@@ -54,7 +54,7 @@ import math
 from typing import Any, Dict, Optional, Sequence
 
 from . import precipitation as rain_model
-from .rain_particles import pcg32
+from .rain_field import pcg32
 
 #: The tower, the anvil, the base.
 TOWER_RADII = 2.5

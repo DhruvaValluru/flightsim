@@ -33,9 +33,11 @@ NEW_MATERIAL = re.compile(r'(?<!_sky)(?<![A-Za-z_])new_material\("(M_[A-Za-z0-9_
 #: The physical sky's materials (-sky=, core/sky/plan.py), made by their own
 #: helper so the W5 world list stays exactly the world's.
 SKY_MATERIAL = re.compile(r'_sky_material\("(M_[A-Za-z0-9_]+)"\)')
-#: The weather's materials (core/scene/weather_look.py, FlightSimWeather.cpp),
-#: made by their own helper for the same reason.
+#: The weather look's materials (FlightSimWeatherLook.cpp), their own helper too.
 WEATHER_MATERIAL = re.compile(r'_weather_material\("(M_[A-Za-z0-9_]+)"\)')
+#: The storm weather's materials (core/scene/storm_weather.py, FlightSimWeather.cpp),
+#: their own helper as well.
+STORM_MATERIAL = re.compile(r'_storm_material\("(M_[A-Za-z0-9_]+)"\)')
 
 
 def loaded_in_cpp():
@@ -50,7 +52,7 @@ def created_by_script():
     return (set(CREATED.findall(text)) | {name for _, name, _, _ in PASS_ROW.findall(text)}
             | {name for _, name, _ in LINEAR_ROW.findall(text)}
             | set(NEW_MATERIAL.findall(text)) | set(SKY_MATERIAL.findall(text))
-            | set(WEATHER_MATERIAL.findall(text)))
+            | set(WEATHER_MATERIAL.findall(text)) | set(STORM_MATERIAL.findall(text)))
 
 
 def test_every_material_the_commandlet_loads_is_created_by_the_script():
@@ -181,7 +183,13 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                "M_AirframePaint", "M_Runway",
                # The physical sky (FlightSimSky.cpp).
                "M_Moon", "M_StarEmissive", "M_TerrainImageryNight",
-               # The weather (FlightSimWeather.cpp).
+               # The weather look (FlightSimWeatherLook.cpp).
+               "M_Ground_Desert", "M_Ground_Forest", "M_Ground_Grassland", "M_Ground_Snow",
+               "M_Ground_Bare", "M_Ground_City", "M_Ground_Ocean", "M_LensDrops",
+               "M_RainShaft", "M_Lightning", "M_IceOverlay",
+               # The 3-D rain (FlightSimRainParticles.cpp).
+               "M_RainDrop",
+               # The storm weather (FlightSimWeather.cpp).
                "M_RainDrops", "M_RainSplash", "M_LightningChannel", "M_StormCell",
                "M_WindshieldRain"}
 COMMANDLET_CPP = BRIDGE / "Private" / "FlightSimRenderCommandlet.cpp"
@@ -297,7 +305,15 @@ def test_the_world_parameters_the_cpp_sets_are_the_ones_the_script_exposes():
                                  "SceneRainDensityParameter", "SceneRainPhaseParameter")):
         assert f'{cpp} = TEXT("{value}");' in SCENE_CPP_TEXT, cpp
     streaks = _body(text, "create_rain_streaks")
-    assert "BL_SCENE_COLOR_AFTER_DOF" in streaks and "PPI_POST_PROCESS_INPUT0" in streaks
+    assert "after_tonemapping()" in streaks and "PPI_POST_PROCESS_INPUT0" in streaks
+    # The screen-space looks run after the tonemapper (the tan-border report),
+    # and a material built before the move is moved in place, not skipped.
+    for name, body in (("M_RainStreaks", streaks), ("M_LensDrops", _body(text, "create_lens_drops"))):
+        create = body.index("new_material(" if name == "M_RainStreaks" else "_weather_material(")
+        assert body.index(f'move_after_tonemapping("{name}")') < create
+        assert '"blendable_location", after_tonemapping()' in body
+    assert '"BL_SCENE_COLOR_AFTER_DOF"' not in text
+    assert 'getattr(unreal.BlendableLocation, "BL_SCENE_COLOR_AFTER_TONEMAPPING", None)' in text
     assert "length, direction, density, phase = RAIN_PARAMETERS" in streaks
     stars = _body(text, "create_starfield")
     assert "MSM_UNLIT" in stars and "BLEND_ADDITIVE" in stars and '"two_sided", True' in stars

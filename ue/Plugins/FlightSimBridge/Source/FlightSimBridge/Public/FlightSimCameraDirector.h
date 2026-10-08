@@ -183,6 +183,14 @@ public:
 	// the stated tolerances.
 	bool ApplyPoseAtTime(double SimTimeSeconds, FString& Error);
 
+	// The solved track's velocity at SimTimeSeconds, engine units per
+	// second: the bracketing samples' displacement over their span -- the
+	// derivative of the linear interpolation ApplyPoseAtTime places the
+	// camera by, so it holds for a single still frame too. False with no
+	// track, or a time outside it (the same span ApplyPoseAtTime refuses).
+	// The rain's streaks read it (FlightSimRainParticles.cpp).
+	bool PoseVelocityAtTime(double SimTimeSeconds, FVector& OutCmPerSecond) const;
+
 	// The two applied-vs-solved tolerances, named rather than spelled
 	// inline, so a test can drive the decision at the exact boundary
 	// instead of asserting that a magic number appears in the source.
@@ -260,6 +268,11 @@ private:
 	                                    const FTransform& TargetTransform,
 	                                    const FVector& OffsetMetres);
 
+	// The chase and wingman follow: offset smoothed horizontally, height
+	// and aim height smoothed in the world. Updates SmoothedLocation and
+	// SmoothedAimPoint.
+	void FollowStation(const FVector& AimPoint, const FVector& Goal, float DeltaSeconds,
+	                   float PositionLag);
 	void UpdateLaggedChase(float DeltaSeconds, const FTransform& TargetTransform);
 	void UpdateCockpitShoulder(const FTransform& TargetTransform);
 	void UpdateFixedPoint(float DeltaSeconds, const FVector& WorldLocation,
@@ -276,6 +289,9 @@ private:
 	// camera lags the aircraft instead of moving with it.
 	FVector SmoothedLocation = FVector::ZeroVector;
 	FVector SmoothedAimPoint = FVector::ZeroVector;
+	// The chase / wingman camera's smoothed horizontal offset from the aim
+	// point (see FollowStation).
+	FVector SmoothedOffsetXY = FVector::ZeroVector;
 	bool bInitialised = false;
 
 	// The consumed pose track (empty = preset mode).

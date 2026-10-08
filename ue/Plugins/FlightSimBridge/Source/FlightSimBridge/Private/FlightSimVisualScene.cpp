@@ -771,6 +771,54 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		LookApplied->SetObjectField(TEXT("xplane_lighting"), XPlaneRecord);
 	}
 
+	// -- the lighting block's engine knobs (core/scene/lighting.py) ---------
+	// Applied AFTER the physical sky and the X-Plane colours: the two scales
+	// multiply whatever intensity those left on the sun and the sky light,
+	// and the temperature tints on top of any light colour. A knob that was
+	// not stated is not touched, so a render without the flags is the scene
+	// above, byte-identical.
+	if (Options.SunIntensityScale >= 0.0 || Options.SkyLightScale >= 0.0 ||
+	    Options.SunTemperatureK > 0.0 || Options.SunSourceAngleDeg >= 0.0)
+	{
+		TSharedPtr<FJsonObject> LightingRecord = NewRecord();
+		if (Options.SunIntensityScale >= 0.0)
+		{
+			const double Before = SunLight->Intensity;
+			const double After = Before * Options.SunIntensityScale;
+			SunLight->SetIntensity(static_cast<float>(After));
+			LightingRecord->SetNumberField(TEXT("sun_intensity_scale"), Options.SunIntensityScale);
+			LightingRecord->SetNumberField(TEXT("sun_intensity_before"), Before);
+			LightingRecord->SetNumberField(TEXT("sun_intensity"), After);
+		}
+		if (Options.SkyLightScale >= 0.0)
+		{
+			const double Before = SkyComponent->Intensity;
+			const double After = Before * Options.SkyLightScale;
+			SkyComponent->SetIntensity(static_cast<float>(After));
+			LightingRecord->SetNumberField(TEXT("sky_light_scale"), Options.SkyLightScale);
+			LightingRecord->SetNumberField(TEXT("sky_light_intensity"), After);
+		}
+		if (Options.SunTemperatureK > 0.0)
+		{
+			SunLight->SetUseTemperature(true);
+			SunLight->SetTemperature(static_cast<float>(Options.SunTemperatureK));
+			LightingRecord->SetNumberField(TEXT("sun_temperature_k"), Options.SunTemperatureK);
+		}
+		if (Options.SunSourceAngleDeg >= 0.0)
+		{
+			SunLight->SetLightSourceAngle(static_cast<float>(Options.SunSourceAngleDeg));
+			LightingRecord->SetNumberField(TEXT("sun_source_angle_deg"), Options.SunSourceAngleDeg);
+		}
+		LightingRecord->SetStringField(TEXT("set_by"),
+			TEXT("ULightComponent::SetIntensity / SetUseTemperature / SetTemperature, ")
+			TEXT("UDirectionalLightComponent::SetLightSourceAngle, USkyLightComponent::SetIntensity"));
+		LightingRecord->SetBoolField(TEXT("calibrated"), false);
+		LightingRecord->SetStringField(TEXT("note"),
+			TEXT("the lighting block's knobs (core/scene/lighting.py): chosen by eye, not ")
+			TEXT("re-pinned against Gate 6's exposure clauses"));
+		LookApplied->SetObjectField(TEXT("lighting"), LightingRecord);
+	}
+
 	// -- clouds (Phase 2, contracts §5.4 row 2) ------------------------------
 	if (!BuildClouds(World, Options, Error))
 	{
@@ -843,6 +891,25 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		Ground->SetActorLocation(FVector(0.0, 0.0, 0.0));
 		// The engine plane is 1 m; 100 km on a side reaches past the far ridge.
 		Ground->SetActorScale3D(FVector(100000.0, 100000.0, 1.0));
+		FlatGround = GroundMesh;
+	}
+	else
+	{
+		FlatGround = nullptr;
+	}
+
+	// -- the weather look (FlightSimWeatherLook.cpp): the flat ground's
+	// surface material, the storm's shafts and lightning; a card without a
+	// weather_look block changes nothing.
+	if (!ApplyWeatherLook(World, Options, Error))
+	{
+		return false;
+	}
+	// -- the rain the camera sees (FlightSimRainParticles.cpp): 3-D drops,
+	// beauty-only; a card without a rain_particles block changes nothing.
+	if (!ApplyRainParticles(World, Options, Error))
+	{
+		return false;
 	}
 
 	// Precipitation is applied to the georeferenced terrain material below;
@@ -851,9 +918,10 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		TSharedPtr<FJsonObject> PrecipRecord = NewRecord();
 		PrecipRecord->SetStringField(TEXT("precipitation"), Options.Precipitation);
 		PrecipRecord->SetNumberField(TEXT("wetness"), Options.Wetness);
-		PrecipRecord->SetBoolField(TEXT("particles"), false);
-		PrecipRecord->SetStringField(TEXT("particles_note"),
-			TEXT("not drawn this phase: no Niagara rain/snow asset exists in ue/Content"));
+		PrecipRecord->SetBoolField(TEXT("particles"), DrawsRainParticles());
+		PrecipRecord->SetStringField(TEXT("particles_note"), DrawsRainParticles()
+			? TEXT("3-D drops: look_applied.rain_particles (FlightSimRainParticles.cpp)")
+			: TEXT("not drawn: the card carries no rain_particles block, or its mesh or material is absent"));
 		PrecipRecord->SetStringField(TEXT("wetness_parameter"), TEXT("absent"));
 		PrecipRecord->SetStringField(TEXT("wetness_applied_to"),
 			TEXT("nothing: no terrain material instance in this scene"));
@@ -1166,9 +1234,10 @@ UMaterialInterface* FFlightSimVisualScene::ApplyWetness(
 	TSharedPtr<FJsonObject> PrecipRecord = NewRecord();
 	PrecipRecord->SetStringField(TEXT("precipitation"), Options.Precipitation);
 	PrecipRecord->SetNumberField(TEXT("wetness"), Options.Wetness);
-	PrecipRecord->SetBoolField(TEXT("particles"), false);
-	PrecipRecord->SetStringField(TEXT("particles_note"),
-		TEXT("not drawn this phase: no Niagara rain/snow asset exists in ue/Content"));
+	PrecipRecord->SetBoolField(TEXT("particles"), DrawsRainParticles());
+	PrecipRecord->SetStringField(TEXT("particles_note"), DrawsRainParticles()
+		? TEXT("3-D drops: look_applied.rain_particles (FlightSimRainParticles.cpp)")
+		: TEXT("not drawn: the card carries no rain_particles block, or its mesh or material is absent"));
 	PrecipRecord->SetStringField(TEXT("component"),
 		TEXT("Wetness scalar on the georeferenced terrain material instance"));
 
@@ -2359,7 +2428,8 @@ bool FFlightSimVisualScene::BuildWorldLook(UWorld* World,
 		                          TEXT("cloud_drift"), TEXT("sea_state"), TEXT("foliage_sway")})
 		{
 			const FString Word(Name);
-			const bool bDrawn = (Word == TEXT("moon") && Moon != nullptr) ||
+			const bool bDrawn = (Word == TEXT("precipitation_particles") && DrawsRainParticles()) ||
+			                    (Word == TEXT("moon") && Moon != nullptr) ||
 			                    (Word == TEXT("stars") && Starfield != nullptr) ||
 			                    (Word == TEXT("cloud_drift") && bDrifting);
 			if (!bDrawn)
@@ -2381,6 +2451,16 @@ bool FFlightSimVisualScene::ApplyRainToBeauty(USceneCaptureComponent2D* Beauty,
 	}
 	TSharedPtr<FJsonObject> Row = NewRecord();
 	Row->SetBoolField(TEXT("asked"), true);
+	if (DrawsRainParticles())
+	{
+		// The 3-D drops (FlightSimRainParticles.cpp) are the rain this
+		// camera sees; a screen-space streak over them would draw it twice.
+		Row->SetBoolField(TEXT("drawn"), false);
+		Row->SetStringField(TEXT("superseded_by"),
+			TEXT("the 3-D drops in the scene (look_applied.rain_particles)"));
+		WorldApplied->SetObjectField(TEXT("precipitation"), Row);
+		return true;
+	}
 	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, SceneRainMaterialPath);
 	if (Material == nullptr || Beauty == nullptr)
 	{
@@ -2487,6 +2567,7 @@ void FFlightSimVisualScene::AdvanceWorld(double TimeSeconds)
 		// The streak pattern's phase is the FDM's time: deterministic per step.
 		RainInstance->SetScalarParameterValue(SceneRainPhaseParameter, static_cast<float>(TimeSeconds));
 	}
+	AdvanceWeather(TimeSeconds);
 }
 
 bool FFlightSimVisualScene::LoadSceneLevel(UWorld* World,

@@ -56,6 +56,39 @@ class Position:
     terrain_elevation_m: float
 
 
+class LocalFrame:
+    """Local north/east metres about a projected origin.
+
+    The UE host's ``LocalSceneCoords``, in Python: latitude/longitude are
+    projected into ``crs`` and the origin's projection is subtracted, so
+    north is projected y minus origin y and east is projected x minus
+    origin x. A position-coupled provider given a frame samples its field
+    where the aircraft really is relative to the scene origin -- the frame
+    the run card's blocks are written in -- instead of the absolute
+    ``latitude x 111320 m`` frame, which puts a field placed about the
+    origin near (0 N, 0 E) whatever the spec's coordinates are.
+    """
+
+    def __init__(self, crs: str, origin_lat_deg: float, origin_lon_deg: float) -> None:
+        from pyproj import Transformer
+
+        self.crs = str(crs)
+        self.origin_lat_deg = float(origin_lat_deg)
+        self.origin_lon_deg = float(origin_lon_deg)
+        self._transformer = Transformer.from_crs("EPSG:4326", self.crs, always_xy=True)
+        x, y = self._transformer.transform(self.origin_lon_deg, self.origin_lat_deg)
+        self.origin_x_m, self.origin_y_m = float(x), float(y)
+
+    def north_east(self, latitude_deg: float, longitude_deg: float) -> Tuple[float, float]:
+        x, y = self._transformer.transform(longitude_deg, latitude_deg)
+        return float(y) - self.origin_y_m, float(x) - self.origin_x_m
+
+    def provenance(self) -> Dict[str, Any]:
+        return {"crs": self.crs, "origin_lat_deg": self.origin_lat_deg,
+                "origin_lon_deg": self.origin_lon_deg,
+                "origin_x_m": self.origin_x_m, "origin_y_m": self.origin_y_m}
+
+
 @dataclass(frozen=True)
 class WindNED:
     """A wind contribution, in m/s, north/east/down.

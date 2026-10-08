@@ -17,7 +17,7 @@ import json
 import re
 from pathlib import Path
 
-from core.scene import weather_look
+from core.scene import storm_weather
 
 REPO = Path(__file__).resolve().parents[1]
 BRIDGE = REPO / "ue" / "Plugins" / "FlightSimBridge" / "Source" / "FlightSimBridge"
@@ -27,7 +27,7 @@ COMMANDLET = (BRIDGE / "Private" / "FlightSimRenderCommandlet.cpp").read_text(en
 INTERACTIVE = (BRIDGE / "Private" / "FlightSimInteractiveMode.cpp").read_text(encoding="utf-8")
 INTERACTIVE_H = (BRIDGE / "Public" / "FlightSimInteractiveMode.h").read_text(encoding="utf-8")
 BUILD_CS = (BRIDGE / "FlightSimBridge.Build.cs").read_text(encoding="utf-8")
-UPLUGIN = json.loads((REPO / "ue" / "Plugins" / "FlightSimBridge" / "FlightSimBridge.uplugin").read_text())
+UPLUGIN = json.loads((REPO / "ue" / "Plugins" / "FlightSimBridge" / "FlightSimBridge.uplugin").read_text(encoding="utf-8"))
 SCRIPT = (REPO / "scripts" / "ue_create_materials.py").read_text(encoding="utf-8")
 SHADERS = REPO / "assets" / "shaders" / "weather"
 DOC = (REPO / "docs" / "WEATHER.md").read_text(encoding="utf-8")
@@ -128,7 +128,7 @@ def _set_on(variable):
 
 
 def test_the_parameters_the_cpp_sets_are_the_ones_the_script_exposes():
-    rain = set(_tuple("RAIN_DROP_PARAMETERS"))
+    rain = set(_tuple("DROPS_PARAMETERS"))
     assert _set_on("RainMaterial") <= rain
     assert _set_on("SplashMaterial") <= set(_tuple("SPLASH_PARAMETERS"))
     assert _set_on("FlashMaterials\\[I\\]") | _set_on("Instance") <= set(_tuple("LIGHTNING_PARAMETERS"))
@@ -137,13 +137,13 @@ def test_the_parameters_the_cpp_sets_are_the_ones_the_script_exposes():
     assert _set_on("WindshieldMaterial") <= set(_tuple("WINDSHIELD_PARAMETERS"))
     # And every material the C++ loads is one the script makes.
     for name in re.findall(r"/Game/FlightSim/(M_\w+)\.", WEATHER_CPP):
-        assert name in _tuple("WEATHER_MATERIALS"), name
+        assert name in _tuple("STORM_MATERIALS"), name
 
 
 def test_every_custom_node_input_is_a_shader_input():
     for call in re.finditer(r'custom\(material, lib, "(\w+)", [^{]+\{(.*?)\}, -?\d+, -?\d+\)', SCRIPT, re.S):
         shader, inputs = call.group(1), call.group(2)
-        text = (SHADERS / f"{shader}.hlsl").read_text()
+        text = (SHADERS / f"{shader}.hlsl").read_text(encoding="utf-8")
         names = re.findall(r'"(\w+)":', inputs)
         assert names, shader
         for name in names:
@@ -154,7 +154,7 @@ def test_every_custom_node_input_is_a_shader_input():
 def test_the_card_keys_the_cpp_reads_are_on_the_card():
     from tests.test_weather import _Spec
 
-    block = weather_look.card_block(_Spec(event="thunderstorm", rate=5.0))
+    block = storm_weather.card_block(_Spec(event="thunderstorm", rate=5.0))
     keys = set()
 
     def walk(value):
@@ -173,7 +173,7 @@ def test_the_card_keys_the_cpp_reads_are_on_the_card():
                  "outflow_max_mps", "outflow_height_m"}
     # A continuing current's keys appear only on the flashes that have one.
     continuing = {"duration_s", "w_per_m"}
-    lightning_source = (REPO / "core" / "scene" / "lightning.py").read_text()
+    lightning_source = (REPO / "core" / "scene" / "lightning.py").read_text(encoding="utf-8")
     assert all(f'"{key}"' in lightning_source for key in continuing)
     assert read - downburst - continuing <= keys, sorted(read - downburst - continuing - keys)
 
@@ -184,3 +184,19 @@ def test_the_niagara_recipe_documents_every_user_parameter():
     for name in params:
         assert f"User.{name}" in DOC, name
     assert "/Game/FlightSim/Weather/NS_FlightSimRain" in DOC
+
+
+def test_the_storm_weather_is_opt_in_and_replaces_the_rain_particles_when_asked():
+    parse = _function(WEATHER_CPP, "bool FFlightSimWeather::ParseBackend")
+    assert 'Name.IsEmpty() || Name == TEXT("off")' in parse
+    assert "EFlightSimWeatherBackend WeatherBackend = EFlightSimWeatherBackend::Off;" in COMMANDLET
+    skip = COMMANDLET.index("SceneOptions.bSkipRainParticles = WeatherBackend != EFlightSimWeatherBackend::Off")
+    assert skip < COMMANDLET.index("VisualScene.Build(World, SceneOptions, Error)")
+    rain = (BRIDGE / "Private" / "FlightSimRainParticles.cpp").read_text(encoding="utf-8")
+    body = _function(rain, "bool FFlightSimVisualScene::ApplyRainParticles")
+    assert body.index("if (Options.bSkipRainParticles)") < body.index("RainNumber(Block, TEXT(\"count\")")
+    # On a cockpit camera the glass takes the lens drops' place, never both.
+    lens = COMMANDLET.index("VisualScene.ApplyLensDropsToBeauty(Capture);")
+    glass = COMMANDLET.index("Weather.ApplyWindshield(Capture", lens)
+    assert "if (!bStormGlass)" in COMMANDLET[lens - 60:lens]
+    assert "else" in COMMANDLET[lens:glass]

@@ -1,5 +1,5 @@
 // The weather a render draws as weather: the card's ``weather`` block
-// (core/scene/weather_look.py) -- rain as drops in the air, splashes on the
+// (core/scene/storm_weather.py) -- rain as drops in the air, splashes on the
 // ground, drops on a cockpit's glass, the thunderstorm's cumulonimbus with its
 // anvil and rain shaft, its lightning and (in the interactive window) its
 // thunder.
@@ -12,15 +12,20 @@
 // Build against the card's own selftest and refused (weather.selftest) when
 // it disagrees:
 //
-//  * SplitMix64 and the drop sampler (core/scene/rain_particles.py drop);
+//  * SplitMix64 and the drop sampler (core/scene/rain_field.py drop);
 //  * the Atlas fall speed (core/scene/precipitation.py);
 //  * the stroke light curve integrated over an exposure
 //    (core/scene/lightning.py window_power);
 //  * the thunder synthesis (core/scene/thunder.py synthesise).
 //
-// Two ways to draw the rain (-weather-backend=):
+// OPT-IN beside the weather look (FlightSimWeatherLook.cpp) and its rain
+// particles (FlightSimRainParticles.cpp): -weather-backend=off, the
+// default, draws nothing here and leaves those exactly as before. Asked
+// for, these drops replace the rain particles (the scene's
+// bSkipRainParticles) and the glass replaces the lens drops on a cockpit
+// camera. Two ways to draw the rain (-weather-backend=):
 //
-//  * procedural (the default): one procedural mesh of four vertices per
+//  * procedural: one procedural mesh of four vertices per
 //    drop, every drop's place a pure function of its index, the card's seed
 //    and the run time, evaluated in M_RainDrops's world position offset
 //    (assets/shaders/weather/rain_drop_offset.hlsl). Deterministic in the
@@ -72,7 +77,7 @@ struct FFlightSimWeatherOptions
 	// The georeferencing that placed everything else: the cell's centre and
 	// the engine's east / north axes are measured through it.
 	AGeoReferencingSystem* GeoReferencing = nullptr;
-	EFlightSimWeatherBackend Backend = EFlightSimWeatherBackend::Procedural;
+	EFlightSimWeatherBackend Backend = EFlightSimWeatherBackend::Off;
 	// The scene's volumetric cloud component, when the look built one: the
 	// storm takes it over (one component draws one cloud field) and draws
 	// the look's layer inside its own material.
@@ -170,7 +175,9 @@ struct FFlightSimThunderConstants
 class FLIGHTSIMBRIDGE_API FFlightSimWeather
 {
 public:
-	// "procedural" | "niagara" | "off"; anything else refused by name.
+	// "procedural" | "niagara" | "off" (empty: off, the default -- the
+	// storm weather is opt-in beside the weather look); anything else
+	// refused by name.
 	static bool ParseBackend(const FString& Name, EFlightSimWeatherBackend& Out, FString& Error);
 
 	// Reads the card's weather block, runs the selftests, spawns what it
@@ -246,7 +253,7 @@ private:
 	bool bCell = false;
 	bool bLightning = false;
 	bool bThunder = false;
-	EFlightSimWeatherBackend Backend = EFlightSimWeatherBackend::Procedural;
+	EFlightSimWeatherBackend Backend = EFlightSimWeatherBackend::Off;
 	UWorld* WorldRef = nullptr;
 
 	// The frame: the cell centre (or the georeferencing origin without a

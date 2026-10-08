@@ -1,4 +1,4 @@
-// M_RainDrops's opacity: Garg & Nayar's coverage of a streak (core/scene/rain_particles.py
+// M_RainDrops's opacity: Garg & Nayar's coverage of a streak (core/scene/rain_field.py
 // streak_opacity): a point of the streak is covered by the drop for D / (|v| t) of the
 // exposure; a streak widened to a pixel keeps its light (times D / width); the weight
 // (how many drops a drawn one stands for) raises it, clamped at opaque. Faded at the

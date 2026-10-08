@@ -36,7 +36,7 @@ def main(argv=None) -> int:
     parser.add_argument("--no-rain", action="store_true")
     args = parser.parse_args(argv)
 
-    card = json.loads(args.card.read_text())
+    card = json.loads(args.card.read_text(encoding="utf-8"))
     weather = card.get("weather")
     if not weather:
         print(json.dumps({"error": "weather.absent: the card carries no weather block"}))

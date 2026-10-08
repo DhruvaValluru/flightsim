@@ -1,5 +1,5 @@
 // M_RainSplash's world position offset: SPLASH slots on the ground under the camera,
-// each relighting once per period at a new place (core/scene/rain_particles.py splash:
+// each relighting once per period at a new place (core/scene/rain_field.py splash:
 // pcg32(slot * 65536 + cycle)), world-fixed through GroundShift.
 //
 // Inputs:

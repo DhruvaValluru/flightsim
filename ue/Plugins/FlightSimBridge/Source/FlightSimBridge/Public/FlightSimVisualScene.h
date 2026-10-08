@@ -99,10 +99,13 @@ class AGeoReferencingSystem;
 class ALandscapeProxy;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class UInstancedStaticMeshComponent;
+class UPointLightComponent;
 class UProceduralMeshComponent;
 class USceneCaptureComponent2D;
 class USkyAtmosphereComponent;
 class UTexture;
+class UStaticMeshComponent;
 class UTexture2D;
 class UVolumetricCloudComponent;
 class UWorld;
@@ -228,6 +231,21 @@ struct FFlightSimVisualSceneOptions
 	FColor XPlaneAmbient = FColor::White;
 	FColor XPlaneHorizon = FColor::White;
 
+	// The lighting block's engine knobs (core/scene/lighting.py, through
+	// -sun-intensity-scale= -sky-light-scale= -sun-temperature=
+	// -sun-source-angle=, core/render/flags.py LIGHTING_FLAGS): a factor on
+	// the sun's intensity and on the sky light's, the sun's colour
+	// temperature in kelvin, and the sun disc's angular diameter in degrees
+	// (shadow-edge softness). Negative (zero for the temperature) = not
+	// stated: the scene is exactly the one built without the flags. Applied
+	// after the physical sky and the X-Plane colours; recorded in
+	// look_applied.lighting. Preset values are uncalibrated against Gate 6.
+	// UNCOMPILED when written (no engine on the authoring machine).
+	double SunIntensityScale = -1.0;
+	double SkyLightScale = -1.0;
+	double SunTemperatureK = 0.0;
+	double SunSourceAngleDeg = -1.0;
+
 	// -- Phase 2 Look lane (contracts §5.4, §10) ----------------------------
 	// Cloud layers from the card's look.clouds (or the -cloud-* probe flags).
 	// Empty = no volumetric cloud component is spawned (byte-identical to
@@ -280,6 +298,11 @@ struct FFlightSimVisualSceneOptions
 	// ignored. On an imagery drape its verified night-lights sidecar, if
 	// the plan names one, is added as emission.
 	const FFlightSimSkyPlan* SkyPlan = nullptr;
+	// The storm weather (FlightSimWeather.cpp, -weather-backend=procedural|
+	// niagara) draws its own 3-D drops: the rain particles here are then
+	// skipped (recorded so), one rain in the air, not two. False (the
+	// default, -weather-backend=off) leaves this scene exactly as before.
+	bool bSkipRainParticles = false;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimVisualScene
@@ -399,6 +422,56 @@ public:
 	// phase. Deterministic in TimeSeconds (Gate 10-R).
 	void AdvanceWorld(double TimeSeconds);
 
+	// -- the weather look (FlightSimWeatherLook.cpp) ------------------------
+	// The card's weather_look block (core/scene/weather_look.py): the flat
+	// ground's material from the surface word, the storm's rain shafts and
+	// lightning (beauty-only actors), recorded in look_applied.weather_look.
+	// A card without the block changes nothing. Missing materials are
+	// recorded as absent, never refused: the look is visual only.
+	// Called by Build after the flat ground exists.
+	bool ApplyWeatherLook(UWorld* World, const FFlightSimVisualSceneOptions& Options,
+	                      FString& Error);
+	// M_LensDrops on the BEAUTY capture only, scaled by the block's rain
+	// rate; nothing without a rate.
+	void ApplyLensDropsToBeauty(USceneCaptureComponent2D* Beauty);
+	// M_IceOverlay as the overlay material of every static mesh part of the
+	// airframe; its IceAmount follows the card's icing_schedule eta(t)
+	// (AdvanceWorld). Nothing without ice on the block.
+	void ApplyIceOverlay(AActor* Airframe);
+	// The lightning schedule and the ice ramp at the FDM's time (from
+	// AdvanceWorld): deterministic in TimeSeconds and the block's seed.
+	void AdvanceWeather(double TimeSeconds);
+	// The flash on/off law, pure (pinned by test): 0..1 at TimeSeconds for
+	// a storm seeded with Seed.
+	static double LightningFlash(double TimeSeconds, int32 Seed);
+
+	// -- the rain the camera sees (FlightSimRainParticles.cpp) ---------------
+	// The card's rain_particles block (core/scene/rain_particles.py): real
+	// 3-D drops, one instanced thin cylinder each, in a world-aligned box
+	// ahead of the camera, drawn on the beauty capture only (a beauty-only
+	// actor: the label captures never see it). Each drop's diameter is drawn
+	// from the block's truncated Marshall-Palmer law with the block's seed,
+	// its fall speed from the Atlas law. A card without the block changes
+	// nothing; a missing mesh or material is recorded, never refused.
+	// Called by Build after the weather look.
+	bool ApplyRainParticles(UWorld* World, const FFlightSimVisualSceneOptions& Options,
+	                        FString& Error);
+	// Per captured frame, after the camera is placed: every drop at the
+	// FDM's time (world-fixed, falling, wrapped into the box around this
+	// camera), drawn as its motion relative to the camera over the block's
+	// streak exposure, at least MinWidthPx wide at its range with its
+	// opacity scaled by the share of that width the drop covers.
+	// Deterministic in TimeSeconds and the camera's pose and velocity.
+	void AdvanceRain(double TimeSeconds, const FVector& CameraLocationCm,
+	                 const FRotator& CameraRotation, const FVector& CameraVelocityCmPerS,
+	                 double HorizontalFovDeg, int32 WidthPx);
+	bool DrawsRainParticles() const { return RainDrops != nullptr; }
+	// The truncated exponential's inverse CDF (core/scene/rain_particles.py
+	// diameter_mm, pinned by test): U in [0, 1) -> D in [DMinMm, DMaxMm].
+	static double RainDropDiameterMm(double U, double LambdaPerMm, double DMinMm, double DMaxMm);
+	// Value wrapped into [-Half, Half): the box's toroidal wrap.
+	static double RainWrap(double Value, double Half);
+
 	// The moon light's rotation from the card's elevation and COMPASS azimuth:
 	// the sun's convention (core/scenario/randomization.py engine_sun_azimuth:
 	// the yaw toward a compass bearing b is 90 - b; the light travels 180
@@ -456,6 +529,28 @@ private:
 	double DriftMps = 0.0;
 	double DriftFromDeg = 0.0;
 	UMaterialInstanceDynamic* RainInstance = nullptr;
+	// The weather look's state (FlightSimWeatherLook.cpp).
+	TSharedPtr<FJsonObject> WeatherLook;
+	UStaticMeshComponent* FlatGround = nullptr;
+	UMaterialInstanceDynamic* LensDropsInstance = nullptr;
+	UMaterialInstanceDynamic* IceInstance = nullptr;
+	UMaterialInstanceDynamic* LightningInstance = nullptr;
+	UPointLightComponent* LightningLight = nullptr;
+	double IceEtaMax = 0.0;
+	double IceOnsetSeconds = 0.0;
+	double IceRampSeconds = 0.0;
+	int32 WeatherSeed = 0;
+	// The rain particles' state (FlightSimRainParticles.cpp).
+	UInstancedStaticMeshComponent* RainDrops = nullptr;
+	TArray<FVector> RainOriginsCm;
+	TArray<double> RainDiametersMm;
+	TArray<double> RainFallCmPerS;
+	TArray<FTransform> RainTransforms;
+	TArray<float> RainCoverage;
+	double RainBoxCm = 0.0;
+	double RainNearCm = 0.0;
+	double RainExposureS = 0.0;
+	double RainMinWidthPx = 1.0;
 	// W5: the scene document (-scene=), parsed once in Build.
 	TSharedPtr<FJsonObject> SceneDocument;
 

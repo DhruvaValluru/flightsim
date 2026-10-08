@@ -1,6 +1,6 @@
 """The weather a render draws as weather: rain particles, the storm cell, lightning, thunder.
 
-core/scene/{rain_particles,storm_cell,lightning,thunder,weather_look}.py are
+core/scene/{rain_field,storm_cell,lightning,thunder,storm_weather}.py are
 the references; the GPU halves (assets/shaders/weather/*.hlsl) are pinned to
 their constants here, and the C++ port's closed forms (FlightSimWeather.cpp)
 are COMPILED here with a stand-in for the engine's math types and run
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from core.scene import lightning, precipitation, rain_particles, storm_cell, thunder, weather_look
+from core.scene import lightning, precipitation, rain_field, storm_cell, thunder, storm_weather
 
 REPO = Path(__file__).resolve().parents[1]
 SHADERS = REPO / "assets" / "shaders" / "weather"
@@ -42,109 +42,109 @@ def _quad(f, a, b, n=20000):
 
 def test_the_truncated_density_is_the_integral_of_the_distribution():
     lam = precipitation.fitted_lambda(10.0)
-    closed = rain_particles.truncated_number_density(lam)
+    closed = rain_field.truncated_number_density(lam)
     numeric = _quad(lambda d: precipitation.MP_N0 * math.exp(-lam * d),
-                    rain_particles.D_RENDER_MIN_MM, rain_particles.D_MAX_MM)
+                    rain_field.D_RENDER_MIN_MM, rain_field.D_MAX_MM)
     assert closed == pytest.approx(numeric, rel=1e-6)
 
 
 def test_the_sampled_diameters_follow_the_truncated_exponential():
     lam = precipitation.fitted_lambda(10.0)
-    lo, hi = rain_particles.D_RENDER_MIN_MM, rain_particles.D_MAX_MM
-    samples = [rain_particles.sample_diameter_mm(rain_particles.unit(7, i, 3), lam)
+    lo, hi = rain_field.D_RENDER_MIN_MM, rain_field.D_MAX_MM
+    samples = [rain_field.sample_diameter_mm(rain_field.unit(7, i, 3), lam)
                for i in range(20000)]
     assert min(samples) >= lo and max(samples) <= hi
     # The truncated exponential's mean, closed form.
     span = hi - lo
     mean = lo + 1.0 / lam - span * math.exp(-lam * span) / (1.0 - math.exp(-lam * span))
     assert sum(samples) / len(samples) == pytest.approx(mean, rel=0.01)
-    assert rain_particles.sample_diameter_mm(0.0, lam) == pytest.approx(lo)
+    assert rain_field.sample_diameter_mm(0.0, lam) == pytest.approx(lo)
 
 
 def test_the_number_flux_is_the_closed_form_of_n_v():
     lam = precipitation.fitted_lambda(25.0)
-    closed = rain_particles.number_flux_per_m2_s(lam)
+    closed = rain_field.number_flux_per_m2_s(lam)
     numeric = _quad(lambda d: precipitation.MP_N0 * math.exp(-lam * d)
                     * precipitation.terminal_velocity_mps(d),
-                    rain_particles.D_RENDER_MIN_MM, rain_particles.D_MAX_MM)
+                    rain_field.D_RENDER_MIN_MM, rain_field.D_MAX_MM)
     assert closed == pytest.approx(numeric, rel=1e-6)
 
 
 def test_big_drops_flatten_and_drops_fall_faster_aloft():
-    assert rain_particles.axis_ratio(1.0) == pytest.approx(0.98, abs=0.01)
-    assert rain_particles.axis_ratio(5.0) == pytest.approx(0.706, abs=0.005)
-    assert rain_particles.presented_width_mm(5.0) > 5.0
-    assert rain_particles.fall_speed_factor(0.0) == pytest.approx(1.0)
-    assert rain_particles.fall_speed_factor(3000.0) > 1.1
+    assert rain_field.axis_ratio(1.0) == pytest.approx(0.98, abs=0.01)
+    assert rain_field.axis_ratio(5.0) == pytest.approx(0.706, abs=0.005)
+    assert rain_field.presented_width_mm(5.0) > 5.0
+    assert rain_field.fall_speed_factor(0.0) == pytest.approx(1.0)
+    assert rain_field.fall_speed_factor(3000.0) > 1.1
 
 
 def test_a_drop_is_fixed_in_the_air_while_the_camera_flies_through_it():
     p0 = (3.0, -2.0, 1.0)
-    half = rain_particles.BOX_HALF_M
+    half = rain_field.BOX_HALF_M
     # Still air, no fall: the drop's world place does not depend on the camera
     # as long as it stays inside the box around it.
-    first = rain_particles.drop_position(p0, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.0, 0.0)
-    moved = rain_particles.drop_position(p0, (0.0, 0.0, 0.0), (1.5, 0.5, 0.0), 0.0, 0.0)
+    first = rain_field.drop_position(p0, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.0, 0.0)
+    moved = rain_field.drop_position(p0, (0.0, 0.0, 0.0), (1.5, 0.5, 0.0), 0.0, 0.0)
     assert moved == pytest.approx(first)
     # Far away the box folds it back around the camera.
-    far = rain_particles.drop_position(p0, (0.0, 0.0, 0.0), (100.0, 0.0, 0.0), 0.0, 0.0)
+    far = rain_field.drop_position(p0, (0.0, 0.0, 0.0), (100.0, 0.0, 0.0), 0.0, 0.0)
     assert abs(far[0] - 100.0) <= half[0]
     # It falls at its own speed and drifts with the air.
-    later = rain_particles.drop_position(p0, (2.0, 0.0, 0.0), (0.0, 0.0, 0.0), 6.5, 0.1)
+    later = rain_field.drop_position(p0, (2.0, 0.0, 0.0), (0.0, 0.0, 0.0), 6.5, 0.1)
     assert later[0] - first[0] == pytest.approx(2.0)
     assert later[2] - first[2] == pytest.approx(-0.65)
 
 
 def test_the_streak_opacity_is_garg_and_nayar_coverage():
     # A 2 mm drop at 6.5 m/s over 1/500 s sweeps 13 mm: covered 2/13 of it.
-    assert rain_particles.streak_opacity(2.0, 6.5, 0.002) == pytest.approx(2.0 / 13.0)
-    assert rain_particles.streak_opacity(2.0, 6.5, 0.002, weight=100.0) == 1.0
+    assert rain_field.streak_opacity(2.0, 6.5, 0.002) == pytest.approx(2.0 / 13.0)
+    assert rain_field.streak_opacity(2.0, 6.5, 0.002, weight=100.0) == 1.0
 
 
 def test_the_rain_block_is_in_its_fixed_order_and_its_selftest_reproduces():
-    block = rain_particles.card_block(12.0, "stated", 1234, 1500.0, (2.0, -1.0, 0.0), 55.0)
-    assert tuple(block) == rain_particles.CARD_KEYS
+    block = rain_field.card_block(12.0, "stated", 1234, 1500.0, (2.0, -1.0, 0.0), 55.0)
+    assert tuple(block) == rain_field.CARD_KEYS
     assert block["ambient_fraction"] == pytest.approx(1.0)
-    assert block["particles"] <= rain_particles.PARTICLE_BUDGET
+    assert block["particles"] <= rain_field.PARTICLE_BUDGET
     assert block["weight"] >= 1.0
-    for entry, again in zip(block["selftest"], rain_particles.drops(block, len(block["selftest"]))):
+    for entry, again in zip(block["selftest"], rain_field.drops(block, len(block["selftest"]))):
         assert entry["d_mm"] == pytest.approx(again["d_mm"], abs=1e-11)
         assert entry["p0_m"] == pytest.approx(again["p0_m"], abs=1e-11)
     assert json.loads(json.dumps(block)) == block
 
 
 def test_outside_a_storms_shaft_only_the_stated_rain_falls():
-    storm = rain_particles.card_block(50.0, "storm_default", 1, 0.0, (0, 0, 0), 60.0,
+    storm = rain_field.card_block(50.0, "storm_default", 1, 0.0, (0, 0, 0), 60.0,
                                       ambient_rate_mmh=None)
     assert storm["ambient_fraction"] == 0.0
-    light = rain_particles.card_block(50.0, "storm_default", 1, 0.0, (0, 0, 0), 60.0,
+    light = rain_field.card_block(50.0, "storm_default", 1, 0.0, (0, 0, 0), 60.0,
                                       ambient_rate_mmh=2.0)
     assert 0.0 < light["ambient_fraction"] < 0.2
 
 
 def test_the_splash_slots_are_the_shaders_hash():
     for slot, cycle in ((0, 0), (17, 3), (4095, 123456)):
-        x, y = rain_particles.splash_position(slot, cycle, 10.0)
-        h = rain_particles.pcg32(slot * 65536 + cycle)
+        x, y = rain_field.splash_position(slot, cycle, 10.0)
+        h = rain_field.pcg32(slot * 65536 + cycle)
         assert x == pytest.approx(((h & 0xFFFF) / 65535.0 * 2 - 1) * 10.0)
         assert -10.0 <= x <= 10.0 and -10.0 <= y <= 10.0
-    text = (SHADERS / "rain_splash_offset.hlsl").read_text()
+    text = (SHADERS / "rain_splash_offset.hlsl").read_text(encoding="utf-8")
     assert "S.Pcg((uint)Slot * 65536u + (uint)cycle)" in text
     assert "float2(h & 0xFFFFu, h >> 16u) / 65535.0 * 2.0 - 1.0" in text
 
 
 def test_the_glass_holds_drops_below_the_shedding_speed():
-    assert rain_particles.windshield(500.0, 15.0)["runoff_mps"] == 0.0
-    fast = rain_particles.windshield(500.0, 60.0)
-    assert fast["runoff_mps"] == pytest.approx(rain_particles.RUNOFF_GAIN * (60.0 - 22.0), abs=1e-4)
+    assert rain_field.windshield(500.0, 15.0)["runoff_mps"] == 0.0
+    fast = rain_field.windshield(500.0, 60.0)
+    assert fast["runoff_mps"] == pytest.approx(rain_field.RUNOFF_GAIN * (60.0 - 22.0), abs=1e-4)
     assert fast["impinge_per_m2_s"] == pytest.approx(500.0 * 60.0 * 0.5, rel=1e-6)
 
 
 def test_the_hashes_are_the_published_ones():
     # SplitMix64 from state 0: the first output of Vigna's reference.
-    assert rain_particles.splitmix64(0) == 0xE220A8397B1DCDAF
-    assert 0.0 <= rain_particles.unit(1, 2, 3) < 1.0
-    assert rain_particles.pcg32(0) == rain_particles.pcg32(0)
+    assert rain_field.splitmix64(0) == 0xE220A8397B1DCDAF
+    assert 0.0 <= rain_field.unit(1, 2, 3) < 1.0
+    assert rain_field.pcg32(0) == rain_field.pcg32(0)
 
 
 # -- the storm cell --------------------------------------------------------------------
@@ -182,7 +182,7 @@ def test_the_towers_boil_upward_with_time():
 
 
 def test_the_storm_shader_is_the_python_twin_constant_for_constant():
-    text = (SHADERS / "storm_cell.hlsl").read_text()
+    text = (SHADERS / "storm_cell.hlsl").read_text(encoding="utf-8")
     for constant in ("747796405u", "2891336453u", "277803737u", "(word >> 22u) ^ word",
                      "amp *= 0.5", "freq *= 2.03", "k < 4", "const float Edge = 250.0",
                      "1.0 - 0.25 * 0.5 + 0.25 * f", "0.5 * towerR", "Edge * 4.0", "* 0.6 * (ra / anvilR)",
@@ -193,16 +193,16 @@ def test_the_storm_shader_is_the_python_twin_constant_for_constant():
     assert storm_cell.NOISE_LACUNARITY == 2.03 and storm_cell.EDGE_M == 250.0
     assert storm_cell.TOWER_FLARE == 0.25 and storm_cell.OVERSHOOT_RADIUS_FRACTION == 0.5
     assert storm_cell.SHAFT_NOISE_STRETCH == 8.0
-    glow = (SHADERS / "storm_glow.hlsl").read_text()
+    glow = (SHADERS / "storm_glow.hlsl").read_text(encoding="utf-8")
     assert "max(length(Rel - FlashRel) / 100.0, Edge)" in glow and "exp(-d / Flash.y)" in glow
 
 
 @pytest.mark.skipif(shutil.which("g++") is None, reason="no C++ compiler on this machine")
 def test_the_shaders_hash_and_lattice_are_the_pythons(tmp_path):
     """The HLSL Pcg and Lattice methods (storm_cell.hlsl), compiled as C++
-    with HLSL's uint / asuint, against rain_particles.pcg32 and
+    with HLSL's uint / asuint, against rain_field.pcg32 and
     storm_cell.lattice."""
-    text = (SHADERS / "storm_cell.hlsl").read_text()
+    text = (SHADERS / "storm_cell.hlsl").read_text(encoding="utf-8")
     methods = "".join(_extract(text, f"\t{sig}", "\n\t}\n") + "\n\t}\n"
                       for sig in ("uint Pcg(uint v)", "float Lattice(int ix, int iy, int iz, uint seed)"))
     cases = [(0, 0, 0, 0), (-1, 2, -3, 5), (123, -456, 789, 42), (-70000, 3, 1, 16777215)]
@@ -213,12 +213,12 @@ def test_the_shaders_hash_and_lattice_are_the_pythons(tmp_path):
               + "".join(f"printf(\"%.9g\\n\", (double)s.Lattice({x}, {y}, {z}, {seed}u));\n"
                         for x, y, z, seed in cases)
               + "return 0; }\n")
-    (tmp_path / "hash.cpp").write_text(source)
+    (tmp_path / "hash.cpp").write_text(source, encoding="utf-8")
     subprocess.run(["g++", "-std=c++17", "-o", str(tmp_path / "hash"), str(tmp_path / "hash.cpp")],
                    check=True, capture_output=True, text=True)
     out = subprocess.run([str(tmp_path / "hash")], check=True, capture_output=True,
                          text=True).stdout.split()
-    assert [int(v) for v in out[:4]] == [rain_particles.pcg32(v) for v in (0, 1, 2891336453, 4294967295)]
+    assert [int(v) for v in out[:4]] == [rain_field.pcg32(v) for v in (0, 1, 2891336453, 4294967295)]
     for value, (x, y, z, seed) in zip(out[4:], cases):
         # The shader returns a float: the lattice to single precision.
         assert float(value) == pytest.approx(storm_cell.lattice(x, y, z, seed), rel=1e-7)
@@ -330,24 +330,24 @@ class _Spec:
 
 
 def test_the_block_is_absent_canonical():
-    assert weather_look.card_block(_Spec()) is None
-    assert weather_look.card_block(_Spec(event="tornado")) is None
+    assert storm_weather.card_block(_Spec()) is None
+    assert storm_weather.card_block(_Spec(event="tornado")) is None
 
 
 def test_stated_rain_without_a_storm_is_rain_everywhere():
-    block = weather_look.card_block(_Spec(rate=6.0))
+    block = storm_weather.card_block(_Spec(rate=6.0))
     assert tuple(block) == ("version", "rain")
     assert block["rain"]["rate_source"] == "stated" and block["rain"]["ambient_fraction"] == 1.0
 
 
 def test_a_thunderstorm_carries_every_element_deterministically():
-    a = weather_look.card_block(_Spec(event="thunderstorm"))
-    b = weather_look.card_block(_Spec(event="thunderstorm"))
-    assert tuple(a) == weather_look.CARD_KEYS
+    a = storm_weather.card_block(_Spec(event="thunderstorm"))
+    b = storm_weather.card_block(_Spec(event="thunderstorm"))
+    assert tuple(a) == storm_weather.CARD_KEYS
     assert json.dumps(a) == json.dumps(b)
     assert a["rain"]["rate_source"] == "storm_default" and a["rain"]["ambient_fraction"] == 0.0
     assert tuple(a["thunder"]) == thunder.CARD_KEYS
-    stated = weather_look.card_block(_Spec(event="thunderstorm", rate=20.0))
+    stated = storm_weather.card_block(_Spec(event="thunderstorm", rate=20.0))
     assert stated["cell"]["shaft"]["rate_mmh"] == 20.0
     assert stated["rain"]["ambient_fraction"] == 1.0
 
@@ -357,18 +357,18 @@ def test_the_run_card_carries_the_block_for_a_thunderstorm(tmp_path):
     from core.scenario.card import write_run_card
 
     storm = json.loads(write_run_card(compile_prompt("fly the 747 through a thunderstorm at 3000 m"),
-                                      tmp_path / "storm.json").read_text())
-    assert tuple(storm["weather"]) == weather_look.CARD_KEYS
+                                      tmp_path / "storm.json").read_text(encoding="utf-8"))
+    assert tuple(storm["weather"]) == storm_weather.CARD_KEYS
     calm = json.loads(write_run_card(compile_prompt("fly the c172 at 1500 m"),
-                                     tmp_path / "calm.json").read_text())
+                                     tmp_path / "calm.json").read_text(encoding="utf-8"))
     assert "weather" not in calm
 
 
 def test_the_soundtrack_script_writes_the_cards_storm(tmp_path):
-    card = {"duration_s": 3.0, "weather": weather_look.card_block(_Spec(event="thunderstorm"))}
+    card = {"duration_s": 3.0, "weather": storm_weather.card_block(_Spec(event="thunderstorm"))}
     # One flash early enough to be heard in a short clip.
     card["weather"]["lightning"]["flashes"] = [dict(thunder.SELFTEST_FLASH)]
-    (tmp_path / "card.json").write_text(json.dumps(card))
+    (tmp_path / "card.json").write_text(json.dumps(card), encoding="utf-8")
     out = subprocess.run(
         ["python", str(REPO / "scripts" / "storm_soundtrack.py"), str(tmp_path / "card.json"),
          str(tmp_path / "out.wav"), "--listener", "800,0,2", "--sample-rate", "8000",
@@ -487,7 +487,7 @@ def _cpp_flash(name, flash):
 
 @pytest.mark.skipif(shutil.which("g++") is None, reason="no C++ compiler on this machine")
 def test_the_cpp_port_computes_what_the_python_computes(tmp_path):
-    block = weather_look.card_block(_Spec(event="thunderstorm"))
+    block = storm_weather.card_block(_Spec(event="thunderstorm"))
     rain = block["rain"]
     flashes = block["lightning"]["flashes"]
     curve = block["lightning"]["light_curve"]
@@ -529,7 +529,7 @@ def test_the_cpp_port_computes_what_the_python_computes(tmp_path):
                     f"for (int32 I = 0; I < S.Num(); I += 97) printf(\"s %d %.17g\\n\", I, S[I]); }}")
     main.append("return 0; }")
     source = tmp_path / "port.cpp"
-    source.write_text(_port_source() + "\n".join(main))
+    source.write_text(_port_source() + "\n".join(main), encoding="utf-8")
     binary = tmp_path / "port"
     subprocess.run(["g++", "-std=c++17", "-O1", "-o", str(binary), str(source)], check=True,
                    capture_output=True, text=True)
@@ -537,12 +537,12 @@ def test_the_cpp_port_computes_what_the_python_computes(tmp_path):
 
     drops = [list(map(float, line.split()[1:])) for line in lines if line.startswith("drop ")]
     for i, (d, width, vt, phase, u0) in enumerate(drops):
-        ref = rain_particles.drop(i, rain["seed"], rain["lambda"], rain["box_half_m"], rain["fall_speed_factor"])
+        ref = rain_field.drop(i, rain["seed"], rain["lambda"], rain["box_half_m"], rain["fall_speed_factor"])
         assert d == pytest.approx(ref["d_mm"], rel=1e-12)
         assert width == pytest.approx(ref["width_mm"], rel=1e-12)
         assert vt == pytest.approx(ref["v_t_mps"], rel=1e-12)
         assert phase == pytest.approx(ref["phase"], rel=1e-15)
-        assert u0 == pytest.approx(rain_particles.unit(rain["seed"], i, 0), rel=1e-15)
+        assert u0 == pytest.approx(rain_field.unit(rain["seed"], i, 0), rel=1e-15)
     got = [list(map(float, line.split()[1:])) for line in lines if line.startswith("window ")]
     for (a, b), (m, br, prog, cd) in zip(windows, got):
         ref = lightning.window_power(cg, a, b)

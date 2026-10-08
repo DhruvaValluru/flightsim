@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Dict, Optional, Sequence
 
 from core.scenario.spec import ScenarioSpec
+from core.scene.rain_particles import particle_block as rain_particle_block
+from core.scene.weather_look import weather_look_card_block
 
 #: Sampling period asked of the UE recorder. Must match the period the headless
 #: runner gives its own Recorder; gate5's main() checks that it does rather
@@ -284,17 +286,17 @@ def wake_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
 
 
 def weather_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
-    """The top-level ``weather`` block (core/scene/weather_look.py), or None
+    """The top-level ``weather`` block (core/scene/storm_weather.py), or None
     when the spec states no rain rate and no thunderstorm. Keys in the
-    fixed order ``core.scene.weather_look.CARD_KEYS``."""
-    from core.scene import weather_look
+    fixed order ``core.scene.storm_weather.CARD_KEYS``."""
+    from core.scene import storm_weather
 
-    block = weather_look.card_block(spec)
+    block = storm_weather.card_block(spec)
     if block is None:
         return None
-    if tuple(block) != tuple(k for k in weather_look.CARD_KEYS if k in block):
+    if tuple(block) != tuple(k for k in storm_weather.CARD_KEYS if k in block):
         raise RuntimeError(f"weather card keys {list(block)} are not in the fixed order "
-                           f"{list(weather_look.CARD_KEYS)}")
+                           f"{list(storm_weather.CARD_KEYS)}")
     return block
 
 
@@ -375,6 +377,49 @@ def google_tiles_requested() -> bool:
     """FLIGHTSIM_GOOGLE_TILES is on: the same words the render host's
     FFlightSimGoogleTiles::Requested accepts."""
     return os.environ.get(GOOGLE_TILES_ENV, "").strip().lower() in GOOGLE_TILES_ON
+
+
+#: The constraint a Google-tiles render refuses under when the physics
+#: ground is not a real elevation bake of the place the tiles draw.
+GOOGLE_TILES_TERRAIN_CONSTRAINT = "google_tiles.terrain"
+
+
+def google_tiles_terrain_refusal(heightfield, latitude_deg: Optional[float] = None,
+                                 longitude_deg: Optional[float] = None,
+                                 terrain_elevation_m: Optional[float] = None
+                                 ) -> Optional[str]:
+    """None, or why the render must not draw Google's tiles over this ground.
+
+    The tiles draw the real Earth at the card's coordinates; the physics,
+    the labels and the verifier keep the run's own ground. Over a flat
+    slab (``heightfield`` None) or a synthesised raster that ground is NOT
+    the place the tiles show, so the aircraft would fly through mountains
+    it never feels. Only a bake ingested from a real DEM (producer ``dem
+    ingestion``: GLO-30 or 3DEP) is accepted under the tiles -- and the
+    flat slab at a 0 m datum over open ocean (no GLO-30 land in or beside
+    the origin's cell, core.terrain.landmask), where the sea surface IS
+    that slab.
+    """
+    if not google_tiles_requested():
+        return None
+    if heightfield is None:
+        from ..terrain.landmask import open_ocean
+
+        if (latitude_deg is not None and longitude_deg is not None
+                and terrain_elevation_m is not None and float(terrain_elevation_m) == 0.0
+                and open_ocean(latitude_deg, longitude_deg)):
+            return None
+        return (f"{GOOGLE_TILES_ENV} is on but the physics ground is the flat slab: "
+                f"the tiles would draw real terrain the aircraft never feels. Bake the "
+                f"place (scripts/bake_terrain.py, or the page's on-demand bake), say "
+                f"'over the ocean' for an open-ocean scene, or turn the tiles off")
+    producer = str((heightfield.provenance or {}).get("producer", ""))
+    if producer != "dem ingestion":
+        return (f"{GOOGLE_TILES_ENV} is on but the physics ground {heightfield.name!r} is "
+                f"not a real elevation bake (producer {producer or 'unknown'!r}): the tiles "
+                f"would draw a different place from the ground the aircraft flies on. Bake "
+                f"the real place or turn the tiles off")
+    return None
 
 
 def google_tiles_card_block(latitude_deg: float, longitude_deg: float) -> Dict[str, object]:
@@ -568,15 +613,30 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # look.precipitation_particles or look.cloud_drift_parameter by
         # name when it cannot draw one exactly.
         card["look"] = look
+    weather_look = weather_look_card_block(spec)
+    if weather_look is not None:
+        # Visual only (absent-canonical): the ground word, the storm, the
+        # rain rate, the wetness, the ice and the seed the host's weather
+        # look draws from (core/scene/weather_look.py); a spec stating none
+        # of them writes no block.
+        card["weather_look"] = weather_look
+        if weather_look["rain_rate_mmh"]:
+            # Visual only: the 3-D drops the beauty camera sees, from the
+            # same rate (core/scene/rain_particles.py; the host's
+            # FlightSimRainParticles.cpp draws them).
+            card["rain_particles"] = rain_particle_block(weather_look["rain_rate_mmh"],
+                                                         weather_look["seed"])
     weather = weather_card_block(spec)
     if weather is not None:
-        # The weather a render draws as weather (absent-canonical: a stated
+        # The storm drawn as a storm (absent-canonical: a stated
         # rain rate or a thunderstorm): weather.rain (the 3D drops, their
         # splashes and the windshield), weather.cell (the cumulonimbus over
         # the downburst block's centre), weather.lightning (every flash's
         # schedule, strokes and channel) and weather.thunder (the synthesis
         # constants and their selftest). VISUAL: no equation of motion reads
-        # it; the host draws it verbatim (core/scene/weather_look.py).
+        # it; FlightSimWeather draws it verbatim when the render asks for it
+        # (-weather-backend=procedural|niagara; off by default, beside the
+        # weather_look / rain_particles path above) (core/scene/storm_weather.py).
         card["weather"] = weather
     if reference_speeds:
         # Display-only (the HUD/panel stall-margin marks): the MODEL's own

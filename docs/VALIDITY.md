@@ -531,6 +531,22 @@ more. The CG itself is deliberately not a station: terrain under the
 aircraft is the ground model's existing job (heightfield collision, AGL
 parity measured).
 
+### 2.10a Place names are looked up, not surveyed
+
+A place a prompt names outside the curated bakes (core/nl/geocode.py) is
+the centre point the built-in list or OpenStreetMap gives for it. The
+list's ground heights are rounded and approximate: a city centre, an
+airfield, or a summit for a peak. They set the spec's terrain datum,
+which the validator's `altitude.terrain_clearance` check uses before a
+bake exists. The physics ground is always the GLO-30 raster baked around
+the point on the first run (source-verified only, no named summits). A
+name with several meanings resolves to the list's entry ("Portland" is
+Oregon) or to OpenStreetMap's top result; the spec's provenance names
+which place was used, so a wrong guess can be seen and edited. A word is
+read as a place only after a location word ("over", "near", ...), and
+an OpenStreetMap hit is accepted only for a geographic category above a
+minimum importance.
+
 ### 2.10b Surface classes are two documented couplings, not ground cover
 
 A surface word (grassland / desert / ocean / forest / city, Phase 9.1)
@@ -958,6 +974,23 @@ own wind-down property shows **2.58 fps RMS** of ridge-forced vertical wind;
 with `-NoOrographic` severing it, **0.00000 fps**. Every §2.8 caveat about
 the orographic model itself still applies — the port being faithful makes it
 exactly as crude as the original.
+
+**The same coupling in the headless host (2026-10-07).** Until this date
+`run_spec` over a raster flew the ground (elevation under the CG, span
+stations) but attached no orographic field and no lee rotor, so a windy
+terrain spec flew a different mountain headless than in the render path,
+and surface thermals were sampled in the absolute `latitude x 111320 m`
+frame (they sat near 0 N 0 E whatever the spec's place). Now
+`environment_for(..., terrain_ground=...)` attaches the orographic provider
+built from the run card's own numbers (`core.terrain.glo30.
+orographic_parameters`) and the lee-rotor turbulence riding it, and every
+position-coupled field samples in the card's frame about the spec origin
+(`core.environment.base.LocalFrame`, the UE host's `LocalSceneCoords`).
+Pinned by `tests/test_terrain_air_coupling.py` (calm vs 25 kt over a 600 m
+ridge: no vertical air vs lift and sink). Not measured here: the
+cross-host comparison of a windy terrain flight, which needs the Windows
+build. Still open: JSBSim's trim zeroes the wind (JSBSIM_CORRECTIONS 18),
+so a windy run starts as a step gust from a still-air trim.
 
 **Turbulence in the Unreal host, and an honest parity verdict.** The card
 carries the headless Dryden provider's EXACT property writes (turb-type,

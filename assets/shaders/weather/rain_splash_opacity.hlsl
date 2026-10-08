@@ -1,5 +1,5 @@
 // M_RainSplash's opacity: a crown sheet rising and thinning over its lifetime
-// (core/scene/rain_particles.py SPLASH_LIFETIME_S), times the slot weight, clamped.
+// (core/scene/rain_field.py SPLASH_LIFETIME_S), times the slot weight, clamped.
 //
 // Inputs:
 //   Corner  float2  UV0 (x across, y up)

@@ -85,10 +85,11 @@ def worst_diff(rows_a, rows_b) -> float:
 # -- the pipeline: order, suffix, default, idempotence ---------------------------------
 
 def test_the_selection_is_applied_in_the_fixed_order_and_the_suffix_encodes_the_set():
-    assert INJECTION_ORDER == ("tecs", "failures", "icing", "icing_alpha", "gust_rotation")
-    given = ("gust_rotation", "icing", "tecs", "failures", "icing_alpha")
+    assert INJECTION_ORDER == ("tecs", "failures", "icing", "icing_alpha", "gust_rotation",
+                               "rain")
+    given = ("gust_rotation", "rain", "icing", "tecs", "failures", "icing_alpha")
     assert tuple(i.name for i in select_injections(given)) == INJECTION_ORDER
-    assert suffix_for(given) == "-tecs-fail-ice-alpha-gust"
+    assert suffix_for(given) == "-tecs-fail-ice-alpha-gust-rain"
     assert suffix_for(ALL) == "-fail-ice-alpha-gust"
     assert suffix_for(("tecs",)) == "-tecs" == module.SUFFIX
     for name in INJECTION_ORDER:

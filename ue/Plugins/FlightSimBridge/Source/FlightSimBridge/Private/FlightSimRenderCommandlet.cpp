@@ -1008,7 +1008,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		            "[-passes=normal,velocity,albedo] [-width=960] [-height=540] "
 		            "[-calibration] [-sun-lux=<lux>] [-accumulate=<K>] [-velocity-check] "
 		            "[-normal-source=scs|material] [-scene=<scene document>] "
-		            "[-quality=measure|beauty] [-warmup=N] [-triangle-budget=<n>]"));
+		            "[-quality=measure|beauty] [-warmup=N] [-triangle-budget=<n>] "
+		            "[-sun-intensity-scale=<x>] [-sky-light-scale=<x>] [-sun-temperature=<K>] "
+		            "[-sun-source-angle=<deg>]"));
 		return 1;
 	}
 	// Visual plan V0. "measure" is every render this project has
@@ -1214,13 +1216,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// absent, the calibrated legacy scene renders unchanged.
 	FString SkyPlanPath;
 	FParse::Value(*Params, TEXT("sky="), SkyPlanPath);
-	// The card's weather block (core/scene/weather_look.py) drawn as weather:
-	// -weather-backend=procedural (the default: deterministic drops in the
-	// material), niagara (the hand-built NS_FlightSimRain, docs/WEATHER.md)
-	// or off. A card without the block draws nothing either way.
+	// The card's storm weather block (core/scene/storm_weather.py) drawn as
+	// weather, opt-in beside the weather look: -weather-backend=procedural
+	// (deterministic drops in the material), niagara (the hand-built
+	// NS_FlightSimRain, docs/WEATHER.md) or off (the default: the weather
+	// look and its rain particles alone, exactly as before).
 	FString WeatherBackendName;
 	FParse::Value(*Params, TEXT("weather-backend="), WeatherBackendName);
-	EFlightSimWeatherBackend WeatherBackend = EFlightSimWeatherBackend::Procedural;
+	EFlightSimWeatherBackend WeatherBackend = EFlightSimWeatherBackend::Off;
 	{
 		FString WeatherError;
 		if (!FFlightSimWeather::ParseBackend(WeatherBackendName, WeatherBackend, WeatherError))
@@ -1408,6 +1411,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SceneOptions.TerrainPath = TerrainPath;
 		SceneOptions.bDynamicShadows = !bNoShadows;
 		SceneOptions.FogDensity = static_cast<float>(FogDensity);
+		// The lighting block's engine knobs (core/render/flags.py
+		// LIGHTING_FLAGS). Each is optional; an absent one keeps the
+		// options' "not stated" sentinel, so the scene is unchanged.
+		FParse::Value(*Params, TEXT("sun-intensity-scale="), SceneOptions.SunIntensityScale);
+		FParse::Value(*Params, TEXT("sky-light-scale="), SceneOptions.SkyLightScale);
+		FParse::Value(*Params, TEXT("sun-temperature="), SceneOptions.SunTemperatureK);
+		FParse::Value(*Params, TEXT("sun-source-angle="), SceneOptions.SunSourceAngleDeg);
 		// -triangle-budget=<n> (core/render/flags.py TRIANGLE_BUDGET_PREFIX):
 		// the procedural terrain's triangle budget, asked for by webapp.runs
 		// only when the bake is finer than 30 m (a 10 m 3DEP bake would
@@ -1520,6 +1530,35 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			CardLook->TryGetNumberField(TEXT("cloud_drift_mps"), SceneOptions.CloudDriftMps);
 			CardLook->TryGetNumberField(TEXT("cloud_drift_from_deg"), SceneOptions.CloudDriftFromDeg);
+		}
+		// The weather look (core/scene/weather_look.py, visual only): a
+		// thunderstorm with no cloud layer of its own gets a low, thick,
+		// nearly overcast one (cover 0.95, 1200 m to 9000 m: stated), and a
+		// stated rain or wet runway wets the terrain through the existing
+		// Wetness scalar when the look carried none. The probe overrides
+		// below still win.
+		const TSharedPtr<FJsonObject>* WeatherLookBlock = nullptr;
+		if (WorldCardRoot.IsValid() &&
+		    WorldCardRoot->TryGetObjectField(TEXT("weather_look"), WeatherLookBlock) &&
+		    WeatherLookBlock != nullptr && WeatherLookBlock->IsValid())
+		{
+			FString WeatherStorm;
+			(*WeatherLookBlock)->TryGetStringField(TEXT("storm"), WeatherStorm);
+			if (WeatherStorm == TEXT("thunderstorm") && SceneOptions.CloudLayers.Num() == 0)
+			{
+				FFlightSimCloudLayer StormLayer;
+				StormLayer.CoverFraction = 0.95;
+				StormLayer.BaseMetres = 1200.0;
+				StormLayer.TopMetres = 9000.0;
+				SceneOptions.CloudLayers.Add(StormLayer);
+			}
+			double WeatherWetness = 0.0;
+			if ((*WeatherLookBlock)->TryGetNumberField(TEXT("wetness"), WeatherWetness) &&
+			    WeatherWetness > 0.0 && SceneOptions.Wetness <= 0.0)
+			{
+				SceneOptions.Wetness = FMath::Min(WeatherWetness, 1.0);
+				SceneOptions.Precipitation = TEXT("rain");
+			}
 		}
 		// Probe overrides (Gate 6 controls), each recorded by name.
 		if (CloudCoverFlag >= 0.0)
@@ -1640,6 +1679,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			SceneOptions.SkyPlan = &SkyPlan;
 		}
+		// The storm weather asked for, on a card that carries it: its drops
+		// replace the rain particles (one rain in the air).
+		SceneOptions.bSkipRainParticles = WeatherBackend != EFlightSimWeatherBackend::Off &&
+			WorldCardRoot.IsValid() && WorldCardRoot->HasField(TEXT("weather"));
 		if (!VisualScene.Build(World, SceneOptions, Error)) { return Fail(Error); }
 		// The weather (FlightSimWeather.h): after the scene, so the storm can
 		// take over the look's cloud component; its actors join the scene's
@@ -1777,6 +1820,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Animator->BindSurfaceComponent(TEXT("aileron_l"), Frame.LeftAileronHinge);
 		Animator->BindSurfaceComponent(TEXT("aileron_r"), Frame.RightAileronHinge);
 		Animator->BindSurfaceComponent(TEXT("rudder"), Frame.RudderHinge);
+	}
+	// The weather look's ice: an overlay on every part of the airframe,
+	// scaled per step by the card's icing ramp (nothing without ice).
+	if (bVisual)
+	{
+		VisualScene.ApplyIceOverlay(Scenario.Aircraft);
 	}
 	if (MeshAirframe.bLoaded && MeshAirframe.DeclaredSurfaces == 0)
 	{
@@ -2374,6 +2423,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				RainCamera->TryGetStringField(TEXT("camera_id"), RainCameraId);
 			}
 		}
+		// Drops on the glass: a camera looking out through a windshield
+		// (the card camera's "cockpit" preset, or the legacy shoulder view)
+		// gets the storm weather's glass in place of the lens drops.
+		FString RainCameraPreset;
+		if (bConsumePoses && RainCameras != nullptr && RainCameras->IsValidIndex(ConsumedCameraIndex))
+		{
+			const TSharedPtr<FJsonObject> RainCamera = (*RainCameras)[ConsumedCameraIndex]->AsObject();
+			if (RainCamera.IsValid())
+			{
+				RainCamera->TryGetStringField(TEXT("preset"), RainCameraPreset);
+			}
+		}
+		const bool bStormGlass = Weather.DrawsRain() &&
+			(bConsumePoses ? RainCameraPreset == TEXT("cockpit") : CameraPreset == TEXT("shoulder"));
 		if (Weather.DrawsRain())
 		{
 			// The 3D drops supersede the screen-space streaks: one rain, not
@@ -2392,20 +2455,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(Error);
 		}
-		// Drops on the glass: a camera looking out through a windshield
-		// (the card camera's "cockpit" preset, or the legacy shoulder view).
-		FString RainCameraPreset;
-		if (bConsumePoses && RainCameras != nullptr && RainCameras->IsValidIndex(ConsumedCameraIndex))
+		if (!bStormGlass)
 		{
-			const TSharedPtr<FJsonObject> RainCamera = (*RainCameras)[ConsumedCameraIndex]->AsObject();
-			if (RainCamera.IsValid())
-			{
-				RainCamera->TryGetStringField(TEXT("preset"), RainCameraPreset);
-			}
+			VisualScene.ApplyLensDropsToBeauty(Capture);
 		}
-		const bool bThroughGlass = bConsumePoses ? RainCameraPreset == TEXT("cockpit")
-		                                         : CameraPreset == TEXT("shoulder");
-		if (bThroughGlass && Weather.DrawsRain())
+		else
 		{
 			double AirspeedKt = 0.0;
 			if (WorldCardRoot.IsValid())
@@ -3573,6 +3627,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// S4: the velocity cross-check's first captured frame has no previous
 	// one and writes zeros, saying so (the I6 flow's rule).
 	bool bVelocityCheckHasPrevious = false;
+	// The rain's camera velocity when no pose track gives one: the camera's
+	// displacement since the previous captured frame (zero on the first).
+	FVector RainPreviousCameraCm = FVector::ZeroVector;
+	double RainPreviousTime = -1.0;
 	for (int32 Step = 0; Step < Steps; ++Step)
 	{
 		const double Time = Step * DeltaSeconds;
@@ -3657,6 +3715,27 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Capture->FOVAngle = static_cast<float>(FMath::RadiansToDegrees(
 				2.0 * FMath::Atan(CameraSensorWidthMm /
 				                  (2.0 * Director->GetAppliedFocalLengthMm()))));
+		}
+
+		// The rain the camera sees (FlightSimRainParticles.cpp): every drop
+		// around THIS frame's camera at the FDM's time, before the render-
+		// state flush. The camera's velocity streaks them: the solved track's
+		// under consume-poses (a single still frame included), else the
+		// camera's motion since the previous captured frame.
+		if (bVisual && VisualScene.DrawsRainParticles())
+		{
+			const double RainNow = Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+			const FVector RainCameraCm = Capture->GetComponentLocation();
+			FVector RainCameraVelocity = FVector::ZeroVector;
+			if (!(bConsumePoses && Director->PoseVelocityAtTime(RainNow, RainCameraVelocity)) &&
+			    RainPreviousTime >= 0.0 && RainNow > RainPreviousTime)
+			{
+				RainCameraVelocity = (RainCameraCm - RainPreviousCameraCm) / (RainNow - RainPreviousTime);
+			}
+			RainPreviousCameraCm = RainCameraCm;
+			RainPreviousTime = RainNow;
+			VisualScene.AdvanceRain(RainNow, RainCameraCm, Capture->GetComponentRotation(),
+			                        RainCameraVelocity, Capture->FOVAngle, Width);
 		}
 
 		// Component render-state updates are queued and flushed at end of

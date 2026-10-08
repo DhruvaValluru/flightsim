@@ -28,7 +28,10 @@ Per frame, per camera::
                        width, height), the airframe's body axes as rows
                        of a 3x3 (forward, right, down in camera coords),
                        and the eight corners in the fixed order
-                       :meth:`Airframe.box_corners_body_m` documents
+                       :meth:`Airframe.box_corners_body_m` documents;
+                       plus the same box in pixels, range, rotation
+                       (matrix and quaternion), KITTI's camera-frame
+                       terms and its world placement (:func:`box3d_extras`)
     keypoints          {name: {u, v, depth_m, in_frame, camera_xyz_m}}
                        for every keypoint the airframe carries;
                        ``in_frame`` means inside the image with positive
@@ -206,6 +209,88 @@ def _project_body_box(record: Dict, state: Dict, corners_body, axes):
     return clipped, unclipped, truncation, corners_cam
 
 
+def _quaternion_wxyz(rows) -> List[float]:
+    """Unit quaternion (w, x, y, z) of the rotation whose COLUMNS are the
+    three given vectors (Shepperd's method, the branch with the largest
+    diagonal term, so no division by a near-zero)."""
+    m = [[rows[c][r] for c in range(3)] for r in range(3)]
+    trace = m[0][0] + m[1][1] + m[2][2]
+    if trace > 0.0:
+        k = 0.5 / math.sqrt(trace + 1.0)
+        q = (0.25 / k, (m[2][1] - m[1][2]) * k, (m[0][2] - m[2][0]) * k, (m[1][0] - m[0][1]) * k)
+    elif m[0][0] > m[1][1] and m[0][0] > m[2][2]:
+        k = 2.0 * math.sqrt(1.0 + m[0][0] - m[1][1] - m[2][2])
+        q = ((m[2][1] - m[1][2]) / k, 0.25 * k, (m[0][1] + m[1][0]) / k, (m[0][2] + m[2][0]) / k)
+    elif m[1][1] > m[2][2]:
+        k = 2.0 * math.sqrt(1.0 + m[1][1] - m[0][0] - m[2][2])
+        q = ((m[0][2] - m[2][0]) / k, (m[0][1] + m[1][0]) / k, 0.25 * k, (m[1][2] + m[2][1]) / k)
+    else:
+        k = 2.0 * math.sqrt(1.0 + m[2][2] - m[0][0] - m[1][1])
+        q = ((m[1][0] - m[0][1]) / k, (m[0][2] + m[2][0]) / k, (m[1][2] + m[2][1]) / k, 0.25 * k)
+    if q[0] < 0.0:                       # one sign, so equal rotations compare equal
+        q = tuple(-v for v in q)
+    norm = math.sqrt(sum(v * v for v in q))
+    return [v / norm for v in q]
+
+
+def _wrap_pi(angle: float) -> float:
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def box3d_extras(record: Dict, state: Dict, centre_body: Vec, centre_cam: Vec,
+                 corners_cam, extents, axes_cam) -> Dict:
+    """The 3-D box's derived values, beside its centre, extents, axes and
+    corners -- the same box, said the ways 3-D detection datasets read it.
+
+    ``corners_px`` / ``centre_px``: the corners and centre through the
+    frame's pinhole, [u, v] or null behind the camera; ``corners_in_frame``
+    counts the corners inside the image. ``range_m``: the centre's
+    distance from the camera; ``depth_m``: its z. ``volume_m3``.
+    ``rotation_camera``: the 3x3 that turns body (forward, right, down)
+    into camera coordinates (its columns are ``body_axes_in_camera``'s
+    rows), and ``quaternion_camera_wxyz`` the same rotation. KITTI's
+    camera-frame terms: ``dimensions_hwl_m`` (height, width, length),
+    ``location_bottom_m`` (the centre of the box's bottom face),
+    ``rotation_y_rad`` (yaw about the camera's y axis, 0 = the nose along
+    camera +x, KITTI's sign) and ``alpha_rad`` (the observation angle,
+    rotation_y - atan2(x, z) of the centre, wrapped to [-pi, pi]).
+    ``world``: the centre in the scene frame (north, east, altitude MSL)
+    and the attitude the box was placed at."""
+    def pixel(c):
+        uv = to_pixel(record, c)
+        return [uv[0], uv[1]] if uv is not None else None
+
+    width, height = float(record["width_px"]), float(record["height_px"])
+    corners_px = [pixel(c) for c in corners_cam]
+    forward, _, down = axes_cam
+    length, span, tall = extents
+    bottom = [centre_cam[i] + 0.5 * tall * down[i] for i in range(3)]
+    rotation_y = math.atan2(-forward[2], forward[0])
+    centre_world = body_to_scene(centre_body, state)
+    return {
+        "centre_px": pixel(centre_cam),
+        "corners_px": corners_px,
+        "corners_in_frame": sum(1 for uv in corners_px if uv is not None
+                                and 0.0 <= uv[0] <= width and 0.0 <= uv[1] <= height),
+        "range_m": math.sqrt(sum(v * v for v in centre_cam)),
+        "depth_m": centre_cam[2],
+        "volume_m3": length * span * tall,
+        "rotation_camera": [[axes_cam[c][r] for c in range(3)] for r in range(3)],
+        "quaternion_camera_wxyz": _quaternion_wxyz(axes_cam),
+        "dimensions_hwl_m": [tall, span, length],
+        "location_bottom_m": bottom,
+        "rotation_y_rad": rotation_y,
+        "alpha_rad": _wrap_pi(rotation_y - math.atan2(centre_cam[0], centre_cam[2])),
+        "world": {
+            "centre_north_m": centre_world[0], "centre_east_m": centre_world[1],
+            "centre_alt_m": centre_world[2],
+            "heading_deg": float(state["heading_deg"]),
+            "pitch_deg": float(state["pitch_deg"]),
+            "roll_deg": float(state["roll_deg"]),
+        },
+    }
+
+
 def bbox_labels(record: Dict, state: Dict, airframe: Airframe, axes) -> Dict:
     corners_body = airframe.box_corners_body_m()
     clipped, unclipped, truncation, corners_cam = _project_body_box(
@@ -232,6 +317,9 @@ def bbox_labels(record: Dict, state: Dict, airframe: Airframe, axes) -> Dict:
     centre_body = tuple((lo + hi) / 2.0 for lo, hi in
                         (box["forward"], box["right"], box["down"]))
     centre_cam = to_camera(record, body_to_scene(centre_body, state), axes)
+    extents = [box["forward"][1] - box["forward"][0],
+               box["right"][1] - box["right"][0],
+               box["down"][1] - box["down"][0]]
     return {
         "bbox_2d": list(clipped) if clipped else None,
         "bbox_2d_unclipped": list(unclipped) if unclipped else None,
@@ -239,12 +327,12 @@ def bbox_labels(record: Dict, state: Dict, airframe: Airframe, axes) -> Dict:
         "in_frame": bool(in_frame),
         "bbox_3d_camera": {
             "centre_m": list(centre_cam),
-            "extents_m": [box["forward"][1] - box["forward"][0],
-                          box["right"][1] - box["right"][0],
-                          box["down"][1] - box["down"][0]],
+            "extents_m": extents,
             "body_axes_in_camera": axes_cam,
             "corners_m": [list(c) for c in corners_cam],
             "cg_m": list(cg_cam),
+            **box3d_extras(record, state, centre_body, centre_cam, corners_cam,
+                           extents, axes_cam),
         },
     }
 
@@ -643,14 +731,17 @@ def box3d_camera(record: Dict, state: Dict, box: Dict[str, Tuple[float, float]],
     centre_body = tuple((lo + hi) / 2.0 for lo, hi in
                         (box["forward"], box["right"], box["down"]))
     centre_cam = to_camera(record, body_to_scene(centre_body, state), axes)
+    extents = [box["forward"][1] - box["forward"][0],
+               box["right"][1] - box["right"][0],
+               box["down"][1] - box["down"][0]]
     return {
         "centre_m": list(centre_cam),
-        "extents_m": [box["forward"][1] - box["forward"][0],
-                      box["right"][1] - box["right"][0],
-                      box["down"][1] - box["down"][0]],
+        "extents_m": extents,
         "body_axes_in_camera": axes_cam,
         "corners_m": [list(c) for c in corners_cam],
         "cg_m": list(o),
+        **box3d_extras(record, state, centre_body, centre_cam, corners_cam,
+                       extents, axes_cam),
     }
 
 

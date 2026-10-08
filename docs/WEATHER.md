@@ -8,7 +8,7 @@ cloud you fly into is the storm the aircraft is feeling.
 
 | What | Drawn by | Driven by (card `weather`) | Python reference |
 |---|---|---|---|
-| Rain drops in the air, motion-blurred by the real shutter | `M_RainDrops` on a procedural mesh, or the Niagara system | `weather.rain` | `core/scene/rain_particles.py` |
+| Rain drops in the air, motion-blurred by the real shutter | `M_RainDrops` on a procedural mesh, or the Niagara system | `weather.rain` | `core/scene/rain_field.py` |
 | Splash crowns on the ground near the camera | `M_RainSplash` | `weather.rain.splash` | same |
 | Drops on a cockpit camera's glass | `M_WindshieldRain` (post-process, beauty only) | `weather.rain.windshield` | same |
 | The cumulonimbus: tower, overshooting top, anvil, rain shaft | `M_StormCell` on the volumetric cloud | `weather.cell` (centred on the card's `downburst`) | `core/scene/storm_cell.py` |
@@ -18,8 +18,19 @@ cloud you fly into is the storm the aircraft is feeling.
 | Rain hiss (interactive window) | `USoundWaveProcedural`, level from the rain rate | `weather.rain` | `thunder.rain_noise` |
 | A storm soundtrack for rendered videos | `scripts/storm_soundtrack.py` | the whole block | `thunder.soundtrack` |
 
-The block exists only when the spec states `environment.precipitation_rate_mmh`
-or a `thunderstorm` weather event. Any other spec's card is unchanged, byte for
+**Opt-in.** This is a second weather path, built in parallel with the
+weather look (`core/scene/weather_look.py`, `FlightSimWeatherLook.cpp`: ground
+surfaces, puddles, lens drops, storm shafts, lightning flashes, ice) and its
+rain particles (`core/scene/rain_particles.py`, `FlightSimRainParticles.cpp`).
+Those stay the default. This path draws only when a render asks for it with
+`-weather-backend=procedural` or `niagara`. Its drops then replace the rain
+particles (the scene's `bSkipRainParticles`), and its glass replaces the lens
+drops on a cockpit camera. The weather look's storm shafts and flashes still
+draw alongside it; which path to keep, or how to fold them together, is an
+open decision.
+
+The card block (`core/scene/storm_weather.py`) exists only when the spec states
+`environment.precipitation_rate_mmh` or a `thunderstorm` weather event. Any other spec's card is unchanged, byte for
 byte. None of it reaches an equation of motion.
 
 ## The physics in each piece
@@ -81,21 +92,21 @@ Every literature constant is cited in its module and tagged
 
 Both hosts read the card's `weather` block. `-weather-backend=` picks the rain:
 
-* `procedural` (the default): every drop's place is a pure function of its
+* `off` (the default): nothing here is drawn; the weather look and its rain
+  particles render exactly as before.
+* `procedural`: every drop's place is a pure function of its
   index, the card's seed and the run time, computed in the material. It is
   deterministic in the step (Gate 10-R) and needs no asset beyond the
   materials.
 * `niagara`: the hand-built `NS_FlightSimRain`, fed the same numbers each
   frame. It is GPU-simulated, so a replay is **not** byte-identical, and
   `render.json` says so.
-* `off`: nothing is drawn.
-
-The cell, lightning, splashes and glass are the same in all three, except
-`off`.
+The cell, lightning, splashes and glass are the same for `procedural` and
+`niagara`.
 
 ```
 # a rendered clip
-UnrealEditor-Cmd ue/FlightSim.uproject -run=FlightSimRender -scenario=<card.json> -Visual ... [-weather-backend=procedural]
+UnrealEditor-Cmd ue/FlightSim.uproject -run=FlightSimRender -scenario=<card.json> -Visual ... -weather-backend=procedural
 # the interactive window (thunder and rain heard)
 UnrealEditor ue/FlightSim.uproject -game -card=<card.json> -terrain=... [-weather-backend=niagara]
 # the soundtrack for a rendered clip (sample 0 at run time 0, ready to mux)
@@ -147,7 +158,7 @@ fraction exceeds `User.Active`.
 
 | Name | When |
 |---|---|
-| `weather.backend` | `-weather-backend=` is not `procedural`, `niagara` or `off` |
+| `weather.backend` | `-weather-backend=` is not `procedural`, `niagara` or `off` (empty is `off`) |
 | `weather.card` | the block lacks a number the host reads |
 | `weather.selftest` | the port of the drop sampler, the stroke light curve or the thunder synthesis disagrees with the card's selftest (relative 1e-9) |
 | `weather.frame` | no georeferencing to place the weather through |

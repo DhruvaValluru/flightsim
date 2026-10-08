@@ -1,5 +1,5 @@
 // M_WindshieldRain: drops on the glass in front of a cockpit camera (core/scene/
-// rain_particles.py windshield: they impinge at n_r |V| cos(theta) per m^2 of glass,
+// rain_field.py windshield: they impinge at n_r |V| cos(theta) per m^2 of glass,
 // hold below the shedding airspeed and run off above it). Returns (du, dv, mask): the
 // refraction offset of the scene behind a drop (a spherical cap inverts its view) and
 // how much of the pixel the drop covers. The material lerps the scene toward the

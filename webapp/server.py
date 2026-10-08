@@ -44,6 +44,8 @@ from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
 from webapp.runs import (  # noqa: E402
     CLIP_SECONDS,
+    PREFETCH,
+    prefetch_terrain_for,
     RunManager,
     apply_historical_weather,
     apply_weather_event,
@@ -211,6 +213,13 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
         "source": str(quantity.source), "from": quantity.frm,
         "std": quantity.std, "detail": quantity.detail,
     } for name, quantity in spec.randomization.quantities()]
+    # The lighting block (core/scene/lighting.py): the same shape, so the
+    # page's lighting panel and its table rows have entries to edit.
+    lighting = [{
+        "name": name, "value": quantity.value, "unit": quantity.unit,
+        "source": str(quantity.source), "from": quantity.frm,
+        "std": quantity.std, "detail": quantity.detail,
+    } for name, quantity in spec.lighting.quantities()]
     spec_dict = spec.to_dict()
     # The block's own dict (always present for the page) MERGED with the
     # policy the canonical form carries under the same key: the policy
@@ -229,6 +238,10 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     if "policy" in canonical_section:
         randomization_section["policy"] = canonical_section["policy"]
     spec_dict["randomization"] = randomization_section
+    # The lighting section, always present for the page (the canonical form
+    # omits a default block; from_dict reads a default one back as absent,
+    # so the digest is unmoved).
+    spec_dict["lighting"] = spec.lighting.to_dict()
     # The time-of-day row's entry (omitted from the canonical form while
     # unstated; read back unstated, so the digest is unmoved).
     spec_dict.setdefault("environment", {}).setdefault(
@@ -238,8 +251,18 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
             "fields": fields, "cameras": cameras,
-            "randomization": randomization, "dict": spec_dict,
+            "randomization": randomization, "lighting": lighting,
+            "lighting_presets": _lighting_presets(), "dict": spec_dict,
             "table": spec.render_table()}
+
+
+def _lighting_presets() -> Dict[str, Any]:
+    """The preset table and ranges for the page's lighting panel (one
+    source: core/scene/lighting.py)."""
+    from core.scene.lighting import PRESETS, RANGES
+
+    return {"presets": PRESETS,
+            "ranges": {name: list(bounds) for name, bounds in RANGES.items()}}
 
 
 def _validation_payload(spec: ScenarioSpec) -> Dict[str, Any]:
@@ -260,6 +283,20 @@ def _validation_payload(spec: ScenarioSpec) -> Dict[str, Any]:
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return (STATIC / "index.html").read_text(encoding="utf-8")
+
+
+@app.get("/altitude-guide")
+def altitude_guide_endpoint(ground_m: float = 0.0) -> JSONResponse:
+    """The altitude guide's data for ground at ``ground_m`` MSL: the
+    checkpoints above the ground with the number to ask for at each, the
+    reference heights and the aircraft's typical cruise (presentation
+    only; core.scenario.altitude_guide)."""
+    from core.scenario.altitude_guide import guide
+
+    if not (-500.0 <= ground_m <= 9000.0):
+        return JSONResponse({"error": "ground_m must be in [-500, 9000]"},
+                            status_code=400)
+    return JSONResponse(guide(ground_m))
 
 
 @app.post("/compile")
@@ -398,6 +435,9 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         "transcript": transcript,
         "spec": _spec_payload(spec),
         "validation": _validation_payload(spec),
+        # The terrain the place needs, downloading in the background from
+        # now on (None when it needs none or is already on this machine).
+        "terrain_prefetch": _prefetch(spec),
     }
     if randomization_refusal is not None:
         payload["validation"]["ok"] = False
@@ -496,12 +536,16 @@ def camera_prompt_endpoint(request: CameraPromptRequest) -> JSONResponse:
     A language model (the rule parser when none is reachable) reads the
     sentence into an offset; the spec's own geometry then widens the lens
     and pulls the camera back until every aircraft is in frame, and says
-    so. The camera is added like any picked view, with the user's words
+    so. The reader sees the scene (aircraft, other aircraft, the cameras
+    already there), so a sentence may also EDIT a camera ("a bit closer",
+    "make the chase cam wider"), which replaces it in place. The camera
+    is added like any picked view, with the user's words
     as the provenance of every number, and refused by the validator's
     names if it is unusable.
     """
     from core.capture.validate import validate_cameras
-    from core.nl.camera_prompt import CameraPromptError, build_camera, read_intent
+    from core.nl.camera_prompt import (CameraPromptError, build_camera,
+                                       find_camera, read_intent)
 
     try:
         spec = ScenarioSpec.from_dict(request.spec)
@@ -518,13 +562,26 @@ def camera_prompt_endpoint(request: CameraPromptRequest) -> JSONResponse:
     except CameraPromptError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
-    taken = {str(c.camera_id.value) for c in spec.cameras}
-    camera_id, suffix = "prompt", 0
-    while camera_id in taken:
-        suffix += 1
-        camera_id = f"prompt{suffix}"
-    camera, notes = build_camera(spec, intent, camera_id)
-    spec.cameras.append(camera)
+    # An edit ("a bit closer", "make the chase cam wider") names the
+    # camera it changes; that camera is replaced in place, keeping its id
+    # (the directory its frames land in). Anything else is a new view.
+    index = find_camera(spec, intent.edit_camera_id)
+    if index is not None:
+        existing = spec.cameras[index]
+        camera_id = str(existing.camera_id.value)
+        camera, notes = build_camera(spec, intent, camera_id, existing=existing)
+        spec.cameras[index] = camera
+    else:
+        taken = {str(c.camera_id.value) for c in spec.cameras}
+        camera_id, suffix = "prompt", 0
+        while camera_id in taken:
+            suffix += 1
+            camera_id = f"prompt{suffix}"
+        camera, notes = build_camera(spec, intent, camera_id)
+        if intent.edit_camera_id:
+            notes.append(f"no camera is named {intent.edit_camera_id!r}; "
+                         f"added a new one")
+        spec.cameras.append(camera)
     violations = validate_cameras(spec)
     if violations:
         first = violations[0]
@@ -534,8 +591,8 @@ def camera_prompt_endpoint(request: CameraPromptRequest) -> JSONResponse:
             status_code=409)
     payload = _spec_payload(spec)
     payload["camera_prompt"] = {
-        "camera_id": camera_id, "intent": intent.to_dict(), "notes": notes,
-        "model_skipped": skipped}
+        "camera_id": camera_id, "edited": index is not None,
+        "intent": intent.to_dict(), "notes": notes, "model_skipped": skipped}
     return JSONResponse(payload)
 
 
@@ -597,6 +654,20 @@ def cameras_endpoint(request: CameraRequest) -> JSONResponse:
         aircraft=str(spec.aircraft.value),
         terrain_elevation_m=float(spec.terrain_elevation.value),
         frm=f"added from the page as a {preset} view")
+    if preset == "explicit":
+        # "You state the position yourself": the documented default is an
+        # offset with no world anchor, which the pose solver refuses. Start
+        # it where the ground observer stands (planned, so an edit in the
+        # table wins) and let the user move it from there.
+        from core.scenario.camera import GROUND_OBSERVER_LOCAL
+
+        start = "starts at the ground observer's spot; edit the position rows"
+        camera.plan("position_mode", "scene", frm=start)
+        camera.plan("position_north_m", GROUND_OBSERVER_LOCAL["north_m"], frm=start)
+        camera.plan("position_east_m", GROUND_OBSERVER_LOCAL["east_m"], frm=start)
+        camera.plan("position_alt_m",
+                    float(spec.terrain_elevation.value) + GROUND_OBSERVER_LOCAL["up_m"],
+                    frm=start)
     spec.cameras.append(camera)
     frame_traffic(spec)
     spec.cameras.pop()
@@ -811,15 +882,34 @@ class BakeRequest(BaseModel):
     longitude: float
 
 
+def _prefetch(spec: ScenarioSpec) -> Optional[Dict[str, Any]]:
+    """Start the place's terrain bake in the background (webapp.runs
+    TerrainPrefetch); a failure to START is reported, never a failed
+    compile -- /run still asks the same question and bakes then."""
+    try:
+        return prefetch_terrain_for(spec, bake_on_demand)
+    except Exception as exc:
+        return {"state": "failed", "error": f"{type(exc).__name__}: {exc}"}
+
+
+@app.get("/bake/status")
+def bake_status(latitude: float, longitude: float) -> JSONResponse:
+    """The background bake for these coordinates: downloading, done or
+    failed (with the error); state "none" when none was started."""
+    return JSONResponse(PREFETCH.status(latitude, longitude) or {"state": "none"})
+
+
 @app.post("/bake")
 def bake_endpoint(request: BakeRequest) -> JSONResponse:
     """Fetch + bake + verify GLO-30 for arbitrary coordinates (the page
-    calls this when /run refuses terrain.unbaked). Synchronous: the first
-    fetch downloads 1x1 degree tiles and takes minutes; cached afterwards.
-    Failure is a named error -- open ocean has no tiles, an unverified
-    bake is never written."""
+    calls this when /run refuses terrain.unbaked). Waits for the bake:
+    the one /compile already started for these coordinates when there is
+    one (never a second, concurrent bake of the same place), else a new
+    one. The first fetch downloads 1x1 degree tiles and takes minutes;
+    cached afterwards. Failure is a named error -- open ocean has no
+    tiles, an unverified bake is never written."""
     try:
-        entry = bake_on_demand(request.latitude, request.longitude)
+        entry = PREFETCH.bake(request.latitude, request.longitude, bake_on_demand)
     except Exception as exc:
         return JSONResponse(
             {"error": f"{type(exc).__name__}: {exc}"}, status_code=502)
@@ -1231,6 +1321,23 @@ def _generate_call(function, *args, **kwargs):
         return JSONResponse(function(*args, **kwargs))
     except generate_module.GenerateRefusal as exc:
         return JSONResponse(exc.payload, status_code=exc.status_code)
+
+
+@app.get("/lens_picker.js")
+def lens_picker_script() -> FileResponse:
+    """The lens picker both prompt pages mount: a sample frame and a
+    focal-length slider that writes "with a <n> mm lens" into the prompt."""
+    return FileResponse(STATIC / "lens_picker.js",
+                        media_type="application/javascript")
+
+
+@app.get("/conditions_list.js")
+def conditions_list_script() -> FileResponse:
+    """The conditions list both prompt pages mount beside the prompt box:
+    the weather and environment phrases the compiler turns into spec
+    fields, clickable into the prompt (tests/test_conditions_list.py)."""
+    return FileResponse(STATIC / "conditions_list.js",
+                        media_type="application/javascript")
 
 
 @app.get("/generate.html", response_class=HTMLResponse)

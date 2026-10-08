@@ -487,7 +487,7 @@ bool FFlightSimWeather::ParseFlash(const TSharedPtr<FJsonObject>& Json, FFlightS
 bool FFlightSimWeather::ParseBackend(const FString& Name, EFlightSimWeatherBackend& Out,
                                      FString& Error)
 {
-	if (Name.IsEmpty() || Name == TEXT("procedural"))
+	if (Name == TEXT("procedural"))
 	{
 		Out = EFlightSimWeatherBackend::Procedural;
 	}
@@ -495,7 +495,7 @@ bool FFlightSimWeather::ParseBackend(const FString& Name, EFlightSimWeatherBacke
 	{
 		Out = EFlightSimWeatherBackend::Niagara;
 	}
-	else if (Name == TEXT("off"))
+	else if (Name.IsEmpty() || Name == TEXT("off"))
 	{
 		Out = EFlightSimWeatherBackend::Off;
 	}
@@ -740,7 +740,7 @@ bool FFlightSimWeather::BuildRain(UWorld* World, const TSharedPtr<FJsonObject>& 
 	}
 	D0Mm = 3.67 / RainLambda;    // precipitation.py MEDIAN_VOLUME_FACTOR
 
-	// The selftest: the first drops, exactly as rain_particles.py drew them.
+	// The selftest: the first drops, exactly as rain_field.py drew them.
 	const TArray<TSharedPtr<FJsonValue>>* Selftest = nullptr;
 	if (!Rain->TryGetArrayField(TEXT("selftest"), Selftest) || Selftest == nullptr || Selftest->Num() == 0)
 	{
@@ -775,7 +775,7 @@ bool FFlightSimWeather::BuildRain(UWorld* World, const TSharedPtr<FJsonObject>& 
 		{
 			Error = FString::Printf(
 				TEXT("weather.selftest: drop %llu drawn here (D %.12f mm) is not the card's (D %.12f mm); ")
-				TEXT("the port of rain_particles.py disagrees with its reference"), Index, D, DMm);
+				TEXT("the port of rain_field.py disagrees with its reference"), Index, D, DMm);
 			return false;
 		}
 	}
@@ -1673,7 +1673,7 @@ bool FFlightSimWeather::ApplyWindshield(USceneCaptureComponent2D* Beauty, double
 	Row->SetNumberField(TEXT("runoff_mps"), WindshieldRunoffMps);
 	Row->SetNumberField(TEXT("airspeed_mps"), AirspeedMps);
 	Row->SetStringField(TEXT("basis"),
-		TEXT("the card's impingement and run-off (rain_particles.py windshield; the run-off law ")
+		TEXT("the card's impingement and run-off (rain_field.py windshield; the run-off law ")
 		TEXT("stated, not measured) over a stated 1 m^2, 0.8 m high visible glass"));
 	Record->SetObjectField(TEXT("windshield"), Row);
 	return true;

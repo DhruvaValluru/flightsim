@@ -1,5 +1,5 @@
 // M_RainDrops's world position offset: each drop of the rain box at its place in
-// the air, stretched into the streak the shutter sees (core/scene/rain_particles.py).
+// the air, stretched into the streak the shutter sees (core/scene/rain_field.py).
 //
 // The mesh (FlightSimWeather.cpp BuildRainMesh): four vertices per drop, all at the
 // drop's seed position p0 (component space, cm; the component sits at the camera),
