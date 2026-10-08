@@ -3419,6 +3419,13 @@ class RunManager:
             clip_camera = self._encode_capture_clip(
                 frames, raw_clip, camera_ids, out / "capture_manifest.json")
             clip_ok = clip_camera is not None
+            if clip_ok:
+                # Say how long the clip is, so a short one can be checked
+                # against the clip selector without opening the file.
+                shot = len(list((frames / clip_camera).glob("frame_*.png")))
+                rate = self._capture_fps(out / "capture_manifest.json", clip_camera)
+                run.push("encoding", f"clip: {shot} frames of {clip_camera} at "
+                                     f"{rate:.1f} fps = {shot / rate:.1f} s of flight")
         else:
             clip_ok = encode_clip(frames, raw_clip)
         if not clip_ok:

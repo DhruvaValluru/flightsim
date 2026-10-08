@@ -88,7 +88,7 @@ def test_the_clip_selector_applies_after_interpret():
     assert 'setRow("duration", seconds);' in page
 
 
-def test_the_picker_zooms_out_to_6_mm():
-    """The owner asked to zoom out further: 6 mm is ~143 deg across."""
-    assert "const MIN_MM = 6;" in SCRIPT
-    assert "[6, \"widest\"]" in SCRIPT
+def test_the_picker_zooms_out_to_4_mm():
+    """The owner asked twice to zoom out further: 4 mm is ~155 deg across."""
+    assert "const MIN_MM = 4;" in SCRIPT
+    assert "[4, \"widest\"]" in SCRIPT

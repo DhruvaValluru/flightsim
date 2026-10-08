@@ -256,5 +256,5 @@ def test_the_sun_dial_shows_the_camera_and_the_flight_direction_and_drags():
     for anchor in ("function attachSunDialDrag", "data-camera-marker", "function followingCamera",
                    "function cameraDialInner", 'data-vslider="zoom"', 'data-vslider="height"',
                    'data-vslider="distance"', "writing-mode:vertical-lr",
-                   "const VIEW_MIN_MM = 6"):
+                   "const VIEW_MIN_MM = 4"):
         assert anchor in page, anchor

@@ -652,11 +652,11 @@ function showTerrainPrefetch(status) {
 let lightingPresets = {presets: {}, ranges: {}};
 let lightStep = 5;
 let viewStep = 15;
-//: The camera panel's zoom slider range (mm): 6 mm is ~143 deg across on
+//: The camera panel's zoom slider range (mm): 4 mm is ~155 deg across on
 //: the 36 mm sensor, 400 mm ~5 deg. Typing a value outside it still works.
-const VIEW_MIN_MM = 6, VIEW_MAX_MM = 400;
+const VIEW_MIN_MM = 4, VIEW_MAX_MM = 400;
 //: The distance slider's range (m), for pulling the camera back.
-const VIEW_MIN_M = 5, VIEW_MAX_M = 5000;
+const VIEW_MIN_M = 5, VIEW_MAX_M = 20000;
 const toLog = (v, lo, hi) => 1000 * Math.log(clamp(v, lo, hi) / lo) / Math.log(hi / lo);
 const fromLog = (t, lo, hi) => lo * Math.pow(hi / lo, t / 1000);
 
@@ -1180,7 +1180,8 @@ function cameraViewHtml(cam) {
     `value="${round(toLog(focal, VIEW_MIN_MM, VIEW_MAX_MM), 0)}" style="width:16rem" ` +
     `title="left: wider (down to ${VIEW_MIN_MM} mm); right: closer (up to ${VIEW_MAX_MM} mm)"></div>` +
     `<div class="ctl"><label>&nbsp;</label>` +
-    [["ultra wide", 120], ["wide", 70], ["normal", 45], ["tele", 15], ["super tele", 5]]
+    [["fisheye", 150], ["ultra wide", 120], ["wide", 70], ["normal", 45], ["tele", 15],
+     ["super tele", 5]]
       .map(([label, f]) => button("fov", label, `${f}&deg; field of view`, f)).join("") +
     `</div>`;
   const livePreset = String(rowValue(`cameras[${i}].preset`) || cam.preset);
