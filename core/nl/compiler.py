@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..environment import sun as sun_model
 from ..fdm import units as u
 from ..scenario.fields import Quantity, Source
-from ..scenario.spec import ScenarioSpec
+from ..scenario.spec import ScenarioSpec, _default_precipitation_rate
 
 # -- vocabulary ---------------------------------------------------------
 
@@ -519,6 +519,36 @@ def _time_of_day(text: str) -> Quantity:
                            f"see core.environment.sun)")
     return Quantity.default("none", frm="no time of day stated; default "
                                         "render look")
+
+
+#: Rain words -> a rain rate (mm/h), most specific first. The AMS
+#: glossary's intensity bands [unverified here]: light below 2.5,
+#: moderate 2.5-7.6, heavy above 7.6 mm/h; each word lands inside its
+#: band (a stated choice, the registry's u_input bin). Snow is not here:
+#: a rate is rain (core.scene.precipitation states snow absent).
+RAIN_WORDS: Tuple[Tuple[str, float, str], ...] = (
+    (r"(?:heavy|torrential|pouring)\s+(?:rain|showers?)|downpours?|pouring\b",
+     10.0, "heavy"),
+    (r"(?:light|gentle|slight)\s+(?:rain|showers?)|drizzl\w*", 1.0, "light"),
+    (r"rain(?:y|ing|fall)?|showers?", 4.0, "moderate"),
+)
+
+
+def _precipitation_rate(text: str) -> Quantity:
+    """``environment.precipitation_rate_mmh``: a stated "N mm/h" is the
+    user's number; a rain word is its intensity band (inferred). A
+    negated word ("no rain", "without rain") states nothing."""
+    match = _search(r"\b(\d+(?:\.\d+)?)\s*mm\s*(?:/\s*h(?:r|our)?|per\s+hour)\b", text)
+    if match:
+        return Quantity.user(float(match.group(1)), "mm/h", frm=match.group(0).strip())
+    for pattern, rate, band in RAIN_WORDS:
+        match = _search(rf"\b(?:{pattern})\b", text)
+        if match and not _search(rf"\b(?:no|without|not)\s+{re.escape(match.group(0))}",
+                                 text):
+            return Quantity.inferred(
+                rate, "mm/h", frm=f"{band} rain {match.group(0)!r} (AMS intensity "
+                                  f"band; render only, see core.scene.precipitation)")
+    return _default_precipitation_rate()
 
 
 def _turbulence(text: str) -> Quantity:
@@ -1226,6 +1256,7 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
         weather_date=_weather_date(text),
         weather_event=_weather_event(text),
         time_of_day=_time_of_day(text),
+        precipitation_rate_mmh=_precipitation_rate(text),
     )
 
     if traffic:

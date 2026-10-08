@@ -99,7 +99,7 @@ below catches the prompt and every other tier is one env var away:
 
 * **No AI (`FLIGHTSIM_LLM=none` in `~/.flightsim.env`):** the built-in
   deterministic parser covers the whole documented vocabulary (aircraft,
-  altitudes, winds, turbulence, surfaces, storms, tornadoes, dates).
+  altitudes, winds, turbulence, surfaces, rain, storms, tornadoes, dates).
   Only place *names* need AI -- state coordinates instead
   ("at 27.99, 86.92"). This parser is also the automatic fallback
   whenever any LLM tier fails.

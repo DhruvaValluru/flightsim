@@ -3,7 +3,7 @@
 A prompt can name something the spec was never told: a thing the
 simulator does not model at all ("birds", "hail", "a ship below"), or a
 condition the spec DOES carry but that the compiler which read this
-prompt did not set ("rain" through the offline parser). Before this,
+prompt did not set ("fog" through the offline parser). Before this,
 both were silently ignored: "an A320 in heavy snow with birds nearby"
 flew a clear, empty sky with no word said.
 

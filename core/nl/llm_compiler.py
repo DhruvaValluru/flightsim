@@ -281,13 +281,21 @@ FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
                        "HH:MMZ (UTC), when the prompt states or clearly "
                        "evokes a time of day.",
     },
+    "precipitation_rate_mmh": {
+        "type": "number",
+        "description": "Rain rate in mm/h, render only (never physics), "
+                       "when the prompt states or names rain. Rain only: "
+                       "snow is not modelled.",
+    },
 }
 
 # The schema is generated FROM the spec's field list; a field added to one
 # and not the other fails at import, not at 2 a.m. in a run manifest.
-# time_of_day is spec 9's optional, absent-canonical environment field
-# (not in FIELD_ORDER, so a spec that omits it keeps its canonical form).
-_SPEC_FIELDS = {name for _, name in ScenarioSpec.FIELD_ORDER} | {"time_of_day"}
+# time_of_day and precipitation_rate_mmh are spec 9's optional,
+# absent-canonical environment fields (not in FIELD_ORDER, so a spec that
+# omits them keeps its canonical form).
+_SPEC_FIELDS = ({name for _, name in ScenarioSpec.FIELD_ORDER}
+                | {"time_of_day", "precipitation_rate_mmh"})
 _unknown = set(FIELD_VALUE_SCHEMAS) - _SPEC_FIELDS
 assert not _unknown, f"llm_compiler schema names non-spec fields: {_unknown}"
 
@@ -429,6 +437,7 @@ CANONICAL_UNITS: Dict[str, str] = {
     "altitude": "m", "airspeed": "kt", "heading": "deg",
     "latitude": "deg", "longitude": "deg", "terrain_elevation": "m",
     "duration": "s", "wind_speed": "kt", "wind_direction": "deg",
+    "precipitation_rate_mmh": "mm/h",
 }
 
 #: One clarifying question: an id the answer round refers back to, the
@@ -623,7 +632,7 @@ SYSTEM_PROMPT = """\
 You are the scene DIRECTOR for a flight-simulation compiler. Turn the
 prompt into a COHERENT scene: fill every field the prompt justifies --
 aircraft, place, altitude, airspeed, heading, wind speed AND direction,
-turbulence, surface, weather event, date, time of day -- so that the
+turbulence, surface, weather event, rain, date, time of day -- so that the
 fields agree with each other and with what the prompt evokes. Every value you write
 declares how it was chosen; a guess you do not declare is the one
 failure this protocol cannot forgive.
@@ -687,6 +696,10 @@ Extraction rules:
   otherwise.
 - Turbulence words: smooth/calm -> none, bumpy/choppy/mild -> light,
   rough (air) -> moderate, violent/heavy -> severe.
+- Rain is precipitation_rate_mmh, NEVER weather_event (whose only words
+  are thunderstorm and tornado): light rain/drizzle -> 1, rain/raining/
+  rainy/showers -> 4, heavy rain/downpour -> 10 (inferred); "<n> mm/h"
+  is user. Snow, sleet and hail have no field: they go to "notes".
 - Relative wind ("headwind", "crosswind") is a bearing offset from the
   aircraft heading (head 0, cross 90, tail 180), meteorological
   convention (the bearing the wind is FROM).

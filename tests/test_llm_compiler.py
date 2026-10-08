@@ -289,8 +289,10 @@ def test_api_failure_is_reported_not_swallowed():
 # -- schema consistency ----------------------------------------------------
 
 def test_every_schema_field_is_a_spec_field():
-    # time_of_day: spec 9's optional environment field (outside FIELD_ORDER).
-    spec_fields = {name for _, name in ScenarioSpec.FIELD_ORDER} | {"time_of_day"}
+    # time_of_day, precipitation_rate_mmh: spec 9's optional environment
+    # fields (outside FIELD_ORDER).
+    spec_fields = ({name for _, name in ScenarioSpec.FIELD_ORDER}
+                   | {"time_of_day", "precipitation_rate_mmh"})
     assert set(FIELD_VALUE_SCHEMAS) <= spec_fields
 
 
