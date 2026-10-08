@@ -90,7 +90,7 @@ Open http://127.0.0.1:8008, type a scenario ("fly the c172p through a
 tornado over the prairie"), review the compiled spec, and run. **No API
 keys or accounts are needed for anything**: terrain elevation comes from
 the public Copernicus bucket, historical weather from the free Open-Meteo
-API, and the natural-language compiler **works out of the box** -- with
+API, place names from the free OpenStreetMap search, and the natural-language compiler **works out of the box** -- with
 nothing configured, prompts compile through [relay/](relay/), a small
 Vercel function holding the author's own OpenAI key server-side, pinned
 to `gpt-4.1-mini`, rate-limited to 40 requests/hour per IP. Best-effort
@@ -207,6 +207,24 @@ for priming a machine ahead of time rather than prerequisites.
   carry a fail-safe: a scene the SYSTEM chose never falls back to the
   featureless slab -- the control ridge is synthesised on first need --
   while a user-stated flat place stays honestly flat.
+* **Any named place** (`core/nl/geocode.py`): "over New York", "near
+  Denver", "above the Golden Gate Bridge". A prompt's place words become
+  coordinates: first the six curated bakes, then a built-in list of about
+  200 cities, airports, peaks and landmarks (each with an approximate
+  ground height), then OpenStreetMap's free Nominatim search for anything
+  else. Results are cached in `data/geocode_cache.json`. The place then
+  goes through the usual on-demand GLO-30 bake on the first run, so it
+  gets the same terrain physics as a curated place: the raster under the
+  aircraft, wingtip contact, orographic lift and lee sink, and the
+  clearance pre-flight. `FLIGHTSIM_GEOCODER=offline` uses the list only;
+  `off` disables the lookup.
+* **Altitude guide** (web page, under the prompt): a side view of planes
+  at checkpoints from 60 m to 11,000 m above the ground. Each one shows
+  the number to ask for over the scene's ground, next to familiar heights
+  (Eiffel Tower, Burj Khalifa, the Matterhorn, Everest) and the chosen
+  aircraft's typical cruise. A prompt's altitude is above **sea level**,
+  so over Denver "at 1000 m" is underground, and the guide says so
+  before you run. **use** puts a checkpoint's number into the spec.
 * **Simulator-derived terrain look (committed in `assets/xplane/`)**: ground
   textures, water polygons and sky-colour tables extracted from a local simulator install by
   `python scripts/extract_xplane.py --xplane-root "<X-Plane 12 folder>"`

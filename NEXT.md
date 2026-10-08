@@ -1,5 +1,31 @@
 # Resume here
 
+**Weather visuals (2026-10-07, `phase-2-testing`; UNCOMPILED -- no engine
+here).** A new absent-canonical card block `weather_look`
+(`core/scene/weather_look.py`: surface, storm, rain rate, wetness, ice,
+seed) drives `FlightSimWeatherLook.cpp`: the flat scene's ground gets
+`M_Ground_<Surface>` (it had NO material before: the engine plane's
+default) with puddles and ripples from the wetness; a thunderstorm gets a
+cloud layer when the look has none (cover 0.95, 1200-9000 m, in the
+commandlet), three rain shafts and a lightning bolt + point light on a
+seeded flash schedule (all `BeautyOnlyActors`); a rain rate puts
+`M_LensDrops` on the beauty capture beside the streaks and wets the
+georeferenced terrain through the existing Wetness scalar when the look
+carried none; icing puts `M_IceOverlay` on every airframe part
+(`SetOverlayMaterial`), IceAmount following the card's icing ramp. All
+eleven materials are procedural in `scripts/ue_create_materials.py`
+(`_weather_material`); `scripts/fetch_ground_textures.py` fetches CC0
+Poly Haven textures (unreachable from the container; run it on Windows,
+then re-run the materials script) and the ground materials sample them
+when present. FIRST WINDOWS STEPS: build, run the materials script (watch
+for MATERIAL-FAILED), render "over the desert through a thunderstorm"
+and a run with `icing:`; check render.json `look_applied.weather_look`.
+Known risks: the Python material-node property names (Noise, DepthFade,
+Transform) and `SetOverlayMaterial` are from memory; the storm shafts
+assume the start is over the engine origin; the albedo pass now shows
+the surface colours on a flat scene that states a surface word.
+Tests: `tests/test_weather_look.py`, `tests/test_fetch_ground_textures.py`.
+
 **Camera control by language, widened (2026-10-07, `phase-2-testing`).**
 The camera-sentence box (`core/nl/camera_prompt.py`, `/cameras/prompt`)
 now tells the model the SCENE: the aircraft, a distance table scaled to

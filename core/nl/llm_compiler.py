@@ -52,6 +52,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -594,6 +595,30 @@ def _locations_block() -> str:
         '(from the prompt or the answer, source "user") are fetched and '
         'baked on demand from the same verified GLO-30 pipeline.')
     return "\n".join(lines)
+
+
+def _looked_up_block(place) -> str:
+    """The system-prompt addendum for a place core.nl.geocode resolved."""
+    elevation = ("" if place.elevation_m is None else
+                 f", terrain_elevation {place.elevation_m:g}")
+    return (
+        f"\n\nPlace lookup for THIS prompt: {place.phrase!r} is "
+        f"{place.display} -- latitude {place.latitude}, longitude "
+        f"{place.longitude}{elevation} (from the {place.source}). Treat it "
+        f"exactly like a listed place: set those fields to these EXACT "
+        f"values, source \"inferred\", with {place.phrase!r} in \"from\", "
+        f"and do NOT ask about the location. Its terrain is fetched on "
+        f"demand on the first run.")
+
+
+_LOCATION_QUESTION = re.compile(
+    r"locat|place|where|latitude|longitude|coordinat|which (?:mountain|city|area)",
+    re.IGNORECASE)
+
+
+def _asks_location(question: Dict[str, Any]) -> bool:
+    return bool(_LOCATION_QUESTION.search(
+        f"{question.get('id', '')} {question.get('question', '')}"))
 
 
 def _chase_table_block() -> str:
@@ -1368,6 +1393,17 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                     "is unavailable. Use the offline regex compiler.") from exc
             client = anthropic.Anthropic()
 
+    # A place the prompt names outside the listed bakes is looked up
+    # BEFORE the model is asked (core.nl.geocode), and the model is told
+    # the answer: a looked-up place is as determined as a listed one, so
+    # it is not a question. The overlay below enforces it either way.
+    from .compiler import apply_named_place, named_place
+
+    looked_up = named_place(prompt)
+    system = SYSTEM_PROMPT
+    if looked_up is not None:
+        system = SYSTEM_PROMPT + _looked_up_block(looked_up)
+
     answering = answers is not None
     if answering and not questions:
         raise LLMCompileError(
@@ -1387,7 +1423,7 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
         response = client.messages.create(
             model=model,
             max_tokens=16000,
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=messages,
             # A short structured extraction behind a UI button: low effort
             # cuts the interactive latency substantially and this size of
@@ -1481,6 +1517,17 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                               f"{spec.heading.value} but the prompt says "
                               f"{stated.frm!r}; the stated heading is used")
         spec.heading = stated
+
+    # The looked-up place is the prompt's own words resolved; a model guess
+    # (a listed bake chosen for scene-setting) or an omission gives way to
+    # it, and a location question the model asked anyway is dropped -- the
+    # prompt already answered it. Stated coordinates are never moved.
+    applied = apply_named_place(spec, looked_up)
+    if looked_up is not None and (applied or (
+            abs(float(spec.latitude.value) - looked_up.latitude) < 1e-4
+            and abs(float(spec.longitude.value) - looked_up.longitude) < 1e-4)):
+        payload["questions"] = [q for q in payload["questions"]
+                                if not _asks_location(q)]
 
     # Cameras overlay AFTER the fields: the default offsets and the
     # world-anchored placements depend on the (possibly model-chosen)

@@ -5566,6 +5566,21 @@ mutate core/agent/tools.py \
     "Phase 2 fixes: a failed bake is refused by name, terrain.unbaked" \
     tests/test_agent.py || failures=$((failures+1))
 
+# -- Place names: a place the prompt names ("over New York") is baked on
+# demand like stated coordinates, and the built-in list never matches a
+# word that is not after a location word ("a Boston terrier").
+mutate webapp/runs.py \
+    '    return looked_up_place(spec)' \
+    '    return False  # MUTATED: a looked-up place is never baked' \
+    "a place the prompt names is baked on demand, then flown over real terrain" \
+    tests/test_geocode.py || failures=$((failures+1))
+
+mutate core/nl/geocode.py \
+    'LOCATIVE = (r"over|above|near|around|across|in|at|from|to|towards?|outside|"' \
+    'LOCATIVE = (r"|over|above|near|around|across|in|at|from|to|towards?|outside|"  # MUTATED: any mention' \
+    "a listed place is read only after a location word" \
+    tests/test_geocode.py || failures=$((failures+1))
+
 if [ "$guard_n" -ne "$total" ]; then
     echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2
     exit 1

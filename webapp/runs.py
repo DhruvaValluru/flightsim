@@ -204,19 +204,40 @@ def curated_key_at(lat: float, lon: float) -> Optional[str]:
 
 
 def named_place(spec: ScenarioSpec) -> bool:
-    """True when the prompt NAMED a real place: the compiler maps a listed
-    place's name to its coordinates with source ``inferred`` (core/nl/
-    llm_compiler.py, geography rules). Such a spec means "fly at that real
-    place" exactly as stated coordinates do, so it is held to the same
-    bake rule -- never the flat slab or the synthesised ridge under the
-    place's name."""
+    """True when the prompt NAMED a real place: source ``inferred`` on both
+    coordinates -- a listed place's name mapped to its origin (core/nl/
+    llm_compiler.py, geography rules) or any other place name the compiler
+    looked up (core.nl.geocode, :func:`looked_up_place`). Such a spec
+    means "fly at that real place" exactly as stated coordinates do, so it
+    is held to the same bake rule -- never the flat slab or the
+    synthesised ridge under the place's name."""
     return (str(spec.latitude.source) == "inferred"
             and str(spec.longitude.source) == "inferred")
 
 
+def looked_up_place(spec: ScenarioSpec) -> bool:
+    """True when the coordinates are a place name the compiler looked up
+    (core.nl.geocode): source inferred, and NOT a curated bake's origin
+    (a curated place has its own bake, :func:`curated_key_at`)."""
+    if not named_place(spec):
+        return False
+    return curated_key_at(float(spec.latitude.value),
+                          float(spec.longitude.value)) is None
+
+
+def names_real_place(spec: ScenarioSpec) -> bool:
+    """True when the coordinates are a real place someone named: stated
+    (source user), a curated place named in the prompt, or a place name
+    the compiler looked up (:func:`named_place`)."""
+    if {str(spec.latitude.source), str(spec.longitude.source)} == {"user"}:
+        return True
+    return named_place(spec)
+
+
 def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
-    """None, or the named refusal for USER-stated coordinates that no bake
-    covers yet.
+    """None, or the named refusal for coordinates someone named -- stated,
+    or a place name the compiler looked up (:func:`names_real_place`) --
+    that no bake covers yet.
 
     Stated coordinates mean "fly at that real place": defaulted and
     placed-on-scene coordinates never trigger (this runs BEFORE
@@ -244,8 +265,7 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
             "latitude": float(spec.latitude.value),
             "longitude": float(spec.longitude.value),
         }
-    if not (named_place(spec) or (str(spec.latitude.source) == "user"
-                                  and str(spec.longitude.source) == "user")):
+    if not names_real_place(spec):
         return None
     # The synthesised control ridge is NOT a place (the ERA5 doctrine):
     # stated coordinates that fall on no real bake refuse here even when
@@ -267,9 +287,11 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
                        f"verify it, then run again",
             "latitude": lat, "longitude": lon,
         }
+    what = ("stated coordinates" if str(spec.latitude.source) == "user"
+            else "coordinates of the place the prompt names")
     return {
         "constraint": "terrain.unbaked",
-        "message": f"no GLO-30 bake covers the stated coordinates "
+        "message": f"no GLO-30 bake covers the {what} "
                    f"({lat:.4f}, {lon:.4f}); POST /bake with them to fetch "
                    f"and verify that terrain (first fetch downloads tiles, "
                    f"a few minutes), then run again",
@@ -531,7 +553,10 @@ def _auto_scene(spec: ScenarioSpec) -> Dict:
         # 3299 m peaks under a "413 m" scene (measured: a 3000 m flight
         # refused terrain.clearance at -89.5 m AGL over "413 m staged
         # terrain" because the ridge had been substituted).
-        if baked(terrain_dir / "control_ridge"):
+        # Nor for a place the prompt named (a curated place or one
+        # core.nl.geocode looked up): its own
+        # ground arrives with the on-demand bake.
+        if baked(terrain_dir / "control_ridge") and not named_place(spec):
             return {
                 "key": "control", "kind": "synthesised control ridge",
                 "terrain": str(terrain_dir / "control_ridge"),

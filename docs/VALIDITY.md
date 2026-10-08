@@ -531,6 +531,22 @@ more. The CG itself is deliberately not a station: terrain under the
 aircraft is the ground model's existing job (heightfield collision, AGL
 parity measured).
 
+### 2.10a Place names are looked up, not surveyed
+
+A place a prompt names outside the curated bakes (core/nl/geocode.py) is
+the centre point the built-in list or OpenStreetMap gives for it. The
+list's ground heights are rounded and approximate: a city centre, an
+airfield, or a summit for a peak. They set the spec's terrain datum,
+which the validator's `altitude.terrain_clearance` check uses before a
+bake exists. The physics ground is always the GLO-30 raster baked around
+the point on the first run (source-verified only, no named summits). A
+name with several meanings resolves to the list's entry ("Portland" is
+Oregon) or to OpenStreetMap's top result; the spec's provenance names
+which place was used, so a wrong guess can be seen and edited. A word is
+read as a place only after a location word ("over", "near", ...), and
+an OpenStreetMap hit is accepted only for a geographic category above a
+minimum importance.
+
 ### 2.10b Surface classes are two documented couplings, not ground cover
 
 A surface word (grassland / desert / ocean / forest / city, Phase 9.1)

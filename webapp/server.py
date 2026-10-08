@@ -262,6 +262,20 @@ def index() -> str:
     return (STATIC / "index.html").read_text(encoding="utf-8")
 
 
+@app.get("/altitude-guide")
+def altitude_guide_endpoint(ground_m: float = 0.0) -> JSONResponse:
+    """The altitude guide's data for ground at ``ground_m`` MSL: the
+    checkpoints above the ground with the number to ask for at each, the
+    reference heights and the aircraft's typical cruise (presentation
+    only; core.scenario.altitude_guide)."""
+    from core.scenario.altitude_guide import guide
+
+    if not (-500.0 <= ground_m <= 9000.0):
+        return JSONResponse({"error": "ground_m must be in [-500, 9000]"},
+                            status_code=400)
+    return JSONResponse(guide(ground_m))
+
+
 @app.post("/compile")
 def compile_endpoint(request: CompileRequest) -> JSONResponse:
     prompt = request.prompt.strip()
