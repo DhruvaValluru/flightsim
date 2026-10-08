@@ -3537,6 +3537,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// S4: the velocity cross-check's first captured frame has no previous
 	// one and writes zeros, saying so (the I6 flow's rule).
 	bool bVelocityCheckHasPrevious = false;
+	// The rain's camera velocity when no pose track gives one: the camera's
+	// displacement since the previous captured frame (zero on the first).
+	FVector RainPreviousCameraCm = FVector::ZeroVector;
+	double RainPreviousTime = -1.0;
 	for (int32 Step = 0; Step < Steps; ++Step)
 	{
 		const double Time = Step * DeltaSeconds;
@@ -3621,6 +3625,27 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Capture->FOVAngle = static_cast<float>(FMath::RadiansToDegrees(
 				2.0 * FMath::Atan(CameraSensorWidthMm /
 				                  (2.0 * Director->GetAppliedFocalLengthMm()))));
+		}
+
+		// The rain the camera sees (FlightSimRainParticles.cpp): every drop
+		// around THIS frame's camera at the FDM's time, before the render-
+		// state flush. The camera's velocity streaks them: the solved track's
+		// under consume-poses (a single still frame included), else the
+		// camera's motion since the previous captured frame.
+		if (bVisual && VisualScene.DrawsRainParticles())
+		{
+			const double RainNow = Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+			const FVector RainCameraCm = Capture->GetComponentLocation();
+			FVector RainCameraVelocity = FVector::ZeroVector;
+			if (!(bConsumePoses && Director->PoseVelocityAtTime(RainNow, RainCameraVelocity)) &&
+			    RainPreviousTime >= 0.0 && RainNow > RainPreviousTime)
+			{
+				RainCameraVelocity = (RainCameraCm - RainPreviousCameraCm) / (RainNow - RainPreviousTime);
+			}
+			RainPreviousCameraCm = RainCameraCm;
+			RainPreviousTime = RainNow;
+			VisualScene.AdvanceRain(RainNow, RainCameraCm, Capture->GetComponentRotation(),
+			                        RainCameraVelocity, Capture->FOVAngle, Width);
 		}
 
 		// Component render-state updates are queued and flushed at end of

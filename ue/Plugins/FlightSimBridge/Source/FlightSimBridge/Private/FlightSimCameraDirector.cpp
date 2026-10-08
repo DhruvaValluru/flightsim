@@ -187,6 +187,27 @@ bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
 	return true;
 }
 
+bool AFlightSimCameraDirector::PoseVelocityAtTime(double SimTimeSeconds,
+                                                  FVector& OutCmPerSecond) const
+{
+	const double Slack = 1.0e-6;
+	if (PoseTimes.Num() < 2 || SimTimeSeconds < PoseTimes[0] - Slack ||
+	    SimTimeSeconds > PoseTimes.Last() + Slack)
+	{
+		return false;
+	}
+	int32 Upper = 1;
+	while (Upper < PoseTimes.Num() - 1 && PoseTimes[Upper] < SimTimeSeconds)
+	{
+		++Upper;
+	}
+	const double Span = PoseTimes[Upper] - PoseTimes[Upper - 1];
+	OutCmPerSecond = Span > 0.0
+		? (PoseLocations[Upper] - PoseLocations[Upper - 1]) / Span
+		: FVector::ZeroVector;
+	return true;
+}
+
 bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
                                                FString& Error)
 {

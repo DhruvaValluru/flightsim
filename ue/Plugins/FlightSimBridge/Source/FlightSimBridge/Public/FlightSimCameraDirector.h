@@ -183,6 +183,14 @@ public:
 	// the stated tolerances.
 	bool ApplyPoseAtTime(double SimTimeSeconds, FString& Error);
 
+	// The solved track's velocity at SimTimeSeconds, engine units per
+	// second: the bracketing samples' displacement over their span -- the
+	// derivative of the linear interpolation ApplyPoseAtTime places the
+	// camera by, so it holds for a single still frame too. False with no
+	// track, or a time outside it (the same span ApplyPoseAtTime refuses).
+	// The rain's streaks read it (FlightSimRainParticles.cpp).
+	bool PoseVelocityAtTime(double SimTimeSeconds, FVector& OutCmPerSecond) const;
+
 	// The two applied-vs-solved tolerances, named rather than spelled
 	// inline, so a test can drive the decision at the exact boundary
 	// instead of asserting that a magic number appears in the source.

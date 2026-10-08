@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, Optional, Sequence
 
 from core.scenario.spec import ScenarioSpec
+from core.scene.rain_particles import particle_block as rain_particle_block
 from core.scene.weather_look import weather_look_card_block
 
 #: Sampling period asked of the UE recorder. Must match the period the headless
@@ -604,6 +605,12 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # look draws from (core/scene/weather_look.py); a spec stating none
         # of them writes no block.
         card["weather_look"] = weather_look
+        if weather_look["rain_rate_mmh"]:
+            # Visual only: the 3-D drops the beauty camera sees, from the
+            # same rate (core/scene/rain_particles.py; the host's
+            # FlightSimRainParticles.cpp draws them).
+            card["rain_particles"] = rain_particle_block(weather_look["rain_rate_mmh"],
+                                                         weather_look["seed"])
     if reference_speeds:
         # Display-only (the HUD/panel stall-margin marks): the MODEL's own
         # measured Vs and CLmax with their basis string (§2.4), so the marks

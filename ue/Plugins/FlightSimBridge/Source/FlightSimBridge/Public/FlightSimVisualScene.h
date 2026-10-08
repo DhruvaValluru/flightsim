@@ -99,6 +99,7 @@ class AGeoReferencingSystem;
 class ALandscapeProxy;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class UInstancedStaticMeshComponent;
 class UPointLightComponent;
 class UProceduralMeshComponent;
 class USceneCaptureComponent2D;
@@ -439,6 +440,33 @@ public:
 	// a storm seeded with Seed.
 	static double LightningFlash(double TimeSeconds, int32 Seed);
 
+	// -- the rain the camera sees (FlightSimRainParticles.cpp) ---------------
+	// The card's rain_particles block (core/scene/rain_particles.py): real
+	// 3-D drops, one instanced thin cylinder each, in a world-aligned box
+	// ahead of the camera, drawn on the beauty capture only (a beauty-only
+	// actor: the label captures never see it). Each drop's diameter is drawn
+	// from the block's truncated Marshall-Palmer law with the block's seed,
+	// its fall speed from the Atlas law. A card without the block changes
+	// nothing; a missing mesh or material is recorded, never refused.
+	// Called by Build after the weather look.
+	bool ApplyRainParticles(UWorld* World, const FFlightSimVisualSceneOptions& Options,
+	                        FString& Error);
+	// Per captured frame, after the camera is placed: every drop at the
+	// FDM's time (world-fixed, falling, wrapped into the box around this
+	// camera), drawn as its motion relative to the camera over the block's
+	// streak exposure, at least MinWidthPx wide at its range with its
+	// opacity scaled by the share of that width the drop covers.
+	// Deterministic in TimeSeconds and the camera's pose and velocity.
+	void AdvanceRain(double TimeSeconds, const FVector& CameraLocationCm,
+	                 const FRotator& CameraRotation, const FVector& CameraVelocityCmPerS,
+	                 double HorizontalFovDeg, int32 WidthPx);
+	bool DrawsRainParticles() const { return RainDrops != nullptr; }
+	// The truncated exponential's inverse CDF (core/scene/rain_particles.py
+	// diameter_mm, pinned by test): U in [0, 1) -> D in [DMinMm, DMaxMm].
+	static double RainDropDiameterMm(double U, double LambdaPerMm, double DMinMm, double DMaxMm);
+	// Value wrapped into [-Half, Half): the box's toroidal wrap.
+	static double RainWrap(double Value, double Half);
+
 	// The moon light's rotation from the card's elevation and COMPASS azimuth:
 	// the sun's convention (core/scenario/randomization.py engine_sun_azimuth:
 	// the yaw toward a compass bearing b is 90 - b; the light travels 180
@@ -507,6 +535,17 @@ private:
 	double IceOnsetSeconds = 0.0;
 	double IceRampSeconds = 0.0;
 	int32 WeatherSeed = 0;
+	// The rain particles' state (FlightSimRainParticles.cpp).
+	UInstancedStaticMeshComponent* RainDrops = nullptr;
+	TArray<FVector> RainOriginsCm;
+	TArray<double> RainDiametersMm;
+	TArray<double> RainFallCmPerS;
+	TArray<FTransform> RainTransforms;
+	TArray<float> RainCoverage;
+	double RainBoxCm = 0.0;
+	double RainNearCm = 0.0;
+	double RainExposureS = 0.0;
+	double RainMinWidthPx = 1.0;
 	// W5: the scene document (-scene=), parsed once in Build.
 	TSharedPtr<FJsonObject> SceneDocument;
 

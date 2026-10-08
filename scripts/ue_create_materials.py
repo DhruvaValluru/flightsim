@@ -1702,6 +1702,10 @@ def create_terrain_imagery_night():
 #   FlashIntensity 0.
 # * M_IceOverlay -- translucent overlay (UMeshComponent::SetOverlayMaterial)
 #   on the airframe: frost on the forward-facing surfaces, IceAmount 0..1.
+# * M_RainDrop -- the 3-D rain (FlightSimRainParticles.cpp): lit translucent
+#   water on the instanced drop cylinders, its opacity DropOpacity x the
+#   instance's custom float 0 (the share of the drawn width the drop
+#   covers), so a sub-pixel drop adds only its own light.
 
 WET_GROUND_PARAMETER = "Wetness"
 GROUND_TILE_M = 12.0
@@ -1722,6 +1726,11 @@ GROUND_SURFACES = {
 OCEAN_WAVES = ((1.0, 0.3, 40.0, 0.35, 7.9), (-0.4, 1.0, 13.0, 0.12, 4.5))
 WEATHER_PARAMETERS = {"drops": "DropAmount", "shaft": "ShaftOpacity",
                       "flash": "FlashIntensity", "ice": "IceAmount"}
+#: M_RainDrop's parameters, by the names FlightSimRainParticles.cpp sets.
+RAIN_DROP_PARAMETERS = ("DropOpacity",)
+#: The drop's water: a pale grey-blue base, nearly mirror-smooth (stated).
+RAIN_DROP_COLOUR = (0.62, 0.66, 0.70)
+RAIN_DROP_ROUGHNESS = 0.08
 
 
 def _weather_material(name):
@@ -2053,6 +2062,38 @@ def create_lightning():
     finish(material, "M_Lightning")
 
 
+def create_rain_drop():
+    """M_RainDrop: translucent, lit per pixel (the sun's glint and the
+    sky's fill reach each drop), used with instanced static meshes;
+    base colour RAIN_DROP_COLOUR, roughness RAIN_DROP_ROUGHNESS, opacity =
+    DropOpacity x PerInstanceCustomData[0] (1 where a mesh carries none)."""
+    material = _weather_material("M_RainDrop")
+    if material is None:
+        return
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    lighting = getattr(unreal.TranslucencyLightingMode, "TLM_SURFACE_PER_PIXEL_LIGHTING", None)
+    if lighting is not None:
+        material.set_editor_property("translucency_lighting_mode", lighting)
+    material.set_editor_property("used_with_instanced_static_meshes", True)
+    lib = unreal.MaterialEditingLibrary
+    lib.connect_material_property(constant3(material, lib, RAIN_DROP_COLOUR, -600, 0), "",
+                                  unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(constant(material, lib, RAIN_DROP_ROUGHNESS, -600, 150), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
+    opacity = scalar(material, lib, RAIN_DROP_PARAMETERS[0], 0.55, -900, 300)
+    coverage = lib.create_material_expression(
+        material, unreal.MaterialExpressionPerInstanceCustomData, -900, 450)
+    coverage.set_editor_property("data_index", 0)
+    try:
+        coverage.set_editor_property("const_default_value", 1.0)
+    except Exception:   # an engine without the property: every drop sets the float anyway
+        print("M_RainDrop: PerInstanceCustomData has no const_default_value; left at its default")
+    lib.connect_material_property(
+        binary(material, lib, unreal.MaterialExpressionMultiply, opacity, coverage, -600, 350),
+        "", unreal.MaterialProperty.MP_OPACITY)
+    finish(material, "M_RainDrop")
+
+
 def create_ice_overlay():
     """M_IceOverlay: translucent, lit, rough-ish blue-white frost; opacity =
     IceAmount x (0.25 + 0.75 x the forward-facing share of the surface: the
@@ -2137,5 +2178,6 @@ create_lens_drops()
 create_rain_shaft()
 create_lightning()
 create_ice_overlay()
+create_rain_drop()
 if _FAILED:
     raise SystemExit(f"materials not created: {', '.join(_FAILED)}")

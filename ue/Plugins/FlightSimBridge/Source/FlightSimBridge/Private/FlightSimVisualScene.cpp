@@ -905,6 +905,12 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	{
 		return false;
 	}
+	// -- the rain the camera sees (FlightSimRainParticles.cpp): 3-D drops,
+	// beauty-only; a card without a rain_particles block changes nothing.
+	if (!ApplyRainParticles(World, Options, Error))
+	{
+		return false;
+	}
 
 	// Precipitation is applied to the georeferenced terrain material below;
 	// until (and unless) that runs, the record says it drove nothing.
@@ -912,9 +918,10 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		TSharedPtr<FJsonObject> PrecipRecord = NewRecord();
 		PrecipRecord->SetStringField(TEXT("precipitation"), Options.Precipitation);
 		PrecipRecord->SetNumberField(TEXT("wetness"), Options.Wetness);
-		PrecipRecord->SetBoolField(TEXT("particles"), false);
-		PrecipRecord->SetStringField(TEXT("particles_note"),
-			TEXT("not drawn this phase: no Niagara rain/snow asset exists in ue/Content"));
+		PrecipRecord->SetBoolField(TEXT("particles"), DrawsRainParticles());
+		PrecipRecord->SetStringField(TEXT("particles_note"), DrawsRainParticles()
+			? TEXT("3-D drops: look_applied.rain_particles (FlightSimRainParticles.cpp)")
+			: TEXT("not drawn: the card carries no rain_particles block, or its mesh or material is absent"));
 		PrecipRecord->SetStringField(TEXT("wetness_parameter"), TEXT("absent"));
 		PrecipRecord->SetStringField(TEXT("wetness_applied_to"),
 			TEXT("nothing: no terrain material instance in this scene"));
@@ -1227,9 +1234,10 @@ UMaterialInterface* FFlightSimVisualScene::ApplyWetness(
 	TSharedPtr<FJsonObject> PrecipRecord = NewRecord();
 	PrecipRecord->SetStringField(TEXT("precipitation"), Options.Precipitation);
 	PrecipRecord->SetNumberField(TEXT("wetness"), Options.Wetness);
-	PrecipRecord->SetBoolField(TEXT("particles"), false);
-	PrecipRecord->SetStringField(TEXT("particles_note"),
-		TEXT("not drawn this phase: no Niagara rain/snow asset exists in ue/Content"));
+	PrecipRecord->SetBoolField(TEXT("particles"), DrawsRainParticles());
+	PrecipRecord->SetStringField(TEXT("particles_note"), DrawsRainParticles()
+		? TEXT("3-D drops: look_applied.rain_particles (FlightSimRainParticles.cpp)")
+		: TEXT("not drawn: the card carries no rain_particles block, or its mesh or material is absent"));
 	PrecipRecord->SetStringField(TEXT("component"),
 		TEXT("Wetness scalar on the georeferenced terrain material instance"));
 
@@ -2420,7 +2428,8 @@ bool FFlightSimVisualScene::BuildWorldLook(UWorld* World,
 		                          TEXT("cloud_drift"), TEXT("sea_state"), TEXT("foliage_sway")})
 		{
 			const FString Word(Name);
-			const bool bDrawn = (Word == TEXT("moon") && Moon != nullptr) ||
+			const bool bDrawn = (Word == TEXT("precipitation_particles") && DrawsRainParticles()) ||
+			                    (Word == TEXT("moon") && Moon != nullptr) ||
 			                    (Word == TEXT("stars") && Starfield != nullptr) ||
 			                    (Word == TEXT("cloud_drift") && bDrifting);
 			if (!bDrawn)
