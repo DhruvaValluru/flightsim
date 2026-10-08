@@ -71,8 +71,9 @@ from ..scenario.spec import ScenarioSpec
 from ..terrain.glo30 import LOCATIONS
 from .compiler import (MOVE_KINDS, RANDOMIZATION_FAMILIES, TURBULENCE_STD,
                        TURBULENCE_WORDS, apply_mountain_scene, apply_moves,
-                       apply_randomization_phrases, compile_prompt,
-                       prompt_moves, _name_from)
+                       apply_randomization_phrases, apply_stated_offset,
+                       compile_prompt, prompt_moves, stated_camera_offset,
+                       _name_from)
 
 #: The model the compiler asks for. Recorded verbatim in the result so the
 #: manifest can say which model produced the spec.
@@ -806,6 +807,9 @@ prompt has no camera or capture language):
 - Placement of a chase or wingman view is an offset in the PRIMARY
   aircraft's heading frame: offset_forward_m (negative = behind),
   offset_right_m (negative = left), offset_up_m (negative = below).
+  An exact position, "camera <a> m behind|ahead, <b> m left|right, <c> m
+  above|below the aircraft", is a chase view at exactly those offsets,
+  source "user"; its metres are never the altitude or any other field.
   Write offsets ONLY when the prompt places the camera ("low and behind",
   "off the left wing", "from above", "300 m back"); otherwise omit them
   and the calibrated framing applies. Scale every unstated distance to
@@ -1622,6 +1626,11 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
     # aircraft and terrain datum.
     duration_s = float(spec.duration.value)
     model_moves = False
+    # An exact camera position the prompt states ("camera 110 m behind,
+    # 0 m right, 12 m above the aircraft", the page's 3D sample frame)
+    # is the user's, like a stated heading: it overrules the model's
+    # offsets, before any move keyframes are built from them.
+    stated_offset = stated_camera_offset(prompt)
     for index, block in enumerate(payload["cameras"]):
         preset_entry = block.get("preset")
         preset = str(preset_entry["value"]) if preset_entry else "chase"
@@ -1670,6 +1679,8 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                 source={"user": Source.USER, "inferred": Source.INFERRED,
                         "model": Source.MODEL}[entry["source"]],
                 frm=entry["from"].strip()))
+        if stated_offset is not None:
+            apply_stated_offset([camera], stated_offset, spec.notes)
         # A bearing aim with no bearing looks along the flight path.
         if str(camera.aim_mode.value) == "bearing" \
                 and "aim_bearing_deg" not in block:
@@ -1695,7 +1706,7 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
     # for randomization phrases. A move word with no camera earns the
     # documented default view, exactly as on the regex tier.
     stated = [] if model_moves else prompt_moves(prompt)
-    if stated and not spec.cameras:
+    if (stated or stated_offset is not None) and not spec.cameras:
         camera = CameraSpec.defaulted(
             camera_id="camera0", preset="chase",
             aircraft=str(spec.aircraft.value),
@@ -1703,6 +1714,8 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
             frm="a camera move in the prompt; documented camera default")
         plan_full_capture(camera, frm="a view named in the prompt with "
                                       "no count captures the whole clip")
+        if stated_offset is not None:
+            apply_stated_offset([camera], stated_offset, spec.notes)
         spec.cameras.append(camera)
     for camera in spec.cameras:
         apply_moves(camera, stated, duration_s, spec.notes)

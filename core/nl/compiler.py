@@ -797,6 +797,52 @@ OFFSET_PRESETS = ("chase", "wingman")
 MOVE_KINDS: Tuple[str, ...] = tuple(dict.fromkeys(k for _, k in MOVE_WORDS))
 
 
+#: The exact camera position the page's 3D sample frame writes ("camera
+#: 110 m behind, 0 m right, 12 m above the aircraft"): the chase /
+#: wingman offset in the aircraft's heading frame (forward, right, up
+#: metres -- the same frame as CHASE_OFFSETS), every number user-stated.
+CAMERA_OFFSET_PHRASE = re.compile(
+    r"\bcamera\s+(?:at\s+)?(\d+(?:\.\d+)?)\s*m\s+(behind|ahead|in front)"
+    r"\s*,?\s*(\d+(?:\.\d+)?)\s*m\s+(?:to the\s+)?(left|right)"
+    r"\s*,?\s*(?:and\s+)?(\d+(?:\.\d+)?)\s*m\s+(above|below)",
+    re.IGNORECASE)
+
+
+def stated_camera_offset(text: str) -> Optional[Tuple[float, float, float, str]]:
+    """(forward_m, right_m, up_m, phrase) when the prompt states the
+    camera's exact position, else None."""
+    m = CAMERA_OFFSET_PHRASE.search(" ".join(text.split()))
+    if not m:
+        return None
+
+    def signed(value: str, negative: bool) -> float:
+        number = float(value)
+        return (-number if negative else number) + 0.0    # never -0.0
+
+    return (signed(m.group(1), m.group(2).lower() == "behind"),
+            signed(m.group(3), m.group(4).lower() == "left"),
+            signed(m.group(5), m.group(6).lower() == "below"),
+            m.group(0).strip())
+
+
+def apply_stated_offset(cameras, offset, notes: List[str]) -> None:
+    """Put a stated camera position on every camera that follows at an
+    offset (chase, wingman); any other view says by name why it cannot
+    take one."""
+    forward, right, up, phrase = offset
+    for camera in cameras:
+        preset = str(camera.preset.value)
+        if preset not in OFFSET_PRESETS:
+            notes.append(f"{phrase!r} not applied to the {preset} view -- "
+                         f"only the chase and wingman views follow at an "
+                         f"offset")
+            continue
+        for name, value in (("offset_forward_m", forward),
+                            ("offset_right_m", right),
+                            ("offset_up_m", up)):
+            setattr(camera, name, Quantity.user(value, "m", frm=phrase))
+
+
 def camera_questions(prompt: str) -> List[Dict[str, Any]]:
     """The regex path's clarifying questions, or []: the aircraft when
     the prompt names a kind of aircraft or a name the vocabulary lacks
@@ -808,7 +854,8 @@ def camera_questions(prompt: str) -> List[Dict[str, Any]]:
     asked = aircraft_question(text)
     if asked is not None:
         questions.append(asked)
-    if _view_mentions(text):
+    if _view_mentions(text) or stated_camera_offset(text):
+        # A stated camera position is the following (chase) view.
         return questions
     if not any(_search(rf"\b{word}\b", text) for word in IMAGERY_WORDS):
         return questions
@@ -994,9 +1041,10 @@ def _cameras(text: str, aircraft: str, terrain_elevation_m: float,
                                   f"85 mm)")
                 break
     moves = prompt_moves(text)
+    offset = stated_camera_offset(text)
     imagery = any(_search(rf"\b{word}\b", text) for word in IMAGERY_WORDS)
     if not mentions and count is None and focal_quantity is None \
-            and not moves and not imagery:
+            and not moves and not imagery and offset is None:
         return [], notes
     if not mentions:
         # Imagery, a count, a lens or a move with no view: the documented
@@ -1024,6 +1072,8 @@ def _cameras(text: str, aircraft: str, terrain_elevation_m: float,
                                           "no count captures the whole clip")
         if focal_quantity is not None:
             camera.focal_length_mm = focal_quantity
+        if offset is not None:
+            apply_stated_offset([camera], offset, notes)
         apply_moves(camera, moves, duration_s, notes)
         cameras.append(camera)
     return cameras, notes
@@ -1376,6 +1426,11 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
     # The second aircraft's clause leaves the text first: its airframe
     # is not the primary and its range is not an altitude.
     traffic, text = _traffic(text)
+    # An exact camera position ("camera 110 m behind, 0 m right, 12 m
+    # above the aircraft") leaves next: its metres are not an altitude.
+    # The camera parser reads it from the text it was in.
+    camera_text = text
+    text = " ".join(CAMERA_OFFSET_PHRASE.sub(" ", text).split())
     aircraft = _aircraft(text, answers)
     model = str(aircraft.value)
 
@@ -1435,7 +1490,7 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
             f"second aircraft")
 
     cameras, camera_notes = _cameras(
-        text, str(spec.aircraft.value), float(spec.terrain_elevation.value),
+        camera_text, str(spec.aircraft.value), float(spec.terrain_elevation.value),
         float(spec.duration.value), answers=answers)
     if cameras:
         spec.cameras = cameras
