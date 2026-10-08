@@ -978,6 +978,15 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
     # absent traffic list what [] does.
     payload.setdefault("randomization", {})
     payload.setdefault("traffic", [])
+    # A section stated EMPTY in the wrong empty shape -- null, or [] for
+    # the randomization mapping -- claims what absence does (measured
+    # 2026-10-08 on the relay: "'randomization' is not an object of
+    # policy leaves" on a prompt with no variation language). A non-empty
+    # section of the wrong shape still refuses below.
+    for key, empty in (("notes", []), ("questions", []), ("cameras", []),
+                       ("traffic", []), ("randomization", {})):
+        if payload[key] is None or payload[key] == []:
+            payload[key] = empty
     if set(payload) != set(RESPONSE_TOP_LEVEL_KEYS):
         raise _fail(f"top-level keys {sorted(payload)} != "
                     f"{sorted(RESPONSE_TOP_LEVEL_KEYS)}")
@@ -1216,7 +1225,8 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
     # -- randomization (spec 8): every rail strict, shape by name ------
     randomization = payload["randomization"]
     if not isinstance(randomization, dict):
-        raise _fail("'randomization' is not an object of policy leaves")
+        raise _fail(f"'randomization' is not an object of policy leaves "
+                    f"(the model sent {json.dumps(randomization)[:200]})")
     from ..scenario.validate import policy_problems
 
     for name in [n for n, e in list(randomization.items())
