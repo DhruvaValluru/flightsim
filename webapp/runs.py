@@ -1534,7 +1534,9 @@ def xplane_lighting_flags(look: Optional[Dict],
     if look:
         tod.update({key: look[key] for key in DEFAULT_LOOK if key in look})
     sun_elev, sun_azim = float(tod["sun_elev"]), float(tod["sun_azim"])
-    if look == STORM_LOOK:
+    rained = float(((look or {}).get("lighting") or {}).get("rain_look_mmh") or 0.0)
+    if look == STORM_LOOK or rained >= 4.0:
+        # The storm look, or rain heavy enough to be under a full cloud deck.
         condition = "ocast"
     elif float(tod["fog_density"]) >= XPLANE_HAZY_FOG_DENSITY:
         condition = "hazy"
@@ -1999,16 +2001,45 @@ def lighting_look(spec: ScenarioSpec, base: Optional[Dict] = None) -> Optional[D
     from core.scene import lighting
 
     block = getattr(spec, "lighting", None)
-    if block is None or block.is_default():
+    rate = rain_rate(spec)
+    if (block is None or block.is_default()) and rate is None:
         return None
     start = dict(DEFAULT_LOOK)
     if base:
         start.update({key: base[key] for key in DEFAULT_LOOK if key in base})
-    look = lighting.apply(start, lighting.stated_values(block),
-                          lambda elevation: exposure_bias_for(elevation)[0])
+    stated = lighting.stated_values(block) if block is not None else {}
+    if rate is not None:
+        # Rain falls from cloud: the knobs the lighting block leaves open
+        # take the rain look (core/scene/lighting.py RAIN_ANCHORS).
+        stated = lighting.with_rain(stated, rate, start["fog_density"])
+    look = lighting.apply(start, stated, lambda elevation: exposure_bias_for(elevation)[0])
+    if rate is not None:
+        look["lighting"]["rain_look_mmh"] = rate
+        look["note"] = f"rain look for {rate:g} mm/h; {look['note']}"
     if base and base.get("note"):
         look["note"] = f"{look['note']}; on top of: {base['note']}"
     return look
+
+
+#: The rain look a storm (thunderstorm, tornado) takes when no rain rate
+#: is stated: storms rain, and without it the storm rendered under a full
+#: sun. LIGHTING ONLY -- no streaks, no extinction record; a stated rate
+#: replaces it everywhere.
+STORM_RAIN_LOOK_MMH = 8.0
+
+
+def rain_rate(spec: ScenarioSpec) -> Optional[float]:
+    """The rain rate (mm/h) the look is lit for: the stated one, else
+    :data:`STORM_RAIN_LOOK_MMH` under a storm, else None."""
+    value = getattr(getattr(spec, "precipitation_rate_mmh", None), "value", None)
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        rate = 0.0
+    if rate > 0.0:
+        return rate
+    event = str(getattr(getattr(spec, "weather_event", None), "value", "none"))
+    return STORM_RAIN_LOOK_MMH if event in ("thunderstorm", "tornado") else None
 
 
 def physical_sky_enabled(spec: ScenarioSpec) -> bool:
@@ -3051,7 +3082,7 @@ class RunManager:
         run.reference = reference
         # The lighting block, as render_look_for applies it (or why not).
         lighting_note = None
-        if not spec.lighting.is_default():
+        if not spec.lighting.is_default() or rain_rate(spec) is not None:
             if physical_sky_enabled(spec):
                 lighting_note = ("lighting block NOT applied: the physical sky "
                                  "lights the scene itself")

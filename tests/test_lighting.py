@@ -258,3 +258,46 @@ def test_the_sun_dial_shows_the_camera_and_the_flight_direction_and_drags():
                    'data-vslider="distance"', "writing-mode:vertical-lr",
                    "const VIEW_MIN_MM = 4"):
         assert anchor in page, anchor
+
+
+def test_rain_dims_softens_and_hazes_the_light_and_a_stated_choice_still_wins():
+    """Measured on the owner's machine: "heavy rain" rendered a clear,
+    sunny day (no haze, full sun). A stated rain rate now lights the
+    scene as rain does; a preset or knob the person set wins over it."""
+    import webapp.runs as runs
+
+    spec = compile_prompt("tower view of the a320 at 1000 m in heavy rain for 6 seconds")
+    assert spec.precipitation_rate_mmh.value == 10.0
+    look = runs.render_look_for(spec, None)
+    assert look["sun_intensity_scale"] == pytest.approx(0.25)
+    assert look["fog_density"] == pytest.approx(0.012)
+    assert look["sky_light_scale"] > 1.0 and look["sun_source_angle_deg"] > 10.0
+    assert look["lighting"]["rain_look_mmh"] == 10.0 and look["note"].startswith("rain look")
+    light = runs.render_look_for(compile_prompt(
+        "chase view of the c172p over mount fuji at sunrise in light rain for 6 seconds"), None)
+    assert look["sun_intensity_scale"] < light["sun_intensity_scale"] < 1.0      # heavier = dimmer
+    spec.set("lighting.preset", "sunny")
+    sunny = runs.render_look_for(spec, None)
+    assert sunny["sun_intensity_scale"] == lighting.PRESETS["sunny"]["sun_intensity"]
+    spec.set("lighting.sky_fill", 0.5)
+    assert runs.render_look_for(spec, None)["sky_light_scale"] == 0.5
+
+
+def test_a_storm_rains_on_the_look_without_a_stated_rate():
+    import webapp.runs as runs
+
+    spec = compile_prompt("chase view of the 747 flying west through a thunderstorm at 2000 m")
+    assert runs.rain_rate(spec) == runs.STORM_RAIN_LOOK_MMH
+    look = runs.render_look_for(spec, "thunderstorm")
+    assert look["sun_intensity_scale"] < 0.5
+    assert look["fog_density"] >= runs.STORM_LOOK["fog_density"]                 # never thinner
+    assert runs.rain_rate(compile_prompt("fly the 747 at 3000 m")) is None
+
+
+def test_the_rain_look_is_interpolated_and_held():
+    assert lighting.rain_knobs(10.0) == lighting.RAIN_ANCHORS[3][1]
+    assert lighting.rain_knobs(500.0) == lighting.RAIN_ANCHORS[-1][1]
+    middle = lighting.rain_knobs(2.0)
+    assert lighting.RAIN_ANCHORS[2][1]["sun_intensity"] < middle["sun_intensity"] \
+        < lighting.RAIN_ANCHORS[1][1]["sun_intensity"]
+    assert lighting.problems(lighting.rain_knobs(30.0)) == []

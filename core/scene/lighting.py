@@ -206,6 +206,61 @@ def apply(base: Mapping[str, Any], stated: Mapping[str, Any],
     return look
 
 
+#: The rain look: the engine knobs a stated rain rate implies, at anchor
+#: rates (mm/h). Rain falls from cloud, so the sun dims, the shadows soften
+#: and fill from the sky, the light cools and the air thickens; between the
+#: anchors the knobs are interpolated on log(rate), and held beyond them.
+#: Measured on the owner's machine before this: "heavy rain" (10 mm/h)
+#: rendered a clear, sunny day -- the rain's extinction reached the render
+#: only through the randomisation block, and its streaks are sub-pixel at
+#: the default 1/500 s shutter. Chosen by eye like the presets, NOT a
+#: radiative model of a raining sky; a stated lighting value or preset
+#: still wins over it.
+RAIN_ANCHORS = (
+    (0.1, {"sun_intensity": 0.85, "sky_fill": 1.1, "color_temperature_k": 6300.0,
+           "shadow_softness_deg": 1.5, "haze": 0.002, "brightness_ev": -0.2}),
+    (1.0, {"sun_intensity": 0.6, "sky_fill": 1.3, "color_temperature_k": 6600.0,
+           "shadow_softness_deg": 4.0, "haze": 0.0035, "brightness_ev": -0.2}),
+    (4.0, {"sun_intensity": 0.4, "sky_fill": 1.5, "color_temperature_k": 6800.0,
+           "shadow_softness_deg": 12.0, "haze": 0.007, "brightness_ev": -0.1}),
+    (10.0, {"sun_intensity": 0.25, "sky_fill": 1.6, "color_temperature_k": 7000.0,
+            "shadow_softness_deg": 25.0, "haze": 0.012, "brightness_ev": 0.0}),
+    (30.0, {"sun_intensity": 0.15, "sky_fill": 1.7, "color_temperature_k": 7200.0,
+            "shadow_softness_deg": 35.0, "haze": 0.02, "brightness_ev": 0.1}),
+)
+
+
+def rain_knobs(rate_mmh: float) -> Dict[str, float]:
+    """The rain look's knobs for a rain rate (mm/h), interpolated on
+    log(rate) between :data:`RAIN_ANCHORS` and held beyond them."""
+    import math
+
+    rate = float(rate_mmh)
+    if rate <= RAIN_ANCHORS[0][0]:
+        return dict(RAIN_ANCHORS[0][1])
+    for (r0, k0), (r1, k1) in zip(RAIN_ANCHORS, RAIN_ANCHORS[1:]):
+        if rate <= r1:
+            t = (math.log(rate) - math.log(r0)) / (math.log(r1) - math.log(r0))
+            return {name: round(k0[name] + t * (k1[name] - k0[name]),
+                                0 if name == "color_temperature_k" else 5 if name == "haze" else 2)
+                    for name in k0}
+    return dict(RAIN_ANCHORS[-1][1])
+
+
+def with_rain(stated: Mapping[str, Any], rate_mmh: float, base_fog: float) -> Dict[str, Any]:
+    """``stated`` with every knob it (or its preset) leaves open filled
+    from the rain look; the haze never thins the air below ``base_fog``
+    (a storm look's own fog stays)."""
+    open_knobs = effective_values(stated)
+    out = dict(stated)
+    for name, value in rain_knobs(rate_mmh).items():
+        if name == "haze":
+            value = max(value, float(base_fog))
+        if open_knobs.get(name) is None:
+            out[name] = round(value, 5)
+    return out
+
+
 def problems(stated: Mapping[str, Any]) -> list:
     """(kind, message) for every stated value the render cannot take:
     ``"preset"`` for an unknown preset word, ``"range"`` for a number out
