@@ -86,3 +86,9 @@ def test_the_clip_selector_applies_after_interpret():
     page = (STATIC / "index.html").read_text(encoding="utf-8")
     assert '$("clipSeconds").addEventListener("change"' in page
     assert 'setRow("duration", seconds);' in page
+
+
+def test_the_picker_zooms_out_to_6_mm():
+    """The owner asked to zoom out further: 6 mm is ~143 deg across."""
+    assert "const MIN_MM = 6;" in SCRIPT
+    assert "[6, \"widest\"]" in SCRIPT

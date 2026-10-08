@@ -20,9 +20,9 @@
 const DEFAULT_FOCAL_MM = 35.0;
 const SENSOR_W_MM = 36.0;
 const SENSOR_H_MM = 20.25;
-const MIN_MM = 12;
+const MIN_MM = 6;
 const MAX_MM = 400;
-const STOPS = [[18, "wide"], [24, ""], [35, "default"], [50, ""],
+const STOPS = [[6, "widest"], [10, ""], [18, "wide"], [24, ""], [35, "default"], [50, ""],
                [85, "tele"], [135, ""], [200, ""], [400, "long"]];
 const CHASE_OFFSETS = {
   "B747": [-110.0, 0.0, 12.0],

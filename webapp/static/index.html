@@ -652,6 +652,13 @@ function showTerrainPrefetch(status) {
 let lightingPresets = {presets: {}, ranges: {}};
 let lightStep = 5;
 let viewStep = 15;
+//: The camera panel's zoom slider range (mm): 6 mm is ~143 deg across on
+//: the 36 mm sensor, 400 mm ~5 deg. Typing a value outside it still works.
+const VIEW_MIN_MM = 6, VIEW_MAX_MM = 400;
+//: The distance slider's range (m), for pulling the camera back.
+const VIEW_MIN_M = 5, VIEW_MAX_M = 5000;
+const toLog = (v, lo, hi) => 1000 * Math.log(clamp(v, lo, hi) / lo) / Math.log(hi / lo);
+const fromLog = (t, lo, hi) => lo * Math.pow(hi / lo, t / 1000);
 
 const LIGHTING_LABELS = {
   natural: "Natural", sunny: "Sunny", super_bright: "Super bright",
@@ -757,12 +764,14 @@ function renderLightingPanel() {
 
   holder.innerHTML =
     `<h3>Lighting</h3>` +
-    `<div class="dim">Pick a look, then aim the sun: click the sky dial ` +
+    `<div class="dim">Pick a look, then aim the sun: drag it on the sky dial ` +
     `(centre = straight overhead, edge = the horizon) or type exact degrees. ` +
+    `<b>C</b> is the camera and the arrow is where the aircraft flies, so you can ` +
+    `put the light behind the camera, beside it or behind the aircraft. ` +
     `What you set here is written into the <b>lighting</b> rows of the table.</div>` +
     `<div class="ctl">${presetButtons}</div>` +
     `<div class="panelRow">` +
-    `<div class="panelCol" style="flex:0 0 220px">${sunDialSvg(azimuth, elevation, heading, timeOfDay)}</div>` +
+    `<div class="panelCol" style="flex:0 0 220px">${sunDialSvg()}</div>` +
     `<div class="panelCol">` +
     `<div class="ctl"><label>light comes from</label>` +
     `<button class="nudge" data-laznudge="-1" title="swing the sun anticlockwise">&#9664;</button>` +
@@ -863,22 +872,92 @@ function renderLightingPanel() {
     setRow("lighting.sun_elevation_deg", text === "" ? null : clamp(Number(text), 2, 90));
     renderLightingPanel();
   });
-  const dial = $("sunDial");
-  dial.addEventListener("click", event => {
-    // Screen -> sky: angle from north (clockwise) is where the light comes
-    // FROM; distance from the centre is 90 deg minus the sun's height.
-    const box = dial.getBoundingClientRect();
-    const x = (event.clientX - box.left) * (200 / box.width) - 100;
-    const y = (event.clientY - box.top) * (200 / box.height) - 100;
-    const r = Math.min(Math.hypot(x, y), 88);
-    setRow("lighting.sun_azimuth_deg", Math.round(wrap360(deg(Math.atan2(x, -y)))));
-    setRow("lighting.sun_elevation_deg", Math.round(clamp(90 * (1 - r / 88), 2, 90)));
-    renderLightingPanel();
-  });
+  attachSunDialDrag($("sunDial"));
 }
 
-function sunDialSvg(azimuth, elevation, heading, timeOfDay) {
+// The first camera that follows the aircraft at an offset: the one the
+// sun dial shows as "C", so the light can be set against the view.
+function followingCamera() {
+  for (const cam of ((compiled && compiled.spec.cameras) || [])) {
+    const i = cam.index;
+    const preset = String(rowValue(`cameras[${i}].preset`) || cam.preset);
+    if (["chase", "wingman"].includes(preset) &&
+        rowValue(`cameras[${i}].position_mode`) === "offset" &&
+        rowValue(`cameras[${i}].aim_mode`) === "aircraft") {
+      return {index: i, id: cam.camera_id, orbit: cameraOrbit(i)};
+    }
+  }
+  return null;
+}
+
+// Pointer -> (compass bearing, height angle) on a sky dial: angle from
+// north clockwise; distance from the centre is 90 deg minus the height.
+function dialSky(svg, event, size, radius) {
+  const box = svg.getBoundingClientRect();
+  const x = (event.clientX - box.left) * (size / box.width) - size / 2;
+  const y = (event.clientY - box.top) * (size / box.height) - size / 2;
+  const r = Math.min(Math.hypot(x, y), radius);
+  return {bearing: wrap360(deg(Math.atan2(x, -y))), height: 90 * (1 - r / radius),
+          x, y};
+}
+
+function attachSunDialDrag(svg) {
+  // Press on the C to swing the camera around the aircraft; press
+  // anywhere else to put the sun there and drag it. While dragging only
+  // the dial redraws (the panel re-renders on release), so the pointer
+  // stays captured.
+  let dragging = null;
+  const move = event => {
+    const sky = dialSky(svg, event, 200, 88);
+    if (dragging === "sun") {
+      setRow("lighting.sun_azimuth_deg", Math.round(sky.bearing));
+      setRow("lighting.sun_elevation_deg", Math.round(clamp(sky.height, 2, 90)));
+    } else if (dragging) {
+      const o = cameraOrbit(dragging.index);
+      const heading = Number(rowValue("heading")) || 0;
+      setCameraOrbit(dragging.index, Math.round(wrap360(sky.bearing - heading)),
+                     Math.round(clamp(sky.height, 0, 85)), o.distance);
+    }
+    svg.innerHTML = sunDialInner();
+  };
+  svg.addEventListener("pointerdown", event => {
+    const camera = followingCamera();
+    const at = svg.querySelector("[data-camera-marker]");
+    if (camera && at) {
+      const sky = dialSky(svg, event, 200, 88);
+      const mx = +at.dataset.x - 100, my = +at.dataset.y - 100;
+      if (Math.hypot(sky.x - mx, sky.y - my) <= 13) dragging = camera;
+    }
+    dragging = dragging || "sun";
+    svg.setPointerCapture(event.pointerId);
+    move(event);
+  });
+  svg.addEventListener("pointermove", event => { if (dragging) move(event); });
+  const end = () => {
+    if (!dragging) return;
+    const camera = dragging !== "sun";
+    dragging = null;
+    renderLightingPanel();
+    if (camera) renderViewPanel();
+  };
+  svg.addEventListener("pointerup", end);
+  svg.addEventListener("pointercancel", end);
+}
+
+function sunDialSvg() {
+  return `<svg id="sunDial" class="dial" viewBox="0 0 200 200" width="200" height="200" ` +
+    `role="img" aria-label="sun position dial" style="touch-action:none">` +
+    sunDialInner() + `</svg>` +
+    `<div class="dim" style="font-size:.85em">drag the sun &middot; drag ` +
+    `<b>C</b> to move the camera &middot; arrow = where the aircraft flies</div>`;
+}
+
+function sunDialInner() {
   const cx = 100, cy = 100, R = 88;
+  const azimuth = rowValue("lighting.sun_azimuth_deg");
+  const elevation = lightingKnob("sun_elevation_deg");
+  const heading = Number(rowValue("heading")) || 0;
+  const timeOfDay = String(rowValue("time_of_day") ?? "none");
   const point = (az, el) => {
     const r = R * (1 - clamp(el, 0, 90) / 90);
     return [cx + r * Math.sin(rad(az)), cy - r * Math.cos(rad(az))];
@@ -892,10 +971,27 @@ function sunDialSvg(azimuth, elevation, heading, timeOfDay) {
     return `<text x="${x}" y="${y + 4}" fill="#7d8a93" font-size="11" ` +
       `text-anchor="middle">${t}</text>`;
   }).join("");
-  // The aircraft: an arrow along its heading, so the light reads against it.
-  const [nx, ny] = [cx + 22 * Math.sin(rad(heading)), cy - 22 * Math.cos(rad(heading))];
-  const plane = `<line x1="${cx}" y1="${cy}" x2="${nx}" y2="${ny}" stroke="#9fb4c7" ` +
-    `stroke-width="2"/><circle cx="${nx}" cy="${ny}" r="3" fill="#9fb4c7"/>`;
+  // The aircraft: an arrow through the centre along its heading.
+  const along = (d, side = 0) => [cx + d * Math.sin(rad(heading)) + side * Math.cos(rad(heading)),
+                                  cy - d * Math.cos(rad(heading)) + side * Math.sin(rad(heading))];
+  const [tx, ty] = along(-16), [hx, hy] = along(20);
+  const [ax, ay] = along(28), [lx, ly] = along(18, -6), [rx, ry] = along(18, 6);
+  const plane = `<line x1="${tx}" y1="${ty}" x2="${hx}" y2="${hy}" stroke="#9fb4c7" ` +
+    `stroke-width="3" stroke-linecap="round"/>` +
+    `<polygon points="${ax},${ay} ${lx},${ly} ${rx},${ry}" fill="#9fb4c7"/>`;
+  // The camera: where it sits around the aircraft, at its height angle.
+  let camera = "";
+  const follow = followingCamera();
+  if (follow) {
+    const [kx, ky] = point(wrap360(heading + follow.orbit.bearing),
+                           Math.max(0, follow.orbit.elevation));
+    camera = `<line x1="${kx}" y1="${ky}" x2="${cx}" y2="${cy}" stroke="#6fb3e0" ` +
+      `stroke-dasharray="2 3" opacity=".7"/>` +
+      `<g data-camera-marker data-x="${kx}" data-y="${ky}" style="cursor:grab">` +
+      `<circle cx="${kx}" cy="${ky}" r="9" fill="#6fb3e0"/>` +
+      `<text x="${kx}" y="${ky + 4}" fill="#0d1217" font-size="11" font-weight="bold" ` +
+      `text-anchor="middle">C</text></g>`;
+  }
   let sun = "";
   const known = azimuth !== null && azimuth !== undefined;
   // Unstated, the default look's sun is compass 270 (engine yaw 180).
@@ -905,14 +1001,10 @@ function sunDialSvg(azimuth, elevation, heading, timeOfDay) {
     sun = `<line x1="${sx}" y1="${sy}" x2="${cx}" y2="${cy}" stroke="#e0b452" ` +
       `stroke-dasharray="3 3" opacity=".7"/>` +
       `<circle cx="${sx}" cy="${sy}" r="8" fill="${known ? "#e0b452" : "none"}" ` +
-      `stroke="#e0b452" stroke-width="2"/>`;
+      `stroke="#e0b452" stroke-width="2" style="cursor:grab"/>`;
   }
-  return `<svg id="sunDial" class="dial" viewBox="0 0 200 200" width="200" height="200" ` +
-    `role="img" aria-label="sun position dial">` +
-    `<circle cx="${cx}" cy="${cy}" r="${R}" fill="#111a24" stroke="#2c3947"/>` +
-    rings + labels + plane + sun + `</svg>` +
-    `<div class="dim" style="font-size:.85em">click to place the sun &middot; ` +
-    `arrow = aircraft heading</div>`;
+  return `<circle cx="${cx}" cy="${cy}" r="${R}" fill="#111a24" stroke="#2c3947"/>` +
+    rings + labels + plane + camera + sun;
 }
 
 // -- camera view & zoom ------------------------------------------------------
@@ -977,7 +1069,8 @@ function renderViewPanel() {
       if (act === "elevation" && element.value !== "") setCameraOrbit(i, o.bearing, v, o.distance);
       if (act === "distance" && element.value !== "") setCameraOrbit(i, o.bearing, o.elevation, v);
       if (act === "zoomin") setRow(`cameras[${i}].focal_length_mm`, round(focal * 1.25, 1));
-      if (act === "zoomout") setRow(`cameras[${i}].focal_length_mm`, round(focal / 1.25, 1));
+      if (act === "zoomout") setRow(`cameras[${i}].focal_length_mm`,
+                                    round(Math.max(VIEW_MIN_MM, focal / 1.25), 1));
       if (act === "focal" && element.value !== "") setRow(`cameras[${i}].focal_length_mm`, v);
       if (act === "tochase") {
         // A world-anchored view left with an offset placement cannot be
@@ -988,19 +1081,78 @@ function renderViewPanel() {
       if (act === "fov") setRow(`cameras[${i}].focal_length_mm`,
         round(sensor / (2 * Math.tan(rad(+element.dataset.vval) / 2)), 1));
       renderViewPanel();
+      renderLightingPanel();
     };
     element.addEventListener(element.tagName === "INPUT" ? "change" : "click", handler);
   });
-  holder.querySelectorAll("svg[data-vdial]").forEach(svg =>
-    svg.addEventListener("click", event => {
-      const i = +svg.dataset.vdial;
-      const box = svg.getBoundingClientRect();
-      const x = (event.clientX - box.left) * (140 / box.width) - 70;
-      const y = (event.clientY - box.top) * (140 / box.height) - 70;
+  holder.querySelectorAll("svg[data-vdial]").forEach(svg => {
+    // Drag the camera round the aircraft; only the dial redraws while the
+    // pointer is down, the panels re-render on release.
+    const i = +svg.dataset.vdial;
+    let dragging = false;
+    const move = event => {
+      const sky = dialSky(svg, event, 140, 52);
       const o = cameraOrbit(i);
-      setCameraOrbit(i, Math.round(wrap360(deg(Math.atan2(x, -y)))), o.elevation, o.distance);
+      setCameraOrbit(i, Math.round(sky.bearing), o.elevation, o.distance);
+      svg.innerHTML = cameraDialInner(cameraOrbit(i));
+    };
+    svg.addEventListener("pointerdown", event => {
+      dragging = true;
+      svg.setPointerCapture(event.pointerId);
+      move(event);
+    });
+    svg.addEventListener("pointermove", event => { if (dragging) move(event); });
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
       renderViewPanel();
-    }));
+      renderLightingPanel();
+    };
+    svg.addEventListener("pointerup", end);
+    svg.addEventListener("pointercancel", end);
+  });
+  holder.querySelectorAll("input[data-vslider]").forEach(slider => {
+    const i = +slider.dataset.vcam;
+    slider.addEventListener("input", () => {
+      const t = Number(slider.value);
+      const o = cameraOrbit(i);
+      if (slider.dataset.vslider === "zoom") {
+        const mm = round(fromLog(t, VIEW_MIN_MM, VIEW_MAX_MM), 1);
+        setRow(`cameras[${i}].focal_length_mm`, mm);
+        const sensor = Number(rowValue(`cameras[${i}].sensor_width_mm`)) || 36;
+        const focalBox = holder.querySelector(`input[data-vcam="${i}"][data-vact="focal"]`);
+        if (focalBox) focalBox.value = mm;
+        const fov = holder.querySelector(`[data-vfov="${i}"]`);
+        if (fov) fov.innerHTML = `${round(2 * deg(Math.atan(sensor / (2 * mm))), 1)}&deg; across`;
+      } else if (slider.dataset.vslider === "height") {
+        setCameraOrbit(i, o.bearing, t, o.distance);
+        const label = holder.querySelector(`[data-vheight="${i}"]`);
+        if (label) label.innerHTML = `${t}&deg;`;
+        const box = holder.querySelector(`input[data-vcam="${i}"][data-vact="elevation"]`);
+        if (box) box.value = t;
+      } else {
+        const metres = round(fromLog(1000 - t, VIEW_MIN_M, VIEW_MAX_M), 1);
+        setCameraOrbit(i, o.bearing, o.elevation, metres);
+        const box = holder.querySelector(`input[data-vcam="${i}"][data-vact="distance"]`);
+        if (box) box.value = metres;
+      }
+    });
+    slider.addEventListener("change", () => { renderViewPanel(); renderLightingPanel(); });
+  });
+}
+
+function cameraDialInner(o) {
+  // Aircraft nose up (an arrow: the way it flies), the camera a C at its
+  // angle around the nose.
+  const [px, py] = [70 + 52 * Math.sin(rad(o.bearing)), 70 - 52 * Math.cos(rad(o.bearing))];
+  return `<circle cx="70" cy="70" r="52" fill="none" stroke="#232d38"/>` +
+    `<line x1="70" y1="88" x2="70" y2="58" stroke="#9fb4c7" stroke-width="3" ` +
+    `stroke-linecap="round"/><polygon points="70,46 63,59 77,59" fill="#9fb4c7"/>` +
+    `<text x="70" y="12" fill="#7d8a93" font-size="9" text-anchor="middle">nose</text>` +
+    `<line x1="${px}" y1="${py}" x2="70" y2="70" stroke="#6fb3e0" stroke-dasharray="3 3"/>` +
+    `<circle cx="${px}" cy="${py}" r="9" fill="#6fb3e0" style="cursor:grab"/>` +
+    `<text x="${px}" y="${py + 4}" fill="#0d1217" font-size="11" font-weight="bold" ` +
+    `text-anchor="middle" style="pointer-events:none">C</text>`;
 }
 
 function cameraViewHtml(cam) {
@@ -1022,10 +1174,15 @@ function cameraViewHtml(cam) {
     button("zoomout", "&minus; out", "wider: focal length / 1.25") +
     number("focal", round(focal, 1), 0.1, " mm") +
     button("zoomin", "in +", "closer: focal length x 1.25") +
-    ` <span class="dim">${round(fov, 1)}&deg; across</span></div>` +
+    ` <span class="dim" data-vfov="${i}">${round(fov, 1)}&deg; across</span></div>` +
+    `<div class="ctl"><label>zoom out &harr; in</label>` +
+    `<input type="range" min="0" max="1000" step="1" data-vslider="zoom" data-vcam="${i}" ` +
+    `value="${round(toLog(focal, VIEW_MIN_MM, VIEW_MAX_MM), 0)}" style="width:16rem" ` +
+    `title="left: wider (down to ${VIEW_MIN_MM} mm); right: closer (up to ${VIEW_MAX_MM} mm)"></div>` +
     `<div class="ctl"><label>&nbsp;</label>` +
-    [["wide", 70], ["normal", 45], ["tele", 15], ["super tele", 5]].map(([label, f]) =>
-      button("fov", label, `${f}&deg; field of view`, f)).join("") + `</div>`;
+    [["ultra wide", 120], ["wide", 70], ["normal", 45], ["tele", 15], ["super tele", 5]]
+      .map(([label, f]) => button("fov", label, `${f}&deg; field of view`, f)).join("") +
+    `</div>`;
   const livePreset = String(rowValue(`cameras[${i}].preset`) || cam.preset);
   const presetTag = livePreset !== cam.camera_id ? `${livePreset} &mdash; ` : "&mdash; ";
   const movesNote = (cam.moves && cam.moves.length)
@@ -1057,19 +1214,26 @@ function cameraViewHtml(cam) {
   const heights = [["below", -35], ["level", 0], ["slightly above", 12], ["high", 40],
                    ["top-down", 80]]
     .map(([label, e]) => button("height", label, `${e}&deg; height angle`, e)).join("");
-  // Top-down diagram: aircraft nose up, the camera where it sits.
-  const [px, py] = [70 + 52 * Math.sin(rad(o.bearing)), 70 - 52 * Math.cos(rad(o.bearing))];
+  // Top-down diagram (drag the C round the aircraft) and, beside it, a
+  // vertical slider for the camera's height angle: up = above the
+  // aircraft looking down on it, down = below it looking up.
   const dial = `<svg data-vdial="${i}" class="dial" viewBox="0 0 140 140" width="140" ` +
-    `height="140" role="img" aria-label="camera position around the aircraft">` +
-    `<circle cx="70" cy="70" r="52" fill="none" stroke="#232d38"/>` +
-    `<path d="M70 52 L78 80 L70 75 L62 80 Z" fill="#9fb4c7"/>` +
-    `<text x="70" y="12" fill="#7d8a93" font-size="9" text-anchor="middle">nose</text>` +
-    `<line x1="${px}" y1="${py}" x2="70" y2="68" stroke="#6fb3e0" stroke-dasharray="3 3"/>` +
-    `<circle cx="${px}" cy="${py}" r="7" fill="#6fb3e0"/></svg>`;
+    `height="140" role="img" aria-label="camera position around the aircraft" ` +
+    `style="touch-action:none">${cameraDialInner(o)}</svg>`;
+  const angle = `<div style="display:flex;flex-direction:column;align-items:center;` +
+    `margin-left:.4rem"><span class="dim" style="font-size:.8em">above</span>` +
+    `<input type="range" min="-85" max="85" step="1" data-vslider="height" ` +
+    `data-vcam="${i}" value="${round(o.elevation, 0)}" ` +
+    `style="writing-mode:vertical-lr;direction:rtl;height:120px;width:1.6rem" ` +
+    `title="camera angle to the aircraft: up = from above, down = from below">` +
+    `<span class="dim" style="font-size:.8em">below</span>` +
+    `<span data-vheight="${i}" style="font-size:.85em">${round(o.elevation, 0)}&deg;</span></div>`;
   return `<div class="panel"><b>${cam.camera_id}</b> <span class="dim">${presetTag}` +
     `follows the aircraft</span>` +
-    `<div class="panelRow"><div class="panelCol" style="flex:0 0 150px">${dial}` +
-    `<div class="dim" style="font-size:.85em">click to move the camera</div></div>` +
+    `<div class="panelRow"><div class="panelCol" style="flex:0 0 200px">` +
+    `<div style="display:flex;align-items:center">${dial}${angle}</div>` +
+    `<div class="dim" style="font-size:.85em">drag <b>C</b> round the aircraft &middot; ` +
+    `slider = camera angle</div></div>` +
     `<div class="panelCol">` +
     `<div class="ctl"><label>orbit</label>` +
     button("left", "&#9664; left", "swing the camera to its left around the aircraft") +
@@ -1086,6 +1250,10 @@ function cameraViewHtml(cam) {
     button("closer", "closer", "distance / 1.25") +
     number("distance", round(o.distance, 1), 0.1, " m") +
     button("farther", "farther", "distance x 1.25") + `</div>` +
+    `<div class="ctl"><label>pull back &harr; in</label>` +
+    `<input type="range" min="0" max="1000" step="1" data-vslider="distance" ` +
+    `data-vcam="${i}" value="${round(1000 - toLog(o.distance, VIEW_MIN_M, VIEW_MAX_M), 0)}" ` +
+    `style="width:16rem" title="left: further away (up to ${VIEW_MAX_M} m); right: closer"></div>` +
     zoom + movesNote + `</div></div></div>`;
 }
 

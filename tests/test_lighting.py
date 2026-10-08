@@ -246,3 +246,15 @@ def test_the_page_gets_the_block_its_presets_and_a_dict_that_reads_back_unchange
     for anchor in ('id="lightingPanel"', 'id="viewPanel"', "function renderLightingPanel",
                    "function renderViewPanel", 'data-block="lighting"'):
         assert anchor in page, anchor
+
+
+def test_the_sun_dial_shows_the_camera_and_the_flight_direction_and_drags():
+    """The owner asked for the camera on the sun dial (a draggable C) and
+    an arrow for where the aircraft flies, and in the camera panel a
+    horizontal zoom slider and a vertical camera-angle slider."""
+    page = (REPO / "webapp/static/index.html").read_text(encoding="utf-8")
+    for anchor in ("function attachSunDialDrag", "data-camera-marker", "function followingCamera",
+                   "function cameraDialInner", 'data-vslider="zoom"', 'data-vslider="height"',
+                   'data-vslider="distance"', "writing-mode:vertical-lr",
+                   "const VIEW_MIN_MM = 6"):
+        assert anchor in page, anchor
