@@ -3,7 +3,7 @@
 A prompt can name something the spec was never told: a thing the
 simulator does not model at all ("birds", "hail", "a ship below"), or a
 condition the spec DOES carry but that the compiler which read this
-prompt did not set ("rain" through the offline parser). Before this,
+prompt did not set ("fog" through the offline parser). Before this,
 both were silently ignored: "an A320 in heavy snow with birds nearby"
 flew a clear, empty sky with no word said.
 
@@ -44,6 +44,9 @@ NOT_MODELLED: Tuple[Tuple[str, str, Optional[str]], ...] = (
     (r"\b(?:cars?|trucks?|vehicles?|trains?)\b", "ground vehicles", None),
     (r"\b(?:people|crowds?|pedestrians?|persons?)\b", "people", None),
     (r"\bhail(?:storm|stones?)?\b", "hail", "thunderstorm (weather_event)"),
+    (r"\b(?:hurricanes?|typhoons?|(?:tropical )?cyclones?|tropical storms?)\b",
+     "hurricanes and tropical cyclones",
+     "strong wind, severe turbulence and heavy rain, or a thunderstorm (weather_event)"),
     (r"\blightning(?: strikes?| bolts?)?\b", "lightning", "thunderstorm (weather_event)"),
     (r"\bvolcanic ash\b|\bash clouds?\b", "volcanic ash", None),
     (r"\b(?:sand|dust)\s?storms?\b|\bhaboob\b", "sand / dust storms", "low visibility"),

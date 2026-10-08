@@ -63,6 +63,12 @@ three later branches merged in:
 * **Aircraft named in the prompt are kept**: "a4", "A-4E" or "Skyhawk"
   always fly the A-4, even when a language model guesses otherwise (the
   spec's notes say when it was overruled).
+* **Vague places land somewhere real**: "over the ocean" or "over a
+  jungle" with no place named gets a real place, chosen by the language
+  model (or, offline, an open-ocean point for ocean prompts) and checked
+  against the GLO-30 land mask (`core/terrain/landmask.py`). The place
+  decides the ground: open ocean flies the flat sea surface (no bake, and
+  Google tiles accept it), land is baked on demand like a named place.
 
 Run it on Windows (PowerShell, no clone needed):
 
@@ -90,7 +96,7 @@ Open http://127.0.0.1:8008, type a scenario ("fly the c172p through a
 tornado over the prairie"), review the compiled spec, and run. **No API
 keys or accounts are needed for anything**: terrain elevation comes from
 the public Copernicus bucket, historical weather from the free Open-Meteo
-API, and the natural-language compiler **works out of the box** -- with
+API, place names from the free OpenStreetMap search, and the natural-language compiler **works out of the box** -- with
 nothing configured, prompts compile through [relay/](relay/), a small
 Vercel function holding the author's own OpenAI key server-side, pinned
 to `gpt-4.1-mini`, rate-limited to 40 requests/hour per IP. Best-effort
@@ -99,7 +105,7 @@ below catches the prompt and every other tier is one env var away:
 
 * **No AI (`FLIGHTSIM_LLM=none` in `~/.flightsim.env`):** the built-in
   deterministic parser covers the whole documented vocabulary (aircraft,
-  altitudes, winds, turbulence, surfaces, storms, tornadoes, dates).
+  altitudes, winds, turbulence, surfaces, rain, storms, tornadoes, dates).
   Only place *names* need AI -- state coordinates instead
   ("at 27.99, 86.92"). This parser is also the automatic fallback
   whenever any LLM tier fails.
@@ -207,6 +213,24 @@ for priming a machine ahead of time rather than prerequisites.
   carry a fail-safe: a scene the SYSTEM chose never falls back to the
   featureless slab -- the control ridge is synthesised on first need --
   while a user-stated flat place stays honestly flat.
+* **Any named place** (`core/nl/geocode.py`): "over New York", "near
+  Denver", "above the Golden Gate Bridge". A prompt's place words become
+  coordinates: first the six curated bakes, then a built-in list of about
+  200 cities, airports, peaks and landmarks (each with an approximate
+  ground height), then OpenStreetMap's free Nominatim search for anything
+  else. Results are cached in `data/geocode_cache.json`. The place then
+  goes through the usual on-demand GLO-30 bake on the first run, so it
+  gets the same terrain physics as a curated place: the raster under the
+  aircraft, wingtip contact, orographic lift and lee sink, and the
+  clearance pre-flight. `FLIGHTSIM_GEOCODER=offline` uses the list only;
+  `off` disables the lookup.
+* **Altitude guide** (web page, under the prompt): a side view of planes
+  at checkpoints from 60 m to 11,000 m above the ground. Each one shows
+  the number to ask for over the scene's ground, next to familiar heights
+  (Eiffel Tower, Burj Khalifa, the Matterhorn, Everest) and the chosen
+  aircraft's typical cruise. A prompt's altitude is above **sea level**,
+  so over Denver "at 1000 m" is underground, and the guide says so
+  before you run. **use** puts a checkpoint's number into the spec.
 * **Simulator-derived terrain look (committed in `assets/xplane/`)**: ground
   textures, water polygons and sky-colour tables extracted from a local simulator install by
   `python scripts/extract_xplane.py --xplane-root "<X-Plane 12 folder>"`
@@ -399,6 +423,57 @@ Committed examples, all runnable with no network and no account:
 spec's own origin (spectral construction plus thermal and hydraulic
 erosion), so the terrain examples run over real ground on a fresh clone.
 `--terrain <bake stem>` remains the path for real geography.
+
+## Lighting and camera views (web page)
+
+After **Interpret**, two panels sit under the spec table. Both write into
+the table's own rows (shown as `user (edited)`), so **Run** carries and
+re-validates them like any typed value.
+
+* **Lighting** (the spec's `lighting` block, `core/scene/lighting.py`):
+  presets (natural, sunny, super bright, soft, hazy, overcast, golden
+  hour, dramatic); the sun's direction in exact degrees (click the sky
+  dial, type the angle, nudge with the arrows, or pick a compass point or
+  a side of the aircraft); brightness in EV; and, under *advanced light*,
+  sun strength, colour temperature, shadow softness, sky fill and haze.
+  A stated value beats the preset, and the preset beats the time of day's
+  sun. `natural` with nothing stated changes nothing. The preset numbers
+  were chosen by eye. They are uncalibrated against Gate 6, so the block is
+  VISUAL ONLY and records that with the run. The engine knobs reach the
+  commandlet as `-sun-intensity-scale= -sky-light-scale= -sun-temperature=
+  -sun-source-angle=`, and that C++ is uncompiled until the next Windows
+  build.
+* **Camera view & zoom**: for each camera that follows the aircraft,
+  swing it around the nose (0° front, 90° right, 180° behind, 270° left)
+  by clicking the top-down diagram, the side buttons, or the ◀ ▶ ▲ ▼
+  orbit arrows. You can also type the exact angle, height angle and
+  distance. Zoom in or out (×1.25), type the focal length, or pick a
+  field of view. A camera placed in the scene (tower, ground) gets the
+  zoom controls only.
+
+## Terrain downloads start at Interpret
+
+When a prompt names a real place ("over new york city") whose terrain is
+not on this machine yet, **Interpret** starts the GLO-30 download in the
+background. A line under the notes follows it: *downloading*, then
+*terrain ready*. **Run** waits on that same download if it hasn't
+finished, and never starts a second one. Each 1°×1° elevation tile is
+downloaded once (`data/glo30`) and each place's ground is kept
+(`runs/terrain/dynamic`), so later runs nearby start immediately. Set
+`FLIGHTSIM_TERRAIN_PREFETCH=off` to download only at Run, as before.
+
+## Test scenarios in one go
+
+With the app running, `python scripts/run_test_scenarios.py` interprets
+and runs 14 scenarios one after another, waiting for each run to finish:
+lighting presets and exact sun angles, rain, a thunderstorm, a tornado,
+mountain turbulence, the cockpit and tower views, an ocean cruise and an
+unsupported hurricane. It prints a summary (done / failed / refused, run
+id, clip length), writes `runs/test_scenarios.json`, and copies every
+result into one folder, `runs/test_scenarios/`, with an `index.html` that
+plays them all (`--collect` gathers the last batch again). Use `--list` to
+see them, `--only 1 4 7` to pick some, `--still` for one frame each, and
+`--clip 6` for longer clips.
 
 ## Run the tests
 

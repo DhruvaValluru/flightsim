@@ -410,3 +410,47 @@ def test_the_ridge_top_the_compiler_reads_is_the_synthesised_raster_s():
     assert DEMO_RIDGE["size"] == 1024
     top = float(np.max(np.asarray(Heightfield.read(stem).elevations())))
     assert top == pytest.approx(DEMO_RIDGE_TOP_M, abs=0.01)
+
+
+@pytest.mark.parametrize("prompt, heading", [
+    ("fly over sfo north", 0.0),
+    ("fly over sfo south", 180.0),
+    ("fly the 747 west over sfo at 3000 m", 270.0),
+    ("fly the c172p over san francisco southbound", 180.0),
+    ("fly over the bay to the east", 90.0),
+    ("fly over sfo north-east", 45.0),
+    ("fly toward the south over yosemite", 180.0),
+    ("chase view of the 747 over sfo south for 20 seconds", 180.0),
+    ("the a320 over yosemite westbound", 270.0),
+    ("fly over west virginia heading east", 90.0),
+])
+def test_a_direction_anywhere_in_the_flying_phrase_is_the_stated_heading(prompt, heading):
+    """Only a direction right after the verb was read ("flying north");
+    "over sfo south" flew the default due north (measured on the page)."""
+    spec = compile_prompt(prompt)
+    assert spec.heading.value == heading
+    assert spec.heading.source == Source.USER
+
+
+@pytest.mark.parametrize("prompt", [
+    "fly over sfo with a strong wind from the north",
+    "fly over sfo in a north wind",
+    "fly the c172 over sfo in a northerly wind",
+    "fly over the north side of the bay",
+    "the 747 over north carolina",
+    "flying over south africa",
+    "the 747 over sfo, wind from the south at 10 kt",
+])
+def test_the_wind_s_or_a_place_s_direction_is_not_a_heading(prompt):
+    assert compile_prompt(prompt).heading.source == Source.DEFAULT
+
+
+@pytest.mark.parametrize("prompt", ["fly the 747 through a hurricane",
+                                    "fly the a320 into a typhoon",
+                                    "fly the c172p near a tropical cyclone"])
+def test_a_hurricane_is_refused_by_name_never_flown_as_calm_air(prompt):
+    """"fly the 747 through a hurricane" compiled with the word dropped and
+    flew calm air (measured on the owner's machine). Not modelled: refused."""
+    report = validate(compile_prompt(prompt), check_feasibility=False)
+    assert [v.constraint for v in report.violations] == ["prompt.unsupported"]
+    assert "hurricanes and tropical cyclones" in report.violations[0].message

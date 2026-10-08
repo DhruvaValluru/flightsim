@@ -359,6 +359,36 @@ def check_summits(baked: Heightfield, location: Location) -> List[Dict]:
     return out
 
 
+def orographic_parameters(heightfield: Heightfield, origin_lat: float,
+                          origin_lon: float) -> Dict[str, float]:
+    """The orographic field's derived numbers for a raster and an origin:
+    wavelength (the raster-extent heuristic terrain_field_from documents),
+    decay height (the provider's own clamp) and the projected origin.
+
+    The ONE place they are computed: the run card's block below and the
+    headless runner's provider (core.scenario.runner.orographic_for) both
+    read them from here, so the two hosts cannot model two different
+    mountains.
+    """
+    from pyproj import Transformer
+
+    from ..environment.terrain_field import (
+        DECAY_FROM_WAVELENGTH, DECAY_HEIGHT_MAX_M, DECAY_HEIGHT_MIN_M,
+    )
+
+    width_m, _ = heightfield.extent_m
+    wavelength_m = max(width_m / 8.0, 200.0)
+    decay_height_m = min(max(wavelength_m * DECAY_FROM_WAVELENGTH,
+                             DECAY_HEIGHT_MIN_M), DECAY_HEIGHT_MAX_M)
+    transformer = Transformer.from_crs("EPSG:4326", heightfield.georeference.crs,
+                                       always_xy=True)
+    origin_x, origin_y = transformer.transform(origin_lon, origin_lat)
+    return {"decay_height_m": float(decay_height_m),
+            "wavelength_m": float(wavelength_m),
+            "origin_x_m": float(origin_x),
+            "origin_y_m": float(origin_y)}
+
+
 def orographic_card_block(baked_path, origin_lat: float, origin_lon: float,
                           wind_speed_kt: float, wind_from_deg: float) -> Dict:
     """The run card's ``orographic`` block, with every parameter computed here.
@@ -369,29 +399,14 @@ def orographic_card_block(baked_path, origin_lat: float, origin_lon: float,
     derive differently. The same numbers drive the Python provider when the
     selftest verifies the port.
     """
-    from pyproj import Transformer
-
-    from ..environment.terrain_field import (
-        DECAY_FROM_WAVELENGTH, DECAY_HEIGHT_MAX_M, DECAY_HEIGHT_MIN_M,
-    )
     from ..fdm import units as u
 
     baked = Heightfield.read(baked_path)
-    width_m, _ = baked.extent_m
-    wavelength_m = max(width_m / 8.0, 200.0)
-    decay_height_m = min(max(wavelength_m * DECAY_FROM_WAVELENGTH,
-                             DECAY_HEIGHT_MIN_M), DECAY_HEIGHT_MAX_M)
-    transformer = Transformer.from_crs("EPSG:4326", baked.georeference.crs,
-                                       always_xy=True)
-    origin_x, origin_y = transformer.transform(origin_lon, origin_lat)
     return {
         "terrain": str(Path(baked_path).resolve()),
         "wind_speed_mps": u.kt_to_mps(wind_speed_kt),
         "wind_from_deg": float(wind_from_deg),
-        "decay_height_m": float(decay_height_m),
-        "wavelength_m": float(wavelength_m),
-        "origin_x_m": float(origin_x),
-        "origin_y_m": float(origin_y),
+        **orographic_parameters(baked, origin_lat, origin_lon),
         "lee": True,
         # The vertical datum block (P10), from the sidecar when the bake
         # wrote one, else evaluated from its provenance origin. The card

@@ -1,5 +1,141 @@
 # Resume here
 
+**Storm weather, opt-in (2026-10-08, `phase-2-testing`; docs/WEATHER.md is
+the record; built in parallel with the weather look and rain particles
+below, merged beside them).** A stated rain rate or a thunderstorm now also
+puts a `weather` block on the card (core/scene/storm_weather.py,
+absent-canonical): 3D rain
+drops from the same Marshall & Palmer fit, shutter-length and fixed in the
+air (rain_field.py), splashes, drops on a cockpit's glass; the
+cumulonimbus over the downburst centre with a physical extinction, anvil
+and Atlas rain shaft (storm_cell.py); seeded lightning with stepped
+leaders, return strokes integrated over each frame's exposure, branching
+channels that land on their strike points (lightning.py); thunder
+synthesised from each bolt's own channel (thunder.py,
+scripts/storm_soundtrack.py for videos). Unreal side: FlightSimWeather,
+OFF by default (`-weather-backend=procedural|niagara` turns it on; its
+drops then replace the rain particles and its glass the lens drops), five materials from committed HLSL
+(assets/shaders/weather/), hooks in the render commandlet (beauty-only,
+streaks superseded) and the interactive window (thunder and rain heard).
+The C++ closed forms are COMPILED with g++ and matched to Python in
+tests/test_weather.py; the rest is UNCOMPILED. NEXT: the first Windows
+build and the WX.1-WX.6 clauses (WX.4 sets ExtinctionScale if the engine
+does not read Extinction per metre); then build NS_FlightSimRain from the
+recipe if the Niagara backend is wanted. OPEN for the owner: the two
+weather paths overlap (both draw drops, storm clouds and lightning);
+which one to keep, or how to fold them together, is the owner's call.
+
+**3-D rain and the tan border (2026-10-08, `phase-2-testing`; UNCOMPILED
+-- no engine here).** The owner's "heavy rain" stills showed no rain and
+a blurred tan border round every frame. (1) A stated rain rate now writes
+a `rain_particles` card block (`core/scene/rain_particles.py`) and
+`FlightSimRainParticles.cpp` draws real drops: one instanced
+`/Engine/BasicShapes/Cylinder` per drop with `M_RainDrop` (lit
+translucent, per-instance coverage in custom float 0), 1,500-20,000 of
+them by rate in a 12 m world box ahead of the camera, falling at their
+Atlas speed on the FDM's time, streaked by their motion relative to the
+camera (the pose track's velocity, `PoseVelocityAtTime`) over a stated
+1/60 s, beauty-only. They supersede the screen-space `M_RainStreaks`
+when drawn. (2) The border: SUSPECTED (not measured) to be the two
+screen-space looks running at `BL_SCENE_COLOR_AFTER_DOF` (render
+resolution, before TSR); both now run after the tonemapper, and the
+materials script moves an existing asset's location in place
+(`move_after_tonemapping`). FIRST WINDOWS STEPS: `.\scripts\build_ue.ps1`,
+re-run `scripts/ue_create_materials.py` (watch for MATERIAL-UPDATED on
+M_RainStreaks / M_LensDrops and MATERIAL-CREATED on M_RainDrop), then
+`scripts\run_test_scenarios.py --still --only 7 8` and
+`scripts\inspect_run.py <id>` (look_applied.rain_particles: drawn,
+last_drawn, last_camera_speed_mps). If the border survives, try
+`Capture->ShowFlags.SetPostProcessMaterial(false)` on the beauty capture,
+then the lens flare (`LensFlareIntensity` 0). Known risks: the ISM API
+names (`BatchUpdateInstancesTransforms`, `SetNumCustomDataFloats`) and
+the PerInstanceCustomData node's `const_default_value` are from memory.
+Tests: `tests/test_rain_particles.py`, `tests/test_ue_materials.py`.
+
+**Weather visuals (2026-10-07, `phase-2-testing`; UNCOMPILED -- no engine
+here).** A new absent-canonical card block `weather_look`
+(`core/scene/weather_look.py`: surface, storm, rain rate, wetness, ice,
+seed) drives `FlightSimWeatherLook.cpp`: the flat scene's ground gets
+`M_Ground_<Surface>` (it had NO material before: the engine plane's
+default) with puddles and ripples from the wetness; a thunderstorm gets a
+cloud layer when the look has none (cover 0.95, 1200-9000 m, in the
+commandlet), three rain shafts and a lightning bolt + point light on a
+seeded flash schedule (all `BeautyOnlyActors`); a rain rate puts
+`M_LensDrops` on the beauty capture beside the streaks and wets the
+georeferenced terrain through the existing Wetness scalar when the look
+carried none; icing puts `M_IceOverlay` on every airframe part
+(`SetOverlayMaterial`), IceAmount following the card's icing ramp. All
+eleven materials are procedural in `scripts/ue_create_materials.py`
+(`_weather_material`); `scripts/fetch_ground_textures.py` fetches CC0
+Poly Haven textures (unreachable from the container; run it on Windows,
+then re-run the materials script) and the ground materials sample them
+when present. FIRST WINDOWS STEPS: build, run the materials script (watch
+for MATERIAL-FAILED), render "over the desert through a thunderstorm"
+and a run with `icing:`; check render.json `look_applied.weather_look`.
+Known risks: the Python material-node property names (Noise, DepthFade,
+Transform) and `SetOverlayMaterial` are from memory; the storm shafts
+assume the start is over the engine origin; the albedo pass now shows
+the surface colours on a flat scene that states a surface word.
+Tests: `tests/test_weather_look.py`, `tests/test_fetch_ground_textures.py`.
+
+**Camera control by language, widened (2026-10-07, `phase-2-testing`).**
+The camera-sentence box (`core/nl/camera_prompt.py`, `/cameras/prompt`)
+now tells the model the SCENE: the aircraft, a distance table scaled to
+its calibrated chase framing (`framing_distances`: close 0.6 D, default
+D, far 4 D, very far 10 D -- "behind the Cessna" is 28 m, not the old
+flat 150 m), the other aircraft and every existing camera. The intent
+gained optional `edit_camera_id` (the endpoint replaces that camera in
+place, keeping its id, lens, schedule and moves unless restated; moves
+are re-keyed on the new offset via `compiler.describe_moves`),
+`focal_length_mm` (a stated lens is never widened by the fit; the camera
+is pulled back instead), `aim` / `aim_bearing_deg` / `aim_elevation_deg`
+and `moves`, plus a `cockpit` view. The rule reader scales the same way,
+reads lens / compass aim / move words, and its `show_all` is no longer
+the constant `anchor_centre or True` ("only the main plane" is False).
+The main-prompt LLM compiler may now write `offset_*`, `aim_*` and
+`moves` per camera; the calibrated chase table is GENERATED into its
+system prompt from `CHASE_OFFSETS`; a field the view cannot honour goes
+to notes by name; move words the model drops still key the regex moves
+(`prompt_moves`, which now also matches "zooms in" / "orbiting").
+`core/capture/poses.py`: a chase / wingman camera honours a stated
+`point` / `bearing` aim (it still follows; only where it looks changes).
+Tests: `tests/test_camera_sentence.py`.
+
+**Rain physics (2026-10-07, `phase-2-testing`).** The stated rain rate
+(`environment.precipitation_rate_mmh`, W3's look) now has opt-in PHYSICS
+through a new spec-9 block `rain` (absent-canonical: no block, nothing
+changes, every committed example keeps its digest). LANDED:
+`core/environment/rain.py` -- the water from the fitted Marshall-Palmer
+DSD (LWC and the mass-weighted fall speed, closing `rho_w R = LWC v_m`
+exactly); the swept-up drops' momentum (inelastic capture, box projection
+over the frontal and wing areas) as a JSBSim `<external_reactions>` force
+in the BODY frame at the AERORP, direction and magnitude written every
+step; a STATED linear wetted-wing mapping in LWC (lift `1 - 0.15 phi`,
+drag `1 + 0.30 phi`, `phi = min(LWC / 46, 1)`, after NASA TP-3184's tested
+range; both penalties are spec fields); the runway through JSBSim's own
+`ground/static-friction-factor` (`dry` 1.0, `wet` the 14 CFR 25.109(c)(1)
+cubic over the airframe's dry coefficient, `standing_water` 0.05 above
+Horne's `9 sqrt(p)` kt). `core/control/derive.py` gains the `rain`
+injection (last in the order, suffix `-rain`: LIFT and DRAG functions
+wrapped like icing's, plus the force) and `core/control/systems/rain.xml`;
+`RainSpec` in blocks.py, plumbed through spec.py, validate.py
+(`rain.rate_missing` / `runway_condition` / `factor_range` /
+`airframe_data`, catalogued), runner.py (provider, injections, the
+`rain` manifest block, seven telemetry columns ONLY on a run with the
+block). `assets/aircraft_config/c172p.json` carries a `rain` block
+(frontal area 3.8 m^2 estimated, 29 psi from memory -- both marked
+unverified); every other airframe must state them or is refused by name.
+MEASURED (`experiments/rain_physics.py`, `tests/test_rain.py` 34 tests):
+neutral injection bit-identical to the stock c172p; every write reads
+back exactly; 300 mm/h costs 36 m over 20 s at 100 kt; full brakes from
+55 kt stop in 114 m dry, 140 m wet, 248 m on standing water (5.4 s
+hydroplaning). OPEN: the 25.109 coefficients and Horne's constant were
+cited from memory (the eCFR and NTRS are blocked here) -- check them;
+the spec runner flies airborne trims only, so the runway law is exercised
+by the test harness, not a spec (a ground-roll / landing scenario is the
+next step); engine water ingestion, the UE side (Niagara rain, wet
+materials) and NL-compiler words ("heavy rain") are not done.
+
 **The logic reports READ and BUILT FROM (2026-10-05, later the same day,
 `phase-2-testing`; NO tests run, owner's instruction).** The owner's
 point: the logic branch held the instructions on how the simulator

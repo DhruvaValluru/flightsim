@@ -755,6 +755,77 @@ class IcingSpec(ProvenancedBlock):
         return {"eta_max": eta}
 
 
+#: The rain block's vocabulary (core/environment/rain.py). The runway
+#: words choose the braking law: ``dry`` the airframe's own coefficients,
+#: ``wet`` 14 CFR 25.109(c)(1)'s wet-runway coefficient, ``standing_water``
+#: the same below Horne's hydroplaning speed and a stated 0.05 above it.
+#: The two wetted-wing penalties are the fractions at LWC 46 g/m^3 (the
+#: top of NASA TP-3184's tested range), each within a stated bound.
+RAIN_RUNWAY_WORDS = ("dry", "wet", "standing_water")
+RAIN_LIFT_LOSS_RANGE = (0.0, 0.5)
+RAIN_DRAG_RISE_RANGE = (0.0, 2.0)
+RAIN_STANDARDS: Dict[str, str] = {
+    "aerodynamics": "the rain's momentum (inelastic drop capture, Haines & Luers 1983) and the "
+                    "wetted wing (a stated linear mapping in LWC after Bezos et al., NASA "
+                    "TP-3184, 1992) through the rain injection [unverified here]",
+    "lift_loss_at_ref": "the fractional lift loss at LWC 46 g/m^3, linear in LWC below it and "
+                        "held above it: a stated value, 0.15 by default [unverified here]",
+    "drag_rise_at_ref": "the fractional drag rise at LWC 46 g/m^3, linear in LWC below it and "
+                        "held above it: a stated value, 0.30 by default [unverified here]",
+    "frontal_area_m2": "the airframe's frontal area, the area the drops it overtakes strike "
+                       "(the wing area is JSBSim's metrics/Sw-sqft)",
+    "runway_condition": "dry / wet (14 CFR 25.109(c)(1)) / standing_water (Horne & Dreher "
+                        "1963 V_p = 9 sqrt(p) kt, a stated 0.05 above it) [unverified here]",
+    "tire_pressure_psi": "the main tyres' inflation pressure, which chooses the 25.109 curve "
+                         "and sets the hydroplaning speed",
+}
+
+
+@dataclass
+class RainSpec(ProvenancedBlock):
+    """``rain``: what the stated rain rate (``environment.
+    precipitation_rate_mmh``) does to the aircraft and the runway.
+    Absent-canonical: no block, no rain physics (the rate still drives the
+    look), so every committed example keeps its digest. ``aerodynamics``
+    (true when unstated) flies the airframe derived with the ``rain``
+    injection and needs a rate (``rain.rate_missing``); the penalties sit
+    within their stated bounds (``rain.factor_range``); ``runway_condition``
+    is a word (``rain.runway_condition``), ``wet`` when a rate is stated
+    and the word is not; the frontal area and the tyre pressure come from
+    the block or the airframe config (``rain.airframe_data`` otherwise).
+    The writes, the read-back and the records are core/environment/rain.py's."""
+
+    aerodynamics: Quantity
+    lift_loss_at_ref: Quantity
+    drag_rise_at_ref: Quantity
+    frontal_area_m2: Quantity
+    runway_condition: Quantity
+    tire_pressure_psi: Quantity
+
+    FIELD_ORDER = ("aerodynamics", "lift_loss_at_ref", "drag_rise_at_ref", "frontal_area_m2",
+                   "runway_condition", "tire_pressure_psi")
+    BLOCK = "rain"
+
+    @classmethod
+    def defaulted(cls) -> "RainSpec":
+        return cls(
+            aerodynamics=Quantity.default(
+                None, frm="unstated: on when the block is stated", std=RAIN_STANDARDS["aerodynamics"]),
+            lift_loss_at_ref=Quantity.default(
+                None, "1", frm="unstated: 0.15", std=RAIN_STANDARDS["lift_loss_at_ref"]),
+            drag_rise_at_ref=Quantity.default(
+                None, "1", frm="unstated: 0.30", std=RAIN_STANDARDS["drag_rise_at_ref"]),
+            frontal_area_m2=Quantity.default(
+                None, "m^2", frm="unstated: the airframe config's", std=RAIN_STANDARDS["frontal_area_m2"]),
+            runway_condition=Quantity.default(
+                None, frm="unstated: wet under a stated rate, else dry",
+                std=RAIN_STANDARDS["runway_condition"]),
+            tire_pressure_psi=Quantity.default(
+                None, "psi", frm="unstated: the airframe config's",
+                std=RAIN_STANDARDS["tire_pressure_psi"]),
+        )
+
+
 #: D2 (blueprint section 5): the ``dis`` block's vocabulary. The entity
 #: identifier is the standard's site / application / entity triple, each
 #: 0..65535 (``interop.dis.entity_id`` outside); ``force_id`` is the 8-bit
@@ -1129,6 +1200,60 @@ class RunwayBlockSpec(ProvenancedBlock):
             markings=Quantity.default(
                 "standard", frm="the documented default: the five Annex 14 elements",
                 std=RUNWAY_STANDARDS["markings"]),
+        )
+
+
+@dataclass
+class LightingSpec(ProvenancedBlock):
+    """``lighting``: how the render is lit, on top of the sun the time of
+    day (or the default look) placed -- a ``preset`` word, the sun's
+    direction in exact degrees (``sun_elevation_deg`` above the horizon,
+    ``sun_azimuth_deg`` the compass bearing the light comes FROM), the
+    ``brightness_ev`` in stops, and four engine knobs (``sun_intensity``,
+    ``color_temperature_k``, ``shadow_softness_deg``, ``sky_fill``) plus
+    ``haze``. VISUAL ONLY: physics never reads it. Absent-canonical: the
+    ``natural`` preset with nothing stated is the default and is omitted,
+    so every committed spec keeps its digest. Presets, precedence and
+    ranges are core/scene/lighting.py's; the validator refuses
+    ``lighting.preset`` and ``lighting.range`` by name."""
+
+    preset: Quantity
+    sun_elevation_deg: Quantity
+    sun_azimuth_deg: Quantity
+    brightness_ev: Quantity
+    sun_intensity: Quantity
+    color_temperature_k: Quantity
+    shadow_softness_deg: Quantity
+    sky_fill: Quantity
+    haze: Quantity
+
+    FIELD_ORDER = ("preset", "sun_elevation_deg", "sun_azimuth_deg", "brightness_ev",
+                   "sun_intensity", "color_temperature_k", "shadow_softness_deg",
+                   "sky_fill", "haze")
+    BLOCK = "lighting"
+
+    @classmethod
+    def defaulted(cls) -> "LightingSpec":
+        from_preset = "unstated: the preset's value, else the look underneath"
+        return cls(
+            preset=Quantity.default(
+                "natural", frm="the documented default: the calibrated look, unchanged"),
+            sun_elevation_deg=Quantity.default(
+                None, "deg", frm="unstated: the preset's, else the time of day's sun"),
+            sun_azimuth_deg=Quantity.default(
+                None, "deg", frm="unstated: the time of day's sun (compass, light FROM)"),
+            brightness_ev=Quantity.default(
+                0.0, "EV", frm="no brightness change (stops on the calibrated exposure)"),
+            sun_intensity=Quantity.default(
+                None, "x", frm=from_preset + " (1 = the calibrated sun)"),
+            color_temperature_k=Quantity.default(
+                None, "K", frm=from_preset + " (unset = white light)"),
+            shadow_softness_deg=Quantity.default(
+                None, "deg", frm=from_preset + " (sun disc size; 0.5 = the real sun)"),
+            sky_fill=Quantity.default(
+                None, "x", frm=from_preset + " (1 = the calibrated sky light)"),
+            haze=Quantity.default(
+                None, frm=from_preset + " (height-fog density; 0.0012 = clear)"),
         )
 
 

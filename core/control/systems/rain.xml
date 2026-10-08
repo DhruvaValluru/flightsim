@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<system name="rain"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="http://jsbsim.sourceforge.net/JSBSimSystem.xsd">
+
+<!-- ===================================================================
+     Rain factors (core/environment/rain.py).
+
+     Two multipliers and the liquid water content. core/control/derive.py
+     wraps EVERY <function> of the airframe's LIFT and DRAG axes in a
+     <product> with the axis's factor (the icing injection's form), and
+     adds an <external_reactions> force "rain-momentum" in the BODY frame
+     at the aerodynamic reference point. The rain provider writes the
+     factors from a stated linear mapping in the liquid water content and
+     the force's direction and magnitude from the drops the aircraft
+     sweeps up, every step. Nothing here maps the rain to the numbers:
+     the LWC is declared so the provider has one property to write and
+     the record one value to read back.
+
+     NEUTRAL VALUES: both factors 1.0 and the force's magnitude 0 (x * 1.0
+     and x + 0.0 are exact in IEEE 754, so the derived airframe flies
+     bit-identically to the stock one; measured in tests/test_rain.py),
+     LWC 0.
+
+     NOT CLAIMED: the factors scale whole axes (the measured effect is on
+     maximum lift); no airframe's rain response is validated.
+     =================================================================== -->
+
+  <property value="1.0">rain/lift-factor</property>
+  <property value="1.0">rain/drag-factor</property>
+  <property value="0.0">rain/lwc-gm3</property>
+
+</system>

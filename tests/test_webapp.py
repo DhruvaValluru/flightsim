@@ -817,9 +817,16 @@ def test_scene_setting_stages_unlocated_scenes():
     plan_scene_setting(flat)
     assert str(flat.latitude.source) == "default"      # asked for flat
 
+    # No ocean bake, and none needed: an open-ocean point is staged
+    # (core.terrain.ocean), its ground the flat slab at sea level.
+    from core.terrain.ocean import OPEN_OCEAN
+
     ocean = compile_prompt("fly the 747 over the ocean at 3000 m")
     plan_scene_setting(ocean)
-    assert str(ocean.latitude.source) == "default"     # no ocean bake
+    assert (float(ocean.latitude.value), float(ocean.longitude.value)) == \
+        (OPEN_OCEAN["atlantic"].lat, OPEN_OCEAN["atlantic"].lon)
+    assert str(ocean.latitude.source) == "derived"
+    assert float(ocean.terrain_elevation.value) == 0.0
 
     named = compile_prompt("fly the 747 at 5200 m")
     named.set("latitude", 45.9764, frm="stated place")

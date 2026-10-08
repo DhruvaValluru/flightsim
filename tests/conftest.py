@@ -11,6 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # attach_xplane_drape); the X-Plane tests switch them on themselves.
 os.environ.setdefault("FLIGHTSIM_XPLANE_LIGHTING", "off")
 os.environ.setdefault("FLIGHTSIM_XPLANE_TERRAIN", "off")
+# Place names resolve from the built-in list only: no test may reach
+# OpenStreetMap (core/nl/geocode.py; tests/test_geocode.py fakes it).
+os.environ.setdefault("FLIGHTSIM_GEOCODER", "offline")
+# A compile naming a place must not start a terrain download in the
+# background (webapp.runs.TerrainPrefetch); tests/test_terrain_prefetch.py
+# switches it on with a stubbed bake.
+os.environ.setdefault("FLIGHTSIM_TERRAIN_PREFETCH", "off")
 
 from core.util.platform import ue_available  # noqa: E402
 

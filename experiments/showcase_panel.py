@@ -286,7 +286,7 @@ def build_panel_clip(card_path: Path, manifest_path: Path, conditions: Dict,
     proc = subprocess.run([
         str(_ffmpeg()), "-y",
         "-i", str(raw_clip),
-        "-framerate", str(fps), "-i", str(work / "panel_%04d.png"),
+        "-framerate", f"{float(fps):g}", "-i", str(work / "panel_%04d.png"),
         "-filter_complex", "[0:v][1:v]vstack=inputs=2",
         "-c:v", "libx264", "-preset", "medium", "-crf", "19",
         "-pix_fmt", "yuv420p", str(out_clip),

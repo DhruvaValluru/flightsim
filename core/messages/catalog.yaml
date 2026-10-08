@@ -207,6 +207,15 @@ terrain.landcover_grid:
 terrain.unbaked:
   sentence: "No terrain has been prepared for the coordinates asked for."
   hint: "Prepare the terrain there first (it downloads once), then run again."
+google_tiles.undulation_missing:
+  sentence: "The render could not tell how high to place Google's 3D tiles, because no geoid height was given for this place."
+  hint: "Write the run card again with FLIGHTSIM_GOOGLE_TILES on, so it carries the geoid height."
+terrain.google_tiles:
+  sentence: "Google's 3D tiles could not be set up for this render."
+  hint: "Set GOOGLE_MAPS_API_KEY or CESIUM_ION_TOKEN, and check the render log for which step failed."
+google_tiles.terrain:
+  sentence: "Google's 3D tiles would show a real place, but the aircraft would fly over flat or made-up ground there."
+  hint: "Prepare the real terrain for this place first, or turn FLIGHTSIM_GOOGLE_TILES off."
 terrain.clearance:
   sentence: "The planned flight would descend too close to the terrain along its path."
 terrain.impact:
@@ -803,6 +812,18 @@ icing.airframe_data:
 card.icing_schedule:
   sentence: "The run card's icing schedule is malformed: a key is missing or out of order, or the coefficient table is not six numbers, so the host ices nothing."
   hint: "Regenerate the card from the scenario; the schedule is written by the scenario tools, never by hand."
+rain.rate_missing:
+  sentence: "The rain's effect on the aircraft needs a rain rate, and none usable is stated: the rate has to be a positive number of millimetres per hour within the recorded extreme."
+  hint: "State the rain rate in millimetres per hour, or turn the rain's aerodynamics off for a runway that is wet after the rain."
+rain.runway_condition:
+  sentence: "The runway condition is not one this build models: the runway can be dry, wet, or under standing water."
+  hint: "Choose dry, wet or standing water, or leave it out (wet when rain is falling)."
+rain.factor_range:
+  sentence: "The rain's wetted-wing penalty is outside its stated bound (not {actual}): the lift loss is a fraction from 0 to 0.5 and the drag rise from 0 to 2, and aerodynamics is true or false."
+  hint: "Keep the penalties within their bounds, or leave them out for the stated defaults."
+rain.airframe_data:
+  sentence: "This aircraft has no frontal area or tyre pressure on file for the rain, so its drops' force or its wet-runway braking would be a guess."
+  hint: "State the aircraft's frontal area and main-tyre pressure in the rain block, or give the aircraft config those numbers with their sources."
 dis.entity_type_unknown:
   sentence: "The standard's entity-type numbers for that aircraft have not been entered in the entity-type table, so the stream cannot state what kind of entity it is."
   hint: "Enter the seven numbers from the cited edition of the enumeration standard into the table's row, or ask for the remembered fallback row (marked unverified) or for the unspecified type."
@@ -989,6 +1010,12 @@ buildings.unverified:
 buildings.ids:
   sentence: "A building in the footprint set has no stable identifier, repeats another's, or states a malformed outline or height."
   hint: "Take every identifier from the source, once each, and give each outline at least three corners."
+lighting.preset:
+  sentence: "The lighting preset is not one this build knows."
+  hint: "Choose natural, sunny, super bright, soft, hazy, overcast, golden hour or dramatic."
+lighting.range:
+  sentence: "A lighting value is outside what the render can show."
+  hint: "Keep the sun 2 to 90 degrees up and its direction 0 to 360 degrees, brightness within 5 stops, colour 1700 to 12000 K, shadow softness 0 to 45 degrees, sun and sky fill 0 to 10 times, and haze 0 to 0.05."
 runway.geometry:
   sentence: "The runway cannot be placed: its designator, threshold, heading, length or width is missing, out of range, or disagrees with the heading."
   hint: "State a designator that names the heading, a threshold latitude and longitude, a heading below 360 degrees, a length of 300 to 5500 metres and a width of 18 to 80 metres."

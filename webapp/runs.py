@@ -194,9 +194,75 @@ def _dynamic_scenes(dynamic_dir: Path) -> List[Dict]:
     return scenes
 
 
+def curated_key_at(lat: float, lon: float) -> Optional[str]:
+    """The curated location whose origin these coordinates sit on, or None."""
+    for key, location in LOCATIONS.items():
+        if (abs(float(lat) - location.origin_lat) <= LOCATION_TOLERANCE_DEG
+                and abs(float(lon) - location.origin_lon) <= LOCATION_TOLERANCE_DEG):
+            return key
+    return None
+
+
+def named_place(spec: ScenarioSpec) -> bool:
+    """True when the prompt NAMED a real place: source ``inferred`` on both
+    coordinates -- a listed place's name mapped to its origin (core/nl/
+    llm_compiler.py, geography rules) or any other place name the compiler
+    looked up (core.nl.geocode, :func:`looked_up_place`) -- or the language
+    model CHOSE one for a vague prompt (source ``model`` on both, kept only
+    where the GLO-30 land mask confirms the kind of place). Such a spec
+    means "fly at that real place" exactly as stated coordinates do, so it
+    is held to the same bake rule -- never the flat slab or the
+    synthesised ridge under the place's name (open ocean excepted: there
+    the flat slab at sea level IS the place, :func:`needs_dynamic_bake`)."""
+    sources = {str(spec.latitude.source), str(spec.longitude.source)}
+    return sources == {"inferred"} or sources == {"model"}
+
+
+def looked_up_place(spec: ScenarioSpec) -> bool:
+    """True when the coordinates are a place name the compiler looked up
+    (core.nl.geocode): source inferred, and NOT a curated bake's origin
+    (a curated place has its own bake, :func:`curated_key_at`)."""
+    if not named_place(spec):
+        return False
+    return curated_key_at(float(spec.latitude.value),
+                          float(spec.longitude.value)) is None
+
+
+def open_ocean_scene(spec: ScenarioSpec) -> bool:
+    """The spec flies over open ocean at a 0 m datum: no GLO-30 land in or
+    beside its origin's one-degree cell (core.terrain.landmask), so the
+    flat slab at sea level is that place's real ground. The default 0, 0
+    origin is "no geography requested", not a place, so it never counts."""
+    from core.terrain.landmask import open_ocean
+
+    if "default" in (str(spec.latitude.source), str(spec.longitude.source)):
+        return False
+    return (float(spec.terrain_elevation.value) == 0.0
+            and open_ocean(float(spec.latitude.value), float(spec.longitude.value)))
+
+
+def _chosen_origin(spec: ScenarioSpec):
+    """(lat, lon, datum) for google_tiles_terrain_refusal, or three Nones
+    when the coordinates are the default "no geography" origin."""
+    if "default" in (str(spec.latitude.source), str(spec.longitude.source)):
+        return None, None, None
+    return (float(spec.latitude.value), float(spec.longitude.value),
+            float(spec.terrain_elevation.value))
+
+
+def names_real_place(spec: ScenarioSpec) -> bool:
+    """True when the coordinates are a real place someone named: stated
+    (source user), a curated place named in the prompt, or a place name
+    the compiler looked up (:func:`named_place`)."""
+    if {str(spec.latitude.source), str(spec.longitude.source)} == {"user"}:
+        return True
+    return named_place(spec)
+
+
 def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
-    """None, or the named refusal for USER-stated coordinates that no bake
-    covers yet.
+    """None, or the named refusal for coordinates someone named -- stated,
+    or a place name the compiler looked up (:func:`names_real_place`) --
+    that no bake covers yet.
 
     Stated coordinates mean "fly at that real place": defaulted and
     placed-on-scene coordinates never trigger (this runs BEFORE
@@ -224,8 +290,29 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
             "latitude": float(spec.latitude.value),
             "longitude": float(spec.longitude.value),
         }
-    if (str(spec.latitude.source) != "user"
-            or str(spec.longitude.source) != "user"):
+    # Open ocean has no GLO-30 tile to bake and needs none: the sea
+    # surface is the flat slab at a 0 m datum (core.terrain.landmask).
+    if open_ocean_scene(spec):
+        return None
+    if not names_real_place(spec):
+        # Google's tiles draw the real place under ANY chosen origin, a
+        # scene-setting stage included; the flat slab there would refuse
+        # google_tiles.terrain at render time (measured 2026-10-08: a
+        # staged Flint Hills without its bake). Bake it first instead.
+        from core.scenario.card import google_tiles_requested
+
+        if (google_tiles_requested() and scene.get("terrain") is None
+                and "default" not in (str(spec.latitude.source),
+                                      str(spec.longitude.source))):
+            lat, lon = float(spec.latitude.value), float(spec.longitude.value)
+            return {
+                "constraint": "terrain.unbaked",
+                "message": f"Google tiles are on and no bake covers this scene "
+                           f"({lat:.4f}, {lon:.4f}); POST /bake with these "
+                           f"coordinates so the physics flies the ground the "
+                           f"tiles draw, then run again",
+                "latitude": lat, "longitude": lon,
+            }
         return None
     # The synthesised control ridge is NOT a place (the ERA5 doctrine):
     # stated coordinates that fall on no real bake refuse here even when
@@ -236,9 +323,22 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
         return None
     lat = float(spec.latitude.value)
     lon = float(spec.longitude.value)
+    curated = curated_key_at(lat, lon)
+    if curated is not None:
+        return {
+            "constraint": "terrain.unbaked",
+            "message": f"the {curated} terrain is not baked on this machine, so the "
+                       f"aircraft would fly over flat ground (or a synthesised ridge) "
+                       f"under a real place's name; POST /bake with these coordinates "
+                       f"(or run scripts/bake_terrain.py {curated}) to fetch and "
+                       f"verify it, then run again",
+            "latitude": lat, "longitude": lon,
+        }
+    what = ("stated coordinates" if str(spec.latitude.source) == "user"
+            else "coordinates of the place the prompt names")
     return {
         "constraint": "terrain.unbaked",
-        "message": f"no GLO-30 bake covers the stated coordinates "
+        "message": f"no GLO-30 bake covers the {what} "
                    f"({lat:.4f}, {lon:.4f}); POST /bake with them to fetch "
                    f"and verify that terrain (first fetch downloads tiles, "
                    f"a few minutes), then run again",
@@ -246,10 +346,121 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
     }
 
 
+#: FLIGHTSIM_TERRAIN_PREFETCH=off stops /compile from starting a terrain
+#: download in the background (the test suite sets it: no test may reach
+#: the network from a compile). Any other value, or unset, is on.
+TERRAIN_PREFETCH_ENV = "FLIGHTSIM_TERRAIN_PREFETCH"
+
+
+def terrain_prefetch_enabled() -> bool:
+    return os.environ.get(TERRAIN_PREFETCH_ENV, "").strip().lower() not in (
+        "off", "0", "false", "no")
+
+
+class TerrainPrefetch:
+    """Terrain bakes started early, one per place, in the background.
+
+    The bake a named place needs used to start only when Run was clicked
+    (/run refused terrain.unbaked, the page called /bake and waited). Now
+    /compile starts it as soon as the spec names the place, so the
+    download runs while the person sets lighting and cameras; /bake joins
+    the job already running for those coordinates instead of starting a
+    second one (two bakes of one place would write the same files). A
+    failed job is retried by the next request, never served stale.
+
+    Nothing here decides WHETHER a place needs a bake -- that stays
+    :func:`needs_dynamic_bake`, the same rule /run applies -- and nothing
+    changes what runs: the bake is the one bake_on_demand writes.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._jobs: Dict[tuple, Dict[str, Any]] = {}
+
+    @staticmethod
+    def key(lat: float, lon: float) -> tuple:
+        return (round(float(lat), 4), round(float(lon), 4))
+
+    def start(self, lat: float, lon: float, bake=None) -> Dict[str, Any]:
+        """Start (or keep) the bake for these coordinates; its status.
+        ``bake``: the bake function, ``bake_on_demand`` by default."""
+        key = self.key(lat, lon)
+        with self._lock:
+            job = self._jobs.get(key)
+            if job is None or job["state"] == "failed":
+                job = {"state": "downloading", "entry": None, "error": None,
+                       "started": time.time(), "finished": threading.Event()}
+                self._jobs[key] = job
+                threading.Thread(target=self._run, args=(key, job, bake or bake_on_demand),
+                                 name=f"terrain-prefetch {key}", daemon=True).start()
+        return self.status(lat, lon)
+
+    @staticmethod
+    def _run(key: tuple, job: Dict[str, Any], bake) -> None:
+        try:
+            job["entry"] = bake(*key)
+            job["state"] = "done"
+        except Exception as exc:  # named to the page, never swallowed
+            job["error"] = f"{type(exc).__name__}: {exc}"
+            job["state"] = "failed"
+        finally:
+            job["finished"].set()
+
+    def status(self, lat: float, lon: float) -> Optional[Dict[str, Any]]:
+        """{state, latitude, longitude, elapsed_s, title?, error?}, or None
+        when no bake was started for these coordinates."""
+        key = self.key(lat, lon)
+        job = self._jobs.get(key)
+        if job is None:
+            return None
+        out = {"state": job["state"], "latitude": key[0], "longitude": key[1],
+               "elapsed_s": round(time.time() - job["started"], 1)}
+        if job["state"] == "done" and isinstance(job["entry"], dict):
+            out["title"] = job["entry"].get("title")
+        if job["error"]:
+            out["error"] = job["error"]
+        return out
+
+    def bake(self, lat: float, lon: float, bake=None) -> Dict:
+        """The bake /bake answers with: the job already running for these
+        coordinates (waited for), a finished one, or a new one. Raises
+        RuntimeError carrying the job's own error when it failed."""
+        self.start(lat, lon, bake)
+        job = self._jobs[self.key(lat, lon)]
+        job["finished"].wait()
+        if job["state"] != "done":
+            raise RuntimeError(job["error"] or "the terrain bake did not finish")
+        return job["entry"]
+
+
+PREFETCH = TerrainPrefetch()
+
+
+def prefetch_terrain_for(spec: ScenarioSpec, bake=None) -> Optional[Dict[str, Any]]:
+    """Start the bake a compiled spec will need at Run, in the background;
+    its status, or None when it needs none (or prefetch is off).
+
+    Applies /run's own pre-bake planners (scene-setting, mapped water) to a
+    COPY, so the compiled spec the page shows is untouched and the
+    question asked is exactly the one /run will ask."""
+    if not terrain_prefetch_enabled():
+        return None
+    probe = ScenarioSpec.from_dict(spec.to_dict())
+    plan_scene_setting(probe)
+    plan_water_surface(probe)
+    unbaked = needs_dynamic_bake(probe)
+    if unbaked is None or "latitude" not in unbaked:
+        return None
+    return PREFETCH.start(unbaked["latitude"], unbaked["longitude"], bake)
+
+
 def bake_on_demand(lat: float, lon: float) -> Dict:
     """Fetch, bake and verify GLO-30 for arbitrary coordinates; register
     the scene. Raises (DEMError / URLError by name) rather than writing an
     unverified or empty bake -- open ocean has no tiles and says so."""
+    curated = curated_key_at(lat, lon)
+    if curated is not None:
+        return bake_curated(curated)
     location = dynamic_location(lat, lon)
     dynamic_dir = TERRAIN_DIR / "dynamic"
     raster = dynamic_dir / f"{location.key}.r16"
@@ -263,6 +474,34 @@ def bake_on_demand(lat: float, lon: float) -> Dict:
     sidecar.write_text(json.dumps(entry, indent=1), encoding="utf-8")
     entry["terrain"] = str(raster.with_suffix(""))
     return entry
+
+
+def bake_curated(key: str) -> Dict:
+    """Fetch, bake and verify a curated location (named summits checked),
+    plus its Sentinel-2 drape, into TERRAIN_DIR -- what scripts/
+    bake_terrain.py does for one key, reached from the page's on-demand
+    bake when a named place has no bake yet. A bake already on disk is
+    kept. The drape failing leaves the verified bake standing (the
+    terrain then renders untextured, and the scene says imagery null)."""
+    location = LOCATIONS[key]
+    raster = TERRAIN_DIR / f"{key}.r16"
+    if not raster.is_file():
+        TERRAIN_DIR.mkdir(parents=True, exist_ok=True)
+        bake(location, REPO / "data" / "glo30", TERRAIN_DIR)
+    imagery = "present"
+    if not (TERRAIN_DIR / f"{key}_imagery.json").is_file():
+        try:
+            from core.terrain.imagery import drape
+
+            drape(location, TERRAIN_DIR / key, REPO / "data" / "imagery_cache",
+                  TERRAIN_DIR)
+            imagery = "draped"
+        except Exception as exc:
+            imagery = f"FAILED ({type(exc).__name__}: {exc}); renders untextured"
+    return {"key": key, "title": location.title,
+            "origin_lat": location.origin_lat, "origin_lon": location.origin_lon,
+            "crs": location.crs, "identity": "named summits verified",
+            "imagery": imagery, "terrain": str(TERRAIN_DIR / key)}
 
 
 #: Guards the one-time control-ridge synthesis; concurrent runs must not
@@ -469,7 +708,10 @@ def _auto_scene(spec: ScenarioSpec) -> Dict:
         # 3299 m peaks under a "413 m" scene (measured: a 3000 m flight
         # refused terrain.clearance at -89.5 m AGL over "413 m staged
         # terrain" because the ridge had been substituted).
-        if baked(terrain_dir / "control_ridge"):
+        # Nor for a place the prompt named (a curated place or one
+        # core.nl.geocode looked up): its own
+        # ground arrives with the on-demand bake.
+        if baked(terrain_dir / "control_ridge") and not named_place(spec):
             return {
                 "key": "control", "kind": "synthesised control ridge",
                 "terrain": str(terrain_dir / "control_ridge"),
@@ -488,6 +730,15 @@ def _auto_scene(spec: ScenarioSpec) -> Dict:
                          f"{float(spec.terrain_elevation.value):g} m datum "
                          f"until then -- the synthesised ridge is never "
                          f"substituted for a staged place"}
+    if open_ocean_scene(spec):
+        from core.terrain.ocean import open_ocean_at
+
+        listed = open_ocean_at(lat, lon)
+        where = listed.title if listed else f"open ocean at {lat:.3f}, {lon:.3f}"
+        return {"key": "flat", "kind": "flat (open ocean)", "terrain": None,
+                "imagery": None,
+                "label": f"{where}: the flat slab at sea level is the real "
+                         f"ground there (no GLO-30 land within a degree)"}
     return {"key": "flat", "kind": "flat", "terrain": None, "imagery": None,
             "label": "no terrain requested; flat slab at the spec's "
                      "elevation"}
@@ -507,6 +758,13 @@ def place_on_scene(spec: ScenarioSpec) -> None:
     """
     scene = pick_scene(spec)
     if scene["key"] != "control":
+        return
+    if named_place(spec) or (str(spec.latitude.source) == "user"
+                             and str(spec.longitude.source) == "user"):
+        # A real place someone stated or named is never moved onto the
+        # synthesised ridge (measured: a named Everest flight moved to
+        # 0.138 N, 10.649 E). needs_dynamic_bake refuses it first on the
+        # web path; a caller that skipped that keeps the coordinates.
         return
     from pyproj import Transformer
 
@@ -933,9 +1191,11 @@ def plan_terrain_environment(spec: ScenarioSpec) -> None:
 SCENE_SETTING_BAKES = {"desert": "grand_canyon", "grassland": "flint_hills",
                        "forest": "yosemite"}
 #: Prompt words that opt OUT of scene-setting: the user asked for the flat
-#: slab (or water) and gets exactly that.
-SCENE_SETTING_OPT_OUT = ("flat", "featureless", "ocean", "open sea",
-                         "over the sea", "over water", "offshore")
+#: slab and gets exactly that.
+SCENE_SETTING_OPT_OUT = ("flat", "featureless")
+#: Prompt words that stage an open-ocean point (core.terrain.ocean): the
+#: flat slab at sea level, at a real place.
+OCEAN_WORDS = ("ocean", "open sea", "over the sea", "over water", "offshore")
 
 
 def renderable_aircraft() -> List[str]:
@@ -1057,13 +1317,31 @@ def plan_scene_setting(spec: ScenarioSpec) -> None:
     if (str(spec.latitude.source) != "default"
             or str(spec.longitude.source) != "default"):
         return
+    prompt = (spec.prompt or "").lower()
+    surface = str(spec.surface.value)
+    # An ocean scene at sea level is staged whatever source its 0 m datum
+    # carries (a model may state "inferred 0" for the sea).
+    if float(spec.terrain_elevation.value) == 0.0 and (
+            surface == "ocean" or any(word in prompt for word in OCEAN_WORDS)):
+        # No ocean bake, and none needed: an open-ocean point's ground IS
+        # the flat slab at sea level (core.terrain.ocean), so the scene
+        # sits at a real place -- the one Google's tiles draw, when on.
+        from core.terrain.ocean import pick_open_ocean
+
+        point = pick_open_ocean(spec.prompt)
+        frm = (f"scene-setting: an ocean with no place stated, so {point.title} "
+               f"stages the scene (flat sea level, no land within ~330 km); name "
+               f"a place to move it")
+        spec.plan("latitude", point.lat, frm=frm)
+        spec.plan("longitude", point.lon, frm=frm)
+        if str(spec.surface.source) == "default":
+            spec.plan("surface", "ocean", frm=frm)
+        return
     if str(spec.terrain_elevation.source) != "default":
         return          # unnamed mountains: the generic ridge is the scene
-    prompt = (spec.prompt or "").lower()
     if any(word in prompt for word in SCENE_SETTING_OPT_OUT):
         return
-    surface = str(spec.surface.value)
-    if surface == "ocean" or surface == "city":
+    if surface == "city":
         return
     key = SCENE_SETTING_BAKES.get(surface, "flint_hills")
     location = LOCATIONS[key]
@@ -1256,7 +1534,9 @@ def xplane_lighting_flags(look: Optional[Dict],
     if look:
         tod.update({key: look[key] for key in DEFAULT_LOOK if key in look})
     sun_elev, sun_azim = float(tod["sun_elev"]), float(tod["sun_azim"])
-    if look == STORM_LOOK:
+    rained = float(((look or {}).get("lighting") or {}).get("rain_look_mmh") or 0.0)
+    if look == STORM_LOOK or rained >= 4.0:
+        # The storm look, or rain heavy enough to be under a full cloud deck.
         condition = "ocast"
     elif float(tod["fog_density"]) >= XPLANE_HAZY_FOG_DENSITY:
         condition = "hazy"
@@ -1559,6 +1839,19 @@ STORM_LOOK = {"sun_elev": 10.0, "sun_azim": 180.0, "exposure_bias": 9.6,
               "fog_density": 0.007}
 
 
+def rendered_frames(directory: Path) -> List[Path]:
+    """The rendered frames in a camera directory, ``frame_NNNN.png`` only.
+
+    A labelled run writes ``frame_NNNN_mask.png``, ``_class.png``,
+    ``_depth.png`` and ``_sensor.png`` beside every frame, and
+    ``frame_*.png`` matched them all: a one-frame preview counted as five
+    frames (a "clip"), and a clip's length read five times too long."""
+    import re
+
+    return sorted(p for p in Path(directory).glob("frame_*.png")
+                  if re.fullmatch(r"frame_\d{4}\.png", p.name))
+
+
 def _ffmpeg(command: List[str]):
     """Run ffmpeg; None when the binary is not on this machine.
 
@@ -1592,12 +1885,17 @@ def render_look_for(spec: ScenarioSpec, event_note) -> Optional[Dict]:
     sampled = randomization_look(spec)
     if sampled is not None:
         return sampled
-    if event_note:
-        return STORM_LOOK
-    # A stated time of day (visual plan V1): its sun and exposure; None
-    # when unstated keeps the default look byte-identical. The physical
-    # sky (FLIGHTSIM_SKY=physical) replaces these flags with -sky=.
-    return None if physical_sky_enabled(spec) else sun_look(spec)
+    if physical_sky_enabled(spec):
+        # The physical sky (FLIGHTSIM_SKY=physical) replaces the sun flags
+        # with -sky=; the storm look still states its fog there.
+        return STORM_LOOK if event_note else None
+    # A stated time of day (visual plan V1) places the sun, the storm look
+    # replaces it, and a stated lighting block is layered on whichever
+    # it was; None when none of the three is stated keeps the default
+    # look byte-identical.
+    base = STORM_LOOK if event_note else sun_look(spec)
+    lit = lighting_look(spec, base)
+    return lit if lit is not None else base
 
 
 #: Render quality presets (visual plan V0). "measure" is the configuration
@@ -1622,6 +1920,24 @@ def render_quality() -> str:
             f"FLIGHTSIM_RENDER_QUALITY={quality!r} is not one of "
             f"{sorted(RENDER_QUALITIES)}")
     return quality
+
+
+#: The storm weather (core/scene/storm_weather.py, FlightSimWeather.cpp) is
+#: OPT-IN beside the weather look: FLIGHTSIM_WEATHER_BACKEND=procedural
+#: (deterministic drops) or niagara (the hand-built NS_FlightSimRain)
+#: adds -weather-backend= to the render; unset or "off" adds nothing, so
+#: every pinned command stands.
+WEATHER_BACKENDS = ("off", "procedural", "niagara")
+
+
+def weather_backend_flags() -> List[str]:
+    """The render's -weather-backend= token, or none; ValueError names an
+    unknown backend."""
+    backend = os.environ.get("FLIGHTSIM_WEATHER_BACKEND", "off").strip() or "off"
+    if backend not in WEATHER_BACKENDS:
+        raise ValueError(f"FLIGHTSIM_WEATHER_BACKEND={backend!r} is not one of "
+                         f"{list(WEATHER_BACKENDS)}")
+    return [] if backend == "off" else [f"-weather-backend={backend}"]
 
 
 def exposure_bias_for(elevation_deg: float):
@@ -1670,15 +1986,78 @@ def sun_look(spec: ScenarioSpec) -> Optional[Dict]:
                   float(spec.longitude.value), day)
     require_renderable(sun)
     bias, bias_basis = exposure_bias_for(sun.elevation_deg)
+    from core.scene.lighting import compass_to_engine_azimuth
+
     return {
         "sun_elev": round(sun.elevation_deg, 2),
-        "sun_azim": round(sun.azimuth_deg, 2),
+        # -sun-azim is the ENGINE yaw toward the sun (east = 0, north =
+        # 90; core.scenario.randomization.engine_sun_azimuth), not the
+        # compass bearing NOAA gives: passing the bearing through put a
+        # dawn sun (compass ~90, east) in the north.
+        "sun_azim": round(compass_to_engine_azimuth(sun.azimuth_deg), 2),
         "exposure_bias": bias,
         "note": (f"sun {sun.elevation_deg:.1f} deg up at azimuth "
                  f"{sun.azimuth_deg:.1f} deg ({sun.basis}; "
                  f"{sun.when_utc.strftime('%H:%M')} UTC; NOAA solar "
                  f"position); exposure bias {bias:g}, {bias_basis} (VISUAL)"),
     }
+
+
+def lighting_look(spec: ScenarioSpec, base: Optional[Dict] = None) -> Optional[Dict]:
+    """The look with the spec's ``lighting`` block layered on ``base``
+    (the time of day's or the storm look; None = the default look), or
+    None when the block is the documented default -- the render command
+    then stays exactly what it was (pinned by test).
+
+    The sun moves to the stated (or the preset's) exact degrees, the
+    calibrated exposure follows the new elevation (:func:`exposure_bias_for`)
+    and the brightness stops add on top; the engine knobs ride as their
+    own look keys, which core.render.flags turns into commandlet flags.
+    VISUAL ONLY. core/scene/lighting.py says what is and is not claimed.
+    """
+    from core.render.flags import DEFAULT_LOOK
+    from core.scene import lighting
+
+    block = getattr(spec, "lighting", None)
+    rate = rain_rate(spec)
+    if (block is None or block.is_default()) and rate is None:
+        return None
+    start = dict(DEFAULT_LOOK)
+    if base:
+        start.update({key: base[key] for key in DEFAULT_LOOK if key in base})
+    stated = lighting.stated_values(block) if block is not None else {}
+    if rate is not None:
+        # Rain falls from cloud: the knobs the lighting block leaves open
+        # take the rain look (core/scene/lighting.py RAIN_ANCHORS).
+        stated = lighting.with_rain(stated, rate, start["fog_density"])
+    look = lighting.apply(start, stated, lambda elevation: exposure_bias_for(elevation)[0])
+    if rate is not None:
+        look["lighting"]["rain_look_mmh"] = rate
+        look["note"] = f"rain look for {rate:g} mm/h; {look['note']}"
+    if base and base.get("note"):
+        look["note"] = f"{look['note']}; on top of: {base['note']}"
+    return look
+
+
+#: The rain look a storm (thunderstorm, tornado) takes when no rain rate
+#: is stated: storms rain, and without it the storm rendered under a full
+#: sun. LIGHTING ONLY -- no streaks, no extinction record; a stated rate
+#: replaces it everywhere.
+STORM_RAIN_LOOK_MMH = 8.0
+
+
+def rain_rate(spec: ScenarioSpec) -> Optional[float]:
+    """The rain rate (mm/h) the look is lit for: the stated one, else
+    :data:`STORM_RAIN_LOOK_MMH` under a storm, else None."""
+    value = getattr(getattr(spec, "precipitation_rate_mmh", None), "value", None)
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        rate = 0.0
+    if rate > 0.0:
+        return rate
+    event = str(getattr(getattr(spec, "weather_event", None), "value", "none"))
+    return STORM_RAIN_LOOK_MMH if event in ("thunderstorm", "tornado") else None
 
 
 def physical_sky_enabled(spec: ScenarioSpec) -> bool:
@@ -2248,8 +2627,10 @@ class RunManager:
             triangle_budget=terrain_triangle_budget(scene),
             # The SHARED recorder's own file (same component all three
             # hosts use), stamping the FDM's clock -- the aero panel
-            # reads it verbatim, no resampling.
-            telemetry=telemetry, extra=extra)
+            # reads it verbatim, no resampling. The storm weather's
+            # backend rides in extra, only when FLIGHTSIM_WEATHER_BACKEND
+            # asks for it.
+            telemetry=telemetry, extra=list(extra) + weather_backend_flags())
         log = frames.parent / "render.log"
         # Unattended and watched (core/render/headless.py): no window, no
         # OS error box, no stdin; a pass that writes nothing for the stall
@@ -2301,7 +2682,7 @@ class RunManager:
         made = []
         for camera_id in camera_ids:
             directory = frames / camera_id
-            if len(sorted(directory.glob("frame_*.png"))) < 2:
+            if len(rendered_frames(directory)) < 2:
                 continue          # a still is not a clip
             target = clips / f"{camera_id}.mp4"
             done = _ffmpeg([
@@ -2316,8 +2697,8 @@ class RunManager:
         return made
 
     @staticmethod
-    def _encode_capture_clip(frames: Path, clip: Path,
-                             camera_ids: List[str]) -> Optional[str]:
+    def _encode_capture_clip(frames: Path, clip: Path, camera_ids: List[str],
+                             manifest_path: Optional[Path] = None) -> Optional[str]:
         """An mp4 of ONE camera's frames, leaving every frame on disk.
 
         Deliberately not ``encode_clip``: that one reads a flat
@@ -2332,16 +2713,24 @@ class RunManager:
         camera's render.json. Returning a bare bool left the panel to
         guess, and it guessed a flat frames/render.json that a capture
         run does not have.
+
+        ``manifest_path``: the capture manifest, so the clip plays at the
+        rate the frames were TAKEN (:meth:`_capture_fps`). Encoding a
+        continuous capture (ten frames per second of flight) at the
+        render's 30 fps played a 3 s flight in 1 s -- the clip selector's
+        "3 s" gave a one-second video (measured on the owner's machine).
         """
         from experiments.showcase_matrix import FFMPEG, FPS
 
         for camera_id in camera_ids:
             directory = frames / camera_id
-            if not sorted(directory.glob("frame_*.png")):
+            if not rendered_frames(directory):
                 continue
             clip.parent.mkdir(parents=True, exist_ok=True)
+            rate = (RunManager._capture_fps(manifest_path, camera_id)
+                    if manifest_path is not None else float(FPS))
             done = _ffmpeg([
-                str(FFMPEG), "-y", "-framerate", str(FPS),
+                str(FFMPEG), "-y", "-framerate", f"{rate:g}",
                 "-i", str(directory / "frame_%04d.png"),
                 "-c:v", "libx264", "-preset", "medium", "-crf", "19",
                 "-pix_fmt", "yuv420p", str(clip),
@@ -2541,6 +2930,20 @@ class RunManager:
             run.push("failed", f"[{exc.constraint}] {exc.message}")
             return
         scene = pick_scene(spec)
+        # Google's tiles draw the real place; the physics flies this
+        # scene's ground. Over the slab or the synthesised ridge the two
+        # are different places, so the render refuses by name.
+        from core.scenario.card import (
+            GOOGLE_TILES_TERRAIN_CONSTRAINT, google_tiles_terrain_refusal,
+        )
+        from core.terrain.heightfield import Heightfield
+
+        tiles_refusal = google_tiles_terrain_refusal(
+            Heightfield.read(Path(scene["terrain"])) if scene.get("terrain") else None,
+            *_chosen_origin(spec))
+        if tiles_refusal is not None:
+            run.push("failed", f"[{GOOGLE_TILES_TERRAIN_CONSTRAINT}] {tiles_refusal}")
+            return
         # X-Plane ground textures replace the scene's own texture when
         # the extraction is present (attach_xplane_drape); the snow class
         # follows the spec's month.
@@ -2697,6 +3100,18 @@ class RunManager:
         except Exception:
             reference = None   # marks are optional; the run is not
         run.reference = reference
+        # The lighting block, as render_look_for applies it (or why not).
+        lighting_note = None
+        if not spec.lighting.is_default() or rain_rate(spec) is not None:
+            if physical_sky_enabled(spec):
+                lighting_note = ("lighting block NOT applied: the physical sky "
+                                 "lights the scene itself")
+            elif randomization_look(spec) is not None:
+                lighting_note = ("lighting block NOT applied: the randomisation "
+                                 "block's sampled look is the record")
+            else:
+                lighting_note = lighting_look(
+                    spec, STORM_LOOK if event_note else sun)["note"]
         run.conditions = {
             "wind_note": (f"{wind_kt:g} kt from "
                           f"{float(spec.wind_direction.value):g} deg"
@@ -2725,6 +3140,7 @@ class RunManager:
                         f"a whole (sun, fog and exposure together)"
                         if event_note else sun_note)}
                if sun_note else {}),
+            **({"lighting": lighting_note} if lighting_note else {}),
         }
         # The scene's raster, for the headless pre-run's ground model and
         # for the terrain-coupled camera checks. Same construction the
@@ -2748,6 +3164,19 @@ class RunManager:
         capture_cameras = None
         capture_landmarks = None
         if wants_capture(spec):
+            # FLIGHTSIM_CAPTURE_PASSES: the extra ground-truth passes
+            # (normals, motion vectors, base colour, flow, points, amodal)
+            # on every camera that states none; unset changes nothing.
+            from webapp.capture import apply_capture_passes
+
+            try:
+                extra_passes = apply_capture_passes(spec)
+            except CaptureError as exc:
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+            if extra_passes:
+                run.push("cameras", "ground-truth passes asked for: "
+                                    + ", ".join(extra_passes))
             run.push("cameras", f"solving {len(spec.cameras)} camera "
                                 f"pose track(s) and capture schedule(s)")
             try:
@@ -2948,6 +3377,13 @@ class RunManager:
             run.push("rendering",
                      f"rendering {len(camera_ids)} camera pass(es): "
                      f"{', '.join(camera_ids)}")
+            # The engine words any camera's passes name (normal, velocity,
+            # albedo) ride -passes= on every camera's pass, as the CLI's.
+            from core.capture.passes import engine_words
+            from core.render.flags import passes_flag
+
+            pass_token = passes_flag(engine_words(spec.cameras))
+            pass_extra = [pass_token] if pass_token else []
             try:
                 capture_render_passes(
                     card, frames, camera_ids,
@@ -2961,7 +3397,7 @@ class RunManager:
                         # reported NOT RUN on every web run.
                         telemetry=telemetry,
                         look=render_look_for(spec, event_note),
-                        camera_flags=camera_flags, extra=extra,
+                        camera_flags=camera_flags, extra=list(extra) + pass_extra,
                         sky=sky))
             except CaptureError as exc:
                 # The render log for the pass that failed sits beside its
@@ -2993,6 +3429,23 @@ class RunManager:
                                  "overlays and the verification summary")
             capture_write_manifest(spec, capture_solved, out, scene,
                                    heightfield=capture_heightfield)
+            # Phase 2 (package C), as the CLI capture does it: complete
+            # every frame's object records from the bundle the engine just
+            # wrote (the tight box from the ID image, the visible fraction
+            # from the alone pass, occluded_by, the depth under the mask).
+            # Without it the records keep their nulls and the box, depth
+            # and visibility checks grade a record that was never filled.
+            from core.capture.labels import attach_engine_labels
+            from core.capture.passes import PassError
+
+            try:
+                attached = attach_engine_labels(out)
+            except PassError as exc:
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+            run.push("labels", f"engine labels attached on {attached['attached']} of "
+                               f"{attached['frames']} frame(s) "
+                               f"({attached['without_bundle']} without a bundle)")
             # Phase 10: the sensor model, as a seeded post-pass over the
             # rendered frames of every camera whose profile is not the
             # ideal pinhole. Reproducible from the spec's own seed.
@@ -3027,9 +3480,16 @@ class RunManager:
         # ARE the deliverable and the manifest names every one of them.
         clip_camera = None
         if capture_solved is not None:
-            clip_camera = self._encode_capture_clip(frames, raw_clip,
-                                                    camera_ids)
+            clip_camera = self._encode_capture_clip(
+                frames, raw_clip, camera_ids, out / "capture_manifest.json")
             clip_ok = clip_camera is not None
+            if clip_ok:
+                # Say how long the clip is, so a short one can be checked
+                # against the clip selector without opening the file.
+                shot = len(rendered_frames(frames / clip_camera))
+                rate = self._capture_fps(out / "capture_manifest.json", clip_camera)
+                run.push("encoding", f"clip: {shot} frames of {clip_camera} at "
+                                     f"{rate:.1f} fps = {shot / rate:.1f} s of flight")
         else:
             clip_ok = encode_clip(frames, raw_clip)
         if not clip_ok:
@@ -3062,9 +3522,13 @@ class RunManager:
             "turbulence_seed": seed if turbulent else None,
         }
         clip = out / "clip.mp4"
+        # The panel's frames are the clip's frames, one each: they play at
+        # the clip's own rate or the two halves of the stack drift apart.
+        clip_fps = (self._capture_fps(out / "capture_manifest.json", clip_camera)
+                    if clip_camera else FPS)
         try:
             panel_ok = build_panel_clip(card, manifest, conditions, raw_clip,
-                                        clip, fps=FPS)
+                                        clip, fps=clip_fps)
         except Exception as exc:
             # No ffmpeg (ffmpeg.missing) or no raw clip to stack onto: on a
             # capture run that is "no panel", not a lost run.

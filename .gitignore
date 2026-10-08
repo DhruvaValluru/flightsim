@@ -26,3 +26,5 @@ ue/Plugins/*/Binaries/
 
 ue_tests.log
 data/imagery_cache/
+data/geocode_cache.json
+data/textures/
