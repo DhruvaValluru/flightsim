@@ -1504,6 +1504,35 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			CardLook->TryGetNumberField(TEXT("cloud_drift_mps"), SceneOptions.CloudDriftMps);
 			CardLook->TryGetNumberField(TEXT("cloud_drift_from_deg"), SceneOptions.CloudDriftFromDeg);
 		}
+		// The weather look (core/scene/weather_look.py, visual only): a
+		// thunderstorm with no cloud layer of its own gets a low, thick,
+		// nearly overcast one (cover 0.95, 1200 m to 9000 m: stated), and a
+		// stated rain or wet runway wets the terrain through the existing
+		// Wetness scalar when the look carried none. The probe overrides
+		// below still win.
+		const TSharedPtr<FJsonObject>* WeatherLookBlock = nullptr;
+		if (WorldCardRoot.IsValid() &&
+		    WorldCardRoot->TryGetObjectField(TEXT("weather_look"), WeatherLookBlock) &&
+		    WeatherLookBlock != nullptr && WeatherLookBlock->IsValid())
+		{
+			FString WeatherStorm;
+			(*WeatherLookBlock)->TryGetStringField(TEXT("storm"), WeatherStorm);
+			if (WeatherStorm == TEXT("thunderstorm") && SceneOptions.CloudLayers.Num() == 0)
+			{
+				FFlightSimCloudLayer StormLayer;
+				StormLayer.CoverFraction = 0.95;
+				StormLayer.BaseMetres = 1200.0;
+				StormLayer.TopMetres = 9000.0;
+				SceneOptions.CloudLayers.Add(StormLayer);
+			}
+			double WeatherWetness = 0.0;
+			if ((*WeatherLookBlock)->TryGetNumberField(TEXT("wetness"), WeatherWetness) &&
+			    WeatherWetness > 0.0 && SceneOptions.Wetness <= 0.0)
+			{
+				SceneOptions.Wetness = FMath::Min(WeatherWetness, 1.0);
+				SceneOptions.Precipitation = TEXT("rain");
+			}
+		}
 		// Probe overrides (Gate 6 controls), each recorded by name.
 		if (CloudCoverFlag >= 0.0)
 		{
@@ -1734,6 +1763,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Animator->BindSurfaceComponent(TEXT("aileron_l"), Frame.LeftAileronHinge);
 		Animator->BindSurfaceComponent(TEXT("aileron_r"), Frame.RightAileronHinge);
 		Animator->BindSurfaceComponent(TEXT("rudder"), Frame.RudderHinge);
+	}
+	// The weather look's ice: an overlay on every part of the airframe,
+	// scaled per step by the card's icing ramp (nothing without ice).
+	if (bVisual)
+	{
+		VisualScene.ApplyIceOverlay(Scenario.Aircraft);
 	}
 	if (MeshAirframe.bLoaded && MeshAirframe.DeclaredSurfaces == 0)
 	{
@@ -2335,6 +2370,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(Error);
 		}
+		// The weather look's rain on the lens, on the same beauty capture.
+		VisualScene.ApplyLensDropsToBeauty(Capture);
 	}
 
 	// -- Phase 2 labels (packages B + C, contracts §1): the ID pass -------

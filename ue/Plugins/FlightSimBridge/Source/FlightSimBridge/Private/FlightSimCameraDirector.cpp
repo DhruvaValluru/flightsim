@@ -293,6 +293,8 @@ void AFlightSimCameraDirector::Tick(float DeltaSeconds)
 	{
 		SmoothedLocation = GetActorLocation();
 		SmoothedAimPoint = AimPoint;
+		SmoothedOffsetXY = FVector(SmoothedLocation.X - AimPoint.X,
+		                           SmoothedLocation.Y - AimPoint.Y, 0.0);
 		bInitialised = true;
 	}
 
@@ -329,16 +331,38 @@ void AFlightSimCameraDirector::UpdateLaggedChase(float DeltaSeconds,
 	const FVector Goal = HeadingOffsetStation(AimPoint, TargetTransform,
 	                                          ChaseOffsetMetres);
 
-	SmoothedLocation = SmoothTowards(SmoothedLocation, Goal, DeltaSeconds,
-	                                 PositionLagSeconds);
-	SmoothedAimPoint = SmoothTowards(SmoothedAimPoint, AimPoint,
-	                                 DeltaSeconds, AimLagSeconds);
+	FollowStation(AimPoint, Goal, DeltaSeconds, PositionLagSeconds);
 
 	SetActorLocation(SmoothedLocation);
 
 	FRotator Look = (SmoothedAimPoint - SmoothedLocation).Rotation();
 	Look.Roll = 0.0f;                 // never inherit roll
 	SetActorRotation(Look);
+}
+
+void AFlightSimCameraDirector::FollowStation(const FVector& AimPoint, const FVector& Goal,
+                                             float DeltaSeconds, float PositionLag)
+{
+	// Horizontally the lag acts on the OFFSET from the aircraft, not on the
+	// camera's world position: a world-position lag trails a steadily
+	// moving target by speed x lag (58 m at 250 kt), which dragged a side
+	// view off its station and the aircraft across the frame over the first
+	// second of every clip. The offset still swings smoothly through a turn
+	// (it rotates with the heading). Vertically the lag stays on the world
+	// position, so a climb or a pitch bob still shows in the frame. Python's
+	// core/capture/poses.py solve_pose_track is the same model.
+	const FVector GoalOffsetXY(Goal.X - AimPoint.X, Goal.Y - AimPoint.Y, 0.0);
+	SmoothedOffsetXY = SmoothTowards(SmoothedOffsetXY, GoalOffsetXY, DeltaSeconds,
+	                                 PositionLag);
+	const double CameraZ = SmoothTowards(FVector(0.0, 0.0, SmoothedLocation.Z),
+	                                     FVector(0.0, 0.0, Goal.Z), DeltaSeconds,
+	                                     PositionLag).Z;
+	const double AimZ = SmoothTowards(FVector(0.0, 0.0, SmoothedAimPoint.Z),
+	                                  FVector(0.0, 0.0, AimPoint.Z), DeltaSeconds,
+	                                  AimLagSeconds).Z;
+	SmoothedLocation = FVector(AimPoint.X + SmoothedOffsetXY.X,
+	                           AimPoint.Y + SmoothedOffsetXY.Y, CameraZ);
+	SmoothedAimPoint = FVector(AimPoint.X, AimPoint.Y, AimZ);
 }
 
 void AFlightSimCameraDirector::UpdateCockpitShoulder(
@@ -381,10 +405,7 @@ void AFlightSimCameraDirector::UpdateWingman(float DeltaSeconds,
 	                                          WingmanOffsetMetres);
 
 	// Station-keeping is tighter than a chase: a wingman holds position.
-	SmoothedLocation = SmoothTowards(SmoothedLocation, Goal, DeltaSeconds,
-	                                 PositionLagSeconds * 0.5f);
-	SmoothedAimPoint = SmoothTowards(SmoothedAimPoint, AimPoint,
-	                                 DeltaSeconds, AimLagSeconds);
+	FollowStation(AimPoint, Goal, DeltaSeconds, PositionLagSeconds * 0.5f);
 
 	SetActorLocation(SmoothedLocation);
 	FRotator Look = (SmoothedAimPoint - SmoothedLocation).Rotation();

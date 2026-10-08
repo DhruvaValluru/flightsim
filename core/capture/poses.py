@@ -14,11 +14,13 @@ The five presets are ported from
 
 * **chase** / **wingman** -- the offset is applied in a HEADING-ONLY
   frame (yaw from the aircraft, pitch and roll discarded; §1.5: using
-  the full rotation is precisely the historic failure), position and
-  aim exponentially smoothed with the C++ time constants
-  (:data:`POSITION_LAG_S`, :data:`AIM_LAG_S`; the wingman's
-  station-keeping is twice as tight). The look rotation never inherits
-  roll.
+  the full rotation is precisely the historic failure), smoothed with
+  the C++ time constants (:data:`POSITION_LAG_S`, :data:`AIM_LAG_S`;
+  the wingman's station-keeping is twice as tight): horizontally the
+  OFFSET from the aircraft is smoothed and the aim is the aircraft
+  itself (no steady trail of speed x tau), vertically the camera
+  height and the aim height are smoothed in the world. The look
+  rotation never inherits roll.
 * **ground** / **tower** -- world-anchored: the camera does not move;
   only the aim point is smoothed toward the aircraft. Roll stays zero.
 * **cockpit** -- body-fixed, no smoothing, FULL rotation applied: roll
@@ -519,38 +521,78 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                               float(camera.position_alt_m.value))
         return north, east, alt
 
+    aim_mode = str(camera.aim_mode.value)
+
+    def _stated_aim(cn: float, ce: float, calt: float, at_t: float):
+        """(yaw, pitch, quat) for a camera at (cn, ce, calt) whose aim
+        is a stated point or bearing (keyframable), not the aircraft."""
+        if aim_mode == "point":
+            pn = _keyframe_value(camera.moves, "aim_north_m", at_t,
+                                 float(camera.aim_north_m.value))
+            pe = _keyframe_value(camera.moves, "aim_east_m", at_t,
+                                 float(camera.aim_east_m.value))
+            palt = _keyframe_value(camera.moves, "aim_alt_m", at_t,
+                                   float(camera.aim_alt_m.value))
+            y, p = look_angles(cn, ce, calt, pn, pe, palt)
+            return y, p, euler_to_quat(0.0, p, y)
+        if aim_mode == "bearing":
+            q = _keyframed_bearing_quat(
+                camera.moves, at_t,
+                float(camera.aim_bearing_deg.value),
+                float(camera.aim_elevation_deg.value))
+            if q is None:
+                y = float(camera.aim_bearing_deg.value) % 360.0
+                p = float(camera.aim_elevation_deg.value)
+                return y, p, euler_to_quat(0.0, p, y)
+            y, p = _quat_yaw_pitch(q)
+            return y, p, q
+        raise PoseSolveError(f"camera.poses: unknown aim mode {aim_mode!r}")
+
     if preset in ("chase", "wingman"):
         tau_pos = POSITION_LAG_S * (WINGMAN_POSITION_LAG_FACTOR
                                     if preset == "wingman" else 1.0)
-        sm_n = sm_e = sm_alt = None
-        aim_n = aim_e = aim_alt = None
-        prev_goal = prev_target = None
+        # Horizontally the lag acts on the OFFSET from the aircraft, not on
+        # the camera's world position: a world-position lag trails a
+        # steadily moving target by speed x tau (58 m at 250 kt), which
+        # dragged a side view off its station and the aircraft across the
+        # frame over the first second of every clip. The offset still
+        # swings smoothly through a turn (it rotates with the heading);
+        # vertically the lag stays on the world position, so a climb or a
+        # pitch bob still shows in the frame instead of being followed.
+        off_n = off_e = sm_alt = None
+        aim_alt = None
+        prev_off = prev_goal_alt = prev_target_alt = None
         for i in range(n):
             gn, ge, gup = _heading_only(air_yaw[i], *offset_at(t[i]))
-            goal = (air_n[i] + gn, air_e[i] + ge, air_alt[i] + gup)
-            target = (air_n[i], air_e[i], air_alt[i])
+            goal_alt = air_alt[i] + gup
             if i == 0:
-                sm_n, sm_e, sm_alt = goal          # start where it settles
-                aim_n, aim_e, aim_alt = target
+                off_n, off_e, sm_alt = gn, ge, goal_alt   # start where it settles
+                aim_alt = air_alt[i]
             else:
                 dt = t[i] - t[i - 1]
-                sm_n = lag_step(sm_n, prev_goal[0], goal[0], dt, tau_pos)
-                sm_e = lag_step(sm_e, prev_goal[1], goal[1], dt, tau_pos)
-                sm_alt = lag_step(sm_alt, prev_goal[2], goal[2], dt, tau_pos)
-                aim_n = lag_step(aim_n, prev_target[0], target[0], dt, AIM_LAG_S)
-                aim_e = lag_step(aim_e, prev_target[1], target[1], dt, AIM_LAG_S)
-                aim_alt = lag_step(aim_alt, prev_target[2], target[2], dt, AIM_LAG_S)
-            prev_goal, prev_target = goal, target
-            y, p = look_angles(sm_n, sm_e, sm_alt, aim_n, aim_e, aim_alt)
+                off_n = lag_step(off_n, prev_off[0], gn, dt, tau_pos)
+                off_e = lag_step(off_e, prev_off[1], ge, dt, tau_pos)
+                sm_alt = lag_step(sm_alt, prev_goal_alt, goal_alt, dt, tau_pos)
+                aim_alt = lag_step(aim_alt, prev_target_alt, air_alt[i], dt, AIM_LAG_S)
+            prev_off, prev_goal_alt, prev_target_alt = (gn, ge), goal_alt, air_alt[i]
+            sm_n, sm_e = air_n[i] + off_n, air_e[i] + off_e
+            if aim_mode == "aircraft":
+                aim_n, aim_e = air_n[i], air_e[i]
+                y, p = look_angles(sm_n, sm_e, sm_alt, aim_n, aim_e, aim_alt)
+                q = euler_to_quat(0.0, p, y)
+            else:
+                # A following camera that looks somewhere else: a stated
+                # point or a fixed bearing, solved exactly as the
+                # world-anchored presets solve it.
+                y, p, q = _stated_aim(sm_n, sm_e, sm_alt, t[i])
             pos_n.append(sm_n)
             pos_e.append(sm_e)
             pos_alt.append(sm_alt)
-            yaw.append(y)
+            yaw.append(y % 360.0 if aim_mode != "aircraft" else y)
             pitch.append(p)
             roll.append(0.0)                       # never inherit roll
-            quat.append(euler_to_quat(0.0, p, y))
+            quat.append(q)
     elif preset in ("ground", "tower", "explicit"):
-        aim_mode = str(camera.aim_mode.value)
         aim_n = aim_e = aim_alt = None
         for i in range(n):
             cn, ce, calt = _static_position(t[i])
@@ -570,29 +612,8 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                 prev_target = target
                 y, p = look_angles(cn, ce, calt, aim_n, aim_e, aim_alt)
                 q = euler_to_quat(0.0, p, y)
-            elif aim_mode == "point":
-                pn = _keyframe_value(camera.moves, "aim_north_m", t[i],
-                                     float(camera.aim_north_m.value))
-                pe = _keyframe_value(camera.moves, "aim_east_m", t[i],
-                                     float(camera.aim_east_m.value))
-                palt = _keyframe_value(camera.moves, "aim_alt_m", t[i],
-                                       float(camera.aim_alt_m.value))
-                y, p = look_angles(cn, ce, calt, pn, pe, palt)
-                q = euler_to_quat(0.0, p, y)
-            elif aim_mode == "bearing":
-                q = _keyframed_bearing_quat(
-                    camera.moves, t[i],
-                    float(camera.aim_bearing_deg.value),
-                    float(camera.aim_elevation_deg.value))
-                if q is None:
-                    y = float(camera.aim_bearing_deg.value) % 360.0
-                    p = float(camera.aim_elevation_deg.value)
-                    q = euler_to_quat(0.0, p, y)
-                else:
-                    y, p = _quat_yaw_pitch(q)
             else:
-                raise PoseSolveError(
-                    f"camera.poses: unknown aim mode {aim_mode!r}")
+                y, p, q = _stated_aim(cn, ce, calt, t[i])
             pos_n.append(cn)
             pos_e.append(ce)
             pos_alt.append(calt)

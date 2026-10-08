@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, Optional, Sequence
 
 from core.scenario.spec import ScenarioSpec
+from core.scene.weather_look import weather_look_card_block
 
 #: Sampling period asked of the UE recorder. Must match the period the headless
 #: runner gives its own Recorder; gate5's main() checks that it does rather
@@ -362,6 +363,37 @@ def google_tiles_requested() -> bool:
     return os.environ.get(GOOGLE_TILES_ENV, "").strip().lower() in GOOGLE_TILES_ON
 
 
+#: The constraint a Google-tiles render refuses under when the physics
+#: ground is not a real elevation bake of the place the tiles draw.
+GOOGLE_TILES_TERRAIN_CONSTRAINT = "google_tiles.terrain"
+
+
+def google_tiles_terrain_refusal(heightfield) -> Optional[str]:
+    """None, or why the render must not draw Google's tiles over this ground.
+
+    The tiles draw the real Earth at the card's coordinates; the physics,
+    the labels and the verifier keep the run's own ground. Over a flat
+    slab (``heightfield`` None) or a synthesised raster that ground is NOT
+    the place the tiles show, so the aircraft would fly through mountains
+    it never feels. Only a bake ingested from a real DEM (producer ``dem
+    ingestion``: GLO-30 or 3DEP) is accepted under the tiles.
+    """
+    if not google_tiles_requested():
+        return None
+    if heightfield is None:
+        return (f"{GOOGLE_TILES_ENV} is on but the physics ground is the flat slab: "
+                f"the tiles would draw real terrain the aircraft never feels. Bake the "
+                f"place (scripts/bake_terrain.py, or the page's on-demand bake) or turn "
+                f"the tiles off")
+    producer = str((heightfield.provenance or {}).get("producer", ""))
+    if producer != "dem ingestion":
+        return (f"{GOOGLE_TILES_ENV} is on but the physics ground {heightfield.name!r} is "
+                f"not a real elevation bake (producer {producer or 'unknown'!r}): the tiles "
+                f"would draw a different place from the ground the aircraft flies on. Bake "
+                f"the real place or turn the tiles off")
+    return None
+
+
 def google_tiles_card_block(latitude_deg: float, longitude_deg: float) -> Dict[str, object]:
     """The ``google_tiles`` card block: the geoid undulation at the card's
     origin, which places Cesium's georeference origin at ellipsoidal
@@ -553,6 +585,13 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # look.precipitation_particles or look.cloud_drift_parameter by
         # name when it cannot draw one exactly.
         card["look"] = look
+    weather_look = weather_look_card_block(spec)
+    if weather_look is not None:
+        # Visual only (absent-canonical): the ground word, the storm, the
+        # rain rate, the wetness, the ice and the seed the host's weather
+        # look draws from (core/scene/weather_look.py); a spec stating none
+        # of them writes no block.
+        card["weather_look"] = weather_look
     if reference_speeds:
         # Display-only (the HUD/panel stall-margin marks): the MODEL's own
         # measured Vs and CLmax with their basis string (§2.4), so the marks

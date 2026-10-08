@@ -251,16 +251,44 @@ def test_pose_check_still_fails_when_the_track_ignores_the_keyframes():
     assert "stated station" in check.detail
 
 
-def test_the_phase1_failure_reproduces_when_keyframes_are_not_consulted(
+def _worst_placement_gap_m(check) -> float:
+    """The worst placement gap a PASSing pose check reports, metres."""
+    import re
+
+    match = re.search(r"worst placement gap ([0-9.]+) m", check.detail)
+    assert match, check.detail
+    return float(match.group(1))
+
+
+def test_ignoring_the_keyframes_misplaces_the_camera_by_the_whole_move(
         monkeypatch):
-    """The defect, kept as a measurement: grade the same pulled-back
-    track against the static offset (what the check did before) and it
-    fails exactly the way the Phase 1 report recorded."""
+    """The Phase 1 defect, kept as a measurement. Graded against the
+    static offset (what the check did before it consulted the keyframes),
+    the pulled-back camera sits off its station by the whole move: the
+    pull back from 110 m to 220 m. Graded against the keyframes it sits
+    on its station, give or take the follow lag.
+
+    Phase 1 recorded this as a FAIL (172.1 m against a 166.0 m bound)
+    only because the camera then also trailed the aircraft by speed x
+    lag. Since the follow lag acts on the offset rather than the world
+    position, that trail is gone, and a doubled offset can never exceed
+    the 1.5x bound -- so the defect is measured by the gap, not by the
+    verdict."""
     from core.capture import verify as verify_module
 
-    manifest, _ = _pulled_back_manifest()
+    manifest, spec = _pulled_back_manifest()
+    moves = spec.cameras[0].moves
+    pulled_back_m = abs(moves[-1]["offset_forward_m"]
+                        - moves[0]["offset_forward_m"])
+    assert pulled_back_m == pytest.approx(110.0)
+
+    keyed = verify_module.verify_pose_matches_spec(manifest)
+    assert keyed.status == PASS, keyed.detail
+    assert _worst_placement_gap_m(keyed) < 5.0
+
     monkeypatch.setattr(verify_module, "_keyframed_scalar",
                         lambda moves, key, t, default: default)
-    check = verify_module.verify_pose_matches_spec(manifest)
-    assert check.status == FAIL, check.detail
-    assert "stated station" in check.detail
+    static = verify_module.verify_pose_matches_spec(manifest)
+    assert static.status == PASS, static.detail
+    assert _worst_placement_gap_m(static) == pytest.approx(pulled_back_m,
+                                                           abs=5.0)

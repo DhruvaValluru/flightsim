@@ -11,6 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # attach_xplane_drape); the X-Plane tests switch them on themselves.
 os.environ.setdefault("FLIGHTSIM_XPLANE_LIGHTING", "off")
 os.environ.setdefault("FLIGHTSIM_XPLANE_TERRAIN", "off")
+# Place names resolve from the built-in list only: no test may reach
+# OpenStreetMap (core/nl/geocode.py; tests/test_geocode.py fakes it).
+os.environ.setdefault("FLIGHTSIM_GEOCODER", "offline")
 
 from core.util.platform import ue_available  # noqa: E402
 

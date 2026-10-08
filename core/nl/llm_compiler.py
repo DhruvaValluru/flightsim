@@ -50,7 +50,9 @@ to any manifest.
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -67,9 +69,10 @@ from ..scenario.randomization import (
 )
 from ..scenario.spec import ScenarioSpec
 from ..terrain.glo30 import LOCATIONS
-from .compiler import (RANDOMIZATION_FAMILIES, TURBULENCE_STD, TURBULENCE_WORDS,
-                       apply_mountain_scene, apply_randomization_phrases,
-                       compile_prompt, _name_from)
+from .compiler import (MOVE_KINDS, RANDOMIZATION_FAMILIES, TURBULENCE_STD,
+                       TURBULENCE_WORDS, apply_mountain_scene, apply_moves,
+                       apply_randomization_phrases, compile_prompt,
+                       prompt_moves, _name_from)
 
 #: The model the compiler asks for. Recorded verbatim in the result so the
 #: manifest can say which model produced the spec.
@@ -302,10 +305,14 @@ assert not _unknown, f"llm_compiler schema names non-spec fields: {_unknown}"
 #: Hard cap on cameras per response, enforced in parsing like MAX_QUESTIONS.
 MAX_CAMERAS = 4
 
-#: Value schema per LLM-settable CAMERA field (Camera Phase 1). Kept
-#: deliberately narrow: the view, the lens, and the capture schedule --
-#: placement geometry stays with the deterministic vocabulary, the
-#: documented defaults and the review-table edit path.
+#: Value schema per LLM-settable CAMERA field: the view, the lens, the
+#: capture schedule, the aircraft-relative placement of a following view
+#: and its aim. Placement is in the primary aircraft's heading frame
+#: (the -chase= convention), every value provenanced like any field; the
+#: system prompt carries the calibrated per-airframe chase table so the
+#: model scales "close behind" to the airframe instead of guessing.
+#: World-anchored placement (scene / geographic) stays with YAML and the
+#: review table: the model is never handed coordinates to invent.
 CAMERA_FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "preset": {"type": "string", "enum": list(CAMERA_PRESETS)},
     "focal_length_mm": {"type": "number", "description": "millimetres"},
@@ -315,6 +322,39 @@ CAMERA_FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
     },
     "period_s": {"type": "number",
                  "description": "seconds between captures"},
+    "offset_forward_m": {"type": "number",
+                         "description": "metres ahead (+) / behind (-) of "
+                                        "the primary along its heading "
+                                        "(chase and wingman only)"},
+    "offset_right_m": {"type": "number",
+                       "description": "metres right (+) / left (-) of the "
+                                      "primary (chase and wingman only)"},
+    "offset_up_m": {"type": "number",
+                    "description": "metres above (+) / below (-) the "
+                                   "primary (chase and wingman only)"},
+    "aim_mode": {"type": "string", "enum": ["aircraft", "bearing"],
+                 "description": "aircraft = look at the primary; bearing = "
+                                "look along aim_bearing_deg / "
+                                "aim_elevation_deg"},
+    "aim_bearing_deg": {"type": "number",
+                        "description": "degrees true the camera looks along"},
+    "aim_elevation_deg": {"type": "number",
+                          "description": "degrees above (+) / below (-) the "
+                                         "horizon"},
+}
+
+#: Fields that only mean something on a following (offset) view, and
+#: fields the cockpit view cannot honour (it looks where the nose does).
+_OFFSET_CAMERA_FIELDS = ("offset_forward_m", "offset_right_m", "offset_up_m")
+_AIM_CAMERA_FIELDS = ("aim_mode", "aim_bearing_deg", "aim_elevation_deg")
+
+#: The camera's moves over the clip: the regex compiler's own keyframe
+#: shapes, named. Not a CameraSpec field (the keyframes are), so it sits
+#: beside CAMERA_FIELD_VALUE_SCHEMAS rather than in it.
+CAMERA_MOVES_KEY = "moves"
+CAMERA_MOVES_VALUE_SCHEMA: Dict[str, Any] = {
+    "type": "array", "items": {"type": "string", "enum": list(MOVE_KINDS)},
+    "description": "camera moves over the whole clip",
 }
 
 # Same generated-not-hand-copied discipline: the camera schema is tied
@@ -489,9 +529,10 @@ RESPONSE_SCHEMA: Dict[str, Any] = {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    name: _field_schema(value_schema)
-                    for name, value_schema
-                    in CAMERA_FIELD_VALUE_SCHEMAS.items()
+                    **{name: _field_schema(value_schema)
+                       for name, value_schema
+                       in CAMERA_FIELD_VALUE_SCHEMAS.items()},
+                    CAMERA_MOVES_KEY: _field_schema(CAMERA_MOVES_VALUE_SCHEMA),
                 },
             },
         },
@@ -563,6 +604,44 @@ def _locations_block() -> str:
         '(from the prompt or the answer, source "user") are fetched and '
         'baked on demand from the same verified GLO-30 pipeline.')
     return "\n".join(lines)
+
+
+def _looked_up_block(place) -> str:
+    """The system-prompt addendum for a place core.nl.geocode resolved."""
+    elevation = ("" if place.elevation_m is None else
+                 f", terrain_elevation {place.elevation_m:g}")
+    return (
+        f"\n\nPlace lookup for THIS prompt: {place.phrase!r} is "
+        f"{place.display} -- latitude {place.latitude}, longitude "
+        f"{place.longitude}{elevation} (from the {place.source}). Treat it "
+        f"exactly like a listed place: set those fields to these EXACT "
+        f"values, source \"inferred\", with {place.phrase!r} in \"from\", "
+        f"and do NOT ask about the location. Its terrain is fetched on "
+        f"demand on the first run.")
+
+
+_LOCATION_QUESTION = re.compile(
+    r"locat|place|where|latitude|longitude|coordinat|which (?:mountain|city|area)",
+    re.IGNORECASE)
+
+
+def _asks_location(question: Dict[str, Any]) -> bool:
+    return bool(_LOCATION_QUESTION.search(
+        f"{question.get('id', '')} {question.get('question', '')}"))
+
+
+def _chase_table_block() -> str:
+    """The calibrated chase framing per airframe, GENERATED from
+    :data:`core.scenario.camera.CHASE_OFFSETS` so the prompt and the
+    renderer's own framing cannot drift apart."""
+    from ..scenario.camera import CHASE_OFFSETS, FALLBACK_CHASE_OFFSET
+
+    rows = [f"    {name}: D = {abs(f):g} m behind, {u:g} m up"
+            for name, (f, _, u) in CHASE_OFFSETS.items()]
+    f, _, u = FALLBACK_CHASE_OFFSET
+    rows.append(f"    any other airframe: about {abs(f):g} m behind, "
+                f"{u:g} m up")
+    return "\n".join(rows)
 
 
 def _randomization_block() -> str:
@@ -719,10 +798,36 @@ prompt has no camera or capture language):
   tower / "from the tower", ground / "ground observer", cockpit /
   "over the shoulder". Each camera entry carries provenanced fields
   exactly like "fields": preset, focal_length_mm, capture_count,
-  period_s -- nothing else; placement geometry is not yours to invent.
+  period_s, offset_forward_m, offset_right_m, offset_up_m, aim_mode,
+  aim_bearing_deg, aim_elevation_deg, moves -- nothing else.
 - An exact image count ("50 images/frames/stills") is capture_count,
-  source "user". Lens words: wide angle -> 24 mm, telephoto -> 85 mm
-  (inferred); "<n> mm lens" is user.
+  source "user". Lens words: ultra wide -> 16 mm, wide angle -> 24 mm,
+  telephoto / long lens -> 85 mm, super telephoto -> 200 mm (inferred);
+  "<n> mm lens" is user.
+- Placement of a chase or wingman view is an offset in the PRIMARY
+  aircraft's heading frame: offset_forward_m (negative = behind),
+  offset_right_m (negative = left), offset_up_m (negative = below).
+  Write offsets ONLY when the prompt places the camera ("low and behind",
+  "off the left wing", "from above", "300 m back"); otherwise omit them
+  and the calibrated framing applies. Scale every unstated distance to
+  the airframe from its calibrated chase framing D (behind, up):
+__CHASE_TABLE__
+  "close" ~0.6 D, "far" ~4 D, "very far" ~10 D; "behind" -> forward -D
+  with up as calibrated; a side view -> right +-D; "above"/"overhead"
+  -> up D (combined with behind: up ~D/2); "below" -> negative up. A
+  stated distance ("300 m", "500 ft") is user and always wins; a
+  direction word scaled from the table is inferred.
+- Aim: omit (the camera looks at the primary) unless the prompt points
+  the camera elsewhere: "looking north/east/south/west" -> aim_mode
+  "bearing", aim_bearing_deg 0/90/180/270; "looking ahead" -> the
+  heading; aim_elevation_deg "down at the ground" -90, "down" -30, "at
+  the horizon" 0. Never invent the bearing of a feature you were not
+  given; keep the aim on the aircraft and put the feature in "notes".
+  The cockpit view takes no aim and no offset.
+- Moves over the clip ("moves", a list): "zoom in" zoom_in, "zoom out"
+  zoom_out, "push in"/"move closer" push_in, "pull back"/"pull away"
+  pull_back, "orbit"/"circle around" orbit. Push, pull and orbit need a
+  chase or wingman view; zoom works on every view.
 - When the prompt implies imagery ("photograph", "capture", "images
   of") but names NO viewpoint, you MAY ask one camera-intent question
   (which view?) under the same one-round/three-question caps. A prompt
@@ -806,6 +911,8 @@ Clarifying questions:
 SYSTEM_PROMPT = SYSTEM_PROMPT.replace("__RESPONSE_SHAPE__",
                                       response_shape_sentence())
 assert "__RESPONSE_SHAPE__" not in SYSTEM_PROMPT
+SYSTEM_PROMPT = SYSTEM_PROMPT.replace("__CHASE_TABLE__", _chase_table_block())
+assert "__CHASE_TABLE__" not in SYSTEM_PROMPT
 for _key in RESPONSE_TOP_LEVEL_KEYS:
     assert f'"{_key}"' in SYSTEM_PROMPT, (
         f"the system prompt never names top-level key {_key!r}")
@@ -1061,7 +1168,8 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
                      if isinstance(e, dict) and e.get("value") is None]:
             del block[name]
         for name, entry in block.items():
-            if name not in CAMERA_FIELD_VALUE_SCHEMAS:
+            if name not in CAMERA_FIELD_VALUE_SCHEMAS \
+                    and name != CAMERA_MOVES_KEY:
                 raise _fail(f"camera {index}: unknown camera field "
                             f"{name!r}")
             if not isinstance(entry, dict) \
@@ -1081,11 +1189,19 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
                                 f"interprets")
                 raise _fail(f"camera {index} field {name!r} has no "
                             f"provenance phrase")
-            value_schema = CAMERA_FIELD_VALUE_SCHEMAS[name]
             value = entry["value"]
+            if name == CAMERA_MOVES_KEY:
+                if not isinstance(value, list) \
+                        or any(v not in MOVE_KINDS for v in value):
+                    raise _fail(f"camera {index} field 'moves' value "
+                                f"{value!r} must be a list drawn from "
+                                f"{list(MOVE_KINDS)}")
+                continue
+            value_schema = CAMERA_FIELD_VALUE_SCHEMAS[name]
             if value_schema["type"] == "number":
                 if isinstance(value, bool) \
-                        or not isinstance(value, (int, float)):
+                        or not isinstance(value, (int, float)) \
+                        or not math.isfinite(value):
                     raise _fail(f"camera {index} field {name!r} value "
                                 f"{value!r} is not a number")
                 if name == "capture_count" and float(value) != int(value):
@@ -1290,6 +1406,17 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                     "is unavailable. Use the offline regex compiler.") from exc
             client = anthropic.Anthropic()
 
+    # A place the prompt names outside the listed bakes is looked up
+    # BEFORE the model is asked (core.nl.geocode), and the model is told
+    # the answer: a looked-up place is as determined as a listed one, so
+    # it is not a question. The overlay below enforces it either way.
+    from .compiler import apply_named_place, named_place
+
+    looked_up = named_place(prompt)
+    system = SYSTEM_PROMPT
+    if looked_up is not None:
+        system = SYSTEM_PROMPT + _looked_up_block(looked_up)
+
     answering = answers is not None
     if answering and not questions:
         raise LLMCompileError(
@@ -1309,7 +1436,7 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
         response = client.messages.create(
             model=model,
             max_tokens=16000,
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=messages,
             # A short structured extraction behind a UI button: low effort
             # cuts the interactive latency substantially and this size of
@@ -1404,9 +1531,22 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                               f"{stated.frm!r}; the stated heading is used")
         spec.heading = stated
 
+    # The looked-up place is the prompt's own words resolved; a model guess
+    # (a listed bake chosen for scene-setting) or an omission gives way to
+    # it, and a location question the model asked anyway is dropped -- the
+    # prompt already answered it. Stated coordinates are never moved.
+    applied = apply_named_place(spec, looked_up)
+    if looked_up is not None and (applied or (
+            abs(float(spec.latitude.value) - looked_up.latitude) < 1e-4
+            and abs(float(spec.longitude.value) - looked_up.longitude) < 1e-4)):
+        payload["questions"] = [q for q in payload["questions"]
+                                if not _asks_location(q)]
+
     # Cameras overlay AFTER the fields: the default offsets and the
     # world-anchored placements depend on the (possibly model-chosen)
     # aircraft and terrain datum.
+    duration_s = float(spec.duration.value)
+    model_moves = False
     for index, block in enumerate(payload["cameras"]):
         preset_entry = block.get("preset")
         preset = str(preset_entry["value"]) if preset_entry else "chase"
@@ -1415,6 +1555,22 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
             aircraft=str(spec.aircraft.value),
             terrain_elevation_m=float(spec.terrain_elevation.value),
             frm="camera language in the prompt; documented camera default")
+        moves_entry = block.pop(CAMERA_MOVES_KEY, None)
+        # A field the view cannot honour is said in the notes by name,
+        # never applied where the pose solver would ignore it.
+        dropped = [n for n in block
+                   if (n in _OFFSET_CAMERA_FIELDS
+                       and preset not in ("chase", "wingman"))
+                   or (n in _AIM_CAMERA_FIELDS and preset == "cockpit")]
+        for name in dropped:
+            spec.notes.append(
+                f"camera {index} ({preset}): {name} "
+                f"{block[name]['value']!r} from {block[name]['from']!r} not "
+                f"applied -- "
+                + ("only the chase and wingman views follow at an offset"
+                   if name in _OFFSET_CAMERA_FIELDS else
+                   "the cockpit view looks where the aircraft points"))
+            del block[name]
         for name, entry in block.items():
             current = getattr(camera, name)
             value = entry["value"]
@@ -1427,13 +1583,42 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                 source={"user": Source.USER, "inferred": Source.INFERRED,
                         "model": Source.MODEL}[entry["source"]],
                 frm=entry["from"].strip()))
+        # A bearing aim with no bearing looks along the flight path.
+        if str(camera.aim_mode.value) == "bearing" \
+                and "aim_bearing_deg" not in block:
+            camera.plan("aim_bearing_deg",
+                        float(spec.heading.value) % 360.0,
+                        frm="no bearing stated; the aircraft's heading")
         # Same rule as the regex compiler and the page's picker: a view
         # the model named without a count is the whole clip from that
         # view. A count or a trigger the model DID state is a stated
         # field and is left exactly as it is.
         plan_full_capture(camera, frm="a view named in the prompt with "
                                       "no count captures the whole clip")
+        if moves_entry is not None:
+            model_moves = True
+            phrase = moves_entry["from"].strip()
+            apply_moves(camera, [(phrase, kind) for kind
+                                 in dict.fromkeys(moves_entry["value"])],
+                        duration_s, spec.notes)
         spec.cameras.append(camera)
+
+    # Move words the model left out ("orbit", "zoom in", "pull back") still
+    # move the camera: the regex compiler's vocabulary is the control, as
+    # for randomization phrases. A move word with no camera earns the
+    # documented default view, exactly as on the regex tier.
+    stated = [] if model_moves else prompt_moves(prompt)
+    if stated and not spec.cameras:
+        camera = CameraSpec.defaulted(
+            camera_id="camera0", preset="chase",
+            aircraft=str(spec.aircraft.value),
+            terrain_elevation_m=float(spec.terrain_elevation.value),
+            frm="a camera move in the prompt; documented camera default")
+        plan_full_capture(camera, frm="a view named in the prompt with "
+                                      "no count captures the whole clip")
+        spec.cameras.append(camera)
+    for camera in spec.cameras:
+        apply_moves(camera, stated, duration_s, spec.notes)
 
     # Spec 8 (contracts §2.2): every traffic aircraft the model named,
     # the documented defaults under the fields it did not state.

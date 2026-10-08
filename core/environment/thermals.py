@@ -50,7 +50,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .base import Position, Term, WindNED, WindProvider
+from .base import LocalFrame, Position, Term, WindNED, WindProvider
 
 STANDARD = "Allen, NASA/TM-2006-214019 (2006), eqs 11-23 + Appendix B"
 
@@ -105,6 +105,7 @@ class AllenThermals(WindProvider):
         origin_north_m: float = 0.0,
         origin_east_m: float = 0.0,
         positions: Optional[Sequence[Tuple[float, float]]] = None,
+        frame: Optional[LocalFrame] = None,
     ) -> None:
         if wstar_mps < 0:
             raise ValueError("w* cannot be negative")
@@ -117,6 +118,10 @@ class AllenThermals(WindProvider):
         self.origin_north_m = float(origin_north_m)
         self.origin_east_m = float(origin_east_m)
         self.seed = int(seed)
+        #: The frame the area and positions are stated in (the run card's
+        #: projected origin, as the UE host reads them). None keeps the
+        #: absolute ``latitude x 111320 m`` frame.
+        self.frame = frame
 
         # N from eq (20) at the spacing height ratio; at least one updraft
         # or the provider is pointless and says so.
@@ -222,7 +227,11 @@ class AllenThermals(WindProvider):
     # -- provider contract ----------------------------------------------
 
     def wind_at(self, position: Position, time_s: float) -> WindNED:
-        north, east = self._scene_coords(position)
+        if self.frame is not None:
+            north, east = self.frame.north_east(position.latitude_deg,
+                                                position.longitude_deg)
+        else:
+            north, east = self._scene_coords(position)
         w_up = self.w_at(north, east, position.agl_m)
         return WindNED(0.0, 0.0, -w_up)
 
@@ -285,4 +294,5 @@ class AllenThermals(WindProvider):
                 "origin_east_m": self.origin_east_m,
                 "seed": self.seed, "count": self.count,
                 "positions_m": [list(p) for p in self.positions],
-                "kshape_source": "Appendix B (columns 1-4; see module note)"}
+                "kshape_source": "Appendix B (columns 1-4; see module note)",
+                "frame": None if self.frame is None else self.frame.provenance()}

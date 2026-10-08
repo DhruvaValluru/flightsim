@@ -194,9 +194,50 @@ def _dynamic_scenes(dynamic_dir: Path) -> List[Dict]:
     return scenes
 
 
+def curated_key_at(lat: float, lon: float) -> Optional[str]:
+    """The curated location whose origin these coordinates sit on, or None."""
+    for key, location in LOCATIONS.items():
+        if (abs(float(lat) - location.origin_lat) <= LOCATION_TOLERANCE_DEG
+                and abs(float(lon) - location.origin_lon) <= LOCATION_TOLERANCE_DEG):
+            return key
+    return None
+
+
+def named_place(spec: ScenarioSpec) -> bool:
+    """True when the prompt NAMED a real place: source ``inferred`` on both
+    coordinates -- a listed place's name mapped to its origin (core/nl/
+    llm_compiler.py, geography rules) or any other place name the compiler
+    looked up (core.nl.geocode, :func:`looked_up_place`). Such a spec
+    means "fly at that real place" exactly as stated coordinates do, so it
+    is held to the same bake rule -- never the flat slab or the
+    synthesised ridge under the place's name."""
+    return (str(spec.latitude.source) == "inferred"
+            and str(spec.longitude.source) == "inferred")
+
+
+def looked_up_place(spec: ScenarioSpec) -> bool:
+    """True when the coordinates are a place name the compiler looked up
+    (core.nl.geocode): source inferred, and NOT a curated bake's origin
+    (a curated place has its own bake, :func:`curated_key_at`)."""
+    if not named_place(spec):
+        return False
+    return curated_key_at(float(spec.latitude.value),
+                          float(spec.longitude.value)) is None
+
+
+def names_real_place(spec: ScenarioSpec) -> bool:
+    """True when the coordinates are a real place someone named: stated
+    (source user), a curated place named in the prompt, or a place name
+    the compiler looked up (:func:`named_place`)."""
+    if {str(spec.latitude.source), str(spec.longitude.source)} == {"user"}:
+        return True
+    return named_place(spec)
+
+
 def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
-    """None, or the named refusal for USER-stated coordinates that no bake
-    covers yet.
+    """None, or the named refusal for coordinates someone named -- stated,
+    or a place name the compiler looked up (:func:`names_real_place`) --
+    that no bake covers yet.
 
     Stated coordinates mean "fly at that real place": defaulted and
     placed-on-scene coordinates never trigger (this runs BEFORE
@@ -224,8 +265,7 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
             "latitude": float(spec.latitude.value),
             "longitude": float(spec.longitude.value),
         }
-    if (str(spec.latitude.source) != "user"
-            or str(spec.longitude.source) != "user"):
+    if not names_real_place(spec):
         return None
     # The synthesised control ridge is NOT a place (the ERA5 doctrine):
     # stated coordinates that fall on no real bake refuse here even when
@@ -236,9 +276,22 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
         return None
     lat = float(spec.latitude.value)
     lon = float(spec.longitude.value)
+    curated = curated_key_at(lat, lon)
+    if curated is not None:
+        return {
+            "constraint": "terrain.unbaked",
+            "message": f"the {curated} terrain is not baked on this machine, so the "
+                       f"aircraft would fly over flat ground (or a synthesised ridge) "
+                       f"under a real place's name; POST /bake with these coordinates "
+                       f"(or run scripts/bake_terrain.py {curated}) to fetch and "
+                       f"verify it, then run again",
+            "latitude": lat, "longitude": lon,
+        }
+    what = ("stated coordinates" if str(spec.latitude.source) == "user"
+            else "coordinates of the place the prompt names")
     return {
         "constraint": "terrain.unbaked",
-        "message": f"no GLO-30 bake covers the stated coordinates "
+        "message": f"no GLO-30 bake covers the {what} "
                    f"({lat:.4f}, {lon:.4f}); POST /bake with them to fetch "
                    f"and verify that terrain (first fetch downloads tiles, "
                    f"a few minutes), then run again",
@@ -250,6 +303,9 @@ def bake_on_demand(lat: float, lon: float) -> Dict:
     """Fetch, bake and verify GLO-30 for arbitrary coordinates; register
     the scene. Raises (DEMError / URLError by name) rather than writing an
     unverified or empty bake -- open ocean has no tiles and says so."""
+    curated = curated_key_at(lat, lon)
+    if curated is not None:
+        return bake_curated(curated)
     location = dynamic_location(lat, lon)
     dynamic_dir = TERRAIN_DIR / "dynamic"
     raster = dynamic_dir / f"{location.key}.r16"
@@ -263,6 +319,34 @@ def bake_on_demand(lat: float, lon: float) -> Dict:
     sidecar.write_text(json.dumps(entry, indent=1), encoding="utf-8")
     entry["terrain"] = str(raster.with_suffix(""))
     return entry
+
+
+def bake_curated(key: str) -> Dict:
+    """Fetch, bake and verify a curated location (named summits checked),
+    plus its Sentinel-2 drape, into TERRAIN_DIR -- what scripts/
+    bake_terrain.py does for one key, reached from the page's on-demand
+    bake when a named place has no bake yet. A bake already on disk is
+    kept. The drape failing leaves the verified bake standing (the
+    terrain then renders untextured, and the scene says imagery null)."""
+    location = LOCATIONS[key]
+    raster = TERRAIN_DIR / f"{key}.r16"
+    if not raster.is_file():
+        TERRAIN_DIR.mkdir(parents=True, exist_ok=True)
+        bake(location, REPO / "data" / "glo30", TERRAIN_DIR)
+    imagery = "present"
+    if not (TERRAIN_DIR / f"{key}_imagery.json").is_file():
+        try:
+            from core.terrain.imagery import drape
+
+            drape(location, TERRAIN_DIR / key, REPO / "data" / "imagery_cache",
+                  TERRAIN_DIR)
+            imagery = "draped"
+        except Exception as exc:
+            imagery = f"FAILED ({type(exc).__name__}: {exc}); renders untextured"
+    return {"key": key, "title": location.title,
+            "origin_lat": location.origin_lat, "origin_lon": location.origin_lon,
+            "crs": location.crs, "identity": "named summits verified",
+            "imagery": imagery, "terrain": str(TERRAIN_DIR / key)}
 
 
 #: Guards the one-time control-ridge synthesis; concurrent runs must not
@@ -469,7 +553,10 @@ def _auto_scene(spec: ScenarioSpec) -> Dict:
         # 3299 m peaks under a "413 m" scene (measured: a 3000 m flight
         # refused terrain.clearance at -89.5 m AGL over "413 m staged
         # terrain" because the ridge had been substituted).
-        if baked(terrain_dir / "control_ridge"):
+        # Nor for a place the prompt named (a curated place or one
+        # core.nl.geocode looked up): its own
+        # ground arrives with the on-demand bake.
+        if baked(terrain_dir / "control_ridge") and not named_place(spec):
             return {
                 "key": "control", "kind": "synthesised control ridge",
                 "terrain": str(terrain_dir / "control_ridge"),
@@ -507,6 +594,13 @@ def place_on_scene(spec: ScenarioSpec) -> None:
     """
     scene = pick_scene(spec)
     if scene["key"] != "control":
+        return
+    if named_place(spec) or (str(spec.latitude.source) == "user"
+                             and str(spec.longitude.source) == "user"):
+        # A real place someone stated or named is never moved onto the
+        # synthesised ridge (measured: a named Everest flight moved to
+        # 0.138 N, 10.649 E). needs_dynamic_bake refuses it first on the
+        # web path; a caller that skipped that keeps the coordinates.
         return
     from pyproj import Transformer
 
@@ -2541,6 +2635,19 @@ class RunManager:
             run.push("failed", f"[{exc.constraint}] {exc.message}")
             return
         scene = pick_scene(spec)
+        # Google's tiles draw the real place; the physics flies this
+        # scene's ground. Over the slab or the synthesised ridge the two
+        # are different places, so the render refuses by name.
+        from core.scenario.card import (
+            GOOGLE_TILES_TERRAIN_CONSTRAINT, google_tiles_terrain_refusal,
+        )
+        from core.terrain.heightfield import Heightfield
+
+        tiles_refusal = google_tiles_terrain_refusal(
+            Heightfield.read(Path(scene["terrain"])) if scene.get("terrain") else None)
+        if tiles_refusal is not None:
+            run.push("failed", f"[{GOOGLE_TILES_TERRAIN_CONSTRAINT}] {tiles_refusal}")
+            return
         # X-Plane ground textures replace the scene's own texture when
         # the extraction is present (attach_xplane_drape); the snow class
         # follows the spec's month.
@@ -2748,6 +2855,19 @@ class RunManager:
         capture_cameras = None
         capture_landmarks = None
         if wants_capture(spec):
+            # FLIGHTSIM_CAPTURE_PASSES: the extra ground-truth passes
+            # (normals, motion vectors, base colour, flow, points, amodal)
+            # on every camera that states none; unset changes nothing.
+            from webapp.capture import apply_capture_passes
+
+            try:
+                extra_passes = apply_capture_passes(spec)
+            except CaptureError as exc:
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+            if extra_passes:
+                run.push("cameras", "ground-truth passes asked for: "
+                                    + ", ".join(extra_passes))
             run.push("cameras", f"solving {len(spec.cameras)} camera "
                                 f"pose track(s) and capture schedule(s)")
             try:
@@ -2948,6 +3068,13 @@ class RunManager:
             run.push("rendering",
                      f"rendering {len(camera_ids)} camera pass(es): "
                      f"{', '.join(camera_ids)}")
+            # The engine words any camera's passes name (normal, velocity,
+            # albedo) ride -passes= on every camera's pass, as the CLI's.
+            from core.capture.passes import engine_words
+            from core.render.flags import passes_flag
+
+            pass_token = passes_flag(engine_words(spec.cameras))
+            pass_extra = [pass_token] if pass_token else []
             try:
                 capture_render_passes(
                     card, frames, camera_ids,
@@ -2961,7 +3088,7 @@ class RunManager:
                         # reported NOT RUN on every web run.
                         telemetry=telemetry,
                         look=render_look_for(spec, event_note),
-                        camera_flags=camera_flags, extra=extra,
+                        camera_flags=camera_flags, extra=list(extra) + pass_extra,
                         sky=sky))
             except CaptureError as exc:
                 # The render log for the pass that failed sits beside its
@@ -2993,6 +3120,23 @@ class RunManager:
                                  "overlays and the verification summary")
             capture_write_manifest(spec, capture_solved, out, scene,
                                    heightfield=capture_heightfield)
+            # Phase 2 (package C), as the CLI capture does it: complete
+            # every frame's object records from the bundle the engine just
+            # wrote (the tight box from the ID image, the visible fraction
+            # from the alone pass, occluded_by, the depth under the mask).
+            # Without it the records keep their nulls and the box, depth
+            # and visibility checks grade a record that was never filled.
+            from core.capture.labels import attach_engine_labels
+            from core.capture.passes import PassError
+
+            try:
+                attached = attach_engine_labels(out)
+            except PassError as exc:
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+            run.push("labels", f"engine labels attached on {attached['attached']} of "
+                               f"{attached['frames']} frame(s) "
+                               f"({attached['without_bundle']} without a bundle)")
             # Phase 10: the sensor model, as a seeded post-pass over the
             # rendered frames of every camera whose profile is not the
             # ideal pinhole. Reproducible from the spec's own seed.

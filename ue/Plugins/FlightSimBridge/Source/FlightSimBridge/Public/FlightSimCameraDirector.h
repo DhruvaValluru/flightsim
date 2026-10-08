@@ -260,6 +260,11 @@ private:
 	                                    const FTransform& TargetTransform,
 	                                    const FVector& OffsetMetres);
 
+	// The chase and wingman follow: offset smoothed horizontally, height
+	// and aim height smoothed in the world. Updates SmoothedLocation and
+	// SmoothedAimPoint.
+	void FollowStation(const FVector& AimPoint, const FVector& Goal, float DeltaSeconds,
+	                   float PositionLag);
 	void UpdateLaggedChase(float DeltaSeconds, const FTransform& TargetTransform);
 	void UpdateCockpitShoulder(const FTransform& TargetTransform);
 	void UpdateFixedPoint(float DeltaSeconds, const FVector& WorldLocation,
@@ -276,6 +281,9 @@ private:
 	// camera lags the aircraft instead of moving with it.
 	FVector SmoothedLocation = FVector::ZeroVector;
 	FVector SmoothedAimPoint = FVector::ZeroVector;
+	// The chase / wingman camera's smoothed horizontal offset from the aim
+	// point (see FollowStation).
+	FVector SmoothedOffsetXY = FVector::ZeroVector;
 	bool bInitialised = false;
 
 	// The consumed pose track (empty = preset mode).
