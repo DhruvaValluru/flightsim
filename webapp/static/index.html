@@ -220,6 +220,7 @@ visual-only per host (measured).</p>
 <div id="specArea" style="display:none" class="card">
   <div id="compilerLine"></div>
   <div id="notes"></div>
+  <div id="terrainState" class="dim" style="display:none;margin:.3rem 0"></div>
   <table id="specTable">
     <thead><tr><th>field</th><th>value</th><th>source</th>
     <th>provenance</th></tr></thead>
@@ -596,6 +597,47 @@ function renderVerdict(v) {
       `<div class="verdict-refused">This scenario cannot run as it stands:</div><ul>` +
       v.violations.map(x => `<li>${refusalHtml(x)}</li>`).join("") + `</ul>`;
     $("run").disabled = true;
+  }
+}
+
+// ===================== terrain download in the background =====================
+//
+// /compile starts the bake a named place needs (webapp.runs.TerrainPrefetch)
+// so it downloads while lighting and cameras are set; this line follows it.
+// Run still asks /run, which waits on the same job through /bake.
+
+let terrainPrefetch = null;
+let terrainPoll = null;
+
+function showTerrainPrefetch(status) {
+  clearTimeout(terrainPoll);
+  terrainPrefetch = status || null;
+  const line = $("terrainState");
+  if (!terrainPrefetch) { line.style.display = "none"; return; }
+  line.style.display = "";
+  const where = `${(+terrainPrefetch.latitude).toFixed(3)}, ` +
+    `${(+terrainPrefetch.longitude).toFixed(3)}`;
+  if (terrainPrefetch.state === "downloading") {
+    line.textContent = `terrain: downloading the ground for ${where} in the ` +
+      `background (${Math.round(terrainPrefetch.elapsed_s || 0)} s) — keep ` +
+      `setting things up; Run waits for it if it is not done yet`;
+    terrainPoll = setTimeout(async () => {
+      try {
+        const response = await fetch(`/bake/status?latitude=${terrainPrefetch.latitude}` +
+                                     `&longitude=${terrainPrefetch.longitude}`);
+        showTerrainPrefetch(await response.json());
+      } catch (error) {
+        terrainPoll = setTimeout(() => showTerrainPrefetch(terrainPrefetch), 5000);
+      }
+    }, 3000);
+  } else if (terrainPrefetch.state === "done") {
+    line.innerHTML = `<span class="verdict-ok">terrain ready</span>: ` +
+      `${terrainPrefetch.title || where} (downloaded and verified; saved for next time)`;
+  } else if (terrainPrefetch.state === "failed") {
+    line.innerHTML = `<span class="verdict-refused">terrain download failed</span>: ` +
+      `${terrainPrefetch.error || "unknown error"} — Run will try again`;
+  } else {
+    line.style.display = "none";
   }
 }
 
@@ -1261,6 +1303,7 @@ async function doCompile(body) {
       $("questionArea").style.display = "none";
     }
     renderSpec(payload);
+    showTerrainPrefetch(payload.terrain_prefetch);
     // A fresh compile starts from one aircraft; carry the page's choice onto it.
     if (+$("aircraftCount").value > 1) await applyFleet();
   } catch (error) {
@@ -1328,10 +1371,13 @@ async function startRun(mayBake) {
     // Stated coordinates with no bake yet: fetch + verify that terrain
     // (GLO-30 on-demand), then run again. Once per click -- a second
     // refusal is a real error, not a retry loop.
-    $("status").textContent =
-      `baking GLO-30 terrain for ${payload.latitude.toFixed(3)}, ` +
-      `${payload.longitude.toFixed(3)} — first fetch downloads elevation ` +
-      `tiles and can take a few minutes...`;
+    $("status").textContent = terrainPrefetch && terrainPrefetch.state === "downloading"
+      ? `waiting for the terrain download that started at Interpret ` +
+        `(${payload.latitude.toFixed(3)}, ${payload.longitude.toFixed(3)}); ` +
+        `the run starts by itself when it finishes...`
+      : `baking GLO-30 terrain for ${payload.latitude.toFixed(3)}, ` +
+        `${payload.longitude.toFixed(3)} — first fetch downloads elevation ` +
+        `tiles and can take a few minutes...`;
     const baked = await fetch("/bake", {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({latitude: payload.latitude,

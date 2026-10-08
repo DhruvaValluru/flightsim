@@ -328,6 +328,114 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
     }
 
 
+#: FLIGHTSIM_TERRAIN_PREFETCH=off stops /compile from starting a terrain
+#: download in the background (the test suite sets it: no test may reach
+#: the network from a compile). Any other value, or unset, is on.
+TERRAIN_PREFETCH_ENV = "FLIGHTSIM_TERRAIN_PREFETCH"
+
+
+def terrain_prefetch_enabled() -> bool:
+    return os.environ.get(TERRAIN_PREFETCH_ENV, "").strip().lower() not in (
+        "off", "0", "false", "no")
+
+
+class TerrainPrefetch:
+    """Terrain bakes started early, one per place, in the background.
+
+    The bake a named place needs used to start only when Run was clicked
+    (/run refused terrain.unbaked, the page called /bake and waited). Now
+    /compile starts it as soon as the spec names the place, so the
+    download runs while the person sets lighting and cameras; /bake joins
+    the job already running for those coordinates instead of starting a
+    second one (two bakes of one place would write the same files). A
+    failed job is retried by the next request, never served stale.
+
+    Nothing here decides WHETHER a place needs a bake -- that stays
+    :func:`needs_dynamic_bake`, the same rule /run applies -- and nothing
+    changes what runs: the bake is the one bake_on_demand writes.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._jobs: Dict[tuple, Dict[str, Any]] = {}
+
+    @staticmethod
+    def key(lat: float, lon: float) -> tuple:
+        return (round(float(lat), 4), round(float(lon), 4))
+
+    def start(self, lat: float, lon: float, bake=None) -> Dict[str, Any]:
+        """Start (or keep) the bake for these coordinates; its status.
+        ``bake``: the bake function, ``bake_on_demand`` by default."""
+        key = self.key(lat, lon)
+        with self._lock:
+            job = self._jobs.get(key)
+            if job is None or job["state"] == "failed":
+                job = {"state": "downloading", "entry": None, "error": None,
+                       "started": time.time(), "finished": threading.Event()}
+                self._jobs[key] = job
+                threading.Thread(target=self._run, args=(key, job, bake or bake_on_demand),
+                                 name=f"terrain-prefetch {key}", daemon=True).start()
+        return self.status(lat, lon)
+
+    @staticmethod
+    def _run(key: tuple, job: Dict[str, Any], bake) -> None:
+        try:
+            job["entry"] = bake(*key)
+            job["state"] = "done"
+        except Exception as exc:  # named to the page, never swallowed
+            job["error"] = f"{type(exc).__name__}: {exc}"
+            job["state"] = "failed"
+        finally:
+            job["finished"].set()
+
+    def status(self, lat: float, lon: float) -> Optional[Dict[str, Any]]:
+        """{state, latitude, longitude, elapsed_s, title?, error?}, or None
+        when no bake was started for these coordinates."""
+        key = self.key(lat, lon)
+        job = self._jobs.get(key)
+        if job is None:
+            return None
+        out = {"state": job["state"], "latitude": key[0], "longitude": key[1],
+               "elapsed_s": round(time.time() - job["started"], 1)}
+        if job["state"] == "done" and isinstance(job["entry"], dict):
+            out["title"] = job["entry"].get("title")
+        if job["error"]:
+            out["error"] = job["error"]
+        return out
+
+    def bake(self, lat: float, lon: float, bake=None) -> Dict:
+        """The bake /bake answers with: the job already running for these
+        coordinates (waited for), a finished one, or a new one. Raises
+        RuntimeError carrying the job's own error when it failed."""
+        self.start(lat, lon, bake)
+        job = self._jobs[self.key(lat, lon)]
+        job["finished"].wait()
+        if job["state"] != "done":
+            raise RuntimeError(job["error"] or "the terrain bake did not finish")
+        return job["entry"]
+
+
+PREFETCH = TerrainPrefetch()
+
+
+def prefetch_terrain_for(spec: ScenarioSpec, bake=None) -> Optional[Dict[str, Any]]:
+    """Start the bake a compiled spec will need at Run, in the background;
+    its status, or None when it needs none (or prefetch is off).
+
+    Applies /run's own pre-bake planners (scene-setting, mapped water) to a
+    COPY, so the compiled spec the page shows is untouched and the
+    question asked is exactly the one /run will ask."""
+    if not terrain_prefetch_enabled():
+        return None
+    probe = ScenarioSpec.from_dict(spec.to_dict())
+    plan_scene_setting(probe)
+    plan_water_surface(probe)
+    unbaked = needs_dynamic_bake(probe)
+    if unbaked is None or "latitude" not in unbaked:
+        return None
+    return PREFETCH.start(unbaked["latitude"], unbaked["longitude"], bake)
+
+
 def bake_on_demand(lat: float, lon: float) -> Dict:
     """Fetch, bake and verify GLO-30 for arbitrary coordinates; register
     the scene. Raises (DEMError / URLError by name) rather than writing an

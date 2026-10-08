@@ -451,6 +451,17 @@ re-validates them like any typed value.
   field of view. A camera placed in the scene (tower, ground) gets the
   zoom controls only.
 
+## Terrain downloads start at Interpret
+
+When a prompt names a real place ("over new york city") whose terrain is
+not on this machine yet, **Interpret** starts the GLO-30 download in the
+background. A line under the notes follows it: *downloading*, then
+*terrain ready*. **Run** waits on that same download if it hasn't
+finished, and never starts a second one. Each 1°×1° elevation tile is
+downloaded once (`data/glo30`) and each place's ground is kept
+(`runs/terrain/dynamic`), so later runs nearby start immediately. Set
+`FLIGHTSIM_TERRAIN_PREFETCH=off` to download only at Run, as before.
+
 ## Run the tests
 
 ```bash

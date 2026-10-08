@@ -44,6 +44,8 @@ from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
 from webapp.runs import (  # noqa: E402
     CLIP_SECONDS,
+    PREFETCH,
+    prefetch_terrain_for,
     RunManager,
     apply_historical_weather,
     apply_weather_event,
@@ -433,6 +435,9 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         "transcript": transcript,
         "spec": _spec_payload(spec),
         "validation": _validation_payload(spec),
+        # The terrain the place needs, downloading in the background from
+        # now on (None when it needs none or is already on this machine).
+        "terrain_prefetch": _prefetch(spec),
     }
     if randomization_refusal is not None:
         payload["validation"]["ok"] = False
@@ -877,15 +882,34 @@ class BakeRequest(BaseModel):
     longitude: float
 
 
+def _prefetch(spec: ScenarioSpec) -> Optional[Dict[str, Any]]:
+    """Start the place's terrain bake in the background (webapp.runs
+    TerrainPrefetch); a failure to START is reported, never a failed
+    compile -- /run still asks the same question and bakes then."""
+    try:
+        return prefetch_terrain_for(spec, bake_on_demand)
+    except Exception as exc:
+        return {"state": "failed", "error": f"{type(exc).__name__}: {exc}"}
+
+
+@app.get("/bake/status")
+def bake_status(latitude: float, longitude: float) -> JSONResponse:
+    """The background bake for these coordinates: downloading, done or
+    failed (with the error); state "none" when none was started."""
+    return JSONResponse(PREFETCH.status(latitude, longitude) or {"state": "none"})
+
+
 @app.post("/bake")
 def bake_endpoint(request: BakeRequest) -> JSONResponse:
     """Fetch + bake + verify GLO-30 for arbitrary coordinates (the page
-    calls this when /run refuses terrain.unbaked). Synchronous: the first
-    fetch downloads 1x1 degree tiles and takes minutes; cached afterwards.
-    Failure is a named error -- open ocean has no tiles, an unverified
-    bake is never written."""
+    calls this when /run refuses terrain.unbaked). Waits for the bake:
+    the one /compile already started for these coordinates when there is
+    one (never a second, concurrent bake of the same place), else a new
+    one. The first fetch downloads 1x1 degree tiles and takes minutes;
+    cached afterwards. Failure is a named error -- open ocean has no
+    tiles, an unverified bake is never written."""
     try:
-        entry = bake_on_demand(request.latitude, request.longitude)
+        entry = PREFETCH.bake(request.latitude, request.longitude, bake_on_demand)
     except Exception as exc:
         return JSONResponse(
             {"error": f"{type(exc).__name__}: {exc}"}, status_code=502)
