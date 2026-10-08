@@ -622,6 +622,86 @@ def cameras_endpoint(request: CameraRequest) -> JSONResponse:
     return JSONResponse(_spec_payload(spec))
 
 
+class PlacerTerrainRequest(BaseModel):
+    """The spec the page is holding; the placer draws ITS scene."""
+
+    spec: Dict[str, Any]
+
+
+@app.post("/cameras/terrain")
+def camera_terrain_endpoint(request: PlacerTerrainRequest) -> JSONResponse:
+    """The 3D camera placer's scene: the raster pick_scene chooses for
+    this spec, sampled on a grid in the pose solver's local frame, with
+    the aircraft's start pose and straight-line track."""
+    from webapp.camera_placer import PlacementError, terrain_payload
+
+    try:
+        spec = ScenarioSpec.from_dict(request.spec)
+    except (ValueError, KeyError) as exc:
+        return JSONResponse({"error": f"spec did not parse: {exc}"},
+                            status_code=400)
+    try:
+        return JSONResponse(terrain_payload(spec, pick_scene(spec),
+                                            CLIP_SECONDS))
+    except PlacementError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+
+
+class PlacerRequest(BaseModel):
+    """One camera placed in the 3D view: ``mode`` "world" (east / north /
+    altitude MSL, aimed at the aircraft or along a bearing) or "follow"
+    (forward / right / up metres off the aircraft, heading frame).
+    ``replace`` overwrites that camera index instead of adding one."""
+
+    spec: Dict[str, Any]
+    placement: Dict[str, Any]
+
+
+@app.post("/cameras/place")
+def camera_place_endpoint(request: PlacerRequest) -> JSONResponse:
+    """Add the camera the 3D placer shows, every moved number user-stated.
+
+    Refusals are the validator's and the scene check's, by name: a world
+    camera under the terrain or outside the raster refuses here, before
+    any engine time, exactly as /run would refuse it."""
+    from core.capture.validate import validate_cameras
+    from webapp.camera_placer import PlacementError, place_camera
+
+    try:
+        spec = ScenarioSpec.from_dict(request.spec)
+    except (ValueError, KeyError) as exc:
+        return JSONResponse({"error": f"spec did not parse: {exc}"},
+                            status_code=400)
+    try:
+        index = place_camera(spec, request.placement)
+    except PlacementError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    # Only refusals naming THIS camera: another camera's problem is the
+    # review table's to show, and /run re-validates the whole spec.
+    prefix = f"camera[{index}] "
+    ours = [{"constraint": v.constraint, "text": v.render()}
+            for v in validate_cameras(spec) if v.message.startswith(prefix)]
+    if not ours:
+        ours = [{"constraint": v["constraint"],
+                 "text": f"{v['constraint']}: {v['message']}"}
+                for v in camera_scene_violations(spec, pick_scene(spec))
+                if v["message"].startswith(prefix)]
+    if ours:
+        return JSONResponse(
+            {"refused": ours[0]["constraint"],
+             "error": "; ".join(v["text"] for v in ours)}, status_code=409)
+    payload = _spec_payload(spec)
+    payload["placed_index"] = index
+    return JSONResponse(payload)
+
+
+@app.get("/camera3d.js")
+def camera_placer_script():
+    """The placer's WebGL view, a script the main page loads."""
+    return FileResponse(STATIC / "camera3d.js",
+                        media_type="text/javascript")
+
+
 @app.post("/run")
 def run_endpoint(request: RunRequest) -> JSONResponse:
     try:

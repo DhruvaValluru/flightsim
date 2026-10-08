@@ -130,6 +130,7 @@ visual-only per host (measured).</p>
   <div id="srcLegend" class="dim" style="margin:.4rem 0"></div>
   <div id="cameraPicker" style="margin:.6rem 0"></div>
   <div id="cameraState" class="dim"></div>
+  <div id="cameraPlacer"></div>
   <div id="verdict"></div>
   <p>
     <button id="run" class="run">Run</button>
@@ -143,6 +144,7 @@ visual-only per host (measured).</p>
   <div id="clipArea"></div>
 </div>
 
+<script src="/camera3d.js"></script>
 <script>
 "use strict";
 let airframeChoices = [];       // /status: airframes with labels (may be traffic)
@@ -396,7 +398,9 @@ function renderSpec(payload) {
     const head = document.createElement("tr");
     head.innerHTML = `<td colspan="3"><b>camera[${cam.index}] ` +
       `${cam.camera_id}</b> <span class="dim">${cam.preset || ""}</span></td>` +
-      `<td><button class="opt cam-remove" data-remove="${cam.index}">` +
+      `<td><button class="opt cam-edit3d" data-edit="${cam.index}" ` +
+      `title="move this camera in the 3D placer">edit in 3D</button>` +
+      `<button class="opt cam-remove" data-remove="${cam.index}">` +
       `remove</button></td>`;
     body.appendChild(head);
     for (const f of cam.fields) {
@@ -509,6 +513,16 @@ function renderCameraPicker() {
     button.addEventListener("click", () => changeCameras({preset}));
     row.appendChild(button);
   }
+  // Or put it at an exact spot: the 3D placer (webapp/static/camera3d.js)
+  // shows this spec's terrain and aircraft; x / y / z and the aim are
+  // numbers you move, and what the camera sees is drawn beside it.
+  const placer = document.createElement("button");
+  placer.className = "opt";
+  placer.id = "cameraPlacerOpen";
+  placer.textContent = "+ place in 3D (exact x / y / z)";
+  placer.title = "move the camera over the scene's terrain and see its view";
+  placer.addEventListener("click", () => openCameraPlacer(null));
+  row.appendChild(placer);
   holder.appendChild(row);
   // Or say where the camera should be, in words.
   const sentence = document.createElement("div");
@@ -563,6 +577,27 @@ function renderCameraPicker() {
   document.querySelectorAll(".cam-remove").forEach(button =>
     button.addEventListener("click", () =>
       changeCameras({remove: +button.dataset.remove})));
+  document.querySelectorAll(".cam-edit3d").forEach(button =>
+    button.addEventListener("click", () =>
+      openCameraPlacer(+button.dataset.edit)));
+}
+
+function openCameraPlacer(index) {
+  // The placer reads the EDITED spec (a typed value is not lost) and
+  // hands back the server's whole payload, like every other camera path.
+  const camera = index === null ? null
+    : (compiled.spec.cameras || []).find(c => c.index === index);
+  CameraPlacer.open({
+    container: $("cameraPlacer"),
+    getSpec: editedSpecDict,
+    edit: camera ? {index, camera} : null,
+    onPlaced: payload => {
+      $("cameraState").textContent =
+        `${payload.cameras.length} view(s): ` +
+        payload.cameras.map(c => c.camera_id).join(", ");
+      renderSpec({...compiled, spec: payload});
+    },
+  });
 }
 
 async function placeCameraFromSentence() {
@@ -685,6 +720,9 @@ async function doCompile(body) {
       $("questionArea").style.display = "none";
     }
     renderSpec(payload);
+    // A new spec is a new scene: a placer open on the old one would draw
+    // the wrong terrain and could overwrite the wrong camera index.
+    CameraPlacer.close();
     // A fresh compile starts from one aircraft; carry the page's choice onto it.
     if (+$("aircraftCount").value > 1) await applyFleet();
   } catch (error) {
