@@ -107,6 +107,9 @@ The cell, lightning, splashes and glass are the same for `procedural` and
 ```
 # a rendered clip
 UnrealEditor-Cmd ue/FlightSim.uproject -run=FlightSimRender -scenario=<card.json> -Visual ... -weather-backend=procedural
+# the web app: set this before starting it, and every prompt's render asks for the storm
+#   (Windows PowerShell: $env:FLIGHTSIM_WEATHER_BACKEND="procedural"; unset or "off" = as before)
+FLIGHTSIM_WEATHER_BACKEND=procedural
 # the interactive window (thunder and rain heard)
 UnrealEditor ue/FlightSim.uproject -game -card=<card.json> -terrain=... [-weather-backend=niagara]
 # the soundtrack for a rendered clip (sample 0 at run time 0, ready to mux)

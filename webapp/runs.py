@@ -1922,6 +1922,24 @@ def render_quality() -> str:
     return quality
 
 
+#: The storm weather (core/scene/storm_weather.py, FlightSimWeather.cpp) is
+#: OPT-IN beside the weather look: FLIGHTSIM_WEATHER_BACKEND=procedural
+#: (deterministic drops) or niagara (the hand-built NS_FlightSimRain)
+#: adds -weather-backend= to the render; unset or "off" adds nothing, so
+#: every pinned command stands.
+WEATHER_BACKENDS = ("off", "procedural", "niagara")
+
+
+def weather_backend_flags() -> List[str]:
+    """The render's -weather-backend= token, or none; ValueError names an
+    unknown backend."""
+    backend = os.environ.get("FLIGHTSIM_WEATHER_BACKEND", "off").strip() or "off"
+    if backend not in WEATHER_BACKENDS:
+        raise ValueError(f"FLIGHTSIM_WEATHER_BACKEND={backend!r} is not one of "
+                         f"{list(WEATHER_BACKENDS)}")
+    return [] if backend == "off" else [f"-weather-backend={backend}"]
+
+
 def exposure_bias_for(elevation_deg: float):
     """(manual exposure bias, basis) for a sun at elevation_deg.
 
@@ -2609,8 +2627,10 @@ class RunManager:
             triangle_budget=terrain_triangle_budget(scene),
             # The SHARED recorder's own file (same component all three
             # hosts use), stamping the FDM's clock -- the aero panel
-            # reads it verbatim, no resampling.
-            telemetry=telemetry, extra=extra)
+            # reads it verbatim, no resampling. The storm weather's
+            # backend rides in extra, only when FLIGHTSIM_WEATHER_BACKEND
+            # asks for it.
+            telemetry=telemetry, extra=list(extra) + weather_backend_flags())
         log = frames.parent / "render.log"
         # Unattended and watched (core/render/headless.py): no window, no
         # OS error box, no stdin; a pass that writes nothing for the stall

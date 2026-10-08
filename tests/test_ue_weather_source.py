@@ -200,3 +200,16 @@ def test_the_storm_weather_is_opt_in_and_replaces_the_rain_particles_when_asked(
     glass = COMMANDLET.index("Weather.ApplyWindshield(Capture", lens)
     assert "if (!bStormGlass)" in COMMANDLET[lens - 60:lens]
     assert "else" in COMMANDLET[lens:glass]
+
+
+def test_the_web_app_asks_for_the_storm_weather_only_when_told(monkeypatch):
+    from webapp import runs
+
+    monkeypatch.delenv("FLIGHTSIM_WEATHER_BACKEND", raising=False)
+    assert runs.weather_backend_flags() == []
+    monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "procedural")
+    assert runs.weather_backend_flags() == ["-weather-backend=procedural"]
+    monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "hail")
+    import pytest
+    with pytest.raises(ValueError):
+        runs.weather_backend_flags()
