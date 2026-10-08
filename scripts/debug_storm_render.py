@@ -112,7 +112,10 @@ def main(argv=None) -> int:
         rendered = (frames / "render.json").is_file()
         crashed = any("Assertion failed" in line or "Fatal error" in line for line in lines)
         verdicts[backend] = "RENDERED" if rendered else ("CRASHED" if crashed else "REFUSED/NO FRAMES")
-        print(f"  -> {verdicts[backend]} (returncode {result.returncode}, {result.seconds:.0f} s)")
+        # The editor exits 1 whenever any error was logged (the project's
+        # Water Body Collision profile error, on every run); the verdict is
+        # whether render.json was written, as the web app judges it.
+        print(f"  -> {verdicts[backend]} (editor exit code {result.returncode}, {result.seconds:.0f} s)")
     print("\n" + json.dumps(verdicts))
     return 0 if all(v == "RENDERED" for v in verdicts.values()) else 1
 

@@ -276,3 +276,12 @@ def test_the_debug_script_runs_the_render_commandlet_per_backend_and_keeps_the_l
     assert 'extra.append(f"-weather-backend={backend}")' in text
     assert "Assertion failed" in text and "Failed to compile Material" in text
     assert "debug_storm_render.py" in DOC
+
+
+def test_a_requested_rebuild_is_not_skipped_by_the_tonemapper_move():
+    """Measured on the owner's machine: FLIGHTSIM_REBUILD_MATERIALS rebuilt
+    M_GreyCard and M_LandcoverID (which then compiled) but not M_RainStreaks
+    or M_LensDrops, whose creators return early from move_after_tonemapping
+    before new_material's delete; the move now yields to a rebuild."""
+    move = SCRIPT[SCRIPT.index("def move_after_tonemapping"):SCRIPT.index("def new_material")]
+    assert "or rebuild_requested(name)" in move

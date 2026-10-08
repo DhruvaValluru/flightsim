@@ -836,8 +836,8 @@ def move_after_tonemapping(name):
     place (this script otherwise skips existing assets, so a machine that
     built the material before the move would keep the old location)."""
     full = f"{PATH}/{name}"
-    if not unreal.EditorAssetLibrary.does_asset_exist(full):
-        return False
+    if not unreal.EditorAssetLibrary.does_asset_exist(full) or rebuild_requested(name):
+        return False   # absent, or FLIGHTSIM_REBUILD_MATERIALS: built again below
     material = unreal.EditorAssetLibrary.load_asset(full)
     location = after_tonemapping()
     if material.get_editor_property("blendable_location") == location:
