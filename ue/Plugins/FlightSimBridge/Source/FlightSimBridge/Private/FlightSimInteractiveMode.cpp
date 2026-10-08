@@ -226,6 +226,12 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		{
 			return false;
 		}
+		// Every cloud's material, checked before the window draws a frame
+		// (the engine asserts on a bad one; this refuses by name).
+		if (!FFlightSimWeather::VerifyCloudMaterials(GetWorld(), Error))
+		{
+			return false;
+		}
 	}
 
 	// -- camera ------------------------------------------------------------

@@ -21,7 +21,19 @@ The C++ closed forms are COMPILED with g++ and matched to Python in
 tests/test_weather.py; the rest is UNCOMPILED. NEXT: the first Windows
 build and the WX.1-WX.6 clauses (WX.4 sets ExtinctionScale if the engine
 does not read Extinction per metre); then build NS_FlightSimRain from the
-recipe if the Niagara backend is wanted. OPEN for the owner: the two
+recipe if the Niagara backend is wanted. FIRST WINDOWS RUNS (2026-10-08):
+the build needed C4883 silenced on the commandlet's Main and 5.7's
+GetMaterialResource(EShaderPlatform); the first thunderstorm render
+crashed in the engine's cloud SHADOW pass (MD_Volume assert: M_StormCell
+compiled as a Volume material with no cloud shaders, lacking the "Used
+with Volumetric Cloud" usage flag). Fixed by the flag (script, in place
+too), a usage check in BuildCell, and VerifyCloudMaterials before the
+first frame of both hosts (refuses clouds.material instead). Also found:
+select_if connected nothing ("A>B" is not the engine's pin name), so
+M_LensDrops / M_GreyCard / M_LandcoverID / M_RainStreaks failed to
+compile -- rebuild them with FLIGHTSIM_REBUILD_MATERIALS. Tools:
+scripts/debug_storm_render.py (direct commandlet runs, logs kept).
+OPEN for the owner: the two
 weather paths overlap (both draw drops, storm clouds and lightning);
 which one to keep, or how to fold them together, is the owner's call.
 

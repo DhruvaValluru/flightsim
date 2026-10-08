@@ -3419,6 +3419,27 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// from every frame while its 26-triangle ailerons rendered fine). Finish
 	// the builds before the first capture, exactly as with shaders above.
 	FAssetCompilingManager::Get().FinishAllCompilation();
+	// Every volumetric cloud's material checked the way the engine's cloud
+	// passes check it, BEFORE the first scene render: the engine asserts
+	// (a crash with a callstack) where this refuses by name
+	// (clouds.material) with the component and material on the line.
+	{
+		TArray<FString> CloudReport;
+		FString CloudError;
+		if (!FFlightSimWeather::VerifyCloudMaterials(World, CloudError, &CloudReport))
+		{
+			return Fail(CloudError);
+		}
+		if (VisualScene.LookApplied.IsValid())
+		{
+			TArray<TSharedPtr<FJsonValue>> Lines;
+			for (const FString& Line : CloudReport)
+			{
+				Lines.Add(MakeShared<FJsonValueString>(Line));
+			}
+			VisualScene.LookApplied->SetArrayField(TEXT("cloud_materials"), Lines);
+		}
+	}
 
 	// Discarded warm-up captures. The first CaptureScene after the component is
 	// registered resolves nothing -- the scene proxies exist, but the capture's

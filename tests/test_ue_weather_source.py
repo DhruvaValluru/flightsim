@@ -225,3 +225,54 @@ def test_the_storm_material_is_compiled_and_checked_before_the_cloud_draws_it():
     assert check < cell.index("Resource->FinishCompilation();") < cell.index("GetCompileErrors()")
     assert cell.index("GetCompileErrors()") < cell.index("StormClouds->SetMaterial(StormMaterial)")
     assert "weather.storm_material" in cell[check:cell.index("StormClouds->SetMaterial(StormMaterial)")]
+
+
+def test_the_storm_material_is_flagged_for_the_volumetric_cloud_and_every_cloud_is_verified():
+    """Measured on the owner's machine (2026-10-08): the engine's cloud SHADOW
+    pass asserts MD_Volume on a cloud whose material compiled without cloud
+    shaders -- a Volume material not flagged 'Used with Volumetric Cloud'.
+    The script sets the flag (new and existing assets), BuildCell checks it,
+    and both hosts verify every cloud before the first frame."""
+    assert 'STORM_USAGE_PROPERTY = "used_with_volumetric_cloud"' in SCRIPT
+    storm = SCRIPT[SCRIPT.index("def create_storm_cell"):SCRIPT.index("def create_windshield_rain")]
+    assert 'ensure_volumetric_cloud_usage("M_StormCell")' in storm
+    assert "material.set_editor_property(STORM_USAGE_PROPERTY, True)" in storm
+    repair = SCRIPT[SCRIPT.index("def ensure_volumetric_cloud_usage"):SCRIPT.index("def create_storm_cell")]
+    assert "recompile_material" in repair and "save_asset" in repair
+    cell = _function(WEATHER_CPP, "bool FFlightSimWeather::BuildCell")
+    assert cell.index("GetUsageByFlag(MATUSAGE_VolumetricCloud)") < cell.index("Resource->FinishCompilation();")
+    verify = _function(WEATHER_CPP, "bool FFlightSimWeather::VerifyCloudMaterials")
+    for needle in ("TObjectIterator<UVolumetricCloudComponent>", "MD_Volume",
+                   "MATUSAGE_VolumetricCloud", "GetCompileErrors()", "clouds.material"):
+        assert needle in verify, needle
+    # The commandlet verifies after the shader wait and before the warm-up captures.
+    wait = COMMANDLET.index('TEXT("waiting for shader compilation")')
+    check = COMMANDLET.index("FFlightSimWeather::VerifyCloudMaterials(World, CloudError, &CloudReport)")
+    warmup = COMMANDLET.index("for (int32 i = 0; i < WarmupCaptures; ++i)")
+    assert wait < check < warmup
+    assert "VerifyCloudMaterials(GetWorld(), Error)" in INTERACTIVE
+
+
+def test_the_if_pins_are_connected_under_a_name_the_engine_accepts_or_refused():
+    """Measured on the owner's 5.7: connecting "A>B" did nothing and every
+    If-based material (M_LensDrops, and the older M_GreyCard, M_LandcoverID,
+    M_RainStreaks built the same way) failed with 'Missing If AGreaterThanB
+    input'. select_if now tries each engine name and raises, naming the
+    node's real inputs, when none connects."""
+    assert 'IF_PIN_NAMES = (("A > B", "A>B", "AGreaterThanB")' in SCRIPT
+    select = SCRIPT[SCRIPT.index("def select_if"):SCRIPT.index("def in_unit_interval")]
+    assert "connect(lib, constant(material, lib, value, x - 150, y), \"\", node, names)" in select
+    helper = SCRIPT[SCRIPT.index("def connect(lib, source"):SCRIPT.index("def select_if")]
+    assert "if lib.connect_material_expressions(source, source_out, node, name):" in helper
+    assert "raise RuntimeError" in helper
+    assert 'os.environ.get("FLIGHTSIM_REBUILD_MATERIALS"' in SCRIPT
+    assert "delete_asset(full)" in SCRIPT
+
+
+def test_the_debug_script_runs_the_render_commandlet_per_backend_and_keeps_the_logs():
+    text = (REPO / "scripts" / "debug_storm_render.py").read_text(encoding="utf-8")
+    assert "run_headless(list(command) + list(HEADLESS_FLAGS), log, watch=[frames])" in text
+    assert '"-run=FlightSimBridge.FlightSimRender"' in text
+    assert 'extra.append(f"-weather-backend={backend}")' in text
+    assert "Assertion failed" in text and "Failed to compile Material" in text
+    assert "debug_storm_render.py" in DOC

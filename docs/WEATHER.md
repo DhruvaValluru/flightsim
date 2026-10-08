@@ -167,9 +167,42 @@ fraction exceeds `User.Active`.
 | `weather.rain_material`, `weather.storm_material`, `weather.lightning_material` | a weather material did not load (run the material script) |
 | `weather.windshield` | a cockpit camera in the rain without `M_WindshieldRain` |
 | `weather.niagara_asset` | `-weather-backend=niagara` without `NS_FlightSimRain` |
+| `clouds.material` | a registered volumetric cloud (any host, any cloud: the look's, the storm's, the sky's) carries a material that is not a compiled Volume material flagged "Used with Volumetric Cloud"; the engine would assert on it, so the host refuses before its first frame, with the component and material on the line |
 
 A thunderstorm card without a `downburst` block draws its rain and records the
 cell and lightning as not drawn (they have no place). That is not a refusal.
+
+## Debugging a crash (what the first Windows runs taught)
+
+The engine's volumetric cloud passes do not refuse a bad cloud material,
+they assert: `Assertion failed: Material->GetMaterialDomain() == MD_Volume`
+in `VolumetricCloudRendering.cpp`, from the cloud **shadow** mesh pass, which
+walks the material's fallback chain and lands on the default *surface*
+material when the cloud's own material has no cloud shaders. A material
+compiles its cloud shaders only when flagged **Used with Volumetric Cloud**
+(`used_with_volumetric_cloud`); a Volume material without the flag compiles
+fine, draws nothing, and crashes the shadow pass. `M_StormCell` now carries
+the flag (the script sets it on a new asset and in place on an old one),
+`BuildCell` checks it, and both hosts run `VerifyCloudMaterials` before the
+first frame: every cloud's material, domain, flag and compile errors on one
+log line each, a bad one refused as `clouds.material`.
+
+Two tools for the next time something only fails on the engine:
+
+* `python scripts/debug_storm_render.py --backend off --backend procedural`
+  writes the storm card and runs the render commandlet directly, a few
+  seconds per backend, keeping each log under `runs/debug_storm/<backend>/`
+  and printing the decisive lines (weather and cloud lines, materials that
+  failed to compile, the assertion if any). The web app deletes a failed
+  run's folder; this does not.
+* `FLIGHTSIM_REBUILD_MATERIALS=M_LensDrops,M_StormCell` (or `all`) before
+  the material script deletes those assets and builds them again. The
+  script otherwise skips what exists, so a material built by an older script
+  keeps its old graph. The `If` node's pins are now connected under the
+  name the engine accepts (or the script fails naming the node's real
+  inputs): `M_LensDrops`, `M_GreyCard`, `M_LandcoverID` and `M_RainStreaks`
+  were all built on a pin name the engine ignored and failed to compile
+  ("Missing If AGreaterThanB input"); rebuild them once.
 
 ## What is verified where
 

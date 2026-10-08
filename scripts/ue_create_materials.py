@@ -513,6 +513,17 @@ WEATHER_FLOAT4_PARAMETERS = ("Splash", "Power", "Geo1", "Geo2", "Sigma", "Noise"
 #: the card's into Flash.z, the material's base colour reads this parameter).
 STORM_ALBEDO_PARAMETER = "Albedo"
 STORM_ALBEDO_DEFAULT = 0.98
+#: The usage flag a volumetric cloud's material MUST carry: the engine
+#: compiles a material's cloud shaders (the view pass and the cloud SHADOW
+#: pass) only for materials flagged "Used with Volumetric Cloud". Without
+#: it the material compiles as a Volume material with no cloud shaders, the
+#: cloud shadow mesh pass finds none, falls back to the default SURFACE
+#: material and asserts GetMaterialDomain() == MD_Volume
+#: (VolumetricCloudRendering.cpp; measured on the owner's 5.7, 2026-10-08:
+#: every thunderstorm render crashed there). The engine's own
+#: m_SimpleVolumetricCloud carries it; ensure_volumetric_cloud_usage sets
+#: it on an M_StormCell built before this line existed.
+STORM_USAGE_PROPERTY = "used_with_volumetric_cloud"
 
 
 def add_wetness(material, lib, base_colour_node, base_output, x,
@@ -839,12 +850,28 @@ def move_after_tonemapping(name):
     return True
 
 
+def rebuild_requested(name):
+    """FLIGHTSIM_REBUILD_MATERIALS=all or a comma list of names: an existing
+    asset is deleted and built again (the script otherwise skips what
+    exists, so a material built by an older script keeps its old graph)."""
+    import os
+    wanted = os.environ.get("FLIGHTSIM_REBUILD_MATERIALS", "").strip()
+    if not wanted:
+        return False
+    names = {token.strip() for token in wanted.split(",")}
+    return "all" in names or name in names
+
+
 def new_material(name):
-    """Create /Game/FlightSim/<name> once; None when it already exists."""
+    """Create /Game/FlightSim/<name> once; None when it already exists
+    (unless rebuild_requested: then it is deleted and built again)."""
     full = f"{PATH}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
-        print(f"MATERIAL-EXISTS: {full}")
-        return None
+        if rebuild_requested(name) and unreal.EditorAssetLibrary.delete_asset(full):
+            print(f"MATERIAL-REBUILT: {full} (deleted on FLIGHTSIM_REBUILD_MATERIALS)")
+        else:
+            print(f"MATERIAL-EXISTS: {full}")
+            return None
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     material = tools.create_asset(name, PATH, unreal.Material, unreal.MaterialFactoryNew())
     if material is None:
@@ -951,13 +978,41 @@ def constant3(material, lib, rgb, x, y):
     return node
 
 
+#: The If node's three result pins, by the names an engine may give them
+#: (measured on the owner's 5.7, 2026-10-08: "A>B" connected NOTHING --
+#: connect_material_expressions returned False silently -- and every
+#: material built on it failed to compile with "Missing If AGreaterThanB
+#: input", drawing the default material). Each pin is tried under every
+#: name until the engine accepts one, and a pin no name connects is an
+#: error naming the pins the engine actually has.
+IF_PIN_NAMES = (("A > B", "A>B", "AGreaterThanB"), ("A == B", "A==B", "AEqualsB"),
+                ("A < B", "A<B", "ALessThanB"))
+
+
+def connect(lib, source, source_out, node, names):
+    """Connect ``source`` to the first of ``names`` the node accepts; the
+    names it does have on failure (never a silent no-op)."""
+    if isinstance(names, str):
+        names = (names,)
+    for name in names:
+        if lib.connect_material_expressions(source, source_out, node, name):
+            return name
+    have = []
+    try:
+        lib.get_inputs_for_material_expression(node, have)
+    except Exception:   # an engine without the lister: the names stay unknown
+        have = ["(unlisted)"]
+    raise RuntimeError(f"no input named {list(names)} on {node.get_class().get_name()}; "
+                       f"its inputs are {list(have)}")
+
+
 def select_if(material, lib, a, b, greater, equal, less, x, y):
     """1/0 from an If node: A > B -> greater, A == B -> equal, A < B -> less."""
     node = lib.create_material_expression(material, unreal.MaterialExpressionIf, x, y)
-    lib.connect_material_expressions(a, "", node, "A")
-    lib.connect_material_expressions(b, "", node, "B")
-    for pin, value in (("A>B", greater), ("A==B", equal), ("A<B", less)):
-        lib.connect_material_expressions(constant(material, lib, value, x - 150, y), "", node, pin)
+    connect(lib, a, "", node, "A")
+    connect(lib, b, "", node, "B")
+    for names, value in zip(IF_PIN_NAMES, (greater, equal, less)):
+        connect(lib, constant(material, lib, value, x - 150, y), "", node, names)
     return node
 
 
@@ -1766,17 +1821,40 @@ def create_lightning_channel():
     finish(material, "M_LightningChannel")
 
 
+def ensure_volumetric_cloud_usage(name):
+    """True when /Game/FlightSim/<name> already exists: its graph is kept
+    and STORM_USAGE_PROPERTY is set in place when it was not (then
+    recompiled and saved), so a machine that built the storm before the
+    flag existed does not keep a cloud material with no cloud shaders."""
+    full = f"{PATH}/{name}"
+    if not unreal.EditorAssetLibrary.does_asset_exist(full) or rebuild_requested(name):
+        return False
+    material = unreal.EditorAssetLibrary.load_asset(full)
+    if material.get_editor_property(STORM_USAGE_PROPERTY):
+        print(f"MATERIAL-EXISTS: {full}")
+        return True
+    material.set_editor_property(STORM_USAGE_PROPERTY, True)
+    unreal.MaterialEditingLibrary.recompile_material(material)
+    unreal.EditorAssetLibrary.save_asset(full)
+    print(f"MATERIAL-UPDATED: {full} ({STORM_USAGE_PROPERTY} set: the cloud shaders compile)")
+    return True
+
+
 def create_storm_cell():
     """M_StormCell: the volumetric cloud material of a thunderstorm cell
-    (Volume domain, additive): albedo "Albedo", extinction
-    storm_cell.hlsl x "ExtinctionScale" (1: the shader's 1/m, the engine's
-    unit the first Windows measurement), emissive storm_glow.hlsl."""
+    (Volume domain, additive, flagged for the volumetric cloud -- see
+    STORM_USAGE_PROPERTY): albedo "Albedo", extinction storm_cell.hlsl x
+    "ExtinctionScale" (1: the shader's 1/m, the engine's unit the first
+    Windows measurement), emissive storm_glow.hlsl."""
+    if ensure_volumetric_cloud_usage("M_StormCell"):
+        return
     material = _storm_material("M_StormCell")
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary
     material.set_editor_property("material_domain", unreal.MaterialDomain.MD_VOLUME)
     material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
+    material.set_editor_property(STORM_USAGE_PROPERTY, True)
     params = {name: weather_parameter(material, lib, name, -1800, -800 + 110 * i,
                                       default=1.0 if name == "ExtinctionScale" else 0.0)
               for i, name in enumerate(STORM_PARAMETERS)}
@@ -1904,8 +1982,11 @@ def create_runway():
 def _sky_material(name):
     full = f"{PATH}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
-        print(f"MATERIAL-EXISTS: {full}")
-        return None, full
+        if rebuild_requested(name) and unreal.EditorAssetLibrary.delete_asset(full):
+            print(f"MATERIAL-REBUILT: {full} (deleted on FLIGHTSIM_REBUILD_MATERIALS)")
+        else:
+            print(f"MATERIAL-EXISTS: {full}")
+            return None, full
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     material = tools.create_asset(name, PATH, unreal.Material,
                                   unreal.MaterialFactoryNew())
@@ -2063,8 +2144,11 @@ def _weather_material(name):
     list stays exactly the world's, like the sky's helper)."""
     full = f"{PATH}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
-        print(f"MATERIAL-EXISTS: {full}")
-        return None
+        if rebuild_requested(name) and unreal.EditorAssetLibrary.delete_asset(full):
+            print(f"MATERIAL-REBUILT: {full} (deleted on FLIGHTSIM_REBUILD_MATERIALS)")
+        else:
+            print(f"MATERIAL-EXISTS: {full}")
+            return None
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     material = tools.create_asset(name, PATH, unreal.Material, unreal.MaterialFactoryNew())
     if material is None:

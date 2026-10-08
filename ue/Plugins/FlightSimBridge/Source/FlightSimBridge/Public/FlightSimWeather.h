@@ -200,6 +200,14 @@ public:
 	bool DrawsRain() const { return bRain; }
 	bool IsBuilt() const { return bBuilt; }
 
+	// Every registered volumetric cloud in the world checked the way the
+	// engine's cloud passes check it (a Volume material, flagged "Used with
+	// Volumetric Cloud", compiled without errors), each logged; false with
+	// clouds.material naming the first bad one. Call before the first frame
+	// of any host that draws clouds: the engine asserts where this refuses.
+	static bool VerifyCloudMaterials(UWorld* World, FString& Error,
+	                                 TArray<FString>* OutReport = nullptr);
+
 	// render.json look_applied.weather: what was drawn, with what, and what
 	// was not and why. Valid after Build().
 	TSharedPtr<FJsonObject> Record;

@@ -24,6 +24,7 @@
 #include "ProceduralMeshComponent.h"
 #include "RHI.h"
 #include "Sound/SoundWaveProcedural.h"
+#include "UObject/UObjectIterator.h"
 
 #include <atomic>
 
@@ -510,6 +511,99 @@ bool FFlightSimWeather::ParseBackend(const FString& Name, EFlightSimWeatherBacke
 		return false;
 	}
 	return true;
+}
+
+// -- every cloud in the world, before the first frame --------------------------------
+
+bool FFlightSimWeather::VerifyCloudMaterials(UWorld* World, FString& Error,
+                                             TArray<FString>* OutReport)
+{
+	// The engine's volumetric cloud passes (VolumetricCloudRendering.cpp)
+	// walk the material's fallback chain and ASSERT when it ends at a
+	// non-Volume material -- a crash, not a refusal. This mirrors their
+	// test on the game thread for every registered cloud component and
+	// refuses by name (clouds.material) with the component, its material,
+	// the domain, the usage flag and the compiler's errors, so a bad cloud
+	// is a readable line in the log rather than a callstack.
+	bool bOk = true;
+	const EShaderPlatform Platform = GShaderPlatformForFeatureLevel[World->GetFeatureLevel()];
+	for (TObjectIterator<UVolumetricCloudComponent> It; It; ++It)
+	{
+		UVolumetricCloudComponent* Cloud = *It;
+		if (Cloud->GetWorld() != World || !Cloud->IsRegistered())
+		{
+			continue;
+		}
+		const FString Owner = Cloud->GetOwner() != nullptr ? Cloud->GetOwner()->GetName() : TEXT("(no owner)");
+		UMaterialInterface* Material = Cloud->GetMaterial();
+		FString Line = FString::Printf(TEXT("cloud %s (%s): "), *Cloud->GetName(), *Owner);
+		FString Why;
+		if (Material == nullptr)
+		{
+			Line += TEXT("no material (draws nothing)");
+		}
+		else
+		{
+			UMaterial* Base = Material->GetMaterial();
+			Line += Material->GetPathName();
+			if (Base == nullptr)
+			{
+				Why = TEXT("has no base material");
+			}
+			else
+			{
+				Line += FString::Printf(TEXT(", domain %d, used_with_volumetric_cloud %s"),
+				                        static_cast<int32>(Base->MaterialDomain),
+				                        Base->GetUsageByFlag(MATUSAGE_VolumetricCloud) ? TEXT("yes") : TEXT("NO"));
+				if (Base->MaterialDomain != MD_Volume)
+				{
+					Why = TEXT("is not a Volume material");
+				}
+				else if (!Base->GetUsageByFlag(MATUSAGE_VolumetricCloud))
+				{
+					Why = TEXT("is not flagged 'Used with Volumetric Cloud' (no cloud shaders)");
+				}
+				else if (FMaterialResource* Resource = Base->GetMaterialResource(Platform))
+				{
+					Resource->FinishCompilation();
+					if (Resource->GetCompileErrors().Num() > 0)
+					{
+						Why = TEXT("failed to compile: ") + FString::Join(Resource->GetCompileErrors(), TEXT(" | "));
+					}
+					else if (Resource->GetGameThreadShaderMap() == nullptr)
+					{
+						Why = TEXT("has no shader map after compiling");
+					}
+					else
+					{
+						Line += TEXT(", compiled");
+					}
+				}
+				else
+				{
+					Why = TEXT("has no material resource for this shader platform");
+				}
+			}
+		}
+		if (!Why.IsEmpty())
+		{
+			Line += TEXT(" -- ") + Why;
+			if (bOk)   // the first bad cloud names the refusal
+			{
+				Error = FString::Printf(TEXT("clouds.material: the volumetric cloud %s of %s carries %s, which %s; ")
+				                        TEXT("the engine would assert on it, so the render refuses instead"),
+				                        *Cloud->GetName(), *Owner,
+				                        Material != nullptr ? *Material->GetPathName() : TEXT("nothing"), *Why);
+			}
+			bOk = false;
+		}
+		UE_LOG(LogFlightSimWeather, Display, TEXT("%s"), *Line);
+		if (OutReport != nullptr)
+		{
+			OutReport->Add(Line);
+		}
+	}
+	return bOk;
 }
 
 // -- the frame -------------------------------------------------------------------
@@ -1062,6 +1156,21 @@ bool FFlightSimWeather::BuildCell(UWorld* World, const TSharedPtr<FJsonObject>& 
 		if (Base == nullptr || Base->MaterialDomain != MD_Volume)
 		{
 			Why = TEXT("its material domain is not Volume (re-run scripts/ue_create_materials.py)");
+		}
+		// "Used with Volumetric Cloud": the engine compiles a material's
+		// cloud shaders only under this usage flag. Without it the material
+		// IS a compiled Volume material with no cloud shaders, the cloud
+		// shadow mesh pass finds none, falls back to the default surface
+		// material and asserts MD_Volume (VolumetricCloudRendering.cpp;
+		// measured on the owner's machine, 2026-10-08). CheckMaterialUsage
+		// sets it in the editor (and recompiles; FinishCompilation below
+		// waits); a material that still lacks it is refused, never drawn.
+		else if (!Base->GetUsageByFlag(MATUSAGE_VolumetricCloud) &&
+		         (!Base->CheckMaterialUsage(MATUSAGE_VolumetricCloud) ||
+		          !Base->GetUsageByFlag(MATUSAGE_VolumetricCloud)))
+		{
+			Why = TEXT("it is not flagged 'Used with Volumetric Cloud' (no cloud shaders; the engine ")
+			      TEXT("asserts on it): re-run scripts/ue_create_materials.py, which sets the flag");
 		}
 		// UE 5.7 keys material resources by shader platform (measured: the
 		// feature-level overload is gone); the platform of this world's level.
