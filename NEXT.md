@@ -32,7 +32,18 @@ first frame of both hosts (refuses clouds.material instead). Also found:
 select_if connected nothing ("A>B" is not the engine's pin name), so
 M_LensDrops / M_GreyCard / M_LandcoverID / M_RainStreaks failed to
 compile -- rebuild them with FLIGHTSIM_REBUILD_MATERIALS. Tools:
-scripts/debug_storm_render.py (direct commandlet runs, logs kept).
+scripts/debug_storm_render.py (direct commandlet runs, logs kept, frame
+luma measured). SECOND RUN: the frame rendered BLACK -- the cloud
+material had no multiple scattering (single scattering under an 11 km
+tower lights nothing), the look's deck was drawn 156 optical depths deep,
+and the look's manual exposure stood. Fixed (docs/WEATHER.md "Seeing
+nothing"): M_StormCell carries a VolumetricAdvancedMaterialOutput
+(STORM_SCATTERING; storm materials are stamped with STORM_GENERATION and
+an older build is rebuilt by the script itself), the deck is capped to a
+nimbostratus depth, the commandlet meters a frame read back before frame
+0 (look_applied.storm_exposure; -storm-meter-target=), the window adapts
+on the engine's histogram. UNCOMPILED and UNMEASURED here: the next
+Windows run tells (debug_storm_render.py prints RENDERED-DARK if not).
 OPEN for the owner: the two
 weather paths overlap (both draw drops, storm clouds and lightning);
 which one to keep, or how to fold them together, is the owner's call.

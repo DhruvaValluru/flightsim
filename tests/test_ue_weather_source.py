@@ -285,3 +285,66 @@ def test_a_requested_rebuild_is_not_skipped_by_the_tonemapper_move():
     before new_material's delete; the move now yields to a rebuild."""
     move = SCRIPT[SCRIPT.index("def move_after_tonemapping"):SCRIPT.index("def new_material")]
     assert "or rebuild_requested(name)" in move
+
+
+def test_the_storm_is_lit_by_multiple_scattering_and_its_exposure_is_metered():
+    """The owner's first storm frame (2026-10-08) rendered black: the cloud
+    material had no VolumetricAdvancedMaterialOutput (single scattering:
+    nothing under an 11 km tower), the look's deck was drawn 156 optical
+    depths deep, and the look's manual exposure stood. Now: the node with
+    its phase and two multiple-scattering octaves, the deck capped to a
+    nimbostratus depth, the commandlet metering a frame read back before
+    frame 0 (never closing, never past the physical cap), the window on
+    the engine's histogram, and the debug script measuring the frames."""
+    scattering = _tuple("STORM_SCATTERING")
+    assert scattering["octaves"] == 2 and scattering["phase_g"] == 0.8 and scattering["phase_g2"] < 0.0
+    properties = _tuple("STORM_SCATTERING_PROPERTIES")
+    assert set(properties) == set(scattering)
+    node = SCRIPT[SCRIPT.index("def storm_scattering"):SCRIPT.index("def weather_shader")]
+    assert "unreal.MaterialExpressionVolumetricAdvancedMaterialOutput" in node
+    assert '("ground_contribution", True)' in node
+    assert "raise RuntimeError" in node   # a refused property name is reported, never skipped
+    storm = SCRIPT[SCRIPT.index("def create_storm_cell"):SCRIPT.index("def create_windshield_rain")]
+    assert "storm_scattering(material, lib" in storm
+    cell = _function(WEATHER_CPP, "bool FFlightSimWeather::BuildCell")
+    assert "LayerDepthMaxM = 1500.0" in cell and "LayerTopDrawnM" in cell
+    assert 'TEXT("look_layer_top_drawn_m")' in cell
+    assert "bool DrawsCell() const { return bCell; }" in WEATHER_H
+    # The commandlet meters after the warm-up captures and before the probe loop.
+    warmup = COMMANDLET.index("for (int32 i = 0; i < WarmupCaptures; ++i)")
+    meter = COMMANDLET.index("if (Weather.DrawsCell() && !bAutoExposure)")
+    probe = COMMANDLET.index("// -- Phase 8B.0: the real-time probe loop")
+    assert warmup < meter < probe
+    metering = COMMANDLET[meter:probe]
+    for needle in ("ReadPixels(MeterPixels)", "FMath::Clamp(Opened + Step, 0.0, StormMeterMaxStops)",
+                   'TEXT("storm_exposure")', 'TEXT("stops_opened")', "MeterSettings.AutoExposureBias ="):
+        assert needle in metering, needle
+    assert "constexpr double StormMeterMaxStops = 8.0;" in COMMANDLET
+    assert 'TEXT("storm-meter-target=")' in COMMANDLET
+    window = INTERACTIVE[INTERACTIVE.index("Weather.DrawsCell()"):]
+    assert "AEM_Histogram" in window[:1200]
+    debug = (REPO / "scripts" / "debug_storm_render.py").read_text(encoding="utf-8")
+    assert "def frame_luma" in debug and "RENDERED-DARK" in debug and "storm_exposure" in debug
+    assert "storm_exposure" in DOC and "STORM_SCATTERING" in DOC
+
+
+def test_a_storm_material_built_by_an_older_script_is_built_again():
+    """Every storm material is stamped with STORM_GENERATION as asset
+    metadata; one stamped older (or not at all) is deleted and rebuilt by
+    its own creator, so a graph change here reaches a machine that built
+    the storm before it. The windshield's tonemapper move and the cloud's
+    usage repair both yield to a stale stamp."""
+    assert re.search(r'^STORM_GENERATION = "\d+"$', SCRIPT, re.M)
+    stale = SCRIPT[SCRIPT.index("def storm_material_stale"):SCRIPT.index("def finish_storm")]
+    assert "get_metadata_tag" in stale and "STORM_GENERATION_TAG" in stale
+    stamp = SCRIPT[SCRIPT.index("def finish_storm"):SCRIPT.index("def storm_scattering")]
+    assert "set_metadata_tag(material, STORM_GENERATION_TAG, STORM_GENERATION)" in stamp
+    maker = SCRIPT[SCRIPT.index("def _storm_material"):SCRIPT.index("def storm_material_stale")]
+    assert "storm_material_stale(name)" in maker and "delete_asset" in maker
+    for name in _tuple("STORM_MATERIALS"):
+        assert f'finish_storm(material, "{name}")' in SCRIPT, name
+        assert f'finish(material, "{name}")' not in SCRIPT, name
+    repair = SCRIPT[SCRIPT.index("def ensure_volumetric_cloud_usage"):SCRIPT.index("def create_storm_cell")]
+    assert "or storm_material_stale(name)" in repair
+    glass = SCRIPT[SCRIPT.index("def create_windshield_rain"):]
+    assert 'not storm_material_stale("M_WindshieldRain") and move_after_tonemapping' in glass

@@ -198,6 +198,11 @@ public:
 	bool ApplyWindshield(USceneCaptureComponent2D* Beauty, double AirspeedMps, FString& Error);
 
 	bool DrawsRain() const { return bRain; }
+	// The cumulonimbus is drawn: the sun is shadowed out under it and its
+	// base is lit by its own multiple scattering alone, stops below the
+	// look's light -- the hosts meter the exposure again (the commandlet
+	// from a frame read back, the window by the engine's histogram).
+	bool DrawsCell() const { return bCell; }
 	bool IsBuilt() const { return bBuilt; }
 
 	// Every registered volumetric cloud in the world checked the way the

@@ -68,6 +68,21 @@ namespace
 	constexpr double RenderCmPerMetre = 100.0;   // unity-unique name
 	constexpr double RenderRadiansToDegrees = 57.29577951308232;   // unity-unique name
 
+	// The storm meter (the exposure under a drawn cumulonimbus, before the
+	// first frame): the mean sRGB luma a metered frame is opened up to
+	// (-storm-meter-target=; 0.32 is a gloomy day's mean), the tolerance it
+	// stops within, the rounds it gets, and the most it may open. The cap is
+	// physical: the two-stream diffuse transmittance of a cloud column of
+	// optical depth tau is about 1 / (1 + 0.75 tau (1 - g)); the tower's
+	// thousands of optical depths pass under 1 % of the light, eight stops.
+	// Darkness past that is the engine's cloud model, not the storm's, and
+	// is not hidden by opening further.
+	constexpr double StormMeterTargetDefault = 0.32;
+	constexpr double StormMeterTolerance = 0.04;
+	constexpr int32 StormMeterRounds = 5;
+	constexpr double StormMeterMaxStops = 8.0;
+	constexpr int32 StormMeterSettleCaptures = 4;
+
 	// A placeholder airframe: boxes, roughly 747-shaped, with real hinges.
 	//
 	// This is NOT visual realism -- that is Phase 6 and there is no aircraft
@@ -1235,6 +1250,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	FString WeatherBackendName;
 	FParse::Value(*Params, TEXT("weather-backend="), WeatherBackendName);
 	EFlightSimWeatherBackend WeatherBackend = EFlightSimWeatherBackend::Off;
+	// The exposure under the storm's cloud (see the storm meter before the
+	// first frame): the mean sRGB luma (0..1) a metered frame is opened up
+	// to, -storm-meter-target=, a gloomy day's mean by default; never past
+	// StormMeterMaxStops open, never closed below the look's exposure.
+	double StormMeterTarget = StormMeterTargetDefault;
+	FParse::Value(*Params, TEXT("storm-meter-target="), StormMeterTarget);
+	StormMeterTarget = FMath::Clamp(StormMeterTarget, 0.05, 0.8);
 	{
 		FString WeatherError;
 		if (!FFlightSimWeather::ParseBackend(WeatherBackendName, WeatherBackend, WeatherError))
@@ -3461,6 +3483,118 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		FlushRenderingCommands();
 		Capture->CaptureScene();
 		FlushRenderingCommands();
+	}
+
+	// -- the storm meter: the exposure under a drawn cumulonimbus ----------
+	// The cell's cloud shadows the sun out and its base is lit by its own
+	// multiple scattering alone: the light under it is stops below the
+	// look's, whose exposure was calibrated for a dim sun and fog
+	// (webapp/runs.py STORM_LOOK). Left there, a manual exposure renders
+	// black (the owner's first storm frame, 2026-10-08: nothing visible). A
+	// camera meters: the frame is captured and read back, and the bias
+	// opened until the frame's mean sRGB luma reaches the target (the
+	// constants above), never closed below the look's exposure and never
+	// more than StormMeterMaxStops open. Constant over the clip once set
+	// (Gate 6: no breathing); recorded in look_applied.storm_exposure.
+	// -AutoExposure meters itself and skips this; so does a cell not drawn.
+	if (Weather.DrawsCell() && !bAutoExposure)
+	{
+		FPostProcessSettings& MeterSettings = Capture->PostProcessSettings;
+		MeterSettings.bOverride_AutoExposureBias = true;
+		const double BiasBefore = MeterSettings.AutoExposureBias;
+		double Opened = 0.0;
+		double MeanBefore = -1.0;
+		double Mean = -1.0;
+		int32 Rounds = 0;
+		FString MeterNote = TEXT("within tolerance of the target");
+		TArray<FColor> MeterPixels;
+		for (; Rounds < StormMeterRounds; ++Rounds)
+		{
+			World->SendAllEndOfFrameUpdates();
+			FlushRenderingCommands();
+			Capture->CaptureScene();
+			FlushRenderingCommands();
+			FTextureRenderTargetResource* MeterResource =
+				RenderTarget->GameThread_GetRenderTargetResource();
+			if (MeterResource == nullptr || !MeterResource->ReadPixels(MeterPixels) ||
+			    MeterPixels.Num() == 0)
+			{
+				MeterNote = TEXT("could not read the frame back; the look's exposure stands");
+				break;
+			}
+			double Sum = 0.0;
+			for (const FColor& Pixel : MeterPixels)
+			{
+				Sum += 0.2126 * Pixel.R + 0.7152 * Pixel.G + 0.0722 * Pixel.B;
+			}
+			Mean = Sum / (255.0 * MeterPixels.Num());
+			if (MeanBefore < 0.0)
+			{
+				MeanBefore = Mean;
+			}
+			if (FMath::Abs(Mean - StormMeterTarget) <= StormMeterTolerance)
+			{
+				break;
+			}
+			// sRGB-encoded luma goes about as the 1/2.2 power of the light:
+			// the stops that would land the target, damped (0.8) against the
+			// tonemapper's shoulder, the sum clamped to [0, the cap].
+			const double Step =
+				2.2 * 0.8 * FMath::Log2(StormMeterTarget / FMath::Max(Mean, 1.0 / 255.0));
+			const double Next = FMath::Clamp(Opened + Step, 0.0, StormMeterMaxStops);
+			if (FMath::IsNearlyEqual(Next, Opened, 0.01))
+			{
+				MeterNote = Next >= StormMeterMaxStops
+					? TEXT("at the cap: darker than the cap allows for is the engine's cloud "
+					       "model, not the storm's")
+					: TEXT("the look's exposure already lands the target or brighter");
+				break;
+			}
+			Opened = Next;
+			MeterSettings.AutoExposureBias = static_cast<float>(BiasBefore + Opened);
+			if (Rounds + 1 == StormMeterRounds)
+			{
+				MeterNote = TEXT("out of rounds; the last step stands");
+			}
+		}
+		// The temporal history converges on the exposure the clip keeps
+		// before frame 0, as the warm-up did for the look's.
+		for (int32 i = 0; i < StormMeterSettleCaptures; ++i)
+		{
+			World->SendAllEndOfFrameUpdates();
+			FlushRenderingCommands();
+			Capture->CaptureScene();
+			FlushRenderingCommands();
+		}
+		TSharedPtr<FJsonObject> MeterRow = MakeShared<FJsonObject>();
+		MeterRow->SetBoolField(TEXT("metered"), MeanBefore >= 0.0);
+		MeterRow->SetNumberField(TEXT("target_mean_luma"), StormMeterTarget);
+		MeterRow->SetNumberField(TEXT("tolerance"), StormMeterTolerance);
+		MeterRow->SetNumberField(TEXT("mean_luma_before"), MeanBefore);
+		MeterRow->SetNumberField(TEXT("mean_luma_after"), Mean);
+		MeterRow->SetNumberField(TEXT("stops_opened"), Opened);
+		MeterRow->SetNumberField(TEXT("max_stops"), StormMeterMaxStops);
+		MeterRow->SetNumberField(TEXT("bias_before"), BiasBefore);
+		MeterRow->SetNumberField(TEXT("bias_after"), MeterSettings.AutoExposureBias);
+		MeterRow->SetNumberField(TEXT("rounds"), Rounds);
+		MeterRow->SetStringField(TEXT("note"), MeterNote);
+		MeterRow->SetStringField(TEXT("basis"),
+			TEXT("the beauty frame read back before frame 0, its mean sRGB luma (Rec. 709 weights) ")
+			TEXT("opened to the target by AutoExposureBias; a camera meters the light it gets, ")
+			TEXT("constant over the clip"));
+		if (VisualScene.LookApplied.IsValid())
+		{
+			VisualScene.LookApplied->SetObjectField(TEXT("storm_exposure"), MeterRow);
+		}
+		ExposureSource += FString::Printf(
+			TEXT("; storm meter opened %.2f stops (mean luma %.3f -> %.3f, target %.2f)"),
+			Opened, MeanBefore, Mean, StormMeterTarget);
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("storm exposure: metered mean luma %.3f -> %.3f (target %.2f), bias %.2f -> %.2f ")
+		       TEXT("(%.2f stops opened of %.0f), %d rounds: %s"),
+		       MeanBefore, Mean, StormMeterTarget, BiasBefore,
+		       static_cast<double>(MeterSettings.AutoExposureBias), Opened, StormMeterMaxStops,
+		       Rounds, *MeterNote);
 	}
 
 	// -- Phase 8B.0: the real-time probe loop ------------------------------

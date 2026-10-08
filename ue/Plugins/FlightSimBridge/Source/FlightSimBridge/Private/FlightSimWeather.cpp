@@ -1251,11 +1251,20 @@ bool FFlightSimWeather::BuildCell(UWorld* World, const TSharedPtr<FJsonObject>& 
 		             static_cast<float>(Updraft)));
 	StormMaterial->SetVectorParameterValue(TEXT("Drift"),
 		FLinearColor(static_cast<float>(Drift[0]), static_cast<float>(Drift[1]), 0.0f, 0.0f));
-	// The look's layer inside the storm's material (0 cover: none).
+	// The look's layer inside the storm's material (0 cover: none). Its depth
+	// is capped: the storm look states a deck from 1200 m to 9000 m, which at
+	// a stratiform deck's extinction is 156 optical depths of water -- no
+	// light leaves it, and the owner's first storm frame (2026-10-08) was
+	// black. It is drawn as a nimbostratus LayerDepthMaxM deep from its base
+	// (a real deck's order; optical depth 30: dark grey, not black). The
+	// look's top is where its clear sky starts, recorded beside what is drawn.
 	constexpr double LayerExtinctionPerM = 0.02;   // stated: a stratiform deck's order
+	constexpr double LayerDepthMaxM = 1500.0;      // stated: a nimbostratus deck's order
+	const double LayerTopDrawnM =
+		FMath::Min(Options.LayerTopMetres, Options.LayerBaseMetres + LayerDepthMaxM);
 	StormMaterial->SetVectorParameterValue(TEXT("Layer"),
 		FLinearColor(static_cast<float>(Options.LayerCover), static_cast<float>(Options.LayerBaseMetres),
-		             static_cast<float>(Options.LayerTopMetres), static_cast<float>(LayerExtinctionPerM)));
+		             static_cast<float>(LayerTopDrawnM), static_cast<float>(LayerExtinctionPerM)));
 	GlowDiffusionM = Glow;
 	CellAlbedo = Albedo;
 	StormMaterial->SetVectorParameterValue(TEXT("Flash"),
@@ -1278,6 +1287,20 @@ bool FFlightSimWeather::BuildCell(UWorld* World, const TSharedPtr<FJsonObject>& 
 	Row->SetNumberField(TEXT("shaft_extinction_per_m"), ShaftSigma);
 	Row->SetNumberField(TEXT("layer_bottom_altitude_km"), 0.0);
 	Row->SetNumberField(TEXT("layer_height_km"), (Top + Over + 500.0) / 1000.0);
+	Row->SetNumberField(TEXT("look_layer_cover"), Options.LayerCover);
+	Row->SetNumberField(TEXT("look_layer_base_m"), Options.LayerBaseMetres);
+	Row->SetNumberField(TEXT("look_layer_top_m"), Options.LayerTopMetres);
+	Row->SetNumberField(TEXT("look_layer_top_drawn_m"), LayerTopDrawnM);
+	Row->SetNumberField(TEXT("look_layer_extinction_per_m"), LayerExtinctionPerM);
+	Row->SetStringField(TEXT("look_layer_depth"),
+		FString::Printf(TEXT("drawn at most %.0f m deep from its base (a nimbostratus deck's order, ")
+		                TEXT("optical depth %.0f): the look's full depth would let no light through"),
+		                LayerDepthMaxM, LayerDepthMaxM * LayerExtinctionPerM));
+	Row->SetStringField(TEXT("lighting"),
+		TEXT("the material's VolumetricAdvancedMaterialOutput (scripts/ue_create_materials.py ")
+		TEXT("STORM_SCATTERING): dual-lobe Henyey-Greenstein, two multiple-scattering octaves, ")
+		TEXT("the ground's albedo on the bottoms; the exposure under the cell is metered again ")
+		TEXT("(look_applied.storm_exposure)"));
 	Row->SetStringField(TEXT("extinction_unit"),
 		TEXT("the shader's 1/m into the Extinction output at ExtinctionScale 1: whether the engine ")
 		TEXT("reads it per metre is WX.4's measurement"));

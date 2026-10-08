@@ -3,17 +3,20 @@
     python scripts/debug_storm_render.py [--backend off|procedural|niagara ...]
         [--prompt "..."] [--seconds S] [--out DIR] [--terrain STEM]
 
-The web app deletes a failed run's folder, so the log that says WHY it
-failed goes with it. This writes a run card from the prompt the way the web
-app does (the same compiler; hold_state off for the host, which has no
-autopilot; the storm placed on the track by severe_event_centre, so the
-card carries the downburst block the storm cell is centred on), then runs
-the FlightSimRender
-commandlet once per backend with the same flags (core/render/flags.py) for a
-few seconds of flight, into <out>/<backend>/, and prints the decisive lines
-of each log: every weather / cloud line, every material that failed to
-compile, and the engine's assertion if it still crashes. A run that
-survives prints "RENDERED".
+The web app's page names the wrong log for a failed host flight and clears
+its frame scratch, so the lines that say WHY it failed are hard to find.
+This writes a run card from the prompt the way the web app does (the same
+compiler; hold_state off for the host, which has no autopilot; the storm
+placed on the track by severe_event_centre, so the card carries the
+downburst block the storm cell is centred on), then runs the
+FlightSimRender commandlet once per backend with the same flags
+(core/render/flags.py) for a few seconds of flight, into <out>/<backend>/,
+and prints the decisive lines of each log: every weather / cloud / storm
+exposure line, every material that failed to compile, and the engine's
+assertion if it still crashes. A run that survives prints "RENDERED" with
+the first and last frame's mean luma (0..255) -- under DARK_LUMA the
+verdict is "RENDERED-DARK": a frame nobody can see anything in is not a
+pass (the owner's first storm frame, 2026-10-08).
 
 Windows, from the repo root, the engine built (scripts/build_ue.ps1):
 
@@ -38,8 +41,40 @@ DEFAULT_PROMPT = "fly the c172 through a thunderstorm at 900 m with 25 mm/h rain
 #: The lines worth reading out of a commandlet log.
 DECISIVE = re.compile(
     r"LogFlightSimWeather|weather\.|clouds\.|cloud |look\.clouds|LogFlightSimRender: Display: clouds"
-    r"|Failed to compile Material|Missing If|Assertion failed|Fatal error|appError"
+    r"|storm exposure|Failed to compile Material|Missing If|Assertion failed|Fatal error|appError"
     r"|LogFlightSimRender: Error|refused|frames written|MATERIAL-|Engine exit requested")
+#: A frame whose mean luma (0..255) is under this is one nobody can see
+#: anything in: the storm meter (FlightSimRenderCommandlet.cpp) exists so no
+#: storm frame is. Stated: 8-bit black is 0, a gloomy day's mean is ~80.
+DARK_LUMA = 20.0
+FRAME = re.compile(r"frame_\d+\.png")
+
+
+def frame_luma(path: Path):
+    """(mean, 95th percentile) of a frame's 8-bit luma: Rec. 709 weights on
+    the PNG's sRGB bytes, the same measure the storm meter opens the
+    exposure by (it reports 0..1; this reports 0..255)."""
+    import numpy as np
+    from PIL import Image
+
+    rgb = np.asarray(Image.open(path).convert("RGB"), dtype=np.float64)
+    luma = rgb[..., 0] * 0.2126 + rgb[..., 1] * 0.7152 + rgb[..., 2] * 0.0722
+    return float(luma.mean()), float(np.percentile(luma, 95))
+
+
+def frame_report(frames: Path):
+    """The first and last beauty frame's luma, and whether either is DARK."""
+    files = sorted(p for p in frames.glob("frame_*.png") if FRAME.fullmatch(p.name))
+    if not files:
+        return [], False
+    lines = []
+    dark = False
+    for label, path in (("first", files[0]), ("last", files[-1])):
+        mean, p95 = frame_luma(path)
+        dark = dark or mean < DARK_LUMA
+        lines.append(f"{label} frame {path.name}: mean luma {mean:.1f}/255, p95 {p95:.1f}"
+                     f"{' DARK' if mean < DARK_LUMA else ''}")
+    return lines, dark
 
 
 def main(argv=None) -> int:
@@ -112,6 +147,23 @@ def main(argv=None) -> int:
         rendered = (frames / "render.json").is_file()
         crashed = any("Assertion failed" in line or "Fatal error" in line for line in lines)
         verdicts[backend] = "RENDERED" if rendered else ("CRASHED" if crashed else "REFUSED/NO FRAMES")
+        if rendered:
+            # The storm meter's record and the frames' own brightness: a
+            # frame that rendered black is not a pass.
+            try:
+                manifest = json.loads((frames / "render.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                manifest = {}
+            meter = (manifest.get("look_applied") or {}).get("storm_exposure")
+            if meter:
+                print(f"  storm_exposure: opened {meter.get('stops_opened')} stops, mean luma "
+                      f"{meter.get('mean_luma_before')} -> {meter.get('mean_luma_after')} "
+                      f"(target {meter.get('target_mean_luma')}): {meter.get('note')}")
+            report, dark = frame_report(frames)
+            for line in report:
+                print("  " + line)
+            if dark:
+                verdicts[backend] = "RENDERED-DARK"
         # The editor exits 1 whenever any error was logged (the project's
         # Water Body Collision profile error, on every run); the verdict is
         # whether render.json was written, as the web app judges it.

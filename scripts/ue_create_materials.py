@@ -524,6 +524,36 @@ STORM_ALBEDO_DEFAULT = 0.98
 #: m_SimpleVolumetricCloud carries it; ensure_volumetric_cloud_usage sets
 #: it on an M_StormCell built before this line existed.
 STORM_USAGE_PROPERTY = "used_with_volumetric_cloud"
+#: The light inside the cloud: the VolumetricAdvancedMaterialOutput node's
+#: constants. Without that node the engine lights a cloud by single
+#: scattering alone -- the far side and the UNDERSIDE of a thick cloud get
+#: nothing, so a thunderstorm's base under an 11 km tower renders black
+#: (the owner's first storm frame, 2026-10-08: nothing visible). The
+#: dual-lobe Henyey-Greenstein phase of water droplets (g 0.8 forward,
+#: -0.5 back, blended half and half: Hillaire 2016, Frostbite's clouds)
+#: and the multiple-scattering approximation of Wrenninge et al. 2013
+#: (two octaves, each attenuating extinction, scattering and the phase's
+#: eccentricity by 0.5), the engine's own convention; the ground's albedo
+#: lights the bottoms (GroundContribution). Stated, not measured here.
+STORM_SCATTERING = {"phase_g": 0.8, "phase_g2": -0.5, "phase_blend": 0.5, "octaves": 2,
+                    "contribution": 0.5, "occlusion": 0.5, "eccentricity": 0.5}
+#: The node's editor properties, by STORM_SCATTERING key (UE 5.7's
+#: MaterialExpressionVolumetricAdvancedMaterialOutput; a name the engine
+#: does not know is a RuntimeError naming the node's real ones).
+STORM_SCATTERING_PROPERTIES = {
+    "phase_g": "const_phase_g", "phase_g2": "const_phase_g2", "phase_blend": "const_phase_blend",
+    "octaves": "multi_scattering_approximation_octave_count",
+    "contribution": "const_multi_scattering_contribution",
+    "occlusion": "const_multi_scattering_occlusion",
+    "eccentricity": "const_multi_scattering_eccentricity"}
+#: The generation of the storm materials this script builds, stamped on
+#: each asset as metadata: an existing asset stamped with an older one (or
+#: none) is deleted and built again, so a change to a storm material's
+#: graph reaches a machine that built the storm before it without anyone
+#: remembering FLIGHTSIM_REBUILD_MATERIALS. Bump it with every such change.
+#: 2: M_StormCell gained STORM_SCATTERING (2026-10-08).
+STORM_GENERATION = "2"
+STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
 def add_wetness(material, lib, base_colour_node, base_output, x,
@@ -1632,10 +1662,56 @@ def create_rain_streaks():
 
 def _storm_material(name):
     """A storm-weather material (STORM_MATERIALS), made by its own helper so
-    the W5 world list stays exactly the world's; None when it already exists."""
+    the W5 world list stays exactly the world's; None when it already exists
+    at this STORM_GENERATION (an older generation is deleted and built again)."""
     if name not in STORM_MATERIALS:
         raise RuntimeError(f"{name} is not one of STORM_MATERIALS")
+    full = f"{PATH}/{name}"
+    if storm_material_stale(name) and unreal.EditorAssetLibrary.delete_asset(full):
+        print(f"MATERIAL-REBUILT: {full} (built by an older generation of this script; "
+              f"this one is {STORM_GENERATION})")
     return new_material(name)
+
+
+def storm_material_stale(name):
+    """True when /Game/FlightSim/<name> exists but was built by an older
+    generation of this script (its STORM_GENERATION_TAG metadata is not
+    STORM_GENERATION): its graph is not the one this script describes."""
+    full = f"{PATH}/{name}"
+    if not unreal.EditorAssetLibrary.does_asset_exist(full):
+        return False
+    stamped = unreal.EditorAssetLibrary.get_metadata_tag(
+        unreal.EditorAssetLibrary.load_asset(full), STORM_GENERATION_TAG)
+    return str(stamped) != STORM_GENERATION
+
+
+def finish_storm(material, name):
+    """finish() with the STORM_GENERATION stamp saved on the asset."""
+    unreal.EditorAssetLibrary.set_metadata_tag(material, STORM_GENERATION_TAG, STORM_GENERATION)
+    finish(material, name)
+
+
+def storm_scattering(material, lib, x, y):
+    """The VolumetricAdvancedMaterialOutput node (STORM_SCATTERING): the
+    phase function and the multiple-scattering approximation the cloud is
+    lit with, the ground's albedo lighting its bottoms. A property name the
+    engine refuses is reported with the node's own list, never skipped: a
+    cloud lit by single scattering is the black frame this node is for."""
+    node = lib.create_material_expression(
+        material, unreal.MaterialExpressionVolumetricAdvancedMaterialOutput, x, y)
+    settings = [(STORM_SCATTERING_PROPERTIES[key], value) for key, value in STORM_SCATTERING.items()]
+    settings += [("ground_contribution", True), ("per_sample_atmosphere_light_transmittance", False),
+                 ("gray_scale_material", False)]
+    refused = []
+    for prop, value in settings:
+        try:
+            node.set_editor_property(prop, value)
+        except Exception as error:  # the engine's naming decides; reported, not skipped
+            refused.append(f"{prop} = {value!r}: {error}")
+    if refused:
+        raise RuntimeError("VolumetricAdvancedMaterialOutput refused " + "; ".join(refused)
+                           + f"\nthe node's editor properties on this engine:\n{type(node).__doc__}")
+    return node
 
 
 def weather_shader(name):
@@ -1760,7 +1836,7 @@ def create_rain_drops():
     lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
     lib.connect_material_property(drop_radiance(material, lib, -900, 800), "",
                                   unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    finish(material, "M_RainDrops")
+    finish_storm(material, "M_RainDrops")
 
 
 def create_rain_splash():
@@ -1790,7 +1866,7 @@ def create_rain_splash():
     lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
     lib.connect_material_property(drop_radiance(material, lib, -900, 800), "",
                                   unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    finish(material, "M_RainSplash")
+    finish_storm(material, "M_RainSplash")
 
 
 def create_lightning_channel():
@@ -1818,7 +1894,7 @@ def create_lightning_channel():
         "Kind": uv_channel(material, lib, 1, "r", -1500, 650), "Depth": (depth, ""),
         "PixelAngle": pixel, "RadiusCm": radius, "Power": power}, -900, 400)
     lib.connect_material_property(emissive, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    finish(material, "M_LightningChannel")
+    finish_storm(material, "M_LightningChannel")
 
 
 def ensure_volumetric_cloud_usage(name):
@@ -1827,8 +1903,9 @@ def ensure_volumetric_cloud_usage(name):
     recompiled and saved), so a machine that built the storm before the
     flag existed does not keep a cloud material with no cloud shaders."""
     full = f"{PATH}/{name}"
-    if not unreal.EditorAssetLibrary.does_asset_exist(full) or rebuild_requested(name):
-        return False
+    if (not unreal.EditorAssetLibrary.does_asset_exist(full) or rebuild_requested(name)
+            or storm_material_stale(name)):
+        return False   # absent, a rebuild asked for, or an older generation: built again
     material = unreal.EditorAssetLibrary.load_asset(full)
     if material.get_editor_property(STORM_USAGE_PROPERTY):
         print(f"MATERIAL-EXISTS: {full}")
@@ -1845,7 +1922,9 @@ def create_storm_cell():
     (Volume domain, additive, flagged for the volumetric cloud -- see
     STORM_USAGE_PROPERTY): albedo "Albedo", extinction storm_cell.hlsl x
     "ExtinctionScale" (1: the shader's 1/m, the engine's unit the first
-    Windows measurement), emissive storm_glow.hlsl."""
+    Windows measurement), emissive storm_glow.hlsl, lit by STORM_SCATTERING
+    (storm_scattering: the phase and the multiple scattering without which
+    the base is black)."""
     if ensure_volumetric_cloud_usage("M_StormCell"):
         return
     material = _storm_material("M_StormCell")
@@ -1876,7 +1955,8 @@ def create_storm_cell():
         "Rel": rel, "FlashRel": params["FlashRelCm"], "Flash": params["Flash"],
         "Extinction": (extinction, "")}, -600, 400)
     lib.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    finish(material, "M_StormCell")
+    storm_scattering(material, lib, -600, 700)
+    finish_storm(material, "M_StormCell")
 
 
 def create_windshield_rain():
@@ -1885,8 +1965,8 @@ def create_windshield_rain():
     stale border is blurred in) on a cockpit camera's beauty capture only:
     the scene sampled through each drop's refraction offset, lerped in by
     its mask."""
-    if move_after_tonemapping("M_WindshieldRain"):
-        return
+    if not storm_material_stale("M_WindshieldRain") and move_after_tonemapping("M_WindshieldRain"):
+        return   # an older generation falls through: _storm_material builds it again
     material = _storm_material("M_WindshieldRain")
     if material is None:
         return
@@ -1917,7 +1997,7 @@ def create_windshield_rain():
     out = lerp(material, lib, scene, seen, mask(material, lib, drops, "b", -500, 300), -100, 0,
                a_out="Color")
     lib.connect_material_property(out, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    finish(material, "M_WindshieldRain")
+    finish_storm(material, "M_WindshieldRain")
 
 
 def create_airframe_paint():

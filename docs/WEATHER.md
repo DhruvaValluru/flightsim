@@ -193,8 +193,9 @@ Two tools for the next time something only fails on the engine:
   writes the storm card and runs the render commandlet directly, a few
   seconds per backend, keeping each log under `runs/debug_storm/<backend>/`
   and printing the decisive lines (weather and cloud lines, materials that
-  failed to compile, the assertion if any). The web app deletes a failed
-  run's folder; this does not.
+  failed to compile, the assertion if any) and the frames' mean luma. The
+  web app's page names the wrong log for a failed host flight and clears
+  its frame scratch; this keeps everything.
 * `FLIGHTSIM_REBUILD_MATERIALS=M_LensDrops,M_StormCell` (or `all`) before
   the material script deletes those assets and builds them again. The
   script otherwise skips what exists, so a material built by an older script
@@ -203,6 +204,49 @@ Two tools for the next time something only fails on the engine:
   inputs): `M_LensDrops`, `M_GreyCard`, `M_LandcoverID` and `M_RainStreaks`
   were all built on a pin name the engine ignored and failed to compile
   ("Missing If AGreaterThanB input"); rebuild them once.
+
+## Seeing nothing (what the second Windows run taught)
+
+The first storm frame that did not crash was black: an aircraft silhouette,
+a speckle, nothing else. Three causes, all physical in origin, all fixed:
+
+1. **The cloud was lit by single scattering.** A volumetric cloud material
+   without a `VolumetricAdvancedMaterialOutput` node gets no multiple
+   scattering: the far side and the underside of a thick cloud receive
+   nothing, and the cell is an 11 km tower of 0.19 /m water over the
+   camera. `M_StormCell` now carries the node (`STORM_SCATTERING` in
+   `scripts/ue_create_materials.py`): the dual-lobe Henyey-Greenstein phase
+   of water droplets (g 0.8 forward, -0.5 back, blended half and half;
+   Hillaire 2016), two octaves of the Wrenninge et al. 2013
+   multiple-scattering approximation at the engine's 0.5 / 0.5 / 0.5, and
+   the ground's albedo on the bottoms. Stated, not measured.
+2. **The look's deck was 156 optical depths deep.** The storm look states a
+   cloud layer from 1200 m to 9000 m; at a stratiform deck's 0.02 /m no
+   light leaves it. `BuildCell` draws it as a nimbostratus at most 1500 m
+   deep from its base (optical depth 30: dark grey, not black) and records
+   the look's top beside the drawn one (`look_layer_top_drawn_m`).
+3. **The exposure was the look's.** The storm look's manual bias was
+   calibrated for a dim sun and fog; under the cell, with the sun shadowed
+   out, the light is stops below that. A camera meters. Before frame 0 the
+   render commandlet captures the beauty frame, reads it back, and opens
+   `AutoExposureBias` until the frame's mean sRGB luma reaches
+   `-storm-meter-target=` (0.32, a gloomy day's mean; up to five rounds),
+   never closing below the look's exposure and never more than 8 stops
+   open -- the two-stream transmittance of a column thousands of optical
+   depths deep is under 1 %, eight stops, and darkness past that is the
+   engine's cloud model, not the storm's. The exposure is then constant
+   over the clip (no breathing) and `render.json` records it in
+   `look_applied.storm_exposure` (the luma before and after, the stops
+   opened, the note). The interactive window adapts instead, on the
+   engine's histogram metering. `-AutoExposure` meters itself and skips the
+   storm meter.
+
+`scripts/debug_storm_render.py` now prints the storm meter's line and the
+first and last frame's mean luma (0..255); a frame under 20 is
+`RENDERED-DARK`, not a pass. A material built before this (`M_StormCell`
+without the node) is rebuilt by the script on its own: every storm
+material is stamped with `STORM_GENERATION` as asset metadata and an older
+stamp is deleted and built again.
 
 ## What is verified where
 

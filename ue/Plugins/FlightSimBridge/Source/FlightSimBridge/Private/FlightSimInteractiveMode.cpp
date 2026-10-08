@@ -309,6 +309,25 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		Post.bOverride_AutoExposureBias = true;
 		Post.AutoExposureBias = static_cast<float>(ExposureBias);
 	}
+	// Under a drawn cumulonimbus (FlightSimWeather.h DrawsCell) the light is
+	// stops below the look's and a manual exposure left there shows a black
+	// window (the owner's first storm frame, 2026-10-08). The render
+	// commandlet meters a frame once and keeps it; a live window adapts
+	// instead: the engine's histogram metering, fast, the bias at zero.
+	if (CameraDirector->Camera != nullptr && Weather.DrawsCell())
+	{
+		FPostProcessSettings& Post = CameraDirector->Camera->PostProcessSettings;
+		Post.bOverride_AutoExposureMethod = true;
+		Post.AutoExposureMethod = AEM_Histogram;
+		Post.bOverride_AutoExposureBias = true;
+		Post.AutoExposureBias = 0.0f;
+		Post.bOverride_AutoExposureSpeedUp = true;
+		Post.AutoExposureSpeedUp = 10.0f;
+		Post.bOverride_AutoExposureSpeedDown = true;
+		Post.AutoExposureSpeedDown = 10.0f;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("storm exposure: the window meters itself (histogram) under the drawn cell"));
+	}
 
 	APlayerController* Controller = GetWorld()->GetFirstPlayerController();
 	if (Controller == nullptr)
