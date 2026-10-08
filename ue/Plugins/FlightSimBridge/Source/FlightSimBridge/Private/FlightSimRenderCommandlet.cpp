@@ -4,6 +4,7 @@
 #include "FlightSimOrographic.h"
 #include "FlightSimSky.h"
 #include "FlightSimVisualScene.h"
+#include "FlightSimWeather.h"
 #include "FlightSimScenarioWorld.h"
 #include "FlightSimTelemetryRecorder.h"
 #include "FlightSimSurfaceAnimator.h"
@@ -1213,6 +1214,21 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// absent, the calibrated legacy scene renders unchanged.
 	FString SkyPlanPath;
 	FParse::Value(*Params, TEXT("sky="), SkyPlanPath);
+	// The card's weather block (core/scene/weather_look.py) drawn as weather:
+	// -weather-backend=procedural (the default: deterministic drops in the
+	// material), niagara (the hand-built NS_FlightSimRain, docs/WEATHER.md)
+	// or off. A card without the block draws nothing either way.
+	FString WeatherBackendName;
+	FParse::Value(*Params, TEXT("weather-backend="), WeatherBackendName);
+	EFlightSimWeatherBackend WeatherBackend = EFlightSimWeatherBackend::Procedural;
+	{
+		FString WeatherError;
+		if (!FFlightSimWeather::ParseBackend(WeatherBackendName, WeatherBackend, WeatherError))
+		{
+			UE_LOG(LogFlightSimRender, Error, TEXT("%s"), *WeatherError);
+			return 1;
+		}
+	}
 	// Chase offset override, metres: a 747 framed at -170 m puts a Cessna
 	// eleven pixels wide; the harness knows the airframe, so it chooses.
 	FString ChaseSpec;
@@ -1288,6 +1304,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// measurements depend on it, so it stays byte-for-byte as it was. Gate 6's
 	// is the §6.6 scene, behind -Visual.
 	FFlightSimVisualScene VisualScene;
+	FFlightSimWeather Weather;
 	// Google Photorealistic 3D Tiles as the visible ground (opt-in,
 	// FLIGHTSIM_GOOGLE_TILES=on; FlightSimGoogleTiles.h).
 	FFlightSimGoogleTiles GoogleTiles;
@@ -1624,6 +1641,32 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			SceneOptions.SkyPlan = &SkyPlan;
 		}
 		if (!VisualScene.Build(World, SceneOptions, Error)) { return Fail(Error); }
+		// The weather (FlightSimWeather.h): after the scene, so the storm can
+		// take over the look's cloud component; its actors join the scene's
+		// beauty-only list before any label capture is configured, and its
+		// record rides in render.json look_applied.weather.
+		{
+			FFlightSimWeatherOptions WeatherOptions;
+			WeatherOptions.Card = WorldCardRoot;
+			WeatherOptions.GeoReferencing = Scenario.GeoReferencing;
+			WeatherOptions.Backend = WeatherBackend;
+			WeatherOptions.ExistingClouds = VisualScene.Clouds;
+			if (SceneOptions.CloudLayers.Num() > 0)
+			{
+				WeatherOptions.LayerCover = SceneOptions.CloudLayers[0].CoverFraction;
+				WeatherOptions.LayerBaseMetres = SceneOptions.CloudLayers[0].BaseMetres;
+				WeatherOptions.LayerTopMetres = SceneOptions.CloudLayers[0].TopMetres;
+			}
+			WeatherOptions.Sun = VisualScene.Sun;
+			WeatherOptions.bAudio = false;
+			WeatherOptions.bManualNiagaraTick = true;
+			if (!Weather.Build(World, WeatherOptions, Error)) { return Fail(Error); }
+			VisualScene.BeautyOnlyActors.Append(Weather.BeautyOnlyActors);
+			if (VisualScene.LookApplied.IsValid() && Weather.Record.IsValid())
+			{
+				VisualScene.LookApplied->SetObjectField(TEXT("weather"), Weather.Record);
+			}
+		}
 		if (FFlightSimGoogleTiles::Requested() && !bNoGoogleTiles)
 		{
 			// The geoid undulation at the origin: the capture datum's when it
@@ -2331,9 +2374,48 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				RainCamera->TryGetStringField(TEXT("camera_id"), RainCameraId);
 			}
 		}
-		if (!VisualScene.ApplyRainToBeauty(Capture, RainCameraId, Error))
+		if (Weather.DrawsRain())
+		{
+			// The 3D drops supersede the screen-space streaks: one rain, not
+			// two. The world record says so (drawn false, superseded).
+			if (VisualScene.WorldApplied.IsValid() && VisualScene.CardPrecipitation.IsValid())
+			{
+				TSharedPtr<FJsonObject> Superseded = MakeShared<FJsonObject>();
+				Superseded->SetBoolField(TEXT("asked"), true);
+				Superseded->SetBoolField(TEXT("drawn"), false);
+				Superseded->SetStringField(TEXT("superseded_by"),
+					TEXT("weather.rain: the drops in the air (look_applied.weather.rain)"));
+				VisualScene.WorldApplied->SetObjectField(TEXT("precipitation"), Superseded);
+			}
+		}
+		else if (!VisualScene.ApplyRainToBeauty(Capture, RainCameraId, Error))
 		{
 			return Fail(Error);
+		}
+		// Drops on the glass: a camera looking out through a windshield
+		// (the card camera's "cockpit" preset, or the legacy shoulder view).
+		FString RainCameraPreset;
+		if (bConsumePoses && RainCameras != nullptr && RainCameras->IsValidIndex(ConsumedCameraIndex))
+		{
+			const TSharedPtr<FJsonObject> RainCamera = (*RainCameras)[ConsumedCameraIndex]->AsObject();
+			if (RainCamera.IsValid())
+			{
+				RainCamera->TryGetStringField(TEXT("preset"), RainCameraPreset);
+			}
+		}
+		const bool bThroughGlass = bConsumePoses ? RainCameraPreset == TEXT("cockpit")
+		                                         : CameraPreset == TEXT("shoulder");
+		if (bThroughGlass && Weather.DrawsRain())
+		{
+			double AirspeedKt = 0.0;
+			if (WorldCardRoot.IsValid())
+			{
+				WorldCardRoot->TryGetNumberField(TEXT("airspeed_kt"), AirspeedKt);
+			}
+			if (!Weather.ApplyWindshield(Capture, AirspeedKt * 0.514444, Error))
+			{
+				return Fail(Error);
+			}
 		}
 	}
 
@@ -3587,6 +3669,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                             Capture->FOVAngle, Width, Height, Error))
 		{
 			return Fail(Error);
+		}
+		// The weather at this frame: the camera is where this capture looks
+		// from, the exposure the camera's own (the frame interval without one).
+		if (bVisual && Weather.IsBuilt())
+		{
+			FFlightSimWeatherView WeatherView;
+			WeatherView.TimeSeconds = Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+			WeatherView.CameraCm = Capture->GetComponentLocation();
+			WeatherView.HorizontalFovDeg = Capture->FOVAngle;
+			WeatherView.WidthPx = Width;
+			WeatherView.ShutterSeconds = ExposureShutterSeconds > 0.0
+				? ExposureShutterSeconds : static_cast<double>(StepsPerFrame) * DeltaSeconds;
+			Weather.Advance(WeatherView);
 		}
 		World->SendAllEndOfFrameUpdates();
 		FlushRenderingCommands();

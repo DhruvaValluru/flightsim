@@ -485,6 +485,33 @@ RUNWAY_PARAMETERS = ("Markings", "SurfaceColour", "PaintColour", "Wetness")
 #: The non-sRGB default of the linear texture parameters (created below).
 LINEAR_DEFAULT_TEXTURE = "T_LinearDefault"
 
+# -- the weather materials (core/scene/weather_look.py; FlightSimWeather.cpp) ---
+
+#: Every weather material, by name (one /Game/FlightSim path each).
+WEATHER_MATERIALS = ("M_RainDrops", "M_RainSplash", "M_LightningChannel", "M_StormCell",
+                     "M_WindshieldRain")
+#: The Custom node bodies, committed as HLSL beside the Python twins they
+#: mirror (tests/test_weather.py pins their constants to core/scene/*.py).
+WEATHER_SHADER_DIR = "assets/shaders/weather"
+#: The parameters FlightSimWeather.cpp sets, by material. A vector
+#: parameter carries four floats where its shader input is a float4.
+RAIN_DROP_PARAMETERS = ("Shift", "FallTime", "BoxHalf", "WindVel", "CamVel", "Shutter",
+                        "PixelAngle", "Active", "Weight", "GroundRelZ", "SkyRadianceScale",
+                        "FlashLux")
+SPLASH_PARAMETERS = ("Time", "Splash", "GroundShift", "GroundRelZ", "DropMm", "Active",
+                     "Weight", "SkyRadianceScale", "FlashLux")
+LIGHTNING_PARAMETERS = ("PixelAngle", "RadiusCm", "Power")
+STORM_PARAMETERS = ("CellCentreCm", "EastAxis", "NorthAxis", "Geo1", "Geo2", "Sigma", "Noise",
+                    "Drift", "Layer", "Time", "FlashRelCm", "Flash", "ExtinctionScale")
+WINDSHIELD_PARAMETERS = ("Time", "Glass", "Seed")
+#: The vector parameters whose shader input is a float4 (RGB appended with A).
+WEATHER_FLOAT4_PARAMETERS = ("Splash", "Power", "Geo1", "Geo2", "Sigma", "Noise", "Drift",
+                             "Layer", "Flash", "Glass")
+#: The storm's albedo default (core/scene/storm_cell.py ALBEDO; the host sets
+#: the card's into Flash.z, the material's base colour reads this parameter).
+STORM_ALBEDO_PARAMETER = "Albedo"
+STORM_ALBEDO_DEFAULT = 0.98
+
 
 def add_wetness(material, lib, base_colour_node, base_output, x,
                 dry_roughness=None, dry_output=""):
@@ -1515,6 +1542,273 @@ def create_rain_streaks():
     finish(material, "M_RainStreaks")
 
 
+def _weather_material(name):
+    """A weather material (WEATHER_MATERIALS), made by its own helper so the
+    W5 world list stays exactly the world's; None when it already exists."""
+    if name not in WEATHER_MATERIALS:
+        raise RuntimeError(f"{name} is not one of WEATHER_MATERIALS")
+    return new_material(name)
+
+
+def weather_shader(name):
+    """A committed Custom node body (WEATHER_SHADER_DIR/<name>.hlsl)."""
+    source = _repo_file(f"{WEATHER_SHADER_DIR}/{name}.hlsl")
+    if source is None:
+        raise RuntimeError(f"{WEATHER_SHADER_DIR}/{name}.hlsl is not in this checkout")
+    return source.read_text(encoding="utf-8")
+
+
+def custom(material, lib, name, output_type, inputs, x, y):
+    """A Custom node running WEATHER_SHADER_DIR/<name>.hlsl. ``inputs`` maps
+    each shader input name, in order, to (node, output pin)."""
+    node = lib.create_material_expression(material, unreal.MaterialExpressionCustom, x, y)
+    node.set_editor_property("code", weather_shader(name))
+    node.set_editor_property("description", name)
+    node.set_editor_property("output_type", output_type)
+    pins = []
+    for pin in inputs:
+        entry = unreal.CustomInput()
+        entry.set_editor_property("input_name", pin)
+        pins.append(entry)
+    node.set_editor_property("inputs", pins)
+    for pin, (source, source_out) in inputs.items():
+        lib.connect_material_expressions(source, source_out, node, pin)
+    return node
+
+
+def weather_parameter(material, lib, name, x, y, default=0.0):
+    """A weather parameter as the shader reads it: a scalar, a float3 vector
+    (the parameter's RGB) or a float4 (RGB appended with A,
+    WEATHER_FLOAT4_PARAMETERS). Returns (node, output pin)."""
+    vectors = {"Shift", "BoxHalf", "WindVel", "CamVel", "GroundShift", "CellCentreCm",
+               "EastAxis", "NorthAxis", "FlashRelCm"}
+    if name in WEATHER_FLOAT4_PARAMETERS:
+        param = vector(material, lib, name, (0.0, 0.0, 0.0, 0.0), x, y)
+        node = lib.create_material_expression(material, unreal.MaterialExpressionAppendVector,
+                                              x + 200, y)
+        lib.connect_material_expressions(param, "", node, "A")
+        lib.connect_material_expressions(param, "A", node, "B")
+        return node, ""
+    if name in vectors:
+        return vector(material, lib, name, (0.0, 0.0, 0.0, 0.0), x, y), ""
+    return scalar(material, lib, name, default, x, y), ""
+
+
+def uv_channel(material, lib, index, channel, x, y):
+    """One or two channels of a texture coordinate set (the weather meshes
+    carry their per-drop data in UV0..UV3)."""
+    coords = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, x, y)
+    coords.set_editor_property("coordinate_index", index)
+    return mask(material, lib, coords, channel, x + 150, y), ""
+
+
+def relative_position(material, lib, x, y, exclude_offsets, minus):
+    """The world position minus the object's ("object") or the camera's
+    ("camera"): small numbers out of large-world ones, before any Custom node."""
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, x, y)
+    if exclude_offsets:
+        world.set_editor_property("world_position_shader_offset",
+                                  unreal.WorldPositionIncludedOffsets.WPT_EXCLUDE_ALL_SHADER_OFFSETS)
+    other_kind = (unreal.MaterialExpressionObjectPositionWS if minus == "object"
+                  else unreal.MaterialExpressionCameraPositionWS)
+    other = lib.create_material_expression(material, other_kind, x, y + 120)
+    return binary(material, lib, unreal.MaterialExpressionSubtract, world, other, x + 200, y), ""
+
+
+def drop_radiance(material, lib, x, y):
+    """A drop's radiance (Garg & Nayar: the mean of its surroundings): the sky
+    light's diffuse sample times "SkyRadianceScale", plus the lightning
+    flash's "FlashLux" / pi."""
+    sky = lib.create_material_expression(material, unreal.MaterialExpressionSkyLightEnvMapSample, x, y)
+    lib.connect_material_expressions(constant3(material, lib, (0.0, 0.0, 1.0), x - 200, y), "",
+                                     sky, "Direction")
+    lib.connect_material_expressions(constant(material, lib, 1.0, x - 200, y + 100), "", sky,
+                                     "Roughness")
+    scale = scalar(material, lib, "SkyRadianceScale", 1.0, x, y + 150)
+    flash = scalar(material, lib, "FlashLux", 0.0, x, y + 250)
+    lit = binary(material, lib, unreal.MaterialExpressionMultiply, sky, scale, x + 200, y)
+    glow = binary(material, lib, unreal.MaterialExpressionMultiply, flash,
+                  constant(material, lib, 1.0 / 3.14159265, x, y + 350), x + 200, y + 250)
+    return binary(material, lib, unreal.MaterialExpressionAdd, lit, glow, x + 400, y)
+
+
+def _translucent_unlit(material, blend):
+    material.set_editor_property("blend_mode", blend)
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    material.set_editor_property("two_sided", True)
+
+
+def create_rain_drops():
+    """M_RainDrops: the rain box's drops as shutter-length streaks
+    (rain_drop_offset.hlsl into the world position offset,
+    rain_drop_opacity.hlsl into the opacity), lit by drop_radiance."""
+    material = _weather_material("M_RainDrops")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    _translucent_unlit(material, unreal.BlendMode.BLEND_TRANSLUCENT)
+    params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i,
+                                      default=1.0 if name in ("Weight", "SkyRadianceScale") else 0.0)
+              for i, name in enumerate(RAIN_DROP_PARAMETERS) if name not in ("SkyRadianceScale",
+                                                                             "FlashLux")}
+    p0 = relative_position(material, lib, -1800, 900, True, "object")
+    offset = custom(material, lib, "rain_drop_offset", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
+        "P0": p0, "Corner": uv_channel(material, lib, 0, "rg", -1800, 1100),
+        "Drop": uv_channel(material, lib, 1, "rg", -1800, 1250),
+        "Extra": uv_channel(material, lib, 2, "rg", -1800, 1400),
+        "Index": uv_channel(material, lib, 3, "r", -1800, 1550),
+        "Shift": params["Shift"], "FallTime": params["FallTime"], "BoxHalf": params["BoxHalf"],
+        "WindVel": params["WindVel"], "CamVel": params["CamVel"], "Shutter": params["Shutter"],
+        "PixelAngle": params["PixelAngle"], "Active": params["Active"]}, -900, 0)
+    lib.connect_material_property(offset, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
+    rel = relative_position(material, lib, -1800, 1700, False, "object")
+    opacity = custom(material, lib, "rain_drop_opacity", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
+        "Rel": rel, "Drop": uv_channel(material, lib, 1, "rg", -1500, 1250),
+        "Extra": uv_channel(material, lib, 2, "rg", -1500, 1400),
+        "Index": uv_channel(material, lib, 3, "r", -1500, 1550),
+        "WindVel": params["WindVel"], "CamVel": params["CamVel"], "Shutter": params["Shutter"],
+        "PixelAngle": params["PixelAngle"], "Weight": params["Weight"], "Active": params["Active"],
+        "BoxHalf": params["BoxHalf"], "GroundRelZ": params["GroundRelZ"]}, -900, 400)
+    lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
+    lib.connect_material_property(drop_radiance(material, lib, -900, 800), "",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    finish(material, "M_RainDrops")
+
+
+def create_rain_splash():
+    """M_RainSplash: the splash slots' crowns on the ground under the camera."""
+    material = _weather_material("M_RainSplash")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    _translucent_unlit(material, unreal.BlendMode.BLEND_TRANSLUCENT)
+    params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i,
+                                      default=1.0 if name == "Weight" else 0.0)
+              for i, name in enumerate(SPLASH_PARAMETERS) if name not in ("SkyRadianceScale",
+                                                                          "FlashLux")}
+    p0 = relative_position(material, lib, -1800, 600, True, "object")
+    corner = uv_channel(material, lib, 0, "rg", -1800, 800)
+    slot = uv_channel(material, lib, 1, "rg", -1800, 950)
+    offset = custom(material, lib, "rain_splash_offset", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
+        "P0": p0, "Corner": corner, "SlotUV": slot, "Time": params["Time"],
+        "Splash": params["Splash"], "GroundShift": params["GroundShift"],
+        "GroundRelZ": params["GroundRelZ"], "DropMm": params["DropMm"],
+        "Active": params["Active"]}, -900, 0)
+    lib.connect_material_property(offset, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
+    opacity = custom(material, lib, "rain_splash_opacity", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
+        "Corner": uv_channel(material, lib, 0, "rg", -1500, 800),
+        "SlotUV": uv_channel(material, lib, 1, "rg", -1500, 950), "Time": params["Time"],
+        "Splash": params["Splash"], "Weight": params["Weight"]}, -900, 400)
+    lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
+    lib.connect_material_property(drop_radiance(material, lib, -900, 800), "",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    finish(material, "M_RainSplash")
+
+
+def create_lightning_channel():
+    """M_LightningChannel: the bolt as a camera-facing, pixel-floored line
+    source (lightning_offset.hlsl, lightning_emissive.hlsl), additive."""
+    material = _weather_material("M_LightningChannel")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    _translucent_unlit(material, unreal.BlendMode.BLEND_ADDITIVE)
+    pixel = weather_parameter(material, lib, "PixelAngle", -1800, -300)
+    radius = weather_parameter(material, lib, "RadiusCm", -1800, -150, default=5.0)
+    power = weather_parameter(material, lib, "Power", -1800, 0)
+    normal = lib.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS,
+                                            -1800, 200)
+    offset = custom(material, lib, "lightning_offset", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
+        "Side": uv_channel(material, lib, 0, "r", -1800, 350), "Dir": (normal, ""),
+        "Rel": relative_position(material, lib, -1800, 500, True, "camera"),
+        "PixelAngle": pixel, "RadiusCm": radius}, -900, 0)
+    lib.connect_material_property(offset, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
+    depth = lib.create_material_expression(material, unreal.MaterialExpressionPixelDepth, -1800, 800)
+    emissive = custom(material, lib, "lightning_emissive", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
+        "Side": uv_channel(material, lib, 0, "r", -1500, 350),
+        "Arc": uv_channel(material, lib, 0, "g", -1500, 500),
+        "Kind": uv_channel(material, lib, 1, "r", -1500, 650), "Depth": (depth, ""),
+        "PixelAngle": pixel, "RadiusCm": radius, "Power": power}, -900, 400)
+    lib.connect_material_property(emissive, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    finish(material, "M_LightningChannel")
+
+
+def create_storm_cell():
+    """M_StormCell: the volumetric cloud material of a thunderstorm cell
+    (Volume domain, additive): albedo "Albedo", extinction
+    storm_cell.hlsl x "ExtinctionScale" (1: the shader's 1/m, the engine's
+    unit the first Windows measurement), emissive storm_glow.hlsl."""
+    material = _weather_material("M_StormCell")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    material.set_editor_property("material_domain", unreal.MaterialDomain.MD_VOLUME)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
+    params = {name: weather_parameter(material, lib, name, -1800, -800 + 110 * i,
+                                      default=1.0 if name == "ExtinctionScale" else 0.0)
+              for i, name in enumerate(STORM_PARAMETERS)}
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition,
+                                           -1800, 800)
+    rel = (binary(material, lib, unreal.MaterialExpressionSubtract, world,
+                  params["CellCentreCm"][0], -1600, 800), "")
+    extinction = custom(material, lib, "storm_cell", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
+        "Rel": rel, "EastAxis": params["EastAxis"], "NorthAxis": params["NorthAxis"],
+        "Geo1": params["Geo1"], "Geo2": params["Geo2"], "Sigma": params["Sigma"],
+        "Noise": params["Noise"], "Drift": params["Drift"], "Layer": params["Layer"],
+        "Time": params["Time"]}, -900, 0)
+    scaled = binary(material, lib, unreal.MaterialExpressionMultiply, extinction,
+                    params["ExtinctionScale"][0], -600, 0)
+    lib.connect_material_property(scaled, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
+    albedo = scalar(material, lib, STORM_ALBEDO_PARAMETER, STORM_ALBEDO_DEFAULT, -600, 200)
+    lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    glow = custom(material, lib, "storm_glow", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
+        "Rel": rel, "FlashRel": params["FlashRelCm"], "Flash": params["Flash"],
+        "Extinction": (extinction, "")}, -600, 400)
+    lib.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    finish(material, "M_StormCell")
+
+
+def create_windshield_rain():
+    """M_WindshieldRain: drops on the glass (windshield.hlsl), post-process
+    before the tonemapper on a cockpit camera's beauty capture only: the
+    scene sampled through each drop's refraction offset, lerped in by its
+    mask."""
+    material = _weather_material("M_WindshieldRain")
+    if material is None:
+        return
+    material.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
+    material.set_editor_property(
+        "blendable_location",
+        getattr(unreal.BlendableLocation, "BL_SCENE_COLOR_AFTER_DOF", None)
+        or getattr(unreal.BlendableLocation, "BL_BEFORE_TONEMAPPING"))
+    lib = unreal.MaterialEditingLibrary
+    screen = lib.create_material_expression(material, unreal.MaterialExpressionScreenPosition, -1800, 0)
+    size = lib.create_material_expression(material, unreal.MaterialExpressionViewSize, -1800, 200)
+    aspect = binary(material, lib, unreal.MaterialExpressionDivide,
+                    mask(material, lib, size, "r", -1600, 200),
+                    mask(material, lib, size, "g", -1600, 300), -1400, 200)
+    params = {name: weather_parameter(material, lib, name, -1800, 400 + 110 * i)
+              for i, name in enumerate(WINDSHIELD_PARAMETERS)}
+    drops = custom(material, lib, "windshield", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
+        "UV": (screen, "ViewportUV"), "Aspect": (aspect, ""), "Time": params["Time"],
+        "Glass": params["Glass"], "Seed": params["Seed"]}, -1100, 0)
+    shifted = binary(material, lib, unreal.MaterialExpressionAdd,
+                     mask(material, lib, screen, "rg", -900, -150, source_out="ViewportUV"),
+                     mask(material, lib, drops, "rg", -900, 0), -700, -100)
+    behind = lib.create_material_expression(material, unreal.MaterialExpressionSceneTexture, -500, -100)
+    behind.set_editor_property("scene_texture_id", unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0)
+    lib.connect_material_expressions(shifted, "", behind, "UVs")
+    scene = lib.create_material_expression(material, unreal.MaterialExpressionSceneTexture, -500, 150)
+    scene.set_editor_property("scene_texture_id", unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0)
+    # A drop passes ~90 % of the light behind it (two surfaces, stated).
+    seen = binary(material, lib, unreal.MaterialExpressionMultiply, behind,
+                  constant(material, lib, 0.9, -500, 0), -300, -100, a_out="Color")
+    out = lerp(material, lib, scene, seen, mask(material, lib, drops, "b", -500, 300), -100, 0,
+               a_out="Color")
+    lib.connect_material_property(out, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    finish(material, "M_WindshieldRain")
+
+
 def create_airframe_paint():
     """W5: M_AirframePaint -- a clear-coat paint, lit (Substrate converts
     the clear-coat model to a slab with a coat when r.Substrate is on)."""
@@ -1718,5 +2012,10 @@ create_runway()
 create_moon()
 create_star_emissive()
 create_terrain_imagery_night()
+create_rain_drops()
+create_rain_splash()
+create_lightning_channel()
+create_storm_cell()
+create_windshield_rain()
 if _FAILED:
     raise SystemExit(f"materials not created: {', '.join(_FAILED)}")

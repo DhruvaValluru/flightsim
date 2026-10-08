@@ -36,6 +36,11 @@ public class FlightSimBridge : ModuleRules
 			// read by FlightSimVisualScene LoadSceneLevel; level streaming is
 			// "Engine".
 			"Landscape",
+			// The weather (FlightSimWeather.cpp): the optional Niagara rain
+			// backend (UNiagaraComponent, UNiagaraFunctionLibrary). The
+			// procedural backend, the storm, the lightning and the thunder
+			// (USoundWaveProcedural, UGameplayStatics) are all "Engine".
+			"Niagara",
 		});
 
 		// Google Photorealistic 3D Tiles (FlightSimGoogleTiles.cpp) ride the

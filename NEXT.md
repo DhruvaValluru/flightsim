@@ -1,5 +1,26 @@
 # Resume here
 
+**Weather as weather (2026-10-08, `phase-2-testing`; docs/WEATHER.md is
+the record).** A stated rain rate or a thunderstorm now puts a `weather`
+block on the card (core/scene/weather_look.py, absent-canonical): 3D rain
+drops from the same Marshall & Palmer fit, shutter-length and fixed in the
+air (rain_particles.py), splashes, drops on a cockpit's glass; the
+cumulonimbus over the downburst centre with a physical extinction, anvil
+and Atlas rain shaft (storm_cell.py); seeded lightning with stepped
+leaders, return strokes integrated over each frame's exposure, branching
+channels that land on their strike points (lightning.py); thunder
+synthesised from each bolt's own channel (thunder.py,
+scripts/storm_soundtrack.py for videos). Unreal side: FlightSimWeather
+(procedural drops by default, `-weather-backend=niagara` for a hand-built
+NS_FlightSimRain, `off`), five materials from committed HLSL
+(assets/shaders/weather/), hooks in the render commandlet (beauty-only,
+streaks superseded) and the interactive window (thunder and rain heard).
+The C++ closed forms are COMPILED with g++ and matched to Python in
+tests/test_weather.py; the rest is UNCOMPILED. NEXT: the first Windows
+build and the WX.1-WX.6 clauses (WX.4 sets ExtinctionScale if the engine
+does not read Extinction per metre); then build NS_FlightSimRain from the
+recipe if the Niagara backend is wanted.
+
 **The logic reports READ and BUILT FROM (2026-10-05, later the same day,
 `phase-2-testing`; NO tests run, owner's instruction).** The owner's
 point: the logic branch held the instructions on how the simulator

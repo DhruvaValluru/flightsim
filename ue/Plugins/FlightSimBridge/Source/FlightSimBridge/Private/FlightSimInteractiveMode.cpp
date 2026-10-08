@@ -16,6 +16,8 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UnrealClient.h"
@@ -195,6 +197,34 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		Body->AttachToComponent(Scenario.Aircraft->GetRootComponent(),
 		                        FAttachmentTransformRules::KeepRelativeTransform);
 		Body->RegisterComponent();
+	}
+
+	// -- weather -----------------------------------------------------------
+	// The card's weather block drawn and heard (FlightSimWeather.h): the
+	// rain around the camera, the storm, its lightning, its thunder.
+	{
+		FString WeatherBackendName;
+		FParse::Value(CommandLine, TEXT("weather-backend="), WeatherBackendName);
+		FFlightSimWeatherOptions WeatherOptions;
+		if (!FFlightSimWeather::ParseBackend(WeatherBackendName, WeatherOptions.Backend, Error))
+		{
+			return false;
+		}
+		FString CardText;
+		if (FFileHelper::LoadFileToString(CardText, *CardPath))
+		{
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(CardText);
+			FJsonSerializer::Deserialize(Reader, WeatherOptions.Card);
+		}
+		WeatherOptions.GeoReferencing = Scenario.GeoReferencing;
+		WeatherOptions.ExistingClouds = Visual.Clouds;
+		WeatherOptions.Sun = Visual.Sun;
+		WeatherOptions.bAudio = true;
+		WeatherOptions.bManualNiagaraTick = false;
+		if (!Weather.Build(GetWorld(), WeatherOptions, Error))
+		{
+			return false;
+		}
 	}
 
 	// -- camera ------------------------------------------------------------
@@ -381,6 +411,25 @@ void AFlightSimInteractiveMode::Tick(float DeltaSeconds)
 		{
 			FailAndQuit(Error);
 			return;
+		}
+	}
+
+	// -- the weather at the player's camera ---------------------------------
+	if (Weather.IsBuilt())
+	{
+		APlayerController* Controller = GetWorld()->GetFirstPlayerController();
+		if (Controller != nullptr && Controller->PlayerCameraManager != nullptr)
+		{
+			FFlightSimWeatherView View;
+			View.TimeSeconds = SimTimeSeconds;
+			View.CameraCm = Controller->PlayerCameraManager->GetCameraLocation();
+			View.HorizontalFovDeg = Controller->PlayerCameraManager->GetFOVAngle();
+			int32 SizeX = 1920, SizeY = 1080;
+			Controller->GetViewportSize(SizeX, SizeY);
+			View.WidthPx = FMath::Max(1, SizeX);
+			// The eye's integration time stands in for a shutter (stated).
+			View.ShutterSeconds = FMath::Max(WallDelta, 1.0 / 60.0);
+			Weather.Advance(View);
 		}
 	}
 

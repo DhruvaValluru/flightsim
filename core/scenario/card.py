@@ -283,6 +283,21 @@ def wake_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
     return block
 
 
+def weather_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
+    """The top-level ``weather`` block (core/scene/weather_look.py), or None
+    when the spec states no rain rate and no thunderstorm. Keys in the
+    fixed order ``core.scene.weather_look.CARD_KEYS``."""
+    from core.scene import weather_look
+
+    block = weather_look.card_block(spec)
+    if block is None:
+        return None
+    if tuple(block) != tuple(k for k in weather_look.CARD_KEYS if k in block):
+        raise RuntimeError(f"weather card keys {list(block)} are not in the fixed order "
+                           f"{list(weather_look.CARD_KEYS)}")
+    return block
+
+
 def world_look_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
     """The top-level ``look`` block for a spec (W3), or None when the spec
     states no night, no rain rate and a uniform wind (no block: the host
@@ -553,6 +568,16 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # look.precipitation_particles or look.cloud_drift_parameter by
         # name when it cannot draw one exactly.
         card["look"] = look
+    weather = weather_card_block(spec)
+    if weather is not None:
+        # The weather a render draws as weather (absent-canonical: a stated
+        # rain rate or a thunderstorm): weather.rain (the 3D drops, their
+        # splashes and the windshield), weather.cell (the cumulonimbus over
+        # the downburst block's centre), weather.lightning (every flash's
+        # schedule, strokes and channel) and weather.thunder (the synthesis
+        # constants and their selftest). VISUAL: no equation of motion reads
+        # it; the host draws it verbatim (core/scene/weather_look.py).
+        card["weather"] = weather
     if reference_speeds:
         # Display-only (the HUD/panel stall-margin marks): the MODEL's own
         # measured Vs and CLmax with their basis string (§2.4), so the marks

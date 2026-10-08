@@ -33,6 +33,9 @@ NEW_MATERIAL = re.compile(r'(?<!_sky)(?<![A-Za-z_])new_material\("(M_[A-Za-z0-9_
 #: The physical sky's materials (-sky=, core/sky/plan.py), made by their own
 #: helper so the W5 world list stays exactly the world's.
 SKY_MATERIAL = re.compile(r'_sky_material\("(M_[A-Za-z0-9_]+)"\)')
+#: The weather's materials (core/scene/weather_look.py, FlightSimWeather.cpp),
+#: made by their own helper for the same reason.
+WEATHER_MATERIAL = re.compile(r'_weather_material\("(M_[A-Za-z0-9_]+)"\)')
 
 
 def loaded_in_cpp():
@@ -46,7 +49,8 @@ def created_by_script():
     text = SCRIPT.read_text(encoding="utf-8")
     return (set(CREATED.findall(text)) | {name for _, name, _, _ in PASS_ROW.findall(text)}
             | {name for _, name, _ in LINEAR_ROW.findall(text)}
-            | set(NEW_MATERIAL.findall(text)) | set(SKY_MATERIAL.findall(text)))
+            | set(NEW_MATERIAL.findall(text)) | set(SKY_MATERIAL.findall(text))
+            | set(WEATHER_MATERIAL.findall(text)))
 
 
 def test_every_material_the_commandlet_loads_is_created_by_the_script():
@@ -176,7 +180,10 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                "M_Landscape", "M_LandcoverID", "M_Starfield", "M_RainStreaks",
                "M_AirframePaint", "M_Runway",
                # The physical sky (FlightSimSky.cpp).
-               "M_Moon", "M_StarEmissive", "M_TerrainImageryNight"}
+               "M_Moon", "M_StarEmissive", "M_TerrainImageryNight",
+               # The weather (FlightSimWeather.cpp).
+               "M_RainDrops", "M_RainSplash", "M_LightningChannel", "M_StormCell",
+               "M_WindshieldRain"}
 COMMANDLET_CPP = BRIDGE / "Private" / "FlightSimRenderCommandlet.cpp"
 
 
