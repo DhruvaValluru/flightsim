@@ -136,6 +136,20 @@ SCENE_PREFIX = "-scene="
 #: host records the posting it achieved (``terrain_posting_m``).
 TRIANGLE_BUDGET_PREFIX = "-triangle-budget="
 
+#: The lighting block's engine knobs (core/scene/lighting.py): look key ->
+#: commandlet flag. Emitted right after ``-fog-density=``, in this order,
+#: ONLY for the keys the look carries, so a look without them (every look
+#: before the block existed) builds a byte-identical list. The commandlet
+#: multiplies the calibrated sun and sky light by the two scales, sets the
+#: sun's colour temperature and its disc's angular size (shadow softness),
+#: and records each in render.json look_applied.lighting.
+LIGHTING_FLAGS: Tuple[Tuple[str, str], ...] = (
+    ("sun_intensity_scale", "-sun-intensity-scale="),
+    ("sky_light_scale", "-sky-light-scale="),
+    ("sun_temperature_k", "-sun-temperature="),
+    ("sun_source_angle_deg", "-sun-source-angle="),
+)
+
 
 def passes_flag(passes: Iterable[str]) -> Optional[str]:
     """``-passes=a,b`` for the requested passes in :data:`PASS_NAMES`
@@ -180,6 +194,25 @@ def sensing_flags(calibration: bool = False, sun_lux=None, accumulate=None) -> L
         if isinstance(accumulate, bool) or int(accumulate) != accumulate or int(accumulate) < 1:
             raise ValueError(f"-accumulate takes a whole number of sub-exposures >= 1, not {accumulate!r}")
         out.append(f"{ACCUMULATE_PREFIX}{int(accumulate)}")
+    return out
+
+
+def lighting_flags(look: Optional[Mapping[str, Any]]) -> List[str]:
+    """The :data:`LIGHTING_FLAGS` tokens for the engine keys a look
+    carries, in table order; [] for None or a look without them. A value
+    that is not a finite non-negative number is refused HERE (ValueError)
+    rather than sent."""
+    import math
+
+    out: List[str] = []
+    for key, prefix in LIGHTING_FLAGS:
+        if not look or look.get(key) is None:
+            continue
+        value = look[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(float(value)) or float(value) < 0.0:
+            raise ValueError(f"{prefix} takes a non-negative number, not {value!r}")
+        out.append(f"{prefix}{float(value):g}")
     return out
 
 
@@ -294,6 +327,7 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
                   f"-sun-azim={tod['sun_azim']}",
                   f"-exposure-bias={tod['exposure_bias']}",
                   f"-fog-density={tod['fog_density']}"]
+        flags += lighting_flags(look)
     flags += list(LAUNCHER_FLAGS)
     flags += [str(token) for token in trailing]
     flags += extra

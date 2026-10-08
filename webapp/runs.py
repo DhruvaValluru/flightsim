@@ -1592,12 +1592,17 @@ def render_look_for(spec: ScenarioSpec, event_note) -> Optional[Dict]:
     sampled = randomization_look(spec)
     if sampled is not None:
         return sampled
-    if event_note:
-        return STORM_LOOK
-    # A stated time of day (visual plan V1): its sun and exposure; None
-    # when unstated keeps the default look byte-identical. The physical
-    # sky (FLIGHTSIM_SKY=physical) replaces these flags with -sky=.
-    return None if physical_sky_enabled(spec) else sun_look(spec)
+    if physical_sky_enabled(spec):
+        # The physical sky (FLIGHTSIM_SKY=physical) replaces the sun flags
+        # with -sky=; the storm look still states its fog there.
+        return STORM_LOOK if event_note else None
+    # A stated time of day (visual plan V1) places the sun, the storm look
+    # replaces it, and a stated lighting block is layered on whichever
+    # it was; None when none of the three is stated keeps the default
+    # look byte-identical.
+    base = STORM_LOOK if event_note else sun_look(spec)
+    lit = lighting_look(spec, base)
+    return lit if lit is not None else base
 
 
 #: Render quality presets (visual plan V0). "measure" is the configuration
@@ -1670,15 +1675,49 @@ def sun_look(spec: ScenarioSpec) -> Optional[Dict]:
                   float(spec.longitude.value), day)
     require_renderable(sun)
     bias, bias_basis = exposure_bias_for(sun.elevation_deg)
+    from core.scene.lighting import compass_to_engine_azimuth
+
     return {
         "sun_elev": round(sun.elevation_deg, 2),
-        "sun_azim": round(sun.azimuth_deg, 2),
+        # -sun-azim is the ENGINE yaw toward the sun (east = 0, north =
+        # 90; core.scenario.randomization.engine_sun_azimuth), not the
+        # compass bearing NOAA gives: passing the bearing through put a
+        # dawn sun (compass ~90, east) in the north.
+        "sun_azim": round(compass_to_engine_azimuth(sun.azimuth_deg), 2),
         "exposure_bias": bias,
         "note": (f"sun {sun.elevation_deg:.1f} deg up at azimuth "
                  f"{sun.azimuth_deg:.1f} deg ({sun.basis}; "
                  f"{sun.when_utc.strftime('%H:%M')} UTC; NOAA solar "
                  f"position); exposure bias {bias:g}, {bias_basis} (VISUAL)"),
     }
+
+
+def lighting_look(spec: ScenarioSpec, base: Optional[Dict] = None) -> Optional[Dict]:
+    """The look with the spec's ``lighting`` block layered on ``base``
+    (the time of day's or the storm look; None = the default look), or
+    None when the block is the documented default -- the render command
+    then stays exactly what it was (pinned by test).
+
+    The sun moves to the stated (or the preset's) exact degrees, the
+    calibrated exposure follows the new elevation (:func:`exposure_bias_for`)
+    and the brightness stops add on top; the engine knobs ride as their
+    own look keys, which core.render.flags turns into commandlet flags.
+    VISUAL ONLY. core/scene/lighting.py says what is and is not claimed.
+    """
+    from core.render.flags import DEFAULT_LOOK
+    from core.scene import lighting
+
+    block = getattr(spec, "lighting", None)
+    if block is None or block.is_default():
+        return None
+    start = dict(DEFAULT_LOOK)
+    if base:
+        start.update({key: base[key] for key in DEFAULT_LOOK if key in base})
+    look = lighting.apply(start, lighting.stated_values(block),
+                          lambda elevation: exposure_bias_for(elevation)[0])
+    if base and base.get("note"):
+        look["note"] = f"{look['note']}; on top of: {base['note']}"
+    return look
 
 
 def physical_sky_enabled(spec: ScenarioSpec) -> bool:
@@ -2697,6 +2736,18 @@ class RunManager:
         except Exception:
             reference = None   # marks are optional; the run is not
         run.reference = reference
+        # The lighting block, as render_look_for applies it (or why not).
+        lighting_note = None
+        if not spec.lighting.is_default():
+            if physical_sky_enabled(spec):
+                lighting_note = ("lighting block NOT applied: the physical sky "
+                                 "lights the scene itself")
+            elif randomization_look(spec) is not None:
+                lighting_note = ("lighting block NOT applied: the randomisation "
+                                 "block's sampled look is the record")
+            else:
+                lighting_note = lighting_look(
+                    spec, STORM_LOOK if event_note else sun)["note"]
         run.conditions = {
             "wind_note": (f"{wind_kt:g} kt from "
                           f"{float(spec.wind_direction.value):g} deg"
@@ -2725,6 +2776,7 @@ class RunManager:
                         f"a whole (sun, fog and exposure together)"
                         if event_note else sun_note)}
                if sun_note else {}),
+            **({"lighting": lighting_note} if lighting_note else {}),
         }
         # The scene's raster, for the headless pre-run's ground model and
         # for the terrain-coupled camera checks. Same construction the

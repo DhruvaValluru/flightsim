@@ -28,7 +28,7 @@ from .blocks import (
     RecordSpec, SceneSpec, TaxonomySpec,
     TrafficSpec, TurbulenceModelSpec, WakeSpec, WindProfileSpec,
 )
-from .blocks import RunwayBlockSpec
+from .blocks import LightingSpec, RunwayBlockSpec
 from .camera import CameraSpec
 from .randomization import RandomizationSpec
 from .fields import Quantity, Source
@@ -94,7 +94,8 @@ READABLE_SPEC_VERSIONS = (8, 9)
 
 #: Version 9's top-level blocks (each absent-canonical).
 SPEC9_BLOCKS = ("atmosphere", "datum", "turbulence_model", "wind_profile", "loading",
-                "failures", "icing", "dis", "wake", "instruments", "record", "runway")
+                "failures", "icing", "dis", "wake", "instruments", "record", "runway",
+                "lighting")
 #: Version 9's optional fields inside version-8 sections.
 SPEC9_SCENE_FIELDS = ("sun_lux", "buildings", "night")
 SPEC9_ENVIRONMENT_FIELDS = ("precipitation_rate_mmh", "time_of_day")
@@ -269,6 +270,12 @@ class ScenarioSpec:
     #: absent-canonical: no runway is the default and is omitted, so
     #: every committed spec-8 example keeps its digest.
     runway: "RunwayBlockSpec" = dc_field(default_factory=RunwayBlockSpec.defaulted)
+    #: Render lighting (core/scene/lighting.py): a preset word, the sun's
+    #: direction in exact degrees, brightness and the engine's light
+    #: knobs. VISUAL ONLY. Spec 9, absent-canonical: the natural preset
+    #: with nothing stated is omitted, so every committed spec keeps its
+    #: digest.
+    lighting: "LightingSpec" = dc_field(default_factory=LightingSpec.defaulted)
     #: Render sun (core.environment.sun, visual-fidelity plan V1; the
     #: physical sky of core.sky reads it too): a named time ("dawn",
     #: "noon", "golden hour", ...), "HH:MM" local apparent solar time,
@@ -340,7 +347,7 @@ class ScenarioSpec:
         carry the spec's own set()/plan() doctrine."""
         import re
 
-        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|dis|wake|instruments|record|runway)\.(\w+)", name)
+        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|dis|wake|instruments|record|runway|lighting)\.(\w+)", name)
         if match is not None:
             block = getattr(self, match.group(1))
             return block, match.group(2)
@@ -522,6 +529,9 @@ class ScenarioSpec:
         # W2: the runway block, absent-canonical like the others.
         if not self.runway.is_default():
             out["runway"] = self.runway.to_dict()
+        # The lighting block, absent-canonical like the others.
+        if not self.lighting.is_default():
+            out["lighting"] = self.lighting.to_dict()
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -630,6 +640,9 @@ class ScenarioSpec:
         runway_data = data.get("runway")
         runway = (RunwayBlockSpec.defaulted() if runway_data is None
                   else RunwayBlockSpec.from_dict(runway_data))
+        lighting_data = data.get("lighting")
+        lighting = (LightingSpec.defaulted() if lighting_data is None
+                    else LightingSpec.from_dict(lighting_data))
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
@@ -652,6 +665,7 @@ class ScenarioSpec:
             instruments=instruments,
             record=record,
             runway=runway,
+            lighting=lighting,
             **kwargs,
         )
 
@@ -754,7 +768,8 @@ class ScenarioSpec:
                                   ("wake", self.wake),
                                   ("instruments", self.instruments),
                                   ("record", self.record),
-                                  ("runway", self.runway)):
+                                  ("runway", self.runway),
+                                  ("lighting", self.lighting)):
             if not block.is_default():
                 for name, q in block.quantities():
                     rows.append((block_name, name.replace("_", " "),

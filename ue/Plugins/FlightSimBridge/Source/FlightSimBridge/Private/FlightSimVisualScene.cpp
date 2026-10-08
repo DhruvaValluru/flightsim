@@ -771,6 +771,54 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		LookApplied->SetObjectField(TEXT("xplane_lighting"), XPlaneRecord);
 	}
 
+	// -- the lighting block's engine knobs (core/scene/lighting.py) ---------
+	// Applied AFTER the physical sky and the X-Plane colours: the two scales
+	// multiply whatever intensity those left on the sun and the sky light,
+	// and the temperature tints on top of any light colour. A knob that was
+	// not stated is not touched, so a render without the flags is the scene
+	// above, byte-identical.
+	if (Options.SunIntensityScale >= 0.0 || Options.SkyLightScale >= 0.0 ||
+	    Options.SunTemperatureK > 0.0 || Options.SunSourceAngleDeg >= 0.0)
+	{
+		TSharedPtr<FJsonObject> LightingRecord = NewRecord();
+		if (Options.SunIntensityScale >= 0.0)
+		{
+			const double Before = SunLight->Intensity;
+			const double After = Before * Options.SunIntensityScale;
+			SunLight->SetIntensity(static_cast<float>(After));
+			LightingRecord->SetNumberField(TEXT("sun_intensity_scale"), Options.SunIntensityScale);
+			LightingRecord->SetNumberField(TEXT("sun_intensity_before"), Before);
+			LightingRecord->SetNumberField(TEXT("sun_intensity"), After);
+		}
+		if (Options.SkyLightScale >= 0.0)
+		{
+			const double Before = SkyComponent->Intensity;
+			const double After = Before * Options.SkyLightScale;
+			SkyComponent->SetIntensity(static_cast<float>(After));
+			LightingRecord->SetNumberField(TEXT("sky_light_scale"), Options.SkyLightScale);
+			LightingRecord->SetNumberField(TEXT("sky_light_intensity"), After);
+		}
+		if (Options.SunTemperatureK > 0.0)
+		{
+			SunLight->SetUseTemperature(true);
+			SunLight->SetTemperature(static_cast<float>(Options.SunTemperatureK));
+			LightingRecord->SetNumberField(TEXT("sun_temperature_k"), Options.SunTemperatureK);
+		}
+		if (Options.SunSourceAngleDeg >= 0.0)
+		{
+			SunLight->SetLightSourceAngle(static_cast<float>(Options.SunSourceAngleDeg));
+			LightingRecord->SetNumberField(TEXT("sun_source_angle_deg"), Options.SunSourceAngleDeg);
+		}
+		LightingRecord->SetStringField(TEXT("set_by"),
+			TEXT("ULightComponent::SetIntensity / SetUseTemperature / SetTemperature, ")
+			TEXT("UDirectionalLightComponent::SetLightSourceAngle, USkyLightComponent::SetIntensity"));
+		LightingRecord->SetBoolField(TEXT("calibrated"), false);
+		LightingRecord->SetStringField(TEXT("note"),
+			TEXT("the lighting block's knobs (core/scene/lighting.py): chosen by eye, not ")
+			TEXT("re-pinned against Gate 6's exposure clauses"));
+		LookApplied->SetObjectField(TEXT("lighting"), LightingRecord);
+	}
+
 	// -- clouds (Phase 2, contracts §5.4 row 2) ------------------------------
 	if (!BuildClouds(World, Options, Error))
 	{

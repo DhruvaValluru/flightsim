@@ -400,6 +400,33 @@ spec's own origin (spectral construction plus thermal and hydraulic
 erosion), so the terrain examples run over real ground on a fresh clone.
 `--terrain <bake stem>` remains the path for real geography.
 
+## Lighting and camera views (web page)
+
+After **Interpret**, two panels sit under the spec table. Both write into
+the table's own rows (shown as `user (edited)`), so **Run** carries and
+re-validates them like any typed value.
+
+* **Lighting** (the spec's `lighting` block, `core/scene/lighting.py`):
+  presets (natural, sunny, super bright, soft, hazy, overcast, golden
+  hour, dramatic); the sun's direction in exact degrees (click the sky
+  dial, type the angle, nudge with the arrows, or pick a compass point or
+  a side of the aircraft); brightness in EV; and, under *advanced light*,
+  sun strength, colour temperature, shadow softness, sky fill and haze.
+  A stated value beats the preset, and the preset beats the time of day's
+  sun. `natural` with nothing stated changes nothing. The preset numbers
+  were chosen by eye. They are uncalibrated against Gate 6, so the block is
+  VISUAL ONLY and records that with the run. The engine knobs reach the
+  commandlet as `-sun-intensity-scale= -sky-light-scale= -sun-temperature=
+  -sun-source-angle=`, and that C++ is uncompiled until the next Windows
+  build.
+* **Camera view & zoom**: for each camera that follows the aircraft,
+  swing it around the nose (0° front, 90° right, 180° behind, 270° left)
+  by clicking the top-down diagram, the side buttons, or the ◀ ▶ ▲ ▼
+  orbit arrows. You can also type the exact angle, height angle and
+  distance. Zoom in or out (×1.25), type the focal length, or pick a
+  field of view. A camera placed in the scene (tower, ground) gets the
+  zoom controls only.
+
 ## Run the tests
 
 ```bash

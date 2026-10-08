@@ -211,6 +211,13 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
         "source": str(quantity.source), "from": quantity.frm,
         "std": quantity.std, "detail": quantity.detail,
     } for name, quantity in spec.randomization.quantities()]
+    # The lighting block (core/scene/lighting.py): the same shape, so the
+    # page's lighting panel and its table rows have entries to edit.
+    lighting = [{
+        "name": name, "value": quantity.value, "unit": quantity.unit,
+        "source": str(quantity.source), "from": quantity.frm,
+        "std": quantity.std, "detail": quantity.detail,
+    } for name, quantity in spec.lighting.quantities()]
     spec_dict = spec.to_dict()
     # The block's own dict (always present for the page) MERGED with the
     # policy the canonical form carries under the same key: the policy
@@ -229,6 +236,10 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     if "policy" in canonical_section:
         randomization_section["policy"] = canonical_section["policy"]
     spec_dict["randomization"] = randomization_section
+    # The lighting section, always present for the page (the canonical form
+    # omits a default block; from_dict reads a default one back as absent,
+    # so the digest is unmoved).
+    spec_dict["lighting"] = spec.lighting.to_dict()
     # The time-of-day row's entry (omitted from the canonical form while
     # unstated; read back unstated, so the digest is unmoved).
     spec_dict.setdefault("environment", {}).setdefault(
@@ -238,8 +249,18 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
             "fields": fields, "cameras": cameras,
-            "randomization": randomization, "dict": spec_dict,
+            "randomization": randomization, "lighting": lighting,
+            "lighting_presets": _lighting_presets(), "dict": spec_dict,
             "table": spec.render_table()}
+
+
+def _lighting_presets() -> Dict[str, Any]:
+    """The preset table and ranges for the page's lighting panel (one
+    source: core/scene/lighting.py)."""
+    from core.scene.lighting import PRESETS, RANGES
+
+    return {"presets": PRESETS,
+            "ranges": {name: list(bounds) for name, bounds in RANGES.items()}}
 
 
 def _validation_payload(spec: ScenarioSpec) -> Dict[str, Any]:

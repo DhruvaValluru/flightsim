@@ -1133,6 +1133,60 @@ class RunwayBlockSpec(ProvenancedBlock):
 
 
 @dataclass
+class LightingSpec(ProvenancedBlock):
+    """``lighting``: how the render is lit, on top of the sun the time of
+    day (or the default look) placed -- a ``preset`` word, the sun's
+    direction in exact degrees (``sun_elevation_deg`` above the horizon,
+    ``sun_azimuth_deg`` the compass bearing the light comes FROM), the
+    ``brightness_ev`` in stops, and four engine knobs (``sun_intensity``,
+    ``color_temperature_k``, ``shadow_softness_deg``, ``sky_fill``) plus
+    ``haze``. VISUAL ONLY: physics never reads it. Absent-canonical: the
+    ``natural`` preset with nothing stated is the default and is omitted,
+    so every committed spec keeps its digest. Presets, precedence and
+    ranges are core/scene/lighting.py's; the validator refuses
+    ``lighting.preset`` and ``lighting.range`` by name."""
+
+    preset: Quantity
+    sun_elevation_deg: Quantity
+    sun_azimuth_deg: Quantity
+    brightness_ev: Quantity
+    sun_intensity: Quantity
+    color_temperature_k: Quantity
+    shadow_softness_deg: Quantity
+    sky_fill: Quantity
+    haze: Quantity
+
+    FIELD_ORDER = ("preset", "sun_elevation_deg", "sun_azimuth_deg", "brightness_ev",
+                   "sun_intensity", "color_temperature_k", "shadow_softness_deg",
+                   "sky_fill", "haze")
+    BLOCK = "lighting"
+
+    @classmethod
+    def defaulted(cls) -> "LightingSpec":
+        from_preset = "unstated: the preset's value, else the look underneath"
+        return cls(
+            preset=Quantity.default(
+                "natural", frm="the documented default: the calibrated look, unchanged"),
+            sun_elevation_deg=Quantity.default(
+                None, "deg", frm="unstated: the preset's, else the time of day's sun"),
+            sun_azimuth_deg=Quantity.default(
+                None, "deg", frm="unstated: the time of day's sun (compass, light FROM)"),
+            brightness_ev=Quantity.default(
+                0.0, "EV", frm="no brightness change (stops on the calibrated exposure)"),
+            sun_intensity=Quantity.default(
+                None, "x", frm=from_preset + " (1 = the calibrated sun)"),
+            color_temperature_k=Quantity.default(
+                None, "K", frm=from_preset + " (unset = white light)"),
+            shadow_softness_deg=Quantity.default(
+                None, "deg", frm=from_preset + " (sun disc size; 0.5 = the real sun)"),
+            sky_fill=Quantity.default(
+                None, "x", frm=from_preset + " (1 = the calibrated sky light)"),
+            haze=Quantity.default(
+                None, frm=from_preset + " (height-fog density; 0.0012 = clear)"),
+        )
+
+
+@dataclass
 class TrafficSpec(ProvenancedBlock):
     """One scripted traffic aircraft (contracts §2.2).
 

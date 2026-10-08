@@ -276,6 +276,8 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     report.violations.extend(validate_world(spec))
     # W3: the night sky and the rain rate, refused by name.
     report.violations.extend(validate_world_look(spec))
+    # The render lighting block, refused by name.
+    report.violations.extend(validate_lighting(spec))
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
@@ -1218,6 +1220,25 @@ def validate_world_look(spec) -> List[Violation]:
         if problem:
             out.append(Violation("look.precipitation_rate", problem, actual=rate_q.value,
                                  limit=RAIN_RATE_MAX_MMH, unit="mm/h"))
+    return out
+
+
+def validate_lighting(spec) -> List[Violation]:
+    """The ``lighting`` block: ``lighting.preset`` (a word that is not a
+    preset) and ``lighting.range`` (a number outside what the render
+    takes, core/scene/lighting.py RANGES -- a sun below the render floor
+    among them). The default block yields nothing."""
+    block = getattr(spec, "lighting", None)
+    if block is None or block.is_default():
+        return []
+    from ..scene.lighting import problems, stated_values
+
+    out: List[Violation] = []
+    for kind, message in problems(stated_values(block)):
+        if kind == "preset":
+            out.append(Violation("lighting.preset", message))
+        else:
+            out.append(Violation("lighting.range", message))
     return out
 
 
