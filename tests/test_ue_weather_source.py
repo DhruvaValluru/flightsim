@@ -213,3 +213,15 @@ def test_the_web_app_asks_for_the_storm_weather_only_when_told(monkeypatch):
     import pytest
     with pytest.raises(ValueError):
         runs.weather_backend_flags()
+
+
+def test_the_storm_material_is_compiled_and_checked_before_the_cloud_draws_it():
+    """Measured on the owner's machine: the volumetric cloud asserted
+    'Material->GetMaterialDomain() == MD_Volume' while M_StormCell's shaders
+    were still compiling (a not-ready material renders as the default surface
+    material). The cell now compiles it first and skips a bad one by name."""
+    cell = _function(WEATHER_CPP, "bool FFlightSimWeather::BuildCell")
+    check = cell.index("Base->MaterialDomain != MD_Volume")
+    assert check < cell.index("Resource->FinishCompilation();") < cell.index("GetCompileErrors()")
+    assert cell.index("GetCompileErrors()") < cell.index("StormClouds->SetMaterial(StormMaterial)")
+    assert "weather.storm_material" in cell[check:cell.index("StormClouds->SetMaterial(StormMaterial)")]

@@ -12,9 +12,12 @@
 #include "GameFramework/Actor.h"
 #include "GeoReferencingSystem.h"
 #include "Kismet/GameplayStatics.h"
+#include "MaterialDomain.h"
+#include "MaterialShared.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Math/RandomStream.h"
 #include "Materials/MaterialInterface.h"
+#include "Math/RandomStream.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
@@ -1042,6 +1045,51 @@ bool FFlightSimWeather::BuildCell(UWorld* World, const TSharedPtr<FJsonObject>& 
 		                        TEXT("not load; the storm is drawn by it or not at all"),
 		                        WeatherStormMaterialPath);
 		return false;
+	}
+	// The volumetric cloud renderer asserts that its material is a Volume
+	// material (VolumetricCloudRendering.cpp; measured on the owner's
+	// machine: "Assertion failed: Material->GetMaterialDomain() == MD_Volume"
+	// while the shaders were still compiling for the first time). A material
+	// whose shader map is not ready, or failed to compile, renders as the
+	// engine's default SURFACE material -- so the storm's material is
+	// compiled to completion here, and one that is not a compiled Volume
+	// material leaves the storm undrawn (recorded, with the compiler's
+	// errors) instead of crashing the render.
+	{
+		UMaterial* Base = Material->GetMaterial();
+		FString Why;
+		if (Base == nullptr || Base->MaterialDomain != MD_Volume)
+		{
+			Why = TEXT("its material domain is not Volume (re-run scripts/ue_create_materials.py)");
+		}
+		else if (FMaterialResource* Resource = Base->GetMaterialResource(World->GetFeatureLevel()))
+		{
+			Resource->FinishCompilation();
+			if (Resource->GetCompileErrors().Num() > 0)
+			{
+				Why = TEXT("its shaders failed to compile: ")
+					+ FString::Join(Resource->GetCompileErrors(), TEXT(" | "));
+			}
+			else if (Resource->GetGameThreadShaderMap() == nullptr)
+			{
+				Why = TEXT("its shader map is not ready after compiling");
+			}
+		}
+		else
+		{
+			Why = TEXT("it has no material resource at this feature level");
+		}
+		if (!Why.IsEmpty())
+		{
+			UE_LOG(LogFlightSimWeather, Error, TEXT("weather.storm_material: %s not drawn: %s"),
+			       WeatherStormMaterialPath, *Why);
+			TSharedPtr<FJsonObject> Skipped = WeatherRecord();
+			Skipped->SetBoolField(TEXT("drawn"), false);
+			Skipped->SetStringField(TEXT("why"),
+				FString::Printf(TEXT("%s: %s"), WeatherStormMaterialPath, *Why));
+			Record->SetObjectField(TEXT("cell"), Skipped);
+			return true;   // the rain and the rest still draw; bCell stays false
+		}
 	}
 	TSharedPtr<FJsonObject> Row = WeatherRecord();
 	StormClouds = Options.ExistingClouds;
