@@ -4,8 +4,11 @@
         [--prompt "..."] [--seconds S] [--out DIR] [--terrain STEM]
 
 The web app deletes a failed run's folder, so the log that says WHY it
-failed goes with it. This writes a run card from the prompt (the same
-compiler and card the web app uses), then runs the FlightSimRender
+failed goes with it. This writes a run card from the prompt the way the web
+app does (the same compiler; hold_state off for the host, which has no
+autopilot; the storm placed on the track by severe_event_centre, so the
+card carries the downburst block the storm cell is centred on), then runs
+the FlightSimRender
 commandlet once per backend with the same flags (core/render/flags.py) for a
 few seconds of flight, into <out>/<backend>/, and prints the decisive lines
 of each log: every weather / cloud line, every material that failed to
@@ -57,21 +60,37 @@ def main(argv=None) -> int:
     from core.render.headless import HEADLESS_FLAGS, run_headless
     from core.scenario.card import write_run_card
     from core.util.platform import ue_editor_path
+    from webapp.runs import (CLIP_SECONDS, _projected_origin, project_for_ue_host,
+                             severe_event_centre)
+
+    args.out.mkdir(parents=True, exist_ok=True)
+    spec = compile_prompt(args.prompt)
+    # The web app's projection for the render host (hold_state off: it has
+    # no autopilot) and its storm placement (the downburst block the storm
+    # cell is centred on), so this card is the card the web app renders.
+    project_for_ue_host(spec)
+    scene = {"terrain": args.terrain} if args.terrain else {}
+    seconds = min(float(spec.duration.value), CLIP_SECONDS)
+    origin_x, origin_y, scene_crs = _projected_origin(spec, scene)
+    downburst = None
+    if str(spec.weather_event.value) == "thunderstorm":
+        from core.environment.downburst import Downburst
+
+        downburst = Downburst(*severe_event_centre(spec, scene, seconds)).card_block(origin_x, origin_y)
+    card = write_run_card(spec, args.out / "card.json", duration_s=seconds, downburst=downburst,
+                          scene_crs=scene_crs)
+    text = json.loads(card.read_text(encoding="utf-8"))
+    print(f"card: {card}")
+    print(f"  weather_event={spec.weather_event.value} rain={spec.precipitation_rate_mmh.value} "
+          f"hold_state={text.get('hold_state')} blocks: weather={'weather' in text} "
+          f"weather_look={'weather_look' in text} rain_particles={'rain_particles' in text} "
+          f"downburst={'downburst' in text}")
 
     editor = ue_editor_path()
     if editor is None or not editor.is_file():
         print(json.dumps({"error": f"no UnrealEditor-Cmd at {editor} (set UE_ROOT)"}))
         return 2
-    args.out.mkdir(parents=True, exist_ok=True)
-    spec = compile_prompt(args.prompt)
-    card = write_run_card(spec, args.out / "card.json")
-    text = json.loads(card.read_text(encoding="utf-8"))
-    print(f"card: {card}")
-    print(f"  weather_event={spec.weather_event.value} rain={spec.precipitation_rate_mmh.value} "
-          f"blocks: weather={'weather' in text} weather_look={'weather_look' in text} "
-          f"rain_particles={'rain_particles' in text} downburst={'downburst' in text}")
-
-    scene = {"terrain": args.terrain} if args.terrain else None
+    scene = scene or None
     verdicts = {}
     for backend in backends:
         frames = args.out / backend / "frames"
