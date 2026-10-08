@@ -462,6 +462,17 @@ downloaded once (`data/glo30`) and each place's ground is kept
 (`runs/terrain/dynamic`), so later runs nearby start immediately. Set
 `FLIGHTSIM_TERRAIN_PREFETCH=off` to download only at Run, as before.
 
+## Test scenarios in one go
+
+With the app running, `python scripts/run_test_scenarios.py` interprets
+and runs 14 scenarios one after another, waiting for each run to finish:
+lighting presets and exact sun angles, rain, a thunderstorm, a tornado,
+mountain turbulence, the cockpit and tower views, an ocean cruise and an
+unsupported hurricane. It prints a summary (done / failed / refused, run
+id, clip length) and writes `runs/test_scenarios.json`. Use `--list` to
+see them, `--only 1 4 7` to pick some, `--still` for one frame each, and
+`--clip 6` for longer clips.
+
 ## Run the tests
 
 ```bash
