@@ -368,7 +368,10 @@ def google_tiles_requested() -> bool:
 GOOGLE_TILES_TERRAIN_CONSTRAINT = "google_tiles.terrain"
 
 
-def google_tiles_terrain_refusal(heightfield) -> Optional[str]:
+def google_tiles_terrain_refusal(heightfield, latitude_deg: Optional[float] = None,
+                                 longitude_deg: Optional[float] = None,
+                                 terrain_elevation_m: Optional[float] = None
+                                 ) -> Optional[str]:
     """None, or why the render must not draw Google's tiles over this ground.
 
     The tiles draw the real Earth at the card's coordinates; the physics,
@@ -376,15 +379,23 @@ def google_tiles_terrain_refusal(heightfield) -> Optional[str]:
     slab (``heightfield`` None) or a synthesised raster that ground is NOT
     the place the tiles show, so the aircraft would fly through mountains
     it never feels. Only a bake ingested from a real DEM (producer ``dem
-    ingestion``: GLO-30 or 3DEP) is accepted under the tiles.
+    ingestion``: GLO-30 or 3DEP) is accepted under the tiles -- and the
+    flat slab at a 0 m datum on a listed open-ocean point
+    (core.terrain.ocean), where the sea surface IS that slab.
     """
     if not google_tiles_requested():
         return None
     if heightfield is None:
+        from ..terrain.ocean import open_ocean_at
+
+        if (latitude_deg is not None and longitude_deg is not None
+                and terrain_elevation_m is not None and float(terrain_elevation_m) == 0.0
+                and open_ocean_at(latitude_deg, longitude_deg) is not None):
+            return None
         return (f"{GOOGLE_TILES_ENV} is on but the physics ground is the flat slab: "
                 f"the tiles would draw real terrain the aircraft never feels. Bake the "
-                f"place (scripts/bake_terrain.py, or the page's on-demand bake) or turn "
-                f"the tiles off")
+                f"place (scripts/bake_terrain.py, or the page's on-demand bake), say "
+                f"'over the ocean' for an open-ocean scene, or turn the tiles off")
     producer = str((heightfield.provenance or {}).get("producer", ""))
     if producer != "dem ingestion":
         return (f"{GOOGLE_TILES_ENV} is on but the physics ground {heightfield.name!r} is "

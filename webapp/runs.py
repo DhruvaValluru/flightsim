@@ -575,6 +575,14 @@ def _auto_scene(spec: ScenarioSpec) -> Dict:
                          f"{float(spec.terrain_elevation.value):g} m datum "
                          f"until then -- the synthesised ridge is never "
                          f"substituted for a staged place"}
+    from core.terrain.ocean import open_ocean_at
+
+    ocean = open_ocean_at(lat, lon)
+    if ocean is not None and float(spec.terrain_elevation.value) == 0.0:
+        return {"key": "flat", "kind": "flat (open ocean)", "terrain": None,
+                "imagery": None,
+                "label": f"{ocean.title}: the flat slab at sea level is the "
+                         f"real ground there (no land within ~330 km)"}
     return {"key": "flat", "kind": "flat", "terrain": None, "imagery": None,
             "label": "no terrain requested; flat slab at the spec's "
                      "elevation"}
@@ -1027,9 +1035,11 @@ def plan_terrain_environment(spec: ScenarioSpec) -> None:
 SCENE_SETTING_BAKES = {"desert": "grand_canyon", "grassland": "flint_hills",
                        "forest": "yosemite"}
 #: Prompt words that opt OUT of scene-setting: the user asked for the flat
-#: slab (or water) and gets exactly that.
-SCENE_SETTING_OPT_OUT = ("flat", "featureless", "ocean", "open sea",
-                         "over the sea", "over water", "offshore")
+#: slab and gets exactly that.
+SCENE_SETTING_OPT_OUT = ("flat", "featureless")
+#: Prompt words that stage an open-ocean point (core.terrain.ocean): the
+#: flat slab at sea level, at a real place.
+OCEAN_WORDS = ("ocean", "open sea", "over the sea", "over water", "offshore")
 
 
 def renderable_aircraft() -> List[str]:
@@ -1154,10 +1164,25 @@ def plan_scene_setting(spec: ScenarioSpec) -> None:
     if str(spec.terrain_elevation.source) != "default":
         return          # unnamed mountains: the generic ridge is the scene
     prompt = (spec.prompt or "").lower()
+    surface = str(spec.surface.value)
+    if surface == "ocean" or any(word in prompt for word in OCEAN_WORDS):
+        # No ocean bake, and none needed: an open-ocean point's ground IS
+        # the flat slab at sea level (core.terrain.ocean), so the scene
+        # sits at a real place -- the one Google's tiles draw, when on.
+        from core.terrain.ocean import pick_open_ocean
+
+        point = pick_open_ocean(spec.prompt)
+        frm = (f"scene-setting: an ocean with no place stated, so {point.title} "
+               f"stages the scene (flat sea level, no land within ~330 km); name "
+               f"a place to move it")
+        spec.plan("latitude", point.lat, frm=frm)
+        spec.plan("longitude", point.lon, frm=frm)
+        if str(spec.surface.source) == "default":
+            spec.plan("surface", "ocean", frm=frm)
+        return
     if any(word in prompt for word in SCENE_SETTING_OPT_OUT):
         return
-    surface = str(spec.surface.value)
-    if surface == "ocean" or surface == "city":
+    if surface == "city":
         return
     key = SCENE_SETTING_BAKES.get(surface, "flint_hills")
     location = LOCATIONS[key]
@@ -2644,7 +2669,9 @@ class RunManager:
         from core.terrain.heightfield import Heightfield
 
         tiles_refusal = google_tiles_terrain_refusal(
-            Heightfield.read(Path(scene["terrain"])) if scene.get("terrain") else None)
+            Heightfield.read(Path(scene["terrain"])) if scene.get("terrain") else None,
+            float(spec.latitude.value), float(spec.longitude.value),
+            float(spec.terrain_elevation.value))
         if tiles_refusal is not None:
             run.push("failed", f"[{GOOGLE_TILES_TERRAIN_CONSTRAINT}] {tiles_refusal}")
             return

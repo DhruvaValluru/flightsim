@@ -334,3 +334,44 @@ def test_a_relative_wind_word_still_follows_the_heading():
     spec = compile_prompt("fly the 747 heading 090 with a 20 kt crosswind")
     assert float(spec.wind_direction.value) == 180.0
     assert str(spec.wind_direction.source) == "inferred"
+
+
+def test_google_tiles_accept_the_slab_only_on_an_open_ocean_point(monkeypatch):
+    """Over open ocean the sea surface IS the flat slab at 0 m: the tiles
+    and the physics ground are the same place (core.terrain.ocean)."""
+    from core.scenario.card import google_tiles_terrain_refusal
+    from core.terrain.ocean import OPEN_OCEAN
+
+    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "on")
+    for point in OPEN_OCEAN.values():
+        assert google_tiles_terrain_refusal(None, point.lat, point.lon, 0.0) is None
+    atlantic = OPEN_OCEAN["atlantic"]
+    # Raised datum, or a point off the list (the Gulf of Guinea's 0, 0
+    # default and Kansas alike), still refuses.
+    assert "flat slab" in google_tiles_terrain_refusal(None, atlantic.lat, atlantic.lon, 400.0)
+    assert "flat slab" in google_tiles_terrain_refusal(None, 0.0, 0.0, 0.0)
+    assert "flat slab" in google_tiles_terrain_refusal(None, 38.4, -96.5, 0.0)
+
+
+def test_a_vague_ocean_prompt_is_staged_at_a_real_open_ocean(no_bakes, monkeypatch):
+    from core.terrain.ocean import OPEN_OCEAN
+
+    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "on")
+    spec = compile_prompt("fly the 747 over the ocean while it is raining")
+    no_bakes.plan_scene_setting(spec)
+    assert (spec.latitude.value, spec.longitude.value) == (OPEN_OCEAN["atlantic"].lat,
+                                                           OPEN_OCEAN["atlantic"].lon)
+    assert str(spec.surface.value) == "ocean"
+    assert no_bakes.needs_dynamic_bake(spec) is None       # staged, not named
+    scene = no_bakes.pick_scene(spec)
+    assert scene["terrain"] is None and "open North Atlantic" in scene["label"]
+    pacific = compile_prompt("fly the a320 over the pacific ocean")
+    no_bakes.plan_scene_setting(pacific)
+    assert pacific.longitude.value == OPEN_OCEAN["pacific"].lon
+    # A place the prompt states still wins.
+    named = compile_prompt("fly the 747 over the ocean at 3000 m")
+    named.set("latitude", 21.3, frm="stated")
+    named.set("longitude", -157.9, frm="stated")
+    no_bakes.plan_scene_setting(named)
+    assert named.latitude.value == 21.3
+
