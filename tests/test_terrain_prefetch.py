@@ -42,8 +42,10 @@ class FakeBake:
 
 
 @pytest.fixture()
-def prefetch(monkeypatch):
+def prefetch(monkeypatch, tmp_path):
     monkeypatch.setenv(runs.TERRAIN_PREFETCH_ENV, "on")
+    # No bakes on this "machine", whatever the checkout's runs/ holds.
+    monkeypatch.setattr(runs, "TERRAIN_DIR", tmp_path / "terrain")
     fresh = runs.TerrainPrefetch()
     monkeypatch.setattr(runs, "PREFETCH", fresh)
     monkeypatch.setattr(server, "PREFETCH", fresh)
