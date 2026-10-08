@@ -6,13 +6,17 @@ The app must already be running (``python -m uvicorn webapp.server:app
 (``/run``; a place with no terrain yet is baked through ``/bake`` and run
 again), then waits for the run to finish before the next one starts (the
 server runs one at a time). At the end it prints one line per scenario --
-done, failed or refused, with the run id and the clip line -- and writes
-the same as ``runs/test_scenarios.json``.
+done, failed or refused, with the run id and the clip line -- writes the
+same as ``runs/test_scenarios.json``, and copies every finished run's clip
+(or its frame, with ``--still``) and its boxed pictures into ONE folder,
+``runs/test_scenarios/``, named by scenario, with an ``index.html`` that
+shows them all on one page.
 
     python scripts/run_test_scenarios.py                 # all of them, 3 s clips
     python scripts/run_test_scenarios.py --only 1 4 7    # just these
     python scripts/run_test_scenarios.py --still         # 1 frame each (fast look check)
     python scripts/run_test_scenarios.py --list          # print the scenarios
+    python scripts/run_test_scenarios.py --collect       # (re)gather the last batch's results
 
 Open http://127.0.0.1:8008, or each run's frames page, to look at the
 results. Only the standard library is used, so the venv's python runs it.
@@ -21,7 +25,10 @@ results. Only the standard library is used, so the venv's python runs it.
 from __future__ import annotations
 
 import argparse
+import html
 import json
+import re
+import shutil
 import sys
 import time
 import urllib.error
@@ -161,6 +168,82 @@ def run_one(server, number, name, prompt, edits, args):
             "clip": clip, "conditions": state.get("conditions")}
 
 
+REPO = Path(__file__).resolve().parents[1]
+#: Where the web app writes each run (webapp.runs.RunManager's default).
+RUNS = REPO / "runs" / "webapp"
+SUMMARY = REPO / "runs" / "test_scenarios.json"
+GALLERY = REPO / "runs" / "test_scenarios"
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:48]
+
+
+def _first(directory: Path, pattern: str):
+    found = sorted(directory.glob(pattern)) if directory.is_dir() else []
+    return found[0] if found else None
+
+
+def collect(results) -> Path:
+    """Copy each finished run's clip (or first frame) and its boxed
+    pictures into GALLERY as NN_<name>.*, and write index.html there."""
+    GALLERY.mkdir(parents=True, exist_ok=True)
+    cards = []
+    for r in results:
+        stem = f"{int(r['number']):02d}_{_slug(r['name'])}"
+        media = []
+        run_dir = RUNS / str(r.get("run_id") or "-")
+        if r.get("run_id") and run_dir.is_dir():
+            camera_dirs = sorted(d for d in (run_dir / "frames").glob("*") if d.is_dir()) \
+                if (run_dir / "frames").is_dir() else []
+            camera = camera_dirs[0].name if camera_dirs else None
+            picks = [("clip.mp4", run_dir / "clip.mp4"),
+                     ("view.mp4", _first(run_dir / "clips", "*.mp4"))]
+            if camera:
+                picks += [("frame.png", _first(run_dir / "frames" / camera, "frame_*[0-9].png")),
+                          ("boxes.png", _first(run_dir / "boxed" / camera, "*_boxes.png")),
+                          ("box3d.png", _first(run_dir / "boxed3d" / camera, "*_box3d.png"))]
+            have_clip = False
+            for label, source in picks:
+                if source is None or not Path(source).is_file():
+                    continue
+                if label == "view.mp4" and have_clip:
+                    continue              # the panel clip already shows this view
+                target = GALLERY / f"{stem}_{label}"
+                shutil.copy2(source, target)
+                media.append(target.name)
+                have_clip = have_clip or label.endswith(".mp4")
+            r["frames_page"] = (f"http://127.0.0.1:8008/frames.html?run={r['run_id']}"
+                                f"&camera={camera}" if camera else None)
+        r["gallery_files"] = media
+        tiles = "".join(
+            (f'<video src="{html.escape(m)}" controls loop muted playsinline></video>'
+             if m.endswith(".mp4") else f'<a href="{html.escape(m)}"><img src="{html.escape(m)}"></a>')
+            for m in media) or '<div class="none">nothing rendered</div>'
+        link = (f' &middot; <a href="{html.escape(r["frames_page"])}">every frame with its labels</a>'
+                if r.get("frames_page") else "")
+        cards.append(
+            f'<section class="{html.escape(r["outcome"])}"><h2>{int(r["number"])}. '
+            f'{html.escape(r["name"])} <span>{html.escape(r["outcome"].upper())}</span></h2>'
+            f'<p class="prompt">{html.escape(r["prompt"])}</p>'
+            + (f'<p class="why">{html.escape(str(r.get("why", "")))}</p>' if r["outcome"] != "done" else "")
+            + (f'<p class="clip">{html.escape(r["clip"])}</p>' if r.get("clip") else "")
+            + f'<div class="media">{tiles}</div>'
+            + (f'<p class="run">run {html.escape(r["run_id"])}{link}</p>' if r.get("run_id") else "")
+            + "</section>")
+    page = ("<!doctype html><meta charset='utf-8'><title>Test scenarios</title><style>"
+            "body{font:14px/1.5 system-ui,sans-serif;background:#101418;color:#d8dde2;margin:1.5rem}"
+            "section{background:#151b22;border:1px solid #232d38;border-radius:8px;padding:1rem;margin:0 0 1rem}"
+            "h2{font-size:1.05rem;margin:0}h2 span{font-size:.8rem;margin-left:.5rem;color:#7fd08f}"
+            "section.failed h2 span,section.refused h2 span{color:#e07a6f}"
+            ".prompt{color:#9fb4c7;margin:.3rem 0}.why{color:#e07a6f}.clip,.run{color:#7d8a93}"
+            ".media{display:flex;gap:.6rem;flex-wrap:wrap}.media video,.media img{max-width:32rem;"
+            "width:100%;border-radius:6px;background:#000}.none{color:#7d8a93}a{color:#6fb3e0}"
+            "</style><h1>Test scenarios</h1>" + "".join(cards))
+    (GALLERY / "index.html").write_text(page, encoding="utf-8")
+    return GALLERY / "index.html"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--server", default="http://127.0.0.1:8008")
@@ -171,7 +254,18 @@ def main() -> int:
                         help="the AI interpreter (default, as the page) or the offline one")
     parser.add_argument("--poll", type=float, default=5.0, help="seconds between status checks")
     parser.add_argument("--list", action="store_true", help="print the scenarios and stop")
+    parser.add_argument("--collect", action="store_true",
+                        help="gather the last batch's results (runs/test_scenarios.json) "
+                             "into runs/test_scenarios/ and stop")
     args = parser.parse_args()
+
+    if args.collect:
+        if not SUMMARY.is_file():
+            print(f"no {SUMMARY} yet: run the scenarios first")
+            return 2
+        index = collect(json.loads(SUMMARY.read_text(encoding="utf-8")))
+        print(f"all results in one folder: {index.parent}\nopen: {index}")
+        return 0
 
     if args.list:
         for number, (name, prompt, edits) in enumerate(SCENARIOS, 1):
@@ -206,10 +300,11 @@ def main() -> int:
             print(f"      {r['clip']}")
         if r["outcome"] != "done":
             print(f"      {str(r.get('why', ''))[:240]}")
-    out = Path(__file__).resolve().parents[1] / "runs" / "test_scenarios.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
-    print(f"\nwritten: {out}")
+    index = collect(results)
+    SUMMARY.parent.mkdir(parents=True, exist_ok=True)
+    SUMMARY.write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
+    print(f"\nwritten: {SUMMARY}")
+    print(f"all results in one folder: {index.parent}\nopen: {index}")
     return 0
 
 

@@ -469,7 +469,9 @@ and runs 14 scenarios one after another, waiting for each run to finish:
 lighting presets and exact sun angles, rain, a thunderstorm, a tornado,
 mountain turbulence, the cockpit and tower views, an ocean cruise and an
 unsupported hurricane. It prints a summary (done / failed / refused, run
-id, clip length) and writes `runs/test_scenarios.json`. Use `--list` to
+id, clip length), writes `runs/test_scenarios.json`, and copies every
+result into one folder, `runs/test_scenarios/`, with an `index.html` that
+plays them all (`--collect` gathers the last batch again). Use `--list` to
 see them, `--only 1 4 7` to pick some, `--still` for one frame each, and
 `--clip 6` for longer clips.
 
