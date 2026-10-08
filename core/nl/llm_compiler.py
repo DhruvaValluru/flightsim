@@ -286,9 +286,8 @@ FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
     },
     "precipitation_rate_mmh": {
         "type": "number",
-        "description": "Rain rate in mm/h, render only (never physics), "
-                       "when the prompt states or names rain. Rain only: "
-                       "snow is not modelled.",
+        "description": "Rain rate in mm/h, when the prompt states or "
+                       "names rain. Rain only: snow is not modelled.",
     },
 }
 

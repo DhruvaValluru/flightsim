@@ -560,7 +560,7 @@ def _precipitation_rate(text: str) -> Quantity:
                                  text):
             return Quantity.inferred(
                 rate, "mm/h", frm=f"{band} rain {match.group(0)!r} (AMS intensity "
-                                  f"band; render only, see core.scene.precipitation)")
+                                  f"band; see core.scene.precipitation)")
     return _default_precipitation_rate()
 
 
