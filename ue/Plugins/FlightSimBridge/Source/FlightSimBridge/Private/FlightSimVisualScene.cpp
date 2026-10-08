@@ -2457,7 +2457,7 @@ bool FFlightSimVisualScene::ApplyRainToBeauty(USceneCaptureComponent2D* Beauty,
 		// camera sees; a screen-space streak over them would draw it twice.
 		Row->SetBoolField(TEXT("drawn"), false);
 		Row->SetStringField(TEXT("superseded_by"),
-			TEXT("look_applied.rain_particles: 3-D drops in the scene"));
+			TEXT("the 3-D drops in the scene (look_applied.rain_particles)"));
 		WorldApplied->SetObjectField(TEXT("precipitation"), Row);
 		return true;
 	}
