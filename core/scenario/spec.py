@@ -25,7 +25,7 @@ import yaml
 
 from .blocks import (
     AtmosphereSpec, DatumSpec, DisSpec, FailuresSpec, IcingSpec, InstrumentsSpec, LoadingSpec,
-    RecordSpec, SceneSpec, TaxonomySpec,
+    RainSpec, RecordSpec, SceneSpec, TaxonomySpec,
     TrafficSpec, TurbulenceModelSpec, WakeSpec, WindProfileSpec,
 )
 from .blocks import LightingSpec, RunwayBlockSpec
@@ -95,7 +95,7 @@ READABLE_SPEC_VERSIONS = (8, 9)
 #: Version 9's top-level blocks (each absent-canonical).
 SPEC9_BLOCKS = ("atmosphere", "datum", "turbulence_model", "wind_profile", "loading",
                 "failures", "icing", "dis", "wake", "instruments", "record", "runway",
-                "lighting")
+                "rain", "lighting")
 #: Version 9's optional fields inside version-8 sections.
 SPEC9_SCENE_FIELDS = ("sun_lux", "buildings", "night")
 SPEC9_ENVIRONMENT_FIELDS = ("precipitation_rate_mmh", "time_of_day")
@@ -240,6 +240,12 @@ class ScenarioSpec:
     #: the default and is omitted, so every committed spec-8 example
     #: keeps its digest.
     icing: "IcingSpec" = dc_field(default_factory=IcingSpec.defaulted)
+    #: Spec 9, optional: what the stated rain rate does to the aircraft
+    #: and the runway -- aerodynamics, lift_loss_at_ref, drag_rise_at_ref,
+    #: frontal_area_m2, runway_condition, tire_pressure_psi --
+    #: absent-canonical: no rain physics is the default and is omitted
+    #: (core/environment/rain.py).
+    rain: "RainSpec" = dc_field(default_factory=RainSpec.defaulted)
     #: D2 (spec 9: INT-final's bump): how the Entity State
     #: PDU log is labelled -- site, application, entity, force_id, marking,
     #: timestamp_mode -- absent-canonical: the documented defaults are
@@ -347,7 +353,7 @@ class ScenarioSpec:
         carry the spec's own set()/plan() doctrine."""
         import re
 
-        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|dis|wake|instruments|record|runway|lighting)\.(\w+)", name)
+        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|rain|dis|wake|instruments|record|runway|lighting)\.(\w+)", name)
         if match is not None:
             block = getattr(self, match.group(1))
             return block, match.group(2)
@@ -515,6 +521,9 @@ class ScenarioSpec:
         # P5: the icing block, absent-canonical like the others.
         if not self.icing.is_default():
             out["icing"] = self.icing.to_dict()
+        # The rain block, absent-canonical like the others.
+        if not self.rain.is_default():
+            out["rain"] = self.rain.to_dict()
         # D2: the dis block, absent-canonical like the others.
         if not self.dis.is_default():
             out["dis"] = self.dis.to_dict()
@@ -625,6 +634,9 @@ class ScenarioSpec:
         icing_data = data.get("icing")
         icing = (IcingSpec.defaulted() if icing_data is None
                  else IcingSpec.from_dict(icing_data))
+        rain_data = data.get("rain")
+        rain = (RainSpec.defaulted() if rain_data is None
+                else RainSpec.from_dict(rain_data))
         dis_data = data.get("dis")
         dis = (DisSpec.defaulted() if dis_data is None
                else DisSpec.from_dict(dis_data))
@@ -660,6 +672,7 @@ class ScenarioSpec:
             loading=loading,
             failures=failures,
             icing=icing,
+            rain=rain,
             dis=dis,
             wake=wake,
             instruments=instruments,
@@ -764,6 +777,7 @@ class ScenarioSpec:
                                   ("loading", self.loading),
                                   ("failures", self.failures),
                                   ("icing", self.icing),
+                                  ("rain", self.rain),
                                   ("dis", self.dis),
                                   ("wake", self.wake),
                                   ("instruments", self.instruments),

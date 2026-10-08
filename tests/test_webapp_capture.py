@@ -1470,3 +1470,48 @@ def test_the_expert_page_links_the_schema_of_the_manifest_version_it_shows():
     reply = TestClient(app).get(f"/schemas/capture_manifest.v{MANIFEST_VERSION}.schema.json")
     assert reply.status_code == 200
     assert reply.json()["properties"]["manifest_version"]["const"] == MANIFEST_VERSION
+
+
+def test_a_rendered_web_capture_completes_its_labels_before_it_is_verified():
+    """The web capture fills every frame's object records from the
+    engine's bundle (attach_engine_labels, as flightsim.capture does)
+    before the sensor post-pass and the verification: without it the
+    tight box, the visible fraction and the depth under the mask stay
+    null and box_vs_mask, depth_vs_geometry and visibility_vs_scene
+    grade a record that was never filled."""
+    source = (Path(__file__).resolve().parents[1] / "webapp" / "runs.py").read_text(
+        encoding="utf-8")
+    attach = source.index("attached = attach_engine_labels(out)")
+    assert source.index("capture_write_manifest(spec, capture_solved, out, scene,") < attach
+    assert attach < source.index("sensor_written = capture_apply_sensor(out,")
+    assert attach < source.index("run.capture = capture_finish(out)")
+
+
+def test_capture_passes_come_from_the_environment_and_unknown_words_refuse():
+    from core.scenario.spec import ScenarioSpec
+    from webapp.capture import (CAPTURE_PASSES_ALL, CaptureError, apply_capture_passes,
+                                requested_capture_passes)
+
+    assert requested_capture_passes({}) == []
+    assert requested_capture_passes({"FLIGHTSIM_CAPTURE_PASSES": "all"}) == list(CAPTURE_PASSES_ALL)
+    assert requested_capture_passes({"FLIGHTSIM_CAPTURE_PASSES": " Flow, normal "}) == [
+        "normal", "flow"]
+    with pytest.raises(CaptureError) as caught:
+        requested_capture_passes({"FLIGHTSIM_CAPTURE_PASSES": "normal,disparity"})
+    assert caught.value.constraint == "sensing.pass" and "disparity" in caught.value.message
+
+    spec = ScenarioSpec.read(Path(__file__).resolve().parents[1] / "examples/cameras_multi.yaml")
+    before = spec.digest()
+    assert apply_capture_passes(spec, {}) == [] and spec.digest() == before
+    applied = apply_capture_passes(spec, {"FLIGHTSIM_CAPTURE_PASSES": "normal,points"})
+    assert applied == ["normal", "points"]
+    assert all(c.passes.value == ["normal", "points"] for c in spec.cameras)
+
+
+def test_the_engine_pass_words_ride_every_camera_pass_of_a_web_capture():
+    source = (Path(__file__).resolve().parents[1] / "webapp" / "runs.py").read_text(
+        encoding="utf-8")
+    assert "pass_token = passes_flag(engine_words(spec.cameras))" in source
+    assert "extra=list(extra) + pass_extra" in source
+    assert source.index("extra_passes = apply_capture_passes(spec)") < source.index(
+        "capture_solved = capture_solve(")

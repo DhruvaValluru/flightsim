@@ -27,6 +27,8 @@ assets/dis_entity_types.yaml -text
 # bytes their .sha256 sidecars and provenance records cover.
 assets/emissivity/** -text
 assets/thermal/** -text
+# The GLO-30 land mask, whose bytes its sidecar's mask_sha256 covers.
+assets/landmask/** -text
 # A-4 visual model (MSFS/P3D) -- must never be text-normalised
 *.mdl binary
 *.dds binary

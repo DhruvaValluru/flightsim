@@ -269,6 +269,7 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     report.violations.extend(validate_loading(spec))
     report.violations.extend(validate_dis(spec))
     report.violations.extend(validate_icing(spec))
+    report.violations.extend(validate_rain(spec))
     report.violations.extend(validate_wake(spec))
     report.violations.extend(validate_instruments(spec))
     report.violations.extend(validate_record(spec))
@@ -1048,6 +1049,22 @@ def validate_icing(spec) -> List[Violation]:
                                     block.onset_s.value, block.ramp_s.value,
                                     block.alpha_shift_deg.value, block.envelope.value,
                                     str(spec.aircraft.value))]
+
+
+# -- the rain block ---------------------------------------------------------------------
+
+def validate_rain(spec) -> List[Violation]:
+    """The ``rain`` block's own constraints, refused by name through the
+    provider's own list (core.environment.rain.problems): ``rain.rate_missing``
+    (aerodynamics with no rain rate), ``rain.runway_condition`` (an unknown
+    word), ``rain.factor_range`` (a penalty outside its stated bound),
+    ``rain.airframe_data`` (no frontal area or tyre pressure for this
+    airframe). The default block (no rain physics) yields nothing."""
+    from ..environment.rain import problems
+
+    return [Violation(problem.constraint, problem.message, actual=problem.actual,
+                      limit=problem.limit, unit=problem.unit)
+            for problem in problems(spec)]
 
 
 # -- the instruments block (R2) -------------------------------------------------------

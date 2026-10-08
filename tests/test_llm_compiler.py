@@ -289,8 +289,10 @@ def test_api_failure_is_reported_not_swallowed():
 # -- schema consistency ----------------------------------------------------
 
 def test_every_schema_field_is_a_spec_field():
-    # time_of_day: spec 9's optional environment field (outside FIELD_ORDER).
-    spec_fields = {name for _, name in ScenarioSpec.FIELD_ORDER} | {"time_of_day"}
+    # time_of_day, precipitation_rate_mmh: spec 9's optional environment
+    # fields (outside FIELD_ORDER).
+    spec_fields = ({name for _, name in ScenarioSpec.FIELD_ORDER}
+                   | {"time_of_day", "precipitation_rate_mmh"})
     assert set(FIELD_VALUE_SCHEMAS) <= spec_fields
 
 
@@ -1123,10 +1125,12 @@ def test_every_randomization_rail_refuses_by_name(block, reason):
 
 
 def test_randomization_not_an_object_and_null_leaves():
+    # An EMPTY [] claims what {} does (see the wrong-empty-shape test); a
+    # non-empty wrong shape still refuses.
     with pytest.raises(LLMCompileError, match="not an object"):
         compile_prompt_llm("x", client=fake_client({"fields": {}, "notes": [],
                                                     "questions": [],
-                                                    "randomization": []}))
+                                                    "randomization": ["cloud_cover"]}))
     # A null-valued leaf is omission, as everywhere else.
     result = compile_prompt_llm("x", client=fake_client({
         "fields": {}, "notes": [], "questions": [],
@@ -1330,3 +1334,20 @@ def test_unnamed_mountains_are_the_synthesised_scene_on_the_llm_tier():
     spec = compile_prompt_llm("fly the 747 over the matterhorn mountains",
                               client=client).spec
     assert spec.scene.terrain_source.value == "auto"
+
+
+@pytest.mark.parametrize("empty", [[], None])
+def test_an_empty_randomization_in_the_wrong_empty_shape_varies_nothing(empty):
+    """Measured 2026-10-08 on the relay: "'randomization' is not an object
+    of policy leaves" on a prompt with no variation language. [] or null
+    claims what an absent block does; a non-empty wrong shape refuses and
+    says what the model sent."""
+    spec = compile_prompt_llm("fly the c172p at 1000 m", client=fake_client(
+        {"fields": {}, "notes": None, "questions": [], "cameras": None,
+         "traffic": None, "randomization": empty})).spec
+    assert spec.randomization_policy is None
+    assert validate(spec, check_feasibility=False).ok
+    with pytest.raises(LLMCompileError, match=r'the model sent \["precipitation"\]'):
+        compile_prompt_llm("vary the rain", client=fake_client(
+            {"fields": {}, "notes": [], "questions": [],
+             "randomization": ["precipitation"]}))

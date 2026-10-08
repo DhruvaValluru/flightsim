@@ -21,7 +21,7 @@ Physics that must live INSIDE the aero/FCS model enters the same way TECS
 does: by rewriting the aircraft XML, never the vendored data. Each
 :class:`Injection` is applied in the fixed order
 
-    tecs? -> failures -> icing -> icing_alpha -> gust_rotation
+    tecs? -> failures -> icing -> icing_alpha -> gust_rotation -> rain
 
 and is independently selectable; the derivation's suffix encodes the set
 (``c172p-fail-ice-gust`` vs ``c172p-tecs-fail-ice-gust``), so two
@@ -62,6 +62,11 @@ blueprint's 1 and the icing_alpha template's own note):
   table re-pointed at it.
 * ``gust_rotation`` -- the ROLL axis's ``velocities/p-aero-rad_sec`` term
   becomes a ``<sum>`` with ``gust/p-equivalent-rad_sec``.
+* ``rain`` -- every ``<function>`` of the LIFT and DRAG axes is wrapped in
+  a ``<product>`` with ``rain/lift-factor`` / ``rain/drag-factor`` (beside
+  icing's, the products nest), and a BODY-frame ``<external_reactions>``
+  force ``rain-momentum`` is added at the AERORP (into the airframe's own
+  block when it has one). Neutral: factors 1.0, magnitude 0.
 
 At neutral values every injection is bit-identical to the stock airframe
 (x * 1.0, x + 0.0 and a unit-gain pass-through are exact in IEEE 754; the
@@ -113,6 +118,7 @@ FAILURES_TEMPLATE = SYSTEMS_DIR / "failures.xml.tmpl"
 ICING_TEMPLATE = SYSTEMS_DIR / "icing.xml"
 ICING_ALPHA_TEMPLATE = SYSTEMS_DIR / "icing_alpha.xml"
 GUST_ROTATION_TEMPLATE = SYSTEMS_DIR / "gust_rotation.xml"
+RAIN_TEMPLATE = SYSTEMS_DIR / "rain.xml"
 
 #: Where generated aircraft land. Gitignored: they are reproducible artefacts,
 #: not source, and checking them in would invite editing the copy.
@@ -122,7 +128,7 @@ SUFFIX = "-tecs"
 
 #: The fixed application order; a selection is applied in this order
 #: whatever order it was given in.
-INJECTION_ORDER = ("tecs", "failures", "icing", "icing_alpha", "gust_rotation")
+INJECTION_ORDER = ("tecs", "failures", "icing", "icing_alpha", "gust_rotation", "rain")
 #: The default selection: the TECS derivation as it always was.
 DEFAULT_INJECTIONS = ("tecs",)
 
@@ -138,6 +144,9 @@ ALPHA_EFFECTIVE_PROPERTY = "icing/alpha-effective-rad"
 ALPHA_SHIFT_PROPERTY = "icing/alpha-shift-rad"
 ROLL_RATE_PROPERTY = "velocities/p-aero-rad_sec"
 GUST_P_PROPERTY = "gust/p-equivalent-rad_sec"
+#: The rain injection: the two wetted-wing factors and the drops' force.
+RAIN_AXIS_FACTORS = {"LIFT": "rain/lift-factor", "DRAG": "rain/drag-factor"}
+RAIN_FORCE_NAME = "rain-momentum"
 
 
 class DerivationError(FDMError):
@@ -583,6 +592,88 @@ def _gust_rewrite(xml_text: str, ctx: _Context) -> str:
     return _insert_system(rewritten, "gust_rotation")
 
 
+def _aerorp(xml_text: str) -> Tuple[str, Tuple[str, str, str]]:
+    """The aerodynamic reference point's unit and (x, y, z) as written."""
+    m = re.search(r'<location\s+name="AERORP"\s+unit="([^"]+)"\s*>(.*?)</location>',
+                  xml_text, re.S)
+    if m is None:
+        raise DerivationError("derivation.anchor_missing",
+                              "the airframe's metrics declare no <location name=\"AERORP\" "
+                              "unit=...>; the drops' force has no point to act at")
+    coords = []
+    for axis in "xyz":
+        c = re.search(rf"<{axis}>\s*([^<]+?)\s*</{axis}>", m.group(2))
+        if c is None:
+            raise DerivationError("derivation.anchor_missing",
+                                  f"the AERORP location has no <{axis}>")
+        coords.append(c.group(1))
+    return m.group(1), (coords[0], coords[1], coords[2])
+
+
+def _rain_anchor(xml_text: str) -> Dict[str, Any]:
+    span = _section(xml_text, "aerodynamics")
+    if span is None:
+        raise DerivationError("derivation.anchor_missing",
+                              "the airframe has no <aerodynamics> block for the rain factors")
+    aero = xml_text[span[0]:span[1]]
+    counts: Dict[str, Any] = {}
+    for axis in RAIN_AXIS_FACTORS:
+        aspan = _axis_span(aero, axis)
+        if aspan is None:
+            raise DerivationError("derivation.anchor_missing",
+                                  f"the airframe's aerodynamics declare no <axis name=\"{axis}\">")
+        body = aero[aspan[0]:aspan[1]]
+        functions = re.findall(r"<function\b[^>]*>.*?</function>", body, re.S)
+        for fn in functions:
+            if fn.count("<function") != 1:
+                raise DerivationError(
+                    "derivation.anchor_missing",
+                    f"a function in the {axis} axis nests another <function>; the wrap "
+                    f"would not know which expression is the axis's")
+        counts[f"{axis.lower()}_functions"] = len(functions)
+    if re.search(r"<external_reactions\s*/>", xml_text):
+        raise DerivationError("derivation.anchor_missing",
+                              "the airframe declares an empty <external_reactions/>; the rain "
+                              "force would have to replace it")
+    unit, _ = _aerorp(xml_text)
+    counts["aerorp_unit"] = unit
+    counts["external_reactions"] = "existing" if "<external_reactions" in xml_text else "added"
+    return counts
+
+
+def _rain_rewrite(xml_text: str, ctx: _Context) -> str:
+    span = _section(xml_text, "aerodynamics")
+    assert span is not None
+    aero = xml_text[span[0]:span[1]]
+    for axis, factor in RAIN_AXIS_FACTORS.items():
+        aspan = _axis_span(aero, axis)
+        assert aspan is not None
+        body = aero[aspan[0]:aspan[1]]
+        body = re.sub(r"<function\b[^>]*>.*?</function>",
+                      lambda m: _wrap_function(m.group(0), factor), body, flags=re.S)
+        aero = aero[:aspan[0]] + body + aero[aspan[1]:]
+    rewritten = xml_text[:span[0]] + aero + xml_text[span[1]:]
+    unit, (x, y, z) = _aerorp(rewritten)
+    force = (f'        <force name="{RAIN_FORCE_NAME}" frame="BODY">\n'
+             f'            <!-- the swept-up rain\'s momentum (core/environment/rain.py): '
+             f'direction and magnitude written every step -->\n'
+             f'            <location unit="{unit}">\n'
+             f'                <x> {x} </x>\n                <y> {y} </y>\n'
+             f'                <z> {z} </z>\n            </location>\n'
+             f'            <direction>\n                <x> -1 </x>\n                <y> 0 </y>\n'
+             f'                <z> 0 </z>\n            </direction>\n        </force>\n')
+    close = rewritten.find("</external_reactions>")
+    if close != -1:
+        line_start = rewritten.rfind("\n", 0, close) + 1
+        rewritten = rewritten[:line_start] + force + rewritten[line_start:]
+    else:
+        idx = rewritten.find("<aerodynamics")
+        line_start = rewritten.rfind("\n", 0, idx) + 1
+        rewritten = (rewritten[:line_start] + "    <external_reactions>\n" + force
+                     + "    </external_reactions>\n\n" + rewritten[line_start:])
+    return _insert_system(rewritten, "rain")
+
+
 def _static(template_text: str, ctx: _Context) -> str:
     return template_text
 
@@ -610,6 +701,11 @@ INJECTIONS: Dict[str, Injection] = {
         name="gust_rotation", template=GUST_ROTATION_TEMPLATE, rewrite=_gust_rewrite,
         anchor_test=_gust_anchor, suffix="gust", system_file="Systems/gust_rotation.xml",
         expand=_static, introduces=(GUST_P_PROPERTY, '<system file="gust_rotation"')),
+    "rain": Injection(
+        name="rain", template=RAIN_TEMPLATE, rewrite=_rain_rewrite,
+        anchor_test=_rain_anchor, suffix="rain", system_file="Systems/rain.xml",
+        expand=_static, introduces=tuple(RAIN_AXIS_FACTORS.values())
+        + ("rain/lwc-gm3", f'name="{RAIN_FORCE_NAME}"', '<system file="rain"')),
 }
 
 

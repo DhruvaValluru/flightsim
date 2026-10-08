@@ -22,3 +22,12 @@ gitignored), and every render manifest carries its source and licence.
 Credited per bake in its provenance sidecar and in every render manifest
 (Copernicus GLO-30, EOX Sentinel-2 cloudless 2016 CC BY-SA 4.0, ESA
 WorldCover CC BY 4.0).
+
+## Ground textures
+
+Fetched on the owner's machine by `scripts/fetch_ground_textures.py`
+into `data/textures/polyhaven/` (not committed): Poly Haven
+(polyhaven.com), CC0 1.0. Poly Haven's API terms ask software that uses
+the live API to credit it visibly: "Textures: Poly Haven (polyhaven.com),
+CC0". Each surface's `provenance.json` names the asset, its URLs and the
+files' digests. Without the step, every ground material is procedural.

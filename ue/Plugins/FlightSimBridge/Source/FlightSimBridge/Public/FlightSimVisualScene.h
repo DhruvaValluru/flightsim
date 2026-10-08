@@ -99,10 +99,12 @@ class AGeoReferencingSystem;
 class ALandscapeProxy;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class UPointLightComponent;
 class UProceduralMeshComponent;
 class USceneCaptureComponent2D;
 class USkyAtmosphereComponent;
 class UTexture;
+class UStaticMeshComponent;
 class UTexture2D;
 class UVolumetricCloudComponent;
 class UWorld;
@@ -414,6 +416,29 @@ public:
 	// phase. Deterministic in TimeSeconds (Gate 10-R).
 	void AdvanceWorld(double TimeSeconds);
 
+	// -- the weather look (FlightSimWeatherLook.cpp) ------------------------
+	// The card's weather_look block (core/scene/weather_look.py): the flat
+	// ground's material from the surface word, the storm's rain shafts and
+	// lightning (beauty-only actors), recorded in look_applied.weather_look.
+	// A card without the block changes nothing. Missing materials are
+	// recorded as absent, never refused: the look is visual only.
+	// Called by Build after the flat ground exists.
+	bool ApplyWeatherLook(UWorld* World, const FFlightSimVisualSceneOptions& Options,
+	                      FString& Error);
+	// M_LensDrops on the BEAUTY capture only, scaled by the block's rain
+	// rate; nothing without a rate.
+	void ApplyLensDropsToBeauty(USceneCaptureComponent2D* Beauty);
+	// M_IceOverlay as the overlay material of every static mesh part of the
+	// airframe; its IceAmount follows the card's icing_schedule eta(t)
+	// (AdvanceWorld). Nothing without ice on the block.
+	void ApplyIceOverlay(AActor* Airframe);
+	// The lightning schedule and the ice ramp at the FDM's time (from
+	// AdvanceWorld): deterministic in TimeSeconds and the block's seed.
+	void AdvanceWeather(double TimeSeconds);
+	// The flash on/off law, pure (pinned by test): 0..1 at TimeSeconds for
+	// a storm seeded with Seed.
+	static double LightningFlash(double TimeSeconds, int32 Seed);
+
 	// The moon light's rotation from the card's elevation and COMPASS azimuth:
 	// the sun's convention (core/scenario/randomization.py engine_sun_azimuth:
 	// the yaw toward a compass bearing b is 90 - b; the light travels 180
@@ -471,6 +496,17 @@ private:
 	double DriftMps = 0.0;
 	double DriftFromDeg = 0.0;
 	UMaterialInstanceDynamic* RainInstance = nullptr;
+	// The weather look's state (FlightSimWeatherLook.cpp).
+	TSharedPtr<FJsonObject> WeatherLook;
+	UStaticMeshComponent* FlatGround = nullptr;
+	UMaterialInstanceDynamic* LensDropsInstance = nullptr;
+	UMaterialInstanceDynamic* IceInstance = nullptr;
+	UMaterialInstanceDynamic* LightningInstance = nullptr;
+	UPointLightComponent* LightningLight = nullptr;
+	double IceEtaMax = 0.0;
+	double IceOnsetSeconds = 0.0;
+	double IceRampSeconds = 0.0;
+	int32 WeatherSeed = 0;
 	// W5: the scene document (-scene=), parsed once in Build.
 	TSharedPtr<FJsonObject> SceneDocument;
 

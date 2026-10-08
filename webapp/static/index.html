@@ -9,6 +9,12 @@
          color: #d8dde2; max-width: 980px; margin: 2rem auto; padding: 0 1rem; }
   h1 { font-size: 1.1rem; letter-spacing: .12em; color: #9fb4c7; }
   small, .dim { color: #7d8a93; }
+  .promptRow { display: flex; gap: 1rem; align-items: flex-start; }
+  .promptRow textarea { flex: 1 1 auto; min-width: 0; height: 9rem; }
+  .promptRow aside { flex: 0 0 17rem; max-height: 18rem; overflow-y: auto;
+                     border: 1px solid #2c3947; border-radius: 6px; padding: .5rem .6rem; }
+  @media (max-width: 760px) { .promptRow { flex-direction: column; }
+    .promptRow aside { flex-basis: auto; width: 100%; box-sizing: border-box; } }
   textarea { width: 100%; height: 3.6rem; background: #171d24; color: #e6ecf1;
              border: 1px solid #2c3947; border-radius: 6px; padding: .6rem;
              font: inherit; resize: vertical; }
@@ -85,6 +91,33 @@
   .swatch { display: inline-block; width: 1rem; height: 1rem; border-radius: 3px;
             vertical-align: middle; border: 1px solid #2c3947; }
   .auto { color: #7d8a93; font-style: italic; }
+  /* Altitude guide */
+  #altGuide summary { cursor: pointer; color: #9fb4c7; }
+  #altGuide .agControls { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem;
+                          align-items: center; margin: .6rem 0; }
+  #altGuide input[type=number] { width: 6rem; background: #171d24;
+             color: inherit; border: 1px solid #2c3947; border-radius: 4px;
+             font: inherit; padding: .15rem .4rem; }
+  #altGuide select { background: #171d24; color: inherit;
+             border: 1px solid #2c3947; border-radius: 4px; font: inherit; }
+  #agSvg { width: 100%; height: auto; display: block; background: #0d1217;
+           border: 1px solid #232d38; border-radius: 8px; }
+  #agSvg text { font: 11px "SF Mono", Menlo, monospace; fill: #9fb4c7; }
+  #agSvg .agPlane { cursor: pointer; }
+  #agSvg .agPlane:hover path, #agSvg .agPlane.hot path { fill: #ffd27a; }
+  #agTable td, #agTable th { padding: .2rem .5rem; vertical-align: top; }
+  #agTable tr.hot td { background: #1a2633; }
+  #agTable button { padding: .1rem .6rem; }
+  #agTable td:nth-child(2), #agTable td:nth-child(3) { white-space: nowrap; }
+  #agTable td:nth-child(3) { color: #e0b452; }
+  #agTable .agNoteInline { display: none; }
+  @media (max-width: 640px) {
+    #agTable th:nth-child(4), #agTable td:nth-child(4) { display: none; }
+    #agTable .agNoteInline { display: block; font-size: .85em; }
+  }
+  #agReadout { margin: .5rem 0; }
+  .agWarn { color: #e07a6f; }
+  .agOk { color: #7fd08f; }
 </style>
 </head>
 <body>
@@ -110,8 +143,16 @@ visual-only per host (measured).</p>
   <div id="fleetState" class="dim"></div>
 </div>
 
-<textarea id="prompt"
-  placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
+<div class="promptRow">
+  <textarea id="prompt"
+    placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
+  <aside id="conditionsList"></aside>
+</div>
+<script src="/conditions_list.js"></script>
+<script>ConditionsList.mount(document.getElementById("conditionsList"), document.getElementById("prompt"));</script>
+<div id="lensPicker"></div>
+<script src="/lens_picker.js"></script>
+<script>LensPicker.mount(document.getElementById("lensPicker"), document.getElementById("prompt"));</script>
 <p>
   <button id="compile">Interpret</button>
   <label class="dim" title="The clip is min(duration, 22 s); a shorter clip renders proportionally fewer frames. Overrides a duration stated in the prompt, shown as a user edit in the table.">
@@ -129,6 +170,44 @@ visual-only per host (measured).</p>
   <span id="llmState" class="badge">compiler: checking&hellip;</span>
   <span id="compileState" class="dim"></span>
 </p>
+
+<details id="altGuide" class="card" open>
+  <summary><b>Altitude guide</b> &mdash; how high is &ldquo;at 3000 m&rdquo;?
+  Planes at each checkpoint above the ground, and the number to ask for.</summary>
+  <div class="agControls">
+    <label>ground under the flight
+      <input type="number" id="agGround" value="0" step="10" min="-500" max="9000"> m
+      above sea level</label>
+    <label>example
+      <select id="agPreset">
+        <option value="">&mdash;</option>
+        <option value="0">at sea / a coast (0 m)</option>
+        <option value="10">New York City (~10 m)</option>
+        <option value="413">Flint Hills, Kansas (413 m)</option>
+        <option value="1230">Yosemite valley (1,230 m)</option>
+        <option value="1609">Denver (1,609 m)</option>
+        <option value="1860">below the Matterhorn (1,860 m)</option>
+        <option value="4720">below Everest (4,720 m)</option>
+      </select></label>
+    <label>units
+      <select id="agUnits"><option value="m">metres</option>
+      <option value="ft">feet</option></select></label>
+  </div>
+  <div id="agGroundFrom" class="dim"></div>
+  <svg id="agSvg" viewBox="0 0 760 470" role="img"
+       aria-label="Side view: planes at each altitude checkpoint above the ground"></svg>
+  <div id="agReadout"></div>
+  <table id="agTable">
+    <thead><tr><th>checkpoint</th><th>above the ground</th>
+    <th>ask for</th><th>what it is like</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="dim">The altitude in a prompt is measured from <b>sea level</b>
+  (&ldquo;at 3000 m&rdquo;, &ldquo;at 10000 ft&rdquo;, &ldquo;FL350&rdquo;),
+  so over high ground add the ground's height. The <b>ask for</b> column has
+  already added it. Values are typical, for orientation; <b>use</b> puts the
+  number in the interpreted table (or the prompt, before Interpret).</div>
+</details>
 
 <div id="questionArea" style="display:none" class="card">
   <div class="dim">The interpreter needs clarification (one round only).
@@ -368,6 +447,7 @@ function collectAnswers() {
 function renderSpec(payload) {
   compiled = payload;
   const spec = payload.spec;
+  altitudeGuideFromSpec(spec);
   $("specArea").style.display = "";
   $("compilerLine").innerHTML =
     `<span class="badge">compiler: ${payload.compiler}</span>` +
@@ -1063,7 +1143,8 @@ async function placeCameraFromSentence() {
     $("cameraState").textContent =
       `${payload.cameras.length} view(s): ` +
       payload.cameras.map(c => c.camera_id).join(", ") +
-      ` -- ${info.camera_id}: ` + info.notes.join("; ") +
+      ` -- ${info.edited ? "changed" : "added"} ${info.camera_id}: ` +
+      info.notes.join("; ") +
       (info.model_skipped
         ? ` (language model not used: ${info.model_skipped})` : "");
     renderSpec({...compiled, spec: payload});
@@ -2133,6 +2214,370 @@ function renderVerify(capture) {
     rows + `</div>`;
 }
 
+
+// ---- Altitude guide -------------------------------------------------------
+// A side view: the ground at the scene's height, a plane at each checkpoint
+// above it, reference heights beside them, and the altitude the prompt (or
+// the interpreted spec) asks for. The numbers come from /altitude-guide
+// (core/scenario/altitude_guide.py); this only draws them.
+const AG = {data: null, units: "m", ground: 0, groundFrom: "",
+            asked: null, askedFrom: "", aircraft: null, hot: null};
+const SVGNS = "http://www.w3.org/2000/svg";
+const M_TO_FT = 1 / 0.3048;
+// Side-view airliner silhouette, nose to the right, ~34 x 12 units.
+const PLANE_PATH = "M0,6 L4,4 L13,4 L19,-2 L23,-2 L19,4 L30,4 Q34,5 30,8 " +
+                   "L19,8 L23,13 L19,13 L13,8 L4,8 Z";
+
+function agFmt(m) {
+  if (AG.units === "ft") return `${Math.round(m * M_TO_FT).toLocaleString()} ft`;
+  return `${Math.round(m).toLocaleString()} m`;
+}
+function agAsk(row) {
+  return AG.units === "ft" ? `at ${Math.round(row.ask_ft)} ft`
+                           : `at ${Math.round(row.ask_m)} m`;
+}
+function agEl(tag, attrs, text) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+async function agLoad() {
+  try {
+    const r = await fetch(`/altitude-guide?ground_m=${encodeURIComponent(AG.ground)}`);
+    const data = await r.json();
+    if (data.error) return;
+    AG.data = data;
+    agDraw();
+  } catch (_) { /* no server: the guide stays empty, the page still works */ }
+}
+let agTimer = null;
+function agReload() { clearTimeout(agTimer); agTimer = setTimeout(agLoad, 150); }
+
+function agSetGround(value, from) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return;
+  AG.ground = Math.max(-500, Math.min(9000, v));
+  AG.groundFrom = from || "";
+  $("agGround").value = Math.round(AG.ground);
+  agReload();
+}
+
+// The prompt's own altitude, read the compiler's way (FL, m, ft), so the
+// guide answers BEFORE Interpret; the interpreted spec replaces it after.
+function agPromptAltitude(text) {
+  const t = (text || "").toLowerCase()
+    .replace(/(?:over|above)\s+\d+(?:\.\d+)?\s*(?:m|metres?|meters?|ft|feet)\s+(?:of\s+)?(?:terrain|ground|mountains?|ridges?|hills?)/g, " ");
+  let m = t.match(/(?:\bfl|flight level)\s*(\d{2,3})\b/);
+  if (m) return {m: +m[1] * 100 * 0.3048, from: `FL${m[1]} in the prompt`};
+  m = t.match(/(-?\d+(?:\.\d+)?)\s*(?:m|metres?|meters?)\b/);
+  if (m) return {m: +m[1], from: `"${m[0].trim()}" in the prompt`};
+  m = t.match(/(-?\d+(?:\.\d+)?)\s*(?:ft|feet|foot)\b/);
+  if (m) return {m: +m[1] * 0.3048, from: `"${m[0].trim()}" in the prompt`};
+  return null;
+}
+
+function altitudeGuideFromSpec(spec) {
+  const field = name => (spec.fields || []).find(f => f.name === name);
+  const alt = field("altitude"), ground = field("terrain_elevation"),
+        aircraft = field("aircraft");
+  if (ground) agSetGround(ground.value, `from the interpreted spec` +
+    (ground.from ? ` (${ground.from})` : ""));
+  if (alt) { AG.asked = Number(alt.value);
+             AG.askedFrom = alt.source === "user" ? "asked for in the prompt"
+               : `chosen by the interpreter (${alt.source})`; }
+  AG.aircraft = aircraft ? String(aircraft.value) : null;
+  agDraw();
+}
+
+function agDraw() {
+  const svg = $("agSvg");
+  const data = AG.data;
+  if (!svg || !data) return;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const W = 760, H = 470, left = 78, right = W - 12, top = 26,
+        bottom = H - 28;
+  const ground = Math.max(0, AG.ground);
+  const hmax = Math.max(14000, ground + 12500,
+                        (AG.asked || 0) * 1.08);
+  // Square-root height scale measured from a little below the ground, so
+  // the low checkpoints get room to be told apart over high ground too;
+  // stated under the picture so nobody reads it as linear.
+  const base = Math.max(0, ground - 300);
+  const y = h => top + (1 - Math.sqrt(Math.max(h - base, 0) / (hmax - base))) *
+                       (bottom - top);
+
+  // Sky gradient.
+  const defs = agEl("defs");
+  const grad = agEl("linearGradient", {id: "agSky", x1: 0, y1: 0, x2: 0, y2: 1});
+  grad.appendChild(agEl("stop", {offset: "0%", "stop-color": "#0b1a2c"}));
+  grad.appendChild(agEl("stop", {offset: "100%", "stop-color": "#1b3550"}));
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+  svg.appendChild(agEl("rect", {x: left, y: top, width: right - left,
+                                height: bottom - top, fill: "url(#agSky)"}));
+
+  // Axis: MSL ticks.
+  const ticks = [0, 250, 500, 1000, 2000, 3000, 5000, 8000, 11000, 14000, 18000]
+    .filter(t => t <= hmax && t >= base);
+  for (const t of ticks) {
+    svg.appendChild(agEl("line", {x1: left, x2: right, y1: y(t), y2: y(t),
+                                  stroke: "#1f2e3d", "stroke-width": 1}));
+    svg.appendChild(agEl("text", {x: left - 6, y: y(t) + 4,
+                                  "text-anchor": "end"}, agFmt(t)));
+  }
+  svg.appendChild(agEl("text", {x: 8, y: 14}, "height above sea level"));
+  svg.appendChild(agEl("text", {x: right, y: 14, "text-anchor": "end",
+    fill: "#e6ecf1"}, "white: height above the ground"));
+  svg.appendChild(agEl("text", {x: right - 250, y: 14, "text-anchor": "end",
+    fill: "#e0b452"}, "gold: what to ask for"));
+  svg.appendChild(agEl("text", {x: 8, y: bottom + 20},
+                       base > 0 ? `square-root height scale, starting at ${agFmt(base)}`
+                                : "square-root height scale, not linear"));
+
+  // Background peaks (their own summit heights above sea level).
+  const peaks = data.landmarks.filter(l => l.kind === "peak" && l.height_m <= hmax
+                                     && l.height_m > base);
+  peaks.forEach((p, i) => {
+    const cx = 545 + i * 72, half = 52;
+    svg.appendChild(agEl("path", {
+      d: `M${cx - half},${y(base)} L${cx},${y(p.height_m)} L${cx + half},${y(base)} Z`,
+      fill: "#22313f", stroke: "#2f4356"}));
+    svg.appendChild(agEl("path", {
+      d: `M${cx - 14},${y(p.height_m) + 18} L${cx},${y(p.height_m)} ` +
+         `L${cx + 14},${y(p.height_m) + 18} Z`, fill: "#c9d6e2", opacity: .7}));
+    const last = i === peaks.length - 1;
+    svg.appendChild(agEl("text", {x: last ? right - 4 : cx, y: y(p.height_m) - 5,
+      "text-anchor": last ? "end" : "middle"}, `${p.label} ${agFmt(p.height_m)}`));
+  });
+
+  // The ground under this flight.
+  svg.appendChild(agEl("rect", {x: left, y: y(ground), width: right - left,
+    height: Math.max(bottom - y(ground), 2), fill: "#3b3226"}));
+  svg.appendChild(agEl("line", {x1: left, x2: right, y1: y(ground),
+    y2: y(ground), stroke: "#7a6a4f", "stroke-width": 2}));
+  svg.appendChild(agEl("text", {x: right, y: bottom + 20, "text-anchor": "end",
+    fill: "#d9c7a6"}, `brown: the ground, ${agFmt(AG.ground)} above sea level`));
+  if (ground > 0 && base === 0) {
+    svg.appendChild(agEl("line", {x1: left, x2: right, y1: y(0), y2: y(0),
+      stroke: "#2b6c9a", "stroke-dasharray": "4 4"}));
+    svg.appendChild(agEl("text", {x: right - 6, y: y(0) - 4,
+      "text-anchor": "end", fill: "#6fb3e0"}, "sea level"));
+  }
+
+  // Buildings standing on this ground (their own heights).
+  const buildings = data.landmarks.filter(l => l.kind === "building");
+  buildings.forEach((b, i) => {
+    const bx = 520 + i * 50, bw = 12 + i * 3;
+    const yt = y(ground + b.height_m);
+    svg.appendChild(agEl("rect", {x: bx, y: yt, width: bw,
+      height: y(ground) - yt, fill: "#56677a"}));
+    const short = b.label.startsWith("Statue") ? "Liberty" : b.label.split(" ")[0];
+    const label = agEl("text", {x: bx + bw / 2, y: yt - 4 - (i % 2) * 22,
+      "text-anchor": "middle", "font-size": 9}, `${short} ${agFmt(b.height_m)}`);
+    label.appendChild(agEl("title", {}, `${b.label}: ${agFmt(b.height_m)} tall`));
+    svg.appendChild(label);
+  });
+
+  // The aircraft's typical cruise and ceiling (presentation only).
+  const typical = AG.aircraft && data.aircraft[AG.aircraft];
+  if (typical) {
+    const bar = agEl("rect", {x: left + 1, y: y(typical.ceiling_m), width: 6,
+      height: Math.max(y(base) - y(typical.ceiling_m), 0), fill: "#2b5d8c",
+      opacity: .8});
+    bar.appendChild(agEl("title", {},
+      `${typical.label}: can reach about ${agFmt(typical.ceiling_m)}`));
+    svg.appendChild(bar);
+    svg.appendChild(agEl("line", {x1: left, x2: left + 60, y1: y(typical.cruise_m),
+      y2: y(typical.cruise_m), stroke: "#6fb3e0", "stroke-width": 2}));
+    svg.appendChild(agEl("text", {x: left + 10, y: y(typical.cruise_m) - 4,
+      fill: "#6fb3e0"}, `${typical.label} cruise`));
+  }
+
+  // The checkpoint planes, climbing left to right.
+  const rows = data.checkpoints;
+  rows.forEach((row, i) => {
+    const px = left + 22 + i * 52;
+    const py = y(ground + row.agl_m);
+    svg.appendChild(agEl("line", {x1: px + 15, x2: px + 15, y1: py + 8,
+      y2: y(ground), stroke: "#4b5d70", "stroke-dasharray": "2 3"}));
+    const g = agEl("g", {class: "agPlane" + (AG.hot === i ? " hot" : ""),
+                         transform: `translate(${px},${py - 6})`});
+    g.appendChild(agEl("path", {d: PLANE_PATH, fill: "#e6ecf1"}));
+    g.appendChild(agEl("title", {},
+      `${row.label}: ${agFmt(row.agl_m)} above the ground; ask "${agAsk(row)}"`));
+    g.addEventListener("mouseenter", () => agHot(i));
+    g.addEventListener("click", () => agUse(row));
+    svg.appendChild(g);
+    // Above the plane: how far up it is; below it: what to type.
+    svg.appendChild(agEl("text", {x: px + 16, y: py - 10, "text-anchor": "middle",
+      fill: "#e6ecf1"}, agFmt(row.agl_m)));
+    svg.appendChild(agEl("text", {x: px + 16, y: py + 19, "text-anchor": "middle",
+      fill: "#e0b452", "font-size": 9}, agAsk(row).replace(/^at /, "")));
+  });
+
+  // The altitude asked for.
+  if (AG.asked !== null && Number.isFinite(AG.asked)) {
+    const ya = y(AG.asked);
+    const agl = AG.asked - AG.ground;
+    const bad = agl < data.min_clearance_m;
+    const colour = bad ? "#e07a6f" : "#7fd08f";
+    svg.appendChild(agEl("line", {x1: left, x2: right, y1: ya, y2: ya,
+      stroke: colour, "stroke-width": 2, "stroke-dasharray": "8 4"}));
+    const g = agEl("g", {transform: `translate(${right - 46},${ya - 7})`});
+    g.appendChild(agEl("path", {d: PLANE_PATH, fill: colour}));
+    svg.appendChild(g);
+    const youText = `you: ${agFmt(AG.asked)} = ` + (agl < 0
+      ? `${agFmt(-agl)} UNDER the ground` : `${agFmt(agl)} above the ground`);
+    // A backing plate keeps the line legible over the landmark labels.
+    const plateW = youText.length * 6.8 + 8;
+    svg.appendChild(agEl("rect", {x: right - 52 - plateW + 4, y: ya - 19,
+      width: plateW, height: 17, rx: 3, fill: "#0d1217", opacity: .9}));
+    svg.appendChild(agEl("text", {x: right - 52, y: ya - 6, "text-anchor": "end",
+      fill: colour}, youText));
+  }
+  agTable();
+  agReadout();
+}
+
+function agHot(i) {
+  AG.hot = i;
+  document.querySelectorAll("#agSvg .agPlane").forEach((g, j) =>
+    g.classList.toggle("hot", j === i));
+  document.querySelectorAll("#agTable tbody tr").forEach((tr, j) =>
+    tr.classList.toggle("hot", j === i));
+}
+
+function agTable() {
+  const body = $("agTable").querySelector("tbody");
+  body.innerHTML = "";
+  AG.data.checkpoints.forEach((row, i) => {
+    const tr = document.createElement("tr");
+    if (AG.hot === i) tr.classList.add("hot");
+    const cells = [row.label, agFmt(row.agl_m), agAsk(row), row.note];
+    for (const text of cells) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+    }
+    // Narrow screens hide the note column and show the note here instead.
+    const inline = document.createElement("div");
+    inline.className = "agNoteInline dim";
+    inline.textContent = row.note;
+    tr.firstChild.appendChild(inline);
+    const td = document.createElement("td");
+    const button = document.createElement("button");
+    button.className = "opt";
+    button.textContent = "use";
+    button.addEventListener("click", () => agUse(row));
+    td.appendChild(button);
+    tr.appendChild(td);
+    tr.addEventListener("mouseenter", () => agHot(i));
+    body.appendChild(tr);
+  });
+}
+
+function agReadout() {
+  const out = $("agReadout");
+  const data = AG.data;
+  out.innerHTML = "";
+  const line = (text, cls) => {
+    const div = document.createElement("div");
+    if (cls) div.className = cls;
+    div.textContent = text;
+    out.appendChild(div);
+  };
+  if (AG.asked === null) {
+    line("Type an altitude in the prompt (\"at 1500 m\", \"at 5000 ft\", " +
+         "\"FL350\") or press Interpret to see it on the picture.", "dim");
+  } else {
+    const agl = AG.asked - AG.ground;
+    if (agl < 0) {
+      line(`${agFmt(AG.asked)} (${AG.askedFrom}) is ${agFmt(-agl)} BELOW ` +
+           `this ground: it will be refused. Ask for at least ` +
+           `${agFmt(AG.ground + data.min_clearance_m)}; ` +
+           `${agFmt(Math.round((AG.ground + 300) / 10) * 10)} is a sensible low flight.`,
+           "agWarn");
+    } else if (agl < data.min_clearance_m) {
+      line(`${agFmt(AG.asked)} (${AG.askedFrom}) leaves only ${agFmt(agl)} ` +
+           `above the ground; the minimum is ${agFmt(data.min_clearance_m)}.`,
+           "agWarn");
+    } else {
+      const near = data.checkpoints.reduce((a, b) =>
+        Math.abs(b.agl_m - agl) < Math.abs(a.agl_m - agl) ? b : a);
+      line(`${agFmt(AG.asked)} (${AG.askedFrom}) is ${agFmt(agl)} above ` +
+           `the ground: about “${near.label.toLowerCase()}” — ` +
+           `${near.note}.`, "agOk");
+    }
+  }
+  const typical = AG.aircraft && data.aircraft[AG.aircraft];
+  if (typical) {
+    line(`${typical.label}: typically cruises near ${agFmt(typical.cruise_m)}, ` +
+         `can reach about ${agFmt(typical.ceiling_m)} (above sea level).`, "dim");
+  }
+  if (AG.groundFrom) line(`Ground height ${AG.groundFrom}.`, "dim");
+}
+
+function agUse(row) {
+  const metres = Math.round(row.ask_m);
+  const input = document.querySelector('#specTable input[data-name="altitude"]');
+  if (compiled && input) {
+    input.value = metres;
+    input.dispatchEvent(new Event("input", {bubbles: true}));
+    input.focus();
+    $("compileState").textContent =
+      `altitude set to ${metres} m in the table (${row.label.toLowerCase()}); press Run`;
+    return;
+  }
+  const prompt = $("prompt");
+  const phrase = `at ${metres} m`;
+  const re = /\bat\s+-?\d+(?:\.\d+)?\s*(?:m|metres?|meters?|ft|feet|foot)\b|\bfl\s*\d{2,3}\b/i;
+  prompt.value = re.test(prompt.value) ? prompt.value.replace(re, phrase)
+                                       : `${prompt.value.trim()} ${phrase}`.trim();
+  prompt.dispatchEvent(new Event("input"));
+}
+
+$("agGround").addEventListener("input", () =>
+  agSetGround($("agGround").value, "typed here"));
+$("agPreset").addEventListener("change", () => {
+  const select = $("agPreset");
+  if (select.value === "") return;
+  agSetGround(select.value, `example: ${select.options[select.selectedIndex].text}`);
+});
+$("agUnits").addEventListener("change", () => {
+  AG.units = $("agUnits").value;
+  try { localStorage.setItem("agUnits", AG.units); } catch (_) {}
+  agDraw();
+});
+$("prompt").addEventListener("input", () => {
+  // The prompt being typed is newer than any interpreted spec; with no
+  // altitude in it, an interpreted spec's altitude stays on the picture.
+  const asked = agPromptAltitude($("prompt").value);
+  if (asked) { AG.asked = asked.m; AG.askedFrom = asked.from; }
+  else if (!compiled) { AG.asked = null; AG.askedFrom = ""; }
+  agDraw();
+});
+// An edit to the table's altitude or ground row redraws at once.
+$("specTable").addEventListener("input", event => {
+  const name = event.target && event.target.dataset && event.target.dataset.name;
+  if (name === "altitude") {
+    AG.asked = Number(event.target.value);
+    AG.askedFrom = "edited in the table";
+    agDraw();
+  } else if (name === "terrain_elevation") {
+    agSetGround(event.target.value, "edited in the table");
+  }
+});
+try {
+  const units = localStorage.getItem("agUnits");
+  if (units === "m" || units === "ft") { AG.units = units; $("agUnits").value = units; }
+  if (localStorage.getItem("agOpen") === "0") $("altGuide").open = false;
+} catch (_) {}
+$("altGuide").addEventListener("toggle", () => {
+  try { localStorage.setItem("agOpen", $("altGuide").open ? "1" : "0"); } catch (_) {}
+});
+agLoad();
 </script>
 </body>
 </html>
