@@ -855,20 +855,28 @@ Geography rules:
   longitude and terrain_elevation EXACTLY to that place's listed values --
   never rounded, never adjusted -- source "inferred" with the place name in
   "from". The exact coordinates are what lands the scenario on the real bake.
-- Coordinates NEVER carry source "model": a listed place is "inferred",
-  stated coordinates are "user", and any model-sourced coordinate is
-  DISCARDED as an invented place.
+- A listed place is "inferred" and stated coordinates are "user".
+  Coordinates carry source "model" ONLY when you CHOOSE a place for a
+  prompt that names none (below); every such pair is checked against a
+  real land mask and DISCARDED when it is not the kind of place the
+  prompt describes.
 - A ground-cover word that is ALSO a listed place's alias ("the
   prairie" -> flint_hills) sets BOTH: the surface class AND the place's
   exact coordinates. Ground cover alone never suppresses a place the
   list can render.
-- You MAY choose a listed bake as a declared guess (source "model",
-  EXACT listed coordinates, quoting the phrase that guided it) when the
-  prompt strongly evokes one: desert/canyon -> grand_canyon,
-  prairie/plains -> flint_hills, valley -> yosemite, volcano -> fuji.
-  When nothing evokes a place, leave the location fields absent -- the
-  deterministic scene planner places unlocated scenes on a fitting
-  bake; that is not your job to force.
+- When the prompt evokes a KIND of place without naming one, CHOOSE a
+  real place that fits, however vague the prompt: source "model", "from"
+  quoting the phrase. Prefer a listed bake when it fits (EXACT listed
+  coordinates: desert/canyon -> grand_canyon, prairie/plains ->
+  flint_hills, valley -> yosemite, volcano -> fuji) -- it is already on
+  disk. Otherwise any real place: "over the ocean"/"at sea" -> a point
+  of OPEN ocean at least 150 km from any land, with surface "ocean" and
+  no terrain_elevation (sea level is the ground); "over a jungle", "over
+  farmland", "over a fjord" -> land coordinates of such a place. The
+  system decides the ground from the place: open ocean flies the flat
+  sea surface, land downloads that place's real terrain. When nothing
+  evokes a place at all, leave the location fields absent -- the
+  deterministic scene planner stages it.
 - A named place NOT in the list: NEVER invent coordinates. Ask which listed
   place (or the generic ridge) fits, or record the place name verbatim in
   "notes". Coordinates you were not given do not exist.
@@ -945,7 +953,8 @@ def _named_aircraft(prompt: str):
             sorted(found.items(), key=lambda item: item[1][0])]
 
 
-def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]:
+def _parse_payload(text: str, *, allow_questions: bool = True,
+                   prompt: str = "") -> Dict[str, Any]:
     """Parse the model's JSON strictly against the schema's intent.
 
     The API already constrains the shape, but this module does not trust the
@@ -1069,32 +1078,33 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
                  if isinstance(e, dict) and e.get("value") is None]:
         del fields[name]
     # Coordinates are never INVENTED into a spec -- but the director may
-    # CHOOSE a listed bake as a declared guess ("scene-setting": a windy
-    # evocative prompt lands on real terrain instead of a featureless
-    # slab). The line: a model-sourced latitude/longitude pair is kept
-    # ONLY when it sits exactly on a listed bake's origin (the world the
-    # system can actually render); anything else is an invented place and
-    # is dropped like a null (measured: gpt-4.1-mini invents Sahara
-    # coordinates for placeless prompts).
+    # CHOOSE a real place as a declared guess ("scene-setting": "over the
+    # ocean" or "over a desert" lands somewhere real instead of on a
+    # featureless slab at 0, 0). A model-sourced latitude/longitude pair
+    # is kept when it sits on a listed bake's origin, or when the GLO-30
+    # land mask (core.terrain.landmask, offline) confirms the KIND of
+    # place the scene is: open ocean for an ocean scene (no land within
+    # one cell, so the flat slab at 0 m is its real ground), land for any
+    # other (its ground arrives with the on-demand bake). Anything else is
+    # an invented place and is dropped, said in the notes (measured:
+    # gpt-4.1-mini invents Sahara coordinates for placeless prompts).
     lat_entry, lon_entry = fields.get("latitude"), fields.get("longitude")
 
     def _model_sourced(entry):
         return isinstance(entry, dict) and entry.get("source") == "model"
 
     if _model_sourced(lat_entry) or _model_sourced(lon_entry):
-        on_listed_origin = False
-        try:
-            lat, lon = float(lat_entry["value"]), float(lon_entry["value"])
-            on_listed_origin = any(
-                abs(lat - loc.origin_lat) <= 0.05
-                and abs(lon - loc.origin_lon) <= 0.05
-                for loc in LOCATIONS.values())
-        except (TypeError, KeyError, ValueError):
-            on_listed_origin = False
-        if not on_listed_origin:
+        verdict = _model_place_verdict(lat_entry, lon_entry, fields, prompt)
+        if verdict == "ocean":
+            # The sea surface is the datum: a guessed ground height is not.
+            if _model_sourced(fields.get("terrain_elevation")):
+                del fields["terrain_elevation"]
+        elif verdict != "land":
             for name in ("latitude", "longitude", "terrain_elevation"):
                 if _model_sourced(fields.get(name)):
                     del fields[name]
+            if verdict:
+                notes.append(verdict)
     # A DATE is data, not vibes: the prompt rules already say never
     # invent one, and the mechanical rail backs them up (measured:
     # gpt-4.1-mini wrote weather_date 2023-06-01 from the word
@@ -1337,6 +1347,62 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
     return payload
 
 
+#: Prompt words that make a scene an ocean scene (webapp.runs.OCEAN_WORDS
+#: is the planner's copy of the same list).
+OCEAN_PROMPT_WORDS = ("ocean", "open sea", "over the sea", "over water", "offshore")
+#: Words that make a phrase a KIND of place. A model-chosen place off the
+#: listed bakes is kept only when its "from" quotes the prompt AND holds
+#: one of these: a guess must answer scenery the prompt asked for, never
+#: stage a placeless prompt (measured: gpt-4.1-mini put "fly a 747" in
+#: the Sahara).
+LANDSCAPE_WORDS = frozenset("""
+ocean oceans sea seas water waters offshore desert deserts dunes mountain
+mountains mountainous ridge ridges peak peaks hill hills hillside valley
+valleys canyon canyons cliff cliffs plain plains prairie prairies grassland
+grasslands savanna steppe field fields farmland farms countryside forest
+forests woods jungle jungles rainforest tundra glacier glaciers ice arctic
+antarctic island islands archipelago coast coastline shore beach beaches bay
+fjord fjords lake lakes river rivers delta swamp marsh wetlands volcano
+volcanoes city cities town towns village suburbs downtown
+""".split())
+
+
+def _model_place_verdict(lat_entry, lon_entry, fields, prompt) -> str:
+    """"ocean" or "land" for a model-chosen place that is kept (a listed
+    bake's origin, as before, or a place the land mask confirms), "" for
+    an unusable pair (dropped like a null), else the note saying why the
+    place was dropped."""
+    from ..terrain.landmask import has_land, open_ocean
+
+    try:
+        lat, lon = float(lat_entry["value"]), float(lon_entry["value"])
+    except (TypeError, KeyError, ValueError):
+        return ""
+    if not (-85.0 <= lat <= 85.0 and -180.0 <= lon <= 180.0):
+        return f"the model chose coordinates ({lat}, {lon}), which are not a place; dropped"
+    if any(abs(lat - loc.origin_lat) <= 0.05 and abs(lon - loc.origin_lon) <= 0.05
+           for loc in LOCATIONS.values()):
+        return "land"
+    phrase = " ".join(str(lat_entry.get("from") or "").split())
+    text = " ".join((prompt or "").lower().split())
+    if not (phrase and phrase.lower() in text
+            and LANDSCAPE_WORDS & set(re.findall(r"[a-z]+", phrase.lower()))):
+        return (f"the model chose ({lat:.3f}, {lon:.3f}) from {phrase!r}, which "
+                f"names no kind of place in the prompt; dropped")
+    surface = fields.get("surface")
+    ocean_scene = ((isinstance(surface, dict) and surface.get("value") == "ocean")
+                   or any(word in text for word in OCEAN_PROMPT_WORDS))
+    if ocean_scene:
+        if open_ocean(lat, lon):
+            return "ocean"
+        return (f"the model chose ({lat:.3f}, {lon:.3f}) for {phrase!r}, but that is "
+                f"not open ocean (GLO-30 land within one degree); dropped")
+    if has_land(lat, lon):
+        return "land"
+    return (f"the model chose ({lat:.3f}, {lon:.3f}) for {phrase!r}, but no GLO-30 "
+            f"land is there; dropped")
+
+
 def _overlay(spec: ScenarioSpec, name: str, entry: Dict[str, Any]) -> None:
     """Set one spec field from a parsed model entry, with provenance."""
     source = {"user": Source.USER, "inferred": Source.INFERRED,
@@ -1473,7 +1539,7 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
     except StopIteration:
         raise _fail("the response carries no text block") from None
 
-    payload = _parse_payload(text, allow_questions=not answering)
+    payload = _parse_payload(text, allow_questions=not answering, prompt=prompt)
 
     # Defaults come from the regex compiler run on an EMPTY prompt, so an
     # untouched field is bit-identical between the two compilers and the

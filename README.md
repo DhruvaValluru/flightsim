@@ -63,6 +63,12 @@ three later branches merged in:
 * **Aircraft named in the prompt are kept**: "a4", "A-4E" or "Skyhawk"
   always fly the A-4, even when a language model guesses otherwise (the
   spec's notes say when it was overruled).
+* **Vague places land somewhere real**: "over the ocean" or "over a
+  jungle" with no place named gets a real place, chosen by the language
+  model (or, offline, an open-ocean point for ocean prompts) and checked
+  against the GLO-30 land mask (`core/terrain/landmask.py`). The place
+  decides the ground: open ocean flies the flat sea surface (no bake, and
+  Google tiles accept it), land is baked on demand like a named place.
 
 Run it on Windows (PowerShell, no clone needed):
 

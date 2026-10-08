@@ -380,17 +380,18 @@ def google_tiles_terrain_refusal(heightfield, latitude_deg: Optional[float] = No
     the place the tiles show, so the aircraft would fly through mountains
     it never feels. Only a bake ingested from a real DEM (producer ``dem
     ingestion``: GLO-30 or 3DEP) is accepted under the tiles -- and the
-    flat slab at a 0 m datum on a listed open-ocean point
-    (core.terrain.ocean), where the sea surface IS that slab.
+    flat slab at a 0 m datum over open ocean (no GLO-30 land in or beside
+    the origin's cell, core.terrain.landmask), where the sea surface IS
+    that slab.
     """
     if not google_tiles_requested():
         return None
     if heightfield is None:
-        from ..terrain.ocean import open_ocean_at
+        from ..terrain.landmask import open_ocean
 
         if (latitude_deg is not None and longitude_deg is not None
                 and terrain_elevation_m is not None and float(terrain_elevation_m) == 0.0
-                and open_ocean_at(latitude_deg, longitude_deg) is not None):
+                and open_ocean(latitude_deg, longitude_deg)):
             return None
         return (f"{GOOGLE_TILES_ENV} is on but the physics ground is the flat slab: "
                 f"the tiles would draw real terrain the aircraft never feels. Bake the "

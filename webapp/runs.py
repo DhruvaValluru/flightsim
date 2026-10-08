@@ -207,12 +207,15 @@ def named_place(spec: ScenarioSpec) -> bool:
     """True when the prompt NAMED a real place: source ``inferred`` on both
     coordinates -- a listed place's name mapped to its origin (core/nl/
     llm_compiler.py, geography rules) or any other place name the compiler
-    looked up (core.nl.geocode, :func:`looked_up_place`). Such a spec
+    looked up (core.nl.geocode, :func:`looked_up_place`) -- or the language
+    model CHOSE one for a vague prompt (source ``model`` on both, kept only
+    where the GLO-30 land mask confirms the kind of place). Such a spec
     means "fly at that real place" exactly as stated coordinates do, so it
     is held to the same bake rule -- never the flat slab or the
-    synthesised ridge under the place's name."""
-    return (str(spec.latitude.source) == "inferred"
-            and str(spec.longitude.source) == "inferred")
+    synthesised ridge under the place's name (open ocean excepted: there
+    the flat slab at sea level IS the place, :func:`needs_dynamic_bake`)."""
+    sources = {str(spec.latitude.source), str(spec.longitude.source)}
+    return sources == {"inferred"} or sources == {"model"}
 
 
 def looked_up_place(spec: ScenarioSpec) -> bool:
@@ -223,6 +226,28 @@ def looked_up_place(spec: ScenarioSpec) -> bool:
         return False
     return curated_key_at(float(spec.latitude.value),
                           float(spec.longitude.value)) is None
+
+
+def open_ocean_scene(spec: ScenarioSpec) -> bool:
+    """The spec flies over open ocean at a 0 m datum: no GLO-30 land in or
+    beside its origin's one-degree cell (core.terrain.landmask), so the
+    flat slab at sea level is that place's real ground. The default 0, 0
+    origin is "no geography requested", not a place, so it never counts."""
+    from core.terrain.landmask import open_ocean
+
+    if "default" in (str(spec.latitude.source), str(spec.longitude.source)):
+        return False
+    return (float(spec.terrain_elevation.value) == 0.0
+            and open_ocean(float(spec.latitude.value), float(spec.longitude.value)))
+
+
+def _chosen_origin(spec: ScenarioSpec):
+    """(lat, lon, datum) for google_tiles_terrain_refusal, or three Nones
+    when the coordinates are the default "no geography" origin."""
+    if "default" in (str(spec.latitude.source), str(spec.longitude.source)):
+        return None, None, None
+    return (float(spec.latitude.value), float(spec.longitude.value),
+            float(spec.terrain_elevation.value))
 
 
 def names_real_place(spec: ScenarioSpec) -> bool:
@@ -266,6 +291,10 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
             "longitude": float(spec.longitude.value),
         }
     if not names_real_place(spec):
+        return None
+    # Open ocean has no GLO-30 tile to bake and needs none: the sea
+    # surface is the flat slab at a 0 m datum (core.terrain.landmask).
+    if open_ocean_scene(spec):
         return None
     # The synthesised control ridge is NOT a place (the ERA5 doctrine):
     # stated coordinates that fall on no real bake refuse here even when
@@ -575,14 +604,15 @@ def _auto_scene(spec: ScenarioSpec) -> Dict:
                          f"{float(spec.terrain_elevation.value):g} m datum "
                          f"until then -- the synthesised ridge is never "
                          f"substituted for a staged place"}
-    from core.terrain.ocean import open_ocean_at
+    if open_ocean_scene(spec):
+        from core.terrain.ocean import open_ocean_at
 
-    ocean = open_ocean_at(lat, lon)
-    if ocean is not None and float(spec.terrain_elevation.value) == 0.0:
+        listed = open_ocean_at(lat, lon)
+        where = listed.title if listed else f"open ocean at {lat:.3f}, {lon:.3f}"
         return {"key": "flat", "kind": "flat (open ocean)", "terrain": None,
                 "imagery": None,
-                "label": f"{ocean.title}: the flat slab at sea level is the "
-                         f"real ground there (no land within ~330 km)"}
+                "label": f"{where}: the flat slab at sea level is the real "
+                         f"ground there (no GLO-30 land within a degree)"}
     return {"key": "flat", "kind": "flat", "terrain": None, "imagery": None,
             "label": "no terrain requested; flat slab at the spec's "
                      "elevation"}
@@ -2670,8 +2700,7 @@ class RunManager:
 
         tiles_refusal = google_tiles_terrain_refusal(
             Heightfield.read(Path(scene["terrain"])) if scene.get("terrain") else None,
-            float(spec.latitude.value), float(spec.longitude.value),
-            float(spec.terrain_elevation.value))
+            *_chosen_origin(spec))
         if tiles_refusal is not None:
             run.push("failed", f"[{GOOGLE_TILES_TERRAIN_CONSTRAINT}] {tiles_refusal}")
             return

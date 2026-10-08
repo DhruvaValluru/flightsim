@@ -926,9 +926,10 @@ def _run(args: argparse.Namespace) -> int:
         # places, so the render refuses before any flight.
         from core.scenario.card import google_tiles_terrain_refusal
 
+        chosen = "default" not in (str(spec.latitude.source), str(spec.longitude.source))
         tiles_refusal = google_tiles_terrain_refusal(
-            heightfield, float(spec.latitude.value), float(spec.longitude.value),
-            float(spec.terrain_elevation.value))
+            heightfield, *((float(spec.latitude.value), float(spec.longitude.value),
+                            float(spec.terrain_elevation.value)) if chosen else ()))
         if tiles_refusal is not None:
             return _refuse([Violation("google_tiles.terrain", tiles_refusal)])
 

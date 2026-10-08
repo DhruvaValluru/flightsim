@@ -346,11 +346,13 @@ def test_google_tiles_accept_the_slab_only_on_an_open_ocean_point(monkeypatch):
     for point in OPEN_OCEAN.values():
         assert google_tiles_terrain_refusal(None, point.lat, point.lon, 0.0) is None
     atlantic = OPEN_OCEAN["atlantic"]
-    # Raised datum, or a point off the list (the Gulf of Guinea's 0, 0
-    # default and Kansas alike), still refuses.
+    # Any open ocean the land mask confirms, not only the listed points.
+    assert google_tiles_terrain_refusal(None, 56.0, 3.0, 0.0) is None     # mid North Sea
+    # A raised datum, land, a coast, or no origin at all still refuses.
     assert "flat slab" in google_tiles_terrain_refusal(None, atlantic.lat, atlantic.lon, 400.0)
-    assert "flat slab" in google_tiles_terrain_refusal(None, 0.0, 0.0, 0.0)
-    assert "flat slab" in google_tiles_terrain_refusal(None, 38.4, -96.5, 0.0)
+    assert "flat slab" in google_tiles_terrain_refusal(None, 38.4, -96.5, 0.0)   # Kansas
+    assert "flat slab" in google_tiles_terrain_refusal(None, 21.0, -157.5, 0.0)  # off Oahu
+    assert "flat slab" in google_tiles_terrain_refusal(None)
 
 
 def test_a_vague_ocean_prompt_is_staged_at_a_real_open_ocean(no_bakes, monkeypatch):
