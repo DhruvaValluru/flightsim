@@ -14,8 +14,7 @@ cloud you fly into is the storm the aircraft is feeling.
 | The cumulonimbus: tower, overshooting top, anvil, rain shaft | `M_StormCell` on the volumetric cloud | `weather.cell` (centred on the card's `downburst`) | `core/scene/storm_cell.py` |
 | Lightning channels, branches, the stepped leader, return strokes | `M_LightningChannel` ribbons + one point light | `weather.lightning` | `core/scene/lightning.py` |
 | The lightning lighting the cloud from inside | `M_StormCell` emissive (`storm_glow.hlsl`) | same | `storm_cell.glow_illuminance_lux` |
-| Thunder (interactive window) | `USoundWaveProcedural`, synthesised from the bolt's own channel | `weather.thunder` | `core/scene/thunder.py` |
-| Rain hiss (interactive window) | `USoundWaveProcedural`, level from the rain rate | `weather.rain` | `thunder.rain_noise` |
+| Thunder and rain sound | **Off** (the owner's call, 2026-10-08): the code is kept but no host plays it | `weather.thunder` | `core/scene/thunder.py` |
 | A storm soundtrack for rendered videos | `scripts/storm_soundtrack.py` | the whole block | `thunder.soundtrack` |
 
 **Opt-in.** This is a second weather path, built in parallel with the
@@ -110,7 +109,7 @@ UnrealEditor-Cmd ue/FlightSim.uproject -run=FlightSimRender -scenario=<card.json
 # the web app: set this before starting it, and every prompt's render asks for the storm
 #   (Windows PowerShell: $env:FLIGHTSIM_WEATHER_BACKEND="procedural"; unset or "off" = as before)
 FLIGHTSIM_WEATHER_BACKEND=procedural
-# the interactive window (thunder and rain heard)
+# the interactive window (no sound)
 UnrealEditor ue/FlightSim.uproject -game -card=<card.json> -terrain=... [-weather-backend=niagara]
 # the soundtrack for a rendered clip (sample 0 at run time 0, ready to mux)
 python scripts/storm_soundtrack.py <card.json> storm.wav --listener 5000,0,2
@@ -195,7 +194,7 @@ On Windows (the first build), the clauses:
 | WX.3 | A ground camera: splash crowns in the near field, none above `max_agl_m` |
 | WX.4 | The tower's base within 10 % of `base_m` in a level shot; the shaft's transmittance across its diameter against `storm_cell.transmittance`. This is also where `ExtinctionScale` is set if the engine's volumetric cloud does not read Extinction per metre |
 | WX.5 | A frame whose exposure covers a return stroke shows the channel; a frame between strokes does not |
-| WX.6 | The interactive window: the first clap of a flash after r_min / c; the host's thunder selftest equal to the card's |
+| WX.6 | The host's thunder selftest equal to the card's at Build (no sound is played) |
 
 ## Not claimed
 

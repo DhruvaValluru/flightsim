@@ -219,7 +219,8 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		WeatherOptions.GeoReferencing = Scenario.GeoReferencing;
 		WeatherOptions.ExistingClouds = Visual.Clouds;
 		WeatherOptions.Sun = Visual.Sun;
-		WeatherOptions.bAudio = true;
+		// No sound (the owner's call, 2026-10-08): the storm is seen, not heard.
+		WeatherOptions.bAudio = false;
 		WeatherOptions.bManualNiagaraTick = false;
 		if (!Weather.Build(GetWorld(), WeatherOptions, Error))
 		{

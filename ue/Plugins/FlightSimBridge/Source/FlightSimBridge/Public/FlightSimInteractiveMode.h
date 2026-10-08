@@ -84,8 +84,8 @@ private:
 	FFlightSimScenarioCard Card;
 	FFlightSimScenarioWorld Scenario;
 	FFlightSimVisualScene Visual;
-	// The card's weather (rain, storm, lightning) with its thunder and rain
-	// heard: -weather-backend=procedural|niagara|off, procedural by default.
+	// The card's weather (rain, storm, lightning), drawn with no sound:
+	// -weather-backend=procedural|niagara|off, off by default.
 	FFlightSimWeather Weather;
 
 	UPROPERTY()

@@ -81,9 +81,9 @@ def test_the_drops_supersede_the_screen_space_streaks():
     assert "Weather.ApplyWindshield(Capture" in COMMANDLET
 
 
-def test_the_interactive_window_hears_the_storm():
+def test_the_interactive_window_draws_the_storm_without_sound():
     assert "FFlightSimWeather Weather;" in INTERACTIVE_H
-    assert "WeatherOptions.bAudio = true" in INTERACTIVE
+    assert "WeatherOptions.bAudio = false" in INTERACTIVE
     tick = _function(INTERACTIVE, "void AFlightSimInteractiveMode::Tick")
     assert "Weather.Advance(View)" in tick
     assert "PlayerCameraManager->GetCameraLocation()" in tick
