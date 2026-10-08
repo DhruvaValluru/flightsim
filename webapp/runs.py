@@ -290,11 +290,29 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
             "latitude": float(spec.latitude.value),
             "longitude": float(spec.longitude.value),
         }
-    if not names_real_place(spec):
-        return None
     # Open ocean has no GLO-30 tile to bake and needs none: the sea
     # surface is the flat slab at a 0 m datum (core.terrain.landmask).
     if open_ocean_scene(spec):
+        return None
+    if not names_real_place(spec):
+        # Google's tiles draw the real place under ANY chosen origin, a
+        # scene-setting stage included; the flat slab there would refuse
+        # google_tiles.terrain at render time (measured 2026-10-08: a
+        # staged Flint Hills without its bake). Bake it first instead.
+        from core.scenario.card import google_tiles_requested
+
+        if (google_tiles_requested() and scene.get("terrain") is None
+                and "default" not in (str(spec.latitude.source),
+                                      str(spec.longitude.source))):
+            lat, lon = float(spec.latitude.value), float(spec.longitude.value)
+            return {
+                "constraint": "terrain.unbaked",
+                "message": f"Google tiles are on and no bake covers this scene "
+                           f"({lat:.4f}, {lon:.4f}); POST /bake with these "
+                           f"coordinates so the physics flies the ground the "
+                           f"tiles draw, then run again",
+                "latitude": lat, "longitude": lon,
+            }
         return None
     # The synthesised control ridge is NOT a place (the ERA5 doctrine):
     # stated coordinates that fall on no real bake refuse here even when
@@ -1191,11 +1209,12 @@ def plan_scene_setting(spec: ScenarioSpec) -> None:
     if (str(spec.latitude.source) != "default"
             or str(spec.longitude.source) != "default"):
         return
-    if str(spec.terrain_elevation.source) != "default":
-        return          # unnamed mountains: the generic ridge is the scene
     prompt = (spec.prompt or "").lower()
     surface = str(spec.surface.value)
-    if surface == "ocean" or any(word in prompt for word in OCEAN_WORDS):
+    # An ocean scene at sea level is staged whatever source its 0 m datum
+    # carries (a model may state "inferred 0" for the sea).
+    if float(spec.terrain_elevation.value) == 0.0 and (
+            surface == "ocean" or any(word in prompt for word in OCEAN_WORDS)):
         # No ocean bake, and none needed: an open-ocean point's ground IS
         # the flat slab at sea level (core.terrain.ocean), so the scene
         # sits at a real place -- the one Google's tiles draw, when on.
@@ -1210,6 +1229,8 @@ def plan_scene_setting(spec: ScenarioSpec) -> None:
         if str(spec.surface.source) == "default":
             spec.plan("surface", "ocean", frm=frm)
         return
+    if str(spec.terrain_elevation.source) != "default":
+        return          # unnamed mountains: the generic ridge is the scene
     if any(word in prompt for word in SCENE_SETTING_OPT_OUT):
         return
     if surface == "city":

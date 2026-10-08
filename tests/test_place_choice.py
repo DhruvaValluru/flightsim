@@ -122,3 +122,41 @@ def test_the_default_origin_is_not_an_ocean_scene(runs, monkeypatch):
     assert not runs.open_ocean_scene(spec)
     assert "open ocean" not in runs.pick_scene(spec)["label"]
     assert google_tiles_terrain_refusal(None, *runs._chosen_origin(spec)) is not None
+
+
+def test_with_tiles_on_a_staged_place_without_its_bake_is_baked_first(runs, monkeypatch):
+    """Measured 2026-10-08: a placeless prompt staged on the Flint Hills,
+    whose bake was not on the machine, flew the flat slab and the render
+    refused google_tiles.terrain. With the tiles on, /run now answers
+    terrain.unbaked, which the page meets with POST /bake and a re-run."""
+    from core.nl.compiler import compile_prompt
+    from core.terrain.glo30 import LOCATIONS
+
+    spec = compile_prompt("fly the c172p while it is raining")
+    runs.plan_scene_setting(spec)
+    assert runs.scene_set(spec)
+    monkeypatch.delenv("FLIGHTSIM_GOOGLE_TILES", raising=False)
+    assert runs.needs_dynamic_bake(spec) is None              # tiles off: unchanged
+    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "on")
+    refusal = runs.needs_dynamic_bake(spec)
+    assert refusal["constraint"] == "terrain.unbaked"
+    place = LOCATIONS["flint_hills"]
+    assert (refusal["latitude"], refusal["longitude"]) == (place.origin_lat, place.origin_lon)
+    # No place chosen at all ("flat ground", the default origin): nothing
+    # to bake; the render's own refusal still says why.
+    flat = compile_prompt("fly the c172p over flat ground")
+    runs.plan_scene_setting(flat)
+    assert runs.needs_dynamic_bake(flat) is None
+
+
+def test_an_ocean_scene_is_staged_whatever_source_its_sea_level_carries(runs):
+    from core.terrain.ocean import OPEN_OCEAN
+
+    spec = compile_prompt_llm("fly the 747 over the ocean", client=fake_client({
+        "fields": {"surface": entry("ocean", "inferred", "ocean"),
+                   "terrain_elevation": entry(0, "inferred", "the ocean")},
+        "notes": [], "questions": []})).spec
+    runs.plan_scene_setting(spec)
+    assert (spec.latitude.value, spec.longitude.value) == (OPEN_OCEAN["atlantic"].lat,
+                                                           OPEN_OCEAN["atlantic"].lon)
+    assert runs.open_ocean_scene(spec)
