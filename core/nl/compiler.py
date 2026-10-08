@@ -610,6 +610,34 @@ def _heading(text: str) -> Quantity:
                     text)
         if m:
             return Quantity.user(degrees, "deg", frm=m.group(0).strip())
+    # "northbound", "south-westbound".
+    for word, degrees in COMPASS_WORDS:
+        m = _search(rf"\b{word}\s?bound\b", text)
+        if m:
+            return Quantity.user(degrees, "deg", frm=m.group(0).strip())
+    # A direction later in a flying phrase: "fly the 747 north over sfo",
+    # "flying over sfo north", "fly over the bay to the west", or after the
+    # place with no verb at all ("chase view of the 747 over sfo south").
+    # Measured: each of these flew the default due north, which looked
+    # right only when the asked direction happened to be north. Not a
+    # direction of flight when the words between say it is the wind's
+    # ("wind from the north", "a north wind"), when it names a side or a
+    # place ("north of the city", "the north side"), or when it starts a
+    # place name right after the preposition ("over north carolina",
+    # "flying over south africa").
+    for word, degrees in COMPASS_WORDS:
+        m = _search(rf"(\b(?:fly|flying|flies|flown|head|heads|headed|going|go|"
+                    rf"travel\w*|cruis\w*|over)\b[^.;,]{{0,40}}?)\b(?:due\s+)?{word}"
+                    rf"(?:ward|wards|erly)?\b(?!\s*(?:-|of\b|winds?\b|side\b|fac\w*|"
+                    rf"slope\w*|ridge\w*|bound\b))", text)
+        if m is None:
+            continue
+        between = m.group(1)
+        if re.search(r"\b(?:winds?|breeze|gusts?|from|blowing)\b", between):
+            continue
+        if re.search(r"\b(?:over|above|in|into|near|across|of)(?:\s+the)?\s*$", between):
+            continue
+        return Quantity.user(degrees, "deg", frm=m.group(0).strip())
     return Quantity.default(0.0, "deg", frm="due north")
 
 

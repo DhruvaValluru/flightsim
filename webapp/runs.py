@@ -2633,8 +2633,8 @@ class RunManager:
         return made
 
     @staticmethod
-    def _encode_capture_clip(frames: Path, clip: Path,
-                             camera_ids: List[str]) -> Optional[str]:
+    def _encode_capture_clip(frames: Path, clip: Path, camera_ids: List[str],
+                             manifest_path: Optional[Path] = None) -> Optional[str]:
         """An mp4 of ONE camera's frames, leaving every frame on disk.
 
         Deliberately not ``encode_clip``: that one reads a flat
@@ -2649,6 +2649,12 @@ class RunManager:
         camera's render.json. Returning a bare bool left the panel to
         guess, and it guessed a flat frames/render.json that a capture
         run does not have.
+
+        ``manifest_path``: the capture manifest, so the clip plays at the
+        rate the frames were TAKEN (:meth:`_capture_fps`). Encoding a
+        continuous capture (ten frames per second of flight) at the
+        render's 30 fps played a 3 s flight in 1 s -- the clip selector's
+        "3 s" gave a one-second video (measured on the owner's machine).
         """
         from experiments.showcase_matrix import FFMPEG, FPS
 
@@ -2657,8 +2663,10 @@ class RunManager:
             if not sorted(directory.glob("frame_*.png")):
                 continue
             clip.parent.mkdir(parents=True, exist_ok=True)
+            rate = (RunManager._capture_fps(manifest_path, camera_id)
+                    if manifest_path is not None else float(FPS))
             done = _ffmpeg([
-                str(FFMPEG), "-y", "-framerate", str(FPS),
+                str(FFMPEG), "-y", "-framerate", f"{rate:g}",
                 "-i", str(directory / "frame_%04d.png"),
                 "-c:v", "libx264", "-preset", "medium", "-crf", "19",
                 "-pix_fmt", "yuv420p", str(clip),
@@ -3408,8 +3416,8 @@ class RunManager:
         # ARE the deliverable and the manifest names every one of them.
         clip_camera = None
         if capture_solved is not None:
-            clip_camera = self._encode_capture_clip(frames, raw_clip,
-                                                    camera_ids)
+            clip_camera = self._encode_capture_clip(
+                frames, raw_clip, camera_ids, out / "capture_manifest.json")
             clip_ok = clip_camera is not None
         else:
             clip_ok = encode_clip(frames, raw_clip)
@@ -3443,9 +3451,13 @@ class RunManager:
             "turbulence_seed": seed if turbulent else None,
         }
         clip = out / "clip.mp4"
+        # The panel's frames are the clip's frames, one each: they play at
+        # the clip's own rate or the two halves of the stack drift apart.
+        clip_fps = (self._capture_fps(out / "capture_manifest.json", clip_camera)
+                    if clip_camera else FPS)
         try:
             panel_ok = build_panel_clip(card, manifest, conditions, raw_clip,
-                                        clip, fps=FPS)
+                                        clip, fps=clip_fps)
         except Exception as exc:
             # No ffmpeg (ffmpeg.missing) or no raw clip to stack onto: on a
             # capture run that is "no panel", not a lost run.

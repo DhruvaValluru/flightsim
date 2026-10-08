@@ -1515,3 +1515,39 @@ def test_the_engine_pass_words_ride_every_camera_pass_of_a_web_capture():
     assert "extra=list(extra) + pass_extra" in source
     assert source.index("extra_passes = apply_capture_passes(spec)") < source.index(
         "capture_solved = capture_solve(")
+
+
+def test_the_main_clip_and_its_panel_play_at_the_capture_rate(tmp_path, monkeypatch):
+    """The main clip was encoded at the render's 30 fps from a continuous
+    capture taken at 10 frames per second of flight, so the clip
+    selector's "3 s" played back in one second (measured on the owner's
+    machine). The clip and the panel stacked under it now take the
+    camera's own rate."""
+    import inspect
+
+    from webapp.runs import RunManager
+
+    frames = tmp_path / "frames"
+    (frames / "chase").mkdir(parents=True)
+    for i in range(30):
+        (frames / "chase" / f"frame_{i:04d}.png").write_bytes(_png())
+    manifest = tmp_path / "capture_manifest.json"
+    manifest.write_text(json.dumps({"frames": [
+        {"camera_id": "chase", "t_s": i * 0.1} for i in range(30)]}), encoding="utf-8")
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["rate"] = command[command.index("-framerate") + 1]
+        Path(command[-1]).write_bytes(b"mp4")
+
+        class Done:
+            returncode = 0
+        return Done()
+
+    monkeypatch.setattr("webapp.runs.subprocess.run", fake_run)
+    assert RunManager._encode_capture_clip(
+        frames, tmp_path / "raw.mp4", ["chase"], manifest) == "chase"
+    assert float(seen["rate"]) == pytest.approx(10.0)       # 30 frames = 3 s
+    source = inspect.getsource(RunManager._render_flow)
+    assert 'frames, raw_clip, camera_ids, out / "capture_manifest.json")' in source
+    assert "fps=clip_fps" in source

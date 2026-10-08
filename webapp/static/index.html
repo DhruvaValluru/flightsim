@@ -1333,6 +1333,44 @@ $("compile").addEventListener("click", () =>
   doCompile({prompt: $("prompt").value, clip_seconds: clipSeconds(),
              still: stillPreview()}));
 
+// The selector used to be read only at Interpret: picking "3 s" AFTER
+// interpreting changed nothing, and Run flew the old duration. Now a pick
+// on an interpreted spec writes into the table's own rows (a user edit,
+// re-validated by /run like any other).
+$("clipSeconds").addEventListener("change", () => {
+  if (!compiled) return;
+  const note = $("compileState");
+  if (stillPreview()) {
+    const cameras = compiled.spec.cameras || [];
+    if (!cameras.length) {
+      note.textContent = "1-frame preview: click Interpret again to add a camera for it";
+      return;
+    }
+    setRow("duration", 3);
+    for (const cam of cameras) {
+      setRow(`cameras[${cam.index}].trigger`, "interval");
+      setRow(`cameras[${cam.index}].capture_count`, 1);
+    }
+    note.textContent = "1-frame preview set in the table: each camera takes one image";
+    return;
+  }
+  const seconds = clipSeconds();
+  if (seconds === null) {
+    note.textContent = "clip length: the prompt's duration (click Interpret again to restore it)";
+    return;
+  }
+  setRow("duration", seconds);
+  // A still preview set earlier is undone: the clip captures again.
+  for (const cam of (compiled.spec.cameras || [])) {
+    if (Number(rowValue(`cameras[${cam.index}].capture_count`)) === 1 &&
+        rowValue(`cameras[${cam.index}].trigger`) === "interval") {
+      setRow(`cameras[${cam.index}].trigger`, "continuous");
+      setRow(`cameras[${cam.index}].capture_count`, 0);
+    }
+  }
+  note.textContent = `clip length set to ${seconds} s in the table (run.duration)`;
+});
+
 $("answer").addEventListener("click", () => {
   // One round: the original prompt plus the model's questions (echoed back)
   // and the user's answers. The server keeps no conversation state.

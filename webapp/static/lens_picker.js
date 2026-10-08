@@ -60,7 +60,8 @@ const AIRFRAMES = {
 
 const STYLE = `
 .lensPicker { margin: .6rem 0; }
-.lensPicker summary { cursor: pointer; }
+.lensPicker summary { cursor: default; list-style: none; }
+.lensPicker summary::-webkit-details-marker { display: none; }
 .lensPicker .lpBody { margin-top: .6rem; }
 .lensPicker canvas { width: 100%; max-width: 640px; aspect-ratio: 16 / 9;
   display: block; border-radius: 6px; border: 1px solid #2c3947;
@@ -266,6 +267,10 @@ function mount(holder, textarea) {
     `<button type="button" class="opt lpCopy">Copy</button>` +
     `<span class="lpDim lpNote"></span></div>` +
     `</div>`;
+  // Always open: the picker is the page's way to choose a zoom, so it is
+  // shown expanded and its header no longer folds it away.
+  box.open = true;
+  box.querySelector("summary").addEventListener("click", e => e.preventDefault());
   holder.appendChild(box);
 
   const $ = sel => box.querySelector(sel);

@@ -71,3 +71,18 @@ def test_the_script_is_served_and_both_pages_mount_it():
         assert '<script src="/lens_picker.js"></script>' in html, page
         assert 'LensPicker.mount(document.getElementById("lensPicker"), ' \
                'document.getElementById("prompt"))' in html, page
+
+
+def test_the_picker_is_always_open():
+    """The owner asked for the picker expanded no matter what: it mounts
+    open and its header no longer folds it away."""
+    assert "box.open = true;" in SCRIPT
+    assert 'querySelector("summary").addEventListener("click", e => e.preventDefault())' in SCRIPT
+
+
+def test_the_clip_selector_applies_after_interpret():
+    """Picking a clip length after Interpret used to change nothing: the
+    selector was read only by /compile. It now writes the table's rows."""
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert '$("clipSeconds").addEventListener("change"' in page
+    assert 'setRow("duration", seconds);' in page
