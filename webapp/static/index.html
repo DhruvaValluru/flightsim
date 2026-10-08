@@ -937,6 +937,12 @@ function renderViewPanel() {
       if (act === "zoomin") setRow(`cameras[${i}].focal_length_mm`, round(focal * 1.25, 1));
       if (act === "zoomout") setRow(`cameras[${i}].focal_length_mm`, round(focal / 1.25, 1));
       if (act === "focal" && element.value !== "") setRow(`cameras[${i}].focal_length_mm`, v);
+      if (act === "tochase") {
+        // A world-anchored view left with an offset placement cannot be
+        // solved; as a chase view the offsets mean "where it follows".
+        setRow(`cameras[${i}].preset`, "chase");
+        if (o.distance < 1) setCameraOrbit(i, 180, 10, 40);
+      }
       if (act === "fov") setRow(`cameras[${i}].focal_length_mm`,
         round(sensor / (2 * Math.tan(rad(+element.dataset.vval) / 2)), 1));
       renderViewPanel();
@@ -978,16 +984,29 @@ function cameraViewHtml(cam) {
     `<div class="ctl"><label>&nbsp;</label>` +
     [["wide", 70], ["normal", 45], ["tele", 15], ["super tele", 5]].map(([label, f]) =>
       button("fov", label, `${f}&deg; field of view`, f)).join("") + `</div>`;
-  const presetTag = cam.preset && cam.preset !== cam.camera_id
-    ? `${cam.preset} &mdash; ` : "&mdash; ";
+  const livePreset = String(rowValue(`cameras[${i}].preset`) || cam.preset);
+  const presetTag = livePreset !== cam.camera_id ? `${livePreset} &mdash; ` : "&mdash; ";
   const movesNote = (cam.moves && cam.moves.length)
     ? `<div class="dim">this camera has ${cam.moves.length} keyframed move(s); ` +
       `they animate from the values set here</div>` : "";
 
-  if (mode !== "offset" || aim !== "aircraft") {
+  const preset = livePreset;
+  if (mode === "offset" && !["chase", "wingman", "cockpit"].includes(preset)) {
+    return `<div class="panel"><b>${cam.camera_id}</b> <span class="verdict-refused">` +
+      `${preset} view with no position in the world: it cannot render (the run ` +
+      `refuses it).</span> <span class="dim">A ${preset} view stands somewhere in ` +
+      `the scene, but this one only has an offset from the aircraft.</span>` +
+      `<div class="ctl">${button("tochase", "make it a chase view",
+        "follow the aircraft; then swing it around with the orbit controls")}</div>` +
+      `${zoom}</div>`;
+  }
+  if (mode !== "offset" || aim !== "aircraft" || preset === "cockpit") {
     return `<div class="panel"><b>${cam.camera_id}</b> <span class="dim">${presetTag}` +
-      `placed in the scene (${mode}, aimed by ${aim}), so only its zoom ` +
-      `is adjustable here; its position is in the rows above.</span>${zoom}${movesNote}</div>`;
+      (preset === "cockpit"
+        ? `rides in the cockpit, so only its zoom is adjustable here.`
+        : `placed in the scene (${mode}, aimed by ${aim}), so only its zoom ` +
+          `is adjustable here; its position is in the rows above.`) +
+      `</span>${zoom}${movesNote}</div>`;
   }
   const o = cameraOrbit(i);
   const around = [["front", 0], ["front-right", 45], ["right", 90], ["rear-right", 135],

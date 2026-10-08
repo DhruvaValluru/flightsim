@@ -318,3 +318,20 @@ def test_an_unsafe_id_is_refused_never_sanitised():
     cam.set("camera_id", "cam:0", frm="test")
     identifier_violations(cam)
     assert cam.camera_id.value == "cam:0"
+
+
+def test_a_world_anchored_view_with_an_offset_placement_refuses_at_validation():
+    """explicit / ground / tower are solved from a scene or geographic
+    placement; an offset has none. The pose solver refused it only after
+    the terrain and the flight were built; the validator says so first."""
+    from core.capture.validate import vocabulary_violations
+
+    for preset in ("explicit", "ground", "tower"):
+        cam = CameraSpec.defaulted(camera_id="free", preset=preset)
+        cam.set("position_mode", "offset")
+        found = vocabulary_violations(cam)
+        assert [v.constraint for v in found] == ["camera.preset"], preset
+        assert "no world anchor" in found[0].message
+        cam.set("position_mode", "scene")
+        assert vocabulary_violations(cam) == []
+    assert vocabulary_violations(CameraSpec.defaulted(preset="chase")) == []

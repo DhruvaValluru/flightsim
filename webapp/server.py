@@ -649,6 +649,20 @@ def cameras_endpoint(request: CameraRequest) -> JSONResponse:
         aircraft=str(spec.aircraft.value),
         terrain_elevation_m=float(spec.terrain_elevation.value),
         frm=f"added from the page as a {preset} view")
+    if preset == "explicit":
+        # "You state the position yourself": the documented default is an
+        # offset with no world anchor, which the pose solver refuses. Start
+        # it where the ground observer stands (planned, so an edit in the
+        # table wins) and let the user move it from there.
+        from core.scenario.camera import GROUND_OBSERVER_LOCAL
+
+        start = "starts at the ground observer's spot; edit the position rows"
+        camera.plan("position_mode", "scene", frm=start)
+        camera.plan("position_north_m", GROUND_OBSERVER_LOCAL["north_m"], frm=start)
+        camera.plan("position_east_m", GROUND_OBSERVER_LOCAL["east_m"], frm=start)
+        camera.plan("position_alt_m",
+                    float(spec.terrain_elevation.value) + GROUND_OBSERVER_LOCAL["up_m"],
+                    frm=start)
     spec.cameras.append(camera)
     frame_traffic(spec)
     spec.cameras.pop()

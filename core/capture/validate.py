@@ -277,6 +277,16 @@ def vocabulary_violations(camera: CameraSpec,
             "camera.preset",
             f"{who}: unknown position mode {mode!r}; modelled: "
             f"{', '.join(POSITION_MODES)}"))
+    # The world-anchored views are solved from a scene or geographic
+    # placement; an offset has no world anchor, and the pose solver
+    # refused it only after the terrain and the flight were built.
+    if preset in ("ground", "tower", "explicit") and mode == "offset":
+        out.append(Violation(
+            "camera.preset",
+            f"{who}: the {preset} view is placed in the scene, so it needs "
+            f"position_mode 'scene' or 'geographic', not 'offset' (an "
+            f"offset follows the aircraft and has no world anchor); for a "
+            f"camera that follows the aircraft use the chase or wingman view"))
     aim = str(camera.aim_mode.value)
     if aim not in AIM_MODES:
         out.append(Violation(
