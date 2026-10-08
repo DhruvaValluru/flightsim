@@ -50,6 +50,17 @@
 
 DEFINE_LOG_CATEGORY(LogFlightSimRender);
 
+// UFlightSimRenderCommandlet::Main has grown past the size MSVC will optimise
+// (C4883, "function size suppresses optimizations"), which the engine's
+// warnings-as-errors turns into a failed build (measured on the owner's
+// machine, MSVC 14.44, 2026-10-08). The commandlet's Main only sets up and
+// drives the render -- the work is the engine's and the GPU's -- so an
+// unoptimised Main costs nothing measurable; the warning is silenced for this
+// file only, and splitting Main is left to a refactor of its own.
+#if defined(_MSC_VER)
+#pragma warning(disable : 4883)
+#endif
+
 namespace
 {
 	// The engine's unit cube is 100 cm across, so a scale of N gives an N-metre
