@@ -71,7 +71,7 @@ SCENARIOS = [
      "cockpit view of the c172p over the grand canyon at 2500 m flying east for 6 seconds", {}),
     ("747 cruise over the ocean",
      "chase view of the 747 over the ocean at 10000 m at noon for 6 seconds", {}),
-    ("hurricane (not supported: refused, or the word silently ignored?)",
+    ("hurricane (should be refused: not supported)",
      "fly the 747 through a hurricane", {}),
 ]
 

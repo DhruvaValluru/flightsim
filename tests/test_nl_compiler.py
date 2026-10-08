@@ -443,3 +443,14 @@ def test_a_direction_anywhere_in_the_flying_phrase_is_the_stated_heading(prompt,
 ])
 def test_the_wind_s_or_a_place_s_direction_is_not_a_heading(prompt):
     assert compile_prompt(prompt).heading.source == Source.DEFAULT
+
+
+@pytest.mark.parametrize("prompt", ["fly the 747 through a hurricane",
+                                    "fly the a320 into a typhoon",
+                                    "fly the c172p near a tropical cyclone"])
+def test_a_hurricane_is_refused_by_name_never_flown_as_calm_air(prompt):
+    """"fly the 747 through a hurricane" compiled with the word dropped and
+    flew calm air (measured on the owner's machine). Not modelled: refused."""
+    report = validate(compile_prompt(prompt), check_feasibility=False)
+    assert [v.constraint for v in report.violations] == ["prompt.unsupported"]
+    assert "hurricanes and tropical cyclones" in report.violations[0].message

@@ -1551,3 +1551,16 @@ def test_the_main_clip_and_its_panel_play_at_the_capture_rate(tmp_path, monkeypa
     source = inspect.getsource(RunManager._render_flow)
     assert 'frames, raw_clip, camera_ids, out / "capture_manifest.json")' in source
     assert "fps=clip_fps" in source
+
+
+def test_only_rendered_frames_count_never_their_label_images(tmp_path):
+    """A labelled run writes _mask, _class, _depth and _sensor PNGs beside
+    every frame; frame_*.png matched them all, so a one-frame preview
+    logged "5 frames ... = 0.2 s" (measured on the owner's machine) and a
+    clip's length read five times too long."""
+    from webapp.runs import rendered_frames
+
+    for name in ("frame_0000.png", "frame_0000_mask.png", "frame_0000_class.png",
+                 "frame_0000_depth.png", "frame_0000_sensor.png", "frame_0001.png"):
+        (tmp_path / name).write_bytes(_png())
+    assert [p.name for p in rendered_frames(tmp_path)] == ["frame_0000.png", "frame_0001.png"]

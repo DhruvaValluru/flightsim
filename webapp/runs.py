@@ -1837,6 +1837,19 @@ STORM_LOOK = {"sun_elev": 10.0, "sun_azim": 180.0, "exposure_bias": 9.6,
               "fog_density": 0.007}
 
 
+def rendered_frames(directory: Path) -> List[Path]:
+    """The rendered frames in a camera directory, ``frame_NNNN.png`` only.
+
+    A labelled run writes ``frame_NNNN_mask.png``, ``_class.png``,
+    ``_depth.png`` and ``_sensor.png`` beside every frame, and
+    ``frame_*.png`` matched them all: a one-frame preview counted as five
+    frames (a "clip"), and a clip's length read five times too long."""
+    import re
+
+    return sorted(p for p in Path(directory).glob("frame_*.png")
+                  if re.fullmatch(r"frame_\d{4}\.png", p.name))
+
+
 def _ffmpeg(command: List[str]):
     """Run ffmpeg; None when the binary is not on this machine.
 
@@ -2618,7 +2631,7 @@ class RunManager:
         made = []
         for camera_id in camera_ids:
             directory = frames / camera_id
-            if len(sorted(directory.glob("frame_*.png"))) < 2:
+            if len(rendered_frames(directory)) < 2:
                 continue          # a still is not a clip
             target = clips / f"{camera_id}.mp4"
             done = _ffmpeg([
@@ -2660,7 +2673,7 @@ class RunManager:
 
         for camera_id in camera_ids:
             directory = frames / camera_id
-            if not sorted(directory.glob("frame_*.png")):
+            if not rendered_frames(directory):
                 continue
             clip.parent.mkdir(parents=True, exist_ok=True)
             rate = (RunManager._capture_fps(manifest_path, camera_id)
@@ -3422,7 +3435,7 @@ class RunManager:
             if clip_ok:
                 # Say how long the clip is, so a short one can be checked
                 # against the clip selector without opening the file.
-                shot = len(list((frames / clip_camera).glob("frame_*.png")))
+                shot = len(rendered_frames(frames / clip_camera))
                 rate = self._capture_fps(out / "capture_manifest.json", clip_camera)
                 run.push("encoding", f"clip: {shot} frames of {clip_camera} at "
                                      f"{rate:.1f} fps = {shot / rate:.1f} s of flight")
