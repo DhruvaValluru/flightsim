@@ -2001,37 +2001,38 @@ def render_quality() -> str:
 
 
 #: The storm weather (core/scene/storm_weather.py, FlightSimWeather.cpp) is
-#: OPT-IN beside the weather look: FLIGHTSIM_WEATHER_BACKEND=procedural
+#: ON by default beside the weather look (the owner's rule); FLIGHTSIM_WEATHER_BACKEND=off
 #: (deterministic drops) or niagara (the hand-built NS_FlightSimRain)
 #: adds -weather-backend= to the render; unset or "off" adds nothing, so
 #: every pinned command stands.
 WEATHER_BACKENDS = ("off", "procedural", "niagara")
 
 
+#: The web app's weather defaults -- the owner's rule (2026-10-09, "why do
+#: I have to add all these extra commands"): the storm weather ON
+#: (procedural), the rain's opacity times WEATHER_DEFAULT_GAIN, the
+#: cinematic style. FLIGHTSIM_WEATHER_BACKEND=off, FLIGHTSIM_RAIN_GAIN=1
+#: and FLIGHTSIM_RAIN_STYLE=physical are the way back to the physics.
+WEATHER_DEFAULT_BACKEND = "procedural"
+WEATHER_DEFAULT_GAIN = 4.0
+WEATHER_DEFAULT_STYLE = "cinematic"
+
+
 def weather_backend_flags() -> List[str]:
-    """The render's -weather-backend= token, or none; ValueError names an
-    unknown backend."""
-    backend = os.environ.get("FLIGHTSIM_WEATHER_BACKEND", "off").strip() or "off"
+    """The render's -weather-backend=, -rain-gain= and -rain-style= tokens
+    (the defaults above unless the environment says otherwise; none when
+    the backend is off); ValueError names an unknown backend or style."""
+    backend = os.environ.get("FLIGHTSIM_WEATHER_BACKEND", "").strip() or WEATHER_DEFAULT_BACKEND
     if backend not in WEATHER_BACKENDS:
         raise ValueError(f"FLIGHTSIM_WEATHER_BACKEND={backend!r} is not one of "
                          f"{list(WEATHER_BACKENDS)}")
     if backend == "off":
         return []
-    flags = [f"-weather-backend={backend}"]
-    # FLIGHTSIM_RAIN_GAIN=N: the drops' opacity times N (1 = the physics,
-    # faint from a fast aircraft; more shows the rain, recorded as such).
-    gain = os.environ.get("FLIGHTSIM_RAIN_GAIN", "").strip()
-    if gain:
-        flags.append(f"-rain-gain={float(gain):g}")
-    # FLIGHTSIM_RAIN_STYLE=cinematic: the rain an observer sees (the drops'
-    # fall and the wind over a long exposure, the camera's motion left
-    # out); physical (the default) is what a camera on the aircraft records.
-    style = os.environ.get("FLIGHTSIM_RAIN_STYLE", "").strip().lower()
-    if style:
-        if style not in ("physical", "cinematic"):
-            raise ValueError(f"FLIGHTSIM_RAIN_STYLE={style!r} is not physical or cinematic")
-        flags.append(f"-rain-style={style}")
-    return flags
+    gain = float(os.environ.get("FLIGHTSIM_RAIN_GAIN", "").strip() or WEATHER_DEFAULT_GAIN)
+    style = (os.environ.get("FLIGHTSIM_RAIN_STYLE", "").strip().lower() or WEATHER_DEFAULT_STYLE)
+    if style not in ("physical", "cinematic"):
+        raise ValueError(f"FLIGHTSIM_RAIN_STYLE={style!r} is not physical or cinematic")
+    return [f"-weather-backend={backend}", f"-rain-gain={gain:g}", f"-rain-style={style}"]
 
 
 def exposure_bias_for(elevation_deg: float):

@@ -20,3 +20,10 @@ tiles"). `FFlightSimGoogleTiles::Requested` and
 `core/scenario/card.py google_tiles_requested` are ON unless
 `FLIGHTSIM_GOOGLE_TILES=off`; a render that cannot draw the tiles refuses
 by name. Do not make them opt-in again.
+
+## The web app's weather is on by default
+
+Owner's rule, 2026-10-09 ("why do I have to add all these extra
+commands"). `webapp/runs.py weather_backend_flags` sends the storm weather
+(procedural), rain gain 4 and the cinematic rain style unless the
+environment says otherwise. Do not make them opt-in again.

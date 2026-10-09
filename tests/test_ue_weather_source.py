@@ -205,10 +205,13 @@ def test_the_storm_weather_is_opt_in_and_replaces_the_rain_particles_when_asked(
 def test_the_web_app_asks_for_the_storm_weather_only_when_told(monkeypatch):
     from webapp import runs
 
-    monkeypatch.delenv("FLIGHTSIM_WEATHER_BACKEND", raising=False)
+    # The owner's rule (2026-10-09): on by default, cinematic, gain 4; off by name.
+    for name in ("FLIGHTSIM_WEATHER_BACKEND", "FLIGHTSIM_RAIN_GAIN", "FLIGHTSIM_RAIN_STYLE"):
+        monkeypatch.delenv(name, raising=False)
+    assert runs.weather_backend_flags() == ["-weather-backend=procedural", "-rain-gain=4",
+                                            "-rain-style=cinematic"]
+    monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "off")
     assert runs.weather_backend_flags() == []
-    monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "procedural")
-    assert runs.weather_backend_flags() == ["-weather-backend=procedural"]
     monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "hail")
     import pytest
     with pytest.raises(ValueError):
@@ -448,10 +451,11 @@ def test_the_rain_gain_is_a_stated_exaggeration_on_both_hosts_and_the_web_app(mo
     assert 'TEXT("rain-gain=")' in COMMANDLET and 'TEXT("rain-gain=")' in INTERACTIVE
     from webapp.runs import weather_backend_flags
     monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "procedural")
-    monkeypatch.delenv("FLIGHTSIM_RAIN_GAIN", raising=False)
-    assert weather_backend_flags() == ["-weather-backend=procedural"]
-    monkeypatch.setenv("FLIGHTSIM_RAIN_GAIN", "4")
-    assert weather_backend_flags() == ["-weather-backend=procedural", "-rain-gain=4"]
+    monkeypatch.setenv("FLIGHTSIM_RAIN_STYLE", "physical")
+    monkeypatch.setenv("FLIGHTSIM_RAIN_GAIN", "1")
+    assert weather_backend_flags() == ["-weather-backend=procedural", "-rain-gain=1", "-rain-style=physical"]
+    monkeypatch.setenv("FLIGHTSIM_RAIN_GAIN", "8")
+    assert weather_backend_flags() == ["-weather-backend=procedural", "-rain-gain=8", "-rain-style=physical"]
 
 
 def test_a_stated_rain_gets_an_overcast_deck_when_the_look_has_no_clouds():
@@ -480,6 +484,6 @@ def test_the_cinematic_rain_style_and_the_warm_up_step_guard(monkeypatch):
     assert 'TEXT("rain-style=")' in COMMANDLET and 'TEXT("rain-style=")' in INTERACTIVE
     from webapp.runs import weather_backend_flags
     monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "procedural")
-    monkeypatch.delenv("FLIGHTSIM_RAIN_GAIN", raising=False)
+    monkeypatch.setenv("FLIGHTSIM_RAIN_GAIN", "2")
     monkeypatch.setenv("FLIGHTSIM_RAIN_STYLE", "cinematic")
-    assert weather_backend_flags() == ["-weather-backend=procedural", "-rain-style=cinematic"]
+    assert weather_backend_flags() == ["-weather-backend=procedural", "-rain-gain=2", "-rain-style=cinematic"]
