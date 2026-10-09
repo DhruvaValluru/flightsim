@@ -2,7 +2,9 @@
 // streak_opacity): a point of the streak is covered by the drop for D / (|v| t) of the
 // exposure; a streak widened to a pixel keeps its light (times D / width); the weight
 // (how many drops a drawn one stands for) raises it, clamped at opaque. Faded at the
-// box's faces (no popping where the wrap folds a drop over) and in the first metre.
+// box's faces (no popping where the wrap folds a drop over) and in the first 30 cm
+// (a drop on the lens is the glass's job) -- not the first metre, which faded out
+// exactly the drops wide enough to see (the owner's frame, 2026-10-09).
 //
 // Inputs:
 //   Rel      float3  the pixel's engine position minus the component's (cm)
@@ -41,5 +43,5 @@ float width = max(widthCm, dist * PixelAngle);
 float coverage = (diameterCm / streak) * (widthCm / width) * Weight;
 float3 a = abs(Rel) / BoxHalf;
 float edge = (1.0 - R.Ss(0.8, 1.0, a.x)) * (1.0 - R.Ss(0.8, 1.0, a.y)) * (1.0 - R.Ss(0.8, 1.0, a.z));
-float nearFade = R.Ss(20.0, 100.0, dist);
+float nearFade = R.Ss(5.0, 30.0, dist);
 return saturate(coverage) * edge * nearFade;

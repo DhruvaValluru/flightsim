@@ -361,11 +361,13 @@ def test_a_storm_material_built_by_an_older_script_is_built_again():
     its own creator, so a graph change here reaches a machine that built
     the storm before it. The windshield's tonemapper move and the cloud's
     usage repair both yield to a stale stamp."""
-    assert re.search(r'^STORM_GENERATION = "\d+"$', SCRIPT, re.M)
+    generations = _tuple("STORM_GENERATIONS")
+    assert set(generations) == set(_tuple("STORM_MATERIALS"))   # one number per material, its own
+    assert all(re.fullmatch(r"\d+", g) for g in generations.values())
     stale = SCRIPT[SCRIPT.index("def storm_material_stale"):SCRIPT.index("def finish_storm")]
     assert "get_metadata_tag" in stale and "STORM_GENERATION_TAG" in stale
     stamp = SCRIPT[SCRIPT.index("def finish_storm"):SCRIPT.index("def storm_scattering")]
-    assert "set_metadata_tag(material, STORM_GENERATION_TAG, STORM_GENERATION)" in stamp
+    assert "set_metadata_tag(material, STORM_GENERATION_TAG, STORM_GENERATIONS[name])" in stamp
     maker = SCRIPT[SCRIPT.index("def _storm_material"):SCRIPT.index("_ASIDE = {}")]
     assert "storm_material_stale(name)" in maker
     # The old asset is set aside, never deleted before the new one is saved
@@ -402,3 +404,18 @@ def test_the_storm_weather_supersedes_the_lens_drops_and_the_debug_run_is_the_we
                    "mesh=mesh", "km\nahead"):
         assert needle in debug, needle
     assert "ahead" in DOC and "event_ahead_m" in DOC
+
+
+def test_the_drops_streak_over_a_daylight_shutter_and_the_near_ones_are_kept():
+    """The owner's storm frame (2026-10-09) showed no rain: the drops
+    streaked over the frame interval (0.2 s at 5 fps -- no camera meters
+    that in daylight) into nothing, and the first metre, the only drops
+    wide enough to see, was faded out. A stated daylight shutter when the
+    card has no triple, recorded; the fade over the first 30 cm."""
+    assert "constexpr double WeatherDefaultShutterS = 1.0 / 250.0;" in COMMANDLET
+    assert ("FMath::Min(static_cast<double>(StepsPerFrame) * DeltaSeconds, WeatherDefaultShutterS)"
+            in COMMANDLET)
+    assert 'TEXT("shutter_s")' in COMMANDLET
+    opacity = (SHADERS / "rain_drop_opacity.hlsl").read_text(encoding="utf-8")
+    assert "float nearFade = R.Ss(5.0, 30.0, dist);" in opacity
+    assert _tuple("STORM_GENERATIONS")["M_RainDrops"] >= "3"   # the shader body changed: rebuilt

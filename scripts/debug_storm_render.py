@@ -101,8 +101,10 @@ def main(argv=None) -> int:
     parser.add_argument("--terrain", default=None,
                         help="a bake stem under runs/terrain (default: the web app's scene for the prompt)")
     parser.add_argument("--flat", action="store_true", help="the bare slab, no terrain")
-    parser.add_argument("--width", type=int, default=640)
-    parser.add_argument("--height", type=int, default=360)
+    # 1280 x 720: at 640 x 360 a drop a metre from the camera is under a
+    # pixel and the rain cannot be judged.
+    parser.add_argument("--width", type=int, default=1280)
+    parser.add_argument("--height", type=int, default=720)
     args = parser.parse_args(argv)
     backends = args.backend or ["off", "procedural"]
 

@@ -546,13 +546,18 @@ STORM_SCATTERING_PROPERTIES = {
     "contribution": "const_multi_scattering_contribution",
     "occlusion": "const_multi_scattering_occlusion",
     "eccentricity": "const_multi_scattering_eccentricity"}
-#: The generation of the storm materials this script builds, stamped on
-#: each asset as metadata: an existing asset stamped with an older one (or
-#: none) is deleted and built again, so a change to a storm material's
+#: The generation of each storm material this script builds, stamped on
+#: the asset as metadata: an existing asset stamped with an older one (or
+#: none) is set aside and built again, so a change to a storm material's
 #: graph reaches a machine that built the storm before it without anyone
-#: remembering FLIGHTSIM_REBUILD_MATERIALS. Bump it with every such change.
-#: 2: M_StormCell gained STORM_SCATTERING (2026-10-08).
-STORM_GENERATION = "2"
+#: remembering FLIGHTSIM_REBUILD_MATERIALS. Bump a material's number with
+#: every change to its graph or its shader body -- its own only: a rebuilt
+#: M_StormCell recompiles its cloud shaders for a quarter of an hour
+#: (measured 2026-10-09), so the rain's change must not cost the cloud's.
+#: M_StormCell 2: STORM_SCATTERING (2026-10-08). M_RainDrops 3: the near
+#: fade shortened to 30 cm (rain_drop_opacity.hlsl, 2026-10-09).
+STORM_GENERATIONS = {"M_RainDrops": "3", "M_RainSplash": "2", "M_LightningChannel": "2",
+                     "M_StormCell": "2", "M_WindshieldRain": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -1663,7 +1668,8 @@ def create_rain_streaks():
 def _storm_material(name):
     """A storm-weather material (STORM_MATERIALS), made by its own helper so
     the W5 world list stays exactly the world's; None when it already exists
-    at this STORM_GENERATION (an older generation is deleted and built again)."""
+    at its STORM_GENERATIONS number (an older generation is set aside and
+    built again)."""
     if name not in STORM_MATERIALS:
         raise RuntimeError(f"{name} is not one of STORM_MATERIALS")
     full = f"{PATH}/{name}"
@@ -1679,11 +1685,11 @@ def _storm_material(name):
             unreal.EditorAssetLibrary.delete_asset(aside)
         if not unreal.EditorAssetLibrary.rename_asset(full, aside):
             raise RuntimeError(f"{full} was built by an older generation of this script "
-                               f"(this one is {STORM_GENERATION}) and could not be set aside")
+                               f"(this one is {STORM_GENERATIONS[name]}) and could not be set aside")
         _ASIDE[name] = aside
         print(f"MATERIAL-REBUILT: {full} (built by an older generation of this script; "
-              f"this one is {STORM_GENERATION}; the old asset is kept at {aside} until the "
-              f"new one is saved)")
+              f"this one is {STORM_GENERATIONS[name]}; the old asset is kept at {aside} until "
+              f"the new one is saved)")
     return new_material(name)
 
 
@@ -1710,19 +1716,19 @@ def restore_storm_materials():
 def storm_material_stale(name):
     """True when /Game/FlightSim/<name> exists but was built by an older
     generation of this script (its STORM_GENERATION_TAG metadata is not
-    STORM_GENERATION): its graph is not the one this script describes."""
+    STORM_GENERATIONS[name]): its graph is not the one this script describes."""
     full = f"{PATH}/{name}"
     if not unreal.EditorAssetLibrary.does_asset_exist(full):
         return False
     stamped = unreal.EditorAssetLibrary.get_metadata_tag(
         unreal.EditorAssetLibrary.load_asset(full), STORM_GENERATION_TAG)
-    return str(stamped) != STORM_GENERATION
+    return str(stamped) != STORM_GENERATIONS[name]
 
 
 def finish_storm(material, name):
-    """finish() with the STORM_GENERATION stamp saved on the asset; the old
-    asset set aside for this rebuild (if any) is deleted only now."""
-    unreal.EditorAssetLibrary.set_metadata_tag(material, STORM_GENERATION_TAG, STORM_GENERATION)
+    """finish() with the material's STORM_GENERATIONS stamp saved on the
+    asset; the old asset set aside for this rebuild (if any) is deleted only now."""
+    unreal.EditorAssetLibrary.set_metadata_tag(material, STORM_GENERATION_TAG, STORM_GENERATIONS[name])
     finish(material, name)
     aside = _ASIDE.pop(name, None)
     if aside is not None and unreal.EditorAssetLibrary.does_asset_exist(aside):

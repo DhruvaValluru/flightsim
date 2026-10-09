@@ -89,6 +89,9 @@ namespace
 	constexpr int32 StormMeterRounds = 5;
 	constexpr double StormMeterMaxStops = 8.0;
 	constexpr int32 StormMeterSettleCaptures = 4;
+	// The exposure the rain's drops streak over when the card states no
+	// camera triple: 1/250 s, a daylight video camera's order (stated).
+	constexpr double WeatherDefaultShutterS = 1.0 / 250.0;
 
 	// A placeholder airframe: boxes, roughly 747-shaped, with real hinges.
 	//
@@ -2298,6 +2301,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// The stops the storm meter (before the first frame) opened the manual
 	// exposure by; 0 when no cell is drawn. The scene record states it.
 	double StormMeterOpened = 0.0;
+	bool bWeatherShutterRecorded = false;
 	double AppliedEv100 = 0.0;
 	bool bAppliedEv100 = false;
 	// S4: the card's shutter, when the card states the triple: the window
@@ -3994,8 +3998,24 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			WeatherView.CameraCm = Capture->GetComponentLocation();
 			WeatherView.HorizontalFovDeg = Capture->FOVAngle;
 			WeatherView.WidthPx = Width;
+			// The exposure the drops streak over: the card's shutter when it
+			// states one; else a daylight camera's (WeatherDefaultShutterS),
+			// never the frame interval -- at 5 frames a second that is a
+			// 0.2 s exposure no camera meters in daylight, and it smears
+			// every drop over 10 m of streak into nothing (Garg & Nayar:
+			// a streak's coverage is D / (|v| t); the owner's frame,
+			// 2026-10-09, showed no rain at all).
 			WeatherView.ShutterSeconds = ExposureShutterSeconds > 0.0
-				? ExposureShutterSeconds : static_cast<double>(StepsPerFrame) * DeltaSeconds;
+				? ExposureShutterSeconds
+				: FMath::Min(static_cast<double>(StepsPerFrame) * DeltaSeconds, WeatherDefaultShutterS);
+			if (!bWeatherShutterRecorded && Weather.Record.IsValid())
+			{
+				Weather.Record->SetNumberField(TEXT("shutter_s"), WeatherView.ShutterSeconds);
+				Weather.Record->SetStringField(TEXT("shutter_basis"), ExposureShutterSeconds > 0.0
+					? TEXT("the card camera's exposure triple")
+					: TEXT("a daylight camera's shutter (stated), or the frame interval when shorter"));
+				bWeatherShutterRecorded = true;
+			}
 			Weather.Advance(WeatherView);
 		}
 		World->SendAllEndOfFrameUpdates();
