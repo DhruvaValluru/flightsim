@@ -471,3 +471,16 @@ def test_a_storm_at_a_stated_distance_records_it_in_the_event_detail():
     plain = compile_prompt("fly the c172 through a thunderstorm at 900 m")
     assert plain.weather_event.detail == {"aim": "core"}
     assert plain.weather_event.detail.get("ahead_m") is None
+
+
+def test_a_thousands_separator_does_not_split_a_number():
+    """The owner's A-4 "at 11,000 feet" (2026-10-09) compiled to "000 feet",
+    an altitude of 0 m, and was refused for terrain clearance."""
+    from core.nl.compiler import strip_thousands
+
+    assert strip_thousands("at 11,000 feet and 1,234,567 m, rain, snow, 1,5") == \
+        "at 11000 feet and 1234567 m, rain, snow, 1,5"
+    spec = compile_prompt("fly the a4 at 11,000 feet")
+    assert float(spec.altitude.value) == pytest.approx(3352.8)
+    assert spec.altitude.frm == "11000 feet"
+    assert float(compile_prompt("fly the 747 at 35,000 ft and 250 kt").altitude.value) == pytest.approx(10668.0)

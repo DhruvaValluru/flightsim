@@ -91,6 +91,19 @@ WIND_RELATIVE: Dict[str, float] = {
 }
 
 NUMBER = r"(-?\d+(?:\.\d+)?)"
+#: "11,000 feet" is eleven thousand feet: the thousands separator is
+#: dropped before any number is read (measured 2026-10-09: the owner's
+#: A-4 "at 11,000 feet" compiled to "000 feet", an altitude of 0 m, and was
+#: refused for terrain clearance). Only a comma between a digit and
+#: exactly three digits; "1,5" and lists ("rain, snow") are left alone.
+THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}\b)")
+
+
+def strip_thousands(text: str) -> str:
+    """``11,000`` -> ``11000``, ``1,234,567`` -> ``1234567``."""
+    while THOUSANDS.search(text):
+        text = THOUSANDS.sub("", text)
+    return text
 
 #: The regex path's aircraft question (asked beside the camera one, see
 #: :func:`camera_questions`): the options are plain names, each a phrase
@@ -1449,7 +1462,7 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
     is the page's answer round ([{id, answer}]); the regex path has
     two questions it can answer, aircraft and camera_view
     (:func:`camera_questions`)."""
-    text = " ".join(prompt.lower().split())
+    text = strip_thousands(" ".join(prompt.lower().split()))
     # The second aircraft's clause leaves the text first: its airframe
     # is not the primary and its range is not an altitude.
     traffic, text = _traffic(text)
