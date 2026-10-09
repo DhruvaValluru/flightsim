@@ -247,7 +247,15 @@ a speckle, nothing else. Three causes, all physical in origin, all fixed:
 
 `scripts/debug_storm_render.py` now prints the storm meter's line and the
 first and last frame's luma (0..255, the mean and the 90th percentile); a
-frame whose 90th percentile is under 32 is `RENDERED-DARK`, not a pass. A material built before this (`M_StormCell`
+frame whose 90th percentile is under 32 is `RENDERED-DARK`, not a pass.
+
+Measured on the owner's machine (2026-10-09, the storm look, 640x360): the
+weather off renders at luma mean 24 / p90 48; the storm on, the meter read
+p90 0.055 (mean 0.028) and opened 1.65 stops over three rounds to p90 0.365
+(mean 0.304); the frames came out at mean 78 / p90 93. The first render of
+the rebuilt `M_StormCell` compiled its cloud shaders for 14 minutes on a
+machine with 1.5 GB free (single compile jobs of one to two minutes each);
+the derived-data cache keeps them, so every later render skips that. A material built before this (`M_StormCell`
 without the node) is rebuilt by the script on its own: every storm
 material is stamped with `STORM_GENERATION` as asset metadata and an older
 stamp is built again -- the old asset set aside as `<name>_prev` until the

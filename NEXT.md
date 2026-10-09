@@ -42,8 +42,13 @@ nothing"): M_StormCell carries a VolumetricAdvancedMaterialOutput
 an older build is rebuilt by the script itself), the deck is capped to a
 nimbostratus depth, the commandlet meters a frame read back before frame
 0 (look_applied.storm_exposure; -storm-meter-target=), the window adapts
-on the engine's histogram. UNCOMPILED and UNMEASURED here: the next
-Windows run tells (debug_storm_render.py prints RENDERED-DARK if not).
+on the engine's histogram. MEASURED (2026-10-09): the storm frame now
+renders at luma mean 78 / p90 93 (the meter opened 1.65 stops; the look
+without the storm sits at 24 / 48); the rebuilt M_StormCell's first
+render compiled cloud shaders for 14 minutes, once. The first rebuild
+had failed on a node property the engine does not have and deleted the
+old asset first; the script now keeps the old asset aside until the new
+one is saved.
 OPEN for the owner: the two
 weather paths overlap (both draw drops, storm clouds and lightning);
 which one to keep, or how to fold them together, is the owner's call.
