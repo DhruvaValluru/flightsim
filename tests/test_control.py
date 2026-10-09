@@ -105,6 +105,26 @@ def test_engage_writes_the_measured_signs():
     assert fdm.props.get("ap/sign/elevator") == ap.signs.elevator
 
 
+def test_engage_measures_the_signs_at_the_aircrafts_own_condition():
+    """A light aircraft engages at ITS cruise.
+
+    measure()'s default probe condition is a jet's (6000 m, 280 kt). The
+    c172p cannot trim there, so engage() raised TrimError from inside the
+    sign probe and no Cessna ever flew under hold_state (measured,
+    2026-10-09). The probe now runs at the condition the aircraft has just
+    trimmed at, which is the one condition it is known to trim at.
+    """
+    from core.control import signs
+
+    signs._CACHE.pop("c172p", None)
+    fdm = flying("c172p", altitude_m=1500.0, cas_kt=100.0)
+    ap = Autopilot(fdm)
+    ap.engage()
+    assert ap.engaged
+    assert ap.signs.aircraft == "c172p"
+    assert fdm.props.get("ap/sign/elevator") == ap.signs.elevator
+
+
 # -- engage -------------------------------------------------------------
 
 
