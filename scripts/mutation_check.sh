@@ -216,7 +216,8 @@ mutate core/scenario/runner.py \
     "unimplemented-condition guard" tests/test_validation_and_run.py || failures=$((failures+1))
 
 mutate core/control/autopilot.py \
-    '        self.signs = measure(base)' \
+    '        self.signs = measure(base, altitude_m=state.altitude_m,
+                             cas_kt=state.cas_kt)' \
     '        from .signs import ControlSigns
         self.signs = ControlSigns(base, 1.0, 1.0, 1.0)  # MUTATED: assume signs' \
     "measured control signs" tests/test_control.py || failures=$((failures+1))
@@ -5580,6 +5581,33 @@ mutate core/nl/geocode.py \
     'LOCATIVE = (r"|over|above|near|around|across|in|at|from|to|towards?|outside|"  # MUTATED: any mention' \
     "a listed place is read only after a location word" \
     tests/test_geocode.py || failures=$((failures+1))
+
+# -- The route (docs/ROUTE.md): a drawn flight path is validated by name,
+# flown by the autopilot's setpoints, held to the clearance floor, and the
+# projection's own hold_state refusal is dropped only for the projection.
+mutate core/scenario/validate.py \
+    '    report.violations.extend(validate_route(spec))' \
+    '    pass  # MUTATED: the route block is not validated' \
+    "route: the validator refuses the route block's problems by name" \
+    tests/test_route_core.py -k "hold_state or route_turn or every_other_name" || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '                    guidance.update(fdm.state())' \
+    '                    pass  # MUTATED: the route guidance never ticks after engage' \
+    "route: the guidance steers the autopilot along the line at 2 Hz (the closure sees the cross-track)" \
+    tests/test_route_core.py -k "90_degree_route" || failures=$((failures+1))
+
+mutate webapp/route_map.py \
+    '    clearance_problem = terrain_clearance_problem(min_clearance)' \
+    '    clearance_problem = None  # MUTATED: the clearance floor is never checked' \
+    "route: a line flown within the clearance floor is refused route.terrain_clearance" \
+    tests/test_route_map.py -k "into_the_hill" || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '                                 if v["constraint"] != "route.hold_state"]' \
+    '                                 if True]  # MUTATED: the projection'"'"'s own refusal is kept' \
+    "route: /run drops the validator's route.hold_state only when the host projection switched the autopilot off" \
+    tests/test_route_map.py -k "pinned_order" || failures=$((failures+1))
 
 if [ "$guard_n" -ne "$total" ]; then
     echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2

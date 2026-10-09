@@ -44,6 +44,7 @@ from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
 from webapp.runs import (  # noqa: E402
     CLIP_SECONDS,
+    HOST_OPEN_LOOP_FROM,
     PREFETCH,
     prefetch_terrain_for,
     RunManager,
@@ -67,6 +68,7 @@ from webapp.runs import (  # noqa: E402
     project_for_ue_host,
     refuse_placeholder_mesh,
 )
+from webapp.route_map import plan_route_flight  # noqa: E402
 
 app = FastAPI(title="flightsim", docs_url=None, redoc_url=None)
 
@@ -242,6 +244,21 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     # omits a default block; from_dict reads a default one back as absent,
     # so the digest is unmoved).
     spec_dict["lighting"] = spec.lighting.to_dict()
+    # The route section (docs/ROUTE.md), the lighting rule: always present
+    # so the route map has a block to write into (the canonical form omits
+    # a default block; from_dict reads a default one back as absent, so
+    # the digest is unmoved). The table shows ONE read-only summary row,
+    # "N points, L km" (RouteSpec.summary, the way camera moves are
+    # summarised), never the list: the page edits the block through the
+    # map, not the row, and the row's section tells it so.
+    spec_dict["route"] = spec.route.to_dict()
+    waypoints = spec.route.waypoints
+    fields.append({
+        "section": "route", "name": "waypoints",
+        "value": spec.route.summary(), "unit": waypoints.unit,
+        "source": str(waypoints.source), "from": waypoints.frm,
+        "std": waypoints.std, "detail": waypoints.detail,
+    })
     # The time-of-day row's entry (omitted from the canonical form while
     # unstated; read back unstated, so the digest is unmoved).
     spec_dict.setdefault("environment", {}).setdefault(
@@ -773,6 +790,89 @@ def camera_placer_script():
                         media_type="text/javascript")
 
 
+class RouteTerrainRequest(BaseModel):
+    """The route map's scene: the spec the page holds."""
+
+    spec: Dict[str, Any]
+
+
+@app.post("/route/terrain")
+def route_terrain_endpoint(request: RouteTerrainRequest) -> JSONResponse:
+    """The route map's ground (docs/ROUTE.md step 2): the raster
+    pick_scene chooses for this spec, sampled on the placer's grid over
+    the circle the aircraft can reach in the run, with every limit the
+    map checks against served from core/control/route.py."""
+    from core.control.route import RouteError
+    from webapp.camera_placer import PlacementError
+    from webapp.route_map import terrain_payload_for_route
+
+    try:
+        spec = ScenarioSpec.from_dict(request.spec)
+    except (ValueError, KeyError) as exc:
+        return JSONResponse({"error": f"spec did not parse: {exc}"},
+                            status_code=400)
+    try:
+        return JSONResponse(terrain_payload_for_route(spec, pick_scene(spec),
+                                                      CLIP_SECONDS))
+    except RouteError as exc:
+        # A stated bank limit the autopilot does not fly: by name, the
+        # validator's shape, rather than a radius drawn at a guess.
+        return JSONResponse({"refused": exc.constraint, **exc.to_dict()},
+                            status_code=400)
+    except PlacementError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+
+
+class RouteCheckRequest(BaseModel):
+    """The physics check: the drawn line (scene-frame points
+    ``{east_m, north_m, alt_m}``) and the map's bank limit, with the spec
+    the page holds. ``waypoints`` and ``bank_limit_deg`` are untyped on
+    purpose: a malformed list or limit is route.shape / route.bank_limit
+    BY NAME from the route's own validator, not a schema error."""
+
+    spec: Dict[str, Any]
+    waypoints: Any = None
+    bank_limit_deg: Any = None
+
+
+@app.post("/route/check")
+def route_check_endpoint(request: RouteCheckRequest) -> JSONResponse:
+    """Fly the drawn line for real (docs/ROUTE.md step 5; webapp.route_map
+    .check_route). 400 with the validator's violations when the line
+    cannot be flown as drawn (nothing flown); 409 with the pre-flight's
+    violations when it was flown and came too close to the ground or
+    missed the line (the flown track rides along, so the page can show
+    where); 200 with the flown track, the measures and the closure
+    otherwise. Every violation carries its plain sentence."""
+    from webapp.route_map import check_route
+
+    try:
+        spec = ScenarioSpec.from_dict(request.spec)
+    except (ValueError, KeyError) as exc:
+        return JSONResponse({"error": f"spec did not parse: {exc}"},
+                            status_code=400)
+    try:
+        payload = check_route(spec, request.waypoints, request.bank_limit_deg)
+    except Exception as exc:   # the pre-flight could not fly: said, not a 500
+        return JSONResponse({"error": f"the route pre-flight could not fly: "
+                                      f"{type(exc).__name__}: {exc}"},
+                            status_code=409)
+    payload["violations"] = [_plain(v) for v in payload["violations"]]
+    if payload["ok"]:
+        return JSONResponse(payload)
+    status = 400 if payload["stage"] == "validation" else 409
+    return JSONResponse({"refused": payload["violations"][0]["constraint"], **payload},
+                        status_code=status)
+
+
+@app.get("/route_map.js")
+def route_map_script():
+    """The route map's module, a script the main page loads (explicit,
+    like /camera3d.js)."""
+    return FileResponse(STATIC / "route_map.js",
+                        media_type="text/javascript")
+
+
 @app.post("/run")
 def run_endpoint(request: RunRequest) -> JSONResponse:
     try:
@@ -815,8 +915,8 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
                             status_code=409)
     # PLANNER ORDER (load-bearing, pinned by tests): place_on_scene ->
     # apply_weather_event -> apply_historical_weather ->
-    # plan_terrain_environment -> derive_seed -> plan_terrain_flight ->
-    # plan_flyable_defaults -> plan_trim_recovery ->
+    # plan_terrain_environment -> plan_route_flight -> derive_seed ->
+    # plan_terrain_flight -> plan_flyable_defaults -> plan_trim_recovery ->
     # plan_camera_defaults -> project_for_ue_host -> validate.
     # Rationale: placement fixes coordinates; the event composes its
     # environment; DATED real weather wins over composition (ERA5 wind is
@@ -826,6 +926,16 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # wind and orographic field it will record; envelope floors come last
     # because they depend on the final altitude.
     plan_terrain_environment(spec)
+    # The route (docs/ROUTE.md): a stated route is flown for real here --
+    # JSBSim, the autopilot and the route guidance over the scene's own
+    # raster -- after the terrain environment (the same planned wind and
+    # orographic field the run will record) and BEFORE the seed, so the
+    # pre-flight flies the spec the page confirmed. A line that comes
+    # within the route's clearance floor or that the autopilot cannot
+    # close on refuses by name in the verdict below; a user-stated
+    # altitude is never moved. The flight's control schedule and card
+    # block ride on this spec object into the render flow.
+    route_refusal = plan_route_flight(spec)
     # The seed derives BEFORE the digest is answered. A run can be
     # stochastic even with turbulence word "none" -- lee-rotor over windy
     # terrain, or surface thermals whose positions draw from the seed --
@@ -835,8 +945,14 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
     # Terrain scenes: pre-fly the scripted track over the scene's own
     # raster (a defaulted altitude may be raised, recorded; a stated
-    # altitude that cannot keep clearance refuses by name below).
-    clearance_refusal = plan_terrain_flight(spec)
+    # altitude that cannot keep clearance refuses by name below). Skipped
+    # when a route is stated: the route pre-flight above IS the terrain
+    # check for that run -- it flew the line the clip will follow over
+    # the same raster, span stations included, against the route's own
+    # floor -- and the doublet track it would pre-fly is not the track
+    # the card carries.
+    clearance_refusal = (None if not spec.route.is_default()
+                         else plan_terrain_flight(spec))
     # The track planner may have raised a system-chosen altitude into air
     # where the system-chosen airspeed no longer flies: re-plan the
     # defaults at the final altitude (stated values still never move),
@@ -857,9 +973,26 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # Validation governs the edited spec too: the run endpoint re-validates
     # everything it is handed, whatever the page claimed.
     verdict = _validation_payload(spec)
+    # A stated route on the PROJECTED spec: the projection just switched
+    # the autopilot off (HOST_OPEN_LOOP_FROM: the render host has none),
+    # and the validator, which says only the autopilot can follow a
+    # route, refuses route.hold_state on it. That refusal is answered for
+    # this run -- the pre-flight above flew the route closed loop and the
+    # host steers from the schedule it commanded (plan_route_flight; the
+    # card's route block says so) -- so it is dropped HERE, and only when
+    # the projection is why the autopilot is off: a user who switched it
+    # off keeps the refusal (the field carries their provenance).
+    if (not spec.route.is_default()
+            and str(spec.hold_state.frm) == HOST_OPEN_LOOP_FROM):
+        verdict["violations"] = [v for v in verdict["violations"]
+                                 if v["constraint"] != "route.hold_state"]
+        verdict["ok"] = not verdict["violations"]
     if clearance_refusal is not None:
         verdict["ok"] = False
         verdict["violations"].append(clearance_refusal)
+    if route_refusal is not None:
+        verdict["ok"] = False
+        verdict["violations"].append(route_refusal)
     if randomization_refusal is not None:
         verdict["ok"] = False
         verdict["violations"].append(randomization_refusal)

@@ -277,3 +277,51 @@ from the card's origin.
   `tests/test_route_page.py`.
 * Docs (this file's results section, README, VALIDITY, NEXT) after the
   parts are measured.
+
+## Built and measured (2026-10-09, this branch, JSBSim 1.2.4 on Linux)
+
+Everything above the ownership list exists, with these deviations from
+the contract, each for a measured reason:
+
+* **Guidance past the end.** The target continues along the last leg's
+  extension rather than clamping to the end point: clamping makes the
+  bearing to a point the aircraft is about to pass swing through 180
+  degrees in the last lookahead, which the heading hold turns into a
+  wobble. `Route.point_at` extrapolates beyond either end; `project`
+  still clamps the distance to the line.
+* **`route.turn`'s numbers.** `actual` is the tightest implied radius and
+  `limit` is the enforced floor, 0.9 x the radius at the bank limit, so
+  `actual < limit` is exactly the refusal; the message names the full
+  radius as well.
+* **`route.closure`** (not in the first contract): the pre-flight's
+  refusal when the autopilot cannot close on the drawn line. Measured
+  reason it exists: two legs meeting at 45 degrees pass `route.turn` and
+  still overshoot 117 m at the c172p's 670 m radius, past the 75 m
+  tolerance.
+* **The host's entry rule, mirrored exactly.** `_fly_clearance_track`
+  applies a schedule entry as the host does (aileron set, elevator =
+  latched trim + entry, rudder as given, held between entries) and takes
+  a `clock` argument: the doublet keeps JSBSim's sim time, which the
+  engine start has already advanced to 4.875 s when the loop begins; the
+  route replay uses the run clock the render commandlet steps on.
+* **A fix the feature needed.** `Autopilot.engage()` measured the
+  control signs at the probe's default 6000 m / 280 kt, where the c172p
+  cannot trim, so no Cessna had ever flown under `hold_state`. The probe
+  now runs at the aircraft's own trimmed condition.
+
+Measured: the c172p at 1500 m / 100 kt (107.6 kt true, 670 m radius at
+25 degrees) flies a 2.6 km route -- 600 m north, a 1100 m quarter circle
+to the right, 300 m east -- with 40 m worst cross-track (tolerance 75),
+1.8 m of its profile (tolerance 30), the end reached, 20 degrees of
+bank; the same spec without the block flies straight, no route columns,
+and runs without a route are byte-identical to the previous runner for
+the 747, the A-4 and a turbulent c172p (digest, columns, closure,
+manifest keys). A 20 s flat c172p route: 42 m worst cross-track in the
+pre-flight, 13.4 m replay divergence. A 30 s line over a 1400 m
+synthetic hill at 1500 m: refused `route.terrain_clearance` at 100.5 m.
+The page, driven in headless Chromium against the live server
+(tests/test_route_page.py and a scripted run of the real app): the map
+opens on the scene `pick_scene` names, the checks carry their rule
+names, Self adjust cuts an over-long line to the run, Check with the
+physics returns the flown track, Use this path writes the user-stated
+block and heading, no console errors.

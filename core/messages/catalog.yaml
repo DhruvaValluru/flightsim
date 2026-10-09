@@ -1092,3 +1092,30 @@ render.timeout:
 look.xplane_lighting:
   sentence: "The lighting colours taken from the simulator's sky tables could not be applied to this render."
 
+
+# -- the route (core/control/route.py, docs/ROUTE.md) -------------------------
+
+route.shape:
+  sentence: "The flight path cannot be read as a line: it needs at least one point after the start and at most {limit}, each a position and a height, with no point on the start and no two points on top of each other."
+  hint: "Draw the path again on the route map."
+route.bank_limit:
+  sentence: "The bank limit for the path has to be more than 5 and at most {limit} degrees, not {actual}."
+  hint: "Leave the bank limit at the autopilot's own 25 degrees, or choose one between 5 and 60."
+route.time:
+  sentence: "The path is too long for the flight: it would take {actual} s at the aircraft's true airspeed, and the flight lasts {limit} s."
+  hint: "Shorten the path, or ask for a longer flight."
+route.turn:
+  sentence: "A bend in the path is tighter than the aircraft can turn at its bank limit (a radius of about {actual} m where at least {limit} m is needed)."
+  hint: "Widen the bend, or let the map adjust the path."
+route.climb:
+  sentence: "A stretch of the path climbs or descends faster than the autopilot will demand ({actual} m/s where the limit is {limit} m/s; this is the controller's own limit, not a measured climb figure)."
+  hint: "Spread the height change over a longer stretch of the path."
+route.hold_state:
+  sentence: "A flight path is drawn but the autopilot is switched off, and only the autopilot can follow it."
+  hint: "Switch the autopilot on in the review table, or clear the path."
+route.terrain_clearance:
+  sentence: "Flown as drawn, the path comes within {actual} m of the ground at some point, closer than the {limit} m it must keep."
+  hint: "Move that stretch sideways or raise its height, or let the map adjust the path."
+route.closure:
+  sentence: "Flown as drawn, the autopilot could not stay on the path: it strayed by {actual} where it must stay within {limit}, so the flight would produce no output."
+  hint: "Widen the bends or spread the height changes, or let the map adjust the path."

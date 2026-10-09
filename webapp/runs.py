@@ -877,16 +877,48 @@ PLANNABLE_SOURCES = ("default", "model", "derived")
 SYNTHESISED_SCENE_KEYS = ("control", "synthesised")
 
 
+#: The clock a control script's ``t_s`` is compared against in
+#: :func:`_fly_clearance_track`. ``"sim"`` is JSBSim's own
+#: simulation/sim-time-sec, which the engine start has already advanced
+#: when the loop begins (measured: 4.875 s on the c172p and the 747);
+#: ``"run"`` is seconds since the loop's first step, the clock the render
+#: commandlet steps the card on (FlightSimRenderCommandlet.cpp: SimTime
+#: from 0.0) and the clock the route's control schedule is cut on
+#: (core/control/route.py control_schedule). The doublet keeps "sim": it
+#: is what every terrain plan to date was flown with, and moving it would
+#: move every planned altitude -- an owner's decision, flagged, not a
+#: side effect of the route.
+SCRIPT_CLOCKS = ("sim", "run")
+
+
 def _fly_clearance_track(spec: ScenarioSpec, ground, script,
-                         seconds: float, orographic=None):
+                         seconds: float, orographic=None,
+                         clock: str = "sim"):
     """The scripted flight on the same JSBSim, for the clearance gate.
 
     The Zermatt valley run's fly_headless, generalised: the SAME control
-    script the card will carry (deltas on the trimmed aileron, held until
-    the next entry -- the parity-tested convention) and the SAME steady
-    wind, so drift shapes the track that gets checked. Turbulence is not
-    modelled here (visual-only realisations; the clearance margin covers
-    the excursion scale the recordings show).
+    script the card will carry and the SAME steady wind, so drift shapes
+    the track that gets checked. Turbulence is not modelled here
+    (visual-only realisations; the clearance margin covers the excursion
+    scale the recordings show).
+
+    The entries are applied exactly as the UE host applies the card's
+    ``control_inputs`` (FlightSimScenarioWorld.cpp ApplyStepWrites,
+    lines 2633-2655): the entry whose ``t_s`` is the latest at or before
+    the clock is current, held until the next; on a change the aileron
+    is SET to the entry's value, the elevator is the latched trim
+    elevator plus the entry's value, and the rudder is the entry's value
+    as given (the host negates it into its own command frame and
+    CopyToJSBSim negates it back). An entry without an elevator or
+    rudder key (the showcase doublet) applies 0 for it, the host's
+    missing-field default. The host's elevator line reads ``+=`` on its
+    running command, which is this rule for the doublet and for a first
+    entry and accumulates across later non-zero entries (flagged in
+    docs/ROUTE.md's api notes); this flies the rule the host's own
+    comment states. Measured consequence of "aileron set": the trim
+    aileron in a crosswind (0.033 on the c172p at 15 kt, 0 in still air)
+    no longer rides under the doublet, as it does not in the host.
+    ``clock`` names the time base (:data:`SCRIPT_CLOCKS`).
 
     Two couplings the real run enforces are pre-flown here too:
 
@@ -899,12 +931,21 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
       check that ends the real run), not just the CG: a bank that lowers a
       wingtip toward a slope tightens the planned clearance. Sampled every
       12th step; the run checks every step.
+
+    ``ground`` None flies the flat slab: the spec's datum under the CG
+    and every station, positions in the spec origin's UTM frame (the
+    run's own ``scene_frame_for``). Each sample carries its run-clock
+    ``t_s``, the recorded ``lat_deg`` / ``lon_deg`` / ``alt_m`` beside
+    the start-relative ``north_m`` / ``east_m``, so a caller can put the
+    track in any frame it has (the route's replay divergence).
     """
     from core.fdm import FlightDynamics, mode_for
     from core.fdm import units as u
-    from core.scenario.runner import wind_components_fps
+    from core.scenario.runner import scene_frame_for, wind_components_fps
     from core.terrain.contact import station_offsets_ned
 
+    if clock not in SCRIPT_CLOCKS:
+        raise ValueError(f"clock must be one of {SCRIPT_CLOCKS}, not {clock!r}")
     fdm = FlightDynamics(str(spec.aircraft.value),
                          rate_hz=float(spec.rate.value))
     fdm.set_initial_conditions(
@@ -925,8 +966,32 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
     fdm.start_engines()
     fdm.trim(mode_for(crosswind=wind_kt > 0.0))
     fdm.hold_mass(True)
-    trimmed_aileron = fdm.props.get("fcs/aileron-cmd-norm")
+    # The latched trim, as the host latches it (LatchTrimmedControls):
+    # the elevator entries ride on it; the aileron and rudder entries
+    # replace theirs.
+    trimmed_elevator = fdm.props.get("fcs/elevator-cmd-norm")
     span_m = u.ft_to_m(fdm.props.get("metrics/bw-ft"))
+    datum_m = float(spec.terrain_elevation.value)
+    flat_frame = scene_frame_for(spec) if ground is None else None
+
+    def project(lat_deg: float, lon_deg: float):
+        """Projected (x, y) metres: the raster's CRS over terrain; over
+        the slab the spec origin's UTM frame, origin-relative."""
+        if ground is not None:
+            return ground.project(lat_deg, lon_deg)
+        north, east = flat_frame.north_east(lat_deg, lon_deg)
+        return east, north
+
+    def terrain_under(px: float, py: float):
+        """The ground at a projected point: the raster bilinear inside
+        it, None outside it (a station off the raster is not checked,
+        as the run's contact check skips it); the datum over the slab."""
+        if ground is None:
+            return datum_m
+        if not ground.heightfield.contains(px, py):
+            return None
+        return ground.heightfield.elevation_at(px, py)
+
     origin_x = origin_y = 0.0
     if orographic is not None:
         # The provider's local frame is north/east about the card origin --
@@ -937,16 +1002,19 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
 
     track = []
     applied = -1
+    t_start = fdm.sim_time
     for i in range(int(round(seconds * fdm.rate_hz))):
-        t = fdm.sim_time
+        t = fdm.sim_time if clock == "sim" else fdm.sim_time - t_start
         current = applied
         for j, entry in enumerate(script):
             if entry["t_s"] <= t:
                 current = j
         if current != applied:
             applied = current
-            fdm.set_controls(aileron=trimmed_aileron
-                             + script[applied]["aileron"])
+            entry = script[applied]
+            fdm.set_controls(aileron=float(entry["aileron"]),
+                             elevator=trimmed_elevator + float(entry.get("elevator", 0.0)),
+                             rudder=float(entry.get("rudder", 0.0)))
         if orographic is not None:
             s = fdm.state()
             x, y = ground.project(s.lat_deg, s.lon_deg)
@@ -959,28 +1027,30 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
         fdm.step()
         if i % 12 == 0:
             s = fdm.state()
-            terrain = (ground.elevation_at(s.lat_deg, s.lon_deg)
-                       if ground.contains(s.lat_deg, s.lon_deg) else 0.0)
+            x, y = project(s.lat_deg, s.lon_deg)
+            under = terrain_under(x, y)
+            terrain = 0.0 if under is None else under
             clearance = s.altitude_m - terrain
-            x, y = ground.project(s.lat_deg, s.lon_deg)
             if not track:
                 origin_xy = (x, y)      # start position: the frame the
             for _, north, east, down in station_offsets_ned(  # card's
                     s.roll_deg, s.pitch_deg, s.heading_deg, span_m):
                 px, py = x + east, y + north                  # event
-                if not ground.heightfield.contains(px, py):   # blocks use
+                under = terrain_under(px, py)                 # blocks use
+                if under is None:
                     continue
-                clearance = min(
-                    clearance, (s.altitude_m - down)
-                    - ground.heightfield.elevation_at(px, py))
-            track.append({"terrain_m": terrain,
+                clearance = min(clearance, (s.altitude_m - down) - under)
+            track.append({"t_s": fdm.sim_time - t_start,
+                          "terrain_m": terrain,
                           "cg_clearance_m": s.altitude_m - terrain,
                           "clearance_m": clearance,
                           # Position relative to the start, so an event
                           # aimed at the track can be placed ON the track
                           # the banked script actually flies.
                           "north_m": y - origin_xy[1],
-                          "east_m": x - origin_xy[0]})
+                          "east_m": x - origin_xy[0],
+                          "lat_deg": s.lat_deg, "lon_deg": s.lon_deg,
+                          "alt_m": s.altitude_m})
     return track
 
 
@@ -1782,6 +1852,15 @@ def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
     }
 
 
+#: The provenance project_for_ue_host writes on the autopilot it switches
+#: off. The run endpoint reads it back for a stated route: the
+#: validator's route.hold_state (a route needs the autopilot) is answered
+#: when THIS is why the autopilot is off -- the route pre-flight flew it
+#: and the host steers from the schedule it commanded -- and stands when
+#: a user switched it off (their provenance, not this one).
+HOST_OPEN_LOOP_FROM = "open loop: the render host has no autopilot"
+
+
 def project_for_ue_host(spec: ScenarioSpec) -> None:
     """The UE hosts have no autopilot: a held state cannot be honoured and
     the commandlet refuses it (correctly -- measured by Gate 8.3's first
@@ -1789,8 +1868,7 @@ def project_for_ue_host(spec: ScenarioSpec) -> None:
     loop, mass held so the clip shows trim quality rather than fuel burn.
     Both edits are recorded in the spec's own provenance."""
     if bool(spec.hold_state.value):
-        spec.set("hold_state", False,
-                 frm="open loop: the render host has no autopilot")
+        spec.set("hold_state", False, frm=HOST_OPEN_LOOP_FROM)
     if not bool(spec.mass_held.value):
         spec.set("mass_held", True,
                  frm="rendered-clip convention (see reference_spec)")
@@ -2971,6 +3049,21 @@ class RunManager:
         # rather than carried because it is a pure function of the spec.
         sun = None if physical_sky_enabled(spec) else sun_look(spec)
         sun_note = sun["note"] if sun else None
+        # The route (docs/ROUTE.md): the pre-flight /run flew (its result
+        # rides on this spec object, webapp.route_map.ROUTE_FLIGHT_ATTR)
+        # or, for a caller that skipped /run, flown now on a copy with
+        # the autopilot restored. Its control schedule is the host's
+        # steering (the card's control_inputs) and its card block says
+        # which line the clip follows; a line that cannot be flown fails
+        # the run BY NAME here, never a clip of a route nobody flew.
+        from core.control.route import RouteError
+        from webapp.route_map import route_conditions_note, route_flight_for
+
+        try:
+            route_flight = route_flight_for(spec)
+        except RouteError as exc:
+            run.push("failed", f"[{exc.constraint}] {exc.message}")
+            return
 
         derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
         project_for_ue_host(spec)
@@ -3214,8 +3307,19 @@ class RunManager:
         # Named once: after the host flies its own solve flight the card
         # is rewritten with the RE-SOLVED tracks, and every other field
         # has to be identical or the two passes are not over one scene.
+        # A route run steers from the route's control schedule (the
+        # autopilot's commanded surfaces, deltas on trim, from the headless
+        # pre-flight) instead of the showcase doublet; every other run is
+        # unchanged. The route block beside it: the line, its digest, the
+        # flown track and the measured replay divergence.
+        if route_flight is not None:
+            control_inputs = route_flight["schedule"]
+            run.conditions["route"] = route_conditions_note(route_flight)
+        else:
+            control_inputs = SHOWCASE_DOUBLET if scripted else ()
         card_arguments = dict(
-            control_inputs=SHOWCASE_DOUBLET if scripted else (),
+            control_inputs=control_inputs,
+            route=route_flight["card"] if route_flight is not None else None,
             duration_s=min(float(spec.duration.value), CLIP_SECONDS),
             orographic=orographic,
             rotor=(rotor_provider.card_block()
@@ -3576,8 +3680,7 @@ class RunManager:
             run.push("report", "measuring the conditions' effect against a "
                                "still-air baseline (headless)")
             try:
-                _effect_report(spec, scene,
-                               SHOWCASE_DOUBLET if scripted else (),
+                _effect_report(spec, scene, control_inputs,
                                min(float(spec.duration.value), CLIP_SECONDS),
                                out / "telemetry.json", out / "effect.json")
             except Exception as exc:

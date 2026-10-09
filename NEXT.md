@@ -1,5 +1,50 @@
 # Resume here
 
+**The drawn flight path (2026-10-09, `phase-2-testing`; docs/ROUTE.md is
+the record).** LANDED: the `route` spec block (core/scenario/blocks.py
+RouteSpec, absent-canonical, no version bump), the route module
+(core/control/route.py: the limits pinned to tecs.xml, `route_problems`
+with route.shape/bank_limit/time/turn/climb, pure-pursuit `RouteGuidance`
+writing setpoints only, the route-aware closure, `control_schedule`, the
+card block), the runner's 2 Hz guidance tick and route columns (only with
+a route: every other digest unchanged), the validator and catalogue
+entries, the web server (webapp/route_map.py: POST /route/terrain, POST
+/route/check flies the line for real, `plan_route_flight` in /run's
+pinned order replacing the doublet pre-flight for route runs; the
+render carries the schedule as control_inputs and the route block, with
+the measured replay divergence), the page (webapp/static/route_map.js,
+"+ draw the flight path": the mockup's engine on the server's grid, every
+limit from the payload; Self adjust; Check with the physics; Use this
+path), and a fix the feature needed: Autopilot.engage() probed the
+control signs at 6000 m / 280 kt, so the c172p never engaged (now at the
+aircraft's own trim). MEASURED here: a c172p 90-degree route within 40 m
+cross-track; a 20 s flat route's open-loop replay 13.4 m from the
+closed-loop track; a line into a synthetic hill refused at 100.5 m.
+UNCOMPILED / UNMEASURED: nothing new in C++ -- the host flies the
+schedule open loop as it flies the doublet; the first Windows run
+measures the clip against the card's `route.flown`. Tests:
+tests/test_route_core.py, tests/test_route_map.py,
+tests/test_route_page.py (headless Chromium when node and
+/opt/pw-browsers/chromium exist). OPEN for the owner: (1) the host's
+elevator entry rule, FlightSimScenarioWorld.cpp ~2650
+`Commands.Elevator += Input.Elevator`, accumulates across entries -- the
+doublet never had a non-zero elevator, a route schedule does; the Python
+replay flies the rule the host's own comment states (trim + delta), so
+the card's divergence will NOT show this error; one line to latch the
+trim elevator and set Trim + Input; (2) the real render path is a
+closed-loop port of the guidance to the host (accept hold_state and the
+tecs injection, tick the setpoints per step) -- the open-loop schedule
+is the honest stand-in, not the destination; (3) the doublet pre-flight
+compares its `t_s` with JSBSim sim time, which the engine start has
+advanced to 4.875 s, while the render commandlet clocks from 0: every
+terrain plan to date flew the doublet ~4.9 s early relative to the
+render (kept as is, `SCRIPT_CLOCKS`; the route replay uses the run
+clock); (4) the headless capture path (no host, cameras stated) runs the
+projected spec and would refuse route.hold_state; (5) a turbulent
+route's pre-flight runs before derive_seed, so its closed-loop flight
+and the run draw different seeds; (6) the review table's route row shows
+the server's last summary until the next round trip.
+
 **Storm weather, opt-in (2026-10-08, `phase-2-testing`; docs/WEATHER.md is
 the record; built in parallel with the weather look and rain particles
 below, merged beside them).** A stated rain rate or a thunderstorm now also

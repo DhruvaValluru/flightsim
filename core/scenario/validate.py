@@ -279,6 +279,8 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     report.violations.extend(validate_world_look(spec))
     # The render lighting block, refused by name.
     report.violations.extend(validate_lighting(spec))
+    # The route block, refused by name (core/control/route.py's list).
+    report.violations.extend(validate_route(spec))
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
@@ -1256,6 +1258,35 @@ def validate_lighting(spec) -> List[Violation]:
             out.append(Violation("lighting.preset", message))
         else:
             out.append(Violation("lighting.range", message))
+    return out
+
+
+def validate_route(spec) -> List[Violation]:
+    """The ``route`` block, refused by name through the route's own list
+    (core.control.route.route_problems, so what validation refuses is
+    what the run refuses): ``route.shape``, ``route.bank_limit``,
+    ``route.time`` (longer than true airspeed x duration -- the planning
+    TAS, tas_kt_isa at the spec altitude), ``route.turn``, ``route.climb``;
+    and ``route.hold_state`` when a route is stated without the autopilot
+    (the route is flown by setpoints, so a run that holds nothing cannot
+    fly it). Terrain is the web app's pre-flight, not the validator's.
+    The default block (no route drawn) yields nothing."""
+    block = getattr(spec, "route", None)
+    if block is None or block.is_default():
+        return []
+    from ..control.route import route_problems, tas_kt_for_spec
+
+    out = [Violation(problem["constraint"], problem["message"], actual=problem.get("actual"),
+                     limit=problem.get("limit"), unit=problem.get("unit"))
+           for problem in route_problems(block.waypoints.value, block.bank_limit_deg.value,
+                                         tas_kt=tas_kt_for_spec(spec),
+                                         duration_s=float(spec.duration.value),
+                                         altitude0_m=float(spec.altitude.value))]
+    if not bool(spec.hold_state.value):
+        out.append(Violation(
+            "route.hold_state",
+            "a route is stated but the run does not hold its state: the route is flown "
+            "by the autopilot's setpoints, so hold_state must be true"))
     return out
 
 
