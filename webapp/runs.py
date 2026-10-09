@@ -82,7 +82,6 @@ from experiments.showcase_matrix import (  # noqa: E402
     EDITOR,
     FPS,
     HEIGHT,
-    SHOWCASE_DOUBLET,
     TIME_OF_DAY,
     WIDTH,
     encode_clip,
@@ -1802,11 +1801,10 @@ def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
 
     ground = TerrainGround(Heightfield.read(Path(scene["terrain"])))
     seconds = min(float(spec.duration.value), CLIP_SECONDS)
-    from experiments.showcase_matrix import SHOWCASE_DOUBLET
 
     orographic = _orographic_provider(spec, scene)
     try:
-        track = _fly_clearance_track(spec, ground, SHOWCASE_DOUBLET,
+        track = _fly_clearance_track(spec, ground, HANDS_OFF,
                                      seconds, orographic=orographic)
     except Exception:
         # A spec that cannot even trim (e.g. commanded below its own flat
@@ -1832,7 +1830,7 @@ def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
                           f"{PLANNED_CLEARANCE_M:.0f} m)")
             try:
                 track = _fly_clearance_track(spec, ground,
-                                             SHOWCASE_DOUBLET, seconds,
+                                             HANDS_OFF, seconds,
                                              orographic=orographic)
                 min_clearance = min(p["clearance_m"] for p in track)
             except Exception:
@@ -1859,6 +1857,14 @@ def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
 #: and the host steers from the schedule it commanded -- and stands when
 #: a user switched it off (their provenance, not this one).
 HOST_OPEN_LOOP_FROM = "open loop: the render host has no autopilot"
+#: The control script every web run flies when no route is drawn: none.
+#: Hands off from trim, straight and level until the air moves it. The
+#: showcase matrix's aileron doublet (experiments/showcase_matrix.py
+#: SHOWCASE_DOUBLET) used to be flown on every terrain run so a clip showed
+#: the surfaces move; the owner never asked for the turn (2026-10-09) and
+#: it lost altitude in the bank with no autopilot to hold it. The
+#: clearance pre-flight and the storm placement fly this same script.
+HANDS_OFF = ()
 
 
 def project_for_ue_host(spec: ScenarioSpec) -> None:
@@ -2408,7 +2414,7 @@ def severe_event_centre(spec: ScenarioSpec, scene: Dict,
             ground_ = TerrainGround(
                 Heightfield.read(Path(scene["terrain"])))
             track_ = _fly_clearance_track(
-                spec, ground_, SHOWCASE_DOUBLET, seconds,
+                spec, ground_, HANDS_OFF, seconds,
                 orographic=_orographic_provider(spec, scene))
             point = track_[int(0.45 * (len(track_) - 1))]
             centre_n = float(point["north_m"])
@@ -3195,11 +3201,13 @@ class RunManager:
                               "ahead on the track + severe turbulence + "
                               "storm look (VISUAL)")
         calm = wind_kt == 0.0 and str(spec.turbulence.value) == "none"
-        # Terrain runs bank through the scene (the same S-turn script the
-        # clearance planner pre-flew) and carry the raster as the PHYSICS
-        # ground -- the picture and the physics agree, and the commandlet
-        # verifies AGL against the raster under the aircraft.
-        scripted = calm or bool(scene.get("terrain"))
+        # Terrain runs carry the raster as the PHYSICS ground -- the picture
+        # and the physics agree, and the commandlet verifies AGL against the
+        # raster under the aircraft. The flight itself is HANDS OFF from
+        # trim (HANDS_OFF): the owner's rule (2026-10-09, "I never
+        # instructed this, remove it"), after the showcase matrix's aileron
+        # doublet banked every terrain run and lost 33 m in the turn. Turns
+        # come from a drawn route (the autopilot flies it) or not at all.
         collision = scene.get("terrain")
         # The model's own measured reference speeds (§2.4), carried on the
         # card for the HUD/panel stall-margin marks. Display-only; a spec
@@ -3333,7 +3341,7 @@ class RunManager:
             control_inputs = route_flight["schedule"]
             run.conditions["route"] = route_conditions_note(route_flight)
         else:
-            control_inputs = SHOWCASE_DOUBLET if scripted else ()
+            control_inputs = HANDS_OFF
         card_arguments = dict(
             control_inputs=control_inputs,
             route=route_flight["card"] if route_flight is not None else None,

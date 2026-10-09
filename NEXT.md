@@ -1191,6 +1191,16 @@ the parity discipline, and the do-not-regress list)
     pins a site by relative path must compare `as_posix()` paths: both
     were Windows-blind until the suite first ran to its end there.
 
+34. **Web runs fly hands off (2026-10-09).** `webapp/runs.py HANDS_OFF`
+    is the control script for every run without a drawn route: no
+    inputs, trim, straight and level. The showcase matrix's aileron
+    doublet used to be flown on every terrain run so a clip showed the
+    surfaces move; the owner never asked for it, and with no autopilot
+    the bank bled altitude (the "why does altitude suddenly start
+    dropping" plots). The clearance pre-flight and the storm placement
+    fly the same empty script. Do not put a demo manoeuvre back into
+    normal runs: a manoeuvre comes from the prompt or a drawn route.
+
 27. **The physical sky has never been rendered.** It was written
     2026-09-30 on a Linux container with no engine: core/sky
     (astropy-checked positions, pinned tests), the `-sky=` sidecar,
