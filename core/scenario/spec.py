@@ -28,7 +28,7 @@ from .blocks import (
     RainSpec, RecordSpec, SceneSpec, TaxonomySpec,
     TrafficSpec, TurbulenceModelSpec, WakeSpec, WindProfileSpec,
 )
-from .blocks import LightingSpec, RunwayBlockSpec
+from .blocks import LightingSpec, RouteSpec, RunwayBlockSpec
 from .camera import CameraSpec
 from .randomization import RandomizationSpec
 from .fields import Quantity, Source
@@ -95,7 +95,7 @@ READABLE_SPEC_VERSIONS = (8, 9)
 #: Version 9's top-level blocks (each absent-canonical).
 SPEC9_BLOCKS = ("atmosphere", "datum", "turbulence_model", "wind_profile", "loading",
                 "failures", "icing", "dis", "wake", "instruments", "record", "runway",
-                "rain", "lighting")
+                "rain", "lighting", "route")
 #: Version 9's optional fields inside version-8 sections.
 SPEC9_SCENE_FIELDS = ("sun_lux", "buildings", "night")
 SPEC9_ENVIRONMENT_FIELDS = ("precipitation_rate_mmh", "time_of_day")
@@ -282,6 +282,12 @@ class ScenarioSpec:
     #: with nothing stated is omitted, so every committed spec keeps its
     #: digest.
     lighting: "LightingSpec" = dc_field(default_factory=LightingSpec.defaulted)
+    #: The route (core/control/route.py, docs/ROUTE.md): the drawn flight
+    #: path the autopilot flies -- the waypoint list in the scene frame
+    #: and the bank limit. Spec 9, absent-canonical: no route drawn is
+    #: omitted, so every committed spec keeps its digest; a stated route
+    #: moves it (the run flies a different track).
+    route: "RouteSpec" = dc_field(default_factory=RouteSpec.defaulted)
     #: Render sun (core.environment.sun, visual-fidelity plan V1; the
     #: physical sky of core.sky reads it too): a named time ("dawn",
     #: "noon", "golden hour", ...), "HH:MM" local apparent solar time,
@@ -353,7 +359,7 @@ class ScenarioSpec:
         carry the spec's own set()/plan() doctrine."""
         import re
 
-        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|rain|dis|wake|instruments|record|runway|lighting)\.(\w+)", name)
+        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|rain|dis|wake|instruments|record|runway|lighting|route)\.(\w+)", name)
         if match is not None:
             block = getattr(self, match.group(1))
             return block, match.group(2)
@@ -541,6 +547,9 @@ class ScenarioSpec:
         # The lighting block, absent-canonical like the others.
         if not self.lighting.is_default():
             out["lighting"] = self.lighting.to_dict()
+        # The route block, absent-canonical like the others.
+        if not self.route.is_default():
+            out["route"] = self.route.to_dict()
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -655,6 +664,9 @@ class ScenarioSpec:
         lighting_data = data.get("lighting")
         lighting = (LightingSpec.defaulted() if lighting_data is None
                     else LightingSpec.from_dict(lighting_data))
+        route_data = data.get("route")
+        route = (RouteSpec.defaulted() if route_data is None
+                 else RouteSpec.from_dict(route_data))
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
@@ -679,6 +691,7 @@ class ScenarioSpec:
             record=record,
             runway=runway,
             lighting=lighting,
+            route=route,
             **kwargs,
         )
 
@@ -788,6 +801,15 @@ class ScenarioSpec:
                 for name, q in block.quantities():
                     rows.append((block_name, name.replace("_", " "),
                                  q.render(), str(q.source), q.note()))
+        # The route block, when stated: the list is summarised ("N points,
+        # L km") the way camera moves are, never printed whole.
+        if not self.route.is_default():
+            q = self.route.waypoints
+            rows.append(("route", "waypoints", self.route.summary(),
+                         str(q.source), q.note()))
+            q = self.route.bank_limit_deg
+            rows.append(("route", "bank limit deg", q.render(),
+                         str(q.source), q.note()))
         for index, entry in enumerate(self.traffic):
             for name, q in entry.quantities():
                 rows.append((f"traffic[{index}]", name.replace("_", " "),

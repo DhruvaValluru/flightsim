@@ -152,6 +152,7 @@ visual-only per host (measured).</p>
 <script>ConditionsList.mount(document.getElementById("conditionsList"), document.getElementById("prompt"));</script>
 <div id="lensPicker"></div>
 <script src="/camera3d.js"></script>
+<script src="/route_map.js"></script>
 <script src="/lens_picker.js"></script>
 <script>LensPicker.mount(document.getElementById("lensPicker"), document.getElementById("prompt"));</script>
 <p>
@@ -233,6 +234,8 @@ visual-only per host (measured).</p>
   <div id="cameraPicker" style="margin:.6rem 0"></div>
   <div id="cameraState" class="dim"></div>
   <div id="cameraPlacer"></div>
+  <div id="routeState" class="dim"></div>
+  <div id="routeMap"></div>
   <div id="verdict"></div>
   <p>
     <button id="run" class="run">Run</button>
@@ -479,9 +482,12 @@ function renderSpec(payload) {
   body.innerHTML = "";
   for (const f of spec.fields) {
     const row = document.createElement("tr");
+    // The route block's rows are read-only summaries ("N points, L km"):
+    // the map edits the block, never the row (docs/ROUTE.md).
     const editable = !["airspeed_kind", "mass_held", "hold_state"]
-      .includes(f.name);
-    const value = typeof f.value === "number" && !Number.isInteger(f.value)
+      .includes(f.name) && f.section !== "route";
+    const value = Array.isArray(f.value) ? `${f.value.length} points`
+      : typeof f.value === "number" && !Number.isInteger(f.value)
       ? f.value : f.value;
     row.innerHTML =
       `<td>${f.section}.${f.name}</td>` +
@@ -1308,6 +1314,16 @@ function renderCameraPicker() {
   placer.title = "move the camera over the scene's terrain and see its view";
   placer.addEventListener("click", () => openCameraPlacer(null));
   row.appendChild(placer);
+  // Or draw the flight path itself: the route map (webapp/static/
+  // route_map.js) shows the ground the physics flies, checks the line as
+  // it is drawn, and writes it into the spec as user-stated waypoints.
+  const routeBtn = document.createElement("button");
+  routeBtn.className = "opt";
+  routeBtn.id = "routeMapOpen";
+  routeBtn.textContent = "+ draw the flight path";
+  routeBtn.title = "draw the route on the scene's terrain; the autopilot flies it";
+  routeBtn.addEventListener("click", openRouteMap);
+  row.appendChild(routeBtn);
   holder.appendChild(row);
   // Or say where the camera should be, in words.
   const sentence = document.createElement("div");
@@ -1381,6 +1397,45 @@ function openCameraPlacer(index) {
         `${payload.cameras.length} view(s): ` +
         payload.cameras.map(c => c.camera_id).join(", ");
       renderSpec({...compiled, spec: payload});
+    },
+  });
+}
+
+function openRouteMap() {
+  // The map reads the EDITED spec (a typed value is not lost) and hands
+  // back the waypoints it checked. They go into the spec's `route` block
+  // as USER-stated fields with the map's provenance, and the initial
+  // heading row becomes the first leg's bearing (a user edit, so no
+  // planner moves it): the same dict /run re-parses and re-validates.
+  // No server round trip happens here, so the review table's route row
+  // keeps the summary the server last sent; the next round trip (an
+  // aircraft or camera change, Interpret, Run) brings the new one. The
+  // page never writes a summary of its own into that row.
+  if (!window.RouteMap) {
+    $("routeState").textContent =
+      "the route map's script did not load (GET /route_map.js): the server " +
+      "running here does not serve it";
+    return;
+  }
+  RouteMap.open({
+    container: $("routeMap"),
+    getSpec: editedSpecDict,
+    onPlaced: route => {
+      const dict = compiled.spec.dict;
+      dict.route = dict.route || {};
+      dict.route.waypoints = {value: route.waypoints, unit: "points",
+                              source: "user", from: route.from};
+      dict.route.bank_limit_deg = {value: route.bank_limit_deg, unit: "deg",
+                                   source: "user", from: route.from};
+      setRow("heading", route.heading_deg);
+      // Self adjust may have raised the start (it says so in its report):
+      // that is a user edit of the altitude row, visible in the table.
+      if (route.altitude_m != null) setRow("altitude", route.altitude_m);
+      $("routeState").textContent =
+        `route in the spec: ${route.waypoints.length} waypoints, ` +
+        `${(route.length_m / 1000).toFixed(1)} km, heading ${route.heading_deg}° ` +
+        `(${route.from}); bank limit ${route.bank_limit_deg}°. The table's route ` +
+        `row shows the server's summary after the next round trip.`;
     },
   });
 }
@@ -1509,8 +1564,13 @@ async function doCompile(body) {
     renderSpec(payload);
     showTerrainPrefetch(payload.terrain_prefetch);
     // A new spec is a new scene: a placer open on the old one would draw
-    // the wrong terrain and could overwrite the wrong camera index.
+    // the wrong terrain and could overwrite the wrong camera index. The
+    // route map likewise: its line was drawn over the old scene.
     CameraPlacer.close();
+    // (Guarded: the module is served by the server's own GET /route_map.js;
+    // a page whose server lacks that route must still interpret.)
+    if (window.RouteMap) RouteMap.close();
+    $("routeState").textContent = "";
     // A fresh compile starts from one aircraft; carry the page's choice onto it.
     if (+$("aircraftCount").value > 1) await applyFleet();
   } catch (error) {
@@ -1819,10 +1879,25 @@ async function initFlightPath(runId, run) {
   const tornado = card && card.tornado ? {
     n: card.tornado.centre_north_m, e: card.tornado.centre_east_m,
     r: card.tornado.r_core_m } : null;
+  // The planned route, when the run flew one: the card's route.waypoints
+  // are north/east metres about the spec origin, and this chart's frame
+  // is flat-earth metres about the FIRST telemetry sample -- the origin
+  // at t = 0 -- so the two coincide at the start and the line is drawn
+  // from (0, 0) through the waypoints as the card carries them.
+  const planned = card && card.route && Array.isArray(card.route.waypoints)
+    && card.route.waypoints.length
+    ? [{e: 0, n: 0}].concat(card.route.waypoints.map(w => ({e: +w.east_m, n: +w.north_m})))
+    : null;
 
   // Bounds: the whole track plus the vortex (core + fade ring), padded.
   let lo = [Math.min(...east), Math.min(...north)];
   let hi = [Math.max(...east), Math.max(...north)];
+  if (planned) {
+    for (const p of planned) {
+      lo = [Math.min(lo[0], p.e), Math.min(lo[1], p.n)];
+      hi = [Math.max(hi[0], p.e), Math.max(hi[1], p.n)];
+    }
+  }
   if (tornado) {
     lo = [Math.min(lo[0], tornado.e - 2.5 * tornado.r),
           Math.min(lo[1], tornado.n - 2.5 * tornado.r)];
@@ -1846,6 +1921,9 @@ async function initFlightPath(runId, run) {
     `(blue) to end (amber); altitude profile from recorded altitude_m` +
     (tornado ? `; tornado core position and radius from the run card ` +
       `(solid = core, dashed = 2.5 radii)` : "") +
+    (planned ? `; planned route (dotted magenta) = the run card's ` +
+      `route.waypoints (${planned.length - 1} points), north/east metres ` +
+      `about the spec origin, which is the first sample` : "") +
     `. Nothing here is recomputed from physics.</div>`;
 
   const scale = Math.min(W, H) / span;
@@ -1876,6 +1954,20 @@ async function initFlightPath(runId, run) {
     ctx.fillStyle = "#e07a6f"; ctx.font = "11px ui-monospace, monospace";
     ctx.fillText(`tornado core (${tornado.r.toFixed(0)} m)`,
                  X(tornado.e) + 8, Y(tornado.n) - tornado.r * scale - 6);
+  }
+
+  // The planned route, dotted, under the flown track.
+  if (planned) {
+    ctx.save();
+    ctx.setLineDash([3, 5]); ctx.lineWidth = 2.5; ctx.strokeStyle = "#ff5cb0";
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    planned.forEach((p, i) => i ? ctx.lineTo(X(p.e), Y(p.n)) : ctx.moveTo(X(p.e), Y(p.n)));
+    ctx.stroke();
+    ctx.restore();
+    const end = planned[planned.length - 1];
+    ctx.fillStyle = "#ff5cb0"; ctx.font = "11px ui-monospace, monospace";
+    ctx.fillText("planned route", X(end.e) + 7, Y(end.n) - 6);
   }
 
   // The track, coloured start->end.

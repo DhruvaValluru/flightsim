@@ -1258,6 +1258,57 @@ class LightingSpec(ProvenancedBlock):
 
 
 @dataclass
+class RouteSpec(ProvenancedBlock):
+    """``route``: a drawn flight path the autopilot flies (docs/ROUTE.md).
+    ``waypoints`` is ONE quantity whose value is the list of points
+    ``{east_m, north_m, alt_m}`` in the scene frame (metres east and
+    north of the spec origin, altitude metres MSL), the first point the
+    first one AFTER the start -- the aircraft begins at the origin, at
+    the spec altitude, pointed along the first leg, and the list never
+    repeats the origin; ``bank_limit_deg`` is the autopilot's bank limit
+    for the run, 25 unstated (tecs.xml's own clip). Absent-canonical: no
+    route drawn is the default and is omitted, so every committed spec
+    keeps its digest; a stated route moves it. The geometry, the checks
+    (``route.shape`` / ``route.bank_limit`` / ``route.time`` /
+    ``route.turn`` / ``route.climb``; ``route.hold_state`` is the
+    validator's) and the guidance are core/control/route.py's; no NL
+    compiler fills the block -- the page's route map does."""
+
+    waypoints: Quantity
+    bank_limit_deg: Quantity
+
+    FIELD_ORDER = ("waypoints", "bank_limit_deg")
+    BLOCK = "route"
+
+    @classmethod
+    def defaulted(cls) -> "RouteSpec":
+        # Imported here: core.control.route is the one statement of the
+        # autopilot's bank limit, and importing it at module scope would
+        # load the flight model package into every reader of this file.
+        from ..control.route import BANK_LIMIT_DEFAULT_DEG
+
+        return cls(
+            waypoints=Quantity.default(
+                [], "points", frm="no route drawn: the initial heading is held"),
+            bank_limit_deg=Quantity.default(
+                BANK_LIMIT_DEFAULT_DEG, "deg",
+                frm="the autopilot's bank limit (tecs.xml ap/limits/bank-rad)"),
+        )
+
+    def summary(self) -> str:
+        """The list for the review table -- "N points, L km", the way
+        camera moves are summarised as keyframes -- never the whole
+        list; a list that cannot be read says so."""
+        from ..control.route import route_length_m
+
+        points = self.waypoints.value
+        count = len(points) if isinstance(points, (list, tuple)) else "?"
+        length = route_length_m(points)
+        shown = "? km" if length is None else f"{length / 1000.0:.1f} km"
+        return f"{count} points, {shown}"
+
+
+@dataclass
 class TrafficSpec(ProvenancedBlock):
     """One scripted traffic aircraft (contracts §2.2).
 

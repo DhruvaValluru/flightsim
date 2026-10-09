@@ -25,6 +25,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..control.autopilot import Autopilot, ClosureReport, ClosureTolerance
+from ..control.route import (
+    Route, RouteError, RouteGuidance, RouteTolerance, route_closure, route_recorder_extras,
+)
 from ..environment.icing import icing_injections_for
 from ..environment.rain import RainProvider, rain_injections_for
 from ..environment.wake import TELEMETRY_COLUMNS as WAKE_COLUMNS, WakeVortexPair, unread_wake_fields, wake_injections_for
@@ -710,6 +713,29 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         autopilot = Autopilot(fdm)
         autopilot.engage()
 
+    # The route (docs/ROUTE.md): when a route is stated, the autopilot
+    # flies it by setpoints -- pure pursuit along the drawn line
+    # (core/control/route.py RouteGuidance) at the 2 Hz guidance site
+    # below, in the scene frame the run card's blocks are written in. A
+    # route without the autopilot is refused by name (the validator says
+    # it too); the bank limit is the block's, written to the controller
+    # before the first tick. The first tick runs here, before the first
+    # sample, so the recorder's first row carries the route's setpoints,
+    # not the engage-time hold. None without a route: nothing below
+    # changes, so every run without a route records exactly what it did.
+    route = Route.from_spec(spec)
+    guidance = None
+    if route is not None:
+        if autopilot is None:
+            raise RouteError(
+                "route.hold_state",
+                "a route is stated but the run does not hold its state: the route is "
+                "flown by the autopilot's setpoints, so hold_state must be true")
+        autopilot.tune(bank_limit_deg=route.bank_limit_deg)
+        guidance = RouteGuidance(route, scene_frame_for(spec, terrain_ground), autopilot,
+                                 u.kt_to_mps(route.tas_kt))
+        guidance.update(fdm.state())
+
     # R2: the instrument models at the FDM rate -- an observer the stack
     # calls after every step and before the recorder samples, in BOTH
     # loops below; it reads the FDM and writes nothing. The block's
@@ -728,9 +754,12 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     # P7: the wake's nine columns beside them (the provider's own numbers,
     # not JSBSim's: the gust channel holds the stack's SUM), 0 on a run
     # without a wake.
+    # The route's columns (its d, cross-track and setpoints, and the
+    # commanded surface norms the control schedule is cut from) ONLY
+    # when a route is stated: {} otherwise, so no other digest moves.
     recorder = Recorder(fdm, interval_s=0.1, extra={**SURFACES, **environment.recorder_extras()}
                         | schedule.recorder_extras() | wake_recorder_extras(environment)
-                        | rain_recorder_extras(environment),
+                        | rain_recorder_extras(environment) | route_recorder_extras(guidance),
                         measured=observer)
     recorder.sample(force=True)
     recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
@@ -752,6 +781,10 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
 
                     raise TerrainImpactError(impact)
             if autopilot is not None and i % every == 0:
+                # The route's setpoints first, so the tick that follows
+                # refreshes the TAS demand against the same state.
+                if guidance is not None:
+                    guidance.update(fdm.state())
                 autopilot.update()
             # R2: the observers, after the step and before the sample --
             # the same seam run_for gives them.
@@ -768,6 +801,20 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
             recorder.series("heading_deg"),
             recorder.series("climb_rate_mps"),
         )
+        if route is not None:
+            # Route-aware closure: the heading and "settled" checks cannot
+            # hold on a line that turns and climbs, and the altitude check
+            # is the route's profile, so the airspeed check (the one
+            # setpoint the route leaves alone) keeps its place and the
+            # route's three checks -- the worst cross-track, the worst
+            # departure from the profile, the furthest point reached --
+            # replace the rest. Measured over every sample: a route has
+            # no settled tail to wait for.
+            closure = ClosureReport(
+                [c for c in closure.checks if c.name == "airspeed"]
+                + route_closure(route, guidance.frame, recorder.series("lat_deg"),
+                                recorder.series("lon_deg"), recorder.series("altitude_m"),
+                                RouteTolerance(), lookahead_m=guidance.lookahead_m))
         if assert_closure:
             closure.raise_if_failed()
 
@@ -850,6 +897,23 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         manifest["control"] = {
             "signs": autopilot.signs.as_properties(),
             "gains": autopilot.gains(),
+        }
+    if route is not None:
+        # The route as flown: the point list and its digest, the limit and
+        # lookahead the line was steered with, the route-aware closure, and
+        # the trim commands captured at engage (what the control schedule
+        # is a delta on). Absent without a route.
+        props = fdm.props
+        manifest["route"] = {
+            "digest": route.digest(),
+            "points": route.point_dicts(),
+            "length_m": route.length_m,
+            "bank_limit_deg": route.bank_limit_deg,
+            "lookahead_m": guidance.lookahead_m,
+            "closure": manifest["closure"]["checks"],
+            "trims": {"aileron": props.get("ap/trim/aileron"),
+                      "elevator": props.get("ap/trim/elevator"),
+                      "rudder": props.get("ap/trim/rudder")},
         }
     if limits_record is not None:
         attach_record(manifest, limits_record)

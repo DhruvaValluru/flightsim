@@ -464,6 +464,7 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    datum: Optional[Dict[str, object]] = None,
                    world: Optional[Dict[str, object]] = None,
                    georeference: Optional[Dict[str, object]] = None,
+                   route: Optional[Dict[str, object]] = None,
                    ) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
@@ -729,6 +730,14 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # moves a static-mesh actor along the track with linear
         # interpolation and refuses a track it cannot draw.
         card["traffic"] = [dict(entry) for entry in traffic]
+    if route:
+        # The route (docs/ROUTE.md; core/control/route.py route_card_block):
+        # the drawn line, its digest, the bank limit and lookahead it was
+        # flown with, the flown track and the measured open-loop replay
+        # divergence. The host has no autopilot: it steers from the card's
+        # control_inputs (the route's control schedule) and may ignore
+        # this block, which is here so the clip says which line it follows.
+        card["route"] = dict(route)
     if world:
         # W2 (absent-canonical): the world the host draws -- the terrain
         # and its sha256, the buildings document and the runway document

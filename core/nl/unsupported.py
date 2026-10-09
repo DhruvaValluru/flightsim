@@ -84,16 +84,35 @@ def _fog_set(spec) -> bool:
                                                      lambda: False)())
 
 
-#: (regex, what it is, the field that carries it, "is it set in this spec?")
-CARRIED: Tuple[Tuple[str, str, str, Callable], ...] = (
+def _route_set(spec) -> bool:
+    route = getattr(spec, "route", None)
+    return route is not None and not route.is_default()
+
+
+#: The remedy for a field no compiler fills: the route is drawn, not
+#: written, so the sentence points at the map rather than at the table
+#: or the language model.
+ROUTE_REMEDY = ("Draw the path on the route map (Draw the flight path, under the review "
+                "table), which writes it into the spec; no compiler reads a path from words")
+
+#: (regex, what it is, the field that carries it, "is it set in this spec?",
+#:  the remedy sentence -- None for the table-or-language-model remedy)
+CARRIED: Tuple[Tuple[str, str, str, Callable, Optional[str]], ...] = (
     (r"\b(?:rain(?:y|ing|fall)?|drizzle|showers?|downpour)\b", "rain",
-     "environment.precipitation_rate_mmh (or varied weather)", _precipitation_set),
+     "environment.precipitation_rate_mmh (or varied weather)", _precipitation_set, None),
     (r"\b(?:snow(?:y|ing|fall|storm)?|sleet|blizzard)\b", "snow",
-     "environment.precipitation_rate_mmh (or varied weather)", _precipitation_set),
+     "environment.precipitation_rate_mmh (or varied weather)", _precipitation_set, None),
     (r"\b(?:icing|icy|ice accretion|freezing rain|rime ice)\b", "icing",
-     "the icing block (icing.*)", _icing_set),
+     "the icing block (icing.*)", _icing_set, None),
     (r"\b(?:fog(?:gy)?|mist(?:y)?|haze|hazy)\b", "fog / haze",
-     "randomization.fog_density or varied weather (visibility)", _fog_set),
+     "randomization.fog_density or varied weather (visibility)", _fog_set, None),
+    # Route words (docs/ROUTE.md): a path is drawn on the route map, never
+    # compiled from a sentence. "orbit" is the chase camera's word and is
+    # not here; "circle" is, unless the camera does the circling.
+    (r"\bfly(?:ing)? to\b|\bwaypoints?\b|\bfollow(?:ing)? the (?:valley|river|coast(?:line)?"
+     r"|ridge|road)\b|\baround the (?:peak|mountain|summit|hill)\b"
+     r"|(?<!camera )(?<!chase )\bcircl(?:e|es|ing)\b",
+     "a flight path", "route.waypoints", _route_set, ROUTE_REMEDY),
 )
 
 
@@ -114,7 +133,7 @@ def unsupported_words(prompt: Optional[str], spec) -> List[Tuple[str, str, str]]
                 f"simulator does not model; remove it from the prompt"
                 + (f" (the nearest supported thing: {nearest})" if nearest else ""),
                 match.group(0)))
-    for pattern, what, field, is_set in CARRIED:
+    for pattern, what, field, is_set, remedy in CARRIED:
         match = re.search(pattern, text)
         if match:
             try:
@@ -125,8 +144,9 @@ def unsupported_words(prompt: Optional[str], spec) -> List[Tuple[str, str, str]]
                 out.append((
                     PROMPT_NOT_SET,
                     f'the prompt says "{match.group(0)}" ({what}) but the compiled '
-                    f"spec does not set it -- it would fly without it. State it in "
-                    f"the review table ({field}), or compile with the language "
-                    f"model, which reads it",
+                    f"spec does not set it -- it would fly without it. "
+                    + (remedy if remedy is not None else
+                       f"State it in the review table ({field}), or compile with the "
+                       f"language model, which reads it"),
                     match.group(0)))
     return out

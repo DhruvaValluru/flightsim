@@ -451,6 +451,46 @@ re-validates them like any typed value.
   field of view. A camera placed in the scene (tower, ground) gets the
   zoom controls only.
 
+## Draw the flight path (web page)
+
+After **Interpret**, **+ draw the flight path** (beside the camera buttons)
+opens a map of the ground the physics will fly -- the same raster
+`pick_scene` chooses, hill-shaded, or the flat slab with its datum named --
+scaled so that the circle of everything the aircraft can reach in the run
+(true airspeed x the run's seconds, the render's 22 s clip when that is
+the cap) fills the view. Draw the path from the aircraft with the pen or
+click straight legs; the Altitude tool sets the height at a point. Four
+checks update as you draw, the sentence first and the rule name under it:
+**fits the time** (`route.time`), **turns flyable** at the autopilot's
+bank limit (`route.turn`, radius V_true^2 / (g tan 25 deg)), **clear of
+the ground** by 150 m on the map's grid (`route.terrain_clearance`) and
+**climbs feasible** against the autopilot's own climb-rate demand limit
+(`route.climb`; 12.19 m/s, the controller's clip, not a measured
+airframe figure -- the page says so). Every number comes from
+`core/control/route.py`, served to the page, never typed into it.
+
+**Self adjust** moves the line as little as needed until every check
+passes (cuts it where the run ends, replaces it by the track a
+bank-limited plane flies along it, pushes a stretch that is too low
+sideways to the side away from the high ground, and only then raises the
+height); the drawn line stays dotted and the changes are listed in words.
+**Check with the physics** flies the line for real -- JSBSim, the TECS
+autopilot and the route guidance over the scene's full raster, wind
+included -- and draws the flown track with the minimum clearance over the
+wing stations, the worst cross-track and the closure checks; a line that
+cannot be flown is refused by name (`route.terrain_clearance`,
+`route.closure`). **Use this path** writes the route into the review
+table as user-stated fields (`route.waypoints`, `route.bank_limit_deg`,
+provenance "drawn on the route map") and sets the initial heading to the
+first leg, so no planner moves it. **Run** then flies the route in the
+physics (the closure assertion is route-aware: a run that strays more than
+75 m or misses the height profile by 30 m produces no output) and renders
+it from the control schedule the autopilot commanded, replayed open loop
+by the host; the divergence between the two is measured and carried on
+the run card (`route.replay_divergence_m`). Prompts that ask for a path in
+words ("fly to", "follow the valley", "circle the peak") are refused
+`prompt.not_set` with that remedy: draw it. docs/ROUTE.md is the record.
+
 ## Terrain downloads start at Interpret
 
 When a prompt names a real place ("over new york city") whose terrain is

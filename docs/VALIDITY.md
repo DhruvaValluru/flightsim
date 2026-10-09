@@ -1395,6 +1395,40 @@ plugin); the delta-T row now measures 100.0 kt CAS on both sides. No layer adds 
 aircraft; the credibility scorecard's ceiling stays 2 and nothing here
 raises it.
 
+### 2.28 The drawn flight path (route): flown by setpoints, rendered open loop
+
+What IS claimed: a stated `route` block (spec 9, optional, absent-canonical:
+no committed digest moves) is flown by the headless run through the
+autopilot's setpoints alone -- pure pursuit on the projected point at 2 Hz,
+`core/control/route.py`, the control laws untouched in `tecs.xml` -- and
+the run's closure assertion is route-aware: a run whose worst cross-track
+exceeds 75 m, whose altitude departs the profile by more than 30 m, or
+that does not reach the line's end produces no output (`route_closure`,
+measured over every sample). Measured 2026-10-09 (JSBSim 1.2.4, this
+branch): the c172p at 1500 m / 100 kt flies a 2.6 km route with a 90
+degree bend (a quarter circle of 1100 m) within 40 m worst cross-track,
+1.8 m of its profile, at 20 degrees of its 25 degree bank limit, and the
+same spec without the block flies straight with no route columns
+(tests/test_route_core.py). The web app's pre-flight flies the drawn line
+over the scene's raster with the wing stations and refuses by name below
+the route's 150 m floor (a 30 s line over a 1400 m synthetic hill at
+1500 m: refused `route.terrain_clearance` at 100.5 m) or when the
+autopilot cannot close on it (`route.closure`). The four limits the map
+shows are the controller's own constants, served from Python and pinned
+to the XML by a test. What is NOT claimed: closed-loop rendering. The UE
+host has no autopilot; a route run renders from the control schedule the
+autopilot commanded in the headless flight (10 Hz deltas on trim, the
+card's `control_inputs`, held between entries as the host holds them),
+and the divergence between that open-loop replay and the closed-loop
+track is MEASURED on the stock FDM and carried on the card
+(`route.replay_divergence_m`; 13.4 m on a 20 s flat c172p route here) --
+it is not assumed small, and over wind, turbulence or a long clip it
+grows. Not claimed either: airframe climb performance (the climb check is
+the autopilot's demand clip and says so), the grid's clearance near a
+ridge (the map's 129 x 129 grid is for drawing; the pre-flight and the run
+use the raster), and parity with the host's own entry rule, whose elevator
+line accumulates across entries (NEXT.md, an owner's fix in C++).
+
 ---
 
 ## 3. Reproducibility: two different claims, kept separate
