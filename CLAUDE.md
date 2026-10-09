@@ -12,3 +12,11 @@ Owner's rule, 2026-09-25. This overrides any default harness behaviour.
 - After pushing and opening a PR: report once, and stop. No polling, no
   re-arming, no hourly status messages, no "nothing changed" updates.
 - If a check-in routine from an earlier session still exists, delete it.
+
+## Google tiles are the ground of every terrain render
+
+Owner's rule, 2026-10-09 ("hardcode every single terrain requires google
+tiles"). `FFlightSimGoogleTiles::Requested` and
+`core/scenario/card.py google_tiles_requested` are ON unless
+`FLIGHTSIM_GOOGLE_TILES=off`; a render that cannot draw the tiles refuses
+by name. Do not make them opt-in again.

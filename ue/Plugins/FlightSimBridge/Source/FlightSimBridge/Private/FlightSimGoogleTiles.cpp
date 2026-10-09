@@ -56,9 +56,12 @@ namespace
 
 bool FFlightSimGoogleTiles::Requested()
 {
+	// Every terrain render draws Google's tiles -- the owner's rule
+	// (2026-10-09): on unless FLIGHTSIM_GOOGLE_TILES says off (the same
+	// words core/scenario/card.py google_tiles_requested reads).
 	const FString Value =
 		FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_GOOGLE_TILES")).TrimStartAndEnd().ToLower();
-	return Value == TEXT("1") || Value == TEXT("on") || Value == TEXT("true") || Value == TEXT("yes");
+	return !(Value == TEXT("0") || Value == TEXT("off") || Value == TEXT("false") || Value == TEXT("no"));
 }
 
 bool FFlightSimGoogleTiles::Available()
@@ -78,9 +81,10 @@ bool FFlightSimGoogleTiles::Enable(UWorld* World, AGeoReferencingSystem* GeoRefe
 		FPlatformMisc::GetEnvironmentVariable(TEXT("CESIUM_ION_TOKEN")).TrimStartAndEnd();
 	if (Key.IsEmpty() && IonToken.IsEmpty())
 	{
-		Error = TEXT("terrain.google_tiles: FLIGHTSIM_GOOGLE_TILES is on but neither ")
+		Error = TEXT("terrain.google_tiles: every terrain render draws Google's tiles, but neither ")
 		        TEXT("GOOGLE_MAPS_API_KEY (a Google Maps Platform key with the Map Tiles API) nor ")
-		        TEXT("CESIUM_ION_TOKEN (a Cesium ion access token) is set");
+		        TEXT("CESIUM_ION_TOKEN (a Cesium ion access token) is set; set one, or ")
+		        TEXT("FLIGHTSIM_GOOGLE_TILES=off for the baked ground");
 		return false;
 	}
 	// A Google key is used directly; otherwise the ion token reaches the
@@ -172,9 +176,9 @@ bool FFlightSimGoogleTiles::Enable(UWorld* World, AGeoReferencingSystem* GeoRefe
 	       MaximumScreenSpaceError);
 	return true;
 #else
-	Error = TEXT("terrain.google_tiles: FLIGHTSIM_GOOGLE_TILES is on but this build has no Cesium ")
+	Error = TEXT("terrain.google_tiles: every terrain render draws Google's tiles, but this build has no Cesium ")
 	        TEXT("for Unreal plugin; install it into the engine (Fab: \"Cesium for Unreal\") and ")
-	        TEXT("rebuild with scripts\\build_ue.ps1");
+	        TEXT("rebuild with scripts\\build_ue.ps1, or FLIGHTSIM_GOOGLE_TILES=off for the baked ground");
 	return false;
 #endif
 }

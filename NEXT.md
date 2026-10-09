@@ -59,6 +59,10 @@ interval (0.2 s at 5 fps) and the first metre was faded out; now a
 daylight shutter (1/250 s, stated) when the card has no triple, and a
 30 cm fade. Storm materials now carry a generation EACH
 (STORM_GENERATIONS): the rain's rebuild does not recompile the cloud.
+OWNER'S RULE (2026-10-09): Google's 3D tiles are the ground of EVERY
+terrain render -- on by default on both sides, FLIGHTSIM_GOOGLE_TILES=off
+the only way off, refusals by name without a key or the Cesium plugin
+(CLAUDE.md).
 OPEN for the owner: the two
 weather paths overlap (both draw drops, storm clouds and lightning);
 which one to keep, or how to fold them together, is the owner's call.

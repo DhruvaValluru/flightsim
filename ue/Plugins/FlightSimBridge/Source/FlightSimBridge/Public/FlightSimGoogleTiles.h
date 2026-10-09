@@ -8,9 +8,11 @@ class AGeoReferencingSystem;
 class UWorld;
 
 // Google Photorealistic 3D Tiles as the render's ground, through the
-// Cesium for Unreal plugin (CesiumRuntime). Opt-in and visual only:
+// Cesium for Unreal plugin (CesiumRuntime). The ground of EVERY terrain
+// render (the owner's rule, 2026-10-09; visual only):
 //
-//   FLIGHTSIM_GOOGLE_TILES=on       ask for it
+//   FLIGHTSIM_GOOGLE_TILES=off      the baked ground instead (the only
+//                                   way the tiles are off; on by default)
 //   GOOGLE_MAPS_API_KEY=<key>       a Google Maps Platform key with the
 //                                   Map Tiles API enabled, or
 //   CESIUM_ION_TOKEN=<token>        a Cesium ion access token: the same
@@ -35,7 +37,7 @@ class UWorld;
 class FLIGHTSIMBRIDGE_API FFlightSimGoogleTiles
 {
 public:
-	// FLIGHTSIM_GOOGLE_TILES is on.
+	// Not switched off (FLIGHTSIM_GOOGLE_TILES=off): on by default.
 	static bool Requested();
 	// This build carries the Cesium integration.
 	static bool Available();

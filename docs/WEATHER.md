@@ -142,9 +142,13 @@ nothing from a real-time-captured sky light.
 What the ground is: the scene's bake (the Flint Hills: a Copernicus
 GLO-30 heightfield at 30 m, coloured by its imagery sidecar when
 `scripts/bake_terrain.py` fetched one, else by the land-cover material),
-never Google's 3D tiles unless `FLIGHTSIM_GOOGLE_TILES=1` is set for the
-web app's beauty render; the debug script and the web app's host flight
-pass `-NoGoogleTiles`. Under the storm it is tinted by the look's fog and
+and, over it, Google's Photorealistic 3D Tiles as the visible ground of
+every terrain render (the owner's rule, 2026-10-09: on by default, needs
+`GOOGLE_MAPS_API_KEY` or `CESIUM_ION_TOKEN` and the Cesium plugin, refuses
+by name without them; `FLIGHTSIM_GOOGLE_TILES=off` is the only way to the
+baked ground). The web app's throw-away host flight passes
+`-NoGoogleTiles`; the debug script streams the tiles unless
+`--no-google-tiles`. Under the storm the ground is tinted by the look's fog and
 the atmosphere's aerial perspective, and the dark patches on it are the
 deck's cloud shadows.
 

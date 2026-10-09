@@ -371,12 +371,18 @@ def derived_aircraft_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object
 
 GOOGLE_TILES_ENV = "FLIGHTSIM_GOOGLE_TILES"
 GOOGLE_TILES_ON = ("1", "on", "true", "yes")
+GOOGLE_TILES_OFF = ("0", "off", "false", "no")
 
 
 def google_tiles_requested() -> bool:
-    """FLIGHTSIM_GOOGLE_TILES is on: the same words the render host's
-    FFlightSimGoogleTiles::Requested accepts."""
-    return os.environ.get(GOOGLE_TILES_ENV, "").strip().lower() in GOOGLE_TILES_ON
+    """Google's 3D tiles are the ground of every terrain render -- the
+    owner's rule (2026-10-09, "hardcode every single terrain requires
+    google tiles"): ON unless FLIGHTSIM_GOOGLE_TILES says off, the same
+    words the render host's FFlightSimGoogleTiles::Requested reads. A
+    render that cannot draw them (no key, no Cesium plugin, a ground that
+    is not a real bake of the place) refuses by name; nothing falls back
+    to the baked ground on its own."""
+    return os.environ.get(GOOGLE_TILES_ENV, "").strip().lower() not in GOOGLE_TILES_OFF
 
 
 #: The constraint a Google-tiles render refuses under when the physics
@@ -409,16 +415,17 @@ def google_tiles_terrain_refusal(heightfield, latitude_deg: Optional[float] = No
                 and terrain_elevation_m is not None and float(terrain_elevation_m) == 0.0
                 and open_ocean(latitude_deg, longitude_deg)):
             return None
-        return (f"{GOOGLE_TILES_ENV} is on but the physics ground is the flat slab: "
-                f"the tiles would draw real terrain the aircraft never feels. Bake the "
-                f"place (scripts/bake_terrain.py, or the page's on-demand bake), say "
-                f"'over the ocean' for an open-ocean scene, or turn the tiles off")
+        return (f"Google tiles are on (every terrain render; {GOOGLE_TILES_ENV}=off turns "
+                f"them off) but the physics ground is the flat slab: the tiles would draw "
+                f"real terrain the aircraft never feels. Bake the place "
+                f"(scripts/bake_terrain.py, or the page's on-demand bake), or say 'over the "
+                f"ocean' for an open-ocean scene")
     producer = str((heightfield.provenance or {}).get("producer", ""))
     if producer != "dem ingestion":
-        return (f"{GOOGLE_TILES_ENV} is on but the physics ground {heightfield.name!r} is "
-                f"not a real elevation bake (producer {producer or 'unknown'!r}): the tiles "
-                f"would draw a different place from the ground the aircraft flies on. Bake "
-                f"the real place or turn the tiles off")
+        return (f"Google tiles are on (every terrain render; {GOOGLE_TILES_ENV}=off turns "
+                f"them off) but the physics ground {heightfield.name!r} is not a real "
+                f"elevation bake (producer {producer or 'unknown'!r}): the tiles would draw "
+                f"a different place from the ground the aircraft flies on. Bake the real place")
     return None
 
 
@@ -744,9 +751,9 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # nothing; check.georeference grades the copy against the manifest.
         card["georeference"] = dict(georeference)
     if google_tiles_requested():
-        # Visual only, and only when the render will draw Google's tiles:
-        # the host reads the undulation from here when the georeference
-        # block has none (a card without the env var is unchanged).
+        # Visual only, and only when the render will draw Google's tiles
+        # (every terrain render unless FLIGHTSIM_GOOGLE_TILES=off): the host
+        # reads the undulation from here when the georeference block has none.
         card["google_tiles"] = google_tiles_card_block(card["latitude_deg"],
                                                        card["longitude_deg"])
     path.parent.mkdir(parents=True, exist_ok=True)

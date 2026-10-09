@@ -135,9 +135,9 @@ def test_with_tiles_on_a_staged_place_without_its_bake_is_baked_first(runs, monk
     spec = compile_prompt("fly the c172p while it is raining")
     runs.plan_scene_setting(spec)
     assert runs.scene_set(spec)
-    monkeypatch.delenv("FLIGHTSIM_GOOGLE_TILES", raising=False)
+    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "off")
     assert runs.needs_dynamic_bake(spec) is None              # tiles off: unchanged
-    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "on")
+    monkeypatch.delenv("FLIGHTSIM_GOOGLE_TILES", raising=False)   # the default: on
     refusal = runs.needs_dynamic_bake(spec)
     assert refusal["constraint"] == "terrain.unbaked"
     place = LOCATIONS["flint_hills"]

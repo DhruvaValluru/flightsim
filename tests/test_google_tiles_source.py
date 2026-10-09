@@ -66,11 +66,11 @@ def test_a_tiles_card_carries_the_geoid_undulation_at_its_origin(tmp_path, monke
     from core.terrain.geoid import grid_for_model
 
     spec = reference_spec("fly the 747 at 3000 m and 250 kt for 30 seconds")
-    monkeypatch.delenv("FLIGHTSIM_GOOGLE_TILES", raising=False)
+    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "off")
     plain = json.loads(write_run_card(spec, tmp_path / "plain.json").read_text(encoding="utf-8"))
     assert "google_tiles" not in plain
 
-    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "on")
+    monkeypatch.delenv("FLIGHTSIM_GOOGLE_TILES", raising=False)   # the default: on
     card = json.loads(write_run_card(spec, tmp_path / "card.json").read_text(encoding="utf-8"))
     block = card["google_tiles"]
     grid = grid_for_model("auto")
@@ -116,3 +116,26 @@ def test_a_stuck_view_is_reloaded_before_the_timeout_refuses():
     assert "Refreshes < MaxTileRefreshes" in wait
     assert wait.index("Tiles->RefreshTileset();") < wait.index("Waited > TimeoutSeconds")
     assert 'TEXT("tileset_reloads")' in TILES_CPP
+
+
+def test_every_terrain_render_draws_the_tiles_unless_switched_off(monkeypatch):
+    """The owner's rule (2026-10-09): Google's tiles are the ground of every
+    terrain render. On by default on both sides; FLIGHTSIM_GOOGLE_TILES=off
+    (0, false, no) is the only way off; a render that cannot draw them
+    refuses by name rather than falling back to the baked ground."""
+    from core.scenario.card import google_tiles_requested
+
+    monkeypatch.delenv("FLIGHTSIM_GOOGLE_TILES", raising=False)
+    assert google_tiles_requested() is True
+    for word in ("off", "0", "false", "no", "OFF"):
+        monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", word)
+        assert google_tiles_requested() is False, word
+    for word in ("on", "1", "true", "yes", "anything"):
+        monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", word)
+        assert google_tiles_requested() is True, word
+    requested = TILES_CPP[TILES_CPP.index("bool FFlightSimGoogleTiles::Requested()"):]
+    requested = requested[:requested.index("\n}\n")]
+    assert 'return !(Value == TEXT("0") || Value == TEXT("off")' in requested
+    assert "FLIGHTSIM_GOOGLE_TILES=off" in TILES_CPP   # the refusals name the way off
+    debug = (REPO / "scripts" / "debug_storm_render.py").read_text(encoding="utf-8")
+    assert '"--no-google-tiles"' in debug and 'extra = [f"-seconds={args.seconds}"] + (["-NoGoogleTiles"]' in debug

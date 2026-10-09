@@ -101,6 +101,9 @@ def main(argv=None) -> int:
     parser.add_argument("--terrain", default=None,
                         help="a bake stem under runs/terrain (default: the web app's scene for the prompt)")
     parser.add_argument("--flat", action="store_true", help="the bare slab, no terrain")
+    parser.add_argument("--no-google-tiles", action="store_true",
+                        help="the baked ground instead of Google's tiles (the web app's own render "
+                             "draws the tiles; its throw-away solve pass does not)")
     # 1280 x 720: at 640 x 360 a drop a metre from the camera is under a
     # pixel and the rain cannot be judged.
     parser.add_argument("--width", type=int, default=1280)
@@ -164,7 +167,7 @@ def main(argv=None) -> int:
     print(f"  scene: terrain={scene.get('terrain') if scene else None} "
           f"({scene.get('kind') if scene else 'flat slab'}); imagery="
           f"{scene.get('imagery') if scene else None} (none: the land-cover material colours "
-          f"the ground); Google tiles off (-NoGoogleTiles)")
+          f"the ground); Google tiles {'off (-NoGoogleTiles)' if args.no_google_tiles else 'on'}")
     camera_flags = ([f"-chase={webapp_chase_flag(aircraft)}", "-camera=chase"], [])
 
     editor = ue_editor_path()
@@ -180,7 +183,7 @@ def main(argv=None) -> int:
         # (measured: a refused run reported the frames of the run before).
         for stale in [frames / "render.json"] + list(frames.glob("frame_*.png")):
             stale.unlink(missing_ok=True)
-        extra = [f"-seconds={args.seconds}", "-NoGoogleTiles"]
+        extra = [f"-seconds={args.seconds}"] + (["-NoGoogleTiles"] if args.no_google_tiles else [])
         if backend != "off":
             extra.append(f"-weather-backend={backend}")
         command = [str(editor), str(REPO / "ue" / "FlightSim.uproject"),

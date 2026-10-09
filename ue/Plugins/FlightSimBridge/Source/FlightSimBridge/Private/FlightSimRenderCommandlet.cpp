@@ -1097,7 +1097,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	const bool bNoShadows = FParse::Param(*Params, TEXT("NoShadows"));
 	const bool bHideAircraft = FParse::Param(*Params, TEXT("HideAircraft"));
 	// The web app's solve pass: its frames are discarded, so it skips the
-	// Google tiles (FLIGHTSIM_GOOGLE_TILES) rather than stream them.
+	// Google tiles (on for every terrain render) rather than stream them.
 	const bool bNoGoogleTiles = FParse::Param(*Params, TEXT("NoGoogleTiles"));
 	// Phase 10 labels: the engine half of the per-frame ground truth --
 	// an instance mask, a class mask, 16-bit depth and an occlusion
@@ -1352,8 +1352,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// is the §6.6 scene, behind -Visual.
 	FFlightSimVisualScene VisualScene;
 	FFlightSimWeather Weather;
-	// Google Photorealistic 3D Tiles as the visible ground (opt-in,
-	// FLIGHTSIM_GOOGLE_TILES=on; FlightSimGoogleTiles.h).
+	// Google Photorealistic 3D Tiles as the visible ground of every terrain
+	// render (FLIGHTSIM_GOOGLE_TILES=off is the only way off; FlightSimGoogleTiles.h).
 	FFlightSimGoogleTiles GoogleTiles;
 	// -- Phase 2 Look lane: the card's look block (contracts §5.4) ---------
 	// The engine consumes what the CARD carries: `look` at the root, else
@@ -1783,8 +1783,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				return Fail(TEXT("google_tiles.undulation_missing: the card carries no geoid ")
 				            TEXT("undulation at the origin (georeference.undulation_origin_m or ")
-				            TEXT("google_tiles.geoid_undulation_m); write the card with ")
-				            TEXT("FLIGHTSIM_GOOGLE_TILES=on set so core/scenario/card.py adds it"));
+				            TEXT("google_tiles.geoid_undulation_m); write the card with the tiles ")
+				            TEXT("on (the default) so core/scenario/card.py adds it"));
 			}
 			if (!GoogleTiles.Enable(World, Scenario.GeoReferencing, Card.LatitudeDegrees,
 			                        Card.LongitudeDegrees, Card.TerrainElevationMetres,

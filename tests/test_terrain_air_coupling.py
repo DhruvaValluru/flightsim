@@ -277,8 +277,11 @@ def test_bake_on_a_named_place_bakes_the_curated_location(no_bakes, monkeypatch)
     assert entry["key"] == "everest" and entry["imagery"] == "draped"
 
 
-def test_a_staged_place_is_still_not_held_for_a_bake(no_bakes):
-    """Scene-setting (source derived) is not a named place: unchanged."""
+def test_a_staged_place_is_still_not_held_for_a_bake(no_bakes, monkeypatch):
+    """Scene-setting (source derived) is not a named place: unchanged --
+    with the tiles off. On (the default since 2026-10-09) a staged place
+    without its bake is held for one (test_place_choice)."""
+    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "off")
     spec = compile_prompt("fly the 747 at 3000 m and 250 kt")
     no_bakes.plan_scene_setting(spec)
     assert no_bakes.scene_set(spec)
@@ -294,10 +297,10 @@ def test_google_tiles_refuse_over_the_slab_and_synthesised_terrain(monkeypatch):
 
     synthetic = generate(size=32, pixel_size_m=30.0, seed=1, name="synthetic")
     real = ridge_ground().heightfield
-    monkeypatch.delenv("FLIGHTSIM_GOOGLE_TILES", raising=False)
+    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "off")
     assert google_tiles_terrain_refusal(None) is None
     assert google_tiles_terrain_refusal(synthetic) is None
-    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "on")
+    monkeypatch.delenv("FLIGHTSIM_GOOGLE_TILES", raising=False)   # the default: on
     assert "flat slab" in google_tiles_terrain_refusal(None)
     assert "not a real elevation bake" in google_tiles_terrain_refusal(synthetic)
     assert google_tiles_terrain_refusal(real) is None

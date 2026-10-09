@@ -18,6 +18,11 @@ os.environ.setdefault("FLIGHTSIM_GEOCODER", "offline")
 # background (webapp.runs.TerrainPrefetch); tests/test_terrain_prefetch.py
 # switches it on with a stubbed bake.
 os.environ.setdefault("FLIGHTSIM_TERRAIN_PREFETCH", "off")
+# Google's tiles are the ground of every terrain render (the owner's rule,
+# 2026-10-09: on by default on both sides); the suite has no key, no Cesium
+# plugin, no bakes and no network, so it runs with them off. A test of the
+# default deletes the variable (monkeypatch.delenv) and sees them on.
+os.environ.setdefault("FLIGHTSIM_GOOGLE_TILES", "off")
 
 from core.util.platform import ue_available  # noqa: E402
 
