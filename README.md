@@ -498,6 +498,20 @@ the run card (`route.replay_divergence_m`). Prompts that ask for a path in
 words ("fly to", "follow the valley", "circle the peak") are refused
 `prompt.not_set` with that remedy: draw it. docs/ROUTE.md is the record.
 
+## Fix a refused scenario with the model (web page)
+
+When the verdict says the scenario cannot run, a box under it asks what
+should stay as it is ("keep the altitude") and **Fix it for me** hands the
+refusals, the scenario's fields and your words to the language model. It
+changes only the scenario's numbers (speed, altitude, heading, wind,
+turbulence, duration, rain), never the field you asked to keep, in up to
+three rounds until the validator passes; every change lands in the review
+table as a user edit whose provenance names the instruction. The trim
+refusal already says the smallest change that works, and the model is
+told it. With no model configured the trim rule applies that change
+itself, and the page says which of the two did it (`POST /repair`,
+`core/nl/repair.py`).
+
 ## Terrain downloads start at Interpret
 
 When a prompt names a real place ("over new york city") whose terrain is

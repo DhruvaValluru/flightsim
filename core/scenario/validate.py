@@ -326,12 +326,14 @@ TRIM_SEARCH_ALTITUDE_FRACTIONS = (0.5, 0.33)
 TRIM_SEARCH_ALTITUDE_FALLBACK_M = 1000.0
 
 
-def trim_suggestion(spec) -> str:
+def trim_suggestion(spec, keep: Optional[str] = None) -> str:
     """The smallest single change of speed or altitude at which this
-    airframe trims, in words ("it trims at 120 kt at 900 m"), or "" when
-    none of the nearby conditions trims either. The owner's ask
-    (2026-10-09): a refusal should say what small change makes it work.
-    The airframe's documented cruise is tried first, then the steps."""
+    airframe trims, in words ("change the altitude to 4000 m (it trims
+    there at 100 kt)"), or "" when none of the nearby conditions trims
+    either. The owner's ask (2026-10-09): a refusal should say what small
+    change makes it work. The airframe's documented cruise is tried first,
+    then the speed steps, then the altitudes; ``keep`` ("altitude" or
+    "airspeed") skips changes to that field (the repair layer's kept field)."""
     import copy
 
     from .runner import configure_from_spec
@@ -360,9 +362,13 @@ def trim_suggestion(spec) -> str:
     if cruise is not None and cruise != speed:
         speeds.append(cruise)
     speeds += [speed + step for step in TRIM_SEARCH_SPEED_STEPS_KT if speed + step > 0.0]
+    if keep == "airspeed":
+        speeds = []
     for candidate in speeds:
         if trims(candidate, altitude):
             return f"change the speed to {candidate:g} kt (it trims there at {altitude:g} m)"
+    if keep == "altitude":
+        return ""
     altitudes = [altitude + step for step in TRIM_SEARCH_ALTITUDE_STEPS_M]
     altitudes += [altitude * f for f in TRIM_SEARCH_ALTITUDE_FRACTIONS] + [TRIM_SEARCH_ALTITUDE_FALLBACK_M]
     tried = set()

@@ -612,8 +612,46 @@ function renderVerdict(v) {
   } else {
     $("verdict").innerHTML =
       `<div class="verdict-refused">This scenario cannot run as it stands:</div><ul>` +
-      v.violations.map(x => `<li>${refusalHtml(x)}</li>`).join("") + `</ul>`;
+      v.violations.map(x => `<li>${refusalHtml(x)}</li>`).join("") + `</ul>` +
+      // The owner's ask (2026-10-09): say what to keep and let the model
+      // change the rest until it runs (POST /repair; core/nl/repair.py).
+      `<div class="repair-row"><input id="repairWhat" maxlength="300" style="width:55%" ` +
+      `placeholder="what should stay as it is? e.g. keep the altitude">` +
+      ` <button id="repairGo" class="opt">Fix it for me</button>` +
+      `<div id="repairState" class="dim"></div></div>`;
+    $("repairGo").addEventListener("click", repairSpec);
+    $("repairWhat").addEventListener("keydown", e => { if (e.key === "Enter") repairSpec(); });
     $("run").disabled = true;
+  }
+}
+
+async function repairSpec() {
+  // The EDITED dict (a typed value is kept); the server applies the
+  // model's edits as user edits and re-validates; the table shows them.
+  const instruction = $("repairWhat").value.trim();
+  $("repairState").textContent = "asking the model...";
+  $("repairGo").disabled = true;
+  try {
+    const response = await fetch("/repair", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({spec: editedSpecDict(), instruction}),
+    });
+    const payload = await response.json();
+    if (payload.error) { $("repairState").innerHTML = refusalHtml(payload); $("repairGo").disabled = false; return; }
+    const r = payload.repair;
+    const changes = r.edits.length
+      ? r.edits.map(e => `${e.field}: ${esc(e.from)} → ${esc(e.to)}`).join("; ")
+      : "no change made";
+    const who = r.reader === "llm" ? `the model (${esc(r.model || "")})` : "the trim rule (no model configured)";
+    renderSpec({...compiled, spec: payload.spec, validation: payload.validation});
+    const state = document.createElement("div");
+    state.className = "dim";
+    state.textContent = (r.ok ? "Repaired by " : "Still refused after ") + who + ": " + changes +
+      (r.note ? ". " + r.note : "");
+    $("verdict").prepend(state);
+  } catch (error) {
+    $("repairState").textContent = `could not reach the server: ${error}`;
+    $("repairGo").disabled = false;
   }
 }
 

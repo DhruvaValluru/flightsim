@@ -613,6 +613,38 @@ def camera_prompt_endpoint(request: CameraPromptRequest) -> JSONResponse:
     return JSONResponse(payload)
 
 
+class RepairRequest(BaseModel):
+    """Repair the refused spec the page is holding: what the user wants
+    kept, in words; the model (or the rules) changes the rest."""
+
+    spec: Dict[str, Any]
+    instruction: str = ""
+
+
+@app.post("/repair")
+def repair_endpoint(request: RepairRequest) -> JSONResponse:
+    """The owner's ask (2026-10-09): tell the model what to keep and have
+    it change the rest until the refusals are gone. core/nl/repair.py
+    does the rounds; every edit is a user edit with the instruction as
+    its provenance, shown in the table; the response says which reader
+    did it (the model, or the trim rule when no model is configured) and
+    what is still refused, if anything."""
+    from core.nl.repair import repair_spec
+
+    try:
+        spec = ScenarioSpec.from_dict(request.spec)
+    except (ValueError, KeyError) as exc:
+        return JSONResponse({"error": f"spec did not parse: {exc}"}, status_code=400)
+    instruction = request.instruction.strip()
+    if len(instruction) > 300:
+        return JSONResponse({"error": "say what to keep in at most 300 characters"},
+                            status_code=400)
+    result = repair_spec(spec, instruction)
+    payload = {"spec": _spec_payload(spec), "validation": _validation_payload(spec),
+               "repair": result.to_dict()}
+    return JSONResponse(payload)
+
+
 @app.post("/cameras")
 def cameras_endpoint(request: CameraRequest) -> JSONResponse:
     """One more point of view, or one fewer.
