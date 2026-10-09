@@ -1332,6 +1332,9 @@ function renderCameraPicker() {
   routeBtn.addEventListener("click", openRouteMap);
   row.appendChild(routeBtn);
   holder.appendChild(row);
+  // The owner's rule (2026-10-09, "have it always expanded"): the map opens
+  // by itself after Interpret; the button re-opens it after Clear.
+  if (window.RouteMap) setTimeout(openRouteMap, 0);
   // Or say where the camera should be, in words.
   const sentence = document.createElement("div");
   sentence.style.marginTop = ".5rem";
