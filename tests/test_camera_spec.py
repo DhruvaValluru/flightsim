@@ -10,11 +10,14 @@ load-bearing one: it is a test here, not an intention.
 import pytest
 
 from core.nl.compiler import compile_prompt
+from core.render.headless import HEADLESS_FLAGS
 from core.scenario.camera import (
-    CHASE_OFFSETS, CameraSpec, default_cameras,
+    CHASE_OFFSETS, FALLBACK_CHASE_OFFSET, CameraSpec, default_cameras,
+    derive_chase_offset,
 )
 from core.scenario.fields import Source
 from core.scenario.spec import ScenarioSpec
+from tests.engine_launch import launch_through_run
 
 
 @pytest.fixture
@@ -57,10 +60,16 @@ def test_specs_differing_only_in_cameras_hash_differently(spec):
     assert spec.digest() != with_camera
 
 
-def test_spec_version_5_documents_refuse_by_name(spec_with_camera):
+@pytest.mark.parametrize("version", [5, 7, 10])
+def test_older_spec_versions_refuse_by_name(spec_with_camera, version):
+    """5 (before cameras), 7 (before the spec-8 blocks) and 10 (after
+    this build): each by the named version error, never a guess at the
+    schema. (8 still reads when it states no version-9 block:
+    tests/test_versions.py.)"""
     data = spec_with_camera.to_dict()
-    data["spec_version"] = 5
-    with pytest.raises(ValueError, match="not supported"):
+    data["spec_version"] = version
+    with pytest.raises(ValueError, match=f"spec_version {version} is not "
+                                         f"supported"):
         ScenarioSpec.from_dict(data)
 
 
@@ -137,6 +146,63 @@ def test_default_cameras_is_the_webapp_chase(spec):
     assert all(str(q.source) == "default" for _, q in camera.quantities())
 
 
+def test_an_untabled_airframe_with_no_mesh_yet_gets_the_named_fallback():
+    """Nothing measured for this airframe on this machine -> the stated
+    B747 fallback, not a guess. (This is the bug class that rendered
+    the A-4 "a few pixels wide" before it got a CHASE_OFFSETS entry --
+    reproduced here for an airframe that has never been imported.)"""
+    name = "a-plane-nobody-has-imported"
+    assert name not in CHASE_OFFSETS
+    assert derive_chase_offset(name) == FALLBACK_CHASE_OFFSET
+    spec = CameraSpec.defaulted(aircraft=name, preset="chase")
+    assert tuple(float(v) for v in (spec.offset_forward_m.value,
+                                     spec.offset_right_m.value,
+                                     spec.offset_up_m.value)) == FALLBACK_CHASE_OFFSET
+
+
+def test_an_untabled_airframe_with_a_measured_mesh_gets_a_scaled_offset(
+        tmp_path, monkeypatch):
+    """Once an airframe has been imported (a real mesh_manifest.json on
+    disk, the Phase 1 fix's own provenance record), the chase offset is
+    derived from ITS measured length instead of silently reusing the
+    B747's -110 m -- the same scaling a human applied by hand to frame
+    the A-4 before it had a table entry, now automatic for the NEXT
+    airframe that is added."""
+    import core.scenario.camera as camera_module
+    monkeypatch.setattr(camera_module, "_MESH_GENERATED_DIR", tmp_path)
+    name = "test-plane-twice-the-c172p"
+    (tmp_path / name).mkdir()
+    (tmp_path / name / "mesh_manifest.json").write_text(
+        '{"mesh_length_m": 16.56}', encoding="utf-8")  # 2x the c172p calibration length
+
+    forward, right, up = derive_chase_offset(name)
+    c172_forward, c172_right, c172_up = CHASE_OFFSETS["c172p"]
+    assert forward == pytest.approx(2 * c172_forward)
+    assert right == 0.0
+    assert up == pytest.approx(2 * c172_up)
+
+    spec = CameraSpec.defaulted(aircraft=name, preset="chase")
+    assert float(spec.offset_forward_m.value) == pytest.approx(2 * c172_forward)
+    assert float(spec.offset_up_m.value) == pytest.approx(2 * c172_up)
+    assert "measured mesh length" in spec.offset_forward_m.frm
+
+
+def test_a_tabled_airframe_keeps_its_hand_calibrated_offset_even_with_a_mesh(
+        tmp_path, monkeypatch):
+    """CHASE_OFFSETS entries are measured against a real rendered frame;
+    a derived guess must never override one just because a mesh
+    manifest also happens to exist."""
+    import core.scenario.camera as camera_module
+    monkeypatch.setattr(camera_module, "_MESH_GENERATED_DIR", tmp_path)
+    (tmp_path / "A4").mkdir()
+    (tmp_path / "A4" / "mesh_manifest.json").write_text(
+        '{"mesh_length_m": 999.0}', encoding="utf-8")
+    spec = CameraSpec.defaulted(aircraft="A4", preset="chase")
+    forward, right, up = CHASE_OFFSETS["A4"]
+    assert float(spec.offset_forward_m.value) == forward
+    assert float(spec.offset_up_m.value) == up
+
+
 def test_default_cameras_tornado_core_flies_wingman():
     spec = compile_prompt("fly the 747 through a tornado")
     assert str(spec.weather_event.detail.get("aim")) == "core"
@@ -189,6 +255,7 @@ def test_cameraless_spec_builds_byte_identical_commandlet_args(
             returncode = 0
         return Result()
 
+    launch_through_run(monkeypatch)
     monkeypatch.setattr(runs.subprocess, "run", fake_run)
     card = tmp_path / "card.json"
     frames = tmp_path / "frames"
@@ -196,7 +263,10 @@ def test_cameraless_spec_builds_byte_identical_commandlet_args(
     runs.RunManager._render(card, frames, scene,
                             tmp_path / "missing_mesh.json", "B747",
                             camera_flags=runs.camera_render_flags(spec))
-    assert captured["command"] == _historic_command(card, frames, "B747")
+    # The unattended launcher (core/render/headless.py) appends its own
+    # flags after the builder's list; the list itself is unchanged.
+    assert captured["command"] == (_historic_command(card, frames, "B747")
+                                   + list(HEADLESS_FLAGS))
 
 
 def test_camera_flags_for_the_tornado_core_default(monkeypatch):
@@ -272,3 +342,114 @@ def test_offset_cameras_are_not_touched_by_the_camera_planner():
     spec.plan("terrain_elevation", 2900.0, frm="staged by the test")
     plan_camera_defaults(spec)
     assert spec.cameras[0].to_dict() == before
+
+
+# -- how many frames a view nobody counted actually takes ---------------
+#
+# "why is it only 3 frames" -- and it was three, from every path that
+# built a camera without a number in it. CameraSpec.defaulted() takes
+# the `interval` trigger with capture_count 0 and period_s 1.0, which
+# is one frame per second: a three-second clip is three stills. The web
+# page's picker was fixed first (a view added there plans `continuous`);
+# these pin the same rule for the two compilers, so a view NAMED in the
+# prompt cannot come back as a contact sheet.
+#
+# The rate is not arbitrary: core.scenario.card.SAMPLE_INTERVAL_S is
+# 0.1 s and the headless recorder matches it, so `continuous` is ten
+# frames per second of flight -- 221 over a 22 s clip, 31 over a 3 s
+# one. Both are the whole flight; neither is three.
+
+def test_plan_full_capture_moves_a_defaulted_trigger():
+    from core.scenario.camera import plan_full_capture
+
+    camera = CameraSpec.defaulted(camera_id="c", preset="chase",
+                                  aircraft="B747")
+    assert str(camera.trigger.value) == "interval"
+    assert plan_full_capture(camera, frm="the test") is True
+    assert str(camera.trigger.value) == "continuous"
+    # Planned, not stated: the review table can still overrule it.
+    assert camera.trigger.source == Source.DERIVED
+
+
+def test_plan_full_capture_leaves_a_stated_count_alone():
+    """The guard that keeps a helpful default from becoming a refusal.
+
+    `continuous` emits one frame per recorded sample, so it cannot also
+    honour "12 images" -- solve_schedule refuses a count contract it
+    cannot meet rather than truncating. A camera carrying a stated
+    count therefore keeps its interval trigger.
+    """
+    from core.capture.schedule import solve_schedule
+    from core.scenario.camera import plan_full_capture
+
+    camera = CameraSpec.defaulted(camera_id="c", preset="chase",
+                                  aircraft="B747")
+    camera.set("capture_count", 12, frm="12 images")
+    assert plan_full_capture(camera, frm="the test") is False
+    assert str(camera.trigger.value) == "interval"
+
+    columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
+    assert len(solve_schedule(columns, camera)) == 12
+
+
+def test_plan_full_capture_leaves_a_stated_trigger_alone():
+    from core.scenario.camera import plan_full_capture
+
+    camera = CameraSpec.defaulted(camera_id="c", preset="chase",
+                                  aircraft="B747")
+    camera.set("trigger", "distance", frm="every 500 m")
+    assert plan_full_capture(camera, frm="the test") is False
+    assert str(camera.trigger.value) == "distance"
+
+
+def test_a_view_named_in_the_prompt_captures_the_whole_clip():
+    from core.capture.schedule import solve_schedule
+
+    spec = compile_prompt("chase view of the 747 at 3000 m and 250 kt")
+    camera = spec.cameras[0]
+    assert str(camera.trigger.value) == "continuous", (
+        "a view named without a number is the whole flight from that "
+        "view, not one frame a second")
+
+    # Ten samples a second, so neither clip length is a handful.
+    for seconds, expected in ((3.0, 31), (22.0, 221)):
+        columns = {"t": [round(i * 0.1, 1)
+                         for i in range(int(seconds * 10) + 1)]}
+        assert len(solve_schedule(columns, camera)) == expected
+    assert len(solve_schedule(
+        {"t": [round(i * 0.1, 1) for i in range(31)]}, camera)) > 15
+
+
+def test_a_counted_view_in_the_prompt_still_gets_exactly_that_many():
+    from core.capture.schedule import solve_schedule
+
+    spec = compile_prompt(
+        "fly the 747 at 3000 m and 250 kt, 15 images from the tower")
+    camera = spec.cameras[0]
+    assert int(camera.capture_count.value) == 15
+    assert str(camera.trigger.value) == "interval"
+    assert str(camera.capture_count.source) == "user"
+
+    columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
+    assert len(solve_schedule(columns, camera)) == 15
+
+
+def test_plan_full_capture_leaves_a_stated_period_alone():
+    """A rate is a request too, and `continuous` ignores it.
+
+    period_s is how the review table and the language model ask for an
+    interval capture without naming a count. Planning `continuous` over
+    a stated period would drop that request silently rather than refuse
+    it by name.
+    """
+    from core.capture.schedule import solve_schedule
+    from core.scenario.camera import plan_full_capture
+
+    camera = CameraSpec.defaulted(camera_id="c", preset="chase",
+                                  aircraft="B747")
+    camera.set("period_s", 2.0, frm="one every two seconds")
+    assert plan_full_capture(camera, frm="the test") is False
+    assert str(camera.trigger.value) == "interval"
+
+    columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
+    assert len(solve_schedule(columns, camera)) == 12

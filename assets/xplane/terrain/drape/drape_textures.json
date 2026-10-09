@@ -1,0 +1,37 @@
+{
+ "valley": {
+  "file": "valley.png",
+  "metres_x": 1277.0,
+  "metres_y": 1277.0,
+  "source_ter": "grass_cld_dry_fl.ter",
+  "source_texture": "grass_cld_sdry_flat_c.dds"
+ },
+ "scrub": {
+  "file": "scrub.png",
+  "metres_x": 2444.0,
+  "metres_y": 1222.0,
+  "source_ter": "shrb_cld_sdry_hill.ter",
+  "source_texture": "shrub_tmp_sdry_hill_d.dds"
+ },
+ "rock": {
+  "file": "rock.png",
+  "metres_x": 1111.0,
+  "metres_y": 1111.0,
+  "source_ter": "rock_cld_dry_steep.ter",
+  "source_texture": "rock_cld_dry_steep_d.dds"
+ },
+ "cliff": {
+  "file": "cliff.png",
+  "metres_x": 2832.0,
+  "metres_y": 708.0,
+  "source_ter": "rock_cld_dry_steep.ter",
+  "source_texture": "cliff_cld_dry.dds"
+ },
+ "snow": {
+  "file": "snow.png",
+  "metres_x": 2840.0,
+  "metres_y": 2840.0,
+  "source_ter": "ice_cld_dry_hill.ter",
+  "source_texture": "ice_cld_wet_hill_d.dds"
+ }
+}

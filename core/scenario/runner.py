@@ -8,9 +8,11 @@ Determinism
 -----------
 The output digest is a SHA-256 over the recorded telemetry. Nothing
 time-varying, path-dependent or wall-clock-dependent enters it, so two runs from
-the same spec produce the same digest -- which is what Gate 1 checks. There is
-no RNG anywhere in the current core; when Phase 3 introduces turbulence, its
-seed is already a spec field and will feed a per-subsystem generator (§7.4).
+the same spec produce the same digest -- which is what Gate 1 checks. Every
+stochastic subsystem -- Dryden turbulence, the gust front, Allen thermals and
+the randomisation block -- draws from a stream seeded from the spec
+(``spec.seed`` and the block's own seed; ``core/experiments/seeds.py``
+derives per-subsystem streams), never from global or wall-clock state (§7.4).
 """
 
 from __future__ import annotations
@@ -20,15 +22,33 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ..control.autopilot import Autopilot, ClosureReport, ClosureTolerance
+from ..control.route import (
+    Route, RouteError, RouteGuidance, RouteTolerance, route_closure, route_recorder_extras,
+)
+from ..environment.icing import icing_injections_for
+from ..environment.rain import RainProvider, rain_injections_for
+from ..environment.wake import TELEMETRY_COLUMNS as WAKE_COLUMNS, WakeVortexPair, unread_wake_fields, wake_injections_for
 from ..environment.stack import EnvironmentStack
-from ..environment.turbulence import DrydenTurbulence
+from ..environment.turbulence import DrydenTurbulence, W20_KT
 from ..environment.wind import SteadyWind
 from ..fdm import FlightDynamics, TrimMode, mode_for
 from ..fdm import units as u
+from ..records import RECORD_VERSION, AppliedVariable, Readback, read_records, records_block
+from ..registry import RecordError
+from ..telemetry.instruments import (
+    INSTRUMENTS_FILE, InstrumentError, InstrumentObserver, instruments_from_spec,
+)
+from ..fdm.modes import modes_block
+from ..telemetry.failures import FailureSchedule, failure_injections_for
+from ..telemetry.limits import monitor_run
 from ..telemetry.recorder import Recorder
+from ..terrain.geoid import (
+    TELEMETRY_COLUMNS as DATUM_COLUMNS, check_model_declared, datum_for_heightfield,
+    datum_spec_problems, flat_datum_block, undulation_variable,
+)
 from .spec import ScenarioSpec
 from .validate import ValidationReport, validate
 
@@ -55,18 +75,160 @@ class UnimplementedConditionError(Exception):
     """
 
 
-def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
+def scene_frame_for(spec: ScenarioSpec, terrain_ground=None):
+    """The local north/east frame every position-coupled provider samples
+    in: the spec origin projected into the raster's CRS over terrain, into
+    the origin's UTM zone otherwise -- the frame the webapp writes the run
+    card's blocks in (webapp.runs._projected_origin) and the UE host reads
+    them back through (LocalSceneCoords)."""
+    from ..environment.base import LocalFrame
+    from ..terrain.glo30 import utm_zone_crs
+
+    lat, lon = float(spec.latitude.value), float(spec.longitude.value)
+    crs = None
+    if terrain_ground is not None:
+        crs = terrain_ground.heightfield.georeference.crs
+    if not crs or str(crs).upper() in ("EPSG:4326", "OGC:CRS84"):
+        crs = utm_zone_crs(lat, lon)
+    return LocalFrame(crs, lat, lon)
+
+
+def orographic_for(spec: ScenarioSpec, terrain_ground):
+    """Ridge lift, lee sink and the rotor's field over the run's raster,
+    or None in calm air (orographic forcing is wind over terrain).
+
+    Built from the SAME numbers as the run card's ``orographic`` block
+    (core.terrain.glo30.orographic_parameters) and sampled in the same
+    frame, so the headless host flies the mountain the UE host flies.
+    The forcing wind is the spec's stated wind, as on the card.
+    """
+    wind_kt = float(spec.wind_speed.value)
+    if terrain_ground is None or wind_kt <= 0.0:
+        return None
+    from ..environment.terrain_field import OrographicWind
+    from ..terrain.glo30 import orographic_parameters
+    from ..terrain.ground import terrain_field_at
+
+    heightfield = terrain_ground.heightfield
+    frame = scene_frame_for(spec, terrain_ground)
+    params = orographic_parameters(heightfield, float(spec.latitude.value),
+                                   float(spec.longitude.value))
+    field = terrain_field_at(heightfield, params["origin_x_m"], params["origin_y_m"],
+                             wavelength_m=params["wavelength_m"])
+    return OrographicWind(field, wind_speed_mps=u.kt_to_mps(wind_kt),
+                          wind_from_deg=float(round(float(spec.wind_direction.value))),
+                          decay_height_m=params["decay_height_m"], frame=frame)
+
+
+def environment_for(spec: ScenarioSpec, landcover_json=None,
+                    terrain_ground=None) -> EnvironmentStack:
     """Build the provider stack a spec asks for.
 
     Turbulence is a real provider from Phase 3 onward, so it is no longer
     refused -- but an intensity word the provider does not know still is,
     rather than being quietly rounded to something it does know.
+
+    ``landcover_json`` (W1): the georeferenced bake's ``landcover.json``
+    when the run flies over one. With it, a surface the spec leaves at
+    its default is INFERRED from the dominant land cover class --
+    roughness only, through the same log-profile path a stated word
+    takes, recorded as ``environment.surface`` with provenance
+    ``inferred``. A surface the user or the prompt stated is never
+    overridden (provenance user beats inferred); a scene the map cannot
+    read (no class holds half of it) infers nothing, flies the default
+    surface, and says why in ``stack.notes``.
+
+    ``terrain_ground`` (the raster the run flies over): with wind, the
+    terrain shapes the air as it does in the UE host -- ridge lift and
+    lee sink as a wind provider, and the lee-rotor turbulence riding the
+    same field in place of plain Dryden (the spec's turbulence word is
+    its background floor). Position-coupled fields (the orographic field,
+    surface thermals) are sampled in the scene's local frame about the
+    spec origin (:func:`scene_frame_for`), the frame the run card uses.
     """
     stack = EnvironmentStack()
-    from ..environment.surface import surface_class
+    orographic = orographic_for(spec, terrain_ground)
+    if orographic is not None:
+        stack.add(orographic)
+    from ..environment.surface import (
+        InferredRoughnessWind, SurfaceInferenceError, infer_surface_for_spec, surface_class,
+    )
+
+    # Gap P1: the stated day (temperature deviation, sea-level pressure,
+    # humidity), written before the trim (stack.prepare) and every step.
+    # The standard day adds no provider and records no variable.
+    atmosphere = atmosphere_for(spec)
+    if atmosphere is not None:
+        stack.add(atmosphere)
+    # P4: the loading (payload stations and fuel), written ONCE before the
+    # trim through the same pre-trim hook, AFTER the atmosphere writes
+    # (the stack runs its pre-trim providers in the order added). The
+    # default block adds no provider and records no variable.
+    loading = loading_for(spec)
+    if loading is not None:
+        stack.add(loading)
+    # P5: the icing severity ramp, written to the derived airframe's
+    # injected properties at their neutral values before the trim and as
+    # eta(t) every step (read back before the next write). The default
+    # block adds no provider, derives nothing and records no variable.
+    icing = icing_for(spec)
+    if icing is not None:
+        stack.add(icing)
+    # The rain: the drops' momentum and the wetted wing on the derived
+    # airframe's injected properties, the runway's friction on JSBSim's
+    # own ground property -- neutral before the trim, then every step from
+    # the state at its top (core/environment/rain.py). The default block
+    # adds no provider, derives nothing and records no variable.
+    rain = rain_for(spec)
+    if rain is not None:
+        stack.add(rain)
+    # P7: the wake-vortex pair (a GustProvider: the stack sums it into the
+    # gust channel every step and delivers its equivalent roll rate where
+    # the derived airframe declares the property). A block that names no
+    # generator applies nothing -- the user asked for no encounter -- and
+    # its stated fields are recorded as unread beside the providers.
+    wake = wake_for(spec)
+    if wake is not None:
+        stack.add(wake)
+    else:
+        unread = unread_wake_fields(spec)
+        if unread:
+            stack.notes.append({"provider": "wake_vortex_pair", "applied": False,
+                                "reason": "no generator named: the stated wake fields are "
+                                          "carried, not applied",
+                                "unread_stated_fields": unread})
 
     surface = surface_class(str(spec.surface.value))
+    # W1: the roughness inferred from the bake's dominant land cover when
+    # no surface is stated; the inferred class carries no thermals
+    # (roughness only), so the thermal branch below attaches nothing. A
+    # scene the map cannot read (no class holds half of it, or a legend
+    # code outside the map) is NOT a refusal of the flight -- the user
+    # stated no surface, and the default stands -- but the reason is
+    # recorded beside the providers (stack.notes) so the manifest says why
+    # nothing was inferred.
+    inferred = None
+    if surface is None:
+        try:
+            inferred = infer_surface_for_spec(spec, landcover_json)
+        except SurfaceInferenceError as exc:
+            stack.notes.append({"provider": "surface_inference", "applied": False,
+                                "constraint": "landcover.surface_inference",
+                                "reason": str(exc)})
+    if inferred is not None:
+        surface = inferred.surface
     wind_speed = float(spec.wind_speed.value)
+    profile = wind_profile_for(spec)
+    if profile is not None:
+        # P6: a stated wind profile CARRIES the whole horizontal wind
+        # (layered / nwp: the layers; milspec: the log law from the spec's
+        # wind as W20), in place of the uniform or surface-log wind, and
+        # the trim is done in its wind at the initial altitude
+        # (configure_from_spec). The surface class's roughness is then
+        # not applied to the wind (its thermals still are), so the
+        # uniform providers below see no wind to add.
+        stack.add(profile)
+        wind_speed = 0.0
     if surface is not None and wind_speed > 0.0:
         # The surface-layer log profile CARRIES the whole horizontal wind
         # (reference at the layer top): at and above 300 m AGL it is held at
@@ -76,10 +238,17 @@ def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
         # cruise, a stated approximation below 300 m (BRIEF_PHASE9 9.1).
         from ..environment.wind import LogProfileWind
 
-        stack.add(LogProfileWind(
-            u.kt_to_mps(wind_speed), float(spec.wind_direction.value),
-            reference_height_m=LogProfileWind.SURFACE_LAYER_TOP_M,
-            terrain=surface.roughness))
+        if inferred is not None:
+            # The same profile, returning the environment.surface record
+            # with the null measurement it takes on the run.
+            stack.add(InferredRoughnessWind(
+                inferred, u.kt_to_mps(wind_speed), float(spec.wind_direction.value),
+                reference_height_m=LogProfileWind.SURFACE_LAYER_TOP_M))
+        else:
+            stack.add(LogProfileWind(
+                u.kt_to_mps(wind_speed), float(spec.wind_direction.value),
+                reference_height_m=LogProfileWind.SURFACE_LAYER_TOP_M,
+                terrain=surface.roughness))
     elif wind_speed > 0.0:
         stack.add(SteadyWind(u.kt_to_mps(wind_speed),
                              float(spec.wind_direction.value)))
@@ -94,7 +263,9 @@ def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
             wstar_mps=wstar, zi_m=zi,
             area_north_m=4000.0, area_east_m=4000.0,
             origin_north_m=-2000.0, origin_east_m=-2000.0,
-            seed=int(spec.seed.value)))
+            seed=int(spec.seed.value),
+            frame=(orographic.frame if orographic is not None
+                   else scene_frame_for(spec, terrain_ground))))
 
     event = str(spec.weather_event.value)
     if event in ("thunderstorm", "tornado"):
@@ -111,7 +282,9 @@ def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
         n0 = lat * metres_per_degree
         e0 = (lon * metres_per_degree * _math.cos(_math.radians(lat)))
         seconds = float(spec.duration.value)
-        ahead = 0.45 * u.kt_to_mps(float(spec.airspeed.value)) * seconds
+        stated = spec.weather_event.detail.get("ahead_m")
+        ahead = (float(stated) if stated is not None
+                 else 0.45 * u.kt_to_mps(float(spec.airspeed.value)) * seconds)
         hdg = _math.radians(float(spec.heading.value))
         centre_n = n0 + ahead * _math.cos(hdg)
         centre_e = e0 + ahead * _math.sin(hdg)
@@ -129,14 +302,183 @@ def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
             stack.add(Downburst(centre_n, centre_e))
 
     intensity = str(spec.turbulence.value)
+    model_block = spec.turbulence_model
+    model = str(model_block.model.value)
+    stated_intensity = model_block.intensity.value
+    seed = int(spec.seed.value) if model_block.seed.value is None else int(model_block.seed.value)
+    if model == "von_karman":
+        # P6: the von Karman field through the gust channel; JSBSim's own
+        # Dryden process is switched OFF (turb-type 0) so the two spectra
+        # never add. The table is built in stack.prepare from the FDM's
+        # pre-trim true airspeed and span.
+        from ..environment.von_karman import VonKarmanTurbulence
+
+        word_or_w20 = intensity if stated_intensity is None else stated_intensity
+        if isinstance(word_or_w20, str) and word_or_w20 not in W20_KT:
+            raise UnimplementedConditionError(
+                f"spec requests {word_or_w20!r} turbulence, which no provider implements")
+        if not (isinstance(word_or_w20, str) and word_or_w20 == "none") and not (
+                not isinstance(word_or_w20, str) and float(word_or_w20) == 0.0):
+            stack.add(VonKarmanTurbulence(
+                word_or_w20 if isinstance(word_or_w20, str) else float(word_or_w20),
+                seed=seed, altitude_m=float(spec.altitude.value),
+                duration_s=float(spec.duration.value), rate_hz=float(spec.rate.value),
+                heading_deg=float(spec.heading.value),
+                stated={name: _stated(getattr(model_block, name))
+                        for name in model_block.FIELD_ORDER}))
+        stack.add(DrydenTurbulence("none"))
+        return stack
+    if stated_intensity is not None:
+        intensity = str(stated_intensity)
     try:
-        stack.add(DrydenTurbulence(intensity, seed=int(spec.seed.value)))
+        if orographic is not None:
+            # The mountains shape the turbulence too: W20 follows the lee
+            # sink per step, floored at the spec's own word (the UE host's
+            # rotor block, webapp.runs).
+            from ..environment.rotor import LeeRotorTurbulence
+
+            stack.add(LeeRotorTurbulence(orographic, seed=seed,
+                                         background_intensity=intensity))
+        else:
+            stack.add(DrydenTurbulence(intensity, seed=seed))
     except ValueError as exc:
         raise UnimplementedConditionError(
             f"spec requests {intensity!r} turbulence, which no provider "
             f"implements: {exc}"
         ) from exc
     return stack
+
+
+def _stated(quantity) -> Optional[Dict[str, Any]]:
+    """A block field's value with its provenance, or None when it is at
+    its default (nothing stated)."""
+    if quantity.value is None or str(quantity.source) == "default":
+        return None
+    return {"value": quantity.value, "source": str(quantity.source),
+            "from": quantity.frm, "std": quantity.std}
+
+
+def wind_profile_applied(spec: ScenarioSpec) -> Dict[str, Any]:
+    """What the ``wind_profile`` block did on this run: its kind, the
+    fields the kind read, and any stated field it did NOT read (only
+    possible under the uniform kind, where a companion field of another
+    kind is carried but not applied -- said here, never silently)."""
+    block = spec.wind_profile
+    kind = str(block.kind.value)
+    reads = {"uniform": (), "layered": ("layers",), "milspec": ("roughness_ft",),
+             "nwp": ("fixture",)}.get(kind, ())
+    unread = [name for name in ("layers", "roughness_ft", "fixture")
+              if getattr(block, name).value is not None and name not in reads]
+    return {"kind": kind, "applied": kind != "uniform", "reads": list(reads),
+            "unread_stated_fields": unread,
+            "note": ("the uniform kind applies the spec's wind; a stated companion field "
+                     "is carried, not applied" if unread else "")}
+
+
+def wind_profile_for(spec: ScenarioSpec):
+    """The wind profile provider a spec asks for (P6), or None for the
+    uniform kind: ``layered`` from the stated layers, ``milspec`` from the
+    spec's wind as W20 with the stated (or 0.15 ft) z0, ``nwp`` from the
+    cached fixture. Each is told the scene (initial altitude, terrain,
+    the uniform wind it replaces) for its record's null test."""
+    block = spec.wind_profile
+    kind = str(block.kind.value)
+    if kind == "uniform":
+        return None
+    from ..environment.shear import LayeredWind, MilSpecShear, NwpFixture
+
+    if kind == "layered":
+        provider = LayeredWind(block.layers.value)
+    elif kind == "milspec":
+        z0 = block.roughness_ft.value
+        provider = MilSpecShear(float(spec.wind_speed.value), float(spec.wind_direction.value),
+                                None if z0 is None else float(z0))
+    elif kind == "nwp":
+        provider = NwpFixture(str(block.fixture.value))
+    else:
+        raise UnimplementedConditionError(
+            f"spec requests wind profile {kind!r}, which no provider implements")
+    provider.set_scene(float(spec.altitude.value), float(spec.terrain_elevation.value),
+                       u.kt_to_mps(float(spec.wind_speed.value)))
+    provider.stated = {name: _stated(getattr(block, name)) for name in block.FIELD_ORDER}
+    return provider
+
+
+def atmosphere_for(spec: ScenarioSpec):
+    """The non-standard atmosphere a spec asks for, or None for ISA."""
+    from ..environment.atmosphere import NonStandardAtmosphere
+
+    return NonStandardAtmosphere.from_spec(spec)
+
+
+def loading_for(spec: ScenarioSpec):
+    """The loading a spec asks for (P4: payload stations and fuel, written
+    once before the trim), or None for the default block (the XML's own
+    loading). Refuses by name what the validator refuses."""
+    from .loading import LoadingProvider
+
+    return LoadingProvider.from_spec(spec)
+
+
+def wake_for(spec: ScenarioSpec):
+    """The wake-vortex pair a spec asks for (P7: the generator's pair at
+    the stated geometry, delivered through the gust channel and the
+    gust_rotation injection), or None for the default block and for a
+    block naming no generator. Refuses by name what the validator
+    refuses (the generator's data included)."""
+    return WakeVortexPair.from_spec(spec)
+
+
+def wake_recorder_extras(environment: EnvironmentStack) -> Dict[str, Any]:
+    """The nine wake columns (core/environment/wake.py TELEMETRY_COLUMNS)
+    for every run: the provider's last evaluation where the stack holds a
+    wake, 0.0 where it does not (nothing reached the aircraft)."""
+    for provider in environment.gust:
+        if isinstance(provider, WakeVortexPair):
+            return provider.recorder_extras()
+    return {column: (lambda _fdm: 0.0) for column in WAKE_COLUMNS}
+
+
+def wake_block(environment: EnvironmentStack) -> Optional[Dict[str, Any]]:
+    """The run manifest's ``wake`` block from the stack's wake provider
+    (P7), or None when the spec stated no generator."""
+    for provider in environment.gust:
+        if isinstance(provider, WakeVortexPair):
+            return provider.manifest_block()
+    return None
+
+
+def rain_for(spec: ScenarioSpec) -> Optional[RainProvider]:
+    """The rain provider a spec's ``rain`` block asks for, or None for the
+    default block. Refuses by name what the validator refuses."""
+    return RainProvider.from_spec(spec)
+
+
+def rain_recorder_extras(environment: EnvironmentStack) -> Dict[str, Any]:
+    """The rain columns, only where the stack holds a rain provider (a run
+    without the block keeps its columns and its output digest)."""
+    for provider in environment.atmosphere:
+        if isinstance(provider, RainProvider):
+            return provider.recorder_extras()
+    return {}
+
+
+def rain_block(environment: EnvironmentStack) -> Optional[Dict[str, Any]]:
+    """The run manifest's ``rain`` block, or None when no block was stated."""
+    for provider in environment.atmosphere:
+        if isinstance(provider, RainProvider):
+            return provider.manifest_block()
+    return None
+
+
+def icing_for(spec: ScenarioSpec):
+    """The icing provider a spec asks for (P5: the severity ramp driving
+    the six injected axis factors and the stall-onset cue), or None for
+    the default block (no ice: the stock airframe). Refuses by name what
+    the validator refuses (the airframe's k-table included)."""
+    from ..environment.icing import IcingProvider
+
+    return IcingProvider.from_spec(spec)
 
 
 @dataclass(frozen=True)
@@ -147,12 +489,17 @@ class RunResult:
     validation: ValidationReport
     manifest: Dict[str, Any]
     closure: Optional[ClosureReport] = None
+    #: R2: the instrument observer that ran at the FDM rate (its arrays
+    #: are the instruments.npz beside the run when an instrument is stated).
+    instruments: Optional[InstrumentObserver] = None
 
     def write(self, directory) -> Path:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         self.telemetry.write_json(directory / "telemetry.json")
         (directory / "manifest.json").write_text(json.dumps(self.manifest, indent=1), encoding="utf-8")
+        if self.instruments is not None:
+            self.instruments.write(directory)
         return directory
 
 
@@ -163,40 +510,48 @@ def wind_components_fps(speed_kt: float, from_deg: float):
     return (-speed_fps * math.cos(radians), -speed_fps * math.sin(radians))
 
 
-def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
+def configure_from_spec(spec: ScenarioSpec,
+                        environment: Optional[EnvironmentStack] = None) -> FlightDynamics:
     """Build and trim an FDM from a spec.
 
     Shared by :func:`run_spec` and the validator's feasibility probe, so that
     validation exercises exactly the configuration the run will use. Two
     separate setup paths would drift, and a validator that passes a scenario the
     runner then fails to trim is worse than no validator.
+
+    ``environment`` is the stack the run will step with; its pre-trim hook
+    (``EnvironmentStack.prepare``) runs between the initial conditions and
+    the trim so the trim solver sees the stated day (gap P1: a hot day
+    written after the trim would leave the trim in ISA air, measured as a
+    different throttle). The feasibility probe passes none and gets a
+    stack holding the atmosphere alone.
     """
     wind_speed = float(spec.wind_speed.value)
-    # A spec that commands a state needs the controller; one that only sets an
-    # initial condition does not. Building the derived airframe unconditionally
-    # would change the model hash of every run for no reason.
-    build = (FlightDynamics.with_tecs if bool(spec.hold_state.value)
-             else FlightDynamics)
-    fdm = build(str(spec.aircraft.value), rate_hz=float(spec.rate.value))
-    fdm.set_initial_conditions(
-        {
-            "h-sl-ft": u.m_to_ft(float(spec.altitude.value)),
-            "vc-kts": float(spec.airspeed.value),
-            "gamma-deg": 0.0,
-            "phi-deg": 0.0,
-            "psi-true-deg": float(spec.heading.value),
-            "beta-deg": 0.0,
-            "lat-geod-deg": float(spec.latitude.value),
-            "long-gc-deg": float(spec.longitude.value),
-            "terrain-elevation-ft": u.m_to_ft(float(spec.terrain_elevation.value)),
-        }
-    )
+    fdm = fdm_at_initial_conditions(spec)
+    # The pre-trim hook: the atmosphere (and any later pre-trim provider)
+    # is written now, between the initial conditions and the trim.
+    if environment is None:
+        # The feasibility probe's stack: the two pre-trim providers only
+        # (the atmosphere, then the loading), so the probe trims exactly
+        # the aircraft the run trims.
+        environment = EnvironmentStack([p for p in (atmosphere_for(spec), loading_for(spec))
+                                        if p is not None])
+        # P5: the icing provider is a pre-trim provider too (its neutral
+        # writes and the pre-trim measurement), so the probe carries it.
+        icing = icing_for(spec)
+        if icing is not None:
+            environment.add(icing)
+        # The rain provider's neutral writes come before the trim too.
+        rain = rain_for(spec)
+        if rain is not None:
+            environment.add(rain)
+    environment.prepare(fdm)
 
     # Steady wind is written before trim so the aircraft is trimmed *in* the
     # conditions it will fly rather than dropped into them afterwards.
     # Turbulence is deliberately NOT active during trim: a stochastic
     # disturbance makes the trim solver chase noise.
-    north_fps, east_fps = wind_components_fps(wind_speed, float(spec.wind_direction.value))
+    north_fps, east_fps = trim_wind_fps(spec, environment, fdm)
     fdm.props.set_many(
         {
             "atmosphere/wind-north-fps": north_fps,
@@ -214,8 +569,86 @@ def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
     return fdm
 
 
+def trim_wind_fps(spec: ScenarioSpec, environment: EnvironmentStack, fdm) -> tuple:
+    """The (north, east) wind in fps written before the trim: the spec's
+    uniform wind, or -- P6 -- a stated wind profile's wind at the initial
+    altitude, since the profile carries the whole wind. Measured (docs/
+    JSBSIM_CORRECTIONS.md 18): JSBSim's own trim resets atmosphere/wind-*
+    to 0, so the write reaches the trim solver in neither case (the
+    trimmed throttle is identical with and without it) and the first
+    per-step write restores the wind; the profile's write is made all the
+    same so the two paths are one path, and the limitation is stated."""
+    north_fps, east_fps = wind_components_fps(float(spec.wind_speed.value),
+                                              float(spec.wind_direction.value))
+    profile_wind = environment.profile_wind_at(environment.position_of(fdm))
+    if profile_wind is not None:
+        north_fps, east_fps = u.mps_to_fps(profile_wind.north), u.mps_to_fps(profile_wind.east)
+    return north_fps, east_fps
+
+
+def fdm_at_initial_conditions(spec: ScenarioSpec) -> FlightDynamics:
+    """The FDM a spec names, at the spec's initial conditions, before any
+    provider is prepared and before the trim (shared by
+    :func:`configure_from_spec` and the card's gust-table projection, so
+    the two read the same true airspeed and span)."""
+    # A spec that commands a state needs the controller; one that only sets an
+    # initial condition does not. Building the derived airframe unconditionally
+    # would change the model hash of every run for no reason.
+    injections = failure_injections_for(spec)
+    # P5: a stated icing block flies the airframe derived with the icing
+    # and icing_alpha injections (behind TECS when the state is held, and
+    # beside the failures chain when one is scheduled; derive.py applies
+    # the set in its fixed order). The default block leaves the path and
+    # the hashes as they were.
+    icing_injections = icing_injections_for(spec)
+    if icing_injections:
+        injections = tuple(dict.fromkeys(
+            (("tecs",) if bool(spec.hold_state.value) else ()) + injections + icing_injections))
+    # A rain block with aerodynamics flies the airframe derived with the
+    # rain injection (the two factors and the drops' force); a runway-only
+    # block writes JSBSim's own ground property on the stock airframe.
+    rain_injections = rain_injections_for(spec)
+    if rain_injections:
+        injections = tuple(dict.fromkeys(
+            (("tecs",) if bool(spec.hold_state.value) else ()) + injections + rain_injections))
+    # P7: a stated wake generator flies the airframe derived with the
+    # gust_rotation injection (the equivalent roll rate needs the
+    # property), beside whatever the other blocks selected.
+    wake_injections = wake_injections_for(spec)
+    if wake_injections:
+        injections = tuple(dict.fromkeys(
+            (("tecs",) if bool(spec.hold_state.value) else ()) + injections + wake_injections))
+    if injections:
+        # P3: a scheduled surface failure acts on the failure chain the
+        # failures injection carries (core/control/derive.py), so the
+        # airframe is derived with it (behind TECS when the state is
+        # held). An engine-out alone writes JSBSim's own propulsion
+        # controls and needs no derivation.
+        fdm = FlightDynamics.with_injections(str(spec.aircraft.value), injections,
+                                             rate_hz=float(spec.rate.value))
+    else:
+        build = (FlightDynamics.with_tecs if bool(spec.hold_state.value)
+                 else FlightDynamics)
+        fdm = build(str(spec.aircraft.value), rate_hz=float(spec.rate.value))
+    fdm.set_initial_conditions(
+        {
+            "h-sl-ft": u.m_to_ft(float(spec.altitude.value)),
+            "vc-kts": float(spec.airspeed.value),
+            "gamma-deg": 0.0,
+            "phi-deg": 0.0,
+            "psi-true-deg": float(spec.heading.value),
+            "beta-deg": 0.0,
+            "lat-geod-deg": float(spec.latitude.value),
+            "long-gc-deg": float(spec.longitude.value),
+            "terrain-elevation-ft": u.m_to_ft(float(spec.terrain_elevation.value)),
+        }
+    )
+    return fdm
+
+
 def run_spec(spec: ScenarioSpec, validate_first: bool = True,
-             assert_closure: bool = True, terrain_ground=None) -> RunResult:
+             assert_closure: bool = True, terrain_ground=None,
+             landcover_json=None) -> RunResult:
     """Run a scenario. Raises rather than running something it cannot deliver.
 
     ``terrain_ground`` (Phase 7 1.2): a :class:`core.terrain.ground.
@@ -223,12 +656,28 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     step, replacing the spec's flat terrain elevation exactly as the UE
     host's heightfield collision replaces its slab -- both answer from the
     same baked raster.
+
+    ``landcover_json`` (W1): the bake's ``landcover.json``, read only with
+    ``terrain_ground`` (a georeferenced run): an unstated surface is then
+    inferred from the dominant land cover class, roughness only, and
+    recorded as ``environment.surface`` with provenance ``inferred``.
     """
     report = validate(spec) if validate_first else ValidationReport(spec.digest())
     if validate_first:
         report.raise_if_invalid()
+    # Gap P10 (D1): a datum block this build cannot fly (ellipsoidal
+    # heights, the ellipsoid physics frame, an unknown model) is refused
+    # by name BEFORE the flight, whether or not the validator ran.
+    refuse_datum_spec(spec)
+    # The scene's datum block and the spec's declaration against it are
+    # resolved BEFORE the flight: a bake without its block or a model the
+    # bake does not carry refuses by name here, not after the flight.
+    scene_datum = scene_datum_for(spec, terrain_ground)
 
-    fdm = configure_from_spec(spec)
+    environment = environment_for(
+        spec, landcover_json if terrain_ground is not None else None,
+        terrain_ground=terrain_ground)
+    fdm = configure_from_spec(spec, environment)
     contact = None
     if terrain_ground is not None:
         # The wings feel the terrain, not just the CG (core.terrain.contact):
@@ -244,18 +693,74 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         impact = contact.check(fdm.state(), 0.0)
         if impact is not None:
             raise TerrainImpactError(impact)
-    environment = environment_for(spec)
     # Turbulence seeds a stochastic process, so it is configured once, after
     # trim and before stepping. Re-writing it inside the loop would re-seed the
     # generator every frame and destroy the correlated noise.
     environment.configure(fdm)
+
+    # P3: the failure schedule. Bound to the trimmed FDM (every property
+    # it writes must exist: failures.actuator_missing / failures.target
+    # by name otherwise) and applied at the top of every step through the
+    # FDM's step hook, so both loops below see it; each event lands at
+    # the first step with t >= at_s on the run clock and is read back on
+    # the following step (failures_applied[] in the manifest).
+    schedule = FailureSchedule.from_spec(spec)
+    schedule.bind(fdm)
+    fdm.register_step_hook(schedule.apply)
 
     autopilot = None
     if bool(spec.hold_state.value):
         autopilot = Autopilot(fdm)
         autopilot.engage()
 
-    recorder = Recorder(fdm, interval_s=0.1, extra=SURFACES)
+    # The route (docs/ROUTE.md): when a route is stated, the autopilot
+    # flies it by setpoints -- pure pursuit along the drawn line
+    # (core/control/route.py RouteGuidance) at the 2 Hz guidance site
+    # below, in the scene frame the run card's blocks are written in. A
+    # route without the autopilot is refused by name (the validator says
+    # it too); the bank limit is the block's, written to the controller
+    # before the first tick. The first tick runs here, before the first
+    # sample, so the recorder's first row carries the route's setpoints,
+    # not the engage-time hold. None without a route: nothing below
+    # changes, so every run without a route records exactly what it did.
+    route = Route.from_spec(spec)
+    guidance = None
+    if route is not None:
+        if autopilot is None:
+            raise RouteError(
+                "route.hold_state",
+                "a route is stated but the run does not hold its state: the route is "
+                "flown by the autopilot's setpoints, so hold_state must be true")
+        autopilot.tune(bank_limit_deg=route.bank_limit_deg)
+        guidance = RouteGuidance(route, scene_frame_for(spec, terrain_ground), autopilot,
+                                 u.kt_to_mps(route.tas_kt))
+        guidance.update(fdm.state())
+
+    # R2: the instrument models at the FDM rate -- an observer the stack
+    # calls after every step and before the recorder samples, in BOTH
+    # loops below; it reads the FDM and writes nothing. The block's
+    # refusals (instrument.profile / lever_arm / rate) are raised by name
+    # here as well as by the validator. Observed once at the trimmed
+    # initial state so the recorder's first (forced) sample carries a
+    # measurement rather than the NaN an unobserved snapshot keeps.
+    observer = instruments_for(spec, fdm)
+    environment.add_observer(observer.observe)
+    observer.observe(fdm)
+
+    # P6: the stack's own columns (the wind profile's layer index and
+    # dV/dz) ride beside the surfaces; every other channel is JSBSim's.
+    # P3: the schedule's failure_state_flag and the engine channels of
+    # this airframe beside them (core/telemetry/failures.py).
+    # P7: the wake's nine columns beside them (the provider's own numbers,
+    # not JSBSim's: the gust channel holds the stack's SUM), 0 on a run
+    # without a wake.
+    # The route's columns (its d, cross-track and setpoints, and the
+    # commanded surface norms the control schedule is cut from) ONLY
+    # when a route is stated: {} otherwise, so no other digest moves.
+    recorder = Recorder(fdm, interval_s=0.1, extra={**SURFACES, **environment.recorder_extras()}
+                        | schedule.recorder_extras() | wake_recorder_extras(environment)
+                        | rain_recorder_extras(environment) | route_recorder_extras(guidance),
+                        measured=observer)
     recorder.sample(force=True)
     recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
     if autopilot is None and terrain_ground is None:
@@ -276,7 +781,14 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
 
                     raise TerrainImpactError(impact)
             if autopilot is not None and i % every == 0:
+                # The route's setpoints first, so the tick that follows
+                # refreshes the TAS demand against the same state.
+                if guidance is not None:
+                    guidance.update(fdm.state())
                 autopilot.update()
+            # R2: the observers, after the step and before the sample --
+            # the same seam run_for gives them.
+            environment.observe(fdm)
             recorder.sample()
 
     # The closure assertion (§2.8). A run that did not reach what it was
@@ -289,15 +801,48 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
             recorder.series("heading_deg"),
             recorder.series("climb_rate_mps"),
         )
+        if route is not None:
+            # Route-aware closure: the heading and "settled" checks cannot
+            # hold on a line that turns and climbs, and the altitude check
+            # is the route's profile, so the airspeed check (the one
+            # setpoint the route leaves alone) keeps its place and the
+            # route's three checks -- the worst cross-track, the worst
+            # departure from the profile, the furthest point reached --
+            # replace the rest. Measured over every sample: a route has
+            # no settled tail to wait for.
+            closure = ClosureReport(
+                [c for c in closure.checks if c.name == "airspeed"]
+                + route_closure(route, guidance.frame, recorder.series("lat_deg"),
+                                recorder.series("lon_deg"), recorder.series("altitude_m"),
+                                RouteTolerance(), lookahead_m=guidance.lookahead_m))
         if assert_closure:
             closure.raise_if_failed()
 
+    # The digest covers the RECORDED telemetry (the docstring's claim), so
+    # it is taken before any observer annotates the columns: the limit
+    # flags below are derived from these columns and a change to a
+    # placard value must not change the digest of a flight it did not
+    # touch.
     output_digest = _digest_telemetry(recorder)
+    # Gap P10 (D1): the two datum channels appended AFTER the digest so no
+    # digest moves (measured: the recorded columns re-digest identically),
+    # with the readback and the record.
+    datum_record = datum_run(spec, recorder, scene_datum, output_digest)
+    # Limit monitoring (gap P5): the run graded against the airframe's
+    # stated envelope, flags written beside the recorded columns so every
+    # per-frame consumer (core.capture.manifest.frame_state) carries them.
+    # An airframe with no stated limits is recorded unmonitored; a
+    # malformed table refuses by name (limits.config).
+    limits_block, limits_record = monitor_run(recorder, str(spec.aircraft.value))
     manifest = {
         "spec_digest": spec.digest(),
         "spec": spec.to_dict(),
         "fdm": fdm.provenance(),
         "environment": environment.provenance(),
+        # P6: what the stack wrote and read back on the wind and gust
+        # channels, and whether the roll gust had a property to go to.
+        "environment_delivery": {**environment.delivery_report(),
+                                 "wind_profile": wind_profile_applied(spec)},
         "physics_ground": ("flat slab (spec terrain elevation)"
                            if terrain_ground is None
                            else terrain_ground.provenance()),
@@ -305,6 +850,33 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
                              else contact.provenance()),
         "output_digest": output_digest,
         "samples": len(recorder),
+        "limits": limits_block,
+        # P4: what the loading wrote before the trim, the checks against the
+        # loaded model, the pre-trim measurement and the post-trim read-back;
+        # null for the default block (the XML's own loading, nothing written).
+        "loading": loading_block(environment),
+        "datum": scene_datum,
+        # P3: what the schedule wrote, when, and what read back.
+        "failures": schedule.report(),
+        # P5: the icing schedule as delivered -- the k-table, the pre-trim
+        # measurement, the per-step read-back; null for the default block.
+        "icing": icing_block(environment),
+        # P7: the wake as delivered -- Gamma_0, the geometry, the decay,
+        # the per-step peaks and the card; null for the default block.
+        "wake": wake_block(environment),
+        # The rain as delivered -- the water, the factors, the runway, the
+        # pre-trim pair, the per-step read-back; null for the default block.
+        "rain": rain_block(environment),
+        # R2: the instrument models as run at the FDM rate -- profiles,
+        # lever arms, seeds, the two rates, the residuals per channel, the
+        # Allan self-report, the file (null for the default ideal set).
+        "instruments": observer.manifest_block(),
+        # Modal analysis (gap M2, row A5): a RESULT about the trim, computed
+        # on its own FDM so the recorded flight is untouched (measured:
+        # linearising an executive disturbs it; the digest above is unchanged
+        # with this block computed). A refusal is recorded by name here,
+        # not raised: a result about a run never aborts the run.
+        "modes": modes_block(spec),
         "validation": {
             "ok": report.ok,
             "warnings": list(report.warnings),
@@ -326,8 +898,203 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
             "signs": autopilot.signs.as_properties(),
             "gains": autopilot.gains(),
         }
+    if route is not None:
+        # The route as flown: the point list and its digest, the limit and
+        # lookahead the line was steered with, the route-aware closure, and
+        # the trim commands captured at engage (what the control schedule
+        # is a delta on). Absent without a route.
+        props = fdm.props
+        manifest["route"] = {
+            "digest": route.digest(),
+            "points": route.point_dicts(),
+            "length_m": route.length_m,
+            "bank_limit_deg": route.bank_limit_deg,
+            "lookahead_m": guidance.lookahead_m,
+            "closure": manifest["closure"]["checks"],
+            "trims": {"aileron": props.get("ap/trim/aileron"),
+                      "elevator": props.get("ap/trim/elevator"),
+                      "rudder": props.get("ap/trim/rudder")},
+        }
+    if limits_record is not None:
+        attach_record(manifest, limits_record)
+    # Gap P1: one record per stated atmosphere variable, with the pre-trim
+    # read-back and null measurement and the per-step read-back.
+    for record in environment.applied_variables():
+        attach_record(manifest, record)
+    # P3: one record per scheduled failure (readback, the in-run null
+    # test) and one for the spec field; nothing for an empty schedule.
+    for record in schedule.applied_variables(recorder):
+        attach_record(manifest, record)
+    # Gap P10 (D1): the datum record, with the appended channels' readback
+    # and the measured invariance.
+    attach_record(manifest, datum_record)
+    # R2: one record per stated instrument, with the recorder's latest-value
+    # sampling read back from its own store.
+    for record in observer.applied_variables(recorder):
+        attach_record(manifest, record)
+    # R2: a registered write that read back outside its tolerance is a
+    # refusal of the run by name (record.readback), not a note in a record.
+    refuse_failed_readbacks(manifest)
     return RunResult(spec.digest(), output_digest, recorder, report, manifest,
-                     closure)
+                     closure, instruments=observer)
+
+
+def instruments_for(spec: ScenarioSpec, fdm) -> InstrumentObserver:
+    """The FDM-rate instrument observer a spec asks for (R2): the stated
+    profiles and lever arms, the ideal profile at the CG for each unstated
+    instrument, seeded from the run seed at the FDM's rate. Refuses by
+    name what the validator refuses."""
+    return InstrumentObserver(instruments_from_spec(spec), int(spec.seed.value), fdm.rate_hz)
+
+
+def refuse_failed_readbacks(manifest: Dict[str, Any]) -> List[str]:
+    """R2: every ``readback`` an applied-variable record carries must
+    agree with the value written to its tolerance (the check P1's records
+    measure, made a refusal at the runner): ``record.readback`` by name,
+    listing every disagreeing property. Returns the properties checked."""
+    block = manifest.get("applied_variables") or {}
+    checked: List[str] = []
+    failed: List[str] = []
+    for record in block.get("applied_variables", ()):
+        readback = record.get("readback")
+        if not isinstance(readback, dict):
+            continue
+        checked.append(str(readback.get("property")))
+        if readback.get("agrees") is not True:
+            failed.append(f"{record.get('name')}: {readback.get('property')} wrote "
+                          f"{readback.get('written')!r} and read {readback.get('value')!r} "
+                          f"(tolerance {readback.get('tolerance')!r} {readback.get('tolerance_kind')})")
+    if failed:
+        raise RecordError("record.readback",
+                          f"{len(failed)} registered write(s) read back outside the stated "
+                          f"tolerance; the run is refused rather than recorded with a wrong "
+                          f"value: " + "; ".join(failed))
+    return checked
+
+
+def loading_block(environment: EnvironmentStack) -> Optional[Dict[str, Any]]:
+    """The run manifest's ``loading`` block from the stack's loading
+    provider, or None when the spec stated none."""
+    from .loading import LoadingProvider
+
+    for provider in environment.atmosphere:
+        if isinstance(provider, LoadingProvider):
+            return provider.manifest_block()
+    return None
+
+
+def icing_block(environment: EnvironmentStack) -> Optional[Dict[str, Any]]:
+    """The run manifest's ``icing`` block from the stack's icing provider
+    (P5), or None when the spec stated none."""
+    from ..environment.icing import IcingProvider
+
+    for provider in environment.atmosphere:
+        if isinstance(provider, IcingProvider):
+            return provider.manifest_block()
+    return None
+
+
+def refuse_datum_spec(spec: ScenarioSpec) -> None:
+    """Refuse by name (``datum.physics_frame_unsupported``,
+    ``datum.model_mismatch``) a spec datum block this build cannot fly;
+    the first problem is raised (the validator lists them all)."""
+    problems = datum_spec_problems(getattr(spec, "datum", None))
+    if problems:
+        raise problems[0]
+
+
+def scene_datum_for(spec: ScenarioSpec, terrain_ground) -> Dict[str, Any]:
+    """The scene's datum block for a run, and the spec's declaration
+    checked against it (gap P10, D1). The block is the bake's recorded
+    one when the run flies over a georeferenced heightfield (a bake
+    whose sidecar carries none refuses ``datum.sidecar_without_datum``:
+    re-bake), the synthesised block over a ridge that is no real place,
+    the flat block otherwise. A ``datum.geoid_model`` the spec declares
+    must be the bake's (``datum.model_mismatch``)."""
+    heightfield = getattr(terrain_ground, "heightfield", None)
+    if heightfield is None:
+        block = flat_datum_block(float(spec.terrain_elevation.value))
+    else:
+        block = datum_for_heightfield(heightfield, require_block=True)
+    declared = spec.datum.geoid_model.value if hasattr(spec, "datum") else None
+    check_model_declared(declared, block)
+    return block
+
+
+def datum_run(spec: ScenarioSpec, recorder: Recorder, block: Dict[str, Any],
+              output_digest: str) -> AppliedVariable:
+    """The run's datum channels and record (gap P10, blueprint section 5,
+    D1). AFTER the output digest was taken, ``undulation_m`` (N at the
+    scene origin, constant; 0 where no geoid applies, by the frame's
+    definition -- the block keeps null) and ``hae_m`` (altitude_m +
+    undulation_m) are annotated as derived columns, the appended column
+    is read back, and the recorded columns are re-digested to show the
+    digest did not move. Returns the ``scene.geoid_undulation_m`` record.
+    """
+    declared = spec.datum.geoid_model.value if hasattr(spec, "datum") else None
+    n = block.get("undulation_m")
+    applied = isinstance(n, (int, float))
+    n_column = float(n) if applied else 0.0
+    altitude = recorder.series("altitude_m")
+    recorder.annotate(DATUM_COLUMNS[0], [n_column] * len(altitude))
+    recorder.annotate(DATUM_COLUMNS[1], [float(a) + n_column for a in altitude])
+    # Readback of the appended column from the recorder's own store (not
+    # JSBSim's: nothing is written to the FDM), graded exact.
+    hae = recorder.series(DATUM_COLUMNS[1])
+    readback = Readback(
+        property=f"telemetry.{DATUM_COLUMNS[1]}[0]", value=float(hae[0]),
+        written=float(altitude[0]) + n_column, tolerance=0.0, tolerance_kind="absolute",
+        basis="the recorder's annotate stores the list given and refuses to shadow a "
+              "recorded channel; read back from recorder.columns after the run "
+              "(measured exact on the c172p and A320); this grades the recorder's "
+              "store, not JSBSim's property store, to which nothing is written")
+    # The invariance: the RECORDED columns (every column not derived)
+    # re-digest to the output digest taken before the channels existed.
+    recorded = {name: values for name, values in recorder.columns.items()
+                if name not in recorder.derived}
+    after = _digest_columns(recorded)
+    invariance = {
+        "quantity": "recorded telemetry columns changed by appending the datum channels",
+        "unit": "columns", "with": 0.0 if after == output_digest else 1.0, "without": 0.0,
+        "difference": 0.0 if after == output_digest else 1.0, "threshold": 0.0,
+        "kind": "bounded", "ok": after == output_digest,
+        "output_digest": output_digest, "recorded_digest_after_channels": after,
+        "derived_columns": list(recorder.derived),
+        "note": ("the channels ride beside the recorded columns as derived ones and are "
+                 "not in output_digest; the two-run form (digest identical with and "
+                 "without the spec datum block, exported ECEF radial difference = N0) "
+                 "is experiments/datum_null_test.py"),
+    }
+    run = {
+        "readback": readback,
+        "invariance": invariance,
+        "spec_datum": {name: {"value": q.value, "source": str(q.source), "from": q.frm}
+                       for name, q in spec.datum.quantities()} if hasattr(spec, "datum") else None,
+        "declared_model": declared,
+        "applied": applied,
+        "samples": len(altitude),
+    }
+    return undulation_variable(block, run=run)
+
+
+def attach_record(manifest: Dict[str, Any], record: AppliedVariable) -> None:
+    """Add one ``AppliedVariable`` to the manifest's ``applied_variables``
+    block (ADVANCEMENTS_CONTRACTS rule 0), creating the block when it is absent. A name
+    already in the block is refused: one variable, one record."""
+    block = manifest.get("applied_variables")
+    if block is None:
+        manifest["applied_variables"] = records_block([record])
+        return
+    names = [r["name"] for r in block["applied_variables"]]
+    if record.name in names:
+        raise ValueError(f"applied variable {record.name!r} is already recorded")
+    if block.get("record_version") != RECORD_VERSION:
+        # INT-final: an older block is read (renamed to record 2, or
+        # refused by name) before a record-2 dict joins it -- one block,
+        # one version.
+        block["applied_variables"] = list(read_records(block))
+        block["record_version"] = RECORD_VERSION
+    block["applied_variables"].append(record.to_dict())
 
 
 def _digest_telemetry(recorder: Recorder) -> str:
@@ -337,9 +1104,15 @@ def _digest_telemetry(recorder: Recorder) -> str:
     rounded: two runs that differ in the last bit must produce different
     digests, or the reproducibility claim is not being tested.
     """
+    return _digest_columns(recorder.columns)
+
+
+def _digest_columns(columns: Dict[str, Any]) -> str:
+    """The same digest over a mapping of columns (the runner's own
+    re-check that appended channels moved nothing)."""
     h = hashlib.sha256()
-    for name in sorted(recorder.columns):
+    for name in sorted(columns):
         h.update(name.encode())
-        for value in recorder.columns[name]:
+        for value in columns[name]:
             h.update(repr(value).encode())
     return h.hexdigest()

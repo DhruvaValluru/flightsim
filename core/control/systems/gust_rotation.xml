@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<system name="gust_rotation"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="http://jsbsim.sourceforge.net/JSBSimSystem.xsd">
+
+<!-- ===================================================================
+     Rotational gust (ADVANCEMENTS_BLUEPRINT section 1, work item P2).
+
+     JSBSim's own turbulence roll rate, velocities/p-turb-rad_sec, is
+     read-only (FGWinds.cpp L566-568), so a gust provider (von Karman
+     p_g, the wake's strip-theory p_eq; later items P6 and P7) has no
+     property through which to roll the aircraft. This file declares
+     gust/p-equivalent-rad_sec, and core/control/derive.py sums it into
+     the ROLL axis's roll-damping function: the one <property>
+     velocities/p-aero-rad_sec </property> in the ROLL axis becomes
+     <sum> of that property and gust/p-equivalent-rad_sec, so the
+     damping term sees the equivalent roll rate the gust imposes.
+
+     NEUTRAL VALUE: 0.0 (p + 0.0 == p to the last bit; measured
+     bit-identical in tests/test_derive_injections.py).
+
+     NOT CLAIMED: only the roll-damping term sees the gust (no yaw or
+     pitch moment, no Clr coupling); the value is whatever the provider
+     writes; this file is a port, not a model.
+     =================================================================== -->
+
+  <property value="0.0">gust/p-equivalent-rad_sec</property>
+
+</system>

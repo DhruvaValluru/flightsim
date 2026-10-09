@@ -80,13 +80,60 @@ REQUIRED_PROPERTIES = (
     "atmosphere/rho-slugs_ft3",
     "atmosphere/T-R",
     "atmosphere/P-psf",
+    # The non-standard atmosphere's returns (gap P1): density and pressure
+    # altitude by JSBSim's own inversion, relative humidity (percent) and
+    # vapour pressure. All four probed on the live catalog.
+    "atmosphere/density-altitude",
+    "atmosphere/pressure-altitude",
+    "atmosphere/RH",
+    "atmosphere/vapor-pressure-psf",
     "atmosphere/total-wind-north-fps",
     "atmosphere/total-wind-east-fps",
     "atmosphere/total-wind-down-fps",
+    # P6: the gust channel (RW, persists until written again; the stack
+    # writes it every step) and the base wind the stack writes, read back
+    # as what the FDM holds. All five probed on the live catalog.
+    "atmosphere/gust-north-fps",
+    "atmosphere/gust-east-fps",
+    "atmosphere/gust-down-fps",
+    "atmosphere/wind-north-fps",
+    "atmosphere/wind-east-fps",
+    # P4: the centre of gravity (inches aft of the XML datum) and the pitch
+    # inertia FGMassBalance holds, read back every sample. Both probed on
+    # the live catalog (read-only).
+    "inertia/cg-x-in",
+    "inertia/iyy-slugs_ft2",
     "fcs/elevator-pos-rad",
     "fcs/rudder-pos-rad",
     "fcs/throttle-cmd-norm",
 )
+
+#: P6: the equivalent roll rate of a rotational gust, declared ONLY by an
+#: airframe derived with the gust_rotation injection (core/control/derive.py).
+#: Read when the loaded model has it; recorded as 0.0 when it does not
+#: (nothing reached the airframe), with the record saying ``absent``.
+P_EQUIVALENT_PROPERTY = "gust/p-equivalent-rad_sec"
+
+#: P5: the icing properties, declared ONLY by an airframe derived with the
+#: ``icing`` (eta and the six factors) and ``icing_alpha`` (the shift)
+#: injections (core/control/derive.py). Read when the loaded model has them;
+#: recorded as 0 / 1.0 / 0 when it does not (nothing reached the airframe:
+#: the stock model is x * 1.0 and alpha + 0, said in the record), never NaN.
+ICING_ETA_PROPERTY = "icing/eta"
+ICING_FACTOR_PROPERTIES = tuple(f"icing/{axis}-factor" for axis in
+                                ("lift", "drag", "pitch", "roll", "yaw", "side"))
+ICING_SHIFT_PROPERTY = "icing/alpha-shift-rad"
+
+#: R2: the measured channels, in the recorder's order. Each is a field of
+#: :class:`AircraftState` defaulting to NaN (absent) and filled from the
+#: instrument observer's latest values, never from a JSBSim property.
+MEASURED_CHANNELS = ("meas_n_z", "meas_p_dps", "meas_q_dps", "meas_r_dps",
+                     "meas_lat_deg", "meas_lon_deg", "meas_alt_m", "meas_cas_kt",
+                     "meas_heading_deg")
+
+#: P4: slug ft^2 -> kg m^2, from the density factor the units module states
+#: (1 slug = KGM3_PER_SLUGFT3 kg/m^3 x 1 ft^3; times ft^2): 1.35581795 kg m^2.
+KGM2_PER_SLUGFT2 = u.KGM3_PER_SLUGFT3 * u.M_PER_FT ** 5
 
 #: Control-surface positions, read for mesh articulation (§5 Phase 5) and for
 #: the burn-in. Not every airframe defines every one, so these are resolved
@@ -182,6 +229,13 @@ class AircraftState:
     density_kgm3: float
     temperature_k: float
     pressure_pa: float
+    # -- the non-standard atmosphere's returns (gap P1), read from JSBSim's
+    #    own density-altitude / pressure-altitude inversions, RH (percent)
+    #    and vapour pressure. Recorded, not graded by Gate 5.
+    density_altitude_m: float
+    pressure_altitude_m: float
+    rh_pct: float
+    vapour_pressure_pa: float
 
     # -- total wind actually reaching the FDM: steady + gust + turbulence.
     #    Reading the *total* rather than the commanded wind is what makes an
@@ -190,6 +244,58 @@ class AircraftState:
     wind_north_mps: float
     wind_east_mps: float
     wind_down_mps: float
+
+    # -- the gust channel (P6): what JSBSim holds in atmosphere/gust-*-fps,
+    #    i.e. the summed gust the stack wrote, read back; the equivalent
+    #    roll rate the derived airframe received (0.0 on a stock airframe,
+    #    which declares no such property); and the base wind's horizontal
+    #    speed (atmosphere/wind-*-fps: the summed WindProvider wind, the
+    #    profile's speed at the aircraft's altitude when one is stated).
+    #    Recorded, not graded by Gate 5.
+    gust_north_mps: float
+    gust_east_mps: float
+    gust_down_mps: float
+    gust_p_equivalent_rad_s: float
+    wind_profile_speed_mps: float
+
+    # -- the loading (P4): the CG in metres aft of the XML datum (JSBSim's
+    #    inertia/cg-x-in over 12 and to metres) and the pitch inertia in
+    #    kg m^2 (inertia/iyy-slugs_ft2). Recorded, not graded by Gate 5.
+    cg_x_m: float
+    iyy_kgm2: float
+
+    # -- the icing (P5): the severity eta and the six axis factors the
+    #    derived airframe's aerodynamics multiply by (1 + eta k, written
+    #    every step by the icing provider), and the stall-onset shift in
+    #    degrees. 0 / 1.0 / 0 on a stock airframe, which declares none of
+    #    them. Recorded, not graded by Gate 5.
+    icing_eta: float
+    icing_lift_factor: float
+    icing_drag_factor: float
+    icing_pitch_factor: float
+    icing_roll_factor: float
+    icing_yaw_factor: float
+    icing_side_factor: float
+    icing_alpha_shift_deg: float
+
+    # -- the measured channels (R2, core/telemetry/instruments.py): what the
+    #    instrument models at the FDM rate LAST measured -- the IMU's normal
+    #    load factor and body rates, the GPS position held between fixes,
+    #    the pitot-static CAS, the magnetometer's magnetic heading. They are
+    #    NOT read from JSBSim: the observer hands the recorder its latest
+    #    values (Recorder(measured=...)). A snapshot taken with no observer,
+    #    or before its first observation, carries NaN -- the recorder's
+    #    discipline for an absent value: never a copy of the truth, never
+    #    an invented number.
+    meas_n_z: float = math.nan
+    meas_p_dps: float = math.nan
+    meas_q_dps: float = math.nan
+    meas_r_dps: float = math.nan
+    meas_lat_deg: float = math.nan
+    meas_lon_deg: float = math.nan
+    meas_alt_m: float = math.nan
+    meas_cas_kt: float = math.nan
+    meas_heading_deg: float = math.nan
 
     # -- control surface positions, for articulation and burn-in
     surfaces: Dict[str, float] = field(default_factory=dict)
@@ -223,6 +329,11 @@ class AircraftState:
         return (math.degrees(math.atan2(-self.wind_east_mps, -self.wind_north_mps))) % 360.0
 
     @property
+    def pressure_hpa(self) -> float:
+        """Static pressure in hectopascals, the unit the atmosphere is stated in."""
+        return self.pressure_pa / 100.0
+
+    @property
     def flight_path_angle_deg(self) -> float:
         """Inertial flight path angle, from the NED velocity vector."""
         horizontal = math.hypot(self.v_north_mps, self.v_east_mps)
@@ -242,14 +353,32 @@ class AircraftState:
         )
 
     @classmethod
-    def from_properties(cls, props, surface_names=()) -> "AircraftState":
+    def from_properties(cls, props, surface_names=(), measured=None) -> "AircraftState":
         """Read one snapshot through a :class:`PropertyAccess`.
 
         ``surface_names`` is the pre-resolved subset of :data:`SURFACE_PROPERTIES`
         the loaded model actually defines; resolving it once at observer
         construction avoids a catalog lookup per surface per frame.
+        ``measured`` (R2) is the instrument observer's latest values by
+        channel name (:data:`MEASURED_CHANNELS`); a name it does not give
+        stays NaN, and a name outside the set is a ValueError (a measured
+        channel is never a new column by accident).
         """
+        extra = {}
+        if measured:
+            unknown = sorted(set(measured) - set(MEASURED_CHANNELS))
+            if unknown:
+                raise ValueError(f"not measured channels: {unknown}")
+            extra = {name: float(value) for name, value in measured.items()}
         g = props.get
+        has = getattr(props, "has", None)
+        p_equivalent = (g(P_EQUIVALENT_PROPERTY)
+                        if has is not None and has(P_EQUIVALENT_PROPERTY) else 0.0)
+        iced = has is not None and has(ICING_ETA_PROPERTY)
+        factors = ([g(p) for p in ICING_FACTOR_PROPERTIES] if iced
+                   else [1.0] * len(ICING_FACTOR_PROPERTIES))
+        shift_deg = (math.degrees(g(ICING_SHIFT_PROPERTY))
+                     if has is not None and has(ICING_SHIFT_PROPERTY) else 0.0)
         return cls(
             t=g("simulation/sim-time-sec"),
             lat_deg=g("position/lat-geod-deg"),
@@ -291,8 +420,26 @@ class AircraftState:
             density_kgm3=u.slugft3_to_kgm3(g("atmosphere/rho-slugs_ft3")),
             temperature_k=u.rankine_to_kelvin(g("atmosphere/T-R")),
             pressure_pa=u.psf_to_pa(g("atmosphere/P-psf")),
+            density_altitude_m=u.ft_to_m(g("atmosphere/density-altitude")),
+            pressure_altitude_m=u.ft_to_m(g("atmosphere/pressure-altitude")),
+            rh_pct=g("atmosphere/RH"),
+            vapour_pressure_pa=u.psf_to_pa(g("atmosphere/vapor-pressure-psf")),
             wind_north_mps=u.fps_to_mps(g("atmosphere/total-wind-north-fps")),
             wind_east_mps=u.fps_to_mps(g("atmosphere/total-wind-east-fps")),
             wind_down_mps=u.fps_to_mps(g("atmosphere/total-wind-down-fps")),
+            gust_north_mps=u.fps_to_mps(g("atmosphere/gust-north-fps")),
+            gust_east_mps=u.fps_to_mps(g("atmosphere/gust-east-fps")),
+            gust_down_mps=u.fps_to_mps(g("atmosphere/gust-down-fps")),
+            gust_p_equivalent_rad_s=p_equivalent,
+            wind_profile_speed_mps=u.fps_to_mps(math.hypot(g("atmosphere/wind-north-fps"),
+                                                           g("atmosphere/wind-east-fps"))),
+            cg_x_m=u.ft_to_m(g("inertia/cg-x-in") / 12.0),
+            iyy_kgm2=g("inertia/iyy-slugs_ft2") * KGM2_PER_SLUGFT2,
+            icing_eta=g(ICING_ETA_PROPERTY) if iced else 0.0,
+            icing_lift_factor=factors[0], icing_drag_factor=factors[1],
+            icing_pitch_factor=factors[2], icing_roll_factor=factors[3],
+            icing_yaw_factor=factors[4], icing_side_factor=factors[5],
+            icing_alpha_shift_deg=shift_deg,
             surfaces={n.split("/")[-1]: g(n) for n in surface_names},
+            **extra,
         )

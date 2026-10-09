@@ -1,0 +1,581 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>frames</title>
+<!--
+  One camera's frames, each beside its own labels.
+
+  The gallery on the run page shows thumbnails; this is the page behind
+  them. A capture manifest is the product -- the pictures alone are not
+  -- and until now the only way to read a frame's pose, intrinsics and
+  aircraft state was to open capture_manifest.json and find the record
+  by hand, in a list carrying every camera's frames at once.
+
+  It fetches /runs/<id>/cameras/<camera>/manifest.json, which is that
+  camera on its own: its spec block, only its frames, and the shared
+  context the records are meaningless without (the CRS the metres are
+  in, the scene, the landmarks, which flight the labels were solved
+  over).
+-->
+<style>
+  body { background: #10161d; color: #d8dde2; margin: 0;
+         font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 1rem 1.2rem; border-bottom: 1px solid #24303c;
+           position: sticky; top: 0; background: #10161d; z-index: 2; }
+  h1 { font-size: 1.05rem; margin: 0 0 .3rem; }
+  a { color: #7fb2e5; }
+  .dim { color: #8b98a5; }
+  .badge { background: #1d2733; border-radius: 4px; padding: .1rem .45rem;
+           margin-right: .4rem; font-size: .85em; }
+  main { padding: 1rem 1.2rem; }
+  .frame { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+           gap: 1rem; padding: 1rem 0; border-bottom: 1px solid #1c2630; }
+  @media (max-width: 900px) { .frame { grid-template-columns: 1fr; } }
+  .shots img { width: 100%; border-radius: 6px; background: #000;
+               display: block; margin-bottom: .35rem; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: .12rem .5rem .12rem 0; vertical-align: top; }
+  td.k { color: #8b98a5; white-space: nowrap; width: 12rem; }
+  td.v { font-family: ui-monospace, Menlo, Consolas, monospace;
+         font-size: .88em; word-break: break-word; }
+  h2 { font-size: .95rem; margin: 0 0 .4rem; }
+  .group { margin-bottom: .6rem; }
+  table.presence { border-collapse: collapse; margin: .4rem 0; font-size: .9em; }
+  table.presence th, table.presence td { border: 1px solid #263240;
+    padding: .15rem .45rem; text-align: left; vertical-align: top; }
+  .pres-yes { color: #7fd18b; } .pres-no { color: #e09a6f; }
+  .pres-not-known { color: #c9b45c; }
+  .presence-run { margin: .6rem 0; }
+  details.why { color: #8b98a5; font-size: .85em; }
+  ul.limits { margin: .3rem 0 .3rem 1.1rem; padding: 0; font-size: .9em; }
+  ul.limits li { margin: .15rem 0; color: #e6c98a; }
+  .group > b { color: #b9c4cf; font-size: .85em; letter-spacing: .03em;
+               text-transform: uppercase; }
+  #state { padding: 1rem 1.2rem; }
+  #runpanel-holder { padding: 0 1.2rem; }
+  table.m td.v { text-align: right; font-family: ui-monospace, monospace; padding: 0 .5rem; }
+  .matrix { display: inline-block; vertical-align: top; }
+  button.copy { font-size: .8em; margin-left: .4rem; }
+</style>
+
+<header>
+  <h1 id="title">frames</h1>
+  <div id="meta" class="dim"></div>
+  <div id="links" style="margin-top:.4rem"></div>
+</header>
+<div id="state" class="dim">loading...</div>
+<div id="runpanel-holder"></div>
+<main id="frames"></main>
+
+<script>
+const params = new URLSearchParams(location.search);
+const runId = params.get("run");
+const cameraId = params.get("camera");
+
+function esc(text) {
+  return String(text).replace(/[&<>"]/g, c =>
+    ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+}
+
+function num(value) {
+  if (typeof value !== "number") return esc(value);
+  return Number.isInteger(value) ? String(value) : value.toFixed(6);
+}
+
+function rows(pairs) {
+  return pairs.map(([k, v]) =>
+    `<tr><td class="k">${esc(k)}</td><td class="v">${v}</td></tr>`).join("");
+}
+
+// The record, grouped the way it is actually read: where the camera was,
+// which way it pointed, what lens, and what the aircraft was doing at
+// that instant. Nothing is dropped -- an unlisted key still prints under
+// "other", so a field added to the manifest never silently stops showing.
+const GROUPS = [
+  ["when", ["index", "t_s", "sample_index", "file"]],
+  ["where the camera was", ["position_north_m", "position_east_m",
+                            "position_alt_m"]],
+  ["which way it pointed", ["quaternion_wxyz", "yaw_deg", "pitch_deg",
+                            "roll_deg"]],
+  ["what lens", ["focal_length_mm", "sensor_width_mm", "sensor_height_mm",
+                 "width_px", "height_px", "fx_px", "fy_px",
+                 "principal_point_px", "near_m", "far_m"]],
+  ["the aircraft, at that instant", ["aircraft"]],
+  ["the projection, as matrices", ["intrinsic_matrix", "projection_matrix"]],
+];
+
+// A matrix as rows of numbers, with the JSON one click away: P is what
+// a consumer multiplies, so it must be copyable exactly as recorded.
+function matrixTable(name, matrix) {
+  if (!Array.isArray(matrix) || !matrix.length) return "";
+  const body = matrix.map(row =>
+    `<tr>${(row || []).map(v => `<td class="v">${num(v)}</td>`).join("")}</tr>`).join("");
+  return `<div class="matrix"><span class="k">${esc(name)}</span> ` +
+         `<button class="copy" data-json="${esc(JSON.stringify(matrix))}">copy JSON</button>` +
+         `<table class="m">${body}</table></div>`;
+}
+
+// One click copies the exact recorded value (a matrix, a record); a
+// consumer should never retype a number off a screen.
+document.addEventListener("click", event => {
+  const button = event.target.closest("button.copy");
+  if (!button) return;
+  const text = button.dataset.json;
+  (navigator.clipboard ? navigator.clipboard.writeText(text)
+                       : Promise.reject(new Error("no clipboard")))
+    .then(() => { button.textContent = "copied"; })
+    .catch(() => { window.prompt("copy this:", text); });
+});
+
+// The recorder's whole row at that instant (record.state), grouped the
+// way a person reads a flight: where it was, how it was moving, what
+// the air was doing to it and around it, what the pilot had set. Keys
+// come from whichever recorder flew, so a channel not listed here still
+// prints under "other recorded channels" -- nothing is dropped.
+const STATE_GROUPS = [
+  ["where the aircraft was", ["lat_deg", "lon_deg", "altitude_m", "agl_m"]],
+  ["how it was moving", ["tas_kt", "cas_kt", "mach", "v_north_mps",
+                         "v_east_mps", "v_down_mps", "climb_rate_mps",
+                         "track_deg", "crab_deg", "flight_path_angle_deg",
+                         "pitch_rate_dps", "roll_rate_dps"]],
+  ["the wind, at that instant", ["wind_north_mps", "wind_east_mps",
+                                 "wind_down_mps", "wind_speed_mps"]],
+  ["what the air was doing to it", ["alpha_deg", "beta_deg", "qbar_pa",
+                                    "lift_n", "drag_n", "side_force_n",
+                                    "f_aero_x_n", "f_aero_y_n", "f_aero_z_n",
+                                    "n_z", "weight_kg"]],
+  ["what the controls were set to", ["elevator_deg", "aileron_deg",
+                                     "rudder_deg", "elevator_pos_rad",
+                                     "aileron_pos_rad", "rudder_pos_rad",
+                                     "throttle_cmd"]],
+];
+
+let UNITS = {};   // context.state_units, once the manifest is read
+
+function withUnit(key, value) {
+  const unit = UNITS[key];
+  return unit && unit !== "1" && unit !== "?"
+    ? `${num(value)} <span class="dim">${esc(unit)}</span>` : num(value);
+}
+
+function stateTables(state) {
+  const shown = new Set();
+  let html = "";
+  for (const [label, keys] of STATE_GROUPS) {
+    const pairs = [];
+    for (const key of keys) {
+      if (!(key in state)) continue;
+      shown.add(key);
+      pairs.push([key, withUnit(key, state[key])]);
+    }
+    if (pairs.length) {
+      html += `<div class="group"><b>${label}</b>` +
+              `<table>${rows(pairs)}</table></div>`;
+    }
+  }
+  const rest = Object.entries(state).filter(([k]) => !shown.has(k));
+  if (rest.length) {
+    html += `<div class="group"><b>other recorded channels</b><table>` +
+      rows(rest.map(([k, v]) => [k, withUnit(k, v)])) + `</table></div>`;
+  }
+  return html;
+}
+
+// Version 5: the ground-truth labels, read the way a training pipeline
+// reads them -- the box, the keypoints, the horizon -- with the airframe
+// block's own account of where each keypoint's number came from.
+function labelTables(labels, airframe) {
+  const bases = {};
+  for (const k of (airframe && airframe.keypoints) || []) bases[k.name] = k.basis;
+  let html = "";
+  const box = labels.bbox_2d;
+  html += `<div class="group"><b>where the aircraft is in the image</b><table>` +
+    rows([["in_frame", esc(labels.in_frame)],
+          ["bbox_2d (px)", box ? box.map(num).join(", ") : "none in frame"],
+          ["truncation", labels.truncation === null ? "n/a" : num(labels.truncation)],
+          ["cg depth (m)", num(labels.bbox_3d_camera.cg_m[2])],
+          ["3-D box extents (m)", labels.bbox_3d_camera.extents_m.map(num).join(" x ")]]) +
+    `</table></div>`;
+  const pairs = [];
+  for (const [name, kp] of Object.entries(labels.keypoints || {})) {
+    const where = kp.u === null ? "behind the camera"
+      : `${num(kp.u)}, ${num(kp.v)} px, ${num(kp.depth_m)} m` +
+        (kp.in_frame ? "" : " (outside the image)");
+    pairs.push([name, where + (bases[name] ? ` <span class="dim">${esc(bases[name])}</span>` : "")]);
+  }
+  if (pairs.length) html += `<div class="group"><b>keypoints</b><table>${rows(pairs)}</table></div>`;
+  const h = labels.horizon;
+  if (h) {
+    html += `<div class="group"><b>horizon</b><table>` +
+      rows([["dip", `${num(h.dip_deg)} deg`],
+            ["in image", h.in_frame ? h.endpoints_px.map(p => p.map(num).join(", ")).join(" to ") : "no"]]) +
+      `</table></div>`;
+  }
+  return html;
+}
+
+let AIRFRAME = null;   // context.airframe, once the manifest is read
+
+function recordTable(record) {
+  const shown = new Set(["camera_id", "state", "labels"]);
+  let html = "";
+  for (const [label, keys] of GROUPS) {
+    const pairs = [];
+    for (const key of keys) {
+      if (!(key in record)) continue;
+      shown.add(key);
+      const value = record[key];
+      if (key === "aircraft" && value && typeof value === "object") {
+        for (const [k, v] of Object.entries(value)) pairs.push([k, num(v)]);
+      } else if (key === "intrinsic_matrix" || key === "projection_matrix") {
+        pairs.push([key === "intrinsic_matrix" ? "K (3x3)" : "P = K [R | t] (3x4)",
+                    matrixTable(key, value)]);
+      } else if (Array.isArray(value)) {
+        pairs.push([key, value.map(num).join(", ")]);
+      } else {
+        pairs.push([key, num(value)]);
+      }
+    }
+    if (pairs.length) {
+      html += `<div class="group"><b>${label}</b>` +
+              `<table>${rows(pairs)}</table></div>`;
+    }
+  }
+  if (record.labels && typeof record.labels === "object") {
+    html += labelTables(record.labels, AIRFRAME);
+  }
+  if (record.state && typeof record.state === "object") {
+    html += stateTables(record.state);
+  }
+  const rest = Object.entries(record).filter(([k]) => !shown.has(k));
+  if (rest.length) {
+    html += `<div class="group"><b>other</b><table>` +
+      rows(rest.map(([k, v]) => [k, Array.isArray(v)
+        ? v.map(num).join(", ") : num(v)])) + `</table></div>`;
+  }
+  html += `<div class="group"><button class="copy" ` +
+          `data-json="${esc(JSON.stringify(record))}">copy this frame's record (JSON)</button></div>`;
+  return html;
+}
+
+// The run, once: the frame every position is expressed in, the digests
+// that identify it, the scene, the software, the schema the manifest
+// was validated against, the camera's own block, and the verification
+// verdict -- read off the same manifest and verify.json the files carry,
+// so the page cannot say something the record does not.
+function runPanel(payload, camera, base, verify) {
+  const frame = payload.frame || {};
+  const scene = payload.scene || {};
+  const conventions = payload.label_conventions || {};
+  const profile = (camera.profile || {}).name || "ideal_pinhole";
+  const pairs = [
+    ["positions are in", `${esc(frame.crs || "?")} metres about ` +
+      `(${num(frame.origin_lat_deg)}, ${num(frame.origin_lon_deg)}) = ` +
+      `(${num(frame.origin_x_m)}, ${num(frame.origin_y_m)}); north, east, up`],
+    ["camera frame", esc(conventions.camera_frame || "x right, y down, z forward")],
+    ["projection", esc(conventions.projection_matrix || conventions.projection || "")],
+    ["manifest version", `${esc(payload.manifest_version)} &middot; ` +
+      `<a href="/schemas/capture_manifest.v${esc(payload.manifest_version)}.schema.json">` +
+      `JSON Schema</a>`],
+    ["spec digest", `<code>${esc(payload.spec_digest || "")}</code>`],
+    ["simulation digest", `<code>${esc(payload.simulation_digest || "")}</code>`],
+    ["telemetry digest", `<code>${esc(payload.output_digest || "")}</code>`],
+    ["seed", esc(payload.seed)],
+    ["scene", `${esc(scene.key || "flat")}` +
+      (scene.terrain_sha256 ? ` &middot; terrain sha256 <code>${esc(scene.terrain_sha256)}</code>` : "")],
+    ["software revision", `<code>${esc(payload.software_revision || "")}</code>`],
+    ["labels solved over", esc(payload.solve_source || "?")],
+    ["this camera", `${esc(camera.preset || "")} &middot; ` +
+      `${camera.inherits_roll ? "inherits roll" : "horizon-stable"} &middot; ` +
+      `${esc(camera.trigger || "")} trigger, ${esc(camera.capture_count)} frames` +
+      (camera.schedule_basis ? ` (${esc(camera.schedule_basis)})` : "") +
+      ` &middot; profile ${esc(profile)} &middot; pose track ` +
+      `<code>${esc((camera.pose_track_digest || "").slice(0, 16))}</code>`],
+  ];
+  if (payload.randomization) {
+    const r = payload.randomization;
+    pairs.push(["randomisation", `seed ${esc(r.seed)}, sun ${num(r.sun_elevation_deg)} deg ` +
+      `elevation / ${num(r.sun_azimuth_deg)} deg azimuth, fog ${esc(r.fog_density)} 1/m, ` +
+      `livery ${esc(r.livery)}`]);
+  }
+  if (verify && verify.checks) {
+    const failed = verify.checks.filter(c => c.status === "FAIL").map(c => c.name);
+    const notRun = verify.checks.filter(c => c.status === "NOT RUN").map(c => c.name);
+    const passed = verify.checks.length - failed.length - notRun.length;
+    pairs.push(["verification", `<b>${verify.ok === false || failed.length ? "FAILED" : "PASSED"}</b> ` +
+      `&middot; ${passed} passed, ${failed.length} failed, ${notRun.length} not run` +
+      (failed.length ? ` &middot; failed: ${esc(failed.join(", "))}` : "") +
+      (notRun.length ? ` &middot; not run: ${esc(notRun.join(", "))}` : "") +
+      ` &middot; <a href="${base}/verify.json">the full verdict</a>`]);
+  } else {
+    pairs.push(["verification", `not recorded for this run yet`]);
+  }
+  return `<div class="group" id="runpanel"><b>this run, this camera</b>` +
+         `<table>${rows(pairs)}</table></div>`;
+}
+
+// Scene vs labelled (manifest "presence", per frame labels.presence):
+// per taxonomy class, was anything of it in the scene, did it get a label,
+// and (per frame) which of its objects are in view. So "not labelled" reads
+// apart from "not there".
+function yesNo(value) {
+  return value === true ? "yes" : value === false ? "no" : "not known";
+}
+
+function presenceTable(presence) {
+  if (!Array.isArray(presence) || !presence.length) {
+    return `<div class="dim">This run was captured before scene-vs-labelled ` +
+           `was recorded; re-run it to see the table.</div>`;
+  }
+  return `<table class="presence"><thead><tr><th>class id</th><th>class</th>` +
+    `<th>in the scene</th><th>labelled (instance id)</th><th>objects</th>` +
+    `<th>how / why</th></tr></thead><tbody>` +
+    presence.map(p =>
+      `<tr><td>${esc(p.class_id)}</td><td>${esc(p.class)}</td>` +
+      `<td class="pres-${esc(yesNo(p.in_scene).replace(" ", "-"))}">${yesNo(p.in_scene)}</td>` +
+      `<td class="pres-${esc(yesNo(p.labelled).replace(" ", "-"))}">${yesNo(p.labelled)}</td>` +
+      `<td>${esc((p.objects || []).join(", ") || "—")}</td>` +
+      `<td class="dim">${esc([p.labelled_as, p.reason].filter(Boolean).join(" — "))}</td></tr>`
+    ).join("") + `</tbody></table>`;
+}
+
+function framePresence(presence) {
+  if (!Array.isArray(presence) || !presence.length) return "";
+  return `<div class="group"><b>SCENE VS LABELLED, THIS FRAME</b>` +
+    `<table class="presence"><thead><tr><th>class</th><th>in scene</th>` +
+    `<th>labelled</th><th>in this frame</th></tr></thead><tbody>` +
+    presence.map(p => {
+      const seen = (p.in_frame_objects || []).join(", ");
+      const unknown = (p.in_frame_unknown || []).join(", ");
+      const share = p.landcover_share !== undefined
+        ? ` (${(100 * p.landcover_share).toFixed(1)}% of the frame by land cover)` : "";
+      const inFrame = seen || (unknown ? `${unknown}: not known until the ID image is read`
+                                       : (p.in_scene === false ? "— (not in the scene)" : "none"));
+      return `<tr><td>${esc(p.class)}</td><td>${yesNo(p.in_scene)}</td>` +
+             `<td>${yesNo(p.labelled)}</td><td>${esc(inFrame + share)}</td></tr>`;
+    }).join("") + `</tbody></table></div>`;
+}
+
+// Each frame's own box / depth verdict (frame_checks.json, merged into the
+// camera view by the server): PASS, FAIL with the reason, or NOT RUN.
+function frameChecks(checks) {
+  if (!checks) return "";
+  const rows = ["box_vs_mask", "depth_vs_geometry"].filter(k => checks[k]).map(k => {
+    const c = checks[k];
+    const cls = c.status === "PASS" ? "pres-yes" : c.status === "FAIL" ? "pres-no"
+                                                                      : "pres-not-known";
+    return `<tr><td>${esc(c.sentence || k)}<details class="why"><summary>why, in ` +
+           `the system's own terms</summary><code>${esc(k)}</code></details></td>` +
+           `<td class="${cls}">${esc(c.status === "PASS" ? "passed" : c.status === "FAIL"
+             ? "FAILED" : "not run")}</td><td class="dim">${esc(c.detail || "")}</td></tr>`;
+  }).join("");
+  return `<div class="group"><b>THIS FRAME'S CHECKS</b>` +
+    `<table class="presence"><tbody>${rows}</tbody></table></div>`;
+}
+
+function checksSummary(frames) {
+  const graded = frames.filter(f => f.checks);
+  if (!graded.length) {
+    return `<div class="dim">Per-frame box / depth checks: not graded for this ` +
+           `run (re-verify it to see each frame's verdict).</div>`;
+  }
+  const failed = graded.filter(f => f.checks.ok === false);
+  const notRun = graded.filter(f => ["box_vs_mask", "depth_vs_geometry"]
+    .every(k => !f.checks[k] || f.checks[k].status === "NOT RUN"));
+  return `<div class="${failed.length ? "pres-no" : "dim"}">Per-frame box / depth ` +
+    `checks: ${failed.length} of ${graded.length} frame(s) failing` +
+    (failed.length ? ` (frames ${failed.map(f => esc(f.index)).join(", ")})` : "") +
+    (notRun.length === graded.length
+      ? ` — none could be measured: no engine render on the machine that ran this ` +
+        `(needs the Windows Unreal host)` : "") + `</div>`;
+}
+
+// What is NOT claimed for this frame (its data file's "limits" section,
+// computed by the server into the camera view): the limits that apply here.
+function frameLimits(limits) {
+  if (!limits || !Array.isArray(limits.limits)) return "";
+  const here = limits.limits.filter(l => l.applies === true || l.applies === "always");
+  if (!here.length) return "";
+  return `<div class="group"><b>NOT CLAIMED FOR THIS FRAME</b><ul class="limits">` +
+    here.map(l => `<li>${esc(l.limit)}` +
+      (l.objects && l.objects.length ? ` <span class="dim">(${esc(l.objects.join(", "))})</span>` : "") +
+      ` <span class="dim">— ${esc(l.why)}</span></li>`).join("") + `</ul></div>`;
+}
+
+function conditionsLine(conditions) {
+  if (!conditions || typeof conditions !== "object") return "";
+  const parts = [];
+  for (const [name, q] of Object.entries(conditions)) {
+    if (!q || q.value === undefined || q.value === null) continue;
+    const unit = q.unit && q.unit !== "dimensionless" ? ` ${q.unit}` : "";
+    parts.push(`${esc(name)} ${esc(q.value)}${esc(unit)}` +
+               ` <span class="dim">(${esc(q.source)})</span>`);
+  }
+  return parts.length
+    ? `<div class="dim" style="margin-top:.3rem">asked for: ` +
+      parts.join(" &middot; ") + `</div>` : "";
+}
+
+async function load() {
+  if (!runId || !cameraId) {
+    $state("open this from a run's gallery: it needs ?run=&lt;id&gt;" +
+           "&amp;camera=&lt;camera_id&gt;");
+    return;
+  }
+  const base = `/runs/${encodeURIComponent(runId)}`;
+  const url = `${base}/cameras/${encodeURIComponent(cameraId)}/manifest.json`;
+  let payload;
+  try {
+    const response = await fetch(url);
+    payload = await response.json();
+    if (payload.error) { $state(esc(payload.error)); return; }
+  } catch (error) {
+    $state(`could not read the manifest: ${esc(error)}`);
+    return;
+  }
+
+  // Which images exist is read off the DIRECTORIES, not the manifest: a
+  // frame the manifest names but the renderer never wrote must not
+  // appear here as a broken image.
+  let inventory = {frames: {}, overlays: {}, boxed: {}, boxed3d: {}, previews: {}};
+  try {
+    inventory = await (await fetch(`${base}/images`)).json();
+  } catch (error) { /* the manifest alone still renders */ }
+  const have = kind => new Set(
+    ((inventory[kind] || {})[cameraId]) || []);
+  const present = {frames: have("frames"), overlays: have("overlays"),
+                   boxed: have("boxed"), boxed3d: have("boxed3d"),
+                   previews: have("previews")};
+
+  const camera = payload.camera || {};
+  UNITS = payload.state_units || {};
+  AIRFRAME = payload.airframe || null;
+  document.title = `${cameraId} — ${payload.frames.length} frames`;
+  document.getElementById("title").textContent =
+    `${cameraId} — ${camera.preset || ""} — ${payload.frames.length} frame(s)`;
+  document.getElementById("meta").innerHTML =
+    `<span class="badge">run ${esc(runId)}</span>` +
+    `<span class="badge">solved over ${esc(payload.solve_source || "?")}</span>` +
+    `<span class="badge">${esc(payload.aircraft || "")}</span>` +
+    `<span class="badge">${(payload.landmarks || []).length} landmarks</span>` +
+    `<span class="badge">spec ${esc((payload.spec_digest || "").slice(0, 12))}</span>` +
+    (camera.schedule_basis
+      ? `<span class="badge">${esc(camera.schedule_basis)}</span>` : "");
+  let verify = null;
+  try {
+    const reply = await fetch(`${base}/verify.json`);
+    if (reply.ok) verify = await reply.json();
+  } catch (error) { /* the verdict is optional on the page */ }
+  document.getElementById("runpanel-holder").innerHTML =
+    runPanel(payload, camera, base, verify) +
+    `<details open class="presence-run"><summary><b>Scene vs labelled</b> ` +
+    `<span class="dim">— per class: in the scene, labelled, and the objects ` +
+    `composed for it. Also in every frame's .json (labels.presence) and in the ` +
+    `zip's manifest.json.</span></summary>` + presenceTable(payload.presence) +
+    `</details>` + checksSummary(payload.frames || []);
+  document.getElementById("links").innerHTML =
+    `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/frames.zip">` +
+    `<b>download every frame with its labels (zip)</b></a> &middot; ` +
+    `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/box3d.zip">` +
+    `<b>download the 3-D boxes (3D zip)</b></a> ` +
+    `&middot; dataset: <a href="${base}/dataset.zip?format=coco">COCO</a> ` +
+    `<a href="${base}/dataset.zip?format=kitti">KITTI</a> ` +
+    `<a href="${base}/dataset.zip?format=webdataset">WebDataset</a> ` +
+    `<a href="${base}/dataset.zip?format=yolo">YOLO</a> ` +
+    `<a href="${base}/dataset.zip?format=voc">Pascal VOC</a> ` +
+    `<a href="${base}/dataset.zip?format=all">all five</a> ` +
+    `<span class="dim">(each frame three times: as rendered, with its 2-D ` +
+    `boxes in boxed/, with its 3-D boxes in boxed3d/)</span> &middot; ` +
+    `<a href="${url}" download="${esc(cameraId)}_manifest.json">` +
+    `this camera's manifest</a> &middot; ` +
+    `<a href="${base}/capture_manifest.json">the whole run's</a> &middot; ` +
+    `<a href="${base}/verify.json">verification</a> &middot; ` +
+    `<a href="/">back to the app</a>` +
+    conditionsLine(payload.conditions);
+
+  const main = document.getElementById("frames");
+  main.innerHTML = "";
+  for (const record of payload.frames) {
+    const name = String(record.file || "").split("/").pop();
+    const shots = [];
+    // Beside the ideal render: the sensor-modelled frame, and the engine's
+    // masks and depth when a -labels pass wrote them. Same directory, own
+    // suffixes.
+    const derived = [["_sensor.png", "sensor-modelled frame (the camera profile applied)"],
+                     ["_mask.png", "engine instance mask (each pixel = an object's int_id, 0 = nothing)"],
+                     ["_class.png", "engine class mask (each pixel = a class_id, 0 = sky)"],
+                     ["_depth.png", "engine depth, 16-bit"]];
+    for (const [kind, label] of [["overlays", "overlay — the manifest's " +
+                                  "projection (circle) and the engine's " +
+                                  "(cross)"],
+                                 ["frames", "rendered frame"],
+                                 ["boxed:" + name.replace(/\.png$/, "_boxes.png"),
+                                  "with 2-D boxes — solid green from the mask " +
+                                  "pixels, dashed amber predicted"],
+                                 ["boxed3d:" + name.replace(/\.png$/, "_box3d.png"),
+                                  "with 3-D boxes — rebuilt from the record alone; " +
+                                  "arrow = where the nose points"],
+                                 ...derived.map(([suffix, text]) =>
+                                   ["frames:" + name.replace(/\.png$/, suffix), text]),
+                                 ["previews:preview_" +
+                                  String(record.index).padStart(4, "0") + ".png",
+                                  "engine-free preview (no Unreal host on the " +
+                                  "machine that ran this; the boxes are drawn on it)"]]) {
+      const [dirKind, fileName] = kind.includes(":") ? kind.split(":") : [kind, name];
+      if (present[dirKind].has(fileName)) {
+        const href = `${base}/${dirKind}/${encodeURIComponent(cameraId)}/` +
+                     encodeURIComponent(fileName);
+        shots.push(`<a href="${href}" target="_blank">` +
+                   `<img src="${href}" loading="lazy" decoding="async" ` +
+                   `alt="${esc(label)}"></a>` +
+                   `<div class="dim">${esc(label)} &middot; ` +
+                   `<a href="${href}" download>${esc(fileName)}</a></div>`);
+        continue;
+      }
+      if (false) {
+        const href = `${base}/${kind}/${encodeURIComponent(cameraId)}/` +
+                     encodeURIComponent(name);
+        // Lazily: a continuous capture is one frame per recorded
+        // sample, so a 22 s clip is 221 records and up to three images
+        // each. Fetching six hundred PNGs the moment the page opens
+        // stalls the browser and the server for a gallery whose first
+        // screen shows two of them.
+        shots.push(`<a href="${href}" target="_blank">` +
+                   `<img src="${href}" loading="lazy" decoding="async" ` +
+                   `alt="${esc(kind)} ${esc(name)}"></a>` +
+                   `<div class="dim">${esc(label)} &middot; ` +
+                   `<a href="${href}" download>${esc(name)}</a></div>`);
+      }
+    }
+    // The frame's own labels, as a file: the same record this page
+    // renders, plus the run context, written beside the PNG.
+    const sidecar = name.replace(/\.png$/, ".json");
+    const labels = `${base}/frames/${encodeURIComponent(cameraId)}/` +
+                   encodeURIComponent(sidecar);
+    const labelLink = `<div class="dim" style="margin:.2rem 0 .6rem">` +
+               `<a href="${labels}" download>${esc(sidecar)}</a>` +
+               ` &mdash; this frame's labels, as a file</div>`;
+    const block = document.createElement("section");
+    block.className = "frame";
+    block.innerHTML =
+      `<div class="shots">${shots.join("") ||
+        `<div class="dim">no image on disk for this record — the ` +
+        `manifest names <code>${esc(record.file)}</code>, which the ` +
+        `renderer did not write (no engine on the machine that ran ` +
+        `this, or the pass refused)</div>`}${labelLink}</div>` +
+      `<div><h2>frame ${esc(record.index)} — t = ${num(record.t_s)} s</h2>` +
+      recordTable(record) +
+      frameChecks(record.checks) + frameLimits(record.limits) +
+      framePresence((record.labels || {}).presence) + `</div>`;
+    main.appendChild(block);
+  }
+  document.getElementById("state").style.display = "none";
+}
+
+function $state(html) {
+  const node = document.getElementById("state");
+  node.style.display = "";
+  node.innerHTML = html;
+}
+
+load();
+</script>

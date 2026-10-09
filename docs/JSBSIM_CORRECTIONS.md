@@ -399,6 +399,87 @@ vocabulary must carry, not a claim the coupling still holds.
 
 ---
 
+## 14. The dew point is capped silently, twice, against the LAST computed state
+
+`atmosphere/dew-point-R` is not stored as written. `FGStandardAtmosphere::SetDewPoint`
+converts it to a vapour pressure (the Magnus form, a = 611.2 Pa, b = 17.62,
+c = 243.12 degC) and `SetVaporPressure` to a vapour mass fraction using the
+pressure of the LAST `Calculate`; `ValidateVaporMassFraction` then caps the
+fraction at saturation -- against the saturated vapour pressure of the last
+computed TEMPERATURE -- and at a per-altitude table of record-high fractions
+(35000 ppm at sea level, 38 ppm at 16 km), looked up at the PRESSURE altitude on
+the write and at the geometric altitude on every step. Each cap prints a line to
+the C++ stderr and raises nothing. Measured on 1.2.4: `dew-point-R` 540 written
+at ISA sea level reads back 518.67 (RH 100 %); a dew point of 10 degC written
+together with a +20 degC `delta-T` before any recomputation is capped at the
+pre-bias 5.25 degC ("Dew point temperature has been capped to 501.124"); 500 R
+written at 5000 ft reads back 499.63 R (the table). A dew point read back AFTER a
+step also differs from the one written by one step's pressure change (1.5e-6 R
+per step on a c172p at 1500 m): the mass fraction, not the dew point, is what
+JSBSim conserves.
+
+Consequences (core/environment/atmosphere.py): write `delta-T` and `P-sl-psf`
+first and recompute (`run_ic` before the trim; a step during the flight) before
+writing the dew point; never write a dew point above the temperature JSBSim
+currently holds or beyond the table's dew point at the current pressure; refuse
+both by name at the scene (`atmosphere.dew_point`) rather than let the cap print;
+and grade the per-step read-back of the dew point at 1e-6 relative with the
+reason stated, the other two properties at zero.
+
+---
+
+## 15. A `<system>` reads the previous step's `aero/alpha-rad`; an aerodynamics `<function>` reads this step's (measured 2026-09-28, P2)
+
+In the 1.2.4 schedule the Systems model runs before FGAuxiliary, so an `<fcs_function>` in a `<system>` that copies `aero/alpha-rad` holds the PREVIOUS step's alpha: measured on a trimmed c172p under an elevator step, the copy lags by 5.3e-4, 6.7e-4, 9.8e-4, 1.26e-3, 1.52e-3 rad over five steps (6.8e-9 rad even on the trim's first step). A `<function>` declared at the top of `<aerodynamics>` is evaluated by FGAerodynamics before the axes with the current alpha: difference 0.0 at every step. The icing stall-onset shift (`core/control/derive.py`, injection `icing_alpha`) therefore computes `icing/alpha-effective-rad` as a pre-axis aerodynamics function, not as a system, and its neutral value is bit-identical to the stock airframe because of it.
+
+## 16. `atmosphere/turb-*-fps` is never externally writable: a write is overwritten on the next step (measured 2026-09-28, P6)
+
+The three turbulence properties are bound read-write (`FGWinds.cpp` v1.2.4 L559-L564, `SetTurbNED`), and a write lands: `atmosphere/turb-north-fps` written 10 reads 10.0 before any step. But `FGWinds::Run` (L145-L150) recomputes `vTurbulenceNED` every step -- `Turbulence(in.AltitudeASL)` when `turb-type` is not 0, `vTurbulenceNED.InitMatrix()` when it is -- so the written value never reaches the total wind. Measured on the trimmed c172p (1500 m, 100 kt, 120 Hz): with `turb-type` 0, 10 fps written reads 0 after one step and 0.0 on each of five steps rewritten every step; with `turb-type` 4 (ttTustin, severity 3, W20 25 fps) the same write reads 0.0182 after one step and the Dryden process's own values (0.031, -0.043, -0.264, -0.314, -0.095) on the rewritten steps. Consequence: a Python-realised turbulence field (the von Karman table, `core/environment/von_karman.py`) cannot be delivered through the turbulence channel at all; it goes through the gust channel (17). `atmosphere/p-turb-rad_sec` is bound read-only (L566) and cannot carry a roll gust either: that is the `gust/p-equivalent-rad_sec` injection's job (P2).
+
+## 17. `atmosphere/gust-*-fps` PERSISTS until written again, so a gust provider must write every step, zero included (measured 2026-09-28, P6)
+
+`vGustNED` is never reset by the model: `Run` (L157) forms `vTotalWindNED = vWindNED + vGustNED + vCosineGust + vTurbulenceNED` from whatever the property holds. Measured on the trimmed c172p: `atmosphere/gust-north-fps` written 7.0 once reads 7.0 on every one of 11 steps and `total-wind-north-fps` reads 6.999999999999574 (the wind's -4.3e-13 added); written 0.0 it reads 0.0 and the total -4.3e-13 again; beside an active Dryden process (ttTustin, 20 steps) the total equals wind + gust + turb to 0.0 (5.5013 = -4.3e-13 + 7.0 + -1.4987). The channel is therefore additive and durable: a provider whose gust has passed and that stops writing would leave its last value blowing for the rest of the flight. Consequence (`core/environment/stack.py`): the stack sums every gust provider and writes the three properties EVERY step -- 0.0 when there is no provider -- and reads each back before the next write (0.0 error on every step of a 3 s von Karman run, 359 of 360 steps checked). A stack with no gust provider writing 0.0 into a channel that already holds 0.0 changes nothing: every pre-existing recorded column of four c172p/A320 runs is bit-identical to HEAD's (worst |diff| 0.0), measured from a `git archive` of HEAD.
+
+## 18. `FGWinds.h` says "turb-type 4 resp. 5"; the enum is ttMilspec = 3, ttTustin = 4 (measured 2026-09-28, P6)
+
+The class comment (`FGWinds.h` L78-L79, vendored copy identical to the fetched v1.2.4 source) reads "To use one of these two models, set atmosphere/turb-type to 4 resp. 5", one above the enumeration two lines earlier in the same comment (L63-L67: 0 ttNone, 1 ttStandard, 2 ttCulp, 3 ttMilspec, 4 ttTustin) and the enum itself (L183: `enum tType {ttNone, ttStandard, ttCulp, ttMilspec, ttTustin}`; L248 lists a `ttBerndt` that the enum does not carry). Measured on the trimmed c172p (severity 3, W20 25 fps, seed 1, 600 steps): turb-type 3 reads back 3.0 and delivers a peak |turb-down-fps| of 9.80; 4 reads back 4.0 and delivers 8.13; 5 reads back 5.0 and delivers 0.0000 -- the number the comment names is off the end of the enum and produces no turbulence. This closes docs/VALIDITY.md section 4's open item: `core/environment/turbulence.py`'s TURB_MILSPEC = 3 and TURB_TUSTIN = 4 are right, the header comment is wrong. Two further facts from the same reading: the Dryden ladder is entered with the altitude above SEA LEVEL (`Run` passes `in.AltitudeASL`, L145; MIL-F-8785C's h is height above ground), and JSBSim's own trim resets `atmosphere/wind-*-fps` to 0 (33.756 fps written before `do_trim` reads 0.0 after a longitudinal trim and -4.8e-16 after a full trim, the trimmed throttle 0.7392 and pitch 0.386 deg identical with and without the wind), so a wind written before the trim -- the branch's steady wind and P6's profile alike -- is NOT what the trim solves in; the first per-step write restores it (an open item, see the P6 report).
+
+## 19. A turbine's `set-running = 0` relights on the next step; JSBSim's cutoff holds (measured 2026-09-28, P3)
+
+The blueprint's engine-out write, `propulsion/engine[i]/set-running = 0`, gives ONE step of no thrust on the A320 at 1500 m / 250 kt: 11943.05 lbf trimmed, 0.000 on the next step, 11942.99 on the step after and 11942.96 at 5 s. `FGTurbine::Calculate` (FGTurbine.cpp v1.2.4 L146-L147) enters `tpStart` while `Cutoff` is false and qbar exceeds 30 psf (210 psf here), and `Start()` (L292-L309) relights with N2 above idle. JSBSim's own cutoff holds: `propulsion/active_engine = i`, `propulsion/cutoff_cmd = 1`, `propulsion/active_engine = -1` (FGPropulsion.cpp L651-L680 `SetCutoff`, the ties at L814 / L823) puts the engine in `tpOff` (L150), whose `Off()` (L175-L196) returns 0 thrust with `Running` false: 0.000 lbf on every one of 600 steps, `set-running` 0.0, N1 83.66 -> 50.69 % at 1 s -> 19.89 % at 5 s, engine 1 untouched (11924.65 lbf). Blueprint correction 8 ("cutoff_cmd is ignored after a trim") holds only for a write BEFORE the first post-trim step (L125-L138 reset `Cutoff = false` on the `tpTrim -> tpRun` transition); a scheduled write lands later and sticks. Consequence (`core/telemetry/failures.py`): the turbine engine-out is the cutoff, bracketed by `active_engine`, read back with the engine re-selected. The ladder's A320 pair (docs/vva/VV_REPORT.md section 1b) reads 0.0 N on all 19 samples after the write against 53 kN without.
+
+## 20. A piston's `set-running = 0` is relatched by the windmilling propeller (measured 2026-09-28, P3)
+
+On the c172p `propulsion/engine[0]/set-running = 0` reads 1.0 on the next step: FGPiston.cpp L595-L598 sets `Running` again while the propeller windmills above 0.8 x idle rpm. The magneto cut holds: `propulsion/magneto_cmd = 0` (FGPropulsion.cpp L598-L614) removes the spark (FGPiston.cpp L569-L573), `Running` is false on the next step (L592-L594) and the power falls 89.1 -> -3.5 hp at once; the thrust then dies on the propeller's inertia -- 226.7 lbf halved at 0.39 s, 10 % at 1.30 s, through zero at 1.68 s, about -40 lbf of windmilling drag at 4 s; rpm 2300 -> 1386 (2 s) -> 823 (5 s) -> 697 (8 s) -> 686 (10 s). The mixture cutoff (`fcs/mixture-cmd-norm = 0`) gives the same die-off to 0.3 %. Consequence: the piston engine-out is the magneto cut, and its null test grades the thrust 2 s after the write, not on the next step.
+
+## 21. `propulsion/magneto_cmd` is write-only (measured 2026-09-28, P3)
+
+The tie at FGPropulsion.cpp L819-L820 binds a setter and NO getter (the catalog lists the property `(W)`): a value written cannot be read back. A piston engine-out is therefore read back through the state it implies, `engine[i]/set-running` 0.0 on the next step, and the record says so.
+
+## 22. JSBSim's clock at a run's first step is the engine start's cranking time, and it depends on the rate (measured 2026-09-28/29, P3, P5, P8)
+
+A piston's start cranks for seconds before the trim: the c172p's first recorded sample is at 4.875-4.933 s of sim time, the A320's one step in (0.0083 s at 120 Hz). The crank ends on a step, so the start time differs between rates: 4.933 / 4.900 / 4.879 s at 60 / 120 / 240 Hz on the committed c172p example. Consequences: a scheduled time (a failure's `at_s`, the icing onset) counts on the RUN clock, seconds since the first step, with the sim time recorded beside it; and two recordings at different rates are compared on each run's own elapsed time -- compared on the raw clock, the three-rate study measured the crank's phase shift (0.048 m of altitude at 60 vs 120 Hz) instead of the integration error (0.0019 m), and `core/uncertainty.py` now aligns both clocks at their first sample.
+
+## 23. A jam (`fail_stuck`) holds the output of the step BEFORE the failing one (source read 2026-09-28, P3)
+
+FGActuator.cpp v1.2.4: `fail_zero` replaces the input by 0 (L150), `fail_hardover` by ClipMin / ClipMax by the input's sign (L151), and `fail_stuck` outputs `PreviousOutput` (L160-L161, kept at L171) -- the value of the previous step, not the command at the step the switch was set. Measured: the jammed A320 elevator holds -0.12645121403107676 rad with drift 0.0 over 100 steps while TECS moves the command; the ladder's jam reads 0.0 drift again.
+
+## 24. Mass properties and the aerodynamic forces at the ICs are stale until a model pass (measured 2026-09-28/29, P4, P5)
+
+`inertia/pointmass-weight-lbs[i]` and `propulsion/tank[i]/contents-lbs` are read-write and hold a write to the bit, but FGMassBalance recomputes only on a model pass: 300 lb written to the c172p's baggage station leaves `inertia/cg-x-in` at 42.11702 in until `run_ic`, after which it reads 49.39450 in. The same holds for the aerodynamics: an icing factor of 0.8 written into an injected `<product>` wrap leaves `forces/fwz-aero-lbs` at 1476.19 lbf until `run_ic` (1183.91 lbf after), and each further `run_ic` moves the cranked c172p's IC lift by about 0.1 lbf (the DHC6's by 0.0). A write AFTER the trim leaves the trim solved for the old aircraft: 300 lb at the baggage station after the trim keeps the elevator at 4.3061 deg and the c172p pitches 0.386 -> 9.722 deg and climbs 20.0 m in 5 s at the trim controls. Two more from the same measurements: a tank's capacity is not a property (it is recovered as 100 x contents / `pct-full`, equal to the configuration to 1e-9 on five airframes), and the p51d's twelve weapon stations are `<output>`s of `Systems/weapons-weight.xml` (300 lb written reads 0.0 after one pass). Consequence: every pre-trim write is followed by a re-latch before it is read, and loading is written before the trim.
+
+## 25. `atmosphere/sigma` is the ratio to the DAY's sea-level density; the standard sea-level pressure is 101325.54 Pa (measured 2026-09-28, P1; 2026-09-29, P8)
+
+JSBSim's `atmosphere/sigma` divides by the sea-level density of the modelled day, not of the standard one: 1.0 at sea level with `delta-T` +30 degC. A hot day's density ratio is therefore compared through `atmosphere/rho-slugs_ft3`, never through that property (`core/environment/atmosphere.py` computes its own `sigma` against the standard day). JSBSim's standard sea-level pressure is 2116.228 psf; 1013.25 hPa converted with JSBSim's own 47.880258980336 psf-to-Pa factor is 2116.2166 psf, 5.4e-6 lower, so the standard day at sea level reads 101325.54 Pa -- 0.54 Pa above the 1976 table's printed 101325, the one cell of row A8 (docs/vva/VV_REPORT.md) besides the 3000 m density that sits outside the table's half-digit. Otherwise JSBSim's standard day matches the 1976 table within 1.2e-5 relative at 0 / 3000 / 11000 m.
+
+## 26. JSBSim's Dryden channel does not deliver its own ladder sigma (measured 2026-09-28, P6)
+
+With `turb-type` 4 (ttTustin) and the severity row 3 at 1500 m the ladder sigma_w is 7.181 ft/s (2.189 m/s, FGWinds.cpp L273-L288). Sampled at 10 Hz over 60 s at seed 7 with the controls held on the c172p, the delivered `atmosphere/turb-*-fps` std is 2.39 / 15.21 / 4.07 m/s (north / east / down): the vertical channel 1.9 x the ladder, the lateral 7 x (over 600 s, the aircraft descending, 2.92 / 12.41 / 2.99 m/s; ttMilspec 2.83 / 2.70 / 1.69). The ratio on w is platform-dependent because the process draws from the C++ library's generator: 1.86 on Linux, 2.13 on Windows, 2.60 on macOS (CI run 36503916763). Consequence: "the same sigma" for the von Karman and Dryden models holds at the COMMANDED ladder only; the von Karman field (delivered through the gust channel, 17) realises it within 0.7 % over a 3 s flight (row A9) and the Dryden channel does not.
+
+## 27. A stated non-standard day keeps the initial TRUE airspeed, so the CAS flown is not the CAS stated (measured 2026-09-29, P8)
+
+`FGInitialCondition` holds the velocity as a true airspeed: `ic/vc-kts` is converted to TAS with the atmosphere at the moment it is set. The non-standard atmosphere writes `delta-T`, `P-sl-psf` and `dew-point-R` AFTER the initial conditions and re-latches with `run_ic`, which keeps that TAS. Measured on the c172p at 1500 m with 100 kt stated: at `delta-T` +30 degC the trimmed first sample reads TAS 107.537 kt (equal to the standard day's to 3e-13 kt) and CAS 95.83 kt; at 100 % RH, CAS 99.80 kt. TAS / CAS still equals 1 / sqrt(sigma) within 0.06 % in both runs (0.046 % and 0.056 %, the ladder's delta-T row), so the atmosphere is right and the airspeed is the one that moved. Consequence: on a stated day the spec's calibrated airspeed is not the one flown, and V2 (every requested IC within 1e-3 relative) does not hold for CAS there -- a defect for the atmosphere provider, recorded here and in docs/VALIDITY.md section 2.27. **Fixed**: `FlightDynamics.relatch_initial_conditions` re-states the requested `ic/vc-kts` / `ic/mach` / `ic/ve-kts` before `run_ic` (core/fdm/fdm.py; the engine plugin does the same before each pre-trim re-latch); the delta-T row now measures CAS 100.0 kt on both sides (to 1e-9) and TAS 112.214 kt at +30 degC against 107.537 kt.
+
 ## Model envelope boundaries (measured, not published)
 
 Where each stock model's aero tables give out, from `experiments/envelope_probe.py`.
@@ -412,3 +493,22 @@ This is a property of the tables and says nothing about the real aircraft.
 
 Trim failure at the edge is correct behaviour. Gate 0's grid is chosen inside
 every candidate's envelope so the airframes are compared on equal terms.
+
+The boundaries the physics additions measured (2026-09-28/29, JSBSim 1.2.4,
+120 Hz) are of another kind -- where a model, a derivation or the trim stops
+doing what a write asks -- and each is a refusal or a stated limitation in
+the code, not a silent path:
+
+| Model | Boundary | Measured | Consequence |
+|---|---|---|---|
+| DHC6 | Its engine, propeller and system files live in aircraft-local `Engines/` and `Systems/`; JSBSim resolves `<thruster file="Propeller">` against the aircraft directory's `Engines/` first | A derived DHC6 did not load ("Could not open file: Propeller") until `core/control/derive.py` copied the local subdirectories (P5); the derived hashes are unchanged | Derivation copies them; the DHC6 flies icing |
+| DHC6 | FCS in a shared `<system file=...>` | The failures injection cannot anchor (P2) | `derivation.anchor_missing` / `failures.actuator_missing`: no surface failure on the DHC6 |
+| A320 (turbine) | `set-running = 0` in flight | Thrust 0 for one step, then 11942.99 lbf: relit (section 19) | Engine-out is the cutoff |
+| c172p (piston) | `set-running = 0` in flight | Relatched on the next step by the windmilling propeller (section 20) | Engine-out is the magneto cut |
+| every model | A wind written before `do_trim` | Reset to 0 by the trim (33.756 fps -> 0.0 / -4.8e-16), the trimmed throttle identical with and without (section 18) | "Trimmed in the wind" is trimmed in still air; the first per-step write restores the wind (stated) |
+| every model | A stated day written after the initial conditions | The IC's TAS is kept: 100 kt CAS stated flies 95.83 kt CAS at +30 degC on the c172p (section 27) | Fixed: the requested airspeed re-stated before the re-latch |
+| c172p | The autopilot's sign probe trims at 6000 m / 280 kt | `TrimError` (udot not trimmable) | The c172p flies open loop in every physics test and the ladder; an elevator jam cannot diverge it (silent by construction) |
+| c172p | A static stall sweep through the lift table | Lift peak at 16.25 deg requested (CL 1.449) | The stall-onset cue is measured as a -2.0 deg move of that peak |
+| p51d | Lift table in alpha DEGREES; weapon stations are system outputs | `icing_alpha` cannot anchor; 300 lb written to a weapon station reads 0.0 (section 24) | `derivation.anchor_missing`; the stations are configured unloadable |
+| f16 | Five alpha-rad lift tables; the aileron command read by a `<test>` | The failures and `icing_alpha` injections cannot anchor | Refused by name |
+| B747 | Aileron term a Mach table | The wake's roll-control ratio cannot be computed | Recorded `absent` with the reason |

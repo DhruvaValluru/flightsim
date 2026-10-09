@@ -1,6 +1,7 @@
 #include "FlightSimCameraDirector.h"
 
 #include "CineCameraComponent.h"
+#include "JSBSimMovementComponent.h"
 
 namespace
 {
@@ -60,9 +61,84 @@ float AFlightSimCameraDirector::GetCameraRollDegrees() const
 	return GetActorRotation().Roll;
 }
 
+void AFlightSimCameraDirector::RefreshTargetMovement()
+{
+	if (Target == TargetMovementOwner)
+	{
+		return;
+	}
+	TargetMovementOwner = Target;
+	TargetMovement = Target != nullptr
+		? Target->FindComponentByClass<UJSBSimMovementComponent>()
+		: nullptr;
+}
+
+FVector AFlightSimCameraDirector::TargetAimPoint(const FTransform& TargetTransform) const
+{
+	// CGLocalPosition is in the actor frame (cm), so the actor transform
+	// carries it into the world -- the same arithmetic the scenario world
+	// inverts to place the actor (Origin = TargetCG - R * CGLocalPosition).
+	if (TargetMovement != nullptr)
+	{
+		return TargetTransform.TransformPosition(TargetMovement->CGLocalPosition);
+	}
+	return TargetTransform.GetLocation();
+}
+
+FVector AFlightSimCameraDirector::HeadingOffsetStation(const FVector& AimPoint,
+                                                       const FTransform& TargetTransform,
+                                                       const FVector& OffsetMetres)
+{
+	const FRotator TargetRotation = TargetTransform.GetRotation().Rotator();
+	const FRotator HeadingOnly(0.0f, TargetRotation.Yaw, 0.0f);
+	return AimPoint + HeadingOnly.RotateVector(OffsetMetres * CmPerMetre);
+}
+
+bool AFlightSimCameraDirector::PresetRestingPose(FVector& OutLocation,
+                                                 FRotator& OutLook)
+{
+	if (Target == nullptr)
+	{
+		return false;
+	}
+	RefreshTargetMovement();
+	const FTransform TargetTransform = Target->GetActorTransform();
+	// Rest where the presets update from: the CG, never the datum.
+	const FVector RestAimPoint = TargetAimPoint(TargetTransform);
+	switch (Preset)
+	{
+	case EFlightSimCameraPreset::GroundObserver:
+		OutLocation = ObserverLocationMetres * CmPerMetre;
+		break;
+	case EFlightSimCameraPreset::Tower:
+		OutLocation = TowerLocationMetres * CmPerMetre;
+		break;
+	case EFlightSimCameraPreset::Wingman:
+		OutLocation = HeadingOffsetStation(RestAimPoint, TargetTransform,
+		                                   WingmanOffsetMetres);
+		break;
+	case EFlightSimCameraPreset::CockpitShoulder:
+		// Body-fixed, exactly the placement UpdateCockpitShoulder makes:
+		// full rotation, roll inherited by declaration.
+		OutLocation = RestAimPoint + TargetTransform.GetRotation().RotateVector(
+			ShoulderOffsetMetres * CmPerMetre);
+		OutLook = TargetTransform.GetRotation().Rotator();
+		return true;
+	case EFlightSimCameraPreset::LaggedChase:
+	default:
+		OutLocation = HeadingOffsetStation(RestAimPoint, TargetTransform,
+		                                   ChaseOffsetMetres);
+		break;
+	}
+	OutLook = (RestAimPoint - OutLocation).Rotation();
+	OutLook.Roll = 0.0f;              // never inherit roll
+	return true;
+}
+
 bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
                                             TArray<FVector>&& Locations,
                                             TArray<FRotator>&& Rotations,
+                                            TArray<double>&& FocalLengthsMm,
                                             FString& Error)
 {
 	if (Times.Num() < 2)
@@ -72,13 +148,27 @@ bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
 			     "refusing to fly a camera nobody solved"), Times.Num());
 		return false;
 	}
-	if (Times.Num() != Locations.Num() || Times.Num() != Rotations.Num())
+	if (Times.Num() != Locations.Num() || Times.Num() != Rotations.Num() ||
+	    Times.Num() != FocalLengthsMm.Num())
 	{
 		Error = FString::Printf(
-			TEXT("consume-poses: %d times against %d locations and %d "
-			     "rotations; refusing a misaligned track"),
-			Times.Num(), Locations.Num(), Rotations.Num());
+			TEXT("consume-poses: %d times against %d locations, %d "
+			     "rotations and %d focal lengths; refusing a misaligned "
+			     "track"),
+			Times.Num(), Locations.Num(), Rotations.Num(),
+			FocalLengthsMm.Num());
 		return false;
+	}
+	for (int32 i = 0; i < FocalLengthsMm.Num(); ++i)
+	{
+		if (!(FocalLengthsMm[i] > 0.0))
+		{
+			Error = FString::Printf(
+				TEXT("consume-poses: solved focal length %.4f mm at sample "
+				     "%d is not a lens; refusing to guess a field of view"),
+				FocalLengthsMm[i], i);
+			return false;
+		}
 	}
 	for (int32 i = 1; i < Times.Num(); ++i)
 	{
@@ -92,6 +182,29 @@ bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
 	PoseTimes = MoveTemp(Times);
 	PoseLocations = MoveTemp(Locations);
 	PoseRotations = MoveTemp(Rotations);
+	PoseFocalLengthsMm = MoveTemp(FocalLengthsMm);
+	AppliedFocalLengthMm = PoseFocalLengthsMm[0];
+	return true;
+}
+
+bool AFlightSimCameraDirector::PoseVelocityAtTime(double SimTimeSeconds,
+                                                  FVector& OutCmPerSecond) const
+{
+	const double Slack = 1.0e-6;
+	if (PoseTimes.Num() < 2 || SimTimeSeconds < PoseTimes[0] - Slack ||
+	    SimTimeSeconds > PoseTimes.Last() + Slack)
+	{
+		return false;
+	}
+	int32 Upper = 1;
+	while (Upper < PoseTimes.Num() - 1 && PoseTimes[Upper] < SimTimeSeconds)
+	{
+		++Upper;
+	}
+	const double Span = PoseTimes[Upper] - PoseTimes[Upper - 1];
+	OutCmPerSecond = Span > 0.0
+		? (PoseLocations[Upper] - PoseLocations[Upper - 1]) / Span
+		: FVector::ZeroVector;
 	return true;
 }
 
@@ -132,6 +245,9 @@ bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
 		PoseRotations[Lower].Quaternion(),
 		PoseRotations[Upper].Quaternion(),
 		static_cast<float>(Fraction));
+	AppliedFocalLengthMm = FMath::Lerp(PoseFocalLengthsMm[Lower],
+	                                   PoseFocalLengthsMm[Upper],
+	                                   Fraction);
 	// Sweep-free teleport: the camera is an observer, never a collider.
 	SetActorLocationAndRotation(Location, Rotation, false, nullptr,
 	                            ETeleportType::TeleportPhysics);
@@ -141,15 +257,32 @@ bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
 	// recorded geometry is quietly wrong. 10 cm on a cinema camera is
 	// already generous.
 	const FVector Applied = GetActorLocation();
-	if (!Applied.Equals(Location, 10.0f))
+	if (!Applied.Equals(Location, PositionToleranceCm))
 	{
 		Error = FString::Printf(
 			TEXT("consume-poses: applied camera position (%.1f, %.1f, %.1f) "
 			     "differs from the solved pose (%.1f, %.1f, %.1f) by more "
-			     "than 10 cm at t=%.3f s; refusing to record geometry the "
-			     "frames do not have"),
+			     "than %.3g cm at t=%.3f s; refusing to record geometry "
+			     "the frames do not have"),
 			Applied.X, Applied.Y, Applied.Z,
-			Location.X, Location.Y, Location.Z, SimTimeSeconds);
+			Location.X, Location.Y, Location.Z,
+			PositionToleranceCm, SimTimeSeconds);
+		return false;
+	}
+	// Position parity alone let a rotation divergence through, and where
+	// the camera LOOKS is most of the label: a tenth of a degree at a
+	// kilometre is nearly two metres of misplaced world. Same doctrine,
+	// same loudness.
+	const double RotationErrorDeg =
+		RotationErrorDegrees(GetActorQuat(), Rotation);
+	if (RotationErrorDeg > RotationToleranceDeg)
+	{
+		Error = FString::Printf(
+			TEXT("consume-poses: applied camera rotation differs from the "
+			     "solved pose by %.4f deg at t=%.3f s (tolerance %.3g "
+			     "deg); refusing to record an orientation the frames do "
+			     "not have"),
+			RotationErrorDeg, SimTimeSeconds, RotationToleranceDeg);
 		return false;
 	}
 	return true;
@@ -172,12 +305,17 @@ void AFlightSimCameraDirector::Tick(float DeltaSeconds)
 		return;
 	}
 
+	RefreshTargetMovement();
 	const FTransform TargetTransform = Target->GetActorTransform();
+	// Every preset aims at, and offsets from, the CG (see TargetAimPoint).
+	const FVector AimPoint = TargetAimPoint(TargetTransform);
 
 	if (!bInitialised)
 	{
 		SmoothedLocation = GetActorLocation();
-		SmoothedAimPoint = TargetTransform.GetLocation();
+		SmoothedAimPoint = AimPoint;
+		SmoothedOffsetXY = FVector(SmoothedLocation.X - AimPoint.X,
+		                           SmoothedLocation.Y - AimPoint.Y, 0.0);
 		bInitialised = true;
 	}
 
@@ -185,11 +323,11 @@ void AFlightSimCameraDirector::Tick(float DeltaSeconds)
 	{
 	case EFlightSimCameraPreset::GroundObserver:
 		UpdateFixedPoint(DeltaSeconds, ObserverLocationMetres * CmPerMetre,
-		                 TargetTransform.GetLocation());
+		                 AimPoint);
 		break;
 	case EFlightSimCameraPreset::Tower:
 		UpdateFixedPoint(DeltaSeconds, TowerLocationMetres * CmPerMetre,
-		                 TargetTransform.GetLocation());
+		                 AimPoint);
 		break;
 	case EFlightSimCameraPreset::Wingman:
 		UpdateWingman(DeltaSeconds, TargetTransform);
@@ -207,27 +345,45 @@ void AFlightSimCameraDirector::Tick(float DeltaSeconds)
 void AFlightSimCameraDirector::UpdateLaggedChase(float DeltaSeconds,
                                                  const FTransform& TargetTransform)
 {
-	// The offset is applied in a HEADING-ONLY frame: yaw is taken from the
-	// aircraft so the camera stays behind it through a turn, but pitch and roll
-	// are discarded. Using the full rotation here is precisely the mistake --
-	// the camera would roll with the aircraft and the roll would vanish.
-	const FRotator TargetRotation = TargetTransform.GetRotation().Rotator();
-	const FRotator HeadingOnly(0.0f, TargetRotation.Yaw, 0.0f);
+	// Offset from the CG, as the Python solver states it -- not from the
+	// actor origin, which is the structural datum -- in the heading-only
+	// frame (HeadingOffsetStation: yaw kept, pitch and roll discarded).
+	const FVector AimPoint = TargetAimPoint(TargetTransform);
+	const FVector Goal = HeadingOffsetStation(AimPoint, TargetTransform,
+	                                          ChaseOffsetMetres);
 
-	const FVector Goal = TargetTransform.GetLocation()
-		+ HeadingOnly.RotateVector(ChaseOffsetMetres * CmPerMetre);
-
-	SmoothedLocation = SmoothTowards(SmoothedLocation, Goal, DeltaSeconds,
-	                                 PositionLagSeconds);
-	SmoothedAimPoint = SmoothTowards(SmoothedAimPoint,
-	                                 TargetTransform.GetLocation(),
-	                                 DeltaSeconds, AimLagSeconds);
+	FollowStation(AimPoint, Goal, DeltaSeconds, PositionLagSeconds);
 
 	SetActorLocation(SmoothedLocation);
 
 	FRotator Look = (SmoothedAimPoint - SmoothedLocation).Rotation();
 	Look.Roll = 0.0f;                 // never inherit roll
 	SetActorRotation(Look);
+}
+
+void AFlightSimCameraDirector::FollowStation(const FVector& AimPoint, const FVector& Goal,
+                                             float DeltaSeconds, float PositionLag)
+{
+	// Horizontally the lag acts on the OFFSET from the aircraft, not on the
+	// camera's world position: a world-position lag trails a steadily
+	// moving target by speed x lag (58 m at 250 kt), which dragged a side
+	// view off its station and the aircraft across the frame over the first
+	// second of every clip. The offset still swings smoothly through a turn
+	// (it rotates with the heading). Vertically the lag stays on the world
+	// position, so a climb or a pitch bob still shows in the frame. Python's
+	// core/capture/poses.py solve_pose_track is the same model.
+	const FVector GoalOffsetXY(Goal.X - AimPoint.X, Goal.Y - AimPoint.Y, 0.0);
+	SmoothedOffsetXY = SmoothTowards(SmoothedOffsetXY, GoalOffsetXY, DeltaSeconds,
+	                                 PositionLag);
+	const double CameraZ = SmoothTowards(FVector(0.0, 0.0, SmoothedLocation.Z),
+	                                     FVector(0.0, 0.0, Goal.Z), DeltaSeconds,
+	                                     PositionLag).Z;
+	const double AimZ = SmoothTowards(FVector(0.0, 0.0, SmoothedAimPoint.Z),
+	                                  FVector(0.0, 0.0, AimPoint.Z), DeltaSeconds,
+	                                  AimLagSeconds).Z;
+	SmoothedLocation = FVector(AimPoint.X + SmoothedOffsetXY.X,
+	                           AimPoint.Y + SmoothedOffsetXY.Y, CameraZ);
+	SmoothedAimPoint = FVector(AimPoint.X, AimPoint.Y, AimZ);
 }
 
 void AFlightSimCameraDirector::UpdateCockpitShoulder(
@@ -240,7 +396,8 @@ void AFlightSimCameraDirector::UpdateCockpitShoulder(
 	// frame the aircraft never moves and the world banks; nothing recorded
 	// from this camera may be graded as aircraft motion.
 	const FQuat Rotation = TargetTransform.GetRotation();
-	SetActorLocation(TargetTransform.GetLocation()
+	// Body-frame offset from the CG (the solver's origin), not the datum.
+	SetActorLocation(TargetAimPoint(TargetTransform)
 	                 + Rotation.RotateVector(ShoulderOffsetMetres * CmPerMetre));
 	SetActorRotation(Rotation);
 }
@@ -264,18 +421,12 @@ void AFlightSimCameraDirector::UpdateFixedPoint(float DeltaSeconds,
 void AFlightSimCameraDirector::UpdateWingman(float DeltaSeconds,
                                              const FTransform& TargetTransform)
 {
-	const FRotator TargetRotation = TargetTransform.GetRotation().Rotator();
-	const FRotator HeadingOnly(0.0f, TargetRotation.Yaw, 0.0f);
-
-	const FVector Goal = TargetTransform.GetLocation()
-		+ HeadingOnly.RotateVector(WingmanOffsetMetres * CmPerMetre);
+	const FVector AimPoint = TargetAimPoint(TargetTransform);
+	const FVector Goal = HeadingOffsetStation(AimPoint, TargetTransform,
+	                                          WingmanOffsetMetres);
 
 	// Station-keeping is tighter than a chase: a wingman holds position.
-	SmoothedLocation = SmoothTowards(SmoothedLocation, Goal, DeltaSeconds,
-	                                 PositionLagSeconds * 0.5f);
-	SmoothedAimPoint = SmoothTowards(SmoothedAimPoint,
-	                                 TargetTransform.GetLocation(),
-	                                 DeltaSeconds, AimLagSeconds);
+	FollowStation(AimPoint, Goal, DeltaSeconds, PositionLagSeconds * 0.5f);
 
 	SetActorLocation(SmoothedLocation);
 	FRotator Look = (SmoothedAimPoint - SmoothedLocation).Rotation();

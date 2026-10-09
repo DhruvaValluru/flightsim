@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -38,6 +39,10 @@ DEFAULT_CHANNELS = (
     "n_z",
     "pitch_rate_dps",
     "roll_rate_dps",
+    # -- D2: the body yaw rate (velocities/r-rad_sec), the third rate DRM 4
+    # (RVW) needs, so the Entity State PDU log carries a recorded r. Recorded,
+    # NOT graded: the Gate 5 comparison set is unchanged.
+    "yaw_rate_dps",
     "track_deg",
     "crab_deg",
     "wind_speed_mps",
@@ -61,6 +66,62 @@ DEFAULT_CHANNELS = (
     "v_north_mps",
     "v_east_mps",
     "v_down_mps",
+    # -- the atmosphere block (gap P1): what the FDM's atmosphere delivered
+    # at the sample -- density and pressure altitude by JSBSim's own
+    # inversion, humidity, vapour pressure, temperature and pressure.
+    # Recorded, NOT graded: the Gate 5 comparison set is unchanged.
+    "density_altitude_m",
+    "pressure_altitude_m",
+    "rh_pct",
+    "vapour_pressure_pa",
+    "temperature_k",
+    "pressure_hpa",
+    # -- the gust and wind-profile channels (P6): the gust channel as JSBSim
+    # holds it (the stack's summed gust, read back), the equivalent roll
+    # rate the derived airframe received (0 on a stock one), the base
+    # wind's horizontal speed (the profile's speed at the altitude). The
+    # profile's layer index and dV/dz are not JSBSim's: the runner records
+    # them through Recorder ``extra`` from the stack (STACK_CHANNELS in
+    # core/environment/stack.py). Recorded, NOT graded: the Gate 5
+    # comparison set is unchanged.
+    "gust_north_mps",
+    "gust_east_mps",
+    "gust_down_mps",
+    "gust_p_equivalent_rad_s",
+    "wind_profile_speed_mps",
+    # -- the icing (P5): the severity eta the provider wrote, the six axis
+    # factors (1 + eta k) the derived airframe's aerodynamics read, and the
+    # stall-onset shift in degrees; 0 / 1.0 / 0 on a stock airframe.
+    # Recorded, NOT graded: the Gate 5 comparison set is unchanged.
+    "icing_eta",
+    "icing_lift_factor",
+    "icing_drag_factor",
+    "icing_pitch_factor",
+    "icing_roll_factor",
+    "icing_yaw_factor",
+    "icing_side_factor",
+    "icing_alpha_shift_deg",
+    # -- the loading (P4): the centre of gravity (m aft of the XML datum) and
+    # the pitch inertia (kg m^2) FGMassBalance holds at the sample; weight_kg
+    # above is the gross mass. Recorded, NOT graded: the Gate 5 comparison
+    # set is unchanged.
+    "cg_x_m",
+    "iyy_kgm2",
+    # -- the measured channels (R2): what the instrument models at the FDM
+    # rate LAST measured when the sample was taken (the latest value, held
+    # between the 10 Hz samples' steps and, for the GPS, between fixes) --
+    # NaN when the recorder has no observer or the observer has not yet
+    # observed. Not JSBSim's: handed over by Recorder(measured=...).
+    # Recorded, NOT graded: the Gate 5 comparison set is unchanged.
+    "meas_n_z",
+    "meas_p_dps",
+    "meas_q_dps",
+    "meas_r_dps",
+    "meas_lat_deg",
+    "meas_lon_deg",
+    "meas_alt_m",
+    "meas_cas_kt",
+    "meas_heading_deg",
 )
 
 
@@ -80,6 +141,13 @@ class Recorder:
         Additional named callables taking the FDM and returning a float, for
         quantities that are not on the state snapshot -- control-surface
         positions, for example.
+    measured:
+        R2: an object with ``latest() -> {meas_* channel: value}`` (the
+        instrument observer, core/telemetry/instruments.py). Every sample
+        carries the LATEST measured value -- the observer runs at the FDM
+        rate, the recorder at 10 Hz, so the sample takes what the last
+        step measured (the held GPS fix included). Without one the meas_*
+        columns are NaN: absent, never a copy of the truth.
     """
 
     def __init__(
@@ -88,17 +156,23 @@ class Recorder:
         interval_s: float = 0.1,
         channels=DEFAULT_CHANNELS,
         extra: Optional[Dict[str, Callable[[Any], float]]] = None,
+        measured=None,
     ) -> None:
         self._fdm = fdm
         self.interval_s = float(interval_s)
         self.channels = tuple(channels)
         self._extra = dict(extra or {})
+        self._measured = measured
         self.columns: Dict[str, List[float]] = {
             name: [] for name in (*self.channels, *self._extra)
         }
         #: Annotations: (time, label). Marks events so a chart can show when a
         #: control input or condition change was applied.
         self.events: List[Dict[str, Any]] = []
+        #: Columns added AFTER the run by an observer (the limits
+        #: monitor's 0/1 flags): derived from the recorded columns, never
+        #: read from JSBSim, named here so a reader can tell them apart.
+        self.derived: List[str] = []
         self._next_sample = 0.0
 
     # -- recording -----------------------------------------------------
@@ -109,6 +183,10 @@ class Recorder:
         if not force and t < self._next_sample:
             return False
         state = self._fdm.state()
+        if self._measured is not None:
+            # The latest measured values ride on the snapshot (NaN for a
+            # channel the observer has not measured yet).
+            state = replace(state, **self._measured.latest())
         for name in self.channels:
             self.columns[name].append(_read(state, name))
         for name, fn in self._extra.items():
@@ -126,6 +204,26 @@ class Recorder:
         for _ in range(steps):
             self._fdm.step()
             self.sample()
+
+    def annotate(self, name: str, values) -> None:
+        """Add a DERIVED column after the run, one value per sample.
+
+        For observers that grade the recording (core.telemetry.limits):
+        the column rides beside the recorded ones so every per-frame
+        consumer sees it, and ``derived`` names it as not-from-JSBSim.
+        Refuses a name that would shadow a recorded channel and a
+        length that does not match the run -- a flag column shorter
+        than the telemetry would label the wrong frames.
+        """
+        if name in self.columns:
+            raise ValueError(f"{name!r} is already a column; an annotation "
+                             f"never overwrites a recorded channel")
+        values = list(values)
+        if len(values) != len(self):
+            raise ValueError(f"annotation {name!r} has {len(values)} values for "
+                             f"{len(self)} samples")
+        self.columns[name] = values
+        self.derived.append(name)
 
     # -- output --------------------------------------------------------
 
@@ -145,6 +243,7 @@ class Recorder:
             "interval_s": self.interval_s,
             "samples": len(self),
             "events": self.events,
+            "derived": list(self.derived),
             "columns": self.columns,
         }
 

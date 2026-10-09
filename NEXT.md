@@ -1,7 +1,467 @@
 # Resume here
 
+**The drawn flight path (2026-10-09, `phase-2-testing`; docs/ROUTE.md is
+the record).** LANDED: the `route` spec block (core/scenario/blocks.py
+RouteSpec, absent-canonical, no version bump), the route module
+(core/control/route.py: the limits pinned to tecs.xml, `route_problems`
+with route.shape/bank_limit/time/turn/climb, pure-pursuit `RouteGuidance`
+writing setpoints only, the route-aware closure, `control_schedule`, the
+card block), the runner's 2 Hz guidance tick and route columns (only with
+a route: every other digest unchanged), the validator and catalogue
+entries, the web server (webapp/route_map.py: POST /route/terrain, POST
+/route/check flies the line for real, `plan_route_flight` in /run's
+pinned order replacing the doublet pre-flight for route runs; the
+render carries the schedule as control_inputs and the route block, with
+the measured replay divergence), the page (webapp/static/route_map.js,
+"+ draw the flight path": the mockup's engine on the server's grid, every
+limit from the payload; Self adjust; Check with the physics; Use this
+path), and a fix the feature needed: Autopilot.engage() probed the
+control signs at 6000 m / 280 kt, so the c172p never engaged (now at the
+aircraft's own trim). MEASURED here: a c172p 90-degree route within 40 m
+cross-track; a 20 s flat route's open-loop replay 13.4 m from the
+closed-loop track; a line into a synthetic hill refused at 100.5 m.
+UNCOMPILED / UNMEASURED: nothing new in C++ -- the host flies the
+schedule open loop as it flies the doublet; the first Windows run
+measures the clip against the card's `route.flown`. Tests:
+tests/test_route_core.py, tests/test_route_map.py,
+tests/test_route_page.py (headless Chromium when node and
+/opt/pw-browsers/chromium exist). OPEN for the owner: (1) the host's
+elevator entry rule, FlightSimScenarioWorld.cpp ~2650
+`Commands.Elevator += Input.Elevator`, accumulates across entries -- the
+doublet never had a non-zero elevator, a route schedule does; the Python
+replay flies the rule the host's own comment states (trim + delta), so
+the card's divergence will NOT show this error; one line to latch the
+trim elevator and set Trim + Input; (2) the real render path is a
+closed-loop port of the guidance to the host (accept hold_state and the
+tecs injection, tick the setpoints per step) -- the open-loop schedule
+is the honest stand-in, not the destination; (3) the doublet pre-flight
+compares its `t_s` with JSBSim sim time, which the engine start has
+advanced to 4.875 s, while the render commandlet clocks from 0: every
+terrain plan to date flew the doublet ~4.9 s early relative to the
+render (kept as is, `SCRIPT_CLOCKS`; the route replay uses the run
+clock); (4) the headless capture path (no host, cameras stated) runs the
+projected spec and would refuse route.hold_state; (5) a turbulent
+route's pre-flight runs before derive_seed, so its closed-loop flight
+and the run draw different seeds; (6) the review table's route row shows
+the server's last summary until the next round trip.
+
+**Storm weather, opt-in (2026-10-08, `phase-2-testing`; docs/WEATHER.md is
+the record; built in parallel with the weather look and rain particles
+below, merged beside them).** A stated rain rate or a thunderstorm now also
+puts a `weather` block on the card (core/scene/storm_weather.py,
+absent-canonical): 3D rain
+drops from the same Marshall & Palmer fit, shutter-length and fixed in the
+air (rain_field.py), splashes, drops on a cockpit's glass; the
+cumulonimbus over the downburst centre with a physical extinction, anvil
+and Atlas rain shaft (storm_cell.py); seeded lightning with stepped
+leaders, return strokes integrated over each frame's exposure, branching
+channels that land on their strike points (lightning.py); thunder
+synthesised from each bolt's own channel (thunder.py,
+scripts/storm_soundtrack.py for videos). Unreal side: FlightSimWeather,
+OFF by default (`-weather-backend=procedural|niagara` turns it on; its
+drops then replace the rain particles and its glass the lens drops), five materials from committed HLSL
+(assets/shaders/weather/), hooks in the render commandlet (beauty-only,
+streaks superseded) and the interactive window (thunder and rain heard).
+The C++ closed forms are COMPILED with g++ and matched to Python in
+tests/test_weather.py; the rest is UNCOMPILED. NEXT: the first Windows
+build and the WX.1-WX.6 clauses (WX.4 sets ExtinctionScale if the engine
+does not read Extinction per metre); then build NS_FlightSimRain from the
+recipe if the Niagara backend is wanted. FIRST WINDOWS RUNS (2026-10-08):
+the build needed C4883 silenced on the commandlet's Main and 5.7's
+GetMaterialResource(EShaderPlatform); the first thunderstorm render
+crashed in the engine's cloud SHADOW pass (MD_Volume assert: M_StormCell
+compiled as a Volume material with no cloud shaders, lacking the "Used
+with Volumetric Cloud" usage flag). Fixed by the flag (script, in place
+too), a usage check in BuildCell, and VerifyCloudMaterials before the
+first frame of both hosts (refuses clouds.material instead). Also found:
+select_if connected nothing ("A>B" is not the engine's pin name), so
+M_LensDrops / M_GreyCard / M_LandcoverID / M_RainStreaks failed to
+compile -- rebuild them with FLIGHTSIM_REBUILD_MATERIALS. Tools:
+scripts/debug_storm_render.py (direct commandlet runs, logs kept, frame
+luma measured). SECOND RUN: the frame rendered BLACK -- the cloud
+material had no multiple scattering (single scattering under an 11 km
+tower lights nothing), the look's deck was drawn 156 optical depths deep,
+and the look's manual exposure stood. Fixed (docs/WEATHER.md "Seeing
+nothing"): M_StormCell carries a VolumetricAdvancedMaterialOutput
+(STORM_SCATTERING; storm materials are stamped with STORM_GENERATION and
+an older build is rebuilt by the script itself), the deck is capped to a
+nimbostratus depth, the commandlet meters a frame read back before frame
+0 (look_applied.storm_exposure; -storm-meter-target=), the window adapts
+on the engine's histogram. MEASURED (2026-10-09): the storm frame now
+renders at luma mean 78 / p90 93 (the meter opened 1.65 stops; the look
+without the storm sits at 24 / 48); the rebuilt M_StormCell's first
+render compiled cloud shaders for 14 minutes, once. The first rebuild
+had failed on a node property the engine does not have and deleted the
+old asset first; the script now keeps the old asset aside until the new
+one is saved. The first visible frame was a debug flat world with a box
+aircraft and the look's lens-drop rings: the debug script now renders
+the web app's scene (plan_scene_setting / pick_scene, the aircraft's
+mesh, its chase camera), the storm weather supersedes the lens drops off
+a windshield, and "a thunderstorm 5 km ahead" places the cell at a
+distance (event detail ahead_m; the 45 % point of a short clip is inside
+the shaft). The rain was invisible: the drops streaked over the frame
+interval (0.2 s at 5 fps) and the first metre was faded out; now a
+daylight shutter (1/1000 s, stated; 1/250 lost the rain once a 747 was moving) when the card has no triple, and a
+30 cm fade. Storm materials now carry a generation EACH
+(STORM_GENERATIONS): the rain's rebuild does not recompile the cloud.
+OWNER'S RULE (2026-10-09): Google's 3D tiles are the ground of EVERY
+terrain render -- on by default on both sides, FLIGHTSIM_GOOGLE_TILES=off
+the only way off, refusals by name without a key or the Cesium plugin
+(CLAUDE.md).
+OPEN for the owner: the two
+weather paths overlap (both draw drops, storm clouds and lightning);
+which one to keep, or how to fold them together, is the owner's call.
+
+**3-D rain and the tan border (2026-10-08, `phase-2-testing`; UNCOMPILED
+-- no engine here).** The owner's "heavy rain" stills showed no rain and
+a blurred tan border round every frame. (1) A stated rain rate now writes
+a `rain_particles` card block (`core/scene/rain_particles.py`) and
+`FlightSimRainParticles.cpp` draws real drops: one instanced
+`/Engine/BasicShapes/Cylinder` per drop with `M_RainDrop` (lit
+translucent, per-instance coverage in custom float 0), 1,500-20,000 of
+them by rate in a 12 m world box ahead of the camera, falling at their
+Atlas speed on the FDM's time, streaked by their motion relative to the
+camera (the pose track's velocity, `PoseVelocityAtTime`) over a stated
+1/60 s, beauty-only. They supersede the screen-space `M_RainStreaks`
+when drawn. (2) The border: SUSPECTED (not measured) to be the two
+screen-space looks running at `BL_SCENE_COLOR_AFTER_DOF` (render
+resolution, before TSR); both now run after the tonemapper, and the
+materials script moves an existing asset's location in place
+(`move_after_tonemapping`). FIRST WINDOWS STEPS: `.\scripts\build_ue.ps1`,
+re-run `scripts/ue_create_materials.py` (watch for MATERIAL-UPDATED on
+M_RainStreaks / M_LensDrops and MATERIAL-CREATED on M_RainDrop), then
+`scripts\run_test_scenarios.py --still --only 7 8` and
+`scripts\inspect_run.py <id>` (look_applied.rain_particles: drawn,
+last_drawn, last_camera_speed_mps). If the border survives, try
+`Capture->ShowFlags.SetPostProcessMaterial(false)` on the beauty capture,
+then the lens flare (`LensFlareIntensity` 0). Known risks: the ISM API
+names (`BatchUpdateInstancesTransforms`, `SetNumCustomDataFloats`) and
+the PerInstanceCustomData node's `const_default_value` are from memory.
+Tests: `tests/test_rain_particles.py`, `tests/test_ue_materials.py`.
+
+**Weather visuals (2026-10-07, `phase-2-testing`; UNCOMPILED -- no engine
+here).** A new absent-canonical card block `weather_look`
+(`core/scene/weather_look.py`: surface, storm, rain rate, wetness, ice,
+seed) drives `FlightSimWeatherLook.cpp`: the flat scene's ground gets
+`M_Ground_<Surface>` (it had NO material before: the engine plane's
+default) with puddles and ripples from the wetness; a thunderstorm gets a
+cloud layer when the look has none (cover 0.95, 1200-9000 m, in the
+commandlet), three rain shafts and a lightning bolt + point light on a
+seeded flash schedule (all `BeautyOnlyActors`); a rain rate puts
+`M_LensDrops` on the beauty capture beside the streaks and wets the
+georeferenced terrain through the existing Wetness scalar when the look
+carried none; icing puts `M_IceOverlay` on every airframe part
+(`SetOverlayMaterial`), IceAmount following the card's icing ramp. All
+eleven materials are procedural in `scripts/ue_create_materials.py`
+(`_weather_material`); `scripts/fetch_ground_textures.py` fetches CC0
+Poly Haven textures (unreachable from the container; run it on Windows,
+then re-run the materials script) and the ground materials sample them
+when present. FIRST WINDOWS STEPS: build, run the materials script (watch
+for MATERIAL-FAILED), render "over the desert through a thunderstorm"
+and a run with `icing:`; check render.json `look_applied.weather_look`.
+Known risks: the Python material-node property names (Noise, DepthFade,
+Transform) and `SetOverlayMaterial` are from memory; the storm shafts
+assume the start is over the engine origin; the albedo pass now shows
+the surface colours on a flat scene that states a surface word.
+Tests: `tests/test_weather_look.py`, `tests/test_fetch_ground_textures.py`.
+
+**Camera control by language, widened (2026-10-07, `phase-2-testing`).**
+The camera-sentence box (`core/nl/camera_prompt.py`, `/cameras/prompt`)
+now tells the model the SCENE: the aircraft, a distance table scaled to
+its calibrated chase framing (`framing_distances`: close 0.6 D, default
+D, far 4 D, very far 10 D -- "behind the Cessna" is 28 m, not the old
+flat 150 m), the other aircraft and every existing camera. The intent
+gained optional `edit_camera_id` (the endpoint replaces that camera in
+place, keeping its id, lens, schedule and moves unless restated; moves
+are re-keyed on the new offset via `compiler.describe_moves`),
+`focal_length_mm` (a stated lens is never widened by the fit; the camera
+is pulled back instead), `aim` / `aim_bearing_deg` / `aim_elevation_deg`
+and `moves`, plus a `cockpit` view. The rule reader scales the same way,
+reads lens / compass aim / move words, and its `show_all` is no longer
+the constant `anchor_centre or True` ("only the main plane" is False).
+The main-prompt LLM compiler may now write `offset_*`, `aim_*` and
+`moves` per camera; the calibrated chase table is GENERATED into its
+system prompt from `CHASE_OFFSETS`; a field the view cannot honour goes
+to notes by name; move words the model drops still key the regex moves
+(`prompt_moves`, which now also matches "zooms in" / "orbiting").
+`core/capture/poses.py`: a chase / wingman camera honours a stated
+`point` / `bearing` aim (it still follows; only where it looks changes).
+Tests: `tests/test_camera_sentence.py`.
+
+**Rain physics (2026-10-07, `phase-2-testing`).** The stated rain rate
+(`environment.precipitation_rate_mmh`, W3's look) now has opt-in PHYSICS
+through a new spec-9 block `rain` (absent-canonical: no block, nothing
+changes, every committed example keeps its digest). LANDED:
+`core/environment/rain.py` -- the water from the fitted Marshall-Palmer
+DSD (LWC and the mass-weighted fall speed, closing `rho_w R = LWC v_m`
+exactly); the swept-up drops' momentum (inelastic capture, box projection
+over the frontal and wing areas) as a JSBSim `<external_reactions>` force
+in the BODY frame at the AERORP, direction and magnitude written every
+step; a STATED linear wetted-wing mapping in LWC (lift `1 - 0.15 phi`,
+drag `1 + 0.30 phi`, `phi = min(LWC / 46, 1)`, after NASA TP-3184's tested
+range; both penalties are spec fields); the runway through JSBSim's own
+`ground/static-friction-factor` (`dry` 1.0, `wet` the 14 CFR 25.109(c)(1)
+cubic over the airframe's dry coefficient, `standing_water` 0.05 above
+Horne's `9 sqrt(p)` kt). `core/control/derive.py` gains the `rain`
+injection (last in the order, suffix `-rain`: LIFT and DRAG functions
+wrapped like icing's, plus the force) and `core/control/systems/rain.xml`;
+`RainSpec` in blocks.py, plumbed through spec.py, validate.py
+(`rain.rate_missing` / `runway_condition` / `factor_range` /
+`airframe_data`, catalogued), runner.py (provider, injections, the
+`rain` manifest block, seven telemetry columns ONLY on a run with the
+block). `assets/aircraft_config/c172p.json` carries a `rain` block
+(frontal area 3.8 m^2 estimated, 29 psi from memory -- both marked
+unverified); every other airframe must state them or is refused by name.
+MEASURED (`experiments/rain_physics.py`, `tests/test_rain.py` 34 tests):
+neutral injection bit-identical to the stock c172p; every write reads
+back exactly; 300 mm/h costs 36 m over 20 s at 100 kt; full brakes from
+55 kt stop in 114 m dry, 140 m wet, 248 m on standing water (5.4 s
+hydroplaning). OPEN: the 25.109 coefficients and Horne's constant were
+cited from memory (the eCFR and NTRS are blocked here) -- check them;
+the spec runner flies airborne trims only, so the runway law is exercised
+by the test harness, not a spec (a ground-roll / landing scenario is the
+next step); engine water ingestion, the UE side (Niagara rain, wet
+materials) and NL-compiler words ("heavy rain") are not done.
+
+**The logic reports READ and BUILT FROM (2026-10-05, later the same day,
+`phase-2-testing`; NO tests run, owner's instruction).** The owner's
+point: the logic branch held the instructions on how the simulator
+builds its environment and the first pass only catalogued them. So:
+every one of the 400 decompiled bodies per report that carries terrain /
+water / season / sky / fog / contact logic was read by a reader agent
+(ten groups, exact line spans), each extracted rule handed to an
+adversarial second reader, and the SPIR-V archives' debug names parsed
+for the GPU side. `assets/logic_reports/README.md` is the record: what
+each report's bodies actually contain (the lighting report holds the
+loading screen and nothing else; the terrain shader, sky, exposure and
+surface-friction functions are names without bodies), the rules built
+into the code with their function and line citations, and the ten
+functions a second decompilation pass must target. LANDED in code:
+`core/xplane/physical.py` -- `floor10` / `tile_name` (the simulator's
+tile naming), `classify_terrain_def` (water by name, ortho quadrants,
+`.ter`, the ROCK fallback), `DSF_RASTER_NAMES`, `season_split` /
+`season_for` (four seasons, index + blend + mask; the month rule is the
+stand-in for `total_season_for_location`, no body), `EarthOrbitTiles`
+(the 10-degree height/normal/albedo tiles the map layer loads, the
+`-ele.png` axis decoded and checked on Paris/Lyon/Zermatt),
+`WATER_FALLBACK_NOTE`, `WaterTiles.fallback_colour` (the committed
+`water/any.png`, the unverified candidate for the simulator's global
+fallback) and `depth_attenuation` (the tile alpha decoded: `k = 0.1 *
+10^(2 alpha)`); `core/xplane/drape.py` DRAPE_VERSION 5 (now 8: 6 the material maps and
+the sidecar's "material" block, 7 the base image the material's Imagery
+takes, 8 the derived normals of core/xplane/normals.py) -- weather snow
+composited the way the simulator's `weather_apply` pass does it, read
+from the DISASSEMBLED SPIR-V (the terrain shader writes a luminance
+KEY; the pass thresholds it against the snow level with noise jitter,
+ramps linearly in cos(slope), forms `cov = saturate(2 coverage - 1 +
+snow_ALB.a)` and mixes the committed `snow_ALB.png` in by `cov`); the
+satellite cover drives the level, the band / jitter / slope values /
+scales / key coefficients are ours and listed as `assumed` in the
+sidecar, the decal-modulation constants are taken as 0; the height
+rule's permanent snow keeps the ice texture, thinned by the cover; the
+sidecar records `season` (with `evaluated_at` and what the simulator
+does instead) and `snow_cover.weather_snow`. (DRAPE_VERSION 4, a
+luminance WHITENING, implemented a reading the adversarial pass refuted
+and is withdrawn.) `core/capture/exposure.py` `linear_exposure` +
+`REC709_LUMA`; `core/scene/weather_visuals.py` cross-references the
+decompiled Koschmieder fog it already matched. Verification: 107 rules,
+98 survive, 9 refuted (`assets/logic_reports/README.md`). Tests for all
+of it in `tests/test_xplane.py` -- UNRUN; the drape was exercised end to
+end on the real assets in a scratch directory (Zermatt bake: January
+floor = snow albedo, 45-degree ramp stays rock, July floor = scrub).
+OPEN: the seasonal second texture per role (`mix(base, seasonal,
+u_imm_a_season.x)`) needs the extractor to pull each `.ter`'s per-season
+texture on the owner's machine (`scripts/extract_xplane.py`, no install
+here); per-role detail decals (`DECAL_PARAMS` of the `.ter`) likewise; a
+`beach` role (shoreline band along mapped water, seasonal) is missing;
+the -12/+10 degree sky anchors stay unverifiable until
+`sky_stat::get_for_now` is decompiled (the ten targets for a second
+pass are listed in the logic-reports README).
+
+**Physical renders + logic reports merged (2026-10-05, `phase-2-testing`;
+NO tests run, owner's instruction).** LANDED: `origin/logic`
+(`assets/logic_reports/`: decompiled functions.txt + code.c per
+subsystem) and `origin/physical-renders` (`assets/physical_renders/
+Resources/`: the simulator's render assets in its own layout) merged;
+duplicates resolved to one copy each (the shader set under
+`logic_reports/shaders/` was byte-identical to `physical_renders/
+Resources/shaders/` and is gone; `sky_colors_*.png` + `lights.txt` live
+only in `assets/xplane/lighting/`, the extractor's output the code
+decodes). CONNECTED: `core/xplane/physical.py` -- `REPORTS` (which
+report governs which assets and drape roles, with each report's caveat),
+`SnowCover` (NASA NEO MOD10C1 monthly, palette index 255 = no data) and
+`WaterTiles` (the per-degree water texture `REN_degree::
+create_water_shader` loads; its mean RGB is the location's water
+colour). `core/xplane/drape.py` is DRAPE_VERSION 2: the spec's month
+(`webapp.runs.drape_month`, resolved as the sky plan resolves the date)
+seasons the snow class from the satellite cover, mapped water takes the
+tile's colour, one drape cached per terrain AND month, the sidecar
+records `snow_cover` / `water_colour_source` / `centre_lat_lon`. Tests
+added to `tests/test_xplane.py` (snow palette decode, tile-path formula,
+catalogue, the seasonal drape) and the stale `"Laminar"` assertion
+aligned to the merged wording -- ALL UNRUN. Run `.venv/bin/pytest -q
+tests/test_xplane.py` first; then the whole suite. OPEN: Earth Orbit
+Textures and the globe are catalogued, no consumer; the water tile's
+alpha is not decoded; the snow cover is 2025's months whatever the
+scene's year (stated in the sidecar).
+
+**The advancement addition (2026-09-29, same branch; docs/ADVANCEMENTS_
+BLUEPRINT.md is the plan, docs/ADVANCEMENTS_CONTRACTS.md and _REPORT.md
+the contracts and the report).** LANDED: the blueprint's implementation
+order -- the physics layers (P1-P9), the record every variable returns
+(R1-R3), sensing (S1-S4), world (W1-W5; W5, the world engine side, was
+still writing its C++ beside the bump), interop and datums (D1-D2) --
+and INT-final, the one version bump (built across checkpoints
+`c2acc75`-`78d11df`, landed by the commit after them): `SPEC_VERSION` 9 (a spec 8 file reads unless it states a
+spec 9 block, refused by name `spec.version`; the eight examples
+regenerated by the writer, their spec 8 selves frozen in
+`tests/data/spec8_examples`, every digest re-pinned),
+`MANIFEST_VERSION` 7 (`SUPPORTED` 3-7; `docs/schemas/capture_manifest.
+v7.schema.json` = v6 + every optional block, `building:all` /
+`vegetation:all` valid; v6 kept), `RECORD_VERSION` 2 (`model` = the
+block, `model_name` = the string; record-1 dicts read renamed), the
+limits flags renamed `exceed_*` / `any_exceedance` -> `*_flag`, and the
+verifier's `georeference` check (render.json vs the manifest's frame
+and datum). `tests/test_versions.py` pins all of it. The UE recorder's
+six limit rows carry the `*_flag` names. The render host writes
+render.json's `georeference` block, copied from the card's
+(`core/capture/manifest.py` `georeference_card_block`; pinned by
+`tests/test_ue_georeference.py`); check it on the first Windows render.
+Every C++ change is UNCOMPILED here; the Windows order
+is the blueprint's "Windows verification order". CLAUDE.md's owner rule
+STANDS: no scheduled check-ins, no PR monitoring, report once and stop.
+
+**Phase 2 (2026-09-26, branch `claude/relaxed-cori-gccjvx` -- the phase2
+branch; docs/PHASE2_REPORT.md is the report, docs/PHASE2_CONTRACTS.md
+the contracts, read the report's first section first).** LANDED: the
+nine packages and the Look lane -- A (SPEC_VERSION 8, `scene.
+terrain_source`, the mesh origin measured from vertices, one render-
+command builder `core/render/flags.py`), B + C (object identity,
+`objects[]`, the per-frame ground-truth bundle: masks, class image,
+float32 depth, boxes, occlusion, the scripted second aircraft), D (the
+annotation gates in `core/capture/verify.py`, sheets in `tests/visual/`),
+E (COCO/KITTI/WebDataset/YOLO/VOC with a card), F (the randomisation
+policy, `Source.SAMPLED`, the prompt vocabulary), G (`flightsim.
+campaign`: index-seeded worker pool, the ledger as the truth), H (`core/
+agent`: ten typed tools, a deterministic policy, a trace), I (the
+message catalogue `core/messages/` and the guided page `/generate.html`),
+the Look lane (engine pin 5.7, `DefaultEngine.ini` renderer switches,
+the visual scene consuming the card's look, the EV100 exposure model)
+-- then a review pass of nine area fixers (fbeb686 verifier, 6a71639
+cpp, 2ef240d compiler, b6342d0 catalogue, 53ddff3 campaign, 5bd6864
+webapp, c70dcc4 export, 7b0a39a randomisation, e3efd98 misc, 418489f
+guards), then cd5c96a (the code pass beside this docs pass: the five
+nameless refusals catalogued, `--export` an action on a done campaign,
+`Target.cs` on Unreal5_7, the 16 px line, the Wetness parameter) and
+this docs pass, then 573bff6 (the 74 guards the area fixers proposed,
+73 fired and one retargeted, guard 186 dropped with its reason, and
+`tests/test_mutation_targets.py`). Measured at 573bff6: 439 mutation
+guards, every target unique (`--check-targets`); the whole suite green
+(`.venv/bin/pytest -q`, exit 0, one network-pinned test skipped by
+name); `./scripts/mutation_check.sh` end to end at 1e7c0b1: all 439 guards
+load-bearing, 0 WEAK, 0 SKIP, suite green after the last restore
+(4418 s). Every C++
+change is UNCOMPILED here. WINDOWS, in this
+order: build on 5.7 (`ue_preflight.ps1`, `vendor_ue_plugin.ps1` -- the
+four local plugin patches were measured on 5.5 -- `build_ue.ps1`);
+`ue_create_materials.py` in the editor (M_CustomStencilID for the ID
+pass; the Wetness parameter landed in cd5c96a, unverified in any
+editor); re-convert the airframes
+(`scripts/import_aircraft.py`: mesh manifest 3, a version-2 manifest is
+refused by `drawn_airframe`); the first `-labels` frame
+(`capture_windows.ps1`, then `tests/visual/annotation_sheets.py` on that
+run); `experiments/gate6_visual.py --look`; `experiments/
+gate10_render_repro.py --card`; a rendered campaign at 1 and 2 workers
+(`flightsim.campaign --render --workers 1|2`, compare the ledgers). Two
+SHARED-INDEX commits to know about when reading history: f1a7563
+("Card: a stated camera exposure triple ...") also holds package D --
+the annotation gates, `tests/test_annotation_gates.py`, the sheets and
+their guards rode in from the shared index and 763b325 says so; 28e78fa
+(the spec-8 bump) holds four mesh-origin guards the same way. The
+report's "Open findings" section lists every item the fixers left
+unlanded with its patch. CLAUDE.md's owner rule STANDS: no scheduled
+check-ins, no PR monitoring, report once and stop.
+
+**Phase 10 (2026-09-11, in progress -- docs/PHASE10_REPORT.md is the
+running report; the owner cut scope to what changes the simulation or
+its data: packages 2, 3, 4, 7, 6 in that order).** DELIVERED: P10-2a
+(the four terrain guards fire on every machine; TERRAIN_DIR seam;
+gotchas 27-28) and P10-2 (ground-truth labels per frame, manifest
+version 5: `core/capture/airframe.py` + `labels.py`, five verifier
+checks that fail on corruption, an additive `-labels` render pass
+writing instance/class masks + 16-bit depth + occlusion -- the C++
+is UNCOMPILED here; first Windows run with `-labels` is the
+verification step, see the report); P10-3 (sensor-model camera
+profiles: SPEC_VERSION 7, `cameras[].profile`, `core/capture/
+profile.py` seeded post-pass, `sensor` block per frame,
+sensor_undistortion/sensor_files checks; the `synthetic_cmos_wide`
+profile is declared illustrative; `-linear` EXR C++ UNCOMPILED here);
+P10-4 (render reproducibility MEASURED not asserted: `core/capture/
+repro.py` three-word verdicts, per-frame sha256 in render.json,
+`-deterministic` pins, `frame_integrity` check, Gate 10-R
+`experiments/gate10_render_repro.py` -- NEVER RUN on an engine, so
+VALIDITY §3 now says "not established in either direction"; the first
+Windows `--card` run is the first verdict); P10-7 (domain
+randomisation: optional `randomization` block under SPEC_VERSION 7 --
+ABSENT is the canonical default so no digest moved -- `core/scenario/
+randomization.py` + `solar.py` (Meeus/NOAA), sampled sun/fog/camera
+jitter/livery written back as derived, same dict in card + manifest +
+sidecars, `examples/randomized.yaml`; livery C++ UNCOMPILED and no
+variant material ships; gotcha 29); P10-6 (`flightsim.batch` over a
+matrix -- content-addressed runs, ledger, resume, workers, verified
+with verification.json -- and `flightsim.export` to COCO/KITTI/
+WebDataset with a card, refusing unverified runs, split by
+simulation_digest which now also excludes the randomisation block;
+`examples/batch_matrix.yaml`). PHASE 10's owner-scoped packages are
+ALL DELIVERED; the Windows verification steps (labels, -linear,
+-deterministic + Gate 10-R, sensor post-pass on real frames, livery
+refusal, a rendered batch export) are listed per package in the
+report.
+
+**Camera Phase 1 gap closure (2026-09-11, docs/CAMERA_PHASE1_REPORT.md
+"Gap closure").** Every missing/partial item of the phase plan closed:
+multi-camera sentences (ids = preset names), move phrases as keyframes
+(keyframed offsets in the solver; `camera.moves` refuses unknown keys),
+the regex `camera_view` question + answer round, a 26-prompt corpus
+test, the exact first-order-hold lag (chase rate sensitivity 3.29 m ->
+0.3 mm), per-frame K and P with a `projection_matrix` check, the
+published JSON Schema + dependency-free validator + `json_schema`
+check, and Windows named as the render platform in README/platform.py/
+conftest (marker `ue_host`). Regex compiler ids changed from camera0 to
+the preset name.
+
+**Audit closure (2026-09-11, docs/CAMERA_PHASE1_CHECKLIST.md "Audit
+findings closed").** Nine audit findings + one race fixed: web camera
+refusal surface tested, geographic placement tested, `applied_pose`
+verifier check reads the commandlet's `camera_applied_*`, `json_schema`
+NOT RUN for unpublished older versions, stale macOS/count text gone,
+`core/control/derive.py` writes atomically (two batch workers raced on
+tecs.xml -- gotcha 30). The web page shows K/P per frame + run panel.
+
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
+
+**Visual fidelity V0 + V1 (2026-09-30 -- docs/VISUAL_FIDELITY_PLAN.md
+is the plan, section 8 the status).** V1: the render sun is now
+geometry, not a table -- core/environment/sun.py (NOAA equations, pinned
+to pvlib's NREL SPA within 0.02 deg), new spec field
+environment.time_of_day (SPEC_VERSION 7; named times, HH:MM local SOLAR
+time, HH:MMZ UTC), both compilers read it, the webapp turns it into
+-sun-elev/-sun-azim + an exposure bias interpolated between the dawn and
+noon probe calibrations (held, never extrapolated, outside them) and
+refuses sun.event_absent / sun.below_render_floor by name. No time
+stated = the default look byte-identical. V0: -quality=measure|beauty
+on the render commandlet (measure = unchanged; beauty = Lumen GI +
+reflections as capture post-process overrides, TSR and VSM cvars,
+1080p, 16 warm-up captures, all read back into render.json), -warmup=N,
+-sun-lux=; FLIGHTSIM_RENDER_QUALITY=beauty opts the webapp in;
+gate6_visual.py --quality beauty re-measures Gate 6 at 960x540 under
+beauty. MUST-VERIFY ON THE RENDER MACHINE: none of the V0 C++ has been
+compiled or rendered (written on a Linux container without UE). Build,
+run gate6_visual.py (measure: must still pass unchanged) and
+gate6_visual.py --quality beauty; read render.json's
+cvar_anti_aliasing_method / cvar_virtual_shadow_maps and LOOK at the
+frames to see whether Lumen actually runs inside the scene capture.
 
 **Camera Phase 1 (2026-08-31 -- docs/CAMERA_PHASE1_REPORT.md is the
 full report).** The camera is a spec element now: SPEC_VERSION 6,
@@ -24,13 +484,14 @@ the report's engine-boundary section carries the exact verification
 steps. Suite 573 tests collected, 114 mutation guards. Measured on a
 raster-less clone (no runs/terrain bakes): 104 guards fire; the FOUR
 terrain-coupled planner guards (ridge-axis wind, rotor card word,
-span-station clearance minimum, orographic pre-flight) report WEAK
-there because their test_webapp tests silently take the flat path
-without a baked raster -- bisected to the pre-camera base commit, so
-it is an environment artifact of guard MEASUREMENT, not a regression;
-they fire on a machine with the bakes. Worth fixing by giving those
-tests a synthetic raster fixture (the camera tests' make_mountain
-pattern) so every guard is machine-independent.
+span-station clearance minimum, orographic pre-flight) reported WEAK
+there because their test_webapp tests silently took the flat path
+without a baked raster. RESOLVED 2026-09-11 (Phase 10, P10-2a):
+tests/test_webapp.py carries a session-scoped synthetic control-ridge
+fixture and webapp.runs.TERRAIN_DIR is the one seam the picker reads,
+so all four fire on every machine (measured here, on this raster-less
+clone) -- docs/PHASE10_REPORT.md has the fixture's three measured
+shaping choices and gotchas 27-28.
 
 **Aircraft fail-safe (2026-09-01, one commit).** A model a machine can
 BUILD is no longer a refusal: the render flow provisions it on first
@@ -171,6 +632,38 @@ building collision, UE volumetric clouds + Niagara precipitation as
 LABELED VISUAL-ONLY (task 12), NOAA HRRR deferred; WRF and trueSKY
 refused (recorded).
 
+
+### Simulator terrain, sky, and water port (2026-10-05)
+
+- **Terrain materials.** The drape (v7) writes a base image, role weights,
+  monthly snow cover, and a water mask; `scripts/ue_create_materials.py`
+  builds a layered material from the same names and `FlightSimVisualScene`
+  applies it. All C++ is uncompiled; compile on Windows, rerun the
+  materials script, and rerun `scripts/extract_xplane.py` (2048 px pull,
+  normals, `.ter` directives), then re-measure the three pinned constants
+  the asset README names.
+- **Elevation.** `scripts/bake_terrain.py --source 3dep` bakes USGS 10 m
+  terrain for US places; `-triangle-budget=` keeps that posting in the
+  render. The engine cost of the larger mesh is unmeasured.
+- **Sky.** `core/xplane/atmosphere.py` is the simulator's Bruneton model
+  with its Earth constants; `FLIGHTSIM_XPLANE_SKY=tables` restores the
+  old sky tables.
+- **Water.** `core/xplane/ocean.py` holds the decoded water formulas.
+  Next step: a translucent water surface in the host using them.
+- **Light colours.** The sun is an atmosphere sun light and the sky
+  light a real-time capture, so the engine's sky atmosphere already
+  tints both. `xplane_lighting_flags` now divides that out
+  (`engine_light_colours`): the model sky sends white, a table sky sends
+  the tint that lands on the table's colour. Before this, a low sun was
+  reddened twice and shade blued twice. Check a sunset render.
+- **Rock relief.** Every role now has a normal map derived from its own
+  texture (`scripts/derive_drape_normals.py`) until the extractor pulls
+  the real ones. Check a sunlit cliff for relief that looks lit from the
+  wrong side; if so, flip the green channel in `core/xplane/normals.py`.
+- **Decode record.** `assets/logic_reports/shader_decode.json`.
+- Nothing above has been run under pytest yet; run `tests/test_xplane.py`,
+  `tests/test_normals.py` and `tests/test_ocean.py` first.
+
 ## State
 
 | Phase | Gate | Status |
@@ -234,7 +727,7 @@ guards (selftest refusal, graded-set freeze).
 
 ```bash
 .venv/bin/pytest                          # 395 tests
-./scripts/mutation_check.sh               # 77 guards, all load-bearing
+./scripts/mutation_check.sh               # 77 guards then (260 today), all load-bearing
 ./scripts/ue_preflight.sh                 # "Preflight OK"
 ./scripts/build_ue.sh                     # builds the UE host
 .venv/bin/python experiments/gate5_ue_parity.py    # gate 5 end to end
@@ -506,3 +999,219 @@ the parity discipline, and the do-not-regress list)
     wall-cloud disc was removed (a 700 m disc at chase distance reads
     as a screen-filling artifact); funnel spin runs at the model's own
     core rate omega = v_max/r_core from SIM time (replay-identical).
+
+## Phase 10 gotchas (continuing the numbering)
+
+27. **A test's `REPO` redirect that stops applying writes stubs into the
+    REAL tree.** When the terrain dir became its own name (TERRAIN_DIR),
+    the fail-safe test's `monkeypatch.setattr(runs, "REPO", tmp)` no
+    longer reached `ensure_control_ridge`, and its FakeField wrote an
+    11-byte `control_ridge.r16` into runs/terrain/. The picker then
+    selected the control scene on the .r16 alone and every terrain spec
+    crashed in place_on_scene with a bare FileNotFoundError on the
+    missing .json (four suite failures, none of them in the test that
+    caused it). Now `baked()` requires BOTH files and a half-bake is
+    skipped by the picker and re-synthesised by the fail-safe; and a
+    test that redirects a path must redirect the name the code reads.
+28. **`mutate()` replaces the FIRST occurrence.** Two routes carried the
+    identical line `resolved.relative_to(root)`; the image route's guard
+    had been disabling the CLIP route's check since the clip route landed
+    above it, and reported WEAK for a reason nobody looked for. Every
+    guarded line now has a unique spelling (a trailing comment is
+    enough), and both routes have the one test that can reach the
+    guard: a symlink planted inside the run directory, which no filename
+    regex can see. A WEAK guard is a finding, not a nuisance.
+
+29. **A planner that adds noise must remember what it added to.** The
+    randomisation jitter runs on /compile AND /run (every planner does,
+    value-idempotent by contract); a jitter that draws `base + delta`
+    from the field's CURRENT value jitters the jitter on the second
+    pass and the run renders a camera the table never showed. The
+    un-jittered value lives in the Quantity's `detail`
+    (`randomization_base`) and every pass draws from it; the test that
+    catches it runs the sampler three times through a YAML round trip.
+    Companion rule: the page's dict always carries the block so an edit
+    has a row to land in, while `to_dict()` omits an all-default block
+    -- so "absent" and "all defaults" are one digest.
+
+30. **Generated files shared by parallel processes must be written
+    atomically and left alone when unchanged.** Every capture derives
+    the TECS airframe into `build/aircraft/<model>-tecs/`; two batch
+    workers doing it at once rewrote `Systems/tecs.xml` in place and
+    JSBSim in the other process read it half-written ("XML parse
+    error: no element found"), a failure that vanished on re-run.
+    `derive.py::_write_atomic` writes a temp name and `os.replace`s it,
+    and skips an identical rewrite, so the steady state never touches
+    the file. Any other generated-on-demand file (terrain bakes, mesh
+    imports) that a parallel run can reach needs the same shape.
+
+## Camera Phase 2 gotchas (continuing the numbering)
+
+31. **The actor origin is the JSBSim structural datum, not the model's
+    origin -- a mesh attached at the actor root is drawn 33.7 m ahead of
+    its label on the B747.** Measured in the Camera Phase 1 initial run
+    report: the rendered airframe sat 25-30 m AHEAD of the position the
+    capture manifest recorded for it, along its own axis, and every mask
+    with it; the cockpit preset reported the aircraft out of frame while
+    its mask held 434k aircraft pixels -- same cause. Mechanism:
+    `UJSBSimMovementComponent::UpdateLocalTransforms` maps structural ->
+    actor by (-x, y, z) about `StructuralFrameOrigin` (zero), so the
+    actor origin IS the datum and `CGLocalPosition` is measured from it;
+    `FlightSimScenarioWorld` places the actor so the CG lands on the
+    commanded point (correct); `assets_pipeline/acmodel.py` maps the
+    FlightGear model to the actor frame about the MODEL's own origin,
+    which by FlightGear's convention is the FDM's VRP (`<location
+    name="VRP">`: B747 x=1327 in, A320 661.1, c172p 42.6, aft of the
+    datum); and `BuildMeshAirframe` attached the body and hinges at the
+    root. **What eb5c71d got wrong (found 2026-09-25, before any Windows
+    build):** it wrote `mesh_manifest.json` version 2 with
+    `mesh_origin_actor_cm` = the STAGED FDM's VRP, on the assumption
+    that "the model origin is the VRP". Each FlightGear mesh was
+    modelled against its OWN repository's FDM (FGMEMBERS/747-400's
+    `747-400.xml` has VRP (1263, 0, 0) in; the staged `B747.xml` has
+    (1327, 0, -24)), and some are not built about any VRP. MEASURED from
+    the pinned `.ac` vertices with the repo's own reader
+    (`assets_pipeline.acmodel`), in the actor frame about the model
+    origin: B747 nose +29.80 m / tail -41.14 m (so the VRP rule drew the
+    747 3.9 m AFT of its label); A320 nose -2.53 m (the origin is AHEAD
+    of the nose) / tail -40.09 m (a NEW 19.3 m error); c172p +2.14 /
+    -6.09 m (right to 0.1 m, by luck). **The measured rule (manifest
+    version 3):** `x = labels' nose keypoint (actor) - mesh forward
+    extreme`; `z = main-gear <contact> z (actor) - lowest gear vertex`
+    where the config's documented `gear_geometry` patterns identify gear
+    (B747 gear .ac, c172p `.*Wheel.*`; the A320 config lists no gear
+    part, so its z falls back to the VRP and the manifest SAYS so);
+    `y = 0`; the config's documented `model_origin_offset_m` on top;
+    refusal `aircraft.mesh_extent` when the mesh span disagrees with
+    `labels.dimensions_m.length` by more than 5 %. Measured origins:
+    B747 (-2979.8, 0, +13.9) cm, A320 (+252.6, 0, -94.0), c172p
+    (-118.3, 0, +97.4). The manifest carries the extents, the anchors
+    and `mesh_origin_basis` starting "measured from vertices"; the
+    importer re-converts any manifest below version 3 (no editor time:
+    same geometry). The rest of eb5c71d stands: the commandlet hangs
+    the body and every hinge under one `MeshOrigin` scene component at
+    `mesh_origin_actor_cm` and records what it drew under render.json
+    `drawn`, the camera presets aim at and offset from the CG
+    (`TargetAimPoint`), verify's `drawn_airframe` FAILs by name on a
+    datum-attached mesh or on placeholder boxes under a manifest naming
+    the mesh (its `DRAWN_MESH_MIN_MANIFEST_VERSION` is still 2 and does
+    not yet grade the basis -- the verifier owner's item, CONTRACTS
+    §0.1), and `flightsim.capture --render` passes `-mesh=` (refusing
+    `aircraft.mesh` when the model is not imported). Not verified here:
+    no engine; the mesh-vs-label residual on a rendered frame is a
+    pixel measurement (`mask_vs_geometry`). Windows verification step:
+    re-convert (`python assets_pipeline/convert.py
+    assets/aircraft_config/B747.json`, `scripts/import_aircraft.py` or
+    the web app's render flow -- all re-convert a stale manifest),
+    render one frame with `-mesh=`, and look at the overlay -- the
+    circle (manifest CG) must sit ON the airframe, not 30 m ahead of it
+    and not 4 m behind its nose; `python -m flightsim.verify runs/<id>`
+    must report `drawn_airframe` PASS with manifest_version 3, and
+    `mask_containment` should now pass where it failed. If the mesh
+    lands 2 x 29.8 m aft instead, the sign of the map is the finding,
+    not the measurement: the `mesh_origin_basis` and
+    `origin_measurement` records in the manifest state the numbers to
+    check against. The B747's nose keypoint is itself an `estimate` (the
+    datum taken as the nose tip); if the rendered 747 sits a metre or
+    two off its label along x, the LABEL is the suspect, not the mesh.
+
+## Phase 2 gotchas (continuing the numbering)
+
+32. **The engine pin moved from 5.5 to 5.7 (2026-09-25) and NOTHING has
+    been built or measured on 5.7 yet.** `ue/FlightSim.uproject`
+    `EngineAssociation`, every script that builds a `UE_5.x` path or
+    compares `Build.version`, `core/util/platform.py`
+    (`UE_ENGINE_VERSION`, one constant for the refusals and the default
+    install roots), the README and CAMERA_WINDOWS all say 5.7; the
+    vendor scripts record `ue_engine_target` in `VENDORED.json` and the
+    Windows preflight notes when that key is absent (the committed
+    VENDORED.json predates the move: the plugin was vendored and
+    measured on 5.5). `tests/test_platform.py` fails on any stale 5.5
+    in those files unless the line says "measured" (history stays; the
+    Gate 6 numbers in VALIDITY 2.13 and the CAMERA_WINDOWS 0.00 m bound
+    were taken on 5.5). Before anything in the Look lane is trusted on
+    5.7: (a) re-run `scripts\vendor_ue_plugin.ps1` and
+    `scripts/check_bridge_api.sh` -- the three patched upstream C++
+    bugs in the vendored JSBSim plugin (FGPropertyNode -> SGPropertyNode,
+    the GetAGLevel ray end in metres not centimetres, the force-start
+    mixture hardcoded full rich; VENDORED.json `local_patches` 2-4) and
+    the Build.cs staging path literal (patch 1) were found and measured
+    on 5.5 against JSBSim v1.2.4 and the plugin itself states 5.0-5.6
+    compatibility, so on 5.7 each patch may be unnecessary, still
+    necessary, or no longer apply cleanly, and only a build says which;
+    (b) re-measure Gate 6 (`experiments/gate6_visual.py`) and Gate 10-R
+    on the Windows box -- the renderer settings that landed with the
+    pin (`ue/Config/DefaultEngine.ini` `[/Script/Engine.RendererSettings]`:
+    Lumen GI + reflections, VSM, Nanite project-enable, TSR, extended
+    luminance range; Substrate OFF) each change the luminance the Gate 6
+    clauses and the vertex palette (gotcha 6) and the exposure biases
+    (gotcha 7) were tuned on, so the FIRST 5.7 render is a probe against
+    a 5.5 control, not a dataset; (c) re-probe the two engine-version-
+    sensitive gotchas, 4 (async asset compilation in commandlets) and 5
+    (Interchange Nanite at import -- the project-level
+    `r.Nanite.ProjectEnabled` is on, the per-mesh import flag stays
+    off). `ue/Source/*.Target.cs` said `IncludeOrderVersion
+    Unreal5_5` until cd5c96a moved both to `Unreal5_7` (pinned from
+    `UE_ENGINE_VERSION` in tests/test_gate6_visual.py; the first 5.7
+    build reports whether the include order compiles clean);
+    `flightsim/capture.py`'s help reads `UE_ENGINE_VERSION` since
+    e3efd98; `experiments/fps_probe.py` is outside this stage's files,
+    listed in docs/PHASE2_REPORT.md.
+33. **Never put an os.pipe() between a writer that holds the GIL and a
+    Python reader thread.** `flightsim/capture.py quiet_library_banners`
+    first pointed fd 1 at a pipe and relayed it through a thread to keep
+    the JSBSim banner off stdout. A pipe's buffer is finite; a writer
+    that fills it blocks until the reader drains it; the library's C++
+    writes without releasing the GIL, so the relay thread never got to
+    drain it: writer waits for reader, reader waits for the GIL. Linux
+    pipes hold 64 KB (a run prints less), Windows anonymous pipes hold
+    4 KB, and the card's flight model printed the 16 KB A320 description
+    on `load_model` (debug level left at 1) -- so on Windows CI every
+    capture child under the campaign hung silently, the 120 s watchdog
+    killed it, the token test failed and the end-to-end test hung past
+    pytest's 15 min (run 36217163564; found only after pytest-timeout
+    was added, b51368b). Fix: the block spools fd 1 to a temp FILE that
+    a thread follows (a write to a file never waits), the card's model
+    runs at debug level 0 like core.fdm's, and a test writes 0.6 MB
+    through the C runtime with the GIL held and must return. CI now
+    prints the newest capture.log tails when a job fails or is cut off.
+    Two more things the review of that fix found, both in the block:
+    on POSIX the spool's name is dropped as soon as writer and reader
+    hold it, so a child the watchdog kills leaves no file (tested;
+    Windows cannot unlink an open file, so there the name goes at the
+    end); and in a real Windows console sys.stdout is _WindowsConsoleIO,
+    which writes with WriteConsoleW on fd 1's CURRENT handle -- the
+    spool -- and fails, so the block swaps in a plain file object on fd
+    1 for its duration. That console path is UNMEASURED here (CI's
+    stdout is a pipe): the first `python -m flightsim.capture` in a
+    PowerShell window on the Windows box is its test. A test that fakes
+    `subprocess.run` for the render wrapper must recognise the wrapper
+    ANYWHERE in the command (`ue_runner_command` puts a powershell
+    prefix before `-File <script>.ps1` on Windows), and a test that
+    pins a site by relative path must compare `as_posix()` paths: both
+    were Windows-blind until the suite first ran to its end there.
+
+34. **Web runs fly hands off (2026-10-09).** `webapp/runs.py HANDS_OFF`
+    is the control script for every run without a drawn route: no
+    inputs, trim, straight and level. The showcase matrix's aileron
+    doublet used to be flown on every terrain run so a clip showed the
+    surfaces move; the owner never asked for it, and with no autopilot
+    the bank bled altitude (the "why does altitude suddenly start
+    dropping" plots). The clearance pre-flight and the storm placement
+    fly the same empty script. Do not put a demo manoeuvre back into
+    normal runs: a manoeuvre comes from the prompt or a drawn route.
+
+27. **The physical sky has never been rendered.** It was written
+    2026-09-30 on a Linux container with no engine: core/sky
+    (astropy-checked positions, pinned tests), the `-sky=` sidecar,
+    FlightSimSky.cpp, and M_Moon / M_StarEmissive / M_TerrainImageryNight.
+    On a render machine, in this order: `scripts/check_bridge_api.sh`
+    (its "engine surface the physical sky assumes" block lists every
+    engine symbol written from memory), then build, then re-run
+    `scripts/ue_create_materials.py` (it skips existing assets), then
+    `experiments/sky_check.py`. Only a STATED time of day selects it, so
+    default renders stay byte-identical. Flip `FLIGHTSIM_SKY=physical`
+    per machine once the sky check passes. Expect to calibrate these: the
+    night half-rate exposure rule, star disc size under TSR, and the
+    per-preset lens values. Change them in core/sky/plan.py by probe
+    render, not theory (gotcha 6).

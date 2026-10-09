@@ -21,7 +21,13 @@ The steps, per aircraft, each skipped when already done:
    assets/aircraft_src/ (the license file is verified on disk by the
    converter, per VALIDITY 3.3 -- nothing renders unattributed);
 2. convert -- per-part OBJs + mesh_manifest.json under assets/generated/,
-   refusing any mesh/FDM mismatch (VALIDITY 1.4);
+   refusing any mesh/FDM mismatch (VALIDITY 1.4); a manifest older than
+   version 3 (version 1: no ``mesh_origin_actor_cm``, the mesh would be
+   attached at the structural datum, 25-30 m off its label; version 2:
+   an origin ASSUMED from the staged FDM's VRP, 3.9 m off on the B747
+   and 19.3 m on the A320, where version 3 MEASURES it from the
+   vertices) is NOT converted and is re-converted here, geometry
+   unchanged, no editor time;
 3. import the manifest into the Unreal project inside UnrealEditor-Cmd
    (scripts/ue_import_aircraft.py), which re-verifies each imported
    mesh's bounds.
@@ -105,15 +111,113 @@ def missing_assets(manifest_path: Path) -> List[str]:
             if not (content / root / f"{part}.uasset").is_file()]
 
 
+#: The manifest version the render commandlet needs to place the mesh
+#: where the label is. Version 1 carried no ``mesh_origin_actor_cm``, so
+#: the commandlet attached the body at the actor root -- the JSBSim
+#: structural datum -- and drew the B747 33.7 m forward of its label
+#: (the Camera Phase 1 initial run report measured 25-30 m along the
+#: airframe's own axis). Version 2 (eb5c71d) carried an origin ASSUMED
+#: to be the staged FDM's VRP, which put the B747 mesh 3.9 m aft of its
+#: label and the A320 19.3 m aft (measured from the pinned vertices:
+#: each FlightGear mesh was modelled against its own repository's FDM,
+#: not the staged one). Version 3 MEASURES the origin from the mesh's
+#: nose extreme and lowest gear vertex. Kept as a number here, not
+#: imported from the converter, so a machine that only IMPORTS can still
+#: tell a stale manifest from a current one.
+MESH_MANIFEST_VERSION = 3
+
+
+def stale_manifest_reason(manifest_path: Path) -> Optional[str]:
+    """Why an existing manifest must be re-converted, or None when it is
+    current. A manifest without ``version`` 3 or without
+    ``mesh_origin_actor_cm`` was written by a converter that either said
+    nothing about where the model origin sits in the actor (version 1:
+    the commandlet would attach its mesh at the structural datum and
+    every mask would be offset by the whole origin-to-CG distance) or
+    assumed it from the staged FDM's VRP (version 2: the mesh drawn
+    3.9 m aft of its label on the B747, 19.3 m on the A320). Version 3
+    measures it from the vertices."""
+    try:
+        manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return f"unreadable ({exc})"
+    version = manifest.get("version")
+    if not isinstance(version, int) or version < MESH_MANIFEST_VERSION:
+        if isinstance(version, int) and version >= 2:
+            return (f"manifest version {version!r} predates {MESH_MANIFEST_VERSION}: "
+                    f"its mesh origin was assumed from the staged FDM's VRP, "
+                    f"not measured from the vertices (3.9 m off on the B747, "
+                    f"19.3 m on the A320), so the mesh would be drawn off its "
+                    f"label")
+        return (f"manifest version {version!r} predates {MESH_MANIFEST_VERSION}: "
+                f"it records no mesh origin, so the mesh would be attached "
+                f"at the structural datum instead of where the vertices "
+                f"say the model origin sits")
+    origin = manifest.get("mesh_origin_actor_cm")
+    if (not isinstance(origin, list) or len(origin) != 3
+            or not all(isinstance(v, (int, float)) for v in origin)):
+        return (f"manifest version {version} carries no mesh_origin_actor_cm "
+                f"(got {origin!r}); the mesh would be attached at the "
+                f"structural datum")
+    return _unimportable_output_reason(Path(manifest_path), manifest)
+
+
+def _png_size(path: Path) -> Optional[tuple]:
+    """(width, height) from a PNG's IHDR, or None when it is not a PNG."""
+    with path.open("rb") as handle:
+        head = handle.read(24)
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+def _unimportable_output_reason(manifest_path: Path,
+                                manifest: Dict) -> Optional[str]:
+    """Converter output the Unreal import is measured to fail on.
+
+    Measured 2026-10-05 (UE 5.7, the A320): Interchange refused a
+    non-power-of-two texture, and renamed every "tex_<stem>" material
+    because it names the texture asset "TEX_<stem>" (asset names are
+    case-insensitive) -- after which the import commandlet asserted in
+    the content browser and every part still queued was lost. The
+    converter now writes neither; this sends an earlier conversion back
+    through it (no fetch, no network: the source is already pinned).
+    """
+    directory = manifest_path.parent
+    for part in manifest.get("parts", []):
+        mtl = directory / f"{part}.mtl"
+        if mtl.is_file() and any(
+                line.startswith("newmtl tex_")
+                for line in mtl.read_text(encoding="utf-8",
+                                          errors="replace").splitlines()):
+            return (f"{mtl.name} names materials 'tex_*', which collide with "
+                    f"Interchange's 'TEX_*' texture assets on import")
+    for texture in manifest.get("textures", []):
+        path = directory / texture
+        size = _png_size(path) if path.is_file() else None
+        if size and not all(n > 0 and n & (n - 1) == 0 for n in size):
+            return (f"texture {texture} is {size[0]}x{size[1]}; Unreal "
+                    f"refuses non-power-of-two texture imports")
+    return None
+
+
 def is_converted(name: str) -> bool:
-    return mesh_manifest_path(name).is_file()
+    """A CURRENT manifest is on disk. A version-1 manifest is not
+    converted: ensure_model re-converts it (the source is already fetched
+    at the pinned commit, so this costs one converter run and no
+    network, no editor -- the OBJ geometry is unchanged, only the
+    manifest gains the origin)."""
+    manifest = mesh_manifest_path(name)
+    return manifest.is_file() and stale_manifest_reason(manifest) is None
 
 
 def is_imported(name: str) -> bool:
-    """Converted AND present in the Unreal project. Both halves matter:
-    a manifest with no .uasset behind it renders nothing real."""
+    """Converted (current) AND present in the Unreal project. Both halves
+    matter: a manifest with no .uasset behind it renders nothing real,
+    and a stale manifest renders the real mesh in the wrong place."""
     manifest = mesh_manifest_path(name)
-    return manifest.is_file() and not missing_assets(manifest)
+    return (manifest.is_file() and stale_manifest_reason(manifest) is None
+            and not missing_assets(manifest))
 
 
 def fetch_source(config: Dict, config_path: Path,
@@ -153,8 +257,13 @@ def convert(config_path: Path, report: Report = print) -> Path:
     """Source tree -> per-part OBJs + manifest. Raises if nothing lands."""
     name = config_path.stem
     report("converting (license-verified, FDM-matched)")
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    # A model that lives in this repository (P3D .mdl) has its own converter;
+    # everything else is a FlightGear tree.
+    script = ("a4_mdl_convert.py" if config.get("converter") == "mdl"
+              else "convert.py")
     converted = subprocess.run(
-        [sys.executable, str(REPO / "assets_pipeline" / "convert.py"),
+        [sys.executable, str(REPO / "assets_pipeline" / script),
          str(config_path)], cwd=REPO)
     manifest = mesh_manifest_path(name)
     if converted.returncode != 0 or not manifest.is_file():
@@ -190,10 +299,20 @@ def import_manifests(manifests: List[Path], report: Report = print) -> None:
         [(REPO / "scripts" / "ue_import_aircraft.py").as_posix()]
         + [Path(m).as_posix() for m in manifests])
     report(f"importing {len(manifests)} aircraft into the Unreal project")
-    imported = subprocess.run(
-        [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
-         "-run=pythonscript", f"-script={script_arg}",
-         "-unattended", "-nopause", "-nosplash", "-stdout"], cwd=REPO)
+    imported = _run_import(editor, script_arg)
+
+    if len(manifests) > 1:
+        # An editor crash on one aircraft loses every part still queued
+        # behind it (measured 2026-10-05: the A320 took the whole DHC6
+        # with it). Retry what is missing one aircraft per editor run, so
+        # a failure is confined to the aircraft that causes it.
+        for manifest_path in manifests:
+            if missing_assets(Path(manifest_path)):
+                report(f"retrying {Path(manifest_path).parent.name} in its "
+                       f"own editor run")
+                imported = _run_import(editor, " ".join(
+                    [(REPO / "scripts" / "ue_import_aircraft.py").as_posix(),
+                     Path(manifest_path).as_posix()]))
 
     missing: List[str] = []
     for manifest_path in manifests:
@@ -209,6 +328,13 @@ def import_manifests(manifests: List[Path], report: Report = print) -> None:
         report(f"(the editor exited {imported.returncode}, but every "
                f"expected asset is on disk -- engine-level warnings, not "
                f"an import failure)")
+
+
+def _run_import(editor, script_arg: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
+         "-run=pythonscript", f"-script={script_arg}",
+         "-unattended", "-nopause", "-nosplash", "-stdout"], cwd=REPO)
 
 
 def ensure_model(name: str, report: Report = print) -> Path:
@@ -233,10 +359,17 @@ def ensure_model(name: str, report: Report = print) -> Path:
             f"no model config for the {name} -- configured: "
             f"{', '.join(sorted(configured_aircraft()))}")
     manifest = mesh_manifest_path(name)
-    if not manifest.is_file():
+    stale = stale_manifest_reason(manifest) if manifest.is_file() else None
+    if stale:
+        # Re-convert in place: the OBJs and the imported .uassets are the
+        # same geometry, so only the converter runs (no editor time).
+        report(f"the {name} mesh manifest is stale ({stale}); re-converting "
+               f"so the mesh is drawn where its label is")
+    if not manifest.is_file() or stale:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         try:
-            fetch_source(config, config_path, report)
+            if config.get("converter") != "mdl":   # local models need no fetch
+                fetch_source(config, config_path, report)
         except subprocess.CalledProcessError as exc:
             raise AircraftAssetError(
                 "aircraft.mesh_import",

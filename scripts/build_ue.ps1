@@ -10,7 +10,7 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 $ueRoot = $env:UE_ROOT
 if (-not $ueRoot) {
-    $ueRoot = "C:\Program Files\Epic Games\UE_5.5"
+    $ueRoot = "C:\Program Files\Epic Games\UE_5.7"
     if (-not (Test-Path $ueRoot)) {
         $found = Get-ChildItem "C:\Program Files\Epic Games" -Directory `
             -Filter "UE_5.*" -ErrorAction SilentlyContinue |

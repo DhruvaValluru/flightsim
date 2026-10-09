@@ -106,7 +106,7 @@ class LeeRotorTurbulence(DrydenTurbulence):
 
     def rotor_sigma_w_mps(self, position: Position) -> float:
         """Target sigma_w from the local (height-decayed) lee descent."""
-        north_m, east_m = OrographicWind._scene_coords(position)
+        north_m, east_m = self.orographic.local_coords(position)
         sink = self.orographic.lee_sink(north_m, east_m)
         return ROTOR_SIGMA_GAIN * sink * self.orographic.decay(position.agl_m)
 

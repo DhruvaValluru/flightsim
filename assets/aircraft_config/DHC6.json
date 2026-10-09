@@ -153,5 +153,122 @@
         ]
       ]
     }
+  },
+  "limits": {
+    "category": {
+      "value": "normal",
+      "regulation": "14 CFR 23.337 (normal category)",
+      "source": "FAA TCDS A9EA (DHC-6 Twin Otter): certification basis CAR 3 normal category, whose 3.186 states the same load factors as 14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- unverified here: from memory of the TCDS"
+    },
+    "n_z_pos_g": {
+      "value": 3.8,
+      "source": "14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- normal category +3.8 g"
+    },
+    "n_z_neg_g": {
+      "value": -1.52,
+      "source": "14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- normal category -0.4 x 3.8 = -1.52 g"
+    },
+    "speed_limit_kt": {
+      "value": 170.0,
+      "kind": "V_NE",
+      "source": "unverified here: from memory of the DHC-6-300 Airplane Flight Manual limitations (V_NE 170 KIAS); compared here against JSBSim calibrated airspeed without a position-error correction"
+    },
+    "m_mo": {
+      "value": null,
+      "reason": "a turboprop of this class has no Mach operating limit; none is published for the DHC-6"
+    },
+    "alpha_stall_deg": {
+      "value": null,
+      "reason": "the JSBSim DHC6 model states no alpha limit (no <alphalimits> element; grep of DHC6.xml, 2026-09-28)"
+    },
+    "note": "Not flown here: the prompt compiler does not map 'DHC6' to this FDM name (measured 2026-09-28: 'fly the DHC6' compiles to aircraft 'dhc6', refused aircraft.exists); a spec that sets aircraft 'DHC6' by hand loads the model."
+  },
+  "loading": {
+    "source": "JSBSim 1.2.4 aircraft/DHC6/DHC6.xml <mass_balance> and <propulsion> as shipped in the .venv wheel (read 2026-09-28); the maximum weight from memory of the DHC-6-300 type data [unverified here]",
+    "datum": {
+      "xml": "the DHC6.xml <location> x in inches, positive aft (the JSBSim structural frame); the XML names no reference point",
+      "poh": "not transcribed",
+      "arm_comparison": {
+        "status": "unverified",
+        "reason": "no handbook arm is transcribed for the DHC-6: the envelope check is refused by name (loading.datum_unverified) and the loading is flown at the XML's own arms"
+      }
+    },
+    "empty_weight": {
+      "lb": 8100.0,
+      "arm_in": 211.8,
+      "source": "DHC6.xml <emptywt> 8100 LBS at <location name=\"CG\"> x 211.8 in"
+    },
+    "stations": [
+      {
+        "name": "name",
+        "index": 0,
+        "arm_in": 93.6,
+        "poh_arm_in": null,
+        "default_lb": 230.0,
+        "max_kg": 150.0,
+        "loadable": true,
+        "source": "DHC6.xml <pointmass name=\"name\"> 230 LBS at x 93.6 in (the XML's own station name, the crew position at the EYEPOINT arm); a stated choice, not a handbook limit: 150 kg per seat; the handbook bounds the seats through the maximum weight and the envelope, not per seat"
+      }
+    ],
+    "tanks": [
+      {
+        "index": 0,
+        "arm_in": 211.8,
+        "poh_arm_in": null,
+        "capacity_lb": 1290.5,
+        "default_lb": 892.1,
+        "source": "DHC6.xml tank 0: <capacity> 1290.5 LBS, <contents> 892.1 LBS at x 211.8 in (at the empty CG)"
+      },
+      {
+        "index": 1,
+        "arm_in": 211.8,
+        "poh_arm_in": null,
+        "capacity_lb": 1290.5,
+        "default_lb": 892.1,
+        "source": "DHC6.xml tank 1: <capacity> 1290.5 LBS, <contents> 892.1 LBS at x 211.8 in (at the empty CG)"
+      }
+    ],
+    "max_takeoff_weight": {
+      "kg": 5669.9,
+      "lb": 12500.0,
+      "source": "from memory of the DHC-6-300 maximum takeoff weight 12500 lb [unverified here]"
+    },
+    "cg_envelope": {
+      "polygon": null,
+      "reason": "no handbook envelope transcribed for the DHC-6"
+    },
+    "policy_station": "name",
+    "policy_station_reason": "the model's one station (the XML names it \"name\"): a payload draw replaces its 230 lb"
+  },
+  "icing": {
+    "source": "Bragg, Hutchison, Merret, Oltman, Pokhariyal, AIAA 2000-0360, the Twin Otter k'_CA set of the Smart Icing Systems research (NASA Glenn Twin Otter, Ratvasky et al.), transcribed from memory [unverified here: the paper is not reachable from this container]; the DHC6 IS the Twin Otter (blueprint correction 7), so the row applies directly",
+    "model": "Bragg et al. 2000 factor form C_A,iced = (1 + eta k_A) C_A, applied per axis to the WHOLE axis by the icing injection (a stated simplification: Bragg's k applies to one coefficient of the axis)",
+    "proxy": false,
+    "k_table": {
+      "k_lift": {
+        "value": -0.09,
+        "source": "k'_CLalpha of the Twin Otter set as remembered (the lift-curve slope loss) [unverified here]; applied to the whole LIFT axis"
+      },
+      "k_drag": {
+        "value": 0.34,
+        "source": "k'_CD0 of the Twin Otter set as remembered (the parasite drag rise) [unverified here]; applied to the whole DRAG axis"
+      },
+      "k_pitch": {
+        "value": -0.2,
+        "source": "k'_Cmalpha of the Twin Otter set as remembered (the tail's pitch stiffness loss) [unverified here]; applied to the whole PITCH axis"
+      },
+      "k_roll": {
+        "value": -0.1,
+        "source": "k'_Clp of the Twin Otter set as remembered (roll damping loss) [unverified here]; applied to the whole ROLL axis"
+      },
+      "k_yaw": {
+        "value": -0.1,
+        "source": "k'_Cnbeta of the Twin Otter set as remembered (directional stiffness loss) [unverified here]; applied to the whole YAW axis"
+      },
+      "k_side": {
+        "value": -0.2,
+        "source": "k'_CYbeta of the Twin Otter set as remembered [unverified here]; applied to the whole SIDE axis"
+      }
+    }
   }
 }

@@ -14,7 +14,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
+UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.7}"
 PLUGIN="ue/Plugins/JSBSimFlightDynamicsModel"
 BRIDGE="ue/Plugins/FlightSimBridge"
 STATUS=0
@@ -110,12 +110,59 @@ fi
 for m in $(grep -oE '"[A-Za-z]+"' "$BRIDGE/Source/FlightSimBridge/FlightSimBridge.Build.cs" \
            | tr -d '"' | sort -u); do
     case "$m" in Core|CoreUObject|Engine) continue ;; esac
-    if find "$UE_ROOT/Engine" "$PLUGIN" -name "$m.Build.cs" 2>/dev/null | grep -q .; then
+    # The found path, not the pipe's status: under pipefail a missing
+    # $UE_ROOT/Engine (or grep -q closing the pipe early) failed a module
+    # whose Build.cs is right there in the plugin.
+    if [ -n "$(find "$UE_ROOT/Engine" "$PLUGIN" -name "$m.Build.cs" 2>/dev/null | head -n 1)" ]; then
         ok "module $m" "resolves"
     else
         bad "module $m" "no $m.Build.cs anywhere"
     fi
 done
+
+# -- engine surface the physical sky assumes (FlightSimSky.cpp) -------------
+# Written from memory of the 5.x headers on a machine with no engine; each
+# line below is one assumption, checked here before a build is spent on it.
+ENG="$UE_ROOT/Engine/Source/Runtime/Engine"
+sky_check() {  # label, header (relative to $ENG), fixed-string pattern
+    if [ ! -f "$ENG/$2" ]; then
+        bad "$1" "header $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$ENG/$2"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- FlightSimSky.cpp needs updating"
+    fi
+}
+DLC="Classes/Components/DirectionalLightComponent.h"
+sky_check "DirectionalLight AtmosphereSunLightIndex" "$DLC" "AtmosphereSunLightIndex"
+sky_check "DirectionalLight AtmosphereSunDiskColorScale" "$DLC" "AtmosphereSunDiskColorScale"
+sky_check "DirectionalLight per-pixel transmittance" "$DLC" "bPerPixelAtmosphereTransmittance"
+FOG="Classes/Components/ExponentialHeightFogComponent.h"
+sky_check "Fog SetFogInscatteringColor" "$FOG" "SetFogInscatteringColor"
+sky_check "Fog sky-atmosphere ambient scale" "$FOG" "SkyAtmosphereAmbientContributionColorScale"
+VC="Classes/Components/VolumetricCloudComponent.h"
+sky_check "AVolumetricCloud" "$VC" "class AVolumetricCloud"
+sky_check "VolumetricCloud SetLayerBottomAltitude" "$VC" "SetLayerBottomAltitude"
+sky_check "VolumetricCloud SetLayerHeight" "$VC" "SetLayerHeight"
+sky_check "VolumetricCloud SetMaterial" "$VC" "SetMaterial"
+PPS="Classes/Engine/Scene.h"
+sky_check "PostProcess GI method" "$PPS" "DynamicGlobalIlluminationMethod"
+sky_check "PostProcess reflection method" "$PPS" "EReflectionMethod"
+sky_check "PostProcess physical camera exposure" "$PPS" "AutoExposureApplyPhysicalCameraExposure"
+sky_check "PostProcess FilmGrainIntensity" "$PPS" "FilmGrainIntensity"
+sky_check "PostProcess SceneFringeIntensity" "$PPS" "SceneFringeIntensity"
+SF="Public/ShowFlagsValues.inl"
+sky_check "show flag Cloud" "$SF" "(Cloud,"
+sky_check "show flag LumenGlobalIllumination" "$SF" "LumenGlobalIllumination"
+sky_check "show flag LumenReflections" "$SF" "LumenReflections"
+sky_check "show flag Grain" "$SF" "(Grain,"
+sky_check "show flag SceneColorFringe" "$SF" "SceneColorFringe"
+sky_check "show flag Vignette" "$SF" "(Vignette,"
+if [ -f "$UE_ROOT/Engine/Content/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.uasset" ]; then
+    ok "engine simple cloud material" "present"
+else
+    bad "engine simple cloud material" "missing: physical-sky renders draw no clouds (recorded, not fatal)"
+fi
 
 # -- plugin dependencies must be enabled in the uproject --------------------
 MISSING=$(python3 - <<'PY'

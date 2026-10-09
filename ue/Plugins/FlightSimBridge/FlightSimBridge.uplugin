@@ -8,10 +8,13 @@
 	"CreatedBy": "flightsim",
 	"CanContainContent": false,
 	"Modules": [
-		{ "Name": "FlightSimBridge", "Type": "Runtime", "LoadingPhase": "Default" }
+		{ "Name": "FlightSimBridge", "Type": "Runtime", "LoadingPhase": "Default" },
+		{ "Name": "FlightSimBridgeEditor", "Type": "Editor", "LoadingPhase": "PostEngineInit" }
 	],
 	"Plugins": [
 		{ "Name": "JSBSimFlightDynamicsModel", "Enabled": true },
-		{ "Name": "ProceduralMeshComponent", "Enabled": true }
+		{ "Name": "ProceduralMeshComponent", "Enabled": true },
+		{ "Name": "Niagara", "Enabled": true },
+		{ "Name": "CesiumForUnreal", "Enabled": true, "Optional": true }
 	]
 }

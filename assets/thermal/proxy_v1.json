@@ -1,0 +1,83 @@
+{
+  "name": "proxy_v1",
+  "proxy": true,
+  "source": "this repository (S3): the IR proxy's classes, each a stated temperature model and one cited ASTER spectral library row (assets/emissivity/, sha256 and provenance checked); the mappings below are declared stand-ins, not measurements of any scene",
+  "bands": ["LWIR", "MWIR"],
+  "transmittance": "transmittance_synthetic",
+  "classes": {
+    "aircraft_skin": {
+      "temperature_model": "recovery",
+      "emissivity_row": "jhu.becknic.manmade.roofing.metal.solid.0384uuu.spectrum.txt",
+      "source": "ASTER JHU/NPIC 0384UUUALM Aluminum Metal (bare, weathered and scored): a bare aluminium skin; a painted skin (far higher emissivity) is not represented"
+    },
+    "engine": {
+      "temperature_model": "none",
+      "emissivity_row": null,
+      "source": "no sub-object temperatures: the class image carries no engine pixels, so no engine or plume temperature is stated or used"
+    },
+    "valley": {
+      "temperature_model": "near_surface_air",
+      "emissivity_row": "jhu.becknic.vegetation.grass.green.solid.gras.spectrum.txt",
+      "source": "ASTER JHU green rye grass: the engine's valley-floor vegetation colour and the grassland / cropland land cover"
+    },
+    "scrub": {
+      "temperature_model": "near_surface_air",
+      "emissivity_row": "jhu.becknic.vegetation.grass.dry.solid.drygras.spectrum.txt",
+      "source": "ASTER JHU dry grass: the engine's scrub colour and the shrubland land cover (a stand-in; no shrub row is cached)"
+    },
+    "rock": {
+      "temperature_model": "near_surface_air",
+      "emissivity_row": "jhu.becknic.rock.igneous.felsic.solid.granit1.spectrum.txt",
+      "source": "ASTER JHU Granite.H1 alkalic granite: the engine's rock colour (slopes above 34 degrees)"
+    },
+    "snow": {
+      "temperature_model": "near_surface_air_below_melting",
+      "emissivity_row": "jhu.becknic.water.snow.fine.24um.fine.spectrum.txt",
+      "source": "ASTER JHU fine snow (24 um): the engine's snow colour and the snow and ice land cover"
+    },
+    "trees": {
+      "temperature_model": "near_surface_air",
+      "emissivity_row": "jhu.becknic.vegetation.trees.deciduous.solid.decidou.spectrum.txt",
+      "source": "ASTER JHU deciduous trees: the tree cover and mangrove land cover"
+    },
+    "concrete": {
+      "temperature_model": "near_surface_air",
+      "emissivity_row": "jhu.becknic.manmade.construction.cement.solid.0432uuu.spectrum.txt",
+      "source": "ASTER JHU/NPIC 0432UUUCNC construction concrete: labelled buildings and the built-up land cover"
+    },
+    "soil": {
+      "temperature_model": "near_surface_air",
+      "emissivity_row": "jhu.becknic.soil.aridisol.salorthid.coarse.89P1763.spectrum.txt",
+      "source": "ASTER JHU 89P1763 light yellowish brown clay (aridisol): the bare / sparse vegetation land cover"
+    },
+    "asphalt": {
+      "temperature_model": "near_surface_air",
+      "emissivity_row": "jhu.becknic.manmade.asphalt.paving.solid.0095uuu.spectrum.txt",
+      "source": "ASTER JHU/NPIC 0095UUUASP construction asphalt: a labelled runway pad"
+    },
+    "water": {
+      "temperature_model": "none",
+      "emissivity_row": null,
+      "source": "no water row is cached: water pixels are written unmodelled (NaN) and counted, never guessed"
+    }
+  },
+  "objects": {"aircraft": "aircraft_skin", "building": "concrete", "runway": "asphalt"},
+  "surface_objects": ["terrain"],
+  "terrain_default": "valley",
+  "palette_linear_rgb": {
+    "snow": [0.75, 0.78, 0.82],
+    "rock": [0.068, 0.060, 0.053],
+    "scrub": [0.058, 0.068, 0.034],
+    "valley": [0.030, 0.078, 0.022]
+  },
+  "palette_source": "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimVisualScene.cpp ClassifyVertex: the engine's four vertex colours (calibrated to read as rock / forest / snow, labelled approximated in every manifest)",
+  "landcover": {
+    "10": "trees", "20": "scrub", "30": "valley", "40": "valley", "50": "concrete",
+    "60": "soil", "70": "snow", "80": "water", "90": "water", "95": "trees", "100": null
+  },
+  "landcover_source": "ESA WorldCover v200 legend codes (core/terrain/landcover.py LEGEND) mapped to the cached rows; moss and lichen has no row and is unmodelled",
+  "not_claimed": [
+    "the class-to-row mappings are declared stand-ins (a grass row for cropland, a dry grass row for shrubland), not measured emissivities of the scene",
+    "one temperature per class; no class states a solar-loading term"
+  ]
+}

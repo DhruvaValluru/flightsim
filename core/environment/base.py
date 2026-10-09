@@ -16,10 +16,25 @@ So the contract here is narrow on purpose:
   temperature and pressure deviations -- of which there is exactly one.
 * A :class:`TurbulenceProvider` configures a stochastic process that lives
   inside JSBSim and cannot be expressed as a summed vector.
+* A :class:`GustProvider` (P6) is a wind-like contribution that goes into
+  JSBSim's SEPARATE ``atmosphere/gust-*-fps`` channel rather than the
+  ``wind-*`` one, plus an equivalent roll rate for the airframes that
+  carry the ``gust/p-equivalent-rad_sec`` injection. It takes the
+  aircraft's own state (:class:`OwnShipState`: position, velocity,
+  attitude, span) because a gust field is sampled where the aircraft
+  is and a roll moment depends on how wide it is. Contributions sum,
+  and the stack writes the sum EVERY step including zero, because the
+  gust channel persists in JSBSim until it is written again (measured
+  on 1.2.4: 7 fps written once reads 7.0 after 11 steps; docs/
+  JSBSIM_CORRECTIONS.md 17).
 
 Every provider must also declare its vocabulary and the physical definition
 behind it (§2.5). A provider that cannot say what "moderate" means, with a
 citation and a range, is not finished.
+
+NOT claimed by this module: any physics. It is the contract the providers
+and the stack meet at; every existing class is byte-compatible with what
+it was before ``GustProvider`` and ``OwnShipState`` were added.
 """
 
 from __future__ import annotations
@@ -39,6 +54,39 @@ class Position:
     altitude_m: float      #: MSL
     agl_m: float
     terrain_elevation_m: float
+
+
+class LocalFrame:
+    """Local north/east metres about a projected origin.
+
+    The UE host's ``LocalSceneCoords``, in Python: latitude/longitude are
+    projected into ``crs`` and the origin's projection is subtracted, so
+    north is projected y minus origin y and east is projected x minus
+    origin x. A position-coupled provider given a frame samples its field
+    where the aircraft really is relative to the scene origin -- the frame
+    the run card's blocks are written in -- instead of the absolute
+    ``latitude x 111320 m`` frame, which puts a field placed about the
+    origin near (0 N, 0 E) whatever the spec's coordinates are.
+    """
+
+    def __init__(self, crs: str, origin_lat_deg: float, origin_lon_deg: float) -> None:
+        from pyproj import Transformer
+
+        self.crs = str(crs)
+        self.origin_lat_deg = float(origin_lat_deg)
+        self.origin_lon_deg = float(origin_lon_deg)
+        self._transformer = Transformer.from_crs("EPSG:4326", self.crs, always_xy=True)
+        x, y = self._transformer.transform(self.origin_lon_deg, self.origin_lat_deg)
+        self.origin_x_m, self.origin_y_m = float(x), float(y)
+
+    def north_east(self, latitude_deg: float, longitude_deg: float) -> Tuple[float, float]:
+        x, y = self._transformer.transform(longitude_deg, latitude_deg)
+        return float(y) - self.origin_y_m, float(x) - self.origin_x_m
+
+    def provenance(self) -> Dict[str, Any]:
+        return {"crs": self.crs, "origin_lat_deg": self.origin_lat_deg,
+                "origin_lon_deg": self.origin_lon_deg,
+                "origin_x_m": self.origin_x_m, "origin_y_m": self.origin_y_m}
 
 
 @dataclass(frozen=True)
@@ -99,6 +147,29 @@ class Term:
                if self.valid_range else "")
         note = f" -- {self.note}" if self.note else ""
         return f'"{self.phrase}" -> {value}{unit} [{self.standard}{rng}]{note}'
+
+
+@dataclass(frozen=True)
+class OwnShipState:
+    """The aircraft as a gust provider sees it (P6, blueprint correction 4):
+    where it is, how it moves over the ground (NED, m/s), how it is
+    pointed (degrees), how wide it is (span, m) and its true airspeed.
+
+    Heading and span are what a rotational gust needs: a frozen field
+    is convected along the heading, and an equivalent roll rate is a
+    spanwise integral. Everything here is read from the FDM by the
+    stack (``EnvironmentStack.own_ship_of``); a provider never writes it.
+    """
+
+    position: Position
+    v_north_mps: float
+    v_east_mps: float
+    v_down_mps: float
+    roll_deg: float
+    pitch_deg: float
+    heading_deg: float
+    span_m: float
+    tas_mps: float
 
 
 class Provider(ABC):
@@ -170,3 +241,32 @@ class TurbulenceProvider(Provider):
     @abstractmethod
     def expected_sigma_w_mps(self, agl_m: float) -> float:
         """Predicted vertical RMS gust velocity, for the null test to check."""
+
+
+class GustProvider(Provider):
+    """Contributes a gust vector to JSBSim's ``atmosphere/gust-*-fps``
+    channel and, for an airframe that carries the ``gust_rotation``
+    injection (core/control/derive.py), an equivalent roll rate into
+    ``gust/p-equivalent-rad_sec``.
+
+    Why a separate class from :class:`WindProvider`: the gust channel is
+    a different JSBSim slot with a different persistence rule (a value
+    written once STAYS until written again, measured), it is summed by
+    JSBSim beside the wind and the Dryden turbulence (``vTotalWind =
+    wind + gust + cosineGust + turb``, FGWinds.cpp v1.2.4 L157), and a
+    gust field is a function of the aircraft's own state, not of a
+    point alone. Contributions from several providers sum; the stack
+    writes the sum every step, zero included.
+    """
+
+    def gust_at(self, own_ship: OwnShipState, time_s: float) -> WindNED:
+        """Gust contribution, NED m/s, at the aircraft's state and time.
+        Zero by default so a provider that only rolls need not override."""
+        return WindNED()
+
+    def p_equivalent_at(self, own_ship: OwnShipState, time_s: float) -> float:
+        """Equivalent roll rate in rad/s, delivered to
+        ``gust/p-equivalent-rad_sec`` where that property exists (the
+        derived airframe) and recorded as NOT delivered where it does
+        not (a stock airframe). Zero by default."""
+        return 0.0

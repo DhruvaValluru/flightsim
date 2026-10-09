@@ -16,6 +16,8 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UnrealClient.h"
@@ -67,12 +69,20 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 	{
 		Error = TEXT("usage: -game -card=<run-card.json> [-imagery=<sidecar>] ")
 		        TEXT("[-camera=chase|wingman|tower|shoulder] ")
+		        TEXT("[-chase=forward:right:up (metres, e.g. -chase=-42:0:6)] ")
 		        TEXT("[-telemetry=<out.json>] [-manifest=<out.json>] ")
 		        TEXT("[-screenshot-at=a:b:c -screenshot-dir=<dir>] ")
 		        TEXT("[-probe-seconds=N -report=<out.json>]");
 		return false;
 	}
 	FParse::Value(CommandLine, TEXT("probe-seconds="), ProbeSeconds);
+	// Colon-separated, same spelling as the render commandlet's -chase=
+	// (core.scenario.camera.CHASE_OFFSETS / derive_chase_offset decide the
+	// number on the Python side; this flag is how a launcher hands it to
+	// the interactive host, which has no table of its own to avoid the two
+	// drifting apart). Empty keeps the -170:0:16 default below.
+	FString ChaseSpec;
+	FParse::Value(CommandLine, TEXT("chase="), ChaseSpec);
 	FParse::Value(CommandLine, TEXT("report="), ReportPath);
 	FParse::Value(CommandLine, TEXT("telemetry="), TelemetryPath);
 	FParse::Value(CommandLine, TEXT("manifest="), ManifestPath);
@@ -129,6 +139,20 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 	FString TerrainPath = !Card.CollisionTerrainPath.IsEmpty()
 		? Card.CollisionTerrainPath : Card.OrographicTerrainPath;
 	FParse::Value(CommandLine, TEXT("terrain="), TerrainPath);
+	// The physical sky, same sidecar and meaning as the render commandlet's
+	// -sky=; replaces -sun-* and -exposure-bias when given.
+	FString SkyPlanPath;
+	FParse::Value(CommandLine, TEXT("sky="), SkyPlanPath);
+	FFlightSimSkyPlan SkyPlan;
+	const bool bPhysicalSky = !SkyPlanPath.IsEmpty();
+	if (bPhysicalSky)
+	{
+		if (!FFlightSimSkyPlan::Load(SkyPlanPath, SkyPlan, Error))
+		{
+			return false;
+		}
+		FFlightSimSky::EnableRendererFeatures();
+	}
 	if (!TerrainPath.IsEmpty())
 	{
 		FFlightSimVisualSceneOptions SceneOptions;
@@ -148,6 +172,10 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		FParse::Value(CommandLine, TEXT("sun-azim="), SunAzimuthDeg);
 		SceneOptions.SunRotation =
 			FRotator(-SunElevationDeg, SunAzimuthDeg + 180.0, 0.0);
+		if (bPhysicalSky)
+		{
+			SceneOptions.SkyPlan = &SkyPlan;
+		}
 		if (!Visual.Build(GetWorld(), SceneOptions, Error))
 		{
 			return false;
@@ -169,6 +197,43 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		Body->AttachToComponent(Scenario.Aircraft->GetRootComponent(),
 		                        FAttachmentTransformRules::KeepRelativeTransform);
 		Body->RegisterComponent();
+	}
+
+	// -- weather -----------------------------------------------------------
+	// The card's weather block drawn and heard (FlightSimWeather.h): the
+	// rain around the camera, the storm, its lightning, its thunder.
+	{
+		FString WeatherBackendName;
+		FParse::Value(CommandLine, TEXT("weather-backend="), WeatherBackendName);
+		FFlightSimWeatherOptions WeatherOptions;
+		if (!FFlightSimWeather::ParseBackend(WeatherBackendName, WeatherOptions.Backend, Error))
+		{
+			return false;
+		}
+		FString CardText;
+		if (FFileHelper::LoadFileToString(CardText, *CardPath))
+		{
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(CardText);
+			FJsonSerializer::Deserialize(Reader, WeatherOptions.Card);
+		}
+		WeatherOptions.GeoReferencing = Scenario.GeoReferencing;
+		WeatherOptions.ExistingClouds = Visual.Clouds;
+		WeatherOptions.Sun = Visual.Sun;
+		// No sound (the owner's call, 2026-10-08): the storm is seen, not heard.
+		WeatherOptions.bAudio = false;
+		FParse::Value(CommandLine, TEXT("rain-gain="), WeatherOptions.RainGain);
+		FParse::Value(CommandLine, TEXT("rain-style="), WeatherOptions.RainStyle);
+		WeatherOptions.bManualNiagaraTick = false;
+		if (!Weather.Build(GetWorld(), WeatherOptions, Error))
+		{
+			return false;
+		}
+		// Every cloud's material, checked before the window draws a frame
+		// (the engine asserts on a bad one; this refuses by name).
+		if (!FFlightSimWeather::VerifyCloudMaterials(GetWorld(), Error))
+		{
+			return false;
+		}
 	}
 
 	// -- camera ------------------------------------------------------------
@@ -196,18 +261,74 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		return false;
 	}
 	CameraDirector->ChaseOffsetMetres = FVector(-170.0, 0.0, 16.0);
+	if (!ChaseSpec.IsEmpty())
+	{
+		TArray<FString> Parts;
+		ChaseSpec.ParseIntoArray(Parts, TEXT(":"));
+		if (Parts.Num() != 3)
+		{
+			Error = FString::Printf(
+				TEXT("-chase expects forward:right:up metres, got '%s'"),
+				*ChaseSpec);
+			return false;
+		}
+		CameraDirector->ChaseOffsetMetres = FVector(
+			FCString::Atod(*Parts[0]), FCString::Atod(*Parts[1]),
+			FCString::Atod(*Parts[2]));
+	}
+
+	// Start it where it will settle (FlightSimCameraDirector.h
+	// PresetRestingPose, the same call the render commandlet makes): a
+	// spring-lagged camera spawned at the world's default actor location
+	// and left to Tick() into position spends its opening seconds flying
+	// in from wherever that is, which on an interactive host is seconds
+	// the person is actually watching, not written frames nobody reads.
+	{
+		FVector Station;
+		FRotator Look;
+		if (!CameraDirector->PresetRestingPose(Station, Look))
+		{
+			Error = TEXT("the camera has no aircraft to start behind");
+			return false;
+		}
+		CameraDirector->SetActorLocationAndRotation(Station, Look.Quaternion());
+	}
 
 	// §6.6 manual exposure, on the live camera's post process rather than a
 	// capture component -- the viewport camera is the camera of record here.
 	double ExposureBias = 9.5;
 	FParse::Value(CommandLine, TEXT("exposure-bias="), ExposureBias);
-	if (CameraDirector->Camera != nullptr)
+	if (CameraDirector->Camera != nullptr && bPhysicalSky)
+	{
+		FFlightSimSky::ApplyPostProcess(CameraDirector->Camera->PostProcessSettings,
+		                                SkyPlan);
+	}
+	else if (CameraDirector->Camera != nullptr)
 	{
 		FPostProcessSettings& Post = CameraDirector->Camera->PostProcessSettings;
 		Post.bOverride_AutoExposureMethod = true;
 		Post.AutoExposureMethod = AEM_Manual;
 		Post.bOverride_AutoExposureBias = true;
 		Post.AutoExposureBias = static_cast<float>(ExposureBias);
+	}
+	// Under a drawn cumulonimbus (FlightSimWeather.h DrawsCell) the light is
+	// stops below the look's and a manual exposure left there shows a black
+	// window (the owner's first storm frame, 2026-10-08). The render
+	// commandlet meters a frame once and keeps it; a live window adapts
+	// instead: the engine's histogram metering, fast, the bias at zero.
+	if (CameraDirector->Camera != nullptr && Weather.DrawsCell())
+	{
+		FPostProcessSettings& Post = CameraDirector->Camera->PostProcessSettings;
+		Post.bOverride_AutoExposureMethod = true;
+		Post.AutoExposureMethod = AEM_Histogram;
+		Post.bOverride_AutoExposureBias = true;
+		Post.AutoExposureBias = 0.0f;
+		Post.bOverride_AutoExposureSpeedUp = true;
+		Post.AutoExposureSpeedUp = 10.0f;
+		Post.bOverride_AutoExposureSpeedDown = true;
+		Post.AutoExposureSpeedDown = 10.0f;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("storm exposure: the window meters itself (histogram) under the drawn cell"));
 	}
 
 	APlayerController* Controller = GetWorld()->GetFirstPlayerController();
@@ -318,6 +439,25 @@ void AFlightSimInteractiveMode::Tick(float DeltaSeconds)
 		{
 			FailAndQuit(Error);
 			return;
+		}
+	}
+
+	// -- the weather at the player's camera ---------------------------------
+	if (Weather.IsBuilt())
+	{
+		APlayerController* Controller = GetWorld()->GetFirstPlayerController();
+		if (Controller != nullptr && Controller->PlayerCameraManager != nullptr)
+		{
+			FFlightSimWeatherView View;
+			View.TimeSeconds = SimTimeSeconds;
+			View.CameraCm = Controller->PlayerCameraManager->GetCameraLocation();
+			View.HorizontalFovDeg = Controller->PlayerCameraManager->GetFOVAngle();
+			int32 SizeX = 1920, SizeY = 1080;
+			Controller->GetViewportSize(SizeX, SizeY);
+			View.WidthPx = FMath::Max(1, SizeX);
+			// The eye's integration time stands in for a shutter (stated).
+			View.ShutterSeconds = FMath::Max(WallDelta, 1.0 / 60.0);
+			Weather.Advance(View);
 		}
 	}
 

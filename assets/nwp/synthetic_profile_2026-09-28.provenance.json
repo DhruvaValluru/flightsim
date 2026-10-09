@@ -1,0 +1,12 @@
+{
+ "name": "synthetic_profile_2026-09-28",
+ "synthetic": true,
+ "url": "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?file=gfs.t00z.pgrb2.0p25.f000&lev_1000_mb=on&lev_925_mb=on&lev_850_mb=on&lev_700_mb=on&lev_500_mb=on&var_UGRD=on&var_VGRD=on&subregion=&leftlon=7.6&rightlon=7.7&toplat=46.0&bottomlat=45.9&dir=%2Fgfs.20260928%2F00%2Fatmos",
+ "url_note": "what the cache WOULD carry: the NOMADS GFS 0.25 deg filter for the five pressure levels' u/v winds in a 0.1 deg box; nomads.ncep.noaa.gov is not reachable from this container, so nothing was fetched",
+ "fetched_at": null,
+ "fetched_at_note": "null: never fetched; the levels are a synthetic profile written by hand on 2026-09-28 as a stand-in with a plausible shape (speed rising from 5 to 30 m/s, direction backing with height)",
+ "sha256": "76eebccabb19953a778391aa339fe3ab32cbee2b45fd21f0b9b17c5983c487cf",
+ "sha256_of": "the data file's bytes (synthetic_profile_2026-09-28.json)",
+ "license": "none needed: synthetic; a real GFS fixture would be US Government work, public domain",
+ "height_basis": "the runner converts each level pressure to its US Standard Atmosphere 1976 height (core/environment/shear.py standard_height_m); the model's geopotential heights are not carried"
+}

@@ -32,6 +32,7 @@
 #include "FlightSimCameraDirector.h"
 #include "FlightSimScenarioWorld.h"
 #include "FlightSimVisualScene.h"
+#include "FlightSimWeather.h"
 #include "FlightSimInteractiveMode.generated.h"
 
 class UFlightSimTelemetryRecorder;
@@ -83,6 +84,9 @@ private:
 	FFlightSimScenarioCard Card;
 	FFlightSimScenarioWorld Scenario;
 	FFlightSimVisualScene Visual;
+	// The card's weather (rain, storm, lightning), drawn with no sound:
+	// -weather-backend=procedural|niagara|off, off by default.
+	FFlightSimWeather Weather;
 
 	UPROPERTY()
 	AFlightSimCameraDirector* CameraDirector = nullptr;

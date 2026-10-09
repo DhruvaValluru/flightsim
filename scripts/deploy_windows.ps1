@@ -18,12 +18,24 @@
 #                run from inside itself is reused in place)
 #   -Branch      branch to check out (default master)
 #   -NoLaunch    set up only; do not start the server or browser
+#   -Reset       make the clone EXACTLY the remote branch (git reset
+#                --hard origin/<branch>): local edits and local commits
+#                on that branch are discarded. Use it when a re-run says
+#                the pull was not a fast-forward and the page still shows
+#                the old app.
+#
+# Re-running on an existing install updates it to the remote branch and
+# RESTARTS the server: a uvicorn already on port 8008 keeps serving the
+# code it loaded at start, so without the restart the page never shows
+# what was just pulled (measured 2026-10-09: the route map was on the
+# branch and absent from the page until the old server was stopped).
 
 [CmdletBinding()]
 param(
     [string]$InstallDir = "",
     [string]$Branch = "master",
-    [switch]$NoLaunch
+    [switch]$NoLaunch,
+    [switch]$Reset
 )
 
 $ErrorActionPreference = "Stop"
@@ -129,13 +141,30 @@ if (Test-Path (Join-Path $InstallDir ".git")) {
     Step "updating existing clone at $InstallDir"
     git -C $InstallDir fetch origin $Branch
     git -C $InstallDir checkout $Branch
-    git -C $InstallDir pull --ff-only origin $Branch
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "    (pull was not a fast-forward -- keeping your local state as-is)"
+    if ($Reset) {
+        Step "-Reset: making the clone exactly origin/$Branch (local edits discarded)"
+        git -C $InstallDir reset --hard "origin/$Branch"
+    } else {
+        git -C $InstallDir pull --ff-only origin $Branch
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ""
+            Write-Host "    THE PULL WAS NOT A FAST-FORWARD: this clone has local edits or" -ForegroundColor Yellow
+            Write-Host "    commits that origin/$Branch does not, so it was left as it is and" -ForegroundColor Yellow
+            Write-Host "    the app below is NOT the remote branch. To serve exactly the remote:" -ForegroundColor Yellow
+            Write-Host "      git -C $InstallDir reset --hard origin/$Branch" -ForegroundColor Yellow
+            Write-Host "    or re-run this script with -Reset (local edits are discarded)." -ForegroundColor Yellow
+            Write-Host ""
+        }
     }
 } else {
     Step "cloning $repoUrl -> $InstallDir"
     git clone --branch $Branch $repoUrl $InstallDir
+}
+$served = git -C $InstallDir log -1 --oneline
+$behind = git -C $InstallDir rev-list --count "HEAD..origin/$Branch"
+Step "this install is at: $served"
+if ($behind -and ($behind -ne "0")) {
+    Write-Host "    ($behind commit(s) on origin/$Branch are NOT in this install -- see above)" -ForegroundColor Yellow
 }
 
 # --- venv + pinned requirements ----------------------------------------
@@ -161,6 +190,23 @@ if ($NoLaunch) {
 }
 
 # --- launch ------------------------------------------------------------
+# A server already on 8008 is the OLD code: Python loaded webapp/server.py
+# when it started and never re-reads it. Stop it, or the new one cannot
+# bind and the browser keeps showing the app that was there before.
+try {
+    $listening = @(Get-NetTCPConnection -LocalPort 8008 -State Listen -ErrorAction SilentlyContinue)
+} catch {
+    $listening = @()
+}
+foreach ($conn in $listening) {
+    $owner = $conn.OwningProcess
+    if ($owner -and ($owner -ne $PID)) {
+        Step "stopping the server already on port 8008 (pid $owner) so the updated code serves"
+        Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+    }
+}
+if ($listening.Count -gt 0) { Start-Sleep -Seconds 2 }
+
 Step "starting the web app on http://127.0.0.1:8008 (its own window; close it to stop)"
 # Wrapped in powershell -NoExit so a crashing server leaves its error ON
 # SCREEN instead of a window that closes before anyone can read it.
@@ -178,13 +224,25 @@ foreach ($i in 1..30) {
     } catch { }
 }
 if ($up) {
-    Step "server is up -- opening the browser"
+    Step "server is up, serving $served -- opening the browser"
     Start-Process "http://127.0.0.1:8008"
     Write-Host ""
     Write-Host "Type a scenario ('fly the c172p through a tornado over the prairie'),"
     Write-Host "review the compiled spec, and run. No API keys needed (README"
-    Write-Host "'Quick start'). Rendered video clips still require macOS; everything"
-    Write-Host "else runs here."
+    Write-Host "'Quick start'). After Interpret, '+ draw the flight path' (beside the"
+    Write-Host "camera buttons) opens the route map; hard-refresh (Ctrl+F5) if the"
+    Write-Host "page was already open."
+    Write-Host ""
+    Write-Host "Camera capture, from this same install:"
+    Write-Host "  cd $InstallDir"
+    Write-Host "  .\.venv\Scripts\python.exe -m flightsim.capture examples\cameras_multi.yaml --out runs\demo --card"
+    Write-Host "  .\.venv\Scripts\python.exe -m flightsim.verify runs\demo"
+    Write-Host ""
+    Write-Host "Windows is the supported platform for rendered frames. With"
+    Write-Host "Unreal Engine 5.7 installed and scripts\build_ue.ps1 run, add"
+    Write-Host "--render to the capture command and the frames come out per"
+    Write-Host "camera under runs\demo\frames\. Without the engine everything"
+    Write-Host "except the pixels still runs."
 } else {
     throw ("the server did not answer on port 8008 within 30 s -- the " +
            "uvicorn window it opened stays up with the actual error; or run " +

@@ -105,6 +105,26 @@ def test_engage_writes_the_measured_signs():
     assert fdm.props.get("ap/sign/elevator") == ap.signs.elevator
 
 
+def test_engage_measures_the_signs_at_the_aircrafts_own_condition():
+    """A light aircraft engages at ITS cruise.
+
+    measure()'s default probe condition is a jet's (6000 m, 280 kt). The
+    c172p cannot trim there, so engage() raised TrimError from inside the
+    sign probe and no Cessna ever flew under hold_state (measured,
+    2026-10-09). The probe now runs at the condition the aircraft has just
+    trimmed at, which is the one condition it is known to trim at.
+    """
+    from core.control import signs
+
+    signs._CACHE.pop("c172p", None)
+    fdm = flying("c172p", altitude_m=1500.0, cas_kt=100.0)
+    ap = Autopilot(fdm)
+    ap.engage()
+    assert ap.engaged
+    assert ap.signs.aircraft == "c172p"
+    assert fdm.props.get("ap/sign/elevator") == ap.signs.elevator
+
+
 # -- engage -------------------------------------------------------------
 
 
@@ -321,3 +341,74 @@ def test_acceptance_reports_each_violated_criterion():
     failures = Acceptance(max_overshoot_pct=5.0, max_settling_time_s=5.0,
                           max_abs_sse=0.1).check(r)
     assert len(failures) >= 2
+
+
+# -- the derived airframe is written atomically and idempotently ---------
+
+def test_derive_never_rewrites_an_identical_file(tmp_path):
+    """Two captures at once derive the same airframe into one build
+    directory. The steady state must not touch the files (a reader in
+    the other process would see a truncated tecs.xml), so a second
+    derive of identical content leaves the inode and mtime alone."""
+    import os
+
+    from core.control.derive import derive
+
+    first = derive("c172p", build_dir=tmp_path)
+    tecs = first.xml_path.parent / "Systems" / "tecs.xml"
+    before = (os.stat(tecs).st_ino, os.stat(tecs).st_mtime_ns,
+              os.stat(first.xml_path).st_mtime_ns)
+    second = derive("c172p", build_dir=tmp_path)
+    assert second.xml_path == first.xml_path
+    after = (os.stat(tecs).st_ino, os.stat(tecs).st_mtime_ns,
+             os.stat(first.xml_path).st_mtime_ns)
+    assert after == before
+    assert not [p for p in tecs.parent.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_write_atomic_leaves_the_old_file_whole_when_the_write_dies(tmp_path, monkeypatch):
+    """The atomic write: a failure before the rename leaves the previous
+    complete file in place (never a partial one), and a completed write
+    replaces it whole."""
+    import os
+
+    from core.control import derive as module
+
+    target = tmp_path / "tecs.xml"
+    target.write_bytes(b"<old/>")
+    real_replace = os.replace
+
+    def dying_replace(src, dst):
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(module.os, "replace", dying_replace)
+    with pytest.raises(OSError):
+        module._write_atomic(target, b"<new>partial")
+    assert target.read_bytes() == b"<old/>"
+    monkeypatch.setattr(module.os, "replace", real_replace)
+    assert module._write_atomic(target, b"<new/>") is True
+    assert target.read_bytes() == b"<new/>"
+    assert module._write_atomic(target, b"<new/>") is False
+
+
+# -- the derivation became a pipeline (P2); the TECS derivation is unchanged ----
+
+def test_with_tecs_is_the_tecs_injection_and_nothing_else(tmp_path):
+    """``derive(name)`` and ``with_injections(name, ("tecs",))`` build the
+    same airframe (same name, same derived hash, same tecs.xml bytes), and
+    the provenance keeps its four original keys beside the new list."""
+    from core.control.derive import derive
+
+    build = tmp_path / "aircraft"
+    plain = derive("c172p", build_dir=build)
+    explicit = derive("c172p", build_dir=build, injections=("tecs",))
+    assert plain.name == explicit.name == "c172p-tecs"
+    assert plain.derived_sha256 == explicit.derived_sha256
+    assert plain.injection_names == ("tecs",)
+    prov = plain.provenance()
+    assert {"derived_from", "base_sha256", "tecs_template_sha256", "derived_sha256",
+            "engine_count"} <= set(prov)
+    assert prov["injections"][0]["template_sha256"] == prov["tecs_template_sha256"]
+    fdm = FlightDynamics.with_injections("c172p", ("tecs",), build_dir=build,
+                                         expected_derived_sha256=plain.derived_sha256)
+    assert fdm.has_autopilot and fdm.derived.derived_sha256 == plain.derived_sha256

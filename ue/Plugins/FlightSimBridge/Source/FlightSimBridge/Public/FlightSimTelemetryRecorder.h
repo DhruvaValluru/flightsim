@@ -31,6 +31,11 @@ class UJSBSimMovementComponent;
 // pure unit-conversion scale. bRequired channels must exist on every
 // airframe; optional ones (surface positions a model may not define) are
 // sampled as NaN when absent, which keeps a missing channel visibly missing.
+// P9: a Property of the form "host:<name>" is not a JSBSim property but a
+// value the scenario world computes (FFlightSimScenarioWorld::HostChannel:
+// the wake port's evaluation, the wind layer, the failure flag, the icing
+// factors with their stock-airframe defaults, hae_m, ...), read -- never
+// written -- through the movement component this recorder observes.
 struct FFlightSimTelemetryChannel
 {
 	const TCHAR* Column;

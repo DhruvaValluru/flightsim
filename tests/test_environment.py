@@ -457,3 +457,47 @@ def test_every_provider_declares_its_vocabulary():
         assert terms, f"{provider.name} declares no vocabulary"
         for term in terms:
             assert term.standard, f"{provider.name}:{term.phrase} cites no standard"
+
+
+# -- P6: the gust channel (core/environment/base.py GustProvider) ---------
+
+
+def test_null_von_karman_gust_reaches_the_fdm():
+    """The von Karman field is delivered through JSBSim's gust channel,
+    not its turbulence one, so this rung of the ladder is its own: the
+    aircraft's altitude differs from the still-air run (measured on the
+    B747 at 3000 m, 40 s: a difference well above 1 m), with JSBSim's own
+    turbulence switched off in both."""
+    from core.environment.von_karman import VonKarmanTurbulence
+
+    off = altitudes(EnvironmentStack([DrydenTurbulence("none")]))
+    on = altitudes(EnvironmentStack([
+        DrydenTurbulence("none"),
+        VonKarmanTurbulence("moderate", seed=17, altitude_m=3000.0, duration_s=40.0,
+                            rate_hz=120.0)]))
+    assert peak_diff(on, off) > 1.0, "the von Karman gust never reached the FDM"
+
+
+def test_the_gust_channel_persists_until_written_so_the_stack_writes_it_every_step():
+    """The JSBSim fact the write-when-zero rule rests on (docs/
+    JSBSIM_CORRECTIONS.md 17): ``atmosphere/gust-north-fps`` written once
+    reads the same value after 11 steps and rides in the total wind; a
+    stack with no gust provider writes 0 on its first apply and the
+    channel reads 0 from then on. The turbulence channel is the opposite
+    (16): written once, it reads 0 after one step."""
+    fdm = trimmed()
+    fdm.props.set("atmosphere/turb-type", 0.0)
+    fdm.props.set("atmosphere/turb-north-fps", 10.0)
+    fdm.props.set("atmosphere/gust-north-fps", 7.0)
+    fdm.step()
+    assert fdm.props.get("atmosphere/turb-north-fps") == 0.0
+    for _ in range(10):
+        fdm.step()
+    assert fdm.props.get("atmosphere/gust-north-fps") == 7.0
+    assert fdm.props.get("atmosphere/total-wind-north-fps") == pytest.approx(7.0, abs=1e-9)
+    stack = EnvironmentStack()
+    stack.configure(fdm)
+    stack.apply(fdm)
+    fdm.step()
+    assert fdm.props.get("atmosphere/gust-north-fps") == 0.0
+    assert fdm.props.get("atmosphere/total-wind-north-fps") == pytest.approx(0.0, abs=1e-9)

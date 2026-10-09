@@ -4,7 +4,7 @@ Camera Phase 1's design decision 1, the run-card discipline applied to
 cameras: the pose track is COMPUTED IN PYTHON as a pure function of the
 recorded telemetry and the camera spec, and every consumer -- the
 capture manifest, the geometry verifier, the preview renderer, and (on
-macOS) the render commandlet's consume-poses mode -- reads the same
+Windows) the render commandlet's consume-poses mode -- reads the same
 solved track verbatim. No engine, no wall clock, no RNG, no frame-rate
 dependence: two invocations over the same telemetry are bit-identical,
 and the suite compares them by digest.
@@ -14,11 +14,13 @@ The five presets are ported from
 
 * **chase** / **wingman** -- the offset is applied in a HEADING-ONLY
   frame (yaw from the aircraft, pitch and roll discarded; §1.5: using
-  the full rotation is precisely the historic failure), position and
-  aim exponentially smoothed with the C++ time constants
-  (:data:`POSITION_LAG_S`, :data:`AIM_LAG_S`; the wingman's
-  station-keeping is twice as tight). The look rotation never inherits
-  roll.
+  the full rotation is precisely the historic failure), smoothed with
+  the C++ time constants (:data:`POSITION_LAG_S`, :data:`AIM_LAG_S`;
+  the wingman's station-keeping is twice as tight): horizontally the
+  OFFSET from the aircraft is smoothed and the aim is the aircraft
+  itself (no steady trail of speed x tau), vertically the camera
+  height and the aim height are smoothed in the world. The look
+  rotation never inherits roll.
 * **ground** / **tower** -- world-anchored: the camera does not move;
   only the aim point is smoothed toward the aircraft. Roll stays zero.
 * **cockpit** -- body-fixed, no smoothing, FULL rotation applied: roll
@@ -28,10 +30,13 @@ The five presets are ported from
 * **explicit** -- a stated placement with no preset behaviour: position
   and aim exactly as stated (or keyframed), no smoothing.
 
-Smoothing is the C++ ``SmoothTowards`` filter discretised on the
-telemetry clock: ``alpha = 1 - exp(-dt / tau)`` with dt the recorded
-sample spacing, so the lag is a time constant, never a per-frame
-fraction. The initial condition is DECLARED (the C++ actor starts
+Smoothing is the C++ ``SmoothTowards`` filter's continuous-time model
+(``y' = (x - y) / tau``) integrated EXACTLY over each telemetry
+interval with the goal linear across it (first-order hold,
+:func:`lag_step`), so the lag is a time constant, never a per-frame
+fraction, and the integrator adds no rate-dependent error of its own;
+what remains between sample rates is the aircraft track's own
+interpolation error (measured, bounded by test). The initial condition is DECLARED (the C++ actor starts
 wherever it was spawned; the solver has no spawn): the smoothed
 position starts AT its first goal and the smoothed aim at the
 aircraft, which is exactly the commandlet's own "start it where it
@@ -227,6 +232,19 @@ def look_angles(from_n, from_e, from_alt, to_n, to_e, to_alt):
 
 # -- keyframed moves -----------------------------------------------------
 
+#: Every field a keyframe may carry besides ``t_s``. A move naming any
+#: other key refuses by name (camera.moves) in validation rather than
+#: being silently ignored here.
+MOVE_KEYS = (
+    "position_north_m", "position_east_m", "position_alt_m",
+    "position_lat_deg", "position_lon_deg",
+    "aim_north_m", "aim_east_m", "aim_alt_m",
+    "aim_bearing_deg", "aim_elevation_deg",
+    "focal_length_mm",
+    "offset_forward_m", "offset_right_m", "offset_up_m",
+)
+
+
 def _keyframe_value(moves: List[Dict], key: str, t: float,
                     default: float) -> float:
     """Piecewise-linear interpolation of one keyframed scalar over
@@ -334,7 +352,7 @@ class PoseTrack:
         yaw/pitch/roll degrees. The host derives nothing and refuses a
         track that does not cover the run.
         """
-        return {
+        block = {
             "camera_id": self.camera_id,
             "preset": self.preset,
             "horizon_stable": self.horizon_stable,
@@ -347,7 +365,26 @@ class PoseTrack:
             "near_m": self.near_m,
             "far_m": self.far_m,
             "spec": camera.to_dict(),
-            "poses": {
+        }
+        # Spec 8 (contracts section 10): a STATED exposure triple rides
+        # at the block's top level as plain numbers, which is where the
+        # commandlet's ApplyPhysicalExposure reads it
+        # (cameras[N].exposure {aperture_f, shutter_s, iso}). An
+        # all-default exposure is omitted, exactly as the canonical
+        # camera omits it, so every card written before spec 8 is
+        # byte-identical and the engine keeps its documented bias path.
+        exposure = getattr(camera, "exposure", None)
+        if exposure is not None and not exposure.is_default(self.preset):
+            block["exposure"] = {name: float(q.value)
+                                 for name, q in exposure.quantities()}
+        # S1: the exposure compensation (stops) and the band file, plain
+        # values, only when stated -- the same absent-canonical rule.
+        if getattr(camera, "sensing_stated", None) is not None and camera.sensing_stated():
+            block["sensing"] = {
+                "exposure_compensation_ev": float(camera.exposure_compensation_ev.value or 0.0),
+                "bands": camera.bands.value,
+            }
+        block["poses"] = {
                 "t_s": list(self.t),
                 "north_m": list(self.north_m),
                 "east_m": list(self.east_m),
@@ -356,9 +393,9 @@ class PoseTrack:
                 "pitch_deg": list(self.pitch_deg),
                 "roll_deg": list(self.roll_deg),
                 "focal_length_mm": list(self.focal_length_mm),
-            },
-            "capture_times_s": list(schedule.times),
         }
+        block["capture_times_s"] = list(schedule.times)
+        return block
 
     def sample(self, index: int) -> Dict[str, object]:
         """One pose as the manifest's per-frame mapping."""
@@ -396,6 +433,23 @@ def _columns(columns: Dict[str, Sequence[float]]):
     return n
 
 
+def lag_step(y_prev: float, x_prev: float, x_now: float, dt: float,
+             tau: float) -> float:
+    """One step of the first-order lag y' = (x - y) / tau with the
+    input LINEAR between the two samples (first-order hold): the exact
+    solution over the interval, so halving the sample spacing changes
+    the result only through the input's own interpolation error, not
+    through the integrator. (The previous zero-order-hold update,
+    ``y += (x_now - y) * (1 - exp(-dt/tau))``, carried a first-order
+    integrator error that measured 1.68 m on a 110 m chase offset at
+    140 m/s between 10 and 20 Hz; this form measures centimetres.)"""
+    if dt <= 0.0:
+        return y_prev
+    decay = math.exp(-dt / tau)
+    slope = (x_now - x_prev) / dt
+    return x_now - slope * tau + (y_prev - x_prev + slope * tau) * decay
+
+
 def solve_pose_track(columns: Dict[str, Sequence[float]],
                      camera: CameraSpec,
                      frame: SceneFrame) -> PoseTrack:
@@ -424,9 +478,17 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                      "explicit"):
         raise PoseSolveError(f"camera.poses: unknown preset {preset!r}")
 
-    offset = (float(camera.offset_forward_m.value),
-              float(camera.offset_right_m.value),
-              float(camera.offset_up_m.value))
+    def offset_at(at_t: float):
+        """The aircraft-relative offset, keyframable (push in, pull
+        back, orbit are keyframes over these three)."""
+        return (_keyframe_value(camera.moves, "offset_forward_m", at_t,
+                                float(camera.offset_forward_m.value)),
+                _keyframe_value(camera.moves, "offset_right_m", at_t,
+                                float(camera.offset_right_m.value)),
+                _keyframe_value(camera.moves, "offset_up_m", at_t,
+                                float(camera.offset_up_m.value)))
+
+    offset = offset_at(t[0]) if n else (0.0, 0.0, 0.0)
 
     pos_n: List[float] = []
     pos_e: List[float] = []
@@ -459,38 +521,78 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                               float(camera.position_alt_m.value))
         return north, east, alt
 
+    aim_mode = str(camera.aim_mode.value)
+
+    def _stated_aim(cn: float, ce: float, calt: float, at_t: float):
+        """(yaw, pitch, quat) for a camera at (cn, ce, calt) whose aim
+        is a stated point or bearing (keyframable), not the aircraft."""
+        if aim_mode == "point":
+            pn = _keyframe_value(camera.moves, "aim_north_m", at_t,
+                                 float(camera.aim_north_m.value))
+            pe = _keyframe_value(camera.moves, "aim_east_m", at_t,
+                                 float(camera.aim_east_m.value))
+            palt = _keyframe_value(camera.moves, "aim_alt_m", at_t,
+                                   float(camera.aim_alt_m.value))
+            y, p = look_angles(cn, ce, calt, pn, pe, palt)
+            return y, p, euler_to_quat(0.0, p, y)
+        if aim_mode == "bearing":
+            q = _keyframed_bearing_quat(
+                camera.moves, at_t,
+                float(camera.aim_bearing_deg.value),
+                float(camera.aim_elevation_deg.value))
+            if q is None:
+                y = float(camera.aim_bearing_deg.value) % 360.0
+                p = float(camera.aim_elevation_deg.value)
+                return y, p, euler_to_quat(0.0, p, y)
+            y, p = _quat_yaw_pitch(q)
+            return y, p, q
+        raise PoseSolveError(f"camera.poses: unknown aim mode {aim_mode!r}")
+
     if preset in ("chase", "wingman"):
         tau_pos = POSITION_LAG_S * (WINGMAN_POSITION_LAG_FACTOR
                                     if preset == "wingman" else 1.0)
-        sm_n = sm_e = sm_alt = None
-        aim_n = aim_e = aim_alt = None
+        # Horizontally the lag acts on the OFFSET from the aircraft, not on
+        # the camera's world position: a world-position lag trails a
+        # steadily moving target by speed x tau (58 m at 250 kt), which
+        # dragged a side view off its station and the aircraft across the
+        # frame over the first second of every clip. The offset still
+        # swings smoothly through a turn (it rotates with the heading);
+        # vertically the lag stays on the world position, so a climb or a
+        # pitch bob still shows in the frame instead of being followed.
+        off_n = off_e = sm_alt = None
+        aim_alt = None
+        prev_off = prev_goal_alt = prev_target_alt = None
         for i in range(n):
-            gn, ge, gup = _heading_only(air_yaw[i], *offset)
-            goal = (air_n[i] + gn, air_e[i] + ge, air_alt[i] + gup)
-            target = (air_n[i], air_e[i], air_alt[i])
+            gn, ge, gup = _heading_only(air_yaw[i], *offset_at(t[i]))
+            goal_alt = air_alt[i] + gup
             if i == 0:
-                sm_n, sm_e, sm_alt = goal          # start where it settles
-                aim_n, aim_e, aim_alt = target
+                off_n, off_e, sm_alt = gn, ge, goal_alt   # start where it settles
+                aim_alt = air_alt[i]
             else:
                 dt = t[i] - t[i - 1]
-                ap = 1.0 - math.exp(-dt / tau_pos)
-                aa = 1.0 - math.exp(-dt / AIM_LAG_S)
-                sm_n += (goal[0] - sm_n) * ap
-                sm_e += (goal[1] - sm_e) * ap
-                sm_alt += (goal[2] - sm_alt) * ap
-                aim_n += (target[0] - aim_n) * aa
-                aim_e += (target[1] - aim_e) * aa
-                aim_alt += (target[2] - aim_alt) * aa
-            y, p = look_angles(sm_n, sm_e, sm_alt, aim_n, aim_e, aim_alt)
+                off_n = lag_step(off_n, prev_off[0], gn, dt, tau_pos)
+                off_e = lag_step(off_e, prev_off[1], ge, dt, tau_pos)
+                sm_alt = lag_step(sm_alt, prev_goal_alt, goal_alt, dt, tau_pos)
+                aim_alt = lag_step(aim_alt, prev_target_alt, air_alt[i], dt, AIM_LAG_S)
+            prev_off, prev_goal_alt, prev_target_alt = (gn, ge), goal_alt, air_alt[i]
+            sm_n, sm_e = air_n[i] + off_n, air_e[i] + off_e
+            if aim_mode == "aircraft":
+                aim_n, aim_e = air_n[i], air_e[i]
+                y, p = look_angles(sm_n, sm_e, sm_alt, aim_n, aim_e, aim_alt)
+                q = euler_to_quat(0.0, p, y)
+            else:
+                # A following camera that looks somewhere else: a stated
+                # point or a fixed bearing, solved exactly as the
+                # world-anchored presets solve it.
+                y, p, q = _stated_aim(sm_n, sm_e, sm_alt, t[i])
             pos_n.append(sm_n)
             pos_e.append(sm_e)
             pos_alt.append(sm_alt)
-            yaw.append(y)
+            yaw.append(y % 360.0 if aim_mode != "aircraft" else y)
             pitch.append(p)
             roll.append(0.0)                       # never inherit roll
-            quat.append(euler_to_quat(0.0, p, y))
+            quat.append(q)
     elif preset in ("ground", "tower", "explicit"):
-        aim_mode = str(camera.aim_mode.value)
         aim_n = aim_e = aim_alt = None
         for i in range(n):
             cn, ce, calt = _static_position(t[i])
@@ -504,35 +606,14 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                     aim_n, aim_e, aim_alt = target
                 else:
                     dt = t[i] - t[i - 1]
-                    aa = 1.0 - math.exp(-dt / AIM_LAG_S)
-                    aim_n += (target[0] - aim_n) * aa
-                    aim_e += (target[1] - aim_e) * aa
-                    aim_alt += (target[2] - aim_alt) * aa
+                    aim_n = lag_step(aim_n, prev_target[0], target[0], dt, AIM_LAG_S)
+                    aim_e = lag_step(aim_e, prev_target[1], target[1], dt, AIM_LAG_S)
+                    aim_alt = lag_step(aim_alt, prev_target[2], target[2], dt, AIM_LAG_S)
+                prev_target = target
                 y, p = look_angles(cn, ce, calt, aim_n, aim_e, aim_alt)
                 q = euler_to_quat(0.0, p, y)
-            elif aim_mode == "point":
-                pn = _keyframe_value(camera.moves, "aim_north_m", t[i],
-                                     float(camera.aim_north_m.value))
-                pe = _keyframe_value(camera.moves, "aim_east_m", t[i],
-                                     float(camera.aim_east_m.value))
-                palt = _keyframe_value(camera.moves, "aim_alt_m", t[i],
-                                       float(camera.aim_alt_m.value))
-                y, p = look_angles(cn, ce, calt, pn, pe, palt)
-                q = euler_to_quat(0.0, p, y)
-            elif aim_mode == "bearing":
-                q = _keyframed_bearing_quat(
-                    camera.moves, t[i],
-                    float(camera.aim_bearing_deg.value),
-                    float(camera.aim_elevation_deg.value))
-                if q is None:
-                    y = float(camera.aim_bearing_deg.value) % 360.0
-                    p = float(camera.aim_elevation_deg.value)
-                    q = euler_to_quat(0.0, p, y)
-                else:
-                    y, p = _quat_yaw_pitch(q)
             else:
-                raise PoseSolveError(
-                    f"camera.poses: unknown aim mode {aim_mode!r}")
+                y, p, q = _stated_aim(cn, ce, calt, t[i])
             pos_n.append(cn)
             pos_e.append(ce)
             pos_alt.append(calt)
@@ -607,3 +688,348 @@ def aircraft_local_track(columns: Dict[str, Sequence[float]],
             "heading_deg": float(columns["heading_deg"][i]),
         })
     return out
+
+
+# -- the second aircraft: a scripted traffic track -------------------------
+#
+# Phase 2 (packages B + C, contracts §2.2, brainstorm §3.4). A traffic
+# aircraft is not a second FDM: it is a mesh flown along a track SOLVED
+# HERE from the primary's recorded telemetry, carried on the card as
+# position + attitude keyframes (the camera machinery applied to an
+# actor), and moved by the render host with linear interpolation. The
+# three tracks are the three that produce object-object occlusion:
+#
+#   formation   abeam the primary at ``range_m`` on its right, at its
+#               altitude, copying its attitude sample for sample;
+#   crossing    a straight line at the primary's mean ground speed,
+#               heading the primary's mid-run heading + 90 deg, placed so
+#               that at the run's midpoint the traffic sits exactly
+#               ``range_m`` AHEAD of the primary along its heading -- it
+#               crosses the primary's line there, at the stated range;
+#   overtaking  abeam at ``range_m`` on the primary's right, sliding from
+#               ``range_m`` behind at the first sample to ``range_m``
+#               ahead at the last, same heading, wings level.
+#
+# Crossing and overtaking fly wings-level (roll = pitch = 0); a
+# scripted actor has no dynamics to bank with, and saying so is better
+# than inventing a bank. What is NOT claimed: no collision avoidance,
+# no aerodynamic plausibility of the traffic's speed; the three traffic
+# tracks trail no wake.
+#
+# P7 adds a fourth kind the spec's ``traffic[]`` vocabulary does NOT
+# carry (core/scenario/blocks.py TRAFFIC_TRACKS stays the three): the
+# ``wake_generator`` -- the aircraft whose vortex pair the own ship
+# meets (the spec's ``wake`` block). Its track is NOT relative to the
+# primary sample by sample (that would be circular: the primary's
+# recorded flight is the response to the wake): it is a straight line
+# from the own ship's FIRST sample, ahead along the own initial heading
+# by ``ahead_m``, ``right_m`` to the side, ``above_m`` up, flown at
+# ``speed_mps`` on that heading, wings level -- the geometry
+# core/environment/wake.py states (``generator_geometry``), so the mesh
+# is drawn where the physics put the generator.
+
+#: The tracks this solver knows: the spec's three traffic tracks and the
+#: wake generator.
+TRAFFIC_TRACKS = ("formation", "crossing", "overtaking", "wake_generator")
+#: The stated-offset tracks (core/scenario/blocks.py PLACED_TRACKS).
+PLACED_TRACKS = ("offset", "stationary")
+#: The keys a wake_generator geometry mapping carries (core/environment/wake.py).
+WAKE_GEOMETRY_KEYS = ("heading_deg", "speed_mps", "ahead_m", "right_m", "above_m")
+
+
+def _heading_axes(heading_deg: float) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    """(forward, right) unit vectors in (north, east) for a true heading."""
+    h = math.radians(heading_deg)
+    return (math.cos(h), math.sin(h)), (-math.sin(h), math.cos(h))
+
+
+def _mean_ground_speed(track: Sequence[Dict]) -> float:
+    """Path length over duration of the primary's local track, m/s."""
+    if len(track) < 2:
+        return 0.0
+    length = 0.0
+    for a, b in zip(track, track[1:]):
+        length += math.hypot(b["north_m"] - a["north_m"], b["east_m"] - a["east_m"])
+    duration = float(track[-1]["t_s"]) - float(track[0]["t_s"])
+    return length / duration if duration > 0.0 else 0.0
+
+
+def solve_traffic_track(columns: Dict[str, Sequence[float]], kind: str,
+                        range_m: float, frame: SceneFrame,
+                        object_id: str, wake: Optional[Dict] = None,
+                        placement: Optional[Dict[str, float]] = None) -> PoseTrack:
+    """The traffic aircraft's per-sample track relative to the primary's
+    recorded flight: a :class:`PoseTrack` (the camera container reused:
+    ``camera_id`` holds the object's id, ``preset`` the track kind, the
+    lens fields are zero because an aircraft has no lens). Pure: the
+    same telemetry and entry give a bit-identical track (``digest``).
+    The ``wake_generator`` kind takes its geometry mapping (P7;
+    ``range_m`` is then the along-track lead and is read from it)."""
+    if kind not in TRAFFIC_TRACKS and kind not in PLACED_TRACKS:
+        raise PoseSolveError(
+            f"camera.poses: traffic track {kind!r} is not one of "
+            f"{TRAFFIC_TRACKS + PLACED_TRACKS}; the solver invents no path")
+    if kind == "wake_generator":
+        return solve_wake_generator_track(columns, wake, frame, object_id)
+    if kind in PLACED_TRACKS:
+        return _solve_placed_track(columns, kind, placement or {}, frame,
+                                   object_id)
+    range_m = float(range_m)
+    if not range_m > 0.0:
+        raise PoseSolveError(
+            f"camera.poses: traffic range {range_m!r} m is not positive")
+    primary = aircraft_local_track(columns, frame)
+    n = len(primary)
+    times = [p["t_s"] for p in primary]
+    north: List[float] = []
+    east: List[float] = []
+    alt: List[float] = []
+    yaw: List[float] = []
+    pitch: List[float] = []
+    roll: List[float] = []
+    if kind == "formation":
+        for p in primary:
+            _, right = _heading_axes(p["heading_deg"])
+            north.append(p["north_m"] + range_m * right[0])
+            east.append(p["east_m"] + range_m * right[1])
+            alt.append(p["alt_m"])
+            yaw.append(p["heading_deg"] % 360.0)
+            pitch.append(p["pitch_deg"])
+            roll.append(p["roll_deg"])
+    elif kind == "crossing":
+        mid = n // 2
+        centre = primary[mid]
+        forward, _ = _heading_axes(centre["heading_deg"])
+        cross_n = centre["north_m"] + range_m * forward[0]
+        cross_e = centre["east_m"] + range_m * forward[1]
+        heading = (centre["heading_deg"] + 90.0) % 360.0
+        along, _ = _heading_axes(heading)
+        speed = _mean_ground_speed(primary)
+        t_mid = float(centre["t_s"])
+        for p in primary:
+            s = speed * (float(p["t_s"]) - t_mid)
+            north.append(cross_n + s * along[0])
+            east.append(cross_e + s * along[1])
+            alt.append(centre["alt_m"])
+            yaw.append(heading)
+            pitch.append(0.0)
+            roll.append(0.0)
+    else:   # overtaking
+        t0, t1 = float(times[0]), float(times[-1])
+        span = t1 - t0
+        for p in primary:
+            forward, right = _heading_axes(p["heading_deg"])
+            fraction = (float(p["t_s"]) - t0) / span if span > 0.0 else 0.5
+            s = range_m * (2.0 * fraction - 1.0)
+            north.append(p["north_m"] + range_m * right[0] + s * forward[0])
+            east.append(p["east_m"] + range_m * right[1] + s * forward[1])
+            alt.append(p["alt_m"])
+            yaw.append(p["heading_deg"] % 360.0)
+            pitch.append(0.0)
+            roll.append(0.0)
+    quats = tuple(euler_to_quat(r, p, y) for r, p, y in zip(roll, pitch, yaw))
+    return PoseTrack(
+        camera_id=str(object_id), preset=str(kind), horizon_stable=False,
+        t=tuple(float(t) for t in times),
+        north_m=tuple(north), east_m=tuple(east), alt_m=tuple(alt),
+        quat=quats, yaw_deg=tuple(yaw), pitch_deg=tuple(pitch),
+        roll_deg=tuple(roll),
+        focal_length_mm=tuple(0.0 for _ in times),
+        sensor_width_mm=0.0, sensor_height_mm=0.0, width_px=0, height_px=0,
+        near_m=0.0, far_m=0.0)
+
+
+def _solve_placed_track(columns: Dict[str, Sequence[float]], kind: str,
+                        placement: Dict[str, float], frame: SceneFrame,
+                        object_id: str) -> PoseTrack:
+    """The second aircraft put at a STATED offset from the primary.
+
+    ``offset``: the point ``ahead_m`` forward / ``right_m`` right /
+    ``up_m`` above the primary, in the primary's own heading frame at
+    each sample, drifting along that frame at ``speed_delta_kt`` (so +10
+    kt pulls ahead of the primary by 5.1 m every second and -10 kt falls
+    back) and carrying the primary's attitude. ``stationary``: the same
+    offset from the primary's FIRST sample, then held there with the
+    primary's initial heading and wings level -- an aircraft that just
+    sits, so it can be passed or blocked. Pure, like the other tracks.
+    """
+    ahead = float(placement.get("ahead_m", 0.0))
+    right_m = float(placement.get("right_m", 0.0))
+    up_m = float(placement.get("up_m", 0.0))
+    delta_mps = float(placement.get("speed_delta_kt", 0.0)) * 0.514444
+    primary = aircraft_local_track(columns, frame)
+    times = [p["t_s"] for p in primary]
+    t0 = float(times[0])
+    north: List[float] = []
+    east: List[float] = []
+    alt: List[float] = []
+    yaw: List[float] = []
+    pitch: List[float] = []
+    roll: List[float] = []
+    first = primary[0]
+    for p in primary:
+        if kind == "stationary":
+            base, along = first, ahead
+        else:
+            base, along = p, ahead + delta_mps * (float(p["t_s"]) - t0)
+        forward, right = _heading_axes(base["heading_deg"])
+        north.append(base["north_m"] + along * forward[0] + right_m * right[0])
+        east.append(base["east_m"] + along * forward[1] + right_m * right[1])
+        alt.append(base["alt_m"] + up_m)
+        yaw.append(base["heading_deg"] % 360.0)
+        if kind == "stationary":
+            pitch.append(0.0)
+            roll.append(0.0)
+        else:
+            pitch.append(p["pitch_deg"])
+            roll.append(p["roll_deg"])
+    quats = tuple(euler_to_quat(r, p, y) for r, p, y in zip(roll, pitch, yaw))
+    return PoseTrack(
+        camera_id=str(object_id), preset=str(kind), horizon_stable=False,
+        t=tuple(float(t) for t in times),
+        north_m=tuple(north), east_m=tuple(east), alt_m=tuple(alt),
+        quat=quats, yaw_deg=tuple(yaw), pitch_deg=tuple(pitch),
+        roll_deg=tuple(roll),
+        focal_length_mm=tuple(0.0 for _ in times),
+        sensor_width_mm=0.0, sensor_height_mm=0.0, width_px=0, height_px=0,
+        near_m=0.0, far_m=0.0)
+
+
+def solve_wake_generator_track(columns: Dict[str, Sequence[float]],
+                               geometry: Optional[Dict], frame: SceneFrame,
+                               object_id: str) -> PoseTrack:
+    """The wake generator's per-sample track (P7): a straight line from
+    the own ship's FIRST recorded sample, displaced ``ahead_m`` along the
+    own initial heading, ``right_m`` to its right and ``above_m`` up, and
+    flown at ``speed_mps`` on that heading from that point, wings level,
+    altitude held. Refuses by name a geometry that is missing a key, a
+    non-positive speed or a negative lead (the generator is ahead by
+    construction: a negative lead would put the wake's source behind the
+    aircraft that is said to be flying through it). Pure."""
+    if not isinstance(geometry, dict) or any(k not in geometry for k in WAKE_GEOMETRY_KEYS):
+        raise PoseSolveError(
+            f"camera.poses: a wake_generator track needs a geometry mapping with "
+            f"{list(WAKE_GEOMETRY_KEYS)} (core/environment/wake.py generator_geometry); "
+            f"the solver invents no placement")
+    speed = float(geometry["speed_mps"])
+    ahead = float(geometry["ahead_m"])
+    if not speed > 0.0:
+        raise PoseSolveError(
+            f"camera.poses: the wake generator's speed {speed!r} m/s is not positive")
+    if ahead < 0.0:
+        raise PoseSolveError(
+            f"camera.poses: the wake generator's lead {ahead!r} m is negative; the "
+            f"generator flies ahead of the aircraft in its wake")
+    primary = aircraft_local_track(columns, frame)
+    first = primary[0]
+    heading = float(geometry["heading_deg"]) % 360.0
+    forward, right = _heading_axes(heading)
+    start_n = first["north_m"] + ahead * forward[0] + float(geometry["right_m"]) * right[0]
+    start_e = first["east_m"] + ahead * forward[1] + float(geometry["right_m"]) * right[1]
+    alt = first["alt_m"] + float(geometry["above_m"])
+    t0 = float(first["t_s"])
+    times = [float(p["t_s"]) for p in primary]
+    north = [start_n + speed * (t - t0) * forward[0] for t in times]
+    east = [start_e + speed * (t - t0) * forward[1] for t in times]
+    quats = tuple(euler_to_quat(0.0, 0.0, heading) for _ in times)
+    return PoseTrack(
+        camera_id=str(object_id), preset="wake_generator", horizon_stable=False,
+        t=tuple(times), north_m=tuple(north), east_m=tuple(east),
+        alt_m=tuple(alt for _ in times), quat=quats,
+        yaw_deg=tuple(heading for _ in times), pitch_deg=tuple(0.0 for _ in times),
+        roll_deg=tuple(0.0 for _ in times),
+        focal_length_mm=tuple(0.0 for _ in times),
+        sensor_width_mm=0.0, sensor_height_mm=0.0, width_px=0, height_px=0,
+        near_m=0.0, far_m=0.0)
+
+
+def wake_generator_card_block(track: PoseTrack, aircraft: str, geometry: Dict,
+                              obj, frame: SceneFrame, cg_structural_in: Sequence[float],
+                              mesh_manifest: Optional[str]) -> Dict[str, object]:
+    """The run card's ``traffic[]`` entry for the wake generator (P7): the
+    same shape as a traffic entry (``track`` ``wake_generator``,
+    ``range_m`` the along-track lead, the default livery) plus the
+    geometry the physics stated, so the host draws the generator's mesh
+    where the wake's source is and derives nothing."""
+    return {
+        "id": obj.id,
+        "int_id": obj.int_id,
+        "aircraft": str(aircraft),
+        "track": "wake_generator",
+        "range_m": float(geometry["ahead_m"]),
+        "livery": "default",
+        "mesh_manifest": mesh_manifest,
+        "cg_actor_cm": cg_actor_cm(cg_structural_in),
+        "origin_x_m": frame.origin_x_m,
+        "origin_y_m": frame.origin_y_m,
+        "wake_geometry": {k: float(geometry[k]) for k in WAKE_GEOMETRY_KEYS},
+        "poses": {
+            "t_s": list(track.t),
+            "north_m": list(track.north_m),
+            "east_m": list(track.east_m),
+            "alt_m": list(track.alt_m),
+            "yaw_deg": list(track.yaw_deg),
+            "pitch_deg": list(track.pitch_deg),
+            "roll_deg": list(track.roll_deg),
+        },
+        "track_digest": track.digest(),
+    }
+
+
+def traffic_state(track: PoseTrack, index: int) -> Dict[str, float]:
+    """The traffic aircraft's state at a sample, in the shape of the
+    manifest's ``aircraft`` block (the labels project from it)."""
+    return {
+        "north_m": track.north_m[index], "east_m": track.east_m[index],
+        "alt_m": track.alt_m[index], "roll_deg": track.roll_deg[index],
+        "pitch_deg": track.pitch_deg[index],
+        "heading_deg": track.yaw_deg[index],
+    }
+
+
+#: JSBSim structural inches -> UE actor centimetres: x negated, y and z
+#: as they are (UJSBSimMovementComponent::UpdateLocalTransforms, axis0
+#: (-1, 0, 0); the B747's CG (1327, 0, -24) in lands at (-3370.6, 0,
+#: -61.0) cm, the number the plugin logs).
+STRUCTURAL_IN_TO_ACTOR_CM = 2.54
+
+
+def cg_actor_cm(cg_structural_in: Sequence[float]) -> List[float]:
+    x, y, z = (float(v) for v in cg_structural_in)
+    return [-x * STRUCTURAL_IN_TO_ACTOR_CM, y * STRUCTURAL_IN_TO_ACTOR_CM,
+            z * STRUCTURAL_IN_TO_ACTOR_CM]
+
+
+def traffic_card_block(track: PoseTrack, entry, obj, frame: SceneFrame,
+                       cg_structural_in: Sequence[float],
+                       mesh_manifest: Optional[str]) -> Dict[str, object]:
+    """The run card's ``traffic[]`` entry: the spec fields, the object's
+    ids, where the airframe's CG sits in the actor frame (so the host
+    places the mesh actor's origin at CG - R * cg, exactly as
+    FlightSimScenarioWorld places the FDM actor, deriving nothing), the
+    imported mesh manifest to draw, and the solved keyframes in the same
+    block shape as ``cameras[].poses`` -- consumed verbatim."""
+    return {
+        "id": obj.id,
+        "int_id": obj.int_id,
+        "aircraft": str(entry.aircraft.value),
+        "track": str(entry.track.value),
+        "range_m": float(entry.range_m.value),
+        "livery": str(entry.livery.value),
+        **({"placement": entry.placement()}
+           if str(entry.track.value) in PLACED_TRACKS else {}),
+        "mesh_manifest": mesh_manifest,
+        "cg_actor_cm": cg_actor_cm(cg_structural_in),
+        "origin_x_m": frame.origin_x_m,
+        "origin_y_m": frame.origin_y_m,
+        "poses": {
+            "t_s": list(track.t),
+            "north_m": list(track.north_m),
+            "east_m": list(track.east_m),
+            "alt_m": list(track.alt_m),
+            "yaw_deg": list(track.yaw_deg),
+            "pitch_deg": list(track.pitch_deg),
+            "roll_deg": list(track.roll_deg),
+        },
+        "track_digest": track.digest(),
+    }

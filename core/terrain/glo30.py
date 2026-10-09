@@ -43,6 +43,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .dem import DEMError, ingest
+from .geoid import (
+    bake_datum, cdb_descriptor_block, datum_for_heightfield, dted_block, grid_for_model,
+    write_gtx_bundle,
+)
 from .heightfield import Heightfield
 
 BUCKET = "https://copernicus-dem-30m.s3.amazonaws.com"
@@ -355,6 +359,36 @@ def check_summits(baked: Heightfield, location: Location) -> List[Dict]:
     return out
 
 
+def orographic_parameters(heightfield: Heightfield, origin_lat: float,
+                          origin_lon: float) -> Dict[str, float]:
+    """The orographic field's derived numbers for a raster and an origin:
+    wavelength (the raster-extent heuristic terrain_field_from documents),
+    decay height (the provider's own clamp) and the projected origin.
+
+    The ONE place they are computed: the run card's block below and the
+    headless runner's provider (core.scenario.runner.orographic_for) both
+    read them from here, so the two hosts cannot model two different
+    mountains.
+    """
+    from pyproj import Transformer
+
+    from ..environment.terrain_field import (
+        DECAY_FROM_WAVELENGTH, DECAY_HEIGHT_MAX_M, DECAY_HEIGHT_MIN_M,
+    )
+
+    width_m, _ = heightfield.extent_m
+    wavelength_m = max(width_m / 8.0, 200.0)
+    decay_height_m = min(max(wavelength_m * DECAY_FROM_WAVELENGTH,
+                             DECAY_HEIGHT_MIN_M), DECAY_HEIGHT_MAX_M)
+    transformer = Transformer.from_crs("EPSG:4326", heightfield.georeference.crs,
+                                       always_xy=True)
+    origin_x, origin_y = transformer.transform(origin_lon, origin_lat)
+    return {"decay_height_m": float(decay_height_m),
+            "wavelength_m": float(wavelength_m),
+            "origin_x_m": float(origin_x),
+            "origin_y_m": float(origin_y)}
+
+
 def orographic_card_block(baked_path, origin_lat: float, origin_lon: float,
                           wind_speed_kt: float, wind_from_deg: float) -> Dict:
     """The run card's ``orographic`` block, with every parameter computed here.
@@ -365,43 +399,51 @@ def orographic_card_block(baked_path, origin_lat: float, origin_lon: float,
     derive differently. The same numbers drive the Python provider when the
     selftest verifies the port.
     """
-    from pyproj import Transformer
-
-    from ..environment.terrain_field import (
-        DECAY_FROM_WAVELENGTH, DECAY_HEIGHT_MAX_M, DECAY_HEIGHT_MIN_M,
-    )
     from ..fdm import units as u
 
     baked = Heightfield.read(baked_path)
-    width_m, _ = baked.extent_m
-    wavelength_m = max(width_m / 8.0, 200.0)
-    decay_height_m = min(max(wavelength_m * DECAY_FROM_WAVELENGTH,
-                             DECAY_HEIGHT_MIN_M), DECAY_HEIGHT_MAX_M)
-    transformer = Transformer.from_crs("EPSG:4326", baked.georeference.crs,
-                                       always_xy=True)
-    origin_x, origin_y = transformer.transform(origin_lon, origin_lat)
     return {
         "terrain": str(Path(baked_path).resolve()),
         "wind_speed_mps": u.kt_to_mps(wind_speed_kt),
         "wind_from_deg": float(wind_from_deg),
-        "decay_height_m": float(decay_height_m),
-        "wavelength_m": float(wavelength_m),
-        "origin_x_m": float(origin_x),
-        "origin_y_m": float(origin_y),
+        **orographic_parameters(baked, origin_lat, origin_lon),
         "lee": True,
+        # The vertical datum block (P10), from the sidecar when the bake
+        # wrote one, else evaluated from its provenance origin. The card
+        # writer lifts it to the card's top level (``datum``); the C++
+        # orographic reader takes named fields only and derives nothing
+        # from it.
+        "datum": datum_for_heightfield(baked),
     }
 
 
 def bake(location: Location, cache_dir, out_dir,
-         ground_sample_distance_m: float = 30.0) -> Tuple[Path, Dict]:
+         ground_sample_distance_m: float = 30.0,
+         geoid_model: str = "auto") -> Tuple[Path, Dict]:
     """Fetch, mosaic, ingest, verify and write one location's heightfield.
 
     Returns the ``.r16`` path and the verification report. Raises
     :class:`DEMError` if verification fails -- an unverified real-terrain bake
     must not be renderable by accident.
+
+    ``geoid_model`` (gap P10, D1): ``auto`` evaluates the datum block with
+    the EGM2008 5-minute grid when it is in the bake cache (``data/geoid``,
+    fetched by ``core.terrain.geoid.fetch_egm2008``) and with the committed
+    EGM96 grid otherwise, the difference stated in the block; ``EGM2008``
+    refuses by name (``geoid.grid_missing`` / ``geoid.grid_digest``) when
+    the cache lacks it or holds another file; ``EGM96`` uses the committed
+    grid. Beside the raster the bake writes ``<key>_geoid.gtx`` (the
+    node-aligned crop of the chosen grid around the scene bbox, evaluable
+    by PROJ) and ``<key>_geoid.json`` (the origin and 100 interior points
+    from the full grid). The sidecar's provenance gains ``dted`` (the
+    MIL-PRF-89020B-style fields with the GLO-30 accuracies as declared
+    u_D) and ``cdb_descriptor`` (documentation only).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # The geoid grid is chosen (and refused by name) BEFORE any tile is
+    # fetched: a bake that would end without its datum is not started.
+    grid = grid_for_model(geoid_model)
 
     tile_paths = fetch(location, cache_dir)
     tile_shas = {p.name: sha256_of(p) for p in tile_paths}
@@ -431,7 +473,7 @@ def bake(location: Location, cache_dir, out_dir,
     baked.provenance.update({
         "dataset": "Copernicus GLO-30 DSM (30 m surface model)",
         "attribution": ATTRIBUTION,
-        "vertical_datum": "EGM2008 orthometric (treated as MSL)",
+        "vertical_datum": "EGM2008 orthometric (GLO-30); see the datum block",
         "tiles": {stem: tile_shas[tile_path(Path(cache_dir), stem).name]
                   for stem in location.tiles},
         "bbox_deg": location.bbox,
@@ -445,6 +487,29 @@ def bake(location: Location, cache_dir, out_dir,
             "DSM: canopy and buildings included; 30 m posting smooths "
             "summits and cliffs; finer detail than 30 m is not in the data"),
     })
+    # The vertical datum, stated (P10): the heights are EGM2008
+    # orthometric, JSBSim's sea level is the ellipsoid, and the geoid
+    # undulation N at the origin is what separates them. Evaluated from
+    # the provenance origin just written, so the block and the origin
+    # cannot disagree; nothing in the raster is moved.
+    baked.provenance["datum"] = datum_for_heightfield(baked)
+    # D1: the block re-evaluated with the bake's chosen grid (EGM2008 when
+    # cached, else EGM96 with the difference stated), the scene bbox and
+    # the .gtx crop written beside the raster; the origin and its
+    # orthometric height are the block's own just written above.
+    gtx = write_gtx_bundle(grid, location.bbox, out_dir, location.key,
+                           location.origin_lat, location.origin_lon)
+    baked.provenance["datum"] = bake_datum(baked.provenance["datum"], grid,
+                                           location.bbox, gtx, location_key=location.key)
+    baked.provenance["geoid_files"] = {
+        "gtx": gtx["file"], "gtx_sha256": gtx["sha256"],
+        "samples": gtx["samples_file"], "samples_sha256": gtx["samples_sha256"],
+    }
+    # DTED / CDB-grade metadata (documentation only; nothing is written in
+    # either format): every field from the bake, the standards' field
+    # names marked unverified where they could not be fetched.
+    baked.provenance["dted"] = dted_block(baked)
+    baked.provenance["cdb_descriptor"] = cdb_descriptor_block(baked)
     raw = baked.write(out_dir / location.key)
     return raw, verification
 
@@ -496,3 +561,101 @@ def dynamic_location(lat: float, lon: float,
         snowline_m=max(500.0, 5200.0 - 60.0 * abs(lat)),
         summits=(),
     )
+
+
+# -- W2: the runway's flatten pad, a NEW bake with its own key and sha256 -----------
+
+def runway_pad_key(key: str, designator: str) -> str:
+    """The pad bake's key: ``<parent key>_runway_<designator>`` -- a new
+    stem beside the parent, never the parent's name."""
+    return f"{key}_runway_{designator}"
+
+
+def _pad_datum(parent_block: Optional[Dict], field: Heightfield) -> Optional[Dict]:
+    """The pad bake's datum block: the parent's, with the origin's
+    orthometric and ellipsoidal heights re-evaluated on the padded field
+    (the plane may pass under the origin); N, the grid and the crop are
+    the parent's own -- nothing about the geoid changed."""
+    if not isinstance(parent_block, dict):
+        return None
+    block = dict(parent_block)
+    lat, lon = block.get("origin_lat_deg"), block.get("origin_lon_deg")
+    n = block.get("undulation_m")
+    if lat is None or lon is None or not isinstance(n, (int, float)):
+        block["note"] = (str(block.get("note") or "") + " | runway pad: copied from the parent "
+                         "bake (no origin or undulation to re-evaluate)").strip(" |")
+        return block
+    from pyproj import Transformer
+
+    transformer = Transformer.from_crs("EPSG:4326", field.georeference.crs, always_xy=True)
+    x, y = transformer.transform(float(lon), float(lat))
+    orthometric = float(field.elevation_at(x, y))
+    before = block.get("orthometric_height_of_origin_m")
+    block["orthometric_height_of_origin_m"] = orthometric
+    block["ellipsoidal_height_of_origin_m"] = orthometric + float(n)
+    block["note"] = (str(block.get("note") or "")
+                     + f" | runway pad: the origin's heights re-evaluated on the padded field "
+                       f"(orthometric {before} -> {orthometric:.3f} m); N and the crop are the "
+                       f"parent bake's").strip(" |")
+    return block
+
+
+def bake_runway_pad(bake_stem, spec, out_dir=None, shoulder_m: Optional[float] = None,
+                    tolerance_m: Optional[float] = None) -> Tuple[Path, Dict]:
+    """Write the runway's flatten pad as a NEW bake beside ``bake_stem``
+    (``<key>_runway_<designator>.r16`` + ``.json``): the parent's raster
+    with the runway's least-squares plane over its footprint and a graded
+    shoulder (core.scene.runway.flatten_pad), the parent's provenance
+    copied and extended with ``runway_pad`` {parent, spec, statistics},
+    the datum block re-evaluated at the origin. The parent's files are not
+    touched (measured: its bytes and sha256 are unchanged, pinned). Refuses
+    ``runway.terrain_mismatch`` by name before writing anything. Returns
+    the ``.r16`` path and the pad statistics."""
+    from ..scene import runway as rw
+
+    bake_stem = Path(bake_stem).with_suffix("")
+    out_dir = Path(out_dir) if out_dir is not None else bake_stem.parent
+    parent = Heightfield.read(bake_stem)
+    key = runway_pad_key(parent.name, spec.designator)
+    shoulder = rw.DEFAULT_SHOULDER_M if shoulder_m is None else float(shoulder_m)
+    field, statistics = rw.flatten_pad(parent, spec, shoulder_m=shoulder,
+                                       tolerance_m=tolerance_m, name=key)
+    parent_sidecar = bake_stem.with_suffix(".json")
+    field.provenance = dict(parent.provenance)
+    field.provenance["runway_pad"] = {
+        "key": key,
+        "parent": {"stem": str(bake_stem), "name": parent.name, "sha256": parent.digest(),
+                   "sidecar_sha256": sha256_of(parent_sidecar) if parent_sidecar.is_file() else None},
+        "spec": spec.to_dict(),
+        "statistics": statistics,
+        "basis": "a new bake: the parent's raster with the runway plane over the footprint and "
+                 "a smoothstep shoulder; every other pixel the parent's own value re-quantised "
+                 "to the new scale (untouched_pixels_moved_m states by how much)",
+    }
+    field.provenance["datum"] = _pad_datum(parent.provenance.get("datum"), field)
+    raw = field.write(out_dir / key)
+    return raw, statistics
+
+
+def ensure_runway_pad(bake_stem, spec, out_dir=None, shoulder_m: Optional[float] = None) -> Path:
+    """The pad bake's stem for a parent and a runway: reused when one is
+    already written FROM THIS PARENT (its sidecar's ``runway_pad.parent
+    .sha256`` is the parent's digest and its spec is this one), else
+    baked. A stale pad (the parent re-baked, the runway moved) is
+    replaced, never flown."""
+    bake_stem = Path(bake_stem).with_suffix("")
+    out_dir = Path(out_dir) if out_dir is not None else bake_stem.parent
+    parent = Heightfield.read(bake_stem)
+    stem = out_dir / runway_pad_key(parent.name, spec.designator)
+    sidecar = stem.with_suffix(".json")
+    if sidecar.is_file() and stem.with_suffix(".r16").is_file():
+        try:
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+            pad = (meta.get("provenance") or {}).get("runway_pad") or {}
+            if (pad.get("parent", {}).get("sha256") == parent.digest()
+                    and pad.get("spec") == spec.to_dict()):
+                return stem
+        except (OSError, ValueError):
+            pass
+    bake_runway_pad(bake_stem, spec, out_dir=out_dir, shoulder_m=shoulder_m)
+    return stem

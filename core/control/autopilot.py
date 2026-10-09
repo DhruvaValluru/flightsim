@@ -152,7 +152,15 @@ class Autopilot:
         from .signs import measure
 
         base = getattr(self.fdm.derived, "base_name", self.fdm.aircraft_name)
-        self.signs = measure(base)
+        # Probe at THIS aircraft's trimmed condition, not the probe's jet
+        # default (6000 m, 280 kt): the convention is the model's, so any
+        # condition the airframe trims at measures it, and the condition
+        # it is about to fly is the one it is known to trim at. Measured:
+        # the c172p never engaged (TrimError at 280 kt inside measure()),
+        # so no Cessna ever flew with hold_state before this line.
+        state = self.fdm.state()
+        self.signs = measure(base, altitude_m=state.altitude_m,
+                             cas_kt=state.cas_kt)
         props.set_many(self.signs.as_properties())
 
         props.set_many(

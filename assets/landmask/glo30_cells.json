@@ -1,0 +1,7 @@
+{
+  "source": "https://copernicus-dem-30m.s3.amazonaws.com/tileList.txt",
+  "source_sha256": "10604e3052c98a09e9216f1a8f0a555a04148419757575f783d4937fd44316dc",
+  "land_cells": 26450,
+  "format": "180 rows, lat 89..-90; 90 hex digits per row, lon -180..179, MSB first; 1 = a GLO-30 tile exists for the cell",
+  "mask_sha256": "fef42da0e314ed56aa8d2f8c7fd88a5a2a9170612ef69251638080100015e5de"
+}

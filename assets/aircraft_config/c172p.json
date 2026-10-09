@@ -30,6 +30,13 @@
     "RearNavLight",
     "nav-light.*"
   ],
+  "gear_geometry": {
+    "parts": [],
+    "objects": [
+      ".*Wheel.*"
+    ],
+    "source": "c172-common.ac names its gear NoseWheel, LeftWheel, RightWheel, NoseWheelStrut, Left/RightWheelStrut, Left/RightWheelBrake; nothing else in the model matches .*Wheel.* (the control yoke is 'yoke'). Measured 2026-09-25 from the pinned commit: lowest gear vertex -1.368 m below the model origin (NoseWheel), main wheels -1.326 m"
+  },
   "surfaces": {
     "aileron_l": {
       "bone": "aileron_l",
@@ -174,6 +181,249 @@
           -0.052
         ]
       ]
+    }
+  },
+  "labels": {
+    "dimensions_m": {
+      "length": 8.28,
+      "height": 2.72,
+      "source": "FAA Type Certificate Data Sheet 3A12 / Cessna 172P Pilot's Operating Handbook, section 1 (length 8.28 m, height 2.72 m); span from the flown FDM's own <wingspan>"
+    },
+    "keypoints": {
+      "nose": {
+        "fdm_contact": "NOSE_SKID"
+      },
+      "tail": {
+        "fdm_contact": "TAIL_SKID"
+      },
+      "left_wingtip": {
+        "fdm_contact": "LEFT_TIP"
+      },
+      "right_wingtip": {
+        "fdm_contact": "RIGHT_TIP"
+      },
+      "nose_gear": {
+        "fdm_contact": "NOSE"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MAIN"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MAIN"
+      }
+    }
+  },
+  "limits": {
+    "category": {
+      "value": "normal",
+      "regulation": "14 CFR 23.337 (normal category)",
+      "source": "FAA TCDS 3A12 (Cessna 172P): certification basis CAR 3, whose 3.186 states the same normal-category load factors as 14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- unverified here: from memory of the TCDS"
+    },
+    "n_z_pos_g": {
+      "value": 3.8,
+      "source": "14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- normal category +3.8 g"
+    },
+    "n_z_neg_g": {
+      "value": -1.52,
+      "source": "14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- normal category -0.4 x 3.8 = -1.52 g"
+    },
+    "speed_limit_kt": {
+      "value": 163.0,
+      "kind": "V_NE",
+      "source": "unverified here: from memory of the Cessna 172P Pilot's Operating Handbook section 2 (Limitations): V_NE 163 KIAS (160 KCAS); compared here against JSBSim calibrated airspeed without a position-error correction"
+    },
+    "m_mo": {
+      "value": null,
+      "reason": "a piston single has no Mach operating limit; none is published for the 172P"
+    },
+    "alpha_stall_deg": {
+      "value": null,
+      "reason": "the JSBSim c172p model states no alpha limit (no <alphalimits> element; grep of c172p.xml, 2026-09-28); the validator's CLmax alpha is a derived quantity, not a stated limit"
+    },
+    "note": "Measured 2026-09-28: the c172p aero tables here cannot be trimmed above V_NE (170 kt and 183 kt CAS at 1500 m are refused envelope.trim_feasible), so a run beyond this speed limit is unreachable on this model; the load-factor limits are reachable through the gust and turbulence providers."
+  },
+  "loading": {
+    "source": "JSBSim 1.2.4 aircraft/c172p/c172p.xml <mass_balance> and <propulsion> as shipped in the .venv wheel (read 2026-09-28); handbook arms from memory of the Cessna 172P Pilot's Operating Handbook (1981) section 6 (weight and balance) [unverified here]",
+    "datum": {
+      "xml": "the c172p.xml <location> x in inches, positive aft (the JSBSim structural frame); the XML names no reference point",
+      "poh": "the front face of the firewall (Cessna 172P POH section 6) [unverified here]",
+      "arm_comparison": {
+        "status": "inferred",
+        "stations_xml_in": {
+          "Pilot": 36.0,
+          "Co-Pilot": 36.0,
+          "Left Passenger": 70.0,
+          "Right Passenger": 70.0,
+          "Baggage": 95.0
+        },
+        "stations_poh_in": {
+          "Pilot": 37.0,
+          "Co-Pilot": 37.0,
+          "Left Passenger": 73.0,
+          "Right Passenger": 73.0,
+          "Baggage": 95.0
+        },
+        "tanks_xml_in": 56.0,
+        "tanks_poh_in": 48.0,
+        "max_station_difference_in": 3.0,
+        "inference": "the XML station arms sit 0..3 in forward of the handbook's (front seats 36 vs 37, rear seats 70 vs 73, baggage 95 vs 95), so the XML datum is TAKEN AS the handbook datum with a 3 in uncertainty on any arm; the envelope is applied to the XML CG on that inference, and the record says so. The XML tank arm (56 in) is 8 in aft of the handbook's wing-tank arm (48 in); the tanks are flown at the XML's own arm",
+        "source": "handbook arms from memory of the Cessna 172P POH (1981) section 6 loading arrangements [unverified here]; XML arms read from c172p.xml"
+      }
+    },
+    "empty_weight": {
+      "lb": 1500.0,
+      "arm_in": 41.0,
+      "source": "c172p.xml <emptywt> 1500 LBS at <location name=\"CG\"> x 41 in"
+    },
+    "stations": [
+      {
+        "name": "Pilot",
+        "index": 0,
+        "arm_in": 36.0,
+        "poh_arm_in": 37.0,
+        "default_lb": 180.0,
+        "max_kg": 150.0,
+        "loadable": true,
+        "source": "c172p.xml <pointmass name=\"Pilot\"> 180 LBS at x 36 in; a stated choice, not a handbook limit: 150 kg per seat; the handbook bounds the seats through the maximum weight and the envelope, not per seat"
+      },
+      {
+        "name": "Co-Pilot",
+        "index": 1,
+        "arm_in": 36.0,
+        "poh_arm_in": 37.0,
+        "default_lb": 0.0,
+        "max_kg": 150.0,
+        "loadable": true,
+        "source": "c172p.xml <pointmass name=\"Co-Pilot\"> 0 LBS at x 36 in; a stated choice, not a handbook limit: 150 kg per seat; the handbook bounds the seats through the maximum weight and the envelope, not per seat"
+      },
+      {
+        "name": "Left Passenger",
+        "index": 2,
+        "arm_in": 70.0,
+        "poh_arm_in": 73.0,
+        "default_lb": 0.0,
+        "max_kg": 150.0,
+        "loadable": true,
+        "source": "c172p.xml <pointmass name=\"Left Passenger\"> 0 LBS at x 70 in; a stated choice, not a handbook limit: 150 kg per seat; the handbook bounds the seats through the maximum weight and the envelope, not per seat"
+      },
+      {
+        "name": "Right Passenger",
+        "index": 3,
+        "arm_in": 70.0,
+        "poh_arm_in": 73.0,
+        "default_lb": 0.0,
+        "max_kg": 150.0,
+        "loadable": true,
+        "source": "c172p.xml <pointmass name=\"Right Passenger\"> 0 LBS at x 70 in; a stated choice, not a handbook limit: 150 kg per seat; the handbook bounds the seats through the maximum weight and the envelope, not per seat"
+      },
+      {
+        "name": "Baggage",
+        "index": 4,
+        "arm_in": 95.0,
+        "poh_arm_in": 95.0,
+        "default_lb": 0.0,
+        "max_kg": 54.4,
+        "loadable": true,
+        "source": "c172p.xml <pointmass name=\"Baggage\"> 0 LBS at x 95 in; max 120 lb = 54.4 kg from memory of the Cessna 172P POH section 2 limitations, baggage area 1 [unverified here]"
+      }
+    ],
+    "tanks": [
+      {
+        "index": 0,
+        "arm_in": 56.0,
+        "poh_arm_in": 48.0,
+        "capacity_lb": 185.0,
+        "default_lb": 100.0,
+        "source": "c172p.xml tank 0: <capacity> 185 LBS, <contents> 100 LBS at x 56 in"
+      },
+      {
+        "index": 1,
+        "arm_in": 56.0,
+        "poh_arm_in": 48.0,
+        "capacity_lb": 185.0,
+        "default_lb": 100.0,
+        "source": "c172p.xml tank 1: <capacity> 185 LBS, <contents> 100 LBS at x 56 in"
+      }
+    ],
+    "max_takeoff_weight": {
+      "kg": 1088.62,
+      "lb": 2400.0,
+      "source": "from memory of the Cessna 172P POH section 2 limitations: maximum takeoff weight 2400 lb (normal category) [unverified here]"
+    },
+    "cg_envelope": {
+      "polygon": [
+        [
+          35.0,
+          1500.0
+        ],
+        [
+          35.0,
+          1950.0
+        ],
+        [
+          39.5,
+          2400.0
+        ],
+        [
+          47.3,
+          2400.0
+        ],
+        [
+          47.3,
+          1500.0
+        ]
+      ],
+      "axes": [
+        "cg arm, in aft of the datum",
+        "gross weight, lb"
+      ],
+      "category": "normal",
+      "source": "from memory of the Cessna 172P POH section 6 centre-of-gravity limits, normal category: forward 35.0 in at 1950 lb and below, straight line to 39.5 in at 2400 lb; aft 47.3 in at all weights; the lower edge (1500 lb) is the chart's bottom, a stated choice [unverified here]",
+      "applies_on": "the arm-comparison inference above: the XML CG is compared with the handbook polygon as if the two datums coincide (3 in uncertainty, stated)"
+    },
+    "policy_station": "Co-Pilot",
+    "policy_station_reason": "the front passenger seat: the seat a payload draw fills (a stated choice)"
+  },
+  "icing": {
+    "source": "PROXY: the DHC6 (Twin Otter) row of assets/aircraft_config/DHC6.json applied to a single-engine high-wing piston aeroplane, a stated proxy (blueprint correction 7) -- no Cessna 172 icing coefficients are transcribed; the row itself is from memory of Bragg et al. AIAA 2000-0360 [unverified here]",
+    "model": "Bragg et al. 2000 factor form C_A,iced = (1 + eta k_A) C_A, applied per axis to the WHOLE axis by the icing injection (a stated simplification: Bragg's k applies to one coefficient of the axis)",
+    "proxy": true,
+    "proxy_of": "DHC6",
+    "k_table": {
+      "k_lift": {
+        "value": -0.09,
+        "source": "PROXY of the DHC6 row: k'_CLalpha of the Twin Otter set as remembered (the lift-curve slope loss) [unverified here]; applied to the whole LIFT axis"
+      },
+      "k_drag": {
+        "value": 0.34,
+        "source": "PROXY of the DHC6 row: k'_CD0 of the Twin Otter set as remembered (the parasite drag rise) [unverified here]; applied to the whole DRAG axis"
+      },
+      "k_pitch": {
+        "value": -0.2,
+        "source": "PROXY of the DHC6 row: k'_Cmalpha of the Twin Otter set as remembered (the tail's pitch stiffness loss) [unverified here]; applied to the whole PITCH axis"
+      },
+      "k_roll": {
+        "value": -0.1,
+        "source": "PROXY of the DHC6 row: k'_Clp of the Twin Otter set as remembered (roll damping loss) [unverified here]; applied to the whole ROLL axis"
+      },
+      "k_yaw": {
+        "value": -0.1,
+        "source": "PROXY of the DHC6 row: k'_Cnbeta of the Twin Otter set as remembered (directional stiffness loss) [unverified here]; applied to the whole YAW axis"
+      },
+      "k_side": {
+        "value": -0.2,
+        "source": "PROXY of the DHC6 row: k'_CYbeta of the Twin Otter set as remembered [unverified here]; applied to the whole SIDE axis"
+      }
+    }
+  },
+  "rain": {
+    "frontal_area_m2": {
+      "value": 3.8,
+      "source": "estimated here from the C172's published dimensions: fuselage cross-section about 1.3 m^2, wing span 11.0 m x the NACA 2412's 12 % of a 1.47 m chord (about 1.9 m^2), tail, struts and gear about 0.6 m^2 [an estimate, unverified here]"
+    },
+    "tire_pressure_psi": {
+      "value": 29.0,
+      "source": "Cessna 172P main-tyre inflation pressure, from memory of the pilot's operating handbook [unverified here]"
     }
   }
 }
