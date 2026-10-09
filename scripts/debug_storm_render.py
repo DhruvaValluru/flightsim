@@ -101,6 +101,9 @@ def main(argv=None) -> int:
     parser.add_argument("--terrain", default=None,
                         help="a bake stem under runs/terrain (default: the web app's scene for the prompt)")
     parser.add_argument("--flat", action="store_true", help="the bare slab, no terrain")
+    parser.add_argument("--rain-gain", type=float, default=None,
+                        help="the drops' opacity times this (1 = the physics; the web app reads "
+                             "FLIGHTSIM_RAIN_GAIN)")
     parser.add_argument("--no-google-tiles", action="store_true",
                         help="the baked ground instead of Google's tiles (the web app's own render "
                              "draws the tiles; its throw-away solve pass does not)")
@@ -186,6 +189,8 @@ def main(argv=None) -> int:
         extra = [f"-seconds={args.seconds}"] + (["-NoGoogleTiles"] if args.no_google_tiles else [])
         if backend != "off":
             extra.append(f"-weather-backend={backend}")
+            if args.rain_gain is not None:
+                extra.append(f"-rain-gain={args.rain_gain:g}")
         command = [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
                    "-run=FlightSimBridge.FlightSimRender"] + render_flags(
             card, frames, scene=scene, mesh=mesh, look=look, camera_flags=camera_flags,

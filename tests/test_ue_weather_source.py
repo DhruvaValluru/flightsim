@@ -437,3 +437,18 @@ def test_the_drops_are_lit_by_the_scene_not_by_a_black_sky_sample():
         assert "_translucent_lit(material)" in creator and "drop_lit(material, lib" in creator, name
     generations = _tuple("STORM_GENERATIONS")
     assert generations["M_RainDrops"] >= "4" and generations["M_RainSplash"] >= "3"
+
+
+def test_the_rain_gain_is_a_stated_exaggeration_on_both_hosts_and_the_web_app(monkeypatch):
+    """-rain-gain= / FLIGHTSIM_RAIN_GAIN: the drops' opacity weight times N,
+    1 the physics (faint from a fast aircraft, by Garg & Nayar), recorded."""
+    assert "double RainGain = 1.0;" in WEATHER_H
+    assert 'TEXT("Weight"), static_cast<float>(Weight * RainGain)' in WEATHER_CPP
+    assert 'TEXT("gain")' in WEATHER_CPP and "RainGain = FMath::Clamp(Options.RainGain, 0.0, 100.0);" in WEATHER_CPP
+    assert 'TEXT("rain-gain=")' in COMMANDLET and 'TEXT("rain-gain=")' in INTERACTIVE
+    from webapp.runs import weather_backend_flags
+    monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "procedural")
+    monkeypatch.delenv("FLIGHTSIM_RAIN_GAIN", raising=False)
+    assert weather_backend_flags() == ["-weather-backend=procedural"]
+    monkeypatch.setenv("FLIGHTSIM_RAIN_GAIN", "4")
+    assert weather_backend_flags() == ["-weather-backend=procedural", "-rain-gain=4"]

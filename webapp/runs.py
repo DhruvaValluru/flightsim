@@ -2015,7 +2015,15 @@ def weather_backend_flags() -> List[str]:
     if backend not in WEATHER_BACKENDS:
         raise ValueError(f"FLIGHTSIM_WEATHER_BACKEND={backend!r} is not one of "
                          f"{list(WEATHER_BACKENDS)}")
-    return [] if backend == "off" else [f"-weather-backend={backend}"]
+    if backend == "off":
+        return []
+    flags = [f"-weather-backend={backend}"]
+    # FLIGHTSIM_RAIN_GAIN=N: the drops' opacity times N (1 = the physics,
+    # faint from a fast aircraft; more shows the rain, recorded as such).
+    gain = os.environ.get("FLIGHTSIM_RAIN_GAIN", "").strip()
+    if gain:
+        flags.append(f"-rain-gain={float(gain):g}")
+    return flags
 
 
 def exposure_bias_for(elevation_deg: float):

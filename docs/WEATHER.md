@@ -132,6 +132,10 @@ veil (the shaft's Atlas extinction), not as drops. The shutter is the
 card camera's exposure triple when it states one, else 1/1000 s (stated; 1/250 s showed a 747's rain only before the camera moved;
 `look_applied.weather.shutter_s`), never the frame interval. A cockpit
 camera (`... cockpit camera ...`) gets the windshield's drops and
+rivulets. A clip that must SHOW the rain regardless sets
+`FLIGHTSIM_RAIN_GAIN=4` for the web app (`-rain-gain=4` for the
+commandlet): the drops' opacity times four, a stated exaggeration recorded
+in `look_applied.weather.rain.gain`, never the physics. A cockpit
 rivulets, the rain's most visible face from an aircraft. The drops are
 lit translucent surfaces (a drop's radiance is the mean of its
 surroundings, which is what the sky light and the cloud-shadowed sun

@@ -713,6 +713,7 @@ double FFlightSimWeather::ShaftShare(const FVector& CameraEnu) const
 
 bool FFlightSimWeather::Build(UWorld* World, const FFlightSimWeatherOptions& Options, FString& Error)
 {
+	RainGain = FMath::Clamp(Options.RainGain, 0.0, 100.0);
 	Record = WeatherRecord();
 	WorldRef = World;
 	Backend = Options.Backend;
@@ -905,6 +906,10 @@ bool FFlightSimWeather::BuildRain(UWorld* World, const TSharedPtr<FJsonObject>& 
 	Row->SetNumberField(TEXT("rate_mmh"), RateMmh);
 	Row->SetNumberField(TEXT("particles"), Particles);
 	Row->SetNumberField(TEXT("weight"), Weight);
+	Row->SetNumberField(TEXT("gain"), RainGain);
+	Row->SetStringField(TEXT("gain_basis"), RainGain == 1.0
+		? TEXT("1: the streak coverage of Garg & Nayar, unexaggerated")
+		: TEXT("a stated exaggeration of the drops' opacity (-rain-gain=): the rain is shown, not measured"));
 	Row->SetNumberField(TEXT("ambient_fraction"), AmbientFraction);
 	Row->SetNumberField(TEXT("selftest_drops"), Selftest->Num());
 	RainActor = World->SpawnActor<AActor>();
@@ -1000,7 +1005,7 @@ bool FFlightSimWeather::BuildRainMesh(UWorld* World, FString& Error)
 	RainMesh->SetBoundsScale(2.0f);
 	RainMaterial = UMaterialInstanceDynamic::Create(Material, RainActor);
 	RainMaterial->SetVectorParameterValue(TEXT("BoxHalf"), WeatherColour(BoxHalfM * WeatherCmPerMetre));
-	RainMaterial->SetScalarParameterValue(TEXT("Weight"), static_cast<float>(Weight));
+	RainMaterial->SetScalarParameterValue(TEXT("Weight"), static_cast<float>(Weight * RainGain));
 	RainMesh->SetMaterial(0, RainMaterial);
 	RainMesh->RegisterComponent();
 	return true;
@@ -1049,7 +1054,7 @@ bool FFlightSimWeather::BuildSplashMesh(UWorld* World, FString& Error)
 	SplashMaterial->SetVectorParameterValue(TEXT("Splash"),
 		FLinearColor(static_cast<float>(SplashPeriodS), static_cast<float>(SplashLifetimeS),
 		             static_cast<float>(Half), static_cast<float>(SplashSlots)));
-	SplashMaterial->SetScalarParameterValue(TEXT("Weight"), static_cast<float>(SplashWeight));
+	SplashMaterial->SetScalarParameterValue(TEXT("Weight"), static_cast<float>(SplashWeight * RainGain));
 	SplashMaterial->SetScalarParameterValue(TEXT("DropMm"), static_cast<float>(D0Mm));
 	SplashMesh->SetMaterial(0, SplashMaterial);
 	SplashMesh->RegisterComponent();

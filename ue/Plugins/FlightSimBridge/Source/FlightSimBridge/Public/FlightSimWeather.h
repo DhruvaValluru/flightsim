@@ -87,6 +87,12 @@ struct FFlightSimWeatherOptions
 	double LayerTopMetres = 0.0;
 	// The sun, so a storm the weather spawns casts cloud shadows.
 	ADirectionalLight* Sun = nullptr;
+	// The rain's visibility gain (-rain-gain=, FLIGHTSIM_RAIN_GAIN): the
+	// drawn drops' opacity weight times this. 1 is the physics (Garg &
+	// Nayar's coverage of a streak over the exposure, which from a fast
+	// aircraft is faint); more is a stated exaggeration for a clip that
+	// must SHOW the rain, recorded in look_applied.weather.rain.gain.
+	double RainGain = 1.0;
 	// The interactive window plays thunder and rain; the render does not.
 	bool bAudio = false;
 	// The render commandlet drives no world tick: the Niagara system is
@@ -288,6 +294,7 @@ private:
 	FVector BoxHalfM = FVector(10.0, 10.0, 8.0);
 	int32 Particles = 0;
 	double Weight = 1.0;
+	double RainGain = 1.0;
 	double AmbientFraction = 1.0;
 	double FallSpeedFactor = 1.0;
 	FVector WindEnuMps = FVector::ZeroVector;
