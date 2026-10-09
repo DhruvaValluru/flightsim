@@ -162,7 +162,9 @@ def main(argv=None) -> int:
     else:
         print(f"  mesh: {mesh}")
     print(f"  scene: terrain={scene.get('terrain') if scene else None} "
-          f"({scene.get('kind') if scene else 'flat slab'})")
+          f"({scene.get('kind') if scene else 'flat slab'}); imagery="
+          f"{scene.get('imagery') if scene else None} (none: the land-cover material colours "
+          f"the ground); Google tiles off (-NoGoogleTiles)")
     camera_flags = ([f"-chase={webapp_chase_flag(aircraft)}", "-camera=chase"], [])
 
     editor = ue_editor_path()

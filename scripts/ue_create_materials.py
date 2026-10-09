@@ -555,8 +555,9 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_StormCell recompiles its cloud shaders for a quarter of an hour
 #: (measured 2026-10-09), so the rain's change must not cost the cloud's.
 #: M_StormCell 2: STORM_SCATTERING (2026-10-08). M_RainDrops 3: the near
-#: fade shortened to 30 cm (rain_drop_opacity.hlsl, 2026-10-09).
-STORM_GENERATIONS = {"M_RainDrops": "3", "M_RainSplash": "2", "M_LightningChannel": "2",
+#: fade shortened to 30 cm (rain_drop_opacity.hlsl, 2026-10-09); 4 and
+#: M_RainSplash 3: lit by the scene instead of a black sky sample (drop_lit).
+STORM_GENERATIONS = {"M_RainDrops": "4", "M_RainSplash": "3", "M_LightningChannel": "2",
                      "M_StormCell": "2", "M_WindshieldRain": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
@@ -1825,21 +1826,40 @@ def relative_position(material, lib, x, y, exclude_offsets, minus):
     return binary(material, lib, unreal.MaterialExpressionSubtract, world, other, x + 200, y), ""
 
 
-def drop_radiance(material, lib, x, y):
-    """A drop's radiance (Garg & Nayar: the mean of its surroundings): the sky
-    light's diffuse sample times "SkyRadianceScale", plus the lightning
-    flash's "FlashLux" / pi."""
-    sky = lib.create_material_expression(material, unreal.MaterialExpressionSkyLightEnvMapSample, x, y)
-    lib.connect_material_expressions(constant3(material, lib, (0.0, 0.0, 1.0), x - 200, y), "",
-                                     sky, "Direction")
-    lib.connect_material_expressions(constant(material, lib, 1.0, x - 200, y + 100), "", sky,
-                                     "Roughness")
+#: A drop's albedo as a lit surface: a water drop refracts and reflects
+#: nearly all the light that reaches it (Garg & Nayar: its radiance is close
+#: to the mean radiance of its surroundings), so it is drawn as a white
+#: diffuse surface of this albedo lit by the scene -- the engine's sky
+#: light and shadowed sun at the drop are that mean. Stated.
+DROP_ALBEDO = 0.9
+
+
+def drop_lit(material, lib, x, y):
+    """A drop's radiance as the engine lights it (Garg & Nayar: the mean of
+    its surroundings): the material is a lit translucent surface, base
+    colour DROP_ALBEDO x "SkyRadianceScale", lit per vertex from the
+    translucency lighting volume (the sky light's ambient, the sun through
+    its cloud shadows), plus the lightning flash's "FlashLux" / pi as
+    emissive. Measured on the owner's machine (2026-10-09): the unlit
+    version, its emissive a sample of the sky light's environment map,
+    drew every streak BLACK -- that node reads nothing from a real-time-
+    captured sky light -- so the rain darkened the sky instead of catching
+    its light."""
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
+    lighting = getattr(unreal.TranslucencyLightingMode, "TLM_VOLUMETRIC_PER_VERTEX_NON_DIRECTIONAL",
+                       None)
+    if lighting is not None:
+        material.set_editor_property("translucency_lighting_mode", lighting)
     scale = scalar(material, lib, "SkyRadianceScale", 1.0, x, y + 150)
+    base = binary(material, lib, unreal.MaterialExpressionMultiply,
+                  constant(material, lib, DROP_ALBEDO, x, y), scale, x + 200, y)
+    lib.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(constant(material, lib, 1.0, x, y + 80), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
     flash = scalar(material, lib, "FlashLux", 0.0, x, y + 250)
-    lit = binary(material, lib, unreal.MaterialExpressionMultiply, sky, scale, x + 200, y)
     glow = binary(material, lib, unreal.MaterialExpressionMultiply, flash,
                   constant(material, lib, 1.0 / 3.14159265, x, y + 350), x + 200, y + 250)
-    return binary(material, lib, unreal.MaterialExpressionAdd, lit, glow, x + 400, y)
+    lib.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
 def _translucent_unlit(material, blend):
@@ -1848,15 +1868,22 @@ def _translucent_unlit(material, blend):
     material.set_editor_property("two_sided", True)
 
 
+def _translucent_lit(material):
+    """Translucent, two-sided, lit (drop_lit sets the shading model and the
+    lighting mode; the blend here)."""
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    material.set_editor_property("two_sided", True)
+
+
 def create_rain_drops():
     """M_RainDrops: the rain box's drops as shutter-length streaks
     (rain_drop_offset.hlsl into the world position offset,
-    rain_drop_opacity.hlsl into the opacity), lit by drop_radiance."""
+    rain_drop_opacity.hlsl into the opacity), lit by the scene (drop_lit)."""
     material = _storm_material("M_RainDrops")
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary
-    _translucent_unlit(material, unreal.BlendMode.BLEND_TRANSLUCENT)
+    _translucent_lit(material)
     params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i,
                                       default=1.0 if name in ("Weight", "SkyRadianceScale") else 0.0)
               for i, name in enumerate(DROPS_PARAMETERS) if name not in ("SkyRadianceScale",
@@ -1880,8 +1907,7 @@ def create_rain_drops():
         "PixelAngle": params["PixelAngle"], "Weight": params["Weight"], "Active": params["Active"],
         "BoxHalf": params["BoxHalf"], "GroundRelZ": params["GroundRelZ"]}, -900, 400)
     lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
-    lib.connect_material_property(drop_radiance(material, lib, -900, 800), "",
-                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    drop_lit(material, lib, -900, 800)
     finish_storm(material, "M_RainDrops")
 
 
@@ -1891,7 +1917,7 @@ def create_rain_splash():
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary
-    _translucent_unlit(material, unreal.BlendMode.BLEND_TRANSLUCENT)
+    _translucent_lit(material)
     params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i,
                                       default=1.0 if name == "Weight" else 0.0)
               for i, name in enumerate(SPLASH_PARAMETERS) if name not in ("SkyRadianceScale",
@@ -1910,8 +1936,7 @@ def create_rain_splash():
         "SlotUV": uv_channel(material, lib, 1, "rg", -1500, 950), "Time": params["Time"],
         "Splash": params["Splash"], "Weight": params["Weight"]}, -900, 400)
     lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
-    lib.connect_material_property(drop_radiance(material, lib, -900, 800), "",
-                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    drop_lit(material, lib, -900, 800)
     finish_storm(material, "M_RainSplash")
 
 

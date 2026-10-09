@@ -132,7 +132,21 @@ veil (the shaft's Atlas extinction), not as drops. The shutter is the
 card camera's exposure triple when it states one, else 1/250 s (stated;
 `look_applied.weather.shutter_s`), never the frame interval. A cockpit
 camera (`... cockpit camera ...`) gets the windshield's drops and
-rivulets, the rain's most visible face from an aircraft.
+rivulets, the rain's most visible face from an aircraft. The drops are
+lit translucent surfaces (a drop's radiance is the mean of its
+surroundings, which is what the sky light and the cloud-shadowed sun
+give a white diffuse surface at the drop); the first lit frame drew them
+black because an unlit material's sky-light environment-map sample reads
+nothing from a real-time-captured sky light.
+
+What the ground is: the scene's bake (the Flint Hills: a Copernicus
+GLO-30 heightfield at 30 m, coloured by its imagery sidecar when
+`scripts/bake_terrain.py` fetched one, else by the land-cover material),
+never Google's 3D tiles unless `FLIGHTSIM_GOOGLE_TILES=1` is set for the
+web app's beauty render; the debug script and the web app's host flight
+pass `-NoGoogleTiles`. Under the storm it is tinted by the look's fog and
+the atmosphere's aerial perspective, and the dark patches on it are the
+deck's cloud shadows.
 
 Where the cell stands: by default at the 45 %-of-the-run point of the
 track, where the physics puts the microburst -- for a 3-second clip that

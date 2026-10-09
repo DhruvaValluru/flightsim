@@ -419,3 +419,21 @@ def test_the_drops_streak_over_a_daylight_shutter_and_the_near_ones_are_kept():
     opacity = (SHADERS / "rain_drop_opacity.hlsl").read_text(encoding="utf-8")
     assert "float nearFade = R.Ss(5.0, 30.0, dist);" in opacity
     assert _tuple("STORM_GENERATIONS")["M_RainDrops"] >= "3"   # the shader body changed: rebuilt
+
+
+def test_the_drops_are_lit_by_the_scene_not_by_a_black_sky_sample():
+    """Measured on the owner's machine (2026-10-09): every streak drew BLACK
+    -- the unlit material's emissive was a sample of the sky light's
+    environment map, which reads nothing from a real-time-captured sky
+    light. The drops and the splashes are lit translucent surfaces now (a
+    drop's radiance is the mean of its surroundings: the sky light and the
+    shadowed sun at the drop)."""
+    assert "SkyLightEnvMapSample" not in SCRIPT
+    lit = SCRIPT[SCRIPT.index("def drop_lit"):SCRIPT.index("def _translucent_unlit")]
+    assert "MSM_DEFAULT_LIT" in lit and "TLM_VOLUMETRIC_PER_VERTEX_NON_DIRECTIONAL" in lit
+    assert "MP_BASE_COLOR" in lit and "MP_EMISSIVE_COLOR" in lit   # the flash stays emissive
+    for name in ("M_RainDrops", "M_RainSplash"):
+        creator = SCRIPT[SCRIPT.index(f'_storm_material("{name}")'):SCRIPT.index(f'finish_storm(material, "{name}")')]
+        assert "_translucent_lit(material)" in creator and "drop_lit(material, lib" in creator, name
+    generations = _tuple("STORM_GENERATIONS")
+    assert generations["M_RainDrops"] >= "4" and generations["M_RainSplash"] >= "3"
