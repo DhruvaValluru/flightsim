@@ -156,6 +156,12 @@ baked ground). The web app's throw-away host flight passes
 the atmosphere's aerial perspective, and the dark patches on it are the
 deck's cloud shadows.
 
+Rain without a storm gets its sky too: a stated rate of 4 mm/h or more
+with no cloud layer on the card adds a nimbostratus deck (cover 0.98,
+800 m to 3000 m, stated) the way a thunderstorm adds its own, so the sun
+is shadowed and the rain falls in the dim light it falls in (the first
+747 over New York rendered 25 mm/h under a bright sky with thin clouds).
+
 Where the cell stands: by default at the 45 %-of-the-run point of the
 track, where the physics puts the microburst -- for a 3-second clip that
 is 70 m ahead, so the camera starts INSIDE the rain shaft and sees grey

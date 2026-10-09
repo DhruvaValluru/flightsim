@@ -452,3 +452,14 @@ def test_the_rain_gain_is_a_stated_exaggeration_on_both_hosts_and_the_web_app(mo
     assert weather_backend_flags() == ["-weather-backend=procedural"]
     monkeypatch.setenv("FLIGHTSIM_RAIN_GAIN", "4")
     assert weather_backend_flags() == ["-weather-backend=procedural", "-rain-gain=4"]
+
+
+def test_a_stated_rain_gets_an_overcast_deck_when_the_look_has_no_clouds():
+    """The owner's 747 over New York (2026-10-09): 25 mm/h of rain drawn
+    under a bright sky with thin clouds. A rate of 4 mm/h or more with no
+    cloud layer of its own now gets a nimbostratus deck, like the
+    thunderstorm's layer beside it."""
+    block = COMMANDLET[COMMANDLET.index("FFlightSimCloudLayer StormLayer;"):COMMANDLET.index("double WeatherWetness = 0.0;")]
+    assert 'TryGetNumberField(TEXT("rain_rate_mmh"), WeatherRainMmh)' in block
+    assert "constexpr double RainDeckMinMmh = 4.0;" in block
+    assert "RainLayer.CoverFraction = 0.98;" in block and "SceneOptions.CloudLayers.Add(RainLayer);" in block

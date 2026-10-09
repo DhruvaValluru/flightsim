@@ -1602,6 +1602,24 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				StormLayer.TopMetres = 9000.0;
 				SceneOptions.CloudLayers.Add(StormLayer);
 			}
+			// Rain without a storm under a clear sky is no rain at all (the
+			// owner's 747 over New York, 2026-10-09: 25 mm/h drawn under a
+			// bright sky with a few thin clouds): a stated rate of
+			// RainDeckMinMmh or more with no cloud layer of its own gets a
+			// nimbostratus deck -- overcast (cover 0.98), base 800 m, top
+			// 3000 m (stated: a rain deck's order), which also shadows the
+			// sun and darkens the light the rain falls in.
+			double WeatherRainMmh = 0.0;
+			(*WeatherLookBlock)->TryGetNumberField(TEXT("rain_rate_mmh"), WeatherRainMmh);
+			constexpr double RainDeckMinMmh = 4.0;
+			if (WeatherRainMmh >= RainDeckMinMmh && SceneOptions.CloudLayers.Num() == 0)
+			{
+				FFlightSimCloudLayer RainLayer;
+				RainLayer.CoverFraction = 0.98;
+				RainLayer.BaseMetres = 800.0;
+				RainLayer.TopMetres = 3000.0;
+				SceneOptions.CloudLayers.Add(RainLayer);
+			}
 			double WeatherWetness = 0.0;
 			if ((*WeatherLookBlock)->TryGetNumberField(TEXT("wetness"), WeatherWetness) &&
 			    WeatherWetness > 0.0 && SceneOptions.Wetness <= 0.0)
