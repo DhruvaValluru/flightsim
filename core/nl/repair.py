@@ -209,9 +209,17 @@ def _apply(spec, edits: List[Dict[str, Any]], kept: List[str], instruction: str,
     return applied
 
 
-def _fallback(spec, violations, kept: List[str], instruction: str) -> RepairResult:
+def default_check(spec):
+    """The validator's violations (the server passes a fuller check: the
+    same plus the terrain pre-flight /run refuses on)."""
+    from ..scenario.validate import validate
+
+    return list(validate(spec).violations)
+
+
+def _fallback(spec, violations, kept: List[str], instruction: str, check) -> RepairResult:
     """No model: the trim refusal's own suggestion, honouring a kept field."""
-    from ..scenario.validate import trim_suggestion, validate
+    from ..scenario.validate import trim_suggestion
 
     trim = [v for v in violations if v.constraint == "envelope.trim_feasible"]
     if not trim:
@@ -228,33 +236,33 @@ def _fallback(spec, violations, kept: List[str], instruction: str) -> RepairResu
     before = getattr(spec, name).value
     value = float(m.group(2))
     spec.set(name, value, frm=f"repaired by the rules ({instruction or 'make it run'}): {suggestion}")
-    report = validate(spec)
-    return RepairResult(spec, report.ok, [Edit(name, before, value, suggestion, 1)], 1, "rules",
-                        None, suggestion, refusal_words(report.violations))
+    remaining = check(spec)
+    return RepairResult(spec, not remaining, [Edit(name, before, value, suggestion, 1)], 1, "rules",
+                        None, suggestion, refusal_words(remaining))
 
 
 def repair_spec(spec, instruction: str = "", *, client: Any = None, model: Optional[str] = None,
-                rounds: int = MAX_ROUNDS) -> RepairResult:
-    """The spec edited until it validates (or ``rounds`` rounds have been
-    spent), by the model, else by the rules. The spec passed in is edited
-    in place; a copy is what the rounds work on until one validates."""
-    from ..scenario.validate import validate
-
+                rounds: int = MAX_ROUNDS, check=None) -> RepairResult:
+    """The spec edited until ``check`` passes (or ``rounds`` rounds have
+    been spent), by the model, else by the rules. The spec passed in is
+    edited in place; a copy is what the rounds work on until one passes.
+    ``check(spec)`` returns the violations (default_check: the validator;
+    the server adds the terrain pre-flight /run refuses on)."""
+    check = check or default_check
     instruction = (instruction or "").strip()[:MAX_INSTRUCTION]
     kept = kept_fields(instruction)
-    report = validate(spec)
-    if report.ok:
+    violations = check(spec)
+    if not violations:
         return RepairResult(spec, True, note="nothing to repair: the scenario already runs")
     try:
         client, model = _resolve_client(client, model)
     except RepairError as exc:
-        result = _fallback(spec, report.violations, kept, instruction)
+        result = _fallback(spec, violations, kept, instruction, check)
         result.note = f"{exc}; {result.note}" if result.note else str(exc)
         return result
     work = copy.deepcopy(spec)
     edits: List[Edit] = []
     history: List[str] = []
-    violations = report.violations
     note = ""
     for round_no in range(1, max(1, rounds) + 1):
         refusals = refusal_words(violations)
@@ -264,17 +272,163 @@ def repair_spec(spec, instruction: str = "", *, client: Any = None, model: Optio
         edits.extend(applied)
         history.append(f"round {round_no}: " + "; ".join(
             f"{e.field} {e.before} -> {e.after}" for e in applied) or "no edits")
-        report = validate(work)
-        if report.ok:
+        violations = check(work)
+        if not violations:
             _copy_into(spec, work)
             return RepairResult(spec, True, edits, round_no, "llm", model, note, [])
         if not applied:
             break
-        violations = report.violations
         history[-1] += " -- still refused: " + "; ".join(v.constraint for v in violations)
     _copy_into(spec, work)
     return RepairResult(spec, False, edits, len(history), "llm", model, note,
-                        refusal_words(report.violations))
+                        refusal_words(violations))
+
+
+# -- options: three ways to make it run, to pick from ---------------------------
+
+OPTIONS_PROMPT = """You propose ways to repair a flight-simulation scenario its validator refused.
+Reply with JSON only: {"options": [{"title": <a few words>, "edits": [{"field": <name>,
+"value": <number or word>, "why": <one sentence>}]}]} with at most three options, each a
+different small change (one or two edits) that removes every refusal. Edit only fields
+listed as editable, never a kept one; numbers in the units shown; prefer the change a
+hint names."""
+
+OPTIONS_SCHEMA = {
+    "type": "object",
+    "properties": {"options": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"title": {"type": "string"},
+                       "edits": REPAIR_SCHEMA["properties"]["edits"]},
+        "required": ["title", "edits"]}}},
+    "required": ["options"],
+}
+MAX_OPTIONS = 3
+
+
+def rule_options(spec, violations, kept: List[str]) -> List[Dict[str, Any]]:
+    """The deterministic proposals for the refusals the rules understand:
+    the trim refusal (a speed, an altitude, the cruise speed), the terrain
+    clearance (raise the altitude by the shortfall, and by more), the
+    stall margin (the speed the limit names). Each is a title with edits."""
+    from ..scenario.validate import trim_suggestion
+    from .compiler import CRUISE_DEFAULT_KT
+
+    out: List[Dict[str, Any]] = []
+    names = {v.constraint for v in violations}
+    altitude = float(spec.altitude.value)
+    speed = float(spec.airspeed.value)
+    if "envelope.trim_feasible" in names:
+        for keep in ("altitude", "airspeed"):
+            if keep == "altitude" and "airspeed" in kept:
+                continue
+            if keep == "airspeed" and "altitude" in kept:
+                continue
+            suggestion = trim_suggestion(spec, keep=keep)
+            m = re.match(r"change the (altitude|speed) to ([\d.]+) (m|kt)", suggestion or "")
+            if m:
+                name = "altitude" if m.group(1) == "altitude" else "airspeed"
+                out.append({"title": f"{'lower' if name == 'altitude' and float(m.group(2)) < altitude else 'change'} "
+                                     f"the {m.group(1)} to {m.group(2)} {m.group(3)}, keep the "
+                                     f"{'speed' if name == 'altitude' else 'altitude'}",
+                            "edits": [{"field": name, "value": float(m.group(2)), "why": suggestion}]})
+        cruise = CRUISE_DEFAULT_KT.get(str(spec.aircraft.value))
+        if cruise is not None and cruise != speed and "airspeed" not in kept:
+            out.append({"title": f"fly the airframe's cruise speed, {cruise:g} kt",
+                        "edits": [{"field": "airspeed", "value": cruise,
+                                   "why": "the documented mid-envelope cruise"}]})
+    for v in violations:
+        if v.constraint == "terrain.clearance" and "altitude" not in kept \
+                and isinstance(v.actual, (int, float)) and isinstance(v.limit, (int, float)):
+            shortfall = float(v.limit) - float(v.actual)
+            for margin, words in ((100.0, "just clear of the ground"), (500.0, "well clear of the ground")):
+                target = round((altitude + shortfall + margin) / 50.0) * 50.0
+                out.append({"title": f"raise the altitude to {target:g} m, {words}",
+                            "edits": [{"field": "altitude", "value": target,
+                                       "why": f"the track came {-float(v.actual):g} m below the "
+                                              f"ground where it must keep {float(v.limit):g} m"}]})
+        if v.constraint == "airspeed.stall_margin" and "airspeed" not in kept \
+                and isinstance(v.limit, (int, float)):
+            target = round(float(v.limit) + 5.0)
+            out.append({"title": f"speed up to {target:g} kt, above the stall margin",
+                        "edits": [{"field": "airspeed", "value": float(target),
+                                   "why": f"the validator needs at least {float(v.limit):g} kt"}]})
+    return out
+
+
+def _model_options(client, model, spec, kept, refusals, instruction) -> List[Dict[str, Any]]:
+    text = (f"Scenario fields:\n{_fields_block(spec, kept)}\n\nRefusals:\n"
+            + "\n".join(f"- {r['sentence']} {r['hint']}".strip() for r in refusals)
+            + f"\n\nThe user wants: {instruction or 'a few different small changes to pick from'}")
+    try:
+        response = client.messages.create(
+            model=model, max_tokens=800, system=OPTIONS_PROMPT,
+            messages=[{"role": "user", "content": text}],
+            output_config={"effort": "low",
+                           "format": {"type": "json_schema", "schema": OPTIONS_SCHEMA}})
+        reply = next(b.text for b in response.content if getattr(b, "type", None) == "text")
+        data = json.loads(reply)
+        return [o for o in data.get("options", []) if isinstance(o, dict)][:MAX_OPTIONS]
+    except Exception:
+        return []
+
+
+def apply_edits(spec, edits: List[Dict[str, Any]], instruction: str, check=None,
+                reader: str = "picked") -> RepairResult:
+    """A chosen option's edits applied to the spec as user edits, then
+    checked; the result says what remains."""
+    check = check or default_check
+    instruction = (instruction or "").strip()[:MAX_INSTRUCTION]
+    applied = _apply(spec, list(edits), [], instruction, 1)
+    remaining = check(spec)
+    return RepairResult(spec, not remaining, applied, 1, reader, None,
+                        "" if not remaining else "still refused", refusal_words(remaining))
+
+
+def repair_options(spec, instruction: str = "", *, client: Any = None,
+                   model: Optional[str] = None, check=None) -> Dict[str, Any]:
+    """Up to MAX_OPTIONS ways to make the spec run, each tried on a copy
+    and marked whether it passes ``check``: the rules' proposals first,
+    the model's after them (when one is configured), passing ones first.
+    The owner's ask (2026-10-09): "give 3 options on what to pick"."""
+    check = check or default_check
+    instruction = (instruction or "").strip()[:MAX_INSTRUCTION]
+    kept = kept_fields(instruction)
+    violations = check(spec)
+    if not violations:
+        return {"options": [], "reader": "none", "note": "the scenario already runs"}
+    proposals = rule_options(spec, violations, kept)
+    reader = "rules"
+    model_used = None
+    try:
+        client, model_used = _resolve_client(client, model)
+        proposals += _model_options(client, model_used, spec, kept,
+                                    refusal_words(violations), instruction)
+        reader = "rules + model"
+    except RepairError:
+        pass
+    options = []
+    seen = set()
+    for proposal in proposals:
+        edits = [e for e in proposal.get("edits", []) if isinstance(e, dict)]
+        key = tuple(sorted((str(e.get("field")), str(e.get("value"))) for e in edits))
+        if not edits or key in seen:
+            continue
+        seen.add(key)
+        trial = copy.deepcopy(spec)
+        try:
+            applied = _apply(trial, edits, kept, instruction, 1)
+        except RepairError as exc:
+            options.append({"title": str(proposal.get("title", "")), "edits": edits,
+                            "ok": False, "refused": str(exc), "remaining": []})
+            continue
+        remaining = check(trial)
+        options.append({"title": str(proposal.get("title", "")) or ", ".join(
+                            f"{e.field} {e.before} -> {e.after}" for e in applied),
+                        "edits": [e.to_dict() for e in applied],
+                        "ok": not remaining, "remaining": refusal_words(remaining)})
+    options.sort(key=lambda o: not o["ok"])
+    return {"options": options[:MAX_OPTIONS], "reader": reader, "model": model_used,
+            "note": "" if options else "no rule or model proposal applies to these refusals"}
 
 
 def _copy_into(spec, work) -> None:

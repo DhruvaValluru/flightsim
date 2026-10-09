@@ -510,7 +510,12 @@ table as a user edit whose provenance names the instruction. The trim
 refusal already says the smallest change that works, and the model is
 told it. With no model configured the trim rule applies that change
 itself, and the page says which of the two did it (`POST /repair`,
-`core/nl/repair.py`).
+`core/nl/repair.py`). **Show me 3 fixes** lists up to three ways to make
+it run instead, each already tried against the full verdict and ticked
+when it passes (the rules' proposals -- the trim search, the terrain
+clearance shortfall, the stall margin -- and the model's), and a click
+applies the one you pick (`POST /repair/options`). Both are checked
+against the verdict the Run button gives, terrain pre-flight included.
 
 ## Terrain downloads start at Interpret
 

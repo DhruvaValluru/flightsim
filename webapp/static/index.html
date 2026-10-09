@@ -616,25 +616,61 @@ function renderVerdict(v) {
       // The owner's ask (2026-10-09): say what to keep and let the model
       // change the rest until it runs (POST /repair; core/nl/repair.py).
       `<div class="repair-row"><input id="repairWhat" maxlength="300" style="width:55%" ` +
-      `placeholder="what should stay as it is? e.g. keep the altitude">` +
+      `placeholder="tell it what matters: e.g. keep the altitude, or just ask for options">` +
+      ` <button id="repairOptions" class="opt">Show me 3 fixes</button>` +
       ` <button id="repairGo" class="opt">Fix it for me</button>` +
+      `<div id="repairChoices"></div>` +
       `<div id="repairState" class="dim"></div></div>`;
-    $("repairGo").addEventListener("click", repairSpec);
-    $("repairWhat").addEventListener("keydown", e => { if (e.key === "Enter") repairSpec(); });
+    $("repairGo").addEventListener("click", () => repairSpec(null));
+    $("repairOptions").addEventListener("click", repairOptions);
+    $("repairWhat").addEventListener("keydown", e => { if (e.key === "Enter") repairOptions(); });
     $("run").disabled = true;
   }
 }
 
-async function repairSpec() {
-  // The EDITED dict (a typed value is kept); the server applies the
-  // model's edits as user edits and re-validates; the table shows them.
+async function repairOptions() {
+  // Three ways to make it run, each already tried against the full
+  // verdict (POST /repair/options); a click applies one.
   const instruction = $("repairWhat").value.trim();
-  $("repairState").textContent = "asking the model...";
+  $("repairState").textContent = "working out the options...";
+  $("repairChoices").innerHTML = "";
+  try {
+    const response = await fetch("/repair/options", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({spec: editedSpecDict(), instruction}),
+    });
+    const payload = await response.json();
+    if (payload.error) { $("repairState").innerHTML = refusalHtml(payload); return; }
+    if (!payload.options.length) { $("repairState").textContent = payload.note || "no option found"; return; }
+    $("repairState").textContent = `from ${payload.reader}; a tick means it passes every check:`;
+    const list = document.createElement("div");
+    payload.options.forEach(o => {
+      const b = document.createElement("button");
+      b.className = "opt";
+      b.style.display = "block"; b.style.margin = ".25rem 0"; b.style.textAlign = "left";
+      b.textContent = (o.ok ? "\u2713 " : "\u2717 ") + o.title +
+        (o.ok ? "" : o.refused ? ` (${o.refused})` : ` (still refused: ${o.remaining.map(r => r.sentence).join("; ")})`);
+      b.title = o.edits.map(e => `${e.field}: ${e.from} \u2192 ${e.to} \u2014 ${e.why}`).join("\n");
+      b.addEventListener("click", () => repairSpec(o.edits.map(e => ({field: e.field, value: e.to, why: e.why}))));
+      list.appendChild(b);
+    });
+    $("repairChoices").appendChild(list);
+  } catch (error) {
+    $("repairState").textContent = `could not reach the server: ${error}`;
+  }
+}
+
+async function repairSpec(edits) {
+  // The EDITED dict (a typed value is kept); the server applies the
+  // model's edits -- or the picked option's -- as user edits and
+  // re-validates against the full verdict; the table shows them.
+  const instruction = $("repairWhat").value.trim();
+  $("repairState").textContent = edits ? "applying..." : "asking the model...";
   $("repairGo").disabled = true;
   try {
     const response = await fetch("/repair", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({spec: editedSpecDict(), instruction}),
+      body: JSON.stringify({spec: editedSpecDict(), instruction, edits: edits || null}),
     });
     const payload = await response.json();
     if (payload.error) { $("repairState").innerHTML = refusalHtml(payload); $("repairGo").disabled = false; return; }
@@ -642,7 +678,8 @@ async function repairSpec() {
     const changes = r.edits.length
       ? r.edits.map(e => `${e.field}: ${esc(e.from)} → ${esc(e.to)}`).join("; ")
       : "no change made";
-    const who = r.reader === "llm" ? `the model (${esc(r.model || "")})` : "the trim rule (no model configured)";
+    const who = r.reader === "llm" ? `the model (${esc(r.model || "")})`
+      : r.reader === "picked" ? "the option you picked" : "the trim rule (no model configured)";
     renderSpec({...compiled, spec: payload.spec, validation: payload.validation});
     const state = document.createElement("div");
     state.className = "dim";

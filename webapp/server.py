@@ -615,21 +615,57 @@ def camera_prompt_endpoint(request: CameraPromptRequest) -> JSONResponse:
 
 class RepairRequest(BaseModel):
     """Repair the refused spec the page is holding: what the user wants
-    kept, in words; the model (or the rules) changes the rest."""
+    kept, in words; the model (or the rules) changes the rest. With
+    ``edits`` (an option the user picked from /repair/options) those
+    edits are applied instead of asking the model."""
 
     spec: Dict[str, Any]
     instruction: str = ""
+    edits: Optional[List[Dict[str, Any]]] = None
+
+
+def _full_violations(spec: ScenarioSpec):
+    """What /run would refuse: the validator's violations plus the terrain
+    pre-flight (plan_terrain_flight) a run without a route is held to --
+    so a repair is checked against the verdict the Run button gives,
+    not a laxer one."""
+    from core.scenario.validate import Violation
+
+    violations = list(validate(spec).violations)
+    if not violations and spec.route.is_default():
+        try:
+            clearance = plan_terrain_flight(spec)
+        except Exception:
+            clearance = None
+        if clearance is not None:
+            violations.append(Violation(clearance["constraint"], clearance["message"],
+                                        actual=clearance.get("actual"),
+                                        limit=clearance.get("limit"),
+                                        unit=clearance.get("unit")))
+    return violations
+
+
+def _repair_verdict(spec: ScenarioSpec) -> Dict[str, Any]:
+    verdict = _validation_payload(spec)
+    for v in _full_violations(spec):
+        if v.constraint not in {x["constraint"] for x in verdict["violations"]}:
+            verdict["ok"] = False
+            verdict["violations"].append(_plain({
+                "constraint": v.constraint, "message": v.message,
+                "actual": v.actual, "limit": v.limit, "unit": v.unit}))
+    return verdict
 
 
 @app.post("/repair")
 def repair_endpoint(request: RepairRequest) -> JSONResponse:
     """The owner's ask (2026-10-09): tell the model what to keep and have
     it change the rest until the refusals are gone. core/nl/repair.py
-    does the rounds; every edit is a user edit with the instruction as
-    its provenance, shown in the table; the response says which reader
-    did it (the model, or the trim rule when no model is configured) and
-    what is still refused, if anything."""
-    from core.nl.repair import repair_spec
+    does the rounds against the full verdict (/run's); every edit is a
+    user edit with the instruction as its provenance, shown in the table;
+    the response says which reader did it (the model, the trim rule when
+    no model is configured, or the option the user picked) and what is
+    still refused, if anything."""
+    from core.nl.repair import RepairError, apply_edits, repair_spec
 
     try:
         spec = ScenarioSpec.from_dict(request.spec)
@@ -639,10 +675,32 @@ def repair_endpoint(request: RepairRequest) -> JSONResponse:
     if len(instruction) > 300:
         return JSONResponse({"error": "say what to keep in at most 300 characters"},
                             status_code=400)
-    result = repair_spec(spec, instruction)
-    payload = {"spec": _spec_payload(spec), "validation": _validation_payload(spec),
+    try:
+        if request.edits:
+            result = apply_edits(spec, request.edits, instruction, check=_full_violations)
+        else:
+            result = repair_spec(spec, instruction, check=_full_violations)
+    except RepairError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    payload = {"spec": _spec_payload(spec), "validation": _repair_verdict(spec),
                "repair": result.to_dict()}
     return JSONResponse(payload)
+
+
+@app.post("/repair/options")
+def repair_options_endpoint(request: RepairRequest) -> JSONResponse:
+    """Up to three ways to make the refused spec run, each tried on a copy
+    against the full verdict and marked whether it passes: the rules'
+    proposals (the trim search, the clearance shortfall, the stall
+    margin) and the model's. The page lists them to pick from."""
+    from core.nl.repair import repair_options
+
+    try:
+        spec = ScenarioSpec.from_dict(request.spec)
+    except (ValueError, KeyError) as exc:
+        return JSONResponse({"error": f"spec did not parse: {exc}"}, status_code=400)
+    return JSONResponse(repair_options(spec, request.instruction.strip()[:300],
+                                       check=_full_violations))
 
 
 @app.post("/cameras")
