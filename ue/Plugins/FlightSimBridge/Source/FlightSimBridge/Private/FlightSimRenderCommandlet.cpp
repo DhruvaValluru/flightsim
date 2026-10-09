@@ -69,16 +69,23 @@ namespace
 	constexpr double RenderRadiansToDegrees = 57.29577951308232;   // unity-unique name
 
 	// The storm meter (the exposure under a drawn cumulonimbus, before the
-	// first frame): the mean sRGB luma a metered frame is opened up to
-	// (-storm-meter-target=; 0.32 is a gloomy day's mean), the tolerance it
-	// stops within, the rounds it gets, and the most it may open. The cap is
-	// physical: the two-stream diffuse transmittance of a cloud column of
-	// optical depth tau is about 1 / (1 + 0.75 tau (1 - g)); the tower's
-	// thousands of optical depths pass under 1 % of the light, eight stops.
-	// Darkness past that is the engine's cloud model, not the storm's, and
-	// is not hidden by opening further.
-	constexpr double StormMeterTargetDefault = 0.32;
-	constexpr double StormMeterTolerance = 0.04;
+	// first frame). It meters the BRIGHT end of the frame: the 90th
+	// percentile of sRGB luma -- under a storm the cloud base and the
+	// horizon, the brightest things in view. The mean is the dark terrain's
+	// and says little: measured on the owner's machine (2026-10-09), the
+	// web app's own storm look renders at a mean of 0.09 and is visible,
+	// the black frame at 0.07 and is not, while their bright ends were 0.32
+	// and 0.11. The target (-storm-meter-target=; 0.40, a storm's grey
+	// base), the tolerance it stops within, the rounds it gets, and the
+	// most it may open. The cap is physical: the two-stream diffuse
+	// transmittance of a cloud column of optical depth tau is about
+	// 1 / (1 + 0.75 tau (1 - g)); the tower's thousands of optical depths
+	// pass under 1 % of the light, eight stops. Darkness past that is the
+	// engine's cloud model, not the storm's, and is not hidden by opening
+	// further.
+	constexpr double StormMeterTargetDefault = 0.40;
+	constexpr double StormMeterPercentile = 0.90;
+	constexpr double StormMeterTolerance = 0.05;
 	constexpr int32 StormMeterRounds = 5;
 	constexpr double StormMeterMaxStops = 8.0;
 	constexpr int32 StormMeterSettleCaptures = 4;
@@ -1251,9 +1258,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	FParse::Value(*Params, TEXT("weather-backend="), WeatherBackendName);
 	EFlightSimWeatherBackend WeatherBackend = EFlightSimWeatherBackend::Off;
 	// The exposure under the storm's cloud (see the storm meter before the
-	// first frame): the mean sRGB luma (0..1) a metered frame is opened up
-	// to, -storm-meter-target=, a gloomy day's mean by default; never past
-	// StormMeterMaxStops open, never closed below the look's exposure.
+	// first frame): the sRGB luma (0..1) a metered frame's bright end (its
+	// 90th percentile) is opened up to, -storm-meter-target=, a storm's grey
+	// base by default; never past StormMeterMaxStops open, never closed
+	// below the look's exposure.
 	double StormMeterTarget = StormMeterTargetDefault;
 	FParse::Value(*Params, TEXT("storm-meter-target="), StormMeterTarget);
 	StormMeterTarget = FMath::Clamp(StormMeterTarget, 0.05, 0.8);
@@ -3513,6 +3521,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		double OpenedMeasured = 0.0;
 		double MeanBefore = -1.0;
 		double Mean = -1.0;
+		double BrightBefore = -1.0;   // the 90th percentile, the metered number
+		double Bright = -1.0;
 		int32 Rounds = 0;
 		FString MeterNote = TEXT("within tolerance of the target");
 		TArray<FColor> MeterPixels;
@@ -3537,17 +3547,30 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				break;
 			}
 			double Sum = 0.0;
+			uint32 Histogram[256] = {};
 			for (const FColor& Pixel : MeterPixels)
 			{
-				Sum += 0.2126 * Pixel.R + 0.7152 * Pixel.G + 0.0722 * Pixel.B;
+				const double Luma = 0.2126 * Pixel.R + 0.7152 * Pixel.G + 0.0722 * Pixel.B;
+				Sum += Luma;
+				++Histogram[FMath::Clamp(static_cast<int32>(Luma + 0.5), 0, 255)];
 			}
 			Mean = Sum / (255.0 * MeterPixels.Num());
+			// The bin the StormMeterPercentile of the pixels fall at or below.
+			const uint32 Wanted = static_cast<uint32>(StormMeterPercentile * MeterPixels.Num());
+			uint32 Seen = 0;
+			int32 Bin = 0;
+			for (; Bin < 255 && Seen + Histogram[Bin] < Wanted; ++Bin)
+			{
+				Seen += Histogram[Bin];
+			}
+			Bright = Bin / 255.0;
 			OpenedMeasured = Opened;
 			if (MeanBefore < 0.0)
 			{
 				MeanBefore = Mean;
+				BrightBefore = Bright;
 			}
-			if (FMath::Abs(Mean - StormMeterTarget) <= StormMeterTolerance)
+			if (FMath::Abs(Bright - StormMeterTarget) <= StormMeterTolerance)
 			{
 				break;
 			}
@@ -3560,7 +3583,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			// the stops that would land the target, damped (0.8) against the
 			// tonemapper's shoulder, the sum clamped to [0, the cap].
 			const double Step =
-				2.2 * 0.8 * FMath::Log2(StormMeterTarget / FMath::Max(Mean, 1.0 / 255.0));
+				2.2 * 0.8 * FMath::Log2(StormMeterTarget / FMath::Max(Bright, 1.0 / 255.0));
 			const double Next = FMath::Clamp(Opened + Step, 0.0, StormMeterMaxStops);
 			if (FMath::IsNearlyEqual(Next, Opened, 0.01))
 			{
@@ -3596,8 +3619,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		TSharedPtr<FJsonObject> MeterRow = MakeShared<FJsonObject>();
 		MeterRow->SetBoolField(TEXT("metered"), MeanBefore >= 0.0);
-		MeterRow->SetNumberField(TEXT("target_mean_luma"), StormMeterTarget);
+		MeterRow->SetNumberField(TEXT("target_p90_luma"), StormMeterTarget);
+		MeterRow->SetNumberField(TEXT("percentile"), StormMeterPercentile);
 		MeterRow->SetNumberField(TEXT("tolerance"), StormMeterTolerance);
+		MeterRow->SetNumberField(TEXT("p90_luma_before"), BrightBefore);
+		MeterRow->SetNumberField(TEXT("p90_luma_after"), Bright);
 		MeterRow->SetNumberField(TEXT("mean_luma_before"), MeanBefore);
 		MeterRow->SetNumberField(TEXT("mean_luma_after"), Mean);
 		MeterRow->SetNumberField(TEXT("stops_opened"), Opened);
@@ -3607,20 +3633,21 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		MeterRow->SetNumberField(TEXT("rounds"), Rounds);
 		MeterRow->SetStringField(TEXT("note"), MeterNote);
 		MeterRow->SetStringField(TEXT("basis"),
-			TEXT("the beauty frame read back before frame 0, its mean sRGB luma (Rec. 709 weights) ")
-			TEXT("opened to the target by AutoExposureBias; a camera meters the light it gets, ")
-			TEXT("constant over the clip; the linear and accumulation captures carry the same bias"));
+			TEXT("the beauty frame read back before frame 0, the 90th percentile of its sRGB luma ")
+			TEXT("(Rec. 709 weights; the cloud base and the horizon, not the dark ground) opened ")
+			TEXT("to the target by AutoExposureBias; a camera meters the light it gets, constant ")
+			TEXT("over the clip; the linear and accumulation captures carry the same bias"));
 		if (VisualScene.LookApplied.IsValid())
 		{
 			VisualScene.LookApplied->SetObjectField(TEXT("storm_exposure"), MeterRow);
 		}
 		ExposureSource += FString::Printf(
-			TEXT("; storm meter opened %.2f stops (mean luma %.3f -> %.3f, target %.2f)"),
-			Opened, MeanBefore, Mean, StormMeterTarget);
+			TEXT("; storm meter opened %.2f stops (p90 luma %.3f -> %.3f, target %.2f)"),
+			Opened, BrightBefore, Bright, StormMeterTarget);
 		UE_LOG(LogFlightSimRender, Display,
-		       TEXT("storm exposure: metered mean luma %.3f -> %.3f (target %.2f), bias %.2f -> %.2f ")
-		       TEXT("(%.2f stops opened of %.0f), %d rounds: %s"),
-		       MeanBefore, Mean, StormMeterTarget, BiasBefore,
+		       TEXT("storm exposure: metered p90 luma %.3f -> %.3f (target %.2f; mean %.3f -> %.3f), ")
+		       TEXT("bias %.2f -> %.2f (%.2f stops opened of %.0f), %d rounds: %s"),
+		       BrightBefore, Bright, StormMeterTarget, MeanBefore, Mean, BiasBefore,
 		       static_cast<double>(MeterSettings.AutoExposureBias), Opened, StormMeterMaxStops,
 		       Rounds, *MeterNote);
 	}

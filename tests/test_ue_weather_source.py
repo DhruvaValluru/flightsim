@@ -333,6 +333,8 @@ def test_the_storm_is_lit_by_multiple_scattering_and_its_exposure_is_metered():
                    "Sibling->PostProcessSettings.AutoExposureBias = MeterSettings.AutoExposureBias;"):
         assert needle in metering, needle
     assert "constexpr double StormMeterMaxStops = 8.0;" in COMMANDLET
+    assert "constexpr double StormMeterPercentile = 0.90;" in COMMANDLET
+    assert "FMath::Abs(Bright - StormMeterTarget) <= StormMeterTolerance" in metering
     assert 'TEXT("storm-meter-target=")' in COMMANDLET
     assert "opened %.2f stops by the storm meter" in COMMANDLET   # the scene record says so
     window = INTERACTIVE[INTERACTIVE.index("Weather.DrawsCell()"):]
@@ -341,7 +343,8 @@ def test_the_storm_is_lit_by_multiple_scattering_and_its_exposure_is_metered():
     assert "def frame_luma" in debug and "RENDERED-DARK" in debug
     # The record's fields, the same on both sides.
     assert '(manifest.get("look_applied") or {}).get("storm_exposure")' in debug
-    for field in ("stops_opened", "mean_luma_before", "mean_luma_after", "target_mean_luma", "note"):
+    for field in ("stops_opened", "p90_luma_before", "p90_luma_after", "target_p90_luma",
+                  "mean_luma_before", "mean_luma_after", "note"):
         assert f'TEXT("{field}")' in metering, field
         assert f"meter.get('{field}')" in debug, field
     # A re-run clears the previous run's frames; a crash outranks a manifest;

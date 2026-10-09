@@ -14,9 +14,10 @@ FlightSimRender commandlet once per backend with the same flags
 and prints the decisive lines of each log: every weather / cloud / storm
 exposure line, every material that failed to compile, and the engine's
 assertion if it still crashes. A run that survives prints "RENDERED" with
-the first and last frame's mean luma (0..255) -- under DARK_LUMA the
-verdict is "RENDERED-DARK": a frame nobody can see anything in is not a
-pass (the owner's first storm frame, 2026-10-08).
+the first and last frame's luma (0..255; the mean and the 90th
+percentile) -- a bright end under DARK_LUMA makes the verdict
+"RENDERED-DARK": a frame nobody can see anything in is not a pass (the
+owner's first storm frame, 2026-10-08).
 
 Windows, from the repo root, the engine built (scripts/build_ue.ps1):
 
@@ -43,15 +44,18 @@ DECISIVE = re.compile(
     r"LogFlightSimWeather|weather\.|clouds\.|cloud |look\.clouds|LogFlightSimRender: Display: clouds"
     r"|storm exposure|Failed to compile Material|Missing If|Assertion failed|Fatal error|appError"
     r"|LogFlightSimRender: Error|refused|frames written|MATERIAL-|Engine exit requested")
-#: A frame whose mean luma (0..255) is under this is one nobody can see
-#: anything in: the storm meter (FlightSimRenderCommandlet.cpp) exists so no
-#: storm frame is. Stated: 8-bit black is 0, a gloomy day's mean is ~80.
-DARK_LUMA = 20.0
+#: A frame whose bright end (the 90th percentile of its luma, 0..255) is
+#: under this is one nobody can see anything in: the storm meter
+#: (FlightSimRenderCommandlet.cpp) exists so no storm frame is. The mean is
+#: the dark ground's and does not separate them (measured 2026-10-09: the
+#: web app's storm look, visible, mean 24 / p95 82; the black frame, not,
+#: mean 17 / p95 28). Stated: 32 is an eighth of white.
+DARK_LUMA = 32.0
 FRAME = re.compile(r"frame_\d+\.png")
 
 
 def frame_luma(path: Path):
-    """(mean, 95th percentile) of a frame's 8-bit luma: Rec. 709 weights on
+    """(mean, 90th percentile) of a frame's 8-bit luma: Rec. 709 weights on
     the PNG's sRGB bytes, the same measure the storm meter opens the
     exposure by (it reports 0..1; this reports 0..255)."""
     import numpy as np
@@ -59,7 +63,7 @@ def frame_luma(path: Path):
 
     rgb = np.asarray(Image.open(path).convert("RGB"), dtype=np.float64)
     luma = rgb[..., 0] * 0.2126 + rgb[..., 1] * 0.7152 + rgb[..., 2] * 0.0722
-    return float(luma.mean()), float(np.percentile(luma, 95))
+    return float(luma.mean()), float(np.percentile(luma, 90))
 
 
 def frame_report(frames: Path):
@@ -70,10 +74,10 @@ def frame_report(frames: Path):
     lines = []
     dark = False
     for label, path in (("first", files[0]), ("last", files[-1])):
-        mean, p95 = frame_luma(path)
-        dark = dark or mean < DARK_LUMA
-        lines.append(f"{label} frame {path.name}: mean luma {mean:.1f}/255, p95 {p95:.1f}"
-                     f"{' DARK' if mean < DARK_LUMA else ''}")
+        mean, p90 = frame_luma(path)
+        dark = dark or p90 < DARK_LUMA
+        lines.append(f"{label} frame {path.name}: luma mean {mean:.1f}/255, p90 {p90:.1f}"
+                     f"{' DARK' if p90 < DARK_LUMA else ''}")
     return lines, dark
 
 
@@ -166,9 +170,11 @@ def main(argv=None) -> int:
                 manifest = {}
             meter = (manifest.get("look_applied") or {}).get("storm_exposure")
             if meter:
-                print(f"  storm_exposure: opened {meter.get('stops_opened')} stops, mean luma "
-                      f"{meter.get('mean_luma_before')} -> {meter.get('mean_luma_after')} "
-                      f"(target {meter.get('target_mean_luma')}): {meter.get('note')}")
+                print(f"  storm_exposure: opened {meter.get('stops_opened')} stops, p90 luma "
+                      f"{meter.get('p90_luma_before')} -> {meter.get('p90_luma_after')} "
+                      f"(target {meter.get('target_p90_luma')}; mean "
+                      f"{meter.get('mean_luma_before')} -> {meter.get('mean_luma_after')}): "
+                      f"{meter.get('note')}")
             report, dark = frame_report(frames)
             for line in report:
                 print("  " + line)

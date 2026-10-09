@@ -229,21 +229,25 @@ a speckle, nothing else. Three causes, all physical in origin, all fixed:
    calibrated for a dim sun and fog; under the cell, with the sun shadowed
    out, the light is stops below that. A camera meters. Before frame 0 the
    render commandlet captures the beauty frame, reads it back, and opens
-   `AutoExposureBias` until the frame's mean sRGB luma reaches
-   `-storm-meter-target=` (0.32, a gloomy day's mean; up to five rounds),
+   `AutoExposureBias` until the bright end of the frame -- the 90th
+   percentile of its sRGB luma: the cloud base and the horizon, not the
+   dark ground, whose mean says little (the web app's own storm look is
+   visible at a mean of 0.09; the black frame was 0.07) -- reaches
+   `-storm-meter-target=` (0.40, a storm's grey base; up to five rounds),
    never closing below the look's exposure and never more than 8 stops
    open -- the two-stream transmittance of a column thousands of optical
    depths deep is under 1 %, eight stops, and darkness past that is the
    engine's cloud model, not the storm's. The exposure is then constant
-   over the clip (no breathing) and `render.json` records it in
-   `look_applied.storm_exposure` (the luma before and after, the stops
-   opened, the note). The interactive window adapts instead, on the
+   over the clip (no breathing), the linear and accumulation captures
+   carry it too, and `render.json` records it in
+   `look_applied.storm_exposure` (the p90 and mean luma before and after,
+   the stops opened, the note). The interactive window adapts instead, on the
    engine's histogram metering. `-AutoExposure` meters itself and skips the
    storm meter.
 
 `scripts/debug_storm_render.py` now prints the storm meter's line and the
-first and last frame's mean luma (0..255); a frame under 20 is
-`RENDERED-DARK`, not a pass. A material built before this (`M_StormCell`
+first and last frame's luma (0..255, the mean and the 90th percentile); a
+frame whose 90th percentile is under 32 is `RENDERED-DARK`, not a pass. A material built before this (`M_StormCell`
 without the node) is rebuilt by the script on its own: every storm
 material is stamped with `STORM_GENERATION` as asset metadata and an older
 stamp is built again -- the old asset set aside as `<name>_prev` until the
