@@ -1604,3 +1604,23 @@ def test_historical_weather_refuses_the_stated_synthesised_ridge(
     refusal = apply_historical_weather(spec)
     assert refusal is not None and refusal["constraint"] == "weather.not_a_place"
     assert str(spec.wind_speed.source) == "default"     # nothing moved
+
+
+def test_a_stated_storm_distance_places_the_cell_there_on_the_heading():
+    """severe_event_centre: the 45 % point of the run by default; a
+    distance the prompt states is the straight-line point at that distance
+    on the heading, on every scene, so the cell can be seen from outside."""
+    import math
+
+    from webapp.runs import event_ahead_m, severe_event_centre
+
+    stated = compile_prompt("fly the c172 towards a thunderstorm 5 km ahead at 900 m heading 090, for 3 seconds")
+    assert event_ahead_m(stated) == 5000.0
+    north, east = severe_event_centre(stated, {}, 3.0)
+    heading = math.radians(float(stated.heading.value))
+    assert north == pytest.approx(5000.0 * math.cos(heading), abs=1e-6)
+    assert east == pytest.approx(5000.0 * math.sin(heading), abs=1e-6)
+    plain = compile_prompt("fly the c172 through a thunderstorm at 900 m heading 090, for 3 seconds")
+    assert event_ahead_m(plain) is None
+    north, east = severe_event_centre(plain, {}, 3.0)
+    assert math.hypot(north, east) < 200.0   # 45 % of a 3-second run: inside the shaft

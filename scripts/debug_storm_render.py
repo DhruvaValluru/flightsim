@@ -23,8 +23,18 @@ Windows, from the repo root, the engine built (scripts/build_ue.ps1):
 
     .\\.venv\\Scripts\\python.exe scripts\\debug_storm_render.py --backend off --backend procedural
 
-Flat scene (no terrain) unless --terrain names a bake stem under
-runs/terrain; the storm, the rain and the clouds do not need one.
+The scene is the web app's for the prompt (plan_scene_setting stages a
+curated bake for a prompt that names no place; pick_scene; the aircraft's
+own mesh when assets/generated/<aircraft>/mesh_manifest.json exists, else
+the commandlet's placeholder boxes, said so), unless --terrain names a bake
+stem under runs/terrain or --flat asks for the bare slab (the owner's
+first debug frame, 2026-10-09: a flat world and a box aircraft in fog,
+which told him nothing about the storm).
+
+To SEE the cell from outside instead of starting inside its rain shaft,
+place it at a distance in the prompt: "... towards a thunderstorm 5 km
+ahead ..." (core/nl/compiler.py event_ahead_m; the 45 %-of-the-run point
+of a 3-second clip is 70 m ahead, inside the shaft).
 """
 
 from __future__ import annotations
@@ -88,7 +98,9 @@ def main(argv=None) -> int:
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
     parser.add_argument("--seconds", type=float, default=2.0, help="flight seconds to render")
     parser.add_argument("--out", type=Path, default=REPO / "runs" / "debug_storm")
-    parser.add_argument("--terrain", default=None, help="a bake stem under runs/terrain (default: flat)")
+    parser.add_argument("--terrain", default=None,
+                        help="a bake stem under runs/terrain (default: the web app's scene for the prompt)")
+    parser.add_argument("--flat", action="store_true", help="the bare slab, no terrain")
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=360)
     args = parser.parse_args(argv)
@@ -99,16 +111,25 @@ def main(argv=None) -> int:
     from core.render.headless import HEADLESS_FLAGS, run_headless
     from core.scenario.card import write_run_card
     from core.util.platform import ue_editor_path
-    from webapp.runs import (CLIP_SECONDS, _projected_origin, project_for_ue_host,
-                             render_look_for, severe_event_centre)
+    from webapp.runs import (CLIP_SECONDS, TERRAIN_DIR, _projected_origin, baked, pick_scene,
+                             plan_scene_setting, project_for_ue_host, render_look_for,
+                             severe_event_centre, webapp_chase_flag)
 
     args.out.mkdir(parents=True, exist_ok=True)
     spec = compile_prompt(args.prompt)
-    # The web app's projection for the render host (hold_state off: it has
-    # no autopilot) and its storm placement (the downburst block the storm
+    # The web app's stage for a prompt that names no place (a curated bake),
+    # its projection for the render host (hold_state off: it has no
+    # autopilot) and its storm placement (the downburst block the storm
     # cell is centred on), so this card is the card the web app renders.
+    plan_scene_setting(spec)
     project_for_ue_host(spec)
-    scene = {"terrain": args.terrain} if args.terrain else {}
+    if args.flat:
+        scene = {}
+    elif args.terrain:
+        stem = TERRAIN_DIR / args.terrain
+        scene = {"terrain": str(stem) if baked(stem) else args.terrain}
+    else:
+        scene = pick_scene(spec)
     seconds = min(float(spec.duration.value), CLIP_SECONDS)
     origin_x, origin_y, scene_crs = _projected_origin(spec, scene)
     downburst = None
@@ -130,6 +151,17 @@ def main(argv=None) -> int:
           f"weather_look={'weather_look' in text} rain_particles={'rain_particles' in text} "
           f"downburst={'downburst' in text}")
     print(f"  look: {look if look is None else {k: look[k] for k in look if k != 'note'}}")
+    aircraft = str(spec.aircraft.value)
+    mesh = REPO / "assets" / "generated" / aircraft / "mesh_manifest.json"
+    if not mesh.is_file():
+        print(f"  mesh: none at {mesh} -- the commandlet draws its placeholder boxes for the "
+              f"{aircraft} (the web app builds the mesh on its first render)")
+        mesh = None
+    else:
+        print(f"  mesh: {mesh}")
+    print(f"  scene: terrain={scene.get('terrain') if scene else None} "
+          f"({scene.get('kind') if scene else 'flat slab'})")
+    camera_flags = ([f"-chase={webapp_chase_flag(aircraft)}", "-camera=chase"], [])
 
     editor = ue_editor_path()
     if editor is None or not editor.is_file():
@@ -149,7 +181,7 @@ def main(argv=None) -> int:
             extra.append(f"-weather-backend={backend}")
         command = [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
                    "-run=FlightSimBridge.FlightSimRender"] + render_flags(
-            card, frames, scene=scene, mesh=None, look=look, camera_flags=None,
+            card, frames, scene=scene, mesh=mesh, look=look, camera_flags=camera_flags,
             labels=False, width=args.width, height=args.height, fps=5.0, extra=extra)
         log = args.out / backend / "render.log"
         print(f"\n=== {backend}: {log}")

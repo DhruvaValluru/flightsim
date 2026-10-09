@@ -279,7 +279,9 @@ def environment_for(spec: ScenarioSpec, landcover_json=None,
         n0 = lat * metres_per_degree
         e0 = (lon * metres_per_degree * _math.cos(_math.radians(lat)))
         seconds = float(spec.duration.value)
-        ahead = 0.45 * u.kt_to_mps(float(spec.airspeed.value)) * seconds
+        stated = spec.weather_event.detail.get("ahead_m")
+        ahead = (float(stated) if stated is not None
+                 else 0.45 * u.kt_to_mps(float(spec.airspeed.value)) * seconds)
         hdg = _math.radians(float(spec.heading.value))
         centre_n = n0 + ahead * _math.cos(hdg)
         centre_e = e0 + ahead * _math.sin(hdg)

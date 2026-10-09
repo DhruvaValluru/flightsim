@@ -48,7 +48,13 @@ without the storm sits at 24 / 48); the rebuilt M_StormCell's first
 render compiled cloud shaders for 14 minutes, once. The first rebuild
 had failed on a node property the engine does not have and deleted the
 old asset first; the script now keeps the old asset aside until the new
-one is saved.
+one is saved. The first visible frame was a debug flat world with a box
+aircraft and the look's lens-drop rings: the debug script now renders
+the web app's scene (plan_scene_setting / pick_scene, the aircraft's
+mesh, its chase camera), the storm weather supersedes the lens drops off
+a windshield, and "a thunderstorm 5 km ahead" places the cell at a
+distance (event detail ahead_m; the 45 % point of a short clip is inside
+the shaft).
 OPEN for the owner: the two
 weather paths overlap (both draw drops, storm clouds and lightning);
 which one to keep, or how to fold them together, is the owner's call.

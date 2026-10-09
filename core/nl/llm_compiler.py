@@ -1782,18 +1782,23 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
     if event != "none" and "aim" not in spec.weather_event.detail:
         import re as _re
 
-        from .compiler import WEATHER_EVENT_WORDS
+        from .compiler import WEATHER_EVENT_WORDS, event_ahead_m
 
         aim = "abeam"
+        detail = {}
         for variant in WEATHER_EVENT_WORDS.get(event, ()):
             if _re.search(rf"(?:through|into)\s+(?:a|the)?\s*{variant}",
                           prompt, _re.IGNORECASE):
                 aim = "core"
-                break
+            # A stated distance ("5 km ahead") rides in the detail the same
+            # way; the regex compiler's own reading of the same words.
+            ahead = event_ahead_m(prompt, variant)
+            if ahead is not None and "ahead_m" not in detail:
+                detail["ahead_m"] = ahead
         q = spec.weather_event
         spec.weather_event = Quantity(
             value=q.value, unit=q.unit, source=q.source, frm=q.frm,
-            std=q.std, detail={**q.detail, "aim": aim})
+            std=q.std, detail={**q.detail, **detail, "aim": aim})
 
     return LLMCompileResult(
         spec=spec, model=str(getattr(response, "model", model)),

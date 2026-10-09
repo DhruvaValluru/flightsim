@@ -2499,7 +2499,22 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(Error);
 		}
-		if (!bStormGlass)
+		if (!bStormGlass && Weather.DrawsRain())
+		{
+			// The weather's drops are in the air; a camera not behind a
+			// windshield has no glass for drops to sit on. The rain look's
+			// lens drops (rings over the whole frame) are superseded, and
+			// its record says so.
+			const TSharedPtr<FJsonObject>* LookRecord = nullptr;
+			if (VisualScene.LookApplied.IsValid() &&
+			    VisualScene.LookApplied->TryGetObjectField(TEXT("weather_look"), LookRecord) &&
+			    LookRecord != nullptr && LookRecord->IsValid())
+			{
+				(*LookRecord)->SetStringField(TEXT("lens_drops"),
+					TEXT("superseded by weather.rain: no glass on a camera not behind a windshield"));
+			}
+		}
+		else if (!bStormGlass)
 		{
 			VisualScene.ApplyLensDropsToBeauty(Capture);
 		}

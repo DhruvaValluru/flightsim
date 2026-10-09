@@ -454,3 +454,20 @@ def test_a_hurricane_is_refused_by_name_never_flown_as_calm_air(prompt):
     report = validate(compile_prompt(prompt), check_feasibility=False)
     assert [v.constraint for v in report.violations] == ["prompt.unsupported"]
     assert "hurricanes and tropical cyclones" in report.violations[0].message
+
+
+def test_a_storm_at_a_stated_distance_records_it_in_the_event_detail():
+    """"a thunderstorm 5 km ahead": the distance rides in the event's detail
+    beside the aim (digest-relevant), so the web app and the headless
+    runner place the cell there instead of at the 45 %-of-the-run point --
+    which for a 3-second clip is 70 m ahead, inside the rain shaft (the
+    owner's debug frame, 2026-10-09: grey murk)."""
+    far = compile_prompt("fly the c172 towards a thunderstorm 5 km ahead at 900 m, for 3 seconds")
+    assert far.weather_event.value == "thunderstorm"
+    assert far.weather_event.detail == {"aim": "abeam", "ahead_m": 5000.0}
+    assert "5000 m ahead" in far.weather_event.frm
+    near = compile_prompt("fly the c172 through a storm 3000 m away")
+    assert near.weather_event.detail == {"aim": "core", "ahead_m": 3000.0}
+    plain = compile_prompt("fly the c172 through a thunderstorm at 900 m")
+    assert plain.weather_event.detail == {"aim": "core"}
+    assert plain.weather_event.detail.get("ahead_m") is None

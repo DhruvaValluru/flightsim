@@ -2269,6 +2269,14 @@ def plan_weather_event(spec: ScenarioSpec) -> None:
                       "never moved)")
 
 
+def event_ahead_m(spec: ScenarioSpec):
+    """The distance ahead (m) the prompt placed the severe-weather event
+    at (core/nl/compiler.py event_ahead_m: "a thunderstorm 5 km ahead"),
+    or None for the 45 %-of-the-run point."""
+    ahead = spec.weather_event.detail.get("ahead_m")
+    return float(ahead) if ahead is not None else None
+
+
 def severe_event_centre(spec: ScenarioSpec, scene: Dict,
                         seconds: float):
     """(north_m, east_m) of the severe-weather feature on the track.
@@ -2279,16 +2287,24 @@ def severe_event_centre(spec: ScenarioSpec, scene: Dict,
     same point of the PRE-FLOWN track (the banked S-turn misses the
     straight line; measured on the Fuji core run -- closest approach
     ~410 m to a 150 m core). An untrimmable spec keeps the straight
-    line and validate() rules next.
+    line and validate() rules next. A stated distance ("a thunderstorm
+    5 km ahead", event_ahead_m) is the straight-line point at that
+    distance on every scene, so the cell can be seen from outside it.
     """
     import math as _math
 
     from core.fdm import units as u2
 
-    ahead = 0.45 * u2.kt_to_mps(float(spec.airspeed.value)) * seconds
+    stated = event_ahead_m(spec)
+    ahead = (stated if stated is not None
+             else 0.45 * u2.kt_to_mps(float(spec.airspeed.value)) * seconds)
     hdg = _math.radians(float(spec.heading.value))
     centre_n = ahead * _math.cos(hdg)
     centre_e = ahead * _math.sin(hdg)
+    if stated is not None:
+        # "5 km ahead" is a fixed feature on the heading, not a point of
+        # the flown track: the straight line, on every scene.
+        return centre_n, centre_e
     if scene.get("terrain"):
         try:
             from core.terrain.ground import TerrainGround

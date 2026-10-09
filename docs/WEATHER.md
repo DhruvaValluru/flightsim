@@ -117,7 +117,18 @@ python scripts/storm_soundtrack.py <card.json> storm.wav --listener 5000,0,2
 
 When the drops are drawn, the screen-space streaks are not. `world_applied`
 records `precipitation` as `drawn: false, superseded_by: weather.rain`, so there
-is one rain, not two. Everything the weather draws is beauty-only: its actors
+is one rain, not two. The rain look's lens drops (rings over the whole
+frame) are superseded the same way: a cockpit camera gets the windshield,
+a camera not behind a windshield gets no glass (`look_applied.weather_look.
+lens_drops` says so).
+
+Where the cell stands: by default at the 45 %-of-the-run point of the
+track, where the physics puts the microburst -- for a 3-second clip that
+is 70 m ahead, so the camera starts INSIDE the rain shaft and sees grey
+murk, as it would. To see the cumulonimbus from outside, place it:
+`... towards a thunderstorm 5 km ahead ...` (core/nl/compiler.py
+`event_ahead_m`; the distance rides in the event's detail, and the web
+app, the headless runner and the debug script all place the cell there). Everything the weather draws is beauty-only: its actors
 join `BeautyOnlyActors`, so the mask, class and depth passes are byte-identical
 with the weather on and off. `render.json` `look_applied.weather` records what
 was drawn, with what, and what was not and why.

@@ -382,3 +382,23 @@ def test_a_storm_material_built_by_an_older_script_is_built_again():
     assert "or storm_material_stale(name)" in repair
     glass = SCRIPT[SCRIPT.index("def create_windshield_rain"):]
     assert 'not storm_material_stale("M_WindshieldRain") and move_after_tonemapping' in glass
+
+
+def test_the_storm_weather_supersedes_the_lens_drops_and_the_debug_run_is_the_web_apps_scene():
+    """The owner's first visible storm frame (2026-10-09) was a flat world,
+    a box aircraft and the rain look's lens-drop rings. Under the storm
+    weather a camera not behind a windshield gets no glass (recorded as
+    superseded); the debug script renders the web app's scene for the
+    prompt with the aircraft's own mesh and chase camera, and documents the
+    "N km ahead" placement that puts the camera outside the shaft."""
+    glass = COMMANDLET[COMMANDLET.index("const bool bStormGlass = Weather.DrawsRain()"):]
+    glass = glass[:glass.index("Weather.ApplyWindshield")]
+    assert "if (!bStormGlass && Weather.DrawsRain())" in glass
+    assert "superseded by weather.rain: no glass on a camera not behind a windshield" in glass
+    assert "else if (!bStormGlass)" in glass and "ApplyLensDropsToBeauty(Capture)" in glass
+    debug = (REPO / "scripts" / "debug_storm_render.py").read_text(encoding="utf-8")
+    for needle in ("plan_scene_setting(spec)", "scene = pick_scene(spec)", '"--flat"',
+                   'mesh_manifest.json', "webapp_chase_flag(aircraft)", "camera_flags=camera_flags",
+                   "mesh=mesh", "km\nahead"):
+        assert needle in debug, needle
+    assert "ahead" in DOC and "event_ahead_m" in DOC

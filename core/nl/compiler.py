@@ -463,6 +463,26 @@ WEATHER_EVENT_WORDS = {
 }
 
 
+#: "a thunderstorm 5 km ahead" / "a storm 3000 m away": where the event
+#: sits along the heading, instead of the 45 %-of-the-run point the web app
+#: places it at (webapp/runs.py severe_event_centre; core/scenario/runner.py
+#: the same). Stated so the cell can be SEEN from outside: at the 45 % point
+#: of a short clip the camera starts inside the rain shaft, in grey murk.
+EVENT_RANGE = (r"\s+(?:(?:about|some|roughly)\s+)?(?P<range>\d+(?:\.\d+)?)\s*"
+               r"(?P<unit>km|m|metres?|meters?)\b(?:\s+(?:ahead|away|out|in front|off))?")
+
+
+def event_ahead_m(text: str, variant: str) -> Optional[float]:
+    """The stated distance ahead (m) after ``variant``, or None."""
+    m = _search(rf"\b{variant}{EVENT_RANGE}", text)
+    if m is None:
+        return None
+    metres = float(m.group("range"))
+    if m.group("unit").lower() == "km":
+        metres *= 1000.0
+    return metres
+
+
 def _weather_event(text: str) -> Quantity:
     for event, variants in WEATHER_EVENT_WORDS.items():
         for variant in variants:
@@ -470,14 +490,21 @@ def _weather_event(text: str) -> Quantity:
                 # "through/into" aims the event's core AT the track (the
                 # aim rides in the quantity's detail, so it is recorded,
                 # serialized and digest-relevant like any other value);
-                # anything else is the standard abeam flyby.
+                # anything else is the standard abeam flyby. A stated
+                # distance ("5 km ahead") rides there too.
                 aim = ("core" if _search(
                     rf"(?:through|into)\s+(?:a|the)?\s*{variant}", text)
                     else "abeam")
+                detail = {"aim": aim}
+                ahead = event_ahead_m(text, variant)
+                where = ""
+                if ahead is not None:
+                    detail["ahead_m"] = ahead
+                    where = f", {ahead:g} m ahead"
                 return Quantity.inferred(
-                    event, frm=f"severe weather {variant!r}, aim {aim} "
+                    event, frm=f"severe weather {variant!r}, aim {aim}{where} "
                                f"(documented composition/model; see "
-                               f"conditions strip)", aim=aim)
+                               f"conditions strip)", **detail)
     return Quantity.default("none", frm="no severe weather requested")
 
 
