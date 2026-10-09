@@ -1038,6 +1038,32 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     return JSONResponse({**outcome, "digest": spec.digest()})
 
 
+def build_info() -> Dict[str, str]:
+    """Which checkout THIS server process is serving: the git branch and
+    short commit of the repository the code was imported from, read once
+    per call through git itself ("unknown" when git or the checkout is
+    absent, as in a packaged install). Measured need (2026-10-09): a
+    feature pushed to one branch was "not there" on a second machine that
+    had cloned the default branch; the page could not say which code it
+    was showing, so nobody could tell a stale server from a missing
+    feature. The page prints this beside the compiler state."""
+    import subprocess
+
+    root = Path(__file__).resolve().parent.parent
+    out = {"branch": "unknown", "commit": "unknown"}
+    for key, args in (("branch", ("rev-parse", "--abbrev-ref", "HEAD")),
+                      ("commit", ("rev-parse", "--short", "HEAD"))):
+        try:
+            done = subprocess.run(["git", "-C", str(root), *args], capture_output=True,
+                                  text=True, encoding="utf-8", timeout=5, check=False)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        value = done.stdout.strip()
+        if done.returncode == 0 and value:
+            out[key] = value
+    return out
+
+
 @app.get("/status")
 def status_endpoint() -> JSONResponse:
     # llm_available is a presence check (SDK + key in THIS process's
@@ -1059,7 +1085,10 @@ def status_endpoint() -> JSONResponse:
                          "platform": os_name(),
                          "render_available": ue_available(),
                          "taxonomy": classes,
-                         "airframes": labelled_airframes()})
+                         "airframes": labelled_airframes(),
+                         # The checkout this process serves (branch, commit),
+                         # so a page can be matched to a push at a glance.
+                         "build": build_info()})
 
 
 @app.get("/runs/{run_id}")

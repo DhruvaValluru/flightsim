@@ -170,6 +170,7 @@ visual-only per host (measured).</p>
     </select>
   </label>
   <span id="llmState" class="badge">compiler: checking&hellip;</span>
+  <span id="buildState" class="badge" title="the git branch and commit this server process was started from (GET /status build)">serving: checking&hellip;</span>
   <span id="compileState" class="dim"></span>
 </p>
 
@@ -278,6 +279,12 @@ function provenanceNote(f) {
     const status = await (await fetch("/status")).json();
     airframeChoices = status.airframes || [];
     buildFleetPanels();
+    // Which checkout this server serves: branch@commit from git, so a
+    // page can be matched to a push (a stale server or the wrong branch
+    // shows here, not as a feature that "is not there").
+    const build = status.build || {};
+    $("buildState").textContent =
+      `serving: ${build.branch || "unknown"}@${build.commit || "unknown"}`;
     if (status.taxonomy) {
       $("taxonomyLine").textContent =
         "Class taxonomy (fixed ahead of time; a spec may state its own " +
