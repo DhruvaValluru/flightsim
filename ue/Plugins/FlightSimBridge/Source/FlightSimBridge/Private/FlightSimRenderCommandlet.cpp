@@ -1773,6 +1773,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			WeatherOptions.bManualNiagaraTick = true;
 			// -rain-gain=N: the drops' opacity times N (1 = the physics).
 			FParse::Value(*Params, TEXT("rain-gain="), WeatherOptions.RainGain);
+			FParse::Value(*Params, TEXT("rain-style="), WeatherOptions.RainStyle);
 			if (!Weather.Build(World, WeatherOptions, Error)) { return Fail(Error); }
 			VisualScene.BeautyOnlyActors.Append(Weather.BeautyOnlyActors);
 			if (VisualScene.LookApplied.IsValid() && Weather.Record.IsValid())

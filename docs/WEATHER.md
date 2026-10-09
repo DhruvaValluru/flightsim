@@ -135,7 +135,15 @@ camera (`... cockpit camera ...`) gets the windshield's drops and
 rivulets. A clip that must SHOW the rain regardless sets
 `FLIGHTSIM_RAIN_GAIN=4` for the web app (`-rain-gain=4` for the
 commandlet): the drops' opacity times four, a stated exaggeration recorded
-in `look_applied.weather.rain.gain`, never the physics. A cockpit
+in `look_applied.weather.rain.gain`, never the physics. And
+`FLIGHTSIM_RAIN_STYLE=cinematic` (`-rain-style=cinematic`) draws the rain
+an observer sees rather than what a camera on the aircraft records: the
+drops' own fall and the wind over a 1/15 s exposure, the camera's motion
+left out, which is how film shows rain (long slanted streaks through the
+whole clip); recorded as a stylisation in `look_applied.weather.rain.style`.
+The physical style guards the warm-up's step from the settle position
+to the first pose, which read as a camera velocity of kilometres a second
+and drew metre-long streaks on frame 0 alone. A cockpit
 rivulets, the rain's most visible face from an aircraft. The drops are
 lit translucent surfaces (a drop's radiance is the mean of its
 surroundings, which is what the sky light and the cloud-shadowed sun

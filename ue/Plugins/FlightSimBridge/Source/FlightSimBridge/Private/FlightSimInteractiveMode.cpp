@@ -222,6 +222,7 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		// No sound (the owner's call, 2026-10-08): the storm is seen, not heard.
 		WeatherOptions.bAudio = false;
 		FParse::Value(CommandLine, TEXT("rain-gain="), WeatherOptions.RainGain);
+		FParse::Value(CommandLine, TEXT("rain-style="), WeatherOptions.RainStyle);
 		WeatherOptions.bManualNiagaraTick = false;
 		if (!Weather.Build(GetWorld(), WeatherOptions, Error))
 		{

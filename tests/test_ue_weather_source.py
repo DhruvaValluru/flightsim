@@ -463,3 +463,23 @@ def test_a_stated_rain_gets_an_overcast_deck_when_the_look_has_no_clouds():
     assert 'TryGetNumberField(TEXT("rain_rate_mmh"), WeatherRainMmh)' in block
     assert "constexpr double RainDeckMinMmh = 4.0;" in block
     assert "RainLayer.CoverFraction = 0.98;" in block and "SceneOptions.CloudLayers.Add(RainLayer);" in block
+
+
+def test_the_cinematic_rain_style_and_the_warm_up_step_guard(monkeypatch):
+    """The owner's 747 clip (2026-10-09) showed metre-long streaks on frame 0
+    only: the warm-up's step from the settle position to the first solved
+    pose read as a huge camera velocity, and the real motion at 110 m/s
+    then foreshortened every streak to a dot. A step faster than any
+    aircraft keeps the previous velocity; -rain-style=cinematic draws the
+    rain an observer sees (fall and wind over 1/15 s, no camera motion)."""
+    advance = _function(WEATHER_CPP, "void FFlightSimWeather::Advance")
+    assert "constexpr double WeatherMaxCameraMps = 400.0;" in advance
+    assert "CameraVelocity = PreviousCameraVelocity;" in advance
+    assert "if (bCinematicRain)" in advance and "WeatherCinematicShutterS = 1.0 / 15.0;" in advance
+    assert 'TEXT("style")' in WEATHER_CPP and 'FString RainStyle = TEXT("physical");' in WEATHER_H
+    assert 'TEXT("rain-style=")' in COMMANDLET and 'TEXT("rain-style=")' in INTERACTIVE
+    from webapp.runs import weather_backend_flags
+    monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "procedural")
+    monkeypatch.delenv("FLIGHTSIM_RAIN_GAIN", raising=False)
+    monkeypatch.setenv("FLIGHTSIM_RAIN_STYLE", "cinematic")
+    assert weather_backend_flags() == ["-weather-backend=procedural", "-rain-style=cinematic"]

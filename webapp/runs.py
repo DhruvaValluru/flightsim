@@ -2023,6 +2023,14 @@ def weather_backend_flags() -> List[str]:
     gain = os.environ.get("FLIGHTSIM_RAIN_GAIN", "").strip()
     if gain:
         flags.append(f"-rain-gain={float(gain):g}")
+    # FLIGHTSIM_RAIN_STYLE=cinematic: the rain an observer sees (the drops'
+    # fall and the wind over a long exposure, the camera's motion left
+    # out); physical (the default) is what a camera on the aircraft records.
+    style = os.environ.get("FLIGHTSIM_RAIN_STYLE", "").strip().lower()
+    if style:
+        if style not in ("physical", "cinematic"):
+            raise ValueError(f"FLIGHTSIM_RAIN_STYLE={style!r} is not physical or cinematic")
+        flags.append(f"-rain-style={style}")
     return flags
 
 

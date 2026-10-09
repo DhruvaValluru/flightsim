@@ -93,6 +93,13 @@ struct FFlightSimWeatherOptions
 	// aircraft is faint); more is a stated exaggeration for a clip that
 	// must SHOW the rain, recorded in look_applied.weather.rain.gain.
 	double RainGain = 1.0;
+	// The rain's style (-rain-style=, FLIGHTSIM_RAIN_STYLE): "physical"
+	// (the default: the streaks a camera on the aircraft records, short
+	// and faint at speed) or "cinematic" (the rain an observer SEES: the
+	// drops' own fall and the wind over a long exposure, the camera's own
+	// motion left out, as film shows rain). Recorded in
+	// look_applied.weather.rain.style; cinematic is a stated stylisation.
+	FString RainStyle = TEXT("physical");
 	// The interactive window plays thunder and rain; the render does not.
 	bool bAudio = false;
 	// The render commandlet drives no world tick: the Niagara system is
@@ -295,6 +302,7 @@ private:
 	int32 Particles = 0;
 	double Weight = 1.0;
 	double RainGain = 1.0;
+	bool bCinematicRain = false;
 	double AmbientFraction = 1.0;
 	double FallSpeedFactor = 1.0;
 	FVector WindEnuMps = FVector::ZeroVector;
@@ -319,6 +327,7 @@ private:
 	// The air's displacement since t = 0 (engine cm), integrated per Advance.
 	FVector AirDisplacementCm = FVector::ZeroVector;
 	FVector PreviousCameraCm = FVector::ZeroVector;
+	FVector PreviousCameraVelocity = FVector::ZeroVector;
 	double PreviousTimeS = -1.0;
 
 	// -- the cell ------------------------------------------------------------

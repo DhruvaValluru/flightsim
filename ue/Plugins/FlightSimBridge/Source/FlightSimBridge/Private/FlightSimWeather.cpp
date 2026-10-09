@@ -714,6 +714,7 @@ double FFlightSimWeather::ShaftShare(const FVector& CameraEnu) const
 bool FFlightSimWeather::Build(UWorld* World, const FFlightSimWeatherOptions& Options, FString& Error)
 {
 	RainGain = FMath::Clamp(Options.RainGain, 0.0, 100.0);
+	bCinematicRain = Options.RainStyle.Equals(TEXT("cinematic"), ESearchCase::IgnoreCase);
 	Record = WeatherRecord();
 	WorldRef = World;
 	Backend = Options.Backend;
@@ -907,6 +908,11 @@ bool FFlightSimWeather::BuildRain(UWorld* World, const TSharedPtr<FJsonObject>& 
 	Row->SetNumberField(TEXT("particles"), Particles);
 	Row->SetNumberField(TEXT("weight"), Weight);
 	Row->SetNumberField(TEXT("gain"), RainGain);
+	Row->SetStringField(TEXT("style"), bCinematicRain ? TEXT("cinematic") : TEXT("physical"));
+	Row->SetStringField(TEXT("style_basis"), bCinematicRain
+		? TEXT("the rain an observer sees: the drops' fall and the wind over a 1/15 s exposure, the "
+		       "camera's own motion left out (a stated stylisation, as film shows rain)")
+		: TEXT("the streaks a camera on the aircraft records over its exposure (Garg & Nayar)"));
 	Row->SetStringField(TEXT("gain_basis"), RainGain == 1.0
 		? TEXT("1: the streak coverage of Garg & Nayar, unexaggerated")
 		: TEXT("a stated exaggeration of the drops' opacity (-rain-gain=): the rain is shown, not measured"));
@@ -1683,7 +1689,22 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 	const double Dt = PreviousTimeS >= 0.0 ? T - PreviousTimeS : 0.0;
 	const FVector CameraEnu = EngineToEnu(View.CameraCm);
 	const FVector Wind = WindEngineCmPerS(CameraEnu);
-	const FVector CameraVelocity = Dt > 0.0 ? (View.CameraCm - PreviousCameraCm) / Dt : FVector::ZeroVector;
+	// The camera's velocity for the streaks: the warm-up's step from the
+	// settle position to the first solved pose is not a motion (measured:
+	// metre-long streaks on frame 0 alone, 2026-10-09), so a step faster
+	// than any aircraft (WeatherMaxCameraMps) keeps the previous velocity;
+	// the cinematic style leaves the camera's motion out altogether.
+	FVector CameraVelocity = Dt > 0.0 ? (View.CameraCm - PreviousCameraCm) / Dt : FVector::ZeroVector;
+	constexpr double WeatherMaxCameraMps = 400.0;
+	if (CameraVelocity.Size() > WeatherMaxCameraMps * WeatherCmPerMetre)
+	{
+		CameraVelocity = PreviousCameraVelocity;
+	}
+	PreviousCameraVelocity = CameraVelocity;
+	if (bCinematicRain)
+	{
+		CameraVelocity = FVector::ZeroVector;
+	}
 	if (Dt > 0.0)
 	{
 		AirDisplacementCm += Wind * Dt;
@@ -1692,7 +1713,10 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 	PreviousCameraCm = View.CameraCm;
 	const double PixelAngle = 2.0 * FMath::Tan(FMath::DegreesToRadians(View.HorizontalFovDeg) * 0.5)
 		/ FMath::Max(1, View.WidthPx);
-	const double Shutter = FMath::Max(View.ShutterSeconds, 1.0e-5);
+	// The cinematic style's exposure: 1/15 s, the long exposure film shows
+	// rain with (stated); the physical style's is the view's.
+	constexpr double WeatherCinematicShutterS = 1.0 / 15.0;
+	const double Shutter = bCinematicRain ? WeatherCinematicShutterS : FMath::Max(View.ShutterSeconds, 1.0e-5);
 
 	// -- lightning: the flashes this exposure integrates ----------------------
 	double FlashLux = 0.0;
