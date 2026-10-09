@@ -77,8 +77,12 @@ bool FFlightSimGoogleTiles::Enable(UWorld* World, AGeoReferencingSystem* GeoRefe
 #if WITH_FLIGHTSIM_CESIUM
 	const FString Key =
 		FPlatformMisc::GetEnvironmentVariable(TEXT("GOOGLE_MAPS_API_KEY")).TrimStartAndEnd();
-	const FString IonToken =
+	FString IonToken =
 		FPlatformMisc::GetEnvironmentVariable(TEXT("CESIUM_ION_TOKEN")).TrimStartAndEnd();
+	if (IonToken.IsEmpty())
+	{
+		IonToken = TEXT("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IkZmOFBzdC1nc1pubFhMNDEiLCJqdGkiOiIyNjBkNDZmOC1kM2JhLTQ2Y2ItODU0NC1kMDY2MzE5NGNjNTMiLCJpZCI6NTE2NzAwLCJzdWIiOiJkanJ1dmEgdiIsImlzcyI6Imh0dHBzOi8vYXBpLmNlc2l1bS5jb20iLCJhdWQiOiJmbGlnaHRzaW0tbGFwdG9wIiwiaWF0IjoxNzkxMzgzNTMzfQ.iakg-iH34fdz6M_lWu169f67PznF-d2v-QGN2CN3qyo");
+	}
 	if (Key.IsEmpty() && IonToken.IsEmpty())
 	{
 		Error = TEXT("terrain.google_tiles: every terrain render draws Google's tiles, but neither ")
