@@ -125,11 +125,11 @@ lens_drops` says so).
 What the rain looks like, and why. A drop's streak covers a point of the
 frame for D / (|v| t) of the exposure (Garg & Nayar): from a chase camera
 at 100 kt the relative speed is 52 m/s, so at a daylight shutter of
-1/250 s a 2 mm drop is a 21 cm streak at 1 % coverage -- faint, visible
+1/1000 s a 2 mm drop is a 5 cm streak at 2 % coverage -- faint, visible
 only within a metre or two of the camera at 1080p, as in real footage
 from a moving aircraft, where the rain is seen on the glass and as the
 veil (the shaft's Atlas extinction), not as drops. The shutter is the
-card camera's exposure triple when it states one, else 1/250 s (stated;
+card camera's exposure triple when it states one, else 1/1000 s (stated; 1/250 s showed a 747's rain only before the camera moved;
 `look_applied.weather.shutter_s`), never the frame interval. A cockpit
 camera (`... cockpit camera ...`) gets the windshield's drops and
 rivulets, the rain's most visible face from an aircraft. The drops are

@@ -90,8 +90,14 @@ namespace
 	constexpr double StormMeterMaxStops = 8.0;
 	constexpr int32 StormMeterSettleCaptures = 4;
 	// The exposure the rain's drops streak over when the card states no
-	// camera triple: 1/250 s, a daylight video camera's order (stated).
-	constexpr double WeatherDefaultShutterS = 1.0 / 250.0;
+	// camera triple: 1/1000 s, a daylight video camera's order (stated).
+	// It decides whether the rain is SEEN from a moving aircraft: a
+	// streak's coverage is D / (|v| t) (Garg & Nayar), and from a 747 at
+	// 220 kt (110 m/s) a 2 mm drop at 1/250 s was 0.7 % -- the owner's
+	// clip (2026-10-09) showed rain only in the first frames, before the
+	// camera was moving; at 1/1000 s it is 1.8 %, times the drawn drop's
+	// weight, visible within a few metres as it is in real footage.
+	constexpr double WeatherDefaultShutterS = 1.0 / 1000.0;
 
 	// A placeholder airframe: boxes, roughly 747-shaped, with real hinges.
 	//

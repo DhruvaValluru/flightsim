@@ -412,7 +412,7 @@ def test_the_drops_streak_over_a_daylight_shutter_and_the_near_ones_are_kept():
     that in daylight) into nothing, and the first metre, the only drops
     wide enough to see, was faded out. A stated daylight shutter when the
     card has no triple, recorded; the fade over the first 30 cm."""
-    assert "constexpr double WeatherDefaultShutterS = 1.0 / 250.0;" in COMMANDLET
+    assert "constexpr double WeatherDefaultShutterS = 1.0 / 1000.0;" in COMMANDLET
     assert ("FMath::Min(static_cast<double>(StepsPerFrame) * DeltaSeconds, WeatherDefaultShutterS)"
             in COMMANDLET)
     assert 'TEXT("shutter_s")' in COMMANDLET

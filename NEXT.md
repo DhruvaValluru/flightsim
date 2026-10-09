@@ -101,7 +101,7 @@ a windshield, and "a thunderstorm 5 km ahead" places the cell at a
 distance (event detail ahead_m; the 45 % point of a short clip is inside
 the shaft). The rain was invisible: the drops streaked over the frame
 interval (0.2 s at 5 fps) and the first metre was faded out; now a
-daylight shutter (1/250 s, stated) when the card has no triple, and a
+daylight shutter (1/1000 s, stated; 1/250 lost the rain once a 747 was moving) when the card has no triple, and a
 30 cm fade. Storm materials now carry a generation EACH
 (STORM_GENERATIONS): the rain's rebuild does not recompile the cloud.
 OWNER'S RULE (2026-10-09): Google's 3D tiles are the ground of EVERY
