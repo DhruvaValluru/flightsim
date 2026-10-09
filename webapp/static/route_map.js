@@ -923,6 +923,7 @@ window.RouteMap = (function () {
           <button class="rm-reach" title="Zoom out to everywhere the aircraft can reach">Show reach</button>
         </div>
         <div class="rm-group">
+          <button class="rm-adopt" title="Replace your line with the grey line the aircraft would actually fly, then shape that">Take its line</button>
           <button class="rm-undo" title="Undo (Ctrl+Z)">Undo</button>
           <button class="rm-clear">Clear</button>
         </div>
@@ -987,6 +988,7 @@ window.RouteMap = (function () {
       $(".rm-out").onclick = () => this.setZoom(this.view.zoom / 1.5);
       $(".rm-fit").onclick = () => this.fitLine();
       $(".rm-reach").onclick = () => this.showReach();
+      $(".rm-adopt").onclick = () => this.adoptFlown();
       $(".rm-undo").onclick = () => this.undo();
       $(".rm-clear").onclick = () => this.clear();
       $(".rm-pinsave").onclick = () => this.savePin();
@@ -1164,6 +1166,25 @@ window.RouteMap = (function () {
       return R.empty ? 0 : R.checks.filter(c => c.s === "warn" || c.s === "error").length;
     }
     flatPoints() { return this.S.strokes.flat(); }
+    // "Take its line": the grey quick-look track -- what the aircraft would
+    // actually fly through the drawn line -- becomes the line itself, its
+    // points as handles for the Shape tool (the owner, 2026-10-09: "what
+    // if I can manipulate its own line"). Simplified to a few metres so it
+    // has a handful of points, not one per sample.
+    adoptFlown() {
+      const R = this.R;
+      if (!R || R.empty || !R.sim || R.sim.samples.length < 2) {
+        this.$(".rm-hint").textContent = "Draw a line with the pen first; then its flown line can be taken.";
+        return;
+      }
+      const cut = R.sim.samples.filter((q, i) => i === 0 || Math.hypot(q.x, q.y) > 1e-6);
+      const pts = rdp(cut.map(q => ({x: q.x, y: q.y})), Math.max(4 * this.mpp, R.step * 0.5)).slice(1);
+      if (pts.length < 1) return;
+      this.pushHist(); this.dropGhost(); this.clearResult();
+      this.setPoints(pts); this.S.adjusted = false;
+      this.setTool("shape");
+      this.update();
+    }
     setPoints(pts) { this.S.strokes = pts.length ? [pts] : []; }
     beginShape(px, py, remove) {
       const pts = this.flatPoints();
