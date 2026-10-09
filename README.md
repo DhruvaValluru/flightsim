@@ -76,6 +76,13 @@ Run it on Windows (PowerShell, no clone needed):
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/phase-2-testing/scripts/deploy_windows.ps1))) -Branch phase-2-testing
 ```
 
+Re-running that same line later **updates the install to the branch's
+remote head and restarts the server** (a uvicorn already on port 8008
+keeps serving the code it started with, so it is stopped first); it
+prints the commit it is serving. If it says the pull was not a
+fast-forward, add `-Reset` to make the clone exactly the remote branch
+(local edits are discarded).
+
 Or, from a clone: `git checkout phase-2-testing`, `.\scripts\setup.ps1`,
 then `.\.venv\Scripts\python.exe -m uvicorn webapp.server:app --port 8008`.
 For rendered frames, follow "Rendering video clips" below. After pulling
