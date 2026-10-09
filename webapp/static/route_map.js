@@ -754,6 +754,7 @@ window.RouteMap = (function () {
     pen: "Drag from the aircraft to draw. Click to add a straight leg.",
     alt: "Click your line to set the altitude at that point.",
     pan: "Drag to move the map. Scroll or use + and − to zoom.",
+    shape: "Drag a point of your line. It stops where a check would fail. Click the line to add a point; right-click a point to remove it.",
   };
 
   class RouteMapView {
@@ -778,6 +779,7 @@ window.RouteMap = (function () {
       this.anim = null;
       this.drawing = null;
       this.panning = null;
+      this.shaping = null;
       this.pinEdit = null;
       this.raf = 0;
       this.terr = {key: ""};
@@ -816,6 +818,7 @@ window.RouteMap = (function () {
                 overflow: hidden; background: #0d1217; }
   .rm-map { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
   .rm-mapwrap[data-tool="alt"] .rm-map { cursor: copy; }
+  .rm-mapwrap[data-tool="shape"] .rm-map { cursor: pointer; }
   .rm-mapwrap[data-tool="pan"] .rm-map { cursor: grab; }
   .rm-toolbar { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap;
                 gap: 4px; pointer-events: none; }
@@ -895,7 +898,8 @@ window.RouteMap = (function () {
 <div><b>Route map</b>
   <span class="dim">— ${esc(scene.label || this.data.kind)}</span></div>
 <div class="dim" style="margin:.3rem 0">Draw the flight path from the aircraft with the pen,
-  or click straight legs; the Altitude tool sets the altitude at a point on the line. North is
+  or click straight legs; the Shape tool drags the line's points, and a point stops where a
+  check would fail; the Altitude tool sets the altitude at a point on the line. North is
   up; X is east, Y is north, metres from the start, where the aircraft begins at its spec
   altitude and heads along the first leg. The ground is the scene the physics flies${
   this.grid.kind === "flat" ? `: this scene is flat, the datum at ${fmtN(this.grid.datum)} m everywhere`
@@ -908,6 +912,7 @@ window.RouteMap = (function () {
       <div class="rm-toolbar" role="toolbar" aria-label="Map tools">
         <div class="rm-group">
           <button class="rm-tool" data-tool="pen" aria-pressed="true" title="Draw the path (P)">Pen</button>
+          <button class="rm-tool" data-tool="shape" aria-pressed="false" title="Move the points of your line; a move stops where a check would fail (S)">Shape</button>
           <button class="rm-tool" data-tool="alt" aria-pressed="false" title="Set an altitude on the line (A)">Altitude</button>
           <button class="rm-tool" data-tool="pan" aria-pressed="false" title="Move the map (M)">Move</button>
         </div>
@@ -1015,6 +1020,7 @@ window.RouteMap = (function () {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); this.undo(); }
         else if (e.key === "p" || e.key === "P") this.setTool("pen");
         else if (e.key === "a" || e.key === "A") this.setTool("alt");
+        else if (e.key === "s" || e.key === "S") this.setTool("shape");
         else if (e.key === "m" || e.key === "M") this.setTool("pan");
         else if (e.key === "+" || e.key === "=") this.setZoom(this.view.zoom * 1.5);
         else if (e.key === "-" || e.key === "_") this.setZoom(this.view.zoom / 1.5);
@@ -1100,6 +1106,7 @@ window.RouteMap = (function () {
       el.addEventListener("contextmenu", e => e.preventDefault());
       el.addEventListener("pointerdown", e => {
         const [px, py] = this.local(e);
+        if (e.button === 2 && this.S.tool === "shape") { this.beginShape(px, py, true); e.preventDefault(); return; }
         if (e.button !== 0 || this.S.tool === "pan") {
           this.panning = {px, py, ox: this.view.ox, oy: this.view.oy};
           el.setPointerCapture(e.pointerId);
@@ -1112,6 +1119,9 @@ window.RouteMap = (function () {
           this.closePin();
           this.drawing = {pts: [this.toW(px, py)], px: [[px, py]]};
           el.setPointerCapture(e.pointerId);
+        } else if (this.S.tool === "shape") {
+          this.closePin();
+          if (this.beginShape(px, py, e.button === 2)) el.setPointerCapture(e.pointerId);
         } else this.pickPin(px, py);
       });
       el.addEventListener("pointermove", e => {
@@ -1124,6 +1134,7 @@ window.RouteMap = (function () {
           this.fitMap(); this.render();
           return;
         }
+        if (this.shaping) { this.moveShape(px, py); return; }
         if (!this.drawing) return;
         const l = this.drawing.px[this.drawing.px.length - 1];
         if (Math.hypot(px - l[0], py - l[1]) < 2.5) return;
@@ -1141,8 +1152,78 @@ window.RouteMap = (function () {
         this.setZoom(this.view.zoom * Math.exp(-e.deltaY * 0.0015), px, py);
       }, {passive: false});
     }
+    // -- the Shape tool: the line's points dragged under the checks ------
+    // The strokes become one list of points with handles. A dragged point
+    // follows the pointer while every check still passes as it did when
+    // the drag began; past that it stops at the farthest place that still
+    // does (a bisection along the pointer's path), so the line can only
+    // be shaped into what the aircraft can fly -- the owner's ask
+    // (2026-10-09): one line to manipulate, never into the impossible.
+    failing(S) {
+      const R = compute(S, this.lim, this.grid);
+      return R.empty ? 0 : R.checks.filter(c => c.s === "warn" || c.s === "error").length;
+    }
+    flatPoints() { return this.S.strokes.flat(); }
+    setPoints(pts) { this.S.strokes = pts.length ? [pts] : []; }
+    beginShape(px, py, remove) {
+      const pts = this.flatPoints();
+      if (!pts.length) { this.$(".rm-hint").textContent = "Draw a line with the pen first."; return false; }
+      let best = -1, bd = 12;
+      pts.forEach((p, i) => {
+        const [x, y] = this.toPx(p.x, p.y), d = Math.hypot(x - px, y - py);
+        if (d < bd) { bd = d; best = i; }
+      });
+      if (remove) {
+        if (best < 0 || pts.length < 2) return false;
+        this.pushHist(); this.dropGhost(); this.clearResult();
+        pts.splice(best, 1); this.setPoints(pts); this.S.adjusted = false; this.update();
+        return false;
+      }
+      if (best < 0) {
+        // A click on the line inserts a point there, between its neighbours.
+        const P = this.R.path && this.R.path.pts;
+        if (!P) return false;
+        let bi = -1, bdd = 10;
+        P.forEach((p, i) => {
+          const [x, y] = this.toPx(p.x, p.y), d = Math.hypot(x - px, y - py);
+          if (d < bdd) { bdd = d; bi = i; }
+        });
+        if (bi < 0) return false;
+        const w = this.toW(px, py), cum = cumLen([{x: 0, y: 0}, ...pts]);
+        let k = 0;
+        while (k < pts.length - 1 && cum[k + 1] < this.R.path.cum[bi]) k++;
+        this.pushHist(); this.dropGhost(); this.clearResult();
+        pts.splice(k + 1, 0, {x: w.x, y: w.y}); this.setPoints(pts); this.S.adjusted = false; this.update();
+        best = k + 1;
+      } else {
+        this.pushHist(); this.dropGhost(); this.clearResult();
+      }
+      this.shaping = {i: best, last: {...pts[best]}, baseline: this.failing(this.S)};
+      return true;
+    }
+    moveShape(px, py) {
+      const sh = this.shaping, pts = this.flatPoints();
+      const want = this.toW(px, py);
+      const trial = q => { const t = pts.map(p => ({...p})); t[sh.i] = q; return {...this.S, strokes: [t]}; };
+      let place = want;
+      if (this.failing(trial(want)) > sh.baseline) {
+        // Bisect between the last place that passed and the pointer.
+        let lo = sh.last, hi = want;
+        for (let k = 0; k < 7; k++) {
+          const mid = {x: (lo.x + hi.x) / 2, y: (lo.y + hi.y) / 2};
+          if (this.failing(trial(mid)) > sh.baseline) hi = mid; else lo = mid;
+        }
+        place = lo;
+      }
+      sh.last = place;
+      pts[sh.i] = place;
+      this.setPoints(pts);
+      this.S.adjusted = false;
+      this.update();
+    }
     endStroke() {
       if (this.panning) { this.panning = null; this.render(); return; }
+      if (this.shaping) { this.shaping = null; this.update(); return; }
       if (!this.drawing) return;
       const d = this.drawing;
       this.drawing = null;
@@ -1389,6 +1470,14 @@ window.RouteMap = (function () {
           this.poly(c, P, 0, ri - 1);
           c.lineWidth = 8; c.strokeStyle = TK.halo; c.globalAlpha = 0.85; c.stroke(); c.globalAlpha = 1;
           c.lineWidth = 5; c.strokeStyle = TK.route; c.stroke();
+        }
+      }
+      // The line's points, as handles, in the Shape tool.
+      if (this.S.tool === "shape") {
+        for (const p of this.flatPoints()) {
+          const [x, y] = this.toPx(p.x, p.y);
+          c.beginPath(); c.arc(x, y, 6, 0, Math.PI * 2);
+          c.fillStyle = TK.route; c.fill(); c.lineWidth = 2; c.strokeStyle = TK.halo; c.stroke();
         }
       }
       // The quick-look track.
