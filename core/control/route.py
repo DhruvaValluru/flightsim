@@ -80,6 +80,14 @@ HDOT_MAX_MPS = 12.192
 #: ahead and hunt across the line).
 LOOKAHEAD_S = 4.0
 MIN_LOOKAHEAD_M = 120.0
+#: The lookahead is never more than this fraction of the line's length:
+#: pure pursuit aims at the point one lookahead ahead, and on a line a
+#: 10-second run can fly (a 747 at 220 kt draws 450 m of lookahead on an
+#: 800 m line) it aimed at the end from the start and cut every bend
+#: straight (the owner's map, 2026-10-09: "I draw a curve and it makes its
+#: own line"). A quarter of the line keeps at least four aiming points
+#: along it; MIN_LOOKAHEAD_M still holds below that.
+LOOKAHEAD_LENGTH_FRACTION = 0.25
 #: The longest list the block carries: the map's pen resamples to a few
 #: metres, and 400 points at the c172p's 55 m/s is far longer than the
 #: longest scenario (MAX_DURATION_S, an hour) at the resample step.
@@ -186,10 +194,15 @@ def turn_radius_m(tas_kt: float, bank_deg: float) -> float:
     return v * v / (G_MPS2 * math.tan(math.radians(float(bank_deg))))
 
 
-def lookahead_m_for(tas_kt: float) -> float:
+def lookahead_m_for(tas_kt: float, length_m: Optional[float] = None) -> float:
     """The pure-pursuit lookahead: LOOKAHEAD_S of true airspeed, never
-    below MIN_LOOKAHEAD_M."""
-    return max(MIN_LOOKAHEAD_M, LOOKAHEAD_S * u.kt_to_mps(float(tas_kt)))
+    below MIN_LOOKAHEAD_M, and never more than LOOKAHEAD_LENGTH_FRACTION of
+    the line's length when the line is known (the map's quick look and
+    the physics use the same number: the card records it)."""
+    base = LOOKAHEAD_S * u.kt_to_mps(float(tas_kt))
+    if length_m is not None and float(length_m) > 0.0:
+        base = min(base, LOOKAHEAD_LENGTH_FRACTION * float(length_m))
+    return max(MIN_LOOKAHEAD_M, base)
 
 
 # -- geometry ----------------------------------------------------------------------
@@ -463,12 +476,12 @@ class Route:
             [(0.0, 0.0, float(altitude0_m))] + waypoint_tuples(waypoints))
         self.bank_limit_deg = float(bank_limit_deg)
         self.tas_kt = float(tas_kt)
-        self.lookahead_m = lookahead_m_for(self.tas_kt)
         self.cum_m: List[float] = [0.0]
         for i in range(len(self.points) - 1):
             (e0, n0, _), (e1, n1, _) = self.points[i], self.points[i + 1]
             self.cum_m.append(self.cum_m[-1] + math.hypot(e1 - e0, n1 - n0))
         self.length_m = self.cum_m[-1]
+        self.lookahead_m = lookahead_m_for(self.tas_kt, self.length_m)
         self.initial_heading_deg = _bearing_deg(*self.points[0][:2], *self.points[1][:2])
 
     @classmethod

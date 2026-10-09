@@ -476,3 +476,22 @@ def test_the_camera_orbit_is_not_a_route_word():
     spec = compile_prompt("orbit the 747 from the chase camera for 20 seconds")
     assert "prompt.not_set" not in names(spec)
     assert [row[1] for row in CARRIED].count("a flight path") == 1
+
+
+def test_the_lookahead_is_capped_to_a_quarter_of_the_line():
+    """A 747 at 220 kt steers 450 m ahead; on an 800 m line that aimed at the
+    end from the start and cut every bend straight (the owner's map,
+    2026-10-09). The lookahead is at most a quarter of the line, never
+    under MIN_LOOKAHEAD_M; the route carries the capped number."""
+    from core.control.route import (LOOKAHEAD_LENGTH_FRACTION, MIN_LOOKAHEAD_M, Route,
+                                    lookahead_m_for)
+
+    assert lookahead_m_for(220.0) == pytest.approx(4.0 * u.kt_to_mps(220.0))
+    assert lookahead_m_for(220.0, 800.0) == pytest.approx(200.0)
+    assert lookahead_m_for(220.0, 100.0) == MIN_LOOKAHEAD_M
+    assert lookahead_m_for(220.0, 100000.0) == pytest.approx(4.0 * u.kt_to_mps(220.0))
+    route = Route([{"east_m": 800.0, "north_m": 0.0, "alt_m": 1000.0}], 1000.0, tas_kt=220.0)
+    assert route.lookahead_m == pytest.approx(LOOKAHEAD_LENGTH_FRACTION * route.length_m)
+    js = (REPO / "webapp" / "static" / "route_map.js").read_text(encoding="utf-8")
+    assert "lim.min_lookahead_m" in js and "lim.lookahead_length_fraction" in js   # served, not mirrored
+    assert js.count("lookaheadFor(lim, R.len)") == 2

@@ -650,3 +650,23 @@ def test_the_module_lists_and_renders_from_the_command_line():
         capture_output=True, text=True)
     assert unknown.returncode == 1
     assert unknown.stdout.splitlines()[0] == "no.such_name"
+
+
+def test_an_untrimmable_condition_names_the_smallest_change_that_works():
+    """The owner (2026-10-09): a refusal should say what small change makes
+    it work. The validator tries nearby speeds, then altitudes, one change
+    at a time, and the hint names the first that trims."""
+    from core.messages import explain
+    from core.nl.compiler import compile_prompt
+    from core.scenario.validate import trim_suggestion, validate
+
+    spec = compile_prompt("fly the c172 at 9000 m and 100 kt")
+    suggestion = trim_suggestion(spec)
+    assert suggestion.startswith("change the altitude to ") and "m (it trims there at 100 kt)" in suggestion
+    assert float(spec.altitude.value) == 9000.0 and str(spec.altitude.source) == "user"   # untouched
+    report = validate(spec)
+    hit = [v for v in report.violations if v.constraint == "envelope.trim_feasible"]
+    assert hit and hit[0].detail == {"suggestion": suggestion}
+    assert f"the smallest change that works: {suggestion}" in explain(hit[0])["hint"]
+    fine = compile_prompt("fly the c172 at 900 m and 100 kt")
+    assert validate(fine).ok

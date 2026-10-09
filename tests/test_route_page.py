@@ -229,16 +229,20 @@ STUB_TAS_KT, STUB_BANK_DEG, STUB_SECONDS = 120.0, 25.0, 20.0
 def _route_limits(seconds):
     try:
         from core.control.route import (
-            HDOT_MAX_MPS, ROUTE_MIN_CLEARANCE_M, lookahead_m_for, turn_radius_m)
+            HDOT_MAX_MPS, LOOKAHEAD_LENGTH_FRACTION, MIN_LOOKAHEAD_M, ROUTE_MIN_CLEARANCE_M,
+            lookahead_m_for, turn_radius_m)
         radius = turn_radius_m(STUB_TAS_KT, STUB_BANK_DEG)
         lookahead = lookahead_m_for(STUB_TAS_KT)
         floor, hdot = ROUTE_MIN_CLEARANCE_M, HDOT_MAX_MPS
+        min_look, look_frac = MIN_LOOKAHEAD_M, LOOKAHEAD_LENGTH_FRACTION
     except ImportError:          # the core part has not landed: the design's values
         v = STUB_TAS_KT * 0.514444
         radius = v * v / (9.80665 * math.tan(math.radians(STUB_BANK_DEG)))
         lookahead, floor, hdot = max(120.0, 4.0 * v), 150.0, 12.192
+        min_look, look_frac = 120.0, 0.25
     return {"tas_kt": STUB_TAS_KT, "turn_radius_m": radius, "bank_limit_deg": STUB_BANK_DEG,
             "hdot_max_mps": hdot, "min_clearance_m": floor, "lookahead_m": lookahead,
+            "min_lookahead_m": min_look, "lookahead_length_fraction": look_frac,
             "seconds": seconds}
 
 

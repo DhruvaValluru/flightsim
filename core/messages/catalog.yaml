@@ -56,7 +56,7 @@ environment.weather_event:
   sentence: "That kind of severe weather is not modelled; only a thunderstorm or a tornado can be asked for."
 envelope.trim_feasible:
   sentence: "This aircraft cannot fly steadily at the requested speed, height and weight; its flight model does not reach there."
-  hint: "Change the speed or the altitude, or choose another aircraft."
+  hint: "Change the speed or the altitude, or choose another aircraft (the smallest change that works: {suggestion})."
 
 # -- the variation block (core/scenario/validate.py, randomization.py) -------
 
@@ -1119,3 +1119,41 @@ route.terrain_clearance:
 route.closure:
   sentence: "Flown as drawn, the autopilot could not stay on the path: it strayed by {actual} where it must stay within {limit}, so the flight would produce no output."
   hint: "Widen the bends or spread the height changes, or let the map adjust the path."
+
+# -- the storm weather (core/scene/storm_weather.py, docs/WEATHER.md) --------
+weather.backend:
+  sentence: "The rain backend asked for is not one the renderer has; it draws rain procedurally, with Niagara, or not at all."
+  hint: "Use -weather-backend=procedural, niagara or off (the web app's FLIGHTSIM_WEATHER_BACKEND)."
+weather.card:
+  sentence: "The run card's weather block is missing a number the renderer needs, so the weather cannot be built from it."
+  hint: "Write the card again from the spec; a card edited by hand must keep every weather field."
+weather.cell:
+  sentence: "The storm cell cannot be shaped here: the tropopause sits too close to the ground datum for a cloud tower to stand between them."
+  hint: "Lower the terrain datum or move the scene away from the poles."
+weather.frame:
+  sentence: "The weather cannot be placed because the scene has no georeference to measure the engine's east and north axes through."
+  hint: "Render a georeferenced scene (a baked terrain); the flat slab carries none."
+weather.selftest:
+  sentence: "The renderer's own weather arithmetic disagrees with the card's recorded self-test, so the weather it would draw is not the weather the card describes."
+  hint: "Rebuild the engine plugin from this checkout; the Python and C++ sides must be the same version."
+weather.rain_material:
+  sentence: "The rain's material is not in the project, so no drops can be drawn."
+  hint: "Run the material script once (the weather guide says how) to build the storm materials."
+weather.storm_material:
+  sentence: "The storm cloud's material is not in the project, so the cumulonimbus cannot be drawn."
+  hint: "Run the material script once (the weather guide says how) to build the storm materials."
+weather.lightning_material:
+  sentence: "The lightning's material is not in the project, so no bolt can be drawn."
+  hint: "Run the material script once (the weather guide says how) to build the storm materials."
+weather.windshield:
+  sentence: "The windshield's rain material is not in the project, so a cockpit camera gets no drops on its glass."
+  hint: "Run the material script once (the weather guide says how) to build the storm materials."
+weather.niagara_asset:
+  sentence: "The Niagara rain system is not in the project; it is built by hand from the recipe in docs/WEATHER.md."
+  hint: "Build NS_FlightSimRain from the recipe, or use -weather-backend=procedural."
+weather.rain:
+  sentence: "The rain is drawn as drops in the air by the storm weather, which supersedes the screen-space streaks and the lens drops."
+  hint: "This is a record, not a refusal; the render manifest says what was drawn."
+clouds.material:
+  sentence: "A volumetric cloud in the scene carries a material the engine's cloud passes would crash on (not a Volume material, not flagged for the volumetric cloud, or failed to compile)."
+  hint: "Run the material script again; it sets the flag and rebuilds a stale storm material."

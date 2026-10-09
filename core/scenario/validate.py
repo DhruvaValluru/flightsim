@@ -22,7 +22,7 @@ honest, and predicting it would be a guess dressed as a constraint.
 from __future__ import annotations
 
 from dataclasses import dataclass, field as dc_field
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..fdm import FDMError, FlightDynamics, TrimMode
 from ..fdm import units as u
@@ -55,6 +55,10 @@ class Violation:
     actual: Optional[Any] = None
     limit: Optional[Any] = None
     unit: Optional[str] = None
+    #: Extra placeholder values for the catalogue's sentence and hint
+    #: (core/messages params_of reads a ``detail`` mapping): the trim
+    #: refusal's ``suggestion``, the change that would work.
+    detail: Optional[Dict[str, Any]] = None
 
     @staticmethod
     def _shown(value: Any) -> str:
@@ -293,16 +297,83 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
         try:
             configure_from_spec(spec)
         except FDMError as exc:
-            report.violations.append(
-                Violation(
-                    "envelope.trim_feasible",
-                    f"this model cannot be trimmed at the commanded condition; "
-                    f"its aero tables do not reach here. Underlying error: "
-                    f"{type(exc).__name__}",
-                )
-            )
+            suggestion = trim_suggestion(spec)
+            # The catalogue's hint reads {suggestion} (core/messages/
+            # catalog.yaml): the page says the change, not just "change".
+            report.violations.append(Violation(
+                "envelope.trim_feasible",
+                f"this model cannot be trimmed at the commanded condition; "
+                f"its aero tables do not reach here. Underlying error: "
+                f"{type(exc).__name__}"
+                + (f". {suggestion}" if suggestion else ""),
+                detail={"suggestion": suggestion} if suggestion else None,
+            ))
 
     return report
+
+
+#: The nearby conditions the trim search tries when the commanded one
+#: cannot be trimmed: speed steps (kt) at the commanded altitude, then
+#: altitude steps (m) at the commanded speed -- one change at a time, the
+#: smallest first, so the suggestion is the smallest change that works.
+#: Measured: one trim attempt is ~0.05 s, so the search is cheap.
+TRIM_SEARCH_SPEED_STEPS_KT = (10.0, -10.0, 20.0, -20.0, 30.0, -30.0, 50.0, -50.0)
+TRIM_SEARCH_ALTITUDE_STEPS_M = (-500.0, -1000.0, -2000.0, -3000.0, -5000.0, -7000.0, 500.0, 1000.0)
+#: Altitudes tried after the steps, as fractions of the commanded one and
+#: a low fallback: a c172 asked for 9000 m is out of its ceiling by far
+#: more than any step (measured: no step trimmed; 3000 m does).
+TRIM_SEARCH_ALTITUDE_FRACTIONS = (0.5, 0.33)
+TRIM_SEARCH_ALTITUDE_FALLBACK_M = 1000.0
+
+
+def trim_suggestion(spec) -> str:
+    """The smallest single change of speed or altitude at which this
+    airframe trims, in words ("it trims at 120 kt at 900 m"), or "" when
+    none of the nearby conditions trims either. The owner's ask
+    (2026-10-09): a refusal should say what small change makes it work.
+    The airframe's documented cruise is tried first, then the steps."""
+    import copy
+
+    from .runner import configure_from_spec
+    from ..nl.compiler import CRUISE_DEFAULT_KT
+
+    speed = float(spec.airspeed.value)
+    altitude = float(spec.altitude.value)
+    model = str(spec.aircraft.value)
+
+    def trims(new_speed, new_altitude) -> bool:
+        trial = copy.deepcopy(spec)
+        # set(), not plan(): a stated value may be moved on a trial copy
+        # that is thrown away; nothing on the real spec changes.
+        if new_speed != speed:
+            trial.set("airspeed", new_speed, frm="trim search (a trial copy)")
+        if new_altitude != altitude:
+            trial.set("altitude", new_altitude, frm="trim search (a trial copy)")
+        try:
+            configure_from_spec(trial)
+            return True
+        except Exception:   # any failure to trim is a no, never a crash of the search
+            return False
+
+    speeds = []
+    cruise = CRUISE_DEFAULT_KT.get(model)
+    if cruise is not None and cruise != speed:
+        speeds.append(cruise)
+    speeds += [speed + step for step in TRIM_SEARCH_SPEED_STEPS_KT if speed + step > 0.0]
+    for candidate in speeds:
+        if trims(candidate, altitude):
+            return f"change the speed to {candidate:g} kt (it trims there at {altitude:g} m)"
+    altitudes = [altitude + step for step in TRIM_SEARCH_ALTITUDE_STEPS_M]
+    altitudes += [altitude * f for f in TRIM_SEARCH_ALTITUDE_FRACTIONS] + [TRIM_SEARCH_ALTITUDE_FALLBACK_M]
+    tried = set()
+    for candidate in altitudes:
+        candidate = round(candidate / 100.0) * 100.0
+        if candidate <= 0.0 or candidate == altitude or candidate in tried:
+            continue
+        tried.add(candidate)
+        if trims(speed, candidate):
+            return f"change the altitude to {candidate:g} m (it trims there at {speed:g} kt)"
+    return ""
 
 
 def validate_registry(spec) -> List[Violation]:

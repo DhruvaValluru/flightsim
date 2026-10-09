@@ -59,6 +59,12 @@ window.RouteMap = (function () {
   const CHAIKIN_PASSES = 3;
   //: The stand-in's integration step (s); every second step is kept.
   const SIM_DT_S = 0.05;
+  // The lookahead the physics steers with: the served one capped to a
+  // fraction of the line, never under the served floor (core/control/
+  // route.py lookahead_m_for; both numbers ride in the payload's route block).
+  function lookaheadFor(lim, len) {
+    return Math.max(lim.min_lookahead_m, Math.min(lim.lookahead_m, lim.lookahead_length_fraction * len));
+  }
   //: Self adjust aims this fraction of the clearance floor above it, so
   //: the fix holds on the raster; it uses a little less than the full
   //: climb-rate clip and bank, so the result passes the checks with margin.
@@ -355,7 +361,8 @@ window.RouteMap = (function () {
       R.turns = turnAnalysis(R.path, Rmin, step, R.psi0);
     } else { R.len = 0; R.turns = {markers: [], minR: Infinity}; }
     const rollRate = lim.roll_rate_dps ? lim.roll_rate_dps * DEG : Infinity;
-    R.sim = simulate(R.empty ? null : R.path, V, T, phiMax, lim.lookahead_m, R.psi0, rollRate);
+    R.lookahead = R.empty ? lim.lookahead_m : lookaheadFor(lim, R.len);
+    R.sim = simulate(R.empty ? null : R.path, V, T, phiMax, R.lookahead, R.psi0, rollRate);
     const pins = S.pins.filter(p => p.d <= R.len + 1).sort((a, b) => a.d - b.d);
     R.pins = pins;
     const altAt = d => {
@@ -567,7 +574,7 @@ window.RouteMap = (function () {
     const rollRate = lim.roll_rate_dps ? lim.roll_rate_dps * DEG : Infinity;
     const fly = keepAll => {
       if (!R.path) return;
-      const sim = simulate(R.path, V, lim.seconds, phiFly, lim.lookahead_m, R.psi0, rollRate), trk = [];
+      const sim = simulate(R.path, V, lim.seconds, phiFly, lookaheadFor(lim, R.len), R.psi0, rollRate), trk = [];
       let ended = false;
       for (const s of sim.samples) {
         if (!s.onPath && !keepAll && trk.length > 1) { ended = true; break; }

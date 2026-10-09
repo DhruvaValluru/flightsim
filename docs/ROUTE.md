@@ -325,3 +325,17 @@ opens on the scene `pick_scene` names, the checks carry their rule
 names, Self adjust cuts an over-long line to the run, Check with the
 physics returns the flown track, Use this path writes the user-stated
 block and heading, no console errors.
+
+
+## The lookahead and short lines (2026-10-09)
+
+Pure pursuit aims at the point one lookahead ahead on the line, and the
+lookahead was four seconds of true airspeed: 450 m for a 747 at 220 kt.
+On the line a ten-second run can fly (about 800 m) that aimed at the end
+from the start, so a drawn bend was flown as a straight line to the flag
+(the owner's map: "I draw a curve and it makes its own line"). The
+lookahead is now capped to a quarter of the line's length, never under
+`MIN_LOOKAHEAD_M` (`lookahead_m_for(tas_kt, length_m)`), on both sides:
+`Route.lookahead_m` carries the capped number to the card, and the
+browser's quick look applies the same cap (`lookaheadFor` in
+`route_map.js`), so the grey line is what the physics steers.
