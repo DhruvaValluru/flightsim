@@ -2287,6 +2287,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// three. Which path ran is recorded in render_settings.exposure_mode.
 	FString ExposureMode = TEXT("auto");
 	FString ExposureSource = TEXT("engine default metering");
+	// The stops the storm meter (before the first frame) opened the manual
+	// exposure by; 0 when no cell is drawn. The scene record states it.
+	double StormMeterOpened = 0.0;
 	double AppliedEv100 = 0.0;
 	bool bAppliedEv100 = false;
 	// S4: the card's shutter, when the card states the triple: the window
@@ -3502,7 +3505,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		FPostProcessSettings& MeterSettings = Capture->PostProcessSettings;
 		MeterSettings.bOverride_AutoExposureBias = true;
 		const double BiasBefore = MeterSettings.AutoExposureBias;
+		// Opened: the stops the bias is open by now; OpenedMeasured: the
+		// stops Mean was read at. The clip keeps only a measured exposure:
+		// the last round measures and never steps, and a frame that cannot
+		// be read back leaves the last measured step in place.
 		double Opened = 0.0;
+		double OpenedMeasured = 0.0;
 		double MeanBefore = -1.0;
 		double Mean = -1.0;
 		int32 Rounds = 0;
@@ -3516,10 +3524,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			FlushRenderingCommands();
 			FTextureRenderTargetResource* MeterResource =
 				RenderTarget->GameThread_GetRenderTargetResource();
+			MeterPixels.Reset();
 			if (MeterResource == nullptr || !MeterResource->ReadPixels(MeterPixels) ||
 			    MeterPixels.Num() == 0)
 			{
-				MeterNote = TEXT("could not read the frame back; the look's exposure stands");
+				Opened = OpenedMeasured;
+				MeterSettings.AutoExposureBias = static_cast<float>(BiasBefore + Opened);
+				MeterNote = Rounds == 0
+					? TEXT("the frame could not be read back; the look's exposure stands")
+					: FString::Printf(TEXT("round %d could not be read back; the last measured ")
+					                  TEXT("exposure stands"), Rounds + 1);
 				break;
 			}
 			double Sum = 0.0;
@@ -3528,12 +3542,18 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				Sum += 0.2126 * Pixel.R + 0.7152 * Pixel.G + 0.0722 * Pixel.B;
 			}
 			Mean = Sum / (255.0 * MeterPixels.Num());
+			OpenedMeasured = Opened;
 			if (MeanBefore < 0.0)
 			{
 				MeanBefore = Mean;
 			}
 			if (FMath::Abs(Mean - StormMeterTarget) <= StormMeterTolerance)
 			{
+				break;
+			}
+			if (Rounds + 1 == StormMeterRounds)
+			{
+				MeterNote = TEXT("out of rounds; the last measured exposure stands");
 				break;
 			}
 			// sRGB-encoded luma goes about as the 1/2.2 power of the light:
@@ -3552,9 +3572,17 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			Opened = Next;
 			MeterSettings.AutoExposureBias = static_cast<float>(BiasBefore + Opened);
-			if (Rounds + 1 == StormMeterRounds)
+		}
+		StormMeterOpened = Opened;
+		// The sibling captures copied the beauty's settings before the meter
+		// ran: the linear (EXR) and accumulation captures render the clip at
+		// the metered exposure too, or their frames would be the black one.
+		for (USceneCaptureComponent2D* Sibling : {LinearCapture, AccumulateCapture})
+		{
+			if (Sibling != nullptr)
 			{
-				MeterNote = TEXT("out of rounds; the last step stands");
+				Sibling->PostProcessSettings.bOverride_AutoExposureBias = true;
+				Sibling->PostProcessSettings.AutoExposureBias = MeterSettings.AutoExposureBias;
 			}
 		}
 		// The temporal history converges on the exposure the clip keeps
@@ -3581,7 +3609,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		MeterRow->SetStringField(TEXT("basis"),
 			TEXT("the beauty frame read back before frame 0, its mean sRGB luma (Rec. 709 weights) ")
 			TEXT("opened to the target by AutoExposureBias; a camera meters the light it gets, ")
-			TEXT("constant over the clip"));
+			TEXT("constant over the clip; the linear and accumulation captures carry the same bias"));
 		if (VisualScene.LookApplied.IsValid())
 		{
 			VisualScene.LookApplied->SetObjectField(TEXT("storm_exposure"), MeterRow);
@@ -6163,17 +6191,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Scene->SetStringField(TEXT("gi_reflections"), (bVisual && bBeauty)
 		? TEXT("Lumen GI + Lumen reflections (capture post-process override)")
 		: TEXT("engine default (no override)"));
-	Scene->SetStringField(TEXT("exposure"), bPhysicalSky
-		? *FString::Printf(TEXT("manual physical camera, EV100 %.2f (f/%.1f, "
-		                        "1/%.0f s, ISO %.0f, bias %.2f)"),
-		                   SkyPlan.Ev100, SkyPlan.CameraFstop,
-		                   SkyPlan.CameraShutterPerSecond, SkyPlan.CameraIso,
-		                   SkyPlan.ExposureBias)
+	Scene->SetStringField(TEXT("exposure"), (bPhysicalSky
+		? FString::Printf(TEXT("manual physical camera, EV100 %.2f (f/%.1f, "
+		                       "1/%.0f s, ISO %.0f, bias %.2f)"),
+		                  SkyPlan.Ev100, SkyPlan.CameraFstop,
+		                  SkyPlan.CameraShutterPerSecond, SkyPlan.CameraIso,
+		                  SkyPlan.ExposureBias)
 		: (bVisual && !bAutoExposure)
 		? (bAppliedEv100
-			? *FString::Printf(TEXT("manual, EV100 %.2f (physical camera)"), AppliedEv100)
-			: *FString::Printf(TEXT("manual, AutoExposureBias %.1f"), ExposureBias))
-		: TEXT("auto (default metering)"));
+			? FString::Printf(TEXT("manual, EV100 %.2f (physical camera)"), AppliedEv100)
+			: FString::Printf(TEXT("manual, AutoExposureBias %.1f"), ExposureBias))
+		: FString(TEXT("auto (default metering)")))
+		// The storm meter's stops, when it opened the exposure: the frames
+		// were rendered at the look's exposure PLUS these.
+		+ (StormMeterOpened > 0.0
+			? FString::Printf(TEXT("; opened %.2f stops by the storm meter (look_applied.")
+			                  TEXT("storm_exposure)"), StormMeterOpened)
+			: FString()));
 	Scene->SetBoolField(TEXT("physical_sky"), bPhysicalSky);
 	if (bPhysicalSky)
 	{

@@ -246,7 +246,13 @@ first and last frame's mean luma (0..255); a frame under 20 is
 `RENDERED-DARK`, not a pass. A material built before this (`M_StormCell`
 without the node) is rebuilt by the script on its own: every storm
 material is stamped with `STORM_GENERATION` as asset metadata and an older
-stamp is deleted and built again.
+stamp is built again -- the old asset set aside as `<name>_prev` until the
+new one is saved, and put back if the build fails (the first rebuild on the
+owner's machine deleted first and failed on a property name the node does
+not have, and every storm render was refused for the missing material).
+The debug script also renders with the web app's look for the spec (the
+storm look's dim sun and fog), clears the previous run's frames first, and
+calls a crash a crash even when an older manifest is beside it.
 
 ## What is verified where
 

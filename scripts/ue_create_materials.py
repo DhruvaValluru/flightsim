@@ -1667,10 +1667,44 @@ def _storm_material(name):
     if name not in STORM_MATERIALS:
         raise RuntimeError(f"{name} is not one of STORM_MATERIALS")
     full = f"{PATH}/{name}"
-    if storm_material_stale(name) and unreal.EditorAssetLibrary.delete_asset(full):
+    if storm_material_stale(name):
+        # Kept ASIDE, not deleted, until finish_storm has saved the new one:
+        # a build that raises (a property name the engine refuses) puts it
+        # back (restore_storm_materials), so the storm never loses its
+        # material to a rebuild. Measured on the owner's machine,
+        # 2026-10-09: a delete-then-build left no M_StormCell at all and
+        # every storm render was refused.
+        aside = f"{PATH}/{name}{STORM_ASIDE_SUFFIX}"
+        if unreal.EditorAssetLibrary.does_asset_exist(aside):
+            unreal.EditorAssetLibrary.delete_asset(aside)
+        if not unreal.EditorAssetLibrary.rename_asset(full, aside):
+            raise RuntimeError(f"{full} was built by an older generation of this script "
+                               f"(this one is {STORM_GENERATION}) and could not be set aside")
+        _ASIDE[name] = aside
         print(f"MATERIAL-REBUILT: {full} (built by an older generation of this script; "
-              f"this one is {STORM_GENERATION})")
+              f"this one is {STORM_GENERATION}; the old asset is kept at {aside} until the "
+              f"new one is saved)")
     return new_material(name)
+
+
+#: Storm materials set aside for a rebuild, by name -> the aside path.
+_ASIDE = {}
+STORM_ASIDE_SUFFIX = "_prev"
+
+
+def restore_storm_materials():
+    """A rebuild that raised: the new, unsaved asset (if any) is removed and
+    the old one put back at its path. Called by _guard after any creator
+    fails; a no-op when nothing is aside."""
+    for name, aside in list(_ASIDE.items()):
+        full = f"{PATH}/{name}"
+        if unreal.EditorAssetLibrary.does_asset_exist(full):
+            unreal.EditorAssetLibrary.delete_asset(full)
+        if unreal.EditorAssetLibrary.rename_asset(aside, full):
+            print(f"MATERIAL-RESTORED: {full} (the old asset put back; the rebuild failed)")
+        else:
+            print(f"MATERIAL-RESTORE-FAILED: {aside} could not be put back at {full}")
+        del _ASIDE[name]
 
 
 def storm_material_stale(name):
@@ -1686,9 +1720,13 @@ def storm_material_stale(name):
 
 
 def finish_storm(material, name):
-    """finish() with the STORM_GENERATION stamp saved on the asset."""
+    """finish() with the STORM_GENERATION stamp saved on the asset; the old
+    asset set aside for this rebuild (if any) is deleted only now."""
     unreal.EditorAssetLibrary.set_metadata_tag(material, STORM_GENERATION_TAG, STORM_GENERATION)
     finish(material, name)
+    aside = _ASIDE.pop(name, None)
+    if aside is not None and unreal.EditorAssetLibrary.does_asset_exist(aside):
+        unreal.EditorAssetLibrary.delete_asset(aside)
 
 
 def storm_scattering(material, lib, x, y):
@@ -1700,8 +1738,10 @@ def storm_scattering(material, lib, x, y):
     node = lib.create_material_expression(
         material, unreal.MaterialExpressionVolumetricAdvancedMaterialOutput, x, y)
     settings = [(STORM_SCATTERING_PROPERTIES[key], value) for key, value in STORM_SCATTERING.items()]
-    settings += [("ground_contribution", True), ("per_sample_atmosphere_light_transmittance", False),
-                 ("gray_scale_material", False)]
+    # The node's own options (per-sample atmospheric light transmittance is
+    # the cloud COMPONENT's switch, not the node's: measured on the owner's
+    # machine, 2026-10-09, the name was refused and M_StormCell lost).
+    settings += [("ground_contribution", True), ("gray_scale_material", False)]
     refused = []
     for prop, value in settings:
         try:
@@ -2629,6 +2669,7 @@ def _guard(creator):
             traceback.print_exc()
             print(f"MATERIAL-FAILED: {creator.__name__}")
             _FAILED.append(creator.__name__)
+            restore_storm_materials()   # a storm rebuild that failed: the old asset back
     return run
 
 

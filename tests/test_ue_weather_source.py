@@ -304,11 +304,18 @@ def test_the_storm_is_lit_by_multiple_scattering_and_its_exposure_is_metered():
     assert "unreal.MaterialExpressionVolumetricAdvancedMaterialOutput" in node
     assert '("ground_contribution", True)' in node
     assert "raise RuntimeError" in node   # a refused property name is reported, never skipped
+    # Measured on the owner's machine (2026-10-09): the per-sample atmosphere
+    # transmittance switch is the cloud component's, not the node's; the
+    # refused name cost the storm its material.
+    assert "per_sample_atmosphere_light_transmittance" not in SCRIPT
     storm = SCRIPT[SCRIPT.index("def create_storm_cell"):SCRIPT.index("def create_windshield_rain")]
     assert "storm_scattering(material, lib" in storm
     cell = _function(WEATHER_CPP, "bool FFlightSimWeather::BuildCell")
     assert "LayerDepthMaxM = 1500.0" in cell and "LayerTopDrawnM" in cell
     assert 'TEXT("look_layer_top_drawn_m")' in cell
+    # The drawn top is what the shader's Layer parameter gets.
+    assert "static_cast<float>(LayerTopDrawnM), static_cast<float>(LayerExtinctionPerM)" in cell
+    assert "static_cast<float>(Options.LayerTopMetres), static_cast<float>(LayerExtinctionPerM)" not in cell
     assert "bool DrawsCell() const { return bCell; }" in WEATHER_H
     # The commandlet meters after the warm-up captures and before the probe loop.
     warmup = COMMANDLET.index("for (int32 i = 0; i < WarmupCaptures; ++i)")
@@ -317,14 +324,31 @@ def test_the_storm_is_lit_by_multiple_scattering_and_its_exposure_is_metered():
     assert warmup < meter < probe
     metering = COMMANDLET[meter:probe]
     for needle in ("ReadPixels(MeterPixels)", "FMath::Clamp(Opened + Step, 0.0, StormMeterMaxStops)",
-                   'TEXT("storm_exposure")', 'TEXT("stops_opened")', "MeterSettings.AutoExposureBias ="):
+                   'TEXT("storm_exposure")', "MeterSettings.AutoExposureBias =",
+                   # the clip keeps a measured exposure: the last round never steps
+                   'MeterNote = TEXT("out of rounds; the last measured exposure stands");',
+                   "OpenedMeasured = Opened;",
+                   # the linear and accumulation captures render at the metered bias too
+                   "for (USceneCaptureComponent2D* Sibling : {LinearCapture, AccumulateCapture})",
+                   "Sibling->PostProcessSettings.AutoExposureBias = MeterSettings.AutoExposureBias;"):
         assert needle in metering, needle
     assert "constexpr double StormMeterMaxStops = 8.0;" in COMMANDLET
     assert 'TEXT("storm-meter-target=")' in COMMANDLET
+    assert "opened %.2f stops by the storm meter" in COMMANDLET   # the scene record says so
     window = INTERACTIVE[INTERACTIVE.index("Weather.DrawsCell()"):]
     assert "AEM_Histogram" in window[:1200]
     debug = (REPO / "scripts" / "debug_storm_render.py").read_text(encoding="utf-8")
-    assert "def frame_luma" in debug and "RENDERED-DARK" in debug and "storm_exposure" in debug
+    assert "def frame_luma" in debug and "RENDERED-DARK" in debug
+    # The record's fields, the same on both sides.
+    assert '(manifest.get("look_applied") or {}).get("storm_exposure")' in debug
+    for field in ("stops_opened", "mean_luma_before", "mean_luma_after", "target_mean_luma", "note"):
+        assert f'TEXT("{field}")' in metering, field
+        assert f"meter.get('{field}')" in debug, field
+    # A re-run clears the previous run's frames; a crash outranks a manifest;
+    # the look is the web app's for the spec.
+    assert 'stale.unlink(missing_ok=True)' in debug
+    assert '"CRASHED" if crashed else ("RENDERED" if rendered' in debug
+    assert "render_look_for(spec," in debug and "look=look" in debug
     assert "storm_exposure" in DOC and "STORM_SCATTERING" in DOC
 
 
@@ -339,8 +363,15 @@ def test_a_storm_material_built_by_an_older_script_is_built_again():
     assert "get_metadata_tag" in stale and "STORM_GENERATION_TAG" in stale
     stamp = SCRIPT[SCRIPT.index("def finish_storm"):SCRIPT.index("def storm_scattering")]
     assert "set_metadata_tag(material, STORM_GENERATION_TAG, STORM_GENERATION)" in stamp
-    maker = SCRIPT[SCRIPT.index("def _storm_material"):SCRIPT.index("def storm_material_stale")]
-    assert "storm_material_stale(name)" in maker and "delete_asset" in maker
+    maker = SCRIPT[SCRIPT.index("def _storm_material"):SCRIPT.index("_ASIDE = {}")]
+    assert "storm_material_stale(name)" in maker
+    # The old asset is set aside, never deleted before the new one is saved
+    # (measured 2026-10-09: a delete-then-build left the storm no material).
+    assert "rename_asset(full, aside)" in maker and "raise RuntimeError" in maker
+    assert "unreal.EditorAssetLibrary.delete_asset(full)" not in maker
+    assert "restore_storm_materials()" in SCRIPT[SCRIPT.index("def _guard"):]
+    stamp = SCRIPT[SCRIPT.index("def finish_storm"):SCRIPT.index("def storm_scattering")]
+    assert "_ASIDE.pop(name, None)" in stamp and "delete_asset(aside)" in stamp
     for name in _tuple("STORM_MATERIALS"):
         assert f'finish_storm(material, "{name}")' in SCRIPT, name
         assert f'finish(material, "{name}")' not in SCRIPT, name

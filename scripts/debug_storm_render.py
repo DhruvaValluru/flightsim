@@ -96,7 +96,7 @@ def main(argv=None) -> int:
     from core.scenario.card import write_run_card
     from core.util.platform import ue_editor_path
     from webapp.runs import (CLIP_SECONDS, _projected_origin, project_for_ue_host,
-                             severe_event_centre)
+                             render_look_for, severe_event_centre)
 
     args.out.mkdir(parents=True, exist_ok=True)
     spec = compile_prompt(args.prompt)
@@ -108,6 +108,11 @@ def main(argv=None) -> int:
     seconds = min(float(spec.duration.value), CLIP_SECONDS)
     origin_x, origin_y, scene_crs = _projected_origin(spec, scene)
     downburst = None
+    # The look the web app gives the commandlet for this spec (the storm look
+    # for a thunderstorm: its dim low sun, bias and fog), so the light the
+    # storm meter meters is the light the web app's frame has.
+    look = render_look_for(spec, "thunderstorm" if str(spec.weather_event.value) == "thunderstorm"
+                           else None)
     if str(spec.weather_event.value) == "thunderstorm":
         from core.environment.downburst import Downburst
 
@@ -120,6 +125,7 @@ def main(argv=None) -> int:
           f"hold_state={text.get('hold_state')} blocks: weather={'weather' in text} "
           f"weather_look={'weather_look' in text} rain_particles={'rain_particles' in text} "
           f"downburst={'downburst' in text}")
+    print(f"  look: {look if look is None else {k: look[k] for k in look if k != 'note'}}")
 
     editor = ue_editor_path()
     if editor is None or not editor.is_file():
@@ -130,12 +136,16 @@ def main(argv=None) -> int:
     for backend in backends:
         frames = args.out / backend / "frames"
         frames.mkdir(parents=True, exist_ok=True)
+        # A previous run's frames and manifest would be read as this run's
+        # (measured: a refused run reported the frames of the run before).
+        for stale in [frames / "render.json"] + list(frames.glob("frame_*.png")):
+            stale.unlink(missing_ok=True)
         extra = [f"-seconds={args.seconds}", "-NoGoogleTiles"]
         if backend != "off":
             extra.append(f"-weather-backend={backend}")
         command = [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
                    "-run=FlightSimBridge.FlightSimRender"] + render_flags(
-            card, frames, scene=scene, mesh=None, look=None, camera_flags=None,
+            card, frames, scene=scene, mesh=None, look=look, camera_flags=None,
             labels=False, width=args.width, height=args.height, fps=5.0, extra=extra)
         log = args.out / backend / "render.log"
         print(f"\n=== {backend}: {log}")
@@ -146,8 +156,8 @@ def main(argv=None) -> int:
                 print("  " + line.strip()[:300])
         rendered = (frames / "render.json").is_file()
         crashed = any("Assertion failed" in line or "Fatal error" in line for line in lines)
-        verdicts[backend] = "RENDERED" if rendered else ("CRASHED" if crashed else "REFUSED/NO FRAMES")
-        if rendered:
+        verdicts[backend] = "CRASHED" if crashed else ("RENDERED" if rendered else "REFUSED/NO FRAMES")
+        if rendered and not crashed:
             # The storm meter's record and the frames' own brightness: a
             # frame that rendered black is not a pass.
             try:
