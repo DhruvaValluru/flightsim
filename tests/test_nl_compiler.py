@@ -480,6 +480,7 @@ def test_a_thousands_separator_does_not_split_a_number():
 
     assert strip_thousands("at 11,000 feet and 1,234,567 m, rain, snow, 1,5") == \
         "at 11000 feet and 1234567 m, rain, snow, 1,5"
+    assert strip_thousands("at 11,000ft") == "at 11000ft"
     spec = compile_prompt("fly the a4 at 11,000 feet")
     assert float(spec.altitude.value) == pytest.approx(3352.8)
     assert spec.altitude.frm == "11000 feet"

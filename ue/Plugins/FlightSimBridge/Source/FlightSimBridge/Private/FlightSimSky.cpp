@@ -453,9 +453,11 @@ void FFlightSimSky::ApplyShowFlags(FEngineShowFlags& Flags)
 	Flags.SetCloud(true);
 	Flags.SetBloom(true);
 	Flags.SetLensFlares(true);
-	Flags.SetVignette(true);
+	// No edge shading: the vignette and the colour fringe darkened and
+	// tinted every frame's border (core/sky/plan.py POST_PROCESS).
+	Flags.SetVignette(false);
 	Flags.SetGrain(true);
-	Flags.SetSceneColorFringe(true);
+	Flags.SetSceneColorFringe(false);
 	Flags.SetLumenGlobalIllumination(true);
 	Flags.SetLumenReflections(true);
 }

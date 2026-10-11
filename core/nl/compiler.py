@@ -96,7 +96,7 @@ NUMBER = r"(-?\d+(?:\.\d+)?)"
 #: A-4 "at 11,000 feet" compiled to "000 feet", an altitude of 0 m, and was
 #: refused for terrain clearance). Only a comma between a digit and
 #: exactly three digits; "1,5" and lists ("rain, snow") are left alone.
-THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}\b)")
+THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
 
 
 def strip_thousands(text: str) -> str:

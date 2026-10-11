@@ -180,8 +180,12 @@ def test_post_processing_is_per_camera_kind():
     cockpit = plan_sky("noon", "none", 0, 0, 3000, 0, camera_preset="cockpit")
     assert chase["post_process"]["kind"] == "external"
     assert cockpit["post_process"]["kind"] == "cockpit"
-    assert (cockpit["post_process"]["vignette_intensity"]
-            > chase["post_process"]["vignette_intensity"])
+    assert (cockpit["post_process"]["film_grain_intensity"]
+            > chase["post_process"]["film_grain_intensity"])
+    # Nothing shades the frame's edges: no vignette, no colour fringe.
+    for plan in (chase, cockpit):
+        assert plan["post_process"]["vignette_intensity"] == 0.0
+        assert plan["post_process"]["chromatic_aberration"] == 0.0
     assert chase["lighting"] == {"global_illumination": "lumen",
                                  "reflections": "lumen",
                                  "shadows": "virtual_shadow_maps"}

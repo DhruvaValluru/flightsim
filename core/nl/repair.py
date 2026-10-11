@@ -39,7 +39,7 @@ KEEP_WORDS = {
     "altitude": ("altitude", "height", "alt"),
     "airspeed": ("speed", "airspeed", "kt", "knots"),
     "heading": ("heading",),
-    "wind_speed": ("wind",),
+    "wind_speed": ("wind", "wind speed"),
     "wind_direction": ("wind direction",),
     "turbulence": ("turbulence",),
     "duration": ("duration", "seconds", "length"),
@@ -105,18 +105,40 @@ class RepairResult:
                 "note": self.note, "remaining": self.remaining}
 
 
+KEEP_VERB = re.compile(r"\b(keep|hold|same|don'?t (?:change|touch|move)|leave|fixed|stay)\b")
+CHANGE_VERB = re.compile(r"\b(change|lower|raise|increase|decrease|reduce|drop|cut|set|make|"
+                         r"adjust|move|slow|speed up|climb|descend|shorten|lengthen)\b")
+
+
 def kept_fields(instruction: str) -> List[str]:
     """The REPAIRABLE fields the instruction says to keep ("keep the
-    altitude", "don't change the speed", "same heading")."""
+    altitude", "don't change the speed", "same heading"). Only the clauses
+    under a keep verb count: "keep the altitude, change the speed" keeps
+    the altitude alone. A clause with neither verb ("keep the altitude and
+    speed") follows the clause before it."""
     text = instruction.lower()
-    if not re.search(r"\b(keep|hold|same|don'?t (?:change|touch|move)|leave|fixed|stay)\b", text):
+    if not KEEP_VERB.search(text):
         return []
-    kept = []
-    for name, words in KEEP_WORDS.items():
-        if any(re.search(rf"\b{re.escape(w)}\b", text) for w in words):
-            kept.append(name)
-    # "wind" alone keeps the speed, not the direction (its own phrase).
-    return kept
+    kept: List[str] = []
+    keeping = False
+    for clause in re.split(r"[,;.]|\bbut\b|\band\b|\bthen\b", text):
+        if KEEP_VERB.search(clause):
+            keeping = True
+        elif CHANGE_VERB.search(clause):
+            keeping = False
+        if not keeping:
+            continue
+        # Longest phrase first, and consume it: "wind direction" is not
+        # also "wind", "wind speed" is not also "speed".
+        phrases = sorted(((w, name) for name, words in KEEP_WORDS.items() for w in words),
+                         key=lambda p: -len(p[0]))
+        for w, name in phrases:
+            pattern = rf"\b{re.escape(w)}\b"
+            if re.search(pattern, clause):
+                clause = re.sub(pattern, " ", clause)
+                if name not in kept:
+                    kept.append(name)
+    return [name for name in KEEP_WORDS if name in kept]
 
 
 def refusal_words(violations) -> List[Dict[str, str]]:
@@ -266,12 +288,19 @@ def repair_spec(spec, instruction: str = "", *, client: Any = None, model: Optio
     note = ""
     for round_no in range(1, max(1, rounds) + 1):
         refusals = refusal_words(violations)
-        data = _ask(client, model, work, kept, refusals, instruction, history)
+        try:
+            data = _ask(client, model, work, kept, refusals, instruction, history)
+        except RepairError as exc:
+            # The call or its reply failed: the rules answer instead, from
+            # the scenario as it came in (the docstring's "or it fails").
+            result = _fallback(spec, check(spec), kept, instruction, check)
+            result.note = f"{exc}; {result.note}" if result.note else str(exc)
+            return result
         note = str(data.get("note", "")).strip()
         applied = _apply(work, data.get("edits", []), kept, instruction, round_no)
         edits.extend(applied)
-        history.append(f"round {round_no}: " + "; ".join(
-            f"{e.field} {e.before} -> {e.after}" for e in applied) or "no edits")
+        history.append(f"round {round_no}: " + ("; ".join(
+            f"{e.field} {e.before} -> {e.after}" for e in applied) or "no edits"))
         violations = check(work)
         if not violations:
             _copy_into(spec, work)

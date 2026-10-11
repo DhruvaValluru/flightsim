@@ -179,3 +179,21 @@ def test_the_options_endpoint_and_a_picked_option(monkeypatch):
         "spec": spec.to_dict(), "instruction": "keep the speed",
         "edits": [{"field": e["field"], "value": e["to"], "why": e["why"]} for e in picked["edits"]]}).json()
     assert payload["validation"]["ok"] and payload["repair"]["reader"] == "picked"
+
+
+def test_only_the_clauses_under_a_keep_verb_are_kept():
+    assert kept_fields("keep the altitude, change the speed") == ["altitude"]
+    assert kept_fields("keep the altitude and lower the wind speed") == ["altitude"]
+    assert kept_fields("keep the wind direction") == ["wind_direction"]
+    assert kept_fields("keep the altitude and speed") == ["altitude", "airspeed"]
+
+
+def test_a_model_call_that_fails_falls_back_to_the_rules():
+    def create(**kwargs):
+        raise TimeoutError("slow")
+
+    client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    spec = compile_prompt("fly the c172 at 9000 m and 100 kt")
+    result = repair_spec(spec, "keep the speed", client=client, model="fake-model")
+    assert result.reader == "rules" and result.ok
+    assert "could not be used" in result.note

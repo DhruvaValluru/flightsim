@@ -606,7 +606,13 @@ class RouteGuidance:
         self.route = route
         self.frame = frame
         self.autopilot = autopilot
-        self.lookahead_m = max(MIN_LOOKAHEAD_M, LOOKAHEAD_S * float(tas_mps))
+        # The route's own capped lookahead (the number the card and the
+        # map record) whenever the guidance flies the route's speed.
+        if math.isclose(u.mps_to_kt(float(tas_mps)), route.tas_kt, rel_tol=1e-9):
+            self.lookahead_m = route.lookahead_m
+        else:
+            self.lookahead_m = max(MIN_LOOKAHEAD_M, min(
+                LOOKAHEAD_S * float(tas_mps), LOOKAHEAD_LENGTH_FRACTION * route.length_m))
         self.last: Dict[str, float] = {
             "d_m": 0.0, "cross_track_m": 0.0,
             "heading_setpoint_deg": route.initial_heading_deg,

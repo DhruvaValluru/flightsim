@@ -542,3 +542,19 @@ def test_the_run_level_pass_records_the_sensing_blocks_per_frame(tmp_path, monke
         assert sensing["blur"]["applied_by"] == "python_velocity_line"
         assert sensing["blur"]["exposure_s"] == pytest.approx(1.0 / 500.0)     # the camera's own shutter
         assert sensing["radiance"] is None
+
+
+def test_no_profile_leaves_a_black_border():
+    """A barrel lens at the render's focal length sampled outside the frame
+    and blacked out 10% of a synthetic_cmos_wide frame (2026-10-11). The
+    sensor zooms just enough that every pixel samples the render."""
+    from core.capture.profile import apply_profile, available_profiles, sensor_zoom
+
+    rec = {"width_px": 320, "height_px": 180, "fx_px": 311.1, "fy_px": 311.1,
+           "principal_point_px": [160.0, 90.0]}
+    flat = np.full((180, 320, 3), 0.1)
+    for name in available_profiles():
+        profile = load_profile(name)
+        out = apply_profile(flat, profile, rec, (0.0, 0.0, 0.0), 1)
+        assert float(out.mean(axis=-1).min()) > 0.02, name
+        assert sensor_zoom(profile, rec) >= 1.0

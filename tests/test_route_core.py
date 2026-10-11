@@ -492,6 +492,9 @@ def test_the_lookahead_is_capped_to_a_quarter_of_the_line():
     assert lookahead_m_for(220.0, 100000.0) == pytest.approx(4.0 * u.kt_to_mps(220.0))
     route = Route([{"east_m": 800.0, "north_m": 0.0, "alt_m": 1000.0}], 1000.0, tas_kt=220.0)
     assert route.lookahead_m == pytest.approx(LOOKAHEAD_LENGTH_FRACTION * route.length_m)
+    # The guidance flies the same capped number, not the uncapped 450 m.
+    g = RouteGuidance(route, FlatFrame(), RecordingAutopilot(), tas_mps=u.kt_to_mps(220.0))
+    assert g.lookahead_m == route.lookahead_m
     js = (REPO / "webapp" / "static" / "route_map.js").read_text(encoding="utf-8")
     assert "lim.min_lookahead_m" in js and "lim.lookahead_length_fraction" in js   # served, not mirrored
     assert js.count("lookaheadFor(lim, R.len)") == 2

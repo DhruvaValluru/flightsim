@@ -389,6 +389,54 @@ def normalised_to_pixel(record: Dict, x: float, y: float) -> Tuple[float, float]
     return cx + float(record["fx_px"]) * x, cy + float(record["fy_px"]) * y
 
 
+def sensor_zoom(profile: CameraProfile, record: Dict) -> float:
+    """How much longer the SENSOR's focal length is than the ideal
+    render's, so every sensor pixel's undistorted direction lands inside
+    the rendered frame. A barrel lens (k1 < 0) sees wider than the
+    pinhole render it is resampled from; at the render's own focal length
+    its border sampled outside the frame and came out black (10% of a
+    synthetic_cmos_wide 1280x720 frame, measured 2026-10-11). 1.0 when
+    the lens has no distortion or already fits."""
+    if not (profile.k1 or profile.k2 or profile.k3 or profile.p1 or profile.p2):
+        return 1.0
+    width, height = float(record["width_px"]), float(record["height_px"])
+    cx, cy = (float(c) for c in record["principal_point_px"])
+    fx, fy = float(record["fx_px"]), float(record["fy_px"])
+    n = 33
+    border = ([(width * i / (n - 1), 0.0) for i in range(n)]
+              + [(width * i / (n - 1), height) for i in range(n)]
+              + [(0.0, height * i / (n - 1)) for i in range(n)]
+              + [(width, height * i / (n - 1)) for i in range(n)])
+
+    def fits(zoom: float) -> bool:
+        for u_s, v_s in border:
+            x, y = undistort_normalised(profile, (u_s - cx) / (fx * zoom),
+                                        (v_s - cy) / (fy * zoom))
+            u, v = cx + fx * x, cy + fy * y
+            if not (-0.5 <= u <= width - 0.5 and -0.5 <= v <= height - 0.5):
+                return False
+        return True
+
+    if fits(1.0):
+        return 1.0
+    lo, hi = 1.0, 4.0
+    for _ in range(40):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (lo, mid) if fits(mid) else (mid, hi)
+    return hi
+
+
+def sensor_record(profile: CameraProfile, record: Dict) -> Dict:
+    """The record with the SENSOR's focal length (:func:`sensor_zoom`):
+    what a pixel of the output frame means. The ideal render keeps its
+    own ``record``."""
+    zoom = sensor_zoom(profile, record)
+    if zoom == 1.0:
+        return record
+    return {**record, "fx_px": float(record["fx_px"]) * zoom,
+            "fy_px": float(record["fy_px"]) * zoom}
+
+
 # -- rolling shutter ------------------------------------------------------
 
 def row_time_s(profile: CameraProfile, v: float, height: float) -> float:
@@ -424,13 +472,14 @@ def sensor_pixel(profile: CameraProfile, record: Dict, camera_xyz: Sequence[floa
     if camera_xyz[2] <= 0.0:
         return None
     height = float(record["height_px"])
+    sensor = sensor_record(profile, record)
 
     def project(direction):
         if direction[2] <= 0.0:
             return None
         x, y = direction[0] / direction[2], direction[1] / direction[2]
         xd, yd = distort_normalised(profile, x, y)
-        return normalised_to_pixel(record, xd, yd)
+        return normalised_to_pixel(sensor, xd, yd)
 
     pixel = project(camera_xyz)
     if pixel is None or profile.readout_s <= 0.0:
@@ -453,7 +502,7 @@ def pinhole_pixel_from_sensor(profile: CameraProfile, record: Dict,
     """The verifier's inverse: undo the rolling shutter at this row and
     the distortion, back to the ideal pinhole pixel."""
     height = float(record["height_px"])
-    xd, yd = pixel_to_normalised(record, u_s, v_s)
+    xd, yd = pixel_to_normalised(sensor_record(profile, record), u_s, v_s)
     x, y = undistort_normalised(profile, xd, yd)
     if profile.readout_s <= 0.0:
         return normalised_to_pixel(record, x, y)
@@ -639,13 +688,14 @@ def _stage_geometry(image, profile, record, omega, seed, blocks, flow, exposure_
     height, width = image.shape[0], image.shape[1]
     cx, cy = record["principal_point_px"]
     fx, fy = float(record["fx_px"]), float(record["fy_px"])
+    zoom = sensor_zoom(profile, record)
     # Geometry: for each OUTPUT (sensor) pixel find the source pixel in
     # the ideal image -- undistort, then unwind the rolling shutter.
     ys, xs = np.mgrid[0:height, 0:width]
     u_s = xs + 0.5
     v_s = ys + 0.5
-    xd = (u_s - cx) / fx
-    yd = (v_s - cy) / fy
+    xd = (u_s - cx) / (fx * zoom)
+    yd = (v_s - cy) / (fy * zoom)
     # Vectorised Newton for the inverse distortion.
     x, y = xd.copy(), yd.copy()
     for _ in range(UNDISTORT_ITERATIONS):

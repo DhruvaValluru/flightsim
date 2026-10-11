@@ -4055,7 +4055,11 @@ def verify_sensor_undistortion(manifest: Dict) -> Check:
             ideal = record["labels"]["keypoints"].get(name)
             if kp.get("u") is None or ideal is None or ideal.get("u") is None:
                 continue
-            x, y = _own_undistort(profile, (kp["u"] - cx) / fx, (kp["v"] - cy) / fy)
+            # The sensor's focal length when the manifest records one (a
+            # barrel lens zoomed to fill the frame), else the render's.
+            sx = float(sensor.get("fx_px", fx))
+            sy = float(sensor.get("fy_px", fy))
+            x, y = _own_undistort(profile, (kp["u"] - cx) / sx, (kp["v"] - cy) / sy)
             if profile["readout_s"] > 0.0:
                 t = profile["readout_s"] * (kp["v"] / height - 0.5)
                 depth = float(ideal["depth_m"])

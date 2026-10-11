@@ -337,13 +337,16 @@ def star_batches(when: datetime, lat: float, lon: float,
 #: Lens character per camera kind. External cameras are a long lens on a
 #: chase ship; the cockpit view is a wide lens behind a canopy. Values are
 #: UE post-process settings; the tonemapper is UE's filmic (ACES-fitted)
-#: default for both, stated rather than re-tuned.
+#: default for both, stated rather than re-tuned. No vignette and no
+#: colour fringe: both shaded the frame's edges with darkening and colour
+#: that the scene does not have (the owner's frames, 2026-10-11); a lens's
+#: real fall-off is the capture profile's cos^4 stage, stated per profile.
 POST_PROCESS = {
     "external": {"bloom_intensity": 0.5, "lens_flare_intensity": 0.15,
-                 "vignette_intensity": 0.3, "film_grain_intensity": 0.03,
-                 "chromatic_aberration": 0.12, "motion_blur_amount": 0.0},
+                 "vignette_intensity": 0.0, "film_grain_intensity": 0.03,
+                 "chromatic_aberration": 0.0, "motion_blur_amount": 0.0},
     "cockpit": {"bloom_intensity": 0.65, "lens_flare_intensity": 0.05,
-                "vignette_intensity": 0.5, "film_grain_intensity": 0.08,
+                "vignette_intensity": 0.0, "film_grain_intensity": 0.08,
                 "chromatic_aberration": 0.0, "motion_blur_amount": 0.0},
 }
 

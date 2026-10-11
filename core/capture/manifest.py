@@ -264,7 +264,7 @@ from .objects import (
     ROLE_PRIMARY, ROLE_TRAFFIC, compose_objects, mesh_manifest_path,
     class_presence, frame_presence, objects_block, taxonomy_classes,
 )
-from .profile import load_profile, sensor_labels
+from .profile import load_profile, sensor_labels, sensor_record
 from .radiometry import (
     camera_sensing_block, frame_radiometry_block, sensing_records, sun_lux_for_spec,
 )
@@ -857,6 +857,13 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 "labels_sensor": sensor_labels(profile, frames[-1],
                                                frames[-1]["labels"], omega),
             }
+            # A distorting lens's sensor focal length when it is not the
+            # render's (profile.sensor_zoom: no black border); absent when
+            # it is, so an ideal manifest is unchanged.
+            sensor_rec = sensor_record(profile, frames[-1])
+            if sensor_rec is not frames[-1]:
+                frames[-1]["sensor"]["fx_px"] = sensor_rec["fx_px"]
+                frames[-1]["sensor"]["fy_px"] = sensor_rec["fy_px"]
             # S1: what one unit of this frame is worth (predicted until the
             # grey card measures it), on a camera with a sensing block.
             if sensing is not None:

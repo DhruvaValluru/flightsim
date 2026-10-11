@@ -256,6 +256,9 @@ def test_cameraless_spec_builds_byte_identical_commandlet_args(
         return Result()
 
     launch_through_run(monkeypatch)
+    # The web weather is on by default (the owner's rule, CLAUDE.md); the
+    # historic command is the one with the weather backend off.
+    monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "off")
     monkeypatch.setattr(runs.subprocess, "run", fake_run)
     card = tmp_path / "card.json"
     frames = tmp_path / "frames"
