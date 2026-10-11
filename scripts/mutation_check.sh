@@ -992,8 +992,8 @@ mutate core/scenario/validate.py \
     tests/test_camera_validate.py || failures=$((failures+1))
 
 mutate core/nl/llm_compiler.py \
-    '            if name not in CAMERA_FIELD_VALUE_SCHEMAS:' \
-    '            if False:  # MUTATED: unknown camera fields patched in' \
+    '            if name not in CAMERA_FIELD_VALUE_SCHEMAS \' \
+    '            if False and name not in CAMERA_FIELD_VALUE_SCHEMAS \' \
     "unknown LLM camera fields refuse loudly" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
@@ -1602,8 +1602,10 @@ mutate core/nl/compiler.py \
     tests/test_camera_spec.py || failures=$((failures+1))
 
 mutate core/nl/llm_compiler.py \
-    '        plan_full_capture(camera, frm="a view named in the prompt with "' \
-    '        (lambda *a, **k: None)(camera, frm="MUTATED: three stills "' \
+    '        # field and is left exactly as it is.
+        plan_full_capture(camera, frm="a view named in the prompt with "' \
+    '        # field and is left exactly as it is.
+        (lambda *a, **k: None)(camera, frm="MUTATED: three stills "' \
     "a view the model named captures the whole clip" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
@@ -2240,12 +2242,8 @@ mutate core/nl/compiler.py \
     tests/test_camera_prompts.py || failures=$((failures+1))
 
 mutate core/nl/compiler.py \
-    '    if _view_mentions(text):
-        return questions
-    if not any(' \
-    '    if False:  # MUTATED: a named view still asks which view
-        return questions
-    if not any(' \
+    '    if _view_mentions(text) or stated_camera_offset(text):' \
+    '    if stated_camera_offset(text):  # MUTATED: a named view still asks which view' \
     "a named view is never asked about" \
     tests/test_camera_prompts.py || failures=$((failures+1))
 
@@ -2258,10 +2256,10 @@ mutate core/nl/compiler.py \
     tests/test_camera_prompts.py || failures=$((failures+1))
 
 mutate core/nl/compiler.py \
-    '            if keyframes is None:
-                notes.append(' \
-    '            if False:  # MUTATED: an inexpressible move crashes instead of a note
-                notes.append(' \
+    '        if keyframes is None:
+            notes.append(' \
+    '        if False:  # MUTATED: an inexpressible move crashes instead of a note
+            notes.append(' \
     "an inexpressible move is reported, not guessed" \
     tests/test_camera_prompts.py || failures=$((failures+1))
 
@@ -3167,13 +3165,13 @@ mutate core/capture/verify.py \
     tests/test_annotation_gates.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
-    '            if extent > MASK_EXTENT_TOL_FRACTION and extent_px > MASK_TOL_PX:' \
+    '            if extent > MASK_EXTENT_TOL_FRACTION and extent_px > floor_px:' \
     '            if False:  # MUTATED: a silhouette of any size passes' \
     "a silhouette smaller than its projected hull fails mask_vs_geometry" \
     tests/test_annotation_gates.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
-    '                if relative > MASK_CENTROID_TOL_FRACTION and offset > MASK_TOL_PX:' \
+    '                if relative > MASK_CENTROID_TOL_FRACTION and offset > centre_floor:' \
     '                if False:  # MUTATED: a silhouette anywhere in the image passes' \
     "a mesh drawn 3 m from its label fails mask_vs_geometry" \
     tests/test_annotation_gates.py || failures=$((failures+1))
@@ -4313,8 +4311,8 @@ mutate core/control/derive.py \
     || failures=$((failures+1))
 
 mutate core/control/derive.py \
-    'INJECTION_ORDER = ("tecs", "failures", "icing", "icing_alpha", "gust_rotation")' \
-    'INJECTION_ORDER = ("failures", "tecs", "icing", "icing_alpha", "gust_rotation")  # MUTATED' \
+    'INJECTION_ORDER = ("tecs", "failures", "icing", "icing_alpha", "gust_rotation", "rain")' \
+    'INJECTION_ORDER = ("failures", "tecs", "icing", "icing_alpha", "gust_rotation", "rain")  # MUTATED' \
     "injections apply in the fixed order tecs, failures, icing, icing_alpha, gust_rotation" tests/test_derive_injections.py \
     || failures=$((failures+1))
 
@@ -5571,8 +5569,8 @@ mutate core/agent/tools.py \
 # demand like stated coordinates, and the built-in list never matches a
 # word that is not after a location word ("a Boston terrier").
 mutate webapp/runs.py \
-    '    return looked_up_place(spec)' \
-    '    return False  # MUTATED: a looked-up place is never baked' \
+    '    return named_place(spec)' \
+    '    return False  # MUTATED: a named or looked-up place is never baked' \
     "a place the prompt names is baked on demand, then flown over real terrain" \
     tests/test_geocode.py || failures=$((failures+1))
 
