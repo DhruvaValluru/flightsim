@@ -204,6 +204,9 @@ def test_the_cli_and_the_web_app_build_the_same_flags(imported_repo, tmp_path,
                                                        monkeypatch):
     from core.util.platform import ue_runner_command
 
+    # The web weather is on by default (the owner's rule, CLAUDE.md); the
+    # CLI's flags are compared with it off.
+    monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "off")
     repo, mesh = imported_repo
     cli = _cli_command(tmp_path / "cli", monkeypatch)
     web = _webapp_command(tmp_path / "web", mesh, monkeypatch)
@@ -252,6 +255,7 @@ def test_the_web_app_s_legacy_single_pass_is_byte_identical(tmp_path,
     pre-camera build's list, as tests/test_camera_spec.py reconstructs
     it) -- no -labels, no -deterministic, launcher tokens where they
     always were. The builder changed nothing here."""
+    monkeypatch.setenv("FLIGHTSIM_WEATHER_BACKEND", "off")   # the owner's weather-on default
     import webapp.runs as runs
     from experiments.showcase_matrix import (
         EDITOR, FPS, HEIGHT, TIME_OF_DAY, VISIBILITY, WIDTH,

@@ -123,7 +123,9 @@ def test_storm_actors_are_beauty_only_and_drops_are_on_the_beauty_capture():
     assert COMMANDLET_CPP.count("VisualScene.ApplyLensDropsToBeauty(Capture);") == 1
     rain = COMMANDLET_CPP.index("VisualScene.ApplyRainToBeauty(Capture, RainCameraId, Error)")
     drops = COMMANDLET_CPP.index("VisualScene.ApplyLensDropsToBeauty(Capture);")
-    assert 0 < drops - rain < 200
+    # Right after the rain, in the same block (the storm-glass branches
+    # between them decide when the look's drops are superseded).
+    assert 0 < drops - rain < 1200
     label = COMMANDLET_CPP[COMMANDLET_CPP.index(
         "auto ConfigureLabelCapture = [&](USceneCaptureComponent2D* Label)"):]
     label = label[:label.index("\t\t};")]
