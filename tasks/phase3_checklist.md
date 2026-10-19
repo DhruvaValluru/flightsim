@@ -10,16 +10,21 @@ Ticking: change `[ ]` to `[x]` in this file and commit it.
 
 ## Step 1 · Fix what's broken from Phase 2
 
-- [ ] **Engine version chosen**
-  - Pick 5.5 or 5.7 and write it in `docs/TOOLCHAIN.md`.
-  - Check: the file names one version and lists all three computers.
-- [ ] **Project set to that version everywhere**
+**Engine: Unreal 5.7** (decided, for best render quality). Already built and rendered on
+5.7 once. What still dates from 5.5 gets redone below.
+
+- [ ] **All three computers on the same 5.7 patch**, written in `docs/TOOLCHAIN.md`
+  - Check: all three rows show the same 5.7.x.
+- [ ] **Project locked to that exact 5.7 patch**
   - Check: `pytest -q tests/test_platform.py` passes.
 - [ ] **Build refuses the wrong engine**
   - Check: pointing it at a different engine version stops with `engine.version_mismatch`.
   - Check: the right engine builds with no errors.
-- [ ] **JSBSim plugin re-checked on that version**
+- [ ] **JSBSim plugin redone on 5.7** (it was set up on 5.5)
   - Check: `scripts/check_bridge_api.sh` passes and the build passes.
+  - Check: each of the 4 patches is marked needed or not needed.
+  - Check: the plane flies the same in the engine as in Python (`gate5_ue_parity.py`).
+- [ ] **Label materials rebuilt on 5.7** (one of them failed to compile on 5.7)
 - [ ] **Engine writes the label images**
   - Check: after one render, `render.json` has a `labels` block.
   - Check: the mask picture is not blank.
@@ -51,9 +56,15 @@ Ticking: change `[ ]` to `[x]` in this file and commit it.
   - Check: `pytest -q tests/test_toolchain_pins.py` passes.
   - Check: changing one version by hand makes it fail.
 
+- [ ] **Picture quality re-tuned on 5.7** (Lumen, shadows, Nanite, TSR stay on; brightness and colours were tuned on 5.5)
+  - Check: `python experiments/gate6_visual.py --quality beauty` passes.
+  - Check: renders repeat the same way (`gate10_render_repro.py`).
+  - Check: the labels test still passes.
+
 ### GATE 2
 
 - [ ] A fresh clone builds with nothing set except the version file.
+- [ ] A beauty-quality render passes the picture checks on 5.7.
 
 ---
 
@@ -153,7 +164,7 @@ Ticking: change `[ ]` to `[x]` in this file and commit it.
 
 ## Decisions waiting on you or Shashank
 
-- [ ] Engine version: 5.5 or 5.7
+- [x] Engine version: **5.7** (decided 2026-10-19)
 - [ ] Which Chinese aircraft, or cut it
 - [ ] Keep storm weather on by default for the demo?
 - [ ] Is entering the Google tiles key once acceptable?

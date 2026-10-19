@@ -43,17 +43,31 @@ Three tasks below run into these rules. Each one is flagged **[OWNER]** rather t
 
 ## Phase A — Phase 2 blockers (must be green before any Phase 3 feature)
 
-### A1 · Record which engine is installed on the three demo machines — XS
-- **Files:** `docs/TOOLCHAIN.md` (new)
-- **Do:** On each of the three machines that will run the demo, record the installed UE versions, the Visual Studio/MSVC toolset and the Windows SDK. **[OWNER]** Choose the engine pin. The default is the newest version installed on all three that has a measured build (5.5 today, per NEXT.md gotcha 32). Write the choice and the reason into the file.
-- **Verify:** `Get-ChildItem "C:\Program Files\Epic Games" -Directory -Filter "UE_5.*"` output is pasted per machine. `grep -c "^| machine" docs/TOOLCHAIN.md` ≥ 3. The file states one pinned version.
+**Engine decision (owner, 2026-10-19): Unreal 5.7**, chosen for render quality. Nothing
+moves back to 5.5. The pins (`EngineAssociation`, `UE_ENGINE_VERSION`, `IncludeOrderVersion
+Unreal5_7`) already say 5.7. NEXT.md L69-80 records that the commandlet has already built and
+rendered on 5.7 (2026-10-08/09). That needed C4883 silenced and the 5.7
+`GetMaterialResource(EShaderPlatform)` signature, and the `select_if` material bug was found
+then.
 
-### A2 · Re-pin the engine version from a single constant — M
+The following are still **5.5-era** and get redone on 5.7 below:
+
+- the vendored JSBSim plugin and its four local patches (A4);
+- the label materials, since `M_LandcoverID` failed to compile on 5.7 (A5);
+- the look tuning: Gate 6 thresholds, the vertex palette and the exposure biases (B4);
+- gotcha 32's text, which is stale because it still says "nothing built on 5.7" (A9).
+
+### A1 · Record the 5.7 toolchain on the three demo machines — XS
+- **Files:** `docs/TOOLCHAIN.md` (new)
+- **Do:** On each machine, record the exact 5.7 build (`Engine/Build/Build.version` Major.Minor.Patch and Changelist), the Visual Studio/MSVC toolset and the Windows SDK. All three must be on the same 5.7 patch; write the one chosen (e.g. 5.7.x).
+- **Verify:** `Get-Content "<UE_5.7>\Engine\Build\Build.version"` is pasted per machine. `grep -c "^| machine" docs/TOOLCHAIN.md` ≥ 3, and all rows show the same patch version.
+
+### A2 · Lock the 5.7 pin to the patch level — M
 - **Files:** `core/util/platform.py`, `ue/FlightSim.uproject`, `ue/Source/FlightSim.Target.cs`, `ue/Source/FlightSimEditor.Target.cs`, `tests/test_platform.py`
-- **Do:** Set `UE_ENGINE_VERSION`, `EngineAssociation` and `IncludeOrderVersion` to the A1 pin. Keep `tests/test_platform.py` (L262-318) asserting that all of them equal the constant. Its "stale version" check must be inverted for the old 5.7 strings.
+- **Do:** Keep 5.7 everywhere. Add the A1 patch level as `UE_ENGINE_PATCH` so preflight can refuse a machine on a different 5.7 hotfix. `tests/test_platform.py` (L262-318) keeps asserting that every pin equals the constant.
 - **Verify:**
   - `pytest -q tests/test_platform.py` passes.
-  - `python -c "import json,core.util.platform as p;assert json.load(open('ue/FlightSim.uproject'))['EngineAssociation']==p.UE_ENGINE_VERSION"` exits 0.
+  - `python -c "import json,core.util.platform as p;assert json.load(open('ue/FlightSim.uproject'))['EngineAssociation']==p.UE_ENGINE_VERSION=='5.7'"` exits 0.
 
 ### A3 · Build scripts refuse a mismatched engine instead of globbing — S
 - **Files:** `scripts/build_ue.ps1`, `scripts/ue_preflight.ps1`
@@ -66,9 +80,10 @@ Three tasks below run into these rules. Each one is flagged **[OWNER]** rather t
 **[CHECKPOINT - PAUSE AND RE-VERIFY SYSTEM STATE]**
 `pytest -q` is fully green. Windows: `.\scripts\ue_preflight.ps1` reports the pinned engine found, with no warnings.
 
-### A4 · Re-vendor the JSBSim plugin and re-apply the four local patches on the pin — S
-- **Files:** `scripts/vendor_ue_plugin.ps1`, `ue/Plugins/…/VENDORED.json`
-- **Do:** Re-run vendoring against the pinned engine. For each of the four patches in `scripts/jsbsim_plugin_patches_5_6.diff`, record in `VENDORED.json` `local_patches` whether it is still needed, still applied, or no longer applies. Also write `ue_engine_target`.
+### A4 · Re-vendor the JSBSim plugin and re-apply the four local patches on 5.7 — S
+- **Files:** `scripts/vendor_ue_plugin.ps1`, `ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json`
+- **Do:** Re-run vendoring against 5.7. The plugin itself claims 5.0–5.6 and the patches were measured on 5.5. For each of the four patches in `scripts/jsbsim_plugin_patches_5_6.diff`, record in `VENDORED.json` `local_patches` whether it is still needed, still applied, or no longer applies. Also write `ue_engine_target: "5.7"`.
+- **Also check:** after the plugin builds, the flight still matches. A short c172p hold on 5.7 must agree with the Python headless flight within the bound recorded on 5.5 (`experiments/gate5_ue_parity.py`).
 - **Verify:**
   - Windows: `bash scripts/check_bridge_api.sh` (Git Bash) exits 0.
   - `.\scripts\build_ue.ps1` exits 0 and the log has zero `error C`.
@@ -77,6 +92,7 @@ Three tasks below run into these rules. Each one is flagged **[OWNER]** rather t
 ### A5 · The `-labels` pass actually writes a bundle — S
 - **Files:** `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp`, `scripts/ue_create_materials.py`
 - **Do:**
+  - Rebuild the label materials on 5.7 (`M_CustomStencilID`, `M_LandcoverID`; the latter failed on 5.7 because of the `select_if` pin name, NEXT.md L76-79), using `FLIGHTSIM_REBUILD_MATERIALS` once.
   - Make sure `M_CustomStencilID` is created headlessly. It must not depend on a by-hand editor step, so the materials script runs unattended and is idempotent.
   - Make sure the commandlet writes `frames/<camera>/render.json` with a `labels` block naming `mask`, `depth_f32` and `objects[].alone_png` for every frame rendered with `-labels`.
   - Fix whatever the first compiled run shows (the stencil path at L2876-2877, the mask writer at ~L4385).
@@ -145,6 +161,22 @@ No Phase 3 feature work starts before Gate A.
 
 **[CHECKPOINT - PAUSE AND RE-VERIFY SYSTEM STATE]**
 `pytest -q` is green. Windows: preflight is all `OK`, and a clean rebuild from a fresh clone succeeds with no flag or environment variable set beyond `toolchain.json`.
+
+### B4 · Re-tune the look on 5.7 for best render quality — M
+- **Files:** `experiments/gate6_visual.py`, `ue/Config/DefaultEngine.ini`, `core/sky/plan.py`, `tests/test_gate6_visual.py`, `docs/VALIDITY.md`
+- **Do:**
+  - Keep the 5.7 renderer switches on: Lumen GI and reflections, virtual shadow maps, Nanite, TSR, extended luminance range. Substrate stays off unless measured.
+  - Re-measure Gate 6 at `--quality beauty`. The palette and exposure biases (gotchas 6 and 7) were tuned on 5.5, so re-derive them from probe renders on 5.7, not by theory.
+  - Record the 5.7 numbers beside the 5.5 ones in VALIDITY 2.13 (the 5.5 values stay as history, marked "measured on 5.5").
+  - Labels are unaffected: the ID and depth passes do not depend on the look, so this task cannot break A5–A8.
+- **Verify:** Windows:
+  - `python experiments/gate6_visual.py --quality beauty` passes every clause.
+  - `python experiments/gate6_visual.py` (measure quality) still passes.
+  - `python experiments/gate10_render_repro.py` reports a bit-identical or bounded verdict on 5.7.
+  - Container: `pytest -q tests/test_gate6_visual.py` passes.
+
+**[CHECKPOINT - PAUSE AND RE-VERIFY SYSTEM STATE]**
+Windows: a beauty-quality render of the default run passes Gate 6 on 5.7, and the A8 label fixture still passes.
 
 ---
 
@@ -400,13 +432,13 @@ Final: every acceptance criterion has evidence. CI is green. Nothing on the user
 | 1 | A newcomer completes a capture without the notes | C1–C6, Gate C, F3 |
 | 2 | J-35/J-15/J-11 available; same pipeline in desert and forest | E1–E6 |
 | 3 | Payload boxes in the manifest wherever visible | A5–A8 (path), D1–D5 |
-| 4 | Hands-off end-to-end run on a pinned toolchain | A1–A4, B1–B3, F1–F2 |
+| 4 | Hands-off end-to-end run on a pinned toolchain | A1–A4, B1–B4, F1–F2 |
 | 5 | Short video plus a guide short enough to read | F3, F4 |
 | 6 | No command line on the user path | C3, C5, C6, F3 |
 
 ## Owner decisions this plan waits on
 
-1. **A1:** the engine pin (5.5 measured versus 5.7 unmeasured).
+1. ~~**A1:** the engine pin~~ Decided 2026-10-19: **5.7**, for render quality. A1, A4, A5, A9 and B4 redo the 5.5-era pieces on it.
 2. **E1:** which one or two Chinese airframes, given licence-clean sources. This is the item most likely to be cut.
 3. **C4/E5:** whether the storm-weather default and the Google-tiles key (both owner rules) sit inside a "no manual intervention" demo as they are.
 4. **D2 spike:** whether the A4 or the first new airframe carries the payload work.
