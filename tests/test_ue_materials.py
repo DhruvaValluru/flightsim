@@ -639,3 +639,31 @@ def test_the_landscape_paints_each_layer_with_a_drape_roles_texture():
     assert "vector(material, lib, name, LANDSCAPE_TINT_DEFAULTS[name] + (1.0,)" in body
     scene = BUILD_SCENE.read_text(encoding="utf-8")
     assert 'set_material_instance_scalar_parameter_value(material, "ImageryWeight", 1.0)' in scene
+
+
+def test_every_material_built_on_the_dead_if_pin_is_rebuilt_without_a_setting():
+    """The owner's 5.7 (2026-10-08): select_if's "A>B" connected nothing, so
+    every material with an If node failed to compile, and the script skips
+    existing assets. Each such material carries a GRAPH_GENERATIONS stamp:
+    an unstamped asset is rebuilt on the next run, no
+    FLIGHTSIM_REBUILD_MATERIALS needed. A new If user must be listed here."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    callers = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name != "select_if":
+            for call in ast.walk(node):
+                if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                        and call.func.id in ("select_if", "in_unit_interval")):
+                    callers.add(node.name)
+    assert callers == {"in_unit_interval", "create_landcover_id", "create_rain_streaks",
+                       "create_ground", "create_lens_drops"}
+    generations = ast.literal_eval(source.split("GRAPH_GENERATIONS = ", 1)[1].split("\nGRAPH_", 1)[0])
+    for name in ("M_LandcoverID", "M_RainStreaks", "M_Ground_City", "M_LensDrops", "M_GreyCard"):
+        assert generations.get(name, "1") >= "2", name
+    finish = source[source.index("def finish(material, name):"):source.index("def linear_default_texture")]
+    assert "set_metadata_tag(material, GRAPH_GENERATION_TAG" in finish
+    rebuild = source[source.index("def rebuild_requested"):source.index("def new_material")]
+    assert "if graph_stale(name):" in rebuild
+    grey = source[source.index("def create_grey_card"):source.index("def after_tonemapping")]
+    assert 'rebuild_requested("M_GreyCard")' in grey and 'finish(material, "M_GreyCard")' in grey

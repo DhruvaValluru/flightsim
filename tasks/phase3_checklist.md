@@ -25,6 +25,9 @@ Ticking: change `[ ]` to `[x]` in this file and commit it.
   - Check: each of the 6 patches is marked needed or not needed.
   - Check: the plane flies the same in the engine as in Python (`gate5_ue_parity.py`).
 - [ ] **Label materials rebuilt on 5.7** (one of them failed to compile on 5.7)
+  - The script now rebuilds the broken ones by itself; no setting needed.
+  - Check: one run of `scripts/ue_create_materials.py` prints `MATERIAL-STALE` then `MATERIAL-CREATED` for M_LandcoverID, M_LensDrops, M_GreyCard, M_RainStreaks and M_Ground_City.
+  - Check: a second run prints `MATERIAL-EXISTS` for all five, and the editor log has no "Missing If" errors.
 - [ ] **Engine writes the label images**
   - Check: after one render, `render.json` has a `labels` block.
   - Check: the mask picture is not blank.

@@ -816,8 +816,11 @@ def create_grey_card():
     the node and pin names are the UE Python API's, checked on Windows."""
     full = f"{PATH}/M_GreyCard"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
-        print(f"MATERIAL-EXISTS: {full}")
-        return
+        if rebuild_requested("M_GreyCard") and unreal.EditorAssetLibrary.delete_asset(full):
+            print(f"MATERIAL-REBUILT: {full} (deleted to be built again)")
+        else:
+            print(f"MATERIAL-EXISTS: {full}")
+            return
 
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     material = tools.create_asset("M_GreyCard", PATH, unreal.Material,
@@ -845,9 +848,7 @@ def create_grey_card():
             material, unreal.MaterialExpressionConstant, -400, y)
         constant.set_editor_property("r", value)
         lib.connect_material_property(constant, "", prop)
-    lib.recompile_material(material)
-    unreal.EditorAssetLibrary.save_asset(full)
-    print(f"MATERIAL-CREATED: {full}")
+    finish(material, "M_GreyCard")
 
 
 # -- W5: the world materials -----------------------------------------------------
@@ -873,7 +874,7 @@ def move_after_tonemapping(name):
     built the material before the move would keep the old location)."""
     full = f"{PATH}/{name}"
     if not unreal.EditorAssetLibrary.does_asset_exist(full) or rebuild_requested(name):
-        return False   # absent, or FLIGHTSIM_REBUILD_MATERIALS: built again below
+        return False   # absent, stale or FLIGHTSIM_REBUILD_MATERIALS: built again below
     material = unreal.EditorAssetLibrary.load_asset(full)
     location = after_tonemapping()
     if material.get_editor_property("blendable_location") == location:
@@ -886,11 +887,42 @@ def move_after_tonemapping(name):
     return True
 
 
+#: The generation of each non-storm material whose graph changed after a
+#: machine may already have built it, stamped on the asset as metadata
+#: like STORM_GENERATIONS: an existing asset stamped with an older one (or
+#: none) is deleted and built again, so the fix reaches that machine
+#: without anyone remembering FLIGHTSIM_REBUILD_MATERIALS. Generation 2:
+#: the If node's pins found by IF_PIN_NAMES (measured on the owner's 5.7,
+#: 2026-10-08: "A>B" connected nothing and every select_if material failed
+#: to compile). Bump a material's number with every change to its graph.
+GRAPH_GENERATIONS = {"M_LandcoverID": "2", "M_LensDrops": "2", "M_GreyCard": "2",
+                     "M_RainStreaks": "2", "M_Ground_City": "2"}
+GRAPH_GENERATION_TAG = "FlightSimGraphGeneration"
+
+
+def graph_stale(name):
+    """True when /Game/FlightSim/<name> exists but is not stamped with its
+    GRAPH_GENERATIONS number: built by an older graph of this script."""
+    if name not in GRAPH_GENERATIONS:
+        return False
+    full = f"{PATH}/{name}"
+    if not unreal.EditorAssetLibrary.does_asset_exist(full):
+        return False
+    stamped = unreal.EditorAssetLibrary.get_metadata_tag(
+        unreal.EditorAssetLibrary.load_asset(full), GRAPH_GENERATION_TAG)
+    return str(stamped) != GRAPH_GENERATIONS[name]
+
+
 def rebuild_requested(name):
-    """FLIGHTSIM_REBUILD_MATERIALS=all or a comma list of names: an existing
-    asset is deleted and built again (the script otherwise skips what
-    exists, so a material built by an older script keeps its old graph)."""
+    """FLIGHTSIM_REBUILD_MATERIALS=all or a comma list of names, or an
+    asset built by an older graph (graph_stale): an existing asset is
+    deleted and built again (the script otherwise skips what exists, so a
+    material built by an older script keeps its old graph)."""
     import os
+    if graph_stale(name):
+        print(f"MATERIAL-STALE: {PATH}/{name} (built by an older graph; "
+              f"this one is generation {GRAPH_GENERATIONS[name]})")
+        return True
     wanted = os.environ.get("FLIGHTSIM_REBUILD_MATERIALS", "").strip()
     if not wanted:
         return False
@@ -904,7 +936,7 @@ def new_material(name):
     full = f"{PATH}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         if rebuild_requested(name) and unreal.EditorAssetLibrary.delete_asset(full):
-            print(f"MATERIAL-REBUILT: {full} (deleted on FLIGHTSIM_REBUILD_MATERIALS)")
+            print(f"MATERIAL-REBUILT: {full} (deleted to be built again)")
         else:
             print(f"MATERIAL-EXISTS: {full}")
             return None
@@ -916,6 +948,9 @@ def new_material(name):
 
 
 def finish(material, name):
+    if name in GRAPH_GENERATIONS:
+        unreal.EditorAssetLibrary.set_metadata_tag(material, GRAPH_GENERATION_TAG,
+                                                   GRAPH_GENERATIONS[name])
     unreal.MaterialEditingLibrary.recompile_material(material)
     unreal.EditorAssetLibrary.save_asset(f"{PATH}/{name}")
     print(f"MATERIAL-CREATED: {PATH}/{name}")
@@ -2134,7 +2169,7 @@ def _sky_material(name):
     full = f"{PATH}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         if rebuild_requested(name) and unreal.EditorAssetLibrary.delete_asset(full):
-            print(f"MATERIAL-REBUILT: {full} (deleted on FLIGHTSIM_REBUILD_MATERIALS)")
+            print(f"MATERIAL-REBUILT: {full} (deleted to be built again)")
         else:
             print(f"MATERIAL-EXISTS: {full}")
             return None, full
@@ -2296,7 +2331,7 @@ def _weather_material(name):
     full = f"{PATH}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         if rebuild_requested(name) and unreal.EditorAssetLibrary.delete_asset(full):
-            print(f"MATERIAL-REBUILT: {full} (deleted on FLIGHTSIM_REBUILD_MATERIALS)")
+            print(f"MATERIAL-REBUILT: {full} (deleted to be built again)")
         else:
             print(f"MATERIAL-EXISTS: {full}")
             return None
