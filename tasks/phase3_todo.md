@@ -80,9 +80,9 @@ The following are still **5.5-era** and get redone on 5.7 below:
 **[CHECKPOINT - PAUSE AND RE-VERIFY SYSTEM STATE]**
 `pytest -q` is fully green. Windows: `.\scripts\ue_preflight.ps1` reports the pinned engine found, with no warnings.
 
-### A4 · Re-vendor the JSBSim plugin and re-apply the four local patches on 5.7 — S
+### A4 · Re-vendor the JSBSim plugin and re-check the six local patches on 5.7 — S
 - **Files:** `scripts/vendor_ue_plugin.ps1`, `ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json`
-- **Do:** Re-run vendoring against 5.7. The plugin itself claims 5.0–5.6 and the patches were measured on 5.5. For each of the four patches in `scripts/jsbsim_plugin_patches_5_6.diff`, record in `VENDORED.json` `local_patches` whether it is still needed, still applied, or no longer applies. Also write `ue_engine_target: "5.7"`.
+- **Do:** Re-run vendoring against 5.7. The plugin itself claims 5.0–5.6 and the patches were measured on 5.5. For each of the six `local_patches` (four from `scripts/jsbsim_plugin_patches_5_6.diff`, two later bridge additions), record in `VENDORED.json` `local_patches` whether it is still needed, still applied, or no longer applies. Also write `ue_engine_target: "5.7"`.
 - **Also check:** after the plugin builds, the flight still matches. A short c172p hold on 5.7 must agree with the Python headless flight within the bound recorded on 5.5 (`experiments/gate5_ue_parity.py`).
 - **Verify:**
   - Windows: `bash scripts/check_bridge_api.sh` (Git Bash) exits 0.

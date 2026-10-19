@@ -22,7 +22,7 @@ Ticking: change `[ ]` to `[x]` in this file and commit it.
   - Check: the right engine builds with no errors.
 - [ ] **JSBSim plugin redone on 5.7** (it was set up on 5.5)
   - Check: `scripts/check_bridge_api.sh` passes and the build passes.
-  - Check: each of the 4 patches is marked needed or not needed.
+  - Check: each of the 6 patches is marked needed or not needed.
   - Check: the plane flies the same in the engine as in Python (`gate5_ue_parity.py`).
 - [ ] **Label materials rebuilt on 5.7** (one of them failed to compile on 5.7)
 - [ ] **Engine writes the label images**
