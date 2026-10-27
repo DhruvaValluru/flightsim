@@ -20,7 +20,7 @@ and calibration done by probe render rather than theory (NEXT.md gotchas
 
 | Area | Current implementation | Where |
 |---|---|---|
-| Engine | UE 5.5, render via `UnrealEditor-Cmd` commandlet into a `USceneCaptureComponent2D`, `SCS_FinalColorLDR`, RGBA8 sRGB target | `FlightSimRenderCommandlet.cpp:782-808` |
+| Engine | UE 5.7 (written when the pin was 5.5), render via `UnrealEditor-Cmd` commandlet into a `USceneCaptureComponent2D`, `SCS_FinalColorLDR`, RGBA8 sRGB target | `FlightSimRenderCommandlet.cpp:782-808` |
 | Resolution / FOV | 960 px wide by default, FOV 55° (visual) | `FlightSimRenderCommandlet.cpp:355, 797` |
 | Engine rendering config | **None.** `DefaultEngine.ini` only sets the fixed 120 Hz tick. Lumen, Nanite, Virtual Shadow Maps, TSR, and physical light units are never set explicitly. | `ue/Config/DefaultEngine.ini` |
 | Sun | One directional light, intensity **8.0** (an arbitrary value, not physical lux), rotation hard-coded per shot or passed in as `-sun-elev/-sun-azim`. Not derived from date, time, or location. | `FlightSimVisualScene.cpp:98-114`, `RenderCommandlet.cpp:509-519`, `webapp/runs.py:1044` |
@@ -253,7 +253,7 @@ the S2-only drape at identical camera.
 `FlightSimVegetation.cpp`, PCG graph asset, `ue_create_materials.py`.
 **How:** bake a sidecar of tree instances from WorldCover tree class ×
 canopy-height raster (1 m Meta/WRI or 10 m ETH), with seeded jitter from
-the spec digest (reproducible). Spawn as **Nanite foliage** (UE 5.5
+the spec digest (reproducible). Spawn as **Nanite foliage** (UE 5.7
 Nanite supports masked and WPO foliage) via HISM, cull by distance, with
 impostor cards or RVT tree-colour darkening past ~5 km. 3 to 5 species per
 biome (conifer, broadleaf, alpine shrub). Labeled **visual-only scenery**
@@ -384,7 +384,7 @@ V2, V3, and V6 alone close most of the perceived gap.
 
 ### 7.1 Master prompt (paste into a new Claude Code session, on the render machine)
 
-> You are working in the `flightsim` repo (UE 5.5 render host plus a Python
+> You are working in the `flightsim` repo (UE 5.7 render host plus a Python
 > core). Read, in order: `docs/CONTEXT_PHASE8B_SESSION.md`, `NEXT.md`
 > (all gotchas), `docs/VALIDITY.md` §Phase 6, and
 > `docs/VISUAL_FIDELITY_PLAN.md`. The goal is to raise render fidelity
