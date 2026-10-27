@@ -1,158 +1,208 @@
-# Phase 3 checklist
+# Phase 3 checklist — the guideline sheet
 
-The simple-words version of `tasks/phase3_todo.md`. Tick a box only when its
-**check** passes. Do the steps in order. Do not start a step until the gate before
-it is ticked.
+The plain-words version of `tasks/phase3_todo.md` (revision 2, 2026-10-27). The
+letters match the plan: **A**1 here is A1 there.
 
-Ticking: change `[ ]` to `[x]` in this file and commit it.
+**How to use this sheet**
+
+- Do the letters in order: A → B → C → D → E → F.
+- Do not start a letter until the gate before it is ticked.
+  - **One exception:** the Python-only boxes in C (marked 🐍) may be done while A is
+    still open.
+- Tick a box only when its **check** passes. Change `[ ]` to `[x]` and commit.
+- 🪟 means the check needs a Windows machine with the engine installed.
+- If a check fails, write what you saw in `docs/PHASE3_LOG.md` before fixing it.
+- The rule for the whole phase: **do less, and make what remains work for someone
+  who is not us.** If a box turns out expensive, say so; it may be cut.
 
 ---
 
-## Step 1 · Fix what's broken from Phase 2
+## Why the order changed (the weekend Windows review)
 
-**Engine: Unreal 5.7** (decided, for best render quality). Already built and rendered on
-5.7 once. What still dates from 5.5 gets redone below.
+**What works:** everything in Python. Plan in plain English, reproducible
+campaigns, the verifier, the exporter refusing bad data, and the aircraft
+sitting 0.4 m from its label (it was ~25 m).
 
-- [ ] **All three computers on the same 5.7 patch**, written in `docs/TOOLCHAIN.md`
-  - Check: all three rows show the same 5.7.x.
-- [ ] **Project locked to that exact 5.7 patch**
+**What doesn't:** the Unreal half. Each problem below has its own box in A.
+
+| What happened on Windows | Box that fixes it |
+|---|---|
+| Build failed on 5.5 (the code names a 5.7-only setting) | A1, A2, A3 |
+| Had to import the aircraft by hand | A7 |
+| Had to skip host flight with `--no-host-flight` | A8 |
+| An old September program drew the pictures | A4 |
+| Only one of two cameras gave pictures | A9 |
+| Generate in the web app always refused | A10 |
+| Tight box empty, "alone" pictures missing (3 of 7 label checks fail) | A11, A12 |
+| The whole aircraft is one colour in the mask (no gear or parts) | C (payload and gear); control surfaces are not this phase |
+
+---
+
+## A · Make the Unreal half work, with no workarounds
+
+- [ ] **A1 · Pick one engine version and install it on all three computers** — *you decide*
+  - Recommended: go back to **5.5** (it is what actually runs). Or keep 5.7, but
+    then all three computers install the same 5.7 first.
+  - Check: `docs/TOOLCHAIN.md` has three rows with the same version, and a dated
+    decision line.
+- [ ] **A2 · That version written in every place the project names it**
   - Check: `pytest -q tests/test_platform.py` passes.
-- [ ] **Build refuses the wrong engine**
-  - Check: pointing it at a different engine version stops with `engine.version_mismatch`.
-  - Check: the right engine builds with no errors.
-- [ ] **JSBSim plugin redone on 5.7** (it was set up on 5.5)
+  - Check: changing the version in one file by hand makes that test fail.
+- [ ] **A3 · The build refuses the wrong engine** 🪟
+  - Check: pointing it at another version stops with `engine.version_mismatch`.
+  - Check: the right version builds with zero errors.
+- [ ] **A4 · An old engine program can't draw the pictures**
+  - Check: after changing one `.cpp` without rebuilding, a render stops with
+    `engine.binary_stale`.
+- [ ] **A5 · JSBSim plugin set up again on this version** 🪟
   - Check: `scripts/check_bridge_api.sh` passes and the build passes.
-  - Check: each of the 6 patches is marked needed or not needed.
+  - Check: each of its six patches is marked needed or not needed.
   - Check: the plane flies the same in the engine as in Python (`gate5_ue_parity.py`).
-- [ ] **Label materials rebuilt on 5.7** (one of them failed to compile on 5.7)
-  - The script now rebuilds the broken ones by itself; no setting needed.
-  - Check: one run of `scripts/ue_create_materials.py` prints `MATERIAL-STALE` then `MATERIAL-CREATED` for M_LandcoverID, M_LensDrops, M_GreyCard, M_RainStreaks and M_Ground_City.
-  - Check: a second run prints `MATERIAL-EXISTS` for all five, and the editor log has no "Missing If" errors.
-- [ ] **Engine writes the label images**
-  - Check: after one render, `render.json` has a `labels` block.
-  - Check: the mask picture is not blank.
-- [ ] **No label images = the run fails loudly**
-  - Check: a run with missing label images stops with `labels.no_bundle`.
-- [ ] **Aircraft tight box is filled in**
-  - Check: `python -m flightsim.verify runs/<id>` shows `bbox_tight` PASS.
+- [ ] **A6 · Materials build by themselves** 🪟
+  - Check: the first run prints `MATERIAL-CREATED` for the five rebuilt ones, and
+    the second run prints `MATERIAL-EXISTS`.
+- [ ] **A7 · The aircraft is imported automatically** 🪟
+  - Check: delete the imported A-4, press Generate, and it imports and renders by itself.
+- [ ] **A8 · Host flight works; nobody needs `--no-host-flight`** 🪟
+  - Check: a web-app run with host flight completes, and no message tells the user
+    to add the flag.
+- [ ] **A9 · Every camera gives pictures, or the run says which one didn't** 🪟
+  - Check: the default run has the same number of frames for both cameras.
+  - Check: an empty camera stops with `render.camera_empty`.
+- [ ] **A10 · Generate works in the web app** 🪟
+  - Check: a one-line prompt on `/generate.html` finishes a campaign.
+- [ ] **A11 · The engine writes the label pictures; missing ones fail loudly** 🪟
+  - Check: every `render.json` has the mask, depth and an "alone" picture per aircraft.
+  - Check: a run with missing label pictures stops with `labels.no_bundle`.
+- [ ] **A12 · All seven label checks pass; one real frame saved as a test** 🪟
+  - Check: `python -m flightsim.verify runs/<id>` shows 7 of 7 PASS.
   - Check: `label_diagnose.py` shows `tight null: 0`.
-- [ ] **One real rendered frame saved as a test**
   - Check: `pytest -q tests/test_engine_bundle_golden.py` passes.
-- [ ] **NEXT.md updated with what was measured**
+- [ ] **A13 · NEXT.md says only what was measured**
 
-### GATE 1
-
+### GATE A
 - [ ] Tests pass on all three operating systems.
-- [ ] The engine builds clean.
-- [ ] One app render: every frame has labels and the tight box is never empty.
+- [ ] **On the reviewer's computer, from a fresh download:** Generate gives
+  pictures from both cameras and 7 of 7 label checks pass, with no hand import, no
+  flag and no old program.
+- [ ] The same on the other two computers.
 
 ---
 
-## Step 2 · Lock the tools
+## B · Lock the tools
 
-- [ ] **Exact versions of every Python package saved**, with hashes, in `requirements.lock`
+- [ ] **B1 · Exact Python package versions saved with hashes** (`requirements.lock`)
   - Check: a fresh install from it, then `pytest -q`, passes.
-- [ ] **One file lists every other tool's version** (`toolchain.json`): engine, Visual Studio, Windows SDK, Cesium, ffmpeg, Python
-  - Check: preflight prints `OK` for each.
-  - Check: a wrong version makes preflight stop.
-- [ ] **A test catches any version drifting**
+- [ ] **B2 · One file lists every other tool's version** (`toolchain.json`)
+  - Check: preflight prints `OK` per tool, and a wrong version stops it.
+- [ ] **B3 · A test catches any version drifting**
   - Check: `pytest -q tests/test_toolchain_pins.py` passes.
-  - Check: changing one version by hand makes it fail.
+- [ ] **B4 · Picture quality checked on this engine** 🪟
+  - Check: `gate6_visual.py` passes, and the A12 label test still passes.
 
-- [ ] **Picture quality re-tuned on 5.7** (Lumen, shadows, Nanite, TSR stay on; brightness and colours were tuned on 5.5)
-  - Check: `python experiments/gate6_visual.py --quality beauty` passes.
-  - Check: renders repeat the same way (`gate10_render_repro.py`).
-  - Check: the labels test still passes.
-
-### GATE 2
-
-- [ ] A fresh clone builds with nothing set except the version file.
-- [ ] A beauty-quality render passes the picture checks on 5.7.
+### GATE B
+- [ ] A fresh download builds with nothing set except `toolchain.json`, and
+  preflight is all `OK` on all three computers.
 
 ---
 
-## Step 3 · Make it simple to use
+## C · Boxes around the payload (and optionally the gear)
 
-- [ ] **Every setting listed and sorted** into: in the app / hidden default / developers only / delete
+Good news: the A-4's model already contains its bombs and tanks as separate pieces.
+They are just switched off today, so this does not wait for a new aircraft.
+
+Two rules to keep in mind:
+
+- **The aircraft's own box still includes its payload.** The payload gets its own
+  colour in the mask, but it is still part of the plane.
+- **Python decides every part's ID; the engine only follows.**
+
+- [ ] **C1 · The A-4 file lists its payload and a default loadout** 🐍 — *you
+  decide the loadout*
+  - Check: the A-4 loads with at least one payload, and the plane still trims with
+    the weight of what it carries.
+- [ ] **C2 · Each loaded station exported as its own piece**
+  - Check: the mesh manifest lists a `payload` piece per loaded station.
+- [ ] **C3 · The run card lists the payload pieces with their own IDs**
+  - Check: the IDs are unique and never clash with other aircraft.
+- [ ] **C4 · The engine gives each piece its own colour in the mask** 🪟
+  - Check: the mask contains the payload's ID, and the aircraft's own tight box is
+    still filled.
+- [ ] **C5 · Payload boxes written into the label file (manifest v8)** 🐍
+  - Check: `pytest -q tests/test_component_labels.py` passes for five cases: visible,
+    off-screen, hidden behind the plane, aircraft box includes payload, and old v7
+    files still read.
+- [ ] **C6 · The checker and exports know about payload** 🐍
+  - Check: `component_coverage` passes, and a COCO export has a `payload` category.
+- [ ] **C7 · (Optional) Landing gear boxes, on the c172p** (its gear is fixed and
+  visible; the A-4's gear is stowed)
+  - Check: folded-up gear is "not claimed", never a zero-size box.
+
+### GATE C
+- [ ] A web-app A-4 run passes verify with `component_coverage` PASS. 🪟
+- [ ] Nobody pressed an extra button or added a flag.
+
+---
+
+## D · New aircraft and places
+
+- [ ] **D1 · Survey: which Chinese aircraft we are allowed to use** — *you decide*
+  - So far there is no J-15, J-35 or J-11 in FlightGear's official add-on collection.
+    One early Su-27SK project includes a J-11A; its licence still needs checking.
+  - Recommended: J-11A only, or **cut it** if the licence isn't clean.
+- [ ] **D2 · First new aircraft added** (with payload from day one)
+  - Check: its config test passes, it flies level in a headless run, and it
+    imports by itself.
+- [ ] **D3 · (If two were chosen) second new aircraft**
+- [ ] **D4 · Desert and Forest buttons in the app**
+  - Check: Desert gives Grand Canyon and Forest gives Yosemite.
+- [ ] **D5 · The two places are prepared once and reused** — *you decide whether
+  typing the Google tiles key once is acceptable*
+  - Check: a second launch says "up to date" for both.
+- [ ] **D6 · Every aircraft × place combination runs with no special tweaks** 🪟
+  - Check: every combination passes verify and has payload boxes.
+
+### GATE D
+- [ ] The new aircraft is available, both places work, payload boxes are present,
+  and the old aircraft still pass. 🪟
+
+---
+
+## E · Make it simple for someone new
+
+- [ ] **E1 · Every setting listed and sorted** into: in the app / hidden default /
+  developers only / delete
   - Check: a test finds no unlisted setting.
-- [ ] **All settings in one file**, edited from the app
-  - Check: an empty settings file gives working defaults.
-  - Check: Google tiles are still on.
-- [ ] **Settings panel in the app**
-  - Check: entering the tiles key survives a page reload.
-  - Check: 6 or fewer fields are visible.
-- [ ] **Pressing Capture with nothing changed gives a working run**
+- [ ] **E2 · All settings in one file**, edited from the app
+  - Check: an empty settings file gives working defaults, and Google tiles are
+    still on.
+- [ ] **E3 · Settings panel in the app**
+  - Check: the tiles key survives a page reload, and 6 or fewer fields are visible.
+- [ ] **E4 · Pressing Capture with nothing typed gives a working run** — *you
+  decide whether storm weather is in the demo default*
   - Check: the run finishes and verify has no FAIL.
-- [ ] **Hidden options moved into the app or removed** (normals / flow / amodal become checkboxes)
-- [ ] **Double-click launcher works**
-  - Check: on a fresh clone the app opens in the browser and the log ends with `READY`.
-  - Check: a second launch skips the build.
+- [ ] **E5 · Hidden options become checkboxes** (normals / flow / amodal)
+- [ ] **E6 · Double-click launcher** (`Launch FlightSim.cmd`) 🪟
+  - Check: on a fresh download, the app opens and the log ends with `READY`.
+  - Check: a second launch skips everything already done.
 
-### GATE 3
-
-- [ ] Someone new uses only the launcher and the app and gets a passing run, without reading NEXT.md, opening a terminal or asking you anything.
+### GATE E
+- [ ] Someone new uses only the launcher and the app and gets a passing run. They
+  don't read NEXT.md, open a terminal or ask you anything. 🪟
 - [ ] Their questions are written in `docs/PHASE3_LOG.md`.
 
 ---
 
-## Step 4 · Boxes around parts of the aircraft
+## F · Demo and wrap-up
 
-- [ ] **Aircraft files can list their parts** (payload, landing gear)
-  - Check: the A4 loads with at least one payload part.
-- [ ] **Quick check: does the A4 model actually include its missiles or bombs?**
-  - If not, use the new Chinese aircraft for this step instead.
-- [ ] **Parts kept as separate pieces when importing**
-  - Check: the import log lists one mesh per part.
-- [ ] **Each part gets its own ID colour in the render**
-  - Check: the mask contains the payload's ID.
-- [ ] **Payload boxes written into the label file**
-  - Check: `pytest -q tests/test_component_labels.py` passes for three cases: visible, off-screen and hidden behind the plane.
-- [ ] **Checker and dataset exports know about payload**
-  - Check: the COCO export has a `payload` category.
-- [ ] *(Optional)* **Landing gear boxes**
-  - Check: gear that is folded up is marked "not claimed", not given a zero-size box.
-
-### GATE 4
-
-- [ ] An app run passes verify with `component_coverage` PASS.
-- [ ] You didn't have to press any extra button or add any flag.
-
----
-
-## Step 5 · New aircraft and places
-
-- [ ] **Survey: which of the J-15 / J-11 / J-35 have models we're allowed to use**
-  - **You decide** which one or two to add, or cut this.
-- [ ] **First new aircraft added**
-  - Check: its config test passes.
-  - Check: it flies level in a headless run.
-  - Check: it imports into the engine.
-- [ ] *(If two were chosen)* **Second new aircraft added**
-- [ ] **Desert and Forest buttons in the app**
-  - Check: Desert gives Grand Canyon terrain and Forest gives Yosemite.
-- [ ] **The two places are prepared once and reused**
-  - Check: a second launch says "up to date" for both.
-- [ ] **Every aircraft × place combination runs with no special tweaks**
-  - Check: every combination passes verify and has payload boxes.
-
-### GATE 5
-
-- [ ] New aircraft available, both places work, payload boxes present.
-- [ ] The old aircraft still pass their tests.
-
----
-
-## Step 6 · Demo and wrap-up
-
-- [ ] **Automated full run**: pick aircraft → pick place → Capture → download data
+- [ ] **F1 · Automated full run:** pick aircraft → pick place → Capture → download 🪟
   - Check: `pytest -q -m ue_host tests/test_demo_e2e.py` passes.
-- [ ] **Same run works on all three computers**
-  - Check: three passing rows in `docs/PHASE3_LOG.md`.
-- [ ] **Short guide written** (`docs/GUIDE.md`)
-  - Check: under 1,000 words.
-  - Check: no terminal commands in it.
-- [ ] **Video recorded** of one full run, under 5 minutes
-- [ ] **Final report**: each of the six goals has proof next to it
+- [ ] **F2 · The same run works on all three computers** 🪟
+  - Check: three passing rows in `docs/PHASE3_LOG.md` with the same tool versions.
+- [ ] **F3 · Short guide written** (`docs/GUIDE.md`)
+  - Check: under 1,000 words, with no terminal commands.
+- [ ] **F4 · Video of one full run**, under 5 minutes
+- [ ] **F5 · Final report:** each of the six goals with its proof
 
 ---
 
@@ -165,10 +215,18 @@ Ticking: change `[ ]` to `[x]` in this file and commit it.
 - [ ] 5. A short video and a short guide exist.
 - [ ] 6. Nothing a user does needs the command line.
 
+## Not this phase
+
+- Separate mask colours for ailerons, elevator, rudder and flaps (control surfaces).
+- World-wide terrain.
+- Supporting two engine versions at once.
+
 ## Decisions waiting on you or Shashank
 
-- [x] Engine version: **5.7** (decided 2026-10-19)
+- [ ] **Engine:** back to 5.5 (recommended), or 5.7 on all three computers. *This
+  one blocks everything.*
+- [ ] Which payload the A-4 carries by default
 - [ ] Which Chinese aircraft, or cut it
-- [ ] Keep storm weather on by default for the demo?
-- [ ] Is entering the Google tiles key once acceptable?
-- [ ] Do payload boxes start on the A4 or the new aircraft?
+- [ ] Storm weather on in the demo, or off?
+- [ ] Is typing the Google tiles key once acceptable?
+- [ ] Keep control surfaces out of Phase 3?
