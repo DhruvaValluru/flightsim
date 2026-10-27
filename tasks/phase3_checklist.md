@@ -27,7 +27,7 @@ sitting 0.4 m from its label (it was ~25 m).
 
 | What happened on Windows | Box that fixes it |
 |---|---|
-| Build failed on 5.5 (the code names a 5.7-only setting) | A1, A2, A3 |
+| Build failed on 5.5 (the code names a 5.7-only setting); fixed by installing 5.7 | A1, A2, A3 |
 | Had to import the aircraft by hand | A7 |
 | Had to skip host flight with `--no-host-flight` | A8 |
 | An old September program drew the pictures | A4 |
@@ -40,11 +40,12 @@ sitting 0.4 m from its label (it was ~25 m).
 
 ## A · Make the Unreal half work, with no workarounds
 
-- [ ] **A1 · Pick one engine version and install it on all three computers** — *you decide*
-  - Recommended: go back to **5.5** (it is what actually runs). Or keep 5.7, but
-    then all three computers install the same 5.7 first.
-  - Check: `docs/TOOLCHAIN.md` has three rows with the same version, and a dated
-    decision line.
+- [ ] **A1 · Install UE 5.7 (5.7.4) on all three computers** — *decided
+  2026-10-27: 5.7*
+  - The engine is **5.7**, patch **5.7.4**, on every computer. No going back to 5.5.
+  - The review computers install 5.7.4 before any other A box.
+  - Check: `docs/TOOLCHAIN.md` has three rows that all say 5.7.4 (the dated
+    decision line is already there).
 - [ ] **A2 · That version written in every place the project names it**
   - Check: `pytest -q tests/test_platform.py` passes.
   - Check: changing the version in one file by hand makes that test fail.
@@ -98,6 +99,7 @@ sitting 0.4 m from its label (it was ~25 m).
 - [ ] **B3 · A test catches any version drifting**
   - Check: `pytest -q tests/test_toolchain_pins.py` passes.
 - [ ] **B4 · Picture quality checked on this engine** 🪟
+  - Re-tune the colours and exposure on 5.7.4.
   - Check: `gate6_visual.py` passes, and the A12 label test still passes.
 
 ### GATE B
@@ -219,12 +221,12 @@ Two rules to keep in mind:
 
 - Separate mask colours for ailerons, elevator, rudder and flaps (control surfaces).
 - World-wide terrain.
-- Supporting two engine versions at once.
+- Supporting two engine versions at once, or a 5.5 fallback.
 
 ## Decisions waiting on you or Shashank
 
-- [ ] **Engine:** back to 5.5 (recommended), or 5.7 on all three computers. *This
-  one blocks everything.*
+- [x] **Engine:** 5.7 (5.7.4) on all three computers. *Decided 2026-10-27 by the
+  owner.*
 - [ ] Which payload the A-4 carries by default
 - [ ] Which Chinese aircraft, or cut it
 - [ ] Storm weather on in the demo, or off?
