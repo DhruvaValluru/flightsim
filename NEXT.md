@@ -1117,7 +1117,7 @@ the parity discipline, and the do-not-regress list)
 
 ## Phase 2 gotchas (continuing the numbering)
 
-32. **The engine pin moved from 5.5 to 5.7 (2026-09-25) and NOTHING has
+32. **The engine pin moved to 5.7 (2026-09-25) and NOTHING has
     been built or measured on 5.7 yet.** `ue/FlightSim.uproject`
     `EngineAssociation`, every script that builds a `UE_5.x` path or
     compares `Build.version`, `core/util/platform.py`

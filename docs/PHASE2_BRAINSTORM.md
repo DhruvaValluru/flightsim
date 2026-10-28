@@ -1144,7 +1144,7 @@ routes through DIRSIG for thermal. Inside UE the pieces exist:
   the honest tools are DIRSIG (via Rendered.ai) or MuSES, both
   commercial, both a phase of their own.
 
-### 9.8 The engine version is a decision, and 5.5 is the wrong answer
+### 9.8 The engine version is a decision, and the answer is 5.7
 
 Everything above assumes an engine newer than the 5.5 the branch pins.
 The facts as of 2026-09-24:

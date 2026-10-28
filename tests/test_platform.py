@@ -293,6 +293,28 @@ OLD_PIN = re.compile(r'UE_' + _OTHER + r'|Unreal(?: Engine)? ' + _OTHER
 OLD_PIN_ALLOWED = re.compile(r"measured|5\.7|UE5\.0", re.IGNORECASE)
 
 
+def test_one_engine_pin_names_the_same_version_in_every_file():
+    """Phase 3 A2: the uproject, both Target.cs include orders, the Python
+    constant and the A1 patch level name one engine. A Target.cs left on
+    another include order is what stopped the review's build (R1); here it
+    fails in CI, with the file named."""
+    import json
+    version = plat.UE_ENGINE_VERSION
+    assert re.fullmatch(r"5\.\d+\.\d+", plat.UE_ENGINE_PATCH)
+    assert plat.UE_ENGINE_PATCH.rsplit(".", 1)[0] == version, (
+        f"UE_ENGINE_PATCH {plat.UE_ENGINE_PATCH} is not a {version} patch")
+    uproject = json.loads((REPO / "ue" / "FlightSim.uproject")
+                          .read_text(encoding="utf-8"))
+    assert uproject["EngineAssociation"] == version, "ue/FlightSim.uproject"
+    wanted = "Unreal" + version.replace(".", "_")
+    for name in ("FlightSim.Target.cs", "FlightSimEditor.Target.cs"):
+        text = (REPO / "ue" / "Source" / name).read_text(encoding="utf-8")
+        named = re.findall(r"EngineIncludeOrderVersion\.(\w+)", text)
+        assert named == [wanted], f"ue/Source/{name} names {named}, not {wanted}"
+    toolchain = (REPO / "docs" / "TOOLCHAIN.md").read_text(encoding="utf-8")
+    assert f'UE_ENGINE_PATCH = "{plat.UE_ENGINE_PATCH}"' in toolchain, "docs/TOOLCHAIN.md"
+
+
 def test_the_engine_pin_is_5_7_everywhere_it_is_stated():
     """The project moved its engine to 5.7 in one commit, and the pin is
     stated in the uproject, in every script that builds an install path
