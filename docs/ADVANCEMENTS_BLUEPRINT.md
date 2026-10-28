@@ -889,7 +889,7 @@ updrafts — through new classes `snow`/`bare` with `thermals None`, refusing
 arithmetic); the stencil loop moves to `UPrimitiveComponent` with a source pin and a
 Windows clause that the terrain int_id survives on a `-scene=` render, and the Nanite
 clause covers the ID and depth passes (the branch measured Nanite meshes drawing the
-coarse fallback in scene captures on 5.5); the verifier unprojects the depth ITSELF (K, P,
+coarse fallback in scene captures before the 5.7 pin); the verifier unprojects the depth ITSELF (K, P,
 depth → ENU → the bake's affine → class raster; no pyproj needed because the class raster
 shares the bake's projected grid) and grades the engine image three-way against its own
 and against `labels.py`'s; invariance null tests use the `bounded` kind (§2); the land-cover

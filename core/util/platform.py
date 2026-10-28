@@ -134,12 +134,18 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
 
 
 #: The Unreal Engine major.minor the project pins (`ue/FlightSim.uproject`
-#: EngineAssociation). Phase 2 moved it from 5.5 to 5.7 (brainstorm 9.8,
+#: EngineAssociation). Phase 2 moved it to 5.7 (brainstorm 9.8,
 #: contracts section 10); the refusal texts and the default install roots
 #: below are built from it so the pin is stated in ONE place on the Python
-#: side. Gate 6 and every render measurement on record were taken on 5.5;
+#: side. Gate 6 and every render measurement on record predate the 5.7 pin;
 #: nothing here claims a 5.7 build.
 UE_ENGINE_VERSION = "5.7"
+
+#: The engine patch every build machine installs (Phase 3 A1, the owner's
+#: decision of 2026-10-27, docs/TOOLCHAIN.md): what
+#: `Engine/Build/Build.version` reads as Major.Minor.Patch. It extends
+#: UE_ENGINE_VERSION, never contradicts it.
+UE_ENGINE_PATCH = "5.7.4"
 
 #: What is missing, and the remedy, IN THIS OS's OWN TERMS. One text for
 #: all three lied on two of them: it named a PowerShell preflight to
@@ -192,7 +198,7 @@ def ue_platform_refusal() -> str:
 UE_PLATFORM_REFUSAL = _UE_REFUSAL[os_name()]
 
 #: Default engine install roots, checked AFTER the UE_ROOT env override.
-#: Windows scans for any UE_5.* so a 5.5/5.6 install is still found and
+#: Windows scans for any UE_5.* so an install other than 5.7 is still found and
 #: preflight can name the version mismatch instead of "not found".
 _UE_ROOT_DEFAULTS = {
     "mac": (f"/Users/Shared/Epic Games/UE_{UE_ENGINE_VERSION}",),

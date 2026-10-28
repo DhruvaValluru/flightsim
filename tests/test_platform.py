@@ -259,11 +259,11 @@ def test_no_text_io_without_utf8_encoding():
         + ", ".join(offenders))
 
 
-# --- the engine pin: 5.7 everywhere it is STATED, 5.5 only where it was
-# MEASURED (Phase 2 Look lane part 1; brainstorm 9.8, contracts section 10)
+# --- the engine pin: 5.7 everywhere it is STATED; another version only on a
+# line that says it was MEASURED (Phase 2 Look lane part 1; brainstorm 9.8, contracts section 10)
 
 #: Every file that states the engine version to a person or constructs a
-#: path from it. A "5.5" surviving in one of these is a stale pin, unless
+#: path from it. Any other 5.x surviving in one of these is a stale pin, unless
 #: the same line says it is a measurement note (see OLD_PIN_ALLOWED).
 ENGINE_PIN_FILES = (
     "ue/FlightSim.uproject",
@@ -278,19 +278,45 @@ ENGINE_PIN_FILES = (
           # this test catches it; it is not a script that names an engine
           if p.name != "mutation_check.sh")
 
-#: The old pin, in every spelling the tree used: the Epic install folder,
-#: the prose "UE 5.5" / "Engine 5.5", and the bare quoted "5.5" the
-#: preflight compared Build.version against.
-OLD_PIN = re.compile(r'UE_5\.5\b|Unreal(?: Engine)? 5\.5\b|UE ?5\.5\b|"5\.5"')
+#: Any engine version other than the pin, in every spelling the tree used:
+#: the Epic install folder, the prose "UE 5.x" / "Engine 5.x", and the bare
+#: quoted "5.x" the preflight compared Build.version against.
+_OTHER = r'5\.(?!' + plat.UE_ENGINE_VERSION.split(".")[1] + r'\b)\d+\b'
+OLD_PIN = re.compile(r'UE_' + _OTHER + r'|Unreal(?: Engine)? ' + _OTHER
+                     + r'|UE ?' + _OTHER + r'|"' + _OTHER + r'"')
 
-#: A line that keeps 5.5 must SAY it is history: the word "measured" (the
-#: Gate 6 / Xcode / toolset measurements were taken on 5.5 and are not
-#: re-measured here) or "5.7" alongside it (a note about the move itself).
-OLD_PIN_ALLOWED = re.compile(r"measured|5\.7", re.IGNORECASE)
+#: A line that keeps another version must SAY why: the word "measured"
+#: (the Gate 6 / Xcode / toolset measurements predate the 5.7 pin and are
+#: not re-measured here), "5.7" alongside it (a note about the move
+#: itself), or the vendored JSBSim plugin's own stated range, which starts
+#: at UE5.0 (a quote of the plugin, not a pin of ours).
+OLD_PIN_ALLOWED = re.compile(r"measured|5\.7|UE5\.0", re.IGNORECASE)
+
+
+def test_one_engine_pin_names_the_same_version_in_every_file():
+    """Phase 3 A2: the uproject, both Target.cs include orders, the Python
+    constant and the A1 patch level name one engine. A Target.cs left on
+    another include order is what stopped the review's build (R1); here it
+    fails in CI, with the file named."""
+    import json
+    version = plat.UE_ENGINE_VERSION
+    assert re.fullmatch(r"5\.\d+\.\d+", plat.UE_ENGINE_PATCH)
+    assert plat.UE_ENGINE_PATCH.rsplit(".", 1)[0] == version, (
+        f"UE_ENGINE_PATCH {plat.UE_ENGINE_PATCH} is not a {version} patch")
+    uproject = json.loads((REPO / "ue" / "FlightSim.uproject")
+                          .read_text(encoding="utf-8"))
+    assert uproject["EngineAssociation"] == version, "ue/FlightSim.uproject"
+    wanted = "Unreal" + version.replace(".", "_")
+    for name in ("FlightSim.Target.cs", "FlightSimEditor.Target.cs"):
+        text = (REPO / "ue" / "Source" / name).read_text(encoding="utf-8")
+        named = re.findall(r"EngineIncludeOrderVersion\.(\w+)", text)
+        assert named == [wanted], f"ue/Source/{name} names {named}, not {wanted}"
+    toolchain = (REPO / "docs" / "TOOLCHAIN.md").read_text(encoding="utf-8")
+    assert f'UE_ENGINE_PATCH = "{plat.UE_ENGINE_PATCH}"' in toolchain, "docs/TOOLCHAIN.md"
 
 
 def test_the_engine_pin_is_5_7_everywhere_it_is_stated():
-    """The project moved from UE 5.5 to 5.7 in one commit, and the pin is
+    """The project moved its engine to 5.7 in one commit, and the pin is
     stated in the uproject, in every script that builds an install path
     or checks Build.version, in the platform refusals and in the
     user-facing docs. A stale 5.5 in any of them sends a person to
@@ -305,14 +331,14 @@ def test_the_engine_pin_is_5_7_everywhere_it_is_stated():
                 path.read_text(encoding="utf-8").splitlines(), 1):
             if OLD_PIN.search(line) and not OLD_PIN_ALLOWED.search(line):
                 stale.append(f"{rel}:{number}: {line.strip()}")
-    assert not stale, "stale UE 5.5 pin(s):\n  " + "\n  ".join(stale)
+    assert not stale, "stale engine pin(s):\n  " + "\n  ".join(stale)
 
     import json
     uproject = json.loads((REPO / "ue" / "FlightSim.uproject")
                           .read_text(encoding="utf-8"))
     assert uproject["EngineAssociation"] == plat.UE_ENGINE_VERSION == "5.7"
     for text in plat._UE_REFUSAL.values():
-        assert "5.5" not in text
+        assert set(re.findall(r"5\.\d+", text)) <= {plat.UE_ENGINE_VERSION}
     for roots in plat._UE_ROOT_DEFAULTS.values():
         for root in roots:
             assert root.endswith("UE_" + plat.UE_ENGINE_VERSION)

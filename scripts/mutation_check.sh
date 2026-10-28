@@ -2682,7 +2682,7 @@ mutate flightsim/capture.py \
 
 mutate flightsim/capture.py \
     '                             f"poses (Windows with UE {UE_ENGINE_VERSION} "' \
-    '                             "poses (Windows with UE 5.5 "  # MUTATED: stale pin' \
+    '                             "poses (Windows with UE 5.6 "  # MUTATED: stale pin' \
     "capture --help states the pinned engine version" \
     tests/test_capture_cli_words.py || failures=$((failures+1))
 
@@ -2720,20 +2720,32 @@ mutate core/scenario/card.py \
 # replace so it applies to them the same way.
 mutate ue/FlightSim.uproject \
     '"EngineAssociation": "5.7"' \
-    '"EngineAssociation": "5.5"' \
+    '"EngineAssociation": "5.6"' \
     "the uproject pins the engine the scripts and refusals name" \
     tests/test_platform.py || failures=$((failures+1))
 
 mutate core/util/platform.py \
     'UE_ENGINE_VERSION = "5.7"' \
-    'UE_ENGINE_VERSION = "5.5"  # MUTATED: refusals name the old engine' \
+    'UE_ENGINE_VERSION = "5.6"  # MUTATED: refusals name the old engine' \
     "the platform refusals and install roots name the pinned engine" \
+    tests/test_platform.py || failures=$((failures+1))
+
+mutate ue/Source/FlightSimEditor.Target.cs \
+    'EngineIncludeOrderVersion.Unreal5_7' \
+    'EngineIncludeOrderVersion.Unreal5_6' \
+    "a Target.cs on another include order fails with the file named (Phase 3 A2)" \
+    tests/test_platform.py || failures=$((failures+1))
+
+mutate core/util/platform.py \
+    'UE_ENGINE_PATCH = "5.7.4"' \
+    'UE_ENGINE_PATCH = "5.6.1"  # MUTATED: the patch level names another engine' \
+    "the A1 patch level extends the pinned engine version (Phase 3 A2)" \
     tests/test_platform.py || failures=$((failures+1))
 
 mutate scripts/ue_preflight.ps1 \
     '$ueRoot = "C:\Program Files\Epic Games\UE_5.7"' \
-    '$ueRoot = "C:\Program Files\Epic Games\UE_5.5"' \
-    "a stale 5.5 install path in a script is caught by name" \
+    '$ueRoot = "C:\Program Files\Epic Games\UE_5.6"' \
+    "a stale (non-5.7) install path in a script is caught by name" \
     tests/test_platform.py || failures=$((failures+1))
 
 # Two-line targets on purpose (gotcha 28): the ini's comment block quotes

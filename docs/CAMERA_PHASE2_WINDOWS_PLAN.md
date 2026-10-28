@@ -79,7 +79,7 @@ Either way the property is checked, not assumed.
 
 ### The measurement, taken
 
-Taken on `examples/cameras_multi.yaml`, Windows, UE 5.5. A two-camera
+Taken on `examples/cameras_multi.yaml`, Windows, before the UE 5.7 pin. A two-camera
 run renders one commandlet pass per camera, so it is two host flights
 over one card — the measurement the paragraph above asks for, and it
 now runs on every multi-camera render rather than once by hand.
@@ -147,7 +147,7 @@ post-hoc relabelling.
   own 1.38 m signature instead of passing inside a tolerance sized for
   it. That bound is pinned by test in both directions.
 * **Measured, and both open questions closed.** On
-  `examples/cameras_terrain.yaml` (UE 5.5, 30 frames, two cameras):
+  `examples/cameras_terrain.yaml` (before the UE 5.7 pin, 30 frames, two cameras):
   `flight_agreement` reports **0.00 m** against its 0.5 m bound, where
   the pre-run solve reported 1.38 m against 25. P10 is closed, not
   bounded.
@@ -352,7 +352,7 @@ and what is untested off Windows.
   because none of it needs the engine.
 - **All C++ — W2, W3 (commandlet half), W1 (replay)** — can be written
   here but **cannot be compiled or run** without a Windows box with
-  UE 5.5 and the bridge built. Same honest boundary Phase 1 recorded.
+  UE 5.7 and the bridge built. Same honest boundary Phase 1 recorded.
   Every C++ change lands with the exact `build_ue.ps1` +
   `capture_windows.ps1` sequence needed to verify it, and nothing
   claims to be verified until that has been run.

@@ -44,7 +44,7 @@
 // does); the residual of that choice is at most relief * 7.7e-6 m.
 //
 // UNCOMPILED here (no engine in the build container): the ALandscape::Import
-// call is a consistency pin of this call site against the 5.5-5.7 signature
+// call is a consistency pin of this call site against the UE 5.7 signature
 // (the final layer-list argument left to its default), checked by the first
 // Windows compile; tests/test_ue_world_source.py pins the source.
 

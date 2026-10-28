@@ -35,6 +35,7 @@ from typing import Optional, Sequence
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.terrain.glo30 import LOCATIONS  # noqa: E402
+from core.util.platform import UE_ENGINE_VERSION  # noqa: E402
 from core.terrain.ground import TerrainGround  # noqa: E402
 from core.terrain.heightfield import Heightfield  # noqa: E402
 from experiments.gate5_ue_parity import reference_spec, write_run_card  # noqa: E402
@@ -52,9 +53,9 @@ THRESHOLDS = {"go_fps_mean": 30.0, "go_frame_ms_p95": 50.0,
 #: NSApplication and works in a locked session -- it is what every
 #: commandlet invocation in this repo already uses.
 EDITOR_WINDOWED = Path(
-    "/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor")
+    f"/Users/Shared/Epic Games/UE_{UE_ENGINE_VERSION}/Engine/Binaries/Mac/UnrealEditor")
 EDITOR_OFFSCREEN = Path(
-    "/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+    f"/Users/Shared/Epic Games/UE_{UE_ENGINE_VERSION}/Engine/Binaries/Mac/UnrealEditor-Cmd")
 PROJECT = Path(__file__).resolve().parents[1] / "ue" / "FlightSim.uproject"
 MAP_URL = "/Engine/Maps/Entry?game=/Script/FlightSimBridge.FlightSimInteractiveMode"
 

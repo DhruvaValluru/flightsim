@@ -33,7 +33,7 @@ here was measured on the pinned build (JSBSim 1.2.4, Python 3.9.6, macOS).
 | V24 | u_num per run | **PASS**. dt/2 twin, c172p, 1 s: u_num altitude 3.5e-5 m, TAS 2.0e-3 kt, heading 6.7e-3 deg. The 30 s example: altitude difference 0.106 m → u_num 0.318 m (F_s 3, p 1; consistent with V9's 0.098 m at 60/120 Hz); u_val = u_num per SRQ with u_input empty; u_D absent per run, stated in the block's form (ASME V&V 20) | R1, tests/test_uncertainty.py; `uncertainty_present` |
 
 Gate 5 (host parity) is **BLOCKED**: the Unreal host does not build on this
-machine because the installed Xcode is outside UE 5.5's supported range. Not
+machine because the installed Xcode is outside the supported range of the engine pinned before UE 5.7. Not
 attempted, not failed.
 
 ### 1b. Gate 3b: the physics layers' null ladder
