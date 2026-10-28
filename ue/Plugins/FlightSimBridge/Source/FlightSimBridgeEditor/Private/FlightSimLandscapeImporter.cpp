@@ -328,7 +328,7 @@ ALandscape* UFlightSimLandscapeImporter::ImportLandscape(UWorld* World, const FS
 	// weights, alpha-map type): weight-blended (the layers sum to 255).
 	// UE 5.7 declares the trailing edit-layer list with no default
 	// (LandscapeProxy.h, read on the owner's machine): passed empty, the
-	// import writes the base layer as 5.5's defaulted call did.
+	// import writes the base layer as the older defaulted call did.
 	Landscape->Import(FGuid::NewGuid(), 0, 0, Resolution - 1, Resolution - 1,
 	                  static_cast<int32>(Sections), static_cast<int32>(Quads),
 	                  HeightDataPerLayer, nullptr, MaterialLayerDataPerLayer,

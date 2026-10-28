@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the Unreal host with a toolchain UE 5.7 accepts (the Xcode range
-# below was measured on 5.5; 5.7's has not been checked on a Mac).
+# below predates the 5.7 pin; 5.7's has not been checked on a Mac).
 #
 # DEVELOPER_DIR rather than `sudo xcode-select`: the override is per process, so
 # the machine's default Xcode is untouched and no admin password is needed.

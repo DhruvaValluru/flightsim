@@ -31,7 +31,7 @@ companion is `tasks/phase3_checklist.md`.
 
 | # | Symptom | Cause, checked in this tree | Fixed by |
 |---|---|---|---|
-| R1 | The build fails on a 5.5 machine | `ue/Source/FlightSim.Target.cs:9` and `FlightSimEditor.Target.cs:9` set `EngineIncludeOrderVersion.Unreal5_7`, which 5.5 does not have. Nothing on the reviewer's machines has compiled against 5.7. A1 keeps 5.7: those machines install 5.7.4 | A1–A3 |
+| R1 | The build fails on a machine without 5.7 | `ue/Source/FlightSim.Target.cs:9` and `FlightSimEditor.Target.cs:9` set `EngineIncludeOrderVersion.Unreal5_7`, which older engines do not have. Nothing on the reviewer's machines has compiled against 5.7. A1 keeps 5.7: those machines install 5.7.4 | A1–A3 |
 | R2 | The aircraft mesh had to be imported by hand | No automatic import: `flightsim/capture.py:337` and `webapp/generate.py:137` refuse and tell the user to run `scripts/import_aircraft.py` | A7 |
 | R3 | Host flight had to be skipped with `--no-host-flight` | Cause in the review document. `flightsim/capture.py:1263` offers the flag in its refusal text | A8 |
 | R4 | The September Phase 1 binary drew the frames | Nothing checks that the engine binary was built from the current source | A4 |
@@ -108,12 +108,12 @@ because each one is a "manual intervention" the brief forbids.
 - **Files:** `docs/TOOLCHAIN.md` (new)
 - **Decided 2026-10-27 by the owner (Dhruva Valluru): the engine is UE 5.7, patch
   5.7.4, for Phase 3.** This confirms the 2026-10-19 decision (render quality).
-  5.5 is not a fallback: the code is not reverted or version-guarded for it.
+  No older engine is a fallback: the code is not reverted or version-guarded.
   - 5.7.4 is the build the owner's machine already measured on (cited in
     `core/capture/verify.py` and `tests/test_mask_silhouette_hull.py`).
   - The condition that comes with keeping 5.7: all three machines install the
-    same 5.7.4 before any other A-step. The review machines that had only 5.5
-    install 5.7.4; their 5.5 builds are no longer used.
+    same 5.7.4 before any other A-step. The review machines install 5.7.4;
+    builds on older engines are no longer used.
   - **Not offered:** building on both versions at once, which doubles the test
     surface.
 - **Do:** record per machine the exact engine build
@@ -132,7 +132,7 @@ because each one is a "manual intervention" the brief forbids.
   already do in this tree. Add `UE_ENGINE_PATCH = "5.7.4"`.
 - **Keep** the 5.7-only changes made in October (the C4883 silencing on the
   commandlet's `Main`, `GetMaterialResource(EShaderPlatform)`, and any other
-  5.7 API call). No 5.5 guard is added.
+  5.7 API call). No older-engine guard is added.
 - **Add a source test:** the `IncludeOrderVersion` constant names `Unreal5_7`. A
   drifted pin becomes a CI failure, not a Windows surprise.
 - **Verify:** `pytest -q tests/test_platform.py` passes. Hand-editing one Target.cs
@@ -323,7 +323,7 @@ No engine-side Phase 3 work starts before Gate A.
   `core/sky/plan.py`, `docs/VALIDITY.md`
 - **Do:**
   - Re-derive the palette and exposure biases from probe renders on 5.7.4. The
-    5.5-era numbers are history, not a target.
+    numbers from before the 5.7 pin are history, not a target.
   - Labels do not depend on the look, so this cannot break A11–A12.
 - **Verify:** Windows. `gate6_visual.py` (measure and beauty) passes,
   `gate10_render_repro.py` gives a bounded verdict, and the A12 fixture still passes.
@@ -650,7 +650,7 @@ recorded in `docs/PHASE3_LOG.md`.
   The component mechanism in C supports it later, but the brief asks for payload and
   optional gear only. The A-4 would also need an articulated export first.
 - **Global terrain, worldwide imagery and large-area streaming** (brief §2).
-- **Building on two engine versions at once,** or any 5.5 fallback.
+- **Building on two engine versions at once,** or any older-engine fallback.
 - **The two overlapping weather paths** (NEXT.md): left as they are unless they
   break the demo run.
 

@@ -326,7 +326,7 @@ committed example carries a `traffic` block.
   the list (`objects[]`, read by `FFlightSimScenarioWorld::ReadCard`); the
   commandlet sets each labelled component's
   `SetRenderCustomDepth(true)` + `SetCustomDepthStencilValue(int_id)`
-  (both `UPrimitiveComponent` API, 5.5 and 5.7) and refuses
+  (both `UPrimitiveComponent` API on 5.7) and refuses
   (`annotation.identity`) a scene needing more than 255. This requires
   `r.CustomDepth=3` under `[/Script/Engine.RendererSettings]` in
   `ue/Config/DefaultEngine.ini`, which today carries NO renderer settings

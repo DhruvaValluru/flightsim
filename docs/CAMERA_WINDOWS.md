@@ -11,8 +11,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 ```
 
 That gets you everything except pixels. For pixels you also need Unreal
-Engine 5.7 (Phase 2 pin; the measurements below were taken on 5.5 and
-are not re-measured on 5.7) and a built bridge:
+Engine 5.7 (Phase 2 pin; the measurements below were taken before the
+5.7 pin and are not re-measured on 5.7) and a built bridge:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\ue_preflight.ps1   # names anything missing
@@ -240,7 +240,7 @@ tolerance sized for it.
 `--no-host-flight` keeps the old behaviour deliberately. It is one
 commandlet pass cheaper, and the manifest records which you chose.
 
-**Measured, `examples\cameras_terrain.yaml`, UE 5.5:** the manifest's
+**Measured, `examples\cameras_terrain.yaml`, before the UE 5.7 pin (re-measure on 5.7):** the manifest's
 aircraft track matches the host's own recorded flight to **0.00 m**
 (tolerance 0.5), against **1.38 m** when the poses were solved over the
 headless pre-run. And `host_determinism` compared **three** flights of
@@ -327,7 +327,7 @@ engine applied differs from the solved one.
   grades it at 0.5 m like the CLI's. **Not yet measured on Windows** —
   the CLI path is (0.00 m); this one has been exercised only by test.
 * ~~The 0.5 m host-solve bound has not been measured on Windows.~~
-  **Measured: 0.00 m**, on `examples\cameras_terrain.yaml`, UE 5.5,
+  **Measured: 0.00 m**, on `examples\cameras_terrain.yaml`, before the UE 5.7 pin,
   30 frames across two cameras. The bound was reasoned from the
   interpolation residual and is not being approached.
 * Segmentation masks, bounding boxes, domain randomization and batch

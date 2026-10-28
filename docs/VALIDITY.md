@@ -110,7 +110,7 @@ deterministic answer every tick.
 
 **Phase 5: the two hosts have now been compared, and they agree.** The build
 constraint that blocked this is a compiler-version check and nothing more —
-UE 5.5 accepts Xcode 15.2–16.9, macOS 26 ships Xcode 26, and a second Xcode
+the engine pinned before UE 5.7 accepted Xcode 15.2–16.9, macOS 26 ships Xcode 26, and a second Xcode
 installed alongside it and selected per process through `DEVELOPER_DIR` is
 enough. No `sudo`, no `xcode-select`, and the machine's default toolchain is
 untouched. macOS 26 also refuses to *launch* Xcode 16.4's GUI, which is

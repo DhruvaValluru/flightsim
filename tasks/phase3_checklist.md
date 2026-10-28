@@ -27,7 +27,7 @@ sitting 0.4 m from its label (it was ~25 m).
 
 | What happened on Windows | Box that fixes it |
 |---|---|
-| Build failed on 5.5 (the code names a 5.7-only setting); fixed by installing 5.7 | A1, A2, A3 |
+| Build failed without 5.7 (the code names a 5.7-only setting); fixed by installing 5.7 | A1, A2, A3 |
 | Had to import the aircraft by hand | A7 |
 | Had to skip host flight with `--no-host-flight` | A8 |
 | An old September program drew the pictures | A4 |
@@ -42,7 +42,7 @@ sitting 0.4 m from its label (it was ~25 m).
 
 - [ ] **A1 · Install UE 5.7 (5.7.4) on all three computers** — *decided
   2026-10-27: 5.7*
-  - The engine is **5.7**, patch **5.7.4**, on every computer. No going back to 5.5.
+  - The engine is **5.7**, patch **5.7.4**, on every computer. No going back to an older engine.
   - The review computers install 5.7.4 before any other A box.
   - Check: `docs/TOOLCHAIN.md` has three rows that all say 5.7.4 (the dated
     decision line is already there).
@@ -221,7 +221,7 @@ Two rules to keep in mind:
 
 - Separate mask colours for ailerons, elevator, rudder and flaps (control surfaces).
 - World-wide terrain.
-- Supporting two engine versions at once, or a 5.5 fallback.
+- Supporting two engine versions at once, or an older-engine fallback.
 
 ## Decisions waiting on you or Shashank
 

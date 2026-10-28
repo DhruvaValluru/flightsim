@@ -7,8 +7,8 @@ every machine that builds or renders FlightSim.
 
 **2026-10-27 — Dhruva Valluru (owner): the engine is Unreal Engine 5.7, patch
 5.7.4, on all three machines.** This confirms the 2026-10-19 decision (5.7, for
-render quality). There is no 5.5 fallback and no building on two versions at
-once. A machine that has only 5.5 installs 5.7.4 before any other A-step.
+render quality). There is no fallback to an older engine and no building on
+two versions at once. A machine without 5.7.4 installs it before any other A-step.
 
 The project already names 5.7 everywhere it pins the engine:
 `ue/FlightSim.uproject` (`EngineAssociation`), `ue/Source/FlightSim.Target.cs`

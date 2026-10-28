@@ -20,7 +20,7 @@ and calibration done by probe render rather than theory (NEXT.md gotchas
 
 | Area | Current implementation | Where |
 |---|---|---|
-| Engine | UE 5.7 (written when the pin was 5.5), render via `UnrealEditor-Cmd` commandlet into a `USceneCaptureComponent2D`, `SCS_FinalColorLDR`, RGBA8 sRGB target | `FlightSimRenderCommandlet.cpp:782-808` |
+| Engine | UE 5.7, render via `UnrealEditor-Cmd` commandlet into a `USceneCaptureComponent2D`, `SCS_FinalColorLDR`, RGBA8 sRGB target | `FlightSimRenderCommandlet.cpp:782-808` |
 | Resolution / FOV | 960 px wide by default, FOV 55° (visual) | `FlightSimRenderCommandlet.cpp:355, 797` |
 | Engine rendering config | **None.** `DefaultEngine.ini` only sets the fixed 120 Hz tick. Lumen, Nanite, Virtual Shadow Maps, TSR, and physical light units are never set explicitly. | `ue/Config/DefaultEngine.ini` |
 | Sun | One directional light, intensity **8.0** (an arbitrary value, not physical lux), rotation hard-coded per shot or passed in as `-sun-elev/-sun-azim`. Not derived from date, time, or location. | `FlightSimVisualScene.cpp:98-114`, `RenderCommandlet.cpp:509-519`, `webapp/runs.py:1044` |
@@ -150,7 +150,7 @@ calibrate materials under the old exposure.
    settings for the gates, *beauty* enables everything above.
 3. TSR and Lumen need history. Render N warm-up captures per cut, not just
    the two discarded today, and keep `bAlwaysPersistRenderingState`.
-   Verify Lumen actually runs inside the scene capture on 5.5 by
+   Verify Lumen actually runs inside the scene capture on 5.7 by
    A/B probe; if not, fall back to rendering the game viewport with
    `-RenderOffScreen` and grabbing the backbuffer (interactive mode
    already owns a viewport).
@@ -422,7 +422,7 @@ V2, V3, and V6 alone close most of the perceived gap.
 `FlightSimRenderCommandlet.cpp` (measure = today's behaviour
 byte-for-byte), a 1920×1080 default, and configurable warm-up captures.
 Prove by A/B probe whether Lumen and TSR actually run inside the
-`USceneCaptureComponent2D` on 5.5; if not, implement the viewport-grab
+`USceneCaptureComponent2D` on 5.7; if not, implement the viewport-grab
 fallback for beauty only. Write every cvar into `render.json`. Add the
 silhouette-aliasing clause and its control to the gate script."
 

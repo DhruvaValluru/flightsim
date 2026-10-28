@@ -638,10 +638,10 @@ def test_the_plugin_includes_only_the_json_headers_the_engine_ships():
 
 def test_the_build_targets_include_order_is_the_pinned_engines():
     """The two Target.cs files state an EngineIncludeOrderVersion; it
-    was left at Unreal5_5 when the pin moved to 5.7, and UnrealBuildTool
-    then compiles the project against the older include order (a warning
-    on every build, and the header shims the engine kept for 5.5 rather
-    than 5.7's). The enum name is built from the one pinned version,
+    was left at an older UnrealX_Y when the pin moved to 5.7, and
+    UnrealBuildTool then compiles the project against the older include
+    order (a warning on every build, and the engine's header shims for
+    the older version rather than 5.7's). The enum name is built from the one pinned version,
     core.util.platform.UE_ENGINE_VERSION, so this moves with the pin."""
     from core.util.platform import UE_ENGINE_VERSION
 
@@ -649,7 +649,8 @@ def test_the_build_targets_include_order_is_the_pinned_engines():
     for name in ("FlightSim.Target.cs", "FlightSimEditor.Target.cs"):
         text = (REPO / "ue/Source" / name).read_text(encoding="utf-8")
         assert f"IncludeOrderVersion = {wanted};" in text, f"{name} does not pin {wanted}"
-        assert "Unreal5_5" not in text, f"{name} still says Unreal5_5"
+        others = set(re.findall(r"EngineIncludeOrderVersion\.(Unreal\d+_\d+)", text))
+        assert others == {wanted.rsplit(".", 1)[1]}, f"{name} names {sorted(others)}"
 
 
 # -- I6 (gap S3): the ground-truth passes, as C++ text (UNCOMPILED here) ------

@@ -40,7 +40,7 @@ REPO="$PWD"
 JSBSIM_VERSION="v1.2.4"
 # The engine this vendoring targets (Phase 2 pin, brainstorm 9.8); recorded
 # in VENDORED.json, not linked by the native library. The patches below were
-# measured on 5.5 and must be re-checked on 5.7 (NEXT.md gotcha 32).
+# measured before the 5.7 pin and must be re-checked on 5.7 (NEXT.md gotcha 32).
 UE_ENGINE_TARGET="5.7"
 UPSTREAM="https://github.com/JSBSim-Team/jsbsim.git"
 WORK="${TMPDIR:-/tmp}/flightsim-vendor"

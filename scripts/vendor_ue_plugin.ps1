@@ -27,7 +27,7 @@ $jsbsimTag = "v1.2.4"
 # The engine this vendoring targets (Phase 2 pin, brainstorm 9.8). The
 # native library does not link the engine; the value is RECORDED in
 # VENDORED.json so the preflight can say which engine the plugin was
-# last vendored and measured against. Measured on 5.5 before Phase 2;
+# last vendored and measured against. Measured before the 5.7 pin;
 # the three patched upstream bugs must be re-checked on 5.7 (NEXT.md
 # gotcha 32, scripts/check_bridge_api.sh).
 $ueEngineTarget = "5.7"
@@ -142,8 +142,8 @@ if ($LASTEXITCODE -ne 0) {
     }
     # MSB8020 means the v143 toolset is absent -- measured on a machine
     # with only Visual Studio 2026 (toolset v180) installed. v143 is not
-    # a preference here: UE 5.5 (measured) was built against VS2022 (and 5.7,
-    # the Phase 2 pin, still lists v143), so the
+    # a preference here: UE 5.7, the Phase 2 pin, builds against VS2022
+    # (it still lists v143), so the
     # engine build needs it too. Name the fix rather than the error code.
     if ($errText -match "MSB8020") {
         Write-Host ""

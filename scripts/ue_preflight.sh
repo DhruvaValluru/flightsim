@@ -89,7 +89,7 @@ if [ -x scripts/check_bridge_api.sh ]; then
 fi
 
 # -- the toolchain ----------------------------------------------------------
-# UE 5.5 (measured) accepted Xcode 15.2 through 16.9 and hard-refused anything else (the
+# Measured before the UE 5.7 pin: Xcode 15.2 through 16.9 accepted, anything else hard-refused (the
 # range 5.7, the Phase 2 pin, accepts has NOT been checked on a Mac; UBT names
 # it itself if this range is wrong, and macOS is not the tested path); UBT
 # reports this itself as "Found Sdk Version=..., MaxRequired=16.9.0". macOS 26
@@ -117,7 +117,7 @@ for candidate in "${DEVELOPER_DIR:-}" \
 done
 
 if [ -z "$USABLE" ]; then
-    fail "xcode (build toolchain)" "no Xcode in the 15.2-16.9 range measured for UE 5.5 (5.7's range unchecked)"
+    fail "xcode (build toolchain)" "no Xcode in the 15.2-16.9 range measured before the UE 5.7 pin (5.7's range unchecked)"
     cat <<'EOF'
 
   Install Xcode 16.x alongside the system one -- it does not need to become the
@@ -125,9 +125,9 @@ if [ -z "$USABLE" ]; then
 
       export DEVELOPER_DIR=/Applications/Xcode_16.app/Contents/Developer
 
-  A newer engine is NOT the easy way out: the plugin states "compatible with
-  engine versions UE5.6 - UE5.0", and UE5.6 predates Xcode 26, so it almost
-  certainly rejects it too.
+  The pinned UE 5.7 is not checked on a Mac either: the plugin states
+  "compatible with engine versions UE5.6 - UE5.0", and 5.7's Xcode range has
+  not been measured.
 
 EOF
 else
