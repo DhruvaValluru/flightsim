@@ -51,3 +51,17 @@ def _measured_render_quality(monkeypatch):
     # delete these themselves.
     monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "measure")
     monkeypatch.setenv("FLIGHTSIM_SKY", "legacy")
+
+
+@pytest.fixture(autouse=True)
+def _engine_binary_current(request, monkeypatch):
+    # Phase 3 A3/A4: a render refuses a wrong engine or an outdated plugin
+    # binary (core/util/build_stamp.py). No test machine has a built
+    # engine, so a test that FAKES the engine present (ue_available ->
+    # True) also gets a current binary; tests/test_build_stamp.py tests
+    # the checks themselves and keeps the real ones.
+    if request.module.__name__.rsplit(".", 1)[-1] == "test_build_stamp":
+        return
+    import core.util.build_stamp as build_stamp
+
+    monkeypatch.setattr(build_stamp, "render_refusal", lambda *a, **k: None)

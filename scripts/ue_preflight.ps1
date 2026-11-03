@@ -33,29 +33,23 @@ Write-Host "Unreal host preflight (Windows)"
 Write-Host ""
 
 # -- engine ---------------------------------------------------------------
+# The pinned patch (Phase 3 A1, docs/TOOLCHAIN.md; equal to UE_ENGINE_PATCH
+# in core/util/platform.py, held by tests/test_platform.py). Only UE_ROOT or
+# the pinned install path: no scan for another version (A3).
+$pinned = "5.7.4"
 $ueRoot = $env:UE_ROOT
-if (-not $ueRoot) {
-    $ueRoot = "C:\Program Files\Epic Games\UE_5.7"
-    if (-not (Test-Path $ueRoot)) {
-        $found = Get-ChildItem "C:\Program Files\Epic Games" -Directory `
-            -Filter "UE_5.*" -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending | Select-Object -First 1
-        if ($found) { $ueRoot = $found.FullName }
-    }
-}
+if (-not $ueRoot) { $ueRoot = "C:\Program Files\Epic Games\UE_5.7" }
 $versionFile = Join-Path $ueRoot "Engine\Build\Build.version"
 if (Test-Path $versionFile) {
     $v = Get-Content $versionFile -Raw | ConvertFrom-Json
     $engine = "$($v.MajorVersion).$($v.MinorVersion).$($v.PatchVersion)"
-    Say "engine" "UE $engine at $ueRoot"
-    if ("$($v.MajorVersion).$($v.MinorVersion)" -ne "5.7") {
-        Say "" ("note: the project pins EngineAssociation 5.7 (Phase 2, " +
-                "brainstorm 9.8); the vendored plugin states UE5.0-5.6 " +
-                "compatibility and is not yet re-measured on 5.7, so $engine may " +
-                "work but is not the pinned engine")
+    if ($engine -eq $pinned) {
+        Say "engine" "UE $engine (changelist $($v.Changelist)) at $ueRoot"
+    } else {
+        Fail "engine" "engine.version_mismatch: found $engine, pinned $pinned (at $ueRoot)"
     }
 } else {
-    Fail "engine" "not found at $ueRoot (install UE 5.7 from the Epic Games Launcher, or set UE_ROOT)"
+    Fail "engine" "not found at $ueRoot (install UE $pinned from the Epic Games Launcher, or set UE_ROOT)"
 }
 $editor = Join-Path $ueRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
 if (-not (Test-Path $editor)) {
@@ -172,6 +166,17 @@ if ($bridgeSources.Count -gt 0) {
 $bridgeDll = Join-Path $repo "ue\Plugins\FlightSimBridge\Binaries\Win64\UnrealEditor-FlightSimBridge.dll"
 if (Test-Path $bridgeDll) {
     Say "bridge binary" "built"
+    # Phase 3 A4: built from TODAY's source, against this engine.
+    $stampPy = Join-Path $repo ".venv\Scripts\python.exe"
+    if (Test-Path $stampPy) {
+        Push-Location $repo
+        try { $stampLine = Probe $stampPy @("-m", "core.util.build_stamp", "check", "--ue-root", $ueRoot) }
+        finally { Pop-Location }
+        if ($LASTEXITCODE -eq 0) { Say "build stamp" "current" }
+        else { Fail "build stamp" "$stampLine" }
+    } else {
+        Fail "build stamp" "no .venv to check it with -- run scripts\setup.ps1 first"
+    }
 } else {
     Fail "bridge binary" "not built yet -- run scripts\build_ue.ps1"
 }

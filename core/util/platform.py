@@ -198,8 +198,10 @@ def ue_platform_refusal() -> str:
 UE_PLATFORM_REFUSAL = _UE_REFUSAL[os_name()]
 
 #: Default engine install roots, checked AFTER the UE_ROOT env override.
-#: Windows scans for any UE_5.* so an install other than 5.7 is still found and
-#: preflight can name the version mismatch instead of "not found".
+#: Only the pinned install: Phase 3 A3 removed the "newest UE_5.* found"
+#: scan, which is how the review's 5.5 machine built against the wrong
+#: engine (R1). Another engine is reached only by naming it in UE_ROOT,
+#: and then core/util/build_stamp.py refuses it as engine.version_mismatch.
 _UE_ROOT_DEFAULTS = {
     "mac": (f"/Users/Shared/Epic Games/UE_{UE_ENGINE_VERSION}",),
     "windows": (rf"C:\Program Files\Epic Games\UE_{UE_ENGINE_VERSION}",),
@@ -208,23 +210,15 @@ _UE_ROOT_DEFAULTS = {
 
 
 def find_ue_root() -> Optional[Path]:
-    """The engine install to use: UE_ROOT env override, the per-OS
-    default, else (Windows) the newest Epic Games/UE_5.* present. When
-    nothing exists the default path is still returned on mac/Windows so
-    refusals can NAME the expected location; None only on Linux, which
-    has no UE half at all."""
+    """The engine install to use: the UE_ROOT env override, else the
+    per-OS pinned install path -- never a scan for some other version
+    (Phase 3 A3). The default path is returned even when it does not
+    exist, so refusals can NAME the expected location; None only on
+    Linux, which has no UE half at all."""
     override = os.environ.get("UE_ROOT", "").strip()
     if override:
         return Path(override)
     defaults = _UE_ROOT_DEFAULTS[os_name()]
-    for candidate in defaults:
-        if Path(candidate).is_dir():
-            return Path(candidate)
-    if os_name() == "windows":
-        epic = Path(r"C:\Program Files\Epic Games")
-        versions = sorted(epic.glob("UE_5.*"), reverse=True)
-        if versions:
-            return versions[0]
     return Path(defaults[0]) if defaults else None
 
 

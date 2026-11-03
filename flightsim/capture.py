@@ -779,7 +779,19 @@ def _run(args: argparse.Namespace) -> int:
         # manifest is the deliverable, exactly as before.
         if ue_available():
             from assets_pipeline.importer import is_imported
+            from core.util.build_stamp import render_refusal
             from webapp.runs import refuse_placeholder_mesh
+
+            # Phase 3 A3/A4: the pinned engine and a binary built from
+            # today's source, before any flight -- an old DLL drew the
+            # review's frames (R4) and nothing said so.
+            engine_refusal = render_refusal(REPO)
+            if engine_refusal is not None:
+                print(f"REFUSED -- {engine_refusal['constraint']}: "
+                      f"{engine_refusal['message'].split(': ', 1)[1]}")
+                print("(--render asked for pixels from an engine half that "
+                      "cannot be trusted; refused before any flight)")
+                return 2
 
             aircraft = str(spec.aircraft.value)
             mesh_manifest = _mesh_manifest_path(spec)

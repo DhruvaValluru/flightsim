@@ -52,9 +52,14 @@ sitting 0.4 m from its label (it was ~25 m).
 - [ ] **A3 · The build refuses the wrong engine** 🪟
   - Check: pointing it at another version stops with `engine.version_mismatch`.
   - Check: the right version builds with zero errors.
+  - *Code landed 2026-11-03 (`core/util/build_stamp.py`, `scripts/build_ue.ps1`,
+    `scripts/ue_preflight.ps1`; container test `tests/test_build_stamp.py`).
+    Tick after the two Windows checks above.*
 - [ ] **A4 · An old engine program can't draw the pictures**
   - Check: after changing one `.cpp` without rebuilding, a render stops with
     `engine.binary_stale`.
+  - *Code landed 2026-11-03; container test `pytest -q -k binary_stale`
+    passes. Tick after the Windows check (edit a `.cpp`, render, see the refusal).*
 - [ ] **A5 · JSBSim plugin set up again on this version** 🪟
   - Check: `scripts/check_bridge_api.sh` passes and the build passes.
   - Check: each of its six patches is marked needed or not needed.
@@ -227,8 +232,13 @@ Two rules to keep in mind:
 
 - [x] **Engine:** 5.7 (5.7.4) on all three computers. *Decided 2026-10-27 by the
   owner.*
-- [ ] Which payload the A-4 carries by default
-- [ ] Which Chinese aircraft, or cut it
-- [ ] Storm weather on in the demo, or off?
-- [ ] Is typing the Google tiles key once acceptable?
-- [ ] Keep control surfaces out of Phase 3?
+- [x] **A-4 payload:** a centreline drop tank on STA3 plus a matched pair on
+  STA2/STA4; STA3 alone if C2 shows STA4 does not decode like STA2. *Decided
+  2026-11-03 by Shashank (docs/PHASE3_DECISIONS.md).*
+- [x] **Chinese aircraft:** the J-11A (GPL-2.0, JSBSim FDM), cut if it cannot
+  trim at the default run. *Decided 2026-11-03 by Shashank.*
+- [x] **Storm weather in the demo:** stays on (CLAUDE.md); revisited with Dhruva
+  only if Gate A runs fail on it. *Decided 2026-11-03 by Shashank.*
+- [x] **Google tiles key typed once in Settings:** acceptable. *Decided
+  2026-11-03 by Shashank.*
+- [x] **Control surfaces:** out of Phase 3. *Decided 2026-11-03 by Shashank.*
