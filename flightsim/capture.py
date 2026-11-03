@@ -787,7 +787,8 @@ def _run(args: argparse.Namespace) -> int:
             # review's frames (R4) and nothing said so.
             engine_refusal = render_refusal(REPO)
             if engine_refusal is not None:
-                print(f"REFUSED -- {engine_refusal['message']}")
+                print(f"REFUSED -- {engine_refusal['constraint']}: "
+                      f"{engine_refusal['message'].split(': ', 1)[1]}")
                 print("(--render asked for pixels from an engine half that "
                       "cannot be trusted; refused before any flight)")
                 return 2
