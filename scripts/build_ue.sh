@@ -29,3 +29,11 @@ TARGET="${1:-FlightSimEditor}"
 echo "building $TARGET with $("$DEVELOPER_DIR/usr/bin/xcodebuild" -version | head -1)"
 "$UE_ROOT/Engine/Build/BatchFiles/Mac/Build.sh" "$TARGET" Mac Development \
     -project="$PWD/ue/FlightSim.uproject" -waitmutex
+
+# Phase 3 A4: the stamp every render checks (engine.binary_stale), written
+# only after a clean editor build. Refuses (exit 2) an engine that is not
+# the pinned patch (A3, engine.version_mismatch).
+if [ "$TARGET" = "FlightSimEditor" ]; then
+  PY="python3"; [ -x .venv/bin/python ] && PY=".venv/bin/python"
+  "$PY" -m core.util.build_stamp write --ue-root "$UE_ROOT"
+fi

@@ -2636,6 +2636,15 @@ class RunManager:
             # happened or remains available on this OS.
             return {"refused": ue_platform_refusal(),
                     "constraint": "ue.platform"}
+        if not headless:
+            # Phase 3 A3/A4: the pinned engine, and a plugin binary built
+            # from today's source -- refused by name before any flight.
+            from core.util.build_stamp import render_refusal
+
+            engine_refusal = render_refusal()
+            if engine_refusal is not None:
+                return {"refused": engine_refusal["message"],
+                        "constraint": engine_refusal["constraint"]}
         # A spec with cameras on a machine without the engine is CAPTURED
         # headlessly instead of refused: the manifest, every frame's data,
         # an engine-free picture of every frame with its 2-D / 3-D boxes,

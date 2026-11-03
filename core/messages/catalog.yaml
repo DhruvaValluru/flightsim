@@ -183,6 +183,12 @@ ffmpeg.missing:
 ue.platform:
   sentence: "Rendered pictures need Windows with Unreal Engine and the bridge built; this machine has no renderer. Everything except the pixels was produced."
   hint: "Run the preflight script on a Windows machine with the engine installed."
+engine.version_mismatch:
+  sentence: "This machine's Unreal Engine is not the version the project is pinned to ({actual} installed), so nothing is built or rendered with it."
+  hint: "Install the pinned engine version from the Epic Games Launcher; the launcher names it."
+engine.binary_stale:
+  sentence: "The renderer on this machine was built from older code than the code it would run with, so its pictures could not be trusted."
+  hint: "Rebuild the renderer; the launcher does this by itself when it starts."
 aircraft.mesh:
   sentence: "This aircraft has real flight physics but no licensed 3-D model that can be rendered."
   hint: "Choose an aircraft with a model, or import one."
