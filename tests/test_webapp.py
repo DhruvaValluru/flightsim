@@ -7,6 +7,8 @@ showcase machinery already covered by its own gates.
 
 from pathlib import Path
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -1624,3 +1626,142 @@ def test_a_stated_storm_distance_places_the_cell_there_on_the_heading():
     assert event_ahead_m(plain) is None
     north, east = severe_event_centre(plain, {}, 3.0)
     assert math.hypot(north, east) < 200.0   # 45 % of a 3-second run: inside the shaft
+
+
+# -- environment presets (Phase 3 D4) ---------------------------------------
+# The page's two-option picker is a structured ``environment`` field on
+# POST /compile, applied as USER edits before the scene-setting planner.
+
+def _stub_bake(terrain_dir: Path, key: str) -> None:
+    """A whole-looking bake (.r16 + .json) so pick_scene earns the scene
+    on a machine that never baked it; the picker reads no sample."""
+    terrain_dir.mkdir(parents=True, exist_ok=True)
+    (terrain_dir / f"{key}.r16").write_bytes(b"\0\0")
+    (terrain_dir / f"{key}.json").write_text("{}", encoding="utf-8")
+
+
+def _compile_preset(client, environment, prompt="fly the c172p at 2500 m"):
+    from core.scenario.spec import ScenarioSpec
+
+    response = client.post("/compile", json={
+        "prompt": prompt, "compiler": "regex", "environment": environment})
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    return payload, ScenarioSpec.from_dict(payload["spec"]["dict"])
+
+
+def _assert_preset(payload, spec, surface, key, time_of_day, month,
+                   monkeypatch, tmp_path):
+    from core.nl.llm_compiler import LOCATION_TERRAIN_ELEVATION_M
+    from core.terrain.glo30 import LOCATIONS
+    from webapp.runs import ENVIRONMENT_PRESET_FROM, drape_month
+
+    assert str(spec.surface.value) == surface
+    assert str(spec.surface.source) == "user"
+    assert ENVIRONMENT_PRESET_FROM in spec.surface.frm
+    assert float(spec.latitude.value) == LOCATIONS[key].origin_lat
+    assert float(spec.longitude.value) == LOCATIONS[key].origin_lon
+    assert str(spec.latitude.source) == "user"
+    assert float(spec.terrain_elevation.value) == \
+        LOCATION_TERRAIN_ELEVATION_M[key]
+    assert str(spec.time_of_day.value) == time_of_day
+    assert str(spec.time_of_day.source) == "user"
+    # The season: the drape's snow month is the preset's date, and the
+    # sky plan accepts the clock (no time_of_day violation in the verdict).
+    assert drape_month(spec) == month
+    assert "time_of_day" not in json.dumps(payload["validation"])
+    # The scene key the rule stages for that surface is the preset's.
+    assert runs_module.SCENE_SETTING_BAKES[surface] == key
+    monkeypatch.setattr(runs_module, "TERRAIN_DIR", tmp_path / "terrain")
+    _stub_bake(tmp_path / "terrain", key)
+    assert pick_scene(spec)["key"] == key
+    # The table row carries the picker's provenance.
+    row = next(f for f in payload["spec"]["fields"] if f["name"] == "surface")
+    assert row["source"] == "user" and ENVIRONMENT_PRESET_FROM in row["from"]
+
+
+def test_environment_preset_desert_stages_grand_canyon(client, monkeypatch,
+                                                       tmp_path):
+    """"Desert" fixes the Grand Canyon origin, surface desert, a July noon
+    sun and season, as user edits the planner leaves alone."""
+    payload, spec = _compile_preset(client, "desert")
+    _assert_preset(payload, spec, "desert", "grand_canyon",
+                   "2026-07-15T12:00", 7, monkeypatch, tmp_path)
+    # /run applies the planners again: the user-chosen place is kept.
+    runs_module.plan_scene_setting(spec)
+    assert str(spec.latitude.source) == "user"
+
+
+def test_environment_preset_forest_stages_yosemite(client, monkeypatch,
+                                                   tmp_path):
+    """"Forest" fixes the Yosemite origin, surface forest, a June morning."""
+    payload, spec = _compile_preset(client, "forest")
+    _assert_preset(payload, spec, "forest", "yosemite",
+                   "2026-06-21T10:00", 6, monkeypatch, tmp_path)
+
+
+def test_environment_preset_unknown_is_400(client):
+    """An unknown preset is refused by name, like an out-of-range clip."""
+    refused = client.post("/compile", json={
+        "prompt": "fly the 747", "compiler": "regex", "environment": "swamp"})
+    assert refused.status_code == 400
+    error = refused.json()["error"]
+    assert "environment" in error and "swamp" in error
+    assert "desert" in error and "forest" in error
+    with pytest.raises(ValueError):
+        runs_module.apply_environment_preset(compile_prompt("fly the 747"),
+                                             "swamp")
+    # Absent = today's behaviour: the planner stages the neutral prairie.
+    _, plain = _compile_preset(client, None, prompt="fly the 747 at 3000 m")
+    assert str(plain.latitude.source) == "derived"
+    assert str(plain.surface.source) != "user"
+
+
+def test_environment_preset_keeps_a_stated_place(client):
+    """A place the prompt stated wins over the preset's location; the
+    surface, sun and season still carry the preset and say so."""
+    from webapp.runs import apply_environment_preset
+
+    named = compile_prompt("fly the 747 at 5200 m")
+    named.set("latitude", 45.9764, frm="stated place")
+    named.set("longitude", 7.6586, frm="stated place")
+    apply_environment_preset(named, "desert")
+    assert float(named.latitude.value) == 45.9764
+    assert named.latitude.frm == "stated place"
+    assert str(named.terrain_elevation.source) == "default"
+    assert str(named.surface.value) == "desert"
+    assert "stated place is kept" in named.surface.frm
+    assert str(named.time_of_day.value) == "2026-07-15T12:00"
+
+
+def test_environment_preset_keeps_tiles_and_weather_defaults(client,
+                                                              monkeypatch):
+    """CLAUDE.md: Google tiles are the ground of every terrain render and
+    the storm weather is on by default; a preset changes neither. (The
+    test session's conftest turns the tiles switch off so no test needs a
+    key; here the switch is read at its default, which is ON.)"""
+    from core.scenario.card import GOOGLE_TILES_ENV, google_tiles_requested
+    from webapp.runs import weather_backend_flags
+
+    monkeypatch.delenv(GOOGLE_TILES_ENV, raising=False)
+    assert google_tiles_requested() is True
+    before = weather_backend_flags()
+    _compile_preset(client, "desert")
+    _compile_preset(client, "forest")
+    assert google_tiles_requested() is True
+    assert weather_backend_flags() == before
+    assert any(flag.startswith("-weather-backend=") for flag in before)
+    assert "-weather-backend=off" not in before
+
+
+def test_environment_picker_served(client):
+    """The picker script is a route of the server and the prompt page
+    mounts it with the select the tests and D6 name."""
+    response = client.get("/environment_picker.js")
+    assert response.status_code == 200
+    assert "environmentPreset" in response.text
+    assert '"desert"' in response.text and '"forest"' in response.text
+    page = client.get("/").text
+    assert 'id="environmentPicker"' in page
+    assert "/environment_picker.js" in page
+    assert "environment: environmentPreset()" in page
