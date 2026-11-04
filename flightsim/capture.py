@@ -1631,12 +1631,13 @@ def _run(args: argparse.Namespace) -> int:
     # ID image, the visible fraction from the alone pass, occluded_by,
     # the depth under the mask -- and write the manifest and sidecars
     # back. A frame with no bundle keeps its nulls and says why.
-    from core.capture.labels import attach_engine_labels
+    from core.capture.labels import attach_engine_labels, require_label_bundle
 
     from core.capture.passes import PassError
 
     try:
         attached = attach_engine_labels(out)
+        require_label_bundle(attached)
     except PassError as exc:
         # S2: a derived pass the bundle cannot supply, refused by its name.
         print(f"REFUSED -- {exc.constraint}: {exc.message}")

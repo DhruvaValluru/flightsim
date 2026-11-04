@@ -1759,6 +1759,29 @@ def _attach_record(manifest: Dict, record) -> None:
     block["applied_variables"] = kept + [record.to_dict()]
 
 
+def require_label_bundle(summary: Dict) -> None:
+    """Refuse ``labels.no_bundle`` when a render was requested and the
+    engine's label bundle is missing: nothing attached, or any frame
+    without a bundle. Called only after a render, by the CLI and the web
+    app; a headless run never reaches it. Names each camera and its
+    frame count. A manifest that declares no per-object labels (``note``)
+    expects no bundle and is not refused."""
+    from .passes import PassError
+
+    if summary.get("note") or not summary.get("frames"):
+        return
+    attached = int(summary.get("attached") or 0)
+    missing = dict(summary.get("without_bundle_by_camera") or {})
+    if attached > 0 and int(summary.get("without_bundle") or 0) == 0:
+        return
+    totals = summary.get("frames_by_camera") or {}
+    parts = [f"{camera} ({missing[camera]} of {totals.get(camera) or missing[camera]} frames)"
+             for camera in sorted(missing)]
+    raise PassError("labels.no_bundle",
+                    "the render wrote no label bundle for " + ", ".join(parts)
+                    if parts else "the render wrote no label bundle")
+
+
 def attach_engine_labels(run_dir, write: bool = True) -> Dict:
     """Complete a manifest-6 run's per-object records from the render
     bundle beside its frames, and write the manifest and every sidecar
@@ -1798,7 +1821,8 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
     manifest = read_capture_manifest(run_dir / "capture_manifest.json")
     version = manifest.get("manifest_version")
     summary = {"manifest_version": version, "frames": 0, "attached": 0,
-               "without_bundle": 0, "objects": 0, "written": False}
+               "without_bundle": 0, "objects": 0, "written": False,
+               "without_bundle_by_camera": {}, "frames_by_camera": {}}
     if version not in SUPPORTED_MANIFEST_VERSIONS or version < 6:
         summary["note"] = (f"manifest version {version} carries no per-object "
                            f"records; nothing to attach (a version-6 manifest "
@@ -1832,6 +1856,11 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
         except LandcoverLabelError as exc:
             landcover_refusal = exc
             summary["landcover"] = {"refused": exc.constraint, "reason": exc.message}
+    from .frames import frames_by_camera
+
+    summary["frames_by_camera"] = frames_by_camera(
+        run_dir / "frames",
+        sorted({str(f["camera_id"]) for f in manifest.get("frames", [])}))
     for frame in manifest.get("frames", []):
         summary["frames"] += 1
         camera = str(frame["camera_id"])
@@ -1842,6 +1871,8 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
         entries = (frame.get("labels") or {}).get("objects")
         if engine is None or not isinstance(entries, list):
             summary["without_bundle"] += 1
+            by_camera = summary["without_bundle_by_camera"]
+            by_camera[camera] = by_camera.get(camera, 0) + 1
             continue
         labels = engine["labels"]
         width, height = int(frame["width_px"]), int(frame["height_px"])

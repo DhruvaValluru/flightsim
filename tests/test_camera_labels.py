@@ -12,6 +12,7 @@ independent reprojection -- and shown to FAIL when corrupted.
 import copy
 import json
 import math
+from pathlib import Path
 
 import pytest
 
@@ -544,3 +545,118 @@ def test_the_full_verification_runs_the_label_checks(tmp_path, labelled):
     for name in ("label_geometry", "keypoints_in_box", "label_files",
                  "mask_containment", "depth_range"):
         assert name in names
+
+
+# -- no label bundle after a render (A11, labels.no_bundle) ------------------
+
+def _unbundled_run(tmp_path):
+    """A run directory with a manifest and every frame PNG but no render.json."""
+    from core.capture.labels import attach_engine_labels
+
+    manifest = manifest_for()
+    (tmp_path / "capture_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    for frame in manifest["frames"]:
+        path = tmp_path / str(frame["file"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+    return manifest, attach_engine_labels(tmp_path, write=False)
+
+
+def test_no_bundle_refuses_naming_camera_and_count(tmp_path):
+    from core.capture.labels import require_label_bundle
+    from core.capture.passes import PassError
+
+    manifest, summary = _unbundled_run(tmp_path)
+    assert summary["without_bundle_by_camera"] == summary["frames_by_camera"]
+    assert set(summary["frames_by_camera"]) == {"chase0", "tower0"}
+    with pytest.raises(PassError) as caught:
+        require_label_bundle(summary)
+    assert caught.value.constraint == "labels.no_bundle"
+    count = summary["frames_by_camera"]["chase0"]
+    assert "chase0" in caught.value.message and "tower0" in caught.value.message
+    assert f"{count} of {count} frames" in caught.value.message
+
+
+def test_no_bundle_when_attached_is_zero():
+    from core.capture.labels import require_label_bundle
+    from core.capture.passes import PassError
+
+    summary = {"frames": 3, "attached": 0, "without_bundle": 0,
+               "without_bundle_by_camera": {}, "frames_by_camera": {"chase0": 3}}
+    with pytest.raises(PassError) as caught:
+        require_label_bundle(summary)
+    assert caught.value.constraint == "labels.no_bundle"
+
+
+def test_no_bundle_partial_refuses_without_bundle_above_zero():
+    from core.capture.labels import require_label_bundle
+    from core.capture.passes import PassError
+
+    summary = {"frames": 6, "attached": 4, "without_bundle": 2,
+               "without_bundle_by_camera": {"tower0": 2},
+               "frames_by_camera": {"chase0": 3, "tower0": 3}}
+    with pytest.raises(PassError) as caught:
+        require_label_bundle(summary)
+    assert "tower0 (2 of 3 frames)" in caught.value.message
+    assert "chase0" not in caught.value.message
+
+
+def test_no_bundle_complete_bundle_does_not_refuse():
+    from core.capture.labels import require_label_bundle
+
+    require_label_bundle({"frames": 6, "attached": 6, "without_bundle": 0,
+                          "without_bundle_by_camera": {},
+                          "frames_by_camera": {"chase0": 3, "tower0": 3}})
+
+
+def test_no_bundle_no_render_requested_never_reaches_the_refusal(tmp_path, monkeypatch):
+    """Headless keeps today's behaviour: the CLI without --render returns
+    before attach, and the web app without an engine refuses ue.platform
+    before any label work."""
+    import core.capture.labels as labels_module
+    import core.util.platform as plat
+    from fastapi.testclient import TestClient
+    from flightsim.capture import main as capture_main
+    from webapp.server import app
+
+    client = TestClient(app)
+
+    def reached(*args, **kwargs):
+        raise AssertionError("require_label_bundle reached on a headless run")
+
+    monkeypatch.setattr(labels_module, "require_label_bundle", reached)
+    spec = Path(__file__).resolve().parents[1] / "examples" / "cameras_multi.yaml"
+    assert capture_main([str(spec), "--out", str(tmp_path / "o"),
+                         "--max-previews", "0"]) == 0
+
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    reply = client.post("/run", json={"spec": compile_prompt(
+        "fly the 747 at 3000 m and 250 kt").to_dict()})
+    assert reply.status_code == 409 and reply.json()["constraint"] == "ue.platform"
+
+
+def test_no_bundle_after_a_cli_render_returns_two(tmp_path, capsys, monkeypatch):
+    import assets_pipeline.importer as importer_module
+    import core.render.headless as headless
+    import core.util.platform as platform_module
+    from flightsim.capture import main as capture_main
+
+    def frames_only(command, log, **kwargs):
+        parts = [str(p) for p in command]
+        for i, part in enumerate(parts[:-1]):
+            if part.endswith("card.json") and Path(part).is_file():
+                for cam in json.loads(Path(part).read_text())["cameras"]:
+                    d = Path(parts[i + 1]) / str(cam["camera_id"])
+                    d.mkdir(parents=True, exist_ok=True)
+                    (d / "frame_0000.png").write_bytes(b"x")
+                break
+        return headless.HeadlessResult(0)
+
+    monkeypatch.setattr(platform_module, "ue_available", lambda: True)
+    monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    monkeypatch.setattr(headless, "run_headless", frames_only)
+    spec = Path(__file__).resolve().parents[1] / "examples" / "cameras_multi.yaml"
+    code = capture_main([str(spec), "--out", str(tmp_path / "o"),
+                         "--max-previews", "0", "--render", "--no-host-flight"])
+    assert code == 2
+    assert "REFUSED -- labels.no_bundle" in capsys.readouterr().out

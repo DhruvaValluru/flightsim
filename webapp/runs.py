@@ -3612,11 +3612,12 @@ class RunManager:
             # from the alone pass, occluded_by, the depth under the mask).
             # Without it the records keep their nulls and the box, depth
             # and visibility checks grade a record that was never filled.
-            from core.capture.labels import attach_engine_labels
+            from core.capture.labels import attach_engine_labels, require_label_bundle
             from core.capture.passes import PassError
 
             try:
                 attached = attach_engine_labels(out)
+                require_label_bundle(attached)
             except PassError as exc:
                 run.push("failed", f"[{exc.constraint}] {exc.message}")
                 return
