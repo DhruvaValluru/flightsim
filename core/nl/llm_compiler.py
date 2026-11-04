@@ -52,6 +52,8 @@ from __future__ import annotations
 import json
 import math
 import os
+
+from core.util.settings import llm_api_key
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -159,7 +161,7 @@ def llm_available() -> bool:
         return False
     if provider:
         return True
-    if "ANTHROPIC_API_KEY" not in os.environ:
+    if not llm_api_key():               # no ANTHROPIC_API_KEY, no stored llm_key
         return True                     # the hosted relay default
     try:
         import anthropic  # noqa: F401
@@ -1533,7 +1535,7 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
             if model == DEFAULT_MODEL:
                 model = provider_model
         # Presence check only -- no secret value is read, stored or logged.
-        elif "ANTHROPIC_API_KEY" not in os.environ:
+        elif not llm_api_key():          # ANTHROPIC_API_KEY or the stored llm_key (E2)
             raise LLMCompileError(
                 "no LLM provider is configured in this process's "
                 "environment, so the LLM compiler is unavailable. In the "
