@@ -8,7 +8,7 @@
 #
 # What it does, in order: installs git and Python via winget only if
 # missing, clones (or fast-forwards) the repo into ~\flightsim, builds
-# the venv, installs the pinned requirements, starts the web app on
+# the venv, installs the hashed lock (requirements.lock), starts the web app on
 # http://127.0.0.1:8008 in its own window, and opens the browser.
 # Re-running is safe: every step is skipped when already done.
 #
@@ -174,9 +174,11 @@ if (-not (Test-Path $venvPython)) {
     & $pyExe @pyArgs -m venv (Join-Path $InstallDir ".venv")
 }
 
-Step "installing pinned requirements (first run downloads ~200 MB of wheels)"
+Step "installing the hashed lock, requirements.lock (first run downloads ~200 MB of wheels)"
 & $venvPython -m pip install --quiet --upgrade pip
-& $venvPython -m pip install --quiet -r (Join-Path $InstallDir "requirements.txt")
+# requirements.txt is the human-edited source; requirements.lock is its hashed
+# resolution. --require-hashes installs exactly the bytes CI installs.
+& $venvPython -m pip install --quiet --require-hashes -r (Join-Path $InstallDir "requirements.lock")
 
 Step "verifying the physics and server imports"
 & $venvPython -c "import jsbsim, fastapi, uvicorn, rasterio, numpy"
