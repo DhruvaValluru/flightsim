@@ -4,7 +4,12 @@
   "budget_used": 42,
   "builder_commit": "4f8abb78",
   "built_commit": "e38daf70",
-  "claims": [],
+  "claims": [
+    "scripts/ue_create_materials.py",
+    "ue/Config/DefaultEngine.ini",
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimVisualScene.cpp",
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimVisualScene.h"
+  ],
   "failures": [
     "run B-1 packet docs/phase3/packets/B4-1.md: gate6 --look measure and beauty FAIL (range extinction ratio 1.12, peaks shadow 210 px, ground shadow 143 px, exposure metric 4.52) because the Gate 6 terrain is not drawn on today's build while the 6 Oct renders of the same engine show it; card, settings, RHI identical; Windows builder bisects the merged engine changes and the A6 material rebuild",
     "run B-1 packet docs/phase3/packets/B4-2.md: terrain clauses pass after 4f8abb78; five clauses fail identically on the 6 Oct renders (ground shadow 0 px, auto-exposure control 2.51, wetness parameter absent, albedo sun invariance, old footage absent); next Windows builder round takes 1-4"
@@ -24,7 +29,7 @@
   "run_id": "",
   "stage": "building",
   "unit": "B4",
-  "updated": "2026-11-04T16:31:42",
+  "updated": "2026-11-04T16:50:20",
   "verdict": "",
   "worktree": "../p3w-B4r2"
 }
