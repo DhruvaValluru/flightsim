@@ -64,7 +64,7 @@ sitting 0.4 m from its label (it was ~25 m).
     the second run prints `MATERIAL-EXISTS`.
 - [ ] **A7 · The aircraft is imported automatically** 🪟
   - Check: delete the imported A-4, press Generate, and it imports and renders by itself.
-- [ ] **A8 · Host flight works; nobody needs `--no-host-flight`** 🪟
+- [x] **A8 · Host flight works; nobody needs `--no-host-flight`** 🪟
   - Check: a web-app run with host flight completes, and no message tells the user
     to add the flag.
 - [x] **A9 · Every camera gives pictures, or the run says which one didn't** 🪟
