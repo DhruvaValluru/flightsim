@@ -6,8 +6,15 @@ Windows render adds pixels beside it without touching it. A frame
 without recorded geometry is unusable as labeled data; this file is the
 label.
 
-Schema (``manifest_version`` 7)
+Schema (``manifest_version`` 8)
 -------------------------------
+Version 8 (Phase 3, package C): labels.objects[] may carry component
+entries (class ``payload`` / ``landing_gear``, with ``parent``, their own
+``int_id``, ``bbox_2d_hull`` and the measured keys), a parent's tight box
+and visible fraction count its components' pixels, and a null
+``bbox_2d_tight`` carries ``basis.bbox_2d_tight``
+(docs/schemas/capture_manifest.v8.schema.json; v7 kept beside it).
+
 Version 7 (INT-final, the advancement addition's one bump): every block
 the addition's items wrote under version 6 as optional and
 absent-canonical is now part of the published contract
@@ -278,14 +285,14 @@ from core.terrain.geoid import (
     datum_for_heightfield, flat_datum_block, undulation_variable,
 )
 
-MANIFEST_VERSION = 7
+MANIFEST_VERSION = 8
 #: Versions this build can READ. Every version here is fully
 #: interpretable by the current verifier and the page: a version 3
 #: manifest has no ``state`` on its frames, a version 4 no ``labels``
 #: and no ``airframe``, a version 5 no ``objects`` and no per-object
 #: label records, a version 6 the addition's blocks only as
-#: unpublished optional keys. Anything else is a refusal, not a guess.
-SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5, 6, 7)
+#: unpublished optional keys, a version 7 no component entries. Anything else is a refusal, not a guess.
+SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5, 6, 7, 8)
 
 #: Which flight the ``aircraft`` block in every frame record describes.
 #: A v2 manifest could not say, and the answer matters more than any

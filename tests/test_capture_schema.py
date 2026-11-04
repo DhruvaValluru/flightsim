@@ -51,7 +51,9 @@ def test_the_schema_is_versioned_with_the_writer_and_the_manifest_validates(mani
     # INT-final: version 7 is v6 plus the addition's optional blocks; v6
     # stays published, so a version-6 run still validates against ITS
     # contract (tests/test_versions.py pins the difference).
-    assert MANIFEST_VERSION == 7
+    assert MANIFEST_VERSION == 8
+    assert load_schema(path.with_name("capture_manifest.v7.schema.json"))[
+        "properties"]["manifest_version"]["const"] == 7
     v6 = load_schema(path.with_name("capture_manifest.v6.schema.json"))
     assert v6["properties"]["manifest_version"]["const"] == 6
     assert v6["required"] == schema["required"]

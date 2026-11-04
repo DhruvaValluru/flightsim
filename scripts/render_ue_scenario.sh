@@ -54,7 +54,7 @@ SCENE_ARGS=("$@")
 
 cd "$(dirname "$0")/.."
 
-UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.7}"
+UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
 EDITOR="$UE_ROOT/Engine/Binaries/Mac/UnrealEditor-Cmd"
 PYTHON="${PYTHON:-.venv/bin/python}"
 

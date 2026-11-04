@@ -27,10 +27,9 @@ $jsbsimTag = "v1.2.4"
 # The engine this vendoring targets (Phase 2 pin, brainstorm 9.8). The
 # native library does not link the engine; the value is RECORDED in
 # VENDORED.json so the preflight can say which engine the plugin was
-# last vendored and measured against. Measured on 5.5 before Phase 2;
-# the three patched upstream bugs must be re-checked on 5.7 (NEXT.md
-# gotcha 32, scripts/check_bridge_api.sh).
-$ueEngineTarget = "5.7"
+# last vendored and measured against. The three patched upstream bugs
+# were measured on 5.5 (NEXT.md gotcha 32, scripts/check_bridge_api.sh).
+$ueEngineTarget = "5.5"
 $upstream = "https://github.com/JSBSim-Team/jsbsim.git"
 $work = Join-Path $env:TEMP "flightsim-vendor"
 $src = Join-Path $work "jsbsim-$jsbsimTag"
@@ -142,13 +141,12 @@ if ($LASTEXITCODE -ne 0) {
     }
     # MSB8020 means the v143 toolset is absent -- measured on a machine
     # with only Visual Studio 2026 (toolset v180) installed. v143 is not
-    # a preference here: UE 5.5 (measured) was built against VS2022 (and 5.7,
-    # the Phase 2 pin, still lists v143), so the
+    # a preference here: UE 5.5 (measured) was built against VS2022, so the
     # engine build needs it too. Name the fix rather than the error code.
     if ($errText -match "MSB8020") {
         Write-Host ""
         Write-Host "The VS2022 (v143) build tools are missing -- you appear"
-        Write-Host "to have a newer Visual Studio only. UE 5.7 needs v143 as"
+        Write-Host "to have a newer Visual Studio only. UE 5.5 needs v143 as"
         Write-Host "well, so install it alongside (no IDE, ~5-7 GB):"
         Write-Host ""
         Write-Host "  winget install --id Microsoft.VisualStudio.2022.BuildTools ``"
@@ -194,7 +192,7 @@ print('VENDORED.json updated')
 Write-Host ""
 Write-Host "vendored Win64 library into $libDir"
 Write-Host "  tag        $jsbsimTag @ $($commit.Substring(0,12))"
-Write-Host "  engine     targets UE $ueEngineTarget (recorded, not a measurement of a 5.7 build)"
+Write-Host "  engine     targets UE $ueEngineTarget (recorded, not a measurement of a build)"
 Write-Host "  dll sha256 $dllSha"
 Write-Host ""
 Write-Host "Next: .\scripts\build_ue.ps1"

@@ -45,7 +45,7 @@ TERRAIN_SOURCES = ("auto", "flat", "synthesised", "baked")
 #: The documented class list (contracts §2.1). ``cloud`` is a class in
 #: the visibility record only: volumetrics write no ID.
 DEFAULT_CLASSES = ("aircraft", "terrain", "building", "vegetation",
-                   "water", "cloud")
+                   "water", "cloud", "payload", "landing_gear")
 #: The three traffic tracks that produce object-object occlusion
 #: (brainstorm §3.4).
 TRAFFIC_TRACKS = ("formation", "crossing", "overtaking")

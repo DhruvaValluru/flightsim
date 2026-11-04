@@ -72,7 +72,7 @@ build is where they are checked.
   I6 (gap S3): the three ground-truth passes -passes=normal,velocity,
   albedo render through, built on the M_CustomStencilID pattern (post-
   process domain, replacing the tonemapper, one SceneTexture node into
-  emissive). The SceneTexture ids are the UE 5.7 ESceneTextureId values
+  emissive). The SceneTexture ids are the UE ESceneTextureId values
   PPI_WorldNormal, PPI_Velocity and PPI_BaseColor (Python enum spellings
   PPI_WORLD_NORMAL, PPI_VELOCITY, PPI_BASE_COLOR). The normal and the
   velocity are SIGNED, and whether a tonemapper-replacing emissive keeps
