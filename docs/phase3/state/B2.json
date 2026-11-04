@@ -1,8 +1,13 @@
 {
+  "B-1": "",
+  "FAIL": "",
   "budget_used": 15,
   "builder_commit": "14e819069c264613868ad55a7764941a7e1f403a",
   "built_commit": "14e819069c264613868ad55a7764941a7e1f403a",
   "claims": [],
+  "failures": [
+    "run B-1 packet docs/phase3/packets/B2-1.md: preflight prints 6 OK lines but toolchain.jsbsim_mismatch: not found (jsbsim 1.2.4 is installed; the reader's 'Probe | Select-Object -First 1' leaves LASTEXITCODE -1 in PowerShell 5.1); steps 6-7 pass by name; Windows builder fixes scripts/ue_preflight.ps1"
+  ],
   "integrated_commit": "ab07961ce4b994bce08611c5f218769187ddc3e5",
   "letter": "B",
   "needs_windows": true,
@@ -13,8 +18,10 @@
     "windows_sdk wrong pin -> toolchain.windows_sdk_mismatch, exit non-zero (step 7)"
   ],
   "pushed_commit": "3e59358d",
+  "run_id": "",
   "stage": "pushed",
   "unit": "B2+B3",
-  "updated": "2026-11-04T12:37:40",
+  "updated": "2026-11-04T12:42:04",
+  "verdict": "",
   "worktree": "../p3-B2"
 }

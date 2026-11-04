@@ -1,8 +1,8 @@
 {
   "A-2": "",
   "FAIL": "",
-  "budget_used": 32,
-  "builder_commit": "e62a4ad3",
+  "budget_used": 28,
+  "builder_commit": "eb9e5f30",
   "claims": [
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp"
   ],
@@ -20,9 +20,9 @@
   "pushed_commit": "23bad766",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "building",
+  "stage": "built_local",
   "unit": "A12+A13",
-  "updated": "2026-11-04T12:19:51",
+  "updated": "2026-11-04T12:41:54",
   "verdict": "",
   "worktree": "../p3w-A12"
 }
