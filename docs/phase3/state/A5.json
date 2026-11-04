@@ -1,8 +1,9 @@
 {
+  "2b746352": "",
   "A-2": "",
   "FAIL": "",
-  "budget_used": 12,
-  "builder_commit": "3b8c3030",
+  "budget_used": 30,
+  "builder_commit": "2b746352",
   "claims": [
     "ue/Config/DefaultEngine.ini",
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimScenarioCommandlet.cpp",
@@ -11,7 +12,8 @@
   ],
   "failures": [
     "docs/phase3/packets/A5-1.md",
-    "run A-2 packet docs/phase3/packets/A5-2.md: commandlet exits 1 (Water collision profile error, Cesium pulls Water on 5.7); hosts trim differently (headless longitudinal, UE full), parity fails"
+    "run A-2 packet docs/phase3/packets/A5-2.md: commandlet exits 1 (Water collision profile error, Cesium pulls Water on 5.7); hosts trim differently (headless longitudinal, UE full), parity fails",
+    "run A-2 packet docs/phase3/packets/A5-3.md: both A5-2 causes fixed (2b746352, merged b7053df7); compare() grades on absolute t while the headless clock starts at 4.875 s and the UE clock at 0.008 s; origin-aligned, every channel within tolerance; decision 14 (Mac: align origins)"
   ],
   "integrated_commit": "f6572ef154be0ab30a427d1ff9de7a56a2e74ed6",
   "letter": "A",
@@ -28,8 +30,9 @@
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "pushed",
-  "updated": "2026-11-04T11:24:56",
+  "stage": "built_local",
+  "updated": "2026-11-04T11:31:54",
   "verdict": "",
+  "windows_build": "",
   "worktree": "../p3w-A5"
 }
