@@ -1,8 +1,8 @@
 {
   "A-2": "",
   "FAIL": "",
-  "budget_used": 28,
-  "builder_commit": "eb9e5f30",
+  "budget_used": 22,
+  "builder_commit": "378fade3",
   "claims": [
     "core/capture/verify.py",
     "docs/phase3/notes/A12.md",
@@ -26,9 +26,9 @@
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "building",
+  "stage": "built_local",
   "unit": "A12+A13",
-  "updated": "2026-11-04T12:56:07",
+  "updated": "2026-11-04T13:05:30",
   "verdict": "",
   "worktree": "../p3-A12r"
 }

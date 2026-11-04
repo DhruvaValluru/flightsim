@@ -1,17 +1,13 @@
 {
-  "budget_used": 13,
-  "claims": [
-    "core/capture/manifest.py",
-    "core/capture/objects.py",
-    "core/scenario/card.py",
-    "docs/phase3/notes/C3.md",
-    "docs/schemas/capture_manifest.v8.schema.json",
-    "tests/test_card_components.py"
-  ],
+  "budget_used": 27,
+  "builder_commit": "d783e8ff",
+  "built_commit": "d783e8ff",
+  "claims": [],
   "letter": "C",
   "needs_windows": false,
-  "stage": "building",
+  "pending_windows": [],
+  "stage": "built",
   "unit": "C3",
-  "updated": "2026-11-04T12:55:36",
+  "updated": "2026-11-04T13:05:17",
   "worktree": "../p3-C3"
 }
