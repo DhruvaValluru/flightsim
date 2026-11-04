@@ -104,10 +104,11 @@ def test_cell_compile_body_adds_only_environment():
 
 
 def test_matrix_scenes_match_scene_setting_bakes():
-    from webapp.runs import SCENE_SETTING_BAKES
+    from webapp.runs import ENVIRONMENT_PRESETS, SCENE_SETTING_BAKES
     assert rts.MATRIX_SCENES == {"desert": "grand_canyon", "forest": "yosemite"}
     for environment, scene in rts.MATRIX_SCENES.items():
         assert SCENE_SETTING_BAKES[environment] == scene
+        assert ENVIRONMENT_PRESETS[environment]["scene"] == scene
     assert set(rts.MATRIX_SCENES) == set(rts.MATRIX_ENVIRONMENTS)
 
 

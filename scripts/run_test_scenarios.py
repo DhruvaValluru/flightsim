@@ -21,7 +21,7 @@ shows them all on one page.
     python scripts/run_test_scenarios.py --matrix --list # print the four cells
 
 Open http://127.0.0.1:8008, or each run's frames page, to look at the
-results. Only the standard library is used, so the venv's python runs it.
+results. Run it with the venv's python (--matrix reads webapp.runs).
 """
 
 from __future__ import annotations
@@ -263,7 +263,11 @@ def collect(results) -> Path:
 #: bake named in MATRIX_SCENES (webapp.runs.SCENE_SETTING_BAKES).
 MATRIX_AIRCRAFT = ("A4", "J11")
 MATRIX_ENVIRONMENTS = ("desert", "forest")
-MATRIX_SCENES = {"desert": "grand_canyon", "forest": "yosemite"}
+sys.path.insert(0, str(REPO))
+from webapp.runs import ENVIRONMENT_PRESETS, SCENE_SETTING_BAKES  # noqa: E402
+
+#: environment -> scene key, read from the web app's own table (never copied).
+MATRIX_SCENES = {name: SCENE_SETTING_BAKES[name] for name in MATRIX_ENVIRONMENTS}
 #: One neutral prompt for every cell: it names no aircraft, no place, no
 #: airspeed and no altitude, so the compiled airspeed keeps source
 #: ``default`` and /run re-plans it to the cell aircraft's own cruise
