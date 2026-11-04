@@ -65,3 +65,11 @@ engine's Marketplace folder; later rows say which engine they ran on.
 | A8 | A-2 | `pytest -q tests/test_host_parity.py` | 19 passed, 1 failed: `test_preflight_on_mac_runs_ue_preflight_sh` asserts a forward-slash path on Windows | Mac test defect, noted |
 | A12 | A-2 | web one-frame 320x180 runs, A-4 (542c05cd9ddc) and c172p (2d70734a8ec4); `flightsim.verify`; `label_diagnose.py` | 6 of 7 gates PASS, `mask_vs_geometry` FAIL on both (mask box 3.5-3.6 px left of the projected hull, 1.1 % of the width, same as 13.7 px at 1280); `tight_box_present` PASS; `tight null: 0` | packet A12-1 |
 | A11 | A-2 | CLI `capture --render --terrain runs/terrain/grand_canyon` (two cameras, three stills) | host flight ok; render commandlet exit 1 `cannot read heightfield sidecar runs/terrain/grand_canyon.json` (relative path handed to the engine); `REFUSED camera.render` | CLI path defect (Mac); retry with an absolute path |
+
+## Letter B, run B-1 (UE 5.7.4, push 3e59358d)
+
+| Box | Run | Check | Result | Note |
+|---|---|---|---|---|
+| B3 | B-1 | `pytest -q tests/test_toolchain_pins.py` | 7 passed, exit 0 | |
+| B2 | B-1 | `ue_preflight.ps1` toolchain section on the 5.7 laptop | 6 `OK <tool> <version>` lines (engine 5.7.4 CL 51494982, msvc, windows_sdk, cesium_for_unreal 2.30.0, ffmpeg 9.0.2, python 3.12.10); `toolchain.jsbsim_mismatch: not found, pinned 1.2.4`; exit 1 | jsbsim reader |
+| B2 | B-1 | ffmpeg pinned 9.0.1 / windows_sdk pinned 10.0.22621.0 | `toolchain.ffmpeg_mismatch: found 9.0.2, pinned 9.0.1` exit 1 / `toolchain.windows_sdk_mismatch: found 10.0.26100.0, pinned 10.0.22621.0` exit 1; toolchain.json restored | |

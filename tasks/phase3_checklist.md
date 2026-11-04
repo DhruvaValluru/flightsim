@@ -96,7 +96,7 @@ sitting 0.4 m from its label (it was ~25 m).
   - Check: a fresh install from it, then `pytest -q`, passes.
 - [ ] **B2 · One file lists every other tool's version** (`toolchain.json`)
   - Check: preflight prints `OK` per tool, and a wrong version stops it.
-- [ ] **B3 · A test catches any version drifting**
+- [x] **B3 · A test catches any version drifting**
   - Check: `pytest -q tests/test_toolchain_pins.py` passes.
 - [ ] **B4 · Picture quality checked on this engine** 🪟
   - Check: `gate6_visual.py` passes, and the A12 label test still passes.
