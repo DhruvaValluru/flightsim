@@ -57,6 +57,13 @@ namespace
 	// as light_units "physical" -- the word core/capture/radiometry.py
 	// PHYSICAL_LIGHT_UNITS reads back before its chain means anything.
 	constexpr double SceneEngineSunUnitless = 8.0;
+	// The synthetic raster's one vertex colour (linear), fed to M_VertexColor
+	// in place of the engine's default material (B4 round 2): a stated
+	// mid-grey, not a probe number; the Gate 6 clauses re-measure on it.
+	constexpr float SceneSyntheticTerrainGrey = 0.5f;
+	// Half the side of the scene's own ground quad at Z=0 (100 km a side
+	// reaches past the far ridge, as the scaled engine Plane did).
+	constexpr double SceneGroundHalfWidthMetres = 50000.0;
 	const TCHAR* const ScenePhysicalLightUnits = TEXT("physical");
 	const TCHAR* const SceneUnitlessLightUnits = TEXT("unitless");
 
@@ -870,27 +877,59 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	// would bury the real valley floors.
 	if (!Options.bGeoreferenced)
 	{
-		UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(
-			nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
-		if (PlaneMesh == nullptr)
+		// B4 round 2, measured on UE 5.7 (the Gate 6 shadow shot's SCS_Normal
+		// capture): the engine Plane scaled 100000 x 100000 x 1 read a zero
+		// GBuffer normal on every pixel, so the sun's N.L was zero and the
+		// plain under the aircraft stayed black under any sun, with shadows,
+		// virtual shadow maps, Lumen, clouds, atmosphere and fog each off in
+		// turn, while the aircraft beside it was lit. The ground is now an
+		// unscaled procedural quad with explicit normals and tangents, the
+		// way the raster instances are built, drawn with the terrain
+		// material M_VertexColor (one stated grey; ApplyWetness instances it
+		// below, so the plain the aircraft's shadow lands on gets wet too).
+		UMaterialInterface* GroundBase = LoadObject<UMaterialInterface>(
+			nullptr, TEXT("/Game/FlightSim/M_VertexColor.M_VertexColor"));
+		if (GroundBase == nullptr)
 		{
-			Error = TEXT("/Engine/BasicShapes/Plane.Plane did not load");
+			Error = TEXT(
+				"/Game/FlightSim/M_VertexColor is missing. Run "
+				"scripts/ue_create_materials.py (build-time asset step) -- "
+				"the scene's own ground refuses the engine's default material, "
+				"which exposes no Wetness parameter.");
 			return false;
 		}
 		AActor* Ground = World->SpawnActor<AActor>();
 		// The scene's own ground: hidden under external terrain tiles
 		// (FlightSimGoogleTiles.cpp), never otherwise.
 		Ground->Tags.Add(FName(TEXT("FlightSim.terrain")));
-		UStaticMeshComponent* GroundMesh =
-			NewObject<UStaticMeshComponent>(Ground, TEXT("VisibleGround"));
+		UProceduralMeshComponent* GroundMesh =
+			NewObject<UProceduralMeshComponent>(Ground, TEXT("VisibleGround"));
 		Ground->SetRootComponent(GroundMesh);
 		GroundMesh->SetMobility(EComponentMobility::Movable);
-		GroundMesh->SetStaticMesh(PlaneMesh);
+		const double HalfCm = SceneGroundHalfWidthMetres * SceneCmPerMetre;
+		// A, B over C, D with +Y north, wound A, C, B / B, C, D like the
+		// raster instances so the face normal comes out +Z.
+		const TArray<FVector> GroundVertices = {
+			FVector(-HalfCm, HalfCm, 0.0), FVector(HalfCm, HalfCm, 0.0),
+			FVector(-HalfCm, -HalfCm, 0.0), FVector(HalfCm, -HalfCm, 0.0)};
+		const TArray<int32> GroundTriangles = {0, 2, 1, 1, 2, 3};
+		TArray<FVector> GroundNormals;
+		GroundNormals.Init(FVector::UpVector, GroundVertices.Num());
+		const TArray<FVector2D> GroundUV = {
+			FVector2D(0.0, 0.0), FVector2D(1.0, 0.0), FVector2D(0.0, 1.0), FVector2D(1.0, 1.0)};
+		TArray<FLinearColor> GroundColours;
+		GroundColours.Init(FLinearColor(SceneSyntheticTerrainGrey, SceneSyntheticTerrainGrey,
+		                                SceneSyntheticTerrainGrey, 1.0f), GroundVertices.Num());
+		TArray<FProcMeshTangent> GroundTangents;
+		GroundTangents.Init(FProcMeshTangent(FVector(1.0, 0.0, 0.0), true), GroundVertices.Num());
+		GroundMesh->CreateMeshSection_LinearColor(0, GroundVertices, GroundTriangles, GroundNormals,
+		                                          GroundUV, GroundColours, GroundTangents,
+		                                          false /* no collision */);
 		GroundMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		GroundMesh->SetCastShadow(true);
+		GroundMesh->SetMaterial(0, GroundBase);
 		GroundMesh->RegisterComponent();
 		Ground->SetActorLocation(FVector(0.0, 0.0, 0.0));
-		// The engine plane is 1 m; 100 km on a side reaches past the far ridge.
-		Ground->SetActorScale3D(FVector(100000.0, 100000.0, 1.0));
 		FlatGround = GroundMesh;
 	}
 	else
@@ -1064,10 +1103,34 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		NearPeakWorldCm = PeakWorld(Options.NearTerrainOriginMetres);
 		FarPeakWorldCm = PeakWorld(Options.FarTerrainOriginMetres);
 
+		// The synthetic raster draws with the same terrain material the
+		// classified georeferenced landscape gets (M_VertexColor, a uniform
+		// vertex colour here: a synthetic ridge has no land cover), through
+		// ApplyWetness so the precipitation scalar has something to drive
+		// and the record names the parameter (B4 round 2, Gate 6 wet-surface
+		// null test: with the engine's default material it was "absent").
+		UMaterialInterface* VertexColour = LoadObject<UMaterialInterface>(
+			nullptr, TEXT("/Game/FlightSim/M_VertexColor.M_VertexColor"));
+		if (VertexColour == nullptr)
+		{
+			Error = TEXT(
+				"/Game/FlightSim/M_VertexColor is missing. Run "
+				"scripts/ue_create_materials.py (build-time asset step) -- "
+				"the synthetic terrain refuses the engine's default material, "
+				"which exposes no Wetness parameter.");
+			return false;
+		}
+		UMaterialInterface* TerrainMaterial = ApplyWetness(World, VertexColour, Options);
+		if (FlatGround != nullptr)
+		{
+			// The plain at Z=0 is terrain too: the same instance, so one
+			// wetness scalar drives the whole ground the clauses measure.
+			FlatGround->SetMaterial(0, TerrainMaterial);
+		}
 		if (!BuildTerrainInstance(World, TEXT("TerrainNear"),
-		                          Options.NearTerrainOriginMetres, Error) ||
+		                          Options.NearTerrainOriginMetres, TerrainMaterial, Error) ||
 		    !BuildTerrainInstance(World, TEXT("TerrainFar"),
-		                          Options.FarTerrainOriginMetres, Error))
+		                          Options.FarTerrainOriginMetres, TerrainMaterial, Error))
 		{
 			return false;
 		}
@@ -1286,8 +1349,14 @@ UMaterialInterface* FFlightSimVisualScene::ApplyWetness(
 
 bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& Name,
                                                  const FVector2D& OriginMetres,
+                                                 UMaterialInterface* Material,
                                                  FString& Error)
 {
+	if (Material == nullptr)
+	{
+		Error = FString::Printf(TEXT("%s: no terrain material to draw the synthetic raster with"), *Name);
+		return false;
+	}
 	const int32 Stride = FMath::Max(1,
 		FMath::DivideAndRoundUp(FMath::Max(Terrain.Width, Terrain.Height),
 		                        MaxVerticesPerSide));
@@ -1302,9 +1371,20 @@ bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& N
 	TArray<FVector> Vertices;
 	TArray<FVector> Normals;
 	TArray<FVector2D> UV0;
+	// Tangents, as the georeferenced tiles carry them. Measured on UE 5.7
+	// (B4 round 2, the Gate 6 shadow shot's SCS_Normal capture): a section
+	// created with NO tangents reads a zero GBuffer normal on every ground
+	// pixel (decoded 0.578, -0.578, -0.578 everywhere), so the sun's N.L is
+	// zero and the ground is black under any sun, while the aircraft, a
+	// static mesh, is lit. With tangents the normal is the one supplied.
+	// Engine +Y is north here (Y = (Height - 1 - Row) * pixel), the
+	// georeferenced tiles' bNorthPlusY case, so the tangent Y is flipped.
+	TArray<FProcMeshTangent> Tangents;
+	const bool bFlipTangentY = true;
 	Vertices.Reserve(Rows * Columns);
 	Normals.Reserve(Rows * Columns);
 	UV0.Reserve(Rows * Columns);
+	Tangents.Reserve(Rows * Columns);
 
 	// Row 0 of the raster is the northernmost (core/terrain/heightfield.py);
 	// engine +Y is north, so row r sits at origin_y + (RasterHeight-1-r)*pixel.
@@ -1330,6 +1410,7 @@ bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& N
 			const double DzDy = (ElevationCm(RowN, Column) - ElevationCm(RowS, Column)) /
 				((RowS - RowN) * Terrain.PixelSizeMetres * SceneCmPerMetre);
 			Normals.Add(FVector(-DzDx, -DzDy, 1.0).GetSafeNormal());
+			Tangents.Add(FProcMeshTangent(FVector(1.0, 0.0, DzDx).GetSafeNormal(), bFlipTangentY));
 		}
 	}
 
@@ -1357,11 +1438,19 @@ bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& N
 		NewObject<UProceduralMeshComponent>(TerrainActor, *Name);
 	TerrainActor->SetRootComponent(Mesh);
 	Mesh->SetMobility(EComponentMobility::Movable);
+	// M_VertexColor reads the vertex colour as its base colour: a synthetic
+	// raster carries no land cover, so every vertex is one stated grey
+	// (SceneSyntheticTerrainGrey), the one surface the Gate 6 clauses
+	// measure extinction, shadow and wetness on. The engine's default
+	// material drew it before (B4 round 2) and exposed no "Wetness".
+	TArray<FLinearColor> Colours;
+	Colours.Init(FLinearColor(SceneSyntheticTerrainGrey, SceneSyntheticTerrainGrey,
+	                          SceneSyntheticTerrainGrey, 1.0f), Vertices.Num());
 	Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0,
-	                                    {}, {}, false /* no collision */);
+	                                    Colours, Tangents, false /* no collision */);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetCastShadow(true);
-	Mesh->SetMaterial(0, UMaterial::GetDefaultMaterial(EMaterialDomain::MD_Surface));
+	Mesh->SetMaterial(0, Material);
 	Mesh->RegisterComponent();
 	TerrainActor->SetActorLocation(FVector::ZeroVector);
 
