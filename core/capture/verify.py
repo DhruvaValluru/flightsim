@@ -2531,6 +2531,26 @@ def _children_by_int_id(objects: Sequence[Dict]) -> Dict[int, List[int]]:
     return out
 
 
+def _occluded_pixels_by(mask, alone, int_id: int, children: Sequence[int],
+                        id_of: Dict[int, str]) -> Dict[str, int]:
+    """The verifier's own hiding breakdown for one object, from the
+    images: under the object's alone footprint -- its own id OR any
+    child's, the parent rollup -- the ID image's pixels given to another
+    id, counted per id and named through ``id_of``. The same rule as the
+    producer's ``measure_object(..., children)`` (core/capture/labels.py),
+    recomputed here without importing it: a child's pixels are the
+    object's own, so a child is in the footprint and never an occluder.
+    Before this (packet C4-1) the recount took the parent's footprint
+    alone and counted its stores as occluders: 22/8/21 px of FAIL."""
+    import numpy as np
+
+    ids = [int(int_id)] + [int(c) for c in children]
+    footprint = np.isin(alone, ids) if len(ids) > 1 else alone == int_id
+    values, counts = np.unique(mask[footprint], return_counts=True)
+    return {id_of.get(int(v), f"int_id:{int(v)}"): int(c)
+            for v, c in zip(values, counts) if int(v) != 0 and int(v) not in ids}
+
+
 def _record_object(record: Dict, int_id: int) -> Optional[Dict]:
     """The frame's ``labels.objects[]`` entry for an id, or None."""
     for entry in (record.get("labels") or {}).get("objects") or []:
@@ -3632,6 +3652,7 @@ def verify_label_geometry_3d(manifest: Dict, run_dir=None) -> Check:
     aircraft = _aircraft_entries(objects)
     id_of = {int(e["int_id"]): str(e.get("id")) for e in objects
              if isinstance(e, dict) and e.get("int_id") is not None}
+    children_by_parent = _children_by_int_id(objects)
     bundles = _engine_label_records(run_dir) if run_dir is not None else {}
     graded = 0
     placed_from_record = 0
@@ -3774,11 +3795,9 @@ def verify_label_geometry_3d(manifest: Dict, run_dir=None) -> Check:
                     mask = _read_gray_png(folder / labels["mask"])
                     alone = _read_gray_png(folder / alone_name)
                     if mask is not None and alone is not None:
-                        footprint = alone == int_id
-                        values, counts = np.unique(mask[footprint], return_counts=True)
-                        mine = {id_of.get(int(v), f"int_id:{int(v)}"): int(c)
-                                for v, c in zip(values, counts)
-                                if int(v) not in (0, int_id)}
+                        mine = _occluded_pixels_by(
+                            mask, alone, int_id,
+                            children_by_parent.get(int_id, ()), id_of)
                         theirs = {str(k): int(v) for k, v in recorded_hidden.items()}
                         if mine != theirs:
                             return Check("label_geometry_3d", FAIL,

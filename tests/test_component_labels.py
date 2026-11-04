@@ -288,3 +288,37 @@ def test_components_a4_gear_has_no_mesh_and_is_retracted_airborne():
     down = _gear_entry(1.0, extent_body=None, obj_id="landing_gear:nose_gear:0",
                        via_record=False)
     assert down["bbox_2d_tight"] is None and "bbox_2d_tight" not in down["basis"]
+
+
+def test_the_verifier_s_hiding_recount_excludes_the_record_s_children():
+    """Packet C4-1: the aircraft record's occluded_pixels_by was {} (C5's
+    measure_object excludes the record's own children) while the verifier
+    recounted the stores as occluders (22/8/21 px). The recount now follows
+    the measure's rule: the parent's footprint is its own id OR a child's,
+    and a child is never an occluder. Synthetic pair: the parent's alone
+    pass draws the aircraft whole (its store included, as the engine does),
+    the ID image gives the store its own id and a traffic aircraft hides
+    4 px of the airframe and 1 px of the store."""
+    from core.capture.verify import _occluded_pixels_by
+
+    alone = np.zeros((6, 8), dtype=np.uint8)
+    alone[1:5, 1:7] = 1                      # the aircraft drawn alone, store included
+    mask = alone.copy()
+    mask[1:5, 5:7] = 64                      # the store's own id in the ID image (8 px)
+    mask[1:3, 1:3] = 2                       # traffic over the airframe (4 px)
+    mask[3, 5] = 2                           # traffic over the store (1 px)
+    id_of = {1: "aircraft:A4:0", 2: "aircraft:traffic:0", 64: "payload:store_sta2:0"}
+
+    mine = _occluded_pixels_by(mask, alone, 1, [64], id_of)
+    assert mine == {"aircraft:traffic:0": 5}
+    # The same rule as C5's measure, which the record was written from.
+    record = measure_object(mask, None, 1, alone=alone, children=[64])
+    assert {id_of[k]: v for k, v in record["occluded_pixels"].items()} == mine
+    # Without the children the store is counted as an occluder: the FAIL.
+    assert _occluded_pixels_by(mask, alone, 1, [], id_of) == {
+        "aircraft:traffic:0": 5, "payload:store_sta2:0": 7}
+    # The child's own recount: the traffic hides 1 px of it, nothing else.
+    assert _occluded_pixels_by(mask, alone, 64, [], id_of) == {}
+    alone_store = np.where(mask == 64, 64, 0).astype(np.uint8)
+    alone_store[3, 5] = 64
+    assert _occluded_pixels_by(mask, alone_store, 64, [], id_of) == {"aircraft:traffic:0": 1}

@@ -131,6 +131,9 @@ from assets_pipeline.acmodel import (  # noqa: E402
     ac_to_model, model_to_ue, parse_ac, world_vertices,
 )
 from assets_pipeline.importer import COMPONENTS_MANIFEST_VERSION  # noqa: E402
+from assets_pipeline.obj_frame import (  # noqa: E402
+    OBJ_FRAME, OBJ_FRAME_KEY, actor_to_obj, obj_winding,
+)
 from core.capture import airframe as airframe_module  # noqa: E402
 from core.capture.airframe import fdm_xml_path  # noqa: E402
 from core.capture.objects import component_mesh_name  # noqa: E402
@@ -707,7 +710,10 @@ def copy_texture(source: Path, destination: Path) -> Tuple[int, int]:
 
 
 class ObjWriter:
-    """Accumulates triangles grouped by (texture, material colour)."""
+    """Accumulates triangles grouped by (texture, material colour), in the
+    UE actor frame (cm, outward winding); :meth:`write` puts them in the
+    OBJ frame of ``assets_pipeline/obj_frame.py`` (Y negated, faces
+    rewound: decision 19), the same convention ``a4_mdl_convert`` writes."""
 
     def __init__(self) -> None:
         self.vertices: List[Tuple[float, float, float]] = []
@@ -739,13 +745,14 @@ class ObjWriter:
         with obj_path.open("w") as out:
             out.write(f"mtllib {mtl_path.name}\n")
             for v in self.vertices:
-                out.write("v %.6f %.6f %.6f\n" % v)
+                out.write("v %.6f %.6f %.6f\n" % actor_to_obj(v))
             for uv in self.uvs:
                 out.write("vt %.6f %.6f\n" % uv)
             for key, faces in self.faces.items():
                 out.write(f"usemtl {key}\n")
                 for face in faces:
-                    out.write("f " + " ".join(f"{vi}/{ti}" for vi, ti in face) + "\n")
+                    out.write("f " + " ".join(f"{vi}/{ti}"
+                                              for vi, ti in obj_winding(face)) + "\n")
         with mtl_path.open("w") as out:
             for key, material in self.materials.items():
                 out.write(f"newmtl {key}\n")
@@ -970,6 +977,9 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         # airframe without any stays at 3 with its manifest unchanged.
         "version": (COMPONENTS_MANIFEST_VERSION if payload_rows
                     else MESH_MANIFEST_VERSION),
+        # The OBJs' axis convention (decision 19); the importer's stale
+        # rule re-converts a manifest without this exact stamp.
+        OBJ_FRAME_KEY: OBJ_FRAME,
         "name": name,
         "fdm": config["fdm"],
         "fdm_config_name": fdm_name,
