@@ -3,6 +3,8 @@
     .venv/bin/python scripts/bake_terrain.py            # the showcase trio
     .venv/bin/python scripts/bake_terrain.py --all      # every curated location
     .venv/bin/python scripts/bake_terrain.py yosemite   # just one
+    .venv/bin/python scripts/bake_terrain.py --places   # the launcher: the
+                                                        # two places, once
 
 A fresh clone has NO terrain baked, so a "mountains" prompt renders the
 labeled flat slab (measured: run fc2cbf725e69 -- "the mountains didnt
@@ -18,16 +20,28 @@ tiles (tens of MB, a few minutes); re-running skips existing bakes.
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
+from urllib.error import URLError
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
+from core.terrain.dem import DEMError  # noqa: E402
 from core.terrain.glo30 import LOCATIONS, bake  # noqa: E402
 from core.terrain.synthesis import TerrainStatistics, generate  # noqa: E402
 
 #: What the showcase matrix bakes; enough for every "mountains" prompt to
 #: land on real terrain. --all adds the remaining curated locations.
 DEFAULT_KEYS = ("matterhorn", "yosemite", "control")
+
+#: The two places the launcher prepares once (Phase 3 D5, ``--places``):
+#: the scene-setting bakes for ``desert`` and ``forest`` (webapp/runs.py
+#: SCENE_SETTING_BAKES) and the showcase matrix's scenes. One GLO-30 tile
+#: each. The launcher runs ``python scripts/bake_terrain.py --places`` at
+#: every start; a bake that is whole is reported up to date and nothing is
+#: streamed again. Google tiles are not part of this: they stream at
+#: render time with the key, as CLAUDE.md requires.
+PLACE_KEYS = ("grand_canyon", "yosemite")
 
 
 def ensure_imagery(key: str, terrain_dir: Path, args) -> None:
@@ -80,6 +94,79 @@ def has_datum(raw: Path) -> bool:
     return isinstance(datum.get("undulation_m"), (int, float))
 
 
+def bake_stale_reason(key: str, terrain_dir: Path,
+                      source: str = "glo30") -> Optional[str]:
+    """None when the bake of ``key`` in ``terrain_dir`` is whole and
+    current; otherwise one sentence naming why it is re-baked.
+
+    Whole and current means: ``<key>.r16`` and ``<key>.json`` exist, the
+    sidecar's ``sha256`` matches the samples on disk (``Heightfield.read``
+    refuses the raster otherwise), the vertical-datum block is present
+    (``has_datum``), the sidecar's dataset is the one asked for
+    (``wants_other_source``), and, for a GLO-30 bake of a curated place,
+    the sidecar's tile stems are the curated table's tiles. Compared on
+    disk only: not the clock, not the network.
+    """
+    terrain_dir = Path(terrain_dir)
+    raw = terrain_dir / f"{key}.r16"
+    sidecar = raw.with_suffix(".json")
+    if not raw.is_file():
+        return f"no bake: {raw.name} is missing"
+    if not sidecar.is_file():
+        return f"no sidecar: {sidecar.name} is missing"
+    from core.terrain.heightfield import Heightfield
+
+    try:
+        field = Heightfield.read(raw)
+    except Exception as exc:
+        if "SHA-256" in str(exc):
+            return (f"sidecar sha256 does not match the {raw.name} samples; "
+                    f"the raster was modified or truncated since it was baked")
+        return f"unreadable bake ({type(exc).__name__}: {exc})"
+    if not has_datum(raw):
+        return "no datum block in its sidecar"
+    if wants_other_source(raw, source):
+        dataset = str(field.provenance.get("dataset", "")) or "unstated"
+        return f"its sidecar names dataset '{dataset}', not {source}"
+    if source == "glo30" and key in LOCATIONS:
+        expected = tuple(LOCATIONS[key].tiles)
+        tiles = field.provenance.get("tiles")
+        if not isinstance(tiles, dict):
+            return "its sidecar records no GLO-30 tiles"
+        if set(tiles) != set(expected):
+            return (f"its sidecar tiles {sorted(tiles)} differ from the "
+                    f"curated tiles {sorted(expected)}")
+    return None
+
+
+def bake_place(key: str, terrain_dir: Path, args) -> bool:
+    """Prepare one of PLACE_KEYS for the launcher, printing the contract
+    lines E6 copies into logs/launch.log, unindented and one per key:
+    ``bake <key> up to date`` | ``bake <key> baking (<reason>)`` then
+    ``bake <key> baked`` | ``bake <key> FAILED <ExceptionName>: <message>``.
+    Returns False only when the bake itself failed; a drape failure stays
+    a printed warning (ensure_imagery) and the verified bake stands."""
+    terrain_dir = Path(terrain_dir)
+    raw = terrain_dir / f"{key}.r16"
+    reason = "--force" if args.force else bake_stale_reason(key, terrain_dir)
+    if reason is None:
+        print(f"bake {key} up to date")
+        print(datum_line(key, raw))
+        ensure_imagery(key, terrain_dir, args)
+        return True
+    print(f"bake {key} baking ({reason})")
+    try:
+        bake(LOCATIONS[key], REPO / "data" / "glo30", terrain_dir,
+             ground_sample_distance_m=args.gsd or 30.0)
+    except (DEMError, URLError, OSError) as exc:
+        print(f"bake {key} FAILED {type(exc).__name__}: {exc}")
+        return False
+    print(f"bake {key} baked")
+    print(datum_line(key, raw))
+    ensure_imagery(key, terrain_dir, args)
+    return True
+
+
 def datum_line(key: str, raw: Path) -> str:
     """The vertical-datum line for a bake (P10), read back from ITS
     sidecar: the geoid undulation at the origin, the interpolation
@@ -110,7 +197,7 @@ def main(argv=None) -> int:
     ap.add_argument("--all", action="store_true",
                     help="bake every curated location and the control ridge")
     ap.add_argument("--force", action="store_true",
-                    help="re-bake locations that are already baked")
+                    help="re-bake locations whose bake is up to date")
     ap.add_argument("--no-imagery", action="store_true",
                     help="skip the Sentinel-2 imagery drape")
     ap.add_argument("--source", choices=("glo30", "3dep"), default="glo30",
@@ -120,7 +207,27 @@ def main(argv=None) -> int:
     ap.add_argument("--gsd", type=float, default=None,
                     help="ground sample distance in metres (default: the "
                          "source's own, 30 for GLO-30 and 10 for 3DEP)")
+    ap.add_argument("--places", action="store_true",
+                    help=f"the launcher's entry: prepare {' and '.join(PLACE_KEYS)} "
+                         f"once from GLO-30 (no other keys, no --all, no "
+                         f"--source) and print 'bake <key> up to date' for a "
+                         f"bake that is whole; exit 1 names a failed bake")
     args = ap.parse_args(argv)
+
+    terrain_dir = REPO / "runs" / "terrain"
+    if args.places:
+        if args.keys or args.all or args.source != "glo30":
+            print(f"--places takes no keys, --all or --source: it prepares "
+                  f"exactly {', '.join(PLACE_KEYS)} from GLO-30")
+            return 2
+        terrain_dir.mkdir(parents=True, exist_ok=True)
+        failed = [key for key in PLACE_KEYS
+                  if not bake_place(key, terrain_dir, args)]
+        if failed:
+            print(f"bake FAILED for {', '.join(failed)}; the other place(s) "
+                  f"were still tried")
+            return 1
+        return 0
 
     keys = list(args.keys) or list(DEFAULT_KEYS)
     if args.all:
@@ -131,13 +238,12 @@ def main(argv=None) -> int:
               f"curated: {', '.join(LOCATIONS)}, plus 'control'")
         return 2
 
-    terrain_dir = REPO / "runs" / "terrain"
     terrain_dir.mkdir(parents=True, exist_ok=True)
     for key in keys:
         if key == "control":
             raw = terrain_dir / "control_ridge.r16"
             if raw.is_file():
-                print(f"  control ridge      already baked ({raw})")
+                print(f"  control ridge      up to date ({raw})")
                 continue
             print("  control ridge      synthesising (showcase parameters)")
             field = generate(size=1024, pixel_size_m=30.0,
@@ -147,9 +253,14 @@ def main(argv=None) -> int:
             field.write(terrain_dir / "control_ridge")
             continue
         raw = terrain_dir / f"{key}.r16"
-        if (raw.is_file() and not args.force and has_datum(raw)
-                and not wants_other_source(raw, args.source)):
-            print(f"  {key:<18} already baked ({raw})")
+        # One skip rule for the CLI and the launcher (bake_stale_reason):
+        # the sidecar sha256 against the samples, the datum block, the
+        # dataset and the tile stems. A bake that fails any of them is
+        # re-baked with the reason printed, never skipped silently.
+        reason = ("--force" if args.force
+                  else bake_stale_reason(key, terrain_dir, args.source))
+        if reason is None:
+            print(f"  {key:<18} up to date ({raw})")
             print(datum_line(key, raw))
             ensure_imagery(key, terrain_dir, args)
             continue
@@ -158,7 +269,7 @@ def main(argv=None) -> int:
             # georeferenced run (datum.sidecar_without_datum, measured on
             # the owner's machine), so it is re-baked, not skipped. The
             # downloaded tiles are cached, so this is ingest + verify only.
-            print(f"  {key:<18} re-baking ({'--force' if args.force else 'no datum block in its sidecar'})")
+            print(f"  {key:<18} re-baking ({reason})")
         elif args.source == "3dep":
             print(f"  {key:<18} baking from USGS 3DEP 1/3 arc-second "
                   f"(windowed fetch + ingest + verify)")
