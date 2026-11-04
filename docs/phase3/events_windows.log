@@ -6,3 +6,4 @@
 {"agent": "decision", "box": "", "stage": "plan", "kind": "note", "note": "PASS decision 6: control surfaces out of Phase 3", "t": 1793759610.2773807, "machine": "windows"}
 {"agent": "decision", "box": "", "stage": "plan", "kind": "note", "note": "machine: no D: drive, FLIGHTSIM_CACHE now C:\\flightsim-cache; no gh/token so CI not readable from Windows; phase-2-final fast-forwarded to bd68745b", "t": 1793759610.439563, "machine": "windows"}
 {"agent": "decision", "box": "", "stage": "plan", "kind": "note", "note": "peers.json mac=flightsim-15 (only peer listed by ListAgents; this session is flightsim-64)", "t": 1793759610.6123798, "machine": "windows"}
+{"agent": "decision", "box": "A", "stage": "msg", "kind": "note", "note": "msg P3 go A decisions=ok", "t": 1793759621.761798, "machine": "windows"}
