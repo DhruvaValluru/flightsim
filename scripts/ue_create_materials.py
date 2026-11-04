@@ -1719,9 +1719,26 @@ def _storm_material(name):
         aside = f"{PATH}/{name}{STORM_ASIDE_SUFFIX}"
         if unreal.EditorAssetLibrary.does_asset_exist(aside):
             unreal.EditorAssetLibrary.delete_asset(aside)
-        if not unreal.EditorAssetLibrary.rename_asset(full, aside):
+        # Set aside as a COPY (duplicate, then delete the original), never by
+        # rename_asset: renaming registers a session-wide soft-path redirect
+        # <name> -> <name>_prev (FAssetRenameManager::RenameReferencingSoftObjectPaths,
+        # GRedirectCollector), and the asset metadata is keyed by soft object
+        # path (FMetaData on UE 5.6+), so when the NEW asset built at <name> is
+        # saved, FSoftObjectPath::PreSavePath rewrites its STORM_GENERATION_TAG
+        # key to the _prev path. The next run then reads no stamp on the new
+        # asset and rebuilds it again, every run (measured on the Windows 5.7
+        # machine, 2026-11-04, run A-2: M_RainDrops and M_RainSplash REBUILT and
+        # CREATED on every run; the saved .uasset carried the stamp keyed to
+        # M_RainDrops_prev). A duplicate registers no redirect.
+        copied = unreal.EditorAssetLibrary.duplicate_asset(full, aside)
+        if copied is None or not unreal.EditorAssetLibrary.does_asset_exist(aside):
             raise RuntimeError(f"{full} was built by an older generation of this script "
                                f"(this one is {STORM_GENERATIONS[name]}) and could not be set aside")
+        if not unreal.EditorAssetLibrary.delete_asset(full):
+            unreal.EditorAssetLibrary.delete_asset(aside)
+            raise RuntimeError(f"{full} was built by an older generation of this script "
+                               f"(this one is {STORM_GENERATIONS[name]}) and could not be removed "
+                               f"for the rebuild")
         _ASIDE[name] = aside
         print(f"MATERIAL-REBUILT: {full} (built by an older generation of this script; "
               f"this one is {STORM_GENERATIONS[name]}; the old asset is kept at {aside} until "
