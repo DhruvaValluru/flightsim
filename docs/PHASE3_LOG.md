@@ -45,3 +45,5 @@ engine's Marketplace folder; later rows say which engine they ran on.
 | A3 | A-2 | `ue_preflight.ps1` at UE_5.5 / at UE_5.7 | exit 1 `engine.version_mismatch: found 5.5.4, pinned 5.7` / exit 0 `engine UE 5.7.4 at C:\Program Files\Epic Games\UE_5.7` | |
 | A4 | A-2 | PowerShell `Get-PluginSourceHash` on the fixture and the repo | fixture `0141215e…` equals golden; repo `770fa283…` equals the stamp and the Python twin | |
 | A2 | A-2 | `pytest -q tests/test_platform.py` | exit 0 | |
+| A5 | A-2 | `check_bridge_api.sh` with `UE_ROOT` at UE_5.7 | exit 0, `API surface matches` (CesiumRuntime module found in the 5.7 Marketplace folder) | |
+| A5 | A-2 | `run_ue_scenario.ps1` c172p parity card on 5.7 | FAIL (machine): commandlet exit 1, no telemetry; `Failed to load … UnrealEditor-CesiumRuntime.dll (GetLastError=4551)`, Code Integrity 3077/3033, dll NotSigned; Smart App Control blocks it | blocks every editor run; owner's call |
