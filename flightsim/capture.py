@@ -567,7 +567,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "accumulation; the Python velocity-line blur is then recorded, "
                              "not applied). Off by default.")
     parser.add_argument("--no-host-flight", action="store_true",
-                        help="with --render, skip the host's own solve "
+                        help="developer only. With --render, skip the host's own solve "
                              "flight and solve the poses over the "
                              "headless pre-run instead. Faster by one "
                              "commandlet pass, and the aircraft labels "
@@ -674,6 +674,49 @@ def _run_unattended(command, log):
         print(f"REFUSED -- {result.sentence()}")
         return SimpleNamespace(returncode=124)
     return SimpleNamespace(returncode=result.returncode if result.returncode is not None else 1)
+
+
+def _log_tail(path, lines: int = 12) -> str:
+    """The last ``lines`` non-empty lines of the log at ``path``, or an
+    empty string when it cannot be read."""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    kept = [line.rstrip() for line in text.splitlines() if line.strip()]
+    return "\n".join(kept[-lines:])
+
+
+def _host_flight_cause(returncode, tail: str) -> str:
+    """The class of fault behind a non-zero commandlet exit."""
+    low = tail.lower()
+    if returncode == 124:
+        return "the pass stalled or ran out of time and was stopped"
+    if any(m in low for m in ("fatal error", "assertion failed", "unhandled exception",
+                              "access violation", "crash")) or (
+            isinstance(returncode, int) and (returncode < 0 or returncode > 255)):
+        return "the engine crashed"
+    if any(m in low for m in ("failed to load", "can't find file", "cannot find",
+                              "missing", "no such file", "does not exist")):
+        return "an asset or file the pass needs is missing"
+    if any(m in low for m in ("unknown command", "invalid argument", "bad argument",
+                              "unrecognized", "usage:")):
+        return "the pass was started with an argument it does not accept"
+    return "the commandlet failed for a reason its log does not name"
+
+
+def _host_flight_refusal(returncode, log_path) -> str:
+    """The refusal when the host flight commandlet exits non-zero: it
+    names the fault (exit code, cause class, the log's last lines and the
+    log's path) and carries no developer flag."""
+    tail = _log_tail(log_path)
+    cause = _host_flight_cause(returncode, tail)
+    text = (f"REFUSED -- capture.host_flight: the scenario commandlet exited "
+            f"{returncode} and recorded no flight ({cause}); nothing was "
+            f"rendered. Its log is {log_path}.")
+    if tail:
+        text += "\nlast lines of the log:\n" + "\n".join("    " + l for l in tail.splitlines())
+    return text
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -1274,14 +1317,9 @@ def _run(args: argparse.Namespace) -> int:
               "describe the flight the pixels show ...")
         completed = _run_unattended(command, host_telemetry.parent / "host_flight_pass.log")
         if completed.returncode != 0:
-            print(f"REFUSED -- capture.host_flight: the scenario "
-                  f"commandlet exited {completed.returncode} and recorded "
-                  f"no flight; nothing was rendered. The wrapper printed "
-                  f"its last words above and kept them in "
-                  f"{host_telemetry.with_suffix('.log')}. Re-run with "
-                  f"--no-host-flight to solve over the pre-run instead, "
-                  f"knowing the labels will then describe a different "
-                  f"flight from the one the pixels show")
+            print(_host_flight_refusal(
+                completed.returncode,
+                host_telemetry.parent / "host_flight_pass.log"))
             return 1
         try:
             # The whole record: every frame's ``state`` is cut from it.
