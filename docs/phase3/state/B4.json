@@ -14,8 +14,9 @@
     "step9 gate10_render_repro.py --card <gate6 card>: bounded or bit-identical, exit 0",
     "step10 pytest tests/test_engine_bundle_golden.py with the A12 fixture: 0 skipped, exit 0"
   ],
+  "pushed_commit": "3e59358d",
   "stage": "pushed",
   "unit": "B4",
-  "updated": "2026-11-04T12:37:05",
+  "updated": "2026-11-04T12:37:40",
   "worktree": "../p3-B4"
 }

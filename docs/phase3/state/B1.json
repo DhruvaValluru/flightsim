@@ -11,8 +11,9 @@
     "step 9: deploy_windows.ps1 installs from the lock and the import verify passes",
     "step 10: CI matrix (ubuntu, windows, macos) green on the lock install step"
   ],
+  "pushed_commit": "3e59358d",
   "stage": "pushed",
   "unit": "B1",
-  "updated": "2026-11-04T12:37:05",
+  "updated": "2026-11-04T12:37:40",
   "worktree": "../p3-B1"
 }
