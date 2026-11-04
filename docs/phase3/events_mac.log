@@ -1474,3 +1474,4 @@
 {"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12r3", "kind": "start", "cmd": "git commit -q -F -", "note": "commit the fix", "t": 1793828760.43018, "machine": "mac"}
 {"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12r3", "kind": "end", "cmd": "git commit -q -F -", "exit": 0, "secs": 0.1, "note": "commit the fix", "t": 1793828760.4883552, "machine": "mac"}
 {"agent": "mac", "box": "A10", "stage": "msg", "kind": "note", "note": "msg P3 pushed 8a9bda0e letter=A boxes=A10 (retry 2)", "t": 1793828785.926079, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "kind": "note", "note": "PASS built A12 retry 3: 27356180 on p3-A12r3; cited mesh without its vertex OBJs graded by containment; golden 9 passed, required files 87 passed", "t": 1793828790.493966, "machine": "mac"}

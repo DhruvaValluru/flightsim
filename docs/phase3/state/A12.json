@@ -2,8 +2,8 @@
   "A-2": "",
   "FAIL": "",
   "PASS": "",
-  "budget_used": 28,
-  "builder_commit": "7f1a489f",
+  "budget_used": 22,
+  "builder_commit": 27356180,
   "claims": [
     "core/capture/verify.py",
     "core/messages/catalog.yaml",
@@ -30,9 +30,9 @@
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "pushed",
+  "stage": "built_local",
   "unit": "A12+A13",
-  "updated": "2026-11-04T16:28:00",
+  "updated": "2026-11-04T16:46:30",
   "verdict": "",
   "windows_build": "",
   "worktree": "../p3-A12r2"
