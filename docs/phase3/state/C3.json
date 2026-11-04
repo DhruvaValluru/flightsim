@@ -3,11 +3,12 @@
   "builder_commit": "d783e8ff",
   "built_commit": "d783e8ff",
   "claims": [],
+  "integrated_commit": "4c243a8c",
   "letter": "C",
   "needs_windows": false,
   "pending_windows": [],
-  "stage": "built",
+  "stage": "integrated",
   "unit": "C3",
-  "updated": "2026-11-04T13:05:17",
+  "updated": "2026-11-04T13:19:01",
   "worktree": "../p3-C3"
 }

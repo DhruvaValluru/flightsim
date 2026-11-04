@@ -957,3 +957,96 @@ def test_pinned_sources_measure_the_extents_and_put_the_nose_on_its_label(
     # nose landed this far from its label along x.
     vrp_rule_residual = manifest["vrp_actor_cm"][0] + extents["nose"] - nose_label_x
     assert vrp_rule_residual == pytest.approx(pinned["vrp_rule_residual_cm"], abs=5.0)
+
+
+# ---------------------------------------------------------------------------
+# C7: the landing gear as its own OBJ. A config that declares ONE
+# landing_gear component sends the gear-matched triangles (the same
+# gear_geometry patterns that anchor z) to SM_<aircraft>_<id>.obj and a
+# mesh-manifest components[] row; the z anchor itself does not move.
+
+GEAR_COMPONENT = {"id": "landing_gear", "class": "landing_gear",
+                  "source": "nose_gear"}
+GEAR_PART = "SM_testcraft_landing_gear"
+
+
+def _labelled_config_with_gear(tmp_path, components=(GEAR_COMPONENT,)):
+    config_path = _write_labelled_config(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["labels"]["components"] = list(components)
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    return config_path
+
+
+def _faces(obj_path: Path):
+    return [line for line in obj_path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("f ")]
+
+
+def test_gear_objects_go_to_their_own_obj_and_manifest_row(tmp_path, monkeypatch):
+    from assets_pipeline import convert as convert_module
+
+    _point_fdm_at(monkeypatch, _fdm_xml(tmp_path, VRP_80_0_5))
+    manifest, manifest_path = _convert(tmp_path, _labelled_config_with_gear(tmp_path))
+    out = manifest_path.parent
+
+    assert manifest["parts"] == ["body", "aileron_l", GEAR_PART]
+    assert manifest["triangles"] == {"body": 1, "aileron_l": 1, GEAR_PART: 1}
+    assert len(_faces(out / "body.obj")) == 1           # the fuselage only
+    gear_obj = out / f"{GEAR_PART}.obj"
+    assert len(_faces(gear_obj)) == 1                   # LeftWheel
+    gear_z = [float(line.split()[3]) for line in gear_obj.read_text(encoding="utf-8").splitlines()
+              if line.startswith("v ")]
+    assert min(gear_z) == pytest.approx(-120.0)         # the wheel's lowest vertex, cm
+
+    [row] = manifest["components"]
+    extent = row.pop("mesh_extent_actor_m")
+    assert row == {
+        "id": "landing_gear", "class": "landing_gear", "station": None,
+        "part": GEAR_PART,
+        "asset_path": f"/Game/Aircraft/testcraft/{GEAR_PART}", "triangles": 1,
+        "vertices": 3, "model_vars": {},
+        "mesh_origin_actor_cm": manifest["mesh_origin_actor_cm"], "mass_lb": 0.0,
+    }
+    for axis, lo_hi in {"x": (-1.5, -1.0), "y": (-0.5, 0.5), "z": (-1.2, -1.0)}.items():
+        assert extent[axis] == pytest.approx(lo_hi), axis
+    assert set(extent) == {"x", "y", "z"}               # the top-level shape
+
+    # One landing_gear component per aircraft: two refuse by name.
+    (tmp_path / "two").mkdir()
+    two = _labelled_config_with_gear(
+        tmp_path / "two", [GEAR_COMPONENT, {**GEAR_COMPONENT, "id": "main_gear"}])
+    with pytest.raises(convert_module.ConvertError, match="2 landing_gear components"):
+        _convert(tmp_path / "two", two)
+
+    # A declared gear whose patterns match nothing is an empty OBJ: refused.
+    (tmp_path / "none").mkdir()
+    none = _labelled_config_with_gear(tmp_path / "none")
+    config = json.loads(none.read_text(encoding="utf-8"))
+    config["gear_geometry"] = {"objects": ["NoSuchObject"]}
+    none.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(convert_module.ConvertError, match="matched no geometry"):
+        _convert(tmp_path / "none", none)
+
+
+def test_gear_split_leaves_the_z_anchor_unchanged(tmp_path, monkeypatch):
+    _point_fdm_at(monkeypatch, _fdm_xml(tmp_path, VRP_80_0_5))
+    (tmp_path / "plain").mkdir()
+    (tmp_path / "split").mkdir()
+    plain, plain_path = _convert(tmp_path / "plain",
+                                 _write_labelled_config(tmp_path / "plain"))
+    split, _ = _convert(tmp_path / "split",
+                        _labelled_config_with_gear(tmp_path / "split"))
+
+    # No component declared: the converter is as before (gear in the body).
+    assert plain["parts"] == ["body", "aileron_l"] and plain["components"] == []
+    assert len(_faces(plain_path.parent / "body.obj")) == 2
+    # The z anchor and every measured extent are the same vertices either way.
+    for key in ("mesh_extents_actor_cm", "mesh_extent_actor_m", "vertices_measured",
+                "gear_vertices_measured", "mesh_origin_actor_cm",
+                "mesh_origin_measured_actor_cm", "origin_anchor", "mesh_origin_basis"):
+        assert plain[key] == split[key], key
+    assert split["mesh_extents_actor_cm"]["gear_lowest"] == -120.0
+    assert split["gear_vertices_measured"] == 3 and split["vertices_measured"] == 9
+    assert split["origin_anchor"]["z"] == "main-gear contact"
+    assert split["mesh_origin_actor_cm"][2] == pytest.approx(-32.4)

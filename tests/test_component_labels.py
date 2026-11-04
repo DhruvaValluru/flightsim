@@ -10,9 +10,11 @@ import numpy as np
 import pytest
 
 from core.capture.labels import (
-    attach_engine_labels, camera_axes, component_label_record, conventions,
-    measure_object, object_label_record, tight_box_basis,
+    GEAR_RETRACTED_BASIS, attach_engine_labels, camera_axes,
+    component_label_record, conventions, measure_object, object_label_record,
+    tight_box_basis,
 )
+from core.capture.verify import verify_component_boxes
 from core.capture.manifest import (
     MANIFEST_VERSION, SUPPORTED_MANIFEST_VERSIONS, read_capture_manifest,
 )
@@ -178,3 +180,111 @@ def test_read_capture_manifest_reads_3_to_8_and_refuses_9(tmp_path):
                 read_capture_manifest(path)
         else:
             assert read_capture_manifest(path)["manifest_version"] == version
+
+
+# ---------------------------------------------------------------------------
+# C7: landing gear. Gear down is boxed like any component; retracted gear
+# (gear/gear-pos-norm below 0.01) is null with the basis "gear retracted",
+# never a zero-size box. The A-4's gear entries have no mesh at all.
+
+GEAR = 65
+_AIRCRAFT_STATE = {"north_m": 1000.0, "east_m": 0.0, "alt_m": 1000.0,
+                   "roll_deg": 0.0, "pitch_deg": 0.0, "heading_deg": 0.0}
+_GEAR_BOX = {"forward": (-1.0, 1.0), "right": (-1.0, 1.0), "down": (1.0, 2.0)}
+
+
+def _gear_object(obj_id="landing_gear:landing_gear:0"):
+    return SceneObject(id=obj_id, int_id=GEAR, class_name="landing_gear",
+                       class_id=class_id_of(DEFAULT_CLASSES, "landing_gear"),
+                       instance=0, role="component", mesh_sha256=None, licence=None,
+                       in_scene=True, labelled=True, parent="aircraft:primary")
+
+
+def _gear_entry(gear_pos, extent_body=_GEAR_BOX, obj_id="landing_gear:landing_gear:0",
+                via_record=True):
+    """A landing_gear record at gear position ``gear_pos``: the channel on
+    the frame record's recorded row (the recorder's), or on the aircraft
+    state dict when ``via_record`` is False."""
+    record = level_camera_record()
+    state = dict(_AIRCRAFT_STATE)
+    if via_record:
+        record["state"] = {"gear/gear-pos-norm": gear_pos, "alt_m": 1000.0}
+    else:
+        state["gear/gear-pos-norm"] = gear_pos
+    return component_label_record(_gear_object(obj_id), {"id": "aircraft:primary"},
+                                  record, state, None,
+                                  camera_axes(record["quaternion_wxyz"]), extent_body)
+
+
+def test_extended_gear_has_a_tight_box():
+    entry = _gear_entry(1.0)
+    assert entry["class"] == "landing_gear" and entry["parent"] == "aircraft:primary"
+    assert entry["bbox_2d_hull"] is not None and entry["fraction_in_frame"] == 1.0
+    assert "bbox_2d_tight" not in entry["basis"]
+    assert not any(GEAR_RETRACTED_BASIS in s for s in entry["not_claimed"])
+    mask = _mask(40, 60, [(AIRCRAFT, 10, 10, 50, 30), (GEAR, 25, 26, 35, 30)])
+    entry["bbox_2d_tight"] = measure_object(mask, None, GEAR)["bbox_2d_tight"]
+    assert entry["bbox_2d_tight"] == [25.0, 26.0, 35.0, 30.0]
+    u0, v0, u1, v1 = entry["bbox_2d_tight"]
+    assert u1 > u0 and v1 > v0                      # a real box, not a zero-size one
+    assert tight_box_basis(entry) is None
+    # No channel recorded (a fixed-gear row without it): the gear is down.
+    record = level_camera_record()
+    plain = component_label_record(_gear_object(), {"id": "aircraft:primary"}, record,
+                                   dict(_AIRCRAFT_STATE), None,
+                                   camera_axes(record["quaternion_wxyz"]), _GEAR_BOX)
+    assert "bbox_2d_tight" not in plain["basis"]
+
+
+def test_retracted_gear_is_null_with_gear_retracted_basis():
+    assert GEAR_RETRACTED_BASIS == "gear retracted"
+    entry = _gear_entry(0.0)
+    assert entry["bbox_2d_tight"] is None
+    assert entry["basis"]["bbox_2d_tight"] == GEAR_RETRACTED_BASIS
+    assert any(GEAR_RETRACTED_BASIS in s for s in entry["not_claimed"])
+    assert entry["bbox_2d_hull"] is not None        # where the card says the gear sits
+    # The threshold: 0.009 is retracted, 0.01 is not.
+    assert _gear_entry(0.009)["basis"]["bbox_2d_tight"] == GEAR_RETRACTED_BASIS
+    assert "bbox_2d_tight" not in _gear_entry(0.01)["basis"]
+    # C6's component_boxes skips a null tight box that carries a basis: the
+    # retracted record alone grades nothing (NOT RUN, never FAIL), and beside
+    # a gear-down record with a box it is skipped while that one passes.
+    parent = {"id": "aircraft:primary", "int_id": AIRCRAFT, "class": "aircraft",
+              "class_id": class_id_of(DEFAULT_CLASSES, "aircraft"), "parent": None,
+              "bbox_2d_hull": [0.0, 0.0, 1280.0, 720.0],
+              "bbox_2d_tight": [0.0, 0.0, 1280.0, 720.0]}
+
+    def manifest_with(*records):
+        return {"frames": [{"camera_id": "cam", "index": 0,
+                            "labels": {"objects": [parent, *records]}}],
+                "objects": _hand_card_objects()}
+
+    check = verify_component_boxes(manifest_with(entry))
+    assert check.status == "NOT RUN" and "no frame carries" in check.detail
+    down = _gear_entry(1.0)
+    u0, v0, u1, v1 = down["bbox_2d_hull"]
+    cu, cv = (u0 + u1) / 2.0, (v0 + v1) / 2.0
+    down["bbox_2d_tight"] = [cu - 1.0, cv - 1.0, cu + 1.0, cv + 1.0]
+    check = verify_component_boxes(manifest_with(entry, down))
+    assert check.status == "PASS", check.detail
+
+
+def test_components_a4_gear_has_no_mesh_and_is_retracted_airborne():
+    """The A-4's three gear entries stay declared with ``mesh: null`` and
+    ``extent_body: null`` (its mesh has no gear vertex); airborne the A-4
+    retracts (gear/gear-pos-norm 0), so the record is null with the gear
+    basis, never a box."""
+    entry = _gear_entry(0.0, extent_body=None, obj_id="landing_gear:nose_gear:0",
+                        via_record=False)
+    assert entry["id"] == "landing_gear:nose_gear:0"
+    assert entry["class"] == "landing_gear" and entry["parent"] == "aircraft:primary"
+    assert entry["bbox_2d_hull"] is None and entry["fraction_in_frame"] is None
+    assert "declares no extent" in entry["basis"]["bbox_2d_hull"]
+    assert entry["bbox_2d_tight"] is None
+    assert entry["basis"]["bbox_2d_tight"] == GEAR_RETRACTED_BASIS
+    assert any(GEAR_RETRACTED_BASIS in s for s in entry["not_claimed"])
+    # On the ground (gear down) the same mesh-less entry has no gear basis:
+    # its null tight box is C5's "card declares no extent" case.
+    down = _gear_entry(1.0, extent_body=None, obj_id="landing_gear:nose_gear:0",
+                       via_record=False)
+    assert down["bbox_2d_tight"] is None and "bbox_2d_tight" not in down["basis"]

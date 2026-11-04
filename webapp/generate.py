@@ -66,6 +66,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from core.campaign import Campaign, CampaignError
 from core.campaign.campaign import (
+    provision_spec,
     CANCELLED, DONE, FAILED, PAUSED, PLANNED, RUNNING, estimate_frames,
     reconcile_images, release_stated_counts, stated_images,
 )
@@ -78,6 +79,7 @@ from core.nl.llm_compiler import LLMCompileError, compile_prompt_llm
 from core.scenario.randomization import RandomizationError, sample_randomization
 from core.scenario.spec import ScenarioSpec
 from core.scenario.validate import validate
+from webapp.runs import provision_place
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -549,7 +551,15 @@ class GenerateService:
                     "expert": [expert_campaign(prompt, explicit, fmt, seed, answers=answers,
                                                tier=compiled["tier"], plan=True)]}
         spec: ScenarioSpec = compiled["spec"]
-        refusals = plan_refusals(spec)
+        # The place, provisioned as POST /run provisions it (decision 17):
+        # the preview shows the staged scene the campaign will fly and
+        # names the bake it lacks, exactly the refusal ``start`` raises.
+        refusals = []
+        try:
+            provision_spec(spec, provision_place, {})
+        except CampaignError as exc:
+            refusals.append(words(exc))
+        refusals += plan_refusals(spec)
         stated = stated_images(spec)
         try:
             images = reconcile_images(spec, explicit, DEFAULT_IMAGES)
@@ -605,8 +615,15 @@ class GenerateService:
         if stated is not None:      # the sample is one case of the campaign
             release_stated_counts(spec, stated)
         engine, render_note = render_here(spec)
-        record = {"spec": spec.to_dict(), "seed": int(seed),
-                  "capture": {"max_previews": 1, "card": True, **({"render": True} if engine else {})}}
+        # The sample is one case of the campaign: it flies the ground the
+        # campaign's cases will (the single run's provisioning, decision 17).
+        try:
+            capture = provision_spec(
+                spec, provision_place,
+                {"max_previews": 1, "card": True, **({"render": True} if engine else {})})
+        except CampaignError as exc:
+            raise GenerateRefusal(words(exc))
+        record = {"spec": spec.to_dict(), "seed": int(seed), "capture": capture}
         preview_id = uuid.uuid4().hex[:12]
         out = self.root / "previews" / preview_id
         out.mkdir(parents=True, exist_ok=True)
@@ -708,7 +725,7 @@ class GenerateService:
                 out=self.root / campaign_id, format=fmt, workers=workers,
                 disk_budget_bytes=disk_budget_bytes,
                 tier=tier if tier in ("llm", "regex") else "regex",
-                capture=capture)
+                capture=capture, provision=provision_place)
             render, render_note = render_here(campaign._spec())
             if render:
                 campaign.record["capture"]["render"] = True

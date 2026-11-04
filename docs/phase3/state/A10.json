@@ -1,26 +1,33 @@
 {
   "A-2": "",
   "FAIL": "",
-  "budget_used": 14,
-  "builder_commit": "47d3e5db",
-  "claims": [],
+  "budget_used": 36,
+  "builder_commit": "4b1d48c9",
+  "claims": [
+    "core/campaign/campaign.py",
+    "core/nl/llm_compiler.py",
+    "tests/test_llm_compiler.py",
+    "tests/test_webapp_generate.py",
+    "webapp/generate.py",
+    "webapp/runs.py",
+    "webapp/server.py"
+  ],
   "failures": [
     "run A-2 packet docs/phase3/packets/A10-1.md: /generate/plan ok; /generate/start campaign 56e6d0854f88 failed campaign.target_unreachable because its capture refused google_tiles.terrain (no bake on the campaign path; the single run maps the scene onto the grand_canyon bake); llm tier fell back to regex (unknown field 'cameras'); decision 17; Mac scope"
   ],
-  "integrated_commit": "e183e5aa3d5878910488d622e5933ccba2f1eaed",
+  "integrated_commit": "bf1f13f7",
   "letter": "A",
   "needs_windows": true,
   "pending_windows": [
-    "step 1 reproduce /generate refusal on Windows",
-    "step 5 one-line prompt to finished campaign"
+    "one-line prompt on /generate.html reaches a finished campaign (step 5): capture carries --terrain grand_canyon, tier llm, state done, card downloadable"
   ],
-  "pushed_commit": "23bad766",
+  "pushed_commit": "9bb12d95",
   "retry": 1,
   "route": "box",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "building",
-  "updated": "2026-11-04T13:16:33",
+  "stage": "pushed",
+  "updated": "2026-11-04T13:51:05",
   "verdict": "",
-  "worktree": "../p3-A10"
+  "worktree": "../p3-A10r"
 }

@@ -58,6 +58,20 @@ The rules, stated once:
   no config exists. ``in_scene`` says the object is drawn in the scene
   the card describes; ``labelled`` says a label is produced for it. A
   missing label is thereby distinguishable from a missing object.
+* Components (Phase C): the primary's ``labels.components[]`` (a
+  payload store, a landing gear) are composed last, one entry each in
+  declared order, ``id`` ``<class>:<bare component id>:0`` with
+  ``role`` ``component`` and ``parent`` the primary's id. Their
+  ``int_id`` comes from :data:`COMPONENT_BAND` (64..127) while every
+  other object keeps 1.. (at most 63 when components exist), so a
+  traffic aircraft can never share an integer with a store. ``mesh``
+  is the part's static-mesh name ``SM_<aircraft>_<component id>``
+  (the converter's OBJ stem) when the mesh manifest on THIS machine
+  has a ``components[]`` row for it, else null (a landing gear has no
+  OBJ; a headless machine has no manifest); ``extent_body`` is that
+  row's measured actor-frame extent re-based on the CG once, here
+  (labels.hull_box_body_m), so the card and the manifest carry one
+  value. Python allocates every integer; the engine invents none.
 
 What is NOT claimed: this module says which objects exist and what
 integer each carries. Whether the ID image actually holds only those
@@ -95,6 +109,13 @@ PRIMARY_INT_ID = 1
 ROLE_PRIMARY = "primary"
 ROLE_TRAFFIC = "traffic"
 ROLE_SCENE = "scene"
+#: Phase C: a component of the primary (``parent`` names the aircraft).
+ROLE_COMPONENT = "component"
+#: The ``int_id`` band of the primary's components, inclusive: 64..127.
+#: Every other object is numbered from 1 and, when components exist,
+#: may not reach the band, so a traffic id and a component id never
+#: collide (tasks/phase3_todo.md, preamble rule 2).
+COMPONENT_BAND = (64, 127)
 
 CLASS_AIRCRAFT = "aircraft"
 #: The component classes (Phase C): parts of an aircraft that carry their
@@ -152,6 +173,13 @@ class SceneObject:
     labelled: bool
     #: a component's aircraft ``id``; None for every other object
     parent: Optional[str] = None
+    #: a component's static-mesh name (``SM_<aircraft>_<component id>``,
+    #: the mesh manifest's ``part``); None without a converted part
+    mesh: Optional[str] = None
+    #: a component's body-frame box about the CG, ``{"forward": (aft,
+    #: fwd), "right": (left, right), "down": (top, bottom)}`` metres
+    #: (labels.hull_box_body_m); None when no mesh row measured it
+    extent_body: Optional[Dict] = None
 
     def to_dict(self) -> Dict:
         out = {
@@ -163,7 +191,22 @@ class SceneObject:
         }
         if self.parent is not None:
             out["parent"] = self.parent
+        # A component always states its mesh and extent (null when it
+        # has none); every other object's entry is the shape it was.
+        if self.parent is not None or self.mesh is not None:
+            out["mesh"] = self.mesh
+        if self.parent is not None or self.extent_body is not None:
+            out["extent_body"] = extent_body_lists(self.extent_body)
         return out
+
+
+def extent_body_lists(extent: Optional[Dict]) -> Optional[Dict[str, List[float]]]:
+    """A body-frame box with JSON lists for its pairs (the card and the
+    manifest form), or None."""
+    if extent is None:
+        return None
+    return {str(axis): [float(pair[0]), float(pair[1])]
+            for axis, pair in extent.items()}
 
 
 def taxonomy_classes(spec) -> List[str]:
@@ -213,6 +256,89 @@ def licence_of(aircraft: str, config_dir: Optional[Path] = None) -> Optional[str
         return None
     licence = (config.get("license") or {}).get("license_name")
     return str(licence) if licence else None
+
+
+def component_object_id(cls: str, component_id: str) -> str:
+    """The card ``id`` of a component, ``<class>:<bare component id>:0``
+    (the existing ``class:name:n`` form). The bare id is the key shared
+    with the config's ``labels.components[].id`` and the mesh
+    manifest's ``components[].id``; the card id is derived from it."""
+    return f"{cls}:{component_id}:0"
+
+
+def component_mesh_name(aircraft: str, component_id: str) -> str:
+    """A component's static-mesh name, ``SM_<aircraft>_<component id>``:
+    the converter's OBJ stem and ``components[].part`` (C2) and the
+    engine's asset name (C4). One convention, stated once."""
+    return f"SM_{aircraft}_{component_id}"
+
+
+def read_mesh_manifest(aircraft: str) -> Optional[Dict]:
+    """The imported model's ``mesh_manifest.json`` on THIS machine as a
+    dict, or None when the machine has no converted mesh (a headless
+    clone honestly has none; that is not a refusal)."""
+    path = mesh_manifest_path(aircraft)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def component_entries(aircraft: str, classes: Sequence[str], parent: Dict,
+                      config_dir: Optional[Path] = None) -> List[Dict]:
+    """One entry per ``labels.components[]`` of the primary's config, in
+    declared order, not yet numbered: role ``component``, ``parent`` the
+    primary's id, ``class`` the component's (payload | landing_gear),
+    ``mesh`` and ``extent_body`` from the mesh manifest's matching
+    ``components[]`` row (matched on the bare id) or both None when no
+    row names it (a landing gear has no OBJ; a machine without the
+    converted mesh has no manifest). Refuses by name
+    (``annotation.identity``) a row whose ``part`` is not the mesh name
+    the card would state: one name per part or the engine attaches
+    the wrong mesh. An aircraft with no config composes none."""
+    config = Path(config_dir or CONFIG_DIR) / f"{aircraft}.json"
+    if not config.is_file():
+        return []
+    from .airframe import load_airframe
+
+    airframe = load_airframe(aircraft, config_dir)
+    if not airframe.components:
+        return []
+    manifest = read_mesh_manifest(aircraft)
+    rows: Dict[str, Dict] = {}
+    for row in (manifest or {}).get("components") or []:
+        if isinstance(row, dict) and row.get("id") is not None:
+            rows[str(row["id"])] = row
+    entries: List[Dict] = []
+    for component in airframe.components:
+        mesh = None
+        extent = None
+        row = rows.get(component.id)
+        if row is not None:
+            mesh = component_mesh_name(aircraft, component.id)
+            if str(row.get("part")) != mesh:
+                raise ObjectIdentityError(
+                    f"component {component.id!r} of {aircraft}: the mesh manifest "
+                    f"names its part {row.get('part')!r} where the card's mesh is "
+                    f"{mesh!r}; one name per part (SM_<aircraft>_<component id>) "
+                    f"or the engine attaches the wrong mesh")
+            # labels.py imports this module at import time; import here.
+            from .labels import hull_box_body_m
+
+            extent, _basis = hull_box_body_m({**manifest, **row}, airframe)
+        entries.append({
+            "id": component_object_id(component.cls, component.id),
+            "class_name": component.cls,
+            "class_id": class_id_of(classes, component.cls),
+            "instance": 0, "role": ROLE_COMPONENT,
+            "mesh_sha256": None, "licence": parent.get("licence"),
+            "in_scene": True, "labelled": True,
+            "parent": parent["id"], "mesh": mesh, "extent_body": extent,
+        })
+    return entries
 
 
 def object_entries(spec, config_dir: Optional[Path] = None,
@@ -319,6 +445,9 @@ def object_entries(spec, config_dir: Optional[Path] = None,
                 "mesh_sha256": None, "licence": None,
                 "in_scene": True, "labelled": True,
             })
+    # Phase C: the primary's components, composed last in declared order
+    # (assign_int_ids gives them the 64..127 band, so nothing above moves).
+    entries.extend(component_entries(primary, classes, entries[0], config_dir))
     return entries
 
 
@@ -436,10 +565,30 @@ def frame_presence(presence: Sequence[Dict], records: Sequence[Dict],
 
 
 def assign_int_ids(entries: Sequence[Dict]) -> List[SceneObject]:
-    """Number the entries 1.. in the order given. Refuses by name
-    (``annotation.identity``) a list the 8-bit stencil cannot carry and
-    a list that names one id twice -- an id that means two objects is
-    exactly the mask a consumer cannot trust."""
+    """Number the entries in the order given: every non-component entry
+    1.. (unchanged by Phase C) and every ``component`` entry from the
+    start of :data:`COMPONENT_BAND` in declared order, so a traffic
+    aircraft (numbered from 1) and a component (numbered from 64) can
+    never share an integer. Refuses by name (``annotation.identity``) a
+    list the 8-bit stencil cannot carry, a list whose non-component
+    objects would reach the band (only when the primary has components;
+    a scene with none keeps the whole 1..255), more components than the
+    band holds, and a list that names one id twice -- an id that means
+    two objects is exactly the mask a consumer cannot trust."""
+    components = [e for e in entries if e.get("role") == ROLE_COMPONENT]
+    others = len(entries) - len(components)
+    low, high = COMPONENT_BAND
+    if components and others > low - 1:
+        raise ObjectIdentityError(
+            f"{others} labelled objects beside the primary's {len(components)} "
+            f"components need ids 1..{others} but the component band {low}-{high} "
+            f"starts at {low}; refusing to give a traffic aircraft or a scene "
+            f"object a component's id")
+    if len(components) > high - low + 1:
+        raise ObjectIdentityError(
+            f"{len(components)} components need {len(components)} ids but the "
+            f"component band {low}-{high} carries at most {high - low + 1}; "
+            f"refusing to wrap a component's id into another object's pixels")
     if len(entries) > MAX_INT_ID:
         raise ObjectIdentityError(
             f"{len(entries)} labelled objects need {len(entries)} ids but the "
@@ -447,17 +596,25 @@ def assign_int_ids(entries: Sequence[Dict]) -> List[SceneObject]:
             f"{MAX_INT_ID}; refusing to wrap an id into another object's pixels")
     seen = set()
     objects: List[SceneObject] = []
+    in_band = 0   # components numbered so far (they take low, low+1, ..)
     for number, entry in enumerate(entries, start=1):
         if entry["id"] in seen:
             raise ObjectIdentityError(
                 f"object id {entry['id']!r} is composed twice; one id, one object")
         seen.add(entry["id"])
+        if entry.get("role") == ROLE_COMPONENT:
+            number, in_band = low + in_band, in_band + 1
+        else:
+            # the position among the non-components: 1.. as before Phase C
+            number -= in_band
         objects.append(SceneObject(
             id=str(entry["id"]), int_id=number,
             class_name=str(entry["class_name"]), class_id=int(entry["class_id"]),
             instance=int(entry["instance"]), role=str(entry["role"]),
             mesh_sha256=entry.get("mesh_sha256"), licence=entry.get("licence"),
-            in_scene=bool(entry["in_scene"]), labelled=bool(entry["labelled"])))
+            in_scene=bool(entry["in_scene"]), labelled=bool(entry["labelled"]),
+            parent=entry.get("parent"), mesh=entry.get("mesh"),
+            extent_body=entry.get("extent_body")))
     return objects
 
 

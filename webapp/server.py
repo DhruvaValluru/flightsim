@@ -67,6 +67,7 @@ from webapp.runs import (  # noqa: E402
     plan_trim_recovery,
     plan_water_surface,
     project_for_ue_host,
+    provision_place,
     refuse_placeholder_mesh,
 )
 from webapp.route_map import plan_route_flight  # noqa: E402
@@ -998,16 +999,15 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # Scene-setting first (idempotent: a compile-planned location arrives
     # source derived and is left alone), so the placement, bake check and
     # every later planner see the staged scene like any named one.
-    plan_scene_setting(spec)
     # Mapped water under the stated place plans the water surface class
     # (X-Plane mask, when extracted on this machine): before placement,
     # so the control ridge's arbitrary georeference is never looked up.
-    plan_water_surface(spec)
-    unbaked = needs_dynamic_bake(spec)
-    if unbaked is not None:
-        return JSONResponse({"refused": "terrain.unbaked", **unbaked},
+    # provision_place is the ONE function the campaign path calls too
+    # (decision 17): scene-setting, water, the bake check, placement.
+    provisioned = provision_place(spec)
+    if provisioned["refusal"] is not None:
+        return JSONResponse({"refused": "terrain.unbaked", **provisioned["refusal"]},
                             status_code=409)
-    place_on_scene(spec)
     # Severe-weather composition edits (thunderstorm -> severe turbulence
     # when the word was defaulted): recorded, pre-digest, like every other
     # transformation.
