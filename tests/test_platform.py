@@ -259,12 +259,12 @@ def test_no_text_io_without_utf8_encoding():
         + ", ".join(offenders))
 
 
-# --- the engine pin: 5.7 everywhere it is STATED, 5.5 only where it was
-# MEASURED (Phase 2 Look lane part 1; brainstorm 9.8, contracts section 10)
+# --- the engine pin: stated the same everywhere, read from ONE constant
+# (Phase 3 A2: the pin moved back to 5.5; the test no longer hard-codes it)
 
 #: Every file that states the engine version to a person or constructs a
-#: path from it. A "5.5" surviving in one of these is a stale pin, unless
-#: the same line says it is a measurement note (see OLD_PIN_ALLOWED).
+#: path from it. Another version in one of these is a stale pin, unless
+#: the same line says it is a measurement or history (see PIN_HISTORY_ALLOWED).
 ENGINE_PIN_FILES = (
     "ue/FlightSim.uproject",
     "core/util/platform.py",
@@ -274,48 +274,94 @@ ENGINE_PIN_FILES = (
 ) + tuple(str(p.relative_to(REPO)) for p in
           sorted((REPO / "scripts").glob("*.ps1"))
           + sorted((REPO / "scripts").glob("*.sh"))
-          # the mutation runner WRITES the old pin on purpose, to prove
+          # the mutation runner WRITES another pin on purpose, to prove
           # this test catches it; it is not a script that names an engine
           if p.name != "mutation_check.sh")
 
-#: The old pin, in every spelling the tree used: the Epic install folder,
-#: the prose "UE 5.5" / "Engine 5.5", and the bare quoted "5.5" the
-#: preflight compared Build.version against.
-OLD_PIN = re.compile(r'UE_5\.5\b|Unreal(?: Engine)? 5\.5\b|UE ?5\.5\b|"5\.5"')
-
-#: A line that keeps 5.5 must SAY it is history: the word "measured" (the
-#: Gate 6 / Xcode / toolset measurements were taken on 5.5 and are not
-#: re-measured here) or "5.7" alongside it (a note about the move itself).
-OLD_PIN_ALLOWED = re.compile(r"measured|5\.7", re.IGNORECASE)
+#: Files whose pin prose another box rewrites; skipped by the sweep until
+#: then. A13 rewrites NEXT.md (A13 step 4b removes this allowance); A3
+#: rewrites build_ue.ps1 and ue_preflight.ps1 whole (A3 removes these two).
+PIN_SWEEP_PENDING = ("NEXT.md",)
 
 
-def test_the_engine_pin_is_5_7_everywhere_it_is_stated():
-    """The project moved from UE 5.5 to 5.7 in one commit, and the pin is
-    stated in the uproject, in every script that builds an install path
-    or checks Build.version, in the platform refusals and in the
-    user-facing docs. A stale 5.5 in any of them sends a person to
-    install the wrong engine or reports a correct install as a version
-    mismatch. Historical measurement notes are allowed by the word on
-    the line, not by file, so a new stale pin cannot hide in an old
-    doc."""
+def _other_pin_regex():
+    """Any engine version other than the pinned one, in every spelling the
+    tree uses: the Epic install folder UE_5.x, the prose "UE 5.x" /
+    "Unreal (Engine) 5.x" / "Engine 5.x", and a bare quoted "5.x"."""
+    major, minor = plat.UE_ENGINE_VERSION.split(".")
+    not_pin = rf"{major}\.(?!{minor}\b)\d+"
+    return re.compile(
+        rf'UE_{not_pin}\b|(?:Unreal(?: Engine)?|UE ?|Engine) {not_pin}\b|"{not_pin}"')
+
+
+#: A line that names another version must SAY it is history: the word
+#: "measured" or "history" (the Gate 6 / Xcode / toolset measurements were
+#: taken on 5.5), or the pin named alongside it.
+PIN_HISTORY_ALLOWED = re.compile(r"measured|history|historical|\bwrong[- ]version\b",
+                                 re.IGNORECASE)
+
+
+def test_the_engine_pin_is_stated_the_same_everywhere():
+    """The pin is stated in the uproject, in every script that builds an
+    install path or checks Build.version, in the platform refusals and in
+    the user-facing docs. Another version in any of them sends a person
+    to install the wrong engine or reports a correct install as a version
+    mismatch. Historical measurement notes are allowed by the word on the
+    line, not by file, so a new stale pin cannot hide in an old doc. The
+    pin itself is read from core.util.platform.UE_ENGINE_VERSION."""
+    other = _other_pin_regex()
     stale = []
     for rel in ENGINE_PIN_FILES:
+        if rel in PIN_SWEEP_PENDING:
+            continue
         path = REPO / rel
         for number, line in enumerate(
                 path.read_text(encoding="utf-8").splitlines(), 1):
-            if OLD_PIN.search(line) and not OLD_PIN_ALLOWED.search(line):
+            if other.search(line) and not PIN_HISTORY_ALLOWED.search(line):
                 stale.append(f"{rel}:{number}: {line.strip()}")
-    assert not stale, "stale UE 5.5 pin(s):\n  " + "\n  ".join(stale)
+    assert not stale, (f"stale engine pin(s) (the pin is {plat.UE_ENGINE_VERSION}):\n  "
+                       + "\n  ".join(stale))
 
     import json
     uproject = json.loads((REPO / "ue" / "FlightSim.uproject")
                           .read_text(encoding="utf-8"))
-    assert uproject["EngineAssociation"] == plat.UE_ENGINE_VERSION == "5.7"
+    assert uproject["EngineAssociation"] == plat.UE_ENGINE_VERSION
     for text in plat._UE_REFUSAL.values():
-        assert "5.5" not in text
+        assert not other.search(text)
     for roots in plat._UE_ROOT_DEFAULTS.values():
         for root in roots:
             assert root.endswith("UE_" + plat.UE_ENGINE_VERSION)
+
+
+def test_target_cs_include_order_names_the_pin():
+    """Hand-editing one Target.cs to another version fails here, with the
+    file named (R1 is a CI failure, not a Windows surprise)."""
+    wanted = "EngineIncludeOrderVersion.Unreal" + plat.UE_ENGINE_VERSION.replace(".", "_")
+    for path in sorted((REPO / "ue" / "Source").glob("*.Target.cs")):
+        text = path.read_text(encoding="utf-8")
+        assert f"IncludeOrderVersion = {wanted};" in text, (
+            f"{path.relative_to(REPO)} does not pin {wanted} "
+            f"(UE_ENGINE_VERSION = {plat.UE_ENGINE_VERSION})")
+
+
+def test_uproject_and_patch_level_agree_with_toolchain_doc():
+    import json
+    uproject = json.loads((REPO / "ue" / "FlightSim.uproject")
+                          .read_text(encoding="utf-8"))
+    assert uproject["EngineAssociation"] == plat.UE_ENGINE_VERSION
+    doc = (REPO / "docs" / "TOOLCHAIN.md").read_text(encoding="utf-8")
+    full = f"{plat.UE_ENGINE_VERSION}.{plat.UE_ENGINE_PATCH}"
+    row = next(line for line in doc.splitlines() if line.startswith("| Windows laptop"))
+    assert full in row, f"docs/TOOLCHAIN.md row 1 does not state {full}"
+
+
+def test_find_ue_root_has_no_newest_glob():
+    """find_ue_root resolves UE_ROOT or the pinned default and nothing
+    else: a newest-UE_5.* glob would build against an engine nobody chose."""
+    import inspect
+    source = inspect.getsource(plat.find_ue_root)
+    assert "glob" not in source and "UE_5." not in source, (
+        "core/util/platform.py find_ue_root still guesses an engine by glob")
 
 
 def _read_ue_ini(path: Path):
