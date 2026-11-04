@@ -1,0 +1,15 @@
+{
+  "budget_used": 14,
+  "builder_commit": "47d3e5db",
+  "claims": [],
+  "integrated_commit": "e183e5aa3d5878910488d622e5933ccba2f1eaed",
+  "letter": "A",
+  "needs_windows": true,
+  "pending_windows": [
+    "step 1 reproduce /generate refusal on Windows",
+    "step 5 one-line prompt to finished campaign"
+  ],
+  "stage": "built",
+  "updated": "2026-11-03T22:00:36",
+  "worktree": "../p3-A10"
+}

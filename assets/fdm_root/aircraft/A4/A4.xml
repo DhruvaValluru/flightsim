@@ -107,7 +107,7 @@
    </pointmass>
 
    <pointmass name="STA2">
-    <weight unit="LBS"> 0.00 </weight>
+    <weight unit="LBS"> 750.00 </weight>
     <location unit="IN">
       <x> 3.60 </x>
       <y> -74.40 </y>
@@ -116,7 +116,7 @@
    </pointmass>
 
    <pointmass name="STA3">
-    <weight unit="LBS"> 0.00 </weight>
+    <weight unit="LBS"> 750.00 </weight>
     <location unit="IN">
       <x> -1.20 </x>
       <y> 0.00 </y>
@@ -125,7 +125,7 @@
    </pointmass>
 
    <pointmass name="STA4">
-    <weight unit="LBS"> 0.00 </weight>
+    <weight unit="LBS"> 750.00 </weight>
     <location unit="IN">
       <x> 3.60 </x>
       <y> 74.40 </y>

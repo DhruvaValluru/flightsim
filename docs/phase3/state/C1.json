@@ -1,0 +1,14 @@
+{
+  "budget_used": 30,
+  "builder_commit": "4c147edd",
+  "claims": [],
+  "integrated_commit": "6495be31b293012615df8de74b99ea98172871a8",
+  "letter": "C",
+  "needs_windows": false,
+  "shared_value_changed": [
+    "loadout station weight 1800->750 lb (decision 2 allows lowering; recorded in notes/C1.md builder_notes; sent to Windows decision agent)"
+  ],
+  "stage": "built",
+  "updated": "2026-11-03T22:16:17",
+  "worktree": "../p3-C1"
+}

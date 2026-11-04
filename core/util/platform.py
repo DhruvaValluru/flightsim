@@ -134,12 +134,17 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
 
 
 #: The Unreal Engine major.minor the project pins (`ue/FlightSim.uproject`
-#: EngineAssociation). Phase 2 moved it from 5.5 to 5.7 (brainstorm 9.8,
-#: contracts section 10); the refusal texts and the default install roots
-#: below are built from it so the pin is stated in ONE place on the Python
-#: side. Gate 6 and every render measurement on record were taken on 5.5;
-#: nothing here claims a 5.7 build.
-UE_ENGINE_VERSION = "5.7"
+#: EngineAssociation, both Target.cs IncludeOrderVersion constants). Phase 3
+#: pinned it back to 5.5 (docs/phase3/decisions.md decision 1; 5.7 never
+#: built on the reviewers' machines, and every measurement on record was taken
+#: on 5.5). The refusal texts and the default install roots below are built
+#: from it so the pin is stated in ONE place on the Python side.
+UE_ENGINE_VERSION = "5.5"
+
+#: The patch level measured on the Windows laptop (docs/TOOLCHAIN.md row 1:
+#: Engine/Build/Build.version 5.5.4). tests/test_platform.py checks it
+#: against that row.
+UE_ENGINE_PATCH = 4
 
 #: What is missing, and the remedy, IN THIS OS's OWN TERMS. One text for
 #: all three lied on two of them: it named a PowerShell preflight to
@@ -192,8 +197,8 @@ def ue_platform_refusal() -> str:
 UE_PLATFORM_REFUSAL = _UE_REFUSAL[os_name()]
 
 #: Default engine install roots, checked AFTER the UE_ROOT env override.
-#: Windows scans for any UE_5.* so a 5.5/5.6 install is still found and
-#: preflight can name the version mismatch instead of "not found".
+#: Only the pinned version's folder is a default: no other UE_5.* is picked up
+#: by guessing (an install of another version is named by preflight, not used).
 _UE_ROOT_DEFAULTS = {
     "mac": (f"/Users/Shared/Epic Games/UE_{UE_ENGINE_VERSION}",),
     "windows": (rf"C:\Program Files\Epic Games\UE_{UE_ENGINE_VERSION}",),
@@ -203,7 +208,7 @@ _UE_ROOT_DEFAULTS = {
 
 def find_ue_root() -> Optional[Path]:
     """The engine install to use: UE_ROOT env override, the per-OS
-    default, else (Windows) the newest Epic Games/UE_5.* present. When
+    default. When
     nothing exists the default path is still returned on mac/Windows so
     refusals can NAME the expected location; None only on Linux, which
     has no UE half at all."""
@@ -214,11 +219,6 @@ def find_ue_root() -> Optional[Path]:
     for candidate in defaults:
         if Path(candidate).is_dir():
             return Path(candidate)
-    if os_name() == "windows":
-        epic = Path(r"C:\Program Files\Epic Games")
-        versions = sorted(epic.glob("UE_5.*"), reverse=True)
-        if versions:
-            return versions[0]
     return Path(defaults[0]) if defaults else None
 
 

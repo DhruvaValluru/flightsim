@@ -166,6 +166,12 @@ STATION_NAMES = {0: "PILOT", 2: "STA1", 3: "STA2", 4: "STA3", 5: "STA4",
                  6: "STA5"}
 
 
+#: Default loadout (owner decision 2, docs/phase3/decisions.md): the weight in
+#: lb carried on each store station, STA2/STA3/STA4 only. A stated choice; it
+#: must equal loading.loadout in assets/aircraft_config/A4.json.
+STATION_DEFAULT_LB = {"STA2": 750.0, "STA3": 750.0, "STA4": 750.0}
+
+
 def _pointmasses(cfg: dict) -> str:
     """Pilot (loaded) and the five pylon stations (empty until stores are set).
 
@@ -176,7 +182,7 @@ def _pointmasses(cfg: dict) -> str:
     out = ""
     for idx, name in STATION_NAMES.items():
         weight, lon, lat, vert = cfg["stations"][idx][:4]
-        weight = weight if idx == 0 else 0.0
+        weight = weight if idx == 0 else STATION_DEFAULT_LB.get(name, 0.0)
         out += (f'\n   <pointmass name="{name}">\n'
                 f'    <weight unit="LBS"> {weight:.2f} </weight>\n'
                 + _loc("", (lon, lat, vert), "    ")
