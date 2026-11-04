@@ -57,5 +57,8 @@
       "verification": "uncompiled here; source pinned by tests/test_ue_physics_source.py (the batch sits after RunIC and before the trim); the first Windows build is W3 (the atmosphere batch before the host trim) and W4 (the host cg-x-in within 0.1 in of the card's expected CG)",
       "status_5_5": "expected needed, unconfirmed on 5.5 (decided by the Windows plugin build and check_bridge_api.sh)"
     }
-  ]
+  ],
+  "library_win64": "Source/ThirdParty/JSBSim/Lib/JSBSim.dll",
+  "library_win64_sha256": "853d8bc6e6eac5af553267e03d56a3506f4c96fa373134a252e20b1b42d2e827",
+  "library_win64_built_with": "upstream JSBSimForUnreal.sln via MSBuild (not a reimplementation)"
 }
