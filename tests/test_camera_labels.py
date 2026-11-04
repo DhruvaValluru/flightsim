@@ -607,6 +607,11 @@ def test_no_bundle_complete_bundle_does_not_refuse():
     require_label_bundle({"frames": 6, "attached": 6, "without_bundle": 0,
                           "without_bundle_by_camera": {},
                           "frames_by_camera": {"chase0": 3, "tower0": 3}})
+    # no bundle is expected: manifest older than v6 (note), or zero frames
+    # (render.camera_empty fires first)
+    require_label_bundle({"frames": 3, "attached": 0, "without_bundle": 3,
+                          "note": "manifest version 5 carries no per-object records"})
+    require_label_bundle({"frames": 0, "attached": 0, "without_bundle": 0})
 
 
 def test_no_bundle_no_render_requested_never_reaches_the_refusal(tmp_path, monkeypatch):
