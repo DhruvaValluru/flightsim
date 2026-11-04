@@ -1253,8 +1253,22 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 			if (!ReadNumber(*Entry, TEXT("class_id"), ClassId, Error)) { return false; }
 			(*Entry)->TryGetStringField(TEXT("class"), Object.Class);
 			(*Entry)->TryGetStringField(TEXT("role"), Object.Role);
+			// Phase 3 (C4): a component carries its parent's id and the
+			// card's mesh name (null for a gear entry with no mesh). The
+			// host loads exactly that asset name and derives none.
+			(*Entry)->TryGetStringField(TEXT("parent"), Object.Parent);
+			(*Entry)->TryGetStringField(TEXT("mesh"), Object.MeshName);
 			Object.IntId = static_cast<int32>(IntId);
 			Object.ClassId = static_cast<int32>(ClassId);
+			if (!Object.Parent.IsEmpty() && Object.Class == TEXT("payload") &&
+			    Object.MeshName.IsEmpty())
+			{
+				Error = FString::Printf(
+					TEXT("annotation.identity: payload component '%s' (parent '%s') carries ")
+					TEXT("no mesh; a store with nothing to draw would own no pixels under ")
+					TEXT("a record that says it was carried"), *Object.Id, *Object.Parent);
+				return false;
+			}
 			if (Object.IntId < 1 || Object.IntId > 255)
 			{
 				Error = FString::Printf(
@@ -1271,6 +1285,27 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 			}
 			SeenIds.Add(Object.IntId);
 			Out.Objects.Add(Object);
+		}
+		// Phase 3 (C4): every parent names an objects[] id on this card; a
+		// component of nothing is an id the ID image could not resolve.
+		for (const FFlightSimSceneObject& Object : Out.Objects)
+		{
+			if (Object.Parent.IsEmpty())
+			{
+				continue;
+			}
+			bool bParentOnCard = false;
+			for (const FFlightSimSceneObject& Other : Out.Objects)
+			{
+				bParentOnCard |= (&Other != &Object) && Other.Id == Object.Parent;
+			}
+			if (!bParentOnCard)
+			{
+				Error = FString::Printf(
+					TEXT("annotation.identity: object '%s' names parent '%s', which no ")
+					TEXT("objects[] entry on the card carries"), *Object.Id, *Object.Parent);
+				return false;
+			}
 		}
 	}
 	const TArray<TSharedPtr<FJsonValue>>* TaxonomyJson = nullptr;

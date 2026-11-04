@@ -359,6 +359,13 @@ namespace
 		FString Role;
 		AActor* Actor = nullptr;
 		USceneCaptureComponent2D* Alone = nullptr;
+		// Phase 3 (C4): a component of another labelled object. Parent is
+		// the parent's card id; Component the store mesh attached under the
+		// parent's mesh origin (null for a gear entry with no mesh, which
+		// is labelled and owns no pixels). A component's stencil overrides
+		// its actor's, and its alone pass shows only that component.
+		FString Parent;
+		UStaticMeshComponent* Component = nullptr;
 	};
 
 	// -- Phase 10, P10-4: SHA-256 of what was written -----------------------
@@ -523,11 +530,20 @@ namespace
 		// converted as one rigid body (the A-4's .mdl: "articulated":
 		// false), not a binding that failed.
 		int32 DeclaredSurfaces = 0;
+		// Phase 3 (C4): the store components attached under MeshOrigin, by
+		// the card object id that named their mesh (payload:store_sta2:0 ->
+		// Store_payload_store_sta2_0).
+		TMap<FString, UStaticMeshComponent*> StoreOfId;
 	};
 
+	// Objects (Phase 3, C4): the card's objects[]; every entry whose parent
+	// is the primary's id and whose mesh is named gets its asset loaded from
+	// the same asset root and attached under MeshOrigin. Null for a traffic
+	// actor, which carries no components.
 	bool BuildMeshAirframe(AActor* Aircraft, UFlightSimSurfaceAnimator* Animator,
 	                       const FString& ManifestPath, const FString& CardAircraft,
-	                       const FString& Livery, FMeshAirframe& Out, FString& Error)
+	                       const FString& Livery, FMeshAirframe& Out, FString& Error,
+	                       const TArray<FFlightSimSceneObject>* Objects = nullptr)
 	{
 		FString Text;
 		if (!FFileHelper::LoadFileToString(Text, *ManifestPath))
@@ -743,6 +759,79 @@ namespace
 				Animator->BindSurfaceComponent(FName(*Bone), HingeComponent);
 			}
 		}
+		// Phase 3 (C4): the primary's components. The card names the mesh
+		// (SM_<aircraft>_<component>, C2's manifest part, imported by
+		// scripts/ue_import_aircraft.py); it is loaded by that string and
+		// attached under MeshOrigin as its own UStaticMeshComponent, so it
+		// moves with the airframe and the parent's show-only pass draws it
+		// (the parent's amodal box includes its stores) while its stencil
+		// and alone pass are its own. The component OBJ is exported in the
+		// model frame like the surfaces; a manifest row with its own origin
+		// offsets it by the difference.
+		if (Objects != nullptr)
+		{
+			FString PrimaryId;
+			for (const FFlightSimSceneObject& Object : *Objects)
+			{
+				if (Object.Role == TEXT("primary"))
+				{
+					PrimaryId = Object.Id;
+				}
+			}
+			const TArray<TSharedPtr<FJsonValue>>* ComponentRows = nullptr;
+			Manifest->TryGetArrayField(TEXT("components"), ComponentRows);
+			for (const FFlightSimSceneObject& Object : *Objects)
+			{
+				if (Object.Parent.IsEmpty() || Object.Parent != PrimaryId || Object.MeshName.IsEmpty())
+				{
+					continue;
+				}
+				UStaticMesh* StoreMesh = LoadPart(Object.MeshName);
+				if (StoreMesh == nullptr)
+				{
+					Error = FString::Printf(
+						TEXT("mesh asset %s/%s did not load for component '%s' (the card's ")
+						TEXT("mesh). Run the import step (scripts/ue_import_aircraft.py) -- a ")
+						TEXT("store the record says was carried must be drawn, never skipped"),
+						*AssetRoot, *Object.MeshName, *Object.Id);
+					return false;
+				}
+				FVector RowOriginCm = Out.MeshOriginActorCm;
+				if (ComponentRows != nullptr)
+				{
+					for (const TSharedPtr<FJsonValue>& RowValue : *ComponentRows)
+					{
+						const TSharedPtr<FJsonObject>* Row = nullptr;
+						FString RowPart;
+						const TArray<TSharedPtr<FJsonValue>>* RowOrigin = nullptr;
+						if (RowValue->TryGetObject(Row) && Row != nullptr &&
+						    (*Row)->TryGetStringField(TEXT("part"), RowPart) && RowPart == Object.MeshName &&
+						    (*Row)->TryGetArrayField(TEXT("mesh_origin_actor_cm"), RowOrigin) &&
+						    RowOrigin != nullptr && RowOrigin->Num() == 3)
+						{
+							RowOriginCm = FVector((*RowOrigin)[0]->AsNumber(), (*RowOrigin)[1]->AsNumber(),
+							                      (*RowOrigin)[2]->AsNumber());
+						}
+					}
+				}
+				const FString Slug = Object.Id.Replace(TEXT(":"), TEXT("_"));
+				UStaticMeshComponent* Store = NewObject<UStaticMeshComponent>(
+					Aircraft, *FString::Printf(TEXT("Store_%s"), *Slug));
+				Store->SetupAttachment(MeshOrigin);
+				Store->SetMobility(EComponentMobility::Movable);
+				Store->SetStaticMesh(StoreMesh);
+				Store->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				Store->RegisterComponent();
+				Store->SetRelativeLocation(RowOriginCm - Out.MeshOriginActorCm);
+				Out.StoreOfId.Add(Object.Id, Store);
+				UE_LOG(LogFlightSimRender, Display,
+				       TEXT("store %s attached (%s/%s as %s under MeshOrigin, offset (%.1f, %.1f, %.1f) cm)"),
+				       *Object.Id, *AssetRoot, *Object.MeshName, *Store->GetName(),
+				       RowOriginCm.X - Out.MeshOriginActorCm.X, RowOriginCm.Y - Out.MeshOriginActorCm.Y,
+				       RowOriginCm.Z - Out.MeshOriginActorCm.Z);
+			}
+		}
+
 		// Phase 10 (package 7): the sampled livery. "default" is the
 		// mesh's own materials (exactly the previous behaviour); any
 		// other name is a material asset the import step placed at
@@ -1926,7 +2015,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (!MeshManifestPath.IsEmpty())
 	{
 		if (!BuildMeshAirframe(Scenario.Aircraft, Animator, MeshManifestPath,
-		                       Card.Aircraft, Card.Livery, MeshAirframe, Error))
+		                       Card.Aircraft, Card.Livery, MeshAirframe, Error,
+		                       &Card.Objects))
 		{
 			return Fail(Error);
 		}
@@ -2814,6 +2904,30 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 							*Object.Id, Object.IntId));
 					}
 				}
+				else if (!Object.Parent.IsEmpty())
+				{
+					// Phase 3 (C4): a component. With a mesh it is the store
+					// component the airframe build attached (its stencil and
+					// alone pass are its own, on the parent's actor); without
+					// one (gear) it is labelled, owns no pixels and gets no
+					// alone pass.
+					Entry.Parent = Object.Parent;
+					if (!Object.MeshName.IsEmpty())
+					{
+						UStaticMeshComponent* const* Store = MeshAirframe.StoreOfId.Find(Object.Id);
+						if (Store == nullptr || *Store == nullptr)
+						{
+							return Fail(FString::Printf(
+								TEXT("annotation.identity: component '%s' (int_id %d) names mesh '%s' ")
+								TEXT("under parent '%s', and the airframe build attached no such store ")
+								TEXT("(only the primary's components are attached, from the mesh ")
+								TEXT("manifest's asset root)"),
+								*Object.Id, Object.IntId, *Object.MeshName, *Object.Parent));
+						}
+						Entry.Actor = Scenario.Aircraft;
+						Entry.Component = *Store;
+					}
+				}
 				else if (Object.Class == TEXT("terrain"))
 				{
 					LabelTerrainIntId = Object.IntId;
@@ -2906,7 +3020,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			for (const FRenderLabelledObject& Entry : Labelled)
 			{
-				if (Entry.Actor != nullptr && Entry.Actor == *It)
+				// Phase 3 (C4): a component entry shares its parent's actor
+				// and is stencilled per component below, never per actor.
+				if (Entry.Actor != nullptr && Entry.Actor == *It && Entry.Component == nullptr)
 				{
 					IntId = Entry.IntId;
 				}
@@ -2927,6 +3043,26 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				Primitive->SetRenderCustomDepth(true);
 				Primitive->SetCustomDepthStencilValue(IntId);
 				StencilCounts.FindOrAdd(IntId)++;
+			}
+		}
+		// Phase 3 (C4): each store component carries its own int_id over the
+		// actor's (the per-actor loop above stencilled it with the parent's);
+		// the airframe's own components keep the parent's id.
+		for (const FRenderLabelledObject& Entry : Labelled)
+		{
+			if (Entry.Component == nullptr)
+			{
+				continue;
+			}
+			Entry.Component->SetRenderCustomDepth(true);
+			Entry.Component->SetCustomDepthStencilValue(Entry.IntId);
+			StencilCounts.FindOrAdd(Entry.IntId)++;
+			for (const FRenderLabelledObject& ParentEntry : Labelled)
+			{
+				if (ParentEntry.Id == Entry.Parent && StencilCounts.Contains(ParentEntry.IntId))
+				{
+					StencilCounts[ParentEntry.IntId]--;
+				}
 			}
 		}
 		for (const FRenderLabelledObject& Entry : Labelled)
@@ -3030,6 +3166,21 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			LabelDepthOfId.Add(Group.Key, Only);
 		}
+		// Phase 3 (C4): one show-only depth capture per store component (its
+		// alone pass). The parent's capture above shows the whole actor,
+		// stores included, so the parent is drawn whole in its own pass.
+		for (const FRenderLabelledObject& Entry : Labelled)
+		{
+			if (Entry.Component == nullptr)
+			{
+				continue;
+			}
+			USceneCaptureComponent2D* Only =
+				MakeDepthCapture(*FString::Printf(TEXT("LabelDepthOnly%d"), Entry.IntId));
+			Only->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+			Only->ShowOnlyComponents.Add(Entry.Component);
+			LabelDepthOfId.Add(Entry.IntId, Only);
+		}
 		// W5: the land-cover ID pass. M_LandcoverID (post-process, replacing
 		// the tonemapper) reconstructs each pixel's world position from its
 		// depth, carries it onto the bake grid with the registration the scene
@@ -3085,7 +3236,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		for (FRenderLabelledObject& Entry : Labelled)
 		{
-			if (Entry.Class != TEXT("aircraft") || Entry.Actor == nullptr)
+			// Phase 3 (C4): an aircraft, or a component with a mesh, has an
+			// alone pass; scene objects and meshless gear get none.
+			if ((Entry.Class != TEXT("aircraft") && Entry.Component == nullptr) || Entry.Actor == nullptr)
 			{
 				continue;   // scene objects get no alone pass (pixels_alone null)
 			}
@@ -4239,8 +4392,28 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			TArray<float> OwnerCm;
 			OwnerCm.Init(TNumericLimits<float>::Max(), Count);
 			TMap<int32, TArray<uint8>> AloneOf;
+			// Phase 3 (C4): a component's group claims, at the parent's own
+			// depth, the pixels the parent's group (which draws the store
+			// too) claimed first; the parent's alone mask keeps covering them.
+			TMap<int32, int32> ParentIdOfGroup;
+			for (const FRenderLabelledObject& Entry : Labelled)
+			{
+				if (Entry.Component == nullptr)
+				{
+					continue;
+				}
+				for (const FRenderLabelledObject& ParentEntry : Labelled)
+				{
+					if (ParentEntry.Id == Entry.Parent)
+					{
+						ParentIdOfGroup.Add(Entry.IntId, ParentEntry.IntId);
+					}
+				}
+			}
 			for (const TPair<int32, USceneCaptureComponent2D*>& Group : LabelDepthOfId)
 			{
+				const int32* ParentOfGroup = ParentIdOfGroup.Find(Group.Key);
+				const int32 ParentGroupId = ParentOfGroup != nullptr ? *ParentOfGroup : 0;
 				Group.Value->FOVAngle = Capture->FOVAngle;
 				TArray<FLinearColor> OnlyDepth;
 				Group.Value->CaptureScene();
@@ -4280,7 +4453,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 						continue;
 					}
 					const float Tolerance = 0.5f + 1.0e-5f * AllCm;
-					if (FMath::Abs(OnlyCm - AllCm) <= Tolerance && OnlyCm < OwnerCm[i])
+					const bool bReplacesParent = ParentGroupId != 0 && OwnerId[i] == ParentGroupId &&
+						FMath::Abs(OnlyCm - OwnerCm[i]) <= Tolerance;
+					if (FMath::Abs(OnlyCm - AllCm) <= Tolerance && (OnlyCm < OwnerCm[i] || bReplacesParent))
 					{
 						OwnerId[i] = GroupId;
 						OwnerCm[i] = OnlyCm;
@@ -4365,13 +4540,26 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 					AloneMask.SetNumZeroed(Count);
 					int32 PixelsAlone = 0;
 					TSet<int32> Occluders;
+					// Phase 3 (C4): the parent's alone pass draws its own
+					// components (the stores under the wings), so their ids
+					// under the parent's alone mask are the parent drawn
+					// whole, never an occluder of it.
+					TSet<int32> OwnChildren;
+					for (const FRenderLabelledObject& Child : Labelled)
+					{
+						if (!Child.Parent.IsEmpty() && Child.Parent == Entry.Id)
+						{
+							OwnChildren.Add(Child.IntId);
+						}
+					}
 					for (int32 i = 0; AloneOwned != nullptr && i < Count; ++i)
 					{
 						if ((*AloneOwned)[i] != 0)
 						{
 							AloneMask[i] = static_cast<uint8>(Entry.IntId);
 							++PixelsAlone;
-							if (Mask[i] != 0 && Mask[i] != Entry.IntId)
+							if (Mask[i] != 0 && Mask[i] != Entry.IntId &&
+							    !OwnChildren.Contains(static_cast<int32>(Mask[i])))
 							{
 								Occluders.Add(static_cast<int32>(Mask[i]));
 							}
@@ -5826,6 +6014,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			ObjectJson->SetNumberField(TEXT("class_id"), Entry.ClassId);
 			ObjectJson->SetStringField(TEXT("role"), Entry.Role);
 			ObjectJson->SetBoolField(TEXT("alone_pass"), Entry.Alone != nullptr);
+			// Phase 3 (C4): a component names its parent; null elsewhere.
+			if (Entry.Parent.IsEmpty())
+			{
+				ObjectJson->SetField(TEXT("parent"), MakeShared<FJsonValueNull>());
+			}
+			else
+			{
+				ObjectJson->SetStringField(TEXT("parent"), Entry.Parent);
+			}
 			ObjectList.Add(MakeShared<FJsonValueObject>(ObjectJson));
 		}
 		Root->SetArrayField(TEXT("objects"), ObjectList);
