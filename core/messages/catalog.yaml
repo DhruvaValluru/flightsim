@@ -177,6 +177,7 @@ camera.multi_render:
   sentence: "Several cameras were sent down a path that can only render one."
 capture.host_flight:
   sentence: "The recorded flight cannot be used to place the cameras."
+  hint: "Read the last lines of the flight log named in the message to see what stopped it, fix that, and run again."
 
 # -- the machine (core/util/platform.py, assets_pipeline/) --------------------
 

@@ -336,3 +336,26 @@ def test_the_host_record_refuses_what_the_solver_would(tmp_path, flight):
     path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
     with pytest.raises(HostFlightError, match="heading_deg"):
         read_host_record(path)
+
+
+# -- the commandlet's non-zero exit is refused by naming the fault ------
+
+def test_host_flight_refusal_names_the_fault(tmp_path):
+    from flightsim.capture import _host_flight_refusal
+    log = tmp_path / "host_flight_pass.log"
+    log.write_text("LogInit: start\nFatal error: access violation\n",
+                   encoding="utf-8")
+    text = _host_flight_refusal(3, log)
+    assert "capture.host_flight" in text
+    assert "exited 3" in text
+    assert str(log) in text
+    assert "access violation" in text
+    assert "crashed" in text
+    assert "stalled" in _host_flight_refusal(124, tmp_path / "none.log")
+
+
+def test_host_flight_refusal_has_no_dev_flag(tmp_path):
+    from flightsim.capture import _host_flight_refusal
+    text = _host_flight_refusal(1, tmp_path / "host_flight_pass.log")
+    assert "no-host-flight" not in text
+    assert "different flight" not in text
