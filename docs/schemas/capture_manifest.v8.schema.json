@@ -1299,7 +1299,8 @@
      "enum": [
       "primary",
       "traffic",
-      "scene"
+      "scene",
+      "component"
      ]
     },
     "mesh_sha256": {
@@ -1330,7 +1331,53 @@
     },
     "parent": {
      "type": "string"
+    },
+    "mesh": {
+     "description": "A component's static-mesh name, SM_<aircraft>_<component id> (the mesh manifest's part); null without a converted part.",
+     "anyOf": [
+      {
+       "type": "null"
+      },
+      {
+       "type": "string"
+      }
+     ]
+    },
+    "extent_body": {
+     "description": "A component's body-frame box about the CG in metres (forward: aft,fwd; right: left,right; down: top,bottom); null when no mesh row measured it.",
+     "anyOf": [
+      {
+       "type": "null"
+      },
+      {
+       "type": "object",
+       "required": [
+        "forward",
+        "right",
+        "down"
+       ],
+       "properties": {
+        "forward": {
+         "$ref": "#/$defs/extent_pair"
+        },
+        "right": {
+         "$ref": "#/$defs/extent_pair"
+        },
+        "down": {
+         "$ref": "#/$defs/extent_pair"
+        }
+       }
+      }
+     ]
     }
+   }
+  },
+  "extent_pair": {
+   "type": "array",
+   "minItems": 2,
+   "maxItems": 2,
+   "items": {
+    "type": "number"
    }
   },
   "object_label": {
