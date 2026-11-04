@@ -957,3 +957,87 @@ def test_pinned_sources_measure_the_extents_and_put_the_nose_on_its_label(
     # nose landed this far from its label along x.
     vrp_rule_residual = manifest["vrp_actor_cm"][0] + extents["nose"] - nose_label_x
     assert vrp_rule_residual == pytest.approx(pinned["vrp_rule_residual_cm"], abs=5.0)
+
+
+def test_converter_output_unchanged_without_components(tmp_path, monkeypatch):
+    """D2: a ``parts[].component`` entry gets its own ``SM_<aircraft>_<id>``
+    OBJ and a manifest v4 ``components[]`` row (the fields C2 writes and
+    C3 reads), and a config without the key converts byte-for-byte as
+    before (version 3, no ``components`` key). The store triangle sits
+    beyond the nose, so a leak into the body's extents would move the
+    measured origin and fail the comparison. A part naming a component
+    the labels do not declare is refused by name."""
+    import hashlib
+
+    from assets_pipeline.convert import ConvertError
+
+    xml = _fdm_xml(tmp_path, VRP_80_0_5)
+    xml.write_text(xml.read_text(encoding="utf-8").replace(
+        "</mass_balance>",
+        '<pointmass name="S1"><weight unit="LBS">100</weight>'
+        '<location name="POINTMASS" unit="IN"><x>0</x><y>0</y><z>0</z></location>'
+        '</pointmass></mass_balance>'), encoding="utf-8")
+    _point_fdm_at(monkeypatch, xml)
+
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    plain, plain_path = _convert(plain_dir, _write_labelled_config(plain_dir))
+    assert plain["version"] == 3
+    assert "components" not in plain
+    assert plain["parts"] == ["body", "aileron_l"]
+    assert set(plain["triangles"]) == {"body", "aileron_l"}
+    plain_body = hashlib.sha256((plain_path.parent / "body.obj").read_bytes()).hexdigest()
+
+    loaded_dir = tmp_path / "loaded"
+    loaded_dir.mkdir()
+    (loaded_dir / "src").mkdir()
+    (loaded_dir / "src" / "store.ac").write_text("\n".join([
+        "AC3Db",
+        'MATERIAL "grey" rgb 0.5 0.5 0.5  amb 0.2 0.2 0.2  emis 0 0 0  spec 0 0 0  shi 0  trans 0',
+        "OBJECT world", "kids 1",
+        _ac_object("missile", [(1.0, 0.0, 0.0), (-1.0, -0.2, 0.0), (-1.0, 0.2, 0.0)]),
+    ]) + "\n", encoding="utf-8")
+    components = [{"id": "store_left", "class": "payload", "station": "S1",
+                   "source": "synthetic pointmass S1, 100 lb"}]
+    config_path = _write_labelled_config(
+        loaded_dir,
+        parts=[{"file": "model.ac"},
+               {"file": "store.ac", "offset_m": [-7.0, -2.0, 0.0],  # FG model x aft: 7 m ahead
+                "component": "store_left"}],
+        loading={"stations": [{"name": "S1", "index": 0, "arm_in": 0.0,
+                               "default_lb": 100.0, "max_kg": 100.0,
+                               "loadable": True, "source": "synthetic"}],
+                 "loadout": {"stations": {"S1": 100.0}, "model_vars": {},
+                             "source": "synthetic"}})
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["labels"]["components"] = components
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    loaded, loaded_path = _convert(loaded_dir, config_path)
+
+    assert loaded["version"] == importer.COMPONENTS_MANIFEST_VERSION == 4
+    assert loaded["parts"] == ["body", "aileron_l", "SM_testcraft_store_left"]
+    assert hashlib.sha256((loaded_path.parent / "body.obj").read_bytes()).hexdigest() == plain_body
+    assert (loaded_path.parent / "SM_testcraft_store_left.obj").is_file()
+    assert loaded["triangles"]["SM_testcraft_store_left"] == 1
+    (row,) = loaded["components"]
+    assert row == {
+        "id": "store_left", "class": "payload", "station": "S1",
+        "part": "SM_testcraft_store_left",
+        "asset_path": "/Game/Aircraft/testcraft/SM_testcraft_store_left",
+        "triangles": 1,
+        "mesh_extent_actor_m": {"x": [6.0, 8.0], "y": [-2.2, -1.8], "z": [0.0, 0.0]},
+        "mesh_origin_actor_cm": loaded["mesh_origin_actor_cm"],
+        "mass_lb": 100.0,
+    }
+    # Everything about the body is the same manifest as the plain run.
+    changed = {"version", "parts", "triangles", "components", "source"}
+    assert {k: v for k, v in loaded.items() if k not in changed} == \
+        {k: v for k, v in plain.items() if k not in changed}
+    assert loaded["mesh_length_m"] == plain["mesh_length_m"] == pytest.approx(10.0)
+
+    config["parts"][1]["component"] = "ghost"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ConvertError) as refused:
+        _convert(loaded_dir, config_path)
+    assert refused.value.constraint == "aircraft.component_unmatched"
+    assert "ghost" in refused.value.message
