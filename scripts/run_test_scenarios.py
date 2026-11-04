@@ -17,9 +17,11 @@ shows them all on one page.
     python scripts/run_test_scenarios.py --still         # 1 frame each (fast look check)
     python scripts/run_test_scenarios.py --list          # print the scenarios
     python scripts/run_test_scenarios.py --collect       # (re)gather the last batch's results
+    python scripts/run_test_scenarios.py --matrix        # Phase 3 D6: {A4,J11} x {desert,forest}
+    python scripts/run_test_scenarios.py --matrix --list # print the four cells
 
 Open http://127.0.0.1:8008, or each run's frames page, to look at the
-results. Only the standard library is used, so the venv's python runs it.
+results. Run it with the venv's python (--matrix reads webapp.runs).
 """
 
 from __future__ import annotations
@@ -133,7 +135,16 @@ def run_one(server, number, name, prompt, edits, args):
         return {**result, "outcome": "refused", "why": why(payload["validation"])}
     spec_dict = payload["spec"]["dict"]
     apply_lighting(spec_dict, edits)
-    run_body = {"spec": spec_dict, "provenance": {"compiler": payload.get("compiler")}}
+    return run_spec(server, result, spec_dict, payload.get("compiler"), args)
+
+
+def run_spec(server, result, spec_dict, compiler_name, args):
+    """POST the edited spec to /run (baking the place on a 409
+    ``terrain.unbaked`` and running again), poll GET /runs/{id} until the
+    run is done or failed, and return ``result`` completed with outcome,
+    why, run_id, clip and conditions. The /run body is
+    ``{"spec": spec_dict, "provenance": {...}}`` and nothing else."""
+    run_body = {"spec": spec_dict, "provenance": {"compiler": compiler_name}}
 
     status, started = call(server, "POST", "/run", run_body)
     if status == 409 and started.get("refused") == "terrain.unbaked":
@@ -244,6 +255,245 @@ def collect(results) -> Path:
     return GALLERY / "index.html"
 
 
+# ---------------------------------------------------------------- Phase 3 D6
+#: The matrix: the default run with ONLY the aircraft and the environment
+#: changed. The aircraft is the spec's ``aircraft`` value (the config file
+#: stem, assets/aircraft_config/<name>.json); the environment is D4's
+#: POST /compile ``environment`` field, whose preset maps onto the scene
+#: bake named in MATRIX_SCENES (webapp.runs.SCENE_SETTING_BAKES).
+MATRIX_AIRCRAFT = ("A4", "J11")
+MATRIX_ENVIRONMENTS = ("desert", "forest")
+sys.path.insert(0, str(REPO))
+from webapp.runs import ENVIRONMENT_PRESETS, SCENE_SETTING_BAKES  # noqa: E402
+
+#: environment -> scene key, read from the web app's own table (never copied).
+MATRIX_SCENES = {name: SCENE_SETTING_BAKES[name] for name in MATRIX_ENVIRONMENTS}
+#: One neutral prompt for every cell: it names no aircraft, no place, no
+#: airspeed and no altitude, so the compiled airspeed keeps source
+#: ``default`` and /run re-plans it to the cell aircraft's own cruise
+#: default after the aircraft swap.
+MATRIX_PROMPT = "chase view"
+MATRIX_SUMMARY = REPO / "runs" / "phase3_matrix.json"
+#: Card keys that MAY differ between cells (they follow the aircraft or
+#: the scene). Dotted names address nested dicts; a bare top-level key
+#: allows everything under it. Every other key must be equal: the
+#: duration, rate, weather, look (storm, rain gain 4, cinematic), cameras,
+#: controls, wind, failures and route are the SAME default run.
+MATRIX_CARD_ALLOW = (
+    "aircraft", "spec_digest",
+    "latitude_deg", "longitude_deg", "terrain_elevation_m", "heading_deg",
+    "altitude_m",
+    "scene_crs", "datum", "georeference", "orographic", "collision_terrain",
+    "landmarks", "google_tiles", "wind_schedule",
+    "objects", "taxonomy", "traffic",
+    "derived_aircraft", "loading_properties", "engine_mixture",
+    "reference_speeds", "airspeed_kt", "atmosphere_properties",
+    "run_id", "created",
+)
+#: The verifier's "could not run" status (core.capture.verify.NOT_RUN is
+#: "NOT RUN"); both spellings are read, neither is a pass.
+NOT_RUN_STATUSES = ("NOT RUN", "NOT_RUN")
+
+
+def matrix_cells() -> list:
+    """The four cells, aircraft-major: A4/desert, A4/forest, J11/desert,
+    J11/forest. Each is ``{"name", "aircraft", "environment"}``."""
+    return [{"name": f"{aircraft}/{environment}", "aircraft": aircraft,
+             "environment": environment}
+            for aircraft in MATRIX_AIRCRAFT
+            for environment in MATRIX_ENVIRONMENTS]
+
+
+def apply_cell(spec_dict: dict, cell: dict) -> None:
+    """Set the cell's aircraft on the compiled spec dict as a USER edit
+    (the shape apply_lighting writes: value, source, from). Nothing else on
+    the spec is touched; the environment is a /compile field, not a spec
+    edit."""
+    entry = spec_dict.get("aircraft")
+    if not isinstance(entry, dict):
+        entry = {}
+        spec_dict["aircraft"] = entry
+    entry.update(value=cell["aircraft"], source="user",
+                 **{"from": "scripts/run_test_scenarios.py --matrix"})
+
+
+def cell_compile_body(cell: dict, compiler: str, still: bool,
+                      clip_seconds: float = 3.0) -> dict:
+    """The POST /compile body of a cell: the one neutral prompt, the
+    compiler, D4's ``environment`` and the still/clip selector. The /run
+    body is the one run_spec builds from the returned spec after
+    apply_cell."""
+    body = {"prompt": MATRIX_PROMPT, "compiler": compiler,
+            "environment": cell["environment"]}
+    if still:
+        body["still"] = True
+    else:
+        body["clip_seconds"] = clip_seconds
+    return body
+
+
+def card_diff(a: dict, b: dict, prefix: str = "") -> list:
+    """The dotted names of every key whose value differs between the two
+    cards (recursing into nested dicts; a key present on one side only
+    counts), sorted."""
+    out = []
+    for key in sorted(set(a) | set(b)):
+        name = f"{prefix}{key}"
+        if key not in a or key not in b:
+            out.append(name)
+            continue
+        left, right = a[key], b[key]
+        if isinstance(left, dict) and isinstance(right, dict):
+            out.extend(card_diff(left, right, name + "."))
+        elif left != right:
+            out.append(name)
+    return out
+
+
+def _allowed(name: str) -> bool:
+    parts = name.split(".")
+    return any(name == allow or parts[0] == allow
+               or name.startswith(allow + ".")
+               for allow in MATRIX_CARD_ALLOW)
+
+
+def check_cards(cards: list) -> list:
+    """Diff every card against the first; return the differing keys that
+    the allow-list does not cover (sorted, unique). Empty means the cells
+    differ only where the aircraft or the scene is allowed to show."""
+    if len(cards) < 2:
+        return []
+    bad = set()
+    for other in cards[1:]:
+        bad.update(k for k in card_diff(cards[0], other) if not _allowed(k))
+    return sorted(bad)
+
+
+def fetch_verify(server, run_id) -> dict:
+    """GET /runs/{id}/verify.json; a non-200 answer comes back as a report
+    with ``ok`` False and the server's words, so it fails the cell by
+    name instead of raising."""
+    status, payload = call(server, "GET", f"/runs/{run_id}/verify.json")
+    if status != 200 or not isinstance(payload, dict):
+        return {"ok": False, "passed": 0, "failed": 0, "not_run": 0,
+                "checks": [], "error": f"verify.json: HTTP {status}: {why(payload)}"}
+    return payload
+
+
+def verify_cell(report: dict, run_record: dict, cell: dict):
+    """(passed, words). A cell passes only when the verifier says ``ok``
+    with ``failed`` 0, its ``component_coverage`` check is PASS (absent or
+    NOT RUN is a failure: NOT RUN is never a pass), and the run record's
+    scene key is the cell environment's bake."""
+    problems = []
+    if report.get("error"):
+        problems.append(str(report["error"]))
+    if report.get("ok") is not True:
+        problems.append("verify ok is not true")
+    if int(report.get("failed") or 0) != 0:
+        problems.append(f"verify failed={report.get('failed')}")
+    checks = report.get("checks") or []
+    coverage = next((c for c in checks
+                     if isinstance(c, dict) and c.get("name") == "component_coverage"), None)
+    if coverage is None:
+        problems.append("component_coverage: not in the report")
+    else:
+        status = str(coverage.get("status") or "")
+        if status in NOT_RUN_STATUSES:
+            problems.append(f"component_coverage NOT RUN: {coverage.get('detail', '')}")
+        elif status != "PASS":
+            problems.append(f"component_coverage {status}: {coverage.get('detail', '')}")
+    wanted = MATRIX_SCENES[cell["environment"]]
+    scene = (run_record or {}).get("scene") or {}
+    scene_key = scene.get("key") if isinstance(scene, dict) else scene
+    if scene_key != wanted:
+        problems.append(f"scene {scene_key!r} is not {wanted!r}")
+    if problems:
+        return False, "; ".join(problems)
+    return True, (f"verify PASS component_coverage PASS "
+                  f"(passed {report.get('passed')}, not_run {report.get('not_run')}, "
+                  f"scene {scene_key})")
+
+
+def run_matrix(args) -> int:
+    """Run the four cells serially (one editor at a time), verify each
+    through GET /runs/{id}/verify.json, diff the cards against cell 1 with
+    the allow-list, write runs/phase3_matrix.json and return 0 only when
+    every cell PASSes and the cards agree."""
+    cells = matrix_cells()
+    results = []
+    cards = []
+    for number, cell in enumerate(cells, 1):
+        result = {"number": number, "name": cell["name"], "aircraft": cell["aircraft"],
+                  "environment": cell["environment"], "prompt": MATRIX_PROMPT,
+                  "scene": MATRIX_SCENES[cell["environment"]]}
+        print(f"\n[{number}] {cell['name']}\n    {MATRIX_PROMPT}  "
+              f"[environment: {cell['environment']} -> {result['scene']}]")
+        body = cell_compile_body(cell, args.compiler, args.still, args.clip)
+        try:
+            status, payload = call(args.server, "POST", "/compile", body)
+            if status != 200 or "spec" not in payload:
+                outcome = {**result, "outcome": "refused", "why": why(payload)}
+            elif not payload["validation"]["ok"]:
+                outcome = {**result, "outcome": "refused", "why": why(payload["validation"])}
+            else:
+                result["compiler"] = payload.get("compiler")
+                result["notes"] = payload["spec"].get("notes", [])
+                spec_dict = payload["spec"]["dict"]
+                apply_cell(spec_dict, cell)
+                outcome = run_spec(args.server, result, spec_dict, payload.get("compiler"), args)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            outcome = {**result, "outcome": "failed", "why": f"could not reach the app: {exc}"}
+        outcome["verify"] = {"passed": False, "why": f"run {outcome['outcome']}"}
+        if outcome["outcome"] == "done" and outcome.get("run_id"):
+            run_id = outcome["run_id"]
+            report = fetch_verify(args.server, run_id)
+            _, record = call(args.server, "GET", f"/runs/{run_id}")
+            passed, words = verify_cell(report, record if isinstance(record, dict) else {}, cell)
+            outcome["verify"] = {"passed": passed, "why": words,
+                                 "ok": report.get("ok"), "passed_count": report.get("passed"),
+                                 "failed": report.get("failed"), "not_run": report.get("not_run"),
+                                 "component_coverage": next(
+                                     (c for c in report.get("checks") or []
+                                      if isinstance(c, dict) and c.get("name") == "component_coverage"),
+                                     None),
+                                 "scene": (record or {}).get("scene") if isinstance(record, dict) else None}
+            status, card = call(args.server, "GET", f"/runs/{run_id}/card.json")
+            if status == 200 and isinstance(card, dict):
+                cards.append(card)
+                outcome["card_aircraft"] = card.get("aircraft")
+            else:
+                outcome["verify"] = {"passed": False,
+                                     "why": f"{words}; card.json: HTTP {status}: {why(card)}"}
+            print(f"    {outcome['verify']['why'][:300]}")
+        results.append(outcome)
+        print(f"    -> {outcome['outcome'].upper()}: {str(outcome.get('why', ''))[:200]}")
+
+    card_problems = check_cards(cards) if len(cards) == len(cells) else \
+        [f"only {len(cards)} of {len(cells)} cards read"]
+    diff_keys = sorted({k for c in cards[1:] for k in card_diff(cards[0], c)}) if cards else []
+    all_pass = (len(results) == len(cells)
+                and all(r["verify"]["passed"] for r in results)
+                and not card_problems)
+
+    print("\n================ matrix ================")
+    for r in results:
+        print(f"{r['number']:2}. {r['outcome'].upper():8} {r['name']}"
+              + (f"  [run {r['run_id']}]" if r.get("run_id") else ""))
+        print(f"      {'PASS' if r['verify']['passed'] else 'FAIL'}: {r['verify']['why'][:240]}")
+    print(f"card diff against cell 1: {diff_keys or 'none'}")
+    if card_problems:
+        print(f"FAIL card keys outside the allow-list: {card_problems}")
+    summary = {"cells": results, "card_diff": diff_keys,
+               "card_outside_allow": card_problems, "ok": all_pass}
+    MATRIX_SUMMARY.parent.mkdir(parents=True, exist_ok=True)
+    MATRIX_SUMMARY.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    index = collect(results)
+    print(f"\nwritten: {MATRIX_SUMMARY}\nall results in one folder: {index.parent}")
+    print("matrix PASS" if all_pass else "matrix FAIL")
+    return 0 if all_pass else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--server", default="http://127.0.0.1:8008")
@@ -254,6 +504,10 @@ def main() -> int:
                         help="the AI interpreter (default, as the page) or the offline one")
     parser.add_argument("--poll", type=float, default=5.0, help="seconds between status checks")
     parser.add_argument("--list", action="store_true", help="print the scenarios and stop")
+    parser.add_argument("--matrix", action="store_true",
+                        help="Phase 3 D6: run {A4,J11} x {desert,forest} from the default run, "
+                             "changing only the aircraft and the environment; verify each cell "
+                             "and diff the cards (with --list: print the four cells)")
     parser.add_argument("--collect", action="store_true",
                         help="gather the last batch's results (runs/test_scenarios.json) "
                              "into runs/test_scenarios/ and stop")
@@ -267,6 +521,12 @@ def main() -> int:
         print(f"all results in one folder: {index.parent}\nopen: {index}")
         return 0
 
+    if args.matrix and args.list:
+        for number, cell in enumerate(matrix_cells(), 1):
+            print(f"{number:2}. {cell['name']}\n    {MATRIX_PROMPT}  "
+                  f"[aircraft: {cell['aircraft']}, environment: {cell['environment']} "
+                  f"-> {MATRIX_SCENES[cell['environment']]}]")
+        return 0
     if args.list:
         for number, (name, prompt, edits) in enumerate(SCENARIOS, 1):
             extra = f"   [lighting: {edits}]" if edits else ""
@@ -277,6 +537,8 @@ def main() -> int:
         print(f"The app is not answering at {args.server}. Start it first:\n"
               f"  .\\.venv\\Scripts\\python.exe -m uvicorn webapp.server:app --port 8008")
         return 2
+    if args.matrix:
+        return run_matrix(args)
 
     wanted = set(args.only or range(1, len(SCENARIOS) + 1))
     results = []

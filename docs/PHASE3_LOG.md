@@ -99,3 +99,13 @@ engine's Marketplace folder; later rows say which engine they ran on.
 | B4 | B-1 | `gate6_visual.py --look` (measure) and `--quality beauty --look` | both `GATE 6: FAIL`, exit 1: range extinction ratio 1.12 (thr 0.75), peaks shadow 210 px (thr 10000), ground shadow 143 px (thr 300), exposure metric 4.52 (needs > 16), look clauses FAIL; the terrain is not drawn today (`B4-compare.png`) though the card, settings and RHI equal the 6 Oct run | packet B4-1 (Windows builder) |
 | B1 | B-1 | step 10 / gate rows: CI matrix | `CI: blocked by Actions billing` (GitHub: "The job was not started because recent account payments have failed or your spending limit needs to be increased"), runs 41885321776-41911496059 zero steps | owner |
 | B4 | B-1 | after 4f8abb78 (tiles decline on the synthetic raster): `gate6_visual.py --look` measure and beauty in the builder worktree | terrain clauses ok (extinction ratio 0.21, peaks shadow 17874 px); five clauses FAIL as on the 6 Oct renders: ground shadow 0 px, auto-exposure control 2.51/255, wetness parameter absent, albedo sun invariance 99.6 %, old footage folder absent; `GATE 6: FAIL` | packet B4-2 (Windows round 2) |
+
+## Letter D
+
+Rows written by the Windows runner for D6 (the {A4, J11} x {desert, forest}
+matrix: `python scripts/run_test_scenarios.py --matrix --still --compiler regex`,
+summary in `runs/phase3_matrix.json`); one row per cell with the run id, the
+verify counts, the `component_coverage` detail and the card diff keys.
+
+| box | run | check | result | note |
+|---|---|---|---|---|
