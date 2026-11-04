@@ -15,10 +15,12 @@
     "step 5 one-line prompt to finished campaign"
   ],
   "pushed_commit": "23bad766",
+  "retry": 1,
+  "route": "box",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "pushed",
-  "updated": "2026-11-04T13:15:27",
+  "stage": "building",
+  "updated": "2026-11-04T13:16:33",
   "verdict": "",
   "worktree": "../p3-A10"
 }
