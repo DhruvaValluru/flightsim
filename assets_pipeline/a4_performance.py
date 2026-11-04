@@ -23,7 +23,16 @@ def loaded_fdm(alt_ft: float, cas_kt: float,
     fdm = FlightDynamics("A4")
     fdm.set_initial_conditions({"h-sl-ft": alt_ft, "vc-kts": cas_kt,
                                 "gamma-deg": 0.0})
-    extra = gross_lb - fdm.props.get("inertia/weight-lbs")
+    # The airframe now ships with its default loadout (STA2-4); the
+    # performance fit is made from the clean aircraft plus one store.
+    # inertia/weight-lbs is not refreshed by a write, so the removed
+    # store weight is subtracted by hand.
+    removed = 0.0
+    for station in (2, 3, 4):
+        name = f"inertia/pointmass-weight-lbs[{station}]"
+        removed += fdm.props.get(name)
+        fdm.props.set(name, 0.0)
+    extra = gross_lb - (fdm.props.get("inertia/weight-lbs") - removed)
     if extra > 0:
         fdm.props.set(f"inertia/pointmass-weight-lbs[{STORES_STATION}]", extra)
     fdm.start_engines()

@@ -19,6 +19,14 @@ def test_a4_is_named_not_substituted():
         assert str(spec.aircraft.value) == "A4"
 
 
+def _clean(fdm):
+    """The A-4 ships with its default loadout (STA2-4); these tests state
+    the clean airframe, so they remove the stores first."""
+    for station in (2, 3, 4):
+        fdm.props.set(f"inertia/pointmass-weight-lbs[{station}]", 0.0)
+    return fdm
+
+
 def test_a4_default_cruise_is_a_fighter_speed():
     spec = compile_prompt("fly the A4 at 3000 m for 10 seconds")
     assert float(spec.airspeed.value) == 350.0
@@ -68,7 +76,7 @@ def test_a4_geometry_and_mass_come_from_the_model_cfg():
     from assets_pipeline import a4_sync
 
     cfg = a4_sync.read_cfg()
-    fdm = FlightDynamics("A4")
+    fdm = _clean(FlightDynamics("A4"))
     g = fdm.props.get
     assert abs(g("metrics/bw-ft") - cfg["span_ft"]) < 1e-6
     assert abs(g("metrics/Sw-sqft") - cfg["area_ft2"]) < 1e-6
@@ -150,7 +158,7 @@ def test_a4_reaches_its_published_maximum_speed():
     (Measured 2026-09-30: 585 kt trims at 0.96 throttle; 620 does not.)"""
 
     def trimmed_throttle(kt):
-        fdm = FlightDynamics("A4")
+        fdm = _clean(FlightDynamics("A4"))
         fdm.set_initial_conditions({"h-sl-ft": 1000.0, "vc-kts": kt,
                                     "gamma-deg": 0.0})
         fdm.start_engines()
@@ -198,7 +206,7 @@ def test_tail_hook_arrests_only_when_down_engaged_and_on_the_deck():
 
 
 def test_pylon_stores_add_weight_and_drag_and_the_clean_airframe_has_none():
-    fdm = FlightDynamics("A4")
+    fdm = _clean(FlightDynamics("A4"))
     fdm.set_initial_conditions({"h-sl-ft": 10000.0, "vc-kts": 350.0})
     from assets_pipeline import a4_sync
 
