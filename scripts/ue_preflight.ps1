@@ -193,10 +193,137 @@ if ($skyMaterials.Count -eq 0) {
         " -- stated-time renders need them; re-run the step above")
 }
 
-# -- ffmpeg (clips only; a named refusal elsewhere, stated here early) ----
-$ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
-if ($ffmpeg) { Say "ffmpeg (clip encoding)" $ffmpeg.Source }
-else { Say "ffmpeg (clip encoding)" "not found -- winget install ffmpeg (renders still run; only encoding needs it)" }
+# -- toolchain manifest ---------------------------------------------------
+# toolchain.json at the repo root pins every tool in ONE file (Phase 3 B2,
+# decisions 13 and 15): the engine (version, patch, changelist), the C++
+# toolchain per platform (msvc + windows_sdk here; xcode on the Mac), Cesium
+# for Unreal, ffmpeg, the venv Python and JSBSim. Each installed tool is
+# read and compared as a string; a difference is a refusal BY NAME
+# (toolchain.<tool>_mismatch: found X, pinned Y), a tool that is not
+# installed is "not found", and a null pin is UNRECORDED (that platform has
+# not measured it yet; never compared). ffmpeg used to be a note here
+# (a Say, never a Fail); decision 15 makes a missing or wrong ffmpeg a
+# failure like every other pinned tool. Keys starting with "_" are comments.
+
+# -> the parsed manifest; throws toolchain.pin_unreadable.
+function Get-Toolchain($repo) {
+    $manifest = Join-Path $repo "toolchain.json"
+    if (-not (Test-Path $manifest)) {
+        throw "toolchain.pin_unreadable: no manifest at $manifest"
+    }
+    try { $pins = Get-Content $manifest -Raw -Encoding UTF8 | ConvertFrom-Json }
+    catch { throw "toolchain.pin_unreadable: $manifest is not valid JSON ($($_.Exception.Message))" }
+    if ((-not $pins.engine) -or (-not $pins.engine.version)) {
+        throw "toolchain.pin_unreadable: $manifest has no engine.version"
+    }
+    return $pins
+}
+
+# The one directory name under $parent that equals $pinned, else the highest
+# one (so the mismatch names what IS installed), else $null.
+function Select-VersionDir($parent, $pinned) {
+    $dirs = Get-ChildItem $parent -Directory -ErrorAction SilentlyContinue
+    if (-not $dirs) { return $null }
+    $exact = $dirs | Where-Object { $_.Name -eq "$pinned" } | Select-Object -First 1
+    if ($exact) { return $exact.Name }
+    $sorted = $dirs | Sort-Object { try { [version]$_.Name } catch { [version]"0.0" } }
+    return ($sorted | Select-Object -Last 1).Name
+}
+
+# -> ordered map tool -> the installed version string, or $null when the
+# tool is not installed. The engine string carries its changelist so the
+# pin's changelist is compared too: "M.m.p (CL n)".
+function Get-InstalledTools($repo, $ueRoot, $pins) {
+    $found = [ordered]@{}
+
+    $buildVersion = Join-Path $ueRoot "Engine\Build\Build.version"
+    $found.engine = $null
+    if (Test-Path $buildVersion) {
+        $v = Get-Content $buildVersion -Raw | ConvertFrom-Json
+        $found.engine = "$($v.MajorVersion).$($v.MinorVersion).$($v.PatchVersion) (CL $($v.Changelist))"
+    }
+
+    $found.msvc = $null
+    $vswhereExe = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhereExe) {
+        $vsPath = Probe $vswhereExe @("-latest", "-products", "*",
+            "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "-property", "installationPath") | Select-Object -First 1
+        if ($vsPath) {
+            $found.msvc = Select-VersionDir (Join-Path $vsPath "VC\Tools\MSVC") $pins.windows.msvc
+        }
+    }
+
+    $found.windows_sdk = Select-VersionDir `
+        (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Include") $pins.windows.windows_sdk
+
+    $found.cesium_for_unreal = $null
+    $uplugin = Get-ChildItem (Join-Path $ueRoot "Engine\Plugins\Marketplace") `
+        -Recurse -Depth 1 -Filter "CesiumForUnreal.uplugin" -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($uplugin) {
+        $descriptor = Get-Content $uplugin.FullName -Raw | ConvertFrom-Json
+        if ($descriptor.VersionName) { $found.cesium_for_unreal = "$($descriptor.VersionName)" }
+    }
+
+    $found.ffmpeg = $null
+    $ffmpegCmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+    if ($ffmpegCmd) {
+        $banner = Probe $ffmpegCmd.Source @("-version") | Select-Object -First 1
+        if ("$banner" -match "version (\d+\.\d+(\.\d+)?)") { $found.ffmpeg = $Matches[1] }
+    }
+
+    $found.python = $null
+    $found.jsbsim = $null
+    $venvPy = Join-Path $repo ".venv\Scripts\python.exe"
+    if (Test-Path $venvPy) {
+        $pyBanner = Probe $venvPy @("--version") | Select-Object -First 1
+        if ("$pyBanner" -match "(\d+\.\d+\.\d+)") { $found.python = $Matches[1] }
+        $jsb = Probe $venvPy @("-c", "import importlib.metadata as m;print(m.version('jsbsim'))") |
+            Select-Object -First 1
+        if ($LASTEXITCODE -eq 0 -and $jsb) { $found.jsbsim = "$jsb".Trim() }
+    }
+    return $found
+}
+
+# One line per tool: "OK <tool> <version>" through Say, a mismatch or a
+# missing tool through Fail (exit non-zero), a null pin as UNRECORDED.
+function Test-ToolVersion($tool, $found, $pinned) {
+    if ($null -eq $pinned) { Say "toolchain $tool" "UNRECORDED $tool"; return }
+    if (-not $found) {
+        Fail "toolchain $tool" "toolchain.${tool}_mismatch: not found, pinned $pinned"
+        return
+    }
+    if ("$found" -ne "$pinned") {
+        Fail "toolchain $tool" "toolchain.${tool}_mismatch: found $found, pinned $pinned"
+        return
+    }
+    Say "toolchain $tool" "OK $tool $found"
+}
+
+$pins = $null
+try { $pins = Get-Toolchain $repo }
+catch { Fail "toolchain manifest" $_.Exception.Message }
+if ($pins) {
+    $installed = Get-InstalledTools $repo $ueRoot $pins
+    $enginePin = "$($pins.engine.version).$($pins.engine.patch)"
+    if ($pins.engine.changelist) { $enginePin = "$enginePin (CL $($pins.engine.changelist))" }
+    Test-ToolVersion "engine" $installed.engine $enginePin
+    $platformPins = $pins.windows
+    if ($platformPins) {
+        foreach ($entry in $platformPins.PSObject.Properties) {
+            if ($entry.Name.StartsWith("_")) { continue }
+            Test-ToolVersion $entry.Name $installed[$entry.Name] $entry.Value
+        }
+    } else {
+        Fail "toolchain manifest" "toolchain.pin_unreadable: no 'windows' block in toolchain.json"
+    }
+    foreach ($entry in $pins.PSObject.Properties) {
+        if ($entry.Name.StartsWith("_")) { continue }
+        if ($entry.Name -in @("engine", "windows", "mac")) { continue }
+        Test-ToolVersion $entry.Name $installed[$entry.Name] $entry.Value
+    }
+}
 
 Write-Host ""
 if ($script:status -eq 0) {
