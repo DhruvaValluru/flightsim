@@ -1,14 +1,18 @@
 {
-  "budget_used": 11,
-  "claims": [
-    "docs/PHASE3_LOG.md",
-    "scripts/run_test_scenarios.py",
-    "tests/test_phase3_matrix.py"
-  ],
+  "budget_used": 17,
+  "builder_commit": "3786776401767ea0e8cd8582093b68c091835ed5",
+  "built_commit": "3786776401767ea0e8cd8582093b68c091835ed5",
+  "claims": [],
   "letter": "D",
   "needs_windows": true,
-  "stage": "building",
+  "pending_windows": [
+    "step 6: four serial renders --matrix --still --compiler regex, 4 done rows in runs/phase3_matrix.json",
+    "step 7: per cell verify.json ok, failed 0, component_coverage PASS (NOT RUN = FAIL)",
+    "step 8: card diff of the four cards inside MATRIX_CARD_ALLOW; provenance scene key = MATRIX_SCENES[environment]",
+    "step 9: four rows under ## Letter D in docs/PHASE3_LOG.md"
+  ],
+  "stage": "built",
   "unit": "D6",
-  "updated": "2026-11-04T13:37:49",
+  "updated": "2026-11-04T13:43:26",
   "worktree": "../p3-D6"
 }
