@@ -633,6 +633,9 @@ labels.pass_unknown:
 labels.pass_needs_labels:
   sentence: "The ground-truth passes ride the label passes and were asked for without them."
   hint: "Ask for the labels too."
+labels.no_bundle:
+  sentence: "The render finished but wrote no label bundle for some cameras, so their objects have no measured boxes."
+  hint: "Render again; if it repeats, the engine did not write the label images for that camera."
 annotation.normals:
   sentence: "The surface normals disagree with the surface the measured distances show."
 annotation.flow:

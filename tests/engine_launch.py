@@ -30,6 +30,8 @@ def _draw_one_frame_per_camera(command) -> None:
     for i, part in enumerate(parts[:-1]):
         if part.endswith("card.json") and Path(part).is_file():
             frames = Path(parts[i + 1])
+            if _write_minimal_bundle(frames.parent):
+                return
             try:
                 cameras = json.loads(Path(part).read_text()).get("cameras") or []
             except ValueError:
@@ -39,6 +41,51 @@ def _draw_one_frame_per_camera(command) -> None:
                 folder.mkdir(parents=True, exist_ok=True)
                 (folder / "frame_0000.png").write_bytes(b"x")
             return
+
+
+def _write_minimal_bundle(run_dir: Path) -> bool:
+    """For the manifest the capture wrote before the render: every frame
+    it lists, plus the minimal real label bundle ``attach_engine_labels``
+    accepts (``render.json`` with a ``labels`` block, a mask and a depth
+    at frame size, one alone image per declared object). Returns False
+    when there is no such manifest."""
+    import json
+
+    import numpy as np
+    from PIL import Image
+
+    path = run_dir / "capture_manifest.json"
+    if not path.is_file():
+        return False
+    try:
+        frames = json.loads(path.read_text(encoding="utf-8")).get("frames") or []
+    except ValueError:
+        return False
+    records = {}
+    for frame in frames:
+        folder = run_dir / "frames" / str(frame["camera_id"])
+        folder.mkdir(parents=True, exist_ok=True)
+        name = Path(str(frame["file"])).name
+        stem = name[:-4]
+        width, height = int(frame["width_px"]), int(frame["height_px"])
+        (folder / name).write_bytes(b"x")
+        Image.fromarray(np.zeros((height, width), dtype=np.uint8), mode="L").save(
+            folder / f"{stem}_mask.png")
+        np.full((height, width), 1000.0, dtype="<f4").tofile(folder / f"{stem}_depth.f32")
+        objects = []
+        for entry in (frame.get("labels") or {}).get("objects") or []:
+            alone = f"{stem}_alone_{int(entry['int_id'])}.png"
+            Image.fromarray(np.zeros((height, width), dtype=np.uint8), mode="L").save(
+                folder / alone)
+            objects.append({"int_id": int(entry["int_id"]), "alone_png": alone})
+        records.setdefault(str(frame["camera_id"]), []).append({
+            "frame": name,
+            "labels": {"mask": f"{stem}_mask.png", "depth_f32": f"{stem}_depth.f32",
+                       "objects": objects}})
+    for camera, rows in records.items():
+        (run_dir / "frames" / camera / "render.json").write_text(
+            json.dumps({"frame_records": rows}), encoding="utf-8")
+    return True
 
 
 def launch_through_run(monkeypatch) -> None:
