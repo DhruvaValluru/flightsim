@@ -743,6 +743,28 @@ def _auto_scene(spec: ScenarioSpec) -> Dict:
                      "elevation"}
 
 
+def clip_window_s(spec: ScenarioSpec) -> float:
+    """The window the single run flies, solves and checks: the spec's
+    duration capped at CLIP_SECONDS (the spec keeps its own duration).
+    Every web site reads it here, and :func:`capture_arguments` hands the
+    same number to ``flightsim.capture --clip-seconds``, so the campaign's
+    capture cannot fly a longer flight than the clip it stands in for."""
+    return min(float(spec.duration.value), CLIP_SECONDS)
+
+
+def capture_arguments(spec: ScenarioSpec, scene: Optional[Dict]) -> Dict[str, Any]:
+    """The ``flightsim.capture`` options that make a CLI capture fly what
+    POST /run flies on this placed spec (core.dataset.batch.CAPTURE_OPTIONS
+    names): the scene's bake stem under ``terrain`` (absent on the slab)
+    and the clip window under ``clip_seconds``. Returned by
+    :func:`provision_place` so the campaign (``core.campaign.campaign.
+    provision_spec``) builds its command from the same numbers."""
+    out: Dict[str, Any] = {"clip_seconds": clip_window_s(spec)}
+    if scene and scene.get("terrain"):
+        out["terrain"] = str(scene["terrain"])
+    return out
+
+
 def provision_place(spec: ScenarioSpec) -> Dict[str, Any]:
     """POST /run's place provisioning, the ONE function every path that
     flies a spec calls (decision 17): the single run (``webapp.server``)
@@ -758,15 +780,19 @@ def provision_place(spec: ScenarioSpec) -> Dict[str, Any]:
     returned under ``refusal`` with the spec untouched further), then
     placement (:func:`place_on_scene`) and the scene the geography earns
     (:func:`pick_scene`, under ``scene``; its ``terrain`` is the bake stem
-    the capture carries, None on the slab).
+    the capture carries, None on the slab), and under ``capture`` the
+    options a ``flightsim.capture`` of this placed spec needs to fly the
+    same flight (:func:`capture_arguments`: the stem and the clip window).
     """
     plan_scene_setting(spec)
     plan_water_surface(spec)
     unbaked = needs_dynamic_bake(spec)
     if unbaked is not None:
-        return {"refusal": unbaked, "scene": None}
+        return {"refusal": unbaked, "scene": None, "capture": None}
     place_on_scene(spec)
-    return {"refusal": None, "scene": pick_scene(spec)}
+    scene = pick_scene(spec)
+    return {"refusal": None, "scene": scene,
+            "capture": capture_arguments(spec, scene)}
 
 
 def place_on_scene(spec: ScenarioSpec) -> None:
@@ -1890,7 +1916,7 @@ def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
     from core.terrain.heightfield import Heightfield
 
     ground = TerrainGround(Heightfield.read(Path(scene["terrain"])))
-    seconds = min(float(spec.duration.value), CLIP_SECONDS)
+    seconds = clip_window_s(spec)
 
     orographic = _orographic_provider(spec, scene)
     try:
@@ -2623,7 +2649,7 @@ def camera_scene_violations(spec: ScenarioSpec, scene: Dict) -> List[Dict]:
     if str(spec.weather_event.value) == "tornado":
         from core.environment.tornado import FADE_TOP_M, R_CORE_M
 
-        seconds = min(float(spec.duration.value), CLIP_SECONDS)
+        seconds = clip_window_s(spec)
         axis_n, axis_e = tornado_axis(spec, scene, seconds)
         tornado_block = {"centre_north_m": axis_n, "centre_east_m": axis_e,
                          "r_core_m": R_CORE_M, "fade_top_m": FADE_TOP_M}
@@ -3115,7 +3141,7 @@ class RunManager:
         try:
             summary = headless_capture(
                 spec, scene, out, heightfield=heightfield, terrain_ground=ground,
-                duration_s=min(float(spec.duration.value), CLIP_SECONDS),
+                duration_s=clip_window_s(spec),
                 push=run.push)
         except CaptureError as exc:
             run.push("failed", f"[{exc.constraint}] {exc.message}")
@@ -3270,7 +3296,7 @@ class RunManager:
         downburst_block = None
         event_note = None
         if event in ("thunderstorm", "tornado"):
-            seconds_ = min(float(spec.duration.value), CLIP_SECONDS)
+            seconds_ = clip_window_s(spec)
             # ONE placement, shared with the /run camera hazard check
             # (severe_event_centre): straight-line 45% ahead, replaced
             # on terrain scenes by the same point of the pre-flown
@@ -3427,8 +3453,7 @@ class RunManager:
                     # The window the HOST flies, not the spec's own: a
                     # schedule laid out past the clip's end names frames
                     # that can never exist.
-                    duration_s=min(float(spec.duration.value),
-                                   CLIP_SECONDS))
+                    duration_s=clip_window_s(spec))
             except CaptureError as exc:
                 run.push("failed", f"[{exc.constraint}] {exc.message}")
                 return
@@ -3452,7 +3477,7 @@ class RunManager:
         card_arguments = dict(
             control_inputs=control_inputs,
             route=route_flight["card"] if route_flight is not None else None,
-            duration_s=min(float(spec.duration.value), CLIP_SECONDS),
+            duration_s=clip_window_s(spec),
             orographic=orographic,
             rotor=(rotor_provider.card_block()
                    if rotor_provider is not None else None),
@@ -3558,8 +3583,7 @@ class RunManager:
                 capture_solved = capture_resolve_over_host(
                     spec, capture_solved, host_telemetry,
                     heightfield=capture_heightfield, tornado=tornado_block,
-                    duration_s=min(float(spec.duration.value),
-                                   CLIP_SECONDS))
+                    duration_s=clip_window_s(spec))
             except CaptureError as exc:
                 # A camera that cleared the ridge on the pre-run and does
                 # not on the host's own track must refuse: that is the
@@ -3819,7 +3843,7 @@ class RunManager:
                                "still-air baseline (headless)")
             try:
                 _effect_report(spec, scene, control_inputs,
-                               min(float(spec.duration.value), CLIP_SECONDS),
+                               clip_window_s(spec),
                                out / "telemetry.json", out / "effect.json")
             except Exception as exc:
                 run.push("report", f"effect report unavailable "

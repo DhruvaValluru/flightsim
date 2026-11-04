@@ -251,7 +251,11 @@ def compile_round(prompt: str, tier: str = "llm", questions=None, answers=None
                 # A nameless failure is the model's answer refused: the
                 # catalogue's compile.rejected, the producer's text beside.
                 said = words({"constraint": "compile.rejected", "message": str(exc)})
-            note, note_details = said["sentence"], said["details"]
+            note = said["sentence"]
+            # The model's raw text rides the details for the packet, never
+            # the sentence (packet A10-2).
+            note_details = {**said["details"],
+                            "raw_response": exc.details.get("raw_response")}
             asked = [] if answers else camera_questions(prompt)
     else:
         spec = compile_prompt(prompt, answers=answers)

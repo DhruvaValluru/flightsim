@@ -59,7 +59,11 @@ CAPTURE_OPTIONS = {"card": bool, "render": bool, "void": bool,
                    # R3: the case flies its null pairs and its dt/2 twin
                    # (the CLI's --null-tests / --uncertainty), so the
                    # campaign report's uncertainty block has numbers.
-                   "null_tests": bool, "uncertainty": bool}
+                   "null_tests": bool, "uncertainty": bool,
+                   # A10: the window the web app's single run flies (its
+                   # clip cap), the CLI's --clip-seconds; the campaign
+                   # takes it from webapp.runs.provision_place.
+                   "clip_seconds": float}
 LEDGER = "ledger.jsonl"
 BATCH_RECORD = "batch.json"
 
@@ -159,6 +163,10 @@ def read_matrix(path) -> Matrix:
             raise BatchError("batch.capture", f"capture.{key} must be an integer")
         if kind is str and not isinstance(value, str):
             raise BatchError("batch.capture", f"capture.{key} must be a string")
+        if kind is float and (isinstance(value, bool)
+                              or not isinstance(value, (int, float)) or value <= 0):
+            raise BatchError("batch.capture",
+                             f"capture.{key} must be a positive number of seconds")
     return Matrix(base=base, factors=factors, seeds=list(seeds), design=design,
                   workers=workers, capture=dict(capture), path=path)
 
@@ -247,6 +255,8 @@ def capture_command(spec_path: Path, run_dir: Path,
         command.append("--no-host-flight")
     if capture.get("terrain"):
         command += ["--terrain", str(capture["terrain"])]
+    if capture.get("clip_seconds") is not None:
+        command += ["--clip-seconds", f"{float(capture['clip_seconds']):g}"]
     if capture.get("synth_terrain"):
         command.append("--synth-terrain")
     if capture.get("null_tests"):
