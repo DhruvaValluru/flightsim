@@ -50,7 +50,7 @@ fi
 step "mutation guard targets for touched files"
 labels="$(bash scripts/mutation_check.sh --list 2>/dev/null | while IFS= read -r line; do
   f="$(echo "$line" | sed -n 's/.*(\(.*\))$/\1/p')"; [ -n "$f" ] || continue
-  echo "$changed" | grep -qx "$f" && echo "$line" | sed -n 's/^ *\[[0-9]*\/[0-9]*\] \(.*\)  (.*$/\1/p'; done | paste -sd'|' -)"
+  echo "$changed" | grep -qx "$f" && echo "$line" | sed -n 's/^ *\[[0-9]*\/[0-9]*\] \(.*\)  (.*$/\1/p' | sed 's/[][\.*^$+?(){}|\\]/\\&/g'; done | paste -sd'|' -)"
 if [ -n "$labels" ]; then
   if ! bash scripts/mutation_check.sh --check-targets --match "$labels"; then echo "FAIL a guard target no longer matches; retarget it in scripts/mutation_check.sh"; exit 6; fi
 else echo "   no guards target the touched files"; fi
