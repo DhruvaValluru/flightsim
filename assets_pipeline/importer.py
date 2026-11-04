@@ -50,7 +50,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG_DIR = REPO / "assets" / "aircraft_config"
@@ -337,6 +337,91 @@ def _run_import(editor, script_arg: str) -> subprocess.CompletedProcess:
          "-unattended", "-nopause", "-nosplash", "-stdout"], cwd=REPO)
 
 
+def _converter_path(name: str) -> Optional[Path]:
+    """The converter script that builds ``name``'s manifest, or None when
+    the config cannot be read."""
+    config_path = CONFIG_DIR / f"{name}.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    script = ("a4_mdl_convert.py" if config.get("converter") == "mdl"
+              else "convert.py")
+    return REPO / "assets_pipeline" / script
+
+
+def outdated_reason(name: str) -> Optional[str]:
+    """Why ``name``'s mesh must be (re)built now, or None when current.
+
+    Two reasons: the mesh manifest is missing, or it is OLDER BY MTIME
+    than the aircraft config (``assets/aircraft_config/<name>.json``) or
+    the converter that wrote it. A changed config or converter means the
+    manifest describes geometry the current code would not produce."""
+    manifest = mesh_manifest_path(name)
+    if not manifest.is_file():
+        return f"no mesh manifest at {manifest}"
+    return older_than_inputs_reason(name)
+
+
+def older_than_inputs_reason(name: str) -> Optional[str]:
+    """The mtime half of :func:`outdated_reason`: a manifest older than
+    the config or converter. None when there is no manifest to compare."""
+    manifest = mesh_manifest_path(name)
+    if not manifest.is_file():
+        return None
+    built = manifest.stat().st_mtime
+    config_path = CONFIG_DIR / f"{name}.json"
+    if config_path.is_file() and config_path.stat().st_mtime > built:
+        return f"the mesh manifest is older than {config_path.name}"
+    converter = _converter_path(name)
+    if converter is not None and converter.is_file() \
+            and converter.stat().st_mtime > built:
+        return f"the mesh manifest is older than {converter.name}"
+    return None
+
+
+def _editor_present() -> bool:
+    from core.util.platform import ue_editor_path
+
+    editor = ue_editor_path()
+    return editor is not None and Path(editor).is_file()
+
+
+def provision_models(names: Iterable[str], report: Report = print,
+                     ensure=None) -> List[str]:
+    """Build, once each, every distinct airframe in ``names`` that is not
+    current (missing mesh, outdated manifest, or no .uasset behind it).
+    Returns the names built. Raises AircraftAssetError (named) on a real
+    failure -- missing licence, converter error, import error.
+
+    No editor file on this machine: a model that still needs the editor
+    import is skipped, with a line saying so, and nothing is launched; a
+    model that needs only a re-convert (assets already imported) is still
+    re-converted. The caller's own check then decides what that means."""
+    ensure = ensure_model if ensure is None else ensure
+    built: List[str] = []
+    seen = set()
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        reason = older_than_inputs_reason(name)
+        if reason is None and is_imported(name):
+            continue
+        manifest = mesh_manifest_path(name)
+        needs_editor = (not manifest.is_file()) or bool(missing_assets(manifest))
+        if needs_editor and not _editor_present() and \
+                unavailable_reason(name) is None:
+            report(f"the {name} model needs the Unreal editor to import "
+                   f"and none is installed here; nothing was run")
+            continue
+        report(f"the {name} model is not current ({reason or 'not imported'}); "
+               f"building it once")
+        ensure(name, report)
+        built.append(name)
+    return built
+
+
 def ensure_model(name: str, report: Report = print) -> Path:
     """The fail-safe: whatever step is missing for `name`, do it now.
 
@@ -360,6 +445,8 @@ def ensure_model(name: str, report: Report = print) -> Path:
             f"{', '.join(sorted(configured_aircraft()))}")
     manifest = mesh_manifest_path(name)
     stale = stale_manifest_reason(manifest) if manifest.is_file() else None
+    if not stale and manifest.is_file():
+        stale = outdated_reason(name)
     if stale:
         # Re-convert in place: the OBJs and the imported .uassets are the
         # same geometry, so only the converter runs (no editor time).
