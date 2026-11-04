@@ -1559,7 +1559,7 @@ mutate webapp/runs.py \
     "the solve pass leaves no render.json for the verifier to find" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
-mutate webapp/capture.py \
+mutate core/capture/window.py \
     '    return {name: list(values)[:keep] for name, values in columns.items()}' \
     '    return columns  # MUTATED: schedule past the end of the clip' \
     "the capture schedule is cut to the flight the host will fly" \
@@ -1605,10 +1605,10 @@ mutate core/nl/compiler.py \
     tests/test_camera_spec.py || failures=$((failures+1))
 
 mutate core/nl/llm_compiler.py \
-    '        # field and is left exactly as it is.
-        plan_full_capture(camera, frm="a view named in the prompt with "' \
-    '        # field and is left exactly as it is.
-        (lambda *a, **k: None)(camera, frm="MUTATED: three stills "' \
+    '            # field and is left exactly as it is.
+            plan_full_capture(camera, frm="a view named in the prompt with "' \
+    '            # field and is left exactly as it is.
+            (lambda *a, **k: None)(camera, frm="MUTATED: three stills "' \
     "a view the model named captures the whole clip" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
