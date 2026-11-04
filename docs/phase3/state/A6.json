@@ -3,7 +3,9 @@
   "FAIL": "",
   "budget_used": 9,
   "builder_commit": "9f033ef9",
-  "claims": [],
+  "claims": [
+    "scripts/ue_create_materials.py"
+  ],
   "failures": [
     "run A-2 packet docs/phase3/packets/A6-1.md: the five print STALE/REBUILT/CREATED then EXISTS, Missing If 0, but M_RainDrops and M_RainSplash are REBUILT/CREATED on every run (storm generation stamp not seen); Windows builder fixes scripts/ue_create_materials.py"
   ],
@@ -19,8 +21,8 @@
   "pushed_commit": "23bad766",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "pushed",
-  "updated": "2026-11-04T11:37:46",
+  "stage": "building",
+  "updated": "2026-11-04T11:38:08",
   "verdict": "",
-  "worktree": "../p3-A6"
+  "worktree": "../p3w-A6"
 }
