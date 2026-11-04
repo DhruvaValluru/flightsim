@@ -150,6 +150,9 @@ visual-only per host (measured).</p>
 </div>
 <script src="/conditions_list.js"></script>
 <script>ConditionsList.mount(document.getElementById("conditionsList"), document.getElementById("prompt"));</script>
+<div id="environmentPicker"></div>
+<script src="/environment_picker.js"></script>
+<script>EnvironmentPicker.mount(document.getElementById("environmentPicker"), {});</script>
 <div id="lensPicker"></div>
 <script src="/camera3d.js"></script>
 <script src="/route_map.js"></script>
@@ -1675,6 +1678,13 @@ function clipSeconds() {
   return v === "" || v === "still" ? null : parseFloat(v);
 }
 
+// The environment preset (desert / forest) the picker holds, or null for
+// "none": sent as the structured `environment` field of /compile, applied
+// server-side as a user edit of place, surface, sun and season.
+function environmentPreset() {
+  return window.EnvironmentPicker ? EnvironmentPicker.value() : null;
+}
+
 // "1 frame (preview)": every camera captures exactly one image, so a look
 // can be judged without rendering a whole clip.
 function stillPreview() {
@@ -1683,6 +1693,7 @@ function stillPreview() {
 
 $("compile").addEventListener("click", () =>
   doCompile({prompt: $("prompt").value, clip_seconds: clipSeconds(),
+             environment: environmentPreset(),
              still: stillPreview()}));
 
 // The selector used to be read only at Interpret: picking "3 s" AFTER
@@ -1733,6 +1744,7 @@ $("answer").addEventListener("click", () => {
              questions: pendingQuestions,
              answers: collectAnswers(),
              clip_seconds: clipSeconds(),
+             environment: environmentPreset(),
              still: stillPreview(),
              prior_spec: compiled ? compiled.spec.dict : null});
 });
