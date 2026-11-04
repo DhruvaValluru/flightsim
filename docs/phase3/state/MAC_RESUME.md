@@ -31,3 +31,5 @@ the first finished run to Windows (B1 step 10, gate rows).
 Rules that stuck today: pull with `git pull --no-rebase`; event logs union-merge;
 never message a running Workflow agent; builders only via Workflow on fable;
 Windows runs only the sheet's check lines; full suite only at phase end.
+
+**Update 2026-11-04 night:** all Mac builds done, F5 written; see docs/PHASE3_REPORT.md for what is open. Stage 7 overlap, phase-end and PR not run.
