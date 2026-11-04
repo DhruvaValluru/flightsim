@@ -810,6 +810,32 @@ def fraction_in_frame(clipped, unclipped) -> Optional[float]:
     return (_area(clipped) / full) if clipped else 0.0
 
 
+#: C7: a retracted landing gear has no box. Its ``bbox_2d_tight`` is null
+#: with this basis (never a zero-size box), read from the recorded
+#: ``gear/gear-pos-norm`` channel (core/fdm/state.py) below this value.
+GEAR_RETRACTED_BASIS = "gear retracted"
+GEAR_RETRACTED_BELOW = 0.01
+GEAR_POSITION_CHANNEL = "gear/gear-pos-norm"
+
+
+def gear_position_norm(record: Optional[Dict],
+                       state: Optional[Dict]) -> Optional[float]:
+    """The frame's ``gear/gear-pos-norm`` (1 down, 0 retracted): the
+    recorded row on the frame record (``record["state"]``, the recorder's
+    whole row) first, else the aircraft state dict; None when neither
+    carries the channel (a fixed-gear type records 1, so None only means
+    the row is absent, and the gear is then taken as down)."""
+    for holder in ((record or {}).get("state"), state):
+        if isinstance(holder, dict) and holder.get(GEAR_POSITION_CHANNEL) is not None:
+            return float(holder[GEAR_POSITION_CHANNEL])
+    return None
+
+
+def gear_retracted(record: Optional[Dict], state: Optional[Dict]) -> bool:
+    position = gear_position_norm(record, state)
+    return position is not None and position < GEAR_RETRACTED_BELOW
+
+
 def not_claimed_for(obj_class: str, alone_pass: bool) -> List[str]:
     out = [f"subpixel_mask_accuracy_beyond_range_m: {NOT_CLAIMED_SUBPIXEL_RANGE_M:g}",
            f"objects_under_px: {NOT_CLAIMED_OBJECT_PX}"]
@@ -864,6 +890,16 @@ def component_label_record(obj, parent_entry: Dict, record: Dict,
         entry[key] = [] if key == "occluded_by" else None
     entry["not_claimed"] = not_claimed_for(obj.class_name, alone_pass=False)
     basis["engine"] = NO_BUNDLE_BASIS
+    if obj.class_name == "landing_gear" and gear_retracted(record, state):
+        # C7: folded gear is not boxed. The tight box stays null with this
+        # basis through attach_engine_labels (never a zero-size box) and
+        # the verifier's component_boxes skips a null box with a basis.
+        entry["bbox_2d_tight"] = None
+        basis["bbox_2d_tight"] = GEAR_RETRACTED_BASIS
+        entry["not_claimed"].append(
+            f"bbox_2d_tight: {GEAR_RETRACTED_BASIS} ({GEAR_POSITION_CHANNEL} "
+            f"{gear_position_norm(record, state):g} < {GEAR_RETRACTED_BELOW:g}), "
+            f"so the folded gear carries no box")
     entry["basis"] = basis
     return entry
 
@@ -1911,7 +1947,10 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
                         alone = np.where(kid_alone == kid, kid, alone).astype(alone.dtype)
                         files[f"alone_{kid}"] = alone_by_id[kid]
             measured = measure_object(mask, depth, int_id, alone, children=kids)
-            entry["bbox_2d_tight"] = measured["bbox_2d_tight"]
+            # C7: a retracted gear keeps its null box and basis.
+            retracted = ((entry.get("basis") or {}).get("bbox_2d_tight")
+                         == GEAR_RETRACTED_BASIS)
+            entry["bbox_2d_tight"] = None if retracted else measured["bbox_2d_tight"]
             entry["visible_fraction"] = measured["visible_fraction"]
             entry["occluded_by"] = resolve_ids(measured["occluded_by"], objects)
             hidden = measured.get("occluded_pixels") or {}
@@ -1932,7 +1971,9 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
             if kids:
                 basis["engine"]["rollup_children"] = resolve_ids(kids, objects)
             why = tight_box_basis(entry)
-            if why is not None:
+            if retracted:
+                basis["bbox_2d_tight"] = GEAR_RETRACTED_BASIS
+            elif why is not None:
                 basis["bbox_2d_tight"] = why
             else:
                 basis.pop("bbox_2d_tight", None)

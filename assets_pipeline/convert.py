@@ -315,6 +315,75 @@ def _gear_patterns(config: Dict) -> Tuple[List[str], List[str]]:
     return out[0], out[1]
 
 
+def _gear_component(config: Dict) -> Optional[Dict]:
+    """The config's declared ``landing_gear`` component (``labels.components``,
+    class ``landing_gear``), or None when the config declares none. The
+    letter-C rule is ONE landing_gear component per aircraft (every wheel,
+    strut and brake the ``gear_geometry`` patterns match goes into its one
+    OBJ), so two refuse by id; a malformed block refuses too, because a
+    silently ignored gear entry would leave the gear in the body OBJ with
+    no box of its own."""
+    declared = (config.get("labels") or {}).get("components")
+    if declared is None:
+        return None
+    if not isinstance(declared, list):
+        raise ConvertError("labels.components must be a list of component "
+                           "objects", constraint="aircraft.component_unmatched")
+    gear = [c for c in declared
+            if isinstance(c, dict) and c.get("class") == "landing_gear"]
+    if len(gear) > 1:
+        raise ConvertError(
+            f"labels.components declares {len(gear)} landing_gear components "
+            f"({[c.get('id') for c in gear]}); the gear split writes ONE "
+            f"landing_gear OBJ per aircraft, so declare one",
+            constraint="aircraft.component_unmatched")
+    if not gear:
+        return None
+    if not gear[0].get("id"):
+        raise ConvertError("the landing_gear component has no id",
+                           constraint="aircraft.component_unmatched")
+    return gear[0]
+
+
+def _component_part_name(aircraft: str, component_id: str) -> str:
+    """The one asset-name convention of letter C: a component's OBJ stem,
+    ``parts`` entry, card ``mesh`` and Unreal asset are all
+    ``SM_<aircraft>_<component id>`` (C3's ``component_mesh_name``)."""
+    return f"SM_{aircraft}_{component_id}"
+
+
+def _gear_component_row(extents_gear: "MeshExtents", config: Dict,
+                        mesh_origin_cm: Tuple[float, float, float],
+                        triangles: int) -> Dict:
+    """The mesh manifest ``components[]`` row for the gear OBJ, in the
+    shape the A-4 payload rows use: ``id`` (the C1 id, the shared key),
+    ``class``, ``part`` (the OBJ stem and asset name), ``asset_path``,
+    ``triangles``, ``mesh_extent_actor_m`` (the gear vertices' box, metres,
+    actor frame, about the MODEL origin, the top-level shape so
+    ``hull_box_body_m({**manifest, **row})`` works) and
+    ``mesh_origin_actor_cm`` (the body's: the gear OBJ shares the body's
+    vertex frame and is attached at the same point)."""
+    component = _gear_component(config)
+    if component is None:
+        raise ConvertError("no landing_gear component declared; no gear row")
+    if extents_gear.count == 0:
+        raise ConvertError(
+            f"landing_gear component {component['id']!r} matched no geometry: "
+            f"the gear_geometry patterns {_gear_patterns(config)} name no "
+            f"drawn vertex, so a gear OBJ would be empty; refusing")
+    name = config["name"]
+    part = _component_part_name(name, str(component["id"]))
+    return {
+        "id": str(component["id"]),
+        "class": "landing_gear",
+        "part": part,
+        "asset_path": f"/Game/Aircraft/{name}/{part}",
+        "triangles": int(triangles),
+        "mesh_extent_actor_m": extents_gear.to_manifest()["mesh_extent_actor_m"],
+        "mesh_origin_actor_cm": list(mesh_origin_cm),
+    }
+
+
 class MeshExtents:
     """Running extents of the DRAWN vertices in the actor frame, cm,
     about the model's own origin -- every vertex a written triangle
@@ -658,9 +727,16 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     writers: Dict[str, ObjWriter] = {"body": ObjWriter()}
     for surface_name in surface_defs:
         writers[surface_name] = ObjWriter()
+    # C7: a declared landing_gear component takes the gear-matched
+    # triangles (the same ``gear`` flag that anchors z) into its own OBJ;
+    # with no component declared the gear stays in the body as before.
+    gear_component = _gear_component(config)
+    if gear_component is not None:
+        writers["gear"] = ObjWriter()
     counts: Dict[str, int] = defaultdict(int)
     textures_used: Dict[str, Path] = {}
     extents = MeshExtents()
+    extents_gear = MeshExtents()
 
     for part in config["parts"]:
         ac_path = source_dir / part["file"]
@@ -675,8 +751,10 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                 if re.fullmatch(pattern, obj.name):
                     target = surface_name
                     break
-            writer = writers[target]
             gear = gear_part or _matches(obj.name, gear_object_patterns)
+            if gear and target == "body" and gear_component is not None:
+                target = "gear"     # a surface claim wins: it is articulated
+            writer = writers[target]
             texture = None
             if obj.texture:
                 texture_path = (ac_path.parent / obj.texture)
@@ -708,6 +786,8 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                         position_cm = (vu[0] * CM_PER_M, vu[1] * CM_PER_M,
                                        vu[2] * CM_PER_M)
                         extents.add(position_cm, gear)
+                        if target == "gear":
+                            extents_gear.add(position_cm, gear)
                         tri.append((position_cm, (u, v)))
                     # Degenerate UV triangles (untextured .ac surfaces carry
                     # u=v=0 on every vertex; some textured ones collapse too)
@@ -775,6 +855,14 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
 
     writers["body"].write(out_dir / "body.obj")
 
+    manifest_components = []
+    if gear_component is not None:
+        gear_row = _gear_component_row(extents_gear, config, mesh_origin_cm,
+                                       counts["gear"])
+        counts[gear_row["part"]] = counts.pop("gear")
+        writers["gear"].write(out_dir / f"{gear_row['part']}.obj")
+        manifest_components.append(gear_row)
+
     manifest = {
         "magic": "flightsim-aircraft-mesh",
         "version": MESH_MANIFEST_VERSION,
@@ -788,7 +876,8 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
             "license_first_line": license_head,
         },
         "units": "cm, UE actor frame (+X forward +Y right +Z up)",
-        "parts": ["body"] + list(surface_defs),
+        "parts": ["body"] + list(surface_defs)
+                 + [row["part"] for row in manifest_components],
         "asset_path_root": f"/Game/Aircraft/{name}",
         "surfaces": manifest_surfaces,
         "triangles": dict(counts),
@@ -807,6 +896,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         **extents.to_manifest(),
         "gear_geometry": {"parts": gear_part_patterns,
                           "objects": gear_object_patterns},
+        "components": manifest_components,
         "vrp_source": {
             "fdm_xml": str(vrp_xml),
             "sha256": hashlib.sha256(vrp_xml.read_bytes()).hexdigest(),
