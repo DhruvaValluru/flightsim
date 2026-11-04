@@ -1406,3 +1406,56 @@ def test_a_camera_stated_as_one_provenanced_preset_under_fields_is_that_camera()
         compile_prompt_llm(prompt, client=fake_client({
             "fields": {"cameras": entry(2, "user", "two cameras")},
             "notes": [], "questions": []}))
+
+
+def test_a_moves_list_of_provenanced_moves_compiles_on_the_llm_tier():
+    """Packet A10-2 (2026-11-04): told '"moves", a list', the model wrote
+    the camera's moves as a LIST of provenanced moves and the compiler
+    refused "camera 0 field 'moves' must carry exactly value/source/from",
+    so the campaign fell back to regex. That list is the one provenanced
+    moves field (same kinds, in order), under the same rails."""
+    prompt = ("12 images of the A-4 over the Grand Canyon from a chase camera, "
+              "a 20 second flight, orbiting and zooming in")
+    as_list = compile_prompt_llm(prompt, client=fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"preset": entry("chase", "user", "from a chase camera"),
+                     "moves": [entry("orbit", "user", "orbiting"),
+                               entry("zoom_in", "inferred", "zooming in")]}]}))
+    as_field = compile_prompt_llm(prompt, client=fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"preset": entry("chase", "user", "from a chase camera"),
+                     "moves": entry(["orbit", "zoom_in"], "inferred",
+                                    "orbiting; zooming in")}]}))
+    # No moves stated anywhere (an empty list is no moves; the prompt here
+    # has no move words for the regex reading to supply either).
+    without = compile_prompt_llm(prompt.split(", orbiting")[0], client=fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"preset": entry("chase", "user", "from a chase camera"),
+                     "moves": []}]}))
+    assert [str(c.preset.value) for c in as_list.spec.cameras] == ["chase"]
+    assert as_list.spec.cameras[0].to_dict() == as_field.spec.cameras[0].to_dict()
+    assert as_list.spec.cameras[0].to_dict() != without.spec.cameras[0].to_dict()
+    # The rails: a bare word, an unknown move and a bald model guess refuse by name.
+    for bad, match in (
+            (["orbit"], "must carry exactly value/source/from"),
+            ([entry("barrel_roll", "user", "roll")], "must be a move drawn from"),
+            ([entry("orbit", "model", "")], "no declared reason")):
+        with pytest.raises(LLMCompileError, match=match):
+            compile_prompt_llm(prompt, client=fake_client({
+                "fields": {}, "notes": [], "questions": [],
+                "cameras": [{"preset": entry("chase", "user", "chase"), "moves": bad}]}))
+
+
+def test_a_rejected_response_carries_the_model_s_raw_text_in_its_details():
+    """Packet A10-2: the campaign record had only the rejection sentence.
+    Every rejection after the model answered carries the verbatim text
+    under details['raw_response']; the message stays a sentence."""
+    payload = {"fields": {}, "notes": [], "questions": [],
+               "cameras": [{"preset": entry("chase", "user", "chase"), "moves": ["orbit"]}]}
+    with pytest.raises(LLMCompileError) as info:
+        compile_prompt_llm("a chase camera", client=fake_client(payload))
+    assert info.value.details["raw_response"] == json.dumps(payload)
+    assert json.dumps(payload) not in info.value.message
+    with pytest.raises(LLMCompileError) as info:
+        compile_prompt_llm("a chase camera", client=fake_client("not json {"))
+    assert info.value.details["raw_response"] == "not json {"

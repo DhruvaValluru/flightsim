@@ -106,31 +106,7 @@ def wants_capture(spec) -> bool:
     return bool(getattr(spec, "cameras", None))
 
 
-def clip_columns(columns: Dict, duration_s: Optional[float]) -> Dict:
-    """The recorded flight, cut to the window the host will actually fly.
-
-    The web run caps its clip at CLIP_SECONDS while the SPEC keeps its
-    own duration, and the headless pre-run flies the spec's. Solving
-    capture schedules over the full flight therefore laid capture
-    instants out past the end of the clip, and the render commandlet
-    refused -- correctly, and only once it had flown:
-
-        consume-poses: emitted 3 of the 4 scheduled images; the run
-        ended before the schedule did, so the manifest would name
-        frames that do not exist
-
-    A manifest naming frames that cannot exist is the exact failure this
-    phase is about, so the schedule is cut to fit the flight rather than
-    the flight stretched to fit the schedule. The CLI never hit this
-    because it caps nothing: its host flies the spec's own duration.
-    """
-    if duration_s is None:
-        return columns
-    times = [float(t) for t in columns["t"]]
-    keep = sum(1 for t in times if t <= duration_s)
-    if keep >= len(times) or keep < 2:
-        return columns
-    return {name: list(values)[:keep] for name, values in columns.items()}
+from core.capture.window import clip_columns  # noqa: E402,F401 -- the one copy, shared with flightsim.capture --clip-seconds
 
 
 def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,

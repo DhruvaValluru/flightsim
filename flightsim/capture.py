@@ -517,6 +517,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--terrain", default=None,
                         help="baked heightfield stem (<stem>.r16 + .json) "
                              "for real-raster physics and camera checks")
+    parser.add_argument("--clip-seconds", type=float, default=None, metavar="S",
+                        help="solve and check the cameras over the first S "
+                             "seconds of the flight only, and fly the host "
+                             "for S seconds: the window the web app's single "
+                             "run flies (its clip cap), so a campaign case "
+                             "places its cameras where POST /run does. "
+                             "Default: the spec's whole duration")
     parser.add_argument("--synth-terrain", action="store_true",
                         help="synthesise a raster CENTRED on the spec's "
                              "own origin and fly over that -- real "
@@ -889,6 +896,14 @@ def _run(args: argparse.Namespace) -> int:
                       "machine does not have; refused before any flight)")
                 return 2
 
+    clip_seconds = getattr(args, "clip_seconds", None)
+    if clip_seconds is not None and not (math.isfinite(clip_seconds) and clip_seconds > 0):
+        return _refuse([Violation(
+            "capture.clip_seconds",
+            f"--clip-seconds {clip_seconds!r} is not a positive number of seconds")])
+    if clip_seconds is not None:
+        print(f"clip: the first {clip_seconds:g} s of the flight (the web run's "
+              f"window) are solved, checked and flown by the host")
     heightfield = None
     terrain_ground = None
     landcover_json = None
@@ -1084,7 +1099,9 @@ def _run(args: argparse.Namespace) -> int:
               "tolerances, so no run was recorded; state hold_state: "
               "false for the open-loop flight, or ease the conditions)")
         return 2
-    columns = result.telemetry.columns
+    from core.capture.window import clip_columns
+
+    columns = clip_columns(result.telemetry.columns, clip_seconds)
 
     # R1 (opt-in): the null pairs and the dt/2 twin, each an extra flight
     # of the same spec through run_spec, measured after the recorded one.
@@ -1243,6 +1260,9 @@ def _run(args: argparse.Namespace) -> int:
                 str(mesh) if mesh.is_file() else None))
         return write_run_card(
             spec, path,
+            # The host flies the clip window when one is asked for
+            # (--clip-seconds), exactly as the web run's card does.
+            duration_s=clip_seconds,
             cameras=[track.card_block(camera, schedule, frame)
                      for camera, track, schedule
                      in zip(cameras, tracks, schedules)],
@@ -1343,7 +1363,7 @@ def _run(args: argparse.Namespace) -> int:
             return 1
         try:
             # The whole record: every frame's ``state`` is cut from it.
-            host_columns = read_host_record(host_telemetry)
+            host_columns = clip_columns(read_host_record(host_telemetry), clip_seconds)
             tracks, schedules, solved_violations = solve_over(host_columns)
             traffic_tracks = solve_traffic(host_columns)
         except HostFlightError as exc:

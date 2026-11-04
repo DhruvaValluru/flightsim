@@ -1021,3 +1021,75 @@ def test_a_campaign_over_a_place_with_no_bake_refuses_by_the_single_run_s_rule(
     assert payload["sentence"] == "No terrain has been prepared for the coordinates asked for."
     assert not _rule_named(payload)
     assert not list((tmp_path / "campaigns").glob("*/campaign.json"))
+
+
+def test_a_campaign_case_flies_the_single_run_s_window_on_its_placed_card(tmp_path, monkeypatch):
+    """Packet A10-2: the place was provisioned, yet the campaign's capture
+    (the CLI) refused camera.scene_bounds with 608 of 1155 chase poses off
+    the 24 km grand_canyon raster while POST /run flew the same card whole.
+    The CLI flew and checked the spec's whole 120 s default duration; the
+    single run flies, solves and checks only its clip window (CLIP_SECONDS).
+    Now one helper hands both paths the placed spec and the same capture
+    arguments: the stem AND the window, as --terrain and --clip-seconds."""
+    from core.campaign.campaign import Campaign, provision_spec
+    from core.dataset.batch import capture_command
+    from core.nl.compiler import compile_prompt
+
+    runs = _tiles_on_machine(monkeypatch, tmp_path)
+    stem = _fake_bake(tmp_path / "terrain", "grand_canyon")
+    single_spec = compile_prompt(GRAND_CANYON)
+    single = runs.provision_place(single_spec)
+    assert single["refusal"] is None
+    assert single["capture"] == {"terrain": str(stem),
+                                 "clip_seconds": runs.clip_window_s(single_spec)}
+    assert single["capture"]["clip_seconds"] == runs.CLIP_SECONDS < float(single_spec.duration.value)
+
+    campaign_spec = compile_prompt(GRAND_CANYON)
+    capture = provision_spec(campaign_spec, runs.provision_place, {})
+    # The same placed card: every coordinate, the datum and the scene.
+    assert campaign_spec.to_dict() == single_spec.to_dict()
+    assert capture["terrain"] == single["capture"]["terrain"]
+    assert capture["clip_seconds"] == single["capture"]["clip_seconds"]
+    command = capture_command(Path("spec.yaml"), Path("run"), capture)
+    assert command[command.index("--terrain") + 1] == str(stem)
+    assert command[command.index("--clip-seconds") + 1] == f"{runs.CLIP_SECONDS:g}"
+    # A caller that states its own window keeps it.
+    assert provision_spec(compile_prompt(GRAND_CANYON), runs.provision_place,
+                          {"clip_seconds": 5.0})["clip_seconds"] == 5.0
+    # The record a /generate campaign writes carries both.
+    campaign = Campaign.create(GRAND_CANYON, images=12, out=tmp_path / "c", tier="regex",
+                               provision=runs.provision_place)
+    assert campaign.record["capture"]["terrain"] == str(stem)
+    assert campaign.record["capture"]["clip_seconds"] == runs.CLIP_SECONDS
+    assert campaign.record["llm_fallback"] is None
+
+
+def test_an_llm_fallback_records_the_model_s_raw_response(tmp_path, monkeypatch):
+    """Packet A10-2: the llm tier fell back ("camera 0 field 'moves' must
+    carry exactly value/source/from") and the record held only the sentence.
+    Now the campaign record names the rule, the sentence and a file under
+    the campaign dir with the model's verbatim text, and the plan preview's
+    note_details carry the text; the headline never does."""
+    from core.campaign.campaign import LLM_RESPONSE_FILE, Campaign
+    from core.nl import llm_compiler
+
+    raw = '{"fields": {}, "cameras": [{"moves": [{"value": "orbit"}]}], "notes": []}'
+
+    def rejected(prompt, **kwargs):
+        raise llm_compiler.LLMCompileError("camera 0 field 'moves' must carry exactly value/source/from",
+                              details={"raw_response": raw})
+
+    monkeypatch.setattr(llm_compiler, "compile_prompt_llm", rejected)
+    monkeypatch.setattr(generate_module, "compile_prompt_llm", rejected)
+    campaign = Campaign.create(GRAND_CANYON, images=12, out=tmp_path / "c", tier="llm")
+    assert campaign.record["tier"].startswith("regex (llm unavailable: camera 0 field 'moves'")
+    fallback = campaign.record["llm_fallback"]
+    assert fallback["message"].startswith("camera 0 field 'moves'")
+    assert fallback["raw_response"] == LLM_RESPONSE_FILE
+    assert (campaign.dir / LLM_RESPONSE_FILE).read_text(encoding="utf-8") == raw
+    assert raw not in campaign.record["tier"]
+    # The plan preview: the sentence stays a sentence, the text is a detail.
+    compiled = generate_module.compile_round(GRAND_CANYON, tier="llm")
+    assert compiled["tier"] == "regex"
+    assert compiled["note_details"]["raw_response"] == raw
+    assert raw not in compiled["note"]

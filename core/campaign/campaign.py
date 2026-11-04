@@ -221,6 +221,11 @@ def release_stated_counts(spec: ScenarioSpec, stated: Dict[str, Any]) -> None:
         f"the campaign spreads them over many varied scenarios"]
 
 
+#: The llm tier's raw model response when it fell back to the regex
+#: compiler, written beside the record (packet A10-2 had only the sentence).
+LLM_RESPONSE_FILE = "llm_response.txt"
+
+
 def provision_spec(spec: ScenarioSpec, provision,
                    capture: Dict[str, Any]) -> Dict[str, Any]:
     """Stage the spec's place the way the caller's SINGLE run does
@@ -247,11 +252,19 @@ def provision_spec(spec: ScenarioSpec, provision,
     if refusal is not None:
         detail = {k: v for k, v in refusal.items() if k not in ("constraint", "message")}
         raise CampaignError(str(refusal["constraint"]), str(refusal["message"]), detail)
-    scene = staged.get("scene") or {}
-    stem = scene.get("terrain")
+    options = dict(staged.get("capture") or {})
+    stem = options.get("terrain") or (staged.get("scene") or {}).get("terrain")
     if (stem and str(spec.scene.terrain_source.value) != "synthesised"
             and not capture.get("synth_terrain")):
         capture["terrain"] = str(stem)
+    # The window the single run flies (webapp.runs.clip_window_s): the
+    # CLI's ``--clip-seconds``, so the case's flight, pose tracks and
+    # scene checks cover the clip POST /run renders, not the spec's
+    # whole duration (packet A10-2: 608 of 1155 chase poses off the
+    # raster over 120 s where the 22 s clip flew whole). A caller that
+    # states its own window keeps it.
+    if options.get("clip_seconds") is not None:
+        capture.setdefault("clip_seconds", float(options["clip_seconds"]))
     return capture
 
 
@@ -266,14 +279,20 @@ def _compile(prompt: str, answers, tier: str):
 
         try:
             result = compile_prompt_llm(prompt, answers=answers)
-            return result.spec, f"llm ({result.model})"
+            return result.spec, f"llm ({result.model})", None
         except LLMCompileError as exc:
+            # The fallback's evidence: the rule, the sentence and the
+            # model's verbatim text (LLMCompileError.details, attached by
+            # the compiler to every rejection), for the record -- never
+            # for the headline.
             return (compile_prompt(prompt, answers=answers),
-                    f"regex (llm unavailable: {exc})")
+                    f"regex (llm unavailable: {exc})",
+                    {"constraint": exc.constraint, "message": exc.message,
+                     "raw_response": exc.details.get("raw_response")})
     if tier != "regex":
         raise CampaignError("campaign.arguments",
                             f"tier {tier!r} is not one of 'regex', 'llm'")
-    return compile_prompt(prompt, answers=answers), "regex"
+    return compile_prompt(prompt, answers=answers), "regex", None
 
 
 class Campaign:
@@ -345,7 +364,7 @@ class Campaign:
         capture.setdefault("max_previews", 0)
         capture.setdefault("card", True)
 
-        spec, tier_used = _compile(str(prompt), answers, tier)
+        spec, tier_used, llm_fallback = _compile(str(prompt), answers, tier)
         if policy is not None:
             spec.set("randomization.policy", policy, frm="campaign policy (given)")
         capture = provision_spec(spec, provision, capture)
@@ -379,6 +398,14 @@ class Campaign:
             "prompt": str(prompt),
             "answers": [dict(a) for a in (answers or [])],
             "tier": tier_used,
+            # The llm tier's fallback, if any: its rule and sentence, and
+            # the model's raw response as a file under the campaign dir
+            # (None when the model sent no text, e.g. unreachable).
+            "llm_fallback": (None if llm_fallback is None else {
+                "constraint": llm_fallback["constraint"],
+                "message": llm_fallback["message"],
+                "raw_response": (LLM_RESPONSE_FILE
+                                 if llm_fallback.get("raw_response") else None)}),
             "spec": spec.to_dict(),
             "spec_digest": spec.digest(),
             "policy": (spec.randomization_policy.value
@@ -402,6 +429,9 @@ class Campaign:
         }
         out.mkdir(parents=True, exist_ok=True)
         (out / RUNS_DIR).mkdir(exist_ok=True)
+        if llm_fallback is not None and llm_fallback.get("raw_response"):
+            (out / LLM_RESPONSE_FILE).write_text(str(llm_fallback["raw_response"]),
+                                                 encoding="utf-8")
         campaign = cls(out, record)
         campaign._save()
         return campaign

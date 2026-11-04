@@ -957,6 +957,50 @@ def _named_aircraft(prompt: str):
             sorted(found.items(), key=lambda item: item[1][0])]
 
 
+def _lift_moves_list(index: int, entries: List[Any]) -> Optional[Dict[str, Any]]:
+    """The camera's ``moves`` written as a LIST of provenanced moves (the
+    shape the model returns when told '"moves", a list': each move its own
+    value/source/from) lifted to the one provenanced field the validator
+    reads, under the same rails as every other field: every entry carries
+    exactly value/source/from, a claimable source and a phrase (a model
+    guess must quote the prompt), and names a move kind. The lifted
+    source is "user" only when every move is, "model" when any is, else
+    "inferred"; the phrases join. An empty list is no moves (None), the
+    same as leaving the field out. A bare word or an unprovenanced entry
+    still refuses by name -- nothing arbitrary is accepted."""
+    if not entries:
+        return None
+    kinds: List[str] = []
+    sources: List[str] = []
+    phrases: List[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"value", "source", "from"}:
+            raise _fail(f"camera {index} field 'moves': each move in the "
+                        f"list must carry exactly value/source/from")
+        if entry["source"] not in ("user", "inferred", "model"):
+            raise _fail(f"camera {index} field 'moves' claims source "
+                        f"{entry['source']!r}; only 'user', 'inferred' or "
+                        f"'model' may be claimed")
+        if not (isinstance(entry["from"], str) and entry["from"].strip()):
+            if entry["source"] == "model":
+                raise _fail(f"camera {index} field 'moves' holds a model "
+                            f"guess with no declared reason; a guess must "
+                            f"quote the prompt phrase it interprets")
+            raise _fail(f"camera {index} field 'moves' has a move with no "
+                        f"provenance phrase")
+        kind = entry["value"]
+        if not isinstance(kind, str) or kind not in MOVE_KINDS:
+            raise _fail(f"camera {index} field 'moves' value {kind!r} must "
+                        f"be a move drawn from {list(MOVE_KINDS)}")
+        kinds.append(kind)
+        sources.append(str(entry["source"]))
+        if entry["from"].strip() not in phrases:
+            phrases.append(entry["from"].strip())
+    source = ("user" if all(s == "user" for s in sources)
+              else "model" if any(s == "model" for s in sources) else "inferred")
+    return {"value": kinds, "source": source, "from": "; ".join(phrases)}
+
+
 def _parse_payload(text: str, *, allow_questions: bool = True,
                    prompt: str = "") -> Dict[str, Any]:
     """Parse the model's JSON strictly against the schema's intent.
@@ -1204,6 +1248,14 @@ def _parse_payload(text: str, *, allow_questions: bool = True,
         for name in [n for n, e in block.items()
                      if isinstance(e, dict) and e.get("value") is None]:
             del block[name]
+        # Packet A10-2: the model writes "moves" as a list of provenanced
+        # moves; lifted to the one provenanced field below, same rails.
+        if isinstance(block.get(CAMERA_MOVES_KEY), list):
+            lifted = _lift_moves_list(index, block[CAMERA_MOVES_KEY])
+            if lifted is None:
+                del block[CAMERA_MOVES_KEY]
+            else:
+                block[CAMERA_MOVES_KEY] = lifted
         for name, entry in block.items():
             if name not in CAMERA_FIELD_VALUE_SCHEMAS \
                     and name != CAMERA_MOVES_KEY:
@@ -1558,269 +1610,276 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
     except StopIteration:
         raise _fail("the response carries no text block") from None
 
-    payload = _parse_payload(text, allow_questions=not answering, prompt=prompt)
+    # Every rejection from here on carries the model's verbatim text
+    # under details['raw_response'] (packet A10-2: the campaign record
+    # had only the sentence), for the record -- never the headline.
+    try:
+        payload = _parse_payload(text, allow_questions=not answering, prompt=prompt)
 
-    # Defaults come from the regex compiler run on an EMPTY prompt, so an
-    # untouched field is bit-identical between the two compilers and the
-    # validator cannot judge them differently on shared vocabulary.
-    spec = compile_prompt("", name=name or _name_from(prompt.lower()))
-    spec.prompt = prompt
-    spec.notes = list(payload["notes"])
+        # Defaults come from the regex compiler run on an EMPTY prompt, so an
+        # untouched field is bit-identical between the two compilers and the
+        # validator cannot judge them differently on shared vocabulary.
+        spec = compile_prompt("", name=name or _name_from(prompt.lower()))
+        spec.prompt = prompt
+        spec.notes = list(payload["notes"])
 
-    for field_name, entry in payload["fields"].items():
-        _overlay(spec, field_name, entry)
+        for field_name, entry in payload["fields"].items():
+            _overlay(spec, field_name, entry)
 
-    # An aircraft the prompt NAMES (the deterministic vocabulary's phrases,
-    # whole words) is the user's, not the model's to reinterpret: a model
-    # that read "a4" as an F-15 is overruled, and the note says so.
-    named = _named_aircraft(prompt)
-    if named and str(spec.aircraft.value) not in {model for _, model in named}:
-        phrase, model = named[0]
-        spec.notes.append(f"the language model chose {spec.aircraft.value!r} but the "
-                          f"prompt names {phrase!r}, which is {model}; the named "
-                          f"aircraft is used")
-        spec.aircraft = Quantity.user(model, frm=phrase)
+        # An aircraft the prompt NAMES (the deterministic vocabulary's phrases,
+        # whole words) is the user's, not the model's to reinterpret: a model
+        # that read "a4" as an F-15 is overruled, and the note says so.
+        named = _named_aircraft(prompt)
+        if named and str(spec.aircraft.value) not in {model for _, model in named}:
+            phrase, model = named[0]
+            spec.notes.append(f"the language model chose {spec.aircraft.value!r} but the "
+                              f"prompt names {phrase!r}, which is {model}; the named "
+                              f"aircraft is used")
+            spec.aircraft = Quantity.user(model, frm=phrase)
 
-    # An aircraft the vocabulary LACKS is asked about, as on the regex
-    # tier (P2 report, the open LLM-tier finding: the model put "the
-    # dragon" in notes and the default B747 flew without a word). When
-    # the model chose no aircraft and the prompt names a SPECIFIC
-    # subject the vocabulary cannot map, the regex tier's own rails
-    # apply: the name is carried as stated and refused by name
-    # (aircraft.exists), and the aircraft question is asked -- unless
-    # the model asked one, or its three are used. A KIND of aircraft
-    # ("an aircraft", "a small plane") stays the model's judgment, as
-    # the system prompt words it. The answer round reads the person's
-    # answer the regex tier's way when the model leaves it unset again.
-    if not named and str(spec.aircraft.source) == "default":
-        from .compiler import _answered_aircraft, _named_subject, aircraft_question
+        # An aircraft the vocabulary LACKS is asked about, as on the regex
+        # tier (P2 report, the open LLM-tier finding: the model put "the
+        # dragon" in notes and the default B747 flew without a word). When
+        # the model chose no aircraft and the prompt names a SPECIFIC
+        # subject the vocabulary cannot map, the regex tier's own rails
+        # apply: the name is carried as stated and refused by name
+        # (aircraft.exists), and the aircraft question is asked -- unless
+        # the model asked one, or its three are used. A KIND of aircraft
+        # ("an aircraft", "a small plane") stays the model's judgment, as
+        # the system prompt words it. The answer round reads the person's
+        # answer the regex tier's way when the model leaves it unset again.
+        if not named and str(spec.aircraft.source) == "default":
+            from .compiler import _answered_aircraft, _named_subject, aircraft_question
 
-        answered = _answered_aircraft(answers) if answering else None
-        subject = _named_subject(" ".join(prompt.lower().split()))
-        if answered is not None:
-            spec.aircraft = answered
-        elif subject is not None and not subject[1]:
-            spec.aircraft = Quantity.user(subject[0], frm=subject[0])
-            asked = aircraft_question(prompt)
-            already = any("aircraft" in f"{q['id']} {q['question']}".lower()
-                          for q in payload["questions"])
-            if (not answering and asked is not None and not already
-                    and len(payload["questions"]) < MAX_QUESTIONS):
-                payload["questions"].append(asked)
-                spec.notes.append(f"the prompt names {subject[0]!r}, which the "
-                                  f"aircraft vocabulary does not hold; asked "
-                                  f"which aircraft should fly")
+            answered = _answered_aircraft(answers) if answering else None
+            subject = _named_subject(" ".join(prompt.lower().split()))
+            if answered is not None:
+                spec.aircraft = answered
+            elif subject is not None and not subject[1]:
+                spec.aircraft = Quantity.user(subject[0], frm=subject[0])
+                asked = aircraft_question(prompt)
+                already = any("aircraft" in f"{q['id']} {q['question']}".lower()
+                              for q in payload["questions"])
+                if (not answering and asked is not None and not already
+                        and len(payload["questions"]) < MAX_QUESTIONS):
+                    payload["questions"].append(asked)
+                    spec.notes.append(f"the prompt names {subject[0]!r}, which the "
+                                      f"aircraft vocabulary does not hold; asked "
+                                      f"which aircraft should fly")
 
-    # A heading the prompt STATES ("heading east", "heading 090") is the
-    # user's: claimed as a model guess, the terrain planner would re-aim it
-    # along the ridge (measured: "heading east" flew 19 deg).
-    from .compiler import _heading
-    stated = _heading(prompt.lower())
-    if str(stated.source) == "user" and (
-            str(spec.heading.source) != "user"
-            or float(spec.heading.value) != float(stated.value)):
-        if float(spec.heading.value) != float(stated.value):
-            spec.notes.append(f"the language model chose heading "
-                              f"{spec.heading.value} but the prompt says "
-                              f"{stated.frm!r}; the stated heading is used")
-        spec.heading = stated
+        # A heading the prompt STATES ("heading east", "heading 090") is the
+        # user's: claimed as a model guess, the terrain planner would re-aim it
+        # along the ridge (measured: "heading east" flew 19 deg).
+        from .compiler import _heading
+        stated = _heading(prompt.lower())
+        if str(stated.source) == "user" and (
+                str(spec.heading.source) != "user"
+                or float(spec.heading.value) != float(stated.value)):
+            if float(spec.heading.value) != float(stated.value):
+                spec.notes.append(f"the language model chose heading "
+                                  f"{spec.heading.value} but the prompt says "
+                                  f"{stated.frm!r}; the stated heading is used")
+            spec.heading = stated
 
-    # The looked-up place is the prompt's own words resolved; a model guess
-    # (a listed bake chosen for scene-setting) or an omission gives way to
-    # it, and a location question the model asked anyway is dropped -- the
-    # prompt already answered it. Stated coordinates are never moved.
-    applied = apply_named_place(spec, looked_up)
-    if looked_up is not None and (applied or (
-            abs(float(spec.latitude.value) - looked_up.latitude) < 1e-4
-            and abs(float(spec.longitude.value) - looked_up.longitude) < 1e-4)):
-        payload["questions"] = [q for q in payload["questions"]
-                                if not _asks_location(q)]
+        # The looked-up place is the prompt's own words resolved; a model guess
+        # (a listed bake chosen for scene-setting) or an omission gives way to
+        # it, and a location question the model asked anyway is dropped -- the
+        # prompt already answered it. Stated coordinates are never moved.
+        applied = apply_named_place(spec, looked_up)
+        if looked_up is not None and (applied or (
+                abs(float(spec.latitude.value) - looked_up.latitude) < 1e-4
+                and abs(float(spec.longitude.value) - looked_up.longitude) < 1e-4)):
+            payload["questions"] = [q for q in payload["questions"]
+                                    if not _asks_location(q)]
 
-    # Cameras overlay AFTER the fields: the default offsets and the
-    # world-anchored placements depend on the (possibly model-chosen)
-    # aircraft and terrain datum.
-    duration_s = float(spec.duration.value)
-    model_moves = False
-    # An exact camera position the prompt states ("camera 110 m behind,
-    # 0 m right, 12 m above the aircraft", the page's 3D sample frame)
-    # is the user's, like a stated heading: it overrules the model's
-    # offsets, before any move keyframes are built from them.
-    stated_offset = stated_camera_offset(prompt)
-    for index, block in enumerate(payload["cameras"]):
-        preset_entry = block.get("preset")
-        preset = str(preset_entry["value"]) if preset_entry else "chase"
-        if preset == "explicit":
-            # The schema gives the model no scene or geographic placement
-            # to state, so an "explicit" camera from it could only be an
-            # offset with no world anchor -- refused by the pose solver
-            # after the flight was built. Its placement words are offsets
-            # in the primary's frame: that is the chase view.
-            spec.notes.append(
-                f"camera {index}: the model chose the 'explicit' view, which "
-                f"needs a scene placement it cannot state; built as a chase "
-                f"(following) view so its offsets apply")
-            preset = "chase"
-            preset_entry["value"] = "chase"
-        camera = CameraSpec.defaulted(
-            camera_id=f"camera{index}", preset=preset,
-            aircraft=str(spec.aircraft.value),
-            terrain_elevation_m=float(spec.terrain_elevation.value),
-            frm="camera language in the prompt; documented camera default")
-        moves_entry = block.pop(CAMERA_MOVES_KEY, None)
-        # A field the view cannot honour is said in the notes by name,
-        # never applied where the pose solver would ignore it.
-        dropped = [n for n in block
-                   if (n in _OFFSET_CAMERA_FIELDS
-                       and preset not in ("chase", "wingman"))
-                   or (n in _AIM_CAMERA_FIELDS and preset == "cockpit")]
-        for name in dropped:
-            spec.notes.append(
-                f"camera {index} ({preset}): {name} "
-                f"{block[name]['value']!r} from {block[name]['from']!r} not "
-                f"applied -- "
-                + ("only the chase and wingman views follow at an offset"
-                   if name in _OFFSET_CAMERA_FIELDS else
-                   "the cockpit view looks where the aircraft points"))
-            del block[name]
-        for name, entry in block.items():
-            current = getattr(camera, name)
-            value = entry["value"]
-            schema = CAMERA_FIELD_VALUE_SCHEMAS[name]
-            if schema["type"] == "number":
-                value = int(value) if name == "capture_count" \
-                    else float(value)
-            setattr(camera, name, Quantity(
-                value=value, unit=current.unit,
-                source={"user": Source.USER, "inferred": Source.INFERRED,
-                        "model": Source.MODEL}[entry["source"]],
-                frm=entry["from"].strip()))
-        if stated_offset is not None:
-            apply_stated_offset([camera], stated_offset, spec.notes)
-        # A bearing aim with no bearing looks along the flight path.
-        if str(camera.aim_mode.value) == "bearing" \
-                and "aim_bearing_deg" not in block:
-            camera.plan("aim_bearing_deg",
-                        float(spec.heading.value) % 360.0,
-                        frm="no bearing stated; the aircraft's heading")
-        # Same rule as the regex compiler and the page's picker: a view
-        # the model named without a count is the whole clip from that
-        # view. A count or a trigger the model DID state is a stated
-        # field and is left exactly as it is.
-        plan_full_capture(camera, frm="a view named in the prompt with "
-                                      "no count captures the whole clip")
-        if moves_entry is not None:
-            model_moves = True
-            phrase = moves_entry["from"].strip()
-            apply_moves(camera, [(phrase, kind) for kind
-                                 in dict.fromkeys(moves_entry["value"])],
-                        duration_s, spec.notes)
-        spec.cameras.append(camera)
+        # Cameras overlay AFTER the fields: the default offsets and the
+        # world-anchored placements depend on the (possibly model-chosen)
+        # aircraft and terrain datum.
+        duration_s = float(spec.duration.value)
+        model_moves = False
+        # An exact camera position the prompt states ("camera 110 m behind,
+        # 0 m right, 12 m above the aircraft", the page's 3D sample frame)
+        # is the user's, like a stated heading: it overrules the model's
+        # offsets, before any move keyframes are built from them.
+        stated_offset = stated_camera_offset(prompt)
+        for index, block in enumerate(payload["cameras"]):
+            preset_entry = block.get("preset")
+            preset = str(preset_entry["value"]) if preset_entry else "chase"
+            if preset == "explicit":
+                # The schema gives the model no scene or geographic placement
+                # to state, so an "explicit" camera from it could only be an
+                # offset with no world anchor -- refused by the pose solver
+                # after the flight was built. Its placement words are offsets
+                # in the primary's frame: that is the chase view.
+                spec.notes.append(
+                    f"camera {index}: the model chose the 'explicit' view, which "
+                    f"needs a scene placement it cannot state; built as a chase "
+                    f"(following) view so its offsets apply")
+                preset = "chase"
+                preset_entry["value"] = "chase"
+            camera = CameraSpec.defaulted(
+                camera_id=f"camera{index}", preset=preset,
+                aircraft=str(spec.aircraft.value),
+                terrain_elevation_m=float(spec.terrain_elevation.value),
+                frm="camera language in the prompt; documented camera default")
+            moves_entry = block.pop(CAMERA_MOVES_KEY, None)
+            # A field the view cannot honour is said in the notes by name,
+            # never applied where the pose solver would ignore it.
+            dropped = [n for n in block
+                       if (n in _OFFSET_CAMERA_FIELDS
+                           and preset not in ("chase", "wingman"))
+                       or (n in _AIM_CAMERA_FIELDS and preset == "cockpit")]
+            for name in dropped:
+                spec.notes.append(
+                    f"camera {index} ({preset}): {name} "
+                    f"{block[name]['value']!r} from {block[name]['from']!r} not "
+                    f"applied -- "
+                    + ("only the chase and wingman views follow at an offset"
+                       if name in _OFFSET_CAMERA_FIELDS else
+                       "the cockpit view looks where the aircraft points"))
+                del block[name]
+            for name, entry in block.items():
+                current = getattr(camera, name)
+                value = entry["value"]
+                schema = CAMERA_FIELD_VALUE_SCHEMAS[name]
+                if schema["type"] == "number":
+                    value = int(value) if name == "capture_count" \
+                        else float(value)
+                setattr(camera, name, Quantity(
+                    value=value, unit=current.unit,
+                    source={"user": Source.USER, "inferred": Source.INFERRED,
+                            "model": Source.MODEL}[entry["source"]],
+                    frm=entry["from"].strip()))
+            if stated_offset is not None:
+                apply_stated_offset([camera], stated_offset, spec.notes)
+            # A bearing aim with no bearing looks along the flight path.
+            if str(camera.aim_mode.value) == "bearing" \
+                    and "aim_bearing_deg" not in block:
+                camera.plan("aim_bearing_deg",
+                            float(spec.heading.value) % 360.0,
+                            frm="no bearing stated; the aircraft's heading")
+            # Same rule as the regex compiler and the page's picker: a view
+            # the model named without a count is the whole clip from that
+            # view. A count or a trigger the model DID state is a stated
+            # field and is left exactly as it is.
+            plan_full_capture(camera, frm="a view named in the prompt with "
+                                          "no count captures the whole clip")
+            if moves_entry is not None:
+                model_moves = True
+                phrase = moves_entry["from"].strip()
+                apply_moves(camera, [(phrase, kind) for kind
+                                     in dict.fromkeys(moves_entry["value"])],
+                            duration_s, spec.notes)
+            spec.cameras.append(camera)
 
-    # Move words the model left out ("orbit", "zoom in", "pull back") still
-    # move the camera: the regex compiler's vocabulary is the control, as
-    # for randomization phrases. A move word with no camera earns the
-    # documented default view, exactly as on the regex tier.
-    stated = [] if model_moves else prompt_moves(prompt)
-    if (stated or stated_offset is not None) and not spec.cameras:
-        camera = CameraSpec.defaulted(
-            camera_id="camera0", preset="chase",
-            aircraft=str(spec.aircraft.value),
-            terrain_elevation_m=float(spec.terrain_elevation.value),
-            frm="a camera move in the prompt; documented camera default")
-        plan_full_capture(camera, frm="a view named in the prompt with "
-                                      "no count captures the whole clip")
-        if stated_offset is not None:
-            apply_stated_offset([camera], stated_offset, spec.notes)
-        spec.cameras.append(camera)
-    for camera in spec.cameras:
-        apply_moves(camera, stated, duration_s, spec.notes)
-
-    # Spec 8 (contracts §2.2): every traffic aircraft the model named,
-    # the documented defaults under the fields it did not state.
-    for block in payload["traffic"]:
-        aircraft_entry = block["aircraft"]
-        entry = TrafficSpec.defaulted(str(aircraft_entry["value"]))
-        for name, field_entry in block.items():
-            current = getattr(entry, name)
-            value = field_entry["value"]
-            if TRAFFIC_FIELD_VALUE_SCHEMAS[name]["type"] == "number":
-                value = float(value)
-            setattr(entry, name, Quantity(
-                value=value, unit=current.unit,
-                source={"user": Source.USER, "inferred": Source.INFERRED,
-                        "model": Source.MODEL}[field_entry["source"]],
-                frm=field_entry["from"].strip()))
-        spec.traffic.append(entry)
-
-    # Spec 8: the policy the model wrote, one provenanced Quantity whose
-    # value is the leaf mapping, attributed per leaf; the block switches
-    # on. An EMPTY block falls back to the deterministic vocabulary --
-    # the control -- which maps the documented phrases and records an
-    # unmapped variation for the sampler to refuse by name.
-    randomization = payload["randomization"]
-    if randomization:
-        policy = {name: entry["value"] for name, entry in randomization.items()}
-        attribution = {name: entry["from"].strip()
-                       for name, entry in randomization.items()}
-        sources = {name: entry["source"] for name, entry in randomization.items()}
-        best = ("user" if "user" in sources.values() else
-                "inferred" if "inferred" in sources.values() else "model")
-        phrases = list(dict.fromkeys(attribution.values()))
-        spec.randomization_policy = Quantity(
-            value=policy, source=Source(best), frm="; ".join(phrases),
-            detail={"attribution": attribution, "sources": sources})
-        enable_for_policy(spec, frm=f"{phrases[0]}: the randomisation block "
-                                    f"is on")
-        if RANDOMIZATION_GROUP in policy and not spec.cameras:
+        # Move words the model left out ("orbit", "zoom in", "pull back") still
+        # move the camera: the regex compiler's vocabulary is the control, as
+        # for randomization phrases. A move word with no camera earns the
+        # documented default view, exactly as on the regex tier.
+        stated = [] if model_moves else prompt_moves(prompt)
+        if (stated or stated_offset is not None) and not spec.cameras:
             camera = CameraSpec.defaulted(
                 camera_id="camera0", preset="chase",
                 aircraft=str(spec.aircraft.value),
                 terrain_elevation_m=float(spec.terrain_elevation.value),
-                frm=f"{attribution[RANDOMIZATION_GROUP]!r}: one documented "
-                    f"default camera for the viewpoint policy to vary")
-            plan_full_capture(camera, frm="a viewpoint policy with no count "
-                                          "captures the whole clip")
+                frm="a camera move in the prompt; documented camera default")
+            plan_full_capture(camera, frm="a view named in the prompt with "
+                                          "no count captures the whole clip")
+            if stated_offset is not None:
+                apply_stated_offset([camera], stated_offset, spec.notes)
             spec.cameras.append(camera)
-    else:
-        apply_randomization_phrases(spec, prompt)
-    # Unnamed mountains: the synthesised scene, as on the regex tier (a
-    # place the model set, or a drawn location, keeps it auto).
-    apply_mountain_scene(spec, prompt)
+        for camera in spec.cameras:
+            apply_moves(camera, stated, duration_s, spec.notes)
 
-    # The event AIM rides in the quantity's detail (digest-relevant: it
-    # decides whether the vortex axis sits ON the track or 2.5 core radii
-    # abeam, and which camera the render uses). The regex compiler records
-    # it; an LLM-set weather_event must carry the SAME detail or a
-    # "through a tornado" clip quietly becomes the flyby with the funnel
-    # off-camera (measured -- run b303b23cc7ee). Same regex, same words.
-    event = str(spec.weather_event.value)
-    if event != "none" and "aim" not in spec.weather_event.detail:
-        import re as _re
+        # Spec 8 (contracts §2.2): every traffic aircraft the model named,
+        # the documented defaults under the fields it did not state.
+        for block in payload["traffic"]:
+            aircraft_entry = block["aircraft"]
+            entry = TrafficSpec.defaulted(str(aircraft_entry["value"]))
+            for name, field_entry in block.items():
+                current = getattr(entry, name)
+                value = field_entry["value"]
+                if TRAFFIC_FIELD_VALUE_SCHEMAS[name]["type"] == "number":
+                    value = float(value)
+                setattr(entry, name, Quantity(
+                    value=value, unit=current.unit,
+                    source={"user": Source.USER, "inferred": Source.INFERRED,
+                            "model": Source.MODEL}[field_entry["source"]],
+                    frm=field_entry["from"].strip()))
+            spec.traffic.append(entry)
 
-        from .compiler import WEATHER_EVENT_WORDS, event_ahead_m
+        # Spec 8: the policy the model wrote, one provenanced Quantity whose
+        # value is the leaf mapping, attributed per leaf; the block switches
+        # on. An EMPTY block falls back to the deterministic vocabulary --
+        # the control -- which maps the documented phrases and records an
+        # unmapped variation for the sampler to refuse by name.
+        randomization = payload["randomization"]
+        if randomization:
+            policy = {name: entry["value"] for name, entry in randomization.items()}
+            attribution = {name: entry["from"].strip()
+                           for name, entry in randomization.items()}
+            sources = {name: entry["source"] for name, entry in randomization.items()}
+            best = ("user" if "user" in sources.values() else
+                    "inferred" if "inferred" in sources.values() else "model")
+            phrases = list(dict.fromkeys(attribution.values()))
+            spec.randomization_policy = Quantity(
+                value=policy, source=Source(best), frm="; ".join(phrases),
+                detail={"attribution": attribution, "sources": sources})
+            enable_for_policy(spec, frm=f"{phrases[0]}: the randomisation block "
+                                        f"is on")
+            if RANDOMIZATION_GROUP in policy and not spec.cameras:
+                camera = CameraSpec.defaulted(
+                    camera_id="camera0", preset="chase",
+                    aircraft=str(spec.aircraft.value),
+                    terrain_elevation_m=float(spec.terrain_elevation.value),
+                    frm=f"{attribution[RANDOMIZATION_GROUP]!r}: one documented "
+                        f"default camera for the viewpoint policy to vary")
+                plan_full_capture(camera, frm="a viewpoint policy with no count "
+                                              "captures the whole clip")
+                spec.cameras.append(camera)
+        else:
+            apply_randomization_phrases(spec, prompt)
+        # Unnamed mountains: the synthesised scene, as on the regex tier (a
+        # place the model set, or a drawn location, keeps it auto).
+        apply_mountain_scene(spec, prompt)
 
-        aim = "abeam"
-        detail = {}
-        for variant in WEATHER_EVENT_WORDS.get(event, ()):
-            if _re.search(rf"(?:through|into)\s+(?:a|the)?\s*{variant}",
-                          prompt, _re.IGNORECASE):
-                aim = "core"
-            # A stated distance ("5 km ahead") rides in the detail the same
-            # way; the regex compiler's own reading of the same words.
-            ahead = event_ahead_m(prompt, variant)
-            if ahead is not None and "ahead_m" not in detail:
-                detail["ahead_m"] = ahead
-        q = spec.weather_event
-        spec.weather_event = Quantity(
-            value=q.value, unit=q.unit, source=q.source, frm=q.frm,
-            std=q.std, detail={**q.detail, **detail, "aim": aim})
+        # The event AIM rides in the quantity's detail (digest-relevant: it
+        # decides whether the vortex axis sits ON the track or 2.5 core radii
+        # abeam, and which camera the render uses). The regex compiler records
+        # it; an LLM-set weather_event must carry the SAME detail or a
+        # "through a tornado" clip quietly becomes the flyby with the funnel
+        # off-camera (measured -- run b303b23cc7ee). Same regex, same words.
+        event = str(spec.weather_event.value)
+        if event != "none" and "aim" not in spec.weather_event.detail:
+            import re as _re
 
-    return LLMCompileResult(
-        spec=spec, model=str(getattr(response, "model", model)),
-        raw_response=text,
-        questions=tuple(dict(q) for q in payload["questions"]),
-        transcript=tuple(dict(m) for m in messages) if answering else None,
-    )
+            from .compiler import WEATHER_EVENT_WORDS, event_ahead_m
+
+            aim = "abeam"
+            detail = {}
+            for variant in WEATHER_EVENT_WORDS.get(event, ()):
+                if _re.search(rf"(?:through|into)\s+(?:a|the)?\s*{variant}",
+                              prompt, _re.IGNORECASE):
+                    aim = "core"
+                # A stated distance ("5 km ahead") rides in the detail the same
+                # way; the regex compiler's own reading of the same words.
+                ahead = event_ahead_m(prompt, variant)
+                if ahead is not None and "ahead_m" not in detail:
+                    detail["ahead_m"] = ahead
+            q = spec.weather_event
+            spec.weather_event = Quantity(
+                value=q.value, unit=q.unit, source=q.source, frm=q.frm,
+                std=q.std, detail={**q.detail, **detail, "aim": aim})
+
+        return LLMCompileResult(
+            spec=spec, model=str(getattr(response, "model", model)),
+            raw_response=text,
+            questions=tuple(dict(q) for q in payload["questions"]),
+            transcript=tuple(dict(m) for m in messages) if answering else None,
+        )
+    except LLMCompileError as exc:
+        exc.details.setdefault("raw_response", text)
+        raise
 
 
 if __name__ == "__main__":   # pragma: no cover -- the live smoke, run by hand
