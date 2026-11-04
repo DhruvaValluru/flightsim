@@ -1725,6 +1725,15 @@ def settings_put(request: SettingsPutRequest) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
+@app.get("/settings.js")
+def settings_script() -> FileResponse:
+    """The settings panel the prompt page mounts above the Interpret button
+    (E3): the six ui_keys() fields over GET/PUT /settings (E2), the rest
+    under its Advanced fold (tests/test_settings_page.py)."""
+    return FileResponse(STATIC / "settings.js",
+                        media_type="application/javascript")
+
+
 @app.get("/environment_picker.js")
 def environment_picker_script() -> FileResponse:
     """The environment picker the prompt page mounts under the prompt box:
