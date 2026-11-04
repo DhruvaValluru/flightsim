@@ -584,3 +584,63 @@ def test_the_vswhere_lint_catches_the_bug_it_was_written_for(tmp_path):
     good = [(n, l) for n, l in _joined_continuations(fixed)
             if VSWHERE_QUERY.search(l) and not ALL_PRODUCTS.search(l)]
     assert not good, good
+
+
+# -- the engine pin: resolved, never guessed ------------------------------
+
+ENGINE_SCRIPTS = [Path(__file__).resolve().parents[1] / "scripts" / name
+                  for name in ("build_ue.ps1", "ue_preflight.ps1", "ue_engine.ps1")]
+
+#: The newest-install fallback that let a 5.7 engine build a 5.5 project.
+ENGINE_GLOB = re.compile(r"UE_5\.\*|Sort-Object\s+Name\s+-Descending")
+
+
+def _engine_glob_offenders(path: Path):
+    return [(n, line.strip()) for n, line in code_lines(path)
+            if ENGINE_GLOB.search(line)]
+
+
+def test_the_engine_resolver_has_no_newest_glob_fallback():
+    for script in ENGINE_SCRIPTS:
+        offenders = _engine_glob_offenders(script)
+        assert not offenders, (
+            f"{script.name}: the engine is UE_ROOT or the pinned path, never "
+            "the newest UE_5.* found:\n" +
+            "\n".join(f"  {script.name}:{n}: {text}" for n, text in offenders))
+
+
+def test_both_engine_scripts_refuse_by_name_before_building():
+    helper = ENGINE_SCRIPTS[2].read_text(encoding="utf-8")
+    assert "engine.version_mismatch: found" in helper and "pinned" in helper
+    for script in ENGINE_SCRIPTS[:2]:
+        text = script.read_text(encoding="utf-8")
+        assert "ue_engine.ps1" in text, f"{script.name} must dot-source ue_engine.ps1"
+        assert "Test-EngineVersion" in text, f"{script.name} must run the version check"
+    lines = [line for _, line in code_lines(ENGINE_SCRIPTS[0])]
+    check = next(i for i, line in enumerate(lines) if "Test-EngineVersion" in line)
+    build = next(i for i, line in enumerate(lines) if "& $buildBat" in line)
+    assert check < build, "build_ue.ps1 must check the engine before Build.bat runs"
+
+
+def test_the_engine_pin_is_read_not_hardcoded_in_powershell():
+    for script in ENGINE_SCRIPTS:
+        offenders = [(n, line.strip()) for n, line in code_lines(script)
+                     if re.search(r"\b5\.[57]\b", line)]
+        assert not offenders, (
+            f"{script.name}: the pin is read by Get-PinnedEngine, not written:\n" +
+            "\n".join(f"  line {n}: {text}" for n, text in offenders))
+    assert "EngineAssociation" in ENGINE_SCRIPTS[2].read_text(encoding="utf-8")
+
+
+def test_the_engine_glob_lint_catches_the_bug_it_was_written_for(tmp_path):
+    bad = tmp_path / "build_ue.ps1"
+    bad.write_text(
+        '$found = Get-ChildItem "C:\\Program Files\\Epic Games" -Directory `\n'
+        '    -Filter "UE_5.*" |\n'
+        '    Sort-Object Name -Descending | Select-Object -First 1\n'
+        '# a comment about UE_5.* is not the bug\n', encoding="utf-8")
+    offenders = _engine_glob_offenders(bad)
+    assert [n for n, _ in offenders] == [2, 3]
+    good = tmp_path / "good.ps1"
+    good.write_text('$root = "C:\\Program Files\\Epic Games\\UE_$pin"\n', encoding="utf-8")
+    assert not _engine_glob_offenders(good)
