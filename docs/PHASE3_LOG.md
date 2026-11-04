@@ -5,9 +5,12 @@ Windows runner (the sheet's rule: a failed check is written here before it
 is fixed). Outputs live under `runs/p3/<run id>/`; synopses under
 `docs/phase3/packets/`; the cross-check records in `docs/phase3/sync_log_<L>.md`.
 
-Machine: Windows laptop, UE 5.5.4 (changelist 40574608), MSVC 14.44.35207,
-Windows SDK 10.0.26100.0, Python 3.12.10, Cesium for Unreal 2.28.0 (project
-plugin, installed 2026-11-04 because only the 5.7 copy was on the machine).
+Machine: Windows laptop, MSVC 14.44.35207, Windows SDK 10.0.26100.0, Python
+3.12.10. Run A-1 rows below were measured on UE 5.5.4 (changelist 40574608,
+decision 1); Cesium for Unreal was never installed for 5.5 (the 2.28.0 copy was
+downloaded but not installed). From decision 10 (2026-11-04, owner override)
+the pin is UE 5.7.4 (changelist 51494982) with Cesium for Unreal 2.30.0 in the
+engine's Marketplace folder; later rows say which engine they ran on.
 
 ## Letter A
 
