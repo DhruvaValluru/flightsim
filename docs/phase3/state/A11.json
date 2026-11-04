@@ -1,7 +1,19 @@
 {
-  "budget_used": 16,
+  "budget_used": 30,
+  "builder_commit": "78ab68fb",
+  "claims": [],
+  "failures": [
+    "local: integrator bounce 2026-11-04, 5 render tests refused by labels.no_bundle because the test stub writes no bundle; builder to make the stub write a real minimal bundle"
+  ],
+  "integrated_commit": "f27ef80a",
   "letter": "A",
   "needs_windows": true,
-  "stage": "aligned",
-  "updated": "2026-11-03T21:54:18"
+  "pending_windows": [
+    "render a 2-camera 3-frame -labels scenario; find which of labels.mask, labels.depth_f32, objects[].alone_png is missing and the engine log line that explains it",
+    "fix the engine cause in FlightSimRenderCommandlet.cpp",
+    "full CLI and web render: every render.json complete, mask not all zeros, one alone PNG per aircraft per frame, no labels.no_bundle"
+  ],
+  "stage": "pushed",
+  "updated": "2026-11-04T00:54:27",
+  "worktree": "../p3-A11"
 }

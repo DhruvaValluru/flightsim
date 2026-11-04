@@ -9,7 +9,7 @@
     "step 1 reproduce /generate refusal on Windows",
     "step 5 one-line prompt to finished campaign"
   ],
-  "stage": "built",
-  "updated": "2026-11-03T22:00:36",
+  "stage": "pushed",
+  "updated": "2026-11-04T00:54:27",
   "worktree": "../p3-A10"
 }

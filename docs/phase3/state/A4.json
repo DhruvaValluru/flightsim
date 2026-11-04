@@ -1,18 +1,16 @@
 {
-  "budget_used": 11,
-  "claims": [
-    "core/messages/catalog.yaml",
-    "core/util/platform.py",
-    "flightsim/capture.py",
-    "scripts/build_ue.ps1",
-    "scripts/build_ue.ps1 core/util/platform.py flightsim/capture.py webapp/runs.py core/messages/catalog.yaml tests/test_binary_stale.py tests/fixtures/stamp_tree",
-    "tests/fixtures/stamp_tree",
-    "tests/test_binary_stale.py",
-    "webapp/runs.py"
-  ],
+  "budget_used": 24,
+  "builder_commit": "b3287569",
+  "claims": [],
+  "integrated_commit": "f78d888045811f8e41b2d1aba2643a8f81f35e4a",
   "letter": "A",
   "needs_windows": true,
-  "stage": "building",
-  "updated": "2026-11-03T22:14:29",
+  "pending_windows": [
+    "step6 build_ue.ps1 stamp equals python hash",
+    "step7 PowerShell fixture hash equals golden 0141215e...",
+    "step8 touch .cpp, render refuses engine.binary_stale then passes after rebuild"
+  ],
+  "stage": "pushed",
+  "updated": "2026-11-04T00:54:27",
   "worktree": "../p3-A4"
 }

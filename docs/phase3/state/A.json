@@ -1,7 +1,12 @@
 {
   "aligned_at": "2026-11-03",
+  "audit": "PASS: full suite at f27ef80a 3215 passed / 8 failed (5 baseline on bd68745b, 3 letter-A regressions fixed in 883163ff and re-checked) / 17 skipped (all pre-existing or the golden-fixture skip); mutation subset: 7 guards (pin, preflight, component) plus 4 re-targeted guards (123,173,218,359) all caught",
   "baseline_failures": [
-    "tests/test_ue_physics_source.py::test_the_gauss_legendre_table_is_numpys_to_the_bit"
+    "tests/test_ue_physics_source.py::test_the_gauss_legendre_table_is_numpys_to_the_bit",
+    "tests/test_shear.py::test_a_missing_or_altered_fixture_refuses_by_name",
+    "tests/test_traceability.py::test_the_regeneration_script_checks_and_writes",
+    "tests/test_wake.py::test_the_card_block_carries_the_pair_in_the_fixed_key_order_with_the_selftest_vectors",
+    "tests/test_weather.py::test_the_soundtrack_script_writes_the_cards_storm"
   ],
   "build_order": [
     "A1+A2",
@@ -20,7 +25,7 @@
     "C6"
   ],
   "letter": "A",
-  "stage": "aligned",
+  "stage": "audited",
   "units": [
     "A1+A2",
     "A3",
@@ -37,5 +42,5 @@
     "C5",
     "C6"
   ],
-  "updated": "2026-11-03T21:58:05"
+  "updated": "2026-11-04T00:54:27"
 }

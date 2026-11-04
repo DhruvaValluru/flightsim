@@ -8,8 +8,8 @@
     "A1 step2 row 2",
     "A1 step3 row 3"
   ],
-  "stage": "built",
+  "stage": "pushed",
   "unit": "A1+A2",
-  "updated": "2026-11-03T22:13:18",
+  "updated": "2026-11-04T00:54:27",
   "worktree": "../p3-A2"
 }

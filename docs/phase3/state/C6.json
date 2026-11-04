@@ -1,7 +1,16 @@
 {
-  "budget_used": 14,
+  "budget_used": 70,
+  "builder_commit": "7509712e",
+  "claims": [],
+  "integrated_commit": 86446340,
   "letter": "C",
+  "missing": [
+    "4 catalogue entries: check.component_boxes check.component_coverage annotation.component_box annotation.component_coverage"
+  ],
   "needs_windows": false,
-  "stage": "aligned",
-  "updated": "2026-11-03T21:54:18"
+  "open_for_C3": [
+    "v8 schema objects[].role enum has no component value; fabricated payload uses role scene; object id pattern rejects payload:tank_centre (fixture uses payload:pod_right:0)"
+  ],
+  "stage": "pushed",
+  "updated": "2026-11-04T00:54:27"
 }

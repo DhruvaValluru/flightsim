@@ -1,15 +1,8 @@
 {
   "budget_used": 32,
   "builder_commit": "e62a4ad3",
-  "claims": [
-    "NEXT.md",
-    "core/capture/verify.py",
-    "scripts/label_diagnose.py",
-    "tests/fixtures/engine_bundle_min/",
-    "tests/test_annotation_gates.py",
-    "tests/test_engine_bundle_golden.py",
-    "tests/test_label_diagnose.py"
-  ],
+  "claims": [],
+  "integrated_commit": "6caabdac",
   "letter": "A",
   "needs_windows": true,
   "pending_windows": [
@@ -17,8 +10,8 @@
     "label_diagnose prints tight null: 0",
     "fixture under 2MB + GOLDEN.json + RUN_ID committed"
   ],
-  "stage": "built_local",
+  "stage": "pushed",
   "unit": "A12+A13",
-  "updated": "2026-11-03T22:07:30",
+  "updated": "2026-11-04T00:54:27",
   "worktree": "../p3-A12"
 }
