@@ -1,15 +1,25 @@
 {
-  "budget_used": 18,
+  "3ef2414e": "",
+  "C-1": "",
+  "FAIL": "",
+  "budget_used": 54,
+  "builder_commit": "3ef2414e",
   "claims": [
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp",
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimScenarioWorld.cpp",
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimScenarioWorld.h"
   ],
+  "failures": [
+    "run C-1 packet docs/phase3/packets/C4-1.md: engine side done (3ef2414e merged): payload ids 64/65/66 in the mask, aircraft tight box filled, 7 gates + component_coverage PASS; component_boxes FAIL because the OBJ import mirrors every A-4 asset (decision 19: converter writes right-handed OBJ, Mac); label_geometry_3d FAIL (verifier occluded recount counts children, Mac); host_determinism FAIL on the CLI route (Mac)"
+  ],
   "letter": "C",
   "needs_windows": true,
   "pushed_commit": "845f014d",
-  "stage": "building",
+  "run_id": "",
+  "stage": "built_local",
   "unit": "C4",
-  "updated": "2026-11-04T16:18:38",
+  "updated": "2026-11-04T16:32:08",
+  "verdict": "",
+  "windows_build": "",
   "worktree": "../p3w-C4"
 }
