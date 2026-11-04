@@ -14,6 +14,7 @@ not on a genuine divergence that happens to sit at a convenient index.
 """
 
 import json
+import math
 
 import pytest
 
@@ -88,8 +89,10 @@ def test_index_alignment_would_have_reported_a_divergence_that_is_not_there(tmp_
             times.append(t)
             t += period
         columns = {"t": times}
+        # The ramp climbs with elapsed time from each host's first sample,
+        # which is the origin the comparison uses (decision 14).
         for channel in COMPARED:
-            columns[channel] = [3000.0 + 3.0 * x for x in times]
+            columns[channel] = [3000.0 + 3.0 * (x - times[0]) for x in times]
         path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
         return path
 
@@ -304,6 +307,78 @@ def test_the_overlap_requirement_admits_an_honest_run(tmp_path):
     b = trajectory(tmp_path / "unreal.json", 0.1, 60.0)
     _, overlap = compare(a, b)
     assert overlap.fraction >= MIN_OVERLAP_FRACTION
+
+
+# -- the clock origin (decision 14) ---------------------------------------
+
+
+def smooth_trajectory(path, period, origin, *, duration=60.0, motion_shift=0.0):
+    """The same smooth hands-off motion, sampled at ``period`` on a recorder
+    clock that starts at ``origin``.
+
+    Every channel is a function of elapsed hands-off time ``s`` (plus
+    ``motion_shift``, which moves the *motion*, not the clock), so two files
+    with different origins describe the same flight unless they are shifted.
+    The shapes stand in for a gentle phugoid and a slow turn: altitude
+    1500 + 20 sin(0.3 s), heading 90 + 2 s wrapped, TAS constant, the rest
+    small functions of ``s``.
+    """
+    times = [origin + i * period for i in range(int(duration / period) + 1)]
+    s = [(t - origin) + motion_shift for t in times]
+    columns = {
+        "t": times,
+        "altitude_m": [1500.0 + 20.0 * math.sin(0.3 * x) for x in s],
+        "tas_kt": [110.0 for _ in s],
+        "roll_deg": [5.0 * math.sin(0.2 * x) for x in s],
+        "pitch_deg": [2.0 + 0.5 * math.cos(0.25 * x) for x in s],
+        "heading_deg": [(90.0 + 2.0 * x) % 360.0 for x in s],
+        "n_z": [1.0 + 0.02 * math.sin(0.3 * x) for x in s],
+        "lat_deg": [37.0 + 1e-5 * x for x in s],
+        "lon_deg": [-122.0 + 2e-5 * x for x in s],
+    }
+    assert set(columns) == {"t", *COMPARED}
+    path.write_text(json.dumps({"host": "test", "samples": len(times),
+                                "interval_s": period, "columns": columns}), encoding="utf-8")
+    return path
+
+
+def test_compare_grades_on_elapsed_time_not_on_each_hosts_absolute_clock(tmp_path):
+    """Packet A5-3: the headless recorder's clock starts after the trim (first
+    sample 4.875 s, period ~0.1077 s); the UE commandlet's clock is zero at
+    the latch (first sample 0.008 s). The same hands-off flight, graded on the
+    absolute clocks, read 40 m and 46 deg apart; on elapsed time it agrees.
+    """
+    a = smooth_trajectory(tmp_path / "headless.json", 0.1077, 4.875)
+    b = smooth_trajectory(tmp_path / "unreal.json", 0.1, 0.008)
+
+    results, overlap = compare(a, b)
+    assert overlap.headless_origin == pytest.approx(4.875)
+    assert overlap.unreal_origin == pytest.approx(0.008)
+    assert overlap.fraction >= MIN_OVERLAP_FRACTION
+    assert overlap.ok
+    assert overlap.end == pytest.approx(59.9, abs=0.11)
+    for result in results:
+        assert result.ok, result.render()
+    assert "origins  headless 4.875 s  unreal 0.008 s" in overlap.render()
+
+
+def test_aligning_the_origins_does_not_hide_a_real_three_second_divergence(tmp_path):
+    """The UE host flies the same motion three seconds of *flight* ahead: its
+    clock is unchanged, its samples hold the motion of ``s + 3``. Elapsed-time
+    alignment must still report that, on heading and altitude, or the fix of
+    decision 14 would be a way to forgive any shift at all.
+    """
+    a = smooth_trajectory(tmp_path / "headless.json", 0.1077, 4.875)
+    b = smooth_trajectory(tmp_path / "unreal.json", 0.1, 0.008, motion_shift=3.0)
+
+    results, overlap = compare(a, b)
+    assert overlap.ok
+    by_channel = {r.channel: r for r in results}
+    assert not by_channel["heading_deg"].ok
+    assert by_channel["heading_deg"].max_difference == pytest.approx(6.0, abs=0.05)
+    assert not by_channel["altitude_m"].ok
+    assert by_channel["altitude_m"].max_difference > TOLERANCE["altitude_m"]
+    assert not all(r.ok for r in results)
 
 
 # -- the run card --------------------------------------------------------
