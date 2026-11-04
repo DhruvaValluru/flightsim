@@ -2540,3 +2540,144 @@ a52ae2cf Merge p3-A6: pin GRAPH_GENERATIONS key set and stencil-id build; engine
  2 files changed, 24 insertions(+), 1 deletion(-)
 ```
 
+## A8 · PASS · run A-2 · 2026-11-04T17:13:25Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+68:   - Check: a web-app run with host flight completes, and no message tells the user
+69:     to add the flag.
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/A8-run-summary.log: run 7274c62756ea done: clip ready (host flight on by default ...); host flight 220 samples; engine labels attached on 220 of 220
+runs/p3/A-2/A8-run-summary.log: verify.json host_determinism PASS: 2 host flights of one card were byte-identical (6bc9dcc5e613, 220 samples): the host is reproducible; solve pass vs chase pass telemetry: 0 columns differ; ground: collision raster ...grand_canyon; Success - 0 error(s)
+runs/p3/A-2/A8-run-summary.log: no-host-flight mentions in the run record and the web app log for this run: 0 / 0
+```
+
+note: run A-2: the parity check against the Python flight is the verifier's flight_agreement (PASS) and host_determinism (PASS); tests/test_host_parity.py 19 passed, 1 failed on test_preflight_on_mac_runs_ue_preflight_sh, a Windows path-separator assertion unrelated to parity (the Mac's test, reported); the run's only verifier failure, mask_vs_geometry, is A12's
+
+### synopsis
+
+# A8 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T17:13:24Z
+
+## A8 step 6: web-app run with host flight on (POST /run) on the merged 3dc6a5ec build
+
+- log: `runs/p3/A-2/A8-web-post.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+status 200
+{"run_id":"7274c62756ea","digest":"c5c75d19687cf6b521db3ad49b69a9e41226941a3ef21b714d80932df9238fb4"}
+```
+
+## A8 step 6: the run's record, determinism and flag check
+
+- log: `runs/p3/A-2/A8-run-summary.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+run 7274c62756ea done: clip ready (host flight on by default, tiles on, storm on; Grand Canyon A-4 chase)
+events: host flight 220 samples; every camera re-solved over the host's own flight; rendering 1 camera pass(es): chase; engine labels attached on 220 of 220 frame(s) (0 without a bundle); verification FAILED: mask_vs_geometry (A12's); clip: 220 frames of chase at 10.0 fps = 22.0 s
+verify.json host_determinism PASS: 2 host flights of one card were byte-identical (6bc9dcc5e613, 220 samples): the host is reproducible
+verify.json flight_agreement PASS; solve pass vs chase pass telemetry: 0 columns differ
+host_flight/host_telemetry.log: LogFlightSimScenario: Display: ground: collision raster C:\Users\kanth\flightsim\runs\terrain\grand_canyon; LogInit: Display: Success - 0 error(s), 4 warning(s)
+no-host-flight mentions in the run record and the web app log for this run: 0 / 0
+```
+
+## A8 step 6: pytest -q tests/test_host_parity.py (19 passed; the 1 failure is a Windows path-separator assertion in the Mac's d4fd0dfd test, not a parity result)
+
+- log: `runs/p3/A-2/A8-pytest-host-parity.log`
+- exit: 1 (expected 0) -> FAIL
+
+```
+..................F.                                                     [100%]
+================================== FAILURES ===================================
+_________________ test_preflight_on_mac_runs_ue_preflight_sh __________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D35D811B80>
+
+    def test_preflight_on_mac_runs_ue_preflight_sh(monkeypatch):
+        argv, kwargs = _capture_preflight(monkeypatch, "mac")
+>       assert len(argv) == 1 and argv[0].endswith("scripts/ue_preflight.sh")
+E       AssertionError: assert (1 == 1 and False)
+E        +  where 1 = len(['C:\\Users\\kanth\\flightsim\\scripts\\ue_preflight.sh'])
+E        +  and   False = <built-in method endswith of str object at 0x000001D35E8F66D0>('scripts/ue_preflight.sh')
+E        +    where <built-in method endswith of str object at 0x000001D35E8F66D0> = 'C:\\Users\\kanth\\flightsim\\scripts\\ue_preflight.sh'.endswith
+
+tests\test_host_parity.py:475: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_host_parity.py::test_preflight_on_mac_runs_ue_preflight_sh
+            [JSBSim-ML v2.0]
+
+JSBSim startup beginning ...
+
+```
+
+note: run A-2: steps 1-2 in packet A8-1; cause 1 (commandlet exit 1, Water profile) fixed by the A5 builder 2b746352; cause 2 (agl_m from the streamed world) fixed by the A8 builder 3dc6a5ec (decision 12), merged 3a8c369f; the cross-check judges the sheet line PASS and names the failing test as the Mac's
+
+## verdict
+
+FAIL
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+f8895c08 Phase 3: A8 builder merge log
+ad4b08f0 A8: JSBSim's ground answers from the card's collision raster in every pass (decision 12)
+79448961 Phase 3: log the A5 push and the A8 note (run A-2)
+ad9bc59d Phase 3 run A-2: A8 reproduction and classification (packet A8-1), decision 12 (ground callback reads the raster in every pass)
+123dcd3c Merge p3-A8: host-flight refusal names the fault, drops the dev flag; catalogue hint
+89f7e577 A8: host-flight refusal names the fault, drops the dev flag; catalogue hint
+
+f8895c08 Phase 3: A8 builder merge log
+
+ docs/phase3/events_windows.log | 3 +++
+ 1 file changed, 3 insertions(+)
+
+ad4b08f0 A8: JSBSim's ground answers from the card's collision raster in every pass (decision 12)
+
+ .../FlightSimBridge/FlightSimBridge.Build.cs       |   5 +
+ .../Private/FlightSimGroundCallback.cpp            | 106 +++++++++++++++++++++
+ .../Private/FlightSimGroundCallback.h              |  42 ++++++++
+ .../Private/FlightSimScenarioWorld.cpp             |  22 +++++
+ .../Private/JSBSimMovementComponent.cpp            |  11 +++
+ .../Public/JSBSimMovementComponent.h               |   7 ++
+ ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json |   9 ++
+ 7 files changed, 202 insertions(+)
+
+79448961 Phase 3: log the A5 push and the A8 note (run A-2)
+
+ docs/phase3/events_mac.log | 2 ++
+ 1 file changed, 2 insertions(+)
+
+ad9bc59d Phase 3 run A-2: A8 reproduction and classification (packet A8-1), decision 12 (ground callback reads the raster in every pass)
+
+ docs/PHASE3_LOG.md             |  2 +
+ docs/phase3/decisions.md       |  2 +
+ docs/phase3/events_windows.log |  4 ++
+ docs/phase3/packets/A8-1.md    | 99 ++++++++++++++++++++++++++++++++++++++++++
+ docs/phase3/state/A8.json      |  7 ++-
+ 5 files changed, 113 insertions(+), 1 deletion(-)
+
+123dcd3c Merge p3-A8: host-flight refusal names the fault, drops the dev flag; catalogue hint
+
+ core/messages/catalog.yaml       |  1 +
+ flightsim/capture.py             | 56 +++++++++++++++++++++++++++++++++-------
+ tests/test_camera_host_flight.py | 23 +++++++++++++++++
+ 3 files changed, 71 insertions(+), 9 deletions(-)
+
+89f7e577 A8: host-flight refusal names the fault, drops the dev flag; catalogue hint
+
+ core/messages/catalog.yaml       |  1 +
+ flightsim/capture.py             | 56 +++++++++++++++++++++++++++++++++-------
+ tests/test_camera_host_flight.py | 23 +++++++++++++++++
+ 3 files changed, 71 insertions(+), 9 deletions(-)
+```
+
