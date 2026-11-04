@@ -40,3 +40,8 @@ engine's Marketplace folder; later rows say which engine they ran on.
 | C1 | A-2 | `pytest -v tests/test_airframe.py -k components` | `6 passed` incl. `test_components_loadout_trims` | |
 | C5 | A-2 | `pytest -q tests/test_component_labels.py` | exit 0, 11 tests | |
 | C6 | A-2 | `pytest -q -k component`; COCO half `-k payload_and_gear_are_their_own_coco` | exit 0 (55 tests); `1 passed` | |
+| A2 | A-2 | `build_ue.ps1` on 5.7.4, retry after clearing `%LOCALAPPDATA%\UnrealEngine\Intermediate\Build\BuildRules` | `Result: Succeeded`, 25 actions, zero `error C`, one C4996 warning (`ULandscapeSubsystem::BuildNanite` deprecated); `build_stamp.json` engine_version 5.7.4, source `770fa283…`; UBT limited itself to 1 parallel action (2.2 GB free) | 204 s |
+| A3 | A-2 | `build_ue.ps1` with `UE_ROOT` at UE_5.5 | exit 1, `engine.version_mismatch: found 5.5.4, pinned 5.7`, UBT not started | |
+| A3 | A-2 | `ue_preflight.ps1` at UE_5.5 / at UE_5.7 | exit 1 `engine.version_mismatch: found 5.5.4, pinned 5.7` / exit 0 `engine UE 5.7.4 at C:\Program Files\Epic Games\UE_5.7` | |
+| A4 | A-2 | PowerShell `Get-PluginSourceHash` on the fixture and the repo | fixture `0141215e…` equals golden; repo `770fa283…` equals the stamp and the Python twin | |
+| A2 | A-2 | `pytest -q tests/test_platform.py` | exit 0 | |

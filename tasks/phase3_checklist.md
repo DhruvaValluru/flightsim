@@ -49,7 +49,7 @@ sitting 0.4 m from its label (it was ~25 m).
 - [ ] **A2 · That version written in every place the project names it**
   - Check: `pytest -q tests/test_platform.py` passes.
   - Check: changing the version in one file by hand makes that test fail.
-- [ ] **A3 · The build refuses the wrong engine** 🪟
+- [x] **A3 · The build refuses the wrong engine** 🪟
   - Check: pointing it at another version stops with `engine.version_mismatch`.
   - Check: the right version builds with zero errors.
 - [ ] **A4 · An old engine program can't draw the pictures**
