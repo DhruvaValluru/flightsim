@@ -1,4 +1,8 @@
 {
+  "audit": "PASS",
+  "audit_baseline": [
+    "mutation guard 242 (a second planner pass lands on the same jitter, core/scenario/randomization.py) was already WEAK at fc7aee06 before letter B: pre-existing, fixed at phase end"
+  ],
   "build_order": [
     [
       "B1",
@@ -10,11 +14,11 @@
     ]
   ],
   "letter": "B",
-  "stage": "aligned",
+  "stage": "pushed",
   "units": [
     "B1",
     "B2+B3",
     "B4"
   ],
-  "updated": "2026-11-04T11:36:11"
+  "updated": "2026-11-04T12:37:05"
 }

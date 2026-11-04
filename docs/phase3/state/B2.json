@@ -12,8 +12,8 @@
     "ffmpeg 9.0.1 pin -> toolchain.ffmpeg_mismatch, exit non-zero (step 6)",
     "windows_sdk wrong pin -> toolchain.windows_sdk_mismatch, exit non-zero (step 7)"
   ],
-  "stage": "integrated",
+  "stage": "pushed",
   "unit": "B2+B3",
-  "updated": "2026-11-04T11:46:58",
+  "updated": "2026-11-04T12:37:05",
   "worktree": "../p3-B2"
 }
