@@ -23,14 +23,14 @@
     "label_diagnose prints tight null: 0",
     "fixture under 2MB + GOLDEN.json + RUN_ID committed"
   ],
-  "pushed_commit": "23bad766",
+  "pushed_commit": "968dcb60",
   "retry": 1,
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
   "stage": "pushed",
   "unit": "A12+A13",
-  "updated": "2026-11-04T13:15:06",
+  "updated": "2026-11-04T13:15:21",
   "verdict": "",
   "windows_build": "",
   "worktree": "../p3-A12r"
