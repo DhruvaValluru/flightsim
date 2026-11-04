@@ -2723,13 +2723,13 @@ mutate ue/FlightSim.uproject \
     '"EngineAssociation": "5.7"' \
     '"EngineAssociation": "5.5"' \
     "the uproject pins the engine the scripts and refusals name" \
-    tests/test_platform.py || failures=$((failures+1))
+    tests/test_platform.py tests/test_toolchain_pins.py || failures=$((failures+1))
 
 mutate toolchain.json \
     '"version": "5.7"' \
     '"version": "5.5"' \
     "the platform refusals and install roots name the pinned engine" \
-    tests/test_platform.py || failures=$((failures+1))
+    tests/test_platform.py tests/test_toolchain_pins.py || failures=$((failures+1))
 
 mutate scripts/ue_preflight.ps1 \
     '$ueRoot = $engine.Root' \
