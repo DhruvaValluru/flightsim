@@ -43,8 +43,11 @@ weather stays on, never subscribe to a PR, never schedule a check-in.
   A failure note starts with `FAIL`, a pass note with `PASS`. Never write JSON
   by hand.
 - Git: you are the only side that pushes code. Push once per letter batch,
-  never per box. Always `git pull --rebase origin phase-2-final` first.
-  Windows only ever commits under `docs/phase3/` and `tasks/`, so a rebase
+  never per box. Always `git pull --no-rebase origin phase-2-final` first (a
+  merge: `--rebase=merges` replays every box merge and re-raises its
+  resolved conflicts, measured three times on 2026-11-04; the event logs
+  union-merge via .gitattributes, state files take Windows' version).
+  Windows only ever commits under `docs/phase3/` and `tasks/`, so a merge
   never conflicts. Builders work in their own worktree
   (`git worktree add ../p3-<box> phase-2-final`), and the integrator merges
   the box into `phase-2-final` in Align's build order.
@@ -180,7 +183,7 @@ suite until Stage 7), then `scripts/mutation_check.sh` with its subset
 option for the guards this letter touched, serialized. A guard whose test
 stays green with the guard removed fails the letter. Hard gate.
 
-**Push.** `git pull --rebase`, push, send `P3 pushed <commit> letter=<L>
+**Push.** `git pull --no-rebase`, push, send `P3 pushed <commit> letter=<L>
 boxes=<all units, including windows-only ones>`.
 
 **Stage 4 · per-box failure.** On `P3 verdict <box> FAIL packet=<path>` or

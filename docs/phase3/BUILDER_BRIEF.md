@@ -10,6 +10,7 @@ flag or environment variable on the user path.
 ## Setup (first commands)
 
     cd /Users/dhruva/flightsim && git worktree add -b p3-<box> ../p3-<box> phase-2-final
+    ln -s /Users/dhruva/flightsim/.venv ../p3-<box>/.venv   # git-ignored; mutation_check.sh and the runner need it
     python3 MAIN/scripts/phase3_state.py claim <box> <every file you will touch>
 
 If `claim` prints `BUSY <other box> holds [...]`, wait: re-run it every 60 s
@@ -24,6 +25,17 @@ Every command runs through the MAIN runner with `--cwd` at your worktree:
     python3 MAIN/scripts/phase3_event.py run --agent builder --box <box> --stage build --cwd ../p3-<box> -- <cmd>
 
 Tests use the MAIN venv: `/Users/dhruva/flightsim/.venv/bin/pytest -q <tests>`
+
+**Test time is the build's bottleneck** (measured 2026-11-04: 96 pytest runs,
+2 h of wall-clock, single files up to 16 min). So:
+- while iterating, run only the tests you are changing: `pytest -q -x -k <name> <box file>`;
+- run the box's whole test file ONCE at the end, with `--durations=5`; a test over
+  60 s is reported in the note (a real flight or render in a unit test is a defect
+  to name, not to wait for);
+- never run another box's long files "to be safe": the integrator and the auditor
+  run the touched modules' tests;
+- `scripts/mutation_check.sh` only with `--check-targets` or `--no-suite`, always
+  with `--match`; the plain run is the phase-end auditor's.
 (run from the worktree via `--cwd`; the worktree's own code is imported).
 Notes: `python3 MAIN/scripts/phase3_event.py log --agent builder --box <box> --stage build --note "..."`.
 A failure note starts with `FAIL`, a pass note with `PASS`. Never write JSON by hand.

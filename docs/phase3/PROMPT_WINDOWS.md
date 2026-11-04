@@ -43,8 +43,9 @@ event helper writes `docs/phase3/events_windows.log`.
   --box <b> --stage <s> -- <cmd>`; notes through `... log`. `FAIL` and `PASS`
   prefixes on notes. Never hand-write JSON.
 - Commit and push your doc changes after every verdict, with
-  `git pull --rebase origin phase-2-final` first. Your paths never overlap
-  the Mac's, so the rebase never conflicts.
+  `git pull --no-rebase origin phase-2-final` first (a merge; the event logs
+  union-merge via .gitattributes). Your paths never overlap the Mac's, so
+  the merge never conflicts.
 - The shared engine cache lives outside the clone at the path in
   `FLIGHTSIM_CACHE` (the engine binary, the five materials, the two terrain
   bakes). A4's build stamp (engine version plus a hash of the plugin Source
@@ -109,7 +110,7 @@ the only code pushes from this machine, and they touch only `ue/`,
 ## Per push: runner → synopsis → cross-check
 
 **Runner.** One queue; a `pushed` that arrives mid-build waits. On
-`P3 pushed <commit> letter=<L> boxes=<...>`: `git pull --rebase`, check out
+`P3 pushed <commit> letter=<L> boxes=<...>`: `git pull --no-rebase`, check out
 `<commit>`, Windows builds if any, then build the engine only if the A4 stamp
 says the cache is stale (one build per batch). Run every WINDOWS check for
 the listed boxes in plan order, each through `phase3_event.py run`, output
