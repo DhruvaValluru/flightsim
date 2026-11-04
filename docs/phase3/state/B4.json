@@ -1,8 +1,20 @@
 {
-  "budget_used": 17,
+  "budget_used": 24,
+  "builder_commit": "e38daf70",
+  "built_commit": "e38daf70",
+  "claims": [],
   "letter": "B",
   "needs_windows": true,
-  "stage": "building",
+  "pending_windows": [
+    "step4 run_ue_scenario.ps1 parity card exit 0 (A5/A8 landed, editor exits 0)",
+    "step5 gate6_visual.py --skip-render --probe-out on the eight 5.7 runs, then --probe-sweep gate6|noon|dawn: every probe.json names 5.7.4 and its bias",
+    "step6 --rederive per look within 4/255 of 118/255; constants replaced only from rederived.json; ClassifyVertex / commandlet 11.0 only if the probe says so",
+    "step8 gate6_visual.py --look measure and --quality beauty --look: GATE 6: PASS, exit 0, control > ~34/255",
+    "step9 gate10_render_repro.py --card <gate6 card>: bounded or bit-identical, exit 0",
+    "step10 pytest tests/test_engine_bundle_golden.py with the A12 fixture: 0 skipped, exit 0"
+  ],
+  "stage": "built",
   "unit": "B4",
-  "updated": "2026-11-04T11:38:19"
+  "updated": "2026-11-04T12:03:07",
+  "worktree": "../p3-B4"
 }
