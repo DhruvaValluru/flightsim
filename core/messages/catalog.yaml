@@ -370,6 +370,7 @@ annotation.intrinsics:
   sentence: "The renderer used a different lens or picture size than the record states."
 annotation.files:
   sentence: "A label file the record declares is missing."
+  hint: "A run verified on another machine may carry copies of the files its record names beside it; a copy counts only when its checksum is the one the record wrote down."
 instruments.file:
   sentence: "The measured-telemetry file is unreadable or was written for a version this build does not read."
 instruments.truth:
@@ -607,6 +608,7 @@ modes.airframe_class:
 # -- the verifier clauses of batch 1 (datum, instruments) ------------------------
 scene.datum:
   sentence: "The recorded height of sea level above the Earth's ellipsoid at the scene origin does not agree with the checker's own reading of the same geoid grid."
+  hint: "The geoid crop and its sidecar are read beside the terrain bake as it was written, else from a copy beside the run whose checksum is the one the record wrote down."
 check.datum:
   sentence: "The scene's vertical datum block names its geoid grid and states the sea-level offset the checker re-measures from it."
 check.instruments:

@@ -35,6 +35,29 @@ reference* actually is:
 A check that could not execute reports NOT RUN, is named in the
 summary, and is excluded from the pass tally. A green summary that
 silently omitted half its checks is worse than a red one.
+
+Files a card names that live on another machine
+-----------------------------------------------
+A card records the files its run was built from by path and sha256:
+the generated mesh manifest (``assets.mesh_manifest``) and the bake's
+geoid crop with its sidecar (beside ``scene.terrain``). The path is
+the PRODUCING machine's -- a fixture rendered on the Windows laptop
+cites ``C:\\...\\runs\\terrain\\grand_canyon`` -- so a run copied to
+another machine for verification names files that are not there, and
+the gates that read them would fail for the move, not for the data.
+:func:`_named_file` is the one rule for that: when the card's own path
+does not hold the file, a file of the same name under the run
+directory (the fixture directory, for a committed run), or one that
+carries that name after an underscored prefix (a committed copy named
+for its aircraft, ``cited/c172p_mesh_manifest.json`` for a card's
+``mesh_manifest.json``), is taken in its place ONLY when the card
+records a sha256 for it and the bytes match. The sha is the proof it
+is the same file; a same-named file with no recorded sha, or with
+other bytes, is refused by the gate's own failure name with the path
+and the sha named, never taken. Nothing is looked for outside the run
+directory, no other name is looked at however its bytes hash, and a
+card whose path is present with the recorded bytes is read exactly as
+before. The name is only where to look; the sha decides.
 """
 
 from __future__ import annotations
@@ -44,7 +67,7 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass, field as dc_field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Dict, List, Optional, Sequence, Tuple
 
 #: Pixel agreement demanded between the quaternion and Euler encodings
@@ -2402,6 +2425,62 @@ OBJECTS_MIN_MANIFEST_VERSION = 6
 _REPO = Path(__file__).resolve().parents[2]
 
 
+def _card_candidate(text, base=None) -> Path:
+    """A path a card wrote, as THIS machine would read it. A card written
+    on Windows carries backslashes, which a POSIX path keeps as one long
+    file name, so the card's separators are read as separators. An
+    absolute path stays as written (it is only on the machine that wrote
+    it, unless this is that machine); a relative one is joined to
+    ``base`` (the repository root for an asset, the working directory
+    for a bake)."""
+    text = str(text).replace("\\", "/")
+    path = Path(text)
+    if path.is_absolute() or PureWindowsPath(text).is_absolute():
+        return path
+    return (Path(base) if base is not None else Path()) / path
+
+
+def _named_file(candidate, sha, run_dir=None) -> Tuple[Optional[Path], Optional[str]]:
+    """The file a card names, on this machine (the module docstring's
+    relocated-bundle rule): ``(path, None)`` when ``candidate`` holds it
+    (bytes with the recorded ``sha``, or any bytes when the card records
+    none -- the caller's own rule then applies), or when a file of the
+    same name under ``run_dir`` -- or of that name after an underscored
+    prefix, ``<aircraft>_<name>`` -- has the recorded sha; ``(None, why)``
+    when a same-named file is under the run directory but the card
+    records no sha for it or its sha differs -- the caller refuses with
+    ``why`` under its own failure name; ``(candidate, None)`` when the
+    candidate is present with other bytes and nothing under the run
+    directory has its name (the caller grades those bytes as before);
+    ``(None, None)`` when nothing of that name is anywhere here."""
+    candidate = Path(candidate)
+    here = candidate.is_file()
+    if here and (not sha or hashlib.sha256(candidate.read_bytes()).hexdigest() == str(sha)):
+        return candidate, None
+    found = None
+    if run_dir is not None and candidate.name:
+        own = candidate.resolve() if here else None
+        root = Path(run_dir)
+        exact = sorted(root.rglob(candidate.name))
+        prefixed = sorted(root.rglob(f"*_{candidate.name}"))
+        for match in [root / candidate.name] + exact + prefixed:
+            if match.is_file() and (own is None or match.resolve() != own):
+                found = match
+                break
+    if found is None:
+        return (candidate if here else None), None
+    if not sha:
+        return None, (f"{candidate} is not here with the recorded bytes; {found} has its "
+                      f"name, but the card records no sha256 for it, so it is not taken "
+                      f"as that file")
+    digest = hashlib.sha256(found.read_bytes()).hexdigest()
+    if digest != str(sha):
+        return None, (f"{candidate} is not here with the recorded bytes; {found} has its "
+                      f"name, but its sha256 {digest[:16]}... is not the card's "
+                      f"{str(sha)[:16]}..., so it is not taken as that file")
+    return found, None
+
+
 def _declared_objects(manifest: Dict) -> List[Dict]:
     """The manifest's ``objects[]`` (version 6), or [] for an older one."""
     objects = manifest.get("objects")
@@ -2554,7 +2633,7 @@ def _mesh_vertices_actor_m(path: str, sha: str):
     return np.unique(np.asarray(rows, dtype=float), axis=0) / 100.0
 
 
-def _mesh_points_body(manifest: Dict, airframe_block: Dict):
+def _mesh_points_body(manifest: Dict, airframe_block: Dict, run_dir=None):
     """(N x 3 array of the primary's mesh vertices in body metres about
     the CG -- forward, right, down -- , basis), or (None, None).
 
@@ -2570,9 +2649,13 @@ def _mesh_points_body(manifest: Dict, airframe_block: Dict):
     centimetres."""
     asset = (manifest.get("assets") or {}).get("mesh_manifest") or {}
     path, sha = asset.get("path"), asset.get("sha256")
-    if not path or not sha:
+    if not path:
         return None, None
-    candidate = _REPO / str(path)
+    candidate, why = _named_file(_card_candidate(path, _REPO), sha, run_dir)
+    if why:
+        raise BundleFileError(why)
+    if not sha or candidate is None:
+        return None, None
     try:
         raw = candidate.read_bytes()
     except OSError:
@@ -2602,14 +2685,17 @@ def _mesh_points_body(manifest: Dict, airframe_block: Dict):
                   f"(control surfaces at rest)")
 
 
-def _hull_box_body(manifest: Dict, airframe_block: Dict, primary: bool
-                   ) -> Tuple[Dict[str, Tuple[float, float]], str]:
+def _hull_box_body(manifest: Dict, airframe_block: Dict, primary: bool,
+                   run_dir=None) -> Tuple[Dict[str, Tuple[float, float]], str]:
     """The box an object's pixels are graded against, in body metres
     about the CG ``{"forward": (aft, fwd), "right": (left, right),
     "down": (top, bottom)}``, with its basis.
 
     For the primary, when ``assets.mesh_manifest`` names a file that is
-    on THIS machine with the cited sha256 and carries the converter's
+    on THIS machine with the cited sha256 (at the card's path, or under
+    the run directory by the module docstring's relocated-bundle rule --
+    a same-named file the card does not vouch for by sha raises
+    :class:`BundleFileError`) and carries the converter's
     measured extent (version >= 3, contracts §0.1): that extent re-based
     on the CG -- the actor frame is +x forward, +y right, +z up with its
     origin at the structural datum, the CG sits at (-x, y, z) * 0.0254 of
@@ -2621,9 +2707,11 @@ def _hull_box_body(manifest: Dict, airframe_block: Dict, primary: bool
     if primary:
         asset = (manifest.get("assets") or {}).get("mesh_manifest") or {}
         path, sha = asset.get("path"), asset.get("sha256")
-        if path and sha:
-            candidate = _REPO / str(path)
-            if candidate.is_file() and hashlib.sha256(
+        if path:
+            candidate, why = _named_file(_card_candidate(path, _REPO), sha, run_dir)
+            if why:
+                raise BundleFileError(why)
+            if sha and candidate is not None and candidate.is_file() and hashlib.sha256(
                     candidate.read_bytes()).hexdigest() == str(sha):
                 try:
                     mesh = json.loads(candidate.read_text(encoding="utf-8"))
@@ -2649,7 +2737,7 @@ def _hull_box_body(manifest: Dict, airframe_block: Dict, primary: bool
             "digest on this machine)")
 
 
-def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes):
+def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes, run_dir=None):
     """The oriented box of one aircraft object in camera coordinates, or
     ``(None, why)``."""
     int_id = int(entry["int_id"])
@@ -2702,7 +2790,7 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes):
                          "the pixels are graded, the placement is not independently "
                          "re-derived)")
     box, basis = _hull_box_body(manifest, airframe, entry.get("role") == "primary"
-                                or int_id == AIRCRAFT_INSTANCE_ID)
+                                or int_id == AIRCRAFT_INSTANCE_ID, run_dir)
     lo = (box["forward"][0], box["right"][0], box["down"][0])
     hi = (box["forward"][1], box["right"][1], box["down"][1])
     centre_body = tuple((a + b) / 2.0 for a, b in zip(lo, hi))
@@ -2716,7 +2804,7 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes):
                for z in box["down"]]
     points = None
     if entry.get("role") == "primary" or int_id == AIRCRAFT_INSTANCE_ID:
-        body_points, points_basis = _mesh_points_body(manifest, airframe)
+        body_points, points_basis = _mesh_points_body(manifest, airframe, run_dir)
         if body_points is not None:
             import numpy as np
 
@@ -3018,7 +3106,7 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
         for entry in aircraft:
             int_id = int(entry["int_id"])
             where = f"{camera}/{name} {entry.get('id')}"
-            geometry, why = _object_geometry(manifest, record, entry, axes)
+            geometry, why = _object_geometry(manifest, record, entry, axes, run_dir)
             if geometry is None:
                 skipped[str(entry.get("id"))] = why
                 continue
@@ -3169,7 +3257,7 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
         for entry in aircraft:
             int_id = int(entry["int_id"])
             where = f"{camera}/{name} {entry.get('id')}"
-            geometry, why = _object_geometry(manifest, record, entry, axes)
+            geometry, why = _object_geometry(manifest, record, entry, axes, run_dir)
             if geometry is None:
                 continue
             hull = _projected_hull(record, geometry)
@@ -3774,7 +3862,7 @@ def verify_depth_vs_geometry(manifest: Dict, run_dir=None) -> Check:
             hit = np.isin(mask, [int_id] + list(kids.get(int_id, ())))
             if not hit.any():
                 continue
-            geometry, why = _object_geometry(manifest, record, entry, axes)
+            geometry, why = _object_geometry(manifest, record, entry, axes, run_dir)
             if geometry is None:
                 continue
             under = depth[hit]
@@ -3943,7 +4031,7 @@ def verify_visibility_vs_scene(manifest: Dict, run_dir=None) -> Check:
             for child in kids.get(int_id, ()):
                 if child in own_alone:
                     footprints[int_id] |= own_alone[child]
-            geometry, _ = _object_geometry(manifest, record, aircraft[int_id], axes)
+            geometry, _ = _object_geometry(manifest, record, aircraft[int_id], axes, run_dir)
             half_len[int_id] = geometry["length_m"] / 2.0 if geometry else 0.0
             visible = np.isin(mask, [int_id] + list(kids.get(int_id, ())))
             if geometry is not None:
@@ -5294,6 +5382,11 @@ def verify_datum_independent(manifest: Dict, run_dir=None) -> Check:
     a gtx sub-block, a bake path (``scene.terrain``) or pyproj; FAIL
     (scene.datum) on an absent or altered file, a misaligned corner, a
     residual beyond the tolerance, or a finite value outside the crop.
+    The crop and its sidecar are found beside ``scene.terrain`` as the
+    producing machine wrote it, else under the run directory by the
+    module docstring's relocated-bundle rule (the block's sha256 is the
+    proof); a same-named file the block does not vouch for fails by the
+    same name.
     """
     datum = manifest.get("datum")
     if not isinstance(datum, dict) or datum.get("undulation_m") is None:
@@ -5315,19 +5408,24 @@ def verify_datum_independent(manifest: Dict, run_dir=None) -> Check:
         return Check("datum_independent", NOT_RUN, "pyproj is not installed here")
     import struct
 
-    folder = Path(str(stem)).parent
-    path = folder / str(gtx.get("file"))
-    samples_path = folder / str(gtx.get("samples_file"))
-    for file, expected in ((path, gtx.get("sha256")), (samples_path, gtx.get("samples_sha256"))):
-        if not file.is_file():
+    folder = _card_candidate(stem).parent
+    resolved: List[Path] = []
+    for named, expected in ((folder / str(gtx.get("file")), gtx.get("sha256")),
+                            (folder / str(gtx.get("samples_file")), gtx.get("samples_sha256"))):
+        file, why = _named_file(named, expected, run_dir)
+        if why:
+            return Check("datum_independent", FAIL, why, failure=FAIL_DATUM)
+        if file is None:
             return Check("datum_independent", FAIL,
-                         f"the bake's geoid file {file} is absent", failure=FAIL_DATUM)
+                         f"the bake's geoid file {named} is absent", failure=FAIL_DATUM)
         digest = hashlib.sha256(file.read_bytes()).hexdigest()
         if digest != expected:
             return Check("datum_independent", FAIL,
                          f"{file.name} has sha256 {digest[:16]}..., not the block's "
                          f"{str(expected)[:16]}...; the crop is not the one the bake wrote",
                          failure=FAIL_DATUM)
+        resolved.append(file)
+    path, samples_path = resolved
     lat0, lon0, dlat, dlon, rows, cols = struct.unpack(">ddddii", path.read_bytes()[:40])
     posting = float(gtx.get("posting_deg") or 0.0)
     if (abs(dlat - posting) > 1e-12 or abs(dlon - posting) > 1e-12
