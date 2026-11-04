@@ -41,3 +41,4 @@ tests/fixtures/stamp_tree/** -text
 # pull conflict on these files was two appends to the same tail).
 docs/phase3/events_mac.log merge=union
 docs/phase3/events_windows.log merge=union
+tests/fixtures/engine_bundle_min/cited/** -text
