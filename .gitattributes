@@ -42,3 +42,4 @@ tests/fixtures/stamp_tree/** -text
 docs/phase3/events_mac.log merge=union
 docs/phase3/events_windows.log merge=union
 tests/fixtures/engine_bundle_min/cited/** -text
+*.cmd text eol=crlf
