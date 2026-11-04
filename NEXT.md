@@ -66,14 +66,19 @@ The C++ closed forms are COMPILED with g++ and matched to Python in
 tests/test_weather.py; the rest is UNCOMPILED. NEXT: the first Windows
 build and the WX.1-WX.6 clauses (WX.4 sets ExtinctionScale if the engine
 does not read Extinction per metre); then build NS_FlightSimRain from the
-recipe if the Niagara backend is wanted. FIRST WINDOWS RUNS (2026-10-08):
-the build needed C4883 silenced on the commandlet's Main and 5.7's
-GetMaterialResource(EShaderPlatform); the first thunderstorm render
+recipe if the Niagara backend is wanted. FIRST WINDOWS RUNS (2026-10-08, measured on one
+machine only, an engine the Phase 3 pin has since left; docs/TOOLCHAIN.md
+holds the pin and the machines): the build needed C4883 silenced on the
+commandlet's Main and GetMaterialResource(EShaderPlatform) (that engine's
+signature; not re-measured on the pinned engine); the first thunderstorm render
 crashed in the engine's cloud SHADOW pass (MD_Volume assert: M_StormCell
 compiled as a Volume material with no cloud shaders, lacking the "Used
 with Volumetric Cloud" usage flag). Fixed by the flag (script, in place
 too), a usage check in BuildCell, and VerifyCloudMaterials before the
-first frame of both hosts (refuses clouds.material instead). Also found:
+first frame of both hosts (refuses clouds.material instead). Annotation run for A12
+(1 camera, 1 frame, lowest resolution): run id pending, written by the
+Windows session to tests/fixtures/engine_bundle_min/RUN_ID (stand-in until
+it supplies it); fixture path tests/fixtures/engine_bundle_min/. Also found:
 select_if connected nothing ("A>B" is not the engine's pin name), so
 M_LensDrops / M_GreyCard / M_LandcoverID / M_RainStreaks failed to
 compile -- rebuild them with FLIGHTSIM_REBUILD_MATERIALS. Tools:
@@ -345,7 +350,7 @@ policy, `Source.SAMPLED`, the prompt vocabulary), G (`flightsim.
 campaign`: index-seeded worker pool, the ledger as the truth), H (`core/
 agent`: ten typed tools, a deterministic policy, a trace), I (the
 message catalogue `core/messages/` and the guided page `/generate.html`),
-the Look lane (engine pin 5.7, `DefaultEngine.ini` renderer switches,
+the Look lane (an engine move since reverted by the Phase 3 pin, see gotcha 32; `DefaultEngine.ini` renderer switches,
 the visual scene consuming the card's look, the EV100 exposure model)
 -- then a review pass of nine area fixers (fbeb686 verifier, 6a71639
 cpp, 2ef240d compiler, b6342d0 catalogue, 53ddff3 campaign, 5bd6864
@@ -362,7 +367,7 @@ name); `./scripts/mutation_check.sh` end to end at 1e7c0b1: all 439 guards
 load-bearing, 0 WEAK, 0 SKIP, suite green after the last restore
 (4418 s). Every C++
 change is UNCOMPILED here. WINDOWS, in this
-order: build on 5.7 (`ue_preflight.ps1`, `vendor_ue_plugin.ps1` -- the
+order: build on the pinned engine (docs/TOOLCHAIN.md; `ue_preflight.ps1`, `vendor_ue_plugin.ps1` -- the
 four local plugin patches were measured on 5.5 -- `build_ue.ps1`);
 `ue_create_materials.py` in the editor (M_CustomStencilID for the ID
 pass; the Wetness parameter landed in cd5c96a, unverified in any
@@ -1117,46 +1122,44 @@ the parity discipline, and the do-not-regress list)
 
 ## Phase 2 gotchas (continuing the numbering)
 
-32. **The engine pin moved from 5.5 to 5.7 (2026-09-25) and NOTHING has
-    been built or measured on 5.7 yet.** `ue/FlightSim.uproject`
-    `EngineAssociation`, every script that builds a `UE_5.x` path or
-    compares `Build.version`, `core/util/platform.py`
-    (`UE_ENGINE_VERSION`, one constant for the refusals and the default
-    install roots), the README and CAMERA_WINDOWS all say 5.7; the
-    vendor scripts record `ue_engine_target` in `VENDORED.json` and the
-    Windows preflight notes when that key is absent (the committed
-    VENDORED.json predates the move: the plugin was vendored and
-    measured on 5.5). `tests/test_platform.py` fails on any stale 5.5
-    in those files unless the line says "measured" (history stays; the
-    Gate 6 numbers in VALIDITY 2.13 and the CAMERA_WINDOWS 0.00 m bound
-    were taken on 5.5). Before anything in the Look lane is trusted on
-    5.7: (a) re-run `scripts\vendor_ue_plugin.ps1` and
-    `scripts/check_bridge_api.sh` -- the three patched upstream C++
-    bugs in the vendored JSBSim plugin (FGPropertyNode -> SGPropertyNode,
-    the GetAGLevel ray end in metres not centimetres, the force-start
-    mixture hardcoded full rich; VENDORED.json `local_patches` 2-4) and
-    the Build.cs staging path literal (patch 1) were found and measured
-    on 5.5 against JSBSim v1.2.4 and the plugin itself states 5.0-5.6
-    compatibility, so on 5.7 each patch may be unnecessary, still
-    necessary, or no longer apply cleanly, and only a build says which;
-    (b) re-measure Gate 6 (`experiments/gate6_visual.py`) and Gate 10-R
-    on the Windows box -- the renderer settings that landed with the
-    pin (`ue/Config/DefaultEngine.ini` `[/Script/Engine.RendererSettings]`:
-    Lumen GI + reflections, VSM, Nanite project-enable, TSR, extended
-    luminance range; Substrate OFF) each change the luminance the Gate 6
-    clauses and the vertex palette (gotcha 6) and the exposure biases
-    (gotcha 7) were tuned on, so the FIRST 5.7 render is a probe against
-    a 5.5 control, not a dataset; (c) re-probe the two engine-version-
-    sensitive gotchas, 4 (async asset compilation in commandlets) and 5
-    (Interchange Nanite at import -- the project-level
-    `r.Nanite.ProjectEnabled` is on, the per-mesh import flag stays
-    off). `ue/Source/*.Target.cs` said `IncludeOrderVersion
-    Unreal5_5` until cd5c96a moved both to `Unreal5_7` (pinned from
-    `UE_ENGINE_VERSION` in tests/test_gate6_visual.py; the first 5.7
-    build reports whether the include order compiles clean);
-    `flightsim/capture.py`'s help reads `UE_ENGINE_VERSION` since
-    e3efd98; `experiments/fps_probe.py` is outside this stage's files,
-    listed in docs/PHASE2_REPORT.md.
+32. **The engine pin is 5.5 (decision 2026-11-03, docs/phase3/decisions.md
+    line 1; machines and versions in docs/TOOLCHAIN.md, which this entry
+    links and does not copy).** What was measured: the build failed on
+    the pinned engine because `ue/Source/FlightSim.Target.cs:9` (and
+    `FlightSimEditor.Target.cs:9`) name `Unreal5_7`; it was measured that 5.7 never built on
+    the reviewers' machines; the Windows laptop of the Phase 3 session
+    reads 5.5.x from `Engine/Build/Build.version` (TOOLCHAIN.md first
+    row); the reviewer's and third machine's rows are pending in that
+    file, so the pin is measured on ONE machine so far. The
+    2026-09-25 move to 5.7 was never built or measured anywhere; its
+    statements in `ue/FlightSim.uproject` (`EngineAssociation`),
+    `core/util/platform.py` (`UE_ENGINE_VERSION`) and the Target.cs files
+    stood unchanged when this entry was rewritten (checked in the tree
+    that day), and are corrected by A1/A2 of Phase 3, not by this note.
+    A3 (merged) made the build and preflight refuse the wrong engine by
+    name (`scripts/ue_engine.ps1`, no `UE_5.*` glob), so a mismatch
+    stops with a sentence instead of a compile error. Every number taken
+    before October (Gate 6 in VALIDITY 2.13, the CAMERA_WINDOWS 0.00 m
+    bound, the four local patches of the vendored JSBSim plugin,
+    VENDORED.json `local_patches` 1-4) was measured on 5.5 against
+    JSBSim v1.2.4, which is the pinned engine. Any later move off the pin
+    owes, before the Look lane is trusted: (a) `scripts\vendor_ue_plugin.ps1`
+    and `scripts/check_bridge_api.sh` re-run (each patch may become
+    unnecessary or stop applying; only a build says which); (b) Gate 6
+    (`experiments/gate6_visual.py`) and Gate 10-R re-measured, because the
+    renderer settings in `ue/Config/DefaultEngine.ini`
+    `[/Script/Engine.RendererSettings]` (Lumen, VSM, Nanite
+    project-enable, TSR, extended luminance range; Substrate OFF) changed
+    the luminance those clauses and the exposure biases (gotchas 6, 7)
+    were tuned on; (c) gotchas 4 and 5 (async asset compilation in
+    commandlets; Interchange Nanite at import) re-probed. The review's
+    faults that touched this entry are recorded in the notes of A8-A11
+    (the review document itself is not in the repo). The annotation run
+    that pins the engine bundle: run id pending, written by the Windows
+    session to `tests/fixtures/engine_bundle_min/RUN_ID` (A12; stand-in
+    until it supplies it), fixture path `tests/fixtures/engine_bundle_min/`,
+    pinned in its `GOLDEN.json` and read by `tests/test_engine_bundle_golden.py`,
+    which skips with one named reason until that fixture is committed.
 33. **Never put an os.pipe() between a writer that holds the GIL and a
     Python reader thread.** `flightsim/capture.py quiet_library_banners`
     first pointed fd 1 at a pipe and relayed it through a thread to keep

@@ -172,7 +172,7 @@ def test_read_capture_manifest_reads_3_to_8_and_refuses_9(tmp_path):
     assert SUPPORTED_MANIFEST_VERSIONS == (3, 4, 5, 6, 7, 8)
     for version in (3, 7, 8, 9):
         path = tmp_path / f"m{version}.json"
-        path.write_text(json.dumps({"manifest_version": version}))
+        path.write_text(json.dumps({"manifest_version": version}), encoding="utf-8")
         if version == 9:
             with pytest.raises(ValueError):
                 read_capture_manifest(path)

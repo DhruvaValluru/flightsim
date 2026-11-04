@@ -2293,6 +2293,7 @@ APPLIED_LENS_TOL_MM = 1e-3
 FAIL_MASK_BLEND = "annotation.mask_blend"
 FAIL_MASK_OFFSET = "annotation.mask_offset"
 FAIL_BOX_MISMATCH = "annotation.box_mismatch"
+FAIL_TIGHT_BOX_NULL = "annotation.tight_box_null"
 FAIL_DEPTH_RANGE = "annotation.depth_range"
 FAIL_VISIBILITY = "annotation.visibility"
 FAIL_IDENTITY = "annotation.identity"
@@ -3111,6 +3112,81 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
                  f"records' bbox_2d_tight re-counted from the ID image to a pixel"
                  + (f"; {not_claimed} under {BOX_IOU_MIN_PX:.0f} px not claimed"
                     if not_claimed else ""))
+
+
+#: The tight box is on the pixel grid (whole-pixel edges, one past the
+#: last pixel) while bbox_2d is the continuous projected box, so the
+#: tight box may overhang it by the pixel that edge lands in: measured on
+#: the fabricated run, 0.3 px (154.0 vs 153.8 .. 346.6 vs 347.0).
+TIGHT_INSIDE_TOL_PX = 1.0
+
+
+@_reads_the_bundle
+def verify_tight_box_present(manifest: Dict, run_dir=None) -> Check:
+    """An aircraft in frame carries a tight box, and it lies inside bbox_2d.
+
+    Independent of box_vs_mask, which grades the tight box against the
+    ID mask's pixels and so skips a frame whose mask holds none of the
+    object: here the record alone is read. For every frame with an
+    engine label record, every labelled aircraft whose record says
+    ``in_frame`` must have a four-number ``bbox_2d_tight`` (a null is a
+    record the bundle was never attached to) lying inside its
+    ``bbox_2d`` (the visible pixels cannot reach outside the clipped
+    projected box). A null tight box is allowed only where the record
+    measured ``visible_fraction`` 0 (the object is fully behind another:
+    no pixel of it in the ID image), counted in the PASS sentence. NOT
+    RUN without objects[] or a bundle.
+    """
+    objects = _declared_objects(manifest)
+    if not objects:
+        return Check("tight_box_present", NOT_RUN, _no_objects_reason(manifest))
+    if not _engine_label_records(run_dir):
+        return Check("tight_box_present", NOT_RUN, _no_bundle_reason())
+    aircraft = _aircraft_entries(objects)
+    checked = 0
+    hidden = 0
+    for record, camera, name, _engine, _folder in _bundle_frames(manifest, run_dir):
+        for entry in aircraft:
+            own = _record_object(record, int(entry["int_id"]))
+            if own is None or not own.get("in_frame"):
+                continue
+            where = f"{camera}/{name} {entry.get('id')}"
+            tight = own.get("bbox_2d_tight")
+            if tight is None and own.get("visible_fraction") == 0:
+                hidden += 1     # measured: no pixel of it in the ID image
+                continue
+            if not (isinstance(tight, (list, tuple)) and len(tight) == 4):
+                return Check("tight_box_present", FAIL,
+                             f"{where}: the aircraft is in frame but the record's "
+                             f"bbox_2d_tight is {tight!r}; the record was never "
+                             f"completed from the bundle",
+                             failure=FAIL_TIGHT_BOX_NULL)
+            box = own.get("bbox_2d")
+            if not (isinstance(box, (list, tuple)) and len(box) == 4):
+                return Check("tight_box_present", FAIL,
+                             f"{where}: the aircraft is in frame but the record's "
+                             f"bbox_2d is {box!r}, so the tight box "
+                             f"{[round(float(v), 1) for v in tight]} has no box to "
+                             f"lie inside",
+                             failure=FAIL_TIGHT_BOX_NULL)
+            t = [float(v) for v in tight]
+            b = [float(v) for v in box]
+            tol = TIGHT_INSIDE_TOL_PX
+            if not (t[0] >= b[0] - tol and t[1] >= b[1] - tol
+                    and t[2] <= b[2] + tol and t[3] <= b[3] + tol):
+                return Check("tight_box_present", FAIL,
+                             f"{where}: bbox_2d_tight {[round(v, 1) for v in t]} "
+                             f"is not inside bbox_2d {[round(v, 1) for v in b]}",
+                             failure=FAIL_TIGHT_BOX_NULL)
+            checked += 1
+    if checked == 0:
+        return Check("tight_box_present", NOT_RUN,
+                     "no aircraft in frame on a frame with a label record to grade")
+    return Check("tight_box_present", PASS,
+                 f"{checked} object-frames: bbox_2d_tight present and inside bbox_2d"
+                 + (f"; {hidden} fully occluded (visible_fraction 0, tight null "
+                    f"by measurement)" if hidden else ""))
+
 
 
 #: label_geometry_3d tolerances: the record's numbers are floats through
@@ -8751,6 +8827,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     run("mask_integers_only", verify_mask_integers_only, manifest, run_dir)
     run("mask_vs_geometry", verify_mask_vs_geometry, manifest, run_dir)
     run("box_vs_mask", verify_box_vs_mask, manifest, run_dir)
+    run("tight_box_present", verify_tight_box_present, manifest, run_dir)
     run("label_geometry_3d", verify_label_geometry_3d, manifest, run_dir)
     run("depth_vs_geometry", verify_depth_vs_geometry, manifest, run_dir)
     run("visibility_vs_scene", verify_visibility_vs_scene, manifest, run_dir)
