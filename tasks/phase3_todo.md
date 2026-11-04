@@ -106,15 +106,16 @@ because each one is a "manual intervention" the brief forbids.
 
 ### A1 · Choose one engine and install it on all three machines — XS · [OWNER]
 - **Files:** `docs/TOOLCHAIN.md` (new)
-- **Decide:** the 2026-10-19 decision was 5.7, for render quality. The review
-  shows 5.7 has not built on the reviewer's machines, and the brief says "if a
-  newer engine cannot be relied on, pin back to what can".
-  - **Recommended:** pin back to **5.5** for Phase 3. It is installed, and every
-    measurement before October was taken on it.
-  - **Alternative:** keep 5.7, but only if all three machines install the same 5.7
-    patch before any other A-step.
+- **Decided (owner, 2026-11-04, `docs/phase3/decisions.md` decision 10): UE 5.7.**
+  The 2026-10-19 choice stands, for render quality. The Windows decision agent's
+  2026-11-03 pin back to 5.5 (decision 1) followed this plan's earlier
+  recommendation and is superseded.
+  - **Condition:** all three machines install the same 5.7 patch before any other
+    A-step; the patch level is read from the Windows laptop's
+    `UE_5.7\Engine\Build\Build.version` and becomes `UE_ENGINE_PATCH`.
   - **Not offered:** building on both versions at once, which doubles the test
-    surface.
+    surface. UE_5.5 stays installed on the Windows laptop only as A3's
+    wrong-version case.
 - **Do:** record per machine the exact engine build
   (`Engine/Build/Build.version` Major.Minor.Patch and Changelist), the MSVC
   toolset and the Windows SDK. All three rows show the same version.
@@ -128,10 +129,11 @@ because each one is a "manual intervention" the brief forbids.
   `tests/test_platform.py`
 - **Do:** set `EngineAssociation`, both `IncludeOrderVersion` constants and
   `UE_ENGINE_VERSION` to `<PIN>`. Add `UE_ENGINE_PATCH` for the A1 patch level.
-- **If `<PIN>` is 5.5:** revert or version-guard the 5.7-only changes made in October:
-  - the C4883 silencing on the commandlet's `Main`;
-  - `GetMaterialResource(EShaderPlatform)`;
-  - any other 5.7-only API call. Find them with `git log -S"5.7" -- ue/`.
+- **With `<PIN>` = 5.7:** the 5.7-only changes made in October stay (the C4883
+  silencing on the commandlet's `Main`; `GetMaterialResource(EShaderPlatform)`).
+  They sit behind `ENGINE_MINOR_VERSION` guards so the source still compiles on
+  5.5 for A3's wrong-version case; no new 5.7-only call is added unguarded.
+  Find them with `git log -S"5.7" -- ue/`.
 - **Add a source test:** the `IncludeOrderVersion` constant names `<PIN>`. R1
   becomes a CI failure, not a Windows surprise.
 - **Verify:** `pytest -q tests/test_platform.py` passes. Hand-editing one Target.cs
@@ -274,8 +276,8 @@ the build is clean (zero `error C`), and the stamp is written.
 - **Do:**
   - Rewrite gotcha 32 and the October "FIRST WINDOWS RUNS" text with the review's
     findings and A1–A12's measured results.
-  - Mark the 5.7 claims as measured on one machine only, unless A1 chose 5.7 and
-    all three now pass.
+  - Mark the 5.7 claims as measured on one machine only, until all three
+    machines pass on 5.7.
   - Cite the A12 run id and the fixture path.
 - **Verify:** no statement in NEXT.md contradicts `docs/TOOLCHAIN.md` or the review.
 
@@ -321,8 +323,8 @@ No engine-side Phase 3 work starts before Gate A.
 - **Files:** `experiments/gate6_visual.py`, `ue/Config/DefaultEngine.ini`,
   `core/sky/plan.py`, `docs/VALIDITY.md`
 - **Do:**
-  - If `<PIN>` is 5.5, confirm the existing 5.5 numbers still hold.
-  - If it is 5.7, re-derive the palette and exposure biases from probe renders.
+  - `<PIN>` is 5.7: re-derive the palette and exposure biases from probe
+    renders; the existing 5.5 numbers are history, kept on lines marked measured.
   - Labels do not depend on the look, so this cannot break A11–A12.
 - **Verify:** Windows. `gate6_visual.py` (measure and beauty) passes,
   `gate10_render_repro.py` gives a bounded verdict, and the A12 fixture still passes.
@@ -655,8 +657,8 @@ recorded in `docs/PHASE3_LOG.md`.
 
 ## Owner decisions this plan waits on
 
-1. **A1 · the engine:** pin back to 5.5 (recommended), or keep 5.7 with the same
-   patch on all three machines. **This is the critical path.**
+1. **A1 · the engine: decided, UE 5.7 (owner, 2026-11-04, decision 10),** the
+   same patch on all three machines. **This is the critical path.**
 2. **C1 · the A-4 default loadout.**
 3. **D1 · which Chinese airframe:** J-11A only if its licence is clean, or cut.
 4. **E4 · storm weather in the demo default:** CLAUDE.md makes it the web-app

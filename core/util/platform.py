@@ -144,9 +144,9 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
 #: ONE place on the Python side.
 UE_ENGINE_VERSION = "5.7"
 
-#: Patch level of UE 5.7 on the Windows laptop, pending its Build.version
-#: read; docs/TOOLCHAIN.md row 1. tests/test_platform.py checks it against
-#: that row.
+#: The patch level measured on the Windows laptop (docs/TOOLCHAIN.md row 1:
+#: UE_5.7/Engine/Build/Build.version 5.7.4, changelist 51494982, read
+#: 2026-11-04). tests/test_platform.py checks it against that row.
 UE_ENGINE_PATCH = 4
 
 #: What is missing, and the remedy, IN THIS OS's OWN TERMS. One text for

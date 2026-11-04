@@ -12,7 +12,7 @@ decision was taken on 5.5.
 
 | Machine | Engine (`Engine/Build/Build.version`) | Changelist | MSVC toolset | Windows SDK | Measured |
 |---|---|---|---|---|---|
-| Windows laptop (Phase 3 Windows session, `UE_ROOT=C:\Program Files\Epic Games\UE_5.7`) | 5.7.x pending: fill from `Engine/Build/Build.version` | pending | pending | pending | pending |
+| Windows laptop (Phase 3 Windows session, `UE_ROOT=C:\Program Files\Epic Games\UE_5.7`) | 5.7.4 (`++UE5+Release-5.7`) | 51494982 (compatible 47537391) | 14.44.35207 | 10.0.26100.0 | 2026-11-04 |
 | Reviewer's machine | 5.7.x, row pending: fill from `Engine/Build/Build.version` | pending | pending | pending | pending |
 | Third machine | 5.7.x, row pending: fill from `Engine/Build/Build.version` | pending | pending | pending | pending |
 

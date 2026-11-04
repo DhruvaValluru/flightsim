@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "check_bridge_api.sh"
-TEXT = SCRIPT.read_text()
+TEXT = SCRIPT.read_text(encoding="utf-8")
 BUILD_CS = ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/FlightSimBridge.Build.cs"
 
 
@@ -22,7 +22,8 @@ def test_module_list_comes_from_dependency_lists_only(tmp_path):
         '  "Niagara",\n});\n'
         'string p = Path.Combine(Dir, "Plugins", "Marketplace");\n'
         'PublicDependencyModuleNames.Add("CesiumRuntime");\n'
-        'PrivateDependencyModuleNames.Add("Slate");\n'
+        'PrivateDependencyModuleNames.Add("Slate");\n',
+        encoding="utf-8",
     )
     got = run("--list-modules", str(cs)).stdout.split()
     assert got == ["CesiumRuntime", "Core", "Json", "Niagara", "Slate"]
@@ -44,9 +45,9 @@ def test_every_show_flag_pattern_matches_engine_forms(tmp_path):
         pat = run("--showflag-pattern", f).stdout.strip()
         for line in (f"SHOWFLAG_FIXED_IN_SHIPPING(1, {f}, SFG_PostProcess, LOCTEXT(\"x\", \"y\"))",
                      f"SHOWFLAG_ALWAYS_ACCESSIBLE({f}, SFG_Normal, LOCTEXT(\"x\", \"y\"))"):
-            inl.write_text(line + "\n")
+            inl.write_text(line + "\n", encoding="utf-8")
             assert subprocess.run(["grep", "-qE", "--", pat, str(inl)]).returncode == 0, line
-        inl.write_text(f"SHOWFLAG_FIXED_IN_SHIPPING(1, {f}Extra, SFG_Normal, x)\n")
+        inl.write_text(f"SHOWFLAG_FIXED_IN_SHIPPING(1, {f}Extra, SFG_Normal, x)\n", encoding="utf-8")
         assert subprocess.run(["grep", "-qE", "--", pat, str(inl)]).returncode != 0
 
 
@@ -64,7 +65,7 @@ def test_python_prefers_venv(tmp_path):
     venv = tmp_path / ".venv" / "bin"
     venv.mkdir(parents=True)
     py = venv / "python"
-    py.write_text("#!/bin/sh\nexit 0\n")
+    py.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     py.chmod(0o755)
     r = subprocess.run(["bash", "-c", fn + "\npick_python"], capture_output=True, text=True, cwd=tmp_path)
     assert r.stdout == ".venv/bin/python"

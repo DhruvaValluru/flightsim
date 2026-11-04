@@ -71,8 +71,8 @@ the Windows decision agent by message to decide.
 ## Token rules (these are hard rules, not advice)
 
 1. **Model per role.** `fable` for breakdown, Align, debug triage, context,
-   overlap and the final report. `sonnet` for sub-agents, builders,
-   integrators and the auditor. `haiku` for the summary agent. Pass `model`
+   overlap, the final report and (owner's rule, 2026-11-04) every builder.
+   `sonnet` for sub-agents, integrators and the auditor. `haiku` for the summary agent. Pass `model`
    on every `Agent` call.
 2. **Scripts do the mechanical work.** Logging, test running, grep-based
    checks, diffs and merge are shell commands through `phase3_event.py run`.
@@ -138,7 +138,7 @@ tagged `windows`, do not build it here: write the step list to
 `notes/<box>.md` under `windows_steps` and include the box in the next
 `pushed` message; the Windows session builds those steps itself.
 
-- *Builder (sonnet).* Own worktree. Claims its files in `state/<box>.json`
+- *Builder (fable, owner's rule 2026-11-04).* Own worktree. Claims its files in `state/<box>.json`
   (`claims`); waits if another box holds one. Codes the whole coding plan,
   nothing stubbed, no TODO. Runs the box's own check from the note until it
   passes locally. Marks every `needs_windows` check `pending`. Logs every

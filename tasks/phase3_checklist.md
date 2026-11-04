@@ -27,7 +27,7 @@ sitting 0.4 m from its label (it was ~25 m).
 
 | What happened on Windows | Box that fixes it |
 |---|---|
-| Build failed on 5.5 (the code names a 5.7-only setting) | A1, A2, A3 |
+| Build failed on 5.5 (the code names a 5.7-only setting) | A1, A2, A3: every computer installs 5.7 |
 | Had to import the aircraft by hand | A7 |
 | Had to skip host flight with `--no-host-flight` | A8 |
 | An old September program drew the pictures | A4 |
@@ -40,10 +40,11 @@ sitting 0.4 m from its label (it was ~25 m).
 
 ## A · Make the Unreal half work, with no workarounds
 
-- [ ] **A1 · Pick one engine version and install it on all three computers** — *you decide*
-  - Recommended: go back to **5.5** (it is what actually runs). Or keep 5.7, but
-    then all three computers install the same 5.7 first.
-  - Check: `docs/TOOLCHAIN.md` has three rows with the same version, and a dated
+- [ ] **A1 · One engine, UE 5.7, installed on all three computers** — *decided by
+  the owner, 2026-11-04 (decision 10)*
+  - Keep **5.7**. All three computers install the same 5.7 patch before anything
+    else in A. The earlier 5.5 pin is superseded.
+  - Check: `docs/TOOLCHAIN.md` has three rows with the same 5.7 version, and a dated
     decision line.
 - [ ] **A2 · That version written in every place the project names it**
   - Check: `pytest -q tests/test_platform.py` passes.
@@ -223,8 +224,8 @@ Two rules to keep in mind:
 
 ## Decisions waiting on you or Shashank
 
-- [ ] **Engine:** back to 5.5 (recommended), or 5.7 on all three computers. *This
-  one blocks everything.*
+- [x] **Engine:** 5.7 on all three computers (owner, 2026-11-04). *This one
+  blocks everything.*
 - [ ] Which payload the A-4 carries by default
 - [ ] Which Chinese aircraft, or cut it
 - [ ] Storm weather on in the demo, or off?

@@ -1,4 +1,4 @@
-# Phase 3 builder brief (sonnet)
+# Phase 3 builder brief (fable, owner's rule 2026-11-04)
 
 You build one unit (one or two boxes) from its aligned note(s)
 `docs/phase3/notes/<box>.md`, in your OWN worktree. Budget: 60 tool calls,

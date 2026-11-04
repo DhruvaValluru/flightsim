@@ -6,7 +6,7 @@
   "letter": "A",
   "needs_windows": true,
   "note": "owner override: pin 5.5 -> 5.7",
-  "pending": "UE_ENGINE_PATCH and TOOLCHAIN.md row 1 need UE_5.7 Build.version from the Windows laptop",
+  "pending": "",
   "pending_windows": [
     "A2 step9 build_ue.ps1 on 5.5.4",
     "A2 step10 cloud-material/landscape paths"
@@ -14,8 +14,8 @@
   "retry": 1,
   "retry_commit": "66a7c1da",
   "route": "decision",
-  "stage": "built",
+  "stage": "pushed",
   "unit": "A1+A2",
-  "updated": "2026-11-04T10:27:32",
+  "updated": "2026-11-04T10:54:17",
   "worktree": "../p3-A2"
 }
