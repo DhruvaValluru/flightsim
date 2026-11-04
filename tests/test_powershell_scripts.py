@@ -644,3 +644,64 @@ def test_the_engine_glob_lint_catches_the_bug_it_was_written_for(tmp_path):
     good = tmp_path / "good.ps1"
     good.write_text('$root = "C:\\Program Files\\Epic Games\\UE_$pin"\n', encoding="utf-8")
     assert not _engine_glob_offenders(good)
+
+
+# --- the toolchain manifest (Phase 3 B2): preflight compares every pinned
+# tool and refuses by name. No PowerShell here, so this reads the source:
+# the manifest's tools must each have a reader, a comparison and a refusal
+# name in scripts/ue_preflight.ps1, and the ffmpeg note must be gone.
+
+PREFLIGHT = Path(__file__).resolve().parents[1] / "scripts" / "ue_preflight.ps1"
+TOOLCHAIN_JSON = Path(__file__).resolve().parents[1] / "toolchain.json"
+
+
+def _pinned_tools():
+    """Every tool name the manifest pins: the top-level entries plus the
+    Windows block (preflight's platform block), comment keys dropped."""
+    import json
+    pins = json.loads(TOOLCHAIN_JSON.read_text(encoding="utf-8"))
+    tools = [key for key in pins if not key.startswith("_")
+             and key not in ("windows", "mac")]
+    tools += [key for key in pins["windows"] if not key.startswith("_")]
+    return tools
+
+
+def test_the_preflight_reads_every_pinned_tool_from_the_manifest():
+    blocks = dict(function_blocks(PREFLIGHT))
+    for name in ("Get-Toolchain", "Get-InstalledTools", "Test-ToolVersion"):
+        assert name in blocks, f"ue_preflight.ps1 must define {name}"
+    assert "toolchain.json" in blocks["Get-Toolchain"]
+    assert "toolchain.pin_unreadable" in blocks["Get-Toolchain"]
+    readers = blocks["Get-InstalledTools"]
+    missing = [tool for tool in _pinned_tools()
+               if not re.search(r"\$found\." + re.escape(tool) + r"\s*=", readers)]
+    assert not missing, (
+        f"ue_preflight.ps1: Get-InstalledTools has no reader for "
+        f"{missing} (toolchain.json pins it)")
+
+
+def test_the_preflight_refuses_a_toolchain_mismatch_by_name():
+    blocks = dict(function_blocks(PREFLIGHT))
+    check = blocks["Test-ToolVersion"]
+    assert "toolchain.${tool}_mismatch: found $found, pinned $pinned" in check
+    assert "toolchain.${tool}_mismatch: not found, pinned $pinned" in check
+    assert '"OK $tool $found"' in check
+    assert "UNRECORDED" in check
+    # a mismatch and a missing tool go through Fail (exit non-zero), the
+    # OK line through Say
+    assert re.search(r"Fail\s+\"toolchain \$tool\"\s+\"toolchain\.\$\{tool\}_mismatch: found", check)
+    assert re.search(r"Fail\s+\"toolchain \$tool\"\s+\"toolchain\.\$\{tool\}_mismatch: not found", check)
+    assert re.search(r"Say\s+\"toolchain \$tool\"\s+\"OK \$tool \$found\"", check)
+
+
+def test_the_preflight_runs_the_manifest_check_before_it_exits():
+    lines = [line for _, line in code_lines(PREFLIGHT)]
+    manifest = next(i for i, line in enumerate(lines) if "Get-Toolchain $repo" in line)
+    compare = next(i for i, line in enumerate(lines) if 'Test-ToolVersion "engine"' in line)
+    final = next(i for i, line in enumerate(lines) if line.strip() == "exit $script:status")
+    assert manifest < compare < final
+    text = PREFLIGHT.read_text(encoding="utf-8")
+    # decision 15: ffmpeg is a pinned tool like the others, no longer a note
+    assert "only encoding needs it" not in text
+    for tool in _pinned_tools():
+        assert tool in text, f"ue_preflight.ps1 never names the pinned tool {tool}"

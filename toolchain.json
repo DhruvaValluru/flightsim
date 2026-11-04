@@ -1,0 +1,19 @@
+{
+  "_comment": "Toolchain pins, measured on the Windows laptop 2026-11-04 (docs/phase3/decisions.md decision 13; decision 15 pins python everywhere). Version numbers only: no vendor build strings. core/util/platform.py reads it at import; scripts/ue_preflight.ps1 compares every installed tool against it and refuses by name (toolchain.<tool>_mismatch). Per-platform tools carry one entry per platform; null means not yet recorded on that machine (never compared, reported UNRECORDED). Keys starting with _ are ignored by readers.",
+  "engine": {
+    "version": "5.7",
+    "patch": 4,
+    "changelist": 51494982
+  },
+  "cesium_for_unreal": "2.30.0",
+  "ffmpeg": "9.0.2",
+  "python": "3.12.10",
+  "jsbsim": "1.2.4",
+  "windows": {
+    "msvc": "14.44.35207",
+    "windows_sdk": "10.0.26100.0"
+  },
+  "mac": {
+    "xcode": null
+  }
+}

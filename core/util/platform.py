@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -135,19 +136,78 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
     return [default for _ in sizes]
 
 
+#: The toolchain manifest at the repo root: one entry per pinned tool
+#: (engine, cesium_for_unreal, ffmpeg, python, jsbsim) plus one block per
+#: platform for the C++ toolchain. Phase 3 B2 (decision 13): the pins are
+#: measured on the Windows laptop and written ONCE, here; the Python side
+#: reads them, scripts/ue_preflight.ps1 compares every installed tool
+#: against them and refuses by name (toolchain.<tool>_mismatch). The path
+#: is relative to this file -- no environment variable, no flag.
+TOOLCHAIN_FILE = Path(__file__).resolve().parents[2] / "toolchain.json"
+
+_ENGINE_VERSION_SHAPE = re.compile(r"^\d+\.\d+$")
+
+
+def load_toolchain(path: Path = TOOLCHAIN_FILE) -> dict:
+    """The parsed manifest, or a named refusal (``toolchain.pin_unreadable``).
+
+    Refuses on a missing file, unparsable JSON, a non-object top level, or
+    an ``engine`` entry without a ``version`` of the form ``N.N`` (str) and
+    an integer ``patch``. Keys starting with ``_`` are comments and dropped.
+    Every other entry is returned as written; comparing them is the
+    preflight's job, not the loader's.
+    """
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(
+            f"toolchain.pin_unreadable: cannot read {path} ({exc})") from exc
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"toolchain.pin_unreadable: {path} is not valid JSON ({exc})") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"toolchain.pin_unreadable: {path} must hold a JSON object, "
+            f"not {type(data).__name__}")
+    data = {key: value for key, value in data.items()
+            if not str(key).startswith("_")}
+    engine = data.get("engine")
+    if not isinstance(engine, dict):
+        raise RuntimeError(
+            f"toolchain.pin_unreadable: {path} has no 'engine' object")
+    version = engine.get("version")
+    if not isinstance(version, str) or not _ENGINE_VERSION_SHAPE.match(version):
+        raise RuntimeError(
+            f"toolchain.pin_unreadable: {path} engine.version must be a "
+            f"string of the form N.N, got {version!r}")
+    patch = engine.get("patch")
+    if isinstance(patch, bool) or not isinstance(patch, int):
+        raise RuntimeError(
+            f"toolchain.pin_unreadable: {path} engine.patch must be an "
+            f"integer, got {patch!r}")
+    return data
+
+
+#: Read once at import: an unreadable manifest refuses here, by name,
+#: before any caller can build a refusal text or install path from it.
+TOOLCHAIN = load_toolchain()
+
 #: The Unreal Engine major.minor the project pins (`ue/FlightSim.uproject`
 #: EngineAssociation, both Target.cs IncludeOrderVersion constants). Decision
 #: 10 (docs/phase3/decisions.md, owner, 2026-11-04) pins it to 5.7; the
 #: Windows laptop has UE_5.7 installed. It supersedes the 2026-11-03 pin to
-#: 5.5; the 5.5 lines elsewhere are measured history. The refusal texts and
-#: the default install roots below are built from it so the pin is stated in
-#: ONE place on the Python side.
-UE_ENGINE_VERSION = "5.7"
+#: 5.5; the 5.5 lines elsewhere are measured history. The value is read from
+#: toolchain.json (B2) so the pin is stated in ONE place; the refusal texts
+#: and the default install roots below are built from this constant.
+UE_ENGINE_VERSION: str = TOOLCHAIN["engine"]["version"]
 
 #: The patch level measured on the Windows laptop (docs/TOOLCHAIN.md row 1:
 #: UE_5.7/Engine/Build/Build.version 5.7.4, changelist 51494982, read
-#: 2026-11-04). tests/test_platform.py checks it against that row.
-UE_ENGINE_PATCH = 4
+#: 2026-11-04), read from toolchain.json. tests/test_platform.py checks it
+#: against that row.
+UE_ENGINE_PATCH: int = TOOLCHAIN["engine"]["patch"]
 
 #: What is missing, and the remedy, IN THIS OS's OWN TERMS. One text for
 #: all three lied on two of them: it named a PowerShell preflight to
