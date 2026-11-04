@@ -10,3 +10,4 @@
 {"agent": "decision", "box": "", "stage": "plan", "kind": "note", "note": "FAIL peers: flightsim-15 is another session on this laptop, not the Mac; mac key removed from peers.json; go A must be re-sent when the Mac session is visible", "t": 1793759660.7258508, "machine": "windows"}
 {"agent": "decision", "box": "", "stage": "plan", "kind": "note", "note": "PASS peers: mac session is p3-mac [cd9c06] (announced itself as flightsim-6f, since renamed); this session is p3-windows [48083d]", "t": 1793761217.0344732, "machine": "windows"}
 {"agent": "decision", "box": "A", "stage": "msg", "kind": "note", "note": "msg P3 go A decisions=ok (re-sent to p3-mac)", "t": 1793761217.2420816, "machine": "windows"}
+{"agent": "decision", "box": "A", "stage": "msg", "kind": "note", "note": "msg P3 go A decisions=ok (owner-directed re-send to p3-mac; peers.json now mac=p3-mac windows=p3-windows)", "t": 1793761245.8321025, "machine": "windows"}
