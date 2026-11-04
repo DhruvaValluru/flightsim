@@ -14,3 +14,5 @@
 {"agent": "runner", "box": "A", "stage": "msg", "kind": "note", "note": "msg (from p3-mac) P3 ack go A received; letter A building on the Mac; next message will be P3 pushed", "t": 1793761312.755998, "machine": "windows"}
 {"agent": "decision", "box": "C1", "stage": "plan", "kind": "note", "note": "PASS decision 7: C1 loadout weight 750 lb per station (18287 lb gross), replaces 1800 lb; builder evidence envelope.trim_feasible fail at 21437 lb", "t": 1793761379.6863785, "machine": "windows"}
 {"agent": "decision", "box": "C1", "stage": "msg", "kind": "note", "note": "msg P3 decision C1 750lb recorded", "t": 1793761379.8517737, "machine": "windows"}
+{"agent": "decision", "box": "C6", "stage": "plan", "kind": "note", "note": "PASS decision 8: C6 over-budget was a 20 min lock wait on catalog.yaml (held by A4); proceed, integrator adds the four catalogue entries after A4 merges, no re-brainstorm, nothing forbidden", "t": 1793763637.811948, "machine": "windows"}
+{"agent": "decision", "box": "C6", "stage": "msg", "kind": "note", "note": "msg P3 decision C6 proceed", "t": 1793763637.9926922, "machine": "windows"}
