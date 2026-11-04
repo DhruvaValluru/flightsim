@@ -19,16 +19,17 @@
   "integrated_commit": "bf1f13f7",
   "letter": "A",
   "needs_windows": true,
+  "note": "campaign capture placement differs from the web run; llm moves shape; raw response logging",
   "pending_windows": [
     "one-line prompt on /generate.html reaches a finished campaign (step 5): capture carries --terrain grand_canyon, tier llm, state done, card downloadable"
   ],
   "pushed_commit": "9bb12d95",
-  "retry": 1,
-  "route": "box",
+  "retry": 2,
+  "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "pushed",
-  "updated": "2026-11-04T14:12:29",
+  "stage": "building",
+  "updated": "2026-11-04T14:13:29",
   "verdict": "",
   "worktree": "../p3-A10r"
 }
