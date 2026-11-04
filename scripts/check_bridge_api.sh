@@ -14,6 +14,52 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# Module names the bridge declares: only the quoted names inside the
+# Public/PrivateDependencyModuleNames Add/AddRange lists (comments stripped), not
+# every quoted token -- FindCesium's path words "Plugins" and "Marketplace" are
+# not modules.
+module_names() {  # Build.cs path
+    awk '{
+        sub(/\/\/.*/, "")
+        if ($0 ~ /(Public|Private)DependencyModuleNames[ \t]*\.[ \t]*(AddRange|Add)[ \t]*\(/) cap = 1
+        if (cap) {
+            s = $0
+            while (match(s, /"[A-Za-z0-9_]+"/)) {
+                print substr(s, RSTART + 1, RLENGTH - 2)
+                s = substr(s, RSTART + RLENGTH)
+            }
+            if ($0 ~ /\)[ \t]*;/) cap = 0
+        }
+    }' "$1" | sort -u
+}
+
+# ERE for one show flag, as a whole token, in either engine form:
+#   SHOWFLAG_FIXED_IN_SHIPPING(1, Grain, SFG_PostProcess, ...)
+#   SHOWFLAG_ALWAYS_ACCESSIBLE(Grain, ...)
+showflag_pattern() {  # flag name
+    printf '%s' "\\([[:space:]]*([01][[:space:]]*,[[:space:]]*)?$1[[:space:]]*,"
+}
+
+# Interpreter: the repo venv, then python3, then python; a candidate must run
+# (the Windows Store alias exists on PATH but does not).
+pick_python() {
+    local c
+    for c in .venv/bin/python .venv/Scripts/python.exe python3 python; do
+        case "$c" in
+            .venv/*) [ -x "$c" ] || continue ;;
+            *) command -v "$c" >/dev/null 2>&1 || continue ;;
+        esac
+        if "$c" -c "" >/dev/null 2>&1; then printf '%s' "$c"; return 0; fi
+    done
+    return 1
+}
+
+# Test hooks (no engine needed).
+case "${1:-}" in
+    --list-modules) module_names "${2:-ue/Plugins/FlightSimBridge/Source/FlightSimBridge/FlightSimBridge.Build.cs}"; exit 0 ;;
+    --showflag-pattern) showflag_pattern "$2"; echo; exit 0 ;;
+esac
+
 UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
 PLUGIN="ue/Plugins/JSBSimFlightDynamicsModel"
 BRIDGE="ue/Plugins/FlightSimBridge"
@@ -107,13 +153,14 @@ else
 fi
 
 # -- every module the bridge declares ---------------------------------------
-for m in $(grep -oE '"[A-Za-z]+"' "$BRIDGE/Source/FlightSimBridge/FlightSimBridge.Build.cs" \
-           | tr -d '"' | sort -u); do
+for m in $(module_names "$BRIDGE/Source/FlightSimBridge/FlightSimBridge.Build.cs"); do
     case "$m" in Core|CoreUObject|Engine) continue ;; esac
     # The found path, not the pipe's status: under pipefail a missing
     # $UE_ROOT/Engine (or grep -q closing the pipe early) failed a module
-    # whose Build.cs is right there in the plugin.
-    if [ -n "$(find "$UE_ROOT/Engine" "$PLUGIN" -name "$m.Build.cs" 2>/dev/null | head -n 1)" ]; then
+    # whose Build.cs is right there in the plugin. Searched: the engine (its
+    # plugin trees, Marketplace included), the JSBSim plugin, and every plugin
+    # in the project (ue/Plugins/*, e.g. a project-level CesiumForUnreal).
+    if [ -n "$(find "$UE_ROOT/Engine" "$PLUGIN" ue/Plugins -name "$m.Build.cs" 2>/dev/null | head -n 1)" ]; then
         ok "module $m" "resolves"
     else
         bad "module $m" "no $m.Build.cs anywhere"
@@ -152,12 +199,21 @@ sky_check "PostProcess physical camera exposure" "$PPS" "AutoExposureApplyPhysic
 sky_check "PostProcess FilmGrainIntensity" "$PPS" "FilmGrainIntensity"
 sky_check "PostProcess SceneFringeIntensity" "$PPS" "SceneFringeIntensity"
 SF="Public/ShowFlagsValues.inl"
-sky_check "show flag Cloud" "$SF" "(Cloud,"
-sky_check "show flag LumenGlobalIllumination" "$SF" "LumenGlobalIllumination"
-sky_check "show flag LumenReflections" "$SF" "LumenReflections"
-sky_check "show flag Grain" "$SF" "(Grain,"
-sky_check "show flag SceneColorFringe" "$SF" "SceneColorFringe"
-sky_check "show flag Vignette" "$SF" "(Vignette,"
+showflag_check() {  # flag name
+    if [ ! -f "$ENG/$SF" ]; then
+        bad "show flag $1" "header $SF not found in $UE_ROOT"
+    elif grep -qE -- "$(showflag_pattern "$1")" "$ENG/$SF"; then
+        ok "show flag $1" "present"
+    else
+        bad "show flag $1" "not found in $SF -- FlightSimSky.cpp needs updating"
+    fi
+}
+showflag_check Cloud
+showflag_check LumenGlobalIllumination
+showflag_check LumenReflections
+showflag_check Grain
+showflag_check SceneColorFringe
+showflag_check Vignette
 if [ -f "$UE_ROOT/Engine/Content/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.uasset" ]; then
     ok "engine simple cloud material" "present"
 else
@@ -165,7 +221,8 @@ else
 fi
 
 # -- plugin dependencies must be enabled in the uproject --------------------
-MISSING=$(python3 - <<'PY'
+PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
+MISSING=$("$PYBIN" - <<'PY'
 import json
 plugin = json.load(open("ue/Plugins/JSBSimFlightDynamicsModel/JSBSimFlightDynamicsModel.uplugin"))
 project = json.load(open("ue/FlightSim.uproject"))
