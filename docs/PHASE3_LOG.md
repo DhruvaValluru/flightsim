@@ -86,3 +86,13 @@ engine's Marketplace folder; later rows say which engine they ran on.
 | A11 | A-2 | CLI `capture --render --terrain C:/.../grand_canyon` two cameras three stills (retry, absolute path) | exit 0; `labels: engine bundle attached on 6 of 6 frames (12 object records; 0 without a bundle)`; every frame record has mask, depth_f32, alone PNG on both cameras; same on the web run 843e5dbe9dcd | PASS |
 | A12 | A-2 | run 7237db488652 on MAIN (build 3b05ec5a, grid convergence fix): `flightsim.verify`, `label_diagnose.py`, fixture | seven gates PASS (`mask_vs_geometry` 0.6 px of 130), `tight_box_present` PASS, `tight null: 0`; fixture `tests/fixtures/engine_bundle_min` 807,894 bytes committed; only `landmark_reprojection` FAIL (3.28 px: verifier ignores `camera_grid_convergence_deg`) | packet A12-2, Mac |
 | A10 | A-2 | `POST /generate/plan` then `/generate/start` one-line prompt (12 images, 20 s) | plan 200 ok; campaign 56e6d0854f88 `failed`: `campaign.target_unreachable: 2 round(s) added no verified frame: 1 failed capture(s)`; the capture: `REFUSED [google_tiles.terrain] ... the physics ground is the flat slab`; llm tier fell back to regex (`unknown field cameras`) | packet A10-1, decision 17 (Mac) |
+
+## Letter D
+
+Rows written by the Windows runner for D6 (the {A4, J11} x {desert, forest}
+matrix: `python scripts/run_test_scenarios.py --matrix --still --compiler regex`,
+summary in `runs/phase3_matrix.json`); one row per cell with the run id, the
+verify counts, the `component_coverage` detail and the card diff keys.
+
+| box | run | check | result | note |
+|---|---|---|---|---|
