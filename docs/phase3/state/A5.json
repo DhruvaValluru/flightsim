@@ -2,6 +2,9 @@
   "budget_used": 12,
   "builder_commit": "3b8c3030",
   "claims": [],
+  "failures": [
+    "docs/phase3/packets/A5-1.md"
+  ],
   "integrated_commit": "f6572ef154be0ab30a427d1ff9de7a56a2e74ed6",
   "letter": "A",
   "needs_windows": true,
@@ -11,6 +14,8 @@
     "check_bridge_api.sh with UE_5.5",
     "gate5_ue_parity c172p hold"
   ],
+  "run_id": "A-1",
   "stage": "pushed",
-  "updated": "2026-11-04T00:54:27"
+  "updated": "2026-11-04T01:22:04",
+  "verdict": "FAIL"
 }
