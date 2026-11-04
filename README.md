@@ -1,5 +1,8 @@
 # flightsim
 
+**New here? Read [the guide](docs/GUIDE.md).** It covers the launcher,
+Settings, Capture and the dataset in plain words, with no commands.
+
 A research-grade flight simulation system: defensible physics data and credible
 visual output, driven by natural language through a validated, reproducible
 scenario spec.
@@ -307,8 +310,7 @@ stated time renders the calibrated noon look unchanged. Run
 
 Materials come from `scripts/ue_create_materials.py` (run inside
 UnrealEditor-Cmd; `ue_preflight` names the exact invocation when they
-are missing). Read `NEXT.md` for operational state and the 26 recorded
-gotchas before deep work.
+are missing).
 
 `rasterio` ships GDAL in its wheel, so no separate GDAL build is needed.
 
@@ -573,6 +575,9 @@ ue/              Unreal project                    (Phase 5)
 docs/            VALIDITY.md, JSBSIM_CORRECTIONS.md, vva/
 tests/
 ```
+
+Developers: read `NEXT.md` for operational state and the 26 recorded gotchas
+before deep work. It is not on the user path; the guide above is.
 
 ## The architectural guards already in place
 
