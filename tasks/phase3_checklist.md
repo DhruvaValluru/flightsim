@@ -75,7 +75,7 @@ sitting 0.4 m from its label (it was ~25 m).
 - [x] **A11 · The engine writes the label pictures; missing ones fail loudly** 🪟
   - Check: every `render.json` has the mask, depth and an "alone" picture per aircraft.
   - Check: a run with missing label pictures stops with `labels.no_bundle`.
-- [ ] **A12 · All seven label checks pass; one real frame saved as a test** 🪟
+- [x] **A12 · All seven label checks pass; one real frame saved as a test** 🪟
   - Check: `python -m flightsim.verify runs/<id>` shows 7 of 7 PASS.
   - Check: `label_diagnose.py` shows `tight null: 0`.
   - Check: `pytest -q tests/test_engine_bundle_golden.py` passes.
