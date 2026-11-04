@@ -645,8 +645,11 @@ def test_render_refuses_an_unimported_mesh_before_any_flight(tmp_path, capsys,
     assert code == 2
     text = capsys.readouterr().out
     assert "REFUSED -- aircraft.mesh" in text
-    assert "scripts/import_aircraft.py" in text
-    assert "structural datum" in text
+    # A7: the capture imports a missing model itself; the refusal that
+    # remains names the real failure (no editor to import with here), not
+    # a command for the user to run.
+    assert "scripts/import_aircraft.py" not in text
+    assert "no Unreal editor" in text or "import failed" in text
     # Before any flight: nothing was run, nothing written.
     assert not out.exists()
 

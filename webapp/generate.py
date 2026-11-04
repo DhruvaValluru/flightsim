@@ -58,7 +58,9 @@ import zipfile
 from copy import deepcopy
 from pathlib import Path
 
-from assets_pipeline.importer import is_imported
+from assets_pipeline.importer import (
+    configured_aircraft, is_imported, older_than_inputs_reason, unavailable_reason,
+)
 from core.util.platform import ue_available
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
@@ -130,13 +132,33 @@ def render_here(spec) -> Tuple[bool, str]:
     names = [str(spec.aircraft.value)]
     for entry in getattr(spec, "traffic", None) or []:
         names.append(str(entry.aircraft.value))
-    missing = [name for name in names if not is_imported(name)]
-    if missing:
-        return False, (f"the {', '.join(missing)} model is not imported on this "
-                       f"machine, so nothing is rendered; the geometry preview "
-                       f"stands in for the picture (scripts/import_aircraft.py "
-                       f"{' '.join(missing)} imports it)")
-    return True, "an engine and every airframe's model are present: the picture is rendered"
+    todo = [name for name in dict.fromkeys(names)
+            if not (is_imported(name) and older_than_inputs_reason(name) is None)]
+    if not todo:
+        return True, "an engine and every airframe's model are present: the picture is rendered"
+    buildable = configured_aircraft()
+    never = [name for name in todo
+             if unavailable_reason(name) or name not in buildable]
+    if never:
+        return False, (f"the {', '.join(never)} model can never render here "
+                       f"(no licensed 3-D model is available for it), so "
+                       f"nothing is rendered; the geometry preview stands in "
+                       f"for the picture")
+    if not _editor_file_exists():
+        return False, (f"the {', '.join(todo)} model is not imported on this "
+                       f"machine and there is no Unreal editor here to import "
+                       f"it, so nothing is rendered; the geometry preview "
+                       f"stands in for the picture")
+    return True, (f"the {', '.join(todo)} model will be imported when the "
+                  f"picture is rendered (once, logged); the preview itself "
+                  f"imports nothing")
+
+
+def _editor_file_exists() -> bool:
+    from core.util.platform import ue_editor_path
+
+    editor = ue_editor_path()
+    return editor is not None and Path(editor).is_file()
 
 
 class GenerateRefusal(Exception):

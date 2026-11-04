@@ -1350,15 +1350,25 @@ def ensure_aircraft_model(spec: ScenarioSpec, report) -> None:
     NOTHING here falls through to the placeholder airframe: that is the
     rule this fail-safe serves, not one it relaxes.
     """
-    from assets_pipeline.importer import ensure_model, is_imported
+    from assets_pipeline.importer import (
+        ensure_model, is_imported, older_than_inputs_reason,
+    )
 
-    aircraft = str(spec.aircraft.value)
-    if is_imported(aircraft):
-        return
-    report(f"the {aircraft} model is not on this machine yet; building it "
-           f"once (fetch at the pinned commit, convert, import)")
-    ensure_model(aircraft, report)
-    report(f"the {aircraft} model is ready")
+    # The primary AND every traffic airframe (a scripted actor is drawn
+    # from the same imported mesh), each distinct name once. A model is
+    # current when imported and its manifest is not older (by mtime) than
+    # its config or converter; an outdated one is re-converted here.
+    names = [str(spec.aircraft.value)]
+    for entry in getattr(spec, "traffic", None) or []:
+        names.append(str(entry.aircraft.value))
+    for aircraft in dict.fromkeys(names):
+        if is_imported(aircraft) and older_than_inputs_reason(aircraft) is None:
+            continue
+        report(f"the {aircraft} model is not on this machine yet or is out "
+               f"of date; building it once (fetch at the pinned commit, "
+               f"convert, import)")
+        ensure_model(aircraft, report)
+        report(f"the {aircraft} model is ready")
 
 
 def plan_scene_setting(spec: ScenarioSpec) -> None:

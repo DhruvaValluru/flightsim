@@ -307,18 +307,43 @@ def _mesh_manifest_path(spec) -> Path:
             / "mesh_manifest.json")
 
 
+def _provision_refusal(aircraft: str, label: str):
+    """Build ``aircraft``'s model now (fetch, convert, import -- once,
+    logged) and return None, or the ``aircraft.mesh`` refusal for a REAL
+    failure: the importer's own named error ("import failed: ..."), or
+    no Unreal editor on this machine to finish the import."""
+    from assets_pipeline.importer import (
+        AircraftAssetError, is_imported, older_than_inputs_reason, provision_models,
+    )
+
+    try:
+        provision_models([aircraft], print)
+    except AircraftAssetError as exc:
+        return {"constraint": exc.constraint,
+                "message": f"{label}: import failed: {exc.message}"}
+    if not is_imported(aircraft) or older_than_inputs_reason(aircraft) is not None:
+        return {"constraint": "aircraft.mesh",
+                "message": (f"{label}: the {aircraft} model is not imported "
+                            f"on this machine and there is no Unreal editor "
+                            f"here to import it, and placeholder airframes "
+                            f"never render; install the editor (UE_ROOT) "
+                            f"and render again")}
+    return None
+
+
 def _traffic_mesh_refusal(spec):
     """The ``aircraft.mesh`` refusal for the first traffic airframe whose
-    model is not imported on this machine, or None. The web app's own
-    words where its refusal applies (no config, no upstream licence);
-    the build command where the model can be built."""
+    model cannot be made available on this machine, or None. A missing or
+    outdated model is imported here first (once, logged); the web app's
+    own words apply where no config / no upstream licence exists, and the
+    importer's error where the import itself fails."""
     from assets_pipeline.importer import (
-        configured_aircraft, is_imported, unavailable_reason,
+        configured_aircraft, is_imported, older_than_inputs_reason, unavailable_reason,
     )
 
     for index, entry in enumerate(spec.traffic):
         aircraft = str(entry.aircraft.value)
-        if is_imported(aircraft):
+        if is_imported(aircraft) and older_than_inputs_reason(aircraft) is None:
             continue
         reason = unavailable_reason(aircraft)
         if reason:
@@ -330,13 +355,10 @@ def _traffic_mesh_refusal(spec):
                        f"airframes never render, for traffic as for the "
                        f"primary")
         else:
-            message = (f"traffic[{index}] names the {aircraft}, whose model "
-                       f"is not imported on this machine (no current "
-                       f"assets/generated/{aircraft}/mesh_manifest.json backed "
-                       f"by its ue/Content assets). Build it once with "
-                       f"`python scripts/import_aircraft.py {aircraft}`; a "
-                       f"scripted traffic actor is drawn from the same "
-                       f"imported mesh as a primary would be")
+            failure = _provision_refusal(aircraft, f"traffic[{index}]")
+            if failure is None:
+                continue
+            return failure
         return {"constraint": "aircraft.mesh", "message": message}
     return None
 
@@ -771,40 +793,28 @@ def _run(args: argparse.Namespace) -> int:
         # CLI --render drew the placeholder boxes -- forbidden on any
         # machine (owner's rule 2026-08-31) -- under a manifest whose
         # assets block named the real mesh. Imported (a CURRENT manifest
-        # AND its .uassets) -> the render pass gets -mesh=; otherwise
-        # REFUSE by name, with the web app's own words where its refusal
-        # applies (no config, no upstream license) and the build command
-        # where the model can be built. Only where the engine is: off
+        # AND its .uassets, not older by mtime than its config/converter)
+        # -> the render pass gets -mesh=; otherwise the model is imported
+        # here (once, logged), and REFUSED by name only for a real
+        # failure: the web app's own words where its refusal applies (no
+        # config, no upstream license), the importer's error otherwise. Only where the engine is: off
         # Windows/Mac the render is refused later as ue.platform and the
         # manifest is the deliverable, exactly as before.
         if ue_available():
-            from assets_pipeline.importer import is_imported
+            from assets_pipeline.importer import is_imported, older_than_inputs_reason
             from webapp.runs import refuse_placeholder_mesh
 
             aircraft = str(spec.aircraft.value)
-            mesh_manifest = _mesh_manifest_path(spec)
-            if not is_imported(aircraft):
-                refusal = refuse_placeholder_mesh(spec)
-                if refusal is None:
-                    refusal = {
-                        "constraint": "aircraft.mesh",
-                        "message": (
-                            f"the {aircraft} model is not imported on this "
-                            f"machine (no current "
-                            f"{mesh_manifest.relative_to(REPO)} backed by "
-                            f"its ue/Content assets), and placeholder "
-                            f"airframes never render. Build it once with "
-                            f"`python scripts/import_aircraft.py "
-                            f"{aircraft}` (fetch at the pinned commit, "
-                            f"convert, import into the Unreal project), or "
-                            f"render through the web app, which provisions "
-                            f"it itself; a manifest older than version 2 "
-                            f"(no mesh origin -- the mesh would be drawn at "
-                            f"the structural datum, 25-30 m off its label) "
-                            f"re-converts with `python "
-                            f"assets_pipeline/convert.py "
-                            f"assets/aircraft_config/{aircraft}.json`"),
-                    }
+            if not (is_imported(aircraft)
+                    and older_than_inputs_reason(aircraft) is None):
+                # Missing or outdated mesh: refuse only what no command
+                # can fix (no config, no licence), otherwise import it
+                # here, once, logged; a real failure still refuses.
+                refusal = (refuse_placeholder_mesh(spec)
+                           or _provision_refusal(aircraft, "primary"))
+            else:
+                refusal = None
+            if refusal is not None:
                 print(f"REFUSED -- {refusal['constraint']}: "
                       f"{refusal['message']}")
                 print("(--render asked for pixels of a model this machine "
