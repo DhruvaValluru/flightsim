@@ -260,7 +260,7 @@ def test_no_text_io_without_utf8_encoding():
 
 
 # --- the engine pin: stated the same everywhere, read from ONE constant
-# (Phase 3 A2: the pin moved back to 5.5; the test no longer hard-codes it)
+# (Phase 3 A2: the pin moved to 5.7 (decision 10); the test no longer hard-codes it)
 
 #: Every file that states the engine version to a person or constructs a
 #: path from it. Another version in one of these is a stale pin, unless
@@ -295,8 +295,7 @@ def _other_pin_regex():
 
 
 #: A line that names another version must SAY it is history: the word
-#: "measured" or "history" (the Gate 6 / Xcode / toolset measurements were
-#: taken on 5.5), or the pin named alongside it.
+#: "measured" or "history" (the Gate 6 / Xcode / toolset measurements #: taken on 5.5), or the pin named alongside it.
 PIN_HISTORY_ALLOWED = re.compile(r"measured|history|historical|\bwrong[- ]version\b",
                                  re.IGNORECASE)
 

@@ -638,7 +638,7 @@ def test_the_plugin_includes_only_the_json_headers_the_engine_ships():
 
 def test_the_build_targets_include_order_is_the_pinned_engines():
     """The two Target.cs files state an EngineIncludeOrderVersion; it
-    was left at Unreal5_5 when the pin moved to 5.7, and UnrealBuildTool
+    was left at the old version when the pin moved, and UnrealBuildTool
     then compiles the project against the older include order (a warning
     on every build, and the header shims the engine kept for 5.5 rather
     than 5.7's). The enum name is built from the one pinned version,

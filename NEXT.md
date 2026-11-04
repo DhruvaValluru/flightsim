@@ -367,7 +367,7 @@ name); `./scripts/mutation_check.sh` end to end at 1e7c0b1: all 439 guards
 load-bearing, 0 WEAK, 0 SKIP, suite green after the last restore
 (4418 s). Every C++
 change is UNCOMPILED here. WINDOWS, in this
-order: build on the pinned engine (docs/TOOLCHAIN.md; `ue_preflight.ps1`, `vendor_ue_plugin.ps1` -- the
+order: build on the pinned engine, 5.7 (docs/TOOLCHAIN.md; `ue_preflight.ps1`, `vendor_ue_plugin.ps1` -- the
 four local plugin patches were measured on 5.5 -- `build_ue.ps1`);
 `ue_create_materials.py` in the editor (M_CustomStencilID for the ID
 pass; the Wetness parameter landed in cd5c96a, unverified in any
@@ -1122,27 +1122,22 @@ the parity discipline, and the do-not-regress list)
 
 ## Phase 2 gotchas (continuing the numbering)
 
-32. **The engine pin is 5.5 (decision 2026-11-03, docs/phase3/decisions.md
-    line 1; machines and versions in docs/TOOLCHAIN.md, which this entry
-    links and does not copy).** What was measured: the build failed on
-    the pinned engine because `ue/Source/FlightSim.Target.cs:9` (and
-    `FlightSimEditor.Target.cs:9`) name `Unreal5_7`; it was measured that 5.7 never built on
-    the reviewers' machines; the Windows laptop of the Phase 3 session
-    reads 5.5.x from `Engine/Build/Build.version` (TOOLCHAIN.md first
-    row); the reviewer's and third machine's rows are pending in that
-    file, so the pin is measured on ONE machine so far. The
-    2026-09-25 move to 5.7 was never built or measured anywhere; its
-    statements in `ue/FlightSim.uproject` (`EngineAssociation`),
-    `core/util/platform.py` (`UE_ENGINE_VERSION`) and the Target.cs files
-    stood unchanged when this entry was rewritten (checked in the tree
-    that day), and are corrected by A1/A2 of Phase 3, not by this note.
+32. **The engine pin is 5.7 (decision 10, owner, 2026-11-04, docs/phase3/decisions.md,
+    superseding the 2026-11-03 pin to 5.5; machines and versions in docs/TOOLCHAIN.md, which this entry
+    links and does not copy).** The pin moved 5.7 -> 5.5 (2026-11-03) -> 5.7
+    (decision 10); `ue/FlightSim.uproject` (`EngineAssociation`),
+    `core/util/platform.py` (`UE_ENGINE_VERSION`) and both Target.cs files
+    (`Unreal5_7`) now state 5.7. The Windows laptop read 5.5.4 (measured
+    2026-11-03) from `Engine/Build/Build.version` and now also has UE_5.7,
+    whose patch level is pending (TOOLCHAIN.md first row); the other rows are
+    pending, so nothing is measured on 5.7 yet.
     A3 (merged) made the build and preflight refuse the wrong engine by
     name (`scripts/ue_engine.ps1`, no `UE_5.*` glob), so a mismatch
     stops with a sentence instead of a compile error. Every number taken
     before October (Gate 6 in VALIDITY 2.13, the CAMERA_WINDOWS 0.00 m
     bound, the four local patches of the vendored JSBSim plugin,
     VENDORED.json `local_patches` 1-4) was measured on 5.5 against
-    JSBSim v1.2.4, which is the pinned engine. Any later move off the pin
+    JSBSim v1.2.4, which is history now that the pin is 5.7. Any later move off the pin
     owes, before the Look lane is trusted: (a) `scripts\vendor_ue_plugin.ps1`
     and `scripts/check_bridge_api.sh` re-run (each patch may become
     unnecessary or stop applying; only a build says which); (b) Gate 6

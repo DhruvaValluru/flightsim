@@ -1,4 +1,4 @@
-"""Source-reading tests over scripts/check_bridge_api.sh (A5 retry, UE 5.5.4)."""
+"""Source-reading tests over scripts/check_bridge_api.sh (A5 retry, UE 5.5.4 measured; pin is now 5.7)."""
 import re
 import shutil
 import subprocess

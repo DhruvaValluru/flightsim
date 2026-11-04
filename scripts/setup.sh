@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-command setup for the Python side (physics, tests, compiler, web app).
-# Rendering additionally needs the Windows host (Unreal Engine 5.5 + the built
+# Rendering additionally needs the Windows host (Unreal Engine 5.7 + the built
 # bridge; .\scripts\setup.ps1 there) -- see README 'Platform support'.
 set -euo pipefail
 cd "$(dirname "$0")/.."

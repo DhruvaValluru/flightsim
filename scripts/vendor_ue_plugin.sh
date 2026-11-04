@@ -41,7 +41,7 @@ JSBSIM_VERSION="v1.2.4"
 # The engine this vendoring targets (Phase 3 pin, decisions.md 1); recorded
 # in VENDORED.json, not linked by the native library. The patches below were
 # measured on 5.5 (NEXT.md gotcha 32).
-UE_ENGINE_TARGET="5.5"
+UE_ENGINE_TARGET="5.7"
 UPSTREAM="https://github.com/JSBSim-Team/jsbsim.git"
 WORK="${TMPDIR:-/tmp}/flightsim-vendor"
 DEST="$REPO/ue/Plugins/JSBSimFlightDynamicsModel"
