@@ -2540,3 +2540,389 @@ a52ae2cf Merge p3-A6: pin GRAPH_GENERATIONS key set and stencil-id build; engine
  2 files changed, 24 insertions(+), 1 deletion(-)
 ```
 
+## A8 · PASS · run A-2 · 2026-11-04T17:13:25Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+68:   - Check: a web-app run with host flight completes, and no message tells the user
+69:     to add the flag.
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/A8-run-summary.log: run 7274c62756ea done: clip ready (host flight on by default ...); host flight 220 samples; engine labels attached on 220 of 220
+runs/p3/A-2/A8-run-summary.log: verify.json host_determinism PASS: 2 host flights of one card were byte-identical (6bc9dcc5e613, 220 samples): the host is reproducible; solve pass vs chase pass telemetry: 0 columns differ; ground: collision raster ...grand_canyon; Success - 0 error(s)
+runs/p3/A-2/A8-run-summary.log: no-host-flight mentions in the run record and the web app log for this run: 0 / 0
+```
+
+note: run A-2: the parity check against the Python flight is the verifier's flight_agreement (PASS) and host_determinism (PASS); tests/test_host_parity.py 19 passed, 1 failed on test_preflight_on_mac_runs_ue_preflight_sh, a Windows path-separator assertion unrelated to parity (the Mac's test, reported); the run's only verifier failure, mask_vs_geometry, is A12's
+
+### synopsis
+
+# A8 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T17:13:24Z
+
+## A8 step 6: web-app run with host flight on (POST /run) on the merged 3dc6a5ec build
+
+- log: `runs/p3/A-2/A8-web-post.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+status 200
+{"run_id":"7274c62756ea","digest":"c5c75d19687cf6b521db3ad49b69a9e41226941a3ef21b714d80932df9238fb4"}
+```
+
+## A8 step 6: the run's record, determinism and flag check
+
+- log: `runs/p3/A-2/A8-run-summary.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+run 7274c62756ea done: clip ready (host flight on by default, tiles on, storm on; Grand Canyon A-4 chase)
+events: host flight 220 samples; every camera re-solved over the host's own flight; rendering 1 camera pass(es): chase; engine labels attached on 220 of 220 frame(s) (0 without a bundle); verification FAILED: mask_vs_geometry (A12's); clip: 220 frames of chase at 10.0 fps = 22.0 s
+verify.json host_determinism PASS: 2 host flights of one card were byte-identical (6bc9dcc5e613, 220 samples): the host is reproducible
+verify.json flight_agreement PASS; solve pass vs chase pass telemetry: 0 columns differ
+host_flight/host_telemetry.log: LogFlightSimScenario: Display: ground: collision raster C:\Users\kanth\flightsim\runs\terrain\grand_canyon; LogInit: Display: Success - 0 error(s), 4 warning(s)
+no-host-flight mentions in the run record and the web app log for this run: 0 / 0
+```
+
+## A8 step 6: pytest -q tests/test_host_parity.py (19 passed; the 1 failure is a Windows path-separator assertion in the Mac's d4fd0dfd test, not a parity result)
+
+- log: `runs/p3/A-2/A8-pytest-host-parity.log`
+- exit: 1 (expected 0) -> FAIL
+
+```
+..................F.                                                     [100%]
+================================== FAILURES ===================================
+_________________ test_preflight_on_mac_runs_ue_preflight_sh __________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D35D811B80>
+
+    def test_preflight_on_mac_runs_ue_preflight_sh(monkeypatch):
+        argv, kwargs = _capture_preflight(monkeypatch, "mac")
+>       assert len(argv) == 1 and argv[0].endswith("scripts/ue_preflight.sh")
+E       AssertionError: assert (1 == 1 and False)
+E        +  where 1 = len(['C:\\Users\\kanth\\flightsim\\scripts\\ue_preflight.sh'])
+E        +  and   False = <built-in method endswith of str object at 0x000001D35E8F66D0>('scripts/ue_preflight.sh')
+E        +    where <built-in method endswith of str object at 0x000001D35E8F66D0> = 'C:\\Users\\kanth\\flightsim\\scripts\\ue_preflight.sh'.endswith
+
+tests\test_host_parity.py:475: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_host_parity.py::test_preflight_on_mac_runs_ue_preflight_sh
+            [JSBSim-ML v2.0]
+
+JSBSim startup beginning ...
+
+```
+
+note: run A-2: steps 1-2 in packet A8-1; cause 1 (commandlet exit 1, Water profile) fixed by the A5 builder 2b746352; cause 2 (agl_m from the streamed world) fixed by the A8 builder 3dc6a5ec (decision 12), merged 3a8c369f; the cross-check judges the sheet line PASS and names the failing test as the Mac's
+
+## verdict
+
+FAIL
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+f8895c08 Phase 3: A8 builder merge log
+ad4b08f0 A8: JSBSim's ground answers from the card's collision raster in every pass (decision 12)
+79448961 Phase 3: log the A5 push and the A8 note (run A-2)
+ad9bc59d Phase 3 run A-2: A8 reproduction and classification (packet A8-1), decision 12 (ground callback reads the raster in every pass)
+123dcd3c Merge p3-A8: host-flight refusal names the fault, drops the dev flag; catalogue hint
+89f7e577 A8: host-flight refusal names the fault, drops the dev flag; catalogue hint
+
+f8895c08 Phase 3: A8 builder merge log
+
+ docs/phase3/events_windows.log | 3 +++
+ 1 file changed, 3 insertions(+)
+
+ad4b08f0 A8: JSBSim's ground answers from the card's collision raster in every pass (decision 12)
+
+ .../FlightSimBridge/FlightSimBridge.Build.cs       |   5 +
+ .../Private/FlightSimGroundCallback.cpp            | 106 +++++++++++++++++++++
+ .../Private/FlightSimGroundCallback.h              |  42 ++++++++
+ .../Private/FlightSimScenarioWorld.cpp             |  22 +++++
+ .../Private/JSBSimMovementComponent.cpp            |  11 +++
+ .../Public/JSBSimMovementComponent.h               |   7 ++
+ ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json |   9 ++
+ 7 files changed, 202 insertions(+)
+
+79448961 Phase 3: log the A5 push and the A8 note (run A-2)
+
+ docs/phase3/events_mac.log | 2 ++
+ 1 file changed, 2 insertions(+)
+
+ad9bc59d Phase 3 run A-2: A8 reproduction and classification (packet A8-1), decision 12 (ground callback reads the raster in every pass)
+
+ docs/PHASE3_LOG.md             |  2 +
+ docs/phase3/decisions.md       |  2 +
+ docs/phase3/events_windows.log |  4 ++
+ docs/phase3/packets/A8-1.md    | 99 ++++++++++++++++++++++++++++++++++++++++++
+ docs/phase3/state/A8.json      |  7 ++-
+ 5 files changed, 113 insertions(+), 1 deletion(-)
+
+123dcd3c Merge p3-A8: host-flight refusal names the fault, drops the dev flag; catalogue hint
+
+ core/messages/catalog.yaml       |  1 +
+ flightsim/capture.py             | 56 +++++++++++++++++++++++++++++++++-------
+ tests/test_camera_host_flight.py | 23 +++++++++++++++++
+ 3 files changed, 71 insertions(+), 9 deletions(-)
+
+89f7e577 A8: host-flight refusal names the fault, drops the dev flag; catalogue hint
+
+ core/messages/catalog.yaml       |  1 +
+ flightsim/capture.py             | 56 +++++++++++++++++++++++++++++++++-------
+ tests/test_camera_host_flight.py | 23 +++++++++++++++++
+ 3 files changed, 71 insertions(+), 9 deletions(-)
+```
+
+## A7 · PASS · run A-2 · 2026-11-04T18:06:34Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+66:   - Check: delete the imported A-4, press Generate, and it imports and renders by itself.
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/A7-summary.log: run 7bbda8c5a4c3: aircraft | the A4 model is not on this machine yet or is out of date; building it once (fetch at the pinned commit, convert, import) ; importing 1 aircraft into the Unreal project ; the A4 model is ready
+runs/p3/A-2/A7-summary.log: run 57db7c98102f: no import; 220 frames rendered; labels 220 of 220; done: clip ready
+runs/p3/A-2/A7-summary.log: run 9bf1e3e387a9: the A4 mesh manifest is stale (older than A4.json); re-converting ... ; converting (license-verified, FDM-matched) ; the A4 model is ready ; one re-convert, no second import line; 220 frames; done: clip ready
+```
+
+note: run A-2: the import fires once when the asset is missing, the mtime rule fires one re-convert when the config is newer than the manifest, and neither loops; the render crashes between the two Generates were memory exhaustion (machine note), not the import; the only verifier failure on the last run is landmark_reprojection, the Mac's A12 follow-up
+
+### synopsis
+
+# A7 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T18:06:34Z
+
+## A7 step 8: delete the imported A-4 asset, Generate (import), then Generate again (render)
+
+- log: `runs/p3/A-2/A7-summary.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+run 7bbda8c5a4c3 (ue/Content/Aircraft/A4 deleted, Generate): aircraft | the A4 model is not on this machine yet or is out of date; building it once (fetch at the pinned commit, convert, import) ; aircraft | importing 1 aircraft into the Unreal project ; aircraft | the A4 model is ready ; ue/Content/Aircraft/A4 recreated (body.uasset, TEX_A4E_1/2, mat_A4E_1/2); render crashed for memory (machine note)
+run 57db7c98102f (Generate again, quiet machine): no import; host flight 220 samples; 220 frames rendered; labels 220 of 220; done: clip ready
+run 9bf1e3e387a9 (A4.json touched, Generate): aircraft | the A4 mesh manifest is stale (the mesh manifest is older than A4.json); re-converting so the mesh is drawn where its label is ; aircraft | converting (license-verified, FDM-matched) ; aircraft | the A4 model is ready ; one re-convert, no second import line, no loop; 220 frames rendered; labels 220 of 220; done: clip ready (verification: only landmark_reprojection FAIL, the Mac's A12 follow-up; mask_vs_geometry now passes on MAIN)
+```
+
+## A7 step 9: touch A4.json, Generate: one re-convert, no import loop
+
+- log: `runs/p3/A-2/A7-web-post-5.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+status 200
+{"run_id":"9bf1e3e387a9","digest":"c5c75d19687cf6b521db3ad49b69a9e41226941a3ef21b714d80932df9238fb4"}
+```
+
+note: run A-2 on UE 5.7.4 (build 3b05ec5a after the A12 merge): the first render after the import crashed for memory (three crashes with AvailablePhysical 0, machine note), the same card rendered once the machine was quiet
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+e35545c3 Phase 3 run A-2: A7 step 8 rows (import once, render completes on a quiet machine)
+576d5baf Merge p3-A7: aircraft mesh imported automatically (mtime rule, traffic, no preview import)
+22fc6424 A7: import a missing or outdated aircraft mesh instead of refusing
+
+e35545c3 Phase 3 run A-2: A7 step 8 rows (import once, render completes on a quiet machine)
+
+ docs/PHASE3_LOG.md | 2 ++
+ 1 file changed, 2 insertions(+)
+
+576d5baf Merge p3-A7: aircraft mesh imported automatically (mtime rule, traffic, no preview import)
+
+ assets_pipeline/importer.py       |  89 +++++++++++++++++++++-
+ flightsim/capture.py              |  90 +++++++++++++----------
+ tests/test_aircraft_autoimport.py | 151 ++++++++++++++++++++++++++++++++++++++
+ tests/test_camera_cli.py          |   7 +-
+ webapp/generate.py                |  38 ++++++++--
+ webapp/runs.py                    |  26 +++++--
+ 6 files changed, 342 insertions(+), 59 deletions(-)
+
+22fc6424 A7: import a missing or outdated aircraft mesh instead of refusing
+
+ assets_pipeline/importer.py       |  89 +++++++++++++++++++++-
+ flightsim/capture.py              |  90 +++++++++++++----------
+ tests/test_aircraft_autoimport.py | 151 ++++++++++++++++++++++++++++++++++++++
+ tests/test_camera_cli.py          |   7 +-
+ webapp/generate.py                |  38 ++++++++--
+ webapp/runs.py                    |  26 +++++--
+ 6 files changed, 342 insertions(+), 59 deletions(-)
+```
+
+## A11 · PASS · run A-2 · 2026-11-04T18:12:34Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+76:   - Check: every `render.json` has the mask, depth and an "alone" picture per aircraft.
+77:   - Check: a run with missing label pictures stops with `labels.no_bundle`.
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/A11-labels-check.log: web chase frames 0-2 and web tower frames 0-2: mask=frame_000N_mask.png (53704..833091 px>0) depth_f32=frame_000N_depth.f32 (True) alone=[('frame_000N_alone_1.png', True)] -> complete; cli chase and cli tower frames 0-2: complete
+runs/p3/A-2/A11-web-post.log / run 843e5dbe9dcd events: engine labels attached on 6 of 6 frame(s) (0 without a bundle)  /  runs/p3/A-2/A11-cli-2.log: labels: engine bundle attached on 6 of 6 frames (12 object records; 0 without a bundle)
+no labels.no_bundle on either path (the refusal itself is the Mac's container test: pytest -q tests/test_camera_labels.py -k no_bundle in the letter audit)
+```
+
+note: run A-2: step 1 found no missing key on 5.7 (the review's Windows symptom did not recur), so step 2 had nothing to fix; step 8 holds on the web app and the CLI; the CLI needed an absolute --terrain (relative path breaks the engine's sidecar read, Mac scope, reported)
+
+### synopsis
+
+# A11 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T18:12:33Z
+
+## A11 step 1/8 web: two cameras, three stills each (run 843e5dbe9dcd), POST /run
+
+- log: `runs/p3/A-2/A11-web-post.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+status 200
+{"run_id":"843e5dbe9dcd","digest":"3414edb508e6a6f3c638e5abb872f8ea4325d6aa726f4c45eb6c2df445dbebc0"}
+```
+
+## A11 step 8 CLI: capture --render --terrain <absolute> two cameras, three stills (runs/p3/A-2/A11-cli-2)
+
+- log: `runs/p3/A-2/A11-cli-2.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+spec 525aeb52033a237c valid; running headlessly...
+flying the card in the host first, so the labels describe the flight the pixels show ...
+  engine pass logging to runs\p3\A-2\A11-cli-2\host_flight\host_flight_pass.log (unattended; stalls are stopped)
+    wrote C:\Users\kanth\flightsim\runs\p3\A-2\A11-cli-2\host_flight\host_telemetry.json
+  host flight: 200 samples, digest 710cbc16705eb46d -- poses re-solved over it
+  instruments: ideal (the recorded channels are the measurement; no telemetry_measured.json written)
+  card:     runs\p3\A-2\A11-cli-2\card.json (consume-poses; one commandlet pass per camera via -camera-index=N)
+captured: 6 frames across 2 camera(s)
+  manifest: runs\p3\A-2\A11-cli-2\capture_manifest.json
+  previews: 6 geometry preview(s) under runs\p3\A-2\A11-cli-2\previews
+rendering 2 camera pass(es) into runs\p3\A-2\A11-cli-2\frames in the visual scene ...
+  engine pass logging to runs\p3\A-2\A11-cli-2\render_pass.log (unattended; stalls are stopped)
+    scene flags for every pass: -Visual -shot=showcase -fps=30 -width=1280 -height=720 -sun-elev=50.0 -sun-azim=180.0 -exposure-bias=9.5 -fog-density=0.0012 -labels -deterministic -GeorefTerrain -terrain=C:/Users/kanth/flightsim/runs/terrain/grand_canyon -mesh=C:\Users\kanth\flightsim\assets\generated\A4\mesh_manifest.json -NoSound -NoLoadingScreen
+    camera 1/2: chase -> C:\Users\kanth\flightsim\runs\p3\A-2\A11-cli-2\frames\chase
+      wrote 15 frames
+    camera 2/2: tower -> C:\Users\kanth\flightsim\runs\p3\A-2\A11-cli-2\frames\tower
+      wrote 15 frames
+    wrote 30 frames across 2 camera(s) under C:\Users\kanth\flightsim\runs\p3\A-2\A11-cli-2\frames
+  frames:   6 rendered under runs\p3\A-2\A11-cli-2\frames
+  labels:   engine bundle attached on 6 of 6 frames (12 object records; 0 without a bundle)
+  overlays: 6 under runs\p3\A-2\A11-cli-2\overlays -- the recorded geometry drawn ON the rendered pixels; the circle (manifest) and the cross (engine) should coincide
+  verify:   python -m flightsim.verify runs\p3\A-2\A11-cli-2
+  (with pixels present, verification exercises the landmark reprojection and two-view checks that report NOT RUN without them)
+```
+
+## A11: every render.json frame record checked for mask, depth_f32 and one alone PNG per aircraft (web and CLI)
+
+- log: `runs/p3/A-2/A11-labels-check.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+web chase frame 0: mask=frame_0000_mask.png (771705 px>0) depth_f32=frame_0000_depth.f32 (True) alone=[('frame_0000_alone_1.png', True)]
+web chase frame 1: mask=frame_0001_mask.png (789106 px>0) depth_f32=frame_0001_depth.f32 (True) alone=[('frame_0001_alone_1.png', True)]
+web chase frame 2: mask=frame_0002_mask.png (833091 px>0) depth_f32=frame_0002_depth.f32 (True) alone=[('frame_0002_alone_1.png', True)]
+web chase: complete (3 frames)
+web tower frame 0: mask=frame_0000_mask.png (53704 px>0) depth_f32=frame_0000_depth.f32 (True) alone=[('frame_0000_alone_1.png', True)]
+web tower frame 1: mask=frame_0001_mask.png (58764 px>0) depth_f32=frame_0001_depth.f32 (True) alone=[('frame_0001_alone_1.png', True)]
+web tower frame 2: mask=frame_0002_mask.png (137246 px>0) depth_f32=frame_0002_depth.f32 (True) alone=[('frame_0002_alone_1.png', True)]
+web tower: complete (3 frames)
+cli (render_ue_scenario.ps1) gate5 doublet frame 0: mask=None (-1 px>0) depth_f32=None (True) alone=[]
+cli (render_ue_scenario.ps1) gate5 doublet frame 1: mask=None (-1 px>0) depth_f32=None (True) alone=[]
+cli (render_ue_scenario.ps1) gate5 doublet frame 2: mask=None (-1 px>0) depth_f32=None (True) alone=[]
+cli (render_ue_scenario.ps1) gate5 doublet frame 3: mask=None (-1 px>0) depth_f32=None (True) alone=[]
+cli (render_ue_scenario.ps1) gate5 doublet: INCOMPLETE (110 frames)
+cli chase frame 0: mask=frame_0000_mask.png (770943 px>0) depth_f32=frame_0000_depth.f32 (True) alone=[('aircraft:A4:0', 'frame_0000_alone_1.png', True)]
+cli chase frame 1: mask=frame_0001_mask.png (788733 px>0) depth_f32=frame_0001_depth.f32 (True) alone=[('aircraft:A4:0', 'frame_0001_alone_1.png', True)]
+cli chase frame 2: mask=frame_0002_mask.png (832572 px>0) depth_f32=frame_0002_depth.f32 (True) alone=[('aircraft:A4:0', 'frame_0002_alone_1.png', True)]
+cli chase: complete (3 frames)
+cli tower frame 0: mask=frame_0000_mask.png (53759 px>0) depth_f32=frame_0000_depth.f32 (True) alone=[('aircraft:A4:0', 'frame_0000_alone_1.png', True)]
+cli tower frame 1: mask=frame_0001_mask.png (57500 px>0) depth_f32=frame_0001_depth.f32 (True) alone=[('aircraft:A4:0', 'frame_0001_alone_1.png', True)]
+cli tower frame 2: mask=frame_0002_mask.png (135201 px>0) depth_f32=frame_0002_depth.f32 (True) alone=[('aircraft:A4:0', 'frame_0002_alone_1.png', True)]
+cli tower: complete (3 frames)
+```
+
+note: run A-2 on UE 5.7.4: nothing was missing on this engine, so step 2 (engine fix) had nothing to fix; the only CLI defect met was the relative --terrain path handed to the engine (Mac scope, noted)
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+33e3e560 Phase 3 run A-2: A12 FAIL packet 1 (pixels 1.1% of the width left of the projection on every render), A11 CLI relative-terrain defect logged
+ef589327 Merge p3-A11: labels.no_bundle refuses a render that wrote no label bundle
+ff073239 Drop A11 note edit from the branch (MAIN has uncommitted edits to it)
+0bc0147f A11: launch stub writes a minimal real label bundle; no_bundle denominator uses the larger count
+426dfd0f A11 integrator: assert the note and zero-frame branches of require_label_bundle
+ddb2ac3f A11: labels.no_bundle refuses a render that wrote no label bundle (CLI and web), per-camera counts
+
+33e3e560 Phase 3 run A-2: A12 FAIL packet 1 (pixels 1.1% of the width left of the projection on every render), A11 CLI relative-terrain defect logged
+
+ docs/PHASE3_LOG.md             |  2 ++
+ docs/phase3/events_windows.log | 12 +++++++
+ docs/phase3/packets/A12-1.md   | 80 ++++++++++++++++++++++++++++++++++++++++++
+ docs/phase3/state/A12.json     |  9 ++++-
+ 4 files changed, 102 insertions(+), 1 deletion(-)
+
+ef589327 Merge p3-A11: labels.no_bundle refuses a render that wrote no label bundle
+
+ core/capture/labels.py      |  33 +++++++++++-
+ core/messages/catalog.yaml  |   3 ++
+ flightsim/capture.py        |   3 +-
+ tests/engine_launch.py      |  47 +++++++++++++++++
+ tests/test_camera_labels.py | 121 ++++++++++++++++++++++++++++++++++++++++++++
+ webapp/runs.py              |   3 +-
+ 6 files changed, 207 insertions(+), 3 deletions(-)
+
+ff073239 Drop A11 note edit from the branch (MAIN has uncommitted edits to it)
+
+ docs/phase3/notes/A11.md | 3 ---
+ 1 file changed, 3 deletions(-)
+
+0bc0147f A11: launch stub writes a minimal real label bundle; no_bundle denominator uses the larger count
+
+ core/capture/labels.py   |  2 +-
+ tests/engine_launch.py   | 47 +++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_camera_cli.py |  3 ---
+ 3 files changed, 48 insertions(+), 4 deletions(-)
+
+426dfd0f A11 integrator: assert the note and zero-frame branches of require_label_bundle
+
+ tests/test_camera_labels.py | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+ddb2ac3f A11: labels.no_bundle refuses a render that wrote no label bundle (CLI and web), per-camera counts
+
+ core/capture/labels.py      |  33 ++++++++++++-
+ core/messages/catalog.yaml  |   3 ++
+ flightsim/capture.py        |   3 +-
+ tests/test_camera_cli.py    |   3 ++
+ tests/test_camera_labels.py | 116 ++++++++++++++++++++++++++++++++++++++++++++
+ webapp/runs.py              |   3 +-
+ 6 files changed, 158 insertions(+), 3 deletions(-)
+```
+

@@ -488,6 +488,18 @@ def _world_documents(spec, terrain_stem, landcover_json=None):
     return out
 
 
+def _engine_path(path) -> str:
+    """A path the ENGINE reads, made absolute: the run card and the
+    ``-terrain=`` / ``-scene=`` arguments are consumed by another process
+    whose working directory is not this one (measured, Windows run A-2:
+    ``--terrain runs/terrain/grand_canyon`` typed at the repo root reached
+    the host as typed and it refused "cannot read heightfield sidecar
+    runs/terrain/grand_canyon.json"). The web path always hands an
+    absolute stem; the CLI now does the same. Refusals about what the
+    user typed keep naming what they typed; this is applied after them."""
+    return str(Path(path).expanduser().resolve())
+
+
 def _refuse(violations) -> int:
     print("REFUSED -- by name:")
     for v in violations:
@@ -941,6 +953,11 @@ def _run(args: argparse.Namespace) -> int:
               f"network; scene.terrain_source: {terrain_source}"
               f"{' + --synth-terrain' if args.synth_terrain else ''})")
     if terrain_stem:
+        # The one place the stem becomes the engine's: absolute from here
+        # on (the card's world block, the manifest's scene.terrain, the
+        # ``-terrain=`` argument, the pad and buildings documents derived
+        # beside it). The refusals above named the stem as typed.
+        terrain_stem = _engine_path(terrain_stem)
         # W1: the bake's land cover (scripts/bake_landcover.py), when baked,
         # lets the runner infer the roughness of an unstated surface. Found
         # beside the PARENT bake: a runway pad (below) shares its grid.
@@ -962,10 +979,13 @@ def _run(args: argparse.Namespace) -> int:
     # W5: the editor-built scene (opt-in): its members ride the card's world
     # block and -scene= reaches the render.
     scene_members = None
+    scene_document = None
     if getattr(args, "scene", None):
         scene_members = _scene_members(args.scene, terrain_stem)
         if "violations" in scene_members:
             return _refuse(scene_members["violations"])
+        # The render reads the document from its own working directory.
+        scene_document = _engine_path(args.scene)
         print(f"scene: {args.scene} (level {scene_members['scene_level']})")
     if terrain_stem:
         from core.terrain.ground import TerrainGround
@@ -1604,7 +1624,7 @@ def _run(args: argparse.Namespace) -> int:
                       | set(engine_pass_words(cameras))),
         calibration=bool(args.calibration), sun_lux=sun_lux_flag,
         accumulate=args.accumulate,
-        scene_document=str(args.scene) if getattr(args, "scene", None) else None))
+        scene_document=scene_document))
     print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} "
           f"{'in the black void (--void)' if args.void else 'in the visual scene'} ...")
     completed = _run_unattended(command, out / "render_pass.log")

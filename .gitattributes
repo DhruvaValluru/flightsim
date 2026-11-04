@@ -35,3 +35,9 @@ assets/landmask/** -text
 
 # A4: the stamp-tree fixture keeps its CRLF (Get-PluginSourceHash must see one).
 tests/fixtures/stamp_tree/** -text
+
+# Phase 3 event logs are append-only JSONL written by two machines and many
+# agents: a union merge is always the right answer (measured 2026-11-04: every
+# pull conflict on these files was two appends to the same tail).
+docs/phase3/events_mac.log merge=union
+docs/phase3/events_windows.log merge=union

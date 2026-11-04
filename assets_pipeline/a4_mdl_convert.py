@@ -9,8 +9,16 @@ disk (VALIDITY 3.3).
 
 What is exported: every part visible in ``mdl_scene.REST_ENV`` (parked,
 all optional variants and stores off), gear stowed, at rest pose, as ONE
-rigid body. The exterior is not articulated: no control surfaces, gear or
-speed brakes move. Livery: the model repo's texture.VA-12 folder.
+rigid body ``body.obj``; then, for every ``payload`` component of the
+config's ``labels.components``, the parts that its station's loadout
+variables (``loading.loadout.model_vars``: ``STA3_LOAD``, ``STA3_RACK``,
+``STA3_RAIL`` ...) add over the rest environment, as their own
+``SM_<aircraft>_<component id>.obj`` in the same model-origin frame (mesh
+manifest version 4: ``components[]`` rows with actor-frame extents). The
+exterior is not articulated: no control surfaces, gear or speed brakes
+move. Landing gear is stowed, so no gear component has a mesh (the
+``landing_gear`` entries of the config get no row and no OBJ). Livery:
+the model repo's texture.VA-12 folder.
 
 Where the mesh sits (mesh manifest version 3, as ``convert.py``): the
 model origin is MEASURED in the actor frame by ``convert.measure_mesh_origin``
@@ -34,7 +42,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 from PIL import Image
@@ -48,8 +56,8 @@ from assets_pipeline.convert import (  # noqa: E402
     _fdm_config_name, _labelled_airframe, _model_origin_offset_actor_cm, fdm_vrp_actor_cm,
     measure_mesh_origin,
 )
-from core.capture.airframe import fdm_xml_path  # noqa: E402
-from assets_pipeline.mdl_scene import MdlScene  # noqa: E402
+from core.capture.airframe import Airframe, Component, fdm_xml_path  # noqa: E402
+from assets_pipeline.mdl_scene import REST_ENV, MdlScene, Part  # noqa: E402
 
 CM_PER_M = 100.0
 TEXTURE_PIXELS = 2048
@@ -64,10 +72,155 @@ SHEETS = ("A4E_1", "A4E_2")
 CENTRELINE_HALF_WIDTH_CM = 30.0
 LIVERY_DIR = ("SimObjects", "Airplanes", "A-4E", "texture.VA-12")
 MODEL = ("SimObjects", "Airplanes", "A-4E", "model", "A4E.mdl")
+#: The mesh manifest version this converter writes: ``convert.py``'s
+#: version 3 contract (measured origin, actor-frame extents) plus a
+#: ``components[]`` list, one row per payload component with its own OBJ.
+#: The shared constant stays 3 for the airframes that have no components;
+#: ``importer.stale_manifest_reason`` sends an A-4 manifest below 4 (or
+#: without ``components``) back through this converter.
+A4_COMPONENTS_MANIFEST_VERSION = 4
+#: The class of component this converter exports a mesh for.
+PAYLOAD_CLASS = "payload"
+#: Zero-area triangles below this cross-product norm (m^2) are dropped.
+DEGENERATE_AREA = 2e-10
 
 
 def _to_ue(v: np.ndarray) -> np.ndarray:
     return np.c_[v[:, 2], v[:, 0], v[:, 1]]
+
+
+def _filter_part(part: Part) -> int:
+    """Drop the part's zero-area and repeated-index triangles in place and
+    return how many remain. Done here rather than left for the engine to
+    discard: the importer rejects a mesh that loses more than 5 percent of
+    its triangles."""
+    tri = part.triangles
+    a, b, c = (part.positions[tri[:, k]] for k in range(3))
+    keep = (np.linalg.norm(np.cross(b - a, c - a), axis=1) > DEGENERATE_AREA) & \
+        (tri[:, 0] != tri[:, 1]) & (tri[:, 1] != tri[:, 2]) & \
+        (tri[:, 0] != tri[:, 2])
+    part.triangles = tri[keep]
+    return int(len(part.triangles))
+
+
+def _write_obj(parts: List[Part], out_dir: Path, stem: str) -> Dict:
+    """Write ``<stem>.obj`` and ``<stem>.mtl`` for already-filtered parts,
+    in the UE actor frame (cm) about the model origin, and return what
+    was measured on the way: ``triangles`` (faces written), ``vertices``,
+    ``lo_cm``/``hi_cm`` (the axis-aligned extent of every vertex) and
+    ``centreline_nose_cm`` (the largest x within the fuselage centreline
+    band, -1e30 when no vertex lies in it)."""
+    by_material: Dict[str, List[str]] = {s: [] for s in SHEETS}
+    v_lines: List[str] = []
+    vt_lines: List[str] = []
+    vn_lines: List[str] = []
+    base = 0
+    triangles = 0
+    lo = np.full(3, 1e30)
+    hi = np.full(3, -1e30)
+    centreline_nose_cm = -1e30
+    for part in parts:
+        pos = _to_ue(part.positions) * CM_PER_M
+        nrm = _to_ue(part.normals)
+        lo, hi = np.minimum(lo, pos.min(0)), np.maximum(hi, pos.max(0))
+        band = np.abs(pos[:, 1]) < CENTRELINE_HALF_WIDTH_CM
+        if band.any():
+            centreline_nose_cm = max(centreline_nose_cm, float(pos[band, 0].max()))
+        v_lines += ["v %.4f %.4f %.4f" % tuple(p) for p in pos]
+        vn_lines += ["vn %.5f %.5f %.5f" % tuple(n) for n in nrm]
+        # OBJ v runs bottom-up; the .mdl's runs top-down.
+        vt_lines += ["vt %.6f %.6f" % (u, 1.0 - v) for u, v in part.uvs]
+        sheet = SHEETS[1] if part.material == WING_MATERIAL else SHEETS[0]
+        by_material[sheet] += [
+            "f " + " ".join(f"{base + i + 1}/{base + i + 1}/{base + i + 1}"
+                            for i in tri) for tri in part.triangles]
+        triangles += len(part.triangles)
+        base += len(pos)
+
+    with (out_dir / f"{stem}.obj").open("w", encoding="utf-8") as out:
+        out.write(f"mtllib {stem}.mtl\n")
+        out.write("\n".join(v_lines) + "\n")
+        out.write("\n".join(vt_lines) + "\n")
+        out.write("\n".join(vn_lines) + "\n")
+        for sheet in SHEETS:
+            out.write(f"usemtl {TEXTURED_MATERIAL_PREFIX}{sheet}\n")
+            out.write("\n".join(by_material[sheet]) + "\n")
+    with (out_dir / f"{stem}.mtl").open("w", encoding="utf-8") as out:
+        for sheet in SHEETS:
+            out.write(f"newmtl {TEXTURED_MATERIAL_PREFIX}{sheet}\n"
+                      "Kd 1.0000 1.0000 1.0000\n"
+                      f"map_Kd {sheet}.png\n\n")
+    return {"triangles": triangles, "vertices": base,
+            "lo_cm": [float(v) for v in lo], "hi_cm": [float(v) for v in hi],
+            "centreline_nose_cm": centreline_nose_cm}
+
+
+def _station_env(loadout: Dict, station: str) -> Dict[str, float]:
+    """The rest environment plus every loadout model variable of one
+    station: ``STA3_LOAD``, ``STA3_RACK``, ``STA3_RAIL`` for ``STA3``.
+    One station at a time, so a component is exactly its own station's
+    parts (decision 2's measurement method)."""
+    prefix = f"{station}_"
+    model_vars = loadout.get("model_vars") or {}
+    return {**REST_ENV, **{str(k): float(v) for k, v in model_vars.items()
+                           if str(k).startswith(prefix)}}
+
+
+def _component_records(scene: MdlScene, airframe: Optional[Airframe],
+                       out_dir: Path, name: str,
+                       mesh_origin_cm) -> List[Dict]:
+    """One ``components[]`` row and one OBJ per payload component of the
+    labelled airframe. The row's ``part`` is the OBJ stem and the Unreal
+    asset name, ``SM_<aircraft>_<component id>`` (the convention C3's
+    card ``mesh`` and C4's import follow); its extents are actor-frame
+    metres about the model origin, like the body's, so
+    ``labels.hull_box_body_m({**manifest, **row}, airframe)`` re-bases
+    them. A component whose station adds no geometry is a refusal: the
+    picture would not show what the physics carries."""
+    if airframe is None:
+        return []
+    records: List[Dict] = []
+    for component in airframe.components:
+        if component.cls != PAYLOAD_CLASS:
+            continue   # gear is stowed in the exported pose: no mesh
+        if not component.station:
+            raise ConvertError(
+                f"payload component {component.id!r} names no station, so "
+                f"no loadout variable can show it")
+        env = _station_env(airframe.loadout, component.station)
+        if env == REST_ENV:
+            raise ConvertError(
+                f"payload component {component.id!r}: loading.loadout.model_vars "
+                f"has no {component.station}_* variable, so the store is "
+                f"never drawn")
+        parts = scene.added_parts(env)
+        for part in parts:
+            _filter_part(part)
+        parts = [p for p in parts if len(p.triangles)]
+        if not parts:
+            raise ConvertError(
+                f"payload component {component.id!r}: {env} adds no geometry "
+                f"over the rest environment")
+        stem = f"SM_{name}_{component.id}"
+        written = _write_obj(parts, out_dir, stem)
+        records.append({
+            "id": component.id,
+            "class": component.cls,
+            "station": component.station,
+            "part": stem,
+            "asset_path": f"/Game/Aircraft/{name}/{stem}",
+            "triangles": written["triangles"],
+            "vertices": written["vertices"],
+            "model_vars": {k: v for k, v in env.items() if k not in REST_ENV},
+            "mesh_extent_actor_m": {
+                "x": [written["lo_cm"][0] / CM_PER_M, written["hi_cm"][0] / CM_PER_M],
+                "y": [written["lo_cm"][1] / CM_PER_M, written["hi_cm"][1] / CM_PER_M],
+                "z": [written["lo_cm"][2] / CM_PER_M, written["hi_cm"][2] / CM_PER_M],
+            },
+            "mesh_origin_actor_cm": list(mesh_origin_cm),
+            "mass_lb": component.mass_lb,
+        })
+    return records
 
 
 def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
@@ -116,68 +269,27 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         image.save(out_dir / f"{sheet}.png")
         textures.append(f"{sheet}.png")
 
-    by_material: Dict[str, List[str]] = {s: [] for s in SHEETS}
-    v_lines: List[str] = []
-    vt_lines: List[str] = []
-    vn_lines: List[str] = []
-    base = 0
-    triangles = 0
-    lo = np.full(3, 1e30)
-    hi = np.full(3, -1e30)
-    centreline_nose_cm = -1e30
     for part in parts:
-        tri = part.triangles
-        a, b, c = (part.positions[tri[:, k]] for k in range(3))
-        # zero-area and repeated-index triangles are dropped here rather
-        # than left for the engine to discard (the importer rejects a mesh
-        # that loses more than 5 percent of its triangles).
-        keep = (np.linalg.norm(np.cross(b - a, c - a), axis=1) > 2e-10) & \
-            (tri[:, 0] != tri[:, 1]) & (tri[:, 1] != tri[:, 2]) & \
-            (tri[:, 0] != tri[:, 2])
-        part.triangles = tri[keep]
-        pos = _to_ue(part.positions) * CM_PER_M
-        nrm = _to_ue(part.normals)
-        lo, hi = np.minimum(lo, pos.min(0)), np.maximum(hi, pos.max(0))
-        band = np.abs(pos[:, 1]) < CENTRELINE_HALF_WIDTH_CM
-        if band.any():
-            centreline_nose_cm = max(centreline_nose_cm, float(pos[band, 0].max()))
-        v_lines += ["v %.4f %.4f %.4f" % tuple(p) for p in pos]
-        vn_lines += ["vn %.5f %.5f %.5f" % tuple(n) for n in nrm]
-        # OBJ v runs bottom-up; the .mdl's runs top-down.
-        vt_lines += ["vt %.6f %.6f" % (u, 1.0 - v) for u, v in part.uvs]
-        sheet = SHEETS[1] if part.material == WING_MATERIAL else SHEETS[0]
-        by_material[sheet] += [
-            "f " + " ".join(f"{base + i + 1}/{base + i + 1}/{base + i + 1}"
-                            for i in tri) for tri in part.triangles]
-        triangles += len(part.triangles)
-        base += len(pos)
-
-    with (out_dir / "body.obj").open("w", encoding="utf-8") as out:
-        out.write("mtllib body.mtl\n")
-        out.write("\n".join(v_lines) + "\n")
-        out.write("\n".join(vt_lines) + "\n")
-        out.write("\n".join(vn_lines) + "\n")
-        for sheet in SHEETS:
-            out.write(f"usemtl {TEXTURED_MATERIAL_PREFIX}{sheet}\n")
-            out.write("\n".join(by_material[sheet]) + "\n")
-    with (out_dir / "body.mtl").open("w", encoding="utf-8") as out:
-        for sheet in SHEETS:
-            out.write(f"newmtl {TEXTURED_MATERIAL_PREFIX}{sheet}\n"
-                      "Kd 1.0000 1.0000 1.0000\n"
-                      f"map_Kd {sheet}.png\n\n")
+        _filter_part(part)
+    body = _write_obj(parts, out_dir, "body")
+    triangles = body["triangles"]
+    lo, hi = body["lo_cm"], body["hi_cm"]
 
     # -- where the mesh sits: measured from what was just converted -----
     extents = MeshExtents()
-    extents.count = base
-    extents.min = [float(v) for v in lo]
-    extents.max = [centreline_nose_cm, float(hi[1]), float(hi[2])]
+    extents.count = body["vertices"]
+    extents.min = list(lo)
+    extents.max = [body["centreline_nose_cm"], hi[1], hi[2]]
     measured_origin_cm, origin_record = measure_mesh_origin(
         extents, airframe, vrp_actor_cm, name)
     mesh_origin_cm = tuple(a + b for a, b in zip(measured_origin_cm, origin_offset_cm))
 
+    # -- the loaded stations: one OBJ each, same frame as the body ------
+    components = _component_records(scene, airframe, out_dir, name, mesh_origin_cm)
+
     manifest = {
         "magic": "flightsim-aircraft-mesh",
-        "version": MESH_MANIFEST_VERSION,
+        "version": A4_COMPONENTS_MANIFEST_VERSION,
         "name": name,
         "fdm": config["fdm"],
         "fdm_config_name": fdm_name,
@@ -185,13 +297,17 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         "source": {**config["license"], "source_dir": str(source_dir),
                    "license_first_line": license_head},
         "units": "cm, UE actor frame (+X forward +Y right +Z up)",
-        "parts": ["body"],
+        "parts": ["body"] + [row["part"] for row in components],
         "asset_path_root": f"/Game/Aircraft/{name}",
         "surfaces": [],
-        "triangles": {"body": triangles},
+        "triangles": {"body": triangles,
+                      **{row["part"]: row["triangles"] for row in components}},
+        # Version 4: the loaded stations, each its own part (actor-frame
+        # extents about the same model origin as the body).
+        "components": components,
         "textures": sorted(textures),
-        "bounds_cm": {"min": [round(float(x), 2) for x in lo],
-                      "max": [round(float(x), 2) for x in hi]},
+        "bounds_cm": {"min": [round(x, 2) for x in lo],
+                      "max": [round(x, 2) for x in hi]},
         "articulated": False,
         # Version 3: the point in the actor frame the body is attached at.
         "vrp_actor_cm": list(vrp_actor_cm),
@@ -205,7 +321,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         **extents.to_manifest(),
         "nose_measurement": (
             f"the fuselage nose on the centreline (|y| < {CENTRELINE_HALF_WIDTH_CM:g} cm); "
-            f"the drawn mesh reaches x {float(hi[0]) / CM_PER_M:.2f} m at the "
+            f"the drawn mesh reaches x {hi[0] / CM_PER_M:.2f} m at the "
             f"starboard refuelling probe, which is not the nose"),
         "gear_geometry": {"parts": [], "objects": [],
                           "note": "gear stowed in the exported pose: no gear vertex"},
@@ -232,6 +348,9 @@ def main(argv=None) -> int:
           f"{data['mesh_airframe']} [{data['source']['license_name']}]")
     print(f"  body {data['triangles']['body']} tris, bounds cm "
           f"{data['bounds_cm']}")
+    for row in data["components"]:
+        print(f"  {row['class']} {row['id']} ({row['station']}) -> {row['part']} "
+              f"{row['triangles']} tris, {row['mass_lb']:g} lb")
     return 0
 
 

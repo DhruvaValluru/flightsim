@@ -1,0 +1,19 @@
+{
+  "budget_used": 22,
+  "claims": [
+    "assets/aircraft_config/J11.json",
+    "assets/fdm_root/aircraft/J11",
+    "assets_pipeline/convert.py",
+    "core/nl/compiler.py",
+    "docs/PHASE3_AIRCRAFT_SOURCES.md",
+    "examples/j11_default.yaml",
+    "tests/test_aircraft_assets.py",
+    "tests/test_aircraft_configs.py"
+  ],
+  "letter": "D",
+  "needs_windows": true,
+  "stage": "building",
+  "unit": "D2",
+  "updated": "2026-11-04T13:18:27",
+  "worktree": "../p3-D2"
+}

@@ -288,25 +288,74 @@ def scene_to_enu(manifest: Dict):
     return convert
 
 
-def _record_in_enu(record: Dict, to_enu) -> Dict:
-    """``record`` with its camera position moved into the host's frame.
+def _record_in_enu(record: Dict, to_enu,
+                   convergence_deg: Optional[float] = None) -> Dict:
+    """``record`` with its camera moved -- and, when the host says it
+    did so, turned -- into the host's frame.
 
-    The recorded ROTATION is left exactly as it is: the host applies
-    the card's yaw/pitch/roll directly in its ENU frame, so the
-    verifier must read them there too. (Grid convergence would separate
-    grid north from true north elsewhere; at this scene's equatorial
-    origin it is identically zero, and the 0.0013 px residual says the
-    host is doing no other rotation either.)
+    The POSITION goes through ``to_enu`` (see :func:`scene_to_enu`).
+
+    The ROTATION is a separate matter. The card's yaw is a GRID bearing:
+    the poses are solved in the scene's projected CRS (EPSG:32612 at
+    the Grand Canyon), where "north" is grid north. The host's ENU
+    frame is tangent to the round planet, where "north" is TRUE north,
+    and the two differ by the grid convergence. Measured, not assumed
+    (A12 run A-2): at the Grand Canyon scene (36.09 N, -112.0 W) the
+    convergence is 0.589 deg, and the commandlet placing the grid
+    bearing as a true heading put the drawn pixels 1.1% of the image
+    width left of its own projection in every render -- the
+    mask_vs_geometry failure. The commandlet now adds the convergence
+    at placement (true heading = grid bearing + convergence) and records
+    it per frame as ``camera_grid_convergence_deg``; this helper then
+    still read the card's yaw as if it were the host's, which was the
+    3.2 px landmark_reprojection failure on the same renders.
+
+    So when the frame's engine record carries
+    ``camera_grid_convergence_deg``, the recorded orientation is turned
+    about the up axis by it, yaw_enu = yaw_grid + convergence, the sign
+    the commandlet applies. The recorded quaternion is COMPOSED with a
+    rotation about the NED down axis (left-multiplied: yaw is the
+    outermost angle of the Z-Y'-X'' sequence the producer wrote it
+    with, so adding to the yaw composes on the left), not rebuilt from
+    the angles: this module imports none of the producer's code
+    (``test_the_verifier_imports_none_of_the_producer_s_code``), and a
+    pure-axis rotation quaternion is a definition, not a second Euler
+    conversion. ``yaw_deg`` is turned alongside for the readers of the
+    angles. A record WITHOUT the field -- an older render.json, or the
+    equatorial fixtures (EPSG:32631 at 0 N 0 E, where the convergence is
+    identically zero) -- keeps its rotation exactly as recorded, and the
+    0.0013 px residual measured there says the host does no other
+    rotation. Every gate that stands a card pose in the host's frame
+    goes through here: landmark_reprojection, cross_view_consistency
+    and the overlay. mask_vs_geometry and the other bundle gates do not
+    -- they project the card's own objects through the card's own
+    camera, both in grid metres, and the host turned both by the same
+    convergence, so they agree without it (0.6 px on Windows).
     """
-    if to_enu is None:
+    turn = convergence_deg is not None and float(convergence_deg) != 0.0
+    if to_enu is None and not turn:
         return record
-    north, east, up = to_enu(record["position_north_m"],
-                             record["position_east_m"],
-                             record["position_alt_m"])
     moved = dict(record)
-    moved["position_north_m"] = north
-    moved["position_east_m"] = east
-    moved["position_alt_m"] = up
+    if to_enu is not None:
+        north, east, up = to_enu(record["position_north_m"],
+                                 record["position_east_m"],
+                                 record["position_alt_m"])
+        moved["position_north_m"] = north
+        moved["position_east_m"] = east
+        moved["position_alt_m"] = up
+    if turn:
+        convergence = float(convergence_deg)
+        moved["yaw_deg"] = float(record["yaw_deg"]) + convergence
+        moved["camera_grid_convergence_deg"] = convergence
+        # q_enu = q_down(convergence) * q_grid  (Hamilton product, with
+        # the left factor's x and y components zero).
+        half = math.radians(convergence) / 2.0
+        aw, az = math.cos(half), math.sin(half)
+        bw, bx, by, bz = (float(c) for c in record["quaternion_wxyz"])
+        moved["quaternion_wxyz"] = [aw * bw - az * bz,
+                                    aw * bx - az * by,
+                                    aw * by + az * bx,
+                                    aw * bz + az * bw]
     return moved
 
 
@@ -863,6 +912,44 @@ def _engine_frame_times(run_dir) -> Dict[str, float]:
     return out
 
 
+def _engine_grid_convergence(run_dir) -> Dict[str, float]:
+    """``{frame_file: camera_grid_convergence_deg}`` for the frames whose
+    engine record carries it: the grid-to-true rotation the commandlet
+    applied when it placed the camera (see :func:`_record_in_enu`).
+
+    A frame without the field is absent here, not zero: an older
+    render.json applied no such rotation, and the verifier must not
+    invent one. Keyed like :func:`_engine_landmark_pixels`, by the
+    camera directory plus the engine's basename, so the convergence
+    used for a frame is the one recorded for THAT frame.
+    """
+    if run_dir is None:
+        return {}
+    run_dir = Path(run_dir)
+    out: Dict[str, float] = {}
+    for path in sorted(run_dir.rglob("render.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        try:
+            prefix = path.parent.relative_to(run_dir).as_posix()
+        except ValueError:
+            prefix = ""
+        for record in _render_frame_records(payload):
+            name = record.get("frame") or record.get("file")
+            value = record.get("camera_grid_convergence_deg")
+            if not name or value is None:
+                continue
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                continue
+            leaf = str(name).replace("\\", "/").rsplit("/", 1)[-1]
+            out[f"{prefix}/{leaf}" if prefix else leaf] = value
+    return out
+
+
 def verify_capture_times(manifest: Dict, run_dir=None,
                          tol_s: float = 0.05) -> Check:
     """The frame delivered for a scheduled instant must be FROM that
@@ -955,6 +1042,9 @@ def verify_landmark_reprojection(manifest: Dict, run_dir=None,
                      "the manifest records no landmarks to reproject")
     known = _landmarks_by_name(manifest["landmarks"])
     to_enu = scene_to_enu(manifest)
+    # The grid-to-true turn the host applied to THIS frame's camera, by
+    # frame; absent for a render that applied none (see _record_in_enu).
+    convergence = _engine_grid_convergence(run_dir)
     compared = 0
     worst = 0.0
     disagreements: List[str] = []
@@ -962,7 +1052,8 @@ def verify_landmark_reprojection(manifest: Dict, run_dir=None,
         pixels = engine.get(str(record.get("file")))
         if not pixels:
             continue
-        placed = _record_in_enu(record, to_enu)
+        placed = _record_in_enu(record, to_enu,
+                                convergence.get(str(record.get("file"))))
         for name, (px, py, visible) in pixels.items():
             landmark = known.get(name)
             if landmark is None or not visible:
@@ -1046,6 +1137,7 @@ def verify_triangulation(manifest: Dict, run_dir=None,
     # against a grid-metre truth would miss by up to 1.17 m here for
     # no reason but the frame.
     to_enu = scene_to_enu(manifest)
+    convergence = _engine_grid_convergence(run_dir)
 
     # (sample_index, landmark) -> [(record, u, v)]
     sightings: Dict[Tuple[int, str], List] = {}
@@ -1053,7 +1145,8 @@ def verify_triangulation(manifest: Dict, run_dir=None,
         pixels = measured.get(str(record.get("file")))
         if not pixels:
             continue
-        placed = _record_in_enu(record, to_enu)
+        placed = _record_in_enu(record, to_enu,
+                                convergence.get(str(record.get("file"))))
         for name, (px, py, visible) in pixels.items():
             if not visible or name not in known:
                 continue

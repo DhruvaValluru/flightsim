@@ -1,0 +1,15 @@
+{
+  "build_order": [
+    [
+      "D2",
+      "D4",
+      "D5"
+    ],
+    [
+      "D6"
+    ]
+  ],
+  "letter": "D",
+  "stage": "aligned",
+  "updated": "2026-11-04T13:15:03"
+}

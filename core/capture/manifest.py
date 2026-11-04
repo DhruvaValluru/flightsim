@@ -268,7 +268,7 @@ from .labels import (
     object_label_record, projection_matrices,
 )
 from .objects import (
-    ROLE_PRIMARY, ROLE_TRAFFIC, compose_objects, mesh_manifest_path,
+    ROLE_COMPONENT, ROLE_PRIMARY, ROLE_TRAFFIC, compose_objects, mesh_manifest_path,
     class_presence, frame_presence, objects_block, taxonomy_classes,
 )
 from .profile import load_profile, sensor_labels, sensor_record
@@ -891,7 +891,11 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 dict({"id": entry["id"], "int_id": entry["int_id"]},
                      **sensor_labels(
                          profile, frames[-1],
-                         dict(entry, bbox_3d_camera=entry["bbox_3d_camera"] or {}),
+                         # a component record (Phase C, has "parent") carries no
+                         # 3-D box; every other object must still state its key
+                         dict(entry, bbox_3d_camera=(
+                             entry.get("bbox_3d_camera") if "parent" in entry
+                             else entry["bbox_3d_camera"]) or {}),
                          omega))
                 for entry in frames[-1]["labels"]["objects"]
                 if entry["int_id"] != objects[0].int_id]
@@ -1060,6 +1064,14 @@ def _object_records(objects, record, primary_state, primary_airframe, axes,
                 obj, record, traffic_state(traffic_tracks[i], sample_index),
                 traffic_airframes[i], axes, terrain_elevation_m,
                 randomization, traffic_meshes[i]))
+        elif obj.role == ROLE_COMPONENT:
+            # Phase C: a component of the primary rides the primary's
+            # state; its hull box is the card's body-frame extent
+            # (composed once in objects.py) through the same camera.
+            out.append(object_label_record(
+                obj, record, primary_state, primary_airframe, axes,
+                terrain_elevation_m, randomization, None,
+                extent_body=obj.extent_body))
         else:
             out.append(object_label_record(
                 obj, record, None, None, axes, terrain_elevation_m,

@@ -62,9 +62,9 @@ sitting 0.4 m from its label (it was ~25 m).
 - [x] **A6 · Materials build by themselves** 🪟
   - Check: the first run prints `MATERIAL-CREATED` for the five rebuilt ones, and
     the second run prints `MATERIAL-EXISTS`.
-- [ ] **A7 · The aircraft is imported automatically** 🪟
+- [x] **A7 · The aircraft is imported automatically** 🪟
   - Check: delete the imported A-4, press Generate, and it imports and renders by itself.
-- [ ] **A8 · Host flight works; nobody needs `--no-host-flight`** 🪟
+- [x] **A8 · Host flight works; nobody needs `--no-host-flight`** 🪟
   - Check: a web-app run with host flight completes, and no message tells the user
     to add the flag.
 - [x] **A9 · Every camera gives pictures, or the run says which one didn't** 🪟
@@ -72,7 +72,7 @@ sitting 0.4 m from its label (it was ~25 m).
   - Check: an empty camera stops with `render.camera_empty`.
 - [ ] **A10 · Generate works in the web app** 🪟
   - Check: a one-line prompt on `/generate.html` finishes a campaign.
-- [ ] **A11 · The engine writes the label pictures; missing ones fail loudly** 🪟
+- [x] **A11 · The engine writes the label pictures; missing ones fail loudly** 🪟
   - Check: every `render.json` has the mask, depth and an "alone" picture per aircraft.
   - Check: a run with missing label pictures stops with `labels.no_bundle`.
 - [ ] **A12 · All seven label checks pass; one real frame saved as a test** 🪟
@@ -92,11 +92,11 @@ sitting 0.4 m from its label (it was ~25 m).
 
 ## B · Lock the tools
 
-- [ ] **B1 · Exact Python package versions saved with hashes** (`requirements.lock`)
+- [x] **B1 · Exact Python package versions saved with hashes** (`requirements.lock`)
   - Check: a fresh install from it, then `pytest -q`, passes.
-- [ ] **B2 · One file lists every other tool's version** (`toolchain.json`)
+- [x] **B2 · One file lists every other tool's version** (`toolchain.json`)
   - Check: preflight prints `OK` per tool, and a wrong version stops it.
-- [ ] **B3 · A test catches any version drifting**
+- [x] **B3 · A test catches any version drifting**
   - Check: `pytest -q tests/test_toolchain_pins.py` passes.
 - [ ] **B4 · Picture quality checked on this engine** 🪟
   - Check: `gate6_visual.py` passes, and the A12 label test still passes.

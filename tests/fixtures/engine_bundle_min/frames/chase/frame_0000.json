@@ -1,0 +1,2405 @@
+{
+ "context": {
+  "manifest_version": 8,
+  "spec_digest": "460442d09e89eeab3d0eb808f64b3a4b8f6a1a54d77169ae822c3a087fdfbbe2",
+  "simulation_digest": "a067e9b923422ba6a3617f0a75a044362c8fcad4e78567c1bedf3d547e6615ba",
+  "output_digest": "219595ec68cf4593d71763db323d47e06f9155bbea5fc8d4be5370889f821c6d",
+  "solve_source": "host flight",
+  "seed": 0,
+  "aircraft": "c172p",
+  "scene": {
+   "key": "grand_canyon",
+   "terrain": "C:\\Users\\kanth\\flightsim\\runs\\terrain\\grand_canyon",
+   "terrain_sha256": "354cd02e9efdf7ef090df725b8027a924f1d931046aba1a0d10744d29143e21b"
+  },
+  "frame": {
+   "crs": "EPSG:32612",
+   "origin_lat_deg": 36.09,
+   "origin_lon_deg": -112.0,
+   "origin_x_m": 409973.48382695805,
+   "origin_y_m": 3994393.650552804,
+   "declared_on_card": false
+  },
+  "software_revision": "3daeb9e7fbdd2857a9b909edc5b4820d0a82e7ad",
+  "conditions": {
+   "altitude": {
+    "value": 2000.0,
+    "unit": "m",
+    "source": "user",
+    "from": "2000 m"
+   },
+   "airspeed": {
+    "value": 100.0,
+    "unit": "kt",
+    "source": "user",
+    "from": "100 kt"
+   },
+   "airspeed_kind": {
+    "value": "cas",
+    "unit": null,
+    "source": "user",
+    "from": "assumed calibrated"
+   },
+   "heading": {
+    "value": 3.0,
+    "unit": "deg",
+    "source": "derived",
+    "from": "along ridge axis 3 deg computed from the scene raster, so the track samples the relief"
+   },
+   "latitude": {
+    "value": 36.09,
+    "unit": "deg",
+    "source": "inferred",
+    "from": "'grand canyon': the grand_canyon bake's origin (Grand Canyon (Cape Royal reach), Arizona)"
+   },
+   "longitude": {
+    "value": -112.0,
+    "unit": "deg",
+    "source": "inferred",
+    "from": "'grand canyon': the grand_canyon bake's origin (Grand Canyon (Cape Royal reach), Arizona)"
+   },
+   "terrain_elevation": {
+    "value": 1340.0,
+    "unit": "m",
+    "source": "inferred",
+    "from": "'grand canyon': the grand_canyon bake's datum"
+   },
+   "wind_speed": {
+    "value": 0.0,
+    "unit": "kt",
+    "source": "default",
+    "from": "still air"
+   },
+   "wind_direction": {
+    "value": 0.0,
+    "unit": "deg",
+    "source": "default",
+    "from": "still air"
+   },
+   "turbulence": {
+    "value": "none",
+    "unit": null,
+    "source": "default",
+    "from": "smooth air"
+   },
+   "surface": {
+    "value": "unspecified",
+    "unit": null,
+    "source": "default",
+    "from": "no ground cover stated; no surface coupling"
+   },
+   "weather_date": {
+    "value": "none",
+    "unit": null,
+    "source": "default",
+    "from": "no date stated; spec wind as given"
+   },
+   "weather_event": {
+    "value": "none",
+    "unit": null,
+    "source": "default",
+    "from": "no severe weather requested"
+   }
+  },
+  "state_units": {
+   "t": "s",
+   "lat_deg": "deg",
+   "lon_deg": "deg",
+   "altitude_m": "m",
+   "roll_deg": "deg",
+   "pitch_deg": "deg",
+   "heading_deg": "deg",
+   "agl_m": "m",
+   "tas_kt": "kt",
+   "cas_kt": "kt",
+   "n_z": "g",
+   "elevator_pos_rad": "rad",
+   "aileron_pos_rad": "rad",
+   "rudder_pos_rad": "rad",
+   "alpha_deg": "deg",
+   "beta_deg": "deg",
+   "qbar_pa": "Pa",
+   "f_aero_x_n": "N",
+   "f_aero_y_n": "N",
+   "f_aero_z_n": "N",
+   "drag_n": "N",
+   "side_force_n": "N",
+   "lift_n": "N",
+   "flight_path_angle_deg": "deg",
+   "wind_north_mps": "m/s",
+   "wind_east_mps": "m/s",
+   "wind_down_mps": "m/s",
+   "v_north_mps": "m/s",
+   "v_east_mps": "m/s",
+   "v_down_mps": "m/s",
+   "mach": "1",
+   "roll_rate_dps": "deg/s",
+   "weight_kg": "kg",
+   "wind_speed_mps": "m/s",
+   "density_altitude_m": "m",
+   "pressure_altitude_m": "m",
+   "temperature_k": "K",
+   "rh_pct": "%",
+   "vapour_pressure_pa": "Pa",
+   "icing_eta": "1",
+   "icing_lift_factor": "1",
+   "icing_drag_factor": "1",
+   "icing_pitch_factor": "1",
+   "icing_roll_factor": "1",
+   "icing_yaw_factor": "1",
+   "icing_side_factor": "1",
+   "icing_alpha_shift_deg": "deg",
+   "gust_north_mps": "m/s",
+   "gust_east_mps": "m/s",
+   "gust_down_mps": "m/s",
+   "gust_p_equivalent_rad_s": "rad/s",
+   "wind_profile_speed_mps": "m/s",
+   "wind_layer_index": "1",
+   "shear_dv_dz_per_s": "1/s",
+   "cg_x_m": "m",
+   "iyy_kgm2": "kg m^2",
+   "undulation_m": "m",
+   "hae_m": "m",
+   "failure_state_flag": "1",
+   "elevator_deg": "deg",
+   "aileron_deg": "deg",
+   "rudder_deg": "deg",
+   "engine0_thrust_n": "N",
+   "engine0_rpm": "rpm",
+   "wake_v_mps": "m/s",
+   "wake_w_mps": "m/s",
+   "wake_p_eq_rad_s": "rad/s",
+   "wake_gamma_m2_s": "m^2/s",
+   "wake_age_s": "s",
+   "wake_lateral_m": "m",
+   "wake_vertical_m": "m",
+   "wake_rcr": "1"
+  },
+  "airframe": {
+   "aircraft": "c172p",
+   "length_m": 8.28,
+   "span_m": 10.911839999999998,
+   "height_m": 2.72,
+   "dimensions_source": "FAA Type Certificate Data Sheet 3A12 / Cessna 172P Pilot's Operating Handbook, section 1 (length 8.28 m, height 2.72 m); span from the flown FDM's own <wingspan>",
+   "span_source": "c172p.xml <metrics><wingspan>",
+   "cg_structural_in": [
+    41.0,
+    0.0,
+    36.5
+   ],
+   "body_frame": "metres about the CG: x forward, y right, z down",
+   "box_body_m": {
+    "forward": [
+     -3.7338,
+     1.99898
+    ],
+    "right": [
+     -5.455919999999999,
+     5.455919999999999
+    ],
+    "down": [
+     -1.2976000000000003,
+     1.4223999999999999
+    ]
+   },
+   "keypoints": [
+    {
+     "name": "nose",
+     "body_m": [
+      1.99898,
+      0.0,
+      0.25145999999999996
+     ],
+     "source": "c172p.xml <contact type=\"STRUCTURE\" name=\"NOSE_SKID\"> location, about the same file's <location name=\"CG\">",
+     "basis": "fdm"
+    },
+    {
+     "name": "tail",
+     "body_m": [
+      -3.7338,
+      0.0,
+      0.7239
+     ],
+     "source": "c172p.xml <contact type=\"STRUCTURE\" name=\"TAIL_SKID\"> location, about the same file's <location name=\"CG\">",
+     "basis": "fdm"
+    },
+    {
+     "name": "left_wingtip",
+     "body_m": [
+      -0.05588000000000007,
+      -5.45592,
+      -0.58166
+     ],
+     "source": "c172p.xml <contact type=\"STRUCTURE\" name=\"LEFT_TIP\"> location, about the same file's <location name=\"CG\">",
+     "basis": "fdm"
+    },
+    {
+     "name": "right_wingtip",
+     "body_m": [
+      -0.05588000000000007,
+      5.45592,
+      -0.58166
+     ],
+     "source": "c172p.xml <contact type=\"STRUCTURE\" name=\"RIGHT_TIP\"> location, about the same file's <location name=\"CG\">",
+     "basis": "fdm"
+    },
+    {
+     "name": "nose_gear",
+     "body_m": [
+      1.2141199999999999,
+      0.0,
+      1.4223999999999999
+     ],
+     "source": "c172p.xml <contact type=\"BOGEY\" name=\"NOSE\"> location, about the same file's <location name=\"CG\">",
+     "basis": "fdm"
+    },
+    {
+     "name": "left_main_gear",
+     "body_m": [
+      -0.43688000000000005,
+      -1.0922,
+      1.3208
+     ],
+     "source": "c172p.xml <contact type=\"BOGEY\" name=\"LEFT_MAIN\"> location, about the same file's <location name=\"CG\">",
+     "basis": "fdm"
+    },
+    {
+     "name": "right_main_gear",
+     "body_m": [
+      -0.43688000000000005,
+      1.0922,
+      1.3208
+     ],
+     "source": "c172p.xml <contact type=\"BOGEY\" name=\"RIGHT_MAIN\"> location, about the same file's <location name=\"CG\">",
+     "basis": "fdm"
+    }
+   ],
+   "keypoints_missing": [],
+   "config_sha256": "5402065a3d2b2063295f9152e9033ccd68ba050eff53807b77677ebb8478936f",
+   "fdm_xml": "C:\\Users\\kanth\\flightsim\\.venv\\Lib\\site-packages\\jsbsim\\aircraft\\c172p\\c172p.xml",
+   "fdm_xml_sha256": "57b9064e5f50025adf4fa15b6bb60996d41aeef087b3fc28956d887e76256bd6",
+   "components": [],
+   "loadout": {}
+  },
+  "label_conventions": {
+   "payload": "a labels.objects[] entry of class payload (parent = the aircraft's id, its own int_id from the card's component band): bbox_2d_hull is the card's body-frame extent box projected through the frame's camera, bbox_2d_tight and visible_fraction are measured from the ID image like any object's; the aircraft's own tight box counts its payload's pixels (component_rollup)",
+   "landing_gear": "as payload, for the landing gear (class landing_gear); optional, present only when the card declares it",
+   "component_rollup": "a parent's bbox_2d_tight, visible_fraction and pixels count its own pixels and its components' pixels (the ID image holds one value per pixel); a component never appears in its parent's occluded_by; a null bbox_2d_tight carries basis.bbox_2d_tight saying out of frame, fully occluded or no pixels",
+   "camera_frame": "x right, y down, z forward, metres",
+   "body_frame": "x forward, y right, z down, metres about the CG",
+   "bbox_2d": "[u0, v0, u1, v1] px, top-left origin, clipped to the image; the airframe's OVERALL extents box (nose-to-tail x FDM wingspan x cited height from the gear contacts up), not a tight hull",
+   "truncation": "1 - clipped area / unclipped area",
+   "fraction_in_frame": "labels.objects[] only: clipped area / unclipped area of the projected box (the complement of truncation, computed as the ratio); null when truncation is",
+   "keypoint_in_frame": "inside the image with positive depth; NOT unoccluded",
+   "corner_order": "for x in (aft, fwd), for y in (left, right), for z in (top, bottom)",
+   "horizon": "spherical Earth R = 6371008.8 m, no refraction, the scene datum plane's tangent horizon; terrain occlusion not modelled",
+   "projection_matrix": "P = K [R | t], 3x4, over homogeneous scene points (north, east, up, 1): pixel = (P p) / (P p)_z; K = [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]; the rows of R are the camera's right, down and forward axes in scene coordinates; t = -R c for the camera centre c. Per frame as intrinsic_matrix and projection_matrix.",
+   "projection": "u = cx + fx*x/z, v = cy + fy*y/z over the camera frame above -- the manifest's documented model",
+   "objects": "labels.objects[] lists every labelled object of the frame, the primary airframe first with the same bbox_2d / bbox_2d_unclipped / truncation / in_frame / bbox_3d_camera / keypoints / horizon values as the frame's labels; ids and int_ids resolve through the manifest's objects[]",
+   "id_mask": "frame_NNNN_mask.png is the ID image: an 8-bit grey PNG whose pixel value is the object's int_id from objects[] (0 = background); the primary airframe is always int_id 1",
+   "alone_pass": "frame_NNNN_alone_<int_id>.png is the ID pass rendered with ONLY that object visible -- its unoccluded footprint; one per aircraft object, none for scene objects (terrain), whose visible_fraction is therefore null",
+   "depth_f32": "frame_NNNN_depth.f32 is raw little-endian float32, row-major, width*height values, metres, +inf for sky; the 16-bit PNG beside it is the same depth at depth_scale_m",
+   "visible_fraction": "pixels carrying the object's int_id in the ID image / pixels in its alone pass -- geometric occlusion only; atmospheric_transmittance is analytic (Koschmieder along the CG ray) and is never folded into it",
+   "bbox_2d_tight": "[u0, v0, u1, v1] px around the pixels carrying the object's int_id (pixel (x, y) covers [x, x+1) x [y, y+1)); null when it has no pixels or no engine bundle exists",
+   "bbox_2d_hull": "the imported mesh's extent (mesh_manifest version >= 3 mesh_extent_actor_m about the measured mesh origin) as a body-frame box about the CG, projected and clipped like bbox_2d; null with a basis when no such manifest is on the producing machine"
+  },
+  "assets": {
+   "aircraft_config": {
+    "path": "assets/aircraft_config/c172p.json",
+    "sha256": "5402065a3d2b2063295f9152e9033ccd68ba050eff53807b77677ebb8478936f"
+   },
+   "fdm_xml": {
+    "path": "C:\\Users\\kanth\\flightsim\\.venv\\Lib\\site-packages\\jsbsim\\aircraft\\c172p\\c172p.xml",
+    "sha256": "57b9064e5f50025adf4fa15b6bb60996d41aeef087b3fc28956d887e76256bd6"
+   },
+   "mesh_manifest": {
+    "path": "assets\\generated\\c172p\\mesh_manifest.json",
+    "sha256": "23d046edb9bf5a1bb0a8f72411cf476029b3e92fba0730a4e9d2e09682deabaa",
+    "note": null
+   },
+   "imagery_sidecar": {
+    "path": null,
+    "sha256": null
+   }
+  },
+  "randomization": null,
+  "objects": [
+   {
+    "id": "aircraft:c172p:0",
+    "int_id": 1,
+    "class": "aircraft",
+    "class_id": 1,
+    "instance": 0,
+    "role": "primary",
+    "mesh_sha256": "23d046edb9bf5a1bb0a8f72411cf476029b3e92fba0730a4e9d2e09682deabaa",
+    "licence": "GPL-2.0",
+    "in_scene": true,
+    "labelled": true
+   },
+   {
+    "id": "terrain",
+    "int_id": 2,
+    "class": "terrain",
+    "class_id": 2,
+    "instance": 0,
+    "role": "scene",
+    "mesh_sha256": null,
+    "licence": null,
+    "in_scene": true,
+    "labelled": true
+   }
+  ],
+  "taxonomy": [
+   "aircraft",
+   "terrain",
+   "building",
+   "vegetation",
+   "water",
+   "cloud",
+   "payload",
+   "landing_gear"
+  ],
+  "traffic": [],
+  "presence": [
+   {
+    "class": "aircraft",
+    "class_id": 1,
+    "objects": [
+     "aircraft:c172p:0"
+    ],
+    "in_scene": true,
+    "labelled": true,
+    "labelled_as": "instance id (ID image) + class image",
+    "reason": "composed as aircraft:c172p:0"
+   },
+   {
+    "class": "terrain",
+    "class_id": 2,
+    "objects": [
+     "terrain"
+    ],
+    "in_scene": true,
+    "labelled": true,
+    "labelled_as": "instance id (ID image) + class image",
+    "reason": "composed as terrain"
+   },
+   {
+    "class": "building",
+    "class_id": 3,
+    "objects": [],
+    "in_scene": false,
+    "labelled": false,
+    "labelled_as": null,
+    "reason": "no building footprint set and no land cover in this scene's bake, so none is drawn"
+   },
+   {
+    "class": "vegetation",
+    "class_id": 4,
+    "objects": [],
+    "in_scene": false,
+    "labelled": false,
+    "labelled_as": null,
+    "reason": "no land cover in this scene's bake, so no vegetation is drawn"
+   },
+   {
+    "class": "water",
+    "class_id": 5,
+    "objects": [],
+    "in_scene": false,
+    "labelled": false,
+    "labelled_as": null,
+    "reason": "no water surface and no land cover in this scene"
+   },
+   {
+    "class": "cloud",
+    "class_id": 6,
+    "objects": [],
+    "in_scene": null,
+    "labelled": false,
+    "labelled_as": "visibility record only (volumetrics write no id)",
+    "reason": "no cloud cover was recorded for this run"
+   },
+   {
+    "class": "payload",
+    "class_id": 7,
+    "objects": [],
+    "in_scene": false,
+    "labelled": false,
+    "labelled_as": null,
+    "reason": "no producer in this build composes a 'payload' object"
+   },
+   {
+    "class": "landing_gear",
+    "class_id": 8,
+    "objects": [],
+    "in_scene": false,
+    "labelled": false,
+    "labelled_as": null,
+    "reason": "no producer in this build composes a 'landing_gear' object"
+   }
+  ],
+  "datum": {
+   "vertical_datum_of_heights": "EGM2008 orthometric (GLO-30)",
+   "geoid_model": "EGM96 15-minute grid (GeographicLib egm96-15)",
+   "origin_lat_deg": 36.09,
+   "origin_lon_deg": -112.0,
+   "undulation_m": -23.403480000000002,
+   "undulation_source": {
+    "file": "assets/geoid/egm96-15.pgm",
+    "sha256": "2a12f13b6df65cdea52432c7fa1b43f34b007148eb817bf032af5af710905caa",
+    "tarball_sha256": "8b1ebad1ebae0a045502d0edb9cc51553da1d3914f01e07470c11b3bed75048e",
+    "tarball_url": "https://sourceforge.net/projects/geographiclib/files/geoids-distrib/egm96-15.tar.bz2/download",
+    "description": "WGS84 EGM96, 15-minute grid",
+    "interpolation": "bilinear",
+    "grid": [
+     1440,
+     721
+    ],
+    "model": "EGM96",
+    "posting_deg": 0.25,
+    "max_bilinear_error_m": 1.152,
+    "max_cubic_error_m": 0.169
+   },
+   "bilinear_error_bound_m": 1.152,
+   "model_difference_bound_m": 13.7,
+   "model_difference_basis": "measured 2026-09-28: max |EGM2008-5 - EGM96-15| over all 1,038,240 EGM96 grid nodes is 11.985 m (28.5 N, 94.5 E), RMS 0.722 m; the bound adds both grids' bilinear error bounds (1.152 + 0.478 m). Pavlis et al. 2012 (J. Geophys. Res. 117, B04406) is the EGM2008 reference, unverified here",
+   "model_difference_at_origin_m": -0.016,
+   "orthometric_height_of_origin_m": 1340.1719805059997,
+   "ellipsoidal_height_of_origin_m": 1316.7685005059998,
+   "note": "JSBSim h-sl is ellipsoidal; heights fed to the FDM are orthometric, so JSBSim altitude equals orthometric height here; ellipsoidal = altitude + undulation_m",
+   "geoid_model_key": "EGM96",
+   "grid_sha256": "2a12f13b6df65cdea52432c7fa1b43f34b007148eb817bf032af5af710905caa",
+   "interpolation": "bilinear",
+   "interpolation_error_bound_m": 1.152,
+   "cubic_error_bound_m": 0.169,
+   "undulation_bilinear_m": -23.403480000000002,
+   "egm2008_minus_egm96_at_origin_m": null,
+   "bounds": {
+    "scene_bbox_deg": [
+     35.98,
+     36.2,
+     -112.12,
+     -111.85
+    ],
+    "lattice_step_deg": 0.0625,
+    "samples": 36,
+    "undulation_min_m": -23.659295999999998,
+    "undulation_max_m": -23.280417600000007,
+    "undulation_range_m": 0.37887839999999073,
+    "note": "N is taken at the scene origin for the whole flight; the range bounds the error of that choice anywhere in the bbox"
+   },
+   "gtx": {
+    "file": "grand_canyon_geoid.gtx",
+    "sha256": "05c414361ca404840fd25cf9d4f3c03aecadcd6d2cd4160d340c29a4b0423c70",
+    "bytes": 140,
+    "format": "NOAA .gtx: big-endian header of four float64 (south latitude, west longitude, latitude step, longitude step) and two int32 (rows, columns), then float32 undulations row-major from the SOUTH row northward, west to east",
+    "sign": "the grid holds +N (ellipsoidal = orthometric + N); PROJ's forward vgridshift SUBTRACTS the grid from a height, so an evaluator uses '+inv +proj=vgridshift' to read +N",
+    "grid_sha256": "2a12f13b6df65cdea52432c7fa1b43f34b007148eb817bf032af5af710905caa",
+    "model": "EGM96",
+    "posting_deg": 0.25,
+    "rows": 5,
+    "cols": 5,
+    "lat_south": 35.5,
+    "lat_north": 36.5,
+    "lon_west": -112.5,
+    "lon_east": -111.5,
+    "alignment": {
+     "south_node": 142,
+     "west_node": -450,
+     "north_node": 146,
+     "east_node": -446,
+     "node_aligned": true,
+     "rule": "floor / ceil of the scene bbox in whole nodes of posting_deg, plus margin_nodes on every side"
+    },
+    "margin_nodes": 1,
+    "scene_bbox_deg": [
+     35.98,
+     36.2,
+     -112.12,
+     -111.85
+    ],
+    "node_value_min_m": -24.420000076293945,
+    "node_value_max_m": -22.812000274658203,
+    "evaluator": "+inv +proj=vgridshift +grids=<file> (PROJ; bilinear on the nodes)",
+    "samples_file": "grand_canyon_geoid.json",
+    "samples_sha256": "1c34283172d7732ada8559c9b5a17f5eba31e1c2e75d356d6b602e23ba076dd7",
+    "samples_count": 100
+   },
+   "u_model_m": 13.7,
+   "u_model_basis": "declared: EGM96 is not the bakes' datum model; the binding term is the EGM2008-EGM96 difference bound (13.7 m stated), not the model's own accuracy",
+   "tide_system": "not verified here",
+   "physics_frame": {
+    "frame": "orthometric",
+    "jsbsim_h_sl": "orthometric height in the ellipsoidal slot (unchanged)",
+    "jsbsim_ecef": "radially low by undulation_m (JSBSim's own position/ecef-*)",
+    "export": "hae_m = altitude_m + undulation_m (the runner's appended channel; DIS reads it)",
+    "atmosphere": "evaluated at the orthometric number (on the geoid), as before",
+    "ellipsoid_frame": "refused by name (datum.physics_frame_unsupported): flying at HAE with the atmosphere kept on the geoid needs the uniform delta-T / P-sl recipe measured in the blueprint, not applied here",
+    "note": "orthometric heights are passed to JSBSim h-sl (its ellipsoidal slot) unchanged, so JSBSim altitude equals orthometric height and JSBSim's own ECEF is radially low by the undulation; the geoid is applied where a coordinate leaves the system (hae_m = altitude_m + undulation_m at export); the ellipsoid frame (flying at HAE with the atmosphere kept on the geoid) is refused by name until the physics frame handles it"
+   }
+  },
+  "applied_variables": {
+   "record_version": 2,
+   "applied_variables": [
+    {
+     "name": "scene.geoid_undulation_m",
+     "value": -23.403480000000002,
+     "unit": "m",
+     "source": "derived",
+     "model_name": "EGM96 bilinear",
+     "parameters": {
+      "vertical_datum_of_heights": "EGM2008 orthometric (GLO-30)",
+      "origin_lat_deg": 36.09,
+      "origin_lon_deg": -112.0,
+      "interpolation": "bilinear",
+      "bilinear_error_bound_m": 1.152,
+      "model_difference_bound_m": 13.7,
+      "model_difference_at_origin_m": -0.016,
+      "grid_sha256": "2a12f13b6df65cdea52432c7fa1b43f34b007148eb817bf032af5af710905caa",
+      "ellipsoidal_height_of_origin_m": 1316.7685005059998,
+      "model": "EGM96",
+      "interpolation_error_bound_m": 1.152,
+      "undulation_bilinear_m": -23.403480000000002,
+      "bounds": {
+       "scene_bbox_deg": [
+        35.98,
+        36.2,
+        -112.12,
+        -111.85
+       ],
+       "lattice_step_deg": 0.0625,
+       "samples": 36,
+       "undulation_min_m": -23.659295999999998,
+       "undulation_max_m": -23.280417600000007,
+       "undulation_range_m": 0.37887839999999073,
+       "note": "N is taken at the scene origin for the whole flight; the range bounds the error of that choice anywhere in the bbox"
+      },
+      "gtx_file": "grand_canyon_geoid.gtx",
+      "gtx_sha256": "05c414361ca404840fd25cf9d4f3c03aecadcd6d2cd4160d340c29a4b0423c70",
+      "physics_frame": "orthometric",
+      "u_model_m": 13.7,
+      "tide_system": "not verified here",
+      "channels": {
+       "undulation_m": "N at the scene origin, constant over the flight; 0 on a scene with no geoid (the frame's definition, not an evaluation: the datum block keeps null)",
+       "hae_m": "altitude_m + undulation_m: the height above the WGS 84 ellipsoid"
+      }
+     },
+     "references": [
+      "Lemoine et al. 1998, NASA/TP-1998-206861, EGM96 (unverified here)",
+      "Pavlis, Holmes, Kenyon, Factor 2012, J. Geophys. Res. 117, B04406, EGM2008 (unverified here)",
+      "GeographicLib geoid datasets, egm96-15.tar.bz2, header MaxBilinearError 1.152 (the committed file's own header)",
+      "GeographicLib geoid datasets, egm2008-5.tar.bz2, header MaxBilinearError 0.478 / MaxCubicError 0.294 (the cached file's own header; not committed)",
+      "GeographicLib 2.3 Geoid.cpp (Karney, MIT/X11): the 12-point cubic transfer matrices, fetched here and re-derived in the tests"
+     ],
+     "properties_written": [],
+     "telemetry_columns": [
+      "undulation_m",
+      "hae_m"
+     ],
+     "frame_keys": [
+      "state.undulation_m",
+      "state.hae_m"
+     ],
+     "null_test": {
+      "quantity": "geoid undulation applied at the scene origin",
+      "unit": "m",
+      "with": -23.403480000000002,
+      "without": 0.0,
+      "difference": -23.403480000000002,
+      "threshold": 1.152,
+      "ok": true,
+      "note": "without = the branch before the datum block (N taken as 0); the difference is the datum error every georeferenced scene carried",
+      "kind": "reached"
+     },
+     "not_claimed": [
+      "no height is converted: JSBSim h-sl stays ellipsoidal and the orthometric heights fed to it are unchanged, so JSBSim altitude equals orthometric height; ellipsoidal = altitude + undulation_m",
+      "EGM96 is not EGM2008 (the bakes' datum); the difference is bounded by model_difference_bound_m and measured only at the curated origins",
+      "the interpolation is bilinear on a 15-minute grid; its error bound is the header's, not the model's error against the geoid",
+      "N is the origin's for the whole flight; its range over the scene bbox (parameters.bounds) is the bound on that choice, not a per-sample evaluation"
+     ],
+     "from": "the scene origin's undulation, bilinear on the EGM96 grid",
+     "std": "GeographicLib egm96-15 header (MaxBilinearError 1.152)",
+     "model": {
+      "name": "EGM96 bilinear",
+      "standard": "EGM96 (Lemoine et al. 1998)",
+      "version": "EGM96 15-minute grid (GeographicLib egm96-15)",
+      "parameters": {
+       "interpolation": "bilinear",
+       "interpolation_error_bound_m": 1.152,
+       "bilinear_error_bound_m": 1.152,
+       "applied": true
+      },
+      "references": [
+       "Lemoine et al. 1998, NASA/TP-1998-206861, EGM96 (unverified here)",
+       "Pavlis, Holmes, Kenyon, Factor 2012, J. Geophys. Res. 117, B04406, EGM2008 (unverified here)",
+       "GeographicLib geoid datasets, egm96-15.tar.bz2, header MaxBilinearError 1.152 (the committed file's own header)",
+       "GeographicLib geoid datasets, egm2008-5.tar.bz2, header MaxBilinearError 0.478 / MaxCubicError 0.294 (the cached file's own header; not committed)",
+       "GeographicLib 2.3 Geoid.cpp (Karney, MIT/X11): the 12-point cubic transfer matrices, fetched here and re-derived in the tests"
+      ]
+     },
+     "uncertainty": {
+      "u_input": {
+       "value": 13.7,
+       "unit": "m",
+       "rule": "declared model spread (declared: EGM96 is not the bakes' datum model; the binding term is the EGM2008-EGM96 difference bound (13.7 m stated), not the model's own accuracy); GUM eq. 10 with sensitivity 1 on hae_m",
+       "sensitivity": {
+        "hae_m": 1.0
+       }
+      },
+      "u_num": null
+     }
+    }
+   ]
+  },
+  "uncertainty": null,
+  "instruments": null,
+  "landcover": null,
+  "licences": [
+   {
+    "asset": "terrain:grand_canyon",
+    "kind": "terrain",
+    "licence": "Copernicus DEM licence",
+    "spdx": "LicenseRef-Copernicus-DEM",
+    "source": "Copernicus GLO-30 DSM (30 m surface model)",
+    "attribution": "produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+    "ml_use": "unknown",
+    "sha256": "354cd02e9efdf7ef090df725b8027a924f1d931046aba1a0d10744d29143e21b",
+    "reaches": [
+     "pixels",
+     "label_files"
+    ],
+    "note": null
+   }
+  ],
+  "class_ids": {
+   "0": "sky",
+   "1": "aircraft",
+   "2": "terrain",
+   "3": "building",
+   "4": "vegetation",
+   "5": "water",
+   "6": "cloud",
+   "7": "payload",
+   "8": "landing_gear"
+  }
+ },
+ "camera": {
+  "camera_id": "chase",
+  "preset": "chase",
+  "horizon_stable": true,
+  "inherits_roll": false,
+  "spec": {
+   "camera_id": {
+    "value": "chase",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "preset": {
+    "value": "chase",
+    "source": "inferred",
+    "from": "chase"
+   },
+   "position_mode": {
+    "value": "offset",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "offset_forward_m": {
+    "value": -28.0,
+    "unit": "m",
+    "source": "default",
+    "from": "per-airframe chase offset table"
+   },
+   "offset_right_m": {
+    "value": 0.0,
+    "unit": "m",
+    "source": "default",
+    "from": "per-airframe chase offset table"
+   },
+   "offset_up_m": {
+    "value": 4.0,
+    "unit": "m",
+    "source": "default",
+    "from": "per-airframe chase offset table"
+   },
+   "position_north_m": {
+    "value": 0.0,
+    "unit": "m",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "position_east_m": {
+    "value": 0.0,
+    "unit": "m",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "position_lat_deg": {
+    "value": 0.0,
+    "unit": "deg",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "position_lon_deg": {
+    "value": 0.0,
+    "unit": "deg",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "position_alt_m": {
+    "value": 0.0,
+    "unit": "m",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "aim_mode": {
+    "value": "aircraft",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "aim_north_m": {
+    "value": 0.0,
+    "unit": "m",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "aim_east_m": {
+    "value": 0.0,
+    "unit": "m",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "aim_alt_m": {
+    "value": 0.0,
+    "unit": "m",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "aim_bearing_deg": {
+    "value": 0.0,
+    "unit": "deg",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "aim_elevation_deg": {
+    "value": 0.0,
+    "unit": "deg",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "focal_length_mm": {
+    "value": 35.0,
+    "unit": "mm",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "sensor_width_mm": {
+    "value": 36.0,
+    "unit": "mm",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "sensor_height_mm": {
+    "value": 20.25,
+    "unit": "mm",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "width_px": {
+    "value": 320,
+    "unit": "px",
+    "source": "user",
+    "from": "lowest resolution (A12 fixture under 2 MB)"
+   },
+   "height_px": {
+    "value": 180,
+    "unit": "px",
+    "source": "user",
+    "from": "lowest resolution (A12 fixture under 2 MB)"
+   },
+   "near_m": {
+    "value": 0.1,
+    "unit": "m",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "far_m": {
+    "value": 100000.0,
+    "unit": "m",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "trigger": {
+    "value": "interval",
+    "source": "user",
+    "from": "one still (A12)"
+   },
+   "capture_count": {
+    "value": 1,
+    "unit": "dimensionless",
+    "source": "user",
+    "from": "one still (A12)"
+   },
+   "period_s": {
+    "value": 5.0,
+    "unit": "s",
+    "source": "user",
+    "from": "one still at 5 s"
+   },
+   "distance_m": {
+    "value": 500.0,
+    "unit": "m",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "event_channel": {
+    "value": "roll_deg",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "event_threshold": {
+    "value": 30.0,
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "event_direction": {
+    "value": "above",
+    "source": "default",
+    "from": "camera language in the prompt; documented camera default"
+   },
+   "refractory_s": {
+    "value": 2.0,
+    "unit": "s",
+    "source": "default",
+    "from": "one event is one capture"
+   },
+   "profile": {
+    "value": "ideal_pinhole",
+    "source": "default",
+    "from": "the documented ideal pinhole; the engine's frames are the sensor frames"
+   },
+   "moves": []
+  },
+  "schedule_basis": "count 1: the first recorded sample",
+  "trigger": "interval",
+  "capture_count": 1,
+  "pose_track_digest": "05bdf7f470d19f92e62e6f96703ace9e7305ef55256e962efce242a1d5bd523a",
+  "profile": {
+   "name": "ideal_pinhole",
+   "basis": "ideal",
+   "source": "this repository: the capture manifest's documented pinhole model (core/capture/manifest.py) -- no distortion, no rolling shutter, no noise, no vignetting; the frames the engine writes are the sensor frames",
+   "distortion": {
+    "model": "brown-conrady",
+    "k1": 0.0,
+    "k2": 0.0,
+    "k3": 0.0,
+    "p1": 0.0,
+    "p2": 0.0
+   },
+   "rolling_shutter": {
+    "readout_s": 0.0,
+    "direction": "top-to-bottom"
+   },
+   "exposure": {
+    "time_s": 0.001,
+    "reference_time_s": 0.001,
+    "iso": 100.0,
+    "base_iso": 100.0,
+    "gain": 1.0
+   },
+   "noise": {
+    "model": "none",
+    "full_well_e": 0.0,
+    "read_noise_e": 0.0
+   },
+   "vignetting": {
+    "model": "none",
+    "strength": 1.0
+   },
+   "colour": {
+    "linear_source": "engine EXR when present, else the 8-bit sRGB PNG inverted through the sRGB transfer (stated approximation)",
+    "output": "sRGB 8-bit PNG"
+   },
+   "bit_depth": 8,
+   "sha256": "d28beef2beb237919558fc2f2b4c93b2d9cd1b8883cb77d732f60651716773a4"
+  }
+ },
+ "truncation": {
+  "about": "Per aircraft in this frame. cut_box = the box clipped to the picture [x0, y0, x1, y1] px; full_box = the whole box, which may run past the edge; fraction_inside = cut-box area / full-box area (1 = fully in frame); truncation = 1 - fraction_inside; cut_edges = the picture edges the plane crosses. Boxes are the projected 3-D bounding box of the airframe; null when part of it is behind the camera.",
+  "image_size_px": [
+   320,
+   180
+  ],
+  "aircraft": [
+   {
+    "id": "aircraft:c172p:0",
+    "cut_box": [
+     90.4327709034552,
+     73.65686732319138,
+     229.56722959098934,
+     114.58682177214271
+    ],
+    "full_box": [
+     90.4327709034552,
+     73.65686732319138,
+     229.56722959098934,
+     114.58682177214271
+    ],
+    "fraction_inside": 1.0,
+    "percent_inside": 100.0,
+    "truncation": 0.0,
+    "cut_off": false,
+    "cut_edges": [],
+    "in_frame": true,
+    "status": "fully in frame"
+   }
+  ]
+ },
+ "occlusion": {
+  "about": "Per aircraft in this frame. visible_fraction = the plane's pixels in the ID image / its pixels drawn alone (1 = nothing in front of it); hidden_fraction = 1 - visible_fraction; hidden_by = each object in front of it and the share of the plane it hides; by_cause sums those by terrain and other aircraft; fog_transmittance = the share of the plane's light that reaches the camera through the stated fog / visibility (it dims, it does not hide pixels); cloud is null: volumetric clouds write no id, so a plane behind cloud is not measured as hidden. distance_m = camera to the plane's CG. change_from_previous = this frame minus the same camera's previous frame (null on the first frame).",
+  "aircraft": [
+   {
+    "id": "aircraft:c172p:0",
+    "distance_m": 28.284271247461902,
+    "visible_fraction": 1.0,
+    "hidden_fraction": 0.0,
+    "hidden_by": [],
+    "by_cause": {
+     "terrain": 0.0,
+     "other_aircraft": 0.0,
+     "cloud": null,
+     "fog_transmittance": 1.0
+    },
+    "measured": "engine ID image vs the plane's alone pass",
+    "change_from_previous": null
+   }
+  ]
+ },
+ "box_3d": {
+  "about": "Per aircraft, in CAMERA coordinates (x right, y down, z forward along the view; metres). To rebuild the box from this record alone: corner_i = centre_m + sum over a in (forward, right, down) of s_a(i) * extents_m[a] / 2 * body_axes_in_camera[a], with s(i) = (+-1 for aft/nose, left/right, top/bottom; corner order for forward in (aft, nose), right in (left, right), down in (top, bottom)); pixel = K * corner / z with this frame's intrinsic_matrix. rebuild_check does exactly that and states the largest error against the recorded corners. orientation: yaw 0 = nose away from the camera, +90 = to the image's right, 180 = toward it; pitch + = nose up; roll + = right wing down.",
+  "intrinsic_matrix": [
+   [
+    311.11111111111114,
+    0.0,
+    160.0
+   ],
+   [
+    0.0,
+    311.11111111111114,
+    90.0
+   ],
+   [
+    0.0,
+    0.0,
+    1.0
+   ]
+  ],
+  "aircraft": [
+   {
+    "id": "aircraft:c172p:0",
+    "box_source": "measured mesh box (shape_box) drawn; the stated-dimension box is the label of record",
+    "shape_box": {
+     "centre_m": [
+      0.0007699981543856094,
+      0.4184661389331668,
+      26.20942873630733
+     ],
+     "extents_m": {
+      "length": 8.225859999999999,
+      "width": 11.3204,
+      "height": 2.4289899999999998
+     },
+     "basis": "mesh_manifest version 3 mesh_extent_actor_m about mesh_origin_actor_cm (measured from vertices: nose keypoint (x), main-gear contact (z)), re-based on the CG (-x, y, z) * 2.54 of cg_structural_in",
+     "rebuild_check": {
+      "max_corner_error_m": 0.0,
+      "max_pixel_error_px": 0.0,
+      "tolerance": {
+       "m": 0.01,
+       "px": 0.05
+      },
+      "ok": true,
+      "used": "centre_m, extents_m, body_axes_in_camera and the frame's intrinsic_matrix only"
+     }
+    },
+    "centre_m": [
+     -1.083357625830672e-09,
+     0.19028058495004116,
+     27.435691747891543
+    ],
+    "extents_m": {
+     "length": 5.73278,
+     "width": 10.911839999999998,
+     "height": 2.72
+    },
+    "body_axes_in_camera": {
+     "forward": [
+      0.0,
+      -0.14822270303449875,
+      0.9889540081849795
+     ],
+     "right": [
+      1.0,
+      1.7169751996906624e-08,
+      2.573369073388676e-09
+     ],
+     "down": [
+      -1.7361504234258973e-08,
+      0.9889540081848838,
+      0.14822270303455554
+     ]
+    },
+    "cg_m": [
+     0.0,
+     -1.0807327255335508e-15,
+     28.284271247461902
+    ],
+    "orientation": {
+     "yaw_deg": 0.0,
+     "pitch_deg": 8.524,
+     "roll_deg": 0.0,
+     "rotation_y": -1.570796,
+     "nose_direction_camera": [
+      0.0,
+      -0.148223,
+      0.988954
+     ],
+     "facing": "away from the camera"
+    },
+    "rebuild_check": {
+     "max_corner_error_m": 0.0,
+     "max_pixel_error_px": 0.0,
+     "tolerance": {
+      "m": 0.01,
+      "px": 0.05
+     },
+     "ok": true,
+     "used": "centre_m, extents_m, body_axes_in_camera and the frame's intrinsic_matrix only"
+    }
+   }
+  ]
+ },
+ "limits": {
+  "about": "What is NOT claimed. Each limit says whether it applies to this frame (true / false / 'always') and to which planes. A number under a limit that applies should not be trusted beyond what the limit says.",
+  "applies_here": [
+   "depth_tolerance"
+  ],
+  "limits": [
+   {
+    "key": "mask_far_away",
+    "limit": "Masks and mask boxes are not pixel-exact for a plane more than 8000 m from the camera.",
+    "applies": false,
+    "objects": [],
+    "why": "beyond that range one pixel covers more of the airframe than the imported mesh's accuracy"
+   },
+   {
+    "key": "tiny_object",
+    "limit": "Boxes and masks of a plane smaller than 16 px across are not claimed and not checked.",
+    "applies": false,
+    "objects": [],
+    "why": "a few pixels cannot pin down an edge; box_vs_mask counts these and does not grade them"
+   },
+   {
+    "key": "not_rendered",
+    "limit": "No mask, mask box, measured depth or measured occlusion exists for this frame: it was not rendered by the engine.",
+    "applies": false,
+    "objects": [],
+    "why": "only a run on the Windows Unreal host writes the ID and depth images; the boxes here are predicted from the geometry"
+   },
+   {
+    "key": "occlusion_not_measured",
+    "limit": "How much of the plane is hidden is not measured for these planes (visible_fraction is null, not 1).",
+    "applies": false,
+    "objects": [],
+    "why": "measuring it needs the engine's ID image and the plane drawn alone"
+   },
+   {
+    "key": "cloud_occlusion",
+    "limit": "A plane behind cloud is not counted as hidden.",
+    "applies": "always",
+    "objects": [],
+    "why": "volumetric clouds write no id into the ID image"
+   },
+   {
+    "key": "fog_is_a_model",
+    "limit": "The fog / haze dimming (fog_transmittance) is computed from the stated visibility, never measured from pixels; nothing was stated for this run, so its 1.0 is a placeholder.",
+    "applies": "always",
+    "objects": [],
+    "why": "Koschmieder's law along the line to the plane's CG"
+   },
+   {
+    "key": "box_3d_is_stated_size",
+    "limit": "The 3-D box is the airframe's stated length, span and height, not its exact shape.",
+    "applies": false,
+    "objects": [],
+    "why": "no measured mesh box (bbox_3d_camera_shape) on the machine that ran this; with the imported model it is measured instead"
+   },
+   {
+    "key": "truncation_by_box",
+    "limit": "How much of a plane is inside the picture is the share of its projected 3-D box, not of its pixels.",
+    "applies": "always",
+    "objects": [],
+    "why": "fraction_inside = cut-box area / full-box area"
+   },
+   {
+    "key": "depth_tolerance",
+    "limit": "Depth is checked to 1 % + 2 m; a depth image scaled wrong by under 2 % is not caught within 200 m.",
+    "applies": true,
+    "objects": [
+     "aircraft:c172p:0"
+    ],
+    "why": "inside 200 m the tolerance is wider than a 2 % scale error"
+   },
+   {
+    "key": "aircraft_state_from_pre_run",
+    "limit": "The aircraft positions in the labels come from a headless flight; a rendered run flies its own, and the difference is checked, not removed.",
+    "applies": false,
+    "objects": [],
+    "why": "verify_flight_agreement measures the gap against the host's flight"
+   }
+  ]
+ },
+ "frame": {
+  "index": 0,
+  "camera_id": "chase",
+  "file": "frames/chase/frame_0000.png",
+  "t_s": 0.008333333333,
+  "sample_index": 0,
+  "position_north_m": -27.49048828491632,
+  "position_east_m": -1.4335509465424212,
+  "position_alt_m": 2004.000001,
+  "quaternion_wxyz": [
+   0.9971423958501875,
+   0.0018556583144347881,
+   -0.07086472819137038,
+   0.026111093978063885
+  ],
+  "yaw_deg": 3.0000001615838454,
+  "pitch_deg": -8.13010235415598,
+  "roll_deg": 0.0,
+  "focal_length_mm": 35.0,
+  "sensor_width_mm": 36.0,
+  "sensor_height_mm": 20.25,
+  "width_px": 320,
+  "height_px": 180,
+  "near_m": 0.1,
+  "far_m": 100000.0,
+  "principal_point_px": [
+   160.0,
+   90.0
+  ],
+  "fx_px": 311.11111111111114,
+  "fy_px": 311.11111111111114,
+  "aircraft": {
+   "north_m": 0.471138684079051,
+   "east_m": 0.03185590711655095,
+   "alt_m": 2000.000001,
+   "roll_deg": 9.947409229611884e-07,
+   "pitch_deg": 0.3938412678951841,
+   "heading_deg": 3.000000161583845
+  },
+  "state": {
+   "t": 0.008333333333,
+   "lat_deg": 36.09000425,
+   "lon_deg": -111.9999997,
+   "altitude_m": 2000.000001,
+   "roll_deg": 9.947409229611884e-07,
+   "pitch_deg": 0.3938412678951841,
+   "heading_deg": 3.000000161583845,
+   "agl_m": 659.6104614216,
+   "tas_kt": 110.2331009,
+   "cas_kt": 99.99999983,
+   "n_z": 0.9984661973,
+   "elevator_pos_rad": 0.0749506452,
+   "aileron_pos_rad": 0.0,
+   "rudder_pos_rad": 0.0,
+   "alpha_deg": 0.3938176709,
+   "beta_deg": 4.102641944e-05,
+   "qbar_pa": 1618.4945008339541,
+   "f_aero_x_n": -951.0425019304931,
+   "f_aero_y_n": 0.4354570798255551,
+   "f_aero_z_n": -8349.828926441343,
+   "drag_n": 1008.4114238349667,
+   "side_force_n": 0.43617914892015264,
+   "lift_n": 8343.094830461265,
+   "flight_path_angle_deg": 2.359703227e-05,
+   "wind_north_mps": 1.7065985958384002e-12,
+   "wind_east_mps": 8.987797171944001e-14,
+   "wind_down_mps": -1.3838185514328e-14,
+   "v_north_mps": 56.631086778240004,
+   "v_east_mps": 2.9679503113824004,
+   "v_down_mps": -2.3355289780056e-05,
+   "mach": 0.1705368171,
+   "roll_rate_dps": -0.1293943962389589,
+   "weight_kg": 852.7536556,
+   "wind_speed_mps": 1.7089636675827839e-12,
+   "density_altitude_m": 2000.0000009064001,
+   "pressure_altitude_m": 2000.0000009064001,
+   "temperature_k": 275.15408883333333,
+   "rh_pct": 0.0,
+   "vapour_pressure_pa": 0.0,
+   "icing_eta": 0.0,
+   "icing_lift_factor": 1.0,
+   "icing_drag_factor": 1.0,
+   "icing_pitch_factor": 1.0,
+   "icing_roll_factor": 1.0,
+   "icing_yaw_factor": 1.0,
+   "icing_side_factor": 1.0,
+   "icing_alpha_shift_deg": 0.0,
+   "gust_north_mps": 0.0,
+   "gust_east_mps": 0.0,
+   "gust_down_mps": 0.0,
+   "gust_p_equivalent_rad_s": 0.0,
+   "wind_profile_speed_mps": 1.7089636675827839e-12,
+   "wind_layer_index": 0.0,
+   "shear_dv_dz_per_s": 0.0,
+   "cg_x_m": 1.069772340512,
+   "iyy_kgm2": 1876.8082260673323,
+   "undulation_m": 0.0,
+   "hae_m": 2000.000001,
+   "failure_state_flag": 0.0,
+   "elevator_deg": 4.294355641742462,
+   "aileron_deg": 0.0,
+   "rudder_deg": 0.0,
+   "engine0_thrust_n": 1008.4245171752913,
+   "engine0_rpm": 2357.978394,
+   "wake_v_mps": 0.0,
+   "wake_w_mps": 0.0,
+   "wake_p_eq_rad_s": 0.0,
+   "wake_gamma_m2_s": 0.0,
+   "wake_age_s": 0.0,
+   "wake_lateral_m": 0.0,
+   "wake_vertical_m": 0.0,
+   "wake_rcr": 0.0
+  },
+  "intrinsic_matrix": [
+   [
+    311.11111111111114,
+    0.0,
+    160.0
+   ],
+   [
+    0.0,
+    311.11111111111114,
+    90.0
+   ],
+   [
+    0.0,
+    0.0,
+    1.0
+   ]
+  ],
+  "projection_matrix": [
+   [
+    141.89254996829362,
+    318.9743370873046,
+    -22.627416997969526,
+    49703.305132032874
+   ],
+   [
+    45.03589431967755,
+    2.3602313366777534,
+    -320.7122089781653,
+    643948.7093500181
+   ],
+   [
+    0.9885928021392638,
+    0.05180995617097509,
+    -0.14142135623730953,
+    310.6595690984609
+   ]
+  ],
+  "labels": {
+   "bbox_2d": [
+    90.4327709034552,
+    73.65686732319138,
+    229.56722959098934,
+    114.58682177214271
+   ],
+   "bbox_2d_unclipped": [
+    90.4327709034552,
+    73.65686732319138,
+    229.56722959098934,
+    114.58682177214271
+   ],
+   "truncation": 0.0,
+   "in_frame": true,
+   "bbox_3d_camera": {
+    "centre_m": [
+     -1.083357625830672e-09,
+     0.19028058495004116,
+     27.435691747891543
+    ],
+    "extents_m": [
+     5.73278,
+     10.911839999999998,
+     2.72
+    ],
+    "body_axes_in_camera": [
+     [
+      0.0,
+      -0.14822270303449875,
+      0.9889540081849795
+     ],
+     [
+      1.0,
+      1.7169751996906624e-08,
+      2.573369073388676e-09
+     ],
+     [
+      -1.7361504234258973e-08,
+      0.9889540081848838,
+      0.14822270303455554
+     ]
+    ],
+    "corners_m": [
+     [
+      -5.45591997747171,
+      -0.7298328861069681,
+      24.399380978203098
+     ],
+     [
+      -5.455920024695002,
+      1.9601220161560142,
+      24.802546730457106
+     ],
+     [
+      5.455920022528286,
+      -0.7298326987537306,
+      24.399381006283278
+     ],
+     [
+      5.455919975304994,
+      1.960122203509477,
+      24.802546758537314
+     ],
+     [
+      -5.4559199774717095,
+      -1.5795610336096206,
+      30.068836737245736
+     ],
+     [
+      -5.4559200246950015,
+      1.1103938686535864,
+      30.472002489499776
+     ],
+     [
+      5.455920022528286,
+      -1.5795608462561572,
+      30.068836765325944
+     ],
+     [
+      5.455919975304994,
+      1.1103940560068248,
+      30.472002517579952
+     ]
+    ],
+    "cg_m": [
+     0.0,
+     -1.0807327255335508e-15,
+     28.284271247461902
+    ],
+    "centre_px": [
+     159.9999999877151,
+     92.15771502139103
+    ],
+    "corners_px": [
+     [
+      90.4327709034552,
+      80.69406226637436
+     ],
+     [
+      91.56358661621437,
+      114.58681944990776
+     ],
+     [
+      229.56722959098934,
+      80.69406466598386
+     ],
+     [
+      228.436412686781,
+      114.58682177214271
+     ],
+     [
+      103.5496177934281,
+      73.65686732319138
+     ],
+     [
+      104.29649506621293,
+      101.33682863037379
+     ],
+     [
+      216.4503826200386,
+      73.65686927693051
+     ],
+     [
+      215.70350437819693,
+      101.33683053275398
+     ]
+    ],
+    "corners_in_frame": 8,
+    "range_m": 27.436351586651114,
+    "depth_m": 27.435691747891543,
+    "volume_m3": 170.15008447334398,
+    "rotation_camera": [
+     [
+      0.0,
+      1.0,
+      -1.7361504234258973e-08
+     ],
+     [
+      -0.14822270303449875,
+      1.7169751996906624e-08,
+      0.9889540081848838
+     ],
+     [
+      0.9889540081849795,
+      2.573369073388676e-09,
+      0.14822270303455554
+     ]
+    ],
+    "quaternion_camera_wxyz": [
+     0.5357757740427412,
+     -0.46145890385699667,
+     -0.4614589131589146,
+     -0.5357757660310833
+    ],
+    "dimensions_hwl_m": [
+     2.72,
+     10.911839999999998,
+     5.73278
+    ],
+    "location_bottom_m": [
+     -2.4695003384422877e-08,
+     1.5352580360814831,
+     27.637274624018538
+    ],
+    "rotation_y_rad": -1.5707963267948966,
+    "alpha_rad": -1.5707963267554095,
+    "world": {
+     "centre_north_m": -0.3946337607065119,
+     "centre_east_m": -0.013517307612286096,
+     "centre_alt_m": 1999.9316400949797,
+     "heading_deg": 3.000000161583845,
+     "pitch_deg": 0.3938412678951841,
+     "roll_deg": 9.947409229611884e-07
+    }
+   },
+   "keypoints": {
+    "nose": {
+     "u": 159.99999995517177,
+     "v": 89.51111105336115,
+     "depth_m": 30.29844261164857,
+     "in_frame": true,
+     "camera_xyz_m": [
+      -4.36572400452917e-09,
+      -0.04761184401387887,
+      30.29844261164857
+     ]
+    },
+    "tail": {
+     "u": 159.99999984169236,
+     "v": 105.98869842152412,
+     "depth_m": 24.699013186427557,
+     "in_frame": true,
+     "camera_xyz_m": [
+      -1.2567993090684126e-08,
+      1.269337735115478,
+      24.699013186427557
+     ]
+    },
+    "left_wingtip": {
+     "u": 99.68625238624027,
+     "v": 83.73249170240322,
+     "depth_m": 28.14279326599733,
+     "in_frame": true,
+     "camera_xyz_m": [
+      -5.455919989901506,
+      -0.5669523974320353,
+      28.14279326599733
+     ]
+    },
+    "right_wingtip": {
+     "u": 220.31374777685244,
+     "v": 83.73249377979963,
+     "depth_m": 28.14279329407754,
+     "in_frame": true,
+     "camera_xyz_m": [
+      5.455920010098492,
+      -0.5669522100785713,
+      28.14279329407754
+     ]
+    },
+    "nose_gear": {
+     "u": 159.99999974128036,
+     "v": 102.85193752602473,
+     "depth_m": 29.695812060675824,
+     "in_frame": true,
+     "camera_xyz_m": [
+      -2.4695003597585696e-08,
+      1.2267280330340704,
+      29.695812060675824
+     ]
+    },
+    "left_main_gear": {
+     "u": 147.88520788922602,
+     "v": 105.20689192993324,
+     "depth_m": 28.047989563723466,
+     "in_frame": true,
+     "camera_xyz_m": [
+      -1.0922000229310749,
+      1.3709659697596221,
+      28.047989563723466
+     ]
+    },
+    "right_main_gear": {
+     "u": 172.1147915996384,
+     "v": 105.20689234290181,
+     "depth_m": 28.047989569344743,
+     "in_frame": true,
+     "camera_xyz_m": [
+      1.0921999770689252,
+      1.370966007265259,
+      28.047989569344743
+     ]
+    }
+   },
+   "horizon": {
+    "model": "spherical-earth datum-plane tangent horizon, no refraction, no terrain; exact per column, the fitted line is a convenience",
+    "dip_deg": 0.8271774929863094,
+    "height_above_datum_m": 664.0000010000001,
+    "polyline_px": [
+     [
+      0.0,
+      50.68943558437394
+     ],
+     [
+      40.0,
+      50.45237619349042
+     ],
+     [
+      80.0,
+      50.27577906181183
+     ],
+     [
+      120.0,
+      50.16658209398496
+     ],
+     [
+      160.0,
+      50.129605030340244
+     ],
+     [
+      200.0,
+      50.16658209398496
+     ],
+     [
+      240.0,
+      50.27577906181183
+     ],
+     [
+      280.0,
+      50.45237619349042
+     ],
+     [
+      320.0,
+      50.68943558437394
+     ]
+    ],
+    "line_abc": [
+     1.347399558182116e-16,
+     -1.0,
+     50.36643898862915
+    ],
+    "line_max_deviation_px": 0.3229965957447902,
+    "endpoints_px": [
+     [
+      0.0,
+      50.68943558437394
+     ],
+     [
+      320.0,
+      50.68943558437394
+     ]
+    ],
+    "in_frame": true
+   },
+   "objects": [
+    {
+     "id": "aircraft:c172p:0",
+     "int_id": 1,
+     "class_id": 1,
+     "bbox_2d": [
+      90.4327709034552,
+      73.65686732319138,
+      229.56722959098934,
+      114.58682177214271
+     ],
+     "bbox_2d_unclipped": [
+      90.4327709034552,
+      73.65686732319138,
+      229.56722959098934,
+      114.58682177214271
+     ],
+     "truncation": 0.0,
+     "fraction_in_frame": 1.0,
+     "in_frame": true,
+     "bbox_2d_hull": [
+      79.82886741958048,
+      75.60841215755362,
+      240.1929485632209,
+      121.06903322306516
+     ],
+     "bbox_3d_camera_shape": {
+      "centre_m": [
+       0.0007699981543856094,
+       0.4184661389331668,
+       26.20942873630733
+      ],
+      "extents_m": [
+       8.225859999999999,
+       11.3204,
+       2.4289899999999998
+      ],
+      "body_axes_in_camera": [
+       [
+        0.0,
+        -0.14822270303449875,
+        0.9889540081849795
+       ],
+       [
+        1.0,
+        1.7169751996906624e-08,
+        2.573369073388676e-09
+       ],
+       [
+        -1.7361504234258973e-08,
+        0.9889540081848838,
+        0.14822270303455554
+       ]
+      ],
+      "corners_m": [
+       [
+        -5.659429980760153,
+        -0.1729840544295072,
+        21.961914381135365
+       ],
+       [
+        -5.659430022931073,
+        2.2291753419118234,
+        22.321945844579318
+       ],
+       [
+        5.660970019239845,
+        -0.17298386006130506,
+        21.96191441026693
+       ],
+       [
+        5.660969977068925,
+        2.2291755362800254,
+        22.321945873710884
+       ],
+       [
+        -5.6594299807601525,
+        -1.392243258413468,
+        30.096911598903816
+       ],
+       [
+        -5.6594300229310734,
+        1.009916137927863,
+        30.456943062347765
+       ],
+       [
+        5.660970019239844,
+        -1.392243064045265,
+        30.096911628035382
+       ],
+       [
+        5.660969977068925,
+        1.0099163322960651,
+        30.45694309147933
+       ]
+      ],
+      "cg_m": [
+       0.0,
+       -1.0807327255335508e-15,
+       28.284271247461902
+      ],
+      "centre_px": [
+       160.00914003062695,
+       94.96727596605437
+      ],
+      "corners_px": [
+       [
+        79.82886741958048,
+        87.54951866016306
+       ],
+       [
+        81.12194989859094,
+        121.06903055461422
+       ],
+       [
+        240.1929485632209,
+        87.54952141682135
+       ],
+       [
+        238.8995130396205,
+        121.06903322306516
+       ],
+       [
+        101.49859716390456,
+        75.60841215755362
+       ],
+       [
+        102.19014169986292,
+        100.31607575181118
+       ],
+       [
+        218.51732212323873,
+        75.60841418066342
+       ],
+       [
+        217.82558854454658,
+        100.31607772737333
+       ]
+      ],
+      "corners_in_frame": 8,
+      "range_m": 26.21276920101925,
+      "depth_m": 26.20942873630733,
+      "volume_m3": 226.1876108461205,
+      "rotation_camera": [
+       [
+        0.0,
+        1.0,
+        -1.7361504234258973e-08
+       ],
+       [
+        -0.14822270303449875,
+        1.7169751996906624e-08,
+        0.9889540081848838
+       ],
+       [
+        0.9889540081849795,
+        2.573369073388676e-09,
+        0.14822270303455554
+       ]
+      ],
+      "quaternion_camera_wxyz": [
+       0.5357757740427412,
+       -0.46145890385699667,
+       -0.4614589131589146,
+       -0.5357757660310833
+      ],
+      "dimensions_hwl_m": [
+       2.4289899999999998,
+       11.3204,
+       8.225859999999999
+      ],
+      "location_bottom_m": [
+       0.0007699770689255244,
+       1.619545837103667,
+       26.389444468029282
+      ],
+      "rotation_y_rad": -1.5707963267948966,
+      "alpha_rad": -1.5708257054647603,
+      "world": {
+       "centre_north_m": -1.639174931311127,
+       "centre_east_m": -0.07796989416621868,
+       "centre_alt_m": 1999.8791676995552,
+       "heading_deg": 3.000000161583845,
+       "pitch_deg": 0.3938412678951841,
+       "roll_deg": 9.947409229611884e-07
+      }
+     },
+     "atmospheric_transmittance": 1.0,
+     "depth_projected_m": 28.284271247461902,
+     "bbox_3d_camera": {
+      "centre_m": [
+       -1.083357625830672e-09,
+       0.19028058495004116,
+       27.435691747891543
+      ],
+      "extents_m": [
+       5.73278,
+       10.911839999999998,
+       2.72
+      ],
+      "body_axes_in_camera": [
+       [
+        0.0,
+        -0.14822270303449875,
+        0.9889540081849795
+       ],
+       [
+        1.0,
+        1.7169751996906624e-08,
+        2.573369073388676e-09
+       ],
+       [
+        -1.7361504234258973e-08,
+        0.9889540081848838,
+        0.14822270303455554
+       ]
+      ],
+      "corners_m": [
+       [
+        -5.45591997747171,
+        -0.7298328861069681,
+        24.399380978203098
+       ],
+       [
+        -5.455920024695002,
+        1.9601220161560142,
+        24.802546730457106
+       ],
+       [
+        5.455920022528286,
+        -0.7298326987537306,
+        24.399381006283278
+       ],
+       [
+        5.455919975304994,
+        1.960122203509477,
+        24.802546758537314
+       ],
+       [
+        -5.4559199774717095,
+        -1.5795610336096206,
+        30.068836737245736
+       ],
+       [
+        -5.4559200246950015,
+        1.1103938686535864,
+        30.472002489499776
+       ],
+       [
+        5.455920022528286,
+        -1.5795608462561572,
+        30.068836765325944
+       ],
+       [
+        5.455919975304994,
+        1.1103940560068248,
+        30.472002517579952
+       ]
+      ],
+      "cg_m": [
+       0.0,
+       -1.0807327255335508e-15,
+       28.284271247461902
+      ],
+      "centre_px": [
+       159.9999999877151,
+       92.15771502139103
+      ],
+      "corners_px": [
+       [
+        90.4327709034552,
+        80.69406226637436
+       ],
+       [
+        91.56358661621437,
+        114.58681944990776
+       ],
+       [
+        229.56722959098934,
+        80.69406466598386
+       ],
+       [
+        228.436412686781,
+        114.58682177214271
+       ],
+       [
+        103.5496177934281,
+        73.65686732319138
+       ],
+       [
+        104.29649506621293,
+        101.33682863037379
+       ],
+       [
+        216.4503826200386,
+        73.65686927693051
+       ],
+       [
+        215.70350437819693,
+        101.33683053275398
+       ]
+      ],
+      "corners_in_frame": 8,
+      "range_m": 27.436351586651114,
+      "depth_m": 27.435691747891543,
+      "volume_m3": 170.15008447334398,
+      "rotation_camera": [
+       [
+        0.0,
+        1.0,
+        -1.7361504234258973e-08
+       ],
+       [
+        -0.14822270303449875,
+        1.7169751996906624e-08,
+        0.9889540081848838
+       ],
+       [
+        0.9889540081849795,
+        2.573369073388676e-09,
+        0.14822270303455554
+       ]
+      ],
+      "quaternion_camera_wxyz": [
+       0.5357757740427412,
+       -0.46145890385699667,
+       -0.4614589131589146,
+       -0.5357757660310833
+      ],
+      "dimensions_hwl_m": [
+       2.72,
+       10.911839999999998,
+       5.73278
+      ],
+      "location_bottom_m": [
+       -2.4695003384422877e-08,
+       1.5352580360814831,
+       27.637274624018538
+      ],
+      "rotation_y_rad": -1.5707963267948966,
+      "alpha_rad": -1.5707963267554095,
+      "world": {
+       "centre_north_m": -0.3946337607065119,
+       "centre_east_m": -0.013517307612286096,
+       "centre_alt_m": 1999.9316400949797,
+       "heading_deg": 3.000000161583845,
+       "pitch_deg": 0.3938412678951841,
+       "roll_deg": 9.947409229611884e-07
+      }
+     },
+     "keypoints": {
+      "nose": {
+       "u": 159.99999995517177,
+       "v": 89.51111105336115,
+       "depth_m": 30.29844261164857,
+       "in_frame": true,
+       "camera_xyz_m": [
+        -4.36572400452917e-09,
+        -0.04761184401387887,
+        30.29844261164857
+       ]
+      },
+      "tail": {
+       "u": 159.99999984169236,
+       "v": 105.98869842152412,
+       "depth_m": 24.699013186427557,
+       "in_frame": true,
+       "camera_xyz_m": [
+        -1.2567993090684126e-08,
+        1.269337735115478,
+        24.699013186427557
+       ]
+      },
+      "left_wingtip": {
+       "u": 99.68625238624027,
+       "v": 83.73249170240322,
+       "depth_m": 28.14279326599733,
+       "in_frame": true,
+       "camera_xyz_m": [
+        -5.455919989901506,
+        -0.5669523974320353,
+        28.14279326599733
+       ]
+      },
+      "right_wingtip": {
+       "u": 220.31374777685244,
+       "v": 83.73249377979963,
+       "depth_m": 28.14279329407754,
+       "in_frame": true,
+       "camera_xyz_m": [
+        5.455920010098492,
+        -0.5669522100785713,
+        28.14279329407754
+       ]
+      },
+      "nose_gear": {
+       "u": 159.99999974128036,
+       "v": 102.85193752602473,
+       "depth_m": 29.695812060675824,
+       "in_frame": true,
+       "camera_xyz_m": [
+        -2.4695003597585696e-08,
+        1.2267280330340704,
+        29.695812060675824
+       ]
+      },
+      "left_main_gear": {
+       "u": 147.88520788922602,
+       "v": 105.20689192993324,
+       "depth_m": 28.047989563723466,
+       "in_frame": true,
+       "camera_xyz_m": [
+        -1.0922000229310749,
+        1.3709659697596221,
+        28.047989563723466
+       ]
+      },
+      "right_main_gear": {
+       "u": 172.1147915996384,
+       "v": 105.20689234290181,
+       "depth_m": 28.047989569344743,
+       "in_frame": true,
+       "camera_xyz_m": [
+        1.0921999770689252,
+        1.370966007265259,
+        28.047989569344743
+       ]
+      }
+     },
+     "horizon": {
+      "model": "spherical-earth datum-plane tangent horizon, no refraction, no terrain; exact per column, the fitted line is a convenience",
+      "dip_deg": 0.8271774929863094,
+      "height_above_datum_m": 664.0000010000001,
+      "polyline_px": [
+       [
+        0.0,
+        50.68943558437394
+       ],
+       [
+        40.0,
+        50.45237619349042
+       ],
+       [
+        80.0,
+        50.27577906181183
+       ],
+       [
+        120.0,
+        50.16658209398496
+       ],
+       [
+        160.0,
+        50.129605030340244
+       ],
+       [
+        200.0,
+        50.16658209398496
+       ],
+       [
+        240.0,
+        50.27577906181183
+       ],
+       [
+        280.0,
+        50.45237619349042
+       ],
+       [
+        320.0,
+        50.68943558437394
+       ]
+      ],
+      "line_abc": [
+       1.347399558182116e-16,
+       -1.0,
+       50.36643898862915
+      ],
+      "line_max_deviation_px": 0.3229965957447902,
+      "endpoints_px": [
+       [
+        0.0,
+        50.68943558437394
+       ],
+       [
+        320.0,
+        50.68943558437394
+       ]
+      ],
+      "in_frame": true
+     },
+     "not_claimed": [
+      "subpixel_mask_accuracy_beyond_range_m: 8000",
+      "objects_under_px: 16",
+      "atmospheric_transmittance: analytic (Koschmieder), never measured from pixels; clouds and precipitation are not in it"
+     ],
+     "bbox_2d_tight": [
+      95.0,
+      79.0,
+      224.0,
+      109.0
+     ],
+     "visible_fraction": 1.0,
+     "occluded_by": [],
+     "depth_min_m": 22.1046142578125,
+     "depth_median_m": 27.059993743896484,
+     "basis": {
+      "bbox_2d_hull": "mesh_manifest version 3 mesh_extent_actor_m about mesh_origin_actor_cm (measured from vertices: nose keypoint (x), main-gear contact (z)), re-based on the CG (-x, y, z) * 2.54 of cg_structural_in",
+      "bbox_3d_camera_shape": "mesh_manifest version 3 mesh_extent_actor_m about mesh_origin_actor_cm (measured from vertices: nose keypoint (x), main-gear contact (z)), re-based on the CG (-x, y, z) * 2.54 of cg_structural_in",
+      "atmospheric_transmittance": "no visibility or fog density stated by the spec: 1.0 is NOT a measurement; the render host's default fog is not modelled here",
+      "engine": {
+       "files": {
+        "mask": "frame_0000_mask.png",
+        "depth": "frame_0000_depth.f32",
+        "alone_1": "frame_0000_alone_1.png"
+       },
+       "pixels": 1084,
+       "pixels_alone": 1084,
+       "method": "numpy over the ID image (== int_id), the alone pass and the depth under the mask; the verifier re-derives these from the same files"
+      }
+     },
+     "in_scene": true,
+     "labelled": true,
+     "occluded_pixels_by": {},
+     "pixels_alone": 1084
+    },
+    {
+     "id": "terrain",
+     "int_id": 2,
+     "class_id": 2,
+     "bbox_2d": null,
+     "bbox_2d_unclipped": null,
+     "truncation": null,
+     "fraction_in_frame": null,
+     "in_frame": null,
+     "bbox_2d_hull": null,
+     "atmospheric_transmittance": null,
+     "depth_projected_m": null,
+     "bbox_3d_camera": null,
+     "bbox_3d_camera_shape": null,
+     "keypoints": {},
+     "horizon": null,
+     "not_claimed": [
+      "subpixel_mask_accuracy_beyond_range_m: 8000",
+      "objects_under_px: 16",
+      "visible_fraction: no alone pass for a terrain object, so occlusion of it is not measured",
+      "atmospheric_transmittance: analytic (Koschmieder), never measured from pixels; clouds and precipitation are not in it"
+     ],
+     "bbox_2d_tight": [
+      0.0,
+      21.0,
+      320.0,
+      180.0
+     ],
+     "visible_fraction": null,
+     "occluded_by": [],
+     "depth_min_m": 708.7014770507812,
+     "depth_median_m": 3161.0009765625,
+     "basis": {
+      "bbox_2d_hull": "a scene object has no airframe hull",
+      "atmospheric_transmittance": "not computed for a scene object (no single range)",
+      "engine": {
+       "files": {
+        "mask": "frame_0000_mask.png",
+        "depth": "frame_0000_depth.f32",
+        "alone_1": "frame_0000_alone_1.png"
+       },
+       "pixels": 47109,
+       "pixels_alone": null,
+       "method": "numpy over the ID image (== int_id), the alone pass and the depth under the mask; the verifier re-derives these from the same files"
+      }
+     },
+     "in_scene": true,
+     "labelled": true,
+     "occluded_pixels_by": {},
+     "pixels_alone": null
+    }
+   ],
+   "presence": [
+    {
+     "class": "aircraft",
+     "class_id": 1,
+     "in_scene": true,
+     "labelled": true,
+     "in_frame_objects": [
+      "aircraft:c172p:0"
+     ],
+     "in_frame_unknown": [],
+     "in_frame_basis": "engine ID image (pixels carrying the object's int_id)"
+    },
+    {
+     "class": "terrain",
+     "class_id": 2,
+     "in_scene": true,
+     "labelled": true,
+     "in_frame_objects": [
+      "terrain"
+     ],
+     "in_frame_unknown": [],
+     "in_frame_basis": "engine ID image (pixels carrying the object's int_id)"
+    },
+    {
+     "class": "building",
+     "class_id": 3,
+     "in_scene": false,
+     "labelled": false,
+     "in_frame_objects": [],
+     "in_frame_unknown": [],
+     "in_frame_basis": "engine ID image (pixels carrying the object's int_id)"
+    },
+    {
+     "class": "vegetation",
+     "class_id": 4,
+     "in_scene": false,
+     "labelled": false,
+     "in_frame_objects": [],
+     "in_frame_unknown": [],
+     "in_frame_basis": "engine ID image (pixels carrying the object's int_id)"
+    },
+    {
+     "class": "water",
+     "class_id": 5,
+     "in_scene": false,
+     "labelled": false,
+     "in_frame_objects": [],
+     "in_frame_unknown": [],
+     "in_frame_basis": "engine ID image (pixels carrying the object's int_id)"
+    },
+    {
+     "class": "cloud",
+     "class_id": 6,
+     "in_scene": null,
+     "labelled": false,
+     "in_frame_objects": [],
+     "in_frame_unknown": [],
+     "in_frame_basis": "engine ID image (pixels carrying the object's int_id)"
+    },
+    {
+     "class": "payload",
+     "class_id": 7,
+     "in_scene": false,
+     "labelled": false,
+     "in_frame_objects": [],
+     "in_frame_unknown": [],
+     "in_frame_basis": "engine ID image (pixels carrying the object's int_id)"
+    },
+    {
+     "class": "landing_gear",
+     "class_id": 8,
+     "in_scene": false,
+     "labelled": false,
+     "in_frame_objects": [],
+     "in_frame_unknown": [],
+     "in_frame_basis": "engine ID image (pixels carrying the object's int_id)"
+    }
+   ],
+   "passes": {
+    "normal": null,
+    "velocity": null,
+    "albedo": null
+   }
+  },
+  "sensor": {
+   "profile": "ideal_pinhole",
+   "angular_rate_rad_s": [
+    1.0147372222358815e-07,
+    -3.531387832142105e-06,
+    -5.044839577480867e-07
+   ],
+   "labels_sensor": {
+    "keypoints": {
+     "nose": {
+      "u": 159.99999995517177,
+      "v": 89.51111105336115,
+      "in_frame": true
+     },
+     "tail": {
+      "u": 159.99999984169236,
+      "v": 105.98869842152412,
+      "in_frame": true
+     },
+     "left_wingtip": {
+      "u": 99.68625238624027,
+      "v": 83.73249170240322,
+      "in_frame": true
+     },
+     "right_wingtip": {
+      "u": 220.31374777685244,
+      "v": 83.73249377979963,
+      "in_frame": true
+     },
+     "nose_gear": {
+      "u": 159.99999974128036,
+      "v": 102.85193752602473,
+      "in_frame": true
+     },
+     "left_main_gear": {
+      "u": 147.88520788922602,
+      "v": 105.20689192993324,
+      "in_frame": true
+     },
+     "right_main_gear": {
+      "u": 172.1147915996384,
+      "v": 105.20689234290181,
+      "in_frame": true
+     }
+    },
+    "corners_px": [
+     [
+      90.4327709034552,
+      80.69406226637436
+     ],
+     [
+      91.56358661621437,
+      114.58681944990776
+     ],
+     [
+      229.56722959098934,
+      80.69406466598386
+     ],
+     [
+      228.436412686781,
+      114.58682177214271
+     ],
+     [
+      103.5496177934281,
+      73.65686732319138
+     ],
+     [
+      104.29649506621293,
+      101.33682863037379
+     ],
+     [
+      216.4503826200386,
+      73.65686927693051
+     ],
+     [
+      215.70350437819693,
+      101.33683053275398
+     ]
+    ],
+    "bbox_2d": [
+     90.4327709034552,
+     73.65686732319138,
+     229.56722959098934,
+     114.58682177214271
+    ],
+    "bbox_2d_unclipped": [
+     90.4327709034552,
+     73.65686732319138,
+     229.56722959098934,
+     114.58682177214271
+    ],
+    "objects": [
+     {
+      "id": "terrain",
+      "int_id": 2,
+      "keypoints": {},
+      "corners_px": [],
+      "bbox_2d": null,
+      "bbox_2d_unclipped": null
+     }
+    ]
+   }
+  }
+ },
+ "checks": {
+  "box_vs_mask": {
+   "status": "PASS",
+   "detail": "1 object-frames; lowest IoU 0.970 at chase/frame_0000.png aircraft:c172p:0 (130 px span, floor 0.8) (floors 0.8 at >= 64 px, 0.5 at >= 16 px); 1 records' bbox_2d_tight re-counted from the ID image to a pixel",
+   "failure": null,
+   "sentence": "The drawn box matches the object's mask."
+  },
+  "depth_vs_geometry": {
+   "status": "PASS",
+   "detail": "1 object-frames within the hull's depth band at 1 % + 2 m; nearest surface at most -2.59 m beyond the nearest keypoint at chase/frame_0000.png aircraft:c172p:0 (tail at 24.7 m, mask from 22.1 m); median depth vs projected CG depth differs by at most 1.2 m at chase/frame_0000.png aircraft:c172p:0 (median 27.1 m, CG 28.3 m); 1 records' depth_min_m / depth_median_m are the same pixels to 0.05 m",
+   "failure": null,
+   "sentence": "The measured distance under the mask agrees with the aircraft's distance."
+  },
+  "ok": true
+ }
+}

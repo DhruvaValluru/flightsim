@@ -17,6 +17,10 @@ tool calls. Log every command through
    a new one).
 4. Run the box's tests plus the touched modules' tests, from the worktree:
    `/Users/dhruva/flightsim/.venv/bin/pytest -q <box tests> <tests of touched modules>`
+   (the mechanical half is `bash scripts/phase3_integrate.sh <box> <tests...>`: merge
+   --no-ff, those tests, guard targets for the touched files, diff guard, worktree
+   removal, state; you add only the fit review and the note. Never the full suite;
+   `mutation_check.sh` only with `--check-targets`/`--no-suite` and `--match`.)
    (use `--cwd ../p3-<box>` on the runner). No full-suite run.
 5. Diff guard, automatic FAIL on any of: a weakened assertion in an existing
    test; a new `skip`/`xfail` other than the Windows-fixture skip the note

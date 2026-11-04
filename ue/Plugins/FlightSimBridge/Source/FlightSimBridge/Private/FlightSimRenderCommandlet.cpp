@@ -296,6 +296,31 @@ namespace
 		return true;
 	}
 
+	// Grid convergence at a projected position: the clockwise angle, in
+	// degrees, from the LOCAL TRUE north of the engine's round-planet ENU
+	// frame to the projected CRS's grid north. The card's camera poses are
+	// solved in projected metres (core/capture/poses.py aims along grid
+	// bearings), so their yaw is a GRID bearing; the engine's yaw is a TRUE
+	// heading. Applying one as the other turned the camera by this angle
+	// (0.59 deg on the Grand Canyon card, 1 deg west of UTM 12's central
+	// meridian) and drew every frame 1.1 % of its width left of its labels
+	// (Phase 3 A12). Measured through the georeference itself, 100 m along
+	// grid north, so no projection formula is assumed here.
+	double RenderGridConvergenceDeg(AGeoReferencingSystem* GeoReferencing,
+	                                const FVector& ProjectedMetres)
+	{
+		FVector Here = FVector::ZeroVector;
+		FVector NorthStep = FVector::ZeroVector;
+		GeoReferencing->ProjectedToEngine(ProjectedMetres, Here);
+		GeoReferencing->ProjectedToEngine(
+			ProjectedMetres + FVector(0.0, 100.0, 0.0), NorthStep);
+		FVector East, North, Up;
+		GeoReferencing->GetENUVectorsAtEngineLocation(Here, East, North, Up);
+		const FVector Grid = NorthStep - Here;
+		return FMath::RadiansToDegrees(FMath::Atan2(
+			FVector::DotProduct(Grid, East), FVector::DotProduct(Grid, North)));
+	}
+
 	// Rec. 709 luminance of a linear working-colour-space pixel.
 	double RenderLuminance709(const FLinearColor& C)
 	{
@@ -2206,9 +2231,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				FVector Engine;
 				Scenario.GeoReferencing->ProjectedToEngine(Projected, Engine);
 				TrackLocations.Add(Engine);
+				// The card's yaw is a grid bearing; the engine's is true
+				// heading - 90 (RenderGridConvergenceDeg).
 				TrackRotations.Add(FRotator(
 					(*Pitches)[i]->AsNumber(),
-					(*Yaws)[i]->AsNumber() - 90.0,
+					(*Yaws)[i]->AsNumber()
+						+ RenderGridConvergenceDeg(Scenario.GeoReferencing, Projected)
+						- 90.0,
 					(*Rolls)[i]->AsNumber()));
 				TrackFocalLengthsMm.Add((*Focals)[i]->AsNumber());
 			}
@@ -5123,8 +5152,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			                       AppliedProjected.X - CameraOriginXMetres);
 			Record->SetNumberField(TEXT("camera_applied_alt_m"),
 			                       AppliedProjected.Z);
+			// Back to the card's grid bearing: true heading minus the
+			// convergence the placement added (recorded beside it).
+			const double AppliedConvergenceDeg =
+				RenderGridConvergenceDeg(Scenario.GeoReferencing, AppliedProjected);
 			Record->SetNumberField(TEXT("camera_applied_yaw_deg"),
-			                       FMath::Fmod(AppliedRotation.Yaw + 90.0 + 360.0, 360.0));
+			                       FMath::Fmod(AppliedRotation.Yaw + 90.0
+			                                   - AppliedConvergenceDeg + 720.0, 360.0));
+			Record->SetNumberField(TEXT("camera_grid_convergence_deg"),
+			                       AppliedConvergenceDeg);
 			Record->SetNumberField(TEXT("camera_applied_pitch_deg"),
 			                       AppliedRotation.Pitch);
 			Record->SetNumberField(TEXT("camera_applied_roll_deg"),

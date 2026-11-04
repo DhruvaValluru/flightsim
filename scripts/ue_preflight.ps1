@@ -277,11 +277,21 @@ function Get-InstalledTools($repo, $ueRoot, $pins) {
     $found.jsbsim = $null
     $venvPy = Join-Path $repo ".venv\Scripts\python.exe"
     if (Test-Path $venvPy) {
-        $pyBanner = Probe $venvPy @("--version") | Select-Object -First 1
-        if ("$pyBanner" -match "(\d+\.\d+\.\d+)") { $found.python = $Matches[1] }
-        $jsb = Probe $venvPy @("-c", "import importlib.metadata as m;print(m.version('jsbsim'))") |
-            Select-Object -First 1
-        if ($LASTEXITCODE -eq 0 -and $jsb) { $found.jsbsim = "$jsb".Trim() }
+        # Capture Probe's output whole and read $LASTEXITCODE RIGHT AFTER the
+        # call, then take the first line. Piping a native command straight
+        # into `Select-Object -First 1` stops its pipeline early in Windows
+        # PowerShell 5.1 and leaves $LASTEXITCODE at -1, so a correctly
+        # printed version was thrown away (B2 packet 1: jsbsim 1.2.4
+        # installed, preflight said "not found"). Probe's catch still sets
+        # $LASTEXITCODE = 1 when the interpreter cannot start at all.
+        $pyBanner = @(Probe $venvPy @("--version"))
+        $pyExit = $LASTEXITCODE
+        $pyLine = "$($pyBanner | Select-Object -First 1)"
+        if ($pyExit -eq 0 -and $pyLine -match "(\d+\.\d+\.\d+)") { $found.python = $Matches[1] }
+        $jsb = @(Probe $venvPy @("-c", "import importlib.metadata as m;print(m.version('jsbsim'))"))
+        $jsbExit = $LASTEXITCODE
+        $jsbLine = "$($jsb | Select-Object -First 1)".Trim()
+        if ($jsbExit -eq 0 -and $jsbLine) { $found.jsbsim = $jsbLine }
     }
     return $found
 }

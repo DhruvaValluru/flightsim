@@ -6,7 +6,7 @@ name: ci
 
 on:
   push:
-    branches: [master]
+    branches: [master, phase-2-final]
   pull_request:
 
 jobs:

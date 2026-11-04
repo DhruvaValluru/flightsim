@@ -1,4 +1,6 @@
 {
+  "A-2": "",
+  "PASS": "",
   "budget_used": 30,
   "builder_commit": "78ab68fb",
   "claims": [
@@ -18,11 +20,13 @@
     "fix the engine cause in FlightSimRenderCommandlet.cpp",
     "full CLI and web render: every render.json complete, mask not all zeros, one alone PNG per aircraft per frame, no labels.no_bundle"
   ],
-  "pushed_commit": "23bad766",
+  "pushed_commit": "968dcb60",
   "retry": 1,
   "route": "box",
+  "run_id": "",
   "run_requested": "A-2",
-  "stage": "building",
-  "updated": "2026-11-04T12:20:41",
+  "stage": "pushed",
+  "updated": "2026-11-04T13:15:21",
+  "verdict": "",
   "worktree": "../p3-A11r"
 }

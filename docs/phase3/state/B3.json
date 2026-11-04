@@ -1,4 +1,6 @@
 {
+  "B-1": "",
+  "PASS": "",
   "budget_used": 14,
   "builder_commit": "8f42b88d",
   "built_commit": "8f42b88d",
@@ -7,7 +9,10 @@
   "letter": "B",
   "needs_windows": false,
   "pending_windows": [],
-  "stage": "integrated",
+  "pushed_commit": "3e59358d",
+  "run_id": "",
+  "stage": "pushed",
   "unit": "B2+B3",
-  "updated": "2026-11-04T12:15:28"
+  "updated": "2026-11-04T12:40:16",
+  "verdict": ""
 }
