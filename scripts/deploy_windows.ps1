@@ -11,6 +11,10 @@
 # the venv, installs the hashed lock (requirements.lock), starts the web app on
 # http://127.0.0.1:8008 in its own window, and opens the browser.
 # Re-running is safe: every step is skipped when already done.
+# A stage that fails (a clone cut by the network, a hash mismatch in
+# the lock, an import error) stops the script with ONE line naming the
+# stage (install.clone_failed, install.lock_failed, install.verify_failed,
+# ...) and a non-zero exit; the launch lines are never printed for it.
 #
 # Parameters (only reachable when run as a file or via
 # `& ([scriptblock]::Create((irm <url>))) -Branch x`):
@@ -48,6 +52,18 @@ $acceptable = @("3.12", "3.11", "3.10")
 $wingetPython = "Python.Python.3.12"
 
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
+
+# A native command (git, pip, python) does NOT stop the script on a
+# non-zero exit, even under $ErrorActionPreference = "Stop": measured
+# 2026-11-04 when a clone cut by a network reset left an empty install
+# and the script still printed the launch line with exit 0. Every stage
+# calls this right after its native command and refuses by name, the
+# ue_preflight.ps1 shape: <stage>: <tool> exited <code> -- <cause>.
+function Require-Exit($stage, $tool, $cause) {
+    if ($LASTEXITCODE -ne 0) {
+        throw "${stage}: $tool exited $LASTEXITCODE -- $cause"
+    }
+}
 
 function Refresh-Path {
     # winget installs land on the registry PATH, not this session's.
@@ -140,10 +156,13 @@ if (-not $InstallDir) {
 if (Test-Path (Join-Path $InstallDir ".git")) {
     Step "updating existing clone at $InstallDir"
     git -C $InstallDir fetch origin $Branch
+    Require-Exit "install.fetch_failed" "git" "could not fetch origin/$Branch into $InstallDir (network cut, or no such branch on $repoUrl)"
     git -C $InstallDir checkout $Branch
+    Require-Exit "install.checkout_failed" "git" "could not check out branch '$Branch' in $InstallDir"
     if ($Reset) {
         Step "-Reset: making the clone exactly origin/$Branch (local edits discarded)"
         git -C $InstallDir reset --hard "origin/$Branch"
+        Require-Exit "install.reset_failed" "git" "could not reset $InstallDir to origin/$Branch"
     } else {
         git -C $InstallDir pull --ff-only origin $Branch
         if ($LASTEXITCODE -ne 0) {
@@ -159,6 +178,7 @@ if (Test-Path (Join-Path $InstallDir ".git")) {
 } else {
     Step "cloning $repoUrl -> $InstallDir"
     git clone --branch $Branch $repoUrl $InstallDir
+    Require-Exit "install.clone_failed" "git" "the clone of $repoUrl (branch '$Branch') into $InstallDir did not complete (network cut, or no such branch); remove $InstallDir and re-run"
 }
 $served = git -C $InstallDir log -1 --oneline
 $behind = git -C $InstallDir rev-list --count "HEAD..origin/$Branch"
@@ -172,16 +192,24 @@ $venvPython = Join-Path $InstallDir ".venv\Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
     Step "creating venv"
     & $pyExe @pyArgs -m venv (Join-Path $InstallDir ".venv")
+    Require-Exit "install.venv_failed" ($python -join " ") "could not create the venv at $(Join-Path $InstallDir ".venv")"
 }
 
 Step "installing the hashed lock, requirements.lock (first run downloads ~200 MB of wheels)"
 & $venvPython -m pip install --quiet --upgrade pip
+Require-Exit "install.pip_upgrade_failed" "pip" "could not upgrade pip in $venvPython (network cut?)"
 # requirements.txt is the human-edited source; requirements.lock is its hashed
 # resolution. --require-hashes installs exactly the bytes CI installs.
-& $venvPython -m pip install --quiet --require-hashes -r (Join-Path $InstallDir "requirements.lock")
+$lock = Join-Path $InstallDir "requirements.lock"
+if (-not (Test-Path $lock)) {
+    throw "install.lock_failed: no requirements.lock at $lock -- the checkout is incomplete or branch '$Branch' has no lock; re-run with -Reset, or remove $InstallDir and re-run"
+}
+& $venvPython -m pip install --quiet --require-hashes -r $lock
+Require-Exit "install.lock_failed" "pip" "the hashed lock $lock did not install (hash mismatch, a wheel missing for this Python, or the download was cut)"
 
 Step "verifying the physics and server imports"
 & $venvPython -c "import jsbsim, fastapi, uvicorn, rasterio, numpy"
+Require-Exit "install.verify_failed" "python" "could not import jsbsim, fastapi, uvicorn, rasterio, numpy from $venvPython"
 
 if ($NoLaunch) {
     Write-Host ""
