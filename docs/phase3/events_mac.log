@@ -1002,3 +1002,5 @@
 {"agent": "builder", "box": "D2", "stage": "build", "cwd": "p3-D2", "kind": "start", "cmd": "git merge --no-edit p3-C3", "note": "merge p3-C3 into p3-D2", "t": 1793816295.996325, "machine": "mac"}
 {"agent": "builder", "box": "D2", "stage": "build", "cwd": "p3-D2", "kind": "end", "cmd": "git merge --no-edit p3-C3", "exit": 0, "secs": 0.1, "note": "merge p3-C3 into p3-D2", "t": 1793816296.11333, "machine": "mac"}
 {"agent": "mac", "box": "C", "stage": "msg", "kind": "note", "note": "msg received P3 go C decisions=ok (2, 6, 7, 16) and P3 go D decisions=ok (3); D2 schema fallback needs no answer unless the builder stops", "t": 1793816308.916567, "machine": "mac"}
+{"agent": "integrator", "box": "C3", "stage": "build", "kind": "note", "note": "integrate.sh C3: merged 4c243a8c, tests exit 0, guard targets ok, diff guard clean", "t": 1793816342.0266602, "machine": "mac"}
+{"agent": "integrator", "box": "C3", "stage": "build", "kind": "note", "note": "C3 integrated (merge 4c243a8c via integrate.sh, 33 guard targets ok): integrator fix ad43e122 limits the missing-3D-box tolerance to component records", "t": 1793816383.516176, "machine": "mac"}
