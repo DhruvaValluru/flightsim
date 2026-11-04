@@ -3,11 +3,13 @@
   "FAIL": "",
   "PASS": "",
   "budget_used": 28,
-  "builder_commit": "eb9e5f30",
+  "builder_commit": "7f1a489f",
   "claims": [
     "core/capture/verify.py",
+    "core/messages/catalog.yaml",
     "docs/phase3/notes/A12.md",
     "tests/test_capture_verify.py",
+    "tests/test_engine_bundle_golden.py",
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp"
   ],
   "eb9e5f30": "",
@@ -20,19 +22,18 @@
   "needs_windows": true,
   "note": "golden fixture portability: relocated-bundle lookup",
   "pending_windows": [
-    "render 1cam/1frame passes all gates + tight_box_present",
-    "label_diagnose prints tight null: 0",
-    "fixture under 2MB + GOLDEN.json + RUN_ID committed"
+    "recommit tests/fixtures/engine_bundle_min/cited/* byte-exact (-text attribute) so sha256 = card: mesh 23d046ed, sidecar 1c342831",
+    "pytest -q tests/test_engine_bundle_golden.py passes on Windows and Mac"
   ],
   "pushed_commit": "968dcb60",
   "retry": 2,
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "building",
+  "stage": "built_local",
   "unit": "A12+A13",
-  "updated": "2026-11-04T14:06:19",
+  "updated": "2026-11-04T16:23:50",
   "verdict": "",
   "windows_build": "",
-  "worktree": "../p3-A12r"
+  "worktree": "../p3-A12r2"
 }
