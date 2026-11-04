@@ -59,7 +59,7 @@ sitting 0.4 m from its label (it was ~25 m).
   - Check: `scripts/check_bridge_api.sh` passes and the build passes.
   - Check: each of its six patches is marked needed or not needed.
   - Check: the plane flies the same in the engine as in Python (`gate5_ue_parity.py`).
-- [ ] **A6 · Materials build by themselves** 🪟
+- [x] **A6 · Materials build by themselves** 🪟
   - Check: the first run prints `MATERIAL-CREATED` for the five rebuilt ones, and
     the second run prints `MATERIAL-EXISTS`.
 - [ ] **A7 · The aircraft is imported automatically** 🪟

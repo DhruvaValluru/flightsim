@@ -1,6 +1,8 @@
 {
+  "79939f51": "",
   "A-2": "",
   "FAIL": "",
+  "PASS": "",
   "budget_used": 38,
   "builder_commit": "79939f51589a94d9aab1526aa1916076b3dc7fa5",
   "claims": [
@@ -22,7 +24,8 @@
   "run_id": "",
   "run_requested": "A-2",
   "stage": "built_local",
-  "updated": "2026-11-04T11:53:47",
+  "updated": "2026-11-04T11:56:48",
   "verdict": "",
+  "windows_build": "",
   "worktree": "../p3w-A6"
 }

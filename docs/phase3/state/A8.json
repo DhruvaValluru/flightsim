@@ -1,7 +1,7 @@
 {
   "A-2": "",
-  "budget_used": 14,
-  "builder_commit": "56fbe68a",
+  "budget_used": 54,
+  "builder_commit": "3dc6a5ec",
   "claims": [
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/FlightSimBridge.Build.cs",
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimGroundCallback.cpp",
@@ -26,7 +26,7 @@
   "pushed_commit": "23bad766",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "building",
-  "updated": "2026-11-04T11:40:25",
+  "stage": "built_local",
+  "updated": "2026-11-04T11:56:41",
   "worktree": "../p3w-A8"
 }

@@ -2390,3 +2390,153 @@ d5d00f36 A5: VENDORED.json targets 5.5 with per-patch status; pin test
  2 files changed, 21 insertions(+), 6 deletions(-)
 ```
 
+## A6 · PASS · run A-2 · 2026-11-04T16:56:48Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+63:   - Check: the first run prints `MATERIAL-CREATED` for the five rebuilt ones, and
+64:     the second run prints `MATERIAL-EXISTS`.
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/A6-run1-editor.log: MATERIAL-STALE / MATERIAL-REBUILT / MATERIAL-CREATED: /Game/FlightSim/M_GreyCard, M_LandcoverID, M_RainStreaks, M_Ground_City, M_LensDrops (first run on this Content; exit 0, Success - 0 error(s))
+runs/p3/A-2/A6-run4-editor.log: MATERIAL-EXISTS for M_GreyCard, M_LandcoverID, M_RainStreaks, M_Ground_City, M_LensDrops, M_CustomStencilID, M_RainDrops, M_RainSplash; counts STALE 0 REBUILT 0 CREATED 0 EXISTS 36 FAILED 0; Missing If 0; exit 0; Success - 0 error(s), 0 warning(s)
+```
+
+note: run A-2: packet A6-1 (storm materials rebuilt every run on 5.7) fixed by the Windows builder in scripts/ue_create_materials.py; the script is idempotent on the pinned engine; M_CustomStencilID needs no editor step (EXISTS on every run)
+
+### synopsis
+
+# A6 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T16:56:47Z
+
+## A6 step 4: first run on the owner's Content (5.7, before the storm fix): the five STALE/REBUILT/CREATED
+
+- log: `runs/p3/A-2/A6-run1.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+[2026.11.04-16.34.00:123][  0]LogTextureEncodingSettings: Display: Oodle Texture Encode Speed settings: Fast: RDO Off Lambda=0, Effort=Normal Final: RDO Off Lambda=0, Effort=Normal
+[2026.11.04-16.34.00:123][  0]LogTextureEncodingSettings: Display: Shared linear texture encoding: Disabled
+[2026.11.04-16.34.00:152][  0]LogMeshReduction: Display: Using QuadricMeshReduction for automatic static mesh reduction
+[2026.11.04-16.34.00:152][  0]LogMeshReduction: Display: Using SkeletalMeshReduction for automatic skeletal mesh reduction
+[2026.11.04-16.34.00:152][  0]LogMeshReduction: Display: Using ProxyLODMeshReduction for automatic mesh merging
+[2026.11.04-16.34.00:152][  0]LogMeshReduction: Display: No distributed automatic mesh merging module available
+[2026.11.04-16.34.00:555][  0]LogShaderCompilers: Display: Compiling shader autogen file: ../../../../../../Users/kanth/flightsim/ue/Intermediate/ShaderAutogen/PCD3D_SM5/AutogenShaderHeaders.ush
+[2026.11.04-16.34.00:556][  0]LogShaderCompilers: Display: Autogen file is unchanged, skipping write.
+[2026.11.04-16.34.00:556][  0]LogVirtualization: Display: VirtualizationSystem name found in ini file: None
+[2026.11.04-16.34.00:556][  0]LogVirtualization: Display: FNullVirtualizationSystem mounted, virtualization will be disabled
+[2026.11.04-16.34.00:667][  0]LogWorldPartition: Display: FWorldPartitionClassDescRegistry::Initialize started...
+[2026.11.04-16.34.00:670][  0]LogWorldPartition: Display: FWorldPartitionClassDescRegistry::Initialize took 2.580 ms
+[2026.11.04-16.34.01:159][  0]LogMetaSound: Display: MetaSound Page Target Initialized to 'Default'
+[2026.11.04-16.34.01:160][  0]LogAudio: Display: Registering Engine Module Parameter Interfaces...
+[2026.11.04-16.34.01:942][  0]LogAudioCaptureCore: Display: No Audio Capture implementations found. Audio input will be silent.
+[2026.11.04-16.34.01:942][  0]LogAudioCaptureCore: Display: No Audio Capture implementations found. Audio input will be silent.
+[2026.11.04-16.34.01:961][  0]LogGeoReferencing: Display: The engine is currently using Compressed Rotation Transforms. You may encounter accuracy issues with large neshes. We recommend setting all bSupportsSceneDataCompressedTransforms to false in the Engine/Config/[platform]/DataDrivenPlatformInfo.ini file
+[2026.11.04-16.34.02:451][  0]LogAssetRegistry: Display: No AssetDiscovery cache present at ../../../../../../Users/kanth/flightsim/ue/Intermediate/CachedAssetRegistryDiscovery.bin. AssetRegistry discovery of files will be uncached.
+[2026.11.04-16.34.02:489][  0]LogAssetRegistry: Display: AssetDataGatherer spent 0.027s loading caches ../../../../../../Users/kanth/flightsim/ue/Intermediate/CachedAssetRegistry_*.bin.
+[2026.11.04-16.34.02:577][  0]LogCsvProfiler: Display: Metadata set : largeworldcoordinates="1"
+[2026.11.04-16.34.02:713][  0]LogPython: Display: No pip-enabled plugins with python dependencies found, skipping
+[2026.11.04-16.34.03:421][  0]LogPython: Display: Running start-up script C:/Program Files/Epic Games/UE_5.7/Engine/Plugins/Animation/IKRig/Content/Python/init_unreal.py... started...
+[2026.11.04-16.34.03:446][  0]LogPython: Display: Running start-up script C:/Program Files/Epic Games/UE_5.7/Engine/Plugins/Animation/IKRig/Content/Python/init_unreal.py... took 23.909 ms
+[2026.11.04-16.34.03:446][  0]LogPython: Display: Running start-up script C:/Program Files/Epic Games/UE_5.7/Engine/Plugins/Animation/ControlRig/Content/Python/init_unreal.py... started...
+[2026.11.04-16.34.03:468][  0]LogPython: Display: Running start-up script C:/Program Files/Epic Games/UE_5.7/Engine/Plugins/Animation/ControlRig/Content/Python/init_unreal.py... took 22.739 ms (total: 46.649 ms)
+[2026.11.04-16.34.03:469][  0]LogPythonScriptCommandlet: Display: Running Python script: C:/Users/kanth/flightsim/scripts/ue_create_materials.py
+[2026.11.04-16.34.03:891][  0]LogObjectTools: Warning: Detected inconsistencies between reference gathering algorithms. Switching 'Editor.UseLegacyGetReferencersForDeletion' on for the remainder of this editor session.
+[2026.11.04-16.34.04:060][  0]LogSourceControl: Display: Uncontrolled Changelist persistency file loaded ../../../../../../Users/kanth/flightsim/ue/Saved/SourceControl/UncontrolledChangelists.json
+[2026.11.04-16.34.07:872][  0]LogPythonScriptCommandlet: Display: Python script executed successfully
+[2026.11.04-16.34.07:872][  0]LogInit: Display: 
+[2026.11.04-16.34.07:873][  0]LogInit: Display: Warning/Error Summary (Unique only)
+[2026.11.04-16.34.07:873][  0]LogInit: Display: -----------------------------------
+[2026.11.04-16.34.07:873][  0]LogInit: Display: LogObjectTools: Warning: Detected inconsistencies between reference gathering algorithms. Switching 'Editor.UseLegacyGetReferencersForDeletion' on for the remainder of this editor session.
+[2026.11.04-16.34.07:874][  0]LogInit: Display: 
+[2026.11.04-16.34.07:874][  0]LogInit: Display: Success - 0 error(s), 1 warning(s)
+[2026.11.04-16.34.07:874][  0]LogInit: Display: 
+
+Execution of commandlet took:  4.45 seconds
+[2026.11.04-16.34.08:158][  0]LogShaderCompilers: Display: Shaders left to compile 0
+[2026.11.04-16.34.08:234][  0]LogSourceControl: Display: Uncontrolled Changelist persistency file saved ../../../../../../Users/kanth/flightsim/ue/Saved/SourceControl/UncontrolledChangelists.json
+```
+
+## A6 steps 6-7 after 79939f51: run 3 and run 4 on MAIN, counts per tag, Missing If
+
+- log: `runs/p3/A-2/A6-summary.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+run 3 (first run after 79939f51 on MAIN): STALE 0, REBUILT 2, CREATED 2 (M_RainDrops, M_RainSplash: their stamps were re-keyed by the old rename path), EXISTS 34, FAILED 0, Missing If 0, exit 0, Success - 0 error(s), 1 warning(s)
+run 4 (second run): STALE 0, REBUILT 0, CREATED 0, EXISTS 36, FAILED 0, Missing If 0, exit 0, Success - 0 error(s), 0 warning(s)
+run 4: MATERIAL-EXISTS for M_CustomStencilID, M_GreyCard, M_LandcoverID, M_RainStreaks, M_Ground_City, M_LensDrops, M_RainDrops, M_RainSplash
+the five's STALE/REBUILT/CREATED sequence is in runs/p3/A-2/A6-run1-editor.log (first run on this Content, before the fix); editor logs: A6-run3-editor.log, A6-run4-editor.log
+```
+
+note: the editor's own log (Saved/Logs/FlightSim.log, copied per run) is the record; the -stdout capture drops LogPython lines; the storm fix (duplicate+delete instead of rename_asset) is the Windows builder's commit 79939f51, merged 156f69ff
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+1706127c Phase 3: A6 builder merge log and worktree machine note
+30661be4 A6: set a stale storm material aside by copy, not rename; the rename redirected the new asset's generation stamp key to _prev on UE 5.7 so M_RainDrops and M_RainSplash rebuilt every run
+6468bb2c Phase 3: log A2 PASS, A6 FAIL (Windows scope), letter B builders start
+f842deba Phase 3 run A-2: A2 PASS (pin everywhere on 5.7), A6 FAIL packet 1 (storm materials rebuilt every run)
+a52ae2cf Merge p3-A6: pin GRAPH_GENERATIONS key set and stencil-id build; engine-neutral comment
+7f830d71 A6: pin GRAPH_GENERATIONS key set and stencil-id build; engine-neutral comment
+
+1706127c Phase 3: A6 builder merge log and worktree machine note
+
+ docs/phase3/decisions.md       | 1 +
+ docs/phase3/events_windows.log | 1 +
+ 2 files changed, 2 insertions(+)
+
+30661be4 A6: set a stale storm material aside by copy, not rename; the rename redirected the new asset's generation stamp key to _prev on UE 5.7 so M_RainDrops and M_RainSplash rebuilt every run
+
+ scripts/ue_create_materials.py | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+6468bb2c Phase 3: log A2 PASS, A6 FAIL (Windows scope), letter B builders start
+
+ docs/phase3/events_mac.log | 9 +++++++++
+ docs/phase3/notes/A5.md    | 6 ++++++
+ docs/phase3/state/A5.json  | 4 ++--
+ docs/phase3/state/B1.json  | 4 ++--
+ docs/phase3/state/B2.json  | 4 ++--
+ docs/phase3/state/B3.json  | 4 ++--
+ docs/phase3/state/B4.json  | 4 ++--
+ 7 files changed, 25 insertions(+), 10 deletions(-)
+
+f842deba Phase 3 run A-2: A2 PASS (pin everywhere on 5.7), A6 FAIL packet 1 (storm materials rebuilt every run)
+
+ docs/PHASE3_LOG.md                 |   4 +
+ docs/phase3/events_windows.log     |  14 ++
+ docs/phase3/packets/A2-synopsis.md | 122 ++++++--------
+ docs/phase3/packets/A6-1.md        |  72 ++++++++
+ docs/phase3/state/A2.json          |   6 +-
+ docs/phase3/state/A6.json          |   9 +-
+ docs/phase3/state/A8.json          |   6 +-
+ docs/phase3/sync_log_A.md          | 326 +++++++++++++++++++++++++++++++++++++
+ tasks/phase3_checklist.md          |   2 +-
+ 9 files changed, 487 insertions(+), 74 deletions(-)
+
+a52ae2cf Merge p3-A6: pin GRAPH_GENERATIONS key set and stencil-id build; engine-neutral comment
+
+ scripts/ue_create_materials.py |  2 +-
+ tests/test_ue_materials.py     | 23 +++++++++++++++++++++++
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+
+7f830d71 A6: pin GRAPH_GENERATIONS key set and stencil-id build; engine-neutral comment
+
+ scripts/ue_create_materials.py |  2 +-
+ tests/test_ue_materials.py     | 23 +++++++++++++++++++++++
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+```
+
