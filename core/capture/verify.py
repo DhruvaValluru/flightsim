@@ -2299,6 +2299,8 @@ FAIL_VISIBILITY = "annotation.visibility"
 FAIL_IDENTITY = "annotation.identity"
 FAIL_INTRINSICS = "annotation.intrinsics"
 FAIL_FILES = "annotation.files"
+FAIL_COMPONENT_BOX = "annotation.component_box"
+FAIL_COMPONENT_COVERAGE = "annotation.component_coverage"
 
 #: The manifest version from which ``objects[]`` declares the ids the ID
 #: image may hold (contracts §2.4).
@@ -2339,6 +2341,22 @@ def _labelled_ids(objects: Sequence[Dict]) -> Dict[int, Dict]:
 def _aircraft_entries(objects: Sequence[Dict]) -> List[Dict]:
     return [e for e in objects if e.get("class") == "aircraft"
             and e.get("labelled", True) and e.get("in_scene", True)]
+
+
+def _children_by_int_id(objects: Sequence[Dict]) -> Dict[int, List[int]]:
+    """``{parent int_id: [component int_ids]}`` from the declared
+    ``objects[]`` (the parent rollup: a component's pixels are its
+    parent's). The verifier's own reading of ``children_of`` in
+    core/capture/objects.py: grading imports no producer module. Empty
+    when no object names a parent."""
+    ids = {str(e.get("id")): int(e["int_id"]) for e in objects
+           if isinstance(e, dict) and e.get("int_id") is not None}
+    out: Dict[int, List[int]] = {}
+    for entry in objects:
+        parent = entry.get("parent") if isinstance(entry, dict) else None
+        if parent is not None and str(parent) in ids:
+            out.setdefault(ids[str(parent)], []).append(int(entry["int_id"]))
+    return out
 
 
 def _record_object(record: Dict, int_id: int) -> Optional[Dict]:
@@ -2711,18 +2729,36 @@ def _alone_files(labels: Dict) -> Dict[int, str]:
     return out
 
 
-def _silhouette(folder: Path, labels: Dict, mask, int_id: int):
+def _silhouette(folder: Path, labels: Dict, mask, int_id: int, children=()):
     """(the object's silhouette, its basis): the alone footprint when the
     engine wrote one -- the object drawn with nothing in front of it,
     so occlusion does not shrink it -- else its visible pixels in the
-    ID image. None when the alone file is unreadable."""
+    ID image. None when the alone file is unreadable.
+
+    ``children`` are the int_ids of the object's components: their pixels
+    count as the object's own (the parent rollup), from the ID image or
+    from each child's own alone pass."""
+    import numpy as np
+
+    ids = [int_id] + [int(c) for c in children]
     alone = _alone_files(labels).get(int_id)
     if alone is None:
-        return mask == int_id, "the ID image (no alone pass declared)"
+        return np.isin(mask, ids), "the ID image (no alone pass declared)"
     array = _read_gray_png(folder / alone)
     if array is None or array.shape != mask.shape:
         return None, f"{alone} is not an image of the frame's size"
-    return array == int_id, f"the alone pass {alone}"
+    hit = array == int_id
+    files = _alone_files(labels)
+    for child in children:
+        child_file = files.get(int(child))
+        if child_file is None:
+            hit = hit | (mask == int(child))
+            continue
+        child_array = _read_gray_png(folder / child_file)
+        if child_array is None or child_array.shape != mask.shape:
+            return None, f"{child_file} is not an image of the frame's size"
+        hit = hit | (child_array == int(child))
+    return hit, f"the alone pass {alone}"
 
 
 def _bundle_frames(manifest: Dict, run_dir):
@@ -2872,6 +2908,7 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
     import numpy as np
 
     aircraft = _aircraft_entries(objects)
+    kids = _children_by_int_id(objects)
     graded = 0
     not_claimed = 0
     skipped: Dict[str, str] = {}
@@ -2893,7 +2930,8 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
                 skipped[str(entry.get("id"))] = why
                 continue
             hull = _projected_hull(record, geometry)
-            hit, source = _silhouette(folder, labels, mask, int_id)
+            hit, source = _silhouette(folder, labels, mask, int_id,
+                                      kids.get(int_id, ()))
             if hit is None:
                 return Check("mask_vs_geometry", FAIL, f"{where}: {source}",
                              failure=FAIL_MASK_OFFSET)
@@ -3022,6 +3060,7 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
     import numpy as np
 
     aircraft = _aircraft_entries(objects)
+    kids = _children_by_int_id(objects)
     graded = 0
     records = 0
     not_claimed = 0
@@ -3041,7 +3080,7 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
             if geometry is None:
                 continue
             hull = _projected_hull(record, geometry)
-            visible = mask == int_id
+            visible = np.isin(mask, [int_id] + list(kids.get(int_id, ())))
             own_record = _record_object(record, int_id)
             recorded = (own_record or {}).get("bbox_2d_tight")
             if visible.any():
@@ -3077,7 +3116,8 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
                                  f"{[round(v, 1) for v in own]} ({gap:.1f} px off)",
                                  failure=FAIL_BOX_MISMATCH)
                 records += 1
-            hit, source = _silhouette(folder, labels, mask, int_id)
+            hit, source = _silhouette(folder, labels, mask, int_id,
+                                      kids.get(int_id, ()))
             if hit is None or hull is None or hull[1] is None or not hit.any():
                 continue        # mask_vs_geometry grades presence
             _, clipped, _ = hull
@@ -3187,6 +3227,149 @@ def verify_tight_box_present(manifest: Dict, run_dir=None) -> Check:
                  + (f"; {hidden} fully occluded (visible_fraction 0, tight null "
                     f"by measurement)" if hidden else ""))
 
+
+
+#: component_box: a component's tight box may overhang its hull and its
+#: parent's tight box by the pixel edge it lands in (the tight box is on
+#: the pixel grid; the hull box is continuous).
+COMPONENT_BOX_TOL_PX = 1.0
+
+
+def _component_objects(manifest: Dict) -> List[Dict]:
+    """The declared objects that are components (they name a ``parent``)."""
+    return [e for e in _declared_objects(manifest)
+            if e.get("parent") is not None and e.get("labelled", True)
+            and e.get("in_scene", True)]
+
+
+def _box_inside(inner, outer, tol: float) -> bool:
+    return (float(inner[0]) >= float(outer[0]) - tol
+            and float(inner[1]) >= float(outer[1]) - tol
+            and float(inner[2]) <= float(outer[2]) + tol
+            and float(inner[3]) <= float(outer[3]) + tol)
+
+
+def _is_box(value) -> bool:
+    return isinstance(value, (list, tuple)) and len(value) == 4
+
+
+@_reads_the_bundle
+def verify_component_boxes(manifest: Dict, run_dir=None) -> Check:
+    """Each component's tight box lies inside its own hull box and inside
+    its parent's tight box (1 px tolerance).
+
+    Read from the records alone, per frame, for every ``labels.objects[]``
+    entry that names a ``parent``. A null tight box is skipped (the
+    record's basis says why: out of frame or fully occluded). A tight box
+    with no hull box has nothing to lie inside and is not graded against
+    the hull. A tight box whose parent has no tight box fails: the parent
+    rollup makes the parent's box contain its components' pixels. NOT RUN
+    when the manifest declares no component or no frame carries a
+    component record.
+    """
+    if not _component_objects(manifest):
+        return Check("component_boxes", NOT_RUN,
+                     "the manifest declares no component object (none names a parent)")
+    checked = 0
+    for record in _labelled_frames(manifest):
+        entries = [e for e in (record.get("labels") or {}).get("objects") or []
+                   if isinstance(e, dict)]
+        by_id = {str(e.get("id")): e for e in entries}
+        for entry in entries:
+            parent_id = entry.get("parent")
+            tight = entry.get("bbox_2d_tight")
+            if parent_id is None or tight is None:
+                continue
+            where = (f"{record.get('camera_id')}/{Path(str(record.get('file'))).name} "
+                     f"{entry.get('id')}")
+            if not _is_box(tight):
+                return Check("component_boxes", FAIL,
+                             f"{where}: bbox_2d_tight is {tight!r}, not a box",
+                             failure=FAIL_COMPONENT_BOX)
+            hull = entry.get("bbox_2d_hull")
+            if _is_box(hull) and not _box_inside(tight, hull, COMPONENT_BOX_TOL_PX):
+                return Check("component_boxes", FAIL,
+                             f"{where}: bbox_2d_tight "
+                             f"{[round(float(v), 1) for v in tight]} is not inside "
+                             f"its own bbox_2d_hull "
+                             f"{[round(float(v), 1) for v in hull]}",
+                             failure=FAIL_COMPONENT_BOX)
+            parent = by_id.get(str(parent_id))
+            parent_tight = (parent or {}).get("bbox_2d_tight")
+            if not _is_box(parent_tight):
+                return Check("component_boxes", FAIL,
+                             f"{where}: its tight box exists but parent "
+                             f"{parent_id} has "
+                             f"{'no record' if parent is None else 'a null bbox_2d_tight'}"
+                             f" in this frame; the parent's box counts its "
+                             f"components' pixels",
+                             failure=FAIL_COMPONENT_BOX)
+            if not _box_inside(tight, parent_tight, COMPONENT_BOX_TOL_PX):
+                return Check("component_boxes", FAIL,
+                             f"{where}: bbox_2d_tight "
+                             f"{[round(float(v), 1) for v in tight]} is not inside "
+                             f"its parent {parent_id}'s tight box "
+                             f"{[round(float(v), 1) for v in parent_tight]}",
+                             failure=FAIL_COMPONENT_BOX)
+            checked += 1
+    if checked == 0:
+        return Check("component_boxes", NOT_RUN,
+                     "no frame carries a component record with a tight box to grade")
+    return Check("component_boxes", PASS,
+                 f"{checked} component records: tight box inside its own hull "
+                 f"and its parent's tight box (tol {COMPONENT_BOX_TOL_PX:.0f} px)")
+
+
+@_reads_the_bundle
+def verify_component_coverage(manifest: Dict, run_dir=None) -> Check:
+    """Every frame whose ID image holds pixels of a component carries that
+    component's record.
+
+    The pixels are read from the mask through ``_bundle_frames``, never
+    from a record's ``fraction_in_frame``: a dropped record claims
+    nothing, so only the image can show it was dropped. FAILS naming the
+    camera, frame and ``int_id``. NOT RUN without a component object, an
+    ``objects[]`` or a bundle.
+    """
+    objects = _declared_objects(manifest)
+    if not objects:
+        return Check("component_coverage", NOT_RUN, _no_objects_reason(manifest))
+    components = {int(e["int_id"]): e for e in _component_objects(manifest)}
+    if not components:
+        return Check("component_coverage", NOT_RUN,
+                     "the manifest declares no component object (none names a parent)")
+    if not _engine_label_records(run_dir):
+        return Check("component_coverage", NOT_RUN, _no_bundle_reason())
+    import numpy as np
+
+    frames = 0
+    covered = 0
+    for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
+        labels = engine["labels"]
+        if not labels.get("mask"):
+            continue
+        mask = _read_gray_png(folder / labels["mask"])
+        if mask is None:
+            return Check("component_coverage", NOT_RUN, "Pillow unavailable")
+        frames += 1
+        for value in (int(v) for v in np.unique(mask)):
+            if value not in components:
+                continue
+            if _record_object(record, value) is None:
+                pixels = int(np.count_nonzero(mask == value))
+                return Check("component_coverage", FAIL,
+                             f"{camera}/{name}: the ID image holds {pixels} pixels "
+                             f"of {components[value].get('id')} (int_id {value}) "
+                             f"but the frame's labels.objects[] has no record "
+                             f"for it",
+                             failure=FAIL_COMPONENT_COVERAGE)
+            covered += 1
+    if frames == 0:
+        return Check("component_coverage", NOT_RUN,
+                     "engine label records declared but none matched a labelled frame")
+    return Check("component_coverage", PASS,
+                 f"{frames} ID images read; {covered} component-frames with pixels "
+                 f"each carry their record")
 
 
 #: label_geometry_3d tolerances: the record's numbers are floats through
@@ -3470,6 +3653,7 @@ def verify_depth_vs_geometry(manifest: Dict, run_dir=None) -> Check:
         return DEPTH_TOL_FRACTION * abs(z) + DEPTH_TOL_M
 
     aircraft = _aircraft_entries(objects)
+    kids = _children_by_int_id(objects)
     graded = 0
     worst_median = (0.0, "")
     worst_near = (-math.inf, "")
@@ -3494,7 +3678,7 @@ def verify_depth_vs_geometry(manifest: Dict, run_dir=None) -> Check:
         for entry in aircraft:
             int_id = int(entry["int_id"])
             where = f"{camera}/{name} {entry.get('id')}"
-            hit = mask == int_id
+            hit = np.isin(mask, [int_id] + list(kids.get(int_id, ())))
             if not hit.any():
                 continue
             geometry, why = _object_geometry(manifest, record, entry, axes)
@@ -3622,6 +3806,8 @@ def verify_visibility_vs_scene(manifest: Dict, run_dir=None) -> Check:
     labelled = _labelled_ids(objects)
     id_of = {i: str(e.get("id")) for i, e in labelled.items()}
     aircraft = {int(e["int_id"]): e for e in _aircraft_entries(objects)}
+    kids = _children_by_int_id(objects)
+    component_ids = {c for cs in kids.values() for c in cs}
     graded = 0
     alone_seen = False
     worst = (0.0, "")
@@ -3648,17 +3834,25 @@ def verify_visibility_vs_scene(manifest: Dict, run_dir=None) -> Check:
         footprints: Dict[int, object] = {}
         depths: Dict[int, Optional[float]] = {}
         half_len: Dict[int, float] = {}
+        own_alone: Dict[int, object] = {}
         for int_id, file in sorted(alone_files.items()):
-            if int_id not in aircraft:
+            if int_id not in aircraft and int_id not in component_ids:
                 return fail(f"{camera}/{name}: an alone pass is declared for id "
                             f"{int_id}, which is not a labelled aircraft object")
             alone = _read_gray_png(folder / file)
             if alone is None or alone.shape != mask.shape:
                 return fail(f"{camera}/{name}: {file} is not an image of the frame's size")
-            footprints[int_id] = alone == int_id
+            own_alone[int_id] = alone == int_id
+        for int_id in sorted(own_alone):
+            if int_id in component_ids:
+                continue        # a component's alone pass joins its parent's footprint
+            footprints[int_id] = own_alone[int_id].copy()
+            for child in kids.get(int_id, ()):
+                if child in own_alone:
+                    footprints[int_id] |= own_alone[child]
             geometry, _ = _object_geometry(manifest, record, aircraft[int_id], axes)
             half_len[int_id] = geometry["length_m"] / 2.0 if geometry else 0.0
-            visible = mask == int_id
+            visible = np.isin(mask, [int_id] + list(kids.get(int_id, ())))
             if geometry is not None:
                 depths[int_id] = geometry["cg"][2]
             elif depth is not None and visible.any():
@@ -3669,7 +3863,8 @@ def verify_visibility_vs_scene(manifest: Dict, run_dir=None) -> Check:
         for int_id, footprint in footprints.items():
             where = f"{camera}/{name} {id_of.get(int_id, int_id)}"
             n_alone = int(np.count_nonzero(footprint))
-            visible = mask == int_id
+            family = [int_id] + list(kids.get(int_id, ()))
+            visible = np.isin(mask, family)
             n_vis = int(np.count_nonzero(visible))
             stray = int(np.count_nonzero(visible & ~footprint))
             if stray > VISIBILITY_TOL_FRACTION * max(n_alone, 1):
@@ -3695,24 +3890,29 @@ def verify_visibility_vs_scene(manifest: Dict, run_dir=None) -> Check:
                                 f"background, or a surface beyond the object) -- the "
                                 f"ID pass dropped it where nothing occludes it")
             own_occluders = sorted(int(v) for v in np.unique(mask[footprint])
-                                   if int(v) not in (0, int_id))
+                                   if int(v) != 0 and int(v) not in family)
             for occluder in own_occluders:
                 if occluder not in labelled:
                     return fail(f"{where}: occluded by id {occluder}, which no object "
                                 f"declares")
             own_fraction = (n_vis / n_alone) if n_alone else None
+            # render.json counts the id's own pixels (a component is its
+            # own id there); the manifest's record is the parent's rollup.
+            n_vis_own = int(np.count_nonzero(mask == int_id))
+            n_alone_own = int(np.count_nonzero(own_alone[int_id]))
+            engine_own_fraction = (n_vis_own / n_alone_own) if n_alone_own else None
             engine_entry = _engine_object(engine, int_id) or {}
-            for key, own in (("pixels", n_vis), ("pixels_alone", n_alone)):
+            for key, own in (("pixels", n_vis_own), ("pixels_alone", n_alone_own)):
                 value = engine_entry.get(key)
                 if isinstance(value, (int, float)) and int(value) != own:
                     return fail(f"{where}: render.json says {key} {int(value)}, the "
                                 f"files hold {own}")
             engine_fraction = engine_entry.get("visible_fraction")
-            if (isinstance(engine_fraction, (int, float)) and own_fraction is not None
-                    and abs(float(engine_fraction) - own_fraction) > VISIBILITY_RECORD_TOL):
+            if (isinstance(engine_fraction, (int, float)) and engine_own_fraction is not None
+                    and abs(float(engine_fraction) - engine_own_fraction) > VISIBILITY_RECORD_TOL):
                 return fail(f"{where}: render.json visible_fraction "
                             f"{float(engine_fraction):.4f} is not the files' "
-                            f"{own_fraction:.4f}")
+                            f"{engine_own_fraction:.4f}")
             engine_occ = engine_entry.get("occluded_by")
             if isinstance(engine_occ, list) and sorted(int(v) for v in engine_occ) != own_occluders:
                 return fail(f"{where}: render.json occluded_by {engine_occ} but the "
@@ -8825,6 +9025,8 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     # page's order, after the version-5 label checks they supersede.
     other = read_manifest(other_run_dir, "against_") if other_run_dir is not None else None
     run("mask_integers_only", verify_mask_integers_only, manifest, run_dir)
+    run("component_coverage", verify_component_coverage, manifest, run_dir)
+    run("component_boxes", verify_component_boxes, manifest, run_dir)
     run("mask_vs_geometry", verify_mask_vs_geometry, manifest, run_dir)
     run("box_vs_mask", verify_box_vs_mask, manifest, run_dir)
     run("tight_box_present", verify_tight_box_present, manifest, run_dir)

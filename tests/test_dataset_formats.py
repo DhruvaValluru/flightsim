@@ -60,7 +60,10 @@ def _runs(batch_dir):
 
 #: The documented class list a manifest-6 run carries (core/scenario/
 #: blocks.py DEFAULT_CLASSES): class_id = position + 1.
-TAXONOMY_6 = ["aircraft", "terrain", "building", "vegetation", "water", "cloud"]
+from core.capture.manifest import MANIFEST_VERSION  # noqa: E402
+
+TAXONOMY_6 = ["aircraft", "terrain", "building", "vegetation", "water", "cloud",
+              "payload", "landing_gear"]
 
 
 def _manifest(run: Path):
@@ -732,7 +735,8 @@ def test_the_card_carries_counts_conditions_licences_and_the_split_policy(batch_
         assert run["seed"] in (1, 2)
         assert run["verification"]["status"] == "passed"
         assert run["masks_shipped"] is False
-    assert card["label_conventions_by_manifest_version"] == {"7": card["label_conventions"]}
+    assert card["label_conventions_by_manifest_version"] == {
+        str(MANIFEST_VERSION): card["label_conventions"]}
     # Manifest 6: every per-object not_claimed sentence is aggregated with
     # its record count -- 192 frames x (primary + terrain) share two, the
     # terrain alone says it has no alone pass.
