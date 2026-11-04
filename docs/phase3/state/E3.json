@@ -1,8 +1,17 @@
 {
   "budget_used": 12,
+  "builder_commit": "e74580e7f18c6f96893c8c162eee4da20a829ad6",
+  "built_commit": "e74580e7f18c6f96893c8c162eee4da20a829ad6",
+  "claims": [],
   "letter": "E",
   "needs_windows": true,
-  "stage": "planned",
+  "pending_windows": [
+    "step 7: real app on the 5.7 machine, key typed once, reload, render draws tiles; panel shows engine 5.7.4 and Cesium 2.30.0",
+    "tests/test_settings_page.py::test_the_script_parses (node --check settings.js)",
+    "tests/test_settings_page.py::test_tiles_key_survives_a_reload (Playwright Chromium)"
+  ],
+  "stage": "built",
   "unit": "E2+E3",
-  "updated": "2026-11-04T16:34:23"
+  "updated": "2026-11-04T17:17:54",
+  "worktree": "../p3-E3"
 }

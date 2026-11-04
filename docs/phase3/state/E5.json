@@ -1,8 +1,15 @@
 {
   "budget_used": 19,
+  "builder_commit": "9d355734da07a115215ec19e536b74442bca88d2",
+  "built_commit": "9d355734da07a115215ec19e536b74442bca88d2",
+  "claims": [],
   "letter": "E",
   "needs_windows": true,
-  "stage": "planned",
+  "pending_windows": [
+    "A run with Normals, Flow and Amodal ticked produces those extra passes in the real render (step 5)"
+  ],
+  "stage": "built",
   "unit": "E4+E5",
-  "updated": "2026-11-04T16:34:41"
+  "updated": "2026-11-04T17:26:43",
+  "worktree": "../p3-E5"
 }
