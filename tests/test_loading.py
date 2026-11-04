@@ -61,13 +61,14 @@ LEVEL = {"gamma-deg": 0.0, "phi-deg": 0.0, "psi-true-deg": 0.0, "beta-deg": 0.0,
 AIRFRAMES = {
     "c172p": (1500.0, 100.0, {"payload": {"Right Passenger": 136.0}, "fuel_fraction": 1.0}),
     "A320": (6000.0, 250.0, {"fuel_fraction": 0.8}),
+    "J11": (3000.0, 350.0, {"fuel_fraction": 0.8}),
     "B747": (6000.0, 280.0, {"fuel_kg": 20000.0}),
     "DHC6": (1500.0, 120.0, {"payload": {"name": 100.0}, "fuel_fraction": 0.9}),
     "p51d": (1500.0, 200.0, {"payload": {"pilot": 100.0}, "fuel_fraction": 0.7}),
     "A4": (3000.0, 300.0, {"payload": {"PILOT": 100.0}, "fuel_fraction": 0.6}),
 }
 #: V13 measured: |hand - JSBSim| after the writes and a re-latch, inches.
-V13_MEASURED_IN = {"c172p": 7.1e-15, "A320": 0.0, "B747": 6.9e-13, "DHC6": 2.9e-14, "p51d": 1.5e-14,
+V13_MEASURED_IN = {"J11": 1e-9, "c172p": 7.1e-15, "A320": 0.0, "B747": 6.9e-13, "DHC6": 2.9e-14, "p51d": 1.5e-14,
                    "A4": 0.0}
 
 

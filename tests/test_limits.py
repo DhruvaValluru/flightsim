@@ -237,6 +237,7 @@ def test_the_record_is_a_valid_applied_variable():
 EXPECTED = {
     # airframe: (category, n_z_pos, n_z_neg, speed, kind, m_mo)
     "c172p": ("normal", 3.8, -1.52, 163.0, "V_NE", None),
+    "J11": ("military", 9.0, -3.0, 756.0, "V_NE", None),
     "A320": ("transport", 2.5, -1.0, 350.0, "V_MO", 0.82),
     "B747": ("transport", 2.5, -1.0, 365.0, "V_MO", 0.92),
     "DHC6": ("normal", 3.8, -1.52, 170.0, "V_NE", None),
@@ -280,7 +281,10 @@ def test_every_configured_airframe_states_a_sourced_table():
                 assert limit.reason and limit.source is None, (aircraft, key)
         # Placard speeds are from memory and say so; the load factors cite the rule.
         assert "unverified here" in t.limit("speed_limit_kt").source
-        assert "CFR" in t.limit("n_z_pos_g").source
+        if aircraft == "J11":          # no CFR part: published figures, from memory
+            assert "unverified here" in t.limit("n_z_pos_g").source
+        else:
+            assert "CFR" in t.limit("n_z_pos_g").source
         assert t.config_path == f"assets/aircraft_config/{aircraft}.json"
         assert len(t.config_sha256) == 64
         json.dumps(t.to_dict())

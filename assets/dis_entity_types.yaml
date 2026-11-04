@@ -45,6 +45,11 @@ airframes:
     siso_reference: "SISO-REF-010, Platform - Air, Attack/Strike (United States), the row for the A-4"
     entity_type: null
     reason: "entered from the standard, never guessed"
+  J11:
+    title: "Shenyang J-11A (repository model J11, assets/fdm_root)"
+    siso_reference: "SISO-REF-010, Platform - Air, Fighter/Air Defense (China), the row for the J-11"
+    entity_type: null
+    reason: "entered from the standard, never guessed"
   B747:
     title: "Boeing 747 (JSBSim stock model B747)"
     siso_reference: "SISO-REF-010, Platform - Air, Civilian Fixed Wing Aircraft (Boeing), the row for the 747 family"

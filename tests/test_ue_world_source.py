@@ -671,8 +671,8 @@ def test_the_drape_material_is_looked_up_set_and_recorded_never_refused():
     assert "CalculateTangentsForMesh" not in build.replace("::CalculateTangentsForMesh:", "")
     assert "KismetProceduralMeshLibrary.h" not in SCENE_CPP
     gate6 = _function(SCENE_CPP, "bool FFlightSimVisualScene::BuildTerrainInstance(")
-    assert "Tangent" not in gate6
-    assert "{}, {}, false /* no collision */);" in gate6
+    # B4 (packet B4-3): on 5.7 the terrain needs real normals and tangents.
+    assert "Tangents" in gate6
     # The record is the scene's for the commandlet, beside the imagery_* provenance.
     assert "TSharedPtr<FJsonObject> ImageryMaterial;" in SCENE_H
     assert "void ApplyDrapeMaterial(UMaterialInstanceDynamic* Instance," in SCENE_H
@@ -703,7 +703,7 @@ def test_scene_is_emitted_only_when_asked_right_after_imagery():
     # (None otherwise), so the two still build one default list
     # (tests/test_render_flags.py compares them).
     assert "scene_document" not in (REPO / "webapp" / "runs.py").read_text(encoding="utf-8")
-    assert ('scene_document=str(args.scene) if getattr(args, "scene", None) else None'
+    assert ("scene_document=scene_document"
             in (REPO / "flightsim" / "capture.py").read_text(encoding="utf-8"))
 
 

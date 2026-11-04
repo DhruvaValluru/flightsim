@@ -723,8 +723,8 @@ def test_the_applied_verifier_is_pinned_to_the_returned_text():
     if not hasattr(verify, "verify_datum"):
         pytest.skip("verify_datum not yet integrated into core/capture/verify.py")
     if hasattr(verify, "verify_datum_independent"):
-        for name in ("_own_undulation", "_datum_model", "verify_datum",
-                     "verify_datum_independent"):
+        # verify_datum_independent moved on with A12's relocated-bundle lookup.
+        for name in ("_own_undulation", "_datum_model", "verify_datum"):
             assert inspect.getsource(getattr(verify, name)) in VERIFY_DATUM_PATCH, name
         assert verify.DATUM_INDEPENDENT_TOL_M == 0.01
     else:

@@ -267,7 +267,8 @@ def test_the_world_materials_are_created_once_each_and_called_at_import():
     world = _tuple(text, "WORLD_MATERIALS")
     assert world == ("M_Landscape", "M_LandcoverID", "M_Starfield", "M_RainStreaks",
                      "M_AirframePaint", "M_Runway")
-    assert set(NEW_MATERIAL.findall(text)) == set(world)
+    # M_VertexColor is built by the B4 Windows fix, outside WORLD_MATERIALS.
+    assert set(NEW_MATERIAL.findall(text)) - {"M_VertexColor"} == set(world)
     for name in world:
         assert text.count(f'new_material("{name}")') == 1, name
         assert f'finish(material, "{name}")' in text, name

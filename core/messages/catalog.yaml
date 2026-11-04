@@ -223,6 +223,21 @@ terrain.google_tiles:
 google_tiles.terrain:
   sentence: "Google's 3D tiles would show a real place, but the aircraft would fly over flat or made-up ground there."
   hint: "Prepare the real terrain for this place first, or turn FLIGHTSIM_GOOGLE_TILES off."
+google_tiles.terrain_not_georeferenced:
+  sentence: "This test ground has no place on Earth, so Google's 3D tiles were left out of the picture."
+  hint: "Nothing to do for a test scene; a real place always draws the tiles."
+toolchain.pin_unreadable:
+  sentence: "The list of pinned tool versions could not be read."
+  hint: "Restore the tool list from a fresh download of the project."
+settings.unreadable:
+  sentence: "The settings file could not be read, so it was left as it is."
+  hint: "Fix or remove the settings file, then start the app again."
+settings.update:
+  sentence: "That setting cannot be changed from the app."
+  hint: "Only the fields shown in the Settings panel can be saved."
+capture.clip_seconds:
+  sentence: "The clip length must be more than zero seconds."
+  hint: "Choose a longer clip."
 terrain.clearance:
   sentence: "The planned flight would descend too close to the terrain along its path."
 terrain.impact:
