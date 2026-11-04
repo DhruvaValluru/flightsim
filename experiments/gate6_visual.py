@@ -76,6 +76,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import shutil
 import struct
 import subprocess
@@ -84,11 +85,13 @@ import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.util.platform import ue_editor_path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core.util.platform import (  # noqa: E402
+    TOOLCHAIN, UE_ENGINE_PATCH, UE_ENGINE_VERSION, ue_editor_path,
+)
 from core.terrain.synthesis import TerrainStatistics, generate  # noqa: E402
 from experiments.gate5_ue_parity import (  # noqa: E402
     RENDER_DURATION_S, ROLL_DOUBLET, reference_spec, write_run_card,
@@ -757,6 +760,296 @@ def compose_side_by_side(old_frame: Path, new_frame: Path, out: Path) -> Path:
 # -- orchestration --------------------------------------------------------
 
 
+# -- B4 probe: the numbers a re-derivation reads off a frame ---------------
+#
+# Decision 13 pins the engine at 5.7.4 (changelist 51494982); the exposure
+# biases and the vertex palette on record were measured on 5.5 (history,
+# ue/Config/DefaultEngine.ini header). "Recalibrate by probe render, not
+# theory" (NEXT.md gotcha 6): the probe reads band and patch means off a
+# rendered frame and writes them with the engine pin, so a re-derivation
+# is a file a reader can check, not a number typed from memory.
+
+#: Decision 15 (B4-1): "equals the reference" is a sky-band mean luminance
+#: within 4/255 and a terrain-class patch mean RGB within 4/255 -- half
+#: the Gate 6 sky-excursion threshold.
+PROBE_TOLERANCE = 4.0
+#: The ONE stated mid-grey target (decision 15, B4-1) for the noon frame's
+#: terrain band: an 18 % reflectance grey card encodes to sRGB 118/255.
+#: A stated target, written beside the number in docs/VALIDITY.md 2.13;
+#: not a measurement, and not a 5.5 frame.
+MID_GREY_TARGET = 118.0
+#: The sweeps of B4 step 5, per look: the Gate 6 look (commandlet default
+#: 11.0), the noon look (DEFAULT_LOOK 9.5) and the dawn look (10.5).
+PROBE_SWEEPS = {
+    "gate6": (10.0, 10.5, 11.0, 11.5, 12.0),
+    "noon": (8.5, 9.0, 9.5, 10.0, 10.5),
+    "dawn": (9.5, 10.0, 10.5, 11.0, 11.5),
+}
+#: Where --probe-sweep writes: <root>/<look>/<bias>/probe.json. The note
+#: said <root>/<bias>/; the biases of the three sweeps overlap (10.5 sits
+#: in all three), so the look is one directory level above the bias.
+PROBE_SWEEP_ROOT = "runs/b4_probe"
+#: The bands every probe reads from the terrain shot: pure sky (top of
+#: frame), the terrain band (the mountains: rock / scrub / snow classes)
+#: and the plain under the flight (the valley class). Each frame record's
+#: visible landmarks (the peaks) are added as patches by name.
+PROBE_BANDS = {
+    "sky": {"rows": SKY_BAND_ROWS},
+    "terrain": {"rows": TERRAIN_BAND_ROWS},
+    "ground": {"rows": CLOUD_GROUND_ROWS},
+}
+#: The doublet window sky_excursion measures over (same bounds as there).
+PROBE_WINDOW_S = (3.0, 20.0)
+
+PROBE_MESSAGES = {
+    "probe_frame_missing":
+        "REFUSED gate6.probe_frame_missing: frame {frame} does not exist; a "
+        "probe reads pixels, it does not invent them",
+    "probe_band_shape":
+        "REFUSED gate6.probe_band_shape: band {band} is {spec!r}; a band is "
+        "{{'rows': (y0, y1)}} or {{'px': x, 'py': y[, 'half': n]}}",
+    "probe_manifest_missing":
+        "REFUSED gate6.probe_manifest_missing: {run} has no render.json; "
+        "nothing was rendered there, so nothing can be probed",
+    "probe_no_frames":
+        "REFUSED gate6.probe_no_frames: {run}/render.json lists no frames",
+    "rederive_no_probes":
+        "REFUSED gate6.rederive_no_probes: no <bias>/probe.json under {root}; "
+        "run --probe-sweep first",
+    "rederive_out_of_tolerance":
+        "REFUSED gate6.rederive_out_of_tolerance: no bias in {biases} puts the "
+        "{band} band within {tolerance:g}/255 of the stated {target:g}/255 with "
+        "the sky excursion under {excursion:g}/255 (nearest: bias {nearest:g} at "
+        "{value:.2f}/255); decision 15 re-tunes only against a measurement, so "
+        "widen the sweep, not the tolerance",
+}
+
+
+class ProbeRefusal(ValueError):
+    """A probe or re-derivation refusal, by rule name (PROBE_MESSAGES)."""
+
+
+def refuse(rule: str, **fields) -> None:
+    raise ProbeRefusal(PROBE_MESSAGES[rule].format(**fields))
+
+
+def engine_string() -> str:
+    """The pinned engine, from toolchain.json via core.util.platform (B2),
+    so a probe file names the same 5.7.4 / changelist as decision 13."""
+    return (f"{UE_ENGINE_VERSION}.{UE_ENGINE_PATCH} "
+            f"(changelist {TOOLCHAIN['engine']['changelist']})")
+
+
+def probe_frame(frame: Path, bands: dict) -> dict:
+    """Mean luminance and mean RGB of every band of one frame.
+
+    A band is ``{"rows": (y0, y1)}`` (full-width row band) or
+    ``{"px": x, "py": y, "half": n}`` (a patch, as patch_mean clamps it).
+    Refuses by name when the frame is absent.
+    """
+    frame = Path(frame)
+    if not frame.is_file():
+        refuse("probe_frame_missing", frame=frame)
+    rgb = load_rgb(frame)
+    lum = luminance(rgb)
+    result = {"frame": frame.name, "width": int(rgb.shape[2]),
+              "height": int(rgb.shape[1]), "bands": {}}
+    for name, spec in bands.items():
+        if "rows" in spec:
+            height = int(rgb.shape[1])
+            y0 = max(0, min(int(spec["rows"][0]), height))
+            y1 = max(0, min(int(spec["rows"][1]), height))
+            if y1 <= y0:
+                # A band below the bottom of a smaller frame (the 540-row
+                # ground band on a test frame): recorded as outside, never
+                # as a NaN that reads like a number.
+                result["bands"][name] = {"mean_luminance": None, "mean_rgb": None,
+                                         "outside_frame": True}
+                continue
+            mean_rgb = [float(rgb[channel, y0:y1, :].mean()) for channel in range(3)]
+            mean_lum = float(lum[y0:y1, :].mean())
+        elif "px" in spec and "py" in spec:
+            half = int(spec.get("half", 6))
+            mean_rgb = [patch_mean(rgb[channel], spec["px"], spec["py"], half)
+                        for channel in range(3)]
+            mean_lum = patch_mean(lum, spec["px"], spec["py"], half)
+        else:
+            refuse("probe_band_shape", band=name, spec=spec)
+        result["bands"][name] = {"mean_luminance": round(mean_lum, 3),
+                                 "mean_rgb": [round(v, 3) for v in mean_rgb]}
+    return result
+
+
+def probe_bias(manifest: dict) -> Optional[float]:
+    """The exposure bias a render recorded: render_settings.exposure_bias
+    (Look lane) or the scene's "manual, AutoExposureBias N" string."""
+    settings = manifest.get("render_settings") or {}
+    if isinstance(settings.get("exposure_bias"), (int, float)):
+        return float(settings["exposure_bias"])
+    found = re.search(r"AutoExposureBias\s+(-?\d+(?:\.\d+)?)",
+                      str(manifest.get("scene", {}).get("exposure", "")))
+    return float(found.group(1)) if found else None
+
+
+def probe_run(frames_dir: Path, bias: Optional[float] = None) -> dict:
+    """Probe every frame of one render: the band means per frame, and the
+    run's summary (bias, sky/terrain/ground means over the doublet window,
+    sky excursion). ``bias`` overrides the manifest's record (a sweep
+    names the bias it asked for)."""
+    frames_dir = Path(frames_dir)
+    manifest_path = frames_dir / "render.json"
+    if not manifest_path.is_file():
+        refuse("probe_manifest_missing", run=frames_dir)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    records = manifest.get("frame_records") or []
+    if not records:
+        refuse("probe_no_frames", run=frames_dir)
+    rows = []
+    for record in records:
+        bands = dict(PROBE_BANDS)
+        for name, mark in (record.get("landmarks") or {}).items():
+            if mark.get("visible"):
+                bands[name] = {"px": mark["px"], "py": mark["py"]}
+        row = probe_frame(frames_dir / record["frame"], bands)
+        row["t"] = record.get("t")
+        row["roll_deg"] = record.get("roll_deg")
+        rows.append(row)
+    window = [row for row in rows
+              if row["t"] is not None and PROBE_WINDOW_S[0] <= row["t"] <= PROBE_WINDOW_S[1]]
+    sample = window or rows
+
+    def band_mean(name: str) -> Optional[float]:
+        values = [row["bands"][name]["mean_luminance"] for row in sample
+                  if row["bands"][name]["mean_luminance"] is not None]
+        return round(sum(values) / len(values), 3) if values else None
+
+    return {
+        "run": frames_dir.name,
+        "bias": float(bias) if bias is not None else probe_bias(manifest),
+        "exposure": manifest.get("scene", {}).get("exposure", "unrecorded"),
+        "frames": len(rows),
+        "window_frames": len(window),
+        "sky_mean": band_mean("sky"),
+        "terrain_mean": band_mean("terrain"),
+        "ground_mean": band_mean("ground"),
+        "sky_excursion": round(sky_excursion(frames_dir), 3) if window else None,
+        "rows": rows,
+    }
+
+
+def probe_tree(out: Path, bias: Optional[float] = None) -> List[dict]:
+    """Every render under ``out`` that has a render.json, probed, in name
+    order -- the --skip-render path over an existing runs/gate6/ tree."""
+    return [probe_run(path, bias) for path in sorted(Path(out).iterdir())
+            if path.is_dir() and (path / "render.json").is_file()]
+
+
+def write_probe(out: Path, rows: list, engine: str) -> Path:
+    """Write the probe file: the engine pin, the tolerances of decision 15
+    and the stated mid-grey target beside every measured row."""
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({
+        "engine": engine,
+        "tolerance": PROBE_TOLERANCE,
+        "mid_grey_target": MID_GREY_TARGET,
+        "sky_excursion_threshold": THRESHOLDS["max_sky_excursion"],
+        "written_by": "experiments/gate6_visual.py",
+        "runs": rows,
+    }, indent=2), encoding="utf-8")
+    return out
+
+
+def probe_look_flags(look: str) -> List[str]:
+    """The commandlet flags of a sweep's look: none for the Gate 6 scene
+    (its defaults are what Gate 6 measured), the showcase matrix's sun and
+    clear air for noon and dawn (imported, not copied, so they cannot
+    drift from DEFAULT_LOOK, which a test pins to that table)."""
+    if look == "gate6":
+        return []
+    from experiments.showcase_matrix import TIME_OF_DAY, VISIBILITY
+    tod = TIME_OF_DAY[look]
+    return [f"-sun-elev={tod['sun_elev']:g}", f"-sun-azim={tod['sun_azim']:g}",
+            f"-fog-density={VISIBILITY['clear']:g}"]
+
+
+def parse_biases(text: str) -> List[float]:
+    return [float(item) for item in text.split(",") if item.strip()]
+
+
+def rederive_bias(probes: List[dict], target: float = MID_GREY_TARGET,
+                  tolerance: float = PROBE_TOLERANCE, band: str = "terrain",
+                  max_excursion: float = THRESHOLDS["max_sky_excursion"]) -> dict:
+    """Pick the bias whose ``band`` mean is nearest the stated target and
+    within the tolerance, among the probes whose sky excursion (when
+    measured) meets Gate 6's own threshold. Refuses by name when none
+    qualifies: a re-tune without a measurement in tolerance has no cause."""
+    key = f"{band}_mean"
+    ranked = sorted(probes, key=lambda probe: (abs(probe[key] - target), probe["bias"]))
+    candidates = [probe for probe in ranked
+                  if abs(probe[key] - target) <= tolerance
+                  and (probe.get("sky_excursion") is None
+                       or probe["sky_excursion"] <= max_excursion)]
+    if not candidates:
+        nearest = ranked[0]
+        refuse("rederive_out_of_tolerance",
+               biases=[probe["bias"] for probe in sorted(probes, key=lambda p: p["bias"])],
+               band=band, tolerance=tolerance, target=target,
+               excursion=max_excursion, nearest=nearest["bias"], value=nearest[key])
+    chosen = candidates[0]
+    return {
+        "engine": engine_string(),
+        "band": band, "target": target, "tolerance": tolerance,
+        "max_sky_excursion": max_excursion,
+        "chosen_bias": chosen["bias"], "value": chosen[key],
+        "sky_excursion": chosen.get("sky_excursion"),
+        "candidates": [{"bias": p["bias"], key: p[key], "sky_excursion": p.get("sky_excursion")}
+                       for p in sorted(probes, key=lambda p: p["bias"])],
+    }
+
+
+def rederive_from_files(look_dir: Path) -> dict:
+    """The re-derivation path: read every <bias>/probe.json a sweep wrote
+    under ``look_dir`` (the first run of each file is the sweep's render),
+    choose by rederive_bias, write <look_dir>/rederived.json."""
+    look_dir = Path(look_dir)
+    files = sorted(look_dir.glob("*/probe.json"))
+    if not files:
+        refuse("rederive_no_probes", root=look_dir)
+    probes = []
+    for path in files:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        run = dict(data["runs"][0])
+        run.pop("rows", None)
+        run["engine"] = data["engine"]
+        run["probe"] = str(path)
+        probes.append(run)
+    result = rederive_bias(probes)
+    result["probes"] = [probe["probe"] for probe in probes]
+    result["measured_on"] = sorted({probe["engine"] for probe in probes})
+    (look_dir / "rederived.json").write_text(json.dumps(result, indent=2),
+                                             encoding="utf-8")
+    return result
+
+
+def emit_probe(out: Path, probe_out: Path) -> Path:
+    rows = probe_tree(out)
+    path = write_probe(Path(probe_out).resolve(), rows, engine_string())
+    print(f"\n{RULE}\nprobe ({engine_string()})\n{RULE}")
+    for row in rows:
+        bias = "unrecorded" if row["bias"] is None else f"{row['bias']:g}"
+        excursion = ("--" if row["sky_excursion"] is None
+                     else f"{row['sky_excursion']:.2f}")
+        means = "  ".join(
+            "{} {:>7s}".format(band, "--" if row[band + "_mean"] is None
+                               else "{:.2f}".format(row[band + "_mean"]))
+            for band in ("sky", "terrain", "ground"))
+        print(f"  {row['run']:18s} bias {bias:>10s}  {means}  "
+              f"excursion {excursion:>6s}  ({row['frames']} frames)")
+    print(f"  wrote {path}")
+    return path
+
+
 def render(editor: Path, project: Path, card: Path, frames: Path,
            terrain: Path, shot: str, extra: Sequence[str]) -> bool:
     frames.mkdir(parents=True, exist_ok=True)
@@ -800,7 +1093,45 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "VSM on, at the SAME 960x540 the thresholds were "
                          "set at, so a pass means the clauses survive the "
                          "renderer change -- not a new resolution's luck")
+    ap.add_argument("--probe-out", default=None, metavar="PATH",
+                    help="B4: write a probe.json of every render under --out "
+                         "(band means per frame, bias, engine pin); with "
+                         "--skip-render it reads an existing tree before "
+                         "anything else, so a tree missing the still runs "
+                         "still yields its probe")
+    ap.add_argument("--probe-sweep", choices=tuple(PROBE_SWEEPS), default=None,
+                    help="B4 step 5: render the Gate 6 scene once per bias "
+                         "of this look's sweep (--probe-biases overrides the "
+                         "list) and write <probe-root>/<look>/<bias>/probe.json; "
+                         "nothing else runs")
+    ap.add_argument("--probe-biases", default=None, metavar="B1,B2,...",
+                    help="the biases --probe-sweep renders (default: the "
+                         "look's PROBE_SWEEPS entry)")
+    ap.add_argument("--probe-root", default=PROBE_SWEEP_ROOT,
+                    help="where --probe-sweep and --rederive read and write")
+    ap.add_argument("--rederive", choices=tuple(PROBE_SWEEPS), default=None,
+                    metavar="LOOK",
+                    help="B4 step 6: read <probe-root>/<look>/*/probe.json, "
+                         "choose the bias nearest the stated mid-grey target "
+                         f"within {PROBE_TOLERANCE:g}/255 (decision 15), write "
+                         "rederived.json beside them; refuses by name when "
+                         "no bias is within tolerance")
     args = ap.parse_args(argv)
+    if args.rederive:
+        try:
+            result = rederive_from_files(Path(args.probe_root) / args.rederive)
+        except ProbeRefusal as refusal:
+            print(refusal)
+            return 1
+        print(f"\n{RULE}\nre-derived {args.rederive} bias on {result['engine']}\n{RULE}")
+        for row in result["candidates"]:
+            print(f"  bias {row['bias']:5g}  {result['band']} {row[result['band'] + '_mean']:7.2f}  "
+                  f"excursion {row['sky_excursion']}")
+        print(f"  chosen {result['chosen_bias']:g}: {result['band']} band "
+              f"{result['value']:.2f}/255 against the stated {result['target']:g}/255 "
+              f"(tolerance {result['tolerance']:g}); measured on "
+              f"{', '.join(result['measured_on'])}")
+        return 0
     if args.quality == "beauty" and args.out == "runs/gate6":
         args.out = "runs/gate6_beauty"
     quality_flags = ([] if args.quality == "measure" else
@@ -836,13 +1167,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # The exposure clause's negative control (see measure_exposure_control).
         "full_auto": ("terrain", ["-AutoExposure"]),
     }
+    if args.probe_sweep:
+        biases = (parse_biases(args.probe_biases) if args.probe_biases
+                  else list(PROBE_SWEEPS[args.probe_sweep]))
+        look_dir = Path(args.probe_root).resolve() / args.probe_sweep
+        print(f"\n{RULE}\n2. probe sweep ({args.probe_sweep}: {biases})\n{RULE}")
+        for bias in biases:
+            frames = look_dir / f"{bias:g}"
+            if args.skip_render and (frames / "render.json").is_file():
+                print(f"  [kept] bias {bias:g}")
+            elif editor is None or not editor.is_file():
+                print(f"  no editor at {editor}, and no render at {frames}"
+                      f"\n\n  PROBE SWEEP: BLOCKED")
+                return 2
+            else:
+                ok = render(editor, project, card, frames, terrain, "terrain",
+                            [*probe_look_flags(args.probe_sweep),
+                             f"-exposure-bias={bias:g}", *quality_flags])
+                print(f"  [{'ok  ' if ok else 'FAIL'}] bias {bias:g}")
+                if not ok:
+                    print("\n  PROBE SWEEP: BLOCKED -- a render did not complete.")
+                    return 2
+            path = write_probe(frames / "probe.json", [probe_run(frames, bias)],
+                               engine_string())
+            print(f"  wrote {path}")
+        return 0
+
+    if args.probe_out and args.skip_render:
+        emit_probe(out, args.probe_out)
+
     print(f"\n{RULE}\n2. renders\n{RULE}")
     for name, (shot, extra) in runs.items():
         frames = out / name
         if args.skip_render and (frames / "render.json").is_file():
             print(f"  [kept] {name}")
             continue
-        if not editor.is_file():
+        if editor is None or not editor.is_file():
             print(f"  no editor at {editor}\n\n  GATE 6: BLOCKED")
             return 2
         ok = render(editor, project, card, frames, terrain, shot,
@@ -859,6 +1219,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if args.skip_render and (frames / "render.json").is_file():
                 print(f"  [kept] {name}")
                 continue
+            if editor is None or not editor.is_file():
+                print(f"  no editor at {editor}\n\n  GATE 6: BLOCKED")
+                return 2
             ok = render(editor, project, card, frames, terrain, shot, extra)
             print(f"  [{'ok  ' if ok else 'FAIL'}] {name} ({shot} shot "
                   f"{' '.join(extra)})")
@@ -877,6 +1240,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print("  The measured mountains are not the raster this harness "
                   "baked. GATE 6: BLOCKED")
             return 2
+
+    if args.probe_out and not args.skip_render:
+        emit_probe(out, args.probe_out)
 
     print(f"\n{RULE}\n3. the four measurable clauses\n{RULE}")
     still = sorted((out / "still").glob("frame_*.png"))[-1]

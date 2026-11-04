@@ -49,10 +49,19 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 #: own defaults (no sun override, fog 0.0025, AutoExposureBias 11.0).
 #: One builder means one default; the web app's is the one pinned
 #: byte-identical by test, so it stands for both.
+#:
+#: B4 (docs/phase3/notes/B4.md, decisions 13 and 15): ``exposure_bias``
+#: 9.5 was measured on UE 5.5 with no renderer settings (history; the
+#: engine mark is ue/Config/DefaultEngine.ini's header). The pinned
+#: engine is 5.7.4 (changelist 51494982); the value is re-derived by
+#: ``experiments/gate6_visual.py --probe-sweep noon`` then ``--rederive
+#: noon`` on the Windows laptop and replaced here only from that probe
+#: file, never typed from theory (decision 15: unchanged if Gate 6
+#: passes with it).
 DEFAULT_LOOK: Dict[str, float] = {
     "sun_elev": 50.0,
     "sun_azim": 180.0,
-    "exposure_bias": 9.5,
+    "exposure_bias": 9.5,  # measured on 5.5 (history); 5.7.4 re-derivation pending the B4 probe
     "fog_density": 0.0012,
 }
 

@@ -779,3 +779,154 @@ def test_the_pass_words_are_the_builders():
     for word in PASS_NAMES:
         assert f'Word == TEXT("{word}")' in source, word
     assert 'FParse::Value(*Params, TEXT("passes="), PassesArg);' in source
+
+
+# -- B4: the probe, the sweep, --skip-render on an existing tree -----------
+
+
+def _doublet(path, sky_for):
+    path.mkdir(parents=True, exist_ok=True)
+    return exposure_run(path, sky_for)
+
+
+def _probe_names():
+    import experiments.gate6_visual as g6
+    return g6
+
+
+class _StubField:
+    """main()'s deterministic inputs, stubbed: the probe paths never render,
+    so the 512 px bake and the JSBSim reference flight are dead weight."""
+
+    def write(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        return path / "terrain.tif"
+
+    def digest(self):
+        return "0" * 64
+
+
+def _fast_inputs(monkeypatch, g6):
+    monkeypatch.setattr(g6, "generate", lambda **kwargs: _StubField())
+    monkeypatch.setattr(g6, "reference_spec", lambda prompt: _StubField())
+    monkeypatch.setattr(g6, "write_run_card", lambda spec, path, **kwargs: path)
+    monkeypatch.setattr(g6, "ue_editor_path", lambda: None)
+
+
+def test_probe_frame_reads_band_luminance(tmp_path):
+    g6 = _probe_names()
+    rgb = frame(sky=(120, 140, 190), ground=(100, 110, 120))
+    paint(rgb, 160, 150, (200, 40, 40), half=8)
+    path = write_png_rgb(tmp_path / "frame_0000.png", rgb)
+    probe = g6.probe_frame(path, {"sky": {"rows": SKY_BAND_ROWS},
+                                  "patch": {"px": 160, "py": 150, "half": 4}})
+    assert probe["width"] == WIDTH and probe["height"] == HEIGHT
+    assert probe["bands"]["sky"]["mean_luminance"] == pytest.approx(150.0)
+    assert probe["bands"]["sky"]["mean_rgb"] == pytest.approx([120, 140, 190])
+    assert probe["bands"]["patch"]["mean_rgb"] == pytest.approx([200, 40, 40])
+    assert probe["bands"]["patch"]["mean_luminance"] == pytest.approx(280 / 3, abs=0.01)
+    with pytest.raises(g6.ProbeRefusal, match="probe_band_shape"):
+        g6.probe_frame(path, {"odd": {"columns": (0, 1)}})
+
+
+def test_probe_out_records_engine_and_bias(tmp_path):
+    """The bias comes off the render's own record (the scene string, or
+    render_settings.exposure_bias when the Look lane wrote it) unless the
+    sweep names one; the engine is the toolchain.json pin, so the file
+    says 5.7.4 / 51494982 exactly as decision 13 does."""
+    g6 = _probe_names()
+    run = _doublet(tmp_path / "full", lambda t, roll: 128)
+    recorded = g6.probe_run(run)
+    assert recorded["bias"] == 11.0                      # "AutoExposureBias 11.0"
+    assert recorded["frames"] == 40 and recorded["window_frames"] > 0
+    assert recorded["sky_mean"] == pytest.approx(128.0)
+    assert recorded["sky_excursion"] == pytest.approx(0.0)
+    manifest = json.loads((run / "render.json").read_text(encoding="utf-8"))
+    manifest["render_settings"] = {"exposure_bias": 9.5}
+    (run / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert g6.probe_run(run)["bias"] == 9.5
+    assert g6.probe_run(run, bias=10.5)["bias"] == 10.5
+
+    path = g6.write_probe(tmp_path / "probe.json", [recorded], g6.engine_string())
+    data = json.loads(path.read_text(encoding="utf-8"))
+    from core.util import platform as plat
+    assert data["engine"] == g6.engine_string()
+    assert data["engine"].startswith(f"{plat.UE_ENGINE_VERSION}.{plat.UE_ENGINE_PATCH} ")
+    assert str(plat.TOOLCHAIN["engine"]["changelist"]) in data["engine"]
+    assert data["runs"][0]["bias"] == 11.0
+    assert data["tolerance"] == g6.PROBE_TOLERANCE == 4.0
+    assert data["mid_grey_target"] == g6.MID_GREY_TARGET
+
+
+def test_probe_refuses_a_missing_frame_by_name(tmp_path):
+    g6 = _probe_names()
+    with pytest.raises(g6.ProbeRefusal) as refusal:
+        g6.probe_frame(tmp_path / "frame_0042.png", {"sky": {"rows": SKY_BAND_ROWS}})
+    assert "probe_frame_missing" in str(refusal.value)
+    assert "frame_0042.png" in str(refusal.value)
+    with pytest.raises(g6.ProbeRefusal, match="probe_manifest_missing"):
+        g6.probe_run(tmp_path / "nowhere")
+
+
+def test_rederive_picks_the_bias_nearest_the_target_within_tolerance():
+    g6 = _probe_names()
+    probes = [{"bias": 9.0, "terrain_mean": 100.0, "sky_excursion": 2.0},
+              {"bias": 9.5, "terrain_mean": 116.5, "sky_excursion": 3.0},
+              {"bias": 10.0, "terrain_mean": 121.0, "sky_excursion": 3.5}]
+    result = g6.rederive_bias(probes)
+    assert result["chosen_bias"] == 9.5 and result["target"] == 118.0
+    assert [row["bias"] for row in result["candidates"]] == [9.0, 9.5, 10.0]
+    # A sky that pumps past Gate 6's threshold disqualifies the nearest.
+    probes[1]["sky_excursion"] = 30.0
+    assert g6.rederive_bias(probes)["chosen_bias"] == 10.0
+
+
+def test_rederive_refuses_when_no_bias_is_within_tolerance():
+    g6 = _probe_names()
+    probes = [{"bias": 9.0, "terrain_mean": 100.0, "sky_excursion": 2.0},
+              {"bias": 9.5, "terrain_mean": 105.0, "sky_excursion": 2.0}]
+    with pytest.raises(g6.ProbeRefusal) as refusal:
+        g6.rederive_bias(probes)
+    assert "rederive_out_of_tolerance" in str(refusal.value)
+    assert "9.5" in str(refusal.value) and "105.00" in str(refusal.value)
+
+
+def test_skip_render_probes_an_existing_tree_before_blocking(tmp_path, monkeypatch):
+    """The Windows laptop's runs/gate6/ holds full, full_auto and the look
+    runs but no still/shadow runs: --skip-render --probe-out must write
+    the probe of what is there before the missing renders block the gate."""
+    g6 = _probe_names()
+    out = tmp_path / "gate6"
+    _doublet(out / "full", lambda t, roll: 128)
+    _doublet(out / "full_auto", lambda t, roll: 128 + roll)
+    _fast_inputs(monkeypatch, g6)
+    probe = tmp_path / "probe.json"
+    code = g6.main(["--out", str(out), "--skip-render", "--probe-out", str(probe)])
+    assert code == 2                                   # BLOCKED: still runs absent
+    data = json.loads(probe.read_text(encoding="utf-8"))
+    assert [row["run"] for row in data["runs"]] == ["full", "full_auto"]
+    assert data["runs"][0]["sky_excursion"] == pytest.approx(0.0)
+    assert data["runs"][1]["sky_excursion"] > THRESHOLDS["max_sky_excursion"]
+    assert data["engine"] == g6.engine_string()
+
+
+def test_probe_sweep_reuses_existing_renders_and_rederives(tmp_path, monkeypatch):
+    g6 = _probe_names()
+    root = tmp_path / "b4_probe"
+    _doublet(root / "gate6" / "11", lambda t, roll: 128)
+    _fast_inputs(monkeypatch, g6)
+    argv = ["--out", str(tmp_path / "out"), "--probe-root", str(root),
+            "--probe-sweep", "gate6", "--probe-biases", "11"]
+    assert g6.main([*argv, "--skip-render"]) == 0
+    data = json.loads((root / "gate6" / "11" / "probe.json").read_text(encoding="utf-8"))
+    assert data["runs"][0]["bias"] == 11.0 and data["engine"] == g6.engine_string()
+    # Without the render and without an editor the sweep is BLOCKED, not faked.
+    assert g6.main([*argv, "--probe-biases", "11,12", "--skip-render"]) == 2
+    assert not (root / "gate6" / "12" / "probe.json").exists()
+    # The re-derivation reads the probe files back: the synthetic ground
+    # (120,115,105) under the sky band puts the terrain band at ~117/255.
+    assert g6.main(["--probe-root", str(root), "--rederive", "gate6"]) == 0
+    chosen = json.loads((root / "gate6" / "rederived.json").read_text(encoding="utf-8"))
+    assert chosen["chosen_bias"] == 11.0
+    assert abs(chosen["value"] - g6.MID_GREY_TARGET) <= g6.PROBE_TOLERANCE
+    assert g6.main(["--probe-root", str(root), "--rederive", "noon"]) == 1

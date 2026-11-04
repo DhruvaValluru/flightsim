@@ -114,8 +114,12 @@ CONFIG_DIR = Path(__file__).resolve().parents[2] / "assets" / "aircraft_config"
 #: (experiments/showcase_matrix.TIME_OF_DAY, NEXT.md gotcha 7):
 #: (sun elevation deg, exposure bias). Exposure is interpolated between
 #: them and clamped beyond -- never extrapolated into a look nobody has
-#: rendered. A test pins these to the harness table.
-EXPOSURE_CALIBRATION = ((8.0, 10.5), (50.0, 9.5))
+#: rendered. A test pins these to the harness table. Both biases were
+#: measured on UE 5.5 (history, engine defaults); the 5.7.4 (changelist
+#: 51494982) anchors come from the B4 probe sweep (gate6_visual.py
+#: --probe-sweep dawn|noon, --rederive) and replace these only from that
+#: probe file (decisions 13 and 15).
+EXPOSURE_CALIBRATION = ((8.0, 10.5), (50.0, 9.5))  # measured on 5.5 (history)
 #: The harness's calibrated fog densities (showcase_matrix.VISIBILITY).
 FOG_CLEAR = 0.0012
 FOG_HAZY = 0.010
