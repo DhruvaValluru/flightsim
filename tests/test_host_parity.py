@@ -203,6 +203,49 @@ def test_heading_is_compared_on_the_circle_not_the_number_line(tmp_path):
     )
 
 
+def test_heading_compared_on_the_circle_when_both_hosts_cross_north_a_fraction_apart(tmp_path):
+    """The mutation guard "heading compared on the circle" re-armed.
+
+    After compare() moved to elapsed time (decision 14) the test above lost
+    its provable seam hit: its heading is a function of the ABSOLUTE clock,
+    so re-basing each host to its first sample shifted the headless grid by
+    0.03 s and the unreal interval that straddles north moved out from under
+    it. With the raw wrapped series every test in this file passed. Here the
+    heading is a function of ELAPSED time, the hosts have the A5 clock
+    origins (4.875 s and 0.008 s), and the headless grid point at 7.54 s is
+    proven to sit strictly inside the unreal interval (7.5, 7.6) where its
+    samples read 359.995 and 0.0. Headless drifts 359.5 -> 0.5 over 20 s,
+    unreal the same 0.12 deg ahead: a real, small difference. Unwrapped, the
+    channel reads 0.12 deg; on the raw series the interpolation runs through
+    south and reports ~144 deg.
+    """
+    def crossing(path, period, start, lead):
+        elapsed = [round(period * k, 6) for k in range(int(20.0 / period) + 1)]
+        times = [round(start + e, 6) for e in elapsed]
+        columns = {"t": times}
+        for channel in COMPARED:
+            columns[channel] = [0.0] * len(times)
+        columns["heading_deg"] = [(359.5 + 0.05 * e + lead) % 360.0 for e in elapsed]
+        path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
+        return path, elapsed, columns["heading_deg"]
+
+    a, at, ha = crossing(tmp_path / "headless.json", 0.13, 4.875, 0.0)
+    b, bt, hb = crossing(tmp_path / "unreal.json", 0.1, 0.008, 0.12)
+    # The proof, not luck: unreal's seam-straddling interval holds a headless
+    # sample time, and both samples of that interval sit a hair either side.
+    seam = next(j for j in range(1, len(hb)) if hb[j] < hb[j - 1])
+    inside = [t for t in at if bt[seam - 1] < t < bt[seam]]
+    assert inside, (bt[seam - 1], bt[seam])
+    assert hb[seam - 1] > 359.9 and hb[seam] < 0.1
+
+    results = {r.channel: r for r in compare(a, b)[0]}
+    assert results["heading_deg"].max_difference == pytest.approx(0.12, abs=1e-6), (
+        "two hosts crossing north 0.12 deg apart were graded on the number "
+        "line -- the heading is no longer compared on the circle"
+    )
+    assert results["heading_deg"].ok
+
+
 def test_a_real_heading_divergence_near_the_seam_is_still_reported(tmp_path):
     """The wrap handling must not also forgive genuine disagreement."""
     def steady(path, heading):
