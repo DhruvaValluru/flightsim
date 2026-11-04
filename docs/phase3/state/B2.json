@@ -1,15 +1,19 @@
 {
-  "budget_used": 7,
-  "claims": [
-    "core/util/platform.py",
-    "scripts/ue_preflight.ps1",
-    "tests/test_powershell_scripts.py",
-    "toolchain.json"
-  ],
+  "budget_used": 15,
+  "builder_commit": "14e819069c264613868ad55a7764941a7e1f403a",
+  "built_commit": "14e819069c264613868ad55a7764941a7e1f403a",
+  "claims": [],
+  "integrated_commit": "ab07961ce4b994bce08611c5f218769187ddc3e5",
   "letter": "B",
   "needs_windows": true,
-  "stage": "building",
+  "pending_windows": [
+    "preflight parses on Windows PowerShell 5.1 (step 4)",
+    "7 OK <tool> <version> lines, exit 0 on the 5.7 laptop (step 5)",
+    "ffmpeg 9.0.1 pin -> toolchain.ffmpeg_mismatch, exit non-zero (step 6)",
+    "windows_sdk wrong pin -> toolchain.windows_sdk_mismatch, exit non-zero (step 7)"
+  ],
+  "stage": "integrated",
   "unit": "B2+B3",
-  "updated": "2026-11-04T11:39:36",
+  "updated": "2026-11-04T11:46:45",
   "worktree": "../p3-B2"
 }
