@@ -8,8 +8,11 @@
     "A1 step2 row 2",
     "A1 step3 row 3"
   ],
+  "reason": "needs the reviewer's and third machines (decision 9, packets/A1-1.md); row 1 measured on this machine",
+  "run_id": "A-1",
   "stage": "pushed",
   "unit": "A1+A2",
-  "updated": "2026-11-04T00:54:27",
+  "updated": "2026-11-04T01:14:27",
+  "verdict": "cut",
   "worktree": "../p3-A2"
 }

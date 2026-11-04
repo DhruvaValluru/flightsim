@@ -48,7 +48,7 @@ sitting 0.4 m from its label (it was ~25 m).
 - [ ] **A2 · That version written in every place the project names it**
   - Check: `pytest -q tests/test_platform.py` passes.
   - Check: changing the version in one file by hand makes that test fail.
-- [ ] **A3 · The build refuses the wrong engine** 🪟
+- [x] **A3 · The build refuses the wrong engine** 🪟
   - Check: pointing it at another version stops with `engine.version_mismatch`.
   - Check: the right version builds with zero errors.
 - [ ] **A4 · An old engine program can't draw the pictures**
@@ -117,7 +117,7 @@ Two rules to keep in mind:
   colour in the mask, but it is still part of the plane.
 - **Python decides every part's ID; the engine only follows.**
 
-- [ ] **C1 · The A-4 file lists its payload and a default loadout** 🐍 — *you
+- [x] **C1 · The A-4 file lists its payload and a default loadout** 🐍 — *you
   decide the loadout*
   - Check: the A-4 loads with at least one payload, and the plane still trims with
     the weight of what it carries.
@@ -128,11 +128,11 @@ Two rules to keep in mind:
 - [ ] **C4 · The engine gives each piece its own colour in the mask** 🪟
   - Check: the mask contains the payload's ID, and the aircraft's own tight box is
     still filled.
-- [ ] **C5 · Payload boxes written into the label file (manifest v8)** 🐍
+- [x] **C5 · Payload boxes written into the label file (manifest v8)** 🐍
   - Check: `pytest -q tests/test_component_labels.py` passes for five cases: visible,
     off-screen, hidden behind the plane, aircraft box includes payload, and old v7
     files still read.
-- [ ] **C6 · The checker and exports know about payload** 🐍
+- [x] **C6 · The checker and exports know about payload** 🐍
   - Check: `component_coverage` passes, and a COCO export has a `payload` category.
 - [ ] **C7 · (Optional) Landing gear boxes, on the c172p** (its gear is fixed and
   visible; the A-4's gear is stowed)

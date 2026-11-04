@@ -1,0 +1,29 @@
+# Phase 3 log
+
+What was run on a real machine, with its result. Written by the Phase 3
+Windows runner (the sheet's rule: a failed check is written here before it
+is fixed). Outputs live under `runs/p3/<run id>/`; synopses under
+`docs/phase3/packets/`; the cross-check records in `docs/phase3/sync_log_<L>.md`.
+
+Machine: Windows laptop, UE 5.5.4 (changelist 40574608), MSVC 14.44.35207,
+Windows SDK 10.0.26100.0, Python 3.12.10, Cesium for Unreal 2.28.0 (project
+plugin, installed 2026-11-04 because only the 5.7 copy was on the machine).
+
+## Letter A
+
+| Box | Run | Check | Result | Note |
+|---|---|---|---|---|
+| A3 | A-1 | `build_ue.ps1` with `UE_ROOT` at UE_5.7 | exit 1, `engine.version_mismatch: found 5.7.4, pinned 5.5`, Build.bat not started | 2026-11-04 |
+| A3 | A-1 | `ue_preflight.ps1` at UE_5.7 | exit 1, `engine.version_mismatch: found 5.7.4, pinned 5.5` | |
+| A3 | A-1 | `ue_preflight.ps1` at the pinned 5.5.4 | exit 0, `engine UE 5.5.4 at C:\Program Files\Epic Games\UE_5.5` | |
+| A2 | A-1 | `build_ue.ps1` on 5.5.4 (first run) | FAIL: `FlightSimVisualScene.cpp(1128): error C2039: 'LoadSynchronous'` (5.7-only) | fixed in be6bf574 (version guard) |
+| A2 | A-1 | `build_ue.ps1` on 5.5.4 after be6bf574 | exit 0, zero `error C`, `stamped 770fa283…` | |
+| A2 | A-1 | `pytest -q tests/test_platform.py` | exit 0 with `FLIGHTSIM_GOOGLE_TILES` unset; with the owner's `=on` one pre-existing test fails (terrain.unbaked), same on bd68745b | environment interaction, not letter A |
+| A2 | A-1 | hand-edit `FlightSim.Target.cs` to Unreal5_7 | exit 1, `ue\Source\FlightSim.Target.cs does not pin EngineIncludeOrderVersion.Unreal5_5` | reverted |
+| A4 | A-1 | PowerShell hash of `tests/fixtures/stamp_tree` vs golden | equal (`0141215e…`); repo hash PowerShell == Python (`770fa283…`) | |
+| A4 | A-1 | edit a `.cpp`, no rebuild, `capture --render` | `binary_stale_reason` names both hashes; the CLI refused `google_tiles.terrain` first (no bake yet) | re-run after the bake |
+| A5 | A-1 | `vendor_ue_plugin.ps1` | run 1 FAIL (stale temp checkout, `fatal: not a git repository`); run 2 exit 0, dll sha256 `853d8bc6…` | temp folder removed |
+| A5 | A-1 | `check_bridge_api.sh` on UE_5.5 | exit 1: `module CesiumRuntime FAIL` (not installed for 5.5 at the time), `module Marketplace`/`Plugins FAIL` (path strings parsed as modules), `show flag Grain FAIL` (pattern `(Grain,` never matches `(1, Grain,` on 5.5 or 5.7) | script defects, packet to follow |
+| C1 | A-1 | `pytest -v tests/test_airframe.py -k components` | `6 passed`, incl. `test_components_loadout_trims` | |
+| C5 | A-1 | `pytest -q tests/test_component_labels.py` | exit 0, 11 tests | |
+| C6 | A-1 | `pytest -q -k component` | exit 0 | mutant half: the Mac auditor's mutation subset (state/A.json) |

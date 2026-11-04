@@ -5,7 +5,9 @@
   "integrated_commit": "de54c12d15e45e8956d6870ac4863100fc2df6c2",
   "letter": "C",
   "needs_windows": false,
+  "run_id": "A-1",
   "stage": "pushed",
-  "updated": "2026-11-04T00:54:27",
+  "updated": "2026-11-04T01:20:40",
+  "verdict": "PASS",
   "worktree": "../p3-C5"
 }

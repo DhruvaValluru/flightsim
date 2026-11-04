@@ -11,6 +11,8 @@
   "open_for_C3": [
     "v8 schema objects[].role enum has no component value; fabricated payload uses role scene; object id pattern rejects payload:tank_centre (fixture uses payload:pod_right:0)"
   ],
+  "run_id": "A-1",
   "stage": "pushed",
-  "updated": "2026-11-04T00:54:27"
+  "updated": "2026-11-04T01:20:40",
+  "verdict": "PASS"
 }
