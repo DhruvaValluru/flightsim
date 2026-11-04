@@ -743,6 +743,32 @@ def _auto_scene(spec: ScenarioSpec) -> Dict:
                      "elevation"}
 
 
+def provision_place(spec: ScenarioSpec) -> Dict[str, Any]:
+    """POST /run's place provisioning, the ONE function every path that
+    flies a spec calls (decision 17): the single run (``webapp.server``)
+    and the campaign (``core.campaign.campaign.provision_spec`` for
+    ``/generate``'s plan, sample and start), so a campaign case flies --
+    and, with Google's tiles on, renders -- exactly the ground the single
+    run would, never a second copy of the bake table or its order.
+
+    In /run's order, on ``spec`` in place: scene-setting onto the curated
+    bake table (:func:`plan_scene_setting`, SCENE_SETTING_BAKES), the
+    water surface (:func:`plan_water_surface`), the bake check
+    (:func:`needs_dynamic_bake`: a named ``terrain.unbaked`` refusal,
+    returned under ``refusal`` with the spec untouched further), then
+    placement (:func:`place_on_scene`) and the scene the geography earns
+    (:func:`pick_scene`, under ``scene``; its ``terrain`` is the bake stem
+    the capture carries, None on the slab).
+    """
+    plan_scene_setting(spec)
+    plan_water_surface(spec)
+    unbaked = needs_dynamic_bake(spec)
+    if unbaked is not None:
+        return {"refusal": unbaked, "scene": None}
+    place_on_scene(spec)
+    return {"refusal": None, "scene": pick_scene(spec)}
+
+
 def place_on_scene(spec: ScenarioSpec) -> None:
     """A spec that earns the control ridge flies AT the control ridge.
 
