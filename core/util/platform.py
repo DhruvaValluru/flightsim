@@ -136,16 +136,17 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
 
 
 #: The Unreal Engine major.minor the project pins (`ue/FlightSim.uproject`
-#: EngineAssociation, both Target.cs IncludeOrderVersion constants). Phase 3
-#: pinned it back to 5.5 (docs/phase3/decisions.md decision 1; 5.7 never
-#: built on the reviewers' machines, and every measurement on record was taken
-#: on 5.5). The refusal texts and the default install roots below are built
-#: from it so the pin is stated in ONE place on the Python side.
-UE_ENGINE_VERSION = "5.5"
+#: EngineAssociation, both Target.cs IncludeOrderVersion constants). Decision
+#: 10 (docs/phase3/decisions.md, owner, 2026-11-04) pins it to 5.7; the
+#: Windows laptop has UE_5.7 installed. It supersedes the 2026-11-03 pin to
+#: 5.5; the 5.5 lines elsewhere are measured history. The refusal texts and
+#: the default install roots below are built from it so the pin is stated in
+#: ONE place on the Python side.
+UE_ENGINE_VERSION = "5.7"
 
-#: The patch level measured on the Windows laptop (docs/TOOLCHAIN.md row 1:
-#: Engine/Build/Build.version 5.5.4). tests/test_platform.py checks it
-#: against that row.
+#: Patch level of UE 5.7 on the Windows laptop, pending its Build.version
+#: read; docs/TOOLCHAIN.md row 1. tests/test_platform.py checks it against
+#: that row.
 UE_ENGINE_PATCH = 4
 
 #: What is missing, and the remedy, IN THIS OS's OWN TERMS. One text for

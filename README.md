@@ -21,7 +21,7 @@ flightsim.export RUNS --out DIR --format coco,kitti,webdataset,yolo,voc`
 writes the dataset with its card and refuses unverified runs by name.
 Everything Python is measured on any machine; the rendered half (the
 `-labels` masks and depth on real pixels, the look clauses) waits for the
-Windows build on UE 5.5 -- [docs/PHASE2_REPORT.md](docs/PHASE2_REPORT.md)
+Windows build on UE 5.7 -- [docs/PHASE2_REPORT.md](docs/PHASE2_REPORT.md)
 opens with the instructor's commands and the Windows verification order.
 
 **The advancement addition (2026-09-29, same branch; versions bumped once,
@@ -189,7 +189,7 @@ Per-OS setup notes:
   ZERO setup on any OS: a fresh clone compiles a prompt before
   installing anything optional.
 
-**Rendering video clips** needs Unreal Engine 5.5 (free from the Epic
+**Rendering video clips** needs Unreal Engine 5.7 (free from the Epic
 Games Launcher) plus the platform toolchain:
 
 * **macOS** (Xcode 15.2-16.9):

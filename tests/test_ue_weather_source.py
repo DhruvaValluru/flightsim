@@ -491,7 +491,7 @@ def test_the_cinematic_rain_style_and_the_warm_up_step_guard(monkeypatch):
 
 def test_material_resource_is_version_guarded():
     """GetMaterialResource takes a shader platform on 5.7+ and a feature
-    level on 5.5 (the Phase 3 pin): both branches sit behind the engine
+    level on 5.5 (measured history): both branches sit behind the engine
     version macro, and no call site uses the overload bare."""
     assert "ENGINE_MINOR_VERSION >= 7" in WEATHER_CPP
     assert "#else" in WEATHER_CPP.split("FLIGHTSIM_GET_MATERIAL_RESOURCE", 1)[1]

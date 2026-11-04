@@ -20,7 +20,7 @@ fi
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
+UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.7}"
 STATUS=0
 
 say() { printf '  %-34s %s\n' "$1" "$2"; }
@@ -117,7 +117,7 @@ for candidate in "${DEVELOPER_DIR:-}" \
 done
 
 if [ -z "$USABLE" ]; then
-    fail "xcode (build toolchain)" "no Xcode in the 15.2-16.9 range measured for UE 5.5"
+    fail "xcode (build toolchain)" "no Xcode in the 15.2-16.9 range (measured on UE 5.5)"
     cat <<'EOF'
 
   Install Xcode 16.x alongside the system one -- it does not need to become the

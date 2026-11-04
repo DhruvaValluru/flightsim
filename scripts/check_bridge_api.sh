@@ -60,7 +60,7 @@ case "${1:-}" in
     --showflag-pattern) showflag_pattern "$2"; echo; exit 0 ;;
 esac
 
-UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
+UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.7}"
 PLUGIN="ue/Plugins/JSBSimFlightDynamicsModel"
 BRIDGE="ue/Plugins/FlightSimBridge"
 STATUS=0

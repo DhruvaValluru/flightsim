@@ -692,7 +692,7 @@ def test_vendored_json_targets_the_pinned_engine():
     vendored = json.loads(text(PLUGIN / "VENDORED.json"))
     assert vendored["ue_engine_target"] == UE_ENGINE_VERSION
     for patch in vendored["local_patches"]:
-        assert patch.get("status_5_5"), patch["file"]
+        assert patch.get("status_5_7"), patch["file"]
 
 
 def test_every_engine_file_this_item_writes_is_ascii():
