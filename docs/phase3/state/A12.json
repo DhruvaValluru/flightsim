@@ -12,7 +12,7 @@
   "failures": [
     "run A-2 packet docs/phase3/packets/A12-1.md: 6 of 7 gates pass on both the A-4 and the c172p one-frame runs; mask_vs_geometry fails on every render: the drawn pixels sit 1.1% of the image width left of the engine's own projection (horizontal only); tight_box_present PASS on one-frame runs; diagnose tight null: 0; Windows builder diagnoses the render camera vs its projection record"
   ],
-  "integrated_commit": "6caabdac",
+  "integrated_commit": "ef4dd87c",
   "letter": "A",
   "needs_windows": true,
   "note": "verify.py landmark_reprojection rotates yaw by camera_grid_convergence_deg",
@@ -26,9 +26,9 @@
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "built_local",
+  "stage": "integrated",
   "unit": "A12+A13",
-  "updated": "2026-11-04T13:05:30",
+  "updated": "2026-11-04T13:13:38",
   "verdict": "",
   "worktree": "../p3-A12r"
 }
