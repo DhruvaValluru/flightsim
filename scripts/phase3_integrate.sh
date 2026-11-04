@@ -40,9 +40,9 @@ Claude-Session: https://claude.ai/code/session_01TYf9hdwcEyKovqfAJKwdzh" >/dev/n
   echo "   bookkeeping conflicts resolved to MAIN: $conflicts"
 fi
 merge="$(git rev-parse --short HEAD)"
-changed="$(git diff --name-only "$base" HEAD -- . ':!docs/phase3')"
+changed="$(git diff --name-only "$base" "$branch" -- . ':!docs/phase3')"   # the branch's own side only
 step "diff guard"
-if git diff "$base" HEAD -- . ':!docs/phase3' | grep -n "GOOGLE_TILES\|WEATHER_BACKEND\|subscribe"; then echo "FAIL diff guard hit (review the lines above)"; exit 4; fi
+if git diff "$base" "$branch" -- . ':!docs/phase3' | grep -n "GOOGLE_TILES\|WEATHER_BACKEND\|subscribe"; then echo "FAIL diff guard hit (review the lines above)"; exit 4; fi
 step "tests: ${tests[*]:-none}"
 if [ "${#tests[@]}" -gt 0 ]; then
   if ! "$py" -m pytest -q -p no:cacheprovider --durations=5 "${tests[@]}"; then echo "FAIL tests"; log "integrate.sh $box: tests FAILED after merge $merge"; exit 5; fi
