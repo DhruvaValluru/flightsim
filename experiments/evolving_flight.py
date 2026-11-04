@@ -190,6 +190,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             f"-fps={FPS}", "-width=1280", "-height=720",
             "-sun-elev=8.0", "-sun-azim=95.0",
             "-sun-elev-end=30.0", "-sun-azim-end=130.0",
+            # 10.5 is the dawn bias measured on UE 5.5 (history); the 5.7.4
+            # value comes from the B4 probe sweep (gate6_visual.py
+            # --probe-sweep dawn, --rederive dawn), decisions 13 and 15.
             "-exposure-bias=10.5", "-fog-density=0.0012",
             "-unattended", "-nopause", "-nosplash",
             "-stdout", "-FullStdOutLogOutput",

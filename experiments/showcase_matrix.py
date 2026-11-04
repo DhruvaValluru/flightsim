@@ -103,10 +103,14 @@ MICROBURST = {
 }
 VISIBILITY = {"clear": 0.0012, "hazy": 0.010}
 #: Time of day as sun geometry plus an exposure bias for the §6.6 manual
-#: exposure. Approximations, recorded as such in every manifest.
+#: exposure. Approximations, recorded as such in every manifest. The two
+#: biases were measured on UE 5.5 (history, no renderer settings); the
+#: 5.7.4 (changelist 51494982) values come from the B4 probe sweep
+#: (gate6_visual.py --probe-sweep dawn|noon, then --rederive) and
+#: replace these only from that probe file (decisions 13 and 15).
 TIME_OF_DAY = {
-    "dawn": {"sun_elev": 8.0, "sun_azim": 95.0, "exposure_bias": 10.5},
-    "noon": {"sun_elev": 50.0, "sun_azim": 180.0, "exposure_bias": 9.5},
+    "dawn": {"sun_elev": 8.0, "sun_azim": 95.0, "exposure_bias": 10.5},   # bias measured on 5.5 (history)
+    "noon": {"sun_elev": 50.0, "sun_azim": 180.0, "exposure_bias": 9.5},  # bias measured on 5.5 (history)
 }
 
 #: Per-airframe framing and altitudes (metres MSL per terrain).

@@ -62,7 +62,10 @@ FULL_MOON_LUX = 0.32
 NIGHT_SKY_LUX = 5.0e-4
 
 #: The physical camera the exposure is realised through: f/4, 1/60 s,
-#: ISO 100 -> EV100 = log2(N^2 / t) = log2(960).
+#: ISO 100 -> EV100 = log2(N^2 / t) = log2(960). This bias is physics
+#: (CAMERA_EV100 - the meter's EV100), not a probe number: unmeasured on
+#: 5.7.4 as it was on 5.5 (docs/VALIDITY.md 2.10d; B4 probes only the
+#: -exposure-bias looks, decision 13).
 CAMERA_FSTOP = 4.0
 CAMERA_SHUTTER_PER_S = 60.0
 CAMERA_ISO = 100.0

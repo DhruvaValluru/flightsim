@@ -597,6 +597,11 @@ What can be claimed:
 * **Star brightness conserves illuminance.** Each star is drawn as a disc
   about one pixel across, at the luminance that makes its illuminance equal
   the star's magnitude. Colour from B−V is approximate and labelled so.
+* **Unmeasured on the pinned engine too.** Nothing here was probed on
+  UE 5.5 and nothing is probed on 5.7.4 (changelist 51494982): the sky's
+  exposure is physics (`core/sky/plan.py` `CAMERA_EV100`), not one of
+  the `-exposure-bias` numbers B4 re-derives, so it carries no engine
+  mark (decision 13 names only the probe numbers).
 * **Exposure is a stated rule, not a meter.** EV100 follows the incident
   light-meter equation in daylight. Below about 400 lx it deliberately drops
   at half the meter's rate, so night looks dark. It is realised as UE's
@@ -672,9 +677,10 @@ recovered verbatim from the originating brief and recorded with provenance in
 Earth atmosphere values, multiscattering, both documented SkyAtmosphere
 gotchas, height fog with max opacity below 1, manual exposure). Measured by
 `experiments/gate6_visual.py`, which reads the PNGs back rather than trusting
-the engine:
+the engine. Every number in this table was measured on macOS, UE 5.5, with
+no renderer settings (history; `ue/Config/DefaultEngine.ini` header):
 
-| clause | measurement |
+| clause | measurement (measured on UE 5.5, history) |
 |---|---|
 | distant terrain shows range-based extinction | the **same raster** placed at ~10 km and ~30 km: sky-contrast 102.1 vs 27.8 (ratio 0.27, threshold 0.75) |
 | peaks shadow the valley | shadows-on/off null test: **18,699 px** of the terrain band darken (threshold 10,000) |
@@ -686,6 +692,37 @@ The side-by-side against the old footage is produced
 (`runs/gate6/side_by_side.png`) and the likeness judgment is explicitly the
 reader's. What the measurements establish is that the four properties the
 brief named as missing from the old footage are present.
+
+**Re-measurement on the pinned engine, 5.7.4 (changelist 51494982)** (B4,
+`docs/phase3/decisions.md` 13 and 15). The exposure biases on record,
+9.5 noon / 10.5 dawn (`core/render/flags.py` `DEFAULT_LOOK`,
+`experiments/showcase_matrix.py` `TIME_OF_DAY`, `core/scenario/randomization.py`
+`EXPOSURE_CALIBRATION`, `experiments/evolving_flight.py`) and 11.0 for the
+Gate 6 scene (the commandlet default), were measured on 5.5 (history) and
+stay until the probe on 5.7.4 replaces them from its own file:
+
+* **Reference: one stated target, not the 5.5 frames.** The noon frame's
+  terrain-band mean luminance target is **118/255**, an 18 % reflectance
+  grey card encoded in sRGB (`gate6_visual.py` `MID_GREY_TARGET`). A stated
+  target, not a measurement; the 5.5 frames record the old engine's
+  defaults and are not a reference for the 5.7 renderer block.
+* **Tolerance (decision 15):** sky-band mean luminance within **4/255** and
+  terrain-class patch mean RGB within **4/255** (`PROBE_TOLERANCE`, half the
+  8/255 sky-excursion threshold), plus Gate 6's own measures unchanged: sky
+  excursion under 8/255 across the doublet, the night minimum mean
+  luminance, the albedo tolerance.
+* **Method:** `gate6_visual.py --skip-render --probe-out` re-measures the
+  eight 5.7 runs already under `runs/gate6/` on the Windows laptop (rendered
+  2026-10-06 on `++UE5+Release-5.7-CL-51494982`); `--probe-sweep
+  gate6|noon|dawn` renders one doublet per bias and writes
+  `runs/b4_probe/<look>/<bias>/probe.json` (band means per frame, the bias,
+  the engine pin from `toolchain.json`); `--rederive <look>` chooses the bias
+  within tolerance of the target and writes `rederived.json`, or refuses by
+  name. If Gate 6 passes unchanged with the old biases they stay, and the
+  lines above say "re-measured on 5.7.4 (changelist 51494982), unchanged".
+* **Status:** not yet re-measured on 5.7.4; the Windows steps are pending
+  (`docs/phase3/notes/B4.md` windows_steps). No 5.7 number is stated here
+  until a probe file holds it.
 
 What Gate 6 does **not** establish, and the Phase 6 work that remains:
 
