@@ -1,9 +1,12 @@
 {
+  "A-2": "",
+  "FAIL": "",
   "budget_used": 12,
   "builder_commit": "3b8c3030",
   "claims": [],
   "failures": [
-    "docs/phase3/packets/A5-1.md"
+    "docs/phase3/packets/A5-1.md",
+    "run A-2 packet docs/phase3/packets/A5-2.md: commandlet exits 1 (Water collision profile error, Cesium pulls Water on 5.7); hosts trim differently (headless longitudinal, UE full), parity fails"
   ],
   "integrated_commit": "f6572ef154be0ab30a427d1ff9de7a56a2e74ed6",
   "letter": "A",
@@ -15,9 +18,9 @@
     "gate5_ue_parity c172p hold"
   ],
   "pushed_commit": "23bad766",
-  "run_id": "A-1",
+  "run_id": "",
   "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T10:54:59",
-  "verdict": "FAIL"
+  "updated": "2026-11-04T11:15:36",
+  "verdict": ""
 }

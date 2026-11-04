@@ -47,3 +47,5 @@ engine's Marketplace folder; later rows say which engine they ran on.
 | A2 | A-2 | `pytest -q tests/test_platform.py` | exit 0 | |
 | A5 | A-2 | `check_bridge_api.sh` with `UE_ROOT` at UE_5.7 | exit 0, `API surface matches` (CesiumRuntime module found in the 5.7 Marketplace folder) | |
 | A5 | A-2 | `run_ue_scenario.ps1` c172p parity card on 5.7 | FAIL (machine): commandlet exit 1, no telemetry; `Failed to load … UnrealEditor-CesiumRuntime.dll (GetLastError=4551)`, Code Integrity 3077/3033, dll NotSigned; Smart App Control blocks it | blocks every editor run; owner's call |
+| A5 | A-2 | `run_ue_scenario.ps1` c172p card on 5.7, Smart App Control off | flight written (600 samples, hold within 0.03 m) but process exit 1: `Failure - 1 error(s)` from `Collision Profile settings do not include an entry for the Water Body Collision profile` (Cesium 2.30.0 depends on the Water plugin) | packet A5-2 cause 1 |
+| A5 | A-2 | `gate5_ue_parity.compare` headless vs UE | `PARITY FAIL`, roll max diff 50.64 deg, heading 180: headless trims longitudinal (aileron 0), UE trims full (aileron 0.497 deg) | packet A5-2 cause 2, decision 11 |
