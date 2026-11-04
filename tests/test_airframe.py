@@ -78,7 +78,7 @@ def test_components_weights_match_the_fdm_xml(tmp_path):
 
 
 def test_components_a_clean_config_has_none():
-    for name in ("c172p", "B747"):
+    for name in ("B747",):
         airframe = load_airframe(name)
         assert airframe.components == ()
         assert airframe.loadout == {}
@@ -97,3 +97,24 @@ def test_components_loadout_trims():
         fdm.start_engines()
         fdm.trim(TrimMode.LONGITUDINAL)
     assert math.isfinite(fdm.props.get("fcs/elevator-pos-rad"))
+
+
+# C7: the c172p declares ONE landing_gear component (letter C: one per
+# aircraft), sourced on a defined keypoint; a dead keypoint is refused by name.
+C172P_JSON = REPO / "assets" / "aircraft_config" / "c172p.json"
+
+
+def test_components_c172p_gear_needs_a_keypoint(tmp_path):
+    airframe = load_airframe("c172p")
+    [gear] = airframe.components
+    assert isinstance(gear, Component)
+    assert gear.cls == "landing_gear" and gear.id == "landing_gear"
+    assert gear.part_name == "nose_gear" and gear.station is None
+    assert airframe.loadout == {}                 # a gear component loads no store
+    config = json.loads(C172P_JSON.read_text(encoding="utf-8"))
+    [entry] = [c for c in config["labels"]["components"] if c["class"] == "landing_gear"]
+    entry["source"] = "no_such_gear"
+    (tmp_path / "c172p.json").write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ComponentUnmatchedError, match="no_such_gear") as info:
+        load_airframe("c172p", config_dir=tmp_path)
+    assert "landing_gear" in str(info.value)

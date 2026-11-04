@@ -211,7 +211,15 @@
       "right_main_gear": {
         "fdm_contact": "RIGHT_MAIN"
       }
-    }
+    },
+    "components": [
+      {
+        "id": "landing_gear",
+        "class": "landing_gear",
+        "source": "nose_gear",
+        "note": "one landing_gear component per aircraft (letter C): every object gear_geometry matches (NoseWheel, Left/RightWheel, struts, brakes) is written to SM_c172p_landing_gear.obj by assets_pipeline/convert.py; fixed gear, gear/gear-pos-norm stays 1"
+      }
+    ]
   },
   "limits": {
     "category": {
