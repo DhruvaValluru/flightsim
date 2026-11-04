@@ -1389,6 +1389,65 @@ def apply_environment_preset(spec: ScenarioSpec, name: str) -> None:
     spec.set("terrain_elevation", LOCATION_TERRAIN_ELEVATION_M[key], frm=frm)
 
 
+#: The default run (E4, decision 2/7/D4): what POST /run {} and the page's
+#: Capture button with nothing typed fly. Every value below is a recorded
+#: USER edit with this provenance; the weather flags and the Google tiles
+#: are NOT edited (decision 4, CLAUDE.md): weather_backend_flags() and
+#: google_tiles_requested() keep their defaults.
+DEFAULT_RUN_AIRCRAFT = "A4"
+DEFAULT_RUN_CLIP_S = 6.0
+DEFAULT_RUN_ENVIRONMENT = "desert"
+DEFAULT_RUN_FROM = "default run (web UI)"
+#: The regex compiler's own A-4 word; the spec starts as the compiler's,
+#: so every field it does not state keeps the compiler's provenance.
+DEFAULT_RUN_PROMPT = "fly the a-4 over the desert"
+#: The loadout stations A4.json's ``loading.loadout`` states (750 lb each,
+#: decision 7); the masses are READ from the config, never retyped here.
+DEFAULT_RUN_STATIONS = ("STA2", "STA3", "STA4")
+KG_PER_LB = 0.45359237
+
+
+def default_run_spec() -> ScenarioSpec:
+    """The spec POST /run {} flies: the A-4 with STA2/3/4 loaded as
+    assets/aircraft_config/A4.json states them (lb -> kg, capped at the
+    station's own maximum), the Desert preset (grand_canyon, noon in
+    July) via apply_environment_preset, ONE chase camera (camera0, the
+    per-airframe offset webapp_chase_flag carries) so wants_capture()
+    routes the run through the capture stage with its labels and verify
+    block, and a 6 s clip. Raises RuntimeError when the A-4 config has no
+    loadable default station: the default run never silently flies a
+    different loadout."""
+    from core.nl.compiler import compile_prompt
+    from core.scenario.loading import load_loading_config
+
+    spec = compile_prompt(DEFAULT_RUN_PROMPT)
+    spec.set("aircraft", DEFAULT_RUN_AIRCRAFT, frm=DEFAULT_RUN_FROM)
+    config = load_loading_config(DEFAULT_RUN_AIRCRAFT)
+    if config is None:
+        raise RuntimeError(f"{DEFAULT_RUN_AIRCRAFT}: aircraft_config has no "
+                           f"loading block; the default run needs its loadout")
+    payload: Dict[str, float] = {}
+    for station in config.stations:
+        if station.name in DEFAULT_RUN_STATIONS and station.loadable:
+            kg = round(float(station.default_lb) * KG_PER_LB, 1)
+            payload[station.name] = min(kg, float(station.max_kg))
+    missing = [name for name in DEFAULT_RUN_STATIONS if name not in payload]
+    if missing:
+        raise RuntimeError(f"{DEFAULT_RUN_AIRCRAFT}: {config.config_path} "
+                           f"has no loadable station(s) {missing}")
+    spec.set("loading.payload", payload,
+             frm=f"{DEFAULT_RUN_FROM}: {config.config_path} loading.loadout "
+                 f"stations, lb -> kg")
+    apply_environment_preset(spec, DEFAULT_RUN_ENVIRONMENT)
+    spec.set("duration", min(DEFAULT_RUN_CLIP_S, CLIP_SECONDS),
+             frm=f"{DEFAULT_RUN_FROM}: {DEFAULT_RUN_CLIP_S:g} s clip")
+    spec.cameras = [CameraSpec.defaulted(
+        camera_id="camera0", preset="chase", aircraft=DEFAULT_RUN_AIRCRAFT,
+        terrain_elevation_m=float(spec.terrain_elevation.value),
+        frm=f"{DEFAULT_RUN_FROM}: the chase view, labels on")]
+    return spec
+
+
 def renderable_aircraft() -> List[str]:
     """Aircraft with a REAL licensed 3-D model imported on this machine
     (a mesh_manifest.json under assets/generated). Everything else is
@@ -2214,15 +2273,24 @@ def sun_look(spec: ScenarioSpec) -> Optional[Dict]:
     does not happen there that day, or the sun would be below the
     render floor. VISUAL ONLY: physics never reads any of this.
     """
-    from datetime import date as date_
-
     from core.environment.sun import require_renderable, resolve
 
     time_of_day = str(spec.time_of_day.value)
     if time_of_day == "none":
         return None
+    # The clock may carry core.sky.plan's ISO date prefix (the environment
+    # presets: ``2026-07-15T12:00``): that date wins, then weather_date,
+    # else the sun module's own equinox; the clock itself is what the sun
+    # module canonicalises (measured: the Desert default run refused
+    # with "time of day '2026-07-15T12:00' is not one of ..." here).
+    from core.sky.plan import scene_date
+
     stated_date = str(spec.weather_date.value)
-    day = None if stated_date == "none" else date_.fromisoformat(stated_date)
+    day, basis = scene_date(time_of_day, None if stated_date == "none" else stated_date)
+    if basis == "time_of_day":
+        time_of_day = time_of_day.strip().split("T", 1)[-1].split("t", 1)[-1]
+    elif basis != "weather_date":
+        day = None
     sun = resolve(time_of_day, float(spec.latitude.value),
                   float(spec.longitude.value), day)
     require_renderable(sun)

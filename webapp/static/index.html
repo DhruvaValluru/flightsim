@@ -276,7 +276,7 @@ visual-only per host (measured).</p>
   <div id="routeMap"></div>
   <div id="verdict"></div>
   <p>
-    <button id="run" class="run">Run</button>
+    <button id="run" class="run">Capture</button>
     <span class="dim">re-validated server-side before anything renders;
     clip capped at 22 s</span>
   </p>
@@ -1785,13 +1785,16 @@ $("answer").addEventListener("click", () => {
 $("run").addEventListener("click", () => startRun(true));
 
 async function startRun(mayBake) {
+  // Nothing compiled: Capture posts {} and the server builds the default
+  // run (A-4 with its loadout, Desert, chase camera, 6 s clip, labels on).
+  const body = compiled == null ? {} : {
+    spec: editedSpecDict(),
+    provenance: {compiler: compiled.compiler, model: compiled.model,
+                 transcript: compiled.transcript || null},
+  };
   const response = await fetch("/run", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      spec: editedSpecDict(),
-      provenance: {compiler: compiled.compiler, model: compiled.model,
-                   transcript: compiled.transcript || null},
-    }),
+    body: JSON.stringify(body),
   });
   const payload = await response.json();
   $("runArea").style.display = "";
