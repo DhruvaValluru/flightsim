@@ -51,7 +51,7 @@ sitting 0.4 m from its label (it was ~25 m).
 - [x] **A3 · The build refuses the wrong engine** 🪟
   - Check: pointing it at another version stops with `engine.version_mismatch`.
   - Check: the right version builds with zero errors.
-- [ ] **A4 · An old engine program can't draw the pictures**
+- [x] **A4 · An old engine program can't draw the pictures**
   - Check: after changing one `.cpp` without rebuilding, a render stops with
     `engine.binary_stale`.
 - [ ] **A5 · JSBSim plugin set up again on this version** 🪟
