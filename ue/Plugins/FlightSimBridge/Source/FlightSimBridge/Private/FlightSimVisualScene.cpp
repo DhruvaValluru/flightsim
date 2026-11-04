@@ -1125,7 +1125,12 @@ bool FFlightSimVisualScene::BuildClouds(UWorld* World,
 	// cloud component with no material draws nothing while "clouds: on"
 	// would be recorded.
 	// A soft reference on UE 5.7: resolved (loaded if need be) here.
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
 	UMaterialInterface* CloudMaterial = Clouds->Material.LoadSynchronous();
+#else
+	// UE 5.5/5.6: a plain TObjectPtr, already loaded by the constructor.
+	UMaterialInterface* CloudMaterial = Clouds->Material.Get();
+#endif
 	if (CloudMaterial == nullptr)
 	{
 		CloudMaterial = LoadObject<UMaterialInterface>(nullptr, SceneDefaultCloudMaterialPath);
