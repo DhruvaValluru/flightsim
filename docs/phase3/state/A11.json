@@ -9,7 +9,7 @@
   "failures": [
     "local: integrator bounce 2026-11-04, 5 render tests refused by labels.no_bundle because the test stub writes no bundle; builder to make the stub write a real minimal bundle"
   ],
-  "integrated_commit": "f27ef80a",
+  "integrated_commit": "fbaee42a",
   "letter": "A",
   "needs_windows": true,
   "note": "CLI capture hands the engine a relative terrain stem",
@@ -22,7 +22,7 @@
   "retry": 1,
   "route": "box",
   "run_requested": "A-2",
-  "stage": "building",
-  "updated": "2026-11-04T12:20:41",
+  "stage": "integrated",
+  "updated": "2026-11-04T13:12:51",
   "worktree": "../p3-A11r"
 }
