@@ -31,8 +31,8 @@
   "route": "box",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "building",
-  "updated": "2026-11-04T11:38:27",
+  "stage": "pushed",
+  "updated": "2026-11-04T11:39:34",
   "verdict": "",
   "windows_build": "",
   "worktree": "../p3w-A5"
