@@ -1,8 +1,13 @@
 {
+  "B-1": "",
+  "FAIL": "",
   "budget_used": 24,
   "builder_commit": "e38daf70",
   "built_commit": "e38daf70",
   "claims": [],
+  "failures": [
+    "run B-1 packet docs/phase3/packets/B4-1.md: gate6 --look measure and beauty FAIL (range extinction ratio 1.12, peaks shadow 210 px, ground shadow 143 px, exposure metric 4.52) because the Gate 6 terrain is not drawn on today's build while the 6 Oct renders of the same engine show it; card, settings, RHI identical; Windows builder bisects the merged engine changes and the A6 material rebuild"
+  ],
   "integrated_commit": "c3383adff2ccc10fc28931471d555e45bc5e78fc",
   "letter": "B",
   "needs_windows": true,
@@ -15,8 +20,10 @@
     "step10 pytest tests/test_engine_bundle_golden.py with the A12 fixture: 0 skipped, exit 0"
   ],
   "pushed_commit": "3e59358d",
+  "run_id": "",
   "stage": "pushed",
   "unit": "B4",
-  "updated": "2026-11-04T12:37:40",
+  "updated": "2026-11-04T14:12:29",
+  "verdict": "",
   "worktree": "../p3-B4"
 }

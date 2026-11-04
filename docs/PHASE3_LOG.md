@@ -95,3 +95,5 @@ engine's Marketplace folder; later rows say which engine they ran on.
 |---|---|---|---|---|
 | C2 | C-1 | `pytest -q tests/test_a4_mesh.py` | exit 0 | |
 | C3 | C-1 | `pytest -q tests/test_card_components.py` | exit 0 () | |
+| A10 | A-2 | retry on 9bb12d95: `/generate/start` one-line prompt, tier llm | campaign c533669e2c7e `failed`: capture `REFUSED [camera.scene_bounds] 608 of 1155 solved poses fall outside the scene raster`; llm tier fell back (`camera 0 field moves`) | packet A10-2 (Mac) |
+| B4 | B-1 | `gate6_visual.py --look` (measure) and `--quality beauty --look` | both `GATE 6: FAIL`, exit 1: range extinction ratio 1.12 (thr 0.75), peaks shadow 210 px (thr 10000), ground shadow 143 px (thr 300), exposure metric 4.52 (needs > 16), look clauses FAIL; the terrain is not drawn today (`B4-compare.png`) though the card, settings and RHI equal the 6 Oct run | packet B4-1 (Windows builder) |
