@@ -1,10 +1,12 @@
 {
   "B-1": "",
   "FAIL": "",
-  "budget_used": 15,
-  "builder_commit": "14e819069c264613868ad55a7764941a7e1f403a",
+  "budget_used": 16,
+  "builder_commit": "0dd863f95eb0c8b9c02270a49d8a9b90ead36e81",
   "built_commit": "14e819069c264613868ad55a7764941a7e1f403a",
-  "claims": [],
+  "claims": [
+    "scripts/ue_preflight.ps1"
+  ],
   "failures": [
     "run B-1 packet docs/phase3/packets/B2-1.md: preflight prints 6 OK lines but toolchain.jsbsim_mismatch: not found (jsbsim 1.2.4 is installed; the reader's 'Probe | Select-Object -First 1' leaves LASTEXITCODE -1 in PowerShell 5.1); steps 6-7 pass by name; Windows builder fixes scripts/ue_preflight.ps1"
   ],
@@ -19,9 +21,9 @@
   ],
   "pushed_commit": "3e59358d",
   "run_id": "",
-  "stage": "pushed",
+  "stage": "built_local",
   "unit": "B2+B3",
-  "updated": "2026-11-04T12:42:04",
+  "updated": "2026-11-04T12:54:02",
   "verdict": "",
-  "worktree": "../p3-B2"
+  "worktree": "../p3w-B2"
 }
