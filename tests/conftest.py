@@ -51,3 +51,16 @@ def _measured_render_quality(monkeypatch):
     # delete these themselves.
     monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "measure")
     monkeypatch.setenv("FLIGHTSIM_SKY", "legacy")
+
+
+@pytest.fixture(autouse=True)
+def _bridge_stamp_fresh(request, monkeypatch):
+    """The render tests fake ue_available() True; the stale-binary gate
+    (core.util.platform.binary_stale_check) reads a real Binaries/ stamp
+    they do not have, so it reports fresh here. tests/test_binary_stale.py
+    exercises the real check and opts out."""
+    if request.module.__name__.endswith("test_binary_stale"):
+        return
+    import core.util.platform as platform_module
+
+    monkeypatch.setattr(platform_module, "binary_stale_check", lambda repo: None)

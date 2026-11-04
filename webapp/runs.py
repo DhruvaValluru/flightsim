@@ -2636,6 +2636,13 @@ class RunManager:
             # happened or remains available on this OS.
             return {"refused": ue_platform_refusal(),
                     "constraint": "ue.platform"}
+        if not headless:
+            from core.util.platform import binary_stale_check
+
+            stale = binary_stale_check(Path(__file__).resolve().parents[1])
+            if stale is not None:
+                return {"refused": stale["message"],
+                        "constraint": "engine.binary_stale"}
         # A spec with cameras on a machine without the engine is CAPTURED
         # headlessly instead of refused: the manifest, every frame's data,
         # an engine-free picture of every frame with its 2-D / 3-D boxes,

@@ -183,6 +183,9 @@ ffmpeg.missing:
 ue.platform:
   sentence: "Rendered pictures need Windows with Unreal Engine and the bridge built; this machine has no renderer. Everything except the pixels was produced."
   hint: "Run the preflight script on a Windows machine with the engine installed."
+engine.binary_stale:
+  sentence: "The built rendering bridge does not match the current source (built from {stamp_hash}, source is now {source_hash}), so a render would run stale code."
+  hint: "Rebuild the rendering bridge with the build script, then render again."
 aircraft.mesh:
   sentence: "This aircraft has real flight physics but no licensed 3-D model that can be rendered."
   hint: "Choose an aircraft with a model, or import one."
