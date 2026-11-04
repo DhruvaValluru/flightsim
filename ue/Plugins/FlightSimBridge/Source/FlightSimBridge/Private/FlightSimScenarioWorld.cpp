@@ -2218,7 +2218,29 @@ bool FFlightSimScenarioWorld::TrimInWind(const FFlightSimScenarioCard& Card,
 
 	if (WindProperties.Num() == 0)
 	{
-		return true;   // still air: the trim BeginPlay produced stands
+		// Still air: decision 11. The plugin's init-time trim is JSBSim's
+		// tFull (JSBSimMovementComponent::DoTrim), which solves the lateral
+		// axes too and leaves a small aileron and rudder in the FCS; the
+		// headless host (core.fdm.trim.mode_for: no wind, no bank, not on
+		// the ground) trims tLongitudinal with the lateral controls never
+		// touched, so the c172p's torque rolls it off and the two flights
+		// diverge. FGTrim::DoTrim restarts from the exec's own initial
+		// condition (phi as the card set it) but zeroes only its own axes,
+		// so centre aileron and rudder first, as the core found them, then
+		// re-trim longitudinally: 0 = tLongitudinal, the enum value
+		// core.fdm.trim.TrimMode.LONGITUDINAL pins against the 1.2.4
+		// do_trim docstring. A ground start would keep tGround (the plugin
+		// chooses it from StartOnGround, which this world never sets).
+		TArray<FString> CalmProperties = {TEXT("fcs/aileron-cmd-norm"),
+		                                  TEXT("fcs/rudder-cmd-norm")};
+		TArray<FString> CalmValues = {TEXT("0"), TEXT("0")};
+		TArray<FString> CalmUnused;
+		Movement->CommandConsoleBatch(CalmProperties, CalmValues, CalmUnused);
+		FString CalmOut;
+		Movement->CommandConsole(TEXT("simulation/do_simple_trim"), TEXT("0"), CalmOut);
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("re-trimmed in still air (tLongitudinal)"));
+		return true;
 	}
 
 	// The headless sequence, reproduced: calm RunIC (done, in BeginPlay), wind

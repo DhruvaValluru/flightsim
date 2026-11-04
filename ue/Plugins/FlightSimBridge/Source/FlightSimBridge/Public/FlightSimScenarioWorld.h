@@ -428,8 +428,10 @@ public:
 	// for real and trims it -- in calm air.
 	bool BeginPlay(FString& Error);
 
-	// If the card commands wind: write it to the FDM and re-trim in it (tFull).
-	// Call between BeginPlay and VerifyTrimmedCondition. A no-op in still air.
+	// Re-trim the way core.fdm.trim.mode_for does (decision 11): in still air
+	// a longitudinal re-trim with aileron and rudder centred (tLongitudinal);
+	// if the card commands wind, write it to the FDM and re-trim in it (tFull).
+	// Call between BeginPlay and VerifyTrimmedCondition.
 	// This mirrors the headless configure_from_spec sequence rather than using
 	// the plugin's wind initial condition, which measurably corrupts the
 	// commanded airspeed (250 kt CAS in, 206 kt out).
