@@ -55,6 +55,14 @@ public:
 	// Hide every actor tagged FlightSim.terrain; returns how many.
 	int32 HideOwnTerrain(UWorld* World);
 
+	// The tiles are not drawn for this scene, for a reason stated by name
+	// (render.json google_tiles.declined). Only for a scene that stands
+	// nowhere on Earth: a -terrain= raster the commandlet places in the
+	// engine frame without -GeorefTerrain (the Gate 6 ridge), whose own
+	// ground the measurements read. Every georeferenced terrain render
+	// still draws the tiles or refuses; this is not a way off.
+	void Decline(const FString& Reason) { DeclinedReason = Reason; }
+
 	// Point Cesium's tile selection at this camera and pump the plugin
 	// (HTTP, game-thread tasks, tileset tick) until the view reports fully
 	// loaded and stays so, or the timeout passes (an error). A view stuck
@@ -83,6 +91,7 @@ private:
 	double OriginEllipsoidHeightM = 0.0;
 	double UndulationM = 0.0;
 	int32 HiddenActors = 0;
+	FString DeclinedReason;
 	int32 FramesWaited = 0;
 	int32 TileRefreshes = 0;
 	double LongestWaitSeconds = 0.0;

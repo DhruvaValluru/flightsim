@@ -292,6 +292,13 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record() const
 {
 	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 	Out->SetBoolField(TEXT("enabled"), bEnabled);
+	if (!DeclinedReason.IsEmpty())
+	{
+		// Not drawn: the reason, and nothing claimed for tiles that were never
+		// placed (no route, origin, waits or attribution).
+		Out->SetStringField(TEXT("declined"), DeclinedReason);
+		return Out;
+	}
 	Out->SetStringField(TEXT("source"), TEXT("Google Photorealistic 3D Tiles via Cesium for Unreal"));
 	// Never the key or the token.
 	Out->SetStringField(TEXT("route"), bViaIon ? TEXT("Cesium ion") : TEXT("Google Map Tiles API"));
