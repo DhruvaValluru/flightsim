@@ -17,9 +17,13 @@ import json
 
 import pytest
 
+import subprocess
+import types
+
+import core.util.platform as plat
 from experiments.gate5_ue_parity import (
     COMPARED, MIN_OVERLAP_FRACTION, SAMPLE_INTERVAL_S, TOLERANCE, compare,
-    reference_spec, write_run_card,
+    preflight, reference_spec, write_run_card,
 )
 
 
@@ -356,3 +360,59 @@ def test_the_run_card_asks_for_the_period_the_headless_recorder_uses():
         f"{SAMPLE_INTERVAL_S} s; SAMPLE_INTERVAL_S in the gate is now asking "
         "the UE host for a different sampling period"
     )
+
+
+# -- preflight runs the right wrapper for the host OS -----------------------
+#
+# Run A-2 on Windows: preflight() executed scripts/ue_preflight.sh directly
+# and died with WinError 193 (not a valid Win32 application) before
+# compare() ran, so the parity gate never produced a verdict on the only
+# machine with the engine. These tests pin the argv per OS without running
+# anything: subprocess.run is captured, os_name is forced.
+
+def _capture_preflight(monkeypatch, os_name):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((list(argv), kwargs))
+        return types.SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(plat, "os_name", lambda: os_name)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    ok, out = preflight()
+    assert ok and out == "ok\n"
+    assert len(calls) == 1, "preflight must run exactly one command"
+    return calls[0]
+
+
+def test_preflight_on_windows_runs_ue_preflight_ps1_through_powershell(monkeypatch):
+    argv, kwargs = _capture_preflight(monkeypatch, "windows")
+    assert argv[0] == "powershell"
+    assert "-File" in argv
+    assert argv[argv.index("-File") + 1].replace("\\", "/").endswith(
+        "scripts/ue_preflight.ps1")
+    assert not any(a.endswith(".sh") for a in argv), argv
+    assert kwargs.get("text") is True and kwargs.get("encoding") == "utf-8"
+
+
+def test_preflight_on_mac_runs_ue_preflight_sh(monkeypatch):
+    argv, kwargs = _capture_preflight(monkeypatch, "mac")
+    assert len(argv) == 1 and argv[0].endswith("scripts/ue_preflight.sh")
+    assert "powershell" not in argv
+    assert kwargs.get("text") is True and kwargs.get("encoding") == "utf-8"
+
+
+def test_preflight_names_the_missing_wrapper_per_os(monkeypatch, tmp_path):
+    """A clone without the wrapper refuses by the wrapper's own name --
+    "scripts/ue_preflight.ps1 is missing" on Windows, never the .sh name."""
+    import experiments.gate5_ue_parity as gate5
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(plat, "os_name", lambda: "windows")
+    monkeypatch.setattr(gate5, "__file__", str(tmp_path / "experiments" / "x.py"))
+    ok, text = preflight()
+    assert ok is False and text == "scripts/ue_preflight.ps1 is missing"
+    monkeypatch.setattr(plat, "os_name", lambda: "mac")
+    ok, text = preflight()
+    assert ok is False and text == "scripts/ue_preflight.sh is missing"
+    assert ran == []
