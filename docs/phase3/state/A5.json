@@ -18,6 +18,7 @@
   "integrated_commit": "f6572ef154be0ab30a427d1ff9de7a56a2e74ed6",
   "letter": "A",
   "needs_windows": true,
+  "note": "retry 3 of 3 (cap): compare() aligns clock origins, decision 14",
   "pending_windows": [
     "vendor_ue_plugin.ps1 on 5.5",
     "build_ue.ps1 on 5.5",
@@ -25,13 +26,13 @@
     "gate5_ue_parity c172p hold"
   ],
   "pushed_commit": "23bad766",
-  "retry": 2,
+  "retry": 3,
   "retry_commit": "5b037fc8",
-  "route": "interaction",
+  "route": "box",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "built_local",
-  "updated": "2026-11-04T11:31:54",
+  "stage": "building",
+  "updated": "2026-11-04T11:32:54",
   "verdict": "",
   "windows_build": "",
   "worktree": "../p3w-A5"

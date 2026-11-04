@@ -1,0 +1,20 @@
+{
+  "build_order": [
+    [
+      "B1",
+      "B2"
+    ],
+    [
+      "B3",
+      "B4"
+    ]
+  ],
+  "letter": "B",
+  "stage": "aligned",
+  "units": [
+    "B1",
+    "B2+B3",
+    "B4"
+  ],
+  "updated": "2026-11-04T11:36:11"
+}
