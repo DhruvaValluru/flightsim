@@ -53,6 +53,8 @@ import urllib.request
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.util.settings import llm_api_key
+
 #: The local default: small enough to run everywhere, strong at
 #: schema-constrained JSON. Override with FLIGHTSIM_LLM_MODEL.
 DEFAULT_OLLAMA_MODEL = "qwen2.5:7b"
@@ -197,7 +199,7 @@ def resolve_client() -> Optional[Tuple[Any, str]]:
         # unavailable and the regex parser is the whole story.
         return None
     if not provider:
-        if os.environ.get("ANTHROPIC_API_KEY", "").strip():
+        if llm_api_key():          # ANTHROPIC_API_KEY, else the stored llm_key (E2)
             # An explicitly provided key is a statement: the Anthropic SDK
             # path keeps priority over the hosted default.
             return None
