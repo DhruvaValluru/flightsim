@@ -1,8 +1,19 @@
 {
   "budget_used": 12,
+  "claims": [
+    "core/nl/camera_prompt.py",
+    "core/nl/llm_compiler.py",
+    "core/nl/providers.py",
+    "core/render/headless.py",
+    "core/util/settings.py",
+    "tests/test_settings.py",
+    "webapp/runs.py",
+    "webapp/server.py"
+  ],
   "letter": "E",
   "needs_windows": true,
-  "stage": "planned",
+  "stage": "building",
   "unit": "E2+E3",
-  "updated": "2026-11-04T16:34:23"
+  "updated": "2026-11-04T16:59:32",
+  "worktree": "../p3-E2"
 }
