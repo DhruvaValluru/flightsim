@@ -1,6 +1,7 @@
 {
   "A-2": "",
   "FAIL": "",
+  "PASS": "",
   "budget_used": 28,
   "builder_commit": "eb9e5f30",
   "claims": [
@@ -30,7 +31,7 @@
   "run_requested": "A-2",
   "stage": "pushed",
   "unit": "A12+A13",
-  "updated": "2026-11-04T13:15:21",
+  "updated": "2026-11-04T13:16:54",
   "verdict": "",
   "windows_build": "",
   "worktree": "../p3-A12r"
