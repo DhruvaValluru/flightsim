@@ -10,7 +10,8 @@
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimScenarioWorld.h"
   ],
   "failures": [
-    "run C-1 packet docs/phase3/packets/C4-1.md: engine side done (3ef2414e merged): payload ids 64/65/66 in the mask, aircraft tight box filled, 7 gates + component_coverage PASS; component_boxes FAIL because the OBJ import mirrors every A-4 asset (decision 19: converter writes right-handed OBJ, Mac); label_geometry_3d FAIL (verifier occluded recount counts children, Mac); host_determinism FAIL on the CLI route (Mac)"
+    "run C-1 packet docs/phase3/packets/C4-1.md: engine side done (3ef2414e merged): payload ids 64/65/66 in the mask, aircraft tight box filled, 7 gates + component_coverage PASS; component_boxes FAIL because the OBJ import mirrors every A-4 asset (decision 19: converter writes right-handed OBJ, Mac); label_geometry_3d FAIL (verifier occluded recount counts children, Mac); host_determinism FAIL on the CLI route (Mac)",
+    "run C-1 packet docs/phase3/packets/C4-2.md: on 1e802859 host_determinism, label_geometry_3d and component_coverage PASS; component_boxes FAIL unchanged because the re-convert was not followed by a re-import (uassets still 14:06, OBJs and manifest 17:02); importer provisioning must import after a re-convert (Mac)"
   ],
   "integrated_commit": "1e802859",
   "letter": "C",
@@ -21,7 +22,7 @@
   "run_id": "",
   "stage": "pushed",
   "unit": "C4",
-  "updated": "2026-11-04T17:01:04",
+  "updated": "2026-11-04T17:04:04",
   "verdict": "",
   "windows_build": "",
   "worktree": "../p3w-C4"
