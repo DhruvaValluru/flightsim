@@ -1482,3 +1482,329 @@ b9c8d830 A4: refuse a stale engine binary (build stamp, plugin source hash, engi
  10 files changed, 228 insertions(+)
 ```
 
+## A2 · PASS · run A-2 · 2026-11-04T16:36:09Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+50:   - Check: `pytest -q tests/test_platform.py` passes.
+51:   - Check: changing the version in one file by hand makes that test fail.
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/A2-pytest-platform.log: .............. [100%]  (exit 0)
+runs/p3/A-2/A2-pytest-platform-edited.log: AssertionError: ue\Source\FlightSim.Target.cs does not pin EngineIncludeOrderVersion.Unreal5_7 (UE_ENGINE_VERSION = 5.7)  /  FAILED tests/test_platform.py::test_target_cs_include_order_names_the_pin  (exit 1; file reverted)
+runs/p3/A-2/A2-build-2.log: Result: Succeeded (0 'error C'); runs/webapp/4be692c3e9fe/frames/render.log: 0 REFUSED lines, cloud material used, landscape raster AGL check
+```
+
+note: run A-2 on 23bad766 (pin sweep 5.7) + 2b746352; pin now 5.7 everywhere the test checks (toolchain row, uproject, Target.cs, scripts, VENDORED.json)
+
+### synopsis
+
+# A2 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T16:36:08Z
+
+## A2 verify: pytest -q tests/test_platform.py (FLIGHTSIM_GOOGLE_TILES unset)
+
+- log: `runs/p3/A-2/A2-pytest-platform.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+..............                                                           [100%]
+            [JSBSim-ML v2.0]
+
+JSBSim startup beginning ...
+
+```
+
+## A2 verify: FlightSim.Target.cs hand-edited to Unreal5_5, same pytest must fail naming the file
+
+- log: `runs/p3/A-2/A2-pytest-platform-edited.log`
+- exit: 1 (expected 1) -> PASS
+
+```
+..........F...                                                           [100%]
+================================== FAILURES ===================================
+_________________ test_target_cs_include_order_names_the_pin __________________
+
+    def test_target_cs_include_order_names_the_pin():
+        """Hand-editing one Target.cs to another version fails here, with the
+        file named (R1 is a CI failure, not a Windows surprise)."""
+        wanted = "EngineIncludeOrderVersion.Unreal" + plat.UE_ENGINE_VERSION.replace(".", "_")
+        for path in sorted((REPO / "ue" / "Source").glob("*.Target.cs")):
+            text = path.read_text(encoding="utf-8")
+>           assert f"IncludeOrderVersion = {wanted};" in text, (
+                f"{path.relative_to(REPO)} does not pin {wanted} "
+                f"(UE_ENGINE_VERSION = {plat.UE_ENGINE_VERSION})")
+E           AssertionError: ue\Source\FlightSim.Target.cs does not pin EngineIncludeOrderVersion.Unreal5_7 (UE_ENGINE_VERSION = 5.7)
+E           assert 'IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_7;' in 'using UnrealBuildTool;\n\npublic class FlightSimTarget : TargetRules\n{\n\tpublic FlightSimTarget(TargetInfo Target) ...est;\n\t\tIncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_5;\n\t\tExtraModuleNames.Add("FlightSim");\n\t}\n}\n'
+
+tests\test_platform.py:341: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_platform.py::test_target_cs_include_order_names_the_pin - A...
+            [JSBSim-ML v2.0]
+
+JSBSim startup beginning ...
+
+```
+
+## A2 step 9: build_ue.ps1 on 5.7.4 (zero errors)
+
+- log: `runs/p3/A-2/A2-build-2.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+  Storage capacity 40Gb
+---- Starting trace: 261104_105833 ----
+UbaServer - Listening on 0.0.0.0:1345
+[1/25] Resource Default.rc2
+[2/25] Compile [x64] Module.JSBSimFlightDynamicsModel.cpp
+[3/25] Link [x64] UnrealEditor-JSBSimFlightDynamicsModel.lib
+[4/25] Link [x64] UnrealEditor-JSBSimFlightDynamicsModel.dll
+[5/25] Resource Default.rc2
+[6/25] Compile [x64] Module.FlightSimBridge.1.cpp
+[7/25] Compile [x64] Module.FlightSimBridge.2.cpp
+[8/25] Compile [x64] Module.FlightSimBridge.3.cpp
+[9/25] Link [x64] UnrealEditor-FlightSimBridge.lib
+[10/25] Link [x64] UnrealEditor-FlightSimBridge.dll
+[11/25] Resource Default.rc2
+[12/25] Compile [x64] FlightSim.cpp
+[13/25] Compile [x64] PerModuleInline.gen.cpp
+[14/25] Link [x64] UnrealEditor-FlightSim.dll
+[15/25] Link [x64] UnrealEditor-FlightSim.lib
+[16/25] Resource Default.rc2
+[17/25] Compile [x64] Module.FlightSimBridgeEditor.cpp
+C:\Users\kanth\flightsim\ue\Plugins\FlightSimBridge\Source\FlightSimBridgeEditor\Private\FlightSimLandscapeImporter.cpp(381,15): warning C4996: 'ULandscapeSubsystem::BuildNanite': Use the function with the EBuildFlags param - Please update your code to the new API before upgrading to the next release, otherwise your project will no longer compile.
+			Subsystem->BuildNanite();
+			           ^
+[18/25] Link [x64] UnrealEditor-FlightSimBridgeEditor.dll
+[19/25] Link [x64] UnrealEditor-FlightSimBridgeEditor.lib
+[20/25] Resource Default.rc2
+[21/25] Compile [x64] Module.JSBSimFlightDynamicsModelEditor.cpp
+[22/25] Link [x64] UnrealEditor-JSBSimFlightDynamicsModelEditor.dll
+[23/25] Link [x64] UnrealEditor-JSBSimFlightDynamicsModelEditor.lib
+[24/25] Copy JSBSim.dll
+[25/25] WriteMetadata FlightSimEditor.target [NoUba]
+
+Trace written to file C:/Users/kanth/AppData/Local/UnrealBuildTool/Log.uba with size 22.6kb
+Total time in Unreal Build Accelerator local executor: 185.91 seconds
+
+Result: Succeeded
+Total execution time: 204.14 seconds
+stamped 770fa283dc1b178644309885b1e7ed82fb9d321dd89eefdef516a0c21cf69ac5
+
+built. Next: .\scripts\ue_preflight.ps1 to confirm, then render.
+```
+
+note: A2 step 10 (cloud-material and landscape paths once, no REFUSED line): web run 4be692c3e9fe on the 5.7 build, runs/webapp/4be692c3e9fe/frames/render.log: 57772 lines, 0 REFUSED; 'LogFlightSimWeather: cloud VolumetricCloudComponent ... m_SimpleVolumetricCloud_Inst, domain 3, used'; 'LogFlightSimScenario: AGL check against the collision raster: elevation under the start point 1340.2 m'; 'LogFlightSimRender: wrote 220 frames'
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+72ed3eca Phase 3 A2 retry 1: UE 5.7.4 patch level, toolchain row 1, letter A agenda on 5.7, builders on fable
+393c7295 Phase 3 A2 retry 1: integrator notes, state and Mac event log
+7853cd63 Merge p3-A2r: A2 retry 1, engine pin moves to UE 5.7 (owner decision 10)
+66a7c1da A2 retry 1: engine pin moves to UE 5.7 (owner decision 10)
+be6bf574 A2: version-guard the cloud material load for UE 5.5 (LoadSynchronous is 5.7-only)
+2db0b1f1 Merge p3-A2: pin UE 5.5 (uproject, Target.cs, platform.py, scripts, docs) + A1 toolchain doc test
+5166765c A1/A2 integrate: narrow pin-sweep allowance, rewrite preflight mutation guard, drop pending-by-design test
+6375569e Merge p3-C1: components block, A-4 default loadout (3 x 750 lb on STA2-4), aircraft.component_unmatched
+8831a3df C1: components block, default loadout (750 lb on STA2-4), component_unmatched refusal
+a022c2b6 Merge branch 'phase-2-final' into p3-A2
+e4a8a337 A1+A2: pin the engine to 5.5.4, version-guard GetMaterialResource, pin sweep and tests
+
+72ed3eca Phase 3 A2 retry 1: UE 5.7.4 patch level, toolchain row 1, letter A agenda on 5.7, builders on fable
+
+ core/util/platform.py          |  6 +++---
+ docs/TOOLCHAIN.md              |  2 +-
+ docs/phase3/BUILDER_BRIEF.md   |  2 +-
+ docs/phase3/PROMPT_MAC.md      |  6 +++---
+ docs/phase3/PROMPT_WINDOWS.md  |  4 ++--
+ docs/phase3/events_mac.log     |  3 +++
+ docs/phase3/state/A2.json      |  6 +++---
+ tasks/phase3_checklist.md      | 15 ++++++++-------
+ tasks/phase3_todo.md           | 38 ++++++++++++++++++++------------------
+ tests/test_check_bridge_api.py | 11 ++++++-----
+ 10 files changed, 50 insertions(+), 43 deletions(-)
+
+393c7295 Phase 3 A2 retry 1: integrator notes, state and Mac event log
+
+ docs/phase3/events_mac.log | 10 ++++++++++
+ docs/phase3/notes/A2.md    | 10 ++++++++++
+ docs/phase3/state/A2.json  |  9 +++++++--
+ 3 files changed, 27 insertions(+), 2 deletions(-)
+
+7853cd63 Merge p3-A2r: A2 retry 1, engine pin moves to UE 5.7 (owner decision 10)
+
+ NEXT.md                                            | 27 +++++++++-------------
+ README.md                                          |  4 ++--
+ core/util/platform.py                              | 21 +++++++++--------
+ docs/CAMERA_WINDOWS.md                             |  2 +-
+ docs/TOOLCHAIN.md                                  | 25 +++++++++++---------
+ scripts/build_ue.sh                                |  4 ++--
+ scripts/check_bridge_api.sh                        |  2 +-
+ scripts/deploy_windows.ps1                         |  2 +-
+ scripts/mutation_check.sh                          |  6 ++---
+ scripts/render_ue_scenario.sh                      |  2 +-
+ scripts/run_ue_scenario.sh                         |  2 +-
+ scripts/setup.ps1                                  |  2 +-
+ scripts/setup.sh                                   |  2 +-
+ scripts/ue_preflight.sh                            |  4 ++--
+ scripts/vendor_ue_plugin.ps1                       |  6 ++---
+ scripts/vendor_ue_plugin.sh                        |  2 +-
+ tests/test_check_bridge_api.py                     |  2 +-
+ tests/test_gate6_visual.py                         |  2 +-
+ tests/test_platform.py                             |  5 ++--
+ tests/test_ue_physics_source.py                    |  2 +-
+ tests/test_ue_weather_source.py                    |  2 +-
+ ue/FlightSim.uproject                              |  2 +-
+ ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json | 14 +++++------
+ ue/Source/FlightSim.Target.cs                      |  2 +-
+ ue/Source/FlightSimEditor.Target.cs                |  2 +-
+ 25 files changed, 72 insertions(+), 74 deletions(-)
+
+66a7c1da A2 retry 1: engine pin moves to UE 5.7 (owner decision 10)
+
+ NEXT.md                                            | 27 +++++++++-------------
+ README.md                                          |  4 ++--
+ core/util/platform.py                              | 21 +++++++++--------
+ docs/CAMERA_WINDOWS.md                             |  2 +-
+ docs/TOOLCHAIN.md                                  | 25 +++++++++++---------
+ scripts/build_ue.sh                                |  4 ++--
+ scripts/check_bridge_api.sh                        |  2 +-
+ scripts/deploy_windows.ps1                         |  2 +-
+ scripts/mutation_check.sh                          |  6 ++---
+ scripts/render_ue_scenario.sh                      |  2 +-
+ scripts/run_ue_scenario.sh                         |  2 +-
+ scripts/setup.ps1                                  |  2 +-
+ scripts/setup.sh                                   |  2 +-
+ scripts/ue_preflight.sh                            |  4 ++--
+ scripts/vendor_ue_plugin.ps1                       |  6 ++---
+ scripts/vendor_ue_plugin.sh                        |  2 +-
+ tests/test_check_bridge_api.py                     |  2 +-
+ tests/test_gate6_visual.py                         |  2 +-
+ tests/test_platform.py                             |  5 ++--
+ tests/test_ue_physics_source.py                    |  2 +-
+ tests/test_ue_weather_source.py                    |  2 +-
+ ue/FlightSim.uproject                              |  2 +-
+ ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json | 14 +++++------
+ ue/Source/FlightSim.Target.cs                      |  2 +-
+ ue/Source/FlightSimEditor.Target.cs                |  2 +-
+ 25 files changed, 72 insertions(+), 74 deletions(-)
+
+be6bf574 A2: version-guard the cloud material load for UE 5.5 (LoadSynchronous is 5.7-only)
+
+ .../Source/FlightSimBridge/Private/FlightSimVisualScene.cpp          | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+2db0b1f1 Merge p3-A2: pin UE 5.5 (uproject, Target.cs, platform.py, scripts, docs) + A1 toolchain doc test
+
+ README.md                                          |   4 +-
+ core/util/platform.py                              |  28 +++---
+ docs/CAMERA_WINDOWS.md                             |   3 +-
+ scripts/build_ue.sh                                |   6 +-
+ scripts/check_bridge_api.sh                        |   2 +-
+ scripts/deploy_windows.ps1                         |   2 +-
+ scripts/mutation_check.sh                          |  14 +--
+ scripts/render_ue_scenario.sh                      |   2 +-
+ scripts/run_ue_scenario.sh                         |   2 +-
+ scripts/setup.ps1                                  |   2 +-
+ scripts/setup.sh                                   |   2 +-
+ scripts/ue_preflight.sh                            |   6 +-
+ scripts/vendor_ue_plugin.ps1                       |  14 ++-
+ scripts/vendor_ue_plugin.sh                        |   8 +-
+ tests/test_gate6_visual.py                         |   3 +-
+ tests/test_platform.py                             | 104 +++++++++++++++------
+ tests/test_toolchain_doc.py                        |  49 ++++++++++
+ tests/test_ue_weather_source.py                    |  11 +++
+ ue/FlightSim.uproject                              |   2 +-
+ .../Private/FlightSimRenderCommandlet.cpp          |   2 +-
+ .../FlightSimBridge/Private/FlightSimWeather.cpp   |  19 +++-
+ ue/Source/FlightSim.Target.cs                      |   2 +-
+ ue/Source/FlightSimEditor.Target.cs                |   2 +-
+ 23 files changed, 202 insertions(+), 87 deletions(-)
+
+5166765c A1/A2 integrate: narrow pin-sweep allowance, rewrite preflight mutation guard, drop pending-by-design test
+
+ scripts/mutation_check.sh   | 8 ++++----
+ tests/test_platform.py      | 2 +-
+ tests/test_toolchain_doc.py | 9 +--------
+ 3 files changed, 6 insertions(+), 13 deletions(-)
+
+6375569e Merge p3-C1: components block, A-4 default loadout (3 x 750 lb on STA2-4), aircraft.component_unmatched
+
+ assets/aircraft_config/A4.json                     |  79 +++++++++++---
+ assets/fdm_root/aircraft/A4/A4.xml                 |   6 +-
+ assets_pipeline/a4_performance.py                  |  11 +-
+ assets_pipeline/a4_sync.py                         |   8 +-
+ core/capture/airframe.py                           | 115 ++++++++++++++++++++-
+ core/messages/catalog.yaml                         |   3 +
+ docs/phase3/notes/C1.md                            |   4 +
+ tests/test_a4.py                                   |  14 ++-
+ tests/test_airframe.py                             |  99 ++++++++++++++++++
+ .../Resources/JSBSim/aircraft/A4/A4.xml            |   6 +-
+ 10 files changed, 316 insertions(+), 29 deletions(-)
+
+8831a3df C1: components block, default loadout (750 lb on STA2-4), component_unmatched refusal
+
+ assets/aircraft_config/A4.json                     |  79 +++++++++++---
+ assets/fdm_root/aircraft/A4/A4.xml                 |   6 +-
+ assets_pipeline/a4_performance.py                  |  11 +-
+ assets_pipeline/a4_sync.py                         |   8 +-
+ core/capture/airframe.py                           | 115 ++++++++++++++++++++-
+ core/messages/catalog.yaml                         |   3 +
+ docs/phase3/notes/C1.md                            |   4 +
+ tests/test_a4.py                                   |  14 ++-
+ tests/test_airframe.py                             |  99 ++++++++++++++++++
+ .../Resources/JSBSim/aircraft/A4/A4.xml            |   6 +-
+ 10 files changed, 316 insertions(+), 29 deletions(-)
+
+a022c2b6 Merge branch 'phase-2-final' into p3-A2
+
+ scripts/build_ue.ps1             | 25 ++++++++---------
+ scripts/ue_create_materials.py   |  2 +-
+ scripts/ue_engine.ps1            | 50 +++++++++++++++++++++++++++++++++
+ scripts/ue_preflight.ps1         | 56 ++++++++++++++-----------------------
+ tests/test_powershell_scripts.py | 60 ++++++++++++++++++++++++++++++++++++++++
+ tests/test_ue_materials.py       | 23 +++++++++++++++
+ tests/test_webapp_generate.py    | 59 +++++++++++++++++++++++++++++++++++++++
+ webapp/generate.py               | 11 ++++++++
+ 8 files changed, 237 insertions(+), 49 deletions(-)
+
+e4a8a337 A1+A2: pin the engine to 5.5.4, version-guard GetMaterialResource, pin sweep and tests
+
+ README.md                                          |   4 +-
+ core/util/platform.py                              |  28 +++---
+ docs/CAMERA_WINDOWS.md                             |   3 +-
+ scripts/build_ue.sh                                |   6 +-
+ scripts/check_bridge_api.sh                        |   2 +-
+ scripts/deploy_windows.ps1                         |   2 +-
+ scripts/mutation_check.sh                          |   6 +-
+ scripts/render_ue_scenario.sh                      |   2 +-
+ scripts/run_ue_scenario.sh                         |   2 +-
+ scripts/setup.ps1                                  |   2 +-
+ scripts/setup.sh                                   |   2 +-
+ scripts/ue_preflight.sh                            |   6 +-
+ scripts/vendor_ue_plugin.ps1                       |  14 ++-
+ scripts/vendor_ue_plugin.sh                        |   8 +-
+ tests/test_gate6_visual.py                         |   3 +-
+ tests/test_platform.py                             | 104 +++++++++++++++------
+ tests/test_toolchain_doc.py                        |  56 +++++++++++
+ tests/test_ue_weather_source.py                    |  11 +++
+ ue/FlightSim.uproject                              |   2 +-
+ .../Private/FlightSimRenderCommandlet.cpp          |   2 +-
+ .../FlightSimBridge/Private/FlightSimWeather.cpp   |  19 +++-
+ ue/Source/FlightSim.Target.cs                      |   2 +-
+ ue/Source/FlightSimEditor.Target.cs                |   2 +-
+ 23 files changed, 205 insertions(+), 83 deletions(-)
+```
+

@@ -46,7 +46,7 @@ sitting 0.4 m from its label (it was ~25 m).
     else in A. The earlier 5.5 pin is superseded.
   - Check: `docs/TOOLCHAIN.md` has three rows with the same 5.7 version, and a dated
     decision line.
-- [ ] **A2 · That version written in every place the project names it**
+- [x] **A2 · That version written in every place the project names it**
   - Check: `pytest -q tests/test_platform.py` passes.
   - Check: changing the version in one file by hand makes that test fail.
 - [x] **A3 · The build refuses the wrong engine** 🪟

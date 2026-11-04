@@ -1,4 +1,6 @@
 {
+  "A-2": "",
+  "PASS": "",
   "budget_used": 22,
   "builder_commit": "51e7bdb5",
   "claims": [],
@@ -15,9 +17,11 @@
   "retry": 1,
   "retry_commit": "66a7c1da",
   "route": "decision",
+  "run_id": "",
   "run_requested": "A-2",
   "stage": "pushed",
   "unit": "A1+A2",
-  "updated": "2026-11-04T10:54:59",
+  "updated": "2026-11-04T11:36:09",
+  "verdict": "",
   "worktree": "../p3-A2"
 }
