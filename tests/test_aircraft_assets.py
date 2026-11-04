@@ -1002,9 +1002,11 @@ def test_gear_objects_go_to_their_own_obj_and_manifest_row(tmp_path, monkeypatch
     [row] = manifest["components"]
     extent = row.pop("mesh_extent_actor_m")
     assert row == {
-        "id": "landing_gear", "class": "landing_gear", "part": GEAR_PART,
+        "id": "landing_gear", "class": "landing_gear", "station": None,
+        "part": GEAR_PART,
         "asset_path": f"/Game/Aircraft/testcraft/{GEAR_PART}", "triangles": 1,
-        "mesh_origin_actor_cm": manifest["mesh_origin_actor_cm"],
+        "vertices": 3, "model_vars": {},
+        "mesh_origin_actor_cm": manifest["mesh_origin_actor_cm"], "mass_lb": 0.0,
     }
     for axis, lo_hi in {"x": (-1.5, -1.0), "y": (-0.5, 0.5), "z": (-1.2, -1.0)}.items():
         assert extent[axis] == pytest.approx(lo_hi), axis

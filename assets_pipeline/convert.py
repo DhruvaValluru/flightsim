@@ -132,6 +132,7 @@ from assets_pipeline.acmodel import (  # noqa: E402
 )
 from core.capture import airframe as airframe_module  # noqa: E402
 from core.capture.airframe import fdm_xml_path  # noqa: E402
+from core.capture.objects import component_mesh_name  # noqa: E402
 
 CM_PER_M = 100.0
 CM_PER_IN = 2.54
@@ -345,13 +346,6 @@ def _gear_component(config: Dict) -> Optional[Dict]:
     return gear[0]
 
 
-def _component_part_name(aircraft: str, component_id: str) -> str:
-    """The one asset-name convention of letter C: a component's OBJ stem,
-    ``parts`` entry, card ``mesh`` and Unreal asset are all
-    ``SM_<aircraft>_<component id>`` (C3's ``component_mesh_name``)."""
-    return f"SM_{aircraft}_{component_id}"
-
-
 def _gear_component_row(extents_gear: "MeshExtents", config: Dict,
                         mesh_origin_cm: Tuple[float, float, float],
                         triangles: int) -> Dict:
@@ -372,15 +366,19 @@ def _gear_component_row(extents_gear: "MeshExtents", config: Dict,
             f"the gear_geometry patterns {_gear_patterns(config)} name no "
             f"drawn vertex, so a gear OBJ would be empty; refusing")
     name = config["name"]
-    part = _component_part_name(name, str(component["id"]))
+    part = component_mesh_name(name, str(component["id"]))
     return {
         "id": str(component["id"]),
         "class": "landing_gear",
+        "station": None,
         "part": part,
         "asset_path": f"/Game/Aircraft/{name}/{part}",
         "triangles": int(triangles),
+        "vertices": int(extents_gear.count),
+        "model_vars": {},
         "mesh_extent_actor_m": extents_gear.to_manifest()["mesh_extent_actor_m"],
         "mesh_origin_actor_cm": list(mesh_origin_cm),
+        "mass_lb": 0.0,
     }
 
 
