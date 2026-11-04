@@ -56,6 +56,15 @@
       "change": "new transient component properties PreTrimProperties / PreTrimValues / PreTrimRelatchAfter / PreTrimReadProperties (in) and PreTrimReadValues / PreTrimMissing (out); PrepareJSBSim writes the batch after its RunIC and engine start and before DoTrim, re-latching (Exec->RunIC) after each write the bridge marks with the card's CAS re-stated first (IC->SetVcalibratedKtsIC(InitialCalibratedAirSpeedKts): JSBSim holds the IC speed as TAS, so a stated day would otherwise trim at another CAS -- the headless relatch_initial_conditions re-states ic/vc-kts the same way), then UpdateLocalTransforms and the read-back list; an undeclared property is listed, never written; an empty batch is a no-op (upstream's sequence unchanged)",
       "verification": "uncompiled here; source pinned by tests/test_ue_physics_source.py (the batch sits after RunIC and before the trim); the first Windows build is W3 (the atmosphere batch before the host trim) and W4 (the host cg-x-in within 0.1 in of the card's expected CG)",
       "status_5_7": "expected needed, unconfirmed on 5.7 (decided by the Windows plugin build and check_bridge_api.sh)"
+    },
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp + Public/JSBSimMovementComponent.h",
+      "applied": "yes",
+      "patch": 7,
+      "reason": "JSBSim's ground callback is a line trace against whatever the world has loaded (UEGroundCallback -> GetAGLevel), and BeginPlay re-creates JSBSim before its trim, so the host had no way to hand JSBSim its own ground. A -nullrhi solve pass and a render pass stream the Cesium tiles differently, so one card recorded different agl_m in its two passes (Phase 3 decision 12, packet A8-1: 38 of 220 samples, max 27.6 m, every other column bit-identical).",
+      "change": "new public member TFunction<JSBSim::FGGroundCallback*()> GroundCallbackFactory; InitializeJSBSim, right after installing UEGroundCallback, installs the factory's instance instead when the factory is set (JSBSim owns it). The bridge sets the factory to its collision-raster callback (FlightSimGroundCallback.cpp) when the card names a raster; an unset factory is upstream's sequence unchanged",
+      "verification": "built and flown on the 5.7 Windows machine (A8): the same card flown twice records identical agl_m",
+      "status_5_7": "needed on 5.7 (built and flown on the 5.7 Windows machine)"
     }
   ],
   "library_win64": "Source/ThirdParty/JSBSim/Lib/JSBSim.dll",

@@ -1,6 +1,7 @@
 #include "FlightSimScenarioWorld.h"
 
 #include "JSBSimMovementComponent.h"
+#include "FlightSimGroundCallback.h"
 
 #include "Async/TaskGraphInterfaces.h"
 #include "Components/BoxComponent.h"
@@ -1885,6 +1886,27 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 	Movement->ControlFDMAtmosphere = false;   // JSBSim's own standard atmosphere,
 	                                          // which is what the headless host uses
 	Movement->FuelFreeze = Card.bMassHeld;
+
+	// -- the ground JSBSim sees (Phase 3 decision 12) ------------------------
+	// The plugin's default ground is a line trace against whatever the world
+	// has loaded, which the -nullrhi solve pass and the render pass stream
+	// differently (Cesium tiles), so agl_m differed between two passes of one
+	// card while every other column matched. With a collision raster the
+	// raster is the ground, read by the same lookup VerifyTrimmedCondition's
+	// AGL check uses: one surface in every pass. The plugin re-creates JSBSim
+	// inside its BeginPlay (LOCAL PATCH 7, VENDORED.json), so it is handed a
+	// factory, not an instance.
+	if (bCollisionTerrainReady)
+	{
+		Movement->GroundCallbackFactory =
+			MakeFlightSimRasterGroundFactory(CollisionTerrain, GeoReferencing);
+		UE_LOG(LogFlightSimScenario, Display, TEXT("ground: collision raster %s"),
+		       *Card.CollisionTerrainPath);
+	}
+	else
+	{
+		UE_LOG(LogFlightSimScenario, Display, TEXT("ground: world trace"));
+	}
 
 	// P9 -- the derived airframe (the plugin's LOCAL PATCH 5, VENDORED.json):
 	// JSBSim reads the aircraft from the card's aircraft_root instead of the

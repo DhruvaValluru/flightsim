@@ -30,6 +30,7 @@ namespace JSBSim {
 	class FGAccelerations;
 	class FGPropertyManager;
 	class FGGroundReactions;
+	class FGGroundCallback;
 }
 
 // UE Forward Declarations
@@ -79,6 +80,12 @@ public:
 	*/
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Model|Settings")
 	float AGLThresholdMeters = 15;
+
+	// LOCAL PATCH 7 (VENDORED.json): the host's own ground. When set, every
+	// InitializeJSBSim installs the callback this returns in place of the
+	// world line trace (UEGroundCallback); JSBSim owns the instance. BeginPlay
+	// re-creates JSBSim (LoadAircraft), which is why this is a factory.
+	TFunction<JSBSim::FGGroundCallback*()> GroundCallbackFactory;
 
 	/**
 	 * Center of Gravity Location in Actor local frame

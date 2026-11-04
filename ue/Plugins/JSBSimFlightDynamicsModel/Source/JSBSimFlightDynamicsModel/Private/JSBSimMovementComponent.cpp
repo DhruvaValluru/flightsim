@@ -510,6 +510,17 @@ void UJSBSimMovementComponent::InitializeJSBSim()
 		Auxiliary = Exec->GetAuxiliary();
 		Inertial = Exec->GetInertial();
 		Inertial->SetGroundCallback(new UEGroundCallback(this)); // Register ground callback.
+		// LOCAL PATCH 7 (VENDORED.json): the host may answer the ground queries
+		// itself (the bridge: the card's collision raster, one surface in every
+		// pass of a card). JSBSim is re-created by BeginPlay, so a fresh
+		// instance is made on every initialisation.
+		if (GroundCallbackFactory)
+		{
+			if (JSBSim::FGGroundCallback* HostGround = GroundCallbackFactory())
+			{
+				Inertial->SetGroundCallback(HostGround);
+			}
+		}
 		Aerodynamics = Exec->GetAerodynamics();
 		GroundReactions = Exec->GetGroundReactions();
 		Accelerations = Exec->GetAccelerations();

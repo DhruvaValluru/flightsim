@@ -14,6 +14,11 @@ public class FlightSimBridge : ModuleRules
 			// Camera-preset keys in the interactive host (EKeys).
 			"InputCore",
 			"JSBSimFlightDynamicsModel",
+			// Phase 3 decision 12 (FlightSimGroundCallback.cpp): the bridge derives
+			// JSBSim's FGGroundCallback itself, so it links the JSBSim library
+			// directly; the plugin module's own ThirdParty link does not carry
+			// over to a dependent module.
+			"JSBSim",
 			"GeoReferencing",
 			"Json", "JsonUtilities",
 			"CinematicCamera",
