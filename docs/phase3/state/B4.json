@@ -7,7 +7,8 @@
   "claims": [],
   "failures": [
     "run B-1 packet docs/phase3/packets/B4-1.md: gate6 --look measure and beauty FAIL (range extinction ratio 1.12, peaks shadow 210 px, ground shadow 143 px, exposure metric 4.52) because the Gate 6 terrain is not drawn on today's build while the 6 Oct renders of the same engine show it; card, settings, RHI identical; Windows builder bisects the merged engine changes and the A6 material rebuild",
-    "run B-1 packet docs/phase3/packets/B4-2.md: terrain clauses pass after 4f8abb78; five clauses fail identically on the 6 Oct renders (ground shadow 0 px, auto-exposure control 2.51, wetness parameter absent, albedo sun invariance, old footage absent); next Windows builder round takes 1-4"
+    "run B-1 packet docs/phase3/packets/B4-2.md: terrain clauses pass after 4f8abb78; five clauses fail identically on the 6 Oct renders (ground shadow 0 px, auto-exposure control 2.51, wetness parameter absent, albedo sun invariance, old footage absent); next Windows builder round takes 1-4",
+    "run B-1 packet docs/phase3/packets/B4-3.md: round 2 (215813cd merged, MAIN stamp e952c275, M_VertexColor rebuilt) fixed the zero-normal ground and the wetness clause; ground shadow 79 px, auto-exposure control 4.62, albedo route unfixed, three contrast/night clauses now fail on the lit ground; round 3 deferred: budget"
   ],
   "integrated_commit": "c3383adff2ccc10fc28931471d555e45bc5e78fc",
   "letter": "B",
@@ -24,7 +25,7 @@
   "run_id": "",
   "stage": "built_local",
   "unit": "B4",
-  "updated": "2026-11-04T17:24:19",
+  "updated": "2026-11-04T17:25:20",
   "verdict": "",
   "worktree": "../p3w-B4r2"
 }
