@@ -23,13 +23,13 @@
   "pending_windows": [
     "one-line prompt on /generate.html to a finished campaign: --clip-seconds 22 on the capture command, no camera.scene_bounds, state done; llm_response.txt if the llm tier falls back"
   ],
-  "pushed_commit": "9bb12d95",
+  "pushed_commit": "8a9bda0e",
   "retry": 2,
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T16:46:23",
+  "updated": "2026-11-04T16:46:25",
   "verdict": "",
   "worktree": "../p3-A10r"
 }
