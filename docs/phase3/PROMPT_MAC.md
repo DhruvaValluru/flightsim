@@ -73,6 +73,23 @@ the Windows decision agent by message to decide.
 
 ## Token rules (these are hard rules, not advice)
 
+**Budget mode (owner's rule, 2026-11-04 evening: 83 % of the weekly credit spent).**
+Finishing the remaining letters' BUILDS comes first; everything else is cut
+until the owner lifts this:
+- no integrator agents: the Mac session runs `scripts/phase3_integrate.sh`
+  itself and reads the diff only where the script fails;
+- no auditor agents: the session runs the letter's test files and
+  `mutation_check.sh --check-targets` itself;
+- breakdown and Align are ONE fable agent per letter, writing the notes itself
+  (no sub-agents); builders stay one Workflow per letter on fable, briefs kept
+  to the note's coding plan;
+- no new retry builders for letters A-D: a Windows FAIL is logged with its
+  packet and left for after F unless the fix is a one-line test or path edit
+  the session can make itself;
+- Stage 7 keeps the full-suite run (a script) and the final report (fable);
+  the summary and overlap agents are skipped and their sections of the report
+  are written from the notes by the final-report agent.
+
 1. **Model per role.** `fable` for breakdown, Align, debug triage, context,
    overlap, the final report and (owner's rule, 2026-11-04) every builder.
    `sonnet` for sub-agents, integrators and the auditor. `haiku` for the summary agent. Pass `model`

@@ -1,8 +1,8 @@
 {
   "A-2": "",
   "FAIL": "",
-  "budget_used": 36,
-  "builder_commit": "4b1d48c9",
+  "budget_used": 48,
+  "builder_commit": "bb6c3552",
   "claims": [
     "core/campaign/campaign.py",
     "core/nl/llm_compiler.py",
@@ -21,15 +21,15 @@
   "needs_windows": true,
   "note": "campaign capture placement differs from the web run; llm moves shape; raw response logging",
   "pending_windows": [
-    "one-line prompt on /generate.html reaches a finished campaign (step 5): capture carries --terrain grand_canyon, tier llm, state done, card downloadable"
+    "one-line prompt on /generate.html to a finished campaign: --clip-seconds 22 on the capture command, no camera.scene_bounds, state done; llm_response.txt if the llm tier falls back"
   ],
   "pushed_commit": "9bb12d95",
   "retry": 2,
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "building",
-  "updated": "2026-11-04T14:13:29",
+  "stage": "built_local",
+  "updated": "2026-11-04T16:38:52",
   "verdict": "",
   "worktree": "../p3-A10r"
 }
