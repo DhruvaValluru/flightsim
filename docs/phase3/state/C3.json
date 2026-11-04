@@ -7,8 +7,8 @@
   "letter": "C",
   "needs_windows": false,
   "pending_windows": [],
-  "stage": "integrated",
+  "stage": "pushed",
   "unit": "C3",
-  "updated": "2026-11-04T13:19:01",
+  "updated": "2026-11-04T14:06:10",
   "worktree": "../p3-C3"
 }

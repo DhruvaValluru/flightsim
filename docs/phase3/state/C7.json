@@ -9,8 +9,8 @@
   "pending_windows": [
     "step 6: c172p re-convert+import, gear-down render, verify component_coverage/component_boxes PASS and SM_c172p_landing_gear imports"
   ],
-  "stage": "integrated",
+  "stage": "pushed",
   "unit": "C7",
-  "updated": "2026-11-04T13:23:21",
+  "updated": "2026-11-04T14:06:10",
   "worktree": "../p3-C7"
 }

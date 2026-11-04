@@ -23,3 +23,9 @@ Base for diff checks: 79d43a52 (98331123~3 omitted C2's a4_mdl_convert/importer/
    (whole-diff hits are only docs/PHASE3_LOG.md and scripts/phase3_integrate.sh text, not code.)
 5. Sanity: COMPONENT_BAND (64, 127), component_mesh_name('A4','store_sta2') = SM_A4_store_sta2. PASS
    (card ids 64-69 test is test_card_components_lists_the_a4_loadout_in_the_band, in step 1, passed.)
+
+## re-audit after p3-fixC (Mac session, 2026-11-04)
+- Letter test files incl. the six previously failing: exit 0 after the merge d35a1173 (test-side updates only; buildings/landcover expectations follow C3 band (i); B747 fail-safe test pins the A7 age rule).
+- tests/test_engine_bundle_golden.py::test_verify_run_has_no_fail stays red on the Mac: PRE-EXISTING at the fixture commit a72c8303, not a C regression (fixture cites a Windows generated mesh manifest and a Windows absolute terrain path for the geoid crop). Routed as A12 interaction: Windows adds the cited files to the fixture; Mac adds a sha-gated relocated-bundle lookup.
+- Mutation subset: 50 guards load-bearing (auditor run). Diff guard clean.
+- Verdict: PASS for letter C.
