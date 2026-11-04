@@ -1,18 +1,20 @@
 {
   "A-2": "",
   "FAIL": "",
-  "budget_used": 22,
-  "builder_commit": "378fade3",
+  "budget_used": 28,
+  "builder_commit": "eb9e5f30",
   "claims": [
     "core/capture/verify.py",
     "docs/phase3/notes/A12.md",
     "tests/test_capture_verify.py",
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp"
   ],
+  "eb9e5f30": "",
   "failures": [
-    "run A-2 packet docs/phase3/packets/A12-1.md: 6 of 7 gates pass on both the A-4 and the c172p one-frame runs; mask_vs_geometry fails on every render: the drawn pixels sit 1.1% of the image width left of the engine's own projection (horizontal only); tight_box_present PASS on one-frame runs; diagnose tight null: 0; Windows builder diagnoses the render camera vs its projection record"
+    "run A-2 packet docs/phase3/packets/A12-1.md: 6 of 7 gates pass on both the A-4 and the c172p one-frame runs; mask_vs_geometry fails on every render: the drawn pixels sit 1.1% of the image width left of the engine's own projection (horizontal only); tight_box_present PASS on one-frame runs; diagnose tight null: 0; Windows builder diagnoses the render camera vs its projection record",
+    "run A-2 packet docs/phase3/packets/A12-2.md: seven gates + tight_box_present PASS on 7237db488652, fixture committed (807,894 bytes, GOLDEN.json, RUN_ID); flightsim.verify and the golden test fail only on landmark_reprojection, which must apply camera_grid_convergence_deg (Mac, core/capture/verify.py)"
   ],
-  "integrated_commit": "ef4dd87c",
+  "integrated_commit": "6caabdac",
   "letter": "A",
   "needs_windows": true,
   "note": "verify.py landmark_reprojection rotates yaw by camera_grid_convergence_deg",
@@ -26,9 +28,10 @@
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "integrated",
+  "stage": "pushed",
   "unit": "A12+A13",
-  "updated": "2026-11-04T13:13:38",
+  "updated": "2026-11-04T13:15:06",
   "verdict": "",
+  "windows_build": "",
   "worktree": "../p3-A12r"
 }

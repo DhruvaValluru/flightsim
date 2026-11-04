@@ -1,0 +1,13 @@
+{
+ "camera_id": "chase",
+ "frame": "frame_0000.png",
+ "int_id": 1,
+ "bbox_2d_tight": [
+  95.0,
+  79.0,
+  224.0,
+  109.0
+ ],
+ "visible_fraction": 1.0,
+ "depth_median_m": 27.059993743896484
+}
