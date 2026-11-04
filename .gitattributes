@@ -32,3 +32,6 @@ assets/landmask/** -text
 # A-4 visual model (MSFS/P3D) -- must never be text-normalised
 *.mdl binary
 *.dds binary
+
+# A4: the stamp-tree fixture keeps its CRLF (Get-PluginSourceHash must see one).
+tests/fixtures/stamp_tree/** -text
