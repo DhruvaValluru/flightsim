@@ -14,6 +14,9 @@ GOLDEN = "0141215eaa199cccb8b67a2acbdccecfcb70e4487506da5a93a326abcc05dc49"
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     shutil.copytree(FIXTURE, repo)
+    binary = plat.ue_bridge_binary(repo)          # a built bridge exists
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"")
     return repo
 
 
@@ -74,3 +77,30 @@ def test_binary_stale_message_names_both_hashes(tmp_path):
     _stamp(repo, "ab" * 32)
     reason = plat.binary_stale_reason(repo)
     assert "ab" * 32 in reason and plat.plugin_source_hash(repo) in reason
+
+
+def test_binary_stale_no_built_binary_is_not_this_refusal(tmp_path):
+    repo = _repo(tmp_path)
+    plat.ue_bridge_binary(repo).unlink()
+    assert plat.binary_stale_reason(repo) is None
+
+
+def test_binary_stale_capture_render_refuses_by_name(tmp_path, capsys, monkeypatch):
+    """The real check, through flightsim.capture: a built bridge with no
+    stamp refuses before any flight; headless (no --render) is untouched."""
+    from flightsim.capture import main as capture_main
+
+    built = tmp_path / "bridge.dylib"
+    built.write_bytes(b"")
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
+    monkeypatch.setattr(plat, "ue_bridge_binary", lambda repo: built)
+    example = Path(__file__).resolve().parents[1] / "examples" / "cameras_multi.yaml"
+    out = tmp_path / "refused"
+    code = capture_main([str(example), "--out", str(out), "--max-previews", "0",
+                         "--render", "--no-host-flight"])
+    assert code == 2
+    text = capsys.readouterr().out
+    assert "REFUSED -- engine.binary_stale" in text
+    assert "no stamp" in text and plat.plugin_source_hash(
+        Path(__file__).resolve().parents[1]) in text
+    assert not out.exists()

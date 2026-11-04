@@ -319,7 +319,12 @@ def _major_minor(version: object) -> str:
 def binary_stale_check(repo: Path) -> Optional[dict]:
     """None when the built bridge matches the source and the pinned engine;
     else ``{"message", "stamp_hash", "source_hash"}`` (stamp_hash is
-    "no stamp" when the stamp is missing)."""
+    "no stamp" when the stamp is missing). None as well when no built
+    bridge binary exists at all: there is nothing stale to run, and the
+    absent build is the ue.platform / build-script refusal's to name (on a
+    Mac ue_available() is True with no binary and no Windows stamp)."""
+    if not ue_bridge_binary(Path(repo)).is_file():
+        return None
     current = plugin_source_hash(repo)
     stamp = read_build_stamp(repo)
     if stamp is None:
