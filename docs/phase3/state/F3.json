@@ -1,8 +1,9 @@
 {
   "built_commit": "cdbbed711f8f35108589042a162e48104c208ff7",
+  "integrated_commit": "317651b8",
   "pending_windows": [
     "step 4: reader follows GUIDE.md during F2 row 1"
   ],
-  "stage": "built",
-  "updated": "2026-11-04T17:00:42"
+  "stage": "integrated",
+  "updated": "2026-11-04T17:01:27"
 }
