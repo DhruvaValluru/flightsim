@@ -22,9 +22,9 @@
   ],
   "pushed_commit": "3e59358d",
   "run_id": "",
-  "stage": "built_local",
+  "stage": "building",
   "unit": "B4",
-  "updated": "2026-11-04T16:17:49",
+  "updated": "2026-11-04T16:31:42",
   "verdict": "",
-  "worktree": "../p3w-B4"
+  "worktree": "../p3w-B4r2"
 }
