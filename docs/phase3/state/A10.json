@@ -9,7 +9,9 @@
     "step 1 reproduce /generate refusal on Windows",
     "step 5 one-line prompt to finished campaign"
   ],
+  "pushed_commit": "23bad766",
+  "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T00:54:27",
+  "updated": "2026-11-04T10:54:59",
   "worktree": "../p3-A10"
 }

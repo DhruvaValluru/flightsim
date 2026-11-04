@@ -10,8 +10,10 @@
     "label_diagnose prints tight null: 0",
     "fixture under 2MB + GOLDEN.json + RUN_ID committed"
   ],
+  "pushed_commit": "23bad766",
+  "run_requested": "A-2",
   "stage": "pushed",
   "unit": "A12+A13",
-  "updated": "2026-11-04T00:54:27",
+  "updated": "2026-11-04T10:54:59",
   "worktree": "../p3-A12"
 }

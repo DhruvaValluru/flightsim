@@ -11,9 +11,11 @@
     "ue_preflight.ps1 on both engines",
     "helper parses under Windows PowerShell 5.1"
   ],
+  "pushed_commit": "23bad766",
   "run_id": "A-1",
+  "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T01:20:39",
+  "updated": "2026-11-04T10:54:59",
   "verdict": "PASS",
   "worktree": "../p3-A3"
 }

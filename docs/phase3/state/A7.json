@@ -10,7 +10,9 @@
     "touch assets/aircraft_config/A4.json, Generate: one re-convert, no import loop",
     "real UnrealEditor-Cmd import completes"
   ],
+  "pushed_commit": "23bad766",
+  "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T00:54:27",
+  "updated": "2026-11-04T10:54:59",
   "worktree": "../p3-A7"
 }

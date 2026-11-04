@@ -14,8 +14,10 @@
     "check_bridge_api.sh with UE_5.5",
     "gate5_ue_parity c172p hold"
   ],
+  "pushed_commit": "23bad766",
   "run_id": "A-1",
+  "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T01:22:04",
+  "updated": "2026-11-04T10:54:59",
   "verdict": "FAIL"
 }

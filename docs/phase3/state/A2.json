@@ -11,11 +11,13 @@
     "A2 step9 build_ue.ps1 on 5.5.4",
     "A2 step10 cloud-material/landscape paths"
   ],
+  "pushed_commit": "23bad766",
   "retry": 1,
   "retry_commit": "66a7c1da",
   "route": "decision",
+  "run_requested": "A-2",
   "stage": "pushed",
   "unit": "A1+A2",
-  "updated": "2026-11-04T10:54:17",
+  "updated": "2026-11-04T10:54:59",
   "worktree": "../p3-A2"
 }

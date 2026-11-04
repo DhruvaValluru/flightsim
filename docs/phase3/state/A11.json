@@ -13,7 +13,9 @@
     "fix the engine cause in FlightSimRenderCommandlet.cpp",
     "full CLI and web render: every render.json complete, mask not all zeros, one alone PNG per aircraft per frame, no labels.no_bundle"
   ],
+  "pushed_commit": "23bad766",
+  "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T00:54:27",
+  "updated": "2026-11-04T10:54:59",
   "worktree": "../p3-A11"
 }
