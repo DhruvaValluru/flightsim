@@ -15,7 +15,7 @@
   "failures": [
     "run A-2 packet docs/phase3/packets/A10-1.md: /generate/plan ok; /generate/start campaign 56e6d0854f88 failed campaign.target_unreachable because its capture refused google_tiles.terrain (no bake on the campaign path; the single run maps the scene onto the grand_canyon bake); llm tier fell back to regex (unknown field 'cameras'); decision 17; Mac scope"
   ],
-  "integrated_commit": "e183e5aa3d5878910488d622e5933ccba2f1eaed",
+  "integrated_commit": "bf1f13f7",
   "letter": "A",
   "needs_windows": true,
   "pending_windows": [
@@ -26,8 +26,8 @@
   "route": "box",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "built_local",
-  "updated": "2026-11-04T13:38:11",
+  "stage": "integrated",
+  "updated": "2026-11-04T13:48:58",
   "verdict": "",
   "worktree": "../p3-A10r"
 }
