@@ -2719,14 +2719,14 @@ mutate core/scenario/card.py \
 # (tests/test_platform.py). Text files, not Python; mutate() is a string
 # replace so it applies to them the same way.
 mutate ue/FlightSim.uproject \
-    '"EngineAssociation": "5.7"' \
     '"EngineAssociation": "5.5"' \
+    '"EngineAssociation": "5.7"' \
     "the uproject pins the engine the scripts and refusals name" \
     tests/test_platform.py || failures=$((failures+1))
 
 mutate core/util/platform.py \
-    'UE_ENGINE_VERSION = "5.7"' \
-    'UE_ENGINE_VERSION = "5.5"  # MUTATED: refusals name the old engine' \
+    'UE_ENGINE_VERSION = "5.5"' \
+    'UE_ENGINE_VERSION = "5.7"  # MUTATED: refusals name another engine' \
     "the platform refusals and install roots name the pinned engine" \
     tests/test_platform.py || failures=$((failures+1))
 

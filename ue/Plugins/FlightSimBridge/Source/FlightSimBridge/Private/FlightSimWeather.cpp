@@ -28,6 +28,16 @@
 
 #include <atomic>
 
+// Material resources are keyed by shader platform on UE 5.7 and later (the
+// feature-level overload is gone there) and by feature level on 5.5 (Phase 3
+// pin). One macro, both overloads; the argument not used is not evaluated.
+#include "Runtime/Launch/Resources/Version.h"
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+#define FLIGHTSIM_GET_MATERIAL_RESOURCE(Base, World, Platform) ((Base)->GetMaterialResource(Platform))
+#else
+#define FLIGHTSIM_GET_MATERIAL_RESOURCE(Base, World, Platform) ((Base)->GetMaterialResource((World)->GetFeatureLevel()))
+#endif
+
 DEFINE_LOG_CATEGORY_STATIC(LogFlightSimWeather, Log, All);
 
 // The rain noise the interactive window plays: band-limited noise at the
@@ -563,7 +573,7 @@ bool FFlightSimWeather::VerifyCloudMaterials(UWorld* World, FString& Error,
 				{
 					Why = TEXT("is not flagged 'Used with Volumetric Cloud' (no cloud shaders)");
 				}
-				else if (FMaterialResource* Resource = Base->GetMaterialResource(Platform))
+				else if (FMaterialResource* Resource = FLIGHTSIM_GET_MATERIAL_RESOURCE(Base, World, Platform))
 				{
 					Resource->FinishCompilation();
 					if (Resource->GetCompileErrors().Num() > 0)
@@ -1184,9 +1194,10 @@ bool FFlightSimWeather::BuildCell(UWorld* World, const TSharedPtr<FJsonObject>& 
 			      TEXT("asserts on it): re-run scripts/ue_create_materials.py, which sets the flag");
 		}
 		// UE 5.7 keys material resources by shader platform (measured: the
-		// feature-level overload is gone); the platform of this world's level.
-		else if (FMaterialResource* Resource =
-		             Base->GetMaterialResource(GShaderPlatformForFeatureLevel[World->GetFeatureLevel()]))
+		// feature-level overload is gone); 5.5 keys them by feature level
+		// (see FLIGHTSIM_GET_MATERIAL_RESOURCE above).
+		else if (FMaterialResource* Resource = FLIGHTSIM_GET_MATERIAL_RESOURCE(
+		             Base, World, GShaderPlatformForFeatureLevel[World->GetFeatureLevel()]))
 		{
 			Resource->FinishCompilation();
 			if (Resource->GetCompileErrors().Num() > 0)

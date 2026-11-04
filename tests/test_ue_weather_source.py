@@ -487,3 +487,14 @@ def test_the_cinematic_rain_style_and_the_warm_up_step_guard(monkeypatch):
     monkeypatch.setenv("FLIGHTSIM_RAIN_GAIN", "2")
     monkeypatch.setenv("FLIGHTSIM_RAIN_STYLE", "cinematic")
     assert weather_backend_flags() == ["-weather-backend=procedural", "-rain-gain=2", "-rain-style=cinematic"]
+
+
+def test_material_resource_is_version_guarded():
+    """GetMaterialResource takes a shader platform on 5.7+ and a feature
+    level on 5.5 (the Phase 3 pin): both branches sit behind the engine
+    version macro, and no call site uses the overload bare."""
+    assert "ENGINE_MINOR_VERSION >= 7" in WEATHER_CPP
+    assert "#else" in WEATHER_CPP.split("FLIGHTSIM_GET_MATERIAL_RESOURCE", 1)[1]
+    assert "GetMaterialResource(Platform)" in WEATHER_CPP
+    assert "GetMaterialResource((World)->GetFeatureLevel())" in WEATHER_CPP
+    assert WEATHER_CPP.count("->GetMaterialResource(") == 2  # the two macro branches

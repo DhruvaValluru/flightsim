@@ -649,7 +649,8 @@ def test_the_build_targets_include_order_is_the_pinned_engines():
     for name in ("FlightSim.Target.cs", "FlightSimEditor.Target.cs"):
         text = (REPO / "ue/Source" / name).read_text(encoding="utf-8")
         assert f"IncludeOrderVersion = {wanted};" in text, f"{name} does not pin {wanted}"
-        assert "Unreal5_5" not in text, f"{name} still says Unreal5_5"
+        others = [n for n in re.findall(r"Unreal5_\d+", text) if n != wanted.split(".")[-1]]
+        assert not others, f"{name} also names {others}"
 
 
 # -- I6 (gap S3): the ground-truth passes, as C++ text (UNCOMPILED here) ------
