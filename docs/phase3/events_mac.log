@@ -392,3 +392,5 @@
 {"agent": "mac", "box": "A", "stage": "msg", "kind": "note", "note": "msg P3 pushed 23bad766 letter=A boxes=A2 A3 A4 A5 A6 A7 A8 A9 A10 A11 A12 A13 C1 C5 C6 restart=A-2 engine=5.7 (owner: start the whole workflow again on 5.7; builders on fable both machines; web app restart approved)", "t": 1793807698.974879, "machine": "mac"}
 {"agent": "mac", "box": "A", "stage": "msg", "kind": "note", "note": "owner's rule 2026-11-04: builders only (both machines) run as ultracode Workflow agents on fable; prompts and builder brief updated", "t": 1793807924.656373, "machine": "mac"}
 {"agent": "mac", "box": "C1", "stage": "prove", "kind": "note", "note": "msg received P3 verdict C1 PASS run=A-2", "t": 1793807980.0789068, "machine": "mac"}
+{"agent": "mac", "box": "C5", "stage": "prove", "kind": "note", "note": "msg received P3 verdict C5 PASS run=A-2", "t": 1793807993.0321689, "machine": "mac"}
+{"agent": "mac", "box": "C6", "stage": "prove", "kind": "note", "note": "msg received P3 verdict C6 PASS run=A-2", "t": 1793807993.073502, "machine": "mac"}
