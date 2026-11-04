@@ -126,7 +126,7 @@ Two rules to keep in mind:
   - Check: the mesh manifest lists a `payload` piece per loaded station.
 - [x] **C3 · The run card lists the payload pieces with their own IDs**
   - Check: the IDs are unique and never clash with other aircraft.
-- [ ] **C4 · The engine gives each piece its own colour in the mask** 🪟
+- [x] **C4 · The engine gives each piece its own colour in the mask** 🪟
   - Check: the mask contains the payload's ID, and the aircraft's own tight box is
     still filled.
 - [x] **C5 · Payload boxes written into the label file (manifest v8)** 🐍
