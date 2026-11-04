@@ -136,13 +136,20 @@ def test_settings_script_is_served():
 
 
 def test_capture_passes_slot_is_reserved():
-    """The sixth field is an empty slot E5 fills; settings.js leaves it
-    alone (E5's loadPasses/savePasses own its inside)."""
+    """The sixth field is E3's slot; E5 fills it with #passPicker and its
+    three checkboxes, and settings.js leaves it alone (E5's
+    loadPasses/savePasses own its inside)."""
     panel = _panel()
-    assert panel.count('<div id="settings-capture-passes"></div>') == 1
+    assert panel.count('<div id="settings-capture-passes">') == 1
+    slot = panel[panel.index('<div id="settings-capture-passes">'):]
+    slot = slot[:slot.index("</div>")]
+    assert 'id="passPicker"' in slot
+    for box in ("passNormals", "passFlow", "passAmodal"):
+        assert slot.count(f'id="{box}"') == 1, box
     assert "settings-capture-passes" not in SCRIPT.replace("#settings-capture-passes; this module never writes into it", "")
     for name in ("passPicker", "passNormals", "passFlow", "passAmodal", "loadPasses", "savePasses"):
         assert name not in SCRIPT, name
+        assert name in PAGE, name
     # E4's element and function are untouched by this box.
     assert PAGE.count('id="run"') == 1 and "function startRun" in PAGE
 
@@ -190,7 +197,7 @@ const [base, executablePath, key] = process.argv.slice(2);
     cesium: document.querySelector('[data-readonly="cesium_status"]').textContent,
     readonlyControls: document.querySelectorAll('[data-field="engine"] input, [data-field="engine"] select, ' +
       '[data-field="cesium_status"] input, [data-field="cesium_status"] select').length,
-    slotEmpty: document.getElementById("settings-capture-passes").children.length === 0,
+    passBoxes: document.querySelectorAll("#settings-capture-passes #passPicker input[type=checkbox]").length,
   }));
   await page.goto(base + "/", {waitUntil: "load"});
   await openPanel();
@@ -246,14 +253,16 @@ def test_tiles_key_survives_a_reload(clean, tmp_path):
     before = result["before"]
     assert before["hidden"] is False            # opened by the missing key
     assert before["order"] == list(ui_keys())
-    assert before["visible"] <= 6 and before["counted"] == before["visible"]
+    # E5's three pass checkboxes sit in the sixth field; the five rows before it are at most six controls.
+    assert before["passBoxes"] == 3
+    assert before["visible"] - before["passBoxes"] <= 6 and before["counted"] == before["visible"]
     assert before["advancedOpen"] is False and before["advancedRows"] > 0
     assert {m["key"] for m in before["messages"]} >= {"google_tiles_key"}
     assert any(m["text"] == TILES_MESSAGE for m in before["messages"])
     assert before["focused"] == "settings-google_tiles_key"
     assert before["value"] == "" and before["type"] == "password"
     assert before["engine"] == settings.engine_label()
-    assert before["readonlyControls"] == 0 and before["slotEmpty"] is True
+    assert before["readonlyControls"] == 0
     assert result["shown"] == "text"
     assert result["put"]["status"] == 200
     assert result["put"]["body"]["settings"]["google_tiles_key"] == key
@@ -261,7 +270,7 @@ def test_tiles_key_survives_a_reload(clean, tmp_path):
     after = result["after"]
     assert after["value"] == key
     assert after["type"] == "password"
-    assert after["visible"] <= 6
+    assert after["visible"] - after["passBoxes"] <= 6
     assert "google_tiles_key" not in [m["key"] for m in after["messages"]]
     assert json.loads(clean.read_text(encoding="utf-8"))["google_tiles_key"] == key
     assert result["errors"] == [], result["errors"]

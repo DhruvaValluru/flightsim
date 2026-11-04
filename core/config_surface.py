@@ -173,14 +173,14 @@ SETTINGS: Tuple[Setting, ...] = (
             ("scripts/phase3_monitor.py:235",),
             "Phase 3 scripts: the branch the monitor watches."),
     Setting("xplane_terrain", "FLIGHTSIM_XPLANE_TERRAIN", "dev-only", None,
-            ("webapp/runs.py:1560",),
-            "X-Plane comparison flag; E5 moves the read to core/xplane/devflags.py."),
+            ("core/xplane/devflags.py:38",),
+            "X-Plane comparison flag for developers; read in core/xplane/devflags.py (E5), never on the web path."),
     Setting("xplane_sky", "FLIGHTSIM_XPLANE_SKY", "dev-only", None,
-            ("webapp/runs.py:1653",),
-            "X-Plane comparison flag; E5 moves the read to core/xplane/devflags.py."),
+            ("core/xplane/devflags.py:50",),
+            "X-Plane comparison flag for developers; read in core/xplane/devflags.py (E5), never on the web path."),
     Setting("xplane_lighting", "FLIGHTSIM_XPLANE_LIGHTING", "dev-only", None,
-            ("webapp/runs.py:1649",),
-            "X-Plane comparison flag; E5 moves the read to core/xplane/devflags.py."),
+            ("core/xplane/devflags.py:43",),
+            "X-Plane comparison flag for developers; read in core/xplane/devflags.py (E5), never on the web path."),
 )
 
 #: Every ``add_argument`` of flightsim/capture.py (the positional ``spec``
