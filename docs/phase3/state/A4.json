@@ -1,0 +1,18 @@
+{
+  "budget_used": 11,
+  "claims": [
+    "core/messages/catalog.yaml",
+    "core/util/platform.py",
+    "flightsim/capture.py",
+    "scripts/build_ue.ps1",
+    "scripts/build_ue.ps1 core/util/platform.py flightsim/capture.py webapp/runs.py core/messages/catalog.yaml tests/test_binary_stale.py tests/fixtures/stamp_tree",
+    "tests/fixtures/stamp_tree",
+    "tests/test_binary_stale.py",
+    "webapp/runs.py"
+  ],
+  "letter": "A",
+  "needs_windows": true,
+  "stage": "building",
+  "updated": "2026-11-03T22:14:29",
+  "worktree": "../p3-A4"
+}

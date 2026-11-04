@@ -1,0 +1,18 @@
+{
+  "budget_used": 12,
+  "builder_commit": "3b8c3030",
+  "claims": [
+    "tests/test_ue_physics_source.py",
+    "ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json"
+  ],
+  "letter": "A",
+  "needs_windows": true,
+  "pending_windows": [
+    "vendor_ue_plugin.ps1 on 5.5",
+    "build_ue.ps1 on 5.5",
+    "check_bridge_api.sh with UE_5.5",
+    "gate5_ue_parity c172p hold"
+  ],
+  "stage": "built_local",
+  "updated": "2026-11-03T21:57:29"
+}
