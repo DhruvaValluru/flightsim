@@ -3,6 +3,7 @@
   "builder_commit": "fa6d3866",
   "built_commit": "fa6d3866",
   "claims": [],
+  "integrated_commit": "0be3ef75",
   "letter": "E",
   "needs_windows": true,
   "pending_windows": [
@@ -12,8 +13,8 @@
     "break one step -> only it reruns; hidden ffmpeg -> FAILED preflight: toolchain.ffmpeg_mismatch and nothing after",
     "Smart App Control block reported as host.smart_app_control"
   ],
-  "stage": "built",
+  "stage": "integrated",
   "unit": "E6",
-  "updated": "2026-11-04T16:57:24",
+  "updated": "2026-11-04T17:10:50",
   "worktree": "../p3-E6"
 }
