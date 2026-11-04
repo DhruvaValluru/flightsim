@@ -24,11 +24,12 @@
   ],
   "pushed_commit": "23bad766",
   "retry": 2,
+  "retry_commit": "5b037fc8",
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "building",
-  "updated": "2026-11-04T11:22:38",
+  "stage": "pushed",
+  "updated": "2026-11-04T11:24:56",
   "verdict": "",
   "worktree": "../p3w-A5"
 }
