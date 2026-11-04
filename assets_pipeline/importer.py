@@ -113,6 +113,26 @@ def missing_assets(manifest_path: Path) -> List[str]:
             if not (content / root / f"{part}.uasset").is_file()]
 
 
+def stale_assets(manifest_path: Path) -> List[str]:
+    """Which of a manifest's parts have a .uasset OLDER than the manifest.
+
+    A re-convert writes new OBJs and a new manifest; the editor's import
+    is what carries them into the project. Measured 2026-11-04 (packet
+    C4-2): after decision 19 re-wrote every A-4 OBJ right-handed, the
+    manifest was current and the .uassets present, so the import was
+    skipped and the editor kept drawing the old mirrored asset against the
+    new hulls. An asset older than its manifest is therefore not imported.
+    Empty list == every present asset is at least as new as the manifest.
+    """
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    root = manifest["asset_path_root"].replace("/Game/", "", 1)
+    content = REPO / "ue" / "Content"
+    since = manifest_path.stat().st_mtime
+    return [f"{manifest['name']}/{part}" for part in manifest["parts"]
+            if (content / root / f"{part}.uasset").is_file()
+            and (content / root / f"{part}.uasset").stat().st_mtime < since]
+
+
 #: The manifest version the render commandlet needs to place the mesh
 #: where the label is. Version 1 carried no ``mesh_origin_actor_cm``, so
 #: the commandlet attached the body at the actor root -- the JSBSim
@@ -259,7 +279,7 @@ def is_imported(name: str) -> bool:
     and a stale manifest renders the real mesh in the wrong place."""
     manifest = mesh_manifest_path(name)
     return (manifest.is_file() and stale_manifest_reason(manifest) is None
-            and not missing_assets(manifest))
+            and not missing_assets(manifest) and not stale_assets(manifest))
 
 
 def fetch_source(config: Dict, config_path: Path,
@@ -451,7 +471,8 @@ def provision_models(names: Iterable[str], report: Report = print,
         if reason is None and is_imported(name):
             continue
         manifest = mesh_manifest_path(name)
-        needs_editor = (not manifest.is_file()) or bool(missing_assets(manifest))
+        needs_editor = ((not manifest.is_file()) or bool(missing_assets(manifest))
+                        or bool(stale_assets(manifest)))
         if needs_editor and not _editor_present() and \
                 unavailable_reason(name) is None:
             report(f"the {name} model needs the Unreal editor to import "
@@ -490,10 +511,12 @@ def ensure_model(name: str, report: Report = print) -> Path:
     if not stale and manifest.is_file():
         stale = outdated_reason(name)
     if stale:
-        # Re-convert in place: the OBJs and the imported .uassets are the
-        # same geometry, so only the converter runs (no editor time).
+        # Re-convert, then re-import: since decision 19 a re-convert can
+        # change the geometry the editor holds (the OBJ frame), so the
+        # .uassets behind a re-converted manifest are stale until the
+        # editor imports them again (packet C4-2, 2026-11-04).
         report(f"the {name} mesh manifest is stale ({stale}); re-converting "
-               f"so the mesh is drawn where its label is")
+               f"and re-importing so the mesh is drawn where its label is")
     if not manifest.is_file() or stale:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         try:
@@ -506,6 +529,6 @@ def ensure_model(name: str, report: Report = print) -> Path:
                 f"pinned commit is fetched from the upstream model "
                 f"repository, so this step needs network access") from exc
         manifest = convert(config_path, report)
-    if missing_assets(manifest):
+    if missing_assets(manifest) or stale_assets(manifest):
         import_manifests([manifest], report)
     return manifest

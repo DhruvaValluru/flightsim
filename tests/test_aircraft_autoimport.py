@@ -93,7 +93,9 @@ def test_manifest_older_than_config_reimports_once(world, monkeypatch):
     assert "older than X.json" in importer.outdated_reason("X")
     ensure = _fake_ensure(world)
     assert importer.provision_models(["X", "X"], lambda line: None, ensure) == ["X"]
-    _age(manifest, 200)                     # the re-convert rewrote it
+    _age(manifest, 200)                     # the re-convert rewrote it ...
+    _age(world.root / "ue" / "Content" / "Aircraft" / "X" / "body.uasset", 200)
+    # ... and the re-import that follows it refreshed the asset (C4-2)
     assert importer.provision_models(["X"], lambda line: None, ensure) == []
     assert world.calls == ["X"]
 
@@ -106,7 +108,23 @@ def test_manifest_older_than_converter_reimports_once(world):
     ensure = _fake_ensure(world)
     assert importer.provision_models(["X"], lambda line: None, ensure) == ["X"]
     _age(manifest, 200)
+    _age(world.root / "ue" / "Content" / "Aircraft" / "X" / "body.uasset", 200)
     assert importer.provision_models(["X"], lambda line: None, ensure) == []
+    assert world.calls == ["X"]
+
+
+def test_a_reconverted_manifest_reimports_its_assets(world):
+    """Packet C4-2: a re-convert left the .uassets older than the manifest
+    and the import was skipped, so the editor drew the old mirrored mesh
+    against the new hulls. Assets older than their manifest are stale."""
+    world.add_config("X")
+    manifest = world.build("X")
+    assert importer.is_imported("X")
+    _age(manifest, 300)                    # re-converted after the import
+    assert importer.stale_assets(manifest) == ["X/body"]
+    assert not importer.is_imported("X")
+    ensure = _fake_ensure(world)
+    assert importer.provision_models(["X"], lambda line: None, ensure) == ["X"]
     assert world.calls == ["X"]
 
 
