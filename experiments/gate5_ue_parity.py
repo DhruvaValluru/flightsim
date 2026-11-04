@@ -18,9 +18,11 @@ All from one spec, which is the point.
    renderer up and writes frames plus ``render.json``.
 4. This harness, given both, decides all three clauses.
 
-The trajectory comparison is on the time base both recorders write, not on
-sample index -- see :func:`compare`, where the reason is measured rather than
-assumed. The on-screen clauses are decided by reading the PNGs back, not by
+The trajectory comparison is on elapsed hands-off time, each host's ``t``
+column taken from its own first sample, not on sample index and not on the
+absolute clocks: JSBSim's clock has already run through the trim when the
+headless recorder starts, while the commandlet's clock is zero at the latch
+-- see :func:`compare`, where the reason is measured rather than assumed. The on-screen clauses are decided by reading the PNGs back, not by
 reading what the engine said about them -- see :func:`measure_frames`.
 
 What it will not do is report a pass on the evidence it happens to have. §5 is
@@ -155,6 +157,10 @@ class Overlap:
     headless_span: float
     unreal_span: float
     samples: int
+    #: Each host's first recorded ``t``: the clock origin the comparison
+    #: subtracts before grading. Printed so a reader can see the shift.
+    headless_origin: float = 0.0
+    unreal_origin: float = 0.0
 
     @property
     def fraction(self) -> float:
@@ -167,9 +173,11 @@ class Overlap:
 
     def render(self) -> str:
         return (f"  [{'ok  ' if self.ok else 'FAIL'}] {'time overlap':14s} "
-                f"{self.start:.3f}..{self.end:.3f} s "
+                f"{self.start:.3f}..{self.end:.3f} s elapsed "
                 f"({self.fraction * 100:.1f}% of the headless run's "
-                f"{self.headless_span:.3f} s; UE ran {self.unreal_span:.3f} s)")
+                f"{self.headless_span:.3f} s; UE ran {self.unreal_span:.3f} s)\n"
+                f"  origins  headless {self.headless_origin:.3f} s  "
+                f"unreal {self.unreal_origin:.3f} s  (aligned to elapsed time)")
 
 
 @dataclass
@@ -284,9 +292,21 @@ def _wrapped_difference(a: float, b: float) -> float:
 
 
 def compare(headless: Path, unreal: Path) -> Tuple[List[Parity], Overlap]:
-    """Compare the two hosts on the time base each one recorded for itself.
+    """Compare the two hosts on elapsed hands-off time.
 
-    Not by sample index. The two recorders have the same nominal sampling
+    Each host's ``t`` column is taken from its own first sample (elapsed =
+    t - t[0]) before the overlap and the interpolation grid are built. The
+    two recorders do not share a clock origin: the headless recorder writes
+    the raw JSBSim clock, which has already run through the trim when the
+    hands-off flight begins (first sample at ~4.9 s), while the UE
+    commandlet's clock is zero at the latch (first sample at ~0.01 s).
+    Graded on the absolute clocks the same two files of a hands-off spiral
+    read 40 m of altitude and 46 deg of heading apart -- the 4.9 s shift,
+    not the integration; on elapsed time every channel agrees to within
+    0.004 deg and 0.002 m (packet A5-3, decision 14). The tolerances are
+    not loosened and the headless reference is not edited.
+
+    Not by sample index either. The two recorders have the same nominal sampling
     period and do *not* sample at the same times: the headless recorder
     schedules the next sample from the time of the last one, so it accumulates
     a step of slack every time the FDM clock lands just short of the deadline,
@@ -297,7 +317,8 @@ def compare(headless: Path, unreal: Path) -> Tuple[List[Parity], Overlap]:
 
     Comparing those two arrays element by element would have compared 60 s of
     one host against 56 s of the other and reported the difference as a
-    physics divergence. Both recorders write a ``t`` column; this uses it.
+    physics divergence. Both recorders write a ``t`` column; this uses it,
+    re-based to each host's first sample.
     """
     a = json.loads(headless.read_text(encoding="utf-8"))["columns"]
     b = json.loads(unreal.read_text(encoding="utf-8"))["columns"]
@@ -310,7 +331,13 @@ def compare(headless: Path, unreal: Path) -> Tuple[List[Parity], Overlap]:
                 f"sample index."
             )
 
-    at, bt = a["t"], b["t"]
+    # Each host on its own elapsed clock: the headless recorder's t[0] is
+    # JSBSim's clock after the trim, the commandlet's t[0] is ~0 at the
+    # latch, and the hands-off flight begins at t[0] on both. Overlap and
+    # grid are built on elapsed time from here on (decision 14).
+    origin_a, origin_b = float(a["t"][0]), float(b["t"][0])
+    at = [float(t) - origin_a for t in a["t"]]
+    bt = [float(t) - origin_b for t in b["t"]]
     # The comparison starts at each host's SECOND sample. The first sample is
     # the trim snapshot: the headless recorder takes it by force before the
     # environment loop has run, so in a wind scenario it records the aircraft
@@ -326,7 +353,8 @@ def compare(headless: Path, unreal: Path) -> Tuple[List[Parity], Overlap]:
     grid = [t for t in at if start <= t <= end]
     overlap = Overlap(start=start, end=end,
                       headless_span=at[-1] - at[0], unreal_span=bt[-1] - bt[0],
-                      samples=len(grid))
+                      samples=len(grid),
+                      headless_origin=origin_a, unreal_origin=origin_b)
 
     results = []
     for channel in COMPARED:
