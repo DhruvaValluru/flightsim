@@ -687,6 +687,14 @@ def test_vendored_json_records_patches_5_and_6():
     assert "\t\t\t\tIC->SetVcalibratedKtsIC(InitialCalibratedAirSpeedKts);" in added
 
 
+def test_vendored_json_targets_the_pinned_engine():
+    from core.util.platform import UE_ENGINE_VERSION
+    vendored = json.loads(text(PLUGIN / "VENDORED.json"))
+    assert vendored["ue_engine_target"] == UE_ENGINE_VERSION
+    for patch in vendored["local_patches"]:
+        assert patch.get("status_5_5"), patch["file"]
+
+
 def test_every_engine_file_this_item_writes_is_ascii():
     for path in (WAKE_CPP, WAKE_H, MOVEMENT_CPP, MOVEMENT_H, PLUGIN / "VENDORED.json"):
         assert text(path).isascii(), path
