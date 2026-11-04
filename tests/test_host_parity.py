@@ -472,7 +472,8 @@ def test_preflight_on_windows_runs_ue_preflight_ps1_through_powershell(monkeypat
 
 def test_preflight_on_mac_runs_ue_preflight_sh(monkeypatch):
     argv, kwargs = _capture_preflight(monkeypatch, "mac")
-    assert len(argv) == 1 and argv[0].endswith("scripts/ue_preflight.sh")
+    assert len(argv) == 1 and argv[0].replace("\\", "/").endswith(
+        "scripts/ue_preflight.sh")
     assert "powershell" not in argv
     assert kwargs.get("text") is True and kwargs.get("encoding") == "utf-8"
 
