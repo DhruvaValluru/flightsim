@@ -3,6 +3,7 @@
   "builder_commit": "695710c6",
   "built_commit": "695710c6",
   "claims": [],
+  "integrated_commit": "76ed3a4d",
   "letter": "B",
   "needs_windows": true,
   "pending_windows": [
@@ -10,8 +11,8 @@
     "step 9: deploy_windows.ps1 installs from the lock and the import verify passes",
     "step 10: CI matrix (ubuntu, windows, macos) green on the lock install step"
   ],
-  "stage": "built",
+  "stage": "integrated",
   "unit": "B1",
-  "updated": "2026-11-04T11:47:00",
+  "updated": "2026-11-04T11:50:05",
   "worktree": "../p3-B1"
 }
