@@ -86,8 +86,11 @@ evidence, then commits and pushes it:
    intervention"; the key is a credential, not a step.
 6. **Control surfaces:** out of Phase 3.
 
-Then send `P3 go A decisions=ok`. Later, when a letter needs its decisions,
-send `P3 go <L> decisions=ok` after the previous letter's `letter PASS`.
+Then send `P3 go A decisions=ok`. Later, send `P3 go <L> decisions=ok` as
+soon as a letter's decisions are in `decisions.md`, without waiting for the
+previous letter: the Mac starts building letter L+1 the moment letter L is
+pushed (owner's rule, 2026-11-04), so decisions for the next letter are
+needed early. `go` is informational; the Mac does not block on it.
 
 The decision agent also answers `P3 cap <box>` (read the packets, choose
 `P3 decision <box> retry-forbid=<the failed approaches>` or
@@ -117,6 +120,18 @@ run per box on disk. Read the CI result for `<commit>` with the GitHub tools
 (`actions_list`) into `gate_log_<L>.md`; CI green on ubuntu, windows and
 macos is the "three operating systems" row.
 
+**Only the checks the sheet names** (owner's rule, 2026-11-04). A box's
+Windows run is exactly the check lines under that box in
+`tasks/phase3_checklist.md`, plus the one or two steps its note marks
+`needs_windows`. Nothing else: no `pytest -q` of the tree or of a test
+file the box did not change (CI covers those), no re-running a box that
+already has `verdict: PASS` for the same run unless a retry names it, no
+second web run to "confirm", no extra headless flights, no engine rebuild
+when the A4 stamp says the binary is current, and no exploratory runs to
+characterise a failure beyond the one packet. A retry push re-runs only the
+boxes it names. Boxes marked 🐍 (Python-only) get their one pytest file
+and nothing more.
+
 **Synopsis (script, then haiku only on failure).** Per box:
 `docs/phase3/packets/<box>-synopsis.md` with the command, exit code, the
 last 40 lines, and pass/fail.
@@ -141,10 +156,12 @@ line and the exact output line that satisfies it; no quote, no tick.
 ## Per letter: letter tester (fable), on `P3 synced <L>`
 
 Fresh clone of `phase-2-final` into a new directory, engine, materials and
-bakes from the cache if the A4 stamp validates them. Run every box check of
-the letter in order, then the letter's CHECKPOINT / Gate text from
-`tasks/phase3_checklist.md` **verbatim** as the gate check, quoted in
-`gate_log_<L>.md`. Keep going after a failure; report all of them. For Gate
+bakes from the cache if the A4 stamp validates them. Run only the letter's
+GATE lines from `tasks/phase3_checklist.md` **verbatim** as the gate check,
+quoted in `gate_log_<L>.md` (owner's rule, 2026-11-04: the per-box checks
+already passed in the cross-check and are not repeated, and no `pytest -q`
+of the tree runs until phase end). Keep going after a failure; report all
+of them. For Gate
 E, spawn the newcomer agent (haiku) with no context except `docs/GUIDE.md`
 and the launcher, against the real launched app, not headless, with ffmpeg
 recording the screen for the whole run; log its questions in
@@ -158,7 +175,9 @@ in `decisions.md`.
 
 Fresh clone plus cache. For each suspect set in `docs/phase3/overlap.md`,
 run its listed checks together, then `pytest -q -m ue_host
-tests/test_demo_e2e.py` once. Report every failing set with outputs to
+tests/test_demo_e2e.py` once. This phase-end run is the only time the
+Windows machine runs a full `pytest -q` (owner's rule, 2026-11-04): once,
+after the suspect sets, with the result in `gate_log_phase.md`. Report every failing set with outputs to
 `docs/phase3/packets/xlt-<set>-out.md`. Send `P3 xlt PASS` or
 `P3 xlt FAIL sets=<...>`. After `xlt PASS`, write `gate_log_phase.md`, commit,
 push, log `PASS phase-end`, and stop. The Mac opens the PR. No polling, no

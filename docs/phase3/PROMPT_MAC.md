@@ -92,21 +92,34 @@ the Windows decision agent by message to decide.
    Windows decision agent by message (`P3 over-budget <box>`).
 5. **Group XS boxes** with the box they serve, one unit each: A1+A2,
    A12+A13, B2+B3, D1+D2, F2+F4+F5. About 30 units per phase, not 41.
-6. **No full-suite runs** except the auditor once per letter and the Windows
-   letter tester. Integrators run the box's own tests plus the touched
-   modules' tests only. `scripts/mutation_check.sh` runs only in the auditor,
-   serialized, with its subset option for the guards the letter touched.
+6. **No full-suite runs until every letter is finished** (owner's rule,
+   2026-11-04). Integrators and the per-letter auditor run the box's own
+   tests plus the touched modules' tests only. `scripts/mutation_check.sh`
+   runs only in the auditor, serialized, with its subset option for the
+   guards the letter touched. The one full `pytest -q` and the one plain
+   `scripts/mutation_check.sh` run happen in Stage 7, after `P3 letter F
+   PASS`, before any summary.
 7. **Retries skip Align** and re-check only the failed box.
 8. **Reports are short.** Every agent returns at most 40 lines to its parent:
    what it did, files touched, the check it ran and its exit code, blockers.
-9. **Stateless long-lived roles.** Breakdown and debug agents are spawned per
-   letter and read everything from the files. Nothing depends on memory.
+9. **Stateless roles, fresh agents.** Every letter gets its own new
+   breakdown, Align, auditor and debug agents, and every box (and every
+   retry) gets its own new sub-agent, builder and integrator (owner's rule,
+   2026-11-04). No agent is reused across boxes or letters; each reads
+   everything from the files. Nothing depends on memory.
+10. **Letters pipeline, they do not queue** (owner's rule, 2026-11-04). The
+   moment letter L's `pushed` message is sent, start letter L+1 at Stage 1
+   while Windows proves L. L's retries (Stage 4) and its Align second run
+   (Stage 5) interleave with L+1's build; they use separate worktrees and a
+   retry push carries only its own box.
 
-## The per-letter loop (A then B then C then D then E then F, never overlapping)
+## The per-letter loop (A, B, C, D, E, F: each letter's build starts as soon as the previous one is pushed)
 
-**Stage 0.** Wait for `P3 go <L>`. Confirm `docs/phase3/decisions.md` has the
-lines the letter needs (A: engine pin; C: A-4 loadout; D: airframe; E: storm
-default and tiles key). If not, do nothing and ask by message.
+**Stage 0.** Do not wait for `P3 go <L>`; it is informational. Start Stage 1
+of letter L+1 right after letter L's `pushed` message. Confirm
+`docs/phase3/decisions.md` has the lines the letter needs (A: engine pin; C:
+A-4 loadout; D: airframe; E: storm default and tiles key). If one is missing,
+ask by message and build the boxes that do not depend on it meanwhile.
 
 **Stage 1 · breakdown agent (fable).** Writes `digest_<L>.md`. Groups XS
 boxes. Spawns one sub-agent per unit, in parallel, each with: the unit's plan
@@ -162,7 +175,8 @@ tagged `windows`, do not build it here: write the step list to
   box tests after the merge. Signs off in `state/<box>.json` (`stage: built`).
 
 **Auditor (sonnet), once per letter** after every integrator signed off:
-full `pytest -q` once, then `scripts/mutation_check.sh` with its subset
+the letter's box tests plus every touched module's tests once (no full
+suite until Stage 7), then `scripts/mutation_check.sh` with its subset
 option for the guards this letter touched, serialized. A guard whose test
 stays green with the guard removed fails the letter. Hard gate.
 
@@ -196,9 +210,15 @@ the gate result, same five routes, then: push, Windows re-checks only the
 affected boxes, Align second run, `P3 synced <L>` again. Never back to stage
 1 for a box that already passed alone.
 
-**`P3 letter <L> PASS`** → start the next letter.
+**`P3 letter <L> PASS`** → nothing to start: the next letter is already
+building (rule 10). Record the letter as passed in `state/<L>.json`.
 
 ## Stage 7, once, after `P3 letter F PASS`
+
+- *Full suite, once.* `pytest -q` over the whole tree and the plain
+  `scripts/mutation_check.sh` run, through `phase3_event.py run`. Any
+  failure goes to a debug triage (fable) and a builder workflow, then the
+  suite runs again; nothing below starts until both are green.
 
 - *Summary agent (haiku), one reader per letter.* For each box, from
   `git diff` of its sync-log commits and the files on the branch now:
