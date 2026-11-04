@@ -46,6 +46,8 @@ from __future__ import annotations
 import json
 import math
 import os
+
+from core.util.settings import llm_api_key
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -358,7 +360,7 @@ def parse_intent_llm(prompt: str, spec, client: Any = None,
             client, provider_model = resolved
             if model == DEFAULT_MODEL:
                 model = provider_model
-        elif "ANTHROPIC_API_KEY" not in os.environ:
+        elif not llm_api_key():          # ANTHROPIC_API_KEY or the stored llm_key (E2)
             raise CameraPromptError("no language model is configured")
         else:
             try:

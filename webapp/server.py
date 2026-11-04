@@ -148,6 +148,14 @@ class RunRequest(BaseModel):
     provenance: Dict[str, Any] = {}
 
 
+class SettingsPutRequest(BaseModel):
+    """PUT /settings: a partial update of the settings file (E2). Only
+    ``core.config_surface.file_keys()`` may appear; ``google_tiles``, the
+    storm rows and the read-only rows are refused by name (422)."""
+
+    settings: Dict[str, Any]
+
+
 class CameraRequest(BaseModel):
     """Add or remove one camera on the spec the page is holding.
 
@@ -1685,6 +1693,44 @@ def conditions_list_script() -> FileResponse:
     the weather and environment phrases the compiler turns into spec
     fields, clickable into the prompt (tests/test_conditions_list.py)."""
     return FileResponse(STATIC / "conditions_list.js",
+                        media_type="application/javascript")
+
+
+@app.get("/settings")
+def settings_get() -> JSONResponse:
+    """The settings file behind the panel (E2): every key's effective
+    value (env > settings.json > default), the defaults, the read-only
+    rows, the env overrides and the missing keys. An unreadable file is
+    a named 422 (settings.unreadable), never a silent reset."""
+    from core.util.settings import SettingsError, settings_payload
+
+    try:
+        return JSONResponse(settings_payload())
+    except SettingsError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
+
+
+@app.put("/settings")
+def settings_put(request: SettingsPutRequest) -> JSONResponse:
+    """Merge a partial update into settings.json (whitelist
+    ``file_keys()``; unknown, read-only or env-only keys such as
+    ``google_tiles`` = 422 ``settings.<key>: <why>``) and reply with the
+    GET body."""
+    from core.util.settings import SettingsError, save_settings, settings_payload
+
+    try:
+        save_settings(request.settings)
+        return JSONResponse(settings_payload())
+    except SettingsError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
+
+
+@app.get("/settings.js")
+def settings_script() -> FileResponse:
+    """The settings panel the prompt page mounts above the Interpret button
+    (E3): the six ui_keys() fields over GET/PUT /settings (E2), the rest
+    under its Advanced fold (tests/test_settings_page.py)."""
+    return FileResponse(STATIC / "settings.js",
                         media_type="application/javascript")
 
 

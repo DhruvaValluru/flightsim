@@ -134,6 +134,9 @@ class RunState:
     #: selected angle and a selected clip length give that many seconds
     #: of that angle.
     camera_clips: List[str] = field(default_factory=list)
+    #: E2: the rows the environment overrode when the run started
+    #: (core.util.settings.env_overrides; secrets recorded as "<set>").
+    env_override: List[Dict] = field(default_factory=list)
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -147,7 +150,20 @@ class RunState:
                 "scene": self.scene, "clip": self.clip,
                 "started": self.started, "events": self.events[-20:],
                 "reference": self.reference, "conditions": self.conditions,
-                "capture": self.capture}
+                "capture": self.capture, "env_override": self.env_override}
+
+
+def record_env_override(run: "RunState") -> List[Dict]:
+    """E2: record on ``run`` every setting the environment overrides right
+    now (env > settings.json > default) and, when there is one, a status
+    line ``env override: NAME=value, ...``; secrets stay ``<set>``."""
+    from core.util.settings import env_override_status, env_overrides
+
+    run.env_override = env_overrides()
+    if run.env_override:
+        run.events.append({"t": time.time(), "status": run.status,
+                           "detail": env_override_status(run.env_override)})
+    return run.env_override
 
 
 def editor_running() -> bool:
@@ -1557,10 +1573,15 @@ def _water_mask():
     return _WATER_MASK or None
 
 
-#: FLIGHTSIM_XPLANE_TERRAIN=off keeps the scene's own texture (Sentinel-2
-#: drape where one was baked, the engine's vertex classification
-#: otherwise). The test suite sets it.
-XPLANE_TERRAIN_ENV = "FLIGHTSIM_XPLANE_TERRAIN"
+#: The developer-only X-Plane comparison switches live in
+#: core/xplane/devflags.py (E5): the web path reads them through its
+#: functions and spells none of their names. The ``XPLANE_*_ENV`` names
+#: are re-exported for tests/test_xplane.py only.
+from core.xplane.devflags import (  # noqa: E402,F401 -- re-exported for the tests
+    XPLANE_LIGHTING_ENV, XPLANE_SKY_ENV, XPLANE_SKY_SOURCES, XPLANE_TERRAIN_ENV,
+    lighting_off as _xplane_lighting_off, sky_choice as _xplane_sky_choice,
+    terrain_off as _xplane_terrain_off,
+)
 
 
 #: The triangle budget asked for when a bake is finer than GLO-30's 30 m
@@ -1623,7 +1644,7 @@ def attach_xplane_drape(scene: Dict, report=None,
     from core.xplane import XPlaneDataError
     from core.xplane.drape import build_drape, drape_paths
 
-    if os.environ.get(XPLANE_TERRAIN_ENV, "").lower() == "off":
+    if _xplane_terrain_off():
         return None
     if not scene.get("terrain"):
         return None
@@ -1646,20 +1667,9 @@ def attach_xplane_drape(scene: Dict, report=None,
 #: Fog density at or above which the X-Plane "hazy" table is read (the
 #: showcase's hazy visibility); the storm look reads "ocast".
 XPLANE_HAZY_FOG_DENSITY = 0.010
-#: FLIGHTSIM_XPLANE_LIGHTING=off disables the lighting flags (the test
-#: suite sets it so pinned render commands do not depend on whether this
-#: machine has an X-Plane extraction).
-XPLANE_LIGHTING_ENV = "FLIGHTSIM_XPLANE_LIGHTING"
-#: FLIGHTSIM_XPLANE_SKY chooses where the clear-sky colours come from:
-#: "model" (the default) computes them from the simulator's atmosphere
-#: model (core.xplane.atmosphere: Bruneton's parameter set, the one its
-#: atmosphere shader takes) for a sun high enough for single scattering
-#: to be trusted; "tables" reads the decoded sky_colors tables for every
-#: sun. Overcast (the storm look), haze and twilight always read the
-#: tables: the model has no clouds, no haze knob and no multiple
-#: scattering, and the tables were measured for exactly those.
-XPLANE_SKY_ENV = "FLIGHTSIM_XPLANE_SKY"
-XPLANE_SKY_SOURCES = ("model", "tables")
+#: The lighting "off" switch and the clear-sky colour source ("model",
+#: the default, or "tables") are developer switches read by
+#: core/xplane/devflags.py (its docstring says what each means).
 
 
 def xplane_sky_source(source: Optional[str] = None) -> str:
@@ -1667,7 +1677,7 @@ def xplane_sky_source(source: Optional[str] = None) -> str:
     else "model"; an unknown word is refused by name."""
     import os
 
-    chosen = (source or os.environ.get(XPLANE_SKY_ENV) or "model").lower()
+    chosen = (source or _xplane_sky_choice() or "model").lower()
     if chosen not in XPLANE_SKY_SOURCES:
         raise ValueError(f"{XPLANE_SKY_ENV}={chosen!r}: expected one of "
                          f"{XPLANE_SKY_SOURCES}")
@@ -1713,7 +1723,7 @@ def xplane_lighting_flags(look: Optional[Dict],
     from core.xplane.atmosphere import MODEL_SUN_ELEVATION_FLOOR_DEG
     from core.xplane.atmosphere import sky_lighting as model_lighting
 
-    if os.environ.get(XPLANE_LIGHTING_ENV, "").lower() == "off":
+    if _xplane_lighting_off():
         return []
     tod = dict(DEFAULT_LOOK)
     if look:
@@ -2122,9 +2132,13 @@ RENDER_QUALITIES = {
 
 
 def render_quality() -> str:
-    """The configured render quality; ValueError names an unknown one."""
-    quality = os.environ.get("FLIGHTSIM_RENDER_QUALITY", "measure").strip() \
-        or "measure"
+    """The configured render quality (settings.json render_quality, the
+    environment FLIGHTSIM_RENDER_QUALITY winning over it, E2); ValueError
+    names an unknown one."""
+    from core.util.settings import effective
+
+    value, _source = effective("render_quality")
+    quality = str(value or "").strip().lower() or "measure"
     if quality not in RENDER_QUALITIES:
         raise ValueError(
             f"FLIGHTSIM_RENDER_QUALITY={quality!r} is not one of "
@@ -2730,6 +2744,7 @@ class RunManager:
             run.scene = provenance.get("scene") or {}
             run.reference = provenance.get("reference_speeds")
             run.conditions = provenance.get("conditions") or {}
+            run.env_override = provenance.get("env_override") or []
         run.events.append({"t": run.started, "status": "done",
                            "detail": "recovered after a server restart"})
         self.runs[run_id] = run
@@ -2785,6 +2800,7 @@ class RunManager:
                                    "run"}
             run = RunState(run_id=uuid.uuid4().hex[:12],
                            spec_digest=spec.digest())
+            record_env_override(run)
             self.runs[run.run_id] = run
             self._active = run.run_id
         thread = threading.Thread(target=self._execute,
@@ -3433,9 +3449,10 @@ class RunManager:
         capture_cameras = None
         capture_landmarks = None
         if wants_capture(spec):
-            # FLIGHTSIM_CAPTURE_PASSES: the extra ground-truth passes
-            # (normals, motion vectors, base colour, flow, points, amodal)
-            # on every camera that states none; unset changes nothing.
+            # The capture_passes setting (the Normals / Flow / Amodal
+            # checkboxes, or the developer override the registry names):
+            # extra ground-truth passes on every camera that states
+            # none; nothing asked for changes nothing.
             from webapp.capture import apply_capture_passes
 
             try:
@@ -3529,6 +3546,8 @@ class RunManager:
             "reference_speeds": reference,
             # Also read back by _recover_from_disk after a server restart.
             "conditions": run.conditions,
+            # E2: the settings the environment overrode for this run.
+            "env_override": run.env_override,
         }, indent=1), encoding="utf-8")
 
         # ONE FLIGHT, NOT TWO -- the web half of 129f140.

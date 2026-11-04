@@ -22,6 +22,19 @@
            padding: .5rem 1.2rem; font: inherit; cursor: pointer; }
   button:disabled { background: #2c3947; color: #7d8a93; cursor: default; }
   button.run { background: #2f7d4f; }
+  button.gear { background: #1d2a38; color: #9fb4c7; padding: .3rem .9rem; }
+  #settings-panel { border: 1px solid #2c3947; border-radius: 6px; padding: .6rem .9rem; margin: .5rem 0 1rem; }
+  .settings-field { display: flex; gap: .8rem; align-items: baseline; flex-wrap: wrap; padding: .25rem 0; }
+  .settings-field > label { flex: 0 0 11rem; color: #7d8a93; }
+  .settings-control { flex: 1 1 14rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .settings-control input, .settings-control select { background: #171d24; color: inherit; border: 1px solid #2c3947;
+             border-radius: 4px; font: inherit; padding: .2rem .4rem; min-width: 14rem; }
+  .settings-show { padding: .15rem .6rem; background: #1d2a38; color: #9fb4c7; }
+  .settings-ro { color: #d8dde2; }
+  .settings-msg { flex: 1 0 100%; color: #e3b341; }
+  .settings-env { color: #7d8a93; }
+  #settings-advanced { margin-top: .4rem; }
+  .settings-advanced-table { margin: .4rem 0; }
   table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
   th, td { text-align: left; padding: .28rem .6rem; border-bottom:
            1px solid #222b34; }
@@ -158,6 +171,27 @@ visual-only per host (measured).</p>
 <script src="/route_map.js"></script>
 <script src="/lens_picker.js"></script>
 <script>LensPicker.mount(document.getElementById("lensPicker"), document.getElementById("prompt"));</script>
+<p><button id="settingsToggle" type="button" class="gear" title="Settings: the tiles key, Cesium, engine, render quality, LLM key, extra passes">settings</button></p>
+<section id="settings-panel" hidden>
+  <div id="settings-fields"></div>
+  <div class="settings-field" data-field="capture_passes">
+    <label>Extra passes</label>
+    <div id="settings-capture-passes">
+      <span id="passPicker" title="Extra ground-truth images on every camera that states none, saved as the capture_passes setting: surface normals, optical flow, whole-silhouette (amodal) masks">
+        <label><input type="checkbox" id="passNormals" value="normals"> Normals</label>
+        <label><input type="checkbox" id="passFlow" value="flow"> Flow</label>
+        <label><input type="checkbox" id="passAmodal" value="amodal"> Amodal</label>
+      </span>
+    </div>
+  </div>
+  <details id="settings-advanced">
+    <summary class="dim">Advanced</summary>
+    <div id="settings-advanced-body"></div>
+  </details>
+  <p id="settings-status" class="dim"></p>
+</section>
+<script src="/settings.js"></script>
+<script>FlightSimSettings.mount(document.getElementById("settings-panel"));</script>
 <p>
   <button id="compile">Interpret</button>
   <label class="dim" title="The clip is min(duration, 22 s); a shorter clip renders proportionally fewer frames. Overrides a duration stated in the prompt, shown as a user edit in the table.">
@@ -298,8 +332,7 @@ function provenanceNote(f) {
     }
     $("llmState").textContent = (status.llm_available
       ? "compiler: llm available"
-      : "compiler: offline regex (no ANTHROPIC_API_KEY in the server " +
-        "process; set it where uvicorn runs)")
+      : "compiler: offline regex (no LLM key: add the LLM key in Settings)")
       + (status.render_available === false
          ? (status.platform === "windows"
             ? " · rendered clips need the Unreal host built here " +
@@ -3077,6 +3110,59 @@ $("altGuide").addEventListener("toggle", () => {
   try { localStorage.setItem("agOpen", $("altGuide").open ? "1" : "0"); } catch (_) {}
 });
 agLoad();
+// E5: the extra-pass checkboxes (#passPicker, inside E3's
+// #settings-capture-passes slot) read and write the capture_passes
+// setting through E2's GET/PUT /settings. settings.js never touches
+// them; a change PUTs the whole list; the reply's list is what is shown.
+const PASS_BOXES = [["passNormals", "normals"], ["passFlow", "flow"], ["passAmodal", "amodal"]];
+function showPasses(body) {
+  const words = (body && body.settings && Array.isArray(body.settings.capture_passes)) ? body.settings.capture_passes : [];
+  const env = body && body.env_override && body.env_override.capture_passes;
+  for (const [id, word] of PASS_BOXES) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.checked = words.indexOf(word) >= 0;
+    el.disabled = !!env;
+  }
+  const picker = document.getElementById("passPicker");
+  if (picker && env) picker.title = env + " is set in the environment and overrides these boxes";
+}
+async function loadPasses() {
+  const status = document.getElementById("settings-status");
+  try {
+    const r = await fetch("/settings");
+    const body = await r.json();
+    if (!r.ok) { if (status) status.textContent = body.detail || ("GET /settings: " + r.status); return null; }
+    showPasses(body);
+    return body;
+  } catch (e) {
+    if (status) status.textContent = "settings: server unreachable (" + (e && e.message || e) + ")";
+    return null;
+  }
+}
+async function savePasses() {
+  const words = PASS_BOXES.filter(([id]) => { const el = document.getElementById(id); return el && el.checked; })
+    .map(([, word]) => word);
+  const status = document.getElementById("settings-status");
+  try {
+    const r = await fetch("/settings", {method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({settings: {capture_passes: words}})});
+    const body = await r.json();
+    if (!r.ok) {
+      if (status) status.textContent = body.detail || ("PUT /settings: " + r.status);
+      return loadPasses();
+    }
+    showPasses(body);
+    if (status) status.textContent = "saved capture_passes";
+    return body;
+  } catch (e) {
+    if (status) status.textContent = "settings: save failed (" + (e && e.message || e) + ")";
+    return null;
+  }
+}
+for (const [id] of PASS_BOXES) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("change", savePasses);
+}
+loadPasses();
 </script>
-</body>
-</html>

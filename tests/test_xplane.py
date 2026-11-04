@@ -375,8 +375,8 @@ def test_unknown_sky_condition_is_a_named_refusal():
 
 
 def test_lighting_flags_follow_the_look(monkeypatch):
-    from webapp.runs import STORM_LOOK, XPLANE_LIGHTING_ENV, \
-        xplane_lighting_flags
+    from core.xplane.devflags import XPLANE_LIGHTING_ENV
+    from webapp.runs import STORM_LOOK, xplane_lighting_flags
 
     monkeypatch.setenv(XPLANE_LIGHTING_ENV, "on")
     tables = _flat_tables(evening=EVENING, morning=MORNING)
@@ -395,7 +395,8 @@ def test_lighting_flags_follow_the_look(monkeypatch):
 
 def test_lighting_flags_are_absent_when_off_or_unextracted(monkeypatch):
     import core.xplane as xplane
-    from webapp.runs import XPLANE_LIGHTING_ENV, xplane_lighting_flags
+    from core.xplane.devflags import XPLANE_LIGHTING_ENV
+    from webapp.runs import xplane_lighting_flags
 
     tables = _flat_tables(evening=EVENING, morning=MORNING)
     monkeypatch.setenv(XPLANE_LIGHTING_ENV, "off")
@@ -493,6 +494,7 @@ def test_attach_replaces_the_scenes_own_texture(data, tmp_path, monkeypatch):
     import numpy as np
 
     import core.xplane.drape as drape
+    import core.xplane.devflags as devflags
     import webapp.runs as runs
 
     stem = _bake(tmp_path, np.full((40, 40), 500.0))
@@ -501,10 +503,10 @@ def test_attach_replaces_the_scenes_own_texture(data, tmp_path, monkeypatch):
     scene = {"key": "x", "terrain": str(stem), "imagery": "/old/s2.json",
              "label": "bake"}
 
-    monkeypatch.setenv(runs.XPLANE_TERRAIN_ENV, "off")
+    monkeypatch.setenv(devflags.XPLANE_TERRAIN_ENV, "off")
     assert runs.attach_xplane_drape(dict(scene)) is None
 
-    monkeypatch.setenv(runs.XPLANE_TERRAIN_ENV, "on")
+    monkeypatch.setenv(devflags.XPLANE_TERRAIN_ENV, "on")
     told = []
     sidecar = runs.attach_xplane_drape(scene, told.append)
     assert scene["imagery"] == sidecar
@@ -879,10 +881,8 @@ def test_sky_lighting_colours_follow_the_sun():
 
 def test_lighting_flags_use_the_model_by_day_and_the_tables_otherwise(monkeypatch):
     from core.xplane.atmosphere import MODEL_SUN_ELEVATION_FLOOR_DEG
-    from webapp.runs import (
-        STORM_LOOK, XPLANE_LIGHTING_ENV, XPLANE_SKY_ENV, xplane_lighting_flags,
-        xplane_sky_source,
-    )
+    from core.xplane.devflags import XPLANE_LIGHTING_ENV, XPLANE_SKY_ENV
+    from webapp.runs import STORM_LOOK, xplane_lighting_flags, xplane_sky_source
 
     monkeypatch.setenv(XPLANE_LIGHTING_ENV, "on")
     monkeypatch.delenv(XPLANE_SKY_ENV, raising=False)
