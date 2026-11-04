@@ -667,3 +667,26 @@ def test_every_material_built_on_the_dead_if_pin_is_rebuilt_without_a_setting():
     assert "if graph_stale(name):" in rebuild
     grey = source[source.index("def create_grey_card"):source.index("def after_tonemapping")]
     assert 'rebuild_requested("M_GreyCard")' in grey and 'finish(material, "M_GreyCard")' in grey
+
+
+def test_graph_generations_names_exactly_the_five_stale_materials():
+    """A6: the stamp table lists exactly the five materials built on the dead
+    If pin, each at generation 2 or higher, so an older asset rebuilds."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    generations = ast.literal_eval(source.split("GRAPH_GENERATIONS = ", 1)[1].split("\nGRAPH_", 1)[0])
+    assert set(generations) == {"M_LandcoverID", "M_LensDrops", "M_GreyCard",
+                                "M_RainStreaks", "M_Ground_City"}
+    for name, generation in generations.items():
+        assert int(generation) >= 2, name
+
+
+def test_custom_stencil_id_is_built_without_an_editor_step():
+    """A6: M_CustomStencilID is made entirely from Python and saved, with no
+    prompt, so the unattended run needs no hand step."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    start = source.index("def create_custom_stencil_id")
+    nxt = source.find("\ndef ", start + 1)
+    body = source[start:nxt if nxt != -1 else len(source)]
+    for needle in ("BL_REPLACING_TONEMAPPER", "PPI_CUSTOM_STENCIL", "save_asset"):
+        assert needle in body, needle
+    assert "input(" not in body

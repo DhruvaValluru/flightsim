@@ -1371,6 +1371,17 @@ def progress_from(record: Dict[str, Any], rows: List[Dict[str, Any]], directory:
                             "sentence": state_words(f"progress.case.{status}", drawn=drawn)}
                    for status in STATUSES}
     headline = state_words(f"progress.campaign.{state}", **numbers)
+    if state == FAILED:
+        # A capture that refused by name says why in its own log: the
+        # headline is that refusal's catalogue sentence, not "an error".
+        for index in sorted(latest):
+            run_dir = latest[index].get("run_dir")
+            if latest[index].get("ok") or not run_dir:
+                continue
+            named = capture_refusals(Path(run_dir) / "capture.log")
+            if named:
+                headline = named[0]["sentence"]
+                break
     return {
         "id": record["id"], "state": state, "headline": headline,
         "reason": record.get("reason"),

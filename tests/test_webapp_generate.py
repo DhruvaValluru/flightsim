@@ -878,3 +878,62 @@ def test_a_bad_gate_is_refused_once_in_the_plan():
     rules = [r["details"]["rule"] for r in refusals]
     assert rules.count("randomization.policy") == 1
     assert "cloud_cover > heavy" in refusals[rules.index("randomization.policy")]["details"]["message"]
+
+
+# -- review R6: a refused capture reaches the page in words ------------------------
+
+def refusing_capture(command, log, run_dir, stall_seconds):
+    """A capture that fails the way the CLI does on a refusal: the
+    ``REFUSED -- <rule>: ...`` line (with the flag in the technical
+    text), exit 1."""
+    Path(log).write_text(
+        "REFUSED -- capture.host_flight: the recorded flight cannot place the "
+        "cameras (pass --no-host-flight to skip it)\n", encoding="utf-8")
+    return 1, False
+
+
+def _failed_campaign(tmp_path, monkeypatch):
+    monkeypatch.setattr(generate_module, "CAPTURE_RUNNER",
+                        "tests.test_webapp_generate:refusing_capture")
+    monkeypatch.setattr(generate_module, "ue_available", lambda: False)
+    service = generate_module.GenerateService(tmp_path / "campaigns")
+    started = service.start(ASKS_VIEW, answers=ANSWER, images=IMAGES, fmt="coco",
+                            seed=7, workers=1, tier="regex")
+    service.wait(started["id"], timeout=120)
+    return service, started["id"]
+
+
+def test_a_host_flight_refusal_in_the_capture_log_reaches_the_page_in_words(
+        tmp_path, monkeypatch):
+    service, campaign_id = _failed_campaign(tmp_path, monkeypatch)
+    campaign = service.open(campaign_id)
+    logs = sorted(campaign.dir.rglob("capture.log"))
+    assert logs
+    refusals = generate_module.capture_refusals(logs[0])
+    assert refusals and refusals[0]["details"]["rule"] == "capture.host_flight"
+    assert refusals[0]["sentence"] == "The recorded flight cannot be used to place the cameras."
+    assert "--no-host-flight" not in refusals[0]["sentence"] + refusals[0]["hint"]
+    assert not _rule_named(refusals[0])
+    assert "--no-host-flight" in refusals[0]["details"]["message"]
+
+
+def test_a_generate_request_with_no_imported_mesh_falls_back_not_refuses(client, monkeypatch):
+    monkeypatch.setattr(generate_module, "ue_available", lambda: True)
+    monkeypatch.setattr(generate_module, "is_imported", lambda name: False)
+    started = client.post("/generate/start", json={
+        "prompt": ASKS_VIEW, "answers": ANSWER, "images": IMAGES, "tier": "regex"})
+    assert started.status_code == 200, started.json()
+    from core.nl.compiler import compile_prompt
+
+    render, note = generate_module.render_here(compile_prompt(ASKS_VIEW + ", chase view"))
+    assert render is False and "not imported" in note
+    generator.wait(started.json()["id"], timeout=120)
+
+
+def test_a_failed_campaign_names_the_refusal_not_the_flag(tmp_path, monkeypatch):
+    service, campaign_id = _failed_campaign(tmp_path, monkeypatch)
+    payload = service.progress(campaign_id)
+    assert payload["state"] == "failed", payload["reason"]
+    assert payload["headline"] == "The recorded flight cannot be used to place the cameras."
+    assert "--no-host-flight" not in payload["headline"]
+    assert not _rule_named({"headline": payload["headline"]})
