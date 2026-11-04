@@ -8,8 +8,8 @@
   "pending_windows": [
     "A run with Normals, Flow and Amodal ticked produces those extra passes in the real render (step 5)"
   ],
-  "stage": "built",
+  "stage": "integrated",
   "unit": "E4+E5",
-  "updated": "2026-11-04T17:26:43",
+  "updated": "2026-11-04T18:28:20",
   "worktree": "../p3-E5"
 }

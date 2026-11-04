@@ -17,12 +17,12 @@
       "E4"
     ]
   ],
-  "stage": "aligned",
+  "stage": "integrated",
   "units": [
     "E1",
     "E2+E3",
     "E4+E5",
     "E6"
   ],
-  "updated": "2026-11-04T16:44:41"
+  "updated": "2026-11-04T18:28:21"
 }
