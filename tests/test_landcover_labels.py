@@ -201,28 +201,36 @@ def spec_for():
 
 def test_the_aggregates_are_one_id_each_after_the_terrain_and_stable():
     from core.capture.objects import (
-        AGGREGATE_CLASSES, aggregate_objects, compose_objects, objects_block,
+        AGGREGATE_CLASSES, TaxonomyError, aggregate_objects, compose_objects, objects_block,
     )
 
     spec = spec_for()
     plain = compose_objects(spec)
     objects = compose_objects(spec, landcover=True)
-    assert [o.id for o in plain] == ["aircraft:c172p:0", "terrain"]
+    # Phase C (C3's band, C7's gear): the c172p's landing_gear component is
+    # composed last and numbered 64; the aggregates keep 3 and 4.
+    gear = "landing_gear:landing_gear:0"
+    assert [o.id for o in plain] == ["aircraft:c172p:0", "terrain", gear]
     assert [o.id for o in objects] == ["aircraft:c172p:0", "terrain", "building:all",
-                                       "vegetation:all"]
-    assert [o.int_id for o in objects] == [1, 2, 3, 4]
-    assert objects_block(objects[:2]) == objects_block(plain)          # earlier ids unmoved
+                                       "vegetation:all", gear]
+    assert [o.int_id for o in objects] == [1, 2, 3, 4, 64]
+    assert objects_block(objects[:2]) == objects_block(plain[:2])      # earlier ids unmoved
+    assert objects_block(objects[-1:]) == objects_block(plain[-1:])    # the component too
     assert objects_block(compose_objects(spec, landcover=True)) == objects_block(objects)
     classes = list(spec.taxonomy.classes.value)
-    for obj in objects[2:]:
+    for obj in objects[2:4]:
         assert obj.class_name == AGGREGATE_CLASSES[obj.id] and obj.role == "scene"
         assert obj.class_id == classes.index(obj.class_name) + 1 and obj.instance == 0
     assert [o["id"] for o in aggregate_objects(objects)] == ["building:all", "vegetation:all"]
     # A trimmed taxonomy composes only what it names, and refuses nothing.
-    spec.set("taxonomy.classes", ["aircraft", "terrain", "vegetation"], frm="test")
-    assert [o.id for o in compose_objects(spec, landcover=True)][2:] == ["vegetation:all"]
+    spec.set("taxonomy.classes", ["aircraft", "terrain", "vegetation", "landing_gear"], frm="test")
+    assert [o.id for o in compose_objects(spec, landcover=True)][2:] == ["vegetation:all", gear]
+    spec.set("taxonomy.classes", ["aircraft", "terrain", "landing_gear"], frm="test")
+    assert [o.id for o in compose_objects(spec, landcover=True)] == ["aircraft:c172p:0", "terrain", gear]
+    # A taxonomy that drops a declared component's class refuses, like a building's.
     spec.set("taxonomy.classes", ["aircraft", "terrain"], frm="test")
-    assert [o.id for o in compose_objects(spec, landcover=True)] == ["aircraft:c172p:0", "terrain"]
+    with pytest.raises(TaxonomyError):
+        compose_objects(spec, landcover=True)
 
 
 def test_the_aggregate_record_names_its_codes_and_the_stencil_limit():
@@ -511,13 +519,15 @@ def test_the_manifest_builder_carries_land_cover_only_when_the_scene_has_it(tmp_
 
     flat = build({"key": "flat", "terrain": None})
     assert "landcover" not in flat and "licences" not in flat
-    assert [o["id"] for o in flat["objects"]] == ["aircraft:c172p:0", "terrain"]
+    gear = "landing_gear:landing_gear:0"             # Phase C: the c172p's component, composed last
+    assert [o["id"] for o in flat["objects"]] == ["aircraft:c172p:0", "terrain", gear]
     stem, document, _ = write_world(tmp_path)
     manifest = build({"key": "terrain", "terrain": str(stem)})       # found beside the bake
     assert manifest["landcover"] == manifest_landcover_block(document)
     assert [o["id"] for o in manifest["objects"]] == ["aircraft:c172p:0", "terrain",
-                                                      "building:all", "vegetation:all"]
-    assert manifest["objects"][:2] == flat["objects"]
+                                                      "building:all", "vegetation:all", gear]
+    assert manifest["objects"][:2] == flat["objects"][:2]
+    assert manifest["objects"][-1] == flat["objects"][-1]
     for frame in manifest["frames"]:
         entries = {e["id"]: e for e in frame["labels"]["objects"]}
         assert entries["vegetation:all"]["aggregate"]["codes"] == [10, 20, 95]

@@ -86,6 +86,19 @@ engine's Marketplace folder; later rows say which engine they ran on.
 | A11 | A-2 | CLI `capture --render --terrain C:/.../grand_canyon` two cameras three stills (retry, absolute path) | exit 0; `labels: engine bundle attached on 6 of 6 frames (12 object records; 0 without a bundle)`; every frame record has mask, depth_f32, alone PNG on both cameras; same on the web run 843e5dbe9dcd | PASS |
 | A12 | A-2 | run 7237db488652 on MAIN (build 3b05ec5a, grid convergence fix): `flightsim.verify`, `label_diagnose.py`, fixture | seven gates PASS (`mask_vs_geometry` 0.6 px of 130), `tight_box_present` PASS, `tight null: 0`; fixture `tests/fixtures/engine_bundle_min` 807,894 bytes committed; only `landmark_reprojection` FAIL (3.28 px: verifier ignores `camera_grid_convergence_deg`) | packet A12-2, Mac |
 | A10 | A-2 | `POST /generate/plan` then `/generate/start` one-line prompt (12 images, 20 s) | plan 200 ok; campaign 56e6d0854f88 `failed`: `campaign.target_unreachable: 2 round(s) added no verified frame: 1 failed capture(s)`; the capture: `REFUSED [google_tiles.terrain] ... the physics ground is the flat slab`; llm tier fell back to regex (`unknown field cameras`) | packet A10-1, decision 17 (Mac) |
+| A12 | A-2 | after 968dcb60 (verifier applies the convergence): `flightsim.verify` on 7237db488652; golden fixture test | exit 0: seven gates PASS, `tight_box_present` PASS, `landmark_reprojection` PASS (0.00 px); `pytest -q tests/test_engine_bundle_golden.py` exit 0, no skips | PASS |
+| B4 | B-1 | `gate6_visual.py --probe-sweep gate6|noon|dawn` (15 renders, 960x540 measure) then `--rederive <look>` | all 15 probes written (`runs/b4_probe/<look>/<bias>/probe.json`, engine 5.7.4 CL 51494982); gate6 look: `chosen 11: terrain band 116.33/255 against the stated 118/255 (tolerance 4)` (unchanged, B4-2); noon and dawn: `REFUSED gate6.rederive_out_of_tolerance` (nearest noon bias 10 at 106.2, dawn bias 11.5 at 130; the 0.5-bias steps straddle the target) | finer sweeps around the nearest values follow |
+
+## Letter C, run C-1 (push 845f014d)
+
+| Box | Run | Check | Result | Note |
+|---|---|---|---|---|
+| C2 | C-1 | `pytest -q tests/test_a4_mesh.py` | exit 0 | |
+| C3 | C-1 | `pytest -q tests/test_card_components.py` | exit 0 () | |
+| A10 | A-2 | retry on 9bb12d95: `/generate/start` one-line prompt, tier llm | campaign c533669e2c7e `failed`: capture `REFUSED [camera.scene_bounds] 608 of 1155 solved poses fall outside the scene raster`; llm tier fell back (`camera 0 field moves`) | packet A10-2 (Mac) |
+| B4 | B-1 | `gate6_visual.py --look` (measure) and `--quality beauty --look` | both `GATE 6: FAIL`, exit 1: range extinction ratio 1.12 (thr 0.75), peaks shadow 210 px (thr 10000), ground shadow 143 px (thr 300), exposure metric 4.52 (needs > 16), look clauses FAIL; the terrain is not drawn today (`B4-compare.png`) though the card, settings and RHI equal the 6 Oct run | packet B4-1 (Windows builder) |
+| B1 | B-1 | step 10 / gate rows: CI matrix | `CI: blocked by Actions billing` (GitHub: "The job was not started because recent account payments have failed or your spending limit needs to be increased"), runs 41885321776-41911496059 zero steps | owner |
+| B4 | B-1 | after 4f8abb78 (tiles decline on the synthetic raster): `gate6_visual.py --look` measure and beauty in the builder worktree | terrain clauses ok (extinction ratio 0.21, peaks shadow 17874 px); five clauses FAIL as on the 6 Oct renders: ground shadow 0 px, auto-exposure control 2.51/255, wetness parameter absent, albedo sun invariance 99.6 %, old footage folder absent; `GATE 6: FAIL` | packet B4-2 (Windows round 2) |
 
 ## Letter D
 

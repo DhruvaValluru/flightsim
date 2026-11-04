@@ -75,7 +75,7 @@ sitting 0.4 m from its label (it was ~25 m).
 - [x] **A11 · The engine writes the label pictures; missing ones fail loudly** 🪟
   - Check: every `render.json` has the mask, depth and an "alone" picture per aircraft.
   - Check: a run with missing label pictures stops with `labels.no_bundle`.
-- [ ] **A12 · All seven label checks pass; one real frame saved as a test** 🪟
+- [x] **A12 · All seven label checks pass; one real frame saved as a test** 🪟
   - Check: `python -m flightsim.verify runs/<id>` shows 7 of 7 PASS.
   - Check: `label_diagnose.py` shows `tight null: 0`.
   - Check: `pytest -q tests/test_engine_bundle_golden.py` passes.
@@ -122,9 +122,9 @@ Two rules to keep in mind:
   decide the loadout*
   - Check: the A-4 loads with at least one payload, and the plane still trims with
     the weight of what it carries.
-- [ ] **C2 · Each loaded station exported as its own piece**
+- [x] **C2 · Each loaded station exported as its own piece**
   - Check: the mesh manifest lists a `payload` piece per loaded station.
-- [ ] **C3 · The run card lists the payload pieces with their own IDs**
+- [x] **C3 · The run card lists the payload pieces with their own IDs**
   - Check: the IDs are unique and never clash with other aircraft.
 - [ ] **C4 · The engine gives each piece its own colour in the mask** 🪟
   - Check: the mask contains the payload's ID, and the aircraft's own tight box is

@@ -1808,43 +1808,65 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		if (FFlightSimGoogleTiles::Requested() && !bNoGoogleTiles)
 		{
-			// The geoid undulation at the origin: the capture datum's when it
-			// has one, else the card's google_tiles block (core/scenario/
-			// card.py evaluates it at the origin for every scene, since a
-			// flat or synthesised datum has none but the tiles are real
-			// Earth). Neither: refuse rather than draw the ground ~N m off.
-			double UndulationM = 0.0;
-			bool bHaveUndulation = false;
-			const TSharedPtr<FJsonObject>* TilesGeoreference = nullptr;
-			if (WorldCardRoot.IsValid() &&
-			    WorldCardRoot->TryGetObjectField(TEXT("georeference"), TilesGeoreference) &&
-			    TilesGeoreference != nullptr)
+			// B4: a -terrain= raster placed WITHOUT -GeorefTerrain is the
+			// commandlet's own ridge in the engine frame (the Gate 6 rig:
+			// TerrainNear/TerrainFar at the offsets above), not a place on
+			// Earth. Google's tiles at the card's latitude and longitude would
+			// be a different ground (the sea at 0, 0) hiding the one every
+			// terrain clause measures, so that scene keeps its own, recorded
+			// by name. Every georeferenced terrain render (-GeorefTerrain, the
+			// web and CLI path) draws the tiles or refuses, as before.
+			if (!TerrainPath.IsEmpty() && !bGeorefTerrain)
 			{
-				bHaveUndulation =
-					(*TilesGeoreference)->TryGetNumberField(TEXT("undulation_origin_m"), UndulationM);
+				const FString Reason = FString::Printf(
+					TEXT("google_tiles.terrain_not_georeferenced: -terrain=%s is placed in the ")
+					TEXT("engine frame without -GeorefTerrain (a synthetic ridge, not a place on ")
+					TEXT("Earth); the tiles at %.4f, %.4f would hide it under a different ground, ")
+					TEXT("so the scene keeps its own terrain"),
+					*FPaths::GetCleanFilename(TerrainPath), Card.LatitudeDegrees, Card.LongitudeDegrees);
+				GoogleTiles.Decline(Reason);
+				UE_LOG(LogFlightSimRender, Display, TEXT("google tiles: %s"), *Reason);
 			}
-			const TSharedPtr<FJsonObject>* TilesBlock = nullptr;
-			if (!bHaveUndulation && WorldCardRoot.IsValid() &&
-			    WorldCardRoot->TryGetObjectField(TEXT("google_tiles"), TilesBlock) &&
-			    TilesBlock != nullptr)
+			else
 			{
-				bHaveUndulation =
-					(*TilesBlock)->TryGetNumberField(TEXT("geoid_undulation_m"), UndulationM);
+				// The geoid undulation at the origin: the capture datum's when it
+				// has one, else the card's google_tiles block (core/scenario/
+				// card.py evaluates it at the origin for every scene, since a
+				// flat or synthesised datum has none but the tiles are real
+				// Earth). Neither: refuse rather than draw the ground ~N m off.
+				double UndulationM = 0.0;
+				bool bHaveUndulation = false;
+				const TSharedPtr<FJsonObject>* TilesGeoreference = nullptr;
+				if (WorldCardRoot.IsValid() &&
+				    WorldCardRoot->TryGetObjectField(TEXT("georeference"), TilesGeoreference) &&
+				    TilesGeoreference != nullptr)
+				{
+					bHaveUndulation =
+						(*TilesGeoreference)->TryGetNumberField(TEXT("undulation_origin_m"), UndulationM);
+				}
+				const TSharedPtr<FJsonObject>* TilesBlock = nullptr;
+				if (!bHaveUndulation && WorldCardRoot.IsValid() &&
+				    WorldCardRoot->TryGetObjectField(TEXT("google_tiles"), TilesBlock) &&
+				    TilesBlock != nullptr)
+				{
+					bHaveUndulation =
+						(*TilesBlock)->TryGetNumberField(TEXT("geoid_undulation_m"), UndulationM);
+				}
+				if (!bHaveUndulation)
+				{
+					return Fail(TEXT("google_tiles.undulation_missing: the card carries no geoid ")
+					            TEXT("undulation at the origin (georeference.undulation_origin_m or ")
+					            TEXT("google_tiles.geoid_undulation_m); write the card with the tiles ")
+					            TEXT("on (the default) so core/scenario/card.py adds it"));
+				}
+				if (!GoogleTiles.Enable(World, Scenario.GeoReferencing, Card.LatitudeDegrees,
+				                        Card.LongitudeDegrees, Card.TerrainElevationMetres,
+				                        UndulationM, Error))
+				{
+					return Fail(Error);
+				}
+				GoogleTiles.HideOwnTerrain(World);
 			}
-			if (!bHaveUndulation)
-			{
-				return Fail(TEXT("google_tiles.undulation_missing: the card carries no geoid ")
-				            TEXT("undulation at the origin (georeference.undulation_origin_m or ")
-				            TEXT("google_tiles.geoid_undulation_m); write the card with the tiles ")
-				            TEXT("on (the default) so core/scenario/card.py adds it"));
-			}
-			if (!GoogleTiles.Enable(World, Scenario.GeoReferencing, Card.LatitudeDegrees,
-			                        Card.LongitudeDegrees, Card.TerrainElevationMetres,
-			                        UndulationM, Error))
-			{
-				return Fail(Error);
-			}
-			GoogleTiles.HideOwnTerrain(World);
 		}
 	}
 	else

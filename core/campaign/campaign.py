@@ -221,6 +221,40 @@ def release_stated_counts(spec: ScenarioSpec, stated: Dict[str, Any]) -> None:
         f"the campaign spreads them over many varied scenarios"]
 
 
+def provision_spec(spec: ScenarioSpec, provision,
+                   capture: Dict[str, Any]) -> Dict[str, Any]:
+    """Stage the spec's place the way the caller's SINGLE run does
+    (decision 17) and return ``capture`` with the ground every case flies.
+
+    ``provision`` is the single run's own provisioning function (the web
+    app passes ``webapp.runs.provision_place``: POST /run's scene-setting
+    onto the curated bake table, the bake check, the placement and the
+    scene it picks -- one function, both paths), applied to ``spec`` IN
+    PLACE before the record is written. Its refusal is raised by ITS rule
+    name (``terrain.unbaked``, the single run's wording), never
+    reworded here; the scene's bake stem becomes the capture's
+    ``--terrain`` so ``flightsim.capture`` flies -- and, with Google's
+    tiles on, renders -- the bake the single run would, instead of the
+    flat slab at the place's datum (measured: packet A10-1, every
+    campaign over a real place refused ``google_tiles.terrain``). A
+    synthesised source keeps the CLI's own ridge (the flag would
+    contradict it). ``provision`` None (the CLI campaign, a test) leaves
+    the spec and the capture as they are."""
+    if provision is None:
+        return capture
+    staged = provision(spec)
+    refusal = staged.get("refusal")
+    if refusal is not None:
+        detail = {k: v for k, v in refusal.items() if k not in ("constraint", "message")}
+        raise CampaignError(str(refusal["constraint"]), str(refusal["message"]), detail)
+    scene = staged.get("scene") or {}
+    stem = scene.get("terrain")
+    if (stem and str(spec.scene.terrain_source.value) != "synthesised"
+            and not capture.get("synth_terrain")):
+        capture["terrain"] = str(stem)
+    return capture
+
+
 def _compile(prompt: str, answers, tier: str):
     """The compiled spec and the tier that compiled it. The LLM tier
     falls back to the regex compiler exactly as the web app does, and
@@ -260,10 +294,16 @@ class Campaign:
                disk_budget_bytes: Optional[int] = None, tier: str = "regex",
                capture: Optional[Dict[str, Any]] = None,
                stall_seconds: Optional[float] = DEFAULT_STALL_SECONDS,
-               max_refused_slots: int = MAX_REFUSED_SLOTS) -> "Campaign":
+               max_refused_slots: int = MAX_REFUSED_SLOTS,
+               provision=None) -> "Campaign":
         """Compile the prompt (plus the answer round), apply an explicit
         policy as a user edit, and write ``campaign.json`` in state
         ``planned``. Refuses by name before anything is drawn or run.
+
+        ``provision`` is the single run's place provisioning
+        (:func:`provision_spec`): applied to the compiled spec before the
+        record and its digest are written, its bake stem rides in
+        ``capture["terrain"]`` to every case.
 
         ``images`` is the target in images across EVERY camera; None
         takes the count the prompt states (:func:`stated_images`), else
@@ -308,6 +348,7 @@ class Campaign:
         spec, tier_used = _compile(str(prompt), answers, tier)
         if policy is not None:
             spec.set("randomization.policy", policy, frm="campaign policy (given)")
+        capture = provision_spec(spec, provision, capture)
         images = reconcile_images(spec, images, DEFAULT_IMAGES)
         stated = stated_images(spec)
         if stated is not None:

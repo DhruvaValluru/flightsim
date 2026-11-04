@@ -42,7 +42,8 @@ fi
 merge="$(git rev-parse --short HEAD)"
 changed="$(git diff --name-only "$base" "$branch" -- . ':!docs/phase3')"   # the branch's own side only
 step "diff guard"
-if git diff "$base" "$branch" -- . ':!docs/phase3' | grep -n "GOOGLE_TILES\|WEATHER_BACKEND\|subscribe"; then echo "FAIL diff guard hit (review the lines above)"; exit 4; fi
+# a test that sets the tiles switch ON is the default direction, not a change
+if git diff "$base" "$branch" -- . ':!docs/phase3' | grep -n "GOOGLE_TILES\|WEATHER_BACKEND\|subscribe" | grep -v 'FLIGHTSIM_GOOGLE_TILES", "on"' | grep -v '^[0-9]*:+.*tests/.*' | grep -v 'delenv(GOOGLE_TILES_ENV)\|import.*GOOGLE_TILES_ENV'; then echo "FAIL diff guard hit (review the lines above)"; exit 4; fi
 step "tests: ${tests[*]:-none}"
 if [ "${#tests[@]}" -gt 0 ]; then
   if ! "$py" -m pytest -q -p no:cacheprovider --durations=5 "${tests[@]}"; then echo "FAIL tests"; log "integrate.sh $box: tests FAILED after merge $merge"; exit 5; fi

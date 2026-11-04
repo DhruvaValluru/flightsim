@@ -1849,7 +1849,7 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 	// (core.fdm.FlightDynamics._retract_gear_if_airborne). Mirror both. The
 	// list is the airframes under assets/fdm_root/aircraft; a Python test
 	// (test_a4.py) fails if the two lists drift apart.
-	static const TCHAR* const RepoOwnedAirframes[] = { TEXT("A4") };
+	static const TCHAR* const RepoOwnedAirframes[] = { TEXT("A4"), TEXT("J11") };
 	bool bRepoOwnedAirframe = false;
 	for (const TCHAR* Name : RepoOwnedAirframes)
 	{

@@ -82,8 +82,8 @@ DEFAULT_MODEL = "claude-opus-5"
 #: Aircraft the schema lets the model name: exactly the models the regex
 #: vocabulary can reach, so the two compilers share an aircraft vocabulary
 #: and ``aircraft.exists`` validation stays the only authority on what flies.
-AIRCRAFT_MODELS = ("737", "A320", "A4", "B747", "c172p", "f15", "f16",
-                   "global5000")
+AIRCRAFT_MODELS = ("737", "A320", "A4", "B747", "J11", "c172p", "f15", "f16",
+                   "global5000")  # D2: the J-11A joins both compilers' vocabularies
 
 #: Canonical turbulence labels and their W20 (the regex compiler's own
 #: mapping, deduplicated to the labels the spec vocabulary stores).
@@ -1037,9 +1037,24 @@ def _parse_payload(text: str, *, allow_questions: bool = True,
         if (kind is list and isinstance(nested, dict)
                 and not {"value", "source", "from"} & set(nested)):
             nested = [nested]           # one entry stated without its list
+        if (section == "cameras" and isinstance(nested, dict)
+                and set(nested) == {"value", "source", "from"}
+                and isinstance(nested["value"], str)):
+            # The camera stated as ONE provenanced field under "fields"
+            # ({"value": "chase", "source": "user", "from": "from a chase
+            # camera"}): the relay's gpt-4.1-mini on the web app's
+            # campaign path (packet A10-1, 2026-11-04: "unknown field
+            # 'cameras'", the campaign compiled by the regex fallback
+            # although the plan was the model's). That is one camera's
+            # PRESET with its own provenance -- nothing is guessed -- so
+            # it is lifted to the schema position as that camera; the
+            # preset rail below still refuses a word outside the
+            # vocabulary and a model guess with no quoted phrase.
+            nested = [{"preset": nested}]
         if not isinstance(nested, kind):
-            # A provenanced scalar ({"value": "chase", ...}) is not a
-            # camera list: the unknown field it is, by name, as before.
+            # Anything else under this name (a bare word with no
+            # provenance, a number, null) is the unknown field it is,
+            # by name, as before.
             raise _fail(f"unknown field {section!r}")
         if not payload[section]:
             payload[section] = nested

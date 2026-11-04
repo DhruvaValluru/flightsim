@@ -1,0 +1,271 @@
+{
+ "magic": "flightsim-aircraft-mesh",
+ "version": 3,
+ "name": "c172p",
+ "fdm": "c172p",
+ "fdm_config_name": "c172",
+ "mesh_airframe": "Cessna 172P Skyhawk (FlightGear c172p-team model)",
+ "source": {
+  "license_name": "GPL-2.0",
+  "file": "LICENSE",
+  "repo": "https://github.com/c172p-team/c172p",
+  "commit": "a15d83d1d56b5ecd9117ce83f5808c5a095f56c1",
+  "authors_file": "README.md",
+  "source_dir": "C:\\Users\\kanth\\flightsim\\assets\\aircraft_src\\c172p",
+  "license_first_line": "GNU GENERAL PUBLIC LICENSE"
+ },
+ "units": "cm, UE actor frame (+X forward +Y right +Z up)",
+ "parts": [
+  "body",
+  "aileron_l",
+  "aileron_r",
+  "elevator_l",
+  "elevator_r",
+  "rudder",
+  "flaps_l",
+  "propeller"
+ ],
+ "asset_path_root": "/Game/Aircraft/c172p",
+ "surfaces": [
+  {
+   "bone": "aileron_l",
+   "part": "aileron_l",
+   "property": "fcs/left-aileron-pos-rad",
+   "scale_deg_per_unit": 57.29578,
+   "hinge_mid_cm": [
+    -101.0,
+    -404.0,
+    39.800000000000004
+   ],
+   "axis_ue": [
+    -0.10328204556181803,
+    0.993740762702898,
+    -0.04256895121128987
+   ],
+   "triangles": 6
+  },
+  {
+   "bone": "aileron_r",
+   "part": "aileron_r",
+   "property": "fcs/right-aileron-pos-rad",
+   "scale_deg_per_unit": -57.29578,
+   "hinge_mid_cm": [
+    -101.0,
+    404.0,
+    39.800000000000004
+   ],
+   "axis_ue": [
+    0.10328204556181803,
+    0.993740762702898,
+    0.04256895121128987
+   ],
+   "triangles": 6
+  },
+  {
+   "bone": "elevator_l",
+   "part": "elevator_l",
+   "property": "fcs/elevator-pos-rad",
+   "scale_deg_per_unit": 57.29578,
+   "hinge_mid_cm": [
+    -481.12949999999995,
+    -93.145,
+    -42.221
+   ],
+   "axis_ue": [
+    0.08431791066348672,
+    -0.9964389041907281,
+    1.2511003882088755e-05
+   ],
+   "triangles": 67
+  },
+  {
+   "bone": "elevator_r",
+   "part": "elevator_r",
+   "property": "fcs/elevator-pos-rad",
+   "scale_deg_per_unit": -57.29578,
+   "hinge_mid_cm": [
+    -481.12949999999995,
+    93.145,
+    -42.221
+   ],
+   "axis_ue": [
+    -0.08431791066348672,
+    -0.9964389041907281,
+    -1.2511003882088755e-05
+   ],
+   "triangles": 110
+  },
+  {
+   "bone": "rudder",
+   "part": "rudder",
+   "property": "fcs/rudder-pos-rad",
+   "scale_deg_per_unit": 57.29578,
+   "hinge_mid_cm": [
+    -536.15,
+    -0.65,
+    34.849999999999994
+   ],
+   "axis_ue": [
+    -0.5585993426685822,
+    -0.008186912575751491,
+    0.8293972201742088
+   ],
+   "triangles": 212
+  },
+  {
+   "bone": "flaps_l",
+   "part": "flaps_l",
+   "property": "fcs/flap-pos-deg",
+   "scale_deg_per_unit": 1.0,
+   "hinge_mid_cm": [
+    -115.19999999999999,
+    -3.0000000000000027,
+    32.0
+   ],
+   "axis_ue": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "triangles": 672
+  },
+  {
+   "bone": "propeller",
+   "part": "propeller",
+   "property": "propulsion/engine/engine-rpm",
+   "scale_deg_per_unit": 6.0,
+   "hinge_mid_cm": [
+    193.4,
+    0.1,
+    -5.2
+   ],
+   "axis_ue": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "triangles": 646,
+   "continuous": true
+  }
+ ],
+ "triangles": {
+  "body": 42547,
+  "propeller": 646,
+  "rudder": 212,
+  "elevator_l": 67,
+  "elevator_r": 110,
+  "flaps_l": 672,
+  "aileron_l": 6,
+  "aileron_r": 6
+ },
+ "textures": [
+  "fuselage.png",
+  "glass-alpha.png",
+  "interior.png",
+  "lights.png",
+  "panel.png",
+  "panel_parts.png",
+  "tail.png",
+  "wing.png"
+ ],
+ "vrp_actor_cm": [
+  -108.20400000000001,
+  0.0,
+  97.79
+ ],
+ "model_origin_offset_actor_cm": [
+  0.0,
+  0.0,
+  0.0
+ ],
+ "mesh_origin_measured_actor_cm": [
+  -118.309,
+  0.0,
+  97.422
+ ],
+ "mesh_origin_actor_cm": [
+  -118.309,
+  0.0,
+  97.422
+ ],
+ "mesh_origin_basis": "measured from vertices: nose keypoint (x), main-gear contact (z)",
+ "origin_anchor": {
+  "x": "nose keypoint (fdm)",
+  "z": "main-gear contact"
+ },
+ "origin_measurement": {
+  "nose_keypoint": {
+   "name": "nose",
+   "basis": "fdm",
+   "source": "c172p.xml <contact type=\"STRUCTURE\" name=\"NOSE_SKID\"> location, about the same file's <location name=\"CG\">",
+   "body_m": [
+    1.99898,
+    0.0,
+    0.25145999999999996
+   ],
+   "actor_cm": [
+    95.758,
+    0.0,
+    67.564
+   ]
+  },
+  "main_gear_contact": {
+   "name": "left_main_gear",
+   "source": "c172p.xml <contact type=\"BOGEY\" name=\"LEFT_MAIN\"> location, about the same file's <location name=\"CG\">",
+   "body_m": [
+    -0.43688000000000005,
+    -1.0922,
+    1.3208
+   ],
+   "actor_cm": [
+    -147.828,
+    -109.22,
+    -39.37
+   ]
+  },
+  "mesh_nose_cm": 214.067,
+  "mesh_tail_cm": -608.519,
+  "gear_lowest_cm": -136.792,
+  "vrp_actor_cm": [
+   -108.20400000000001,
+   0.0,
+   97.79
+  ],
+  "labels_length_m": 8.28,
+  "length_deviation": 0.006538647342994991
+ },
+ "labels_length_m": 8.28,
+ "mesh_extents_actor_cm": {
+  "nose": 214.067,
+  "tail": -608.519,
+  "lowest": -136.792,
+  "gear_lowest": -136.792
+ },
+ "mesh_extent_actor_m": {
+  "x": [
+   -6.08519,
+   2.14067
+  ],
+  "y": [
+   -5.6594299999999995,
+   5.66097
+  ],
+  "z": [
+   -1.36792,
+   1.06107
+  ]
+ },
+ "mesh_length_m": 8.22586,
+ "vertices_measured": 132798,
+ "gear_vertices_measured": 13140,
+ "gear_geometry": {
+  "parts": [],
+  "objects": [
+   ".*Wheel.*"
+  ]
+ },
+ "vrp_source": {
+  "fdm_xml": "C:\\Users\\kanth\\flightsim\\.venv\\Lib\\site-packages\\jsbsim\\aircraft\\c172p\\c172p.xml",
+  "sha256": "57b9064e5f50025adf4fa15b6bb60996d41aeef087b3fc28956d887e76256bd6"
+ }
+}
