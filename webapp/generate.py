@@ -934,6 +934,11 @@ CONDITION_WORDS = {
 }
 
 
+def _class_words(name: str) -> str:
+    """A class id as words for a person: ``landing_gear`` reads "landing gear"."""
+    return str(name).replace("_", " ")
+
+
 def _condition_name(name: str) -> str:
     pretty = name.replace("_", " ")
     for unit in ("km", "m", "deg", "kt"):
@@ -977,14 +982,14 @@ def card_words(card: Dict[str, Any], labels_only: Optional[bool] = None) -> Dict
                if isinstance(c, dict) and int(c.get("instances") or 0) > 0]
     empty = [name for name, c in balance.items()
              if isinstance(c, dict) and not int(c.get("instances") or 0)]
-    classes = [f"{name}: {int(c['instances'])} labelled "
+    classes = [f"{_class_words(name)}: {int(c['instances'])} labelled "
                f"{'object' if int(c['instances']) == 1 else 'objects'} in "
                f"{int(c.get('images') or 0)} {'image' if int(c.get('images') or 0) == 1 else 'images'}"
                + (f" ({round(100 * int(c['instances']) / instances)}% of all objects)"
                   if instances and len(present) > 1 else "") + "."
                for name, c in present]
     if empty:
-        classes.append(f"In the class list but not in any image: {', '.join(empty)}.")
+        classes.append(f"In the class list but not in any image: {', '.join(_class_words(n) for n in empty)}.")
     aircraft = card.get("aircraft") or []
     if aircraft:
         classes.append(f"Aircraft models: {', '.join(str(a) for a in aircraft)}.")

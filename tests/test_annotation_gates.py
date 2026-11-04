@@ -78,17 +78,18 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from core.capture.labels import attach_engine_labels
+from core.capture.labels import attach_engine_labels, camera_axes, component_label_record
 from core.capture.manifest import (
     build_capture_manifest, read_capture_manifest, write_capture_manifest,
     write_frame_sidecars,
 )
-from core.capture.objects import compose_objects
+from core.capture.objects import SceneObject, class_id_of, compose_objects
 from core.capture.poses import solve_pose_track, solve_traffic_track, traffic_state
 from core.capture.schedule import solve_schedule
 from core.capture.verify import (
     FAIL, NOT_RUN, PASS, Check, verify_applied_intrinsics, verify_box_vs_mask,
     verify_depth_range, verify_depth_vs_geometry, verify_identity_stable,
+    verify_component_boxes, verify_component_coverage,
     verify_label_files, verify_mask_containment, verify_mask_integers_only,
     verify_mask_vs_geometry, verify_run, verify_tight_box_present,
     verify_visibility_vs_scene, write_verification,
@@ -290,8 +291,34 @@ def _pinhole(record, point):
             cy - record["fy_px"] * float(np.dot(up, d)) / z, z)
 
 
+#: The payload pod's box in the primary's body frame (metres about the
+#: CG): on the crown of the fuselage, 0.5 m proud of the airframe box.
+PAYLOAD_BOX_BODY = {"forward": (-10.0, 10.0), "right": (-6.0, 6.0), "down": (-15.0, -12.0)}
+PAYLOAD_INT_ID = 64
+
+
+def _add_payload(manifest):
+    """Declare one payload component (int_id 64, parent the primary) on the
+    card and give every frame its record, from the producer's own
+    component_label_record. Returns the declared object."""
+    primary = next(o for o in manifest["objects"] if o["role"] == "primary")
+    declared = SceneObject(
+        id="payload:pod_right:0", int_id=PAYLOAD_INT_ID, class_name="payload",
+        class_id=class_id_of(manifest["taxonomy"], "payload"), instance=0,
+        role="scene", mesh_sha256=None, licence=None, in_scene=True,
+        labelled=True, parent=primary["id"])
+    manifest["objects"].append(declared.to_dict())
+    for record in manifest["frames"]:
+        entry = component_label_record(
+            declared, {"id": primary["id"]}, record, record["aircraft"], None,
+            camera_axes(record["quaternion_wxyz"]), PAYLOAD_BOX_BODY)
+        entry["in_scene"], entry["labelled"] = True, True
+        record["labels"]["objects"].append(entry)
+    return manifest["objects"][-1]
+
+
 def fabricate_run(run_dir, offset_body=(0.0, 0.0, 0.0), attach=True,
-                  mesh_file=None, mesh_path=MESH_PATH):
+                  mesh_file=None, mesh_path=MESH_PATH, components=False):
     """Write a complete manifest-6 run with its bundle under ``run_dir``.
 
     ``offset_body`` draws the PRIMARY's box that far from its label in
@@ -300,7 +327,10 @@ def fabricate_run(run_dir, offset_body=(0.0, 0.0, 0.0), attach=True,
     ``mesh_path`` with the file's digest (the verifier finds it under
     its repository root); the primary is still painted from the
     airframe block's box. Returns the manifest as written (after
-    attach_engine_labels when ``attach``)."""
+    attach_engine_labels when ``attach``). ``components`` adds a payload
+    pod (int_id 64, parent the primary, ``PAYLOAD_BOX_BODY``) to the card,
+    to every frame's records, and paints its pixels in the ID image with an
+    alone pass."""
     run_dir = Path(run_dir)
     spec = fabricated_spec()
     mesh = citation = None
@@ -310,6 +340,8 @@ def fabricate_run(run_dir, offset_body=(0.0, 0.0, 0.0), attach=True,
         citation = {"path": mesh_path, "sha256": hashlib.sha256(data).hexdigest(),
                     "note": None}
     manifest, traffic_tracks = fabricated_manifest(spec, mesh=mesh, citation=citation)
+    if components:
+        _add_payload(manifest)
     write_capture_manifest(manifest, run_dir)
     write_frame_sidecars(manifest, run_dir)
     objects = manifest["objects"]
@@ -333,6 +365,10 @@ def fabricate_run(run_dir, offset_body=(0.0, 0.0, 0.0), attach=True,
                                           manifest["airframe"]["box_body_m"],
                                           offset_body)
         drawn.append((primary, box_depth(record, rays, centre, axes, half)))
+        if components:
+            pod = next(o for o in objects if o.get("parent"))
+            pcentre, paxes, phalf = box_in_world(record["aircraft"], PAYLOAD_BOX_BODY)
+            drawn.append((pod, box_depth(record, rays, pcentre, paxes, phalf)))
         for obj, box_body, track in traffic:
             state = traffic_state(track, int(record["sample_index"]))
             centre, axes, half = box_in_world(state, box_body)
@@ -371,9 +407,11 @@ def fabricate_run(run_dir, offset_body=(0.0, 0.0, 0.0), attach=True,
                 entry["alone_png"] = alone_name
                 if entry["pixels_alone"]:
                     entry["visible_fraction"] = entry["pixels"] / entry["pixels_alone"]
+                    own_parts = {o["int_id"] for o in objects
+                                 if o.get("parent") == obj["id"]}
                     entry["occluded_by"] = sorted(
                         int(v) for v in np.unique(ids[footprint])
-                        if int(v) not in (0, obj["int_id"]))
+                        if int(v) not in (0, obj["int_id"]) and int(v) not in own_parts)
             declared.append(entry)
         first = declared[0]
         fov = math.degrees(2.0 * math.atan(float(record["sensor_width_mm"])
@@ -410,7 +448,8 @@ def fabricate_run(run_dir, offset_body=(0.0, 0.0, 0.0), attach=True,
                       "origin_basis": "measured from vertices (fabricated)"},
             "objects": [{"id": o["id"], "int_id": o["int_id"], "class": o["class"],
                          "class_id": o["class_id"], "role": o["role"],
-                         "alone_pass": o["class"] == "aircraft"} for o in objects],
+                         "alone_pass": o["class"] == "aircraft" or bool(o.get("parent"))}
+                        for o in objects],
             "labels_id_source": "card objects[]",
             "frame_records": records,
         }
@@ -890,6 +929,113 @@ def test_tight_box_present_not_run_without_bundle(clean_run, tmp_path):
     assert check.status == NOT_RUN and "render.json" in check.detail
 
 
+@pytest.fixture(scope="module")
+def component_run(tmp_path_factory):
+    run_dir = tmp_path_factory.mktemp("gates") / "components"
+    fabricate_run(run_dir, components=True)
+    return run_dir
+
+
+@pytest.fixture
+def crun(component_run, tmp_path):
+    """A private copy of the component run for a mutation."""
+    target = tmp_path / "crun"
+    shutil.copytree(component_run, target)
+    return target
+
+
+def _payload_records(manifest):
+    """(frame, record) for every payload record with a tight box."""
+    return [(frame, entry) for frame in manifest["frames"]
+            for entry in frame["labels"]["objects"]
+            if entry.get("parent") and entry.get("bbox_2d_tight") is not None]
+
+
+def test_component_boxes_pass_on_a_clean_component_run(component_run):
+    manifest = manifest_of(component_run)
+    assert _payload_records(manifest), "the fabricated pod is in no frame"
+    check = verify_component_boxes(manifest, component_run)
+    assert check.status == PASS and check.failure is None, check.detail
+    by_name, report = checks_of(component_run)
+    assert by_name["component_boxes"].status == PASS
+    assert by_name["component_coverage"].status == PASS
+    assert not [c for c in report.checks if c.status == FAIL], \
+        [(c.name, c.detail) for c in report.checks if c.status == FAIL]
+
+
+def test_component_checks_are_not_run_without_components(clean_run):
+    manifest = manifest_of(clean_run)
+    for check in (verify_component_boxes(manifest, clean_run),
+                  verify_component_coverage(manifest, clean_run)):
+        assert check.status == NOT_RUN, check.detail
+
+
+def test_a_component_box_outside_its_hull_fails_component_boxes(crun):
+    manifest = manifest_of(crun)
+    _, entry = _payload_records(manifest)[0]
+    x0, y0, x1, y1 = entry["bbox_2d_hull"]
+    entry["bbox_2d_tight"] = [x0 - 10.0, y0, x1, y1]
+    check = verify_component_boxes(manifest, crun)
+    assert check.status == FAIL and check.failure == "annotation.component_box", check.detail
+    assert "own bbox_2d_hull" in check.detail
+
+
+def test_a_component_box_outside_its_parent_fails_component_boxes(crun):
+    manifest = manifest_of(crun)
+    frame, entry = _payload_records(manifest)[0]
+    parent = next(e for e in frame["labels"]["objects"] if e["id"] == entry["parent"])
+    x0, y0, x1, y1 = entry["bbox_2d_tight"]
+    parent["bbox_2d_tight"] = [x0 + 3.0, y0, x1 + 50.0, y1]
+    check = verify_component_boxes(manifest, crun)
+    assert check.status == FAIL and check.failure == "annotation.component_box", check.detail
+    assert "parent" in check.detail
+
+
+def test_component_coverage_passes_when_payload_pixels_have_a_record(component_run):
+    check = verify_component_coverage(manifest_of(component_run), component_run)
+    assert check.status == PASS and check.failure is None, check.detail
+    assert "component-frames" in check.detail
+
+
+def test_a_dropped_payload_record_fails_component_coverage(crun):
+    manifest = manifest_of(crun)
+    frame, entry = _payload_records(manifest)[0]
+    entry["fraction_in_frame"] = 0.0        # a dropped record claims nothing
+    frame["labels"]["objects"].remove(entry)
+    check = verify_component_coverage(manifest, crun)
+    assert check.status == FAIL and check.failure == "annotation.component_coverage", check.detail
+    assert "int_id 64" in check.detail and "payload:pod_right:0" in check.detail
+
+
+def test_component_coverage_is_not_run_without_a_bundle(component_run, tmp_path):
+    manifest = manifest_of(component_run)
+    bare = tmp_path / "bare"
+    write_capture_manifest(manifest, bare)
+    check = verify_component_coverage(manifest, bare)
+    assert check.status == NOT_RUN and "render.json" in check.detail
+
+
+def test_box_vs_mask_counts_payload_pixels_as_the_aircraft(component_run, crun):
+    """The aircraft's tight box is the box of its own pixels plus its
+    payload's; graded against the ID image alone it would not match."""
+    manifest = manifest_of(component_run)
+    check = verify_box_vs_mask(manifest, component_run)
+    assert check.status == PASS, check.detail
+    frame, pod = _payload_records(manifest)[0]
+    parent = next(e for e in frame["labels"]["objects"] if e["id"] == pod["parent"])
+    mask = np.asarray(Image.open(
+        component_run / "frames" / frame["camera_id"]
+        / (Path(frame["file"]).stem + "_mask.png")))
+    ys, xs = np.nonzero(mask == 1)
+    own_only = [float(xs.min()), float(ys.min()), float(xs.max()) + 1, float(ys.max()) + 1]
+    assert parent["bbox_2d_tight"] != own_only
+    assert parent["bbox_2d_tight"][2] >= pod["bbox_2d_tight"][2]
+    # the producer's rollup undone in the record: the verifier names it
+    parent["bbox_2d_tight"] = own_only
+    check = verify_box_vs_mask(manifest, crun)
+    assert check.status == FAIL and check.failure == "annotation.box_mismatch", check.detail
+
+
 def test_a_mask_half_the_size_of_its_hull_fails_box_vs_mask(run):
     """The IoU clause on its own: the primary's pixels cut to their left
     half in every pass (the record re-derived), so the tight box is
@@ -1172,7 +1318,8 @@ GRADING_CHECKS = (
     "verify_mask_vs_geometry", "verify_box_vs_mask", "verify_depth_vs_geometry",
     "verify_visibility_vs_scene", "verify_identity_stable",
     "verify_applied_intrinsics", "verify_landmark_reprojection",
-    "verify_triangulation")
+    "verify_triangulation", "verify_component_boxes",
+    "verify_component_coverage")
 
 
 def _imported_modules(path: Path, package: str):
@@ -1241,7 +1388,9 @@ def test_the_grading_checks_run_with_no_producer_module_loaded(clean_run):
     assert not loaded, f"grading loaded the producer's code: {loaded}"
     # NOT RUN where the evidence is the engine's landmark pixels (the
     # fabricated render.json carries none); every other check grades.
-    expected_not_run = {"verify_landmark_reprojection", "verify_triangulation"}
+    # The component checks have no component to grade on this run.
+    expected_not_run = {"verify_landmark_reprojection", "verify_triangulation",
+                        "verify_component_boxes", "verify_component_coverage"}
     for name, status in result["status"].items():
         assert status == (NOT_RUN if name in expected_not_run else PASS), (name, status)
 

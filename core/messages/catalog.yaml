@@ -355,6 +355,10 @@ annotation.box_mismatch:
   sentence: "The drawn box does not match the object's mask."
 annotation.tight_box_null:
   sentence: "An aircraft in frame has no tight box, or its tight box lies outside its drawn box."
+annotation.component_box:
+  sentence: "A payload or landing gear box lies outside its own drawn box or outside its aircraft's box."
+annotation.component_coverage:
+  sentence: "A frame shows payload or landing gear in its mask but does not list it."
 annotation.depth_range:
   sentence: "The measured distance under the mask does not agree with the aircraft's distance."
 annotation.visibility:
@@ -499,6 +503,10 @@ check.box_vs_mask:
   sentence: "The drawn box matches the object's mask."
 check.tight_box_present:
   sentence: "Every aircraft in frame has a tight box, and it lies inside its drawn box."
+check.component_boxes:
+  sentence: "Every payload and landing gear box lies inside its own drawn box and inside its aircraft's box."
+check.component_coverage:
+  sentence: "Every frame that shows payload or landing gear in its mask also lists it."
 check.depth_vs_geometry:
   sentence: "The measured distance under the mask agrees with the aircraft's distance."
 check.visibility_vs_scene:

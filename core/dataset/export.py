@@ -146,6 +146,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from xml.etree import ElementTree as ET
 
 from core.capture.airframe import KEYPOINT_NAMES
+from core.capture.objects import COMPONENT_CLASSES
 from core.capture.manifest import (
     frame_sidecar, read_capture_manifest, software_revision,
 )
@@ -807,6 +808,8 @@ def object_labels(run: Run, record: Dict[str, Any], labels: Dict[str, Any],
             # carried them).
             "in_scene": entry.get("in_scene", top.get("in_scene")),
             "labelled": entry.get("labelled", top.get("labelled")),
+            # A component names its aircraft; an aircraft has none.
+            "parent": entry.get("parent", top.get("parent")),
         })
     out.sort(key=lambda o: (o["role"] != "primary", o["int_id"] if o["int_id"] is not None else 1 << 30))
     return out
@@ -1008,7 +1011,8 @@ def airframe_classes(samples: Sequence[Sample], names: Sequence[str]) -> List[st
     classes = {n for n in names if n == AIRCRAFT_CLASS}
     for sample in samples:
         for obj in sample.objects:
-            if obj.get("keypoints") and obj["class_name"] in names:
+            if (obj.get("keypoints") and obj["class_name"] in names
+                    and obj["class_name"] not in COMPONENT_CLASSES):
                 classes.add(obj["class_name"])
     return [n for n in names if n in classes]
 
@@ -1016,8 +1020,11 @@ def airframe_classes(samples: Sequence[Sample], names: Sequence[str]) -> List[st
 def coco_categories(samples: Sequence[Sample], names: Sequence[str]) -> List[Dict[str, Any]]:
     """One category per taxonomy class. An airframe class keeps the
     seven keypoints and the airframe skeleton under supercategory
-    ``aircraft``; any other class is its own supercategory with no
-    keypoints (a terrain annotation has none to declare)."""
+    ``aircraft``; a component class (``payload``, ``landing_gear``) is
+    its own category and supercategory with no keypoints and a
+    ``parent_category`` of ``aircraft`` (it is a part of one, not one);
+    any other class is its own supercategory with no keypoints (a
+    terrain annotation has none to declare)."""
     airframes = set(airframe_classes(samples, names))
     categories = []
     for i, name in enumerate(names):
@@ -1025,6 +1032,9 @@ def coco_categories(samples: Sequence[Sample], names: Sequence[str]) -> List[Dic
             categories.append({"id": i + 1, "name": name, "supercategory": AIRCRAFT_CLASS,
                                "keypoints": list(KEYPOINT_NAMES),
                                "skeleton": [[1, 2], [3, 4], [1, 5], [6, 7]]})
+        elif name in COMPONENT_CLASSES:
+            categories.append({"id": i + 1, "name": name, "supercategory": name,
+                               "parent_category": AIRCRAFT_CLASS})
         else:
             categories.append({"id": i + 1, "name": name, "supercategory": name})
     return categories
@@ -1057,7 +1067,7 @@ def box_record(obj: Dict[str, Any]) -> Dict[str, Any]:
     sidecar's ``export.objects[]`` carries it."""
     return {"id": obj["id"], "int_id": obj.get("int_id"), "class": obj["class_name"],
             "bbox_2d": obj.get("bbox_2d"), "bbox_2d_projected": obj.get("bbox_2d_projected"),
-            "bbox_source": obj.get("bbox_source")}
+            "bbox_source": obj.get("bbox_source"), "parent": obj.get("parent")}
 
 
 def export_coco(samples: Sequence[Sample], out: Path, splits: Dict[str, str]

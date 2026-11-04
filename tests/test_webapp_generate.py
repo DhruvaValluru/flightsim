@@ -708,6 +708,11 @@ def test_the_preview_shows_the_overlay_when_one_exists(client, monkeypatch):
     assert "r.data.masks_note ?" in html and "esc(r.data.picture.url)" in html
 
 
+def test_a_class_id_with_an_underscore_reads_as_words():
+    assert generate_module._class_words("landing_gear") == "landing gear"
+    assert generate_module._class_words("aircraft") == "aircraft"
+
+
 def test_the_card_is_shown_in_plain_words_before_the_download(done_client, done_campaign):
     """The finished dataset's card, read for a person: images, labelled
     objects, class balance, the conditions the scenarios drew, the

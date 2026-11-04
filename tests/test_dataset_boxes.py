@@ -185,7 +185,7 @@ def test_every_format_writes_the_mask_box_and_keeps_the_projected_one(
     assert f"2-D boxes: {n_mask} from the ID mask" in text
     taxonomy = card["classes"]
     # COCO through pycocotools: the bbox is the mask's, the projected one beside it.
-    coco = coco_api.COCO(str(out / "coco" / "annotations" / "instances_train.json"))
+    coco = coco_api.COCO(str(out / "annotations" / "instances_train.json"))
     assert [(c["id"], c["name"]) for c in coco.loadCats(coco.getCatIds())] == \
         list(enumerate(taxonomy, start=1))
     assert len(coco.getImgIds()) == len(expected)
@@ -251,6 +251,100 @@ def test_every_format_writes_the_mask_box_and_keeps_the_projected_one(
             assert sidecar["export"]["labels"]["bbox_2d_projected"] == primary[3]
             assert sidecar["export"]["labels"]["bbox_source"] == "mask"
     assert seen_classes <= set(taxonomy) and {"aircraft", "terrain"} <= seen_classes
+
+
+@pytest.fixture(scope="module")
+def component_export_run(tmp_path_factory):
+    """A run whose frames carry a payload record beside the aircraft's."""
+    from tests.test_annotation_gates import fabricate_run
+
+    run = tmp_path_factory.mktemp("boxes") / "component_run"
+    fabricate_run(run, components=True)
+    report = verify_run(run)
+    assert report.ok, [(c.name, c.detail) for c in report.checks if c.status != PASS]
+    write_verification(report, run)
+    bind_verification(run)
+    return run
+
+
+def _payload_expected(run: Path):
+    """{key: [(payload id, tight box)]} straight from the manifest."""
+    out = {}
+    for record in _manifest(run)["frames"]:
+        key = f"{run.name}_{record['camera_id']}_{int(record['index']):04d}"
+        out[key] = [(e["id"], e["bbox_2d_tight"]) for e in record["labels"]["objects"]
+                    if e.get("parent") and e["bbox_2d_tight"] is not None]
+    return out
+
+
+def test_payload_and_gear_are_their_own_coco_categories(
+        component_export_run, tmp_path, no_mesh_licence):
+    from core.capture.objects import COMPONENT_CLASSES
+
+    out = tmp_path / "ds"
+    card = export([component_export_run], out, "coco", fractions=(1.0, 0.0, 0.0),
+                  labels_only=True)
+    taxonomy = card["classes"]
+    coco = json.loads((out / "annotations" / "instances_train.json")
+                      .read_text(encoding="utf-8"))
+    by_name = {c["name"]: c for c in coco["categories"]}
+    for name in COMPONENT_CLASSES:
+        category = by_name[name]
+        assert category["id"] == taxonomy.index(name) + 1
+        assert category["supercategory"] == name != "aircraft"
+        assert category["parent_category"] == "aircraft"
+        assert "keypoints" not in category and "skeleton" not in category
+    assert by_name["aircraft"]["supercategory"] == "aircraft"
+    assert "keypoints" in by_name["aircraft"] and "parent_category" not in by_name["aircraft"]
+    payload_id = by_name["payload"]["id"]
+    anns = [a for a in coco["annotations"] if a["category_id"] == payload_id]
+    expected = _payload_expected(component_export_run)
+    assert len(anns) == sum(len(v) for v in expected.values()) > 0
+    images = {i["id"]: i["file_name"][:-len(".png")] for i in coco["images"]}
+    for ann in anns:
+        (_, box), = [r for r in expected[images[ann["image_id"]]]]
+        x, y, w, h = ann["bbox"]
+        assert (x, y, x + w, y + h) == pytest.approx(tuple(box), abs=1e-9)
+        assert ann["keypoints"] and ann["num_keypoints"] == 0
+
+
+def test_component_boxes_reread_in_yolo_and_voc(
+        component_export_run, tmp_path, no_mesh_licence):
+    out = tmp_path / "ds"
+    card = export([component_export_run], out, "yolo,voc", fractions=(1.0, 0.0, 0.0),
+                  labels_only=True)
+    taxonomy = card["classes"]
+    payload_index = taxonomy.index("payload")
+    expected = _payload_expected(component_export_run)
+    sizes = {f"{component_export_run.name}_{r['camera_id']}_{int(r['index']):04d}":
+             (int(r["width_px"]), int(r["height_px"]))
+             for r in _manifest(component_export_run)["frames"]}
+    names, yolo = _yolo(out / "yolo")
+    assert names[payload_index] == "payload"
+    voc = _voc(out / "voc")
+    checked = 0
+    for key, rows in expected.items():
+        width, height = sizes[key]
+        lines = [line for line in yolo[key] if line[0] == payload_index]
+        boxes = [o for o in voc[key] if o[0] == "payload"]
+        assert len(lines) == len(boxes) == len(rows), key
+        for (c, cx, cy, w, h), (_, _, bndbox), (_, box) in zip(lines, boxes, rows):
+            got = ((cx - w / 2) * width, (cy - h / 2) * height,
+                   (cx + w / 2) * width, (cy + h / 2) * height)
+            assert got == pytest.approx(tuple(box), abs=0.005), key
+            assert bndbox == (int(box[0]) + 1, int(box[1]) + 1, int(box[2]), int(box[3]))
+            checked += 1
+    assert checked > 0
+
+
+def test_the_sidecar_box_record_carries_the_parent(
+        component_export_run, no_mesh_licence):
+    from core.dataset.export import box_record, collect_samples
+
+    samples = collect_samples([load_run(component_export_run)], labels_only=True)
+    parents = {box_record(o)["parent"] for s in samples for o in s.objects
+               if o["class_name"] == "payload"}
+    assert parents == {"aircraft:B747:0"}
 
 
 def test_the_sensor_image_keeps_the_projected_box(engine_run, tmp_path, no_mesh_licence):

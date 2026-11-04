@@ -3199,6 +3199,24 @@ mutate core/capture/verify.py \
     tests/test_annotation_gates.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
+    '            if _record_object(record, value) is None:' \
+    '            if False:  # MUTATED: a component with pixels needs no record' \
+    "a payload record dropped from a frame whose mask holds payload pixels fails component_coverage" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if not _box_inside(tight, parent_tight, COMPONENT_BOX_TOL_PX):' \
+    '            if False:  # MUTATED: a component may leave its parent' \
+    "a component box outside its parent's tight box fails component_boxes" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '        if name in airframes:' \
+    '        if name in airframes or name in COMPONENT_CLASSES:  # MUTATED' \
+    "payload exported as an aircraft category, not its own component category" \
+    tests/test_dataset_boxes.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
     '                if n_bad > VISIBILITY_TOL_FRACTION * max(n_alone, 1):' \
     '                if False:  # MUTATED: a footprint hidden by nothing passes' \
     "an object dropped from the full pass where nothing hides it fails visibility_vs_scene" \
