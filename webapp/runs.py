@@ -1573,10 +1573,15 @@ def _water_mask():
     return _WATER_MASK or None
 
 
-#: FLIGHTSIM_XPLANE_TERRAIN=off keeps the scene's own texture (Sentinel-2
-#: drape where one was baked, the engine's vertex classification
-#: otherwise). The test suite sets it.
-XPLANE_TERRAIN_ENV = "FLIGHTSIM_XPLANE_TERRAIN"
+#: The developer-only X-Plane comparison switches live in
+#: core/xplane/devflags.py (E5): the web path reads them through its
+#: functions and spells none of their names. The ``XPLANE_*_ENV`` names
+#: are re-exported for tests/test_xplane.py only.
+from core.xplane.devflags import (  # noqa: E402,F401 -- re-exported for the tests
+    XPLANE_LIGHTING_ENV, XPLANE_SKY_ENV, XPLANE_SKY_SOURCES, XPLANE_TERRAIN_ENV,
+    lighting_off as _xplane_lighting_off, sky_choice as _xplane_sky_choice,
+    terrain_off as _xplane_terrain_off,
+)
 
 
 #: The triangle budget asked for when a bake is finer than GLO-30's 30 m
@@ -1639,7 +1644,7 @@ def attach_xplane_drape(scene: Dict, report=None,
     from core.xplane import XPlaneDataError
     from core.xplane.drape import build_drape, drape_paths
 
-    if os.environ.get(XPLANE_TERRAIN_ENV, "").lower() == "off":
+    if _xplane_terrain_off():
         return None
     if not scene.get("terrain"):
         return None
@@ -1662,20 +1667,9 @@ def attach_xplane_drape(scene: Dict, report=None,
 #: Fog density at or above which the X-Plane "hazy" table is read (the
 #: showcase's hazy visibility); the storm look reads "ocast".
 XPLANE_HAZY_FOG_DENSITY = 0.010
-#: FLIGHTSIM_XPLANE_LIGHTING=off disables the lighting flags (the test
-#: suite sets it so pinned render commands do not depend on whether this
-#: machine has an X-Plane extraction).
-XPLANE_LIGHTING_ENV = "FLIGHTSIM_XPLANE_LIGHTING"
-#: FLIGHTSIM_XPLANE_SKY chooses where the clear-sky colours come from:
-#: "model" (the default) computes them from the simulator's atmosphere
-#: model (core.xplane.atmosphere: Bruneton's parameter set, the one its
-#: atmosphere shader takes) for a sun high enough for single scattering
-#: to be trusted; "tables" reads the decoded sky_colors tables for every
-#: sun. Overcast (the storm look), haze and twilight always read the
-#: tables: the model has no clouds, no haze knob and no multiple
-#: scattering, and the tables were measured for exactly those.
-XPLANE_SKY_ENV = "FLIGHTSIM_XPLANE_SKY"
-XPLANE_SKY_SOURCES = ("model", "tables")
+#: The lighting "off" switch and the clear-sky colour source ("model",
+#: the default, or "tables") are developer switches read by
+#: core/xplane/devflags.py (its docstring says what each means).
 
 
 def xplane_sky_source(source: Optional[str] = None) -> str:
@@ -1683,7 +1677,7 @@ def xplane_sky_source(source: Optional[str] = None) -> str:
     else "model"; an unknown word is refused by name."""
     import os
 
-    chosen = (source or os.environ.get(XPLANE_SKY_ENV) or "model").lower()
+    chosen = (source or _xplane_sky_choice() or "model").lower()
     if chosen not in XPLANE_SKY_SOURCES:
         raise ValueError(f"{XPLANE_SKY_ENV}={chosen!r}: expected one of "
                          f"{XPLANE_SKY_SOURCES}")
@@ -1729,7 +1723,7 @@ def xplane_lighting_flags(look: Optional[Dict],
     from core.xplane.atmosphere import MODEL_SUN_ELEVATION_FLOOR_DEG
     from core.xplane.atmosphere import sky_lighting as model_lighting
 
-    if os.environ.get(XPLANE_LIGHTING_ENV, "").lower() == "off":
+    if _xplane_lighting_off():
         return []
     tod = dict(DEFAULT_LOOK)
     if look:
@@ -3455,9 +3449,10 @@ class RunManager:
         capture_cameras = None
         capture_landmarks = None
         if wants_capture(spec):
-            # FLIGHTSIM_CAPTURE_PASSES: the extra ground-truth passes
-            # (normals, motion vectors, base colour, flow, points, amodal)
-            # on every camera that states none; unset changes nothing.
+            # The capture_passes setting (the Normals / Flow / Amodal
+            # checkboxes, or the developer override the registry names):
+            # extra ground-truth passes on every camera that states
+            # none; nothing asked for changes nothing.
             from webapp.capture import apply_capture_passes
 
             try:

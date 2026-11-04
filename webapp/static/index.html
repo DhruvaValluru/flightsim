@@ -176,7 +176,13 @@ visual-only per host (measured).</p>
   <div id="settings-fields"></div>
   <div class="settings-field" data-field="capture_passes">
     <label>Extra passes</label>
-    <div id="settings-capture-passes"></div>
+    <div id="settings-capture-passes">
+      <span id="passPicker" title="Extra ground-truth images on every camera that states none, saved as the capture_passes setting: surface normals, optical flow, whole-silhouette (amodal) masks">
+        <label><input type="checkbox" id="passNormals" value="normals"> Normals</label>
+        <label><input type="checkbox" id="passFlow" value="flow"> Flow</label>
+        <label><input type="checkbox" id="passAmodal" value="amodal"> Amodal</label>
+      </span>
+    </div>
   </div>
   <details id="settings-advanced">
     <summary class="dim">Advanced</summary>
@@ -3104,6 +3110,59 @@ $("altGuide").addEventListener("toggle", () => {
   try { localStorage.setItem("agOpen", $("altGuide").open ? "1" : "0"); } catch (_) {}
 });
 agLoad();
+// E5: the extra-pass checkboxes (#passPicker, inside E3's
+// #settings-capture-passes slot) read and write the capture_passes
+// setting through E2's GET/PUT /settings. settings.js never touches
+// them; a change PUTs the whole list; the reply's list is what is shown.
+const PASS_BOXES = [["passNormals", "normals"], ["passFlow", "flow"], ["passAmodal", "amodal"]];
+function showPasses(body) {
+  const words = (body && body.settings && Array.isArray(body.settings.capture_passes)) ? body.settings.capture_passes : [];
+  const env = body && body.env_override && body.env_override.capture_passes;
+  for (const [id, word] of PASS_BOXES) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.checked = words.indexOf(word) >= 0;
+    el.disabled = !!env;
+  }
+  const picker = document.getElementById("passPicker");
+  if (picker && env) picker.title = env + " is set in the environment and overrides these boxes";
+}
+async function loadPasses() {
+  const status = document.getElementById("settings-status");
+  try {
+    const r = await fetch("/settings");
+    const body = await r.json();
+    if (!r.ok) { if (status) status.textContent = body.detail || ("GET /settings: " + r.status); return null; }
+    showPasses(body);
+    return body;
+  } catch (e) {
+    if (status) status.textContent = "settings: server unreachable (" + (e && e.message || e) + ")";
+    return null;
+  }
+}
+async function savePasses() {
+  const words = PASS_BOXES.filter(([id]) => { const el = document.getElementById(id); return el && el.checked; })
+    .map(([, word]) => word);
+  const status = document.getElementById("settings-status");
+  try {
+    const r = await fetch("/settings", {method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({settings: {capture_passes: words}})});
+    const body = await r.json();
+    if (!r.ok) {
+      if (status) status.textContent = body.detail || ("PUT /settings: " + r.status);
+      return loadPasses();
+    }
+    showPasses(body);
+    if (status) status.textContent = "saved capture_passes";
+    return body;
+  } catch (e) {
+    if (status) status.textContent = "settings: save failed (" + (e && e.message || e) + ")";
+    return null;
+  }
+}
+for (const [id] of PASS_BOXES) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("change", savePasses);
+}
+loadPasses();
 </script>
-</body>
-</html>

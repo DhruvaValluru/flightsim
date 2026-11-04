@@ -26,9 +26,9 @@ Every switch the program reads, each with one decision. **ui**: stays exposed, i
 | `FLIGHTSIM_REBUILD_MATERIALS` | `rebuild_materials` | dev-only | unset | `scripts/ue_create_materials.py:926` |
 | `FLIGHTSIM_MACHINE` | `machine` | dev-only | unset | `scripts/phase3_event.py:37` |
 | `FLIGHTSIM_BRANCH` | `branch` | dev-only | unset | `scripts/phase3_monitor.py:235` |
-| `FLIGHTSIM_XPLANE_TERRAIN` | `xplane_terrain` | dev-only | unset | `webapp/runs.py:1560` |
-| `FLIGHTSIM_XPLANE_SKY` | `xplane_sky` | dev-only | unset | `webapp/runs.py:1653` |
-| `FLIGHTSIM_XPLANE_LIGHTING` | `xplane_lighting` | dev-only | unset | `webapp/runs.py:1649` |
+| `FLIGHTSIM_XPLANE_TERRAIN` | `xplane_terrain` | dev-only | unset | `core/xplane/devflags.py:38` |
+| `FLIGHTSIM_XPLANE_SKY` | `xplane_sky` | dev-only | unset | `core/xplane/devflags.py:50` |
+| `FLIGHTSIM_XPLANE_LIGHTING` | `xplane_lighting` | dev-only | unset | `core/xplane/devflags.py:43` |
 
 ## Keys not prefixed FLIGHTSIM_
 
