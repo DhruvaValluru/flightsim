@@ -21,6 +21,8 @@ degradation honest.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import sys
@@ -273,3 +275,80 @@ def ue_available() -> bool:
         return (editor is not None and editor.is_file()
                 and ue_bridge_binary(repo).is_file())
     return False
+
+
+#: The plugin source the stamp hashes, and the stamp scripts/build_ue.ps1
+#: writes after a successful build (ignored by git: Binaries/).
+PLUGIN_SOURCE_REL = Path("ue/Plugins/FlightSimBridge/Source")
+STAMP_REL = Path("ue/Plugins/FlightSimBridge/Binaries/build_stamp.json")
+
+
+def plugin_source_hash(repo: Path) -> str:
+    """Tree hash of the plugin's Source/ -- the same bytes as
+    scripts/build_ue.ps1 Get-PluginSourceHash. Every regular file
+    recursively, key = path relative to Source/ with ``/``, ordinal
+    ascending; content with CRLF folded to LF; one line per file,
+    ``<key>\\0<sha256 hex>\\n``; the hash of the concatenated lines."""
+    root = Path(repo) / PLUGIN_SOURCE_REL
+    files = sorted(
+        ((p.relative_to(root).as_posix(), p)
+         for p in root.rglob("*") if p.is_file()),
+        key=lambda kp: kp[0].encode("utf-8"))
+    tree = hashlib.sha256()
+    for key, path in files:
+        content = path.read_bytes().replace(b"\r\n", b"\n")
+        tree.update(key.encode("utf-8") + b"\0"
+                    + hashlib.sha256(content).hexdigest().encode("ascii")
+                    + b"\n")
+    return tree.hexdigest()
+
+
+def read_build_stamp(repo: Path) -> Optional[dict]:
+    """The build stamp as a dict, or None when missing or unparseable."""
+    try:
+        stamp = json.loads((Path(repo) / STAMP_REL).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return stamp if isinstance(stamp, dict) else None
+
+
+def _major_minor(version: object) -> str:
+    return ".".join(str(version).split(".")[:2])
+
+
+def binary_stale_check(repo: Path) -> Optional[dict]:
+    """None when the built bridge matches the source and the pinned engine;
+    else ``{"message", "stamp_hash", "source_hash"}`` (stamp_hash is
+    "no stamp" when the stamp is missing). None as well when no built
+    bridge binary exists at all: there is nothing stale to run, and the
+    absent build is the ue.platform / build-script refusal's to name (on a
+    Mac ue_available() is True with no binary and no Windows stamp)."""
+    if not ue_bridge_binary(Path(repo)).is_file():
+        return None
+    current = plugin_source_hash(repo)
+    stamp = read_build_stamp(repo)
+    if stamp is None:
+        return {"message": f"the bridge has no build stamp (source {current}); "
+                           f"build it with scripts/build_ue.ps1",
+                "stamp_hash": "no stamp", "source_hash": current}
+    stamped = str(stamp.get("source_sha256", ""))
+    built_on = str(stamp.get("engine_version", ""))
+    problems = []
+    if stamped != current:
+        problems.append(f"the built bridge is from source {stamped or 'unknown'} "
+                        f"but the source is now {current}")
+    if _major_minor(built_on) != _major_minor(UE_ENGINE_VERSION):
+        problems.append(f"it was built against engine {built_on or 'unknown'}, "
+                        f"the pin is {UE_ENGINE_VERSION}")
+    if not problems:
+        return None
+    return {"message": "; ".join(problems),
+            "stamp_hash": stamped or "unknown", "source_hash": current}
+
+
+def binary_stale_reason(repo: Path) -> Optional[str]:
+    """None when fresh, else the message naming the stamp hash (or "no
+    stamp"), the current source hash, and the engine if it differs.
+    Refusal constraint: ``engine.binary_stale``."""
+    found = binary_stale_check(repo)
+    return None if found is None else found["message"]

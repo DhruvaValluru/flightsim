@@ -1218,6 +1218,15 @@ def _run(args: argparse.Namespace) -> int:
     # pre-flight gate, so a camera inside a mountain still refuses
     # BEFORE a UE pass is spent rather than after one.
     # ------------------------------------------------------------------
+    if args.render and ue_available():
+        from core.util.platform import binary_stale_check
+
+        stale = binary_stale_check(REPO)
+        if stale is not None:
+            return _refuse([Violation(
+                "engine.binary_stale", stale["message"],
+                detail={"stamp_hash": stale["stamp_hash"],
+                        "source_hash": stale["source_hash"]})])
     host_flight = args.render and not args.no_host_flight and ue_available()
     if host_flight:
         import subprocess
