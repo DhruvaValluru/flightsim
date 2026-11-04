@@ -97,6 +97,11 @@ ROLE_TRAFFIC = "traffic"
 ROLE_SCENE = "scene"
 
 CLASS_AIRCRAFT = "aircraft"
+#: The component classes (Phase C): parts of an aircraft that carry their
+#: own ``int_id`` and a ``parent``. Defined once, here; labels.py and the
+#: exporter import it. In the taxonomy they follow the documented classes,
+#: in this order, so no existing ``class_id`` moves.
+COMPONENT_CLASSES = ("payload", "landing_gear")
 CLASS_TERRAIN = "terrain"
 #: W2: the buildings' one aggregate object (the 8-bit stencil's limit:
 #: no per-instance ids; they live in the buildings document).
@@ -145,15 +150,20 @@ class SceneObject:
     licence: Optional[str]
     in_scene: bool
     labelled: bool
+    #: a component's aircraft ``id``; None for every other object
+    parent: Optional[str] = None
 
     def to_dict(self) -> Dict:
-        return {
+        out = {
             "id": self.id, "int_id": self.int_id, "class": self.class_name,
             "class_id": self.class_id, "instance": self.instance,
             "role": self.role, "mesh_sha256": self.mesh_sha256,
             "licence": self.licence, "in_scene": self.in_scene,
             "labelled": self.labelled,
         }
+        if self.parent is not None:
+            out["parent"] = self.parent
+        return out
 
 
 def taxonomy_classes(spec) -> List[str]:
@@ -481,6 +491,22 @@ def by_int_id(objects: Sequence) -> Dict[int, Dict]:
     for o in objects:
         entry = o.to_dict() if isinstance(o, SceneObject) else dict(o)
         out[int(entry["int_id"])] = entry
+    return out
+
+
+def children_of(objects: Sequence) -> Dict[int, List[int]]:
+    """``{parent int_id: [child int_ids]}`` over SceneObjects or
+    ``objects[]`` dicts whose ``parent`` names another object's ``id``
+    (a parent the list does not name is skipped). Children keep list
+    order; objects without children are absent."""
+    entries = [o.to_dict() if isinstance(o, SceneObject) else dict(o)
+               for o in objects]
+    ids = {str(e["id"]): int(e["int_id"]) for e in entries}
+    out: Dict[int, List[int]] = {}
+    for entry in entries:
+        parent = entry.get("parent")
+        if parent is not None and str(parent) in ids:
+            out.setdefault(ids[str(parent)], []).append(int(entry["int_id"]))
     return out
 
 

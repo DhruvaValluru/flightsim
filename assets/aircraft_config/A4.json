@@ -57,7 +57,42 @@
       "right_main_gear": {
         "fdm_contact": "RIGHT_MAIN"
       }
-    }
+    },
+    "components": [
+      {
+        "id": "store_sta2",
+        "class": "payload",
+        "station": "STA2",
+        "source": "A4.xml <pointmass name=\"STA2\"> 750 LBS; the store hung on that station"
+      },
+      {
+        "id": "drop_tank_sta3",
+        "class": "payload",
+        "station": "STA3",
+        "source": "A4.xml <pointmass name=\"STA3\"> 750 LBS; the centreline drop tank"
+      },
+      {
+        "id": "store_sta4",
+        "class": "payload",
+        "station": "STA4",
+        "source": "A4.xml <pointmass name=\"STA4\"> 750 LBS; the store hung on that station"
+      },
+      {
+        "id": "nose_gear",
+        "class": "landing_gear",
+        "source": "nose_gear"
+      },
+      {
+        "id": "left_main_gear",
+        "class": "landing_gear",
+        "source": "left_main_gear"
+      },
+      {
+        "id": "right_main_gear",
+        "class": "landing_gear",
+        "source": "right_main_gear"
+      }
+    ]
   },
   "limits": {
     "n_z_pos_g": {
@@ -124,33 +159,30 @@
         "index": 2,
         "arm_in": 3.6,
         "poh_arm_in": null,
-        "default_lb": 0.0,
-        "max_kg": 0.0,
-        "loadable": false,
-        "source": "assets/fdm_root/aircraft/A4/A4.xml <pointmass name=\"STA2\"> 0 LBS at x 3.6 in",
-        "reason": "a store station: its weight drives the stores drag term in the model's aerodynamics (inertia/pointmass-weight-lbs), so a store is stated as a store, not drawn as payload"
+        "default_lb": 750.0,
+        "max_kg": 340.2,
+        "loadable": true,
+        "source": "assets/fdm_root/aircraft/A4/A4.xml <pointmass name=\"STA2\"> 750 LBS at x 3.6 in; owner decision 2 (docs/phase3/decisions.md): STA2/STA3/STA4 carry 750 lb each, a stated choice for a default loadout, not a handbook rating"
       },
       {
         "name": "STA3",
         "index": 3,
         "arm_in": -1.2,
         "poh_arm_in": null,
-        "default_lb": 0.0,
-        "max_kg": 0.0,
-        "loadable": false,
-        "source": "assets/fdm_root/aircraft/A4/A4.xml <pointmass name=\"STA3\"> 0 LBS at x -1.2 in",
-        "reason": "a store station: its weight drives the stores drag term in the model's aerodynamics (inertia/pointmass-weight-lbs), so a store is stated as a store, not drawn as payload"
+        "default_lb": 750.0,
+        "max_kg": 340.2,
+        "loadable": true,
+        "source": "assets/fdm_root/aircraft/A4/A4.xml <pointmass name=\"STA3\"> 750 LBS at x -1.2 in; owner decision 2 (docs/phase3/decisions.md): STA2/STA3/STA4 carry 750 lb each, a stated choice for a default loadout, not a handbook rating"
       },
       {
         "name": "STA4",
         "index": 4,
         "arm_in": 3.6,
         "poh_arm_in": null,
-        "default_lb": 0.0,
-        "max_kg": 0.0,
-        "loadable": false,
-        "source": "assets/fdm_root/aircraft/A4/A4.xml <pointmass name=\"STA4\"> 0 LBS at x 3.6 in",
-        "reason": "a store station: its weight drives the stores drag term in the model's aerodynamics (inertia/pointmass-weight-lbs), so a store is stated as a store, not drawn as payload"
+        "default_lb": 750.0,
+        "max_kg": 340.2,
+        "loadable": true,
+        "source": "assets/fdm_root/aircraft/A4/A4.xml <pointmass name=\"STA4\"> 750 LBS at x 3.6 in; owner decision 2 (docs/phase3/decisions.md): STA2/STA3/STA4 carry 750 lb each, a stated choice for a default loadout, not a handbook rating"
       },
       {
         "name": "STA5",
@@ -208,6 +240,19 @@
       "reason": "no NATOPS envelope transcribed for the A-4"
     },
     "policy_station": "PILOT",
-    "policy_station_reason": "the one loadable station (the five others are store stations): a payload draw replaces the XML's 180 lb pilot"
+    "policy_station_reason": "the pilot seat: a payload draw replaces the XML's 180 lb pilot; STA2-4 carry the default loadout and are loadable stores",
+    "loadout": {
+      "stations": {
+        "STA2": 750.0,
+        "STA3": 750.0,
+        "STA4": 750.0
+      },
+      "model_vars": {
+        "STA2_LOAD": 1,
+        "STA3_LOAD": 1,
+        "STA4_LOAD": 1
+      },
+      "source": "owner decision 2 (docs/phase3/decisions.md): STA2/STA3/STA4 carry 750 lb each, a stated choice for a default loadout, not a handbook rating"
+    }
   }
 }

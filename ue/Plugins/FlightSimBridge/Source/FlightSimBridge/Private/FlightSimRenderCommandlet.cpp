@@ -56,7 +56,7 @@ DEFINE_LOG_CATEGORY(LogFlightSimRender);
 // machine, MSVC 14.44, 2026-10-08). The commandlet's Main only sets up and
 // drives the render -- the work is the engine's and the GPU's -- so an
 // unoptimised Main costs nothing measurable; the warning is silenced for this
-// file only, and splitting Main is left to a refactor of its own.
+// file only (harmless on 5.5: it only disables a warning there), and splitting Main is left to a refactor of its own.
 #if defined(_MSC_VER)
 #pragma warning(disable : 4883)
 #endif

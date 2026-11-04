@@ -1,0 +1,41 @@
+{
+  "aligned_at": "2026-11-03",
+  "baseline_failures": [
+    "tests/test_ue_physics_source.py::test_the_gauss_legendre_table_is_numpys_to_the_bit"
+  ],
+  "build_order": [
+    "A1+A2",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A7",
+    "A8",
+    "A9",
+    "A10",
+    "A11",
+    "A12+A13",
+    "C1",
+    "C5",
+    "C6"
+  ],
+  "letter": "A",
+  "stage": "aligned",
+  "units": [
+    "A1+A2",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A7",
+    "A8",
+    "A9",
+    "A10",
+    "A11",
+    "A12+A13",
+    "C1",
+    "C5",
+    "C6"
+  ],
+  "updated": "2026-11-03T21:58:05"
+}

@@ -1,0 +1,239 @@
+{"agent": "mac", "box": "", "stage": "start", "kind": "note", "note": "mac session up; peer windows=flightsim-98", "t": 1793759370.405427, "machine": "mac"}
+{"agent": "mac", "box": "", "stage": "msg", "kind": "note", "note": "msg P3 mac=flightsim-6f up; phase3 scripts on origin/phase-2-final at bd68745b; waiting for P3 go A", "t": 1793759491.1750898, "machine": "mac"}
+{"agent": "mac", "box": "", "stage": "start", "kind": "note", "note": "FAIL peers: flightsim-98 is another session on this Mac, not Windows; Windows session is flightsim-64 (from events_windows.log), not visible in ListAgents here; peers.json windows=flightsim-64", "t": 1793759749.6585112, "machine": "mac"}
+{"agent": "breakdown", "box": "A", "stage": "plan", "kind": "start", "cmd": "python3 scripts/phase3_digest.py A C1 C5 C6", "note": "", "t": 1793759884.250015, "machine": "mac"}
+{"agent": "breakdown", "box": "A", "stage": "plan", "kind": "end", "cmd": "python3 scripts/phase3_digest.py A C1 C5 C6", "exit": 0, "secs": 0.5, "note": "", "t": 1793759884.723032, "machine": "mac"}
+{"agent": "breakdown", "box": "A", "stage": "plan", "kind": "note", "note": "digest_A.md written (16 boxes incl C1 C5 C6); spawning 14 sub-agents: A1+A2 A3 A4 A5 A6 A7 A8 A9 A10 A11 A12+A13 C1 C5 C6", "t": 1793759931.3153532, "machine": "mac"}
+{"agent": "sub", "box": "A4", "stage": "plan", "kind": "note", "note": "start A4", "t": 1793760052.4295092, "machine": "mac"}
+{"agent": "sub", "box": "A11", "stage": "plan", "kind": "note", "note": "start A11", "t": 1793760052.58241, "machine": "mac"}
+{"agent": "sub", "box": "A8", "stage": "plan", "kind": "note", "note": "start A8", "t": 1793760053.350026, "machine": "mac"}
+{"agent": "sub", "box": "C1", "stage": "plan", "kind": "note", "note": "start C1", "t": 1793760053.771501, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "start A9", "t": 1793760055.496707, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793760055.53681, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_A.md", "t": 1793760055.577399, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760055.6188989, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "start C5", "t": 1793760055.968148, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_A.md", "t": 1793760056.010377, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open tasks/phase3_todo.md", "t": 1793760056.056285, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760056.096315, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "start C6", "t": 1793760056.8933, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793760056.933894, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_A.md", "t": 1793760056.973845, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "open tasks/phase3_todo.md", "t": 1793760057.014245, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760057.061256, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "open core/capture/verify.py", "t": 1793760057.1026108, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "open core/dataset/export.py", "t": 1793760057.142237, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "open scripts/mutation_check.sh", "t": 1793760057.181653, "machine": "mac"}
+{"agent": "sub", "box": "A6", "stage": "plan", "kind": "note", "note": "start A6", "t": 1793760057.198956, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "open tests/test_annotation_gates.py", "t": 1793760057.2262132, "machine": "mac"}
+{"agent": "sub", "box": "A6", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_A.md", "t": 1793760057.239703, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "open tests/test_dataset_boxes.py", "t": 1793760057.267524, "machine": "mac"}
+{"agent": "sub", "box": "A6", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760057.280262, "machine": "mac"}
+{"agent": "sub", "box": "A5", "stage": "plan", "kind": "note", "note": "start A5", "t": 1793760058.2559302, "machine": "mac"}
+{"agent": "sub", "box": "A5", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760058.2976031, "machine": "mac"}
+{"agent": "sub", "box": "A5", "stage": "plan", "kind": "note", "note": "open ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json", "t": 1793760058.337607, "machine": "mac"}
+{"agent": "sub", "box": "A5", "stage": "plan", "kind": "note", "note": "open scripts/vendor_ue_plugin.ps1", "t": 1793760058.387954, "machine": "mac"}
+{"agent": "sub", "box": "A5", "stage": "plan", "kind": "note", "note": "open scripts/jsbsim_plugin_patches_5_6.diff", "t": 1793760058.429662, "machine": "mac"}
+{"agent": "sub", "box": "A5", "stage": "plan", "kind": "note", "note": "open scripts/check_bridge_api.sh", "t": 1793760058.470237, "machine": "mac"}
+{"agent": "sub", "box": "A5", "stage": "plan", "kind": "note", "note": "open experiments/gate5_ue_parity.py", "t": 1793760058.509544, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "start A10", "t": 1793760058.688808, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793760058.731958, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_A.md", "t": 1793760058.773796, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760058.8273878, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "open webapp/generate.py", "t": 1793760058.867469, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "open webapp/server.py", "t": 1793760058.906813, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "start A3", "t": 1793760058.9113338, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793760058.952408, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_A.md", "t": 1793760058.999795, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760059.04005, "machine": "mac"}
+{"agent": "sub", "box": "A11", "stage": "plan", "kind": "note", "note": "open core/capture/labels.py", "t": 1793760059.427418, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open flightsim/capture.py", "t": 1793760059.755713, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open webapp/runs.py", "t": 1793760059.7951639, "machine": "mac"}
+{"agent": "sub", "box": "A1", "stage": "plan", "kind": "note", "note": "start A1+A2", "t": 1793760059.8105989, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open ue FlightSimRenderCommandlet.cpp", "t": 1793760059.83655, "machine": "mac"}
+{"agent": "sub", "box": "A1", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793760059.8508852, "machine": "mac"}
+{"agent": "sub", "box": "A1", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_A.md", "t": 1793760059.89518, "machine": "mac"}
+{"agent": "sub", "box": "A1", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760059.9387589, "machine": "mac"}
+{"agent": "sub", "box": "A12", "stage": "plan", "kind": "note", "note": "start A12+A13", "t": 1793760059.942612, "machine": "mac"}
+{"agent": "sub", "box": "A1", "stage": "plan", "kind": "note", "note": "open docs/TOOLCHAIN.md", "t": 1793760059.9803069, "machine": "mac"}
+{"agent": "sub", "box": "A12", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_A.md", "t": 1793760059.983679, "machine": "mac"}
+{"agent": "sub", "box": "A1", "stage": "plan", "kind": "note", "note": "open core/util/platform.py", "t": 1793760060.0199099, "machine": "mac"}
+{"agent": "sub", "box": "A12", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760060.024687, "machine": "mac"}
+{"agent": "sub", "box": "A1", "stage": "plan", "kind": "note", "note": "open tests/test_platform.py", "t": 1793760060.060662, "machine": "mac"}
+{"agent": "sub", "box": "A1", "stage": "plan", "kind": "note", "note": "open ue/FlightSim.uproject", "t": 1793760060.101831, "machine": "mac"}
+{"agent": "sub", "box": "A6", "stage": "plan", "kind": "note", "note": "open scripts/ue_create_materials.py", "t": 1793760060.724082, "machine": "mac"}
+{"agent": "sub", "box": "A8", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793760061.2445319, "machine": "mac"}
+{"agent": "sub", "box": "A8", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_A.md", "t": 1793760061.284808, "machine": "mac"}
+{"agent": "sub", "box": "A8", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760061.324231, "machine": "mac"}
+{"agent": "sub", "box": "A8", "stage": "plan", "kind": "note", "note": "open flightsim/capture.py", "t": 1793760061.374391, "machine": "mac"}
+{"agent": "sub", "box": "A8", "stage": "plan", "kind": "note", "note": "open core/capture/hostflight.py", "t": 1793760061.414952, "machine": "mac"}
+{"agent": "sub", "box": "A8", "stage": "plan", "kind": "note", "note": "open NEXT.md", "t": 1793760061.4555352, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "start A7", "t": 1793760061.4858398, "machine": "mac"}
+{"agent": "sub", "box": "A8", "stage": "plan", "kind": "note", "note": "open webapp/runs.py", "t": 1793760061.503082, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793760061.526485, "machine": "mac"}
+{"agent": "sub", "box": "A8", "stage": "plan", "kind": "note", "note": "open ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimScenarioWorld.cpp", "t": 1793760061.54458, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_A.md", "t": 1793760061.57032, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793760061.619251, "machine": "mac"}
+{"agent": "sub", "box": "A4", "stage": "plan", "kind": "note", "note": "open flightsim/capture.py", "t": 1793760061.736574, "machine": "mac"}
+{"agent": "sub", "box": "A4", "stage": "plan", "kind": "note", "note": "open core/util/platform.py", "t": 1793760061.777162, "machine": "mac"}
+{"agent": "sub", "box": "A4", "stage": "plan", "kind": "note", "note": "open core/messages/catalog.yaml", "t": 1793760061.838927, "machine": "mac"}
+{"agent": "sub", "box": "A4", "stage": "plan", "kind": "note", "note": "open webapp/runs.py", "t": 1793760061.880985, "machine": "mac"}
+{"agent": "sub", "box": "A4", "stage": "plan", "kind": "note", "note": "open scripts/build_ue.ps1", "t": 1793760061.9331682, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "open scripts/build_ue.ps1", "t": 1793760063.071166, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "open scripts/ue_preflight.ps1", "t": 1793760063.112993, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "open tests/test_platform.py", "t": 1793760063.152878, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open core/messages/catalog.yaml", "t": 1793760063.3670778, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open ue FlightSimRenderCommandlet.cpp (grep)", "t": 1793760063.4077609, "machine": "mac"}
+{"agent": "sub", "box": "A12", "stage": "plan", "kind": "note", "note": "open core/capture/verify.py", "t": 1793760063.8659048, "machine": "mac"}
+{"agent": "sub", "box": "A12", "stage": "plan", "kind": "note", "note": "open scripts/label_diagnose.py", "t": 1793760063.908331, "machine": "mac"}
+{"agent": "sub", "box": "A12", "stage": "plan", "kind": "note", "note": "open NEXT.md", "t": 1793760063.947818, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open flightsim/capture.py", "t": 1793760064.896893, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open webapp/generate.py", "t": 1793760064.939872, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open scripts/import_aircraft.py", "t": 1793760064.989899, "machine": "mac"}
+{"agent": "sub", "box": "A6", "stage": "plan", "kind": "note", "note": "open tests/test_ue_materials.py", "t": 1793760065.135478, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "open tests/test_webapp_generate.py", "t": 1793760066.087935, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "open docs review grep", "t": 1793760066.1280022, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open core/capture/labels.py", "t": 1793760066.610035, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open core/capture/manifest.py", "t": 1793760066.6519911, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open core/capture/schema.py", "t": 1793760066.702105, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open core/scenario/card.py", "t": 1793760066.743239, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open tests/test_camera_labels.py", "t": 1793760066.784485, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open docs/schemas/capture_manifest.v7.schema.json", "t": 1793760066.8250382, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open core/capture/labels.py (grep)", "t": 1793760067.943273, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "open tests/test_powershell_scripts.py", "t": 1793760069.6325052, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "open core/util/platform.py", "t": 1793760069.673527, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open assets_pipeline/importer.py", "t": 1793760070.156478, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open webapp/runs.py", "t": 1793760070.196681, "machine": "mac"}
+{"agent": "sub", "box": "A11", "stage": "plan", "kind": "note", "note": "open flightsim/capture.py, webapp/runs.py, catalog.yaml", "t": 1793760070.646168, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "open flightsim/capture.py", "t": 1793760071.630143, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "open tasks/phase3_todo.md", "t": 1793760071.6813152, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open webapp/runs.py:1920-1940,3540-3570", "t": 1793760071.799914, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open scripts/render_ue_scenario.ps1:120-170", "t": 1793760075.8910809, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open core/capture/objects.py", "t": 1793760076.1324632, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open tests/test_annotation_gates.py", "t": 1793760076.173685, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "open tests/test_capture_schema.py", "t": 1793760076.2143319, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open core/util/platform.py", "t": 1793760077.898886, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open scripts/ue_import_aircraft.py", "t": 1793760077.939024, "machine": "mac"}
+{"agent": "sub", "box": "A11", "stage": "plan", "kind": "note", "note": "open FlightSimRenderCommandlet.cpp (grep)", "t": 1793760078.732209, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "open webapp/capture.py:52", "t": 1793760078.8939772, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "open assets_pipeline/importer.py", "t": 1793760080.2546198, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "open tests/test_aircraft_assets.py", "t": 1793760082.268409, "machine": "mac"}
+{"agent": "sub", "box": "A8", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760083.898398, "machine": "mac"}
+{"agent": "sub", "box": "A9", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760097.202003, "machine": "mac"}
+{"agent": "sub", "box": "A6", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760097.556941, "machine": "mac"}
+{"agent": "sub", "box": "C6", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760097.68397, "machine": "mac"}
+{"agent": "sub", "box": "A5", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760098.891031, "machine": "mac"}
+{"agent": "sub", "box": "A12", "stage": "plan", "kind": "note", "note": "PASS note written (A12, A13)", "t": 1793760100.2378619, "machine": "mac"}
+{"agent": "sub", "box": "A4", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760100.99079, "machine": "mac"}
+{"agent": "sub", "box": "C1", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760102.2724092, "machine": "mac"}
+{"agent": "sub", "box": "A11", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760105.779878, "machine": "mac"}
+{"agent": "sub", "box": "A10", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760106.805401, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/A3.md (written)", "t": 1793760107.845262, "machine": "mac"}
+{"agent": "sub", "box": "A3", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760107.8864481, "machine": "mac"}
+{"agent": "sub", "box": "A7", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760113.6423008, "machine": "mac"}
+{"agent": "sub", "box": "A1", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760114.520757, "machine": "mac"}
+{"agent": "sub", "box": "A2", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760114.5610209, "machine": "mac"}
+{"agent": "sub", "box": "C5", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793760126.9868832, "machine": "mac"}
+{"agent": "breakdown", "box": "A", "stage": "plan", "kind": "note", "note": "PASS 16 notes written by 14 sub-agents; spawning Align first run", "t": 1793760168.393875, "machine": "mac"}
+{"agent": "align", "box": "A", "stage": "align", "kind": "note", "note": "align A start (first run)", "t": 1793760215.086658, "machine": "mac"}
+{"agent": "mac", "box": "", "stage": "build", "cwd": "tmp", "kind": "start", "cmd": "pwd", "note": "", "t": 1793760238.788481, "machine": "mac"}
+{"agent": "mac", "box": "", "stage": "build", "cwd": "tmp", "kind": "end", "cmd": "pwd", "exit": 0, "secs": 0.0, "note": "", "t": 1793760238.792628, "machine": "mac"}
+{"agent": "align", "box": "A", "stage": "align", "kind": "note", "note": "PASS align A final: 16 notes aligned in place, build order in A.json, A_decisions_needed.md written, nothing sent back", "t": 1793760858.453844, "machine": "mac"}
+{"agent": "breakdown", "box": "A", "stage": "build", "kind": "note", "note": "PASS align first run; wave 1 builders: A1+A2 A3 A5 A6 A10 C1 C5 (no shared files); then A4->A7->A8->A9->A11 chain, A12+A13, C6", "t": 1793760935.1656032, "machine": "mac"}
+{"agent": "builder", "box": "A6", "stage": "build", "cwd": "p3-A6", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_ue_materials.py", "note": "", "t": 1793761041.1575391, "machine": "mac"}
+{"agent": "builder", "box": "A6", "stage": "build", "cwd": "p3-A6", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_ue_materials.py", "exit": 0, "secs": 0.8, "note": "", "t": 1793761042.0042188, "machine": "mac"}
+{"agent": "builder", "box": "A6", "stage": "build", "cwd": "p3-A6", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_ue_materials.py", "note": "", "t": 1793761046.209544, "machine": "mac"}
+{"agent": "builder", "box": "A6", "stage": "build", "cwd": "p3-A6", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_ue_materials.py", "exit": 0, "secs": 0.6, "note": "", "t": 1793761046.857086, "machine": "mac"}
+{"agent": "builder", "box": "A6", "stage": "build", "cwd": "p3-A6", "kind": "start", "cmd": "git add -A", "note": "", "t": 1793761046.898672, "machine": "mac"}
+{"agent": "builder", "box": "A6", "stage": "build", "cwd": "p3-A6", "kind": "end", "cmd": "git add -A", "exit": 0, "secs": 0.1, "note": "", "t": 1793761047.0234292, "machine": "mac"}
+{"agent": "builder", "box": "A6", "stage": "build", "cwd": "p3-A6", "kind": "start", "cmd": "git commit -q -m A6: pin GRAPH_GENERATIONS key set and stencil-id build; engine-neutral comment\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>", "note": "", "t": 1793761047.065699, "machine": "mac"}
+{"agent": "builder", "box": "A6", "stage": "build", "cwd": "p3-A6", "kind": "end", "cmd": "git commit -q -m A6: pin GRAPH_GENERATIONS key set and stencil-id build; engine-neutral comment\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>", "exit": 0, "secs": 0.1, "note": "", "t": 1793761047.123324, "machine": "mac"}
+{"agent": "builder", "box": "A6", "stage": "build", "kind": "note", "note": "PASS built A6", "t": 1793761047.247249, "machine": "mac"}
+{"agent": "builder", "box": "A5", "stage": "build", "cwd": "p3-A5", "kind": "start", "cmd": "git add -A", "note": "", "t": 1793761049.069741, "machine": "mac"}
+{"agent": "builder", "box": "A5", "stage": "build", "cwd": "p3-A5", "kind": "end", "cmd": "git add -A", "exit": 0, "secs": 0.1, "note": "", "t": 1793761049.141682, "machine": "mac"}
+{"agent": "builder", "box": "A5", "stage": "build", "cwd": "p3-A5", "kind": "start", "cmd": "git commit -qm A5: VENDORED.json targets 5.5 with per-patch status; pin test\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>", "note": "", "t": 1793761049.1847732, "machine": "mac"}
+{"agent": "builder", "box": "A5", "stage": "build", "cwd": "p3-A5", "kind": "end", "cmd": "git commit -qm A5: VENDORED.json targets 5.5 with per-patch status; pin test\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>", "exit": 0, "secs": 0.1, "note": "", "t": 1793761049.2407339, "machine": "mac"}
+{"agent": "builder", "box": "A5", "stage": "build", "kind": "note", "note": "PASS built A5 (pin test fails only until A2 sets UE_ENGINE_VERSION=5.5)", "t": 1793761049.334516, "machine": "mac"}
+{"agent": "builder", "box": "A3", "stage": "build", "cwd": "p3-A3", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_powershell_scripts.py tests/test_platform.py", "note": "", "t": 1793761059.4244108, "machine": "mac"}
+{"agent": "builder", "box": "A3", "stage": "build", "cwd": "p3-A3", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_powershell_scripts.py tests/test_platform.py", "exit": 0, "secs": 2.0, "note": "", "t": 1793761061.4628658, "machine": "mac"}
+{"agent": "builder", "box": "A3", "stage": "build", "cwd": "p3-A3", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_powershell_scripts.py tests/test_platform.py", "note": "", "t": 1793761074.346582, "machine": "mac"}
+{"agent": "builder", "box": "A3", "stage": "build", "cwd": "p3-A3", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_powershell_scripts.py tests/test_platform.py", "exit": 0, "secs": 1.7, "note": "", "t": 1793761076.0438342, "machine": "mac"}
+{"agent": "mac", "box": "A", "stage": "build", "kind": "start", "cmd": ".venv/bin/pytest -q tests/test_ue_physics_source.py -k gauss_legendre", "note": "", "t": 1793761077.225562, "machine": "mac"}
+{"agent": "mac", "box": "A", "stage": "build", "kind": "end", "cmd": ".venv/bin/pytest -q tests/test_ue_physics_source.py -k gauss_legendre", "exit": 1, "secs": 0.4, "note": "", "t": 1793761077.656338, "machine": "mac"}
+{"agent": "integrator", "box": "A6", "stage": "build", "kind": "note", "note": "PASS integrated A6 f3dd584884694dc8b0fb00f1df3963a392f9a06c", "t": 1793761081.4355571, "machine": "mac"}
+{"agent": "builder", "box": "A3", "stage": "build", "kind": "note", "note": "PASS built A3", "t": 1793761081.693781, "machine": "mac"}
+{"agent": "builder", "box": "A3", "stage": "build", "cwd": "p3-A3", "kind": "start", "cmd": "git add -A", "note": "", "t": 1793761085.3970098, "machine": "mac"}
+{"agent": "builder", "box": "A3", "stage": "build", "cwd": "p3-A3", "kind": "end", "cmd": "git add -A", "exit": 0, "secs": 0.1, "note": "", "t": 1793761085.482374, "machine": "mac"}
+{"agent": "builder", "box": "A3", "stage": "build", "cwd": "p3-A3", "kind": "start", "cmd": "git commit -q -m A3: the build refuses the wrong engine by name (ue_engine.ps1, no UE_5.* glob) -m Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>", "note": "", "t": 1793761085.524171, "machine": "mac"}
+{"agent": "builder", "box": "A3", "stage": "build", "cwd": "p3-A3", "kind": "end", "cmd": "git commit -q -m A3: the build refuses the wrong engine by name (ue_engine.ps1, no UE_5.* glob) -m Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>", "exit": 0, "secs": 0.1, "note": "", "t": 1793761085.5945768, "machine": "mac"}
+{"agent": "mac", "box": "A", "stage": "build", "kind": "note", "note": "baseline: tests/test_ue_physics_source.py::test_the_gauss_legendre_table_is_numpys_to_the_bit already fails on phase-2-final at bd68745b before any Phase 3 merge (pre-existing, not a letter A regression)", "t": 1793761085.671266, "machine": "mac"}
+{"agent": "builder", "box": "A3", "stage": "build", "kind": "note", "note": "PASS built A3", "t": 1793761085.750019, "machine": "mac"}
+{"agent": "builder", "box": "A10", "stage": "build", "kind": "note", "note": "PASS built A10", "t": 1793761093.530198, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_platform.py tests/test_gate6_visual.py tests/test_ue_weather_source.py tests/test_toolchain_doc.py", "note": "", "t": 1793761098.2106419, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_platform.py tests/test_gate6_visual.py tests/test_ue_weather_source.py tests/test_toolchain_doc.py", "exit": 4, "secs": 0.2, "note": "", "t": 1793761098.427994, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_platform.py tests/test_gate6_visual.py tests/test_ue_weather_source.py tests/test_toolchain_doc.py", "note": "", "t": 1793761105.7268329, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_platform.py tests/test_gate6_visual.py tests/test_ue_weather_source.py tests/test_toolchain_doc.py", "exit": 1, "secs": 4.2, "note": "", "t": 1793761109.913057, "machine": "mac"}
+{"agent": "integrator", "box": "A3", "stage": "build", "cwd": "p3-A3", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_powershell_scripts.py tests/test_platform.py", "note": "", "t": 1793761124.855882, "machine": "mac"}
+{"agent": "integrator", "box": "A3", "stage": "build", "cwd": "p3-A3", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_powershell_scripts.py tests/test_platform.py", "exit": 0, "secs": 1.7, "note": "", "t": 1793761126.575341, "machine": "mac"}
+{"agent": "integrator", "box": "A3", "stage": "build", "kind": "start", "cmd": "git merge --no-ff p3-A3 -m Merge p3-A3: build/preflight refuse the wrong engine by name (ue_engine.ps1, no UE_5.* glob)", "note": "", "t": 1793761129.382081, "machine": "mac"}
+{"agent": "integrator", "box": "A3", "stage": "build", "kind": "end", "cmd": "git merge --no-ff p3-A3 -m Merge p3-A3: build/preflight refuse the wrong engine by name (ue_engine.ps1, no UE_5.* glob)", "exit": 0, "secs": 0.2, "note": "", "t": 1793761129.561686, "machine": "mac"}
+{"agent": "integrator", "box": "A3", "stage": "build", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_powershell_scripts.py tests/test_platform.py", "note": "", "t": 1793761129.6204531, "machine": "mac"}
+{"agent": "integrator", "box": "A3", "stage": "build", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_powershell_scripts.py tests/test_platform.py", "exit": 1, "secs": 1.8, "note": "", "t": 1793761131.3906271, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_platform.py tests/test_gate6_visual.py tests/test_ue_weather_source.py tests/test_toolchain_doc.py", "note": "", "t": 1793761132.744392, "machine": "mac"}
+{"agent": "integrator", "box": "A3", "stage": "build", "kind": "note", "note": "PASS integrated A3 (488c80e63a0f2be58b98f66c06d4fad3b03c15fd); MAIN test_platform utf8 test fails only on untracked scripts/phase3_digest.py:144", "t": 1793761135.247437, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_platform.py tests/test_gate6_visual.py tests/test_ue_weather_source.py tests/test_toolchain_doc.py", "exit": 1, "secs": 3.1, "note": "", "t": 1793761135.8597782, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_platform.py -k target_cs", "note": "", "t": 1793761135.906267, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_platform.py -k target_cs", "exit": 1, "secs": 0.3, "note": "", "t": 1793761136.157971, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "start", "cmd": "git add -A", "note": "", "t": 1793761141.502996, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "end", "cmd": "git add -A", "exit": 0, "secs": 0.1, "note": "", "t": 1793761141.6051111, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "start", "cmd": "git commit -q -m A1+A2: pin the engine to 5.5.4, version-guard GetMaterialResource, pin sweep and tests\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TYf9hdwcEyKovqfAJKwdzh", "note": "", "t": 1793761141.647994, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "cwd": "p3-A2", "kind": "end", "cmd": "git commit -q -m A1+A2: pin the engine to 5.5.4, version-guard GetMaterialResource, pin sweep and tests\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TYf9hdwcEyKovqfAJKwdzh", "exit": 0, "secs": 0.1, "note": "", "t": 1793761141.711194, "machine": "mac"}
+{"agent": "builder", "box": "A2", "stage": "build", "kind": "note", "note": "PASS built A1+A2 51e7bdb5", "t": 1793761141.902252, "machine": "mac"}
+{"agent": "mac", "box": "A", "stage": "build", "kind": "start", "cmd": ".venv/bin/pytest -q tests/test_platform.py -k utf8", "note": "", "t": 1793761168.423767, "machine": "mac"}
+{"agent": "mac", "box": "A", "stage": "build", "kind": "end", "cmd": ".venv/bin/pytest -q tests/test_platform.py -k utf8", "exit": 0, "secs": 0.5, "note": "", "t": 1793761168.9157948, "machine": "mac"}
+{"agent": "integrator", "box": "A10", "stage": "build", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q --rootdir ../p3-A10 ../p3-A10/tests/test_webapp_generate.py", "note": "", "t": 1793761177.141881, "machine": "mac"}
+{"agent": "integrator", "box": "A10", "stage": "build", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q --rootdir ../p3-A10 ../p3-A10/tests/test_webapp_generate.py", "exit": 0, "secs": 17.0, "note": "", "t": 1793761194.119477, "machine": "mac"}
+{"agent": "mac", "box": "", "stage": "msg", "kind": "note", "note": "msg P3 mac=flightsim-6f up and visible; decisions read; builds under way; re-send go A (sent to Windows Remote Control session 15cefc)", "t": 1793761197.802835, "machine": "mac"}
+{"agent": "integrator", "box": "A10", "stage": "build", "cwd": "p3-A10", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_webapp_generate.py", "note": "", "t": 1793761198.928491, "machine": "mac"}
+{"agent": "integrator", "box": "A10", "stage": "build", "cwd": "p3-A10", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_webapp_generate.py", "exit": 0, "secs": 16.9, "note": "", "t": 1793761215.8117702, "machine": "mac"}
+{"agent": "integrator", "box": "A10", "stage": "build", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_webapp_generate.py", "note": "", "t": 1793761219.67346, "machine": "mac"}
+{"agent": "integrator", "box": "A10", "stage": "build", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_webapp_generate.py", "exit": 0, "secs": 16.8, "note": "", "t": 1793761236.513375, "machine": "mac"}
+{"agent": "integrator", "box": "A10", "stage": "build", "kind": "note", "note": "PASS integrated A10", "t": 1793761236.64502, "machine": "mac"}
+{"agent": "mac", "box": "A", "stage": "msg", "kind": "note", "note": "msg received P3 go A decisions=ok (from p3-windows); peers.json mac=p3-mac windows=p3-windows", "t": 1793761284.303023, "machine": "mac"}
+{"agent": "mac", "box": "A", "stage": "msg", "kind": "note", "note": "msg P3 ack go A received; letter A building; next message is pushed", "t": 1793761295.9912891, "machine": "mac"}
+{"agent": "builder", "box": "C5", "stage": "build", "cwd": "p3-C5", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q -p no:warnings tests/test_component_labels.py tests/test_camera_labels.py tests/test_capture_schema.py tests/test_versions.py tests/test_capture_objects.py tests/test_datasheet.py tests/test_annotation_passes.py tests/test_annotation_gates.py", "note": "", "t": 1793761314.025425, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_engine_bundle_golden.py tests/test_annotation_gates.py tests/test_label_diagnose.py -k tight or golden or gate or diagnose", "note": "", "t": 1793761333.311362, "machine": "mac"}
+{"agent": "builder", "box": "C5", "stage": "build", "cwd": "p3-C5", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q -p no:warnings tests/test_component_labels.py tests/test_camera_labels.py tests/test_capture_schema.py tests/test_versions.py tests/test_capture_objects.py tests/test_datasheet.py tests/test_annotation_passes.py tests/test_annotation_gates.py", "exit": 1, "secs": 27.3, "note": "", "t": 1793761341.341967, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_engine_bundle_golden.py tests/test_annotation_gates.py tests/test_label_diagnose.py -k tight or golden or gate or diagnose", "exit": 1, "secs": 16.7, "note": "", "t": 1793761349.974816, "machine": "mac"}
+{"agent": "mac", "box": "C1", "stage": "msg", "kind": "note", "note": "msg P3 decision-needed C1 loadout weight: 1800 lb fails envelope.trim_feasible; builder set 750 lb/station (18287 lb gross); asked Windows to record in decisions.md or override", "t": 1793761367.275403, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_engine_bundle_golden.py tests/test_annotation_gates.py tests/test_label_diagnose.py tests/test_camera_labels.py tests/test_dataset_boxes.py tests/test_passes_export.py", "note": "", "t": 1793761383.5622, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_engine_bundle_golden.py tests/test_annotation_gates.py tests/test_label_diagnose.py tests/test_camera_labels.py tests/test_dataset_boxes.py tests/test_passes_export.py", "exit": 1, "secs": 19.5, "note": "", "t": 1793761403.0471098, "machine": "mac"}
+{"agent": "builder", "box": "C5", "stage": "build", "cwd": "p3-C5", "kind": "start", "cmd": "git add -A", "note": "", "t": 1793761421.243753, "machine": "mac"}
+{"agent": "builder", "box": "C5", "stage": "build", "cwd": "p3-C5", "kind": "end", "cmd": "git add -A", "exit": 0, "secs": 0.1, "note": "", "t": 1793761421.343164, "machine": "mac"}
+{"agent": "builder", "box": "C5", "stage": "build", "cwd": "p3-C5", "kind": "start", "cmd": "git commit -q -m C5: component label records, parent rollup, manifest v8\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TYf9hdwcEyKovqfAJKwdzh", "note": "", "t": 1793761421.394335, "machine": "mac"}
+{"agent": "builder", "box": "C5", "stage": "build", "cwd": "p3-C5", "kind": "end", "cmd": "git commit -q -m C5: component label records, parent rollup, manifest v8\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TYf9hdwcEyKovqfAJKwdzh", "exit": 0, "secs": 0.1, "note": "", "t": 1793761421.464363, "machine": "mac"}
+{"agent": "builder", "box": "C5", "stage": "build", "kind": "note", "note": "PASS built C5", "t": 1793761421.637547, "machine": "mac"}
+{"agent": "mac", "box": "C1", "stage": "msg", "kind": "note", "note": "msg received P3 decision C1 750lb recorded (decisions.md item 7, commit 7920bbed on origin/phase-2-final); will arrive here on the pre-push pull", "t": 1793761425.893087, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_engine_bundle_golden.py tests/test_annotation_gates.py tests/test_label_diagnose.py tests/test_camera_labels.py tests/test_dataset_boxes.py tests/test_passes_export.py tests/test_messages.py", "note": "", "t": 1793761451.43855, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_engine_bundle_golden.py tests/test_annotation_gates.py tests/test_label_diagnose.py tests/test_camera_labels.py tests/test_dataset_boxes.py tests/test_passes_export.py tests/test_messages.py", "exit": 1, "secs": 31.2, "note": "", "t": 1793761482.6209888, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_engine_bundle_golden.py tests/test_annotation_gates.py tests/test_label_diagnose.py tests/test_camera_labels.py tests/test_dataset_boxes.py tests/test_passes_export.py tests/test_messages.py tests/test_platform.py", "note": "", "t": 1793761497.5274189, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_engine_bundle_golden.py tests/test_annotation_gates.py tests/test_label_diagnose.py tests/test_camera_labels.py tests/test_dataset_boxes.py tests/test_passes_export.py tests/test_messages.py tests/test_platform.py", "exit": 1, "secs": 32.0, "note": "", "t": 1793761529.5356271, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_engine_bundle_golden.py tests/test_annotation_gates.py tests/test_label_diagnose.py tests/test_camera_labels.py tests/test_dataset_boxes.py tests/test_passes_export.py tests/test_messages.py tests/test_platform.py", "note": "", "t": 1793761579.994028, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_engine_bundle_golden.py tests/test_annotation_gates.py tests/test_label_diagnose.py tests/test_camera_labels.py tests/test_dataset_boxes.py tests/test_passes_export.py tests/test_messages.py tests/test_platform.py", "exit": 0, "secs": 27.9, "note": "", "t": 1793761607.865931, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "kind": "note", "note": "PASS built A12+A13 e183e5aa", "t": 1793761645.2048278, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "start", "cmd": "git add -A", "note": "", "t": 1793761649.720205, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "end", "cmd": "git add -A", "exit": 0, "secs": 0.1, "note": "", "t": 1793761649.819102, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "start", "cmd": "git commit -q -m A12+A13: tight_box_present gate, tight counts in label_diagnose, golden-bundle test; NEXT.md says only what is measured -m Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TYf9hdwcEyKovqfAJKwdzh", "note": "", "t": 1793761649.870612, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "cwd": "p3-A12", "kind": "end", "cmd": "git commit -q -m A12+A13: tight_box_present gate, tight counts in label_diagnose, golden-bundle test; NEXT.md says only what is measured -m Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TYf9hdwcEyKovqfAJKwdzh", "exit": 0, "secs": 0.1, "note": "", "t": 1793761649.934597, "machine": "mac"}
+{"agent": "builder", "box": "A12", "stage": "build", "kind": "note", "note": "PASS built A12+A13 e62a4ad3", "t": 1793761650.1534941, "machine": "mac"}
+{"agent": "integrator", "box": "A2", "stage": "build", "kind": "note", "note": "PASS integrated A1+A2 76ee432f2587f012cfb7c0aa8e53fe7b7b2599fa", "t": 1793761998.25266, "machine": "mac"}
+{"agent": "integrator", "box": "C1", "stage": "build", "cwd": "p3-C1", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_airframe.py tests/test_camera_labels.py tests/test_loading.py tests/test_a4.py tests/test_messages.py tests/test_aircraft_configs.py", "note": "", "t": 1793762078.96289, "machine": "mac"}
+{"agent": "integrator", "box": "C1", "stage": "build", "cwd": "p3-C1", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_airframe.py tests/test_camera_labels.py tests/test_loading.py tests/test_a4.py tests/test_messages.py tests/test_aircraft_configs.py", "exit": 4, "secs": 0.3, "note": "", "t": 1793762079.224447, "machine": "mac"}
+{"agent": "integrator", "box": "C1", "stage": "build", "cwd": "p3-C1", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_airframe.py tests/test_camera_labels.py tests/test_loading.py tests/test_a4.py tests/test_messages.py", "note": "", "t": 1793762082.308267, "machine": "mac"}
+{"agent": "integrator", "box": "C1", "stage": "build", "cwd": "p3-C1", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_airframe.py tests/test_camera_labels.py tests/test_loading.py tests/test_a4.py tests/test_messages.py", "exit": 0, "secs": 18.8, "note": "", "t": 1793762101.143865, "machine": "mac"}
+{"agent": "integrator", "box": "C1", "stage": "build", "cwd": "p3-C1", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_aircraft.py tests/test_aircraft_assets.py", "note": "", "t": 1793762105.590709, "machine": "mac"}
+{"agent": "builder", "box": "A4", "stage": "build", "cwd": "p3-A4", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_binary_stale.py tests/test_messages.py tests/test_platform.py tests/test_powershell_scripts.py tests/test_camera_cli.py", "note": "", "t": 1793762118.7196999, "machine": "mac"}
+{"agent": "integrator", "box": "C1", "stage": "build", "cwd": "p3-C1", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_aircraft.py tests/test_aircraft_assets.py", "exit": 0, "secs": 37.3, "note": "", "t": 1793762142.895786, "machine": "mac"}
+{"agent": "integrator", "box": "C1", "stage": "build", "kind": "start", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_airframe.py tests/test_camera_labels.py tests/test_loading.py tests/test_a4.py tests/test_messages.py", "note": "", "t": 1793762158.0851479, "machine": "mac"}
+{"agent": "integrator", "box": "C1", "stage": "build", "kind": "end", "cmd": "/Users/dhruva/flightsim/.venv/bin/pytest -q tests/test_airframe.py tests/test_camera_labels.py tests/test_loading.py tests/test_a4.py tests/test_messages.py", "exit": 0, "secs": 19.0, "note": "", "t": 1793762177.069642, "machine": "mac"}
+{"agent": "integrator", "box": "C1", "stage": "build", "kind": "note", "note": "PASS integrated C1 6495be31b293012615df8de74b99ea98172871a8", "t": 1793762177.2228491, "machine": "mac"}

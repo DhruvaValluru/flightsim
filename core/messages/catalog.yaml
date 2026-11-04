@@ -165,6 +165,9 @@ camera.poses:
   sentence: "The camera's path could not be worked out from the flight."
 camera.labels:
   sentence: "This aircraft cannot be labelled: its outline points are not on file."
+aircraft.component_unmatched:
+  sentence: "A part this aircraft is drawn with (a store or a landing gear leg) matches nothing in its flight model, so it was not labelled."
+  hint: "Name a loaded station whose weight the flight model carries, or a gear point the model defines; the technical note names the part."
 camera.track:
   sentence: "The camera's solved path breaks one of the scene rules."
   hint: "The technical note under this message names which."
