@@ -851,7 +851,9 @@ mutate core/scenario/runner.py \
 
 # -- Phase 9 dynamic terrain + historical weather ------------------------
 
-mutate webapp/server.py \
+# A10 (decision 17) moved the check into webapp/runs.py provision_place, the
+# one function the single run and the campaign both call.
+mutate webapp/runs.py \
     '    unbaked = needs_dynamic_bake(spec)' \
     '    unbaked = None  # MUTATED: stated places run on a flat slab' \
     "stated coordinates without a bake refuse instead of faking a slab" \
