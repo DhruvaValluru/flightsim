@@ -9,8 +9,9 @@
     "E2 step 8: real render with the key typed once in Settings draws the tiles without GOOGLE_MAPS_API_KEY in the shell",
     "E2: %APPDATA%\\flightsim\\settings.json resolves and is writable"
   ],
-  "stage": "integrated",
+  "pushed_commit": "a2ed7704",
+  "stage": "pushed",
   "unit": "E2+E3",
-  "updated": "2026-11-04T18:28:20",
+  "updated": "2026-11-04T18:28:46",
   "worktree": "../p3-E2"
 }

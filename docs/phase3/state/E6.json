@@ -13,8 +13,9 @@
     "break one step -> only it reruns; hidden ffmpeg -> FAILED preflight: toolchain.ffmpeg_mismatch and nothing after",
     "Smart App Control block reported as host.smart_app_control"
   ],
-  "stage": "integrated",
+  "pushed_commit": "a2ed7704",
+  "stage": "pushed",
   "unit": "E6",
-  "updated": "2026-11-04T17:10:50",
+  "updated": "2026-11-04T18:28:46",
   "worktree": "../p3-E6"
 }

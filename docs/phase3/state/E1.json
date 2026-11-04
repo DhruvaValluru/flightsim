@@ -7,8 +7,9 @@
   "letter": "E",
   "needs_windows": false,
   "pending_windows": [],
-  "stage": "integrated",
+  "pushed_commit": "a2ed7704",
+  "stage": "pushed",
   "unit": "E1",
-  "updated": "2026-11-04T17:11:17",
+  "updated": "2026-11-04T18:28:46",
   "worktree": "../p3-E1"
 }

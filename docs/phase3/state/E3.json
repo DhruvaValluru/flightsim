@@ -10,8 +10,9 @@
     "tests/test_settings_page.py::test_the_script_parses (node --check settings.js)",
     "tests/test_settings_page.py::test_tiles_key_survives_a_reload (Playwright Chromium)"
   ],
-  "stage": "integrated",
+  "pushed_commit": "a2ed7704",
+  "stage": "pushed",
   "unit": "E2+E3",
-  "updated": "2026-11-04T18:28:20",
+  "updated": "2026-11-04T18:28:46",
   "worktree": "../p3-E3"
 }
