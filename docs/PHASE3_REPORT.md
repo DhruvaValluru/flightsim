@@ -52,3 +52,20 @@ weak guard. CI on the branch had no green run to cite when this was written.
 - Letter E defaults taken without confirmation: settings table in `core/config_surface.py`,
   secrets in plain text in `settings.json`, launcher in the repo root, materials stamp, `cmd /k`.
 - F1 reads "pick aircraft" as the page's default A-4; no aircraft picker exists.
+
+## Update after the single run (`e7b128cf`)
+
+Fixed and rerun by file, serially: the J-11A's loading block (it could not parse, so a
+loaded J-11A run would refuse: CG envelope reason, a loadable policy station, arms read
+live from JSBSim), its class, limits and DIS rows, five missing catalogue entries, and
+stale assertions in `test_ue_world_source`, `test_ue_materials`, `test_ue_physics_source`,
+`test_geoid`. The J-11A's limit figures are published numbers from memory, marked
+"unverified here". The J-11A's policy station is the inboard pylon, a stated choice.
+
+CI runs again since the billing fix. The last finished run (`30945bf5`) failed on all three
+operating systems; its ubuntu job's nine failures are all in the set fixed above. No run of
+`e7b128cf` had finished when this was written, so no green CI row exists yet.
+
+Still failing on the Mac: `test_webapp_generate` (10, Mac engine import),
+`test_dataset_boxes` COCO file not found (first run with pycocotools installed; untriaged),
+gauss_legendre, `test_wake`, `test_weather` (baseline).
