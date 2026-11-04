@@ -90,8 +90,8 @@ from core.capture.verify import (
     FAIL, NOT_RUN, PASS, Check, verify_applied_intrinsics, verify_box_vs_mask,
     verify_depth_range, verify_depth_vs_geometry, verify_identity_stable,
     verify_label_files, verify_mask_containment, verify_mask_integers_only,
-    verify_mask_vs_geometry, verify_run, verify_visibility_vs_scene,
-    write_verification,
+    verify_mask_vs_geometry, verify_run, verify_tight_box_present,
+    verify_visibility_vs_scene, write_verification,
 )
 from core.nl.compiler import compile_prompt
 from core.scenario.blocks import TrafficSpec
@@ -837,6 +837,57 @@ def test_a_tight_box_the_record_did_not_measure_fails_box_vs_mask(run):
     entry["bbox_2d_tight"] = [v + 20.0 for v in entry["bbox_2d_tight"]]
     check = verify_box_vs_mask(manifest, run)
     assert check.status == FAIL and check.failure == "annotation.box_mismatch"
+
+
+def _in_frame_record(manifest):
+    for frame in manifest["frames"]:
+        for entry in frame["labels"]["objects"]:
+            if entry.get("in_frame") and entry.get("bbox_2d"):
+                return entry
+    raise AssertionError("the fabricated run has no aircraft in frame")
+
+
+def test_tight_box_present_passes(clean_run):
+    manifest = read_capture_manifest(clean_run / "capture_manifest.json")
+    check = verify_tight_box_present(manifest, clean_run)
+    assert check.status == PASS and check.failure is None, check.detail
+    assert "inside bbox_2d" in check.detail
+    by_name, _ = checks_of(clean_run)
+    assert by_name["tight_box_present"].status == PASS
+
+
+def test_tight_box_null_fails_by_name(run):
+    manifest = read_capture_manifest(run / "capture_manifest.json")
+    entry = _in_frame_record(manifest)
+    entry["bbox_2d_tight"] = None
+    entry["visible_fraction"] = None     # the bundle was never attached
+    check = verify_tight_box_present(manifest, run)
+    assert check.status == FAIL and check.failure == "annotation.tight_box_null", check.detail
+    assert "bbox_2d_tight is None" in check.detail
+
+
+def test_tight_box_null_is_allowed_for_a_fully_occluded_aircraft(clean_run):
+    manifest = read_capture_manifest(clean_run / "capture_manifest.json")
+    check = verify_tight_box_present(manifest, clean_run)
+    assert check.status == PASS and "1 fully occluded" in check.detail, check.detail
+
+
+def test_tight_box_outside_bbox_2d_fails(run):
+    manifest = read_capture_manifest(run / "capture_manifest.json")
+    entry = _in_frame_record(manifest)
+    x0, y0, x1, y1 = entry["bbox_2d"]
+    entry["bbox_2d_tight"] = [x0 - 5.0, y0, x1, y1]
+    check = verify_tight_box_present(manifest, run)
+    assert check.status == FAIL and check.failure == "annotation.tight_box_null", check.detail
+    assert "not inside bbox_2d" in check.detail
+
+
+def test_tight_box_present_not_run_without_bundle(clean_run, tmp_path):
+    manifest = read_capture_manifest(clean_run / "capture_manifest.json")
+    bare = tmp_path / "bare"
+    write_capture_manifest(manifest, bare)
+    check = verify_tight_box_present(manifest, bare)
+    assert check.status == NOT_RUN and "render.json" in check.detail
 
 
 def test_a_mask_half_the_size_of_its_hull_fails_box_vs_mask(run):

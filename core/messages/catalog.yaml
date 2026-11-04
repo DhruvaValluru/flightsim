@@ -347,6 +347,8 @@ annotation.mask_offset:
   sentence: "The object mask does not sit where the aircraft's geometry says it should."
 annotation.box_mismatch:
   sentence: "The drawn box does not match the object's mask."
+annotation.tight_box_null:
+  sentence: "An aircraft in frame has no tight box, or its tight box lies outside its drawn box."
 annotation.depth_range:
   sentence: "The measured distance under the mask does not agree with the aircraft's distance."
 annotation.visibility:
@@ -489,6 +491,8 @@ check.mask_vs_geometry:
   sentence: "The object mask sits where the aircraft's geometry says it should."
 check.box_vs_mask:
   sentence: "The drawn box matches the object's mask."
+check.tight_box_present:
+  sentence: "Every aircraft in frame has a tight box, and it lies inside its drawn box."
 check.depth_vs_geometry:
   sentence: "The measured distance under the mask agrees with the aircraft's distance."
 check.visibility_vs_scene:

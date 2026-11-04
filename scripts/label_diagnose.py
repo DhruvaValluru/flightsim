@@ -16,6 +16,7 @@ import json
 import sys
 from collections import Counter
 from pathlib import Path
+from typing import Tuple
 
 import numpy as np
 from PIL import Image
@@ -30,6 +31,45 @@ def describe(counts: Counter) -> str:
     return ", ".join(f"{value}:{count}" for value, count in sorted(counts.items()))
 
 
+def tight_counts(render: dict) -> Tuple[int, int]:
+    """(null, filled) ``bbox_2d_tight`` over every labelled object record
+    of a render.json: null is a record the bundle was never attached to
+    (or an object with no pixels)."""
+    null = filled = 0
+    records = render.get("frame_records")
+    if not isinstance(records, list):
+        records = render.get("frames") if isinstance(render.get("frames"), list) else []
+    for record in records:
+        labels = record.get("labels") if isinstance(record, dict) else None
+        for entry in (labels or {}).get("objects") or []:
+            if not isinstance(entry, dict):
+                continue
+            tight = entry.get("bbox_2d_tight")
+            if isinstance(tight, (list, tuple)) and len(tight) == 4:
+                filled += 1
+            else:
+                null += 1
+    return null, filled
+
+
+def tight_source(render_json: Path, render: dict) -> dict:
+    """The frame records that carry ``bbox_2d_tight``: the run's
+    capture_manifest.json frames for this camera (attach_engine_labels
+    writes the tight box there), else render.json's own records."""
+    directory = render_json.parent
+    manifest = directory.parent.parent / "capture_manifest.json"
+    try:
+        frames = json.loads(manifest.read_text(encoding="utf-8")).get("frames")
+    except (OSError, ValueError):
+        frames = None
+    if isinstance(frames, list):
+        mine = [f for f in frames if isinstance(f, dict)
+                and str(f.get("camera_id")) == directory.name]
+        if mine:
+            return {"frame_records": mine}
+    return render
+
+
 def camera(render_json: Path, frames: int) -> None:
     directory = render_json.parent
     render = json.loads(render_json.read_text(encoding="utf-8"))
@@ -39,6 +79,8 @@ def camera(render_json: Path, frames: int) -> None:
     print(f"\n== {directory}")
     print(f"   rhi {settings.get('rhi')!r}, declared ids "
           f"{sorted(owned) or 'none recorded'}")
+    null, filled = tight_counts(tight_source(render_json, render))
+    print(f"   tight null: {null}, tight filled: {filled}")
     masks = sorted(directory.glob("frame_*_mask.png"))
     if not masks:
         print("   no frame_*_mask.png here: the run was not rendered with labels")
