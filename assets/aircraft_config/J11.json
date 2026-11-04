@@ -1,0 +1,358 @@
+{
+  "name": "J11",
+  "fdm": "J11",
+  "fdm_match": [
+    "Su-27SK",
+    "J11"
+  ],
+  "mesh_airframe": "Shenyang J-11A (FlightGear SU-27SK package by Yanes Bechir / FGUK; Models/Su-27.ac, shared with the package's Su-27SK variant)",
+  "source_dir": "../aircraft_src/J11",
+  "license": {
+    "license_name": "GPL-2.0",
+    "file": "LICENSE",
+    "repo": "https://github.com/yanes19/SU-27SK",
+    "commit": "925cb5317f3c66fa323a9e186e24d574e0b0881d",
+    "authors_file": "README.md"
+  },
+  "note": "Owner decision 3 (docs/phase3/decisions.md): the J-11A from yanes19/SU-27SK at 925cb531, GPL-2.0. The FDM is the package's J-11A.xml vendored as assets/fdm_root/aircraft/J11/J11.xml with its LICENSE and a provenance header listing every local edit; the mesh is fetched at import time (source_dir is git-ignored). Decision 6: no control surfaces.",
+  "parts": [
+    {
+      "file": "Models/Su-27.ac"
+    },
+    {
+      "file": "Models/Stores/Missiles/R-27R/R-27R.ac",
+      "offset_m": [
+        14.0,
+        -4.836,
+        -0.24
+      ],
+      "component": "r27r_left"
+    },
+    {
+      "file": "Models/Stores/Missiles/R-27R/R-27R.ac",
+      "offset_m": [
+        14.0,
+        4.836,
+        -0.24
+      ],
+      "component": "r27r_right"
+    }
+  ],
+  "parts_source": "the store offsets are the FDM's own pylon2-load / pylon3-load <pointmass> locations (metres, structural = FG model frame), which J-11A-set.xml <sim><weight> repeats as the stores' x-m/y-m/z-m offsets; R-27R.ac is the package's own missile model (Models/Stores/Missiles/R-27R), symmetric about its own y and z so one file serves both sides",
+  "exclude": [],
+  "exclude_source": "Su-27.ac at 925cb531 carries 43 objects: hull, canopy, pylons, gear (UC_*), doors, surfaces; lights, effects and hotspots are separate .ac files the model XML attaches, so nothing in this file needs excluding",
+  "gear_geometry": {
+    "parts": [],
+    "objects": [
+      "UC_.*"
+    ],
+    "source": "Su-27.ac names its undercarriage UC_Nose_* (Tyres, Hubs, struts, WGuard, LLights) and UC_Main_Left_* / UC_Main_Right_* (Tyre, Hub, struts); nothing else matches UC_.*. Measured 2026-11-04 from the pinned commit: lowest gear vertex -2.52 m below the model origin (nose and main tyres), the FDM's gear contacts sit at -103.47 in = -2.63 m"
+  },
+  "surfaces": {},
+  "labels": {
+    "dimensions_m": {
+      "length": 21.94,
+      "height": 5.92,
+      "source": "[unverified here] published Shenyang J-11 / Sukhoi Su-27 overall length 21.94 m and height 5.92 m, from memory of the type's published characteristics; span from the flown FDM's own <wingspan> (48.23 ft = 14.70 m); the pinned mesh measures 22.08 m nose to tail (0.7 % over the cited length)"
+    },
+    "keypoints": {
+      "nose": {
+        "structural_in": [
+          0.23,
+          0.0,
+          -4.42
+        ],
+        "basis": "measured",
+        "source": "measured 2026-11-04 from Models/Su-27.ac at commit 925cb531 with assets_pipeline.acmodel (parse_ac, ac_to_model): the frontmost centreline vertex (|y| < 0.3 m) of HULL_Hull_Upper.001 at model-frame (0.006, 0.001, -0.112) m; the .ac origin is taken as the FDM's structural origin because the FDM's main-gear contacts (x 538.04 in = 13.67 m) fall inside the mesh's main tyres (x 13.09..14.18 m) and the FDM's CG station (517.35 in = 13.14 m) is the mesh's mid-fuselage; metres x 39.3701"
+      },
+      "tail": {
+        "structural_in": [
+          869.4,
+          0.0,
+          0.26
+        ],
+        "basis": "measured",
+        "source": "measured 2026-11-04 from Models/Su-27.ac at commit 925cb531 with assets_pipeline.acmodel (parse_ac, ac_to_model): the aftmost centreline vertex (|y| < 0.3 m) of HULL_Hull_Upper.001 at model-frame (22.083, 0.001, 0.007) m, the tail-boom tip; the .ac origin is taken as the FDM's structural origin because the FDM's main-gear contacts (x 538.04 in = 13.67 m) fall inside the mesh's main tyres (x 13.09..14.18 m) and the FDM's CG station (517.35 in = 13.14 m) is the mesh's mid-fuselage; metres x 39.3701"
+      },
+      "left_wingtip": {
+        "fdm_wingspan": "left"
+      },
+      "right_wingtip": {
+        "fdm_wingspan": "right"
+      },
+      "nose_gear": {
+        "fdm_contact": "NOSE"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MAIN"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MAIN"
+      }
+    },
+    "keypoints_note": "the FDM's LEFT_WING / RIGHT_WING contacts sit at y = +-24.12 in (0.61 m), wing-root structure points, not tips, so the wingtips are the FDM half-span approximation; the FDM's NOSE gear contact (x 112.09 in = 2.85 m) is 5 m ahead of the mesh's nose gear (x 7.5..8.2 m): the label is where the FDM says the gear is, as the labeller's rule states",
+    "components": [
+      {
+        "id": "r27r_left",
+        "class": "payload",
+        "station": "pylon2-load",
+        "source": "J11.xml <pointmass name=\"pylon2-load\"> 230.21 LBS; the R-27R on the left inboard wing pylon (Models/Stores/Missiles/R-27R/R-27R.ac at the pointmass's own location)"
+      },
+      {
+        "id": "r27r_right",
+        "class": "payload",
+        "station": "pylon3-load",
+        "source": "J11.xml <pointmass name=\"pylon3-load\"> 230.21 LBS; the R-27R on the right inboard wing pylon (Models/Stores/Missiles/R-27R/R-27R.ac at the pointmass's own location)"
+      },
+      {
+        "id": "nose_gear",
+        "class": "landing_gear",
+        "source": "nose_gear"
+      },
+      {
+        "id": "left_main_gear",
+        "class": "landing_gear",
+        "source": "left_main_gear"
+      },
+      {
+        "id": "right_main_gear",
+        "class": "landing_gear",
+        "source": "right_main_gear"
+      }
+    ]
+  },
+  "limits": {
+    "category": {
+      "value": "military",
+      "regulation": "military type: no 14 CFR 23 / 25 category applies; 'military' is the limits table's own category word (core/telemetry/limits.py CATEGORIES)",
+      "source": "stated here; the limits below are the type's published figures [unverified here]"
+    },
+    "n_z_pos_g": {
+      "value": 9.0,
+      "source": "[unverified here] published Su-27 / J-11 limit load factor +9 g, from memory of the type's published characteristics"
+    },
+    "n_z_neg_g": {
+      "value": -3.0,
+      "source": "[unverified here] -3 g, the figure commonly quoted for the Su-27 family, from memory"
+    },
+    "speed_limit_kt": {
+      "value": 756.0,
+      "kind": "V_NE",
+      "source": "[unverified here] published Su-27 maximum indicated airspeed 1400 km/h at low level (= 756 kt), from memory, stated as the never-exceed kind the limits table admits (V_NE | V_MO); compared here against JSBSim calibrated airspeed without a position-error correction"
+    },
+    "m_mo": {
+      "value": null,
+      "reason": "the type's published maximum Mach, 2.35 at altitude (from memory, [unverified here]), lies outside the (0, 1) range the limits table admits for the subsonic types configured so far (core/telemetry/limits.py parse_limits), so the Mach limit is recorded as unmonitored on this airframe rather than as a number the parser would refuse"
+    },
+    "alpha_stall_deg": {
+      "value": null,
+      "reason": "the vendored J11.xml (Aeromatic 0.95 derived, upstream J-11A.xml) states no <alphalimits> element (grep 2026-11-04); the validator's CLmax alpha is a derived quantity, not a stated limit"
+    },
+    "note": "J11.xml is an Aeromatic 0.95 derived model ('Yanes Bechir based on Aeromatic 0.95 output', its own header), ALPHA release: every limit monitored against it is graded on an approximate airframe; the figures above are published numbers from memory, none measured here"
+  },
+  "loading": {
+    "source": "assets/fdm_root/aircraft/J11/J11.xml <mass_balance> and <propulsion> (vendored from yanes19/SU-27SK J-11A.xml at 925cb531; pylon2/3 weights are recorded edit 3); the maximum weight from the same file's Aeromatic header comment 'max weight: 67142.25 lb'",
+    "datum": {
+      "xml": "the J11.xml <location> x in inches, positive aft (the JSBSim structural frame); pointmasses are stated in metres in the same frame; the XML names no reference point beyond VRP (0, 0, 0)",
+      "poh": "not transcribed",
+      "arm_comparison": {
+        "status": "unverified",
+        "reason": "no J-11 / Su-27 flight-manual arm is transcribed: the envelope check is refused by name (loading.datum_unverified) and the loading is flown at the XML's own arms"
+      }
+    },
+    "empty_weight": {
+      "lb": 36118.0,
+      "arm_in": 517.35,
+      "source": "J11.xml <emptywt> 36118 LBS at <location name=\"CG\"> x 517.35 in"
+    },
+    "stations": [
+      {
+        "name": "pylon0-load",
+        "index": 0,
+        "arm_in": 454.72,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pylon0-load\"> at (11.55, 0, -0.404) m structural; weight 0 KG upstream, unchanged",
+        "reason": "an empty pylon of the default loadout: the two R-27R of the J-11A default run hang on pylon2-load / pylon3-load, the symmetric inboard wing pair (D2 note, approach 'Payload station' A)"
+      },
+      {
+        "name": "pylon1-load",
+        "index": 1,
+        "arm_in": 629.92,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pylon1-load\"> at (16, 0, -0.404) m structural; weight 0 KG upstream, unchanged",
+        "reason": "an empty pylon of the default loadout: the two R-27R of the J-11A default run hang on pylon2-load / pylon3-load, the symmetric inboard wing pair (D2 note, approach 'Payload station' A)"
+      },
+      {
+        "name": "pylon2-load",
+        "index": 2,
+        "arm_in": 551.18,
+        "poh_arm_in": null,
+        "default_lb": 230.21,
+        "max_kg": 253.0,
+        "loadable": true,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pylon2-load\"> at (14, -4.836, -0.24) m structural; weight 230.21 LBS (recorded edit 3 of the file's provenance header): one R-27R, the upstream package's own store mass (J-11A-set.xml <opt><name>R-27R</name> 230.21 lb); max_kg 253 is the published R-27R launch mass from memory [unverified here]"
+      },
+      {
+        "name": "pylon3-load",
+        "index": 3,
+        "arm_in": 551.18,
+        "poh_arm_in": null,
+        "default_lb": 230.21,
+        "max_kg": 253.0,
+        "loadable": true,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pylon3-load\"> at (14, 4.836, -0.24) m structural; weight 230.21 LBS (recorded edit 3 of the file's provenance header): one R-27R, the upstream package's own store mass (J-11A-set.xml <opt><name>R-27R</name> 230.21 lb); max_kg 253 is the published R-27R launch mass from memory [unverified here]"
+      },
+      {
+        "name": "pylon4-load",
+        "index": 4,
+        "arm_in": 582.68,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pylon4-load\"> at (14.8, -6.49, -0.02) m structural; weight 0 KG upstream, unchanged",
+        "reason": "an empty pylon of the default loadout: the two R-27R of the J-11A default run hang on pylon2-load / pylon3-load, the symmetric inboard wing pair (D2 note, approach 'Payload station' A)"
+      },
+      {
+        "name": "pylon5-load",
+        "index": 5,
+        "arm_in": 582.68,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pylon5-load\"> at (14.8, 6.49, -0.02) m structural; weight 0 KG upstream, unchanged",
+        "reason": "an empty pylon of the default loadout: the two R-27R of the J-11A default run hang on pylon2-load / pylon3-load, the symmetric inboard wing pair (D2 note, approach 'Payload station' A)"
+      },
+      {
+        "name": "pylon6-load",
+        "index": 6,
+        "arm_in": 606.3,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pylon6-load\"> at (15.4, -7.57, 0.156) m structural; weight 0 KG upstream, unchanged",
+        "reason": "an empty pylon of the default loadout: the two R-27R of the J-11A default run hang on pylon2-load / pylon3-load, the symmetric inboard wing pair (D2 note, approach 'Payload station' A)"
+      },
+      {
+        "name": "pylon7-load",
+        "index": 7,
+        "arm_in": 606.3,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pylon7-load\"> at (15.4, 7.57, 0.156) m structural; weight 0 KG upstream, unchanged",
+        "reason": "an empty pylon of the default loadout: the two R-27R of the J-11A default run hang on pylon2-load / pylon3-load, the symmetric inboard wing pair (D2 note, approach 'Payload station' A)"
+      },
+      {
+        "name": "pylon8-load",
+        "index": 8,
+        "arm_in": 533.46,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pylon8-load\"> at (13.55, -1.235, -1.324) m structural; weight 0 KG upstream, unchanged",
+        "reason": "an empty pylon of the default loadout: the two R-27R of the J-11A default run hang on pylon2-load / pylon3-load, the symmetric inboard wing pair (D2 note, approach 'Payload station' A)"
+      },
+      {
+        "name": "pylon9-load",
+        "index": 9,
+        "arm_in": 533.46,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pylon9-load\"> at (13.55, 1.235, -1.324) m structural; weight 0 KG upstream, unchanged",
+        "reason": "an empty pylon of the default loadout: the two R-27R of the J-11A default run hang on pylon2-load / pylon3-load, the symmetric inboard wing pair (D2 note, approach 'Payload station' A)"
+      },
+      {
+        "name": "pilot",
+        "index": 10,
+        "arm_in": 257.87,
+        "poh_arm_in": null,
+        "default_lb": 176.37,
+        "max_kg": 150.0,
+        "loadable": false,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"pilot\"> 80 KG at x 6.55 m; a stated choice, not a handbook limit: 150 kg for the seat",
+        "reason": "the single seat is always occupied; not a payload station for a store"
+      },
+      {
+        "name": "Payload",
+        "index": 11,
+        "arm_in": 517.35,
+        "poh_arm_in": null,
+        "default_lb": 8563.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml <pointmass name=\"Payload\"> 8563 LBS at the CG (x 517.35 in): the Aeromatic lump that brings the empty airframe to its operating weight",
+        "reason": "an Aeromatic mass lump at the CG, not a station a store hangs on"
+      }
+    ],
+    "tanks": [
+      {
+        "index": 0,
+        "arm_in": 260.35,
+        "poh_arm_in": null,
+        "capacity_lb": 7010.7,
+        "default_lb": 3505.35,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml tank 0: <capacity> 7010.70 LBS, <contents> 3505.35 LBS at x 260.35 IN"
+      },
+      {
+        "index": 1,
+        "arm_in": 517.35,
+        "poh_arm_in": null,
+        "capacity_lb": 9171.23,
+        "default_lb": 4585.61,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml tank 1: <capacity> 9171.23 LBS, <contents> 4585.61 LBS at x 517.35 IN"
+      },
+      {
+        "index": 2,
+        "arm_in": 517.35,
+        "poh_arm_in": null,
+        "capacity_lb": 1168.45,
+        "default_lb": 584.22,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml tank 2: <capacity> 1168.45 LBS, <contents> 584.22 LBS at x 517.35 IN"
+      },
+      {
+        "index": 3,
+        "arm_in": 517.35,
+        "poh_arm_in": null,
+        "capacity_lb": 1168.45,
+        "default_lb": 584.22,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml tank 3: <capacity> 1168.45 LBS, <contents> 584.22 LBS at x 517.35 IN"
+      },
+      {
+        "index": 4,
+        "arm_in": 669.29,
+        "poh_arm_in": null,
+        "capacity_lb": 2204.62,
+        "default_lb": 1102.31,
+        "source": "assets/fdm_root/aircraft/J11/J11.xml tank 4: <capacity> 2204.62 LBS, <contents> 1102.31 LBS at x 669.29 IN"
+      }
+    ],
+    "max_takeoff_weight": {
+      "kg": 30455.0,
+      "lb": 67142.25,
+      "source": "J11.xml Aeromatic header comment 'max weight: 67142.25 lb' (30455 kg); the published Su-27 MTOW is 30,450 kg from memory [unverified here]"
+    },
+    "loadout": {
+      "stations": {
+        "pylon2-load": 230.21,
+        "pylon3-load": 230.21
+      },
+      "model_vars": {},
+      "source": "D2 note (docs/phase3/notes/D2.md), approach 'Payload station' A: two R-27R on the symmetric inboard wing pair pylon2-load / pylon3-load so the default run keeps its longitudinal trim; 230.21 lb each is the upstream package's own R-27R mass (J-11A-set.xml); a .ac aircraft has no model variables, the stores are the parts[] entries that carry 'component'"
+    },
+    "policy_station": "pylon0-load",
+    "policy_station_reason": "the forward centreline pylon: the station a payload draw fills (a stated choice); it is not loadable in the default loadout"
+  }
+}

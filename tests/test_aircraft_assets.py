@@ -970,6 +970,90 @@ def test_pinned_sources_measure_the_extents_and_put_the_nose_on_its_label(
     assert vrp_rule_residual == pytest.approx(pinned["vrp_rule_residual_cm"], abs=5.0)
 
 
+def test_converter_output_unchanged_without_components(tmp_path, monkeypatch):
+    """D2: a ``parts[].component`` entry gets its own ``SM_<aircraft>_<id>``
+    OBJ and a manifest v4 ``components[]`` row (the fields C2 writes and
+    C3 reads), and a config without the key converts byte-for-byte as
+    before (version 3, an empty ``components`` list). The store triangle sits
+    beyond the nose, so a leak into the body's extents would move the
+    measured origin and fail the comparison. A part naming a component
+    the labels do not declare is refused by name."""
+    import hashlib
+
+    from assets_pipeline.convert import ConvertError
+
+    xml = _fdm_xml(tmp_path, VRP_80_0_5)
+    xml.write_text(xml.read_text(encoding="utf-8").replace(
+        "</mass_balance>",
+        '<pointmass name="S1"><weight unit="LBS">100</weight>'
+        '<location name="POINTMASS" unit="IN"><x>0</x><y>0</y><z>0</z></location>'
+        '</pointmass></mass_balance>'), encoding="utf-8")
+    _point_fdm_at(monkeypatch, xml)
+
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    plain, plain_path = _convert(plain_dir, _write_labelled_config(plain_dir))
+    assert plain["version"] == 3
+    assert plain["components"] == []   # C7: the key is always present
+    assert plain["parts"] == ["body", "aileron_l"]
+    assert set(plain["triangles"]) == {"body", "aileron_l"}
+    plain_body = hashlib.sha256((plain_path.parent / "body.obj").read_bytes()).hexdigest()
+
+    loaded_dir = tmp_path / "loaded"
+    loaded_dir.mkdir()
+    (loaded_dir / "src").mkdir()
+    (loaded_dir / "src" / "store.ac").write_text("\n".join([
+        "AC3Db",
+        'MATERIAL "grey" rgb 0.5 0.5 0.5  amb 0.2 0.2 0.2  emis 0 0 0  spec 0 0 0  shi 0  trans 0',
+        "OBJECT world", "kids 1",
+        _ac_object("missile", [(1.0, 0.0, 0.0), (-1.0, -0.2, 0.0), (-1.0, 0.2, 0.0)]),
+    ]) + "\n", encoding="utf-8")
+    components = [{"id": "store_left", "class": "payload", "station": "S1",
+                   "source": "synthetic pointmass S1, 100 lb"}]
+    config_path = _write_labelled_config(
+        loaded_dir,
+        parts=[{"file": "model.ac"},
+               {"file": "store.ac", "offset_m": [-7.0, -2.0, 0.0],  # FG model x aft: 7 m ahead
+                "component": "store_left"}],
+        loading={"stations": [{"name": "S1", "index": 0, "arm_in": 0.0,
+                               "default_lb": 100.0, "max_kg": 100.0,
+                               "loadable": True, "source": "synthetic"}],
+                 "loadout": {"stations": {"S1": 100.0}, "model_vars": {},
+                             "source": "synthetic"}})
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["labels"]["components"] = components
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    loaded, loaded_path = _convert(loaded_dir, config_path)
+
+    assert loaded["version"] == importer.COMPONENTS_MANIFEST_VERSION == 4
+    assert loaded["parts"] == ["body", "aileron_l", "SM_testcraft_store_left"]
+    assert hashlib.sha256((loaded_path.parent / "body.obj").read_bytes()).hexdigest() == plain_body
+    assert (loaded_path.parent / "SM_testcraft_store_left.obj").is_file()
+    assert loaded["triangles"]["SM_testcraft_store_left"] == 1
+    (row,) = loaded["components"]
+    assert row == {
+        "id": "store_left", "class": "payload", "station": "S1",
+        "part": "SM_testcraft_store_left",
+        "asset_path": "/Game/Aircraft/testcraft/SM_testcraft_store_left",
+        "triangles": 1, "vertices": 3, "model_vars": {},
+        "mesh_extent_actor_m": {"x": [6.0, 8.0], "y": [-2.2, -1.8], "z": [0.0, 0.0]},
+        "mesh_origin_actor_cm": loaded["mesh_origin_actor_cm"],
+        "mass_lb": 100.0,
+    }
+    # Everything about the body is the same manifest as the plain run.
+    changed = {"version", "parts", "triangles", "components", "source"}
+    assert {k: v for k, v in loaded.items() if k not in changed} == \
+        {k: v for k, v in plain.items() if k not in changed}
+    assert loaded["mesh_length_m"] == plain["mesh_length_m"] == pytest.approx(10.0)
+
+    config["parts"][1]["component"] = "ghost"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ConvertError) as refused:
+        _convert(loaded_dir, config_path)
+    assert refused.value.constraint == "aircraft.component_unmatched"
+    assert "ghost" in refused.value.message
+
+
 # ---------------------------------------------------------------------------
 # C7: the landing gear as its own OBJ. A config that declares ONE
 # landing_gear component sends the gear-matched triangles (the same
@@ -1023,12 +1107,29 @@ def test_gear_objects_go_to_their_own_obj_and_manifest_row(tmp_path, monkeypatch
         assert extent[axis] == pytest.approx(lo_hi), axis
     assert set(extent) == {"x", "y", "z"}               # the top-level shape
 
-    # One landing_gear component per aircraft: two refuse by name.
+    # The split applies to exactly ONE declared landing_gear component. Two
+    # or more are the C1/C3 per-leg pattern (mesh null): no split, the wheel
+    # stays in the body OBJ, no gear OBJ, no gear row, and the body's
+    # measured extents are the no-component run's (notes/C7.md "align").
+    (tmp_path / "plain").mkdir()
+    plain, plain_path = _convert(tmp_path / "plain",
+                                 _write_labelled_config(tmp_path / "plain"))
     (tmp_path / "two").mkdir()
     two = _labelled_config_with_gear(
         tmp_path / "two", [GEAR_COMPONENT, {**GEAR_COMPONENT, "id": "main_gear"}])
-    with pytest.raises(convert_module.ConvertError, match="2 landing_gear components"):
-        _convert(tmp_path / "two", two)
+    two_manifest, two_path = _convert(tmp_path / "two", two)
+    assert two_manifest["parts"] == ["body", "aileron_l"]
+    assert two_manifest["components"] == []
+    assert two_manifest["triangles"] == {"body": 2, "aileron_l": 1}
+    assert len(_faces(two_path.parent / "body.obj")) == 2      # fuselage + LeftWheel
+    assert not (two_path.parent / GEAR_PART).with_suffix(".obj").exists()
+    assert not list(two_path.parent.glob("SM_*gear*.obj"))
+    assert (two_path.parent / "body.obj").read_bytes() == \
+        (plain_path.parent / "body.obj").read_bytes()
+    for key in ("mesh_extents_actor_cm", "mesh_extent_actor_m", "vertices_measured",
+                "gear_vertices_measured", "mesh_origin_actor_cm", "origin_anchor",
+                "mesh_length_m", "version"):
+        assert two_manifest[key] == plain[key], key
 
     # A declared gear whose patterns match nothing is an empty OBJ: refused.
     (tmp_path / "none").mkdir()
@@ -1038,6 +1139,73 @@ def test_gear_objects_go_to_their_own_obj_and_manifest_row(tmp_path, monkeypatch
     none.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(convert_module.ConvertError, match="matched no geometry"):
         _convert(tmp_path / "none", none)
+
+
+def test_per_leg_gear_components_keep_the_gear_in_the_body_and_write_payload_rows_only(
+        tmp_path, monkeypatch):
+    """D2/C7: the J-11A shape, three per-leg landing_gear components
+    (nose_gear, left_main_gear, right_main_gear, the A-4's C1 pattern) beside
+    a payload part. The converter must not refuse, must not split the gear
+    (no SM_<aircraft>_<leg>.obj, no gear row), and the manifest's components
+    list carries the payload rows only; the body keeps the wheel and the
+    body OBJ is byte-equal to a run that declares no component at all."""
+    xml = _fdm_xml(tmp_path, VRP_80_0_5)
+    xml.write_text(xml.read_text(encoding="utf-8").replace(
+        "</mass_balance>",
+        '<pointmass name="S1"><weight unit="LBS">100</weight>'
+        '<location name="POINTMASS" unit="IN"><x>0</x><y>0</y><z>0</z></location>'
+        '</pointmass></mass_balance>'), encoding="utf-8")
+    _point_fdm_at(monkeypatch, xml)
+
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    plain, plain_path = _convert(plain_dir, _write_labelled_config(plain_dir))
+
+    j11_dir = tmp_path / "j11"
+    j11_dir.mkdir()
+    (j11_dir / "src").mkdir()
+    (j11_dir / "src" / "store.ac").write_text("\n".join([
+        "AC3Db",
+        'MATERIAL "grey" rgb 0.5 0.5 0.5  amb 0.2 0.2 0.2  emis 0 0 0  spec 0 0 0  shi 0  trans 0',
+        "OBJECT world", "kids 1",
+        _ac_object("missile", [(1.0, 0.0, 0.0), (-1.0, -0.2, 0.0), (-1.0, 0.2, 0.0)]),
+    ]) + "\n", encoding="utf-8")
+    config_path = _write_labelled_config(
+        j11_dir,
+        parts=[{"file": "model.ac"},
+               {"file": "store.ac", "offset_m": [-7.0, -2.0, 0.0],
+                "component": "store_left"}],
+        loading={"stations": [{"name": "S1", "index": 0, "arm_in": 0.0,
+                               "default_lb": 100.0, "max_kg": 100.0,
+                               "loadable": True, "source": "synthetic"}],
+                 "loadout": {"stations": {"S1": 100.0}, "model_vars": {},
+                             "source": "synthetic"}})
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["labels"]["components"] = [
+        {"id": "store_left", "class": "payload", "station": "S1",
+         "source": "synthetic pointmass S1, 100 lb"},
+        {"id": "nose_gear", "class": "landing_gear", "source": "nose_gear"},
+        {"id": "left_main_gear", "class": "landing_gear", "source": "left_main_gear"},
+        {"id": "right_main_gear", "class": "landing_gear", "source": "right_main_gear"},
+    ]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    manifest, manifest_path = _convert(j11_dir, config_path)
+    out = manifest_path.parent
+
+    assert manifest["version"] == importer.COMPONENTS_MANIFEST_VERSION == 4
+    assert manifest["parts"] == ["body", "aileron_l", "SM_testcraft_store_left"]
+    assert manifest["triangles"] == {"body": 2, "aileron_l": 1, "SM_testcraft_store_left": 1}
+    assert len(_faces(out / "body.obj")) == 2            # fuselage + LeftWheel
+    assert sorted(p.name for p in out.glob("SM_*.obj")) == ["SM_testcraft_store_left.obj"]
+    for leg in ("nose_gear", "left_main_gear", "right_main_gear", "landing_gear"):
+        assert not (out / f"SM_testcraft_{leg}.obj").exists(), leg
+    assert [row["id"] for row in manifest["components"]] == ["store_left"]
+    assert [row["class"] for row in manifest["components"]] == ["payload"]
+    assert (out / "body.obj").read_bytes() == (plain_path.parent / "body.obj").read_bytes()
+    for key in ("mesh_extents_actor_cm", "mesh_extent_actor_m", "vertices_measured",
+                "gear_vertices_measured", "mesh_origin_actor_cm", "origin_anchor"):
+        assert manifest[key] == plain[key], key
+    assert manifest["mesh_extents_actor_cm"]["gear_lowest"] == -120.0
 
 
 def test_gear_split_leaves_the_z_anchor_unchanged(tmp_path, monkeypatch):
