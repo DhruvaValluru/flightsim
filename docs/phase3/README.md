@@ -31,7 +31,11 @@ prompts here are the executable version of them.
 3. The venv the scripts expect, at the repo root:
    Mac `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt`
    Windows `py -m venv .venv; .venv\Scripts\pip install -r requirements.txt -r requirements-dev.txt`
-4. In a terminal in the checkout, leave running: `claude remote-control`
+4. Remote Control is turned on *inside* the working session, not in a
+   separate window: after `claude` starts, type `/remote-control` as the
+   first message, then `/list-agents` to confirm the other machine's
+   session appears. A separate `claude remote-control` window is a
+   different session and does not connect the working one.
 
 ## Windows only
 
@@ -47,11 +51,12 @@ prompts here are the executable version of them.
 
 ## Start the run
 
-1. **Windows first.** Open Claude Code in the checkout, paste
-   `docs/phase3/PROMPT_WINDOWS.md` (everything under the line). It writes
+1. **Windows first.** Open Claude Code in the checkout, type
+   `/remote-control`, then paste `docs/phase3/PROMPT_WINDOWS.md`
+   (everything under the line). It writes
    `decisions.md`, finds the Mac session, and sends `P3 go A`.
-2. **Mac second.** Open Claude Code in the checkout, paste
-   `docs/phase3/PROMPT_MAC.md`. It opens the three progress windows and waits
+2. **Mac second.** Open Claude Code in the checkout, type
+   `/remote-control`, then paste `docs/phase3/PROMPT_MAC.md`. It opens the three progress windows and waits
    for `P3 go A`.
 3. Watch the windows. Window 1: a bar per letter, what each machine is doing
    with elapsed time, the last message in flight, failures against caps.

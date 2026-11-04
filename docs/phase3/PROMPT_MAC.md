@@ -1,8 +1,8 @@
 # Phase 3 · Mac session startup prompt
 
 Paste everything below the line into a fresh Claude Code session on the Mac,
-in the `flightsim` checkout on branch `phase-2-final`, with
-`claude remote-control` running in another terminal. The word **ultracode** in
+in the `flightsim` checkout on branch `phase-2-final`, after typing
+`/remote-control` in the session so it can reach the other machine. The word **ultracode** in
 the first line is what lets the session run multi-agent workflows.
 
 ---
