@@ -1617,6 +1617,14 @@ def _run(args: argparse.Namespace) -> int:
     rendered = sorted(p for p in frames_dir.rglob("frame_*.png")
                       if p.stem[-4:].isdigit())
     print(f"  frames:   {len(rendered)} rendered under {frames_dir}")
+    # A camera whose pass wrote nothing is named, never skipped.
+    from core.capture.frames import empty_camera_ids
+    from core.scenario.validate import Violation
+
+    empty_cameras = empty_camera_ids(
+        frames_dir, [str(c.camera_id.value) for c in cameras])
+    if empty_cameras:
+        return _refuse([Violation("render.camera_empty", empty_cameras[0])])
 
     # Phase 2 (package C): complete every frame's per-object records
     # from the bundle the engine just wrote -- the tight box from the
