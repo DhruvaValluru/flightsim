@@ -1279,3 +1279,206 @@ PASS
  4 files changed, 143 insertions(+), 48 deletions(-)
 ```
 
+## A4 · PASS · run A-2 · 2026-11-04T16:20:54Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+57:     `engine.binary_stale`.
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/A4-stale-web.log: status 409  {"refused":"the built bridge is from source 770fa283dc1b178644309885b1e7ed82fb9d321dd89eefdef516a0c21cf69ac5 but the source is now b714730baf8a102f94876c228334dc80fc21ea71f668d64f7ecbf916e5286ffc","constraint":"engine.binary_stale", ...}
+runs/p3/A-2/A4-fresh-web.log: status 200 {"run_id":"4be692c3e9fe", ...} -> run done: clip ready (stale gate passed after the revert; binary_stale_reason None, hash 770fa283 == stamp)
+runs/p3/A-2/A4-ps-hash.log: fixture 0141215eaa199cccb8b67a2acbdccecfcb70e4487506da5a93a326abcc05dc49 == golden; repo-ps1 770fa283… == python repo 770fa283… (runs/p3/A-2/A4-py-hash.log)
+```
+
+note: run A-2 on UE 5.7.4; the web path checks the stamp right after ue_available(), so the probe needs no bake or editor; the same build_stamp.json now carries engine_version 5.7.4
+
+### synopsis
+
+# A4 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T16:20:54Z
+
+## A4 step 6-7: PowerShell Get-PluginSourceHash fixture vs golden, repo vs python twin
+
+- log: `runs/p3/A-2/A4-ps-hash.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+fixture  0141215eaa199cccb8b67a2acbdccecfcb70e4487506da5a93a326abcc05dc49
+golden   0141215eaa199cccb8b67a2acbdccecfcb70e4487506da5a93a326abcc05dc49
+repo-ps1 770fa283dc1b178644309885b1e7ed82fb9d321dd89eefdef516a0c21cf69ac5
+```
+
+## A4 step 8 first half (web path, 5.7 build): FlightSimSky.cpp edited, no rebuild, POST /run
+
+- log: `runs/p3/A-2/A4-stale-web.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+status 409
+{"refused":"the built bridge is from source 770fa283dc1b178644309885b1e7ed82fb9d321dd89eefdef516a0c21cf69ac5 but the source is now b714730baf8a102f94876c228334dc80fc21ea71f668d64f7ecbf916e5286ffc","constraint":"engine.binary_stale","sentence":"The request was refused.","hint":"","details":{"rule":"the built bridge is from source 770fa283dc1b178644309885b1e7ed82fb9d321dd89eefdef516a0c21cf69ac5 but the source is now b714730baf8a102f94876c228334dc80fc21ea71f668d64f7ecbf916e5286ffc","message":"","catalogued":false}}
+```
+
+## A4 step 8 second half: source reverted, POST /run accepted and the run completed
+
+- log: `runs/p3/A-2/A4-fresh-web.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+status 200
+{"run_id":"4be692c3e9fe","digest":"c5c75d19687cf6b521db3ad49b69a9e41226941a3ef21b714d80932df9238fb4"}
+status 200 run 4be692c3e9fe done: clip ready (host flight 220 samples, 220 frames rendered, labels attached on 220 of 220)
+```
+
+note: run A-2 on 23bad766 / UE 5.7.4 build 770fa283 (build_stamp.json engine_version 5.7.4); the stale POST returned HTTP 409 engine.binary_stale naming both hashes; the reverted POST returned 200 run 4be692c3e9fe which finished 'done: clip ready'
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+94c1871a Phase 3 A4 PASS (run A-1): stale engine binary refused by name on the web path
+94f56764 Merge p3-A4: stale engine binary refused (build stamp vs plugin source hash)
+9a0fdfef A4 integrator: capture wiring test, note integrator_edits
+52b450b3 A4 integrator: skip stale check when no bridge binary exists (drops conftest fixture); CRLF fixture -text; capture wiring test
+d67232f0 Merge branch 'phase-2-final' into p3-A4
+b9c8d830 A4: refuse a stale engine binary (build stamp, plugin source hash, engine.binary_stale)
+
+94c1871a Phase 3 A4 PASS (run A-1): stale engine binary refused by name on the web path
+
+ docs/phase3/events_windows.log     |   9 +++
+ docs/phase3/packets/A4-synopsis.md |  88 ++++++++++++++++++++++
+ docs/phase3/state/A4.json          |   4 +-
+ docs/phase3/sync_log_A.md          | 146 +++++++++++++++++++++++++++++++++++++
+ tasks/phase3_checklist.md          |   2 +-
+ 5 files changed, 247 insertions(+), 2 deletions(-)
+
+94f56764 Merge p3-A4: stale engine binary refused (build stamp vs plugin source hash)
+
+ .gitattributes                                     |   3 +
+ core/messages/catalog.yaml                         |   3 +
+ core/util/platform.py                              |  79 +++++++++++++++
+ docs/phase3/notes/A4.md                            |   5 +
+ flightsim/capture.py                               |   9 ++
+ scripts/build_ue.ps1                               |  41 ++++++++
+ .../ue/Plugins/FlightSimBridge/Source/A.cpp        |   1 +
+ .../ue/Plugins/FlightSimBridge/Source/B.h          |   2 +
+ .../ue/Plugins/FlightSimBridge/Source/Sub/C.cpp    |   2 +
+ tests/test_binary_stale.py                         | 109 +++++++++++++++++++++
+ webapp/runs.py                                     |   7 ++
+ 11 files changed, 261 insertions(+)
+
+9a0fdfef A4 integrator: capture wiring test, note integrator_edits
+
+ docs/phase3/notes/A4.md    | 5 +++++
+ tests/conftest.py          | 1 -
+ tests/test_binary_stale.py | 9 ++++++---
+ 3 files changed, 11 insertions(+), 4 deletions(-)
+
+52b450b3 A4 integrator: skip stale check when no bridge binary exists (drops conftest fixture); CRLF fixture -text; capture wiring test
+
+ .gitattributes                                     |  3 +++
+ core/util/platform.py                              |  7 ++++-
+ tests/conftest.py                                  | 12 ---------
+ .../ue/Plugins/FlightSimBridge/Source/B.h          |  4 +--
+ tests/test_binary_stale.py                         | 30 ++++++++++++++++++++++
+ 5 files changed, 41 insertions(+), 15 deletions(-)
+
+d67232f0 Merge branch 'phase-2-final' into p3-A4
+
+ NEXT.md                                            |   95 +-
+ assets/aircraft_config/A4.json                     |   79 +-
+ assets/fdm_root/aircraft/A4/A4.xml                 |    6 +-
+ assets_pipeline/a4_performance.py                  |   11 +-
+ assets_pipeline/a4_sync.py                         |    8 +-
+ core/capture/airframe.py                           |  115 +-
+ core/capture/labels.py                             |  126 +-
+ core/capture/manifest.py                           |   15 +-
+ core/capture/objects.py                            |   28 +-
+ core/capture/verify.py                             |   77 +
+ core/messages/catalog.yaml                         |    7 +
+ core/scenario/blocks.py                            |    2 +-
+ docs/phase3/BUILDER_BRIEF.md                       |   52 +
+ docs/phase3/INTEGRATOR_BRIEF.md                    |   52 +
+ docs/phase3/SUBAGENT_BRIEF.md                      |   47 +
+ docs/phase3/digest_A.md                            | 1260 ++++++++++++
+ docs/phase3/events_mac.log                         |  239 +++
+ docs/phase3/notes/A1.md                            |   55 +
+ docs/phase3/notes/A10.md                           |   50 +
+ docs/phase3/notes/A11.md                           |   59 +
+ docs/phase3/notes/A12.md                           |   58 +
+ docs/phase3/notes/A13.md                           |   44 +
+ docs/phase3/notes/A2.md                            |   79 +
+ docs/phase3/notes/A3.md                            |   69 +
+ docs/phase3/notes/A4.md                            |   85 +
+ docs/phase3/notes/A5.md                            |   58 +
+ docs/phase3/notes/A6.md                            |   59 +
+ docs/phase3/notes/A7.md                            |   64 +
+ docs/phase3/notes/A8.md                            |   61 +
+ docs/phase3/notes/A9.md                            |   60 +
+ docs/phase3/notes/C1.md                            |   64 +
+ docs/phase3/notes/C5.md                            |   68 +
+ docs/phase3/notes/C6.md                            |   65 +
+ docs/phase3/state/A.json                           |   41 +
+ docs/phase3/state/A1.json                          |   15 +
+ docs/phase3/state/A10.json                         |   15 +
+ docs/phase3/state/A11.json                         |    7 +
+ docs/phase3/state/A12.json                         |   24 +
+ docs/phase3/state/A13.json                         |   10 +
+ docs/phase3/state/A2.json                          |   16 +
+ docs/phase3/state/A3.json                          |   17 +
+ docs/phase3/state/A4.json                          |   18 +
+ docs/phase3/state/A5.json                          |   18 +
+ docs/phase3/state/A6.json                          |   17 +
+ docs/phase3/state/A7.json                          |    7 +
+ docs/phase3/state/A8.json                          |    7 +
+ docs/phase3/state/A9.json                          |    7 +
+ docs/phase3/state/A_decisions_needed.md            |   15 +
+ docs/phase3/state/C1.json                          |   14 +
+ docs/phase3/state/C5.json                          |   23 +
+ docs/phase3/state/C6.json                          |    7 +
+ docs/schemas/capture_manifest.v8.schema.json       | 2059 ++++++++++++++++++++
+ scripts/label_diagnose.py                          |   42 +
+ scripts/phase3_digest.py                           |  149 ++
+ scripts/phase3_event.py                            |    5 +-
+ scripts/phase3_state.py                            |  110 ++
+ tests/test_a4.py                                   |   14 +-
+ tests/test_airframe.py                             |   99 +
+ tests/test_annotation_gates.py                     |   55 +-
+ tests/test_camera_labels.py                        |    5 +-
+ tests/test_capture_objects.py                      |    5 +-
+ tests/test_capture_schema.py                       |    4 +-
+ tests/test_component_labels.py                     |  180 ++
+ tests/test_engine_bundle_golden.py                 |   96 +
+ tests/test_label_diagnose.py                       |   53 +
+ tests/test_platform.py                             |    2 +-
+ tests/test_ue_physics_source.py                    |    8 +
+ tests/test_versions.py                             |    2 +-
+ .../Resources/JSBSim/aircraft/A4/A4.xml            |    6 +-
+ ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json |   19 +-
+ 70 files changed, 6303 insertions(+), 105 deletions(-)
+
+b9c8d830 A4: refuse a stale engine binary (build stamp, plugin source hash, engine.binary_stale)
+
+ core/messages/catalog.yaml                         |  3 +
+ core/util/platform.py                              | 74 +++++++++++++++++++++
+ flightsim/capture.py                               |  9 +++
+ scripts/build_ue.ps1                               | 41 ++++++++++++
+ tests/conftest.py                                  | 13 ++++
+ .../ue/Plugins/FlightSimBridge/Source/A.cpp        |  1 +
+ .../ue/Plugins/FlightSimBridge/Source/B.h          |  2 +
+ .../ue/Plugins/FlightSimBridge/Source/Sub/C.cpp    |  2 +
+ tests/test_binary_stale.py                         | 76 ++++++++++++++++++++++
+ webapp/runs.py                                     |  7 ++
+ 10 files changed, 228 insertions(+)
+```
+
