@@ -709,3 +709,56 @@ def test_traffic_example_validates_and_labels_every_aircraft(tmp_path):
             assert entry["bbox_3d_camera"] is not None
     report = verify_run(out)
     assert report.ok, report.render()
+
+
+# -- the terrain stem the engine is handed ---------------------------------
+#
+# Measured (Windows run A-2): ``--terrain runs/terrain/grand_canyon`` typed
+# at the repo root reached the host as typed -- in the card, the manifest
+# and -terrain= -- and the host, whose working directory is not the
+# repo root, refused "cannot read heightfield sidecar". The web path hands
+# an absolute stem; the CLI resolves its own once the bake is known.
+
+def _ridge_bake(tmp_path):
+    from core.terrain.synthesis import ensure_ridge_for_origin
+
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_terrain.yaml")
+    return ensure_ridge_for_origin(tmp_path / "bakes",
+                                   float(spec.latitude.value),
+                                   float(spec.longitude.value), name="ridge")
+
+
+def _captured_terrain(out):
+    manifest = json.loads((out / "capture_manifest.json").read_text(encoding="utf-8"))
+    card = json.loads((out / "card.json").read_text(encoding="utf-8"))
+    return manifest["scene"]["terrain"], card
+
+
+def test_a_relative_terrain_stem_reaches_the_engine_absolute(tmp_path, monkeypatch):
+    import os
+
+    bake = _ridge_bake(tmp_path)
+    assert bake.with_suffix(".r16").is_file() and bake.with_suffix(".json").is_file()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    typed = os.path.relpath(bake, elsewhere)            # ../bakes/ridge
+    assert not Path(typed).is_absolute()
+    out = tmp_path / "relative"
+    assert capture_main([str(EXAMPLES / "cameras_terrain.yaml"), "--out", str(out),
+                         "--max-previews", "0", "--card", "--terrain", typed]) == 0
+    terrain, card = _captured_terrain(out)
+    assert Path(terrain).is_absolute(), f"scene.terrain is not absolute: {terrain!r}"
+    assert terrain == str(bake.resolve()), f"scene.terrain {terrain!r} is not the resolved stem"
+    # Absent-canonical: no runway, buildings or scene -> no world block; the
+    # engine takes -terrain= from the same (resolved) stem the manifest names.
+    assert card.get("world") is None
+
+
+def test_an_absolute_terrain_stem_is_handed_over_unchanged(tmp_path):
+    bake = _ridge_bake(tmp_path)
+    out = tmp_path / "absolute"
+    assert capture_main([str(EXAMPLES / "cameras_terrain.yaml"), "--out", str(out),
+                         "--max-previews", "0", "--card", "--terrain", str(bake)]) == 0
+    terrain, _ = _captured_terrain(out)
+    assert terrain == str(bake) == str(bake.resolve())
