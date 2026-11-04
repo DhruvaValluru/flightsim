@@ -49,7 +49,15 @@ struct FFlightSimSceneObject
 	int32 IntId = 0;            // 1..255 (the primary airframe is always 1)
 	FString Class;              // taxonomy class name
 	int32 ClassId = 0;          // taxonomy position + 1 (0 is sky / nothing)
-	FString Role;               // primary | traffic | scene
+	FString Role;               // primary | traffic | scene | component
+	// Phase 3 (C4): a component of another object (a payload store, a
+	// landing gear) names its parent's objects[] id and, when the card says
+	// one, the imported mesh asset name (SM_<aircraft>_<component>) the
+	// host attaches under the parent's mesh origin. Empty for every other
+	// object; a landing_gear entry with mesh null is labelled, attaches
+	// nothing and owns no pixels.
+	FString Parent;
+	FString MeshName;
 };
 
 // Phase 2 (packages B + C, contracts §2.2): a scripted traffic aircraft. Not
