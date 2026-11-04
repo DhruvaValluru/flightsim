@@ -42,6 +42,7 @@ from core.nl.llm_compiler import (  # noqa: E402
 )
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
+from webapp.capture import wants_capture  # noqa: E402
 from webapp.runs import (  # noqa: E402
     CLIP_SECONDS,
     HOST_OPEN_LOOP_FROM,
@@ -53,6 +54,7 @@ from webapp.runs import (  # noqa: E402
     bake_on_demand,
     camera_scene_violations,
     coupling_needs_seed,
+    default_run_spec,
     derive_seed,
     needs_dynamic_bake,
     pick_scene,
@@ -144,7 +146,12 @@ class CompileRequest(BaseModel):
 
 
 class RunRequest(BaseModel):
-    spec: Dict[str, Any]       # ScenarioSpec.to_dict(), possibly edited
+    """POST /run. ``spec`` is the page's ScenarioSpec.to_dict(), possibly
+    edited; absent or empty it means "the default run" (E4): the server
+    builds it with ``webapp.runs.default_run_spec`` and runs the same
+    planner order."""
+
+    spec: Optional[Dict[str, Any]] = None
     provenance: Dict[str, Any] = {}
 
 
@@ -990,11 +997,16 @@ def route_map_script():
 
 @app.post("/run")
 def run_endpoint(request: RunRequest) -> JSONResponse:
-    try:
-        spec = ScenarioSpec.from_dict(request.spec)
-    except (ValueError, KeyError) as exc:
-        return JSONResponse({"error": f"spec did not parse: {exc}"},
-                            status_code=400)
+    if not request.spec:
+        # Nothing compiled: the Capture button posts {} and the server
+        # builds the default run (E4), then runs the SAME planner order.
+        spec = default_run_spec()
+    else:
+        try:
+            spec = ScenarioSpec.from_dict(request.spec)
+        except (ValueError, KeyError) as exc:
+            return JSONResponse({"error": f"spec did not parse: {exc}"},
+                                status_code=400)
 
     # The recorded transformations happen BEFORE the digest is answered, so
     # the response content-addresses exactly what will run: the derived
@@ -1129,7 +1141,11 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # blocker was that no Unreal host existed there at all.
     from core.util.platform import ue_available, ue_platform_refusal
 
-    if not ue_available():
+    # A spec WITH cameras on a machine without the engine is not refused
+    # here: the render flow captures it headlessly (runs.py, `headless =
+    # not ue_available()`) -- manifest, boxes, verification, no pixels.
+    # A camera-less spec still hears ue.platform first, same body.
+    if not ue_available() and not wants_capture(spec):
         return JSONResponse({"refused": ue_platform_refusal(),
                              "constraint": "ue.platform"}, status_code=409)
     # Placeholder airframes never render (owner's rule, extended
