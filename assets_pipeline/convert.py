@@ -405,13 +405,17 @@ def _component_records(component_parts: Dict[str, str], airframe,
 
 
 def _gear_component(config: Dict) -> Optional[Dict]:
-    """The config's declared ``landing_gear`` component (``labels.components``,
-    class ``landing_gear``), or None when the config declares none. The
-    letter-C rule is ONE landing_gear component per aircraft (every wheel,
-    strut and brake the ``gear_geometry`` patterns match goes into its one
-    OBJ), so two refuse by id; a malformed block refuses too, because a
-    silently ignored gear entry would leave the gear in the body OBJ with
-    no box of its own."""
+    """The config's ONE declared ``landing_gear`` component
+    (``labels.components``, class ``landing_gear``) when it declares exactly
+    one, else None. The gear split (every wheel, strut and brake the
+    ``gear_geometry`` patterns match into one ``SM_<aircraft>_<id>`` OBJ
+    and a manifest row) applies only to that single-component shape (the
+    c172p). Two or more landing_gear components are the C1/C3 per-leg
+    pattern (the A-4's and the J-11A's ``nose_gear`` / ``left_main_gear`` /
+    ``right_main_gear``, ``mesh: null``): no split, the gear stays in the
+    body OBJ and no gear row is written (decision in notes/C7.md "align").
+    A malformed block refuses, because a silently ignored gear entry would
+    leave the gear in the body OBJ with no box of its own."""
     declared = (config.get("labels") or {}).get("components")
     if declared is None:
         return None
@@ -420,14 +424,8 @@ def _gear_component(config: Dict) -> Optional[Dict]:
                            "objects", constraint="aircraft.component_unmatched")
     gear = [c for c in declared
             if isinstance(c, dict) and c.get("class") == "landing_gear"]
-    if len(gear) > 1:
-        raise ConvertError(
-            f"labels.components declares {len(gear)} landing_gear components "
-            f"({[c.get('id') for c in gear]}); the gear split writes ONE "
-            f"landing_gear OBJ per aircraft, so declare one",
-            constraint="aircraft.component_unmatched")
-    if not gear:
-        return None
+    if len(gear) != 1:
+        return None     # none, or per-leg declarations: the gear stays in the body
     if not gear[0].get("id"):
         raise ConvertError("the landing_gear component has no id",
                            constraint="aircraft.component_unmatched")

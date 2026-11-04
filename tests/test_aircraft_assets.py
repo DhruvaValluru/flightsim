@@ -1107,12 +1107,29 @@ def test_gear_objects_go_to_their_own_obj_and_manifest_row(tmp_path, monkeypatch
         assert extent[axis] == pytest.approx(lo_hi), axis
     assert set(extent) == {"x", "y", "z"}               # the top-level shape
 
-    # One landing_gear component per aircraft: two refuse by name.
+    # The split applies to exactly ONE declared landing_gear component. Two
+    # or more are the C1/C3 per-leg pattern (mesh null): no split, the wheel
+    # stays in the body OBJ, no gear OBJ, no gear row, and the body's
+    # measured extents are the no-component run's (notes/C7.md "align").
+    (tmp_path / "plain").mkdir()
+    plain, plain_path = _convert(tmp_path / "plain",
+                                 _write_labelled_config(tmp_path / "plain"))
     (tmp_path / "two").mkdir()
     two = _labelled_config_with_gear(
         tmp_path / "two", [GEAR_COMPONENT, {**GEAR_COMPONENT, "id": "main_gear"}])
-    with pytest.raises(convert_module.ConvertError, match="2 landing_gear components"):
-        _convert(tmp_path / "two", two)
+    two_manifest, two_path = _convert(tmp_path / "two", two)
+    assert two_manifest["parts"] == ["body", "aileron_l"]
+    assert two_manifest["components"] == []
+    assert two_manifest["triangles"] == {"body": 2, "aileron_l": 1}
+    assert len(_faces(two_path.parent / "body.obj")) == 2      # fuselage + LeftWheel
+    assert not (two_path.parent / GEAR_PART).with_suffix(".obj").exists()
+    assert not list(two_path.parent.glob("SM_*gear*.obj"))
+    assert (two_path.parent / "body.obj").read_bytes() == \
+        (plain_path.parent / "body.obj").read_bytes()
+    for key in ("mesh_extents_actor_cm", "mesh_extent_actor_m", "vertices_measured",
+                "gear_vertices_measured", "mesh_origin_actor_cm", "origin_anchor",
+                "mesh_length_m", "version"):
+        assert two_manifest[key] == plain[key], key
 
     # A declared gear whose patterns match nothing is an empty OBJ: refused.
     (tmp_path / "none").mkdir()
@@ -1122,6 +1139,73 @@ def test_gear_objects_go_to_their_own_obj_and_manifest_row(tmp_path, monkeypatch
     none.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(convert_module.ConvertError, match="matched no geometry"):
         _convert(tmp_path / "none", none)
+
+
+def test_per_leg_gear_components_keep_the_gear_in_the_body_and_write_payload_rows_only(
+        tmp_path, monkeypatch):
+    """D2/C7: the J-11A shape, three per-leg landing_gear components
+    (nose_gear, left_main_gear, right_main_gear, the A-4's C1 pattern) beside
+    a payload part. The converter must not refuse, must not split the gear
+    (no SM_<aircraft>_<leg>.obj, no gear row), and the manifest's components
+    list carries the payload rows only; the body keeps the wheel and the
+    body OBJ is byte-equal to a run that declares no component at all."""
+    xml = _fdm_xml(tmp_path, VRP_80_0_5)
+    xml.write_text(xml.read_text(encoding="utf-8").replace(
+        "</mass_balance>",
+        '<pointmass name="S1"><weight unit="LBS">100</weight>'
+        '<location name="POINTMASS" unit="IN"><x>0</x><y>0</y><z>0</z></location>'
+        '</pointmass></mass_balance>'), encoding="utf-8")
+    _point_fdm_at(monkeypatch, xml)
+
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    plain, plain_path = _convert(plain_dir, _write_labelled_config(plain_dir))
+
+    j11_dir = tmp_path / "j11"
+    j11_dir.mkdir()
+    (j11_dir / "src").mkdir()
+    (j11_dir / "src" / "store.ac").write_text("\n".join([
+        "AC3Db",
+        'MATERIAL "grey" rgb 0.5 0.5 0.5  amb 0.2 0.2 0.2  emis 0 0 0  spec 0 0 0  shi 0  trans 0',
+        "OBJECT world", "kids 1",
+        _ac_object("missile", [(1.0, 0.0, 0.0), (-1.0, -0.2, 0.0), (-1.0, 0.2, 0.0)]),
+    ]) + "\n", encoding="utf-8")
+    config_path = _write_labelled_config(
+        j11_dir,
+        parts=[{"file": "model.ac"},
+               {"file": "store.ac", "offset_m": [-7.0, -2.0, 0.0],
+                "component": "store_left"}],
+        loading={"stations": [{"name": "S1", "index": 0, "arm_in": 0.0,
+                               "default_lb": 100.0, "max_kg": 100.0,
+                               "loadable": True, "source": "synthetic"}],
+                 "loadout": {"stations": {"S1": 100.0}, "model_vars": {},
+                             "source": "synthetic"}})
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["labels"]["components"] = [
+        {"id": "store_left", "class": "payload", "station": "S1",
+         "source": "synthetic pointmass S1, 100 lb"},
+        {"id": "nose_gear", "class": "landing_gear", "source": "nose_gear"},
+        {"id": "left_main_gear", "class": "landing_gear", "source": "left_main_gear"},
+        {"id": "right_main_gear", "class": "landing_gear", "source": "right_main_gear"},
+    ]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    manifest, manifest_path = _convert(j11_dir, config_path)
+    out = manifest_path.parent
+
+    assert manifest["version"] == importer.COMPONENTS_MANIFEST_VERSION == 4
+    assert manifest["parts"] == ["body", "aileron_l", "SM_testcraft_store_left"]
+    assert manifest["triangles"] == {"body": 2, "aileron_l": 1, "SM_testcraft_store_left": 1}
+    assert len(_faces(out / "body.obj")) == 2            # fuselage + LeftWheel
+    assert sorted(p.name for p in out.glob("SM_*.obj")) == ["SM_testcraft_store_left.obj"]
+    for leg in ("nose_gear", "left_main_gear", "right_main_gear", "landing_gear"):
+        assert not (out / f"SM_testcraft_{leg}.obj").exists(), leg
+    assert [row["id"] for row in manifest["components"]] == ["store_left"]
+    assert [row["class"] for row in manifest["components"]] == ["payload"]
+    assert (out / "body.obj").read_bytes() == (plain_path.parent / "body.obj").read_bytes()
+    for key in ("mesh_extents_actor_cm", "mesh_extent_actor_m", "vertices_measured",
+                "gear_vertices_measured", "mesh_origin_actor_cm", "origin_anchor"):
+        assert manifest[key] == plain[key], key
+    assert manifest["mesh_extents_actor_cm"]["gear_lowest"] == -120.0
 
 
 def test_gear_split_leaves_the_z_anchor_unchanged(tmp_path, monkeypatch):
