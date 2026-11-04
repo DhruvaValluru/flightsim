@@ -61,11 +61,13 @@ from webapp.runs import (  # noqa: E402
     sample_randomization_or_refuse,
     plan_flyable_defaults,
     plan_scene_setting,
+    apply_environment_preset,
     plan_terrain_environment,
     plan_terrain_flight,
     plan_trim_recovery,
     plan_water_surface,
     project_for_ue_host,
+    provision_place,
     refuse_placeholder_mesh,
 )
 from webapp.route_map import plan_route_flight  # noqa: E402
@@ -134,6 +136,11 @@ class CompileRequest(BaseModel):
     #: "1 frame (preview)": every camera captures exactly one image (a
     #: counted interval capture of 1, a USER edit shown in the table).
     still: bool = False
+    #: Environment preset (Phase 3 D4): "desert" or "forest", the page's
+    #: structured picker, applied as a USER edit of surface, place, sun
+    #: and season (webapp.runs.ENVIRONMENT_PRESETS). None = the prompt
+    #: decides, as before. An unknown value is refused by name (400).
+    environment: Optional[str] = None
 
 
 class RunRequest(BaseModel):
@@ -410,6 +417,16 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         for camera in spec.cameras:
             camera.set("trigger", "interval", frm="1-frame preview (web UI)")
             camera.set("capture_count", 1, frm="1-frame preview (web UI)")
+    # Environment preset: the picker's choice is a structured USER edit of
+    # surface, place, sun and season -- not prompt wording -- applied
+    # BEFORE the scene-setting planner, which leaves user-chosen
+    # coordinates alone. An unknown value refuses by name, like the clip
+    # length. /run takes the returned spec unchanged: the edits ride on it.
+    if request.environment is not None:
+        try:
+            apply_environment_preset(spec, request.environment)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
     # Planning happens BEFORE the table and verdict are built, so what the
     # user reviews is what will run: the weather event's documented
@@ -982,16 +999,15 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # Scene-setting first (idempotent: a compile-planned location arrives
     # source derived and is left alone), so the placement, bake check and
     # every later planner see the staged scene like any named one.
-    plan_scene_setting(spec)
     # Mapped water under the stated place plans the water surface class
     # (X-Plane mask, when extracted on this machine): before placement,
     # so the control ridge's arbitrary georeference is never looked up.
-    plan_water_surface(spec)
-    unbaked = needs_dynamic_bake(spec)
-    if unbaked is not None:
-        return JSONResponse({"refused": "terrain.unbaked", **unbaked},
+    # provision_place is the ONE function the campaign path calls too
+    # (decision 17): scene-setting, water, the bake check, placement.
+    provisioned = provision_place(spec)
+    if provisioned["refusal"] is not None:
+        return JSONResponse({"refused": "terrain.unbaked", **provisioned["refusal"]},
                             status_code=409)
-    place_on_scene(spec)
     # Severe-weather composition edits (thunderstorm -> severe turbulence
     # when the word was defaulted): recorded, pre-digest, like every other
     # transformation.
@@ -1669,6 +1685,15 @@ def conditions_list_script() -> FileResponse:
     the weather and environment phrases the compiler turns into spec
     fields, clickable into the prompt (tests/test_conditions_list.py)."""
     return FileResponse(STATIC / "conditions_list.js",
+                        media_type="application/javascript")
+
+
+@app.get("/environment_picker.js")
+def environment_picker_script() -> FileResponse:
+    """The environment picker the prompt page mounts under the prompt box:
+    the desert/forest preset sent as the structured ``environment`` field
+    of POST /compile (tests/test_webapp.py test_environment_preset_*)."""
+    return FileResponse(STATIC / "environment_picker.js",
                         media_type="application/javascript")
 
 

@@ -2926,3 +2926,391 @@ ddb2ac3f A11: labels.no_bundle refuses a render that wrote no label bundle (CLI 
  6 files changed, 158 insertions(+), 3 deletions(-)
 ```
 
+## A12 · PASS · run A-2 · 2026-11-04T18:16:53Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+79:   - Check: `python -m flightsim.verify runs/<id>` shows 7 of 7 PASS.
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/A12-verify-main-2.log: [PASS] mask_integers_only / [PASS] mask_vs_geometry (0.6 px of 130 px span, tol 2 %) / [PASS] box_vs_mask (IoU 0.970) / [PASS] label_geometry_3d / [PASS] depth_vs_geometry / [PASS] visibility_vs_scene / [PASS] identity_stable ; [PASS] tight_box_present: bbox_2d_tight present and inside bbox_2d ; [PASS] landmark_reprojection: 16 landmark projections agree with the engine's own to within 0.00 px ; exit 0 (no FAIL line)
+runs/p3/A-2/A12-diagnose-main.log: tight null: 0, tight filled: 2
+runs/p3/A-2/A12-golden-pytest-2.log: pytest -q -rs tests/test_engine_bundle_golden.py exit 0, no SKIPPED line; fixture 807,894 bytes < 2 MB, GOLDEN.json {camera_id chase, frame frame_0000.png, int_id 1, bbox_2d_tight [95.0, 79.0, 224.0, 109.0], visible_fraction 1.0, depth_median_m 27.06}, RUN_ID 7237db488652
+```
+
+note: run A-2: two packets (A12-1 Windows engine, A12-2 Mac verifier) both closed; the fixture is committed data only; B4 step 10 (same golden test, no skips) is satisfied by this run
+
+### synopsis
+
+# A12 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T18:16:51Z
+
+## A12 step 5: flightsim.verify on run 7237db488652 (c172p, chase, 1 x 320x180) after eb9e5f30 (engine) and 968dcb60 (verifier)
+
+- log: `runs/p3/A-2/A12-verify-main-2.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+  [NOT RUN] instruments: no telemetry_measured.json in the run (instruments profile ideal, or none stated)
+  [PASS] datum: heights EGM2008 orthometric (GLO-30); EGM96 bilinear undulation -23.403 m at the origin (bilinear -23.403 m) agrees with the checker's own read of the grid to 0.0000 m; ellipsoidal origin 1316.8 m = orthometric 1340.2 m + N
+  [PASS] datum_independent: PROJ +inv vgridshift on grand_canyon_geoid.gtx (5x5 nodes at 0.250000 deg, corner on whole nodes) reads -23.403 m at the origin (block -23.403 m) and agrees with the producer's full-grid values to 1.14e-06 m over 100 interior points; inf outside
+  [NOT RUN] dis_roundtrip: no Entity State PDU log: the run was captured without --dis (no dis_entity_state.bin, no index, no dis.entity_state record)
+  [PASS] georeference: 1 render.json georeference block(s) agree with the manifest: EPSG:32612 about the frame origin, the stated vertical convention, undulation at the origin -23.403 m
+  [NOT RUN] wake_selftest: the card states no wake: nothing to re-evaluate
+  [NOT RUN] host_physics: no render.json carries the engine's physics keys: the engine side is a Windows step
+  [NOT RUN] building_vs_footprint: the manifest names no footprint set (no scene.buildings): nothing to carry the ID image back against
+  [NOT RUN] runway_vs_geometry: the manifest names no runway (no scene.runway): nothing to grade
+  [NOT RUN] landcover_vs_geometry: the manifest names no land cover (no landcover block): nothing to carry the frames onto
+  [NOT RUN] normals_vs_depth: no render.json frame record declares normal_png (no -passes=normal, or no engine pass at all): render on Windows with -labels -passes=normal to exercise this
+  [NOT RUN] flow_vs_motion: no render.json frame record declares flow_f32 (no -passes=velocity, or no engine pass at all): render on Windows with -labels -passes=velocity to exercise this
+  [NOT RUN] albedo_range: no render.json frame record declares albedo_png (no -passes=albedo, or no engine pass at all): render on Windows with -labels -passes=albedo to exercise this
+  [NOT RUN] psf_slanted_edge: no camera carries a sensing.optics block: no PSF was applied
+  [NOT RUN] blur_vs_flow: no camera carries a sensing.motion_blur block: no blur was applied
+  [NOT RUN] radiometry_grey_card: no camera carries a sensing.radiometry block
+  [NOT RUN] engine_linear_passes: no render.json frame record declares labels.normal or labels.basecolor (render on Windows with -labels -passes=normal,albedo to exercise this)
+  [NOT RUN] velocity_readback: no render.json frame record declares labels.velocity (render on Windows with -labels -velocity-check to exercise this)
+  [PASS] engine_readbacks: 5 read-back(s): the console values parse, the lens attenuation is a fraction, the colour space is linear, a sun in lux says so and was set to it
+  [NOT RUN] calibration_frame: no render.json carries a calibration record (render on Windows with -calibration -sun-lux= to exercise this)
+  [NOT RUN] engine_accumulation: no render.json frame record carries an accumulation (render on Windows with -accumulate=K to exercise this)
+  [NOT RUN] night_exposure: the manifest carries no look.night block: no night was asked for
+  [NOT RUN] world_record: no scene.world record beside a card look and no render.json world_applied: the world engine side is a Windows step
+  [NOT RUN] flow_vs_keypoints: no passes.json names a flow pass (no camera asks for it in cameras[i].passes, or no render): render on Windows with the pass asked for to exercise this
+  [NOT RUN] flow_static_null: no passes.json names a flow pass (no camera asks for it in cameras[i].passes, or no render): render on Windows with the pass asked for to exercise this
+  [NOT RUN] disparity_vs_right_depth: no camera block declares a stereo rig (cameras[i].stereo)
+  [NOT RUN] points_vs_depth: no passes.json names a points pass (no camera asks for it in cameras[i].passes, or no render): render on Windows with the pass asked for to exercise this
+  [NOT RUN] amodal_contains_visible: no object record carries an amodal box (no camera asks for amodal)
+  [NOT RUN] ir_proxy_declared: no IR frame under frames/ (0 camera(s) declare sensing.ir; the proxy is written after a render's ID image and depth exist)
+  [NOT RUN] applied_readback: 1 record(s), none carrying a readback
+  [PASS] null_effect: 1 null test(s) re-graded from their own numbers; every verdict agrees
+  [NOT RUN] instrument_allan: the manifest carries no instruments block (a run before the FDM-rate observer)
+  [NOT RUN] instrument_lever_arm: the manifest carries no instruments block (a run before the FDM-rate observer)
+  [NOT RUN] uncertainty_present: no uncertainty block: the capture did not run the dt/2 twin (--uncertainty or record.sensitivity_pairs)
+  [NOT RUN] temporal_alignment: needs a second capture of the SAME simulation with a different camera set: run flightsim.capture again with other cameras and pass --against <that run dir>
+verification PASSED (33 passed, 0 failed, 35 not run, 2 superseded)
+  NOT RUN (no independent reference available for these; they are NOT counted as passes): cross_view_consistency, aircraft_state_consistency, component_coverage, component_boxes, sensor_files, instruments, dis_roundtrip, wake_selftest, host_physics, building_vs_footprint, runway_vs_geometry, landcover_vs_geometry, normals_vs_depth, flow_vs_motion, albedo_range, psf_slanted_edge, blur_vs_flow, radiometry_grey_card, engine_linear_passes, velocity_readback, calibration_frame, engine_accumulation, night_exposure, world_record, flow_vs_keypoints, flow_static_null, disparity_vs_right_depth, points_vs_depth, amodal_contains_visible, ir_proxy_declared, applied_readback, instrument_allan, instrument_lever_arm, uncertainty_present, temporal_alignment
+  SUPERSEDED on this manifest (each names the check that replaced it above; not counted as passes, and not waiting for any evidence): mask_containment, depth_range
+  recorded: runs\webapp\7237db488652\verification.json
+  per frame: runs\webapp\7237db488652\frame_checks.json (0 frame(s) failing)
+```
+
+## A12 step 5: label_diagnose.py on 7237db488652
+
+- log: `runs/p3/A-2/A12-diagnose-main.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+
+== runs\webapp\7237db488652\frames\chase
+   rhi 'D3D11', declared ids [1, 2]
+   tight null: 0, tight filled: 2
+   frame_0000_mask.png: 0:9407, 1:1084, 2:47109
+      frame_0000_alone_1.png: 0:56516, 1:1084
+   1 mask(s); stray ids over the run: none
+```
+
+## A12 step 6/7: tests/test_engine_bundle_golden.py with the committed fixture (no skips)
+
+- log: `runs/p3/A-2/A12-golden-pytest-2.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+.....                                                                    [100%]
+```
+
+note: run A-2: packet A12-1 (pixels 1.1 % of the width left of the projection) was the UTM grid convergence applied as a true heading, fixed in the render commandlet by the Windows builder (eb9e5f30); packet A12-2 (verifier landmark check) fixed by the Mac in 968dcb60; fixture tests/fixtures/engine_bundle_min committed in a72c8303 (807,894 bytes, RUN_ID 7237db488652)
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+ebc5ca4d Phase 3: A12 retry pushed
+968dcb60 Merge branch 'phase-2-final' of https://github.com/DhruvaValluru/flightsim into phase-2-final
+2f6e8ec5 Phase 3: log the A11 PASS and A12 FAIL (packet 2) verdicts
+a72c8303 Phase 3 run A-2: A11 PASS; A12 fixture engine_bundle_min (run 7237db488652) and packet 2 (verifier landmark check vs grid convergence)
+ef4dd87c Merge p3-A12r: A12
+28267480 Phase 3: bookkeeping before merging p3-A12r
+378fade3 A12: the verifier rotates the camera yaw by the recorded grid convergence
+9d51f93e Phase 3: log the A12 convergence finding and the C7 build
+4200ecce Phase 3: A12 builder merge log
+7f321ccc A12: consume-poses camera applies the card's grid-bearing yaw as a true heading (grid convergence), so the pixels sit on the labels
+e3ed9621 Phase 3: log the A12 FAIL verdict (run A-2) and the relative-terrain note
+33e3e560 Phase 3 run A-2: A12 FAIL packet 1 (pixels 1.1% of the width left of the projection on every render), A11 CLI relative-terrain defect logged
+e38daf70 B4: probe emitter, bias sweep, --skip-render probe and re-derivation in gate6_visual.py; 5.5 numbers marked history
+90705aa5 Phase 3: log the A9 PASS verdict (run A-2) and the A12 evidence
+a65540f7 Merge p3-A12: tight_box_present gate, label_diagnose tight counts, golden-fixture test, NEXT.md measured facts (A12+A13)
+03d1c0bf Merge branch 'phase-2-final' into p3-A12
+0545ef38 A12+A13: tight_box_present gate, tight counts in label_diagnose, golden-bundle test; NEXT.md says only what is measured
+
+ebc5ca4d Phase 3: A12 retry pushed
+
+ docs/phase3/events_mac.log | 3 +++
+ docs/phase3/notes/D4.md    | 3 ++-
+ docs/phase3/state/A11.json | 4 ++--
+ docs/phase3/state/A12.json | 4 ++--
+ docs/phase3/state/D.json   | 5 +++--
+ docs/phase3/state/D1.json  | 4 ++--
+ docs/phase3/state/D2.json  | 4 ++--
+ docs/phase3/state/D4.json  | 4 ++--
+ docs/phase3/state/D5.json  | 4 ++--
+ docs/phase3/state/D6.json  | 4 ++--
+ 10 files changed, 22 insertions(+), 17 deletions(-)
+
+968dcb60 Merge branch 'phase-2-final' of https://github.com/DhruvaValluru/flightsim into phase-2-final
+
+ docs/PHASE3_LOG.md                                 |     4 +
+ docs/phase3/events_windows.log                     |    34 +
+ docs/phase3/packets/A11-synopsis.md                |    81 +
+ docs/phase3/packets/A12-2.md                       |    63 +
+ docs/phase3/packets/A7-synopsis.md                 |    32 +
+ docs/phase3/packets/B1-synopsis.md                 |   149 +
+ docs/phase3/state/A11.json                         |    10 +-
+ docs/phase3/state/A12.json                         |    15 +-
+ docs/phase3/state/A7.json                          |     6 +-
+ docs/phase3/state/B1.json                          |    11 +-
+ docs/phase3/sync_log_A.md                          |   245 +
+ docs/phase3/sync_log_B.md                          |   276 +
+ scripts/deploy_windows.ps1                         |    30 +-
+ tasks/phase3_checklist.md                          |     6 +-
+ tests/fixtures/engine_bundle_min/GOLDEN.json       |    13 +
+ tests/fixtures/engine_bundle_min/RUN_ID            |     1 +
+ .../engine_bundle_min/capture_manifest.json        |  2392 +++
+ .../engine_bundle_min/frames/chase/frame_0000.json |  2405 +++
+ .../engine_bundle_min/frames/chase/frame_0000.png  |   Bin 0 -> 95801 bytes
+ .../frames/chase/frame_0000_alone_1.png            |   Bin 0 -> 646 bytes
+ .../frames/chase/frame_0000_class.png              |   Bin 0 -> 1004 bytes
+ .../frames/chase/frame_0000_depth.f32              |   Bin 0 -> 230400 bytes
+ .../frames/chase/frame_0000_depth.png              |   Bin 0 -> 55317 bytes
+ .../frames/chase/frame_0000_mask.png               |   Bin 0 -> 1004 bytes
+ .../frames/chase/host_telemetry.json               | 16572 +++++++++++++++++++
+ .../engine_bundle_min/frames/chase/render.json     |   763 +
+ 26 files changed, 23090 insertions(+), 18 deletions(-)
+
+2f6e8ec5 Phase 3: log the A11 PASS and A12 FAIL (packet 2) verdicts
+
+ docs/phase3/events_mac.log |  3 +++
+ docs/phase3/notes/D6.md    | 46 ++++++++++++++++++++++++++++++----------------
+ docs/phase3/state/D.json   | 12 +++++++++++-
+ 3 files changed, 44 insertions(+), 17 deletions(-)
+
+a72c8303 Phase 3 run A-2: A11 PASS; A12 fixture engine_bundle_min (run 7237db488652) and packet 2 (verifier landmark check vs grid convergence)
+
+ docs/PHASE3_LOG.md                                 |     2 +
+ docs/phase3/events_windows.log                     |    13 +
+ docs/phase3/packets/A11-synopsis.md                |    81 +
+ docs/phase3/packets/A12-2.md                       |    63 +
+ docs/phase3/state/A11.json                         |     6 +-
+ docs/phase3/state/A12.json                         |     7 +-
+ docs/phase3/sync_log_A.md                          |   159 +
+ tasks/phase3_checklist.md                          |     2 +-
+ tests/fixtures/engine_bundle_min/GOLDEN.json       |    13 +
+ tests/fixtures/engine_bundle_min/RUN_ID            |     1 +
+ .../engine_bundle_min/capture_manifest.json        |  2392 +++
+ .../engine_bundle_min/frames/chase/frame_0000.json |  2405 +++
+ .../engine_bundle_min/frames/chase/frame_0000.png  |   Bin 0 -> 95801 bytes
+ .../frames/chase/frame_0000_alone_1.png            |   Bin 0 -> 646 bytes
+ .../frames/chase/frame_0000_class.png              |   Bin 0 -> 1004 bytes
+ .../frames/chase/frame_0000_depth.f32              |   Bin 0 -> 230400 bytes
+ .../frames/chase/frame_0000_depth.png              |   Bin 0 -> 55317 bytes
+ .../frames/chase/frame_0000_mask.png               |   Bin 0 -> 1004 bytes
+ .../frames/chase/host_telemetry.json               | 16572 +++++++++++++++++++
+ .../engine_bundle_min/frames/chase/render.json     |   763 +
+ 20 files changed, 22475 insertions(+), 4 deletions(-)
+
+ef4dd87c Merge p3-A12r: A12
+
+ core/capture/overlay.py            |  10 ++-
+ core/capture/verify.py             | 129 +++++++++++++++++++++++++++++++------
+ tests/test_camera_engine_parity.py |  99 ++++++++++++++++++++++++++--
+ 3 files changed, 210 insertions(+), 28 deletions(-)
+
+28267480 Phase 3: bookkeeping before merging p3-A12r
+
+ docs/phase3/events_mac.log | 10 +++++++
+ docs/phase3/notes/D1.md    |  5 ++++
+ docs/phase3/notes/D2.md    | 66 ++++++++++++++++++++++++++++++++++++++++++++++
+ docs/phase3/state/A11.json |  6 ++---
+ docs/phase3/state/D2.json  |  8 ++++++
+ 5 files changed, 92 insertions(+), 3 deletions(-)
+
+378fade3 A12: the verifier rotates the camera yaw by the recorded grid convergence
+
+ core/capture/overlay.py            |  10 ++-
+ core/capture/verify.py             | 129 +++++++++++++++++++++++++++++++------
+ tests/test_camera_engine_parity.py |  99 ++++++++++++++++++++++++++--
+ 3 files changed, 210 insertions(+), 28 deletions(-)
+
+9d51f93e Phase 3: log the A12 convergence finding and the C7 build
+
+ docs/phase3/events_mac.log | 18 ++++++++++++++++++
+ docs/phase3/notes/C2.md    | 10 ++++++++++
+ docs/phase3/notes/C7.md    |  7 +++++++
+ docs/phase3/state/C2.json  | 17 +++++++----------
+ docs/phase3/state/C7.json  | 20 +++++++++-----------
+ 5 files changed, 51 insertions(+), 21 deletions(-)
+
+4200ecce Phase 3: A12 builder merge log
+
+ docs/phase3/events_windows.log | 3 +++
+ 1 file changed, 3 insertions(+)
+
+7f321ccc A12: consume-poses camera applies the card's grid-bearing yaw as a true heading (grid convergence), so the pixels sit on the labels
+
+ .../Private/FlightSimRenderCommandlet.cpp          | 40 ++++++++++++++++++++--
+ 1 file changed, 38 insertions(+), 2 deletions(-)
+
+e3ed9621 Phase 3: log the A12 FAIL verdict (run A-2) and the relative-terrain note
+
+ docs/phase3/events_mac.log | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+33e3e560 Phase 3 run A-2: A12 FAIL packet 1 (pixels 1.1% of the width left of the projection on every render), A11 CLI relative-terrain defect logged
+
+ docs/PHASE3_LOG.md             |  2 ++
+ docs/phase3/events_windows.log | 12 +++++++
+ docs/phase3/packets/A12-1.md   | 80 ++++++++++++++++++++++++++++++++++++++++++
+ docs/phase3/state/A12.json     |  9 ++++-
+ 4 files changed, 102 insertions(+), 1 deletion(-)
+
+e38daf70 B4: probe emitter, bias sweep, --skip-render probe and re-derivation in gate6_visual.py; 5.5 numbers marked history
+
+ core/render/flags.py           |  11 +-
+ core/scenario/randomization.py |   8 +-
+ core/sky/plan.py               |   5 +-
+ docs/VALIDITY.md               |  41 ++++-
+ experiments/evolving_flight.py |   3 +
+ experiments/gate6_visual.py    | 370 ++++++++++++++++++++++++++++++++++++++++-
+ experiments/showcase_matrix.py |  10 +-
+ tests/test_gate6_visual.py     | 151 +++++++++++++++++
+ ue/Config/DefaultEngine.ini    |  12 +-
+ 9 files changed, 598 insertions(+), 13 deletions(-)
+
+90705aa5 Phase 3: log the A9 PASS verdict (run A-2) and the A12 evidence
+
+ docs/phase3/events_mac.log | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+a65540f7 Merge p3-A12: tight_box_present gate, label_diagnose tight counts, golden-fixture test, NEXT.md measured facts (A12+A13)
+
+ NEXT.md                            | 95 +++++++++++++++++++------------------
+ core/capture/verify.py             | 77 ++++++++++++++++++++++++++++++
+ core/messages/catalog.yaml         |  4 ++
+ scripts/label_diagnose.py          | 42 +++++++++++++++++
+ tests/test_annotation_gates.py     | 55 +++++++++++++++++++++-
+ tests/test_component_labels.py     |  2 +-
+ tests/test_engine_bundle_golden.py | 96 ++++++++++++++++++++++++++++++++++++++
+ tests/test_label_diagnose.py       | 53 +++++++++++++++++++++
+ tests/test_platform.py             |  2 +-
+ 9 files changed, 376 insertions(+), 50 deletions(-)
+
+03d1c0bf Merge branch 'phase-2-final' into p3-A12
+
+ README.md                                          |    4 +-
+ assets/aircraft_config/A4.json                     |   79 +-
+ assets/fdm_root/aircraft/A4/A4.xml                 |    6 +-
+ assets_pipeline/a4_performance.py                  |   11 +-
+ assets_pipeline/a4_sync.py                         |    8 +-
+ core/capture/airframe.py                           |  115 +-
+ core/capture/labels.py                             |  126 +-
+ core/capture/manifest.py                           |   15 +-
+ core/capture/objects.py                            |   28 +-
+ core/messages/catalog.yaml                         |    3 +
+ core/scenario/blocks.py                            |    2 +-
+ core/util/platform.py                              |   28 +-
+ docs/CAMERA_WINDOWS.md                             |    3 +-
+ docs/phase3/BUILDER_BRIEF.md                       |   52 +
+ docs/phase3/INTEGRATOR_BRIEF.md                    |   52 +
+ docs/phase3/SUBAGENT_BRIEF.md                      |   47 +
+ docs/phase3/digest_A.md                            | 1260 ++++++++++++
+ docs/phase3/events_mac.log                         |  239 +++
+ docs/phase3/notes/A1.md                            |   55 +
+ docs/phase3/notes/A10.md                           |   50 +
+ docs/phase3/notes/A11.md                           |   59 +
+ docs/phase3/notes/A12.md                           |   58 +
+ docs/phase3/notes/A13.md                           |   44 +
+ docs/phase3/notes/A2.md                            |   79 +
+ docs/phase3/notes/A3.md                            |   69 +
+ docs/phase3/notes/A4.md                            |   85 +
+ docs/phase3/notes/A5.md                            |   58 +
+ docs/phase3/notes/A6.md                            |   59 +
+ docs/phase3/notes/A7.md                            |   64 +
+ docs/phase3/notes/A8.md                            |   61 +
+ docs/phase3/notes/A9.md                            |   60 +
+ docs/phase3/notes/C1.md                            |   64 +
+ docs/phase3/notes/C5.md                            |   68 +
+ docs/phase3/notes/C6.md                            |   65 +
+ docs/phase3/state/A.json                           |   41 +
+ docs/phase3/state/A1.json                          |   15 +
+ docs/phase3/state/A10.json                         |   15 +
+ docs/phase3/state/A11.json                         |    7 +
+ docs/phase3/state/A12.json                         |   24 +
+ docs/phase3/state/A13.json                         |   10 +
+ docs/phase3/state/A2.json                          |   16 +
+ docs/phase3/state/A3.json                          |   17 +
+ docs/phase3/state/A4.json                          |   18 +
+ docs/phase3/state/A5.json                          |   18 +
+ docs/phase3/state/A6.json                          |   17 +
+ docs/phase3/state/A7.json                          |    7 +
+ docs/phase3/state/A8.json                          |    7 +
+ docs/phase3/state/A9.json                          |    7 +
+ docs/phase3/state/A_decisions_needed.md            |   15 +
+ docs/phase3/state/C1.json                          |   14 +
+ docs/phase3/state/C5.json                          |   23 +
+ docs/phase3/state/C6.json                          |    7 +
+ docs/schemas/capture_manifest.v8.schema.json       | 2059 ++++++++++++++++++++
+ scripts/build_ue.sh                                |    6 +-
+ scripts/check_bridge_api.sh                        |    2 +-
+ scripts/deploy_windows.ps1                         |    2 +-
+ scripts/mutation_check.sh                          |   14 +-
+ scripts/phase3_digest.py                           |  149 ++
+ scripts/phase3_event.py                            |    5 +-
+ scripts/phase3_state.py                            |  110 ++
+ scripts/render_ue_scenario.sh                      |    2 +-
+ scripts/run_ue_scenario.sh                         |    2 +-
+ scripts/setup.ps1                                  |    2 +-
+ scripts/setup.sh                                   |    2 +-
+ scripts/ue_preflight.sh                            |    6 +-
+ scripts/vendor_ue_plugin.ps1                       |   14 +-
+ scripts/vendor_ue_plugin.sh                        |    8 +-
+ tests/test_a4.py                                   |   14 +-
+ tests/test_airframe.py                             |   99 +
+ tests/test_camera_labels.py                        |    5 +-
+ tests/test_capture_objects.py                      |    5 +-
+ tests/test_capture_schema.py                       |    4 +-
+ tests/test_component_labels.py                     |  180 ++
+ tests/test_gate6_visual.py                         |    3 +-
+ tests/test_platform.py                             |  104 +-
+ tests/test_toolchain_doc.py                        |   49 +
+ tests/test_ue_physics_source.py                    |    8 +
+ tests/test_ue_weather_source.py                    |   11 +
+ tests/test_versions.py                             |    2 +-
+ ue/FlightSim.uproject                              |    2 +-
+ .../Private/FlightSimRenderCommandlet.cpp          |    2 +-
+ .../FlightSimBridge/Private/FlightSimWeather.cpp   |   19 +-
+ .../Resources/JSBSim/aircraft/A4/A4.xml            |    6 +-
+ ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json |   19 +-
+ ue/Source/FlightSim.Target.cs                      |    2 +-
+ ue/Source/FlightSimEditor.Target.cs                |    2 +-
+ 86 files changed, 6130 insertions(+), 143 deletions(-)
+
+0545ef38 A12+A13: tight_box_present gate, tight counts in label_diagnose, golden-bundle test; NEXT.md says only what is measured
+
+ NEXT.md                            | 95 +++++++++++++++++++------------------
+ core/capture/verify.py             | 77 ++++++++++++++++++++++++++++++
+ core/messages/catalog.yaml         |  4 ++
+ scripts/label_diagnose.py          | 42 +++++++++++++++++
+ tests/test_annotation_gates.py     | 55 +++++++++++++++++++++-
+ tests/test_engine_bundle_golden.py | 96 ++++++++++++++++++++++++++++++++++++++
+ tests/test_label_diagnose.py       | 53 +++++++++++++++++++++
+ 7 files changed, 374 insertions(+), 48 deletions(-)
+```
+

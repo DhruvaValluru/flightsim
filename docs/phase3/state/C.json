@@ -1,4 +1,5 @@
 {
+  "audit": "PASS",
   "build_order": [
     [
       "C2"
@@ -13,6 +14,7 @@
       "C7"
     ]
   ],
-  "stage": "aligned",
-  "updated": "2026-11-04T12:25:15"
+  "integrated_commit": "d35a1173",
+  "stage": "pushed",
+  "updated": "2026-11-04T14:06:10"
 }

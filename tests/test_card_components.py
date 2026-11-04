@@ -281,6 +281,9 @@ def test_manifest_labels_carry_a_component_record(converted):
         assert "body-frame extent box" in payload["basis"]["bbox_2d_hull"]
         gear = records["landing_gear:nose_gear:0"]
         assert gear["bbox_2d_hull"] is None and "declares no extent" in gear["basis"]["bbox_2d_hull"]
+        # only a component record may lack the 3-D box; every other record states it
+        assert all("bbox_3d_camera" in r for r in frame["labels"]["objects"]
+                   if "parent" not in r)
     # One extent for the card and the manifest: the manifest's objects[]
     # entry carries the same body-frame box the record was projected from.
     entry = next(o for o in manifest["objects"] if o["id"] == "payload:drop_tank_sta3:0")

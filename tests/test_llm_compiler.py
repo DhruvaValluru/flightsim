@@ -985,7 +985,7 @@ def test_a_camera_list_nested_under_fields_is_lifted_not_refused():
     assert [str(c.preset.value) for c in
             compile_prompt_llm("chase the 747", client=wrapped).spec.cameras] == ["chase"]
     not_a_list = fake_client({
-        "fields": {"cameras": entry("chase", "inferred", "chase")},
+        "fields": {"cameras": "chase"},         # a bare word, no provenance
         "notes": [], "questions": [],
     })
     with pytest.raises(LLMCompileError, match="unknown field 'cameras'"):
@@ -1374,3 +1374,35 @@ def test_a_model_explicit_view_is_built_as_a_chase_so_it_can_be_solved():
     assert any("'explicit'" in note for note in spec.notes)
     report = validate(spec, check_feasibility=False)
     assert not any(v.constraint == "camera.preset" for v in report.violations)
+
+
+def test_a_camera_stated_as_one_provenanced_preset_under_fields_is_that_camera():
+    """Packet A10-1 (2026-11-04): on the web app's campaign path the
+    relay's model answered the one-line prompt with the camera as ONE
+    provenanced field under "fields" and the whole response was refused
+    ("unknown field 'cameras'"), so the campaign was compiled by the regex
+    fallback although the plan was the model's. That shape is one
+    camera's preset with its own provenance: it compiles on the llm tier
+    (no LLMCompileError, so no fallback), as that camera, noted."""
+    prompt = ("12 images of the A-4 over the Grand Canyon from a chase camera, "
+              "a 20 second flight")
+    client = fake_client({
+        "fields": {"cameras": entry("chase", "user", "from a chase camera")},
+        "notes": [], "questions": [],
+    })
+    result = compile_prompt_llm(prompt, client=client)
+    assert result.model == "claude-opus-5"
+    assert [str(c.preset.value) for c in result.spec.cameras] == ["chase"]
+    camera = result.spec.cameras[0]
+    assert str(camera.preset.source) == "user" and camera.preset.frm == "from a chase camera"
+    assert any("nested 'cameras'" in n for n in result.spec.notes)
+    # The per-camera rails are untouched: a preset outside the vocabulary
+    # in that shape still refuses, and a provenanced number is no camera.
+    with pytest.raises(LLMCompileError, match="outside the vocabulary"):
+        compile_prompt_llm(prompt, client=fake_client({
+            "fields": {"cameras": entry("drone", "user", "drone shot")},
+            "notes": [], "questions": []}))
+    with pytest.raises(LLMCompileError, match="unknown field 'cameras'"):
+        compile_prompt_llm(prompt, client=fake_client({
+            "fields": {"cameras": entry(2, "user", "two cameras")},
+            "notes": [], "questions": []}))

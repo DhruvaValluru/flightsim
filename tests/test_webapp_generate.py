@@ -942,3 +942,82 @@ def test_a_failed_campaign_names_the_refusal_not_the_flag(tmp_path, monkeypatch)
     assert payload["headline"] == "The recorded flight cannot be used to place the cameras."
     assert "--no-host-flight" not in payload["headline"]
     assert not _rule_named({"headline": payload["headline"]})
+
+
+# -- the campaign provisions its place like a single run (decision 17) ---------
+
+#: Packet A10-1's one-line prompt: a real place with a curated bake.
+GRAND_CANYON = ("12 images of the A-4 over the Grand Canyon from a chase camera, "
+                "a 20 second flight")
+
+
+def _fake_bake(terrain_dir: Path, key: str) -> Path:
+    """A whole bake as ``webapp.runs.baked`` sees one (.r16 + .json)."""
+    terrain_dir.mkdir(parents=True, exist_ok=True)
+    (terrain_dir / f"{key}.r16").write_bytes(b"\0" * 8)
+    (terrain_dir / f"{key}.json").write_text("{}", encoding="utf-8")
+    return terrain_dir / key
+
+
+def _tiles_on_machine(monkeypatch, tmp_path):
+    """Google's tiles on (the user path; conftest turns them off for the
+    suite) and no bake but the ones the test writes."""
+    import webapp.runs as runs
+
+    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "on")
+    monkeypatch.setattr(runs, "TERRAIN_DIR", tmp_path / "terrain")
+    monkeypatch.setattr(generate_module, "CAPTURE_RUNNER",
+                        "tests.test_webapp_generate:refusing_capture")
+    monkeypatch.setattr(generate_module, "ue_available", lambda: False)
+    return runs
+
+
+def test_a_campaign_case_flies_the_bake_the_single_run_would(tmp_path, monkeypatch):
+    """Packet A10-1: POST /run mapped the prompt onto the grand_canyon
+    bake while the campaign's capture got no terrain and refused
+    google_tiles.terrain. Now the campaign's place is provisioned by the
+    single run's own function and every case carries its stem."""
+    from core.dataset.batch import capture_command
+    from core.nl.compiler import compile_prompt
+
+    runs = _tiles_on_machine(monkeypatch, tmp_path)
+    stem = _fake_bake(tmp_path / "terrain", "grand_canyon")
+    single_spec = compile_prompt(GRAND_CANYON)
+    single = runs.provision_place(single_spec)
+    assert single["refusal"] is None and single["scene"]["terrain"] == str(stem)
+
+    service = generate_module.GenerateService(tmp_path / "campaigns")
+    plan = service.plan(GRAND_CANYON, images=12, tier="regex")
+    assert plan["state"] == "preview" and plan["ok"], plan.get("refusals")
+    started = service.start(GRAND_CANYON, images=12, fmt="coco", seed=7, workers=1,
+                            tier="regex")
+    campaign = service.open(started["id"])
+    assert campaign.record["capture"]["terrain"] == str(stem)
+    assert float(campaign._spec().latitude.value) == float(single_spec.latitude.value)
+    command = capture_command(Path("spec.yaml"), Path("run"), campaign.record["capture"])
+    assert command[command.index("--terrain") + 1] == str(stem)
+    service.wait(started["id"], timeout=120)
+    rows = [r for r in Ledger(campaign.dir / "ledger.jsonl").rows() if r.get("command")]
+    assert rows, "no case ran"
+    assert all(r["command"][r["command"].index("--terrain") + 1] == str(stem) for r in rows)
+
+
+def test_a_campaign_over_a_place_with_no_bake_refuses_by_the_single_run_s_rule(
+        tmp_path, monkeypatch):
+    from core.nl.compiler import compile_prompt
+
+    runs = _tiles_on_machine(monkeypatch, tmp_path)
+    single = runs.provision_place(compile_prompt(GRAND_CANYON))["refusal"]
+    assert single["constraint"] == "terrain.unbaked"
+    service = generate_module.GenerateService(tmp_path / "campaigns")
+    plan = service.plan(GRAND_CANYON, images=12, tier="regex")
+    assert plan["ok"] is False
+    assert plan["refusals"][0]["details"]["rule"] == "terrain.unbaked"
+    with pytest.raises(generate_module.GenerateRefusal) as caught:
+        service.start(GRAND_CANYON, images=12, fmt="coco", seed=7, workers=1, tier="regex")
+    payload = caught.value.payload
+    assert payload["details"]["rule"] == "terrain.unbaked"
+    assert payload["details"]["message"] == single["message"]
+    assert payload["sentence"] == "No terrain has been prepared for the coordinates asked for."
+    assert not _rule_named(payload)
+    assert not list((tmp_path / "campaigns").glob("*/campaign.json"))
