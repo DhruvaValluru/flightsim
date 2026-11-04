@@ -281,7 +281,7 @@ ENGINE_PIN_FILES = (
 #: Files whose pin prose another box rewrites; skipped by the sweep until
 #: then. A13 rewrites NEXT.md (A13 step 4b removes this allowance); A3
 #: rewrites build_ue.ps1 and ue_preflight.ps1 whole (A3 removes these two).
-PIN_SWEEP_PENDING = ("NEXT.md",)
+PIN_SWEEP_PENDING = ()
 
 
 def _other_pin_regex():
