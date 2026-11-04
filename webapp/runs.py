@@ -1265,6 +1265,60 @@ SCENE_SETTING_OPT_OUT = ("flat", "featureless")
 #: Prompt words that stage an open-ocean point (core.terrain.ocean): the
 #: flat slab at sea level, at a real place.
 OCEAN_WORDS = ("ocean", "open sea", "over the sea", "over water", "offshore")
+#: Environment presets (Phase 3 D4): the page's two-option picker over the
+#: scene-setting rule. A preset fixes location, surface, sun and season as
+#: USER edits (``apply_environment_preset``), so ``plan_scene_setting`` --
+#: which only ever touches all-default coordinates -- leaves them alone,
+#: and the stated rule ``SCENE_SETTING_BAKES[surface]`` and the preset
+#: agree because the scene key is READ from that table, never written
+#: twice. ``time_of_day`` is a core.sky.plan clock with the ISO date prefix
+#: that parser documents (``YYYY-MM-DDTHH:MM``): the sun comes from the
+#: clock, the season (drape_month's snow cover) from the date. The date is
+#: NOT ``weather_date``, which would turn on ERA5 historical weather.
+#: Google tiles stay the ground of the render (CLAUDE.md); nothing here
+#: touches google_tiles_requested or weather_backend_flags.
+ENVIRONMENT_PRESETS: Dict[str, Dict[str, Any]] = {
+    "desert": {"surface": "desert", "scene": SCENE_SETTING_BAKES["desert"],
+               "time_of_day": "2026-07-15T12:00"},
+    "forest": {"surface": "forest", "scene": SCENE_SETTING_BAKES["forest"],
+               "time_of_day": "2026-06-21T10:00"},
+}
+#: The provenance every preset edit carries (the review table shows it).
+ENVIRONMENT_PRESET_FROM = "environment preset (web UI)"
+
+
+def apply_environment_preset(spec: ScenarioSpec, name: str) -> None:
+    """Apply the named ENVIRONMENT_PRESETS entry to ``spec`` as USER edits
+    of surface, latitude, longitude, terrain_elevation and time_of_day.
+
+    A place the prompt already stated (coordinates whose source is not
+    ``default``) is kept: the preset still sets the surface, sun and
+    season, and says in its provenance that the stated place won. Raises
+    ValueError, naming the accepted values, for an unknown preset.
+    """
+    preset = ENVIRONMENT_PRESETS.get(str(name))
+    if preset is None:
+        raise ValueError(
+            f"environment must be one of {sorted(ENVIRONMENT_PRESETS)}, "
+            f"not {name!r}")
+    key = preset["scene"]
+    location = LOCATIONS[key]
+    from core.nl.llm_compiler import LOCATION_TERRAIN_ELEVATION_M
+
+    frm = f"{ENVIRONMENT_PRESET_FROM}: {name} -> {key}"
+    placed = (str(spec.latitude.source) != "default"
+              or str(spec.longitude.source) != "default")
+    if placed:
+        # The prompt named a place: the preset does not move the scene
+        # away from it; the surface and the sun still carry the preset.
+        frm = f"{frm}; the stated place is kept"
+    spec.set("surface", preset["surface"], frm=frm)
+    spec.set("time_of_day", preset["time_of_day"], frm=frm)
+    if placed:
+        return
+    spec.set("latitude", location.origin_lat, frm=frm)
+    spec.set("longitude", location.origin_lon, frm=frm)
+    spec.set("terrain_elevation", LOCATION_TERRAIN_ELEVATION_M[key], frm=frm)
 
 
 def renderable_aircraft() -> List[str]:
