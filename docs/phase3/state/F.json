@@ -1,4 +1,9 @@
 {
-  "stage": "breakdown",
-  "updated": "2026-11-04T16:47:45"
+  "build_order": [
+    "F1",
+    "F3",
+    "F5"
+  ],
+  "stage": "aligned",
+  "updated": "2026-11-04T16:55:33"
 }
