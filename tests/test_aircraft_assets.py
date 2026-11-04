@@ -762,7 +762,9 @@ def test_a_version_1_or_2_manifest_is_stale_and_rebuilds(tmp_path, monkeypatch):
                         lambda manifests, report: steps.append("import"))
     lines = []
     assert importer.ensure_model("TEST", report=lines.append) == manifest
-    assert steps == ["fetch", "convert"]          # no editor: geometry unchanged
+    # A re-convert is followed by the import since C4-2 (decision 19 can
+    # change the geometry the editor holds), so the editor step runs too.
+    assert steps == ["fetch", "convert", "import"]
     assert any("stale" in line and "re-converting" in line for line in lines)
 
     # Current now: converted, imported, and a second ensure touches nothing.
