@@ -111,3 +111,4 @@ verify counts, the `component_coverage` detail and the card diff keys.
 |---|---|---|---|---|
 | A12 | A-2 | retry 3 (2163a0d5): `pytest -q tests/test_engine_bundle_golden.py` | exit 0, no skips | PASS stands |
 | A10 | A-2 | retry 2 (8a9bda0e): `/generate/start` one-line prompt, one campaign | 348abcf4ddce `failed`: both cases render (22 frames, labels 22/22, no refusal) but verify FAIL on `host_determinism` (CLI route), `component_boxes` (mirrored OBJ), `label_geometry_3d` (recount); llm fell back on `unknown field notes` | packet A10-3 (Mac; waits on C4-1 items) |
+| C4 | C-1 | re-prove on 1e802859: one A-4 still through the CLI (A7 re-convert) | `host_determinism` PASS (byte-identical), `label_geometry_3d` PASS, `component_coverage` PASS; `component_boxes` FAIL with the same numbers: the re-convert (OBJs + manifest 17:02, obj_frame stamped) was not followed by a re-import (uassets 14:06) | packet C4-2 (Mac importer) |
