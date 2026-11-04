@@ -891,9 +891,11 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 dict({"id": entry["id"], "int_id": entry["int_id"]},
                      **sensor_labels(
                          profile, frames[-1],
-                         # a component record (Phase C) carries no 3-D box, like
-                # a scene object's null: the sensor sees no box either way
-                dict(entry, bbox_3d_camera=entry.get("bbox_3d_camera") or {}),
+                         # a component record (Phase C, has "parent") carries no
+                         # 3-D box; every other object must still state its key
+                         dict(entry, bbox_3d_camera=(
+                             entry.get("bbox_3d_camera") if "parent" in entry
+                             else entry["bbox_3d_camera"]) or {}),
                          omega))
                 for entry in frames[-1]["labels"]["objects"]
                 if entry["int_id"] != objects[0].int_id]
