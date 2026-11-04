@@ -394,3 +394,4 @@
 {"agent": "mac", "box": "C1", "stage": "prove", "kind": "note", "note": "msg received P3 verdict C1 PASS run=A-2", "t": 1793807980.0789068, "machine": "mac"}
 {"agent": "mac", "box": "C5", "stage": "prove", "kind": "note", "note": "msg received P3 verdict C5 PASS run=A-2", "t": 1793807993.0321689, "machine": "mac"}
 {"agent": "mac", "box": "C6", "stage": "prove", "kind": "note", "note": "msg received P3 verdict C6 PASS run=A-2", "t": 1793807993.073502, "machine": "mac"}
+{"agent": "mac", "box": "A3", "stage": "prove", "kind": "note", "note": "msg received P3 verdict A3 PASS run=A-2", "t": 1793808245.669052, "machine": "mac"}
