@@ -2731,10 +2731,10 @@ mutate core/util/platform.py \
     tests/test_platform.py || failures=$((failures+1))
 
 mutate scripts/ue_preflight.ps1 \
-    '$ueRoot = "C:\Program Files\Epic Games\UE_5.7"' \
-    '$ueRoot = "C:\Program Files\Epic Games\UE_5.5"' \
-    "a stale 5.5 install path in a script is caught by name" \
-    tests/test_platform.py || failures=$((failures+1))
+    '$ueRoot = $engine.Root' \
+    '$ueRoot = (Get-ChildItem "C:\Program Files\Epic Games" -Filter "UE_5.*" | Sort-Object Name -Descending | Select-Object -First 1).FullName  # MUTATED: newest UE_5.* wins' \
+    "the preflight takes the pinned engine, never the newest UE_5.* install" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
 
 # Two-line targets on purpose (gotcha 28): the ini's comment block quotes
 # each key=value once BEFORE the real assignment, and mutate() replaces

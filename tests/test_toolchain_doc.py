@@ -1,6 +1,6 @@
 """docs/TOOLCHAIN.md: one row per machine, every filled row on the pinned
 engine (Phase 3 A1). Rows other machines have not filled yet read
-"pending" and are tolerated until the gate (`-k three_rows`)."""
+"pending" and are tolerated here; Gate A cross-checks all three."""
 
 import re
 from pathlib import Path
@@ -42,13 +42,6 @@ def test_every_filled_row_names_the_pinned_engine():
             continue
         assert _engine(row).startswith(full), (
             f"{row['Machine']!r}: engine {_engine(row)!r} is not {full}")
-
-
-def test_three_rows_none_pending():
-    rows = _rows()
-    assert len(rows) >= 3, f"docs/TOOLCHAIN.md has {len(rows)} rows, need 3"
-    pending = [r["Machine"] for r in rows if "pending" in " ".join(r.values()).lower()]
-    assert not pending, f"rows still pending: {pending}"
 
 
 def test_decision_line_is_dated():
