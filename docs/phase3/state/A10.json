@@ -3,7 +3,13 @@
   "FAIL": "",
   "budget_used": 14,
   "builder_commit": "47d3e5db",
-  "claims": [],
+  "claims": [
+    "core/campaign/campaign.py",
+    "core/nl/llm_compiler.py",
+    "tests/test_llm_compiler.py",
+    "tests/test_webapp_generate.py",
+    "webapp/generate.py"
+  ],
   "failures": [
     "run A-2 packet docs/phase3/packets/A10-1.md: /generate/plan ok; /generate/start campaign 56e6d0854f88 failed campaign.target_unreachable because its capture refused google_tiles.terrain (no bake on the campaign path; the single run maps the scene onto the grand_canyon bake); llm tier fell back to regex (unknown field 'cameras'); decision 17; Mac scope"
   ],
@@ -20,7 +26,7 @@
   "run_id": "",
   "run_requested": "A-2",
   "stage": "building",
-  "updated": "2026-11-04T13:16:33",
+  "updated": "2026-11-04T13:21:12",
   "verdict": "",
-  "worktree": "../p3-A10"
+  "worktree": "../p3-A10r"
 }
