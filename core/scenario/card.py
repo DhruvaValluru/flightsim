@@ -446,6 +446,43 @@ def google_tiles_card_block(latitude_deg: float, longitude_deg: float) -> Dict[s
     }
 
 
+def check_component_ids(objects: Sequence[Dict[str, object]]) -> None:
+    """Refuse by name (``annotation.identity``) a composed object list the
+    card must not carry: a ``component`` whose ``int_id`` lies outside
+    the component band, a non-component inside the band while components
+    exist (a traffic aircraft wearing a store's integer), or one
+    ``int_id`` on two entries. Validation only: the list is composed
+    once in core/capture/objects.py and the card copies it; nothing is
+    renumbered here."""
+    from core.capture.objects import COMPONENT_BAND, ROLE_COMPONENT, ObjectIdentityError
+
+    low, high = COMPONENT_BAND
+    entries = [dict(entry) for entry in objects]
+    has_components = any(e.get("role") == ROLE_COMPONENT for e in entries)
+    seen: Dict[int, str] = {}
+    for entry in entries:
+        raw = entry.get("int_id")
+        if raw is None:
+            continue
+        int_id = int(raw)
+        if int_id in seen:
+            raise ObjectIdentityError(
+                f"int_id {int_id} is carried by both {seen[int_id]!r} and "
+                f"{entry.get('id')!r}; the card cannot name one integer for two objects")
+        seen[int_id] = str(entry.get("id"))
+        in_band = low <= int_id <= high
+        if entry.get("role") == ROLE_COMPONENT and not in_band:
+            raise ObjectIdentityError(
+                f"component {entry.get('id')!r} has int_id {int_id}, outside the "
+                f"component band {low}-{high}; the engine reads the band and invents "
+                f"no id, so the card refuses to write one it does not allocate")
+        if has_components and in_band and entry.get("role") != ROLE_COMPONENT:
+            raise ObjectIdentityError(
+                f"{entry.get('id')!r} ({entry.get('role')}) has int_id {int_id} inside "
+                f"the component band {low}-{high} while this scene has components; "
+                f"a traffic aircraft or scene object may not wear a component's id")
+
+
 def write_run_card(spec: ScenarioSpec, path: Path,
                    control_inputs: Sequence[Dict[str, float]] = (),
                    duration_s: Optional[float] = None,
@@ -723,6 +760,11 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # (core/capture/objects.py). The render host sets every labelled
         # component's Custom Depth Stencil from this list and never
         # invents an id; the ID image holds exactly these integers.
+        # Phase C: the primary's components ride on the same list
+        # (parent, mesh, extent_body on each entry) with int_ids in the
+        # 64..127 band; the card validates the band and copies, never
+        # renumbers.
+        check_component_ids(objects)
         card["objects"] = [dict(entry) for entry in objects]
     if taxonomy:
         # The class list the class image is written against (class_id =
