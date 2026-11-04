@@ -11,3 +11,6 @@
 {"agent": "decision", "box": "", "stage": "plan", "kind": "note", "note": "PASS peers: mac session is p3-mac [cd9c06] (announced itself as flightsim-6f, since renamed); this session is p3-windows [48083d]", "t": 1793761217.0344732, "machine": "windows"}
 {"agent": "decision", "box": "A", "stage": "msg", "kind": "note", "note": "msg P3 go A decisions=ok (re-sent to p3-mac)", "t": 1793761217.2420816, "machine": "windows"}
 {"agent": "decision", "box": "A", "stage": "msg", "kind": "note", "note": "msg P3 go A decisions=ok (owner-directed re-send to p3-mac; peers.json now mac=p3-mac windows=p3-windows)", "t": 1793761245.8321025, "machine": "windows"}
+{"agent": "runner", "box": "A", "stage": "msg", "kind": "note", "note": "msg (from p3-mac) P3 ack go A received; letter A building on the Mac; next message will be P3 pushed", "t": 1793761312.755998, "machine": "windows"}
+{"agent": "decision", "box": "C1", "stage": "plan", "kind": "note", "note": "PASS decision 7: C1 loadout weight 750 lb per station (18287 lb gross), replaces 1800 lb; builder evidence envelope.trim_feasible fail at 21437 lb", "t": 1793761379.6863785, "machine": "windows"}
+{"agent": "decision", "box": "C1", "stage": "msg", "kind": "note", "note": "msg P3 decision C1 750lb recorded", "t": 1793761379.8517737, "machine": "windows"}
