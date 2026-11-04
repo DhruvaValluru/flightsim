@@ -94,7 +94,7 @@ sitting 0.4 m from its label (it was ~25 m).
 
 - [ ] **B1 · Exact Python package versions saved with hashes** (`requirements.lock`)
   - Check: a fresh install from it, then `pytest -q`, passes.
-- [ ] **B2 · One file lists every other tool's version** (`toolchain.json`)
+- [x] **B2 · One file lists every other tool's version** (`toolchain.json`)
   - Check: preflight prints `OK` per tool, and a wrong version stops it.
 - [x] **B3 · A test catches any version drifting**
   - Check: `pytest -q tests/test_toolchain_pins.py` passes.
