@@ -226,8 +226,8 @@ Two rules to keep in mind:
 
 - [x] **Engine:** 5.7 on all three computers (owner, 2026-11-04). *This one
   blocks everything.*
-- [ ] Which payload the A-4 carries by default
-- [ ] Which Chinese aircraft, or cut it
-- [ ] Storm weather on in the demo, or off?
-- [ ] Is typing the Google tiles key once acceptable?
-- [ ] Keep control surfaces out of Phase 3?
+- [x] Which payload the A-4 carries by default
+- [x] Which Chinese aircraft, or cut it
+- [x] Storm weather on in the demo, or off?
+- [x] Is typing the Google tiles key once acceptable?
+- [x] Keep control surfaces out of Phase 3?
