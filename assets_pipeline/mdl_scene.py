@@ -216,3 +216,20 @@ class MdlScene:
             n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-9)
             out.append(Part(i, node, mat, world[:, :3], n, uv, tri))
         return out
+
+    def added_parts(self, extra_env: Dict[str, float],
+                    base_env: Optional[Dict[str, float]] = None,
+                    min_vertices: int = 4) -> List[Part]:
+        """The parts that become visible when ``extra_env`` is laid over
+        ``base_env`` (``REST_ENV`` when None): ``parts(base + extra)`` minus
+        the ``Part.index`` set of ``parts(base)``. The index is the part's
+        position in the file, so the same geometry is never counted twice
+        and a part the base already shows is never attributed to the
+        variable. One variable at a time is the measurement method of
+        decision 2 (docs/phase3/decisions.md): ``STA3_LOAD=1`` adds one
+        part, +5,612 triangles; ``STA2_LOAD=1`` and ``STA4_LOAD=1`` one
+        part each, +5,676."""
+        base_env = REST_ENV if base_env is None else base_env
+        shown = {p.index for p in self.parts(base_env, min_vertices)}
+        env = {**base_env, **extra_env}
+        return [p for p in self.parts(env, min_vertices) if p.index not in shown]

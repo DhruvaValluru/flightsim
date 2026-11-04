@@ -13,15 +13,58 @@ import numpy as np
 import pytest
 
 from assets_pipeline import a4_mdl_convert, a4_mesh_check as mc, importer
-from assets_pipeline.mdl_scene import MdlScene, evaluate
+from assets_pipeline.mdl_scene import REST_ENV, MdlScene, evaluate
+from core.capture import objects
+from core.capture.airframe import load_airframe
+from core.capture.labels import hull_box_body_m
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG = REPO / "assets" / "aircraft_config" / "A4.json"
+
+#: Triangles each loaded station adds over the rest environment, before the
+#: converter's degenerate filter (decision 2, docs/phase3/decisions.md:
+#: one variable at a time over REST_ENV). Not the plan's "+14,612".
+STATION_DELTAS = {"STA2": 5676, "STA3": 5612, "STA4": 5676}
+#: Where each store hangs, model x (right), metres (decision 2).
+STATION_X_M = {"STA2": -1.9, "STA3": 0.0, "STA4": 1.9}
+#: The body's triangle count after the degenerate filter (baseline run).
+BODY_TRIANGLES = 266886
+
+
+def component_mesh_name(aircraft: str, component_id: str) -> str:
+    """C3's `core.capture.objects.component_mesh_name` when it exists, else
+    the agreed convention it implements (Align agreement d)."""
+    fn = getattr(objects, "component_mesh_name", None)
+    expected = f"SM_{aircraft}_{component_id}"
+    if fn is not None:
+        assert fn(aircraft, component_id) == expected
+    return expected
+
+
+def _raw_triangles(parts) -> int:
+    return sum(len(p.triangles) for p in parts)
+
+
+def _obj_faces(path: Path) -> int:
+    return sum(1 for line in path.read_text(encoding="utf-8").splitlines()
+               if line.startswith("f "))
 
 
 @pytest.fixture(scope="module")
 def scene():
     return MdlScene(mc.MDL)
+
+
+@pytest.fixture(scope="module")
+def converted(tmp_path_factory):
+    """One conversion shared by the component tests (the decode is slow)."""
+    path = a4_mdl_convert.convert(CONFIG, tmp_path_factory.mktemp("a4"), REPO)
+    return path, json.loads(path.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def loadout():
+    return json.loads(CONFIG.read_text(encoding="utf-8"))["loading"]["loadout"]
 
 
 def test_scene_decodes_a_complete_visible_airframe(scene):
@@ -77,7 +120,9 @@ def test_conversion_writes_a_valid_manifest_and_obj(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["magic"] == "flightsim-aircraft-mesh"
     assert manifest["fdm"] == "A4" and manifest["fdm_config_name"] == "A-4"
-    assert manifest["parts"] == ["body"] and manifest["surfaces"] == []
+    assert manifest["parts"] == ["body", "SM_A4_store_sta2", "SM_A4_drop_tank_sta3",
+                                 "SM_A4_store_sta4"]
+    assert manifest["surfaces"] == []
     assert manifest["articulated"] is False
     assert manifest["source"]["license_first_line"].startswith("A-4 Skyhawk")
 
@@ -115,6 +160,120 @@ def test_converted_bounds_agree_with_the_flight_models_geometry(tmp_path):
     assert abs(hi[2] / ft - ref["top_ft"]) < 0.3              # fin top
     assert abs(lo[0] / ft - ref["tail_end_ft"]) < 1.0         # tail end
     assert hi[0] / ft > ref["nose_ft"]                        # nose + probe
+
+
+def test_station_load_adds_one_part_each(scene):
+    rest = {p.index for p in scene.parts()}
+    for station, delta in STATION_DELTAS.items():
+        added = scene.added_parts({f"{station}_LOAD": 1})
+        assert len(added) == 1, station
+        assert _raw_triangles(added) == delta, station
+        assert added[0].index not in rest
+        centre = added[0].positions.mean(0)
+        assert abs(centre[0] - STATION_X_M[station]) < 0.3, station
+        assert centre[1] < -1.0, station                # it hangs below the wing
+    # a base the station is already in adds nothing
+    assert scene.added_parts({"STA3_LOAD": 1}, {**REST_ENV, "STA3_LOAD": 1}) == []
+
+
+def test_station_parts_sum_to_the_full_loadout_delta(scene, loadout):
+    per_station = {}
+    for station in loadout["stations"]:
+        env = a4_mdl_convert._station_env(loadout, station)
+        assert env == {**REST_ENV, f"{station}_LOAD": 1.0}
+        per_station[station] = {p.index for p in scene.added_parts(env)}
+    full = {p.index for p in scene.added_parts(loadout["model_vars"])}
+    assert set.union(*per_station.values()) == full
+    assert sum(len(s) for s in per_station.values()) == len(full) == 3
+    assert _raw_triangles(scene.added_parts(loadout["model_vars"])) == sum(
+        STATION_DELTAS.values())
+
+
+def test_conversion_exports_one_payload_obj_per_loaded_station(scene, converted, loadout):
+    manifest_path, manifest = converted
+    root = manifest_path.parent
+    assert manifest["version"] == a4_mdl_convert.A4_COMPONENTS_MANIFEST_VERSION == 4
+    assert manifest["parts"][0] == "body"
+    assert len(manifest["parts"]) == 1 + len(loadout["stations"]) == 4
+    assert set(manifest["triangles"]) == set(manifest["parts"])
+    assert manifest["triangles"]["body"] == BODY_TRIANGLES
+    for part in manifest["parts"]:
+        assert (root / f"{part}.obj").is_file() and (root / f"{part}.mtl").is_file()
+        assert _obj_faces(root / f"{part}.obj") == manifest["triangles"][part]
+        assert f"mtllib {part}.mtl" in (root / f"{part}.obj").read_text(encoding="utf-8")
+    # each component's count is the station's own delta, same filter
+    for row in manifest["components"]:
+        parts = scene.added_parts(a4_mdl_convert._station_env(loadout, row["station"]))
+        assert _raw_triangles(parts) == STATION_DELTAS[row["station"]]
+        assert row["triangles"] == sum(a4_mdl_convert._filter_part(p) for p in parts)
+        assert row["model_vars"] == {f"{row['station']}_LOAD": 1.0}
+    # and the body is the rest environment only
+    rest = scene.parts()
+    assert sum(a4_mdl_convert._filter_part(p) for p in rest) == manifest["triangles"]["body"]
+
+
+def test_component_ids_match_labels_components(converted):
+    _, manifest = converted
+    airframe = load_airframe("A4")
+    payloads = {c.id: c for c in airframe.components if c.cls == "payload"}
+    assert len(payloads) == 3
+    rows = {row["id"]: row for row in manifest["components"]}
+    assert set(rows) == set(payloads)              # the bare C1 id is the shared key
+    assert all(row["class"] == "payload" for row in rows.values())
+    for component in payloads.values():
+        row = rows[component.id]
+        mesh = component_mesh_name("A4", component.id)
+        assert row["part"] == mesh
+        assert mesh in manifest["parts"] and manifest["triangles"][mesh] == row["triangles"]
+        assert row["asset_path"] == f"{manifest['asset_path_root']}/{mesh}"
+        assert row["station"] == component.station
+        assert row["mass_lb"] == component.mass_lb == 750.0
+    # gear is stowed: no row, no OBJ (Align agreement f)
+    assert [c.id for c in airframe.components if c.cls == "landing_gear"]
+    assert not any(row["class"] == "landing_gear" for row in manifest["components"])
+
+
+def test_component_extents_feed_hull_box_body_m(converted):
+    _, manifest = converted
+    airframe = load_airframe("A4")
+    body_box, _ = hull_box_body_m(manifest, airframe)
+    assert body_box is not None
+    for row in manifest["components"]:
+        assert row["mesh_origin_actor_cm"] == manifest["mesh_origin_actor_cm"]
+        box, basis = hull_box_body_m({**manifest, **row}, airframe)
+        assert box is not None and "version 4" in basis
+        # a store is shorter than the fuselage and inside the span
+        assert body_box["forward"][0] < box["forward"][0] < box["forward"][1] < body_box["forward"][1]
+        assert body_box["right"][0] < box["right"][0] < box["right"][1] < body_box["right"][1]
+        # and hangs below the body's lowest rest-pose vertex (down is +)
+        assert box["down"][1] > body_box["down"][1]
+        ex = row["mesh_extent_actor_m"]
+        length = ex["x"][1] - ex["x"][0]
+        if row["station"] == "STA3":
+            assert 4.0 < length < 4.5                 # the 4.22 m centreline tank
+            assert abs(sum(ex["y"])) < 0.1
+        else:
+            assert 4.6 < length < 5.1                 # the 4.85 m inboard stores
+            assert (sum(ex["y"]) / 2) * (1 if row["station"] == "STA4" else -1) > 1.5
+
+
+def test_old_a4_manifest_is_stale(tmp_path):
+    def write(name, version, **extra):
+        path = tmp_path / name / "mesh_manifest.json"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps({
+            "version": version, "name": name, "parts": [], "textures": [],
+            "mesh_origin_actor_cm": [-100.0, 0.0, 10.0], **extra}), encoding="utf-8")
+        return path
+
+    reason = importer.stale_manifest_reason(write("A4", 3))
+    assert reason is not None and "components" in reason and "STA3_LOAD" in reason
+    assert "version 4" in reason
+    # version 4 claimed without the list is equally stale
+    assert "components" in importer.stale_manifest_reason(write("A4", 4))
+    assert importer.stale_manifest_reason(write("A4", 4, components=[])) is None
+    # an airframe without a loadout keeps the version-3 contract
+    assert importer.stale_manifest_reason(write("B747", 3)) is None
 
 
 def test_importer_builds_a_local_model_without_fetching(monkeypatch, tmp_path):
