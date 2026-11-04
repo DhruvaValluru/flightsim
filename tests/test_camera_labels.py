@@ -650,7 +650,7 @@ def test_no_bundle_after_a_cli_render_returns_two(tmp_path, capsys, monkeypatch)
         parts = [str(p) for p in command]
         for i, part in enumerate(parts[:-1]):
             if part.endswith("card.json") and Path(part).is_file():
-                for cam in json.loads(Path(part).read_text())["cameras"]:
+                for cam in json.loads(Path(part).read_text(encoding="utf-8"))["cameras"]:
                     d = Path(parts[i + 1]) / str(cam["camera_id"])
                     d.mkdir(parents=True, exist_ok=True)
                     (d / "frame_0000.png").write_bytes(b"x")

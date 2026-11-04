@@ -5,8 +5,8 @@ pinned.
 
 Measured before the fixes (7b0a39a): `python -m flightsim.capture
 examples/cameras_multi.yaml --max-previews 0` printed the JSBSim
-startup banner 12 times before "spec ... valid"; `--help` said
-"UE 5.5" after the pin moved to 5.7; three `REFUSED --` lines carried
+startup banner 12 times before "spec ... valid"; `--help` named a
+stale engine version after the pin moved; three `REFUSED --` lines carried
 no rule name (an unreadable spec, the host-flight error in its
 bracketed form, the render wrapper's exit).
 """
@@ -230,7 +230,9 @@ def test_the_help_names_the_engine_version_that_is_pinned(capsys):
     assert caught.value.code == 0
     helptext = capsys.readouterr().out
     assert f"UE {UE_ENGINE_VERSION}" in helptext
-    assert "UE 5.5" not in helptext
+    # no other engine version is named: every "UE x.y" is the pinned one
+    named = set(re.findall(r"UE \d+\.\d+", helptext))
+    assert named == {f"UE {UE_ENGINE_VERSION}"}, named
     assert "--verbose" in helptext
 
 

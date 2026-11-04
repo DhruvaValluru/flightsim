@@ -35,7 +35,7 @@ def test_all_cameras_filled_passes(tmp_path):
 
 def test_catalog_has_render_camera_empty():
     entries = yaml.safe_load(
-        (Path(__file__).resolve().parents[1] / "core/messages/catalog.yaml").read_text())
+        (Path(__file__).resolve().parents[1] / "core/messages/catalog.yaml").read_text(encoding="utf-8"))
     entry = entries["render.camera_empty"]
     assert entry["sentence"] and entry["hint"]
 
@@ -79,7 +79,7 @@ def test_cli_render_path_refuses_when_one_camera_drew_nothing(tmp_path, capsys,
         parts = [str(p) for p in command]
         for i, part in enumerate(parts[:-1]):
             if part.endswith("card.json") and Path(part).is_file():
-                cameras = json.loads(Path(part).read_text())["cameras"]
+                cameras = json.loads(Path(part).read_text(encoding="utf-8"))["cameras"]
                 first = Path(parts[i + 1]) / str(cameras[0]["camera_id"])
                 first.mkdir(parents=True, exist_ok=True)
                 (first / "frame_0000.png").write_bytes(b"x")
