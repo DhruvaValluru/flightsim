@@ -51,4 +51,3 @@ def _measured_render_quality(monkeypatch):
     # delete these themselves.
     monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "measure")
     monkeypatch.setenv("FLIGHTSIM_SKY", "legacy")
-

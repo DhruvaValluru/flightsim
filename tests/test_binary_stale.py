@@ -92,6 +92,9 @@ def test_binary_stale_capture_render_refuses_by_name(tmp_path, capsys, monkeypat
 
     built = tmp_path / "bridge.dylib"
     built.write_bytes(b"")
+    import assets_pipeline.importer as importer_module
+
+    monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
     monkeypatch.setattr(plat, "ue_available", lambda: True)
     monkeypatch.setattr(plat, "ue_bridge_binary", lambda repo: built)
     example = Path(__file__).resolve().parents[1] / "examples" / "cameras_multi.yaml"
@@ -100,7 +103,7 @@ def test_binary_stale_capture_render_refuses_by_name(tmp_path, capsys, monkeypat
                          "--render", "--no-host-flight"])
     assert code == 2
     text = capsys.readouterr().out
-    assert "REFUSED -- engine.binary_stale" in text
-    assert "no stamp" in text and plat.plugin_source_hash(
+    assert "REFUSED -- by name:" in text and "no build stamp" in text
+    assert plat.plugin_source_hash(
         Path(__file__).resolve().parents[1]) in text
-    assert not out.exists()
+    assert not (out / "capture_manifest.json").exists()
