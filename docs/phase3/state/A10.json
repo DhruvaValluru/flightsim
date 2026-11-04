@@ -21,13 +21,13 @@
   "pending_windows": [
     "one-line prompt on /generate.html reaches a finished campaign (step 5): capture carries --terrain grand_canyon, tier llm, state done, card downloadable"
   ],
-  "pushed_commit": "23bad766",
+  "pushed_commit": "9bb12d95",
   "retry": 1,
   "route": "box",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "integrated",
-  "updated": "2026-11-04T13:48:58",
+  "stage": "pushed",
+  "updated": "2026-11-04T13:51:05",
   "verdict": "",
   "worktree": "../p3-A10r"
 }
