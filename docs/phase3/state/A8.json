@@ -2,7 +2,15 @@
   "A-2": "",
   "budget_used": 14,
   "builder_commit": "56fbe68a",
-  "claims": [],
+  "claims": [
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/FlightSimBridge.Build.cs",
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimGroundCallback.cpp",
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimGroundCallback.h",
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimScenarioWorld.cpp",
+    "ue/Plugins/JSBSimFlightDynamicsModel/Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp",
+    "ue/Plugins/JSBSimFlightDynamicsModel/Source/JSBSimFlightDynamicsModel/Public/JSBSimMovementComponent.h",
+    "ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json"
+  ],
   "failures": [
     "run A-2 packet docs/phase3/packets/A8-1.md: step 1-2 done; cause 1 = Water collision profile exit 1 (A5 builder), cause 2 = agl_m differs between passes (ground callback traces streamed tiles; decision 12), mask_vs_geometry 13.7 px offset recorded for A12"
   ],
@@ -19,6 +27,6 @@
   "run_id": "",
   "run_requested": "A-2",
   "stage": "building",
-  "updated": "2026-11-04T11:37:03",
+  "updated": "2026-11-04T11:40:25",
   "worktree": "../p3w-A8"
 }

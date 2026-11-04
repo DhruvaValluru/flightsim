@@ -1808,3 +1808,93 @@ e4a8a337 A1+A2: pin the engine to 5.5.4, version-guard GetMaterialResource, pin 
  23 files changed, 205 insertions(+), 83 deletions(-)
 ```
 
+## A9 · PASS · run A-2 · 2026-11-04T16:51:19Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+71:   - Check: the default run has the same number of frames for both cameras.
+72:   - Check: an empty camera stops with `render.camera_empty`.
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/A9-frames.log: frames/chase frame_NNNN.png: 200  /  frames/tower frame_NNNN.png: 200  (run 473b9e1ecfff done: clip ready; rendering 2 camera pass(es): chase, tower; labels attached on 400 of 400)
+runs/p3/A-2/A9-frames.log: no render.camera_empty refusal (the guard did not fire)
+```
+
+note: run A-2: step 1's reproduction found no empty camera on 5.7 (the review's Windows cause did not recur with the 5.7 build and the A5 fixes), so step 6 has nothing to fix; steps 6 and 7 are satisfied by the same run: equal counts and a quiet guard; the run's verifier failures are other boxes' (host_determinism A8, mask_vs_geometry and tight_box_present A12)
+
+### synopsis
+
+# A9 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T16:51:18Z
+
+## A9 step 1/6/7: default two-camera run through the web app (POST /run, chase + tower)
+
+- log: `runs/p3/A-2/A9-web-post.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+status 200
+{"run_id":"473b9e1ecfff","digest":"a65a380837f70079993de42e905ec5694aa41b990ea5a98d651a47c73fa64b5d"}
+```
+
+## A9 frame counts per camera and the run's events
+
+- log: `runs/p3/A-2/A9-frames.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+run 473b9e1ecfff done: clip ready (two cameras chase + tower, Grand Canyon A-4, 20 s)
+frames/chase frame_NNNN.png: 200
+frames/tower frame_NNNN.png: 200
+events: rendering 2 camera pass(es): chase, tower; engine labels attached on 400 of 400 frame(s) (0 without a bundle); clip: 200 frames of chase at 10.0 fps = 20.0 s; a clip per view: chase, tower
+no render.camera_empty refusal (the guard did not fire); verification FAILED: host_determinism (A8), mask_vs_geometry, tight_box_present (A12)
+```
+
+note: run A-2 on UE 5.7.4 build 99dc982e: the empty second camera did not reproduce; both camera passes wrote 200 frames; the render.camera_empty guard did not fire on this healthy run
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+140d8cdf Merge p3-A9: render refuses by name when a camera drew no frames (render.camera_empty)
+a61f2589 A9 integrator: CLI render-path test for render.camera_empty
+ff32cbcd A9: a camera with zero frames refuses render.camera_empty by name (CLI and web)
+
+140d8cdf Merge p3-A9: render refuses by name when a camera drew no frames (render.camera_empty)
+
+ core/capture/frames.py     | 36 +++++++++++++++++
+ core/messages/catalog.yaml |  3 ++
+ docs/phase3/notes/A9.md    |  3 ++
+ flightsim/capture.py       |  8 ++++
+ tests/engine_launch.py     | 25 ++++++++++++
+ tests/test_camera_empty.py | 96 ++++++++++++++++++++++++++++++++++++++++++++++
+ webapp/runs.py             | 15 ++++++++
+ 7 files changed, 186 insertions(+)
+
+a61f2589 A9 integrator: CLI render-path test for render.camera_empty
+
+ docs/phase3/notes/A9.md    |  3 +++
+ tests/test_camera_empty.py | 32 ++++++++++++++++++++++++++++++++
+ 2 files changed, 35 insertions(+)
+
+ff32cbcd A9: a camera with zero frames refuses render.camera_empty by name (CLI and web)
+
+ core/capture/frames.py     | 36 ++++++++++++++++++++++++++
+ core/messages/catalog.yaml |  3 +++
+ flightsim/capture.py       |  8 ++++++
+ tests/engine_launch.py     | 25 ++++++++++++++++++
+ tests/test_camera_empty.py | 64 ++++++++++++++++++++++++++++++++++++++++++++++
+ webapp/runs.py             | 15 +++++++++++
+ 6 files changed, 151 insertions(+)
+```
+

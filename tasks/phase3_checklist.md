@@ -67,7 +67,7 @@ sitting 0.4 m from its label (it was ~25 m).
 - [ ] **A8 · Host flight works; nobody needs `--no-host-flight`** 🪟
   - Check: a web-app run with host flight completes, and no message tells the user
     to add the flag.
-- [ ] **A9 · Every camera gives pictures, or the run says which one didn't** 🪟
+- [x] **A9 · Every camera gives pictures, or the run says which one didn't** 🪟
   - Check: the default run has the same number of frames for both cameras.
   - Check: an empty camera stops with `render.camera_empty`.
 - [ ] **A10 · Generate works in the web app** 🪟
