@@ -1725,17 +1725,22 @@ def test_the_hull_is_the_cited_mesh_extent_when_that_mesh_is_on_this_machine(
         tmp_path, monkeypatch):
     """The mesh branch of the verifier's hull, exercised deliberately:
     a version-3 mesh manifest whose measured extent IS the airframe
-    box passes; one 10 % taller than the painted box fails
-    mask_vs_geometry naming the mesh as its basis (the extent clause:
-    measured 11 % off against a 5 % tolerance). The manifest cites the
-    mesh with its digest and the verifier resolves the citation under a
-    temporary repository root, so nothing is written into this clone."""
+    box passes; one 20 % shorter than the painted box fails
+    mask_vs_geometry naming the mesh as its basis. The manifest comes
+    without its part OBJs (none are written here), so the extent box
+    is an outer bound of the drawn silhouette and the grade is
+    containment: the exact box passes graded by containment, the
+    shorter one has the painted pixels poking out of it (A12 retry 3;
+    tests/test_engine_bundle_golden.py pins the vertices-present
+    branch). The manifest cites the mesh with its digest and the
+    verifier resolves the citation under a temporary repository root,
+    so nothing is written into this clone."""
     from core.capture import verify as verify_module
 
     repo = tmp_path / "repo"
     airframe = fabricated_manifest(fabricated_spec())[0]["airframe"]
     monkeypatch.setattr(verify_module, "_REPO", repo)
-    for label, taller in (("exact", 1.0), ("taller", 1.1)):
+    for label, taller in (("exact", 1.0), ("shorter", 0.8)):
         mesh_file = repo / MESH_PATH
         mesh_file.parent.mkdir(parents=True, exist_ok=True)
         mesh_file.write_text(json.dumps(fabricated_mesh_manifest(airframe, taller=taller)),
@@ -1748,17 +1753,20 @@ def test_the_hull_is_the_cited_mesh_extent_when_that_mesh_is_on_this_machine(
         check = verify_mask_vs_geometry(manifest, run_dir)
         if taller == 1.0:
             assert check.status == PASS, check.detail
+            assert "graded by containment only" in check.detail
+            assert "vertex files" in check.detail and MESH_PATH in check.detail
         else:
             assert check.status == FAIL and check.failure == "annotation.mask_offset", check.detail
-            assert "mask extent" in check.detail
+            assert "mask extent" in check.detail and "outside the projected hull box" in check.detail
             assert "mesh manifest version 3 measured extent" in check.detail
             assert MESH_PATH in check.detail
     # Without the file under the verifier's root the citation is not
     # honoured and the airframe block is the hull (the run above passes
     # again, and says so in the basis).
     monkeypatch.setattr(verify_module, "_REPO", tmp_path / "elsewhere")
-    check = verify_mask_vs_geometry(manifest_of(tmp_path / "taller"), tmp_path / "taller")
+    check = verify_mask_vs_geometry(manifest_of(tmp_path / "shorter"), tmp_path / "shorter")
     assert check.status == PASS, check.detail
+    assert "containment" not in check.detail
 
 
 # -- what is NOT claimed, pinned ----------------------------------------------------
