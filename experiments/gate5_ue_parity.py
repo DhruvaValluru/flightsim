@@ -35,7 +35,7 @@ Scope of the claim
 This gate tests the *integration*, not the physics and not visual realism.
 
 Both hosts run the same JSBSim commit and byte-identical aircraft and engine
-files -- ``ue_preflight.sh`` checks the first and ``docs/VALIDITY.md`` records
+files -- ``ue_preflight.sh|.ps1`` checks the first and ``docs/VALIDITY.md`` records
 the second -- so trajectory agreement says the UE host steps and transforms the
 same model correctly. It says nothing about whether that model matches a real
 747.
@@ -72,6 +72,7 @@ from core.scenario.card import (  # noqa: E402,F401 -- re-exported: every
 )
 from core.scenario.runner import run_spec  # noqa: E402
 from core.scenario.spec import ScenarioSpec  # noqa: E402
+from core.util.platform import ue_runner_command  # noqa: E402
 
 RULE = "=" * 96
 
@@ -485,10 +486,18 @@ def measure_frames(manifest_path: Path) -> List[Check]:
 
 
 def preflight() -> Tuple[bool, str]:
-    script = Path(__file__).resolve().parents[1] / "scripts" / "ue_preflight.sh"
+    """Run scripts/ue_preflight.sh (mac/linux) or, through PowerShell,
+    scripts/ue_preflight.ps1 (Windows). Executing the .sh directly on
+    Windows dies with WinError 193 before compare() ever runs, so the
+    command comes from core.util.platform.ue_runner_command. Returns
+    (ok, stdout)."""
+    repo = Path(__file__).resolve().parents[1]
+    command = ue_runner_command(repo, "ue_preflight")
+    script = Path(command[-1])
     if not script.is_file():
-        return False, "scripts/ue_preflight.sh is missing"
-    proc = subprocess.run([str(script)], capture_output=True, text=True)
+        return False, f"scripts/{script.name} is missing"
+    proc = subprocess.run(command, capture_output=True, text=True,
+                          encoding="utf-8")
     return proc.returncode == 0, proc.stdout
 
 
