@@ -63,6 +63,7 @@ def main(argv: list[str]) -> int:
         p.add_argument("--stage", default="", help="plan, align, build, push, prove, debug, sync, lettertest, final")
         p.add_argument("--note", default="")
     sub.choices["log"].add_argument("--exit", type=int, default=None)
+    sub.choices["run"].add_argument("--cwd", default=None, help="run the command in this directory (a builder's worktree); the log stays in this checkout")
     sub.choices["run"].add_argument("cmd", nargs=argparse.REMAINDER, help="-- then the command")
     args = ap.parse_args(argv)
 
@@ -80,10 +81,12 @@ def main(argv: list[str]) -> int:
     if not cmd:
         ap.error("run needs a command after --")
     shown = " ".join(cmd)
+    if args.cwd:
+        base["cwd"] = str(Path(args.cwd).resolve().name)
     append(dict(base, kind="start", cmd=shown, note=args.note))
     t0 = time.time()
     try:
-        rc = subprocess.call(cmd, cwd=str(ROOT))
+        rc = subprocess.call(cmd, cwd=str(Path(args.cwd).resolve() if args.cwd else ROOT))
     except FileNotFoundError as exc:
         append(dict(base, kind="end", cmd=shown, exit=127, secs=round(time.time() - t0, 1), note=f"not found: {exc}"))
         print(f"phase3_event: command not found: {cmd[0]}", file=sys.stderr)

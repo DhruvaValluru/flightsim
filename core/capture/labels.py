@@ -80,6 +80,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .airframe import Airframe
+from .objects import COMPONENT_CLASSES
 
 #: IUGG 1980 mean Earth radius, metres.
 EARTH_RADIUS_M = 6_371_008.8
@@ -498,6 +499,22 @@ def frame_labels(record: Dict, state: Dict, airframe: Airframe,
 def conventions() -> Dict:
     """What a consumer needs to read these labels, in the manifest."""
     return {
+        "payload": "a labels.objects[] entry of class payload (parent = the "
+                   "aircraft's id, its own int_id from the card's component "
+                   "band): bbox_2d_hull is the card's body-frame extent box "
+                   "projected through the frame's camera, bbox_2d_tight and "
+                   "visible_fraction are measured from the ID image like any "
+                   "object's; the aircraft's own tight box counts its "
+                   "payload's pixels (component_rollup)",
+        "landing_gear": "as payload, for the landing gear (class landing_gear); "
+                        "optional, present only when the card declares it",
+        "component_rollup": "a parent's bbox_2d_tight, visible_fraction and "
+                            "pixels count its own pixels and its components' "
+                            "pixels (the ID image holds one value per pixel); "
+                            "a component never appears in its parent's "
+                            "occluded_by; a null bbox_2d_tight carries "
+                            "basis.bbox_2d_tight saying out of frame, fully "
+                            "occluded or no pixels",
         "camera_frame": "x right, y down, z forward, metres",
         "body_frame": "x forward, y right, z down, metres about the CG",
         "bbox_2d": "[u0, v0, u1, v1] px, top-left origin, clipped to the "
@@ -804,13 +821,79 @@ def not_claimed_for(obj_class: str, alone_pass: bool) -> List[str]:
     return out
 
 
+def component_label_record(obj, parent_entry: Dict, record: Dict,
+                           state: Optional[Dict], airframe: Optional[Airframe],
+                           axes, extent_body: Optional[Dict],
+                           mesh_manifest: Optional[Dict] = None) -> Dict:
+    """One ``labels.objects[]`` entry for a COMPONENT (class ``payload`` or
+    ``landing_gear``) of an aircraft: the keys the aircraft carries that a
+    part can have, in the same null-with-basis convention.
+
+    ``extent_body`` is the card's body-frame box for the part
+    (``{"forward": (aft, fwd), "right": (left, right), "down": (top,
+    bottom)}`` metres about the CG, the aircraft's convention); the hull
+    box is those eight corners projected through the SAME camera and
+    aircraft state as the aircraft's own box. ``parent_entry`` is the
+    aircraft's ``objects[]`` entry (its ``id`` becomes ``parent``).
+    ``airframe`` is accepted for signature parity with the aircraft path
+    and ``mesh_manifest`` is not read: a component's extent is declared by
+    the card, never guessed from the airframe's mesh. The engine keys are
+    null until :func:`attach_engine_labels` fills them.
+    """
+    if obj.class_name not in COMPONENT_CLASSES:
+        raise ValueError(f"{obj.id!r}: class {obj.class_name!r} is not a "
+                         f"component class {COMPONENT_CLASSES}")
+    entry: Dict = {"id": obj.id, "int_id": obj.int_id, "class": obj.class_name,
+                   "class_id": obj.class_id, "parent": parent_entry["id"]}
+    basis: Dict[str, str] = {}
+    hull = None
+    unclipped = None
+    if extent_body is not None and state is not None:
+        clipped, unclipped, _, _ = _project_body_box(
+            record, state, _box_corners(extent_body), axes)
+        hull = list(clipped) if clipped else None
+        basis["bbox_2d_hull"] = (
+            f"the card's body-frame extent box of this {obj.class_name} "
+            f"projected through the frame's camera and the aircraft's pose")
+    else:
+        basis["bbox_2d_hull"] = (f"the card declares no extent for this "
+                                 f"{obj.class_name}, so no hull box exists")
+    entry["bbox_2d_hull"] = hull
+    entry["fraction_in_frame"] = fraction_in_frame(hull, unclipped)
+    for key in ENGINE_LABEL_KEYS:
+        entry[key] = [] if key == "occluded_by" else None
+    entry["not_claimed"] = not_claimed_for(obj.class_name, alone_pass=False)
+    basis["engine"] = NO_BUNDLE_BASIS
+    entry["basis"] = basis
+    return entry
+
+
+def tight_box_basis(entry: Dict) -> Optional[str]:
+    """Why an object's ``bbox_2d_tight`` is null, from its measured keys
+    (None when the box exists): ``out of frame`` when ``fraction_in_frame``
+    is 0 or null, ``fully occluded`` when ``visible_fraction`` is 0, else
+    ``no pixels``."""
+    if entry.get("bbox_2d_tight") is not None:
+        return None
+    fraction = entry.get("fraction_in_frame")
+    if fraction is None or fraction == 0:
+        return ("out of frame: fraction_in_frame is "
+                f"{'null' if fraction is None else '0'}, so no pixel of "
+                "this object is in the image")
+    if entry.get("visible_fraction") == 0:
+        return ("fully occluded: visible_fraction is 0, every pixel of its "
+                "alone pass belongs to another object")
+    return "no pixel of this object's id (or its components') in the ID image"
+
+
 def object_label_record(obj, record: Dict, state: Optional[Dict],
                         airframe: Optional[Airframe], axes,
                         terrain_elevation_m: float,
                         randomization: Optional[Dict] = None,
                         mesh_manifest: Optional[Dict] = None,
                         primary: bool = False,
-                        base_labels: Optional[Dict] = None) -> Dict:
+                        base_labels: Optional[Dict] = None,
+                        extent_body: Optional[Dict] = None) -> Dict:
     """One ``labels.objects[]`` entry (contracts §3).
 
     For an aircraft object ``state`` is its CG state at the frame instant
@@ -819,6 +902,8 @@ def object_label_record(obj, record: Dict, state: Optional[Dict],
     COPIED from ``base_labels`` so the two can never disagree). For a
     scene object (terrain) both are None and every box is null.
     """
+    if getattr(obj, "parent", None) is not None:
+        return component_label_record(obj, {"id": obj.parent}, record, state, airframe, axes, extent_body, mesh_manifest)
     entry: Dict = {"id": obj.id, "int_id": obj.int_id, "class_id": obj.class_id}
     aircraft = airframe is not None and state is not None
     basis: Dict[str, str] = {}
@@ -1137,7 +1222,8 @@ def passes_record(files_per_frame: Sequence[int], words: Sequence[str]):
     )
 
 
-def measure_object(mask, depth, int_id: int, alone=None) -> Dict:
+def measure_object(mask, depth, int_id: int, alone=None,
+                   children: Sequence[int] = ()) -> Dict:
     """What the bundle says about ONE object: pixel counts, the tight
     box, the visible fraction, who occludes it and the depth under it.
 
@@ -1145,10 +1231,16 @@ def measure_object(mask, depth, int_id: int, alone=None) -> Dict:
     None: no alone pass, so visible_fraction and occluded_by are not
     measured), ``depth`` float metres or None. Integers out are Python
     ints and floats, never numpy scalars, so the record serialises.
+
+    ``children`` (Phase C): the ``int_id``s of this object's components.
+    The ID image holds one value per pixel, so the object's pixels are
+    those of ``{int_id} | children``, its alone footprint likewise, and a
+    child never appears in ``occluded_by``. Empty: exactly the old result.
     """
     import numpy as np
 
-    hit = mask == int_id
+    ids = [int(int_id)] + [int(c) for c in children]
+    hit = np.isin(mask, ids) if len(ids) > 1 else mask == int_id
     pixels = int(np.count_nonzero(hit))
     out: Dict = {"pixels": pixels, "pixels_alone": None,
                  "bbox_2d_tight": None, "visible_fraction": None,
@@ -1167,18 +1259,18 @@ def measure_object(mask, depth, int_id: int, alone=None) -> Dict:
                 out["depth_min_m"] = float(finite.min())
                 out["depth_median_m"] = float(np.median(finite))
     if alone is not None:
-        footprint = alone == int_id
+        footprint = np.isin(alone, ids) if len(ids) > 1 else alone == int_id
         pixels_alone = int(np.count_nonzero(footprint))
         out["pixels_alone"] = pixels_alone
         if pixels_alone > 0:
             out["visible_fraction"] = pixels / pixels_alone
             others, counts = np.unique(mask[footprint], return_counts=True)
             out["occluded_by"] = [int(v) for v in others
-                                  if int(v) not in (0, int_id)]
+                                  if int(v) not in (0, *ids)]
             # How much of the plane each occluder hides: the alone pass's
             # footprint pixels that the ID image gives to another id.
             out["occluded_pixels"] = {int(v): int(c) for v, c in zip(others, counts)
-                                      if int(v) not in (0, int_id)}
+                                      if int(v) not in (0, *ids)}
     return out
 
 
@@ -1698,7 +1790,9 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
         SUPPORTED_MANIFEST_VERSIONS, read_capture_manifest,
         write_capture_manifest, write_frame_sidecars,
     )
-    from .objects import resolve_ids
+    import numpy as np
+
+    from .objects import children_of, resolve_ids
 
     run_dir = Path(run_dir)
     manifest = read_capture_manifest(run_dir / "capture_manifest.json")
@@ -1711,6 +1805,7 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
                            f"is written by this build)")
         return summary
     objects = manifest.get("objects") or []
+    rollup = children_of(objects)
     bundles: Dict[str, Dict[str, Dict]] = {}
     pass_files_per_frame: List[int] = []
     pass_words_seen: set = set()
@@ -1776,7 +1871,15 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
             if int_id in alone_by_id:
                 alone = _read_id_png(camera_dir / alone_by_id[int_id])
                 files[f"alone_{int_id}"] = alone_by_id[int_id]
-            measured = measure_object(mask, depth, int_id, alone)
+            kids = rollup.get(int_id, [])
+            if alone is not None:
+                # the parent's alone footprint plus its components' alone passes
+                for kid in kids:
+                    if kid in alone_by_id:
+                        kid_alone = _read_id_png(camera_dir / alone_by_id[kid])
+                        alone = np.where(kid_alone == kid, kid, alone).astype(alone.dtype)
+                        files[f"alone_{kid}"] = alone_by_id[kid]
+            measured = measure_object(mask, depth, int_id, alone, children=kids)
             entry["bbox_2d_tight"] = measured["bbox_2d_tight"]
             entry["visible_fraction"] = measured["visible_fraction"]
             entry["occluded_by"] = resolve_ids(measured["occluded_by"], objects)
@@ -1795,6 +1898,13 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
                            "and the depth under the mask; the verifier "
                            "re-derives these from the same files"),
             }
+            if kids:
+                basis["engine"]["rollup_children"] = resolve_ids(kids, objects)
+            why = tight_box_basis(entry)
+            if why is not None:
+                basis["bbox_2d_tight"] = why
+            else:
+                basis.pop("bbox_2d_tight", None)
             # S2: the amodal box and mask, when this frame's camera asks.
             wants_amodal = "amodal" in ((frame.get("passes") or {}).get("requested") or [])
             if wants_amodal and int_id in aircraft_ids:

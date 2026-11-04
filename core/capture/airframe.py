@@ -76,6 +76,40 @@ class AirframeLabelError(Exception):
         super().__init__(f"camera.labels: {message}")
 
 
+class ComponentUnmatchedError(AirframeLabelError):
+    """A declared component names no part of the airframe."""
+
+    constraint = "aircraft.component_unmatched"
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        Exception.__init__(self, f"{self.constraint}: {message}")
+
+
+#: The classes a component may declare.
+COMPONENT_CLASSES = ("payload", "landing_gear")
+#: A pointmass weight must equal the stated mass to this many lb.
+COMPONENT_MASS_TOL_LB = 0.01
+
+
+@dataclass(frozen=True)
+class Component:
+    id: str
+    #: The ``class`` string of the config: ``payload`` | ``landing_gear``.
+    cls: str
+    station: Optional[str]
+    source: str
+    #: Payload: the stated store weight (lb); gear: 0.0.
+    mass_lb: float
+    #: The FDM part it matched: the pointmass name or the keypoint name.
+    part_name: str
+
+    def to_dict(self) -> Dict:
+        return {"id": self.id, "class": self.cls, "station": self.station,
+                "source": self.source, "mass_lb": self.mass_lb,
+                "part_name": self.part_name}
+
+
 @dataclass(frozen=True)
 class Keypoint:
     name: str
@@ -103,6 +137,9 @@ class Airframe:
     fdm_xml_path: str
     fdm_xml_sha256: str
     missing: Tuple[str, ...] = field(default_factory=tuple)
+    components: Tuple[Component, ...] = ()
+    #: The config's default loadout (``loading.loadout``), {} when none.
+    loadout: Dict = field(default_factory=dict)
 
     # -- the box ----------------------------------------------------------
 
@@ -151,6 +188,8 @@ class Airframe:
             "config_sha256": self.config_sha256,
             "fdm_xml": self.fdm_xml_path,
             "fdm_xml_sha256": self.fdm_xml_sha256,
+            "components": [c.to_dict() for c in self.components],
+            "loadout": dict(self.loadout),
         }
 
 
@@ -211,8 +250,77 @@ def _read_fdm(path: Path) -> Dict:
         for contact in ground.findall("contact"):
             contacts[contact.get("name")] = (contact.get("type"),
                                              _location_in(contact))
+    pointmasses = {}
+    for pm in mass.findall("pointmass"):
+        weight = pm.find("weight")
+        if weight is not None and weight.text:
+            pointmasses[pm.get("name")] = float(weight.text)
     return {"cg_in": cg, "wingspan_ft": float(span.text),
-            "aerorp_in": aerorp, "contacts": contacts}
+            "aerorp_in": aerorp, "contacts": contacts,
+            "pointmasses_lb": pointmasses}
+
+
+def _read_components(config: Dict, path: Path, model: Dict,
+                     keypoints: Dict[str, "Keypoint"]
+                     ) -> Tuple[Component, ...]:
+    """The ``labels.components`` block, each entry matched to a part.
+
+    A payload must name a loadable ``loading.stations`` entry whose FDM
+    pointmass weighs the stated mass; a landing_gear must name a defined
+    keypoint. Anything else is refused by id (aircraft.component_unmatched)
+    so the picture can never draw a part the physics does not carry.
+    """
+    declared = (config.get("labels") or {}).get("components")
+    if declared is None:
+        return ()
+    if not isinstance(declared, list):
+        raise ComponentUnmatchedError(
+            f"{path.name} labels.components is not a list")
+    stations = {s.get("name"): s for s in
+                (config.get("loading") or {}).get("stations") or []}
+    out: List[Component] = []
+    seen = set()
+    for entry in declared:
+        cid = entry.get("id") if isinstance(entry, dict) else None
+        if not cid or cid in seen:
+            raise ComponentUnmatchedError(
+                f"{path.name} has a component with a missing or repeated "
+                f"id ({cid!r})")
+        seen.add(cid)
+        cls = entry.get("class")
+        source = entry.get("source")
+        if cls not in COMPONENT_CLASSES:
+            raise ComponentUnmatchedError(
+                f"component {cid!r} has class {cls!r}; expected one of "
+                f"{list(COMPONENT_CLASSES)}")
+        if not source:
+            raise ComponentUnmatchedError(
+                f"component {cid!r} states no source")
+        if cls == "payload":
+            name = entry.get("station")
+            st = stations.get(name)
+            if st is None or not st.get("loadable"):
+                raise ComponentUnmatchedError(
+                    f"payload component {cid!r} names station {name!r}, "
+                    f"which is not a loadable station of {path.name}")
+            stated = float(st.get("default_lb", 0.0))
+            weight = model["pointmasses_lb"].get(name)
+            if weight is None or stated <= 0.0 or \
+                    abs(weight - stated) > COMPONENT_MASS_TOL_LB:
+                raise ComponentUnmatchedError(
+                    f"payload component {cid!r} on {name}: the flight "
+                    f"model's pointmass weighs {weight} lb, the config "
+                    f"states {stated} lb; the drawn store and the physics "
+                    f"disagree")
+            out.append(Component(cid, cls, name, str(source), stated, name))
+        else:
+            if source not in keypoints:
+                raise ComponentUnmatchedError(
+                    f"landing_gear component {cid!r} names {source!r}, "
+                    f"which is not a keypoint of this airframe "
+                    f"({sorted(keypoints)})")
+            out.append(Component(cid, cls, None, str(source), 0.0, source))
+    return tuple(out)
 
 
 def structural_to_body(point_in: Tuple[float, float, float],
@@ -312,6 +420,9 @@ def load_airframe(aircraft: str, config_dir: Optional[Path] = None
                 f"{path.name} keypoint {name!r} has no fdm_contact, "
                 f"fdm_wingspan or structural_in definition")
 
+    components = _read_components(config, path, model, keypoints)
+    loadout = dict((config.get("loading") or {}).get("loadout") or {})
+
     return Airframe(
         aircraft=aircraft,
         length_m=float(dims["length"]),
@@ -325,4 +436,6 @@ def load_airframe(aircraft: str, config_dir: Optional[Path] = None
         fdm_xml_path=str(xml_path),
         fdm_xml_sha256=_sha256(xml_path),
         missing=tuple(missing),
+        components=components,
+        loadout=loadout,
     )

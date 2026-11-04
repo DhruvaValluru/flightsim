@@ -1,0 +1,17 @@
+{
+  "budget_used": 15,
+  "builder_commit": "9e967f1b",
+  "claims": [],
+  "integrated_commit": "488c80e63a0f2be58b98f66c06d4fad3b03c15fd",
+  "letter": "A",
+  "needs_windows": true,
+  "pending_windows": [
+    "step6 UE_ROOT at 5.7 -> engine.version_mismatch, no Build.bat",
+    "step7 pinned engine exit 0 prints full version",
+    "ue_preflight.ps1 on both engines",
+    "helper parses under Windows PowerShell 5.1"
+  ],
+  "stage": "built",
+  "updated": "2026-11-03T21:58:55",
+  "worktree": "../p3-A3"
+}
