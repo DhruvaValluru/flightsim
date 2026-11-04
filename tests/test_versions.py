@@ -91,7 +91,7 @@ def _canonical_digest(payload) -> str:
 
 def test_the_three_versions_and_what_each_reads():
     assert SPEC_VERSION == 9 and READABLE_SPEC_VERSIONS == (8, 9)
-    assert MANIFEST_VERSION == 7 and SUPPORTED_MANIFEST_VERSIONS == (3, 4, 5, 6, 7)
+    assert MANIFEST_VERSION == 8 and SUPPORTED_MANIFEST_VERSIONS == (3, 4, 5, 6, 7, 8)
     assert RECORD_VERSION == 2 and READABLE_RECORD_VERSIONS == (1, 2)
 
 
