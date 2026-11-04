@@ -209,7 +209,10 @@ def test_datum_independent_refuses_a_relocated_crop_the_block_does_not_vouch_for
     check = verify_datum_independent(manifest, run_dir)
     assert check.status == FAIL and check.failure == FAIL_DATUM, check.detail
     assert "grand_canyon_geoid.gtx" in check.detail and "ab" * 8 in check.detail
-    assert "C:/Users/someone/flightsim/runs/terrain/grand_canyon_geoid.gtx" in check.detail
+    # The card's path is echoed in the host's own separators (Windows prints
+    # backslashes), so compare separator-neutrally.
+    assert ("C:/Users/someone/flightsim/runs/terrain/grand_canyon_geoid.gtx"
+            in check.detail.replace("\\", "/"))
     manifest["datum"]["gtx"]["sha256"] = None
     check = verify_datum_independent(manifest, run_dir)
     assert check.status == FAIL and check.failure == FAIL_DATUM, check.detail
