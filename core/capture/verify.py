@@ -58,6 +58,22 @@ and the sha named, never taken. Nothing is looked for outside the run
 directory, no other name is looked at however its bytes hash, and a
 card whose path is present with the recorded bytes is read exactly as
 before. The name is only where to look; the sha decides.
+
+The mesh manifest vouches for its own bytes, not for the part OBJs the
+converter wrote beside it, and a relocated copy of the manifest comes
+alone: the vertices are not under the run directory (a fixture holds
+the 5 kB manifest, not 130 000 vertices). A machine with the vertices
+grades the mask against the silhouette they project (the primary's
+drawn outline, within a pixel); a machine with the manifest alone has
+only the converter's measured extent box, which is an OUTER bound of
+that silhouette, never its extent (measured on the A12 fixture, the
+c172p chase frame at 320x180: the engine's own bbox_2d_hull of
+160.4x45.5 px against a 129x30 px silhouette, the same box the Mac
+projects to 0.01 px). mask_vs_geometry then grades containment -- the
+silhouette's tight box inside the projected extent box within the box
+floor -- and says so, naming the missing vertex files, in its detail;
+it does not grade the box's extent as if the box were what was drawn,
+which is the Windows-passes-Mac-fails difference of A12 retry 3.
 """
 
 from __future__ import annotations
@@ -2672,7 +2688,24 @@ def _mesh_points_body(manifest: Dict, airframe_block: Dict, run_dir=None):
         return None, None
     vertices = _mesh_vertices_actor_m(str(candidate), str(sha))
     if vertices is None:
-        return None, None
+        extent = mesh.get("mesh_extent_actor_m") or {}
+        if not all(k in extent for k in "xyz"):
+            return None, None
+        parts = [str(p) for p in (mesh.get("parts") or [])]
+        missing = [f"{p}.obj" for p in parts if not (candidate.parent / f"{p}.obj").is_file()]
+        if not parts:
+            which = "it names no part OBJ"
+        else:
+            which = (f"{len(missing)} of its {len(parts)} part OBJs are not beside "
+                     f"{candidate} ({', '.join(missing[:4])}"
+                     f"{', ...' if len(missing) > 4 else ''})")
+        # The manifest is here with the recorded bytes but the vertices
+        # it was measured from are not (a relocated copy comes alone), so
+        # the measured extent is an outer bound of the drawn silhouette,
+        # not the silhouette: said here, graded as such by the caller.
+        return None, (f"the vertex files of {path} are not on this machine ({which}), "
+                      f"so its measured extent box is an outer bound of the drawn "
+                      f"silhouette, not its extent")
     import numpy as np
 
     ox, oy, oz = (float(v) / 100.0 for v in origin)
@@ -2803,6 +2836,7 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes, run_dir=No
     corners = [place((x, y, z)) for x in box["forward"] for y in box["right"]
                for z in box["down"]]
     points = None
+    outer_bound = None
     if entry.get("role") == "primary" or int_id == AIRCRAFT_INSTANCE_ID:
         body_points, points_basis = _mesh_points_body(manifest, airframe, run_dir)
         if body_points is not None:
@@ -2811,6 +2845,9 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes, run_dir=No
             points = (np.asarray(cg, dtype=float)
                       + body_points @ np.asarray(body_axes, dtype=float))
             basis = f"{basis}; {points_basis}"
+        elif points_basis:
+            outer_bound = points_basis
+            basis = f"{basis}; {points_basis}"
     keypoints = {}
     for kp in airframe.get("keypoints") or []:
         if isinstance(kp, dict) and kp.get("name") and kp.get("body_m"):
@@ -2818,6 +2855,7 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes, run_dir=No
     return {
         "centre": place(centre_body), "axes": body_axes, "half": half,
         "cg": cg, "corners": corners, "points": points, "keypoints": keypoints,
+        "outer_bound": outer_bound,
         "length_m": float(box["forward"][1] - box["forward"][0]),
         "basis": f"{basis}; placement: {placement}",
     }, ""
@@ -3060,6 +3098,13 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
     and the tight box's width and height against the projected hull
     box's (within MASK_EXTENT_TOL_FRACTION). A hull inside the image
     with no pixels, or pixels for a hull outside it, fails outright.
+    When the card vouches for a mesh whose vertex files are not on this
+    machine (module docstring, relocated files), the hull is that
+    mesh's measured extent box, an outer bound of the drawn silhouette
+    and not its extent: the grade is then containment -- every edge of
+    the tight box inside the projected box within MASK_TOL_PX -- and
+    the detail says so, naming the missing files; the centre and extent
+    clauses are not applied to a box that was not what was drawn.
     The silhouette graded is the object's ALONE pass where the engine
     wrote one -- the object drawn with nothing in front of it, so an
     occluder does not shrink or shift it -- else its pixels in the ID
@@ -3095,6 +3140,9 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
     skipped: Dict[str, str] = {}
     worst_centroid = (0.0, "")
     worst_extent = (0.0, "")
+    contained = 0
+    least_slack = (math.inf, "")
+    outer_why = ""
     for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
         labels = engine["labels"]
         if not labels.get("mask"):
@@ -3147,6 +3195,31 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
             ys, xs = np.nonzero(hit)
             tight_w = float(xs.max() + 1 - xs.min())
             tight_h = float(ys.max() + 1 - ys.min())
+            outer = geometry.get("outer_bound")
+            if outer:
+                # The hull box bounds the drawn mesh from outside (its
+                # vertex files are not here): grade containment, within
+                # the box floor, and nothing the box cannot vouch for.
+                tight = (float(xs.min()), float(ys.min()),
+                         float(xs.max() + 1), float(ys.max() + 1))
+                slack = min(tight[0] - clipped[0], tight[1] - clipped[1],
+                            clipped[2] - tight[2], clipped[3] - tight[3])
+                graded += 1
+                contained += 1
+                outer_why = outer
+                if slack < least_slack[0]:
+                    least_slack = (slack, where)
+                if slack < -MASK_TOL_PX:
+                    return Check("mask_vs_geometry", FAIL,
+                                 f"{where}: mask extent {tight_w:.0f}x{tight_h:.0f} px "
+                                 f"({', '.join(f'{v:.0f}' for v in tight)}) pokes "
+                                 f"{-slack:.1f} px outside the projected hull box of "
+                                 f"{hull_w:.1f}x{hull_h:.1f} px "
+                                 f"({', '.join(f'{v:.1f}' for v in clipped)}), floor "
+                                 f"{MASK_TOL_PX:g} px; graded for containment because "
+                                 f"{outer}; basis: {geometry['basis']}",
+                                 failure=FAIL_MASK_OFFSET)
+                continue
             extent = max(abs(tight_w - hull_w) / hull_w, abs(tight_h - hull_h) / hull_h)
             extent_px = max(abs(tight_w - hull_w), abs(tight_h - hull_h))
             if extent > worst_extent[0]:
@@ -3205,6 +3278,10 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
         notes.append(f"{not_claimed} object-frames under {BOX_IOU_MIN_PX:.0f} px not claimed")
     for key, why in skipped.items():
         notes.append(f"{key} not graded: {why}")
+    if contained:
+        notes.append(f"{contained} object-frames graded by containment only, least edge "
+                     f"slack {least_slack[0]:.1f} px at {least_slack[1]} (floor "
+                     f"-{MASK_TOL_PX:g} px): {outer_why}")
     return Check("mask_vs_geometry", PASS,
                  f"{graded} object-frames; worst box-centre offset "
                  f"{worst_centroid[0] * 100:.2f} % of span at "
@@ -3232,6 +3309,13 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
     name, not skipped (a record the bundle was never attached to). The
     PASS sentence says how many records were compared. Supersedes
     mask_containment for manifest 6.
+
+    When the hull is a cited mesh's measured extent box with the mesh's
+    vertex files not on this machine (an outer bound of the silhouette,
+    module docstring), an IoU against it measures the box's slack, not
+    the paint: those object-frames are not IoU-graded (mask_vs_geometry
+    grades their containment), the record clause still applies, and the
+    PASS sentence counts them and says why.
     """
     objects = _declared_objects(manifest)
     if not objects:
@@ -3245,6 +3329,8 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
     graded = 0
     records = 0
     not_claimed = 0
+    bounded = 0
+    bounded_why = ""
     worst = (1.0, "")
     for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
         labels = engine["labels"]
@@ -3306,6 +3392,10 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
             if span < BOX_IOU_MIN_PX:
                 not_claimed += 1
                 continue
+            if geometry.get("outer_bound"):
+                bounded += 1
+                bounded_why = str(geometry["outer_bound"])
+                continue        # mask_vs_geometry grades containment
             ys, xs = np.nonzero(hit)
             tight = (float(xs.min()), float(ys.min()), float(xs.max()) + 1.0,
                      float(ys.max()) + 1.0)
@@ -3322,17 +3412,22 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
                              f"{floor} for a {span:.0f} px span; basis: "
                              f"{geometry['basis']}",
                              failure=FAIL_BOX_MISMATCH)
-    if graded == 0:
+    bounded_note = (f"; {bounded} object-frames not IoU-graded, their hull box an outer "
+                    f"bound of the drawn mesh (containment graded by mask_vs_geometry): "
+                    f"{bounded_why}" if bounded else "")
+    if graded == 0 and not (bounded and records):
         return Check("box_vs_mask", NOT_RUN,
                      f"no aircraft object with pixels and a projected hull to grade "
-                     f"({not_claimed} under {BOX_IOU_MIN_PX:.0f} px, not claimed)")
+                     f"({not_claimed} under {BOX_IOU_MIN_PX:.0f} px, not claimed)"
+                     + bounded_note)
     return Check("box_vs_mask", PASS,
-                 f"{graded} object-frames; lowest IoU {worst[0]:.3f} at {worst[1]} "
+                 f"{graded} object-frames; lowest IoU {worst[0]:.3f} at "
+                 f"{worst[1] or 'none IoU-graded'} "
                  f"(floors {BOX_IOU_MIN_LARGE} at >= {BOX_IOU_LARGE_PX:.0f} px, "
                  f"{BOX_IOU_MIN_SMALL} at >= {BOX_IOU_MIN_PX:.0f} px); {records} "
                  f"records' bbox_2d_tight re-counted from the ID image to a pixel"
                  + (f"; {not_claimed} under {BOX_IOU_MIN_PX:.0f} px not claimed"
-                    if not_claimed else ""))
+                    if not_claimed else "") + bounded_note)
 
 
 #: The tight box is on the pixel grid (whole-pixel edges, one past the

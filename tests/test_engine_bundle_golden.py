@@ -149,17 +149,21 @@ def test_a_relocated_file_is_taken_only_with_its_recorded_sha(tmp_path):
     assert relative == _REPO / "assets" / "generated" / "c172p" / "mesh_manifest.json"
 
 
-def _run_citing_a_relocated_mesh(tmp_path):
-    """A fabricated run whose directory holds a version-3 mesh manifest 10 %
-    taller than the painted box, and its manifest (in memory) citing that
-    file at a Windows path that is not on this machine."""
+def _run_citing_a_relocated_mesh(tmp_path, taller=0.8, parts=()):
+    """A fabricated run whose directory holds a version-3 mesh manifest
+    ``taller`` times the painted box's height (20 % shorter by default,
+    so the painted pixels poke out of it) naming ``parts`` as its part
+    OBJs, none written, and its manifest (in memory) citing that file at
+    a Windows path that is not on this machine."""
     from tests.test_annotation_gates import (fabricate_run, fabricated_mesh_manifest,
                                              manifest_of)
 
     run_dir = tmp_path / "run"
     fabricate_run(run_dir)
     manifest = manifest_of(run_dir)
-    mesh = json.dumps(fabricated_mesh_manifest(manifest["airframe"], taller=1.1)).encode("utf-8")
+    body = fabricated_mesh_manifest(manifest["airframe"], taller=taller)
+    body["parts"] = list(parts)
+    mesh = json.dumps(body).encode("utf-8")
     (run_dir / "mesh_manifest.json").write_bytes(mesh)
     return manifest, run_dir, hashlib.sha256(mesh).hexdigest()
 
@@ -169,12 +173,13 @@ def test_mask_vs_geometry_grades_a_relocated_mesh_only_when_the_card_vouches_for
 
     manifest, run_dir, sha = _run_citing_a_relocated_mesh(tmp_path)
     cite = manifest.setdefault("assets", {})
-    # Recorded sha matches: the relocated mesh IS the hull, and the taller
-    # extent fails the extent clause naming the mesh as its basis.
+    # Recorded sha matches: the relocated mesh IS the hull, and the painted
+    # pixels poking out of its shorter extent box fail, naming the mesh.
     cite["mesh_manifest"] = {"path": WINDOWS_MESH_PATH, "sha256": sha, "note": None}
     check = verify_mask_vs_geometry(manifest, run_dir)
     assert check.status == FAIL and check.failure == FAIL_MASK_OFFSET, check.detail
     assert "mesh manifest version 3 measured extent" in check.detail
+    assert "outside the projected hull box" in check.detail
     assert WINDOWS_MESH_PATH in check.detail
     # Wrong sha: refused by name, the path and both shas named; the hull is
     # never taken from the unproven file.
@@ -192,6 +197,58 @@ def test_mask_vs_geometry_grades_a_relocated_mesh_only_when_the_card_vouches_for
     cite["mesh_manifest"] = {"path": None, "sha256": None, "note": "none on the producer"}
     check = verify_mask_vs_geometry(manifest, run_dir)
     assert check.status == "PASS", check.detail
+
+
+def test_a_vouched_mesh_without_its_vertex_files_bounds_the_silhouette_from_outside(tmp_path):
+    """A12 retry 3, the Mac golden failure: the committed fixture holds
+    the cited mesh manifest (sha-matched) but not the eight part OBJs the
+    Windows machine has beside its own copy, so Windows grades the mask
+    against the vertices' silhouette (130 px span) while the Mac has only
+    the measured extent box (160.4x45.5 px, equal to the engine's own
+    bbox_2d_hull to 0.01 px) and used to grade a real silhouette's extent
+    against it (129x30 px: 24 % off). The box is an outer bound of the
+    silhouette, so with the vertices absent the gate grades containment
+    and names the missing files; with the OBJs beside the manifest the
+    silhouette grade is back, as on the producing machine."""
+    from core.capture.verify import (FAIL_MASK_OFFSET, PASS, _mesh_vertices_actor_m,
+                                     verify_box_vs_mask, verify_mask_vs_geometry)
+
+    manifest, run_dir, sha = _run_citing_a_relocated_mesh(tmp_path, taller=1.1,
+                                                          parts=("body", "rudder"))
+    manifest.setdefault("assets", {})["mesh_manifest"] = {
+        "path": WINDOWS_MESH_PATH, "sha256": sha, "note": None}
+    _mesh_vertices_actor_m.cache_clear()
+    check = verify_mask_vs_geometry(manifest, run_dir)
+    assert check.status == PASS, check.detail
+    assert "object-frames graded by containment only" in check.detail
+    assert "2 of its 2 part OBJs are not beside" in check.detail
+    assert "body.obj, rudder.obj" in check.detail and WINDOWS_MESH_PATH in check.detail
+    # box_vs_mask: an IoU against an outer bound measures the box's slack,
+    # not the paint, so that frame is not IoU-graded and the sentence says
+    # so; the record's bbox_2d_tight is still re-counted to a pixel.
+    check = verify_box_vs_mask(manifest, run_dir)
+    assert check.status == PASS, check.detail
+    assert "object-frames not IoU-graded" in check.detail
+    assert "records' bbox_2d_tight re-counted" in check.detail and "vertex files" in check.detail
+    # The vertices arrive beside the manifest (the extent box's corners, in
+    # actor-frame centimetres as the converter writes them): the hull is
+    # their silhouette again, and the 10 % taller mesh fails the extent
+    # clause naming the vertices, exactly as the producing machine grades.
+    mesh = json.loads((run_dir / "mesh_manifest.json").read_text(encoding="utf-8"))
+    ext = mesh["mesh_extent_actor_m"]
+    corners = [(x * 100.0, y * 100.0, z * 100.0)
+               for x in ext["x"] for y in ext["y"] for z in ext["z"]]
+    for part in mesh["parts"]:
+        (run_dir / f"{part}.obj").write_text(
+            "".join("v %.4f %.4f %.4f\n" % c for c in corners), encoding="utf-8")
+    _mesh_vertices_actor_m.cache_clear()
+    check = verify_mask_vs_geometry(manifest, run_dir)
+    assert check.status == FAIL and check.failure == FAIL_MASK_OFFSET, check.detail
+    assert "silhouette from 8 mesh vertices" in check.detail
+    assert "containment" not in check.detail
+    check = verify_box_vs_mask(manifest, run_dir)
+    assert check.status == PASS and "not IoU-graded" not in check.detail, check.detail
+    assert "lowest IoU 0." in check.detail
 
 
 def test_datum_independent_refuses_a_relocated_crop_the_block_does_not_vouch_for(tmp_path):
