@@ -9,5 +9,22 @@
   109.0
  ],
  "visible_fraction": 1.0,
- "depth_median_m": 27.059993743896484
+ "depth_median_m": 27.059993743896484,
+ "cited_files": {
+  "c172p_mesh_manifest.json": {
+   "sha256": "23d046edb9bf5a1bb0a8f72411cf476029b3e92fba0730a4e9d2e09682deabaa",
+   "bytes": 5501,
+   "cited_as": "assets/generated/c172p/mesh_manifest.json (the card mesh manifest)"
+  },
+  "grand_canyon_geoid.gtx": {
+   "sha256": "05c414361ca404840fd25cf9d4f3c03aecadcd6d2cd4160d340c29a4b0423c70",
+   "bytes": 140,
+   "cited_as": "runs/terrain/grand_canyon_geoid.gtx (scene.terrain geoid crop)"
+  },
+  "grand_canyon_geoid.json": {
+   "sha256": "1c34283172d7732ada8559c9b5a17f5eba31e1c2e75d356d6b602e23ba076dd7",
+   "bytes": 9553,
+   "cited_as": "runs/terrain/grand_canyon_geoid.json (geoid crop sidecar)"
+  }
+ }
 }

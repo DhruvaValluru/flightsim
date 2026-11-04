@@ -122,9 +122,9 @@ Two rules to keep in mind:
   decide the loadout*
   - Check: the A-4 loads with at least one payload, and the plane still trims with
     the weight of what it carries.
-- [ ] **C2 · Each loaded station exported as its own piece**
+- [x] **C2 · Each loaded station exported as its own piece**
   - Check: the mesh manifest lists a `payload` piece per loaded station.
-- [ ] **C3 · The run card lists the payload pieces with their own IDs**
+- [x] **C3 · The run card lists the payload pieces with their own IDs**
   - Check: the IDs are unique and never clash with other aircraft.
 - [ ] **C4 · The engine gives each piece its own colour in the mask** 🪟
   - Check: the mask contains the payload's ID, and the aircraft's own tight box is
