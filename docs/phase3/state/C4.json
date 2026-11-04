@@ -1,9 +1,15 @@
 {
   "budget_used": 18,
+  "claims": [
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp",
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimScenarioWorld.cpp",
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimScenarioWorld.h"
+  ],
   "letter": "C",
   "needs_windows": true,
   "pushed_commit": "845f014d",
-  "stage": "pushed",
+  "stage": "building",
   "unit": "C4",
-  "updated": "2026-11-04T16:09:55"
+  "updated": "2026-11-04T16:18:38",
+  "worktree": "../p3w-C4"
 }
