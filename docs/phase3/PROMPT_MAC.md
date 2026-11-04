@@ -73,7 +73,11 @@ the Windows decision agent by message to decide.
 1. **Model per role.** `fable` for breakdown, Align, debug triage, context,
    overlap, the final report and (owner's rule, 2026-11-04) every builder.
    `sonnet` for sub-agents, integrators and the auditor. `haiku` for the summary agent. Pass `model`
-   on every `Agent` call.
+   on every `Agent` call. **Builders only run as ultracode** (owner's rule,
+   2026-11-04): each letter's Stage 3 builders are one `Workflow` run whose
+   `agent()` calls use `model: "fable"`, fanned out in Align's build order with
+   `parallel()` inside each order group; a retry builder is a one-agent
+   workflow. No other role runs through `Workflow`.
 2. **Scripts do the mechanical work.** Logging, test running, grep-based
    checks, diffs and merge are shell commands through `phase3_event.py run`.
    An agent never retypes a file to the parent and never composes JSON.
@@ -138,7 +142,7 @@ tagged `windows`, do not build it here: write the step list to
 `notes/<box>.md` under `windows_steps` and include the box in the next
 `pushed` message; the Windows session builds those steps itself.
 
-- *Builder (fable, owner's rule 2026-11-04).* Own worktree. Claims its files in `state/<box>.json`
+- *Builder (fable, as an ultracode `Workflow` agent; owner's rule 2026-11-04).* Own worktree. Claims its files in `state/<box>.json`
   (`claims`); waits if another box holds one. Codes the whole coding plan,
   nothing stubbed, no TODO. Runs the box's own check from the note until it
   passes locally. Marks every `needs_windows` check `pending`. Logs every
