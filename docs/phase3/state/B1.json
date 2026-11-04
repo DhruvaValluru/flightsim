@@ -1,9 +1,11 @@
 {
   "B-1": "",
   "FAIL": "",
+  "PASS": "",
   "budget_used": 20,
   "builder_commit": "cfa48660",
   "built_commit": "695710c6",
+  "cfa48660": "",
   "claims": [
     "scripts/deploy_windows.ps1"
   ],
@@ -22,7 +24,8 @@
   "run_id": "",
   "stage": "built_local",
   "unit": "B1",
-  "updated": "2026-11-04T13:06:07",
+  "updated": "2026-11-04T13:07:44",
   "verdict": "",
+  "windows_build": "",
   "worktree": "../p3w-B1"
 }

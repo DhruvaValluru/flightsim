@@ -92,7 +92,7 @@ sitting 0.4 m from its label (it was ~25 m).
 
 ## B · Lock the tools
 
-- [ ] **B1 · Exact Python package versions saved with hashes** (`requirements.lock`)
+- [x] **B1 · Exact Python package versions saved with hashes** (`requirements.lock`)
   - Check: a fresh install from it, then `pytest -q`, passes.
 - [x] **B2 · One file lists every other tool's version** (`toolchain.json`)
   - Check: preflight prints `OK` per tool, and a wrong version stops it.
