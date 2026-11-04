@@ -1,0 +1,763 @@
+{
+	"host": "unreal",
+	"spec_digest": "460442d09e89eeab3d0eb808f64b3a4b8f6a1a54d77169ae822c3a087fdfbbe2",
+	"airframe": "Cessna 172P Skyhawk (FlightGear c172p-team model) (FDM c172p)",
+	"mesh":
+	{
+		"name": "c172p",
+		"mesh_airframe": "Cessna 172P Skyhawk (FlightGear c172p-team model)",
+		"fdm": "c172p",
+		"license": "GPL-2.0",
+		"repo": "https://github.com/c172p-team/c172p",
+		"commit": "a15d83d1d56b5ecd9117ce83f5808c5a095f56c1"
+	},
+	"drawn":
+	{
+		"kind": "mesh",
+		"mesh_origin_actor_cm": [
+			-118.309,
+			0,
+			97.421999999999997
+		],
+		"manifest_version": 3,
+		"origin_basis": "measured from vertices: nose keypoint (x), main-gear contact (z)",
+		"triangles": 44266
+	},
+	"objects": [
+		{
+			"id": "aircraft:c172p:0",
+			"int_id": 1,
+			"class": "aircraft",
+			"class_id": 1,
+			"role": "primary",
+			"alone_pass": true
+		},
+		{
+			"id": "terrain",
+			"int_id": 2,
+			"class": "terrain",
+			"class_id": 2,
+			"role": "scene",
+			"alone_pass": false
+		}
+	],
+	"labels_id_source": "card objects[]",
+	"width": 320,
+	"height": 180,
+	"frames": 1,
+	"bound_surfaces": 7,
+	"surface_peak_deg":
+	{
+		"aileron_l": 0,
+		"aileron_r": 0,
+		"elevator_l": 4.2943553924560547,
+		"elevator_r": 4.2943553924560547,
+		"rudder": 0,
+		"flaps_l": 0,
+		"propeller": 359.9990234375
+	},
+	"camera_preset": "chase",
+	"camera_keeps_horizon_level": true,
+	"camera_consume_poses": true,
+	"camera_index": 0,
+	"render_settings":
+	{
+		"console":
+		{
+			"r.AntiAliasingMethod": "4",
+			"r.DynamicGlobalIlluminationMethod": "1",
+			"r.ReflectionMethod": "1",
+			"r.Lumen.HardwareRayTracing": "0",
+			"r.GenerateMeshDistanceFields": "1",
+			"r.Shadow.Virtual.Enable": "1",
+			"r.Nanite.ProjectEnabled": "1",
+			"r.Nanite": "1",
+			"r.CustomDepth": "3",
+			"r.ScreenPercentage": "0",
+			"r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange": "1",
+			"r.Substrate": "0",
+			"r.TextureStreaming": "0",
+			"r.Streaming.FullyLoadUsedTextures": "1",
+			"r.ForceLOD": "0",
+			"r.Velocity.ForceOutput": "0",
+			"r.EyeAdaptation.LensAttenuation": "0.78",
+			"r.UsePreExposure": "absent",
+			"r.VelocityOutputPass": "0",
+			"landscape.RenderNanite": "1",
+			"r.VirtualTextures": "1",
+			"r.MegaLights": "absent",
+			"r.MegaLights.EnableForProject": "0"
+		},
+		"anti_aliasing":
+		{
+			"beauty": "TSR",
+			"labels": "DEFECT: label capture anti-aliasing show flag is on"
+		},
+		"beauty_show_flags":
+		{
+			"anti_aliasing": true,
+			"temporal_aa": false,
+			"motion_blur": false,
+			"bloom": true,
+			"fog": true,
+			"atmosphere": true,
+			"volumetric_fog": true,
+			"cloud": true,
+			"depth_of_field": true,
+			"lens_flares": true,
+			"dynamic_shadows": true
+		},
+		"capture_size_px": [
+			320,
+			180
+		],
+		"screen_percentage": "captures render at capture_size_px; r.ScreenPercentage recorded in console",
+		"exposure_mode": "physical_sky",
+		"exposure_source": "-sky= plan (core/sky/plan.py) EV100",
+		"ev100": null,
+		"exposure_bias": 11,
+		"extend_default_luminance_range": "1",
+		"rhi": "D3D11",
+		"shader_platform": "PCD3D_SM5",
+		"working_colour_space": "sRGB / Rec.709 primaries, linear",
+		"deterministic_pins": true,
+		"cockpit_offset_m": [
+			-6,
+			-0.5,
+			1.6000000238418579
+		],
+		"chase_offset_m": [
+			-170,
+			0,
+			16
+		],
+		"wingman_offset_m": [
+			-45,
+			180,
+			0
+		],
+		"preset_offset_rule": "Python's (core/scenario/camera.py FALLBACK_CHASE_OFFSET, WINGMAN_OFFSET, SHOULDER_OFFSET): body offsets from the CG, unscaled; chase as flown is the shot constant or -chase="
+	},
+	"look_applied":
+	{
+		"sun":
+		{
+			"sun_elevation_deg": 12,
+			"engine_sun_yaw_deg": 180,
+			"component": "ADirectionalLight (existing sun)",
+			"cast_shadows": true,
+			"intensity": 8,
+			"light_units": "unitless",
+			"note": "the unitless 8.0 sun every Gate 6 clause was tuned on; no luminance chain describes it"
+		},
+		"aerosol":
+		{
+			"component": "USkyAtmosphereComponent::MieScatteringScale",
+			"mie_scattering_scale": 1,
+			"applied": false,
+			"note": "engine default 1.0; the fog row carries the extinction (applying look.aerosol as well double counts)"
+		},
+		"fog":
+		{
+			"fog_density": 0.0012000000569969416,
+			"component": "UExponentialHeightFogComponent::FogDensity",
+			"fog_height_falloff": 0.00020000000000000001,
+			"fog_max_opacity": 0.92000000000000004,
+			"start_distance_m": 1500
+		},
+		"clouds":
+		{
+			"component": "UVolumetricCloudComponent (LayerBottomAltitude / LayerHeight; coverage through the cloud material)",
+			"layers_requested": 0,
+			"drawn": false
+		},
+		"cloud_drift":
+		{
+			"cloud_drift_mps": 0,
+			"cloud_drift_from_deg": 0,
+			"applied": false,
+			"note": "not modelled this phase: no per-tick wind offset is written to the cloud material"
+		},
+		"night":
+		{
+			"stars_requested": false,
+			"moon_requested": false,
+			"stars": "not modelled",
+			"moon": "not modelled",
+			"night_sky": "the existing sun below the horizon only (sky atmosphere twilight)"
+		},
+		"not_claimed": [
+			"precipitation_particles",
+			"moon",
+			"stars",
+			"cloud_drift",
+			"sea_state",
+			"foliage_sway"
+		],
+		"precipitation":
+		{
+			"precipitation": "none",
+			"wetness": 0,
+			"particles": false,
+			"particles_note": "not drawn: the card carries no rain_particles block, or its mesh or material is absent",
+			"component": "Wetness scalar on the georeferenced terrain material instance",
+			"wetness_parameter": "not set (dry)",
+			"wetness_applied_to": "nothing (wetness 0)"
+		},
+		"terrain_material":
+		{
+			"tangents": "per vertex of every georeferenced tile: tangent X the raster's east direction in the surface (dP/du); bitangent +V (south, the row direction) by construction -- the engine's cross(N, T) is +Y, flipped exactly when the georeferencing puts north along +Y",
+			"north_axis_measured": "-Y",
+			"flip_tangent_y": false,
+			"version": 1,
+			"material": "/Game/FlightSim/M_TerrainImagery.M_TerrainImagery",
+			"sidecar": "C:\\Users\\kanth\\flightsim\\runs\\terrain\\grand_canyon_xplane_drape.json",
+			"applied": [
+				"Imagery"
+			],
+			"absent": [
+				"Roles",
+				"SnowCover",
+				"WaterMask",
+				"DetailValley",
+				"DetailScrub",
+				"DetailRock",
+				"DetailCliff",
+				"DetailSnow",
+				"NormalValley",
+				"NormalScrub",
+				"NormalRock",
+				"NormalCliff",
+				"NormalSnow",
+				"SnowAlbedo",
+				"SnowNormal",
+				"Noise",
+				"DetailMetresValley",
+				"DetailMetresScrub",
+				"DetailMetresRock",
+				"DetailMetresCliff",
+				"DetailMetresSnow",
+				"SnowMetres",
+				"NoiseMetres",
+				"DetailStrength",
+				"DetailFadeStartM",
+				"DetailFadeEndM",
+				"SnowSlopeLowCos",
+				"SnowSlopeHighCos",
+				"SnowBand",
+				"RoughnessValley",
+				"RoughnessScrub",
+				"RoughnessRock",
+				"RoughnessCliff",
+				"RoughnessSnow",
+				"RoughnessWater"
+			],
+			"missing_files": [],
+			"not_in_sidecar": [],
+			"textures":
+			{
+				"Imagery":
+				{
+					"file": "C:\\Users\\kanth\\flightsim\\runs\\terrain/grand_canyon_xplane_base.png",
+					"width": 2406,
+					"height": 2418,
+					"mips": 1,
+					"srgb": true,
+					"texel": "albedo (sRGB)",
+					"uv": "the composite's UV0 (clamp)"
+				}
+			},
+			"scalars":
+			{
+			},
+			"imagery_source": "material.textures.imagery",
+			"not_claimed": "the material's graph (the detail, snow, water and roughness rules) is scripts/ue_create_materials.py's; that each map reads as intended, that every in-memory mip uploads, and the extracted normals' green convention against +V are the first Windows build's measurements; no normal is extracted for any ground texture yet"
+		},
+		"weather":
+		{
+			"asked": false
+		},
+		"cloud_materials": [
+			"cloud VolumetricCloudComponent (VolumetricCloud_0): /Engine/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.m_SimpleVolumetricCloud_Inst, domain 3, used_with_volumetric_cloud yes, compiled"
+		],
+		"source": "flags (the card carries no look block)",
+		"probe_overrides": [],
+		"exposure":
+		{
+			"mode": "physical_sky",
+			"source": "-sky= plan (core/sky/plan.py) EV100",
+			"ev100": null
+		}
+	},
+	"georeference":
+	{
+		"geographic_crs": "EPSG:4326",
+		"projected_crs": "EPSG:32612",
+		"origin":
+		{
+			"lat_deg": 36.090000000000003,
+			"lon_deg": -112,
+			"x_m": 409973.48382695805,
+			"y_m": 3994393.6505528041
+		},
+		"vertical_convention": "orthometric heights passed to AGeoReferencingSystem as ellipsoidal; engine ECEF radially low by undulation_origin_m",
+		"undulation_origin_m": -23.403480000000002
+	},
+	"google_tiles":
+	{
+		"enabled": true,
+		"source": "Google Photorealistic 3D Tiles via Cesium for Unreal",
+		"route": "Cesium ion",
+		"ion_asset_id": 2275207,
+		"maximum_screen_space_error": 8,
+		"origin_lat_deg": 36.090000000000003,
+		"origin_lon_deg": -112,
+		"origin_ellipsoidal_height_m": 1316.5965200000001,
+		"undulation_used_m": -23.403480000000002,
+		"hidden_scene_ground_actors": 2,
+		"frames_waited": 1,
+		"longest_wait_s": 1.4021626971662045,
+		"total_wait_s": 1.4021626971662045,
+		"tileset_reloads": 0,
+		"attribution": "Imagery and 3D data: Google. Per-tile data-provider credits are shown by Cesium on screen and are not drawn into these frames; the Google Maps Platform terms govern display, attribution, caching and any derived use of these images.",
+		"not_claimed": "the tiles' surface agrees with the baked heightfield the physics and the labels' geometry use; the ground in the pixels is Google's, the ground the checks use is the bake"
+	},
+	"scene":
+	{
+		"visual": true,
+		"shot": "showcase",
+		"dynamic_shadows": true,
+		"aircraft_hidden": false,
+		"render_quality": "beauty",
+		"warmup_captures": 16,
+		"cvar_anti_aliasing_method": 4,
+		"cvar_virtual_shadow_maps": 1,
+		"gi_reflections": "Lumen GI + Lumen reflections (capture post-process override)",
+		"exposure": "manual physical camera, EV100 15.01 (f/4.0, 1/60 s, ISO 100, bias -5.10)",
+		"physical_sky": true,
+		"sky":
+		{
+			"plan": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\7237db488652\\sky.json",
+			"instant_utc": "2026-03-20T19:36:00+00:00",
+			"sun_azimuth_deg": 180.2679,
+			"sun_elevation_deg": 54.003799999999998,
+			"sun_illuminance_lux": 120000,
+			"moon_azimuth_deg": 137.7313,
+			"moon_elevation_deg": 59.901400000000002,
+			"moon_illuminated_fraction": 0.041500000000000002,
+			"moon_above_horizon": true,
+			"stars_drawn": 0,
+			"clouds_drawn": true,
+			"clouds_note": "UE simple volumetric cloud layer (VISUAL ONLY)",
+			"ev100": 15.009,
+			"global_illumination": "lumen",
+			"reflections": "lumen",
+			"shadows": "virtual shadow maps",
+			"post_process": "external",
+			"warmup_captures": 16,
+			"night_lights_sha256": "",
+			"night_lights_attribution": "",
+			"night_lights_note": "none in the sky plan"
+		},
+		"terrain_sha256": "354cd02e9efdf7ef090df725b8027a924f1d931046aba1a0d10744d29143e21b",
+		"terrain_peak_m": 2650.7109375,
+		"terrain_georeferenced": true,
+		"terrain_crs": "EPSG:32612",
+		"terrain_name": "grand_canyon",
+		"terrain_posting_m": 30,
+		"terrain_stride": 1,
+		"terrain_tiles": 16,
+		"terrain_triangles": 1289610,
+		"terrain_material": "true-colour satellite imagery drape (see imagery_* fields; acquisition-date and resolution limits in VALIDITY.md)",
+		"imagery_dataset": "Local simulator-derived ground textures, tiled by a slope/height classification (approximated)",
+		"imagery_file": "grand_canyon_xplane_drape.png",
+		"imagery_sha256": "80ec9bf6212d40bd8562732aa5fffef26d6efe9a81e9e6dfb5bb2da5e42b3c25",
+		"imagery_license": "Local simulator-derived texture set",
+		"imagery_attribution": "Ground textures and water colour: local simulator-derived data; Snow cover: NASA Earth Observations, MODIS/Terra MOD10C1 monthly snow cover (NSIDC), via the local simulator's Snow Cover bitmaps",
+		"physics_ground": "flat slab at spec terrain_elevation; visual terrain carries no collision",
+		"livery": "default",
+		"fog_density": 0.0011999999999999999,
+		"sun_animated": false,
+		"camera_preset": "chase",
+		"camera_inherits_roll": false
+	},
+	"environment":
+	{
+		"turbulence": "none",
+		"wind_speed_kt": 0,
+		"wind_from_deg": 0,
+		"wind_schedule": false,
+		"orographic": false,
+		"downburst": false,
+		"rotor": false,
+		"log_profile": false,
+		"thermals": false,
+		"turbulence_schedule": false,
+		"orographic_follow_schedule": false
+	},
+	"frame_records": [
+		{
+			"frame": "frame_0000.png",
+			"sha256": "07918f5163b9f7bb1632a7aab250220d706bd5fb40d17f1645d522211469b956",
+			"deterministic_pins": true,
+			"t": 0.0083333333329999992,
+			"roll_deg": 9.9474092296118841e-07,
+			"pitch_deg": 0.39384126789518409,
+			"aileron_cmd": 0,
+			"camera_roll_deg": 0,
+			"labels":
+			{
+				"mask": "frame_0000_mask.png",
+				"class_mask": "frame_0000_class.png",
+				"depth": "frame_0000_depth.png",
+				"depth_scale_m": 0.10000000000000001,
+				"depth_saturation_m": 6553.5,
+				"silhouette_pixels": 1084,
+				"visible_pixels": 1084,
+				"occlusion_fraction": 0,
+				"classes": "0 sky, 1 aircraft, 2 terrain, 3 building, 4 vegetation, 5 water, 6 cloud, 7 payload, 8 landing_gear",
+				"method": "depth ownership: show-only depth per int_id against the scene depth; alone pass per aircraft",
+				"depth_f32": "frame_0000_depth.f32",
+				"anti_aliasing": "none",
+				"id_source": "card objects[]",
+				"unlabelled_geometry_pixels": 0,
+				"non_integer_id_pixels": 0,
+				"objects": [
+					{
+						"id": "aircraft:c172p:0",
+						"int_id": 1,
+						"class_id": 1,
+						"pixels": 1084,
+						"pixels_alone": 1084,
+						"alone_png": "frame_0000_alone_1.png",
+						"visible_fraction": 1,
+						"occluded_by": [],
+						"depth_min_m": 22.1046142578125,
+						"depth_median_m": 27.059994697570801
+					},
+					{
+						"id": "terrain",
+						"int_id": 2,
+						"class_id": 2,
+						"pixels": 47109,
+						"pixels_alone": null,
+						"alone_png": null,
+						"visible_fraction": null,
+						"occluded_by": [],
+						"depth_min_m": 708.70147705078125,
+						"depth_median_m": 3161.0009765625
+					}
+				]
+			},
+			"camera_index": 0,
+			"camera_applied_north_m": -27.490488256793469,
+			"camera_applied_east_m": -1.4335509467637166,
+			"camera_applied_alt_m": 2004.0000010216609,
+			"camera_applied_yaw_deg": 3.0000001622504442,
+			"camera_grid_convergence_deg": -0.58910448350955835,
+			"camera_applied_pitch_deg": -8.1301023541559534,
+			"camera_applied_roll_deg": 0,
+			"lit_pixels": 40042,
+			"n_z": 0.99846619729999997,
+			"wind_down_fps": -4.5400871109999997e-14,
+			"turb_down_fps": 0,
+			"w20_fps": 0,
+			"altitude_m": 2000.0000010000001,
+			"cas_kt": 99.999999829999993,
+			"tas_kt": 110.2331009,
+			"heading_deg": 3.000000161583845,
+			"agl_m": 659.61046142160001,
+			"wind_north_fps": 5.5990767580000003e-12,
+			"wind_east_fps": 2.948752353e-13,
+			"surface_component_deg":
+			{
+				"aileron_l": -0,
+				"aileron_r": 0,
+				"elevator_l": 4.2943553924560547,
+				"elevator_r": -4.2943553924560547,
+				"rudder": -0,
+				"flaps_l": 0,
+				"propeller": 117.89891815185547
+			},
+			"landmarks":
+			{
+				"air_0_40_l":
+				{
+					"visible": false,
+					"px": -273.66133344864494,
+					"py": 89.337965364940615
+				},
+				"air_0_40_r":
+				{
+					"visible": false,
+					"px": 606.44077268032288,
+					"py": 90.628195992406617
+				},
+				"air_0_40_u":
+				{
+					"visible": false,
+					"px": 160.00006810545244,
+					"py": -454.06950536186605
+				},
+				"air_0_40_d":
+				{
+					"visible": false,
+					"px": 160.00002385647787,
+					"py": 452.75735355828459
+				},
+				"air_0_400_l":
+				{
+					"visible": false,
+					"px": -3681.5420150459104,
+					"py": 84.459987463185655
+				},
+				"air_0_400_r":
+				{
+					"visible": false,
+					"px": 5306.5623206560404,
+					"py": 97.676637163255037
+				},
+				"air_0_400_u":
+				{
+					"visible": false,
+					"px": -1,
+					"py": -1
+				},
+				"air_0_400_d":
+				{
+					"visible": false,
+					"px": 159.99997071989199,
+					"py": 1541.5466978550462
+				},
+				"ground_0":
+				{
+					"visible": false,
+					"px": 159.99996001762145,
+					"py": 1760.8476185775485
+				},
+				"air_1_40_l":
+				{
+					"visible": true,
+					"px": 120.41312078639267,
+					"py": 49.533654404339849
+				},
+				"air_1_40_r":
+				{
+					"visible": true,
+					"px": 182.75189137363768,
+					"py": 49.451361562640088
+				},
+				"air_1_40_u":
+				{
+					"visible": true,
+					"px": 151.79286508788636,
+					"py": 17.541018720559471
+				},
+				"air_1_40_d":
+				{
+					"visible": true,
+					"px": 152.02267490929069,
+					"py": 80.548655248499401
+				},
+				"air_1_400_l":
+				{
+					"visible": false,
+					"px": -196.26396695806747,
+					"py": 49.962617856481053
+				},
+				"air_1_400_r":
+				{
+					"visible": false,
+					"px": 433.98456111966073,
+					"py": 49.128559280130752
+				},
+				"air_1_400_u":
+				{
+					"visible": false,
+					"px": 150.57055832564322,
+					"py": -317.58243144636765
+				},
+				"air_1_400_d":
+				{
+					"visible": false,
+					"px": 152.91543047583323,
+					"py": 325.31808204356889
+				},
+				"ground_1":
+				{
+					"visible": false,
+					"px": 152.80804973235738,
+					"py": 295.87718693625857
+				},
+				"air_2_40_l":
+				{
+					"visible": true,
+					"px": 99.815653140173893,
+					"py": 52.582332641682328
+				},
+				"air_2_40_r":
+				{
+					"visible": true,
+					"px": 131.15240909481588,
+					"py": 52.275394200221612
+				},
+				"air_2_40_u":
+				{
+					"visible": true,
+					"px": 115.50623402363861,
+					"py": 35.925240900272101
+				},
+				"air_2_40_d":
+				{
+					"visible": true,
+					"px": 116.1593165922516,
+					"py": 68.68351759386465
+				},
+				"air_2_400_l":
+				{
+					"visible": false,
+					"px": -86.005559329782244,
+					"py": 54.40897761609358
+				},
+				"air_2_400_r":
+				{
+					"visible": true,
+					"px": 243.76795887379694,
+					"py": 51.176498762272672
+				},
+				"air_2_400_u":
+				{
+					"visible": false,
+					"px": 112.30950977113355,
+					"py": -124.42075910160696
+				},
+				"air_2_400_d":
+				{
+					"visible": false,
+					"px": 118.8758102610425,
+					"py": 204.9414051685383
+				},
+				"ground_2":
+				{
+					"visible": false,
+					"px": 127.82487682350171,
+					"py": 653.82185705336235
+				},
+				"air_3_40_l":
+				{
+					"visible": true,
+					"px": 45.067507653618541,
+					"py": 59.439663216451663
+				},
+				"air_3_40_r":
+				{
+					"visible": true,
+					"px": 64.807131703698843,
+					"py": 58.616723808503266
+				},
+				"air_3_40_u":
+				{
+					"visible": true,
+					"px": 54.679784415307999,
+					"py": 47.211974771186966
+				},
+				"air_3_40_d":
+				{
+					"visible": true,
+					"px": 55.793578632620822,
+					"py": 70.694450908775465
+				},
+				"air_3_400_l":
+				{
+					"visible": false,
+					"px": -86.905744503882374,
+					"py": 64.946866190403625
+				},
+				"air_3_400_r":
+				{
+					"visible": true,
+					"px": 130.72378193285002,
+					"py": 55.871478286248845
+				},
+				"air_3_400_u":
+				{
+					"visible": false,
+					"px": 49.358568760665484,
+					"py": -64.976899699202306
+				},
+				"air_3_400_d":
+				{
+					"visible": true,
+					"px": 60.527683589031795,
+					"py": 170.50508463511446
+				},
+				"ground_3":
+				{
+					"visible": false,
+					"px": 76.880291858713775,
+					"py": 515.2723024092661
+				},
+				"terrain_nw":
+				{
+					"visible": false,
+					"px": -140.20413543186578,
+					"py": 99.907972621105856
+				},
+				"terrain_ne":
+				{
+					"visible": false,
+					"px": 470.39239220432023,
+					"py": 58.445947310686726
+				},
+				"terrain_sw":
+				{
+					"visible": false,
+					"px": -1,
+					"py": -1
+				},
+				"terrain_se":
+				{
+					"visible": false,
+					"px": -1,
+					"py": -1
+				},
+				"terrain_peak":
+				{
+					"visible": true,
+					"px": 146.24251852575802,
+					"py": 26.7359907555348
+				},
+				"near_peak":
+				{
+					"visible": true,
+					"px": 146.24251852575802,
+					"py": 26.7359907555348
+				},
+				"far_peak":
+				{
+					"visible": false,
+					"px": 159.98158039928197,
+					"py": 1767.6924244413851
+				},
+				"valley":
+				{
+					"visible": true,
+					"px": 146.16757433642235,
+					"py": 85.199610207615166
+				},
+				"aircraft_ground":
+				{
+					"visible": false,
+					"px": 159.93592307545691,
+					"py": 1746.1755922239047
+				}
+			},
+			"applied_focal_length_mm": 35,
+			"applied_sensor_width_mm": 36,
+			"applied_fov_deg": 54.432224273681641,
+			"applied_width_px": 320,
+			"applied_height_px": 180
+		}
+	],
+	"telemetry": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\7237db488652\\frames\\chase\\host_telemetry.json"
+}

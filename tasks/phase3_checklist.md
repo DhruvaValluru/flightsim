@@ -72,7 +72,7 @@ sitting 0.4 m from its label (it was ~25 m).
   - Check: an empty camera stops with `render.camera_empty`.
 - [ ] **A10 · Generate works in the web app** 🪟
   - Check: a one-line prompt on `/generate.html` finishes a campaign.
-- [ ] **A11 · The engine writes the label pictures; missing ones fail loudly** 🪟
+- [x] **A11 · The engine writes the label pictures; missing ones fail loudly** 🪟
   - Check: every `render.json` has the mask, depth and an "alone" picture per aircraft.
   - Check: a run with missing label pictures stops with `labels.no_bundle`.
 - [ ] **A12 · All seven label checks pass; one real frame saved as a test** 🪟
