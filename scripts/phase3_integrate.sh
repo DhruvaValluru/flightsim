@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase 3 integrator, the mechanical half (owner's rule 2026-11-04: the model
 # reviews fit; this script merges, tests, checks guards, cleans up).
-#   bash scripts/phase3_integrate.sh <box> <pytest paths...>
+#   [BRANCH=p3-<box>r] bash scripts/phase3_integrate.sh <box> <pytest paths...>
 # Runs from the MAIN checkout on phase-2-final. Merges branch p3-<box> with
 # --no-ff, runs the given tests (never the suite), checks the mutation guards
 # whose target files the merge touched (--check-targets), runs the diff guard,
@@ -15,9 +15,16 @@ root="$(cd "$(dirname "$0")/.." && pwd)"; cd "$root"
 py="$root/.venv/bin/python"
 log() { python3 scripts/phase3_event.py log --agent integrator --box "$box" --stage build --note "$1" >/dev/null; }
 step() { echo "== $1"; }
-branch="p3-$box"
+branch="${BRANCH:-p3-$box}"
 git rev-parse --verify -q "$branch" >/dev/null || { echo "FAIL no branch $branch"; exit 2; }
 [ "$(git branch --show-current)" = "phase-2-final" ] || { echo "FAIL not on phase-2-final"; exit 2; }
+if ! git diff --quiet -- docs/phase3 || ! git diff --cached --quiet -- docs/phase3; then
+  git add docs/phase3 && git commit -qm "Phase 3: bookkeeping before merging $branch
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TYf9hdwcEyKovqfAJKwdzh" >/dev/null
+fi
+if ! git diff --quiet || ! git diff --cached --quiet; then echo "FAIL dirty working tree outside docs/phase3"; git status --short; exit 2; fi
 base="$(git merge-base HEAD "$branch")"
 step "merge $branch --no-ff"
 if ! git merge --no-ff "$branch" -m "Merge $branch: $box
@@ -48,7 +55,7 @@ if [ -n "$labels" ]; then
   if ! bash scripts/mutation_check.sh --check-targets --match "$labels"; then echo "FAIL a guard target no longer matches; retarget it in scripts/mutation_check.sh"; exit 6; fi
 else echo "   no guards target the touched files"; fi
 step "cleanup"
-git worktree remove --force "../p3-$box" 2>/dev/null || true
+git worktree remove --force "../${branch}" 2>/dev/null || true
 python3 scripts/phase3_state.py set "$box" stage=integrated integrated_commit="\"$merge\"" >/dev/null
 log "integrate.sh $box: merged $merge, tests exit 0, guard targets ok, diff guard clean"
 echo "OK $box integrated as $merge"
