@@ -59,6 +59,6 @@
     }
   ],
   "library_win64": "Source/ThirdParty/JSBSim/Lib/JSBSim.dll",
-  "library_win64_sha256": "853d8bc6e6eac5af553267e03d56a3506f4c96fa373134a252e20b1b42d2e827",
+  "library_win64_sha256": "e7c302ecb931c2d069d15ce2ded237473b5ad985c643d3a41357fcf2b340f540",
   "library_win64_built_with": "upstream JSBSimForUnreal.sln via MSBuild (not a reimplementation)"
 }

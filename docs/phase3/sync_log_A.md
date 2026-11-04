@@ -553,3 +553,535 @@ b9c8d830 A4: refuse a stale engine binary (build stamp, plugin source hash, engi
  10 files changed, 228 insertions(+)
 ```
 
+
+---
+
+# Run A-2 · UE 5.7 restart (decision 10, Mac push 23bad766)
+
+The owner moved the pin to 5.7 and asked for every letter A box to be proved
+again from scratch. The run A-1 records above were measured on UE 5.5.4 and
+are history; A1 stays `cut` (decision 9). Records below are run A-2 on
+UE 5.7.4 (changelist 51494982), Cesium for Unreal 2.30.0 in the engine.
+
+## C1 · PASS · run A-2 · 2026-11-04T15:59:06Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+123:   - Check: the A-4 loads with at least one payload, and the plane still trims with
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/C1-pytest-v.log: ============================== 6 passed in 1.80s ==============================
+runs/p3/A-2/C1-pytest-v.log: tests/test_airframe.py::test_components_loadout_trims PASSED
+```
+
+note: run A-2: same tests as run A-1, now on the 5.7 pin sweep; python-only box, no engine involved
+
+### synopsis
+
+# C1 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T15:59:05Z
+
+## C1 verify (test names): pytest -v tests/test_airframe.py -k components
+
+- log: `runs/p3/A-2/C1-pytest-v.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-8.4.2, pluggy-1.6.0
+rootdir: C:\Users\kanth\flightsim
+configfile: pytest.ini
+plugins: anyio-4.14.2, timeout-2.3.1
+timeout: 900.0s
+timeout method: thread
+timeout func_only: False
+collected 6 items
+
+tests\test_airframe.py ......                                            [100%]
+
+============================== 6 passed in 1.80s ==============================
+            [JSBSim-ML v2.0]
+
+JSBSim startup beginning ...
+
+```
+
+note: run A-2 on the 5.7 pin sweep (23bad766); 6 passed incl. test_components_loadout_trims
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+42183a30 Phase 3 letter A, run A-1: A3, C1, C5, C6 PASS; A1 cut (decision 9); synopses and log
+6375569e Merge p3-C1: components block, A-4 default loadout (3 x 750 lb on STA2-4), aircraft.component_unmatched
+6cf3a3fc Merge branch 'phase-2-final' into p3-C1
+8831a3df C1: components block, default loadout (750 lb on STA2-4), component_unmatched refusal
+
+42183a30 Phase 3 letter A, run A-1: A3, C1, C5, C6 PASS; A1 cut (decision 9); synopses and log
+
+ docs/PHASE3_LOG.md                 |  29 +++
+ docs/phase3/decisions.md           |   2 +
+ docs/phase3/events_windows.log     |  17 ++
+ docs/phase3/packets/A1-1.md        |  27 +++
+ docs/phase3/packets/A2-synopsis.md | 117 +++++++++++
+ docs/phase3/packets/A3-synopsis.md | 122 +++++++++++
+ docs/phase3/packets/C1-synopsis.md |  47 +++++
+ docs/phase3/packets/C5-synopsis.md |  18 ++
+ docs/phase3/packets/C6-synopsis.md |  40 ++++
+ docs/phase3/state/A1.json          |   5 +-
+ docs/phase3/state/A3.json          |   4 +-
+ docs/phase3/state/C1.json          |   4 +-
+ docs/phase3/state/C5.json          |   4 +-
+ docs/phase3/state/C6.json          |   4 +-
+ docs/phase3/sync_log_A.md          | 409 +++++++++++++++++++++++++++++++++++++
+ tasks/phase3_checklist.md          |   8 +-
+ 16 files changed, 848 insertions(+), 9 deletions(-)
+
+6375569e Merge p3-C1: components block, A-4 default loadout (3 x 750 lb on STA2-4), aircraft.component_unmatched
+
+ assets/aircraft_config/A4.json                     |  79 +++++++++++---
+ assets/fdm_root/aircraft/A4/A4.xml                 |   6 +-
+ assets_pipeline/a4_performance.py                  |  11 +-
+ assets_pipeline/a4_sync.py                         |   8 +-
+ core/capture/airframe.py                           | 115 ++++++++++++++++++++-
+ core/messages/catalog.yaml                         |   3 +
+ docs/phase3/notes/C1.md                            |   4 +
+ tests/test_a4.py                                   |  14 ++-
+ tests/test_airframe.py                             |  99 ++++++++++++++++++
+ .../Resources/JSBSim/aircraft/A4/A4.xml            |   6 +-
+ 10 files changed, 316 insertions(+), 29 deletions(-)
+
+6cf3a3fc Merge branch 'phase-2-final' into p3-C1
+
+ README.md                                          |   4 +-
+ core/util/platform.py                              |  28 +++---
+ docs/CAMERA_WINDOWS.md                             |   3 +-
+ scripts/build_ue.ps1                               |  25 +++--
+ scripts/build_ue.sh                                |   6 +-
+ scripts/check_bridge_api.sh                        |   2 +-
+ scripts/deploy_windows.ps1                         |   2 +-
+ scripts/mutation_check.sh                          |  14 +--
+ scripts/render_ue_scenario.sh                      |   2 +-
+ scripts/run_ue_scenario.sh                         |   2 +-
+ scripts/setup.ps1                                  |   2 +-
+ scripts/setup.sh                                   |   2 +-
+ scripts/ue_create_materials.py                     |   2 +-
+ scripts/ue_engine.ps1                              |  50 ++++++++++
+ scripts/ue_preflight.ps1                           |  56 +++++------
+ scripts/ue_preflight.sh                            |   6 +-
+ scripts/vendor_ue_plugin.ps1                       |  14 ++-
+ scripts/vendor_ue_plugin.sh                        |   8 +-
+ tests/test_gate6_visual.py                         |   3 +-
+ tests/test_platform.py                             | 104 +++++++++++++++------
+ tests/test_powershell_scripts.py                   |  60 ++++++++++++
+ tests/test_toolchain_doc.py                        |  49 ++++++++++
+ tests/test_ue_materials.py                         |  23 +++++
+ tests/test_ue_weather_source.py                    |  11 +++
+ tests/test_webapp_generate.py                      |  59 ++++++++++++
+ ue/FlightSim.uproject                              |   2 +-
+ .../Private/FlightSimRenderCommandlet.cpp          |   2 +-
+ .../FlightSimBridge/Private/FlightSimWeather.cpp   |  19 +++-
+ ue/Source/FlightSim.Target.cs                      |   2 +-
+ ue/Source/FlightSimEditor.Target.cs                |   2 +-
+ webapp/generate.py                                 |  11 +++
+ 31 files changed, 439 insertions(+), 136 deletions(-)
+
+8831a3df C1: components block, default loadout (750 lb on STA2-4), component_unmatched refusal
+
+ assets/aircraft_config/A4.json                     |  79 +++++++++++---
+ assets/fdm_root/aircraft/A4/A4.xml                 |   6 +-
+ assets_pipeline/a4_performance.py                  |  11 +-
+ assets_pipeline/a4_sync.py                         |   8 +-
+ core/capture/airframe.py                           | 115 ++++++++++++++++++++-
+ core/messages/catalog.yaml                         |   3 +
+ docs/phase3/notes/C1.md                            |   4 +
+ tests/test_a4.py                                   |  14 ++-
+ tests/test_airframe.py                             |  99 ++++++++++++++++++
+ .../Resources/JSBSim/aircraft/A4/A4.xml            |   6 +-
+ 10 files changed, 316 insertions(+), 29 deletions(-)
+```
+
+## C5 · PASS · run A-2 · 2026-11-04T15:59:06Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+133:   - Check: `pytest -q tests/test_component_labels.py` passes for five cases: visible,
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/C5-pytest.log: ...........                                                              [100%]  (11 passed, exit 0)
+```
+
+note: run A-2 on 23bad766
+
+### synopsis
+
+# C5 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T15:59:05Z
+
+## C5 verify: pytest -q tests/test_component_labels.py
+
+- log: `runs/p3/A-2/C5-pytest.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+...........                                                              [100%]
+```
+
+note: run A-2 on 23bad766; 11 dots, no F
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+42183a30 Phase 3 letter A, run A-1: A3, C1, C5, C6 PASS; A1 cut (decision 9); synopses and log
+d8d29d82 Merge p3-C5: component labels (payload, landing_gear), parent rollup, manifest v8
+21c6787d Merge branch 'phase-2-final' into p3-C5
+b135d207 C5: component label records, parent rollup, manifest v8
+
+42183a30 Phase 3 letter A, run A-1: A3, C1, C5, C6 PASS; A1 cut (decision 9); synopses and log
+
+ docs/PHASE3_LOG.md                 |  29 +++
+ docs/phase3/decisions.md           |   2 +
+ docs/phase3/events_windows.log     |  17 ++
+ docs/phase3/packets/A1-1.md        |  27 +++
+ docs/phase3/packets/A2-synopsis.md | 117 +++++++++++
+ docs/phase3/packets/A3-synopsis.md | 122 +++++++++++
+ docs/phase3/packets/C1-synopsis.md |  47 +++++
+ docs/phase3/packets/C5-synopsis.md |  18 ++
+ docs/phase3/packets/C6-synopsis.md |  40 ++++
+ docs/phase3/state/A1.json          |   5 +-
+ docs/phase3/state/A3.json          |   4 +-
+ docs/phase3/state/C1.json          |   4 +-
+ docs/phase3/state/C5.json          |   4 +-
+ docs/phase3/state/C6.json          |   4 +-
+ docs/phase3/sync_log_A.md          | 409 +++++++++++++++++++++++++++++++++++++
+ tasks/phase3_checklist.md          |   8 +-
+ 16 files changed, 848 insertions(+), 9 deletions(-)
+
+d8d29d82 Merge p3-C5: component labels (payload, landing_gear), parent rollup, manifest v8
+
+ core/capture/labels.py                       |  126 +-
+ core/capture/manifest.py                     |   15 +-
+ core/capture/objects.py                      |   28 +-
+ core/scenario/blocks.py                      |    2 +-
+ docs/schemas/capture_manifest.v8.schema.json | 2059 ++++++++++++++++++++++++++
+ tests/test_camera_labels.py                  |    5 +-
+ tests/test_capture_objects.py                |    5 +-
+ tests/test_capture_schema.py                 |    4 +-
+ tests/test_component_labels.py               |  180 +++
+ tests/test_versions.py                       |    2 +-
+ 10 files changed, 2406 insertions(+), 20 deletions(-)
+
+21c6787d Merge branch 'phase-2-final' into p3-C5
+
+ README.md                                          |    4 +-
+ assets/aircraft_config/A4.json                     |   79 +-
+ assets/fdm_root/aircraft/A4/A4.xml                 |    6 +-
+ assets_pipeline/a4_performance.py                  |   11 +-
+ assets_pipeline/a4_sync.py                         |    8 +-
+ core/capture/airframe.py                           |  115 +-
+ core/messages/catalog.yaml                         |    3 +
+ core/util/platform.py                              |   28 +-
+ docs/CAMERA_WINDOWS.md                             |    3 +-
+ docs/phase3/BUILDER_BRIEF.md                       |   52 +
+ docs/phase3/INTEGRATOR_BRIEF.md                    |   52 +
+ docs/phase3/SUBAGENT_BRIEF.md                      |   47 +
+ docs/phase3/digest_A.md                            | 1260 ++++++++++++++++++++
+ docs/phase3/events_mac.log                         |  239 ++++
+ docs/phase3/notes/A1.md                            |   55 +
+ docs/phase3/notes/A10.md                           |   50 +
+ docs/phase3/notes/A11.md                           |   59 +
+ docs/phase3/notes/A12.md                           |   58 +
+ docs/phase3/notes/A13.md                           |   44 +
+ docs/phase3/notes/A2.md                            |   79 ++
+ docs/phase3/notes/A3.md                            |   69 ++
+ docs/phase3/notes/A4.md                            |   85 ++
+ docs/phase3/notes/A5.md                            |   58 +
+ docs/phase3/notes/A6.md                            |   59 +
+ docs/phase3/notes/A7.md                            |   64 +
+ docs/phase3/notes/A8.md                            |   61 +
+ docs/phase3/notes/A9.md                            |   60 +
+ docs/phase3/notes/C1.md                            |   64 +
+ docs/phase3/notes/C5.md                            |   68 ++
+ docs/phase3/notes/C6.md                            |   65 +
+ docs/phase3/state/A.json                           |   41 +
+ docs/phase3/state/A1.json                          |   15 +
+ docs/phase3/state/A10.json                         |   15 +
+ docs/phase3/state/A11.json                         |    7 +
+ docs/phase3/state/A12.json                         |   24 +
+ docs/phase3/state/A13.json                         |   10 +
+ docs/phase3/state/A2.json                          |   16 +
+ docs/phase3/state/A3.json                          |   17 +
+ docs/phase3/state/A4.json                          |   18 +
+ docs/phase3/state/A5.json                          |   18 +
+ docs/phase3/state/A6.json                          |   17 +
+ docs/phase3/state/A7.json                          |    7 +
+ docs/phase3/state/A8.json                          |    7 +
+ docs/phase3/state/A9.json                          |    7 +
+ docs/phase3/state/A_decisions_needed.md            |   15 +
+ docs/phase3/state/C1.json                          |   14 +
+ docs/phase3/state/C5.json                          |   23 +
+ docs/phase3/state/C6.json                          |    7 +
+ scripts/build_ue.ps1                               |   25 +-
+ scripts/build_ue.sh                                |    6 +-
+ scripts/check_bridge_api.sh                        |    2 +-
+ scripts/deploy_windows.ps1                         |    2 +-
+ scripts/mutation_check.sh                          |   14 +-
+ scripts/phase3_digest.py                           |  149 +++
+ scripts/phase3_event.py                            |    5 +-
+ scripts/phase3_state.py                            |  110 ++
+ scripts/render_ue_scenario.sh                      |    2 +-
+ scripts/run_ue_scenario.sh                         |    2 +-
+ scripts/setup.ps1                                  |    2 +-
+ scripts/setup.sh                                   |    2 +-
+ scripts/ue_create_materials.py                     |    2 +-
+ scripts/ue_engine.ps1                              |   50 +
+ scripts/ue_preflight.ps1                           |   56 +-
+ scripts/ue_preflight.sh                            |    6 +-
+ scripts/vendor_ue_plugin.ps1                       |   14 +-
+ scripts/vendor_ue_plugin.sh                        |    8 +-
+ tests/test_a4.py                                   |   14 +-
+ tests/test_airframe.py                             |   99 ++
+ tests/test_gate6_visual.py                         |    3 +-
+ tests/test_platform.py                             |  104 +-
+ tests/test_powershell_scripts.py                   |   60 +
+ tests/test_toolchain_doc.py                        |   49 +
+ tests/test_ue_materials.py                         |   23 +
+ tests/test_ue_weather_source.py                    |   11 +
+ tests/test_webapp_generate.py                      |   59 +
+ ue/FlightSim.uproject                              |    2 +-
+ .../Private/FlightSimRenderCommandlet.cpp          |    2 +-
+ .../FlightSimBridge/Private/FlightSimWeather.cpp   |   19 +-
+ .../Resources/JSBSim/aircraft/A4/A4.xml            |    6 +-
+ ue/Source/FlightSim.Target.cs                      |    2 +-
+ ue/Source/FlightSimEditor.Target.cs                |    2 +-
+ webapp/generate.py                                 |   11 +
+ 82 files changed, 3940 insertions(+), 166 deletions(-)
+
+b135d207 C5: component label records, parent rollup, manifest v8
+
+ core/capture/labels.py                       |  126 +-
+ core/capture/manifest.py                     |   15 +-
+ core/capture/objects.py                      |   28 +-
+ core/scenario/blocks.py                      |    2 +-
+ docs/schemas/capture_manifest.v8.schema.json | 2059 ++++++++++++++++++++++++++
+ tests/test_camera_labels.py                  |    5 +-
+ tests/test_capture_objects.py                |    5 +-
+ tests/test_capture_schema.py                 |    4 +-
+ tests/test_component_labels.py               |  180 +++
+ tests/test_versions.py                       |    2 +-
+ 10 files changed, 2406 insertions(+), 20 deletions(-)
+```
+
+## C6 · PASS · run A-2 · 2026-11-04T15:59:07Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+137:   - Check: `component_coverage` passes, and a COCO export has a `payload` category.
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/C6-pytest.log: 55 dots [100%], exit 0 (pytest -q -k component)
+runs/p3/A-2/C6-coco.log: ================ 1 passed, 12 deselected, 36 warnings in 6.78s ================ (test_payload_and_gear_are_their_own_coco_categories)
+```
+
+note: run A-2 on 23bad766; mutant half: the Mac auditor's subset in state/A.json
+
+### synopsis
+
+# C6 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T15:59:05Z
+
+## C6 verify: pytest -q -k component
+
+- log: `runs/p3/A-2/C6-pytest.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+...........................                                              [100%]
+============================== warnings summary ===============================
+tests/test_annotation_gates.py: 12 warnings
+tests/test_dataset_boxes.py: 6 warnings
+  C:\Users\kanth\flightsim\tests\test_annotation_gates.py:384: DeprecationWarning: 'mode' parameter is deprecated and will be removed in Pillow 13 (2026-10-15)
+    Image.fromarray(ids, mode="L").save(folder / f"{stem}_mask.png")
+
+tests/test_annotation_gates.py: 12 warnings
+tests/test_dataset_boxes.py: 6 warnings
+  C:\Users\kanth\flightsim\tests\test_annotation_gates.py:385: DeprecationWarning: 'mode' parameter is deprecated and will be removed in Pillow 13 (2026-10-15)
+    Image.fromarray(classes, mode="L").save(folder / f"{stem}_class.png")
+
+tests/test_annotation_gates.py: 12 warnings
+tests/test_dataset_boxes.py: 6 warnings
+  C:\Users\kanth\flightsim\tests\test_annotation_gates.py:389: DeprecationWarning: 'mode' parameter is deprecated and will be removed in Pillow 13 (2026-10-15)
+    Image.fromarray(png.astype(np.uint16), mode="I;16").save(folder / f"{stem}_depth.png")
+
+tests/test_annotation_gates.py: 30 warnings
+tests/test_dataset_boxes.py: 18 warnings
+  C:\Users\kanth\flightsim\tests\test_annotation_gates.py:404: DeprecationWarning: 'mode' parameter is deprecated and will be removed in Pillow 13 (2026-10-15)
+    Image.fromarray(alone, mode="L").save(folder / alone_name)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+```
+
+## C6 COCO half: pytest -v tests/test_dataset_boxes.py -k payload_and_gear_are_their_own_coco
+
+- log: `runs/p3/A-2/C6-coco.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+timeout method: thread
+timeout func_only: False
+collected 13 items / 12 deselected / 1 selected
+
+tests\test_dataset_boxes.py .                                            [100%]
+
+============================== warnings summary ===============================
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+  C:\Users\kanth\flightsim\tests\test_annotation_gates.py:384: DeprecationWarning: 'mode' parameter is deprecated and will be removed in Pillow 13 (2026-10-15)
+    Image.fromarray(ids, mode="L").save(folder / f"{stem}_mask.png")
+
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+  C:\Users\kanth\flightsim\tests\test_annotation_gates.py:385: DeprecationWarning: 'mode' parameter is deprecated and will be removed in Pillow 13 (2026-10-15)
+    Image.fromarray(classes, mode="L").save(folder / f"{stem}_class.png")
+
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+tests/test_dataset_boxes.py::test_payload_and_gear_are_their_own_coco_categories
+  C:\Users\kanth\flightsim\tests\test_annotation_gates.py:389: DeprecationWarning: 'mode' parameter is deprecated and will be removed in Pillow 13 (2026-10-15)
+    Image.fromarray(png.astype(np.uint16), mode="I;16").save(folder / f"{stem}_depth.png")
+
+tests/test_dataset_boxes.py: 18 warnings
+  C:\Users\kanth\flightsim\tests\test_annotation_gates.py:404: DeprecationWarning: 'mode' parameter is deprecated and will be removed in Pillow 13 (2026-10-15)
+    Image.fromarray(alone, mode="L").save(folder / alone_name)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 1 passed, 12 deselected, 36 warnings in 6.78s ================
+```
+
+note: run A-2 on 23bad766; 55 component tests, no F; mutant half is the Mac auditor's (state/A.json audit)
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+42183a30 Phase 3 letter A, run A-1: A3, C1, C5, C6 PASS; A1 cut (decision 9); synopses and log
+0209de50 Merge p3-C6: component box and coverage gates, component export categories
+5e97e409 C6 integrator: component catalogue entries, class ids as words on the card
+9683bbe5 Merge branch 'phase-2-final' into p3-C6
+b2e362b9 C6: component_boxes and component_coverage gates, parent rollup in verify, payload/landing_gear export categories, guards
+9d1a8256 Phase 3 decision 8: C6 proceeds after its lock wait, nothing forbidden
+
+42183a30 Phase 3 letter A, run A-1: A3, C1, C5, C6 PASS; A1 cut (decision 9); synopses and log
+
+ docs/PHASE3_LOG.md                 |  29 +++
+ docs/phase3/decisions.md           |   2 +
+ docs/phase3/events_windows.log     |  17 ++
+ docs/phase3/packets/A1-1.md        |  27 +++
+ docs/phase3/packets/A2-synopsis.md | 117 +++++++++++
+ docs/phase3/packets/A3-synopsis.md | 122 +++++++++++
+ docs/phase3/packets/C1-synopsis.md |  47 +++++
+ docs/phase3/packets/C5-synopsis.md |  18 ++
+ docs/phase3/packets/C6-synopsis.md |  40 ++++
+ docs/phase3/state/A1.json          |   5 +-
+ docs/phase3/state/A3.json          |   4 +-
+ docs/phase3/state/C1.json          |   4 +-
+ docs/phase3/state/C5.json          |   4 +-
+ docs/phase3/state/C6.json          |   4 +-
+ docs/phase3/sync_log_A.md          | 409 +++++++++++++++++++++++++++++++++++++
+ tasks/phase3_checklist.md          |   8 +-
+ 16 files changed, 848 insertions(+), 9 deletions(-)
+
+0209de50 Merge p3-C6: component box and coverage gates, component export categories
+
+ core/capture/verify.py         | 236 ++++++++++++++++++++++++++++++++++++++---
+ core/dataset/export.py         |  18 +++-
+ core/messages/catalog.yaml     |   8 ++
+ scripts/mutation_check.sh      |  18 ++++
+ tests/test_annotation_gates.py | 165 ++++++++++++++++++++++++++--
+ tests/test_dataset_boxes.py    |  96 ++++++++++++++++-
+ tests/test_dataset_formats.py  |   8 +-
+ tests/test_webapp_generate.py  |   5 +
+ webapp/generate.py             |   9 +-
+ 9 files changed, 529 insertions(+), 34 deletions(-)
+
+5e97e409 C6 integrator: component catalogue entries, class ids as words on the card
+
+ core/messages/catalog.yaml    | 8 ++++++++
+ tests/test_webapp_generate.py | 5 +++++
+ webapp/generate.py            | 9 +++++++--
+ 3 files changed, 20 insertions(+), 2 deletions(-)
+
+9683bbe5 Merge branch 'phase-2-final' into p3-C6
+
+ .gitattributes                                     |   3 +
+ core/messages/catalog.yaml                         |   3 +
+ core/util/platform.py                              |  79 +++++++++++++++
+ docs/phase3/notes/A4.md                            |   5 +
+ flightsim/capture.py                               |   9 ++
+ scripts/build_ue.ps1                               |  41 ++++++++
+ .../ue/Plugins/FlightSimBridge/Source/A.cpp        |   1 +
+ .../ue/Plugins/FlightSimBridge/Source/B.h          |   2 +
+ .../ue/Plugins/FlightSimBridge/Source/Sub/C.cpp    |   2 +
+ tests/test_binary_stale.py                         | 109 +++++++++++++++++++++
+ webapp/runs.py                                     |   7 ++
+ 11 files changed, 261 insertions(+)
+
+b2e362b9 C6: component_boxes and component_coverage gates, parent rollup in verify, payload/landing_gear export categories, guards
+
+ core/capture/verify.py         | 236 ++++++++++++++++++++++++++++++++++++++---
+ core/dataset/export.py         |  18 +++-
+ scripts/mutation_check.sh      |  18 ++++
+ tests/test_annotation_gates.py | 165 ++++++++++++++++++++++++++--
+ tests/test_dataset_boxes.py    |  96 ++++++++++++++++-
+ tests/test_dataset_formats.py  |   8 +-
+ 6 files changed, 509 insertions(+), 32 deletions(-)
+
+9d1a8256 Phase 3 decision 8: C6 proceeds after its lock wait, nothing forbidden
+
+ docs/phase3/decisions.md       | 2 ++
+ docs/phase3/events_windows.log | 2 ++
+ 2 files changed, 4 insertions(+)
+```
+

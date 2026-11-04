@@ -1,25 +1,12 @@
 # C1 synopsis
 
-run_id: A-1
+run_id: A-2
 machine: windows
-written: 2026-11-04T06:19:49Z
+written: 2026-11-04T15:59:05Z
 
-## C1 verify: pytest -q tests/test_airframe.py -k components
+## C1 verify (test names): pytest -v tests/test_airframe.py -k components
 
-- log: `runs/p3/A-1/C1-pytest.log`
-- exit: 0 (expected 0) -> PASS
-
-```
-......                                                                   [100%]
-            [JSBSim-ML v2.0]
-
-JSBSim startup beginning ...
-
-```
-
-## C1 verify (verbose, test names): pytest -v tests/test_airframe.py -k components
-
-- log: `runs/p3/A-1/C1-pytest-v.log`
+- log: `runs/p3/A-2/C1-pytest-v.log`
 - exit: 0 (expected 0) -> PASS
 
 ```
@@ -35,12 +22,14 @@ collected 6 items
 
 tests\test_airframe.py ......                                            [100%]
 
-============================== 6 passed in 0.77s ==============================
+============================== 6 passed in 1.80s ==============================
             [JSBSim-ML v2.0]
 
 JSBSim startup beginning ...
 
 ```
+
+note: run A-2 on the 5.7 pin sweep (23bad766); 6 passed incl. test_components_loadout_trims
 
 ## verdict
 

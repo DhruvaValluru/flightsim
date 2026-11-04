@@ -30,3 +30,13 @@ engine's Marketplace folder; later rows say which engine they ran on.
 | C1 | A-1 | `pytest -v tests/test_airframe.py -k components` | `6 passed`, incl. `test_components_loadout_trims` | |
 | C5 | A-1 | `pytest -q tests/test_component_labels.py` | exit 0, 11 tests | |
 | C6 | A-1 | `pytest -q -k component` | exit 0 | mutant half: the Mac auditor's mutation subset (state/A.json) |
+
+## Letter A, run A-2 (UE 5.7.4, decision 10)
+
+| Box | Run | Check | Result | Note |
+|---|---|---|---|---|
+| A5 | A-2 | `vendor_ue_plugin.ps1` with `UE_ROOT` at UE_5.7 | exit 0, `targets UE 5.7`, dll sha256 `e7c302ec…`; diff only `library_win64_sha256` | 2026-11-04 |
+| A2 | A-2 | `build_ue.ps1` on 5.7.4 (first run) | FAIL before compiling: UBT `Unable to load … BuildRules\MarketplaceRules.dll … An Application Control policy has blocked this file (0x800711C7)`, then the recompile found it locked; Code Integrity events 3077/3033 name the dll; Smart App Control is on (policy state 1) | machine, not code |
+| C1 | A-2 | `pytest -v tests/test_airframe.py -k components` | `6 passed` incl. `test_components_loadout_trims` | |
+| C5 | A-2 | `pytest -q tests/test_component_labels.py` | exit 0, 11 tests | |
+| C6 | A-2 | `pytest -q -k component`; COCO half `-k payload_and_gear_are_their_own_coco` | exit 0 (55 tests); `1 passed` | |

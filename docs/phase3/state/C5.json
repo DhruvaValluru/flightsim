@@ -1,4 +1,6 @@
 {
+  "A-2": "",
+  "PASS": "",
   "budget_used": 34,
   "builder_commit": "3249f023",
   "claims": [],
@@ -6,10 +8,10 @@
   "letter": "C",
   "needs_windows": false,
   "pushed_commit": "23bad766",
-  "run_id": "A-1",
+  "run_id": "",
   "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T10:54:59",
-  "verdict": "PASS",
+  "updated": "2026-11-04T10:59:07",
+  "verdict": "",
   "worktree": "../p3-C5"
 }
