@@ -263,7 +263,8 @@ def test_old_a4_manifest_is_stale(tmp_path):
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps({
             "version": version, "name": name, "parts": [], "textures": [],
-            "mesh_origin_actor_cm": [-100.0, 0.0, 10.0], **extra}), encoding="utf-8")
+            "mesh_origin_actor_cm": [-100.0, 0.0, 10.0],
+            importer.OBJ_FRAME_KEY: importer.OBJ_FRAME, **extra}), encoding="utf-8")
         return path
 
     reason = importer.stale_manifest_reason(write("A4", 3))
@@ -307,3 +308,107 @@ def test_unreal_host_gear_list_matches_the_repo_owned_airframes():
     owned = {p.name for p in (REPO / "assets/fdm_root/aircraft").iterdir()
              if p.is_dir()}
     assert listed == owned
+
+
+# -- decision 19: the OBJ is right-handed; the manifest stays in the actor frame --
+
+def _obj_vertices_and_faces(path: Path):
+    """``v`` lines as (x, y, z) floats, ``f`` lines as 0-based vertex indices."""
+    vertices, faces = [], []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("v "):
+            vertices.append(tuple(float(t) for t in line.split()[1:4]))
+        elif line.startswith("f "):
+            faces.append(tuple(int(t.split("/")[0]) - 1 for t in line.split()[1:]))
+    return vertices, faces
+
+
+def test_body_obj_is_right_handed_against_the_manifest_extents(converted):
+    """The manifest's bounds_cm are the ACTOR frame; the OBJ's vertices are
+    the same points with Y negated (what Unreal's right-handed OBJ import
+    undoes), so the file's y range is the manifest's mirrored and x / z
+    are untouched. The starboard refuelling probe (actor y +0.43..+0.54 m,
+    the forward-most vertex) is the asymmetric feature that tells a mirror
+    from the real thing: in the OBJ it sits at NEGATIVE y."""
+    path, manifest = converted
+    vertices, _ = _obj_vertices_and_faces(path.parent / "body.obj")
+    xs, ys, zs = (np.array(c) for c in zip(*vertices))
+    lo, hi = manifest["bounds_cm"]["min"], manifest["bounds_cm"]["max"]
+    assert manifest[importer.OBJ_FRAME_KEY] == importer.OBJ_FRAME
+    assert (xs.min(), xs.max()) == pytest.approx((lo[0], hi[0]), abs=0.01)
+    assert (zs.min(), zs.max()) == pytest.approx((lo[2], hi[2]), abs=0.01)
+    assert (ys.min(), ys.max()) == pytest.approx((-hi[1], -lo[1]), abs=0.01)
+    probe = vertices[int(xs.argmax())]
+    assert -60.0 < probe[1] < -30.0, probe
+
+
+def test_store_objs_sit_on_the_obj_frame_s_other_side(converted):
+    """Each component OBJ follows the same convention as the body: the
+    port store (row extent y < 0 in the actor frame) is written at y > 0,
+    the starboard one at y < 0 (the measured mirror of packet C4-1, now
+    produced on purpose so the import lands it where the row says)."""
+    path, manifest = converted
+    for row in manifest["components"]:
+        vertices, _ = _obj_vertices_and_faces(path.parent / f"{row['part']}.obj")
+        ys = np.array([v[1] for v in vertices])
+        side = sum(row["mesh_extent_actor_m"]["y"]) / 2.0
+        if row["station"] == "STA3":
+            assert abs(side) < 0.1 and abs(ys.mean()) < 10.0
+        else:
+            assert side * ys.mean() < 0, (row["part"], side, ys.mean())
+            assert (ys > 0).all() if side < 0 else (ys < 0).all()
+
+
+def test_a_hand_part_s_signed_volume_survives_the_obj_write(tmp_path):
+    """One tetrahedron through _write_obj: every written vertex is the
+    actor-frame point with Y negated, every face is the part's triangle
+    rewound, and the signed volume the written file encloses has the SIGN
+    of the actor-frame tetrahedron with its original winding (times 1e6:
+    metres to centimetres). A mirror without the rewind would negate it."""
+    from assets_pipeline.mdl_scene import Part
+    from assets_pipeline.obj_frame import signed_volume
+
+    # .mdl frame (x right, y up, z forward), metres; an outward-wound tetra.
+    positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+                          [0.0, 1.0, 0.0], [0.0, 0.0, 2.0]])
+    triangles = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
+    part = Part(index=0, node=0, material=0, positions=positions,
+                normals=np.tile([0.0, 1.0, 0.0], (4, 1)),
+                uvs=np.zeros((4, 2)), triangles=triangles)
+    actor = a4_mdl_convert._to_ue(positions) * a4_mdl_convert.CM_PER_M
+    expected = signed_volume(actor.tolist(), triangles.tolist())
+    assert expected != 0.0
+
+    measured = a4_mdl_convert._write_obj([part], tmp_path, "tet")
+    assert measured["triangles"] == 4 and measured["vertices"] == 4
+    vertices, faces = _obj_vertices_and_faces(tmp_path / "tet.obj")
+    assert np.allclose(vertices, actor * [1.0, -1.0, 1.0])
+    assert faces == [tuple(reversed(tri)) for tri in triangles.tolist()]
+    written = signed_volume(vertices, faces)
+    assert written == pytest.approx(expected, rel=1e-9)
+    assert written * expected > 0
+    # The extents reported for the manifest are the ACTOR frame's.
+    assert measured["lo_cm"] == pytest.approx(actor.min(0).tolist())
+    assert measured["hi_cm"] == pytest.approx(actor.max(0).tolist())
+    # And the normals ride the same mirror.
+    vn = [tuple(float(t) for t in line.split()[1:4])
+          for line in (tmp_path / "tet.obj").read_text(encoding="utf-8").splitlines()
+          if line.startswith("vn ")]
+    assert vn == [(0.0, 0.0, 1.0)] * 4         # .mdl +y (up) -> actor +Z, Y untouched
+
+
+def test_a_manifest_from_a_left_handed_conversion_is_stale(tmp_path):
+    """A manifest without the exact obj_frame stamp (every conversion
+    before decision 19) is re-converted and re-imported by A7's rule."""
+    path = tmp_path / "mesh_manifest.json"
+    base = {"version": 4, "name": "A4", "parts": [], "textures": [], "components": [],
+            "mesh_origin_actor_cm": [-100.0, 0.0, 10.0]}
+    path.write_text(json.dumps(base), encoding="utf-8")
+    reason = importer.stale_manifest_reason(path)
+    assert reason and "mirror" in reason and "decision 19" in reason
+    path.write_text(json.dumps({**base, importer.OBJ_FRAME_KEY: "left-handed"}),
+                    encoding="utf-8")
+    assert "mirror" in importer.stale_manifest_reason(path)
+    path.write_text(json.dumps({**base, importer.OBJ_FRAME_KEY: importer.OBJ_FRAME}),
+                    encoding="utf-8")
+    assert importer.stale_manifest_reason(path) is None

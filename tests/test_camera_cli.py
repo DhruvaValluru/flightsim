@@ -762,3 +762,40 @@ def test_an_absolute_terrain_stem_is_handed_over_unchanged(tmp_path):
                          "--max-previews", "0", "--card", "--terrain", str(bake)]) == 0
     terrain, _ = _captured_terrain(out)
     assert terrain == str(bake) == str(bake.resolve())
+
+
+def test_the_cli_passes_share_one_ground_source(tmp_path):
+    """Decision 12 on the CLI route (packet C4-1: chase 4ba58ab266a3 vs
+    host_flight 4f73b77001d5 differed in agl_m). The card every CLI pass
+    flies carries collision_terrain -- the engine path the render passes
+    get in -terrain= -- so the host's ground callback answers from the
+    same raster in the solve pass and in each render pass; and the solve
+    command's terrain flags are the render flags' own, from one helper."""
+    from core.render.flags import render_flags, terrain_flags
+    from flightsim.capture import host_flight_command
+
+    out = tmp_path / "ground"
+    assert capture_main([str(EXAMPLES / "cameras_terrain.yaml"),
+                         "--out", str(out), "--synth-terrain",
+                         "--max-previews", "0", "--card"]) == 0
+    card = json.loads((out / "card.json").read_text(encoding="utf-8"))
+    stem = card["collision_terrain"]
+    assert stem and Path(stem).is_absolute()
+    ground = terrain_flags(stem)
+    solve = host_flight_command(out / "host_flight" / "card.json",
+                                out / "host_flight" / "host_telemetry.json", stem)
+    assert str(out / "host_flight" / "card.json") in solve
+    assert [t for t in solve if t in ground] == ground
+    render = render_flags(out / "card.json", out / "frames", scene={"terrain": stem},
+                          mesh=None, look=None, camera_flags=None,
+                          width=320, height=180, fps=30.0)
+    assert [t for t in render if t in ground] == ground
+    assert f"-terrain={stem}" in solve and "-GeorefTerrain" in solve
+    # The flat slab names no raster: no collision_terrain, no terrain flag.
+    flat = tmp_path / "flat"
+    assert capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out", str(flat),
+                         "--max-previews", "0", "--card"]) == 0
+    assert "collision_terrain" not in json.loads(
+        (flat / "card.json").read_text(encoding="utf-8"))
+    assert not any(t.startswith("-terrain") or t == "-GeorefTerrain"
+                   for t in host_flight_command(flat / "c.json", flat / "t.json", None))

@@ -3069,7 +3069,9 @@ class RunManager:
             "-AllowNonParityEnvironment",
         ]
         if scene.get("terrain"):
-            command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
+            from core.render.flags import terrain_flags
+
+            command += terrain_flags(scene["terrain"])
         log = telemetry.with_suffix(".log")
         from core.render.headless import HEADLESS_FLAGS, run_headless
 

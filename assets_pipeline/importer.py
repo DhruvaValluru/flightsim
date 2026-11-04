@@ -52,6 +52,8 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
 
+from assets_pipeline.obj_frame import OBJ_FRAME, OBJ_FRAME_KEY
+
 REPO = Path(__file__).resolve().parents[1]
 CONFIG_DIR = REPO / "assets" / "aircraft_config"
 GENERATED = REPO / "assets" / "generated"
@@ -166,6 +168,16 @@ def stale_manifest_reason(manifest_path: Path) -> Optional[str]:
         return (f"manifest version {version} carries no mesh_origin_actor_cm "
                 f"(got {origin!r}); the mesh would be attached at the "
                 f"structural datum")
+    # Decision 19: an OBJ written in the UE left-handed actor frame is
+    # mirrored by Unreal's right-handed OBJ import (the A-4's port store
+    # drew to starboard), so a conversion without the exact stamp of the
+    # current OBJ frame is re-converted and re-imported, every airframe.
+    if manifest.get(OBJ_FRAME_KEY) != OBJ_FRAME:
+        return (f"manifest version {version} carries no {OBJ_FRAME_KEY} "
+                f"{OBJ_FRAME!r} (got {manifest.get(OBJ_FRAME_KEY)!r}): its OBJs "
+                f"were written in the UE left-handed actor frame, which the "
+                f"Interchange OBJ import mirrors, so the imported asset is a "
+                f"mirror image of the manifest's frame (decision 19)")
     components = _missing_components_reason(manifest, version)
     if components:
         return components

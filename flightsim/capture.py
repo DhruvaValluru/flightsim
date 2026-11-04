@@ -672,6 +672,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def host_flight_command(card_path, telemetry_path, terrain_stem) -> list:
+    """The CLI's SOLVE pass: the scenario commandlet (telemetry only, no
+    renderer) over ``card_path`` into ``telemetry_path``, with the same
+    ground the render passes fly -- ``core.render.flags.terrain_flags``,
+    the one helper every pass's terrain flags come from. Physics-affecting
+    flags only: -Visual builds the render scene and this pass has none.
+    verify_host_determinism grades exactly this choice: if it ever FAILs
+    on a run whose passes differ only in -Visual, -Visual perturbs the
+    flight and this pass has to carry it too."""
+    from core.render.flags import terrain_flags
+    from core.util.platform import ue_runner_command
+
+    command = ue_runner_command(REPO, "run_ue_scenario")
+    command += [str(card_path), str(telemetry_path)]
+    if terrain_stem:
+        command += terrain_flags(terrain_stem)
+    return command
+
+
 def _run_unattended(command, log):
     """An engine pass with no window, no OS error box and no stdin, under
     the stall watchdog (core/render/headless.py), its output kept in
@@ -1283,6 +1302,13 @@ def _run(args: argparse.Namespace) -> int:
                 if (world_documents["buildings_document"]
                     or world_documents["runway_document"] or scene_members) else None,
                 scene_members),
+            # Decision 12: the host's ground callback answers from the
+            # card's collision raster in EVERY pass, not from whatever the
+            # world has streamed. The web route has carried it since A8;
+            # without it the CLI's solve and render passes read different
+            # grounds and host_determinism failed on agl_m (packet C4-1).
+            # The same engine path the render passes get in -terrain=.
+            collision_terrain=str(terrain_stem) if terrain_stem else None,
             # The frame and datum the manifest records, for the host to
             # copy into render.json (check.georeference grades the copy).
             georeference=georeference_card_block(frame, heightfield, terrain_datum))
@@ -1340,19 +1366,11 @@ def _run(args: argparse.Namespace) -> int:
         write_card(host_dir / "card.json", tracks, schedules, None,
                    traffic_tracks)
         host_telemetry = host_telemetry_path(out)
-        command = ue_runner_command(REPO, "run_ue_scenario")
-        command += [str(host_dir / "card.json"), str(host_telemetry)]
-        # Physics-affecting flags only. -Visual builds the RENDER scene
-        # and this pass has no renderer; the terrain is what the ground
-        # callback reads, so it has to match what the render passes fly
-        # over or the two flights differ for a reason that is not the
-        # host's determinism. verify_host_determinism is precisely the
-        # check that grades this choice: if it ever FAILs on a run whose
-        # passes differ only in -Visual, then -Visual perturbs the
-        # flight and this pass has to carry it too.
-        if terrain_stem:
-            command.append(f"-terrain={terrain_stem}")
-            command.append("-GeorefTerrain")
+        # The terrain is what the ground callback reads, so this pass
+        # carries the render passes' own terrain flags (one helper) and
+        # the card it flies carries the same collision_terrain as theirs.
+        command = host_flight_command(host_dir / "card.json", host_telemetry,
+                                      terrain_stem)
         print("flying the card in the host first, so the labels "
               "describe the flight the pixels show ...")
         completed = _run_unattended(command, host_telemetry.parent / "host_flight_pass.log")

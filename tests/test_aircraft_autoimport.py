@@ -41,6 +41,7 @@ def _build(root, name):
     out.mkdir(parents=True, exist_ok=True)
     (out / "mesh_manifest.json").write_text(json.dumps({
         "name": name, "version": importer.MESH_MANIFEST_VERSION,
+        importer.OBJ_FRAME_KEY: importer.OBJ_FRAME,
         "mesh_origin_actor_cm": [0, 0, 0],
         "asset_path_root": f"/Game/Aircraft/{name}", "parts": ["body"]}),
         encoding="utf-8")

@@ -32,6 +32,12 @@ x 5.76 m, probe tip 6.63 m; nose to tail 12.13 m against the labels'
 
 Frames: the .mdl is x right, y up, z forward (left-handed, like Unreal), so
 UE (X fwd, Y right, Z up) = (z, x, y) -- an even permutation, winding kept.
+Every number in the manifest (``bounds_cm``, the origins, each component
+row's ``mesh_extent_actor_m`` / ``mesh_origin_actor_cm``) is in that UE
+ACTOR frame. The OBJ files alone are in the OBJ frame of
+``assets_pipeline/obj_frame.py`` (decision 19): Y negated, faces rewound,
+so Unreal's right-handed OBJ import lands the asset in the actor frame
+instead of its mirror image; the manifest stamps it as ``obj_frame``.
 
     python -m assets_pipeline.a4_mdl_convert assets/aircraft_config/A4.json
 """
@@ -58,6 +64,9 @@ from assets_pipeline.convert import (  # noqa: E402
 )
 from core.capture.airframe import Airframe, Component, fdm_xml_path  # noqa: E402
 from assets_pipeline.mdl_scene import REST_ENV, MdlScene, Part  # noqa: E402
+from assets_pipeline.obj_frame import (  # noqa: E402
+    OBJ_FRAME, OBJ_FRAME_KEY, actor_to_obj_array, obj_winding,
+)
 
 CM_PER_M = 100.0
 TEXTURE_PIXELS = 2048
@@ -104,12 +113,14 @@ def _filter_part(part: Part) -> int:
 
 
 def _write_obj(parts: List[Part], out_dir: Path, stem: str) -> Dict:
-    """Write ``<stem>.obj`` and ``<stem>.mtl`` for already-filtered parts,
-    in the UE actor frame (cm) about the model origin, and return what
-    was measured on the way: ``triangles`` (faces written), ``vertices``,
+    """Write ``<stem>.obj`` and ``<stem>.mtl`` for already-filtered parts
+    and return what was measured on the way, in the UE ACTOR frame (cm)
+    about the model origin: ``triangles`` (faces written), ``vertices``,
     ``lo_cm``/``hi_cm`` (the axis-aligned extent of every vertex) and
     ``centreline_nose_cm`` (the largest x within the fuselage centreline
-    band, -1e30 when no vertex lies in it)."""
+    band, -1e30 when no vertex lies in it). The file itself is in the
+    OBJ frame (``obj_frame.actor_to_obj_array`` on positions and normals,
+    ``obj_winding`` on every face): decision 19."""
     by_material: Dict[str, List[str]] = {s: [] for s in SHEETS}
     v_lines: List[str] = []
     vt_lines: List[str] = []
@@ -126,14 +137,16 @@ def _write_obj(parts: List[Part], out_dir: Path, stem: str) -> Dict:
         band = np.abs(pos[:, 1]) < CENTRELINE_HALF_WIDTH_CM
         if band.any():
             centreline_nose_cm = max(centreline_nose_cm, float(pos[band, 0].max()))
-        v_lines += ["v %.4f %.4f %.4f" % tuple(p) for p in pos]
-        vn_lines += ["vn %.5f %.5f %.5f" % tuple(n) for n in nrm]
+        # The OBJ frame (decision 19): Y negated on positions AND normals,
+        # each face rewound; the extents above stay in the actor frame.
+        v_lines += ["v %.4f %.4f %.4f" % tuple(p) for p in actor_to_obj_array(pos)]
+        vn_lines += ["vn %.5f %.5f %.5f" % tuple(n) for n in actor_to_obj_array(nrm)]
         # OBJ v runs bottom-up; the .mdl's runs top-down.
         vt_lines += ["vt %.6f %.6f" % (u, 1.0 - v) for u, v in part.uvs]
         sheet = SHEETS[1] if part.material == WING_MATERIAL else SHEETS[0]
         by_material[sheet] += [
             "f " + " ".join(f"{base + i + 1}/{base + i + 1}/{base + i + 1}"
-                            for i in tri) for tri in part.triangles]
+                            for i in obj_winding(tri)) for tri in part.triangles]
         triangles += len(part.triangles)
         base += len(pos)
 
@@ -290,6 +303,9 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     manifest = {
         "magic": "flightsim-aircraft-mesh",
         "version": A4_COMPONENTS_MANIFEST_VERSION,
+        # The OBJs' axis convention (decision 19); the importer's stale
+        # rule re-converts a manifest without this exact stamp.
+        OBJ_FRAME_KEY: OBJ_FRAME,
         "name": name,
         "fdm": config["fdm"],
         "fdm_config_name": fdm_name,

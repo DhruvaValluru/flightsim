@@ -271,6 +271,7 @@ def _textured_manifest(tmp_path: Path):
     manifest = write_manifest(tmp_path)
     data = json.loads(manifest.read_text(encoding="utf-8"))
     data.update({"version": 3, "mesh_origin_actor_cm": [0.0, 0.0, 0.0],
+                 importer.OBJ_FRAME_KEY: importer.OBJ_FRAME,
                  "textures": ["livery.png"]})
     manifest.write_text(json.dumps(data), encoding="utf-8")
 
@@ -743,7 +744,8 @@ def test_a_version_1_or_2_manifest_is_stale_and_rebuilds(tmp_path, monkeypatch):
 
     def current(manifest_path: Path) -> None:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        data.update({"version": 3, "mesh_origin_actor_cm": [-2979.82, 0.0, 13.86]})
+        data.update({"version": 3, "mesh_origin_actor_cm": [-2979.82, 0.0, 13.86],
+                     importer.OBJ_FRAME_KEY: importer.OBJ_FRAME})
         manifest_path.write_text(json.dumps(data), encoding="utf-8")
 
     steps = []
@@ -831,6 +833,7 @@ def test_import_script_re_converts_a_stale_manifest(tmp_path, monkeypatch,
     # A current manifest is left alone.
     manifest.write_text(json.dumps({"magic": "flightsim-aircraft-mesh",
                                     "name": "TEST", "version": 3,
+                                    importer.OBJ_FRAME_KEY: importer.OBJ_FRAME,
                                     "mesh_origin_actor_cm": [-1.0, 0.0, 0.0]}),
                         encoding="utf-8")
     converted.clear()
@@ -1229,3 +1232,60 @@ def test_gear_split_leaves_the_z_anchor_unchanged(tmp_path, monkeypatch):
     assert split["gear_vertices_measured"] == 3 and split["vertices_measured"] == 9
     assert split["origin_anchor"]["z"] == "main-gear contact"
     assert split["mesh_origin_actor_cm"][2] == pytest.approx(-32.4)
+
+
+# -- decision 19: the .ac route writes the same right-handed OBJ as the .mdl route --
+
+def test_the_obj_writer_writes_the_right_handed_frame(tmp_path):
+    """ObjWriter accumulates actor-frame triangles (cm, outward winding)
+    and writes them in the ONE OBJ frame both converters share: Y negated,
+    faces rewound, so the signed volume the file encloses keeps the sign
+    of the actor-frame solid (a mirror without the rewind would flip it,
+    and Unreal would import the c172p inside out or mirrored)."""
+    from assets_pipeline import a4_mdl_convert, convert
+    from assets_pipeline.obj_frame import OBJ_FRAME, signed_volume
+
+    assert convert.OBJ_FRAME == a4_mdl_convert.OBJ_FRAME == OBJ_FRAME
+    actor = [(0.0, 0.0, 0.0), (100.0, 0.0, 0.0), (0.0, 100.0, 0.0), (0.0, 0.0, 200.0)]
+    triangles = [(0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)]
+    expected = signed_volume(actor, triangles)
+    assert expected != 0.0
+    writer = convert.ObjWriter()
+    key = writer.material_key(None, (0.5, 0.5, 0.5), 0.0)
+    for tri in triangles:
+        writer.add_triangle(key, [(actor[i], (0.1 * i, 0.2 * i)) for i in tri])
+    writer.write(tmp_path / "tet.obj")
+
+    vertices, faces = [], []
+    for line in (tmp_path / "tet.obj").read_text(encoding="utf-8").splitlines():
+        if line.startswith("v "):
+            vertices.append(tuple(float(t) for t in line.split()[1:4]))
+        elif line.startswith("f "):
+            faces.append(tuple(int(t.split("/")[0]) - 1 for t in line.split()[1:]))
+    assert len(vertices) == 12 and len(faces) == 4
+    # Every written vertex is its actor-frame point with Y negated ...
+    for tri, face in zip(triangles, faces):
+        for i, written_index in zip(reversed(tri), face):
+            x, y, z = actor[i]
+            assert vertices[written_index] == pytest.approx((x, -y, z))
+    # ... each face is the triangle rewound (vertices are per-face, 3 apart) ...
+    assert faces == [(3 * n + 2, 3 * n + 1, 3 * n) for n in range(4)]
+    # ... and the enclosed signed volume keeps the actor frame's sign.
+    written = signed_volume(vertices, faces)
+    assert written == pytest.approx(expected, rel=1e-9) and written * expected > 0
+    assert "-0.0" not in (tmp_path / "tet.obj").read_text(encoding="utf-8")
+
+
+def test_a_manifest_without_the_obj_frame_stamp_is_stale(tmp_path):
+    """Every conversion written before decision 19 lacks the stamp; the
+    importer's stale rule sends it back through the converter by name,
+    then A7's rule re-imports the right-handed OBJs."""
+    manifest = write_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data.update({"version": 3, "mesh_origin_actor_cm": [0.0, 0.0, 0.0]})
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    reason = importer.stale_manifest_reason(manifest)
+    assert reason and "mirror image" in reason and "decision 19" in reason
+    data[importer.OBJ_FRAME_KEY] = importer.OBJ_FRAME
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert importer.stale_manifest_reason(manifest) is None

@@ -225,6 +225,18 @@ def lighting_flags(look: Optional[Mapping[str, Any]]) -> List[str]:
     return out
 
 
+def terrain_flags(terrain_stem) -> List[str]:
+    """The flags that name the ground the host's physics reads: the baked
+    heightfield at ``terrain_stem`` (``-terrain=``) placed at its true
+    georeference (``-GeorefTerrain``). ONE function for every pass of a
+    card -- the render passes (:func:`render_flags`), the CLI's solve pass
+    (``flightsim.capture.host_flight_command``) and the web app's
+    (``webapp.runs.RunService._fly_host``) -- because verify_host_determinism
+    compares those flights and a pass flying another ground is a real
+    difference, not the host's."""
+    return ["-GeorefTerrain", f"-terrain={terrain_stem}"]
+
+
 def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
                  mesh, look: Optional[Mapping[str, Any]],
                  camera_flags: Optional[Tuple[Sequence[str], Sequence[str]]],
@@ -363,7 +375,7 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
         if token not in flags:
             flags.append(token)
     if not void and scene.get("terrain"):
-        flags += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
+        flags += terrain_flags(scene["terrain"])
     if not void and scene.get("imagery"):
         flags += [f"-imagery={scene['imagery']}"]
     if not void and scene_document is not None:
