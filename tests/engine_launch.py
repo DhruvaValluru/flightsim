@@ -17,6 +17,30 @@ import subprocess
 from pathlib import Path
 
 
+def _draw_one_frame_per_camera(command) -> None:
+    """The wrapper's stand-in drew pictures: one frame in each card
+    camera's directory (the render.camera_empty guard reads them). Only
+    the whole-wrapper call (``<card.json> <frames dir>``); a per-camera
+    pass (-camera-index=N) is the web path's and writes its own."""
+    import json
+
+    parts = [str(p) for p in command]
+    if any(p.startswith("-camera-index=") for p in parts):
+        return
+    for i, part in enumerate(parts[:-1]):
+        if part.endswith("card.json") and Path(part).is_file():
+            frames = Path(parts[i + 1])
+            try:
+                cameras = json.loads(Path(part).read_text()).get("cameras") or []
+            except ValueError:
+                return
+            for camera in cameras:
+                folder = frames / str(camera.get("id") or camera.get("camera_id"))
+                folder.mkdir(parents=True, exist_ok=True)
+                (folder / "frame_0000.png").write_bytes(b"x")
+            return
+
+
 def launch_through_run(monkeypatch) -> None:
     import core.render.headless as headless
 
@@ -29,6 +53,7 @@ def launch_through_run(monkeypatch) -> None:
                                        stderr=subprocess.STDOUT,
                                        stdin=subprocess.DEVNULL,
                                        cwd=str(cwd) if cwd else None)
+        _draw_one_frame_per_camera(command)
         # A stub that returns nothing stands for a pass that exited 0.
         return headless.HeadlessResult(getattr(completed, "returncode", 0))
 

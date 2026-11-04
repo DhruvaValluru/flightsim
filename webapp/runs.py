@@ -1933,6 +1933,16 @@ STORM_LOOK = {"sun_elev": 10.0, "sun_azim": 180.0, "exposure_bias": 9.6,
               "fog_density": 0.007}
 
 
+def check_cameras_drew_frames(frames: Path, camera_ids: List[str]) -> None:
+    """Refuse by name when an expected camera's directory holds no frame
+    (a pass that wrote nothing used to be skipped silently downstream)."""
+    from core.capture.frames import empty_camera_ids
+
+    empty = empty_camera_ids(frames, camera_ids)
+    if empty:
+        raise CaptureError("render.camera_empty", empty[0])
+
+
 def rendered_frames(directory: Path) -> List[Path]:
     """The rendered frames in a camera directory, ``frame_NNNN.png`` only.
 
@@ -3573,6 +3583,11 @@ class RunManager:
                 run.push("failed", f"[{exc.constraint}] {exc.message}"
                                    + (f"\nlast words:\n{words}"
                                       if words else ""))
+                return
+            try:
+                check_cameras_drew_frames(frames, camera_ids)
+            except CaptureError as exc:
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
                 return
         elif not self._render(card, frames, scene, mesh, aircraft,
                               telemetry=out / "telemetry.json",

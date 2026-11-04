@@ -1108,6 +1108,9 @@ render.stalled:
 render.timeout:
   sentence: "The renderer ran past the time limit set for one pass and was stopped, along with everything it had started."
   hint: "Raise or unset FLIGHTSIM_RENDER_TIMEOUT_SECONDS."
+render.camera_empty:
+  sentence: "A camera's render pass finished but wrote no frames, so that camera has no pictures."
+  hint: "Read that camera's render log for its last words, then render again."
 look.xplane_lighting:
   sentence: "The lighting colours taken from the simulator's sky tables could not be applied to this render."
 
