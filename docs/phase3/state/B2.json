@@ -1,8 +1,15 @@
 {
   "budget_used": 7,
+  "claims": [
+    "core/util/platform.py",
+    "scripts/ue_preflight.ps1",
+    "tests/test_powershell_scripts.py",
+    "toolchain.json"
+  ],
   "letter": "B",
   "needs_windows": true,
   "stage": "building",
   "unit": "B2+B3",
-  "updated": "2026-11-04T11:38:12"
+  "updated": "2026-11-04T11:39:36",
+  "worktree": "../p3-B2"
 }
