@@ -3,6 +3,7 @@
   "builder_commit": "e38daf70",
   "built_commit": "e38daf70",
   "claims": [],
+  "integrated_commit": "c3383adff2ccc10fc28931471d555e45bc5e78fc",
   "letter": "B",
   "needs_windows": true,
   "pending_windows": [
@@ -13,8 +14,8 @@
     "step9 gate10_render_repro.py --card <gate6 card>: bounded or bit-identical, exit 0",
     "step10 pytest tests/test_engine_bundle_golden.py with the A12 fixture: 0 skipped, exit 0"
   ],
-  "stage": "built",
+  "stage": "integrated",
   "unit": "B4",
-  "updated": "2026-11-04T12:03:07",
+  "updated": "2026-11-04T12:18:38",
   "worktree": "../p3-B4"
 }

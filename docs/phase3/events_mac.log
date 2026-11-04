@@ -671,3 +671,56 @@
 {"agent": "integrator", "box": "B3", "stage": "build", "kind": "note", "note": "B3 integrated (merge 69726238, conflict in B1 note/state resolved to the integrated versions): toolchain_pins + platform tests exit 0, both pin guards' targets check; the integrator's full-suite mutation run was stopped and replaced by --check-targets", "t": 1793812475.4099998, "machine": "mac"}
 {"agent": "mac", "box": "A6", "stage": "prove", "kind": "note", "note": "msg received P3 verdict A6 PASS run=A-2 (materials idempotent on 5.7 after the Windows storm set-aside fix)", "t": 1793812475.4501839, "machine": "mac"}
 {"agent": "mac", "box": "A8", "stage": "prove", "kind": "note", "note": "msg received P3 verdict A8 PASS run=A-2 (web run 7274c62756ea, host flight on, host_determinism PASS, flights byte-identical, collision-raster ground; remaining mask_vs_geometry failure is A12's)", "t": 1793812475.489861, "machine": "mac"}
+{"agent": "breakdown", "box": "C", "stage": "breakdown", "kind": "note", "note": "spawned sub-agents C2 C3 C4 C7 (sonnet, parallel)", "t": 1793812541.5460439, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "start C2", "t": 1793812543.100647, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793812543.1356401, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_C.md", "t": 1793812543.171757, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793812543.211045, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C1.md", "t": 1793812543.248301, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C5.md", "t": 1793812543.290674, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C6.md", "t": 1793812543.331079, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "start C7", "t": 1793812545.863699, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793812545.903861, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_C.md", "t": 1793812545.9414241, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793812545.9789, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C1.md", "t": 1793812546.014907, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C5.md", "t": 1793812546.05152, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C6.md", "t": 1793812546.08648, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open assets_pipeline/convert.py", "t": 1793812546.121377, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open assets/aircraft_config/c172p.json", "t": 1793812546.1565151, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open assets/aircraft_config/A4.json", "t": 1793812546.1924858, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open core/capture/labels.py", "t": 1793812546.229035, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open core/capture/airframe.py", "t": 1793812546.2700238, "machine": "mac"}
+{"agent": "sub", "box": "C3", "stage": "plan", "kind": "note", "note": "start C3", "t": 1793812550.273667, "machine": "mac"}
+{"agent": "sub", "box": "C3", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793812550.314569, "machine": "mac"}
+{"agent": "sub", "box": "C3", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_C.md", "t": 1793812550.355087, "machine": "mac"}
+{"agent": "sub", "box": "C3", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793812550.394353, "machine": "mac"}
+{"agent": "sub", "box": "C3", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C1.md", "t": 1793812550.433375, "machine": "mac"}
+{"agent": "sub", "box": "C3", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C5.md", "t": 1793812550.471746, "machine": "mac"}
+{"agent": "sub", "box": "C3", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C6.md", "t": 1793812550.514399, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open assets_pipeline/a4_mdl_convert.py (grep)", "t": 1793812550.662463, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open assets_pipeline/mdl_scene.py (grep)", "t": 1793812550.703527, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open assets/aircraft_config/A4.json (grep)", "t": 1793812550.756062, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open core/capture/airframe.py (grep)", "t": 1793812550.797835, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open scripts/ue_import_aircraft.py (grep)", "t": 1793812550.8379111, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open core/capture/labels.py (grep)", "t": 1793812550.8879008, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "open core/capture/manifest.py (grep)", "t": 1793812550.936948, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "start C4", "t": 1793812554.346335, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open docs/phase3/SUBAGENT_BRIEF.md", "t": 1793812554.3867362, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open docs/phase3/digest_C.md", "t": 1793812554.4293, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open docs/phase3/decisions.md", "t": 1793812554.470128, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C1.md", "t": 1793812554.512299, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C5.md", "t": 1793812554.552472, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C6.md", "t": 1793812554.591681, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimScenarioWorld.cpp", "t": 1793812554.629558, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimScenarioWorld.h", "t": 1793812554.668237, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp", "t": 1793812554.706526, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open scripts/ue_import_aircraft.py", "t": 1793812554.743573, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open core/capture/verify.py", "t": 1793812554.781125, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/A12.md", "t": 1793812554.818314, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "open docs/phase3/notes/C7.md", "t": 1793812590.161696, "machine": "mac"}
+{"agent": "sub", "box": "C7", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793812590.19966, "machine": "mac"}
+{"agent": "sub", "box": "C4", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793812614.543175, "machine": "mac"}
+{"agent": "sub", "box": "C2", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793812642.575333, "machine": "mac"}
+{"agent": "sub", "box": "C3", "stage": "plan", "kind": "note", "note": "open core/capture/objects.py", "t": 1793812654.1602292, "machine": "mac"}
+{"agent": "sub", "box": "C3", "stage": "plan", "kind": "note", "note": "PASS note written", "t": 1793812654.198606, "machine": "mac"}
