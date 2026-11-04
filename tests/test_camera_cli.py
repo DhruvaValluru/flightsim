@@ -607,9 +607,6 @@ def test_render_passes_the_imported_mesh_to_the_wrapper(tmp_path, monkeypatch):
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
     launch_through_run(monkeypatch)
-    # this stub render writes frames but no label bundle; the bundle
-    # refusal (labels.no_bundle) has its own tests in test_camera_labels.py
-    monkeypatch.setattr("core.capture.labels.require_label_bundle", lambda summary: None)
     monkeypatch.setattr("subprocess.run", _fake_run(commands))
     out = tmp_path / "rendered"
     code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out", str(out),

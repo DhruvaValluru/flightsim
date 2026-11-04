@@ -1775,7 +1775,7 @@ def require_label_bundle(summary: Dict) -> None:
     if attached > 0 and int(summary.get("without_bundle") or 0) == 0:
         return
     totals = summary.get("frames_by_camera") or {}
-    parts = [f"{camera} ({missing[camera]} of {totals.get(camera) or missing[camera]} frames)"
+    parts = [f"{camera} ({missing[camera]} of {max(int(totals.get(camera) or 0), missing[camera])} frames)"
              for camera in sorted(missing)]
     raise PassError("labels.no_bundle",
                     "the render wrote no label bundle for " + ", ".join(parts)
