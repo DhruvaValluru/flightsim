@@ -1,8 +1,8 @@
 {
   "B-1": "",
   "FAIL": "",
-  "budget_used": 24,
-  "builder_commit": "695710c6",
+  "budget_used": 20,
+  "builder_commit": "cfa48660",
   "built_commit": "695710c6",
   "claims": [
     "scripts/deploy_windows.ps1"
@@ -20,9 +20,9 @@
   ],
   "pushed_commit": "3e59358d",
   "run_id": "",
-  "stage": "building",
+  "stage": "built_local",
   "unit": "B1",
-  "updated": "2026-11-04T12:56:24",
+  "updated": "2026-11-04T13:06:07",
   "verdict": "",
   "worktree": "../p3w-B1"
 }

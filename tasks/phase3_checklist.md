@@ -62,7 +62,7 @@ sitting 0.4 m from its label (it was ~25 m).
 - [x] **A6 · Materials build by themselves** 🪟
   - Check: the first run prints `MATERIAL-CREATED` for the five rebuilt ones, and
     the second run prints `MATERIAL-EXISTS`.
-- [ ] **A7 · The aircraft is imported automatically** 🪟
+- [x] **A7 · The aircraft is imported automatically** 🪟
   - Check: delete the imported A-4, press Generate, and it imports and renders by itself.
 - [x] **A8 · Host flight works; nobody needs `--no-host-flight`** 🪟
   - Check: a web-app run with host flight completes, and no message tells the user
