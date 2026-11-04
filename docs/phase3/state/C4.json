@@ -2,8 +2,8 @@
   "3ef2414e": "",
   "C-1": "",
   "FAIL": "",
-  "budget_used": 54,
-  "builder_commit": "3ef2414e",
+  "budget_used": 24,
+  "builder_commit": "9c96fcb6",
   "claims": [
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp",
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimScenarioWorld.cpp",
@@ -18,9 +18,9 @@
   "retry": 1,
   "route": "interaction",
   "run_id": "",
-  "stage": "building",
+  "stage": "built_local",
   "unit": "C4",
-  "updated": "2026-11-04T16:32:38",
+  "updated": "2026-11-04T16:57:24",
   "verdict": "",
   "windows_build": "",
   "worktree": "../p3w-C4"
