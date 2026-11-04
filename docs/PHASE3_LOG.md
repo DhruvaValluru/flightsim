@@ -109,3 +109,4 @@ verify counts, the `component_coverage` detail and the card diff keys.
 
 | box | run | check | result | note |
 |---|---|---|---|---|
+| A12 | A-2 | retry 3 (2163a0d5): `pytest -q tests/test_engine_bundle_golden.py` | exit 0, no skips | PASS stands |
