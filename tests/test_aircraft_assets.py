@@ -150,9 +150,20 @@ def test_the_fail_safe_builds_a_missing_model_once(monkeypatch):
     assert built == ["B747"]
     assert any("B747" in line for line in lines)
 
+    # Present AND current. The age half (older_than_inputs_reason) reads the
+    # real generated dir, where a machine's B747 manifest is older than
+    # convert.py after every converter commit -- a re-convert by design (A7),
+    # not a second build of a missing model; pin it current here and test
+    # the outdated branch on its own below.
     monkeypatch.setattr(importer, "is_imported", lambda name: True)
+    monkeypatch.setattr(importer, "older_than_inputs_reason", lambda name: None)
     ensure_aircraft_model(spec, lines.append)
     assert built == ["B747"]            # already there: no second build
+    monkeypatch.setattr(importer, "older_than_inputs_reason",
+                        lambda name: "the mesh manifest is older than convert.py")
+    ensure_aircraft_model(spec, lines.append)
+    assert built == ["B747", "B747"]    # outdated: re-converted once, stated
+    assert any("out of date" in line for line in lines)
 
 
 def test_a_failed_build_fails_the_run_by_name_and_never_renders(

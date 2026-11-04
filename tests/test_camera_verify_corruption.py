@@ -382,9 +382,12 @@ def test_placeholder_boxes_under_a_manifest_that_names_the_mesh_fail(
     assert "placeholder" in check.detail and "-mesh=" in check.detail
     assert "b747b747b747" in check.detail
     # With no mesh expected (none on the producing machine, sha null) the
-    # boxes are what the record said; PASS with the honest detail.
-    assert manifest["assets"]["mesh_manifest"]["sha256"] is None
-    check = verify_drawn_airframe(manifest, tmp_path)
+    # boxes are what the record said; PASS with the honest detail. Stated
+    # on a copy: the fixture's block reads THIS machine's generated dir,
+    # and a built B747 there is not a defect of the verifier.
+    bare = json.loads(json.dumps(manifest))
+    bare["assets"]["mesh_manifest"] = {"path": None, "sha256": None, "note": None}
+    check = verify_drawn_airframe(bare, tmp_path)
     assert check.status == PASS and "expected no mesh" in check.detail
 
 

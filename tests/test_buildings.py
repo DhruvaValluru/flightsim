@@ -257,16 +257,20 @@ def test_building_all_is_one_aggregate_object_after_the_terrain(cache):
 
     spec = spec_for()
     plain = compose_objects(spec)
-    assert [o.id for o in plain] == ["aircraft:c172p:0", "terrain"]
+    # Phase C (C3's band, C7's gear): the c172p's landing_gear component is
+    # composed last and numbered 64; every scene object keeps its 1.. id.
+    assert [o.id for o in plain] == ["aircraft:c172p:0", "terrain", "landing_gear:landing_gear:0"]
     spec.set("scene.buildings", KEY, frm="test")
     objects = compose_objects(spec)
-    assert [o.id for o in objects] == ["aircraft:c172p:0", "terrain", "building:all"]
-    building = objects[-1]
+    assert [o.id for o in objects] == ["aircraft:c172p:0", "terrain", "building:all",
+                                       "landing_gear:landing_gear:0"]
+    building = objects[2]
     assert building.int_id == 3 and building.class_name == "building" and building.role == "scene"
     assert building.class_id == list(spec.taxonomy.classes.value).index("building") + 1
     assert building.licence == "synthetic"
     assert building.mesh_sha256 == bd.sha256_of(cache / f"{KEY}.jsonl")
-    assert [o.int_id for o in objects[:2]] == [o.int_id for o in plain]       # earlier ids unmoved
+    assert [o.int_id for o in objects[:2]] == [o.int_id for o in plain[:2]]   # earlier ids unmoved
+    assert objects[-1].int_id == plain[-1].int_id == 64                       # the component's band id
     spec.set("taxonomy.classes", ["aircraft", "terrain"], frm="test")
     with pytest.raises(TaxonomyError):
         compose_objects(spec)
