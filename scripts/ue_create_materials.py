@@ -611,24 +611,19 @@ def add_wetness(material, lib, base_colour_node, base_output, x,
 
 
 def create_vertex_colour():
-    full = f"{PATH}/M_VertexColor"
-    if unreal.EditorAssetLibrary.does_asset_exist(full):
-        print(f"MATERIAL-EXISTS: {full}")
-        return
-
-    tools = unreal.AssetToolsHelpers.get_asset_tools()
-    material = tools.create_asset("M_VertexColor", PATH, unreal.Material,
-                                  unreal.MaterialFactoryNew())
+    # Through new_material, so FLIGHTSIM_REBUILD_MATERIALS=M_VertexColor
+    # rebuilds an asset a machine built before the wetness coupling (B4
+    # round 2, measured on the Windows laptop: the asset of 2026-08-31
+    # carried no "Wetness" scalar, so ApplyWetness recorded "absent").
+    material = new_material("M_VertexColor")
     if material is None:
-        raise SystemExit("could not create material asset")
+        return
 
     lib = unreal.MaterialEditingLibrary
     vertex = lib.create_material_expression(
         material, unreal.MaterialExpressionVertexColor, -350, 0)
     add_wetness(material, lib, vertex, "", -350)
-    lib.recompile_material(material)
-    unreal.EditorAssetLibrary.save_asset(full)
-    print(f"MATERIAL-CREATED: {full}")
+    finish(material, "M_VertexColor")
 
 
 def create_terrain_imagery():

@@ -99,6 +99,7 @@ class AGeoReferencingSystem;
 class ALandscapeProxy;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class UMeshComponent;
 class UInstancedStaticMeshComponent;
 class UPointLightComponent;
 class UProceduralMeshComponent;
@@ -531,7 +532,9 @@ private:
 	UMaterialInstanceDynamic* RainInstance = nullptr;
 	// The weather look's state (FlightSimWeatherLook.cpp).
 	TSharedPtr<FJsonObject> WeatherLook;
-	UStaticMeshComponent* FlatGround = nullptr;
+	// A procedural quad since B4 round 2 (the scaled engine Plane read a
+	// zero GBuffer normal on UE 5.7); the weather look sets its material.
+	UMeshComponent* FlatGround = nullptr;
 	UMaterialInstanceDynamic* LensDropsInstance = nullptr;
 	UMaterialInstanceDynamic* IceInstance = nullptr;
 	UMaterialInstanceDynamic* LightningInstance = nullptr;
@@ -554,8 +557,14 @@ private:
 	// W5: the scene document (-scene=), parsed once in Build.
 	TSharedPtr<FJsonObject> SceneDocument;
 
+	// One synthetic raster instance (the Gate 6 ridge), drawn with Material:
+	// the terrain material the georeferenced landscape gets, through
+	// ApplyWetness, so the precipitation scalar drives it too (B4 round 2:
+	// the engine's default material exposes no "Wetness", and the record
+	// said "absent").
 	bool BuildTerrainInstance(UWorld* World, const FString& Name,
-	                          const FVector2D& OriginMetres, FString& Error);
+	                          const FVector2D& OriginMetres,
+	                          UMaterialInterface* Material, FString& Error);
 	bool BuildGeoreferencedTerrain(UWorld* World,
 	                               const FFlightSimVisualSceneOptions& Options,
 	                               FString& Error);
