@@ -1046,8 +1046,9 @@ mutate webapp/runs.py \
 # engine AND every airframe's imported model; ue_available() alone sent
 # the macOS runner into aircraft.mesh on every preview and campaign.
 mutate webapp/generate.py \
-    '    missing = [name for name in names if not is_imported(name)]' \
-    '    missing = []  # MUTATED: an engine alone decides; the model is never checked' \
+    '    todo = [name for name in dict.fromkeys(names)
+            if not (is_imported(name) and older_than_inputs_reason(name) is None)]' \
+    '    todo = []  # MUTATED: an engine alone decides; the model is never checked' \
     "the guided page renders only when every airframe's model is imported" \
     tests/test_webapp_generate.py || failures=$((failures+1))
 
@@ -1384,8 +1385,8 @@ mutate webapp/runs.py \
     tests/test_aircraft_assets.py || failures=$((failures+1))
 
 mutate webapp/runs.py \
-    '    if is_imported(aircraft):' \
-    '    if False:  # MUTATED: rebuild the model on every render' \
+    '        if is_imported(aircraft) and older_than_inputs_reason(aircraft) is None:' \
+    '        if False:  # MUTATED: rebuild the model on every render' \
     "the aircraft fail-safe builds once, not once per render" \
     tests/test_aircraft_assets.py || failures=$((failures+1))
 
@@ -1699,8 +1700,8 @@ mutate core/capture/manifest.py \
     tests/test_camera_manifest.py || failures=$((failures+1))
 
 mutate core/capture/manifest.py \
-    'SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5, 6, 7)' \
-    'SUPPORTED_MANIFEST_VERSIONS = (4, 5, 6, 7)  # MUTATED: every earlier run refused' \
+    'SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5, 6, 7, 8)' \
+    'SUPPORTED_MANIFEST_VERSIONS = (4, 5, 6, 7, 8)  # MUTATED: every earlier run refused' \
     "a version 3 manifest still reads" \
     tests/test_camera_manifest.py || failures=$((failures+1))
 
@@ -2795,7 +2796,7 @@ mutate core/capture/labels.py \
 mutate core/capture/labels.py \
     '            others, counts = np.unique(mask[footprint], return_counts=True)
             out["occluded_by"] = [int(v) for v in others
-                                  if int(v) not in (0, int_id)]' \
+                                  if int(v) not in (0, *ids)]' \
     '            others, counts = np.unique(mask[footprint], return_counts=True)
             out["occluded_by"] = []  # MUTATED: nobody occludes anybody' \
     "occluded_by lists the ids found inside the alone-pass footprint" \

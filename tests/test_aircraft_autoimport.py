@@ -20,17 +20,18 @@ def world(tmp_path, monkeypatch):
     (tmp_path / "assets" / "aircraft_config").mkdir(parents=True)
     (tmp_path / "assets" / "generated").mkdir(parents=True)
     (tmp_path / "assets_pipeline").mkdir()
-    (tmp_path / "assets_pipeline" / "convert.py").write_text("# converter\n")
+    (tmp_path / "assets_pipeline" / "convert.py").write_text("# converter\n", encoding="utf-8")
     monkeypatch.setattr(importer, "REPO", tmp_path)
     monkeypatch.setattr(importer, "CONFIG_DIR", tmp_path / "assets" / "aircraft_config")
     monkeypatch.setattr(importer, "GENERATED", tmp_path / "assets" / "generated")
     editor = tmp_path / "UnrealEditor-Cmd"
-    editor.write_text("")
+    editor.write_text("", encoding="utf-8")
     monkeypatch.setattr("core.util.platform.ue_editor_path", lambda: editor)
     world = SimpleNamespace(root=tmp_path, editor=editor, calls=[])
     world.add_config = lambda name, unavailable=None: (
         importer.CONFIG_DIR / f"{name}.json").write_text(json.dumps(
-            {"license": {"repo": "x", "commit": "c", "unavailable": unavailable}}))
+            {"license": {"repo": "x", "commit": "c", "unavailable": unavailable}}),
+        encoding="utf-8")
     world.build = lambda name: _build(tmp_path, name)
     return world
 
@@ -41,10 +42,11 @@ def _build(root, name):
     (out / "mesh_manifest.json").write_text(json.dumps({
         "name": name, "version": importer.MESH_MANIFEST_VERSION,
         "mesh_origin_actor_cm": [0, 0, 0],
-        "asset_path_root": f"/Game/Aircraft/{name}", "parts": ["body"]}))
+        "asset_path_root": f"/Game/Aircraft/{name}", "parts": ["body"]}),
+        encoding="utf-8")
     asset = root / "ue" / "Content" / "Aircraft" / name
     asset.mkdir(parents=True, exist_ok=True)
-    (asset / "body.uasset").write_text("")
+    (asset / "body.uasset").write_text("", encoding="utf-8")
     return out / "mesh_manifest.json"
 
 

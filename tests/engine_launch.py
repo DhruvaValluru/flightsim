@@ -33,7 +33,7 @@ def _draw_one_frame_per_camera(command) -> None:
             if _write_minimal_bundle(frames.parent):
                 return
             try:
-                cameras = json.loads(Path(part).read_text()).get("cameras") or []
+                cameras = json.loads(Path(part).read_text(encoding="utf-8")).get("cameras") or []
             except ValueError:
                 return
             for camera in cameras:
