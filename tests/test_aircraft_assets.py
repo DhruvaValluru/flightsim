@@ -758,8 +758,16 @@ def test_a_version_1_or_2_manifest_is_stale_and_rebuilds(tmp_path, monkeypatch):
         return manifest
 
     monkeypatch.setattr(importer, "convert", fake_convert)
-    monkeypatch.setattr(importer, "import_manifests",
-                        lambda manifests, report: steps.append("import"))
+    def fake_import(manifests, report):
+        steps.append("import")
+        # a real import rewrites the .uassets, so they are newer than the
+        # manifest afterwards (the C4-2 rule: an older asset is not imported)
+        for m in manifests:
+            root = json.loads(Path(m).read_text(encoding="utf-8"))
+            parts = root["parts"]; base = root["asset_path_root"].replace("/Game/", "", 1)
+            for part in parts:
+                (tmp_path / "ue" / "Content" / base / f"{part}.uasset").touch()
+    monkeypatch.setattr(importer, "import_manifests", fake_import)
     lines = []
     assert importer.ensure_model("TEST", report=lines.append) == manifest
     # A re-convert is followed by the import since C4-2 (decision 19 can
@@ -771,7 +779,7 @@ def test_a_version_1_or_2_manifest_is_stale_and_rebuilds(tmp_path, monkeypatch):
     assert importer.stale_manifest_reason(manifest) is None
     assert importer.is_converted("TEST") and importer.is_imported("TEST")
     importer.ensure_model("TEST", report=lines.append)
-    assert steps == ["fetch", "convert"]
+    assert steps == ["fetch", "convert", "import"]   # the second ensure added nothing
 
     # Version 3 WITHOUT the field is equally stale: the version is a
     # claim, the field is what the commandlet reads.
