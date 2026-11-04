@@ -3,11 +3,11 @@
   "builder_commit": "8f42b88d",
   "built_commit": "8f42b88d",
   "claims": [],
+  "integrated_commit": "69726238",
   "letter": "B",
   "needs_windows": false,
   "pending_windows": [],
   "stage": "integrated",
   "unit": "B2+B3",
-  "updated": "2026-11-04T12:14:35",
-  "integrated_commit": 69726238
+  "updated": "2026-11-04T12:15:28"
 }
