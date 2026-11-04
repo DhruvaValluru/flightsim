@@ -35,8 +35,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .landmarks import landmark_point
-from .verify import (_engine_landmark_pixels, _record_in_enu, axes_from_quat,
-                     project_point, scene_to_enu)
+from .verify import (_engine_grid_convergence, _engine_landmark_pixels,
+                     _record_in_enu, axes_from_quat, project_point,
+                     scene_to_enu)
 
 #: Colours, chosen to stay legible over both sky and terrain.
 AIRCRAFT = (255, 214, 64)
@@ -96,6 +97,8 @@ def draw_overlays(manifest: Dict, run_dir, out_subdir: str = "overlays",
 
     run_dir = Path(run_dir)
     engine = _engine_landmark_pixels(run_dir)
+    # The grid-to-true turn the host applied per frame (verify._record_in_enu).
+    convergence = _engine_grid_convergence(run_dir)
     landmarks = manifest.get("landmarks") or []
     frames = manifest.get("frames", [])
     if max_frames is not None:
@@ -128,7 +131,8 @@ def draw_overlays(manifest: Dict, run_dir, out_subdir: str = "overlays",
         source = run_dir / str(record.get("file", ""))
         if not source.is_file():
             continue
-        placed = _record_in_enu(record, to_enu)
+        placed = _record_in_enu(record, to_enu,
+                                convergence.get(str(record.get("file"))))
         image = Image.open(source).convert("RGB")
         draw = ImageDraw.Draw(image)
         width, height = image.size

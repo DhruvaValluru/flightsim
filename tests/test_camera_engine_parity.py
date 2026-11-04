@@ -25,6 +25,7 @@ disagreement of the size that matters.
 
 import json
 import math
+import re
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,8 @@ from core.capture.manifest import build_capture_manifest
 from core.capture.poses import solve_pose_track
 from core.capture.schedule import solve_schedule
 from core.capture.verify import (
-    FAIL, NOT_RUN, PASS, verify_landmark_reprojection, verify_triangulation,
+    FAIL, NOT_RUN, PASS, _record_in_enu, scene_to_enu,
+    verify_landmark_reprojection, verify_triangulation,
 )
 from core.nl.compiler import compile_prompt
 from core.scenario.camera import CameraSpec
@@ -146,26 +148,41 @@ def manifest():
                                   cameras=spec.cameras)
 
 
-def write_render_json(manifest, run_dir, jitter_px=0.0, only_camera=None):
+def write_render_json(manifest, run_dir, jitter_px=0.0, only_camera=None,
+                      convergence_deg=None, record_convergence=True,
+                      cameras=None):
     """A render.json in the commandlet's shape, one per camera
-    directory, with every landmark projected the engine's way."""
+    directory, with every landmark projected the engine's way.
+
+    ``convergence_deg`` stands in for the grid convergence the
+    commandlet adds to the card's grid bearing at placement (true
+    heading = grid bearing + convergence): the engine-style pixels are
+    then made with yaw + convergence, and each frame record carries
+    ``camera_grid_convergence_deg`` unless ``record_convergence`` is
+    False (a render that turned the camera but did not say so).
+    ``cameras`` limits which cameras get a render.json.
+    """
     from core.capture.landmarks import landmark_point
 
     to_enu = engine_frame_converter(manifest)
     by_camera = {}
     for record in manifest["frames"]:
+        if cameras is not None and record["camera_id"] not in cameras:
+            continue
         by_camera.setdefault(record["camera_id"], []).append(record)
     for camera_id, records in by_camera.items():
         frames = []
         for record in records:
             # Camera and landmark both into the host's frame; the
-            # recorded rotation is applied there unchanged, as the
-            # commandlet applies it.
+            # recorded rotation is applied there as the commandlet
+            # applies it: unchanged, or turned by the grid convergence.
             placed = dict(record)
             (placed["position_north_m"], placed["position_east_m"],
              placed["position_alt_m"]) = to_enu(record["position_north_m"],
                                                 record["position_east_m"],
                                                 record["position_alt_m"])
+            if convergence_deg is not None:
+                placed["yaw_deg"] = record["yaw_deg"] + convergence_deg
             landmarks = {}
             for landmark in manifest["landmarks"]:
                 px, py, visible = engine_style_pixel(
@@ -180,8 +197,11 @@ def write_render_json(manifest, run_dir, jitter_px=0.0, only_camera=None):
             # the lookup appear to work in tests while never matching a
             # real render.json -- so both engine checks reported NOT RUN
             # on a real run and these tests could not see it.
-            frames.append({"frame": Path(record["file"]).name,
-                           "landmarks": landmarks})
+            frame = {"frame": Path(record["file"]).name,
+                     "landmarks": landmarks}
+            if convergence_deg is not None and record_convergence:
+                frame["camera_grid_convergence_deg"] = convergence_deg
+            frames.append(frame)
         path = run_dir / "frames" / camera_id
         path.mkdir(parents=True, exist_ok=True)
         (path / "render.json").write_text(
@@ -237,6 +257,71 @@ def test_a_displaced_camera_is_caught_against_the_engine(manifest, tmp_path):
         if record["camera_id"] == "chase0":
             record["position_east_m"] += 25.0
     assert verify_landmark_reprojection(manifest, tmp_path).status == FAIL
+
+
+# EPSG:32612 grid convergence at the Grand Canyon scene (36.09 N,
+# -112.0 W), measured by the Windows builder in A12 run A-2: 0.589 deg,
+# which the commandlet placing a grid bearing as a true heading turned
+# into a 1.1%-of-width horizontal offset in every render.
+GRAND_CANYON_CONVERGENCE_DEG = 0.589
+
+
+def test_the_recorded_grid_convergence_turns_the_camera(manifest, tmp_path):
+    """The commandlet adds the grid convergence to the card's grid
+    bearing at placement and records it per frame; the verifier reads
+    the field and turns the recorded orientation by the same amount, so
+    the two projections meet again."""
+    write_render_json(manifest, tmp_path,
+                      convergence_deg=GRAND_CANYON_CONVERGENCE_DEG)
+    check = verify_landmark_reprojection(manifest, tmp_path)
+    assert check.status == PASS, f"landmark_reprojection: {check.detail}"
+    assert "agree with the engine's own" in check.detail
+    # Not merely under the 2 px gate: the turned quaternion and the
+    # engine-style Euler basis with yaw + convergence are the same
+    # rotation (a wrong sign would miss by ~28 px, a wrong axis by more).
+    worst = float(re.search(r"within (\d+\.\d+) px", check.detail).group(1))
+    assert worst < 0.1, check.detail
+    assert verify_triangulation(manifest, tmp_path).status == PASS
+
+
+def test_ignoring_the_recorded_convergence_misses_by_a_percent_of_width(
+        manifest, tmp_path):
+    """The 3.2 px A12 run A-2 failure, reproduced: the engine turned the
+    camera by the convergence, and a verifier that does not is off by
+    about 1.1% of the image width (0.589 deg of a 54.43 deg lens) on
+    every landmark -- above the gate's 2 px tolerance."""
+    write_render_json(manifest, tmp_path,
+                      convergence_deg=GRAND_CANYON_CONVERGENCE_DEG,
+                      record_convergence=False, cameras={"chase0"})
+    check = verify_landmark_reprojection(manifest, tmp_path)
+    assert check.status == FAIL, f"landmark_reprojection: {check.detail}"
+    gaps = [float(g) for g in re.findall(r"(\d+\.\d+) px between", check.detail)]
+    width = float(manifest["frames"][0]["width_px"])
+    assert gaps, check.detail
+    assert all(0.008 * width < gap < 0.015 * width for gap in gaps), (
+        f"landmark_reprojection: {gaps} px against width {width}")
+
+
+def test_a_record_without_the_convergence_field_is_not_turned(manifest,
+                                                              tmp_path):
+    """An older render.json, or an equatorial scene, carries no
+    convergence: the recorded orientation must stay exactly as it is,
+    and the fixtures made that way keep passing."""
+    to_enu = scene_to_enu(manifest)
+    record = manifest["frames"][0]
+    placed = _record_in_enu(record, to_enu)
+    assert placed["quaternion_wxyz"] == record["quaternion_wxyz"]
+    assert placed["yaw_deg"] == record["yaw_deg"]
+    assert "camera_grid_convergence_deg" not in placed
+    turned = _record_in_enu(record, to_enu, GRAND_CANYON_CONVERGENCE_DEG)
+    assert turned["yaw_deg"] == pytest.approx(
+        record["yaw_deg"] + GRAND_CANYON_CONVERGENCE_DEG)
+    assert turned["quaternion_wxyz"] != record["quaternion_wxyz"]
+    assert turned["pitch_deg"] == record["pitch_deg"]
+    assert turned["roll_deg"] == record["roll_deg"]
+    write_render_json(manifest, tmp_path)
+    check = verify_landmark_reprojection(manifest, tmp_path)
+    assert check.status == PASS, f"landmark_reprojection: {check.detail}"
 
 
 def test_two_view_triangulation_recovers_the_landmarks(manifest, tmp_path):
