@@ -126,6 +126,13 @@ def missing_assets(manifest_path: Path) -> List[str]:
 #: tell a stale manifest from a current one.
 MESH_MANIFEST_VERSION = 3
 
+#: The version an airframe WITH a default loadout (``loading.loadout`` in
+#: its config) must reach: its converter (``a4_mdl_convert``) writes the
+#: loaded stations as ``components[]``, one OBJ each. A manifest below it
+#: draws the airframe clean while the FDM carries the stores. Airframes
+#: without a loadout stay at ``MESH_MANIFEST_VERSION``.
+COMPONENTS_MANIFEST_VERSION = 4
+
 
 def stale_manifest_reason(manifest_path: Path) -> Optional[str]:
     """Why an existing manifest must be re-converted, or None when it is
@@ -159,7 +166,30 @@ def stale_manifest_reason(manifest_path: Path) -> Optional[str]:
         return (f"manifest version {version} carries no mesh_origin_actor_cm "
                 f"(got {origin!r}); the mesh would be attached at the "
                 f"structural datum")
+    components = _missing_components_reason(manifest, version)
+    if components:
+        return components
     return _unimportable_output_reason(Path(manifest_path), manifest)
+
+
+def _missing_components_reason(manifest: Dict, version: int) -> Optional[str]:
+    """Stale when the airframe's config states a default loadout
+    (``loading.loadout``, the A-4) but the manifest predates
+    ``COMPONENTS_MANIFEST_VERSION`` or carries no ``components`` list: the
+    render would draw a clean airframe while the FDM flies the stores.
+    An airframe whose config has no loadout is never stale for this."""
+    name = manifest.get("name")
+    config = load_config(name) if isinstance(name, str) else None
+    loadout = ((config or {}).get("loading") or {}).get("loadout")
+    if not loadout:
+        return None
+    if version < COMPONENTS_MANIFEST_VERSION or "components" not in manifest:
+        stations = ", ".join(sorted((loadout.get("model_vars") or {}).keys())) or "?"
+        return (f"manifest version {version} of the {name} carries no "
+                f"components[] while its config states a default loadout "
+                f"({stations}); the loaded stations would not be drawn "
+                f"(needs version {COMPONENTS_MANIFEST_VERSION})")
+    return None
 
 
 def _png_size(path: Path) -> Optional[tuple]:
