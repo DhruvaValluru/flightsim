@@ -2,6 +2,7 @@
   "2b746352": "",
   "A-2": "",
   "FAIL": "",
+  "PASS": "",
   "budget_used": 30,
   "builder_commit": "2b746352",
   "claims": [
@@ -32,7 +33,7 @@
   "run_id": "",
   "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T11:39:34",
+  "updated": "2026-11-04T11:53:55",
   "verdict": "",
   "windows_build": "",
   "worktree": "../p3w-A5"

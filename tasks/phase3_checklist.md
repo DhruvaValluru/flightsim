@@ -55,7 +55,7 @@ sitting 0.4 m from its label (it was ~25 m).
 - [x] **A4 · An old engine program can't draw the pictures**
   - Check: after changing one `.cpp` without rebuilding, a render stops with
     `engine.binary_stale`.
-- [ ] **A5 · JSBSim plugin set up again on this version** 🪟
+- [x] **A5 · JSBSim plugin set up again on this version** 🪟
   - Check: `scripts/check_bridge_api.sh` passes and the build passes.
   - Check: each of its six patches is marked needed or not needed.
   - Check: the plane flies the same in the engine as in Python (`gate5_ue_parity.py`).

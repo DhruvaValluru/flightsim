@@ -1,8 +1,8 @@
 {
   "A-2": "",
   "FAIL": "",
-  "budget_used": 9,
-  "builder_commit": "9f033ef9",
+  "budget_used": 38,
+  "builder_commit": "79939f51589a94d9aab1526aa1916076b3dc7fa5",
   "claims": [
     "scripts/ue_create_materials.py"
   ],
@@ -21,8 +21,8 @@
   "pushed_commit": "23bad766",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "building",
-  "updated": "2026-11-04T11:38:08",
+  "stage": "built_local",
+  "updated": "2026-11-04T11:53:47",
   "verdict": "",
   "worktree": "../p3w-A6"
 }

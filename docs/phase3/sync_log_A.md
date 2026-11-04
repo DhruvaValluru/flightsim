@@ -1898,3 +1898,495 @@ ff32cbcd A9: a camera with zero frames refuses render.camera_empty by name (CLI 
  6 files changed, 151 insertions(+)
 ```
 
+## A5 · PASS · run A-2 · 2026-11-04T16:53:55Z
+
+verify line(s) from tasks/phase3_checklist.md:
+
+```
+61:   - Check: the plane flies the same in the engine as in Python (`gate5_ue_parity.py`).
+```
+
+output line(s) that satisfy it:
+
+```
+runs/p3/A-2/A5-gate5-full.log:   [PASS] identical scenario, both hosts, matching trajectories within stated tolerance   /   GATE 5: PASS -- all three clauses, each measured.   (exit 0)
+runs/p3/A-2/A5-gate5-full.log:   [ok  ] altitude_m max difference 0.07226 (tolerance 5, 555 samples) ... heading_deg 0.08153 (tolerance 1) ... lon_deg 5.223e-06 (tolerance 0.0001); time overlap 0.100..59.900 s elapsed (99.7%); origins headless 4.875 s unreal 0.008 s (aligned to elapsed time)
+runs/p3/A-2/A5-check-bridge-api.log: API surface matches. (exit 0)  /  runs/p3/A-2/A5-vendor.log: dll sha256 e7c302ec... targets UE 5.7 (exit 0)  /  runs/p3/A-2/A5-build-main.log: Result: Succeeded (0 'error C')
+```
+
+note: run A-2; the on-screen clauses also pass on 5.7 (control surfaces articulate: aileron 8.75 deg, elevator 4.31 deg; commanded roll visible r=0.99795); decisions 11 and 14 record the two contracts the box settled
+
+### synopsis
+
+# A5 synopsis
+
+run_id: A-2
+machine: windows
+written: 2026-11-04T16:53:53Z
+
+## A5 step 4: vendor_ue_plugin.ps1 for UE 5.7
+
+- log: `runs/p3/A-2/A5-vendor.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+  	    New File  		     912	refuel.xml
+  100%  
+  	    New File  		    1982	rpm_governor.xml
+  100%  
+  	    New File  		    1686	SensorBaro.xml
+  100%  
+  	    New File  		    3835	SensorGps.xml
+  100%  
+  	    New File  		    8925	SensorImu.xml
+  100%  
+  	    New File  		     514	speedbrakes.xml
+  100%  
+  	    New File  		   12153	sperry-a2-autopilot.xml
+  100%  
+  	    New File  		     824	tail_wheel_lock.xml
+  100%  
+  	    New File  		    7570	visual-reference-point-extensions.xml
+  100%  
+  
+  ------------------------------------------------------------------------------
+  
+                 Total    Copied   Skipped  Mismatch    FAILED    Extras
+      Dirs :         1         1         0         0         0         0
+     Files :        30        30         0         0         0         0
+     Bytes :   172.5 k   172.5 k         0         0         0         0
+     Times :   0:00:00   0:00:00                       0:00:00   0:00:00
+  
+  
+     Speed :           3,925,600 Bytes/sec.
+     Speed :             224.625 MegaBytes/min.
+     Ended : Wednesday, November 4, 2026 10:56:38 AM
+  
+VENDORED.json updated
+
+vendored Win64 library into C:\Users\kanth\flightsim\ue\Plugins\JSBSimFlightDynamicsModel\Source\ThirdParty\JSBSim\Lib
+  tag        v1.2.4 @ e07a7d810d4f
+  engine     targets UE 5.7 (recorded, not a measurement of a build)
+  dll sha256 e7c302ecb931c2d069d15ce2ded237473b5ad985c643d3a41357fcf2b340f540
+
+Next: .\scripts\build_ue.ps1
+```
+
+## A5 step 5: build_ue.ps1 on 5.7.4 after the Windows builder's fixes (2b746352)
+
+- log: `runs/p3/A-2/A5-build-main.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+building FlightSimEditor Win64 Development against UE 5.7.4 at C:\Program Files\Epic Games\UE_5.7
+Using bundled DotNet SDK version: 8.0.412 win-x64
+Running UnrealBuildTool: dotnet "..\..\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" FlightSimEditor Win64 Development -project=C:\Users\kanth\flightsim\ue\FlightSim.uproject -waitmutex
+Log file: C:\Users\kanth\AppData\Local\UnrealBuildTool\Log.txt
+Using 'git status' to determine working set for adaptive non-unity build (C:\Users\kanth\flightsim).
+Invalidating makefile for FlightSimEditor (DefaultEngine.ini modified)
+JSBSim Path Check OK: C:\Users\kanth\flightsim\ue\Plugins\JSBSimFlightDynamicsModel\Source\ThirdParty\JSBSim\Lib\JSBSim.dll
+UHT compiled-in object format Default
+Building FlightSimEditor...
+Using Visual Studio 2022 14.44.35228 toolchain (C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207) and Windows 10.0.26100.0 SDK (C:\Program Files (x86)\Windows Kits\10).
+Determining max actions to execute in parallel (8 physical cores, 12 logical cores)
+  Executing up to 8 processes, one per physical core
+  Requested 1.5 GB memory per action, 6.12 GB available: limiting max parallel actions to 4
+Using Unreal Build Accelerator local executor to run 5 action(s)
+  Storage capacity 40Gb
+---- Starting trace: 261104_113201 ----
+UbaServer - Listening on 0.0.0.0:1345
+[1/5] Compile [x64] Module.FlightSimBridge.2.cpp
+[2/5] Compile [x64] Module.FlightSimBridge.1.cpp
+[3/5] Link [x64] UnrealEditor-FlightSimBridge.lib
+[4/5] Link [x64] UnrealEditor-FlightSimBridge.dll
+[5/5] WriteMetadata FlightSimEditor.target [NoUba]
+
+Trace written to file C:/Users/kanth/AppData/Local/UnrealBuildTool/Log.uba with size 6.1kb
+Total time in Unreal Build Accelerator local executor: 33.75 seconds
+
+Result: Succeeded
+Total execution time: 40.59 seconds
+stamped 99dc982e65ccb81a75a3719cd468876c4900098eafc29c08313807ce4eacd80e
+
+built. Next: .\scripts\ue_preflight.ps1 to confirm, then render.
+```
+
+## A5 step 6: check_bridge_api.sh with UE_ROOT at UE_5.7
+
+- log: `runs/p3/A-2/A5-check-bridge-api.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+  start mixture                              ok  card-carried mixture (piston-at-altitude patch)
+  UCineCameraComponent                       ok  derives from UCameraComponent (a USceneComponent)
+  module CesiumRuntime                       ok  resolves
+  module CinematicCamera                     ok  resolves
+  module GeoReferencing                      ok  resolves
+  module ImageWrapper                        ok  resolves
+  module InputCore                           ok  resolves
+  module JSBSimFlightDynamicsModel           ok  resolves
+  module Json                                ok  resolves
+  module JsonUtilities                       ok  resolves
+  module Landscape                           ok  resolves
+  module Niagara                             ok  resolves
+  module ProceduralMeshComponent             ok  resolves
+  module RHI                                 ok  resolves
+  module RenderCore                          ok  resolves
+  DirectionalLight AtmosphereSunLightIndex   ok  present
+  DirectionalLight AtmosphereSunDiskColorScale ok  present
+  DirectionalLight per-pixel transmittance   ok  present
+  Fog SetFogInscatteringColor                ok  present
+  Fog sky-atmosphere ambient scale           ok  present
+  AVolumetricCloud                           ok  present
+  VolumetricCloud SetLayerBottomAltitude     ok  present
+  VolumetricCloud SetLayerHeight             ok  present
+  VolumetricCloud SetMaterial                ok  present
+  PostProcess GI method                      ok  present
+  PostProcess reflection method              ok  present
+  PostProcess physical camera exposure       ok  present
+  PostProcess FilmGrainIntensity             ok  present
+  PostProcess SceneFringeIntensity           ok  present
+  show flag Cloud                            ok  present
+  show flag LumenGlobalIllumination          ok  present
+  show flag LumenReflections                 ok  present
+  show flag Grain                            ok  present
+  show flag SceneColorFringe                 ok  present
+  show flag Vignette                         ok  present
+  engine simple cloud material               ok  present
+  plugin dependencies                        ok  all enabled in FlightSim.uproject
+
+API surface matches. This is NOT a compile -- it means the first build
+should fail on ordinary C++ errors, not on structural mismatches.
+```
+
+## A5 step 8 / sheet check: gate5_ue_parity.py with --unreal-telemetry (fixed build) and --unreal-render (roll doublet)
+
+- log: `runs/p3/A-2/A5-gate5-full.log`
+- exit: 0 (expected 0) -> PASS
+
+```
+  trajectory  runs\p3\A-2\gate5_c172p_fixed\unreal.json (600 samples)
+
+================================================================================================
+3. host parity
+================================================================================================
+  [ok  ] time overlap   0.100..59.900 s elapsed (99.7% of the headless run's 60.000 s; UE ran 59.900 s)
+  origins  headless 4.875 s  unreal 0.008 s  (aligned to elapsed time)
+  [ok  ] altitude_m     max difference    0.07226 (tolerance 5, 555 samples)
+  [ok  ] tas_kt         max difference   0.007988 (tolerance 2, 555 samples)
+  [ok  ] roll_deg       max difference    0.01817 (tolerance 1, 555 samples)
+  [ok  ] pitch_deg      max difference   0.003191 (tolerance 1, 555 samples)
+  [ok  ] heading_deg    max difference    0.08153 (tolerance 1, 555 samples)
+  [ok  ] n_z            max difference  0.0001352 (tolerance 0.05, 555 samples)
+  [ok  ] lat_deg        max difference    5.4e-06 (tolerance 0.0001, 555 samples)
+  [ok  ] lon_deg        max difference  5.223e-06 (tolerance 0.0001, 555 samples)
+
+================================================================================================
+4. on screen
+================================================================================================
+  110 frames at 960x540, airframe: placeholder boxes, not a visual asset
+  [ok  ] frames show the aircraft     110 frames, aircraft covers 4.28%-9.33% of the frame (floor 0.5%)
+  [ok  ] camera never inherits roll   max |camera roll| 0.000000 deg over the run, preset chase
+  [ok  ] control surfaces articulate  4 bound to geometry, 3 moved: aileron_l 8.75 deg, aileron_r 8.75 deg, elevator 4.31 deg, rudder 0.00 deg
+  [ok  ] commanded roll is visible    apparent bank in the pixels tracks FDM roll at r=0.99795, over -71.9..+40.4 deg (FDM -64.6..+40.3)
+
+================================================================================================
+GATE 5
+================================================================================================
+  [PASS] identical scenario, both hosts, matching trajectories within stated tolerance
+  [PASS] control surfaces visibly articulate
+  [PASS] commanded roll is visible on screen
+
+  GATE 5: PASS -- all three clauses, each measured.
+  Scope: one airframe, one envelope point, still air, flat terrain,
+  and a placeholder box airframe. Visual realism is Phase 6 and is
+  not what this gate asked for.
+            [JSBSim-ML v2.0]
+
+JSBSim startup beginning ...
+
+```
+
+note: run A-2 on UE 5.7.4: three FAIL packets led here (A5-1 script defects on 5.5, A5-2 Water profile exit 1 + trim-mode mismatch fixed in 2b746352, A5-3 harness clock origins fixed by the Mac in d4fd0dfd); the Windows build is 99dc982e (build_stamp.json engine_version 5.7.4)
+
+## verdict
+
+PASS
+
+### the box's commits on the branch (final diff, by stat)
+
+```
+fff1d50b Phase 3: log decision 15 and the A5 retry 3 push
+d4fd0dfd Phase 3 A5 retry 3: notes, state, Mac event log
+0b49a87f Merge p3-A5r3: A5 retry 3, gate5 parity grades on elapsed hands-off time (decision 14)
+ca3103fc A5 retry 3: gate5 parity grades on elapsed hands-off time (decision 14)
+7cab0177 Phase 3 run A-2: A5 packet 3 (parity harness clock origins), decision 14, Windows builder machine notes
+b7053df7 Merge p3w-A5: A5 Windows builder (WaterBodyCollision profile; still-air longitudinal re-trim per decision 11)
+2b746352 A5: WaterBodyCollision profile for 5.7 (Cesium pulls Water) and calm cards re-trim tLongitudinal like core (decision 11)
+79448961 Phase 3: log the A5 push and the A8 note (run A-2)
+71bd9053 Phase 3 A5 retry 2: notes, state, Mac event log
+049fcf88 Merge p3-A5r2: A5 retry 2, gate5 parity preflight runs ue_preflight.ps1 on Windows
+5b037fc8 A5 retry 2: gate5 parity preflight runs ue_preflight.ps1 on Windows
+56289aff Phase 3: A5 state keeps Windows' run A-2 verdict fields (Mac adds stage/retry only)
+ec43bbd6 Phase 3: log the A4 PASS verdict (run A-2) and the A5 retry 2 start
+9eb894e7 Phase 3 run A-2: A5 FAIL packet 2 (Water collision profile exit 1; trim-mode mismatch between hosts), decision 11 (UE host trims like core)
+6bc6c204 Phase 3 run A-2: A5 check_bridge_api.sh passes on 5.7; Smart App Control blocks the Cesium runtime dll, every 5.7 editor run stops (machine note)
+3f92a998 Phase 3: Windows event log (web app stopped for memory, A5 retry state)
+6cd75cea Phase 3: log the A5 retry push
+ad73e6ae Phase 3 A5 retry: triage and integrator notes, Mac event log
+ab11bc5c Merge p3-A5r: A5 retry, check_bridge_api.sh fixes
+29201a34 A5 retry: check_bridge_api.sh module list, show-flag patterns, project Cesium path, venv python
+6264aa55 Phase 3 A5: FAIL packet 1 (check_bridge_api.sh defects on 5.5)
+e7876720 A5: Win64 JSBSim library re-vendored on this machine (v1.2.4 @ e07a7d81, dll sha256 recorded)
+40b2a3dd Merge p3-A5: VENDORED.json ue_engine_target 5.5 and per-patch status_5_5
+289626a9 Merge phase-2-final into p3-A5
+d5d00f36 A5: VENDORED.json targets 5.5 with per-patch status; pin test
+
+fff1d50b Phase 3: log decision 15 and the A5 retry 3 push
+
+ docs/phase3/events_mac.log | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+d4fd0dfd Phase 3 A5 retry 3: notes, state, Mac event log
+
+ docs/phase3/events_mac.log | 1 +
+ docs/phase3/state/A5.json  | 4 ++--
+ docs/phase3/state/B1.json  | 8 +++++++-
+ 3 files changed, 10 insertions(+), 3 deletions(-)
+
+0b49a87f Merge p3-A5r3: A5 retry 3, gate5 parity grades on elapsed hands-off time (decision 14)
+
+ experiments/gate5_ue_parity.py | 50 +++++++++++++++++++++------
+ tests/test_host_parity.py      | 77 +++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 115 insertions(+), 12 deletions(-)
+
+ca3103fc A5 retry 3: gate5 parity grades on elapsed hands-off time (decision 14)
+
+ experiments/gate5_ue_parity.py | 50 +++++++++++++++++++++------
+ tests/test_host_parity.py      | 77 +++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 115 insertions(+), 12 deletions(-)
+
+7cab0177 Phase 3 run A-2: A5 packet 3 (parity harness clock origins), decision 14, Windows builder machine notes
+
+ docs/PHASE3_LOG.md             |  2 ++
+ docs/phase3/decisions.md       |  4 +++
+ docs/phase3/events_windows.log |  5 +++
+ docs/phase3/packets/A5-3.md    | 80 ++++++++++++++++++++++++++++++++++++++++++
+ docs/phase3/state/A5.json      | 13 ++++---
+ 5 files changed, 99 insertions(+), 5 deletions(-)
+
+b7053df7 Merge p3w-A5: A5 Windows builder (WaterBodyCollision profile; still-air longitudinal re-trim per decision 11)
+
+ ue/Config/DefaultEngine.ini                        | 14 +++++++++++++
+ .../Private/FlightSimScenarioWorld.cpp             | 24 +++++++++++++++++++++-
+ .../Public/FlightSimScenarioWorld.h                |  6 ++++--
+ 3 files changed, 41 insertions(+), 3 deletions(-)
+
+2b746352 A5: WaterBodyCollision profile for 5.7 (Cesium pulls Water) and calm cards re-trim tLongitudinal like core (decision 11)
+
+ ue/Config/DefaultEngine.ini                        | 14 +++++++++++++
+ .../Private/FlightSimScenarioWorld.cpp             | 24 +++++++++++++++++++++-
+ .../Public/FlightSimScenarioWorld.h                |  6 ++++--
+ 3 files changed, 41 insertions(+), 3 deletions(-)
+
+79448961 Phase 3: log the A5 push and the A8 note (run A-2)
+
+ docs/phase3/events_mac.log | 2 ++
+ 1 file changed, 2 insertions(+)
+
+71bd9053 Phase 3 A5 retry 2: notes, state, Mac event log
+
+ docs/phase3/events_mac.log | 20 ++++++++++++++++++++
+ docs/phase3/notes/A5.md    |  6 ++++++
+ docs/phase3/state/A5.json  |  5 +++--
+ 3 files changed, 29 insertions(+), 2 deletions(-)
+
+049fcf88 Merge p3-A5r2: A5 retry 2, gate5 parity preflight runs ue_preflight.ps1 on Windows
+
+ experiments/gate5_ue_parity.py | 17 +++++++++---
+ tests/test_host_parity.py      | 62 +++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 74 insertions(+), 5 deletions(-)
+
+5b037fc8 A5 retry 2: gate5 parity preflight runs ue_preflight.ps1 on Windows
+
+ experiments/gate5_ue_parity.py | 17 +++++++++---
+ tests/test_host_parity.py      | 62 +++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 74 insertions(+), 5 deletions(-)
+
+56289aff Phase 3: A5 state keeps Windows' run A-2 verdict fields (Mac adds stage/retry only)
+
+ docs/phase3/state/A5.json | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+ec43bbd6 Phase 3: log the A4 PASS verdict (run A-2) and the A5 retry 2 start
+
+ docs/phase3/events_mac.log |  3 +++
+ docs/phase3/state/A5.json  | 21 +++++++--------------
+ 2 files changed, 10 insertions(+), 14 deletions(-)
+
+9eb894e7 Phase 3 run A-2: A5 FAIL packet 2 (Water collision profile exit 1; trim-mode mismatch between hosts), decision 11 (UE host trims like core)
+
+ docs/PHASE3_LOG.md             |   2 +
+ docs/phase3/decisions.md       |   2 +
+ docs/phase3/events_windows.log |  12 +++++
+ docs/phase3/packets/A5-2.md    | 112 +++++++++++++++++++++++++++++++++++++++++
+ docs/phase3/state/A5.json      |  11 ++--
+ 5 files changed, 135 insertions(+), 4 deletions(-)
+
+6bc6c204 Phase 3 run A-2: A5 check_bridge_api.sh passes on 5.7; Smart App Control blocks the Cesium runtime dll, every 5.7 editor run stops (machine note)
+
+ docs/PHASE3_LOG.md             | 2 ++
+ docs/phase3/decisions.md       | 1 +
+ docs/phase3/events_windows.log | 7 +++++++
+ 3 files changed, 10 insertions(+)
+
+3f92a998 Phase 3: Windows event log (web app stopped for memory, A5 retry state)
+
+ docs/phase3/events_windows.log | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+6cd75cea Phase 3: log the A5 retry push
+
+ docs/phase3/events_windows.log | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+ad73e6ae Phase 3 A5 retry: triage and integrator notes, Mac event log
+
+ docs/phase3/events_mac.log | 5 +++++
+ docs/phase3/notes/A5.md    | 8 ++++++++
+ 2 files changed, 13 insertions(+)
+
+ab11bc5c Merge p3-A5r: A5 retry, check_bridge_api.sh fixes
+
+ scripts/check_bridge_api.sh    | 79 ++++++++++++++++++++++++++++++++++++------
+ tests/test_check_bridge_api.py | 74 +++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 142 insertions(+), 11 deletions(-)
+
+29201a34 A5 retry: check_bridge_api.sh module list, show-flag patterns, project Cesium path, venv python
+
+ scripts/check_bridge_api.sh    | 79 ++++++++++++++++++++++++++++++++++++------
+ tests/test_check_bridge_api.py | 74 +++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 142 insertions(+), 11 deletions(-)
+
+6264aa55 Phase 3 A5: FAIL packet 1 (check_bridge_api.sh defects on 5.5)
+
+ docs/phase3/events_windows.log |  6 +++++
+ docs/phase3/packets/A5-1.md    | 61 ++++++++++++++++++++++++++++++++++++++++++
+ docs/phase3/state/A5.json      |  7 ++++-
+ 3 files changed, 73 insertions(+), 1 deletion(-)
+
+e7876720 A5: Win64 JSBSim library re-vendored on this machine (v1.2.4 @ e07a7d81, dll sha256 recorded)
+
+ docs/phase3/events_windows.log                     | 42 ++++++++++++++++++++++
+ ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json |  7 ++--
+ 2 files changed, 47 insertions(+), 2 deletions(-)
+
+40b2a3dd Merge p3-A5: VENDORED.json ue_engine_target 5.5 and per-patch status_5_5
+
+ tests/test_ue_physics_source.py                    |  8 ++++++++
+ ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json | 19 +++++++++++++------
+ 2 files changed, 21 insertions(+), 6 deletions(-)
+
+289626a9 Merge phase-2-final into p3-A5
+
+ README.md                                          |    4 +-
+ assets/aircraft_config/A4.json                     |   79 +-
+ assets/fdm_root/aircraft/A4/A4.xml                 |    6 +-
+ assets_pipeline/a4_performance.py                  |   11 +-
+ assets_pipeline/a4_sync.py                         |    8 +-
+ core/capture/airframe.py                           |  115 +-
+ core/capture/labels.py                             |  126 +-
+ core/capture/manifest.py                           |   15 +-
+ core/capture/objects.py                            |   28 +-
+ core/messages/catalog.yaml                         |    3 +
+ core/scenario/blocks.py                            |    2 +-
+ core/util/platform.py                              |   28 +-
+ docs/CAMERA_WINDOWS.md                             |    3 +-
+ docs/phase3/BUILDER_BRIEF.md                       |   52 +
+ docs/phase3/INTEGRATOR_BRIEF.md                    |   52 +
+ docs/phase3/SUBAGENT_BRIEF.md                      |   47 +
+ docs/phase3/digest_A.md                            | 1260 ++++++++++++
+ docs/phase3/events_mac.log                         |  239 +++
+ docs/phase3/notes/A1.md                            |   55 +
+ docs/phase3/notes/A10.md                           |   50 +
+ docs/phase3/notes/A11.md                           |   59 +
+ docs/phase3/notes/A12.md                           |   58 +
+ docs/phase3/notes/A13.md                           |   44 +
+ docs/phase3/notes/A2.md                            |   79 +
+ docs/phase3/notes/A3.md                            |   69 +
+ docs/phase3/notes/A4.md                            |   85 +
+ docs/phase3/notes/A5.md                            |   58 +
+ docs/phase3/notes/A6.md                            |   59 +
+ docs/phase3/notes/A7.md                            |   64 +
+ docs/phase3/notes/A8.md                            |   61 +
+ docs/phase3/notes/A9.md                            |   60 +
+ docs/phase3/notes/C1.md                            |   64 +
+ docs/phase3/notes/C5.md                            |   68 +
+ docs/phase3/notes/C6.md                            |   65 +
+ docs/phase3/state/A.json                           |   41 +
+ docs/phase3/state/A1.json                          |   15 +
+ docs/phase3/state/A10.json                         |   15 +
+ docs/phase3/state/A11.json                         |    7 +
+ docs/phase3/state/A12.json                         |   24 +
+ docs/phase3/state/A13.json                         |   10 +
+ docs/phase3/state/A2.json                          |   16 +
+ docs/phase3/state/A3.json                          |   17 +
+ docs/phase3/state/A4.json                          |   18 +
+ docs/phase3/state/A5.json                          |   18 +
+ docs/phase3/state/A6.json                          |   17 +
+ docs/phase3/state/A7.json                          |    7 +
+ docs/phase3/state/A8.json                          |    7 +
+ docs/phase3/state/A9.json                          |    7 +
+ docs/phase3/state/A_decisions_needed.md            |   15 +
+ docs/phase3/state/C1.json                          |   14 +
+ docs/phase3/state/C5.json                          |   23 +
+ docs/phase3/state/C6.json                          |    7 +
+ docs/schemas/capture_manifest.v8.schema.json       | 2059 ++++++++++++++++++++
+ scripts/build_ue.ps1                               |   25 +-
+ scripts/build_ue.sh                                |    6 +-
+ scripts/check_bridge_api.sh                        |    2 +-
+ scripts/deploy_windows.ps1                         |    2 +-
+ scripts/mutation_check.sh                          |   14 +-
+ scripts/phase3_digest.py                           |  149 ++
+ scripts/phase3_event.py                            |    5 +-
+ scripts/phase3_state.py                            |  110 ++
+ scripts/render_ue_scenario.sh                      |    2 +-
+ scripts/run_ue_scenario.sh                         |    2 +-
+ scripts/setup.ps1                                  |    2 +-
+ scripts/setup.sh                                   |    2 +-
+ scripts/ue_create_materials.py                     |    2 +-
+ scripts/ue_engine.ps1                              |   50 +
+ scripts/ue_preflight.ps1                           |   56 +-
+ scripts/ue_preflight.sh                            |    6 +-
+ scripts/vendor_ue_plugin.ps1                       |   14 +-
+ scripts/vendor_ue_plugin.sh                        |    8 +-
+ tests/test_a4.py                                   |   14 +-
+ tests/test_airframe.py                             |   99 +
+ tests/test_camera_labels.py                        |    5 +-
+ tests/test_capture_objects.py                      |    5 +-
+ tests/test_capture_schema.py                       |    4 +-
+ tests/test_component_labels.py                     |  180 ++
+ tests/test_gate6_visual.py                         |    3 +-
+ tests/test_platform.py                             |  104 +-
+ tests/test_powershell_scripts.py                   |   60 +
+ tests/test_toolchain_doc.py                        |   49 +
+ tests/test_ue_materials.py                         |   23 +
+ tests/test_ue_weather_source.py                    |   11 +
+ tests/test_versions.py                             |    2 +-
+ tests/test_webapp_generate.py                      |   59 +
+ ue/FlightSim.uproject                              |    2 +-
+ .../Private/FlightSimRenderCommandlet.cpp          |    2 +-
+ .../FlightSimBridge/Private/FlightSimWeather.cpp   |   19 +-
+ .../Resources/JSBSim/aircraft/A4/A4.xml            |    6 +-
+ ue/Source/FlightSim.Target.cs                      |    2 +-
+ ue/Source/FlightSimEditor.Target.cs                |    2 +-
+ webapp/generate.py                                 |   11 +
+ 92 files changed, 6346 insertions(+), 186 deletions(-)
+
+d5d00f36 A5: VENDORED.json targets 5.5 with per-patch status; pin test
+
+ tests/test_ue_physics_source.py                    |  8 ++++++++
+ ue/Plugins/JSBSimFlightDynamicsModel/VENDORED.json | 19 +++++++++++++------
+ 2 files changed, 21 insertions(+), 6 deletions(-)
+```
+
