@@ -62,3 +62,35 @@ def test_cli_refuses_one_empty_camera(tmp_path, capsys):
     assert _refuse([Violation("render.camera_empty", empty[0])]) == 2
     out = capsys.readouterr().out
     assert "render.camera_empty" in out and "cam_b" in out
+
+
+def test_cli_render_path_refuses_when_one_camera_drew_nothing(tmp_path, capsys,
+                                                              monkeypatch):
+    """Drives capture --render itself: the stub render writes frames for
+    the first card camera only, so the post-render check must refuse."""
+    import json
+
+    import assets_pipeline.importer as importer_module
+    import core.render.headless as headless
+    import core.util.platform as platform_module
+    from flightsim.capture import main as capture_main
+
+    def one_camera_only(command, log, **kwargs):
+        parts = [str(p) for p in command]
+        for i, part in enumerate(parts[:-1]):
+            if part.endswith("card.json") and Path(part).is_file():
+                cameras = json.loads(Path(part).read_text())["cameras"]
+                first = Path(parts[i + 1]) / str(cameras[0]["camera_id"])
+                first.mkdir(parents=True, exist_ok=True)
+                (first / "frame_0000.png").write_bytes(b"x")
+                break
+        return headless.HeadlessResult(0)
+
+    monkeypatch.setattr(platform_module, "ue_available", lambda: True)
+    monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    monkeypatch.setattr(headless, "run_headless", one_camera_only)
+    spec = Path(__file__).resolve().parents[1] / "examples" / "cameras_multi.yaml"
+    code = capture_main([str(spec), "--out", str(tmp_path / "o"),
+                         "--max-previews", "0", "--render", "--no-host-flight"])
+    assert code == 2
+    assert "render.camera_empty" in capsys.readouterr().out
