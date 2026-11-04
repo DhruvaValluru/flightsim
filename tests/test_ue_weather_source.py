@@ -373,10 +373,27 @@ def test_a_storm_material_built_by_an_older_script_is_built_again():
     assert "set_metadata_tag(material, STORM_GENERATION_TAG, STORM_GENERATIONS[name])" in stamp
     maker = SCRIPT[SCRIPT.index("def _storm_material"):SCRIPT.index("_ASIDE = {}")]
     assert "storm_material_stale(name)" in maker
-    # The old asset is set aside, never deleted before the new one is saved
+    # The old asset is set aside, never gone before the new one is saved
     # (measured 2026-10-09: a delete-then-build left the storm no material).
-    assert "rename_asset(full, aside)" in maker and "raise RuntimeError" in maker
-    assert "unreal.EditorAssetLibrary.delete_asset(full)" not in maker
+    # Set aside as a COPY, not by rename (2026-11-04, A6 run A-2: rename_asset
+    # registers a soft-path redirect <name> -> <name>_prev, the metadata is
+    # keyed by soft object path, so the new asset's STORM_GENERATION stamp was
+    # saved under the _prev path, left unseen, and every run rebuilt it).
+    # Source order pins the invariant: duplicate to the aside, prove the copy
+    # exists, and only then delete the original; a copy that fails raises
+    # before anything is deleted, a delete that fails drops the copy and raises.
+    assert "rename_asset(full, aside)" not in maker
+    copy = maker.index("unreal.EditorAssetLibrary.duplicate_asset(full, aside)")
+    proof = maker.index("not unreal.EditorAssetLibrary.does_asset_exist(aside)")
+    drop = maker.index("if not unreal.EditorAssetLibrary.delete_asset(full):")
+    assert copy < proof < drop
+    assert maker.count("unreal.EditorAssetLibrary.delete_asset(full)") == 1   # once, after the copy
+    assert "raise RuntimeError" in maker[copy:drop] and "raise RuntimeError" in maker[drop:]
+    assert "_ASIDE[name] = aside" in maker[drop:] and "MATERIAL-REBUILT" in maker[drop:]
+    assert "2026-11-04" in maker and "redirect" in maker   # the reason travels with the code
+    # A failed build puts the aside copy back at the asset's path.
+    restore = SCRIPT[SCRIPT.index("def restore_storm_materials"):SCRIPT.index("def storm_material_stale")]
+    assert "rename_asset(aside, full)" in restore and "MATERIAL-RESTORED" in restore
     assert "restore_storm_materials()" in SCRIPT[SCRIPT.index("def _guard"):]
     stamp = SCRIPT[SCRIPT.index("def finish_storm"):SCRIPT.index("def storm_scattering")]
     assert "_ASIDE.pop(name, None)" in stamp and "delete_asset(aside)" in stamp
