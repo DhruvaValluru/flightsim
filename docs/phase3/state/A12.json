@@ -25,14 +25,14 @@
     "recommit tests/fixtures/engine_bundle_min/cited/* byte-exact (-text attribute) so sha256 = card: mesh 23d046ed, sidecar 1c342831",
     "pytest -q tests/test_engine_bundle_golden.py passes on Windows and Mac"
   ],
-  "pushed_commit": "968dcb60",
+  "pushed_commit": "0041c09e",
   "retry": 2,
   "route": "interaction",
   "run_id": "",
   "run_requested": "A-2",
-  "stage": "integrated",
+  "stage": "pushed",
   "unit": "A12+A13",
-  "updated": "2026-11-04T16:26:54",
+  "updated": "2026-11-04T16:28:00",
   "verdict": "",
   "windows_build": "",
   "worktree": "../p3-A12r2"
