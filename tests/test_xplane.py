@@ -581,10 +581,10 @@ def test_water_tile_path_is_the_simulators_own_formula():
 
     # REN_degree::create_water_shader: "%sworld/water/%+03d%+04d/%+03d%+04d.png"
     # with the folder floored to 10 degrees (negatives round away from 0).
-    assert str(water_tile_relpath(46.005, 7.72)) == "+40+000/+46+007.png"
-    assert str(water_tile_relpath(37.8, -119.5)) == "+30-120/+37-120.png"
-    assert str(water_tile_relpath(-3.2, -60.5)) == "-10-070/-04-061.png"
-    assert str(water_tile_relpath(0.5, 0.5)) == "+00+000/+00+000.png"
+    assert water_tile_relpath(46.005, 7.72).as_posix() == "+40+000/+46+007.png"
+    assert water_tile_relpath(37.8, -119.5).as_posix() == "+30-120/+37-120.png"
+    assert water_tile_relpath(-3.2, -60.5).as_posix() == "-10-070/-04-061.png"
+    assert water_tile_relpath(0.5, 0.5).as_posix() == "+00+000/+00+000.png"
 
 
 def test_water_tiles_give_the_tiles_colour_and_none_elsewhere(render_dir):

@@ -47,3 +47,9 @@ tests/fixtures/engine_bundle_min/cited/** -text
 # D2: the vendored J-11A's hashes and licence text stay byte-exact on Windows.
 assets/fdm_root/aircraft/J11/** -text
 docs/phase3/packets/D1-SU-27SK-LICENSE.txt -text
+
+# Windows CI, 2026-11-04: these files' bytes are pinned by digests; a CRLF
+# checkout made radiometry refuse and the shipped profiles change hash.
+assets/cie/** -text
+assets/camera_profiles/** -text
+assets/instrument_profiles/** -text

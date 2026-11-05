@@ -1,6 +1,7 @@
 """Source-reading tests over scripts/check_bridge_api.sh (A5 retry, UE 5.5.4 measured; pin is now 5.7)."""
 import re
 import shutil
+import os
 import subprocess
 from pathlib import Path
 
@@ -10,8 +11,13 @@ TEXT = SCRIPT.read_text(encoding="utf-8")
 BUILD_CS = ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/FlightSimBridge.Build.cs"
 
 
+# On Windows a bare "bash" is System32's WSL stub (UTF-16 output, no distro);
+# the script is written for Git Bash.
+_GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
+BASH = str(_GIT_BASH) if os.name == "nt" and _GIT_BASH.is_file() else "bash"
+
 def run(*args):
-    return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, cwd=ROOT)
+    return subprocess.run([BASH, str(SCRIPT), *args], capture_output=True, text=True, cwd=ROOT)
 
 
 def test_module_list_comes_from_dependency_lists_only(tmp_path):
@@ -67,9 +73,9 @@ def test_python_prefers_venv(tmp_path):
     py = venv / "python"
     py.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     py.chmod(0o755)
-    r = subprocess.run(["bash", "-c", fn + "\npick_python"], capture_output=True, text=True, cwd=tmp_path)
+    r = subprocess.run([BASH, "-c", fn + "\npick_python"], capture_output=True, text=True, cwd=tmp_path)
     assert r.stdout == ".venv/bin/python"
     # no venv: falls through to a real interpreter on PATH, never fails here
     shutil.rmtree(tmp_path / ".venv")
-    r = subprocess.run(["bash", "-c", fn + "\npick_python"], capture_output=True, text=True, cwd=tmp_path)
+    r = subprocess.run([BASH, "-c", fn + "\npick_python"], capture_output=True, text=True, cwd=tmp_path)
     assert r.stdout in ("python3", "python")
