@@ -3,8 +3,8 @@
 #
 # Run from the repo root in PowerShell:  .\scripts\ue_preflight.ps1
 
-# -FromLauncher: the launcher builds the materials after this step, so their
-# absence on a fresh download is reported, not failed.
+# -FromLauncher: the launcher builds the bridge and the materials after this
+# step, so their absence on a fresh download is reported, not failed.
 param([switch]$FromLauncher)
 
 $ErrorActionPreference = "Stop"
@@ -162,6 +162,8 @@ if ($bridgeSources.Count -gt 0) {
 $bridgeDll = Join-Path $repo "ue\Plugins\FlightSimBridge\Binaries\Win64\UnrealEditor-FlightSimBridge.dll"
 if (Test-Path $bridgeDll) {
     Say "bridge binary" "built"
+} elseif ($FromLauncher) {
+    Say "bridge binary" "not built yet -- the launcher's build step builds it next"
 } else {
     Fail "bridge binary" "not built yet -- run scripts\build_ue.ps1"
 }
