@@ -33,10 +33,10 @@ STATIC = REPO / "webapp" / "static"
 SCRIPT = (STATIC / "settings.js").read_text(encoding="utf-8")
 PAGE = (STATIC / "index.html").read_text(encoding="utf-8")
 
-CLEARED = sorted(flightsim_env_names() | {"GOOGLE_MAPS_API_KEY", "ANTHROPIC_API_KEY"})
+CLEARED = sorted(flightsim_env_names() | {"GOOGLE_MAPS_API_KEY", "CESIUM_ION_TOKEN", "ANTHROPIC_API_KEY"})
 
-TILES_MESSAGE = ("Google tiles key missing: paste it here once "
-                 "(Google Maps Platform key with the Map Tiles API)")
+TILES_MESSAGE = ("Google tiles key or Cesium ion token missing: paste one here once "
+                 "(a Cesium ion access token, or a Google Maps Platform key with the Map Tiles API)")
 
 
 @pytest.fixture
@@ -45,6 +45,7 @@ def clean(monkeypatch, tmp_path):
     path = tmp_path / "settings.json"
     path.write_bytes(b"")
     monkeypatch.setattr(settings, "SETTINGS_PATH", path)
+    monkeypatch.setattr(settings, "compiled_ion_fallback", lambda: False)
     for name in CLEARED:
         monkeypatch.delenv(name, raising=False)
     return path
@@ -110,6 +111,38 @@ def test_missing_tiles_key_shows_a_named_fixable_message(clean):
     assert "if (input) input.focus();" in SCRIPT
     # Cesium absent: named with the pinned version and the engine.
     assert "not found for engine" in SCRIPT and "install it from" in SCRIPT
+
+
+def test_the_field_is_labelled_for_either_credential():
+    assert 'google_tiles_key: "Google tiles key or Cesium ion token",' in SCRIPT
+
+
+def test_no_tiles_warning_when_a_credential_exists(clean, monkeypatch):
+    """The panel stops calling a working setup missing: the ion token in the
+    environment, the stored field and the compiled fallback each count."""
+    client = TestClient(app)
+
+    def warned():
+        return "google_tiles_key" in [m["key"] for m in client.get("/settings").json()["missing"]]
+
+    assert warned()
+    monkeypatch.setenv("CESIUM_ION_TOKEN", "eyJfake.token.value")
+    assert not warned()
+    monkeypatch.delenv("CESIUM_ION_TOKEN")
+    monkeypatch.setattr(settings, "compiled_ion_fallback", lambda: True)
+    assert not warned()
+    monkeypatch.setattr(settings, "compiled_ion_fallback", lambda: False)
+    assert client.put("/settings", json={"settings": {"google_tiles_key": "eyJfake.token.value"}}).status_code == 200
+    assert not warned()
+
+
+def test_the_ion_token_is_never_printed_in_the_advanced_fold(clean, monkeypatch):
+    """The fold prints its rows as text, so the environment's token is
+    served as <set>, like every other record of it."""
+    monkeypatch.setenv("CESIUM_ION_TOKEN", "eyJfake.token.value")
+    response = TestClient(app).get("/settings")
+    assert response.json()["settings"]["cesium_ion_token"] == "<set>"
+    assert "eyJfake.token.value" not in response.text
 
 
 def test_cesium_and_engine_are_read_only(clean):

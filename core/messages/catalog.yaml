@@ -219,7 +219,7 @@ google_tiles.undulation_missing:
   hint: "Write the run card again with FLIGHTSIM_GOOGLE_TILES on, so it carries the geoid height."
 terrain.google_tiles:
   sentence: "Google's 3D tiles could not be set up for this render."
-  hint: "Set GOOGLE_MAPS_API_KEY or CESIUM_ION_TOKEN, and check the render log for which step failed."
+  hint: "Type a Google tiles key or Cesium ion token in Settings (or set GOOGLE_MAPS_API_KEY or CESIUM_ION_TOKEN), and check the render log for which step failed."
 google_tiles.terrain:
   sentence: "Google's 3D tiles would show a real place, but the aircraft would fly over flat or made-up ground there."
   hint: "Prepare the real terrain for this place first, or turn FLIGHTSIM_GOOGLE_TILES off."

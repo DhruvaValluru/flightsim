@@ -21,13 +21,15 @@ from core.render import headless
 from core.scenario.card import google_tiles_requested
 from core.util import settings
 from core.util.settings import (
-    SettingsError, effective, env_overrides, llm_api_key, load_settings, render_env,
+    SettingsError, effective, env_overrides, llm_api_key, load_settings, missing_required, render_env,
     save_settings, settings_payload,
 )
 from webapp.runs import RunState, record_env_override, render_quality, weather_backend_flags
 from webapp.server import app
 
-CLEARED = sorted(flightsim_env_names() | {"GOOGLE_MAPS_API_KEY", "ANTHROPIC_API_KEY", "UE_ROOT"})
+CLEARED = sorted(flightsim_env_names() | {"GOOGLE_MAPS_API_KEY", "CESIUM_ION_TOKEN", "ANTHROPIC_API_KEY", "UE_ROOT"})
+
+FAKE_ION = "eyJfake.token.value"
 
 
 @pytest.fixture
@@ -36,6 +38,7 @@ def clean(monkeypatch, tmp_path):
     path = tmp_path / "settings.json"
     path.write_bytes(b"")
     monkeypatch.setattr(settings, "SETTINGS_PATH", path)
+    monkeypatch.setattr(settings, "compiled_ion_fallback", lambda: False)
     for name in CLEARED:
         monkeypatch.delenv(name, raising=False)
     return path
@@ -254,6 +257,81 @@ def test_render_env_carries_key_once(clean, monkeypatch, tmp_path):
     assert set(env) == set(os.environ)
     assert render_env({"GOOGLE_MAPS_API_KEY": "  "})["GOOGLE_MAPS_API_KEY"] == "AIza-from-settings"
     assert render_env({"PATH": "/bin"}) == {"PATH": "/bin", "GOOGLE_MAPS_API_KEY": "AIza-from-settings"}
+
+
+def test_an_ion_token_goes_to_the_ion_variable_and_a_plain_key_to_google(clean):
+    assert settings.is_ion_token(FAKE_ION)
+    for other in ("", "AIza-plain", "eyJ.only-two", "eyJa..c", "abc.def.ghi", "eyJa.b.c.d"):
+        assert not settings.is_ion_token(other), other
+    save_settings({"google_tiles_key": FAKE_ION})
+    assert render_env({"PATH": "/bin"}) == {"PATH": "/bin", "CESIUM_ION_TOKEN": FAKE_ION}
+    save_settings({"google_tiles_key": "AIza-plain"})
+    assert render_env({"PATH": "/bin"}) == {"PATH": "/bin", "GOOGLE_MAPS_API_KEY": "AIza-plain"}
+
+
+def test_a_credential_in_the_environment_wins_over_the_stored_one(clean):
+    """Either kind, whichever kind is stored: the render host prefers a Google
+    key, so exporting a stored one would beat an environment ion token."""
+    env_ion = {"CESIUM_ION_TOKEN": "eyJenv.token.value"}
+    env_google = {"GOOGLE_MAPS_API_KEY": "AIza-env"}
+    for stored in (FAKE_ION, "AIza-plain"):
+        save_settings({"google_tiles_key": stored})
+        assert render_env(env_ion) == env_ion
+        assert render_env(env_google) == env_google
+
+
+def test_tiles_credential_names_the_type_in_the_render_hosts_order(clean, monkeypatch):
+    assert settings.tiles_credential() is None
+    monkeypatch.setattr(settings, "compiled_ion_fallback", lambda: True)
+    assert settings.tiles_credential() == "cesium_ion"
+    assert settings.tiles_credential({"GOOGLE_MAPS_API_KEY": "AIza-env"}) == "google_key"
+    assert settings.tiles_credential({"CESIUM_ION_TOKEN": FAKE_ION}) == "cesium_ion"
+    monkeypatch.setattr(settings, "compiled_ion_fallback", lambda: False)
+    save_settings({"google_tiles_key": FAKE_ION})
+    assert settings.tiles_credential() == "cesium_ion"
+    save_settings({"google_tiles_key": "AIza-plain"})
+    assert settings.tiles_credential() == "google_key"
+    assert settings.tiles_credential({"FLIGHTSIM_GOOGLE_TILES": "off"}) is None
+
+
+def test_a_run_records_the_credential_type_never_the_value(clean, monkeypatch, caplog):
+    save_settings({"google_tiles_key": FAKE_ION})
+    run = RunState(run_id="abc123")
+    record_env_override(run)
+    assert run.as_dict()["tiles_credential"] == "cesium_ion"
+    monkeypatch.setenv("CESIUM_ION_TOKEN", "eyJenv.token.value")
+    record_env_override(run)
+    assert run.as_dict()["tiles_credential"] == "cesium_ion"
+    assert "CESIUM_ION_TOKEN=<set>" in run.events[-1]["detail"]
+    text = json.dumps(run.as_dict()) + json.dumps(run.events) + caplog.text
+    assert FAKE_ION not in text and "eyJenv.token.value" not in text
+    monkeypatch.delenv("CESIUM_ION_TOKEN")
+    save_settings({"google_tiles_key": "AIza-plain"})
+    record_env_override(run)
+    assert run.as_dict()["tiles_credential"] == "google_key"
+
+
+def test_no_missing_tiles_warning_with_the_ion_token_in_the_environment(clean, monkeypatch):
+    assert "google_tiles_key" in [m["key"] for m in missing_required()]
+    monkeypatch.setenv("CESIUM_ION_TOKEN", FAKE_ION)
+    assert "google_tiles_key" not in [m["key"] for m in missing_required()]
+    assert google_tiles_requested() is True
+
+
+def test_the_compiled_fallback_is_read_as_a_fact(tmp_path, monkeypatch):
+    settings.compiled_ion_fallback.cache_clear()
+    try:
+        assert settings.compiled_ion_fallback() is True     # this repository's bridge source
+        settings.compiled_ion_fallback.cache_clear()
+        bare = tmp_path / "tiles.cpp"
+        bare.write_text('FString IonToken = GetEnv(TEXT("CESIUM_ION_TOKEN"));\n', encoding="utf-8")
+        monkeypatch.setattr(settings, "BRIDGE_TILES_SOURCE", bare)
+        assert settings.compiled_ion_fallback() is False
+        settings.compiled_ion_fallback.cache_clear()
+        monkeypatch.setattr(settings, "BRIDGE_TILES_SOURCE", tmp_path / "gone.cpp")
+        assert settings.compiled_ion_fallback() is False
+    finally:
+        settings.compiled_ion_fallback.cache_clear()
 
 
 def test_llm_api_key_env_wins_then_file(clean, monkeypatch):
