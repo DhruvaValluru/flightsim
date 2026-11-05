@@ -1478,8 +1478,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// -- Phase 2 Look lane: the card's look block (contracts §5.4) ---------
 	// The engine consumes what the CARD carries: `look` at the root, else
 	// `randomization.look` (where package F lands it, contracts §5.6). The
-	// keys are exactly core/scene/weather_visuals.py's: fog_extinction_per_m
-	// (-> FogDensity, overriding -fog-density), aerosol (RECORDED, not
+	// keys are exactly core/scene/weather_visuals.py's: engine_fog_density
+	// (-> FogDensity, overriding -fog-density; fog_extinction_per_m beside it is
+	// the same air in 1/m, for the labels), aerosol (RECORDED, not
 	// applied: the fog row carries that extinction), clouds[{cover, base_m,
 	// top_m}], precipitation + wetness, cloud_drift_mps / cloud_drift_from_deg
 	// (recorded, not applied), ev100{camera_id} and the sun pair. A card
@@ -1649,10 +1650,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		if (CardLook.IsValid())
 		{
 			double Value = 0.0;
-			if (CardLook->TryGetNumberField(TEXT("fog_extinction_per_m"), Value) && Value > 0.0)
+			if (CardLook->TryGetNumberField(TEXT("engine_fog_density"), Value) && Value > 0.0)
 			{
 				FogDensity = Value;
 				SceneOptions.FogDensity = static_cast<float>(Value);
+				double Extinction = 0.0;
+				if (CardLook->TryGetNumberField(TEXT("fog_extinction_per_m"), Extinction))
+				{
+					UE_LOG(LogFlightSimRender, Display,
+					       TEXT("look: extinction %g 1/m drawn as FogDensity %g"), Extinction, Value);
+				}
 			}
 			double LookSunElevation = 0.0, LookSunAzimuth = 0.0;
 			if (!bSunAnimated &&

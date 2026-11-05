@@ -1,0 +1,378 @@
+{
+ "ok": true,
+ "passed": 32,
+ "failed": 0,
+ "not_run": 38,
+ "checks": [
+  {
+   "name": "manifest_version",
+   "status": "PASS",
+   "detail": "manifest_version 8, spec 460442d09e89eeab"
+  },
+  {
+   "name": "fields_finite",
+   "status": "PASS",
+   "detail": "1 frame records checked"
+  },
+  {
+   "name": "json_schema",
+   "status": "PASS",
+   "detail": "valid against capture_manifest.v8.schema.json"
+  },
+  {
+   "name": "intrinsics_match_spec",
+   "status": "PASS",
+   "detail": "1 frames carry the lens their spec states, and fx/fy match focal/sensor*pixels to 5.68e-14 px"
+  },
+  {
+   "name": "projection_matrix",
+   "status": "PASS",
+   "detail": "39 projections through P agree with the recorded parameters to 9.09e-12 px (tol 0.001 px)"
+  },
+  {
+   "name": "pose_matches_spec",
+   "status": "PASS",
+   "detail": "2 placement/aim clauses graded against the stated cameras; worst placement gap 0.000 m, worst aim error 0.00 deg"
+  },
+  {
+   "name": "geometry_recovery",
+   "status": "PASS",
+   "detail": "1 frames; quaternion-vs-euler reprojection gap 0.0000 px (tol 0.5); 0 aircraft behind camera; 0 aimed frames without the aircraft in frame"
+  },
+  {
+   "name": "landmark_reprojection",
+   "status": "PASS",
+   "detail": "16 landmark projections agree with the engine's own to within 0.00 px (tol 2.0). (41 landmarks, 16 in-frame projections, worst off-axis radius 0.70 of the half-diagonal)"
+  },
+  {
+   "name": "cross_view_consistency",
+   "status": "NOT RUN",
+   "detail": "no landmark was seen by two cameras at the same instant; capture two cameras on a shared schedule with a landmark in both frames to exercise this"
+  },
+  {
+   "name": "count_exactness",
+   "status": "PASS",
+   "detail": "1 camera(s) requested an exact image count and got exactly it; every camera's frames are densely indexed"
+  },
+  {
+   "name": "aircraft_state_consistency",
+   "status": "NOT RUN",
+   "detail": "no telemetry sample was captured by more than one camera, so there is nothing to cross-check"
+  },
+  {
+   "name": "flight_agreement",
+   "status": "PASS",
+   "detail": "1 frames against 1 host flight(s); the manifest's aircraft track matches the host's recorded flight to within 0.00 m (solved over 'host flight', tol 0.5 m)"
+  },
+  {
+   "name": "host_determinism",
+   "status": "NOT RUN",
+   "detail": "1 host flight(s) recorded; repeatability needs two flights over the same card to compare. Render on Windows to exercise this -- a run that flies the host to solve, then renders, records two"
+  },
+  {
+   "name": "capture_time_agreement",
+   "status": "PASS",
+   "detail": "1 frames rendered within 0.0000 s of the instant each record states (tol 0.05 s)"
+  },
+  {
+   "name": "label_geometry",
+   "status": "PASS",
+   "detail": "1 labelled frames re-projected independently; worst disagreement 0.0000 (px or m) at chase/0 bbox v1; tolerance 0.05"
+  },
+  {
+   "name": "keypoints_in_box",
+   "status": "PASS",
+   "detail": "7 projected keypoints, every one inside its frame's box (tolerance 0.5 px)"
+  },
+  {
+   "name": "drawn_airframe",
+   "status": "PASS",
+   "detail": "1 camera(s): chase: mesh at (-118.3, 0.0, 97.4) cm in the actor frame, manifest version 3, origin measured from vertices"
+  },
+  {
+   "name": "label_files",
+   "status": "PASS",
+   "detail": "5 declared label files present across ['chase']"
+  },
+  {
+   "name": "mask_containment",
+   "status": "NOT RUN",
+   "detail": "superseded for manifest 8 by box_vs_mask (the ID image carries every object's int_id; the tight box of each is graded against its projected hull there); this single-id containment test is the version-5 check"
+  },
+  {
+   "name": "depth_range",
+   "status": "NOT RUN",
+   "detail": "superseded for manifest 8 by depth_vs_geometry (per object: the depth under the mask against the projected hull band, the nearest keypoint and the record); this single-id span test is the version-5 check"
+  },
+  {
+   "name": "mask_integers_only",
+   "status": "PASS",
+   "detail": "1 ID images hold only [1, 2] of the declared [1, 2] (0 background); the class image agrees at every labelled pixel; the engine counted no non-integer ids"
+  },
+  {
+   "name": "component_coverage",
+   "status": "NOT RUN",
+   "detail": "the manifest declares no component object (none names a parent)"
+  },
+  {
+   "name": "component_boxes",
+   "status": "NOT RUN",
+   "detail": "the manifest declares no component object (none names a parent)"
+  },
+  {
+   "name": "mask_vs_geometry",
+   "status": "PASS",
+   "detail": "1 object-frames; worst box-centre offset 0.47 % of span at chase/frame_0000.png aircraft:c172p:0 (0.6 px of 130 px span) (tol 2 %); worst extent 0.41 % at chase/frame_0000.png aircraft:c172p:0 (129x30 px vs hull 130x30) (tol 5 %)"
+  },
+  {
+   "name": "box_vs_mask",
+   "status": "PASS",
+   "detail": "1 object-frames; lowest IoU 0.970 at chase/frame_0000.png aircraft:c172p:0 (130 px span, floor 0.8) (floors 0.8 at >= 64 px, 0.5 at >= 16 px); 1 records' bbox_2d_tight re-counted from the ID image to a pixel"
+  },
+  {
+   "name": "tight_box_present",
+   "status": "PASS",
+   "detail": "1 object-frames: bbox_2d_tight present and inside bbox_2d"
+  },
+  {
+   "name": "label_geometry_3d",
+   "status": "PASS",
+   "detail": "1 object-frames: 3-D box placed by the verifier's own rotation (largest gap 2.3e-13 m), full box / cut box / fraction inside from its own projection; 1 data-file truncation / facing sections agree; 1 hiding breakdowns recounted from the ID image"
+  },
+  {
+   "name": "depth_vs_geometry",
+   "status": "PASS",
+   "detail": "1 object-frames within the hull's depth band at 1 % + 2 m; nearest surface at most -2.59 m beyond the nearest keypoint at chase/frame_0000.png aircraft:c172p:0 (tail at 24.7 m, mask from 22.1 m); median depth vs projected CG depth differs by at most 1.2 m at chase/frame_0000.png aircraft:c172p:0 (median 27.1 m, CG 28.3 m); 1 records' depth_min_m / depth_median_m are the same pixels to 0.05 m"
+  },
+  {
+   "name": "visibility_vs_scene",
+   "status": "PASS",
+   "detail": "1 object-frames: visible pixels inside the alone footprint, hidden pixels explained by something nearer (worst unexplained 0.00 % at none; tol 3 %), overlaps owned by the nearer object, and 1 records' fractions and occluders re-counted from the files"
+  },
+  {
+   "name": "identity_stable",
+   "status": "PASS",
+   "detail": "2 objects keep one integer each across 1 frames and 1 camera(s) (['chase']), and the engine's render.json echoes the same list"
+  },
+  {
+   "name": "applied_intrinsics",
+   "status": "PASS",
+   "detail": "1 frames of ['chase'] rendered at the record's lens and picture size; worst field-of-view gap 0.0000 deg (tol 0.1 deg)"
+  },
+  {
+   "name": "sensor_undistortion",
+   "status": "PASS",
+   "detail": "7 sensor keypoints undistorted with the verifier's own inverse of the recorded profile; worst return error 0.0000 px at  (tolerance 0.05)"
+  },
+  {
+   "name": "sensor_files",
+   "status": "NOT RUN",
+   "detail": "no camera ran the sensor post-pass (every profile ideal, or no frames rendered)"
+  },
+  {
+   "name": "frame_integrity",
+   "status": "PASS",
+   "detail": "1 frames hash to the engine's own record across ['chase']"
+  },
+  {
+   "name": "applied_pose",
+   "status": "PASS",
+   "detail": "1 frames: the engine applied the solved pose to 0.0000 m / 0.0000 deg (tol 0.1 m / 0.05 deg)"
+  },
+  {
+   "name": "instruments",
+   "status": "NOT RUN",
+   "detail": "no telemetry_measured.json in the run (instruments profile ideal, or none stated)"
+  },
+  {
+   "name": "datum",
+   "status": "PASS",
+   "detail": "heights EGM2008 orthometric (GLO-30); EGM96 bilinear undulation -23.403 m at the origin (bilinear -23.403 m) agrees with the checker's own read of the grid to 0.0000 m; ellipsoidal origin 1316.8 m = orthometric 1340.2 m + N"
+  },
+  {
+   "name": "datum_independent",
+   "status": "PASS",
+   "detail": "PROJ +inv vgridshift on grand_canyon_geoid.gtx (5x5 nodes at 0.250000 deg, corner on whole nodes) reads -23.403 m at the origin (block -23.403 m) and agrees with the producer's full-grid values to 1.14e-06 m over 100 interior points; inf outside"
+  },
+  {
+   "name": "dis_roundtrip",
+   "status": "NOT RUN",
+   "detail": "no Entity State PDU log: the run was captured without --dis (no dis_entity_state.bin, no index, no dis.entity_state record)"
+  },
+  {
+   "name": "georeference",
+   "status": "PASS",
+   "detail": "1 render.json georeference block(s) agree with the manifest: EPSG:32612 about the frame origin, the stated vertical convention, undulation at the origin -23.403 m"
+  },
+  {
+   "name": "wake_selftest",
+   "status": "NOT RUN",
+   "detail": "no card.json in the run directory"
+  },
+  {
+   "name": "host_physics",
+   "status": "NOT RUN",
+   "detail": "no card.json in the run directory"
+  },
+  {
+   "name": "building_vs_footprint",
+   "status": "NOT RUN",
+   "detail": "the manifest names no footprint set (no scene.buildings): nothing to carry the ID image back against"
+  },
+  {
+   "name": "runway_vs_geometry",
+   "status": "NOT RUN",
+   "detail": "the manifest names no runway (no scene.runway): nothing to grade"
+  },
+  {
+   "name": "landcover_vs_geometry",
+   "status": "NOT RUN",
+   "detail": "the manifest names no land cover (no landcover block): nothing to carry the frames onto"
+  },
+  {
+   "name": "normals_vs_depth",
+   "status": "NOT RUN",
+   "detail": "no render.json frame record declares normal_png (no -passes=normal, or no engine pass at all): render on Windows with -labels -passes=normal to exercise this"
+  },
+  {
+   "name": "flow_vs_motion",
+   "status": "NOT RUN",
+   "detail": "no render.json frame record declares flow_f32 (no -passes=velocity, or no engine pass at all): render on Windows with -labels -passes=velocity to exercise this"
+  },
+  {
+   "name": "albedo_range",
+   "status": "NOT RUN",
+   "detail": "no render.json frame record declares albedo_png (no -passes=albedo, or no engine pass at all): render on Windows with -labels -passes=albedo to exercise this"
+  },
+  {
+   "name": "psf_slanted_edge",
+   "status": "NOT RUN",
+   "detail": "no camera carries a sensing.optics block: no PSF was applied"
+  },
+  {
+   "name": "blur_vs_flow",
+   "status": "NOT RUN",
+   "detail": "no camera carries a sensing.motion_blur block: no blur was applied"
+  },
+  {
+   "name": "radiometry_grey_card",
+   "status": "NOT RUN",
+   "detail": "no camera carries a sensing.radiometry block"
+  },
+  {
+   "name": "engine_linear_passes",
+   "status": "NOT RUN",
+   "detail": "no render.json frame record declares labels.normal or labels.basecolor (render on Windows with -labels -passes=normal,albedo to exercise this)"
+  },
+  {
+   "name": "velocity_readback",
+   "status": "NOT RUN",
+   "detail": "no render.json frame record declares labels.velocity (render on Windows with -labels -velocity-check to exercise this)"
+  },
+  {
+   "name": "engine_readbacks",
+   "status": "PASS",
+   "detail": "5 read-back(s): the console values parse, the lens attenuation is a fraction, the colour space is linear, a sun in lux says so and was set to it"
+  },
+  {
+   "name": "calibration_frame",
+   "status": "NOT RUN",
+   "detail": "no render.json carries a calibration record (render on Windows with -calibration -sun-lux= to exercise this)"
+  },
+  {
+   "name": "engine_accumulation",
+   "status": "NOT RUN",
+   "detail": "no render.json frame record carries an accumulation (render on Windows with -accumulate=K to exercise this)"
+  },
+  {
+   "name": "night_exposure",
+   "status": "NOT RUN",
+   "detail": "the manifest carries no look.night block: no night was asked for"
+  },
+  {
+   "name": "world_record",
+   "status": "NOT RUN",
+   "detail": "no scene.world record beside a card look and no render.json world_applied: the world engine side is a Windows step"
+  },
+  {
+   "name": "flow_vs_keypoints",
+   "status": "NOT RUN",
+   "detail": "no passes.json names a flow pass (no camera asks for it in cameras[i].passes, or no render): render on Windows with the pass asked for to exercise this"
+  },
+  {
+   "name": "flow_static_null",
+   "status": "NOT RUN",
+   "detail": "no passes.json names a flow pass (no camera asks for it in cameras[i].passes, or no render): render on Windows with the pass asked for to exercise this"
+  },
+  {
+   "name": "disparity_vs_right_depth",
+   "status": "NOT RUN",
+   "detail": "no camera block declares a stereo rig (cameras[i].stereo)"
+  },
+  {
+   "name": "points_vs_depth",
+   "status": "NOT RUN",
+   "detail": "no passes.json names a points pass (no camera asks for it in cameras[i].passes, or no render): render on Windows with the pass asked for to exercise this"
+  },
+  {
+   "name": "amodal_contains_visible",
+   "status": "NOT RUN",
+   "detail": "no object record carries an amodal box (no camera asks for amodal)"
+  },
+  {
+   "name": "ir_proxy_declared",
+   "status": "NOT RUN",
+   "detail": "no IR frame under frames/ (0 camera(s) declare sensing.ir; the proxy is written after a render's ID image and depth exist)"
+  },
+  {
+   "name": "applied_readback",
+   "status": "NOT RUN",
+   "detail": "1 record(s), none carrying a readback"
+  },
+  {
+   "name": "null_effect",
+   "status": "PASS",
+   "detail": "1 null test(s) re-graded from their own numbers; every verdict agrees"
+  },
+  {
+   "name": "instrument_allan",
+   "status": "NOT RUN",
+   "detail": "the manifest carries no instruments block (a run before the FDM-rate observer)"
+  },
+  {
+   "name": "instrument_lever_arm",
+   "status": "NOT RUN",
+   "detail": "the manifest carries no instruments block (a run before the FDM-rate observer)"
+  },
+  {
+   "name": "uncertainty_present",
+   "status": "NOT RUN",
+   "detail": "no uncertainty block: the capture did not run the dt/2 twin (--uncertainty or record.sensitivity_pairs)"
+  },
+  {
+   "name": "temporal_alignment",
+   "status": "NOT RUN",
+   "detail": "needs a second capture of the SAME simulation with a different camera set: run flightsim.capture again with other cameras and pass --against <that run dir>"
+  }
+ ],
+ "manifest_sha256": "8f0096cb754937e612efd2b585b9f157d79b9e395906d529bcea26c23c916ab9",
+ "drawn_airframe": {
+  "source": "frames/<camera>/render.json 'drawn', as the engine wrote it",
+  "expected_mesh_manifest_sha256": "23d046edb9bf5a1bb0a8f72411cf476029b3e92fba0730a4e9d2e09682deabaa",
+  "cameras": {
+   "chase": {
+    "kind": "mesh",
+    "manifest_version": 3,
+    "origin_basis": "measured from vertices: nose keypoint (x), main-gear contact (z)",
+    "mesh_origin_actor_cm": [
+     -118.309,
+     0,
+     97.422
+    ],
+    "triangles": 44266,
+    "mesh_manifest_path": "assets\\generated\\c172p\\mesh_manifest.json",
+    "mesh_manifest_sha256": "23d046edb9bf5a1bb0a8f72411cf476029b3e92fba0730a4e9d2e09682deabaa"
+   }
+  }
+ }
+}

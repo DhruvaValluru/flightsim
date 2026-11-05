@@ -67,7 +67,7 @@ graded whenever their directories exist:
   so only the air differs; the hazy day must keep at most a stated share of
   the clear day's contrast. The far peak cannot grade this: at the true
   density it sits on the fog's 0.92 opacity cap on both days. ``FogDensity``
-  is NOT a per-metre extinction, see UE_FOG_DENSITY_PER_EXTINCTION.
+  is NOT a per-metre extinction, see core/scene/weather_visuals.py ENGINE_FOG_DENSITY_PER_EXTINCTION.
 * **Wet-surface null test.** The same still with ``-precip=rain`` and
   ``-precip=none``. The terrain band must change (the wetness scalar
   reached a material parameter -- and ``look_applied`` must not say the
@@ -230,16 +230,12 @@ def koschmieder_fog_density(visibility_km: float) -> float:
     return KOSCHMIEDER / (1000.0 * float(visibility_km))
 
 
-#: UE FogDensity for one 1/m of extinction. FogDensity is not 1/m: SceneCore
-#: divides it by 1000 per cm and HeightFogCommon integrates ln 2 of it in base
-#: 2, so beta = FogDensity * 0.1 * ln(2)^2 per metre at this scene's near-zero
-#: falloff. Read on the 5.7.4 sources.
-UE_FOG_DENSITY_PER_EXTINCTION = 1.0 / (0.1 * math.log(2.0) ** 2)
-
-
 def engine_fog_density(visibility_km: float) -> float:
-    """The -fog-density that draws this visibility on the engine."""
-    return koschmieder_fog_density(visibility_km) * UE_FOG_DENSITY_PER_EXTINCTION
+    """The -fog-density the product draws this visibility with: the product's
+    own conversion, so the clause grades that path and not a copy of it."""
+    from core.scene import weather_visuals
+
+    return weather_visuals.engine_fog_density(weather_visuals.fog_extinction_per_m(visibility_km))
 
 
 #: The look control renders (--look): one switch per pair, everything else

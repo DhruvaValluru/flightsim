@@ -12,6 +12,8 @@ import math
 from pathlib import Path
 
 import pytest
+
+from core.scene.weather_visuals import engine_fog_density
 import yaml
 
 from core.nl.compiler import compile_prompt
@@ -221,7 +223,7 @@ def test_the_sun_is_where_the_algorithm_puts_it_and_the_look_follows():
     look = render_look(spec)
     assert look["sun_elev"] == float(block.sun_elevation_deg.value)
     assert look["sun_azim"] == engine_sun_azimuth(float(block.sun_azimuth_deg.value))
-    assert look["fog_density"] == float(block.fog_density.value)
+    assert look["fog_density"] == engine_fog_density(float(block.fog_density.value))
 
 
 def test_exposure_and_fog_come_from_the_calibrated_look_points_only():
@@ -233,7 +235,8 @@ def test_exposure_and_fog_come_from_the_calibrated_look_points_only():
     dawn, noon = TIME_OF_DAY["dawn"], TIME_OF_DAY["noon"]
     assert EXPOSURE_CALIBRATION == ((dawn["sun_elev"], dawn["exposure_bias"]),
                                     (noon["sun_elev"], noon["exposure_bias"]))
-    assert (FOG_CLEAR, FOG_HAZY) == (VISIBILITY["clear"], VISIBILITY["hazy"])
+    assert (engine_fog_density(FOG_CLEAR), engine_fog_density(FOG_HAZY)) == pytest.approx(
+        (VISIBILITY["clear"], VISIBILITY["hazy"]))
     assert exposure_for_elevation(8.0) == 10.5
     assert exposure_for_elevation(50.0) == 9.5
     assert exposure_for_elevation(29.0) == pytest.approx(10.0)

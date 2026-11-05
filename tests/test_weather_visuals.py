@@ -38,8 +38,8 @@ def test_the_harness_fog_constants_read_back_as_visibilities():
 
     clear = wv.visibility_km_for_extinction(FOG_CLEAR)
     hazy = wv.visibility_km_for_extinction(FOG_HAZY)
-    assert clear == pytest.approx(3.912 / (1000.0 * 0.0012))
-    assert hazy == pytest.approx(3.912 / (1000.0 * 0.010))
+    assert clear == pytest.approx(3.912 / (1000.0 * 0.0012 / wv.ENGINE_FOG_DENSITY_PER_EXTINCTION))
+    assert hazy == pytest.approx(3.912 / (1000.0 * 0.010 / wv.ENGINE_FOG_DENSITY_PER_EXTINCTION))
     assert clear > hazy
 
 
@@ -117,7 +117,7 @@ def test_look_block_is_the_documented_table_and_states_what_it_does_not_claim():
     from_fog = wv.look_block({"fog_density": 0.0012})
     assert from_fog["visibility_km"] == pytest.approx(3.912 / 1.2, abs=1e-3)
     bare = wv.look_block({})
-    assert bare["fog_extinction_per_m"] == pytest.approx(wv.ENGINE_FOG_DENSITY_DEFAULT)
+    assert bare["engine_fog_density"] == pytest.approx(wv.ENGINE_FOG_DENSITY_DEFAULT, rel=1e-4)
     assert bare["clouds"] == [] and bare["ev100"] == {}
 
 

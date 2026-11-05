@@ -118,7 +118,8 @@ NOT_CLAIMED = ("precipitation_particles", "moon", "stars", "sea_state",
 #: parameter each drives (contracts §5.4 table). The sun keys are added
 #: by ``core.scenario.randomization.render_look``.
 ENGINE_PARAMETERS: Dict[str, str] = {
-    "fog_extinction_per_m": "UExponentialHeightFogComponent::FogDensity",
+    "fog_extinction_per_m": "recorded in 1/m for the labels; drawn as engine_fog_density",
+    "engine_fog_density": "UExponentialHeightFogComponent::FogDensity",
     "aerosol": "USkyAtmosphereComponent Mie scattering scale",
     "clouds": "UVolumetricCloudComponent layer bottom altitude / thickness "
               "/ coverage (cloud shadows on)",
@@ -165,6 +166,19 @@ RENDER_FLAGS: Dict[str, str] = {
 }
 #: Where the block lands in the run card.
 CARD_LOOK_KEY = "look"
+
+
+#: UE FogDensity for one 1/m of extinction (decision 21). FogDensity is not
+#: 1/m: SceneCore.cpp divides it by 1000 per cm and HeightFogCommon.ush
+#: integrates ln 2 of it in base 2, so beta = FogDensity * 0.1 * ln(2)^2 at this
+#: scene's near-zero falloff (read on the 5.7.4 sources).
+ENGINE_FOG_DENSITY_PER_EXTINCTION = 1.0 / (0.1 * math.log(2.0) ** 2)
+
+
+def engine_fog_density(beta_per_m: float) -> float:
+    """The FogDensity that draws an extinction of beta 1/m. Only extinction
+    goes through this; the engine-unit look presets are engine numbers."""
+    return float(beta_per_m) * ENGINE_FOG_DENSITY_PER_EXTINCTION
 
 
 def fog_extinction_per_m(visibility_km: float) -> float:
@@ -294,7 +308,8 @@ def look_block(values: Dict[str, Any]) -> Dict[str, Any]:
         density = values.get("fog_density")
         visibility = (visibility_km_for_extinction(density)
                       if density is not None and float(density) > 0.0
-                      else visibility_km_for_extinction(ENGINE_FOG_DENSITY_DEFAULT))
+                      else visibility_km_for_extinction(
+                          ENGINE_FOG_DENSITY_DEFAULT / ENGINE_FOG_DENSITY_PER_EXTINCTION))
     rain_row = None
     if rate is not None:
         from .precipitation import extinction_per_m, fitted_lambda, reconcile_extinction
@@ -309,6 +324,7 @@ def look_block(values: Dict[str, Any]) -> Dict[str, Any]:
     out = {
         "visibility_km": round(float(visibility), 4),
         "fog_extinction_per_m": float(f"{beta:.6g}"),
+        "engine_fog_density": float(f"{engine_fog_density(beta):.6g}"),
         "aerosol": round(aerosol_scale(visibility), 4),
         "clouds": cloud_layers(values.get("cloud_cover", 0.0),
                                values.get("cloud_base_m"),

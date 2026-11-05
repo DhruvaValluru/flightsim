@@ -1,0 +1,29 @@
+{
+ "frames": {
+  "frames/chase/frame_0000.png": {
+   "box_vs_mask": {
+    "status": "PASS",
+    "detail": "1 object-frames; lowest IoU 0.970 at chase/frame_0000.png aircraft:c172p:0 (130 px span, floor 0.8) (floors 0.8 at >= 64 px, 0.5 at >= 16 px); 1 records' bbox_2d_tight re-counted from the ID image to a pixel",
+    "failure": null,
+    "sentence": "The drawn box matches the object's mask."
+   },
+   "depth_vs_geometry": {
+    "status": "PASS",
+    "detail": "1 object-frames within the hull's depth band at 1 % + 2 m; nearest surface at most -2.59 m beyond the nearest keypoint at chase/frame_0000.png aircraft:c172p:0 (tail at 24.7 m, mask from 22.1 m); median depth vs projected CG depth differs by at most 1.2 m at chase/frame_0000.png aircraft:c172p:0 (median 27.1 m, CG 28.3 m); 1 records' depth_min_m / depth_median_m are the same pixels to 0.05 m",
+    "failure": null,
+    "sentence": "The measured distance under the mask agrees with the aircraft's distance."
+   },
+   "ok": true
+  }
+ },
+ "counts": {
+  "box_vs_mask": {
+   "PASS": 1
+  },
+  "depth_vs_geometry": {
+   "PASS": 1
+  }
+ },
+ "failed_frames": [],
+ "about": "box_vs_mask and depth_vs_geometry run once per frame (the same check functions as the run's verdict). PASS / FAIL / NOT RUN per frame; a FAIL names why."
+}

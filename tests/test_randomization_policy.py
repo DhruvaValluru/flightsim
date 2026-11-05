@@ -15,6 +15,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
+from core.scene.weather_visuals import engine_fog_density
 import yaml
 
 from core.nl.compiler import compile_prompt
@@ -129,7 +131,7 @@ def test_the_phase10_block_keeps_its_twenty_keys_and_its_draws():
                                      "fog_density"}
     # And the four flag values are the block's own numbers.
     look = render_look(spec)
-    assert look["fog_density"] == float(spec.randomization.fog_density.value)
+    assert look["fog_density"] == engine_fog_density(float(spec.randomization.fog_density.value))
 
 
 def test_the_phase10_leaves_draw_the_same_numbers_beside_a_policy():
@@ -267,8 +269,8 @@ def test_the_contract_policy_draws_every_leaf_validates_and_round_trips(tmp_path
     assert card["policy"] == POLICY
     look = card["look"]
     assert look["sun_elev"] == card["sun_elevation_deg"]
-    assert look["fog_density"] == card["fog_density"]
-    assert look["fog_extinction_per_m"] == pytest.approx(look["fog_density"], rel=1e-6)
+    assert look["fog_density"] == engine_fog_density(card["fog_density"])
+    assert look["fog_extinction_per_m"] == pytest.approx(card["fog_density"], rel=1e-6)
     assert look["visibility_km"] == pytest.approx(float(block.visibility_km.value), abs=1e-3)
     assert look["cloud_drift_mps"] == pytest.approx(float(spec.wind_speed.value) * 0.514444, abs=1e-3)
     assert set(look["ev100"]) == {"camera0"}

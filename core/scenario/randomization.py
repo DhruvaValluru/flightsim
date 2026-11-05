@@ -121,8 +121,8 @@ CONFIG_DIR = Path(__file__).resolve().parents[2] / "assets" / "aircraft_config"
 #: probe file (decisions 13 and 15).
 EXPOSURE_CALIBRATION = ((8.0, 10.5), (50.0, 9.5))  # measured on 5.5 (history)
 #: The harness's calibrated fog densities (showcase_matrix.VISIBILITY).
-FOG_CLEAR = 0.0012
-FOG_HAZY = 0.010
+FOG_CLEAR = 0.0012 / weather_visuals.ENGINE_FOG_DENSITY_PER_EXTINCTION
+FOG_HAZY = 0.010 / weather_visuals.ENGINE_FOG_DENSITY_PER_EXTINCTION
 #: Draws rejected for a sun below the floor before the sampler refuses.
 MAX_DAYLIGHT_DRAWS = 64
 #: Largest seed any consumer represents (core.experiments.seeds.MAX_SEED).
@@ -1698,11 +1698,12 @@ def render_look(spec) -> Optional[Dict[str, Any]]:
         "sun_elev": float(block.sun_elevation_deg.value),
         "sun_azim": engine_sun_azimuth(float(block.sun_azimuth_deg.value)),
         "exposure_bias": float(block.exposure_bias.value),
-        "fog_density": float(block.fog_density.value),
+        # The commandlet's -fog-density is an engine number; the block's is 1/m.
+        "fog_density": weather_visuals.engine_fog_density(float(block.fog_density.value)),
     }
     sampled = _sampled_policy_values(spec)
     values: Dict[str, Any] = {
-        "fog_density": look["fog_density"],
+        "fog_density": float(block.fog_density.value),
         "precipitation": sampled.get("precipitation", "none"),
         "cloud_cover": sampled.get("cloud_cover", 0.0),
         "wind_speed_kt": float(spec.wind_speed.value),
@@ -1755,7 +1756,7 @@ def card_block(spec) -> Optional[Dict[str, Any]]:
         "sun_azimuth_deg": float(block.sun_azimuth_deg.value),
         "engine_sun_azimuth_deg": look["sun_azim"],
         "exposure_bias": look["exposure_bias"],
-        "fog_density": look["fog_density"],
+        "fog_density": float(block.fog_density.value),
         "livery": str(block.livery.value),
         "solar_source": SOLAR_SOURCE,
         "camera_jitter": jitter,
