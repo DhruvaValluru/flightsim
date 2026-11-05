@@ -286,6 +286,25 @@ def cloud_scene(tmp_path, above_rows, below_rows):
             still(tmp_path / "cloud_control", control))
 
 
+def _shaded(control, keep):
+    shaded = control.copy()
+    shaded[:, CLOUD_GROUND_ROWS[0]:CLOUD_GROUND_ROWS[1], :] = (
+        shaded[:, CLOUD_GROUND_ROWS[0]:CLOUD_GROUND_ROWS[1], :] * keep)
+    return shaded
+
+
+def test_a_layer_above_may_shade_the_ground_and_may_not_black_it_out(tmp_path):
+    above, below, control = cloud_scene(tmp_path, SKY_BAND_ROWS, CLOUD_GROUND_ROWS)
+    frame_path = above / "frame_0000.png"
+    base = tall_frame()
+    base[:, SKY_BAND_ROWS[0]:SKY_BAND_ROWS[1], :] -= 40
+    write_png_rgb(frame_path, _shaded(base, 0.8))
+    assert measure_cloud_base(above, below, control).status == "PASS"
+    write_png_rgb(frame_path, _shaded(base, 0.05))
+    clause = measure_cloud_base(above, below, control)
+    assert clause.status == "FAIL" and "keeps 0.05" in clause.detail
+
+
 def test_a_layer_above_changes_only_the_sky_and_one_below_only_the_ground(tmp_path):
     clause = measure_cloud_base(*cloud_scene(tmp_path, SKY_BAND_ROWS, CLOUD_GROUND_ROWS))
     assert clause.status == "PASS", clause.detail
@@ -294,8 +313,9 @@ def test_a_layer_above_changes_only_the_sky_and_one_below_only_the_ground(tmp_pa
 
 def test_a_base_drawn_at_the_wrong_height_fails_the_bracket(tmp_path):
     """The 'above' layer leaking into the ground band: its base is not
-    above the camera, whatever the record says."""
-    leaking = (SKY_BAND_ROWS[0], CLOUD_GROUND_ROWS[1])
+    above the camera, whatever the record says. Part of the band: an even
+    change over all of it is the layer's shade."""
+    leaking = (SKY_BAND_ROWS[0], (CLOUD_GROUND_ROWS[0] + CLOUD_GROUND_ROWS[1]) // 2)
     clause = measure_cloud_base(*cloud_scene(tmp_path, leaking, CLOUD_GROUND_ROWS))
     assert clause.status == "FAIL"
 
@@ -438,9 +458,9 @@ def test_every_look_clause_reports_not_run_with_its_measurement_when_unrendered(
 def test_the_look_controls_change_one_switch_each():
     """Every look run is the terrain shot plus its own switch; the control
     of each pair carries the switch's 'off' spelling."""
-    assert LOOK_RUNS["cloud_control"][1] == ["-seconds=2", "-NoCloudShadows", "-cloud-cover=0"]
-    assert all("-NoCloudShadows" in LOOK_RUNS[name][1]
-               for name in ("cloud_above", "cloud_below", "cloud_control"))
+    assert LOOK_RUNS["cloud_control"][1] == ["-seconds=2", "-cloud-cover=0"]
+    assert not any("-NoCloudShadows" in LOOK_RUNS[name][1]
+                   for name in ("cloud_above", "cloud_below", "cloud_control"))
     assert "-precip=rain" in LOOK_RUNS["wet"][1]
     assert "-precip=none" in LOOK_RUNS["wet_control"][1]
     assert "-sun-elev=-12" in LOOK_RUNS["night"][1]

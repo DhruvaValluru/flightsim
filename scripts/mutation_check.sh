@@ -488,7 +488,7 @@ mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRender
     || failures=$((failures+1))
 
 mutate experiments/gate6_visual.py \
-    '    ok = (above_sky >= minimum and above_ground <= leak
+    '    ok = (above_sky >= minimum and above_ground <= leak and kept >= floor
           and below_ground >= minimum and below_sky <= leak)' \
     '    ok = above_sky >= minimum  # MUTATED: a layer leaking below the horizon passes' \
     "cloud base bracket needs both sides" tests/test_gate6_visual.py \

@@ -203,6 +203,10 @@ LOOK_THRESHOLDS = {
     "cloud_min_changed_px": 2000,
     #: ... and at most this many in the band it cannot reach.
     "cloud_max_leak_px": 500,
+    #: A layer above the camera shades the ground and must not black it out:
+    #: the share of the clear ground's mean it keeps. Measured on 5.7.4: 0.86
+    #: with the sky light captured; 0.01 without it, the defect this grades.
+    "cloud_min_ground_kept": 0.25,
     #: Rain on/off must change this many terrain-band pixels ...
     "wet_min_changed_px": 2000,
     #: ... and this few sky-band pixels (the null: sky does not get wet).
@@ -238,17 +242,15 @@ def engine_fog_density(visibility_km: float) -> float:
 #: The look control renders (--look): one switch per pair, everything else
 #: the gate's terrain shot. Values are (shot, extra flags).
 LOOK_RUNS = {
-    # -NoCloudShadows on all three: the bracket grades where the layer is
-    # drawn; with a real ground a layer above would otherwise shade it all.
     "cloud_above": ("terrain", [
-        "-seconds=2", "-NoCloudShadows", "-cloud-cover=0.9",
+        "-seconds=2", "-cloud-cover=0.9",
         f"-cloud-base={FLIGHT_ALTITUDE_M + CLOUD_BASE_BRACKET_M:g}",
         "-cloud-thickness=800"]),
     "cloud_below": ("terrain", [
-        "-seconds=2", "-NoCloudShadows", "-cloud-cover=0.9",
+        "-seconds=2", "-cloud-cover=0.9",
         f"-cloud-base={FLIGHT_ALTITUDE_M - CLOUD_BASE_BRACKET_M + 20:g}",
         "-cloud-thickness=180"]),
-    "cloud_control": ("terrain", ["-seconds=2", "-NoCloudShadows", "-cloud-cover=0"]),
+    "cloud_control": ("terrain", ["-seconds=2", "-cloud-cover=0"]),
     "visibility_clear": ("terrain", [
         "-seconds=2", f"-fog-density={engine_fog_density(VISIBILITY_CLEAR_KM):.6g}"]),
     "visibility_hazy": ("terrain", [
@@ -525,9 +527,12 @@ def _band_count(mask, rows: Tuple[int, int]) -> int:
 
 CLOUD_MEASUREMENT = (
     "same still, cloud layer 300 m above the flight vs 300 m below it, each "
-    "against a no-cloud control; changed pixels are cloud; above -> sky band "
-    f"rows {SKY_BAND_ROWS} only, below -> ground band rows {CLOUD_GROUND_ROWS} "
-    "only (min changed / max leak px in LOOK_THRESHOLDS)")
+    "against a no-cloud control, cloud shadows on; changed pixels are cloud; "
+    f"above -> sky band rows {SKY_BAND_ROWS} only, below -> ground band rows "
+    f"{CLOUD_GROUND_ROWS} only (min changed / max leak px in LOOK_THRESHOLDS). "
+    "Above, the ground is compared after its mean shade is divided out, so the "
+    "layer's shadow is not counted as cloud, and it must keep "
+    "cloud_min_ground_kept of the clear ground's mean")
 
 
 def measure_cloud_base(above_dir: Path, below_dir: Path, control_dir: Path) -> LookClause:
@@ -535,17 +540,24 @@ def measure_cloud_base(above_dir: Path, below_dir: Path, control_dir: Path) -> L
     above = changed_mask(_last_frame(above_dir), control)
     below = changed_mask(_last_frame(below_dir), control)
     above_sky = _band_count(above, SKY_BAND_ROWS)
-    above_ground = _band_count(above, CLOUD_GROUND_ROWS)
+    rows = slice(*CLOUD_GROUND_ROWS)
+    clear_ground = luminance(load_rgb(control))[rows]
+    shaded_ground = luminance(load_rgb(_last_frame(above_dir)))[rows]
+    kept = float(shaded_ground.mean()) / max(float(clear_ground.mean()), 1e-6)
+    above_ground = int((abs(shaded_ground / max(kept, 1e-6) - clear_ground)
+                        > THRESHOLDS["darkening_threshold"]).sum())
     below_sky = _band_count(below, SKY_BAND_ROWS)
     below_ground = _band_count(below, CLOUD_GROUND_ROWS)
     minimum = LOOK_THRESHOLDS["cloud_min_changed_px"]
     leak = LOOK_THRESHOLDS["cloud_max_leak_px"]
     applied = _look_applied(above_dir).get("clouds", {})
-    ok = (above_sky >= minimum and above_ground <= leak
+    floor = LOOK_THRESHOLDS["cloud_min_ground_kept"]
+    ok = (above_sky >= minimum and above_ground <= leak and kept >= floor
           and below_ground >= minimum and below_sky <= leak)
     return LookClause(
         "cloud base bracket", "PASS" if ok else "FAIL",
-        f"layer above: {above_sky} sky px / {above_ground} ground px changed; "
+        f"layer above: {above_sky} sky px / {above_ground} ground px changed, ground "
+        f"keeps {kept:.2f} of its light (min {floor:g}); "
         f"layer below: {below_ground} ground px / {below_sky} sky px "
         f"(min {minimum}, leak max {leak}; cover parameter "
         f"{applied.get('cover_parameter', 'unrecorded')})",

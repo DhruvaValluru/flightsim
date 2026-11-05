@@ -749,8 +749,9 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	SkyComponent->SetMobility(EComponentMobility::Movable);
 	// Real Time Capture per §6.6, so the sky light follows the atmosphere
 	// rather than a flat ambient term.
-	SkyComponent->SetRealTimeCapture(true);
+	SkyComponent->SetRealTimeCapture(!Options.bCaptureSkyOnce);
 	SkyComponent->SetIntensity(1.0f);
+	SkyLightComponent = SkyComponent;
 
 	// -- X-Plane lighting colours (opt-in, see the options' comment) --------
 	// Applied AFTER the physical sky so a plan's own colours are not
@@ -1281,10 +1282,7 @@ bool FFlightSimVisualScene::BuildClouds(UWorld* World,
 	{
 		// UE 5.7 has no setters for these: the properties, then a render
 		// state refresh so the change reaches the proxy.
-		// -NoCloudShadows (Gate 6's cloud bracket only): with a real ground
-		// a layer above the camera shades the plain (B4 round 3), and that
-		// bracket grades where the layer is DRAWN, not where it shades.
-		SunLight->bCastCloudShadows = !Options.bNoCloudShadows;
+		SunLight->bCastCloudShadows = true;
 		SunLight->CloudShadowStrength = 1.0f;
 		SunLight->MarkRenderStateDirty();
 	}

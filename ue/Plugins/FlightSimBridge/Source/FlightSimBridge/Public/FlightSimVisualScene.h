@@ -179,7 +179,10 @@ struct FFlightSimVisualSceneOptions
 	// Gate 6: leave the near copy out, so the far peak can be seen at all.
 	bool bHideNearTerrain = false;
 	// Gate 6's cloud bracket: the layer drawn, its shadow on the ground off.
-	bool bNoCloudShadows = false;
+	// Capture the sky light once before the first frame. Real-time capture
+	// returns at once for a scene capture (FScene::
+	// AllocateAndCaptureFrameSkyEnvMap), and this renderer draws only those.
+	bool bCaptureSkyOnce = false;
 	// Gate 6's extinction control: no atmosphere and no height fog in frame.
 	bool bNoAerialPerspective = false;
 	// Sun placed low in the north-west, so the east-west ridge throws its
@@ -546,6 +549,7 @@ public:
 	// The plain's vertex colour to near black (-GroundDarkAt, Gate 6's
 	// exposure control). Nothing else in the scene changes.
 	void DarkenGround();
+	class USkyLightComponent* SkyLightComponent = nullptr;
 
 private:
 	UMaterialInstanceDynamic* LensDropsInstance = nullptr;

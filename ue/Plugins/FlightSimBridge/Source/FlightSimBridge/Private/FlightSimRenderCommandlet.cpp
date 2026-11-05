@@ -1852,7 +1852,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SceneOptions.NearTerrainOriginMetres = FVector2D(-8000.0, -21360.0);
 		SceneOptions.FarTerrainOriginMetres = FVector2D(-8000.0, -41360.0);
 		SceneOptions.bHideNearTerrain = FParse::Param(*Params, TEXT("HideNearTerrain"));
-		SceneOptions.bNoCloudShadows = FParse::Param(*Params, TEXT("NoCloudShadows"));
+		SceneOptions.bCaptureSkyOnce = true;
 		SceneOptions.bNoAerialPerspective = FParse::Param(*Params, TEXT("NoAerialPerspective"));
 		// Terrain shot: sun beyond the ridge, so the peaks throw their shadow
 		// band back across the plain toward the camera. Shadow shot: sun high
@@ -3782,6 +3782,22 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Capture->CaptureScene();
 		FlushRenderingCommands();
 	}
+	// The sky light, captured here because real-time capture never runs for a
+	// scene capture: without this every shadow and every overcast is lit by
+	// nothing (measured on 5.7.4: the plain under a layer, 1.8/255; with it, 172).
+	if (VisualScene.SkyLightComponent != nullptr)
+	{
+		VisualScene.SkyLightComponent->SetCaptureIsDirty();
+		USkyLightComponent::UpdateSkyCaptureContents(World);
+		FlushRenderingCommands();
+		for (int32 i = 0; i < 2; ++i)
+		{
+			World->SendAllEndOfFrameUpdates();
+			FlushRenderingCommands();
+			Capture->CaptureScene();
+			FlushRenderingCommands();
+		}
+	}
 
 	// -- the storm meter: the exposure under a drawn cumulonimbus ----------
 	// The cell's cloud shadows the sun out and its base is lit by its own
@@ -4340,6 +4356,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			VisualScene.DarkenGround();
 			bGroundDarkened = true;
+		}
+		if (bSunAnimated && VisualScene.SkyLightComponent != nullptr)
+		{
+			VisualScene.SkyLightComponent->SetCaptureIsDirty();
+			USkyLightComponent::UpdateSkyCaptureContents(World);
+			FlushRenderingCommands();
 		}
 		Capture->CaptureScene();
 		FlushRenderingCommands();
