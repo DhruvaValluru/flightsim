@@ -25,8 +25,8 @@ reason, for example which tool is missing. The same lines are kept in
 
 Open Settings (the gear). It has six items, in this order:
 
-1. **Google tiles key.** Paste it once; it is kept in `settings.json` so you
-   never type it again. The ground in every picture is drawn from Google's 3D
+1. **Google tiles key or Cesium ion token.** Paste either one once; it is kept
+   in `settings.json` so you never type it again. The ground in every picture is drawn from Google's 3D
    tiles, so a run without the key does not fly: it tells you by name that the
    key is missing. The tiles are the ground; there is nothing to switch off.
 2. **Cesium status.** Read-only, taken from the installed tools.

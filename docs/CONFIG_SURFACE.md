@@ -37,6 +37,7 @@ Every switch the program reads, each with one decision. **ui**: stays exposed, i
 | `GOOGLE_MAPS_API_KEY` | `google_tiles_key` | ui | none | `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimGoogleTiles.cpp:79` |
 | `UE_ROOT` | `engine` | ui | 5.7.4 | `core/util/platform.py:278` |
 | `ANTHROPIC_API_KEY` | `llm_key` | ui | none | `core/nl/providers.py:200`, `core/nl/llm_compiler.py:162`, `core/nl/llm_compiler.py:1536`, `core/nl/camera_prompt.py:361` |
+| `CESIUM_ION_TOKEN` | `cesium_ion_token` | dev-only | none | `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimGoogleTiles.cpp:81`, `core/util/settings.py:67` |
 
 ## Derived rows (shown, never set)
 

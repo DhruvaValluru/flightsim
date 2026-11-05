@@ -207,8 +207,8 @@ def run_headless(command: Sequence[str], log: Path, watch: Sequence[Path] = (),
     watched: List[Path] = [log, *[Path(p) for p in watch]]
     with log.open("a" if append else "w", encoding="utf-8", errors="replace") as sink:
         # The render child's environment (E2): the server's plus the
-        # stored google_tiles_key as GOOGLE_MAPS_API_KEY unless the shell
-        # already set one; nothing else is added.
+        # stored google_tiles_key, as CESIUM_ION_TOKEN or GOOGLE_MAPS_API_KEY
+        # by its shape, unless the shell already set one; nothing else.
         from core.util.settings import render_env
 
         process = subprocess.Popen(list(command), stdout=sink, stderr=subprocess.STDOUT,

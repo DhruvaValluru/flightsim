@@ -159,9 +159,11 @@ def test_ui_bucket_is_the_e3_set():
     assert "google_tiles" not in file_keys()
     assert by_key("cesium_status").readonly and by_key("engine").readonly
     assert by_key("google_tiles_key").env == "GOOGLE_MAPS_API_KEY"
+    assert by_key("cesium_ion_token").env == "CESIUM_ION_TOKEN"
+    assert not by_key("cesium_ion_token").file_writable
     assert by_key("llm_key").env == "ANTHROPIC_API_KEY"
     assert by_key("engine").env == "UE_ROOT"
-    for key in ("llm", "llm_model", "relay_url", "google_tiles", "ffmpeg", "font", "geocoder", "geocode_cache",
+    for key in ("llm", "llm_model", "relay_url", "google_tiles", "cesium_ion_token", "ffmpeg", "font", "geocoder", "geocode_cache",
                 "rebuild_materials", "machine", "branch", "xplane_terrain", "xplane_sky", "xplane_lighting"):
         assert by_key(key).bucket == "dev-only", key
     for key in ("weather_backend", "rain_gain", "rain_style", "sky", "render_timeout_seconds",

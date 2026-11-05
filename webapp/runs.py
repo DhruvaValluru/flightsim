@@ -137,6 +137,9 @@ class RunState:
     #: E2: the rows the environment overrode when the run started
     #: (core.util.settings.env_overrides; secrets recorded as "<set>").
     env_override: List[Dict] = field(default_factory=list)
+    #: The tiles credential's type ("cesium_ion" or "google_key", None with
+    #: the tiles off or no credential); never its value.
+    tiles_credential: Optional[str] = None
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -150,16 +153,19 @@ class RunState:
                 "scene": self.scene, "clip": self.clip,
                 "started": self.started, "events": self.events[-20:],
                 "reference": self.reference, "conditions": self.conditions,
-                "capture": self.capture, "env_override": self.env_override}
+                "capture": self.capture, "env_override": self.env_override,
+                "tiles_credential": self.tiles_credential}
 
 
 def record_env_override(run: "RunState") -> List[Dict]:
     """E2: record on ``run`` every setting the environment overrides right
     now (env > settings.json > default) and, when there is one, a status
-    line ``env override: NAME=value, ...``; secrets stay ``<set>``."""
-    from core.util.settings import env_override_status, env_overrides
+    line ``env override: NAME=value, ...``; secrets stay ``<set>``. The
+    tiles credential's type goes on ``run`` here too."""
+    from core.util.settings import env_override_status, env_overrides, tiles_credential
 
     run.env_override = env_overrides()
+    run.tiles_credential = tiles_credential()
     if run.env_override:
         run.events.append({"t": time.time(), "status": run.status,
                            "detail": env_override_status(run.env_override)})
@@ -2816,6 +2822,7 @@ class RunManager:
             run.reference = provenance.get("reference_speeds")
             run.conditions = provenance.get("conditions") or {}
             run.env_override = provenance.get("env_override") or []
+            run.tiles_credential = provenance.get("tiles_credential")
         run.events.append({"t": run.started, "status": "done",
                            "detail": "recovered after a server restart"})
         self.runs[run_id] = run
@@ -3619,6 +3626,8 @@ class RunManager:
             "conditions": run.conditions,
             # E2: the settings the environment overrode for this run.
             "env_override": run.env_override,
+            # The type of tiles credential, never its value.
+            "tiles_credential": run.tiles_credential,
         }, indent=1), encoding="utf-8")
 
         # ONE FLIGHT, NOT TWO -- the web half of 129f140.

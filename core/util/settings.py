@@ -27,11 +27,17 @@ Secrets (``google_tiles_key``, ``llm_key``) are stored as typed (local
 single-user app; the file is created mode 0600 off Windows), served to the
 panel as stored, and never logged: ``env_overrides()`` records a secret
 override's value as ``"<set>"``.
+
+``google_tiles_key`` holds either tiles credential, the two the render host
+reads (FlightSimGoogleTiles.cpp): a Cesium ion token (a JWT) reaches the
+render as ``CESIUM_ION_TOKEN``, anything else as ``GOOGLE_MAPS_API_KEY``.
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -41,7 +47,7 @@ from core.config_surface import SETTINGS, Setting, by_key, file_keys, ui_keys  #
 from core.util.platform import TOOLCHAIN, UE_ENGINE_PATCH, UE_ENGINE_VERSION, find_ue_root, os_name
 
 #: The rows whose values are secrets: never logged, recorded as "<set>".
-SECRET_KEYS: Tuple[str, ...] = ("google_tiles_key", "llm_key")
+SECRET_KEYS: Tuple[str, ...] = ("google_tiles_key", "llm_key", "cesium_ion_token")
 
 #: The render quality presets (webapp/runs.py RENDER_QUALITIES; stated here
 #: so core/ does not import webapp/).
@@ -56,6 +62,13 @@ OFF_WORDS: Tuple[str, ...] = ("0", "off", "false", "no")
 
 #: The environment name the render host reads for the tiles key.
 TILES_ENV = "GOOGLE_MAPS_API_KEY"
+
+#: The environment name the render host reads for a Cesium ion token.
+ION_ENV = "CESIUM_ION_TOKEN"
+
+#: The bridge source that may carry a compiled-in ion token.
+BRIDGE_TILES_SOURCE: Path = (Path(__file__).resolve().parents[2] / "ue" / "Plugins" / "FlightSimBridge"
+                             / "Source" / "FlightSimBridge" / "Private" / "FlightSimGoogleTiles.cpp")
 
 #: The environment name the LLM compiler reads for the Claude key.
 LLM_ENV = "ANTHROPIC_API_KEY"
@@ -269,18 +282,59 @@ def env_override_status(overrides: List[Dict[str, Any]]) -> str:
         f"{o['env']}={o['value']}" for o in overrides)
 
 
+def is_ion_token(value: str) -> bool:
+    """Whether ``value`` looks like a Cesium ion token: a JWT, three
+    dot-separated parts starting ``eyJ``."""
+    parts = str(value or "").strip().split(".")
+    return len(parts) == 3 and all(parts) and parts[0].startswith("eyJ")
+
+
+@functools.lru_cache(maxsize=1)
+def compiled_ion_fallback() -> bool:
+    """Whether the bridge source compiles in an ion token, so the engine
+    draws the tiles with nothing typed. Only that fact: the token itself is
+    neither captured nor returned."""
+    try:
+        text = BRIDGE_TILES_SOURCE.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return re.search(r'IonToken\s*=\s*TEXT\("eyJ', text) is not None
+
+
 def render_env(environ: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """The render child's environment: a copy of ``environ`` (default
-    ``os.environ``) plus ``GOOGLE_MAPS_API_KEY`` from the stored
-    ``google_tiles_key`` unless the environment already has one. Nothing
-    else is added; ``ANTHROPIC_API_KEY`` is never exported."""
+    ``os.environ``) plus the stored ``google_tiles_key``, as
+    ``CESIUM_ION_TOKEN`` when it looks like an ion token and as
+    ``GOOGLE_MAPS_API_KEY`` otherwise. A credential of either kind in the
+    environment wins and nothing is added: the render host prefers a Google
+    key, so a stored one would otherwise beat an environment ion token.
+    ``ANTHROPIC_API_KEY`` is never exported."""
     env = dict(os.environ if environ is None else environ)
-    if not env.get(TILES_ENV, "").strip():
+    if not env.get(TILES_ENV, "").strip() and not env.get(ION_ENV, "").strip():
         stored = load_settings()
         key = str(stored.get("google_tiles_key", "") or "").strip()
         if key:
-            env[TILES_ENV] = key
+            env[ION_ENV if is_ion_token(key) else TILES_ENV] = key
     return env
+
+
+def tiles_credential(environ: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """The type of credential a render started now would use, in the render
+    host's order: ``"google_key"``, ``"cesium_ion"``, or None when the tiles
+    are off or there is none. Never the value."""
+    source = os.environ if environ is None else environ
+    tiles_on, _ = effective("google_tiles", source)
+    if not tiles_on:
+        return None
+    try:
+        env = render_env(source)
+    except SettingsError:
+        env = dict(source)
+    if env.get(TILES_ENV, "").strip():
+        return "google_key"
+    if env.get(ION_ENV, "").strip() or compiled_ion_fallback():
+        return "cesium_ion"
+    return None
 
 
 def llm_api_key(environ: Optional[Dict[str, str]] = None) -> str:
@@ -299,16 +353,17 @@ def llm_api_key(environ: Optional[Dict[str, str]] = None) -> str:
 
 def missing_required(environ: Optional[Dict[str, str]] = None) -> List[Dict[str, str]]:
     """The keys a render or compile will refuse without, each with its
-    message: the tiles key while the tiles are on; the LLM key."""
+    message: a tiles credential while the tiles are on (the environment,
+    the stored field or the compiled ion token all count); the LLM key."""
     env = os.environ if environ is None else environ
     out: List[Dict[str, str]] = []
     tiles_on, _ = effective("google_tiles", env)
-    tiles_key, _ = effective("google_tiles_key", env)
-    if tiles_on and not str(tiles_key or "").strip():
+    if tiles_on and tiles_credential(env) is None:
         out.append({"key": "google_tiles_key",
                     "message": "google_tiles_key: Google tiles are the ground of every terrain "
-                               "render and no key is set; type it in Settings (or set "
-                               f"{TILES_ENV} for a developer run)"})
+                               "render and no Google tiles key or Cesium ion token is set; type "
+                               f"one in Settings (or set {TILES_ENV} or {ION_ENV} for a "
+                               "developer run)"})
     llm_key, _ = effective("llm_key", env)
     if not str(llm_key or "").strip() and not (env.get("FLIGHTSIM_LLM", "") or "").strip():
         out.append({"key": "llm_key",
@@ -359,6 +414,10 @@ def settings_payload(environ: Optional[Dict[str, str]] = None) -> Dict[str, Any]
         if row.readonly:
             continue
         value, _source = effective(row.key, env)
+        # An environment-only secret has no password input to sit in: the
+        # advanced fold prints its rows as text.
+        if row.key in SECRET_KEYS and not row.file_writable and value:
+            value = "<set>"
         values[row.key] = value
     values["engine"] = engine_label()
     values["cesium_status"] = cesium_status()

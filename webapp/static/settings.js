@@ -12,7 +12,7 @@ window.FlightSimSettings = (function () {
   const READONLY = ["cesium_status", "engine"];
   const SECRETS = ["google_tiles_key", "llm_key"];
   const LABELS = {
-    google_tiles_key: "Google tiles key",
+    google_tiles_key: "Google tiles key or Cesium ion token",
     cesium_status: "Cesium for Unreal",
     engine: "Engine",
     render_quality: "Render quality",
@@ -23,7 +23,7 @@ window.FlightSimSettings = (function () {
   //: The missing-item messages, keyed by the row name GET /settings `missing`
   //: reports; each names the item and what fixes it.
   const MESSAGES = {
-    google_tiles_key: "Google tiles key missing: paste it here once (Google Maps Platform key with the Map Tiles API)",
+    google_tiles_key: "Google tiles key or Cesium ion token missing: paste one here once (a Cesium ion access token, or a Google Maps Platform key with the Map Tiles API)",
     llm_key: "LLM key missing: paste a Claude API key here once, or the compiler stays on the offline parser",
   };
 
