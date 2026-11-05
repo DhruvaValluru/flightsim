@@ -29,8 +29,20 @@
     ".*hotspot.*",
     "shadow.*",
     "Lprop\\.disk",
-    "Rprop\\.disk"
+    "Rprop\\.disk",
+    "FrtSki",
+    "Lski",
+    "Rski",
+    "bluntnose",
+    "float\\.fairing"
   ],
+  "gear_geometry": {
+    "parts": [
+      "Models/wheels\\.ac"
+    ],
+    "objects": [],
+    "source": "every object wheels.ac still draws after the excludes is landing gear: FrtWheel, Lwheel, Rwheel, FrtStrut, LHstrut, RHstrut, frt.d1, frt.d2 (its skis, chock hotspots and taxi-light flare are excluded). Measured 2026-11-05 from the pinned commit: lowest gear vertex -1.839 m below the model origin (Lwheel/Rwheel), nose wheel -1.801 m"
+  },
   "hinge_note": "hinge lines estimated from each surface's own leading-edge geometry (assets_pipeline/estimate_hinges.py); verified on screen by gate5_realmesh, not assumed",
   "surfaces": {
     "aileron_l": {
@@ -153,6 +165,57 @@
         ]
       ]
     }
+  },
+  "labels": {
+    "dimensions_m": {
+      "length": 15.77,
+      "height": 5.91,
+      "source": "dhc6-help.xml at the pinned commit, Technical data (DHC-6-300): length 15.77 m / 51 ft 9 in, height 5.91 m / 19 ft 4 in; the flown DHC6.xml header states the same length (51.75 ft); span from the flown FDM's own <wingspan>. The pinned mesh measures 15.75 m nose to tail and 5.80 m lowest tyre to fin top"
+    },
+    "keypoints": {
+      "nose": {
+        "structural_in": [
+          0.0,
+          0.0,
+          -52.52
+        ],
+        "basis": "measured",
+        "source": "measured 2026-11-05 from Models/dhc-6.ac at commit ed826b95 with assets_pipeline.acmodel (parse_ac, ac_to_model): the frontmost vertex of the drawn 'longnose' at model-frame (-6.346, 0.003, -0.189) m, y taken as the centreline; the frame: the source repo's own dhc6jsb.xml has VRP x 249.9 in = 6.347 m and the mesh's nose tip is 6.346 m ahead of the .ac origin, so the structural origin is the nose tip (checked: the mesh's wheel centres fall at x 73.94 and 252.91 in against dhc6jsb.xml's NOSE_LG 73.9 and LEFT/RIGHT_MLG 252.9 in); z as the converter draws it, the lowest tyre vertex (model z -1.839 m) on the flown DHC6.xml main-gear contact z -117.5 in; metres / 0.0254"
+      },
+      "tail": {
+        "structural_in": [
+          619.89,
+          0.0,
+          105.88
+        ],
+        "basis": "measured",
+        "source": "measured 2026-11-05 from Models/dhc-6.ac at commit ed826b95 with assets_pipeline.acmodel (parse_ac, ac_to_model): the aftmost vertex, the rudder's trailing tip, at model-frame (9.399, 0.0, 3.835) m; the frame: the source repo's own dhc6jsb.xml has VRP x 249.9 in = 6.347 m and the mesh's nose tip is 6.346 m ahead of the .ac origin, so the structural origin is the nose tip (checked: the mesh's wheel centres fall at x 73.94 and 252.91 in against dhc6jsb.xml's NOSE_LG 73.9 and LEFT/RIGHT_MLG 252.9 in); z as the converter draws it, the lowest tyre vertex (model z -1.839 m) on the flown DHC6.xml main-gear contact z -117.5 in; metres / 0.0254"
+      },
+      "left_wingtip": {
+        "fdm_wingspan": "left"
+      },
+      "right_wingtip": {
+        "fdm_wingspan": "right"
+      },
+      "nose_gear": {
+        "fdm_contact": "NOSE_LG"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MLG"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MLG"
+      }
+    },
+    "keypoints_note": "the flown DHC6.xml carries only the three gear contacts, so the wingtips are the FDM half-span approximation (9.91 m; the mesh's wing tip is 9.78 m). The labels are where the flown FDM says the gear is, as the labeller's rule states, and that FDM is the stock JSBSim file, not the mesh's own dhc6jsb.xml: its mains sit at x 245.9 in, 0.18 m ahead of the mesh's wheels, and its CG is 2.61 m above the tyres where dhc6jsb.xml's is 1.64 m, so the drawn aircraft sits about 0.96 m lower about the CG than its own repository's FDM would place it",
+    "components": [
+      {
+        "id": "landing_gear",
+        "class": "landing_gear",
+        "source": "nose_gear",
+        "note": "one landing_gear component per aircraft (letter C): every object gear_geometry matches (wheels, struts, oleo links) is written to SM_DHC6_landing_gear.obj by assets_pipeline/convert.py; fixed gear (the FDM's <retractable>0)"
+      }
+    ]
   },
   "limits": {
     "category": {

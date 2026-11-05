@@ -369,6 +369,12 @@ CRUISE_DEFAULT_KT: Dict[str, float] = {
     "B747": 250.0, "737": 250.0, "A320": 250.0, "global5000": 250.0,
     "c172p": 100.0, "f16": 350.0, "f15": 350.0, "A4": 350.0,
     "J11": 350.0,
+    # MEASURED, not the type's cruise. The only stated cruise is "around
+    # 150 KIAS" (dhc6-help.xml at the config's pinned commit), which the
+    # flown stock DHC6.xml cannot hold: it trims 85..135 kt at the default
+    # run's 3500 m and 85..125 kt at 4500 m (measured 2026-11-05, 5 kt
+    # steps, configure_from_spec). 110 kt is the middle of that band.
+    "DHC6": 110.0,
 }
 
 

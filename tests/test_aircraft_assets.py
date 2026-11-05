@@ -644,7 +644,7 @@ def test_without_identifiable_gear_the_z_anchor_is_the_vrp_and_says_so(
 
 def test_a_config_with_no_labels_keeps_the_vrp_rule_and_says_so(tmp_path,
                                                                  monkeypatch):
-    """A config without a labels block (the DHC6) has no nose keypoint to
+    """A config without a labels block (the p51d) has no nose keypoint to
     align to. Its origin is byte-identical to eb5c71d's VRP rule, the
     basis says so (so the verifier's drawn_airframe can grade it by
     name), and the extents are still recorded."""

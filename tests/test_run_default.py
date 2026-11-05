@@ -262,13 +262,53 @@ def test_run_with_no_aircraft_field_is_unchanged(client, monkeypatch):
 
 
 def test_an_aircraft_the_picker_does_not_offer_is_refused_and_never_switched(client, monkeypatch):
-    """The DHC6 has no labels block, so it is not offered; asking for it is a
-    400 naming what is, and nothing flies in its place."""
+    """The p51d's upstream ships no licence file and its config has no labels
+    block, so it is not offered; asking for it is a 400 naming what is, and
+    nothing flies in its place."""
     started = _hold_engine_open(monkeypatch)
-    reply = client.post("/run", json={"aircraft": "DHC6"})
+    reply = client.post("/run", json={"aircraft": "p51d"})
     assert reply.status_code == 400, reply.text
-    assert "c172p" in reply.text
+    assert "c172p" in reply.text and "DHC6" in reply.text
     assert started == []
+
+
+def test_a_picked_aircraft_that_cannot_trim_refuses_and_never_switches(client, monkeypatch):
+    """The DHC6's own default trims, but a STATED speed never moves: 250 kt is
+    past what its model can hold, so the run refuses by the existing rule
+    instead of flying slower or flying another."""
+    started = _hold_engine_open(monkeypatch)
+    stated = compile_prompt("fly the c172p at 3000 m and 250 kt").to_dict()
+    reply = client.post("/run", json={"aircraft": "DHC6", "spec": stated})
+    assert reply.status_code == 409, reply.text
+    named = [v["constraint"] for v in reply.json()["violations"]]
+    assert "envelope.trim_feasible" in named
+    assert started == []
+
+
+def test_the_dhc6_flies_its_measured_default_and_reaches_done_headless(client, monkeypatch, tmp_path):
+    """POST /run {"aircraft": "DHC6"} flies at the table's speed and finishes
+    with no FAIL on an engine-less host (the slab, as the default run's own
+    headless test: the grand_canyon bake is not on every clone)."""
+    import core.util.platform as plat
+
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    monkeypatch.setattr(runs_module, "ensure_aircraft_model",
+                        lambda spec, report: None)
+    monkeypatch.setattr(runs_module, "needs_dynamic_bake", lambda spec: None)
+    monkeypatch.setattr(runs_module, "pick_scene", lambda spec: FLAT_SCENE)
+    monkeypatch.setattr(server_module, "pick_scene", lambda spec: FLAT_SCENE)
+    monkeypatch.setattr(server_module, "manager", RunManager(out_root=tmp_path))
+    reply = client.post("/run", json={"aircraft": "DHC6"})
+    assert reply.status_code == 200, reply.text
+    state = _wait_for_run(client, reply.json()["run_id"])
+    assert state["status"] == "done", state["detail"]
+    assert state["capture"] is not None and state["capture"]["headless"] is True
+    failed = [c["name"] for c in state["capture"]["checks"]
+              if c["status"] == "FAIL"]
+    assert failed == [], failed
+    assert "FAILED" not in state["detail"]
+    spec = default_run_spec("DHC6")
+    assert float(spec.airspeed.value) == CRUISE_DEFAULT_KT["DHC6"] == 110.0
 
 
 def test_compile_applies_the_picked_aircraft_over_the_prompt(client):
@@ -327,5 +367,7 @@ def test_the_picker_offers_only_aircraft_a_capture_can_label():
     from webapp.runs import pickable_aircraft
 
     names = {entry["name"] for entry in pickable_aircraft()}
-    assert {"c172p", "J11", "A4"} <= names and "DHC6" not in names
+    assert {"c172p", "J11", "A4", "DHC6"} <= names
+    # No licence upstream at its pinned commit (or at upstream HEAD): never.
+    assert "p51d" not in names
 

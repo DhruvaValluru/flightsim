@@ -118,3 +118,17 @@ def test_components_c172p_gear_needs_a_keypoint(tmp_path):
     with pytest.raises(ComponentUnmatchedError, match="no_such_gear") as info:
         load_airframe("c172p", config_dir=tmp_path)
     assert "landing_gear" in str(info.value)
+
+
+def test_the_dhc6_states_all_seven_keypoints_and_measures_nose_to_tail():
+    """The DHC6's nose and tail are measured from its mesh; its gear is the
+    flown FDM's own contacts. Nothing is missing, and the keypoints span the
+    labelled length to within the mesh's 2.5 cm disagreement with it."""
+    airframe = load_airframe("DHC6")
+    assert airframe.missing == ()
+    assert airframe.keypoints["nose"].basis == "measured"
+    assert airframe.keypoints["tail"].basis == "measured"
+    assert airframe.keypoints["nose_gear"].basis == "fdm"
+    assert airframe.keypoints["left_wingtip"].basis == "fdm-approximation"
+    span = airframe.keypoints["nose"].body_m[0] - airframe.keypoints["tail"].body_m[0]
+    assert span == pytest.approx(airframe.length_m, abs=0.03)
