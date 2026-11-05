@@ -6,9 +6,10 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "flightsim setup (Windows)"
 
-# numpy==2.0.2 has Windows wheels only up to Python 3.12, so a default
-# 3.13/3.14 install would try to build numpy from source and fail. Ask
-# the py launcher for a covered version first, else python on PATH.
+# requirements.lock is resolved for Python 3.12 (and numpy==2.0.2 has
+# Windows wheels only up to 3.12), so any other version stops here
+# rather than installing loose. Ask the py launcher for 3.12 first,
+# else python on PATH.
 #
 # Probes run with $ErrorActionPreference dropped to Continue: under
 # "Stop", PS 5.1 turns a REDIRECTED stderr line into a terminating error
@@ -27,17 +28,14 @@ function Probe {
 $pyExe = $null
 $pyArgs = @()
 if (Get-Command py -ErrorAction SilentlyContinue) {
-    foreach ($v in @("3.12", "3.11", "3.10")) {
-        $null = Probe "py" @("-$v", "-c", "pass")
-        if ($LASTEXITCODE -eq 0) { $pyExe = "py"; $pyArgs = @("-$v"); break }
-    }
+    $null = Probe "py" @("-3.12", "-c", "pass")
+    if ($LASTEXITCODE -eq 0) { $pyExe = "py"; $pyArgs = @("-3.12") }
 }
 if (-not $pyExe) {
     $ver = Probe "python" @("-c", "import sys; print('%d.%d' % sys.version_info[:2])")
-    if ($LASTEXITCODE -ne 0 -or
-        @("3.12", "3.11", "3.10", "3.9") -notcontains $ver) {
-        Write-Host "No Python 3.10-3.12 found (numpy==2.0.2 ships no Windows"
-        Write-Host "wheel past 3.12). Install one with:"
+    if ($LASTEXITCODE -ne 0 -or $ver -ne "3.12") {
+        Write-Host "No Python 3.12 found: requirements.lock is pinned to"
+        Write-Host "Python 3.12. Install it with:"
         Write-Host "  winget install -e --id Python.Python.3.12"
         Write-Host "then re-run this script -- or use the one-command deploy,"
         Write-Host "which installs it for you:  .\scripts\deploy_windows.ps1"
@@ -48,7 +46,7 @@ if (-not $pyExe) {
 
 & $pyExe @pyArgs -m venv .venv
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip
-& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+& .\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements.lock
 
 Write-Host ""
 Write-Host "Done. Next steps:"

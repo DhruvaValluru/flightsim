@@ -5,9 +5,30 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 -m venv .venv
+# requirements.txt is the human-edited source; requirements.lock is its hashed
+# resolution, made for one Python. --require-hashes installs exactly the bytes
+# CI and scripts/deploy_windows.ps1 install, so any other Python stops here
+# rather than installing loose.
+PINNED_PYTHON=3.12
+python=""
+for candidate in "python$PINNED_PYTHON" python3; do
+    if command -v "$candidate" >/dev/null 2>&1 &&
+       [ "$("$candidate" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)" = "$PINNED_PYTHON" ]; then
+        # The real binary: a venv made through a uv-managed symlink cannot
+        # find its standard library.
+        python="$("$candidate" -c 'import os, sys; print(os.path.realpath(sys.executable))')"
+        break
+    fi
+done
+if [ -z "$python" ]; then
+    echo "No Python $PINNED_PYTHON found: requirements.lock is pinned to Python $PINNED_PYTHON." >&2
+    echo "Install Python $PINNED_PYTHON (for example: brew install python@$PINNED_PYTHON), then re-run this script." >&2
+    exit 1
+fi
+
+"$python" -m venv .venv
 .venv/bin/pip install --upgrade pip
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install --require-hashes -r requirements.lock
 
 echo
 echo "Running the test suite (should be all green)..."

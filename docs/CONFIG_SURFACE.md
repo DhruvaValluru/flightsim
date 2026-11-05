@@ -6,19 +6,19 @@ Every switch the program reads, each with one decision. **ui**: stays exposed, i
 
 | name | settings key | bucket | default | where read (file:line) |
 |---|---|---|---|---|
-| `FLIGHTSIM_RENDER_QUALITY` | `render_quality` | ui | measure | `webapp/runs.py:2126` |
+| `FLIGHTSIM_RENDER_QUALITY` | `render_quality` | ui | measure | `webapp/runs.py:2290` |
 | `FLIGHTSIM_CAPTURE_PASSES` | `capture_passes` | ui | none | `webapp/capture.py:66` |
 | `FLIGHTSIM_LLM` | `llm` | dev-only | unset | `core/nl/providers.py:193`, `core/nl/llm_compiler.py:157`, `scripts/llm_check.py:50` |
 | `FLIGHTSIM_LLM_MODEL` | `llm_model` | dev-only | unset | `core/nl/providers.py:210`, `core/nl/providers.py:219`, `core/nl/providers.py:254`, `core/nl/providers.py:262` |
 | `FLIGHTSIM_RELAY_URL` | `relay_url` | dev-only | unset | `core/nl/providers.py:231` |
 | `FLIGHTSIM_GOOGLE_TILES` | `google_tiles` | dev-only | on | `core/scenario/card.py:385` |
-| `FLIGHTSIM_WEATHER_BACKEND` | `weather_backend` | default | procedural | `webapp/runs.py:2157` |
-| `FLIGHTSIM_RAIN_GAIN` | `rain_gain` | default | 4.0 | `webapp/runs.py:2163`, `scripts/debug_storm_render.py:106` |
-| `FLIGHTSIM_RAIN_STYLE` | `rain_style` | default | cinematic | `webapp/runs.py:2164` |
-| `FLIGHTSIM_SKY` | `sky` | default | unset | `webapp/runs.py:2293`, `core/registry.py:1317`, `scripts/ue_create_materials.py:2183` |
+| `FLIGHTSIM_WEATHER_BACKEND` | `weather_backend` | default | procedural | `webapp/runs.py:2321` |
+| `FLIGHTSIM_RAIN_GAIN` | `rain_gain` | default | 4.0 | `webapp/runs.py:2327`, `scripts/debug_storm_render.py:106` |
+| `FLIGHTSIM_RAIN_STYLE` | `rain_style` | default | cinematic | `webapp/runs.py:2328` |
+| `FLIGHTSIM_SKY` | `sky` | default | unset | `webapp/runs.py:2473`, `core/registry.py:1317`, `scripts/ue_create_materials.py:2183` |
 | `FLIGHTSIM_RENDER_TIMEOUT_SECONDS` | `render_timeout_seconds` | default | unset | `core/render/headless.py:83` |
 | `FLIGHTSIM_STALL_SECONDS` | `stall_seconds` | default | unset | `core/render/headless.py:79` |
-| `FLIGHTSIM_TERRAIN_PREFETCH` | `terrain_prefetch` | default | on | `webapp/runs.py:351` |
+| `FLIGHTSIM_TERRAIN_PREFETCH` | `terrain_prefetch` | default | on | `webapp/runs.py:377` |
 | `FLIGHTSIM_FFMPEG` | `ffmpeg` | dev-only | unset | `core/util/platform.py:76` |
 | `FLIGHTSIM_FONT` | `font` | dev-only | unset | `core/util/platform.py:113` |
 | `FLIGHTSIM_GEOCODER` | `geocoder` | dev-only | unset | `core/nl/geocode.py:54` |
