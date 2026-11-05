@@ -74,6 +74,9 @@ def test_each_skip_line_is_the_agreed_word(monkeypatch, capsys, tmp_path):
     spec.loader.exec_module(lc)
     import core.util.platform as platform
     from assets_pipeline import importer
+    built = tmp_path / "bridge.dll"
+    built.write_bytes(b"")
+    monkeypatch.setattr(platform, "ue_bridge_binary", lambda repo: built)
     monkeypatch.setattr(platform, "binary_stale_reason", lambda repo: None)
     monkeypatch.setattr(lc, "check_materials", lambda repo, engine_version=None: None)
     monkeypatch.setattr(importer, "configured_aircraft", lambda: {})

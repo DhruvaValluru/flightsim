@@ -102,6 +102,9 @@ def test_aircraft_check_lists_only_stale_names(monkeypatch, capsys):
 def test_build_check_follows_binary_stale_reason(monkeypatch, capsys, tmp_path):
     import core.util.platform as platform
     seen = []
+    built = tmp_path / "bridge.dll"
+    built.write_bytes(b"")
+    monkeypatch.setattr(platform, "ue_bridge_binary", lambda repo: built)
     monkeypatch.setattr(platform, "binary_stale_reason",
                         lambda repo: seen.append(repo) or "no stamp; source abc")
     assert lc.check_build(tmp_path) == "no stamp; source abc"
@@ -111,6 +114,11 @@ def test_build_check_follows_binary_stale_reason(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(platform, "binary_stale_reason", lambda repo: None)
     assert lc.main(["build", "--repo", str(tmp_path)]) == 0
     assert capsys.readouterr().out.strip() == "build up to date"
+
+
+def test_a_bridge_never_built_is_not_up_to_date(tmp_path):
+    """A fresh download's state: nothing built, so the build step must run."""
+    assert lc.check_build(tmp_path) == "the bridge is not built"
 
 
 def test_unknown_step_is_a_usage_error():
