@@ -169,7 +169,7 @@
       {
         "name": "pylon0-load",
         "index": 0,
-        "arm_in": 454.72,
+        "arm_in": 454.72441014000003,
         "poh_arm_in": null,
         "default_lb": 0.0,
         "max_kg": 0.0,
@@ -180,7 +180,7 @@
       {
         "name": "pylon1-load",
         "index": 1,
-        "arm_in": 629.92,
+        "arm_in": 629.9212608,
         "poh_arm_in": null,
         "default_lb": 0.0,
         "max_kg": 0.0,
@@ -191,7 +191,7 @@
       {
         "name": "pylon2-load",
         "index": 2,
-        "arm_in": 551.18,
+        "arm_in": 551.1811032,
         "poh_arm_in": null,
         "default_lb": 230.21,
         "max_kg": 253.0,
@@ -201,7 +201,7 @@
       {
         "name": "pylon3-load",
         "index": 3,
-        "arm_in": 551.18,
+        "arm_in": 551.1811032,
         "poh_arm_in": null,
         "default_lb": 230.21,
         "max_kg": 253.0,
@@ -211,7 +211,7 @@
       {
         "name": "pylon4-load",
         "index": 4,
-        "arm_in": 582.68,
+        "arm_in": 582.67716624,
         "poh_arm_in": null,
         "default_lb": 0.0,
         "max_kg": 0.0,
@@ -222,7 +222,7 @@
       {
         "name": "pylon5-load",
         "index": 5,
-        "arm_in": 582.68,
+        "arm_in": 582.67716624,
         "poh_arm_in": null,
         "default_lb": 0.0,
         "max_kg": 0.0,
@@ -233,7 +233,7 @@
       {
         "name": "pylon6-load",
         "index": 6,
-        "arm_in": 606.3,
+        "arm_in": 606.2992135200001,
         "poh_arm_in": null,
         "default_lb": 0.0,
         "max_kg": 0.0,
@@ -244,7 +244,7 @@
       {
         "name": "pylon7-load",
         "index": 7,
-        "arm_in": 606.3,
+        "arm_in": 606.2992135200001,
         "poh_arm_in": null,
         "default_lb": 0.0,
         "max_kg": 0.0,
@@ -255,7 +255,7 @@
       {
         "name": "pylon8-load",
         "index": 8,
-        "arm_in": 533.46,
+        "arm_in": 533.46456774,
         "poh_arm_in": null,
         "default_lb": 0.0,
         "max_kg": 0.0,
@@ -266,7 +266,7 @@
       {
         "name": "pylon9-load",
         "index": 9,
-        "arm_in": 533.46,
+        "arm_in": 533.46456774,
         "poh_arm_in": null,
         "default_lb": 0.0,
         "max_kg": 0.0,
@@ -277,7 +277,7 @@
       {
         "name": "pilot",
         "index": 10,
-        "arm_in": 257.87,
+        "arm_in": 257.87401614,
         "poh_arm_in": null,
         "default_lb": 176.37,
         "max_kg": 150.0,
@@ -352,7 +352,11 @@
       "model_vars": {},
       "source": "D2 note (docs/phase3/notes/D2.md), approach 'Payload station' A: two R-27R on the symmetric inboard wing pair pylon2-load / pylon3-load so the default run keeps its longitudinal trim; 230.21 lb each is the upstream package's own R-27R mass (J-11A-set.xml); a .ac aircraft has no model variables, the stores are the parts[] entries that carry 'component'"
     },
-    "policy_station": "pylon0-load",
-    "policy_station_reason": "the forward centreline pylon: the station a payload draw fills (a stated choice); it is not loadable in the default loadout"
+    "policy_station": "pylon2-load",
+    "policy_station_reason": "the loaded inboard pylon: the J-11A has no separately declared pilot station that is loadable",
+    "cg_envelope": {
+      "polygon": null,
+      "reason": "no flight-manual CG envelope transcribed for the J-11A"
+    }
   }
 }

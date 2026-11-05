@@ -21,7 +21,7 @@ git rev-parse --verify -q "$branch" >/dev/null || { echo "FAIL no branch $branch
 if ! git diff --quiet -- docs/phase3 || ! git diff --cached --quiet -- docs/phase3; then
   git add docs/phase3 && git commit -qm "Phase 3: bookkeeping before merging $branch
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01TYf9hdwcEyKovqfAJKwdzh" >/dev/null
 fi
 if ! git diff --quiet || ! git diff --cached --quiet; then echo "FAIL dirty working tree outside docs/phase3"; git status --short; exit 2; fi
@@ -29,7 +29,7 @@ base="$(git merge-base HEAD "$branch")"
 step "merge $branch --no-ff"
 if ! git merge --no-ff "$branch" -m "Merge $branch: $box
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01TYf9hdwcEyKovqfAJKwdzh" >/dev/null 2>&1; then
   # bookkeeping conflicts resolve to MAIN's copy; anything else is the model's call
   conflicts="$(git diff --name-only --diff-filter=U)"

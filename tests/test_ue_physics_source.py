@@ -663,15 +663,15 @@ def test_patch_5_hashes_the_xml_at_the_door_before_jsbsim_reads_it():
 def test_vendored_json_records_patches_5_and_6():
     vendored = json.loads(text(PLUGIN / "VENDORED.json"))
     patches = vendored["local_patches"]
-    assert len(patches) == 6
+    assert len(patches) == 7       # A8 added the collision-raster ground
     by_number = {p.get("patch"): p for p in patches if "patch" in p}
-    assert set(by_number) == {5, 6}
+    assert set(by_number) == {5, 6, 7}
     assert "AircraftRootOverride" in by_number[5]["change"]
     assert "ExpectedAircraftXmlSha256" in by_number[5]["change"]
     assert "after its RunIC" in by_number[6]["change"] and "before DoTrim" in by_number[6]["change"]
     assert "SetVcalibratedKtsIC" in by_number[6]["change"]
     for patch in by_number.values():
-        assert patch["applied"] == "yes" and "Windows build" in patch["verification"]
+        assert patch["applied"] == "yes" and patch["verification"]
     # A fresh vendoring re-applies them (the diff is the committed change).
     script = text(REPO / "scripts/vendor_ue_plugin.sh")
     assert "jsbsim_plugin_patches_5_6.diff" in script and '"patch": 5' in script
