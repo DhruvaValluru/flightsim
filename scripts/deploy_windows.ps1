@@ -20,7 +20,7 @@
 # `& ([scriptblock]::Create((irm <url>))) -Branch x`):
 #   -InstallDir  where to clone (default ~\flightsim; an existing clone
 #                run from inside itself is reused in place)
-#   -Branch      branch to check out (default master)
+#   -Branch      branch to check out (default phase-2-final, the repository's default)
 #   -NoLaunch    set up only; do not start the server or browser
 #   -Reset       make the clone EXACTLY the remote branch (git reset
 #                --hard origin/<branch>): local edits and local commits
@@ -37,7 +37,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallDir = "",
-    [string]$Branch = "master",
+    [string]$Branch = "phase-2-final",
     [switch]$NoLaunch,
     [switch]$Reset
 )

@@ -3,6 +3,8 @@
   "builder_commit": "e74580e7f18c6f96893c8c162eee4da20a829ad6",
   "built_commit": "e74580e7f18c6f96893c8c162eee4da20a829ad6",
   "claims": [],
+  "green_commit": "0393195b",
+  "green_run_id": "G-settings-tests",
   "letter": "E",
   "needs_windows": true,
   "pending_windows": [
@@ -11,8 +13,10 @@
     "tests/test_settings_page.py::test_tiles_key_survives_a_reload (Playwright Chromium)"
   ],
   "pushed_commit": "a2ed7704",
+  "run_id": "G-settings-tests",
   "stage": "pushed",
   "unit": "E2+E3",
-  "updated": "2026-11-04T18:28:46",
+  "updated": "2026-11-05T18:02:11",
+  "verdict": "PASS",
   "worktree": "../p3-E3"
 }

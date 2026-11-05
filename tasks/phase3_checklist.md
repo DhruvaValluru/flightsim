@@ -174,10 +174,10 @@ Two rules to keep in mind:
 - [x] **E1 · Every setting listed and sorted** into: in the app / hidden default /
   developers only / delete
   - Check: a test finds no unlisted setting.
-- [ ] **E2 · All settings in one file**, edited from the app
+- [x] **E2 · All settings in one file**, edited from the app
   - Check: an empty settings file gives working defaults, and Google tiles are
     still on.
-- [ ] **E3 · Settings panel in the app**
+- [x] **E3 · Settings panel in the app**
   - Check: the tiles key survives a page reload, and 6 or fewer fields are visible.
 - [x] **E4 · Pressing Capture with nothing typed gives a working run** — *you
   decide whether storm weather is in the demo default*

@@ -3,6 +3,8 @@
   "builder_commit": "fef3a26e3aba6a23ccfa2d2821364be26161b096",
   "built_commit": "fef3a26e3aba6a23ccfa2d2821364be26161b096",
   "claims": [],
+  "green_commit": "0393195b",
+  "green_run_id": "G-settings-tests",
   "letter": "E",
   "needs_windows": true,
   "pending_windows": [
@@ -10,8 +12,10 @@
     "E2: %APPDATA%\\flightsim\\settings.json resolves and is writable"
   ],
   "pushed_commit": "a2ed7704",
+  "run_id": "G-settings-tests",
   "stage": "pushed",
   "unit": "E2+E3",
-  "updated": "2026-11-04T18:28:46",
+  "updated": "2026-11-05T18:02:11",
+  "verdict": "PASS",
   "worktree": "../p3-E2"
 }
