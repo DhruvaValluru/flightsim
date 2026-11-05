@@ -3,8 +3,8 @@
 Written 2026-11-04 by the Mac session, in budget mode. Engine: UE 5.7.4 (decision 10).
 Every box with Mac code is built and on `phase-2-final`. **Phase 3 is not accepted yet:**
 the open items below are real. Verdicts are the Windows runner's messages, as logged in
-`docs/phase3/events_mac.log`; the `verdict` fields in `docs/phase3/state/*.json` are blank
-on this branch and should not be read as evidence.
+`docs/phase3/events_mac.log`. Windows rewrote the state files' `verdict` fields from its
+evidence in 500a9698, after a wrong command had left them blank through run A-2.
 
 ## The six goals
 
@@ -21,9 +21,9 @@ on this branch and should not be read as evidence.
 
 | Verdict | Boxes |
 |---|---|
-| PASS | A2 A3 A4 A5 A6 A8 A9 A11 A12, B1 B2 B3, C1 C2 C3 C4 C5 C6 |
+| PASS | A2 A3 A4 A5 A6 A7 A8 A9 A11 A12, B1 B2 B3, C1 C2 C3 C4 C5 C6 |
 | FAIL | A10 (packet A10-3: its own causes are gone; needs one re-proof after C4, plus llm "unknown field 'notes'"), B4 (packet B4-3: Gate 6 clauses; round 3 deferred) |
-| No verdict yet | A7, A13, D2 D4 D5 D6, E1-E6, F1 |
+| No verdict yet | A13 (NEXT.md fixed after packet A13-1, awaiting re-check), D2 D4 D5 D6, E1-E6, F1 |
 | Cut or deferred | A1 rows 2-3 (decision 9), D3 (decision 3), C7 step 6 (deferred: budget) |
 | Owner or Windows only | F2, F4 |
 
