@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shutil
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -114,8 +115,9 @@ def read_shards_with_webdataset(root: Path):
     wds = pytest.importorskip("webdataset", reason="webdataset (requirements-dev.txt) is "
                                                    "the independent shard reader")
     out = {}
+    # Relative paths: webdataset reads a Windows drive letter as a URL scheme.
     for split in ("train", "val", "test"):
-        shards = sorted(str(p) for p in (root / split).glob("shard-*.tar")) \
+        shards = sorted(os.path.relpath(p) for p in (root / split).glob("shard-*.tar")) \
             if (root / split).is_dir() else []
         if not shards:
             continue

@@ -203,6 +203,11 @@ def fabricated_run(tmp_path, name, drawn=None, licences=None, images=True):
     manifest = manifest_with(spec_with(aircraft="c172p", count=2))
     if licences is not None:
         manifest["licences"] = licences
+    if drawn != "mesh":
+        # A machine with the imported model records its digest on the object;
+        # a render that drew no mesh must not read as one that did.
+        for entry in manifest.get("objects") or []:
+            entry.pop("mesh_sha256", None)
     run = tmp_path / name
     write_capture_manifest(manifest, run)
     write_frame_sidecars(manifest, run)

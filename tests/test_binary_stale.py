@@ -97,6 +97,8 @@ def test_binary_stale_capture_render_refuses_by_name(tmp_path, capsys, monkeypat
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
     monkeypatch.setattr(plat, "ue_available", lambda: True)
     monkeypatch.setattr(plat, "ue_bridge_binary", lambda repo: built)
+    # A machine with a real build carries a stamp; this bridge has none.
+    monkeypatch.setattr(plat, "STAMP_REL", Path("no/build_stamp.json"))
     example = Path(__file__).resolve().parents[1] / "examples" / "cameras_multi.yaml"
     out = tmp_path / "refused"
     code = capture_main([str(example), "--out", str(out), "--max-previews", "0",

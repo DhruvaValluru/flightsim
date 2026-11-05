@@ -52,7 +52,7 @@ def _npm_root():
     if not npm:
         return None
     try:
-        out = subprocess.run([npm, "root", "-g"], capture_output=True, text=True,
+        out = subprocess.run([npm, "root", "-g"], capture_output=True, encoding="utf-8",
                              timeout=30, check=True).stdout.strip()
     except (subprocess.SubprocessError, OSError):
         return None
@@ -297,7 +297,7 @@ def test_the_engine_self_adjusts_a_line_over_the_hill(tmp_path):
     (tmp_path / "probe.js").write_text(ENGINE_PROBE, encoding="utf-8")
     out = subprocess.run([NODE, str(tmp_path / "probe.js"), str(STATIC / "route_map.js"),
                           str(tmp_path / "fixture.json")],
-                         capture_output=True, text=True, timeout=60, check=True).stdout
+                         capture_output=True, encoding="utf-8", timeout=60, check=True).stdout
     result = json.loads(out)
     assert result["before"]["status"]["route.terrain_clearance"] == "error"
     assert result["before"]["minClr"] < 0
@@ -476,7 +476,7 @@ def test_the_map_draws_checks_adjusts_and_flies_in_a_browser(tmp_path):
         env = {**os.environ, "NODE_PATH": _npm_root()}
         env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(CHROMIUM.parent))
         run = subprocess.run([NODE, str(driver), f"http://127.0.0.1:{port}", str(CHROMIUM)],
-                             capture_output=True, text=True, timeout=50, env=env)
+                             capture_output=True, encoding="utf-8", timeout=50, env=env)
     finally:
         server.should_exit = True
         thread.join(10)
