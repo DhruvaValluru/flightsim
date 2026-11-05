@@ -34,6 +34,17 @@ IMAGES = 20
 NAME_RE = r"^[a-z_]+(?:\.[a-z_]+)+$"
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _headless_whatever_is_installed():
+    """These tests fly headless. A machine with an engine folder (this Mac has
+    UE_5.7 without a working import) would otherwise try a real render; the
+    tests that are about the engine set ue_available themselves."""
+    patch = pytest.MonkeyPatch()
+    patch.setattr(generate_module, "ue_available", lambda: False)
+    yield
+    patch.undo()
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(generator, "root", tmp_path / "campaigns")
@@ -634,6 +645,7 @@ def test_the_page_renders_only_with_an_engine_and_the_model(client, monkeypatch)
 
     monkeypatch.setattr(generate_module, "ue_available", lambda: True)
     monkeypatch.setattr(generate_module, "is_imported", lambda name: False)
+    monkeypatch.setattr(generate_module, "_editor_file_exists", lambda: False)
     render, note = generate_module.render_here(spec)
     assert render is False and "not imported" in note and "A320" in note
 
@@ -930,6 +942,7 @@ def test_a_generate_request_with_no_imported_mesh_falls_back_not_refuses(client,
     assert started.status_code == 200, started.json()
     from core.nl.compiler import compile_prompt
 
+    monkeypatch.setattr(generate_module, "_editor_file_exists", lambda: False)
     render, note = generate_module.render_here(compile_prompt(ASKS_VIEW + ", chase view"))
     assert render is False and "not imported" in note
     generator.wait(started.json()["id"], timeout=120)

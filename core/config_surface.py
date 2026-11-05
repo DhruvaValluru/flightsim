@@ -2,8 +2,8 @@
 
 Phase 3 box E1. One row per environment name (the 23 ``FLIGHTSIM_*``
 names read under core/, webapp/, flightsim/ and scripts/*.py, plus the
-three names without the prefix: ``UE_ROOT``, ``GOOGLE_MAPS_API_KEY``,
-``ANTHROPIC_API_KEY``) and one entry per flag of ``flightsim/capture.py``.
+four names without the prefix: ``UE_ROOT``, ``GOOGLE_MAPS_API_KEY``,
+``CESIUM_ION_TOKEN``, ``ANTHROPIC_API_KEY``) and one entry per flag of ``flightsim/capture.py``.
 Each carries a decision, its *bucket*:
 
 * ``ui``       -- stays exposed, in the interface (exactly what the E3
@@ -35,7 +35,7 @@ from typing import Any, Dict, FrozenSet, Iterable, Optional, Sequence, Set, Tupl
 BUCKETS: Tuple[str, ...] = ("ui", "default", "dev-only", "remove")
 
 #: Environment names in the table that are not ``FLIGHTSIM_``-prefixed.
-NON_PREFIXED_ENV: Tuple[str, ...] = ("UE_ROOT", "GOOGLE_MAPS_API_KEY", "ANTHROPIC_API_KEY")
+NON_PREFIXED_ENV: Tuple[str, ...] = ("UE_ROOT", "GOOGLE_MAPS_API_KEY", "CESIUM_ION_TOKEN", "ANTHROPIC_API_KEY")
 
 #: The regex the scan and the test share.
 ENV_NAME_PATTERN = re.compile(r"FLIGHTSIM_[A-Z0-9_]+")
@@ -89,8 +89,9 @@ SETTINGS: Tuple[Setting, ...] = (
     # --- the six the E3 panel shows, in E3's order -------------------------
     Setting("google_tiles_key", "GOOGLE_MAPS_API_KEY", "ui", "",
             ("ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimGoogleTiles.cpp:79",),
-            "Read by the render host only; the render refuses by name without it. "
-            "Typed once in Settings; E2 passes it to the headless render as GOOGLE_MAPS_API_KEY.",
+            "Google tiles key or Cesium ion token, read by the render host only; the render refuses by "
+            "name without a credential. Typed once in Settings; E2 passes a Cesium ion token (a JWT) to the "
+            "headless render as CESIUM_ION_TOKEN and anything else as GOOGLE_MAPS_API_KEY.",
             file_writable=True),
     Setting("cesium_status", None, "ui", "unknown", (),
             "Derived (E2 cesium_status() from toolchain.json plus the plugin probe); shown, never set.",
@@ -128,6 +129,11 @@ SETTINGS: Tuple[Setting, ...] = (
             ("core/scenario/card.py:385",),
             "ON in every render; only the value off turns it off (the test suite's conftest sets it). "
             "Never in the settings file."),
+    Setting("cesium_ion_token", "CESIUM_ION_TOKEN", "dev-only", "",
+            ("ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimGoogleTiles.cpp:81",
+             "core/util/settings.py:67"),
+            "The Cesium ion route to the same tiles, for a developer run; the panel takes the token in "
+            "google_tiles_key, so this row is no seventh field. A secret: shown as <set>, never by value."),
     # --- hidden defaults ----------------------------------------------------
     Setting("weather_backend", "FLIGHTSIM_WEATHER_BACKEND", "default", "procedural",
             ("webapp/runs.py:2157",),

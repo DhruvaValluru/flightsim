@@ -19,10 +19,12 @@ sys.path.insert(0, str(REPO))
 
 import webapp.runs as runs_module  # noqa: E402
 import webapp.server as server_module  # noqa: E402
-from core.nl.compiler import compile_prompt  # noqa: E402
+from core.nl.compiler import CRUISE_DEFAULT_KT, compile_prompt  # noqa: E402
+from core.scenario.camera import CHASE_OFFSETS, CameraSpec  # noqa: E402
 from core.scenario.card import google_tiles_requested  # noqa: E402
 from webapp.runs import (  # noqa: E402
-    CLIP_SECONDS, DEFAULT_RUN_FROM, RunManager, default_run_spec,
+    AIRCRAFT_PICK_FROM, CLIP_SECONDS, DEFAULT_RUN_AIRCRAFT, DEFAULT_RUN_FROM,
+    DEFAULT_RUN_PROMPT, RunManager, apply_aircraft_choice, default_run_spec,
     weather_backend_flags, webapp_chase_flag,
 )
 from webapp.server import app  # noqa: E402
@@ -184,3 +186,146 @@ def test_capture_button_enabled_and_posts_empty_body():
     body = html[start:html.index("const payload = await response.json();", start)]
     assert "compiled == null ? {} :" in body
     assert "JSON.stringify(body)" in body
+
+
+# -- the aircraft picker (box P1) ------------------------------------------
+
+def _hold_engine_open(monkeypatch):
+    """The test_empty_run_body_is_not_422 gate: every spec /run would start
+    is collected instead, so a test reads the spec that would have flown."""
+    import core.util.platform as plat
+
+    started = []
+
+    def start(spec, provenance):
+        started.append(spec)
+        return {"refused": "stopped by the test", "constraint": "test.stop"}
+
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
+    monkeypatch.setattr(runs_module, "needs_dynamic_bake", lambda spec: None)
+    monkeypatch.setattr(runs_module, "pick_scene", lambda spec: FLAT_SCENE)
+    monkeypatch.setattr(server_module, "pick_scene", lambda spec: FLAT_SCENE)
+    monkeypatch.setattr(server_module.manager, "start", start)
+    return started
+
+
+def test_get_aircraft_lists_the_pickable_aircraft(client):
+    reply = client.get("/aircraft")
+    assert reply.status_code == 200
+    body = reply.json()
+    assert body["default"] == DEFAULT_RUN_AIRCRAFT
+    titles = {entry["name"]: entry["title"] for entry in body["aircraft"]}
+    assert {"c172p", "A4", "J11"} <= set(titles)
+    assert titles["c172p"] == "Cessna 172P Skyhawk"
+    assert titles["A4"] == "Douglas A-4E Skyhawk"
+    assert titles["J11"] == "Shenyang J-11A"
+    assert "p51d" not in titles            # its config states why it cannot render
+
+
+def test_run_with_aircraft_flies_it_at_its_own_cruise(client, monkeypatch):
+    started = _hold_engine_open(monkeypatch)
+    reply = client.post("/run", json={"aircraft": "J11"})
+    assert reply.json().get("constraint") == "test.stop", reply.text
+    spec = started[0]
+    assert str(spec.aircraft.value) == "J11"
+    assert str(spec.aircraft.source) == "user"
+    assert spec.aircraft.frm == AIRCRAFT_PICK_FROM
+    assert float(spec.airspeed.value) == CRUISE_DEFAULT_KT["J11"]
+    assert float(spec.altitude.value) == 3500.0
+    assert spec.to_dict()["aircraft"]["aircraft"]["value"] == "J11"
+    # The rest of the default run stays: Desert, one chase camera, 6 s.
+    assert str(spec.surface.value) == "desert"
+    assert [str(c.preset.value) for c in spec.cameras] == ["chase"]
+    assert float(spec.duration.value) == 6.0
+
+
+def test_run_with_unknown_aircraft_is_400_naming_the_accepted(client):
+    for body in ({"aircraft": "hindenburg"},
+                 {"aircraft": "hindenburg", "spec": compile_prompt("fly the a-4").to_dict()}):
+        reply = client.post("/run", json=body)
+        assert reply.status_code == 400, reply.text
+        error = reply.json()["error"]
+        assert "hindenburg" in error and "c172p" in error and "J11" in error
+    # Not offered is not accepted: the p51d may never render.
+    assert client.post("/run", json={"aircraft": "p51d"}).status_code == 400
+
+
+def test_run_with_no_aircraft_field_is_unchanged(client, monkeypatch):
+    started = _hold_engine_open(monkeypatch)
+    client.post("/run", json={})
+    spec = started[0]
+    assert str(spec.aircraft.value) == DEFAULT_RUN_AIRCRAFT
+    assert spec.aircraft.frm == DEFAULT_RUN_FROM
+    assert spec.prompt == DEFAULT_RUN_PROMPT
+    assert float(spec.airspeed.value) == 100.0
+    assert default_run_spec().digest() == default_run_spec(None).digest()
+
+
+def test_an_aircraft_the_picker_does_not_offer_is_refused_and_never_switched(client, monkeypatch):
+    """The DHC6 has no labels block, so it is not offered; asking for it is a
+    400 naming what is, and nothing flies in its place."""
+    started = _hold_engine_open(monkeypatch)
+    reply = client.post("/run", json={"aircraft": "DHC6"})
+    assert reply.status_code == 400, reply.text
+    assert "c172p" in reply.text
+    assert started == []
+
+
+def test_compile_applies_the_picked_aircraft_over_the_prompt(client):
+    reply = client.post("/compile", json={
+        "prompt": "fly the a-4 at 3000 m over the desert", "compiler": "regex",
+        "aircraft": "J11"})
+    assert reply.status_code == 200, reply.text
+    spec = type(default_run_spec()).from_dict(reply.json()["spec"]["dict"])
+    assert str(spec.aircraft.value) == "J11"
+    assert spec.aircraft.frm == AIRCRAFT_PICK_FROM
+    plain = client.post("/compile", json={"prompt": "fly the a-4 at 3000 m",
+                                          "compiler": "regex"})
+    assert plain.json()["spec"]["dict"]["aircraft"]["aircraft"]["value"] == "A4"
+    refused = client.post("/compile", json={"prompt": "fly the a-4", "compiler": "regex",
+                                            "aircraft": "hindenburg"})
+    assert refused.status_code == 400
+    assert "hindenburg" in refused.json()["error"] and "J11" in refused.json()["error"]
+
+
+def test_a_stated_speed_stays_and_a_planned_one_follows_the_aircraft():
+    stated = compile_prompt("fly the c172p at 3000 m and 110 kt")
+    apply_aircraft_choice(stated, "J11")
+    assert float(stated.airspeed.value) == 110.0
+    assert str(stated.airspeed.source) == "user"
+    planned = compile_prompt("fly the c172p at 3000 m")
+    planned.cameras = [CameraSpec.defaulted(camera_id="camera0", preset="chase",
+                                            aircraft="c172p")]
+    apply_aircraft_choice(planned, "A4")
+    assert float(planned.airspeed.value) == CRUISE_DEFAULT_KT["A4"]
+    camera = planned.cameras[0]
+    assert (float(camera.offset_forward_m.value), float(camera.offset_up_m.value)) \
+        == (CHASE_OFFSETS["A4"][0], CHASE_OFFSETS["A4"][2])
+
+
+def test_picking_an_aircraft_leaves_tiles_and_storm_on(monkeypatch):
+    for name in ("FLIGHTSIM_WEATHER_BACKEND", "FLIGHTSIM_RAIN_GAIN",
+                 "FLIGHTSIM_RAIN_STYLE", "FLIGHTSIM_GOOGLE_TILES"):
+        monkeypatch.delenv(name, raising=False)
+    before = weather_backend_flags()
+    default_run_spec("J11")
+    assert weather_backend_flags() == before
+    assert google_tiles_requested() is True
+
+
+def test_the_page_mounts_the_picker_and_posts_only_a_real_pick(client):
+    script = client.get("/aircraft_picker.js")
+    assert script.status_code == 200
+    assert "aircraftPreset" in script.text and 'fetch("/aircraft")' in script.text
+    page = client.get("/").text
+    assert 'id="aircraftPicker"' in page and "/aircraft_picker.js" in page
+    assert page.count("aircraft: aircraftPreset()") == 2      # Interpret, answer round
+    assert "if (aircraft) body.aircraft = aircraft;" in page
+
+
+def test_the_picker_offers_only_aircraft_a_capture_can_label():
+    from webapp.runs import pickable_aircraft
+
+    names = {entry["name"] for entry in pickable_aircraft()}
+    assert {"c172p", "J11", "A4"} <= names and "DHC6" not in names
+

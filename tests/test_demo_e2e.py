@@ -1,9 +1,9 @@
 """The automated end-to-end demo run (Phase 3, box F1).
 
-Five steps, driven with no other input: pick the aircraft (the page has
-no aircraft picker, so the main aircraft the page offers -- E4's default
-run, the c172p -- is accepted), pick Desert (`#environmentPreset`), press
-Capture (`#run`, which posts `POST /run {}`), wait for `done`
+Five steps, driven with no other input: pick the aircraft
+(`#aircraftPreset`, the J-11A, so a run that ignored the pick would fly
+the default c172p and fail), pick Desert (`#environmentPreset`), press
+Capture (`#run`, which posts `POST /run {"aircraft": "J11"}`), wait for `done`
 (`GET /runs/{id}`), download `dataset.zip` (`?format=coco&cameras=camera0`,
 the page's default dataset query). The two tests share `DEMO_STEPS`:
 
@@ -51,11 +51,11 @@ HERE = Path(__file__).resolve()
 DEMO_STEPS = ("aircraft", "desert", "capture", "done", "download")
 #: D4's picker value for "Pick Desert" (a key of ENVIRONMENT_PRESETS).
 DESERT = "desert"
-#: "Pick the aircraft": the main aircraft the page offers (E4's default
-#: run). The test imports E4's constant and fails if the names drift.
-DEMO_AIRCRAFT = "c172p"
-#: What the Capture button posts with nothing compiled (E4 agreement).
-CAPTURE_BODY: Dict = {}
+#: "Pick the aircraft": a GET /aircraft name that is NOT the default run's,
+#: so the card or manifest can only name it if the pick reached the run.
+DEMO_AIRCRAFT = "J11"
+#: What the Capture button posts with nothing compiled and that pick made.
+CAPTURE_BODY: Dict = {"aircraft": DEMO_AIRCRAFT}
 #: The page's default dataset query (`datasetQuery`: format coco, camera0).
 DATASET_QUERY = "format=coco&cameras=camera0"
 #: Terminal run statuses (scripts/run_test_scenarios.py DONE).
@@ -184,8 +184,8 @@ def test_the_demo_touches_no_tiles_or_weather_switch():
     text = HERE.read_text(encoding="utf-8")
     assert "FLIGHTSIM_GOOGLE_" + "TILES" not in text
     assert "WEATHER_" + "BACKEND" not in text
-    assert CAPTURE_BODY == {}
-    assert DEMO_AIRCRAFT == DEFAULT_RUN_AIRCRAFT
+    assert CAPTURE_BODY == {"aircraft": DEMO_AIRCRAFT}
+    assert DEMO_AIRCRAFT != DEFAULT_RUN_AIRCRAFT
     assert DESERT == DEFAULT_RUN_ENVIRONMENT and DESERT in ENVIRONMENT_PRESETS
     assert list(DEMO_STEPS) == ["aircraft", "desert", "capture", "done", "download"]
 
@@ -198,8 +198,9 @@ def client():
 
 
 def test_demo_run_headless_to_the_render_step(client, monkeypatch, tmp_path):
-    """No engine on this host: the Capture body `{}` is accepted, the run
-    reaches `done` through the Python capture, verify has no FAIL, and
+    """No engine on this host: the Capture body with the picked aircraft is
+    accepted, the run reaches `done` through the Python capture flying that
+    aircraft, verify has no FAIL, and
     the page's dataset download is a 200 zip holding the COCO file
     (labels only: there are no pixels before the render step)."""
     import core.util.platform as plat
@@ -215,8 +216,9 @@ def test_demo_run_headless_to_the_render_step(client, monkeypatch, tmp_path):
     monkeypatch.setattr(server_module, "manager", RunManager(out_root=tmp_path))
     walked = []
 
-    walked.append("aircraft")                      # accepted: the page's main aircraft
-    assert DEMO_AIRCRAFT == DEFAULT_RUN_AIRCRAFT
+    offered = [entry["name"] for entry in client.get("/aircraft").json()["aircraft"]]
+    assert DEMO_AIRCRAFT in offered                # what the picker lists
+    walked.append("aircraft")
     walked.append("desert")                        # the default run's environment
     assert DEFAULT_RUN_ENVIRONMENT == DESERT
 
@@ -253,7 +255,7 @@ def test_demo_run_headless_to_the_render_step(client, monkeypatch, tmp_path):
 
 PAGE_DRIVER = r"""
 const { chromium } = require("playwright");
-const [base, executablePath, desert, timeoutS] = process.argv.slice(2);
+const [base, executablePath, aircraft, desert, timeoutS] = process.argv.slice(2);
 (async () => {
   const errors = [];
   const browser = await chromium.launch({headless: true, executablePath, args: ["--no-sandbox"]});
@@ -262,6 +264,9 @@ const [base, executablePath, desert, timeoutS] = process.argv.slice(2);
     errors.push({text: msg.text(), url: (msg.location() || {}).url || ""}); });
   page.on("pageerror", err => errors.push({text: "pageerror: " + err.message, url: ""}));
   await page.goto(base + "/", {waitUntil: "load"});
+  await page.waitForSelector(`#aircraftPreset option[value="${aircraft}"]`, {state: "attached", timeout: 30000});
+  await page.selectOption("#aircraftPreset", aircraft);                      // Pick the aircraft
+  const pickedAircraft = await page.$eval("#aircraftPreset", e => e.value);
   await page.waitForSelector("#environmentPreset", {state: "attached", timeout: 30000});
   await page.selectOption("#environmentPreset", desert);                     // Pick Desert
   const picked = await page.$eval("#environmentPreset", e => e.value);
@@ -282,11 +287,11 @@ const [base, executablePath, desert, timeoutS] = process.argv.slice(2);
   }
   const wall_s = (Date.now() - t0) / 1000;
   await browser.close();
-  console.log(JSON.stringify({picked, button, body, started, state, wall_s, errors}));
+  console.log(JSON.stringify({pickedAircraft, picked, button, body, started, state, wall_s, errors}));
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });
 """
 
-#: A long render: the c172p clip through the editor, then capture and verify.
+#: A long render: the picked aircraft's clip through the editor, then capture and verify.
 RENDER_TIMEOUT_S = float(os.environ.get("FLIGHTSIM_DEMO_TIMEOUT_S", "1800"))
 
 
@@ -343,13 +348,15 @@ def test_demo_page_end_to_end(demo_server, tmp_path, record_property):
     driver.write_text(PAGE_DRIVER, encoding="utf-8")
     env = {**os.environ, "NODE_PATH": _npm_root()}
     env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(CHROMIUM.parent))
-    run = subprocess.run([NODE, str(driver), demo_server, str(CHROMIUM), DESERT, str(RENDER_TIMEOUT_S)],
+    run = subprocess.run([NODE, str(driver), demo_server, str(CHROMIUM), DEMO_AIRCRAFT, DESERT,
+                          str(RENDER_TIMEOUT_S)],
                          capture_output=True, text=True, timeout=RENDER_TIMEOUT_S + 120, env=env)
     assert run.returncode == 0, run.stderr[-4000:]
     result = json.loads(run.stdout.strip().splitlines()[-1])
     walked = []
 
-    walked.append("aircraft")                      # the page offers one aircraft: E4's A-4
+    assert result["pickedAircraft"] == DEMO_AIRCRAFT
+    walked.append("aircraft")
     assert result["picked"] == DESERT
     walked.append("desert")
     assert result["button"] == "Capture", result["button"]

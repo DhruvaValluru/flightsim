@@ -25,8 +25,8 @@ reason, for example which tool is missing. The same lines are kept in
 
 Open Settings (the gear). It has six items, in this order:
 
-1. **Google tiles key.** Paste it once; it is kept in `settings.json` so you
-   never type it again. The ground in every picture is drawn from Google's 3D
+1. **Google tiles key or Cesium ion token.** Paste either one once; it is kept
+   in `settings.json` so you never type it again. The ground in every picture is drawn from Google's 3D
    tiles, so a run without the key does not fly: it tells you by name that the
    key is missing. The tiles are the ground; there is nothing to switch off.
 2. **Cesium status.** Read-only, taken from the installed tools.
@@ -45,6 +45,8 @@ are the ones the project ships with.
 
 Pick an **Environment**: Desert is the Grand Canyon, Forest is Yosemite. Both
 were prepared by the launcher, so the first run over either is ready to go.
+Beside it, the **Aircraft** picker lists every aircraft you can film, with the
+Cessna 172P already chosen.
 
 Press **Capture**. With nothing typed, the run is:
 
@@ -56,9 +58,8 @@ Press **Capture**. With nothing typed, the run is:
 - storm weather, which is the default, with Google tiles as the ground.
 
 To change any of that, type a prompt first (an aircraft, a place, a camera, a
-time of day) and press **Interpret**; then press Capture. The J-11A is the
-other aircraft you can ask for. If the prompt leaves something out, the app
-asks one question and waits for your answer.
+time of day) and press **Interpret**; then press Capture. If the prompt leaves
+something out, the app asks one question and waits for your answer.
 
 ## 5. What to expect
 

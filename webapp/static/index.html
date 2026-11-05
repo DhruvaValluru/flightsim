@@ -166,6 +166,8 @@ visual-only per host (measured).</p>
 <div id="environmentPicker"></div>
 <script src="/environment_picker.js"></script>
 <script>EnvironmentPicker.mount(document.getElementById("environmentPicker"), {});</script>
+<div id="aircraftPicker"></div>
+<script src="/aircraft_picker.js"></script>
 <div id="lensPicker"></div>
 <script src="/camera3d.js"></script>
 <script src="/route_map.js"></script>
@@ -1676,6 +1678,7 @@ async function doCompile(body) {
     const payload = await response.json();
     if (payload.error) { $("compileState").textContent = payload.error; return; }
     $("compileState").textContent = "";
+    pickedAfterCompile = null;
     if (payload.needs_clarification) {
       renderQuestions(payload);
     } else {
@@ -1718,6 +1721,32 @@ function environmentPreset() {
   return window.EnvironmentPicker ? EnvironmentPicker.value() : null;
 }
 
+// The aircraft a person picked, or null while the picker still shows the
+// default: an untouched picker must not overrule an aircraft in the prompt.
+function aircraftPreset() {
+  return window.AircraftPicker ? AircraftPicker.value() : null;
+}
+
+// A pick made after Interpret: shown in the table, and posted with the run
+// so the server moves the speed and the chase camera with it. A later
+// Interpret or a hand edit of the table's aircraft row replaces it.
+let pickedAfterCompile = null;
+
+function aircraftForRun() {
+  if (compiled == null) return aircraftPreset();
+  return pickedAfterCompile !== null && rowValue("aircraft") === pickedAfterCompile
+    ? pickedAfterCompile : null;
+}
+
+window.AircraftPicker && AircraftPicker.mount($("aircraftPicker"), {
+  onChange(name) {
+    if (!compiled) return;
+    pickedAfterCompile = name;
+    setRow("aircraft", name);
+    $("compileState").textContent = `aircraft set to ${name} in the table`;
+  },
+});
+
 // "1 frame (preview)": every camera captures exactly one image, so a look
 // can be judged without rendering a whole clip.
 function stillPreview() {
@@ -1727,6 +1756,7 @@ function stillPreview() {
 $("compile").addEventListener("click", () =>
   doCompile({prompt: $("prompt").value, clip_seconds: clipSeconds(),
              environment: environmentPreset(),
+             aircraft: aircraftPreset(),
              still: stillPreview()}));
 
 // The selector used to be read only at Interpret: picking "3 s" AFTER
@@ -1778,6 +1808,7 @@ $("answer").addEventListener("click", () => {
              answers: collectAnswers(),
              clip_seconds: clipSeconds(),
              environment: environmentPreset(),
+             aircraft: aircraftPreset(),
              still: stillPreview(),
              prior_spec: compiled ? compiled.spec.dict : null});
 });
@@ -1786,12 +1817,15 @@ $("run").addEventListener("click", () => startRun(true));
 
 async function startRun(mayBake) {
   // Nothing compiled: Capture posts {} and the server builds the default
-  // run (the c172p, Desert, chase camera, 6 s clip, labels on).
+  // run (the c172p, Desert, chase camera, 6 s clip, labels on), flown by
+  // the picked aircraft when a person picked one.
   const body = compiled == null ? {} : {
     spec: editedSpecDict(),
     provenance: {compiler: compiled.compiler, model: compiled.model,
                  transcript: compiled.transcript || null},
   };
+  const aircraft = aircraftForRun();
+  if (aircraft) body.aircraft = aircraft;
   const response = await fetch("/run", {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify(body),
