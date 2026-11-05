@@ -259,7 +259,9 @@ def _assert_coco_equal_but_gained(old: Path, new: Path) -> None:
         assert set(COCO_GAINED) & set(annotation), "the gained keys are written"
         for key in COCO_GAINED:
             annotation.pop(key, None)
-    assert json.dumps(document, indent=1).encode("utf-8") == old.read_bytes()
+    # The frozen writer is text mode (CRLF on Windows); the live one is LF everywhere.
+    assert json.dumps(document, indent=1).encode("utf-8") == \
+        old.read_bytes().replace(b"\r\n", b"\n")
 
 
 def test_phase10_outputs_are_byte_identical_to_the_frozen_writer(batch_dir, tmp_path):
@@ -309,8 +311,10 @@ def test_phase10_outputs_are_byte_identical_to_the_frozen_writer(batch_dir, tmp_
                                               tmp_path / "new" / fmt / rel)
                 compared += 1
                 continue
-            assert (tmp_path / "old" / fmt / rel).read_bytes() == \
-                (tmp_path / "new" / fmt / rel).read_bytes(), f"{fmt}: {rel}"
+            old_bytes = (tmp_path / "old" / fmt / rel).read_bytes()
+            if rel.suffix in (".json", ".txt", ".yaml", ".md", ".xml", ".csv"):
+                old_bytes = old_bytes.replace(b"\r\n", b"\n")   # frozen text mode on Windows
+            assert old_bytes == (tmp_path / "new" / fmt / rel).read_bytes(), f"{fmt}: {rel}"
             compared += 1
         assert compared > 0
 
