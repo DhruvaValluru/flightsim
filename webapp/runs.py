@@ -1414,7 +1414,10 @@ def pickable_aircraft() -> List[Dict[str, str]]:
     for name in configured_aircraft():
         if unavailable_reason(name):
             continue
-        title = str(load_config(name).get("mesh_airframe") or name)
+        config = load_config(name)
+        if not config.get("labels"):     # no labels block: a Capture cannot label it
+            continue
+        title = str(config.get("mesh_airframe") or name)
         offered.append({"name": name,
                         "title": title.split(" (")[0].split(",")[0].strip()})
     return sorted(offered, key=lambda entry: entry["title"].lower())

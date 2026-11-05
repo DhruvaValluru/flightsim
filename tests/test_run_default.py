@@ -261,14 +261,13 @@ def test_run_with_no_aircraft_field_is_unchanged(client, monkeypatch):
     assert default_run_spec().digest() == default_run_spec(None).digest()
 
 
-def test_a_picked_aircraft_that_cannot_trim_refuses_and_never_switches(client, monkeypatch):
-    """The DHC6 has no documented cruise: the default 250 kt cannot trim,
-    so the run refuses by the existing rule instead of flying another."""
+def test_an_aircraft_the_picker_does_not_offer_is_refused_and_never_switched(client, monkeypatch):
+    """The DHC6 has no labels block, so it is not offered; asking for it is a
+    400 naming what is, and nothing flies in its place."""
     started = _hold_engine_open(monkeypatch)
     reply = client.post("/run", json={"aircraft": "DHC6"})
-    assert reply.status_code == 409, reply.text
-    named = [v["constraint"] for v in reply.json()["violations"]]
-    assert "envelope.trim_feasible" in named
+    assert reply.status_code == 400, reply.text
+    assert "c172p" in reply.text
     assert started == []
 
 
@@ -322,3 +321,11 @@ def test_the_page_mounts_the_picker_and_posts_only_a_real_pick(client):
     assert 'id="aircraftPicker"' in page and "/aircraft_picker.js" in page
     assert page.count("aircraft: aircraftPreset()") == 2      # Interpret, answer round
     assert "if (aircraft) body.aircraft = aircraft;" in page
+
+
+def test_the_picker_offers_only_aircraft_a_capture_can_label():
+    from webapp.runs import pickable_aircraft
+
+    names = {entry["name"] for entry in pickable_aircraft()}
+    assert {"c172p", "J11", "A4"} <= names and "DHC6" not in names
+
