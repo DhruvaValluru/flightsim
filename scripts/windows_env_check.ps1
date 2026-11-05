@@ -8,6 +8,15 @@
 # bad machine fails in seconds with a line that says what to fix, not an hour
 # into an engine build.
 $ErrorActionPreference = "Stop"
+
+# A native command's stderr under the Stop preference ends the script; run it
+# with Continue and leave $LASTEXITCODE for the caller.
+function Invoke-Quiet([scriptblock]$Command) {
+  $saved = $ErrorActionPreference
+  try { $ErrorActionPreference = "Continue"; & $Command 2>$null | Out-Null }
+  finally { $ErrorActionPreference = $saved }
+}
+
 Set-Location (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 $fails = @()
 $facts = [ordered]@{}
@@ -44,7 +53,7 @@ else {
   $pv = & .venv\Scripts\python.exe -c "import sys; print('%d.%d.%d' % sys.version_info[:3])"
   $facts.python = $pv
   if ($pv -ne $tc.python) { Fail "venv.python_mismatch" "venv is $pv, toolchain.json pins $($tc.python)" } else { Ok "python" $pv }
-  & .venv\Scripts\python.exe -c "import numpy, jsbsim" 2>$null
+  Invoke-Quiet { & .venv\Scripts\python.exe -c "import numpy, jsbsim" }
   if ($LASTEXITCODE -ne 0) { Fail "venv.imports" "numpy or jsbsim does not import; reinstall from requirements.lock" } else { Ok "venv" "numpy and jsbsim import" }
 }
 
@@ -68,7 +77,7 @@ $branch = (git rev-parse --abbrev-ref HEAD).Trim(); $facts.branch = $branch
 if ($branch -ne "phase-2-final") { Fail "git.branch" "on $branch, the pipeline runs on phase-2-final" } else { Ok "git" "branch $branch" }
 $dirty = git status --porcelain | Where-Object { $_ -notmatch "^\?\? " }
 if ($dirty) { Fail "git.dirty" "uncommitted changes: $(($dirty | Measure-Object).Count) files; commit or stash before proving" }
-git ls-remote --exit-code origin phase-2-final 2>$null | Out-Null
+Invoke-Quiet { git ls-remote --exit-code origin phase-2-final }
 if ($LASTEXITCODE -ne 0) { Fail "git.origin" "origin phase-2-final not reachable" }
 
 # 9. the built game module the editor commandlets need

@@ -421,7 +421,7 @@ mutate experiments/gate5_ue_parity.py \
     || failures=$((failures+1))
 
 mutate experiments/gate6_visual.py \
-    '        ratio <= THRESHOLDS["max_extinction_ratio"],' \
+    '        ratio <= THRESHOLDS["max_extinction_ratio"] and control_ok,' \
     '        True,  # MUTATED: a crisp far ridge counts as extinction' \
     "extinction must fade the far ridge" tests/test_gate6_visual.py \
     || failures=$((failures+1))
@@ -482,8 +482,8 @@ mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRender
     || failures=$((failures+1))
 
 mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
-    '			if (CardLook->TryGetNumberField(TEXT("fog_extinction_per_m"), Value) && Value > 0.0)' \
-    '			if (CardLook->TryGetNumberField(TEXT("fog_extinction"), Value) && Value > 0.0)  // MUTATED: a key the look never writes' \
+    '			if (CardLook->TryGetNumberField(TEXT("engine_fog_density"), Value) && Value > 0.0)' \
+    '			if (CardLook->TryGetNumberField(TEXT("engine_fog"), Value) && Value > 0.0)  // MUTATED: a key the look never writes' \
     "commandlet reads the look keys weather_visuals writes" tests/test_gate6_visual.py \
     || failures=$((failures+1))
 
@@ -495,7 +495,7 @@ mutate experiments/gate6_visual.py \
     || failures=$((failures+1))
 
 mutate experiments/gate6_visual.py \
-    '    ok = drop >= LOOK_THRESHOLDS["visibility_min_ratio_drop"]' \
+    '    ok = kept <= THRESHOLDS["max_extinction_ratio"]' \
     '    ok = True  # MUTATED: no order between 50 km and 10 km required' \
     "extinction must follow visibility" tests/test_gate6_visual.py \
     || failures=$((failures+1))
