@@ -9,6 +9,7 @@ says.
 
 import json
 import math
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from core.scenario.randomization import (
     derive_block_seed, engine_sun_azimuth, exposure_for_elevation,
     render_look, sample_randomization,
 )
+from core.scenario.fields import Source
 from core.scenario.solar import julian_day, solar_position
 from core.scenario.spec import ScenarioSpec
 from core.scenario.validate import validate
@@ -174,6 +176,25 @@ def test_sampling_is_value_idempotent_across_planner_passes():
     reread = ScenarioSpec.from_dict(json.loads(json.dumps(first)))
     sample_randomization(reread)
     assert reread.to_dict() == first
+
+
+def test_a_second_pass_over_a_plannable_jitter_starts_from_the_recorded_base():
+    """A sampled field is skipped outright, so only a jittered field still
+    on a plannable source (a record from before draws were marked sampled)
+    reaches the base lookup. Its value is already jittered: the pass must
+    start from the recorded base and land on the same number, not add the
+    same draw to the jitter."""
+    spec = _enabled()
+    sample_randomization(spec)
+    camera = spec.cameras[0]
+    first = {name: q.value for name, q in camera.quantities()
+             if JITTER_BASE_KEY in q.detail}
+    assert {"offset_forward_m", "focal_length_mm"} <= set(first)
+    for name in first:
+        setattr(camera, name, replace(getattr(camera, name), source=Source.DEFAULT))
+    sample_randomization(spec)
+    assert {name: getattr(camera, name).value for name in first} == first
+    assert all(getattr(camera, name).source == Source.SAMPLED for name in first)
 
 
 def test_the_jitter_never_moves_a_stated_camera_field_and_says_so():

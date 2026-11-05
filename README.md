@@ -176,8 +176,8 @@ Per-OS setup notes:
   irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/master/scripts/deploy_windows.ps1 | iex
   ```
 
-  Windows note: install Python 3.10-3.12, not 3.13+ -- `numpy==2.0.2`
-  ships no Windows wheel past 3.12, and both setup scripts check this.
+  Install Python 3.12: both setup scripts install the hashed
+  `requirements.lock`, which is pinned to it, and stop on any other version.
 * **ffmpeg** (only for encoding clips/panels): `brew install ffmpeg` /
   `sudo apt install ffmpeg` / `winget install ffmpeg`. Missing ffmpeg is
   a named refusal (`ffmpeg.missing`); nothing else needs it. Override

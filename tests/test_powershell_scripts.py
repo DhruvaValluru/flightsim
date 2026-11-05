@@ -705,3 +705,18 @@ def test_the_preflight_runs_the_manifest_check_before_it_exits():
     assert "only encoding needs it" not in text
     for tool in _pinned_tools():
         assert tool in text, f"ue_preflight.ps1 never names the pinned tool {tool}"
+
+
+# -- the setup scripts install the lock, on the Python it was made for ----
+
+SETUP_SCRIPTS = [Path(__file__).resolve().parents[1] / "scripts" / name
+                 for name in ("setup.sh", "setup.ps1")]
+
+
+@pytest.mark.parametrize("script", SETUP_SCRIPTS, ids=lambda p: p.name)
+def test_setup_installs_the_hashed_lock_and_refuses_another_python(script):
+    text = script.read_text(encoding="utf-8")
+    assert "--require-hashes -r requirements.lock" in text
+    assert "-r requirements.txt" not in text
+    assert "pinned to" in text and "3.12" in text
+    assert "3.11" not in text and "3.10" not in text
