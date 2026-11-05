@@ -1,0 +1,18 @@
+﻿{
+    "ok":  true,
+    "checked":  "2026-11-05T17:11:30.2768766-05:00",
+    "fails":  [
+
+              ],
+    "facts":  {
+                  "engine":  "5.7.4",
+                  "changelist":  51494982,
+                  "cache":  "C:\\flightsim-cache",
+                  "python":  "3.12.10",
+                  "smart_app_control":  0,
+                  "tiles":  "CESIUM_ION_TOKEN",
+                  "branch":  "phase-2-final",
+                  "ue_binaries":  "present"
+              },
+    "engine_pin":  "5.7.4"
+}
