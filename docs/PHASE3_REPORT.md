@@ -3,8 +3,8 @@
 Written 2026-11-04 by the Mac session, in budget mode. Engine: UE 5.7.4 (decision 10).
 Every box with Mac code is built and on `phase-2-final`. **Phase 3 is not accepted yet:**
 the open items below are real. Verdicts are the Windows runner's messages, as logged in
-`docs/phase3/events_mac.log`; the `verdict` fields in `docs/phase3/state/*.json` are blank
-on this branch and should not be read as evidence.
+`docs/phase3/events_mac.log`. Windows rewrote the state files' `verdict` fields from its
+evidence in 500a9698, after a wrong command had left them blank through run A-2.
 
 ## The six goals
 
@@ -21,9 +21,9 @@ on this branch and should not be read as evidence.
 
 | Verdict | Boxes |
 |---|---|
-| PASS | A2 A3 A4 A5 A6 A8 A9 A11 A12, B1 B2 B3, C1 C2 C3 C4 C5 C6 |
+| PASS | A2 A3 A4 A5 A6 A7 A8 A9 A11 A12, B1 B2 B3, C1 C2 C3 C4 C5 C6 |
 | FAIL | A10 (packet A10-3: its own causes are gone; needs one re-proof after C4, plus llm "unknown field 'notes'"), B4 (packet B4-3: Gate 6 clauses; round 3 deferred) |
-| No verdict yet | A7, A13, D2 D4 D5 D6, E1-E6, F1 |
+| No verdict yet | A13 (NEXT.md fixed after packet A13-1, awaiting re-check), D2 D4 D5 D6, E1-E6, F1 |
 | Cut or deferred | A1 rows 2-3 (decision 9), D3 (decision 3), C7 step 6 (deferred: budget) |
 | Owner or Windows only | F2, F4 |
 
@@ -69,3 +69,18 @@ operating systems; its ubuntu job's nine failures are all in the set fixed above
 Still failing on the Mac: `test_webapp_generate` (10, Mac engine import),
 `test_dataset_boxes` COCO file not found (first run with pycocotools installed; untriaged),
 gauss_legendre, `test_wake`, `test_weather` (baseline).
+
+## Full suite, serial (Mac, Python 3.11, commit `d5f95a4c`, 15.4 min)
+
+3,685 tests: 3,656 passed, 9 failed, 5 errors, 15 skipped. This replaces the `-n 6` run
+above. The 14: `test_webapp_generate` (10 of them: 5 failures and 5 setup errors; 9 are the
+Mac's engine import, plus the page test that assumes no engine), `test_dataset_boxes` (COCO
+file not found, untriaged), gauss_legendre and `test_wake` (last-digit float, baseline),
+`test_weather` (bare `python` not on this Mac's path, baseline). Skips: no node (7), no
+EGM2008 grid (4), no real bakes here (3+). Later commits (the albedo change, NEXT.md) were
+not in this run.
+
+**Blocker, owner's decision (packet A10-4):** `aircraft.licence_dataset` refuses pixel export
+for all seven aircraft (A-4 all rights reserved, the rest GPL-2.0), so `/card` and
+`/download` answer 409 on a finished campaign. A10's campaign itself verified 12 of 12.
+

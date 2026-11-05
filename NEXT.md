@@ -76,9 +76,8 @@ compiled as a Volume material with no cloud shaders, lacking the "Used
 with Volumetric Cloud" usage flag). Fixed by the flag (script, in place
 too), a usage check in BuildCell, and VerifyCloudMaterials before the
 first frame of both hosts (refuses clouds.material instead). Annotation run for A12
-(1 camera, 1 frame, lowest resolution): run id pending, written by the
-Windows session to tests/fixtures/engine_bundle_min/RUN_ID (stand-in until
-it supplies it); fixture path tests/fixtures/engine_bundle_min/. Also found:
+(1 camera, 1 frame, lowest resolution): run id 7237db488652, recorded in
+tests/fixtures/engine_bundle_min/RUN_ID; fixture path tests/fixtures/engine_bundle_min/. Also found:
 select_if connected nothing ("A>B" is not the engine's pin name), so
 M_LensDrops / M_GreyCard / M_LandcoverID / M_RainStreaks failed to
 compile -- rebuild them with FLIGHTSIM_REBUILD_MATERIALS. Tools:
@@ -1128,9 +1127,10 @@ the parity discipline, and the do-not-regress list)
     (decision 10); `ue/FlightSim.uproject` (`EngineAssociation`),
     `core/util/platform.py` (`UE_ENGINE_VERSION`) and both Target.cs files
     (`Unreal5_7`) now state 5.7. The Windows laptop read 5.5.4 (measured
-    2026-11-03) from `Engine/Build/Build.version` and now also has UE_5.7,
-    whose patch level is pending (TOOLCHAIN.md first row); the other rows are
-    pending, so nothing is measured on 5.7 yet.
+    2026-11-03) from `Engine/Build/Build.version` and now also has UE_5.7 at
+    5.7.4, changelist 51494982 (measured 2026-11-04, TOOLCHAIN.md first row),
+    where letter A was proved (run A-2). The other two machines' rows are
+    pending, so 5.7 is measured on one machine only.
     A3 (merged) made the build and preflight refuse the wrong engine by
     name (`scripts/ue_engine.ps1`, no `UE_5.*` glob), so a mismatch
     stops with a sentence instead of a compile error. Every number taken
@@ -1150,9 +1150,8 @@ the parity discipline, and the do-not-regress list)
     commandlets; Interchange Nanite at import) re-probed. The review's
     faults that touched this entry are recorded in the notes of A8-A11
     (the review document itself is not in the repo). The annotation run
-    that pins the engine bundle: run id pending, written by the Windows
-    session to `tests/fixtures/engine_bundle_min/RUN_ID` (A12; stand-in
-    until it supplies it), fixture path `tests/fixtures/engine_bundle_min/`,
+    that pins the engine bundle: run id 7237db488652, recorded in
+    `tests/fixtures/engine_bundle_min/RUN_ID` (A12), fixture path `tests/fixtures/engine_bundle_min/`,
     pinned in its `GOLDEN.json` and read by `tests/test_engine_bundle_golden.py`,
     which skips with one named reason until that fixture is committed.
 33. **Never put an os.pipe() between a writer that holds the GIL and a
