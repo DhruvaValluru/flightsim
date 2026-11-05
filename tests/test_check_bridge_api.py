@@ -49,12 +49,15 @@ def test_every_show_flag_pattern_matches_engine_forms(tmp_path):
     inl = tmp_path / "ShowFlagsValues.inl"
     for f in flags:
         pat = run("--showflag-pattern", f).stdout.strip()
+        # by file: Windows argument quoting mangles the pattern's backslash
+        patfile = tmp_path / "pattern.txt"
+        patfile.write_text(pat + "\n", encoding="utf-8", newline="\n")
         for line in (f"SHOWFLAG_FIXED_IN_SHIPPING(1, {f}, SFG_PostProcess, LOCTEXT(\"x\", \"y\"))",
                      f"SHOWFLAG_ALWAYS_ACCESSIBLE({f}, SFG_Normal, LOCTEXT(\"x\", \"y\"))"):
             inl.write_text(line + "\n", encoding="utf-8")
-            assert subprocess.run(["grep", "-qE", "--", pat, str(inl)]).returncode == 0, line
+            assert subprocess.run(["grep", "-qEf", str(patfile), str(inl)]).returncode == 0, line
         inl.write_text(f"SHOWFLAG_FIXED_IN_SHIPPING(1, {f}Extra, SFG_Normal, x)\n", encoding="utf-8")
-        assert subprocess.run(["grep", "-qE", "--", pat, str(inl)]).returncode != 0
+        assert subprocess.run(["grep", "-qEf", str(patfile), str(inl)]).returncode != 0
 
 
 def test_module_search_covers_project_plugins_and_engine():

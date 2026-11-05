@@ -53,3 +53,4 @@ docs/phase3/packets/D1-SU-27SK-LICENSE.txt -text
 assets/cie/** -text
 assets/camera_profiles/** -text
 assets/instrument_profiles/** -text
+assets/illuminants/** -text
