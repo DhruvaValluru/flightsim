@@ -1,8 +1,8 @@
 # Phase 3 · Windows session startup prompt
 
 Paste everything below the line into a fresh Claude Code session on the
-Windows laptop, in the `flightsim` checkout on branch `phase-2-final`, with
-`claude remote-control` running in another terminal. Start this session
+Windows laptop, in the `flightsim` checkout on branch `phase-2-final`, after typing
+`/remote-control` in the session so it can reach the other machine. Start this session
 **before** the Mac one. The word **ultracode** in the first line is what lets
 the session run multi-agent workflows.
 
@@ -183,3 +183,36 @@ after the suspect sets, with the result in `gate_log_phase.md`. Report every fai
 `P3 xlt FAIL sets=<...>`. After `xlt PASS`, write `gate_log_phase.md`, commit,
 push, log `PASS phase-end`, and stop. The Mac opens the PR. No polling, no
 check-ins.
+
+## Finishing run (restart, 5 Nov 2026 onward)
+
+Read `docs/phase3/README.md` "Finishing run" first.
+
+0. Before anything: `powershell -NoProfile -ExecutionPolicy Bypass -File
+   scripts\windows_env_check.ps1`. It writes `docs/phase3/machine.json`.
+   Refuse to run any check unless that file is under 12 hours old and says
+   `ok: true`; say which precondition failed, by name, and stop. Commit the
+   machine.json with your next doc push.
+1. Definition of done: `.venv\Scripts\python -m pytest -q -o addopts= -m
+   gate_<L> tests/test_phase3_gates.py`. Run it after every verdict and after
+   ticking gate lines. A letter is finished only when it is green here and the
+   Mac reports the same commit green on CI. Report `P3 letter <L> PASS
+   gate-test=green` only then.
+2. On every PASS verdict write `green_commit` (the commit you proved) and
+   `green_run_id` into the box's state file, so `scripts/phase3_repro.py`
+   has something to diff against.
+3. Gate lines: when a gate line's check passes on this machine, tick it on
+   the sheet and write the row in the gate log as PASS with the evidence. A
+   row the pipeline cannot do (the other two computers) is `owner-pending`
+   with the evidence of what was measured here. "PENDING" and "FAIL" rows
+   keep the gate test red; resolve them.
+4. Order, Windows first: C gate lines (tick, they passed), then A10 re-proof
+   and Gate A, then E2 E3 E5 E6 checks and Gate E with the newcomer agent
+   (record it: that is F4), then F1 `ue_host`, then B4 round 3 with the
+   Windows builder, then Gate B. D's gate lines: tick them, the re-run
+   passed.
+5. On any failure, run `python scripts/phase3_repro.py <box>` before you
+   write the failure packet, and attach it. The packet's first line names
+   whether the cause is in the diff, the machine, or unknown.
+6. Verification is never skipped for budget. A budget stop ends the run at
+   the current box with `budget-halt`, never by skipping a check.

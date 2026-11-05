@@ -1,8 +1,8 @@
 # Phase 3 · Mac session startup prompt
 
 Paste everything below the line into a fresh Claude Code session on the Mac,
-in the `flightsim` checkout on branch `phase-2-final`, with
-`claude remote-control` running in another terminal. The word **ultracode** in
+in the `flightsim` checkout on branch `phase-2-final`, after typing
+`/remote-control` in the session so it can reach the other machine. The word **ultracode** in
 the first line is what lets the session run multi-agent workflows.
 
 ---
@@ -263,3 +263,28 @@ building (rule 10). Record the letter as passed in `state/<L>.json`.
   machine only. Commit, push, open a **draft** PR to `phase-2-final` with the
   GitHub tools, immediately unsubscribe from it, log `PASS phase-end`, and
   stop. No polling, no check-ins.
+
+## Finishing run (restart, 5 Nov 2026 onward)
+
+Read `docs/phase3/README.md` "Finishing run" first. The definition of done is
+now `pytest -m gate_<L>` (tests/test_phase3_gates.py) green on the laptop
+and on CI for the same commit; nothing else counts as a letter finished.
+
+Your part, in this order:
+1. Pull. Run `pytest -q tests/test_phase3_decisions.py` and the default
+   suite once; fix what is red before anything else is pushed.
+2. Read CI for the tip commit with the GitHub tools (`actions_list`,
+   `get_job_logs`). You are the only side that can. Write the three-OS row
+   into every `gate_log_<L>.md` as PASS with the run id, or fix what CI
+   shows and push. A letter cannot pass its gate test until that row is PASS.
+3. Do not start new boxes. The open Mac-side code is B4 round 3 (only if the
+   Windows builder sends Mac steps), C7's Mac half if the decision agent
+   un-defers it, F5 once the letter tests pass.
+4. For every failure packet from Windows, run
+   `python3 scripts/phase3_repro.py <box>` first and give the repro packet to
+   the debug triage. No re-brainstorm until the repro packet has been read.
+5. Verification is never skipped for budget. If a budget stop comes, finish
+   the current box, log `budget-halt <where>` and stop; do not thin Align,
+   the auditor or the gate tests.
+6. When Windows reports `P3 letter <L> PASS gate-test=green`, run Align's
+   second run for that letter, then the next.
