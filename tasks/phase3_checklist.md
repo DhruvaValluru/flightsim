@@ -171,7 +171,7 @@ Two rules to keep in mind:
 
 ## E · Make it simple for someone new
 
-- [ ] **E1 · Every setting listed and sorted** into: in the app / hidden default /
+- [x] **E1 · Every setting listed and sorted** into: in the app / hidden default /
   developers only / delete
   - Check: a test finds no unlisted setting.
 - [ ] **E2 · All settings in one file**, edited from the app
@@ -200,7 +200,7 @@ Two rules to keep in mind:
   - Check: `pytest -q -m ue_host tests/test_demo_e2e.py` passes.
 - [ ] **F2 · The same run works on all three computers** 🪟
   - Check: three passing rows in `docs/PHASE3_LOG.md` with the same tool versions.
-- [ ] **F3 · Short guide written** (`docs/GUIDE.md`)
+- [x] **F3 · Short guide written** (`docs/GUIDE.md`)
   - Check: under 1,000 words, with no terminal commands.
 - [ ] **F4 · Video of one full run**, under 5 minutes
 - [ ] **F5 · Final report:** each of the six goals with its proof

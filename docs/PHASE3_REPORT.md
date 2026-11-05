@@ -69,3 +69,18 @@ operating systems; its ubuntu job's nine failures are all in the set fixed above
 Still failing on the Mac: `test_webapp_generate` (10, Mac engine import),
 `test_dataset_boxes` COCO file not found (first run with pycocotools installed; untriaged),
 gauss_legendre, `test_wake`, `test_weather` (baseline).
+
+## Full suite, serial (Mac, Python 3.11, commit `d5f95a4c`, 15.4 min)
+
+3,685 tests: 3,656 passed, 9 failed, 5 errors, 15 skipped. This replaces the `-n 6` run
+above. The 14: `test_webapp_generate` (10 of them: 5 failures and 5 setup errors; 9 are the
+Mac's engine import, plus the page test that assumes no engine), `test_dataset_boxes` (COCO
+file not found, untriaged), gauss_legendre and `test_wake` (last-digit float, baseline),
+`test_weather` (bare `python` not on this Mac's path, baseline). Skips: no node (7), no
+EGM2008 grid (4), no real bakes here (3+). Later commits (the albedo change, NEXT.md) were
+not in this run.
+
+**Blocker, owner's decision (packet A10-4):** `aircraft.licence_dataset` refuses pixel export
+for all seven aircraft (A-4 all rights reserved, the rest GPL-2.0), so `/card` and
+`/download` answer 409 on a finished campaign. A10's campaign itself verified 12 of 12.
+
