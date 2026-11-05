@@ -22,10 +22,10 @@ How each measurable clause is decided
   Extinction means the far copy of the very same mountain reads fainter. The
   near copy stands in front of the far peak, so the far peak is read from a
   second still with ``-HideNearTerrain`` (same camera, same sun, same fog, the
-  near copy left out); a projected pixel is "in frame", not "seen". Both are
-  rendered at the 10 km fog of the look clause: the scene's default 0.0025
-  already holds the near peak (19.9 km away) at the fog's 0.92 opacity cap, so
-  no distance beyond it can read fainter. A fog-off pair is the control.
+  near copy left out); a projected pixel is "in frame", not "seen". Contrast
+  is the spread of light inside the same piece of each mountain (lit rock
+  against shaded rock), C = C0 * T. A pair with ``-NoAerialPerspective`` is the
+  control: with nothing between camera and rock, distance must fade nothing.
 * **Peaks shadow the valley.** A null test in the Gate 3 style: the same
   still, rendered with and without dynamic shadows. Only cast shadows differ,
   so pixels that darken in the terrain band ARE the terrain's cast shadows.
@@ -61,12 +61,13 @@ graded whenever their directories exist:
   only; with the layer below, the ground band only. A base drawn at the
   wrong height fails one side of the bracket. (The brainstorm's "cloud-only
   depth render" does not exist: volumetrics write no depth.)
-* **Extinction vs visibility_km.** The existing extinction ratio, re-run
-  with the fog density set by Koschmieder (beta = 3.912 / V, re-implemented
-  here, not imported from the producer) at 50 km and at 10 km. The hazy
-  ratio must sit below the clear one by a stated margin. Whether
-  ``FogDensity`` IS a per-metre extinction is what this measures; nothing
-  in the look table claims it.
+* **Extinction vs visibility_km.** The near peak's contrast, re-run with the
+  fog density set by Koschmieder (beta = 3.912 / V, re-implemented here, not
+  imported from the producer) at 50 km and at 10 km. One peak at one range,
+  so only the air differs; the hazy day must keep at most a stated share of
+  the clear day's contrast. The far peak cannot grade this: at the true
+  density it sits on the fog's 0.92 opacity cap on both days. ``FogDensity``
+  is NOT a per-metre extinction, see UE_FOG_DENSITY_PER_EXTINCTION.
 * **Wet-surface null test.** The same still with ``-precip=rain`` and
   ``-precip=none``. The terrain band must change (the wetness scalar
   reached a material parameter -- and ``look_applied`` must not say the
@@ -121,25 +122,39 @@ THRESHOLDS = {
     #: means the same mountain reads fainter with distance; 0.75 asks for a
     #: quarter of its contrast gone over ~20 km, which the fog settings exceed
     #: comfortably -- while a renderer with no aerial perspective at all
-    #: (the old build) shows ratios near 1. The 5.5 record (0.27) graded a
-    #: far pixel that lay on the near copy; @@EXT@@
+    #: (the old build) shows ratios near 1. The 0.27 of 5.5 graded a far pixel
+    #: that lay on the near copy. Measured 2026-11-04 on 5.7.4, far peak seen
+    #: alone: good 0.14, the no-aerial-perspective control that must fail it
+    #: 0.91. The number stands.
     "max_extinction_ratio": 0.75,
     #: Minimum sky-contrast of the NEAR peak, in 8-bit counts. Below this the
     #: extinction ratio is a quotient of noise.
     "min_near_contrast": 8.0,
     #: Cast-shadow area on terrain, pixels of a 960x540 frame (~1.9%).
     "min_valley_shadow_px": 10000,
-    #: Aircraft ground-shadow area, pixels, after excluding its body. @@SHADOW@@
+    #: Aircraft ground-shadow area, pixels, after excluding its body. Measured
+    #: 2026-11-04 on 5.7.4: good 863; bad 79, the same A/B with the ground
+    #: culled and no shadow on it, all of it edge pixels of the body (1,181
+    #: on 5.5). The number stands.
     "min_aircraft_shadow_px": 300,
     #: Sky-band luminance excursion across the doublet window, 8-bit counts.
     #: Empirically anchored from both sides: with §6.6's manual exposure this
     #: scene measures 4.9 (smooth drift from three kilometres of camera
     #: travel), and with auto-exposure -- the failure the clause forbids --
-    #: it measures 34.4 (both measured on 5.5). @@EXP_GOOD@@
+    #: it measures 34.4 (both measured on 5.5). Measured 2026-11-04 on 5.7.4:
+    #: good 5.96 under manual exposure; bad 57.90, one stop of real exposure
+    #: change. The number stands.
     "max_sky_excursion": 8.0,
     #: What the negative control must exceed. A metric that the known failure
     #: cannot trip is not a measurement (§1.7), so every gate run re-validates
-    #: its own instrument. On 5.5 the control was auto-exposure (34.4). @@EXP_CTRL@@
+    #: its own instrument. On 5.5 the control was auto-exposure (34.4). On
+    #: 5.7.4 (2026-11-04) auto-exposure measures 5.85, level with manual's
+    #: 5.96, and no threshold separates them: the horizon stays level, the
+    #: frame mean moves 150.8 to 146.9, and nothing moves the meter. The
+    #: engine is right and the control had no failure to show, so the control
+    #: is now a one-stop step (57.90); auto-exposure is reported, not graded.
+    #: This shows the metric sees an exposure move. It does NOT show the
+    #: manual run would have caught auto-exposure breathing on this flight.
     "min_control_excursion": 16.0,
     #: The doublet must actually roll the aircraft, or "does not breathe when
     #: the aircraft banks" is being tested without any banking.
@@ -174,14 +189,13 @@ VISIBILITY_HAZY_KM = 10.0
 #: the thing it measures.
 KOSCHMIEDER = 3.912
 
-#: Half-size, drop below the peak and rise above it of the two samples the
-#: extinction clauses compare, pixels at the near peak (the far ones shrink
-#: with range). Half 6 fell on one lit or one shaded facet, so the ratio read
-#: rock aspect (measured 2026-11-04 on 5.7.4: 3.61 with fog thinning the far
-#: copy); this covers both sides of the peak, the same ground on each copy.
+#: Half-size and drop below the peak of the block the extinction clauses
+#: read, pixels at the near peak (the far one shrinks with range, so both
+#: cover the same ground): large enough to hold lit and shaded rock at once.
 PEAK_PATCH_HALF = 20
 PEAK_PATCH_DROP = 24
-PEAK_SKY_RISE = 45
+#: The block's contrast: its luminance spread between these percentiles.
+PEAK_SPREAD_PERCENTILES = (10, 90)
 #: The exposure step the control renders: a real one-stop move of the bias
 #: (commandlet default 11.0), the excursion a breathing exposure would make.
 EXPOSURE_STEP_BIAS = 12.0
@@ -192,9 +206,6 @@ LOOK_THRESHOLDS = {
     "cloud_min_changed_px": 2000,
     #: ... and at most this many in the band it cannot reach.
     "cloud_max_leak_px": 500,
-    #: The hazy (10 km) extinction ratio must sit this far below the clear
-    #: (50 km) one. A fog density that is not an extinction shows no order.
-    "visibility_min_ratio_drop": 0.10,
     #: Rain on/off must change this many terrain-band pixels ...
     "wet_min_changed_px": 2000,
     #: ... and this few sky-band pixels (the null: sky does not get wet).
@@ -214,24 +225,21 @@ LOOK_THRESHOLDS = {
 }
 
 
+def koschmieder_fog_density(visibility_km: float) -> float:
+    """beta = 3.912 / (1000 V) in 1/m, V in km (re-implemented, see above)."""
+    return KOSCHMIEDER / (1000.0 * float(visibility_km))
+
+
 #: UE FogDensity for one 1/m of extinction. FogDensity is not 1/m: SceneCore
 #: divides it by 1000 per cm and HeightFogCommon integrates ln 2 of it in base
 #: 2, so beta = FogDensity * 0.1 * ln(2)^2 per metre at this scene's near-zero
-#: falloff. Read on the 5.7.4 sources; beta handed over as it stood drew a
-#: "10 km" day whose 20 km ridge kept 71 % of its contrast.
+#: falloff. Read on the 5.7.4 sources.
 UE_FOG_DENSITY_PER_EXTINCTION = 1.0 / (0.1 * math.log(2.0) ** 2)
 
 
-def koschmieder_fog_density(visibility_km: float) -> float:
-    """The -fog-density that draws a visibility of V km: Koschmieder's
-    beta = 3.912 / (1000 V) in 1/m, in the engine's units."""
-    return KOSCHMIEDER / (1000.0 * float(visibility_km)) * UE_FOG_DENSITY_PER_EXTINCTION
-
-
-#: The fog the range-extinction clause renders at: the look clause's clear
-#: day. The peaks stand 19.9 km and 39.5 km off (range_m), so a 10 km day takes
-#: both to the fog's opacity floor and leaves no difference to grade.
-EXTINCTION_FOG = f"-fog-density={koschmieder_fog_density(VISIBILITY_CLEAR_KM):.6g}"
+def engine_fog_density(visibility_km: float) -> float:
+    """The -fog-density that draws this visibility on the engine."""
+    return koschmieder_fog_density(visibility_km) * UE_FOG_DENSITY_PER_EXTINCTION
 
 
 #: The look control renders (--look): one switch per pair, everything else
@@ -249,16 +257,9 @@ LOOK_RUNS = {
         "-cloud-thickness=180"]),
     "cloud_control": ("terrain", ["-seconds=2", "-NoCloudShadows", "-cloud-cover=0"]),
     "visibility_clear": ("terrain", [
-        "-seconds=2", f"-fog-density={koschmieder_fog_density(VISIBILITY_CLEAR_KM):.6g}"]),
+        "-seconds=2", f"-fog-density={engine_fog_density(VISIBILITY_CLEAR_KM):.6g}"]),
     "visibility_hazy": ("terrain", [
-        "-seconds=2", f"-fog-density={koschmieder_fog_density(VISIBILITY_HAZY_KM):.6g}"]),
-    # The far peak of each, with the near copy that hides it left out.
-    "visibility_clear_far": ("terrain", [
-        "-seconds=2", "-HideNearTerrain",
-        f"-fog-density={koschmieder_fog_density(VISIBILITY_CLEAR_KM):.6g}"]),
-    "visibility_hazy_far": ("terrain", [
-        "-seconds=2", "-HideNearTerrain",
-        f"-fog-density={koschmieder_fog_density(VISIBILITY_HAZY_KM):.6g}"]),
+        "-seconds=2", f"-fog-density={engine_fog_density(VISIBILITY_HAZY_KM):.6g}"]),
     "wet": ("terrain", ["-seconds=2", "-precip=rain"]),
     "wet_control": ("terrain", ["-seconds=2", "-precip=none"]),
     "night": ("terrain", ["-sun-elev=-12", "-sun-azim=180"]),
@@ -338,21 +339,17 @@ def measure_extinction(frames_dir: Path, far_dir: Optional[Path] = None,
                        control_far_dir: Optional[Path] = None) -> Check:
     """The same raster, near and far: the far copy must read fainter.
 
-    Contrast is each peak's COLOUR distance from the sky directly above its
-    projected pixel, not its luminance difference. Measured on this scene, a
-    sunlit mountain and the sky behind it can match in luminance to within
-    half a count while remaining plainly separate to the eye -- the eye is
-    using chromaticity (warm rock against blue sky), and extinction is
-    precisely the collapse of that difference toward the haze colour.
+    Contrast is the spread of light inside the same piece of each mountain
+    (peak_contrasts), not its distance from the sky. Measured 2026-11-04 on
+    5.7.4 that distance is not monotonic in fog (0.66, 1.95, 1.04 at three
+    rising densities): a grey peak's mean sits near the sky's colour, so
+    haze can raise it or lower it. Lit against shaded rock can only collapse.
 
     ``far_dir`` is the render the far peak is read from (the near copy left
     out, see peak_contrasts); without it both peaks come from ``frames_dir``.
-    ``control_dir``/``control_far_dir`` are the same pair with the fog off:
-    the fog must lower the ratio by at least visibility_min_ratio_drop, or
-    the clause cannot tell fog from anything else and a pass means nothing.
-    The control is not asked to miss the threshold: the sky atmosphere's own
-    aerial perspective fades the far copy with the fog off (0.66 measured on
-    5.7.4), and that is extinction too.
+    ``control_dir``/``control_far_dir`` are the same pair with no aerial
+    perspective: its ratio must MISS the threshold, or the clause cannot tell
+    haze from anything else and a pass means nothing.
     """
     contrasts = peak_contrasts(frames_dir, far_dir)
     if contrasts is None:
@@ -369,11 +366,10 @@ def measure_extinction(frames_dir: Path, far_dir: Optional[Path] = None,
         control = peak_contrasts(control_dir, control_far_dir)
         if control is None:
             return Check("terrain shows range extinction", False,
-                         "a terrain peak is not in frame in the fog-off control")
+                         "a terrain peak is not in frame in the control")
         control_ratio = control["far"] / control["near"]
-        drop = LOOK_THRESHOLDS["visibility_min_ratio_drop"]
-        control_ok = control_ratio - ratio >= drop
-        control_note = f"; fog-off control {control_ratio:.2f} must sit {drop:g} above it"
+        control_ok = control_ratio > THRESHOLDS["max_extinction_ratio"]
+        control_note = f"; no-aerial-perspective control {control_ratio:.2f} must exceed it"
     return Check(
         "terrain shows range extinction",
         ratio <= THRESHOLDS["max_extinction_ratio"] and control_ok,
@@ -581,16 +577,16 @@ def _range_text(range_m: Optional[float], fallback: str) -> str:
 
 
 def peak_contrasts(frames_dir: Path, far_dir: Optional[Path] = None) -> Optional[dict]:
-    """Near/far peak colour distance from the sky above each, or None when
-    a peak is out of frame. The one quantity both extinction clauses use.
+    """Near/far peak contrast (the luminance spread of a block on each), or
+    None when a peak is out of frame. The one quantity both extinction
+    clauses use.
 
     The near peak is read from ``frames_dir`` and the far peak from
     ``far_dir`` (the same still with -HideNearTerrain). Measured 2026-11-04
     on UE 5.7.4: in the two-copy frame the far peak's pixel lies on the near
     copy, so it was never the far mountain that was graded. When the record
-    states each peak's range the far samples shrink with it, so both patches
-    cover the same piece of the same mountain instead of the far one
-    averaging three times the ground.
+    states each peak's range the far block shrinks with it, so both cover
+    the same piece of the same mountain.
     """
     import numpy as np
 
@@ -607,17 +603,13 @@ def peak_contrasts(frames_dir: Path, far_dir: Optional[Path] = None) -> Optional
     far_scale = near_range / far_range if near_range and far_range else 1.0
 
     def contrast(frame: Path, mark: dict, scale: float) -> float:
-        rgb = load_rgb(frame)
+        lum = luminance(load_rgb(frame))
         half = max(2, round(PEAK_PATCH_HALF * scale))
-
-        def patch(py: float):
-            y0 = max(0, int(py) - half)
-            x0 = max(0, int(mark["px"]) - half)
-            return rgb[:, y0:int(py) + half + 1,
-                       x0:int(mark["px"]) + half + 1].mean(axis=(1, 2))
-
-        return float(np.linalg.norm(patch(mark["py"] + PEAK_PATCH_DROP * scale)
-                                    - patch(mark["py"] - PEAK_SKY_RISE * scale)))
+        y = int(mark["py"] + PEAK_PATCH_DROP * scale)
+        x = int(mark["px"])
+        block = lum[max(0, y - half):y + half + 1, max(0, x - half):x + half + 1]
+        low, high = np.percentile(block, PEAK_SPREAD_PERCENTILES)
+        return float(high - low)
 
     return {"near": contrast(frames_dir / near_record["frame"], near, 1.0),
             "far": contrast(far_dir / far_record["frame"], far, far_scale),
@@ -629,15 +621,16 @@ VISIBILITY_MEASUREMENT = (
     f"{VISIBILITY_HAZY_KM:g} km (Koschmieder, in engine units): the hazy day must keep at "
     f"most {THRESHOLDS['max_extinction_ratio']:g} of the clear day's, the clear contrast "
     f"above {THRESHOLDS['min_near_contrast']:g}. One peak at one range, so only the air "
-    "differs; a far/near ratio cannot grade this, the far peak sits on the fog's opacity "
-    "floor on both days")
+    "differs; the far peak sits on the fog's opacity cap on both days")
 
 
-def measure_extinction_vs_visibility(clear_dir: Path, hazy_dir: Path,
-                                     clear_far_dir: Optional[Path] = None,
-                                     hazy_far_dir: Optional[Path] = None) -> LookClause:
-    clear = peak_contrasts(clear_dir, clear_far_dir)
-    hazy = peak_contrasts(hazy_dir, hazy_far_dir)
+def measure_extinction_vs_visibility(clear_dir: Path, hazy_dir: Path) -> LookClause:
+    """Measured 2026-11-04 on 5.7.4: good 0.26 kept (118.7 to 30.3, the
+    gate6_r5 renders); bad 0.93, the same days with beta handed over
+    unconverted. The far peak in those r5 renders kept 0.97, which is why it
+    is not graded."""
+    clear = peak_contrasts(clear_dir)
+    hazy = peak_contrasts(hazy_dir)
     if clear is None or hazy is None:
         return LookClause("extinction follows visibility", "FAIL",
                           "a terrain peak is not in frame; nothing to measure",
@@ -797,15 +790,12 @@ def look_clauses(out: Path) -> List[LookClause]:
                                   "renders cloud_above / cloud_below / cloud_control "
                                   "absent (no engine here, or --look not given)",
                                   CLOUD_MEASUREMENT))
-    if rendered("visibility_clear", "visibility_hazy",
-                "visibility_clear_far", "visibility_hazy_far"):
-        clauses.append(measure_extinction_vs_visibility(
-            out / "visibility_clear", out / "visibility_hazy",
-            out / "visibility_clear_far", out / "visibility_hazy_far"))
+    if rendered("visibility_clear", "visibility_hazy"):
+        clauses.append(measure_extinction_vs_visibility(out / "visibility_clear",
+                                                        out / "visibility_hazy"))
     else:
         clauses.append(LookClause("extinction follows visibility", "NOT RUN",
-                                  "renders visibility_clear / visibility_hazy "
-                                  "(and their _far pair) absent",
+                                  "renders visibility_clear / visibility_hazy absent",
                                   VISIBILITY_MEASUREMENT))
     if rendered("wet", "wet_control"):
         clauses.append(measure_wet_surface_null(out / "wet", out / "wet_control"))
@@ -1249,14 +1239,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "full": ("terrain", []),
         "still": ("terrain", ["-seconds=2"]),
         "still_noshadow": ("terrain", ["-seconds=2", "-NoShadows"]),
-        # Range extinction: the near peak, then the far peak with the near
-        # copy that stands in front of it left out, at the 10 km fog; and the
-        # same pair with the fog off, the control that must miss the threshold.
-        "extinction": ("terrain", ["-seconds=2", EXTINCTION_FOG]),
-        "extinction_far": ("terrain", ["-seconds=2", "-HideNearTerrain", EXTINCTION_FOG]),
-        "extinction_nofog": ("terrain", ["-seconds=2", "-fog-density=0"]),
-        "extinction_nofog_far": ("terrain", ["-seconds=2", "-HideNearTerrain",
-                                             "-fog-density=0"]),
+        # Range extinction: the far peak, with the near copy that stands in
+        # front of it left out; and the control pair with no aerial
+        # perspective, which must miss the threshold.
+        "still_far": ("terrain", ["-seconds=2", "-HideNearTerrain"]),
+        "extinction_control": ("terrain", ["-seconds=2", "-NoAerialPerspective"]),
+        "extinction_control_far": ("terrain", ["-seconds=2", "-HideNearTerrain",
+                                               "-NoAerialPerspective"]),
         # The exposure control's step: the still, one stop up.
         "still_step": ("terrain", ["-seconds=2", f"-exposure-bias={EXPOSURE_STEP_BIAS:g}"]),
         "shadow": ("shadow", ["-seconds=2"]),
@@ -1347,8 +1336,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     shadow = sorted((out / "shadow").glob("frame_*.png"))[-1]
     shadow_hidden = sorted((out / "shadow_hidden").glob("frame_*.png"))[-1]
     checks = [
-        measure_extinction(out / "extinction", out / "extinction_far",
-                           out / "extinction_nofog", out / "extinction_nofog_far"),
+        measure_extinction(out / "still", out / "still_far",
+                           out / "extinction_control", out / "extinction_control_far"),
         measure_valley_shadow(still, still_ns),
         measure_aircraft_shadow(shadow, shadow_hidden),
         measure_exposure(out / "full"),

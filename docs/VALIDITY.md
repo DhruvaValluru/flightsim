@@ -723,30 +723,55 @@ stay until the probe on 5.7.4 replaces them from its own file:
 * **Status:** not yet re-measured on 5.7.4; the Windows steps are pending
   (`docs/phase3/notes/B4.md` windows_steps). No 5.7 number is stated here
   until a probe file holds it.
-* **Gate 6 on 5.7.4 is INCOMPLETE, not passed.** `gate6_visual.py --look`
-  (`runs/p3/B-1/gate6_r5`) passes every measured clause. The side-by-side is
-  NOT RUN because the owner's footage is absent, so the harness exits 3.
-  * The synthetic ground and raster were wound face-down on 5.7, so both
-    were culled from above. Both are rewound. The georeferenced tiles keep
-    the old order and are unmeasured.
-  * `-fog-density` is an engine number, not 1/m: beta = FogDensity * 0.1 *
-    ln(2)^2 per metre (SceneCore.cpp, HeightFogCommon.ush). The harness now
-    converts. **The product does not yet:** `core/scene/weather_visuals.py`
-    hands beta over as it stands, so a stated visibility renders about 20.8
-    times clearer than stated.
-  * `terrain shows range extinction` grades the 50 km day: contrast 21.4 at
-    19.9 km against 8.7 at 39.5 km, ratio 0.41. The near peak keeps 0.25 of
-    its fog-off contrast, and Koschmieder gives 0.237. With the fog off the
-    ratio is 0.66, because aerial perspective fades the far copy too, so the
-    control asks for a drop of 0.1 and not a miss of the threshold.
-  * `extinction follows visibility` grades one peak across two days: contrast
-    21.4 at 50 km against 3.8 at 10 km, kept 0.18. The wrong-unit fog is its
-    measured failure: 29.9 against 35.0, kept 1.17.
-  * `exposure metric discriminates` grades a one-stop step, 57.90/255. The
-    auto-exposure control moves only 5.85/255 on this flight and is reported,
-    not graded, so this clause does not show auto-exposure would breathe.
+* **Gate 6 on 5.7.4 is INCOMPLETE, not passed.** No run has yet measured the
+  code as it stands: two trees feed the numbers below, and each is named.
+  `g1` is `runs/p3/B-1/diag3/g1` in the `p3w-B4r3` worktree, measure quality,
+  built up over several rebuilds and re-renders. `r5` is `runs/p3/B-1/gate6_r5`
+  on the merged tree, measure quality. Neither is a probe file, so no bias
+  above changes. Both exit 3: the side-by-side is NOT RUN, the owner's footage
+  being absent, and without it the harness can reach INCOMPLETE, never PASS.
+  Beauty quality and a georeferenced frame are not re-measured.
+  * The synthetic ground and raster were wound face-down on 5.7, so both were
+    culled from above: depth inf and base colour 0 on the plain, and the lit
+    ground the earlier frames showed was the atmosphere's virtual planet. The
+    ridges in every earlier 5.7 frame were their far slopes seen from inside.
+    Both are rewound. The georeferenced tiles keep the old order and are
+    unmeasured; if they are face-down too, it shows only with
+    `FLIGHTSIM_GOOGLE_TILES=off`.
+  * `g1` and `r5` agree: aircraft ground shadow **863 px** (threshold 300), night
+    **2.7/255** (floor 2.0), peaks shadow the valley 41,107 px, wet surface
+    31,617 px, thresholds unchanged.
   * The peaks are 19.9 km and 39.5 km from the camera of record (`range_m`),
-    not the ~10 km and ~30 km stated for 5.5 above.
+    not the ~10 km and ~30 km stated for 5.5 above, and the near copy hides
+    the far peak, so the far peak is read with `-HideNearTerrain`. Contrast is
+    now the luminance spread inside the same block of each peak. It is read
+    from encoded 8-bit frames, so it orders scenes and is not a transmission.
+  * Range extinction (`g1`, the scene's default fog): ratio **0.14**,
+    no-aerial-perspective control **0.91**, threshold 0.75 unchanged.
+  * `-fog-density` is an engine number, not 1/m: beta = FogDensity * 0.1 *
+    ln(2)^2 per metre (`SceneCore.cpp`, `HeightFogCommon.ush`), a factor of
+    20.8. The harness converts. **The product does not yet:**
+    `core/scene/weather_visuals.py` hands beta over unconverted, so by that
+    arithmetic a stated visibility renders about 20.8 times clearer than
+    stated. Read from the sources; the product path is not measured.
+  * Extinction follows visibility grades the near peak alone across two days
+    (`r5` renders, the clause re-read with the spread metric, not a gate exit):
+    **118.7 to 30.3, kept 0.26**, threshold 0.75. The far peak goes 13.7 to
+    13.3 on the same renders, flat on the fog's opacity cap, so it is not
+    graded. `g1`'s visibility renders used a factor of 10 and were days of
+    about 104 km and 20.8 km; no visibility number here comes from them.
+  * `exposure metric discriminates` passes on a **substituted control that
+    needs the owner's review.** Its auto-exposure control reads 5.85/255
+    against manual's 5.96 (`g1`, `r5`; 34.4 on 5.5): the horizon stays level
+    and the frame mean moves 150.8 to 146.9 (`g1`), so the meter has nothing
+    to chase. The control is now a one-stop step, **57.90/255** (threshold 16
+    unchanged). That shows the metric sees an exposure move; it does not show
+    this flight would catch auto-exposure breathing.
+  * `cloud base bracket` passes with `-NoCloudShadows` on its three renders
+    (0 ground px leak, `g1`, `r5`), which grades where the layer is drawn. **A
+    defect stays open beside that pass:** with cloud shadows on, the plain
+    under the layer above the camera falls from about 189 to about 2 of 255
+    (`g1`, before `-NoCloudShadows`). Black is not overcast. No clause grades it.
 
 What Gate 6 does **not** establish, and the Phase 6 work that remains:
 

@@ -37,15 +37,6 @@ def paint(rgb, x, y, colour, half=8):
     return rgb
 
 
-def paint_peak(rgb, x, colour):
-    """A mountain as wide as the samples peak_contrasts reads: rock from
-    just above the landmark down past the lower patch, so the near-sized
-    patch lands on rock and not on the ground beside it."""
-    for channel in range(3):
-        rgb[channel, 78:130, x - 24:x + 25] = colour[channel]
-    return rgb
-
-
 def manifest_for(tmp_path, records):
     (tmp_path / "render.json").write_text(json.dumps({
         "frames": len(records),
@@ -62,12 +53,24 @@ def landmark(px, py, visible=True):
 # -- extinction -----------------------------------------------------------
 
 
-def extinction_scene(tmp_path, far_colour):
-    """Two 'peaks' against the sky; the near one is always warm rock."""
+#: Lit-against-shaded spread of each fixture mountain, 8-bit counts.
+NEAR_ROCK, HAZED_ROCK, CRISP_ROCK = 100, 30, 100
+
+
+def rock(rgb, x, y, spread, half=22, base=120):
+    """A block of mountain under a peak at (x, y): lit rock on one side,
+    shaded on the other, ``spread`` counts apart. Covers the block the
+    extinction clauses read at any scale."""
+    rgb[:, y:y + 2 * half + 4, x - half:x] = base + spread // 2
+    rgb[:, y:y + 2 * half + 4, x:x + half + 1] = base - spread // 2
+    return rgb
+
+
+def extinction_scene(tmp_path, far_spread):
+    """Two 'peaks' against the sky; the near one is always crisp rock."""
     rgb = frame()
-    near = (150, 130, 100)                     # warm rock against blue sky
-    paint_peak(rgb, 80, near)
-    paint_peak(rgb, 200, far_colour)
+    rock(rgb, 80, 80, NEAR_ROCK)
+    rock(rgb, 200, 80, far_spread)
     name = "frame_0000.png"
     write_png_rgb(tmp_path / name, rgb)
     manifest_for(tmp_path, [{
@@ -79,18 +82,18 @@ def extinction_scene(tmp_path, far_colour):
 
 
 def test_a_hazed_far_ridge_is_extinction(tmp_path):
-    check = measure_extinction(extinction_scene(tmp_path, (122, 138, 185)))
+    check = measure_extinction(extinction_scene(tmp_path, HAZED_ROCK))
     assert check.ok, check.detail
 
 
 def test_a_far_ridge_as_crisp_as_the_near_one_is_not(tmp_path):
     """The old build's look: distance changes nothing. Must fail."""
-    check = measure_extinction(extinction_scene(tmp_path, (150, 130, 100)))
+    check = measure_extinction(extinction_scene(tmp_path, CRISP_ROCK))
     assert not check.ok
 
 
 def test_a_peak_out_of_frame_is_not_silently_passed(tmp_path):
-    directory = extinction_scene(tmp_path, (122, 138, 185))
+    directory = extinction_scene(tmp_path, HAZED_ROCK)
     manifest = json.loads((directory / "render.json").read_text(encoding="utf-8"))
     manifest["frame_records"][-1]["landmarks"]["far_peak"]["visible"] = False
     (directory / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -302,14 +305,14 @@ def test_a_layer_that_changes_nothing_is_not_a_cloud(tmp_path):
     assert clause.status == "FAIL"
 
 
-def extinction_pair(tmp_path, clear_far, hazy_far):
+def extinction_pair(tmp_path, clear_near, hazy_near, clear_far=HAZED_ROCK, hazy_far=HAZED_ROCK):
     rgb = frame()
-    near = (150, 130, 100)
     out = []
-    for name, far_colour in (("visibility_clear", clear_far), ("visibility_hazy", hazy_far)):
+    for name, near_spread, far_spread in (("visibility_clear", clear_near, clear_far),
+                                          ("visibility_hazy", hazy_near, hazy_far)):
         image = rgb.copy()
-        paint_peak(image, 80, far_colour)      # the air fades both peaks
-        paint_peak(image, 200, far_colour)
+        rock(image, 80, 80, near_spread)
+        rock(image, 200, 80, far_spread)
         directory = still(tmp_path / name, image,
                           look={"fog": {"fog_density": koschmieder_fog_density(10.0)}},
                           records=[{"frame": "frame_0000.png", "t": 1.0, "roll_deg": 0.0,
@@ -319,21 +322,37 @@ def extinction_pair(tmp_path, clear_far, hazy_far):
     return out
 
 
-def test_a_hazier_day_fades_the_far_ridge_more(tmp_path):
-    clear, hazy = extinction_pair(tmp_path, (140, 132, 130), (122, 138, 185))
+def test_a_hazier_day_fades_the_near_peak(tmp_path):
+    clear, hazy = extinction_pair(tmp_path, NEAR_ROCK, HAZED_ROCK)
     clause = measure_extinction_vs_visibility(clear, hazy)
     assert clause.status == "PASS", clause.detail
 
 
 def test_a_fog_density_that_is_not_an_extinction_shows_no_order(tmp_path):
-    """Same far contrast at 50 km and 10 km: the number reached nothing."""
-    clear, hazy = extinction_pair(tmp_path, (140, 132, 130), (140, 132, 130))
+    """Same near contrast at 50 km and 10 km: the number reached nothing."""
+    clear, hazy = extinction_pair(tmp_path, NEAR_ROCK, NEAR_ROCK)
     clause = measure_extinction_vs_visibility(clear, hazy)
     assert clause.status == "FAIL"
 
 
+def test_fog_handed_over_unconverted_fails_the_visibility_clause(tmp_path):
+    """Measured on 5.7.4 with beta as the engine number: the near peak kept 0.93."""
+    clear, hazy = extinction_pair(tmp_path, NEAR_ROCK, 93)
+    assert measure_extinction_vs_visibility(clear, hazy).status == "FAIL"
+
+
+def test_the_far_peak_on_the_opacity_cap_does_not_decide_visibility(tmp_path):
+    """Measured in gate6_r5: the far peak kept 0.97 at the true density, flat
+    on the cap both days. It can neither fail a real fade nor make one."""
+    clear, hazy = extinction_pair(tmp_path, NEAR_ROCK, HAZED_ROCK, 14, 14)
+    assert measure_extinction_vs_visibility(clear, hazy).status == "PASS"
+    (tmp_path / "flat").mkdir()
+    clear, hazy = extinction_pair(tmp_path / "flat", NEAR_ROCK, NEAR_ROCK, 100, 10)
+    assert measure_extinction_vs_visibility(clear, hazy).status == "FAIL"
+
+
 def test_a_peak_out_of_frame_fails_the_visibility_clause_too(tmp_path):
-    clear, hazy = extinction_pair(tmp_path, (140, 132, 130), (122, 138, 185))
+    clear, hazy = extinction_pair(tmp_path, NEAR_ROCK, HAZED_ROCK)
     manifest = json.loads((hazy / "render.json").read_text(encoding="utf-8"))
     manifest["frame_records"][-1]["landmarks"]["far_peak"]["visible"] = False
     (hazy / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -419,8 +438,9 @@ def test_every_look_clause_reports_not_run_with_its_measurement_when_unrendered(
 def test_the_look_controls_change_one_switch_each():
     """Every look run is the terrain shot plus its own switch; the control
     of each pair carries the switch's 'off' spelling."""
-    assert LOOK_RUNS["cloud_control"][1] == ["-seconds=2", "-NoCloudShadows",
-                                             "-cloud-cover=0"]
+    assert LOOK_RUNS["cloud_control"][1] == ["-seconds=2", "-NoCloudShadows", "-cloud-cover=0"]
+    assert all("-NoCloudShadows" in LOOK_RUNS[name][1]
+               for name in ("cloud_above", "cloud_below", "cloud_control"))
     assert "-precip=rain" in LOOK_RUNS["wet"][1]
     assert "-precip=none" in LOOK_RUNS["wet_control"][1]
     assert "-sun-elev=-12" in LOOK_RUNS["night"][1]
@@ -958,10 +978,10 @@ def two_copy_pair(tmp_path, seen_in_two_copy, seen_alone, ranges=(None, None)):
         return {"near_peak": near, "far_peak": far}
 
     out = []
-    for name, far_colour in (("still", seen_in_two_copy), ("still_far", seen_alone)):
+    for name, far_spread in (("still", seen_in_two_copy), ("still_far", seen_alone)):
         directory = tmp_path / name
         directory.mkdir()
-        rgb = paint_peak(paint_peak(frame(), 80, (150, 130, 100)), 200, far_colour)
+        rgb = rock(rock(frame(), 80, 80, NEAR_ROCK), 200, 80, far_spread)
         write_png_rgb(directory / "frame_0000.png", rgb)
         manifest_for(directory, [{"frame": "frame_0000.png", "t": 1.0,
                                   "roll_deg": 0.0, "landmarks": marks()}])
@@ -971,19 +991,19 @@ def two_copy_pair(tmp_path, seen_in_two_copy, seen_alone, ranges=(None, None)):
 
 def test_the_far_peak_comes_from_the_render_that_shows_it(tmp_path):
     """Crisp in the two-copy still (that pixel is the near copy), hazed alone."""
-    still, far = two_copy_pair(tmp_path, (150, 130, 100), (122, 138, 185))
+    still, far = two_copy_pair(tmp_path, CRISP_ROCK, HAZED_ROCK)
     assert not measure_extinction(still).ok
     assert measure_extinction(still, far).ok
 
 
 def test_a_far_render_that_shows_no_fade_fails_whatever_the_still_shows(tmp_path):
-    still, far = two_copy_pair(tmp_path, (122, 138, 185), (150, 130, 100))
+    still, far = two_copy_pair(tmp_path, HAZED_ROCK, CRISP_ROCK)
     assert measure_extinction(still).ok
     assert not measure_extinction(still, far).ok
 
 
 def test_the_far_peak_out_of_frame_in_its_own_render_is_not_passed(tmp_path):
-    still, far = two_copy_pair(tmp_path, (150, 130, 100), (122, 138, 185))
+    still, far = two_copy_pair(tmp_path, CRISP_ROCK, HAZED_ROCK)
     manifest = json.loads((far / "render.json").read_text(encoding="utf-8"))
     manifest["frame_records"][-1]["landmarks"]["far_peak"]["visible"] = False
     (far / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -993,7 +1013,7 @@ def test_the_far_peak_out_of_frame_in_its_own_render_is_not_passed(tmp_path):
 
 
 def test_the_detail_states_the_ranges_the_record_measured(tmp_path):
-    still, far = two_copy_pair(tmp_path, (150, 130, 100), (122, 138, 185),
+    still, far = two_copy_pair(tmp_path, CRISP_ROCK, HAZED_ROCK,
                                ranges=(19918.0, 39494.0))
     detail = measure_extinction(still, far).detail
     assert "19.9 km" in detail and "39.5 km" in detail
@@ -1001,15 +1021,17 @@ def test_the_detail_states_the_ranges_the_record_measured(tmp_path):
 
 
 def test_the_far_samples_shrink_with_the_stated_range(tmp_path):
-    """At twice the range the same piece of mountain is half the pixels. A
-    far peak half the near one's width must be read as itself, not averaged
-    away in a near-sized patch, and its sky sample must come from the
-    shrunken offset."""
+    """At twice the range the same piece of mountain is half the pixels: a
+    small lit-and-shaded feature fills enough of the shrunken block to count,
+    and is lost in a block the near peak's size."""
     from experiments.gate6_visual import peak_contrasts
 
-    still, far = two_copy_pair(tmp_path, (150, 130, 100), (120, 140, 190),
+    still, far = two_copy_pair(tmp_path, CRISP_ROCK, HAZED_ROCK,
                                ranges=(10000.0, 20000.0))
-    rgb = paint(paint_peak(frame(), 80, (150, 130, 100)), 200, 92, (200, 60, 60), half=11)
+    rgb = rock(frame(), 80, 80, NEAR_ROCK)
+    rgb[:, 78:128, 178:223] = 120                # one flat grey mountain ...
+    rgb[:, 87:98, 195:200] = 170                 # ... with one small feature
+    rgb[:, 87:98, 200:206] = 70
     write_png_rgb(far / "frame_0000.png", rgb)
     scaled = peak_contrasts(still, far)["far"]
     for directory in (still, far):
@@ -1021,9 +1043,58 @@ def test_the_far_samples_shrink_with_the_stated_range(tmp_path):
     assert scaled > unscaled
 
 
+def test_a_control_with_no_aerial_perspective_must_miss_the_threshold(tmp_path):
+    """Control inside the threshold: the clause cannot tell haze from
+    anything else, so a good far ratio proves nothing."""
+    still, far = two_copy_pair(tmp_path, CRISP_ROCK, HAZED_ROCK)
+    (tmp_path / "control").mkdir()
+    hazed = two_copy_pair(tmp_path / "control", CRISP_ROCK, HAZED_ROCK)
+    (tmp_path / "crisp").mkdir()
+    crisp = two_copy_pair(tmp_path / "crisp", CRISP_ROCK, CRISP_ROCK)
+    assert not measure_extinction(still, far, *hazed).ok
+    good = measure_extinction(still, far, *crisp)
+    assert good.ok and "control 1.00" in good.detail
+
+
+def test_contrast_is_inside_the_rock_not_against_the_sky(tmp_path):
+    """A hazed peak the sky's own colour still has a spread to lose; a flat
+    block has none, however far its mean sits from the sky."""
+    from experiments.gate6_visual import peak_contrasts
+
+    directory = extinction_scene(tmp_path, HAZED_ROCK)
+    contrasts = peak_contrasts(directory)
+    assert contrasts["near"] == pytest.approx(NEAR_ROCK, abs=1)
+    assert contrasts["far"] == pytest.approx(HAZED_ROCK, abs=1)
+
+
+def _sky_still(directory, level):
+    directory.mkdir()
+    write_png_rgb(directory / "frame_0000.png", frame(sky=(level, level, level)))
+    return manifest_for(directory, [{"frame": "frame_0000.png", "t": 1.0, "roll_deg": 0.0,
+                                     "landmarks": {}}])
+
+
+def test_the_exposure_step_decides_the_control_and_auto_is_only_reported(tmp_path):
+    auto = tmp_path / "auto"
+    auto.mkdir()
+    write_png_rgb(auto / "frame_0000.png", frame())
+    manifest_for(auto, [{"frame": "frame_0000.png", "t": 5.0, "roll_deg": 0.0,
+                         "landmarks": {}}])
+    manifest = json.loads((auto / "render.json").read_text(encoding="utf-8"))
+    manifest["scene"]["exposure"] = "auto (default metering)"
+    (auto / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
+    still = _sky_still(tmp_path / "still", 100)
+    stepped = _sky_still(tmp_path / "step", 160)
+    flat = _sky_still(tmp_path / "flat", 104)
+    check = measure_exposure_control(auto, still, stepped)
+    assert check.ok and "not graded" in check.detail
+    assert not measure_exposure_control(auto, still, flat).ok
+    assert not measure_exposure_control(auto).ok      # auto alone, flat: still fails
+
+
 def _measured_tree(out):
-    for name in ("still", "still_noshadow", "still_step", "extinction", "extinction_far",
-                 "extinction_nofog", "extinction_nofog_far", "shadow", "shadow_hidden",
+    for name in ("still", "still_far", "still_noshadow", "still_step", "shadow",
+                 "shadow_hidden", "extinction_control", "extinction_control_far",
                  "full", "full_auto"):
         directory = out / name
         directory.mkdir(parents=True)

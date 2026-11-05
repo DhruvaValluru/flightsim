@@ -180,6 +180,8 @@ struct FFlightSimVisualSceneOptions
 	bool bHideNearTerrain = false;
 	// Gate 6's cloud bracket: the layer drawn, its shadow on the ground off.
 	bool bNoCloudShadows = false;
+	// Gate 6's extinction control: no atmosphere and no height fog in frame.
+	bool bNoAerialPerspective = false;
 	// Sun placed low in the north-west, so the east-west ridge throws its
 	// shadow band toward the camera side and the aircraft's own shadow lands
 	// ahead-right of it, inside the chase framing.
