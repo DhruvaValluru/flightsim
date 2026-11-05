@@ -587,7 +587,7 @@ def test_the_card_block_carries_the_pair_in_the_fixed_key_order_with_the_selftes
     # The first vector sits between the cores: downwash, no roll; the
     # second at r_c outside the starboard core: the analytic core value
     # of the near vortex plus the far one's, upward.
-    assert block["selftest"][0]["p_eq_rad_s"] == 0.0 and block["selftest"][0]["w_mps"] > 0.0
+    assert abs(block["selftest"][0]["p_eq_rad_s"]) < 1e-12 and block["selftest"][0]["w_mps"] > 0.0
     near = burnham_hallock(B747_RC_M, GAMMA_0, B747_RC_M)
     far = burnham_hallock(B747_B0_M + B747_RC_M, GAMMA_0, B747_RC_M)
     assert block["selftest"][1]["w_mps"] == pytest.approx(-(near - far), abs=1e-9)

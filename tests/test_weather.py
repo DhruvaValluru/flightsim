@@ -17,6 +17,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 import wave
 from pathlib import Path
 
@@ -370,7 +371,7 @@ def test_the_soundtrack_script_writes_the_cards_storm(tmp_path):
     card["weather"]["lightning"]["flashes"] = [dict(thunder.SELFTEST_FLASH)]
     (tmp_path / "card.json").write_text(json.dumps(card), encoding="utf-8")
     out = subprocess.run(
-        ["python", str(REPO / "scripts" / "storm_soundtrack.py"), str(tmp_path / "card.json"),
+        [sys.executable, str(REPO / "scripts" / "storm_soundtrack.py"), str(tmp_path / "card.json"),
          str(tmp_path / "out.wav"), "--listener", "800,0,2", "--sample-rate", "8000",
          "--no-rain"], capture_output=True, text=True, check=True)
     record = json.loads(out.stdout)

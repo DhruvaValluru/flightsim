@@ -84,3 +84,14 @@ not in this run.
 for all seven aircraft (A-4 all rights reserved, the rest GPL-2.0), so `/card` and
 `/download` answer 409 on a finished campaign. A10's campaign itself verified 12 of 12.
 
+## Later on 2026-11-04
+
+Letter gates as Windows reported them: **C PASS, D PASS on the laptop.** A10 PASS (c172p
+campaign 6b69c8dc1d28, tier llm, 12 of 12 verified, card and 19.6 MB download) after the
+owner cleared the models (decision 20), so letter A's gate needs a re-run, as does B's.
+A13, A7 PASS. B4's albedo clause PASS. D2 D4 D5 D6 PASS, E1 E4 PASS. Windows CI failures
+fixed: digest-pinned assets kept byte-exact, the exporter writes LF on every OS, Git Bash
+for the bridge tests. The two float baselines now compare within rounding, and
+`test_weather` uses the running interpreter. Fog units (decision 21) and the Gate 6 rework
+are unpushed on Windows and unreviewed. Open: E2 E3 real-key half, E5, E6, F1, F2, F4.
+
