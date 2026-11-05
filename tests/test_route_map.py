@@ -335,15 +335,26 @@ def test_run_flies_the_route_in_the_pinned_order_and_the_card_carries_its_schedu
                         lambda spec, provenance: captured.update(spec=spec) or {"run_id": "routetest"})
     order = []
 
+    preflying = []      # the route pre-flight plans its own copy: not /run's order
+
     def recording(name, real):
         def wrapped(spec, *args, **kwargs):
-            order.append(name)
+            if not preflying:
+                order.append(name)
             return real(spec, *args, **kwargs)
         return wrapped
 
-    for name in ("plan_terrain_environment", "plan_route_flight", "derive_seed",
-                 "plan_terrain_flight"):
-        monkeypatch.setattr(server_module, name, recording(name, getattr(server_module, name)))
+    def route_preflight(spec, *args, **kwargs):
+        order.append("plan_route_flight")
+        preflying.append(True)
+        try:
+            return plan_route_flight(spec, *args, **kwargs)
+        finally:
+            preflying.pop()
+
+    for name in ("plan_terrain_environment", "derive_seed", "plan_terrain_flight"):
+        monkeypatch.setattr(runs_module, name, recording(name, getattr(runs_module, name)))
+    monkeypatch.setattr("webapp.route_map.plan_route_flight", route_preflight)
 
     spec = flat_spec(20)
     spec.set("route.waypoints", FLAT_ROUTE, frm="drawn on the route map")
@@ -431,7 +442,7 @@ def test_a_run_with_no_route_is_untouched(monkeypatch):
     monkeypatch.setattr(server_module, "refuse_placeholder_mesh", lambda spec: None)
     monkeypatch.setattr(manager, "start", lambda spec, provenance: {"run_id": "plain"})
     called = []
-    monkeypatch.setattr(server_module, "plan_terrain_flight",
+    monkeypatch.setattr(runs_module, "plan_terrain_flight",
                         lambda spec: called.append("plan_terrain_flight"))
     reply = TestClient(app).post("/run", json={"spec": flat_spec().to_dict()})
     assert reply.status_code == 200, reply.json()

@@ -79,7 +79,7 @@ from core.nl.llm_compiler import LLMCompileError, compile_prompt_llm
 from core.scenario.randomization import RandomizationError, sample_randomization
 from core.scenario.spec import ScenarioSpec
 from core.scenario.validate import validate
-from webapp.runs import provision_place
+from webapp.runs import provision_campaign
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -560,7 +560,7 @@ class GenerateService:
         # names the bake it lacks, exactly the refusal ``start`` raises.
         refusals = []
         try:
-            provision_spec(spec, provision_place, {})
+            provision_spec(spec, provision_campaign, {})
         except CampaignError as exc:
             refusals.append(words(exc))
         refusals += plan_refusals(spec)
@@ -623,7 +623,7 @@ class GenerateService:
         # campaign's cases will (the single run's provisioning, decision 17).
         try:
             capture = provision_spec(
-                spec, provision_place,
+                spec, provision_campaign,
                 {"max_previews": 1, "card": True, **({"render": True} if engine else {})})
         except CampaignError as exc:
             raise GenerateRefusal(words(exc))
@@ -729,7 +729,7 @@ class GenerateService:
                 out=self.root / campaign_id, format=fmt, workers=workers,
                 disk_budget_bytes=disk_budget_bytes,
                 tier=tier if tier in ("llm", "regex") else "regex",
-                capture=capture, provision=provision_place)
+                capture=capture, provision=provision_campaign)
             render, render_note = render_here(campaign._spec())
             if render:
                 campaign.record["capture"]["render"] = True

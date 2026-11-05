@@ -50,13 +50,10 @@ from webapp.runs import (  # noqa: E402
     PREFETCH,
     prefetch_terrain_for,
     RunManager,
-    apply_historical_weather,
     apply_weather_event,
     bake_on_demand,
     camera_scene_violations,
-    coupling_needs_seed,
     default_run_spec,
-    derive_seed,
     needs_dynamic_bake,
     pick_scene,
     place_on_scene,
@@ -71,11 +68,9 @@ from webapp.runs import (  # noqa: E402
     plan_terrain_flight,
     plan_trim_recovery,
     plan_water_surface,
-    project_for_ue_host,
-    provision_place,
+    provision_flight,
     refuse_placeholder_mesh,
 )
-from webapp.route_map import plan_route_flight  # noqa: E402
 
 app = FastAPI(title="flightsim", docs_url=None, redoc_url=None)
 
@@ -1051,85 +1046,16 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # USER-stated coordinates with no bake yet refuse by name BEFORE any
     # spec edit: the page bakes via POST /bake and simply runs again --
     # never a silent flat slab standing in for a real place the user named.
-    # Scene-setting first (idempotent: a compile-planned location arrives
-    # source derived and is left alone), so the placement, bake check and
-    # every later planner see the staged scene like any named one.
-    # Mapped water under the stated place plans the water surface class
-    # (X-Plane mask, when extracted on this machine): before placement,
-    # so the control ridge's arbitrary georeference is never looked up.
-    # provision_place is the ONE function the campaign path calls too
-    # (decision 17): scene-setting, water, the bake check, placement.
-    provisioned = provision_place(spec)
+    # provision_flight is the ONE function the campaign path calls too
+    # (decision 17): scene-setting, water, the bake check, placement and
+    # every flight planner, in the pinned order its docstring states.
+    provisioned = provision_flight(spec)
     if provisioned["refusal"] is not None:
         return JSONResponse({"refused": "terrain.unbaked", **provisioned["refusal"]},
                             status_code=409)
-    # Severe-weather composition edits (thunderstorm -> severe turbulence
-    # when the word was defaulted): recorded, pre-digest, like every other
-    # transformation.
-    apply_weather_event(spec)
-    # Historical weather (ERA5) applies AFTER placement (coordinates are
-    # final) and BEFORE the seed/digest: the reanalysis wind is a recorded
-    # spec edit like every other transformation, or a named refusal.
-    weather_refusal = apply_historical_weather(spec)
-    if weather_refusal is not None:
-        return JSONResponse({"refused": "weather", **weather_refusal},
+    if provisioned["weather_refusal"] is not None:
+        return JSONResponse({"refused": "weather", **provisioned["weather_refusal"]},
                             status_code=409)
-    # PLANNER ORDER (load-bearing, pinned by tests): place_on_scene ->
-    # apply_weather_event -> apply_historical_weather ->
-    # plan_terrain_environment -> plan_route_flight -> derive_seed ->
-    # plan_terrain_flight -> plan_flyable_defaults -> plan_trim_recovery ->
-    # plan_camera_defaults -> project_for_ue_host -> validate.
-    # Rationale: placement fixes coordinates; the event composes its
-    # environment; DATED real weather wins over composition (ERA5 wind is
-    # source user, so the terrain planner then refuses to touch it);
-    # cross-ridge wind and along-ridge heading must exist BEFORE the
-    # clearance pre-flight so the track is flown through the SAME planned
-    # wind and orographic field it will record; envelope floors come last
-    # because they depend on the final altitude.
-    plan_terrain_environment(spec)
-    # The route (docs/ROUTE.md): a stated route is flown for real here --
-    # JSBSim, the autopilot and the route guidance over the scene's own
-    # raster -- after the terrain environment (the same planned wind and
-    # orographic field the run will record) and BEFORE the seed, so the
-    # pre-flight flies the spec the page confirmed. A line that comes
-    # within the route's clearance floor or that the autopilot cannot
-    # close on refuses by name in the verdict below; a user-stated
-    # altitude is never moved. The flight's control schedule and card
-    # block ride on this spec object into the render flow.
-    route_refusal = plan_route_flight(spec)
-    # The seed derives BEFORE the digest is answered. A run can be
-    # stochastic even with turbulence word "none" -- lee-rotor over windy
-    # terrain, or surface thermals whose positions draw from the seed --
-    # and coupling_needs_seed is the ONE predicate both this endpoint and
-    # the render flow consult, so the card's digest is always the digest
-    # this response advertises.
-    derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
-    # Terrain scenes: pre-fly the scripted track over the scene's own
-    # raster (a defaulted altitude may be raised, recorded; a stated
-    # altitude that cannot keep clearance refuses by name below). Skipped
-    # when a route is stated: the route pre-flight above IS the terrain
-    # check for that run -- it flew the line the clip will follow over
-    # the same raster, span stations included, against the route's own
-    # floor -- and the doublet track it would pre-fly is not the track
-    # the card carries.
-    clearance_refusal = (None if not spec.route.is_default()
-                         else plan_terrain_flight(spec))
-    # The track planner may have raised a system-chosen altitude into air
-    # where the system-chosen airspeed no longer flies: re-plan the
-    # defaults at the final altitude (stated values still never move),
-    # then give physics the last word over any surviving guess.
-    plan_flyable_defaults(spec)
-    plan_trim_recovery(spec)
-    # Camera placements last among the planners: they depend on the
-    # FINAL scene and terrain datum (a defaulted tower camera moves onto
-    # the raster under it; stated placements never move and refuse by
-    # name in the verdict below).
-    plan_camera_defaults(spec)
-    # Randomisation draws AFTER the camera planner (its jitter is about
-    # the planned placement) and BEFORE the host projection; off by
-    # default. Same sampler as /compile: value-idempotent.
-    randomization_refusal = sample_randomization_or_refuse(spec)
-    project_for_ue_host(spec)
 
     # Validation governs the edited spec too: the run endpoint re-validates
     # everything it is handed, whatever the page claimed.
@@ -1148,23 +1074,12 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
         verdict["violations"] = [v for v in verdict["violations"]
                                  if v["constraint"] != "route.hold_state"]
         verdict["ok"] = not verdict["violations"]
-    if clearance_refusal is not None:
+    # What the planners refused, in the same verdict before any editor
+    # time is spent: the clearance and route pre-flights, the sampler, and
+    # the scene-coupled camera checks.
+    if provisioned["violations"]:
         verdict["ok"] = False
-        verdict["violations"].append(clearance_refusal)
-    if route_refusal is not None:
-        verdict["ok"] = False
-        verdict["violations"].append(route_refusal)
-    if randomization_refusal is not None:
-        verdict["ok"] = False
-        verdict["violations"].append(randomization_refusal)
-    # Scene-coupled camera checks (Camera Phase 1): world-anchored
-    # cameras against the scene raster, its bounds and the modelled
-    # tornado core -- the plan_terrain_flight pattern, refused by name
-    # in the same verdict before any editor time is spent.
-    camera_refusals = camera_scene_violations(spec, pick_scene(spec))
-    if camera_refusals:
-        verdict["ok"] = False
-        verdict["violations"].extend(camera_refusals)
+        verdict["violations"].extend(provisioned["violations"])
     if not verdict["ok"]:
         return JSONResponse({"refused": "validation", **verdict},
                             status_code=409)

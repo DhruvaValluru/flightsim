@@ -232,11 +232,12 @@ def provision_spec(spec: ScenarioSpec, provision,
     (decision 17) and return ``capture`` with the ground every case flies.
 
     ``provision`` is the single run's own provisioning function (the web
-    app passes ``webapp.runs.provision_place``: POST /run's scene-setting
-    onto the curated bake table, the bake check, the placement and the
-    scene it picks -- one function, both paths), applied to ``spec`` IN
-    PLACE before the record is written. Its refusal is raised by ITS rule
-    name (``terrain.unbaked``, the single run's wording), never
+    app passes ``webapp.runs.provision_campaign``: POST /run's scene-setting
+    onto the curated bake table, the bake check, the placement, the scene
+    it picks and the flight planners -- one function, both paths), applied
+    to ``spec`` IN PLACE before the record is written. Its first refusal
+    is raised by ITS rule name (``terrain.unbaked``, ``terrain.clearance``,
+    the single run's wording), never
     reworded here; the scene's bake stem becomes the capture's
     ``--terrain`` so ``flightsim.capture`` flies -- and, with Google's
     tiles on, renders -- the bake the single run would, instead of the
@@ -248,10 +249,12 @@ def provision_spec(spec: ScenarioSpec, provision,
     if provision is None:
         return capture
     staged = provision(spec)
-    refusal = staged.get("refusal")
-    if refusal is not None:
-        detail = {k: v for k, v in refusal.items() if k not in ("constraint", "message")}
-        raise CampaignError(str(refusal["constraint"]), str(refusal["message"]), detail)
+    refusals = [staged.get("refusal"), staged.get("weather_refusal"),
+                *(staged.get("violations") or ())]
+    for refusal in refusals:
+        if refusal is not None:
+            detail = {k: v for k, v in refusal.items() if k not in ("constraint", "message")}
+            raise CampaignError(str(refusal["constraint"]), str(refusal["message"]), detail)
     options = dict(staged.get("capture") or {})
     stem = options.get("terrain") or (staged.get("scene") or {}).get("terrain")
     if (stem and str(spec.scene.terrain_source.value) != "synthesised"
@@ -319,7 +322,7 @@ class Campaign:
         policy as a user edit, and write ``campaign.json`` in state
         ``planned``. Refuses by name before anything is drawn or run.
 
-        ``provision`` is the single run's place provisioning
+        ``provision`` is the single run's provisioning and flight planning
         (:func:`provision_spec`): applied to the compiled spec before the
         record and its digest are written, its bake stem rides in
         ``capture["terrain"]`` to every case.
