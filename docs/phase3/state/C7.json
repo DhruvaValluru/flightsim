@@ -3,6 +3,8 @@
   "builder_commit": "f2c69c6ee47eb47f38d1dcdf55eb8f3f4cff9f4d",
   "built_commit": "f2c69c6ee47eb47f38d1dcdf55eb8f3f4cff9f4d",
   "claims": [],
+  "green_commit": "984487b8",
+  "green_run_id": "90a9f2cfb840",
   "integrated_commit": "ef05addc",
   "letter": "C",
   "needs_windows": true,
@@ -10,10 +12,10 @@
     "step 6: c172p re-convert+import, gear-down render, verify component_coverage/component_boxes PASS and SM_c172p_landing_gear imports"
   ],
   "pushed_commit": "845f014d",
-  "run_id": "C-1",
+  "run_id": "90a9f2cfb840",
   "stage": "pushed",
   "unit": "C7",
-  "updated": "2026-11-04T19:15:10",
-  "verdict": "deferred: budget",
+  "updated": "2026-11-05T18:01:50",
+  "verdict": "PASS",
   "worktree": "../p3-C7"
 }

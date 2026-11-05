@@ -3,14 +3,18 @@
   "builder_commit": "9d355734da07a115215ec19e536b74442bca88d2",
   "built_commit": "9d355734da07a115215ec19e536b74442bca88d2",
   "claims": [],
+  "green_commit": "984487b8",
+  "green_run_id": "90a9f2cfb840",
   "letter": "E",
   "needs_windows": true,
   "pending_windows": [
     "A run with Normals, Flow and Amodal ticked produces those extra passes in the real render (step 5)"
   ],
   "pushed_commit": "a2ed7704",
+  "run_id": "90a9f2cfb840",
   "stage": "pushed",
   "unit": "E4+E5",
-  "updated": "2026-11-04T18:28:46",
+  "updated": "2026-11-05T18:01:50",
+  "verdict": "PASS",
   "worktree": "../p3-E5"
 }

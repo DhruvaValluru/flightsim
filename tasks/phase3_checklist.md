@@ -70,7 +70,7 @@ sitting 0.4 m from its label (it was ~25 m).
 - [x] **A9 · Every camera gives pictures, or the run says which one didn't** 🪟
   - Check: the default run has the same number of frames for both cameras.
   - Check: an empty camera stops with `render.camera_empty`.
-- [ ] **A10 · Generate works in the web app** 🪟
+- [x] **A10 · Generate works in the web app** 🪟
   - Check: a one-line prompt on `/generate.html` finishes a campaign.
 - [x] **A11 · The engine writes the label pictures; missing ones fail loudly** 🪟
   - Check: every `render.json` has the mask, depth and an "alone" picture per aircraft.
@@ -135,7 +135,7 @@ Two rules to keep in mind:
     files still read.
 - [x] **C6 · The checker and exports know about payload** 🐍
   - Check: `component_coverage` passes, and a COCO export has a `payload` category.
-- [ ] **C7 · (Optional) Landing gear boxes, on the c172p** (its gear is fixed and
+- [x] **C7 · (Optional) Landing gear boxes, on the c172p** (its gear is fixed and
   visible; the A-4's gear is stowed)
   - Check: folded-up gear is "not claimed", never a zero-size box.
 
@@ -179,10 +179,10 @@ Two rules to keep in mind:
     still on.
 - [ ] **E3 · Settings panel in the app**
   - Check: the tiles key survives a page reload, and 6 or fewer fields are visible.
-- [ ] **E4 · Pressing Capture with nothing typed gives a working run** — *you
+- [x] **E4 · Pressing Capture with nothing typed gives a working run** — *you
   decide whether storm weather is in the demo default*
   - Check: the run finishes and verify has no FAIL.
-- [ ] **E5 · Hidden options become checkboxes** (normals / flow / amodal)
+- [x] **E5 · Hidden options become checkboxes** (normals / flow / amodal)
 - [ ] **E6 · Double-click launcher** (`Launch FlightSim.cmd`) 🪟
   - Check: on a fresh download, the app opens and the log ends with `READY`.
   - Check: a second launch skips everything already done.

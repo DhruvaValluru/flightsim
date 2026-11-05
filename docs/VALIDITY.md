@@ -724,49 +724,49 @@ stay until the probe on 5.7.4 replaces them from its own file:
   (`docs/phase3/notes/B4.md` windows_steps). No 5.7 number is stated here
   until a probe file holds it.
 * **Gate 6 on 5.7.4 is INCOMPLETE, not passed.** One build, measure and beauty
-  (`runs/p3/B-1/gate6_measure`, `gate6_beauty`), both exit 3: every measured
-  clause passes, the side-by-side is NOT RUN, the owner's footage being absent,
-  and without it the harness can reach INCOMPLETE, never PASS. Neither is a
-  probe file, so no bias above changes. A georeferenced frame is not
-  re-measured. Numbers below are the measure run unless another tree is named.
-  * The synthetic ground and raster were wound face-down on 5.7, so both were
-    culled from above: depth inf and base colour 0 on the plain, and the lit
-    ground the earlier frames showed was the atmosphere's virtual planet. The
-    ridges in every earlier 5.7 frame were their far slopes seen from inside.
-    Both are rewound. The georeferenced tiles keep the old order and are
-    unmeasured; if they are face-down too, it shows only with
-    `FLIGHTSIM_GOOGLE_TILES=off`.
-  * Aircraft ground shadow **863 px** (threshold 300), night
-    **2.7/255** (floor 2.0), peaks shadow the valley 41,107 px, wet surface
-    31,617 px, thresholds unchanged.
-  * The peaks are 19.9 km and 39.5 km from the camera of record (`range_m`),
-    not the ~10 km and ~30 km stated for 5.5 above, and the near copy hides
-    the far peak, so the far peak is read with `-HideNearTerrain`. Contrast is
-    now the luminance spread inside the same block of each peak. It is read
-    from encoded 8-bit frames, so it orders scenes and is not a transmission.
-  * Range extinction (the scene's default fog): ratio **0.14**,
-    no-aerial-perspective control **0.91**, threshold 0.75 unchanged.
+  (`runs/p3/B-1/gate6_m2`, `gate6_b2`), both exit 3: every measured clause
+  passes, the side-by-side is NOT RUN, the owner's footage being absent, and
+  without it the harness can reach INCOMPLETE, never PASS. Neither is a probe
+  file, so no bias above changes. Numbers below are the measure run.
+  * The sky light delivered nothing in any render before this build. Real-time
+    capture returns at once for a scene capture
+    (`FScene::AllocateAndCaptureFrameSkyEnvMap`), and the renderer draws only
+    those, so shadows and overcast were lit by nothing. The commandlet now
+    captures the sky once before the first frame, and each frame when the sun
+    animates. The plain under a full cloud shadow went from 1.8/255 to 172/255,
+    against 199 clear. Frames rendered before this differ in every shaded area.
+  * The synthetic ground and raster were wound face-down on 5.7 and culled from
+    above. Both are rewound. The georeferenced mesh keeps the old order and is
+    hidden under the tiles; it shows only with `FLIGHTSIM_GOOGLE_TILES=off`, and
+    that case is unmeasured.
+  * Aircraft ground shadow **1,243 px** (threshold 300; 5.5 record 1,181). Night
+    **2.9/255** (floor 2.0). Peaks shadow the valley 39,784 px. Wet surface
+    31,059 px. Thresholds unchanged.
+  * The peaks are 19.9 km and 39.5 km from the camera of record (`range_m`), not
+    the ~10 km and ~30 km stated for 5.5 above, and the near copy hides the far
+    peak, so the far peak is read with `-HideNearTerrain`. Contrast is the
+    luminance spread inside the same block of each peak, read from encoded
+    8-bit frames, so it orders scenes and is not a transmission.
+  * Range extinction (the scene's default fog): ratio **0.21**,
+    no-aerial-perspective control **0.90**, threshold 0.75 unchanged.
   * `-fog-density` is an engine number, not 1/m: beta = FogDensity * 0.1 *
     ln(2)^2 per metre (`SceneCore.cpp`, `HeightFogCommon.ush`), a factor of
     20.8. Since decision 21 the product converts stated visibility and sampled
     fog through `core/scene/weather_visuals.py engine_fog_density`, and Gate 6
     reads that same conversion. A card stating 10 km drew FogDensity 0.00814232,
     once (`runs/p3/B-1/fog10`). The engine-unit look presets are unchanged.
-  * Extinction follows visibility grades the near peak alone across two days
-    (both qualities):
-    **118.7 to 30.3, kept 0.26**, threshold 0.75. The far peak goes 13.7 to
-    13.3 on the same renders, flat on the fog's opacity cap, so it is not
-    graded.
+  * Extinction follows visibility grades the near peak alone across two days:
+    **77.7 to 26.0, kept 0.33**, threshold 0.75. The far peak sits on the fog's
+    opacity cap on both days, so it is not graded.
   * `exposure metric discriminates` grades real auto-exposure against the
-    original line of 16. This flight's frame barely changes with bank (5.85/255,
-    against 34.4 on 5.5), so the control now darkens the plain at 10 s with
-    `-GroundDarkAt`, a luminance step clear of the sky band: **29.62/255** under
-    auto-exposure and **5.84/255** under manual (`runs/p3/B-1/exprig`).
-  * `cloud base bracket` passes with `-NoCloudShadows` on its three renders
-    (0 ground px leak), which grades where the layer is drawn. **A
-    defect stays open beside that pass:** with cloud shadows on, the plain
-    under the layer above the camera falls from about 189 to about 2 of 255
-    (`diag3/g1`, before `-NoCloudShadows`). Black is not overcast. No clause grades it.
+    original line of 16. This flight's frame barely changes with bank, so the
+    control darkens the plain at 10 s with `-GroundDarkAt`, a luminance step
+    clear of the sky band: **30.22/255** under auto-exposure, **5.81/255** under
+    manual.
+  * `cloud base bracket` runs with cloud shadows on. Under the layer above the
+    camera the ground keeps **0.86** of its light (floor 0.25, a stated floor;
+    the defect measured 0.01), and 81 ground pixels change once the mean shade
+    is divided out (leak max 500).
 
 What Gate 6 does **not** establish, and the Phase 6 work that remains:
 
