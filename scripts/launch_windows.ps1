@@ -111,6 +111,14 @@ Invoke-Step 1 "install" {
         (Join-Path $PSScriptRoot "deploy_windows.ps1"), "-NoLaunch", "-InstallDir", $repo)
     if ($script:lastExit -ne 0) { Stop-With "install" (Find-NamedReason $out "install.lock_failed") }
     if (-not (Test-Path $venvPython)) { Stop-With "install" "install.venv_failed: no $venvPython" }
+    # The native JSBSim library is built here, not committed: a fresh download
+    # has its patched sources and no JSBSim.dll, and preflight refuses without it.
+    $jsbsimDll = Join-Path $repo "ue\Plugins\JSBSimFlightDynamicsModel\Source\ThirdParty\JSBSim\Lib\JSBSim.dll"
+    if (-not (Test-Path $jsbsimDll)) {
+        $out = Invoke-Logged "powershell" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+            (Join-Path $PSScriptRoot "vendor_ue_plugin.ps1"))
+        if ($script:lastExit -ne 0) { Stop-With "install" "install.jsbsim_vendor_failed: scriptsendor_ue_plugin.ps1 exited $($script:lastExit)" }
+    }
 }
 
 Invoke-Step 2 "preflight" {

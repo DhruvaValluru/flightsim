@@ -2,7 +2,7 @@
 #
 # From any PowerShell window (no clone needed first):
 #
-#   irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/master/scripts/deploy_windows.ps1 | iex
+#   irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/phase-2-final/scripts/deploy_windows.ps1 | iex
 #
 # or, from an existing clone:  .\scripts\deploy_windows.ps1
 #

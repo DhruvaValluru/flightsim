@@ -173,7 +173,7 @@ Per-OS setup notes:
   starts the server and opens the browser):
 
   ```powershell
-  irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/master/scripts/deploy_windows.ps1 | iex
+  irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/phase-2-final/scripts/deploy_windows.ps1 | iex
   ```
 
   Windows note: install Python 3.10-3.12, not 3.13+ -- `numpy==2.0.2`
