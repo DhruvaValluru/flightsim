@@ -1,6 +1,4 @@
 {
-  "B-1": "",
-  "FAIL": "",
   "budget_used": 79,
   "builder_commit": "215813cd",
   "built_commit": "e38daf70",
@@ -22,10 +20,11 @@
     "step10 pytest tests/test_engine_bundle_golden.py with the A12 fixture: 0 skipped, exit 0"
   ],
   "pushed_commit": "3e59358d",
-  "run_id": "",
+  "run_id": "B-1",
   "stage": "built_local",
   "unit": "B4",
-  "updated": "2026-11-04T17:25:20",
-  "verdict": "",
+  "updated": "2026-11-04T19:15:11",
+  "verdict": "FAIL",
+  "windows_build": "215813cd",
   "worktree": "../p3w-B4r2"
 }

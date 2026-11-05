@@ -1,8 +1,4 @@
 {
-  "0dd863f9": "",
-  "B-1": "",
-  "FAIL": "",
-  "PASS": "",
   "budget_used": 16,
   "builder_commit": "0dd863f95eb0c8b9c02270a49d8a9b90ead36e81",
   "built_commit": "14e819069c264613868ad55a7764941a7e1f403a",
@@ -20,11 +16,11 @@
     "windows_sdk wrong pin -> toolchain.windows_sdk_mismatch, exit non-zero (step 7)"
   ],
   "pushed_commit": "3e59358d",
-  "run_id": "",
+  "run_id": "B-1",
   "stage": "built_local",
   "unit": "B2+B3",
-  "updated": "2026-11-04T16:10:58",
-  "verdict": "",
-  "windows_build": "",
+  "updated": "2026-11-04T19:15:11",
+  "verdict": "PASS",
+  "windows_build": "0dd863f9",
   "worktree": "../p3w-B2"
 }

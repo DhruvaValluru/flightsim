@@ -1,6 +1,4 @@
 {
-  "A-2": "",
-  "PASS": "",
   "budget_used": 30,
   "builder_commit": "78ab68fb",
   "claims": [
@@ -23,10 +21,10 @@
   "pushed_commit": "968dcb60",
   "retry": 1,
   "route": "box",
-  "run_id": "",
+  "run_id": "A-2",
   "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T13:15:21",
-  "verdict": "",
+  "updated": "2026-11-04T19:15:09",
+  "verdict": "PASS",
   "worktree": "../p3-A11r"
 }

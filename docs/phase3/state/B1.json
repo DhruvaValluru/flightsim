@@ -1,11 +1,7 @@
 {
-  "B-1": "",
-  "FAIL": "",
-  "PASS": "",
   "budget_used": 20,
   "builder_commit": "cfa48660",
   "built_commit": "695710c6",
-  "cfa48660": "",
   "claims": [],
   "failures": [
     "run B-1 packet docs/phase3/packets/B1-1.md: fresh-venv lock install, imports and the box's tests pass; deploy_windows.ps1 exits 0 after a cut clone, a missing lock and a failed verify import (no LASTEXITCODE checks); Windows builder fixes the installer; CI readable only from the Mac"
@@ -19,11 +15,11 @@
     "step 10: CI matrix (ubuntu, windows, macos) green on the lock install step"
   ],
   "pushed_commit": "3e59358d",
-  "run_id": "",
+  "run_id": "B-1",
   "stage": "built_local",
   "unit": "B1",
-  "updated": "2026-11-04T16:10:57",
-  "verdict": "",
-  "windows_build": "",
+  "updated": "2026-11-04T19:15:11",
+  "verdict": "PASS",
+  "windows_build": "cfa48660",
   "worktree": "../p3w-B1"
 }

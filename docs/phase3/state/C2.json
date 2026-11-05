@@ -1,6 +1,4 @@
 {
-  "C-1": "",
-  "PASS": "",
   "budget_used": 25,
   "builder_commit": "c5bb4a39",
   "built_commit": "c5bb4a39",
@@ -10,10 +8,10 @@
   "needs_windows": false,
   "pending_windows": [],
   "pushed_commit": "845f014d",
-  "run_id": "",
+  "run_id": "C-1",
   "stage": "pushed",
   "unit": "C2",
-  "updated": "2026-11-04T14:09:32",
-  "verdict": "",
+  "updated": "2026-11-04T19:15:10",
+  "verdict": "PASS",
   "worktree": "../p3-C2"
 }

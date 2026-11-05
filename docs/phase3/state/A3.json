@@ -1,6 +1,4 @@
 {
-  "A-2": "",
-  "PASS": "",
   "budget_used": 15,
   "builder_commit": "9e967f1b",
   "claims": [],
@@ -14,10 +12,10 @@
     "helper parses under Windows PowerShell 5.1"
   ],
   "pushed_commit": "23bad766",
-  "run_id": "",
+  "run_id": "A-2",
   "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T11:03:43",
-  "verdict": "",
+  "updated": "2026-11-04T19:15:08",
+  "verdict": "PASS",
   "worktree": "../p3-A3"
 }

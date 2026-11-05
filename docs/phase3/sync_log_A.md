@@ -575,7 +575,7 @@ output line(s) that satisfy it:
 
 ```
 runs/p3/A-2/C1-pytest-v.log: ============================== 6 passed in 1.80s ==============================
-runs/p3/A-2/C1-pytest-v.log: tests/test_airframe.py::test_components_loadout_trims PASSED
+[CORRECTED 2026-11-04: this line was not in that log, which shows only dots; the real line is in runs/p3/G/C1-audit.log] tests/test_airframe.py::test_components_loadout_trims PASSED             [ 85%]
 ```
 
 note: run A-2: same tests as run A-1, now on the 5.7 pin sweep; python-only box, no engine involved
@@ -3314,3 +3314,12 @@ a65540f7 Merge p3-A12: tight_box_present gate, label_diagnose tight counts, gold
  7 files changed, 374 insertions(+), 48 deletions(-)
 ```
 
+
+## Corrections to the records above (Windows cross-check, 2026-11-04)
+
+- C1: the quote `tests/test_airframe.py::test_components_loadout_trims PASSED` was written by the cross-check without being in `runs/p3/A-2/C1-pytest-v.log` (that log prints dots, and so does A-1's). The test was re-run with per-test output: `runs/p3/G/C1-audit.log`, `tests/test_airframe.py::test_components_loadout_trims PASSED`, `7 passed`.
+- A9: the sheet's second line (an empty camera stops with `render.camera_empty`) was ticked with only "the guard did not fire". Proved now: `runs/p3/G/A9-audit.log`, `tests/test_camera_empty.py` `6 passed`, incl. `test_cli_render_path_refuses_when_one_camera_drew_nothing PASSED`.
+- A11: the sheet's second line (`labels.no_bundle`) was ticked without a run. Proved now: `runs/p3/G/A11-audit.log`, `-k no_bundle` `6 passed`, incl. `test_no_bundle_after_a_cli_render_returns_two PASSED`.
+- A8: the synopsis file says FAIL because `tests/test_host_parity.py` had one path-separator failure at the time; re-run on the tip: `runs/p3/G/A8-audit.log`, `21 passed`. `grep no-host-flight webapp/*.py` 0 hits; `flightsim/capture.py` only the docstring and the argparse option.
+- `A4-fresh-web.log`, `A7-summary.log`, `A8-run-summary.log`, `A9-frames.log` and `A6-summary.log` are summaries the runner wrote from the run records, not raw tool output; the raw records are the run folders they name.
+- State files: from run A-2 on, `phase3_state.py set <box> verdict PASS` (wrong form) stored no verdict and added empty junk keys. Verdicts, run ids and windows_build were rewritten with `key=value` from the records above; the junk keys were removed.

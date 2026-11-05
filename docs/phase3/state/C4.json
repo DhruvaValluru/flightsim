@@ -1,8 +1,4 @@
 {
-  "3ef2414e": "",
-  "C-1": "",
-  "FAIL": "",
-  "PASS": "",
   "budget_used": 24,
   "builder_commit": "9c96fcb6",
   "claims": [
@@ -20,11 +16,11 @@
   "pushed_commit": "e6e33c6e",
   "retry": 1,
   "route": "interaction",
-  "run_id": "",
+  "run_id": "C-1",
   "stage": "pushed",
   "unit": "C4",
-  "updated": "2026-11-04T17:10:35",
-  "verdict": "",
-  "windows_build": "",
+  "updated": "2026-11-04T19:15:11",
+  "verdict": "PASS",
+  "windows_build": "3ef2414e",
   "worktree": "../p3w-C4"
 }

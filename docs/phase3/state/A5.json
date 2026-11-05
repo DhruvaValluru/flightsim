@@ -1,8 +1,4 @@
 {
-  "2b746352": "",
-  "A-2": "",
-  "FAIL": "",
-  "PASS": "",
   "budget_used": 30,
   "builder_commit": "2b746352",
   "claims": [],
@@ -25,11 +21,11 @@
   "retry": 3,
   "retry_commit": "ca3103fc",
   "route": "box",
-  "run_id": "",
+  "run_id": "A-2",
   "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T16:10:57",
-  "verdict": "",
-  "windows_build": "",
+  "updated": "2026-11-04T19:15:11",
+  "verdict": "PASS",
+  "windows_build": "2b746352",
   "worktree": "../p3w-A5"
 }

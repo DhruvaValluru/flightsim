@@ -1,6 +1,4 @@
 {
-  "A-2": "",
-  "PASS": "",
   "budget_used": 22,
   "builder_commit": "51e7bdb5",
   "claims": [],
@@ -8,7 +6,6 @@
   "letter": "A",
   "needs_windows": true,
   "note": "owner override: pin 5.5 -> 5.7",
-  "pending": "",
   "pending_windows": [
     "A2 step9 build_ue.ps1 on 5.5.4",
     "A2 step10 cloud-material/landscape paths"
@@ -17,11 +14,11 @@
   "retry": 1,
   "retry_commit": "66a7c1da",
   "route": "decision",
-  "run_id": "",
+  "run_id": "A-2",
   "run_requested": "A-2",
   "stage": "pushed",
   "unit": "A1+A2",
-  "updated": "2026-11-04T11:36:09",
-  "verdict": "",
+  "updated": "2026-11-04T19:15:08",
+  "verdict": "PASS",
   "worktree": "../p3-A2"
 }

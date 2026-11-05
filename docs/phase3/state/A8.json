@@ -1,7 +1,4 @@
 {
-  "3dc6a5ec": "",
-  "A-2": "",
-  "PASS": "",
   "budget_used": 54,
   "builder_commit": "3dc6a5ec",
   "claims": [],
@@ -18,11 +15,11 @@
     "web-app run with parity"
   ],
   "pushed_commit": "23bad766",
-  "run_id": "",
+  "run_id": "A-2",
   "run_requested": "A-2",
   "stage": "built_local",
-  "updated": "2026-11-04T16:10:57",
-  "verdict": "",
-  "windows_build": "",
+  "updated": "2026-11-04T19:15:11",
+  "verdict": "PASS",
+  "windows_build": "3dc6a5ec",
   "worktree": "../p3w-A8"
 }
