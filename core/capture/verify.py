@@ -5014,6 +5014,20 @@ def _no_pass_reason(word: str, key: str) -> str:
             f"exercise this")
 
 
+def _tile_terrain_ids(folder, labels: Dict) -> List[int]:
+    """The ID-image values of a frame's terrain when render.json says the
+    Google tiles drew it; empty for every other ground."""
+    try:
+        render = json.loads((Path(folder) / "render.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not (render.get("google_tiles") or {}).get("enabled"):
+        return []
+    return [int(entry["int_id"]) for entry in labels.get("objects") or []
+            if isinstance(entry, dict) and entry.get("id") == "terrain"
+            and entry.get("int_id") is not None]
+
+
 @_reads_the_bundle
 def verify_normals_vs_depth(manifest: Dict, run_dir=None) -> Check:
     """The normal pass against the depth file.
@@ -5032,6 +5046,12 @@ def verify_normals_vs_depth(manifest: Dict, run_dir=None) -> Check:
     float32 depth (the 16-bit PNG at 0.1 m quantises the differences).
     NOT claimed: silhouette edges, the sky, and pixels the depth resolves
     at under the smoothness rule -- a surface at grazing incidence.
+    NOT graded either: the terrain of a frame drawn on the Google tiles. They
+    are unlit photogrammetry, and Cesium for Unreal writes the ellipsoid's up
+    vector on every unlit vertex (setUnlitNormals, measured on 5.7.4: one
+    vector across 41,334 terrain pixels), so the GBuffer there holds no
+    surface normal for the depth to agree with. The rest of the frame is
+    graded as ever, and a frame left with too few pixels is not a pass.
     """
     frames = list(_pass_frames(manifest, run_dir, "normal_png"))
     if not frames:
@@ -5041,6 +5061,7 @@ def verify_normals_vs_depth(manifest: Dict, run_dir=None) -> Check:
     graded = 0
     skipped = []
     worst = (0.0, "")
+    tile_frames = 0
     for record, camera, name, engine, folder, file in frames:
         labels = engine["labels"]
         where = f"{camera}/{name}"
@@ -5091,6 +5112,15 @@ def verify_normals_vs_depth(manifest: Dict, run_dir=None) -> Check:
                     np.abs(neighbour - centre) <= SMOOTH_DEPTH_FRACTION * np.abs(centre))
             smooth &= near
         smooth &= length > 1e-12
+        tile_ids = _tile_terrain_ids(folder, labels)
+        if tile_ids:
+            mask = _read_gray_png(folder / str(labels["mask"]))
+            if mask is None or mask.shape != depth.shape:
+                return Check("normals_vs_depth", FAIL,
+                             f"{where}: the frame drew the tiles and its ID image cannot "
+                             f"say which pixels are terrain", failure=FAIL_NORMALS)
+            smooth &= ~np.isin(mask[interior], tile_ids)
+            tile_frames += 1
         count = int(np.count_nonzero(smooth))
         if count < NORMAL_MIN_SMOOTH_PIXELS:
             skipped.append(f"{where} ({count} smooth pixels)")
@@ -5116,7 +5146,10 @@ def verify_normals_vs_depth(manifest: Dict, run_dir=None) -> Check:
                  f"{graded} frames: the pass's normals agree with the depth's to a "
                  f"median of at most {worst[0]:.2f} deg at {worst[1]} (tolerance "
                  f"{NORMAL_ANGLE_TOL_DEG:g} deg, smooth pixels only)"
-                 + (f"; not graded: {'; '.join(skipped[:3])}" if skipped else ""))
+                 + (f"; not graded: {'; '.join(skipped[:3])}" if skipped else "")
+                 + (f"; terrain not graded on {tile_frames} frames: the tiles are unlit "
+                    f"and carry the ellipsoid's up vector, no surface normal"
+                    if tile_frames else ""))
 
 
 @_reads_the_bundle

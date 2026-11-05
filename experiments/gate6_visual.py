@@ -214,14 +214,24 @@ LOOK_THRESHOLDS = {
 }
 
 
+#: UE FogDensity for one 1/m of extinction. FogDensity is not 1/m: SceneCore
+#: divides it by 1000 per cm and HeightFogCommon integrates ln 2 of it in base
+#: 2, so beta = FogDensity * 0.1 * ln(2)^2 per metre at this scene's near-zero
+#: falloff. Read on the 5.7.4 sources; beta handed over as it stood drew a
+#: "10 km" day whose 20 km ridge kept 71 % of its contrast.
+UE_FOG_DENSITY_PER_EXTINCTION = 1.0 / (0.1 * math.log(2.0) ** 2)
+
+
 def koschmieder_fog_density(visibility_km: float) -> float:
-    """beta = 3.912 / (1000 V) in 1/m, V in km -- the number handed to
-    -fog-density for the visibility clause (re-implemented, see above)."""
-    return KOSCHMIEDER / (1000.0 * float(visibility_km))
+    """The -fog-density that draws a visibility of V km: Koschmieder's
+    beta = 3.912 / (1000 V) in 1/m, in the engine's units."""
+    return KOSCHMIEDER / (1000.0 * float(visibility_km)) * UE_FOG_DENSITY_PER_EXTINCTION
 
 
-#: The fog the range-extinction clause renders at: the look clause's hazy day.
-EXTINCTION_FOG = f"-fog-density={koschmieder_fog_density(VISIBILITY_HAZY_KM):.6g}"
+#: The fog the range-extinction clause renders at: the look clause's clear
+#: day. The peaks stand 19.9 km and 39.5 km off (range_m), so a 10 km day takes
+#: both to the fog's opacity floor and leaves no difference to grade.
+EXTINCTION_FOG = f"-fog-density={koschmieder_fog_density(VISIBILITY_CLEAR_KM):.6g}"
 
 
 #: The look control renders (--look): one switch per pair, everything else
@@ -338,8 +348,11 @@ def measure_extinction(frames_dir: Path, far_dir: Optional[Path] = None,
     ``far_dir`` is the render the far peak is read from (the near copy left
     out, see peak_contrasts); without it both peaks come from ``frames_dir``.
     ``control_dir``/``control_far_dir`` are the same pair with the fog off:
-    its ratio must MISS the threshold, or the clause cannot tell fog from
-    anything else and a pass means nothing.
+    the fog must lower the ratio by at least visibility_min_ratio_drop, or
+    the clause cannot tell fog from anything else and a pass means nothing.
+    The control is not asked to miss the threshold: the sky atmosphere's own
+    aerial perspective fades the far copy with the fog off (0.66 measured on
+    5.7.4), and that is extinction too.
     """
     contrasts = peak_contrasts(frames_dir, far_dir)
     if contrasts is None:
@@ -358,8 +371,9 @@ def measure_extinction(frames_dir: Path, far_dir: Optional[Path] = None,
             return Check("terrain shows range extinction", False,
                          "a terrain peak is not in frame in the fog-off control")
         control_ratio = control["far"] / control["near"]
-        control_ok = control_ratio > THRESHOLDS["max_extinction_ratio"]
-        control_note = f"; fog-off control {control_ratio:.2f} must exceed it"
+        drop = LOOK_THRESHOLDS["visibility_min_ratio_drop"]
+        control_ok = control_ratio - ratio >= drop
+        control_note = f"; fog-off control {control_ratio:.2f} must sit {drop:g} above it"
     return Check(
         "terrain shows range extinction",
         ratio <= THRESHOLDS["max_extinction_ratio"] and control_ok,
@@ -611,11 +625,12 @@ def peak_contrasts(frames_dir: Path, far_dir: Optional[Path] = None) -> Optional
 
 
 VISIBILITY_MEASUREMENT = (
-    f"the extinction ratio (far/near peak contrast) at -fog-density = "
-    f"3.912/(1000 V) for V = {VISIBILITY_CLEAR_KM:g} km and {VISIBILITY_HAZY_KM:g} km; "
-    "the hazy ratio must sit below the clear one by "
-    f"{LOOK_THRESHOLDS['visibility_min_ratio_drop']:g}, both near contrasts above "
-    f"{THRESHOLDS['min_near_contrast']:g}")
+    f"the near peak's contrast at the -fog-density of V = {VISIBILITY_CLEAR_KM:g} km and "
+    f"{VISIBILITY_HAZY_KM:g} km (Koschmieder, in engine units): the hazy day must keep at "
+    f"most {THRESHOLDS['max_extinction_ratio']:g} of the clear day's, the clear contrast "
+    f"above {THRESHOLDS['min_near_contrast']:g}. One peak at one range, so only the air "
+    "differs; a far/near ratio cannot grade this, the far peak sits on the fog's opacity "
+    "floor on both days")
 
 
 def measure_extinction_vs_visibility(clear_dir: Path, hazy_dir: Path,
@@ -628,20 +643,17 @@ def measure_extinction_vs_visibility(clear_dir: Path, hazy_dir: Path,
                           "a terrain peak is not in frame; nothing to measure",
                           VISIBILITY_MEASUREMENT)
     floor = THRESHOLDS["min_near_contrast"]
-    if clear["near"] < floor or hazy["near"] < floor:
+    if clear["near"] < floor:
         return LookClause("extinction follows visibility", "FAIL",
-                          f"near contrast {clear['near']:.1f} / {hazy['near']:.1f} "
-                          f"below {floor:g}; a quotient of noise",
-                          VISIBILITY_MEASUREMENT)
-    ratio_clear = clear["far"] / clear["near"]
-    ratio_hazy = hazy["far"] / hazy["near"]
-    drop = ratio_clear - ratio_hazy
-    ok = drop >= LOOK_THRESHOLDS["visibility_min_ratio_drop"]
+                          f"clear-day near contrast {clear['near']:.1f} below {floor:g}; "
+                          f"a quotient of noise", VISIBILITY_MEASUREMENT)
+    kept = hazy["near"] / clear["near"]
+    ok = kept <= THRESHOLDS["max_extinction_ratio"]
     return LookClause(
         "extinction follows visibility", "PASS" if ok else "FAIL",
-        f"ratio {ratio_clear:.2f} at {VISIBILITY_CLEAR_KM:g} km vs {ratio_hazy:.2f} at "
-        f"{VISIBILITY_HAZY_KM:g} km (drop {drop:.2f}, threshold "
-        f"{LOOK_THRESHOLDS['visibility_min_ratio_drop']:g}; fog_density applied "
+        f"near peak contrast {clear['near']:.1f} at {VISIBILITY_CLEAR_KM:g} km visibility "
+        f"vs {hazy['near']:.1f} at {VISIBILITY_HAZY_KM:g} km (kept {kept:.2f}, threshold "
+        f"{THRESHOLDS['max_extinction_ratio']:g}; fog_density applied "
         f"{_look_applied(hazy_dir).get('fog', {}).get('fog_density', 'unrecorded')})",
         VISIBILITY_MEASUREMENT)
 

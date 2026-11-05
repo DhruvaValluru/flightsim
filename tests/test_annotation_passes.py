@@ -210,6 +210,54 @@ def test_normals_rotated_by_less_than_the_tolerance_still_pass(tmp_path):
     assert check.status == verify.PASS, check.detail
 
 
+def tile_frame_run(tmp_path: Path, aircraft_normal) -> tuple:
+    """The upper half of the frame is tile terrain carrying the ellipsoid's
+    up vector, which the plane's depth does not imply; the lower half is the
+    aircraft with ``aircraft_normal``. The render says the tiles drew it."""
+    run_dir = tmp_path / "tiles"
+    camera_dir = run_dir / "frames" / CAMERA
+    camera_dir.mkdir(parents=True)
+    depth = plane_depth()
+    mask = np.ones(depth.shape)
+    mask[: HEIGHT // 2] = 2
+    files = _write_mask_and_depth(camera_dir, 0, mask, depth)
+    image = np.array(np.broadcast_to(np.asarray(aircraft_normal), (HEIGHT, WIDTH, 3)))
+    image[: HEIGHT // 2] = _rotate_about_east(PLANE_NORMAL, 60.0)
+    producer.write_rgb16_png(camera_dir / "frame_0000_normal.png", producer.encode_normals(image))
+    _write_bundle(run_dir, [(0, files, {"normal_png": "frame_0000_normal.png"})])
+    render_path = camera_dir / "render.json"
+    render = json.loads(render_path.read_text(encoding="utf-8"))
+    render["frame_records"][0]["labels"]["objects"] = [
+        {"id": "aircraft:c172p:0", "int_id": 1}, {"id": "terrain", "int_id": 2}]
+    render["google_tiles"] = {"enabled": True}
+    render_path.write_text(json.dumps(render), encoding="utf-8")
+    manifest = _manifest([_record(0, 0.0, _aircraft(600.0, 0.0, 0.0))])
+    (run_dir / "capture_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return manifest, run_dir, render_path
+
+
+def test_tile_terrain_is_named_and_left_ungraded(tmp_path):
+    manifest, run_dir, _ = tile_frame_run(tmp_path, PLANE_NORMAL)
+    check = verify.verify_normals_vs_depth(manifest, run_dir)
+    assert check.status == verify.PASS, check.detail
+    assert "terrain not graded on 1 frames" in check.detail
+
+
+def test_a_wrong_normal_off_the_tiles_still_fails(tmp_path):
+    manifest, run_dir, _ = tile_frame_run(tmp_path, _rotate_about_east(PLANE_NORMAL, 30.0))
+    check = verify.verify_normals_vs_depth(manifest, run_dir)
+    assert check.status == verify.FAIL and check.failure == "annotation.normals"
+
+
+def test_terrain_is_graded_when_the_tiles_did_not_draw_it(tmp_path):
+    manifest, run_dir, render_path = tile_frame_run(tmp_path, PLANE_NORMAL)
+    render = json.loads(render_path.read_text(encoding="utf-8"))
+    render["google_tiles"] = {"enabled": False}
+    render_path.write_text(json.dumps(render), encoding="utf-8")
+    check = verify.verify_normals_vs_depth(manifest, run_dir)
+    assert "terrain not graded" not in check.detail
+
+
 def test_normals_are_not_run_without_the_file(tmp_path):
     run_dir = normals_run(tmp_path, PLANE_NORMAL, declare=False)
     manifest = json.loads((run_dir / "capture_manifest.json").read_text(encoding="utf-8"))

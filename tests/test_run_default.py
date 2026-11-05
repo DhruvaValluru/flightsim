@@ -1,7 +1,7 @@
 """E4: pressing Capture with nothing typed gives a working run.
 
-``POST /run {}`` builds the default spec server-side (the A-4 with its
-A4.json loadout, the Desert preset, one chase camera, a 6 s clip) and
+``POST /run {}`` builds the default spec server-side (the c172p with
+its own load, the Desert preset, one chase camera, a 6 s clip) and
 runs the SAME planner order; the page's Capture button posts ``{}`` when
 nothing is compiled. The weather flags and the Google tiles are not
 edited by the default run (decision 4, CLAUDE.md)."""
@@ -55,17 +55,13 @@ def test_empty_run_body_is_not_422(client, monkeypatch):
     assert reply.json().get("constraint") == "test.stop"
 
 
-def test_default_spec_is_a4_loadout_desert_chase_6s():
+def test_default_spec_is_c172p_desert_chase_6s():
     spec = default_run_spec()
-    assert str(spec.aircraft.value) == "A4"
+    assert str(spec.aircraft.value) == "c172p"
     assert str(spec.aircraft.source) == "user"
     assert spec.aircraft.frm == DEFAULT_RUN_FROM
-    # 750 lb per station as A4.json states them, read from the config
-    # (340.2 kg = the station's own max_kg), never retyped.
-    assert spec.loading.payload.value == {"STA2": 340.2, "STA3": 340.2,
-                                          "STA4": 340.2}
-    assert str(spec.loading.payload.source) == "user"
-    assert DEFAULT_RUN_FROM in spec.loading.payload.frm
+    # The Cessna flies its own config's load: the default run states none.
+    assert str(spec.loading.payload.source) != "user"
     # The Desert preset: surface, the grand_canyon origin and July noon.
     assert str(spec.surface.value) == "desert"
     assert str(spec.latitude.source) == "user"
@@ -79,7 +75,7 @@ def test_default_spec_is_a4_loadout_desert_chase_6s():
     offset = (float(camera.offset_forward_m.value),
               float(camera.offset_right_m.value),
               float(camera.offset_up_m.value))
-    assert webapp_chase_flag("A4") == f"{offset[0]:g}:{offset[1]:g}:{offset[2]:g}"
+    assert webapp_chase_flag("c172p") == f"{offset[0]:g}:{offset[1]:g}:{offset[2]:g}"
     # A 6 s clip, under the cap, as a recorded USER edit.
     assert float(spec.duration.value) == 6.0 <= CLIP_SECONDS
     assert str(spec.duration.source) == "user"

@@ -2,7 +2,7 @@
 
 Five steps, driven with no other input: pick the aircraft (the page has
 no aircraft picker, so the main aircraft the page offers -- E4's default
-run, the A-4 -- is accepted), pick Desert (`#environmentPreset`), press
+run, the c172p -- is accepted), pick Desert (`#environmentPreset`), press
 Capture (`#run`, which posts `POST /run {}`), wait for `done`
 (`GET /runs/{id}`), download `dataset.zip` (`?format=coco&cameras=camera0`,
 the page's default dataset query). The two tests share `DEMO_STEPS`:
@@ -53,7 +53,7 @@ DEMO_STEPS = ("aircraft", "desert", "capture", "done", "download")
 DESERT = "desert"
 #: "Pick the aircraft": the main aircraft the page offers (E4's default
 #: run). The test imports E4's constant and fails if the names drift.
-DEMO_AIRCRAFT = "A4"
+DEMO_AIRCRAFT = "c172p"
 #: What the Capture button posts with nothing compiled (E4 agreement).
 CAPTURE_BODY: Dict = {}
 #: The page's default dataset query (`datasetQuery`: format coco, camera0).
@@ -286,7 +286,7 @@ const [base, executablePath, desert, timeoutS] = process.argv.slice(2);
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });
 """
 
-#: A long render: the A-4 clip through the editor, then capture and verify.
+#: A long render: the c172p clip through the editor, then capture and verify.
 RENDER_TIMEOUT_S = float(os.environ.get("FLIGHTSIM_DEMO_TIMEOUT_S", "1800"))
 
 

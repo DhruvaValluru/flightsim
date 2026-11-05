@@ -37,6 +37,15 @@ def paint(rgb, x, y, colour, half=8):
     return rgb
 
 
+def paint_peak(rgb, x, colour):
+    """A mountain as wide as the samples peak_contrasts reads: rock from
+    just above the landmark down past the lower patch, so the near-sized
+    patch lands on rock and not on the ground beside it."""
+    for channel in range(3):
+        rgb[channel, 78:130, x - 24:x + 25] = colour[channel]
+    return rgb
+
+
 def manifest_for(tmp_path, records):
     (tmp_path / "render.json").write_text(json.dumps({
         "frames": len(records),
@@ -57,8 +66,8 @@ def extinction_scene(tmp_path, far_colour):
     """Two 'peaks' against the sky; the near one is always warm rock."""
     rgb = frame()
     near = (150, 130, 100)                     # warm rock against blue sky
-    paint(rgb, 80, 88, near)
-    paint(rgb, 200, 88, far_colour)
+    paint_peak(rgb, 80, near)
+    paint_peak(rgb, 200, far_colour)
     name = "frame_0000.png"
     write_png_rgb(tmp_path / name, rgb)
     manifest_for(tmp_path, [{
@@ -299,8 +308,8 @@ def extinction_pair(tmp_path, clear_far, hazy_far):
     out = []
     for name, far_colour in (("visibility_clear", clear_far), ("visibility_hazy", hazy_far)):
         image = rgb.copy()
-        paint(image, 80, 88, near)
-        paint(image, 200, 88, far_colour)
+        paint_peak(image, 80, far_colour)      # the air fades both peaks
+        paint_peak(image, 200, far_colour)
         directory = still(tmp_path / name, image,
                           look={"fog": {"fog_density": koschmieder_fog_density(10.0)}},
                           records=[{"frame": "frame_0000.png", "t": 1.0, "roll_deg": 0.0,
@@ -410,14 +419,16 @@ def test_every_look_clause_reports_not_run_with_its_measurement_when_unrendered(
 def test_the_look_controls_change_one_switch_each():
     """Every look run is the terrain shot plus its own switch; the control
     of each pair carries the switch's 'off' spelling."""
-    assert LOOK_RUNS["cloud_control"][1] == ["-seconds=2", "-cloud-cover=0"]
+    assert LOOK_RUNS["cloud_control"][1] == ["-seconds=2", "-NoCloudShadows",
+                                             "-cloud-cover=0"]
     assert "-precip=rain" in LOOK_RUNS["wet"][1]
     assert "-precip=none" in LOOK_RUNS["wet_control"][1]
     assert "-sun-elev=-12" in LOOK_RUNS["night"][1]
     clear = [f for f in LOOK_RUNS["visibility_clear"][1] if f.startswith("-fog-density=")][0]
     hazy = [f for f in LOOK_RUNS["visibility_hazy"][1] if f.startswith("-fog-density=")][0]
-    assert float(hazy.split("=")[1]) == pytest.approx(3.912 / 10000.0, rel=1e-3)
-    assert float(clear.split("=")[1]) == pytest.approx(3.912 / 50000.0, rel=1e-3)
+    per_extinction = 1.0 / (0.1 * math.log(2.0) ** 2)   # UE FogDensity for 1/m
+    assert float(hazy.split("=")[1]) == pytest.approx(3.912 / 10000.0 * per_extinction, rel=1e-3)
+    assert float(clear.split("=")[1]) == pytest.approx(3.912 / 50000.0 * per_extinction, rel=1e-3)
     assert all(shot == "terrain" for shot, _ in LOOK_RUNS.values())
     assert LOOK_THRESHOLDS["cloud_min_changed_px"] > LOOK_THRESHOLDS["cloud_max_leak_px"]
     # I6: the albedo pair differs in the sun alone, and both carry the pass.
@@ -950,7 +961,7 @@ def two_copy_pair(tmp_path, seen_in_two_copy, seen_alone, ranges=(None, None)):
     for name, far_colour in (("still", seen_in_two_copy), ("still_far", seen_alone)):
         directory = tmp_path / name
         directory.mkdir()
-        rgb = paint(paint(frame(), 80, 88, (150, 130, 100)), 200, 88, far_colour)
+        rgb = paint_peak(paint_peak(frame(), 80, (150, 130, 100)), 200, far_colour)
         write_png_rgb(directory / "frame_0000.png", rgb)
         manifest_for(directory, [{"frame": "frame_0000.png", "t": 1.0,
                                   "roll_deg": 0.0, "landmarks": marks()}])
@@ -991,13 +1002,14 @@ def test_the_detail_states_the_ranges_the_record_measured(tmp_path):
 
 def test_the_far_samples_shrink_with_the_stated_range(tmp_path):
     """At twice the range the same piece of mountain is half the pixels. A
-    far peak 3 px wide must be read as itself, not averaged away in a 13 px
-    patch, and its sky sample must come from the shrunken offset."""
+    far peak half the near one's width must be read as itself, not averaged
+    away in a near-sized patch, and its sky sample must come from the
+    shrunken offset."""
     from experiments.gate6_visual import peak_contrasts
 
     still, far = two_copy_pair(tmp_path, (150, 130, 100), (120, 140, 190),
                                ranges=(10000.0, 20000.0))
-    rgb = paint(paint(frame(), 80, 88, (150, 130, 100)), 200, 84, (200, 60, 60), half=3)
+    rgb = paint(paint_peak(frame(), 80, (150, 130, 100)), 200, 92, (200, 60, 60), half=11)
     write_png_rgb(far / "frame_0000.png", rgb)
     scaled = peak_contrasts(still, far)["far"]
     for directory in (still, far):
@@ -1010,7 +1022,8 @@ def test_the_far_samples_shrink_with_the_stated_range(tmp_path):
 
 
 def _measured_tree(out):
-    for name in ("still", "still_far", "still_noshadow", "shadow", "shadow_hidden",
+    for name in ("still", "still_noshadow", "still_step", "extinction", "extinction_far",
+                 "extinction_nofog", "extinction_nofog_far", "shadow", "shadow_hidden",
                  "full", "full_auto"):
         directory = out / name
         directory.mkdir(parents=True)

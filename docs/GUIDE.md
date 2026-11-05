@@ -48,8 +48,7 @@ were prepared by the launcher, so the first run over either is ready to go.
 
 Press **Capture**. With nothing typed, the run is:
 
-- the A-4, carrying its three stores (750 lb on each of the two inboard wing
-  stations and on the centreline);
+- the Cessna 172P at 3,500 m and 100 kt;
 - over the Desert;
 - a chase camera;
 - a six-second clip;

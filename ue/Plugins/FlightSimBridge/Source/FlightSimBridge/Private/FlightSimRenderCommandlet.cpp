@@ -3319,7 +3319,18 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 					return Fail(Error);
 				}
 				PassNormalTarget = MakePassTarget(RTF_RGBA16f);
-				PassNormal = MakePassCapture(TEXT("PassWorldNormal"), PassNormalTarget, PassNormalMaterial);
+				// Measured on 5.7.4 (run 3e663ca39b9e): the post-process route
+				// (PPI_WorldNormal on SCS_FinalColorHDR) read back zero on every
+				// pixel, one constant vector in the PNG, while SCS_Normal of the
+				// same frame agreed with the depth to a median of 1.1 deg on the
+				// aircraft. The albedo pass took the same route for the same
+				// reason (packet B4-3); the material stays loaded as the pass's
+				// presence check.
+				PassNormal = NewObject<USceneCaptureComponent2D>(Director, TEXT("PassWorldNormal"));
+				PassNormal->TextureTarget = PassNormalTarget;
+				PassNormal->CaptureSource = ESceneCaptureSource::SCS_Normal;
+				ConfigureLabelCapture(PassNormal);
+				PassNormal->RegisterComponent();
 			}
 			if (bPassVelocity)
 			{
@@ -4835,15 +4846,32 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				FVector East, North, Up;
 				Scenario.GeoReferencing->GetENUVectorsAtEngineLocation(
 					Director->GetActorLocation(), East, North, Up);
+				// What an SCS_Normal texel is, measured on this frame's texels
+				// as the .f32 route does (labels.normal_encoding): signed when
+				// most written texels are unit length as they stand.
+				int32 WrittenTexels = 0, UnitTexels = 0;
+				for (int32 i = 0; i < PassCount; ++i)
+				{
+					const FVector Texel(Raw[i].R, Raw[i].G, Raw[i].B);
+					if (!Texel.IsNearlyZero())
+					{
+						++WrittenTexels;
+						UnitTexels += FMath::Abs(Texel.Size() - 1.0) < RenderNormalUnitTolerance ? 1 : 0;
+					}
+				}
+				const bool bSignedTexels = WrittenTexels > 0
+					&& double(UnitTexels) / WrittenTexels >= RenderNormalUnitFraction;
 				TArray<uint16> Rgba;
 				Rgba.SetNumUninitialized(PassCount * 4);
 				int32 UnitPixels = 0;
 				for (int32 i = 0; i < PassCount; ++i)
 				{
-					const FVector Engine(
-						(Raw[i].R - RenderPassSignedOffset) / RenderPassSignedScale,
-						(Raw[i].G - RenderPassSignedOffset) / RenderPassSignedScale,
-						(Raw[i].B - RenderPassSignedOffset) / RenderPassSignedScale);
+					const FVector Texel(Raw[i].R, Raw[i].G, Raw[i].B);
+					const FVector Engine = bSignedTexels
+						? Texel
+						: FVector((Raw[i].R - RenderPassSignedOffset) / RenderPassSignedScale,
+						          (Raw[i].G - RenderPassSignedOffset) / RenderPassSignedScale,
+						          (Raw[i].B - RenderPassSignedOffset) / RenderPassSignedScale);
 					const FVector Scene(FVector::DotProduct(Engine, North),
 					                    FVector::DotProduct(Engine, East),
 					                    FVector::DotProduct(Engine, Up));
@@ -6059,10 +6087,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				TEXT("scene (north, east, up), +up is the third channel; camera-space is R * n with R "
 				     "the camera's (right, -up, forward) rows from the manifest quaternion"));
 			Normal->SetStringField(TEXT("material"), RenderPassNormalMaterialPath);
-			Normal->SetStringField(TEXT("scene_texture"), TEXT("PPI_WorldNormal"));
+			Normal->SetStringField(TEXT("scene_texture"), TEXT("SCS_Normal"));
 			Normal->SetStringField(TEXT("anti_aliasing"), TEXT("none"));
 			Normal->SetStringField(TEXT("not_claimed"),
-				TEXT("sky pixels (the depth file says where): the cleared GBuffer normal"));
+				TEXT("sky pixels (the depth file says where): the cleared GBuffer normal; terrain ")
+				TEXT("drawn by the Google tiles: unlit, the ellipsoid's up vector, no surface normal"));
 			Passes->SetObjectField(TEXT("normal"), Normal);
 		}
 		if (bPassVelocity)

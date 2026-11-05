@@ -1938,6 +1938,10 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
             if int_id in alone_by_id:
                 alone = _read_id_png(camera_dir / alone_by_id[int_id])
                 files[f"alone_{int_id}"] = alone_by_id[int_id]
+            # The amodal mask is the alone FILE, read as the record declares it
+            # ("pixels equal to int_id"); the rollup below overwrites a
+            # component's pixels, so the mask must not be counted on it.
+            own_alone = alone
             kids = rollup.get(int_id, [])
             if alone is not None:
                 # the parent's alone footprint plus its components' alone passes
@@ -1983,7 +1987,7 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
                 from .passes import PassError
 
                 try:
-                    amodal = amodal_labels(alone, mask, int_id, alone_by_id.get(int_id))
+                    amodal = amodal_labels(own_alone, mask, int_id, alone_by_id.get(int_id))
                 except PassError as exc:
                     entry["amodal_bbox_2d"] = entry["amodal_mask"] = entry["amodal_ratio"] = None
                     basis["amodal"] = {"refused": exc.constraint, "reason": exc.message}
