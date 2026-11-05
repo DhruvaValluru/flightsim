@@ -687,9 +687,9 @@ def test_traffic_example_validates_and_labels_every_aircraft(tmp_path):
     report = validate(spec, check_feasibility=False)
     assert report.ok, report.render()
     # An airframe whose config states no labels cannot be traffic: refused
-    # by name before any flight (measured: the DHC6 stopped the headless
-    # capture with an AirframeLabelError traceback).
-    spec.set("traffic[1].aircraft", "DHC6", frm="test: no labels block")
+    # by name before any flight (measured: the DHC6, then unlabelled, stopped
+    # the headless capture with an AirframeLabelError traceback).
+    spec.set("traffic[1].aircraft", "p51d", frm="test: no labels block")
     names = [v.constraint for v in validate(spec, check_feasibility=False).violations]
     assert names == ["traffic.aircraft"]
 

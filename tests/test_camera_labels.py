@@ -93,7 +93,7 @@ def test_the_b747_s_nose_and_tail_are_labelled_estimates():
 
 def test_an_airframe_with_no_stated_geometry_refuses_by_name():
     with pytest.raises(AirframeLabelError, match="camera.labels") as info:
-        load_airframe("DHC6")            # config exists, no labels block
+        load_airframe("p51d")            # config exists, no labels block
     assert "labels" in str(info.value)
     with pytest.raises(AirframeLabelError, match="no aircraft config"):
         load_airframe("global5000")
