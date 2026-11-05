@@ -9,8 +9,10 @@
   "pending_windows": [
     "python scripts\\bake_terrain.py --places run twice on Windows: first streams and bakes both places, second prints bake grand_canyon up to date and bake yosemite up to date, exit 0, data/glo30 mtimes unchanged"
   ],
+  "run_id": "D-1",
   "stage": "integrated",
   "unit": "D5",
-  "updated": "2026-11-04T13:49:59",
+  "updated": "2026-11-04T19:36:20",
+  "verdict": "PASS",
   "worktree": "../p3-D5"
 }

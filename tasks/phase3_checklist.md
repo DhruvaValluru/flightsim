@@ -155,9 +155,9 @@ Two rules to keep in mind:
   - Check: its config test passes, it flies level in a headless run, and it
     imports by itself.
 - [ ] **D3 · (If two were chosen) second new aircraft**
-- [ ] **D4 · Desert and Forest buttons in the app**
+- [x] **D4 · Desert and Forest buttons in the app**
   - Check: Desert gives Grand Canyon and Forest gives Yosemite.
-- [ ] **D5 · The two places are prepared once and reused** — *you decide whether
+- [x] **D5 · The two places are prepared once and reused** — *you decide whether
   typing the Google tiles key once is acceptable*
   - Check: a second launch says "up to date" for both.
 - [ ] **D6 · Every aircraft × place combination runs with no special tweaks** 🪟

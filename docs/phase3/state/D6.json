@@ -12,8 +12,10 @@
     "step 8: card diff of the four cards inside MATRIX_CARD_ALLOW; provenance scene key = MATRIX_SCENES[environment]",
     "step 9: four rows under ## Letter D in docs/PHASE3_LOG.md"
   ],
+  "run_id": "D-1",
   "stage": "integrated",
   "unit": "D6",
-  "updated": "2026-11-04T16:29:23",
+  "updated": "2026-11-04T19:36:20",
+  "verdict": "FAIL",
   "worktree": "../p3-D6"
 }
