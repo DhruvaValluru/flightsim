@@ -723,6 +723,28 @@ stay until the probe on 5.7.4 replaces them from its own file:
 * **Status:** not yet re-measured on 5.7.4; the Windows steps are pending
   (`docs/phase3/notes/B4.md` windows_steps). No 5.7 number is stated here
   until a probe file holds it.
+* **Gate 6 on 5.7.4 does not pass.** A diagnostic pass of
+  `gate6_visual.py --look` (`runs/p3/B-1/diag3/g1`, not a probe file, so no
+  bias above changes) exits FAIL, and the side-by-side is NOT RUN because
+  the owner's footage is absent. Without that footage the harness can reach
+  INCOMPLETE (exit 3), never PASS.
+  * The synthetic ground and raster were wound face-down on 5.7, so both
+    were culled from above: depth inf on the plain, and the lit ground the
+    earlier frames showed was the atmosphere's virtual planet. Both are
+    rewound. The georeferenced tiles keep the old order and are unmeasured.
+  * `terrain shows range extinction` FAILS: near contrast 5.7 is under the
+    floor of 8. The sample lands on shaded rock the colour of the sky.
+  * `exposure metric discriminates` FAILS: the auto-exposure control moves
+    5.85/255 and must exceed 16. It was also under 16 in the older 5.7
+    trees (4.62, 1.92), so the manual run's 5.96/255 is void, as above.
+  * `cloud base bracket` FAILS: under the layer above the camera the plain
+    falls from about 189 to about 2 of 255. Black is not overcast; this is
+    a defect the real ground exposed, not a threshold to move.
+  * `extinction follows visibility` passes by its rule on far/near ratios of
+    3.61 and 1.89. Above 1 the near sample is no reference, so only the far
+    contrast falling 66.9 to 41.9 is evidence.
+  * The peaks are 19.9 km and 39.5 km from the camera of record (`range_m`),
+    not the ~10 km and ~30 km stated for 5.5 above.
 
 What Gate 6 does **not** establish, and the Phase 6 work that remains:
 

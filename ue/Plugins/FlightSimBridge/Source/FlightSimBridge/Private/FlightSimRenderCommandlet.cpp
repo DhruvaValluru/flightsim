@@ -1837,6 +1837,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// far copy at extinction distance beyond.
 		SceneOptions.NearTerrainOriginMetres = FVector2D(-8000.0, -21360.0);
 		SceneOptions.FarTerrainOriginMetres = FVector2D(-8000.0, -41360.0);
+		SceneOptions.bHideNearTerrain = FParse::Param(*Params, TEXT("HideNearTerrain"));
+		SceneOptions.bNoCloudShadows = FParse::Param(*Params, TEXT("NoCloudShadows"));
 		// Terrain shot: sun beyond the ridge, so the peaks throw their shadow
 		// band back across the plain toward the camera. Shadow shot: sun high
 		// behind the camera's right shoulder, so the aircraft's shadow lands
@@ -5520,6 +5522,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				Entry->SetBoolField(TEXT("visible"), bVisible);
 				Entry->SetNumberField(TEXT("px"), Pixel.X);
 				Entry->SetNumberField(TEXT("py"), Pixel.Y);
+				// Metres from the camera of record: Gate 6's "~10 km" and "~30 km"
+				// peaks are stated from this, not assumed.
+				Entry->SetNumberField(TEXT("range_m"),
+					FVector::Dist(Capture->GetComponentLocation(), WorldCm) / 100.0);
 				Landmarks->SetObjectField(LandmarkName, Entry);
 			};
 			AddLandmark(TEXT("near_peak"), VisualScene.NearPeakWorldCm);
@@ -6535,6 +6541,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Scene->SetStringField(TEXT("shot"), Shot);
 	Scene->SetBoolField(TEXT("dynamic_shadows"), !bNoShadows);
 	Scene->SetBoolField(TEXT("aircraft_hidden"), bHideAircraft);
+	Scene->SetBoolField(TEXT("near_terrain_hidden"), FParse::Param(*Params, TEXT("HideNearTerrain")));
 	// Visual plan V0: which renderer configuration produced these frames.
 	// Numbers and ASCII only (gotcha 13).
 	Scene->SetStringField(TEXT("render_quality"), Quality);

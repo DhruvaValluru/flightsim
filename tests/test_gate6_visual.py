@@ -930,3 +930,127 @@ def test_probe_sweep_reuses_existing_renders_and_rederives(tmp_path, monkeypatch
     assert chosen["chosen_bias"] == 11.0
     assert abs(chosen["value"] - g6.MID_GREY_TARGET) <= g6.PROBE_TOLERANCE
     assert g6.main(["--probe-root", str(root), "--rederive", "noon"]) == 1
+
+
+# -- B4 round 3: the far peak is read where it can be seen ------------------
+
+
+def two_copy_pair(tmp_path, seen_in_two_copy, seen_alone, ranges=(None, None)):
+    """The near copy stands over the far peak's pixel in the two-copy still;
+    only the render with the near copy left out shows the far mountain."""
+    near_range, far_range = ranges
+
+    def marks():
+        near, far = landmark(80, 80), landmark(200, 80)
+        if near_range:
+            near["range_m"], far["range_m"] = near_range, far_range
+        return {"near_peak": near, "far_peak": far}
+
+    out = []
+    for name, far_colour in (("still", seen_in_two_copy), ("still_far", seen_alone)):
+        directory = tmp_path / name
+        directory.mkdir()
+        rgb = paint(paint(frame(), 80, 88, (150, 130, 100)), 200, 88, far_colour)
+        write_png_rgb(directory / "frame_0000.png", rgb)
+        manifest_for(directory, [{"frame": "frame_0000.png", "t": 1.0,
+                                  "roll_deg": 0.0, "landmarks": marks()}])
+        out.append(directory)
+    return out
+
+
+def test_the_far_peak_comes_from_the_render_that_shows_it(tmp_path):
+    """Crisp in the two-copy still (that pixel is the near copy), hazed alone."""
+    still, far = two_copy_pair(tmp_path, (150, 130, 100), (122, 138, 185))
+    assert not measure_extinction(still).ok
+    assert measure_extinction(still, far).ok
+
+
+def test_a_far_render_that_shows_no_fade_fails_whatever_the_still_shows(tmp_path):
+    still, far = two_copy_pair(tmp_path, (122, 138, 185), (150, 130, 100))
+    assert measure_extinction(still).ok
+    assert not measure_extinction(still, far).ok
+
+
+def test_the_far_peak_out_of_frame_in_its_own_render_is_not_passed(tmp_path):
+    still, far = two_copy_pair(tmp_path, (150, 130, 100), (122, 138, 185))
+    manifest = json.loads((far / "render.json").read_text(encoding="utf-8"))
+    manifest["frame_records"][-1]["landmarks"]["far_peak"]["visible"] = False
+    (far / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
+    check = measure_extinction(still, far)
+    assert not check.ok
+    assert "not in frame" in check.detail
+
+
+def test_the_detail_states_the_ranges_the_record_measured(tmp_path):
+    still, far = two_copy_pair(tmp_path, (150, 130, 100), (122, 138, 185),
+                               ranges=(19918.0, 39494.0))
+    detail = measure_extinction(still, far).detail
+    assert "19.9 km" in detail and "39.5 km" in detail
+    assert "~10 km" not in detail and "~30 km" not in detail
+
+
+def test_the_far_samples_shrink_with_the_stated_range(tmp_path):
+    """At twice the range the same piece of mountain is half the pixels. A
+    far peak 3 px wide must be read as itself, not averaged away in a 13 px
+    patch, and its sky sample must come from the shrunken offset."""
+    from experiments.gate6_visual import peak_contrasts
+
+    still, far = two_copy_pair(tmp_path, (150, 130, 100), (120, 140, 190),
+                               ranges=(10000.0, 20000.0))
+    rgb = paint(paint(frame(), 80, 88, (150, 130, 100)), 200, 84, (200, 60, 60), half=3)
+    write_png_rgb(far / "frame_0000.png", rgb)
+    scaled = peak_contrasts(still, far)["far"]
+    for directory in (still, far):
+        manifest = json.loads((directory / "render.json").read_text(encoding="utf-8"))
+        for mark in manifest["frame_records"][-1]["landmarks"].values():
+            del mark["range_m"]
+        (directory / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
+    unscaled = peak_contrasts(still, far)["far"]
+    assert scaled > unscaled
+
+
+def _measured_tree(out):
+    for name in ("still", "still_far", "still_noshadow", "shadow", "shadow_hidden",
+                 "full", "full_auto"):
+        directory = out / name
+        directory.mkdir(parents=True)
+        write_png_rgb(directory / "frame_0000.png", frame())
+        manifest_for(directory, [{"frame": "frame_0000.png", "t": 1.0, "roll_deg": 0.0,
+                                  "landmarks": {}}])
+        manifest = json.loads((directory / "render.json").read_text(encoding="utf-8"))
+        manifest["scene"]["terrain_sha256"] = _StubField().digest()
+        (directory / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _stub_measures(monkeypatch, g6, ok=True):
+    for name in ("measure_extinction", "measure_valley_shadow", "measure_aircraft_shadow",
+                 "measure_exposure", "measure_exposure_control"):
+        monkeypatch.setattr(g6, name, lambda *a, _n=name: g6.Check(_n, ok, "stub"))
+    monkeypatch.setattr(g6, "look_clauses", lambda out: [])
+
+
+def test_a_gate_without_the_owners_footage_is_incomplete_not_failed_or_passed(
+        tmp_path, monkeypatch, capsys):
+    g6 = _probe_names()
+    out = tmp_path / "gate6"
+    _measured_tree(out)
+    _fast_inputs(monkeypatch, g6)
+    _stub_measures(monkeypatch, g6)
+    code = g6.main(["--out", str(out), "--skip-render",
+                    "--old-footage", str(tmp_path / "none")])
+    text = capsys.readouterr().out
+    assert code == 3
+    assert "GATE 6: INCOMPLETE" in text and "[NOT RUN] side-by-side" in text
+    assert "GATE 6: PASS" not in text
+
+
+def test_a_failed_clause_stays_a_failure_without_the_footage(tmp_path, monkeypatch, capsys):
+    g6 = _probe_names()
+    out = tmp_path / "gate6"
+    _measured_tree(out)
+    _fast_inputs(monkeypatch, g6)
+    _stub_measures(monkeypatch, g6, ok=False)
+    code = g6.main(["--out", str(out), "--skip-render",
+                    "--old-footage", str(tmp_path / "none")])
+    assert code == 1
+    assert "GATE 6: FAIL" in capsys.readouterr().out

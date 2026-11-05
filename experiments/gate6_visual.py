@@ -19,7 +19,13 @@ How each measurable clause is decided
   once ~10 km from the camera and once ~30 km. The commandlet projects each
   instance's peak through the camera of record into pixel coordinates, and the
   harness compares each peak's contrast against the sky directly above it.
-  Extinction means the far copy of the very same mountain reads fainter.
+  Extinction means the far copy of the very same mountain reads fainter. The
+  near copy stands in front of the far peak, so the far peak is read from a
+  second still with ``-HideNearTerrain`` (same camera, same sun, same fog, the
+  near copy left out); a projected pixel is "in frame", not "seen". Both are
+  rendered at the 10 km fog of the look clause: the scene's default 0.0025
+  already holds the near peak (19.9 km away) at the fog's 0.92 opacity cap, so
+  no distance beyond it can read fainter. A fog-off pair is the control.
 * **Peaks shadow the valley.** A null test in the Gate 3 style: the same
   still, rendered with and without dynamic shadows. Only cast shadows differ,
   so pixels that darken in the terrain band ARE the terrain's cast shadows.
@@ -115,25 +121,25 @@ THRESHOLDS = {
     #: means the same mountain reads fainter with distance; 0.75 asks for a
     #: quarter of its contrast gone over ~20 km, which the fog settings exceed
     #: comfortably -- while a renderer with no aerial perspective at all
-    #: (the old build) shows ratios near 1.
+    #: (the old build) shows ratios near 1. The 5.5 record (0.27) graded a
+    #: far pixel that lay on the near copy; @@EXT@@
     "max_extinction_ratio": 0.75,
     #: Minimum sky-contrast of the NEAR peak, in 8-bit counts. Below this the
     #: extinction ratio is a quotient of noise.
     "min_near_contrast": 8.0,
     #: Cast-shadow area on terrain, pixels of a 960x540 frame (~1.9%).
     "min_valley_shadow_px": 10000,
-    #: Aircraft ground-shadow area, pixels, after excluding its body.
+    #: Aircraft ground-shadow area, pixels, after excluding its body. @@SHADOW@@
     "min_aircraft_shadow_px": 300,
     #: Sky-band luminance excursion across the doublet window, 8-bit counts.
     #: Empirically anchored from both sides: with §6.6's manual exposure this
     #: scene measures 4.9 (smooth drift from three kilometres of camera
     #: travel), and with auto-exposure -- the failure the clause forbids --
-    #: it measures 34.4. The threshold sits 1.6x above the one and 4x below
-    #: the other.
+    #: it measures 34.4 (both measured on 5.5). @@EXP_GOOD@@
     "max_sky_excursion": 8.0,
-    #: What the auto-exposure negative control must exceed. A metric that the
-    #: known failure cannot trip is not a measurement (§1.7), so every gate
-    #: run re-validates its own instrument.
+    #: What the negative control must exceed. A metric that the known failure
+    #: cannot trip is not a measurement (§1.7), so every gate run re-validates
+    #: its own instrument. On 5.5 the control was auto-exposure (34.4). @@EXP_CTRL@@
     "min_control_excursion": 16.0,
     #: The doublet must actually roll the aircraft, or "does not breathe when
     #: the aircraft banks" is being tested without any banking.
@@ -167,6 +173,18 @@ VISIBILITY_HAZY_KM = 10.0
 #: producer is core/scene/weather_visuals.py; this harness must not import
 #: the thing it measures.
 KOSCHMIEDER = 3.912
+
+#: Half-size, drop below the peak and rise above it of the two samples the
+#: extinction clauses compare, pixels at the near peak (the far ones shrink
+#: with range). Half 6 fell on one lit or one shaded facet, so the ratio read
+#: rock aspect (measured 2026-11-04 on 5.7.4: 3.61 with fog thinning the far
+#: copy); this covers both sides of the peak, the same ground on each copy.
+PEAK_PATCH_HALF = 20
+PEAK_PATCH_DROP = 24
+PEAK_SKY_RISE = 45
+#: The exposure step the control renders: a real one-stop move of the bias
+#: (commandlet default 11.0), the excursion a breathing exposure would make.
+EXPOSURE_STEP_BIAS = 12.0
 
 LOOK_THRESHOLDS = {
     #: Cloud on/off must change this many pixels in the band the layer's
@@ -202,22 +220,35 @@ def koschmieder_fog_density(visibility_km: float) -> float:
     return KOSCHMIEDER / (1000.0 * float(visibility_km))
 
 
+#: The fog the range-extinction clause renders at: the look clause's hazy day.
+EXTINCTION_FOG = f"-fog-density={koschmieder_fog_density(VISIBILITY_HAZY_KM):.6g}"
+
+
 #: The look control renders (--look): one switch per pair, everything else
 #: the gate's terrain shot. Values are (shot, extra flags).
 LOOK_RUNS = {
+    # -NoCloudShadows on all three: the bracket grades where the layer is
+    # drawn; with a real ground a layer above would otherwise shade it all.
     "cloud_above": ("terrain", [
-        "-seconds=2", "-cloud-cover=0.9",
+        "-seconds=2", "-NoCloudShadows", "-cloud-cover=0.9",
         f"-cloud-base={FLIGHT_ALTITUDE_M + CLOUD_BASE_BRACKET_M:g}",
         "-cloud-thickness=800"]),
     "cloud_below": ("terrain", [
-        "-seconds=2", "-cloud-cover=0.9",
+        "-seconds=2", "-NoCloudShadows", "-cloud-cover=0.9",
         f"-cloud-base={FLIGHT_ALTITUDE_M - CLOUD_BASE_BRACKET_M + 20:g}",
         "-cloud-thickness=180"]),
-    "cloud_control": ("terrain", ["-seconds=2", "-cloud-cover=0"]),
+    "cloud_control": ("terrain", ["-seconds=2", "-NoCloudShadows", "-cloud-cover=0"]),
     "visibility_clear": ("terrain", [
         "-seconds=2", f"-fog-density={koschmieder_fog_density(VISIBILITY_CLEAR_KM):.6g}"]),
     "visibility_hazy": ("terrain", [
         "-seconds=2", f"-fog-density={koschmieder_fog_density(VISIBILITY_HAZY_KM):.6g}"]),
+    # The far peak of each, with the near copy that hides it left out.
+    "visibility_clear_far": ("terrain", [
+        "-seconds=2", "-HideNearTerrain",
+        f"-fog-density={koschmieder_fog_density(VISIBILITY_CLEAR_KM):.6g}"]),
+    "visibility_hazy_far": ("terrain", [
+        "-seconds=2", "-HideNearTerrain",
+        f"-fog-density={koschmieder_fog_density(VISIBILITY_HAZY_KM):.6g}"]),
     "wet": ("terrain", ["-seconds=2", "-precip=rain"]),
     "wet_control": ("terrain", ["-seconds=2", "-precip=none"]),
     "night": ("terrain", ["-sun-elev=-12", "-sun-azim=180"]),
@@ -292,7 +323,9 @@ class Check:
         return f"  [{'ok  ' if self.ok else 'FAIL'}] {self.name:30s} {self.detail}"
 
 
-def measure_extinction(frames_dir: Path) -> Check:
+def measure_extinction(frames_dir: Path, far_dir: Optional[Path] = None,
+                       control_dir: Optional[Path] = None,
+                       control_far_dir: Optional[Path] = None) -> Check:
     """The same raster, near and far: the far copy must read fainter.
 
     Contrast is each peak's COLOUR distance from the sky directly above its
@@ -301,43 +334,40 @@ def measure_extinction(frames_dir: Path) -> Check:
     half a count while remaining plainly separate to the eye -- the eye is
     using chromaticity (warm rock against blue sky), and extinction is
     precisely the collapse of that difference toward the haze colour.
-    """
-    import numpy as np
 
-    manifest = json.loads((frames_dir / "render.json").read_text(encoding="utf-8"))
-    record = manifest["frame_records"][-1]
-    landmarks = record.get("landmarks", {})
-    near = landmarks.get("near_peak", {})
-    far = landmarks.get("far_peak", {})
-    if not (near.get("visible") and far.get("visible")):
+    ``far_dir`` is the render the far peak is read from (the near copy left
+    out, see peak_contrasts); without it both peaks come from ``frames_dir``.
+    ``control_dir``/``control_far_dir`` are the same pair with the fog off:
+    its ratio must MISS the threshold, or the clause cannot tell fog from
+    anything else and a pass means nothing.
+    """
+    contrasts = peak_contrasts(frames_dir, far_dir)
+    if contrasts is None:
         return Check("terrain shows range extinction", False,
                      "a terrain peak is not in frame; nothing to measure")
-
-    rgb = load_rgb(frames_dir / record["frame"])
-
-    def patch_rgb(px: float, py: float, half: int = 6):
-        y0 = max(0, int(py) - half)
-        x0 = max(0, int(px) - half)
-        return rgb[:, y0:int(py) + half + 1, x0:int(px) + half + 1] \
-            .mean(axis=(1, 2))
-
-    contrasts = {}
-    for name, mark in (("near", near), ("far", far)):
-        peak = patch_rgb(mark["px"], mark["py"] + 8)
-        sky = patch_rgb(mark["px"], mark["py"] - 45)
-        contrasts[name] = float(np.linalg.norm(peak - sky))
     if contrasts["near"] < THRESHOLDS["min_near_contrast"]:
         return Check("terrain shows range extinction", False,
                      f"near peak contrast {contrasts['near']:.1f} is below "
                      f"{THRESHOLDS['min_near_contrast']:g}; the measurement "
                      f"would be a quotient of noise")
     ratio = contrasts["far"] / contrasts["near"]
+    control_note, control_ok = "", True
+    if control_dir is not None:
+        control = peak_contrasts(control_dir, control_far_dir)
+        if control is None:
+            return Check("terrain shows range extinction", False,
+                         "a terrain peak is not in frame in the fog-off control")
+        control_ratio = control["far"] / control["near"]
+        control_ok = control_ratio > THRESHOLDS["max_extinction_ratio"]
+        control_note = f"; fog-off control {control_ratio:.2f} must exceed it"
     return Check(
         "terrain shows range extinction",
-        ratio <= THRESHOLDS["max_extinction_ratio"],
-        f"same raster: contrast {contrasts['near']:.1f} at ~10 km vs "
-        f"{contrasts['far']:.1f} at ~30 km (ratio {ratio:.2f}, "
-        f"threshold {THRESHOLDS['max_extinction_ratio']:g})",
+        ratio <= THRESHOLDS["max_extinction_ratio"] and control_ok,
+        f"same raster: contrast {contrasts['near']:.1f} at "
+        f"{_range_text(contrasts['near_range_m'], '~10 km')} vs "
+        f"{contrasts['far']:.1f} at "
+        f"{_range_text(contrasts['far_range_m'], '~30 km')} (ratio {ratio:.2f}, "
+        f"threshold {THRESHOLDS['max_extinction_ratio']:g}{control_note})",
     )
 
 
@@ -394,8 +424,7 @@ def measure_exposure(frames_dir: Path) -> Check:
         "exposure does not breathe",
         excursion <= THRESHOLDS["max_sky_excursion"],
         f"sky band moved {excursion:.2f}/255 over a {sweep:.1f} deg roll sweep "
-        f"(threshold {THRESHOLDS['max_sky_excursion']:g}; auto-exposure "
-        f"measures ~34 on this scene)",
+        f"(threshold {THRESHOLDS['max_sky_excursion']:g})",
     )
 
 
@@ -409,13 +438,23 @@ def sky_excursion(frames_dir: Path) -> float:
     return max(means) - min(means)
 
 
-def measure_exposure_control(control_dir: Path) -> Check:
+def _sky_mean(frames_dir: Path) -> float:
+    return float(luminance(load_rgb(_last_frame(frames_dir)))
+                 [SKY_BAND_ROWS[0]:SKY_BAND_ROWS[1], :].mean())
+
+
+def measure_exposure_control(control_dir: Path, still_dir: Optional[Path] = None,
+                             step_dir: Optional[Path] = None) -> Check:
     """The metric must catch the failure it exists for, every run.
 
     The control renders the same flight with the engine's default
-    auto-exposure -- exactly the metering §6.6 replaces -- and the measurement
-    has to trip on it. If it does not, the manual run's pass says nothing,
-    and the clause fails on the instrument rather than the image.
+    auto-exposure -- exactly the metering §6.6 replaces. Without a step pair
+    the measurement has to trip on that alone. With ``still_dir`` and
+    ``step_dir`` (the same still one stop apart) the step is what must trip
+    it, and the auto-exposure excursion is reported beside it, NOT graded:
+    on 5.7.4 the frame this flight shows does not change with bank, so
+    nothing moves the meter (see THRESHOLDS). The step shows the metric can
+    see an exposure move; it does not show that auto-exposure would breathe.
     """
     manifest = json.loads((control_dir / "render.json").read_text(encoding="utf-8"))
     exposure = manifest.get("scene", {}).get("exposure", "")
@@ -424,6 +463,16 @@ def measure_exposure_control(control_dir: Path) -> Check:
                      f"the control rendered with '{exposure}', not "
                      f"auto-exposure; it controls for nothing")
     excursion = sky_excursion(control_dir)
+    if still_dir is not None and step_dir is not None:
+        step = abs(_sky_mean(step_dir) - _sky_mean(still_dir))
+        return Check(
+            "exposure metric discriminates",
+            step >= THRESHOLDS["min_control_excursion"],
+            f"a one-stop exposure step moves the sky band {step:.2f}/255 (must "
+            f"exceed {THRESHOLDS['min_control_excursion']:g}); auto-exposure "
+            f"control, not graded: {excursion:.2f}/255, the frame gives the "
+            f"meter nothing to chase",
+        )
     return Check(
         "exposure metric discriminates",
         excursion >= THRESHOLDS["min_control_excursion"],
@@ -513,31 +562,52 @@ def measure_cloud_base(above_dir: Path, below_dir: Path, control_dir: Path) -> L
         CLOUD_MEASUREMENT)
 
 
-def peak_contrasts(frames_dir: Path) -> Optional[Dict[str, float]]:
+def _range_text(range_m: Optional[float], fallback: str) -> str:
+    return fallback if range_m is None else f"{range_m / 1000.0:.1f} km"
+
+
+def peak_contrasts(frames_dir: Path, far_dir: Optional[Path] = None) -> Optional[dict]:
     """Near/far peak colour distance from the sky above each, or None when
-    a peak is out of frame. The same quantity measure_extinction uses."""
+    a peak is out of frame. The one quantity both extinction clauses use.
+
+    The near peak is read from ``frames_dir`` and the far peak from
+    ``far_dir`` (the same still with -HideNearTerrain). Measured 2026-11-04
+    on UE 5.7.4: in the two-copy frame the far peak's pixel lies on the near
+    copy, so it was never the far mountain that was graded. When the record
+    states each peak's range the far samples shrink with it, so both patches
+    cover the same piece of the same mountain instead of the far one
+    averaging three times the ground.
+    """
     import numpy as np
 
-    manifest = json.loads((frames_dir / "render.json").read_text(encoding="utf-8"))
-    record = manifest["frame_records"][-1]
-    landmarks = record.get("landmarks", {})
-    near = landmarks.get("near_peak", {})
-    far = landmarks.get("far_peak", {})
+    far_dir = frames_dir if far_dir is None else far_dir
+    near_record = json.loads((frames_dir / "render.json").read_text(
+        encoding="utf-8"))["frame_records"][-1]
+    far_record = json.loads((far_dir / "render.json").read_text(
+        encoding="utf-8"))["frame_records"][-1]
+    near = near_record.get("landmarks", {}).get("near_peak", {})
+    far = far_record.get("landmarks", {}).get("far_peak", {})
     if not (near.get("visible") and far.get("visible")):
         return None
-    rgb = load_rgb(frames_dir / record["frame"])
+    near_range, far_range = near.get("range_m"), far.get("range_m")
+    far_scale = near_range / far_range if near_range and far_range else 1.0
 
-    def patch_rgb(px: float, py: float, half: int = 6):
-        y0 = max(0, int(py) - half)
-        x0 = max(0, int(px) - half)
-        return rgb[:, y0:int(py) + half + 1, x0:int(px) + half + 1].mean(axis=(1, 2))
+    def contrast(frame: Path, mark: dict, scale: float) -> float:
+        rgb = load_rgb(frame)
+        half = max(2, round(PEAK_PATCH_HALF * scale))
 
-    out = {}
-    for name, mark in (("near", near), ("far", far)):
-        peak = patch_rgb(mark["px"], mark["py"] + 8)
-        sky = patch_rgb(mark["px"], mark["py"] - 45)
-        out[name] = float(np.linalg.norm(peak - sky))
-    return out
+        def patch(py: float):
+            y0 = max(0, int(py) - half)
+            x0 = max(0, int(mark["px"]) - half)
+            return rgb[:, y0:int(py) + half + 1,
+                       x0:int(mark["px"]) + half + 1].mean(axis=(1, 2))
+
+        return float(np.linalg.norm(patch(mark["py"] + PEAK_PATCH_DROP * scale)
+                                    - patch(mark["py"] - PEAK_SKY_RISE * scale)))
+
+    return {"near": contrast(frames_dir / near_record["frame"], near, 1.0),
+            "far": contrast(far_dir / far_record["frame"], far, far_scale),
+            "near_range_m": near_range, "far_range_m": far_range}
 
 
 VISIBILITY_MEASUREMENT = (
@@ -548,9 +618,11 @@ VISIBILITY_MEASUREMENT = (
     f"{THRESHOLDS['min_near_contrast']:g}")
 
 
-def measure_extinction_vs_visibility(clear_dir: Path, hazy_dir: Path) -> LookClause:
-    clear = peak_contrasts(clear_dir)
-    hazy = peak_contrasts(hazy_dir)
+def measure_extinction_vs_visibility(clear_dir: Path, hazy_dir: Path,
+                                     clear_far_dir: Optional[Path] = None,
+                                     hazy_far_dir: Optional[Path] = None) -> LookClause:
+    clear = peak_contrasts(clear_dir, clear_far_dir)
+    hazy = peak_contrasts(hazy_dir, hazy_far_dir)
     if clear is None or hazy is None:
         return LookClause("extinction follows visibility", "FAIL",
                           "a terrain peak is not in frame; nothing to measure",
@@ -713,12 +785,15 @@ def look_clauses(out: Path) -> List[LookClause]:
                                   "renders cloud_above / cloud_below / cloud_control "
                                   "absent (no engine here, or --look not given)",
                                   CLOUD_MEASUREMENT))
-    if rendered("visibility_clear", "visibility_hazy"):
-        clauses.append(measure_extinction_vs_visibility(out / "visibility_clear",
-                                                        out / "visibility_hazy"))
+    if rendered("visibility_clear", "visibility_hazy",
+                "visibility_clear_far", "visibility_hazy_far"):
+        clauses.append(measure_extinction_vs_visibility(
+            out / "visibility_clear", out / "visibility_hazy",
+            out / "visibility_clear_far", out / "visibility_hazy_far"))
     else:
         clauses.append(LookClause("extinction follows visibility", "NOT RUN",
-                                  "renders visibility_clear / visibility_hazy absent",
+                                  "renders visibility_clear / visibility_hazy "
+                                  "(and their _far pair) absent",
                                   VISIBILITY_MEASUREMENT))
     if rendered("wet", "wet_control"):
         clauses.append(measure_wet_surface_null(out / "wet", out / "wet_control"))
@@ -1162,6 +1237,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "full": ("terrain", []),
         "still": ("terrain", ["-seconds=2"]),
         "still_noshadow": ("terrain", ["-seconds=2", "-NoShadows"]),
+        # Range extinction: the near peak, then the far peak with the near
+        # copy that stands in front of it left out, at the 10 km fog; and the
+        # same pair with the fog off, the control that must miss the threshold.
+        "extinction": ("terrain", ["-seconds=2", EXTINCTION_FOG]),
+        "extinction_far": ("terrain", ["-seconds=2", "-HideNearTerrain", EXTINCTION_FOG]),
+        "extinction_nofog": ("terrain", ["-seconds=2", "-fog-density=0"]),
+        "extinction_nofog_far": ("terrain", ["-seconds=2", "-HideNearTerrain",
+                                             "-fog-density=0"]),
+        # The exposure control's step: the still, one stop up.
+        "still_step": ("terrain", ["-seconds=2", f"-exposure-bias={EXPOSURE_STEP_BIAS:g}"]),
         "shadow": ("shadow", ["-seconds=2"]),
         "shadow_hidden": ("shadow", ["-seconds=2", "-HideAircraft"]),
         # The exposure clause's negative control (see measure_exposure_control).
@@ -1250,11 +1335,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     shadow = sorted((out / "shadow").glob("frame_*.png"))[-1]
     shadow_hidden = sorted((out / "shadow_hidden").glob("frame_*.png"))[-1]
     checks = [
-        measure_extinction(out / "full"),
+        measure_extinction(out / "extinction", out / "extinction_far",
+                           out / "extinction_nofog", out / "extinction_nofog_far"),
         measure_valley_shadow(still, still_ns),
         measure_aircraft_shadow(shadow, shadow_hidden),
         measure_exposure(out / "full"),
-        measure_exposure_control(out / "full_auto"),
+        measure_exposure_control(out / "full_auto", out / "still", out / "still_step"),
     ]
     for check in checks:
         print(check.render())
@@ -1275,21 +1361,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               "the brief named")
         print("  as missing from the old footage are present in the new.")
     else:
-        print(f"  no old footage found under {args.old_footage}")
+        print(f"  [----] side-by-side NOT RUN: no old footage under {args.old_footage}")
+        print("         measurement: this harness composes old beside new for a "
+              "person to judge;")
+        print("         the footage is the owner's, and nothing stands in for it.")
 
     print(f"\n{RULE}\n5. Phase 2 look clauses (NOT RUN without their control renders)\n{RULE}")
     looks = look_clauses(out)
     for clause in looks:
         print(clause.render())
 
-    everything = (all(check.ok for check in checks) and side_by_side is not None
-                  and all(clause.ok for clause in looks if clause.ran))
+    measured = (all(check.ok for check in checks)
+                and all(clause.ok for clause in looks if clause.ran))
+    everything = measured and side_by_side is not None
     print(f"\n{RULE}\nGATE 6\n{RULE}")
     for check in checks:
         print(f"  [{'PASS' if check.ok else 'FAIL'}] {check.name}")
     for clause in looks:
         print(f"  [{clause.status}] {clause.name}")
-    print(f"  [{'PASS' if side_by_side else 'FAIL'}] side-by-side produced "
+    print(f"  [{'PASS' if side_by_side else 'NOT RUN'}] side-by-side produced "
           f"against the old footage")
     if everything:
         print("\n  GATE 6: PASS -- four clauses measured from the pixels, the "
@@ -1299,6 +1389,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("  no foliage -- docs/VALIDITY.md lists the Phase 6 work that "
               "remains.")
         return 0
+    if measured:
+        # A clause that did not run is not a clause that passed.
+        print("\n  GATE 6: INCOMPLETE -- every measured clause passes; the "
+              "side-by-side is NOT RUN")
+        print("  until the owner's footage is present, so this is not a pass.")
+        return 3
     print("\n  GATE 6: FAIL")
     return 1
 

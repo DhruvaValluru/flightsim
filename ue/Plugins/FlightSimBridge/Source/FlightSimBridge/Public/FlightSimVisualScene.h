@@ -176,6 +176,10 @@ struct FFlightSimVisualSceneOptions
 	// instance of the same raster sits at extinction distance.
 	FVector2D NearTerrainOriginMetres = FVector2D(-8000.0, 6000.0);
 	FVector2D FarTerrainOriginMetres = FVector2D(-8000.0, 26000.0);
+	// Gate 6: leave the near copy out, so the far peak can be seen at all.
+	bool bHideNearTerrain = false;
+	// Gate 6's cloud bracket: the layer drawn, its shadow on the ground off.
+	bool bNoCloudShadows = false;
 	// Sun placed low in the north-west, so the east-west ridge throws its
 	// shadow band toward the camera side and the aircraft's own shadow lands
 	// ahead-right of it, inside the chase framing.

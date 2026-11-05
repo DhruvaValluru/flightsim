@@ -907,12 +907,17 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		Ground->SetRootComponent(GroundMesh);
 		GroundMesh->SetMobility(EComponentMobility::Movable);
 		const double HalfCm = SceneGroundHalfWidthMetres * SceneCmPerMetre;
-		// A, B over C, D with +Y north, wound A, C, B / B, C, D like the
-		// raster instances so the face normal comes out +Z.
+		// A, B over C, D with +Y north. B4 round 3, measured on UE 5.7: wound
+		// A, C, B / B, C, D this quad faced DOWN, so the renderer culled it
+		// from every camera above it: depth inf and base colour 0 on the
+		// plain, and what round 2 read as a lit ground was the atmosphere's
+		// virtual planet. Wound A, B, C / B, D, C the plain has depth
+		// (714..2431 m in the shadow shot), takes the sun and the aircraft's
+		// shadow.
 		const TArray<FVector> GroundVertices = {
 			FVector(-HalfCm, HalfCm, 0.0), FVector(HalfCm, HalfCm, 0.0),
 			FVector(-HalfCm, -HalfCm, 0.0), FVector(HalfCm, -HalfCm, 0.0)};
-		const TArray<int32> GroundTriangles = {0, 2, 1, 1, 2, 3};
+		const TArray<int32> GroundTriangles = {0, 1, 2, 1, 3, 2};
 		TArray<FVector> GroundNormals;
 		GroundNormals.Init(FVector::UpVector, GroundVertices.Num());
 		const TArray<FVector2D> GroundUV = {
@@ -1127,8 +1132,12 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 			// wetness scalar drives the whole ground the clauses measure.
 			FlatGround->SetMaterial(0, TerrainMaterial);
 		}
-		if (!BuildTerrainInstance(World, TEXT("TerrainNear"),
-		                          Options.NearTerrainOriginMetres, TerrainMaterial, Error) ||
+		// -HideNearTerrain (Gate 6's extinction clauses): the near copy
+		// stands between the camera and the far peak on the terrain shot,
+		// so the far copy is only ever seen with the near one left out.
+		if ((!Options.bHideNearTerrain &&
+		     !BuildTerrainInstance(World, TEXT("TerrainNear"),
+		                           Options.NearTerrainOriginMetres, TerrainMaterial, Error)) ||
 		    !BuildTerrainInstance(World, TEXT("TerrainFar"),
 		                          Options.FarTerrainOriginMetres, TerrainMaterial, Error))
 		{
@@ -1262,7 +1271,10 @@ bool FFlightSimVisualScene::BuildClouds(UWorld* World,
 	{
 		// UE 5.7 has no setters for these: the properties, then a render
 		// state refresh so the change reaches the proxy.
-		SunLight->bCastCloudShadows = true;
+		// -NoCloudShadows (Gate 6's cloud bracket only): with a real ground
+		// a layer above the camera shades the plain (B4 round 3), and that
+		// bracket grades where the layer is DRAWN, not where it shades.
+		SunLight->bCastCloudShadows = !Options.bNoCloudShadows;
 		SunLight->CloudShadowStrength = 1.0f;
 		SunLight->MarkRenderStateDirty();
 	}
@@ -1424,11 +1436,14 @@ bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& N
 			const int32 B = A + 1;
 			const int32 C = A + Columns;
 			const int32 D = C + 1;
-			// Wound so the face normal comes out +Z: row index increases
-			// SOUTHWARD (raster row 0 is northernmost), so the naive A,B,C
-			// order faces down and the terrain is invisible from above --
-			// which is exactly how the first probe frame came out.
-			Triangles.Append({A, C, B, B, C, D});
+			// Wound so the face normal comes out +Z. B4 round 3, measured on
+			// UE 5.7: the A, C, B / B, C, D this file used to carry here faced
+			// down, so the near faces of every ridge were culled and the
+			// frames showed the far slopes from inside, hanging at the
+			// camera's altitude. A, B, C / B, D, C draws the mountain's
+			// outside. The georeferenced tiles below keep their order: that
+			// is the user path, under Google tiles, and B4 does not touch it.
+			Triangles.Append({A, B, C, B, D, C});
 		}
 	}
 
