@@ -9,6 +9,12 @@ on:
     branches: [master, phase-2-final]
   pull_request:
 
+# A newer push replaces an older run: bookkeeping pushes queued up behind
+# each other and no run reached the current code.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pytest:
     strategy:
