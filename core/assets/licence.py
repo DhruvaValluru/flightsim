@@ -183,6 +183,17 @@ class LicenceError(ValueError):
 
 # -- names -----------------------------------------------------------------
 
+#: Airframe licences the owner cleared for dataset export (owner's statement,
+#: 2026-11-04, decisions.md item 20: "the license and everything is approved
+#: and you have the clearence to use models"). Airframes only: a livery, a
+#: terrain or any new licence still has to reach ALLOW_LIST on its own terms.
+OWNER_CLEARED_AIRFRAMES: Dict[str, Dict[str, Any]] = {
+    licence: {"name": licence, "attribution_required": True, "share_alike": False,
+              "ml_use": "unknown", "basis": "cleared by the owner, decisions.md item 20"}
+    for licence in ("GPL-2.0", "All rights reserved; model author-owned, used with permission")
+}
+
+
 def _squash(name: str) -> str:
     return "".join(ch for ch in str(name).upper() if ch not in " -_")
 
@@ -460,8 +471,8 @@ def verdict_for(entry: Dict[str, Any], shipped: bool) -> Dict[str, Any]:
     """The verdict on one (merged) asset record: allowed, refused (with
     the refusal's name) or not shipped."""
     spdx = entry.get("spdx")
-    allowed = allow_list_entry(spdx)
     aircraft = entry.get("kind") in AIRCRAFT_KINDS
+    allowed = allow_list_entry(spdx) or (OWNER_CLEARED_AIRFRAMES.get(spdx) if aircraft else None)
     obligations = []
     if allowed:
         if allowed["attribution_required"]:

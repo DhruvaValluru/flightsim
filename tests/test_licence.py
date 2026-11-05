@@ -55,6 +55,13 @@ def one(result):
 
 # -- the table ------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _guard_without_the_owner_clearance(monkeypatch, request):
+    """The guard itself stays tested: these tests run with no clearance."""
+    if "owner_clearance" not in request.node.name:
+        monkeypatch.setattr(lic, "OWNER_CLEARED_AIRFRAMES", {})
+
+
 def test_the_allow_list_is_stated_and_the_gpl_family_is_off_it():
     assert {"CC-BY-4.0", "CC0-1.0", lic.PUBLIC_DOMAIN, lic.OWN, lic.SYNTHETIC} <= set(lic.ALLOW_LIST)
     for name in ("GPL-2.0", "GPL-3.0-or-later", "LGPL-2.1", "AGPL-3.0"):
@@ -319,3 +326,11 @@ def test_the_capture_builds_the_world_documents_and_their_licence_records(tmp_pa
     assert refused.constraint == "runway.terrain_mismatch"
     (refused,) = _world_documents(tr.spec_with_runway(length_m=50.0), str(ridge))["violations"]
     assert refused.constraint == "runway.geometry"
+
+
+def test_owner_clearance_lets_the_airframes_export_and_nothing_else():
+    for name in ("c172p", "A4"):
+        record = lic.airframe_record(name)
+        assert lic.verdict_for({**record, "kind": record.get("kind", "airframe")}, True)["refusal"] is None
+    other = {"asset": "x", "kind": "terrain", "licence": "GPL-2.0", "spdx": "GPL-2.0"}
+    assert lic.verdict_for(other, True)["refusal"] is not None
