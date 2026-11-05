@@ -3353,7 +3353,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 					return Fail(Error);
 				}
 				PassAlbedoTarget = MakePassTarget(RTF_RGBA16f);
-				PassAlbedo = MakePassCapture(TEXT("PassBaseColor"), PassAlbedoTarget, PassAlbedoMaterial);
+				// Packet B4-3 (5.7.4): the post-process route (PPI_BaseColor
+				// replacing the tonemapper on SCS_FinalColorHDR) came out LIT
+				// (albedo differed on 99.9 % of pixels between two suns), while
+				// SCS_BaseColor of the same frames differed on 0.0 %. The
+				// material above stays loaded as the pass's presence check.
+				PassAlbedo = NewObject<USceneCaptureComponent2D>(Director, TEXT("PassBaseColor"));
+				PassAlbedo->TextureTarget = PassAlbedoTarget;
+				PassAlbedo->CaptureSource = ESceneCaptureSource::SCS_BaseColor;
+				ConfigureLabelCapture(PassAlbedo);
+				PassAlbedo->RegisterComponent();
 			}
 			UE_LOG(LogFlightSimRender, Display,
 			       TEXT("passes: normal %s, velocity %s, albedo %s -- each an AA-free capture ")
@@ -6076,7 +6085,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Albedo->SetStringField(TEXT("encoding"),
 				TEXT("16-bit RGBA PNG; R,G,B = linear base colour in [0, 1] * 65535; A = 65535"));
 			Albedo->SetStringField(TEXT("material"), RenderPassBaseColorMaterialPath);
-			Albedo->SetStringField(TEXT("scene_texture"), TEXT("PPI_BaseColor"));
+			Albedo->SetStringField(TEXT("scene_texture"), TEXT("SCS_BaseColor"));
 			Albedo->SetStringField(TEXT("anti_aliasing"), TEXT("none"));
 			Albedo->SetStringField(TEXT("not_claimed"),
 				TEXT("sun invariance is measured by Gate 6's albedo clause on Windows, not here"));
