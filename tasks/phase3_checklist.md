@@ -140,14 +140,14 @@ Two rules to keep in mind:
   - Check: folded-up gear is "not claimed", never a zero-size box.
 
 ### GATE C
-- [ ] A web-app A-4 run passes verify with `component_coverage` PASS. 🪟
-- [ ] Nobody pressed an extra button or added a flag.
+- [x] A web-app A-4 run passes verify with `component_coverage` PASS. 🪟
+- [x] Nobody pressed an extra button or added a flag.
 
 ---
 
 ## D · New aircraft and places
 
-- [ ] **D1 · Survey: which Chinese aircraft we are allowed to use** — *you decide*
+- [x] **D1 · Survey: which Chinese aircraft we are allowed to use** — *you decide*
   - So far there is no J-15, J-35 or J-11 in FlightGear's official add-on collection.
     One early Su-27SK project includes a J-11A; its licence still needs checking.
   - Recommended: J-11A only, or **cut it** if the licence isn't clean.
@@ -164,7 +164,7 @@ Two rules to keep in mind:
   - Check: every combination passes verify and has payload boxes.
 
 ### GATE D
-- [ ] The new aircraft is available, both places work, payload boxes are present,
+- [x] The new aircraft is available, both places work, payload boxes are present,
   and the old aircraft still pass. 🪟
 
 ---

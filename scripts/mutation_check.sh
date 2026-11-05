@@ -421,7 +421,7 @@ mutate experiments/gate5_ue_parity.py \
     || failures=$((failures+1))
 
 mutate experiments/gate6_visual.py \
-    '        ratio <= THRESHOLDS["max_extinction_ratio"],' \
+    '        ratio <= THRESHOLDS["max_extinction_ratio"] and control_ok,' \
     '        True,  # MUTATED: a crisp far ridge counts as extinction' \
     "extinction must fade the far ridge" tests/test_gate6_visual.py \
     || failures=$((failures+1))
