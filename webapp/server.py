@@ -45,6 +45,7 @@ from core.scenario.validate import validate  # noqa: E402
 from webapp.capture import wants_capture  # noqa: E402
 from webapp.runs import (  # noqa: E402
     CLIP_SECONDS,
+    DEFAULT_RUN_AIRCRAFT,
     HOST_OPEN_LOOP_FROM,
     PREFETCH,
     prefetch_terrain_for,
@@ -63,7 +64,9 @@ from webapp.runs import (  # noqa: E402
     sample_randomization_or_refuse,
     plan_flyable_defaults,
     plan_scene_setting,
+    apply_aircraft_choice,
     apply_environment_preset,
+    pickable_aircraft,
     plan_terrain_environment,
     plan_terrain_flight,
     plan_trim_recovery,
@@ -143,16 +146,23 @@ class CompileRequest(BaseModel):
     #: and season (webapp.runs.ENVIRONMENT_PRESETS). None = the prompt
     #: decides, as before. An unknown value is refused by name (400).
     environment: Optional[str] = None
+    #: The aircraft picker: a GET /aircraft name, applied as a USER edit
+    #: (webapp.runs.apply_aircraft_choice). None = the prompt decides, as
+    #: before. An unknown value is refused by name (400).
+    aircraft: Optional[str] = None
 
 
 class RunRequest(BaseModel):
     """POST /run. ``spec`` is the page's ScenarioSpec.to_dict(), possibly
     edited; absent or empty it means "the default run" (E4): the server
     builds it with ``webapp.runs.default_run_spec`` and runs the same
-    planner order."""
+    planner order. ``aircraft`` is the page's aircraft picker: a GET
+    /aircraft name, a USER edit of whichever spec runs; None changes
+    nothing and an unknown value is refused by name (400)."""
 
     spec: Optional[Dict[str, Any]] = None
     provenance: Dict[str, Any] = {}
+    aircraft: Optional[str] = None
 
 
 class SettingsPutRequest(BaseModel):
@@ -432,6 +442,14 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         for camera in spec.cameras:
             camera.set("trigger", "interval", frm="1-frame preview (web UI)")
             camera.set("capture_count", 1, frm="1-frame preview (web UI)")
+    # The aircraft picker: a structured USER edit like the preset below,
+    # and it wins over an aircraft the prompt named (the page sends it only
+    # once a person has picked).
+    if request.aircraft is not None:
+        try:
+            apply_aircraft_choice(spec, request.aircraft)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
     # Environment preset: the picker's choice is a structured USER edit of
     # surface, place, sun and season -- not prompt wording -- applied
     # BEFORE the scene-setting planner, which leaves user-chosen
@@ -519,6 +537,14 @@ class AircraftRequest(BaseModel):
 
     spec: Dict[str, Any]
     others: List[AircraftPlacement] = []
+
+
+@app.get("/aircraft")
+def aircraft_list_endpoint() -> JSONResponse:
+    """What the aircraft picker offers: the configured aircraft with no
+    unavailable reason (name, plain title) and the default run's aircraft."""
+    return JSONResponse({"aircraft": pickable_aircraft(),
+                         "default": DEFAULT_RUN_AIRCRAFT})
 
 
 @app.post("/aircraft")
@@ -1000,13 +1026,22 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     if not request.spec:
         # Nothing compiled: the Capture button posts {} and the server
         # builds the default run (E4), then runs the SAME planner order.
-        spec = default_run_spec()
+        # The aircraft picker's choice flies that same run.
+        try:
+            spec = default_run_spec(request.aircraft)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
     else:
         try:
             spec = ScenarioSpec.from_dict(request.spec)
         except (ValueError, KeyError) as exc:
             return JSONResponse({"error": f"spec did not parse: {exc}"},
                                 status_code=400)
+        if request.aircraft is not None:
+            try:
+                apply_aircraft_choice(spec, request.aircraft)
+            except ValueError as exc:
+                return JSONResponse({"error": str(exc)}, status_code=400)
 
     # The recorded transformations happen BEFORE the digest is answered, so
     # the response content-addresses exactly what will run: the derived
@@ -1762,6 +1797,14 @@ def environment_picker_script() -> FileResponse:
     the desert/forest preset sent as the structured ``environment`` field
     of POST /compile (tests/test_webapp.py test_environment_preset_*)."""
     return FileResponse(STATIC / "environment_picker.js",
+                        media_type="application/javascript")
+
+
+@app.get("/aircraft_picker.js")
+def aircraft_picker_script() -> FileResponse:
+    """The aircraft picker the prompt page mounts beside the environment
+    picker, filled from GET /aircraft."""
+    return FileResponse(STATIC / "aircraft_picker.js",
                         media_type="application/javascript")
 
 
