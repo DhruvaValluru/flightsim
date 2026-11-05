@@ -724,6 +724,16 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		LookApplied->SetObjectField(TEXT("fog"), FogRecord);
 	}
 
+	// -NoAerialPerspective (Gate 6's extinction control): nothing between the
+	// camera and the rock, so distance alone can fade nothing. The components
+	// are hidden rather than the capture's show flags cleared: measured on
+	// 5.7, those flags read back on and the frame did not change.
+	if (Options.bNoAerialPerspective)
+	{
+		Atmosphere->SetVisibility(false);
+		FogComponent->SetVisibility(false);
+	}
+
 	// -- physical sky ------------------------------------------------------
 	// Everything above stays as §6.6 built it; the plan only re-aims and
 	// re-lights it and adds the night sky. Legacy renders never get here.

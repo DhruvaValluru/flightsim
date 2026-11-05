@@ -1839,6 +1839,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SceneOptions.FarTerrainOriginMetres = FVector2D(-8000.0, -41360.0);
 		SceneOptions.bHideNearTerrain = FParse::Param(*Params, TEXT("HideNearTerrain"));
 		SceneOptions.bNoCloudShadows = FParse::Param(*Params, TEXT("NoCloudShadows"));
+		SceneOptions.bNoAerialPerspective = FParse::Param(*Params, TEXT("NoAerialPerspective"));
 		// Terrain shot: sun beyond the ridge, so the peaks throw their shadow
 		// band back across the plain toward the camera. Shadow shot: sun high
 		// behind the camera's right shoulder, so the aircraft's shadow lands
@@ -6542,6 +6543,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Scene->SetBoolField(TEXT("dynamic_shadows"), !bNoShadows);
 	Scene->SetBoolField(TEXT("aircraft_hidden"), bHideAircraft);
 	Scene->SetBoolField(TEXT("near_terrain_hidden"), FParse::Param(*Params, TEXT("HideNearTerrain")));
+	Scene->SetBoolField(TEXT("aerial_perspective_off"), FParse::Param(*Params, TEXT("NoAerialPerspective")));
 	// Visual plan V0: which renderer configuration produced these frames.
 	// Numbers and ASCII only (gotcha 13).
 	Scene->SetStringField(TEXT("render_quality"), Quality);

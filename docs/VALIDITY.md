@@ -723,28 +723,48 @@ stay until the probe on 5.7.4 replaces them from its own file:
 * **Status:** not yet re-measured on 5.7.4; the Windows steps are pending
   (`docs/phase3/notes/B4.md` windows_steps). No 5.7 number is stated here
   until a probe file holds it.
-* **Gate 6 on 5.7.4 does not pass.** A diagnostic pass of
-  `gate6_visual.py --look` (`runs/p3/B-1/diag3/g1`, not a probe file, so no
-  bias above changes) exits FAIL, and the side-by-side is NOT RUN because
-  the owner's footage is absent. Without that footage the harness can reach
-  INCOMPLETE (exit 3), never PASS.
+* **Gate 6 on 5.7.4 is INCOMPLETE, not passed.** A diagnostic pass of
+  `gate6_visual.py --look` (`runs/p3/B-1/diag3/g1`, measure quality, built up
+  over several rebuilds and re-renders, so not the proof run; not a probe
+  file, so no bias above changes) exits 3: every measured clause passes and
+  the side-by-side is NOT RUN, the owner's footage being absent. Without that
+  footage the harness can reach INCOMPLETE, never PASS. Beauty quality and a
+  georeferenced frame have not been re-measured on this code.
   * The synthetic ground and raster were wound face-down on 5.7, so both
-    were culled from above: depth inf on the plain, and the lit ground the
-    earlier frames showed was the atmosphere's virtual planet. Both are
-    rewound. The georeferenced tiles keep the old order and are unmeasured.
-  * `terrain shows range extinction` FAILS: near contrast 5.7 is under the
-    floor of 8. The sample lands on shaded rock the colour of the sky.
-  * `exposure metric discriminates` FAILS: the auto-exposure control moves
-    5.85/255 and must exceed 16. It was also under 16 in the older 5.7
-    trees (4.62, 1.92), so the manual run's 5.96/255 is void, as above.
-  * `cloud base bracket` FAILS: under the layer above the camera the plain
-    falls from about 189 to about 2 of 255. Black is not overcast; this is
-    a defect the real ground exposed, not a threshold to move.
-  * `extinction follows visibility` passes by its rule on far/near ratios of
-    3.61 and 1.89. Above 1 the near sample is no reference, so only the far
-    contrast falling 66.9 to 41.9 is evidence.
+    were culled from above: depth inf and base colour 0 on the plain, and
+    the lit ground the earlier frames showed was the atmosphere's virtual
+    planet. Both are rewound. The ridges in every earlier 5.7 frame were
+    their far slopes seen from inside. The georeferenced tiles keep the old
+    order and are unmeasured; if they are face-down too, it shows only with
+    `FLIGHTSIM_GOOGLE_TILES=off`.
+  * Aircraft ground shadow **863 px** (threshold 300, unchanged; 79 px with
+    the ground culled, all of it the body's edge). Night **2.7/255** (floor
+    2.0, unchanged). Peaks shadow the valley 41,107 px; wet surface 31,617 px.
   * The peaks are 19.9 km and 39.5 km from the camera of record (`range_m`),
-    not the ~10 km and ~30 km stated for 5.5 above.
+    not the ~10 km and ~30 km stated for 5.5 above, and the near copy hides
+    the far peak, so the far peak is read with `-HideNearTerrain`. Contrast
+    is now the luminance spread inside the same block of each peak: distance
+    from the sky was not monotonic in fog (0.66, 1.95, 1.04).
+  * Range extinction: ratio **0.14**, no-aerial-perspective control **0.91**,
+    threshold 0.75 unchanged.
+  * `FogDensity` is not 1/m: UE 5.7 `SceneCore.cpp` reads it as 1/1000 per
+    cm, so beta (1/m) = FogDensity / 10, and Gate 6 now renders at that
+    density. Whether the user path's fog carries the same factor of ten is
+    not measured here. Extinction follows visibility: near **148.3 to 64.3**
+    (loses 0.57), far **30.0 to 13.3** (loses 0.56), threshold 0.10 unchanged
+    but now graded per peak; the pair at a tenth of the density lost 0.07.
+  * `exposure metric discriminates` passes on a **substituted control**. Its
+    auto-exposure control reads 5.85/255 against manual's 5.96 (34.4 on 5.5):
+    the horizon stays level and the frame mean moves 150.8 to 146.9, so the
+    meter has nothing to chase and no threshold separates them. The control
+    is now a one-stop exposure step, **57.90/255** (threshold 16 unchanged).
+    That shows the metric sees an exposure move; it does not show this flight
+    would catch auto-exposure breathing. Auto-exposure is reported, not graded.
+  * `cloud base bracket` passes with `-NoCloudShadows` on its three renders
+    (0 ground px leak), which grades where the layer is drawn. **A defect
+    stays open beside that pass:** with cloud shadows on, the plain under the
+    layer above the camera falls from about 189 to about 2 of 255. Black is
+    not overcast. No clause grades it.
 
 What Gate 6 does **not** establish, and the Phase 6 work that remains:
 
