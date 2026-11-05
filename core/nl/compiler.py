@@ -1487,7 +1487,8 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
     if airspeed is None:
         airspeed = Quantity.default(
             CRUISE_DEFAULT_KT.get(model, 250.0), "kt",
-            frm=f"typical cruise for the {model}")
+            frm=(f"mid-band trimmable speed measured for the {model}" if model == "DHC6"
+                 else f"typical cruise for the {model}"))
         airspeed_kind = Quantity.default("cas")
     wind_speed, wind_direction = _wind(text, float(heading.value))
     named = named_place(prompt)

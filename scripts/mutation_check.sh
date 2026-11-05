@@ -1930,10 +1930,10 @@ mutate flightsim/capture.py \
     "the capture command samples the block" \
     tests/test_randomization.py || failures=$((failures+1))
 
-mutate webapp/server.py \
-    '    randomization_refusal = sample_randomization_or_refuse(spec)
+mutate webapp/runs.py \
+    '        randomization_refusal = sample_randomization_or_refuse(spec)
     project_for_ue_host(spec)' \
-    '    randomization_refusal = None  # MUTATED: /run never samples
+    '        randomization_refusal = None  # MUTATED: /run never samples
     project_for_ue_host(spec)' \
     "/run samples and refuses by name" \
     tests/test_randomization.py || failures=$((failures+1))
@@ -2386,12 +2386,12 @@ mutate core/control/derive.py \
 # -- audit fixes: the web camera refusal surface, geographic placement, schema NOT RUN, applied pose --
 
 mutate webapp/server.py \
-    '    if camera_refusals:
+    '    if provisioned["violations"]:
         verdict["ok"] = False
-        verdict["violations"].extend(camera_refusals)' \
+        verdict["violations"].extend(provisioned["violations"])' \
     '    if False:  # MUTATED: camera refusals never reach the page
         verdict["ok"] = False
-        verdict["violations"].extend(camera_refusals)' \
+        verdict["violations"].extend(provisioned["violations"])' \
     "a buried camera refuses on the web surface" \
     tests/test_webapp.py || failures=$((failures+1))
 
