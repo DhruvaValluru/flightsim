@@ -31,6 +31,7 @@ import subprocess
 import threading
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -789,11 +790,12 @@ def capture_arguments(spec: ScenarioSpec, scene: Optional[Dict]) -> Dict[str, An
 
 def provision_place(spec: ScenarioSpec) -> Dict[str, Any]:
     """POST /run's place provisioning, the ONE function every path that
-    flies a spec calls (decision 17): the single run (``webapp.server``)
-    and the campaign (``core.campaign.campaign.provision_spec`` for
-    ``/generate``'s plan, sample and start), so a campaign case flies --
-    and, with Google's tiles on, renders -- exactly the ground the single
-    run would, never a second copy of the bake table or its order.
+    flies a spec calls (decision 17), through :func:`provision_flight`:
+    the single run (``webapp.server``) and the campaign
+    (``core.campaign.campaign.provision_spec`` for ``/generate``'s plan,
+    sample and start), so a campaign case flies -- and, with Google's
+    tiles on, renders -- exactly the ground the single run would, never a
+    second copy of the bake table or its order.
 
     In /run's order, on ``spec`` in place: scene-setting onto the curated
     bake table (:func:`plan_scene_setting`, SCENE_SETTING_BAKES), the
@@ -815,6 +817,117 @@ def provision_place(spec: ScenarioSpec) -> Dict[str, Any]:
     scene = pick_scene(spec)
     return {"refusal": None, "scene": scene,
             "capture": capture_arguments(spec, scene)}
+
+
+def provision_flight(spec: ScenarioSpec, *, per_case: bool = False) -> Dict[str, Any]:
+    """POST /run's whole planning step, the ONE function the single run
+    and the campaign call: :func:`provision_place`, then every flight
+    planner on ``spec`` in place, so one prompt plans one flight on both
+    paths. Every planner moves only what the system chose; a stated field
+    stays and its refusal stands.
+
+    PLANNER ORDER (load-bearing, pinned by tests): place_on_scene ->
+    apply_weather_event -> apply_historical_weather ->
+    plan_terrain_environment -> plan_route_flight -> derive_seed ->
+    plan_terrain_flight -> plan_flyable_defaults -> plan_trim_recovery ->
+    plan_camera_defaults -> sample_randomization_or_refuse ->
+    project_for_ue_host.
+    Rationale: placement fixes coordinates; the event composes its
+    environment; DATED real weather wins over composition (ERA5 wind is
+    source user, so the terrain planner then refuses to touch it);
+    cross-ridge wind and along-ridge heading must exist BEFORE the
+    clearance pre-flight so the track is flown through the SAME planned
+    wind and orographic field it will record; envelope floors come after
+    it because they depend on the final altitude; camera placements
+    depend on the FINAL scene and datum; the draw jitters the planned
+    placement. All of it happens before the digest is answered.
+
+    Returns :func:`provision_place`'s dict plus ``weather_refusal`` (the
+    historical-weather refusal, which stops the planning there) and
+    ``violations`` (the clearance and route pre-flights', the sampler's
+    and the scene-coupled camera refusals, for the verdict, in that order).
+
+    ``per_case`` is the campaign's mode (:func:`provision_campaign`): its
+    sampler draws and its run seed are each case's (``core.campaign.
+    workers.build_case``), so the block is not drawn here and the seed is
+    handed back as it came. The pre-flight still flies the derived seed,
+    so the planned altitude is the single run's; ``derive_seed`` records
+    its seed as a user edit, which build_case would keep on every case.
+    """
+    provisioned = provision_place(spec)
+    out = {**provisioned, "weather_refusal": None, "violations": []}
+    if provisioned["refusal"] is not None:
+        return out
+    # Severe-weather composition edits (thunderstorm -> severe turbulence
+    # when the word was defaulted).
+    apply_weather_event(spec)
+    # Historical weather (ERA5) applies AFTER placement (coordinates are
+    # final) and BEFORE the seed/digest, or refuses by name.
+    out["weather_refusal"] = apply_historical_weather(spec)
+    if out["weather_refusal"] is not None:
+        return out
+    plan_terrain_environment(spec)
+    # The route (docs/ROUTE.md): a stated route is flown for real here --
+    # JSBSim, the autopilot and the route guidance over the scene's own
+    # raster -- after the terrain environment (the same planned wind and
+    # orographic field the run will record) and BEFORE the seed, so the
+    # pre-flight flies the spec the page confirmed. A line that comes
+    # within the route's clearance floor or that the autopilot cannot
+    # close on refuses by name in the verdict; a user-stated altitude is
+    # never moved. The flight's control schedule and card block ride on
+    # this spec object into the render flow.
+    from webapp.route_map import plan_route_flight
+
+    route_refusal = plan_route_flight(spec)
+    # The seed derives BEFORE the digest is answered. A run can be
+    # stochastic even with turbulence word "none" -- lee-rotor over windy
+    # terrain, or surface thermals whose positions draw from the seed --
+    # and coupling_needs_seed is the ONE predicate both this function and
+    # the render flow consult, so the card's digest is always the digest
+    # the response advertises.
+    case_seed = deepcopy(spec.seed)
+    derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
+    # Terrain scenes: pre-fly the scripted track over the scene's own
+    # raster (a defaulted altitude may be raised, recorded; a stated
+    # altitude that cannot keep clearance refuses by name). Skipped when
+    # a route is stated: the route pre-flight above IS the terrain check
+    # for that run -- it flew the line the clip will follow over the same
+    # raster, span stations included, against the route's own floor --
+    # and the track this would pre-fly is not the track the card carries.
+    clearance_refusal = (None if not spec.route.is_default()
+                         else plan_terrain_flight(spec))
+    # The track planner may have raised a system-chosen altitude into air
+    # where the system-chosen airspeed no longer flies: re-plan the
+    # defaults at the final altitude, then give physics the last word
+    # over any surviving guess.
+    plan_flyable_defaults(spec)
+    plan_trim_recovery(spec)
+    # Camera placements last among the planners (a defaulted tower camera
+    # moves onto the raster under it; stated placements never move and
+    # refuse by name in the verdict).
+    plan_camera_defaults(spec)
+    # Randomisation draws AFTER the camera planner (its jitter is about
+    # the planned placement) and BEFORE the host projection; off by
+    # default. Same sampler as /compile: value-idempotent.
+    randomization_refusal = None
+    if per_case:
+        spec.seed = case_seed
+    else:
+        randomization_refusal = sample_randomization_or_refuse(spec)
+    project_for_ue_host(spec)
+    out["violations"] = [
+        refusal for refusal in (clearance_refusal, route_refusal, randomization_refusal)
+        if refusal is not None]
+    # Scene-coupled camera checks (Camera Phase 1): world-anchored cameras
+    # against the scene raster, its bounds and the modelled tornado core.
+    out["violations"] += camera_scene_violations(spec, pick_scene(spec))
+    return out
+
+
+def provision_campaign(spec: ScenarioSpec) -> Dict[str, Any]:
+    """:func:`provision_flight` for a campaign's base spec, the function
+    ``core.campaign.campaign.provision_spec`` is handed."""
+    return provision_flight(spec, per_case=True)
 
 
 def place_on_scene(spec: ScenarioSpec) -> None:

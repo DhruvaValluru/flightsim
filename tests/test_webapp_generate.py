@@ -964,11 +964,35 @@ GRAND_CANYON = ("12 images of the A-4 over the Grand Canyon from a chase camera,
                 "a 20 second flight")
 
 
+#: The fake bake's relief: a hill peaking this far up, under the origin's
+#: north, well above any compile-time altitude default near the datum.
+BAKE_PEAK_M = 3100.0
+
+
 def _fake_bake(terrain_dir: Path, key: str) -> Path:
-    """A whole bake as ``webapp.runs.baked`` sees one (.r16 + .json)."""
+    """A whole bake as ``webapp.runs.baked`` and the flight planners see
+    one: a real heightfield around the prompt's place (.r16 + .json)."""
+    import numpy as np
+
+    from core.capture.poses import SceneFrame
+    from core.nl.compiler import compile_prompt
+    from core.terrain.glo30 import utm_zone_crs
+    from core.terrain.heightfield import Georeference, Heightfield
+
     terrain_dir.mkdir(parents=True, exist_ok=True)
-    (terrain_dir / f"{key}.r16").write_bytes(b"\0" * 8)
-    (terrain_dir / f"{key}.json").write_text("{}", encoding="utf-8")
+    placed = compile_prompt(GRAND_CANYON)
+    lat, lon = float(placed.latitude.value), float(placed.longitude.value)
+    crs = utm_zone_crs(lat, lon)
+    frame = SceneFrame(crs, lat, lon, declared=True)
+    half, pixel = 24000.0, 200.0
+    offsets = -half + pixel * np.arange(int(2 * half / pixel) + 1)
+    east, north = np.meshgrid(offsets, -offsets, indexing="xy")
+    relief = 1500.0 + (BAKE_PEAK_M - 1500.0) * np.exp(
+        -(east ** 2 + north ** 2) / (2.0 * 6000.0 ** 2))
+    geo = Georeference(crs=crs, origin_x_m=frame.origin_x_m - half,
+                       origin_y_m=frame.origin_y_m + half, pixel_size_m=pixel)
+    Heightfield.from_elevations(relief, geo, name=key, provenance={
+        "fixture": "tests/test_webapp_generate.py"}).write(terrain_dir / key)
     return terrain_dir / key
 
 
@@ -992,6 +1016,7 @@ def test_a_campaign_case_flies_the_bake_the_single_run_would(tmp_path, monkeypat
     single run's own function and every case carries its stem."""
     from core.dataset.batch import capture_command
     from core.nl.compiler import compile_prompt
+    from core.scenario.spec import ScenarioSpec
 
     runs = _tiles_on_machine(monkeypatch, tmp_path)
     stem = _fake_bake(tmp_path / "terrain", "grand_canyon")
@@ -1007,6 +1032,9 @@ def test_a_campaign_case_flies_the_bake_the_single_run_would(tmp_path, monkeypat
     campaign = service.open(started["id"])
     assert campaign.record["capture"]["terrain"] == str(stem)
     assert float(campaign._spec().latitude.value) == float(single_spec.latitude.value)
+    # The page's preview and the started campaign both carry the planned flight.
+    for planned in (ScenarioSpec.from_dict(plan["spec"]), campaign._spec()):
+        assert float(planned.altitude.value) > BAKE_PEAK_M and planned.hold_state.value is False
     command = capture_command(Path("spec.yaml"), Path("run"), campaign.record["capture"])
     assert command[command.index("--terrain") + 1] == str(stem)
     service.wait(started["id"], timeout=120)
@@ -1075,6 +1103,115 @@ def test_a_campaign_case_flies_the_single_run_s_window_on_its_placed_card(tmp_pa
     assert campaign.record["capture"]["terrain"] == str(stem)
     assert campaign.record["capture"]["clip_seconds"] == runs.CLIP_SECONDS
     assert campaign.record["llm_fallback"] is None
+
+
+#: What a single run and a campaign must agree on after planning: the
+#: terrain-coupled flight, the camera the scene moved, the host projection.
+PLANNED_FIELDS = ("altitude", "airspeed", "heading", "wind_speed", "wind_direction",
+                  "latitude", "longitude", "terrain_elevation",
+                  "hold_state", "mass_held", "airspeed_kind")
+#: One defaulted world-anchored camera, so plan_camera_defaults has work.
+TOWER_CANYON = ("12 images of the A-4 over the Grand Canyon from a tower camera "
+                "in strong wind, a 20 second flight")
+
+
+def _planned(spec):
+    fields = {name: getattr(spec, name).value for name in PLANNED_FIELDS}
+    fields["camera_alt_m"] = [camera.position_alt_m.value for camera in spec.cameras]
+    return fields
+
+
+def _single_run(prompt, monkeypatch):
+    """The spec POST /run hands the manager for ``prompt``, by the page's
+    own two requests."""
+    import core.util.platform as platform
+    import webapp.server as server_module
+
+    monkeypatch.setattr(platform, "ue_available", lambda: True)
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh", lambda spec: None)
+    started = {}
+    monkeypatch.setattr(server_module.manager, "start",
+                        lambda spec, provenance: started.update(spec=spec) or {"run_id": "t"})
+    web = TestClient(app)
+    compiled = web.post("/compile", json={"prompt": prompt, "compiler": "regex"}).json()
+    reply = web.post("/run", json={"spec": compiled["spec"]["dict"]})
+    assert reply.status_code == 200, reply.json()
+    return started["spec"]
+
+
+def test_a_campaign_plans_the_flight_the_single_run_plans(tmp_path, monkeypatch):
+    """The A10 residual: POST /run ran its flight planners and a campaign of
+    the same prompt did not, so the record held a defaulted altitude inside
+    the relief, a tower camera on the compile-time datum and an unprojected
+    autopilot. Both now go through runs.provision_flight."""
+    from core.campaign.workers import build_case
+    from core.nl.compiler import compile_prompt
+
+    runs = _tiles_on_machine(monkeypatch, tmp_path)
+    _fake_bake(tmp_path / "terrain", "grand_canyon")
+    single = _single_run(TOWER_CANYON, monkeypatch)
+    campaign = Campaign.create(TOWER_CANYON, images=12, out=tmp_path / "c", tier="regex",
+                               provision=runs.provision_campaign)
+    spec = campaign._spec()
+    assert _planned(spec) == _planned(single)
+
+    # The fields really moved: an equality of two unplanned specs is no test.
+    compiled = compile_prompt(TOWER_CANYON)
+    assert float(spec.altitude.value) > BAKE_PEAK_M > float(compiled.altitude.value)
+    assert str(spec.altitude.source) == "derived"
+    assert spec.cameras[0].position_alt_m.value != compiled.cameras[0].position_alt_m.value
+    assert spec.hold_state.value is False and spec.mass_held.value is True
+
+    # The cases fly it, and each keeps its own run seed: derive_seed writes
+    # a user edit, which build_case would have kept on every case.
+    first, first_seed = build_case(0, campaign.record)
+    second, second_seed = build_case(1, campaign.record)
+    assert first_seed != second_seed
+    assert int(first.seed.value) == first_seed and int(second.seed.value) == second_seed
+    assert float(first.altitude.value) == float(spec.altitude.value)
+    assert first.hold_state.value is False
+
+
+def test_a_stated_field_survives_the_campaign_s_planners(tmp_path, monkeypatch):
+    """Planners fill what the system chose. A stated altitude and heading
+    stay on both paths, and a stated altitude into the relief is the single
+    run's refusal, by its name, not a climb."""
+    from core.campaign import CampaignError
+
+    runs = _tiles_on_machine(monkeypatch, tmp_path)
+    _fake_bake(tmp_path / "terrain", "grand_canyon")
+    prompt = f"{GRAND_CANYON} at 4500 m heading 130"
+    single = _single_run(prompt, monkeypatch)
+    campaign = Campaign.create(prompt, images=12, out=tmp_path / "c", tier="regex",
+                               provision=runs.provision_campaign)
+    spec = campaign._spec()
+    assert _planned(spec) == _planned(single)
+    assert float(spec.altitude.value) == 4500.0 and float(spec.heading.value) == 130.0
+    assert str(spec.altitude.source) == str(spec.heading.source) == "user"
+
+    with pytest.raises(CampaignError) as refused:
+        Campaign.create(f"{GRAND_CANYON} at 2000 m", images=12, out=tmp_path / "low",
+                        tier="regex", provision=runs.provision_campaign)
+    assert refused.value.constraint == "terrain.clearance"
+    assert not (tmp_path / "low" / "campaign.json").exists()
+
+
+def test_a_campaign_leaves_the_policy_draw_to_its_cases(tmp_path, monkeypatch):
+    """provision_flight draws on the single run; the campaign's sampler is
+    per case, so its base spec stays undrawn and a stated seed stays stated."""
+    runs = _tiles_on_machine(monkeypatch, tmp_path)
+    _fake_bake(tmp_path / "terrain", "grand_canyon")
+    drawn = []
+    monkeypatch.setattr(runs, "sample_randomization_or_refuse",
+                        lambda spec: drawn.append(spec))
+    from core.nl.compiler import compile_prompt
+
+    spec = compile_prompt(GRAND_CANYON)
+    before = spec.seed.value, str(spec.seed.source)
+    runs.provision_campaign(spec)
+    assert drawn == [] and (spec.seed.value, str(spec.seed.source)) == before
+    runs.provision_flight(compile_prompt(GRAND_CANYON))
+    assert len(drawn) == 1
 
 
 def test_an_llm_fallback_records_the_model_s_raw_response(tmp_path, monkeypatch):
