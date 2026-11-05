@@ -305,13 +305,13 @@ def test_a_layer_that_changes_nothing_is_not_a_cloud(tmp_path):
     assert clause.status == "FAIL"
 
 
-def extinction_pair(tmp_path, clear_far, hazy_far):
+def extinction_pair(tmp_path, clear_near, hazy_near, clear_far=HAZED_ROCK, hazy_far=HAZED_ROCK):
     rgb = frame()
     out = []
-    for name, far_spread in (("visibility_clear", clear_far), ("visibility_hazy", hazy_far)):
+    for name, near_spread, far_spread in (("visibility_clear", clear_near, clear_far),
+                                          ("visibility_hazy", hazy_near, hazy_far)):
         image = rgb.copy()
-        # The near peak fades by the same share as the far one.
-        rock(image, 80, 80, NEAR_ROCK * far_spread // clear_far)
+        rock(image, 80, 80, near_spread)
         rock(image, 200, 80, far_spread)
         directory = still(tmp_path / name, image,
                           look={"fog": {"fog_density": koschmieder_fog_density(10.0)}},
@@ -322,31 +322,37 @@ def extinction_pair(tmp_path, clear_far, hazy_far):
     return out
 
 
-def test_a_hazier_day_fades_the_far_ridge_more(tmp_path):
-    clear, hazy = extinction_pair(tmp_path, 80, HAZED_ROCK)
+def test_a_hazier_day_fades_the_near_peak(tmp_path):
+    clear, hazy = extinction_pair(tmp_path, NEAR_ROCK, HAZED_ROCK)
     clause = measure_extinction_vs_visibility(clear, hazy)
     assert clause.status == "PASS", clause.detail
 
 
 def test_a_fog_density_that_is_not_an_extinction_shows_no_order(tmp_path):
-    """Same far contrast at 50 km and 10 km: the number reached nothing."""
-    clear, hazy = extinction_pair(tmp_path, 80, 80)
+    """Same near contrast at 50 km and 10 km: the number reached nothing."""
+    clear, hazy = extinction_pair(tmp_path, NEAR_ROCK, NEAR_ROCK)
     clause = measure_extinction_vs_visibility(clear, hazy)
     assert clause.status == "FAIL"
 
 
-def test_one_copy_that_does_not_fade_fails_the_visibility_clause(tmp_path):
-    """Measured on the ten-times-too-thin fog: the near peak lost 0.07. A
-    far copy fading alone does not make the clause."""
-    clear, hazy = extinction_pair(tmp_path, 80, HAZED_ROCK)
-    image = rock(rock(frame(), 80, 80, NEAR_ROCK * 95 // 100), 200, 80, HAZED_ROCK)
-    write_png_rgb(hazy / "frame_0000.png", image)
-    clause = measure_extinction_vs_visibility(clear, hazy)
-    assert clause.status == "FAIL", clause.detail
+def test_fog_handed_over_unconverted_fails_the_visibility_clause(tmp_path):
+    """Measured on 5.7.4 with beta as the engine number: the near peak kept 0.93."""
+    clear, hazy = extinction_pair(tmp_path, NEAR_ROCK, 93)
+    assert measure_extinction_vs_visibility(clear, hazy).status == "FAIL"
+
+
+def test_the_far_peak_on_the_opacity_cap_does_not_decide_visibility(tmp_path):
+    """Measured in gate6_r5: the far peak kept 0.97 at the true density, flat
+    on the cap both days. It can neither fail a real fade nor make one."""
+    clear, hazy = extinction_pair(tmp_path, NEAR_ROCK, HAZED_ROCK, 14, 14)
+    assert measure_extinction_vs_visibility(clear, hazy).status == "PASS"
+    (tmp_path / "flat").mkdir()
+    clear, hazy = extinction_pair(tmp_path / "flat", NEAR_ROCK, NEAR_ROCK, 100, 10)
+    assert measure_extinction_vs_visibility(clear, hazy).status == "FAIL"
 
 
 def test_a_peak_out_of_frame_fails_the_visibility_clause_too(tmp_path):
-    clear, hazy = extinction_pair(tmp_path, 80, HAZED_ROCK)
+    clear, hazy = extinction_pair(tmp_path, NEAR_ROCK, HAZED_ROCK)
     manifest = json.loads((hazy / "render.json").read_text(encoding="utf-8"))
     manifest["frame_records"][-1]["landmarks"]["far_peak"]["visible"] = False
     (hazy / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -440,13 +446,9 @@ def test_the_look_controls_change_one_switch_each():
     assert "-sun-elev=-12" in LOOK_RUNS["night"][1]
     clear = [f for f in LOOK_RUNS["visibility_clear"][1] if f.startswith("-fog-density=")][0]
     hazy = [f for f in LOOK_RUNS["visibility_hazy"][1] if f.startswith("-fog-density=")][0]
-    # Ten times beta: the engine reads FogDensity / 1000 per centimetre.
-    assert float(hazy.split("=")[1]) == pytest.approx(10 * 3.912 / 10000.0, rel=1e-3)
-    assert float(clear.split("=")[1]) == pytest.approx(10 * 3.912 / 50000.0, rel=1e-3)
-    for name in ("visibility_clear", "visibility_hazy"):
-        assert "-HideNearTerrain" in LOOK_RUNS[f"{name}_far"][1]
-        assert [f for f in LOOK_RUNS[f"{name}_far"][1] if f.startswith("-fog-density=")] \
-            == [f for f in LOOK_RUNS[name][1] if f.startswith("-fog-density=")]
+    per_extinction = 1.0 / (0.1 * math.log(2.0) ** 2)   # UE FogDensity for 1/m
+    assert float(hazy.split("=")[1]) == pytest.approx(3.912 / 10000.0 * per_extinction, rel=1e-3)
+    assert float(clear.split("=")[1]) == pytest.approx(3.912 / 50000.0 * per_extinction, rel=1e-3)
     assert all(shot == "terrain" for shot, _ in LOOK_RUNS.values())
     assert LOOK_THRESHOLDS["cloud_min_changed_px"] > LOOK_THRESHOLDS["cloud_max_leak_px"]
     # I6: the albedo pair differs in the sun alone, and both carry the pass.

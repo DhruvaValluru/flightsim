@@ -33,7 +33,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -1394,29 +1394,31 @@ def apply_environment_preset(spec: ScenarioSpec, name: str) -> None:
 #: USER edit with this provenance; the weather flags and the Google tiles
 #: are NOT edited (decision 4, CLAUDE.md): weather_backend_flags() and
 #: google_tiles_requested() keep their defaults.
-DEFAULT_RUN_AIRCRAFT = "A4"
+#: The Cessna, on the owner's word (2026-11-04): the A-4's model has no
+#: documentation of its terms, so nothing defaults to it. It stays selectable.
+DEFAULT_RUN_AIRCRAFT = "c172p"
 DEFAULT_RUN_CLIP_S = 6.0
 DEFAULT_RUN_ENVIRONMENT = "desert"
 DEFAULT_RUN_FROM = "default run (web UI)"
-#: The regex compiler's own A-4 word; the spec starts as the compiler's,
-#: so every field it does not state keeps the compiler's provenance.
-DEFAULT_RUN_PROMPT = "fly the a-4 over the desert"
-#: The loadout stations A4.json's ``loading.loadout`` states (750 lb each,
-#: decision 7); the masses are READ from the config, never retyped here.
-DEFAULT_RUN_STATIONS = ("STA2", "STA3", "STA4")
+#: The spec starts as the compiler's, so every field the prompt does not
+#: state keeps the compiler's provenance. The altitude clears the Canyon rim
+#: and 100 kt is where the Cessna trims there (envelope.trim_feasible).
+DEFAULT_RUN_PROMPT = "fly the c172p over the desert at 3500 m and 100 kt"
+#: Stations the default run loads; the masses are READ from the config, never
+#: retyped here. The Cessna flies its own config's default load.
+DEFAULT_RUN_STATIONS: Tuple[str, ...] = ()
 KG_PER_LB = 0.45359237
 
 
 def default_run_spec() -> ScenarioSpec:
-    """The spec POST /run {} flies: the A-4 with STA2/3/4 loaded as
-    assets/aircraft_config/A4.json states them (lb -> kg, capped at the
-    station's own maximum), the Desert preset (grand_canyon, noon in
+    """The spec POST /run {} flies: the default aircraft with any
+    DEFAULT_RUN_STATIONS loaded as its config states them (lb -> kg, capped
+    at the station's own maximum), the Desert preset (grand_canyon, noon in
     July) via apply_environment_preset, ONE chase camera (camera0, the
     per-airframe offset webapp_chase_flag carries) so wants_capture()
     routes the run through the capture stage with its labels and verify
-    block, and a 6 s clip. Raises RuntimeError when the A-4 config has no
-    loadable default station: the default run never silently flies a
-    different loadout."""
+    block, and a 6 s clip. Raises RuntimeError when a named station is not
+    loadable: the default run never silently flies a different loadout."""
     from core.nl.compiler import compile_prompt
     from core.scenario.loading import load_loading_config
 
@@ -1435,9 +1437,10 @@ def default_run_spec() -> ScenarioSpec:
     if missing:
         raise RuntimeError(f"{DEFAULT_RUN_AIRCRAFT}: {config.config_path} "
                            f"has no loadable station(s) {missing}")
-    spec.set("loading.payload", payload,
-             frm=f"{DEFAULT_RUN_FROM}: {config.config_path} loading.loadout "
-                 f"stations, lb -> kg")
+    if payload:
+        spec.set("loading.payload", payload,
+                 frm=f"{DEFAULT_RUN_FROM}: {config.config_path} loading.loadout "
+                     f"stations, lb -> kg")
     apply_environment_preset(spec, DEFAULT_RUN_ENVIRONMENT)
     spec.set("duration", min(DEFAULT_RUN_CLIP_S, CLIP_SECONDS),
              frm=f"{DEFAULT_RUN_FROM}: {DEFAULT_RUN_CLIP_S:g} s clip")

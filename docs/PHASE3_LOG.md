@@ -123,3 +123,8 @@ verify counts, the `component_coverage` detail and the card diff keys.
 | A10 | G | one-line campaign 34ecd500da42 | `done`, tier llm, 12 of 12 verified; card and download refuse `aircraft.licence_dataset` | packet A10-4, owner |
 | A13 | G | NEXT.md re-read after e042916e; `tests/test_platform.py` | no contradiction with TOOLCHAIN.md; run id 7237db488652 cited; 14 passed | PASS |
 | B4 | G | `gate6_visual.py --look` on the tip | albedo 0.000 % PASS; `GATE 6: FAIL` on five threshold clauses + old footage | owner |
+| D4 | D-1 | matrix runs, provenance scene | desert = grand_canyon, forest = yosemite, verify ok | PASS |
+| D5 | D-1 | `bake_terrain.py --places` twice | `up to date` for both, exit 0 | PASS |
+| D6 | D-1 | `run_test_scenarios.py --matrix --still --compiler regex` | `matrix FAIL`: all four cells flew the B747 (`apply_cell` writes the wrong key); runs 5835af44a0de, eaf9c4b8f369, a5f4d4e34e6e, 16342bb78e61 | packet D6-1 |
+| D2 | D-1 | J-11 config test, level flight, import | level flight OK; 2 CRLF test failures; import not reached | packet D2-1 |
+| D2, D6 | D-1 | matrix re-run after the fixes | all four cells flew their own aircraft, verify ok, `component_coverage` PASS; J-11 imported itself | PASS, see gate_log_D.md |

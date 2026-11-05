@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 REPO = Path(__file__).resolve().parents[1]
@@ -1710,6 +1710,12 @@ def conditions_list_script() -> FileResponse:
     fields, clickable into the prompt (tests/test_conditions_list.py)."""
     return FileResponse(STATIC / "conditions_list.js",
                         media_type="application/javascript")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    """No icon: answer empty rather than log a 404 in the browser console."""
+    return Response(status_code=204)
 
 
 @app.get("/settings")

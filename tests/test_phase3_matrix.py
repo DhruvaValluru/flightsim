@@ -63,7 +63,7 @@ def test_cells_are_the_product_of_two_aircraft_and_two_environments():
 
 def _spec_dict():
     return {
-        "aircraft": {"value": "c172p", "source": "default", "from": "compiler"},
+        "aircraft": {"aircraft": {"value": "c172p", "source": "default", "from": "compiler"}},
         "altitude": {"value": 1500.0, "source": "default"},
         "airspeed": {"value": 110.0, "source": "default"},
         "lighting": {"preset": {"value": "noon", "source": "default"}},
@@ -76,15 +76,15 @@ def test_apply_cell_changes_only_the_aircraft():
     for cell in MATRIX:
         spec = copy.deepcopy(before)
         rts.apply_cell(spec, cell)
-        assert spec["aircraft"]["value"] == cell["aircraft"]
-        assert spec["aircraft"]["source"] == "user"
+        assert spec["aircraft"]["aircraft"]["value"] == cell["aircraft"]
+        assert spec["aircraft"]["aircraft"]["source"] == "user"
         rest_before = {k: v for k, v in before.items() if k != "aircraft"}
         rest_after = {k: v for k, v in spec.items() if k != "aircraft"}
         assert rest_after == rest_before
     # a spec without an aircraft entry gets one, in the same shape
     bare = {"lighting": {}}
     rts.apply_cell(bare, MATRIX[2])
-    assert bare["aircraft"]["value"] == "J11" and bare["aircraft"]["source"] == "user"
+    assert bare["aircraft"]["aircraft"]["value"] == "J11" and bare["aircraft"]["aircraft"]["source"] == "user"
 
 
 def test_cell_compile_body_adds_only_environment():
@@ -230,7 +230,7 @@ class FakeApp:
             spec = body["spec"]
             run_id = f"run{len(self.runs) + 1}"
             scene = "yosemite" if spec["latitude"]["value"] == 37.7 else "grand_canyon"
-            self.runs[run_id] = {"aircraft": spec["aircraft"]["value"], "scene": scene,
+            self.runs[run_id] = {"aircraft": spec["aircraft"]["aircraft"]["value"], "scene": scene,
                                  "spec": spec}
             return 200, {"run_id": run_id}
         run_id = path.split("/")[2]
@@ -279,7 +279,7 @@ def test_run_matrix_with_fake_server_passes_and_writes_summary(sandbox, monkeypa
     assert [b["environment"] for b in compiles] == ["desert", "forest", "desert", "forest"]
     assert {b["prompt"] for b in compiles} == {rts.MATRIX_PROMPT}
     assert all(set(b) == {"spec", "provenance"} for b in runs)
-    assert [b["spec"]["aircraft"]["value"] for b in runs] == ["A4", "A4", "J11", "J11"]
+    assert [b["spec"]["aircraft"]["aircraft"]["value"] for b in runs] == ["A4", "A4", "J11", "J11"]
     out = capsys.readouterr().out
     # once per cell as it finishes (step 7's line) and once in the summary
     assert out.count("verify PASS component_coverage PASS") >= 4

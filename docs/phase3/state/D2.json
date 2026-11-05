@@ -10,8 +10,10 @@
     "step 11: Generate on a J-11 default run auto-imports body + SM_J11_r27r_left/right and renders exit 0",
     "the two R-27R stores visible in the render; gear components mesh null"
   ],
+  "run_id": "D-1",
   "stage": "integrated",
   "unit": "D2",
-  "updated": "2026-11-04T16:27:58",
+  "updated": "2026-11-04T19:49:32",
+  "verdict": "PASS",
   "worktree": "../p3-D2"
 }

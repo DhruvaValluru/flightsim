@@ -1786,7 +1786,7 @@ $("run").addEventListener("click", () => startRun(true));
 
 async function startRun(mayBake) {
   // Nothing compiled: Capture posts {} and the server builds the default
-  // run (A-4 with its loadout, Desert, chase camera, 6 s clip, labels on).
+  // run (the c172p, Desert, chase camera, 6 s clip, labels on).
   const body = compiled == null ? {} : {
     spec: editedSpecDict(),
     provenance: {compiler: compiled.compiler, model: compiled.model,

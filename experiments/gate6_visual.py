@@ -61,14 +61,13 @@ graded whenever their directories exist:
   only; with the layer below, the ground band only. A base drawn at the
   wrong height fails one side of the bracket. (The brainstorm's "cloud-only
   depth render" does not exist: volumetrics write no depth.)
-* **Extinction vs visibility_km.** Each peak's contrast, re-run with the fog
-  density set by Koschmieder (beta = 3.912 / V, re-implemented here, not
-  imported from the producer) at 50 km and at 10 km. Each copy, at its own
-  unchanged range, must lose a stated share of its contrast on the hazy day.
-  A far/near ratio cannot order the two days: at V = 10 km the 19.9 km peak is
-  already at the fog's 0.92 opacity cap, so it stops fading. ``FogDensity`` is
-  NOT a per-metre extinction: the engine divides it by 1000 per centimetre,
-  so beta (1/m) = FogDensity / 10, and the rig renders at that density.
+* **Extinction vs visibility_km.** The near peak's contrast, re-run with the
+  fog density set by Koschmieder (beta = 3.912 / V, re-implemented here, not
+  imported from the producer) at 50 km and at 10 km. One peak at one range,
+  so only the air differs; the hazy day must keep at most a stated share of
+  the clear day's contrast. The far peak cannot grade this: at the true
+  density it sits on the fog's 0.92 opacity cap on both days. ``FogDensity``
+  is NOT a per-metre extinction, see UE_FOG_DENSITY_PER_EXTINCTION.
 * **Wet-surface null test.** The same still with ``-precip=rain`` and
   ``-precip=none``. The terrain band must change (the wetness scalar
   reached a material parameter -- and ``look_applied`` must not say the
@@ -207,13 +206,6 @@ LOOK_THRESHOLDS = {
     "cloud_min_changed_px": 2000,
     #: ... and at most this many in the band it cannot reach.
     "cloud_max_leak_px": 500,
-    #: Each peak must lose this share of its clear-day (50 km) contrast on the
-    #: hazy (10 km) day. A fog density that is not an extinction shows no
-    #: order. The 0.10 was stated on a far/near ratio on 5.5. Measured
-    #: 2026-11-04 on 5.7.4: good 0.57 near, 0.56 far at the engine's true
-    #: density; bad 0.07 near, the same pair at a tenth of it (the density
-    #: this rig used to hand the engine). The number stands.
-    "visibility_min_ratio_drop": 0.10,
     #: Rain on/off must change this many terrain-band pixels ...
     "wet_min_changed_px": 2000,
     #: ... and this few sky-band pixels (the null: sky does not get wet).
@@ -238,15 +230,16 @@ def koschmieder_fog_density(visibility_km: float) -> float:
     return KOSCHMIEDER / (1000.0 * float(visibility_km))
 
 
-#: UExponentialHeightFogComponent.FogDensity per 1/m of extinction. UE 5.7
-#: SceneCore.cpp: Density = FogDensity / 1000.0f, per centimetre, so the value
-#: is ten times beta. Handing it beta drew a "10 km" day of about 100 km.
-ENGINE_FOG_PER_BETA = 10.0
+#: UE FogDensity for one 1/m of extinction. FogDensity is not 1/m: SceneCore
+#: divides it by 1000 per cm and HeightFogCommon integrates ln 2 of it in base
+#: 2, so beta = FogDensity * 0.1 * ln(2)^2 per metre at this scene's near-zero
+#: falloff. Read on the 5.7.4 sources.
+UE_FOG_DENSITY_PER_EXTINCTION = 1.0 / (0.1 * math.log(2.0) ** 2)
 
 
 def engine_fog_density(visibility_km: float) -> float:
     """The -fog-density that draws this visibility on the engine."""
-    return ENGINE_FOG_PER_BETA * koschmieder_fog_density(visibility_km)
+    return koschmieder_fog_density(visibility_km) * UE_FOG_DENSITY_PER_EXTINCTION
 
 
 #: The look control renders (--look): one switch per pair, everything else
@@ -267,13 +260,6 @@ LOOK_RUNS = {
         "-seconds=2", f"-fog-density={engine_fog_density(VISIBILITY_CLEAR_KM):.6g}"]),
     "visibility_hazy": ("terrain", [
         "-seconds=2", f"-fog-density={engine_fog_density(VISIBILITY_HAZY_KM):.6g}"]),
-    # The far peak of each, with the near copy that hides it left out.
-    "visibility_clear_far": ("terrain", [
-        "-seconds=2", "-HideNearTerrain",
-        f"-fog-density={engine_fog_density(VISIBILITY_CLEAR_KM):.6g}"]),
-    "visibility_hazy_far": ("terrain", [
-        "-seconds=2", "-HideNearTerrain",
-        f"-fog-density={engine_fog_density(VISIBILITY_HAZY_KM):.6g}"]),
     "wet": ("terrain", ["-seconds=2", "-precip=rain"]),
     "wet_control": ("terrain", ["-seconds=2", "-precip=none"]),
     "night": ("terrain", ["-sun-elev=-12", "-sun-azim=180"]),
@@ -631,39 +617,36 @@ def peak_contrasts(frames_dir: Path, far_dir: Optional[Path] = None) -> Optional
 
 
 VISIBILITY_MEASUREMENT = (
-    f"each peak's contrast at -fog-density = "
-    f"{ENGINE_FOG_PER_BETA:g} * 3.912/(1000 V) for V = {VISIBILITY_CLEAR_KM:g} km and "
-    f"{VISIBILITY_HAZY_KM:g} km; "
-    "each peak must lose "
-    f"{LOOK_THRESHOLDS['visibility_min_ratio_drop']:g} of its clear contrast on the "
-    "hazy day, both near contrasts above "
-    f"{THRESHOLDS['min_near_contrast']:g}")
+    f"the near peak's contrast at the -fog-density of V = {VISIBILITY_CLEAR_KM:g} km and "
+    f"{VISIBILITY_HAZY_KM:g} km (Koschmieder, in engine units): the hazy day must keep at "
+    f"most {THRESHOLDS['max_extinction_ratio']:g} of the clear day's, the clear contrast "
+    f"above {THRESHOLDS['min_near_contrast']:g}. One peak at one range, so only the air "
+    "differs; the far peak sits on the fog's opacity cap on both days")
 
 
-def measure_extinction_vs_visibility(clear_dir: Path, hazy_dir: Path,
-                                     clear_far_dir: Optional[Path] = None,
-                                     hazy_far_dir: Optional[Path] = None) -> LookClause:
-    clear = peak_contrasts(clear_dir, clear_far_dir)
-    hazy = peak_contrasts(hazy_dir, hazy_far_dir)
+def measure_extinction_vs_visibility(clear_dir: Path, hazy_dir: Path) -> LookClause:
+    """Measured 2026-11-04 on 5.7.4: good 0.26 kept (118.7 to 30.3, the
+    gate6_r5 renders); bad 0.93, the same days with beta handed over
+    unconverted. The far peak in those r5 renders kept 0.97, which is why it
+    is not graded."""
+    clear = peak_contrasts(clear_dir)
+    hazy = peak_contrasts(hazy_dir)
     if clear is None or hazy is None:
         return LookClause("extinction follows visibility", "FAIL",
                           "a terrain peak is not in frame; nothing to measure",
                           VISIBILITY_MEASUREMENT)
     floor = THRESHOLDS["min_near_contrast"]
-    if clear["near"] < floor or hazy["near"] < floor:
+    if clear["near"] < floor:
         return LookClause("extinction follows visibility", "FAIL",
-                          f"near contrast {clear['near']:.1f} / {hazy['near']:.1f} "
-                          f"below {floor:g}; a quotient of noise",
-                          VISIBILITY_MEASUREMENT)
-    near_loss = 1.0 - hazy["near"] / clear["near"]
-    far_loss = 1.0 - hazy["far"] / clear["far"] if clear["far"] > 0 else 0.0
-    ok = min(near_loss, far_loss) >= LOOK_THRESHOLDS["visibility_min_ratio_drop"]
+                          f"clear-day near contrast {clear['near']:.1f} below {floor:g}; "
+                          f"a quotient of noise", VISIBILITY_MEASUREMENT)
+    kept = hazy["near"] / clear["near"]
+    ok = kept <= THRESHOLDS["max_extinction_ratio"]
     return LookClause(
         "extinction follows visibility", "PASS" if ok else "FAIL",
-        f"visibility {VISIBILITY_CLEAR_KM:g} km to {VISIBILITY_HAZY_KM:g} km: near peak "
-        f"{clear['near']:.1f} to {hazy['near']:.1f} (loses {near_loss:.2f}), far peak "
-        f"{clear['far']:.1f} to {hazy['far']:.1f} (loses {far_loss:.2f}); each must lose "
-        f"{LOOK_THRESHOLDS['visibility_min_ratio_drop']:g}; fog_density applied "
+        f"near peak contrast {clear['near']:.1f} at {VISIBILITY_CLEAR_KM:g} km visibility "
+        f"vs {hazy['near']:.1f} at {VISIBILITY_HAZY_KM:g} km (kept {kept:.2f}, threshold "
+        f"{THRESHOLDS['max_extinction_ratio']:g}; fog_density applied "
         f"{_look_applied(hazy_dir).get('fog', {}).get('fog_density', 'unrecorded')})",
         VISIBILITY_MEASUREMENT)
 
@@ -807,15 +790,12 @@ def look_clauses(out: Path) -> List[LookClause]:
                                   "renders cloud_above / cloud_below / cloud_control "
                                   "absent (no engine here, or --look not given)",
                                   CLOUD_MEASUREMENT))
-    if rendered("visibility_clear", "visibility_hazy",
-                "visibility_clear_far", "visibility_hazy_far"):
-        clauses.append(measure_extinction_vs_visibility(
-            out / "visibility_clear", out / "visibility_hazy",
-            out / "visibility_clear_far", out / "visibility_hazy_far"))
+    if rendered("visibility_clear", "visibility_hazy"):
+        clauses.append(measure_extinction_vs_visibility(out / "visibility_clear",
+                                                        out / "visibility_hazy"))
     else:
         clauses.append(LookClause("extinction follows visibility", "NOT RUN",
-                                  "renders visibility_clear / visibility_hazy "
-                                  "(and their _far pair) absent",
+                                  "renders visibility_clear / visibility_hazy absent",
                                   VISIBILITY_MEASUREMENT))
     if rendered("wet", "wet_control"):
         clauses.append(measure_wet_surface_null(out / "wet", out / "wet_control"))

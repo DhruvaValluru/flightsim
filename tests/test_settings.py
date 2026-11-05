@@ -27,7 +27,7 @@ from core.util.settings import (
 from webapp.runs import RunState, record_env_override, render_quality, weather_backend_flags
 from webapp.server import app
 
-CLEARED = sorted(flightsim_env_names() | {"GOOGLE_MAPS_API_KEY", "ANTHROPIC_API_KEY"})
+CLEARED = sorted(flightsim_env_names() | {"GOOGLE_MAPS_API_KEY", "ANTHROPIC_API_KEY", "UE_ROOT"})
 
 
 @pytest.fixture

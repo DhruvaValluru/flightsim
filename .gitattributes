@@ -43,3 +43,7 @@ docs/phase3/events_mac.log merge=union
 docs/phase3/events_windows.log merge=union
 tests/fixtures/engine_bundle_min/cited/** -text
 *.cmd text eol=crlf
+
+# D2: the vendored J-11A's hashes and licence text stay byte-exact on Windows.
+assets/fdm_root/aircraft/J11/** -text
+docs/phase3/packets/D1-SU-27SK-LICENSE.txt -text
