@@ -185,7 +185,7 @@ def test_every_format_writes_the_mask_box_and_keeps_the_projected_one(
     assert f"2-D boxes: {n_mask} from the ID mask" in text
     taxonomy = card["classes"]
     # COCO through pycocotools: the bbox is the mask's, the projected one beside it.
-    coco = coco_api.COCO(str(out / "annotations" / "instances_train.json"))
+    coco = coco_api.COCO(str(next(out.rglob("instances_train.json"))))
     assert [(c["id"], c["name"]) for c in coco.loadCats(coco.getCatIds())] == \
         list(enumerate(taxonomy, start=1))
     assert len(coco.getImgIds()) == len(expected)

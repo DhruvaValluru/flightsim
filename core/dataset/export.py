@@ -357,7 +357,7 @@ def bind_verification(directory) -> Path:
     verification = json.loads(record.read_text(encoding="utf-8"))
     verification[MANIFEST_DIGEST_KEY] = manifest_digest(directory)
     staged = record.with_name(f".{VERIFICATION_FILE}.{os.getpid()}.bind.tmp")
-    staged.write_text(json.dumps(verification, indent=1), encoding="utf-8")
+    staged.write_text(json.dumps(verification, indent=1), encoding="utf-8", newline="\n")
     os.replace(staged, record)
     return record
 
@@ -1150,7 +1150,7 @@ def export_coco(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
                             "conventions": "see DATASET_CARD.md"},
                    "licenses": licenses, "categories": categories, **content}
         (out / "annotations" / f"instances_{split}.json").write_text(
-            json.dumps(payload, indent=1), encoding="utf-8")
+            json.dumps(payload, indent=1), encoding="utf-8", newline="\n")
         counts[split] = len(content["images"])
     return counts
 
@@ -1254,7 +1254,7 @@ def export_kitti(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
         _place_image(sample, root / "image_2" / f"{sample.key}.png")
         lines = kitti_label_lines(sample)
         (root / "label_2" / f"{sample.key}.txt").write_text(
-            "".join(line + "\n" for line in lines), encoding="utf-8")
+            "".join(line + "\n" for line in lines), encoding="utf-8", newline="\n")
         calib = kitti_calib(sample.record)
         # S2: the frame's passes in the KITTI layout (flow_occ / flow_noc,
         # disp_occ_0, velodyne + velodyne_id, normals), only for a frame that
@@ -1267,7 +1267,7 @@ def export_kitti(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
             if "velodyne" in written:
                 calib = "\n".join(kitti_calib_velodyne() if line.startswith("Tr_velo_to_cam:")
                                   else line for line in calib.splitlines()) + "\n"
-        (root / "calib" / f"{sample.key}.txt").write_text(calib, encoding="utf-8")
+        (root / "calib" / f"{sample.key}.txt").write_text(calib, encoding="utf-8", newline="\n")
         counts[split] += 1
     return counts
 
@@ -1392,7 +1392,7 @@ def export_yolo(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
             if line:
                 lines.append(line)
         (out / "labels" / split / f"{sample.key}.txt").write_text(
-            "".join(line + "\n" for line in lines), encoding="utf-8")
+            "".join(line + "\n" for line in lines), encoding="utf-8", newline="\n")
         counts[split] += 1
     # No ``path`` key on purpose: Ultralytics resolves a relative
     # ``path`` against its datasets directory or the working directory,
@@ -1406,7 +1406,7 @@ def export_yolo(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
                                   "normalised cx cy w h"),
                           "path": "no path key: the split directories are beside this file",
                           "card": "../DATASET_CARD.md or DATASET_CARD.md"}}
-    (out / "data.yaml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    (out / "data.yaml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8", newline="\n")
     return counts
 
 
@@ -1526,12 +1526,12 @@ def export_voc(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
         split = sample_split(sample, splits)
         _place_image(sample, out / "JPEGImages" / f"{sample.key}.png")
         (out / "Annotations" / f"{sample.key}.xml").write_text(
-            voc_annotation_xml(sample, names), encoding="utf-8")
+            voc_annotation_xml(sample, names), encoding="utf-8", newline="\n")
         stems[split].append(sample.key)
         counts[split] += 1
     for split in SPLITS:
         (out / "ImageSets" / "Main" / f"{split}.txt").write_text(
-            "".join(stem + "\n" for stem in stems[split]), encoding="utf-8")
+            "".join(stem + "\n" for stem in stems[split]), encoding="utf-8", newline="\n")
     return counts
 
 
@@ -2362,12 +2362,12 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
     card["realised"] = card["summary"]["realised"]
     card["realised_words"] = card["summary"]["realised_words"]
     (out / PRESENCE_JSON).write_text(
-        json.dumps(presence_document(runs, samples), indent=1), encoding="utf-8")
+        json.dumps(presence_document(runs, samples), indent=1), encoding="utf-8", newline="\n")
     card["presence"] = {
         "file": PRESENCE_JSON,
         "runs": {run.name: run.manifest.get("presence") for run in runs},
     }
-    (out / CARD_JSON).write_text(json.dumps(card, indent=1), encoding="utf-8")
-    (out / CARD_MD).write_text(render_card(card), encoding="utf-8")
-    (out / CARD_HTML).write_text(render_card_html(card), encoding="utf-8")
+    (out / CARD_JSON).write_text(json.dumps(card, indent=1), encoding="utf-8", newline="\n")
+    (out / CARD_MD).write_text(render_card(card), encoding="utf-8", newline="\n")
+    (out / CARD_HTML).write_text(render_card_html(card), encoding="utf-8", newline="\n")
     return card
