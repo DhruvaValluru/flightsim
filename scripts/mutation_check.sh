@@ -441,7 +441,7 @@ mutate experiments/gate6_visual.py \
     || failures=$((failures+1))
 
 mutate experiments/gate6_visual.py \
-    '        excursion >= THRESHOLDS["min_control_excursion"],' \
+    '        excursion >= THRESHOLDS["min_control_excursion"] and manual_ok,' \
     '        True,  # MUTATED: a metric nothing can trip still validates' \
     "exposure control must trip the metric" tests/test_gate6_visual.py \
     || failures=$((failures+1))

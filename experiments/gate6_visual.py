@@ -147,14 +147,11 @@ THRESHOLDS = {
     "max_sky_excursion": 8.0,
     #: What the negative control must exceed. A metric that the known failure
     #: cannot trip is not a measurement (§1.7), so every gate run re-validates
-    #: its own instrument. On 5.5 the control was auto-exposure (34.4). On
-    #: 5.7.4 (2026-11-04) auto-exposure measures 5.85, level with manual's
-    #: 5.96, and no threshold separates them: the horizon stays level, the
-    #: frame mean moves 150.8 to 146.9, and nothing moves the meter. The
-    #: engine is right and the control had no failure to show, so the control
-    #: is now a one-stop step (57.90); auto-exposure is reported, not graded.
-    #: This shows the metric sees an exposure move. It does NOT show the
-    #: manual run would have caught auto-exposure breathing on this flight.
+    #: its own instrument. The control is auto-exposure, as on 5.5 (34.4). On
+    #: 5.7.4 this flight's frame barely changes with bank (5.85), so the control
+    #: renders the same shot with the plain going dark at EXPOSURE_STEP_AT_S, a
+    #: luminance step clear of the sky band: measured 29.62 under auto-exposure
+    #: and 5.84 under manual, which must hold under max_sky_excursion.
     "min_control_excursion": 16.0,
     #: The doublet must actually roll the aircraft, or "does not breathe when
     #: the aircraft banks" is being tested without any banking.
@@ -196,9 +193,9 @@ PEAK_PATCH_HALF = 20
 PEAK_PATCH_DROP = 24
 #: The block's contrast: its luminance spread between these percentiles.
 PEAK_SPREAD_PERCENTILES = (10, 90)
-#: The exposure step the control renders: a real one-stop move of the bias
-#: (commandlet default 11.0), the excursion a breathing exposure would make.
-EXPOSURE_STEP_BIAS = 12.0
+#: When the exposure control's plain goes dark (-GroundDarkAt), seconds into
+#: sky_excursion's window, leaving the meter the rest of the clip to chase it.
+EXPOSURE_STEP_AT_S = 10.0
 
 LOOK_THRESHOLDS = {
     #: Cloud on/off must change this many pixels in the band the layer's
@@ -444,23 +441,14 @@ def sky_excursion(frames_dir: Path) -> float:
     return max(means) - min(means)
 
 
-def _sky_mean(frames_dir: Path) -> float:
-    return float(luminance(load_rgb(_last_frame(frames_dir)))
-                 [SKY_BAND_ROWS[0]:SKY_BAND_ROWS[1], :].mean())
-
-
-def measure_exposure_control(control_dir: Path, still_dir: Optional[Path] = None,
-                             step_dir: Optional[Path] = None) -> Check:
+def measure_exposure_control(control_dir: Path, manual_dir: Optional[Path] = None) -> Check:
     """The metric must catch the failure it exists for, every run.
 
-    The control renders the same flight with the engine's default
-    auto-exposure -- exactly the metering §6.6 replaces. Without a step pair
-    the measurement has to trip on that alone. With ``still_dir`` and
-    ``step_dir`` (the same still one stop apart) the step is what must trip
-    it, and the auto-exposure excursion is reported beside it, NOT graded:
-    on 5.7.4 the frame this flight shows does not change with bank, so
-    nothing moves the meter (see THRESHOLDS). The step shows the metric can
-    see an exposure move; it does not show that auto-exposure would breathe.
+    The control renders the flight with the engine's default auto-exposure,
+    exactly the metering the manual exposure replaces, and the plain going
+    dark mid-shot, so the meter has something to chase: it must pump the sky
+    band past the line. ``manual_dir`` is the same shot under manual exposure,
+    which must hold, or the sky moved by itself and the step proves nothing.
     """
     manifest = json.loads((control_dir / "render.json").read_text(encoding="utf-8"))
     exposure = manifest.get("scene", {}).get("exposure", "")
@@ -469,22 +457,18 @@ def measure_exposure_control(control_dir: Path, still_dir: Optional[Path] = None
                      f"the control rendered with '{exposure}', not "
                      f"auto-exposure; it controls for nothing")
     excursion = sky_excursion(control_dir)
-    if still_dir is not None and step_dir is not None:
-        step = abs(_sky_mean(step_dir) - _sky_mean(still_dir))
-        return Check(
-            "exposure metric discriminates",
-            step >= THRESHOLDS["min_control_excursion"],
-            f"a one-stop exposure step moves the sky band {step:.2f}/255 (must "
-            f"exceed {THRESHOLDS['min_control_excursion']:g}); auto-exposure "
-            f"control, not graded: {excursion:.2f}/255, the frame gives the "
-            f"meter nothing to chase",
-        )
+    manual_note, manual_ok = "", True
+    if manual_dir is not None:
+        manual = sky_excursion(manual_dir)
+        manual_ok = manual <= THRESHOLDS["max_sky_excursion"]
+        manual_note = (f"; the same step under manual exposure {manual:.2f}/255 "
+                       f"(must stay under {THRESHOLDS['max_sky_excursion']:g})")
     return Check(
         "exposure metric discriminates",
-        excursion >= THRESHOLDS["min_control_excursion"],
+        excursion >= THRESHOLDS["min_control_excursion"] and manual_ok,
         f"auto-exposure control pumps the sky band {excursion:.2f}/255 "
         f"(must exceed {THRESHOLDS['min_control_excursion']:g} for the "
-        f"manual run's pass to mean anything)",
+        f"manual run's pass to mean anything){manual_note}",
     )
 
 
@@ -1242,12 +1226,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "extinction_control": ("terrain", ["-seconds=2", "-NoAerialPerspective"]),
         "extinction_control_far": ("terrain", ["-seconds=2", "-HideNearTerrain",
                                                "-NoAerialPerspective"]),
-        # The exposure control's step: the still, one stop up.
-        "still_step": ("terrain", ["-seconds=2", f"-exposure-bias={EXPOSURE_STEP_BIAS:g}"]),
         "shadow": ("shadow", ["-seconds=2"]),
         "shadow_hidden": ("shadow", ["-seconds=2", "-HideAircraft"]),
         # The exposure clause's negative control (see measure_exposure_control).
-        "full_auto": ("terrain", ["-AutoExposure"]),
+        "full_auto": ("terrain", ["-AutoExposure", f"-GroundDarkAt={EXPOSURE_STEP_AT_S:g}"]),
+        "full_step": ("terrain", [f"-GroundDarkAt={EXPOSURE_STEP_AT_S:g}"]),
     }
     if args.probe_sweep:
         biases = (parse_biases(args.probe_biases) if args.probe_biases
@@ -1337,7 +1320,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         measure_valley_shadow(still, still_ns),
         measure_aircraft_shadow(shadow, shadow_hidden),
         measure_exposure(out / "full"),
-        measure_exposure_control(out / "full_auto", out / "still", out / "still_step"),
+        measure_exposure_control(out / "full_auto", out / "full_step"),
     ]
     for check in checks:
         print(check.render())

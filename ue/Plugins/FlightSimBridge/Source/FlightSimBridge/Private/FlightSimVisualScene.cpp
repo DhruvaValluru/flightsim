@@ -1842,6 +1842,21 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 	return true;
 }
 
+void FFlightSimVisualScene::DarkenGround()
+{
+	UProceduralMeshComponent* Ground = Cast<UProceduralMeshComponent>(FlatGround);
+	FProcMeshSection* Section = Ground != nullptr ? Ground->GetProcMeshSection(0) : nullptr;
+	if (Section == nullptr)
+	{
+		return;
+	}
+	for (FProcMeshVertex& Vertex : Section->ProcVertexBuffer)
+	{
+		Vertex.Color = FColor(2, 2, 2, 255);
+	}
+	Ground->SetProcMeshSection(0, *Section);
+}
+
 UTexture2D* FFlightSimVisualScene::LoadNightLights(const FString& SidecarPath,
                                                    double& LuminanceNits)
 {

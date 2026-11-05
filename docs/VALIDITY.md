@@ -757,13 +757,11 @@ stay until the probe on 5.7.4 replaces them from its own file:
     **118.7 to 30.3, kept 0.26**, threshold 0.75. The far peak goes 13.7 to
     13.3 on the same renders, flat on the fog's opacity cap, so it is not
     graded.
-  * `exposure metric discriminates` passes on a **substituted control that
-    needs the owner's review.** Its auto-exposure control reads 5.85/255
-    against manual's 5.96 (34.4 on 5.5): the horizon stays level
-    and the frame mean moves 150.8 to 146.9 (`diag3/g1` in the round-3 worktree), so the meter has nothing
-    to chase. The control is now a one-stop step, **57.90/255** (threshold 16
-    unchanged). That shows the metric sees an exposure move; it does not show
-    this flight would catch auto-exposure breathing.
+  * `exposure metric discriminates` grades real auto-exposure against the
+    original line of 16. This flight's frame barely changes with bank (5.85/255,
+    against 34.4 on 5.5), so the control now darkens the plain at 10 s with
+    `-GroundDarkAt`, a luminance step clear of the sky band: **29.62/255** under
+    auto-exposure and **5.84/255** under manual (`runs/p3/B-1/exprig`).
   * `cloud base bracket` passes with `-NoCloudShadows` on its three renders
     (0 ground px leak), which grades where the layer is drawn. **A
     defect stays open beside that pass:** with cloud shadows on, the plain

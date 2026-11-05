@@ -541,6 +541,13 @@ private:
 	// A procedural quad since B4 round 2 (the scaled engine Plane read a
 	// zero GBuffer normal on UE 5.7); the weather look sets its material.
 	UMeshComponent* FlatGround = nullptr;
+
+public:
+	// The plain's vertex colour to near black (-GroundDarkAt, Gate 6's
+	// exposure control). Nothing else in the scene changes.
+	void DarkenGround();
+
+private:
 	UMaterialInstanceDynamic* LensDropsInstance = nullptr;
 	UMaterialInstanceDynamic* IceInstance = nullptr;
 	UMaterialInstanceDynamic* LightningInstance = nullptr;

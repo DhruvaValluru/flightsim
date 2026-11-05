@@ -1067,35 +1067,35 @@ def test_contrast_is_inside_the_rock_not_against_the_sky(tmp_path):
     assert contrasts["far"] == pytest.approx(HAZED_ROCK, abs=1)
 
 
-def _sky_still(directory, level):
+def _sky_clip(directory, exposure, sky_by_t):
     directory.mkdir()
-    write_png_rgb(directory / "frame_0000.png", frame(sky=(level, level, level)))
-    return manifest_for(directory, [{"frame": "frame_0000.png", "t": 1.0, "roll_deg": 0.0,
-                                     "landmarks": {}}])
+    records = []
+    for index, (seconds, sky) in enumerate(sky_by_t):
+        name = f"frame_{index:04d}.png"
+        write_png_rgb(directory / name, frame(sky=(sky, sky, sky)))
+        records.append({"frame": name, "t": seconds, "roll_deg": 0.0, "landmarks": {}})
+    manifest_for(directory, records)
+    manifest = json.loads((directory / "render.json").read_text(encoding="utf-8"))
+    manifest["scene"]["exposure"] = exposure
+    (directory / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return directory
 
 
-def test_the_exposure_step_decides_the_control_and_auto_is_only_reported(tmp_path):
-    auto = tmp_path / "auto"
-    auto.mkdir()
-    write_png_rgb(auto / "frame_0000.png", frame())
-    manifest_for(auto, [{"frame": "frame_0000.png", "t": 5.0, "roll_deg": 0.0,
-                         "landmarks": {}}])
-    manifest = json.loads((auto / "render.json").read_text(encoding="utf-8"))
-    manifest["scene"]["exposure"] = "auto (default metering)"
-    (auto / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
-    still = _sky_still(tmp_path / "still", 100)
-    stepped = _sky_still(tmp_path / "step", 160)
-    flat = _sky_still(tmp_path / "flat", 104)
-    check = measure_exposure_control(auto, still, stepped)
-    assert check.ok and "not graded" in check.detail
-    assert not measure_exposure_control(auto, still, flat).ok
-    assert not measure_exposure_control(auto).ok      # auto alone, flat: still fails
+def test_the_control_is_auto_exposure_chasing_the_step_and_manual_must_hold(tmp_path):
+    pumps = _sky_clip(tmp_path / "pumps", "auto (default metering)", [(5.0, 100), (15.0, 135)])
+    flat = _sky_clip(tmp_path / "flat", "auto (default metering)", [(5.0, 100), (15.0, 104)])
+    holds = _sky_clip(tmp_path / "holds", "manual, AutoExposureBias 11.0", [(5.0, 100), (15.0, 104)])
+    drifts = _sky_clip(tmp_path / "drifts", "manual, AutoExposureBias 11.0", [(5.0, 100), (15.0, 135)])
+    assert measure_exposure_control(pumps, holds).ok
+    assert not measure_exposure_control(flat, holds).ok      # the meter did not move
+    assert not measure_exposure_control(pumps, drifts).ok    # the sky moved by itself
+    assert not measure_exposure_control(holds, holds).ok     # no auto-exposure in the control
 
 
 def _measured_tree(out):
-    for name in ("still", "still_far", "still_noshadow", "still_step", "shadow",
+    for name in ("still", "still_far", "still_noshadow", "shadow",
                  "shadow_hidden", "extinction_control", "extinction_control_far",
-                 "full", "full_auto"):
+                 "full", "full_auto", "full_step"):
         directory = out / name
         directory.mkdir(parents=True)
         write_png_rgb(directory / "frame_0000.png", frame())

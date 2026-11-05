@@ -1301,6 +1301,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// metering that responds to the scene. A metric no failure can trip is
 	// not a measurement (§1.7).
 	const bool bAutoExposure = FParse::Param(*Params, TEXT("AutoExposure"));
+	// -GroundDarkAt=<s> (Gate 6's exposure control): the plain goes near black
+	// at that simulation time, a luminance step inside one shot that leaves the
+	// sky alone, so a meter has something to chase. On 5.7 this flight's frame
+	// does not change with bank, so nothing else moves it.
+	double GroundDarkAt = -1.0;
+	FParse::Value(*Params, TEXT("GroundDarkAt="), GroundDarkAt);
+	bool bGroundDarkened = false;
 	FString TerrainPath;
 	FParse::Value(*Params, TEXT("terrain="), TerrainPath);
 	double SecondsOverride = 0.0;
@@ -4328,6 +4335,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				return Fail(TEXT("linear passes: could not read the velocity cross-check back"));
 			}
 		}
+		if (GroundDarkAt >= 0.0 && !bGroundDarkened &&
+		    Scenario.ReadProperty(TEXT("simulation/sim-time-sec")) >= GroundDarkAt)
+		{
+			VisualScene.DarkenGround();
+			bGroundDarkened = true;
+		}
 		Capture->CaptureScene();
 		FlushRenderingCommands();
 
@@ -6579,6 +6592,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Scene->SetBoolField(TEXT("dynamic_shadows"), !bNoShadows);
 	Scene->SetBoolField(TEXT("aircraft_hidden"), bHideAircraft);
 	Scene->SetBoolField(TEXT("near_terrain_hidden"), FParse::Param(*Params, TEXT("HideNearTerrain")));
+	Scene->SetNumberField(TEXT("ground_darkened_at_s"), bGroundDarkened ? GroundDarkAt : -1.0);
 	Scene->SetBoolField(TEXT("aerial_perspective_off"), FParse::Param(*Params, TEXT("NoAerialPerspective")));
 	// Visual plan V0: which renderer configuration produced these frames.
 	// Numbers and ASCII only (gotcha 13).
