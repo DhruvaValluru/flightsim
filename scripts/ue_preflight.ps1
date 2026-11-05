@@ -3,6 +3,10 @@
 #
 # Run from the repo root in PowerShell:  .\scripts\ue_preflight.ps1
 
+# -FromLauncher: the launcher builds the materials after this step, so their
+# absence on a fresh download is reported, not failed.
+param([switch]$FromLauncher)
+
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $script:status = 0
@@ -172,6 +176,8 @@ $haveMaterials = @("M_VertexColor", "M_TerrainImagery") |
     Where-Object { Test-Path (Join-Path $materials "$_.uasset") }
 if ($haveMaterials.Count -eq 2) {
     Say "material assets" "M_VertexColor + M_TerrainImagery present"
+} elseif ($FromLauncher) {
+    Say "material assets" "missing -- the launcher's materials step builds them next"
 } else {
     Fail "material assets" "missing -- run the build-time step below"
     Write-Host ("        & '$editor' '" + (Join-Path $repo "ue\FlightSim.uproject") +

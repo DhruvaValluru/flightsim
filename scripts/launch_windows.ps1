@@ -123,7 +123,7 @@ Invoke-Step 1 "install" {
 
 Invoke-Step 2 "preflight" {
     $out = Invoke-Logged "powershell" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-        (Join-Path $PSScriptRoot "ue_preflight.ps1"))
+        (Join-Path $PSScriptRoot "ue_preflight.ps1"), "-FromLauncher")
     if ($script:lastExit -ne 0) { Stop-With "preflight" (Find-NamedReason $out "toolchain.pin_unreadable") }
 }
 
