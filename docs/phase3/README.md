@@ -31,7 +31,11 @@ prompts here are the executable version of them.
 3. The venv the scripts expect, at the repo root:
    Mac `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt`
    Windows `py -m venv .venv; .venv\Scripts\pip install -r requirements.txt -r requirements-dev.txt`
-4. In a terminal in the checkout, leave running: `claude remote-control`
+4. Remote Control is turned on *inside* the working session, not in a
+   separate window: after `claude` starts, type `/remote-control`, then
+   `/rename p3-mac` (or `p3-windows`), then `/list-agents` to confirm the
+   other machine's session appears. A separate `claude remote-control`
+   window is a different session and does not connect the working one.
 
 ## Windows only
 
@@ -47,11 +51,12 @@ prompts here are the executable version of them.
 
 ## Start the run
 
-1. **Windows first.** Open Claude Code in the checkout, paste
+1. **Windows first.** Open Claude Code in the checkout, type
+   `/remote-control` and `/rename p3-windows`, then paste
    `docs/phase3/PROMPT_WINDOWS.md` (everything under the line). It writes
    `decisions.md`, finds the Mac session, and sends `P3 go A`.
-2. **Mac second.** Open Claude Code in the checkout, paste
-   `docs/phase3/PROMPT_MAC.md`. It opens the three progress windows and waits
+2. **Mac second.** Open Claude Code in the checkout, type `/remote-control`
+   and `/rename p3-mac`, then paste `docs/phase3/PROMPT_MAC.md`. It opens the three progress windows and waits
    for `P3 go A`.
 3. Watch the windows. Window 1: a bar per letter, what each machine is doing
    with elapsed time, the last message in flight, failures against caps.
@@ -65,3 +70,33 @@ prompts here are the executable version of them.
 Start it again with the same prompt. All state is in the repo; the session
 reads `docs/phase3/state/` and continues from the first box not marked
 `verdict: PASS` or `cut`. Nothing depends on memory.
+
+## Finishing run (restart after 5 Nov 2026)
+
+Three things were added after the first run, and they change what "done"
+means:
+
+| Path | What |
+|---|---|
+| `tests/test_phase3_gates.py` | the definition of done: `pytest -m gate_<L>` passes when every box of the letter is ticked (or cut by decision) with a PASS state and run id, and every gate line is ticked with a PASS or owner-pending row in the gate log. Excluded from the default suite; run by name. |
+| `tests/test_phase3_decisions.py` | the code matches the decision log: engine pin, tiles on, storm on. In the default suite. |
+| `scripts/windows_env_check.ps1` | asserts every Windows precondition by name and writes `docs/phase3/machine.json`; the runner refuses to prove anything without a fresh `ok: true`. |
+| `scripts/phase3_repro.py <box>` | reproduce, diff against last green, localize; written to `packets/<box>-repro.md` and read by triage before any re-brainstorm. The runner records `green_commit` on every PASS. |
+
+Rules for the finishing run:
+
+1. A letter is finished only when `pytest -m gate_<L>` passes on the
+   laptop and the same commit is green on CI. No other statement counts.
+2. Windows first: the engine-side and WINDOWS checks of a letter are
+   scheduled before the Mac's work on the next letter, so the long renders
+   are never the last thing in the queue.
+3. Verification is never skipped for budget: a budget stop halts at the
+   next checkpoint with a written reason; it does not thin the checks.
+4. Every failure gets a repro packet before anyone proposes a new approach.
+
+What is left (from the status board, 5 Nov): A10 gate re-run; B4 Gate 6
+clauses (code); C7 optional; E2 E3 E5 E6 Windows checks; F1 ue_host run;
+F2 and F4 (owner); F5; gate lines ticked for every letter; CI green.
+
+Start order: Windows runs `scripts\windows_env_check.ps1` first, then both
+sessions get the "Finishing run" section at the end of their prompt.
