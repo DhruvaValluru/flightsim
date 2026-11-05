@@ -8908,8 +8908,13 @@ def verify_amodal_contains_visible(manifest: Dict, run_dir=None) -> Check:
                 return Check("amodal_contains_visible", FAIL,
                              f"{where}: amodal_ratio {ratio} is not the checker's {own_ratio}",
                              failure=FAIL_AMODAL)
+            # visible_fraction rolls up the object's components (measure_object);
+            # the alone file and this ratio are its own id alone, so the two
+            # answer one question only for an object with no components.
             fraction = entry.get("visible_fraction")
-            if own_ratio is not None and isinstance(fraction, (int, float)) and fraction > 0 \
+            has_parts = any(isinstance(e, dict) and e.get("parent") == entry.get("id")
+                            for e in (record.get("labels") or {}).get("objects") or [])
+            if own_ratio is not None and not has_parts and isinstance(fraction, (int, float)) and fraction > 0 \
                     and abs(own_ratio - 1.0 / float(fraction)) > 1e-6 * own_ratio:
                 return Check("amodal_contains_visible", FAIL,
                              f"{where}: amodal_ratio {own_ratio:.6f} is not 1 / visible_fraction "

@@ -27,6 +27,8 @@
     "panel_blocker",
     ".*hotspot.*",
     "Beacon.*",
+    "landinglight",
+    "taxilight",
     "RearNavLight",
     "nav-light.*"
   ],
