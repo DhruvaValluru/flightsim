@@ -63,7 +63,7 @@ def test_cells_are_the_product_of_two_aircraft_and_two_environments():
 
 def _spec_dict():
     return {
-        "aircraft": {"value": "c172p", "source": "default", "from": "compiler"},
+        "aircraft": {"aircraft": {"value": "c172p", "source": "default", "from": "compiler"}},
         "altitude": {"value": 1500.0, "source": "default"},
         "airspeed": {"value": 110.0, "source": "default"},
         "lighting": {"preset": {"value": "noon", "source": "default"}},
@@ -76,8 +76,8 @@ def test_apply_cell_changes_only_the_aircraft():
     for cell in MATRIX:
         spec = copy.deepcopy(before)
         rts.apply_cell(spec, cell)
-        assert spec["aircraft"]["value"] == cell["aircraft"]
-        assert spec["aircraft"]["source"] == "user"
+        assert spec["aircraft"]["aircraft"]["value"] == cell["aircraft"]
+        assert spec["aircraft"]["aircraft"]["source"] == "user"
         rest_before = {k: v for k, v in before.items() if k != "aircraft"}
         rest_after = {k: v for k, v in spec.items() if k != "aircraft"}
         assert rest_after == rest_before

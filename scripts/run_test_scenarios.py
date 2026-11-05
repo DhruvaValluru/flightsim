@@ -309,10 +309,10 @@ def apply_cell(spec_dict: dict, cell: dict) -> None:
     (the shape apply_lighting writes: value, source, from). Nothing else on
     the spec is touched; the environment is a /compile field, not a spec
     edit."""
-    entry = spec_dict.get("aircraft")
-    if not isinstance(entry, dict):
-        entry = {}
-        spec_dict["aircraft"] = entry
+    # ScenarioSpec.to_dict nests it: spec["aircraft"]["aircraft"] is the field
+    # (packet D6-1: writing one level up left every cell on the B747).
+    block = spec_dict.setdefault("aircraft", {})
+    entry = block.setdefault("aircraft", {})
     entry.update(value=cell["aircraft"], source="user",
                  **{"from": "scripts/run_test_scenarios.py --matrix"})
 
