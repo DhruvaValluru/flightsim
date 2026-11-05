@@ -79,7 +79,7 @@ sitting 0.4 m from its label (it was ~25 m).
   - Check: `python -m flightsim.verify runs/<id>` shows 7 of 7 PASS.
   - Check: `label_diagnose.py` shows `tight null: 0`.
   - Check: `pytest -q tests/test_engine_bundle_golden.py` passes.
-- [ ] **A13 · NEXT.md says only what was measured**
+- [x] **A13 · NEXT.md says only what was measured**
 
 ### GATE A
 - [ ] Tests pass on all three operating systems.

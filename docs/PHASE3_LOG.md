@@ -115,3 +115,11 @@ verify counts, the `component_coverage` detail and the card diff keys.
 | C4 | C-1 | re-prove 2 on e6e33c6e+30945bf5: A7 re-imported body + stores (uassets 17:09), one A-4 still | mask ids 64/65/66 (21/8/22 px), aircraft 462 px tight box filled; `component_boxes` PASS, `component_coverage` PASS, `label_geometry_3d` PASS, `host_determinism` PASS; verify exit 0 | PASS |
 | C7 | C-1 | step 6 (gear-down c172p render) | deferred: budget (owner rule; C4 renders, decision 16 condition met) | |
 | B4 | B-1 | round 2 (215813cd merged; MAIN stamp e952c275; M_VertexColor rebuilt with Wetness): `gate6_visual.py --look` measure and beauty in the builder worktree | wet surface PASS (22443 px); ground shadow 79 px (thr 300); auto-exposure control 4.62/255; albedo unfixed (file claimed); range extinction 1.07, extinction-follows-visibility 0.09 and night ground 1.87/255 now FAIL on the lit ground; `GATE 6: FAIL` | packet B4-3; round 3 deferred: budget |
+
+## Letter-gates pass (tip, build ee7ffe53, 2026-11-04)
+
+| Box | Run | Check | Result | Note |
+|---|---|---|---|---|
+| A10 | G | one-line campaign 34ecd500da42 | `done`, tier llm, 12 of 12 verified; card and download refuse `aircraft.licence_dataset` | packet A10-4, owner |
+| A13 | G | NEXT.md re-read after e042916e; `tests/test_platform.py` | no contradiction with TOOLCHAIN.md; run id 7237db488652 cited; 14 passed | PASS |
+| B4 | G | `gate6_visual.py --look` on the tip | albedo 0.000 % PASS; `GATE 6: FAIL` on five threshold clauses + old footage | owner |
