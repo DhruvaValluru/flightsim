@@ -132,7 +132,8 @@ def test_settings_script_is_served():
     response = TestClient(app).get("/settings.js")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/javascript")
-    assert response.text == SCRIPT
+    # Line endings follow the checkout (CRLF on Windows); the content is the check.
+    assert response.text.replace(chr(13), "") == SCRIPT
 
 
 def test_capture_passes_slot_is_reserved():

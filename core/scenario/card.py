@@ -51,6 +51,7 @@ def discovered_engine_mixture(spec: ScenarioSpec) -> float:
     import jsbsim
 
     from core.fdm import units as u
+    from core.fdm.aircraft import resolve
 
     aircraft = str(spec.aircraft.value)
     altitude_m = float(spec.altitude.value)
@@ -59,7 +60,9 @@ def discovered_engine_mixture(spec: ScenarioSpec) -> float:
         return _MIXTURE_CACHE[key]
 
     def attempt(mixture: float):
-        fdm = jsbsim.FGFDMExec(jsbsim.get_default_root_dir())
+        # The resolver, not the wheel's stock root: an airframe this repo
+        # vendors (the J-11A) is not in the wheel (packet D6-1).
+        fdm = jsbsim.FGFDMExec(str(resolve(aircraft).root_dir))
         # Quiet, as core.fdm's own instance is: at the library's default
         # level load_model prints the whole aircraft description (16 KB
         # for the A320, measured in every campaign capture.log) -- the

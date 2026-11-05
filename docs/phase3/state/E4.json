@@ -9,8 +9,10 @@
     "POST /run {} against the live server renders the A-4 clip (desert tiles, storm, chase) and verify has no FAIL"
   ],
   "pushed_commit": "a2ed7704",
+  "run_id": "E-1",
   "stage": "pushed",
   "unit": "E4+E5",
-  "updated": "2026-11-04T18:28:46",
+  "updated": "2026-11-04T19:50:07",
+  "verdict": "PASS",
   "worktree": "../p3-E4"
 }

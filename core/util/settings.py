@@ -326,11 +326,11 @@ def cesium_status() -> Dict[str, Any]:
     root = find_ue_root()
     plugin = None
     if root is not None:
-        for candidate in (root / "Engine" / "Plugins" / "Marketplace" / "CesiumForUnreal",
-                          root / "Engine" / "Plugins" / "Marketplace" / "cesium-unreal"):
-            if (candidate / "CesiumForUnreal.uplugin").is_file():
-                plugin = candidate
-                break
+        # The Epic launcher installs under a hashed folder name
+        # (Cesiumfo9eaf76ca58f3V10), so look for the .uplugin, not a folder name.
+        marketplace = root / "Engine" / "Plugins" / "Marketplace"
+        found = sorted(marketplace.glob("*/CesiumForUnreal.uplugin"))
+        plugin = found[0].parent if found else None
     if version is None:
         return {"ok": False, "name": "cesium_for_unreal", "version": None,
                 "message": "cesium_for_unreal: toolchain.json records no pin"}

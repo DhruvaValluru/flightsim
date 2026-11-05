@@ -151,7 +151,7 @@ Two rules to keep in mind:
   - So far there is no J-15, J-35 or J-11 in FlightGear's official add-on collection.
     One early Su-27SK project includes a J-11A; its licence still needs checking.
   - Recommended: J-11A only, or **cut it** if the licence isn't clean.
-- [ ] **D2 · First new aircraft added** (with payload from day one)
+- [x] **D2 · First new aircraft added** (with payload from day one)
   - Check: its config test passes, it flies level in a headless run, and it
     imports by itself.
 - [ ] **D3 · (If two were chosen) second new aircraft**
@@ -160,7 +160,7 @@ Two rules to keep in mind:
 - [x] **D5 · The two places are prepared once and reused** — *you decide whether
   typing the Google tiles key once is acceptable*
   - Check: a second launch says "up to date" for both.
-- [ ] **D6 · Every aircraft × place combination runs with no special tweaks** 🪟
+- [x] **D6 · Every aircraft × place combination runs with no special tweaks** 🪟
   - Check: every combination passes verify and has payload boxes.
 
 ### GATE D

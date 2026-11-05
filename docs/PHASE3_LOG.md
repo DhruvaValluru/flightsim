@@ -127,3 +127,4 @@ verify counts, the `component_coverage` detail and the card diff keys.
 | D5 | D-1 | `bake_terrain.py --places` twice | `up to date` for both, exit 0 | PASS |
 | D6 | D-1 | `run_test_scenarios.py --matrix --still --compiler regex` | `matrix FAIL`: all four cells flew the B747 (`apply_cell` writes the wrong key); runs 5835af44a0de, eaf9c4b8f369, a5f4d4e34e6e, 16342bb78e61 | packet D6-1 |
 | D2 | D-1 | J-11 config test, level flight, import | level flight OK; 2 CRLF test failures; import not reached | packet D2-1 |
+| D2, D6 | D-1 | matrix re-run after the fixes | all four cells flew their own aircraft, verify ok, `component_coverage` PASS; J-11 imported itself | PASS, see gate_log_D.md |

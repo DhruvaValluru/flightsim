@@ -8,7 +8,9 @@
     "tests/test_gate6_visual.py",
     "ue/Config/DefaultEngine.ini",
     "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp",
-    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimVisualScene.cpp"
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimVisualScene.cpp",
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimVisualScene.h",
+    "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimVisualScene.h"
   ],
   "failures": [
     "run B-1 packet docs/phase3/packets/B4-1.md: gate6 --look measure and beauty FAIL (range extinction ratio 1.12, peaks shadow 210 px, ground shadow 143 px, exposure metric 4.52) because the Gate 6 terrain is not drawn on today's build while the 6 Oct renders of the same engine show it; card, settings, RHI identical; Windows builder bisects the merged engine changes and the A6 material rebuild",
@@ -30,7 +32,7 @@
   "run_id": "B-1",
   "stage": "building",
   "unit": "B4",
-  "updated": "2026-11-04T19:36:05",
+  "updated": "2026-11-04T19:44:12",
   "verdict": "FAIL",
   "windows_build": "215813cd",
   "worktree": "../p3w-B4r3"

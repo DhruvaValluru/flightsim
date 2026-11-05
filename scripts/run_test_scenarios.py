@@ -289,7 +289,16 @@ MATRIX_CARD_ALLOW = (
     "derived_aircraft", "loading_properties", "engine_mixture",
     "reference_speeds", "airspeed_kt", "atmosphere_properties",
     "run_id", "created",
+    # They follow the place: the thermal field is built from the scene's
+    # origin and surface, and the look's seed and surface are per run and
+    # per place (measured, run A-2 matrix: the aircraft alone changes none).
+    "thermals", "weather_look.seed", "weather_look.surface",
 )
+
+#: Camera keys that follow the scene or the flight: the projected origin
+#: and the pose track solved over each aircraft's own flight. Every other
+#: camera key must stay equal across cells.
+MATRIX_CAMERA_SCENE_KEYS = ("origin_x_m", "origin_y_m", "poses")
 #: The verifier's "could not run" status (core.capture.verify.NOT_RUN is
 #: "NOT RUN"); both spellings are read, neither is a pass.
 NOT_RUN_STATUSES = ("NOT RUN", "NOT_RUN")
@@ -332,6 +341,15 @@ def cell_compile_body(cell: dict, compiler: str, still: bool,
     return body
 
 
+def comparable_card(card: dict) -> dict:
+    """The card without each camera's scene origin and solved poses, so the cameras
+    stay compared key by key instead of being allowed wholesale."""
+    out = dict(card)
+    out["cameras"] = [{k: v for k, v in cam.items() if k not in MATRIX_CAMERA_SCENE_KEYS}
+                      for cam in card.get("cameras") or []]
+    return out
+
+
 def card_diff(a: dict, b: dict, prefix: str = "") -> list:
     """The dotted names of every key whose value differs between the two
     cards (recursing into nested dicts; a key present on one side only
@@ -365,7 +383,7 @@ def check_cards(cards: list) -> list:
         return []
     bad = set()
     for other in cards[1:]:
-        bad.update(k for k in card_diff(cards[0], other) if not _allowed(k))
+        bad.update(k for k in card_diff(comparable_card(cards[0]), comparable_card(other)) if not _allowed(k))
     return sorted(bad)
 
 
