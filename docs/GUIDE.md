@@ -45,6 +45,8 @@ are the ones the project ships with.
 
 Pick an **Environment**: Desert is the Grand Canyon, Forest is Yosemite. Both
 were prepared by the launcher, so the first run over either is ready to go.
+Beside it, the **Aircraft** picker lists every aircraft you can film, with the
+Cessna 172P already chosen.
 
 Press **Capture**. With nothing typed, the run is:
 
@@ -56,9 +58,8 @@ Press **Capture**. With nothing typed, the run is:
 - storm weather, which is the default, with Google tiles as the ground.
 
 To change any of that, type a prompt first (an aircraft, a place, a camera, a
-time of day) and press **Interpret**; then press Capture. The J-11A is the
-other aircraft you can ask for. If the prompt leaves something out, the app
-asks one question and waits for your answer.
+time of day) and press **Interpret**; then press Capture. If the prompt leaves
+something out, the app asks one question and waits for your answer.
 
 ## 5. What to expect
 

@@ -1395,6 +1395,70 @@ def apply_environment_preset(spec: ScenarioSpec, name: str) -> None:
     spec.set("terrain_elevation", LOCATION_TERRAIN_ELEVATION_M[key], frm=frm)
 
 
+#: The provenance of the page's aircraft choice (the review table shows it).
+AIRCRAFT_PICK_FROM = "aircraft picker (web UI)"
+
+
+def pickable_aircraft() -> List[Dict[str, str]]:
+    """The aircraft the page offers, for GET /aircraft: every configured
+    airframe with no unavailable reason, as ``{"name", "title"}``, by
+    title. ``name`` is the id POST /compile and POST /run accept. A config
+    has no separate title key: ``title`` is the head of its own
+    ``mesh_airframe`` ("Shenyang J-11A (FlightGear ...)" -> "Shenyang
+    J-11A"), read here so no config is edited, because a config newer than
+    its manifest re-converts that model."""
+    from assets_pipeline.importer import (configured_aircraft, load_config,
+                                          unavailable_reason)
+
+    offered = []
+    for name in configured_aircraft():
+        if unavailable_reason(name):
+            continue
+        title = str(load_config(name).get("mesh_airframe") or name)
+        offered.append({"name": name,
+                        "title": title.split(" (")[0].split(",")[0].strip()})
+    return sorted(offered, key=lambda entry: entry["title"].lower())
+
+
+def require_pickable_aircraft(name: str) -> None:
+    """Raise ValueError, naming the accepted values, for an aircraft the
+    page does not offer: the same refusal an unknown environment gets."""
+    accepted = sorted(entry["name"] for entry in pickable_aircraft())
+    if str(name) not in accepted:
+        raise ValueError(f"aircraft must be one of {accepted}, not {name!r}")
+
+
+def apply_aircraft_choice(spec: ScenarioSpec, name: str) -> None:
+    """Apply the page's aircraft choice to ``spec`` as a USER edit. What the
+    system chose for the previous airframe follows the new one: a plannable
+    airspeed goes to this airframe's documented cruise, and a plannable
+    chase camera to this airframe's offset. A stated value never moves; one
+    the new airframe cannot fly refuses by name in validate(), and the
+    aircraft is never switched to make it fly. Raises ValueError, naming
+    the accepted values, for an aircraft the page does not offer."""
+    from core.nl.compiler import CRUISE_DEFAULT_KT
+    from core.scenario.camera import (CHASE_OFFSETS, derive_chase_offset,
+                                      frame_traffic)
+
+    require_pickable_aircraft(name)
+    spec.set("aircraft", name, frm=AIRCRAFT_PICK_FROM)
+    cruise = CRUISE_DEFAULT_KT.get(name)
+    if (cruise is not None and float(spec.airspeed.value) != cruise
+            and str(spec.airspeed.source) in PLANNABLE_SOURCES):
+        spec.plan("airspeed", cruise,
+                  frm=f"the {name}'s documented cruise default ({AIRCRAFT_PICK_FROM})")
+    offset = CHASE_OFFSETS.get(name) or derive_chase_offset(name)
+    for camera in spec.cameras:
+        fields = ("offset_forward_m", "offset_right_m", "offset_up_m")
+        if (str(camera.preset.value) == "chase"
+                and all(str(getattr(camera, field).source) in PLANNABLE_SOURCES
+                        for field in fields)):
+            for field, value in zip(fields, offset):
+                camera.plan(field, float(value),
+                            frm=f"the {name}'s chase offset ({AIRCRAFT_PICK_FROM})")
+    frame_traffic(spec)
+
+
 #: The default run (E4, decision 2/7/D4): what POST /run {} and the page's
 #: Capture button with nothing typed fly. Every value below is a recorded
 #: USER edit with this provenance; the weather flags and the Google tiles
@@ -1410,13 +1474,16 @@ DEFAULT_RUN_FROM = "default run (web UI)"
 #: state keeps the compiler's provenance. The altitude clears the Canyon rim
 #: and 100 kt is where the Cessna trims there (envelope.trim_feasible).
 DEFAULT_RUN_PROMPT = "fly the c172p over the desert at 3500 m and 100 kt"
+#: A picked aircraft keeps the altitude (no config states one of its own)
+#: and leaves the airspeed unsaid, so it flies its own documented cruise.
+PICKED_RUN_PROMPT = "fly the {aircraft} over the desert at 3500 m"
 #: Stations the default run loads; the masses are READ from the config, never
 #: retyped here. The Cessna flies its own config's default load.
 DEFAULT_RUN_STATIONS: Tuple[str, ...] = ()
 KG_PER_LB = 0.45359237
 
 
-def default_run_spec() -> ScenarioSpec:
+def default_run_spec(aircraft: Optional[str] = None) -> ScenarioSpec:
     """The spec POST /run {} flies: the default aircraft with any
     DEFAULT_RUN_STATIONS loaded as its config states them (lb -> kg, capped
     at the station's own maximum), the Desert preset (grand_canyon, noon in
@@ -1424,15 +1491,27 @@ def default_run_spec() -> ScenarioSpec:
     per-airframe offset webapp_chase_flag carries) so wants_capture()
     routes the run through the capture stage with its labels and verify
     block, and a 6 s clip. Raises RuntimeError when a named station is not
-    loadable: the default run never silently flies a different loadout."""
+    loadable: the default run never silently flies a different loadout.
+
+    ``aircraft`` is the page's choice: the same run flown by that airframe
+    at its own documented cruise (apply_aircraft_choice; ValueError for one
+    the page does not offer). None is the default aircraft, unchanged."""
     from core.nl.compiler import compile_prompt
     from core.scenario.loading import load_loading_config
 
-    spec = compile_prompt(DEFAULT_RUN_PROMPT)
-    spec.set("aircraft", DEFAULT_RUN_AIRCRAFT, frm=DEFAULT_RUN_FROM)
-    config = load_loading_config(DEFAULT_RUN_AIRCRAFT)
+    if aircraft is None:
+        name = DEFAULT_RUN_AIRCRAFT
+        spec = compile_prompt(DEFAULT_RUN_PROMPT)
+        spec.set("aircraft", name, frm=DEFAULT_RUN_FROM)
+    else:
+        require_pickable_aircraft(aircraft)
+        name = aircraft
+        spec = compile_prompt(DEFAULT_RUN_PROMPT if name == DEFAULT_RUN_AIRCRAFT
+                              else PICKED_RUN_PROMPT.format(aircraft=name))
+        apply_aircraft_choice(spec, name)
+    config = load_loading_config(name)
     if config is None:
-        raise RuntimeError(f"{DEFAULT_RUN_AIRCRAFT}: aircraft_config has no "
+        raise RuntimeError(f"{name}: aircraft_config has no "
                            f"loading block; the default run needs its loadout")
     payload: Dict[str, float] = {}
     for station in config.stations:
@@ -1441,7 +1520,7 @@ def default_run_spec() -> ScenarioSpec:
             payload[station.name] = min(kg, float(station.max_kg))
     missing = [name for name in DEFAULT_RUN_STATIONS if name not in payload]
     if missing:
-        raise RuntimeError(f"{DEFAULT_RUN_AIRCRAFT}: {config.config_path} "
+        raise RuntimeError(f"{name}: {config.config_path} "
                            f"has no loadable station(s) {missing}")
     if payload:
         spec.set("loading.payload", payload,
@@ -1451,7 +1530,7 @@ def default_run_spec() -> ScenarioSpec:
     spec.set("duration", min(DEFAULT_RUN_CLIP_S, CLIP_SECONDS),
              frm=f"{DEFAULT_RUN_FROM}: {DEFAULT_RUN_CLIP_S:g} s clip")
     spec.cameras = [CameraSpec.defaulted(
-        camera_id="camera0", preset="chase", aircraft=DEFAULT_RUN_AIRCRAFT,
+        camera_id="camera0", preset="chase", aircraft=name,
         terrain_elevation_m=float(spec.terrain_elevation.value),
         frm=f"{DEFAULT_RUN_FROM}: the chase view, labels on")]
     return spec
