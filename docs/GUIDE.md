@@ -25,10 +25,12 @@ reason, for example which tool is missing. The same lines are kept in
 
 Open Settings (the gear). It has six items, in this order:
 
-1. **Google tiles key or Cesium ion token.** Paste either one once; it is kept
-   in `settings.json` so you never type it again. The ground in every picture is drawn from Google's 3D
-   tiles, so a run without the key does not fly: it tells you by name that the
-   key is missing. The tiles are the ground; there is nothing to switch off.
+1. **Google tiles key or Cesium ion token.** The ground in every picture is
+   drawn from Google's 3D tiles; there is nothing to switch off. A new install
+   can usually draw them with the token the engine came with, so try a run
+   first, even if Settings says there is one thing to fix. If the tiles cannot
+   be drawn, the run stops and names the key: paste either one here, once, and
+   it is kept in `settings.json`.
 2. **Cesium status.** Read-only, taken from the installed tools.
 3. **Engine.** Read-only, the engine the launcher built.
 4. **Render quality.** Measure for plain, accurate pictures; beauty for the
@@ -55,7 +57,8 @@ Press **Capture**. With nothing typed, the run is:
 - a chase camera;
 - a six-second clip;
 - labels on;
-- storm weather, which is the default, with Google tiles as the ground.
+- Google tiles as the ground, with the storm weather effects ready: rain and
+  storms appear when a prompt asks for them, and calm air is recorded as none.
 
 To change any of that, type a prompt first (an aircraft, a place, a camera, a
 time of day) and press **Interpret**; then press Capture. If the prompt leaves
@@ -69,7 +72,9 @@ minutes longer, once, while the terrain is baked; after that it is quick.
 
 When it finishes, the clip and the frames appear on the page with their boxes
 drawn on. Below them, the checks are listed by name, each marked PASS or FAIL.
-A FAIL does not throw the run away; it tells you which check to read.
+A FAIL does not throw the run away; it tells you which check to read. NOT RUN
+means the check had nothing to measure in this run, such as an extra pass you
+did not ask for; it is not a failure.
 
 ## 6. What the output contains
 
@@ -78,9 +83,9 @@ if you want one other than COCO: KITTI, WebDataset, YOLO and VOC are also
 offered. Inside the zip:
 
 - the images, one set per camera;
-- the labels: on every frame where it is visible, one box for the aircraft and
-  one box for each payload store (the landing gear gets a box too when the
-  prompt asks for it);
+- the labels: on every frame where it is visible, one box for the aircraft,
+  one for its landing gear and one for each payload store it carries, plus
+  the terrain;
 - the per-camera manifest with the flight data (position, attitude, speed) for
   every frame;
 - the verification report, the same checks you saw on the page, including the

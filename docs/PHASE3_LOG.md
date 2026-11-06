@@ -128,3 +128,30 @@ verify counts, the `component_coverage` detail and the card diff keys.
 | D6 | D-1 | `run_test_scenarios.py --matrix --still --compiler regex` | `matrix FAIL`: all four cells flew the B747 (`apply_cell` writes the wrong key); runs 5835af44a0de, eaf9c4b8f369, a5f4d4e34e6e, 16342bb78e61 | packet D6-1 |
 | D2 | D-1 | J-11 config test, level flight, import | level flight OK; 2 CRLF test failures; import not reached | packet D2-1 |
 | D2, D6 | D-1 | matrix re-run after the fixes | all four cells flew their own aircraft, verify ok, `component_coverage` PASS; J-11 imported itself | PASS, see gate_log_D.md |
+
+## Gate E: newcomer questions (2026-11-05, Windows)
+
+The newcomer was an agent (haiku), not a person. It had only docs/GUIDE.md and a
+helper that read and pressed the page in a visible browser, on the fresh install
+in C:\Users\kanth\p3-fresh, with no key. That is weaker than "someone new": it
+cannot show that a person can do this.
+
+Attempt 1, on 03bc3bac: failed. Capture sat inside a panel hidden until Interpret,
+so the guide's first run could not be pressed (fixed, cf41ce35). The helper also
+cut the page short, which hid Settings; that part was the helper's fault.
+
+Attempt 2, on cf41ce35: run d24c496c5872, verify 35 PASS, 0 FAIL, 35 NOT RUN, dataset
+zip downloaded (13 files), Google tiles drawn. Recording kept on the laptop:
+runs/p3/G/newcomer/screen.mkv.
+
+Its questions, and what became of each:
+
+1. The guide says a run with no key does not fly, yet it flew. Guide corrected.
+2. The prompt box looked pre-filled. That was the helper reading the placeholder.
+3. The guide says storm weather, the card says none. Guide corrected.
+4. The landing gear and terrain have boxes I did not ask for. Guide corrected.
+5. What does "not run" mean? Guide corrected.
+6. Press Interpret first, or go straight to Capture? Both work.
+7. The guide says a gear; the page has a button named settings. Left as is.
+8. The page does not show the run id; it was read from the card's address. Open.
+9. Its note, not a question: the render took about 6 minutes.
