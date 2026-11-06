@@ -1651,3 +1651,4 @@
 {"agent": "mac", "box": "C", "stage": "sync", "kind": "note", "note": "Align second run on 1b29b7d2: synced, no code drift", "t": 1793938840.58061, "machine": "mac"}
 {"agent": "mac", "box": "D", "stage": "sync", "kind": "note", "note": "Align second run on 1b29b7d2: synced, no code drift", "t": 1793938840.6213272, "machine": "mac"}
 {"agent": "mac", "box": "F2", "stage": "sync", "kind": "note", "note": "owner: accept one machine, decision 26; E6 partial: browser opened, READY and prompt not reported; newcomer not yet; picture not reported", "t": 1793971592.344815, "machine": "mac"}
+{"agent": "mac", "box": "E6", "stage": "sync", "kind": "note", "note": "owner double-click reported: READY yes, browser yes, prompt no, in p3-final; picture still not reported", "t": 1793972283.552533, "machine": "mac"}

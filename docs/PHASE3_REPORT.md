@@ -15,7 +15,7 @@ laptop unless a row says otherwise. Run logs under `runs/` stay on that laptop.
 | 3 | Payload boxes wherever payload is visible | Proved | `component_boxes` and `component_coverage` PASS on the D6 cells above; F1's zip clause; J-11 dataset has 12 payload boxes over 6 images | Nothing |
 | 4 | Hands-off run on a pinned toolchain | Proved on one machine | Fresh clone, run 027ccd408fe7, 35 PASS, 0 FAIL, 247 s; `toolchain.json`, `requirements.lock`, B1-B3 PASS; Gate 6 `GATE 6: PASS` at e6a60f75 against a substitute only (decision 25) | Owner judges the side-by-side |
 | 5 | Short video and a short guide | Proved | `docs/demo/demo.mp4`, 89 s, run e60762d4364b, 35 PASS, 0 FAIL; `docs/GUIDE.md`, 899 words. Scripted on a built install, not a double-click (`docs/demo/README.md`) | Nothing required |
-| 6 | No command line on the user path | Owner-pending | `Launch FlightSim.cmd` opened by automation in a new folder: READY in about 565 s, all seven steps (`docs/phase3/packets/E6-materials.md`). Nobody watched the screen | The owner's double-click: browser opened on 6 Nov; READY and no prompt not yet reported |
+| 6 | No command line on the user path | Owner-pending | `Launch FlightSim.cmd` opened by automation in a new folder: READY in about 565 s, all seven steps (`docs/phase3/packets/E6-materials.md`). Nobody watched the screen | A person's confirmation with the newcomer test. The owner's double-click is done: 6 Nov, fresh clone in `C:\Users\kanth\p3-final`, READY, browser opened, no prompt; both bakes ran and the p51d imported (owner's report from `logs\launch.log`) |
 
 | Letter | Gate test on the laptop | Align's second run (Mac, on 1b29b7d2) |
 |---|---|---|
