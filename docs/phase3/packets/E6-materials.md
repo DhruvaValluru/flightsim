@@ -41,3 +41,18 @@ preflight (runs/p3/G/E6-*-stdout.log). Limits on that:
 - Engine, MSVC and ffmpeg were already installed on this laptop.
 - A launcher update takes effect on the next launch: step 1 pulls, but the
   running PowerShell keeps the old script.
+
+## Shell open by automation, 2026-11-05
+
+Not the owner's double-click. `Launch FlightSim.cmd` in a new clone,
+C:\Users\kanth\p3-open at ff491087, opened with Shell.Application InvokeVerb open,
+the path a double-click takes, with Explorer's environment.
+
+- launch.log ended READY after about 565 s, all seven steps, no failure.
+- Browser: indirect but strong. New chrome processes started at 22:30:49, the
+  second of READY, and recorded frames show the row of flightsim tabs.
+- Prompt: none seen. No consent or credential process existed. A Windows Settings
+  window was open, started the day before. Nobody watched the screen.
+- Each launch leaves another server window and another browser tab open.
+
+This narrows the double-click limit above and does not close it.

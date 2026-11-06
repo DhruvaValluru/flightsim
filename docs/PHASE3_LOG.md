@@ -155,3 +155,18 @@ Its questions, and what became of each:
 7. The guide says a gear; the page has a button named settings. Left as is.
 8. The page does not show the run id; it was read from the card's address. Open.
 9. Its note, not a question: the render took about 6 minutes.
+
+## F2: the same run, by machine (2026-11-05)
+
+One row only. Rows 2 and 3 have no machine (decision 24), so F2 stays incomplete.
+
+| Machine | Preflight | Run id | Verify | Wall time | sha256 of toolchain.json + requirements.lock |
+|---|---|---|---|---|---|
+| Windows laptop, fresh clone C:\Users\kanth\p3-open at ff491087 | OK: engine 5.7.4 CL 51494982, msvc 14.44.35207, windows_sdk 10.0.26100.0, cesium_for_unreal 2.30.0, ffmpeg 9.0.2, python 3.12.10, jsbsim 1.2.4 | 027ccd408fe7 | 35 PASS, 0 FAIL, 35 NOT RUN | 247 s | 4b73c19a98ff75cbadba3a45821b50cb2ef50b209b90707655d7ba4480d4e60c |
+
+F1 on the working copy at ff491087 also passed, in 99.66 s.
+
+## F4: the video (2026-11-05)
+
+docs/demo/demo.mp4, 89 s, run e60762d4364b, verify 35 PASS, 0 FAIL, 35 NOT RUN. Scripted
+in a visible browser on a built install; see docs/demo/README.md.
