@@ -26,3 +26,18 @@ Also found: the launcher's MATERIAL-FAILED match could never fire, because
 Python prints did not reach stdout. Fixed with -FullStdOutLogOutput. A forced
 materials rerun showed all 36 MATERIAL- lines in stdout (runs/p3/G/E6-tip2-stdout.log).
 A real failed material has not been run through it.
+
+## E6 is not closed
+
+The launcher checks passed from a shell: fresh clone READY on cead67ba, second
+launch up to date, a broken stamp reran only materials, hidden ffmpeg stopped at
+preflight (runs/p3/G/E6-*-stdout.log). Limits on that:
+
+- 90d7f1f7 was proved by updating the clone and forcing a materials rerun, not by
+  a new clone from scratch. The from-scratch run is cead67ba.
+- Run from a shell, not by double-clicking Launch FlightSim.cmd. Browser opening
+  and "no prompt" were not observed. The owner's double-click is open.
+- host.smart_app_control is not exercised: Smart App Control is off here.
+- Engine, MSVC and ffmpeg were already installed on this laptop.
+- A launcher update takes effect on the next launch: step 1 pulls, but the
+  running PowerShell keeps the old script.
