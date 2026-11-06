@@ -56,6 +56,8 @@ AIRCRAFT_WORDS: Tuple[Tuple[str, str], ...] = (
     ("f-15", "f15"), ("f15", "f15"),
     ("a-4", "A4"), ("a4", "A4"), ("skyhawk", "A4"),
     ("j-11", "J11"), ("j11", "J11"), ("flanker", "J11"),
+    ("dhc-6", "DHC6"), ("dhc6", "DHC6"), ("twin otter", "DHC6"),
+    ("p-51", "p51d"), ("p51d", "p51d"), ("p51", "p51d"), ("mustang", "p51d"),
 )
 
 #: Turbulence words -> MIL-F-8785C severity. The standard defines intensity by

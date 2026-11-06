@@ -84,7 +84,7 @@ DEFAULT_MODEL = "claude-opus-5"
 #: Aircraft the schema lets the model name: exactly the models the regex
 #: vocabulary can reach, so the two compilers share an aircraft vocabulary
 #: and ``aircraft.exists`` validation stays the only authority on what flies.
-AIRCRAFT_MODELS = ("737", "A320", "A4", "B747", "J11", "c172p", "f15", "f16",
+AIRCRAFT_MODELS = ("737", "A320", "A4", "B747", "DHC6", "J11", "c172p", "f15", "f16", "p51d",
                    "global5000")  # D2: the J-11A joins both compilers' vocabularies
 
 #: Canonical turbulence labels and their W20 (the regex compiler's own

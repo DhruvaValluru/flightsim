@@ -672,3 +672,16 @@ def test_mixed_traffic_in_a_prompt_puts_a_second_aircraft_in_the_scene(tmp_path)
     for spec in cases:
         assert len(spec.traffic) == int(spec.randomization.traffic_count.value)
         assert validate(spec, check_feasibility=False).ok
+
+
+def test_the_p51d_and_dhc6_clauses_compile_as_traffic_and_are_never_dropped():
+    """Measured on run c7309d6eab57: "with a p51d in formation 150 m ahead"
+    compiled to no traffic and no message, because the word was missing."""
+    from core.nl.compiler import compile_prompt
+
+    for words, model in (("p51d", "p51d"), ("P-51", "p51d"), ("Mustang", "p51d"),
+                         ("DHC-6", "DHC6"), ("Twin Otter", "DHC6")):
+        spec = compile_prompt(f"fly the c172 at 1000 m with a {words} in formation 150 m ahead")
+        assert str(spec.aircraft.value) == "c172p"
+        assert [str(t.aircraft.value) for t in spec.traffic] == [model]
+    assert str(compile_prompt("fly the p51d").aircraft.value) == "p51d"
