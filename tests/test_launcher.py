@@ -105,6 +105,19 @@ def test_ready_is_written_after_the_server_answers():
     assert text.rstrip().endswith("exit 0")
 
 
+def test_a_relaunch_closes_the_old_server_window_too():
+    """E6: stopping only uvicorn left its powershell -NoExit window open, one
+    more per launch. The hosts are read before the kill (a dead process has
+    no parent to look up) and only ones running the server are matched."""
+    text = _ps1()
+    hosts = text.index("$hosts = @(Get-ServerHosts $owner)")
+    kill = text.index("Stop-Process -Id $owner -Force")
+    closed = text.index("Stop-Process -Id $hostPid -Force")
+    assert hosts < kill < closed
+    assert '-notlike "*uvicorn webapp.server:app*"' in text
+    assert "$parent.ProcessId -eq $PID" in text
+
+
 def test_launcher_sets_no_flightsim_variable_and_leaves_tiles_and_weather_alone():
     for text in (_cmd(), _ps1()):
         assert "FLIGHTSIM_" not in text
