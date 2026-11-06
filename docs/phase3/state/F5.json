@@ -1,4 +1,8 @@
 {
+  "green_commit": "16ee7ea3",
+  "note": "document box, no run of its own; run_id names the report",
+  "run_id": "docs/PHASE3_REPORT.md@16ee7ea3",
   "stage": "aligned",
-  "updated": "2026-11-04T16:55:33"
+  "updated": "2026-11-06T08:31:26",
+  "verdict": "PASS"
 }

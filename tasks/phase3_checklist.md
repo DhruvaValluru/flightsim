@@ -198,12 +198,12 @@ Two rules to keep in mind:
 
 - [x] **F1 · Automated full run:** pick aircraft → pick place → Capture → download 🪟
   - Check: `pytest -q -m ue_host tests/test_demo_e2e.py` passes.
-- [ ] **F2 · The same run works on all three computers** 🪟
+- [x] **F2 · The same run works on all three computers** 🪟
   - Check: three passing rows in `docs/PHASE3_LOG.md` with the same tool versions.
 - [x] **F3 · Short guide written** (`docs/GUIDE.md`)
   - Check: under 1,000 words, with no terminal commands.
 - [x] **F4 · Video of one full run**, under 5 minutes
-- [ ] **F5 · Final report:** each of the six goals with its proof
+- [x] **F5 · Final report:** each of the six goals with its proof
 
 ---
 

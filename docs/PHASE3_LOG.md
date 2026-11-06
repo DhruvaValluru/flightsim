@@ -159,7 +159,7 @@ Its questions, and what became of each:
 
 ## F2: the same run, by machine (2026-11-05)
 
-One row only. Rows 2 and 3 have no machine (decision 24), so F2 stays incomplete.
+One row only. The owner accepted F2 on one machine (decision 26): rows 2 and 3 are waived, not run, so working on three computers stays unproved.
 
 | Machine | Preflight | Run id | Verify | Wall time | sha256 of toolchain.json + requirements.lock |
 |---|---|---|---|---|---|

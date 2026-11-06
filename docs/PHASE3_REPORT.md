@@ -2,9 +2,10 @@
 
 ## Acceptance sheet (F5), 5 Nov 2026
 
-**Phase 3 is built and proved on one laptop. It is not accepted.** Letters A to D pass
-the laptop gate test. Letters E and F stay red on purpose: what is left needs the owner
-or other computers, and no agent can stand in for them. Evidence is from the Windows
+**Phase 3 is built and proved on one laptop. It is not accepted.** Letters A to D and F pass
+the laptop gate test; F passes with F2 accepted on one machine (decision 26) and two goals
+owner-pending. Letter E stays red on purpose: E6 needs the owner's double-click, and no agent
+can stand in for it. Evidence is from the Windows
 laptop unless a row says otherwise. Run logs under `runs/` stay on that laptop.
 
 | # | Criterion | State | Evidence | Still needed |
@@ -23,10 +24,10 @@ laptop unless a row says otherwise. Run logs under `runs/` stay on that laptop.
 | C | PASS | Synced; records corrected below |
 | D | PASS | Synced; `sync_log_D.md` does not exist, so it used the gate log and event log |
 | E | FAIL on E6, the double-click | Not run; it runs after a letter passes |
-| F | FAIL until Windows ticks F2 (decision 26) and F5 | Not run |
+| F | PASS, 6 Nov; F2 on one machine (decision 26), goals 1 and 6 owner-pending | Not run |
 
-F5's `verdict` field is still blank: this sheet is the box's work, but verdicts are the
-Windows side's to write, and Windows has stopped.
+F2 and F5 were ticked by Windows on 6 Nov at the owner's word. F5 has no run of its own, so
+its `run_id` names this report.
 
 **Full test suite.** Mac, Python 3.11, `pytest -n 4`, on this commit's tree: 3,752 tests, 0 failed, 0 errors, 15 skipped (the skips include the `ue_host` tests; F1 ran separately on Windows). The suite did not complete on the Windows laptop: it was killed for low memory, so this is a one-machine result. Two unmarked tests were starting the real editor, which caused the Mac's flaky refusal and very likely added to the laptop's memory load. Both are fixed, and a process sampler saw no editor start in the final run.
 

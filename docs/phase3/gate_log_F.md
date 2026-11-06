@@ -9,6 +9,7 @@
 | 5. A short video and a short guide exist. | PASS | docs/demo/demo.mp4, 89 s; docs/GUIDE.md, 899 words. |
 | 6. Nothing a user does needs the command line. | owner-pending | No step in the guide uses it and the agent used none of the app's own, but no person has confirmed it, and the double-click is open. |
 
-Boxes: F1, F3, F4 PASS. F2 incomplete: one row, decision 24. F5: the Mac's report.
+Boxes: F1, F3, F4 PASS. F2 PASS on one machine only, decision 26: rows 2 and 3 waived, not run.
+F5 PASS: docs/PHASE3_REPORT.md, acceptance sheet; the box has no run of its own.
 
-Letter F: FAIL on F2 and F5. CI: not run, owner decision 23.
+CI: not run, owner decision 23.

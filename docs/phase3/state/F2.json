@@ -1,4 +1,9 @@
 {
+  "green_commit": "ff491087",
+  "green_run_id": "027ccd408fe7",
+  "note": "one machine only, decision 26; rows 2 and 3 waived, not run",
+  "run_id": "027ccd408fe7",
   "stage": "aligned",
-  "updated": "2026-11-04T16:55:33"
+  "updated": "2026-11-06T08:31:25",
+  "verdict": "PASS"
 }
