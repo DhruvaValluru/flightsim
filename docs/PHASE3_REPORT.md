@@ -9,12 +9,12 @@ laptop unless a row says otherwise. Run logs under `runs/` stay on that laptop.
 
 | # | Criterion | State | Evidence | Still needed |
 |---|---|---|---|---|
-| 1 | A newcomer completes a capture without the notes | Owner-pending | An agent, not a person, with only `docs/GUIDE.md`: run d24c496c5872, 35 PASS, 0 FAIL, zip downloaded, tiles drawn with no key. Attempt 1 found a real bug, fixed in cf41ce35. `docs/phase3/gate_log_E.md`, `docs/PHASE3_LOG.md` | A real person |
+| 1 | A newcomer completes a capture without the notes | Owner-pending | An agent, not a person, with only `docs/GUIDE.md`: run d24c496c5872, 35 PASS, 0 FAIL, zip downloaded, tiles drawn with no key. Attempt 1 found a real bug, fixed in cf41ce35. `docs/phase3/gate_log_E.md`, `docs/PHASE3_LOG.md` | A real person: none available on 6 Nov, so this stays open |
 | 2 | J-11 available; same pipeline in Desert and Forest | Proved | J11 Desert 57fe18aa0719, J11 Forest 82d994bf7935, A4 Desert 2f5fcb4991ab, A4 Forest 3c8ae258e11e (`gate_log_D.md`); F1 99.66 s on ff491087 | Nothing |
 | 3 | Payload boxes wherever payload is visible | Proved | `component_boxes` and `component_coverage` PASS on the D6 cells above; F1's zip clause; J-11 dataset has 12 payload boxes over 6 images | Nothing |
-| 4 | Hands-off run on a pinned toolchain | Proved on one machine | Fresh clone, run 027ccd408fe7, 35 PASS, 0 FAIL, 247 s; `toolchain.json`, `requirements.lock`, B1-B3 PASS; Gate 6 `GATE 6: PASS` at e6a60f75 against a substitute only (decision 25) | F2 rows 2 and 3; owner judges the side-by-side |
+| 4 | Hands-off run on a pinned toolchain | Proved on one machine | Fresh clone, run 027ccd408fe7, 35 PASS, 0 FAIL, 247 s; `toolchain.json`, `requirements.lock`, B1-B3 PASS; Gate 6 `GATE 6: PASS` at e6a60f75 against a substitute only (decision 25) | Owner judges the side-by-side |
 | 5 | Short video and a short guide | Proved | `docs/demo/demo.mp4`, 89 s, run e60762d4364b, 35 PASS, 0 FAIL; `docs/GUIDE.md`, 899 words. Scripted on a built install, not a double-click (`docs/demo/README.md`) | Nothing required |
-| 6 | No command line on the user path | Owner-pending | `Launch FlightSim.cmd` opened by automation in a new folder: READY in about 565 s, all seven steps (`docs/phase3/packets/E6-materials.md`). Nobody watched the screen | The owner's double-click |
+| 6 | No command line on the user path | Owner-pending | `Launch FlightSim.cmd` opened by automation in a new folder: READY in about 565 s, all seven steps (`docs/phase3/packets/E6-materials.md`). Nobody watched the screen | The owner's double-click: browser opened on 6 Nov; READY and no prompt not yet reported |
 
 | Letter | Gate test on the laptop | Align's second run (Mac, on 1b29b7d2) |
 |---|---|---|
@@ -23,7 +23,7 @@ laptop unless a row says otherwise. Run logs under `runs/` stay on that laptop.
 | C | PASS | Synced; records corrected below |
 | D | PASS | Synced; `sync_log_D.md` does not exist, so it used the gate log and event log |
 | E | FAIL on E6, the double-click | Not run; it runs after a letter passes |
-| F | FAIL on F2 and F5 | Not run |
+| F | FAIL until Windows ticks F2 (decision 26) and F5 | Not run |
 
 F5's `verdict` field is still blank: this sheet is the box's work, but verdicts are the
 Windows side's to write, and Windows has stopped.
@@ -37,7 +37,7 @@ Windows side's to write, and Windows has stopped.
 | A1 rows 2-3 | Decision 9 |
 | D3, a second airframe | Decision 3: one airframe, the J-11A |
 | CI on three operating systems | Owner, decision 23. Last green: `0c68db3e`, run 42128478598. Nothing after it was checked on any other OS |
-| F2 rows 2 and 3 | One machine available, decision 24. Stays incomplete, so letter F stays red |
+| F2 rows 2 and 3 | Waived by the owner, decision 26: accepted on one machine. Working on three computers stays unproved |
 | Old footage comparison | Footage not found. Decision 25: the left panel is this project's own 6 October still. It shows change since then and says nothing about likeness to the old build. The new plain reads much brighter, and nobody has judged it |
 | p51d as a primary aircraft | Decision 22: its FDM cannot trim, so it is traffic only. Traffic render PASS, run 64cb84d761a2, re-verified 35 PASS, 0 FAIL |
 
