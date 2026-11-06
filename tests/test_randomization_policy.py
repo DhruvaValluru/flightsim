@@ -613,9 +613,9 @@ def test_a_drawn_traffic_count_flies_that_many_scripted_aircraft():
         sample_randomization(reread, check_feasibility=False)
         assert reread.to_dict() == spec.to_dict()
     assert set(counts.values()) == {0, 1, 2}
-    # Labelled and renderable only: the p51d states no labels and has no
-    # upstream licence; the DHC6 states labels and a licence.
-    assert "p51d" not in traffic_airframes() and "DHC6" in traffic_airframes()
+    # Labelled and renderable only: the DHC6 states labels and a licence,
+    # the p51d labels and the owner's clearance (decisions.md item 22).
+    assert "p51d" in traffic_airframes() and "DHC6" in traffic_airframes()
     assert "A320" in traffic_airframes()
 
 

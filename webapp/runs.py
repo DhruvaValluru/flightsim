@@ -1530,6 +1530,8 @@ def pickable_aircraft() -> List[Dict[str, str]]:
         config = load_config(name)
         if not config.get("labels"):     # no labels block: a Capture cannot label it
             continue
+        if config.get("not_primary"):    # draws as traffic, cannot be flown as the primary
+            continue
         title = str(config.get("mesh_airframe") or name)
         offered.append({"name": name,
                         "title": title.split(" (")[0].split(",")[0].strip()})
@@ -1693,7 +1695,7 @@ def refuse_placeholder_mesh(spec: ScenarioSpec) -> Optional[Dict]:
     if aircraft in renderable_aircraft():
         return None
     # Only airframes that can ACTUALLY be built belong in this list: one
-    # whose upstream ships no license (p51d today) would send the reader
+    # whose config declares it unavailable would send the reader
     # after a model that will refuse for a reason no command can fix.
     buildable = sorted(n for n in configured_aircraft()
                        if not unavailable_reason(n))

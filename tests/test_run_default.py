@@ -219,7 +219,7 @@ def test_get_aircraft_lists_the_pickable_aircraft(client):
     assert titles["c172p"] == "Cessna 172P Skyhawk"
     assert titles["A4"] == "Douglas A-4E Skyhawk"
     assert titles["J11"] == "Shenyang J-11A"
-    assert "p51d" not in titles            # its config states why it cannot render
+    assert "p51d" not in titles            # its config states why it cannot be the primary
 
 
 def test_run_with_aircraft_flies_it_at_its_own_cruise(client, monkeypatch):
@@ -246,7 +246,7 @@ def test_run_with_unknown_aircraft_is_400_naming_the_accepted(client):
         assert reply.status_code == 400, reply.text
         error = reply.json()["error"]
         assert "hindenburg" in error and "c172p" in error and "J11" in error
-    # Not offered is not accepted: the p51d may never render.
+    # Not offered is not accepted: the p51d does not trim as the primary.
     assert client.post("/run", json={"aircraft": "p51d"}).status_code == 400
 
 
@@ -262,9 +262,9 @@ def test_run_with_no_aircraft_field_is_unchanged(client, monkeypatch):
 
 
 def test_an_aircraft_the_picker_does_not_offer_is_refused_and_never_switched(client, monkeypatch):
-    """The p51d's upstream ships no licence file and its config has no labels
-    block, so it is not offered; asking for it is a 400 naming what is, and
-    nothing flies in its place."""
+    """The p51d cannot trim as the primary (its config says why), so it is
+    not offered; asking for it is a 400 naming what is, and nothing flies
+    in its place."""
     started = _hold_engine_open(monkeypatch)
     reply = client.post("/run", json={"aircraft": "p51d"})
     assert reply.status_code == 400, reply.text

@@ -650,6 +650,7 @@ def test_the_page_renders_only_with_an_engine_and_the_model(client, monkeypatch)
     assert render is False and "not imported" in note and "A320" in note
 
     monkeypatch.setattr(generate_module, "is_imported", lambda name: True)
+    monkeypatch.setattr(generate_module, "older_than_inputs_reason", lambda name: None)
     render, note = generate_module.render_here(spec)
     assert render is True and "rendered" in note
 

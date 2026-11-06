@@ -91,9 +91,10 @@ def test_the_b747_s_nose_and_tail_are_labelled_estimates():
         airframe.length_m, abs=0.01)
 
 
-def test_an_airframe_with_no_stated_geometry_refuses_by_name():
+def test_an_airframe_with_no_stated_geometry_refuses_by_name(tmp_path):
+    (tmp_path / "bare.json").write_text('{"fdm": "p51d"}', encoding="utf-8")
     with pytest.raises(AirframeLabelError, match="camera.labels") as info:
-        load_airframe("p51d")            # config exists, no labels block
+        load_airframe("bare", config_dir=tmp_path)   # config, no labels block
     assert "labels" in str(info.value)
     with pytest.raises(AirframeLabelError, match="no aircraft config"):
         load_airframe("global5000")
@@ -659,6 +660,7 @@ def test_no_bundle_after_a_cli_render_returns_two(tmp_path, capsys, monkeypatch)
 
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    monkeypatch.setattr(importer_module, "older_than_inputs_reason", lambda name: None)
     monkeypatch.setattr(headless, "run_headless", frames_only)
     spec = Path(__file__).resolve().parents[1] / "examples" / "cameras_multi.yaml"
     code = capture_main([str(spec), "--out", str(tmp_path / "o"),

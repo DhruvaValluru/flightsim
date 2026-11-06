@@ -236,6 +236,8 @@ def test_every_aircraft_config_is_shippable_or_says_why_not():
         for required in ("license_name", "repo", "commit"):
             if not license_block.get(required):
                 problems.append(f"{path.name}: no {required}")
+        if license_block.get("owner_clearance"):
+            continue                    # the owner's clearance is the basis (decision 22)
         if license_block.get("unavailable"):
             # An unavailable airframe must give a REASON, and must not
             # also claim a license file that would let it slip through.

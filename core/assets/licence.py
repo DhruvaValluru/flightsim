@@ -192,6 +192,10 @@ OWNER_CLEARED_AIRFRAMES: Dict[str, Dict[str, Any]] = {
               "ml_use": "unknown", "basis": "cleared by the owner, decisions.md item 20"}
     for licence in ("GPL-2.0", "All rights reserved; model author-owned, used with permission")
 }
+OWNER_CLEARED_AIRFRAMES["Owner-cleared; upstream states no licence"] = {
+    "name": "Owner-cleared; upstream states no licence", "attribution_required": True,
+    "share_alike": False, "ml_use": "unknown",
+    "basis": "cleared by the owner, decisions.md item 22"}
 
 
 def _squash(name: str) -> str:

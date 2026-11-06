@@ -800,10 +800,16 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     airframe = _labelled_airframe(config, config_path)
 
     # -- §3.3: license present on disk ---------------------------------
-    license_file = source_dir / config["license"]["file"]
-    if not license_file.is_file():
-        raise ConvertError(f"license file {license_file} does not exist")
-    license_head = license_file.read_text(errors="replace").strip().splitlines()[0].strip()
+    # An airframe the owner cleared by name has no file to point at; its
+    # clearance is the recorded basis, and it never claims a licence.
+    owner_clearance = config["license"].get("owner_clearance")
+    if owner_clearance:
+        license_head = owner_clearance
+    else:
+        license_file = source_dir / config["license"]["file"]
+        if not license_file.is_file():
+            raise ConvertError(f"license file {license_file} does not exist")
+        license_head = license_file.read_text(errors="replace").strip().splitlines()[0].strip()
 
     out_dir = out_root / name
     out_dir.mkdir(parents=True, exist_ok=True)

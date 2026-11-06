@@ -939,6 +939,10 @@ per-aircraft grant. The converter's license-file requirement was
 deliberately not weakened; both configs sit ready in
 assets/aircraft_config/ against the day an explicit statement exists.
 
+Update, 2026-11-05: the DHC6 has since shipped at a commit carrying a licence
+file. The p51d renders on the owner's clearance alone (`docs/phase3/decisions.md`
+item 22): upstream still states no licence, and its record says so.
+
 ### 1.6b Phase 6B: real meshes, real terrain, turbulence and wind in the host
 
 **Real aircraft meshes, held to Gate 5's own bar.** Two properly-licensed

@@ -37,7 +37,7 @@ no amount of running commands can satisfy them:
 
 * an aircraft with no config has nothing to fetch (`aircraft.mesh`);
 * an aircraft whose upstream ships no license file may never render at
-  all (`aircraft.mesh`, VALIDITY 3.3) -- p51d today. This module refuses
+  all (`aircraft.mesh`, VALIDITY 3.3). This module refuses
   such an airframe BEFORE any fetch, so automation cannot become the
   path by which unattributed geometry reaches a frame.
 

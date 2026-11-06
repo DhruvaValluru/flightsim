@@ -75,14 +75,24 @@ def place_assets(tmp_path: Path, name: str = "TEST", parts=("fuselage",
 # -- what automation may not do -----------------------------------------
 
 
+def _declare_unavailable(monkeypatch, name):
+    """No shipped airframe is unavailable today (the p51d is owner-cleared,
+    decisions.md item 22), so the refusal is exercised on a declared one."""
+    real = importer.unavailable_reason
+    monkeypatch.setattr(
+        importer, "unavailable_reason",
+        lambda n: "upstream ships no license file" if n == name else real(n))
+
+
 def test_an_unlicensable_airframe_is_never_fetched(monkeypatch):
-    """VALIDITY 3.3, the load-bearing case: the p51d's upstream ships no
-    license file, so it may never render -- and the fail-safe must
+    """VALIDITY 3.3, the load-bearing case: an airframe declared
+    unavailable may never render -- and the fail-safe must
     refuse it BEFORE the fetch, not discover it at the converter. If
     automation reached upstream first, an unattributed model would be on
     disk whatever happened next."""
     fake = FakeSubprocess()
     monkeypatch.setattr(importer, "subprocess", fake)
+    _declare_unavailable(monkeypatch, "p51d")
 
     with pytest.raises(importer.AircraftAssetError) as caught:
         importer.ensure_model("p51d", report=lambda line: None)
@@ -93,9 +103,10 @@ def test_an_unlicensable_airframe_is_never_fetched(monkeypatch):
 
 def test_an_unconfigured_airframe_refuses_with_nothing_to_build(monkeypatch):
     """No config means nothing to fetch: the refusal stands, and names
-    only airframes that can ACTUALLY be built (never the p51d, whose
-    refusal no command can fix)."""
+    only airframes that can ACTUALLY be built (never one declared
+    unavailable, whose refusal no command can fix)."""
     monkeypatch.setattr(runs_module, "renderable_aircraft", lambda: [])
+    _declare_unavailable(monkeypatch, "p51d")
     spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
     refusal = refuse_placeholder_mesh(spec)
     assert refusal is not None
@@ -111,9 +122,10 @@ def test_an_unconfigured_airframe_refuses_with_nothing_to_build(monkeypatch):
 
 def test_an_unlicensable_airframe_refuses_at_the_webapp_too(monkeypatch):
     """The same rule at the other door: the run endpoint's refusal for
-    the p51d states the license reason, not an import command that would
-    never help."""
+    an unavailable airframe states the license reason, not an import
+    command that would never help."""
     monkeypatch.setattr(runs_module, "renderable_aircraft", lambda: [])
+    _declare_unavailable(monkeypatch, "p51d")
     spec = compile_prompt("fly the 747 at 3000 m and 250 kt")
     spec.set("aircraft", "p51d", frm="test: an airframe with no license")
     refusal = refuse_placeholder_mesh(spec)
@@ -644,7 +656,7 @@ def test_without_identifiable_gear_the_z_anchor_is_the_vrp_and_says_so(
 
 def test_a_config_with_no_labels_keeps_the_vrp_rule_and_says_so(tmp_path,
                                                                  monkeypatch):
-    """A config without a labels block (the p51d) has no nose keypoint to
+    """A config without a labels block has no nose keypoint to
     align to. Its origin is byte-identical to eb5c71d's VRP rule, the
     basis says so (so the verifier's drawn_airframe can grade it by
     name), and the extents are still recorded."""

@@ -9,16 +9,18 @@
   "mesh_airframe": "North American P-51D Mustang (FGMEMBERS p51d model)",
   "source_dir": "../aircraft_src/p51d",
   "license": {
-    "license_name": "GPL-2.0",
-    "file": "COPYING",
+    "license_name": "Owner-cleared; upstream states no licence",
+    "owner_clearance": "cleared by the owner, decisions.md item 22: upstream ships no licence file at this commit, so this is the owner's clearance and not a GPL grant",
     "repo": "https://github.com/FGMEMBERS/p51d",
     "commit": "cb3bcd6ef41182f6b1bae91395f38d0dadd974e5",
-    "authors_file": "README.md",
-    "unavailable": "upstream ships no license file at this commit (whole tree checked: no COPYING/LICENSE anywhere; README.p51d is flying notes and p51d-contributors.txt is authorship, neither is a license). Section 3.3 forbids rendering unattributed geometry, so this airframe stays physics-only until upstream publishes one."
+    "authors_file": "p51d-contributors.txt"
   },
   "parts": [
     {
       "file": "Models/P-51D-25NA.ac"
+    },
+    {
+      "file": "Models/prop.ac"
     }
   ],
   "exclude": [
@@ -392,5 +394,61 @@
     },
     "policy_station": "pilot",
     "policy_station_reason": "the one loadable station (the twelve others are written by a system every pass): a payload draw replaces the XML's 180 lb pilot"
-  }
+  },
+  "gear_geometry": {
+    "parts": [],
+    "objects": [
+      "mainWheel(Left|Right)",
+      "tailWheel",
+      "tailWheel(Knuckle|OleoHousing|SpinleAssembly)",
+      "(lower|upper)(Strut|Scissors)(Left|Right)",
+      "mainGearRetract(Piston|Strut)(Left|Right)",
+      "landingGearPivit(Left|Right)"
+    ],
+    "source": "P-51D-25NA.ac names its gear mainWheelLeft/Right, tailWheel and its knuckle, oleo and spindle, the upper and lower struts and scissors, the retract pistons and struts and the pivots; doors and wells are left out. Measured 2026-11-05 from the pinned commit: lowest gear vertex -2.219 m below the model origin (main wheels), tail wheel -0.923 m. The model is drawn gear down: nothing animates the retraction"
+  },
+  "labels": {
+    "dimensions_m": {
+      "length": 9.84,
+      "height": 3.88,
+      "source": "measured 2026-11-05 from the pinned mesh at commit cb3bcd6e: 9.84 m spinner tip to rudder trailing edge, 3.88 m lowest tyre to fin top in the model's level attitude (the drawn model sits level, not on its tail wheel); span from the flown FDM's own <wingspan>, 37.1 ft, which the mesh matches at 11.31 m"
+    },
+    "keypoints": {
+      "nose": {
+        "structural_in": [
+          -29.94,
+          0.0,
+          -5.06
+        ],
+        "basis": "measured",
+        "source": "measured 2026-11-05 from Models/P-51D-25NA.ac and Models/prop.ac at commit cb3bcd6e with assets_pipeline.acmodel (parse_ac, ac_to_model): the frontmost vertex, the spinner tip ('spinner'), at model-frame (-0.829, -0.001, -0.074) m, y taken as the centreline; the frame: the .ac origin is the FDM's structural origin to within centimetres (FlightGear's p51d-jw-jsbsim.xml loads the model with no offset), so x is the main-wheel centre (model x 1.913 m) put on the flown p51d.xml LEFT_MLG x 78 in, a +0.069 m shift, and z the lowest tyre vertex (model z -2.219 m) on its contact z -89.5 in, a -0.054 m shift; metres / 0.0254"
+      },
+      "tail": {
+        "structural_in": [
+          357.49,
+          0.0,
+          4.54
+        ],
+        "basis": "measured",
+        "source": "measured 2026-11-05 from Models/P-51D-25NA.ac and Models/prop.ac at commit cb3bcd6e with assets_pipeline.acmodel (parse_ac, ac_to_model): the aftmost vertex ('rudder'), at model-frame (9.012, 0.000, 0.169) m, y taken as the centreline; the frame: the .ac origin is the FDM's structural origin to within centimetres (FlightGear's p51d-jw-jsbsim.xml loads the model with no offset), so x is the main-wheel centre (model x 1.913 m) put on the flown p51d.xml LEFT_MLG x 78 in, a +0.069 m shift, and z the lowest tyre vertex (model z -2.219 m) on its contact z -89.5 in, a -0.054 m shift; metres / 0.0254"
+      },
+      "left_wingtip": {
+        "fdm_wingspan": "left"
+      },
+      "right_wingtip": {
+        "fdm_wingspan": "right"
+      },
+      "nose_gear": {
+        "fdm_contact": "TAIL_LG"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MLG"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MLG"
+      }
+    },
+    "keypoints_note": "the P-51D is a tail-dragger, so the third-gear keypoint, nose_gear by the labeller's fixed name, is the tail wheel's TAIL_LG contact. The labels are where the flown stock p51d.xml says the gear is: its tail wheel sits at x 282 in, 0.23 m aft of the drawn wheel once the main wheels are aligned, and its main contacts at y 71 in against the drawn 72 in"
+  },
+  "not_primary": "the stock p51d.xml drives fcs/throttle-pos-norm from ap/throttle-cmd-norm (Systems/propulsion.xml), so JSBSim's trim, which moves fcs/throttle-cmd-norm, cannot change power and fails at every speed and altitude tried (measured 2026-11-05: 100-320 kt at 1000, 3000 and 6000 m). It renders as traffic, which is scripted and needs no trim"
 }
