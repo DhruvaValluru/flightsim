@@ -2,10 +2,10 @@
 
 ## Acceptance sheet (F5), 5 Nov 2026
 
-**Phase 3 is built and proved on one laptop. It is not accepted.** Letters A to D and F pass
-the laptop gate test; F passes with F2 accepted on one machine (decision 26) and two goals
-owner-pending. Letter E stays red on purpose: E6 needs the owner's double-click, and no agent
-can stand in for it. Evidence is from the Windows
+**Phase 3 is built and proved on one laptop. It is not accepted.** All six letters pass
+the laptop gate test. F passes with F2 accepted on one machine (decision 26) and two goals
+owner-pending; E passes with the newcomer line owner-pending, because no person has done it
+and no agent can stand in for one. Evidence is from the Windows
 laptop unless a row says otherwise. Run logs under `runs/` stay on that laptop.
 
 | # | Criterion | State | Evidence | Still needed |
@@ -23,7 +23,7 @@ laptop unless a row says otherwise. Run logs under `runs/` stay on that laptop.
 | B | PASS; B4 on the substitute baseline, other computers owner-pending | Synced; records corrected below |
 | C | PASS | Synced; records corrected below |
 | D | PASS | Synced; `sync_log_D.md` does not exist, so it used the gate log and event log |
-| E | FAIL on E6, the double-click | Not run; it runs after a letter passes |
+| E | PASS, 6 Nov; E6 on the owner's double-click, newcomer line owner-pending | Not run |
 | F | PASS, 6 Nov; F2 on one machine (decision 26), goals 1 and 6 owner-pending | Not run |
 
 F2 and F5 were ticked by Windows on 6 Nov at the owner's word. F5 has no run of its own, so

@@ -70,3 +70,5 @@ Known flaw, not fixed: each launch opens one more browser tab.
 ## Owner's double-click, 2026-11-06
 
 The owner double-clicked `Launch FlightSim.cmd` in a fresh clone, `C:\Users\kanth\p3-final`, and reported: `logs\launch.log` ends with step 7/7 server, server started, READY; browser opened; no prompt. Both bakes ran from missing .r16 files and the p51d imported. The browser asked for /runs/49c73b3c38d8 and got a 404: a run id this laptop's browser remembered, per the owner, not a fresh-machine behaviour. These are the owner's words; the log stayed on the laptop.
+
+Windows read that log the same day: steps 1 to 7 in order, last lines `step 7/7 server`, the server start, `READY`, and no line starting `FAILED`. The clone is at 995275e0. The browser and the absence of a prompt rest on the owner's word; a log cannot show them.

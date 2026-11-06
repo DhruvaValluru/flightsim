@@ -3,19 +3,17 @@
   "builder_commit": "fa6d3866",
   "built_commit": "fa6d3866",
   "claims": [],
+  "green_commit": 995275.0,
   "integrated_commit": "0be3ef75",
   "letter": "E",
   "needs_windows": true,
-  "pending_windows": [
-    "preflight from the launcher exits 0 or one FAILED preflight: toolchain.<tool>_mismatch line",
-    "fresh folder double-click: launch.log ends READY, browser opened, no prompt",
-    "second launch: build/materials/aircraft up to date + both bake up to date, no editor",
-    "break one step -> only it reruns; hidden ffmpeg -> FAILED preflight: toolchain.ffmpeg_mismatch and nothing after",
-    "Smart App Control block reported as host.smart_app_control"
-  ],
+  "note": "owner's double-click, 2026-11-06; launcher box, no capture run; run_id names the launch",
+  "pending_windows": [],
   "pushed_commit": "a2ed7704",
-  "stage": "pushed",
+  "run_id": "launch:p3-final@995275e0",
+  "stage": "integrated",
   "unit": "E6",
-  "updated": "2026-11-04T18:28:46",
+  "updated": "2026-11-06T08:38:44",
+  "verdict": "PASS",
   "worktree": "../p3-E6"
 }

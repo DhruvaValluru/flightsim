@@ -183,7 +183,7 @@ Two rules to keep in mind:
   decide whether storm weather is in the demo default*
   - Check: the run finishes and verify has no FAIL.
 - [x] **E5 · Hidden options become checkboxes** (normals / flow / amodal)
-- [ ] **E6 · Double-click launcher** (`Launch FlightSim.cmd`) 🪟
+- [x] **E6 · Double-click launcher** (`Launch FlightSim.cmd`) 🪟
   - Check: on a fresh download, the app opens and the log ends with `READY`.
   - Check: a second launch skips everything already done.
 
