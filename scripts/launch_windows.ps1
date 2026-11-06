@@ -149,7 +149,7 @@ Invoke-Step 4 "materials" {
         $uproject = Join-Path $repo "ue\FlightSim.uproject"
         $materialScript = Join-Path $repo "scripts\ue_create_materials.py"
         $out = Invoke-Logged $editor @($uproject, "-run=pythonscript", "-script=$materialScript",
-            "-unattended", "-nopause", "-nosplash", "-stdout")
+            "-unattended", "-nopause", "-nosplash", "-stdout", "-FullStdOutLogOutput")
         $joined = $out -join "`n"
         if (Test-SmartAppControl $joined) { Stop-With "materials" "host.smart_app_control" }
         if (($script:lastExit -ne 0) -or ($joined -match "MATERIAL-FAILED")) {
