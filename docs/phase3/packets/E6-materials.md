@@ -17,6 +17,12 @@ Fix: the CVar off in ue/Config/DefaultEngine.ini. It also covers
 ue_build_scene.py, which imports the same way. On the failed clone the commandlet
 then exits 0 with 49 assets (runs/p3/G/E6-materials-try1.log).
 
-Not proven: T_RolesValley goes through Interchange although
-ue_create_materials.py sets a TextureFactory to keep its zero-alpha texels, so
-those texels may not be as written.
+T_RolesValley, checked after: exported from the fresh clone, all 16 texels read
+(255, 0, 0, 0), equal to the source. The engine fill touches only
+(255, 255, 255, 0). The TextureFactory branch never ran, because this engine has
+no fill_png_zero_alpha, and is removed (90d7f1f7).
+
+Also found: the launcher's MATERIAL-FAILED match could never fire, because
+Python prints did not reach stdout. Fixed with -FullStdOutLogOutput. A forced
+materials rerun showed all 36 MATERIAL- lines in stdout (runs/p3/G/E6-tip2-stdout.log).
+A real failed material has not been run through it.
