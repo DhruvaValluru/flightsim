@@ -115,7 +115,11 @@ def write_materials_stamp(repo: Path, engine_version: Optional[str] = None) -> P
 def check_build(repo: Path) -> Optional[str]:
     """None when the plugin binary matches its A4 stamp, else
     binary_stale_reason's message (engine.binary_stale)."""
-    from core.util.platform import binary_stale_reason
+    from core.util.platform import binary_stale_reason, ue_bridge_binary
+    # binary_stale_reason says nothing about a bridge that was never built,
+    # which is a fresh download's state: this step must build it.
+    if not ue_bridge_binary(Path(repo)).is_file():
+        return "the bridge is not built"
     return binary_stale_reason(Path(repo))
 
 
