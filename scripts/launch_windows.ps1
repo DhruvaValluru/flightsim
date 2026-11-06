@@ -75,6 +75,25 @@ function Find-NamedReason($lines, $fallback) {
     return $fallback
 }
 
+function Get-ServerHosts($serverPid) {
+    # The processes above the server that exist only to run it: the venv
+    # python.exe stub and the powershell -NoExit window. Stopping the server
+    # alone left that window open, one more per launch. Matched on the
+    # command line, so a shell the owner started by hand is never touched.
+    $found = @()
+    try {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$serverPid" -ErrorAction SilentlyContinue
+        while ($proc) {
+            $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.ParentProcessId)" -ErrorAction SilentlyContinue
+            if (-not $parent -or $parent.ProcessId -eq $PID) { break }
+            if ($parent.CommandLine -notlike "*uvicorn webapp.server:app*") { break }
+            $found += $parent.ProcessId
+            $proc = $parent
+        }
+    } catch { }
+    return $found
+}
+
 function Start-FlightSimServer {
     # A server already on 8008 is the OLD code (deploy_windows.ps1): stop it.
     try {
@@ -86,7 +105,12 @@ function Start-FlightSimServer {
         $owner = $conn.OwningProcess
         if ($owner -and ($owner -ne $PID)) {
             Log "stopping the server already on port 8008 (pid $owner)"
+            $hosts = @(Get-ServerHosts $owner)
             Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+            foreach ($hostPid in $hosts) {
+                Log "closing its window (pid $hostPid)"
+                Stop-Process -Id $hostPid -Force -ErrorAction SilentlyContinue
+            }
         }
     }
     if ($listening.Count -gt 0) { Start-Sleep -Seconds 2 }
