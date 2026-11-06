@@ -95,3 +95,23 @@ for the bridge tests. The two float baselines now compare within rounding, and
 `test_weather` uses the running interpreter. Fog units (decision 21) and the Gate 6 rework
 are unpushed on Windows and unreviewed. Open: E2 E3 real-key half, E5, E6, F1, F2, F4.
 
+
+## Finishing run, 5 Nov 2026
+
+Supersedes the tables above where they differ. Not accepted yet: a letter counts only when
+`pytest -m gate_<L>` is green on the laptop and on CI for the same commit.
+
+| Item | State |
+|---|---|
+| PASS by state file | A2-A13, B1-B3, C1-C7, D1 D2 D4 D5 D6, E1-E5 |
+| B4 | Gate 6 INCOMPLETE: every measured clause passes; the side-by-side has no old footage. Searched the Mac, the laptop's PNGs, Drive by name and the repo; not found |
+| E6 | Fresh clone on `cead67ba`: steps 1-7 exit 0, READY. Later launcher fix proved by a forced rerun only. The owner's double-click is open |
+| Decision 18 | Confirmed by the owner |
+| p51d | Decision 22: owner-cleared, traffic only, its FDM cannot trim. Fetch and convert ran on Windows; the import was killed for low memory, so it is not proved |
+| A10 | PASS on `6b69c8dc1d28`; re-proof on the tip not run |
+| DHC6 engine render, Gate E newcomer, F1 `ue_host` | Not run |
+| F2, F4, F5 | Open |
+| CI | Dropped by the owner (decision 23). Last green: `0c68db3e`, run 42128478598. Nothing after it was checked on three operating systems |
+
+Known gap: a traffic clause naming an aircraft outside the vocabulary compiles to no
+traffic and no message.
