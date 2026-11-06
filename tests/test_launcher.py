@@ -146,3 +146,17 @@ def test_bake_step_is_d5s_exact_command():
         assert retyped not in text, f"the launcher re-types D5's line {retyped!r}"
     assert '$script:lastExit -eq 2) { Stop-With "bake" "bake.usage' in text
     assert 'FAILED ' in text and '"^bake \\S+ FAILED "' in text
+
+
+def test_a_commandlet_import_does_not_reach_for_the_content_browser():
+    """The materials step imports in a commandlet on a fresh download: with the
+    sync on, the engine asserts on the Slate application it does not have."""
+    ini = (REPO / "ue" / "Config" / "DefaultEngine.ini").read_text(encoding="utf-8")
+    assert "Interchange.FeatureFlags.Import.SyncToBrowser=0" in ini
+
+
+def test_the_materials_step_can_see_a_failed_material():
+    """MATERIAL-FAILED is a Python print, which stdout drops without this flag."""
+    text = (REPO / "scripts" / "launch_windows.ps1").read_text(encoding="utf-8")
+    step = text[text.index('Invoke-Step 4 "materials"'):text.index("Invoke-Step 5")]
+    assert '"-FullStdOutLogOutput"' in step and '"MATERIAL-FAILED"' in step

@@ -529,17 +529,17 @@ def test_every_terrain_sampler_the_cpp_may_leave_unset_defaults_to_a_known_textu
                     '"srgb", bool(srgb)', "raise RuntimeError"):
         assert setting in helper, setting
     assert "SystemExit" not in helper
-    # The zero-alpha flat texel (Roles: cliff = A = 0) is imported through a
-    # TextureFactory with the engine's zero-alpha PNG fill off, or the
-    # script says it could not be; untouched texels are the first Windows check.
-    assert "unreal.TextureFactory()" in helper
-    assert 'factory.set_editor_property("fill_png_zero_alpha", False)' in helper
-    assert 'task.set_editor_property("factory", factory)' in helper and "MATERIAL-NOTE" in helper
+    # The engine's PNG fill touches only (255, 255, 255, 0), so the zero-alpha
+    # Roles texel imports as written and must not become that value.
+    assert "fill_png_zero_alpha" not in helper
+    assert TERRAIN_ROLES_TEXEL in text and "(255, 255, 255, 0)" not in TERRAIN_ROLES_TEXEL
     chooser = _body(text, "default_texture")
     assert "_repo_file(committed)" in chooser and "MATERIAL-NOTE" in chooser
-    assert "zero_alpha=flat and texel[3] == 0" in chooser
     sampler = _body(text, "texture_parameter")
     assert "SAMPLERTYPE_NORMAL" in sampler and 'node.set_editor_property("texture", default)' in sampler
+
+
+TERRAIN_ROLES_TEXEL = '"T_RolesValley": (None, (255, 0, 0, 0), False, False)'
 
 
 def test_the_terrain_graph_is_one_helper_under_both_drape_materials():

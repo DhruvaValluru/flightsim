@@ -363,11 +363,10 @@ TERRAIN_DETAIL_NEUTRAL = {
 #: (the committed bitmap, repository-relative, imported when the checkout
 #: has it, or None; the 4 x 4 flat RGBA texel 0-255 used instead; sRGB;
 #: normal map). The flat detail texels are the neutrals sRGB-encoded.
-#: T_RolesValley is a ZERO-ALPHA PNG (cliff = A = 0): the engine's PNG
-#: import rewrites zero-alpha texels unless told not to, so that one goes
-#: through a TextureFactory with fill_png_zero_alpha off (import_texture);
-#: that the imported texture reads (255, 0, 0, 0) untouched is the first
-#: Windows check of these defaults.
+#: T_RolesValley is a ZERO-ALPHA PNG (cliff = A = 0). The engine's PNG import
+#: fills only texels of exactly (255, 255, 255, 0), so this one arrives as
+#: written: measured on 5.7.4, all 16 texels read back (255, 0, 0, 0) from a
+#: fresh download. A role map must never be that white texel.
 TERRAIN_DEFAULT_TEXTURES = {
     "T_DetailValley": ("assets/xplane/terrain/drape/valley.png", (79, 80, 54, 255), True, False),
     "T_DetailScrub": ("assets/xplane/terrain/drape/scrub.png", (85, 85, 67, 255), True, False),
@@ -1136,19 +1135,14 @@ def _repo_file(relative):
     return None
 
 
-def import_texture(source, name, srgb, normal_map, flat, zero_alpha=False):
+def import_texture(source, name, srgb, normal_map, flat):
     """Import one PNG as /Game/FlightSim/<name> (scripts/ue_build_scene.py's
     _import_texture idiom): an sRGB colour, a linear data map (no sRGB
     curve, uncompressed 8 bits) or a normal map (TC_Normalmap, whose
     Normal sampler unpacks x, y from R, G). A flat texel takes no mips;
-    a bitmap keeps the texture group's. A zero_alpha PNG (T_RolesValley,
-    (255, 0, 0, 0)) goes through its own TextureFactory with the
-    importer's zero-alpha fill off, so its texels arrive as written; an
-    engine whose Python has no such option is told so and imports it
-    through the default factory, and whether that leaves the texels
-    untouched is the first Windows check of these defaults. A failed
-    import is a RuntimeError the creator guard reports by name, not an
-    exit: the other materials still build."""
+    a bitmap keeps the texture group's. A failed import is a RuntimeError
+    the creator guard reports by name, not an exit: the other materials
+    still build."""
     task = unreal.AssetImportTask()
     task.set_editor_property("filename", str(source))
     task.set_editor_property("destination_path", PATH)
@@ -1156,16 +1150,6 @@ def import_texture(source, name, srgb, normal_map, flat, zero_alpha=False):
     task.set_editor_property("automated", True)
     task.set_editor_property("replace_existing", True)
     task.set_editor_property("save", False)
-    if zero_alpha:
-        try:
-            factory = unreal.TextureFactory()
-            factory.set_editor_property("fill_png_zero_alpha", False)
-        except Exception:   # not this engine's name: said, not hidden
-            print(f"MATERIAL-NOTE: {name} is a zero-alpha PNG and this engine's Python has no "
-                  f"TextureFactory.fill_png_zero_alpha; whether the default import leaves its "
-                  f"texels untouched is the first Windows check")
-        else:
-            task.set_editor_property("factory", factory)
     unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
     full = f"{PATH}/{name}"
     texture = unreal.load_asset(full)
@@ -1199,7 +1183,7 @@ def default_texture(name):
             print(f"MATERIAL-NOTE: {committed} is not on this checkout; {name} is the flat "
                   f"texel {texel}")
         source = _flat_png(name, texel)
-    return import_texture(source, name, srgb, normal_map, flat, zero_alpha=flat and texel[3] == 0)
+    return import_texture(source, name, srgb, normal_map, flat)
 
 
 def terrain_texture(material, lib, name, x, y, default=None):
