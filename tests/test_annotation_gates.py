@@ -156,6 +156,9 @@ def fabricated_manifest(spec, mesh=None, citation=None):
         "path": MESH_PATH, "sha256": None,
         "note": "fixture: the bundle is painted from the airframe block's box, "
                 "so no mesh is cited whatever this machine has imported"}
+    for entry in manifest["objects"]:
+        if entry.get("role") == "traffic":
+            entry["mesh_sha256"] = None
     return manifest, traffic_tracks
 
 

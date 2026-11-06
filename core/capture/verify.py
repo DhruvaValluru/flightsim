@@ -2669,9 +2669,23 @@ def _mesh_vertices_actor_m(path: str, sha: str):
     return np.unique(np.asarray(rows, dtype=float), axis=0) / 100.0
 
 
-def _mesh_points_body(manifest: Dict, airframe_block: Dict, run_dir=None):
-    """(N x 3 array of the primary's mesh vertices in body metres about
-    the CG -- forward, right, down -- , basis), or (None, None).
+def _mesh_asset(manifest: Dict, entry: Dict, airframe_block: Dict, primary: bool) -> Dict:
+    """The mesh citation of one aircraft object: the primary's from
+    ``assets.mesh_manifest``, a traffic aircraft's from the digest its
+    object record carries, at the path the importer writes. Empty when it
+    cites none, which leaves that object on its extents box."""
+    if primary:
+        return (manifest.get("assets") or {}).get("mesh_manifest") or {}
+    sha, aircraft = entry.get("mesh_sha256"), airframe_block.get("aircraft")
+    if not sha or not aircraft:
+        return {}
+    return {"path": f"assets/generated/{aircraft}/mesh_manifest.json", "sha256": sha}
+
+
+def _mesh_points_body(manifest: Dict, airframe_block: Dict, run_dir=None, asset=None):
+    """(N x 3 array of an aircraft's mesh vertices in body metres about
+    the CG -- forward, right, down -- , basis), or (None, None). ``asset``
+    is that aircraft's citation (_mesh_asset); absent, the primary's.
 
     The same citation, digest and re-basing as _hull_box_body's measured
     extent, applied to every vertex instead of the extent's two ends:
@@ -2683,7 +2697,8 @@ def _mesh_points_body(manifest: Dict, airframe_block: Dict, run_dir=None):
     box's corners stand off the wing and tail roots. Control surfaces
     are taken at rest; their deflection moves a trailing edge by
     centimetres."""
-    asset = (manifest.get("assets") or {}).get("mesh_manifest") or {}
+    if asset is None:
+        asset = (manifest.get("assets") or {}).get("mesh_manifest") or {}
     path, sha = asset.get("path"), asset.get("sha256")
     if not path:
         return None, None
@@ -2739,13 +2754,14 @@ def _mesh_points_body(manifest: Dict, airframe_block: Dict, run_dir=None):
 
 
 def _hull_box_body(manifest: Dict, airframe_block: Dict, primary: bool,
-                   run_dir=None) -> Tuple[Dict[str, Tuple[float, float]], str]:
+                   run_dir=None, asset=None) -> Tuple[Dict[str, Tuple[float, float]], str]:
     """The box an object's pixels are graded against, in body metres
     about the CG ``{"forward": (aft, fwd), "right": (left, right),
     "down": (top, bottom)}``, with its basis.
 
-    For the primary, when ``assets.mesh_manifest`` names a file that is
-    on THIS machine with the cited sha256 (at the card's path, or under
+    For the primary, or any aircraft passed its ``asset`` citation
+    (_mesh_asset), when ``assets.mesh_manifest`` or that citation names a
+    file that is on THIS machine with the cited sha256 (at the card's path, or under
     the run directory by the module docstring's relocated-bundle rule --
     a same-named file the card does not vouch for by sha raises
     :class:`BundleFileError`) and carries the converter's
@@ -2757,8 +2773,9 @@ def _hull_box_body(manifest: Dict, airframe_block: Dict, primary: bool,
     airframe block's extents box, which the labels' own bbox_2d is built
     from and which test_camera_labels pins against the FDM's XML.
     """
-    if primary:
-        asset = (manifest.get("assets") or {}).get("mesh_manifest") or {}
+    if primary or asset:
+        if asset is None:
+            asset = (manifest.get("assets") or {}).get("mesh_manifest") or {}
         path, sha = asset.get("path"), asset.get("sha256")
         if path:
             candidate, why = _named_file(_card_candidate(path, _REPO), sha, run_dir)
@@ -2842,8 +2859,9 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes, run_dir=No
                          "before frames carried traffic_states; the projection and "
                          "the pixels are graded, the placement is not independently "
                          "re-derived)")
-    box, basis = _hull_box_body(manifest, airframe, entry.get("role") == "primary"
-                                or int_id == AIRCRAFT_INSTANCE_ID, run_dir)
+    primary = entry.get("role") == "primary" or int_id == AIRCRAFT_INSTANCE_ID
+    asset = _mesh_asset(manifest, entry, airframe, primary)
+    box, basis = _hull_box_body(manifest, airframe, primary, run_dir, asset)
     lo = (box["forward"][0], box["right"][0], box["down"][0])
     hi = (box["forward"][1], box["right"][1], box["down"][1])
     centre_body = tuple((a + b) / 2.0 for a, b in zip(lo, hi))
@@ -2857,8 +2875,8 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes, run_dir=No
                for z in box["down"]]
     points = None
     outer_bound = None
-    if entry.get("role") == "primary" or int_id == AIRCRAFT_INSTANCE_ID:
-        body_points, points_basis = _mesh_points_body(manifest, airframe, run_dir)
+    if asset:
+        body_points, points_basis = _mesh_points_body(manifest, airframe, run_dir, asset)
         if body_points is not None:
             import numpy as np
 

@@ -97,3 +97,27 @@ def test_the_mesh_centre_floor_is_one_pixel_per_axis():
 
     assert verify.MASK_CENTRE_TOL_PX_MESH == math.sqrt(2.0)
     assert verify.MASK_TOL_PX < 1.1 < verify.MASK_CENTRE_TOL_PX_MESH
+
+
+def test_a_traffic_aircraft_is_graded_on_its_own_mesh_by_the_digest_it_carries(tmp_path, monkeypatch):
+    """p51d traffic, UE 5.7.4: a correct 119 px mask failed against a 155 px
+    extents box, because only the primary took the mesh hull."""
+    monkeypatch.setattr(verify, "_REPO", tmp_path)
+    verify._mesh_vertices_actor_m.cache_clear()
+    cited = _write_mesh(tmp_path, [(100.0, -200.0, 50.0), (-300.0, 400.0, -25.0)])
+    sha = cited["assets"]["mesh_manifest"]["sha256"]
+    airframe = {"aircraft": "X", "cg_structural_in": [0.0, 0.0, 0.0]}
+    asset = verify._mesh_asset({}, {"mesh_sha256": sha}, airframe, False)
+    assert asset == cited["assets"]["mesh_manifest"]
+    body, basis = verify._mesh_points_body({}, airframe, None, asset)
+    assert basis and "2 mesh vertices" in basis and len(body) == 2
+
+
+def test_traffic_with_no_cited_or_matching_mesh_stays_on_its_box(tmp_path, monkeypatch):
+    monkeypatch.setattr(verify, "_REPO", tmp_path)
+    verify._mesh_vertices_actor_m.cache_clear()
+    _write_mesh(tmp_path, [(100.0, -200.0, 50.0), (-300.0, 400.0, -25.0)])
+    airframe = {"aircraft": "X", "cg_structural_in": [0.0, 0.0, 0.0]}
+    assert verify._mesh_asset({}, {"mesh_sha256": None}, airframe, False) == {}
+    wrong = verify._mesh_asset({}, {"mesh_sha256": "0" * 64}, airframe, False)
+    assert verify._mesh_points_body({}, airframe, None, wrong) == (None, None)
