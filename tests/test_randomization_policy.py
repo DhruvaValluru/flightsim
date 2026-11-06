@@ -685,3 +685,15 @@ def test_the_p51d_and_dhc6_clauses_compile_as_traffic_and_are_never_dropped():
         assert str(spec.aircraft.value) == "c172p"
         assert [str(t.aircraft.value) for t in spec.traffic] == [model]
     assert str(compile_prompt("fly the p51d").aircraft.value) == "p51d"
+
+
+def test_a_traffic_clause_for_an_unknown_aircraft_leaves_a_note():
+    """It was dropped with no message; "with a gust crossing" has the same
+    shape, so this is a note and the flight still compiles."""
+    from core.nl.compiler import compile_prompt
+
+    spec = compile_prompt("fly the c172 at 1000 m with a pilatus in formation 150 m ahead")
+    assert not spec.traffic
+    assert any("pilatus" in note and "no traffic" in note for note in spec.notes)
+    spec = compile_prompt("fly the c172 at 1000 m with an a320 in formation 150 m ahead")
+    assert not any("no traffic" in note for note in spec.notes)
