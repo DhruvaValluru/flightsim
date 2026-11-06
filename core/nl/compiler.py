@@ -306,6 +306,21 @@ def _traffic(text: str):
     return entries, TRAFFIC_PHRASE.sub(" ", text)
 
 
+#: A traffic-shaped clause whose airframe the vocabulary lacks. It becomes a
+#: note, not a refusal: "with a gust crossing" has the same shape.
+UNPLACED_TRAFFIC = re.compile(
+    rf"\b(?:with|and|plus)\s+(?:an?|another|one|a second)\s+"
+    rf"(?P<name>[\w-]+(?:\s+[\w-]+)?)\s+(?:(?:traffic|aircraft)\s+)?"
+    rf"(?:{_TRACK_ALT})\b", re.IGNORECASE)
+
+
+def unplaced_traffic_notes(text: str) -> List[str]:
+    """The note for each such clause left once _traffic has taken its own."""
+    return [f'"{m.group(0).strip()}" looks like traffic, but "{m.group("name")}" '
+            f"is not an aircraft this compiler knows, so no traffic was added"
+            for m in UNPLACED_TRAFFIC.finditer(text)]
+
+
 #: A terrain phrase: "over 3000 m terrain", "above 9000 ft ridge".
 TERRAIN_PHRASE = (
     rf"(?:over|above|across)\s+{NUMBER}\s*"
@@ -1533,6 +1548,7 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
 
     if traffic:
         spec.traffic = traffic
+    spec.notes.extend(unplaced_traffic_notes(text))
     for phrase in _other_airframes(text, model):
         spec.notes.append(
             f"a second aircraft {phrase!r} is named but not as traffic, so "

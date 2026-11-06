@@ -1158,3 +1158,38 @@ def test_a_failed_clause_stays_a_failure_without_the_footage(tmp_path, monkeypat
                     "--old-footage", str(tmp_path / "none")])
     assert code == 1
     assert "GATE 6: FAIL" in capsys.readouterr().out
+
+
+def test_a_substitute_baseline_passes_and_says_it_is_not_the_old_footage(
+        tmp_path, monkeypatch, capsys):
+    """Decision 25: the footage is lost, so an earlier render may stand in,
+    but only under its own name, on every line that mentions it."""
+    g6 = _probe_names()
+    out = tmp_path / "gate6"
+    _measured_tree(out)
+    _fast_inputs(monkeypatch, g6)
+    _stub_measures(monkeypatch, g6)
+    composed = []
+    monkeypatch.setattr(g6, "compose_side_by_side",
+                        lambda old, new, path: composed.append(old) or path)
+    baseline = tmp_path / "6oct_still.png"
+    baseline.write_bytes(b"x")
+    code = g6.main(["--out", str(out), "--skip-render",
+                    "--old-footage", str(tmp_path / "none"),
+                    "--substitute-baseline", str(baseline)])
+    text = capsys.readouterr().out
+    assert code == 0 and composed == [baseline]
+    assert "SUBSTITUTE baseline, not the old footage (decision 25)" in text
+    assert "substitute baseline (decision 25)" in text
+
+
+def test_a_missing_substitute_baseline_is_still_incomplete(tmp_path, monkeypatch, capsys):
+    g6 = _probe_names()
+    out = tmp_path / "gate6"
+    _measured_tree(out)
+    _fast_inputs(monkeypatch, g6)
+    _stub_measures(monkeypatch, g6)
+    code = g6.main(["--out", str(out), "--skip-render",
+                    "--substitute-baseline", str(tmp_path / "none")])
+    assert code == 3
+    assert "GATE 6: PASS" not in capsys.readouterr().out

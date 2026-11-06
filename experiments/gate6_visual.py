@@ -1150,6 +1150,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--out", default="runs/gate6")
     ap.add_argument("--old-footage",
                     default=str(Path.home() / "FlightScene" / "renders"))
+    ap.add_argument("--substitute-baseline", default=None,
+                    help="a PNG or folder standing in for the lost old footage "
+                         "(decision 25); every line then says it is a substitute")
     ap.add_argument("--skip-render", action="store_true",
                     help="measure existing renders without re-rendering")
     ap.add_argument("--look", action="store_true",
@@ -1338,13 +1341,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(check.render())
 
     print(f"\n{RULE}\n4. the side-by-side\n{RULE}")
-    old_frames = sorted(Path(args.old_footage).glob("*.png"))
+    substitute = Path(args.substitute_baseline) if args.substitute_baseline else None
+    baseline_words = ("a SUBSTITUTE baseline, not the old footage (decision 25)"
+                      if substitute else "the old footage")
+    if substitute and substitute.is_file():
+        old_frames = [substitute]
+    else:
+        old_frames = sorted((substitute or Path(args.old_footage)).glob("*.png"))
     side_by_side = None
     if old_frames:
         old = old_frames[len(old_frames) // 2]
         new = sorted((out / "full").glob("frame_*.png"))[-1]
         side_by_side = compose_side_by_side(old, new, out / "side_by_side.png")
-        print(f"  old footage {old}")
+        print(f"  {'SUBSTITUTE ' if substitute else 'old footage'} {old}")
         print(f"  this build  {new}")
         print(f"  wrote       {side_by_side}")
         print("  Likeness is the reader's judgment to make, not this "
@@ -1352,6 +1361,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("  measurements above establish is that the four properties "
               "the brief named")
         print("  as missing from the old footage are present in the new.")
+        if substitute:
+            print("  The left panel is an earlier render of THIS project, not the "
+                  "old footage,")
+            print("  which is lost: it shows change since then, not likeness to "
+                  "the old build.")
     else:
         print(f"  [----] side-by-side NOT RUN: no old footage under {args.old_footage}")
         print("         measurement: this harness composes old beside new for a "
@@ -1372,7 +1386,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for clause in looks:
         print(f"  [{clause.status}] {clause.name}")
     print(f"  [{'PASS' if side_by_side else 'NOT RUN'}] side-by-side produced "
-          f"against the old footage")
+          f"against {baseline_words}")
     if everything:
         print("\n  GATE 6: PASS -- four clauses measured from the pixels, the "
               "side-by-side")
@@ -1380,6 +1394,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               "terrain material,")
         print("  no foliage -- docs/VALIDITY.md lists the Phase 6 work that "
               "remains.")
+        if substitute:
+            print("  The side-by-side used a substitute baseline (decision 25); "
+                  "the old footage is lost.")
         return 0
     if measured:
         # A clause that did not run is not a clause that passed.
