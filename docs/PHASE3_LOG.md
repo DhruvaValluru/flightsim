@@ -128,6 +128,7 @@ verify counts, the `component_coverage` detail and the card diff keys.
 | D6 | D-1 | `run_test_scenarios.py --matrix --still --compiler regex` | `matrix FAIL`: all four cells flew the B747 (`apply_cell` writes the wrong key); runs 5835af44a0de, eaf9c4b8f369, a5f4d4e34e6e, 16342bb78e61 | packet D6-1 |
 | D2 | D-1 | J-11 config test, level flight, import | level flight OK; 2 CRLF test failures; import not reached | packet D2-1 |
 | D2, D6 | D-1 | matrix re-run after the fixes | all four cells flew their own aircraft, verify ok, `component_coverage` PASS; J-11 imported itself | PASS, see gate_log_D.md |
+| B4 | B-1 | `gate6_visual.py --look --substitute-baseline`, measure and beauty, e6a60f75 | both exit 0, `GATE 6: PASS` against the 6 October still, not the old footage; nobody has judged it | decision 25 |
 
 ## Gate E: newcomer questions (2026-11-05, Windows)
 

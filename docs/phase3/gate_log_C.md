@@ -7,4 +7,6 @@
 
 Boxes: C1-C6 PASS. C7 step 6 not run (deferred: budget; optional; not on the go list).
 
+Correction, 2026-11-05: C7 step 6 did run later: run 90a9f2cfb840 on 984487b8, `component_coverage` and `component_boxes` PASS (`events_windows.log`).
+
 Letter C: PASS.

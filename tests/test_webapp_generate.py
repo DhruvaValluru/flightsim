@@ -937,6 +937,9 @@ def test_a_host_flight_refusal_in_the_capture_log_reaches_the_page_in_words(
 
 def test_a_generate_request_with_no_imported_mesh_falls_back_not_refuses(client, monkeypatch):
     monkeypatch.setattr(generate_module, "ue_available", lambda: True)
+    # The real runner's child process imported the mesh with the installed
+    # editor: an unmarked engine launch, and a refusal for parallel tests.
+    monkeypatch.setattr(generate_module, "CAPTURE_RUNNER", "tests.test_campaign:failing_capture")
     monkeypatch.setattr(generate_module, "is_imported", lambda name: False)
     started = client.post("/generate/start", json={
         "prompt": ASKS_VIEW, "answers": ANSWER, "images": IMAGES, "tier": "regex"})

@@ -637,6 +637,8 @@ def test_render_refuses_an_unimported_mesh_before_any_flight(tmp_path, capsys,
 
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: False)
+    # No editor to import with: on a machine with one, the real import ran.
+    monkeypatch.setattr(platform_module, "ue_editor_path", lambda: None)
     launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", never)
     out = tmp_path / "refused"

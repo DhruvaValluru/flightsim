@@ -134,6 +134,7 @@ def test_empty_run_headless_reaches_done_no_fail(client, monkeypatch, tmp_path):
     import core.util.platform as plat
 
     monkeypatch.setattr(plat, "ue_available", lambda: False)
+    monkeypatch.setattr(runs_module, "editor_running", lambda: False)
     monkeypatch.setattr(runs_module, "ensure_aircraft_model",
                         lambda spec, report: None)
     # The grand_canyon bake is not on every clone: the bake check is held

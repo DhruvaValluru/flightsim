@@ -723,6 +723,13 @@ stay until the probe on 5.7.4 replaces them from its own file:
 * **Status:** not yet re-measured on 5.7.4; the Windows steps are pending
   (`docs/phase3/notes/B4.md` windows_steps). No 5.7 number is stated here
   until a probe file holds it.
+* **Gate 6 against a substitute, 2026-11-05 (decision 25).** At e6a60f75, measure
+  and beauty both exit 0, `GATE 6: PASS`, with the side-by-side's left panel the
+  project's own 6 October still (`runs/p3/B-1/gate6_sub_measure`,
+  `gate6_sub_beauty`). That shows change since then. It is not a likeness to the
+  old build, whose footage was not found, and nobody has judged the picture; the
+  plain reads much brighter than the still. Against the old footage the statement
+  below stands. Neither run is a probe file, so no bias above changes.
 * **Gate 6 on 5.7.4 is INCOMPLETE, not passed.** One build, measure and beauty
   (`runs/p3/B-1/gate6_m2`, `gate6_b2`), both exit 3: every measured clause
   passes, the side-by-side is NOT RUN, the owner's footage being absent, and
