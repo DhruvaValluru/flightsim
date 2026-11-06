@@ -8,6 +8,7 @@
     "run B-1 packet docs/phase3/packets/B4-2.md: terrain clauses pass after 4f8abb78; five clauses fail identically on the 6 Oct renders (ground shadow 0 px, auto-exposure control 2.51, wetness parameter absent, albedo sun invariance, old footage absent); next Windows builder round takes 1-4",
     "run B-1 packet docs/phase3/packets/B4-3.md: round 2 (215813cd merged, MAIN stamp e952c275, M_VertexColor rebuilt) fixed the zero-normal ground and the wetness clause; ground shadow 79 px, auto-exposure control 4.62, albedo route unfixed, three contrast/night clauses now fail on the lit ground; round 3 deferred: budget"
   ],
+  "green_commit": "e6a60f75",
   "integrated_commit": "c3383adff2ccc10fc28931471d555e45bc5e78fc",
   "letter": "B",
   "needs_windows": true,
@@ -20,11 +21,11 @@
     "step10 pytest tests/test_engine_bundle_golden.py with the A12 fixture: 0 skipped, exit 0"
   ],
   "pushed_commit": "3e59358d",
-  "run_id": "B-1",
+  "run_id": "gate6_sub_measure",
   "stage": "built_local",
   "unit": "B4",
-  "updated": "2026-11-04T21:06:13",
-  "verdict": "FAIL",
+  "updated": "2026-11-05T23:10:11",
+  "verdict": "PASS",
   "windows_build": "215813cd",
   "worktree": "../p3w-B4r3"
 }

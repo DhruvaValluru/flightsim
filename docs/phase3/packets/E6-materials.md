@@ -56,3 +56,13 @@ the path a double-click takes, with Explorer's environment.
 - Each launch leaves another server window and another browser tab open.
 
 This narrows the double-click limit above and does not close it.
+
+## Server windows, 2026-11-05, at 728dc15d
+
+Launched from the installed folder, counting powershell windows hosting the server.
+Launch 1 still ran the old script; it pulled the fix. Launches 2 and 3 logged
+`closing its window` and the count held at 2, one of them a window from before
+the fix (started 22:42). With that one closed, launches 4 and 5: count 1 each,
+`closing its window` logged.
+
+Known flaw, not fixed: each launch opens one more browser tab.

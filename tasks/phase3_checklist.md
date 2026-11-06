@@ -98,7 +98,7 @@ sitting 0.4 m from its label (it was ~25 m).
   - Check: preflight prints `OK` per tool, and a wrong version stops it.
 - [x] **B3 · A test catches any version drifting**
   - Check: `pytest -q tests/test_toolchain_pins.py` passes.
-- [ ] **B4 · Picture quality checked on this engine** 🪟
+- [x] **B4 · Picture quality checked on this engine** 🪟
   - Check: `gate6_visual.py` passes, and the A12 label test still passes.
 
 ### GATE B
@@ -190,19 +190,19 @@ Two rules to keep in mind:
 ### GATE E
 - [ ] Someone new uses only the launcher and the app and gets a passing run. They
   don't read NEXT.md, open a terminal or ask you anything. 🪟
-- [ ] Their questions are written in `docs/PHASE3_LOG.md`.
+- [x] Their questions are written in `docs/PHASE3_LOG.md`.
 
 ---
 
 ## F · Demo and wrap-up
 
-- [ ] **F1 · Automated full run:** pick aircraft → pick place → Capture → download 🪟
+- [x] **F1 · Automated full run:** pick aircraft → pick place → Capture → download 🪟
   - Check: `pytest -q -m ue_host tests/test_demo_e2e.py` passes.
 - [ ] **F2 · The same run works on all three computers** 🪟
   - Check: three passing rows in `docs/PHASE3_LOG.md` with the same tool versions.
 - [x] **F3 · Short guide written** (`docs/GUIDE.md`)
   - Check: under 1,000 words, with no terminal commands.
-- [ ] **F4 · Video of one full run**, under 5 minutes
+- [x] **F4 · Video of one full run**, under 5 minutes
 - [ ] **F5 · Final report:** each of the six goals with its proof
 
 ---
@@ -210,10 +210,10 @@ Two rules to keep in mind:
 ## The six goals (the brief's "done" list)
 
 - [ ] 1. A new person does a full capture without help or the notes.
-- [ ] 2. A J-15, J-11 or J-35 is available, and the same pipeline works in Desert and Forest.
-- [ ] 3. Payload boxes appear automatically wherever the payload is visible.
-- [ ] 4. One full run (configure, capture, label) with no manual steps, on locked tool versions.
-- [ ] 5. A short video and a short guide exist.
+- [x] 2. A J-15, J-11 or J-35 is available, and the same pipeline works in Desert and Forest.
+- [x] 3. Payload boxes appear automatically wherever the payload is visible.
+- [x] 4. One full run (configure, capture, label) with no manual steps, on locked tool versions.
+- [x] 5. A short video and a short guide exist.
 - [ ] 6. Nothing a user does needs the command line.
 
 ## Not this phase

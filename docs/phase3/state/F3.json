@@ -1,9 +1,12 @@
 {
   "built_commit": "cdbbed711f8f35108589042a162e48104c208ff7",
+  "green_commit": "ff491087",
   "integrated_commit": "317651b8",
   "pending_windows": [
     "step 4: reader follows GUIDE.md during F2 row 1"
   ],
+  "run_id": "d24c496c5872",
   "stage": "integrated",
-  "updated": "2026-11-04T17:01:27"
+  "updated": "2026-11-05T23:10:12",
+  "verdict": "PASS"
 }

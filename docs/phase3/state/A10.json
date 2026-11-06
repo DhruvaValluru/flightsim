@@ -15,6 +15,7 @@
     "run A-2 packet docs/phase3/packets/A10-2.md: on 9bb12d95 the campaign's capture now refuses camera.scene_bounds (608 of 1155 poses outside the raster; the web single run flies the same card on the same bake); llm tier fell back again on camera 0 field 'moves'",
     "run A-2 packet docs/phase3/packets/A10-3.md: on 8a9bda0e both cases capture and render (22 frames, labels 22/22, no refusal) but verify FAIL on host_determinism (CLI route), component_boxes (mirrored OBJ, decision 19) and label_geometry_3d (verifier recount), all filed in C4-1; llm tier falls back on unknown field 'notes' (raw response recorded)"
   ],
+  "green_commit": "03bc3bac",
   "integrated_commit": "305774c2",
   "letter": "A",
   "needs_windows": true,
@@ -25,10 +26,10 @@
   "pushed_commit": "8a9bda0e",
   "retry": 2,
   "route": "interaction",
-  "run_id": "6b69c8dc1d28",
+  "run_id": "d39d37055bf5",
   "run_requested": "A-2",
   "stage": "pushed",
-  "updated": "2026-11-04T21:14:04",
+  "updated": "2026-11-05T23:10:11",
   "verdict": "PASS",
   "worktree": "../p3-A10r"
 }

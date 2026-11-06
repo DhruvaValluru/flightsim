@@ -1,5 +1,8 @@
 {
+  "green_commit": "ff491087",
   "integrated_commit": "31a0e0aa",
+  "run_id": "027ccd408fe7",
   "stage": "integrated",
-  "updated": "2026-11-04T18:34:47"
+  "updated": "2026-11-05T23:10:11",
+  "verdict": "PASS"
 }
