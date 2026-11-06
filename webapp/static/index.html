@@ -277,12 +277,15 @@ visual-only per host (measured).</p>
   <div id="routeState" class="dim"></div>
   <div id="routeMap"></div>
   <div id="verdict"></div>
-  <p>
-    <button id="run" class="run">Capture</button>
-    <span class="dim">re-validated server-side before anything renders;
-    clip capped at 22 s</span>
-  </p>
 </div>
+
+<!-- Outside #specArea, which stays hidden until Interpret: with nothing typed,
+     Capture runs the default run (startRun). -->
+<p>
+  <button id="run" class="run">Capture</button>
+  <span class="dim">re-validated server-side before anything renders;
+  clip capped at 22 s</span>
+</p>
 
 <div id="runArea" style="display:none" class="card">
   <div id="status"></div>

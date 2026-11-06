@@ -388,3 +388,16 @@ def test_demo_page_end_to_end(demo_server, tmp_path, record_property):
     print(f"F1 demo run {run_id}: done in {result['wall_s']:.0f} s, "
           f"verify passed={verification.get('passed')} failed={verification.get('failed')} "
           f"not_run={verification.get('not_run')}")
+
+
+def test_capture_is_on_the_page_before_anything_is_interpreted():
+    """The guide's first run presses Capture with nothing typed. A newcomer
+    found it inside #specArea, hidden until Interpret, so it could not be
+    pressed; only a direct POST /run had proved the default run."""
+    text = (Path(__file__).resolve().parents[1] / "webapp" / "static" / "index.html").read_text(
+        encoding="utf-8")
+    area = text.index('<div id="specArea"')
+    closes = text.index('<div id="verdict"></div>', area)
+    assert 'id="specArea" style="display:none"' in text
+    assert text.index('<button id="run"') > text.index("</div>", closes)
+
