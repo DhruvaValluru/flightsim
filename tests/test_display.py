@@ -209,8 +209,11 @@ def test_the_look_switch_hooks():
     assert display.commandlet_tokens(runs.resolve_look_switch("cinematic", None)) == []
     assert display.commandlet_tokens(None) == []
     assert "cinematic_aces2" in runs.LOOK_CHOICES
-    # The existing switch is unchanged.
-    assert runs.LOOK_SWITCHES["cinematic"] == {"quality": "beauty", "lens": "cinematic"}
+    # The existing switch keeps its quality and lens (camera-motion-layer adds
+    # its own key to it; this module adds none).
+    assert {k: runs.LOOK_SWITCHES["cinematic"][k] for k in ("quality", "lens")} == {
+        "quality": "beauty", "lens": "cinematic"}
+    assert "display" not in runs.LOOK_SWITCHES["cinematic"]
 
 
 def test_record_moves_no_pixels():
