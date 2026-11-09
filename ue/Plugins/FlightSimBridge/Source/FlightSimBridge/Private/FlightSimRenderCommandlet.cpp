@@ -2950,6 +2950,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Beauty.PathTracingMaxBounces = PathTraceBounces;
 			Beauty.bOverride_PathTracingEnableDenoiser = true;
 			Beauty.PathTracingEnableDenoiser = PathTraceDenoise != 0 ? 1 : 0;
+			// reference-frames lane (PROBE_LOG.md): reference atmosphere + clouds, the HQ NNE denoiser (pathtrace only).
+			Beauty.bOverride_PathTracingEnableReferenceAtmosphere = true; Beauty.PathTracingEnableReferenceAtmosphere = 1;
+			SetBeautyCvar(TEXT("r.PathTracing.EnableReferenceClouds"), 1.0f);
+			SetBeautyCvar(TEXT("NNEDenoiser.Asset"), 3.0f); // OIDN 2.3 High Quality; UNCALIBRATED
 			TSharedPtr<FJsonObject> PathTracer = MakeShared<FJsonObject>();
 			PathTracer->SetNumberField(TEXT("samples_per_pixel"), PathTraceSpp);
 			PathTracer->SetNumberField(TEXT("max_bounces"), PathTraceBounces);

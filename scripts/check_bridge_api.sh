@@ -274,6 +274,22 @@ rp_cvar r.PathTracing.Denoiser "Renderer/Private/PathTracingSpatialTemporalDenoi
 rp_cvar r.PathTracing.Denoiser.Name "Renderer/Private/PathTracingSpatialTemporalDenoising.cpp"
 rp_cvar r.RayTracing "Renderer/Private/DeferredShadingRenderer.cpp"
 rp_cvar r.RayTracing.Nanite.Mode "Engine/Private/Rendering/NaniteResources.cpp"
+# -- reference-frames lane (2026-11-09): the path-traced reference ----------
+# FlightSimRenderCommandlet.cpp pathtrace branch: the reference atmosphere
+# (a post-process override the -1 cvar inherits), the reference clouds and
+# the NNE denoiser's asset; each read in the 5.7.4 source on this date.
+rp_check "PostProcess PathTracingEnableReferenceAtmosphere" "Engine/Classes/Engine/Scene.h" "uint32 PathTracingEnableReferenceAtmosphere : 1;"
+rp_check "ref atmosphere inherits the post-process value" "Renderer/Private/PathTracing.cpp" "return EnableReferenceAtmosphereCVar < 0 ? View.FinalPostProcessSettings.PathTracingEnableReferenceAtmosphere != 0 : EnableReferenceAtmosphereCVar != 0;"
+rp_check "ref clouds need the ref atmosphere" "Renderer/Private/PathTracing.cpp" "if (!PathTracing::UsesReferenceAtmosphere(View) || !ShouldRenderVolumetricCloud(Scene, View.Family->EngineShowFlags))"
+rp_check "sky light skydome off under the ref atmosphere" "Renderer/Private/PathTracing.cpp" "const bool bEnableSkydome = !bUseAtmosphere;"
+rp_check "denoise on the last sample" "Renderer/Private/PathTracing.cpp" "(((Config.PathTracingData.Iteration + 1) == MaxSPP) ||"
+rp_check "default spatial denoiser is NNEDenoiser" "Renderer/Private/PathTracingSpatialTemporalDenoising.cpp" "\"NNEDenoiser\","
+rp_cvar NNEDenoiser.Asset "../../Plugins/NNE/NNEDenoiser/Source/NNEDenoiser/Private/NNEDenoiserViewExtension.cpp"
+rp_check "NNEDenoiser.Asset 3 is OIDN High Quality" "../../Plugins/NNE/NNEDenoiser/Source/NNEDenoiser/Private/NNEDenoiserViewExtension.cpp" "case 3: return TEXT(\"/NNEDenoiser/NNED_Oidn2-3_HighQuality.NNED_Oidn2-3_HighQuality\");"
+rp_check "NNEDenoiser registers only with ray tracing" "../../Plugins/NNE/NNEDenoiser/Source/NNEDenoiser/Private/NNEDenoise.cpp" "if (IsRayTracingAllowed())"
+rp_check "NNEDenoiser active only on path-traced families" "../../Plugins/NNE/NNEDenoiser/Source/NNEDenoiser/Private/NNEDenoiserViewExtension.cpp" "TimeoutCounter = !!InViewFamily.EngineShowFlags.PathTracing ? NO_SHOW_PATH_TRACING_TIMEOUT"
+rp_check "NNEDenoiser plugin enabled by default" "../../Plugins/NNE/NNEDenoiser/NNEDenoiser.uplugin" "\"EnabledByDefault\" : true,"
+# -- end reference-frames lane ------------------------------------------------
 
 
 # -- engine surface the beauty look assumes (FlightSimBeautyLook.cpp) --------
