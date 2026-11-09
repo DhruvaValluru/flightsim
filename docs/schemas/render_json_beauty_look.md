@@ -65,8 +65,14 @@ when `scene` lacks it. Any other value fails as `look.quality`.
 
 On `measure`, which is the path Gate 6 passed on, nothing may change:
 `beauty_look` must be absent, empty or `{"applied": false}`, no
-pixel-moving effect may be on, and `beauty_samples.temporal` must be 1.
-Otherwise the run fails as `look.measure_altered`.
+pixel-moving effect may be on, and `beauty_samples.temporal`,
+`beauty_samples.spatial`, `beauty_samples.still_samples` and
+`render_settings.beauty_path.accumulation.captures_per_frame` must each be
+1 (the commandlet captures a measure frame once and never supersamples
+it). Otherwise the run fails as `look.measure_altered`. The host's record
+(`FFlightSimBeautyLook::Record`: `sidecar`, `plan`, `applied`) counts as
+a look applied when `applied` is a non-empty object or `sidecar` names a
+file.
 
 ### `beauty_look` (object)
 
@@ -86,12 +92,19 @@ the keys that move pixels:
 | `temporal_accumulation` | `temporal_accumulation` |
 | `MotionBlurAmount` (the C++ record's spelling) | `motion_blur` |
 | `SceneFringeIntensity` (the C++ record's spelling) | `chromatic_aberration` |
+| `PaniniD`, `ScreenPercentage` (UE spellings) | `panini`, `upscale` |
+
+`MotionBlurMax` is not a switch (it caps the smear and draws nothing while
+`MotionBlurAmount` is 0). When the record carries the host's non-empty
+`applied` echo, its `plan` subtree (the request, and descriptive rows such
+as `plan.pixel_effects.motion_blur`) is not searched: `applied` is what
+was set on the capture.
 
 A key counts as on when its value is `true`, a non-zero number, a word
 other than off/none/false/0, or an object whose `on`, `enabled` or
 `applied` is true, or whose `amount`, `intensity`, `strength`, `scale`,
 `k1`, `fraction` or `max_displacement_px` is non-zero.
-`screen_percentage` is on away from 0 (the engine default) and 100. A key
+`screen_percentage` / `ScreenPercentage` is on away from 0 (the engine default) and 100. A key
 that is on and has no entry in `pixel_moving_effects` fails as
 `look.pixel_moving_unrecorded`. `motion_blur` and `temporal_accumulation`
 answer for each other. The on/off words are matched without regard to case.
@@ -135,7 +148,10 @@ PASS text claims the field of view only when a comparison ran.
 
 `spatial`, `temporal` and `path_tracer_spp` must each be a whole number of
 at least 1, and `shutter_s` a time of at least 0. A malformed value fails
-as `look.record`. A `pathtrace` render must state `path_tracer_spp`.
+as `look.record`. A `pathtrace` render must state its samples per pixel:
+`beauty_samples.path_tracer_spp` or the render path's
+`render_settings.beauty_path.path_tracer.samples_per_pixel` (the same
+`PathTraceSpp`; two that disagree fail as `look.record`).
 Temporal samples greater than 1 over a non-zero shutter make motion blur
 by accumulation, so `temporal_accumulation` or `motion_blur` must be
 listed. (The S4 per-frame `accumulation` of `-accumulate=K` is a separate
@@ -158,6 +174,13 @@ fails as `look.record`:
   camera-to-subject cone by construction, so the mask has nothing to
   miss.
 - `none_in_frame`: no beauty-only actor projects into the frame.
+
+The world lane's per-frame rows, `look_applied.world_beauty.frames[]`
+(FlightSimClouds.cpp), are graded too: a frame with
+`cloud_occludes_aircraft` true, or with `cloud_occlusion_complete` false
+(a drawn cloud outside the slab model, so "not flagged" is only a lower
+bound), makes the run beauty-not-label-aligned unless `cloud_occlusion`
+carries a `"measured"` covered fraction, which supersedes the model.
 
 Decision (verifier-tooling, 2026-11-09): a cloud in front of the
 aircraft in the beauty and absent from the mask is a label error, not a
