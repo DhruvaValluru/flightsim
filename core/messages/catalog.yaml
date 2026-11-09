@@ -163,6 +163,9 @@ camera.hazard_intersection:
   sentence: "The camera would sit inside the tornado's core at {actual} {actual:point|points} along its path; those frames are refused rather than rendered blank."
 camera.poses:
   sentence: "The camera's path could not be worked out from the flight."
+camera.motion:
+  sentence: "The camera's shake or gimbal-motion settings are not ones the system knows how to apply."
+  hint: "Pick a known motion profile, a whole-number seed and an intensity from 0 to 3; the technical note lists the profiles."
 camera.labels:
   sentence: "This aircraft cannot be labelled: its outline points are not on file."
 aircraft.component_unmatched:
