@@ -135,15 +135,37 @@ def test_refuses_on_measure(tmp_path):
 
 
 def test_bundle_refusal_is_recorded_not_swallowed(tmp_path):
+    # A beauty render with no linear EXR: refused, and the refusal is in
+    # render.json so the missing _aces2.png is explained.
     (tmp_path / "render.json").write_text(json.dumps(
-        {"quality": "measure", "beauty_look": {}}), encoding="utf-8")
+        {"quality": "beauty", "beauty_look": {}}), encoding="utf-8")
+    (tmp_path / "frame_0000.png").write_bytes(b"x")
+    record = display.apply_to_bundle(tmp_path, {"display": "aces2"})
+    assert record["refused"] == "look.display_input"
+    saved = json.loads((tmp_path / "render.json").read_text(encoding="utf-8"))
+    assert saved["beauty_look"]["display"]["refused"] == "look.display_input"
+    assert not (tmp_path / "frame_0000_aces2.png").exists()
+    assert (tmp_path / "frame_0000.png").read_bytes() == b"x"
+
+
+@pytest.mark.parametrize("payload", [{"scene": {"render_quality": "measure"}},
+                                     {"quality": "measure", "beauty_look": {}},
+                                     {}])
+def test_measure_manifest_is_left_byte_identical(tmp_path, payload):
+    # Writing beauty_look into a measure (or quality-less) render.json
+    # flips has_look_record, so look_label_alignment would grade a bundle
+    # it otherwise leaves NOT RUN. The refusal is returned, not written.
+    from core.capture.beauty_look import has_look_record
+
+    manifest = tmp_path / "render.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    before = manifest.read_bytes()
     (tmp_path / "frame_0000.png").write_bytes(b"x")
     record = display.apply_to_bundle(tmp_path, {"display": "aces2"})
     assert record["refused"] == "look.display_on_measure"
-    saved = json.loads((tmp_path / "render.json").read_text(encoding="utf-8"))
-    assert saved["beauty_look"]["display"]["refused"] == "look.display_on_measure"
-    assert not (tmp_path / "frame_0000_aces2.png").exists()
-    assert (tmp_path / "frame_0000.png").read_bytes() == b"x"
+    assert manifest.read_bytes() == before
+    assert has_look_record(json.loads(before)) == has_look_record(
+        json.loads(manifest.read_bytes()))
 
 
 def test_missing_ocio_is_a_named_refusal(monkeypatch):

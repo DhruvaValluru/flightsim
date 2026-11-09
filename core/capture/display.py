@@ -421,6 +421,12 @@ def apply_to_bundle(bundle_dir, look: Optional[Dict[str, Any]] = None,
                   "frames": [r["output"] for r in records]}
     except DisplayError as exc:
         record = {"refused": exc.constraint, "reason": exc.message}
+        if exc.constraint == "look.display_on_measure":
+            # A measure (or quality-less) manifest is never written: a
+            # beauty_look key there flips has_look_record and so changes
+            # what the verifier grades (look_label_alignment) on the path
+            # the label gates were measured on. The refusal is returned.
+            return record
     if manifest.is_file():
         payload.setdefault("beauty_look", {})
         if isinstance(payload["beauty_look"], dict):
