@@ -260,6 +260,16 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 		{
 			Record->SetStringField(TEXT("look_config_sha256"), ConfigSha);
 		}
+		// The mesh manifest the anchors were measured on. Not compared here
+		// (no hashing in this file): a reader compares it with render.json's
+		// own mesh manifest sha256, and a mismatch means the lamps and
+		// nozzles were placed on an earlier conversion of the mesh (re-run
+		// python scripts/aircraft_look.py <NAME> or the import step).
+		FString MeshSha;
+		if (Look->TryGetStringField(TEXT("mesh_manifest_sha256"), MeshSha))
+		{
+			Record->SetStringField(TEXT("look_mesh_manifest_sha256"), MeshSha);
+		}
 		const TSharedPtr<FJsonObject>* ConstantsObject = nullptr;
 		if (Look->TryGetObjectField(TEXT("constants"), ConstantsObject) && ConstantsObject != nullptr)
 		{

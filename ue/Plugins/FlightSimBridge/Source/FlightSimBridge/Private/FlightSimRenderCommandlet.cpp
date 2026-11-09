@@ -4287,13 +4287,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(Error);
 		}
-		// The weather at this frame: the camera is where this capture looks
-		// from, the exposure the camera's own (the frame interval without one).
 		// AIRCRAFT LANE (V7): strobe, reheat, trails at this step's FDM state.
 		if (AircraftFX.IsBuilt())
 		{
 			AircraftFX.Advance([&Scenario](const TCHAR* Name) { return Scenario.ReadProperty(Name); });
 		}
+		// The weather at this frame: the camera is where this capture looks
+		// from, the exposure the camera's own (the frame interval without one).
 		if (bVisual && Weather.IsBuilt())
 		{
 			FFlightSimWeatherView WeatherView;
