@@ -283,7 +283,7 @@ def test_report_edge_aliasing_writes_and_compares(tmp_path):
     (base / "aliasing.json").write_text(json.dumps({"energy": 1.0}), encoding="utf-8")
     row = gate6.report_edge_aliasing(tmp_path, base)
     assert row["energy"] is not None and abs(row["change"] - (row["energy"] - 1.0)) < 1e-12
-    assert json.loads((tmp_path / "aliasing.json").read_text())["energy"] == row["energy"]
+    assert json.loads((tmp_path / "aliasing.json").read_text(encoding="utf-8"))["energy"] == row["energy"]
     assert "[info] edge aliasing (reported, not a gate)" in gate6.edge_aliasing_line(row)
     assert gate6.report_edge_aliasing(tmp_path / "missing") is None
 
