@@ -1193,3 +1193,54 @@ def test_a_missing_substitute_baseline_is_still_incomplete(tmp_path, monkeypatch
                     "--substitute-baseline", str(tmp_path / "none")])
     assert code == 3
     assert "GATE 6: PASS" not in capsys.readouterr().out
+
+
+# -- fix pass (shots-render): the edge-aliasing number never moves the gate --
+
+
+def _aliasing_run(tmp_path, monkeypatch, capsys, report, ok=True):
+    g6 = _probe_names()
+    out = tmp_path / "gate6"
+    _measured_tree(out)
+    _fast_inputs(monkeypatch, g6)
+    _stub_measures(monkeypatch, g6, ok=ok)
+    monkeypatch.setattr(g6, "compose_side_by_side", lambda old, new, path: path)
+    monkeypatch.setattr(g6, "report_edge_aliasing", report)
+    baseline = tmp_path / "6oct_still.png"
+    baseline.write_bytes(b"x")
+    code = g6.main(["--out", str(out), "--skip-render", "--old-footage", str(tmp_path / "none"),
+                    "--substitute-baseline", str(baseline)])
+    return code, capsys.readouterr().out
+
+
+def _raises(*_a, **_k):
+    raise RuntimeError("boom")
+
+
+def _aliasing_lines(text):
+    return [line for line in text.splitlines() if "edge aliasing" in line]
+
+
+@pytest.mark.parametrize("ok, expected", [(True, 0), (False, 1)])
+def test_an_aliasing_error_cannot_change_the_gate(tmp_path, monkeypatch, capsys, ok, expected):
+    code, text = _aliasing_run(tmp_path, monkeypatch, capsys, _raises, ok=ok)
+    assert code == expected
+    lines = _aliasing_lines(text)
+    assert lines and "not computed: boom" in lines[0]
+    assert "PASS" not in lines[0] and "FAIL" not in lines[0]
+
+
+@pytest.mark.parametrize("ok, expected", [(True, 0), (False, 1)])
+def test_a_void_aliasing_row_cannot_change_the_gate(tmp_path, monkeypatch, capsys, ok, expected):
+    void = {"energy": None, "control_energy": None, "void": True}
+    code, text = _aliasing_run(tmp_path, monkeypatch, capsys, lambda *a, **k: dict(void), ok=ok)
+    assert code == expected
+    lines = _aliasing_lines(text)
+    assert lines and "VOID" in lines[0] and "GATE 6" not in lines[0]
+
+
+@pytest.mark.parametrize("ok, expected", [(True, 0), (False, 1)])
+def test_a_malformed_aliasing_row_cannot_change_the_gate(tmp_path, monkeypatch, capsys, ok,
+                                                         expected):
+    code, text = _aliasing_run(tmp_path, monkeypatch, capsys, lambda *a, **k: {}, ok=ok)
+    assert code == expected and "not computed:" in text
