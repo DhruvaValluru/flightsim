@@ -141,7 +141,10 @@ def is_on(key: str, value) -> bool:
     if isinstance(value, dict):
         for flag in ("on", "enabled", "applied"):
             if flag in value:
-                return bool(value[flag]) and value[flag] not in _OFF_WORDS
+                word = value[flag]
+                if isinstance(word, str):
+                    return word.strip().lower() not in _OFF_WORDS
+                return bool(word)
         return any((_number(value.get(k)) or 0.0) != 0.0 for k in _AMOUNT_KEYS)
     if isinstance(value, (list, tuple)):
         return len(value) > 0
@@ -150,20 +153,44 @@ def is_on(key: str, value) -> bool:
 
 def look_effects_on(look: Dict) -> List[Tuple[str, str]]:
     """(key, effect name) for every pixel-moving key ON in ``beauty_look``,
-    searched one level into nested objects (``post.motion_blur``)."""
+    searched through every nested object (``post.motion_blur``,
+    ``camera.lens.lens_distortion``): an effect recorded one level deeper
+    than expected still moves pixels."""
     found: List[Tuple[str, str]] = []
 
     def visit(where: str, mapping: Dict) -> None:
         for key, value in mapping.items():
             path = f"{where}.{key}" if where else str(key)
-            if key in PIXEL_MOVING_KEYS and is_on(key, value):
-                found.append((path, PIXEL_MOVING_KEYS[key]))
-            elif isinstance(value, dict) and not where:
+            if key in PIXEL_MOVING_KEYS:
+                if is_on(key, value):
+                    found.append((path, PIXEL_MOVING_KEYS[key]))
+            elif isinstance(value, dict):
                 visit(path, value)
 
     if isinstance(look, dict):
         visit("", look)
     return found
+
+
+#: Pixel-moving show flags the commandlet MEASURES on the beauty capture
+#: and writes today (FlightSimRenderCommandlet.cpp,
+#: render_settings.beauty_show_flags). UE 5.7 turns motion blur off on
+#: every scene capture (SceneCaptureComponent.cpp), so ``true`` here
+#: means someone turned it on, whatever beauty_look says.
+MEASURED_SHOW_FLAGS: Dict[str, str] = {"motion_blur": "motion_blur"}
+
+
+def measured_effects_on(payload: Dict) -> List[Tuple[str, str]]:
+    """(key, effect name) for every pixel-moving show flag the commandlet
+    measured ON on the beauty capture (``render_settings.beauty_show_flags``).
+    Read on every bundle, old or new: it is a measurement, not the
+    look-dev record."""
+    settings = payload.get("render_settings")
+    flags = settings.get("beauty_show_flags") if isinstance(settings, dict) else None
+    if not isinstance(flags, dict):
+        return []
+    return [(f"render_settings.beauty_show_flags.{key}", name)
+            for key, name in MEASURED_SHOW_FLAGS.items() if flags.get(key) is True]
 
 
 def look_anything_on(look) -> bool:

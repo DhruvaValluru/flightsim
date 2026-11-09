@@ -273,3 +273,36 @@ def test_normalise_effects_reports_nameless_entries():
     assert [e["name"] for e in effects] == ["a", "b"] and effects[1]["on"] is False
     assert problems and "[2]" in problems[0]
     assert bl.normalise_effects("x")[1]
+
+
+# -- review fixes: the measured show flag, nesting, case ------------------------------
+
+def _show_flag_motion_blur(p):
+    p["render_settings"]["beauty_show_flags"]["motion_blur"] = True
+
+
+def test_measured_motion_blur_show_flag_must_be_listed_even_on_an_old_bundle(bundle):
+    edit(bundle, _show_flag_motion_blur)
+    record, _ = grade(bundle)
+    assert record.status == FAIL and record.failure == FAIL_LOOK_UNRECORDED
+    assert "beauty_show_flags.motion_blur" in record.detail
+    edit(bundle, lambda p: p.update(pixel_moving_effects=[
+        {"name": "motion_blur", "max_displacement_px": 0.5, "displacement_basis": "measured"}]))
+    assert grade(bundle)[0].status == PASS
+
+
+def test_measured_motion_blur_show_flag_alters_a_measure_render(bundle):
+    edit(bundle, set_quality("measure"))
+    edit(bundle, _show_flag_motion_blur)
+    record, _ = grade(bundle)
+    assert record.failure == FAIL_LOOK_MEASURE_ALTERED
+
+
+def test_a_pixel_moving_key_two_objects_deep_is_found():
+    found = bl.look_effects_on({"camera": {"lens": {"lens_distortion": {"k1": -0.02}}}})
+    assert found == [("camera.lens.lens_distortion", "lens_distortion")]
+
+
+def test_on_off_words_ignore_case():
+    assert not bl.is_on("lens_distortion", {"enabled": "OFF"})
+    assert bl.is_on("lens_distortion", {"enabled": "On"})

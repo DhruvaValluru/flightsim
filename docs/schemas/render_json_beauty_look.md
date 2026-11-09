@@ -45,8 +45,8 @@ Otherwise the run fails as `look.measure_altered`.
 ### `beauty_look` (object)
 
 The look-dev lane's record of the look applied. The verifier does not grade
-its contents. It only searches them, at the top level and one object deep,
-for the keys that move pixels:
+its contents. It only searches them, through every nested object, for
+the keys that move pixels:
 
 | key(s) | effect name |
 |---|---|
@@ -66,7 +66,14 @@ other than off/none/false/0, or an object whose `on`, `enabled` or
 `screen_percentage` is on away from 0 (the engine default) and 100. A key
 that is on and has no entry in `pixel_moving_effects` fails as
 `look.pixel_moving_unrecorded`. `motion_blur` and `temporal_accumulation`
-answer for each other.
+answer for each other. The on/off words are matched without regard to case.
+
+The commandlet's own measurement is read too, on every bundle whatever
+its age: `render_settings.beauty_show_flags.motion_blur` (written today,
+FlightSimRenderCommandlet.cpp) `true` counts as `motion_blur` on. UE 5.7
+turns motion blur off on every scene capture, so `true` means it was
+turned on. On a measure render it fails as `look.measure_altered`; on a
+beauty render it must be listed in `pixel_moving_effects`.
 
 Optional `beauty_look.camera.fov_deg` (or `beauty_look.fov_deg`) is the
 beauty camera's horizontal field of view. It must equal the pose solver's,

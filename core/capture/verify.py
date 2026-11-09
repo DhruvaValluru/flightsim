@@ -9330,7 +9330,7 @@ def verify_look_record(manifest: Dict, run_dir=None) -> Check:
     pixels, on, and not listed)."""
     from .beauty_look import (OCCLUSION_POLICIES, QUALITIES, has_look_record,
                               look_anything_on, look_effects_on, listed,
-                              normalise_effects, quality_of)
+                              measured_effects_on, normalise_effects, quality_of)
 
     graded: Dict[str, str] = {}
     for camera, _folder, payload in _s4_renders(run_dir):
@@ -9365,7 +9365,12 @@ def verify_look_record(manifest: Dict, run_dir=None) -> Check:
             return fail(f"beauty_samples.shutter_s = {shutter!r} is not a non-negative time",
                         FAIL_LOOK_RECORD)
         temporal = int(samples.get("temporal", 1))
+        measured = measured_effects_on(payload)
         if quality == "measure":
+            if measured:
+                return fail(f"a measure render's beauty capture was measured with pixel-moving "
+                            f"show flag(s) on: {', '.join(key for key, _ in measured)}",
+                            FAIL_LOOK_MEASURE_ALTERED)
             if look_anything_on(look):
                 return fail("a measure render carries a beauty look that applies something; the "
                             "measure path is the one Gate 6 passed on and must render as it did",
@@ -9391,7 +9396,7 @@ def verify_look_record(manifest: Dict, run_dir=None) -> Check:
                             f"(cloud_occlusion.policy one of {', '.join(OCCLUSION_POLICIES)}): a "
                             f"cloud in front of the subject in the beauty is absent from the mask",
                             FAIL_LOOK_RECORD)
-        unlisted = [f"{key} ({name})" for key, name in look_effects_on(look or {})
+        unlisted = [f"{key} ({name})" for key, name in look_effects_on(look or {}) + measured
                     if not listed(on, name)]
         if temporal > 1 and float(shutter) > 0.0 and not listed(on, "temporal_accumulation"):
             unlisted.append(f"beauty_samples.temporal {temporal} over a {float(shutter):g} s "
