@@ -7,7 +7,7 @@ do not edit by hand. Licence GPL-2.0, owner-cleared (docs/phase3/decisions.md
 decisions 3 and 20). The binaries are fetched into the git-ignored
 `assets/aircraft_src/J11` by `assets_pipeline/importer.py fetch_source`, never committed.
 
-701 files, 182,056,051 bytes. **Used** marks the 27 files the conversion
+701 files, 182,056,051 bytes. **Used** marks the 29 files the conversion
 reads, each pinned in `assets/aircraft_config/J11.json package_files` by git blob
 sha1 AND sha256 and checked against the bytes before every convert.
 
@@ -116,9 +116,9 @@ sha1 AND sha256 and checked against the bytes before every convert.
 | `Models/Effects/flammes/flammesG.xml` | 2486 | `55e18530d9d97a7f93bf6d47513f384e801c7cb2` |  | explosion / fire / boom effect |
 | `Models/Effects/glass.eff` | 4089 | `034932b3a2a4883a8358f75f2e67f52c4896b5d9` |  | glass effect: reflections on, no normal map |
 | `Models/Effects/gunsmoke.xml` | 2328 | `49bb14089fc79851bbbfa8b56d277042814641af` |  | gun smoke effect |
-| `Models/Effects/nozzles/NozzleL.xml` | 2255 | `d97c1a0cfc88c1d0c177189f7ef6719941f4181d` |  | variable nozzle petals: 18 animated segments per engine |
+| `Models/Effects/nozzles/NozzleL.xml` | 2255 | `d97c1a0cfc88c1d0c177189f7ef6719941f4181d` | **used** | one petal pair (mesh_nozzleseg.ac), throttle-animated 15 -> 0 deg; read for the ring geometry, not imported |
 | `Models/Effects/nozzles/NozzleR.xml` | 2255 | `982e698c134f2330aeeb06e8c19a64b8c7fb54ed` |  | variable nozzle petals: 18 animated segments per engine |
-| `Models/Effects/nozzles/Nozzles.xml` | 3984 | `9afae013bf1bb7a0b06b5879a67d510809ac48bc` |  | variable nozzle petals: 18 animated segments per engine |
+| `Models/Effects/nozzles/Nozzles.xml` | 3984 | `9afae013bf1bb7a0b06b5879a67d510809ac48bc` | **used** | nozzle petal rings: NozzleL.xml at (13.847, -0.957, -0.176) m and (13.847, 0.957, -0.176) m, nine roll copies each; J-11A.xml places this file at (5.38, -0.32, -0.02) and (5.38, 2.22, -0.02) m, so the FX nozzles sit on the rings at y -1.277 / +1.263 m (look/J11.json) |
 | `Models/Effects/nozzles/mesh_nozzleseg.ac` | 4546 | `cfc04025a6ed06f118ae80e080a6edabe98270fa` |  | variable nozzle petals: 18 animated segments per engine |
 | `Models/Effects/smoke.rgb` | 69626 | `c310df0873c51851c38ecfc5254482fcda771e45` |  | smoke / trail particle effect |
 | `Models/Effects/smoke/aerobatic-smoke.xml` | 4260 | `2822f0f6f5d9a181ab933f562541dee7cd7822a2` |  | smoke / trail particle effect |

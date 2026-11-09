@@ -579,6 +579,20 @@
       "sha256": "d65560990cc6849f25b571078faae9b8eace464420e7b1e3f505596efe15d232",
       "bytes": 276,
       "role": "right reheat model the J-11A.xml places at (19.8, 1.27, -0.22) m"
+    },
+    {
+      "file": "Models/Effects/nozzles/Nozzles.xml",
+      "git_blob_sha1": "9afae013bf1bb7a0b06b5879a67d510809ac48bc",
+      "sha256": "f74c4f8443fb147c6415888680ba3c5b18d63df69f13528cce97f08fcc48b616",
+      "bytes": 3984,
+      "role": "nozzle petal rings: NozzleL.xml at (13.847, -0.957, -0.176) m and (13.847, 0.957, -0.176) m, nine roll copies each; J-11A.xml places this file at (5.38, -0.32, -0.02) and (5.38, 2.22, -0.02) m, so the FX nozzles sit on the rings at y -1.277 / +1.263 m (look/J11.json)"
+    },
+    {
+      "file": "Models/Effects/nozzles/NozzleL.xml",
+      "git_blob_sha1": "d97c1a0cfc88c1d0c177189f7ef6719941f4181d",
+      "sha256": "bed894fcb3aa6747ae3dbca7c188a2c9a59a883b60df633e34463a0a519cd435",
+      "bytes": 2255,
+      "role": "one petal pair (mesh_nozzleseg.ac), throttle-animated 15 -> 0 deg; read for the ring geometry, not imported"
     }
   ],
   "package_files_source": "j11-package lane, 2026-11-09: every file of github.com/yanes19/SU-27SK at the pinned commit the conversion reads beyond the commit pin; git_blob_sha1 as the GitHub tree API lists it (git/trees/925cb531...?recursive=1) and recomputed from the downloaded bytes, sha256 of the same bytes; verified before every convert (assets_pipeline/package_pins.py, refusal aircraft.package_pin). The full inventory of the package is docs/visual/J11_PACKAGE.md",
