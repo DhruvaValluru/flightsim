@@ -2518,13 +2518,19 @@ def look_word_in_prompt(prompt: Optional[str]) -> Optional[str]:
 
 
 def resolve_look_switch(choice: Optional[str],
-                        prompt: Optional[str]) -> Optional[Dict[str, str]]:
+                        prompt: Optional[str],
+                        capture: bool = False) -> Optional[Dict[str, str]]:
     """The run's look switch: {"switch", "quality", "lens", "source"} or None.
 
     ``choice`` is the page's option (wins; "off" means none, whatever the
-    prompt says); None lets a look word in ``prompt`` decide. ValueError
-    names an unknown choice."""
-    if choice is not None:
+    prompt says); None (or "") lets a look word in ``prompt`` decide.
+    ``capture``: the run captures labels (wants_capture). A prompt word
+    does NOT switch such a run -- the label gates were measured under
+    measure and the owner's beauty capture failed mask_vs_geometry, so
+    leaving measure on a label run takes the explicit page option, never
+    a word that happens to be in a prompt. ValueError names an unknown
+    choice."""
+    if choice is not None and str(choice).strip():
         word = str(choice).strip().lower()
         if word not in LOOK_CHOICES:
             raise ValueError(f"look {choice!r} is not one of {list(LOOK_CHOICES)}")
@@ -2533,7 +2539,7 @@ def resolve_look_switch(choice: Optional[str],
         return {"switch": word, **LOOK_SWITCHES[word],
                 "source": "the page's look option"}
     word = look_word_in_prompt(prompt)
-    if word is None:
+    if word is None or capture:
         return None
     return {"switch": word, **LOOK_SWITCHES[word],
             "source": f"the prompt word {word!r}"}

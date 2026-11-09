@@ -1124,7 +1124,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
 
     # The look switch rides only when there is one, so a run without it
     # starts exactly as before (and answers the same keys).
-    look = resolve_look_switch(request.look, spec.prompt)
+    # A prompt word never moves a label (capture) run off measure; the
+    # page option still can, as an explicit choice.
+    look = resolve_look_switch(request.look, spec.prompt,
+                               capture=wants_capture(spec))
     switched = {"look": look} if look else {}
     outcome = manager.start(spec, provenance={
         "prompt": spec.prompt,

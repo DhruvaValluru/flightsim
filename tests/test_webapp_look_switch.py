@@ -40,6 +40,20 @@ def test_the_page_option_wins_and_off_ignores_the_prompt():
         runs.resolve_look_switch("anamorphic", None)
 
 
+def test_a_prompt_word_does_not_switch_a_label_run():
+    # The label gates were measured under measure: only the explicit page
+    # option takes a capture run to beauty, never a word in the prompt.
+    assert runs.resolve_look_switch(None, "a cinematic pass", capture=True) is None
+    explicit = runs.resolve_look_switch("beauty", "a cinematic pass", capture=True)
+    assert explicit["switch"] == "beauty"
+    assert explicit["source"] == "the page's look option"
+
+
+def test_an_empty_option_leaves_it_to_the_prompt():
+    assert runs.resolve_look_switch("", "fly the 747") is None
+    assert runs.resolve_look_switch("  ", "a beauty pass")["switch"] == "beauty"
+
+
 def test_without_the_switch_the_configured_quality_stands(monkeypatch):
     """The default for label runs is not this lane's to change."""
     monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "measure")
@@ -175,3 +189,16 @@ def test_the_run_state_carries_the_look():
     line = runs.look_condition(state.look)
     assert "look switch beauty" in line and "grade golden_hour" in line
     assert "VISUAL ONLY" in line
+
+
+def test_run_endpoint_keeps_a_worded_label_run_on_measure(run_client):
+    client, calls = run_client
+    worded = _compiled(client, "a cinematic flight of the a320 at 3000 m, "
+                               "camera 80 m behind")
+    assert worded["spec"]["dict"].get("cameras"), "the prompt states a camera"
+    response = client.post("/run", json={"spec": worded["spec"]["dict"]})
+    assert response.status_code == 200, response.text
+    assert calls[-1] == {} and "look" not in response.json()
+    response = client.post("/run", json={"spec": worded["spec"]["dict"], "look": "beauty"})
+    assert response.status_code == 200, response.text
+    assert calls[-1]["look"]["source"] == "the page's look option"
