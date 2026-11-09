@@ -27,3 +27,19 @@ Owner's rule, 2026-10-09 ("why do I have to add all these extra
 commands"). `webapp/runs.py weather_backend_flags` sends the storm weather
 (procedural), rain gain 4 and the cinematic rain style unless the
 environment says otherwise. Do not make them opt-in again.
+
+## Ruflo (agent orchestration) is installed in this project
+
+Added 2026-11-09 from https://github.com/ruvnet/ruflo with
+`npx ruflo@3.74.1 init --no-global --no-skills-sh --no-codex-detect`.
+What it brings: `.claude/agents`, `.claude/commands`, `.claude/skills`,
+`.claude/helpers` (hook scripts), the hooks and plugins in
+`.claude/settings.json`, the `claude-flow` MCP server in `.mcp.json`
+(pinned to ruflo 3.74.1), and runtime config in `.claude-flow/`. Memory
+databases (`.swarm/`) and runtime data are git-ignored and rebuild per machine.
+
+- The owner's rules above win over anything ruflo's agents, commands or
+  skills say. In particular, do not start `ruflo daemon` workers, ruflo
+  schedules or swarm loops that re-check pull requests or CI.
+- Hooks need Node 20+ on PATH. Health check: `npx ruflo@3.74.1 doctor`.
+- To upgrade: `npx ruflo@<version> init upgrade`, then re-pin `.mcp.json`.

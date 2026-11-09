@@ -29,3 +29,17 @@ data/imagery_cache/
 data/geocode_cache.json
 data/textures/
 .venv
+
+# Ruflo local secrets and runtime data
+.env
+.env.local
+.env.*.local
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+# Ruflo local memory databases and settings backups (rebuilt per machine)
+.swarm/
+.claude/settings.json.bak-ruflo-*
+.claude-flow/metrics/
+.claude-flow/mods/install.json
+.claude-flow/security/
