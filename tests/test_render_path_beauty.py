@@ -112,3 +112,86 @@ def test_refusal_names_are_catalogued():
     text = (ROOT / "core/messages/catalog.yaml").read_text(encoding="utf-8")
     assert "\nrender.still_samples:\n" in text
     assert "\nrender.pathtrace:\n" in text
+
+
+# -- fix pass (shots-render, 2026-11-09) --------------------------------------
+
+
+def _aa_lambda() -> str:
+    start = COMMANDLET.index("auto AntiAliasingName = ")
+    return COMMANDLET[start:COMMANDLET.index("};", start)]
+
+
+def test_the_aa_record_follows_the_engine_fallback():
+    """SceneView.cpp drops TSR/TAA to FXAA when the capture's TemporalAA
+    show flag is clear; render.json must name what ran, not what was asked."""
+    body = _aa_lambda()
+    assert "const FEngineShowFlags& Flags" in body
+    assert "Flags.TemporalAA == 0" in body
+    assert "(Method == 2 || Method == 4)" in body
+    assert "FXAA (%s fell back: TemporalAA show flag off)" in body
+    assert "Flags.PathTracing != 0" in body
+    assert 'AntiAliasing->SetStringField(TEXT("beauty"), AntiAliasingName(Capture->ShowFlags));' in COMMANDLET
+    assert "AntiAliasingName(LinearCapture->ShowFlags)" in COMMANDLET
+    assert "AntiAliasingName(AccumulateCapture->ShowFlags)" in COMMANDLET
+    assert 'rp_check "TAA falls back without the flag"' in CHECK
+
+
+def test_the_beauty_sky_never_lowers_the_cinematic_level():
+    value = float(re.search(r"constexpr float RenderBeautySkySampleCountMax = ([\d.]+)f;",
+                            COMMANDLET).group(1))
+    per_slice = float(re.search(
+        r"constexpr float RenderBeautyAerialPerspectiveSamplesPerSlice = ([\d.]+)f;",
+        COMMANDLET).group(1))
+    assert value >= 256.0 and per_slice >= 8.0   # BaseScalability.ini [EffectsQuality@Cine]
+    block = _beauty_block()
+    assert 'BeforeOverride->SetStringField(Name, Variable->GetString());' in block
+    assert block.index("BeforeOverride->SetStringField") < block.index("Variable->Set(Value, ECVF_SetByCode);")
+    assert 'BeautyPath->SetObjectField(TEXT("cvars_before_override"), BeforeOverride);' in block
+    assert 'rp_check "Cinematic sky SampleCountMax 256"' in CHECK
+
+
+def _subframes() -> str:
+    start = COMMANDLET.index("const bool bPathTraceClip = ")
+    return COMMANDLET[start:COMMANDLET.index('BeautyPath->SetObjectField(TEXT("accumulation"), SubFrames);', start)]
+
+
+def test_the_path_tracer_refuses_a_clip_unless_asked():
+    block = _subframes()
+    assert 'FParse::Param(*Params, TEXT("pathtrace-clip"))' in block
+    refusal = block[block.index("if (DeliveredFrames > RenderBeautyStillMaxFrames && !bPathTraceClip)"):]
+    assert refusal.index("return Fail(") < refusal.index("int32 BeautySubFrames = 1;")
+    assert "render.pathtrace: -quality=pathtrace is for stills" in refusal
+    assert "path-traced captures" in block   # the estimate is logged
+    assert 'SubFrames->SetNumberField(TEXT("total_captures")' in COMMANDLET
+
+
+def test_a_beauty_clip_keeps_one_capture_a_frame():
+    block = _subframes()
+    stated = ("else if (bVisual && bBeauty && bStillSamplesFlag && "
+              "DeliveredFrames <= RenderBeautyStillMaxFrames)")
+    assert stated in block
+    ignored = block[block.index("else if (bVisual && bBeauty && bStillSamplesFlag)\n"):]
+    ignored = ignored[:ignored.index("else if", 10)]
+    assert "BeautySubFrames = " not in ignored and "ignored on this clip" in ignored
+
+
+def test_the_path_tracer_draws_the_reference_sky_and_says_so():
+    block = _beauty_block()
+    pt = block[block.index("Capture->ShowFlags.SetPathTracing(true);"):]
+    assert "Beauty.PathTracingEnableReferenceAtmosphere = 1;" in pt
+    assert 'SetBeautyCvar(TEXT("r.PathTracing.EnableReferenceClouds"), 1.0f);' in pt
+    assert 'PathTracer->SetBoolField(TEXT("reference_atmosphere")' in pt
+
+
+def test_the_label_mismatches_are_said_in_render_json():
+    block = _beauty_block()
+    pt = block[block.index("Capture->ShowFlags.SetPathTracing(true);"):]
+    labels_note = pt[pt.index('TEXT("labels_note")'):]
+    assert "FALLBACK" in labels_note[:800]
+    assert 'TEXT("r.RayTracing.Nanite.Mode")' in pt
+    acc = COMMANDLET[COMMANDLET.index('SubFrames->SetStringField(TEXT("labels"),'):
+                     COMMANDLET.index('BeautyPath->SetObjectField(TEXT("accumulation"), SubFrames);')]
+    assert acc.index("if (!bPathTrace)") < acc.index('TEXT("history_across_frames")')
+    assert acc.index("if (LinearCapture != nullptr)") < acc.index('TEXT("linear_capture")')
+    assert "render-path: the path tracer replaces Lumen" in COMMANDLET

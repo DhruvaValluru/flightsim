@@ -332,8 +332,14 @@ namespace
 	// atmosphere: per-pixel sky and aerial perspective instead of the LUTs
 	// (r.SkyAtmosphere.FastSkyLUT 0, AerialPerspectiveLUT.FastApplyOnOpaque
 	// 0), high-quality multiple scattering, 32-bit LUTs, and these sample
-	// caps (engine defaults 32 and 2). Probe: shot (a) horizon band.
-	constexpr float RenderBeautySkySampleCountMax = 64.0f;
+	// caps. The baseline is the Cinematic level the block applies first
+	// (BaseScalability.ini [EffectsQuality@Cine]: SampleCountMax 256,
+	// SampleCountMaxPerSlice 8; the raw cvar defaults 32 and 2 never
+	// apply here), so these repeat Cinematic and never lower it (an
+	// explicit cvar is code priority and wins). render.json beauty_path
+	// cvars_before_override records what scalability had set. Probe: shot
+	// (a) horizon band.
+	constexpr float RenderBeautySkySampleCountMax = 256.0f;
 	constexpr float RenderBeautyAerialPerspectiveSamplesPerSlice = 8.0f;
 	// UNCALIBRATED: set by probe render on the render machine. Volumetric
 	// render target mode 3 = "Cinematic mode with tracing done at full
@@ -3217,11 +3223,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		BeautyPath = MakeShared<FJsonObject>();
 		TSharedPtr<FJsonObject> Asked = MakeShared<FJsonObject>();
 		TSharedPtr<FJsonObject> ReadBack = MakeShared<FJsonObject>();
+		// What the Cinematic scalability level (applied first, below) had set
+		// before each explicit override: an override that LOWERS it shows.
+		TSharedPtr<FJsonObject> BeforeOverride = MakeShared<FJsonObject>();
 		auto SetBeautyCvar = [&](const TCHAR* Name, float Value)
 		{
 			Asked->SetNumberField(Name, Value);
 			if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name))
 			{
+				BeforeOverride->SetStringField(Name, Variable->GetString());
 				Variable->Set(Value, ECVF_SetByCode);
 				ReadBack->SetStringField(Name, Variable->GetString());
 			}
@@ -3362,6 +3372,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			PathTracer->SetNumberField(TEXT("samples_per_pixel"), PathTraceSpp);
 			PathTracer->SetNumberField(TEXT("max_bounces"), PathTraceBounces);
 			PathTracer->SetBoolField(TEXT("denoiser_asked"), PathTraceDenoise != 0);
+			// The tracer draws the volumetric clouds and the physical aerial
+			// perspective only with the reference atmosphere on (the post-
+			// process value above; the cvar's -1 inherits it): said, so a
+			// path-traced hero frame is known to carry the beauty frame's sky.
+			PathTracer->SetBoolField(TEXT("reference_atmosphere"), Beauty.PathTracingEnableReferenceAtmosphere != 0);
+			PathTracer->SetStringField(TEXT("reference_atmosphere_basis"),
+				TEXT("PostProcess PathTracingEnableReferenceAtmosphere=1 (r.PathTracing.EnableReferenceAtmosphere -1 ")
+				TEXT("inherits it) and r.PathTracing.EnableReferenceClouds=1: the volumetric clouds and the ")
+				TEXT("physical sky and aerial perspective are path traced, not lit through the sky light only"));
 			// Which denoiser (if any) the engine has: a denoiser plugin must be
 			// enabled for PathTracingEnableDenoiser to do anything
 			// (PathTracingSpatialTemporalDenoising.cpp IsPathTracingDenoiserEnabled).
@@ -3389,6 +3408,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			BeautyPath->SetObjectField(TEXT("path_tracer"), PathTracer);
 		}
 		BeautyPath->SetObjectField(TEXT("cvars_asked"), Asked);
+		BeautyPath->SetObjectField(TEXT("cvars_before_override"), BeforeOverride);
 		BeautyPath->SetObjectField(TEXT("cvars_read_back"), ReadBack);
 		BeautyPath->SetStringField(TEXT("calibration"),
 			TEXT("UNCALIBRATED: every constant here is set by probe render on the render machine ")
@@ -4975,6 +4995,27 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	const int32 DeliveredFrames = bConsumePoses
 		? CaptureTimes.Num()
 		: (Steps + StepsPerFrame - 1) / StepsPerFrame;
+	// Fix pass (shots-render): the path tracer is for hero STILLS. A clip
+	// runs -pathtrace-spp captures for every delivered frame (300 frames at
+	// 256 spp is 76,800 path-traced captures, hours), so a clip is refused
+	// by name unless -pathtrace-clip says it is meant; the capture count is
+	// logged and recorded either way.
+	const bool bPathTraceClip = FParse::Param(*Params, TEXT("pathtrace-clip"));
+	if (bVisual && bPathTrace)
+	{
+		const int64 PathTraceCaptures = static_cast<int64>(DeliveredFrames) * PathTraceSpp;
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("pathtrace: %d delivered frame(s) x %d spp = %lld path-traced captures"),
+		       DeliveredFrames, PathTraceSpp, PathTraceCaptures);
+		if (DeliveredFrames > RenderBeautyStillMaxFrames && !bPathTraceClip)
+		{
+			return Fail(FString::Printf(
+				TEXT("render.pathtrace: -quality=pathtrace is for stills (at most %d delivered frame); this run ")
+				TEXT("delivers %d, which is %lld path-traced captures at %d spp. Render a still, or pass ")
+				TEXT("-pathtrace-clip to mean it"),
+				RenderBeautyStillMaxFrames, DeliveredFrames, PathTraceCaptures, PathTraceSpp));
+		}
+	}
 	int32 BeautySubFrames = 1;
 	FString BeautySubFramesBasis = TEXT("one capture a frame (measure, or a beauty clip)");
 	if (bVisual && bPathTrace)
@@ -4982,10 +5023,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		BeautySubFrames = PathTraceSpp;
 		BeautySubFramesBasis = TEXT("pathtrace: one path-traced sample a capture, -pathtrace-spp of them");
 	}
-	else if (bVisual && bBeauty && bStillSamplesFlag)
+	else if (bVisual && bBeauty && bStillSamplesFlag && DeliveredFrames <= RenderBeautyStillMaxFrames)
 	{
 		BeautySubFrames = StillSamplesRequested;
 		BeautySubFramesBasis = TEXT("-still-samples, stated");
+	}
+	else if (bVisual && bBeauty && bStillSamplesFlag)
+	{
+		// A beauty clip keeps ONE capture a frame: only the first capture
+		// after the move carries motion vectors, so N captures of one pose
+		// would read back a frame with no motion blur and the clip strobes.
+		UE_LOG(LogFlightSimRender, Warning,
+		       TEXT("beauty: -still-samples=%d ignored on a clip of %d frames (one capture a frame keeps the ")
+		       TEXT("motion blur)"), StillSamplesRequested, DeliveredFrames);
+		BeautySubFramesBasis = FString::Printf(
+			TEXT("one capture a frame: -still-samples=%d is for stills (at most %d delivered frame) and was ")
+			TEXT("ignored on this clip of %d frames, so the motion blur the beauty look states is kept"),
+			StillSamplesRequested, RenderBeautyStillMaxFrames, DeliveredFrames);
 	}
 	else if (bVisual && bBeauty && DeliveredFrames <= RenderBeautyStillMaxFrames)
 	{
@@ -4997,6 +5051,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		TSharedPtr<FJsonObject> SubFrames = MakeShared<FJsonObject>();
 		SubFrames->SetNumberField(TEXT("captures_per_frame"), BeautySubFrames);
 		SubFrames->SetNumberField(TEXT("delivered_frames"), DeliveredFrames);
+		SubFrames->SetNumberField(TEXT("total_captures"), static_cast<double>(DeliveredFrames) * BeautySubFrames);
 		SubFrames->SetStringField(TEXT("basis"), BeautySubFramesBasis);
 		SubFrames->SetStringField(TEXT("method"), bPathTrace
 			? TEXT("the path tracer's own progressive accumulation in the capture's view state")
@@ -7206,11 +7261,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		RenderSettings->SetObjectField(TEXT("console"), Console);
 
-		auto AntiAliasingName = [&](bool bShowFlag) -> FString
+		// What the engine RAN, not what was asked: SceneView.cpp falls back
+		// from TSR/TAA to FXAA when the capture's TemporalAA show flag is
+		// clear (a 2D capture's constructor clears it; only the beauty
+		// branch sets it), and the path tracer replaces the AA pass.
+		auto AntiAliasingName = [&](const FEngineShowFlags& Flags) -> FString
 		{
-			if (!bShowFlag)
+			if (Flags.AntiAliasing == 0)
 			{
 				return TEXT("none");
+			}
+			if (Flags.PathTracing != 0)
+			{
+				return TEXT("path tracer pixel filter (r.PathTracing.FilterWidth; no AA pass)");
 			}
 			IConsoleVariable* Variable =
 				IConsoleManager::Get().FindConsoleVariable(TEXT("r.AntiAliasingMethod"));
@@ -7218,23 +7281,27 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				return TEXT("absent (show flag on, r.AntiAliasingMethod not found)");
 			}
-			switch (Variable->GetInt())
+			const int32 Method = Variable->GetInt();
+			if ((Method == 2 || Method == 4) && Flags.TemporalAA == 0)
+			{
+				return FString::Printf(TEXT("FXAA (%s fell back: TemporalAA show flag off)"),
+				                       Method == 4 ? TEXT("TSR") : TEXT("TAA"));
+			}
+			switch (Method)
 			{
 			case 0: return TEXT("none");
 			case 1: return TEXT("FXAA");
 			case 2: return TEXT("TAA");
 			case 3: return TEXT("MSAA");
 			case 4: return TEXT("TSR");
-			default: return FString::Printf(TEXT("unknown(%d)"), Variable->GetInt());
+			default: return FString::Printf(TEXT("unknown(%d)"), Method);
 			}
 		};
 		TSharedPtr<FJsonObject> AntiAliasing = MakeShared<FJsonObject>();
-		AntiAliasing->SetStringField(TEXT("beauty"),
-			AntiAliasingName(Capture->ShowFlags.AntiAliasing != 0));
+		AntiAliasing->SetStringField(TEXT("beauty"), AntiAliasingName(Capture->ShowFlags));
 		if (LinearCapture != nullptr)
 		{
-			AntiAliasing->SetStringField(TEXT("linear"),
-				AntiAliasingName(LinearCapture->ShowFlags.AntiAliasing != 0));
+			AntiAliasing->SetStringField(TEXT("linear"), AntiAliasingName(LinearCapture->ShowFlags));
 		}
 		if (LabelDepthAll != nullptr)
 		{
@@ -7275,8 +7342,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		if (AccumulateCapture != nullptr)
 		{
 			// S4: the accumulation capture's own flag, measured like the rest.
-			AntiAliasing->SetStringField(TEXT("accumulate"),
-				AntiAliasingName(AccumulateCapture->ShowFlags.AntiAliasing != 0));
+			AntiAliasing->SetStringField(TEXT("accumulate"), AntiAliasingName(AccumulateCapture->ShowFlags));
 		}
 		RenderSettings->SetObjectField(TEXT("anti_aliasing"), AntiAliasing);
 
