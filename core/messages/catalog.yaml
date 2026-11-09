@@ -1249,6 +1249,16 @@ look.record:
 look.beauty_not_label_aligned:
   sentence: "The beauty frames are not label-aligned: an effect moved pixels, scenery covered the aircraft, the field of view changed, or the labels came from another frame, and nothing recorded maps the labels onto the picture."
   hint: "Render the labelled set at measurement quality, record the effect's transform, or measure its displacement with the look label check."
+# -- visual overhaul: the offline ACES 2.0 display step (aces2-display, core/capture/display.py) --
+look.display_input:
+  sentence: "The ACES display step needs the engine's linear frame, and only the finished 8-bit picture is there; undoing its tone curve does not give the scene's light back."
+  hint: "Render with the linear frame turned on (the cinematic ACES look does this)."
+look.display_unavailable:
+  sentence: "The ACES display step cannot run on this machine: the colour library or the linear image reader it needs is not installed, or is too old."
+  hint: "Install the pinned display requirements; the engine picture is kept as it is."
+look.display_on_measure:
+  sentence: "The ACES display step runs on beauty renders only, and this render is a measurement render or names no quality."
+  hint: "Use a beauty look; measurement pixels stay as the label gates measured them."
 check.look_record:
   sentence: "The beauty look's record agrees with the render's quality, and every effect that moves pixels is listed."
 check.look_label_alignment:

@@ -1107,3 +1107,83 @@ second fog density 0 / 0.0002 / 0.0004, falloff 0.015, inversion 1500 /
 3. Each run: confirm `world_beauty.dust_haze.visibility_model_km` equals
    `visibility_target_km`, and that `look_label_check` is ALIGNED. The overlay
    moves no pixel, so any offset is another module's.
+
+## aces2-display
+
+Offline ACES 2.0 SDR display transform for beauty frames, plus two CC0
+show LUTs. Written 2026-11-09 on the Mac, which cannot render. No C++.
+
+### What it does
+
+`core/capture/display.py` reads `frame_NNNN_linear.exr` (the commandlet's
+`-linear` pass, `SCS_FinalColorHDR` into an RGBA16f target). It optionally
+applies a show LUT and runs OpenColorIO 2.5's built-in config
+`ocio://studio-config-v4.0.0_aces-v2.0_ocio-v2.5` (never `ocio://default`)
+to display `sRGB - Display`, view `ACES 2.0 - SDR 100 nits (Rec.709)`. It
+writes `frame_NNNN_aces2.png` beside the engine PNG. The engine PNG is never
+touched. The result is recorded in render.json as `beauty_look.display`.
+`r.HDR.Aces.Version` alone does nothing here, because it only reaches HDR
+output devices 3-6, not the sRGB LDR beauty capture.
+
+- Web: the look switch `cinematic_aces2` is quality beauty, lens cinematic,
+  display aces2. It adds `-linear` to the commandlet and runs the step after
+  each camera's pass (`webapp/capture.py render_passes`), and also on the
+  camera-less path (`webapp/runs.py`). The page's `<select>` does not offer
+  it yet. POST `"look": "cinematic_aces2"` to use it.
+- CLI: `python -m core.capture.display <render dir> [--lut warm_print] [--exposure-scale 1.0]`.
+- Labels: this is a per-pixel colour transform, so it is not in
+  `PIXEL_MOVING_KEYS` and `pixel_moving: false`. It refuses on measure, or
+  when no quality is named (`look.display_on_measure`).
+- Refusals: `look.display_input` (only the 8-bit PNG exists),
+  `look.display_unavailable` (no PyOpenColorIO or OpenEXR, or OCIO < 2.5).
+  The web hook records a refusal in render.json (`beauty_look.display.refused`)
+  and keeps the engine PNG. There is no fallback.
+
+### Decisions
+
+1. **The source is `Linear Rec.709 (sRGB)`, not the `scene_linear` role.** In
+   this config `scene_linear` is ACEScg (AP1). UE's working colour space is
+   Rec.709 primaries (ue/Config/DefaultEngine.ini sets none). Measured with
+   the pinned wheel, an orange (0.5, 0.2, 0.05) gives (0.581, 0.375, 0.177)
+   as Rec.709 and an over-saturated (0.683, 0.343, 0.114) when misread as
+   ACEScg. Grey is the same either way. The record names `input_colorspace`.
+2. **Show LUTs work on ACEScct code values.** The domain 0..1 covers linear 0
+   to about 222. The step converts Rec.709 linear to ACEScct with OCIO,
+   applies the cube (tetrahedral, numpy) and then runs the view from ACEScct.
+   `scripts/make_show_luts.py` generates `warm_print` and `broadcast_neutral`
+   from closed-form curves (33^3, six decimals, deterministic). They are the
+   project's own work, CC0-1.0. `looks.json` holds the sha256 values, and
+   tests regenerate and compare them.
+3. **Pins:** `requirements-display.txt` has opencolorio==2.5.2 (2026-05-13)
+   and openexr==3.4.16 (2026-10-03, which still has the legacy
+   `InputFile`/`Imath` API that `profile.read_linear_frame` uses). Both are
+   BSD-3-Clause (ASWF), with PyPI sha256 values for cp311-313 on macOS,
+   manylinux and Windows. Neither is in the base requirements.
+4. **Vendored reference:** 0.18 grey (Rec.709 linear) maps to display code
+   0.3491875 (8-bit 89), black maps to 0, and 1.0 maps to 0.70668. Computed
+   with 2.5.2 on macOS arm64. The test tolerance is 1e-4.
+
+### Engine reading (5.7.4 source, not a measurement)
+
+- `PostProcessTonemap.cpp`: `SCS_FinalColorHDR` gives
+  `EDisplayOutputFormat::HDR_LinearNoToneCurve`.
+- `PostProcessTonemap.usf:521-524`: scene colour times
+  `OneOverPreExposure * GlobalExposure * VignetteMask * LocalExposure`, plus
+  bloom, happen before the grading LUT. So the EXR appears to carry exposure,
+  vignette, local exposure, bloom and the grade, but no filmic curve and no
+  BlueCorrect. `scripts/check_bridge_api.sh` pins these three strings in the
+  ACES2-DISPLAY block.
+
+### UNCALIBRATED (probe on the render machine)
+
+- Whether `SCS_FinalColorHDR` really is pre-tonemap scene-linear, with
+  exposure and bloom included, as the source reading says. Until it is
+  measured, the record says `input_basis: "UNVERIFIED pre-tonemap"`.
+- The exposure scale the EXR needs before the view. It is 1.0 until then
+  (`exposure_scale_basis: "UNCALIBRATED (1.0 until probed)"`).
+
+Probe: render one `cinematic_aces2` still and run
+`python -m core.capture.display <dir>`. Compare a grey card or the sky-free
+ground mean against the engine PNG at the same pixels. If the ACES image is
+systematically one stop off, record the scale here and in ruflo
+`visual-overhaul/aces2-display/exposure-probe`.

@@ -43,6 +43,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from core.capture import display  # aces2-display (numpy only at import)
 from core.capture.hostflight import HostFlightError
 from core.capture.manifest import SOLVE_HOST_FLIGHT, SOLVE_PRE_RUN
 
@@ -271,7 +272,8 @@ def landmarks(spec, solved: Dict, heightfield=None) -> List[Dict]:
 
 
 def render_passes(card: Path, frames_root: Path, camera_ids: List[str],
-                  render: Callable[..., bool], **render_kwargs) -> List[str]:
+                  render: Callable[..., bool], look: Optional[Dict] = None,
+                  **render_kwargs) -> List[str]:
     """One commandlet pass per camera, each into its own directory.
 
     ``render`` is the caller's own render function (the webapp's, so the
@@ -294,8 +296,11 @@ def render_passes(card: Path, frames_root: Path, camera_ids: List[str],
         # -labels: the engine's masks, depth and occlusion beside every
         # frame (Phase 10). Only the camera path passes it; the
         # camera-less path's arguments stay pinned byte-identical.
+        # aces2-display: a look with display 'aces2' adds -linear (the EXR
+        # the offline ACES 2.0 view reads); [] for every other look.
         ok = render(card=card, frames=out,
-                    extra=[f"-camera-index={index}", "-labels"],
+                    extra=[f"-camera-index={index}", "-labels"]
+                    + display.commandlet_tokens(look),
                     telemetry=out / "host_telemetry.json", **render_kwargs)
         if not ok:
             raise CaptureError(
@@ -303,6 +308,8 @@ def render_passes(card: Path, frames_root: Path, camera_ids: List[str],
                 f"the render commandlet produced no render.json for "
                 f"camera {camera_id!r} (pass {index + 1} of "
                 f"{len(camera_ids)}); see render.log")
+        if display.wants_display(look):  # aces2-display: beauty frames only
+            display.apply_to_bundle(out, look)  # refusals recorded in render.json
         rendered.append(camera_id)
     return rendered
 
