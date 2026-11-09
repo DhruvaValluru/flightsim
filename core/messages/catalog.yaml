@@ -299,6 +299,15 @@ render.pathtrace:
 render.beauty_look:
   sentence: "The beauty look cannot be planned or applied: an unknown grade or lens, a sun that cannot be lit, a camera without a sensor width, or a sidecar the renderer cannot read."
   hint: "Use a known grade (golden hour, desert noon or storm) and lens (standard or cinematic), or render at the measure quality."
+world_beauty.overrides:
+  sentence: "The world look's probe overrides file cannot be read, or names a section, row or field the world look does not have."
+  hint: "Fix the overrides file so it names only the world look's own sections and fields, or render without it."
+world_beauty.clouds:
+  sentence: "The beauty clouds were asked for in a mode the world look does not know."
+  hint: "Ask for the card's clouds, fair-weather clouds or the engine's clouds, or leave the choice out."
+ground_scatter.sidecar:
+  sentence: "The ground scatter file cannot be read, is of another format or version, or carries no region or species."
+  hint: "Write the scatter file again, or render without ground scatter."
 
 # -- the batch runner (core/dataset/batch.py) --------------------------------
 
