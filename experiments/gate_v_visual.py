@@ -735,6 +735,43 @@ def find_key(blob, key: str):
     return None
 
 
+def stated_cloud_cover(blob) -> Optional[float]:
+    """A cloud_cover the run actually drew, or None. A Quantity whose
+    source is ``default`` is the randomization block's unsampled 0.0
+    placeholder (core/scenario/randomization.py), and a plain number is
+    only trusted beside a ``policy`` that names cloud_cover (card_block):
+    the look block writes 0.0 when no policy drew it. Grading the storm
+    sky (default-on in the web app) against either would be a label that
+    does not match the pixels."""
+    found: List[float] = []
+
+    def walk(node):
+        if found:
+            return
+        if isinstance(node, dict):
+            value = node.get("cloud_cover")
+            if isinstance(value, dict):
+                if str(value.get("source", "default")) != "default":
+                    number = _number(value)
+                    if number is not None:
+                        found.append(number)
+                        return
+            elif value is not None and _number(value) is not None \
+                    and "cloud_cover" in json.dumps(node.get("policy"), default=str):
+                found.append(_number(value))
+                return
+            children = node.values()
+        elif isinstance(node, list):
+            children = node
+        else:
+            return
+        for child in children:
+            walk(child)
+
+    walk(blob)
+    return found[0] if found else None
+
+
 def _read_json(path: Path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -853,7 +890,7 @@ def resolve_inputs(directory: Path, key: str, png: Path, width: int, height: int
         places += [png.parent, png.parent.parent]
         for place in places:
             for name in ("spec.json", "card.json", "manifest.json", "render.json"):
-                value = _number(find_key(_read_json(place / name), "cloud_cover"))
+                value = stated_cloud_cover(_read_json(place / name))
                 if value is not None:
                     inputs.expected_cloud, inputs.cloud_source = value, str(place / name)
                     break

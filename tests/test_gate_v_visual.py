@@ -293,6 +293,25 @@ def test_horizon_comes_from_the_capture_labels_of_this_camera(tmp_path, sidecar)
     assert ("frame_0000.json" if sidecar else "capture_manifest.json") in inputs.horizon_source
 
 
+def test_an_unsampled_cloud_cover_is_never_the_expected_cover(tmp_path):
+    step = tmp_path / "v0"
+    step.mkdir()
+    rgb, _, _ = scene()
+    Image.fromarray(np.rint(rgb).astype(np.uint8)).save(step / "a.png")
+    (step / "spec.json").write_text(json.dumps({"randomization": {"cloud_cover": {
+        "value": 0.0, "unit": "fraction", "source": "default",
+        "from": "not drawn (no policy names this leaf)"}},
+        "look": {"cloud_cover": 0.0}}))
+    inputs = gv.resolve_inputs(step, "a", step / "a.png", W, H)
+    assert inputs.expected_cloud is None and inputs.cloud_source == "none"
+
+
+def test_a_drawn_cloud_cover_is_the_expected_cover():
+    assert gv.stated_cloud_cover({"cloud_cover": {"value": 0.7, "source": "sampled"}}) == 0.7
+    card = {"randomization": {"policy": {"cloud_cover": {"form": "beta"}}, "cloud_cover": 0.4}}
+    assert gv.stated_cloud_cover(card) == 0.4
+
+
 def test_cli_skip_render_and_compare(tmp_path, capsys):
     write_step(tmp_path / "before", haze=False)
     write_step(tmp_path / "after", haze=True)
