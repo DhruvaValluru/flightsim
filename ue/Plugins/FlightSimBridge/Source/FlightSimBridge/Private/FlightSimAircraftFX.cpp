@@ -183,6 +183,7 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& Params)
 	bAfterburner = bAll && AircraftFxSwitch(Params, TEXT("afterburner="), true);
 	// Pixel-moving: off unless asked for by name.
 	bHeatHaze = bAll && AircraftFxSwitch(Params, TEXT("heat-haze="), false);
+	Humidity.ParseParams(Params);  // condensation-solver: -humidity-pct=
 }
 
 double FFlightSimAircraftFX::Constant(const TCHAR* Group, const TCHAR* Name, double Fallback) const
@@ -377,7 +378,10 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 	ContrailRow->SetBoolField(TEXT("enabled"), Options.bContrails);
 	ContrailRow->SetStringField(TEXT("rule"), TEXT("drawn while atmosphere/T-R is below contrail.MaxTemperatureK ")
 		TEXT("and position/h-sl-meters above contrail.MinAltitudeM (Schmidt-Appleman threshold, no humidity ")
-		TEXT("modelled); wingtip vapour while accelerations/Nz exceeds vapour.MinNz"));
+		TEXT("modelled); wingtip vapour from the humidity test (aircraft_look.condensation), or while ")
+		TEXT("accelerations/Nz exceeds vapour.MinNz when the humidity is unavailable; vapour_frames counts ")
+		TEXT("only the frames these wingtip vapour trails drew (the humidity-gated tip ribbons' frames are in ")
+		TEXT("aircraft_look.condensation.per_frame)"));
 	ContrailRow->SetStringField(TEXT("label_convention"), TEXT("a trail is a translucent medium like the clouds ")
 		TEXT("and rain the label captures already omit: where it crosses in front of the aircraft the mask ")
 		TEXT("still says aircraft"));
@@ -398,6 +402,8 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 		}
 	}
 	Record->SetObjectField(TEXT("heat_haze"), HazeRow);
+	// condensation-solver: the humidity-gated vapour sites, own beauty-only actors.
+	if (!Condensation.Build(World, Aircraft, Constants, Options.Humidity, Options.bContrails, BeautyOnlyActors, Error)) { return false; }
 	Record->SetNumberField(TEXT("beauty_only_actors"), BeautyOnlyActors.Num());
 	bBuilt = true;
 	UE_LOG(LogFlightSimAircraftFX, Display,
@@ -728,7 +734,9 @@ void FFlightSimAircraftFX::Advance(TFunctionRef<double(const TCHAR*)> ReadProper
 	const double AltitudeM = ReadProperty(TEXT("position/h-sl-meters"));
 	const bool bContrail = TemperatureK < Constant(TEXT("contrail"), TEXT("MaxTemperatureK"), 233.15)
 		&& AltitudeM > Constant(TEXT("contrail"), TEXT("MinAltitudeM"), 7500.0);
-	const bool bVapour = ReadProperty(TEXT("accelerations/Nz")) > Constant(TEXT("vapour"), TEXT("MinNz"), 4.0);
+	// condensation-solver: the humidity test per site; the old Nz rule only when RH is unavailable.
+	const bool bVapour = Condensation.Advance(ReadProperty, Record) ||
+		(!Condensation.HasHumidity() && ReadProperty(TEXT("accelerations/Nz")) > Constant(TEXT("vapour"), TEXT("MinNz"), 4.0));
 	const double SpeedCmS = ReadProperty(TEXT("velocities/vtrue-kts")) * AircraftFxMpsPerKnot * AircraftFxCmPerMetre;
 	ContrailFrames += bContrail ? 1 : 0;
 	VapourFrames += bVapour ? 1 : 0;

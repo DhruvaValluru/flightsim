@@ -2555,6 +2555,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		AircraftFXOptions.MeshManifestPath = MeshManifestPath;
 		AircraftFXOptions.Livery = MeshAirframe.Livery;
 		AircraftFXOptions.Weather = Weather.IsBuilt() ? &Weather : nullptr;  // wet-airframe-canopy
+
+		// condensation-solver: the card's dew point makes atmosphere/RH the stated day's.
+		AircraftFXOptions.Humidity.bCardStated = Card.AtmosphereProperties.Contains(TEXT("atmosphere/dew-point-R"));
 		if (!AircraftFX.Build(World, AircraftFXOptions, Error)) { return Fail(Error); }
 		VisualScene.BeautyOnlyActors.Append(AircraftFX.BeautyOnlyActors);
 	}

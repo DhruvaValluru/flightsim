@@ -203,6 +203,10 @@ aircraft_look.manifest:
   sentence: "The aircraft's beauty look file exists but cannot be read, so the beauty render was stopped rather than drawn without it."
   hint: "Run the aircraft import step again; it rewrites the look file beside the converted model."
 
+aircraft_look.condensation:
+  sentence: "The aircraft's vapour settings contradict each other or are not numbers, so the beauty render was stopped rather than drawn with them."
+  hint: "Correct the condensation numbers in the aircraft's look config, then run the aircraft import step again."
+
 # -- terrain and weather (webapp/runs.py, flightsim/capture.py) --------------
 
 terrain.geoid:

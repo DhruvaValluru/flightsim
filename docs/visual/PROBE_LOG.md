@@ -1187,3 +1187,117 @@ Probe: render one `cinematic_aces2` still and run
 ground mean against the engine PNG at the same pixels. If the ACES image is
 systematically one stop off, record the scale here and in ruflo
 `visual-overhaul/aces2-display/exposure-probe`.
+
+## condensation-solver
+
+Humidity-gated condensation on the airframe: wingtip vortex cores, the
+upper-wing vapour sheet, LEX vortices (J-11 class) and the transonic vapour
+cone. It replaces the old vapour rule (`accelerations/Nz > vapour.MinNz`, no
+humidity) in `FlightSimAircraftFX.cpp` Advance. Code only. Nothing has been
+compiled or rendered: this Mac cannot build UE 5.7.
+
+### What it does
+
+For each site it finds a local pressure `p_l`, takes the isentropic local
+temperature `T_l = T (p_l/p)^0.2857`, and compares the vapour the free
+stream carries with what the local air can hold, using JSBSim's Magnus
+form (`core/environment/atmosphere.py`). The equilibrium condensate is
+`dq = q_v - q_sat(T_l, p_l)` and is recorded. Opacity is
+`clamp(OpacityPerGkg x (q_v - q_sat(T_l + OnsetCoolingK, p_l)))`, and
+nothing is drawn below `VisibleMinGkg`.
+
+| site | local state |
+|---|---|
+| tip | `Gamma = Nz W/(rho V b pi/4)`; Lamb-Oseen core `dp = 0.87 rho Gamma^2/(4 pi^2 rc^2)`, `rc = CoreRadiusSpanFraction b` (0.87 = ln 2 x 1.1209^2: rc is the peak-swirl radius) |
+| sheet | `CL = Nz W/(qbar S)`, `Cp_min = -(SheetCpMinAtZeroLift + CpMinPerCL CL)`, `p_l = p (1 + 0.7 M^2 Cp_min)` |
+| lex | only when `LexEnabled` and `alpha > LexAlphaOnsetDeg`: `Cp = -LexCpPerDeg (alpha - onset)` |
+| cone | only when `ConeMachMin <= M <= ConeMachMax`: `T_l/T = (1+0.2M^2)/(1+0.2 ConeLocalMach^2)`, `p_l/p = (T_l/T)^3.5`. The cloud ends at the recompression shock (the cone's sharp aft edge). |
+
+The Python twin is `core/scene/condensation.py`. Its tests are in
+`tests/test_condensation.py`, and they pin the C++ constant names and
+defaults to it by text.
+
+### Two deliberate departures from the spec (measured with the twin)
+
+* **Sheet zero-lift term.** The spec's `Cp_min = -(1 + k CL)` made the sheet
+  fully opaque at 1 g in any humid low-level air, for example M 0.6, RH 80 %,
+  sea level: `dq` 6.2 g/kg, as strong as a 5 g tip core. The `1` is now
+  the constant `SheetCpMinAtZeroLift`, default 0.3 (a thin wing).
+* **Onset margin.** `OnsetCoolingK` (6 K) stands in for the droplet growth
+  time over a transit of a few milliseconds. The local air must cool this
+  far below its dew point before the cloud shows. `VisibleMinGkg`
+  (0.05 g/kg) makes high, dry air give exactly nothing: at 12 km and RH 30 %,
+  `q_v` is only 0.03 g/kg.
+
+Twin results (J-11-class numbers): a 5 g pull at M 0.6, RH 80 %, sea level
+gives tip and sheet. At 1 g it gives neither. M 0.95 at RH 90 % gives the
+cone; M 0.80 gives no cone. RH 0 gives nothing anywhere, and neither does
+12 km at RH 30 %.
+
+### Humidity source and fallback (render.json `aircraft_look.condensation`)
+
+1. `-humidity-pct=<0..100>` is a beauty-only override for probes. The
+   physics never sees it.
+2. When the card states a dew point (`atmosphere_properties`
+   `atmosphere/dew-point-R`), the commandlet sets `Humidity.bCardStated`
+   and the FDM's `atmosphere/RH` is read every step.
+3. Otherwise the old Nz rule runs (`fallback_used`, `fallback_frames`).
+
+A card with no dew point is JSBSim's dry default. That is not a statement
+that the day is dry, so it falls back rather than suppressing all vapour.
+An FDM read that is NaN, or a read that must be positive and is not, drops
+that site and lists it in `dropped`.
+
+### Labels
+
+The condensation draws on its own actors: one attached actor carrying the
+sheet, cone and LEX sections, plus two world-space tip ribbons. None of
+them is a component of the aircraft actor, and all of them are in
+`BeautyOnlyActors`. `M_AircraftCondensation` is translucent: not in mask,
+class or depth (the trail convention). It does not refract and has no WPO,
+so `pixel_moving: false`.
+
+`Advance` returns true only when the tips condense but this module could
+not draw ribbons (no material or no CPU-readable vertices). In that case
+the existing wingtip vapour trails carry them.
+
+### Site placement (from LOD 0 vertices, actor frame)
+
+* Tips: the +/-Y vertex extremes.
+* Cone collar: the X slice with the largest Y span x Z span. Its radius is
+  half that slice's Y span, and the shock sits `ConeLengthBodyFraction` x
+  the body length aft.
+* Sheet: in 6 span bands from `SheetSpanStartFraction` to
+  `SheetSpanEndFraction`, the chord of the X-cluster with the largest
+  extent (the wing, not a tailplane), at the 90th-percentile Z.
+* LEX: `LexAftOfNoseM`, `LexSpanM` and `LexUpM` from the nose vertex.
+  `assets/aircraft_config/look/J11.json` sets `LexEnabled` 1.
+
+### UNCALIBRATED
+
+These are engineering approximations:
+
+* every `CONDENSATION_DEFAULTS` value;
+* the 0.87 Lamb-Oseen factor;
+* the compressible Cp form;
+* Magnus over liquid water at every temperature (no ice phase);
+* the material's colour, fade distance (60 cm) and noise scale.
+
+### Probes (render machine)
+
+| probe | sets |
+|---|---|
+| A humid low pass at M 0.95 (`-humidity-pct=90`, sea level, chase and side views) | `ConeLocalMach`, `ConeLengthBodyFraction`, `OpacityPerGkg`; the shock edge looks sharp; the sheet is present |
+| A 5 g pull-up in the forest rain scene (card dew point, or `-humidity-pct=85`) | `CoreRadiusSpanFraction`, `OnsetCoolingK`, `CpMinPerCL`, `SheetCpMinAtZeroLift`, `LifetimeS`, `TipStartWidthM`, `TipSpreadMPerS` |
+| A J-11 at alpha 20-25 deg, M 0.4, humid | `LexAlphaOnsetDeg`, `LexCpPerDeg`, the LEX offsets against the mesh |
+
+Check: `aircraft_look.condensation.per_frame` shows the expected sites
+(cone only between `ConeMachMin` and `ConeMachMax`), and `fallback_used`
+is false when humidity was given.
+
+### Engine symbols
+
+`scripts/check_bridge_api.sh`, block `CONDENSATION (condensation-solver)`:
+18 symbols, each grepped in the UE 5.7.4 headers (all present). The
+refusal `aircraft_look.condensation` (contradictory or non-finite
+constants) is in `core/messages/catalog.yaml`.

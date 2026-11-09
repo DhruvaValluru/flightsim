@@ -580,6 +580,30 @@ aircraft_check "ProcMesh CreateMeshSection_LinearColor" "Plugins/Runtime/Procedu
 aircraft_check "ProcMesh ClearMeshSection" "Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h" "void ClearMeshSection(int32 SectionIndex)"
 aircraft_check "RotationMatrix MakeFromX" "Runtime/Core/Public/Math/RotationMatrix.h" "MakeFromX(TVector<T> const& XAxis)"
 aircraft_check "Math UE_DOUBLE_PI" "Runtime/Core/Public/Math/UnrealMathUtility.h" "#define UE_DOUBLE_PI"
+# -- CONDENSATION (condensation-solver) --------------------------------------
+# FlightSimCondensation.cpp (the humidity-gated vapour sites: mesh vertices
+# read from LOD 0, the attached and world-space ribbons) and
+# scripts/aircraft_condensation_material.py (M_AircraftCondensation's nodes).
+# Each line is one symbol grepped in the 5.7.4 headers when it was written.
+aircraft_check "condensation: UStaticMesh GetRenderData" "$RE/Classes/Engine/StaticMesh.h" "ENGINE_API const FStaticMeshRenderData* GetRenderData() const;"
+aircraft_check "condensation: RenderData LODResources" "$RE/Public/StaticMeshResources.h" "FStaticMeshLODResourcesArray LODResources;"
+aircraft_check "condensation: LODResources VertexBuffers" "$RE/Public/StaticMeshResources.h" "FStaticMeshVertexBuffers VertexBuffers;"
+aircraft_check "condensation: VertexBuffers PositionVertexBuffer" "$RE/Public/StaticMeshResources.h" "FPositionVertexBuffer PositionVertexBuffer;"
+aircraft_check "condensation: PositionVertexBuffer VertexPosition" "$RE/Public/Rendering/PositionVertexBuffer.h" "inline const FVector3f& VertexPosition(uint32 VertexIndex) const"
+aircraft_check "condensation: PositionVertexBuffer GetVertexData" "$RE/Public/Rendering/PositionVertexBuffer.h" "const void* GetVertexData() const { return Data; }"
+aircraft_check "condensation: PositionVertexBuffer GetNumVertices" "$RE/Public/Rendering/PositionVertexBuffer.h" "inline uint32 GetNumVertices() const"
+aircraft_check "condensation: editor keeps mesh CPU data" "$RE/Private/StaticMesh.cpp" "bool bNeedsCPUAccess = !FPlatformProperties::RequiresCookedData()"
+aircraft_check "condensation: StaticMeshComponent GetStaticMesh" "$RE/Classes/Components/StaticMeshComponent.h" "TObjectPtr<UStaticMesh> GetStaticMesh() const"
+aircraft_check "condensation: Transform GetRelativeTransform" "Runtime/Core/Public/Math/TransformVectorized.h" "TTransform<T> GetRelativeTransform(const TTransform<T>& Other) const;"
+aircraft_check "condensation: FParse Value double" "Runtime/Core/Public/Misc/Parse.h" "static CORE_API bool Value(const TCHAR* Stream, const TCHAR* Match, double& Value);"
+aircraft_check "condensation: FMath IsFinite double" "Runtime/Core/Public/GenericPlatform/GenericPlatformMath.h" "static UE_FORCEINLINE_HINT bool IsFinite(double A)"
+aircraft_check "condensation: FJsonValueNull" "Runtime/Json/Public/Dom/JsonValue.h" "class FJsonValueNull : public FJsonValue"
+aircraft_check "condensation: UMaterialExpressionDepthFade" "$RE/Public/Materials/MaterialExpressionDepthFade.h" "class UMaterialExpressionDepthFade : public UMaterialExpression"
+aircraft_check "condensation: DepthFade FadeDistanceDefault" "$RE/Public/Materials/MaterialExpressionDepthFade.h" "float FadeDistanceDefault"
+aircraft_check "condensation: UMaterialExpressionNoise" "$RE/Public/Materials/MaterialExpressionNoise.h" "class UMaterialExpressionNoise : public UMaterialExpression"
+aircraft_check "condensation: Noise OutputMax" "$RE/Public/Materials/MaterialExpressionNoise.h" "float OutputMax;"
+aircraft_check "condensation: UMaterialExpressionVertexColor" "$RE/Public/Materials/MaterialExpressionVertexColor.h" "class UMaterialExpressionVertexColor"
+# -- CONDENSATION -- end
 if [ -f "$UE_ROOT/Engine/Content/EngineResources/WhiteSquareTexture.uasset" ]; then
     ok "engine WhiteSquareTexture" "present"
 else

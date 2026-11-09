@@ -78,7 +78,7 @@ CLASS_MASTERS = {
 }
 #: The beauty-only FX masters (FlightSimAircraftFX.cpp loads these by path).
 FX_MASTERS = ("M_NavLightEmissive", "M_AircraftContrail", "M_AircraftAfterburner",
-              "M_AircraftHeatHaze")
+              "M_AircraftHeatHaze", "M_AircraftCondensation")
 SLOT_CLASSES = tuple(CLASS_MASTERS)
 #: The per-model instance folder and name: <asset root>/Look/MI_<slot>.
 LOOK_INSTANCE_FOLDER = "Look"
@@ -132,6 +132,8 @@ FX_PARAMETERS = {
     "M_AircraftContrail": ("Opacity", "Formation"),
     "M_AircraftAfterburner": ("Intensity", "CoreColour", "TipColour", "Shocks"),
     "M_AircraftHeatHaze": ("TimeS", "Strength"),
+    # condensation-solver (scripts/aircraft_condensation_material.py PARAMETERS).
+    "M_AircraftCondensation": ("Opacity", "Shape"),
 }
 #: The committed Custom-node bodies (assets/shaders/aircraft/<name>.hlsl) and
 #: their inputs, in order.
@@ -263,7 +265,8 @@ AXES = {"+x": (0, 1.0), "-x": (0, -1.0), "+y": (1, 1.0), "-y": (1, -1.0),
         "+z": (2, 1.0), "-z": (2, -1.0)}
 REQUIRED_KEYS = ("schema", "name", "default_class")
 KNOWN_KEYS = set(REQUIRED_KEYS) | {"note", "slot_rules", "class_scalars", "class_vectors",
-                                   "lights", "nozzles", "contrail", "vapour", "light_constants"}
+                                   "lights", "nozzles", "contrail", "vapour", "light_constants",
+                                   "condensation"}
 
 
 def validate(config, path="look config"):
@@ -524,6 +527,24 @@ AFTERBURNER_DEFAULTS = {"PlumeLengthRadii": 7.0, "AfterburnerCandela": 6.0e4,
 HEAT_HAZE_DEFAULTS = {"LengthRadii": 14.0, "Strength": 0.6}
 
 
+def _condensation_defaults():
+    """condensation-solver: core/scene/condensation.py CONDENSATION_DEFAULTS,
+    read as a literal (this module is stdlib-only and also runs inside
+    UnrealEditor's Python, where core's own imports do not)."""
+    import ast
+    path = os.path.join(REPO, "core", "scene", "condensation.py")
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    for node in tree.body:
+        target = getattr(node, "target", None) or (getattr(node, "targets", None) or [None])[0]
+        if getattr(target, "id", "") == "CONDENSATION_DEFAULTS":
+            return ast.literal_eval(node.value)
+    raise LookError(f"{path} defines no CONDENSATION_DEFAULTS")
+
+
+CONDENSATION_DEFAULTS = _condensation_defaults()
+
+
 def _constants(defaults, overrides, probe):
     out = {}
     for key, value in defaults.items():
@@ -582,6 +603,9 @@ def build_manifest(name, config, generated_dir, fdm_xml, materials=None):
                                    "a cruise beauty probe above 9 km, chase and side views"),
             "vapour": _constants(VAPOUR_DEFAULTS, config.get("vapour", {}),
                                  "a 5 g pull-up beauty probe"),
+            "condensation": _constants(CONDENSATION_DEFAULTS, config.get("condensation", {}),
+                                       "a humid low pass at M 0.95 and a 5 g pull-up in the forest "
+                                       "rain scene (docs/visual/PROBE_LOG.md condensation-solver)"),
             "afterburner": _constants(AFTERBURNER_DEFAULTS, {},
                                       "a full-reheat take-off beauty probe, rear quarter"),
             "heat_haze": _constants(HEAT_HAZE_DEFAULTS, {},

@@ -49,6 +49,8 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
 #include "FlightSimAircraftWet.h"  // wet-airframe-canopy
+
+#include "FlightSimCondensation.h"  // condensation-solver
 #include "Templates/Function.h"
 
 class AActor;
@@ -78,6 +80,10 @@ struct FFlightSimAircraftFXOptions
 	bool bHeatHaze = false;
 	// wet-airframe-canopy: the built weather (its rain wets the airframe), or null.
 	const FFlightSimWeather* Weather = nullptr;
+
+	// condensation-solver: where the vapour test's humidity comes from
+	// (-humidity-pct=; the commandlet sets bCardStated from the card).
+	FFlightSimCondensationHumidity Humidity;
 	// Read the switches above from the commandlet's parameters.
 	void ParseParams(const FString& Params);
 };
@@ -157,6 +163,8 @@ private:
 	TArray<FLamp> Lamps;
 	TArray<FNozzle> Nozzles;
 	TArray<FTrail> Trails;
+	// condensation-solver: the humidity-gated vapour sites (FlightSimCondensation.h).
+	FFlightSimCondensation Condensation;
 	int32 ContrailFrames = 0;
 	int32 VapourFrames = 0;
 	double PeakAfterburner = 0.0;
