@@ -239,7 +239,10 @@ class Clause:
 def _graded(name: str, measure, frame_inputs: dict, control_inputs: Optional[dict],
             basis: str) -> Clause:
     """Run ``measure`` on the frame and on its control; a control that
-    passes voids the clause."""
+    passes voids a PASS (plan §5: "or the pass is void"). A FAIL stands
+    whatever its control does: the frame itself said no, and reporting it
+    as VOID would hide a real failure (an underexposed frame whose x4
+    control lands in band, say)."""
     values = measure(**frame_inputs)
     if values.get("not_run"):
         return Clause(name, NOT_RUN, values, None, values.pop("not_run"))
@@ -252,8 +255,12 @@ def _graded(name: str, measure, frame_inputs: dict, control_inputs: Optional[dic
                        **control}
             status = VOID if status == PASS else status
         elif control.pop("passed"):
-            status = VOID
-            control["note"] = "the control passed: the measurement could not say no"
+            if status == PASS:
+                status = VOID
+                control["note"] = "the control passed: the measurement could not say no"
+            else:
+                control["note"] = ("the control passed too; the frame's FAIL stands, "
+                                   "but this control does not test it")
         else:
             control["note"] = "the control tripped"
     return Clause(name, status, values, control, basis)

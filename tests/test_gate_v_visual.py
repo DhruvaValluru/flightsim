@@ -201,6 +201,14 @@ def test_a_control_that_passes_voids_the_clause():
     assert clause.status == gv.VOID
 
 
+def test_a_passing_control_never_hides_a_fail():
+    # p90 luma ~37: far under EXPOSURE_P90_MIN; its x4 control lands in band.
+    rgb = np.random.default_rng(0).uniform(5.0, 45.0, (200, 200, 3))
+    clause = gv.measure_exposure(rgb)
+    assert clause.status == gv.FAIL, clause.control
+    assert "FAIL stands" in clause.control["note"]
+
+
 # -- edge aliasing is Gate 6's number ---------------------------------------
 
 
