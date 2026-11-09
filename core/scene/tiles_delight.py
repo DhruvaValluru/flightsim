@@ -111,6 +111,10 @@ DELIGHT_DEFAULTS: Dict[str, float] = {
 #: The render.json basis line (world_beauty.tiles.delight.basis; the C++ says it too).
 BASIS = "shader per frame, nothing stored (Google tile policy)"
 
+#: Where the record points for the contact shading that replaces the lifted
+#: shadows (FlightSimClouds.cpp writes it under world_beauty.atmosphere).
+CONTACT_SHADING_RECORD = "world_beauty.atmosphere.contact_shading"
+
 #: The names a probe render must set.
 UNCALIBRATED: Tuple[str, ...] = ("DELIGHT_DEFAULTS", "DELIGHT_MIP_BIAS", "DELIGHT_RATIO_KNEE",
                                  "DELIGHT_BLUE_GATE", "CONTACT_SHADOW_LENGTH")
@@ -181,4 +185,5 @@ def delight_record(preset: str) -> Dict[str, Any]:
         "basis": BASIS,
         "pixel_moving": False,
         "calibration": "UNCALIBRATED",
+        "contact_shading": CONTACT_SHADING_RECORD,
     }

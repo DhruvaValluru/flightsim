@@ -190,6 +190,10 @@ def test_the_cpp_numbers_are_the_twin():
     record = td.delight_record("clear")
     for key in record:
         assert f'TEXT("{key}")' in block, key
+    # and the C++ record writes no key the twin lacks (both directions)
+    rec_cpp = block[block.index("TSharedPtr<FJsonObject> DelightRecord("):block.index("TSharedPtr<FJsonObject> ApplyContactShading(")]
+    assert set(re.findall(r'Out->Set\w+Field\(TEXT\("(\w+)"\)', rec_cpp)) == set(record)
+    assert f'TEXT("{td.CONTACT_SHADING_RECORD}")' in rec_cpp
     assert f'TEXT("{td.BASIS}")' in block and 'TEXT("UNCALIBRATED")' in block
     assert 'SetBoolField(TEXT("pixel_moving"), false)' in block
     # the hooks: once each, in the beauty world look only
@@ -204,7 +208,8 @@ def test_the_record_is_colour_only_and_not_pixel_moving():
     record = td.delight_record("storm")
     assert record == {"amount": 0.2, "mip_bias": td.DELIGHT_MIP_BIAS, "ratio_knee": td.DELIGHT_RATIO_KNEE,
                       "blue_gate": td.DELIGHT_BLUE_GATE, "preset": "storm", "basis": td.BASIS,
-                      "pixel_moving": False, "calibration": "UNCALIBRATED"}
+                      "pixel_moving": False, "calibration": "UNCALIBRATED",
+                      "contact_shading": "world_beauty.atmosphere.contact_shading"}
     assert "delight" not in capture_look.PIXEL_MOVING_KEYS
     assert not any("delight" in k or "contact" in k for k in capture_look.PIXEL_MOVING_KEYS)
     # colour only: no world-position offset, no depth
