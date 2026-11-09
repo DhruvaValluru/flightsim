@@ -214,7 +214,9 @@ namespace
 		TArray<FString> Raw;
 		for (const TSharedPtr<FJsonObject>& From : {Look, Weather})
 		{
-			if (!From.IsValid() || !From->HasField(TEXT("present_weather")) || Raw.Num() > 0)
+			// The first block that names present_weather is used, even when empty
+			// (dust_haze.card_inputs: look's, else weather's).
+			if (!From.IsValid() || !From->HasField(TEXT("present_weather")))
 			{
 				continue;
 			}
@@ -235,6 +237,7 @@ namespace
 			{
 				Text.ParseIntoArrayWS(Raw);
 			}
+			break;
 		}
 		TArray<FString> Out;
 		static const TCHAR* const Prefixes[] = {TEXT("+"), TEXT("-"), TEXT("VC"), TEXT("BL"), TEXT("DR")};
@@ -360,6 +363,12 @@ void FFlightSimDustHaze::Apply(UWorld* World, FFlightSimVisualScene& Scene, cons
 	FString RowBasis = TEXT("none of the card's words select dust or haze");
 	TSharedPtr<FJsonObject> DustFrom = Weather.IsValid() && Weather->HasField(TEXT("dust")) ? Weather
 		: (Look.IsValid() && Look->HasField(TEXT("dust")) ? Look : nullptr);
+	// A null dust is unstated (dust_haze.card_inputs: weather.get("dust") is
+	// None): the codes and the surface decide.
+	if (DustFrom.IsValid() && DustFrom->HasTypedField<EJson::Null>(TEXT("dust")))
+	{
+		DustFrom = nullptr;
+	}
 	if (DustFrom.IsValid())
 	{
 		bool bDust = false;
