@@ -880,3 +880,22 @@ source and is grepped by the check script's block.
 .\.venv\Scripts\python.exe experiments\look_match.py --steps ref_pt ref_rt --shot a
 #   then RENDER_RUNBOOK.md step 13b: apply, re-render, match again until "converged"
 ```
+
+### reference-frames: skeptic review (2026-11-09)
+
+Read `git diff claude/vibrant-gauss-olema4...worktree-wf_d78a46c2-467-4` and tried to break it.
+
+- Engine symbols: the 12 rows of the lane's block in scripts/check_bridge_api.sh were grepped by hand in the
+  installed 5.7.4 source (Build.version 5.7.4). `bOverride_PathTracingEnableReferenceAtmosphere` is in
+  Scene.h:1391. `NNEDenoiser.Asset` is read on the game thread on every update
+  (NNEDenoiserViewExtension.cpp:387 compares the asset name), so a code-priority set takes effect.
+- Labels: the hook writes only `Capture->PostProcessSettings` of the beauty capture plus two cvars that only
+  the path tracer reads. The copies of that post-process (linear, accumulate, calibration) are refused under
+  pathtrace before this point. Under the reference atmosphere the path tracer drops the sky light from its
+  light list (PathTracing.cpp:3022). That is not a second sun, and nothing reaches physics.
+- Measure: NNEDenoiser is EnabledByDefault and supports Win64/Linux/Mac, so listing it in the uproject loads
+  nothing new.
+- Fixed: a truncated or mis-sized REFERENCE `_depth.f32` used to raise a bare ValueError (a traceback from the
+  CLI). It now refuses as `look_match.inputs`, with a test.
+- Not this lane: the utf-8 failure in tests/test_platform.py (tests/test_gate_v_visual.py,
+  tests/test_swarm_viz.py) is fixed on claude/vibrant-gauss-olema4 by 43795f40. It clears when the lane merges.

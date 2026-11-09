@@ -755,7 +755,10 @@ def match(reference: Path, realtime: Path, *, beauty_look_path: Optional[Path] =
             raise LookMatchError("look_match.inputs", str(exc))
         depth_note = f"{depth_bundle['depth'].name} ({'realtime' if depth_bundle is rt else 'reference'})"
     if ref["depth"] is not None and rt["depth"] is not None:
-        other = read_depth_f32(ref["depth"], width, height)
+        try:
+            other = read_depth_f32(ref["depth"], width, height)
+        except ValueError as exc:  # a truncated reference depth refuses by name, not a traceback
+            raise LookMatchError("look_match.inputs", str(exc))
         both = np.isfinite(depth) & np.isfinite(other)
         sky_mismatch = float(np.mean(np.isfinite(depth) != np.isfinite(other)))
         rel = float(np.median(np.abs(depth[both] - other[both]) / np.maximum(depth[both], 1e-3))) \

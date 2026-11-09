@@ -262,6 +262,17 @@ def test_match_refuses_the_wrong_qualities_and_another_pose(tmp_path):
     assert err.value.constraint in ("look_match.inputs", "look_match.not_same_shot")
 
 
+def test_a_truncated_reference_depth_refuses_by_name(tmp_path):
+    lin, ids, depth = _scene()
+    ref = _bundle(tmp_path / "ref", lin, ids, depth, "pathtrace")
+    rt = _bundle(tmp_path / "rt", lin, ids, depth, "beauty")
+    raw = (tmp_path / "ref" / "frame_0000_depth.f32").read_bytes()
+    (tmp_path / "ref" / "frame_0000_depth.f32").write_bytes(raw[: len(raw) // 2])
+    with pytest.raises(lm.LookMatchError) as err:
+        lm.match(ref, rt)
+    assert err.value.constraint == "look_match.inputs"
+
+
 def test_existing_world_overrides_are_merged(tmp_path):
     lin, ids, depth = _scene()
     ref = _bundle(tmp_path / "pt", lin, ids, depth, "pathtrace")
