@@ -1503,8 +1503,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(check.render())
 
     # Visual plan V0 "Measure": reported beside the clauses, never one.
-    aliasing = report_edge_aliasing(
-        out, Path(args.aliasing_baseline) if args.aliasing_baseline else None)
+    # A number that is never a gate must never change the gate's outcome:
+    # an error computing it is reported as [info] and the run goes on.
+    try:
+        aliasing = report_edge_aliasing(
+            out, Path(args.aliasing_baseline) if args.aliasing_baseline else None)
+    except Exception as error:  # noqa: BLE001 -- reported, never a gate
+        aliasing = None
+        print(f"  [info] edge aliasing (reported, not a gate) not computed: {error}")
     if aliasing is not None:
         print(edge_aliasing_line(aliasing))
 
