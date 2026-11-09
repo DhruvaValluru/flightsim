@@ -304,3 +304,69 @@ def test_cinematic_look_switch_maps_presets():
     from webapp import runs
     assert runs.LOOK_SWITCHES["cinematic"]["camera_motion"] == "auto"
     assert "camera_motion" not in runs.LOOK_SWITCHES["beauty"]
+
+
+# -- skeptic review: stereo, verifier, CLI clock, validate ------------------
+
+def test_stereo_right_camera_dense_track_carries_the_baseline():
+    """A moving left camera's right twin must ship a dense track offset by
+    the baseline too, or the engine flies it at the left centre while its
+    labels (the sparse arrays) sit a baseline away."""
+    from core.capture.stereo import right_track
+
+    left = solve_pose_track(make_columns(5.0), camera("chase", {"profile": "handheld",
+                                                                "seed": 1, "intensity": 1.0}),
+                            FRAME, render_clock=(30, 1))
+    right = right_track(left, 0.5, "cam0_right")
+    assert right.dense is not None and right.dense.camera_id == "cam0_right"
+    dense_index = {t: j for j, t in enumerate(right.dense.t)}
+    for i, t in enumerate(right.t):
+        j = dense_index[t]
+        for name in ("north_m", "east_m", "alt_m"):
+            assert getattr(right.dense, name)[j] == getattr(right, name)[i]
+    gap = math.dist((left.dense.north_m[9], left.dense.east_m[9], left.dense.alt_m[9]),
+                    (right.dense.north_m[9], right.dense.east_m[9], right.dense.alt_m[9]))
+    assert abs(gap - 0.5) < 1e-9
+
+
+def test_verifier_finds_the_card_row_by_time_on_a_dense_track():
+    from core.capture.verify import _card_pose_row
+
+    track = solve_pose_track(make_columns(5.0), camera("chase", {"profile": "camera_ship"}),
+                             FRAME, render_clock=(30, 1))
+    from core.capture.schedule import solve_schedule
+    block = track.card_block(camera("chase", {"profile": "camera_ship"}),
+                             solve_schedule(make_columns(5.0), camera("chase"), FRAME), FRAME)
+    poses = block["poses"]
+    assert len(poses["t_s"]) > len(track.t)
+    for sample in (0, 1, 7, len(track.t) - 1):
+        row = _card_pose_row(poses, sample, track.t[sample])
+        assert poses["t_s"][row] == track.t[sample]
+        assert poses["north_m"][row] == track.north_m[sample]
+        assert poses["yaw_deg"][row] == track.yaw_deg[sample]
+    # A telemetry-clock track keeps row == sample; an unmatched time falls
+    # back to the by-index row so a corrupted track is still compared.
+    plain = {"t_s": [0.0, 0.1, 0.2]}
+    assert _card_pose_row(plain, 1, 0.1) == 1
+    assert _card_pose_row(plain, 1, 0.15) == 1
+    assert _card_pose_row(plain, 5, 0.5) is None
+
+
+def test_cli_render_clock_is_default_fps_and_accumulate():
+    from types import SimpleNamespace
+
+    from core.render.flags import DEFAULT_FPS
+    from flightsim.capture import _render_clock
+
+    assert _render_clock(SimpleNamespace(accumulate=None)) == (DEFAULT_FPS, 1)
+    assert _render_clock(SimpleNamespace(accumulate=8)) == (DEFAULT_FPS, 8)
+
+
+def test_a_bad_motion_block_refuses_at_validate_time_by_name():
+    from core.capture.validate import motion_violations
+
+    assert motion_violations(camera()) == []
+    assert motion_violations(camera(motion={"profile": "handheld", "seed": 2})) == []
+    bad = motion_violations(camera(motion={"profile": "steadicam"}))
+    assert [v.constraint for v in bad] == ["camera.motion"]
+    assert motion_violations(camera(motion={"profile": "handheld", "intensity": 9}))

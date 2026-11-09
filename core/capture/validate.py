@@ -387,6 +387,22 @@ def moves_violations(camera, index: int = 0) -> List[Violation]:
     return out
 
 
+def motion_violations(camera, index: int = 0) -> List[Violation]:
+    """camera-motion-layer: a stated ``motion`` block the layer cannot
+    apply refuses here, by name (camera.motion), before any solve."""
+    motion = getattr(camera, "motion", None)
+    if motion is None:
+        return []
+    from .camera_motion import CameraMotionError, normalise_motion
+
+    try:
+        normalise_motion(motion)
+    except CameraMotionError as exc:
+        who = f"camera[{index}] {camera.camera_id.value!r}"
+        return [Violation("camera.motion", f"{who}: {exc}")]
+    return []
+
+
 def validate_cameras(spec) -> List[Violation]:
     """Every scene-free camera check, for the core validator."""
     out: List[Violation] = []
@@ -398,6 +414,7 @@ def validate_cameras(spec) -> List[Violation]:
         out.extend(exposure_violations(camera, index))
         out.extend(schedule_violations(camera, index))
         out.extend(moves_violations(camera, index))
+        out.extend(motion_violations(camera, index))
         # S2: the stereo rig (sensing.stereo) and the passes (sensing.pass).
         from .passes import pass_violations
         from .stereo import stereo_violations
