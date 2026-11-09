@@ -67,6 +67,36 @@ def test_every_effect_name_written_is_one_the_verifier_knows():
     assert len(names) == len(set(names))
 
 
+def test_the_rain_blendables_are_read_back_off_the_beauty_capture():
+    # Both sample the scene at a shifted UV (M_LensDrops mirrored in a
+    # cell, M_WindshieldRain through a drop's refraction): found by their
+    # base material in the beauty's WeightedBlendables, bounded, not measured.
+    assert "Post.WeightedBlendables.Array" in CONTRACT
+    for material, effect in (("M_LensDrops", "lens_drops"), ("M_WindshieldRain", "windshield_rain")):
+        assert f'FName(TEXT("{material}"))' in CONTRACT, material
+        assert f'RenderPixelEffect(TEXT("{effect}")' in CONTRACT, effect
+    assert "Contract.Height = Height;" in COMMANDLET
+    look = (PRIVATE / "FlightSimWeatherLook.cpp").read_text(encoding="utf-8")
+    weather = (PRIVATE / "FlightSimWeather.cpp").read_text(encoding="utf-8")
+    assert "/Game/FlightSim/M_LensDrops.M_LensDrops" in look
+    assert "WeightedBlendables.Array.Add(FWeightedBlendable(1.0f, LensDropsInstance))" in look
+    assert "/Game/FlightSim/M_WindshieldRain.M_WindshieldRain" in weather
+    assert "WeightedBlendables.Array.Add(FWeightedBlendable(1.0f, WindshieldMaterial))" in weather
+
+
+@pytest.mark.parametrize("effect", ["lens_drops", "windshield_rain"])
+def test_a_beauty_with_rain_on_the_glass_is_not_label_aligned(bundle, effect):
+    shaped = _commandlet_shaped(False, [], {"policy": "none_in_frame"})
+    for entry in shaped["pixel_moving_effects"]:
+        if entry["name"] == effect:
+            entry.update(on=True, max_displacement_px=64.0,
+                         displacement_basis="bound: by construction; not measured")
+    record, alignment = _grade(bundle, shaped)
+    assert record.status == PASS, record.detail
+    assert alignment.status == FAIL and alignment.failure == FAIL_LOOK_NOT_ALIGNED
+    assert effect in alignment.detail
+
+
 def test_an_effect_entry_has_the_fields_the_verifier_reads():
     entry = _function(COMMANDLET, "TSharedPtr<FJsonObject> RenderPixelEffect(")
     for key in ("name", "on", "transform", "max_displacement_px", "displacement_basis"):

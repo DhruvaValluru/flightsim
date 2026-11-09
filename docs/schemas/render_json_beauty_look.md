@@ -19,8 +19,12 @@ render, and none on `-quality=measure`:
 
 The commandlet writes one `pixel_moving_effects` entry for each of
 `motion_blur`, `depth_of_field`, `heat_haze`, `path_tracer_filter`,
-`chromatic_aberration` and `lens_distortion`, with `on` measured off the
-capture (`core/capture/beauty_look.py COMMANDLET_EFFECTS`). None carries a
+`chromatic_aberration`, `lens_distortion`, `lens_drops` and
+`windshield_rain`, with `on` measured off the capture
+(`core/capture/beauty_look.py COMMANDLET_EFFECTS`). The last two are the
+rain blendables (`M_LensDrops`, `M_WindshieldRain`) found by base
+material in the beauty's `WeightedBlendables`; both refract the scene,
+and their `max_displacement_px` is a bound by construction. None carries a
 transform or a measured displacement yet, so a beauty render with any of
 them on is graded beauty-not-label-aligned until
 `experiments/look_label_check.py` measures it. That is the rule working:

@@ -75,9 +75,14 @@ PIXEL_MOVING_KEYS: Dict[str, str] = {
 #: RenderWriteLookContract), on or off. Depth of field and the path
 #: tracer's pixel filter spread edges rather than shift them, but the class
 #: and depth labels of a defocused or filtered edge still disagree with the
-#: beauty, so they are listed and graded like the rest.
+#: beauty, so they are listed and graded like the rest. ``lens_drops``
+#: (M_LensDrops, the rain look) and ``windshield_rain`` (M_WindshieldRain,
+#: the storm weather's glass on a cockpit camera) are post-process
+#: blendables that sample the scene at a refracted UV; the commandlet
+#: finds them in the beauty capture's WeightedBlendables and states a
+#: bound by construction, not a measurement.
 COMMANDLET_EFFECTS = ("motion_blur", "depth_of_field", "heat_haze", "path_tracer_filter",
-                      "chromatic_aberration", "lens_distortion")
+                      "chromatic_aberration", "lens_distortion", "lens_drops", "windshield_rain")
 
 #: Every effect name the verifier knows (look keys and the commandlet's).
 EFFECT_NAMES = tuple(sorted(set(PIXEL_MOVING_KEYS.values()) | set(COMMANDLET_EFFECTS)))

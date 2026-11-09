@@ -27,6 +27,7 @@
 #include "Engine/Engine.h"
 #include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ColorManagement/ColorSpace.h"
@@ -1353,6 +1354,7 @@ namespace
 		double FramesPerSecond = 0.0;
 		float TsrHistorySamples = 0.0f;
 		float TsrHistoryScreenPercentage = 0.0f;
+		int32 Height = 0;
 		const TSharedPtr<FJsonObject>* AircraftLook = nullptr;   // render.json aircraft_look
 		const TArray<AActor*>* SceneBeautyOnly = nullptr;         // VisualScene.BeautyOnlyActors
 		const TArray<AActor*>* WeatherBeautyOnly = nullptr;       // Weather.BeautyOnlyActors
@@ -1427,6 +1429,54 @@ namespace
 		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("chromatic_aberration"), bFringe, -1.0,
 			TEXT("not measured"),
 			TEXT("beauty capture: SceneColorFringe show flag and SceneFringeIntensity"))));
+		// The rain blendables on the beauty capture, read back off its
+		// WeightedBlendables by base material: M_LensDrops (the rain look's
+		// lens drops, ApplyLensDropsToBeauty) and M_WindshieldRain (the storm
+		// weather's glass, ApplyWindshield). Both sample the scene at a
+		// shifted UV, so both move pixels the labels do not see.
+		UMaterialInstanceDynamic* LensDrops = nullptr;
+		UMaterialInstanceDynamic* Windshield = nullptr;
+		for (const FWeightedBlendable& Blendable : Post.WeightedBlendables.Array)
+		{
+			UMaterialInstanceDynamic* Instance = Cast<UMaterialInstanceDynamic>(Blendable.Object.Get());
+			UMaterial* Base = Instance != nullptr ? Instance->GetBaseMaterial() : nullptr;
+			if (Blendable.Weight <= 0.0f || Base == nullptr)
+			{
+				continue;
+			}
+			if (Base->GetFName() == FName(TEXT("M_LensDrops")))
+			{
+				LensDrops = Instance;
+			}
+			else if (Base->GetFName() == FName(TEXT("M_WindshieldRain")))
+			{
+				Windshield = Instance;
+			}
+		}
+		// M_LensDrops (scripts/ue_create_materials.py create_lens_drops) samples
+		// uv - 2 (within - 0.5) / 18 * 0.6: at most 0.6 / 18 of the viewport
+		// on each axis.
+		const double LensDropsBoundPx = 0.6 / 18.0 * FMath::Sqrt(
+			double(In.Width) * In.Width + double(In.Height) * In.Height);
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("lens_drops"), LensDrops != nullptr,
+			LensDropsBoundPx,
+			TEXT("bound: M_LensDrops samples the scene mirrored within an 1/18-screen cell, at most 0.6/18 ")
+			TEXT("of the viewport per axis, by construction; not measured"),
+			TEXT("beauty capture: M_LensDrops in WeightedBlendables (rain look, a camera with no weather rain)"))));
+		// M_WindshieldRain (assets/shaders/weather/windshield.hlsl): the offset
+		// is normal * radius * 2 with |normal| <= 0.5 and radius <= 0.4 cells
+		// of the height, so at most 0.4 / cells of the height in pixels.
+		double WindshieldBoundPx = -1.0;
+		if (Windshield != nullptr)
+		{
+			const double Cells = FMath::Max(1.0, double(Windshield->K2_GetVectorParameterValue(TEXT("Glass")).A));
+			WindshieldBoundPx = 0.4 / Cells * In.Height;
+		}
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("windshield_rain"), Windshield != nullptr,
+			WindshieldBoundPx,
+			TEXT("bound: windshield.hlsl refracts by at most 0.4 / cells of the height (Glass.w), by ")
+			TEXT("construction; not measured"),
+			TEXT("beauty capture: M_WindshieldRain in WeightedBlendables (storm weather, cockpit/shoulder camera)"))));
 		// No lane applies a lens distortion (no LUT, no lens component): stated off.
 		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("lens_distortion"), false, -1.0,
 			TEXT("not applied by any lane"), TEXT("none (look-dev pixel_effects.lens_distortion: not implemented)"))));
@@ -7685,6 +7735,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		FRenderLookContractInputs Contract;
 		Contract.Capture = Capture;
 		Contract.Width = Width;
+		Contract.Height = Height;
 		Contract.bPathTrace = bPathTrace;
 		Contract.CapturesPerFrame = BeautySubFrames;
 		Contract.PathTraceSpp = PathTraceSpp;
