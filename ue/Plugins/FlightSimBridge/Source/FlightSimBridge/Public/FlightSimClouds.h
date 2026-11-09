@@ -137,6 +137,8 @@ private:
 	TArray<FString> Overridden;
 
 	TArray<FCloudLayerState> CloudLayers;
+	// Drawn clouds the per-frame occlusion row does not model (ApplyClouds).
+	int32 UnmodelledClouds = 0;
 	double DriftMps = 0.0;
 	double DriftFromDeg = 0.0;
 

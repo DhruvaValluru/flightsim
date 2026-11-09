@@ -794,7 +794,8 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 
 	// The sun: shadows on the atmosphere and the clouds, per-pixel
 	// transmittance, volumetric shadow. The cloud SHADOW switch is the
-	// scene's (Gate 6's cloud bracket turns it off): never touched here.
+	// scene's (Gate 6's cloud bracket turns it off): never touched here (only
+	// the stated -beauty-clouds=fair layer turns it on, recorded in clouds).
 	UDirectionalLightComponent* SunLight = Scene.Sun != nullptr
 		? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
 	if (SunLight != nullptr)
@@ -824,8 +825,23 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		TEXT("volumetric clouds write no depth or stencil: the mask, class and depth never see them. Clouds "
 		     "stay where the card puts them; each frame records the camera-to-aircraft path through every "
 		     "layer, its estimated transmittance and cloud_occludes_aircraft (frames[]); the mask is not edited"));
+	// The clouds the per-frame occlusion row cannot model (their shape is not
+	// this table's): with any, frames[].cloud_occlusion_complete is false and a
+	// consumer must not read cloud_occludes_aircraft = false as "clear".
+	UnmodelledClouds = 0;
+	auto CountWorldClouds = [World]()
+	{
+		int32 Count = 0;
+		for (TObjectIterator<UVolumetricCloudComponent> It; It; ++It)
+		{
+			Count += (*It != nullptr && It->GetWorld() == World) ? 1 : 0;
+		}
+		return Count;
+	};
 	if (Mode == TEXT("engine"))
 	{
+		UnmodelledClouds = CountWorldClouds();
+		Out->SetNumberField(TEXT("unmodelled_clouds"), UnmodelledClouds);
 		Out->SetStringField(TEXT("drawn"), TEXT("as the scene built them (-beauty-clouds=engine)"));
 		Record->SetObjectField(TEXT("clouds"), Out);
 		return;
@@ -833,6 +849,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, WorldCloudMaterialPath);
 	if (Base == nullptr)
 	{
+		UnmodelledClouds = CountWorldClouds();
+		Out->SetNumberField(TEXT("unmodelled_clouds"), UnmodelledClouds);
 		Out->SetStringField(TEXT("drawn"),
 			TEXT("as the scene built them: M_FlightSimCloudLayers did not load (run scripts/ue_create_materials.py)"));
 		Record->SetObjectField(TEXT("clouds"), Out);
@@ -858,6 +876,9 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		}
 	}
 	Out->SetArrayField(TEXT("kept_other_material"), Kept);
+	// The storm's M_StormCell and any other material's cloud: kept as drawn, and
+	// outside the occlusion row's slab model.
+	UnmodelledClouds = Kept.Num();
 	bool bFair = false;
 	if (Components.Num() == 0 && Mode == TEXT("fair") && CardCover < 0.0 && !Weather.DrawsCell())
 	{
@@ -877,8 +898,12 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
 		if (SunLight != nullptr)
 		{
+			// The one place the beauty touches the sun's cloud SHADOW switch:
+			// only the stated -beauty-clouds=fair stylisation, recorded.
+			Out->SetBoolField(TEXT("fair_layer_sun_cast_cloud_shadows_before"), SunLight->bCastCloudShadows != 0);
 			SunLight->bCastCloudShadows = true;
 			SunLight->MarkRenderStateDirty();
+			Out->SetBoolField(TEXT("fair_layer_sun_cast_cloud_shadows"), true);
 		}
 	}
 	Out->SetBoolField(TEXT("fair_layer_added"), bFair);
@@ -942,6 +967,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Layers.Add(MakeShared<FJsonValueObject>(Layer));
 	}
 	Out->SetArrayField(TEXT("layers"), Layers);
+	Out->SetNumberField(TEXT("unmodelled_clouds"), UnmodelledClouds);
 	Out->SetNumberField(TEXT("view_sample_count_scale"), WorldCloudViewSampleScale);
 	Out->SetNumberField(TEXT("shadow_view_sample_count_scale"), WorldCloudShadowSampleScale);
 	Out->SetNumberField(TEXT("shadow_tracing_distance_km"), WorldCloudShadowTracingKm);
@@ -1077,6 +1103,10 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 	}
 	Frame->SetArrayField(TEXT("cloud_path"), Occlusions);
 	Frame->SetBoolField(TEXT("cloud_occludes_aircraft"), bOccluded);
+	// False when a cloud is drawn that the slab model above does not cover (the
+	// storm cell, another material's cloud, -beauty-clouds=engine, or the beauty
+	// cloud material missing): cloud_occludes_aircraft is then only a lower bound.
+	Frame->SetBoolField(TEXT("cloud_occlusion_complete"), UnmodelledClouds == 0);
 
 	if (Scatter.IsBuilt())
 	{

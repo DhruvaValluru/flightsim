@@ -25,7 +25,9 @@ render Gate 6 passed on) never reaches it. It records everything in
   perspective scale, planet ground albedo (the horizon fill beyond the tiles),
   volumetric fog, sun shadows on atmosphere and clouds, per-pixel
   transmittance. `-NoAerialPerspective` is respected (a hidden atmosphere is
-  left alone); `bCastCloudShadows` is never touched (Gate 6's cloud bracket).
+  left alone); `bCastCloudShadows` is never touched (Gate 6's cloud bracket),
+  except by the stated `-beauty-clouds=fair` layer, which turns it on and records
+  it (`clouds.fair_layer_sun_cast_cloud_shadows`, with the value before).
 * Clouds: every cloud on the engine's `m_SimpleVolumetricCloud` material
   (the look's layer, the physical sky's) is redrawn with
   `M_FlightSimCloudLayers` (seeded layered value noise, four shapes). The
@@ -53,6 +55,11 @@ render Gate 6 passed on) never reaches it. It records everything in
   estimated transmittance and `cloud_occludes_aircraft` (transmittance under
   `occlusion_flag_transmittance`, 0.5). A consumer drops or down-weights those
   frames. The mask is not edited. The fair layer is a beauty-only actor.
+  Only the clouds redrawn with `M_FlightSimCloudLayers` are modelled: with the
+  storm's `M_StormCell`, another material's cloud, `-beauty-clouds=engine` or the
+  material missing, `clouds.unmodelled_clouds` > 0 and every frame carries
+  `cloud_occlusion_complete: false` (`cloud_occludes_aircraft` is then a lower
+  bound, never a clear).
 * **Scatter and labels.** The instances are in the beauty frame, so they are
   NOT beauty-only: they are in the same frame's mask, class and depth (a tree in
   front of the aircraft cuts its mask as it cuts its pixels), labelled
