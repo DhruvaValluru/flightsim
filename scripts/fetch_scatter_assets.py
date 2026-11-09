@@ -4,14 +4,14 @@
 The beauty render's ground scatter (FlightSimGroundDetail.cpp, -ground-scatter=,
 core/scene/world_beauty.py) draws a species only when its asset is PINNED: a
 source URL, a redistributable non-NC licence, and a sha256 for every file.
-assets/scatter/polyhaven_pins.json carries the pins. On 2026-11-09 (a Mac that
-cannot render) only each model's small root .gltf was downloaded: its md5
-matched Poly Haven's API and its sha256 is recorded; the five small assets
-(shrub_02, rock_moss_set_01, grass_medium_01, namaqualand_boulder_02,
-wild_rooibos_bush, ~15 MB) were then fetched in full and pinned with
---write-pins. The big trees' meshes and textures (hundreds of MB) were NOT
-downloaded: their sha256 is null, so those species are drawn as nothing until
-this script runs:
+assets/scatter/polyhaven_pins.json carries the pins. The 2026-11-09 pin audit
+re-checked every pin against Poly Haven's live API (files_hash, url, size,
+md5) and downloaded every file under 50 MB (67.7 MB): seven assets are now
+complete, the earlier digests reproduced. Three tree meshes were NOT
+downloaded -- fir_tree_01.bin (478.5 MB), jacaranda_tree.bin (208.3 MB),
+pine_tree_01.bin (948.8 MB) -- their sha256 is null with a ``sha256_status``
+saying UNVERIFIED and why, so those species are drawn as nothing until this
+script runs:
 
     python scripts/fetch_scatter_assets.py --dry-run            # sizes, nothing fetched
     python scripts/fetch_scatter_assets.py --only shrub_02,rock_moss_set_01
@@ -98,6 +98,7 @@ def write_pins(pins: Dict, asset_id: str, digests: Dict[str, str]) -> None:
     pin = pins["assets"][asset_id]
     for relative, file_pin in files_of(pin):
         file_pin["sha256"] = digests[relative]
+        file_pin.pop("sha256_status", None)   # an UNVERIFIED note no longer applies
 
 
 def main(argv: Optional[Sequence[str]] = None, fetch: Fetch = http_fetch,
