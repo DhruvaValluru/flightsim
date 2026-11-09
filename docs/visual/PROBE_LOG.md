@@ -751,3 +751,83 @@ $env:FLIGHTSIM_RENDER_QUALITY = "beauty";  .\.venv\Scripts\python.exe -m uvicorn
 Record each run's offsets here, and in ruflo under
 `visual-overhaul/verifier-tooling/probe-<date>`, before changing any
 constant above.
+
+## camera-motion-layer
+
+Lane: `core/capture/camera_motion.py`, `tests/test_camera_motion.py`; hooks
+in `core/capture/poses.py` (`solve_pose_track` return), `core/scenario/camera.py`
+(`CameraSpec.motion`), `webapp/capture.py` (render clock), `webapp/runs.py`
+(`LOOK_SWITCHES['cinematic']['camera_motion'] = 'auto'` and one
+`apply_look_motion` call before the capture solve), `core/capture/manifest.py`
+(one line: the capture manifest's camera block carries `camera_motion`).
+Session 2026-11-09, code only, Mac; **nothing rendered**. No C++ changed and no
+engine symbol is used, so `scripts/check_bridge_api.sh` gains no block.
+
+### Decisions
+
+1. **Labels are safe by construction.** The motion perturbs the solved pose
+   track before it is recorded or shipped; the beauty pass and every label
+   capture consume one pose through `ApplyPoseAtTime`. Nothing is added to
+   `pixel_moving_effects`.
+2. **Profile `none` is the default and returns the input track object** (no
+   resample, no subclass), so every existing digest and card is byte-identical
+   (tested for chase, ground and cockpit, with and without a render clock).
+3. **Two clocks, one pose.** The schedule and the manifest index the track by
+   telemetry sample (`schedule.indices` -> `track.sample(i)`), so a motion
+   track (`MotionPoseTrack`) keeps its own arrays on the telemetry clock and
+   carries the render-clock track in `.dense`; `card_block` ships the dense
+   arrays as `poses`. The dense clock is `t0 + k/(fps x accumulate)` UNION the
+   telemetry times, and the telemetry-clock arrays are the dense samples at
+   those exact times, so the manifest's label pose equals the pose the engine
+   applies at each capture time (`label_pose: shutter-centre sample`).
+4. **Web render clock = (30 fps, accumulate 1)**: the web passes no
+   `-accumulate` (it is dev-only in `core/config_surface.py`).
+5. **Noise is a sum of sinusoids evaluated at continuous t** with frequency and
+   phase from `sha256(seed|camera_id|axis|k)`; amplitudes normalised to the
+   profile's RMS. Rate independence measured at 1e-12 (30 vs 240 Hz).
+6. **Roll shake clamp +/- 0.15 deg**, recorded as `roll_bound_deg` (and the
+   count of clamped samples). `horizon_roll_tolerance_deg(record)` is the
+   tolerance a horizon check may take: exact 0 for none, the bound otherwise.
+   `tests/test_gate6_visual.py`'s roll is the AIRCRAFT's frame-record roll, not
+   the camera's, so it needed no change; `PresetKeepsHorizonLevel()` (C++) is
+   unchanged and still reports the preset.
+7. **Aim lag** (camera_ship zeta 0.7 fn 1.5 Hz; tripod_fluid_head zeta 0.8 fn
+   1.0 Hz) is an exact first-order-hold second-order step on yaw (unwrapped)
+   and pitch, on the dense clock. Overshoot matches exp(-pi zeta/sqrt(1-zeta^2))
+   within 1%. Measured on a 100 m/s chase with a 10 deg weave: 0.25 deg
+   worst yaw lag.
+8. **camera_ship turbulence scale** comes from the camera's own speed (the
+   Catmull-Rom derivative of the solved track), not an airspeed column: the
+   hook signature carries only the track, and the camera ship is the airframe
+   that feels the turbulence. Wind is not included (recorded in the block).
+9. **Cinematic look switch**: chase/wingman -> camera_ship 1.0, cockpit ->
+   handheld 0.5, ground/tower/explicit -> tripod_fluid_head 1.0 (a deviation
+   from "camera_ship for every external preset": a tower camera is not on a
+   helicopter). A camera that states a motion block is never moved. The block
+   rides in the camera's spec (`motion`, with `source`), so a cinematic run's
+   spec digest records it.
+10. **Card size measured**: 30 s on the densest clock the commandlet accepts
+    (30 fps x 64) is 57,601 samples, 8,241,919 bytes of pose block. The
+    commandlet reads the card with `FFileHelper::LoadFileToString` +
+    `FJsonSerializer` (no cap below FString's int32), and `SetPoseTrack` takes
+    any length >= 2. `ApplyPoseAtTime` searches linearly from index 1 per call,
+    so a very dense track costs O(n) per sub-frame (not changed here).
+
+### Uncalibrated
+
+Every profile RMS (handheld 0.035/0.03/0.02 deg; camera_ship 0.03/0.04/0.02;
+tripod 0.004/0.003/0.001), translation RMS (4 mm, 20 mm, 0), band edges and
+counts, the blade-pass default 19.5 Hz and the 0.5 % line width, the speed
+reference 60 m/s and clamp [0.25, 2], both lag zeta/fn pairs, and the
+cinematic switch's intensity mapping. None was fit to footage.
+
+### Open
+
+* render.json itself (written by the commandlet) does not yet copy
+  `cameras[N].camera_motion`; the record lives in the card's camera block and
+  in the Python capture manifest's camera block. A C++ copy is a 3-line follow
+  up for the commandlet lane.
+* `manifest.camera_angular_rate` (rolling shutter) differentiates the
+  telemetry-clock track, so it under-reads shake above 5 Hz.
+* `track_violations` checks the telemetry-clock samples; the shake between
+  them is millimetres.

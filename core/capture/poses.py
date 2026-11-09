@@ -452,7 +452,8 @@ def lag_step(y_prev: float, x_prev: float, x_now: float, dt: float,
 
 def solve_pose_track(columns: Dict[str, Sequence[float]],
                      camera: CameraSpec,
-                     frame: SceneFrame) -> PoseTrack:
+                     frame: SceneFrame,
+                     render_clock: Optional[Tuple[float, int]] = None) -> PoseTrack:
     """Solve one camera's pose track over the recorded telemetry.
 
     Pure: same inputs, bit-identical output (the suite pins this by
@@ -639,7 +640,7 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                              float(camera.focal_length_mm.value))
              for ti in t]
 
-    return PoseTrack(
+    track = PoseTrack(
         camera_id=str(camera.camera_id.value),
         preset=preset,
         # Mirrors PresetKeepsHorizonLevel(): only the cockpit preset
@@ -657,6 +658,11 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
         near_m=float(camera.near_m.value),
         far_m=float(camera.far_m.value),
     )
+    # camera-motion-layer hook: the spec's motion block (absent = none =
+    # this very track, digest unchanged) and, given a render clock
+    # (fps, accumulate), the dense render-clock track the card ships.
+    from . import camera_motion
+    return camera_motion.apply_motion(track, getattr(camera, "motion", None), render_clock)[0]
 
 
 def _quat_yaw_pitch(q) -> Tuple[float, float]:
