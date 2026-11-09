@@ -332,3 +332,20 @@ def test_the_look_manifest_carries_the_wet_group(tmp_path):
         assert entry["value"] == float(wet.WET_DEFAULTS[key])
         assert entry["calibration"] == look.UNCALIBRATED == wet.UNCALIBRATED
         assert entry["probe"]
+
+
+def test_every_wet_default_reaches_a_master_or_the_cpp():
+    # No dead UNCALIBRATED constant: each WET_DEFAULTS key is a master scalar's
+    # default for a class that takes the layer, a scratch / centre default, or
+    # a constant the C++ integration reads.
+    # the classes whose masters call add_wet_layer (pinned by
+    # test_the_masters_builder_calls_the_layer_once_per_master; rubber does not)
+    layered = ("paint", "bare_metal", "glass")
+    assert set(wet.CLASS_KEYS) == set(layered)
+    used = {template.format(cls=wet.CLASS_KEYS[cls]) for template in wet.WET_MASTER_SCALARS.values()
+            for cls in layered}
+    used |= set(wet.SCRATCH_MASTER_SCALARS.values())
+    used |= {"CanopyCentreXCm", "CanopyCentreYCm", "CanopyCentreZCm"}
+    cpp = WET_CPP.read_text(encoding="utf-8")
+    used |= {key for key in ("WetSaturationMmh", "WetDryTauS") if f'TEXT("{key}")' in cpp}
+    assert set(wet.WET_DEFAULTS) - used == set()

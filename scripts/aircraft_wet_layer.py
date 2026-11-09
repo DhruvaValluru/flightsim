@@ -75,11 +75,11 @@ WET_DEFAULTS = {
     "WetSaturationMmh": 4.0,
     # dry-off time constant on the FDM's time (wetting is immediate)
     "WetDryTauS": 90.0,
-    # how far the film darkens each class (wet x porosity is the lerp to albedo^2)
+    # how far the film darkens each class (wet x porosity is the lerp to albedo^2).
+    # No rubber entry: M_AircraftRubber takes no wet layer (tests pin that).
     "PorosityPaint": 0.3,
     "PorosityBareMetal": 0.12,
     "PorosityGlass": 0.0,
-    "PorosityRubber": 0.5,
     # round beads in the gravity regime (glass sheds into beads, waxed paint less)
     "BeadAmountPaint": 0.3,
     "BeadAmountBareMetal": 0.0,
@@ -142,7 +142,7 @@ WET_SHADER_INPUTS = {
 WET_COAT_OUTPUT = "WetCoat"
 
 #: The classes that take the wet layer, and the WET_DEFAULTS suffix of each.
-CLASS_KEYS = {"paint": "Paint", "bare_metal": "BareMetal", "glass": "Glass", "rubber": "Rubber"}
+CLASS_KEYS = {"paint": "Paint", "bare_metal": "BareMetal", "glass": "Glass"}
 #: The classes whose master has a clear coat (the wet coat is wired only there).
 COATED_CLASSES = ("paint",)
 
@@ -163,7 +163,7 @@ def class_default(template, cls):
         raise ValueError(f"slot class {cls!r} is not one of {tuple(CLASS_KEYS)}")
     key = template.format(cls=CLASS_KEYS[cls])
     if key not in WET_DEFAULTS:
-        # bare-metal / rubber beads: none unless stated
+        # bare-metal beads: none unless stated
         return 0.0
     return float(WET_DEFAULTS[key])
 

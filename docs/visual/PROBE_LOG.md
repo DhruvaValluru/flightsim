@@ -815,7 +815,7 @@ Tests: `tests/test_aircraft_wet.py`.
 manifest as group `wet`, and the HLSL literals `GravityRunCmS` 3.0,
 `BeadRoughness` 0.3, `RingCm` 0.8): StreakSpeedPerKt 0.5, BeadingMaxKts 60,
 WetRoughness 0.08, WetCoatRoughness 0.03, WetSaturationMmh 4, WetDryTauS 90,
-Porosity paint/bare metal/glass/rubber 0.3/0.12/0/0.5, BeadAmount
+Porosity paint/bare metal/glass 0.3/0.12/0 (rubber takes no wet layer), BeadAmount
 paint/bare metal/glass 0.3/0/1, StreakPitchCm 2.5, StreakLengthCm 30,
 RivuletFullMmh 10, ScratchDensity 0.6, ScratchAnisotropy 0.5,
 CanopyCentre (0, 0, 0).
@@ -823,7 +823,8 @@ CanopyCentre (0, 0, 0).
 **Probes, on the render machine, in order.**
 1. `scripts/check_bridge_api.sh`: the `wet:` lines all ok.
 2. Build, then `scripts/ue_create_materials.py` (expect `MATERIAL-REBUILT`
-   for the three class masters and no `MATERIAL-FAILED`), then
+   for every aircraft master, since `LOOK_GENERATION` 2 restamps them all,
+   and no `MATERIAL-FAILED`), then
    `ue_fix_aircraft_materials.py` for the look manifests' `wet` group.
 3. Storm-weather beauty chase at shot c range (default web render): read
    `aircraft_look.wet` (wetness, regime, mids > 0) and judge the paint
