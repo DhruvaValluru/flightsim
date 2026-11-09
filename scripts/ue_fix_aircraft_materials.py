@@ -18,7 +18,7 @@ SCRIPTS = os.path.dirname(os.path.abspath(_SCRIPT))
 REPO = os.path.dirname(SCRIPTS)
 sys.path.insert(0, SCRIPTS)
 
-from ue_aircraft_materials import fix_materials  # noqa: E402
+from ue_aircraft_materials import create_look_instances, fix_materials  # noqa: E402
 
 REPORT = os.path.join(REPO, "runs", "fix_aircraft_materials.txt")
 os.makedirs(os.path.dirname(REPORT), exist_ok=True)
@@ -49,6 +49,17 @@ for aircraft in sys.argv[1:] or ["B747"]:
         say(f"{aircraft}: PROBLEM {problem}")
     say(f"{aircraft}: {fixed} material(s) set, {len(problems)} problem(s)")
     failed = failed or bool(problems)
+    # Visual overhaul V7: refresh the beauty look instances and the look
+    # manifest (reported, never a failure of this script: measure renders
+    # do not use them).
+    try:
+        made, look_problems = create_look_instances(f"/Game/Aircraft/{aircraft}", mtl_dir,
+                                                    aircraft, say)
+        for problem in look_problems:
+            say(f"{aircraft}: LOOK-PROBLEM {problem}")
+        say(f"{aircraft}: {made} look instance(s)")
+    except Exception as exc:
+        say(f"{aircraft}: LOOK-PROBLEM look pass failed: {exc!r}")
 
 if failed:
     raise SystemExit(1)
