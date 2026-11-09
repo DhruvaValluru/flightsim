@@ -2,8 +2,24 @@
   "schema": "flightsim-aircraft-look/1",
   "name": "J11",
   "default_class": "paint",
-  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. The J-11's MTL names are not measured on this machine (its source is fetched at import, not here), so it has no slot_rules: glass and rubber come from the automatic rules. Matte PLAAF grey: low clear coat. The landing lamp sits on the nose gear: assets/aircraft_config/J11.json keypoints_note measures the mesh's nose gear at x 7.5..8.2 m aft of the nose (7.85 m used); the 1.5 m drop below the nose tip is an estimate. Nozzles: the FDM's two AL-31F thruster lines (J11.xml, y +-20 in), x snapped to the mesh; the afterburner follows the engine file's milthrust/maxthrust.",
-  "slot_rules": [],
+  "note": "Beauty-only look (scripts/aircraft_look.py). Every class parameter not stated here is the master default; every look number here is UNCALIBRATED: set by probe render on the render machine. Matte PLAAF grey: low clear coat. j11-package lane (2026-11-09): the slot names are now measured on the converted J-11A (25 MTL slots: assets_pipeline/convert.py over the pinned package, docs/visual/J11_PACKAGE.md); the cockpit interior, seat and pilot slots are matte (the rubber master: Default Lit, no clear coat, no panel lines) with a roughness derived from the package's own .ac shininess (fg_material); the canopy and the pilot's visor are glass. Lamps and nozzles sit at the package's own model-XML positions (package_model_m), mapped to the actor frame the way the converter maps every vertex.",
+  "slot_rules": [
+    {
+      "match": "mat_Glass_Cockpit",
+      "class": "glass",
+      "source": "measured 2026-11-09 on the converted J-11A: the only triangles of this slot are Su-27.ac canopy.glass / object.001 (material mat3.002), which Models/J-11A.xml's glass <effect> (model-transparent) draws as the canopy; the MTL carries no d, so without this rule it would be painted"
+    },
+    {
+      "match": "mat_transp",
+      "class": "glass",
+      "source": "Models/Interior/pilot/pilot.xml: transp.png is the visor (lunettes) of the pilot figure, drawn transparent by the package"
+    },
+    {
+      "match": "mat_panel_front_tex_2048_bevel|mat_panel_wcs|mat_grey_blue_flood|mat_texture|mat_K_36DM|mat_fighter_pilot|rgb_191919|rgb_292c2d|rgb_2a2a2a|rgb_2c2b23|rgb_4784c0|rgb_557a3a|rgb_565656|rgb_ff0000|rgb_ffffff",
+      "class": "rubber",
+      "source": "measured 2026-11-09 from the converter's material_sources.json: every triangle of these slots comes from Models/Interior/panel.ac, seat2.ac or pilot/fighter_default.ac (instrument panel, K-36DM seat, pilot figure): fabric, cushions and matt cockpit paint, not clear-coated airframe skin"
+    }
+  ],
   "class_scalars": {
     "paint": {
       "Roughness": 0.58,
@@ -27,43 +43,75 @@
   "nozzles": [
     {
       "id": "engine0",
-      "anchor": "fdm_thruster",
+      "anchor": "package_model_m",
+      "package_model_m": [
+        19.227,
+        -1.277,
+        -0.196
+      ],
       "index": 0,
-      "snap_radius_m": 0.35,
       "radius_m": 0.5,
-      "afterburner": true
+      "afterburner": true,
+      "source": "Models/J-11A.xml places Models/Effects/nozzles/Nozzles.xml at (5.38, -0.32, -0.02) m and Nozzles.xml its left petal ring NozzleL.xml at (13.847, -0.957, -0.176) m: the ring centre (19.227, -1.277, -0.196) m. Measured on the converted mesh 2026-11-09: the hull's nozzle exit is at x 19.19 m aft, rim radius 0.45-0.58 m about this line. The FDM thruster line (J11.xml y -20 in) snapped to the tail sting (x 21.5 m, y -0.51 m), not a nozzle"
     },
     {
       "id": "engine1",
-      "anchor": "fdm_thruster",
+      "anchor": "package_model_m",
+      "package_model_m": [
+        19.227,
+        1.263,
+        -0.196
+      ],
       "index": 1,
-      "snap_radius_m": 0.35,
       "radius_m": 0.5,
-      "afterburner": true
+      "afterburner": true,
+      "source": "Models/J-11A.xml places the second Nozzles.xml at (5.38, 2.22, -0.02) m, its NozzleL.xml ring at (13.847, -0.957, -0.176) m: (19.227, 1.263, -0.196) m; the hull's right nozzle exit measured at x 19.19 m, rim 0.48-0.56 m"
     }
   ],
   "lights": [
     {
       "id": "nav_left",
       "kind": "nav_red",
-      "anchor": "mesh_extreme",
-      "axis": "-y",
-      "offset_m": [
-        0.0,
-        0.05,
-        0.0
-      ]
+      "anchor": "package_model_m",
+      "package_model_m": [
+        16.12,
+        -7.5,
+        0.32
+      ],
+      "source": "Models/Lights/LightPack.xml (included by Models/J-11A.xml at offset 0) RedLight at (16.12, -7.5, 0.32) m"
     },
     {
       "id": "nav_right",
       "kind": "nav_green",
-      "anchor": "mesh_extreme",
-      "axis": "+y",
-      "offset_m": [
-        0.0,
-        -0.05,
-        0.0
-      ]
+      "anchor": "package_model_m",
+      "package_model_m": [
+        16.12,
+        7.5,
+        0.32
+      ],
+      "source": "Models/Lights/LightPack.xml (included by Models/J-11A.xml at offset 0) GreenLight at (16.12, 7.5, 0.32) m"
+    },
+    {
+      "id": "beacon_left",
+      "kind": "beacon_red",
+      "anchor": "package_model_m",
+      "package_model_m": [
+        16.12,
+        -7.5,
+        0.32
+      ],
+      "source": "Models/Lights/LightPack.xml (included by Models/J-11A.xml at offset 0) BeaconRed at (16.12, -7.5, 0.32) m; the package's strobes are commented out, its beacons are the flashing lamps"
+    },
+    {
+      "id": "beacon_right",
+      "kind": "beacon_green",
+      "anchor": "package_model_m",
+      "package_model_m": [
+        16.12,
+        7.5,
+        0.32
+      ],
+      "source": "Models/Lights/LightPack.xml (included by Models/J-11A.xml at offset 0) BeaconGreen at (16.12, 7.5, 0.32) m"
     },
     {
       "id": "tail",
@@ -74,40 +122,41 @@
         0.05,
         0.0,
         0.0
-      ]
+      ],
+      "source": "NOT from the package (its WhiteLight is commented out): the aft-most hull vertex, the tail sting, as before"
     },
     {
-      "id": "strobe_left",
-      "kind": "strobe",
-      "anchor": "mesh_extreme",
-      "axis": "-y",
-      "offset_m": [
-        -0.15,
-        0.05,
-        0.0
-      ]
-    },
-    {
-      "id": "strobe_right",
-      "kind": "strobe",
-      "anchor": "mesh_extreme",
-      "axis": "+y",
-      "offset_m": [
-        -0.15,
-        -0.05,
-        0.0
-      ]
-    },
-    {
-      "id": "landing",
+      "id": "landing_left",
       "kind": "landing",
-      "anchor": "mesh_extreme",
-      "axis": "+x",
-      "offset_m": [
-        -7.85,
-        0.0,
-        -1.5
-      ]
+      "anchor": "package_model_m",
+      "package_model_m": [
+        7.65,
+        -0.13,
+        -0.48
+      ],
+      "source": "Models/Lights/LightPack.xml (included by Models/J-11A.xml at offset 0) LandingLight2 at (7.65, -0.13, -0.48) m pitch -6.25 heading 10 (the cone direction is the FX's own)"
+    },
+    {
+      "id": "landing_right",
+      "kind": "landing",
+      "anchor": "package_model_m",
+      "package_model_m": [
+        7.65,
+        0.13,
+        -0.48
+      ],
+      "source": "Models/Lights/LightPack.xml (included by Models/J-11A.xml at offset 0) LandingLight1 at (7.65, 0.13, -0.48) m pitch -6.25 heading -10"
     }
-  ]
+  ],
+  "fg_material": {
+    "parameters": [
+      "Roughness"
+    ],
+    "classes": [
+      "rubber"
+    ],
+    "roughness_min": 0.5,
+    "roughness_max": 0.95,
+    "source": "j11-package lane: the interior .ac materials carry varied Phong exponents (seat2.ac shi 0 / 5 / 10 / 12 / 20 / 64 / 88 / 128, panel.ac 64, pilot 64), so the roughness is the package's own; airframe paint is NOT derived (every Su-27.ac painted material is shi 128 spec 1, an authoring habit that would make matte PLAAF grey glossy, roughness 0.35); the floor 0.5 keeps Su-27.ac's black shi-128 rubber (rgb_000000) from reading as gloss. UNCALIBRATED as a look"
+  }
 }

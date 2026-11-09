@@ -151,6 +151,27 @@ def _write_model(tmp_path, vertices_actor_about_origin, origin):
         encoding="utf-8")
 
 
+def _measured_anchor_look():
+    """The J-11 look as it stood before the j11-package lane moved its lamps
+    and nozzles to the package's own positions: every measured anchor
+    (mesh_extreme, fdm_thruster) at once, so the mechanism stays pinned."""
+    config = dict(look.load_config("J11"))
+    side = lambda i, k, a, o: {"id": i, "kind": k, "anchor": "mesh_extreme",  # noqa: E731
+                               "axis": a, "offset_m": o}
+    config["lights"] = [
+        side("nav_left", "nav_red", "-y", [0.0, 0.05, 0.0]),
+        side("nav_right", "nav_green", "+y", [0.0, -0.05, 0.0]),
+        side("tail", "nav_white", "-x", [0.05, 0.0, 0.0]),
+        side("strobe_left", "strobe", "-y", [-0.15, 0.05, 0.0]),
+        side("strobe_right", "strobe", "+y", [-0.15, -0.05, 0.0]),
+        side("landing", "landing", "+x", [-7.85, 0.0, -1.5]),
+    ]
+    config["nozzles"] = [
+        {"id": f"engine{i}", "anchor": "fdm_thruster", "index": i, "snap_radius_m": 0.35,
+         "radius_m": 0.5, "afterburner": True} for i in (0, 1)]
+    return look.validate(config)
+
+
 def test_the_manifest_puts_lamps_on_measured_extremes_and_snaps_nozzles(tmp_path):
     origin = (-100.0, 0.0, 10.0)
     thruster = look.structural_to_actor_cm((802.25, -20.0, 0.0))     # J11.xml engine 0
@@ -164,7 +185,7 @@ def test_the_manifest_puts_lamps_on_measured_extremes_and_snaps_nozzles(tmp_path
         about((thruster[0] - 450.0, thruster[1], thruster[2])),  # beyond the window
     ]
     _write_model(tmp_path, verts, origin)
-    manifest = look.build_manifest("J11", look.load_config("J11"), str(tmp_path), str(J11_FDM))
+    manifest = look.build_manifest("J11", _measured_anchor_look(), str(tmp_path), str(J11_FDM))
     lamps = {row["id"]: row for row in manifest["lights"]}
     # offset_m: 5 cm inward on y; the strobes 15 cm aft too.
     assert lamps["nav_left"]["actor_cm"] == [-1500.0, -695.0, 20.0]
