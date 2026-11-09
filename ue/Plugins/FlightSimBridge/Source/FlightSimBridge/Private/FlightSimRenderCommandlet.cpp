@@ -2863,6 +2863,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SetBeautyCvar(TEXT("r.VolumetricCloud.HighQualityAerialPerspective"), 1.0f);
 		SetBeautyCvar(TEXT("r.VolumetricRenderTarget.Mode"),
 		              static_cast<float>(RenderBeautyVolumetricRenderTargetMode));
+		// sun-shafts-sky-occlusion: the beauty capture only (labels untouched).
+		Capture->ShowFlags.SetLightShafts(true);
+		Capture->ShowFlags.SetVolumetricFog(true);
 		FPostProcessSettings& Beauty = Capture->PostProcessSettings;
 		if (!bPathTrace)
 		{
@@ -6765,6 +6768,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		BeautyFlags->SetBoolField(TEXT("fog"), Capture->ShowFlags.Fog != 0);
 		BeautyFlags->SetBoolField(TEXT("atmosphere"), Capture->ShowFlags.Atmosphere != 0);
 		BeautyFlags->SetBoolField(TEXT("volumetric_fog"), Capture->ShowFlags.VolumetricFog != 0);
+		BeautyFlags->SetBoolField(TEXT("light_shafts"), Capture->ShowFlags.LightShafts != 0);
 		BeautyFlags->SetBoolField(TEXT("cloud"), Capture->ShowFlags.Cloud != 0);
 		BeautyFlags->SetBoolField(TEXT("depth_of_field"), Capture->ShowFlags.DepthOfField != 0);
 		BeautyFlags->SetBoolField(TEXT("lens_flares"), Capture->ShowFlags.LensFlares != 0);
@@ -7294,6 +7298,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	UE_LOG(LogFlightSimRender, Display, TEXT("wrote %d frames and %s"),
 	       Captured, *ManifestPath);
 
+	WorldBeauty.RestoreCvars();  // sun-shafts-sky-occlusion: its cvars back
 	Scenario.Teardown();
 	return 0;
 }

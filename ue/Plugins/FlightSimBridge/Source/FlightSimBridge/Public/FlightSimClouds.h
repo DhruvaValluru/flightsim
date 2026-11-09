@@ -67,6 +67,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "FlightSimGroundDetail.h"
+#include "FlightSimSunShafts.h"
 
 class AActor;
 class AGeoReferencingSystem;
@@ -101,6 +102,10 @@ public:
 	             int32 FrameIndex);
 
 	bool IsBuilt() const { return bBuilt; }
+
+	// sun-shafts-sky-occlusion: the cvars Build's sun shafts wrote, put back
+	// (the render commandlet's teardown).
+	void RestoreCvars();
 
 	// look_applied.world_beauty (the same object the scene's LookApplied holds).
 	TSharedPtr<FJsonObject> Record;
@@ -150,5 +155,8 @@ private:
 	const FFlightSimWeather* WeatherRef = nullptr;
 
 	FFlightSimGroundDetail Scatter;
+	// sun-shafts-sky-occlusion: light shafts, cloud shadow on the atmosphere,
+	// cloud sky AO, the still tier's fog grid (FlightSimSunShafts.h).
+	FFlightSimSunShafts SunShafts;
 	TArray<TSharedPtr<FJsonValue>> Frames;
 };
