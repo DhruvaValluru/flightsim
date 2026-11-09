@@ -589,6 +589,10 @@ aircraft_check "MP_MaterialAttributes (not Hidden)" "$RE/Public/SceneTypes.h" "M
 aircraft_check "MP_Refraction" "$RE/Public/SceneTypes.h" "MP_Refraction UMETA(DisplayName = \"Refraction\")"
 aircraft_check "MakeMaterialAttributes ClearCoat" "$RE/Public/Materials/MaterialExpressionMakeMaterialAttributes.h" "FExpressionInput ClearCoatRoughness;"
 aircraft_check "Fresnel ExponentIn" "$RE/Public/Materials/MaterialExpressionFresnel.h" "ExponentIn"
+# fix pass: the glass master zeroes the node's base reflect fraction (default
+# 0.04) so the face-on F0 is the class Specular's, and that F0 is 0.08 x Specular.
+aircraft_check "Fresnel BaseReflectFraction default 0.04" "$RE/Public/Materials/MaterialExpressionFresnel.h" "float BaseReflectFraction = 0.04f;"
+aircraft_check "F0 = 0.08 x Specular" "Shaders/Private/ShadingCommon.ush" "return half(0.08f * Specular);"
 aircraft_check "Custom CMOT_Float4" "$RE/Public/Materials/MaterialExpressionCustom.h" "CMOT_Float4"
 aircraft_check "MaterialExpressionLocalPosition" "$RE/Public/Materials/MaterialExpressionLocalPosition.h" "class UMaterialExpressionLocalPosition"
 aircraft_check "MaterialExpressionTransform" "$RE/Public/Materials/MaterialExpressionTransform.h" "TransformSourceType"

@@ -287,6 +287,25 @@ def test_no_master_moves_a_vertex_and_the_glass_is_opaque():
         assert "blend_mode" not in body[:body.index("_finish(")]
 
 
+def test_the_glass_is_acrylic_face_on_and_its_fresnel_boost_is_never_clamped_away():
+    """F0 = 0.08 x Specular (UE): the canopy's Specular gives acrylic's F0
+    (n 1.49, 0.039); the Fresnel node's own 0.04 base is zeroed so face-on
+    adds nothing; Specular + ReflectionBoost <= 1, so the saturate never
+    swallows the boost (it did at Specular 1.0)."""
+    glass = look.CLASS_SCALARS["glass"]
+    f0 = look.UE_F0_PER_SPECULAR * glass["Specular"]
+    assert f0 == pytest.approx(look.GLASS_F0, abs=0.003)
+    assert look.GLASS_F0 == pytest.approx(0.039, abs=0.001)
+    assert 0.0 < glass["ReflectionBoost"] <= 1.0 - glass["Specular"]
+    text = MASTERS.read_text(encoding="utf-8")
+    body = text[text.index("def create_aircraft_glass"):text.index("def create_aircraft_rubber")]
+    assert 'fresnel.set_editor_property("base_reflect_fraction", 0.0)' in body
+    assert 's["ReflectionBoost"]' in body
+    for path in LOOKS:
+        overrides = json.loads(path.read_text(encoding="utf-8")).get("class_scalars", {}).get("glass", {})
+        assert "Specular" not in overrides and "ReflectionBoost" not in overrides, path.name
+
+
 def test_the_masters_stay_out_of_the_world_materials_contract():
     """tests/test_ue_materials.py pins every /Game/FlightSim/M_* path the C++
     loads to ue_create_materials.py: the aircraft masters live one folder down

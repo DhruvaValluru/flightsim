@@ -377,7 +377,12 @@ def create_aircraft_glass():
     tint = _vector(material, "GlassTint", look.CLASS_VECTORS["glass"]["GlassTint"], -900, 700)
     base = _base_colour(material, -900, 900)
     fresnel = _node(material, unreal.MaterialExpressionFresnel, -600, 300)
+    # pow(1 - N.V, e) alone: the node's default base reflect fraction (0.04)
+    # would lift the face-on Specular above the class value, F0 above acrylic.
+    fresnel.set_editor_property("base_reflect_fraction", 0.0)
     _link(s["FresnelExponent"], "", fresnel, ("ExponentIn", "Exponent"))
+    # Specular 0.5 + ReflectionBoost 0.5 x Fresnel <= 1: the saturate is a
+    # guard, never the shape (aircraft_look.CLASS_SCALARS["glass"]).
     spec = _saturate(material, _add(material, s["Specular"],
                                     _mul(material, fresnel, s["ReflectionBoost"], -450, 350),
                                     -300, 300), -150, 300)

@@ -106,14 +106,29 @@ CLASS_SCALARS = {
         "WearAmount": 0.1, "GrimeAmount": 0.25, "Specular": 0.5,
         "NoiseCm": 35.0, "EdgeStart": 0.02, "EdgeEnd": 0.2,
     },
+    # Canopy acrylic (PMMA, n 1.49): F0 = ((n - 1) / (n + 1))^2 = 0.039, and
+    # UE's F0 is 0.08 x Specular, so Specular 0.5 (polycarbonate, n 1.586,
+    # would be 0.64). The engine's BRDF already applies Schlick's grazing
+    # Fresnel to that F0; ReflectionBoost x pow(1 - N.V, FresnelExponent) on
+    # top is a NON-PHYSICAL look gain (a cockpit glass reads glossier than
+    # its F0 at mid angles), kept at most 1 - Specular so the saturate never
+    # swallows it: face-on F0 stays GLASS_F0 (the master sets the Fresnel
+    # node's own base reflect fraction to 0), grazing Specular <= 1.
     "glass": {
-        "Metallic": 0.0, "Roughness": 0.04, "Specular": 1.0, "FresnelExponent": 5.0,
-        "ReflectionBoost": 0.6,
+        "Metallic": 0.0, "Roughness": 0.04, "Specular": 0.5, "FresnelExponent": 5.0,
+        "ReflectionBoost": 0.5,
     },
     "rubber": {
         "Metallic": 0.0, "Roughness": 0.86, "Specular": 0.3, "RoughnessBreakup": 0.08,
     },
 }
+#: UE's dielectric F0 per unit Specular (ShadingCommon.ush
+#: DielectricSpecularToF0: 0.08 x Specular, UE 5.7.4) and the canopy F0 the
+#: glass Specular above is meant to give (acrylic, n 1.49: 0.039).
+UE_F0_PER_SPECULAR = 0.08
+GLASS_IOR = 1.49
+GLASS_F0 = ((GLASS_IOR - 1.0) / (GLASS_IOR + 1.0)) ** 2
+
 #: Every vector each class master exposes (linear RGBA), with its default.
 CLASS_VECTORS = {
     "paint": {"PanelPitchCm": (120.0, 90.0, 45.0, 0.0), "WearColour": (0.56, 0.57, 0.6, 1.0)},
