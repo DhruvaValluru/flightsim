@@ -615,7 +615,13 @@ def report_edge_aliasing(out: Path, baseline: Optional[Path] = None) -> Optional
         except (OSError, ValueError):
             before = None
         row["baseline"] = str(path)
-        if before and before.get("energy") is not None and row["energy"] is not None:
+        # A VOID row (the control did not trip) has no comparable number:
+        # no change is computed against one, and the line says why.
+        if before and before.get("void"):
+            row["change_void"] = "baseline void"
+        elif row["void"]:
+            row["change_void"] = "this run void"
+        elif before and before.get("energy") is not None and row["energy"] is not None:
             row["baseline_energy"] = before["energy"]
             row["change"] = row["energy"] - before["energy"]
     (out / "aliasing.json").write_text(json.dumps(row, indent=2), encoding="utf-8")
@@ -632,6 +638,8 @@ def edge_aliasing_line(row: dict) -> str:
             f"{'VOID: the control did not trip' if row['void'] else 'control tripped'}")
     if "change" in row:
         line += f"; change vs baseline {row['change']:+.4f}"
+    elif row.get("change_void"):
+        line += f"; no comparison with the baseline ({row['change_void']})"
     return line
 
 
@@ -1508,11 +1516,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         aliasing = report_edge_aliasing(
             out, Path(args.aliasing_baseline) if args.aliasing_baseline else None)
+        if aliasing is not None:
+            print(edge_aliasing_line(aliasing))
     except Exception as error:  # noqa: BLE001 -- reported, never a gate
-        aliasing = None
         print(f"  [info] edge aliasing (reported, not a gate) not computed: {error}")
-    if aliasing is not None:
-        print(edge_aliasing_line(aliasing))
 
     print(f"\n{RULE}\n4. the side-by-side\n{RULE}")
     substitute = Path(args.substitute_baseline) if args.substitute_baseline else None

@@ -10,12 +10,18 @@ The four shots (docs/VISUAL_FIDELITY_PLAN.md, the visual overhaul's
 baseline; every later step renders the same four so the sheets compare
 like with like):
 
-  a  chase cam over real terrain at golden hour (the Matterhorn)
+  a  chase cam over real terrain at golden hour, the Matterhorn dead ahead
   b  low pass over the desert (the Phase 3 desert preset, Grand Canyon)
   c  the forest in heavy rain (the Phase 3 forest preset, Yosemite; the
      web app's storm weather is on by default and draws the rain)
-  d  the cockpit-shoulder view (the "cockpit" camera preset, behind the
-     windshield, the legacy shoulder view)
+  d  the cockpit view of the Matterhorn (the "cockpit" camera preset at
+     the J-11's own FDM eyepoint, behind the windshield)
+
+a and d are framed, not hoped for: the hero-lighting director solves the
+heading that puts the sun where the look wants it, and the start is then
+moved SUBJECT_STANDOFF_M short of the summit along that heading
+(:func:`frame_subject`, the summit's coordinates from core/terrain/glo30.py
+LOCATIONS), so the mountain sits on the lens axis whatever the date.
 
 The subject is the J-11 (assets/aircraft_config/J11.json), the only one of
 the Phase 3 J-35 / J-15 / J-11 subjects the repository has (owner decision
@@ -31,7 +37,9 @@ FLIGHTSIM_GOOGLE_TILES=off) and the storm weather is on by default
 FLIGHTSIM_RENDER_QUALITY for this process. ``--still-samples N`` and
 ``--pathtrace`` add their commandlet tokens to the per-camera render
 command only (the dataset pass, ``-camera-index=``), never to the
-throw-away solve pass; shots.json records the exact tokens added. A beauty
+throw-away solve pass and never to the ``--clip`` run (a clip is one
+capture a frame, so it keeps its motion blur); shots.json records the
+exact tokens added, and each shot's subject and camera framing. A beauty
 sheet also adds ``-supersample=2`` unless ``--supersample N`` says otherwise
 (the beauty rendered at 2x per axis, box-filtered to the output size;
 core/capture/supersample.py).
@@ -60,7 +68,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -99,17 +107,33 @@ class Shot:
     #: The hero-lighting director's intent (core/scene/hero_lighting.py
     #: INTENTS): realised through the time of day, date and heading only.
     lighting: Optional[str] = None
+    #: The summit the frame is OF: (core/terrain/glo30.py LOCATIONS key,
+    #: summit name in that location's ``summits``). The start is placed so
+    #: it sits dead ahead on the flown heading (:func:`frame_subject`).
+    subject: Optional[Tuple[str, str]] = None
 
+
+#: How far ahead of the start a shot's subject summit is placed, metres:
+#: far enough that a 15 s clip at the J-11's 350 kt cruise (2.7 km) ends
+#: well short of the mountain, near enough that it fills the middle third
+#: of a 54 deg lens. UNCALIBRATED (probe shots-subject: shots a and d, the
+#: Matterhorn's width in the frame against the airframe's).
+SUBJECT_STANDOFF_M = 7000.0
 
 #: The four fixed shots. Prompts are compiled by the offline (regex)
 #: interpreter so the table is reproducible without a model call; the
 #: environment is the page's Phase 3 D4 picker (webapp.runs
 #: ENVIRONMENT_PRESETS). tests/test_visual_contact_sheet.py compiles each.
+#: a and d are OF the Matterhorn: the director solves the heading for the
+#: light, and the start is then placed SUBJECT_STANDOFF_M short of the
+#: summit on that heading (3800 m MSL clears the Hoernli ridge, the
+#: Theodul glacier and Plateau Rosa under either approach).
 SHOTS: Dict[str, Shot] = {
     "a": Shot("a", "chase cam, real terrain, golden hour",
-              "chase view of the j11 at 3000 m over the matterhorn at golden hour, "
-              "flying east, for 6 seconds",
-              None, "J11", "chase", "golden hour, Google tiles", "golden_rim_backlight"),
+              "chase view of the j11 at 3800 m over the matterhorn at golden hour, "
+              "flying southwest, for 6 seconds",
+              None, "J11", "chase", "golden hour, Google tiles", "golden_rim_backlight",
+              ("matterhorn", "Matterhorn")),
     "b": Shot("b", "low pass over the desert",
               "chase view of the j11 at 1600 m over the desert, flying southwest, "
               "for 6 seconds",
@@ -119,9 +143,10 @@ SHOTS: Dict[str, Shot] = {
               "chase view of the j11 at 1700 m over the forest in heavy rain for 6 seconds",
               "forest", "J11", "chase", "forest preset (Yosemite), storm rain",
               "storm_soft_sheen"),
-    "d": Shot("d", "cockpit-shoulder view",
-              "cockpit view of the j11 at 3000 m over the matterhorn at 10:00 for 6 seconds",
-              None, "J11", "cockpit", "behind the windshield", "cockpit_canopy_glint"),
+    "d": Shot("d", "cockpit view, the Matterhorn ahead",
+              "cockpit view of the j11 at 3800 m over the matterhorn at 10:00 for 6 seconds",
+              None, "J11", "cockpit", "behind the windshield", "cockpit_canopy_glint",
+              ("matterhorn", "Matterhorn")),
 }
 SHOT_ORDER = ("a", "b", "c", "d")
 
@@ -147,6 +172,12 @@ def step_dir(step: str, root: Path = VISUAL_ROOT) -> Path:
 #: supersample lane: the beauty sheet's -supersample factor when --supersample
 #: is not given (core/capture/supersample.py SHEET_DEFAULT_FACTOR).
 SUPERSAMPLE_SHEET_DEFAULT = 2
+#: The commandlet's own ranges (FlightSimRenderCommandlet.cpp
+#: RenderBeautyStillSamplesMax, RenderPathTraceSppMax, the -supersample cap);
+#: tests/test_visual_contact_sheet.py parses the C++ and pins these to it.
+STILL_SAMPLES_MAX = 64
+PATHTRACE_SPP_MAX = 16384
+from core.capture.supersample import MAX_FACTOR as SUPERSAMPLE_MAX  # noqa: E402 -- one source
 
 
 def sheet_supersample(quality: str, pathtrace: bool, stated: Optional[int]) -> Optional[int]:
@@ -168,8 +199,9 @@ def render_extra_tokens(quality: str, still_samples: Optional[int],
         if pathtrace or quality != "beauty":
             raise ValueError("render.supersample: --supersample needs --quality beauty (not "
                              "measure, not --pathtrace)")
-        if not 1 <= int(supersample) <= 4:
-            raise ValueError(f"render.supersample: --supersample {supersample} is not from 1 to 4")
+        if not 1 <= int(supersample) <= SUPERSAMPLE_MAX:
+            raise ValueError(f"render.supersample: --supersample {supersample} is not from 1 to "
+                             f"{SUPERSAMPLE_MAX}")
         tokens.append(f"-supersample={int(supersample)}")
     if pathtrace:
         if still_samples is not None:
@@ -177,8 +209,9 @@ def render_extra_tokens(quality: str, still_samples: Optional[int],
                              "tracer accumulates by --spp")
         tokens += ["-quality=pathtrace", RAY_TRACING_INI_TOKEN]
         if spp is not None:
-            if not 1 <= int(spp) <= 16384:
-                raise ValueError(f"render.pathtrace: --spp {spp} is not from 1 to 16384")
+            if not 1 <= int(spp) <= PATHTRACE_SPP_MAX:
+                raise ValueError(f"render.pathtrace: --spp {spp} is not from 1 to "
+                                 f"{PATHTRACE_SPP_MAX}")
             tokens.append(f"-pathtrace-spp={int(spp)}")
         return tokens
     if spp is not None:
@@ -186,9 +219,9 @@ def render_extra_tokens(quality: str, still_samples: Optional[int],
     if still_samples is not None:
         if quality != "beauty":
             raise ValueError("render.still_samples: --still-samples needs --quality beauty")
-        if not 1 <= int(still_samples) <= 64:
+        if not 1 <= int(still_samples) <= STILL_SAMPLES_MAX:
             raise ValueError(f"render.still_samples: --still-samples {still_samples} is not "
-                             f"from 1 to 64")
+                             f"from 1 to {STILL_SAMPLES_MAX}")
         tokens.append(f"-still-samples={int(still_samples)}")
     return tokens
 
@@ -369,9 +402,13 @@ def render_shot(shot: Shot, *, still: bool = True, clip_seconds: Optional[float]
         raise ShotRefused(f"compile: {payload}")
     lit = None
     if shot.lighting:   # hero-lighting lane: solve the time + heading, recompile, record
-        payload, lit = light_shot(client, body, payload, shot.lighting)
+        payload, lit = light_shot(client, body, payload, shot.lighting, subject=shot.subject)
+    framed = None
+    if shot.subject:    # the summit dead ahead on the flown heading
+        payload["spec"]["dict"], framed = frame_subject(payload["spec"]["dict"], shot.subject)
     if not payload.get("validation", {}).get("ok", False):
         raise ShotRefused(f"validation: {payload.get('validation')}")
+    framing = camera_framing(payload["spec"]["dict"], shot.camera)
     run_body = {"spec": payload["spec"]["dict"],
                 "provenance": {"compiler": payload.get("compiler"),
                                "tool": "experiments/visual_contact_sheet.py"}}
@@ -409,23 +446,122 @@ def render_shot(shot: Shot, *, still: bool = True, clip_seconds: Optional[float]
     state["run_id"] = run_id
     if lit is not None:
         state["hero_lighting"] = lit
+    if framed is not None:
+        state["subject_framing"] = framed
+    if framing:
+        state["camera_framing"] = framing
     return state
 
 
-def light_shot(client, body: dict, payload: dict, intent: str) -> tuple:
+def _summit(subject: Tuple[str, str]) -> tuple:
+    """(location, (name, lat, lon, elevation)) of a shot subject, from
+    core/terrain/glo30.py LOCATIONS -- the one table of where they are."""
+    from core.terrain.dem import DEMError
+    from core.terrain.glo30 import summit
+
+    try:
+        return summit(*subject)
+    except DEMError as exc:
+        raise ShotRefused(str(exc))
+
+
+def subject_start(subject: Tuple[str, str], heading_deg: float,
+                  standoff_m: float = SUBJECT_STANDOFF_M) -> tuple:
+    """(lat, lon) of the start that puts ``subject`` dead ahead at
+    ``standoff_m`` on ``heading_deg`` (core/terrain/glo30.py standoff_start,
+    held to the bake the web app's LOCATION_TOLERANCE_DEG earns). Refuses by
+    name (shot.subject_unframed) as that does."""
+    from core.terrain.dem import DEMError
+    from core.terrain.glo30 import standoff_start
+    from webapp.runs import LOCATION_TOLERANCE_DEG
+
+    try:
+        return standoff_start(subject[0], subject[1], heading_deg, standoff_m,
+                              LOCATION_TOLERANCE_DEG)
+    except DEMError as exc:
+        raise ShotRefused(str(exc))
+
+
+def frame_subject(spec: dict, subject: Tuple[str, str],
+                  standoff_m: float = SUBJECT_STANDOFF_M) -> tuple:
+    """(spec, record): the compiled spec with its start moved so the
+    subject summit is dead ahead on the spec's own heading (the director's
+    solved one when the shot is lit). Only the start's coordinates change;
+    their source stays ``inferred`` (still the named place's bake) with the
+    reason in ``from``. The record says where the subject sits from the
+    camera so a sheet can be checked by number, not by eye."""
+    import math
+
+    from core.terrain.glo30 import bearing
+
+    location, (name, lat, lon, elevation) = _summit(subject)
+    out = json.loads(json.dumps(spec))
+    initial = out.setdefault("initial", {})
+    heading = float((initial.get("heading") or {}).get("value", 0.0))
+    start = subject_start(subject, heading, standoff_m)
+    why = (f"visual contact sheet: {name} placed {standoff_m:g} m dead ahead on heading "
+           f"{heading:g} (SUBJECT_STANDOFF_M, UNCALIBRATED) inside the {location.key} bake")
+    for field, value in (("latitude", start[0]), ("longitude", start[1])):
+        entry = dict(initial.get(field) or {"unit": "deg"})
+        entry.update(value=round(value, 6), source="inferred", **{"from": why})
+        initial[field] = entry
+    altitude = float((initial.get("altitude") or {}).get("value", 0.0))
+    to_subject = bearing(start[0], start[1], lat, lon)
+    record = {"subject": name, "location": location.key, "summit_lat_deg": lat,
+              "summit_lon_deg": lon, "summit_elevation_m": elevation,
+              "start_lat_deg": round(start[0], 6), "start_lon_deg": round(start[1], 6),
+              "heading_deg": heading, "standoff_m": standoff_m,
+              "bearing_to_subject_deg": round(to_subject, 3),
+              "relative_bearing_deg": round((to_subject - heading + 180.0) % 360.0 - 180.0, 3),
+              "subject_elevation_angle_deg": round(math.degrees(math.atan2(
+                  elevation - altitude, standoff_m)), 2),
+              "uncalibrated": ["SUBJECT_STANDOFF_M"]}
+    return out, record
+
+
+def camera_framing(spec: dict, preset: str) -> dict:
+    """The shot camera's body offset as compiled, and its basis. Refuses by
+    name (shot.chase_unframed, core/scenario/camera.py chase_unframed) a
+    chase camera on the B747 fallback: with no mesh manifest the J-11 would
+    be framed from 110 m back, a few pixels wide, and later runs (after the
+    render flow imports the mesh) would frame it differently, so the
+    baselines would not compare."""
+    from core.scenario.camera import chase_unframed
+
+    cameras = [c for c in spec.get("cameras") or []
+               if (c.get("preset") or {}).get("value") == preset]
+    if not cameras:
+        return {}
+    camera = cameras[0]
+    framing = {name: (camera.get(name) or {}).get("value")
+               for name in ("offset_forward_m", "offset_right_m", "offset_up_m")}
+    framing["basis"] = (camera.get("offset_forward_m") or {}).get("from")
+    refusal = chase_unframed(preset, framing["basis"])
+    if refusal:
+        raise ShotRefused(refusal)
+    return framing
+
+
+def light_shot(client, body: dict, payload: dict, intent: str,
+               subject: Optional[Tuple[str, str]] = None) -> tuple:
     """(compiled payload, solved record) for a shot lit by the hero-lighting
     director: the place and date come from the first compile, the heading
     goes into the prompt (``heading NNN``) and the dated UTC clock onto the
-    spec's time of day. Refuses by name (ShotRefused) as the solver does."""
+    spec's time of day. With a ``subject`` the sun is solved where the
+    flight will actually start (the subject's stand-off point on the first
+    solve's heading), so the recorded sun is the rendered one. Refuses by
+    name (ShotRefused) as the solver does."""
     from core.scene.hero_lighting import HeroLightingError, apply_to_spec, scene_day, solve, \
         with_heading
 
     spec = payload["spec"]["dict"]
     initial, environment = spec.get("initial", {}), spec.get("environment", {})
     try:
-        solved = solve(intent, float(initial["latitude"]["value"]),
-                       float(initial["longitude"]["value"]),
-                       scene_day((environment.get("time_of_day") or {}).get("value")))
+        lat, lon = float(initial["latitude"]["value"]), float(initial["longitude"]["value"])
+        day = scene_day((environment.get("time_of_day") or {}).get("value"))
+        solved = solve(intent, lat, lon, day)
+        if subject:
+            solved = solve(intent, *subject_start(subject, solved.heading_deg), day)
     except (HeroLightingError, ValueError, KeyError) as exc:
         raise ShotRefused(f"{getattr(exc, 'constraint', 'hero_lighting.intent')}: {exc}")
     relit = dict(body, prompt=with_heading(body["prompt"], solved.heading_deg))
@@ -603,14 +739,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 row.update(frame=str(frame), render=render_summary(frame))
             if state.get("hero_lighting"):
                 row["hero_lighting"] = state["hero_lighting"]
-                print(f"[{key}] {directory / f'{key}.png'}")
+            for record in ("subject_framing", "camera_framing"):
+                if state.get(record):
+                    row[record] = state[record]
+            print(f"[{key}] {directory / f'{key}.png'}")
             rows[key] = row
         if args.clip:
             shot = SHOTS["a"]
-            print(f"[clip] {shot.title}: {args.clip_seconds:g} s beauty clip")
+            # A clip is one capture a frame: -still-samples is a stills option
+            # (N captures of one pose leave only the first with motion
+            # vectors, so the clip would lose its motion blur and strobe),
+            # and the commandlet ignores it on a clip anyway. Nothing added.
+            clip_tokens: List[str] = []
+            print(f"[clip] {shot.title}: {args.clip_seconds:g} s beauty clip, one capture a "
+                  f"frame (no -still-samples)")
             try:
                 state = render_shot(shot, still=False, clip_seconds=args.clip_seconds,
-                                    tokens=[t for t in tokens if t.startswith("-still")])
+                                    tokens=clip_tokens)
                 run_dir = Path(state["run_dir"])
                 clip = Path(state["clip"]) if state.get("clip") else None
                 target = directory / "clip.mp4"
@@ -621,6 +766,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     if frame is None or encode_clip(frame.parent, target) is None:
                         target = None
                 meta["clip"] = {"run_id": state["run_id"], "seconds": args.clip_seconds,
+                                "render_tokens_added": clip_tokens,
+                                "captures_per_frame": 1,
                                 "file": str(target) if target else None,
                                 "note": None if target else "no clip: no web encode and no ffmpeg"}
                 print(f"[clip] {target or 'not written (no encode, no ffmpeg)'}")

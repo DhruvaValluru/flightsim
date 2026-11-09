@@ -232,6 +232,12 @@ rp_check "show flag TemporalAA" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_AL
 rp_check "show flag PathTracing" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_ALWAYS_ACCESSIBLE(PathTracing,"
 rp_check "capture clears TemporalAA (why beauty sets it)" "Engine/Private/Components/SceneCaptureComponent.cpp" "ShowFlags.TemporalAA = false;"
 rp_check "TSR falls back without the flag" "Engine/Private/SceneView.cpp" "if (!Family->EngineShowFlags.TemporalAA || !Family->bRealtimeUpdate || !SupportsTSR(GetShaderPlatform()))"
+# Fix pass (shots-render): render.json anti_aliasing names the FXAA fallback
+# for TAA too, and the Cinematic sky sample caps the beauty block repeats.
+rp_check "TAA falls back without the flag" "Engine/Private/SceneView.cpp" "if (!Family->EngineShowFlags.TemporalAA || !Family->bRealtimeUpdate || !SupportsGen4TAA(GetShaderPlatform()))"
+rp_check "fallback is FXAA" "Engine/Private/SceneView.cpp" "AntiAliasingMethod = AAM_FXAA;"
+rp_check "Cinematic sky SampleCountMax 256" "../../Config/BaseScalability.ini" "r.SkyAtmosphere.SampleCountMax=256.0"
+rp_check "Cinematic AP SampleCountMaxPerSlice 8" "../../Config/BaseScalability.ini" "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice=8"
 rp_check "capture family realtime when persistent" "Renderer/Private/SceneCaptureRendering.cpp" ".SetRealtimeUpdate(SceneCaptureComponent->bCaptureEveryFrame || SceneCaptureComponent->bAlwaysPersistRenderingState));"
 rp_check "capture Lumen off unless overridden" "Renderer/Private/SceneCaptureRendering.cpp" "By default, Lumen is disabled in scene captures"
 rp_check "capture view state needs persistence" "Engine/Private/Components/SceneCaptureComponent.cpp" "if ((bCaptureEveryFrame || bAlwaysPersistRenderingState) && ViewStateInterface == NULL)"
