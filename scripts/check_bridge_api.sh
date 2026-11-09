@@ -430,6 +430,22 @@ if grep -qF 'GetCloudSampleNormAltitudeInLayer' "$UE_ROOT/Engine/Config/BaseMate
 else
     bad "world: NormAltitudeInLayer output" "not in BaseMaterialExpressions.ini: M_FlightSimCloudLayers' pin name changed"
 fi
+# -- tiles-delight (visual overhaul module, 2026-11-09) -- begin -------------
+# FlightSimClouds.cpp FlightSimTilesDelight (contact shading) and the
+# M_FlightSimTilesBeauty coarse-mip sample in scripts/ue_create_materials.py.
+# Each pattern was read in the 5.7.4 source on 2026-11-09 (paths under $RT).
+rp_check "delight: Light ContactShadowLength" "Engine/Classes/Components/LightComponent.h" "float ContactShadowLength;"
+rp_check "delight: Light ContactShadowLengthInWS" "Engine/Classes/Components/LightComponent.h" "uint32 ContactShadowLengthInWS : 1;"
+rp_check "delight: MarkRenderStateDirty" "Engine/Classes/Components/ActorComponent.h" "ENGINE_API void MarkRenderStateDirty();"
+rp_check "delight: cvar ShortRangeAO" "Renderer/Private/Lumen/LumenScreenProbeGather.cpp" 'TEXT("r.Lumen.ScreenProbeGather.ShortRangeAO"),'
+rp_check "delight: cvar ShortRangeAO.HorizonSearch" "Renderer/Private/Lumen/LumenScreenSpaceBentNormal.cpp" 'TEXT("r.Lumen.ScreenProbeGather.ShortRangeAO.HorizonSearch"),'
+rp_check "delight: FindConsoleVariable" "Core/Public/HAL/IConsoleManager.h" "virtual IConsoleVariable* FindConsoleVariable(const TCHAR* Name, bool bTrackFrequentCalls = true) const = 0;"
+rp_check "delight: TMVM_MipBias" "Engine/Classes/Engine/EngineTypes.h" "TMVM_MipBias UMETA("
+rp_check "delight: TextureSample MipBias pin" "Engine/Private/Materials/MaterialExpressions.cpp" 'IF_INPUT_RETURN(TEXT("MipBias"));'
+# MaterialEditingLibrary::ConnectMaterialExpressions matches the shortened pin
+# name, so the script connects "Bias", not "MipBias".
+rp_check "delight: MipBias pin shortens to Bias" "../Editor/UnrealEd/Private/MaterialGraphNode.cpp" "InputName = MaterialPinNames::Bias;"
+# -- tiles-delight -- end ------------------------------------------------------
 # -- AIRCRAFT LANE: engine surface the airframe look assumes ----------------
 # FlightSimAircraftFX.cpp (lights, bulbs, trails, plume, haze, the slot swap)
 # and scripts/ue_aircraft_master_materials.py (the masters' properties and

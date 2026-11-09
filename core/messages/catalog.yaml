@@ -299,6 +299,12 @@ render.pathtrace:
 render.beauty_look:
   sentence: "The beauty look cannot be planned or applied: an unknown grade or lens, a sun that cannot be lit, a camera without a sensor width, or a sidecar the renderer cannot read."
   hint: "Use a known grade (golden hour, desert noon or storm) and lens (standard or cinematic), or render at the measure quality."
+
+# tiles-delight (core/scene/tiles_delight.py, the shader's Python twin):
+world_beauty.tiles_delight:
+  sentence: "The tile de-lighting cannot run: the colour and its coarse sample differ in shape or are not colours, or a setting is not a usable number."
+  hint: "Pass two colour arrays of the same shape and finite settings, with the knee above zero and the blue gate at least zero."
+# world lane (visual plan V6/V4, FlightSimClouds.cpp, FlightSimGroundDetail.cpp):
 world_beauty.overrides:
   sentence: "The world look's probe overrides file cannot be read, or names a section, row or field the world look does not have."
   hint: "Fix the overrides file so it names only the world look's own sections and fields, or render without it."

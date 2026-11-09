@@ -22,6 +22,7 @@
 #include "FlightSimVisualScene.h"
 #include "FlightSimWeather.h"
 #include "GameFramework/Actor.h"
+#include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -718,6 +719,79 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	return true;
 }
 
+// -- tiles-delight (visual overhaul module, 2026-11-09) ------------------------
+// The tiles' de-lighting (assets/shaders/world/tiles_delight.hlsl; Python twin
+// core/scene/tiles_delight.py, whose DELIGHT_DEFAULTS, DELIGHT_* constants and
+// CONTACT_* rows tests/test_tiles_delight.py pins to the numbers below) and the
+// engine's contact shading that replaces the shadows it lifts. BEAUTY ONLY: only
+// FFlightSimWorldBeauty calls these. A per-frame shader operation: nothing is
+// stored (Google Map Tiles policy). UNCALIBRATED: every number (PROBE_LOG.md
+// ## tiles-delight). Engine symbols: scripts/check_bridge_api.sh "tiles-delight".
+namespace FlightSimTilesDelight
+{
+	// DelightAmount per FlightSimWorldPure preset: clear, hazy, overcast, rain, storm.
+	constexpr double DelightAmounts[FlightSimWorldPure::PresetCount] = {0.5, 0.5, 0.2, 0.2, 0.2};
+	constexpr double DelightMipBias = 5.0;
+	constexpr double DelightRatioKnee = 0.6;
+	constexpr double DelightBlueGate = 4.0;
+	constexpr float ContactShadowLength = 0.05f;
+
+	inline double AmountFor(int32 Preset)
+	{
+		return Preset >= 0 && Preset < FlightSimWorldPure::PresetCount ? DelightAmounts[Preset] : 0.0;
+	}
+
+	// render.json world_beauty.tiles.delight.
+	TSharedPtr<FJsonObject> DelightRecord(int32 Preset)
+	{
+		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+		Out->SetNumberField(TEXT("amount"), AmountFor(Preset));
+		Out->SetNumberField(TEXT("mip_bias"), DelightMipBias);
+		Out->SetNumberField(TEXT("ratio_knee"), DelightRatioKnee);
+		Out->SetNumberField(TEXT("blue_gate"), DelightBlueGate);
+		Out->SetStringField(TEXT("preset"), ANSI_TO_TCHAR(FlightSimWorldPure::PresetName(Preset)));
+		Out->SetStringField(TEXT("basis"), TEXT("shader per frame, nothing stored (Google tile policy)"));
+		Out->SetBoolField(TEXT("pixel_moving"), false);
+		Out->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED"));
+		Out->SetStringField(TEXT("contact_shading"), TEXT("world_beauty.atmosphere.contact_shading"));
+		return Out;
+	}
+
+	// Lumen's short-range AO (pinned by code: both are ECVF_Scalability) and the
+	// sun's screen-space contact shadows; read back for the record. Lighting only.
+	TSharedPtr<FJsonObject> ApplyContactShading(UDirectionalLightComponent* SunLight)
+	{
+		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+		const TCHAR* const Cvars[] = {
+			TEXT("r.Lumen.ScreenProbeGather.ShortRangeAO"),
+			TEXT("r.Lumen.ScreenProbeGather.ShortRangeAO.HorizonSearch"),
+		};
+		for (const TCHAR* Name : Cvars)
+		{
+			IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name);
+			if (Variable != nullptr)
+			{
+				Variable->Set(1, ECVF_SetByCode);
+			}
+			Out->SetStringField(Name, Variable != nullptr ? Variable->GetString() : FString(TEXT("absent")));
+		}
+		if (SunLight != nullptr)
+		{
+			SunLight->ContactShadowLength = ContactShadowLength;
+			SunLight->ContactShadowLengthInWS = false;
+			SunLight->MarkRenderStateDirty();
+			Out->SetNumberField(TEXT("sun_contact_shadow_length"), SunLight->ContactShadowLength);
+		}
+		else
+		{
+			Out->SetStringField(TEXT("sun_contact_shadow_length"), TEXT("no sun light: not set"));
+		}
+		Out->SetBoolField(TEXT("pixel_moving"), false);
+		Out->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED"));
+		return Out;
+	}
+}
+
 void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm)
 {
 	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
@@ -829,6 +903,8 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 		Out->SetBoolField(TEXT("sun_per_pixel_transmittance"), SunLight->bPerPixelAtmosphereTransmittance != 0);
 		Out->SetBoolField(TEXT("sun_cast_cloud_shadows"), SunLight->bCastCloudShadows != 0);
 	}
+	// tiles-delight hook: contact shading stands in for the baked shadows it lifts.
+	Out->SetObjectField(TEXT("contact_shading"), FlightSimTilesDelight::ApplyContactShading(SunLight));
 	Record->SetObjectField(TEXT("atmosphere"), Out);
 }
 
@@ -1036,6 +1112,9 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 			{TEXT("DetailStrength"), Row[AtmTilesDetailStrength]},
 			{TEXT("DetailFadeM"), DetailFadeM},
 			{TEXT("DetailScaleM"), DetailScaleM},
+			// tiles-delight hook (FlightSimTilesDelight above).
+			{TEXT("DelightAmount"), FlightSimTilesDelight::AmountFor(Preset)},
+			{TEXT("DelightBlueGate"), FlightSimTilesDelight::DelightBlueGate},
 		};
 		for (const FWorldScalar& Scalar : Scalars)
 		{
@@ -1056,6 +1135,7 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 			     "material reads its defaults (dry, ungraded)"));
 	}
 	Out->SetObjectField(TEXT("parameters"), Parameters);
+	Out->SetObjectField(TEXT("delight"), FlightSimTilesDelight::DelightRecord(Preset));   // tiles-delight hook
 	Out->SetStringField(TEXT("wetness_basis"), TEXT("max(the card's wetness, the preset's wetness_floor)"));
 	Out->SetStringField(TEXT("rule"),
 		TEXT("the tiles stay the ground of every terrain render (the owner's rule); this changes their shading only"));
