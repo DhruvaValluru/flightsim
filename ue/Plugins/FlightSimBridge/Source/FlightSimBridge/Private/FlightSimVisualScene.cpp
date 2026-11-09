@@ -1,4 +1,5 @@
 #include "FlightSimVisualScene.h"
+#include "FlightSimBeautyLook.h"
 
 #include "FlightSimRenderCommandlet.h"
 
@@ -22,6 +23,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "ProceduralMeshComponent.h"
@@ -3162,9 +3164,10 @@ bool FFlightSimVisualScene::LoadSceneLevel(UWorld* World,
 
 void FFlightSimVisualScene::ApplyBeautyPostProcess(USceneCaptureComponent2D* Capture)
 {
-	FPostProcessSettings& Settings = Capture->PostProcessSettings;
-	Settings.bOverride_DynamicGlobalIlluminationMethod = true;
-	Settings.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Lumen;
-	Settings.bOverride_ReflectionMethod = true;
-	Settings.ReflectionMethod = EReflectionMethod::Lumen;
+	// Look-dev lane: the logic lives in FlightSimBeautyLook.cpp. Without a
+	// -beauty-look= sidecar it sets exactly what this body set before
+	// (Lumen GI + Lumen reflections); with one it adds the beauty look.
+	// The commandlet's process command line carries -beauty-look= (the
+	// commandlet's Params are tokenised from it, LaunchEngineLoop.cpp).
+	FFlightSimBeautyLook::Apply(Capture, FCommandLine::Get());
 }
