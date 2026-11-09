@@ -378,7 +378,9 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 	ContrailRow->SetStringField(TEXT("rule"), TEXT("drawn while atmosphere/T-R is below contrail.MaxTemperatureK ")
 		TEXT("and position/h-sl-meters above contrail.MinAltitudeM (Schmidt-Appleman threshold, no humidity ")
 		TEXT("modelled); wingtip vapour from the humidity test (aircraft_look.condensation), or while ")
-		TEXT("accelerations/Nz exceeds vapour.MinNz when the humidity is unavailable"));
+		TEXT("accelerations/Nz exceeds vapour.MinNz when the humidity is unavailable; vapour_frames counts ")
+		TEXT("only the frames these wingtip vapour trails drew (the humidity-gated tip ribbons' frames are in ")
+		TEXT("aircraft_look.condensation.per_frame)"));
 	ContrailRow->SetStringField(TEXT("label_convention"), TEXT("a trail is a translucent medium like the clouds ")
 		TEXT("and rain the label captures already omit: where it crosses in front of the aircraft the mask ")
 		TEXT("still says aircraft"));
