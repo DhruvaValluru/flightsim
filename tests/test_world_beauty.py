@@ -415,12 +415,20 @@ def test_the_pins_are_cc0_with_the_roots_verified():
         assert re.fullmatch(r"[0-9a-f]{64}", pin["root"]["sha256"]), asset_id
         assert re.fullmatch(r"[0-9a-f]{32}", pin["root"]["md5"]), asset_id
         assert all(re.fullmatch(r"[0-9a-f]{32}", f["md5"]) for f in pin["includes"].values())
-    # 2026-11-09: the five small assets were fetched, md5-checked and pinned; the
-    # big trees' meshes and textures were not downloaded (hundreds of MB), so
-    # they are not pinned and are drawn as nothing until the fetch script runs.
+    # 2026-11-09 pin audit: every file under 50 MB was fetched, md5-checked and
+    # sha256-pinned; three tree meshes (fir 478 MB, jacaranda 208 MB, pine
+    # 949 MB) were not, carry an UNVERIFIED status saying why, and are drawn as
+    # nothing until the fetch script runs.
     complete = {a for a, pin in pins["assets"].items() if wb.pin_complete(pin)}
     assert complete == {"shrub_02", "rock_moss_set_01", "grass_medium_01", "namaqualand_boulder_02",
-                        "wild_rooibos_bush"}
+                        "wild_rooibos_bush", "quiver_tree_01", "searsia_lucida"}
+    for asset_id, pin in pins["assets"].items():
+        for file_pin in pin["includes"].values():
+            if file_pin.get("sha256") is None:
+                assert file_pin["sha256_status"].startswith("UNVERIFIED: "), asset_id
+            else:
+                assert re.fullmatch(r"[0-9a-f]{64}", file_pin["sha256"]), asset_id
+                assert "sha256_status" not in file_pin, asset_id
 
 
 def test_the_sidecar_draws_nothing_until_pinned():

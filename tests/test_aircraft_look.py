@@ -353,20 +353,42 @@ def test_no_candidate_with_a_forbidden_licence_is_redistributable():
     assert not models.licence_ok("CC-BY-NC-4.0")
 
 
-def test_a_candidate_is_usable_only_with_a_pin():
+def test_a_candidate_is_usable_only_with_a_licence_a_provenance_and_a_pin():
     for candidate in models.CANDIDATES:
         assert models.usable(candidate) == (models.licence_ok(candidate["licence"])
+                                            and candidate.get("provenance") == "ok"
                                             and bool(candidate.get("sha256")))
-    # Nothing was downloaded this session, so nothing is pinned yet.
-    assert not any(models.usable(c) for c in models.CANDIDATES)
+        if candidate.get("sha256"):
+            assert re.fullmatch(r"[0-9a-f]{64}", candidate["sha256"]), candidate["id"]
+        if candidate["id"].endswith("_rejected"):
+            assert not models.usable(candidate), candidate["id"]
+    # 2026-11-09 pin audit: only the FGAddon Su-33 tree was fetched (WebDAV at
+    # r18942) and digested; every Sketchfab model needs an account token.
+    assert {c["id"] for c in models.CANDIDATES if models.usable(c)} == {"su33_fgaddon_helijah"}
+    # an uploader who says the model is not theirs cannot grant its CC label
+    by_id = {c["id"]: c for c in models.CANDIDATES}
+    assert models.licence_ok(by_id["j15_42manako_sketchfab_rejected"]["licence"])
+    assert not models.provenance_ok(by_id["j15_42manako_sketchfab_rejected"])
 
 
-def test_a_fetch_refuses_an_unpinned_or_unredistributable_candidate(tmp_path):
+def test_a_fetch_refuses_an_unpinned_unredistributable_or_unprovenanced_candidate(tmp_path):
     by_id = {c["id"]: c for c in models.CANDIDATES}
     with pytest.raises(SystemExit, match="not redistributable"):
         models.fetch(by_id["su30mki_sketchfab_rejected"], tmp_path / "x", record_pin=False)
     with pytest.raises(SystemExit, match="no sha256 pinned"):
-        models.fetch(by_id["su33_fgaddon_helijah"], tmp_path / "y", record_pin=False)
+        models.fetch(by_id["j11_rhinelab_sketchfab"], tmp_path / "y", record_pin=False)
+    with pytest.raises(SystemExit, match="provenance"):
+        models.fetch(by_id["j11_42manako_sketchfab_rejected"], tmp_path / "z", record_pin=False)
+
+
+def test_the_webdav_fetch_writes_nothing_outside_the_pinned_folder(tmp_path, monkeypatch):
+    candidate = {"id": "t", "dav_root": "https://example.invalid", "dav_path": "/p/!svn/bc/1/A/"}
+    monkeypatch.setattr(models, "_dav_list", lambda root, path: ["/p/!svn/bc/2/B/evil.txt"])
+    monkeypatch.setattr(models.urllib.request, "urlopen",
+                        lambda *a, **k: pytest.fail("fetched a file outside the pin"))
+    with pytest.raises(SystemExit, match="not under"):
+        models.fetch_svn_dav(candidate, tmp_path / "dest")
+    assert not (tmp_path / "dest").exists()
 
 
 def test_tree_digest_is_order_and_content_sensitive(tmp_path):
