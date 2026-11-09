@@ -1,0 +1,79 @@
+{
+  "schema": "flightsim-aircraft-look/1",
+  "name": "A4",
+  "default_class": "paint",
+  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. The A-4's FDM thruster sits inside the fuselage (x 144 in); the snap takes the aftmost body vertex on its line as the exhaust. No afterburner (J52).",
+  "slot_rules": [],
+  "class_scalars": {
+    "paint": {
+      "Roughness": 0.5,
+      "ClearCoat": 0.25
+    }
+  },
+  "nozzles": [
+    {
+      "id": "engine0",
+      "anchor": "fdm_thruster",
+      "index": 0,
+      "snap_radius_m": 0.35,
+      "radius_m": 0.35
+    }
+  ],
+  "lights": [
+    {
+      "id": "nav_left",
+      "kind": "nav_red",
+      "anchor": "mesh_extreme",
+      "axis": "-y",
+      "offset_m": [
+        0.0,
+        0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "nav_right",
+      "kind": "nav_green",
+      "anchor": "mesh_extreme",
+      "axis": "+y",
+      "offset_m": [
+        0.0,
+        -0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "tail",
+      "kind": "nav_white",
+      "anchor": "mesh_extreme",
+      "axis": "-x",
+      "offset_m": [
+        0.05,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "strobe_left",
+      "kind": "strobe",
+      "anchor": "mesh_extreme",
+      "axis": "-y",
+      "offset_m": [
+        -0.15,
+        0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "strobe_right",
+      "kind": "strobe",
+      "anchor": "mesh_extreme",
+      "axis": "+y",
+      "offset_m": [
+        -0.15,
+        -0.05,
+        0.0
+      ]
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "schema": "flightsim-aircraft-look/1",
+  "name": "A320",
+  "default_class": "paint",
+  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. Airliner gloss: full clear coat.",
+  "slot_rules": [],
+  "class_scalars": {
+    "paint": {
+      "Roughness": 0.3,
+      "ClearCoat": 1.0,
+      "ClearCoatRoughness": 0.06,
+      "Metallic": 0.1
+    }
+  },
+  "nozzles": [
+    {
+      "id": "engine0",
+      "anchor": "fdm_thruster",
+      "index": 0,
+      "snap_radius_m": 0.8,
+      "radius_m": 0.55
+    },
+    {
+      "id": "engine1",
+      "anchor": "fdm_thruster",
+      "index": 1,
+      "snap_radius_m": 0.8,
+      "radius_m": 0.55
+    }
+  ],
+  "lights": [
+    {
+      "id": "nav_left",
+      "kind": "nav_red",
+      "anchor": "mesh_extreme",
+      "axis": "-y",
+      "offset_m": [
+        0.0,
+        0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "nav_right",
+      "kind": "nav_green",
+      "anchor": "mesh_extreme",
+      "axis": "+y",
+      "offset_m": [
+        0.0,
+        -0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "tail",
+      "kind": "nav_white",
+      "anchor": "mesh_extreme",
+      "axis": "-x",
+      "offset_m": [
+        0.05,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "strobe_left",
+      "kind": "strobe",
+      "anchor": "mesh_extreme",
+      "axis": "-y",
+      "offset_m": [
+        -0.15,
+        0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "strobe_right",
+      "kind": "strobe",
+      "anchor": "mesh_extreme",
+      "axis": "+y",
+      "offset_m": [
+        -0.15,
+        -0.05,
+        0.0
+      ]
+    }
+  ]
+}
