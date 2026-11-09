@@ -1039,3 +1039,71 @@ CanopyCentre (0, 0, 0).
    BeadAmountGlass, ScratchDensity, ScratchAnisotropy, CanopyCentreCm.
 5. `look_label_check` on a storm beauty run: ALIGNED (nothing here may move a
    label edge).
+
+## dust-humidity-haze
+
+Module: dust and humidity haze, an overlay on the world beauty's atmosphere
+preset. Written 2026-11-09 on the Mac that cannot compile or render the
+bridge. Nothing here has been built or rendered.
+
+### What was built (all BEAUTY ONLY)
+
+`FFlightSimDustHaze` (`FlightSimDustHaze.h/.cpp`) is a member of
+`FFlightSimWorldBeauty`. `Build` calls it right after `ApplyAtmosphere`, so
+`-quality=measure` never reaches it. It records into `render.json`
+`look_applied.world_beauty.dust_haze`. `core/scene/dust_haze.py` is the Python
+twin and holds the documentation. `core/scene/world_record.py` puts the
+expected values (`spec_parameters`) in the `scene.world` record's parameters
+as `dust_haze`.
+
+* Hygroscopic growth (Hanel 1976): the preset's Mie extinction is multiplied by
+  f(RH) = (1 - min(RH, 0.95))^-gamma. gamma is 0.3 continental, 0.5 maritime
+  (ocean surface) and 0.1 dust. RH comes from the card: `look.rh_pct`, then
+  `weather.rh_pct`, then the atmosphere block's stated relative humidity, then
+  its stated dew point against 15 degC plus the stated deviation (Magnus).
+  With none of these it defaults to 50 %, recorded as `rh_basis: default`.
+* Row: `weather.dust` (or `look.dust`) first, then a METAR dust or sand code
+  in `look.present_weather` / `weather.present_weather` (DU, SA, BLSA, DS, SS,
+  PO), then a `desert` surface (`weather_look.surface`), then HZ / FU / BR,
+  which select `haze`. Otherwise `none`. An unknown dust word is refused by
+  name in Python (`dust_haze.row`). The C++ records it and draws `none`.
+* Dust tint: a warm Mie absorption colour (blue absorbs about 2.2x green, red
+  about 0.45x), a tint on the other-absorption layer and a tan volumetric fog
+  albedo.
+* Boundary-layer cap: the scene fog's second fog
+  (`SetSecondFogData`) with its offset at the inversion height (the row's
+  default, or `look.inversion_height_m` / `weather.inversion_height_m`). The
+  engine fog is exponential, not a slab. At falloff 0.015 the density halves
+  every 667 m above the inversion and doubles as fast below it. The "flat top"
+  is that steepness.
+* Visibility kept: the grown Mie and the second layer's ground extinction are
+  taken out of the main fog (`fog_density_ratio`). When together they would
+  exceed the haze, both are scaled by one factor (`renormalised`).
+  `visibility_model_km` equals the card's to rounding.
+* Labels: values only, `pixel_moving: false`. Each frame, the second layer's
+  camera-to-aircraft transmittance is a `cloud_path` row
+  (`layer: dust_haze_second_fog`). Under 0.5 it is flagged and sets
+  `cloud_occludes_aircraft`, the same way a cloud does. The haboob local fog
+  volume is out of scope.
+* A/B switch: `-dust-haze=off` (or `FLIGHTSIM_DUST_HAZE=off`).
+
+### UNCALIBRATED (set by probe render)
+
+Every `DUST_ROWS` value (absorption colours, other absorption, fog albedo,
+second fog density 0 / 0.0002 / 0.0004, falloff 0.015, inversion 1500 /
+1500 / 1800 m), `RH_GAMMA`, `DEFAULT_RH_PCT` and `DEFAULT_INVERSION_HEIGHT_M`.
+
+### Probes to run on the render machine
+
+1. Shot b, desert, A/B: the same card with `-dust-haze=off` and with it on, at
+   1600-3000 m. Check that the haze top reads as a layer below the camera,
+   that the far terrain and the sky near the horizon warm (no magenta, no
+   grey-brown mud), and that the subject's contrast at the card's visibility
+   matches the off render. Tune `second_fog_density`, `second_fog_falloff` and
+   the dust colours.
+2. Shot c, humid forest (`look.rh_pct` 85) against the same card at RH 30:
+   the aerial perspective should be milkier and brighter toward the sun with
+   the same visibility. Tune `RH_GAMMA["continental"]`.
+3. Each run: confirm `world_beauty.dust_haze.visibility_model_km` equals
+   `visibility_target_km`, and that `look_label_check` is ALIGNED. The overlay
+   moves no pixel, so any offset is another module's.

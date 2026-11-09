@@ -66,6 +66,7 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "FlightSimDustHaze.h"
 #include "FlightSimGroundDetail.h"
 #include "FlightSimSunShafts.h"
 
@@ -172,6 +173,9 @@ private:
 	// sun-shafts-sky-occlusion: light shafts, cloud shadow on the atmosphere,
 	// cloud sky AO, the still tier's fog grid (FlightSimSunShafts.h).
 	FFlightSimSunShafts SunShafts;
+
+	// dust-humidity-haze: the overlay after ApplyAtmosphere (FlightSimDustHaze.h).
+	FFlightSimDustHaze DustHaze;
 	TArray<TSharedPtr<FJsonValue>> Frames;
 	// The occlusion summary CloudOcclusionRecord reports (Advance keeps it).
 	double MaxOccludedFraction = 0.0;

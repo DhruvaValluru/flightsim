@@ -311,6 +311,13 @@ world_beauty.overrides:
 world_beauty.clouds:
   sentence: "The beauty clouds were asked for in a mode the world look does not know."
   hint: "Ask for the card's clouds, fair-weather clouds or the engine's clouds, or leave the choice out."
+
+  sentence: "The beauty cloud source is not one the renderer knows."
+  hint: "Use -beauty-clouds=card, fair or engine."
+# dust-humidity-haze (core/scene/dust_haze.py, FlightSimDustHaze.cpp):
+dust_haze.row:
+  sentence: "The dust haze cannot be chosen: the card names a dust word the renderer does not know."
+  hint: "Say dust, haze or none (or true or false) for the weather's dust, or leave it out to let the surface and the reported weather decide."
 ground_scatter.sidecar:
   sentence: "The ground scatter file cannot be read, is of another format or version, or carries no region or species."
   hint: "Write the scatter file again, or render without ground scatter."

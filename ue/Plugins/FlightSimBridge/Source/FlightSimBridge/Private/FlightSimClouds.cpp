@@ -652,6 +652,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		TEXT("nothing here reaches the flight model; the measure quality never builds it"));
 
 	ApplyAtmosphere(World, Scene, VisibilityKm);
+	// dust-humidity-haze (FlightSimDustHaze.h): RH growth, dust tint, the boundary-layer cap.
+	TSharedPtr<FJsonObject> DustOut;
+	DustHaze.Apply(World, Scene, Params, Card, VisibilityKm, WorldObject(Record, TEXT("atmosphere")), DustOut);
+	Record->SetObjectField(TEXT("dust_haze"), DustOut);
 	ApplyClouds(World, Scene, Weather, CloudsMode, bCardLayer ? CardCover : -1.0, CardBaseM, CardTopM, Seed);
 	ApplyTiles(World, Tiles, CardWetness);
 	// sun-shafts-sky-occlusion (FlightSimSunShafts.h): value-only, after the presets.
@@ -1208,6 +1212,13 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 		Occlusions.Add(MakeShared<FJsonValueObject>(Row));
 		bOccluded = bOccluded || Occ.bFlagged;
 		PathTransmittance *= FMath::Clamp(Occ.Transmittance, 0.0, 1.0);
+	}
+	// dust-humidity-haze: the second fog's camera-to-aircraft row, flagged like a cloud's.
+	bool bDustFlagged = false;
+	if (TSharedPtr<FJsonObject> DustRow = DustHaze.FrameRow(CameraCm, AircraftCm, OcclusionFlagTransmittance, bDustFlagged))
+	{
+		Occlusions.Add(MakeShared<FJsonValueObject>(DustRow));
+		bOccluded = bOccluded || bDustFlagged;
 	}
 	Frame->SetArrayField(TEXT("cloud_path"), Occlusions);
 	Frame->SetBoolField(TEXT("cloud_occludes_aircraft"), bOccluded);
