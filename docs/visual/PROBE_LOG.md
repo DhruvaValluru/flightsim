@@ -855,7 +855,7 @@ now converts from much more of github.com/yanes19/SU-27SK @ 925cb531 than
   the 0.5 m nozzle radius against the measured 0.45-0.58 m rim.
 
 **Render-machine steps.**
-1. Pull; the next J-11 render (or `python -m assets_pipeline.importer J11`)
+1. Pull; the next J-11 render (webapp/runs.py ensure_aircraft_model -> importer.ensure_model)
    finds the manifest stale, verifies the 29 pins, re-converts and
    re-imports. Expect "29 pinned package file(s) verified".
 2. `UnrealEditor-Cmd ue/FlightSim.uproject -run=pythonscript -script="scripts/ue_fix_aircraft_materials.py J11"`;
