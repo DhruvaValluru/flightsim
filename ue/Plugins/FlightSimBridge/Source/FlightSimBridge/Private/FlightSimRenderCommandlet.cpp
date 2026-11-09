@@ -41,6 +41,12 @@
 #include "AssetCompilingManager.h"
 #include "RenderingThread.h"
 #include "RHI.h"
+// Render-path lane (visual plan V0/V8): IsRayTracingEnabled (RenderCore),
+// FDataDrivenShaderPlatformInfo::GetSupportsPathTracing (RHI) and the
+// Cinematic scalability level (Engine) for -quality=beauty|pathtrace.
+#include "DataDrivenShaderPlatformInfo.h"
+#include "RenderUtils.h"
+#include "Scalability.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "ShaderCompiler.h"
@@ -274,6 +280,77 @@ namespace
 	constexpr double RenderSubPixelBlurPx = 0.25;
 	// The e-SFR's edge-spread oversampling (a quarter pixel).
 	constexpr int32 RenderEsfrOversample = 4;
+
+	// -- Visual plan V0/V8, render-path lane (2026-11-09) ------------------
+	// The beauty and path-trace look constants. Every one is applied ONLY
+	// under -quality=beauty or -quality=pathtrace (never on measure), and
+	// every one is recorded in render.json render_settings.beauty_path,
+	// read back from the engine where it is a console variable. NONE IS
+	// MEASURED: each line names the probe render that should set it
+	// (docs/visual/PROBE_LOG.md, "## render-path").
+	//
+	// UNCALIBRATED: set by probe render on the render machine. Scalability
+	// group level for beauty (4 = Cinematic, Scalability.h); probe: the
+	// contact sheet (experiments/visual_contact_sheet.py) at 3 and at 4.
+	constexpr int32 RenderBeautyScalabilityLevel = 4;
+	// UNCALIBRATED: set by probe render on the render machine. TSR history
+	// samples per pixel (engine default 16, 32 is the most its metadata
+	// encodes, TemporalSuperResolution.cpp help text); probe: sheet shot (a)
+	// edge-aliasing number at 16 and 32.
+	constexpr float RenderBeautyTsrHistorySamples = 32.0f;
+	// UNCALIBRATED: set by probe render on the render machine. TSR history
+	// at 200 % of the output (the engine's help text: the Nyquist setting);
+	// probe: sheet shot (a) at 100 and 200, edge-aliasing and frame time.
+	constexpr float RenderBeautyTsrHistoryScreenPercentage = 200.0f;
+	// UNCALIBRATED: set by probe render on the render machine. Lumen
+	// per-view quality overrides (Scene.h LumenSceneLightingQuality,
+	// LumenFinalGatherQuality, LumenReflectionQuality; engine default 1,
+	// UI max 2); probe: sheet shot (b) desert shadow side at 1 and 2.
+	constexpr float RenderBeautyLumenSceneLightingQuality = 2.0f;
+	constexpr float RenderBeautyLumenFinalGatherQuality = 2.0f;
+	constexpr float RenderBeautyLumenReflectionQuality = 2.0f;
+	// UNCALIBRATED: set by probe render on the render machine. A scene
+	// capture's Lumen surface cache defaults to half resolution
+	// (SceneCaptureRendering.cpp); 1.0 is the main view's. Probe: shot (a).
+	constexpr float RenderBeautyLumenSurfaceCacheResolution = 1.0f;
+	// UNCALIBRATED: set by probe render on the render machine. Lumen's
+	// scene and trace distance in cm; an aircraft view looks kilometres
+	// out, the engine default is tuned for a person on foot. Probe: shot (b)
+	// at 200 m, 1 km and 4 km against frame time.
+	constexpr float RenderBeautyLumenSceneViewDistanceCm = 400000.0f;
+	constexpr float RenderBeautyLumenMaxTraceDistanceCm = 400000.0f;
+	// UNCALIBRATED: set by probe render on the render machine. Sky
+	// atmosphere: per-pixel sky and aerial perspective instead of the LUTs
+	// (r.SkyAtmosphere.FastSkyLUT 0, AerialPerspectiveLUT.FastApplyOnOpaque
+	// 0), high-quality multiple scattering, 32-bit LUTs, and these sample
+	// caps (engine defaults 32 and 2). Probe: shot (a) horizon band.
+	constexpr float RenderBeautySkySampleCountMax = 64.0f;
+	constexpr float RenderBeautyAerialPerspectiveSamplesPerSlice = 8.0f;
+	// UNCALIBRATED: set by probe render on the render machine. Volumetric
+	// render target mode 3 = "Cinematic mode with tracing done at full
+	// resolution" (VolumetricRenderTarget.cpp help text; default 0 traces
+	// at quarter resolution and reconstructs over frames, which a few
+	// warm-up captures do not converge). Probe: shot (c) cloud edges.
+	constexpr int32 RenderBeautyVolumetricRenderTargetMode = 3;
+	// UNCALIBRATED: set by probe render on the render machine. Still
+	// accumulation (-still-samples=N): N captures of the SAME pose per
+	// delivered frame, the engine's own temporal accumulation (TSR's
+	// jittered history, Lumen's radiance cache) doing the averaging. The
+	// default applies to a beauty run delivering at most
+	// RenderBeautyStillMaxFrames frames (a still); a clip keeps 1 unless
+	// asked. Probe: shot (a) at 1, 8 and 32, edge-aliasing number.
+	constexpr int32 RenderBeautyStillSamplesDefault = 8;
+	constexpr int32 RenderBeautyStillMaxFrames = 1;
+	constexpr int32 RenderBeautyStillSamplesMax = 64;
+	// UNCALIBRATED: set by probe render on the render machine. Path tracer
+	// samples per pixel, bounces and the denoiser (-pathtrace-spp=,
+	// -pathtrace-bounces=, -pathtrace-denoise=). One CaptureScene adds one
+	// sample (PathTracing.cpp: Iteration = SampleIndex, one pass a frame
+	// off multi-GPU). Probe: shot (a) at 64, 256 and 1024 spp.
+	constexpr int32 RenderPathTraceSppDefault = 256;
+	constexpr int32 RenderPathTraceSppMax = 16384;
+	constexpr int32 RenderPathTraceBouncesDefault = 8;
+	constexpr int32 RenderPathTraceDenoiseDefault = 1;
 	static_assert(sizeof(float) == 4, "the linear .f32 files are declared float32");
 
 	// A pixel of a world point through a capture's transform and FOV, and
@@ -1164,7 +1241,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		            "[-passes=normal,velocity,albedo] [-width=960] [-height=540] "
 		            "[-calibration] [-sun-lux=<lux>] [-accumulate=<K>] [-velocity-check] "
 		            "[-normal-source=scs|material] [-scene=<scene document>] "
-		            "[-quality=measure|beauty] [-warmup=N] [-triangle-budget=<n>] "
+		            "[-quality=measure|beauty|pathtrace] [-warmup=N] [-still-samples=N] "
+		            "[-pathtrace-spp=N] [-pathtrace-bounces=N] [-pathtrace-denoise=0|1] "
+		            "[-triangle-budget=<n>] "
 		            "[-sun-intensity-scale=<x>] [-sky-light-scale=<x>] [-sun-temperature=<K>] "
 		            "[-sun-source-angle=<deg>]"));
 		return 1;
@@ -1180,13 +1259,62 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// beauty); the manifest says which one produced the frames.
 	FString Quality = TEXT("measure");
 	FParse::Value(*Params, TEXT("quality="), Quality);
-	if (Quality != TEXT("measure") && Quality != TEXT("beauty"))
+	if (Quality != TEXT("measure") && Quality != TEXT("beauty") && Quality != TEXT("pathtrace"))
 	{
 		UE_LOG(LogFlightSimRender, Error,
-		       TEXT("-quality=%s is not one of measure, beauty"), *Quality);
+		       TEXT("-quality=%s is not one of measure, beauty, pathtrace"), *Quality);
 		return 1;
 	}
-	const bool bBeauty = Quality == TEXT("beauty");
+	// Render-path lane (visual plan V8): "pathtrace" is the beauty scene
+	// rendered by the engine's path tracer (hero stills; Windows with a
+	// ray-tracing RHI only, refused by name elsewhere once Fail exists).
+	// Everything gated on bBeauty applies to it too; what is path-trace
+	// only is gated on bPathTrace.
+	const bool bPathTrace = Quality == TEXT("pathtrace");
+	const bool bBeauty = Quality == TEXT("beauty") || bPathTrace;
+	// -still-samples=N (beauty only): N captures of the same pose per
+	// delivered frame (RenderBeautyStillSamplesDefault for a still when not
+	// stated). -pathtrace-spp= / -pathtrace-bounces= / -pathtrace-denoise=
+	// (pathtrace only). Each refused by name off its tier, so measure never
+	// takes one.
+	int32 StillSamplesRequested = 0;
+	const bool bStillSamplesFlag = FParse::Value(*Params, TEXT("still-samples="), StillSamplesRequested);
+	int32 PathTraceSpp = RenderPathTraceSppDefault;
+	const bool bPathTraceSppFlag = FParse::Value(*Params, TEXT("pathtrace-spp="), PathTraceSpp);
+	int32 PathTraceBounces = RenderPathTraceBouncesDefault;
+	const bool bPathTraceBouncesFlag = FParse::Value(*Params, TEXT("pathtrace-bounces="), PathTraceBounces);
+	int32 PathTraceDenoise = RenderPathTraceDenoiseDefault;
+	const bool bPathTraceDenoiseFlag = FParse::Value(*Params, TEXT("pathtrace-denoise="), PathTraceDenoise);
+	if (bStillSamplesFlag && Quality != TEXT("beauty"))
+	{
+		UE_LOG(LogFlightSimRender, Error,
+		       TEXT("render.still_samples: -still-samples needs -quality=beauty (the path tracer ")
+		       TEXT("accumulates by -pathtrace-spp=; measure is never accumulated)"));
+		return 1;
+	}
+	if (bStillSamplesFlag && (StillSamplesRequested < 1 || StillSamplesRequested > RenderBeautyStillSamplesMax))
+	{
+		UE_LOG(LogFlightSimRender, Error,
+		       TEXT("render.still_samples: -still-samples=%d is not a whole number from 1 to %d"),
+		       StillSamplesRequested, RenderBeautyStillSamplesMax);
+		return 1;
+	}
+	if (!bPathTrace && (bPathTraceSppFlag || bPathTraceBouncesFlag || bPathTraceDenoiseFlag))
+	{
+		UE_LOG(LogFlightSimRender, Error,
+		       TEXT("render.pathtrace: -pathtrace-spp/-bounces/-denoise need -quality=pathtrace"));
+		return 1;
+	}
+	if (bPathTrace && (PathTraceSpp < 1 || PathTraceSpp > RenderPathTraceSppMax ||
+	                   PathTraceBounces < 0 || PathTraceBounces > 100 ||
+	                   (PathTraceDenoise != 0 && PathTraceDenoise != 1)))
+	{
+		UE_LOG(LogFlightSimRender, Error,
+		       TEXT("render.pathtrace: -pathtrace-spp=%d (1-%d), -pathtrace-bounces=%d (0-100), ")
+		       TEXT("-pathtrace-denoise=%d (0 or 1): a value is out of range"),
+		       PathTraceSpp, RenderPathTraceSppMax, PathTraceBounces, PathTraceDenoise);
+		return 1;
+	}
 	double FramesPerSecond = 5.0;
 	int32 Width = bBeauty ? 1920 : 960;
 	int32 Height = bBeauty ? 1080 : 540;
@@ -2630,6 +2758,201 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		};
 		SetCvar(TEXT("r.AntiAliasingMethod"), 4);       // TSR
 		SetCvar(TEXT("r.Shadow.Virtual.Enable"), 1);    // VSM
+	}
+	// -- render-path lane (visual plan V0 audit + V8, 2026-11-09) ----------
+	// What the V0 audit found against the 5.7.4 engine source, and what
+	// this block does about it (docs/visual/PROBE_LOG.md "## render-path"):
+	//  * TSR never ran. USceneCaptureComponent2D's constructor clears the
+	//    TemporalAA show flag ("previous behavior was not exposing MotionBlur
+	//    and Temporal AA in scene capture 2d", SceneCaptureComponent.cpp) and
+	//    FSceneView::SetupAntiAliasingMethod (SceneView.cpp) falls back from
+	//    AAM_TSR to AAM_FXAA when that flag is clear: r.AntiAliasingMethod=4
+	//    alone gave the beauty capture FXAA. Beauty now sets the flag. The
+	//    family is realtime (bRealtimeUpdate) because
+	//    bAlwaysPersistRenderingState is set (SceneCaptureRendering.cpp), and
+	//    the view state that TSR history and Lumen need exists for the same
+	//    reason (SceneCaptureComponent.cpp GetViewState).
+	//  * Lumen inside the capture: a scene capture defaults GI/reflections
+	//    to None unless its post-process overrides them
+	//    (SceneCaptureRendering.cpp; ApplyBeautyPostProcess does), and its
+	//    surface cache to HALF resolution; beauty raises it to 1.0.
+	//  * Measure is untouched: nothing below runs without bBeauty, and
+	//    BeautyPath stays null, so a measure render.json gains no field.
+	TSharedPtr<FJsonObject> BeautyPath;
+	if (bPathTrace && !bVisual)
+	{
+		return Fail(TEXT("render.pathtrace: -quality=pathtrace needs -Visual; the void scene has ")
+		            TEXT("no sky or sun for a path tracer to light"));
+	}
+	if (bVisual && bBeauty)
+	{
+		BeautyPath = MakeShared<FJsonObject>();
+		TSharedPtr<FJsonObject> Asked = MakeShared<FJsonObject>();
+		TSharedPtr<FJsonObject> ReadBack = MakeShared<FJsonObject>();
+		auto SetBeautyCvar = [&](const TCHAR* Name, float Value)
+		{
+			Asked->SetNumberField(Name, Value);
+			if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name))
+			{
+				Variable->Set(Value, ECVF_SetByCode);
+				ReadBack->SetStringField(Name, Variable->GetString());
+			}
+			else
+			{
+				ReadBack->SetStringField(Name, TEXT("absent"));
+				UE_LOG(LogFlightSimRender, Warning,
+				       TEXT("beauty: renderer cvar %s not found on this build; recorded absent"), Name);
+			}
+		};
+		// 1. The Cinematic scalability level, FIRST: it sets its cvars at
+		// scalability priority, and every explicit cvar below is code
+		// priority, so the explicit ones win where both touch a name.
+		Scalability::FQualityLevels Levels = Scalability::GetQualityLevels();
+		const int32 ScalabilityBefore = Levels.GetSingleQualityLevel();
+		Levels.SetFromSingleQualityLevel(RenderBeautyScalabilityLevel);
+		Scalability::SetQualityLevels(Levels);
+		BeautyPath->SetNumberField(TEXT("scalability_before"), ScalabilityBefore);
+		BeautyPath->SetNumberField(TEXT("scalability_asked"), RenderBeautyScalabilityLevel);
+		BeautyPath->SetNumberField(TEXT("scalability_applied"),
+			Scalability::GetQualityLevels().GetSingleQualityLevel());
+		// The two the earlier V0 code set, re-asserted after scalability.
+		SetBeautyCvar(TEXT("r.AntiAliasingMethod"), 4.0f);
+		SetBeautyCvar(TEXT("r.Shadow.Virtual.Enable"), 1.0f);
+		// 2. Sky atmosphere: per-pixel sky and aerial perspective, high-
+		// quality multiple scattering, 32-bit LUTs (each name grepped in
+		// SkyAtmosphereRendering.cpp, 5.7.4).
+		SetBeautyCvar(TEXT("r.SkyAtmosphere.FastSkyLUT"), 0.0f);
+		SetBeautyCvar(TEXT("r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque"), 0.0f);
+		SetBeautyCvar(TEXT("r.SkyAtmosphere.MultiScatteringLUT.HighQuality"), 1.0f);
+		SetBeautyCvar(TEXT("r.SkyAtmosphere.LUT32"), 1.0f);
+		SetBeautyCvar(TEXT("r.SkyAtmosphere.SampleCountMax"), RenderBeautySkySampleCountMax);
+		SetBeautyCvar(TEXT("r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice"),
+		              RenderBeautyAerialPerspectiveSamplesPerSlice);
+		// 3. Volumetric clouds on, traced at full resolution, with per-
+		// pixel aerial perspective on the clouds (VolumetricCloudRendering.cpp,
+		// VolumetricRenderTarget.cpp). Visual-only: label captures draw no
+		// cloud (ConfigureLabelCapture SetCloud(false)), as before.
+		SetBeautyCvar(TEXT("r.VolumetricCloud"), 1.0f);
+		SetBeautyCvar(TEXT("r.VolumetricCloud.HighQualityAerialPerspective"), 1.0f);
+		SetBeautyCvar(TEXT("r.VolumetricRenderTarget.Mode"),
+		              static_cast<float>(RenderBeautyVolumetricRenderTargetMode));
+		FPostProcessSettings& Beauty = Capture->PostProcessSettings;
+		if (!bPathTrace)
+		{
+			// 4. TSR, actually on (the audit's first finding), with its
+			// history at the encodable maximum and twice the output size.
+			Capture->ShowFlags.SetAntiAliasing(true);
+			Capture->ShowFlags.SetTemporalAA(true);
+			SetBeautyCvar(TEXT("r.TSR.History.SampleCount"), RenderBeautyTsrHistorySamples);
+			SetBeautyCvar(TEXT("r.TSR.History.ScreenPercentage"), RenderBeautyTsrHistoryScreenPercentage);
+			// 5. Lumen per-view quality (Scene.h overrides).
+			Beauty.bOverride_LumenSurfaceCacheResolution = true;
+			Beauty.LumenSurfaceCacheResolution = RenderBeautyLumenSurfaceCacheResolution;
+			Beauty.bOverride_LumenSceneLightingQuality = true;
+			Beauty.LumenSceneLightingQuality = RenderBeautyLumenSceneLightingQuality;
+			Beauty.bOverride_LumenFinalGatherQuality = true;
+			Beauty.LumenFinalGatherQuality = RenderBeautyLumenFinalGatherQuality;
+			Beauty.bOverride_LumenReflectionQuality = true;
+			Beauty.LumenReflectionQuality = RenderBeautyLumenReflectionQuality;
+			Beauty.bOverride_LumenSceneViewDistance = true;
+			Beauty.LumenSceneViewDistance = RenderBeautyLumenSceneViewDistanceCm;
+			Beauty.bOverride_LumenMaxTraceDistance = true;
+			Beauty.LumenMaxTraceDistance = RenderBeautyLumenMaxTraceDistanceCm;
+			TSharedPtr<FJsonObject> LumenRecord = MakeShared<FJsonObject>();
+			LumenRecord->SetNumberField(TEXT("surface_cache_resolution"), Beauty.LumenSurfaceCacheResolution);
+			LumenRecord->SetNumberField(TEXT("scene_lighting_quality"), Beauty.LumenSceneLightingQuality);
+			LumenRecord->SetNumberField(TEXT("final_gather_quality"), Beauty.LumenFinalGatherQuality);
+			LumenRecord->SetNumberField(TEXT("reflection_quality"), Beauty.LumenReflectionQuality);
+			LumenRecord->SetNumberField(TEXT("scene_view_distance_cm"), Beauty.LumenSceneViewDistance);
+			LumenRecord->SetNumberField(TEXT("max_trace_distance_cm"), Beauty.LumenMaxTraceDistance);
+			BeautyPath->SetObjectField(TEXT("lumen_capture_overrides"), LumenRecord);
+		}
+		else
+		{
+			// 6. The path tracer (visual plan V8 hero stills). Read in the
+			// 5.7.4 source: the PathTracing show flag (ShowFlagsValues.inl)
+			// routes the view to RenderPathTracing (DeferredShadingRenderer.cpp),
+			// whose accumulation lives in the VIEW STATE (PathTracing.cpp
+			// GetPathTracingStateFromView) -- which this capture has, since
+			// bAlwaysPersistRenderingState is set -- and SceneCaptureRendering.cpp
+			// has no path-tracing exclusion. So the scene capture route is
+			// used, not the game viewport. One CaptureScene adds one sample;
+			// a moved camera or a changed scene resets the accumulation.
+#if !PLATFORM_WINDOWS
+			return Fail(TEXT("render.pathtrace: -quality=pathtrace runs on the Windows render host ")
+			            TEXT("only (DX12 with hardware ray tracing); this platform is not one"));
+#else
+			if (!GRHISupportsRayTracing)
+			{
+				return Fail(FString::Printf(
+					TEXT("render.pathtrace: the RHI (%s) reports no ray tracing support on this GPU ")
+					TEXT("or driver; the path tracer needs it"), GDynamicRHI->GetName()));
+			}
+			if (!FDataDrivenShaderPlatformInfo::GetSupportsPathTracing(GMaxRHIShaderPlatform))
+			{
+				return Fail(TEXT("render.pathtrace: the shader platform this process runs does not ")
+				            TEXT("support path tracing (DataDrivenShaderPlatformInfo)"));
+			}
+			if (!IsRayTracingEnabled())
+			{
+				return Fail(TEXT("render.pathtrace: ray tracing is not enabled in this process. It is a ")
+				            TEXT("startup-only project setting kept OUT of DefaultEngine.ini (it would ")
+				            TEXT("change every measure render); pass ")
+				            TEXT("-ini:Engine:[/Script/Engine.RendererSettings]:r.RayTracing=True, as ")
+				            TEXT("scripts/render_visual_sheet.ps1 -PathTrace does"));
+			}
+			if (IConsoleVariable* PathTracingCvar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.PathTracing")))
+			{
+				if (PathTracingCvar->GetInt() == 0)
+				{
+					return Fail(TEXT("render.pathtrace: r.PathTracing is 0 (read-only, startup); the path ")
+					            TEXT("tracer's shaders are not compiled in this process"));
+				}
+			}
+#endif
+			if (bAccumulate || bLinear || bCalibration)
+			{
+				return Fail(TEXT("render.pathtrace: -accumulate, -linear and -calibration copy the beauty ")
+				            TEXT("capture's show flags into a capture of their own, which would path trace ")
+				            TEXT("a single sample; ask for them on -quality=beauty"));
+			}
+			Capture->ShowFlags.SetPathTracing(true);
+			Beauty.bOverride_PathTracingSamplesPerPixel = true;
+			Beauty.PathTracingSamplesPerPixel = PathTraceSpp;
+			Beauty.bOverride_PathTracingMaxBounces = true;
+			Beauty.PathTracingMaxBounces = PathTraceBounces;
+			Beauty.bOverride_PathTracingEnableDenoiser = true;
+			Beauty.PathTracingEnableDenoiser = PathTraceDenoise != 0 ? 1 : 0;
+			TSharedPtr<FJsonObject> PathTracer = MakeShared<FJsonObject>();
+			PathTracer->SetNumberField(TEXT("samples_per_pixel"), PathTraceSpp);
+			PathTracer->SetNumberField(TEXT("max_bounces"), PathTraceBounces);
+			PathTracer->SetBoolField(TEXT("denoiser_asked"), PathTraceDenoise != 0);
+			// Which denoiser (if any) the engine has: a denoiser plugin must be
+			// enabled for PathTracingEnableDenoiser to do anything
+			// (PathTracingSpatialTemporalDenoising.cpp IsPathTracingDenoiserEnabled).
+			const TCHAR* const PathTracingNames[] = {
+				TEXT("r.PathTracing.Denoiser"), TEXT("r.PathTracing.Denoiser.Name"),
+				TEXT("r.PathTracing.FilterWidth"), TEXT("r.PathTracing.EnableReferenceAtmosphere"),
+				TEXT("r.PathTracing.EnableReferenceClouds"), TEXT("r.RayTracing"),
+			};
+			for (const TCHAR* Name : PathTracingNames)
+			{
+				IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name);
+				PathTracer->SetStringField(Name, Variable != nullptr ? Variable->GetString() : FString(TEXT("absent")));
+			}
+			PathTracer->SetStringField(TEXT("route"),
+				TEXT("scene capture with the PathTracing show flag (view-state accumulation), one sample a CaptureScene"));
+			PathTracer->SetStringField(TEXT("labels_note"),
+				TEXT("label captures stay rasterised, AA-free and unjittered from the same pose; the path ")
+				TEXT("tracer's pixel filter (r.PathTracing.FilterWidth, a Gaussian about half a pixel wide) ")
+				TEXT("softens silhouettes by under a pixel and moves no geometry"));
+			BeautyPath->SetObjectField(TEXT("path_tracer"), PathTracer);
+		}
+		BeautyPath->SetObjectField(TEXT("cvars_asked"), Asked);
+		BeautyPath->SetObjectField(TEXT("cvars_read_back"), ReadBack);
+		BeautyPath->SetStringField(TEXT("calibration"),
+			TEXT("UNCALIBRATED: every constant here is set by probe render on the render machine ")
+			TEXT("(docs/visual/PROBE_LOG.md, render-path)"));
 	}
 	AntiAliasingMethod = ReadCvar(TEXT("r.AntiAliasingMethod"));
 	VirtualShadowMaps = ReadCvar(TEXT("r.Shadow.Virtual.Enable"));
@@ -4139,6 +4462,48 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	UE_LOG(LogFlightSimRender, Display,
 	       TEXT("stepping %d frames of %.6f s, capturing every %d (%.1f Hz) at %dx%d"),
 	       Steps, DeltaSeconds, StepsPerFrame, Card.RateHz / StepsPerFrame, Width, Height);
+	// Render-path lane: beauty captures per delivered frame, all at the
+	// frame's own pose (nothing steps, moves or advances between them).
+	// Measure: always 1, so the loop below is the loop Gate 6 passed on.
+	// Beauty: -still-samples=N, else RenderBeautyStillSamplesDefault for a
+	// still (at most RenderBeautyStillMaxFrames delivered), else 1.
+	// Pathtrace: -pathtrace-spp (one sample a capture). The label captures
+	// run once, after the last one, unjittered (AA and temporal AA off).
+	const int32 DeliveredFrames = bConsumePoses
+		? CaptureTimes.Num()
+		: (Steps + StepsPerFrame - 1) / StepsPerFrame;
+	int32 BeautySubFrames = 1;
+	FString BeautySubFramesBasis = TEXT("one capture a frame (measure, or a beauty clip)");
+	if (bVisual && bPathTrace)
+	{
+		BeautySubFrames = PathTraceSpp;
+		BeautySubFramesBasis = TEXT("pathtrace: one path-traced sample a capture, -pathtrace-spp of them");
+	}
+	else if (bVisual && bBeauty && bStillSamplesFlag)
+	{
+		BeautySubFrames = StillSamplesRequested;
+		BeautySubFramesBasis = TEXT("-still-samples, stated");
+	}
+	else if (bVisual && bBeauty && DeliveredFrames <= RenderBeautyStillMaxFrames)
+	{
+		BeautySubFrames = RenderBeautyStillSamplesDefault;
+		BeautySubFramesBasis = TEXT("beauty still default (RenderBeautyStillSamplesDefault, UNCALIBRATED)");
+	}
+	if (BeautyPath.IsValid())
+	{
+		TSharedPtr<FJsonObject> SubFrames = MakeShared<FJsonObject>();
+		SubFrames->SetNumberField(TEXT("captures_per_frame"), BeautySubFrames);
+		SubFrames->SetNumberField(TEXT("delivered_frames"), DeliveredFrames);
+		SubFrames->SetStringField(TEXT("basis"), BeautySubFramesBasis);
+		SubFrames->SetStringField(TEXT("method"), bPathTrace
+			? TEXT("the path tracer's own progressive accumulation in the capture's view state")
+			: TEXT("the engine's own temporal accumulation: TSR's jittered history (r.TSR.History.SampleCount ")
+			  TEXT("caps what it keeps) and Lumen's radiance cache, over repeated captures of one pose; ")
+			  TEXT("no hand-rolled average, so the tonemapper sees the converged HDR scene"));
+		SubFrames->SetStringField(TEXT("labels"),
+			TEXT("rendered once per frame after the last beauty capture, same camera pose, no jitter"));
+		BeautyPath->SetObjectField(TEXT("accumulation"), SubFrames);
+	}
 
 	TArray<TSharedPtr<FJsonValue>> FrameRecords;
 	TArray<FColor> Pixels;
@@ -4361,6 +4726,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			VisualScene.SkyLightComponent->SetCaptureIsDirty();
 			USkyLightComponent::UpdateSkyCaptureContents(World);
+			FlushRenderingCommands();
+		}
+		// Render-path lane: the beauty sub-frames of this pose (none on
+		// measure: BeautySubFrames is 1 there and this loop is empty). The
+		// last capture is the one read back below.
+		for (int32 SubFrame = 1; SubFrame < BeautySubFrames; ++SubFrame)
+		{
+			Capture->CaptureScene();
 			FlushRenderingCommands();
 		}
 		Capture->CaptureScene();
@@ -6339,6 +6712,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		BeautyFlags->SetBoolField(TEXT("lens_flares"), Capture->ShowFlags.LensFlares != 0);
 		BeautyFlags->SetBoolField(TEXT("dynamic_shadows"), Capture->ShowFlags.DynamicShadows != 0);
 		RenderSettings->SetObjectField(TEXT("beauty_show_flags"), BeautyFlags);
+		// Render-path lane: beauty and pathtrace only (null on measure, so a
+		// measure render.json is unchanged): every look constant asked, every
+		// cvar read back, the accumulation and the path tracer's settings.
+		if (BeautyPath.IsValid())
+		{
+			BeautyPath->SetStringField(TEXT("quality"), Quality);
+			BeautyPath->SetBoolField(TEXT("temporal_aa_show_flag"), Capture->ShowFlags.TemporalAA != 0);
+			BeautyPath->SetBoolField(TEXT("path_tracing_show_flag"), Capture->ShowFlags.PathTracing != 0);
+			RenderSettings->SetObjectField(TEXT("beauty_path"), BeautyPath);
+		}
 
 		// Scene captures render at their target's size; the screen
 		// percentage CVar is recorded above as found, the size here.
@@ -6622,7 +7005,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Scene->SetNumberField(TEXT("warmup_captures"), WarmupCaptures);
 	Scene->SetNumberField(TEXT("cvar_anti_aliasing_method"), AntiAliasingMethod);
 	Scene->SetNumberField(TEXT("cvar_virtual_shadow_maps"), VirtualShadowMaps);
-	Scene->SetStringField(TEXT("gi_reflections"), (bVisual && bBeauty)
+	Scene->SetStringField(TEXT("gi_reflections"), (bVisual && bPathTrace)
+		? TEXT("path traced (the path tracer replaces Lumen; render_settings.beauty_path.path_tracer)")
+		: (bVisual && bBeauty)
 		? TEXT("Lumen GI + Lumen reflections (capture post-process override)")
 		: TEXT("engine default (no override)"));
 	Scene->SetStringField(TEXT("exposure"), (bPhysicalSky

@@ -285,6 +285,13 @@ sun.below_render_floor:
 render.quality:
   sentence: "The render quality asked for is not one the renderer knows; it knows measure and beauty."
   hint: "Set FLIGHTSIM_RENDER_QUALITY to measure or beauty, or leave it unset."
+# render-path lane (visual plan V0/V8, FlightSimRenderCommandlet.cpp):
+render.still_samples:
+  sentence: "Still accumulation was asked for on a render that is not a beauty render, or with a count out of range."
+  hint: "Use -still-samples=N (1 to 64) only with -quality=beauty."
+render.pathtrace:
+  sentence: "The path-traced render cannot run here: it needs the Windows render host with hardware ray tracing turned on for that render."
+  hint: "Render the path-traced sheet on the Windows box, or ask for the beauty quality instead."
 
 # -- the batch runner (core/dataset/batch.py) --------------------------------
 
