@@ -34,6 +34,7 @@
 #include "HAL/IConsoleManager.h"
 #include "GeoReferencingSystem.h"
 #include "FlightSimGoogleTiles.h"
+#include "FlightSimClouds.h"   // world lane hook (visual overhaul): the beauty-only world look
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
@@ -1610,6 +1611,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// Google Photorealistic 3D Tiles as the visible ground of every terrain
 	// render (FLIGHTSIM_GOOGLE_TILES=off is the only way off; FlightSimGoogleTiles.h).
 	FFlightSimGoogleTiles GoogleTiles;
+	// World lane hook (visual overhaul, FlightSimClouds.h): built only under -quality=beauty.
+	FFlightSimWorldBeauty WorldBeauty;
 	// -- Phase 2 Look lane: the card's look block (contracts §5.4) ---------
 	// The engine consumes what the CARD carries: `look` at the root, else
 	// `randomization.look` (where package F lands it, contracts §5.6). The
@@ -2102,6 +2105,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				GoogleTiles.HideOwnTerrain(World);
 			}
 		}
+		// World lane hook (visual overhaul): atmosphere depth, clouds, tiles look, rain, scatter.
+		// -quality=measure never reaches it (Gate 6's renders stay byte-identical).
+		if (bBeauty && !WorldBeauty.Build(World, *Params, WorldCardRoot, Scenario.Aircraft, Scenario.GeoReferencing,
+		                                  VisualScene, Weather, GoogleTiles, Error)) { return Fail(Error); }
 	}
 	else
 	{
@@ -4687,6 +4694,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			Weather.Advance(WeatherView);
 		}
+		// World lane hook (visual overhaul): built only under -quality=beauty.
+		if (WorldBeauty.IsBuilt()) { WorldBeauty.Advance(Scenario.ReadProperty(TEXT("simulation/sim-time-sec")),
+			Capture->GetComponentLocation(), Scenario.Aircraft->GetActorLocation(), Captured); }
 		World->SendAllEndOfFrameUpdates();
 		FlushRenderingCommands();
 		// I6: the velocity pass renders FIRST after the step, before the

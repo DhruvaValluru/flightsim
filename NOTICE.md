@@ -31,3 +31,11 @@ into `data/textures/polyhaven/` (not committed): Poly Haven
 the live API to credit it visibly: "Textures: Poly Haven (polyhaven.com),
 CC0". Each surface's `provenance.json` names the asset, its URLs and the
 files' digests. Without the step, every ground material is procedural.
+
+## Ground-scatter models (beauty renders)
+
+Fetched by `scripts/fetch_scatter_assets.py` into `data/scatter/polyhaven/`
+(not committed), pinned in `assets/scatter/polyhaven_pins.json` (source URL,
+md5 from Poly Haven's API, sha256): Poly Haven (polyhaven.com), CC0 1.0.
+"Models: Poly Haven (polyhaven.com), CC0". Visual only; a species without a
+complete pin is never drawn.

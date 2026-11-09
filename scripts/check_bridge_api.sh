@@ -281,6 +281,76 @@ else
     bad "engine simple cloud material" "missing: physical-sky renders draw no clouds (recorded, not fatal)"
 fi
 
+# -- world lane (visual overhaul, 2026-11-09): the beauty world look ---------
+# FlightSimClouds.cpp, FlightSimGroundDetail.cpp, the FlightSimGoogleTiles.cpp
+# beauty look and the FlightSimWeather.cpp readability hook. Each symbol was
+# read in the 5.7.4 headers when written; this re-checks them before a build.
+# Cesium for Unreal's API is NOT checked here: it is reached by reflection by
+# name (no Cesium headers on the authoring machine; UNVERIFIED).
+COREUO="$UE_ROOT/Engine/Source/Runtime/CoreUObject/Public/UObject"
+SKYC="Classes/Components/SkyAtmosphereComponent.h"
+sky_check "world: SkyAtmosphere SetMieScatteringScale" "$SKYC" "void SetMieScatteringScale(float NewValue)"
+sky_check "world: SkyAtmosphere SetMieAbsorptionScale" "$SKYC" "void SetMieAbsorptionScale(float NewValue)"
+sky_check "world: SkyAtmosphere SetMieExponentialDistribution" "$SKYC" "void SetMieExponentialDistribution(float NewValue)"
+sky_check "world: SkyAtmosphere SetMieAnisotropy" "$SKYC" "void SetMieAnisotropy(float NewValue)"
+sky_check "world: SkyAtmosphere SetAerialPespectiveViewDistanceScale" "$SKYC" "void SetAerialPespectiveViewDistanceScale(float NewValue)"
+sky_check "world: SkyAtmosphere SetGroundAlbedo" "$SKYC" "void SetGroundAlbedo(const FColor& NewValue)"
+sky_check "world: Fog FogDensity property" "$FOG" "float FogDensity;"
+sky_check "world: Fog SetVolumetricFog" "$FOG" "void SetVolumetricFog(bool bNewValue)"
+sky_check "world: Fog SetVolumetricFogDistance" "$FOG" "void SetVolumetricFogDistance(float NewValue)"
+sky_check "world: Fog SetVolumetricFogScatteringDistribution" "$FOG" "void SetVolumetricFogScatteringDistribution(float NewValue)"
+sky_check "world: Fog SetVolumetricFogExtinctionScale" "$FOG" "void SetVolumetricFogExtinctionScale(float NewValue)"
+sky_check "world: DirectionalLight bCastShadowsOnClouds" "$DLC" "uint32 bCastShadowsOnClouds : 1;"
+sky_check "world: DirectionalLight bCastShadowsOnAtmosphere" "$DLC" "uint32 bCastShadowsOnAtmosphere : 1;"
+sky_check "world: DirectionalLight bCastCloudShadows" "$DLC" "uint32 bCastCloudShadows : 1;"
+sky_check "world: LightComponentBase bCastVolumetricShadow" "Classes/Components/LightComponentBase.h" "uint32 bCastVolumetricShadow : 1;"
+sky_check "world: LightComponentBase Intensity" "Classes/Components/LightComponentBase.h" "float Intensity;"
+sky_check "world: SkyLight SetIntensity" "Classes/Components/SkyLightComponent.h" "void SetIntensity(float NewIntensity)"
+sky_check "world: VolumetricCloud Material soft pointer" "$VC" "TSoftObjectPtr<UMaterialInterface> Material;"
+sky_check "world: VolumetricCloud LayerBottomAltitude" "$VC" "float LayerBottomAltitude;"
+sky_check "world: VolumetricCloud per-sample transmittance" "$VC" "void SetbUsePerSampleAtmosphericLightTransmittance(bool NewValue)"
+sky_check "world: VolumetricCloud SetSkyLightCloudBottomOcclusion" "$VC" "void SetSkyLightCloudBottomOcclusion(float NewValue)"
+sky_check "world: VolumetricCloud SetViewSampleCountScale" "$VC" "void SetViewSampleCountScale(float NewValue)"
+sky_check "world: VolumetricCloud SetShadowViewSampleCountScale" "$VC" "void SetShadowViewSampleCountScale(float NewValue)"
+sky_check "world: VolumetricCloud SetShadowTracingDistance" "$VC" "void SetShadowTracingDistance(float NewValue)"
+sky_check "world: VolumetricCloud SetTracingMaxDistance" "$VC" "void SetTracingMaxDistance(float NewValue)"
+sky_check "world: VolumetricCloud SetStopTracingTransmittanceThreshold" "$VC" "void SetStopTracingTransmittanceThreshold(float NewValue)"
+sky_check "world: VolumetricCloud SetGroundAlbedo" "$VC" "void SetGroundAlbedo(FColor NewValue)"
+sky_check "world: cloud sample attribute expression" "Public/Materials/MaterialExpressionCloudLayer.h" "class UMaterialExpressionCloudSampleAttribute"
+sky_check "world: MPC instance SetScalarParameterValue" "Public/Materials/MaterialParameterCollectionInstance.h" "bool SetScalarParameterValue(FName ParameterName, float ParameterValue)"
+sky_check "world: World GetParameterCollectionInstance" "Classes/Engine/World.h" "GetParameterCollectionInstance(const UMaterialParameterCollection* Collection) const"
+sky_check "world: World LineTraceSingleByChannel" "Classes/Engine/World.h" "bool LineTraceSingleByChannel(struct FHitResult& OutHit,const FVector& Start,const FVector& End,ECollisionChannel TraceChannel"
+sky_check "world: CollisionQueryParams AddIgnoredActors" "Public/CollisionQueryParams.h" "void AddIgnoredActors(const TArray<AActor*>& InIgnoreActors)"
+ISMH="Classes/Components/InstancedStaticMeshComponent.h"
+sky_check "world: ISM AddInstance" "$ISMH" "virtual int32 AddInstance(const FTransform& InstanceTransform, bool bWorldSpace = false)"
+sky_check "world: ISM GetInstanceTransform" "$ISMH" "bool GetInstanceTransform(int32 InstanceIndex, FTransform& OutInstanceTransform, bool bWorldSpace = false) const"
+sky_check "world: ISM UpdateInstanceTransform" "$ISMH" "virtual bool UpdateInstanceTransform(int32 InstanceIndex, const FTransform& NewInstanceTransform, bool bWorldSpace=false, bool bMarkRenderStateDirty=false, bool bTeleport=false)"
+sky_check "world: ISM SetCullDistances" "$ISMH" "void SetCullDistances(int32 StartCullDistance, int32 EndCullDistance)"
+core_check() {  # label, header (relative to CoreUObject/Public/UObject), fixed-string pattern
+    if [ ! -f "$COREUO/$2" ]; then
+        bad "$1" "header $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$COREUO/$2"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- the world lane's reflection code needs updating"
+    fi
+}
+core_check "world: FindFProperty" "UnrealType.h" "T* FindFProperty(const UStruct* Owner, const TCHAR* FieldName"
+core_check "world: FObjectProperty SetObjectPropertyValue_InContainer" "UnrealType.h" "void SetObjectPropertyValue_InContainer(void* ContainerAddress, UObject* Value, int32 ArrayIndex = 0) const"
+core_check "world: FBoolProperty SetPropertyValue_InContainer" "UnrealType.h" "void SetPropertyValue_InContainer(void* A, bool Value, int32 ArrayIndex = 0) const"
+core_check "world: UFunction ParmsSize" "Class.h" "uint16 ParmsSize;"
+core_check "world: UObject ProcessEvent" "Object.h" "virtual void ProcessEvent( UFunction* Function, void* Parms );"
+if [ -f "$UE_ROOT/Engine/Content/EngineResources/WhiteSquareTexture.uasset" ]; then
+    ok "world: engine WhiteSquareTexture" "present (the tiles material's texture default)"
+else
+    bad "world: engine WhiteSquareTexture" "missing: M_FlightSimTilesBeauty needs another default texture"
+fi
+if grep -qF 'GetCloudSampleNormAltitudeInLayer' "$UE_ROOT/Engine/Config/BaseMaterialExpressions.ini" 2>/dev/null; then
+    ok "world: NormAltitudeInLayer output" "present"
+else
+    bad "world: NormAltitudeInLayer output" "not in BaseMaterialExpressions.ini: M_FlightSimCloudLayers' pin name changed"
+fi
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'

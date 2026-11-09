@@ -218,6 +218,16 @@ public:
 	bool DrawsCell() const { return bCell; }
 	bool IsBuilt() const { return bBuilt; }
 
+	// -- visual overhaul, world lane (2026-11-09): BEAUTY ONLY ---------------
+	// The lightning illuminance at the camera the last Advance drew (lux; 0
+	// without lightning): the world beauty's sky pulse and its per-frame record.
+	double LastFlashLux() const { return LastFlashLuxValue; }
+	// The drawn rain's and splashes' opacity weight times Gain on top of
+	// -rain-gain= (a stated exaggeration so the streaks read on camera,
+	// FFlightSimWorldBeauty under -quality=beauty only), recorded in
+	// Record.rain.beauty_readability_gain. Nothing without drawn drops.
+	void ApplyBeautyRainReadability(double Gain);
+
 	// Every registered volumetric cloud in the world checked the way the
 	// engine's cloud passes check it (a Volume material, flagged "Used with
 	// Volumetric Cloud", compiled without errors), each logged; false with
@@ -345,6 +355,8 @@ private:
 	TArray<UMaterialInstanceDynamic*> FlashMaterials;
 	UPointLightComponent* FlashLight = nullptr;
 	AActor* LightningActor = nullptr;
+	double LastFlashLuxValue = 0.0;
+	double BeautyRainGain = 1.0;
 
 	// -- thunder -------------------------------------------------------------
 	FFlightSimThunderConstants Thunder;
