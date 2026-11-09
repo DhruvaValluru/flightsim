@@ -3255,6 +3255,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SetBeautyCvar(TEXT("r.VolumetricCloud.HighQualityAerialPerspective"), 1.0f);
 		SetBeautyCvar(TEXT("r.VolumetricRenderTarget.Mode"),
 		              static_cast<float>(RenderBeautyVolumetricRenderTargetMode));
+		// sun-shafts-sky-occlusion: the beauty capture only (labels untouched).
+		Capture->ShowFlags.SetLightShafts(true);
+		Capture->ShowFlags.SetVolumetricFog(true);
 		FPostProcessSettings& Beauty = Capture->PostProcessSettings;
 		if (!bPathTrace)
 		{
@@ -3893,6 +3896,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Label->ShowFlags.SetFog(false);
 			Label->ShowFlags.SetAtmosphere(false);
 			Label->ShowFlags.SetVolumetricFog(false);
+			// sun-shafts-sky-occlusion: the sun now has light-shaft occlusion
+			// and bloom on, and RenderLightShaftBloom adds into SceneColor on
+			// any view whose LightShafts flag is set (default on), Bloom flag
+			// or not. Off on every label capture.
+			Label->ShowFlags.SetLightShafts(false);
 			// Phase 2 Look lane: volumetric clouds write no depth and the ID
 			// pass replaces the tonemapper, but a label capture draws no
 			// cloud at all (contracts §1, extended by this stage).
@@ -6588,6 +6596,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		CalibrationCapture->ShowFlags.SetAtmosphere(false);
 		CalibrationCapture->ShowFlags.SetCloud(false);
 		CalibrationCapture->ShowFlags.SetBloom(false);
+		// sun-shafts-sky-occlusion: the copied beauty flags carry LightShafts
+		// on, and the sun's light-shaft bloom would add into the radiometry.
+		CalibrationCapture->ShowFlags.SetLightShafts(false);
 		CalibrationCapture->ShowFlags.SetMotionBlur(false);
 		CalibrationCapture->ShowFlags.SetDepthOfField(false);
 		CalibrationCapture->ShowFlags.SetLensFlares(false);
@@ -7259,6 +7270,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		BeautyFlags->SetBoolField(TEXT("fog"), Capture->ShowFlags.Fog != 0);
 		BeautyFlags->SetBoolField(TEXT("atmosphere"), Capture->ShowFlags.Atmosphere != 0);
 		BeautyFlags->SetBoolField(TEXT("volumetric_fog"), Capture->ShowFlags.VolumetricFog != 0);
+		BeautyFlags->SetBoolField(TEXT("light_shafts"), Capture->ShowFlags.LightShafts != 0);
 		BeautyFlags->SetBoolField(TEXT("cloud"), Capture->ShowFlags.Cloud != 0);
 		BeautyFlags->SetBoolField(TEXT("depth_of_field"), Capture->ShowFlags.DepthOfField != 0);
 		BeautyFlags->SetBoolField(TEXT("lens_flares"), Capture->ShowFlags.LensFlares != 0);
@@ -7859,6 +7871,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	UE_LOG(LogFlightSimRender, Display, TEXT("wrote %d frames and %s"),
 	       Captured, *ManifestPath);
 
+	WorldBeauty.RestoreCvars();  // sun-shafts-sky-occlusion: its cvars back
 	Scenario.Teardown();
 	return 0;
 }

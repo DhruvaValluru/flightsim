@@ -654,6 +654,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	ApplyAtmosphere(World, Scene, VisibilityKm);
 	ApplyClouds(World, Scene, Weather, CloudsMode, bCardLayer ? CardCover : -1.0, CardBaseM, CardTopM, Seed);
 	ApplyTiles(World, Tiles, CardWetness);
+	// sun-shafts-sky-occlusion (FlightSimSunShafts.h): value-only, after the presets.
+	TSharedPtr<FJsonObject> SunShaftsOut;
+	SunShafts.Apply(World, Scene, Preset, SunShafts.ResolveStillTier(Params), SunShaftsOut);
+	Record->SetObjectField(TEXT("sun_shafts"), SunShaftsOut);
 
 	// -- rain readability and the lightning's pulse --------------------------
 	const double* Row = &AtmosphereValues[Preset * AtmosphereFieldCount];
@@ -791,6 +795,9 @@ namespace FlightSimTilesDelight
 		return Out;
 	}
 }
+
+// sun-shafts-sky-occlusion: the commandlet's teardown forwards here.
+void FFlightSimWorldBeauty::RestoreCvars() { SunShafts.Restore(); }
 
 void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm)
 {
