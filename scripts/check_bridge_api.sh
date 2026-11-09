@@ -402,6 +402,33 @@ if grep -qF 'GetCloudSampleNormAltitudeInLayer' "$UE_ROOT/Engine/Config/BaseMate
 else
     bad "world: NormAltitudeInLayer output" "not in BaseMaterialExpressions.ini: M_FlightSimCloudLayers' pin name changed"
 fi
+# -- dust-humidity-haze (visual overhaul, 2026-11-09): the haze overlay ------
+# FlightSimDustHaze.cpp: RH growth on the Mie, the dust tint, the second fog
+# at the inversion height. Each symbol was read in the 5.7.4 headers when
+# written; this re-checks them before a build.
+sky_check "dust-haze: SkyAtmosphere SetMieAbsorption" "$SKYC" "void SetMieAbsorption(FLinearColor NewValue)"
+sky_check "dust-haze: SkyAtmosphere SetOtherAbsorption" "$SKYC" "void SetOtherAbsorption(FLinearColor NewValue)"
+sky_check "dust-haze: SkyAtmosphere SetOtherAbsorptionScale" "$SKYC" "void SetOtherAbsorptionScale(float NewValue)"
+sky_check "dust-haze: SkyAtmosphere MieScatteringScale property" "$SKYC" "float MieScatteringScale;"
+sky_check "dust-haze: SkyAtmosphere MieAbsorptionScale property" "$SKYC" "float MieAbsorptionScale;"
+sky_check "dust-haze: Fog SetSecondFogData" "$FOG" "void SetSecondFogData(FExponentialHeightFogData NewValue)"
+sky_check "dust-haze: Fog SetVolumetricFogAlbedo" "$FOG" "void SetVolumetricFogAlbedo(FColor NewValue)"
+sky_check "dust-haze: Fog SetFogDensity" "$FOG" "void SetFogDensity(float Value)"
+sky_check "dust-haze: FExponentialHeightFogData FogDensity" "Public/Rendering/ExponentialHeightFogData.h" "float FogDensity = 0.02f;"
+sky_check "dust-haze: FExponentialHeightFogData FogHeightFalloff" "Public/Rendering/ExponentialHeightFogData.h" "float FogHeightFalloff = 0.2f;"
+sky_check "dust-haze: FExponentialHeightFogData FogHeightOffset" "Public/Rendering/ExponentialHeightFogData.h" "float FogHeightOffset = 0.0f;"
+if grep -qF 'FogData[1].Height = State.Height + State.SecondFogData.FogHeightOffset;' \
+    "$UE_ROOT/Engine/Source/Runtime/Renderer/Private/SceneCore.cpp" 2>/dev/null; then
+    ok "dust-haze: premise second fog height = actor Z + offset" "present"
+else
+    bad "dust-haze: premise second fog height = actor Z + offset" "SceneCore.cpp changed: FlightSimDustHaze.cpp's offset needs re-reading"
+fi
+if grep -qF 'FogData[1].HeightFalloff = State.SecondFogData.FogHeightFalloff / 1000.0f;' \
+    "$UE_ROOT/Engine/Source/Runtime/Renderer/Private/SceneCore.cpp" 2>/dev/null; then
+    ok "dust-haze: premise falloff / 1000 per cm" "present"
+else
+    bad "dust-haze: premise falloff / 1000 per cm" "SceneCore.cpp changed: core/scene/dust_haze.py FALLOFF_TO_PER_M needs re-reading"
+fi
 # -- AIRCRAFT LANE: engine surface the airframe look assumes ----------------
 # FlightSimAircraftFX.cpp (lights, bulbs, trails, plume, haze, the slot swap)
 # and scripts/ue_aircraft_master_materials.py (the masters' properties and
