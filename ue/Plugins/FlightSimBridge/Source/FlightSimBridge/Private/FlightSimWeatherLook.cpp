@@ -291,7 +291,15 @@ bool FFlightSimVisualScene::ApplyWeatherLook(UWorld* World,
 	// -- the storm: rain shafts and lightning (beauty-only) -------------------
 	TSharedPtr<FJsonObject> StormRow = MakeShared<FJsonObject>();
 	StormRow->SetStringField(TEXT("storm"), Storm.IsEmpty() ? TEXT("none") : *Storm);
-	if (Storm == TEXT("thunderstorm"))
+	if (Storm == TEXT("thunderstorm") && Options.bSkipStormLook)
+	{
+		// One storm in the frame, one lightning clock: the storm weather's
+		// M_StormCell and its lightning channels (FlightSimWeather.cpp, its own
+		// flash list) draw it; the look's shafts and bolt stand down.
+		StormRow->SetStringField(TEXT("drawn"),
+			TEXT("nothing here: the storm weather draws the cell and its lightning (SceneOptions.bSkipStormLook)"));
+	}
+	else if (Storm == TEXT("thunderstorm"))
 	{
 		const double CloudBaseM = Options.CloudLayers.Num() > 0 && Options.CloudLayers[0].BaseMetres > 0.0
 			? Options.CloudLayers[0].BaseMetres : DefaultCloudBaseM;

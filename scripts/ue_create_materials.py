@@ -2729,7 +2729,7 @@ def create_ice_overlay():
 # Kept in this one block so the aircraft lane's block merges beside it.
 
 #: Created through _world_beauty_material (tests/test_ue_materials.py pins it).
-WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimTilesBeauty")
+WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter")
 WORLD_SHADER_DIR = "assets/shaders/world"
 #: The collection the tiles' material reads and the render sets
 #: (world_beauty.WORLD_MPC / WORLD_MPC_SCALARS: names and defaults pinned equal).
@@ -2740,7 +2740,7 @@ WORLD_COLLECTION_SCALARS = {
     "Dehaze": 0.0,
     "Saturation": 1.0,
     "DetailStrength": 0.0,
-    "DetailFadeM": 1500.0,
+    "DetailFadeM": 400.0,
     "DetailScaleM": 2.0,
     # tiles-delight (core/scene/tiles_delight.py): 0 is a pass-through.
     "DelightAmount": 0.0,
@@ -2781,6 +2781,21 @@ WORLD_TILES_INPUTS = {
 #: the render does not set them), at tiles_delight.DELIGHT_MIP_BIAS and
 #: DELIGHT_RATIO_KNEE. UNCALIBRATED.
 WORLD_TILES_DELIGHT_SCALARS = {"DelightMipBias": 5.0, "DelightRatioKnee": 0.6}
+#: M_FlightSimScatter (the ground scatter's master, world_beauty.SCATTER_MATERIAL):
+#: the imported glTF's maps as parameters, the tiles' Wetness and Saturation from
+#: the collection. Each scatter shader's Custom inputs, in order, and the
+#: material's own parameters (the import's names; scripts/ue_import_scatter.py,
+#: pending, parents each imported material to this master and sets them).
+WORLD_SCATTER_INPUTS = {
+    "scatter_base_colour": ("Albedo", "Wetness", "Saturation"),
+    "scatter_roughness": ("Roughness", "Wetness"),
+    "scatter_opacity": ("Alpha", "FadeAmount"),
+}
+WORLD_SCATTER_TEXTURES = ("BaseColorTexture", "NormalTexture")
+WORLD_SCATTER_SCALARS = {"RoughnessFactor": 0.8}
+WORLD_SCATTER_VECTORS = {"BaseColorFactor": (1.0, 1.0, 1.0, 1.0)}
+#: The opacity mask's clip (the dithered fade and the leaf alpha both cut here).
+WORLD_SCATTER_OPACITY_CLIP = 0.5
 
 
 def _world_beauty_material(name):
@@ -2957,6 +2972,59 @@ def create_world_tiles_beauty():
         lib.connect_material_property(node, "", prop)
     finish(material, "M_FlightSimTilesBeauty")
 
+
+def create_world_scatter():
+    """M_FlightSimScatter: the ground scatter's master (masked, two-sided for
+    leaf cards). The glTF base colour (BaseColorTexture x BaseColorFactor) graded
+    and wetted by scatter_base_colour.hlsl with the tiles' own Wetness and
+    Saturation (MPC_FlightSimWorld: one ground state for the tiles and what
+    stands on them); roughness pulled wet by scatter_roughness.hlsl; the opacity
+    mask the leaf alpha times a dithered per-instance fade (scatter_opacity.hlsl,
+    PerInstanceFadeAmount), so instances dissolve instead of popping."""
+    material = _world_beauty_material("M_FlightSimScatter")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    material.set_editor_property("two_sided", True)
+    material.set_editor_property("opacity_mask_clip_value", WORLD_SCATTER_OPACITY_CLIP)
+    material.set_editor_property("used_with_instanced_static_meshes", True)
+    white = unreal.load_asset("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture")
+    uv = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -2000, -300)
+    base = texture_parameter(material, lib, "BaseColorTexture", False, -1800, -300, default=white)
+    lib.connect_material_expressions(uv, "", base, "UVs")
+    normal = texture_parameter(material, lib, "NormalTexture", True, -1800, 500,
+                               default=default_texture("T_FlatNormal"), normal_map=True)
+    lib.connect_material_expressions(uv, "", normal, "UVs")
+    lib.connect_material_property(normal, "", unreal.MaterialProperty.MP_NORMAL)
+    factor = vector(material, lib, "BaseColorFactor", WORLD_SCATTER_VECTORS["BaseColorFactor"], -1800, -100)
+    rough_factor = scalar(material, lib, "RoughnessFactor", WORLD_SCATTER_SCALARS["RoughnessFactor"], -1800, 350)
+    common = {
+        "Albedo": (binary(material, lib, unreal.MaterialExpressionMultiply,
+                          mask(material, lib, base, "rgb", -1550, -300),
+                          mask(material, lib, factor, "rgb", -1550, -100), -1400, -200), ""),
+        "Alpha": (mask(material, lib, base, "a", -1550, -450), ""),
+        # One roughness per species (the import sets it from the glTF's factor;
+        # foliage and rock read as their factor at the scatter's ranges).
+        "Roughness": (rough_factor, ""),
+        "FadeAmount": (lib.create_material_expression(
+            material, unreal.MaterialExpressionPerInstanceFadeAmount, -1800, 800), ""),
+    }
+    for i, name in enumerate(("Wetness", "Saturation")):
+        common[name] = (world_collection_parameter(material, lib, name, -1800, 950 + 110 * i), "")
+    outputs = {"scatter_base_colour": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                                       unreal.MaterialProperty.MP_BASE_COLOR),
+               "scatter_roughness": (unreal.CustomMaterialOutputType.CMOT_FLOAT1,
+                                     unreal.MaterialProperty.MP_ROUGHNESS),
+               "scatter_opacity": (unreal.CustomMaterialOutputType.CMOT_FLOAT1,
+                                   unreal.MaterialProperty.MP_OPACITY_MASK)}
+    for row, (shader, (output_type, prop)) in enumerate(outputs.items()):
+        node = world_custom(material, lib, shader, output_type,
+                            {name: common[name] for name in WORLD_SCATTER_INPUTS[shader]},
+                            -900, -300 + 400 * row)
+        lib.connect_material_property(node, "", prop)
+    finish(material, "M_FlightSimScatter")
+
 # == END WORLD LANE ===============================================================
 
 # ==== AIRCRAFT LANE (visual overhaul V7) -- begin ============================
@@ -3037,6 +3105,7 @@ create_windshield_rain()
 create_world_collection()
 create_world_cloud_layers()
 create_world_tiles_beauty()
+create_world_scatter()
 
 create_aircraft_masters()  # AIRCRAFT LANE (V7)
 if _FAILED:

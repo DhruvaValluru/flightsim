@@ -34,7 +34,7 @@ and the second layer's ground extinction are taken out of the main height fog
 (its density times ``fog_density_ratio``), and when together they would exceed
 the haze (beta less Rayleigh) both are scaled down by one factor
 (``renormalised``). ``visibility_model_km`` is what the overlay's three terms
-sum to; :func:`parameters` asserts it is the card's within
+sum to with the atmosphere's own Rayleigh; :func:`parameters` asserts it is the card's within
 :data:`VISIBILITY_TOLERANCE`.
 
 **Labels.** Values only: nothing here moves a pixel (``pixel_moving: false``).
@@ -314,7 +314,7 @@ def parameters(rh_pct: Optional[float], visibility_km: Optional[float], dust_row
         density = density_row * scale
         ff_before = split["fog_factor"]
         ff_after = max(ff_before - (mie_after - mie_before + second_ground) / beta, 0.0)
-        total = mie_after + second_ground + ff_after * beta
+        total = wb.RAYLEIGH_GREEN_PER_KM + mie_after + second_ground + ff_after * beta
         model_km = wb.KOSCHMIEDER / total if total > 0.0 else math.inf
         if abs(model_km / float(visibility_km) - 1.0) > VISIBILITY_TOLERANCE + 1e-12 \
                 and float(visibility_km) >= wb.MIN_VISIBILITY_KM:

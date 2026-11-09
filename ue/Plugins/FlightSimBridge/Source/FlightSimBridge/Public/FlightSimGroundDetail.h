@@ -53,7 +53,7 @@ public:
 	           AActor* Aircraft, FFlightSimGoogleTiles* Tiles, AGeoReferencingSystem* GeoReferencing,
 	           FString& Error);
 
-	// The instances within the sidecar's resnap radius of the camera traced
+	// The instances within their species' resnap radius (its cull distance) of the camera traced
 	// again onto the tiles this frame streamed.
 	void Resnap(const FVector& CameraCm);
 
@@ -73,6 +73,8 @@ private:
 		TArray<FVector2D> GroundXYCm;   // per instance, engine XY of its trace
 		TArray<double> Scale;
 		TArray<double> YawDeg;
+		// Re-traced each frame within this of the camera: the species' cull_end_m.
+		double ResnapRadiusCm = 0.0;
 	};
 
 	// One straight-down trace at engine XY: the ground Z (cm) and normal, or false.
@@ -86,7 +88,6 @@ private:
 	double TraceUpCm = 300000.0;
 	double TraceDownCm = 300000.0;
 	double SinkCm = 30.0;
-	double ResnapRadiusCm = 80000.0;
 	int32 ResnapMoved = 0;
 	int32 ResnapFrames = 0;
 };

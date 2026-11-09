@@ -2372,6 +2372,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// replace the rain particles (one rain in the air).
 		SceneOptions.bSkipRainParticles = WeatherBackend != EFlightSimWeatherBackend::Off &&
 			WorldCardRoot.IsValid() && WorldCardRoot->HasField(TEXT("weather"));
+		// World lane fix pass: the storm weather's cell, on such a card, is the
+		// only storm (the weather look's shafts and bolt stand down).
+		{
+			const TSharedPtr<FJsonObject>* StormWeather = nullptr;
+			SceneOptions.bSkipStormLook = SceneOptions.bSkipRainParticles &&
+				WorldCardRoot->TryGetObjectField(TEXT("weather"), StormWeather) && StormWeather != nullptr &&
+				(*StormWeather)->HasField(TEXT("cell"));
+		}
 		if (!VisualScene.Build(World, SceneOptions, Error)) { return Fail(Error); }
 		// The weather (FlightSimWeather.h): after the scene, so the storm can
 		// take over the look's cloud component; its actors join the scene's

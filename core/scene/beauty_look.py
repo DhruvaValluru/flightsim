@@ -89,6 +89,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from core.sky.plan import SUN_ILLUMINANCE_LUX as _SKY_SUN_ILLUMINANCE_LUX
+from .weather_look import STORMS as _WEATHER_STORMS
 
 #: The sidecar's version; the host refuses one it does not know. 2: the sun
 #: is outer-space lux under the engine's per-pixel transmittance, and the
@@ -247,8 +248,9 @@ GRADE_NAMES: Tuple[str, ...] = tuple(GRADES)
 #: golden_hour grade; above it desert_noon. UNCALIBRATED: set by probe
 #: render on the render machine (the 10/15/20 deg probe series).
 GOLDEN_HOUR_BELOW_DEG = 15.0
-#: Weather words that take the storm grade (core/scene/weather_look.py STORMS).
-STORM_EVENTS = ("thunderstorm", "tornado")
+#: Weather words that take the storm grade: core/scene/weather_look.py STORMS
+#: itself, the one list the world look (world_beauty.STORM_WORDS) reads too.
+STORM_EVENTS = _WEATHER_STORMS
 #: The world preset (core/scene/world_beauty.py PRESETS, chosen by its
 #: select_preset, the selector the world lane draws with) -> the grade.
 #: ``clear`` falls through to the sun.

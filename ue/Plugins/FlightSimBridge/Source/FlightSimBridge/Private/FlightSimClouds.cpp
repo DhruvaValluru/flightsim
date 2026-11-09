@@ -78,24 +78,24 @@ namespace FlightSimWorldPure
 	}
 
 	// core/scene/world_beauty.py ATMOSPHERE_FIELDS, in order.
-	constexpr int AtmosphereFieldCount = 18;
+	// Fix pass 2026-11-09: the ground albedo (GroundAlbedoSrgb: the card's
+	// surface and wetness) and the tiles' dehaze and saturation (tileset
+	// constants) left the per-weather rows.
+	constexpr int AtmosphereFieldCount = 13;
 	inline const char* AtmosphereFieldName(int Field)
 	{
 		static const char* const Names[AtmosphereFieldCount] = {
 			"mie_scale_height_km", "mie_anisotropy", "mie_share", "mie_cap_per_km",
-			"aerial_perspective_scale", "ground_albedo_r", "ground_albedo_g", "ground_albedo_b",
-			"vfog_distance_m", "vfog_scattering_distribution", "vfog_extinction_scale",
-			"cloud_bottom_occlusion", "rain_readability_gain", "wetness_floor", "tiles_dehaze",
-			"tiles_saturation", "tiles_detail_strength", "lightning_sky_gain"};
+			"aerial_perspective_scale", "vfog_distance_m", "vfog_scattering_distribution",
+			"vfog_extinction_scale", "cloud_bottom_occlusion", "rain_readability_gain", "wetness_floor",
+			"tiles_detail_strength", "lightning_sky_gain"};
 		return Field >= 0 && Field < AtmosphereFieldCount ? Names[Field] : "";
 	}
 	enum : int
 	{
 		AtmMieScaleHeightKm = 0, AtmMieAnisotropy, AtmMieShare, AtmMieCapPerKm, AtmAerialPerspectiveScale,
-		AtmGroundAlbedoR, AtmGroundAlbedoG, AtmGroundAlbedoB, AtmVFogDistanceM,
-		AtmVFogScatteringDistribution, AtmVFogExtinctionScale, AtmCloudBottomOcclusion,
-		AtmRainReadabilityGain, AtmWetnessFloor, AtmTilesDehaze, AtmTilesSaturation,
-		AtmTilesDetailStrength, AtmLightningSkyGain
+		AtmVFogDistanceM, AtmVFogScatteringDistribution, AtmVFogExtinctionScale, AtmCloudBottomOcclusion,
+		AtmRainReadabilityGain, AtmWetnessFloor, AtmTilesDetailStrength, AtmLightningSkyGain
 	};
 
 	// UNCALIBRATED: set by probe render on the render machine (every number).
@@ -103,15 +103,15 @@ namespace FlightSimWorldPure
 	{
 		static const double Rows[PresetCount][AtmosphereFieldCount] = {
 			// clear
-			{1.2, 0.80, 0.6, 0.25, 1.0, 92, 96, 78, 8000.0, 0.75, 1.0, 0.5, 1.0, 0.0, 0.10, 1.10, 0.6, 0.0},
+			{1.2, 0.80, 0.6, 0.25, 1.0, 8000.0, 0.75, 1.0, 0.5, 1.0, 0.0, 0.12, 0.0},
 			// hazy
-			{1.6, 0.76, 0.6, 0.6, 1.15, 110, 110, 100, 8000.0, 0.7, 1.0, 0.5, 1.0, 0.0, 0.06, 1.06, 0.6, 0.0},
+			{1.6, 0.76, 0.7, 0.6, 1.0, 8000.0, 0.7, 1.0, 0.5, 1.0, 0.0, 0.12, 0.0},
 			// overcast
-			{1.4, 0.70, 0.4, 0.6, 1.0, 80, 82, 78, 6000.0, 0.4, 1.0, 0.75, 1.0, 0.0, 0.04, 0.97, 0.5, 0.0},
+			{1.4, 0.70, 0.4, 0.6, 1.0, 6000.0, 0.4, 1.0, 0.75, 1.0, 0.0, 0.12, 0.0},
 			// rain
-			{1.0, 0.65, 0.3, 0.8, 1.0, 64, 66, 62, 4000.0, 0.3, 1.0, 0.85, 1.5, 0.6, 0.03, 0.92, 0.5, 0.0},
+			{1.0, 0.65, 0.3, 0.8, 1.0, 4000.0, 0.3, 1.0, 0.85, 1.5, 0.6, 0.12, 0.0},
 			// storm
-			{1.8, 0.65, 0.3, 0.8, 1.0, 52, 54, 52, 4000.0, 0.3, 1.0, 0.9, 1.5, 0.85, 0.03, 0.90, 0.5, 3.0},
+			{1.8, 0.65, 0.3, 0.8, 1.0, 4000.0, 0.3, 1.0, 0.9, 1.5, 0.85, 0.12, 3.0},
 		};
 		return Preset >= 0 && Preset < PresetCount && Field >= 0 && Field < AtmosphereFieldCount
 			? Rows[Preset][Field] : 0.0;
@@ -159,9 +159,80 @@ namespace FlightSimWorldPure
 	constexpr double CloudExtinctionScaleDefault = 1.0;
 	constexpr double OcclusionFlagTransmittanceDefault = 0.5;
 	constexpr double LightningReferenceLuxDefault = 50.0;
-	constexpr double DetailFadeMDefault = 1500.0;
+	constexpr double DetailFadeMDefault = 400.0;
 	constexpr double DetailScaleMDefault = 2.0;
 	constexpr double PuddleShareDefault = 0.5;
+	// The tileset's imagery correction (world_beauty.TILES_DEHAZE / TILES_SATURATION):
+	// one value for every preset.
+	constexpr double TilesDehazeDefault = 0.8;
+	constexpr double TilesSaturationDefault = 1.05;
+	// The wet law the tiles, the scatter and the planet's ground share
+	// (world_beauty.WET_DARKENING).
+	constexpr double WetDarkening = 0.30;
+	// The sun's transmittance model this lane sets on a scene without a -sky=
+	// plan (world_beauty.SUN_PER_PIXEL_TRANSMITTANCE, the one flag beauty_look
+	// reads): the engine's atmosphere reddens and dims the beam per pixel.
+	constexpr bool SunPerPixelTransmittance = true;
+
+	// The storm words: core/scene/weather_look.py STORMS (world_beauty.STORM_WORDS).
+	constexpr int StormWordCount = 2;
+	inline const char* StormWord(int Index)
+	{
+		static const char* const Words[StormWordCount] = {"thunderstorm", "tornado"};
+		return Index >= 0 && Index < StormWordCount ? Words[Index] : "";
+	}
+	inline bool IsStormWord(const char* Word)
+	{
+		for (int I = 0; Word != nullptr && I < StormWordCount; ++I)
+		{
+			if (std::strcmp(Word, StormWord(I)) == 0)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// The planet's ground albedo by surface (world_beauty.GROUND_ALBEDO_SRGB, row
+	// 0 the default), sRGB bytes, darkened in linear light by the wet law.
+	// UNCALIBRATED: set by probe render on the render machine.
+	constexpr int GroundSurfaceCount = 8;
+	inline const char* GroundSurfaceName(int Surface)
+	{
+		static const char* const Names[GroundSurfaceCount] = {
+			"default", "desert", "forest", "grassland", "snow", "bare", "city", "ocean"};
+		return Surface >= 0 && Surface < GroundSurfaceCount ? Names[Surface] : "default";
+	}
+	inline int GroundSurfaceIndex(const char* Surface)
+	{
+		for (int I = 0; Surface != nullptr && I < GroundSurfaceCount; ++I)
+		{
+			if (std::strcmp(Surface, GroundSurfaceName(I)) == 0)
+			{
+				return I;
+			}
+		}
+		return 0;
+	}
+	inline void GroundAlbedoSrgb(int Surface, double Wetness, int Out[3])
+	{
+		static const int Rows[GroundSurfaceCount][3] = {
+			{92, 96, 78}, {156, 124, 92}, {62, 74, 52}, {96, 108, 70},
+			{206, 210, 216}, {120, 110, 96}, {104, 104, 100}, {40, 52, 60}};
+		const int Row = Surface >= 0 && Surface < GroundSurfaceCount ? Surface : 0;
+		const double Wet = Wetness < 0.0 ? 0.0 : (Wetness > 1.0 ? 1.0 : Wetness);
+		const double K = 1.0 - WetDarkening * Wet;
+		for (int C = 0; C < 3; ++C)
+		{
+			double V = Rows[Row][C] / 255.0;
+			V = V < 0.0 ? 0.0 : (V > 1.0 ? 1.0 : V);
+			double Lin = V <= 0.04045 ? V / 12.92 : std::pow((V + 0.055) / 1.055, 2.4);
+			Lin *= K;
+			Lin = Lin < 0.0 ? 0.0 : (Lin > 1.0 ? 1.0 : Lin);
+			const double S = Lin <= 0.0031308 ? Lin * 12.92 : 1.055 * std::pow(Lin, 1.0 / 2.4) - 0.055;
+			Out[C] = static_cast<int>(std::floor(S * 255.0 + 0.5));
+		}
+	}
 	// Physical constants (not look values).
 	constexpr double Koschmieder = 3.912;
 	constexpr double RayleighGreenPerKm = 0.013558;
@@ -212,7 +283,9 @@ namespace FlightSimWorldPure
 		Out.MieExtinctionPerKm = Mie;
 		Out.MieScatteringPerKm = Mie * MieSingleScatterAlbedo;
 		Out.MieAbsorptionPerKm = Mie * (1.0 - MieSingleScatterAlbedo);
-		Out.FogFactor = 1.0 - (Beta > 0.0 ? Mie / Beta : 0.0);
+		// The fog keeps the haze the Mie layer did not take: Rayleigh (the
+		// atmosphere's own) + Mie + fog = Beta at the ground, counted once.
+		Out.FogFactor = Beta > 0.0 ? (Haze - Mie > 0.0 ? Haze - Mie : 0.0) / Beta : 0.0;
 		return Out;
 	}
 
@@ -231,6 +304,40 @@ namespace FlightSimWorldPure
 			return CloudStratocumulus;
 		}
 		return CloudCumulus;
+	}
+
+	// world_beauty.fog_directional_exponent: the analytic fog's sun lobe
+	// pow(cos, n) / 4 pi has mean cosine (n+1)/(n+2) over its hemisphere; n is
+	// chosen so that equals the volumetric fog's Henyey-Greenstein g, clamped to
+	// [FogExponentMin, FogExponentMax] (a lobe this shape cannot be flatter
+	// than g = 0.5). Fitted, not a look value.
+	constexpr double FogExponentMin = 1.0;
+	constexpr double FogExponentMax = 64.0;
+	inline double FogDirectionalExponentForG(double G)
+	{
+		const double Gc = G < 0.0 ? 0.0 : (G > 0.99 ? 0.99 : G);
+		const double N = (2.0 * Gc - 1.0) / (1.0 - Gc);
+		return N < FogExponentMin ? FogExponentMin : (N > FogExponentMax ? FogExponentMax : N);
+	}
+
+	// world_beauty.layer_cover_and_shape: the fair layer's cover, else the
+	// card's (CardCover >= 0), else the default cover of the shape a cover-0
+	// layer of this thickness would be; the shape then follows the cover.
+	// CloudTable: the cloud rows in force (CloudCount x CloudFieldCount, the
+	// overrides applied), or nullptr for the defaults.
+	inline int LayerCoverAndShape(double CardCover, double ThicknessM, int Preset, bool bFair,
+	                              const double* CloudTable, double* OutCover)
+	{
+		const bool bStated = CardCover >= 0.0;
+		const int Guess = SelectCloud(bStated ? CardCover : 0.0, ThicknessM, Preset);
+		const double GuessDefault = CloudTable != nullptr ? CloudTable[Guess * CloudFieldCount + CldDefaultCover]
+		                                                  : CloudDefault(Guess, CldDefaultCover);
+		const double Cover = bFair ? FairCover : (bStated ? CardCover : GuessDefault);
+		if (OutCover != nullptr)
+		{
+			*OutCover = Cover;
+		}
+		return SelectCloud(Cover, ThicknessM, Preset);
 	}
 
 	// rain_field.splitmix64 / rain_field.unit (the weather's own law).
@@ -359,16 +466,36 @@ namespace
 		return nullptr;
 	}
 
-	FColor WorldAlbedo(const TArray<double>& Values, int32 PresetIndex)
+	// The planet's ground albedo: the card's surface, the ground's wetness
+	// (FlightSimWorldPure::GroundAlbedoSrgb, world_beauty.ground_albedo_srgb).
+	FColor WorldAlbedo(const FString& Surface, double Wetness)
 	{
 		// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
 		using namespace FlightSimWorldPure;
-		auto Byte = [&](int32 Field)
+		int Rgb[3] = {0, 0, 0};
+		GroundAlbedoSrgb(GroundSurfaceIndex(TCHAR_TO_ANSI(*Surface)), Wetness, Rgb);
+		return FColor(static_cast<uint8>(FMath::Clamp(Rgb[0], 0, 255)), static_cast<uint8>(FMath::Clamp(Rgb[1], 0, 255)),
+		              static_cast<uint8>(FMath::Clamp(Rgb[2], 0, 255)), 255);
+	}
+
+	// One look key, read key by key (world_beauty.card_inputs): the card's W3
+	// look block when it states the key as a value of this JSON type (its
+	// "precipitation" is an object there, never the word), else
+	// randomization.look. A W3 look (night, precipitation, cloud_drift) must
+	// never hide the sampled haze, cloud layer or wetness.
+	TSharedPtr<FJsonValue> WorldLookValue(const TSharedPtr<FJsonObject>& Card, const TCHAR* Key, EJson Type)
+	{
+		const TSharedPtr<FJsonObject> Looks[2] = {
+			WorldObject(Card, TEXT("look")), WorldObject(WorldObject(Card, TEXT("randomization")), TEXT("look"))};
+		for (const TSharedPtr<FJsonObject>& Look : Looks)
 		{
-			return static_cast<uint8>(FMath::Clamp(
-				FMath::RoundToInt(Values[PresetIndex * AtmosphereFieldCount + Field]), 0, 255));
-		};
-		return FColor(Byte(AtmGroundAlbedoR), Byte(AtmGroundAlbedoG), Byte(AtmGroundAlbedoB), 255);
+			const TSharedPtr<FJsonValue> Value = Look.IsValid() ? Look->TryGetField(Key) : nullptr;
+			if (Value.IsValid() && Value->Type == Type)
+			{
+				return Value;
+			}
+		}
+		return nullptr;
 	}
 }
 
@@ -474,6 +601,8 @@ bool FFlightSimWorldBeauty::LoadOverrides(const FString& Path, FString& Error)
 			{TEXT("detail_fade_m"), &DetailFadeM},
 			{TEXT("detail_scale_m"), &DetailScaleM},
 			{TEXT("puddle_share_of_wetness"), &PuddleShare},
+			{TEXT("tiles_dehaze"), &TilesDehaze},
+			{TEXT("tiles_saturation"), &TilesSaturation},
 		};
 		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Constants->Values)
 		{
@@ -547,6 +676,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	DetailFadeM = DetailFadeMDefault;
 	DetailScaleM = DetailScaleMDefault;
 	PuddleShare = PuddleShareDefault;
+	TilesDehaze = TilesDehazeDefault;
+	TilesSaturation = TilesSaturationDefault;
+	GroundWetness = 0.0;
+	Surface.Reset();
 
 	FString CloudsMode = TEXT("card");
 	// The flag, else the environment (the web app's renders reach these without
@@ -580,25 +713,31 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	const FString ScatterPath = FlagOrEnv(TEXT("ground-scatter="), TEXT("FLIGHTSIM_GROUND_SCATTER"));
 
 	// -- what the card says --------------------------------------------------
-	TSharedPtr<FJsonObject> Look = WorldObject(Card, TEXT("look"));
-	if (!Look.IsValid())
+	// Key by key (WorldLookValue; world_beauty.card_inputs is the Python twin):
+	// card.look when it states the key, else card.randomization.look.
+	auto LookNumber = [&Card](const TCHAR* Key)
 	{
-		Look = WorldObject(WorldObject(Card, TEXT("randomization")), TEXT("look"));
-	}
+		const TSharedPtr<FJsonValue> Value = WorldLookValue(Card, Key, EJson::Number);
+		return Value.IsValid() ? Value->AsNumber() : 0.0;
+	};
 	const TSharedPtr<FJsonObject> WeatherLook = WorldObject(Card, TEXT("weather_look"));
-	const double VisibilityKm = WorldNumber(Look, TEXT("visibility_km"), 0.0);
-	const double RainRate = FMath::Max(WorldNumber(Look, TEXT("precipitation_rate_mmh"), 0.0),
+	const double VisibilityKm = LookNumber(TEXT("visibility_km"));
+	const double RainRate = FMath::Max(LookNumber(TEXT("precipitation_rate_mmh")),
 	                                   WorldNumber(WeatherLook, TEXT("rain_rate_mmh"), 0.0));
-	const bool bRainWord = WorldString(Look, TEXT("precipitation")) == TEXT("rain");
-	const bool bStorm = WorldString(WeatherLook, TEXT("storm")) == TEXT("thunderstorm") || Weather.DrawsCell();
+	const TSharedPtr<FJsonValue> RainWord = WorldLookValue(Card, TEXT("precipitation"), EJson::String);
+	const bool bRainWord = RainWord.IsValid() && RainWord->AsString() == TEXT("rain");
+	// The storm words are ONE list (FlightSimWorldPure::StormWord, weather_look.STORMS):
+	// a tornado is a storm here exactly as it is for beauty_look's grade.
+	const FString StormWordValue = WorldString(WeatherLook, TEXT("storm"));
+	const bool bStorm = IsStormWord(TCHAR_TO_ANSI(*StormWordValue)) || Weather.DrawsCell();
+	Surface = WorldString(WeatherLook, TEXT("surface"));
 	double CardCover = 0.0, CardBaseM = 0.0, CardTopM = 0.0;
 	bool bCardLayer = false;
-	const TArray<TSharedPtr<FJsonValue>>* CloudsJson = nullptr;
-	if (Look.IsValid() && Look->TryGetArrayField(TEXT("clouds"), CloudsJson) && CloudsJson != nullptr &&
-	    CloudsJson->Num() > 0)
+	const TSharedPtr<FJsonValue> CloudsValue = WorldLookValue(Card, TEXT("clouds"), EJson::Array);
+	if (CloudsValue.IsValid() && CloudsValue->AsArray().Num() > 0)
 	{
 		const TSharedPtr<FJsonObject>* LayerJson = nullptr;
-		if ((*CloudsJson)[0]->TryGetObject(LayerJson) && LayerJson != nullptr)
+		if (CloudsValue->AsArray()[0]->TryGetObject(LayerJson) && LayerJson != nullptr)
 		{
 			CardCover = WorldNumber(*LayerJson, TEXT("cover"), 0.0);
 			CardBaseM = WorldNumber(*LayerJson, TEXT("base_m"), 0.0);
@@ -606,21 +745,22 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 			bCardLayer = CardTopM > CardBaseM;
 		}
 	}
-	const double CardWetness = FMath::Max(WorldNumber(Look, TEXT("wetness"), 0.0),
+	const double CardWetness = FMath::Max(LookNumber(TEXT("wetness")),
 	                                      WorldNumber(WeatherLook, TEXT("wetness"), 0.0));
 	const int32 Seed = static_cast<int32>(WorldNumber(WeatherLook, TEXT("seed"),
 	                                                  WorldNumber(Card, TEXT("seed"), 0.0)));
 	Preset = SelectPreset(bStorm, RainRate, bRainWord, bCardLayer ? CardCover : 0.0, VisibilityKm);
-	const TSharedPtr<FJsonObject>* Drift = nullptr;
-	if (Look.IsValid() && Look->TryGetObjectField(TEXT("cloud_drift"), Drift) && Drift != nullptr)
+	GroundWetness = TilesWetness(CardWetness, AtmosphereValues[Preset * AtmosphereFieldCount + AtmWetnessFloor]);
+	const TSharedPtr<FJsonValue> DriftValue = WorldLookValue(Card, TEXT("cloud_drift"), EJson::Object);
+	if (DriftValue.IsValid())
 	{
-		(*Drift)->TryGetNumberField(TEXT("mps"), DriftMps);
-		(*Drift)->TryGetNumberField(TEXT("from_deg"), DriftFromDeg);
+		DriftValue->AsObject()->TryGetNumberField(TEXT("mps"), DriftMps);
+		DriftValue->AsObject()->TryGetNumberField(TEXT("from_deg"), DriftFromDeg);
 	}
 	else
 	{
-		DriftMps = WorldNumber(Look, TEXT("cloud_drift_mps"), 0.0);
-		DriftFromDeg = WorldNumber(Look, TEXT("cloud_drift_from_deg"), 0.0);
+		DriftMps = LookNumber(TEXT("cloud_drift_mps"));
+		DriftFromDeg = LookNumber(TEXT("cloud_drift_from_deg"));
 	}
 
 	Record->SetStringField(TEXT("quality"), TEXT("beauty"));
@@ -631,6 +771,12 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		Inputs->SetNumberField(TEXT("rain_rate_mmh"), RainRate);
 		Inputs->SetBoolField(TEXT("precipitation_rain"), bRainWord);
 		Inputs->SetBoolField(TEXT("storm"), bStorm);
+		Inputs->SetStringField(TEXT("storm_word"), StormWordValue);
+		Inputs->SetStringField(TEXT("storm_words"), TEXT("weather_look.STORMS (thunderstorm, tornado), or a drawn storm cell"));
+		Inputs->SetStringField(TEXT("surface"), Surface);
+		Inputs->SetNumberField(TEXT("ground_wetness"), GroundWetness);
+		Inputs->SetStringField(TEXT("look_basis"),
+			TEXT("per key: card.look when it states the key, else card.randomization.look (world_beauty.card_inputs)"));
 		Inputs->SetNumberField(TEXT("card_cover"), bCardLayer ? CardCover : 0.0);
 		Inputs->SetNumberField(TEXT("card_wetness"), CardWetness);
 		Inputs->SetNumberField(TEXT("seed"), Seed);
@@ -684,7 +830,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	SkyLight = Scene.SkyLightComponent;
 	SkyLightBaseIntensity = SkyLight != nullptr ? SkyLight->Intensity : 1.0f;
 	LightningSkyGain = Row[AtmLightningSkyGain];
-	bLookLightning = WorldString(WeatherLook, TEXT("storm")) == TEXT("thunderstorm");
+	// One lightning clock: when the storm weather draws its cell, its own flash
+	// list (LastFlashLux) is the only source; the weather look's schedule (and
+	// its bolt, SceneOptions.bSkipStormLook) stands down.
+	bLookLightning = StormWordValue == TEXT("thunderstorm") && !Weather.DrawsCell();
 	LookSeed = static_cast<int32>(WorldNumber(WeatherLook, TEXT("seed"), 0.0));
 	{
 		TSharedPtr<FJsonObject> Lightning = MakeShared<FJsonObject>();
@@ -828,7 +977,7 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	Atmosphere->SetMieExponentialDistribution(static_cast<float>(Row[AtmMieScaleHeightKm]));
 	Atmosphere->SetMieAnisotropy(static_cast<float>(Row[AtmMieAnisotropy]));
 	Atmosphere->SetAerialPespectiveViewDistanceScale(static_cast<float>(Row[AtmAerialPerspectiveScale]));
-	const FColor Albedo = WorldAlbedo(AtmosphereValues, Preset);
+	const FColor Albedo = WorldAlbedo(Surface, GroundWetness);
 	Atmosphere->SetGroundAlbedo(Albedo);
 	Out->SetNumberField(TEXT("mie_scale_height_km"), Row[AtmMieScaleHeightKm]);
 	Out->SetNumberField(TEXT("mie_anisotropy"), Row[AtmMieAnisotropy]);
@@ -836,7 +985,11 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	Out->SetStringField(TEXT("ground_albedo_srgb"),
 		FString::Printf(TEXT("%d,%d,%d"), Albedo.R, Albedo.G, Albedo.B));
 	Out->SetStringField(TEXT("ground_albedo_basis"),
-		TEXT("the planet's ground below the horizon where no tile is drawn: the horizon is never empty"));
+		TEXT("the atmosphere's multiple-scattering ground bounce (the only engine pass that reads it; the main "
+		     "view draws no albedo-lit ground): the card's surface row (world_beauty.GROUND_ALBEDO_SRGB, "
+		     "UNCALIBRATED) darkened by the tiles' wet law at the ground's wetness"));
+	Out->SetStringField(TEXT("ground_albedo_surface"), Surface.IsEmpty() ? FString(TEXT("default")) : Surface);
+	Out->SetNumberField(TEXT("ground_albedo_wetness"), GroundWetness);
 	if (VisibilityKm > 0.0 && !bAerosolProbe)
 	{
 		const FMieSplit Split = MieSplit(VisibilityKm, Row[AtmMieShare], Row[AtmMieCapPerKm]);
@@ -851,7 +1004,8 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 		Out->SetNumberField(TEXT("fog_factor"), FogFactor);
 		Out->SetStringField(TEXT("mie_basis"),
 			TEXT("a share of the card's haze (3.912 / visibility less Rayleigh) moved from the height fog "
-			     "into the atmosphere's Mie layer; the fog keeps the rest (extinction counted once)"));
+			     "into the atmosphere's Mie layer; the fog keeps the rest of the haze, so Rayleigh + Mie + fog "
+			     "= the Koschmieder beta at the ground (extinction counted once)"));
 	}
 	else
 	{
@@ -878,7 +1032,17 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 		Fog->SetVolumetricFogDistance(static_cast<float>(Row[AtmVFogDistanceM] * WorldCmPerMetre));
 		Fog->SetVolumetricFogScatteringDistribution(static_cast<float>(Row[AtmVFogScatteringDistribution]));
 		Fog->SetVolumetricFogExtinctionScale(static_cast<float>(Row[AtmVFogExtinctionScale]));
+		// One phase for one haze: beyond the volumetric fog's distance the
+		// analytic fog lights its sun term by pow(cos, exponent) / 4 pi (the
+		// project keeps r.SupportExpFogMatchesVolumetricFog at 0: the measure
+		// renders' fog must not change); its exponent is fitted to the same g.
+		const double FogExponent = FogDirectionalExponentForG(Row[AtmVFogScatteringDistribution]);
+		Fog->SetDirectionalInscatteringExponent(static_cast<float>(FogExponent));
 		FogRow->SetNumberField(TEXT("fog_density_after"), Fog->FogDensity);
+		FogRow->SetNumberField(TEXT("directional_inscattering_exponent"), FogExponent);
+		FogRow->SetStringField(TEXT("directional_inscattering_basis"),
+			TEXT("the pow lobe whose mean cosine (n+1)/(n+2) is the volumetric fog's g, clamped "
+			     "(FlightSimWorldPure::FogDirectionalExponentForG)"));
 		FogRow->SetBoolField(TEXT("volumetric_fog"), true);
 		FogRow->SetNumberField(TEXT("volumetric_fog_distance_m"), Row[AtmVFogDistanceM]);
 		FogRow->SetNumberField(TEXT("volumetric_fog_scattering_distribution"), Row[AtmVFogScatteringDistribution]);
@@ -900,6 +1064,8 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 		// Integration (2026-11-09): a -sky= plan states the sun's per-pixel
 		// transmittance (FFlightSimSky::Build, plan sun.per_pixel_transmittance)
 		// and owns it; this look sets it only on a scene without a plan.
+		// The model is world_beauty.SUN_PER_PIXEL_TRANSMITTANCE (the flag beauty_look reads).
+		static_assert(SunPerPixelTransmittance, "the world look sets the engine's per-pixel transmittance");
 		if (!bPhysicalSkyPlan)
 		{
 			SunLight->bPerPixelAtmosphereTransmittance = true;
@@ -912,6 +1078,9 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 			: TEXT("bCastShadowsOnClouds, bCastShadowsOnAtmosphere, bPerPixelAtmosphereTransmittance, "
 			       "bCastVolumetricShadow on; bCastCloudShadows left as the scene set it"));
 		Out->SetBoolField(TEXT("sun_per_pixel_transmittance"), SunLight->bPerPixelAtmosphereTransmittance != 0);
+		Out->SetStringField(TEXT("sun_transmittance_model"),
+			TEXT("world_beauty.SUN_PER_PIXEL_TRANSMITTANCE: the engine's atmosphere alone reddens and dims the beam "
+			     "along the true slant path; beauty_look reads the same flag for the light's lux and colour"));
 		Out->SetBoolField(TEXT("sun_cast_cloud_shadows"), SunLight->bCastCloudShadows != 0);
 	}
 	// tiles-delight hook: contact shading stands in for the baked shadows it lifts.
@@ -1023,10 +1192,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		State.Component = Cloud;
 		State.BaseM = Cloud->LayerBottomAltitude * 1000.0;
 		State.TopM = (Cloud->LayerBottomAltitude + Cloud->LayerHeight) * 1000.0;
-		const int32 ShapeGuess = SelectCloud(CardCover >= 0.0 ? CardCover : 0.0, State.TopM - State.BaseM, Preset);
-		State.Cover = bFair ? FairCover
-		                    : (CardCover >= 0.0 ? CardCover : CloudValues[ShapeGuess * CloudFieldCount + CldDefaultCover]);
-		State.Shape = SelectCloud(State.Cover, State.TopM - State.BaseM, Preset);
+		State.Shape = LayerCoverAndShape(CardCover, State.TopM - State.BaseM, Preset, bFair, CloudValues.GetData(),
+		                                 &State.Cover);
 		const double* CloudRow = &CloudValues[State.Shape * CloudFieldCount];
 		State.Material = UMaterialInstanceDynamic::Create(Base, Cloud);
 		State.Material->SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(State.Cover));
@@ -1051,7 +1218,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Cloud->SetShadowTracingDistance(WorldCloudShadowTracingKm);
 		Cloud->SetTracingMaxDistance(WorldCloudTracingMaxKm);
 		Cloud->SetStopTracingTransmittanceThreshold(WorldCloudStopTransmittance);
-		Cloud->SetGroundAlbedo(WorldAlbedo(AtmosphereValues, Preset));
+		Cloud->SetGroundAlbedo(WorldAlbedo(Surface, GroundWetness));
 		CloudLayers.Add(State);
 
 		TSharedPtr<FJsonObject> Layer = MakeShared<FJsonObject>();
@@ -1074,6 +1241,10 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 	}
 	Out->SetArrayField(TEXT("layers"), Layers);
 	Out->SetNumberField(TEXT("unmodelled_clouds"), UnmodelledClouds);
+	Out->SetStringField(TEXT("coverage_law"),
+		TEXT("cloud_layers.hlsl cuts the shape noise at its (1 - cover) quantile: FBM_MEAN 0.5 + FBM_SIGMA 0.123 x "
+		     "probit(1 - cover) (the noise's own moments, world_beauty.CLOUD_FBM_*), the vertical profile after the "
+		     "cut, so the drawn share of sky is the stated cover"));
 	Out->SetNumberField(TEXT("view_sample_count_scale"), WorldCloudViewSampleScale);
 	Out->SetNumberField(TEXT("shadow_view_sample_count_scale"), WorldCloudShadowSampleScale);
 	Out->SetNumberField(TEXT("shadow_tracing_distance_km"), WorldCloudShadowTracingKm);
@@ -1104,7 +1275,15 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 	Out = Tiles.ApplyBeautyLook(Material);
 	const double* Row = &AtmosphereValues[Preset * AtmosphereFieldCount];
 	const double Wetness = TilesWetness(CardWetness, Row[AtmWetnessFloor]);
-	UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(nullptr, WorldCollectionPath);
+	// The collection is the ground's one wetness and grade (the tiles AND the
+	// scatter read it): set only when the tiles really draw with the beauty
+	// material, so the scatter can never go wet over tiles left at Cesium's
+	// own dry material.
+	FString MaterialRoute;
+	Out->TryGetStringField(TEXT("material_route"), MaterialRoute);
+	const bool bTilesMaterial = MaterialRoute == TEXT("UFunction SetMaterial") || MaterialRoute == TEXT("UPROPERTY Material");
+	UMaterialParameterCollection* Collection =
+		bTilesMaterial ? LoadObject<UMaterialParameterCollection>(nullptr, WorldCollectionPath) : nullptr;
 	UMaterialParameterCollectionInstance* Instance =
 		Collection != nullptr ? World->GetParameterCollectionInstance(Collection) : nullptr;
 	TSharedPtr<FJsonObject> Parameters = MakeShared<FJsonObject>();
@@ -1118,8 +1297,8 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 		const FWorldScalar Scalars[] = {
 			{TEXT("Wetness"), Wetness},
 			{TEXT("PuddleAmount"), Wetness * PuddleShare},
-			{TEXT("Dehaze"), Row[AtmTilesDehaze]},
-			{TEXT("Saturation"), Row[AtmTilesSaturation]},
+			{TEXT("Dehaze"), TilesDehaze},
+			{TEXT("Saturation"), TilesSaturation},
 			{TEXT("DetailStrength"), Row[AtmTilesDetailStrength]},
 			{TEXT("DetailFadeM"), DetailFadeM},
 			{TEXT("DetailScaleM"), DetailScaleM},
@@ -1141,10 +1320,20 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 	}
 	else
 	{
-		Out->SetStringField(TEXT("collection"),
-			TEXT("absent: MPC_FlightSimWorld did not load (run scripts/ue_create_materials.py); the tiles "
-			     "material reads its defaults (dry, ungraded)"));
+		Out->SetStringField(TEXT("collection"), bTilesMaterial
+			? TEXT("absent: MPC_FlightSimWorld did not load (run scripts/ue_create_materials.py); the tiles "
+			       "material reads its defaults (dry, ungraded)")
+			: TEXT("not set: the tiles do not draw with M_FlightSimTilesBeauty (material_route), so the ground "
+			       "and the scatter both stay at the collection's defaults (dry, ungraded)"));
 	}
+	Out->SetStringField(TEXT("dehaze_law"),
+		TEXT("soft toe: removal Dehaze x HAZE_RGB (0.010, 0.015, 0.022) x a / (a + k), k = h / (1 - 0.5), white kept "
+		     "white; a dark texel keeps at least half of itself (world_beauty.TILES_HAZE_RGB, TILES_DEHAZE_TOE, "
+		     "UNCALIBRATED)"));
+	Out->SetStringField(TEXT("grade_basis"),
+		TEXT("Dehaze and Saturation are the tileset's imagery correction (world_beauty.TILES_DEHAZE, "
+		     "TILES_SATURATION, UNCALIBRATED), one value for every weather; the weather's grade is beauty_look's "
+		     "frame grade alone"));
 	Out->SetObjectField(TEXT("parameters"), Parameters);
 	Out->SetObjectField(TEXT("delight"), FlightSimTilesDelight::DelightRecord(Preset));   // tiles-delight hook
 	Out->SetStringField(TEXT("wetness_basis"), TEXT("max(the card's wetness, the preset's wetness_floor)"));

@@ -4,13 +4,18 @@
 // sets this material on the tileset.
 //
 // The tiles are photogrammetry: the imagery is baked with the day's haze and
-// shadows. A dark-object subtraction takes off a little of the baked haze (Dehaze
-// of HazeRgb), a luma-preserving saturation restores colour, and wetness darkens
-// porous ground (Lekner & Dorf 1988's order: a wet surface's albedo falls by a
-// third) and standing water further. The amounts come from MPC_FlightSimWorld
-// (core/scene/world_beauty.py WORLD_MPC_SCALARS, UNCALIBRATED: set by probe render
-// on the render machine). HAZE_RGB, WET_DARKENING and PUDDLE_DARKENING below are
-// UNCALIBRATED too.
+// shadows. A soft-toe dark-object correction takes off the baked haze (Dehaze of
+// HAZE_RGB: removal h x a / (a + k), k = h / (1 - DEHAZE_TOE), renormalised so white
+// stays white: about h off a bright texel, a dark one keeps at least DEHAZE_TOE of
+// itself in every channel, so a shadow never clips to black), a luma-preserving saturation
+// restores colour, and wetness darkens porous ground (Lekner & Dorf 1988's order:
+// a wet surface's albedo falls by a third) and standing water further. Dehaze and
+// Saturation are the tileset's imagery correction (world_beauty.TILES_DEHAZE,
+// TILES_SATURATION: one value for every weather). The amounts come from
+// MPC_FlightSimWorld (core/scene/world_beauty.py WORLD_MPC_SCALARS, UNCALIBRATED:
+// set by probe render on the render machine). HAZE_RGB (a dark-object level,
+// world_beauty.TILES_HAZE_RGB), WET_DARKENING and PUDDLE_DARKENING below are
+// world_beauty's (pinned by tests/test_world_beauty.py) and UNCALIBRATED too.
 //
 // Inputs (the script's WORLD_TILES_INPUTS["tiles_base_colour"]):
 //   Albedo        float3  the Cesium base-colour texture times its factor (linear)
@@ -20,7 +25,8 @@
 //   PuddleAmount  float   0..1
 //   Dehaze        float   0..1 share of HAZE_RGB taken off
 //   Saturation    float   1 = unchanged
-const float3 HAZE_RGB = float3(0.20, 0.24, 0.30);
+const float3 HAZE_RGB = float3(0.010, 0.015, 0.022);
+const float DEHAZE_TOE = 0.5;
 const float WET_DARKENING = 0.30;
 const float PUDDLE_DARKENING = 0.55;
 struct FWorldTilesColour
@@ -53,7 +59,10 @@ struct FWorldTilesColour
 	// end shared
 };
 FWorldTilesColour T;
-float3 c = max(Albedo - Dehaze * HAZE_RGB, 0.0) / max(1.0 - Dehaze * HAZE_RGB, 1e-3);
+float3 a = max(Albedo, 0.0);
+float3 h = max(Dehaze, 0.0) * HAZE_RGB;
+float3 k = h / (1.0 - DEHAZE_TOE);
+float3 c = (a - h * a / max(a + k, 1e-6)) / (1.0 - h / (1.0 + k));
 float luma = dot(c, float3(0.2126, 0.7152, 0.0722));
 c = max(lerp(float3(luma, luma, luma), c, Saturation), 0.0);
 c *= 1.0 - WET_DARKENING * saturate(Wetness);

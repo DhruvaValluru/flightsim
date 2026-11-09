@@ -14,8 +14,10 @@
 //   into the sky atmosphere's Mie layer, the fog keeping the rest, so the
 //   extinction at the ground is counted once and far ridges turn blue-hazy
 //   through the atmosphere's own scattering. Mie scale height and anisotropy,
-//   the aerial perspective distance scale and the planet's ground albedo
-//   (the horizon fill beyond the tiles' extent) per preset. The height fog's
+//   the aerial perspective distance scale per preset; the planet's ground
+//   albedo (the atmosphere's multiple-scattering ground bounce, never a
+//   horizon fill: the main view draws no albedo-lit ground) from the card's
+//   surface, darkened by the tiles' own wet law. The height fog's
 //   volumetric fog on, the sun casting shadows on the atmosphere and clouds,
 //   per-pixel atmosphere transmittance. -NoAerialPerspective (Gate 6's
 //   extinction control) is respected: a hidden atmosphere is left alone.
@@ -151,9 +153,16 @@ private:
 	double CloudExtinctionScale = 1.0;
 	double OcclusionFlagTransmittance = 0.5;
 	double LightningReferenceLux = 50.0;
-	double DetailFadeM = 1500.0;
+	double DetailFadeM = 400.0;
 	double DetailScaleM = 2.0;
 	double PuddleShare = 0.5;
+	double TilesDehaze = 0.8;
+	double TilesSaturation = 1.05;
+	// The ground's wetness (TilesWetness: the card's, at least the preset's
+	// floor) and the card's surface word: the tiles, the scatter and the
+	// planet's ground albedo read these one pair.
+	double GroundWetness = 0.0;
+	FString Surface;
 	TArray<FString> Overridden;
 
 	TArray<FCloudLayerState> CloudLayers;
