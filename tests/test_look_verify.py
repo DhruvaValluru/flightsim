@@ -235,7 +235,7 @@ def test_the_labels_instant_must_be_inside_the_beauty_window(bundle):
         def change(p):
             p["frame_records"][0]["beauty_window_s"] = [lo, hi]
         return change
-    t = json.loads(render_json(bundle).read_text())["frame_records"][0]["t"]
+    t = json.loads(render_json(bundle).read_text(encoding="utf-8"))["frame_records"][0]["t"]
     edit(bundle, window(t - 0.01, t + 0.01))
     assert grade(bundle)[1].status == PASS
     edit(bundle, window(t + 0.01, t + 0.02))

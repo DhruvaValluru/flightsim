@@ -99,7 +99,7 @@ def test_the_cli_reads_two_bundles_and_exits_by_verdict(tmp_path, capsys):
     beauty = write_bundle(tmp_path / "beauty", m_pic, m_mask)
     out = tmp_path / "report.json"
     assert llc.main(["--measure", str(measure), "--beauty", str(beauty), "--out", str(out)]) == 0
-    report = json.loads(out.read_text())
+    report = json.loads(out.read_text(encoding="utf-8"))
     assert report["verdict"] == "ALIGNED" and report["frame"] == "frame_0000.png"
     assert "UNCALIBRATED" in capsys.readouterr().out
     moved = write_bundle(tmp_path / "moved", llc.shift_image(m_pic, 4, 0), m_mask)
