@@ -106,7 +106,11 @@ beauty render it must be listed in `pixel_moving_effects`.
 Optional `beauty_look.camera.fov_deg` (or `beauty_look.fov_deg`) is the
 beauty camera's horizontal field of view. It must equal the pose solver's,
 2 atan(width / 2 fx) from the capture manifest, within
-`APPLIED_FOV_TOL_DEG` (0.1 deg). A per-frame `beauty_fov_deg` overrides it.
+`APPLIED_FOV_TOL_DEG` (0.1 deg). The commandlet writes a per-frame
+`frame_records[].beauty_fov_deg` (the beauty capture's `FOVAngle`, beauty
+and pathtrace only), which overrides it; without either, the look-dev
+record's `beauty_look.applied.camera.fov_deg_unchanged` is compared. The
+PASS text claims the field of view only when a comparison ran.
 
 ### `pixel_moving_effects` (list)
 

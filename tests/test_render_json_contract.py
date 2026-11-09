@@ -12,6 +12,7 @@ writes it is graded the way the schema says.
 """
 
 import json
+import math
 import re
 import shutil
 from pathlib import Path
@@ -184,6 +185,52 @@ def test_the_record_with_motion_blur_on_and_unlisted_is_refused(bundle):
         entry["on"] = False
     record, _ = _grade(bundle, shaped)
     assert record.status == FAIL
+
+
+def test_the_beauty_fov_is_written_per_frame_on_beauty_only():
+    write = 'Record->SetNumberField(TEXT("beauty_fov_deg"), Capture->FOVAngle);'
+    assert write in COMMANDLET
+    gate = COMMANDLET.rindex("if (bBeauty)", 0, COMMANDLET.index(write))
+    assert COMMANDLET.index(write) - gate < 600
+    look = (PRIVATE / "FlightSimBeautyLook.cpp").read_text(encoding="utf-8")
+    assert 'Echo->SetNumberField(TEXT("fov_deg_unchanged"), Capture->FOVAngle);' in look
+
+
+def _with_frame_fov(run, offset):
+    manifest = read_capture_manifest(run / "capture_manifest.json")
+    solver = {Path(str(f["file"])).name: math.degrees(2 * math.atan(f["width_px"] / (2 * f["fx_px"])))
+              for f in manifest["frames"] if f.get("camera_id") == "chase"}
+    path = run / "frames" / "chase" / "render.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for record in payload["frame_records"]:
+        record["beauty_fov_deg"] = solver[record["frame"]] + offset
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_the_commandlets_per_frame_fov_is_compared(bundle):
+    _with_frame_fov(bundle, 0.05)
+    _, alignment = _grade(bundle, _commandlet_shaped(False, [], {"policy": "none_in_frame"}))
+    assert alignment.status == PASS and "frame(s) compared" in alignment.detail, alignment.detail
+    _with_frame_fov(bundle, 2.0)
+    _, alignment = _grade(bundle, _commandlet_shaped(False, [], {"policy": "none_in_frame"}))
+    assert alignment.status == FAIL and "pose solver" in alignment.detail
+
+
+def test_the_look_dev_records_fov_is_compared(bundle):
+    manifest = read_capture_manifest(bundle / "capture_manifest.json")
+    frame = next(f for f in manifest["frames"] if f.get("camera_id") == "chase")
+    solver = math.degrees(2 * math.atan(frame["width_px"] / (2 * frame["fx_px"])))
+    shaped = _commandlet_shaped(False, [], {"policy": "none_in_frame"})
+    shaped["beauty_look"]["applied"] = {"camera": {"fov_deg_unchanged": solver + 2.0}}
+    _, alignment = _grade(bundle, shaped)
+    assert alignment.status == FAIL and "pose solver" in alignment.detail
+
+
+def test_no_fov_compared_is_not_claimed(bundle):
+    _, alignment = _grade(bundle, _commandlet_shaped(False, [], {"policy": "none_in_frame"}))
+    assert alignment.status == PASS
+    assert "at the pose solver's field of view" not in alignment.detail
+    assert "not compared" in alignment.detail
 
 
 # -- one owner per contested setting (integration item 2) -------------------------

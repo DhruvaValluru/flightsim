@@ -5299,6 +5299,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                       Scenario.ReadProperty(TEXT("attitude/theta-rad")) * RenderRadiansToDegrees);
 		Record->SetNumberField(TEXT("aileron_cmd"), Scenario.Movement->Commands.Aileron);
 		Record->SetNumberField(TEXT("camera_roll_deg"), Director->GetCameraRollDegrees());
+		if (bBeauty)
+		{
+			// The beauty's horizontal field of view at THIS frame's capture
+			// (the value every label capture copies); the verifier compares it
+			// with the pose solver's (look_label_alignment). Beauty and
+			// pathtrace only, so a measure frame record gains no key.
+			Record->SetNumberField(TEXT("beauty_fov_deg"), Capture->FOVAngle);
+		}
 		// S4: this frame's metric depth (+inf for sky), handed from the label
 		// bundle to the linear passes, which write 0, 0, 0 where it is sky.
 		TArray<float> LabelDepthThisFrame;
