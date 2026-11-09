@@ -70,6 +70,7 @@ from webapp.runs import (  # noqa: E402
     plan_water_surface,
     provision_flight,
     refuse_placeholder_mesh,
+    resolve_look_switch,
 )
 
 app = FastAPI(title="flightsim", docs_url=None, redoc_url=None)
@@ -158,6 +159,12 @@ class RunRequest(BaseModel):
     spec: Optional[Dict[str, Any]] = None
     provenance: Dict[str, Any] = {}
     aircraft: Optional[str] = None
+    #: The look switch (webapp.runs.LOOK_SWITCHES): "cinematic" or
+    #: "beauty" renders THIS run at quality=beauty with the grade chosen
+    #: from the sun and the weather; "off" none (a look word in the prompt
+    #: is then ignored); None lets a whole word "cinematic" / "beauty" in
+    #: the prompt decide. An unknown value is refused by name (400).
+    look: Optional[str] = None
 
 
 class SettingsPutRequest(BaseModel):
@@ -1018,6 +1025,13 @@ def route_map_script():
 
 @app.post("/run")
 def run_endpoint(request: RunRequest) -> JSONResponse:
+    # The look switch: checked first, so an unknown word is a 400 by name
+    # before any planner runs. The prompt word is read again once the spec
+    # is built (the default run's spec has its own prompt).
+    try:
+        resolve_look_switch(request.look, None)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
     if not request.spec:
         # Nothing compiled: the Capture button posts {} and the server
         # builds the default run (E4), then runs the SAME planner order.
@@ -1108,14 +1122,18 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
         return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
                             status_code=409)
 
+    # The look switch rides only when there is one, so a run without it
+    # starts exactly as before (and answers the same keys).
+    look = resolve_look_switch(request.look, spec.prompt)
+    switched = {"look": look} if look else {}
     outcome = manager.start(spec, provenance={
         "prompt": spec.prompt,
         **{k: v for k, v in request.provenance.items()
            if k in ("compiler", "model", "transcript")},
-    })
+    }, **switched)
     if "refused" in outcome:
         return JSONResponse(outcome, status_code=409)
-    return JSONResponse({**outcome, "digest": spec.digest()})
+    return JSONResponse({**outcome, "digest": spec.digest(), **switched})
 
 
 def build_info() -> Dict[str, str]:
