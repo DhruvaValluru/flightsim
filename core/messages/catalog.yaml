@@ -306,6 +306,10 @@ world_beauty.overrides:
 world_beauty.clouds:
   sentence: "The beauty cloud source is not one the renderer knows."
   hint: "Use -beauty-clouds=card, fair or engine."
+# dust-humidity-haze (core/scene/dust_haze.py, FlightSimDustHaze.cpp):
+dust_haze.row:
+  sentence: "The dust haze cannot be chosen: the card names a dust word the renderer does not know."
+  hint: "Say dust, haze or none (or true or false) for the weather's dust, or leave it out to let the surface and the reported weather decide."
 ground_scatter.sidecar:
   sentence: "The ground scatter sidecar cannot be used: it is not JSON, it has the wrong format or version, or it lists no region or species."
   hint: "Re-bake the scatter sidecar with the current format, or render without ground scatter."
