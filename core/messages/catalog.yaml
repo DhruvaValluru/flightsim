@@ -236,6 +236,9 @@ terrain.landcover_grid:
 terrain.unbaked:
   sentence: "No terrain has been prepared for the coordinates asked for."
   hint: "Prepare the terrain there first (it downloads once), then run again."
+terrain.tiles_uncovered:
+  sentence: "The place's elevation tiles do not cover its whole area, so part of the prepared terrain would be a flat plain at sea level."
+  hint: "List every GLO-30 tile the place's box touches in core/terrain/glo30.py, then prepare the terrain again."
 google_tiles.undulation_missing:
   sentence: "The render could not tell how high to place Google's 3D tiles, because no geoid height was given for this place."
   hint: "Write the run card again with FLIGHTSIM_GOOGLE_TILES on, so it carries the geoid height."
