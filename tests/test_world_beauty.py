@@ -82,8 +82,9 @@ def test_the_mie_split_counts_the_extinction_once():
             split = wb.mie_split(visibility, row["mie_share"], row["mie_cap_per_km"])
             beta = 3.912 / visibility
             assert split["beta_per_km"] == pytest.approx(beta)
-            # what the fog gives up is exactly what the Mie layer takes
-            assert (1.0 - split["fog_factor"]) * beta == pytest.approx(split["mie_extinction_per_km"])
+            # Rayleigh (the atmosphere's own) + Mie + the fog = beta: counted once
+            assert (wb.RAYLEIGH_GREEN_PER_KM + split["mie_extinction_per_km"]
+                    + split["fog_factor"] * beta) == pytest.approx(beta)
             assert split["mie_extinction_per_km"] <= row["mie_cap_per_km"] + 1e-12
             assert 0.0 <= split["fog_factor"] <= 1.0
             assert split["mie_scattering_per_km"] + split["mie_absorption_per_km"] == pytest.approx(
@@ -142,7 +143,6 @@ def test_overrides_are_validated_by_name():
 
 # -- the C++ pure blocks, compiled ----------------------------------------------------
 
-@NEEDS_CXX
 def test_the_cpp_overrides_loader_refuses_what_validate_overrides_refuses():
     """Review fix: a misspelt section or a bool/string value must be refused by
     the host too, never run silently on the defaults."""
@@ -151,6 +151,8 @@ def test_the_cpp_overrides_loader_refuses_what_validate_overrides_refuses():
     for section in wb.OVERRIDE_SECTIONS:
         assert f'TEXT("{section}")' in body
     assert 'TEXT("constants")' in body
+    for name in wb.OVERRIDE_CONSTANTS:
+        assert f'TEXT("{name}")' in body, name
     assert "unknown section" in body
     assert body.count("!= EJson::Number") == 2
     assert "!= EJson::Object" in body
@@ -164,12 +166,20 @@ def test_every_frame_says_whether_the_cloud_occlusion_is_complete():
     assert 'UnmodelledClouds = Kept.Num();' in CLOUDS_CPP
 
 
+@NEEDS_CXX
 def test_the_cpp_world_tables_and_laws_are_the_python_ones(tmp_path):
     block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
     assert "#include" not in block and "FString" not in block and "TEXT(" not in block
+    # every selection threshold sits in the cases on both sides
     cases = [(s, r, p, c, v) for s in (0, 1) for r in (0.0, 3.0) for p in (0, 1)
-             for c in (0.0, 0.5, 0.8) for v in (0.0, 5.0, 30.0)]
-    clouds = [(c, t, p) for c in (0.2, 0.55, 0.9) for t in (500.0, 1500.0) for p in range(5)]
+             for c in (0.0, 0.5, 0.7499, 0.75, 0.8) for v in (0.0, 5.0, 14.999, 15.0, 30.0)]
+    clouds = [(c, t, p) for c in (0.2, 0.4999, 0.5, 0.55, 0.85, 0.9) for t in (500.0, 900.0, 900.1, 1500.0)
+              for p in range(5)]
+    layers = [(c, t, p, f) for c in (-1.0, 0.4, 0.9) for t in (500.0, 1200.0) for p in (0, 3) for f in (0, 1)]
+    flags = (0.3, 0.5, 0.9)
+    wet_cases = [(p, w) for p in range(5) for w in (0.0, 0.2, 0.7, 0.95, 1.5)]
+    albedos = [(s, w) for s in wb.GROUND_ALBEDO_SRGB for w in (0.0, 0.6, 1.0)]
+    gs = (0.0, 0.3, 0.5, 0.7, 0.75, 0.9, 0.995)
     slabs = [(0.0, 3000.0, 3000.0, 1000.0, 2000.0), (1500.0, 1500.0, 250.0, 1000.0, 2000.0),
              (2500.0, 1500.0, 1000.0, 1000.0, 2000.0), (100.0, 200.0, 50.0, 1000.0, 2000.0),
              (1200.0, 4000.0, 3500.0, 800.0, 3000.0)]
@@ -187,14 +197,29 @@ def test_the_cpp_world_tables_and_laws_are_the_python_ones(tmp_path):
         main.append(f"{{ FMieSplit S = MieSplit({v!r}, 0.6, 0.6); printf(\"mie %.17g %.17g %.17g %.17g %.17g\\n\","
                     " S.BetaPerKm, S.MieExtinctionPerKm, S.MieScatteringPerKm, S.MieAbsorptionPerKm, S.FogFactor); }")
     for a, b, length, base, top in slabs:
-        main.append(f"{{ FOcclusion O = Occlusion({a!r}, {b!r}, {length!r}, {base!r}, {top!r}, 0.4, 0.05, 1.0, 0.5);"
-                    " printf(\"occ %.17g %.17g %.17g %d\\n\", O.PathM, O.Tau, O.Transmittance, O.bFlagged ? 1 : 0); }")
+        for flag in flags:
+            main.append(f"{{ FOcclusion O = Occlusion({a!r}, {b!r}, {length!r}, {base!r}, {top!r}, 0.4, 0.05, 1.0, {flag!r});"
+                        " printf(\"occ %.17g %.17g %.17g %d\\n\", O.PathM, O.Tau, O.Transmittance, O.bFlagged ? 1 : 0); }")
+    for c, t, p, f in layers:
+        main.append(f"{{ double Cv = 0.0; int S = LayerCoverAndShape({c!r}, {t!r}, {p}, {'true' if f else 'false'},"
+                    " nullptr, &Cv); printf(\"layer %.17g %s\\n\", Cv, CloudName(S)); }")
+    for s, w in albedos:
+        main.append(f"{{ int R[3]; GroundAlbedoSrgb(GroundSurfaceIndex(\"{s}\"), {w!r}, R);"
+                    " printf(\"albedo %d %d %d\\n\", R[0], R[1], R[2]); }")
+    main.append("printf(\"albedo_unknown %d\\n\", GroundSurfaceIndex(\"volcanic\"));")
+    for g in gs:
+        main.append(f"printf(\"fogexp %.17g\\n\", FogDirectionalExponentForG({g!r}));")
+    main.append("for (int i = 0; i < StormWordCount; ++i) printf(\"storm %s\\n\", StormWord(i));")
+    main.append("printf(\"isstorm %d %d %d\\n\", IsStormWord(\"tornado\") ? 1 : 0, IsStormWord(\"rain\") ? 1 : 0,"
+                " IsStormWord(nullptr) ? 1 : 0);")
+    main.append("printf(\"tiles %.17g %.17g %.17g %d\\n\", TilesDehazeDefault, TilesSaturationDefault, WetDarkening,"
+                " SunPerPixelTransmittance ? 1 : 0);")
     for seed in (0, 7, 123456789):
         main.append(f"{{ double K[3]; CloudSeedOffsetKm({seed}ull, K); printf(\"seed %.17g %.17g %.17g\\n\", K[0], K[1], K[2]); }}")
     for flash, gain in ((0.0, 3.0), (0.5, 3.0), (2.0, 3.0), (1.0, 0.0)):
         main.append(f"printf(\"pulse %.17g\\n\", SkyPulseScale({flash!r}, {gain!r}));")
-    for wet, floor in ((0.0, 0.0), (0.2, 0.85), (0.95, 0.6), (1.5, 0.0)):
-        main.append(f"printf(\"wet %.17g\\n\", TilesWetness({wet!r}, {floor!r}));")
+    for preset, wet in wet_cases:
+        main.append(f"printf(\"wet %.17g\\n\", TilesWetness({wet!r}, AtmosphereDefault({preset}, AtmWetnessFloor)));")
     main.append("printf(\"const %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g\\n\","
                 " HazyVisibilityKm, OvercastCover, CloudOvercastCover, StratocumulusMaxThicknessM,"
                 " StratocumulusMinCover, FairCover, FairBaseM, FairTopM, CloudSeedSpanKm,"
@@ -222,19 +247,34 @@ def test_the_cpp_world_tables_and_laws_are_the_python_ones(tmp_path):
         assert vals == pytest.approx([ref["beta_per_km"], ref["mie_extinction_per_km"],
                                       ref["mie_scattering_per_km"], ref["mie_absorption_per_km"],
                                       ref["fog_factor"]], rel=1e-14, abs=1e-15)
-    for (a, b, length, base, top), line in zip(slabs, [l for l in lines if l.startswith("occ ")]):
-        ref = wb.occlusion(a, b, length, base, top, 0.4, 0.05, 1.0)
+    occ_cases = [(s, f) for s in slabs for f in flags]
+    occ_lines = [l for l in lines if l.startswith("occ ")]
+    assert len(occ_lines) == len(occ_cases)
+    for ((a, b, length, base, top), flag), line in zip(occ_cases, occ_lines):
+        ref = wb.occlusion(a, b, length, base, top, 0.4, 0.05, 1.0, flag_transmittance=flag)
         path, tau, t, flagged = line.split()[1:]
         assert float(path) == pytest.approx(ref["path_m"], rel=1e-14, abs=1e-12)
         assert float(tau) == pytest.approx(ref["tau"], rel=1e-14, abs=1e-15)
         assert float(t) == pytest.approx(ref["transmittance"], rel=1e-14)
         assert bool(int(flagged)) == ref["flagged"]
+    got = [(float(l.split()[1]), l.split()[2]) for l in lines if l.startswith("layer ")]
+    assert got == [wb.layer_cover_and_shape(None if c < 0 else c, t, wb.PRESETS[p], bool(f)) for c, t, p, f in layers]
+    got = [tuple(map(int, l.split()[1:])) for l in lines if l.startswith("albedo ")]
+    assert got == [wb.ground_albedo_srgb(s, w) for s, w in albedos]
+    assert next(l for l in lines if l.startswith("albedo_unknown ")) == "albedo_unknown 0"
+    got = [float(l.split()[1]) for l in lines if l.startswith("fogexp ")]
+    assert got == pytest.approx([wb.fog_directional_exponent(g) for g in gs], rel=1e-14)
+    assert tuple(l.split()[1] for l in lines if l.startswith("storm ")) == wb.STORM_WORDS
+    assert next(l for l in lines if l.startswith("isstorm ")) == "isstorm 1 0 0"
+    tiles = next(l for l in lines if l.startswith("tiles ")).split()[1:]
+    assert list(map(float, tiles[:3])) == [wb.TILES_DEHAZE, wb.TILES_SATURATION, wb.WET_DARKENING]
+    assert bool(int(tiles[3])) is wb.SUN_PER_PIXEL_TRANSMITTANCE
     for seed, line in zip((0, 7, 123456789), [l for l in lines if l.startswith("seed ")]):
         assert list(map(float, line.split()[1:])) == pytest.approx(list(wb.cloud_seed_offset_km(seed)), rel=1e-15)
     pulses = [float(l.split()[1]) for l in lines if l.startswith("pulse ")]
     assert pulses == [wb.sky_pulse_scale(f, g) for f, g in ((0.0, 3.0), (0.5, 3.0), (2.0, 3.0), (1.0, 0.0))]
     wets = [float(l.split()[1]) for l in lines if l.startswith("wet ")]
-    assert wets == [max(min(max(w, 0.0), 1.0), f) for w, f in ((0.0, 0.0), (0.2, 0.85), (0.95, 0.6), (1.5, 0.0))]
+    assert wets == [wb.tiles_parameters(wb.PRESETS[p], w)["Wetness"] for p, w in wet_cases]
     consts = list(map(float, next(l for l in lines if l.startswith("const ")).split()[1:]))
     assert consts == [wb.HAZY_VISIBILITY_KM, wb.OVERCAST_COVER, wb.CLOUD_OVERCAST_COVER,
                       wb.STRATOCUMULUS_MAX_THICKNESS_M, wb.STRATOCUMULUS_MIN_COVER,
@@ -514,3 +554,217 @@ def test_the_sidecar_cli_writes_a_readable_file(tmp_path):
     doc = json.loads(out.read_text(encoding="utf-8"))
     assert doc["biome"] == "desert" and doc["region"]["half_east_m"] == 500.0
     assert wb.sidecar_sha256(doc) == hashlib.sha256(wb.dumps(doc).encode("utf-8")).hexdigest()
+
+
+# -- fix pass (2026-11-09): one source of truth per shared quantity --------------------
+
+WEATHERLOOK_CPP = (SOURCE / "Private" / "FlightSimWeatherLook.cpp").read_text(encoding="utf-8")
+VISUAL_SCENE_H = (SOURCE / "Public" / "FlightSimVisualScene.h").read_text(encoding="utf-8")
+
+
+def test_the_storm_words_are_one_list_tornado_included():
+    from core.scene import beauty_look, weather_look
+    assert wb.STORM_WORDS == tuple(weather_look.STORMS) == tuple(beauty_look.STORM_EVENTS)
+    assert "tornado" in wb.STORM_WORDS and wb.is_storm_word("tornado") and not wb.is_storm_word(None)
+    card = {"weather_look": {"storm": "tornado"}}
+    assert wb.card_preset(card) == "storm"
+    # the C++ preset test reads the list, never the one word
+    build = CLOUDS_CPP[CLOUDS_CPP.index("bool FFlightSimWorldBeauty::Build"):]
+    assert "IsStormWord(TCHAR_TO_ANSI(*StormWordValue)) || Weather.DrawsCell()" in build
+    assert 'WorldString(WeatherLook, TEXT("storm")) == TEXT("thunderstorm") ||' not in build
+
+
+def test_one_storm_and_one_lightning_clock():
+    """With the storm weather's cell drawn, the weather look's shafts, bolt and
+    schedule stand down."""
+    assert "bool bSkipStormLook = false;" in VISUAL_SCENE_H
+    assert 'Storm == TEXT("thunderstorm") && Options.bSkipStormLook' in WEATHERLOOK_CPP
+    assert "SceneOptions.bSkipStormLook = SceneOptions.bSkipRainParticles &&" in COMMANDLET
+    assert 'bLookLightning = StormWordValue == TEXT("thunderstorm") && !Weather.DrawsCell();' in CLOUDS_CPP
+
+
+def test_the_world_inputs_survive_a_w3_look_block():
+    card = {
+        "look": {"night": False, "precipitation": {"rate_mmh": 3.0}, "cloud_drift": {"mps": 4.0, "from_deg": 270}},
+        "randomization": {"look": {"visibility_km": 9.0, "precipitation": "rain", "precipitation_rate_mmh": 3.0,
+                                   "wetness": 0.4,
+                                   "clouds": [{"cover": 0.6, "base_m": 900.0, "top_m": 1700.0}]}},
+        "weather_look": {"surface": "forest", "seed": 5},
+    }
+    inputs = wb.card_inputs(card)
+    assert inputs["visibility_km"] == card["randomization"]["look"]["visibility_km"]
+    assert inputs["card_cover"] == card["randomization"]["look"]["clouds"][0]["cover"]
+    assert inputs["precipitation_rain"] and inputs["rain_rate_mmh"] == 3.0 and inputs["wetness"] == 0.4
+    assert inputs["surface"] == "forest" and inputs["seed"] == 5
+    assert wb.card_preset(card) == "rain"
+    night_only = {"look": {"night": True},
+                  "randomization": {"look": {"visibility_km": 8.0,
+                                             "clouds": [{"cover": 0.8, "base_m": 600.0, "top_m": 1500.0}]}}}
+    assert wb.card_preset(night_only) == "overcast"
+    night_only["randomization"]["look"]["clouds"][0]["cover"] = 0.3
+    assert wb.card_preset(night_only) == "hazy"
+    # the host reads key by key, randomization inside the per-key fallback
+    body = CLOUDS_CPP[CLOUDS_CPP.index("TSharedPtr<FJsonValue> WorldLookValue"):]
+    body = body[:body.index("\n\t}\n")]
+    assert 'TEXT("randomization")' in body and "Value->Type == Type" in body
+    assert "if (!Look.IsValid())" not in CLOUDS_CPP
+
+
+def test_the_selection_boundaries_are_pinned():
+    assert wb.select_preset(False, 0.0, False, 0.75, 50.0) == "overcast"
+    assert wb.select_preset(False, 0.0, False, 0.7499, 50.0) == "clear"
+    assert wb.select_preset(False, 0.0, False, 0.0, 15.0) == "clear"
+    assert wb.select_preset(False, 0.0, False, 0.0, 14.999) == "hazy"
+    assert wb.select_cloud(0.85, 3000.0, "clear") == "overcast"
+    assert wb.select_cloud(0.5, 900.0, "clear") == "stratocumulus"
+    assert wb.select_cloud(0.5, 900.1, "clear") == "cumulus"
+    assert wb.select_cloud(0.4999, 900.0, "clear") == "cumulus"
+
+
+def test_the_layer_cover_law():
+    assert wb.layer_cover_and_shape(None, 1200.0, "clear", False) == (0.35, "cumulus")
+    assert wb.layer_cover_and_shape(None, 1200.0, "rain", False) == (0.98, "nimbostratus")
+    assert wb.layer_cover_and_shape(0.9, 1200.0, "clear", False) == (0.9, "overcast")
+    assert wb.layer_cover_and_shape(None, 1200.0, "clear", True) == (wb.FAIR_LAYER["cover"], "cumulus")
+    assert ("State.Shape = LayerCoverAndShape(CardCover, State.TopM - State.BaseM, Preset, bFair, "
+            "CloudValues.GetData(),") in CLOUDS_CPP
+
+
+def test_the_frame_row_uses_the_overridden_constants():
+    advance = CLOUDS_CPP[CLOUDS_CPP.index("void FFlightSimWorldBeauty::Advance"):]
+    assert "CloudExtinctionScale, OcclusionFlagTransmittance)" in advance
+    assert "CldExtinctionPerM]" in advance
+    assert "CameraCm.Z / WorldCmPerMetre" in advance and "AircraftCm.Z / WorldCmPerMetre" in advance
+
+
+def test_apply_tiles_maps_the_python_parameters():
+    body = CLOUDS_CPP[CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyTiles"):
+                      CLOUDS_CPP.index("void FFlightSimWorldBeauty::Advance")]
+    mapping = dict(re.findall(r'\{TEXT\("(\w+)"\), ([^}]+)\}', body))
+    assert mapping == {"Wetness": "Wetness", "PuddleAmount": "Wetness * PuddleShare", "Dehaze": "TilesDehaze",
+                       "Saturation": "TilesSaturation", "DetailStrength": "Row[AtmTilesDetailStrength]",
+                       "DetailFadeM": "DetailFadeM", "DetailScaleM": "DetailScaleM",
+                       "DelightAmount": "FlightSimTilesDelight::AmountFor(Preset)",
+                       "DelightBlueGate": "FlightSimTilesDelight::DelightBlueGate"}
+    assert set(mapping) == set(wb.WORLD_MPC_SCALARS)
+    # the ground state is set only when the tiles really draw with the beauty material
+    assert 'MaterialRoute == TEXT("UFunction SetMaterial") || MaterialRoute == TEXT("UPROPERTY Material")' in body
+    assert "bTilesMaterial ? LoadObject<UMaterialParameterCollection>" in body
+    # the tileset's grade is one value for every weather
+    for preset in wb.PRESETS:
+        p = wb.tiles_parameters(preset, 0.0)
+        assert p["Dehaze"] == wb.TILES_DEHAZE and p["Saturation"] == wb.TILES_SATURATION
+
+
+def test_the_drawn_cloud_cover_is_the_stated_cover():
+    """The quantile cut: the drawn share of cloud columns (mid-layer, after the
+    erosion) is within 15 % of the stated cover for every shape at the covers it
+    is drawn with. The noise's moments are the shader's constants."""
+    import random
+    rng = random.Random(11)
+    samples = [wb.cloud_fbm(rng.uniform(0, 300), rng.uniform(0, 300), rng.uniform(0, 300), 7) for _ in range(6000)]
+    mean = sum(samples) / len(samples)
+    sd = (sum((v - mean) ** 2 for v in samples) / len(samples)) ** 0.5
+    assert mean == pytest.approx(wb.CLOUD_FBM_MEAN, abs=0.01)
+    assert sd == pytest.approx(wb.CLOUD_FBM_SIGMA, abs=0.006)
+    hlsl = (SHADERS / "cloud_layers.hlsl").read_text(encoding="utf-8")
+    assert f"const float FBM_MEAN = {wb.CLOUD_FBM_MEAN};" in hlsl
+    assert f"const float FBM_SIGMA = {wb.CLOUD_FBM_SIGMA};" in hlsl
+    assert "4.91 * (pow(p, 0.14) - pow(1.0 - p, 0.14))" in hlsl
+    assert "return density * profile * ExtinctionPerM * ExtinctionScale;" in hlsl
+    for shape, covers in (("cumulus", (0.2, 0.35, 0.5, 0.7)), ("stratocumulus", (0.5, 0.7)),
+                          ("nimbostratus", (0.5, 0.7))):
+        row = wb.CLOUDS[shape]
+        for cover in covers:
+            n = 1500
+            hits = sum(wb.cloud_density((rng.uniform(0, 200), rng.uniform(0, 200), rng.uniform(1, 3)), 0.5,
+                                        cover, row) > 0.0 for _ in range(n))
+            assert hits / n == pytest.approx(cover, rel=0.15), (shape, cover, hits / n)
+
+
+def test_the_dehaze_never_clips_and_every_shader_shares_the_wet_law():
+    for a in (0.0, 0.002, 0.01, 0.05, 0.3, 1.0):
+        out = wb.tiles_dehaze((a, a, a))
+        assert all(0.0 <= c <= a + 1e-12 for c in out)            # never brighter, never negative
+        if a > 0.0:
+            assert all(c >= wb.TILES_DEHAZE_TOE * a - 1e-15 for c in out)   # a shadow never clips
+    assert wb.tiles_dehaze((1.0, 1.0, 1.0)) == pytest.approx((1.0, 1.0, 1.0))
+    base = (SHADERS / "tiles_base_colour.hlsl").read_text(encoding="utf-8")
+    r, g, b = wb.TILES_HAZE_RGB
+    assert f"const float3 HAZE_RGB = float3({r:.3f}, {g:.3f}, {b:.3f});" in base
+    assert f"const float DEHAZE_TOE = {wb.TILES_DEHAZE_TOE};" in base
+    assert "float3 c = (a - h * a / max(a + k, 1e-6)) / (1.0 - h / (1.0 + k));" in base
+    shaders = {name: (SHADERS / f"{name}.hlsl").read_text(encoding="utf-8")
+               for name in ("tiles_base_colour", "tiles_roughness", "scatter_base_colour", "scatter_roughness")}
+    pins = {"WET_DARKENING": wb.WET_DARKENING, "PUDDLE_DARKENING": wb.PUDDLE_DARKENING,
+            "ROUGHNESS_DRY": wb.ROUGHNESS_DRY, "ROUGHNESS_WET": wb.ROUGHNESS_WET,
+            "ROUGHNESS_PUDDLE": wb.ROUGHNESS_PUDDLE}
+    seen = set()
+    for name, text in shaders.items():
+        for const, value in re.findall(r"const float (\w+) = ([0-9.]+);", text):
+            if const in pins:
+                assert float(value) == pins[const], (name, const)
+                seen.add((name, const))
+    assert ("scatter_base_colour", "WET_DARKENING") in seen and ("scatter_roughness", "ROUGHNESS_WET") in seen
+    assert ("tiles_base_colour", "WET_DARKENING") in seen and ("tiles_roughness", "ROUGHNESS_WET") in seen
+
+
+def test_the_scatter_reads_the_tiles_ground_state():
+    inputs = _script_dict("WORLD_SCATTER_INPUTS")
+    for name, pins in inputs.items():
+        hlsl = (SHADERS / f"{name}.hlsl").read_text(encoding="utf-8")
+        for pin in pins:
+            assert re.search(rf"//\s+{pin}\s", hlsl), (name, pin)
+    assert {"Wetness", "Saturation"} <= {p for pins in inputs.values() for p in pins}
+    assert "M_FlightSimScatter" in _script_dict("WORLD_BEAUTY_MATERIALS")
+    create = SCRIPT[SCRIPT.index("def create_world_scatter"):SCRIPT.index("# == END WORLD LANE")]
+    assert "world_collection_parameter(material, lib, name" in create
+    assert "MaterialExpressionPerInstanceFadeAmount" in create and "BLEND_MASKED" in create
+    assert re.search(r"^create_world_scatter\(\)$", SCRIPT, re.M)
+    assert wb.SCATTER_MATERIAL == "/Game/FlightSim/M_FlightSimScatter.M_FlightSimScatter"
+    assert f'TEXT("{wb.SCATTER_MATERIAL}")' in SCATTER_CPP
+    sidecar = wb.scatter_sidecar("forest", 3)
+    assert sidecar["cull_start_share"] == 0.7 and sidecar["material"] == wb.SCATTER_MATERIAL
+    assert all(s["resnap_radius_m"] == s["cull_end_m"] for s in sidecar["species"])
+    for key in ("cull_start_share", "resnap_radius_m", "biome"):
+        assert f'TEXT("{key}")' in SCATTER_CPP, key
+    assert "SetCullDistances(static_cast<int32>(FMath::Min(CullEndCm * CullStartShare" in SCATTER_CPP
+
+
+def test_the_scatter_is_in_the_labels_and_has_no_collision():
+    assert "SetCollisionEnabled(ECollisionEnabled::NoCollision)" in SCATTER_CPP
+    assert "BeautyOnlyActors" not in SCATTER_CPP
+    assert re.search(r"if \(bVegetation\)\s*\{\s*Holder->Tags\.Add\(FName\(FlightSimWorld::VegetationTag\)\)",
+                     SCATTER_CPP)
+    assert "Id == FlightSimWorld::VegetationObjectId" in SCATTER_CPP
+
+
+def test_the_scatter_biome_is_the_card_surface():
+    assert wb.scatter_biome_for("forest") == "forest" and wb.scatter_biome_for("snow") is None
+    assert "ground_scatter.biome: " in SCATTER_CPP
+    catalog = (REPO / "core" / "messages" / "catalog.yaml").read_text(encoding="utf-8")
+    assert re.search(r"^ground_scatter\.biome:$", catalog, re.M)
+    assert "carries no scatter species (forest, desert)" in SCATTER_CPP
+
+
+def test_the_atmosphere_counts_the_haze_once_with_one_phase():
+    assert all(wb.ATMOSPHERE[p]["aerial_perspective_scale"] == 1.0 for p in wb.PRESETS)
+    assert wb.fog_directional_exponent(0.75) == pytest.approx(2.0)
+    assert wb.fog_directional_exponent(0.3) == wb.FOG_EXPONENT_MIN
+    body = CLOUDS_CPP[CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyAtmosphere"):
+                      CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyClouds")]
+    assert "Fog->SetDirectionalInscatteringExponent(static_cast<float>(FogExponent));" in body
+    assert "WorldAlbedo(Surface, GroundWetness)" in body
+    assert 'static_assert(SunPerPixelTransmittance, ' in body
+    ini = (REPO / "ue" / "Config" / "DefaultEngine.ini").read_text(encoding="utf-8")
+    assert "r.SupportExpFogMatchesVolumetricFog" not in ini   # the measure renders' fog stays as it was
+    # the ground albedo is the surface's, darkened by the tiles' own wet law
+    assert wb.ground_albedo_srgb("desert", 0.0) == wb.GROUND_ALBEDO_SRGB["desert"]
+    assert all(w < d for w, d in zip(wb.ground_albedo_srgb("desert", 1.0), wb.GROUND_ALBEDO_SRGB["desert"]))
+    assert wb.ground_albedo_srgb("volcanic", 0.0) == wb.GROUND_ALBEDO_SRGB["default"]
+
+
+def test_the_detail_normal_is_micro_relief():
+    for preset in wb.PRESETS:
+        assert wb.ATMOSPHERE[preset]["tiles_detail_strength"] <= 0.15
+    assert wb.WORLD_MPC_SCALARS["DetailFadeM"] <= 500.0

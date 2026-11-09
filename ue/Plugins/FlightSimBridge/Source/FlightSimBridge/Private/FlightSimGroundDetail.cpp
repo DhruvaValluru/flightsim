@@ -17,6 +17,8 @@
 #include "FlightSimVisualScene.h"
 #include "GameFramework/Actor.h"
 #include "GeoReferencingSystem.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -134,6 +136,17 @@ namespace
 	// The nadir view the region is loaded from before the first trace.
 	constexpr double ScatterNadirFovDeg = 60.0;
 	constexpr int32 ScatterNadirPixels = 1024;
+	// world_beauty.SCATTER_MATERIAL: the master that reads the tiles' Wetness and
+	// Saturation (MPC_FlightSimWorld); a species drawn with any other material
+	// stays dry and ungraded over wet tiles, recorded so.
+	const TCHAR* const ScatterWorldMaterialPath = TEXT("/Game/FlightSim/M_FlightSimScatter.M_FlightSimScatter");
+	// world_beauty.SCATTER_DEFAULTS cull_start_share (UNCALIBRATED).
+	constexpr double ScatterCullStartShareDefault = 0.7;
+	// world_beauty.BIOMES: the surfaces that carry species.
+	bool ScatterIsBiome(const FString& Surface)
+	{
+		return Surface == TEXT("forest") || Surface == TEXT("desert");
+	}
 
 	double ScatterNumber(const TSharedPtr<FJsonObject>& Object, const TCHAR* Key, double Default)
 	{
@@ -250,6 +263,38 @@ bool FFlightSimGroundDetail::Build(UWorld* World, const FString& SidecarPath,
 		Error = FString::Printf(TEXT("ground_scatter.sidecar: %s carries no region or species"), *SidecarPath);
 		return false;
 	}
+	// The biome is the card's surface (weather_look.surface, world_beauty.
+	// scatter_biome_for): a forest sidecar on a desert card is refused; a card
+	// whose surface carries no species (snow, ocean, city, ...) draws none.
+	{
+		FString Biome, Surface;
+		Sidecar->TryGetStringField(TEXT("biome"), Biome);
+		const TSharedPtr<FJsonObject>* WeatherLook = nullptr;
+		if (Card.IsValid() && Card->TryGetObjectField(TEXT("weather_look"), WeatherLook) && WeatherLook != nullptr)
+		{
+			(*WeatherLook)->TryGetStringField(TEXT("surface"), Surface);
+		}
+		Record->SetStringField(TEXT("biome"), Biome);
+		Record->SetStringField(TEXT("card_surface"), Surface);
+		if (!Surface.IsEmpty() && !ScatterIsBiome(Surface))
+		{
+			Record->SetStringField(TEXT("drawn"),
+				FString::Printf(TEXT("nothing: the card's surface '%s' carries no scatter species (forest, desert)"),
+				                *Surface));
+			bBuilt = false;
+			return true;
+		}
+		if (!Surface.IsEmpty() && Biome != Surface)
+		{
+			Error = FString::Printf(TEXT("ground_scatter.biome: %s is the '%s' biome but the card's surface is '%s' ")
+			                        TEXT("(write the sidecar for the card's surface: python -m core.scene.world_beauty ")
+			                        TEXT("--biome %s)"), *SidecarPath, *Biome, *Surface, *Surface);
+			return false;
+		}
+		Record->SetStringField(TEXT("biome_basis"), Surface.IsEmpty()
+			? TEXT("the sidecar's: the card states no surface")
+			: TEXT("the card's surface (weather_look.surface)"));
+	}
 	const TSharedPtr<FJsonObject> Region = *RegionJson;
 	const TSharedPtr<FJsonObject>* ExclusionJson = nullptr;
 	Sidecar->TryGetObjectField(TEXT("exclusion"), ExclusionJson);
@@ -264,7 +309,8 @@ bool FFlightSimGroundDetail::Build(UWorld* World, const FString& SidecarPath,
 	const double StepRejectM = ScatterNumber(Sidecar, TEXT("step_reject_m"), 2.5);
 	const double ProbeOffsetCm = ScatterNumber(Sidecar, TEXT("probe_offset_m"), 4.0) * ScatterCmPerMetre;
 	SinkCm = ScatterNumber(Sidecar, TEXT("sink_m"), 0.3) * ScatterCmPerMetre;
-	ResnapRadiusCm = ScatterNumber(Sidecar, TEXT("resnap_radius_m"), 800.0) * ScatterCmPerMetre;
+	const double CullStartShare = FMath::Clamp(
+		ScatterNumber(Sidecar, TEXT("cull_start_share"), ScatterCullStartShareDefault), 0.0, 1.0);
 	TraceUpCm = ScatterNumber(Sidecar, TEXT("trace_up_m"), 3000.0) * ScatterCmPerMetre;
 	TraceDownCm = ScatterNumber(Sidecar, TEXT("trace_down_m"), 3000.0) * ScatterCmPerMetre;
 
@@ -378,8 +424,26 @@ bool FFlightSimGroundDetail::Build(UWorld* World, const FString& SidecarPath,
 		Instances->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Instances->SetCastShadow(true);
 		const double CullEndCm = ScatterNumber(Row, TEXT("cull_end_m"), 3000.0) * ScatterCmPerMetre;
-		Instances->SetCullDistances(0, static_cast<int32>(FMath::Min(CullEndCm, 2.0e9)));
+		// A fade band (M_FlightSimScatter dithers on PerInstanceFadeAmount
+		// between the two), not a pop at a fixed range.
+		Instances->SetCullDistances(static_cast<int32>(FMath::Min(CullEndCm * CullStartShare, 2.0e9)),
+		                            static_cast<int32>(FMath::Min(CullEndCm, 2.0e9)));
 		Instances->RegisterComponent();
+		Out->SetNumberField(TEXT("cull_start_m"), CullEndCm * CullStartShare / ScatterCmPerMetre);
+		Out->SetNumberField(TEXT("cull_end_m"), CullEndCm / ScatterCmPerMetre);
+		// The ground state: every material slot an instance of the world
+		// scatter master, else this species stays dry over wet tiles.
+		bool bWorldMaterial = Mesh->GetStaticMaterials().Num() > 0;
+		for (int32 Slot = 0; Slot < Mesh->GetStaticMaterials().Num(); ++Slot)
+		{
+			UMaterialInterface* SlotMaterial = Mesh->GetMaterial(Slot);
+			const UMaterial* SlotBase = SlotMaterial != nullptr ? SlotMaterial->GetBaseMaterial() : nullptr;
+			bWorldMaterial = bWorldMaterial && SlotBase != nullptr &&
+				SlotBase->GetPathName() == ScatterWorldMaterialPath;
+		}
+		Out->SetStringField(TEXT("ground_state"), bWorldMaterial
+			? TEXT("wet and graded with the tiles (M_FlightSimScatter reads MPC_FlightSimWorld Wetness, Saturation)")
+			: TEXT("dry: not the world material (scripts/ue_import_scatter.py parents the import to M_FlightSimScatter)"));
 		if (bVegetation)
 		{
 			Holder->Tags.Add(FName(FlightSimWorld::VegetationTag));
@@ -387,6 +451,11 @@ bool FFlightSimGroundDetail::Build(UWorld* World, const FString& SidecarPath,
 		Ignored.Add(Holder);
 		FSpecies& State = Species.Last();
 		State.Instances = Instances;
+		// Every drawn instance is re-traced onto the level of detail the frame
+		// streamed: the re-snap radius is the species' own cull distance.
+		State.ResnapRadiusCm = ScatterNumber(Row, TEXT("resnap_radius_m"), CullEndCm / ScatterCmPerMetre) *
+			ScatterCmPerMetre;
+		Out->SetNumberField(TEXT("resnap_radius_m"), State.ResnapRadiusCm / ScatterCmPerMetre);
 
 		const int64 Budget = FMath::Max<int64>(ScatterMaxTotalInstances - Total, 0);
 		const int64 Count = FlightSimScatterPure::InstanceCount(
@@ -463,7 +532,7 @@ bool FFlightSimGroundDetail::Build(UWorld* World, const FString& SidecarPath,
 	Record->SetArrayField(TEXT("species"), SpeciesRows);
 	Record->SetNumberField(TEXT("seed"), static_cast<double>(Seed));
 	Record->SetNumberField(TEXT("instances"), static_cast<double>(Total));
-	Record->SetNumberField(TEXT("resnap_radius_m"), ResnapRadiusCm / ScatterCmPerMetre);
+	Record->SetStringField(TEXT("resnap_radius_m"), TEXT("per species (species[].resnap_radius_m: its cull_end_m)"));
 	Record->SetStringField(TEXT("not_claimed"),
 		TEXT("no collision (the flight model never sees these); a seeded uniform scatter, not the land "
 		     "cover's trees; may stand on flat roofs or water; positions follow the tiles Cesium streamed, "
@@ -476,18 +545,18 @@ bool FFlightSimGroundDetail::Build(UWorld* World, const FString& SidecarPath,
 
 void FFlightSimGroundDetail::Resnap(const FVector& CameraCm)
 {
-	if (!bBuilt || ResnapRadiusCm <= 0.0)
+	if (!bBuilt)
 	{
 		return;
 	}
-	const double RadiusSq = ResnapRadiusCm * ResnapRadiusCm;
 	int32 Moved = 0;
 	for (FSpecies& State : Species)
 	{
-		if (State.Instances == nullptr)
+		if (State.Instances == nullptr || State.ResnapRadiusCm <= 0.0)
 		{
 			continue;
 		}
+		const double RadiusSq = State.ResnapRadiusCm * State.ResnapRadiusCm;
 		bool bDirty = false;
 		for (int32 Index = 0; Index < State.GroundXYCm.Num(); ++Index)
 		{

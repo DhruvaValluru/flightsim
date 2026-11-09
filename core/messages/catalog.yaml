@@ -355,6 +355,9 @@ hero_lighting.sidecar:
 ground_scatter.sidecar:
   sentence: "The ground scatter file cannot be read, is of another format or version, or carries no region or species."
   hint: "Write the scatter file again, or render without ground scatter."
+ground_scatter.biome:
+  sentence: "The ground scatter file is for a different landscape than the scene: its trees and bushes belong to another kind of ground."
+  hint: "Write the scatter file for the scene's own ground (forest or desert), or render without ground scatter."
 
   sentence: "The ground scatter sidecar cannot be used: it is not JSON, it has the wrong format or version, or it lists no region or species."
   hint: "Re-bake the scatter sidecar with the current format, or render without ground scatter."

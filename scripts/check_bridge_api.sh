@@ -462,6 +462,26 @@ rp_check "delight: TextureSample MipBias pin" "Engine/Private/Materials/Material
 # name, so the script connects "Bias", not "MipBias".
 rp_check "delight: MipBias pin shortens to Bias" "../Editor/UnrealEd/Private/MaterialGraphNode.cpp" "InputName = MaterialPinNames::Bias;"
 # -- tiles-delight -- end ------------------------------------------------------
+# -- world lane fix pass (2026-11-09) -- begin --------------------------------
+# FlightSimClouds.cpp (the per-key look read, the fog's sun lobe),
+# FlightSimGroundDetail.cpp (the fade band, the scatter's material check) and
+# M_FlightSimScatter (scripts/ue_create_materials.py, scatter_opacity.hlsl).
+# Each pattern was read in the 5.7.4 source on 2026-11-09 (paths under $RT).
+rp_check "world fix: Fog SetDirectionalInscatteringExponent" "Engine/Classes/Components/ExponentialHeightFogComponent.h" "ENGINE_API void SetDirectionalInscatteringExponent(float Value);"
+rp_check "world fix: Json TryGetField" "Json/Public/Dom/JsonObject.h" "TSharedPtr<FJsonValue> TryGetField(FStringView FieldName) const"
+rp_check "world fix: Json AsArray" "Json/Public/Dom/JsonValue.h" "JSON_API const TArray<TSharedPtr<FJsonValue>>& AsArray() const;"
+rp_check "world fix: Json AsObject" "Json/Public/Dom/JsonValue.h" "JSON_API virtual const TSharedPtr<FJsonObject>& AsObject() const;"
+rp_check "world fix: Json AsNumber" "Json/Public/Dom/JsonValue.h" "JSON_API double AsNumber() const;"
+rp_check "world fix: Json AsString" "Json/Public/Dom/JsonValue.h" "JSON_API FString AsString() const;"
+rp_check "world fix: StaticMesh GetStaticMaterials" "Engine/Classes/Engine/StaticMesh.h" "const TArray<FStaticMaterial>& GetStaticMaterials() const"
+rp_check "world fix: StaticMesh GetMaterial" "Engine/Classes/Engine/StaticMesh.h" "ENGINE_API UMaterialInterface* GetMaterial(int32 MaterialIndex) const;"
+rp_check "world fix: MaterialInterface GetBaseMaterial" "Engine/Public/Materials/MaterialInterface.h" "ENGINE_API UMaterial* GetBaseMaterial();"
+rp_check "world fix: ISM SetCullDistances (start, end)" "Engine/Classes/Components/InstancedStaticMeshComponent.h" "ENGINE_API void SetCullDistances(int32 StartCullDistance, int32 EndCullDistance);"
+rp_check "world fix: PerInstanceFadeAmount expression" "Engine/Public/Materials/MaterialExpressionPerInstanceFadeAmount.h" "class UMaterialExpressionPerInstanceFadeAmount"
+rp_check "world fix: Material OpacityMaskClipValue" "Engine/Public/Materials/Material.h" "float OpacityMaskClipValue;"
+rp_check "world fix: Material bUsedWithInstancedStaticMeshes" "Engine/Public/Materials/Material.h" "uint8 bUsedWithInstancedStaticMeshes : 1;"
+rp_check "world fix: material SvPosition" "../../Shaders/Private/MaterialTemplate.ush" "float4 SvPosition;"
+# -- world lane fix pass -- end ------------------------------------------------
 
 # -- sun-shafts-sky-occlusion (visual overhaul, 2026-11-09) -----------------
 # FlightSimSunShafts.cpp: the sun's light shafts and cloud shadow, the sky

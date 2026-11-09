@@ -71,6 +71,8 @@ import math
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from .weather_look import STORMS as _WEATHER_STORMS
+
 #: The sidecar's version; the host refuses one it does not know.
 BEAUTY_LOOK_VERSION = 1
 
@@ -219,8 +221,9 @@ GRADE_NAMES: Tuple[str, ...] = tuple(GRADES)
 #: golden_hour grade; above it desert_noon. UNCALIBRATED: set by probe
 #: render on the render machine (the 10/15/20 deg probe series).
 GOLDEN_HOUR_BELOW_DEG = 15.0
-#: Weather words that take the storm grade (core/scene/weather_look.py STORMS).
-STORM_EVENTS = ("thunderstorm", "tornado")
+#: Weather words that take the storm grade: core/scene/weather_look.py STORMS
+#: itself, the one list the world look (world_beauty.STORM_WORDS) reads too.
+STORM_EVENTS = _WEATHER_STORMS
 
 # -- lenses --------------------------------------------------------------------
 
