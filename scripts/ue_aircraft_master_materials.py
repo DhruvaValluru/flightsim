@@ -62,7 +62,7 @@ import aircraft_look as look  # noqa: E402
 import aircraft_wet_layer  # noqa: E402  (wet-airframe-canopy)
 
 REPO = os.path.dirname(_HERE)
-LOOK_GENERATION = "2"  # 2: wet-airframe-canopy wet layer and canopy scratches
+LOOK_GENERATION = "3"  # 2: wet-airframe-canopy wet layer and canopy scratches; 3: fix pass (acrylic glass, physical bulbs and plume)
 LOOK_GENERATION_TAG = "FlightSimAircraftLookGeneration"
 #: The engine's white texture, the default of every BaseColorMap
 #: (Engine/Content/EngineResources/WhiteSquareTexture.uasset, present in 5.7.4).
@@ -447,13 +447,30 @@ def create_nav_light_emissive():
     material = _fx("M_NavLightEmissive", "BLEND_ADDITIVE", unlit=True)
     if material is None:
         return
-    colour, intensity, strobe = look.FX_PARAMETERS["M_NavLightEmissive"]
+    unreal = _u()
+    colour, intensity, strobe, beam_direction, beam_cos = look.FX_PARAMETERS["M_NavLightEmissive"]
+    # The beam axis is set in the ACTOR frame (the lamp actor hangs on the
+    # aircraft with its rotation), turned to world here; the omni default
+    # BeamCos (-2, -2) draws the bulb from every side.
+    direction = _node(material, unreal.MaterialExpressionTransform, -900, 600)
+    direction.set_editor_property("transform_source_type",
+                                  unreal.MaterialVectorCoordTransformSource.TRANSFORMSOURCE_LOCAL)
+    direction.set_editor_property("transform_type", unreal.MaterialVectorCoordTransform.TRANSFORM_WORLD)
+    _link(_mask(material, _vector(material, beam_direction, (1.0, 0.0, 0.0, 0.0), -1300, 600),
+                "rgb", -1100, 600), "", direction, "")
+    beam_dir = _node(material, unreal.MaterialExpressionNormalize, -700, 600)
+    _link(direction, "", beam_dir, "")
     glow = _custom(material, "nav_bulb", "CMOT_FLOAT3", {
         "UV": (_uv(material, -700, 0), ""),
         "LightColour": (_mask(material, _vector(material, colour, (1.0, 1.0, 1.0, 1.0), -900, 150),
                               "rgb", -700, 150), ""),
+        # cd/m2 (aircraft_look.bulb_luminance_nits); the C++ always sets it.
         "Intensity": (_scalar(material, intensity, 1.0, -700, 300), ""),
-        "Strobe": (_scalar(material, strobe, 1.0, -700, 400), "")}, -400, 100)
+        "Strobe": (_scalar(material, strobe, 1.0, -700, 400), ""),
+        "CameraDir": (_node(material, unreal.MaterialExpressionCameraVectorWS, -700, 500), ""),
+        "BeamDir": (beam_dir, ""),
+        "BeamCos": (_mask(material, _vector(material, beam_cos, (*look.OMNI_BEAM_COS, 0.0, 0.0), -900, 700),
+                          "rg", -700, 700), "")}, -400, 100)
     _emissive(material, glow)
     _finish(material, "M_NavLightEmissive")
 
@@ -466,12 +483,15 @@ def create_aircraft_afterburner():
     glow = _custom(material, "afterburner_glow", "CMOT_FLOAT3", {
         "UV": (_uv(material, -700, 0), ""),
         "Intensity": (_scalar(material, intensity, 0.0, -700, 100), ""),
-        # UNCALIBRATED: a blue-white core going orange (reheat), emissive scale.
-        "CoreColour": (_mask(material, _vector(material, core, (30.0, 22.0, 18.0, 1.0), -900, 200),
+        # The hue only (core luminance 1): the C++ sets hue x the plume's
+        # luminance from the look manifest (aircraft_look.plume_luminance),
+        # the same AfterburnerCandela its light throws. UNCALIBRATED hue.
+        "CoreColour": (_mask(material, _vector(material, core, (*look.AFTERBURNER_CORE_HUE, 1.0), -900, 200),
                              "rgb", -700, 200), ""),
-        "TipColour": (_mask(material, _vector(material, tip, (20.0, 6.0, 1.5, 1.0), -900, 320),
+        "TipColour": (_mask(material, _vector(material, tip, (*look.AFTERBURNER_TIP_HUE, 1.0), -900, 320),
                             "rgb", -700, 320), ""),
-        "Shocks": (_scalar(material, shocks, 5.0, -700, 440), "")}, -400, 100)
+        "Shocks": (_scalar(material, shocks, look.AFTERBURNER_DEFAULTS["Shocks"], -700, 440), "")},
+        -400, 100)
     _emissive(material, glow)
     _finish(material, "M_AircraftAfterburner")
 

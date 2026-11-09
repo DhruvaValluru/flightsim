@@ -2,7 +2,7 @@
   "schema": "flightsim-aircraft-look/1",
   "name": "J11",
   "default_class": "paint",
-  "note": "Beauty-only look (scripts/aircraft_look.py). Every class parameter not stated here is the master default; every look number here is UNCALIBRATED: set by probe render on the render machine. Matte PLAAF grey: low clear coat. j11-package lane (2026-11-09): the slot names are now measured on the converted J-11A (25 MTL slots: assets_pipeline/convert.py over the pinned package, docs/visual/J11_PACKAGE.md); the cockpit interior, seat and pilot slots are matte (the rubber master: Default Lit, no clear coat, no panel lines) with a roughness derived from the package's own .ac shininess (fg_material); the canopy and the pilot's visor are glass. Lamps and nozzles sit at the package's own model-XML positions (package_model_m), mapped to the actor frame the way the converter maps every vertex.",
+  "note": "Beauty-only look (scripts/aircraft_look.py). Every class parameter not stated here is the master default; every look number here is UNCALIBRATED: set by probe render on the render machine. Matte PLAAF grey: low clear coat. j11-package lane (2026-11-09): the slot names are now measured on the converted J-11A (25 MTL slots: assets_pipeline/convert.py over the pinned package, docs/visual/J11_PACKAGE.md); the cockpit interior, seat and pilot slots are matte (the rubber master: Default Lit, no clear coat, no panel lines) with a roughness derived from the package's own .ac shininess (fg_material); the canopy and the pilot's visor are glass. Lamps and nozzles sit at the package's own model-XML positions (package_model_m), mapped to the actor frame the way the converter maps every vertex. Fix pass (2026-11-09): light_constants.BulbRadiusCm 6 -- the default 18 cm glow sprite and point-light source radius is an airliner's wingtip lens and glare, about three times a fighter's wingtip nav lens; the bulb's luminance follows its candela over that area (scripts/aircraft_look.py bulb_luminance_nits), so a smaller bulb is brighter, not dimmer. UNCALIBRATED.",
   "slot_rules": [
     {
       "match": "mat_Glass_Cockpit",
@@ -39,6 +39,9 @@
         1.0
       ]
     }
+  },
+  "light_constants": {
+    "BulbRadiusCm": 6.0
   },
   "nozzles": [
     {

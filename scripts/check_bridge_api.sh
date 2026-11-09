@@ -593,6 +593,16 @@ aircraft_check "Fresnel ExponentIn" "$RE/Public/Materials/MaterialExpressionFres
 # 0.04) so the face-on F0 is the class Specular's, and that F0 is 0.08 x Specular.
 aircraft_check "Fresnel BaseReflectFraction default 0.04" "$RE/Public/Materials/MaterialExpressionFresnel.h" "float BaseReflectFraction = 0.04f;"
 aircraft_check "F0 = 0.08 x Specular" "Shaders/Private/ShadingCommon.ush" "return half(0.08f * Specular);"
+# fix pass: the landing bulb's beam (camera vector, the actor-frame axis to
+# world, normalised) and the heat haze's engine scale (the 2D offset times
+# width x 0.00023 x the projection's M[0][0], FlightSimAircraftFX.cpp
+# HeatHazeMaxDisplacementPx, with the capture's FOVAngle).
+aircraft_check "MaterialExpressionCameraVectorWS" "$RE/Public/Materials/MaterialExpressionCameraVectorWS.h" "class UMaterialExpressionCameraVectorWS"
+aircraft_check "MaterialExpressionNormalize" "$RE/Public/Materials/MaterialExpressionNormalize.h" "class UMaterialExpressionNormalize"
+aircraft_check "2D offset fudge 0.00023" "Shaders/Private/DistortionCommon.ush" "const float OffsetFudgeFactor = 0.00023;"
+aircraft_check "2D offset x view width x fudge x FOV fix" "Shaders/Private/DistortionCommon.ush" "BufferUVDistortion *= DistortionParameters.zw * float2(OffsetFudgeFactor, -OffsetFudgeFactor) * FovFix;"
+aircraft_check "distortion params: M[0][0], aspect, width, height" "Runtime/Renderer/Private/DistortionRendering.cpp" "DistortionParams.Z = (float)View.UnscaledViewRect.Width();"
+aircraft_check "SceneCapture2D FOVAngle" "$RE/Classes/Components/SceneCaptureComponent2D.h" "float FOVAngle;"
 aircraft_check "Custom CMOT_Float4" "$RE/Public/Materials/MaterialExpressionCustom.h" "CMOT_Float4"
 aircraft_check "MaterialExpressionLocalPosition" "$RE/Public/Materials/MaterialExpressionLocalPosition.h" "class UMaterialExpressionLocalPosition"
 aircraft_check "MaterialExpressionTransform" "$RE/Public/Materials/MaterialExpressionTransform.h" "TransformSourceType"

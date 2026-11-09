@@ -7,8 +7,8 @@
 // Inputs:
 //   UV         float2  x along the plume 0..1, y around it
 //   Intensity  float   0..1 reheat glow (from thrust, set by the C++ per frame)
-//   CoreColour float3  linear colour at the nozzle
-//   TipColour  float3  linear colour at the tip
+//   CoreColour float3  linear luminance at the nozzle, cd/m2 (the hue x the core luminance the C++ sets from AfterburnerCandela)
+//   TipColour  float3  linear luminance at the tip, cd/m2 (likewise)
 //   Shocks     float   the number of shock diamonds along the plume
 // Returns float3 emissive.
 float along = saturate(UV.x);

@@ -218,6 +218,10 @@ aircraft_look.manifest:
   sentence: "The aircraft's beauty look file exists but cannot be read, so the beauty render was stopped rather than drawn without it."
   hint: "Run the aircraft import step again; it rewrites the look file beside the converted model."
 
+aircraft_look.switch:
+  sentence: "One of the aircraft look's on/off switches was given a word other than on or off, so the beauty render was stopped rather than guessing what was meant."
+  hint: "Give the switch on, 1 or true, or off, 0 or false (for example -heat-haze=off)."
+
 aircraft_look.condensation:
   sentence: "The aircraft's vapour settings contradict each other or are not numbers, so the beauty render was stopped rather than drawn with them."
   hint: "Correct the condensation numbers in the aircraft's look config, then run the aircraft import step again."
