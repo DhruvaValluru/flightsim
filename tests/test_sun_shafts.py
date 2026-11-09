@@ -219,7 +219,7 @@ def test_measure_quality_cannot_reach_apply():
 
 
 def test_show_flags_are_set_on_the_beauty_capture_only():
-    lines = [i for i, line in enumerate(COMMANDLET.splitlines()) if "ShowFlags.SetLightShafts" in line]
+    lines = [i for i, line in enumerate(COMMANDLET.splitlines()) if "ShowFlags.SetLightShafts(true)" in line]
     assert len(lines) == 1
     text = COMMANDLET.splitlines()
     assert text[lines[0]].strip() == "Capture->ShowFlags.SetLightShafts(true);"
@@ -231,7 +231,11 @@ def test_show_flags_are_set_on_the_beauty_capture_only():
     # the label rule still turns volumetric fog off on every label capture
     configure = COMMANDLET[COMMANDLET.index("auto ConfigureLabelCapture"):COMMANDLET.index("auto MakeDepthCapture")]
     assert "Label->ShowFlags.SetVolumetricFog(false);" in configure
-    assert "SetLightShafts" not in configure
+    # the sun's light-shaft bloom adds into SceneColor whenever a view's
+    # LightShafts flag is set (default on), so every label capture and the
+    # radiometric calibration capture turn it off
+    assert "Label->ShowFlags.SetLightShafts(false);" in configure
+    assert "CalibrationCapture->ShowFlags.SetLightShafts(false);" in COMMANDLET
     assert 'BeautyFlags->SetBoolField(TEXT("light_shafts"), Capture->ShowFlags.LightShafts != 0);' in COMMANDLET
 
 

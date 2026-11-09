@@ -794,9 +794,14 @@ It records everything in `look_applied.world_beauty.sun_shafts`.
   was grepped in the 5.7.4 Renderer source and is checked by
   `scripts/check_bridge_api.sh` (block "sun-shafts-sky-occlusion").
 * Show flags: `LightShafts` and `VolumetricFog` are forced on the beauty
-  capture only, inside the commandlet's beauty block. The accumulate, linear
-  and calibration captures copy the beauty flags. The label captures are left
-  as they are, and `ConfigureLabelCapture` still turns volumetric fog off.
+  capture only, inside the commandlet's beauty block. The accumulate and
+  linear captures copy the beauty flags. The calibration capture copies them
+  and then turns `LightShafts` off. `ConfigureLabelCapture` turns
+  `LightShafts` and volumetric fog off on every label capture (skeptic fix,
+  2026-11-09: `RenderLightShaftBloom` in the 5.7.4 DeferredShadingRenderer.cpp
+  is gated by the LightShafts flag alone, not Bloom, and adds into SceneColor,
+  so with the sun's light-shaft bloom now on it would have run on the label
+  views too).
   `render_settings.beauty_show_flags.light_shafts` records the value the
   capture actually had.
 * No ephemeris change. `core/environment/sun.py` already applies NOAA
@@ -807,7 +812,7 @@ It records everything in `look_applied.world_beauty.sun_shafts`.
 Value-only: radiance changes and no surface moves, so this is not in
 `PIXEL_MOVING_KEYS`. The light switches and the cvars are process-wide while
 a beauty render runs, so the label captures in that run share them. The label
-captures draw no fog, atmosphere or cloud, and they read stencil, depth,
+captures draw no fog, atmosphere, cloud or light shafts, and they read stencil, depth,
 normal or base colour through their own post-process materials. Their bytes
 should therefore be the same with the module on or off. That is a claim, not
 a measurement (probe 5).

@@ -300,8 +300,10 @@ void FFlightSimSunShafts::Apply(UWorld* World, FFlightSimVisualScene& Scene, int
 		Flags->SetBoolField(TEXT("light_shafts"), true);
 		Flags->SetBoolField(TEXT("volumetric_fog"), true);
 		Flags->SetStringField(TEXT("where"),
-			TEXT("the beauty capture only (FlightSimRenderCommandlet.cpp beauty block); the label captures' "
-			     "flags are untouched; the measured value is render_settings.beauty_show_flags"));
+			TEXT("on for the beauty capture (FlightSimRenderCommandlet.cpp beauty block); LightShafts is "
+			     "off on every label capture (ConfigureLabelCapture) and on the calibration capture, since "
+			     "the sun's light-shaft bloom adds into SceneColor on any view with the flag on; the "
+			     "measured value is render_settings.beauty_show_flags"));
 		Out->SetObjectField(TEXT("show_flags"), Flags);
 	}
 

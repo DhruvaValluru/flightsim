@@ -3491,6 +3491,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Label->ShowFlags.SetFog(false);
 			Label->ShowFlags.SetAtmosphere(false);
 			Label->ShowFlags.SetVolumetricFog(false);
+			// sun-shafts-sky-occlusion: the sun now has light-shaft occlusion
+			// and bloom on, and RenderLightShaftBloom adds into SceneColor on
+			// any view whose LightShafts flag is set (default on), Bloom flag
+			// or not. Off on every label capture.
+			Label->ShowFlags.SetLightShafts(false);
 			// Phase 2 Look lane: volumetric clouds write no depth and the ID
 			// pass replaces the tonemapper, but a label capture draws no
 			// cloud at all (contracts §1, extended by this stage).
@@ -6134,6 +6139,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		CalibrationCapture->ShowFlags.SetAtmosphere(false);
 		CalibrationCapture->ShowFlags.SetCloud(false);
 		CalibrationCapture->ShowFlags.SetBloom(false);
+		// sun-shafts-sky-occlusion: the copied beauty flags carry LightShafts
+		// on, and the sun's light-shaft bloom would add into the radiometry.
+		CalibrationCapture->ShowFlags.SetLightShafts(false);
 		CalibrationCapture->ShowFlags.SetMotionBlur(false);
 		CalibrationCapture->ShowFlags.SetDepthOfField(false);
 		CalibrationCapture->ShowFlags.SetLensFlares(false);
