@@ -214,6 +214,7 @@ AActor* FFlightSimAircraftFX::SpawnAttached(UWorld* World, const FVector& ActorC
 bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOptions& Options, FString& Error)
 {
 	Aircraft = Options.Aircraft;
+	Weather = Options.Weather;  // wet-airframe-canopy
 	Record = MakeShared<FJsonObject>();
 	Record->SetStringField(TEXT("drawn_in"), TEXT("beauty capture only (-quality=beauty); every element is a ")
 		TEXT("beauty-only actor or a shading-only material swap, so mask, class and depth are those of the ")
@@ -443,7 +444,10 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 				AbsentNames.AddUnique(SlotName);
 				continue;
 			}
-			Part->SetMaterial(Slot, LookInstance);
+			// wet-airframe-canopy: a MID of the look instance, so the wet scalars can be set per step.
+			UMaterialInstanceDynamic* LookMid = UMaterialInstanceDynamic::Create(LookInstance, Part);
+			Part->SetMaterial(Slot, LookMid != nullptr ? static_cast<UMaterialInterface*>(LookMid) : LookInstance);
+			if (LookMid != nullptr) { LookMids.Add(LookMid); }
 			++Applied;
 		}
 	}
@@ -777,4 +781,6 @@ void FFlightSimAircraftFX::Advance(TFunctionRef<double(const TCHAR*)> ReadProper
 	Record->SetObjectField(TEXT("afterburner"), Afterburner);
 	Record->SetNumberField(TEXT("strobe_on_frames"), StrobeOnFrames);
 	Record->SetNumberField(TEXT("landing_light_on_frames"), LandingOnFrames);
+	// wet-airframe-canopy: the weather's wetness on the look MIDs (shading only).
+	if (Weather != nullptr) { Wet.Advance(LookMids, *Weather, ReadProperty(TEXT("velocities/vtrue-kts")), ReadProperty(TEXT("simulation/sim-time-sec")), Record); }
 }
