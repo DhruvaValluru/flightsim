@@ -306,3 +306,155 @@ def test_a_pixel_moving_key_two_objects_deep_is_found():
 def test_on_off_words_ignore_case():
     assert not bl.is_on("lens_distortion", {"enabled": "OFF"})
     assert bl.is_on("lens_distortion", {"enabled": "On"})
+
+
+# -- fix pass (visual overhaul, verifier): the records the host really writes -------
+
+def _host_record():
+    """beauty_look in the FFlightSimBeautyLook::Record shape: sidecar, the
+    planner's own plan, and the applied rows the host echoes."""
+    from core.scene.beauty_look import plan_beauty_look
+    plan = plan_beauty_look(54.0, fps=30.0, width_px=1920)
+    return {"sidecar": "C:/runs/x/beauty_look.json", "plan": plan,
+            "applied": {"camera": {"fov_deg_unchanged": None,
+                                   "MotionBlurAmount": plan["camera"]["MotionBlurAmount"],
+                                   "MotionBlurTargetFPS": 30},
+                        "lens_post": {k: v for k, v in plan["lens_post"].items()
+                                      if isinstance(v, (int, float)) and not isinstance(v, bool)},
+                        "tonemap": {"tonemapper": "filmic"}}}
+
+
+def _contract_effects(motion_blur_on):
+    return [{"name": n, "on": n == "motion_blur" and motion_blur_on, "transform": None,
+             "max_displacement_px": 19.2 if n == "motion_blur" else None,
+             "displacement_basis": "bound: MotionBlurMax percent of the width, by construction; "
+                                   "not measured", "source": "beauty capture"}
+            for n in bl.COMMANDLET_EFFECTS]
+
+
+def test_the_planners_own_record_grades_as_the_schema_says(bundle):
+    look = _host_record()
+
+    def change(p):
+        p["beauty_look"] = look
+        p["render_settings"]["beauty_show_flags"]["motion_blur"] = True
+        p["pixel_moving_effects"] = _contract_effects(True)
+        p["beauty_samples"] = {"spatial": 8, "temporal": 1, "still_samples": 8, "shutter_s": 0.0167}
+    edit(bundle, change)
+    record, alignment = grade(bundle)
+    # Consistent: the commandlet lists the motion blur it read back ...
+    assert record.status == PASS, record.detail
+    # ... and honestly not label aligned: a bound by construction is not a measurement.
+    assert alignment.failure == FAIL_LOOK_NOT_ALIGNED and "motion_blur" in alignment.detail
+    # The plan's descriptive rows are not switches once the host's applied echo exists.
+    assert not [k for k, _ in bl.look_effects_on(look) if k.startswith("plan.")]
+    # With the readback saying motion blur is off, the applied MotionBlurAmount is still caught.
+    edit(bundle, lambda p: p.update(pixel_moving_effects=_contract_effects(False)))
+    record, _ = grade(bundle)
+    assert record.failure == FAIL_LOOK_UNRECORDED
+    assert "applied.camera.MotionBlurAmount" in record.detail
+
+
+def test_measure_with_the_hosts_applied_record_is_refused(bundle):
+    edit(bundle, set_quality("measure"))
+    edit(bundle, lambda p: p.update(beauty_look={"sidecar": "s.json", "plan": {},
+                                                 "applied": {"exposure": {"ev100": 15.0}}}))
+    assert grade(bundle)[0].failure == FAIL_LOOK_MEASURE_ALTERED
+    assert bl.look_anything_on({"sidecar": "s.json"})
+    assert not bl.look_anything_on({"applied": {}})
+    assert not bl.look_anything_on({"applied": {"on": False}, "sidecar": ""})
+
+
+def test_the_hosts_camelcase_echo_is_read():
+    assert bl.look_effects_on({"applied": {"lens_post": {"SceneFringeIntensity": 0.4}}}) == [
+        ("applied.lens_post.SceneFringeIntensity", "chromatic_aberration")]
+    assert bl.look_effects_on({"applied": {"camera": {"MotionBlurAmount": 0.5}}}) == [
+        ("applied.camera.MotionBlurAmount", "motion_blur")]
+    assert bl.look_effects_on({"applied": {"lens_post": {"MotionBlurMax": 1.0,
+                                                         "ScreenPercentage": 100}}}) == []
+    assert bl.look_effects_on({"post": {"PaniniD": 0.2, "ScreenPercentage": 66.7}}) == [
+        ("post.PaniniD", "panini"), ("post.ScreenPercentage", "upscale")]
+    assert bl.measured_effects_on({"render_settings": {"beauty_show_flags": {
+        "scene_color_fringe": True}}}) == [
+        ("render_settings.beauty_show_flags.scene_color_fringe", "chromatic_aberration")]
+
+
+def test_a_commandlet_shaped_pathtrace_render_passes(bundle):
+    def change(p):
+        p["scene"]["render_quality"] = "pathtrace"
+        p["render_settings"]["beauty_path"] = {
+            "quality": "pathtrace", "accumulation": {"captures_per_frame": 256},
+            "path_tracer": {"samples_per_pixel": 256}}
+        effects = _contract_effects(False)
+        for e in effects:
+            if e["name"] == "path_tracer_filter":
+                e["on"] = True
+        p["pixel_moving_effects"] = effects
+        p["beauty_samples"] = {"spatial": 1, "temporal": 1, "still_samples": 1,
+                               "path_tracer_spp": 256, "shutter_s": 0.0}
+    edit(bundle, change)
+    assert grade(bundle)[0].status == PASS
+    # the render path's own record alone states the samples too
+    edit(bundle, lambda p: p.update(beauty_samples={"spatial": 1, "temporal": 1, "shutter_s": 0.0}))
+    assert grade(bundle)[0].status == PASS
+    # two numbers for one PathTraceSpp that disagree are a malformed record
+    edit(bundle, lambda p: p.update(beauty_samples={"path_tracer_spp": 128}))
+    assert grade(bundle)[0].failure == FAIL_LOOK_RECORD
+
+
+@pytest.mark.parametrize("change", [
+    lambda p: p.update(beauty_samples={"spatial": 4}),
+    lambda p: p.update(beauty_samples={"still_samples": 8}),
+    lambda p: p["render_settings"].update(beauty_path={"accumulation": {"captures_per_frame": 2}}),
+])
+def test_measure_with_still_samples_is_refused(bundle, change):
+    edit(bundle, set_quality("measure"))
+    edit(bundle, change)
+    assert grade(bundle)[0].failure == FAIL_LOOK_MEASURE_ALTERED
+
+
+def _world_frames(*rows):
+    def change(p):
+        p["beauty_look"] = {}
+        p["look_applied"]["world_beauty"] = {"frames": list(rows)}
+    return change
+
+
+def test_a_cloud_flagged_frame_is_not_label_aligned(bundle):
+    edit(bundle, _world_frames({"frame": 0, "cloud_occludes_aircraft": True,
+                                "cloud_occlusion_complete": True}))
+    _, alignment = grade(bundle)
+    assert alignment.status == FAIL and alignment.failure == FAIL_LOOK_NOT_ALIGNED
+    assert "world lane flags a cloud" in alignment.detail
+
+
+def test_an_unmodelled_cloud_frame_is_not_label_aligned(bundle):
+    edit(bundle, _world_frames({"frame": 0, "cloud_occludes_aircraft": False,
+                                "cloud_occlusion_complete": False}))
+    _, alignment = grade(bundle)
+    assert alignment.failure == FAIL_LOOK_NOT_ALIGNED and "not ruled out" in alignment.detail
+
+
+def test_a_clear_modelled_frame_passes_and_a_measurement_supersedes_the_model(bundle):
+    edit(bundle, _world_frames({"frame": 0, "cloud_occludes_aircraft": False,
+                                "cloud_occlusion_complete": True}))
+    assert grade(bundle)[1].status == PASS
+    edit(bundle, _world_frames({"frame": 0, "cloud_occludes_aircraft": True,
+                                "cloud_occlusion_complete": True}))
+    edit(bundle, lambda p: p.update(cloud_occlusion={
+        "policy": "labels_unoccluded", "subject_occluded_fraction": 0.0, "basis": "measured"}))
+    assert grade(bundle)[1].status == PASS
+
+
+def test_the_fov_is_read_where_the_host_writes_it(bundle):
+    import math
+    manifest = read_capture_manifest(bundle / "capture_manifest.json")
+    frame = manifest["frames"][0]
+    solver = math.degrees(2 * math.atan(frame["width_px"] / (2 * frame["fx_px"])))
+    edit(bundle, lambda p: p.update(
+        beauty_look={"applied": {"camera": {"fov_deg_unchanged": solver + 2}}}))
+    _, alignment = grade(bundle)
+    assert alignment.failure == FAIL_LOOK_NOT_ALIGNED and "pose solver" in alignment.detail
+    edit(bundle, lambda p: p.update(beauty_look={}))
+    _, alignment = grade(bundle)
+    assert alignment.status == PASS and "pose solver" not in alignment.detail

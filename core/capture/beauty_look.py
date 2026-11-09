@@ -68,7 +68,18 @@ PIXEL_MOVING_KEYS: Dict[str, str] = {
     # FPostProcessSettings member names; integration 2026-11-09).
     "MotionBlurAmount": "motion_blur",
     "SceneFringeIntensity": "chromatic_aberration",
+    # The same UE member names for the other pixel-moving settings, read if
+    # a sidecar or a lane ever echoes them (no lane sets PaniniD today;
+    # ScreenPercentage is graded like screen_percentage). MotionBlurMax is
+    # NOT one: it caps the smear and draws nothing while MotionBlurAmount
+    # is 0.
+    "PaniniD": "panini",
+    "ScreenPercentage": "upscale",
 }
+
+#: Keys whose "on" is away from 0 (the engine default) and 100 (no
+#: resampling) rather than away from 0.
+_SCREEN_PERCENTAGE_KEYS = ("screen_percentage", "ScreenPercentage")
 
 #: Every effect name the render commandlet writes into
 #: ``pixel_moving_effects`` (FlightSimRenderCommandlet.cpp
@@ -146,7 +157,7 @@ def is_on(key: str, value) -> bool:
     ``enabled`` is true or whose amount is non-zero. ``screen_percentage``
     is on away from 0 (the engine's "default") and 100 (no resampling).
     """
-    if key == "screen_percentage":
+    if key in _SCREEN_PERCENTAGE_KEYS:
         number = _number(value)
         if number is None and isinstance(value, str):
             try:
@@ -183,10 +194,21 @@ def look_effects_on(look: Dict) -> List[Tuple[str, str]]:
     ``camera.lens.lens_distortion``): an effect recorded one level deeper
     than expected still moves pixels."""
     found: List[Tuple[str, str]] = []
+    # FFlightSimBeautyLook::Record echoes the planner's sidecar under
+    # ``plan`` beside what the host set under ``applied``. The plan's rows
+    # are the request and its descriptions (``plan.pixel_effects.motion_blur``
+    # is ``{"on": true, "effect": "softens"}`` on every preset), not
+    # switches. When the host's ``applied`` echo is present it is what was
+    # set on the capture, so the plan is not searched; a record with no
+    # ``applied`` (older or hand-written) is searched whole.
+    skip_plan = (isinstance(look, dict) and isinstance(look.get("applied"), dict)
+                 and bool(look.get("applied")))
 
     def visit(where: str, mapping: Dict) -> None:
         for key, value in mapping.items():
             path = f"{where}.{key}" if where else str(key)
+            if skip_plan and path == "plan":
+                continue
             if key in PIXEL_MOVING_KEYS:
                 if is_on(key, value):
                     found.append((path, PIXEL_MOVING_KEYS[key]))
@@ -203,7 +225,11 @@ def look_effects_on(look: Dict) -> List[Tuple[str, str]]:
 #: render_settings.beauty_show_flags). UE 5.7 turns motion blur off on
 #: every scene capture (SceneCaptureComponent.cpp), so ``true`` here
 #: means someone turned it on, whatever beauty_look says.
-MEASURED_SHOW_FLAGS: Dict[str, str] = {"motion_blur": "motion_blur"}
+#: ``scene_color_fringe`` (chromatic aberration) is read when written; on
+#: beauty renders the commandlet's pixel_moving_effects
+#: chromatic_aberration entry already reads that flag back off the capture.
+MEASURED_SHOW_FLAGS: Dict[str, str] = {"motion_blur": "motion_blur",
+                                       "scene_color_fringe": "chromatic_aberration"}
 
 
 def measured_effects_on(payload: Dict) -> List[Tuple[str, str]]:
@@ -221,12 +247,24 @@ def measured_effects_on(payload: Dict) -> List[Tuple[str, str]]:
 
 def look_anything_on(look) -> bool:
     """A ``beauty_look`` record that applies anything at all (for the
-    measure rule): absent, empty, ``applied: false`` or every value off
-    is nothing."""
+    measure rule): absent, empty, ``applied: false`` / ``applied: {}`` or
+    every value off is nothing.
+
+    The host's record (FFlightSimBeautyLook::Record) carries ``sidecar``
+    (the file applied), ``plan`` and ``applied``: a dict of rows (camera,
+    exposure, lens_post, tonemap, ...) with no on flag and no amount key.
+    A non-empty ``applied`` object, or a named ``sidecar``, IS a look
+    applied; a record that applies nothing says ``applied: false``."""
     if not isinstance(look, dict) or not look:
         return False
     if "applied" in look:
-        return is_on("applied", look["applied"])
+        applied = look["applied"]
+        if isinstance(applied, dict) and not any(f in applied for f in ("on", "enabled", "applied")):
+            return bool(applied)
+        return is_on("applied", applied)
+    sidecar = look.get("sidecar")
+    if isinstance(sidecar, str) and sidecar.strip():
+        return True
     return any(is_on(str(k), v) for k, v in look.items()
                if k not in ("not_claimed", "source", "note", "notes", "uncalibrated"))
 

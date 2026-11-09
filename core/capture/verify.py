@@ -9347,6 +9347,40 @@ def _whole_at_least_one(value) -> bool:
             and math.isfinite(float(value)) and float(value) == int(value) and int(value) >= 1)
 
 
+def _look_beauty_path(payload: Dict) -> Dict:
+    settings = payload.get("render_settings")
+    path = settings.get("beauty_path") if isinstance(settings, dict) else None
+    return path if isinstance(path, dict) else {}
+
+
+def _look_whole(value) -> Optional[int]:
+    return int(value) if _whole_at_least_one(value) else None
+
+
+def _look_path_tracer_spp(payload: Dict) -> Optional[int]:
+    """render_settings.beauty_path.path_tracer.samples_per_pixel (the
+    render path's record of PathTraceSpp), or None."""
+    tracer = _look_beauty_path(payload).get("path_tracer")
+    return _look_whole(tracer.get("samples_per_pixel")) if isinstance(tracer, dict) else None
+
+
+def _look_captures_per_frame(payload: Dict) -> Optional[int]:
+    """render_settings.beauty_path.accumulation.captures_per_frame, or None."""
+    accumulation = _look_beauty_path(payload).get("accumulation")
+    return (_look_whole(accumulation.get("captures_per_frame"))
+            if isinstance(accumulation, dict) else None)
+
+
+def _look_world_frames(payload: Dict) -> List[Dict]:
+    """look_applied.world_beauty.frames[]: the world lane's per-frame cloud
+    rows (FlightSimClouds.cpp), each with cloud_occludes_aircraft and
+    cloud_occlusion_complete."""
+    look = payload.get("look_applied")
+    world = look.get("world_beauty") if isinstance(look, dict) else None
+    frames = world.get("frames") if isinstance(world, dict) else None
+    return [f for f in frames if isinstance(f, dict)] if isinstance(frames, list) else []
+
+
 def verify_look_record(manifest: Dict, run_dir=None) -> Check:
     """The beauty look's record against its own rules (section comment above).
 
@@ -9382,7 +9416,7 @@ def verify_look_record(manifest: Dict, run_dir=None) -> Check:
         if samples is not None and not isinstance(samples, dict):
             return fail(f"beauty_samples is {type(samples).__name__}, not an object", FAIL_LOOK_RECORD)
         samples = samples or {}
-        for key in ("spatial", "temporal", "path_tracer_spp"):
+        for key in ("spatial", "temporal", "still_samples", "path_tracer_spp"):
             if key in samples and not _whole_at_least_one(samples[key]):
                 return fail(f"beauty_samples.{key} = {samples[key]!r} is not a whole number "
                             f"of at least 1", FAIL_LOOK_RECORD)
@@ -9408,9 +9442,32 @@ def verify_look_record(manifest: Dict, run_dir=None) -> Check:
             if temporal > 1:
                 return fail(f"a measure render accumulated {temporal} temporal beauty samples",
                             FAIL_LOOK_MEASURE_ALTERED)
-        if quality == "pathtrace" and "path_tracer_spp" not in samples:
-            return fail("a path-traced render does not state its samples per pixel "
-                        "(beauty_samples.path_tracer_spp)", FAIL_LOOK_RECORD)
+            # Still samples (jittered captures of one pose) and supersampling
+            # change the measure frame too: the commandlet captures a measure
+            # frame once (BeautySubFrames = 1) and never supersamples it.
+            stills = [f"beauty_samples.{key} {int(samples[key])}"
+                      for key in ("spatial", "still_samples") if int(samples.get(key, 1)) > 1]
+            per_frame = _look_captures_per_frame(payload)
+            if per_frame is not None and per_frame > 1:
+                stills.append(f"render_settings.beauty_path.accumulation.captures_per_frame "
+                              f"{per_frame}")
+            if stills:
+                return fail(f"a measure render accumulated beauty samples: {', '.join(stills)}",
+                            FAIL_LOOK_MEASURE_ALTERED)
+        if quality == "pathtrace":
+            # ONE number: the contract's beauty_samples.path_tracer_spp and the
+            # render path's own render_settings.beauty_path.path_tracer
+            # .samples_per_pixel are the same PathTraceSpp; either states it,
+            # and two that disagree are a malformed record.
+            traced = _look_path_tracer_spp(payload)
+            if "path_tracer_spp" not in samples and traced is None:
+                return fail("a path-traced render does not state its samples per pixel "
+                            "(beauty_samples.path_tracer_spp)", FAIL_LOOK_RECORD)
+            if "path_tracer_spp" in samples and traced is not None \
+                    and int(samples["path_tracer_spp"]) != traced:
+                return fail(f"beauty_samples.path_tracer_spp {int(samples['path_tracer_spp'])} is "
+                            f"not render_settings.beauty_path.path_tracer.samples_per_pixel "
+                            f"{traced}", FAIL_LOOK_RECORD)
         actors = payload.get("beauty_only_actors")
         if actors is not None:
             if not isinstance(actors, list):
@@ -9489,6 +9546,29 @@ def verify_look_label_alignment(manifest: Dict, run_dir=None) -> Check:
             elif float(fraction) > LOOK_OCCLUSION_TOL_FRACTION:
                 reasons.append(f"{camera}: beauty-only actors cover {float(fraction):.3f} of the "
                                f"subject the mask shows unoccluded (tol {LOOK_OCCLUSION_TOL_FRACTION})")
+        # The world lane's own per-frame rows (look_applied.world_beauty
+        # .frames[]): a frame its slab model flags as cloud over the
+        # aircraft, or one with a drawn cloud outside the model (so "not
+        # flagged" is only a lower bound), is not shown to be label aligned.
+        # A MEASURED covered fraction (above) supersedes the model.
+        measured_cover = (isinstance(occlusion, dict)
+                          and occlusion.get("policy") == "labels_unoccluded"
+                          and str(occlusion.get("basis") or "").lower() == "measured")
+        if not measured_cover:
+            world_frames = _look_world_frames(payload)
+            flagged = [str(f.get("frame", i)) for i, f in enumerate(world_frames)
+                       if f.get("cloud_occludes_aircraft") is True]
+            unmodelled = [str(f.get("frame", i)) for i, f in enumerate(world_frames)
+                          if f.get("cloud_occlusion_complete") is False]
+            if flagged:
+                reasons.append(f"{camera}: the world lane flags a cloud between the camera and the "
+                               f"aircraft in {len(flagged)} frame(s) ({', '.join(flagged[:5])}"
+                               f"{', ...' if len(flagged) > 5 else ''}) and the mask shows the "
+                               f"aircraft unoccluded")
+            if unmodelled:
+                reasons.append(f"{camera}: {len(unmodelled)} frame(s) draw a cloud the world lane's "
+                               f"occlusion model does not cover (cloud_occlusion_complete false), "
+                               f"so a cloud over the aircraft is not ruled out")
         look = payload.get("beauty_look") if isinstance(payload.get("beauty_look"), dict) else {}
         lens = look.get("camera") if isinstance(look.get("camera"), dict) else look
         look_fov = lens.get("fov_deg") if isinstance(lens, dict) else None
