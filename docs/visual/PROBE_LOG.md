@@ -777,7 +777,11 @@ What a render records:
 * `look_applied.world_beauty.tiles.delight` -- `amount`, `mip_bias`,
   `ratio_knee`, `blue_gate`, `preset`, `basis` ("shader per frame,
   nothing stored (Google tile policy)"), `pixel_moving: false`,
-  `calibration: UNCALIBRATED`;
+  `calibration: UNCALIBRATED`, `contact_shading` (a pointer to the
+  atmosphere record below). `mip_bias` and `ratio_knee` are the C++
+  constants, the values the material is built with; they are not read back
+  from `M_FlightSimTilesBeauty`, so a material rebuilt with other defaults
+  would not show here (review note, 2026-11-09);
 * `tiles.parameters.DelightAmount` / `DelightBlueGate` -- what the MPC got
   (a `_set: NOT SET` beside either means the collection predates this
   module: rebuild `MPC_FlightSimWorld` with
@@ -804,6 +808,14 @@ UNVERIFIED (could not be checked on this Mac):
   of `TMVM_MipBias` (the script's other enums follow the same rule) and
   that two `TextureSampleParameter2D` nodes with the same parameter name
   both receive Cesium's per-primitive texture.
+* (review, 2026-11-09) that the coarse mip is a fair "local mean". The
+  photogrammetry textures are atlases of UV islands; at +5 mips a texel
+  averages neighbouring islands and any padding between them, which can be
+  another part of the scene or a fill colour. A dark or black padding
+  lowers `Lm`, so true shadows are lifted less (safe); a bright one raises
+  `Lm` and can lift pixels that are not shadows at island edges. Probe: in
+  the A/B, look for bright fringes along texture seams on roofs and slopes;
+  if there are any, lower `DelightMipBias`.
 
 | constant | value | probe that sets it |
 |---|---|---|
