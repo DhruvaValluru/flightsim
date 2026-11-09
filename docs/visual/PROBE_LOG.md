@@ -751,3 +751,73 @@ $env:FLIGHTSIM_RENDER_QUALITY = "beauty";  .\.venv\Scripts\python.exe -m uvicorn
 Record each run's offsets here, and in ruflo under
 `visual-overhaul/verifier-tooling/probe-<date>`, before changing any
 constant above.
+
+## tiles-delight
+
+Module tiles-delight (2026-11-09, written on the Mac; nothing rendered).
+Google's photogrammetry carries the capture day's cast shadows: dark,
+blue (skylight only) and pointing the capture sun's way. Under the
+simulated sun at another hour they read wrong and double the engine's own
+VSM shadows and Lumen AO. `assets/shaders/world/tiles_delight.hlsl` runs
+in `M_FlightSimTilesBeauty` ahead of `tiles_base_colour.hlsl` and lifts
+pixels that are darker than `DelightRatioKnee` of the coarse-mip local
+mean AND blue-shifted (B/R above 1, times `DelightBlueGate`) toward that
+mean, pulling their chroma to the mean's. Python twin
+`core/scene/tiles_delight.py` (`delight`, `DELIGHT_DEFAULTS`); tests
+`tests/test_tiles_delight.py` pin the HLSL constants, input order, MPC
+names and the C++ numbers to it.
+
+Rules it keeps: a per-frame shader op only (Google Map Tiles policy: no
+baked texture, no cache, no tool that writes a de-lit image; attribution
+untouched); the tiles stay the ground; colour only, no WPO or depth, not
+in `PIXEL_MOVING_KEYS`; the label captures never draw this material.
+
+What a render records:
+
+* `look_applied.world_beauty.tiles.delight` -- `amount`, `mip_bias`,
+  `ratio_knee`, `blue_gate`, `preset`, `basis` ("shader per frame,
+  nothing stored (Google tile policy)"), `pixel_moving: false`,
+  `calibration: UNCALIBRATED`;
+* `tiles.parameters.DelightAmount` / `DelightBlueGate` -- what the MPC got
+  (a `_set: NOT SET` beside either means the collection predates this
+  module: rebuild `MPC_FlightSimWorld` with
+  `FLIGHTSIM_REBUILD_MATERIALS`);
+* `world_beauty.atmosphere.contact_shading` -- the read-back of
+  `r.Lumen.ScreenProbeGather.ShortRangeAO` and `...ShortRangeAO.HorizonSearch`
+  (set to 1 by code; both are `ECVF_Scalability`, default 1 in 5.7.4) and
+  the sun's `ContactShadowLength`.
+
+Where it deviates from the brief: the contact shading is set in
+`FlightSimClouds.cpp` (the beauty world look, `ApplyAtmosphere`'s sun
+block), not through the `-beauty-look=` sidecar, so the look-dev and
+render-path files other lanes are editing were not touched. It is still
+beauty only (the world look is built only under `-quality=beauty`). Move
+it into the sidecar later if that lane wants one place for every cvar.
+
+UNVERIFIED (could not be checked on this Mac):
+
+* that Cesium's per-tile base-colour textures carry mips. If they do not,
+  the `MipBias` sample returns the full-resolution texel, `ratio = 1`,
+  the shadow weight is 0 and the node is an exact pass-through (fails
+  safe, looks unchanged). Probe: the A/B below shows no difference at all.
+* that `unreal.TextureMipValueMode.TMVM_MIP_BIAS` is the Python spelling
+  of `TMVM_MipBias` (the script's other enums follow the same rule) and
+  that two `TextureSampleParameter2D` nodes with the same parameter name
+  both receive Cesium's per-primitive texture.
+
+| constant | value | probe that sets it |
+|---|---|---|
+| `DELIGHT_DEFAULTS` (DelightAmount) | clear/hazy 0.5, overcast/rain/storm 0.2 | A/B below; raise until the baked shadows vanish without the ground going flat |
+| `DelightMipBias` | +5 (32x32 texels) | at 300 m AGL, the mean must span a building shadow, not a block; try +4..+7 |
+| `DelightRatioKnee` | 0.6 | lowest value that still catches the Zermatt valley-side shadows; too high lifts dark roofs and forest |
+| `DelightBlueGate` | 4 | asphalt and dark rock must stay put (B/R ~1); raise if neutral darks lift |
+| `ContactShadowLength` | 0.05 (screen share) | aircraft on the runway: a contact line under the gear without self-shadow acne |
+
+PROBE (render machine): the same camera, A/B with `DelightAmount` 0 against
+the preset value (via the MPC defaults or a rebuild), over Zermatt and over
+Yosemite Valley, at a sun time far from the capture day's (e.g. 08:00 local
+against Google's late-morning captures). Pass: no second, wrong-direction
+shadow on slopes and building fronts in B; asphalt, water and dark forest
+unchanged in mean luma within 2 %; the attribution string unchanged; the
+mask, class and depth captures byte-identical between A and B. Record the
+frames here and in ruflo under `visual-overhaul/tiles-delight/probe-<date>`.
