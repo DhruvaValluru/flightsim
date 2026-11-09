@@ -231,3 +231,31 @@ def test_the_label_flags_are_recorded_and_a_leak_is_not_label_aligned(bundle):
     path.write_text(json.dumps(payload), encoding="utf-8")
     _, alignment = _grade(bundle, _commandlet_shaped(False, [], {"policy": "none_in_frame"}))
     assert alignment.status == FAIL and "anti_aliasing" in alignment.detail
+
+
+# -- the linear EXR and accumulation captures are lens-free (integration item 4) --
+
+def test_linear_and_accumulate_are_made_lens_free_on_beauty():
+    helper = _function(COMMANDLET, "void RenderMakeLensFree(")
+    for flag in ("DepthOfField", "MotionBlur", "Bloom", "LensFlares", "Grain", "Vignette",
+                 "SceneColorFringe", "LocalExposure"):
+        assert f"Flags.Set{flag}(false);" in helper, flag
+    assert "Post.DepthOfFieldFocalDistance = 0.0f;" in helper and "Post.MotionBlurAmount = 0.0f;" in helper
+    for sibling in ("LinearCapture", "AccumulateCapture"):
+        register = COMMANDLET.index(f"\t{sibling}->RegisterComponent();")
+        before = COMMANDLET[register - 400:register]
+        assert f"RenderMakeLensFree({sibling});" in before and f"RenderPinShowFlags({sibling});" in before
+        assert "if (bBeauty)" in before
+    assert 'TEXT("linear_capture"), RenderLensFreeRecord(LinearCapture)' in COMMANDLET
+    assert 'TEXT("accumulate_capture"), RenderLensFreeRecord(AccumulateCapture)' in COMMANDLET
+
+
+def test_profile_reads_the_linear_exrs_lens(tmp_path):
+    from core.capture.profile import linear_exr_lens
+    frame = tmp_path / "frame_0000.png"
+    assert linear_exr_lens(frame) == ""
+    (tmp_path / "render.json").write_text(json.dumps(
+        {"render_settings": {"linear_capture": {"lens": "lens_free"}}}), encoding="utf-8")
+    assert linear_exr_lens(frame) == "lens_free"
+    (tmp_path / "render.json").write_text("{not json", encoding="utf-8")
+    assert linear_exr_lens(frame) == ""

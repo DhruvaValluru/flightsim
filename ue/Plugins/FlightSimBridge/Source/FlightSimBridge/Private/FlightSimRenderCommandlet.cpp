@@ -1283,6 +1283,56 @@ namespace
 		return Settings.Num();
 	}
 
+	// -- Integration: the linear (EXR) and accumulation captures are LENS-FREE.
+	// They copy the beauty's settings once at setup, before the look-dev lane
+	// focuses the beauty per frame, so frame_NNNN_linear.exr had no depth of
+	// field while the PNG did, and the linear capture kept the engine's motion
+	// blur. The EXR is the sensor post-pass's input (core/capture/profile.py
+	// read_linear_frame prefers it), and that pass applies its OWN optics: the
+	// PSF from the camera's f-number and the motion blur from the shutter and
+	// the flow. An engine lens under it would count twice. So both captures
+	// keep the beauty's scene, light, exposure and anti-aliasing, and drop
+	// every lens and post effect: depth of field, motion blur, bloom, flare,
+	// grain, vignette, colour fringe, local exposure. render.json
+	// render_settings.linear_capture / accumulate_capture record it.
+	void RenderMakeLensFree(USceneCaptureComponent2D* Sibling)
+	{
+		FEngineShowFlags& Flags = Sibling->ShowFlags;
+		Flags.SetDepthOfField(false);
+		Flags.SetMotionBlur(false);
+		Flags.SetBloom(false);
+		Flags.SetLensFlares(false);
+		Flags.SetGrain(false);
+		Flags.SetVignette(false);
+		Flags.SetSceneColorFringe(false);
+		Flags.SetLocalExposure(false);
+		FPostProcessSettings& Post = Sibling->PostProcessSettings;
+		Post.bOverride_DepthOfFieldFocalDistance = true;
+		Post.DepthOfFieldFocalDistance = 0.0f;   // 0 disables depth of field
+		Post.bOverride_MotionBlurAmount = true;
+		Post.MotionBlurAmount = 0.0f;
+	}
+
+	TSharedPtr<FJsonObject> RenderLensFreeRecord(const USceneCaptureComponent2D* Sibling)
+	{
+		const FEngineShowFlags& Flags = Sibling->ShowFlags;
+		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+		const bool bLensFree = Flags.DepthOfField == 0 && Flags.MotionBlur == 0 && Flags.Bloom == 0 &&
+			Flags.LensFlares == 0 && Flags.Grain == 0 && Flags.Vignette == 0 && Flags.SceneColorFringe == 0 &&
+			Flags.LocalExposure == 0;
+		Out->SetStringField(TEXT("lens"), bLensFree ? TEXT("lens_free") : TEXT("DEFECT: a lens or post flag is on"));
+		Out->SetBoolField(TEXT("depth_of_field"), Flags.DepthOfField != 0);
+		Out->SetBoolField(TEXT("motion_blur"), Flags.MotionBlur != 0);
+		Out->SetBoolField(TEXT("bloom"), Flags.Bloom != 0);
+		Out->SetBoolField(TEXT("anti_aliasing"), Flags.AntiAliasing != 0);
+		Out->SetBoolField(TEXT("temporal_aa"), Flags.TemporalAA != 0);
+		Out->SetNumberField(TEXT("auto_exposure_bias"), Sibling->PostProcessSettings.AutoExposureBias);
+		Out->SetStringField(TEXT("basis"),
+			TEXT("the beauty's scene, light and exposure without its lens: the sensor post-pass ")
+			TEXT("(core/capture/profile.py) applies its own PSF and motion blur to this linear image"));
+		return Out;
+	}
+
 	// -- Integration (visual overhaul, 2026-11-09): the beauty-look contract --
 	// The verifier lane (core/capture/beauty_look.py LOOK_KEYS, graded by
 	// look_record / look_label_alignment in core/capture/verify.py; schema in
@@ -4224,6 +4274,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		LinearCapture->PostProcessSettings = Capture->PostProcessSettings;
 		LinearCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
 		LinearCapture->HiddenActors = Capture->HiddenActors;
+		if (bBeauty)
+		{
+			// Integration: lens-free (RenderMakeLensFree says why), pinned so
+			// the copied flags survive registration (RenderPinShowFlags).
+			RenderMakeLensFree(LinearCapture);
+			RenderPinShowFlags(LinearCapture);
+		}
 		LinearCapture->RegisterComponent();
 		UE_LOG(LogFlightSimRender, Display,
 		       TEXT("linear: FinalColorHDR written as frame_NNNN_linear.exr beside each frame"));
@@ -4268,6 +4325,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		AccumulateCapture->PostProcessSettings = Capture->PostProcessSettings;
 		AccumulateCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
 		AccumulateCapture->HiddenActors = Capture->HiddenActors;
+		if (bBeauty)
+		{
+			// Integration: lens-free like the linear capture, its AA-off flags
+			// kept through registration.
+			RenderMakeLensFree(AccumulateCapture);
+			RenderPinShowFlags(AccumulateCapture);
+		}
 		AccumulateCapture->RegisterComponent();
 		// What moves within a window: every aircraft, and a preset camera
 		// (which the world tick moves every step). A consume-poses camera
@@ -4879,8 +4943,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			SubFrames->SetStringField(TEXT("linear_capture"),
 				TEXT("-linear's capture copies the beauty show flags (TemporalAA included, so it runs ")
-				TEXT("TSR on its own history) but is captured ONCE a frame, not captures_per_frame ")
-				TEXT("times: frame_NNNN_linear.exr is not the accumulated PNG's HDR twin"));
+				TEXT("TSR on its own history) but is LENS-FREE (no depth of field, motion blur, bloom, ")
+				TEXT("flare, grain, vignette, fringe or local exposure: render_settings.linear_capture) and ")
+				TEXT("captured ONCE a frame, not captures_per_frame times: frame_NNNN_linear.exr is the ")
+				TEXT("scene's linear light for the sensor post-pass, not the accumulated PNG's HDR twin"));
 		}
 		BeautyPath->SetObjectField(TEXT("accumulation"), SubFrames);
 	}
@@ -7186,6 +7252,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Lens->SetNumberField(TEXT("DepthOfFieldFstop"), Final.DepthOfFieldFstop);
 			Owners->SetObjectField(TEXT("lens_post"), Lens);
 			RenderSettings->SetObjectField(TEXT("beauty_owners"), Owners);
+			// Integration: the siblings' lens, read back (lens-free on beauty).
+			if (LinearCapture != nullptr)
+			{
+				RenderSettings->SetObjectField(TEXT("linear_capture"), RenderLensFreeRecord(LinearCapture));
+			}
+			if (AccumulateCapture != nullptr)
+			{
+				RenderSettings->SetObjectField(TEXT("accumulate_capture"), RenderLensFreeRecord(AccumulateCapture));
+			}
 		}
 
 		// Scene captures render at their target's size; the screen
