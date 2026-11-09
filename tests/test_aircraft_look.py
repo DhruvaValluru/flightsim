@@ -381,6 +381,16 @@ def test_a_fetch_refuses_an_unpinned_unredistributable_or_unprovenanced_candidat
         models.fetch(by_id["j11_42manako_sketchfab_rejected"], tmp_path / "z", record_pin=False)
 
 
+def test_the_webdav_fetch_writes_nothing_outside_the_pinned_folder(tmp_path, monkeypatch):
+    candidate = {"id": "t", "dav_root": "https://example.invalid", "dav_path": "/p/!svn/bc/1/A/"}
+    monkeypatch.setattr(models, "_dav_list", lambda root, path: ["/p/!svn/bc/2/B/evil.txt"])
+    monkeypatch.setattr(models.urllib.request, "urlopen",
+                        lambda *a, **k: pytest.fail("fetched a file outside the pin"))
+    with pytest.raises(SystemExit, match="not under"):
+        models.fetch_svn_dav(candidate, tmp_path / "dest")
+    assert not (tmp_path / "dest").exists()
+
+
 def test_tree_digest_is_order_and_content_sensitive(tmp_path):
     (tmp_path / "a").mkdir()
     (tmp_path / "a" / "x.txt").write_text("1")

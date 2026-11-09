@@ -411,6 +411,8 @@ def _dav_list(root: str, path: str) -> list:
             tree = ET.fromstring(response.read())
         for resp in tree.findall("{DAV:}response"):
             child = resp.find("{DAV:}href").text
+            if child.startswith(root):   # a server may answer with absolute URLs
+                child = child[len(root):]
             if child.rstrip("/") == href.rstrip("/"):
                 continue
             if resp.find(".//{DAV:}resourcetype/{DAV:}collection") is not None:
@@ -424,6 +426,8 @@ def fetch_svn_dav(candidate: dict, dest: Path) -> None:
     """Fetch an SVN folder at its pinned revision over WebDAV (no svn client needed)."""
     root, path = candidate["dav_root"], candidate["dav_path"]
     for href in _dav_list(root, path):
+        if not href.startswith(path):   # never slice (and write) a path outside the pinned folder
+            raise SystemExit(f"{candidate['id']}: the server listed {href!r}, not under {path!r}")
         relative = urllib.parse.unquote(href[len(path):])
         if ".." in Path(relative).parts or Path(relative).is_absolute():
             raise SystemExit(f"{candidate['id']}: {relative!r} is outside the folder")
