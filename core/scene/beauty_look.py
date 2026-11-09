@@ -522,6 +522,15 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
         band_ev, band_basis = ev100_band(elevation)
         target = band_ev + float(grade_row["ev100_offset"])
         horizontal = clear_sky_horizontal_lux(elevation, altitude_m)
+    if not physical_sky and sun["lux"] is None:
+        # No lux on the light (the sun is down): the host keeps its unitless
+        # sun, and a sunlit EV100 over a unitless sun is a black frame. The
+        # host's own exposure stands.
+        exposure = {
+            "ev100": None,
+            "basis": ("the sun is not in lux (at or below the horizon): the host's "
+                      "unitless sun and its own exposure stand")}
+    elif not physical_sky:
         exposure = {
             "ev100": round(target, 4),
             "band_ev100": band_ev,

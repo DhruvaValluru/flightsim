@@ -84,6 +84,8 @@ def test_a_stated_sun_wins_and_a_bad_one_refuses():
 def test_a_sun_below_the_horizon_sets_no_lux():
     assert bl.sun_lux_for(-3.0)["lux"] is None
     assert "-sun-lux" not in " ".join(bl.beauty_look_flags(Path("x.json"), plan(-3.0)))
+    # A sunlit EV100 over the host's unitless sun would be a black frame.
+    assert plan(-3.0)["exposure"]["ev100"] is None
 
 
 def test_the_sun_colour_warms_as_it_sinks_and_storm_is_neutral():
@@ -253,6 +255,15 @@ def test_the_host_formulas_are_the_python_ones():
     assert ("SensorWidthMm / (2.0 * FMath::Tan(FMath::DegreesToRadians(HorizontalFovDeg) * 0.5))"
             in LOOK_CPP)
     assert "Settings.AutoExposureBias = static_cast<float>(CameraEv - Ev100);" in LOOK_CPP
+
+
+def test_a_physical_camera_keeps_its_aperture():
+    # The card triple's / -sky= plan's f-number is part of its EV100; the
+    # beauty lens must not replace it (the exposure would shift unrecorded).
+    camera = LOOK_CPP[LOOK_CPP.index("// -- camera: sensor"):LOOK_CPP.index("// -- exposure:")]
+    guard = camera.index("if (bPhysicalAlready)")
+    assert guard < camera.index("Settings.DepthOfFieldFstop = static_cast<float>(ApertureF);")
+    assert "RoundToInt(" not in LOOK_CPP   # int64 from a double; RoundToInt32 into int32 members
 
 
 def test_the_host_never_touches_the_fov():

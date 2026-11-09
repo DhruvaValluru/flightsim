@@ -174,6 +174,14 @@ namespace
 				BeautyLookSupportedVersion));
 		}
 
+		// A card's exposure triple or the -sky= plan already meters through a
+		// physical camera: its aperture IS part of that exposure (EV100 =
+		// log2(N^2 * ShutterSpeed * 100 / ISO)), so the lens below must not
+		// change it -- f/4 over a plan's f/N would shift the exposure by
+		// 2 log2(4/N) stops with nothing recording it.
+		const bool bPhysicalAlready = Settings.bOverride_AutoExposureApplyPhysicalCameraExposure &&
+			Settings.AutoExposureApplyPhysicalCameraExposure;
+
 		// -- camera: sensor, aperture, shutter (the FOV is NOT touched) -------
 		TSharedPtr<FJsonObject> CameraJson;
 		if (!BeautyLookObject(Plan, TEXT("camera"), CameraJson)) { return false; }
@@ -213,8 +221,18 @@ namespace
 			// the same FOV and the same sensor give the manifest's lens.
 			Settings.bOverride_DepthOfFieldSensorWidth = true;
 			Settings.DepthOfFieldSensorWidth = static_cast<float>(State.SensorWidthMm);
-			Settings.bOverride_DepthOfFieldFstop = true;
-			Settings.DepthOfFieldFstop = static_cast<float>(ApertureF);
+			if (bPhysicalAlready)
+			{
+				Echo->SetStringField(TEXT("aperture_source"), FString::Printf(
+					TEXT("the exposure's (card triple or -sky= plan) f/%g kept; the lens's f/%g not applied"),
+					Settings.DepthOfFieldFstop, ApertureF));
+			}
+			else
+			{
+				Settings.bOverride_DepthOfFieldFstop = true;
+				Settings.DepthOfFieldFstop = static_cast<float>(ApertureF);
+				Echo->SetStringField(TEXT("aperture_source"), TEXT("the beauty lens"));
+			}
 			Settings.bOverride_DepthOfFieldMinFstop = true;
 			Settings.DepthOfFieldMinFstop = FMath::Min(1.2f, Settings.DepthOfFieldFstop);
 			// Focal distance 0 disables depth of field; a DOF lens gets its
@@ -228,7 +246,7 @@ namespace
 			Settings.bOverride_MotionBlurAmount = true;
 			Settings.MotionBlurAmount = static_cast<float>(BlurAmount);
 			Settings.bOverride_MotionBlurTargetFPS = true;
-			Settings.MotionBlurTargetFPS = FMath::Clamp(FMath::RoundToInt(TargetFps), 0, 120);
+			Settings.MotionBlurTargetFPS = FMath::Clamp(FMath::RoundToInt32(TargetFps), 0, 120);
 			Capture->ShowFlags.SetMotionBlur(BlurAmount > 0.0);
 			const double FocalMm =
 				FFlightSimBeautyLook::FocalLengthMm(State.SensorWidthMm, Capture->FOVAngle);
@@ -252,11 +270,9 @@ namespace
 			const bool bAsked = ExposureJson->TryGetNumberField(TEXT("ev100"), Ev100);
 			const bool bManual = Settings.bOverride_AutoExposureMethod &&
 				Settings.AutoExposureMethod == EAutoExposureMethod::AEM_Manual;
-			const bool bPhysicalAlready = Settings.bOverride_AutoExposureApplyPhysicalCameraExposure &&
-				Settings.AutoExposureApplyPhysicalCameraExposure;
 			if (!bAsked)
 			{
-				Echo->SetStringField(TEXT("applied"), TEXT("no: the sidecar leaves the exposure to the -sky= plan"));
+				Echo->SetStringField(TEXT("applied"), TEXT("no: the sidecar states no EV100 (the -sky= plan, or a sun not in lux); the exposure stands"));
 			}
 			else if (!bManual)
 			{
@@ -397,7 +413,7 @@ namespace
 				double Blades = 0.0;
 				if (!BeautyLookNumber(Lens, TEXT("DepthOfFieldBladeCount"), Blades)) { return false; }
 				Settings.bOverride_DepthOfFieldBladeCount = true;
-				Settings.DepthOfFieldBladeCount = FMath::RoundToInt(Blades);
+				Settings.DepthOfFieldBladeCount = FMath::RoundToInt32(Blades);
 				Echo->SetNumberField(TEXT("DepthOfFieldBladeCount"), Settings.DepthOfFieldBladeCount);
 			}
 			Capture->ShowFlags.SetBloom(Settings.BloomIntensity > 0.0f);
