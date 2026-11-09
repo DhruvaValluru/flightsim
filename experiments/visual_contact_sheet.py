@@ -31,7 +31,10 @@ FLIGHTSIM_GOOGLE_TILES=off) and the storm weather is on by default
 FLIGHTSIM_RENDER_QUALITY for this process. ``--still-samples N`` and
 ``--pathtrace`` add their commandlet tokens to the per-camera render
 command only (the dataset pass, ``-camera-index=``), never to the
-throw-away solve pass; shots.json records the exact tokens added.
+throw-away solve pass; shots.json records the exact tokens added. A beauty
+sheet also adds ``-supersample=2`` unless ``--supersample N`` says otherwise
+(the beauty rendered at 2x per axis, box-filtered to the output size;
+core/capture/supersample.py).
 
 Outputs, under ``runs/visual/<step>/``: ``a.png .. d.png`` (and
 ``<shot>_mask.png`` when the run wrote a label mask), ``shots.json``
@@ -141,12 +144,33 @@ def step_dir(step: str, root: Path = VISUAL_ROOT) -> Path:
     return root / step
 
 
+#: supersample lane: the beauty sheet's -supersample factor when --supersample
+#: is not given (core/capture/supersample.py SHEET_DEFAULT_FACTOR).
+SUPERSAMPLE_SHEET_DEFAULT = 2
+
+
+def sheet_supersample(quality: str, pathtrace: bool, stated: Optional[int]) -> Optional[int]:
+    """The -supersample factor a sheet asks for: what was stated, else 2 on
+    a beauty sheet and none on measure or pathtrace."""
+    if stated is not None:
+        return int(stated)
+    return SUPERSAMPLE_SHEET_DEFAULT if quality == "beauty" and not pathtrace else None
+
+
 def render_extra_tokens(quality: str, still_samples: Optional[int],
-                        pathtrace: bool, spp: Optional[int]) -> List[str]:
+                        pathtrace: bool, spp: Optional[int],
+                        supersample: Optional[int] = None) -> List[str]:
     """The commandlet tokens this tool adds to the per-camera render pass
     (beyond what FLIGHTSIM_RENDER_QUALITY already makes the web app send).
     Refuses by name what the commandlet would refuse."""
     tokens: List[str] = []
+    if supersample is not None:
+        if pathtrace or quality != "beauty":
+            raise ValueError("render.supersample: --supersample needs --quality beauty (not "
+                             "measure, not --pathtrace)")
+        if not 1 <= int(supersample) <= 4:
+            raise ValueError(f"render.supersample: --supersample {supersample} is not from 1 to 4")
+        tokens.append(f"-supersample={int(supersample)}")
     if pathtrace:
         if still_samples is not None:
             raise ValueError("render.still_samples: --still-samples is a beauty option; the path "
@@ -492,6 +516,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="FLIGHTSIM_RENDER_QUALITY for this process (default beauty)")
     ap.add_argument("--still-samples", type=int, default=None, metavar="N",
                     help="beauty: N captures of each still's pose (-still-samples=N)")
+    ap.add_argument("--supersample", type=int, default=None, metavar="N",
+                    help="beauty: render the beauty at N x the output size and box-filter it "
+                         "down (-supersample=N, 1-4; default 2 on a beauty sheet)")
     ap.add_argument("--pathtrace", action="store_true",
                     help="path-traced hero stills (Windows, hardware RT): -quality=pathtrace "
                          "plus the one-process r.RayTracing ini override")
@@ -528,7 +555,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not 10.0 <= args.clip_seconds <= 20.0:
         ap.error("--clip-seconds must be from 10 to 20")
     try:
-        tokens = render_extra_tokens(args.quality, args.still_samples, args.pathtrace, args.spp)
+        tokens = render_extra_tokens(args.quality, args.still_samples, args.pathtrace, args.spp,
+                                     sheet_supersample(args.quality, args.pathtrace, args.supersample))
     except ValueError as exc:
         print(f"REFUSED {exc}")
         return 2

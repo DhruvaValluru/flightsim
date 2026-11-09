@@ -314,6 +314,10 @@ render.still_samples:
 render.pathtrace:
   sentence: "The path-traced render cannot run here: it needs the Windows render host with hardware ray tracing turned on for that render."
   hint: "Render the path-traced sheet on the Windows box, or ask for the beauty quality instead."
+# supersample lane (visual overhaul, FlightSimSupersample.cpp):
+render.supersample:
+  sentence: "Supersampling was asked for on a render that is not a beauty render, with a factor out of range, or at a size whose internal frame would not fit the texture limit or the memory budget."
+  hint: "Use -supersample=N (1 to 4) only with -quality=beauty, or a smaller factor or output size."
 
 render.beauty_look:
   sentence: "The beauty look cannot be planned or applied: an unknown grade or lens, a sun that cannot be lit, a camera without a sensor width, or a sidecar the renderer cannot read."
