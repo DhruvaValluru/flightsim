@@ -114,6 +114,7 @@ the engine's own names. No Cesium API is used by this lane.
 - `scripts/ue_create_materials.py`: the `AIRCRAFT LANE` block (one creator
   that imports `ue_aircraft_master_materials.build_all`) and its call.
 - `scripts/check_bridge_api.sh`: the `AIRCRAFT LANE` block.
+- `core/messages/catalog.yaml`: one entry, `aircraft_look.manifest` (a look manifest that exists but cannot be read).
 
 **Model candidates** (`python scripts/fetch_aircraft_models.py --list`):
 Su-27 by andertan on Sketchfab, CC-BY-4.0, 28.8k triangles (J-11 parent;
