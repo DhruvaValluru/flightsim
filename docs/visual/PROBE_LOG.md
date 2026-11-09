@@ -1946,3 +1946,62 @@ Read `git diff claude/vibrant-gauss-olema4...worktree-wf_d78a46c2-467-4` and tri
   CLI). It now refuses as `look_match.inputs`, with a test.
 - Not this lane: the utf-8 failure in tests/test_platform.py (tests/test_gate_v_visual.py,
   tests/test_swarm_viz.py) is fixed on claude/vibrant-gauss-olema4 by 43795f40. It clears when the lane merges.
+
+## render-machine
+
+Windows laptop (p3-windows), 2026-11-09. Intel(R) Graphics, driver 32.0.101.7076,
+D3D11, 16 GB. UE 5.7.4 CL 51494982. Base 355dae64; head ef361bd6 (the job named
+43795f40 first; it also built clean and its step 6 matched; superseded).
+
+- Steps 1-2: branch fetched; check_bridge_api.sh all ok, CesiumRuntime included.
+- Step 3, base 355dae64: build_ue OK (54 s). Gate 6 measure into runs/gate6_base: PASS,
+  the four measured clauses and the substitute side-by-side; the five look clauses NOT RUN
+  (no --look). Base sheet (beauty) and base_measure rendered with HEAD's borrowed
+  visual_contact_sheet.py and gate6_visual.py; tree restored clean. Shots a, b, d are
+  byte-identical between beauty and measure at the base; only c differs.
+- Step 4, head ef361bd6: build_ue OK, 0 errors, 1 warning (C4996
+  ULandscapeSubsystem::BuildNanite deprecated, FlightSimLandscapeImporter.cpp:381). No
+  compile fixes were needed.
+- Step 5: ue_create_materials.py created M_AircraftCondensation and M_FlightSimScatter and
+  rebuilt 8 aircraft masters, but kept MPC_FlightSimWorld, M_FlightSimTilesBeauty and
+  M_FlightSimCloudLayers as built at 43795f40. FINDING: those have no generation bump,
+  so the tiles de-light and the two new MPC scalars (DelightAmount, DelightBlueGate) do
+  not arrive on a machine that built the earlier head. FINDING:
+  FLIGHTSIM_REBUILD_MATERIALS=MPC_FlightSimWorld fails ("could not create", the asset is
+  referenced, delete_asset refuses unattended). Worked round by moving the four .uasset
+  files to runs/visual/content_backup_43795f40 with no editor open; the script then
+  created all four. ue_fix_aircraft_materials.py: 0 LOOK-PROBLEM lines, 7 look manifests.
+- Step 6, measure UNCHANGED: Gate 6 measure at head prints the same clauses and numbers as
+  runs/gate6_base (PASS); Gate 10-R --against runs/gate6_base/full runs/gate6/full:
+  BIT-IDENTICAL, 110 frames; runs/gate6/full/render.json has no aircraft_look,
+  beauty_look, render_settings.beauty_path or look_applied.world_beauty. Note: without
+  --look, gate6_visual.py grades look-clause renders it finds in --out; runs/gate6 held
+  6 October ones, which FAILed three clauses on the 43795f40 pass; moved to
+  runs/gate6_stale_20261006 before the ef361bd6 pass.
+- Gate 6 beauty at head: FAIL (reported, not a gate). exposure does not breathe: sky band
+  12.51/255 over the roll sweep (threshold 8; it was 5.87 at 43795f40); exposure metric
+  discriminates: manual 12.38/255 (must stay under 8). Edge aliasing 0.1831, change vs
+  measure -0.0291. beauty_path.temporal_aa_show_flag true, r.AntiAliasingMethod 4,
+  scalability 4. Tiles declined (decision 18, synthetic raster).
+- Step 7: FINDING: every shot first refused aircraft.package_pin: this laptop's global
+  git core.autocrlf=true checked assets/aircraft_src/J11 out with CRLF, so 13 pinned files
+  had other bytes. Re-checked out with core.autocrlf=false in that checkout only: 29 pins
+  OK. importer.fetch_source should set it. The four-shot render was twice reaped by the
+  harness for low memory while idle; rendered one shot per call in the foreground.
+  beauty_look exposure on every shot: "no: the sidecar states no EV100 (the -sky= plan,
+  or a sun not in lux); the exposure stands". fov unchanged 54.432. Tiles route
+  UFunction SetMaterial, generate_smooth_normals true. cloud_occludes_aircraft false.
+- Steps 8-9: compare sheet and a 15 s chase clip (4.7 MB, 9 min 46 s).
+- Step 10, flightsim.verify on shot a beauty (runs/webapp/6b02ece7a099): exit 1, 36 PASS,
+  1 FAIL, 33 NOT RUN. look_record PASS. look_label_alignment FAIL:
+  look.beauty_not_label_aligned (motion_blur 12.8 px, uncalibrated), as expected.
+- Step 11, look_label_check: NOT ALIGNED (exit 1). Beauty offset 0.85 px (tol 2), edge
+  distance median 1.00 p90 6.00 px; measure floor 0.17 px; mask IoU 1.000; control
+  recovered 3.00 of 3 px.
+- Step 12, gate_v_visual.py --step head --skip-render: a horizon_fill FAIL, exposure PASS,
+  specular PASS; b specular FAIL; c exposure FAIL (luma mean 3.6, 52.7 % crushed),
+  specular FAIL; d horizon_fill FAIL, specular FAIL. aerial_perspective and texel_detail
+  NOT RUN on every shot: "0 ground pixels with depth". Compare JSON in runs/visual/final.
+- Step 13, path trace: refused by name, render.pathtrace: the RHI (D3D11) reports no ray
+  tracing on this GPU or driver. No hero still. This laptop cannot make it.
+- Step 14 not run, as instructed. Ruflo memory not written: no ruflo on this machine.
