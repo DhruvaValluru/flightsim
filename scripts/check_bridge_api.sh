@@ -273,6 +273,7 @@ rp_cvar r.PathTracing.EnableReferenceClouds "Renderer/Private/PathTracing.cpp"
 rp_cvar r.PathTracing.Denoiser "Renderer/Private/PathTracingSpatialTemporalDenoising.cpp"
 rp_cvar r.PathTracing.Denoiser.Name "Renderer/Private/PathTracingSpatialTemporalDenoising.cpp"
 rp_cvar r.RayTracing "Renderer/Private/DeferredShadingRenderer.cpp"
+rp_cvar r.RayTracing.Nanite.Mode "Engine/Private/Rendering/NaniteResources.cpp"
 
 if [ -f "$UE_ROOT/Engine/Content/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.uasset" ]; then
     ok "engine simple cloud material" "present"

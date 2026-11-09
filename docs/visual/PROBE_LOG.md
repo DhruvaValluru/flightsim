@@ -111,6 +111,22 @@ Every value is recorded in `render.json`, under
   headers are not on this Mac.
 - Calling `Scalability::SetQualityLevels` inside a commandlet is assumed to
   work. `beauty_path.scalability_applied` records what the engine reported.
+- Review, 2026-11-09. These are recorded in render.json and not measured:
+  - The path tracer traces each Nanite mesh's fallback mesh
+    (`r.RayTracing.Nanite.Mode` 0, now read back into
+    `beauty_path.path_tracer`). The labels rasterise the full Nanite mesh,
+    so a path-traced Nanite silhouette can sit off the mask.
+  - With one capture per frame (a clip), TSR carries history across the
+    camera move, and a moving silhouette can ghost where the masks show
+    nothing (`accumulation.history_across_frames`).
+  - The `-linear` capture copies beauty's show flags, so it now runs TSR, but
+    it captures once per frame and is not accumulated
+    (`accumulation.linear_capture`).
+  - The path tracer resets its accumulation when the exposure changes more
+    than 16x between samples (PathTracing.cpp `IsExposureDifferentEnough`).
+    If beauty's exposure is automatic, a still can restart part-way through.
+    Check that `accumulation.captures_per_frame` converged on the first
+    pathtrace sheet.
 
 ### Render-machine commands (Windows box, in order)
 

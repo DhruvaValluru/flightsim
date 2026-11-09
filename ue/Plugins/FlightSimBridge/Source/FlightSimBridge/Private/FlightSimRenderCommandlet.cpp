@@ -2934,6 +2934,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				TEXT("r.PathTracing.Denoiser"), TEXT("r.PathTracing.Denoiser.Name"),
 				TEXT("r.PathTracing.FilterWidth"), TEXT("r.PathTracing.EnableReferenceAtmosphere"),
 				TEXT("r.PathTracing.EnableReferenceClouds"), TEXT("r.RayTracing"),
+				TEXT("r.RayTracing.Nanite.Mode"),
 			};
 			for (const TCHAR* Name : PathTracingNames)
 			{
@@ -2945,7 +2946,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			PathTracer->SetStringField(TEXT("labels_note"),
 				TEXT("label captures stay rasterised, AA-free and unjittered from the same pose; the path ")
 				TEXT("tracer's pixel filter (r.PathTracing.FilterWidth, a Gaussian about half a pixel wide) ")
-				TEXT("softens silhouettes by under a pixel and moves no geometry"));
+				TEXT("softens silhouettes by under a pixel and moves no geometry. NOT matched: with ")
+				TEXT("r.RayTracing.Nanite.Mode 0 (the engine default, recorded above) the path tracer ")
+				TEXT("traces each Nanite mesh's FALLBACK mesh while the labels rasterise the full Nanite ")
+				TEXT("mesh, so a Nanite silhouette in the path-traced frame can sit off the mask by the ")
+				TEXT("fallback's simplification error; unmeasured"));
 			BeautyPath->SetObjectField(TEXT("path_tracer"), PathTracer);
 		}
 		BeautyPath->SetObjectField(TEXT("cvars_asked"), Asked);
@@ -4502,6 +4507,21 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			  TEXT("no hand-rolled average, so the tonemapper sees the converged HDR scene"));
 		SubFrames->SetStringField(TEXT("labels"),
 			TEXT("rendered once per frame after the last beauty capture, same camera pose, no jitter"));
+		// Review (render-path): what the accumulation does NOT cover, said.
+		if (!bPathTrace)
+		{
+			SubFrames->SetStringField(TEXT("history_across_frames"),
+				TEXT("TSR keeps its history from the previous delivered frame and reprojects it across ")
+				TEXT("the camera move; with one capture a frame (a clip) a moving silhouette can ghost ")
+				TEXT("where the label masks, rendered without history, show nothing; unmeasured"));
+		}
+		if (LinearCapture != nullptr)
+		{
+			SubFrames->SetStringField(TEXT("linear_capture"),
+				TEXT("-linear's capture copies the beauty show flags (TemporalAA included, so it runs ")
+				TEXT("TSR on its own history) but is captured ONCE a frame, not captures_per_frame ")
+				TEXT("times: frame_NNNN_linear.exr is not the accumulated PNG's HDR twin"));
+		}
 		BeautyPath->SetObjectField(TEXT("accumulation"), SubFrames);
 	}
 
