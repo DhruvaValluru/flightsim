@@ -256,6 +256,10 @@ int main() {
     std::printf("t %.17g\n", DustSecondTau(0.0004, 0.015, 1500.0, 200.0, 2600.0, 9000.0));
     std::printf("t %.17g\n", DustSecondTau(0.0004, 0.015, 1500.0, 700.0, 700.0, 3000.0));
     std::printf("e %.17g\n", DustSecondExtinctionPerM(0.0004, 0.015, 1800.0, 0.0));
+    const double slabs[][5] = {{200.0, 2600.0, 9000.0, 0.0, 1500.0}, {700.0, 700.0, 3000.0, 0.0, 1500.0},
+                               {9000.0, 8000.0, 1500.0, 0.0, 1500.0}, {-50.0, 300.0, 800.0, -50.0, 1500.0}};
+    for (const auto& s : slabs)
+        std::printf("p %.17g\n", DustSlabPathM(s[0], s[1], s[2], s[3], s[4]));
     FDustRenorm R = DustRenormalise(%BETA%, %MIE%, %FF%, %FRH%, %DENS%, %GROUND%);
     std::printf("r %.17g %.17g %.17g %.17g %.17g %.17g\n", R.MieAfter, R.SecondGroundPerKm,
                 R.SecondDensity, R.FogFactorAfter, R.Scale, R.VisibilityModelKm);
@@ -286,6 +290,12 @@ int main() {
                                  rel=1e-12)
     e = [float(line.split()[1]) for line in lines if line.startswith("e ")][0]
     assert e == pytest.approx(dh.second_fog_extinction_per_m(0.0004, 0.015, 1800.0, 0.0), rel=1e-12)
+    paths = [float(line.split()[1]) for line in lines if line.startswith("p ")]
+    assert paths == pytest.approx([wb.slab_path_m(*s) for s in ((200.0, 2600.0, 9000.0, 0.0, 1500.0),
+                                                                (700.0, 700.0, 3000.0, 0.0, 1500.0),
+                                                                (9000.0, 8000.0, 1500.0, 0.0, 1500.0),
+                                                                (-50.0, 300.0, 800.0, -50.0, 1500.0))],
+                                  rel=1e-12, abs=1e-12)
     r = [float(x) for x in next(line for line in lines if line.startswith("r ")).split()[1:]]
     assert r == pytest.approx([p["mie_after"], p["second_fog_ground_extinction_per_km"],
                                p["second_fog"]["density"], p["fog_factor_after"], p["renormalised"],
@@ -300,6 +310,9 @@ def test_the_hooks_are_in_the_world_beauty_only():
     assert 0 < hook - after < 300
     assert 'Record->SetObjectField(TEXT("dust_haze"), DustOut);' in CLOUDS_CPP
     assert CLOUDS_CPP.index("DustHaze.FrameRow(") < CLOUDS_CPP.index('Frame->SetArrayField(TEXT("cloud_path")')
+    # the C++ row carries the Python row's keys (subject_occlusion)
+    for key in ("layer", "path_m", "tau", "transmittance", "flagged"):
+        assert f'TEXT("{key}")' in DUST_CPP.split("FFlightSimDustHaze::FrameRow")[1], key
     assert "FFlightSimDustHaze DustHaze;" in CLOUDS_H
     assert '#include "FlightSimDustHaze.h"' in CLOUDS_H
     # the commandlet never calls it directly: the measure quality cannot reach it

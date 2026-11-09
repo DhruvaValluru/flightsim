@@ -130,6 +130,27 @@ namespace FlightSimDustHazePure
 		return BetaA * LengthM * (1.0 - std::exp(-X)) / X;
 	}
 
+	// The length (m) of a straight segment from height a to height b that lies
+	// inside [base, top] (core/scene/world_beauty.py slab_path_m).
+	inline double DustSlabPathM(double AZM, double BZM, double LengthM, double BaseM, double TopM)
+	{
+		if (!(TopM > BaseM) || !(LengthM > 0.0))
+		{
+			return 0.0;
+		}
+		if (AZM == BZM)
+		{
+			return BaseM <= AZM && AZM <= TopM ? LengthM : 0.0;
+		}
+		const double T0 = (BaseM - AZM) / (BZM - AZM);
+		const double T1 = (TopM - AZM) / (BZM - AZM);
+		double Lo = T0 < T1 ? T0 : T1;
+		double Hi = T0 < T1 ? T1 : T0;
+		Lo = Lo > 0.0 ? Lo : 0.0;
+		Hi = Hi < 1.0 ? Hi : 1.0;
+		return Hi > Lo ? (Hi - Lo) * LengthM : 0.0;
+	}
+
 	struct FDustRenorm
 	{
 		double MieAfter;
@@ -512,6 +533,7 @@ void FFlightSimDustHaze::Apply(UWorld* World, FFlightSimVisualScene& Scene, cons
 			SecondDensity = SecondDensityOut;
 			SecondFalloff = Falloff;
 			InversionZM = FogZM + OffsetM;
+			FogBaseZM = FogZM;
 		}
 		FogRows.Add(MakeShared<FJsonValueObject>(FogRow));
 	}
@@ -558,6 +580,10 @@ TSharedPtr<FJsonObject> FFlightSimDustHaze::FrameRow(const FVector& CameraCm, co
 	bFlagged = Transmittance < FlagTransmittance;
 	TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 	Row->SetStringField(TEXT("layer"), TEXT("dust_haze_second_fog"));
+	// The path below the inversion, from the fog actor (or the lower end) up:
+	// core/scene/dust_haze.py subject_occlusion's path_m, the clouds' key.
+	Row->SetNumberField(TEXT("path_m"),
+		DustSlabPathM(AZ, BZ, LengthM, FMath::Min3(AZ, BZ, FogBaseZM), InversionZM));
 	Row->SetNumberField(TEXT("tau"), Tau);
 	Row->SetNumberField(TEXT("transmittance"), Transmittance);
 	Row->SetBoolField(TEXT("flagged"), bFlagged);

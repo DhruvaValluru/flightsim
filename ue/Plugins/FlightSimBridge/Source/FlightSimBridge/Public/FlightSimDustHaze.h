@@ -57,4 +57,6 @@ private:
 	double SecondFalloff = 0.0;
 	// The second fog's height (m, world Z): the fog actor's Z + its offset.
 	double InversionZM = 0.0;
+	// The fog actor's Z (m): the base of the path_m slab, as in the Python twin.
+	double FogBaseZM = 0.0;
 };
