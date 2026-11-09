@@ -367,6 +367,12 @@ beauty_check "premise: per-pixel sun carries no CPU transmittance" \
     "return FLinearColor(FVector(GetOuterSpaceIlluminance()));"
 beauty_check "DirectionalLight bPerPixelAtmosphereTransmittance" \
     "Engine/Classes/Components/DirectionalLightComponent.h" "uint32 bPerPixelAtmosphereTransmittance : 1;"
+# The beauty sky light is captured once, from the aircraft (RenderCommandlet).
+beauty_check "Actor SetActorLocation" "Engine/Classes/GameFramework/Actor.h" \
+    "ENGINE_API bool SetActorLocation(const FVector& NewLocation, bool bSweep=false"
+beauty_check "ActorComponent GetOwner" "Engine/Classes/Components/ActorComponent.h" "AActor* GetOwner() const;"
+beauty_check "SkyLight UpdateSkyCaptureContents" "Engine/Classes/Components/SkyLightComponent.h" \
+    "static ENGINE_API void UpdateSkyCaptureContents(UWorld* WorldToUpdate);"
 # The -aerosol= probe converts its multiplier to 1/km against these defaults
 # (FlightSimVisualScene.cpp SceneMie*DefaultPerKm).
 beauty_check "premise: Mie scattering default 0.003996/km" \

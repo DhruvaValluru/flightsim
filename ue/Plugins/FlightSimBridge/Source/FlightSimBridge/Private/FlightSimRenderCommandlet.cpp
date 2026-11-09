@@ -4614,6 +4614,28 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// nothing (measured on 5.7.4: the plain under a layer, 1.8/255; with it, 172).
 	if (VisualScene.SkyLightComponent != nullptr)
 	{
+		// Beauty (fix pass, light-colour): the one capture is all the aircraft
+		// ever gets, so it is taken FROM the aircraft (the sky light was spawned
+		// at the world origin, on the ground, under any layer the aircraft is
+		// above). Measure keeps the origin capture its gates were tuned on.
+		if (bBeauty && Scenario.Aircraft != nullptr)
+		{
+			AActor* SkyOwner = VisualScene.SkyLightComponent->GetOwner();
+			if (SkyOwner != nullptr)
+			{
+				SkyOwner->SetActorLocation(Scenario.Aircraft->GetActorLocation());
+			}
+			if (VisualScene.LookApplied.IsValid())
+			{
+				TSharedPtr<FJsonObject> SkyCapture = MakeShared<FJsonObject>();
+				const FVector At = VisualScene.SkyLightComponent->GetComponentLocation();
+				SkyCapture->SetStringField(TEXT("position"), TEXT("the aircraft at the first kept frame"));
+				SkyCapture->SetNumberField(TEXT("z_m"), At.Z / 100.0);
+				SkyCapture->SetStringField(TEXT("not_done"),
+					TEXT("no recapture when the aircraft crosses a cloud layer (captured once; per frame only when the sun animates)"));
+				VisualScene.LookApplied->SetObjectField(TEXT("sky_light_capture"), SkyCapture);
+			}
+		}
 		VisualScene.SkyLightComponent->SetCaptureIsDirty();
 		USkyLightComponent::UpdateSkyCaptureContents(World);
 		FlushRenderingCommands();

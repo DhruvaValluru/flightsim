@@ -336,6 +336,12 @@ def write_sidecar_beside(spec: Any, beauty_look: Optional[Path]) -> Optional[Pat
     except (TypeError, ValueError):
         raining = False
     raining = raining or look.get("grade") == "storm"
+    # The beauty look's world preset (the world lane's selector): an overcast
+    # deck without rain shadows the ground as well (core/scene/beauty_look.py
+    # DECK_PRESETS meters the same fraction).
+    from core.scene.beauty_look import DECK_PRESETS
+
+    raining = raining or look.get("world_preset") in DECK_PRESETS
     altitude = getattr(getattr(spec, "terrain_elevation", None), "value", 0.0)
     try:
         altitude = float(altitude or 0.0)
