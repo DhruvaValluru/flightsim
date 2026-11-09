@@ -29,8 +29,8 @@ def plan(elevation=40.0, **kw):
 # -- presets ---------------------------------------------------------------------
 
 
-def test_the_three_grades_and_two_lenses_are_named():
-    assert bl.GRADE_NAMES == ("golden_hour", "desert_noon", "storm")
+def test_the_four_grades_and_two_lenses_are_named():
+    assert bl.GRADE_NAMES == ("golden_hour", "desert_noon", "storm", "overcast")
     assert bl.LENS_NAMES == ("standard", "cinematic")
     assert bl.validate_grade(" Storm ") == "storm"
     assert bl.validate_lens("CINEMATIC") == "cinematic"
@@ -54,29 +54,64 @@ def test_grade_follows_weather_then_sun():
     assert plan(8.0, grade="desert_noon")["grade_basis"] == "stated by the caller"
 
 
+@pytest.mark.parametrize("preset, grade", [("storm", "storm"), ("rain", "storm"),
+                                           ("overcast", "overcast"), ("hazy", "overcast"),
+                                           ("clear", "desert_noon")])
+def test_the_world_preset_chooses_the_grade_before_the_sun(preset, grade):
+    """The world lane's selector is the one source: an overcast or hazy
+    world never takes a sunny grade."""
+    assert bl.grade_for(60.0, world_preset=preset)[0] == grade
+    assert plan(60.0, world_preset=preset)["grade"] == grade
+
+
+def test_the_world_preset_is_read_from_the_card_like_the_host_reads_it():
+    from core.scene.world_beauty import OVERCAST_COVER
+
+    deck = {"look": {"clouds": [{"cover": OVERCAST_COVER, "base_m": 900.0, "top_m": 2400.0}]}}
+    assert bl.world_preset_for_card(deck)[0] == "overcast"
+    # A layer with no depth is not a layer (FlightSimClouds.cpp bCardLayer).
+    flat = {"look": {"clouds": [{"cover": 0.9, "base_m": 900.0, "top_m": 900.0}]}}
+    assert bl.world_preset_for_card(flat)[0] == "clear"
+    assert bl.world_preset_for_card({"weather_look": {"rain_rate_mmh": 3.0}})[0] == "rain"
+    assert bl.world_preset_for_card({"weather_look": {"storm": "thunderstorm"}})[0] == "storm"
+    assert bl.world_preset_for_card({"randomization": {"look": {"visibility_km": 6.0}}})[0] == "hazy"
+    assert bl.world_preset_for_card(None)[0] == "clear"
+
+
 # -- the sun ---------------------------------------------------------------------
 
 
-def test_high_sun_is_100_to_120_klx_and_falls_with_air_mass():
-    lux = [bl.sun_lux_for(e)["lux"] for e in (3, 8, 15, 30, 50, 70, 90)]
-    assert lux == sorted(lux)                           # falls with air mass
-    assert 100000.0 <= bl.sun_lux_for(60.0)["lux"] <= 120000.0
-    ground = bl.sun_lux_for(90.0)["ground_direct_normal_lux"]
-    assert 95000.0 <= ground <= 110000.0                # clear-sky DNI at the zenith
-    assert all(v <= bl.SUN_LUX_CEILING for v in lux)
+def test_the_sun_is_the_physical_skys_outer_space_lux_at_every_elevation():
+    """ONE transmittance model: the light carries the outer-space number the
+    -sky= plan uses, and the engine's per-pixel transmittance dims it once
+    (the air-mass falloff is never also put into the lux)."""
+    from core.sky.plan import SUN_ILLUMINANCE_LUX
+
+    for e in (3, 8, 15, 30, 50, 70, 90):
+        row = bl.sun_lux_for(e)
+        assert row["lux"] == SUN_ILLUMINANCE_LUX <= bl.SUN_LUX_CEILING
+        assert row["source"] == "outer_space" and row["transmittance"] == "engine_per_pixel"
+    ground = bl.sun_lux_for(90.0)["ground_direct_normal_lux_reference"]
+    assert 95000.0 <= ground <= 110000.0                # clear-sky DNI at the zenith, reference only
+    assert not hasattr(bl, "UE_ZENITH_TRANSMITTANCE")
 
 
-def test_the_light_divides_out_only_the_engines_zenith_transmittance():
-    row = bl.sun_lux_for(20.0)
-    assert row["lux"] == pytest.approx(row["ground_direct_normal_lux"]
-                                       / bl.UE_ZENITH_TRANSMITTANCE, abs=0.2)
-    assert row["source"] == "model" and "UNCALIBRATED" in row["basis"]
+def test_the_world_lane_turns_per_pixel_transmittance_on_for_every_beauty_sun():
+    """The premise of the outer-space lux, pinned on both sides: the world
+    look sets it without a plan, the -sky= plan states it, and the host
+    refuses outer-space lux without it."""
+    clouds = (PRIVATE / "FlightSimClouds.cpp").read_text(encoding="utf-8")
+    assert "SunLight->bPerPixelAtmosphereTransmittance = true;" in clouds
+    assert "bBeauty && !WorldBeauty.Build(" in RENDER_CPP
+    from core.sky.plan import plan_sky  # noqa: F401  (the plan's own key)
+    assert '"per_pixel_transmittance": True' in (REPO / "core/sky/plan.py").read_text(encoding="utf-8")
+    assert 'Transmittance == TEXT("engine_per_pixel") && !bPerPixel' in LOOK_CPP
 
 
 def test_a_stated_sun_wins_and_a_bad_one_refuses():
-    assert bl.sun_lux_for(30.0, stated=50000.0) == {
-        "lux": 50000.0, "source": "stated",
-        "basis": "scene.sun_lux as stated, on the light unchanged"}
+    row = bl.sun_lux_for(30.0, stated=50000.0)
+    assert (row["lux"], row["source"], row["transmittance"]) == (50000.0, "stated", "engine_per_pixel")
+    assert row["basis"].startswith("scene.sun_lux as stated, on the light unchanged")
     with pytest.raises(BeautyLookError):
         bl.sun_lux_for(30.0, stated=-5.0)
 
@@ -88,10 +123,26 @@ def test_a_sun_below_the_horizon_sets_no_lux():
     assert plan(-3.0)["exposure"]["ev100"] is None
 
 
-def test_the_sun_colour_warms_as_it_sinks_and_storm_is_neutral():
-    temps = [bl.sun_temperature_band(e)[0] for e in (3, 10, 20, 30, 60)]
-    assert temps == sorted(temps)
-    assert plan(10.0, weather_event="thunderstorm")["sun"]["temperature_k"] == 6500.0
+@pytest.mark.parametrize("e", [3.0, 10.0, 30.0, 60.0])
+def test_the_plan_never_colours_the_sun(e):
+    """The atmosphere is the only owner of the sun's colour: no temperature
+    band, no grade temperature, and the host has no tint to decide on."""
+    for p in (plan(e), plan(e, weather_event="thunderstorm"), plan(e, physical_sky=True)):
+        assert "temperature_k" not in p["sun"]
+        assert "per-pixel atmosphere transmittance" in p["sun"]["colour"]
+    assert not hasattr(bl, "SUN_TEMPERATURE_BANDS")
+    sun_block = LOOK_CPP[LOOK_CPP.index("// -- sun (the lux"):LOOK_CPP.index("// -- tonemap, grade")]
+    assert "SetUseTemperature" not in sun_block and "SetTemperature" not in sun_block
+    assert "!= FColor::White" not in LOOK_CPP
+
+
+def test_one_warmth_owner_per_grade():
+    """ColorGain is neutral on every grade: WhiteTemp is each grade's only
+    colour-temperature knob, and no grade carries a sun temperature."""
+    for name, row in bl.GRADES.items():
+        assert row["ColorGain"] == [1.0, 1.0, 1.0, 1.0], name
+        assert "sun_temperature_k" not in row, name
+        assert 6000.0 <= row["WhiteTemp"] <= 6800.0, name
 
 
 # -- exposure ---------------------------------------------------------------------
@@ -102,20 +153,43 @@ def test_a_sunlit_scene_sits_at_ev100_14_to_15():
         assert 14.0 <= plan(e)["exposure"]["ev100"] <= 15.0
 
 
-def test_every_band_stays_near_the_clear_sky_meter():
-    """The UNCALIBRATED bands are guarded against drifting from physics:
-    each within EV100_METER_TOLERANCE_STOPS of the incident meter at the
-    band's middle elevation (the lowest band from the render floor)."""
+def test_every_renderable_elevation_stays_near_the_meter():
+    """The UNCALIBRATED bands are guarded against drifting from physics at
+    EVERY renderable elevation, both edges of each band included, not only
+    at its middle (the old lowest band sat ~2 stops dark at the floor)."""
+    import numpy
+
     from core.environment.sun import RENDER_FLOOR_DEG
 
-    edges = [90.0] + [low for low, _ in bl.EV100_BANDS]
-    for (low, ev), high in zip(bl.EV100_BANDS, edges):
-        low = max(low, RENDER_FLOOR_DEG)
-        middle = 0.5 * (low + high)
-        meter = bl.meter_ev100(bl.clear_sky_horizontal_lux(middle))
-        assert abs(ev - meter) <= bl.EV100_METER_TOLERANCE_STOPS, (middle, ev, meter)
+    for e in numpy.arange(RENDER_FLOOR_DEG, 90.01, 0.5):
+        meter = bl.meter_ev100(bl.clear_sky_horizontal_lux(float(e)))
+        assert abs(bl.ev100_band(float(e))[0] - meter) <= bl.EV100_METER_TOLERANCE_STOPS, (e, meter)
+    for low, _ in bl.EV100_BANDS[:-1]:
+        for e in (low - 1e-6, low):
+            meter = bl.meter_ev100(bl.clear_sky_horizontal_lux(e))
+            assert abs(bl.ev100_band(e)[0] - meter) <= bl.EV100_METER_TOLERANCE_STOPS, (e, meter)
     evs = [ev for _, ev in bl.EV100_BANDS]
     assert evs == sorted(evs, reverse=True)
+
+
+def test_the_exposure_meters_the_light_the_look_and_the_deck_give():
+    """The lighting look's sun and sky-fill scales and brightness stops, and
+    the world preset's deck, all move the one EV100 the host applies."""
+    from core.scene.hero_lighting import OVERCAST_ILLUMINANCE_FRACTION
+
+    clear = plan(40.0)["exposure"]
+    assert clear["scene_light_stops"] == 0.0
+    dim = plan(40.0, sun_intensity_scale=0.3, sky_light_scale=2.0)["exposure"]
+    assert dim["ev100"] < clear["ev100"]                        # opens for a dimmer sun
+    bright = plan(40.0, brightness_ev=0.5)["exposure"]
+    assert bright["ev100"] == pytest.approx(clear["ev100"] - 0.5)
+    deck = plan(40.0, world_preset="overcast", sun_intensity_scale=0.3)["exposure"]
+    assert deck["ev100"] == pytest.approx(
+        clear["ev100"] + math.log2(OVERCAST_ILLUMINANCE_FRACTION), abs=1e-3)
+    assert deck["meter_horizontal_lux_reference"] == clear["meter_horizontal_lux_reference"]
+    assert deck["meter_horizontal_lux_scene"] < deck["meter_horizontal_lux_reference"]
+    with pytest.raises(BeautyLookError):
+        plan(40.0, brightness_ev=float("nan"))
 
 
 def test_the_compensation_lands_the_target_through_the_physical_camera():
@@ -128,16 +202,17 @@ def test_the_compensation_lands_the_target_through_the_physical_camera():
         exposure["ev100"], abs=1e-3)
 
 
-def test_storm_grade_opens_the_exposure():
+def test_the_grade_offset_adds_to_the_band():
     clear = plan(10.0, grade="golden_hour")["exposure"]["ev100"]
     storm = plan(10.0, grade="storm")["exposure"]["ev100"]
-    assert storm == pytest.approx(clear + bl.GRADES["storm"]["ev100_offset"])
+    assert storm == pytest.approx(clear + bl.GRADES["storm"]["ev100_offset"]
+                                  - bl.GRADES["golden_hour"]["ev100_offset"])
 
 
 def test_the_physical_sky_keeps_its_own_sun_and_exposure():
     sky = plan(20.0, physical_sky=True)
     assert sky["exposure"]["ev100"] is None
-    assert sky["sun"]["lux"] is None and sky["sun"]["temperature_k"] is None
+    assert sky["sun"]["lux"] is None and "temperature_k" not in sky["sun"]
     assert bl.beauty_look_flags(Path("b.json"), sky) == [f"-beauty-look={Path('b.json').resolve()}"]
 
 
@@ -221,6 +296,14 @@ def test_flags_carry_the_sidecar_and_the_lux():
     assert bl.beauty_look_flags(None) == []
 
 
+@pytest.mark.parametrize("e", [10, 20, 40, 50, 60, 90])
+def test_the_sun_lux_flag_round_trips_the_plan(e):
+    p = plan(float(e))
+    assert float(bl.beauty_look_flags(Path("b.json"), p)[1].split("=", 1)[1]) == p["sun"]["lux"]
+    stated = plan(float(e), stated_sun_lux=98765.4321)
+    assert float(bl.beauty_look_flags(Path("b.json"), stated)[1].split("=", 1)[1]) == 98765.4321
+
+
 # -- the C++ that reads the sidecar ------------------------------------------------
 
 
@@ -246,7 +329,8 @@ def test_the_host_reads_the_camera_and_exposure_fields_the_python_writes():
         assert key in plan()["camera"], key
     for key in ("ev100", "shutter_s", "iso"):
         assert f'TEXT("{key}")' in LOOK_CPP and key in plan()["exposure"], key
-    assert 'TEXT("temperature_k")' in LOOK_CPP and "temperature_k" in plan()["sun"]
+    for key in ("lux", "transmittance"):
+        assert f'TEXT("{key}")' in LOOK_CPP and key in plan()["sun"], key
     assert f"BeautyLookSupportedVersion = {bl.BEAUTY_LOOK_VERSION};" in LOOK_CPP
 
 
@@ -360,6 +444,7 @@ def test_beauty_writes_the_sidecar_and_the_command_carries_it(tmp_path, monkeypa
     command = _render_command(tmp_path, monkeypatch, path)
     assert f"-beauty-look={path.resolve()}" in command
     assert f"-sun-lux={sidecar['sun']['lux']:g}" in command
+    assert sidecar["sun"]["source"] == "outer_space"
     assert "-quality=beauty" in command
 
 
@@ -381,6 +466,93 @@ def test_the_storm_look_chooses_the_storm_grade(tmp_path, monkeypatch):
         runs.write_beauty_look_plan(_spec(), tmp_path, None, lens="anamorphic")
 
 
+def test_sensor_widths_follow_the_camera_order(tmp_path, monkeypatch):
+    """The host indexes the widths by -camera-index= (spec.cameras order)."""
+    from types import SimpleNamespace
+
+    import webapp.runs as runs
+
+    monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "beauty")
+    spec = _spec()
+    spec.cameras = [SimpleNamespace(sensor_width_mm=SimpleNamespace(value=36.0)),
+                    SimpleNamespace(sensor_width_mm=SimpleNamespace(value=23.76)),
+                    SimpleNamespace(sensor_width_mm=None)]
+    sidecar = json.loads(runs.write_beauty_look_plan(spec, tmp_path, None).read_text(encoding="utf-8"))
+    assert sidecar["camera"]["sensor_width_mm"] == [36.0, 23.76, bl.DEFAULT_SENSOR_WIDTH_MM]
+    # A width that is there but unreadable raises instead of becoming 36 mm.
+    spec.cameras = [SimpleNamespace(sensor_width_mm=SimpleNamespace(value="wide"))]
+    with pytest.raises(ValueError):
+        runs.write_beauty_look_plan(spec, tmp_path, None)
+
+
+def test_the_sky_sidecar_sets_elevation_and_keeps_sun_and_exposure(tmp_path, monkeypatch):
+    import webapp.runs as runs
+
+    monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "beauty")
+    sky = tmp_path / "sky.json"
+    sky.write_text(json.dumps({"sun": {"elevation_deg": 8.0}}), encoding="ascii")
+    path = runs.write_beauty_look_plan(_spec(), tmp_path, None, sky=sky)
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    assert sidecar["sun_elevation_deg"] == 8.0 and sidecar["grade"] == "golden_hour"
+    assert sidecar["exposure"]["ev100"] is None and sidecar["sun"]["lux"] is None
+    assert not any(t.startswith("-sun-lux=") for t in runs.beauty_look_render_flags(path))
+
+
+def test_the_card_world_preset_and_the_lighting_look_reach_the_plan(tmp_path, monkeypatch):
+    """One source: the card's world preset picks the grade, the deck and the
+    beauty X-Plane condition; the lighting look's knobs reach the EV100."""
+    import webapp.runs as runs
+    from core.scene.world_beauty import OVERCAST_COVER
+
+    monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "beauty")
+    (tmp_path / "card.json").write_text(json.dumps({"look": {"clouds": [
+        {"cover": OVERCAST_COVER, "base_m": 1200.0, "top_m": 2600.0}]}}), encoding="utf-8")
+    look = {"sun_elev": 40.0, "sun_azim": 120.0, "exposure_bias": 10.0, "fog_density": 0.002,
+            "sun_intensity_scale": 0.3, "lighting": {"brightness_ev": 0.9}}
+    path = runs.write_beauty_look_plan(_spec(), tmp_path, look)
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    assert sidecar["world_preset"] == "overcast" and sidecar["grade"] == "overcast"
+    assert sidecar["exposure"]["brightness_ev"] == 0.9
+    assert sidecar["exposure"]["scene_light_stops"] < 0.0
+    assert runs.beauty_xplane_condition(path) == "ocast"
+    assert runs.beauty_xplane_condition(None) is None          # measure: unchanged
+    (tmp_path / "card.json").write_text("{}", encoding="utf-8")
+    clear = runs.write_beauty_look_plan(_spec(), tmp_path, None)
+    assert runs.beauty_xplane_condition(clear) is None          # clear keeps the look's choice
+
+
+def test_a_planned_beauty_look_record_passes_verify_look_record(tmp_path):
+    """The look-dev lane and the verifier agree on motion blur: the plan's
+    'softens' row nests under beauty_look.plan, the commandlet's
+    RenderWriteLookContract lists motion_blur in pixel_moving_effects
+    (a bound by construction), and the record grades PASS."""
+    import shutil
+
+    from core.capture.manifest import read_capture_manifest
+    from core.capture.verify import PASS, verify_look_record
+
+    assert 'RenderPixelEffect(TEXT("motion_blur"), bMotionBlur' in RENDER_CPP
+    fixture = REPO / "tests" / "fixtures" / "engine_bundle_min"
+    for lens in bl.LENS_NAMES:
+        run = tmp_path / lens
+        shutil.copytree(fixture, run)
+        render = run / "frames" / "chase" / "render.json"
+        payload = json.loads(render.read_text(encoding="utf-8"))
+        p = plan(30.0, lens=lens)
+        payload["scene"]["render_quality"] = "beauty"
+        payload["beauty_look"] = {"sidecar": "beauty_look.json", "plan": p, "applied": {},
+                                  "per_frame": {"frames": 1}}
+        payload.setdefault("render_settings", {})["beauty_show_flags"] = {"motion_blur": True}
+        payload["pixel_moving_effects"] = [{
+            "name": "motion_blur", "on": True, "transform": None,
+            "max_displacement_px": p["pixel_effects"]["motion_blur"]["max_smear_px"],
+            "displacement_basis": "bound: MotionBlurMax percent of the width, by construction; not measured",
+            "source": "beauty capture"}]
+        render.write_text(json.dumps(payload), encoding="utf-8")
+        record = verify_look_record(read_capture_manifest(run / "capture_manifest.json"), run)
+        assert record.status == PASS, (lens, record.detail)
+
+
 def test_the_config_surface_stays_frozen():
     """No new FLIGHTSIM_* name: the beauty look needs no switch."""
     source = (REPO / "webapp/runs.py").read_text(encoding="utf-8")
@@ -394,3 +566,18 @@ def test_the_weather_defaults_are_untouched():
 
     assert runs.WEATHER_DEFAULT_BACKEND == "procedural"
     assert runs.WEATHER_DEFAULT_GAIN == 4.0 and runs.WEATHER_DEFAULT_STYLE == "cinematic"
+
+
+def test_a_camera_inside_the_aircraft_gets_no_depth_of_field():
+    """The cinematic lens focuses on the aircraft from outside it; a cockpit
+    camera would focus on the datum behind it, so its DOF is off."""
+    p = plan(lens="cinematic", sensor_width_mm=[36.0, 36.0, 36.0],
+             camera_presets=["chase", "cockpit", "shoulder"])
+    assert p["camera"]["focus_per_camera"] == ["subject", "off", "off"]
+    assert plan(lens="standard", camera_presets=["chase"])["camera"]["focus_per_camera"] == ["off"]
+    with pytest.raises(BeautyLookError):
+        plan(sensor_width_mm=[36.0, 36.0], camera_presets=["chase"])
+    camera = LOOK_CPP[LOOK_CPP.index("// -- camera: sensor"):LOOK_CPP.index("// -- exposure:")]
+    assert 'TEXT("focus_per_camera")' in camera
+    assert camera.index('FocusBasis == TEXT("off")') < camera.index(
+        "Capture->ShowFlags.SetDepthOfField(State.bDepthOfField);")

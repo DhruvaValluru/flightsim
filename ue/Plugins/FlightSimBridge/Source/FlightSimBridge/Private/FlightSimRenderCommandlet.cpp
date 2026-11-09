@@ -3149,8 +3149,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	//  4. Look-dev (ApplyBeautyPostProcess -> FFlightSimBeautyLook::Apply):
 	//     Lumen GI/reflection METHOD (same values as the -sky= plan), the
 	//     beauty EV100 ONLY on a plain manual exposure (a card triple or a
-	//     -sky= plan wins, recorded "applied: no"), sun TEMPERATURE only on an
-	//     uncoloured sun (never its lux), tonemap, grade, lens post (bloom,
+	//     -sky= plan wins, recorded "applied: no"), never the sun's colour or
+	//     lux (it refuses outer-space lux without per-pixel transmittance),
+	//     tonemap, grade, lens post (bloom,
 	//     flare, vignette, grain, fringe: the look's values replace the -sky=
 	//     plan's lens character on beauty), local exposure, DOF and motion
 	//     blur, LumenSceneDetail and SSR. NOT Lumen quality/distances.
@@ -4613,6 +4614,28 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// nothing (measured on 5.7.4: the plain under a layer, 1.8/255; with it, 172).
 	if (VisualScene.SkyLightComponent != nullptr)
 	{
+		// Beauty (fix pass, light-colour): the one capture is all the aircraft
+		// ever gets, so it is taken FROM the aircraft (the sky light was spawned
+		// at the world origin, on the ground, under any layer the aircraft is
+		// above). Measure keeps the origin capture its gates were tuned on.
+		if (bBeauty && Scenario.Aircraft != nullptr)
+		{
+			AActor* SkyOwner = VisualScene.SkyLightComponent->GetOwner();
+			if (SkyOwner != nullptr)
+			{
+				SkyOwner->SetActorLocation(Scenario.Aircraft->GetActorLocation());
+			}
+			if (VisualScene.LookApplied.IsValid())
+			{
+				TSharedPtr<FJsonObject> SkyCapture = MakeShared<FJsonObject>();
+				const FVector At = VisualScene.SkyLightComponent->GetComponentLocation();
+				SkyCapture->SetStringField(TEXT("position"), TEXT("the aircraft at the first kept frame"));
+				SkyCapture->SetNumberField(TEXT("z_m"), At.Z / 100.0);
+				SkyCapture->SetStringField(TEXT("not_done"),
+					TEXT("no recapture when the aircraft crosses a cloud layer (captured once; per frame only when the sun animates)"));
+				VisualScene.LookApplied->SetObjectField(TEXT("sky_light_capture"), SkyCapture);
+			}
+		}
 		VisualScene.SkyLightComponent->SetCaptureIsDirty();
 		USkyLightComponent::UpdateSkyCaptureContents(World);
 		FlushRenderingCommands();

@@ -358,6 +358,34 @@ beauty_check "premise: lux x transmittance" "Engine/Private/Components/Direction
     "GetOuterSpaceIlluminance() * GetAtmosphereTransmittanceTowardSun()"
 beauty_check "premise: transmittance floor" "Engine/Classes/Components/SkyAtmosphereComponent.h" \
     "float TransmittanceMinLightElevationAngle;"
+# Fix pass (light-colour, 2026-11-09): ONE sun transmittance model. The beauty
+# sun is outer-space lux; with per-pixel transmittance the CPU illuminance
+# carries none, and the shader samples the LUT at the pixel's own sun angle
+# (past the +90 deg floor). The host reads bPerPixelAtmosphereTransmittance.
+beauty_check "premise: per-pixel sun carries no CPU transmittance" \
+    "Engine/Private/Components/DirectionalLightComponent.cpp" \
+    "return FLinearColor(FVector(GetOuterSpaceIlluminance()));"
+beauty_check "DirectionalLight bPerPixelAtmosphereTransmittance" \
+    "Engine/Classes/Components/DirectionalLightComponent.h" "uint32 bPerPixelAtmosphereTransmittance : 1;"
+# The beauty sky light is captured once, from the aircraft (RenderCommandlet).
+beauty_check "Actor SetActorLocation" "Engine/Classes/GameFramework/Actor.h" \
+    "ENGINE_API bool SetActorLocation(const FVector& NewLocation, bool bSweep=false"
+beauty_check "ActorComponent GetOwner" "Engine/Classes/Components/ActorComponent.h" "AActor* GetOwner() const;"
+beauty_check "SkyLight UpdateSkyCaptureContents" "Engine/Classes/Components/SkyLightComponent.h" \
+    "static ENGINE_API void UpdateSkyCaptureContents(UWorld* WorldToUpdate);"
+# The -aerosol= probe converts its multiplier to 1/km against these defaults
+# (FlightSimVisualScene.cpp SceneMie*DefaultPerKm).
+beauty_check "premise: Mie scattering default 0.003996/km" \
+    "Engine/Private/Components/SkyAtmosphereComponent.cpp" "MieScatteringScale = 0.003996f;"
+beauty_check "premise: Mie absorption default 0.000444/km" \
+    "Engine/Private/Components/SkyAtmosphereComponent.cpp" "MieAbsorptionScale = 0.000444f;"
+if grep -qF -- "getTransmittanceLutUvs(PHeight, LightZenithCosAngle, BottomRadius, TopRadius, TransmittanceLutUv);" \
+    "$UE_ROOT/Engine/Shaders/Private/SkyAtmosphereCommon.ush" 2>/dev/null; then
+    ok "premise: per-pixel transmittance at the pixel's sun angle" "present"
+else
+    bad "premise: per-pixel transmittance at the pixel's sun angle" \
+        "not found in Shaders/Private/SkyAtmosphereCommon.ush -- core/scene/beauty_look.py needs updating"
+fi
 beauty_check "premise: physical camera EV100" "Renderer/Private/PostProcess/PostProcessEyeAdaptation.cpp" \
     "FMath::Log2(FMath::Square(Settings.DepthOfFieldFstop) * Settings.CameraShutterSpeed * 100"
 # Integration fix, 2026-11-09: RenderWriteLookContract finds the rain

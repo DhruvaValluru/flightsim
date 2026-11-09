@@ -27,7 +27,7 @@ namespace
 {
 	// Names are per-file unique (NEXT.md gotcha 3: unity builds merge
 	// anonymous namespaces across files).
-	constexpr int32 BeautyLookSupportedVersion = 1;
+	constexpr int32 BeautyLookSupportedVersion = 2;
 	constexpr double BeautyLookCmPerMetre = 100.0;
 
 	struct FBeautyLookState
@@ -209,6 +209,23 @@ namespace
 			{
 				return BeautyLookFail(TEXT("camera.depth_of_field is not true or false"));
 			}
+			// Per camera: a camera inside the aircraft (cockpit) would focus on
+			// the JSBSim datum a few metres behind it; the plan says "off".
+			FString FocusBasis = State.bDepthOfField ? TEXT("subject") : TEXT("off");
+			const TArray<TSharedPtr<FJsonValue>>* Focus = nullptr;
+			if (CameraJson->TryGetArrayField(TEXT("focus_per_camera"), Focus) && Focus != nullptr)
+			{
+				if (!Focus->IsValidIndex(CameraIndex) || !(*Focus)[CameraIndex]->TryGetString(FocusBasis))
+				{
+					return BeautyLookFail(FString::Printf(
+						TEXT("camera.focus_per_camera has no entry for -camera-index=%d"), CameraIndex));
+				}
+				if (FocusBasis == TEXT("off"))
+				{
+					State.bDepthOfField = false;
+				}
+			}
+			Echo->SetStringField(TEXT("focus_basis"), FocusBasis);
 			double ApertureF = 0.0, BlurAmount = 0.0, TargetFps = 0.0;
 			if (!BeautyLookNumber(CameraJson, TEXT("aperture_f"), ApertureF) ||
 			    !BeautyLookNumber(CameraJson, TEXT("MotionBlurAmount"), BlurAmount) ||
@@ -328,36 +345,46 @@ namespace
 			State.Applied->SetObjectField(TEXT("exposure"), Echo);
 		}
 
-		// -- sun colour (the lux rides the existing -sun-lux= hook) ------------
+		// -- sun (the lux rides the existing -sun-lux= hook) -------------------
+		// ONE transmittance model, the physical sky's (core/scene/beauty_look.py):
+		// the lux is OUTER-SPACE illuminance and the engine's per-pixel
+		// atmosphere transmittance dims and reddens it once. UE 5.7.4
+		// DirectionalLightComponent.cpp: with bPerPixelAtmosphereTransmittance
+		// the light's illuminance carries no transmittance, and the shader
+		// samples the LUT at the pixel's own sun angle (SkyAtmosphereCommon.ush
+		// GetAtmosphereTransmittance), past the +90 deg CPU floor. This host
+		// never tints the sun: no temperature, no 8-bit colour comparison.
 		{
 			TSharedPtr<FJsonObject> SunJson;
 			if (!BeautyLookObject(Plan, TEXT("sun"), SunJson)) { return false; }
 			TSharedPtr<FJsonObject> Echo = MakeShared<FJsonObject>();
-			double TemperatureK = 0.0;
 			UDirectionalLightComponent* Sun = BeautyLookFindSun(Capture);
-			if (!SunJson->TryGetNumberField(TEXT("temperature_k"), TemperatureK))
+			double PlanLux = 0.0;
+			const bool bPlanLux = SunJson->TryGetNumberField(TEXT("lux"), PlanLux);
+			FString Transmittance;
+			SunJson->TryGetStringField(TEXT("transmittance"), Transmittance);
+			Echo->SetStringField(TEXT("colour_owner"),
+				TEXT("the engine's per-pixel atmosphere transmittance; the beauty look sets no sun temperature"));
+			if (Sun == nullptr)
 			{
-				Echo->SetStringField(TEXT("temperature"), TEXT("not asked (the -sky= plan colours the sun)"));
-			}
-			else if (Sun == nullptr)
-			{
-				Echo->SetStringField(TEXT("temperature"), TEXT("not applied: no atmosphere sun light in the world"));
-			}
-			else if (Sun->bUseTemperature || Sun->LightColor != FColor::White)
-			{
-				// The lighting block's temperature or the X-Plane colours
-				// already coloured this sun; tinting on top would count twice.
-				Echo->SetStringField(TEXT("temperature"),
-					TEXT("not applied: the sun is already coloured (lighting block or X-Plane colours)"));
+				Echo->SetStringField(TEXT("sun"), TEXT("no atmosphere sun light in the world"));
 			}
 			else
 			{
-				Sun->SetUseTemperature(true);
-				Sun->SetTemperature(static_cast<float>(TemperatureK));
-				Echo->SetNumberField(TEXT("temperature_k"), Sun->Temperature);
-			}
-			if (Sun != nullptr)
-			{
+				const bool bPerPixel = Sun->bPerPixelAtmosphereTransmittance != 0;
+				if (bPlanLux && Transmittance == TEXT("engine_per_pixel") && !bPerPixel)
+				{
+					// Outer-space lux with only the +90 deg zenith floor would
+					// reach the ground undimmed and white at a low sun.
+					return BeautyLookFail(TEXT("the sun is in outer-space lux but the atmosphere sun light has ")
+						TEXT("bPerPixelAtmosphereTransmittance off: the engine would not dim and redden it"));
+				}
+				Echo->SetBoolField(TEXT("per_pixel_transmittance"), bPerPixel);
+				// Read back as data, never as a decision: another lane's colour
+				// (the lighting block's temperature, the X-Plane colours) stands.
+				Echo->SetBoolField(TEXT("use_temperature_read_back"), Sun->bUseTemperature != 0);
+				Echo->SetStringField(TEXT("light_color_read_back"), FString::Printf(TEXT("%d:%d:%d"),
+					Sun->LightColor.R, Sun->LightColor.G, Sun->LightColor.B));
 				// What the light holds (lux when -sun-lux= reached it).
 				Echo->SetNumberField(TEXT("intensity_read_back"), Sun->Intensity);
 			}
@@ -424,6 +451,11 @@ namespace
 			// the sidecar's pixel_effects names it (Python refuses otherwise).
 			Capture->ShowFlags.SetSceneColorFringe(Settings.SceneFringeIntensity > 0.0f);
 			Echo->SetStringField(TEXT("BloomMethod"), TEXT("BM_SOG (standard)"));
+			// One owner of lens character on beauty: this lens. Under -sky= the
+			// plan's per-camera lens (FFlightSimSky::ApplyPostProcess, applied
+			// first) is replaced here, and the record says so.
+			Echo->SetStringField(TEXT("lens_character_owner"),
+				TEXT("the beauty lens; replaces the -sky= plan's grain, vignette and motion blur when one is set"));
 			State.Applied->SetObjectField(TEXT("lens_post"), Echo);
 		}
 		{
