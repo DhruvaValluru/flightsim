@@ -337,6 +337,17 @@ world_beauty.clouds:
 dust_haze.row:
   sentence: "The dust haze cannot be chosen: the card names a dust word the renderer does not know."
   hint: "Say dust, haze or none (or true or false) for the weather's dust, or leave it out to let the surface and the reported weather decide."
+
+# hero-lighting lane (core/scene/hero_lighting.py, FlightSimHeroLighting.cpp):
+hero_lighting.intent:
+  sentence: "The shot asks for a lighting look the lighting director does not know."
+  hint: "Use one of the director's looks: golden rim backlight, desert cross relief, storm soft sheen or cockpit canopy glint."
+hero_lighting.unreachable:
+  sentence: "The sun never stands at the elevation this lighting look needs at that place on that date."
+  hint: "Choose another date, or a look with a lower or higher sun."
+hero_lighting.sidecar:
+  sentence: "The hero lighting file the renderer was given cannot be read: it is missing, not JSON, of an unknown version, or has a ground colour that is not three numbers."
+  hint: "Run the shot again from the web app so the file is rewritten, or render at the measure quality."
 ground_scatter.sidecar:
   sentence: "The ground scatter file cannot be read, is of another format or version, or carries no region or species."
   hint: "Write the scatter file again, or render without ground scatter."

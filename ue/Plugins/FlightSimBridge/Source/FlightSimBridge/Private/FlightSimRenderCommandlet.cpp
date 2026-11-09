@@ -1,6 +1,7 @@
 #include "FlightSimRenderCommandlet.h"
 
 #include "FlightSimBeautyLook.h"   // look-dev lane hook
+#include "FlightSimHeroLighting.h" // hero-lighting lane hook
 
 #include "FlightSimAircraftFX.h"  // aircraft lane (visual overhaul V7)
 #include "FlightSimCameraDirector.h"
@@ -3385,6 +3386,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			TEXT("UNCALIBRATED: every constant here is set by probe render on the render machine ")
 			TEXT("(docs/visual/PROBE_LOG.md, render-path)"));
 	}
+	// hero-lighting lane hook (FlightSimHeroLighting.cpp): beauty-only sun/sky light quality; a bad sidecar refuses.
+	if (bVisual && bBeauty && !FFlightSimHeroLighting::Apply(VisualScene, Capture, bPathTrace, *Params)) { return Fail(FFlightSimHeroLighting::LastError()); }
 	AntiAliasingMethod = ReadCvar(TEXT("r.AntiAliasingMethod"));
 	VirtualShadowMaps = ReadCvar(TEXT("r.Shadow.Virtual.Enable"));
 	if (bHideAircraft)
@@ -3946,6 +3949,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			// ever added to a label capture -- so mask, class and depth are
 			// byte-identical with the world look on and off.
 			Label->HiddenActors.Append(VisualScene.BeautyOnlyActors);
+			FFlightSimHeroLighting::ExcludeFromLabel(Label);   // hero-lighting lane: no-op unless beauty applied it
 		};
 		// Integration: registration resets ShowFlags to the class default
 		// (RenderPinShowFlags), which is why the owner's fixture records the
@@ -7775,6 +7779,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Contract.EngineWorld = World;
 		RenderWriteLookContract(*Root, Contract);
 	}
+
+	if (TSharedPtr<FJsonObject> HeroLighting = FFlightSimHeroLighting::Record()) { Root->SetObjectField(TEXT("hero_lighting"), HeroLighting); }   // hero-lighting lane
 
 	// Environmental couplings, stated per run rather than assumed.
 	TSharedPtr<FJsonObject> Environment = MakeShared<FJsonObject>();

@@ -1550,3 +1550,105 @@ on the Mac, no engine. What was checked, and what came of it:
 - **Tests.** test_platform's utf-8 failure is in tests/test_gate_v_visual.py
   and tests/test_swarm_viz.py, which are not in this branch's diff.
   Commit 43795f40 on the integration branch fixes it.
+
+## hero-lighting
+
+Lane: dramatic, physically plausible light for every shot. Files:
+`core/scene/hero_lighting.py`,
+`ue/Plugins/FlightSimBridge/Source/FlightSimBridge/{Private,Public}/FlightSimHeroLighting.{cpp,h}`,
+`tests/test_hero_lighting.py`. Hooks: `experiments/visual_contact_sheet.py`
+(a `lighting` field per shot plus `light_shot`), `webapp/runs.py` (two lines,
+both on the beauty look only), `FlightSimRenderCommandlet.cpp` (4 lines),
+`scripts/check_bridge_api.sh` (block `BEGIN hero lighting`) and
+`core/messages/catalog.yaml` (`hero_lighting.intent`, `.unreachable`,
+`.sidecar`).
+
+### What it does
+
+1. **A lighting director per shot.** Each contact-sheet shot names a look
+   (`INTENTS`): where the sun should sit relative to the camera, as an
+   azimuth off the lens axis and an elevation. The look is realised only
+   through the levers a real flight has: the time of day, the date and the
+   heading. `solve()` bisects `core.environment.sun.solar_position` for the
+   UTC instant at which the apparent sun crosses the wanted elevation. It
+   then picks the heading that puts the sun at the wanted relative bearing,
+   and re-resolves the sun on exactly the clock string the renderer will
+   read. The date is the one the spec already had (the environment preset's,
+   or the equinox), so the season is never changed. It is carried as an ISO
+   prefix on the clock (`2026-07-15T13:52Z`), never as `weather_date`,
+   which would switch on ERA5 winds and so change physics. The heading goes
+   into the prompt as `heading NNN` and is recompiled, so the planners see
+   it. There is no second sun and no moved light.
+2. **The quality of the one sun and the one sky light**, beauty only:
+   - the source angle at the true solar disc (0.5357 deg) plus a soft angle,
+     unless the run stated `-sun-source-angle=` (the rain look's softening),
+     which is kept;
+   - VSM: directional LOD bias, page pool, and SMRT ray and sample counts;
+   - world-space contact shadows at airframe scale;
+   - the sky light with cloud AO, left in the commandlet's capture-once
+     mode (skeptic fix: real-time capture never runs for a scene capture,
+     so turning it on lit every shadow with nothing; docs/VALIDITY.md),
+     and its lower hemisphere set to the ground's radiance from the
+     `-hero-lighting=` sidecar (Lambertian: albedo x E_h / pi);
+   - Lumen short-range AO and screen traces, and reflections with hardware
+     ray-traced hit lighting (LightingMode 2) when `IsRayTracingEnabled()`,
+     with a screen-trace and surface-cache fallback otherwise;
+   - light-shaft occlusion, plus light-shaft bloom except under overcast;
+   - volumetric-fog scattering and volumetric shadow from the sun;
+   - the atmosphere's sun disc at physical luminance (scale 1), hidden
+     under overcast;
+   - the aureole (the world lane's Mie anisotropy) read back and recorded,
+     but not set.
+   Everything is recorded in render.json `hero_lighting` (asked and
+   read-back cvars, the reflection route, the plan). `pixel_moving_effects`
+   there is empty because lighting moves no geometry.
+3. **Labels and measure.** The commandlet calls `Apply` only under
+   `bVisual && bBeauty`. `ExcludeFromLabel` turns light shafts and contact
+   shadows off on every label capture, and before `Apply` it does nothing,
+   so measure label captures are byte-for-byte as before. The web app
+   writes the sidecar and passes the token only when a beauty look exists,
+   and measure has none.
+
+### Solved values (2026-11-09, the regex compiler, in-process web app)
+
+| shot | look | time_of_day | heading | sun el / az | rel. az | residual el / rel. az |
+|---|---|---|---|---|---|---|
+| a | golden_rim_backlight (35 deg, 6 deg, setting) | 2026-03-20T17:03Z | 229 | 5.98 / 263.98 | 34.98 | -0.02 / -0.02 |
+| b | desert_cross_relief (90 deg, 16 deg, rising) | 2026-07-15T13:52Z | 345 | 15.98 / 74.77 | 89.77 | -0.02 / -0.24 |
+| c | storm_soft_sheen (20 deg, 28 deg, rising) | 2026-06-21T15:13Z | 061 | 28.05 / 80.91 | 19.91 | +0.05 / -0.09 |
+| d | cockpit_canopy_glint (150 deg, 35 deg, rising) | 2026-03-20T09:20Z | 347 | 35.04 / 136.74 | 149.74 | +0.04 / -0.26 |
+
+Shot a was "flying east". It now flies 229 because a golden-hour backlight
+in the evening needs the western sun ahead of the lens.
+
+### Probes (every value below is UNCALIBRATED until its probe is run)
+
+Run these on the render machine (p3-windows) with the contact sheet:
+`experiments/visual_contact_sheet.py`, one tile per shot, read against the
+V0 sheet. Record each result here and in ruflo under
+`visual-overhaul/hero-lighting/probe-<date>`.
+
+| probe | sets | how to read it |
+|---|---|---|
+| hl-director | `INTENTS` azimuths and elevations | the four tiles: rim on shot a's airframe edge without disc flare; relief shadows on shot b; sheen on shot c's canopy and wet ground; glints on shot d's coaming and canopy arch |
+| hl-penumbra | `HeroLightingSunSoftAngleDeg` 0.5 | shot a, the fin's shadow on the fuselage at 1080p against a reference photograph's penumbra |
+| hl-overcast | `HeroLightingOvercastAngleDeg` 2.0, `OVERCAST_ILLUMINANCE_FRACTION` 0.25 | shot c: is the sun disc visible through the storm deck; an incident reading under the deck from the `-calibration` quad |
+| hl-vsm | LOD bias -1.5, 8192 pages, 16 rays, 12 samples | shot b: canyon-rim shadow-edge aliasing, against the page-pool overflow warning in the log |
+| hl-contact | `HeroLightingContactShadowLengthCm` 150 | shot d (canopy frame, coaming) and shot a (pylons, intakes): no halo on the tiles |
+| hl-lumen | max roughness 0.4, downsample 1, LightingMode 2 | shots a and d: canopy and airframe reflection noise and cost, ray tracing on against off |
+| hl-shafts | occlusion darkness 0.4, bloom scale 0.12, threshold 6, max 50 | shot a into the low sun through the Matterhorn ridge: no bloom haze across the frame |
+| hl-fog | grid pixel size 4, grid Z 128 | shot c: shaft banding in the rain fog |
+| hl-skylight | cloud AO strength 1 | shot c, the airframe belly under the deck; shot b, the belly over red rock |
+| hl-ground | `GROUND_ALBEDO_RGB` | the belly's luminance over each ground, against the tiles' mean linear colour under the camera (a `-linear` pass) |
+| hl-labels | (a check, sets nothing) | label sha256 for mask, class and depth with and without `-hero-lighting=`; they must be identical |
+
+### Open points
+
+- The sun-shafts-sky-occlusion lane (`FlightSimSunShafts.cpp`, branch
+  `worktree-wf_6c29a6d7-e69-8`, not merged here) also sets light shafts and
+  volumetric fog. Hero lighting runs later in the commandlet, so its
+  values win where both touch. At integration, keep one owner per cvar.
+- Renderer cvars are process-wide, so label captures share VSM and Lumen
+  quality. The claim that label pixels are unchanged rests on the label
+  materials reading stencil, depth and the GBuffer; probe hl-labels checks
+  it.
