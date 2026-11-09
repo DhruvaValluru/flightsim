@@ -383,6 +383,25 @@ bool FFlightSimWorldBeauty::LoadOverrides(const FString& Path, FString& Error)
 		Error = FString::Printf(TEXT("world_beauty.overrides: %s could not be read as JSON"), *Path);
 		return false;
 	}
+	// The same refusals as core/scene/world_beauty.py validate_overrides: an
+	// unknown or misspelt section, a section that is not an object, and a value
+	// that is not a JSON number (a bool or a numeric string is refused, never
+	// read as 1/0 or parsed) -- a probe file with a typo must not run silently
+	// on the defaults.
+	for (const TPair<FString, TSharedPtr<FJsonValue>>& Top : Doc->Values)
+	{
+		if (Top.Key != TEXT("atmosphere") && Top.Key != TEXT("clouds") && Top.Key != TEXT("constants"))
+		{
+			Error = FString::Printf(TEXT("world_beauty.overrides: unknown section '%s' (atmosphere, clouds, ")
+			                        TEXT("constants) in %s"), *Top.Key, *Path);
+			return false;
+		}
+		if (!Top.Value.IsValid() || Top.Value->Type != EJson::Object)
+		{
+			Error = FString::Printf(TEXT("world_beauty.overrides: %s is not an object (%s)"), *Top.Key, *Path);
+			return false;
+		}
+	}
 	auto Section = [&](const TCHAR* Name, int32 Rows, int32 Fields, const char* (*RowName)(int),
 	                   const char* (*FieldName)(int), TArray<double>& Values) -> bool
 	{
@@ -420,7 +439,8 @@ bool FFlightSimWorldBeauty::LoadOverrides(const FString& Path, FString& Error)
 					}
 				}
 				double Value = 0.0;
-				if (Field < 0 || !FieldPair.Value.IsValid() || !FieldPair.Value->TryGetNumber(Value))
+				if (Field < 0 || !FieldPair.Value.IsValid() || FieldPair.Value->Type != EJson::Number ||
+				    !FieldPair.Value->TryGetNumber(Value))
 				{
 					Error = FString::Printf(TEXT("world_beauty.overrides: %s.%s.%s is not a numeric field (%s)"),
 					                        Name, *RowPair.Key, *FieldPair.Key, *Path);
@@ -465,7 +485,8 @@ bool FFlightSimWorldBeauty::LoadOverrides(const FString& Path, FString& Error)
 				}
 			}
 			double Value = 0.0;
-			if (Slot == nullptr || !Pair.Value.IsValid() || !Pair.Value->TryGetNumber(Value))
+			if (Slot == nullptr || !Pair.Value.IsValid() || Pair.Value->Type != EJson::Number ||
+			    !Pair.Value->TryGetNumber(Value))
 			{
 				Error = FString::Printf(TEXT("world_beauty.overrides: constants.%s is not a numeric constant (%s)"),
 				                        *Pair.Key, *Path);
