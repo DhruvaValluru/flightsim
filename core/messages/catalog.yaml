@@ -285,6 +285,9 @@ sun.below_render_floor:
 render.quality:
   sentence: "The render quality asked for is not one the renderer knows; it knows measure and beauty."
   hint: "Set FLIGHTSIM_RENDER_QUALITY to measure or beauty, or leave it unset."
+render.beauty_look:
+  sentence: "The beauty look cannot be planned or applied: an unknown grade or lens, a sun that cannot be lit, a camera without a sensor width, or a sidecar the renderer cannot read."
+  hint: "Use a known grade (golden hour, desert noon or storm) and lens (standard or cinematic), or render at the measure quality."
 
 # -- the batch runner (core/dataset/batch.py) --------------------------------
 
