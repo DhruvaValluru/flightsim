@@ -259,6 +259,40 @@ def test_bundle_layout_is_discovered(tmp_path):
     assert [k for k, _ in gv.discover_shots(tmp_path)] == ["frame_0000"]
 
 
+def _web_run(tmp_path, *, sidecar):
+    """A web run as the capture pipeline writes it: two cameras, the
+    labels in capture_manifest.json (and optionally in frame sidecars)."""
+    run = tmp_path / "run"
+    rgb, ids, _ = scene()
+    records = []
+    for camera, row in (("chase", 50), ("tower", HORIZON)):
+        folder = run / "frames" / camera
+        folder.mkdir(parents=True)
+        Image.fromarray(np.rint(rgb).astype(np.uint8)).save(folder / "frame_0000.png")
+        record = {"camera_id": camera, "index": 0, "file": f"frames/{camera}/frame_0000.png",
+                  "labels": {"horizon": {"polyline_px": [[0, row], [W, row]]}}}
+        records.append(record)
+        if sidecar:
+            (folder / "frame_0000.json").write_text(json.dumps({"frame": record}))
+    (run / "capture_manifest.json").write_text(json.dumps({"frames": records}))
+    step = tmp_path / "v0"
+    step.mkdir()
+    Image.fromarray(np.rint(rgb).astype(np.uint8)).save(step / "a.png")
+    frame = run / "frames" / "tower" / "frame_0000.png"
+    (step / "shots.json").write_text(json.dumps(
+        {"shots": {"a": {"frame": str(frame), "run_dir": str(run)}}}))
+    return step
+
+
+@pytest.mark.parametrize("sidecar", [True, False])
+def test_horizon_comes_from_the_capture_labels_of_this_camera(tmp_path, sidecar):
+    step = _web_run(tmp_path, sidecar=sidecar)
+    inputs = gv.resolve_inputs(step, "a", step / "a.png", W, H)
+    assert inputs.horizon is not None, inputs.horizon_source
+    assert inputs.horizon[0] == pytest.approx(HORIZON)  # tower, not chase
+    assert ("frame_0000.json" if sidecar else "capture_manifest.json") in inputs.horizon_source
+
+
 def test_cli_skip_render_and_compare(tmp_path, capsys):
     write_step(tmp_path / "before", haze=False)
     write_step(tmp_path / "after", haze=True)

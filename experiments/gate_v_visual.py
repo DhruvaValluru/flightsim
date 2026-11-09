@@ -764,19 +764,38 @@ def _load_depth(png: Path, frame_hint: Optional[Path], width: int, height: int):
     return None, "none"
 
 
-def _horizon_from_manifest(run_dir: Path, frame_hint: Optional[Path]):
-    manifest = _read_json(run_dir / "manifest.json")
-    if not isinstance(manifest, dict) or not isinstance(manifest.get("frames"), list):
+def _record_polyline(record):
+    """``labels.horizon.polyline_px`` of one capture-manifest frame record."""
+    if not isinstance(record, dict):
         return None
-    index = 0
-    if frame_hint is not None:
-        digits = re.findall(r"\d+", frame_hint.stem)
-        index = int(digits[-1]) if digits else 0
-    frames = manifest["frames"]
-    frame = frames[index] if 0 <= index < len(frames) else (frames[0] if frames else None)
-    horizon = find_key(frame, "horizon") if frame is not None else None
+    horizon = (record.get("labels") or {}).get("horizon")
     if isinstance(horizon, dict) and horizon.get("polyline_px"):
         return horizon["polyline_px"]
+    return None
+
+
+def _horizon_from_sidecar(frame: Optional[Path]):
+    """The frame's own sidecar, ``frame_NNNN.json`` beside the PNG
+    (core/capture/manifest.py write_frame_sidecars): its ``frame`` record."""
+    if frame is None:
+        return None
+    sidecar = _read_json(frame.with_suffix(".json"))
+    return _record_polyline(sidecar.get("frame")) if isinstance(sidecar, dict) else None
+
+
+def _horizon_from_manifest(run_dir: Path, frame_hint: Optional[Path]):
+    """The run's ``capture_manifest.json`` frame whose ``file`` is this
+    frame (matched by camera directory and name, never by a list index:
+    the list holds every camera's frames)."""
+    if frame_hint is None:
+        return None
+    manifest = _read_json(run_dir / "capture_manifest.json")
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("frames"), list):
+        return None
+    tail = (frame_hint.parent.name, frame_hint.name)
+    for record in manifest["frames"]:
+        if isinstance(record, dict) and tuple(Path(str(record.get("file", ""))).parts[-2:]) == tail:
+            return _record_polyline(record)
     return None
 
 
@@ -801,16 +820,21 @@ def resolve_inputs(directory: Path, key: str, png: Path, width: int, height: int
         found = find_key(side, "polyline_px") if side is not None else None
         if found:
             polyline, source = found, f"{png.stem}_horizon.json"
+    if polyline is None:
+        for frame in (frame_hint, png):
+            found = _horizon_from_sidecar(frame)
+            if found:
+                polyline, source = found, f"{frame.with_suffix('.json').name} labels"
+                break
     if polyline is None and run_dir is not None:
         found = _horizon_from_manifest(run_dir, frame_hint)
         if found:
-            polyline, source = found, f"{run_dir / 'manifest.json'} labels"
+            polyline, source = found, f"{run_dir / 'capture_manifest.json'} labels"
     if polyline is None:
-        found = _horizon_from_manifest(png.parent.parent, png)
-        if found is None:
-            found = _horizon_from_manifest(png.parent, png)
+        # A bundle measured in place: frames/<camera>/frame_NNNN.png.
+        found = _horizon_from_manifest(png.parent.parent.parent, png)
         if found:
-            polyline, source = found, "the bundle's manifest labels"
+            polyline, source = found, "the bundle's capture_manifest.json labels"
     if polyline is not None:
         import numpy as np
 
