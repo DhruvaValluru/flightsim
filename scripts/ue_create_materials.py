@@ -2742,6 +2742,9 @@ WORLD_COLLECTION_SCALARS = {
     "DetailStrength": 0.0,
     "DetailFadeM": 1500.0,
     "DetailScaleM": 2.0,
+    # tiles-delight (core/scene/tiles_delight.py): 0 is a pass-through.
+    "DelightAmount": 0.0,
+    "DelightBlueGate": 4.0,
 }
 #: M_FlightSimCloudLayers' scalar parameters (FlightSimClouds.cpp sets each by
 #: name) with the default a material has before the render sets them, and its
@@ -2771,7 +2774,13 @@ WORLD_TILES_INPUTS = {
     "tiles_normal": ("WorldPos", "CameraPos", "NormalWS", "DetailStrength", "DetailFadeM",
                      "DetailScaleM", "PuddleAmount"),
     "tiles_roughness": ("WorldPos", "CameraPos", "NormalWS", "Wetness", "PuddleAmount", "DetailFadeM"),
+    # tiles-delight: runs first; its output is the other nodes' Albedo.
+    "tiles_delight": ("Albedo", "AlbedoLow", "DelightAmount", "DelightRatioKnee", "DelightBlueGate"),
 }
+#: tiles-delight: the material's own scalar parameters (not the collection's:
+#: the render does not set them), at tiles_delight.DELIGHT_MIP_BIAS and
+#: DELIGHT_RATIO_KNEE. UNCALIBRATED.
+WORLD_TILES_DELIGHT_SCALARS = {"DelightMipBias": 5.0, "DelightRatioKnee": 0.6}
 
 
 def _world_beauty_material(name):
@@ -2916,6 +2925,23 @@ def create_world_tiles_beauty():
               "NormalWS": (normal, "")}
     for i, name in enumerate(WORLD_COLLECTION_SCALARS):
         common[name] = (world_collection_parameter(material, lib, name, -1800, 450 + 110 * i), "")
+    # tiles-delight hook: the same texture at a coarse mip (the local mean), then
+    # tiles_delight.hlsl lifts the baked shadows; its output replaces Albedo.
+    for i, (name, default) in enumerate(WORLD_TILES_DELIGHT_SCALARS.items()):
+        common[name] = (scalar(material, lib, name, default, -2200, -600 - 110 * i), "")
+    low = texture_parameter(material, lib, CESIUM_BASE_COLOUR_TEXTURE, False, -1800, -700,
+                            default=unreal.load_asset(
+                                "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"))
+    lib.connect_material_expressions(uv, "", low, "UVs")
+    low.set_editor_property("mip_value_mode", unreal.TextureMipValueMode.TMVM_MIP_BIAS)
+    lib.connect_material_expressions(common["DelightMipBias"][0], "", low, "MipBias")
+    common["AlbedoLow"] = (binary(material, lib, unreal.MaterialExpressionMultiply,
+                                  mask(material, lib, low, "rgb", -1550, -700),
+                                  mask(material, lib, factor, "rgb", -1550, -100), -1400, -600), "")
+    common["Albedo"] = (world_custom(material, lib, "tiles_delight",
+                                     unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                                     {name: common[name] for name in WORLD_TILES_INPUTS["tiles_delight"]},
+                                     -1200, -400), "")
     outputs = {"tiles_base_colour": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                                      unreal.MaterialProperty.MP_BASE_COLOR),
                "tiles_normal": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,

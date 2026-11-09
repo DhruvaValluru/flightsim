@@ -382,7 +382,9 @@ def test_the_tiles_shaders_read_what_the_script_wires():
         shared = noise if shared is None else shared
         assert noise == shared, f"{name}: the shared noise differs"
         assert "static const" not in hlsl and "float flat" not in hlsl
-    for pin in {p for pins in inputs.values() for p in pins} - {"Albedo", "WorldPos", "CameraPos", "NormalWS"}:
+    # tiles-delight: AlbedoLow is a texture sample, its knee a material scalar (not the collection's)
+    local = {"AlbedoLow"} | set(_script_dict("WORLD_TILES_DELIGHT_SCALARS"))
+    for pin in {p for pins in inputs.values() for p in pins} - {"Albedo", "WorldPos", "CameraPos", "NormalWS"} - local:
         assert pin in wb.WORLD_MPC_SCALARS, pin
 
 

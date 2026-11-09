@@ -34,6 +34,7 @@ import math
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from . import tiles_delight
 from .rain_field import MASK64, splitmix64, unit
 
 # -- the atmosphere presets -------------------------------------------------------
@@ -288,6 +289,9 @@ WORLD_MPC_SCALARS: Dict[str, float] = {
     "DetailStrength": 0.0,
     "DetailFadeM": 1500.0,
     "DetailScaleM": 2.0,
+    # tiles-delight (core/scene/tiles_delight.py): 0 is a pass-through.
+    "DelightAmount": 0.0,
+    "DelightBlueGate": 4.0,
 }
 #: How much of the wetness becomes standing water on flat ground. UNCALIBRATED.
 PUDDLE_SHARE_OF_WETNESS = 0.5
@@ -301,7 +305,10 @@ def tiles_parameters(preset: str, card_wetness: float) -> Dict[str, float]:
     out = dict(WORLD_MPC_SCALARS)
     out.update({"Wetness": wet, "PuddleAmount": wet * PUDDLE_SHARE_OF_WETNESS,
                 "Dehaze": row["tiles_dehaze"], "Saturation": row["tiles_saturation"],
-                "DetailStrength": row["tiles_detail_strength"]})
+                "DetailStrength": row["tiles_detail_strength"],
+                # tiles-delight: the preset's de-light amount (tiles_delight.DELIGHT_DEFAULTS).
+                "DelightAmount": tiles_delight.amount_for(preset),
+                "DelightBlueGate": tiles_delight.DELIGHT_BLUE_GATE})
     return out
 
 
