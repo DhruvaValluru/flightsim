@@ -5,6 +5,32 @@ graded by `look_record` and `look_label_alignment` in
 `core/capture/verify.py`. The render host writes these keys into each
 camera's `frames/<camera>/render.json`, beside the keys it already writes.
 
+**Who writes them (integration, 2026-11-09).** The render commandlet writes
+all five root keys on every `-quality=beauty` and `-quality=pathtrace`
+render, and none on `-quality=measure`:
+
+| key | written by | filled from |
+|---|---|---|
+| `beauty_look` | `FFlightSimBeautyLook::Record` (look-dev) | the `-beauty-look=` sidecar and what was read back; absent without a sidecar |
+| `pixel_moving_effects` | `RenderWriteLookContract` (FlightSimRenderCommandlet.cpp) | the beauty capture's show flags and post-process settings read back after every lane ran, and `aircraft_look.heat_haze` |
+| `beauty_samples` | `RenderWriteLookContract` | `render_settings.beauty_path.accumulation.captures_per_frame` (still samples), the TSR history constants, `-pathtrace-spp`, the engine motion blur's shutter |
+| `beauty_only_actors` | `RenderWriteLookContract` | `VisualScene.BeautyOnlyActors` (the weather, weather-look, rain, starfield and world fair-cumulus actors appended to it), `AircraftFX.BeautyOnlyActors`, and the world's volumetric cloud owners (hidden by the Cloud show flag) as `{"name", "source", "hidden_by"}` objects |
+| `cloud_occlusion` | `FFlightSimWorldBeauty::CloudOcclusionRecord` (world) | the per-frame slab model; `basis` is `"modelled"`, never `"measured"` |
+
+The commandlet writes one `pixel_moving_effects` entry for each of
+`motion_blur`, `depth_of_field`, `heat_haze`, `path_tracer_filter`,
+`chromatic_aberration`, `lens_distortion`, `lens_drops` and
+`windshield_rain`, with `on` measured off the capture
+(`core/capture/beauty_look.py COMMANDLET_EFFECTS`). The last two are the
+rain blendables (`M_LensDrops`, `M_WindshieldRain`) found by base
+material in the beauty's `WeightedBlendables`; both refract the scene,
+and their `max_displacement_px` is a bound by construction. None carries a
+transform or a measured displacement yet, so a beauty render with any of
+them on is graded beauty-not-label-aligned until
+`experiments/look_label_check.py` measures it. That is the rule working:
+labelled sets come from `-quality=measure`. `tests/test_render_json_contract.py`
+checks the commandlet source against these tables.
+
 **Every key here is optional.** A render.json written before them stays
 valid: `look_record` grades only the quality (`scene.render_quality`, on
 every render.json since V0) and `look_label_alignment` reports NOT RUN.
@@ -58,6 +84,8 @@ the keys that move pixels:
 | `overscan`, `overscan_fraction` | `overscan` |
 | `upscale`, `upscaling`, `screen_percentage` | `upscale` |
 | `temporal_accumulation` | `temporal_accumulation` |
+| `MotionBlurAmount` (the C++ record's spelling) | `motion_blur` |
+| `SceneFringeIntensity` (the C++ record's spelling) | `chromatic_aberration` |
 
 A key counts as on when its value is `true`, a non-zero number, a word
 other than off/none/false/0, or an object whose `on`, `enabled` or
@@ -78,7 +106,11 @@ beauty render it must be listed in `pixel_moving_effects`.
 Optional `beauty_look.camera.fov_deg` (or `beauty_look.fov_deg`) is the
 beauty camera's horizontal field of view. It must equal the pose solver's,
 2 atan(width / 2 fx) from the capture manifest, within
-`APPLIED_FOV_TOL_DEG` (0.1 deg). A per-frame `beauty_fov_deg` overrides it.
+`APPLIED_FOV_TOL_DEG` (0.1 deg). The commandlet writes a per-frame
+`frame_records[].beauty_fov_deg` (the beauty capture's `FOVAngle`, beauty
+and pathtrace only), which overrides it; without either, the look-dev
+record's `beauty_look.applied.camera.fov_deg_unchanged` is compared. The
+PASS text claims the field of view only when a comparison ran.
 
 ### `pixel_moving_effects` (list)
 
@@ -133,6 +165,25 @@ look. It is either kept out of the cone, measured under the visibility
 gate, or the bundle is refused. The amodal masks (S2) already carry the
 "behind something" case for real occluders. Beauty-only actors are not
 real occluders, because the physics and the labels never see them.
+
+### `render_settings.label_show_flags` (object, beauty and pathtrace)
+
+The label capture's own show flags, read back by the commandlet after
+registration: anti-aliasing, temporal AA, motion blur, depth of field,
+bloom, lens flares, grain, vignette, local exposure, colour fringe, lens
+distortion, refraction, path tracing, eye adaptation, translucency, cloud
+and fog. Any `true` fails `look_label_alignment` (the labels saw the look).
+
+Why it exists (integration, 2026-11-09): UE 5.7 `USceneCaptureComponent::
+OnRegister` calls `UpdateShowFlags()`, which resets `ShowFlags` to the
+class default and re-applies only `ShowFlagSettings`. Flags set before
+`RegisterComponent()` were lost, which is the `"DEFECT: label capture
+anti-aliasing show flag is on"` in `tests/fixtures/engine_bundle_min`
+(a pre-overhaul render). The beauty's TSR, lens and path-tracing flags were
+lost the same way. On beauty and pathtrace the commandlet now pins every
+flag through `ShowFlagSettings` (`RenderPinShowFlags`). Measure renders keep
+the registration Gate 6 passed on, so their labels are unchanged and the
+recorded defect still stands there. Changing that is the owner's call.
 
 ### per frame (`frame_records[]`)
 

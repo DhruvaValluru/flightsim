@@ -9431,11 +9431,22 @@ def verify_look_label_alignment(manifest: Dict, run_dir=None) -> Check:
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             continue
     graded, reasons, notes = [], [], []
+    fov_compared = 0
     for camera, _folder, payload in _s4_renders(run_dir):
         records = _render_frame_records(payload)
         if not has_look_record(payload) and not any("beauty_window_s" in r for r in records):
             continue
         graded.append(camera)
+        # Integration: the label capture's own flags, read back by the
+        # commandlet after registration (render_settings.label_show_flags,
+        # beauty renders): a beauty-only lens or post flag on there means the
+        # labels saw the look.
+        label_flags = (payload.get("render_settings") or {}).get("label_show_flags")
+        if isinstance(label_flags, dict):
+            leaked = sorted(k for k, v in label_flags.items() if v is True)
+            if leaked:
+                reasons.append(f"{camera}: the label capture has beauty-only show flag(s) on: "
+                               f"{', '.join(leaked)}")
         effects, _ = normalise_effects(payload.get("pixel_moving_effects"))
         for effect in (e for e in effects if e["on"]):
             aligned, words = classify_effect(effect, LOOK_ALIGNMENT_TOL_PX)
@@ -9454,12 +9465,19 @@ def verify_look_label_alignment(manifest: Dict, run_dir=None) -> Check:
         look = payload.get("beauty_look") if isinstance(payload.get("beauty_look"), dict) else {}
         lens = look.get("camera") if isinstance(look.get("camera"), dict) else look
         look_fov = lens.get("fov_deg") if isinstance(lens, dict) else None
+        if look_fov is None:
+            # What FFlightSimBeautyLook::Record writes: the lens it left alone.
+            applied = look.get("applied") if isinstance(look.get("applied"), dict) else {}
+            echo = applied.get("camera") if isinstance(applied.get("camera"), dict) else {}
+            look_fov = echo.get("fov_deg_unchanged")
         for record in records:
             frame = str(record.get("frame", ""))
             where = f"{camera}/{frame}"
             stem = Path(frame).stem
             fov = record.get("beauty_fov_deg", look_fov)
             solver = implied.get((camera, frame))
+            if isinstance(fov, (int, float)) and not isinstance(fov, bool) and solver is not None:
+                fov_compared += 1
             if isinstance(fov, (int, float)) and not isinstance(fov, bool) and solver is not None \
                     and abs(float(fov) - solver) > APPLIED_FOV_TOL_DEG:
                 reasons.append(f"{where}: the beauty's field of view {float(fov):.3f} deg is not "
@@ -9494,8 +9512,10 @@ def verify_look_label_alignment(manifest: Dict, run_dir=None) -> Check:
                        "or measure the displacement (experiments/look_label_check.py)",
                      failure=FAIL_LOOK_NOT_ALIGNED)
     return Check("look_label_alignment", PASS,
-                 f"{', '.join(graded)}: labels of the beauty's own frame and instant, at the pose "
-                 f"solver's field of view"
+                 f"{', '.join(graded)}: labels of the beauty's own frame and instant"
+                 + (f", at the pose solver's field of view ({fov_compared} frame(s) compared)"
+                    if fov_compared else
+                    "; the beauty's field of view was not compared (no beauty_fov_deg)")
                  + (f"; {'; '.join(notes)}" if notes else "; no pixel-moving effect on"))
 
 

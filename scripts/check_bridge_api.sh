@@ -275,6 +275,26 @@ rp_cvar r.PathTracing.Denoiser.Name "Renderer/Private/PathTracingSpatialTemporal
 rp_cvar r.RayTracing "Renderer/Private/DeferredShadingRenderer.cpp"
 rp_cvar r.RayTracing.Nanite.Mode "Engine/Private/Rendering/NaniteResources.cpp"
 
+# -- integration (visual overhaul, 2026-11-09) -------------------------------
+# RenderPinShowFlags / RegisterLabelCapture / RenderMakeLensFree /
+# RenderWriteLookContract (FlightSimRenderCommandlet.cpp). The first two
+# rows are WHY flags are pinned: registration resets ShowFlags.
+rp_check "OnRegister re-applies show flag settings" "Engine/Private/Components/SceneCaptureComponent.cpp" "// Make sure any loaded saved flag settings are reflected in our FEngineShowFlags"
+rp_check "UpdateShowFlags resets to the archetype" "Engine/Private/Components/SceneCaptureComponent.cpp" "ShowFlags = Archetype->ShowFlags;"
+rp_check "SetShowFlagSettings" "Engine/Classes/Components/SceneCaptureComponent.h" "ENGINE_API void SetShowFlagSettings(const TArray<FEngineShowFlagsSetting>& InShowFlagSettings);"
+rp_check "FEngineShowFlagsSetting.ShowFlagName" "Engine/Classes/Components/SceneCaptureComponent.h" "FString ShowFlagName;"
+rp_check "FEngineShowFlagsSetting.Enabled" "Engine/Classes/Components/SceneCaptureComponent.h" "bool Enabled = false;"
+rp_check "FEngineShowFlags::IterateAllFlags" "Engine/Public/ShowFlags.h" "template <class T> static void IterateAllFlags(T& Sink)"
+rp_check "IterateAllFlags custom sink" "Engine/Public/ShowFlags.h" "return Sink.OnCustomShowFlag(Index, Name);"
+rp_check "FEngineShowFlags::GetSingleFlag" "Engine/Public/ShowFlags.h" "ENGINE_API bool GetSingleFlag(uint32 Index) const;"
+rp_check "show flag LensDistortion" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_FIXED_IN_SHIPPING(1, LensDistortion,"
+rp_check "show flag Refraction" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_FIXED_IN_SHIPPING(1, Refraction,"
+rp_check "show flag LocalExposure" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_ALWAYS_ACCESSIBLE(LocalExposure,"
+rp_check "PostProcess MotionBlurTargetFPS" "Engine/Classes/Engine/Scene.h" "int32 MotionBlurTargetFPS;"
+rp_check "PostProcess MotionBlurMax" "Engine/Classes/Engine/Scene.h" "float MotionBlurMax;"
+rp_check "UVolumetricCloudComponent header" "Engine/Classes/Components/VolumetricCloudComponent.h" "class UVolumetricCloudComponent"
+rp_check "TObjectIterator" "CoreUObject/Public/UObject/UObjectIterator.h" "class TObjectIterator"
+
 
 # -- engine surface the beauty look assumes (FlightSimBeautyLook.cpp) --------
 # Look-dev lane, 2026-11-09: each symbol was read in the UE 5.7.4 headers on
@@ -324,6 +344,14 @@ beauty_check "premise: transmittance floor" "Engine/Classes/Components/SkyAtmosp
     "float TransmittanceMinLightElevationAngle;"
 beauty_check "premise: physical camera EV100" "Renderer/Private/PostProcess/PostProcessEyeAdaptation.cpp" \
     "FMath::Log2(FMath::Square(Settings.DepthOfFieldFstop) * Settings.CameraShutterSpeed * 100"
+# Integration fix, 2026-11-09: RenderWriteLookContract finds the rain
+# blendables (M_LensDrops, M_WindshieldRain) on the beauty capture by base
+# material and reads the windshield's Glass vector back.
+beauty_check "WeightedBlendable Weight/Object" "$BSCENE" "TObjectPtr<UObject> Object;"
+beauty_check "MaterialInterface GetBaseMaterial" "Engine/Public/Materials/MaterialInterface.h" \
+    "ENGINE_API UMaterial* GetBaseMaterial();"
+beauty_check "MID K2_GetVectorParameterValue" "Engine/Public/Materials/MaterialInstanceDynamic.h" \
+    "ENGINE_API FLinearColor K2_GetVectorParameterValue(FName ParameterName);"
 for f in MotionBlur DepthOfField Bloom LensFlares Tonemapper LocalExposure ScreenSpaceReflections; do
     showflag_check "$f"
 done

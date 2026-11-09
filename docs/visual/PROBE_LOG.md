@@ -1,3 +1,18 @@
+# Visual overhaul probe log
+
+One `## <lane>` section per lane of the 2026-11-09 visual-overhaul session
+(flightsim-83, swarm `swarm-1794241474984-rmywk3`): render-path, world,
+look-dev, aircraft, verifier-tooling, and the integration that merged them.
+Each lane keeps to its own heading, so merges stay trivial.
+
+That session ran on a Mac that cannot build or render (Xcode 27.2 is above
+UE 5.7.4's ceiling of 26.9, and Cesium for Unreal is not installed), so
+**nothing below has been rendered or measured**. Every look constant is
+UNCALIBRATED: a probe render on the render machine sets it. Each section
+lists those constants, the probe that sets each one, and the exact command
+to see it. The render machine reads this repo copy. The shared record is
+ruflo memory, namespace `visual`, key `visual-overhaul/<lane>/<topic>`.
+
 ## render-path
 
 Lane: render path (FlightSimRenderCommandlet.cpp beauty section,
@@ -145,12 +160,6 @@ python experiments\gate6_visual.py --quality beauty --aliasing-baseline runs\gat
 .\scripts\render_visual_sheet.ps1 -Step v0_pt -PathTrace -Spp 256 -Shots a
 .\scripts\render_visual_sheet.ps1 -Step v0_beauty -Clip
 ```
-
-# Visual overhaul probe log
-
-Each lane keeps its own `## <lane>` section (merges stay trivial). The render
-machine reads this file: every constant below was chosen without a frame and
-is set by the probe named beside it.
 
 ## world
 
@@ -332,16 +341,6 @@ not `baseColorTexture` / `baseColorFactor`: fix `CESIUM_BASE_COLOUR_*` in the
 material script and rebuild that one material
 (`FLIGHTSIM_REBUILD_MATERIALS=M_FlightSimTilesBeauty`).
 
-# Visual overhaul probe log
-
-One section per lane of the 2026-11-09 visual-overhaul session (swarm
-`swarm-1794241474984-rmywk3`). That session ran on a Mac that cannot build or
-render (Xcode 27.2 is above UE 5.7.4's ceiling of 26.9, and Cesium for Unreal
-is not installed), so **nothing below has been rendered**. Each section lists
-the constants a probe render on the render machine must set, the probe that
-sets each one, and the exact command to see it. Keep to your own `## <lane>`
-heading so merges stay trivial.
-
 ## look-dev
 
 Lane: light, exposure, post, camera feel. Files:
@@ -427,9 +426,10 @@ unchanged. Measure renders never get the flag.
    that never get these settings. This lane adds **no visual-only actor**,
    so there is no occluder the masks lack. Bloom can lighten pixels just
    outside the mask; that is recorded.
-9. **Reflections:** Lumen reflection, final-gather and scene-lighting
-   quality are 2, LumenSceneDetail is 2, LumenMaxTraceDistance is 2 km,
-   front-layer translucency reflections are on, and SSR quality is 100.
+9. **Reflections:** LumenSceneDetail is 2, front-layer translucency
+   reflections are on, and SSR quality is 100. (Integration: Lumen's
+   reflection, final-gather and scene-lighting quality and its trace
+   distance are the render-path lane's alone, see `## integration`.)
    Whether Lumen runs inside a scene capture on this build is still a
    probe question.
 
@@ -498,14 +498,6 @@ $env:FLIGHTSIM_RENDER_QUALITY = "beauty"
 #    then re-run the commandlet line from that run's render.log unchanged
 python -c "from core.scene.beauty_look import plan_beauty_look as p, write_beauty_look as w; w(p(8.0, fps=30, width_px=1920, grade='storm', lens='cinematic'), r'runs\<id>\beauty_look.json')"
 ```
-
-# Visual overhaul probe log
-
-Each lane keeps its own `## <lane>` section. Everything below was written
-on 2026-11-09 on a Mac that cannot compile or render UE 5.7.4 (Xcode above
-the engine's cap, no Cesium): nothing here has been rendered or measured.
-Every look constant is UNCALIBRATED: set by probe render on the render
-machine.
 
 ## aircraft
 
@@ -646,14 +638,6 @@ platform; the `.sh` twins take the same arguments):
    and compare mask edges behind the nozzles against the beauty frame
    (bound: `aircraft_look.heat_haze.max_offset_screen_fraction`).
 
-# Visual overhaul probe log
-
-Each lane keeps its own `## <lane>` section, so merges stay trivial. Every
-entry is either code that has not been rendered yet (session flightsim-83,
-2026-11-09, Mac, code only) or a number a probe render on the render
-machine has set. The shared record is ruflo memory, namespace `visual`, key
-`visual-overhaul/<lane>/<topic>`. The render machine reads this repo copy.
-
 ## verifier-tooling
 
 Session flightsim-83, 2026-11-09. Code only: nothing here has been
@@ -751,3 +735,35 @@ $env:FLIGHTSIM_RENDER_QUALITY = "beauty";  .\.venv\Scripts\python.exe -m uvicorn
 Record each run's offsets here, and in ruflo under
 `visual-overhaul/verifier-tooling/probe-<date>`, before changing any
 constant above.
+
+## integration
+
+Session flightsim-83, 2026-11-09, after the five lanes merged into
+`claude/vibrant-gauss-olema4`. Code only: nothing here has been rendered.
+
+**Read this first on the render machine.** UE 5.7's
+`USceneCaptureComponent::OnRegister` calls `UpdateShowFlags()`, which resets
+a capture's `ShowFlags` to the class default and re-applies only its
+`ShowFlagSettings`. Every flag the commandlet set before `RegisterComponent()`
+was being dropped. That explains the owner's fixture
+(`tests/fixtures/engine_bundle_min`, `anti_aliasing.labels` = "DEFECT: label
+capture anti-aliasing show flag is on"), and it means the beauty's TSR, the
+look-dev lens (DOF, motion blur, grain, fringe, local exposure) and the
+path tracer's show flag never reached the renderer in any earlier probe.
+On beauty and pathtrace, `RenderPinShowFlags` now writes them into
+`ShowFlagSettings` for the beauty, every label capture, the calibration
+capture and the linear and accumulation captures. Measure keeps its old
+registration: its bytes are unchanged and the label defect still stands
+there. Fixing measure is the owner's call, because it changes Gate 6's
+label bytes. Expect the first beauty frame after this build to look
+different from every earlier probe (TSR, DOF and motion blur are now on).
+
+| decision | where | check on the render machine |
+|---|---|---|
+| render.json gets `pixel_moving_effects`, `beauty_samples`, `beauty_only_actors` and `cloud_occlusion` on beauty and pathtrace (none on measure) | `RenderWriteLookContract`, `FFlightSimWorldBeauty::CloudOcclusionRecord` | `python -m flightsim.verify runs\<id>`: `look_record` PASS; `look_label_alignment` FAIL (beauty-not-label-aligned) until `look_label_check.py` measures motion blur, DOF and the cloud fraction. That FAIL is expected. |
+| Lumen quality, trace distance and surface cache: render-path only | `RenderBeautyLumen*`; look-dev no longer sets them | `render_settings.beauty_path.lumen_capture_overrides` is the record. `beauty_look.applied.reflections.lumen_quality_owner` points to it. |
+| Order of application: scene, world, exposure, look-dev, render-path, storm meter, per frame | comment block at `ApplyBeautyPostProcess(Capture)` | `render_settings.beauty_owners` (lens values differ by look) |
+| The world look leaves a `-sky=` plan's per-pixel transmittance alone | `FFlightSimWorldBeauty::ApplyAtmosphere` | `look_applied.world_beauty.atmosphere.sun_per_pixel_transmittance` |
+| Label captures turn every beauty-only flag off by name, and the flags survive registration | `ConfigureLabelCapture`, `RegisterLabelCapture` | `render_settings.label_show_flags` all false; `anti_aliasing.labels` = "none" |
+| The linear EXR and the accumulation capture are lens-free | `RenderMakeLensFree` | `render_settings.linear_capture.lens` = "lens_free"; `sensor.json` linear_source says lens-free |
+| Unity names unique | `tests/test_unity_names.py` | first clean-clone build |

@@ -445,11 +445,15 @@ namespace
 			TSharedPtr<FJsonObject> Reflections;
 			if (!BeautyLookObject(Plan, TEXT("reflections"), Reflections)) { return false; }
 			TSharedPtr<FJsonObject> Echo = MakeShared<FJsonObject>();
-			FLIGHTSIM_BEAUTY_FLOAT(Reflections, LumenReflectionQuality)
-			FLIGHTSIM_BEAUTY_FLOAT(Reflections, LumenFinalGatherQuality)
-			FLIGHTSIM_BEAUTY_FLOAT(Reflections, LumenSceneLightingQuality)
+			// Integration (2026-11-09): Lumen's quality and distance overrides
+			// (reflection / final gather / scene lighting quality, max trace and
+			// scene view distance, surface cache) are the render-path lane's,
+			// applied after this call and recorded in render_settings.
+			// beauty_path.lumen_capture_overrides. Setting them here too was a
+			// silent overwrite with a wrong echo; this look sets only the rest.
+			Echo->SetStringField(TEXT("lumen_quality_owner"),
+				TEXT("render-path lane (render_settings.beauty_path.lumen_capture_overrides)"));
 			FLIGHTSIM_BEAUTY_FLOAT(Reflections, LumenSceneDetail)
-			FLIGHTSIM_BEAUTY_FLOAT(Reflections, LumenMaxTraceDistance)
 			FLIGHTSIM_BEAUTY_FLOAT(Reflections, ScreenSpaceReflectionIntensity)
 			FLIGHTSIM_BEAUTY_FLOAT(Reflections, ScreenSpaceReflectionQuality)
 			FLIGHTSIM_BEAUTY_FLOAT(Reflections, ScreenSpaceReflectionMaxRoughness)

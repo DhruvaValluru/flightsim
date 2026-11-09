@@ -19,12 +19,15 @@
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/VolumetricCloudComponent.h"   // integration: beauty_only_actors (world clouds)
+#include "UObject/UObjectIterator.h"
 #include "EngineUtils.h"
 #include "Dom/JsonObject.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/Engine.h"
 #include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ColorManagement/ColorSpace.h"
@@ -1230,6 +1233,357 @@ double UFlightSimRenderCommandlet::EsfrMtf50(const TArray<float>& Luminance, int
 		Previous = Mtf;
 	}
 	return (Lsfs / 2) * RenderEsfrOversample / double(Lsfs);
+}
+
+namespace
+{
+	// -- Integration (visual overhaul, 2026-11-09): show flags that survive
+	// registration. UE 5.7 USceneCaptureComponent::OnRegister calls
+	// UpdateShowFlags() (SceneCaptureComponent.cpp), which RESETS ShowFlags to
+	// the archetype's (the class default: AntiAliasing on, TemporalAA and
+	// MotionBlur off) and re-applies only ShowFlagSettings. A flag set on
+	// ShowFlags before RegisterComponent() is therefore lost: measured on the
+	// owner's machine as render_settings.anti_aliasing.labels "DEFECT: label
+	// capture anti-aliasing show flag is on" (tests/fixtures/engine_bundle_min),
+	// and by the same mechanism the beauty capture's TSR, look-dev lens and
+	// path-tracing flags never reached the renderer. This writes every flag
+	// that differs from the archetype into ShowFlagSettings, so registration
+	// (and any later re-registration) rebuilds exactly ShowFlags as set.
+	struct FRenderShowFlagDiff
+	{
+		const FEngineShowFlags& Wanted;
+		const FEngineShowFlags& Reference;
+		TArray<FEngineShowFlagsSetting>& Out;
+
+		bool OnEngineShowFlag(uint32 Index, const FString& Name)
+		{
+			const bool bOn = Wanted.GetSingleFlag(Index);
+			if (bOn != Reference.GetSingleFlag(Index))
+			{
+				FEngineShowFlagsSetting Setting;
+				Setting.ShowFlagName = Name;
+				Setting.Enabled = bOn;
+				Out.Add(Setting);
+			}
+			return true;
+		}
+		bool OnCustomShowFlag(uint32 Index, const FString& Name) { return OnEngineShowFlag(Index, Name); }
+	};
+
+	// Call after the last ShowFlags change and before RegisterComponent().
+	// Returns how many flags differ from the archetype (recorded).
+	int32 RenderPinShowFlags(USceneCaptureComponent2D* Capture)
+	{
+		const USceneCaptureComponent* Archetype = Cast<USceneCaptureComponent>(Capture->GetArchetype());
+		const FEngineShowFlags Reference = Archetype != nullptr ? Archetype->ShowFlags : FEngineShowFlags(ESFIM_Game);
+		const FEngineShowFlags Wanted = Capture->ShowFlags;
+		TArray<FEngineShowFlagsSetting> Settings;
+		FRenderShowFlagDiff Diff{Wanted, Reference, Settings};
+		FEngineShowFlags::IterateAllFlags(Diff);
+		Capture->SetShowFlagSettings(Settings);   // UpdateShowFlags: archetype + Settings == Wanted
+		return Settings.Num();
+	}
+
+	// -- Integration: the linear (EXR) and accumulation captures are LENS-FREE.
+	// They copy the beauty's settings once at setup, before the look-dev lane
+	// focuses the beauty per frame, so frame_NNNN_linear.exr had no depth of
+	// field while the PNG did, and the linear capture kept the engine's motion
+	// blur. The EXR is the sensor post-pass's input (core/capture/profile.py
+	// read_linear_frame prefers it), and that pass applies its OWN optics: the
+	// PSF from the camera's f-number and the motion blur from the shutter and
+	// the flow. An engine lens under it would count twice. So both captures
+	// keep the beauty's scene, light, exposure and anti-aliasing, and drop
+	// every lens and post effect: depth of field, motion blur, bloom, flare,
+	// grain, vignette, colour fringe, local exposure. render.json
+	// render_settings.linear_capture / accumulate_capture record it.
+	void RenderMakeLensFree(USceneCaptureComponent2D* Sibling)
+	{
+		FEngineShowFlags& Flags = Sibling->ShowFlags;
+		Flags.SetDepthOfField(false);
+		Flags.SetMotionBlur(false);
+		Flags.SetBloom(false);
+		Flags.SetLensFlares(false);
+		Flags.SetGrain(false);
+		Flags.SetVignette(false);
+		Flags.SetSceneColorFringe(false);
+		Flags.SetLocalExposure(false);
+		FPostProcessSettings& Post = Sibling->PostProcessSettings;
+		Post.bOverride_DepthOfFieldFocalDistance = true;
+		Post.DepthOfFieldFocalDistance = 0.0f;   // 0 disables depth of field
+		Post.bOverride_MotionBlurAmount = true;
+		Post.MotionBlurAmount = 0.0f;
+	}
+
+	TSharedPtr<FJsonObject> RenderLensFreeRecord(const USceneCaptureComponent2D* Sibling)
+	{
+		const FEngineShowFlags& Flags = Sibling->ShowFlags;
+		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+		const bool bLensFree = Flags.DepthOfField == 0 && Flags.MotionBlur == 0 && Flags.Bloom == 0 &&
+			Flags.LensFlares == 0 && Flags.Grain == 0 && Flags.Vignette == 0 && Flags.SceneColorFringe == 0 &&
+			Flags.LocalExposure == 0;
+		Out->SetStringField(TEXT("lens"), bLensFree ? TEXT("lens_free") : TEXT("DEFECT: a lens or post flag is on"));
+		Out->SetBoolField(TEXT("depth_of_field"), Flags.DepthOfField != 0);
+		Out->SetBoolField(TEXT("motion_blur"), Flags.MotionBlur != 0);
+		Out->SetBoolField(TEXT("bloom"), Flags.Bloom != 0);
+		Out->SetBoolField(TEXT("anti_aliasing"), Flags.AntiAliasing != 0);
+		Out->SetBoolField(TEXT("temporal_aa"), Flags.TemporalAA != 0);
+		Out->SetNumberField(TEXT("auto_exposure_bias"), Sibling->PostProcessSettings.AutoExposureBias);
+		Out->SetStringField(TEXT("basis"),
+			TEXT("the beauty's scene, light and exposure without its lens: the sensor post-pass ")
+			TEXT("(core/capture/profile.py) applies its own PSF and motion blur to this linear image"));
+		return Out;
+	}
+
+	// -- Integration (visual overhaul, 2026-11-09): the beauty-look contract --
+	// The verifier lane (core/capture/beauty_look.py LOOK_KEYS, graded by
+	// look_record / look_label_alignment in core/capture/verify.py; schema in
+	// docs/schemas/render_json_beauty_look.md) reads five root keys. Four are
+	// composed here from what the other lanes actually set, READ BACK off the
+	// beauty capture after every lane has run; "beauty_look" is the look-dev
+	// lane's own record (FFlightSimBeautyLook::Record). Written on beauty and
+	// pathtrace only, so a measure render.json gains no key.
+	// tests/test_render_json_contract.py pins every key and effect name here
+	// against the verifier's tables.
+	struct FRenderLookContractInputs
+	{
+		const USceneCaptureComponent2D* Capture = nullptr;
+		int32 Width = 0;
+		bool bPathTrace = false;
+		int32 CapturesPerFrame = 1;
+		int32 PathTraceSpp = 0;
+		double FramesPerSecond = 0.0;
+		float TsrHistorySamples = 0.0f;
+		float TsrHistoryScreenPercentage = 0.0f;
+		int32 Height = 0;
+		const TSharedPtr<FJsonObject>* AircraftLook = nullptr;   // render.json aircraft_look
+		const TArray<AActor*>* SceneBeautyOnly = nullptr;         // VisualScene.BeautyOnlyActors
+		const TArray<AActor*>* WeatherBeautyOnly = nullptr;       // Weather.BeautyOnlyActors
+		const TArray<AActor*>* AircraftBeautyOnly = nullptr;      // AircraftFX.BeautyOnlyActors
+		const FFlightSimWorldBeauty* World = nullptr;
+		UWorld* EngineWorld = nullptr;
+	};
+
+	TSharedPtr<FJsonObject> RenderPixelEffect(const TCHAR* Name, bool bOn, double BoundPx,
+	                                          const TCHAR* Basis, const TCHAR* Source)
+	{
+		// The verifier's entry: name, on, transform (null: none of these has a
+		// recorded label-to-beauty mapping), max_displacement_px and its basis.
+		// Only "measured" counts as evidence; a bound by construction is stated
+		// as such and graded beauty-not-label-aligned until measured
+		// (experiments/look_label_check.py).
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("name"), Name);
+		Entry->SetBoolField(TEXT("on"), bOn);
+		Entry->SetField(TEXT("transform"), MakeShared<FJsonValueNull>());
+		if (bOn && BoundPx >= 0.0)
+		{
+			Entry->SetNumberField(TEXT("max_displacement_px"), BoundPx);
+		}
+		else
+		{
+			Entry->SetField(TEXT("max_displacement_px"), MakeShared<FJsonValueNull>());
+		}
+		Entry->SetStringField(TEXT("displacement_basis"), Basis);
+		Entry->SetStringField(TEXT("source"), Source);
+		return Entry;
+	}
+
+	void RenderWriteLookContract(FJsonObject& Root, const FRenderLookContractInputs& In)
+	{
+		const USceneCaptureComponent2D* Capture = In.Capture;
+		const FPostProcessSettings& Post = Capture->PostProcessSettings;
+		const FEngineShowFlags& Flags = Capture->ShowFlags;
+
+		// -- pixel_moving_effects: every effect the lanes can turn on, on or off
+		TArray<TSharedPtr<FJsonValue>> Effects;
+		const bool bMotionBlur = Flags.MotionBlur != 0 && Post.MotionBlurAmount > 0.0f && Post.MotionBlurMax > 0.0f;
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("motion_blur"), bMotionBlur,
+			Post.MotionBlurMax / 100.0 * In.Width,
+			TEXT("bound: MotionBlurMax percent of the width, by construction; not measured"),
+			TEXT("beauty capture: MotionBlur show flag and MotionBlurAmount/MotionBlurMax (look-dev lens)"))));
+		const bool bDepthOfField = Flags.DepthOfField != 0 && Post.DepthOfFieldFocalDistance > 0.0f;
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("depth_of_field"), bDepthOfField, -1.0,
+			TEXT("not measured: zero at the focal plane (the aircraft, focused per frame), growing off it; the class ")
+			TEXT("and depth labels of defocused terrain spread"),
+			TEXT("beauty capture: DepthOfField show flag and DepthOfFieldFocalDistance > 0 (look-dev per-frame focus)"))));
+		bool bHeatHaze = false;
+		double HazeFraction = -1.0;
+		if (In.AircraftLook != nullptr && In.AircraftLook->IsValid())
+		{
+			const TSharedPtr<FJsonObject>* Haze = nullptr;
+			if ((*In.AircraftLook)->TryGetObjectField(TEXT("heat_haze"), Haze) && Haze != nullptr && Haze->IsValid())
+			{
+				(*Haze)->TryGetBoolField(TEXT("drawn"), bHeatHaze);
+				(*Haze)->TryGetNumberField(TEXT("max_offset_screen_fraction"), HazeFraction);
+			}
+		}
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("heat_haze"), bHeatHaze,
+			HazeFraction >= 0.0 ? HazeFraction * In.Width : -1.0,
+			TEXT("bound: heat_haze.hlsl offsets by at most Strength / 100 of the screen; not measured"),
+			TEXT("aircraft_look.heat_haze (aircraft lane, -heat-haze=on only)"))));
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("path_tracer_filter"), In.bPathTrace, -1.0,
+			TEXT("not measured: the path tracer's pixel filter (r.PathTracing.FilterWidth) and the Nanite fallback ")
+			TEXT("mesh it traces (render_settings.beauty_path.path_tracer.labels_note)"),
+			TEXT("-quality=pathtrace (render-path lane)"))));
+		const bool bFringe = Flags.SceneColorFringe != 0 && Post.SceneFringeIntensity > 0.0f;
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("chromatic_aberration"), bFringe, -1.0,
+			TEXT("not measured"),
+			TEXT("beauty capture: SceneColorFringe show flag and SceneFringeIntensity"))));
+		// The rain blendables on the beauty capture, read back off its
+		// WeightedBlendables by base material: M_LensDrops (the rain look's
+		// lens drops, ApplyLensDropsToBeauty) and M_WindshieldRain (the storm
+		// weather's glass, ApplyWindshield). Both sample the scene at a
+		// shifted UV, so both move pixels the labels do not see.
+		UMaterialInstanceDynamic* LensDrops = nullptr;
+		UMaterialInstanceDynamic* Windshield = nullptr;
+		for (const FWeightedBlendable& Blendable : Post.WeightedBlendables.Array)
+		{
+			UMaterialInstanceDynamic* Instance = Cast<UMaterialInstanceDynamic>(Blendable.Object.Get());
+			UMaterial* Base = Instance != nullptr ? Instance->GetBaseMaterial() : nullptr;
+			if (Blendable.Weight <= 0.0f || Base == nullptr)
+			{
+				continue;
+			}
+			if (Base->GetFName() == FName(TEXT("M_LensDrops")))
+			{
+				LensDrops = Instance;
+			}
+			else if (Base->GetFName() == FName(TEXT("M_WindshieldRain")))
+			{
+				Windshield = Instance;
+			}
+		}
+		// M_LensDrops (scripts/ue_create_materials.py create_lens_drops) samples
+		// uv - 2 (within - 0.5) / 18 * 0.6: at most 0.6 / 18 of the viewport
+		// on each axis.
+		const double LensDropsBoundPx = 0.6 / 18.0 * FMath::Sqrt(
+			double(In.Width) * In.Width + double(In.Height) * In.Height);
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("lens_drops"), LensDrops != nullptr,
+			LensDropsBoundPx,
+			TEXT("bound: M_LensDrops samples the scene mirrored within an 1/18-screen cell, at most 0.6/18 ")
+			TEXT("of the viewport per axis, by construction; not measured"),
+			TEXT("beauty capture: M_LensDrops in WeightedBlendables (rain look, a camera with no weather rain)"))));
+		// M_WindshieldRain (assets/shaders/weather/windshield.hlsl): the offset
+		// is normal * radius * 2 with |normal| <= 0.5 and radius <= 0.4 cells
+		// of the height, so at most 0.4 / cells of the height in pixels.
+		double WindshieldBoundPx = -1.0;
+		if (Windshield != nullptr)
+		{
+			const double Cells = FMath::Max(1.0, double(Windshield->K2_GetVectorParameterValue(TEXT("Glass")).A));
+			WindshieldBoundPx = 0.4 / Cells * In.Height;
+		}
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("windshield_rain"), Windshield != nullptr,
+			WindshieldBoundPx,
+			TEXT("bound: windshield.hlsl refracts by at most 0.4 / cells of the height (Glass.w), by ")
+			TEXT("construction; not measured"),
+			TEXT("beauty capture: M_WindshieldRain in WeightedBlendables (storm weather, cockpit/shoulder camera)"))));
+		// No lane applies a lens distortion (no LUT, no lens component): stated off.
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("lens_distortion"), false, -1.0,
+			TEXT("not applied by any lane"), TEXT("none (look-dev pixel_effects.lens_distortion: not implemented)"))));
+		Root.SetArrayField(TEXT("pixel_moving_effects"), Effects);
+
+		// -- beauty_samples ------------------------------------------------------
+		TSharedPtr<FJsonObject> Samples = MakeShared<FJsonObject>();
+		// Still samples are jittered captures of ONE pose (spatial); no beauty
+		// capture advances time, so temporal is 1 (-accumulate=K is the separate
+		// S4 record graded by engine_accumulation).
+		Samples->SetNumberField(TEXT("spatial"), In.bPathTrace ? 1 : FMath::Max(1, In.CapturesPerFrame));
+		Samples->SetNumberField(TEXT("temporal"), 1);
+		Samples->SetNumberField(TEXT("still_samples"), In.bPathTrace ? 1 : FMath::Max(1, In.CapturesPerFrame));
+		if (In.bPathTrace)
+		{
+			Samples->SetNumberField(TEXT("path_tracer_spp"), FMath::Max(1, In.PathTraceSpp));
+		}
+		else
+		{
+			Samples->SetNumberField(TEXT("tsr_history_samples"), In.TsrHistorySamples);
+			Samples->SetNumberField(TEXT("tsr_history_screen_percentage"), In.TsrHistoryScreenPercentage);
+			Samples->SetBoolField(TEXT("tsr_temporal_aa_show_flag"), Flags.TemporalAA != 0);
+		}
+		double ShutterS = 0.0;
+		if (bMotionBlur)
+		{
+			const double Fps = Post.MotionBlurTargetFPS > 0 ? double(Post.MotionBlurTargetFPS) : In.FramesPerSecond;
+			ShutterS = Fps > 0.0 ? Post.MotionBlurAmount / Fps : 0.0;
+		}
+		Samples->SetNumberField(TEXT("shutter_s"), ShutterS);
+		Samples->SetStringField(TEXT("shutter_basis"), bMotionBlur
+			? TEXT("engine motion blur: MotionBlurAmount (fraction of the frame open) / MotionBlurTargetFPS (else the clip rate)")
+			: TEXT("no engine motion blur on the beauty capture"));
+		Root.SetObjectField(TEXT("beauty_samples"), Samples);
+
+		// -- beauty_only_actors ---------------------------------------------------
+		TArray<TSharedPtr<FJsonValue>> Actors;
+		TSet<const AActor*> Seen;
+		auto AddActor = [&](const AActor* Actor, const TCHAR* Source, const TCHAR* HiddenBy)
+		{
+			if (Actor == nullptr || Seen.Contains(Actor))
+			{
+				return;
+			}
+			Seen.Add(Actor);
+			TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+			Row->SetStringField(TEXT("name"), Actor->GetName());
+			Row->SetStringField(TEXT("source"), Source);
+			Row->SetStringField(TEXT("hidden_by"), HiddenBy);
+			Actors.Add(MakeShared<FJsonValueObject>(Row));
+		};
+		const TCHAR* const ByList = TEXT("HiddenActors on every label capture (ConfigureLabelCapture)");
+		if (In.AircraftBeautyOnly != nullptr)
+		{
+			for (const AActor* Actor : *In.AircraftBeautyOnly) { AddActor(Actor, TEXT("aircraft_fx"), ByList); }
+		}
+		if (In.WeatherBeautyOnly != nullptr)
+		{
+			for (const AActor* Actor : *In.WeatherBeautyOnly) { AddActor(Actor, TEXT("weather"), ByList); }
+		}
+		if (In.SceneBeautyOnly != nullptr)
+		{
+			for (const AActor* Actor : *In.SceneBeautyOnly)
+			{
+				const bool bCloud = Actor != nullptr && Actor->FindComponentByClass<UVolumetricCloudComponent>() != nullptr;
+				AddActor(Actor, bCloud ? TEXT("world") : TEXT("visual_scene"), ByList);
+			}
+		}
+		if (In.EngineWorld != nullptr)
+		{
+			// The scene's own volumetric clouds are not in the list: the label
+			// captures draw no cloud at all (Cloud show flag off).
+			for (TObjectIterator<UVolumetricCloudComponent> It; It; ++It)
+			{
+				if (*It != nullptr && It->GetWorld() == In.EngineWorld)
+				{
+					AddActor(It->GetOwner(), TEXT("world"), TEXT("Cloud show flag off on every label capture"));
+				}
+			}
+		}
+		Root.SetArrayField(TEXT("beauty_only_actors"), Actors);
+
+		// -- cloud_occlusion: the world lane's decision ---------------------------
+		TSharedPtr<FJsonObject> Occlusion;
+		if (In.World != nullptr && In.World->IsBuilt())
+		{
+			Occlusion = In.World->CloudOcclusionRecord();
+		}
+		else
+		{
+			Occlusion = MakeShared<FJsonObject>();
+			if (Actors.Num() == 0)
+			{
+				Occlusion->SetStringField(TEXT("policy"), TEXT("none_in_frame"));
+				Occlusion->SetStringField(TEXT("basis"), TEXT("no beauty-only actor and no cloud exists in the world"));
+			}
+			else
+			{
+				Occlusion->SetStringField(TEXT("policy"), TEXT("labels_unoccluded"));
+				Occlusion->SetField(TEXT("subject_occluded_fraction"), MakeShared<FJsonValueNull>());
+				Occlusion->SetStringField(TEXT("basis"),
+					TEXT("not modelled: the world beauty look was not built, so no lane estimated what the ")
+					TEXT("beauty-only actors cover"));
+			}
+		}
+		Root.SetObjectField(TEXT("cloud_occlusion"), Occlusion);
+	}
 }
 
 int32 UFlightSimRenderCommandlet::Main(const FString& Params)
@@ -2762,6 +3116,44 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			IConsoleManager::Get().FindConsoleVariable(Name);
 		return Variable != nullptr ? Variable->GetInt() : -1;
 	};
+	// -- Integration (visual overhaul, 2026-11-09): ONE owner per setting -----
+	// Five lanes touch the beauty capture and the scene. Who owns what, and
+	// the order it is applied in (each later step may only touch what it
+	// owns; render.json render_settings.beauty_owners records the values
+	// read back at the end, since several differ by look):
+	//  1. Scene build (FFlightSimVisualScene::Build, before this point): sun
+	//     direction and lux (-sun-lux= / the card's scene.sun_lux, or the
+	//     -sky= plan's), X-Plane colours, the lighting block's scales and
+	//     temperature; SkyAtmosphere, height fog and clouds from the card;
+	//     with -sky=, FFlightSimSky owns the sun lux, its per-pixel
+	//     transmittance and the fog's inscattering.
+	//  2. World lane (FFlightSimWorldBeauty::Build, beauty only, earlier in
+	//     Main): SkyAtmosphere Mie / aerial perspective / ground albedo, the
+	//     fog's density share and volumetric fog, the sun's shadow-on-
+	//     atmosphere/cloud switches (never its lux or colour; never the
+	//     per-pixel transmittance a -sky= plan set), cloud materials, rain
+	//     readability, the SKY LIGHT's lightning pulse per frame. It never
+	//     touches the exposure: lightning is scene light the fixed exposure
+	//     sees, as a real camera would.
+	//  3. Exposure (above): the card's exposure triple, else look.ev100,
+	//     else -exposure-bias; with -sky=, the plan's physical camera.
+	//  4. Look-dev (ApplyBeautyPostProcess -> FFlightSimBeautyLook::Apply):
+	//     Lumen GI/reflection METHOD (same values as the -sky= plan), the
+	//     beauty EV100 ONLY on a plain manual exposure (a card triple or a
+	//     -sky= plan wins, recorded "applied: no"), sun TEMPERATURE only on an
+	//     uncoloured sun (never its lux), tonemap, grade, lens post (bloom,
+	//     flare, vignette, grain, fringe: the look's values replace the -sky=
+	//     plan's lens character on beauty), local exposure, DOF and motion
+	//     blur, LumenSceneDetail and SSR. NOT Lumen quality/distances.
+	//  5. Render-path (the block below): scalability, renderer cvars (AA,
+	//     VSM, SkyAtmosphere LUT quality, volumetric cloud tracing), TSR show
+	//     flags, and ALL Lumen per-view quality / distance / surface-cache
+	//     overrides; or the path tracer.
+	//  6. Storm meter (after warm-up): opens AutoExposureBias by a measured
+	//     number of stops on top of steps 3-4 (look_applied.storm_exposure),
+	//     copied to the linear and accumulation captures; constant after.
+	//  7. Per frame: the look-dev focus distance (UpdatePerFrame), the
+	//     world's sky-light pulse and cloud drift, the aircraft FX state.
 	if (bVisual && bBeauty)
 	{
 		FFlightSimVisualScene::ApplyBeautyPostProcess(Capture);
@@ -2991,6 +3383,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (bHideAircraft)
 	{
 		Capture->HiddenActors.Add(Scenario.Aircraft);
+	}
+	// Integration: on beauty and pathtrace every show flag set above (the
+	// -sky= plan's, -NoShadows, the look-dev lens, TSR, the path tracer)
+	// would be reset to the class default by registration
+	// (RenderPinShowFlags says why); pinned so it reaches the renderer.
+	// Measure keeps the registration Gate 6 passed on.
+	if (bBeauty)
+	{
+		const int32 PinnedFlags = RenderPinShowFlags(Capture);
+		if (BeautyPath.IsValid())
+		{
+			BeautyPath->SetNumberField(TEXT("show_flags_pinned"), PinnedFlags);
+		}
 	}
 	Capture->RegisterComponent();
 	// W5: the rain streaks, on the BEAUTY capture only (the label captures
@@ -3497,6 +3902,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Label->ShowFlags.SetDepthOfField(false);
 			Label->ShowFlags.SetLensFlares(false);
 			Label->ShowFlags.SetTranslucency(false);
+			// Integration (visual overhaul): every beauty-only lens and post
+			// flag the look-dev, aircraft and render-path lanes turn on in the
+			// beauty is off here too, by name. Label captures are fresh
+			// components (nothing is copied from the beauty), so these are the
+			// class defaults made explicit: grain, vignette, local exposure and
+			// colour fringe (tonemapper-stage), lens distortion, refraction (the
+			// heat haze), and the path tracer.
+			Label->ShowFlags.SetGrain(false);
+			Label->ShowFlags.SetVignette(false);
+			Label->ShowFlags.SetLocalExposure(false);
+			Label->ShowFlags.SetSceneColorFringe(false);
+			Label->ShowFlags.SetLensDistortion(false);
+			Label->ShowFlags.SetRefraction(false);
+			Label->ShowFlags.SetPathTracing(false);
 			// No exposure of any kind on a label capture. The ID pass replaces
 			// the tonemapper, but eye adaptation, the physical-camera EV100
 			// and pre-exposure still run in the chain; a scale on the stencil
@@ -3516,6 +3935,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			// byte-identical with the world look on and off.
 			Label->HiddenActors.Append(VisualScene.BeautyOnlyActors);
 		};
+		// Integration: registration resets ShowFlags to the class default
+		// (RenderPinShowFlags), which is why the owner's fixture records the
+		// label AA flag ON. On beauty and pathtrace the label flags are pinned
+		// so they survive it; measure keeps the registration it passed Gate 6
+		// with (its label bytes unchanged; the recorded DEFECT stands there and
+		// is the owner's call).
+		auto RegisterLabelCapture = [&](USceneCaptureComponent2D* Label)
+		{
+			if (bBeauty)
+			{
+				RenderPinShowFlags(Label);
+			}
+			Label->RegisterComponent();
+		};
 		auto MakeDepthCapture = [&](const TCHAR* Name) -> USceneCaptureComponent2D*
 		{
 			USceneCaptureComponent2D* Depth =
@@ -3523,7 +3956,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Depth->TextureTarget = LabelDepthTarget;
 			Depth->CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
 			ConfigureLabelCapture(Depth);
-			Depth->RegisterComponent();
+			RegisterLabelCapture(Depth);
 			return Depth;
 		};
 		LabelDepthAll = MakeDepthCapture(TEXT("LabelDepthAll"));
@@ -3604,7 +4037,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			LabelLandcover->PostProcessSettings.WeightedBlendables.Array.Add(
 				FWeightedBlendable(1.0f, LandcoverInstance));
 			LabelLandcover->PostProcessBlendWeight = 1.0f;
-			LabelLandcover->RegisterComponent();
+			RegisterLabelCapture(LabelLandcover);
 		}
 		for (FRenderLabelledObject& Entry : Labelled)
 		{
@@ -3679,7 +4112,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				Pass->PostProcessSettings.WeightedBlendables.Array.Add(
 					FWeightedBlendable(1.0f, Material));
 				Pass->PostProcessBlendWeight = 1.0f;
-				Pass->RegisterComponent();
+				RegisterLabelCapture(Pass);
 				return Pass;
 			};
 			if (bPassNormal)
@@ -3700,7 +4133,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				PassNormal->TextureTarget = PassNormalTarget;
 				PassNormal->CaptureSource = ESceneCaptureSource::SCS_Normal;
 				ConfigureLabelCapture(PassNormal);
-				PassNormal->RegisterComponent();
+				RegisterLabelCapture(PassNormal);
 			}
 			if (bPassVelocity)
 			{
@@ -3745,7 +4178,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				PassAlbedo->TextureTarget = PassAlbedoTarget;
 				PassAlbedo->CaptureSource = ESceneCaptureSource::SCS_BaseColor;
 				ConfigureLabelCapture(PassAlbedo);
-				PassAlbedo->RegisterComponent();
+				RegisterLabelCapture(PassAlbedo);
 			}
 			UE_LOG(LogFlightSimRender, Display,
 			       TEXT("passes: normal %s, velocity %s, albedo %s -- each an AA-free capture ")
@@ -3778,7 +4211,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Normal->TextureTarget = Target;
 			Normal->CaptureSource = ESceneCaptureSource::SCS_Normal;
 			ConfigureLabelCapture(Normal);
-			Normal->RegisterComponent();
+			RegisterLabelCapture(Normal);
 			return Normal;
 		};
 		auto MakeBaseColorCapture = [&](const TCHAR* Name, UTextureRenderTarget2D* Target) -> USceneCaptureComponent2D*
@@ -3787,7 +4220,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			BaseColor->TextureTarget = Target;
 			BaseColor->CaptureSource = ESceneCaptureSource::SCS_BaseColor;
 			ConfigureLabelCapture(BaseColor);
-			BaseColor->RegisterComponent();
+			RegisterLabelCapture(BaseColor);
 			return BaseColor;
 		};
 		auto MakeMaterialCapture = [&](const TCHAR* Name, UTextureRenderTarget2D* Target,
@@ -3800,7 +4233,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Pass->ShowFlags.SetPostProcessing(true);
 			Pass->PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0f, Material));
 			Pass->PostProcessBlendWeight = 1.0f;
-			Pass->RegisterComponent();
+			RegisterLabelCapture(Pass);
 			return Pass;
 		};
 		if (bPassNormal)
@@ -3891,6 +4324,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		LinearCapture->PostProcessSettings = Capture->PostProcessSettings;
 		LinearCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
 		LinearCapture->HiddenActors = Capture->HiddenActors;
+		if (bBeauty)
+		{
+			// Integration: lens-free (RenderMakeLensFree says why), pinned so
+			// the copied flags survive registration (RenderPinShowFlags).
+			RenderMakeLensFree(LinearCapture);
+			RenderPinShowFlags(LinearCapture);
+		}
 		LinearCapture->RegisterComponent();
 		UE_LOG(LogFlightSimRender, Display,
 		       TEXT("linear: FinalColorHDR written as frame_NNNN_linear.exr beside each frame"));
@@ -3935,6 +4375,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		AccumulateCapture->PostProcessSettings = Capture->PostProcessSettings;
 		AccumulateCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
 		AccumulateCapture->HiddenActors = Capture->HiddenActors;
+		if (bBeauty)
+		{
+			// Integration: lens-free like the linear capture, its AA-off flags
+			// kept through registration.
+			RenderMakeLensFree(AccumulateCapture);
+			RenderPinShowFlags(AccumulateCapture);
+		}
 		AccumulateCapture->RegisterComponent();
 		// What moves within a window: every aircraft, and a preset camera
 		// (which the world tick moves every step). A consume-poses camera
@@ -4546,8 +4993,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			SubFrames->SetStringField(TEXT("linear_capture"),
 				TEXT("-linear's capture copies the beauty show flags (TemporalAA included, so it runs ")
-				TEXT("TSR on its own history) but is captured ONCE a frame, not captures_per_frame ")
-				TEXT("times: frame_NNNN_linear.exr is not the accumulated PNG's HDR twin"));
+				TEXT("TSR on its own history) but is LENS-FREE (no depth of field, motion blur, bloom, ")
+				TEXT("flare, grain, vignette, fringe or local exposure: render_settings.linear_capture) and ")
+				TEXT("captured ONCE a frame, not captures_per_frame times: frame_NNNN_linear.exr is the ")
+				TEXT("scene's linear light for the sensor post-pass, not the accumulated PNG's HDR twin"));
 		}
 		BeautyPath->SetObjectField(TEXT("accumulation"), SubFrames);
 	}
@@ -4851,6 +5300,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                       Scenario.ReadProperty(TEXT("attitude/theta-rad")) * RenderRadiansToDegrees);
 		Record->SetNumberField(TEXT("aileron_cmd"), Scenario.Movement->Commands.Aileron);
 		Record->SetNumberField(TEXT("camera_roll_deg"), Director->GetCameraRollDegrees());
+		if (bBeauty)
+		{
+			// The beauty's horizontal field of view at THIS frame's capture
+			// (the value every label capture copies); the verifier compares it
+			// with the pose solver's (look_label_alignment). Beauty and
+			// pathtrace only, so a measure frame record gains no key.
+			Record->SetNumberField(TEXT("beauty_fov_deg"), Capture->FOVAngle);
+		}
 		// S4: this frame's metric depth (+inf for sky), handed from the label
 		// bundle to the linear passes, which write 0, 0, 0 where it is sky.
 		TArray<float> LabelDepthThisFrame;
@@ -6146,6 +6603,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		CalibrationCapture->ShowFlags.SetDynamicShadows(false);
 		CalibrationCapture->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
 		CalibrationCapture->ShowOnlyActors.Add(Rig);
+		if (bBeauty)
+		{
+			// Integration: the beauty's look-dev lens (grain, colour fringe)
+			// is copied above; neither belongs on the slanted edge. Pinned so
+			// the flags survive registration (RenderPinShowFlags).
+			CalibrationCapture->ShowFlags.SetGrain(false);
+			CalibrationCapture->ShowFlags.SetSceneColorFringe(false);
+			CalibrationCapture->ShowFlags.SetLocalExposure(false);
+			RenderPinShowFlags(CalibrationCapture);
+		}
 		CalibrationCapture->RegisterComponent();
 
 		// The quads: /Engine/BasicShapes/Plane (100 cm a side, normal +Z),
@@ -6748,6 +7215,33 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				LabelDepthAll->ShowFlags.AntiAliasing != 0
 					? TEXT("DEFECT: label capture anti-aliasing show flag is on")
 					: TEXT("none"));
+			// Integration: every beauty-only flag on the label capture, read
+			// back after registration (core/capture/verify.py
+			// look_label_alignment fails a beauty render on any that is on).
+			// Beauty and pathtrace only, so a measure render.json is unchanged.
+			if (bBeauty)
+			{
+				const FEngineShowFlags& L = LabelDepthAll->ShowFlags;
+				TSharedPtr<FJsonObject> LabelFlags = MakeShared<FJsonObject>();
+				LabelFlags->SetBoolField(TEXT("anti_aliasing"), L.AntiAliasing != 0);
+				LabelFlags->SetBoolField(TEXT("temporal_aa"), L.TemporalAA != 0);
+				LabelFlags->SetBoolField(TEXT("motion_blur"), L.MotionBlur != 0);
+				LabelFlags->SetBoolField(TEXT("depth_of_field"), L.DepthOfField != 0);
+				LabelFlags->SetBoolField(TEXT("bloom"), L.Bloom != 0);
+				LabelFlags->SetBoolField(TEXT("lens_flares"), L.LensFlares != 0);
+				LabelFlags->SetBoolField(TEXT("grain"), L.Grain != 0);
+				LabelFlags->SetBoolField(TEXT("vignette"), L.Vignette != 0);
+				LabelFlags->SetBoolField(TEXT("local_exposure"), L.LocalExposure != 0);
+				LabelFlags->SetBoolField(TEXT("scene_color_fringe"), L.SceneColorFringe != 0);
+				LabelFlags->SetBoolField(TEXT("lens_distortion"), L.LensDistortion != 0);
+				LabelFlags->SetBoolField(TEXT("refraction"), L.Refraction != 0);
+				LabelFlags->SetBoolField(TEXT("path_tracing"), L.PathTracing != 0);
+				LabelFlags->SetBoolField(TEXT("eye_adaptation"), L.EyeAdaptation != 0);
+				LabelFlags->SetBoolField(TEXT("translucency"), L.Translucency != 0);
+				LabelFlags->SetBoolField(TEXT("cloud"), L.Cloud != 0);
+				LabelFlags->SetBoolField(TEXT("fog"), L.Fog != 0);
+				RenderSettings->SetObjectField(TEXT("label_show_flags"), LabelFlags);
+			}
 		}
 		if (AccumulateCapture != nullptr)
 		{
@@ -6779,6 +7273,53 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			BeautyPath->SetBoolField(TEXT("temporal_aa_show_flag"), Capture->ShowFlags.TemporalAA != 0);
 			BeautyPath->SetBoolField(TEXT("path_tracing_show_flag"), Capture->ShowFlags.PathTracing != 0);
 			RenderSettings->SetObjectField(TEXT("beauty_path"), BeautyPath);
+			// Integration: who owned each contested setting on this render and
+			// what the capture holds at the end (the order is the comment block
+			// at ApplyBeautyPostProcess). The lens values differ by look.
+			const FPostProcessSettings& Final = Capture->PostProcessSettings;
+			const bool bLookApplied = FFlightSimBeautyLook::Record().IsValid();
+			TSharedPtr<FJsonObject> Owners = MakeShared<FJsonObject>();
+			Owners->SetStringField(TEXT("order"),
+				TEXT("scene build (sun lux, sky, fog, clouds), world lane (atmosphere Mie, fog share, cloud ")
+				TEXT("materials, sky-light lightning pulse), exposure (card triple / look.ev100 / -exposure-bias / ")
+				TEXT("-sky= camera), look-dev (EV100 on a plain manual exposure, sun temperature, tonemap, grade, ")
+				TEXT("lens post, DOF, motion blur, SSR), render-path (scalability, cvars, TSR, Lumen quality), storm ")
+				TEXT("meter (bias), per frame (focus, sky pulse)"));
+			Owners->SetStringField(TEXT("lumen_quality"),
+				bPathTrace ? TEXT("render-path: the path tracer replaces Lumen")
+				           : TEXT("render-path (beauty_path.lumen_capture_overrides)"));
+			Owners->SetStringField(TEXT("exposure"), ExposureMode);
+			Owners->SetNumberField(TEXT("auto_exposure_bias"), Final.AutoExposureBias);
+			Owners->SetBoolField(TEXT("physical_camera_exposure"),
+				Final.bOverride_AutoExposureApplyPhysicalCameraExposure && Final.AutoExposureApplyPhysicalCameraExposure);
+			Owners->SetStringField(TEXT("sun_lux"), bPhysicalSky ? TEXT("-sky= plan") : TEXT("scene build (-sun-lux= / scene.sun_lux)"));
+			Owners->SetStringField(TEXT("sun_colour"), bLookApplied
+				? TEXT("look-dev temperature only on an uncoloured sun (beauty_look.applied.sun)")
+				: TEXT("scene build"));
+			Owners->SetStringField(TEXT("atmosphere_fog"), WorldBeauty.IsBuilt()
+				? TEXT("world lane over the scene build (look_applied.world_beauty.atmosphere)")
+				: TEXT("scene build"));
+			TSharedPtr<FJsonObject> Lens = MakeShared<FJsonObject>();
+			Lens->SetStringField(TEXT("owner"), bLookApplied ? TEXT("look-dev (-beauty-look=)")
+				: bPhysicalSky ? TEXT("-sky= plan") : TEXT("engine default"));
+			Lens->SetNumberField(TEXT("BloomIntensity"), Final.BloomIntensity);
+			Lens->SetNumberField(TEXT("LensFlareIntensity"), Final.LensFlareIntensity);
+			Lens->SetNumberField(TEXT("VignetteIntensity"), Final.VignetteIntensity);
+			Lens->SetNumberField(TEXT("FilmGrainIntensity"), Final.FilmGrainIntensity);
+			Lens->SetNumberField(TEXT("SceneFringeIntensity"), Final.SceneFringeIntensity);
+			Lens->SetNumberField(TEXT("MotionBlurAmount"), Final.MotionBlurAmount);
+			Lens->SetNumberField(TEXT("DepthOfFieldFstop"), Final.DepthOfFieldFstop);
+			Owners->SetObjectField(TEXT("lens_post"), Lens);
+			RenderSettings->SetObjectField(TEXT("beauty_owners"), Owners);
+			// Integration: the siblings' lens, read back (lens-free on beauty).
+			if (LinearCapture != nullptr)
+			{
+				RenderSettings->SetObjectField(TEXT("linear_capture"), RenderLensFreeRecord(LinearCapture));
+			}
+			if (AccumulateCapture != nullptr)
+			{
+				RenderSettings->SetObjectField(TEXT("accumulate_capture"), RenderLensFreeRecord(AccumulateCapture));
+			}
 		}
 
 		// Scene captures render at their target's size; the screen
@@ -7194,6 +7735,30 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Root->SetObjectField(TEXT("scene"), Scene);
 	// look-dev lane hook: render.json "beauty_look" (absent unless a sidecar was applied).
 	if (TSharedPtr<FJsonObject> BeautyLook = FFlightSimBeautyLook::Record()) { Root->SetObjectField(TEXT("beauty_look"), BeautyLook); }
+	// Integration: the verifier's beauty-look contract (pixel_moving_effects,
+	// beauty_samples, beauty_only_actors, cloud_occlusion), read back off the
+	// beauty capture after every lane ran. BeautyPath is null on measure, so a
+	// measure render.json gains none of these keys.
+	if (BeautyPath.IsValid())
+	{
+		FRenderLookContractInputs Contract;
+		Contract.Capture = Capture;
+		Contract.Width = Width;
+		Contract.Height = Height;
+		Contract.bPathTrace = bPathTrace;
+		Contract.CapturesPerFrame = BeautySubFrames;
+		Contract.PathTraceSpp = PathTraceSpp;
+		Contract.FramesPerSecond = FramesPerSecond;
+		Contract.TsrHistorySamples = RenderBeautyTsrHistorySamples;
+		Contract.TsrHistoryScreenPercentage = RenderBeautyTsrHistoryScreenPercentage;
+		Contract.AircraftLook = AircraftFX.IsBuilt() ? &AircraftFX.Record : nullptr;
+		Contract.SceneBeautyOnly = &VisualScene.BeautyOnlyActors;
+		Contract.WeatherBeautyOnly = &Weather.BeautyOnlyActors;
+		Contract.AircraftBeautyOnly = &AircraftFX.BeautyOnlyActors;
+		Contract.World = &WorldBeauty;
+		Contract.EngineWorld = World;
+		RenderWriteLookContract(*Root, Contract);
+	}
 
 	// Environmental couplings, stated per run rather than assumed.
 	TSharedPtr<FJsonObject> Environment = MakeShared<FJsonObject>();
