@@ -364,3 +364,8 @@ def test_ruflo_cli_is_never_run_by_default(tmp_path: Path, monkeypatch) -> None:
     collector.state()
     time.sleep(0.05)
     assert calls == []
+
+
+def test_projects_root_follows_the_checkout() -> None:
+    root = sv.projects_root_for(Path("/Users/someone/flight.sim"))
+    assert root == Path.home() / ".claude" / "projects" / "-Users-someone-flight-sim"

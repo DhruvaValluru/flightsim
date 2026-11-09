@@ -35,7 +35,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_PROJECTS_ROOT = Path.home() / ".claude" / "projects" / "-Users-dhruva-flightsim"
 DEFAULT_BASE = "claude/vibrant-gauss-olema4"
 RUFLO_PKG = "ruflo@3.74.1"
 
@@ -773,6 +772,11 @@ class Collector:
         }
 
 
+def projects_root_for(repo: Path) -> Path:
+    """Claude Code's transcript folder for ``repo``: ~/.claude/projects/<path with / as ->."""
+    return Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9-]", "-", str(repo))
+
+
 def main_repo_root(start: Path) -> Path:
     """The main worktree of the repository holding ``start`` (ruflo state lives there)."""
     rc, out = _run(["git", "-C", str(start), "worktree", "list", "--porcelain"])
@@ -845,7 +849,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8787)
-    ap.add_argument("--projects-root", type=Path, default=DEFAULT_PROJECTS_ROOT)
+    ap.add_argument("--projects-root", type=Path, default=None,
+                    help="default: ~/.claude/projects/<the main checkout's path, dashed>")
     ap.add_argument("--repo", type=Path, default=None, help="repository main checkout (default: found with git)")
     ap.add_argument("--base", default=DEFAULT_BASE)
     ap.add_argument("--no-ruflo", action="store_true", help="show no ruflo agents, tasks or swarms")
@@ -857,6 +862,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         ap.error("this dashboard binds to loopback only")
     repo = (args.repo or main_repo_root(HERE)).resolve()
+    if args.projects_root is None:
+        args.projects_root = projects_root_for(repo)
     collector = Collector(args.projects_root, repo, args.base, use_ruflo=not args.no_ruflo,
                           ruflo_cli=args.ruflo_cli)
     if args.once:
