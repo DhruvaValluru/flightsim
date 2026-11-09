@@ -273,14 +273,14 @@ def _web_run(tmp_path, *, sidecar):
                   "labels": {"horizon": {"polyline_px": [[0, row], [W, row]]}}}
         records.append(record)
         if sidecar:
-            (folder / "frame_0000.json").write_text(json.dumps({"frame": record}))
-    (run / "capture_manifest.json").write_text(json.dumps({"frames": records}))
+            (folder / "frame_0000.json").write_text(json.dumps({"frame": record}), encoding="utf-8")
+    (run / "capture_manifest.json").write_text(json.dumps({"frames": records}), encoding="utf-8")
     step = tmp_path / "v0"
     step.mkdir()
     Image.fromarray(np.rint(rgb).astype(np.uint8)).save(step / "a.png")
     frame = run / "frames" / "tower" / "frame_0000.png"
     (step / "shots.json").write_text(json.dumps(
-        {"shots": {"a": {"frame": str(frame), "run_dir": str(run)}}}))
+        {"shots": {"a": {"frame": str(frame), "run_dir": str(run)}}}), encoding="utf-8")
     return step
 
 
@@ -301,7 +301,7 @@ def test_an_unsampled_cloud_cover_is_never_the_expected_cover(tmp_path):
     (step / "spec.json").write_text(json.dumps({"randomization": {"cloud_cover": {
         "value": 0.0, "unit": "fraction", "source": "default",
         "from": "not drawn (no policy names this leaf)"}},
-        "look": {"cloud_cover": 0.0}}))
+        "look": {"cloud_cover": 0.0}}), encoding="utf-8")
     inputs = gv.resolve_inputs(step, "a", step / "a.png", W, H)
     assert inputs.expected_cloud is None and inputs.cloud_source == "none"
 
@@ -321,7 +321,7 @@ def test_cli_skip_render_and_compare(tmp_path, capsys):
     assert gv.main(["--compare", "before", "after", "--root", str(tmp_path)]) == 0
     out = capsys.readouterr().out
     assert "aerial_perspective" in out and "FAIL -> PASS" in out
-    comparison = json.loads((tmp_path / "gate_v_compare_before_vs_after.json").read_text())
+    comparison = json.loads((tmp_path / "gate_v_compare_before_vs_after.json").read_text(encoding="utf-8"))
     delta = comparison["shots"]["a"]["aerial_perspective"]["delta"]
     assert delta["blue_slope_per_decade"]["delta"] > 0
 
@@ -330,7 +330,7 @@ def test_cli_overrides_the_expected_cloud(tmp_path):
     write_step(tmp_path / "v0", clouds=0.0)
     assert gv.main(["--step", "v0", "--skip-render", "--root", str(tmp_path),
                     "--expect-cloud", "a=0.9"]) == 0
-    report = json.loads((tmp_path / "v0" / gv.REPORT_NAME).read_text())
+    report = json.loads((tmp_path / "v0" / gv.REPORT_NAME).read_text(encoding="utf-8"))
     assert report["shots"]["a"]["clauses"]["cloud_fraction"]["status"] == gv.FAIL
 
 
@@ -351,5 +351,5 @@ def test_compare_keeps_the_cloud_override(tmp_path):
     write_step(tmp_path / "after", clouds=0.0)
     assert gv.main(["--compare", "before", "after", "--root", str(tmp_path),
                     "--expect-cloud", "a=0.9"]) == 0
-    comparison = json.loads((tmp_path / "gate_v_compare_before_vs_after.json").read_text())
+    comparison = json.loads((tmp_path / "gate_v_compare_before_vs_after.json").read_text(encoding="utf-8"))
     assert comparison["shots"]["a"]["cloud_fraction"]["status"] == [gv.FAIL, gv.FAIL]

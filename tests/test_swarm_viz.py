@@ -146,7 +146,7 @@ def test_tail_reader_expands_past_a_huge_line(tmp_path: Path) -> None:
     _write_agent(run, "z", "x", "P", [("Bash", {"command": "echo hi"})], NOW, pad=sv.TAIL_BYTES + 10_000)
     # the only tool call sits after a line bigger than the first tail window
     tr = run / "agent-z.jsonl"
-    tr.write_text(tr.read_text() + json.dumps({"type": "user", "message": {"content": "y" * (sv.TAIL_BYTES + 5)}}) + "\n")
+    tr.write_text(tr.read_text(encoding="utf-8") + json.dumps({"type": "user", "message": {"content": "y" * (sv.TAIL_BYTES + 5)}}) + "\n", encoding="utf-8")
     calls = sv.transcript_tail_tools(tr, tr.stat().st_size)
     assert [c["name"] for c in calls] == ["Bash"]
 
@@ -262,7 +262,7 @@ def test_memory_merge_db_values_and_lanes(tmp_path: Path) -> None:
 def test_daemon_summary(tmp_path: Path) -> None:
     p = tmp_path / "daemon-state.json"
     p.write_text(json.dumps({"running": False, "workers": {
-        "map": {"runCount": 2, "isRunning": True}, "audit": {"runCount": 0, "isRunning": False}}}))
+        "map": {"runCount": 2, "isRunning": True}, "audit": {"runCount": 0, "isRunning": False}}}), encoding="utf-8")
     d = sv.daemon_summary(p)
     assert d["present"] and not d["running"]
     assert d["workers_total"] == 2 and d["workers_running"] == 1 and d["runs_total"] == 2
@@ -276,7 +276,7 @@ def test_pytest_log_running_and_final(tmp_path: Path) -> None:
     assert r["status"] == "running-with-failures" and r["percent"] == 20
     assert r["progress_counts"] == {"passed": 14, "failed": 1, "error": 0, "skipped": 1}
     log.write_text("........ [100%]\nFAILED tests/test_x.py::test_y - boom\n"
-                   "===== 1 failed, 2900 passed, 6 skipped, 3 warnings in 812.10s (0:13:32) =====\n")
+                   "===== 1 failed, 2900 passed, 6 skipped, 3 warnings in 812.10s (0:13:32) =====\n", encoding="utf-8")
     r = sv.parse_pytest_log(log, now=log.stat().st_mtime + 5)
     assert r["status"] == "failed"
     assert r["final"] == {"failed": 1, "passed": 2900, "skipped": 6, "warning": 3}
@@ -343,7 +343,7 @@ def test_ruflo_read_from_stores_without_the_cli(tmp_path: Path) -> None:
                             ("tasks", "store.json", {"tasks": {"t1": {"taskId": "t1", "status": "in_progress"}}}),
                             ("swarm", "swarm-state.json", {"swarms": {"s1": {"swarmId": "s1"}}})):
         (cf / sub).mkdir(parents=True)
-        (cf / sub / name).write_text(json.dumps(body))
+        (cf / sub / name).write_text(json.dumps(body), encoding="utf-8")
     collector = sv.Collector(tmp_path / "projects", tmp_path, "base")
     assert collector.ruflo_cli is False  # the CLI writes policy state; it stays opt-in
     collector._git_at = time.time() + 3600
