@@ -1,0 +1,49 @@
+# Optional: the offline ACES 2.0 SDR display step (core/capture/display.py,
+# look switch "cinematic_aces2"). NOT in requirements.txt: without these the
+# step refuses as look.display_unavailable and the engine PNG stands.
+#
+#   pip install --require-hashes --no-deps -r requirements-display.txt
+#
+# Both are BSD-3-Clause, Academy Software Foundation projects; wheels from
+# https://pypi.org/project/opencolorio/2.5.2/ (uploaded 2026-05-13) and
+# https://pypi.org/project/openexr/3.4.16/ (uploaded 2026-10-03). Hashes are
+# PyPI's sha256 for the CPython 3.11 / 3.12 / 3.13 wheels on macOS
+# (x86_64, arm64), manylinux (x86_64, aarch64) and Windows (amd64).
+# opencolorio 2.5 is the first release that ships the built-in config
+# ocio://studio-config-v4.0.0_aces-v2.0_ocio-v2.5. numpy comes from
+# requirements.txt.
+opencolorio==2.5.2 \
+    --hash=sha256:11636d2ae5d90d676023a24bd12622833b3221ee5bb57e7df62cdfca2de6998d \
+    --hash=sha256:d764b3064498974624f68be6182f10f0a5fd8f084a38f468eab7ec6cc6db078d \
+    --hash=sha256:8e6a53e12605e929ba3c7dfbfbbe03664f3427f2119aaec495265aad275a6391 \
+    --hash=sha256:18d76fee8e245af2d3302462ca2f9baafa6cb3fc11578e8888063a7f32774061 \
+    --hash=sha256:35488faa982d89933cd430697ab68f40c439f1456780f46d09fec7c4b981fea3 \
+    --hash=sha256:a1f0f18fe0897255059296782a895c57ca639e37d2ba3022cf39bf2b26e01155 \
+    --hash=sha256:72c5ff68430f11d1cef8fb792d1167cb840ccd6da2aade6bbe6c3c9d7088eb56 \
+    --hash=sha256:53f8098188a8fe434c4831138e818e6b53ae00599b8a537ef4eb1f3288af276b \
+    --hash=sha256:b84e0653e59686ccbdbec1b4b857946f2f126f3bccbb25921649beefdb4bd763 \
+    --hash=sha256:cc34db609bd91fb43747d2f425d020d6d17afed406669703bab2af08c149ddac \
+    --hash=sha256:3d0ab1c398d560513c651c7b9c676e68f264a63b97e29fec21722d4270f865aa \
+    --hash=sha256:96b0b01713d759c2ddc0f57229a1bb599d72298746cdeff9512abc46a079494f \
+    --hash=sha256:d1a5ca15950a56bfaa6e061865e5550659522a86c31b4459fe29c6cc4f11eec4 \
+    --hash=sha256:bdc60c73e35e9fa25ecb777906b68d098fc7845b9ffbeaf6bc67b73e42bee79b \
+    --hash=sha256:0a690efa269a5310b5e70c930380be02d56ffdb287a33b13f81bcdbcbfe27566 \
+    --hash=sha256:36265c9539ef8317e6b4a7750c155286b6376626f7af67f98c536a5a20273871 \
+    --hash=sha256:b7d7494a311bf38bd3311d2bcb37c1409c5a0961559bcb802c90656edf96e379 \
+    --hash=sha256:47a68600bb159c2a4a824752c25554ca4f3847089cbc226d05478e284cec17c3
+openexr==3.4.16 \
+    --hash=sha256:e69a2ab4833c45c978378bd8f148f9d736fa9b996c131a6385cea8bd2e58e29a \
+    --hash=sha256:13e49f65b6df94b14d391df222559985f46ab2b882374fb4df48d3f860649783 \
+    --hash=sha256:453f6b2569af26c0f055d8e419126d1fa83cdc136c07e00750b8b04cd2bffc13 \
+    --hash=sha256:496a709088e5d4395fd62ddd15a143e9eb0029d50e833a96c35230a6006263a2 \
+    --hash=sha256:3fcd302738edd4ad6587235d81e984f56666386d12e94da7c3e23a81316e4d7f \
+    --hash=sha256:25cc6af085cfdaac10bd92b4b2a2ef9602f1dc82365bb24c9a6e3522b79aa482 \
+    --hash=sha256:f2ee51e973fed7119c20aa3318729548e924176ed02db7ea3e65aee450b77e3c \
+    --hash=sha256:58128f9a5ff9a43d5352c226f912efe5fdeec742bdd82107aa3258637f029067 \
+    --hash=sha256:0ed6a8828726b104ffa0bd659e429d8a2dfaeab19a529653436ee68abcba0770 \
+    --hash=sha256:82c8c146fcee3e4a39c1a438d5e9af1bbe9d68720182551673834480ecada8ab \
+    --hash=sha256:19a82c3c87b97be45154b1c61aabf9f2a3cb1eec04af6b837fc3d63eea8f4f2d \
+    --hash=sha256:36ecce7b4c91974ebeda183703eab5c2f85d3f3fb32400d77db22d8c24921185 \
+    --hash=sha256:cd39eb8a878d8b272e6c4563b1c2f250ec3b0b33a1917deb3e8e9b2fff11eb41 \
+    --hash=sha256:b9f94afe270444cc280e1cf3189dccfd5348dc2cae6fd506f762836de28659e6 \
+    --hash=sha256:c1e66d8325df4dbb32ef8edb374593dcb9c70375a2bad4b4753b58684334b72f
