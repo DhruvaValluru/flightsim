@@ -88,6 +88,7 @@ from experiments.showcase_matrix import (  # noqa: E402
     encode_clip,
 )
 from experiments.showcase_panel import build_panel_clip  # noqa: E402
+from core.capture import display as capture_display  # noqa: E402  (aces2-display)
 from webapp.capture import (  # noqa: E402
     CaptureError,
     card_blocks as capture_card_blocks,
@@ -2501,6 +2502,9 @@ def beauty_look_render_flags(path: Optional[Path]) -> List[str]:
 LOOK_SWITCHES: Dict[str, Dict[str, str]] = {
     "cinematic": {"quality": "beauty", "lens": "cinematic"},
     "beauty": {"quality": "beauty", "lens": "standard"},
+    # aces2-display: the cinematic look, plus the offline ACES 2.0 SDR view
+    # (core/capture/display.py) on the -linear EXR -> frame_NNNN_aces2.png.
+    "cinematic_aces2": {"quality": "beauty", "lens": "cinematic", "display": "aces2"},
 }
 #: The page's "look" option values: a switch name, or "off" (no switch,
 #: and a look word in the prompt is ignored). None (absent) = the prompt decides.
@@ -4155,7 +4159,8 @@ class RunManager:
                         telemetry=telemetry,
                         look=render_look_for(spec, event_note),
                         camera_flags=camera_flags, extra=list(extra) + pass_extra,
-                        sky=sky, beauty_look=beauty_look, quality=quality))
+                        sky=sky, beauty_look=beauty_look, quality=quality),
+                    look=run.look)  # aces2-display: -linear + the ACES 2.0 view
             except CaptureError as exc:
                 # The render log for the pass that failed sits beside its
                 # frames. Say what it HOLDS, not where it is: whoever is
@@ -4178,6 +4183,8 @@ class RunManager:
                               telemetry=out / "telemetry.json",
                               look=render_look_for(spec, event_note),
                               camera_flags=camera_flags, sky=sky,
+                              # aces2-display: -linear for the ACES 2.0 view.
+                              extra=capture_display.commandlet_tokens(run.look) or None,
                               beauty_look=beauty_look, quality=quality):
             run.push("failed", "the render commandlet wrote no manifest; "
                                "its last words:\n"
@@ -4186,6 +4193,8 @@ class RunManager:
                                   or "(it wrote no log at all)")
                                + f"\n-- full log: {out / 'render.log'}")
             return
+        elif capture_display.wants_display(run.look):  # aces2-display, camera-less
+            capture_display.apply_to_bundle(frames, run.look)  # refusals -> render.json
 
         if capture_solved is not None:
             run.push("manifest", "writing the capture manifest, the "
