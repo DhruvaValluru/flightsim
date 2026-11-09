@@ -1213,3 +1213,21 @@ weather.rain:
 clouds.material:
   sentence: "A volumetric cloud in the scene carries a material the engine's cloud passes would crash on (not a Volume material, not flagged for the volumetric cloud, or failed to compile)."
   hint: "Run the material script again; it sets the flag and rebuilds a stale storm material."
+# -- visual overhaul: the beauty look's record and label honesty (verifier-tooling) --
+look.quality:
+  sentence: "The render names a quality that is not one of measure, beauty or path-traced."
+look.measure_altered:
+  sentence: "A measurement render carries the beauty look or an effect that moves pixels; the measurement path must render as it did when its gate passed."
+  hint: "Leave the look to beauty renders; render the labelled set at measurement quality."
+look.pixel_moving_unrecorded:
+  sentence: "The look moves pixels (distortion, fringing, haze, blur, overscan or resampling) and the render record does not say so."
+  hint: "List the effect in the render record with its transform or its measured displacement."
+look.record:
+  sentence: "The beauty look's record is malformed: a sample count, a list, or the decision about scenery in front of the aircraft is missing or not what it should be."
+look.beauty_not_label_aligned:
+  sentence: "The beauty frames are not label-aligned: an effect moved pixels, scenery covered the aircraft, the field of view changed, or the labels came from another frame, and nothing recorded maps the labels onto the picture."
+  hint: "Render the labelled set at measurement quality, record the effect's transform, or measure its displacement with the look label check."
+check.look_record:
+  sentence: "The beauty look's record agrees with the render's quality, and every effect that moves pixels is listed."
+check.look_label_alignment:
+  sentence: "The labels lie on the beauty picture: of its own frame and instant, at the solved field of view, with every pixel-moving effect mapped or measured within tolerance."
