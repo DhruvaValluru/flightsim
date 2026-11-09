@@ -864,3 +864,59 @@ now converts from much more of github.com/yanes19/SU-27SK @ 925cb531 than
 3. `python experiments/gate6_visual.py` (measure unchanged).
 4. `python experiments/visual_contact_sheet.py` shots a and d; look at the
    livery, the nozzle plume origin and the nav/beacon lamps at the tips.
+
+### j11-package skeptic review (2026-11-09)
+
+Reviewed `git diff claude/vibrant-gauss-olema4...worktree-wf_d78a46c2-467-1`
+on the Mac, no engine. What was checked, and what came of it:
+
+- **Pins.** I downloaded all 29 `package_files` from
+  raw.githubusercontent.com at 925cb531 into a scratch tree, and
+  `package_pins.verify` passed on all 29 (git blob sha1, sha256, bytes).
+  The converter ran on that tree alone, so it reads no file outside the
+  pins. Every `texture` line of the five parts' .ac files resolves to a
+  pinned PNG.
+- **New `aircraft.texture_collision` refusal for other airframes.** I
+  fetched the texture lines of every part of the A320, B747, c172p, DHC6
+  and p51d at their pinned commits. No basename comes from two
+  directories, so none of them start to refuse.
+- **Interior inside the hull.** The converter's bounding-box check is
+  loose, so I also cast a vertical ray from every interior vertex
+  against the Su-27.ac triangles. The pilot is fully covered by
+  canopy.glass. 9 panel vertices (canopy rail, x 4.6-5.5 m) and 26
+  seat vertices (rail height, x 5.83-5.86 m, 1-6 cm from hull
+  vertices) have no hull face above them, which looks like the seam
+  between the canopy and the sill. They are in the body part, with the
+  aircraft's stencil, so pixels and labels still agree. Check at the
+  pilot-eye frame.
+- **Fixed: the label-box / preview mesh read the interior.**
+  `core/capture/aircraft_mesh.py` builds the engine-less preview and
+  `labels.mesh_tight_box_body_m` from config `parts[]`, keeping only
+  the largest 2600 faces. The interior parts went in (without the
+  seat's pitch) and pushed 89 hull faces out of that budget on the
+  pinned J-11A. The tight box itself came out the same, but this path
+  is not beauty, so interior parts are now skipped there (test:
+  `test_the_preview_and_label_box_mesh_skips_the_interior_parts`).
+- **Slot classes.** I checked them against the material_sources.json
+  written from the real package. mat_Glass_Cockpit comes only from
+  Su-27.ac's canopy. Every slot the rubber rule matches comes only
+  from panel.ac, seat2.ac or fighter_default.ac. M_AircraftGlass is
+  opaque (ue_aircraft_master_materials.py), so the glass canopy keeps
+  beauty, mask and depth in agreement.
+- **Lamps.** The mesh's span is y ±7.62 m, so the LightPack positions
+  at ±7.5 m are inboard of the tip. Beacons flash on the strobe clock.
+  Both are beauty-only bulbs and lights in FlightSimAircraftFX, and no
+  C++ was changed.
+- **Things this lane did not touch.** No engine symbols, no edits to
+  RenderCommandlet, verify.py or beauty_look.py, no sun change, and no
+  physics change: the FDM and the J11.json mass and loading rows are
+  untouched.
+- **Licence note for the owner.** `Models/Interior/pilot/Read-Me.txt`
+  says the pilot figure was "extracted from the collection of drivers
+  for X-Plane conducted by Bertrand AUGRAS" by Emmanuel Baranger. It
+  ships inside the GPL-2.0 package that decisions 3 and 20 cleared, and
+  it is pinned. Its original author is not the package's, so the
+  attribution line for exports should name him too.
+- **Tests.** test_platform's utf-8 failure is in tests/test_gate_v_visual.py
+  and tests/test_swarm_viz.py, which are not in this branch's diff.
+  Commit 43795f40 on the integration branch fixes it.
