@@ -38,6 +38,7 @@
 #include "GeoReferencingSystem.h"
 #include "FlightSimGoogleTiles.h"
 #include "FlightSimClouds.h"   // world lane hook (visual overhaul): the beauty-only world look
+#include "FlightSimSupersample.h"   // supersample lane: -supersample=N beauty box filter
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
@@ -2593,11 +2594,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 	}
 
+	// supersample lane hook: -supersample=N, beauty only, refused by name (FlightSimSupersample.h).
+	int32 Supersample = 1; { FString SsWhy; if (!FFlightSimSupersample::Configure(*Params, Quality, Width, Height, RenderBeautyTsrHistoryScreenPercentage, Supersample, SsWhy)) { return Fail(SsWhy); } }
 	UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>();
 	RenderTarget->RenderTargetFormat = RTF_RGBA8_SRGB;
 	RenderTarget->ClearColor = FLinearColor::Black;
 	RenderTarget->bAutoGenerateMips = false;
-	RenderTarget->InitAutoFormat(Width, Height);
+	// supersample lane hook: the beauty target alone is N x the output size (labels keep Width x Height).
+	RenderTarget->InitAutoFormat(Width * Supersample, Height * Supersample);
 	RenderTarget->UpdateResourceImmediate(true);
 
 	USceneCaptureComponent2D* Capture =
@@ -4803,6 +4807,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(TEXT("could not read the render target back"));
 		}
+		// supersample lane hook: exact N x N linear-light box to the output size, before the PNG.
+		{ FString SsWhy; if (!FFlightSimSupersample::Downsample(Pixels, Width, Height, Supersample, SsWhy)) { return Fail(SsWhy); } }
 
 		int32 Lit = 0;
 		for (FColor& Pixel : Pixels)
@@ -7194,6 +7200,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Root->SetObjectField(TEXT("scene"), Scene);
 	// look-dev lane hook: render.json "beauty_look" (absent unless a sidecar was applied).
 	if (TSharedPtr<FJsonObject> BeautyLook = FFlightSimBeautyLook::Record()) { Root->SetObjectField(TEXT("beauty_look"), BeautyLook); }
+	// supersample lane hook: render.json beauty_samples (supersample, filter, internal size), only when stated.
+	FFlightSimSupersample::Record(Root);
 
 	// Environmental couplings, stated per run rather than assumed.
 	TSharedPtr<FJsonObject> Environment = MakeShared<FJsonObject>();
