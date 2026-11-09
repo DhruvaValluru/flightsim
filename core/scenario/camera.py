@@ -416,6 +416,10 @@ class CameraSpec:
     passes: Quantity = dc_field(default_factory=lambda: default_pass_fields()["passes"])
     #: S3: the IR proxy request (see IR_FIELD), absent-canonical.
     ir: Quantity = dc_field(default_factory=default_ir_field)
+    #: camera-motion-layer: the optional motion block {profile, seed,
+    #: intensity, ...} (core.capture.camera_motion checks it). Data like
+    #: ``moves``; absent (None) = profile none and serialises as absent.
+    motion: Optional[Dict[str, Any]] = None
 
     #: Canonical field order for serialisation and the rendered table.
     FIELD_ORDER = (
@@ -501,6 +505,8 @@ class CameraSpec:
         # S3: the IR request, the same absent-canonical rule.
         if self.ir_stated():
             out[IR_FIELD] = self.ir.to_dict()
+        if self.motion is not None:          # camera-motion-layer, absent-canonical
+            out["motion"] = dict(self.motion)
         return out
 
     def ir_stated(self) -> bool:
@@ -537,7 +543,7 @@ class CameraSpec:
         kwargs[IR_FIELD] = (Quantity.from_dict(data[IR_FIELD]) if data.get(IR_FIELD) is not None
                             else default_ir_field())
         unknown = (set(data) - set(cls.FIELD_ORDER) - {"moves", "exposure"} - set(SENSING_FIELDS)
-                   - set(PASS_FIELDS) - {IR_FIELD})
+                   - set(PASS_FIELDS) - {IR_FIELD} - {"motion"})
         if unknown:
             raise ValueError(
                 f"camera carries unknown fields {sorted(unknown)}; "
@@ -551,7 +557,11 @@ class CameraSpec:
         exposure = (ExposureSpec.defaulted(str(kwargs["preset"].value))
                     if exposure_data is None
                     else ExposureSpec.from_dict(exposure_data))
+        motion = data.get("motion")          # camera-motion-layer
+        if motion is not None and not isinstance(motion, dict):
+            raise ValueError("camera 'motion' must be a mapping")
         return cls(moves=[dict(m) for m in moves], exposure=exposure,
+                   motion=dict(motion) if motion is not None else None,
                    **kwargs)
 
     # -- construction ---------------------------------------------------

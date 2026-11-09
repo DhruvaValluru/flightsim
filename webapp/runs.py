@@ -2500,7 +2500,9 @@ def beauty_look_render_flags(path: Optional[Path]) -> List[str]:
 #: both; core.scene.beauty_look.pixel_effects). VISUAL ONLY: the physics
 #: never reads any of this.
 LOOK_SWITCHES: Dict[str, Dict[str, str]] = {
-    "cinematic": {"quality": "beauty", "lens": "cinematic"},
+    # camera_motion "auto": core.capture.camera_motion.look_motion picks the
+    # profile per preset (camera-motion-layer); 'beauty' and 'off' keep none.
+    "cinematic": {"quality": "beauty", "lens": "cinematic", "camera_motion": "auto"},
     "beauty": {"quality": "beauty", "lens": "standard"},
     # aces2-display: the cinematic look, plus the offline ACES 2.0 SDR view
     # (core/capture/display.py) on the -linear EXR -> frame_NNNN_aces2.png.
@@ -3905,6 +3907,11 @@ class RunManager:
                                     + ", ".join(extra_passes))
             run.push("cameras", f"solving {len(spec.cameras)} camera "
                                 f"pose track(s) and capture schedule(s)")
+            # camera-motion-layer: the look switch's camera motion, recorded
+            # in each camera's spec (a stated motion block is never moved).
+            from core.capture.camera_motion import apply_look_motion
+            if apply_look_motion(spec, run.look):
+                run.push("cameras", "camera motion from the look switch: " + run.look["switch"])
             try:
                 capture_solved = capture_solve(
                     spec, scene, heightfield=capture_heightfield,

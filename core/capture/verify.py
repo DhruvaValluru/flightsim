@@ -8262,6 +8262,32 @@ def _card_cameras(run_dir) -> Dict[str, Dict]:
             for c in (card.get("cameras") or []) if isinstance(c, dict)}
 
 
+def _card_pose_row(poses: Dict, sample: int, t_s) -> Optional[int]:
+    """The row of the card's pose track that holds telemetry ``sample``
+    (at time ``t_s``), or None when the track has no such row.
+
+    A track on the telemetry clock holds sample k at row k. A camera with
+    motion (camera-motion-layer) ships its DENSE render-clock track, which
+    contains every telemetry time but at other rows, so the row is found
+    by time; on a telemetry-clock track both agree."""
+    times = poses.get("t_s") or []
+    if t_s is None:
+        return sample if len(times) > sample else None
+    try:
+        want = float(t_s)
+        if len(times) > sample and abs(float(times[sample]) - want) <= 1e-9:
+            return sample
+        import bisect
+        j = bisect.bisect_left([float(v) for v in times], want - 1e-9)
+        if j < len(times) and abs(float(times[j]) - want) <= 1e-9:
+            return j
+    except (TypeError, ValueError):
+        pass
+    # No row at that time: the old by-index row, so a corrupted track
+    # still fails the comparison rather than skipping it.
+    return sample if len(times) > sample else None
+
+
 def _own_neighbour_problem(manifest: Dict, record: Dict, neighbours: Dict,
                            primary_id: int, card: Dict[str, Dict]) -> Tuple[Optional[str], int]:
     """(the first disagreement, the number of cross-checks made) between a
@@ -8305,13 +8331,14 @@ def _own_neighbour_problem(manifest: Dict, record: Dict, neighbours: Dict,
                             f"manifest's own frame at sample {sample}"), checked
                 checked += 1
         poses = card.get(camera)
-        if poses and len(poses.get("t_s") or []) > sample:
+        row = _card_pose_row(poses, sample, target.get("t_s")) if poses else None
+        if row is not None:
             try:
-                where = (float(poses["north_m"][sample]), float(poses["east_m"][sample]),
-                         float(poses["alt_m"][sample]))
-                axes_card = axes_from_euler(float(poses["roll_deg"][sample]),
-                                            float(poses["pitch_deg"][sample]),
-                                            float(poses["yaw_deg"][sample]))
+                where = (float(poses["north_m"][row]), float(poses["east_m"][row]),
+                         float(poses["alt_m"][row]))
+                axes_card = axes_from_euler(float(poses["roll_deg"][row]),
+                                            float(poses["pitch_deg"][row]),
+                                            float(poses["yaw_deg"][row]))
             except (KeyError, IndexError, TypeError, ValueError):
                 return f"the run card's track for {camera} cannot be read at sample {sample}", checked
             gap = math.dist(where, (float(target["position_north_m"]),

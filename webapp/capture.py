@@ -131,6 +131,7 @@ def wants_capture(spec) -> bool:
 
 
 from core.capture.window import clip_columns  # noqa: E402,F401 -- the one copy, shared with flightsim.capture --clip-seconds
+from core.render.flags import DEFAULT_FPS as RENDER_FPS  # noqa: E402 -- camera-motion-layer: the frame clock
 
 
 def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,
@@ -177,7 +178,10 @@ def _solve_cameras(spec, columns, frame, heightfield, tornado, datum):
     tracks, schedules = [], []
     try:
         for camera in spec.cameras:
-            tracks.append(solve_pose_track(columns, camera, frame))
+            # camera-motion-layer: the render frame clock (the web passes no
+            # -accumulate, so k = 1); a camera with no motion block ignores it.
+            tracks.append(solve_pose_track(columns, camera, frame,
+                                           render_clock=(RENDER_FPS, 1)))
             schedules.append(solve_schedule(columns, camera, frame))
     except (ScheduleError, PoseSolveError) as exc:
         raise CaptureError(getattr(exc, "constraint", "camera.schedule"),

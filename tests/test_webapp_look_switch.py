@@ -29,6 +29,7 @@ def test_the_prompt_word_names_the_switch():
 def test_the_page_option_wins_and_off_ignores_the_prompt():
     look = runs.resolve_look_switch("cinematic", "a beauty shot")
     assert look == {"switch": "cinematic", "quality": "beauty", "lens": "cinematic",
+                    "camera_motion": "auto",   # camera-motion-layer
                     "source": "the page's look option"}
     assert runs.resolve_look_switch("off", "a cinematic flight") is None
     assert runs.resolve_look_switch(None, "fly the 747") is None
