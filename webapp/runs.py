@@ -1954,10 +1954,31 @@ def xplane_sky_source(source: Optional[str] = None) -> str:
     return chosen
 
 
+#: The beauty look's world preset (core/scene/world_beauty.py select_preset,
+#: recorded in beauty_look.json) -> the X-Plane sky condition. ``clear``
+#: keeps the look-based choice below.
+XPLANE_CONDITION_FOR_PRESET: Dict[str, str] = {
+    "storm": "ocast", "rain": "ocast", "overcast": "ocast", "hazy": "hazy",
+}
+
+
+def beauty_xplane_condition(beauty_look: Optional[Path]) -> Optional[str]:
+    """The X-Plane sky condition a beauty render's world preset implies, or
+    None (measure: no sidecar, so the measure command is unchanged; a clear
+    world, or a sidecar with no preset, keeps the look-based choice). The
+    world lane's selector is then the one source for the grade, the
+    exposure's deck and the X-Plane colours alike."""
+    if beauty_look is None:
+        return None
+    preset = json.loads(Path(beauty_look).read_text(encoding="ascii")).get("world_preset")
+    return XPLANE_CONDITION_FOR_PRESET.get(str(preset)) if preset else None
+
+
 def xplane_lighting_flags(look: Optional[Dict],
                           tables: Optional[Dict] = None,
                           source: Optional[str] = None,
-                          compensate: bool = True) -> List[str]:
+                          compensate: bool = True,
+                          condition: Optional[str] = None) -> List[str]:
     """The -xplane-* render flags for a look, or [] when there is no
     extracted X-Plane lighting table on this machine.
 
@@ -2000,7 +2021,12 @@ def xplane_lighting_flags(look: Optional[Dict],
         tod.update({key: look[key] for key in DEFAULT_LOOK if key in look})
     sun_elev, sun_azim = float(tod["sun_elev"]), float(tod["sun_azim"])
     rained = float(((look or {}).get("lighting") or {}).get("rain_look_mmh") or 0.0)
-    if look == STORM_LOOK or rained >= 4.0:
+    if condition is not None:
+        # A beauty render: the world preset the frame is drawn under
+        # (beauty_xplane_condition), not a guess from the look's numbers.
+        if condition not in ("ocast", "hazy", "clean"):
+            raise ValueError(f"X-Plane sky condition {condition!r} is not ocast, hazy or clean")
+    elif look == STORM_LOOK or rained >= 4.0:
         # The storm look, or rain heavy enough to be under a full cloud deck.
         condition = "ocast"
     elif float(tod["fog_density"]) >= XPLANE_HAZY_FOG_DENSITY:
@@ -2451,12 +2477,26 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
     if sky is not None:
         elevation = float(json.loads(Path(sky).read_text(encoding="ascii"))
                           ["sun"]["elevation_deg"])
+    # One width per camera, in spec.cameras order: the host indexes them by
+    # -camera-index= (the capture loop's position in spec.cameras). Only an
+    # UNSTATED sensor takes the documented default; a width that is there
+    # but unreadable raises instead of quietly becoming 36 mm.
     sensors = []
     for camera in spec.cameras or default_cameras(spec):
-        try:
-            sensors.append(float(camera.sensor_width_mm.value))
-        except (AttributeError, TypeError, ValueError):
-            sensors.append(DEFAULT_SENSOR_WIDTH_MM)
+        width = getattr(camera, "sensor_width_mm", None)
+        value = getattr(width, "value", width)
+        sensors.append(DEFAULT_SENSOR_WIDTH_MM if value is None else float(value))
+    # The world the frame is drawn in: the card's preset, read the way the
+    # world lane's host reads it (core.scene.beauty_look.world_preset_for_card).
+    from core.scene.beauty_look import world_preset_for_card
+
+    card_path = Path(out) / "card.json"
+    world_preset = None
+    if card_path.is_file():
+        world_preset, _inputs = world_preset_for_card(
+            json.loads(card_path.read_text(encoding="utf-8")))
+    lit = look or {}
+    brightness = (lit.get("lighting") or {}).get("brightness_ev")
     scene_block = getattr(spec, "scene", None)
     stated = getattr(getattr(scene_block, "sun_lux", None), "value", None)
     altitude = getattr(getattr(spec, "terrain_elevation", None), "value", 0.0)
@@ -2470,7 +2510,13 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
         weather_event=str(getattr(getattr(spec, "weather_event", None), "value", "none")),
         raining=rain_rate(spec) is not None, altitude_m=altitude,
         stated_sun_lux=None if stated is None else float(stated),
-        physical_sky=sky is not None)
+        physical_sky=sky is not None, world_preset=world_preset,
+        # The lighting look's knobs the host applies to the light
+        # (FlightSimVisualScene.cpp): the exposure meters them, and the
+        # brightness stops land on the one EV100 the host applies.
+        sun_intensity_scale=lit.get("sun_intensity_scale"),
+        sky_light_scale=lit.get("sky_light_scale"),
+        brightness_ev=None if brightness is None else float(brightness))
     return write_beauty_look(plan, Path(out) / "beauty_look.json")
 
 
@@ -3277,7 +3323,8 @@ class RunManager:
         # look only: a physical sky plan lights the scene itself and is
         # left alone. No extraction on this machine -> no flags.
         if sky is None:
-            extra += xplane_lighting_flags(look)
+            extra += xplane_lighting_flags(
+                look, condition=beauty_xplane_condition(beauty_look))
         # The beauty look's sidecar (write_beauty_look_plan), beauty only:
         # None under measure adds nothing, so the pinned command stands.
         extra += beauty_look_render_flags(beauty_look)

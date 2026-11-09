@@ -394,11 +394,14 @@ them (§4: never calibrate materials under the old exposure).
    - tiles not white: the Cesium names `baseColorTexture` and
      `baseColorFactor`, set in `CESIUM_BASE_COLOUR_*` in
      `scripts/ue_create_materials.py`.
-2. **`UE_ZENITH_TRANSMITTANCE` (0.90)**, `core/scene/beauty_look.py`. It
-   sets the sun lux of every beauty frame. Probe: a `-calibration` white
-   quad, sky atmosphere on and then off, sun at 50 degrees; take the ratio
-   of the two quad luminances.
-3. **`EV100_BANDS` (15.0 / 14.7 / 14.2 / 13.4 / 12.6)**, same file. Probe:
+2. **The sun's one transmittance model** (fix pass 2026-11-09). The beauty
+   sun is the physical sky's outer-space 120 klx (`core/sky/plan.py`
+   `SUN_ILLUMINANCE_LUX`), dimmed and reddened once by the engine's per-pixel
+   transmittance; there is no zenith factor and no temperature band left to
+   sweep. Check, not sweep: `beauty_look.applied.sun.per_pixel_transmittance`
+   is true, and a `-calibration` white quad at sun 10 and 50 degrees lands
+   near `sun.ground_direct_normal_lux_reference`.
+3. **`EV100_BANDS` (15.0 / 14.5 / 13.9 / 13.0 / 12.0 / 11.0)**, `core/scene/beauty_look.py`. Probe:
    one clip per band; the sunlit grey card should sit at about 18% of white
    after the tonemapper, with the sky unclipped. No rebuild is needed:
    rewrite a run's `beauty_look.json` (PROBE_LOG look-dev, step 3) and

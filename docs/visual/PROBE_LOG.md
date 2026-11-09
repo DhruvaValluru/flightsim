@@ -440,10 +440,12 @@ All live in `core/scene/beauty_look.py`. Each carries the comment
 
 | Constant | Starting value | Probe |
 |---|---|---|
-| `UE_ZENITH_TRANSMITTANCE` | 0.90 | `-calibration` white quad, sky atmosphere on vs off, sun 50 deg: the ratio of the two quad luminances |
-| `EV100_BANDS` | 15.0 / 14.7 / 14.2 / 13.4 / 12.6 from >=40 / 25 / 15 / 8 / below | one clip per band: the sunlit grey card at ~18% of white after the tonemapper, sky unclipped |
-| `SUN_TEMPERATURE_BANDS` | 5600 / 5200 / 4700 / 4000 / 3300 K | golden-hour and noon probes: hue of the sunlit side of a white quad |
-| `GRADES` (golden_hour, desert_noon, storm) | see file | the same frame graded three ways on one contact sheet |
+| `EV100_BANDS` | 15.0 / 14.5 / 13.9 / 13.0 / 12.0 / 11.0 from >=40 / 25 / 15 / 8 / 4 / below | one clip per band: the sunlit grey card at ~18% of white after the tonemapper, sky unclipped |
+| `GRADES` (golden_hour, desert_noon, storm, overcast) | see file; ColorGain neutral, WhiteTemp the one warmth knob | the same frame graded four ways on one contact sheet, a white quad in frame |
+
+(Fix pass 2026-11-09: `UE_ZENITH_TRANSMITTANCE` and `SUN_TEMPERATURE_BANDS`
+are gone. The beauty sun is the physical sky's outer-space lux and the
+engine's per-pixel transmittance dims and reddens it once.)
 | `GOLDEN_HOUR_BELOW_DEG` | 15 | probe series at sun 10 / 15 / 20 deg |
 | `LENSES` (standard, cinematic) | bloom 0.35/0.45, flare 0.12/0.18, grain 0.02/0.035, vignette 0/0.2, MotionBlurMax 1 % | the same clip through both lenses, with the sun in frame |
 | `LOCAL_EXPOSURE` | highlight 0.85, shadow 0.8 | Matterhorn north face: valley floor and snowfield in one frame |

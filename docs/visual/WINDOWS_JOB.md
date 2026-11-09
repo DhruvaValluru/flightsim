@@ -26,7 +26,7 @@ Follow docs/visual/RENDER_RUNBOOK.md exactly, in order; it has every flag. Steps
     --out runs\visual\final\look_label_check.json (0 ALIGNED, 1 NOT ALIGNED, 2 VOID).
 12. experiments\gate_v_visual.py: read --help first (it was not on the branch when the runbook was written); if missing, record it.
 13. Path-traced hero still: .\scripts\render_visual_sheet.ps1 -Step head_pt -PathTrace -Spp 256 -Shots a; copy a.png to final\.
-14. Sweep the uncalibrated constants in the runbook's order: TSR/Lumen/tiles-colour checks, UE_ZENITH_TRANSMITTANCE,
+14. Sweep the uncalibrated constants in the runbook's order: TSR/Lumen/tiles-colour checks, the per-pixel sun check,
     EV100_BANDS, look_label_check controls, world Mie (FLIGHTSIM_WORLD_BEAUTY_OVERRIDES, no rebuild), still samples/TSR.
 
 Rules: Google tiles are never optional (never FLIGHTSIM_GOOGLE_TILES=off); storm weather stays on by default;

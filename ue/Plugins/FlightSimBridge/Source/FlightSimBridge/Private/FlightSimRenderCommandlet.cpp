@@ -3149,8 +3149,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	//  4. Look-dev (ApplyBeautyPostProcess -> FFlightSimBeautyLook::Apply):
 	//     Lumen GI/reflection METHOD (same values as the -sky= plan), the
 	//     beauty EV100 ONLY on a plain manual exposure (a card triple or a
-	//     -sky= plan wins, recorded "applied: no"), sun TEMPERATURE only on an
-	//     uncoloured sun (never its lux), tonemap, grade, lens post (bloom,
+	//     -sky= plan wins, recorded "applied: no"), never the sun's colour or
+	//     lux (it refuses outer-space lux without per-pixel transmittance),
+	//     tonemap, grade, lens post (bloom,
 	//     flare, vignette, grain, fringe: the look's values replace the -sky=
 	//     plan's lens character on beauty), local exposure, DOF and motion
 	//     blur, LumenSceneDetail and SSR. NOT Lumen quality/distances.
