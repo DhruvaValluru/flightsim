@@ -201,7 +201,30 @@ def stale_manifest_reason(manifest_path: Path) -> Optional[str]:
     components = _missing_components_reason(manifest, version)
     if components:
         return components
+    package = _package_pins_reason(manifest)
+    if package:
+        return package
     return _unimportable_output_reason(Path(manifest_path), manifest)
+
+
+def _package_pins_reason(manifest: Dict) -> Optional[str]:
+    """Stale when the airframe's config pins package files (j11-package
+    lane: the livery, cockpit interior and pilot) that the manifest was
+    not converted from: a conversion from before the pins draws the
+    airframe without them, so it is converted and imported again (no
+    fetch when the source is already at the pinned commit)."""
+    name = manifest.get("name")
+    config = load_config(name) if isinstance(name, str) else None
+    pins = (config or {}).get("package_files") or []
+    if not pins:
+        return None
+    wanted = {(row.get("file"), row.get("sha256")) for row in pins}
+    have = {(row.get("file"), row.get("sha256")) for row in manifest.get("package_files") or []}
+    if wanted != have:
+        return (f"the {name} config pins {len(wanted)} package file(s) "
+                f"(livery, cockpit interior, pilot) the manifest was not "
+                f"converted from ({len(wanted - have)} missing or changed)")
+    return None
 
 
 def _missing_components_reason(manifest: Dict, version: int) -> Optional[str]:
@@ -313,6 +336,23 @@ def fetch_source(config: Dict, config_path: Path,
     subprocess.run(["git", "-C", str(source_dir), "checkout", "-q", commit],
                    check=True)
     return source_dir
+
+
+def verify_source_pins(config: Dict, source_dir: Path,
+                       report: Report = print) -> int:
+    """Every ``package_files`` pin of the config (git blob sha1 and sha256,
+    assets_pipeline/package_pins.py) holds on the fetched source, BEFORE
+    it is converted. Returns the number of files verified; raises the
+    named ``aircraft.package_pin`` refusal on the first mismatch set."""
+    from assets_pipeline.package_pins import PackagePinError, verify
+
+    try:
+        rows = verify(config, source_dir)
+    except PackagePinError as exc:
+        raise AircraftAssetError("aircraft.package_pin", exc.message) from exc
+    if rows:
+        report(f"{len(rows)} pinned package file(s) verified (git blob sha1 + sha256)")
+    return len(rows)
 
 
 def convert(config_path: Path, report: Report = print) -> Path:
@@ -521,7 +561,8 @@ def ensure_model(name: str, report: Report = print) -> Path:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         try:
             if config.get("converter") != "mdl":   # local models need no fetch
-                fetch_source(config, config_path, report)
+                source_dir = fetch_source(config, config_path, report)
+                verify_source_pins(config, source_dir, report)
         except subprocess.CalledProcessError as exc:
             raise AircraftAssetError(
                 "aircraft.mesh_import",
