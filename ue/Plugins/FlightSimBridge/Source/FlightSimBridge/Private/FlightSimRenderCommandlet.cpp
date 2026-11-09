@@ -2554,6 +2554,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		AircraftFXOptions.Aircraft = Scenario.Aircraft;
 		AircraftFXOptions.MeshManifestPath = MeshManifestPath;
 		AircraftFXOptions.Livery = MeshAirframe.Livery;
+		AircraftFXOptions.Weather = Weather.IsBuilt() ? &Weather : nullptr;  // wet-airframe-canopy
 		if (!AircraftFX.Build(World, AircraftFXOptions, Error)) { return Fail(Error); }
 		VisualScene.BeautyOnlyActors.Append(AircraftFX.BeautyOnlyActors);
 	}

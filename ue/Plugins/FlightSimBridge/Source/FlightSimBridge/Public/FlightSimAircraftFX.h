@@ -48,9 +48,11 @@
 
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
+#include "FlightSimAircraftWet.h"  // wet-airframe-canopy
 #include "Templates/Function.h"
 
 class AActor;
+class FFlightSimWeather;
 class UMaterialInstanceDynamic;
 class UPointLightComponent;
 class UProceduralMeshComponent;
@@ -74,6 +76,8 @@ struct FFlightSimAircraftFXOptions
 	bool bContrails = true;
 	bool bAfterburner = true;
 	bool bHeatHaze = false;
+	// wet-airframe-canopy: the built weather (its rain wets the airframe), or null.
+	const FFlightSimWeather* Weather = nullptr;
 	// Read the switches above from the commandlet's parameters.
 	void ParseParams(const FString& Params);
 };
@@ -158,4 +162,8 @@ private:
 	double PeakAfterburner = 0.0;
 	int32 StrobeOnFrames = 0;
 	int32 LandingOnFrames = 0;
+	// wet-airframe-canopy: one MID per look slot (the wet scalars), the weather, the wetness.
+	TArray<UMaterialInstanceDynamic*> LookMids;
+	const FFlightSimWeather* Weather = nullptr;
+	FFlightSimAircraftWet Wet;
 };

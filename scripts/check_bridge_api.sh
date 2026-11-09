@@ -558,6 +558,48 @@ else
     bad "engine WhiteSquareTexture" "missing: the aircraft masters' BaseColorMap default"
 fi
 
+# -- WET-AIRFRAME-CANOPY: engine surface the wet airframe assumes ----------
+# FlightSimAircraftWet.cpp (scalars on the look MIDs, the anisotropy cvar
+# record) and scripts/aircraft_wet_layer.py (the graft: Break -> Custom with
+# an additional output -> Make, the glass's world-space tangent), written on
+# a Mac that cannot compile UE 5.7 (visual overhaul, 2026-11-09). Each line is
+# one symbol grepped in the 5.7.4 headers when it was written.
+wet_check() {  # label, file (relative to $UE_ROOT/Engine/Source or $UE_ROOT/Engine), fixed-string pattern
+    local file="$UE_ROOT/Engine/Source/$2"
+    [ -f "$file" ] || file="$UE_ROOT/Engine/$2"
+    if [ ! -f "$file" ]; then
+        bad "wet: $1" "$2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$file"; then
+        ok "wet: $1" "present"
+    else
+        bad "wet: $1" "not found in $2 -- FlightSimAircraftWet.cpp / aircraft_wet_layer.py need updating"
+    fi
+}
+WM="Runtime/Engine/Public/Materials"
+wet_check "MID SetScalarParameterValue" "$WM/MaterialInstanceDynamic.h" "void SetScalarParameterValue(FName ParameterName, float Value)"
+wet_check "MID Create" "$WM/MaterialInstanceDynamic.h" "static ENGINE_API UMaterialInstanceDynamic* Create( class UMaterialInterface* ParentMaterial, class UObject* InOuter"
+wet_check "IConsoleManager FindConsoleVariable" "Runtime/Core/Public/HAL/IConsoleManager.h" "virtual IConsoleVariable* FindConsoleVariable(const TCHAR* Name"
+wet_check "IConsoleVariable GetInt" "Runtime/Core/Public/HAL/IConsoleManager.h" "virtual int32 GetInt() const = 0;"
+wet_check "cvar r.AnisotropicMaterials" "Runtime/Renderer/Private/AnisotropyRendering.cpp" 'TEXT("r.AnisotropicMaterials")'
+wet_check "Cine scalability enables anisotropy" "Config/BaseScalability.ini" "r.AnisotropicMaterials=1"
+wet_check "anisotropy tangent in the normal's space" "Shaders/Private/MaterialTemplate.ush" "float3 CalculateAnisotropyTangent"
+wet_check "Custom AdditionalOutputs" "$WM/MaterialExpressionCustom.h" "TArray<struct FCustomOutput> AdditionalOutputs;"
+wet_check "FCustomOutput OutputName" "$WM/MaterialExpressionCustom.h" "FName OutputName;"
+wet_check "Custom output 0 is 'return'" "Runtime/Engine/Private/Materials/MaterialExpressions.cpp" 'Outputs.Add(FExpressionOutput(TEXT("return")));'
+wet_check "Custom CMOT_Float1" "$WM/MaterialExpressionCustom.h" "CMOT_Float1"
+wet_check "BreakMaterialAttributes" "$WM/MaterialExpressionBreakMaterialAttributes.h" "class UMaterialExpressionBreakMaterialAttributes"
+wet_check "Break output ClearCoatRoughness" "Runtime/Engine/Private/Materials/MaterialExpressions.cpp" 'Outputs.Add(FExpressionOutput(TEXT("ClearCoatRoughness"), 1, 1, 0, 0, 0));'
+wet_check "MakeMaterialAttributes Anisotropy" "$WM/MaterialExpressionMakeMaterialAttributes.h" "FExpressionInput Anisotropy;"
+wet_check "MakeMaterialAttributes Tangent" "$WM/MaterialExpressionMakeMaterialAttributes.h" "FExpressionInput Tangent;"
+wet_check "AppendVector" "$WM/MaterialExpressionAppendVector.h" "class UMaterialExpressionAppendVector"
+wet_check "VertexNormalWS" "$WM/MaterialExpressionVertexNormalWS.h" "class UMaterialExpressionVertexNormalWS"
+wet_check "EditingLibrary GetMaterialPropertyInputNode" "Editor/MaterialEditor/Public/MaterialEditingLibrary.h" "static UE_API UMaterialExpression* GetMaterialPropertyInputNode(UMaterial* Material, EMaterialProperty Property);"
+wet_check "EditingLibrary GetMaterialPropertyInputNodeOutputName" "Editor/MaterialEditor/Public/MaterialEditingLibrary.h" "GetMaterialPropertyInputNodeOutputName(UMaterial* Material, EMaterialProperty Property);"
+wet_check "Json TryGetObjectField (pointer)" "Runtime/Json/Public/Dom/JsonObject.h" "bool TryGetObjectField(FStringView FieldName, const TSharedPtr<FJsonObject>*& OutObject) const;"
+wet_check "Json TryGetNumberField" "Runtime/Json/Public/Dom/JsonObject.h" "bool TryGetNumberField(FStringView FieldName, double& OutNumber) const;"
+wet_check "FMath Exp(double)" "Runtime/Core/Public/GenericPlatform/GenericPlatformMath.h" "double Exp(double Value)"
+# -- WET-AIRFRAME-CANOPY -- end
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'

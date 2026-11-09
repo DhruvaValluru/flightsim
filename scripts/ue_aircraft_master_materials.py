@@ -59,9 +59,10 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import aircraft_look as look  # noqa: E402
+import aircraft_wet_layer  # noqa: E402  (wet-airframe-canopy)
 
 REPO = os.path.dirname(_HERE)
-LOOK_GENERATION = "1"
+LOOK_GENERATION = "2"  # 2: wet-airframe-canopy wet layer and canopy scratches
 LOOK_GENERATION_TAG = "FlightSimAircraftLookGeneration"
 #: The engine's white texture, the default of every BaseColorMap
 #: (Engine/Content/EngineResources/WhiteSquareTexture.uasset, present in 5.7.4).
@@ -352,6 +353,8 @@ def _surface(name, cls, coat):
         _link(s["ClearCoat"], "", out, ("ClearCoat", "Clear Coat"))
         _link(s["ClearCoatRoughness"], "", out, ("ClearCoatRoughness", "Clear Coat Roughness"))
     _use_attributes(material, out)
+    # wet-airframe-canopy: the weather's wetness (shading only, opaque, no WPO).
+    aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], cls)
     _finish(material, name)
 
 
@@ -385,6 +388,10 @@ def create_aircraft_glass():
     _link(spec, "", out, "Specular")
     _link(s["Roughness"], "", out, "Roughness")
     _use_attributes(material, out)
+    # wet-airframe-canopy: wet glass (beads / streaks) and the anisotropic
+    # micro-scratches; the glass stays opaque.
+    aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], "glass")
+    aircraft_wet_layer.add_canopy_scratch(material, sys.modules[__name__])
     _finish(material, "M_AircraftGlass")
 
 
