@@ -293,25 +293,94 @@ clause needs its self-validation control to trip, otherwise the pass is
 void (§5). If the script is still missing, record "Gate V: no script" and
 go on.
 
-## 13. The path-traced hero still
+## 13. The path-traced hero still (the look's reference)
 
 ```powershell
-.\scripts\render_visual_sheet.ps1 -Step head_pt -PathTrace -Spp 256 -Shots a
+.\scripts\render_visual_sheet.ps1 -Step head_pt -PathTrace -Spp 1024 -Shots a,b,c
 Copy-Item runs\visual\head_pt\a.png runs\visual\final\hero_pathtrace_a.png
 ```
 
 `-PathTrace` adds `-quality=pathtrace` and the one-process
 `-ini:Engine:[/Script/Engine.RendererSettings]:r.RayTracing=True` override
-to the per-camera pass only. `-Spp` accepts 1 to 16384, and
-`-StillSamples` cannot be combined with it. The first run compiles the
-ray-tracing shaders and is slow. It refuses by name (`render.pathtrace`)
-without hardware ray tracing, or when `IsRayTracingEnabled()` stays false
-under the override, which is an open risk. Read
-`render_settings.beauty_path.path_tracer` and
-`accumulation.captures_per_frame`, because exposure changes can reset
-the accumulation. The denoiser plugins (NNEDenoiser, OpenImageDenoise)
-are not enabled in `FlightSim.uproject`, so expect noise at 256 spp. For
-a convergence series, try 64 and 1024.
+to the per-camera pass only. `-Spp` accepts 1 to 16384 (the commandlet's
+default is 256), and `-StillSamples` cannot be combined with it. The first
+run compiles the ray-tracing shaders and is slow. It refuses by name
+(`render.pathtrace`) without hardware ray tracing, or when
+`IsRayTracingEnabled()` stays false under the override, which is an open
+risk.
+
+What the pathtrace branch now sets (reference-frames lane, PROBE_LOG.md
+"## reference-frames"), on the BEAUTY capture only:
+
+- the **reference atmosphere** (`PathTracingEnableReferenceAtmosphere`
+  on the capture's post process; `r.PathTracing.EnableReferenceAtmosphere`
+  stays -1 and inherits it) and the **reference clouds**
+  (`r.PathTracing.EnableReferenceClouds 1`). Without them the path tracer
+  drew no volumetric clouds and no aerial perspective;
+- the **NNE denoiser** at `NNEDenoiser.Asset 3` (OIDN 2.3 High Quality),
+  run once on the last sample. `NNEDenoiser` is now listed in
+  `FlightSim.uproject`; it was already loaded by default, so measure is
+  unchanged.
+
+Read in `render.json`: `render_settings.beauty_path.path_tracer`,
+`cvars_read_back` (`r.PathTracing.EnableReferenceClouds`,
+`NNEDenoiser.Asset`: "absent" means the plugin did not load) and
+`accumulation.captures_per_frame` (exposure changes and tile streaming can
+reset the accumulation). Search `render.log` for `LogNNEDenoiser`: "Could
+not create denoiser" means the still is raw (no DirectML runtime). For the
+convergence series, try 256, 1024 and 4096 on shot `a` and stop where the
+sky band stops changing.
+
+## 13b. Match the realtime beauty to the reference
+
+Each pass: render the reference once (13), render the realtime beauty of
+the same shots, run `look_match`, apply what it wrote, re-render the
+realtime beauty, and match again until it prints `converged`.
+
+```powershell
+# 1. the realtime beauty of the same shots (same cards, same poses)
+.\scripts\render_visual_sheet.ps1 -Step head_rt -Shots a,b,c
+# 2. the match, one shot at a time
+& $py experiments\look_match.py --steps head_pt head_rt --shot a
+#    -> runs\look_match\a\look_match.json, beauty_look.json,
+#       world_beauty_overrides.json, and maybe a -sky-light-scale= flag
+```
+
+It refuses by name: `look_match.inputs` (a frame, its mask, depth or look
+file is missing), `look_match.not_same_shot` (size or depth differs: the
+two runs are not the same shot) and `look_match.quality` (the reference
+is not pathtrace, or the realtime frame is not beauty). Regions come from
+the realtime run's labels: sky (depth +inf), ground, aircraft (the mask).
+
+3. **Apply.**
+   - World (haze, cloud extinction): set
+     `$env:FLIGHTSIM_WORLD_BEAUTY_OVERRIDES = (Resolve-Path runs\look_match\a\world_beauty_overrides.json).Path`
+     before the next render. It already merges the overrides that were in
+     force.
+   - Beauty look (exposure EV100, colour grade) and the sky light: the web
+     app writes its own `-beauty-look=` sidecar for every run, so these
+     two are applied by re-running the realtime run's commandlet command.
+     Copy it from that run's `render.log` (`LogInit: Command Line:`), and
+     REPLACE the `-beauty-look=` token with
+     `runs\look_match\a\beauty_look.json`. If the match printed a
+     `-sky-light-scale=` flag, replace the existing one or add it. The
+     engine reads the first occurrence of a flag, so do not append a
+     second one.
+4. **Re-render** the realtime beauty (step 1, or the edited command) and
+   run step 2 again, with `--beauty-look runs\look_match\a\beauty_look.json`
+   and `--world-overrides` pointing at the file in force. Stop at
+   `converged`, or after four passes. Record each pass's suggestions in
+   PROBE_LOG.md "## reference-frames".
+5. Once the numbers converge on shots a to c, move the values into the
+   constants they came from (`core/scene/beauty_look.py`,
+   `core/scene/world_beauty.py`), each still marked UNCALIBRATED with the
+   probe named, and re-run sections 6 (measure unchanged) and 10
+   (`flightsim.verify`).
+
+This is VISUAL ONLY. The reference never feeds a label, and the frames are
+display-referred, so every step is damped. A sky that is still too bright
+or too dark after the exposure converges is reported in `not_judged`,
+because no look constant owns the atmosphere's own scattering.
 
 ## 14. Uncalibrated constants: sweep these first
 

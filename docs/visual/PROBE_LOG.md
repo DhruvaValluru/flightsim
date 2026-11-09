@@ -751,3 +751,132 @@ $env:FLIGHTSIM_RENDER_QUALITY = "beauty";  .\.venv\Scripts\python.exe -m uvicorn
 Record each run's offsets here, and in ruflo under
 `visual-overhaul/verifier-tooling/probe-<date>`, before changing any
 constant above.
+
+## reference-frames
+
+Lane: a path-traced REFERENCE for the look, and the tools that match the
+realtime beauty to it. Files: `core/scene/look_match.py` (the pure part:
+metrics, suggestions, refusals), `experiments/look_match.py` (the CLI),
+`tests/test_look_match.py`, a 4-line hook in the pathtrace branch of
+`FlightSimRenderCommandlet.cpp`, one plugin line in `ue/FlightSim.uproject`,
+the "reference-frames lane" block in `scripts/check_bridge_api.sh`, three
+`look_match.*` names in `core/messages/catalog.yaml`, and runbook step 13.
+Session 2026-11-09, on the Mac that cannot build or render. **Nothing below
+has been rendered or measured**; every engine symbol was read in the 5.7.4
+source and is grepped by the check script's block.
+
+### Decisions
+
+1. **Reference atmosphere and clouds on the pathtrace route.** Without them
+   the path tracer has no volumetric sky: `PreparePathTracingCloudMaterial`
+   skips the cloud callable unless `UsesReferenceAtmosphere`, so the hero
+   still drew the volumetric clouds and the aerial perspective NOT AT ALL
+   (refuter memory `visual-overhaul/swarm/refuter1-consts-render-path-refatmo`).
+   The branch now sets `bOverride_PathTracingEnableReferenceAtmosphere` and
+   `PathTracingEnableReferenceAtmosphere = 1` on the BEAUTY capture's post
+   process (the cvar `r.PathTracing.EnableReferenceAtmosphere` defaults to -1,
+   which inherits this; PathTracing.cpp `UsesReferenceAtmosphere`), and sets
+   `r.PathTracing.EnableReferenceClouds 1` explicitly (its default, stated and
+   read back). Under the reference atmosphere the sky light's skydome is
+   dropped from the path tracer's light list (`bEnableSkydome =
+   !bUseAtmosphere`), so the sky is not counted twice. The raster sky passes
+   are skipped for that family only (DeferredShadingRenderer.cpp
+   `bPathTracedAtmosphere`). Label captures are separate captures with no
+   PathTracing show flag, so they inherit none of it.
+2. **Denoiser: NNEDenoiser, made explicit; OpenImageDenoise left off.** Read
+   at load: `NNEDenoiser.uplugin` is `"EnabledByDefault": true` and the
+   project sets no `bAllowEnginePluginsEnabledByDefault=false`, so it was
+   ALREADY loaded in every FlightSim process, measure included (the
+   render-path note "neither is enabled" was wrong for this one). Its module
+   registers a scene view extension only when `IsRayTracingAllowed()` (it
+   is not under measure: `r.RayTracing` stays out of DefaultEngine.ini), and
+   the extension activates only on a view family with the PathTracing show
+   flag (`BeginRenderViewFamily` timeout counter), and registers a denoiser
+   that only `RenderPathTracing` calls, on the last sample. So listing it in
+   the uproject changes no module set and no measure pixel; it pins the
+   hero denoiser against an engine default change. `OpenImageDenoise` is
+   `EnabledByDefault: false` and Win64-only: enabling it would add a module
+   load to every process for no gain over NNEDenoiser (the same OIDN 2.3
+   network), so it stays off. `r.PathTracing.Denoiser.Name` defaults to
+   `NNEDenoiser` and is recorded, as before.
+3. **Denoiser quality: `NNEDenoiser.Asset 3`** (OIDN 2.3 High Quality, colour
+   + albedo + normal). The project-settings default is Balanced+Alpha. Set
+   with `SetBeautyCvar`, so it is in `cvars_asked`/`cvars_read_back`.
+4. **Samples: the default stays 256; references use `-Spp 1024`.**
+   `RenderPathTraceSppDefault` is the render-path lane's constant, and each
+   sample is one `CaptureScene` (a pathtrace clip pays it per frame), so it
+   is left alone; the runbook asks for `-Spp 1024` on reference stills,
+   because the volumetric clouds converge more slowly than surfaces.
+   Denoised 1024 is the starting point; the convergence probe below sets it.
+5. **Labels match pixels.** Nothing here moves geometry. The reference
+   clouds may hide part of the aircraft in the path-traced frame, which the
+   mask (clouds absent, `SetCloud(false)`) still shows: the existing
+   visual-only cloud rule, unchanged.
+6. **look_match regions** come from the REALTIME run's label bundle (labels
+   are rasterised identically under both qualities): sky = depth +inf,
+   ground = finite depth, aircraft = the ID mask's `class: aircraft` int_ids
+   (default 1). Two depth files that disagree (median relative > 1%, or > 1%
+   of pixels switching sky/ground) refuse `look_match.not_same_shot`.
+7. **Metrics** are on the display-referred PNGs (sRGB decoded to linear):
+   luminance in stops (median), CIEDE2000 (Sharma 2005; tested against its
+   reference pairs) of the region means and per pixel, L* interquartile
+   contrast, shadow depth log2(median / p05), and the far-ground (depth >=
+   p75) L* spread for haze. Because the tonemapper sits between, a PNG stop
+   is not a scene stop: every step is damped and clamped, and the runbook
+   iterates until `converged`.
+8. **Which knob each metric moves, in the files their loaders already read:**
+   lit (ground + aircraft) luminance -> `beauty_look.json exposure.ev100`;
+   colour cast -> `color_grade.ColorGain` (luminance-preserving);
+   chroma -> `ColorSaturation`; mid-tone contrast -> `ColorContrast`; shadow
+   depth -> `-sky-light-scale=` (the fill; the flag has no sidecar);
+   far-ground contrast -> `world_beauty_overrides.json
+   atmosphere.<preset>.aerial_perspective_scale`; sky L* spread (only when
+   the reference sky has cloud structure) -> `constants.cloud_extinction_scale`.
+   Sky brightness left over after the exposure is REPORTED, not corrected:
+   no look constant owns the atmosphere's own scattering.
+9. **Applying the overrides** (runbook 13b). The world file goes in through
+   `FLIGHTSIM_WORLD_BEAUTY_OVERRIDES`, so the contact sheet picks it up.
+   The web app writes its own `-beauty-look=` sidecar on every run, so the
+   matched `beauty_look.json` and the `-sky-light-scale=` flag are applied
+   by re-running the commandlet command from the realtime run's
+   `render.log` with those tokens REPLACED. The engine reads a flag's
+   first occurrence, so appending a second one does nothing. A web-app
+   input for both is left to the web-app lane.
+
+### Uncalibrated constants (each: UNCALIBRATED, set by probe render on the render machine)
+
+| Constant | Value | Probe that sets it |
+|---|---|---|
+| `NNEDenoiser.Asset` (commandlet, pathtrace) | 3 (High Quality) | shot (a) at 256 spp, Asset 2 vs 3: residual noise in the sky band against frame time |
+| reference spp (runbook `-Spp`) | 1024 | shot (a) at 256, 1024, 4096 denoised: stop when the sky band's L* std changes < 0.5 |
+| `look_match.EXPOSURE_GAIN` / `_TOLERANCE_STOPS` / `_STEP_MAX_STOPS` | 0.8 / 0.10 / 2.0 | iterations to converge on shot (a); lower the gain if it overshoots |
+| `GAIN_DAMP`, `GAIN_STEP_CLAMP`, `COLOUR_TOLERANCE_DE00` | 0.7, (0.85, 1.15), 2.0 | shot (a) golden hour: the cast after two passes |
+| `SATURATION_*`, `CONTRAST_*` | 0.05 / 0.7 / (0.8, 1.25); 0.05 / 0.6 / (0.8, 1.25) | shot (b) desert low pass |
+| `SHADOW_TOLERANCE_STOPS`, `SKY_LIGHT_GAIN`, `SKY_LIGHT_STEP_CLAMP` | 0.15, 0.6, (0.5, 2.0) | shot (b), the aircraft's shadow side |
+| `HAZE_*`, `FAR_GROUND_PERCENTILE` | 0.08 / 0.7 / (0.7, 1.4); 75 | shot (c) forest in rain, far ridges |
+| `CLOUD_SKY_MIN_SPREAD_L`, `CLOUD_*` | 3.0; 0.08 / 0.6 / (0.5, 2.0) | shot (c) storm deck |
+| `MIN_REGION_PIXELS` | 64 | none: below it a region is skipped |
+
+### Open risks (not verifiable here)
+
+- The path tracer and the realtime path draw the SAME clouds only if the
+  reference clouds trace the cloud material the world lane builds; their
+  look may still differ by model (the raster clouds' multiple-scattering
+  approximation). The cloud suggestion then tunes the raster clouds toward
+  the traced ones, which is the point, but it is a heuristic on L* spread.
+- Exposure: the beauty look is manual, so the accumulation does not reset
+  (`IsExposureDifferentEnough`). A card that is auto-exposed would.
+- The NNE denoiser runs on `NNERuntimeORTDml` (DirectML) by default; on a
+  driver without it the denoiser logs "Could not create denoiser" and the
+  still is raw. Read the log for `LogNNEDenoiser`.
+- Google tiles streaming during the 1024 samples would reset the
+  accumulation (render-path risk, unchanged).
+
+### Render-machine commands
+
+```powershell
+.\scripts\render_visual_sheet.ps1 -Step ref_pt -PathTrace -Spp 1024 -Shots a,b,c
+.\scripts\render_visual_sheet.ps1 -Step ref_rt -Shots a,b,c
+.\.venv\Scripts\python.exe experiments\look_match.py --steps ref_pt ref_rt --shot a
+#   then RENDER_RUNBOOK.md step 13b: apply, re-render, match again until "converged"
+```
