@@ -458,6 +458,29 @@ else
     bad "engine WhiteSquareTexture" "missing: the aircraft masters' BaseColorMap default"
 fi
 
+# -- supersample lane (visual overhaul, 2026-11-09): -supersample=N ---------
+# FlightSimSupersample.cpp and its hooks in FlightSimRenderCommandlet.cpp.
+# Each pattern is a fixed string read in the 5.7.4 source when written.
+ss_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
+    local f="$UE_ROOT/Engine/Source/Runtime/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- FlightSimSupersample.cpp needs updating"
+    fi
+}
+ss_check "supersample: GMaxTextureDimensions" "RHI/Public/RHIGlobals.h" "#define GMaxTextureDimensions"
+ss_check "supersample: RenderTarget InitAutoFormat" "Engine/Classes/Engine/TextureRenderTarget2D.h" "ENGINE_API void InitAutoFormat(uint32 InSizeX, uint32 InSizeY);"
+ss_check "supersample: RTF_RGBA8_SRGB" "Engine/Classes/Engine/TextureRenderTarget2D.h" "RTF_RGBA8_SRGB,"
+ss_check "supersample: SCS_FinalColorLDR" "Engine/Classes/Engine/EngineTypes.h" "SCS_FinalColorLDR UMETA"
+ss_check "supersample: ReadPixels FColor" "Engine/Public/UnrealClient.h" "ENGINE_API virtual bool ReadPixels(TArray<FColor>& OutImageData"
+ss_check "supersample: Json TryGetObjectField" "Json/Public/Dom/JsonObject.h" "JSON_API bool TryGetObjectField(FStringView FieldName, const TSharedPtr<FJsonObject>*& OutObject) const;"
+ss_check "supersample: FParse::Value int32" "Core/Public/Misc/Parse.h" "static CORE_API bool Value( const TCHAR* Stream, const TCHAR* Match, int32& Value );"
+ss_check "supersample: TArray SetNumUninitialized" "Core/Public/Containers/Array.h" "void SetNumUninitialized(SizeType NewNum"
+# -- supersample lane end ---------------------------------------------------
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'
