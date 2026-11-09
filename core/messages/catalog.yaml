@@ -293,6 +293,10 @@ render.pathtrace:
   sentence: "The path-traced render cannot run here: it needs the Windows render host with hardware ray tracing turned on for that render."
   hint: "Render the path-traced sheet on the Windows box, or ask for the beauty quality instead."
 
+render.beauty_look:
+  sentence: "The beauty look cannot be planned or applied: an unknown grade or lens, a sun that cannot be lit, a camera without a sensor width, or a sidecar the renderer cannot read."
+  hint: "Use a known grade (golden hour, desert noon or storm) and lens (standard or cinematic), or render at the measure quality."
+
 # -- the batch runner (core/dataset/batch.py) --------------------------------
 
 batch.matrix:

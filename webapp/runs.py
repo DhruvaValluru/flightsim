@@ -2411,6 +2411,71 @@ def render_quality() -> str:
     return quality
 
 
+# -- the beauty look (look-dev lane; core/scene/beauty_look.py) -----------------
+#: The beauty look rides EVERY beauty render with no extra command (the
+#: owner's "why do I have to add all these extra commands"): the grade is
+#: chosen from the weather and the sun (core.scene.beauty_look.grade_for),
+#: the lens is "standard". No environment switch selects them: the
+#: FLIGHTSIM_* surface is frozen at 23 names (core/config_surface.py, E1).
+#: The "cinematic" lens and a forced grade are reachable through
+#: plan_beauty_look(lens=..., grade=...). Measure renders never get a
+#: sidecar, so their command is byte-identical.
+
+
+def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
+                           sky: Optional[Path] = None, *, grade: Optional[str] = None,
+                           lens: Optional[str] = None) -> Optional[Path]:
+    """Write the run's ``beauty_look.json`` (the ``-beauty-look=`` sidecar)
+    when the render quality is beauty; None otherwise (measure: nothing is
+    written and no flag is added). ``look`` is the look the render is given
+    (its sun elevation chooses the band and grade); ``sky`` the physical-sky
+    sidecar, whose plan then keeps the sun and the exposure. ``grade`` /
+    ``lens``: None for the automatic grade and the standard lens."""
+    if render_quality() != "beauty":
+        return None
+    from core.render.flags import DEFAULT_LOOK
+    from core.scene.beauty_look import (
+        DEFAULT_LENS, DEFAULT_SENSOR_WIDTH_MM, plan_beauty_look, write_beauty_look,
+    )
+
+    lens = lens or DEFAULT_LENS
+    elevation = float((look or {}).get("sun_elev", DEFAULT_LOOK["sun_elev"]))
+    if sky is not None:
+        elevation = float(json.loads(Path(sky).read_text(encoding="ascii"))
+                          ["sun"]["elevation_deg"])
+    sensors = []
+    for camera in spec.cameras or default_cameras(spec):
+        try:
+            sensors.append(float(camera.sensor_width_mm.value))
+        except (AttributeError, TypeError, ValueError):
+            sensors.append(DEFAULT_SENSOR_WIDTH_MM)
+    scene_block = getattr(spec, "scene", None)
+    stated = getattr(getattr(scene_block, "sun_lux", None), "value", None)
+    altitude = getattr(getattr(spec, "terrain_elevation", None), "value", 0.0)
+    try:
+        altitude = float(altitude or 0.0)
+    except (TypeError, ValueError):
+        altitude = 0.0
+    plan = plan_beauty_look(
+        elevation, fps=FPS, width_px=RENDER_QUALITIES["beauty"]["width"],
+        sensor_width_mm=sensors or [DEFAULT_SENSOR_WIDTH_MM], grade=grade, lens=lens,
+        weather_event=str(getattr(getattr(spec, "weather_event", None), "value", "none")),
+        raining=rain_rate(spec) is not None, altitude_m=altitude,
+        stated_sun_lux=None if stated is None else float(stated),
+        physical_sky=sky is not None)
+    return write_beauty_look(plan, Path(out) / "beauty_look.json")
+
+
+def beauty_look_render_flags(path: Optional[Path]) -> List[str]:
+    """The commandlet tokens for a written sidecar (``-beauty-look=`` and,
+    when the plan puts the sun in lux, ``-sun-lux=``); [] for None."""
+    if path is None:
+        return []
+    from core.scene.beauty_look import beauty_look_flags
+
+    return beauty_look_flags(path, json.loads(Path(path).read_text(encoding="ascii")))
+
+
 #: The storm weather (core/scene/storm_weather.py, FlightSimWeather.cpp) is
 #: ON by default beside the weather look (the owner's rule); FLIGHTSIM_WEATHER_BACKEND=off
 #: (deterministic drops) or niagara (the hand-built NS_FlightSimRain)
@@ -3091,7 +3156,8 @@ class RunManager:
                 aircraft: str, telemetry: Optional[Path] = None,
                 look: Optional[Dict] = None,
                 camera_flags=None, extra=None,
-                sky: Optional[Path] = None) -> bool:
+                sky: Optional[Path] = None,
+                beauty_look: Optional[Path] = None) -> bool:
         """The showcase render command, with terrain/imagery conditional.
 
         Same flags render_cell passes (gotcha 1: absolute paths, -stdout,
@@ -3115,6 +3181,9 @@ class RunManager:
         # left alone. No extraction on this machine -> no flags.
         if sky is None:
             extra += xplane_lighting_flags(look)
+        # The beauty look's sidecar (write_beauty_look_plan), beauty only:
+        # None under measure adds nothing, so the pinned command stands.
+        extra += beauty_look_render_flags(beauty_look)
         # Phase 2 (package A, contracts §9): the flag list comes from the
         # ONE builder the CLI also uses. Which passes get which flags:
         #   * a per-camera pass (the capture stage's loop hands in
@@ -3813,6 +3882,14 @@ class RunManager:
                 f"{plan['sun']['elevation_deg']:+.1f} deg, moon "
                 f"{plan['moon']['illuminated_fraction']:.0%} lit, EV100 "
                 f"{plan['exposure']['ev100']:+.1f}; clouds VISUAL ONLY")
+        # The beauty look (beauty quality only; None under measure).
+        beauty_look = write_beauty_look_plan(
+            spec, out, render_look_for(spec, event_note), sky=sky)
+        if beauty_look is not None:
+            beauty = json.loads(beauty_look.read_text(encoding="ascii"))
+            run.conditions["beauty_look"] = (
+                f"beauty look: grade {beauty['grade']} ({beauty['grade_basis']}), "
+                f"lens {beauty['lens']}; VISUAL ONLY, uncalibrated")
         # Prompt/model provenance in a Python-written UTF-8 sidecar; the
         # UE-written manifest stays ASCII (gotcha 13).
         (out / "provenance.json").write_text(json.dumps({
@@ -3972,7 +4049,7 @@ class RunManager:
                         telemetry=telemetry,
                         look=render_look_for(spec, event_note),
                         camera_flags=camera_flags, extra=list(extra) + pass_extra,
-                        sky=sky))
+                        sky=sky, beauty_look=beauty_look))
             except CaptureError as exc:
                 # The render log for the pass that failed sits beside its
                 # frames. Say what it HOLDS, not where it is: whoever is
@@ -3994,7 +4071,8 @@ class RunManager:
         elif not self._render(card, frames, scene, mesh, aircraft,
                               telemetry=out / "telemetry.json",
                               look=render_look_for(spec, event_note),
-                              camera_flags=camera_flags, sky=sky):
+                              camera_flags=camera_flags, sky=sky,
+                              beauty_look=beauty_look):
             run.push("failed", "the render commandlet wrote no manifest; "
                                "its last words:\n"
                                + (self.commandlet_last_words(

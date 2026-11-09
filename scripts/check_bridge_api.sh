@@ -275,6 +275,58 @@ rp_cvar r.PathTracing.Denoiser.Name "Renderer/Private/PathTracingSpatialTemporal
 rp_cvar r.RayTracing "Renderer/Private/DeferredShadingRenderer.cpp"
 rp_cvar r.RayTracing.Nanite.Mode "Engine/Private/Rendering/NaniteResources.cpp"
 
+
+# -- engine surface the beauty look assumes (FlightSimBeautyLook.cpp) --------
+# Look-dev lane, 2026-11-09: each symbol was read in the UE 5.7.4 headers on
+# the authoring Mac (which cannot compile); re-checked here before a build.
+beauty_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
+    local f="$UE_ROOT/Engine/Source/Runtime/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- FlightSimBeautyLook.cpp needs updating"
+    fi
+}
+BSCENE="Engine/Classes/Engine/Scene.h"
+for p in FilmSlope FilmToe FilmShoulder FilmBlackClip FilmWhiteClip ToneCurveAmount \
+         ColorSaturation ColorContrast ColorGamma ColorGain ColorOffset WhiteTemp WhiteTint \
+         BloomMethod BloomIntensity BloomThreshold LensFlareIntensity LensFlareThreshold \
+         VignetteIntensity MotionBlurAmount MotionBlurMax MotionBlurPerObjectSize \
+         MotionBlurTargetFPS DepthOfFieldSensorWidth DepthOfFieldMinFstop \
+         DepthOfFieldFocalDistance DepthOfFieldBladeCount CameraShutterSpeed CameraISO \
+         LocalExposureMethod LocalExposureHighlightContrastScale \
+         LocalExposureShadowContrastScale LocalExposureDetailStrength \
+         LocalExposureBlurredLuminanceBlend LocalExposureMiddleGreyBias \
+         LumenReflectionQuality LumenFinalGatherQuality LumenSceneLightingQuality \
+         LumenSceneDetail LumenMaxTraceDistance LumenFrontLayerTranslucencyReflections \
+         ScreenSpaceReflectionIntensity ScreenSpaceReflectionQuality \
+         ScreenSpaceReflectionMaxRoughness; do
+    beauty_check "PostProcess $p" "$BSCENE" "bOverride_$p"
+done
+beauty_check "EBloomMethod BM_SOG" "$BSCENE" "BM_SOG"
+beauty_check "ELocalExposureMethod Bilateral" "$BSCENE" "enum class ELocalExposureMethod"
+beauty_check "DirectionalLight GetAtmosphereSunLightIndex" \
+    "Engine/Classes/Components/DirectionalLightComponent.h" "GetAtmosphereSunLightIndex() const override"
+beauty_check "DirectionalLight IsUsedAsAtmosphereSunLight" \
+    "Engine/Classes/Components/DirectionalLightComponent.h" "IsUsedAsAtmosphereSunLight() const override"
+beauty_check "Light bUseTemperature" "Engine/Classes/Components/LightComponent.h" "uint32 bUseTemperature : 1;"
+beauty_check "Light SetUseTemperature" "Engine/Classes/Components/LightComponent.h" "void SetUseTemperature(bool bNewValue);"
+beauty_check "Light LightColor" "Engine/Classes/Components/LightComponentBase.h" "FColor LightColor;"
+beauty_check "FCommandLine::Get" "Core/Public/Misc/CommandLine.h" "static const TCHAR* Get();"
+# The premises the sun's lux is built on (core/scene/beauty_look.py): the
+# light's intensity is outer-space illuminance times the atmosphere's
+# transmittance, and the manual exposure is log2(N^2 * shutter * 100 / ISO).
+beauty_check "premise: lux x transmittance" "Engine/Private/Components/DirectionalLightComponent.cpp" \
+    "GetOuterSpaceIlluminance() * GetAtmosphereTransmittanceTowardSun()"
+beauty_check "premise: transmittance floor" "Engine/Classes/Components/SkyAtmosphereComponent.h" \
+    "float TransmittanceMinLightElevationAngle;"
+beauty_check "premise: physical camera EV100" "Renderer/Private/PostProcess/PostProcessEyeAdaptation.cpp" \
+    "FMath::Log2(FMath::Square(Settings.DepthOfFieldFstop) * Settings.CameraShutterSpeed * 100"
+for f in MotionBlur DepthOfField Bloom LensFlares Tonemapper LocalExposure ScreenSpaceReflections; do
+    showflag_check "$f"
+done
 if [ -f "$UE_ROOT/Engine/Content/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.uasset" ]; then
     ok "engine simple cloud material" "present"
 else

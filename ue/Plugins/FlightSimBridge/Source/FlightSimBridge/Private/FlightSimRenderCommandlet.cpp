@@ -1,5 +1,6 @@
 #include "FlightSimRenderCommandlet.h"
 
+#include "FlightSimBeautyLook.h"   // look-dev lane hook
 #include "FlightSimCameraDirector.h"
 #include "FlightSimOrographic.h"
 #include "FlightSimSky.h"
@@ -2749,6 +2750,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (bVisual && bBeauty)
 	{
 		FFlightSimVisualScene::ApplyBeautyPostProcess(Capture);
+		// look-dev lane hook (FlightSimBeautyLook.cpp): a -beauty-look= sidecar
+		// that cannot be applied refuses; an applied EV100 is the exposure of record.
+		if (!FFlightSimBeautyLook::LastError().IsEmpty()) { return Fail(FFlightSimBeautyLook::LastError()); }
+		FFlightSimBeautyLook::RecordExposure(ExposureMode, ExposureSource, AppliedEv100, bAppliedEv100);
 		auto SetCvar = [](const TCHAR* Name, int32 Value)
 		{
 			if (IConsoleVariable* Variable =
@@ -4758,6 +4763,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			USkyLightComponent::UpdateSkyCaptureContents(World);
 			FlushRenderingCommands();
 		}
+		// look-dev lane hook: per-frame focus at the aircraft (cinematic lens only).
+		FFlightSimBeautyLook::UpdatePerFrame(Capture, Scenario.Aircraft);
 		// Render-path lane: the beauty sub-frames of this pose (none on
 		// measure: BeautySubFrames is 1 there and this loop is empty). The
 		// last capture is the one read back below.
@@ -7159,6 +7166,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Scene->SetBoolField(TEXT("sun_lux_applied"), bVisual && AppliedSunLux > 0.0);
 	}
 	Root->SetObjectField(TEXT("scene"), Scene);
+	// look-dev lane hook: render.json "beauty_look" (absent unless a sidecar was applied).
+	if (TSharedPtr<FJsonObject> BeautyLook = FFlightSimBeautyLook::Record()) { Root->SetObjectField(TEXT("beauty_look"), BeautyLook); }
 
 	// Environmental couplings, stated per run rather than assumed.
 	TSharedPtr<FJsonObject> Environment = MakeShared<FJsonObject>();
