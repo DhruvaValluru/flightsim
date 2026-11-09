@@ -410,7 +410,10 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	TInlineComponentArray<UStaticMeshComponent*> Parts;
 	Aircraft->GetComponents(Parts);
 	int32 Applied = 0;
-	TArray<TSharedPtr<FJsonValue>> Absent;
+	// Slot names without a look instance, once each (AddUnique on the JSON
+	// values would compare pointers and never deduplicate a slot that several
+	// parts share).
+	TArray<FString> AbsentNames;
 	for (UStaticMeshComponent* Part : Parts)
 	{
 		for (int32 Slot = 0; Slot < Part->GetNumMaterials(); ++Slot)
@@ -427,7 +430,7 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 			UMaterialInterface* LookInstance = LoadObject<UMaterialInterface>(nullptr, *Path);
 			if (LookInstance == nullptr)
 			{
-				Absent.AddUnique(MakeShared<FJsonValueString>(SlotName));
+				AbsentNames.AddUnique(SlotName);
 				continue;
 			}
 			Part->SetMaterial(Slot, LookInstance);
@@ -438,6 +441,11 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 		TEXT("offset, every class master opaque, so the label silhouette is the beauty's)"));
 	Row->SetStringField(TEXT("instance_root"), AssetRoot + TEXT("/") + AircraftFxLookFolder);
 	Row->SetNumberField(TEXT("slots_applied"), Applied);
+	TArray<TSharedPtr<FJsonValue>> Absent;
+	for (const FString& Name : AbsentNames)
+	{
+		Absent.Add(MakeShared<FJsonValueString>(Name));
+	}
 	Row->SetArrayField(TEXT("slots_absent"), Absent);
 	Record->SetObjectField(TEXT("materials"), Row);
 	UE_LOG(LogFlightSimAircraftFX, Display, TEXT("aircraft look: %d slot(s) on look instances, %d absent"),
