@@ -402,6 +402,61 @@ if grep -qF 'GetCloudSampleNormAltitudeInLayer' "$UE_ROOT/Engine/Config/BaseMate
 else
     bad "world: NormAltitudeInLayer output" "not in BaseMaterialExpressions.ini: M_FlightSimCloudLayers' pin name changed"
 fi
+# -- sun-shafts-sky-occlusion (visual overhaul, 2026-11-09) -----------------
+# FlightSimSunShafts.cpp: the sun's light shafts and cloud shadow, the sky
+# light's cloud AO, and the cvars it sets (each grepped in the 5.7.4 source
+# when written; r.LightShaftNumSamples was dropped, ECVF_ReadOnly). Paths are
+# relative to $UE_ROOT/Engine/Source/Runtime.
+sunshafts_check() {  # label, file (relative to $RT), fixed-string pattern
+    if [ ! -f "$RT/$2" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$RT/$2"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- FlightSimSunShafts.cpp needs updating"
+    fi
+}
+SS_DLC="Engine/Classes/Components/DirectionalLightComponent.h"
+SS_LC="Engine/Classes/Components/LightComponent.h"
+SS_SKY="Engine/Classes/Components/SkyLightComponent.h"
+sunshafts_check "sun-shafts: DirectionalLight SetEnableLightShaftOcclusion" "$SS_DLC" "ENGINE_API void SetEnableLightShaftOcclusion(bool bNewValue);"
+sunshafts_check "sun-shafts: DirectionalLight SetOcclusionMaskDarkness" "$SS_DLC" "ENGINE_API void SetOcclusionMaskDarkness(float NewValue);"
+sunshafts_check "sun-shafts: DirectionalLight SetOcclusionDepthRange" "$SS_DLC" "ENGINE_API void SetOcclusionDepthRange(float NewValue);"
+sunshafts_check "sun-shafts: Light SetEnableLightShaftBloom" "$SS_LC" "ENGINE_API void SetEnableLightShaftBloom(bool bNewValue);"
+sunshafts_check "sun-shafts: Light SetBloomScale" "$SS_LC" "ENGINE_API void SetBloomScale(float NewValue);"
+sunshafts_check "sun-shafts: Light SetBloomThreshold" "$SS_LC" "ENGINE_API void SetBloomThreshold(float NewValue);"
+sunshafts_check "sun-shafts: Light SetBloomMaxBrightness" "$SS_LC" "ENGINE_API void SetBloomMaxBrightness(float NewValue);"
+sunshafts_check "sun-shafts: DirectionalLight CloudShadowOnAtmosphereStrength" "$SS_DLC" "float CloudShadowOnAtmosphereStrength;"
+sunshafts_check "sun-shafts: DirectionalLight CloudShadowOnSurfaceStrength" "$SS_DLC" "float CloudShadowOnSurfaceStrength;"
+sunshafts_check "sun-shafts: DirectionalLight CloudShadowExtent" "$SS_DLC" "float CloudShadowExtent;"
+sunshafts_check "sun-shafts: DirectionalLight CloudShadowMapResolutionScale" "$SS_DLC" "float CloudShadowMapResolutionScale;"
+sunshafts_check "sun-shafts: DirectionalLight CloudShadowRaySampleCountScale" "$SS_DLC" "float CloudShadowRaySampleCountScale;"
+sunshafts_check "sun-shafts: DirectionalLight bCastCloudShadows" "$SS_DLC" "uint32 bCastCloudShadows : 1;"
+sunshafts_check "sun-shafts: SkyLight bCloudAmbientOcclusion" "$SS_SKY" "uint32 bCloudAmbientOcclusion : 1;"
+sunshafts_check "sun-shafts: SkyLight CloudAmbientOcclusionStrength" "$SS_SKY" "float CloudAmbientOcclusionStrength;"
+sunshafts_check "sun-shafts: SkyLight CloudAmbientOcclusionExtent" "$SS_SKY" "float CloudAmbientOcclusionExtent;"
+sunshafts_check "sun-shafts: SkyLight CloudAmbientOcclusionMapResolutionScale" "$SS_SKY" "float CloudAmbientOcclusionMapResolutionScale;"
+sunshafts_check "sun-shafts: SkyLight CloudAmbientOcclusionApertureScale" "$SS_SKY" "float CloudAmbientOcclusionApertureScale;"
+sunshafts_check "sun-shafts: SkyLight bRealTimeCapture" "$SS_SKY" "bool bRealTimeCapture;"
+sunshafts_check "sun-shafts: ActorComponent MarkRenderStateDirty" "Engine/Classes/Components/ActorComponent.h" "ENGINE_API void MarkRenderStateDirty();"
+sunshafts_check "sun-shafts: show flag LightShafts" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_ALWAYS_ACCESSIBLE(LightShafts,"
+sunshafts_check "sun-shafts: show flag VolumetricFog" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_ALWAYS_ACCESSIBLE(VolumetricFog,"
+sunshafts_cvar() {  # cvar name, file (relative to $RT)
+    sunshafts_check "sun-shafts: cvar $1" "$2" "TEXT(\"$1\")"
+}
+sunshafts_cvar r.VolumetricFog.GridPixelSize "Renderer/Private/VolumetricFog.cpp"
+sunshafts_cvar r.VolumetricFog.GridSizeZ "Renderer/Private/VolumetricFog.cpp"
+sunshafts_cvar r.VolumetricFog.HistoryMissSupersampleCount "Renderer/Private/VolumetricFog.cpp"
+sunshafts_cvar r.VolumetricCloud.ShadowMap "Renderer/Private/VolumetricCloudRendering.cpp"
+sunshafts_cvar r.VolumetricCloud.SkyAO "Renderer/Private/VolumetricCloudRendering.cpp"
+sunshafts_cvar r.VolumetricCloud.HighQualityAerialPerspective "Renderer/Private/VolumetricCloudRendering.cpp"
+sunshafts_cvar r.VolumetricCloud.Shadow.SampleAtmosphericLightShadowmap "Renderer/Private/VolumetricCloudRendering.cpp"
+sunshafts_cvar r.SkyLight.RealTimeReflectionCapture.TimeSlice "Renderer/Private/ReflectionEnvironmentRealTimeCapture.cpp"
+sunshafts_cvar r.SkyLight.RealTimeReflectionCapture.VolumetricCloudResolutionDivider "Renderer/Private/ReflectionEnvironmentRealTimeCapture.cpp"
+sunshafts_cvar r.SkyLight.RealTimeReflectionCapture.ShadowFromOpaque "Renderer/Private/ReflectionEnvironmentRealTimeCapture.cpp"
+sunshafts_cvar r.LightShaftQuality "Renderer/Private/LightShaftRendering.cpp"
+sunshafts_cvar r.LightShaftDownSampleFactor "Renderer/Private/LightShaftRendering.cpp"
+# -- end sun-shafts-sky-occlusion --------------------------------------------
 # -- AIRCRAFT LANE: engine surface the airframe look assumes ----------------
 # FlightSimAircraftFX.cpp (lights, bulbs, trails, plume, haze, the slot swap)
 # and scripts/ue_aircraft_master_materials.py (the masters' properties and

@@ -751,3 +751,104 @@ $env:FLIGHTSIM_RENDER_QUALITY = "beauty";  .\.venv\Scripts\python.exe -m uvicorn
 Record each run's offsets here, and in ruflo under
 `visual-overhaul/verifier-tooling/probe-<date>`, before changing any
 constant above.
+
+## sun-shafts-sky-occlusion
+
+Module: `FFlightSimSunShafts` (`Public/FlightSimSunShafts.h`,
+`Private/FlightSimSunShafts.cpp`), table `core/scene/sun_shafts.py`, tests
+`tests/test_sun_shafts.py`. Written 2026-11-09 on the Mac that cannot compile
+or render the bridge. Nothing here has been built or rendered.
+
+### What was built (BEAUTY ONLY, value-only)
+
+`FFlightSimWorldBeauty::Build` calls `SunShafts.Apply` once, right after
+`ApplyTiles`, so it runs only under `-quality=beauty` or `-quality=pathtrace`.
+It records everything in `look_applied.world_beauty.sun_shafts`.
+
+* Sun (`UDirectionalLightComponent`): light-shaft occlusion on, with mask
+  darkness and depth range. Light-shaft bloom only where a sun disc shows
+  (clear 0.2, hazy 0.25, rain 0.02, overcast and storm off). Cloud shadow on
+  the SkyAtmosphere (clear and hazy 1.0, which gives the crepuscular rays)
+  and on surfaces, with the shadow map's extent, resolution and ray samples.
+  The cloud fields have no setter in 5.7.4, so they are written directly and
+  followed by `MarkRenderStateDirty()`. `bCastShadowsOnAtmosphere` belongs to
+  `ApplyAtmosphere` and `bCastCloudShadows` to the scene (Gate 6's cloud
+  bracket). This module reads both and writes neither.
+* Sky light: cloud ambient occlusion. Overcast, rain and storm are 1.0, so the
+  ground goes darker under the deck. Clear is 0.5 and hazy 0.6. The record
+  also notes whether the sky light is a real-time capture, because the
+  `RealTimeReflectionCapture` cvars only act on one.
+* Cvars: each value is saved before it is set. `FFlightSimWorldBeauty::
+  RestoreCvars()` puts them back at the commandlet's final teardown. On the
+  still tier only (`-still-samples=`, `-accumulate=`, `-quality=pathtrace`,
+  or `-sun-shafts-tier=still` / `FLIGHTSIM_SUN_SHAFTS_TIER`), the fog grid
+  goes to 4 px x 128 slices. The still tier also sets
+  HistoryMissSupersampleCount 16, the cloud shadow map and sky AO,
+  HighQualityAerialPerspective, SampleAtmosphericLightShadowmap, the
+  sky-light capture (TimeSlice 0, VolumetricCloudResolutionDivider 1,
+  ShadowFromOpaque 1), LightShaftQuality 1 and LightShaftDownSampleFactor 1.
+  The interactive tier sets only ShadowMap, SkyAO and LightShaftQuality, all
+  to 1, which are their engine defaults.
+* Dropped: `r.LightShaftNumSamples`, which is `ECVF_ReadOnly` in the 5.7.4
+  `LightShaftRendering.cpp`, so a runtime set is refused. Every other name
+  was grepped in the 5.7.4 Renderer source and is checked by
+  `scripts/check_bridge_api.sh` (block "sun-shafts-sky-occlusion").
+* Show flags: `LightShafts` and `VolumetricFog` are forced on the beauty
+  capture only, inside the commandlet's beauty block. The accumulate, linear
+  and calibration captures copy the beauty flags. The label captures are left
+  as they are, and `ConfigureLabelCapture` still turns volumetric fog off.
+  `render_settings.beauty_show_flags.light_shafts` records the value the
+  capture actually had.
+* No ephemeris change. `core/environment/sun.py` already applies NOAA
+  piecewise refraction.
+
+### Labels
+
+Value-only: radiance changes and no surface moves, so this is not in
+`PIXEL_MOVING_KEYS`. The light switches and the cvars are process-wide while
+a beauty render runs, so the label captures in that run share them. The label
+captures draw no fog, atmosphere or cloud, and they read stencil, depth,
+normal or base colour through their own post-process materials. Their bytes
+should therefore be the same with the module on or off. That is a claim, not
+a measurement (probe 5).
+
+The module spec said a Gate V bloom-ceiling check already measures the mean
+mask-edge luminance change. **No such clause exists.**
+`experiments/gate_v_visual.py` has no bloom metric (grepped 2026-11-09).
+`look_label_check`'s mask-edge distance is the nearest existing check.
+
+### UNCALIBRATED constants
+
+Every value in `SHAFT_PRESETS`, `STILL_CVARS` and `INTERACTIVE_CVARS` is
+uncalibrated: bloom scale, threshold and max; occlusion darkness and depth
+range; cloud-shadow strengths, extent, map resolution and ray samples; sky-AO
+strength, extent, map resolution and aperture; fog grid sizes; and the
+supersample and downsample counts. They are engine defaults and orders of
+magnitude, never taken from a frame.
+
+### Probes (render machine)
+
+1. **Light shafts inside a SceneCapture2D.** `ShouldRenderLightShafts` needs
+   `GLightShafts`, the LightShafts and Lighting show flags, and no debug view.
+   Nothing in it excludes a scene capture, but this has not been seen.
+   Render clear golden hour with the sun just off-frame behind a ridge, then
+   A/B `-sun-shafts-tier=still` against a build with the hook commented out.
+   Record whether the rays appear.
+2. **HighQualityAerialPerspective visible from 3000 m.** Cumulus at 1500 m
+   seen from 3000 m AGL, with `r.VolumetricCloud.HighQualityAerialPerspective`
+   at 1 and at 0 (console). Record the mean sky-region delta.
+3. **TimeSlice=0 cost.** Time per still frame with
+   `r.SkyLight.RealTimeReflectionCapture.TimeSlice` at 0 and at 1, still
+   tier, 1920x1080. Record ms per capture.
+4. **Matterhorn golden-hour A/B (shot a)** and **Yosemite storm A/B
+   (shot c)**. The same card with the module on and off, each with a contact
+   sheet. These set the bloom and occlusion values (a) and the sky-AO
+   strength (c).
+5. **Label bytes A/B.** For shots a and c, compare the mask, class and depth
+   sha256 with the module on and off. If they are not identical, the
+   value-only claim is wrong: move the switch onto the beauty capture or
+   record it in `pixel_moving_effects`.
+
+Record each result here and in ruflo under
+`visual-overhaul/sun-shafts-sky-occlusion/probe-<date>` before changing any
+constant.
