@@ -39,7 +39,10 @@ How the error is measured
 
 The verdict is ALIGNED when the beauty's offset is within
 ``core.capture.verify.LOOK_ALIGNMENT_TOL_PX`` (the mask gate's tolerance
-for a drawn mesh) and the control is not void; the measure bundle's
+for a drawn mesh), its edge-distance p90 exceeds the measure bundle's
+(in beauty pixels) by no more than that tolerance (a radial move such as
+lens distortion leaves the best translation near zero but spreads the
+edge), and the control is not void; the measure bundle's
 offset is printed beside it as the floor this proxy reads on a picture
 known to be aligned. Exit 0 ALIGNED, 1 NOT ALIGNED, 2 VOID or unreadable.
 Masks of different sizes (beauty is 1920x1080 by default, measure
@@ -240,7 +243,14 @@ def compare(measure_image, measure_mask, beauty_image, beauty_mask,
     void = [name for name, c in checks.items() if c["void"]]
     if beauty["at_search_edge"]:
         void.append("beauty offset at the search edge (raise SEARCH_RADIUS_PX)")
-    aligned = beauty["offset_length_px"] <= tolerance_px
+    # A translation alone cannot see a radial move (lens distortion, a
+    # panini squeeze, a crop rescale about the subject): the silhouette
+    # sits off the mask on every side and the best shift is near zero.
+    # The edge-distance p90 can, so its excess over the measure floor
+    # (in beauty pixels) is graded against the same tolerance.
+    measure_p90_in_beauty = measure["edge_distance_p90_px"] / to_measure
+    spread_excess = beauty["edge_distance_p90_px"] - measure_p90_in_beauty
+    aligned = beauty["offset_length_px"] <= tolerance_px and spread_excess <= tolerance_px
     verdict = "VOID" if void else ("ALIGNED" if aligned else "NOT ALIGNED")
     return {
         "verdict": verdict,
@@ -250,6 +260,7 @@ def compare(measure_image, measure_mask, beauty_image, beauty_mask,
         "beauty_offset_in_measure_px": round(beauty["offset_length_px"] * to_measure, 4),
         "beauty_minus_measure_px": round(beauty["offset_length_px"] * to_measure
                                          - measure["offset_length_px"], 4),
+        "edge_p90_excess_over_measure_px": round(spread_excess, 4),
         "mask_iou_at_measure_size": round(iou(measure_mask,
                                               resample_nearest(beauty_mask, measure_mask.shape)), 4),
         "control": checks,

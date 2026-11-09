@@ -106,3 +106,14 @@ def test_the_cli_reads_two_bundles_and_exits_by_verdict(tmp_path, capsys):
     assert llc.main(["--measure", str(measure), "--beauty", str(moved)]) == 1
     assert llc.main(["--measure", str(measure), "--beauty", str(tmp_path / "nowhere")]) == 2
     assert "REFUSED -- look_label_check" in capsys.readouterr().out
+
+
+def test_a_radial_move_with_no_net_shift_is_not_aligned():
+    """Lens distortion about the subject moves its silhouette out on every
+    side: the best translation stays near zero, the edge spread does not."""
+    measure, mask = scene()
+    beauty, _ = scene(a=53.0, b=19.0)          # tips 3 px out, mask unchanged
+    report = llc.compare(measure, mask, beauty, mask)
+    assert report["beauty"]["offset_length_px"] <= llc.LOOK_ALIGNMENT_TOL_PX
+    assert report["edge_p90_excess_over_measure_px"] > llc.LOOK_ALIGNMENT_TOL_PX
+    assert report["verdict"] == "NOT ALIGNED"
