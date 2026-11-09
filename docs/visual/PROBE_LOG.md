@@ -751,3 +751,86 @@ $env:FLIGHTSIM_RENDER_QUALITY = "beauty";  .\.venv\Scripts\python.exe -m uvicorn
 Record each run's offsets here, and in ruflo under
 `visual-overhaul/verifier-tooling/probe-<date>`, before changing any
 constant above.
+
+## wet-airframe-canopy
+
+Session 2026-11-09, Mac, code only: nothing here has been compiled or
+rendered. Wet airframe, airflow rain streaks and canopy micro-scratches (no
+pilot).
+
+**What exists.** `assets/shaders/aircraft/aircraft_wet.hlsl` (film darkening
+`lerp(albedo, albedo^2, wet*porosity)`, roughness `lerp(r, min(r,
+WetRoughness), wet)`, rivulets, beads, the `WetCoat` clear-coat mask as a
+Custom-node additional output); `assets/shaders/aircraft/canopy_scratch.hlsl`
+(circular-swirl tangent about `CanopyCentreCm`, negative anisotropy so the
+highlight smears across the scratches); `scripts/aircraft_wet_layer.py`
+(`add_wet_layer`, `add_canopy_scratch`, `WET_DEFAULTS`, the numpy twins);
+`FlightSimAircraftWet.cpp/.h` (the wetness integration and the four
+per-step scalars `Wetness`, `RainRateMmh`, `AirspeedKts`, `TimeS`).
+Tests: `tests/test_aircraft_wet.py`.
+
+**Decisions.**
+- Shading only, on the beauty look MIDs. No World Position Offset, every
+  master stays opaque (the documented "glass is opaque" decision holds), so
+  silhouette, class, mask and depth are those of the dry airframe:
+  `render.json aircraft_look.wet.pixel_moving: false`, no
+  `pixel_moving_effects` entry. The MakeHuman pilot and a translucent canopy
+  are rejected (label-unsafe).
+- The graft is Break -> Custom -> Make inserted after the master's own
+  attributes, so the class graphs are untouched; `LOOK_GENERATION` is now
+  `"2"` so every master rebuilds once with the layer.
+- `FFlightSimAircraftFX::ApplyMaterials` now wraps each look instance in a
+  MID (the wet scalars are per step). Same parent, same shading at
+  Wetness 0.
+- The rain rate is read from the weather's public record
+  (`Record.rain.rate_mmh`, `rain.beauty_readability_gain`): those fields are
+  private in `FlightSimWeather.h`, which stays untouched. The wetness uses the
+  physical rate; the rivulets see rate x beauty gain (the drops' own stated
+  exaggeration).
+- Wetness: target `saturate(rate / WetSaturationMmh)`; wetting immediate,
+  drying `exp(-dt / WetDryTauS)` on `simulation/sim-time-sec` (exact, so
+  step-size independent); the first step starts at the target.
+- Regime: `airflow` at or above `BeadingMaxKts` (lines aft along object -X,
+  panned at `StreakSpeedPerKt x airspeed` cm/s), else `gravity` (runs along
+  world -Z expressed in the object frame, so the pattern rides the airframe;
+  beads, mostly on glass).
+- The canopy scratches need `r.AnisotropicMaterials` (1 at
+  `ShadingQuality@Cine`, BaseScalability.ini 5.7.4, which the beauty path
+  uses) and a world-space tangent: the glass master's `tangent_space_normal`
+  is now off with `VertexNormalWS` wired explicitly (an unconnected
+  world-space normal would default to +Z). The cvar's value at render time is
+  recorded in `aircraft_look.wet.canopy_scratch.r_anisotropic_materials`.
+- Storm weather is default-on, so this is on in the default web render with
+  no new flag. Without a built weather the airframe stays dry (pointer null).
+
+**Not done / known gaps.**
+- The card's own `wetness` (wet ground after the rain stopped) does not wet
+  the airframe: `SceneOptions` is out of scope at the aircraft build in the
+  commandlet. Only drawn rain does.
+- `CanopyCentreCm` defaults to the mesh origin (concentric circles about a
+  distant centre read as long curved wipe lines); a per-type centre is a
+  probe item.
+
+**Uncalibrated constants** (all of `WET_DEFAULTS`, copied into every look
+manifest as group `wet`, and the HLSL literals `GravityRunCmS` 3.0,
+`BeadRoughness` 0.3, `RingCm` 0.8): StreakSpeedPerKt 0.5, BeadingMaxKts 60,
+WetRoughness 0.08, WetCoatRoughness 0.03, WetSaturationMmh 4, WetDryTauS 90,
+Porosity paint/bare metal/glass/rubber 0.3/0.12/0/0.5, BeadAmount
+paint/bare metal/glass 0.3/0/1, StreakPitchCm 2.5, StreakLengthCm 30,
+RivuletFullMmh 10, ScratchDensity 0.6, ScratchAnisotropy 0.5,
+CanopyCentre (0, 0, 0).
+
+**Probes, on the render machine, in order.**
+1. `scripts/check_bridge_api.sh`: the `wet:` lines all ok.
+2. Build, then `scripts/ue_create_materials.py` (expect `MATERIAL-REBUILT`
+   for the three class masters and no `MATERIAL-FAILED`), then
+   `ue_fix_aircraft_materials.py` for the look manifests' `wet` group.
+3. Storm-weather beauty chase at shot c range (default web render): read
+   `aircraft_look.wet` (wetness, regime, mids > 0) and judge the paint
+   darkening, the coat and the aft streaks; set WetSaturationMmh, Porosity*,
+   WetRoughness, StreakSpeedPerKt, StreakPitchCm/LengthCm.
+4. Canopy close-up into the sun (and shot d from outside): judge the beads
+   (below BeadingMaxKts) and streaks on the glass and the scratch swirl; set
+   BeadAmountGlass, ScratchDensity, ScratchAnisotropy, CanopyCentreCm.
+5. `look_label_check` on a storm beauty run: ALIGNED (nothing here may move a
+   label edge).
