@@ -82,6 +82,7 @@ import functools
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path, PureWindowsPath
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -9272,6 +9273,227 @@ def verify_world_record(manifest: Dict, run_dir=None) -> Check:
                              f"Windows clauses")
 
 
+# -- visual overhaul (verifier-tooling lane): the beauty look's record ----------
+#
+# look_record: each camera's render.json states a known quality
+# (measure | beauty | pathtrace), a measure render carries no beauty look
+# and no pixel-moving effect (Gate 6 passed on measure; it must stay what
+# it was), the sample counts are whole and the path tracer's are stated,
+# a beauty-only actor list comes with its occlusion decision, and every
+# pixel-moving key the look turns on is listed in pixel_moving_effects.
+#
+# look_label_alignment: every pixel-moving effect that is on either
+# records the transform that maps the labels onto the beauty or a
+# MEASURED displacement within the mask gate's tolerance; a beauty-only
+# cloud over the subject is within the visibility gate's tolerance (or
+# kept clear by construction); the beauty's field of view is the pose
+# solver's; and the labels are of the beauty's own frame and instant.
+# A bundle that fails it is "beauty-not-label-aligned" BY NAME, and the
+# dataset export refuses it -- the frames may be beautiful, they are not
+# labelled data.
+#
+# Both read only the keys of core/capture/beauty_look.py (schema:
+# docs/schemas/render_json_beauty_look.md) and are NOT RUN on a bundle
+# whose render.json predates them: an old bundle stays valid.
+
+FAIL_LOOK_QUALITY = "look.quality"
+FAIL_LOOK_MEASURE_ALTERED = "look.measure_altered"
+FAIL_LOOK_UNRECORDED = "look.pixel_moving_unrecorded"
+FAIL_LOOK_RECORD = "look.record"
+FAIL_LOOK_NOT_ALIGNED = "look.beauty_not_label_aligned"
+
+#: A pixel-moving effect with no transform must have MOVED pixels by no
+#: more than the tolerance mask_vs_geometry grants a drawn mesh's mask
+#: (the gate the labels passed under; not a new look setting).
+LOOK_ALIGNMENT_TOL_PX = MASK_TOL_PX_MESH
+#: A beauty-only actor may cover at most the visibility gate's tolerance
+#: of the subject where the mask shows it unoccluded.
+LOOK_OCCLUSION_TOL_FRACTION = VISIBILITY_TOL_FRACTION
+
+
+#: A label value that names a file (the labels block also holds prose).
+_LOOK_LABEL_FILE = re.compile(r"\.(png|f32|exr|json|bin|npy)$", re.IGNORECASE)
+
+
+def _whole_at_least_one(value) -> bool:
+    return (not isinstance(value, bool) and isinstance(value, (int, float))
+            and math.isfinite(float(value)) and float(value) == int(value) and int(value) >= 1)
+
+
+def verify_look_record(manifest: Dict, run_dir=None) -> Check:
+    """The beauty look's record against its own rules (section comment above).
+
+    NOT RUN with no render.json, or none that states a quality. FAIL
+    look.quality (an unknown quality), look.measure_altered (a measure
+    render with a look or a pixel-moving effect on), look.record (a
+    malformed record), look.pixel_moving_unrecorded (a look key that moves
+    pixels, on, and not listed)."""
+    from .beauty_look import (OCCLUSION_POLICIES, QUALITIES, has_look_record,
+                              look_anything_on, look_effects_on, listed,
+                              normalise_effects, quality_of)
+
+    graded: Dict[str, str] = {}
+    for camera, _folder, payload in _s4_renders(run_dir):
+        quality = quality_of(payload)
+        if quality is None:
+            continue
+
+        def fail(text: str, name: str) -> Check:
+            return Check("look_record", FAIL, f"{camera}: {text}", failure=name)
+
+        if quality not in QUALITIES:
+            return fail(f"render quality {quality!r} is not one of {', '.join(QUALITIES)}",
+                        FAIL_LOOK_QUALITY)
+        effects, problems = normalise_effects(payload.get("pixel_moving_effects"))
+        if problems:
+            return fail("; ".join(problems), FAIL_LOOK_RECORD)
+        on = [e for e in effects if e["on"]]
+        look = payload.get("beauty_look")
+        if look is not None and not isinstance(look, dict):
+            return fail(f"beauty_look is {type(look).__name__}, not an object", FAIL_LOOK_RECORD)
+        samples = payload.get("beauty_samples")
+        if samples is not None and not isinstance(samples, dict):
+            return fail(f"beauty_samples is {type(samples).__name__}, not an object", FAIL_LOOK_RECORD)
+        samples = samples or {}
+        for key in ("spatial", "temporal", "path_tracer_spp"):
+            if key in samples and not _whole_at_least_one(samples[key]):
+                return fail(f"beauty_samples.{key} = {samples[key]!r} is not a whole number "
+                            f"of at least 1", FAIL_LOOK_RECORD)
+        shutter = samples.get("shutter_s", 0.0)
+        if isinstance(shutter, bool) or not isinstance(shutter, (int, float)) \
+                or not math.isfinite(float(shutter)) or float(shutter) < 0.0:
+            return fail(f"beauty_samples.shutter_s = {shutter!r} is not a non-negative time",
+                        FAIL_LOOK_RECORD)
+        temporal = int(samples.get("temporal", 1))
+        if quality == "measure":
+            if look_anything_on(look):
+                return fail("a measure render carries a beauty look that applies something; the "
+                            "measure path is the one Gate 6 passed on and must render as it did",
+                            FAIL_LOOK_MEASURE_ALTERED)
+            if on:
+                return fail(f"a measure render has pixel-moving effect(s) on: "
+                            f"{', '.join(e['name'] for e in on)}", FAIL_LOOK_MEASURE_ALTERED)
+            if temporal > 1:
+                return fail(f"a measure render accumulated {temporal} temporal beauty samples",
+                            FAIL_LOOK_MEASURE_ALTERED)
+        if quality == "pathtrace" and "path_tracer_spp" not in samples:
+            return fail("a path-traced render does not state its samples per pixel "
+                        "(beauty_samples.path_tracer_spp)", FAIL_LOOK_RECORD)
+        actors = payload.get("beauty_only_actors")
+        if actors is not None:
+            if not isinstance(actors, list):
+                return fail(f"beauty_only_actors is {type(actors).__name__}, not a list",
+                            FAIL_LOOK_RECORD)
+            occlusion = payload.get("cloud_occlusion")
+            if actors and not (isinstance(occlusion, dict)
+                               and occlusion.get("policy") in OCCLUSION_POLICIES):
+                return fail(f"{len(actors)} beauty-only actor(s) with no occlusion decision "
+                            f"(cloud_occlusion.policy one of {', '.join(OCCLUSION_POLICIES)}): a "
+                            f"cloud in front of the subject in the beauty is absent from the mask",
+                            FAIL_LOOK_RECORD)
+        unlisted = [f"{key} ({name})" for key, name in look_effects_on(look or {})
+                    if not listed(on, name)]
+        if temporal > 1 and float(shutter) > 0.0 and not listed(on, "temporal_accumulation"):
+            unlisted.append(f"beauty_samples.temporal {temporal} over a {float(shutter):g} s "
+                            f"shutter (motion blur)")
+        if unlisted:
+            return fail(f"the look moves pixels and pixel_moving_effects does not say so: "
+                        f"{', '.join(unlisted)}", FAIL_LOOK_UNRECORDED)
+        graded[camera] = quality + (f", {len(on)} pixel-moving effect(s) listed" if on else "") \
+            + ("" if has_look_record(payload)
+               else " (no beauty-look record, an older build: the quality alone is graded)")
+    if not graded:
+        return Check("look_record", NOT_RUN,
+                     "no render.json states its render quality (no render, or an older build)")
+    return Check("look_record", PASS,
+                 "; ".join(f"{camera}: {words}" for camera, words in sorted(graded.items()))
+                 + " -- the look's record is consistent with its quality")
+
+
+def verify_look_label_alignment(manifest: Dict, run_dir=None) -> Check:
+    """The labels lie on the beauty, or the bundle is refused by name.
+
+    Graded only on a render.json that carries the beauty-look record (or
+    a frame's beauty_window_s); NOT RUN otherwise. FAIL
+    look.beauty_not_label_aligned, every reason listed."""
+    from .beauty_look import (classify_effect, has_look_record, normalise_effects)
+
+    implied: Dict[Tuple[str, str], float] = {}
+    for record in manifest.get("frames", []):
+        try:
+            implied[(str(record["camera_id"]), Path(str(record["file"])).name)] = math.degrees(
+                2.0 * math.atan(float(record["width_px"]) / (2.0 * float(record["fx_px"]))))
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            continue
+    graded, reasons, notes = [], [], []
+    for camera, _folder, payload in _s4_renders(run_dir):
+        records = _render_frame_records(payload)
+        if not has_look_record(payload) and not any("beauty_window_s" in r for r in records):
+            continue
+        graded.append(camera)
+        effects, _ = normalise_effects(payload.get("pixel_moving_effects"))
+        for effect in (e for e in effects if e["on"]):
+            aligned, words = classify_effect(effect, LOOK_ALIGNMENT_TOL_PX)
+            (notes if aligned else reasons).append(f"{camera}: {words}")
+        occlusion = payload.get("cloud_occlusion")
+        if isinstance(occlusion, dict) and occlusion.get("policy") == "labels_unoccluded":
+            fraction = occlusion.get("subject_occluded_fraction")
+            basis = str(occlusion.get("basis") or "").lower()
+            if isinstance(fraction, bool) or not isinstance(fraction, (int, float)) or basis != "measured":
+                reasons.append(f"{camera}: beauty-only actors may cover the subject where the mask "
+                               f"shows it, and the covered fraction is not measured ({fraction!r}, "
+                               f"{basis or 'no basis'})")
+            elif float(fraction) > LOOK_OCCLUSION_TOL_FRACTION:
+                reasons.append(f"{camera}: beauty-only actors cover {float(fraction):.3f} of the "
+                               f"subject the mask shows unoccluded (tol {LOOK_OCCLUSION_TOL_FRACTION})")
+        look = payload.get("beauty_look") if isinstance(payload.get("beauty_look"), dict) else {}
+        lens = look.get("camera") if isinstance(look.get("camera"), dict) else look
+        look_fov = lens.get("fov_deg") if isinstance(lens, dict) else None
+        for record in records:
+            frame = str(record.get("frame", ""))
+            where = f"{camera}/{frame}"
+            stem = Path(frame).stem
+            fov = record.get("beauty_fov_deg", look_fov)
+            solver = implied.get((camera, frame))
+            if isinstance(fov, (int, float)) and not isinstance(fov, bool) and solver is not None \
+                    and abs(float(fov) - solver) > APPLIED_FOV_TOL_DEG:
+                reasons.append(f"{where}: the beauty's field of view {float(fov):.3f} deg is not "
+                               f"the pose solver's {solver:.3f} deg (tol {APPLIED_FOV_TOL_DEG})")
+            labels = record.get("labels")
+            if isinstance(labels, dict) and stem:
+                other = sorted(v for v in labels.values()
+                               if isinstance(v, str) and _LOOK_LABEL_FILE.search(v)
+                               and not Path(v).name.startswith((stem + "_", stem + ".")))
+                if other:
+                    reasons.append(f"{where}: label file(s) {', '.join(other)} are not of this frame")
+            window = record.get("beauty_window_s")
+            if window is not None:
+                try:
+                    t0, t1, t = float(window[0]), float(window[1]), float(record["t"])
+                    inside = t0 - 1e-9 <= t <= t1 + 1e-9
+                except (KeyError, TypeError, ValueError, IndexError):
+                    reasons.append(f"{where}: beauty_window_s {window!r} is not a [t0, t1] window "
+                                   f"with the record's t")
+                    continue
+                if not inside:
+                    reasons.append(f"{where}: the labels' instant {t:g} s is outside the beauty's "
+                                   f"window [{t0:g}, {t1:g}] s")
+    if not graded:
+        return Check("look_label_alignment", NOT_RUN,
+                     "no render.json carries the beauty-look record (no render, or an older "
+                     "build); mask_vs_geometry and box_vs_mask still grade the labels")
+    if reasons:
+        return Check("look_label_alignment", FAIL,
+                     "beauty-not-label-aligned: " + "; ".join(reasons)
+                     + ". Render the labelled set with -quality=measure, record the transform, "
+                       "or measure the displacement (experiments/look_label_check.py)",
+                     failure=FAIL_LOOK_NOT_ALIGNED)
+    return Check("look_label_alignment", PASS,
+                 f"{', '.join(graded)}: labels of the beauty's own frame and instant, at the pose "
+                 f"solver's field of view"
+                 + (f"; {'; '.join(notes)}" if notes else "; no pixel-moving effect on"))
+
+
 #: A check that raised instead of returning its verdict: the run is not
 #: verified until the checker is fixed (the verdict names the check).
 FAIL_CHECKER_ERROR = "verify.checker_error"
@@ -9472,6 +9694,10 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     run("instrument_allan", verify_instrument_allan, manifest, run_dir)
     run("instrument_lever_arm", verify_instrument_lever_arm, manifest, run_dir)
     run("uncertainty_present", verify_uncertainty_present, manifest)
+    # Visual overhaul: the beauty look's record and label honesty -- NOT RUN
+    # on a render.json that predates the record, never a pass on absence.
+    run("look_record", verify_look_record, manifest, run_dir)
+    run("look_label_alignment", verify_look_label_alignment, manifest, run_dir)
 
     if other is not None:
         run("temporal_alignment", verify_alignment, manifest, other)
