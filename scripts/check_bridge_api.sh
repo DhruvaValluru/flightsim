@@ -414,6 +414,9 @@ rp_check "delight: cvar ShortRangeAO.HorizonSearch" "Renderer/Private/Lumen/Lume
 rp_check "delight: FindConsoleVariable" "Core/Public/HAL/IConsoleManager.h" "virtual IConsoleVariable* FindConsoleVariable(const TCHAR* Name, bool bTrackFrequentCalls = true) const = 0;"
 rp_check "delight: TMVM_MipBias" "Engine/Classes/Engine/EngineTypes.h" "TMVM_MipBias UMETA("
 rp_check "delight: TextureSample MipBias pin" "Engine/Private/Materials/MaterialExpressions.cpp" 'IF_INPUT_RETURN(TEXT("MipBias"));'
+# MaterialEditingLibrary::ConnectMaterialExpressions matches the shortened pin
+# name, so the script connects "Bias", not "MipBias".
+rp_check "delight: MipBias pin shortens to Bias" "../Editor/UnrealEd/Private/MaterialGraphNode.cpp" "InputName = MaterialPinNames::Bias;"
 # -- tiles-delight -- end ------------------------------------------------------
 # -- AIRCRAFT LANE: engine surface the airframe look assumes ----------------
 # FlightSimAircraftFX.cpp (lights, bulbs, trails, plume, haze, the slot swap)

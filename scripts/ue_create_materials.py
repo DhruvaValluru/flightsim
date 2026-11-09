@@ -2934,7 +2934,9 @@ def create_world_tiles_beauty():
                                 "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"))
     lib.connect_material_expressions(uv, "", low, "UVs")
     low.set_editor_property("mip_value_mode", unreal.TextureMipValueMode.TMVM_MIP_BIAS)
-    lib.connect_material_expressions(common["DelightMipBias"][0], "", low, "MipBias")
+    # The pin is "MipBias" in GetInputName, but MaterialEditingLibrary matches the
+    # graph's short name (UMaterialGraphNode::GetShortenPinName: MipBias -> Bias).
+    lib.connect_material_expressions(common["DelightMipBias"][0], "", low, "Bias")
     common["AlbedoLow"] = (binary(material, lib, unreal.MaterialExpressionMultiply,
                                   mask(material, lib, low, "rgb", -1550, -700),
                                   mask(material, lib, factor, "rgb", -1550, -100), -1400, -600), "")

@@ -155,7 +155,9 @@ def test_the_material_samples_the_same_texture_at_the_mip_bias_and_feeds_the_gra
         "DelightMipBias": td.DELIGHT_MIP_BIAS, "DelightRatioKnee": td.DELIGHT_RATIO_KNEE}
     create = SCRIPT[SCRIPT.index("def create_world_tiles_beauty"):SCRIPT.index("# == END WORLD LANE")]
     assert create.count("texture_parameter(material, lib, CESIUM_BASE_COLOUR_TEXTURE") == 2
-    assert "TMVM_MIP_BIAS" in create and '"MipBias")' in create
+    assert "TMVM_MIP_BIAS" in create
+    # MaterialEditingLibrary finds a pin by its shortened graph name: MipBias -> Bias
+    assert 'low, "Bias")' in create and 'low, "MipBias")' not in create
     assert re.search(r'common\["Albedo"\] = \(world_custom\(material, lib, "tiles_delight"', create)
     # it runs before the nodes that read Albedo
     assert create.index('"tiles_delight"') < create.index("for row, (shader")
@@ -237,5 +239,6 @@ def test_the_bridge_check_lists_the_delight_symbols():
     block = CHECK[CHECK.index("# -- tiles-delight"):CHECK.index("# -- tiles-delight -- end")]
     for symbol in ("ContactShadowLength;", "ContactShadowLengthInWS", "MarkRenderStateDirty",
                    "r.Lumen.ScreenProbeGather.ShortRangeAO\"", "ShortRangeAO.HorizonSearch",
-                   "FindConsoleVariable", "TMVM_MipBias", 'IF_INPUT_RETURN(TEXT("MipBias"));'):
+                   "FindConsoleVariable", "TMVM_MipBias", 'IF_INPUT_RETURN(TEXT("MipBias"));',
+                   "InputName = MaterialPinNames::Bias;"):
         assert symbol in block, symbol
