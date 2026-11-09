@@ -1,0 +1,473 @@
+{
+  "before": "C:\\Users\\kanth\\flightsim\\runs\\visual\\base",
+  "after": "C:\\Users\\kanth\\flightsim\\runs\\visual\\head",
+  "shots": {
+    "a": {
+      "aerial_perspective": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {}
+      },
+      "horizon_fill": {
+        "status": [
+          "NOT RUN",
+          "FAIL"
+        ],
+        "delta": {}
+      },
+      "cloud_fraction": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {
+          "cloud_fraction": {
+            "before": 0.6096977839415215,
+            "after": 0.9963002315530138,
+            "delta": 0.3866024476114923
+          },
+          "sky_px": {
+            "before": 138444.0,
+            "after": 236231.0,
+            "delta": 97787.0
+          }
+        }
+      },
+      "exposure": {
+        "status": [
+          "PASS",
+          "PASS"
+        ],
+        "delta": {
+          "luma_p90": {
+            "before": 180.24299999999997,
+            "after": 220.6298,
+            "delta": 40.38680000000002
+          },
+          "clipped_fraction": {
+            "before": 6.510416666666667e-06,
+            "after": 0.0,
+            "delta": -6.510416666666667e-06
+          },
+          "crushed_fraction": {
+            "before": 8.680555555555556e-06,
+            "after": 6.618923611111112e-05,
+            "delta": 5.750868055555556e-05
+          },
+          "luma_mean": {
+            "before": 124.73114133246531,
+            "after": 141.29361604904517,
+            "delta": 16.562474716579857
+          }
+        }
+      },
+      "texel_detail": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {}
+      },
+      "specular": {
+        "status": [
+          "PASS",
+          "PASS"
+        ],
+        "delta": {
+          "highlight_fraction": {
+            "before": 0.10605302651325663,
+            "after": 0.017456359102244388,
+            "delta": -0.08859666741101224
+          },
+          "highlight_px": {
+            "before": 636.0,
+            "after": 105.0,
+            "delta": -531.0
+          },
+          "airframe_px": {
+            "before": 5997.0,
+            "after": 6015.0,
+            "delta": 18.0
+          },
+          "median_luma": {
+            "before": 116.0206,
+            "after": 29.647,
+            "delta": -86.37360000000001
+          },
+          "peak_over_median": {
+            "before": 2.1342916688932827,
+            "after": 6.54535028839343,
+            "delta": 4.411058619500148
+          },
+          "cut_luma": {
+            "before": 185.63296000000003,
+            "after": 180.0,
+            "delta": -5.6329600000000255
+          }
+        }
+      },
+      "edge_aliasing": {
+        "status": [
+          "VOID",
+          "INFO"
+        ],
+        "delta": {}
+      }
+    },
+    "b": {
+      "aerial_perspective": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {}
+      },
+      "horizon_fill": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {}
+      },
+      "cloud_fraction": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {
+          "cloud_fraction": {
+            "before": 0.0,
+            "after": 0.026249350712102725,
+            "delta": 0.026249350712102725
+          },
+          "sky_px": {
+            "before": 120329.0,
+            "after": 82783.0,
+            "delta": -37546.0
+          }
+        }
+      },
+      "exposure": {
+        "status": [
+          "PASS",
+          "PASS"
+        ],
+        "delta": {
+          "luma_p90": {
+            "before": 141.56511999999998,
+            "after": 131.73,
+            "delta": -9.83511999999999
+          },
+          "clipped_fraction": {
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0
+          },
+          "crushed_fraction": {
+            "before": 0.14212999131944445,
+            "after": 0.06364691840277778,
+            "delta": -0.07848307291666667
+          },
+          "luma_mean": {
+            "before": 55.82393567100695,
+            "after": 45.61020812391494,
+            "delta": -10.213727547092013
+          }
+        }
+      },
+      "texel_detail": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {}
+      },
+      "specular": {
+        "status": [
+          "PASS",
+          "FAIL"
+        ],
+        "delta": {
+          "highlight_fraction": {
+            "before": 0.005362828892240657,
+            "after": 0.0,
+            "delta": -0.005362828892240657
+          },
+          "highlight_px": {
+            "before": 32.0,
+            "after": 0.0,
+            "delta": -32.0
+          },
+          "airframe_px": {
+            "before": 5967.0,
+            "after": 5951.0,
+            "delta": -16.0
+          },
+          "median_luma": {
+            "before": 70.48419999999999,
+            "after": 34.5352,
+            "delta": -35.948999999999984
+          },
+          "peak_over_median": {
+            "before": 2.7534709906617376,
+            "after": 4.478236697630243,
+            "delta": 1.7247657069685056
+          },
+          "cut_luma": {
+            "before": 180.0,
+            "after": 180.0,
+            "delta": 0.0
+          }
+        }
+      },
+      "edge_aliasing": {
+        "status": [
+          "INFO",
+          "VOID"
+        ],
+        "delta": {}
+      }
+    },
+    "c": {
+      "aerial_perspective": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {}
+      },
+      "horizon_fill": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {}
+      },
+      "cloud_fraction": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {
+          "cloud_fraction": {
+            "before": 0.8504250490441205,
+            "after": 4.4206710578665844e-05,
+            "delta": -0.8503808423335418
+          },
+          "sky_px": {
+            "before": 51994.0,
+            "after": 45242.0,
+            "delta": -6752.0
+          }
+        }
+      },
+      "exposure": {
+        "status": [
+          "FAIL",
+          "FAIL"
+        ],
+        "delta": {
+          "luma_p90": {
+            "before": 73.68533999999973,
+            "after": 6.442399999999999,
+            "delta": -67.24293999999972
+          },
+          "clipped_fraction": {
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0
+          },
+          "crushed_fraction": {
+            "before": 0.4798133680555556,
+            "after": 0.5270323350694445,
+            "delta": 0.04721896701388889
+          },
+          "luma_mean": {
+            "before": 20.301916274956596,
+            "after": 3.626137845269098,
+            "delta": -16.675778429687497
+          }
+        }
+      },
+      "texel_detail": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {}
+      },
+      "specular": {
+        "status": [
+          "FAIL",
+          "FAIL"
+        ],
+        "delta": {
+          "highlight_fraction": {
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0
+          },
+          "highlight_px": {
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0
+          },
+          "airframe_px": {
+            "before": 5968.0,
+            "after": 5970.0,
+            "delta": 2.0
+          },
+          "median_luma": {
+            "before": 12.999999999999998,
+            "after": 3.1404,
+            "delta": -9.859599999999999
+          },
+          "peak_over_median": {
+            "before": 9.008876923076924,
+            "after": 6.002929563112979,
+            "delta": -3.005947359963945
+          },
+          "cut_luma": {
+            "before": 180.0,
+            "after": 180.0,
+            "delta": 0.0
+          }
+        }
+      },
+      "edge_aliasing": {
+        "status": [
+          "INFO",
+          "VOID"
+        ],
+        "delta": {}
+      }
+    },
+    "d": {
+      "aerial_perspective": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {}
+      },
+      "horizon_fill": {
+        "status": [
+          "NOT RUN",
+          "FAIL"
+        ],
+        "delta": {}
+      },
+      "cloud_fraction": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {
+          "cloud_fraction": {
+            "before": 3.012834675718561e-05,
+            "after": 0.054143313619476496,
+            "delta": 0.054113185272719314
+          },
+          "sky_px": {
+            "before": 398296.0,
+            "after": 484769.0,
+            "delta": 86473.0
+          }
+        }
+      },
+      "exposure": {
+        "status": [
+          "PASS",
+          "PASS"
+        ],
+        "delta": {
+          "luma_p90": {
+            "before": 126.54683999999997,
+            "after": 127.51691999999997,
+            "delta": 0.9700799999999958
+          },
+          "clipped_fraction": {
+            "before": 0.0,
+            "after": 0.0,
+            "delta": 0.0
+          },
+          "crushed_fraction": {
+            "before": 0.11293836805555556,
+            "after": 0.02378689236111111,
+            "delta": -0.08915147569444445
+          },
+          "luma_mean": {
+            "before": 69.58263817816841,
+            "after": 51.950512488281255,
+            "delta": -17.632125689887154
+          }
+        }
+      },
+      "texel_detail": {
+        "status": [
+          "NOT RUN",
+          "NOT RUN"
+        ],
+        "delta": {}
+      },
+      "specular": {
+        "status": [
+          "PASS",
+          "FAIL"
+        ],
+        "delta": {
+          "highlight_fraction": {
+            "before": 0.0015822830247737853,
+            "after": 0.0,
+            "delta": -0.0015822830247737853
+          },
+          "highlight_px": {
+            "before": 551.0,
+            "after": 0.0,
+            "delta": -551.0
+          },
+          "airframe_px": {
+            "before": 348231.0,
+            "after": 236194.0,
+            "delta": -112037.0
+          },
+          "median_luma": {
+            "before": 39.412,
+            "after": 9.421199999999999,
+            "delta": -29.9908
+          },
+          "peak_over_median": {
+            "before": 5.473236577692074,
+            "after": 18.254447416464995,
+            "delta": 12.781210838772921
+          },
+          "cut_luma": {
+            "before": 180.0,
+            "after": 180.0,
+            "delta": 0.0
+          }
+        }
+      },
+      "edge_aliasing": {
+        "status": [
+          "INFO",
+          "INFO"
+        ],
+        "delta": {
+          "energy": {
+            "before": 0.27059636885892324,
+            "after": 0.2179182290015755,
+            "delta": -0.05267813985734773
+          },
+          "control_energy": {
+            "before": 0.3274757126136612,
+            "after": 0.28751233009444316,
+            "delta": -0.03996338251921805
+          }
+        }
+      }
+    }
+  }
+}
