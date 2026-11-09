@@ -2,6 +2,7 @@
 (experiments/gate6_visual.py): the shot table, the token plumbing, the
 composition and the metric, all without the engine."""
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -223,7 +224,9 @@ def test_render_shot_bakes_on_unbaked_and_rewrites_only_while_running(tmp_path, 
         class manager:
             out_root = tmp_path
 
-    state = sheet.render_shot(sheet.SHOTS["b"], tokens=["-still-samples=8"],
+    # The unlit shot (the lit path's second compile: tests/test_hero_lighting.py).
+    unlit = dataclasses.replace(sheet.SHOTS["b"], lighting=None)
+    state = sheet.render_shot(unlit, tokens=["-still-samples=8"],
                               client_factory=lambda: (Client(), Server))
     assert calls == ["/compile", "/run", "/bake", "/run"]
     assert seen and seen[0][-1] == "-still-samples=8"

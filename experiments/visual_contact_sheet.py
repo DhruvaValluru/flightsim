@@ -93,6 +93,9 @@ class Shot:
     camera: str
     #: What the shot is for, in a word or two (the caption's second line).
     look: str
+    #: The hero-lighting director's intent (core/scene/hero_lighting.py
+    #: INTENTS): realised through the time of day, date and heading only.
+    lighting: Optional[str] = None
 
 
 #: The four fixed shots. Prompts are compiled by the offline (regex)
@@ -103,17 +106,19 @@ SHOTS: Dict[str, Shot] = {
     "a": Shot("a", "chase cam, real terrain, golden hour",
               "chase view of the j11 at 3000 m over the matterhorn at golden hour, "
               "flying east, for 6 seconds",
-              None, "J11", "chase", "golden hour, Google tiles"),
+              None, "J11", "chase", "golden hour, Google tiles", "golden_rim_backlight"),
     "b": Shot("b", "low pass over the desert",
               "chase view of the j11 at 1600 m over the desert, flying southwest, "
               "for 6 seconds",
-              "desert", "J11", "chase", "desert preset (Grand Canyon), noon"),
+              "desert", "J11", "chase", "desert preset (Grand Canyon), low cross-light",
+              "desert_cross_relief"),
     "c": Shot("c", "forest in heavy rain (storm weather)",
               "chase view of the j11 at 1700 m over the forest in heavy rain for 6 seconds",
-              "forest", "J11", "chase", "forest preset (Yosemite), storm rain"),
+              "forest", "J11", "chase", "forest preset (Yosemite), storm rain",
+              "storm_soft_sheen"),
     "d": Shot("d", "cockpit-shoulder view",
               "cockpit view of the j11 at 3000 m over the matterhorn at 10:00 for 6 seconds",
-              None, "J11", "cockpit", "behind the windshield"),
+              None, "J11", "cockpit", "behind the windshield", "cockpit_canopy_glint"),
 }
 SHOT_ORDER = ("a", "b", "c", "d")
 
@@ -338,6 +343,9 @@ def render_shot(shot: Shot, *, still: bool = True, clip_seconds: Optional[float]
     payload = reply.json()
     if reply.status_code != 200 or "spec" not in payload:
         raise ShotRefused(f"compile: {payload}")
+    lit = None
+    if shot.lighting:   # hero-lighting lane: solve the time + heading, recompile, record
+        payload, lit = light_shot(client, body, payload, shot.lighting)
     if not payload.get("validation", {}).get("ok", False):
         raise ShotRefused(f"validation: {payload.get('validation')}")
     run_body = {"spec": payload["spec"]["dict"],
@@ -375,7 +383,37 @@ def render_shot(shot: Shot, *, still: bool = True, clip_seconds: Optional[float]
         headless.run_headless = original
     state["run_dir"] = str(server.manager.out_root / run_id)
     state["run_id"] = run_id
+    if lit is not None:
+        state["hero_lighting"] = lit
     return state
+
+
+def light_shot(client, body: dict, payload: dict, intent: str) -> tuple:
+    """(compiled payload, solved record) for a shot lit by the hero-lighting
+    director: the place and date come from the first compile, the heading
+    goes into the prompt (``heading NNN``) and the dated UTC clock onto the
+    spec's time of day. Refuses by name (ShotRefused) as the solver does."""
+    from core.scene.hero_lighting import HeroLightingError, apply_to_spec, scene_day, solve, \
+        with_heading
+
+    spec = payload["spec"]["dict"]
+    initial, environment = spec.get("initial", {}), spec.get("environment", {})
+    try:
+        solved = solve(intent, float(initial["latitude"]["value"]),
+                       float(initial["longitude"]["value"]),
+                       scene_day((environment.get("time_of_day") or {}).get("value")))
+    except (HeroLightingError, ValueError, KeyError) as exc:
+        raise ShotRefused(f"{getattr(exc, 'constraint', 'hero_lighting.intent')}: {exc}")
+    relit = dict(body, prompt=with_heading(body["prompt"], solved.heading_deg))
+    reply = client.post("/compile", json=relit)
+    again = reply.json()
+    if reply.status_code != 200 or "spec" not in again:
+        raise ShotRefused(f"compile: {again}")
+    again["spec"]["dict"] = apply_to_spec(again["spec"]["dict"], solved)
+    record = solved.to_dict()
+    record["prompt"] = relit["prompt"]
+    record["heading_compiled_deg"] = again["spec"]["dict"]["initial"]["heading"]["value"]
+    return again, record
 
 
 def first_frame(run_dir: Path, camera: str) -> tuple:
@@ -535,6 +573,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 if mask is not None:
                     shutil.copy2(mask, directory / f"{key}_mask.png")
                 row.update(frame=str(frame), render=render_summary(frame))
+            if state.get("hero_lighting"):
+                row["hero_lighting"] = state["hero_lighting"]
                 print(f"[{key}] {directory / f'{key}.png'}")
             rows[key] = row
         if args.clip:

@@ -306,6 +306,16 @@ world_beauty.overrides:
 world_beauty.clouds:
   sentence: "The beauty cloud source is not one the renderer knows."
   hint: "Use -beauty-clouds=card, fair or engine."
+# hero-lighting lane (core/scene/hero_lighting.py, FlightSimHeroLighting.cpp):
+hero_lighting.intent:
+  sentence: "The shot asks for a lighting look the lighting director does not know."
+  hint: "Use one of the director's looks: golden rim backlight, desert cross relief, storm soft sheen or cockpit canopy glint."
+hero_lighting.unreachable:
+  sentence: "The sun never stands at the elevation this lighting look needs at that place on that date."
+  hint: "Choose another date, or a look with a lower or higher sun."
+hero_lighting.sidecar:
+  sentence: "The hero lighting file the renderer was given cannot be read: it is missing, not JSON, of an unknown version, or has a ground colour that is not three numbers."
+  hint: "Run the shot again from the web app so the file is rewritten, or render at the measure quality."
 ground_scatter.sidecar:
   sentence: "The ground scatter sidecar cannot be used: it is not JSON, it has the wrong format or version, or it lists no region or species."
   hint: "Re-bake the scatter sidecar with the current format, or render without ground scatter."
