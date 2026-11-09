@@ -804,10 +804,33 @@ def _bilinear(image, u, v):
     return out
 
 
+def linear_exr_lens(frame_png: Path) -> str:
+    """What lens the engine's linear EXR beside ``frame_png`` carries, from
+    its camera's render.json ``render_settings.linear_capture.lens``:
+    ``"lens_free"`` on a beauty render (the visual overhaul's integration:
+    no engine depth of field, motion blur or post, so this post-pass's own
+    PSF and blur are the only optics), else ``""`` (an older or measure
+    render, which does not say)."""
+    try:
+        render = json.loads((Path(frame_png).parent / "render.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    settings = render.get("render_settings") if isinstance(render, dict) else None
+    linear = settings.get("linear_capture") if isinstance(settings, dict) else None
+    lens = linear.get("lens") if isinstance(linear, dict) else None
+    return lens if isinstance(lens, str) else ""
+
+
 def read_linear_frame(frame_png: Path) -> Tuple["object", str]:
     """The frame as linear floats and a note saying how it got there:
     the engine's EXR beside it when readable, else the 8-bit sRGB PNG
-    inverted through the sRGB transfer (a stated approximation)."""
+    inverted through the sRGB transfer (a stated approximation).
+
+    The EXR is preferred because it is the scene's linear light. On a beauty
+    render it is lens-free by construction (render.json
+    ``render_settings.linear_capture``); the PNG carries the beauty's depth
+    of field and motion blur, so the PNG fallback would apply this pass's
+    PSF and blur on top of the engine's. The note says which."""
     import numpy as np
     from PIL import Image
 
@@ -825,8 +848,10 @@ def read_linear_frame(frame_png: Path) -> Tuple["object", str]:
             kind = Imath.PixelType(Imath.PixelType.FLOAT)
             channels = [np.frombuffer(handle.channel(c, kind), dtype=np.float32)
                         .reshape(height, width) for c in ("R", "G", "B")]
+            lens = linear_exr_lens(frame_png)
             return np.stack(channels, axis=-1).astype(np.float64), \
-                "engine linear EXR"
+                "engine linear EXR" + (" (lens-free: no engine depth of field, motion blur or post)"
+                                       if lens == "lens_free" else "")
         except Exception:
             pass
     with Image.open(frame_png) as image:

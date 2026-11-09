@@ -363,6 +363,16 @@ def _traffic_mesh_refusal(spec):
     return None
 
 
+def _render_clock(args) -> tuple:
+    """(fps, accumulate) the commandlet renders on: DEFAULT_FPS (the CLI
+    states no other) and --accumulate (1 when absent). The camera-motion
+    layer samples a moving camera's pose track on this clock."""
+    from core.render.flags import DEFAULT_FPS
+
+    accumulate = getattr(args, "accumulate", None)
+    return DEFAULT_FPS, int(accumulate) if accumulate and int(accumulate) >= 1 else 1
+
+
 def _after_name(exc: Exception) -> str:
     """The text of an error whose str() begins with its own rule name
     (``ScheduleError``: "camera.schedule: ..."), without that head, so
@@ -1214,7 +1224,12 @@ def _run(args: argparse.Namespace) -> int:
                 tracks.append(None)            # derived below from the left's
                 schedules.append(None)
                 continue
-            tracks.append(solve_pose_track(flight, camera, frame))
+            # camera-motion-layer: the render frame clock (DEFAULT_FPS, the
+            # --accumulate sub-frames), the clock the engine renders on, so a
+            # camera with motion ships its shake densely rather than on the
+            # 10 Hz telemetry clock; a camera with no motion block ignores it.
+            tracks.append(solve_pose_track(flight, camera, frame,
+                                           render_clock=_render_clock(args)))
             schedules.append(solve_schedule(flight, camera, frame))
         solve_rig(cameras, tracks, schedules)
         violations = []

@@ -142,6 +142,11 @@ LOCATIONS: Dict[str, Location] = {
     "grand_canyon": Location(
         key="grand_canyon",
         title="Grand Canyon (Cape Royal reach), Arizona",
+        # KNOWN GAP (visual fix pass 2026-11-09, owner decision pending): the
+        # bbox reaches south of 36 N and west of 112 W, so the mosaic fills
+        # the uncovered strips with 0 m. Adding N35_00_W112_00, N35_00_W113_00
+        # and N36_00_W113_00 fixes it but changes the terrain physics flies
+        # on, so it is not done here; glo30.require_tiles_cover reports it.
         tiles=("N36_00_W112_00",),
         bbox=(35.98, 36.20, -112.12, -111.85),
         crs="EPSG:32612",
@@ -170,6 +175,104 @@ LOCATIONS: Dict[str, Location] = {
         ),
     ),
 }
+
+
+def tile_footprint(stem: str) -> Tuple[float, float, float, float]:
+    """(lat_min, lat_max, lon_min, lon_max) of a GLO-30 tile stem: the name
+    is the tile's SOUTH-WEST corner, so ``N36_00_W112_00`` covers 36..37 N,
+    112..111 W."""
+    parts = str(stem).split("_")
+    if len(parts) != 4 or parts[0][:1] not in ("N", "S") or parts[2][:1] not in ("E", "W"):
+        raise DEMError(f"terrain.tiles_uncovered: {stem!r} is not a GLO-30 tile stem "
+                       f"(like N36_00_W112_00)")
+    lat = float(parts[0][1:]) * (1 if parts[0][0] == "N" else -1)
+    lon = float(parts[2][1:]) * (1 if parts[2][0] == "E" else -1)
+    return (lat, lat + 1.0, lon, lon + 1.0)
+
+
+def tiles_needed(bbox: Tuple[float, float, float, float]) -> Tuple[str, ...]:
+    """Every GLO-30 stem a bbox touches (an edge ON a degree line does not
+    need the tile beyond it)."""
+    lat_min, lat_max, lon_min, lon_max = bbox
+    stems = []
+    for lat in range(math.floor(lat_min), math.ceil(lat_max)):
+        for lon in range(math.floor(lon_min), math.ceil(lon_max)):
+            stems.append(f"{'N' if lat >= 0 else 'S'}{abs(lat):02d}_00_"
+                         f"{'E' if lon >= 0 else 'W'}{abs(lon):03d}_00")
+    return tuple(stems)
+
+
+def require_tiles_cover(location: "Location") -> None:
+    """Refuse by name a location whose listed tiles do not cover its bbox:
+    the mosaic would fill the gap with 0 m and the bake would carry a
+    sea-level plain beside the real ground."""
+    for stem in location.tiles:
+        tile_footprint(stem)
+    missing = [stem for stem in tiles_needed(location.bbox) if stem not in location.tiles]
+    if missing:
+        raise DEMError(
+            f"terrain.tiles_uncovered: {location.key}'s bbox {location.bbox} reaches "
+            f"GLO-30 tile(s) {missing} that its tile list {list(location.tiles)} leaves "
+            f"out; the mosaic would fill them with 0 m. List them in core/terrain/glo30.py.")
+
+
+#: Mean Earth radius for a stand-off step (a few km of great circle; the
+#: spherical error is centimetres).
+_EARTH_RADIUS_M = 6371008.8
+
+
+def summit(location_key: str, name: str) -> Tuple["Location", Tuple[str, float, float, float]]:
+    """(location, (name, lat, lon, elevation m)) of a named summit in a
+    curated location: the ONE table of where the subjects are. Refuses by
+    name (shot.subject_unframed) a summit the location does not list."""
+    location = LOCATIONS.get(location_key)
+    found = [s for s in (location.summits if location else ()) if s[0] == name]
+    if not found:
+        raise DEMError(f"shot.subject_unframed: {name!r} is not a summit of the "
+                       f"{location_key!r} location (core/terrain/glo30.py LOCATIONS)")
+    return location, found[0]
+
+
+def destination(lat_deg: float, lon_deg: float, bearing_deg: float,
+                distance_m: float) -> Tuple[float, float]:
+    """The point ``distance_m`` from (lat, lon) along ``bearing_deg``."""
+    phi, lam, theta = map(math.radians, (lat_deg, lon_deg, bearing_deg))
+    delta = distance_m / _EARTH_RADIUS_M
+    phi2 = math.asin(math.sin(phi) * math.cos(delta)
+                     + math.cos(phi) * math.sin(delta) * math.cos(theta))
+    lam2 = lam + math.atan2(math.sin(theta) * math.sin(delta) * math.cos(phi),
+                            math.cos(delta) - math.sin(phi) * math.sin(phi2))
+    return math.degrees(phi2), (math.degrees(lam2) + 540.0) % 360.0 - 180.0
+
+
+def bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Initial great-circle bearing from point 1 to point 2, degrees true."""
+    p1, p2, dl = math.radians(lat1), math.radians(lat2), math.radians(lon2 - lon1)
+    y = math.sin(dl) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return math.degrees(math.atan2(y, x)) % 360.0
+
+
+def standoff_start(location_key: str, name: str, heading_deg: float, standoff_m: float,
+                   origin_tolerance_deg: float) -> Tuple[float, float]:
+    """(lat, lon) of the start that puts the summit dead ahead at
+    ``standoff_m`` on ``heading_deg``. Refuses by name (shot.subject_unframed)
+    when that start leaves the location's bake: outside its bbox, or further
+    than ``origin_tolerance_deg`` from its origin (the web app's rule for
+    which bake a start earns, webapp/runs.py LOCATION_TOLERANCE_DEG)."""
+    location, (_name, lat, lon, _elevation) = summit(location_key, name)
+    start = destination(lat, lon, (float(heading_deg) + 180.0) % 360.0, float(standoff_m))
+    lat_min, lat_max, lon_min, lon_max = location.bbox
+    inside = lat_min <= start[0] <= lat_max and lon_min <= start[1] <= lon_max
+    near = (abs(start[0] - location.origin_lat) <= origin_tolerance_deg
+            and abs(start[1] - location.origin_lon) <= origin_tolerance_deg)
+    if not (inside and near):
+        raise DEMError(
+            f"shot.subject_unframed: {name} {standoff_m:g} m ahead on heading {heading_deg:g} "
+            f"needs a start at {start[0]:.4f}, {start[1]:.4f}, outside the {location.key} bake "
+            f"(origin {location.origin_lat}, {location.origin_lon} within "
+            f"{origin_tolerance_deg:g} deg; bbox {location.bbox})")
+    return start
 
 
 def tile_url(stem: str) -> str:

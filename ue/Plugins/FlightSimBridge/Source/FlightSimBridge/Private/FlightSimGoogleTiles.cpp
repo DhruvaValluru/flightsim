@@ -9,6 +9,16 @@
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
+// The beauty look (ApplyBeautyLook, visual overhaul world lane): the plugin's
+// .uplugin read for its version, and Cesium reached by reflection.
+#include "Dom/JsonValue.h"
+#include "HAL/FileManager.h"
+#include "Materials/MaterialInterface.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "UObject/UnrealType.h"
 
 #ifndef WITH_FLIGHTSIM_CESIUM
 #define WITH_FLIGHTSIM_CESIUM 0
@@ -327,5 +337,146 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record() const
 	Out->SetStringField(TEXT("not_claimed"),
 		TEXT("the tiles' surface agrees with the baked heightfield the physics and the labels' ")
 		TEXT("geometry use; the ground in the pixels is Google's, the ground the checks use is the bake"));
+	return Out;
+}
+
+// -- visual overhaul, world lane (2026-11-09): the beauty look ----------------
+// BEAUTY ONLY: FFlightSimWorldBeauty (FlightSimClouds.cpp) is the only caller
+// and only -quality=beauty builds it. UNVERIFIED against Cesium for Unreal:
+// its headers are not on the authoring machine, so nothing below names a
+// Cesium symbol the existing code does not already use (ACesium3DTileset,
+// RefreshTileset); the material and the smooth normals are reached through
+// the engine's reflection by NAME, and the record says what was found.
+
+FString FFlightSimGoogleTiles::CesiumPluginVersion()
+{
+	TArray<FString> Roots;
+	Roots.Add(FPaths::ProjectPluginsDir());
+	Roots.Add(FPaths::Combine(FPaths::EnginePluginsDir(), TEXT("Marketplace")));
+	for (const FString& Root : Roots)
+	{
+		if (!IFileManager::Get().DirectoryExists(*Root))
+		{
+			continue;
+		}
+		TArray<FString> Found;
+		IFileManager::Get().FindFilesRecursive(Found, *Root, TEXT("CesiumForUnreal.uplugin"), true, false);
+		for (const FString& Path : Found)
+		{
+			FString Text;
+			TSharedPtr<FJsonObject> Descriptor;
+			FString VersionName;
+			if (FFileHelper::LoadFileToString(Text, *Path) &&
+			    FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Descriptor) &&
+			    Descriptor.IsValid() && Descriptor->TryGetStringField(TEXT("VersionName"), VersionName))
+			{
+				return VersionName;
+			}
+		}
+	}
+	return FString();
+}
+
+TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyLook(UMaterialInterface* Material)
+{
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	const FString Version = CesiumPluginVersion();
+	Out->SetStringField(TEXT("cesium_version"), Version.IsEmpty() ? FString(TEXT("not found")) : Version);
+	Out->SetStringField(TEXT("api_basis"),
+		TEXT("UNVERIFIED: Cesium for Unreal reached by reflection by name (no Cesium headers on the ")
+		TEXT("authoring machine); found/not found below is the render machine's answer"));
+#if WITH_FLIGHTSIM_CESIUM
+	ACesium3DTileset* Tiles = Cast<ACesium3DTileset>(Tileset.Get());
+	if (!bEnabled || Tiles == nullptr)
+	{
+		Out->SetStringField(TEXT("applied"), TEXT("nothing: the tileset is not drawn"));
+		return Out;
+	}
+	// "2.30.0" -> 2: the UE 5 material-layer generation of the plugin, the one
+	// whose per-primitive material instances read the glTF parameters a
+	// custom tileset material exposes (UNVERIFIED).
+	const int32 Major = Version.IsEmpty() ? 0 : FCString::Atoi(*Version);
+	if (Major < 2)
+	{
+		Out->SetStringField(TEXT("applied"),
+			TEXT("nothing: the installed Cesium for Unreal is not 2.x or later (or was not found)"));
+		return Out;
+	}
+	UClass* Class = Tiles->GetClass();
+	bool bChanged = false;
+
+	// The material: the setter when the class has one (it refreshes what it
+	// must), else the property.
+	FString MaterialRoute =
+		TEXT("absent: M_FlightSimTilesBeauty did not load (run scripts/ue_create_materials.py)");
+	if (Material != nullptr)
+	{
+		MaterialRoute = FString::Printf(TEXT("not found: no SetMaterial function or Material property on %s"),
+		                                *Class->GetName());
+		UFunction* Setter = Tiles->FindFunction(FName(TEXT("SetMaterial")));
+		FObjectProperty* SetterParam = nullptr;
+		if (Setter != nullptr && Setter->NumParms == 1)
+		{
+			for (TFieldIterator<FProperty> It(Setter); It; ++It)
+			{
+				SetterParam = CastField<FObjectProperty>(*It);
+				break;
+			}
+		}
+		if (SetterParam != nullptr && Material->IsA(SetterParam->PropertyClass))
+		{
+			TArray<uint8> Parms;
+			Parms.SetNumZeroed(Setter->ParmsSize);
+			SetterParam->SetObjectPropertyValue_InContainer(Parms.GetData(), Material);
+			Tiles->ProcessEvent(Setter, Parms.GetData());
+			MaterialRoute = TEXT("UFunction SetMaterial");
+			bChanged = true;
+		}
+		else if (FObjectProperty* Property = FindFProperty<FObjectProperty>(Class, TEXT("Material")))
+		{
+			if (Material->IsA(Property->PropertyClass))
+			{
+				Property->SetObjectPropertyValue_InContainer(Tiles, Material);
+				MaterialRoute = TEXT("UPROPERTY Material");
+				bChanged = true;
+			}
+		}
+		Out->SetStringField(TEXT("material"), Material->GetPathName());
+	}
+	Out->SetStringField(TEXT("material_route"), MaterialRoute);
+
+	// Smooth normals: photogrammetry meshes carry no normals and Cesium's
+	// flat ones facet the sun's shading.
+	if (FBoolProperty* Smooth = FindFProperty<FBoolProperty>(Class, TEXT("GenerateSmoothNormals")))
+	{
+		Smooth->SetPropertyValue_InContainer(Tiles, true);
+		Out->SetBoolField(TEXT("generate_smooth_normals"), true);
+		bChanged = true;
+	}
+	else
+	{
+		Out->SetStringField(TEXT("generate_smooth_normals"), TEXT("not found: no bool GenerateSmoothNormals"));
+	}
+	if (bChanged)
+	{
+		// Rebuilds the loaded tiles with the new settings; every frame's
+		// WaitForView then loads them again before any capture.
+		Tiles->RefreshTileset();
+	}
+	Out->SetBoolField(TEXT("refreshed"), bChanged);
+	// The class's own properties, so the render machine's record names the
+	// real settings the next probe can reach.
+	TArray<TSharedPtr<FJsonValue>> Names;
+	for (TFieldIterator<FProperty> It(Class, EFieldIterationFlags::None); It; ++It)
+	{
+		Names.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("%s:%s"), *It->GetName(),
+		                                                        *It->GetCPPType())));
+	}
+	Out->SetArrayField(TEXT("tileset_properties"), Names);
+	Out->SetStringField(TEXT("applied"), bChanged ? TEXT("the beauty look") : TEXT("nothing was found to set"));
+#else
+	(void)Material;
+	Out->SetStringField(TEXT("applied"), TEXT("nothing: this build has no Cesium for Unreal plugin"));
+#endif
 	return Out;
 }

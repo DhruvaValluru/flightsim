@@ -754,6 +754,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             # Phase 10: the sensor model, every parameter and its source.
             "profile": profile.to_dict(),
         })
+        if getattr(track, "motion_record", None):   # camera-motion-layer, absent = none
+            camera_blocks[-1]["camera_motion"] = dict(track.motion_record)
         if sensing is not None:
             camera_blocks[-1]["sensing"] = sensing
             if not sensing_variables:

@@ -14,7 +14,7 @@
     "commit": "925cb5317f3c66fa323a9e186e24d574e0b0881d",
     "authors_file": "README.md"
   },
-  "note": "Owner decision 3 (docs/phase3/decisions.md): the J-11A from yanes19/SU-27SK at 925cb531, GPL-2.0. The FDM is the package's J-11A.xml vendored as assets/fdm_root/aircraft/J11/J11.xml with its LICENSE and a provenance header listing every local edit; the mesh is fetched at import time (source_dir is git-ignored). Decision 6: no control surfaces.",
+  "note": "Owner decision 3 (docs/phase3/decisions.md): the J-11A from yanes19/SU-27SK at 925cb531, GPL-2.0. The FDM is the package's J-11A.xml vendored as assets/fdm_root/aircraft/J11/J11.xml with its LICENSE and a provenance header listing every local edit; the mesh is fetched at import time (source_dir is git-ignored). Decision 6: no control surfaces. j11-package lane (2026-11-09): the conversion also reads the package's PLAAF livery, cockpit interior, seat and pilot, each file pinned by git blob sha1 and sha256 in package_files.",
   "parts": [
     {
       "file": "Models/Su-27.ac"
@@ -36,6 +36,37 @@
         -0.24
       ],
       "component": "r27r_right"
+    },
+    {
+      "file": "Models/Interior/panel.ac",
+      "interior": true,
+      "offset_m": [
+        0.3,
+        -0.01,
+        0.0
+      ],
+      "source": "Models/J-11A.xml <model> panel-zh.xml <offsets> (0.3, -0.01, 0) m; panel-zh.xml <path>panel.ac</path> at its own origin"
+    },
+    {
+      "file": "Models/Interior/seat2.ac",
+      "interior": true,
+      "offset_m": [
+        5.3,
+        0.0,
+        0.6
+      ],
+      "pitch_deg": -5.0,
+      "source": "panel-zh.xml seat2.ac <offsets> (5.0, 0.01, 0.6) m pitch -5 deg, plus the panel-zh.xml offset (0.3, -0.01, 0) m"
+    },
+    {
+      "file": "Models/Interior/pilot/fighter_default.ac",
+      "interior": true,
+      "offset_m": [
+        5.3,
+        0.0,
+        0.95
+      ],
+      "source": "panel-zh.xml pilot.xml <offsets> (5.0, 0.01, 0.95) m, plus the panel-zh.xml offset (0.3, -0.01, 0) m; pilot.xml <path>fighter_default.ac</path>; its head and visor animations are not applied (drawn at rest)"
     }
   ],
   "parts_source": "the store offsets are the FDM's own pylon2-load / pylon3-load <pointmass> locations (metres, structural = FG model frame), which J-11A-set.xml <sim><weight> repeats as the stores' x-m/y-m/z-m offsets; R-27R.ac is the package's own missile model (Models/Stores/Missiles/R-27R), symmetric about its own y and z so one file serves both sides",
@@ -357,6 +388,245 @@
     "cg_envelope": {
       "polygon": null,
       "reason": "no flight-manual CG envelope transcribed for the J-11A"
+    }
+  },
+  "package_files": [
+    {
+      "file": "LICENSE",
+      "git_blob_sha1": "23cb790338e191e29205d6f4123882c0583ef8eb",
+      "sha256": "db296f2f7f35bca3a174efb0eb392b3b17bd94b341851429a3dff411b1c2fc73",
+      "bytes": 18046,
+      "role": "licence: GPL-2.0 text (decision 3; sha256 = docs/phase3/packets/D1-SU-27SK-LICENSE.txt)"
+    },
+    {
+      "file": "J-11A-set.xml",
+      "git_blob_sha1": "f02f701d21b5e517a8a5f73c21e928a566328bd0",
+      "sha256": "35f2a2fe5a2a044d10ce7f9e25f25f44e90a53f7f80c3905f0c5737800992116",
+      "bytes": 31062,
+      "role": "aircraft set file: the pilot-eye <view n=\"0\"> offsets (views.pilot_eye)"
+    },
+    {
+      "file": "Models/J-11A.xml",
+      "git_blob_sha1": "9a76b3d91a8dfcd1b6d3fd46b3ab6df0d7777ed4",
+      "sha256": "7cc72b918dffd05e1d7aefe3688ca9c648600b326e6e30f22a7c0f158acb86ec",
+      "bytes": 63412,
+      "role": "the J-11A model XML: the livery material animation's object list, the panel-zh.xml offset (0.3, -0.01, 0) m, the reheat offsets (19.8, +-1.27, -0.25/-0.22) m and the LightPack include"
+    },
+    {
+      "file": "Models/Su-27.ac",
+      "git_blob_sha1": "3ee71dbf48f1418aeb2172223678d6fdf9ff871c",
+      "sha256": "960f69a7b836eb4056bec0dfb9e8d9125d150273aa364a518be2db3f0b3b10d2",
+      "bytes": 944371,
+      "role": "airframe mesh (43 objects), parts[0]"
+    },
+    {
+      "file": "Models/Su-27_Flanker_P01.png",
+      "git_blob_sha1": "b2fc29f0d74ac564de3c0b409fb2e68b0370d021",
+      "sha256": "31f03387583d985bed276bc2522003be86c1cfc3a8006fd2f2767b06aed0fb7a",
+      "bytes": 6553769,
+      "role": "base colour of every Su-27.ac object the livery does not replace (pylons, gear doors, engine faces, rear canopy frame), 4096x2048 RGBA"
+    },
+    {
+      "file": "Models/Liveries/PLAAF2Div.png",
+      "git_blob_sha1": "f618a129de620e4902ed2a809b9a2369c9933900",
+      "sha256": "b41deb1933859033c2a2a294b7936b665d33472029c284be315b7ebeef60cbab",
+      "bytes": 4848097,
+      "role": "base colour: the PLAAF 2nd Division livery, swapped onto the model XML's livery objects, 4096x2048 RGBA"
+    },
+    {
+      "file": "Models/Liveries/PLAAF2Div.xml",
+      "git_blob_sha1": "ce182d1097518fac6030758ab9bb4dcd2c237d59",
+      "sha256": "26bf5fc686bac2a22933be46541728d5e6433fa77cdff6973742f9b2c7b5124d",
+      "bytes": 277,
+      "role": "livery definition: <name> People's Liberation Army Air Force, 2 Div. -> Liveries/PLAAF2Div.png"
+    },
+    {
+      "file": "Models/su-27gears.png",
+      "git_blob_sha1": "b90535ecec7a96fcab84c82f7c10494a6deefe3e",
+      "sha256": "cc63a4be6c01bef41935ead999e30d6d71374446616dc86eb90b32f51abf226f",
+      "bytes": 122858,
+      "role": "base colour of the undercarriage, struts, hubs and aerials, 1024x1024 RGBA"
+    },
+    {
+      "file": "Models/Glass_Cockpit.png",
+      "git_blob_sha1": "ec475bc71760547343c4a2dae46422fce53ec6bb",
+      "sha256": "376e65c48062f4b8b4984d3da9115ec5efab20ca5afa0668b6062524feb2b0ef",
+      "bytes": 2985,
+      "role": "base colour of the canopy glass objects (canopy.glass, object.001), 1024x512 RGBA"
+    },
+    {
+      "file": "Models/Stores/Missiles/R-27R/R-27R.ac",
+      "git_blob_sha1": "4feb27e5203a12aea53fc332c8fcd681e5f47f7e",
+      "sha256": "9c744e2a1508bcdc0fe310a17fe8cbd0045c26d98c480a68d67d03f1af07e3c1",
+      "bytes": 97492,
+      "role": "R-27R store mesh, parts[1] and parts[2]"
+    },
+    {
+      "file": "Models/Stores/Missiles/R-27R/R-27R.png",
+      "git_blob_sha1": "c8b7efb9d9e63b244ea23d05fb90c125e8d98540",
+      "sha256": "3efb45ae08ef4b9a860aebcd9f9e5d69cd8ad6219f75a6470fd7dd4f5a57abcb",
+      "bytes": 5742,
+      "role": "base colour of the R-27R, 512x512 RGBA"
+    },
+    {
+      "file": "Models/Interior/panel-zh.xml",
+      "git_blob_sha1": "0119619dd0bfc30dc8a07c159d9ce91e74618665",
+      "sha256": "8665f9ac8872d47442368400b925d3a5f83830ed1794de734346fa0d9d1a4aff",
+      "bytes": 17240,
+      "role": "the J-11A (Chinese-label) cockpit: panel.ac at its origin, seat2.ac at (5.0, 0.01, 0.6) m pitch -5 deg, pilot.xml at (5.0, 0.01, 0.95) m"
+    },
+    {
+      "file": "Models/Interior/panel.ac",
+      "git_blob_sha1": "84bfb6d37b43813f181442f1e2d90bc022f99ce6",
+      "sha256": "4e5b1344a329a99721aa0d07c6a9b43b3df05bf4015ee9b44b62782223a4a0d5",
+      "bytes": 135852,
+      "role": "cockpit interior: front panel, side consoles, cockpit floor (interior part)"
+    },
+    {
+      "file": "Models/Interior/panel-front-tex-2048-bevel.png",
+      "git_blob_sha1": "626477dbd89ea4c2279a2e159cbf7e86230c4cac",
+      "sha256": "50e9388010558e661c9900390908f489d88efe0e6ac071645323b855a249b6c1",
+      "bytes": 1397630,
+      "role": "base colour of the front instrument panel, 2048x2048 RGBA"
+    },
+    {
+      "file": "Models/Interior/panel.wcs.png",
+      "git_blob_sha1": "dca42e613fa16c9f0b7da6e1fa9d3ab739bde91d",
+      "sha256": "06d5f77af7bda35b741c79fdfe6b31dbfcf0d28fbc35bd2301b575953d4bc3b3",
+      "bytes": 80362,
+      "role": "base colour of the weapons-control panel, 1024x652 RGBA (resampled to 1024x512 by the converter)"
+    },
+    {
+      "file": "Models/Interior/seat2.ac",
+      "git_blob_sha1": "77bf8dcfc23df4d76bd91372a999e8e5fd473149",
+      "sha256": "2211ecb5489eba8dde2c55a2694d955f8f214cb378f732d38f25fa95dfd90fb8",
+      "bytes": 1283970,
+      "role": "K-36DM ejection seat (interior part)"
+    },
+    {
+      "file": "Models/Interior/grey-blue-flood.png",
+      "git_blob_sha1": "29cebb54f961b0a79d34976f766bb44b291ff456",
+      "sha256": "47c1976f21ea3be98a1414a0874f4deb2fc82f5b2ea661bf132ec3855f6c7592",
+      "bytes": 14907,
+      "role": "base colour of the seat cushions and chute extractor, 128x128 RGB"
+    },
+    {
+      "file": "Models/Interior/K-36DM.png",
+      "git_blob_sha1": "980d32f1e072d0596e20420b4210c9adca3fbdda",
+      "sha256": "ba92cd9bbc663d9d44d81efd161c58005c8365262d4ce813140c2ce242dd76c5",
+      "bytes": 1967,
+      "role": "base colour of the seat's K-36DM placards, 512x512 RGBA"
+    },
+    {
+      "file": "Models/Interior/texture.png",
+      "git_blob_sha1": "67ff07c2d21abeb3f340f35e514900245a5db8bd",
+      "sha256": "15d87777130f9e7708ffd0bc99693bb3d5da0dfbdb823f6346b975bde803c8e7",
+      "bytes": 63018,
+      "role": "base colour of the seat structure, head rest, rails, 512x512 RGB"
+    },
+    {
+      "file": "Models/Interior/pilot/pilot.xml",
+      "git_blob_sha1": "2439d2ca484aafd41207b468890838328b867247",
+      "sha256": "95df03c671903934a8b0d83be42c9284bccfe2426642711a83e5bb033fbfb7ff",
+      "bytes": 2236,
+      "role": "pilot model XML: fighter_default.ac and its object names (tete, corps, bras, avantbras, main; lunettes transparent)"
+    },
+    {
+      "file": "Models/Interior/pilot/fighter_default.ac",
+      "git_blob_sha1": "d747d4e3085a9d935a983e8f7d379aa5f66fde69",
+      "sha256": "46a92fb0b8b7428cc92e0e54bc7829c170b7e234a09f167c892bc3e3702b7b56",
+      "bytes": 258044,
+      "role": "pilot figure (interior part)"
+    },
+    {
+      "file": "Models/Interior/pilot/fighter_pilot.png",
+      "git_blob_sha1": "0febd74f0e9a2af1fb9deec3bea227daaa23e001",
+      "sha256": "2403d825c12ebcc3f90ef7f12d04240a7e093d9d87b64ad2fea86b00283fd2e8",
+      "bytes": 479067,
+      "role": "base colour of the pilot figure, 512x512 RGB"
+    },
+    {
+      "file": "Models/Interior/pilot/transp.png",
+      "git_blob_sha1": "2f47d7bd4ebe03e4ceea0658b91d10ff9e8edbbc",
+      "sha256": "d4b9fd652e18e6b9b83c8935ee72d6577b19c3561e3386d1e5d90aedb05f1a9e",
+      "bytes": 17067,
+      "role": "base colour of the pilot's visor (lunettes), 128x128 RGBA"
+    },
+    {
+      "file": "Models/Interior/pilot/Read-Me.txt",
+      "git_blob_sha1": "96230222575b9597261c02accbefcc0ed7d75932",
+      "sha256": "f3048a8e9911cf8697a87bb27193cdcb9cc1d6a5fb9b11eb16aec276cb385aa7",
+      "bytes": 898,
+      "role": "pilot provenance: extracted from Bertrand Augras's X-Plane pilot collection by Emmanuel Baranger (helijah); distributed inside the GPL-2.0 package"
+    },
+    {
+      "file": "Models/Lights/LightPack.xml",
+      "git_blob_sha1": "883a97d6b13cb52ba1f980b9c329b7ee057b08d3",
+      "sha256": "6f4b1486694bd3368ee54fd53c5b004414328286e9faaf24ad01b4f5e5567d14",
+      "bytes": 4893,
+      "role": "light positions: nav red (16.12, -7.5, 0.32), green (16.12, 7.5, 0.32), beacons at the same points, landing (7.65, +-0.13, -0.48) pitch -6.25, taxi (7.65, -0.13, -0.68); strobes and the tail light commented out"
+    },
+    {
+      "file": "Models/Effects/Afterburner/Ab-Left.xml",
+      "git_blob_sha1": "6196f20d7111658fe20da9f15aeb7e3ebda4668e",
+      "sha256": "9ae3d580aec797187203d647c08f53e3baeb2b9c4781eb0408fa7a093ceda970",
+      "bytes": 275,
+      "role": "left reheat model (ALS-AB-Left / EJ200-L) the J-11A.xml places at (19.8, -1.27, -0.25) m"
+    },
+    {
+      "file": "Models/Effects/Afterburner/Ab-Right.xml",
+      "git_blob_sha1": "092a62879df9662e14f6a985d407ec17d255c982",
+      "sha256": "d65560990cc6849f25b571078faae9b8eace464420e7b1e3f505596efe15d232",
+      "bytes": 276,
+      "role": "right reheat model the J-11A.xml places at (19.8, 1.27, -0.22) m"
+    },
+    {
+      "file": "Models/Effects/nozzles/Nozzles.xml",
+      "git_blob_sha1": "9afae013bf1bb7a0b06b5879a67d510809ac48bc",
+      "sha256": "f74c4f8443fb147c6415888680ba3c5b18d63df69f13528cce97f08fcc48b616",
+      "bytes": 3984,
+      "role": "nozzle petal rings: NozzleL.xml at (13.847, -0.957, -0.176) m and (13.847, 0.957, -0.176) m, nine roll copies each; J-11A.xml places this file at (5.38, -0.32, -0.02) and (5.38, 2.22, -0.02) m, so the FX nozzles sit on the rings at y -1.277 / +1.263 m (look/J11.json)"
+    },
+    {
+      "file": "Models/Effects/nozzles/NozzleL.xml",
+      "git_blob_sha1": "d97c1a0cfc88c1d0c177189f7ef6719941f4181d",
+      "sha256": "bed894fcb3aa6747ae3dbca7c188a2c9a59a883b60df633e34463a0a519cd435",
+      "bytes": 2255,
+      "role": "one petal pair (mesh_nozzleseg.ac), throttle-animated 15 -> 0 deg; read for the ring geometry, not imported"
+    }
+  ],
+  "package_files_source": "j11-package lane, 2026-11-09: every file of github.com/yanes19/SU-27SK at the pinned commit the conversion reads beyond the commit pin; git_blob_sha1 as the GitHub tree API lists it (git/trees/925cb531...?recursive=1) and recomputed from the downloaded bytes, sha256 of the same bytes; verified before every convert (assets_pipeline/package_pins.py, refusal aircraft.package_pin). The full inventory of the package is docs/visual/J11_PACKAGE.md",
+  "interior_source": "the J-11A model XML includes Models/Interior/panel-zh.xml, which places panel.ac, seat2.ac and the pilot; the three are drawn in the BODY part (the aircraft's class and int_id, no box of their own) and must lie inside the hull's extents (refusal aircraft.interior_outside_hull). Measured 2026-11-09 from the pinned files: panel x 3.86..6.55 m, seat 4.76..5.91 m, pilot 4.81..5.49 m, all |y| <= 0.65 m, z 0.21..1.58 m, inside the hull's (0.01..22.08, +-7.62, -2.52..3.78) m and under the canopy glass top (z 1.72 m). NOT imported: the stick, pedals, throttle block and the 85 animated instrument and console sub-model meshes (Models/Interior/Instruments, LeftPanels, RightPanels), each its own .ac with Nasal/canvas animation; the front panel texture carries the instrument faces",
+  "livery": {
+    "name": "PLAAF2Div",
+    "label": "People's Liberation Army Air Force, 2 Div.",
+    "texture": "Models/Liveries/PLAAF2Div.png",
+    "replaces": "Su-27_Flanker_P01.png",
+    "part": "Models/Su-27.ac",
+    "objects": [
+      "HULL_Hull_Upper.001",
+      "Canopy",
+      "HULL_Speedbrake_Outer",
+      "WNG_Left_Flaperon",
+      "WNG_Right_Flaperon",
+      "ELV_Elevon_Left",
+      "HULL_Hull_Upper",
+      "TF_Left_Rudder",
+      "TF_Right_Rudder",
+      "ELV_Elevon_Right"
+    ],
+    "source": "Models/J-11A.xml <animation><type>material</type> (property-base sim/model/livery, texture-prop texture): these ten objects take the selected livery's texture; Models/Liveries/PLAAF2Div.xml is the package's one PLAAF scheme (the others are Russian, Ukrainian, Indian and Angolan air forces and Gromov test pilots); every other Su-27.ac object keeps Models/Su-27_Flanker_P01.png, as FlightGear draws it"
+  },
+  "views": {
+    "pilot_eye": {
+      "model_m": [
+        5.23,
+        0.0,
+        1.45
+      ],
+      "pitch_deg": -17.0,
+      "fov_deg": 84.0,
+      "source": "J-11A-set.xml <view n=\"0\"> <config> x-offset-m 0.00, y-offset-m 1.45, z-offset-m 5.23, pitch-offset-deg -17, default-field-of-view-deg 84; FlightGear view offsets are x right, y up, z aft, so the model-frame point is (5.23, 0, 1.45) m"
     }
   }
 }

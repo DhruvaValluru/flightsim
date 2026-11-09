@@ -163,6 +163,9 @@ camera.hazard_intersection:
   sentence: "The camera would sit inside the tornado's core at {actual} {actual:point|points} along its path; those frames are refused rather than rendered blank."
 camera.poses:
   sentence: "The camera's path could not be worked out from the flight."
+camera.motion:
+  sentence: "The camera's shake or gimbal-motion settings are not ones the system knows how to apply."
+  hint: "Pick a known motion profile, a whole-number seed and an intensity from 0 to 3; the technical note lists the profiles."
 camera.labels:
   sentence: "This aircraft cannot be labelled: its outline points are not on file."
 aircraft.component_unmatched:
@@ -197,8 +200,31 @@ aircraft.mesh_import:
   sentence: "The aircraft's 3-D model could not be fetched, converted or imported on this machine."
 aircraft.mesh_extent:
   sentence: "The aircraft's 3-D model does not measure the size its flight model says it is."
+# j11-package lane (assets_pipeline/package_pins.py, convert.py): the
+# package files beyond the airframe .ac.
+aircraft.package_pin:
+  sentence: "A file of the aircraft's model package is missing or is not the exact pinned version, so the model was not converted."
+  hint: "Fetch the package again at the pinned commit; the technical note names each file that differs."
+aircraft.interior_outside_hull:
+  sentence: "A cockpit part of the aircraft's model would stick out of the airframe, which would change the outline the labels measure, so the model was not converted."
+  hint: "Check the cockpit part's offset in the aircraft's model config against the package's model file."
+aircraft.livery_unmatched:
+  sentence: "The aircraft's paint scheme names parts of the model that carry no paint texture, so the model was not converted rather than drawn half-painted."
+aircraft.texture_collision:
+  sentence: "Two different textures of the aircraft's model share one file name, and one would silently replace the other, so the model was not converted."
 aircraft.placeholder_drawn:
   sentence: "The pictures show a stand-in shape, not the real aircraft model, so they cannot be labelled."
+aircraft_look.manifest:
+  sentence: "The aircraft's beauty look file exists but cannot be read, so the beauty render was stopped rather than drawn without it."
+  hint: "Run the aircraft import step again; it rewrites the look file beside the converted model."
+
+aircraft_look.switch:
+  sentence: "One of the aircraft look's on/off switches was given a word other than on or off, so the beauty render was stopped rather than guessing what was meant."
+  hint: "Give the switch on, 1 or true, or off, 0 or false (for example -heat-haze=off)."
+
+aircraft_look.condensation:
+  sentence: "The aircraft's vapour settings contradict each other or are not numbers, so the beauty render was stopped rather than drawn with them."
+  hint: "Correct the condensation numbers in the aircraft's look config, then run the aircraft import step again."
 
 # -- terrain and weather (webapp/runs.py, flightsim/capture.py) --------------
 
@@ -214,6 +240,9 @@ terrain.landcover_grid:
 terrain.unbaked:
   sentence: "No terrain has been prepared for the coordinates asked for."
   hint: "Prepare the terrain there first (it downloads once), then run again."
+terrain.tiles_uncovered:
+  sentence: "The place's elevation tiles do not cover its whole area, so part of the prepared terrain would be a flat plain at sea level."
+  hint: "List every GLO-30 tile the place's box touches in core/terrain/glo30.py, then prepare the terrain again."
 google_tiles.undulation_missing:
   sentence: "The render could not tell how high to place Google's 3D tiles, because no geoid height was given for this place."
   hint: "Write the run card again with FLIGHTSIM_GOOGLE_TILES on, so it carries the geoid height."
@@ -285,6 +314,78 @@ sun.below_render_floor:
 render.quality:
   sentence: "The render quality asked for is not one the renderer knows; it knows measure and beauty."
   hint: "Set FLIGHTSIM_RENDER_QUALITY to measure or beauty, or leave it unset."
+# render-path lane (visual plan V0/V8, FlightSimRenderCommandlet.cpp):
+render.still_samples:
+  sentence: "Still accumulation was asked for on a render that is not a beauty render, or with a count out of range."
+  hint: "Use -still-samples=N (1 to 64) only with -quality=beauty."
+render.pathtrace:
+  sentence: "The path-traced render cannot run here: it needs the Windows render host with hardware ray tracing turned on for that render, and it renders stills, not clips (a clip would take hours)."
+  hint: "Render the path-traced sheet on the Windows box as stills (pass -pathtrace-clip only to mean a path-traced clip), or ask for the beauty quality instead."
+# shots-render fix pass (core/terrain/glo30.py standoff_start, core/scenario/
+# camera.py chase_unframed; raised by experiments/visual_contact_sheet.py):
+shot.subject_unframed:
+  sentence: "The shot's subject cannot be put in front of the camera: the start that would put the summit ahead on the flown heading lies outside the place's prepared terrain, or the summit is not one of the place's."
+  hint: "Use a summit listed for the place in core/terrain/glo30.py, or a shorter stand-off."
+shot.chase_unframed:
+  sentence: "The chase camera would frame this aircraft from the fallback distance meant for a jumbo jet, because its mesh has not been imported on this machine."
+  hint: "Import the aircraft's mesh on this machine first, then render the sheet, so every baseline is framed from the aircraft's own measured length."
+# supersample lane (visual overhaul, FlightSimSupersample.cpp):
+render.supersample:
+  sentence: "Supersampling was asked for on a render that is not a beauty render, with a factor out of range, or at a size whose internal frame would not fit the texture limit or the memory budget."
+  hint: "Use -supersample=N (1 to 4) only with -quality=beauty, or a smaller factor or output size."
+
+render.beauty_look:
+  sentence: "The beauty look cannot be planned or applied: an unknown grade or lens, a sun that cannot be lit or that moves during the clip, a camera without a sensor width, or a sidecar the renderer cannot read."
+  hint: "Use a known grade (golden hour, desert noon or storm) and lens (standard or cinematic), or render at the measure quality."
+
+# tiles-delight (core/scene/tiles_delight.py, the shader's Python twin):
+world_beauty.tiles_delight:
+  sentence: "The tile de-lighting cannot run: the colour and its coarse sample differ in shape or are not colours, or a setting is not a usable number."
+  hint: "Pass two colour arrays of the same shape and finite settings, with the knee above zero and the blue gate at least zero."
+# world lane (visual plan V6/V4, FlightSimClouds.cpp, FlightSimGroundDetail.cpp):
+world_beauty.overrides:
+  sentence: "The world look's probe overrides file cannot be read, or names a section, row or field the world look does not have."
+  hint: "Fix the overrides file so it names only the world look's own sections and fields, or render without it."
+world_beauty.clouds:
+  sentence: "The beauty clouds were asked for in a mode the world look does not know."
+  hint: "Ask for the card's clouds, fair-weather clouds or the engine's clouds, or leave the choice out."
+
+  sentence: "The beauty cloud source is not one the renderer knows."
+  hint: "Use -beauty-clouds=card, fair or engine."
+# dust-humidity-haze (core/scene/dust_haze.py, FlightSimDustHaze.cpp):
+dust_haze.row:
+  sentence: "The dust haze cannot be chosen: the card names a dust word the renderer does not know."
+  hint: "Say dust, haze or none (or true or false) for the weather's dust, or leave it out to let the surface and the reported weather decide."
+
+# hero-lighting lane (core/scene/hero_lighting.py, FlightSimHeroLighting.cpp):
+hero_lighting.intent:
+  sentence: "The shot asks for a lighting look the lighting director does not know."
+  hint: "Use one of the director's looks: golden rim backlight, desert cross relief, storm soft sheen or cockpit canopy glint."
+hero_lighting.unreachable:
+  sentence: "The sun never stands at the elevation this lighting look needs at that place on that date."
+  hint: "Choose another date, or a look with a lower or higher sun."
+hero_lighting.sidecar:
+  sentence: "The hero lighting file the renderer was given cannot be read: it is missing, not JSON, of an unknown version, or has a ground colour that is not three numbers."
+  hint: "Run the shot again from the web app so the file is rewritten, or render at the measure quality."
+ground_scatter.sidecar:
+  sentence: "The ground scatter file cannot be read, is of another format or version, or carries no region or species."
+  hint: "Write the scatter file again, or render without ground scatter."
+ground_scatter.biome:
+  sentence: "The ground scatter file is for a different landscape than the scene: its trees and bushes belong to another kind of ground."
+  hint: "Write the scatter file for the scene's own ground (forest or desert), or render without ground scatter."
+
+  sentence: "The ground scatter sidecar cannot be used: it is not JSON, it has the wrong format or version, or it lists no region or species."
+  hint: "Re-bake the scatter sidecar with the current format, or render without ground scatter."
+# reference-frames lane (core/scene/look_match.py, experiments/look_match.py):
+look_match.inputs:
+  sentence: "The look match cannot read what it was given: a frame, its label mask or depth, the beauty look, or the world overrides is missing or not in the expected form."
+  hint: "Point it at a path-traced frame and a beauty frame that were rendered with labels, and at readable look files."
+look_match.not_same_shot:
+  sentence: "The reference and the realtime frame are not the same shot: their size or their depth differs."
+  hint: "Render both from the same card and shot, changing only the quality (pathtrace for the reference, beauty for the realtime frame)."
+look_match.quality:
+  sentence: "The look match needs a path-traced reference and a beauty realtime frame, and one of the two was rendered at another quality."
+  hint: "Render the reference with the path tracer and the realtime frame at the beauty quality."
 
 # -- the batch runner (core/dataset/batch.py) --------------------------------
 
@@ -1199,3 +1300,31 @@ weather.rain:
 clouds.material:
   sentence: "A volumetric cloud in the scene carries a material the engine's cloud passes would crash on (not a Volume material, not flagged for the volumetric cloud, or failed to compile)."
   hint: "Run the material script again; it sets the flag and rebuilds a stale storm material."
+# -- visual overhaul: the beauty look's record and label honesty (verifier-tooling) --
+look.quality:
+  sentence: "The render names a quality that is not one of measure, beauty or path-traced."
+look.measure_altered:
+  sentence: "A measurement render carries the beauty look or an effect that moves pixels; the measurement path must render as it did when its gate passed."
+  hint: "Leave the look to beauty renders; render the labelled set at measurement quality."
+look.pixel_moving_unrecorded:
+  sentence: "The look moves pixels (distortion, fringing, haze, blur, overscan or resampling) and the render record does not say so."
+  hint: "List the effect in the render record with its transform or its measured displacement."
+look.record:
+  sentence: "The beauty look's record is malformed: a sample count, a list, or the decision about scenery in front of the aircraft is missing or not what it should be."
+look.beauty_not_label_aligned:
+  sentence: "The beauty frames are not label-aligned: an effect moved pixels, scenery covered the aircraft, the field of view changed, or the labels came from another frame, and nothing recorded maps the labels onto the picture."
+  hint: "Render the labelled set at measurement quality, record the effect's transform, or measure its displacement with the look label check."
+# -- visual overhaul: the offline ACES 2.0 display step (aces2-display, core/capture/display.py) --
+look.display_input:
+  sentence: "The ACES display step needs the engine's linear frame, and only the finished 8-bit picture is there; undoing its tone curve does not give the scene's light back."
+  hint: "Render with the linear frame turned on (the cinematic ACES look does this)."
+look.display_unavailable:
+  sentence: "The ACES display step cannot run on this machine: the colour library or the linear image reader it needs is not installed, or is too old."
+  hint: "Install the pinned display requirements; the engine picture is kept as it is."
+look.display_on_measure:
+  sentence: "The ACES display step runs on beauty renders only, and this render is a measurement render or names no quality."
+  hint: "Use a beauty look; measurement pixels stay as the label gates measured them."
+check.look_record:
+  sentence: "The beauty look's record agrees with the render's quality, and every effect that moves pixels is listed."
+check.look_label_alignment:
+  sentence: "The labels lie on the beauty picture: of its own frame and instant, at the solved field of view, with every pixel-moving effect mapped or measured within tolerance."

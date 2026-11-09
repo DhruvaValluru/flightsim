@@ -88,6 +88,7 @@ from experiments.showcase_matrix import (  # noqa: E402
     encode_clip,
 )
 from experiments.showcase_panel import build_panel_clip  # noqa: E402
+from core.capture import display as capture_display  # noqa: E402  (aces2-display)
 from webapp.capture import (  # noqa: E402
     CaptureError,
     card_blocks as capture_card_blocks,
@@ -141,6 +142,9 @@ class RunState:
     #: The tiles credential's type ("cesium_ion" or "google_key", None with
     #: the tiles off or no credential); never its value.
     tiles_credential: Optional[str] = None
+    #: The run's look switch (resolve_look_switch) with, once planned, the
+    #: grade the beauty look chose; None renders at the configured quality.
+    look: Optional[Dict] = None
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -155,7 +159,8 @@ class RunState:
                 "started": self.started, "events": self.events[-20:],
                 "reference": self.reference, "conditions": self.conditions,
                 "capture": self.capture, "env_override": self.env_override,
-                "tiles_credential": self.tiles_credential}
+                "tiles_credential": self.tiles_credential,
+                "look": self.look}
 
 
 def record_env_override(run: "RunState") -> List[Dict]:
@@ -1949,10 +1954,31 @@ def xplane_sky_source(source: Optional[str] = None) -> str:
     return chosen
 
 
+#: The beauty look's world preset (core/scene/world_beauty.py select_preset,
+#: recorded in beauty_look.json) -> the X-Plane sky condition. ``clear``
+#: keeps the look-based choice below.
+XPLANE_CONDITION_FOR_PRESET: Dict[str, str] = {
+    "storm": "ocast", "rain": "ocast", "overcast": "ocast", "hazy": "hazy",
+}
+
+
+def beauty_xplane_condition(beauty_look: Optional[Path]) -> Optional[str]:
+    """The X-Plane sky condition a beauty render's world preset implies, or
+    None (measure: no sidecar, so the measure command is unchanged; a clear
+    world, or a sidecar with no preset, keeps the look-based choice). The
+    world lane's selector is then the one source for the grade, the
+    exposure's deck and the X-Plane colours alike."""
+    if beauty_look is None:
+        return None
+    preset = json.loads(Path(beauty_look).read_text(encoding="ascii")).get("world_preset")
+    return XPLANE_CONDITION_FOR_PRESET.get(str(preset)) if preset else None
+
+
 def xplane_lighting_flags(look: Optional[Dict],
                           tables: Optional[Dict] = None,
                           source: Optional[str] = None,
-                          compensate: bool = True) -> List[str]:
+                          compensate: bool = True,
+                          condition: Optional[str] = None) -> List[str]:
     """The -xplane-* render flags for a look, or [] when there is no
     extracted X-Plane lighting table on this machine.
 
@@ -1995,7 +2021,12 @@ def xplane_lighting_flags(look: Optional[Dict],
         tod.update({key: look[key] for key in DEFAULT_LOOK if key in look})
     sun_elev, sun_azim = float(tod["sun_elev"]), float(tod["sun_azim"])
     rained = float(((look or {}).get("lighting") or {}).get("rain_look_mmh") or 0.0)
-    if look == STORM_LOOK or rained >= 4.0:
+    if condition is not None:
+        # A beauty render: the world preset the frame is drawn under
+        # (beauty_xplane_condition), not a guess from the look's numbers.
+        if condition not in ("ocast", "hazy", "clean"):
+            raise ValueError(f"X-Plane sky condition {condition!r} is not ocast, hazy or clean")
+    elif look == STORM_LOOK or rained >= 4.0:
         # The storm look, or rain heavy enough to be under a full cloud deck.
         condition = "ocast"
     elif float(tod["fog_density"]) >= XPLANE_HAZY_FOG_DENSITY:
@@ -2409,6 +2440,181 @@ def render_quality() -> str:
             f"FLIGHTSIM_RENDER_QUALITY={quality!r} is not one of "
             f"{sorted(RENDER_QUALITIES)}")
     return quality
+
+
+# -- the beauty look (look-dev lane; core/scene/beauty_look.py) -----------------
+#: The beauty look rides EVERY beauty render with no extra command (the
+#: owner's "why do I have to add all these extra commands"): the grade is
+#: chosen from the weather and the sun (core.scene.beauty_look.grade_for),
+#: the lens is "standard". No environment switch selects them: the
+#: FLIGHTSIM_* surface is frozen at 23 names (core/config_surface.py, E1).
+#: The "cinematic" lens and a forced grade are reachable through
+#: plan_beauty_look(lens=..., grade=...). Measure renders never get a
+#: sidecar, so their command is byte-identical.
+
+
+def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
+                           sky: Optional[Path] = None, *, grade: Optional[str] = None,
+                           lens: Optional[str] = None,
+                           quality: Optional[str] = None) -> Optional[Path]:
+    """Write the run's ``beauty_look.json`` (the ``-beauty-look=`` sidecar)
+    when the render quality is beauty; None otherwise (measure: nothing is
+    written and no flag is added). ``look`` is the look the render is given
+    (its sun elevation chooses the band and grade); ``sky`` the physical-sky
+    sidecar, whose plan then keeps the sun and the exposure. ``grade`` /
+    ``lens``: None for the automatic grade and the standard lens.
+    ``quality``: the run's own quality (run_render_quality: a look switch);
+    None for the configured one."""
+    if (quality or render_quality()) != "beauty":
+        return None
+    from core.render.flags import DEFAULT_LOOK
+    from core.scene.beauty_look import (
+        DEFAULT_LENS, DEFAULT_SENSOR_WIDTH_MM, plan_beauty_look, write_beauty_look,
+    )
+
+    lens = lens or DEFAULT_LENS
+    elevation = float((look or {}).get("sun_elev", DEFAULT_LOOK["sun_elev"]))
+    if sky is not None:
+        elevation = float(json.loads(Path(sky).read_text(encoding="ascii"))
+                          ["sun"]["elevation_deg"])
+    # One width per camera, in spec.cameras order: the host indexes them by
+    # -camera-index= (the capture loop's position in spec.cameras). Only an
+    # UNSTATED sensor takes the documented default; a width that is there
+    # but unreadable raises instead of quietly becoming 36 mm.
+    sensors, presets = [], []
+    for camera in spec.cameras or default_cameras(spec):
+        width = getattr(camera, "sensor_width_mm", None)
+        value = getattr(width, "value", width)
+        sensors.append(DEFAULT_SENSOR_WIDTH_MM if value is None else float(value))
+        preset = getattr(camera, "preset", None)
+        presets.append(str(getattr(preset, "value", preset) or "chase"))
+    # The world the frame is drawn in: the card's preset, read the way the
+    # world lane's host reads it (core.scene.beauty_look.world_preset_for_card).
+    from core.scene.beauty_look import world_preset_for_card
+
+    card_path = Path(out) / "card.json"
+    world_preset = None
+    if card_path.is_file():
+        world_preset, _inputs = world_preset_for_card(
+            json.loads(card_path.read_text(encoding="utf-8")))
+    lit = look or {}
+    brightness = (lit.get("lighting") or {}).get("brightness_ev")
+    scene_block = getattr(spec, "scene", None)
+    stated = getattr(getattr(scene_block, "sun_lux", None), "value", None)
+    altitude = getattr(getattr(spec, "terrain_elevation", None), "value", 0.0)
+    try:
+        altitude = float(altitude or 0.0)
+    except (TypeError, ValueError):
+        altitude = 0.0
+    plan = plan_beauty_look(
+        elevation, fps=FPS, width_px=RENDER_QUALITIES["beauty"]["width"],
+        sensor_width_mm=sensors or [DEFAULT_SENSOR_WIDTH_MM], grade=grade, lens=lens,
+        weather_event=str(getattr(getattr(spec, "weather_event", None), "value", "none")),
+        raining=rain_rate(spec) is not None, altitude_m=altitude,
+        stated_sun_lux=None if stated is None else float(stated),
+        physical_sky=sky is not None, world_preset=world_preset,
+        # The lighting look's knobs the host applies to the light
+        # (FlightSimVisualScene.cpp): the exposure meters them, and the
+        # brightness stops land on the one EV100 the host applies.
+        sun_intensity_scale=lit.get("sun_intensity_scale"),
+        sky_light_scale=lit.get("sky_light_scale"),
+        brightness_ev=None if brightness is None else float(brightness),
+        camera_presets=presets if sensors else None)
+    return write_beauty_look(plan, Path(out) / "beauty_look.json")
+
+
+def beauty_look_render_flags(path: Optional[Path]) -> List[str]:
+    """The commandlet tokens for a written sidecar (``-beauty-look=`` and,
+    when the plan puts the sun in lux, ``-sun-lux=``); [] for None."""
+    if path is None:
+        return []
+    from core.scene.beauty_look import beauty_look_flags
+
+    return beauty_look_flags(path, json.loads(Path(path).read_text(encoding="ascii")))
+
+
+# -- the look switch (web-defaults lane) ----------------------------------------
+#: ONE per-run switch that makes the web app use the beauty look: the page's
+#: "look" option or a whole word in the prompt. Each selects quality=beauty
+#: for THIS run only (the settings/environment default is untouched, so a
+#: label run without the switch stays on measure, the configuration every
+#: gate was measured under), the grade is chosen automatically from the sun
+#: and the weather (core.scene.beauty_look.grade_for: storm under the storm
+#: weather -- a thunderstorm or tornado event, or stated rain -- else
+#: golden_hour / desert_noon from the time of day's sun elevation), and the
+#: run records the switch, its source, the grade and its basis in
+#: provenance.json and its conditions. "cinematic" takes the cinematic lens
+#: (f/2 depth of field, a light vignette); "beauty" the standard lens.
+#: Neither lens moves pixels off the labels (chromatic aberration is 0 on
+#: both; core.scene.beauty_look.pixel_effects). VISUAL ONLY: the physics
+#: never reads any of this.
+LOOK_SWITCHES: Dict[str, Dict[str, str]] = {
+    # camera_motion "auto": core.capture.camera_motion.look_motion picks the
+    # profile per preset (camera-motion-layer); 'beauty' and 'off' keep none.
+    "cinematic": {"quality": "beauty", "lens": "cinematic", "camera_motion": "auto"},
+    "beauty": {"quality": "beauty", "lens": "standard"},
+    # aces2-display: the cinematic look, plus the offline ACES 2.0 SDR view
+    # (core/capture/display.py) on the -linear EXR -> frame_NNNN_aces2.png.
+    "cinematic_aces2": {"quality": "beauty", "lens": "cinematic", "display": "aces2"},
+}
+#: The page's "look" option values: a switch name, or "off" (no switch,
+#: and a look word in the prompt is ignored). None (absent) = the prompt decides.
+LOOK_CHOICES: Tuple[str, ...] = tuple(LOOK_SWITCHES) + ("off",)
+
+
+def look_word_in_prompt(prompt: Optional[str]) -> Optional[str]:
+    """The look switch a prompt names as a whole word ("cinematic" or
+    "beauty", any case), the first one written; None when it names neither."""
+    import re
+
+    match = re.search(r"\b(" + "|".join(LOOK_SWITCHES) + r")\b",
+                      str(prompt or ""), flags=re.IGNORECASE)
+    return match.group(1).lower() if match else None
+
+
+def resolve_look_switch(choice: Optional[str],
+                        prompt: Optional[str],
+                        capture: bool = False) -> Optional[Dict[str, str]]:
+    """The run's look switch: {"switch", "quality", "lens", "source"} or None.
+
+    ``choice`` is the page's option (wins; "off" means none, whatever the
+    prompt says); None (or "") lets a look word in ``prompt`` decide.
+    ``capture``: the run captures labels (wants_capture). A prompt word
+    does NOT switch such a run -- the label gates were measured under
+    measure and the owner's beauty capture failed mask_vs_geometry, so
+    leaving measure on a label run takes the explicit page option, never
+    a word that happens to be in a prompt. ValueError names an unknown
+    choice."""
+    if choice is not None and str(choice).strip():
+        word = str(choice).strip().lower()
+        if word not in LOOK_CHOICES:
+            raise ValueError(f"look {choice!r} is not one of {list(LOOK_CHOICES)}")
+        if word == "off":
+            return None
+        return {"switch": word, **LOOK_SWITCHES[word],
+                "source": "the page's look option"}
+    word = look_word_in_prompt(prompt)
+    if word is None or capture:
+        return None
+    return {"switch": word, **LOOK_SWITCHES[word],
+            "source": f"the prompt word {word!r}"}
+
+
+def run_render_quality(look: Optional[Dict[str, Any]] = None) -> str:
+    """The quality THIS run renders at: the look switch's when there is one,
+    else the configured default (render_quality: settings / environment)."""
+    if look:
+        return str(look["quality"])
+    return render_quality()
+
+
+def look_condition(look: Dict[str, Any]) -> str:
+    """The run's honesty-strip line for a look switch."""
+    grade = look.get("grade")
+    return (f"look switch {look['switch']} ({look['source']}): quality "
+            f"{look['quality']}, lens {look['lens']}"
+            + (f", grade {grade} ({look.get('grade_basis')})" if grade else "")
+            + "; VISUAL ONLY")
 
 
 #: The storm weather (core/scene/storm_weather.py, FlightSimWeather.cpp) is
@@ -3020,13 +3226,16 @@ class RunManager:
             run.conditions = provenance.get("conditions") or {}
             run.env_override = provenance.get("env_override") or []
             run.tiles_credential = provenance.get("tiles_credential")
+            run.look = provenance.get("look")
         run.events.append({"t": run.started, "status": "done",
                            "detail": "recovered after a server restart"})
         self.runs[run_id] = run
         return run
 
-    def start(self, spec: ScenarioSpec, provenance: Dict) -> Dict:
-        """Refuses (with the reason) or starts a run and returns its id."""
+    def start(self, spec: ScenarioSpec, provenance: Dict,
+              look: Optional[Dict] = None) -> Dict:
+        """Refuses (with the reason) or starts a run and returns its id.
+        ``look``: the run's look switch (resolve_look_switch), or None."""
         from core.util.platform import ue_available, ue_platform_refusal
 
         try:
@@ -3076,6 +3285,7 @@ class RunManager:
             run = RunState(run_id=uuid.uuid4().hex[:12],
                            spec_digest=spec.digest())
             record_env_override(run)
+            run.look = dict(look) if look else None
             self.runs[run.run_id] = run
             self._active = run.run_id
         thread = threading.Thread(target=self._execute,
@@ -3091,7 +3301,9 @@ class RunManager:
                 aircraft: str, telemetry: Optional[Path] = None,
                 look: Optional[Dict] = None,
                 camera_flags=None, extra=None,
-                sky: Optional[Path] = None) -> bool:
+                sky: Optional[Path] = None,
+                beauty_look: Optional[Path] = None,
+                quality: Optional[str] = None) -> bool:
         """The showcase render command, with terrain/imagery conditional.
 
         Same flags render_cell passes (gotcha 1: absolute paths, -stdout,
@@ -3114,7 +3326,13 @@ class RunManager:
         # look only: a physical sky plan lights the scene itself and is
         # left alone. No extraction on this machine -> no flags.
         if sky is None:
-            extra += xplane_lighting_flags(look)
+            extra += xplane_lighting_flags(
+                look, condition=beauty_xplane_condition(beauty_look))
+        # The beauty look's sidecar (write_beauty_look_plan), beauty only:
+        # None under measure adds nothing, so the pinned command stands.
+        extra += beauty_look_render_flags(beauty_look)
+        from core.scene.hero_lighting import flags_beside   # hero-lighting lane: beside the beauty look only
+        extra += flags_beside(beauty_look)
         # Phase 2 (package A, contracts §9): the flag list comes from the
         # ONE builder the CLI also uses. Which passes get which flags:
         #   * a per-camera pass (the capture stage's loop hands in
@@ -3146,7 +3364,8 @@ class RunManager:
         inline, trailing = camera_flags or ((), ())
         # Visual plan V0: FLIGHTSIM_RENDER_QUALITY=beauty opts in (1080p,
         # Lumen/TSR/VSM); "measure" keeps the pinned command byte-identical.
-        quality = render_quality()
+        # A run's look switch (run_render_quality) states its own quality.
+        quality = quality or render_quality()
         preset = RENDER_QUALITIES[quality]
         width, height = ((preset["width"], preset["height"]) if preset
                          else (WIDTH, HEIGHT))
@@ -3215,6 +3434,7 @@ class RunManager:
         user picked, so each one gets its own video of the flight --
         every frame that camera took, at the rate it took them.
         """
+        from core.capture.display import clip_encode_args
         from experiments.showcase_matrix import FFMPEG
 
         clips = out / "clips"
@@ -3230,8 +3450,7 @@ class RunManager:
                 str(FFMPEG), "-y",
                 "-framerate", f"{self._capture_fps(manifest_path, camera_id):g}",
                 "-i", str(directory / "frame_%04d.png"),
-                "-c:v", "libx264", "-preset", "medium", "-crf", "19",
-                "-pix_fmt", "yuv420p", str(target),
+                *clip_encode_args(19), str(target),
             ])
             if done is not None and done.returncode == 0 and target.is_file():
                 made.append(camera_id)
@@ -3261,6 +3480,7 @@ class RunManager:
         render's 30 fps played a 3 s flight in 1 s -- the clip selector's
         "3 s" gave a one-second video (measured on the owner's machine).
         """
+        from core.capture.display import clip_encode_args
         from experiments.showcase_matrix import FFMPEG, FPS
 
         for camera_id in camera_ids:
@@ -3273,8 +3493,7 @@ class RunManager:
             done = _ffmpeg([
                 str(FFMPEG), "-y", "-framerate", f"{rate:g}",
                 "-i", str(directory / "frame_%04d.png"),
-                "-c:v", "libx264", "-preset", "medium", "-crf", "19",
-                "-pix_fmt", "yuv420p", str(clip),
+                *clip_encode_args(19), str(clip),
             ])
             if done is not None and done.returncode == 0 and clip.is_file():
                 return camera_id
@@ -3740,6 +3959,11 @@ class RunManager:
                                     + ", ".join(extra_passes))
             run.push("cameras", f"solving {len(spec.cameras)} camera "
                                 f"pose track(s) and capture schedule(s)")
+            # camera-motion-layer: the look switch's camera motion, recorded
+            # in each camera's spec (a stated motion block is never moved).
+            from core.capture.camera_motion import apply_look_motion
+            if apply_look_motion(spec, run.look):
+                run.push("cameras", "camera motion from the look switch: " + run.look["switch"])
             try:
                 capture_solved = capture_solve(
                     spec, scene, heightfield=capture_heightfield,
@@ -3813,6 +4037,26 @@ class RunManager:
                 f"{plan['sun']['elevation_deg']:+.1f} deg, moon "
                 f"{plan['moon']['illuminated_fraction']:.0%} lit, EV100 "
                 f"{plan['exposure']['ev100']:+.1f}; clouds VISUAL ONLY")
+        # The beauty look (beauty quality only; None under measure).
+        # A look switch (the page's option or a prompt word) renders THIS
+        # run at beauty with its lens; the grade stays automatic.
+        quality = run_render_quality(run.look)
+        beauty_look = write_beauty_look_plan(
+            spec, out, render_look_for(spec, event_note), sky=sky,
+            lens=(run.look or {}).get("lens"), quality=quality)
+        if beauty_look is not None:
+            from core.scene.hero_lighting import write_sidecar_beside   # hero-lighting lane
+            write_sidecar_beside(spec, beauty_look)
+            beauty = json.loads(beauty_look.read_text(encoding="ascii"))
+            run.conditions["beauty_look"] = (
+                f"beauty look: grade {beauty['grade']} ({beauty['grade_basis']}), "
+                f"lens {beauty['lens']}; VISUAL ONLY, uncalibrated")
+            if run.look:
+                run.look.update(grade=beauty["grade"],
+                                grade_basis=beauty["grade_basis"],
+                                lens=beauty["lens"])
+        if run.look:
+            run.conditions["look"] = look_condition(run.look)
         # Prompt/model provenance in a Python-written UTF-8 sidecar; the
         # UE-written manifest stays ASCII (gotcha 13).
         (out / "provenance.json").write_text(json.dumps({
@@ -3825,6 +4069,10 @@ class RunManager:
             "env_override": run.env_override,
             # The type of tiles credential, never its value.
             "tiles_credential": run.tiles_credential,
+            # The look switch, its source and the grade it chose (None:
+            # no switch), and the quality this run rendered at.
+            "look": run.look,
+            "render_quality": quality,
         }, indent=1), encoding="utf-8")
 
         # ONE FLIGHT, NOT TWO -- the web half of 129f140.
@@ -3972,7 +4220,8 @@ class RunManager:
                         telemetry=telemetry,
                         look=render_look_for(spec, event_note),
                         camera_flags=camera_flags, extra=list(extra) + pass_extra,
-                        sky=sky))
+                        sky=sky, beauty_look=beauty_look, quality=quality),
+                    look=run.look)  # aces2-display: -linear + the ACES 2.0 view
             except CaptureError as exc:
                 # The render log for the pass that failed sits beside its
                 # frames. Say what it HOLDS, not where it is: whoever is
@@ -3994,7 +4243,10 @@ class RunManager:
         elif not self._render(card, frames, scene, mesh, aircraft,
                               telemetry=out / "telemetry.json",
                               look=render_look_for(spec, event_note),
-                              camera_flags=camera_flags, sky=sky):
+                              camera_flags=camera_flags, sky=sky,
+                              # aces2-display: -linear for the ACES 2.0 view.
+                              extra=capture_display.commandlet_tokens(run.look) or None,
+                              beauty_look=beauty_look, quality=quality):
             run.push("failed", "the render commandlet wrote no manifest; "
                                "its last words:\n"
                                + (self.commandlet_last_words(
@@ -4002,6 +4254,8 @@ class RunManager:
                                   or "(it wrote no log at all)")
                                + f"\n-- full log: {out / 'render.log'}")
             return
+        elif capture_display.wants_display(run.look):  # aces2-display, camera-less
+            capture_display.apply_to_bundle(frames, run.look)  # refusals -> render.json
 
         if capture_solved is not None:
             run.push("manifest", "writing the capture manifest, the "

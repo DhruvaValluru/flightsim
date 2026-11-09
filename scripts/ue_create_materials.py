@@ -2719,6 +2719,332 @@ def create_ice_overlay():
     finish(material, "M_IceOverlay")
 
 
+# == WORLD LANE (visual overhaul, 2026-11-09) =====================================
+# The beauty world look (FlightSimClouds.cpp; core/scene/world_beauty.py): the
+# beauty cloud material, the Google tiles' beauty material and the material
+# parameter collection both read. BEAUTY ONLY: only FFlightSimWorldBeauty
+# (-quality=beauty) loads them, so a measure render is unchanged whether they
+# exist or not; a missing one is recorded in look_applied.world_beauty, never
+# refused. Their Custom node bodies are the committed assets/shaders/world/*.hlsl.
+# Kept in this one block so the aircraft lane's block merges beside it.
+
+#: Created through _world_beauty_material (tests/test_ue_materials.py pins it).
+WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter")
+WORLD_SHADER_DIR = "assets/shaders/world"
+#: The collection the tiles' material reads and the render sets
+#: (world_beauty.WORLD_MPC / WORLD_MPC_SCALARS: names and defaults pinned equal).
+WORLD_COLLECTION = "MPC_FlightSimWorld"
+WORLD_COLLECTION_SCALARS = {
+    "Wetness": 0.0,
+    "PuddleAmount": 0.0,
+    "Dehaze": 0.0,
+    "Saturation": 1.0,
+    "DetailStrength": 0.0,
+    "DetailFadeM": 400.0,
+    "DetailScaleM": 2.0,
+    # tiles-delight (core/scene/tiles_delight.py): 0 is a pass-through.
+    "DelightAmount": 0.0,
+    "DelightBlueGate": 4.0,
+}
+#: M_FlightSimCloudLayers' scalar parameters (FlightSimClouds.cpp sets each by
+#: name) with the default a material has before the render sets them, and its
+#: two vectors. The Custom node's inputs are these plus WorldPos and NormAlt.
+WORLD_CLOUD_SCALARS = {
+    "Coverage": 0.35, "ExtinctionPerM": 0.05, "ExtinctionScale": 1.0, "ShapeScaleKm": 2.5,
+    "DetailScaleKm": 0.35, "DetailErosion": 0.35, "BottomSoftness": 0.08, "TopRounding": 0.6,
+    "CoverageContrast": 1.6,
+}
+WORLD_CLOUD_VECTORS = ("SeedOffsetKm", "WindOffsetM")
+WORLD_CLOUD_INPUTS = ("WorldPos", "NormAlt", "Coverage", "ExtinctionPerM", "ExtinctionScale",
+                      "ShapeScaleKm", "DetailScaleKm", "DetailErosion", "BottomSoftness", "TopRounding",
+                      "CoverageContrast", "SeedOffsetKm", "WindOffsetM")
+#: The cloud's single-scattering albedo (water droplets scatter almost all they
+#: intercept; the storm cell's own 0.98). UNCALIBRATED: set by probe render.
+WORLD_CLOUD_ALBEDO = 0.98
+#: The parameter names Cesium for Unreal sets on a tileset material's
+#: per-primitive instance for the glTF base colour. UNVERIFIED: the Cesium
+#: headers are not on the authoring machine; a first render whose tiles come out
+#: white means these are not the names (look_applied.world_beauty.tiles).
+CESIUM_BASE_COLOUR_TEXTURE = "baseColorTexture"
+CESIUM_BASE_COLOUR_FACTOR = "baseColorFactor"
+#: Each tiles shader's Custom inputs, in order.
+WORLD_TILES_INPUTS = {
+    "tiles_base_colour": ("Albedo", "WorldPos", "NormalWS", "Wetness", "PuddleAmount", "Dehaze",
+                          "Saturation"),
+    "tiles_normal": ("WorldPos", "CameraPos", "NormalWS", "DetailStrength", "DetailFadeM",
+                     "DetailScaleM", "PuddleAmount"),
+    "tiles_roughness": ("WorldPos", "CameraPos", "NormalWS", "Wetness", "PuddleAmount", "DetailFadeM"),
+    # tiles-delight: runs first; its output is the other nodes' Albedo.
+    "tiles_delight": ("Albedo", "AlbedoLow", "DelightAmount", "DelightRatioKnee", "DelightBlueGate"),
+}
+#: tiles-delight: the material's own scalar parameters (not the collection's:
+#: the render does not set them), at tiles_delight.DELIGHT_MIP_BIAS and
+#: DELIGHT_RATIO_KNEE. UNCALIBRATED.
+WORLD_TILES_DELIGHT_SCALARS = {"DelightMipBias": 5.0, "DelightRatioKnee": 0.6}
+#: M_FlightSimScatter (the ground scatter's master, world_beauty.SCATTER_MATERIAL):
+#: the imported glTF's maps as parameters, the tiles' Wetness and Saturation from
+#: the collection. Each scatter shader's Custom inputs, in order, and the
+#: material's own parameters (the import's names; scripts/ue_import_scatter.py,
+#: pending, parents each imported material to this master and sets them).
+WORLD_SCATTER_INPUTS = {
+    "scatter_base_colour": ("Albedo", "Wetness", "Saturation"),
+    "scatter_roughness": ("Roughness", "Wetness"),
+    "scatter_opacity": ("Alpha", "FadeAmount"),
+}
+WORLD_SCATTER_TEXTURES = ("BaseColorTexture", "NormalTexture")
+WORLD_SCATTER_SCALARS = {"RoughnessFactor": 0.8}
+WORLD_SCATTER_VECTORS = {"BaseColorFactor": (1.0, 1.0, 1.0, 1.0)}
+#: The opacity mask's clip (the dithered fade and the leaf alpha both cut here).
+WORLD_SCATTER_OPACITY_CLIP = 0.5
+
+
+def _world_beauty_material(name):
+    """/Game/FlightSim/<name> once (WORLD_BEAUTY_MATERIALS); None when it already
+    exists unless FLIGHTSIM_REBUILD_MATERIALS names it."""
+    if name not in WORLD_BEAUTY_MATERIALS:
+        raise RuntimeError(f"{name} is not one of WORLD_BEAUTY_MATERIALS")
+    full = f"{PATH}/{name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(full):
+        if rebuild_requested(name) and unreal.EditorAssetLibrary.delete_asset(full):
+            print(f"MATERIAL-REBUILT: {full} (deleted to be built again)")
+        else:
+            print(f"MATERIAL-EXISTS: {full}")
+            return None
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    material = tools.create_asset(name, PATH, unreal.Material, unreal.MaterialFactoryNew())
+    if material is None:
+        raise SystemExit(f"could not create material asset {full}")
+    return material
+
+
+def world_shader(name):
+    """A committed Custom node body (WORLD_SHADER_DIR/<name>.hlsl)."""
+    source = _repo_file(f"{WORLD_SHADER_DIR}/{name}.hlsl")
+    if source is None:
+        raise RuntimeError(f"{WORLD_SHADER_DIR}/{name}.hlsl is not in this checkout")
+    return source.read_text(encoding="utf-8")
+
+
+def world_custom(material, lib, name, output_type, inputs, x, y):
+    """A Custom node running WORLD_SHADER_DIR/<name>.hlsl; ``inputs`` maps each
+    input name, in order, to (node, output pin)."""
+    node = lib.create_material_expression(material, unreal.MaterialExpressionCustom, x, y)
+    node.set_editor_property("code", world_shader(name))
+    node.set_editor_property("description", name)
+    node.set_editor_property("output_type", output_type)
+    pins = []
+    for pin in inputs:
+        entry = unreal.CustomInput()
+        entry.set_editor_property("input_name", pin)
+        pins.append(entry)
+    node.set_editor_property("inputs", pins)
+    for pin, (source, source_out) in inputs.items():
+        if not lib.connect_material_expressions(source, source_out, node, pin):
+            raise RuntimeError(f"{name}: input {pin} did not connect")
+    return node
+
+
+def create_world_collection():
+    """MPC_FlightSimWorld: the scalars WORLD_COLLECTION_SCALARS, at their defaults
+    (dry, ungraded: the tiles look as Cesium's own material draws them)."""
+    full = f"{PATH}/{WORLD_COLLECTION}"
+    if unreal.EditorAssetLibrary.does_asset_exist(full) and not rebuild_requested(WORLD_COLLECTION):
+        print(f"MATERIAL-EXISTS: {full}")
+        return
+    if unreal.EditorAssetLibrary.does_asset_exist(full):
+        unreal.EditorAssetLibrary.delete_asset(full)
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    collection = tools.create_asset(WORLD_COLLECTION, PATH, unreal.MaterialParameterCollection,
+                                    unreal.MaterialParameterCollectionFactoryNew())
+    if collection is None:
+        raise SystemExit(f"could not create {full}")
+    scalars = []
+    for name, default in WORLD_COLLECTION_SCALARS.items():
+        entry = unreal.CollectionScalarParameter()
+        entry.set_editor_property("parameter_name", name)
+        entry.set_editor_property("default_value", float(default))
+        scalars.append(entry)
+    collection.set_editor_property("scalar_parameters", scalars)
+    unreal.EditorAssetLibrary.save_asset(full)
+    print(f"MATERIAL-CREATED: {full}")
+
+
+def world_collection_parameter(material, lib, name, x, y):
+    """A CollectionParameter node reading MPC_FlightSimWorld.<name>."""
+    collection = unreal.load_asset(f"{PATH}/{WORLD_COLLECTION}")
+    if collection is None:
+        raise RuntimeError(f"{WORLD_COLLECTION} is missing: create_world_collection runs first")
+    node = lib.create_material_expression(material, unreal.MaterialExpressionCollectionParameter, x, y)
+    node.set_editor_property("collection", collection)
+    node.set_editor_property("parameter_name", name)
+    return node
+
+
+def create_world_cloud_layers():
+    """M_FlightSimCloudLayers: the beauty volumetric cloud (Volume domain,
+    additive, flagged for the volumetric cloud: STORM_USAGE_PROPERTY, without
+    which the engine's cloud shadow pass asserts, docs/WEATHER.md): albedo
+    WORLD_CLOUD_ALBEDO, extinction cloud_layers.hlsl, lit by the storm's
+    multiple-scattering node (storm_scattering: without it a cloud's base is black)."""
+    material = _world_beauty_material("M_FlightSimCloudLayers")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    material.set_editor_property("material_domain", unreal.MaterialDomain.MD_VOLUME)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
+    material.set_editor_property(STORM_USAGE_PROPERTY, True)
+    inputs = {}
+    inputs["WorldPos"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionWorldPosition, -1800, -200), "")
+    inputs["NormAlt"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionCloudSampleAttribute, -1800, -50), "NormAltitudeInLayer")
+    for i, (name, default) in enumerate(WORLD_CLOUD_SCALARS.items()):
+        inputs[name] = (scalar(material, lib, name, default, -1800, 100 + 110 * i), "")
+    for i, name in enumerate(WORLD_CLOUD_VECTORS):
+        inputs[name] = (vector(material, lib, name, (0.0, 0.0, 0.0, 0.0), -1800, 1200 + 110 * i), "")
+    ordered = {name: inputs[name] for name in WORLD_CLOUD_INPUTS}
+    extinction = world_custom(material, lib, "cloud_layers", unreal.CustomMaterialOutputType.CMOT_FLOAT1,
+                              ordered, -900, 0)
+    lib.connect_material_property(extinction, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
+    albedo = scalar(material, lib, "Albedo", WORLD_CLOUD_ALBEDO, -600, 200)
+    lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    storm_scattering(material, lib, -600, 700)
+    finish(material, "M_FlightSimCloudLayers")
+
+
+def create_world_tiles_beauty():
+    """M_FlightSimTilesBeauty: the Google tiles' beauty surface. The Cesium
+    base-colour texture (CESIUM_BASE_COLOUR_TEXTURE on UV0, UNVERIFIED names)
+    times its factor, graded and wetted by tiles_base_colour.hlsl; a world-space
+    detail normal (tangent_space_normal off: the tiles carry no reliable
+    tangents) by tiles_normal.hlsl; roughness by tiles_roughness.hlsl; every
+    amount from MPC_FlightSimWorld."""
+    material = _world_beauty_material("M_FlightSimTilesBeauty")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    material.set_editor_property("tangent_space_normal", False)
+    uv = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -2000, -300)
+    texture = texture_parameter(material, lib, CESIUM_BASE_COLOUR_TEXTURE, False, -1800, -300,
+                                default=unreal.load_asset(
+                                    "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"))
+    lib.connect_material_expressions(uv, "", texture, "UVs")
+    factor = vector(material, lib, CESIUM_BASE_COLOUR_FACTOR, (1.0, 1.0, 1.0, 1.0), -1800, -100)
+    albedo = binary(material, lib, unreal.MaterialExpressionMultiply,
+                    mask(material, lib, texture, "rgb", -1550, -300),
+                    mask(material, lib, factor, "rgb", -1550, -100), -1400, -200)
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, -1800, 100)
+    camera = lib.create_material_expression(material, unreal.MaterialExpressionCameraPositionWS, -1800, 200)
+    normal = lib.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS, -1800, 300)
+    common = {"Albedo": (albedo, ""), "WorldPos": (world, ""), "CameraPos": (camera, ""),
+              "NormalWS": (normal, "")}
+    for i, name in enumerate(WORLD_COLLECTION_SCALARS):
+        common[name] = (world_collection_parameter(material, lib, name, -1800, 450 + 110 * i), "")
+    # tiles-delight hook: the same texture at a coarse mip (the local mean), then
+    # tiles_delight.hlsl lifts the baked shadows; its output replaces Albedo.
+    for i, (name, default) in enumerate(WORLD_TILES_DELIGHT_SCALARS.items()):
+        common[name] = (scalar(material, lib, name, default, -2200, -600 - 110 * i), "")
+    low = texture_parameter(material, lib, CESIUM_BASE_COLOUR_TEXTURE, False, -1800, -700,
+                            default=unreal.load_asset(
+                                "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"))
+    lib.connect_material_expressions(uv, "", low, "UVs")
+    low.set_editor_property("mip_value_mode", unreal.TextureMipValueMode.TMVM_MIP_BIAS)
+    # The pin is "MipBias" in GetInputName, but MaterialEditingLibrary matches the
+    # graph's short name (UMaterialGraphNode::GetShortenPinName: MipBias -> Bias).
+    lib.connect_material_expressions(common["DelightMipBias"][0], "", low, "Bias")
+    common["AlbedoLow"] = (binary(material, lib, unreal.MaterialExpressionMultiply,
+                                  mask(material, lib, low, "rgb", -1550, -700),
+                                  mask(material, lib, factor, "rgb", -1550, -100), -1400, -600), "")
+    common["Albedo"] = (world_custom(material, lib, "tiles_delight",
+                                     unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                                     {name: common[name] for name in WORLD_TILES_INPUTS["tiles_delight"]},
+                                     -1200, -400), "")
+    outputs = {"tiles_base_colour": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                                     unreal.MaterialProperty.MP_BASE_COLOR),
+               "tiles_normal": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                                unreal.MaterialProperty.MP_NORMAL),
+               "tiles_roughness": (unreal.CustomMaterialOutputType.CMOT_FLOAT1,
+                                   unreal.MaterialProperty.MP_ROUGHNESS)}
+    for row, (shader, (output_type, prop)) in enumerate(outputs.items()):
+        node = world_custom(material, lib, shader, output_type,
+                            {name: common[name] for name in WORLD_TILES_INPUTS[shader]},
+                            -900, -300 + 400 * row)
+        lib.connect_material_property(node, "", prop)
+    finish(material, "M_FlightSimTilesBeauty")
+
+
+def create_world_scatter():
+    """M_FlightSimScatter: the ground scatter's master (masked, two-sided for
+    leaf cards). The glTF base colour (BaseColorTexture x BaseColorFactor) graded
+    and wetted by scatter_base_colour.hlsl with the tiles' own Wetness and
+    Saturation (MPC_FlightSimWorld: one ground state for the tiles and what
+    stands on them); roughness pulled wet by scatter_roughness.hlsl; the opacity
+    mask the leaf alpha times a dithered per-instance fade (scatter_opacity.hlsl,
+    PerInstanceFadeAmount), so instances dissolve instead of popping."""
+    material = _world_beauty_material("M_FlightSimScatter")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    material.set_editor_property("two_sided", True)
+    material.set_editor_property("opacity_mask_clip_value", WORLD_SCATTER_OPACITY_CLIP)
+    material.set_editor_property("used_with_instanced_static_meshes", True)
+    white = unreal.load_asset("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture")
+    uv = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -2000, -300)
+    base = texture_parameter(material, lib, "BaseColorTexture", False, -1800, -300, default=white)
+    lib.connect_material_expressions(uv, "", base, "UVs")
+    normal = texture_parameter(material, lib, "NormalTexture", True, -1800, 500,
+                               default=default_texture("T_FlatNormal"), normal_map=True)
+    lib.connect_material_expressions(uv, "", normal, "UVs")
+    lib.connect_material_property(normal, "", unreal.MaterialProperty.MP_NORMAL)
+    factor = vector(material, lib, "BaseColorFactor", WORLD_SCATTER_VECTORS["BaseColorFactor"], -1800, -100)
+    rough_factor = scalar(material, lib, "RoughnessFactor", WORLD_SCATTER_SCALARS["RoughnessFactor"], -1800, 350)
+    common = {
+        "Albedo": (binary(material, lib, unreal.MaterialExpressionMultiply,
+                          mask(material, lib, base, "rgb", -1550, -300),
+                          mask(material, lib, factor, "rgb", -1550, -100), -1400, -200), ""),
+        "Alpha": (mask(material, lib, base, "a", -1550, -450), ""),
+        # One roughness per species (the import sets it from the glTF's factor;
+        # foliage and rock read as their factor at the scatter's ranges).
+        "Roughness": (rough_factor, ""),
+        "FadeAmount": (lib.create_material_expression(
+            material, unreal.MaterialExpressionPerInstanceFadeAmount, -1800, 800), ""),
+    }
+    for i, name in enumerate(("Wetness", "Saturation")):
+        common[name] = (world_collection_parameter(material, lib, name, -1800, 950 + 110 * i), "")
+    outputs = {"scatter_base_colour": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                                       unreal.MaterialProperty.MP_BASE_COLOR),
+               "scatter_roughness": (unreal.CustomMaterialOutputType.CMOT_FLOAT1,
+                                     unreal.MaterialProperty.MP_ROUGHNESS),
+               "scatter_opacity": (unreal.CustomMaterialOutputType.CMOT_FLOAT1,
+                                   unreal.MaterialProperty.MP_OPACITY_MASK)}
+    for row, (shader, (output_type, prop)) in enumerate(outputs.items()):
+        node = world_custom(material, lib, shader, output_type,
+                            {name: common[name] for name in WORLD_SCATTER_INPUTS[shader]},
+                            -900, -300 + 400 * row)
+        lib.connect_material_property(node, "", prop)
+    finish(material, "M_FlightSimScatter")
+
+# == END WORLD LANE ===============================================================
+
+# ==== AIRCRAFT LANE (visual overhaul V7) -- begin ============================
+# The aircraft master materials live in their own module (they are built
+# under /Game/FlightSim/Aircraft, not /Game/FlightSim, and the C++ loads the
+# per-model instances, not these): scripts/ue_aircraft_master_materials.py.
+# This block only calls it; the world lane's blocks are elsewhere in this file.
+def create_aircraft_masters():
+    import os
+    import sys
+    here = os.path.dirname(os.path.abspath(globals().get("__file__") or sys.argv[0]))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    from ue_aircraft_master_materials import build_all
+    failed = build_all()
+    if failed:
+        raise RuntimeError(f"aircraft masters not built: {', '.join(failed)}")
+# ==== AIRCRAFT LANE -- end ===================================================
+
+
 _FAILED = []
 
 
@@ -2775,5 +3101,12 @@ create_rain_splash()
 create_lightning_channel()
 create_storm_cell()
 create_windshield_rain()
+# World lane (visual overhaul): the collection first, the tiles material reads it.
+create_world_collection()
+create_world_cloud_layers()
+create_world_tiles_beauty()
+create_world_scatter()
+
+create_aircraft_masters()  # AIRCRAFT LANE (V7)
 if _FAILED:
     raise SystemExit(f"materials not created: {', '.join(_FAILED)}")

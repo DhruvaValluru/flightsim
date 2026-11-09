@@ -1,0 +1,401 @@
+{
+  "directory": "C:\\Users\\kanth\\flightsim\\runs\\visual\\head",
+  "thresholds": {
+    "AP_BINS": 5,
+    "AP_MIN_BIN_PX": 200,
+    "AP_MIN_DEPTH_SPAN": 3.0,
+    "AP_MIN_BLUE_SLOPE": 0.004,
+    "AP_MAX_CONTRAST_RATIO": 0.85,
+    "AP_MAX_SKY_RATIO": 0.9,
+    "HORIZON_BAND_PX": 12,
+    "HORIZON_MIN_FILL": 0.9,
+    "HORIZON_MIN_CONTRAST": 0.04,
+    "HORIZON_SKYLIKE_DIST": 12.0,
+    "HORIZON_MIN_COLUMNS": 0.5,
+    "HORIZON_HEURISTIC_WINDOW": 8,
+    "CLOUD_MAX_SATURATION": 0.15,
+    "CLOUD_MIN_VALUE": 60.0,
+    "CLOUD_MIN_SKY_PX": 500,
+    "EXPOSURE_P90_MIN": 120.0,
+    "EXPOSURE_P90_MAX": 240.0,
+    "EXPOSURE_MAX_CLIP_FRACTION": 0.02,
+    "TEXEL_MIN_HF": 0.02,
+    "TEXEL_MIN_PX": 1000,
+    "SPEC_MIN_AIRFRAME_PX": 200,
+    "SPEC_HIGHLIGHT_RATIO": 1.6,
+    "SPEC_MIN_LUMA": 180.0,
+    "SPEC_MIN_HIGHLIGHT_PX": 5,
+    "SPEC_MIN_FRACTION": 0.001,
+    "SPEC_MAX_FRACTION": 0.25
+  },
+  "calibration": "every threshold UNCALIBRATED until a probe render sets it",
+  "not_claimed": "likeness to MSFS is the reader's judgment, not measured here",
+  "shots": {
+    "a": {
+      "png": "C:\\Users\\kanth\\flightsim\\runs\\visual\\head\\a.png",
+      "mask": "C:\\Users\\kanth\\flightsim\\runs\\visual\\head\\a_mask.png",
+      "depth": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\6b02ece7a099\\frames\\chase\\frame_0000_depth.f32",
+      "horizon": "frame_0000.json labels",
+      "expected_cloud": "none",
+      "clauses": {
+        "aerial_perspective": {
+          "status": "NOT RUN",
+          "values": {},
+          "control": null,
+          "basis": "0 ground pixels with depth; 1000 needed"
+        },
+        "horizon_fill": {
+          "status": "FAIL",
+          "values": {
+            "fill": 0.0,
+            "fill_source": "depth",
+            "contrast": 0.03149375496178089,
+            "columns": 1280
+          },
+          "control": {
+            "fill": 0.0,
+            "fill_source": "depth",
+            "contrast": 0.035842781191140566,
+            "columns": 1280,
+            "note": "the control tripped"
+          },
+          "basis": "horizon from frame_0000.json labels; the 12 px under it drawn and unlike the band above; control: that band emptied"
+        },
+        "cloud_fraction": {
+          "status": "NOT RUN",
+          "values": {
+            "cloud_fraction": 0.9963002315530138,
+            "sky_px": 236231,
+            "expected_cover": null
+          },
+          "control": null,
+          "basis": "no expected cloud_cover for this shot (measured fraction reported)"
+        },
+        "exposure": {
+          "status": "PASS",
+          "values": {
+            "luma_p90": 220.6298,
+            "clipped_fraction": 0.0,
+            "crushed_fraction": 6.618923611111112e-05,
+            "luma_mean": 141.29361604904517
+          },
+          "control": {
+            "luma_p90": 254.99999999999997,
+            "clipped_fraction": 0.9261469184027777,
+            "crushed_fraction": 1.953125e-05,
+            "luma_mean": 249.00521965494792,
+            "note": "the control tripped"
+          },
+          "basis": "luma p90 in [120, 240], clipped <= 2%; crushed is reported only; control: the frame x4"
+        },
+        "texel_detail": {
+          "status": "NOT RUN",
+          "values": {},
+          "control": null,
+          "basis": "0 near-ground pixels; 1000 needed"
+        },
+        "specular": {
+          "status": "PASS",
+          "values": {
+            "highlight_fraction": 0.017456359102244388,
+            "highlight_px": 105,
+            "airframe_px": 6015,
+            "median_luma": 29.647,
+            "peak_over_median": 6.54535028839343,
+            "cut_luma": 180.0
+          },
+          "control": {
+            "highlight_fraction": 0.0,
+            "highlight_px": 0,
+            "airframe_px": 6015,
+            "median_luma": 34.4974,
+            "peak_over_median": 1.0,
+            "cut_luma": 180.0,
+            "note": "the control tripped"
+          },
+          "basis": "interior airframe pixels (ID 1) brighter than max(180, 1.6 x median); control: the airframe flattened to its median colour"
+        },
+        "edge_aliasing": {
+          "status": "INFO",
+          "values": {
+            "energy": 0.20826508689579956,
+            "control_energy": 0.3186010513168261
+          },
+          "control": {
+            "note": "Gate 6's own aliased control"
+          },
+          "basis": "experiments/gate6_visual.py measure_edge_aliasing; reported, not a gate"
+        }
+      }
+    },
+    "b": {
+      "png": "C:\\Users\\kanth\\flightsim\\runs\\visual\\head\\b.png",
+      "mask": "C:\\Users\\kanth\\flightsim\\runs\\visual\\head\\b_mask.png",
+      "depth": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\65005094050c\\frames\\chase\\frame_0000_depth.f32",
+      "horizon": "frame_0000.json labels",
+      "expected_cloud": "none",
+      "clauses": {
+        "aerial_perspective": {
+          "status": "NOT RUN",
+          "values": {},
+          "control": null,
+          "basis": "0 ground pixels with depth; 1000 needed"
+        },
+        "horizon_fill": {
+          "status": "NOT RUN",
+          "values": {},
+          "control": null,
+          "basis": "the aircraft covers the horizon bands"
+        },
+        "cloud_fraction": {
+          "status": "NOT RUN",
+          "values": {
+            "cloud_fraction": 0.026249350712102725,
+            "sky_px": 82783,
+            "expected_cover": null
+          },
+          "control": null,
+          "basis": "no expected cloud_cover for this shot (measured fraction reported)"
+        },
+        "exposure": {
+          "status": "PASS",
+          "values": {
+            "luma_p90": 131.73,
+            "clipped_fraction": 0.0,
+            "crushed_fraction": 0.06364691840277778,
+            "luma_mean": 45.61020812391494
+          },
+          "control": {
+            "luma_p90": 254.99999999999997,
+            "clipped_fraction": 0.37004231770833335,
+            "crushed_fraction": 0.013741319444444445,
+            "luma_mean": 124.47020783029518,
+            "note": "the control tripped"
+          },
+          "basis": "luma p90 in [120, 240], clipped <= 2%; crushed is reported only; control: the frame x4"
+        },
+        "texel_detail": {
+          "status": "NOT RUN",
+          "values": {},
+          "control": null,
+          "basis": "0 near-ground pixels; 1000 needed"
+        },
+        "specular": {
+          "status": "FAIL",
+          "values": {
+            "highlight_fraction": 0.0,
+            "highlight_px": 0,
+            "airframe_px": 5951,
+            "median_luma": 34.5352,
+            "peak_over_median": 4.478236697630243,
+            "cut_luma": 180.0
+          },
+          "control": {
+            "highlight_fraction": 0.0,
+            "highlight_px": 0,
+            "airframe_px": 5951,
+            "median_luma": 36.172999999999995,
+            "peak_over_median": 1.0,
+            "cut_luma": 180.0,
+            "note": "the control tripped"
+          },
+          "basis": "interior airframe pixels (ID 1) brighter than max(180, 1.6 x median); control: the airframe flattened to its median colour"
+        },
+        "edge_aliasing": {
+          "status": "VOID",
+          "values": {
+            "energy": null,
+            "control_energy": null
+          },
+          "control": {
+            "note": "Gate 6's own aliased control"
+          },
+          "basis": "experiments/gate6_visual.py measure_edge_aliasing; reported, not a gate"
+        }
+      }
+    },
+    "c": {
+      "png": "C:\\Users\\kanth\\flightsim\\runs\\visual\\head\\c.png",
+      "mask": "C:\\Users\\kanth\\flightsim\\runs\\visual\\head\\c_mask.png",
+      "depth": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\d7a0badefddd\\frames\\chase\\frame_0000_depth.f32",
+      "horizon": "frame_0000.json labels",
+      "expected_cloud": "none",
+      "clauses": {
+        "aerial_perspective": {
+          "status": "NOT RUN",
+          "values": {},
+          "control": null,
+          "basis": "0 ground pixels with depth; 1000 needed"
+        },
+        "horizon_fill": {
+          "status": "NOT RUN",
+          "values": {},
+          "control": null,
+          "basis": "the aircraft covers the horizon bands"
+        },
+        "cloud_fraction": {
+          "status": "NOT RUN",
+          "values": {
+            "cloud_fraction": 4.4206710578665844e-05,
+            "sky_px": 45242,
+            "expected_cover": null
+          },
+          "control": null,
+          "basis": "no expected cloud_cover for this shot (measured fraction reported)"
+        },
+        "exposure": {
+          "status": "FAIL",
+          "values": {
+            "luma_p90": 6.442399999999999,
+            "clipped_fraction": 0.0,
+            "crushed_fraction": 0.5270323350694445,
+            "luma_mean": 3.626137845269098
+          },
+          "control": {
+            "luma_p90": 25.769599999999997,
+            "clipped_fraction": 0.006042751736111111,
+            "crushed_fraction": 0.113134765625,
+            "luma_mean": 13.974050524956608,
+            "note": "the control tripped"
+          },
+          "basis": "luma p90 in [120, 240], clipped <= 2%; crushed is reported only; control: the frame x4"
+        },
+        "texel_detail": {
+          "status": "NOT RUN",
+          "values": {},
+          "control": null,
+          "basis": "0 near-ground pixels; 1000 needed"
+        },
+        "specular": {
+          "status": "FAIL",
+          "values": {
+            "highlight_fraction": 0.0,
+            "highlight_px": 0,
+            "airframe_px": 5970,
+            "median_luma": 3.1404,
+            "peak_over_median": 6.002929563112979,
+            "cut_luma": 180.0
+          },
+          "control": {
+            "highlight_fraction": 0.0,
+            "highlight_px": 0,
+            "airframe_px": 5970,
+            "median_luma": 2.9278,
+            "peak_over_median": 1.0,
+            "cut_luma": 180.0,
+            "note": "the control tripped"
+          },
+          "basis": "interior airframe pixels (ID 1) brighter than max(180, 1.6 x median); control: the airframe flattened to its median colour"
+        },
+        "edge_aliasing": {
+          "status": "VOID",
+          "values": {
+            "energy": null,
+            "control_energy": null
+          },
+          "control": {
+            "note": "Gate 6's own aliased control"
+          },
+          "basis": "experiments/gate6_visual.py measure_edge_aliasing; reported, not a gate"
+        }
+      }
+    },
+    "d": {
+      "png": "C:\\Users\\kanth\\flightsim\\runs\\visual\\head\\d.png",
+      "mask": "C:\\Users\\kanth\\flightsim\\runs\\visual\\head\\d_mask.png",
+      "depth": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\d381942faffb\\frames\\cockpit\\frame_0000_depth.f32",
+      "horizon": "frame_0000.json labels",
+      "expected_cloud": "none",
+      "clauses": {
+        "aerial_perspective": {
+          "status": "NOT RUN",
+          "values": {},
+          "control": null,
+          "basis": "0 ground pixels with depth; 1000 needed"
+        },
+        "horizon_fill": {
+          "status": "FAIL",
+          "values": {
+            "fill": 0.0,
+            "fill_source": "depth",
+            "contrast": 0.6246450351914205,
+            "columns": 1280
+          },
+          "control": {
+            "fill": 0.0,
+            "fill_source": "depth",
+            "contrast": 0.05467363019085937,
+            "columns": 1280,
+            "note": "the control tripped"
+          },
+          "basis": "horizon from frame_0000.json labels; the 12 px under it drawn and unlike the band above; control: that band emptied"
+        },
+        "cloud_fraction": {
+          "status": "NOT RUN",
+          "values": {
+            "cloud_fraction": 0.054143313619476496,
+            "sky_px": 484769,
+            "expected_cover": null
+          },
+          "control": null,
+          "basis": "no expected cloud_cover for this shot (measured fraction reported)"
+        },
+        "exposure": {
+          "status": "PASS",
+          "values": {
+            "luma_p90": 127.51691999999997,
+            "clipped_fraction": 0.0,
+            "crushed_fraction": 0.02378689236111111,
+            "luma_mean": 51.950512488281255
+          },
+          "control": {
+            "luma_p90": 254.99999999999997,
+            "clipped_fraction": 0.6640690104166667,
+            "crushed_fraction": 0.0044921875,
+            "luma_mean": 144.23616988888884,
+            "note": "the control tripped"
+          },
+          "basis": "luma p90 in [120, 240], clipped <= 2%; crushed is reported only; control: the frame x4"
+        },
+        "texel_detail": {
+          "status": "NOT RUN",
+          "values": {},
+          "control": null,
+          "basis": "0 near-ground pixels; 1000 needed"
+        },
+        "specular": {
+          "status": "FAIL",
+          "values": {
+            "highlight_fraction": 0.0,
+            "highlight_px": 0,
+            "airframe_px": 236194,
+            "median_luma": 9.421199999999999,
+            "peak_over_median": 18.254447416464995,
+            "cut_luma": 180.0
+          },
+          "control": {
+            "highlight_fraction": 0.0,
+            "highlight_px": 0,
+            "airframe_px": 236194,
+            "median_luma": 9.923799999999998,
+            "peak_over_median": 1.0,
+            "cut_luma": 180.0,
+            "note": "the control tripped"
+          },
+          "basis": "interior airframe pixels (ID 1) brighter than max(180, 1.6 x median); control: the airframe flattened to its median colour"
+        },
+        "edge_aliasing": {
+          "status": "INFO",
+          "values": {
+            "energy": 0.2179182290015755,
+            "control_energy": 0.28751233009444316
+          },
+          "control": {
+            "note": "Gate 6's own aliased control"
+          },
+          "basis": "experiments/gate6_visual.py measure_edge_aliasing; reported, not a gate"
+        }
+      }
+    }
+  }
+}

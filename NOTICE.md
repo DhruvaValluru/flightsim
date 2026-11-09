@@ -16,6 +16,14 @@ gitignored), and every render manifest carries its source and licence.
   licence statement is `assets/aircraft_models/A4/NOTICE.txt` and the
   source record is `assets/aircraft_config/A4.json`. Its licence is not on
   the dataset allow-list, so the export gate refuses to ship it.
+- **Higher-detail candidates (none renders yet)**: the table in
+  `scripts/fetch_aircraft_models.py`, each row with its licence evidence.
+  Pinned: FlightGear FGAddon `Aircraft/Sukhoi-Su-33` by Emmanuel Baranger
+  (helijah), GPL-2.0 (its `COPYING`), SVN r18942, tree sha256 recorded.
+  The Sketchfab rows are CC BY 4.0 and unpinned; one used later must be
+  credited "Model: <title> by <author> (Sketchfab), CC BY 4.0" with the
+  licence link. Rows whose uploader did not make the model, game rips,
+  NonCommercial and store licences are recorded as REJECTED.
 
 ## Terrain and imagery
 
@@ -31,3 +39,11 @@ into `data/textures/polyhaven/` (not committed): Poly Haven
 the live API to credit it visibly: "Textures: Poly Haven (polyhaven.com),
 CC0". Each surface's `provenance.json` names the asset, its URLs and the
 files' digests. Without the step, every ground material is procedural.
+
+## Ground-scatter models (beauty renders)
+
+Fetched by `scripts/fetch_scatter_assets.py` into `data/scatter/polyhaven/`
+(not committed), pinned in `assets/scatter/polyhaven_pins.json` (source URL,
+md5 from Poly Haven's API, sha256): Poly Haven (polyhaven.com), CC0 1.0.
+"Models: Poly Haven (polyhaven.com), CC0". Visual only; a species without a
+complete pin is never drawn.

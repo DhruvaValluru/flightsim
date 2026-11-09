@@ -78,6 +78,27 @@ public:
 	// the attribution. Never the key.
 	TSharedPtr<FJsonObject> Record() const;
 
+	// -- visual overhaul, world lane (2026-11-09): BEAUTY ONLY ---------------
+	// The beauty look on the tileset (FFlightSimWorldBeauty calls it only
+	// under -quality=beauty; a measure render never does): Material as the
+	// tileset's material (M_FlightSimTilesBeauty, driven by MPC_FlightSimWorld)
+	// and Cesium's smooth normals on, then a tileset refresh. The tiles stay
+	// the ground (the owner's rule): nothing here can turn them off.
+	// UNVERIFIED: the Cesium for Unreal headers are not on the authoring
+	// machine, so every Cesium setting is reached by REFLECTION by name
+	// (the UFunction SetMaterial, else the UPROPERTY Material; the bool
+	// GenerateSmoothNormals) and the record says which names were found, and
+	// lists the tileset's rendering properties so the render machine sees the
+	// real names. Applied only on a Cesium for Unreal 2.x or later (the
+	// installed plugin's VersionName). Returns the record (never fails: a
+	// look that cannot be applied is recorded, the tiles draw as before).
+	TSharedPtr<FJsonObject> ApplyBeautyLook(class UMaterialInterface* Material);
+
+	// The installed Cesium for Unreal plugin's VersionName ("2.30.0"), read
+	// from its .uplugin under the project's or the engine's plugins; empty
+	// when none is found.
+	static FString CesiumPluginVersion();
+
 private:
 	bool bEnabled = false;
 	bool bViaIon = false;

@@ -339,7 +339,7 @@ def test_the_land_cover_id_pass_writes_the_key_the_python_side_reads():
     assert ('constexpr const TCHAR* RenderLandcoverMaterialPath =\n'
             '\t\tTEXT("/Game/FlightSim/M_LandcoverID.M_LandcoverID");') in COMMANDLET
     block = COMMANDLET[COMMANDLET.index("if (bLandcoverAsked)"):]
-    block = block[:block.index("LabelLandcover->RegisterComponent();")]
+    block = block[:block.index("RegisterLabelCapture(LabelLandcover);")]
     assert 'TEXT("labels.landcover_pass: the scene carries land cover' in block
     assert "ConfigureLabelCapture(LabelLandcover);" in block
     assert "LabelLandcover->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;" in block

@@ -42,7 +42,7 @@
 
 namespace
 {
-	constexpr double WeatherCmPerMetre = 100.0;
+	constexpr double WeatherLookCmPerMetre = 100.0;
 
 	struct FGroundMaterialRow
 	{
@@ -133,9 +133,9 @@ namespace
 			const double Angle = 2.0 * PI * Index / ShaftSegments;
 			const FVector Out(FMath::Cos(Angle), FMath::Sin(Angle), 0.0);
 			const double U = static_cast<double>(Index) / ShaftSegments;
-			Vertices.Add(Out * ShaftTopRadiusM * WeatherCmPerMetre +
-			             FVector(0.0, 0.0, HeightM * WeatherCmPerMetre));
-			Vertices.Add(Out * ShaftBottomRadiusM * WeatherCmPerMetre);
+			Vertices.Add(Out * ShaftTopRadiusM * WeatherLookCmPerMetre +
+			             FVector(0.0, 0.0, HeightM * WeatherLookCmPerMetre));
+			Vertices.Add(Out * ShaftBottomRadiusM * WeatherLookCmPerMetre);
 			Normals.Add(Out);
 			Normals.Add(Out);
 			UV0.Add(FVector2D(U, 0.0));
@@ -161,7 +161,7 @@ namespace
 		FVector Point(0.0, 0.0, HeightM);
 		for (int32 Index = 0; Index <= Segments; ++Index)
 		{
-			Points.Add(Point * WeatherCmPerMetre);
+			Points.Add(Point * WeatherLookCmPerMetre);
 			Point += FVector(Random.FRandRange(-JitterM, JitterM), Random.FRandRange(-JitterM, JitterM),
 			                 -HeightM / Segments);
 		}
@@ -174,8 +174,8 @@ namespace
 			const FVector Normal = FVector::CrossProduct(Side, FVector::UpVector).GetSafeNormal();
 			for (const FVector& P : Points)
 			{
-				Vertices.Add(P - Side * WeatherCmPerMetre);
-				Vertices.Add(P + Side * WeatherCmPerMetre);
+				Vertices.Add(P - Side * WeatherLookCmPerMetre);
+				Vertices.Add(P + Side * WeatherLookCmPerMetre);
 				Normals.Add(Normal);
 				Normals.Add(Normal);
 			}
@@ -291,7 +291,15 @@ bool FFlightSimVisualScene::ApplyWeatherLook(UWorld* World,
 	// -- the storm: rain shafts and lightning (beauty-only) -------------------
 	TSharedPtr<FJsonObject> StormRow = MakeShared<FJsonObject>();
 	StormRow->SetStringField(TEXT("storm"), Storm.IsEmpty() ? TEXT("none") : *Storm);
-	if (Storm == TEXT("thunderstorm"))
+	if (Storm == TEXT("thunderstorm") && Options.bSkipStormLook)
+	{
+		// One storm in the frame, one lightning clock: the storm weather's
+		// M_StormCell and its lightning channels (FlightSimWeather.cpp, its own
+		// flash list) draw it; the look's shafts and bolt stand down.
+		StormRow->SetStringField(TEXT("drawn"),
+			TEXT("nothing here: the storm weather draws the cell and its lightning (SceneOptions.bSkipStormLook)"));
+	}
+	else if (Storm == TEXT("thunderstorm"))
 	{
 		const double CloudBaseM = Options.CloudLayers.Num() > 0 && Options.CloudLayers[0].BaseMetres > 0.0
 			? Options.CloudLayers[0].BaseMetres : DefaultCloudBaseM;
@@ -309,7 +317,7 @@ bool FFlightSimVisualScene::ApplyWeatherLook(UWorld* World,
 			const double AheadM = 3000.0 + 2000.0 * Index + Random.FRandRange(-500.0, 500.0);
 			const double SideM = (Index % 2 == 0 ? -1.0 : 1.0) * Random.FRandRange(800.0, 2200.0);
 			const FVector2D At = Forward * AheadM + Right * SideM;
-			const FVector Location(At.X * WeatherCmPerMetre, At.Y * WeatherCmPerMetre, 0.0);
+			const FVector Location(At.X * WeatherLookCmPerMetre, At.Y * WeatherLookCmPerMetre, 0.0);
 			if (Index == 0)
 			{
 				FirstShaft = Location;
@@ -352,10 +360,10 @@ bool FFlightSimVisualScene::ApplyWeatherLook(UWorld* World,
 			LightningLight = NewObject<UPointLightComponent>(Bolt, TEXT("LightningLight"));
 			LightningLight->SetMobility(EComponentMobility::Movable);
 			LightningLight->SetupAttachment(BoltMesh);
-			LightningLight->SetRelativeLocation(FVector(0.0, 0.0, 0.5 * CloudBaseM * WeatherCmPerMetre));
+			LightningLight->SetRelativeLocation(FVector(0.0, 0.0, 0.5 * CloudBaseM * WeatherLookCmPerMetre));
 			LightningLight->SetIntensityUnits(ELightUnits::Candelas);
 			LightningLight->SetIntensity(0.0f);
-			LightningLight->SetAttenuationRadius(static_cast<float>(LightningRadiusM * WeatherCmPerMetre));
+			LightningLight->SetAttenuationRadius(static_cast<float>(LightningRadiusM * WeatherLookCmPerMetre));
 			LightningLight->SetCastShadows(false);
 			LightningLight->RegisterComponent();
 			Bolt->SetActorLocation(FirstShaft);

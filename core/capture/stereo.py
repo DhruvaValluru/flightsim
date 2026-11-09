@@ -224,8 +224,16 @@ def right_track(left_track, baseline_m: float, camera_id: str):
         north.append(left_track.north_m[i] + baseline_m * right[0])
         east.append(left_track.east_m[i] + baseline_m * right[1])
         alt.append(left_track.alt_m[i] + baseline_m * right[2])
+    extra = {}
+    # camera-motion-layer: a moving left camera carries its render-clock
+    # track in ``dense`` (the poses the card ships to the engine). The
+    # right camera's dense track takes the same baseline offset, or the
+    # engine would fly it at the LEFT centre while its labels sit a
+    # baseline away.
+    if getattr(left_track, "dense", None) is not None:
+        extra["dense"] = right_track(left_track.dense, baseline_m, camera_id)
     return replace(left_track, camera_id=str(camera_id), north_m=tuple(north),
-                   east_m=tuple(east), alt_m=tuple(alt))
+                   east_m=tuple(east), alt_m=tuple(alt), **extra)
 
 
 def right_schedule(left_schedule, camera_id: str):

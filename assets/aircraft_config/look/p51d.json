@@ -1,0 +1,75 @@
+{
+  "schema": "flightsim-aircraft-look/1",
+  "name": "p51d",
+  "default_class": "bare_metal",
+  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. default_class bare_metal: the natural-metal finish USAAF P-51Ds flew from 1944 (from memory); the livery texture's paint is then read as bare metal, which the reader checks against a reference photo of the type.",
+  "slot_rules": [],
+  "class_vectors": {
+    "bare_metal": {
+      "PanelPitchCm": [
+        70.0,
+        50.0,
+        30.0,
+        0.0
+      ]
+    }
+  },
+  "lights": [
+    {
+      "id": "nav_left",
+      "kind": "nav_red",
+      "anchor": "mesh_extreme",
+      "axis": "-y",
+      "offset_m": [
+        0.0,
+        0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "nav_right",
+      "kind": "nav_green",
+      "anchor": "mesh_extreme",
+      "axis": "+y",
+      "offset_m": [
+        0.0,
+        -0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "tail",
+      "kind": "nav_white",
+      "anchor": "mesh_extreme",
+      "axis": "-x",
+      "offset_m": [
+        0.05,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "strobe_left",
+      "kind": "strobe",
+      "anchor": "mesh_extreme",
+      "axis": "-y",
+      "offset_m": [
+        -0.15,
+        0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "strobe_right",
+      "kind": "strobe",
+      "anchor": "mesh_extreme",
+      "axis": "+y",
+      "offset_m": [
+        -0.15,
+        -0.05,
+        0.0
+      ]
+    }
+  ],
+  "nozzles": []
+}

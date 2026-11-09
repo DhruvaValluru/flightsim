@@ -203,6 +203,36 @@ namespace
 
 // -- the closed forms ----------------------------------------------------------
 
+void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
+{
+	// Visual overhaul, world lane (2026-11-09): BEAUTY ONLY (FFlightSimWorldBeauty
+	// is the only caller). A stated exaggeration on top of -rain-gain=, never
+	// the physics; recorded beside the gain it multiplies.
+	BeautyRainGain = FMath::Clamp(Gain, 0.0, 100.0);
+	if (RainMaterial != nullptr)
+	{
+		RainMaterial->SetScalarParameterValue(TEXT("Weight"),
+		                                      static_cast<float>(Weight * RainGain * BeautyRainGain));
+	}
+	if (SplashMaterial != nullptr)
+	{
+		SplashMaterial->SetScalarParameterValue(TEXT("Weight"),
+		                                        static_cast<float>(SplashWeight * RainGain * BeautyRainGain));
+	}
+	if (NiagaraRain != nullptr)
+	{
+		NiagaraRain->SetVariableFloat(TEXT("User.Weight"), static_cast<float>(Weight * BeautyRainGain));
+	}
+	const TSharedPtr<FJsonObject>* Row = nullptr;
+	if (Record.IsValid() && Record->TryGetObjectField(TEXT("rain"), Row) && Row != nullptr && Row->IsValid())
+	{
+		(*Row)->SetNumberField(TEXT("beauty_readability_gain"), BeautyRainGain);
+		(*Row)->SetStringField(TEXT("beauty_readability_basis"),
+			TEXT("-quality=beauty: the drawn drops' opacity x this on top of the gain, so the streaks read on "
+			     "camera (a stated exaggeration, UNCALIBRATED; core/scene/world_beauty.py ATMOSPHERE)"));
+	}
+}
+
 uint64 FFlightSimWeather::SplitMix64(uint64 X)
 {
 	uint64 Z = X + 0x9E3779B97F4A7C15ull;
@@ -1795,6 +1825,9 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 	{
 		StormMaterial->SetScalarParameterValue(TEXT("Time"), static_cast<float>(T));
 	}
+	// Visual overhaul (world lane): kept for the beauty's sky pulse and its
+	// per-frame record (LastFlashLux); nothing here reads it back.
+	LastFlashLuxValue = FlashLux;
 
 	// -- rain ------------------------------------------------------------------
 	if (!bRain)

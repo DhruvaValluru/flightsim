@@ -31,6 +31,7 @@ FROZEN_NAMES = frozenset({
     "FLIGHTSIM_REBUILD_MATERIALS", "FLIGHTSIM_RELAY_URL", "FLIGHTSIM_RENDER_QUALITY",
     "FLIGHTSIM_RENDER_TIMEOUT_SECONDS", "FLIGHTSIM_SKY", "FLIGHTSIM_STALL_SECONDS",
     "FLIGHTSIM_TERRAIN_PREFETCH", "FLIGHTSIM_WEATHER_BACKEND", "FLIGHTSIM_XPLANE_LIGHTING",
+    "FLIGHTSIM_WORLD_BEAUTY_OVERRIDES",  # visual overhaul, dev-only probe overrides
     "FLIGHTSIM_XPLANE_SKY", "FLIGHTSIM_XPLANE_TERRAIN",
 })
 
@@ -63,9 +64,9 @@ def test_the_scan_detects_an_unlisted_name(tmp_path):
     assert scan_source_env_names([fake / "*.py"]) == {"FLIGHTSIM_ZZZ_TEST"}
     # The module's own table never counts as a read.
     assert scan_source_env_names([REPO / "core" / "config_surface.py"]) == set()
-    # The real scan is exactly the 23 frozen names: a 24th fails here by name.
+    # The real scan is exactly the 24 frozen names: a 25th fails here by name.
     real = _real_scan()
-    assert len(FROZEN_NAMES) == 23
+    assert len(FROZEN_NAMES) == 24
     assert real == FROZEN_NAMES, (
         f"new: {sorted(real - FROZEN_NAMES)}; gone: {sorted(FROZEN_NAMES - real)}")
     assert flightsim_env_names() == FROZEN_NAMES

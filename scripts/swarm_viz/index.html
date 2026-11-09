@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlightSim Swarm Live</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+:root {
+  --bg0: #04060d; --bg1: #0a1020; --panel: rgba(10, 16, 32, 0.86); --line: rgba(120, 150, 220, 0.16);
+  --text: #dbe4ff; --muted: #7d8bb0; --dim: #4a5677;
+  --active: #3cf0ff; --done: #5be37d; --idle: #8a94ad; --failed: #ff4d5e; --stopped: #c9964f;
+  --session: #ffd166; --run: #a78bfa; --phase: #6d7cff; --branch: #ff9f43; --memory: #f472b6;
+  --rflo-agent: #2dd4bf; --rflo-task: #facc15;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  background: radial-gradient(1200px 800px at 50% 45%, #0d1630 0%, var(--bg1) 45%, var(--bg0) 100%);
+  color: var(--text); font-family: var(--sans); font-size: 13px;
+}
+#app { display: grid; grid-template-rows: auto 1fr 118px; height: 100vh; }
+
+/* top bar */
+#top {
+  display: flex; align-items: center; gap: 12px; padding: 7px 14px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(14,22,44,.92), rgba(8,12,24,.75));
+  backdrop-filter: blur(6px); z-index: 3;
+}
+#brand { display: flex; flex-direction: column; gap: 2px; margin-right: 4px; white-space: nowrap; }
+#brand b { font-family: var(--mono); letter-spacing: .18em; font-size: 13px; color: #fff;
+  text-shadow: 0 0 12px rgba(60,240,255,.55); }
+#brand span { color: var(--muted); font-size: 10px; font-family: var(--mono); }
+.chips { display: flex; gap: 5px; flex-wrap: wrap; flex: 1; min-width: 0; }
+.chip {
+  display: flex; flex-direction: column; min-width: 64px; max-width: 150px; padding: 3px 8px 4px; border-radius: 8px;
+  background: rgba(255,255,255,.03); border: 1px solid var(--line);
+}
+.chip .k { font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.chip .v { font-family: var(--mono); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chip.active .v { color: var(--active); text-shadow: 0 0 10px rgba(60,240,255,.6); }
+.chip.done .v { color: var(--done); }
+.chip.bad .v { color: var(--failed); }
+.chip.warn .v { color: var(--rflo-task); }
+.chip .s { font-size: 9.5px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#controls { position: absolute; top: 10px; right: 12px; display: flex; gap: 6px; align-items: center; z-index: 4;
+  padding: 4px; border-radius: 10px; background: rgba(6,10,22,.7); border: 1px solid var(--line); }
+.panel-open #controls { right: 392px; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button, .btn {
+  background: transparent; color: var(--muted); border: 0; padding: 6px 10px; font: 600 11px var(--mono);
+  letter-spacing: .06em; cursor: pointer;
+}
+.seg button.on { background: rgba(60,240,255,.12); color: var(--active); }
+.btn { border: 1px solid var(--line); border-radius: 8px; }
+.btn:hover, .seg button:hover { color: var(--text); }
+#pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--done); box-shadow: 0 0 8px var(--done); }
+#pulse.stale { background: var(--failed); box-shadow: 0 0 8px var(--failed); }
+#updated { font: 10px var(--mono); color: var(--muted); white-space: nowrap; }
+
+/* stage */
+#stage { position: relative; overflow: hidden; }
+#graph { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+#graph.drag { cursor: grabbing; }
+#legend {
+  position: absolute; left: 12px; bottom: 10px; display: flex; flex-wrap: wrap; gap: 10px; max-width: 70%;
+  font: 10.5px var(--mono); color: var(--muted); pointer-events: none;
+}
+#legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+#tip {
+  position: absolute; pointer-events: none; padding: 6px 9px; border-radius: 6px; background: rgba(4,8,18,.92);
+  border: 1px solid var(--line); font: 11px var(--mono); color: var(--text); max-width: 360px; display: none; z-index: 4;
+}
+#tip .t2 { color: var(--muted); margin-top: 2px; }
+#empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted);
+  font: 13px var(--mono); }
+
+/* side panel */
+#panel {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 380px; max-width: 92vw; background: var(--panel);
+  border-left: 1px solid var(--line); backdrop-filter: blur(10px); transform: translateX(105%);
+  transition: transform .22s ease; overflow-y: auto; padding: 16px 16px 30px; z-index: 5;
+}
+#panel.open { transform: none; }
+#panel h2 { margin: 0 26px 2px 0; font-size: 15px; word-break: break-word; }
+#panel .sub { color: var(--muted); font: 11px var(--mono); margin-bottom: 12px; word-break: break-all; }
+#panel .close { position: absolute; top: 10px; right: 10px; }
+#panel h3 { margin: 16px 0 6px; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+#panel .kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; font: 11.5px var(--mono); }
+#panel .kv div:nth-child(odd) { color: var(--muted); }
+#panel .kv div { word-break: break-word; }
+#panel ul { list-style: none; margin: 0; padding: 0; }
+#panel li { font: 11px var(--mono); padding: 5px 7px; margin-bottom: 4px; border-radius: 6px;
+  background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.04); word-break: break-word; }
+#panel li b { color: var(--active); font-weight: 600; margin-right: 6px; }
+#panel pre { white-space: pre-wrap; word-break: break-word; font: 11px/1.45 var(--mono); margin: 0; padding: 8px;
+  border-radius: 6px; background: rgba(0,0,0,.35); border: 1px solid var(--line); max-height: 320px; overflow: auto; }
+.badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font: 600 10px var(--mono); letter-spacing: .05em;
+  border: 1px solid currentColor; }
+
+/* timeline */
+#timeline { position: relative; border-top: 1px solid var(--line); background: rgba(4,7,15,.75); }
+#tl { position: absolute; inset: 0; width: 100%; height: 100%; }
+#tlLabel { position: absolute; left: 12px; top: 6px; font: 600 9.5px var(--mono); letter-spacing: .14em; color: var(--muted);
+  pointer-events: none; }
+
+@media (max-width: 760px) {
+  #app { grid-template-rows: auto 1fr 90px; }
+  .chip { min-width: 60px; padding: 3px 7px; }
+  .chip .v { font-size: 13px; }
+  #legend { display: none; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div id="brand"><b>SWARM&nbsp;//&nbsp;FLIGHTSIM</b><span id="sessName">loading</span></div>
+    <div class="chips" id="chips"></div>
+  </header>
+  <section id="stage">
+    <canvas id="graph"></canvas>
+    <div id="controls">
+      <div class="seg" id="scope">
+        <button data-s="live">LIVE</button><button data-s="day">24H</button><button data-s="all">ALL</button>
+      </div>
+      <button class="btn" id="fit" title="Fit the graph to the window">FIT</button>
+      <span id="pulse" title="refresh status"></span><span id="updated">-</span>
+    </div>
+    <div id="legend"></div>
+    <div id="tip"></div>
+    <div id="empty">no workflow runs in this scope</div>
+    <aside id="panel"><button class="btn close" id="closePanel">ESC</button><div id="panelBody"></div></aside>
+  </section>
+  <section id="timeline"><canvas id="tl"></canvas><div id="tlLabel">AGENT TIMELINE</div></section>
+</div>
+<script>
+"use strict";
+// ------------------------------------------------------------------ constants
+const css = getComputedStyle(document.documentElement);
+const C = k => css.getPropertyValue("--" + k).trim();
+const COL = {
+  active: C("active"), done: C("done"), idle: C("idle"), failed: C("failed"), stopped: C("stopped"),
+  session: C("session"), run: C("run"), phase: C("phase"), branch: C("branch"), memory: C("memory"),
+  rAgent: C("rflo-agent"), rTask: C("rflo-task"), text: C("text"), muted: C("muted"),
+};
+const REFRESH_MS = 3000;
+const BASE_RING = { session: 70, run: 150, phase: 245, agent: 345, branch: 455, rflo: 560 };
+let RING = { ...BASE_RING };  // rescaled in buildGraph so many runs get a wider orbit
+let runCountInScope = 0;
+const SIZE = { lead: 20, session: 11, run: 10, phase: 6.5, agent: 7, branch: 6, memory: 3.2, rAgent: 7, rTask: 5 };
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } },
+};
+let scope = new URLSearchParams(location.search).get("scope") || store.get("swarmviz.scope", "day");
+if (!["live", "day", "all"].includes(scope)) scope = "day";
+let state = null, lastOk = 0, selectedId = null, hoverNode = null;
+const nodeById = new Map();
+let nodes = [], links = [], timelineRows = [];
+
+// ------------------------------------------------------------------ canvas setup
+const canvas = document.getElementById("graph");
+const ctx = canvas.getContext("2d");
+const tlCanvas = document.getElementById("tl");
+const tctx = tlCanvas.getContext("2d");
+let W = 0, H = 0, TW = 0, TH = 0, DPR = 1;
+let transform = d3.zoomIdentity;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const r = canvas.getBoundingClientRect();
+  W = r.width; H = r.height;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  const t = tlCanvas.getBoundingClientRect();
+  TW = t.width; TH = t.height;
+  tlCanvas.width = TW * DPR; tlCanvas.height = TH * DPR;
+}
+window.addEventListener("resize", () => { resize(); drawTimeline(); });
+resize();
+
+// background star field, generated once
+const stars = d3.range(220).map(() => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.1 + .2, a: Math.random() * .5 + .1 }));
+
+// ------------------------------------------------------------------ simulation
+const sim = d3.forceSimulation()
+  .force("link", d3.forceLink().id(d => d.id).distance(l => l.dist || 60).strength(l => l.str ?? .4))
+  .force("charge", d3.forceManyBody().strength(d => d.kind === "memory" ? -14 : d.kind === "agent" ? -90 : -160).distanceMax(420))
+  .force("radial", d3.forceRadial(d => d.ring ?? 0, 0, 0).strength(d => d.ring == null ? 0 : d.kind === "rAgent" || d.kind === "rTask" ? .35 : .22))
+  .force("collide", d3.forceCollide().radius(d => d.r + (d.kind === "memory" ? 2 : 7)).iterations(1))
+  .alphaDecay(.028).velocityDecay(.38)
+  .on("tick", () => { /* drawing happens in the animation loop */ });
+
+const zoom = d3.zoom().scaleExtent([.15, 6])
+  // a press on a node drags the node; everywhere else (and every wheel) pans and zooms
+  .filter(ev => !ev.button && (ev.type === "wheel" || ev.type.startsWith("touch") || !pick(ev.offsetX, ev.offsetY)))
+  .on("start", () => canvas.classList.add("drag"))
+  .on("end", () => canvas.classList.remove("drag"))
+  .on("zoom", ev => { transform = ev.transform; });
+d3.select(canvas).call(zoom).on("dblclick.zoom", null);
+d3.select(canvas).call(zoom.transform, d3.zoomIdentity.translate(W / 2, H / 2).scale(Math.min(W, H) / 1250));
+
+// node dragging layered on top of zoom
+d3.select(canvas).call(d3.drag()
+  .container(canvas)
+  .filter(ev => !!pick(ev.offsetX, ev.offsetY))
+  .subject(ev => pick(ev.x, ev.y))
+  .on("start", ev => { if (!ev.active) sim.alphaTarget(.2).restart(); ev.subject.fx = ev.subject.x; ev.subject.fy = ev.subject.y; })
+  .on("drag", ev => { const p = transform.invert([ev.x, ev.y]); ev.subject.fx = p[0]; ev.subject.fy = p[1]; })
+  .on("end", ev => { if (!ev.active) sim.alphaTarget(0); if (!ev.subject.lead) { ev.subject.fx = null; ev.subject.fy = null; } }));
+
+function pick(sx, sy) {
+  const [x, y] = transform.invert([sx, sy]);
+  let best = null, bd = Infinity;
+  for (const n of nodes) {
+    const d = Math.hypot(n.x - x, n.y - y);
+    const hit = Math.max(n.r + 4, 9 / transform.k);
+    if (d < hit && d < bd) { best = n; bd = d; }
+  }
+  return best;
+}
+
+// ------------------------------------------------------------------ data -> graph
+const fmtBytes = b => b == null ? "-" : b < 1024 ? b + " B" : b < 1048576 ? (b / 1024).toFixed(1) + " KB" : (b / 1048576).toFixed(2) + " MB";
+const fmtAgo = s => s == null ? "-" : s < 60 ? Math.round(s) + "s" : s < 3600 ? Math.round(s / 60) + "m" : (s / 3600).toFixed(1) + "h";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const shortSess = id => id.slice(0, 8);
+
+function inScope(run, now) {
+  if (scope === "all") return true;
+  const last = run.last_activity || 0;
+  const live = run.status === "running" || run.agents.some(a => a.state === "active");
+  if (scope === "live") return live || now - last < 3600;
+  return live || now - last < 86400;
+}
+
+function laneMatch(label, lane) {
+  if (!label) return false;
+  const l = label.toLowerCase(), k = lane.toLowerCase();
+  return l === k || l.split(":").pop() === k || l.endsWith(":" + k);
+}
+
+function buildGraph(st) {
+  const now = st.generated_at;
+  const sessions = st.workflows.sessions || [];
+  const N = [], L = [];
+  const add = (n) => { N.push(n); return n; };
+  const link = (s, t, o = {}) => L.push(Object.assign({ source: s, target: t }, o));
+  const leadSess = sessions[0];
+  const worktrees = (st.git && st.git.worktrees) || [];
+  const wtByPath = new Map(worktrees.map(w => [w.path, w]));
+  const wtByBranch = new Map(worktrees.filter(w => w.branch).map(w => [w.branch, w]));
+  const agentsAll = [];
+  timelineRows = [];
+
+  if (!leadSess) return { N, L };
+  runCountInScope = sessions.reduce((a, s) => a + s.runs.filter(r => inScope(r, now)).length, 0);
+  const f = Math.max(1, Math.sqrt(runCountInScope / 8));
+  RING = Object.fromEntries(Object.entries(BASE_RING).map(([k, v]) => [k, v * f]));
+  const lead = add({ id: "s:" + leadSess.id, kind: "session", lead: true, label: "lead " + shortSess(leadSess.id), data: leadSess, ring: null, r: SIZE.lead, fx: 0, fy: 0 });
+
+  for (const sess of sessions) {
+    const runs = sess.runs.filter(r => inScope(r, now));
+    if (!runs.length) continue;
+    let hub = lead;
+    if (sess !== leadSess) {
+      hub = add({ id: "s:" + sess.id, kind: "session", label: "session " + shortSess(sess.id), data: sess, ring: RING.session, r: SIZE.session });
+      link(lead.id, hub.id, { dist: 90, str: .6, dashed: true });
+    }
+    for (const run of runs) {
+      const runLive = run.agents.some(a => a.state === "active");
+      const rn = add({ id: "r:" + run.id, kind: "run", label: run.name, sub: run.id, data: run, ring: RING.run, r: SIZE.run + Math.min(6, run.agents.length * .6), live: runLive });
+      link(hub.id, rn.id, { dist: 110, str: .5 });
+      const phaseNodes = new Map();
+      const phaseFor = (title) => {
+        if (!title) return rn;
+        if (!phaseNodes.has(title)) {
+          const pn = add({ id: "p:" + run.id + ":" + title, kind: "phase", label: title, data: { title, run: run.id, runName: run.name }, ring: RING.phase, r: SIZE.phase });
+          link(rn.id, pn.id, { dist: 60, str: .7 });
+          phaseNodes.set(title, pn);
+        }
+        return phaseNodes.get(title);
+      };
+      (run.phases || []).forEach(p => { if (run.agents.some(a => a.phase === p)) phaseFor(p); });
+      for (const a of run.agents) {
+        const pn = phaseFor(a.phase);
+        const an = add({ id: "a:" + run.id + ":" + a.id, kind: "agent", label: a.label, data: a, run, ring: RING.agent, r: SIZE.agent + Math.min(5, Math.log10(1 + (a.transcript_bytes || 0) / 2e4) * 2), state: a.state });
+        link(pn.id, an.id, { dist: 46, str: .8, active: a.state === "active" });
+        agentsAll.push(an);
+        timelineRows.push({ node: an, start: a.start_ms, end: a.end_ms, state: a.state });
+        const wt = (a.worktree && wtByPath.get(a.worktree)) || (a.branch && wtByBranch.get(a.branch));
+        const branch = wt ? wt.branch : a.branch;
+        if (branch) {
+          const bid = "b:" + branch;
+          let bn = N.find(n => n.id === bid);
+          if (!bn) bn = add({ id: bid, kind: "branch", label: branch.replace(/^worktree-/, ""), data: wt || { branch }, ring: RING.branch, r: SIZE.branch + Math.min(5, (wt && wt.ahead) || 0) * .7 });
+          link(an.id, bid, { dist: 70, str: .25, active: a.state === "active", kindEdge: "branch" });
+        }
+      }
+    }
+  }
+
+  // ruflo memory satellites around the lane that wrote them
+  const mem = (st.ruflo && st.ruflo.memory) || [];
+  for (const m of mem) {
+    let owner = null;
+    if (m.lane) {
+      const cands = agentsAll.filter(n => laneMatch(n.label, m.lane));
+      // the lane's writer: prefer an agent that finished or is running (not one stopped with a killed run), then the earliest
+      const rank = n => (n.state === "done" || n.state === "active" ? 0 : 1);
+      cands.sort((x, y) => rank(x) - rank(y) || (x.data.start_ms || 0) - (y.data.start_ms || 0));
+      owner = cands[0] || null;
+    }
+    const target = owner ? owner.id : lead.id;
+    const mn = add({ id: "m:" + m.key, kind: "memory", label: m.key.split("/").pop(), data: m, ring: null, r: SIZE.memory, owner: target });
+    link(target, mn.id, { dist: owner ? 20 : 48, str: 1, kindEdge: "memory", active: owner && owner.state === "active" });
+  }
+
+  // ruflo-registered agents and tasks: the outer ring
+  const rAgents = (st.ruflo && st.ruflo.agents) || [];
+  const rTasks = (st.ruflo && st.ruflo.tasks) || [];
+  for (const ra of rAgents) {
+    const id = "ra:" + ra.agentId;
+    add({ id, kind: "rAgent", label: ra.agentId, data: ra, ring: RING.rflo, r: SIZE.rAgent, state: ra.status });
+    const head = String(ra.name || "").split(/[ (]/)[0].toLowerCase();
+    const twin = agentsAll.filter(n => n.data.state !== "done" && laneMatch(n.label, head)).pop();
+    if (twin) link(id, twin.id, { dist: 140, str: .05, dashed: true, kindEdge: "twin", active: twin.state === "active" });
+  }
+  for (const t of rTasks) {
+    const id = "rt:" + t.taskId;
+    add({ id, kind: "rTask", label: (t.description || t.taskId).slice(0, 40), data: t, ring: RING.rflo + 40, r: SIZE.rTask });
+    for (const aid of t.assignedTo || []) if (N.find(n => n.id === "ra:" + aid)) link(id, "ra:" + aid, { dist: 40, str: .5 });
+  }
+  return { N, L };
+}
+
+function applyGraph(st) {
+  const { N, L } = buildGraph(st);
+  const keep = new Set(N.map(n => n.id));
+  let changed = N.length !== nodes.length;
+  for (const id of [...nodeById.keys()]) if (!keep.has(id)) { nodeById.delete(id); changed = true; }
+  nodes = N.map(n => {
+    const old = nodeById.get(n.id);
+    if (old) {
+      for (const k of ["label", "sub", "data", "run", "r", "state", "ring", "live", "owner"]) old[k] = n[k];
+      return old;
+    }
+    changed = true;
+    // seed new nodes near their parent so the graph grows instead of exploding
+    const parentLink = L.find(l => l.target === n.id);
+    const p = parentLink && nodeById.get(parentLink.source);
+    const ang = Math.random() * Math.PI * 2;
+    n.x = (p ? p.x : 0) + Math.cos(ang) * 30; n.y = (p ? p.y : 0) + Math.sin(ang) * 30;
+    n.phaseOff = Math.random() * Math.PI * 2;
+    nodeById.set(n.id, n);
+    return n;
+  });
+  for (const row of timelineRows) row.node = nodeById.get(row.node.id) || row.node;
+  links = L.filter(l => nodeById.has(l.source) && nodeById.has(l.target)).map(l => ({ ...l, seed: Math.random() }));
+  sim.nodes(nodes);
+  sim.force("link").links(links);
+  if (changed) sim.alpha(Math.max(sim.alpha(), .5)).restart();
+  document.getElementById("empty").style.display = nodes.length > 1 ? "none" : "flex";
+}
+
+// ------------------------------------------------------------------ drawing
+function colorOf(n) {
+  switch (n.kind) {
+    case "agent": return COL[n.state] || COL.idle;
+    case "session": return COL.session;
+    case "run": return COL.run;
+    case "phase": return COL.phase;
+    case "branch": return COL.branch;
+    case "memory": return COL.memory;
+    case "rAgent": return COL.rAgent;
+    case "rTask": return COL.rTask;
+  }
+  return COL.idle;
+}
+function hexA(hex, a) {
+  const c = d3.color(hex); if (!c) return hex; c.opacity = a; return c.formatRgb();
+}
+
+function draw(tms) {
+  const t = tms / 1000;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  // stars (screen space, slight parallax)
+  for (const s of stars) {
+    ctx.globalAlpha = s.a * (.75 + .25 * Math.sin(t * .7 + s.x * 40));
+    ctx.fillStyle = "#9fb4ff";
+    ctx.fillRect(((s.x * W + transform.x * .03) % W + W) % W, ((s.y * H + transform.y * .03) % H + H) % H, s.r, s.r);
+  }
+  ctx.globalAlpha = 1;
+  ctx.setTransform(DPR * transform.k, 0, 0, DPR * transform.k, DPR * transform.x, DPR * transform.y);
+  const k = transform.k;
+
+  // orbit rings
+  ctx.lineWidth = 1 / k;
+  for (const [name, r] of [["runs", RING.run], ["agents", RING.agent], ["branches", RING.branch], ["ruflo", RING.rflo]]) {
+    ctx.strokeStyle = name === "ruflo" ? "rgba(45,212,191,.10)" : "rgba(120,150,230,.07)";
+    ctx.setLineDash(name === "ruflo" ? [4 / k, 6 / k] : []);
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  if (k > .45) {
+    ctx.fillStyle = "rgba(125,139,176,.45)"; ctx.font = `${10 / k}px ui-monospace, Menlo, monospace`; ctx.textAlign = "center";
+    ctx.fillText("RUFLO RING", 0, -RING.rflo - 8 / k);
+  }
+
+  const sel = selectedId && nodeById.get(selectedId);
+  const neigh = new Set();
+  if (sel) { neigh.add(sel.id); for (const l of links) { if (l.source.id === sel.id) neigh.add(l.target.id); if (l.target.id === sel.id) neigh.add(l.source.id); } }
+
+  // edges
+  for (const l of links) {
+    const s = l.source, d = l.target;
+    const dim = sel && !(neigh.has(s.id) && neigh.has(d.id));
+    let col = "rgba(130,155,230,.16)";
+    if (l.kindEdge === "branch") col = "rgba(255,159,67,.16)";
+    if (l.kindEdge === "memory") col = "rgba(244,114,182,.22)";
+    if (l.kindEdge === "twin") col = "rgba(45,212,191,.22)";
+    if (l.active) col = "rgba(60,240,255,.42)";
+    ctx.strokeStyle = dim ? "rgba(120,140,200,.05)" : col;
+    ctx.lineWidth = (l.active ? 1.4 : .8) / Math.sqrt(k);
+    if (l.dashed) ctx.setLineDash([3 / k, 4 / k]);
+    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(d.x, d.y); ctx.stroke();
+    if (l.dashed) ctx.setLineDash([]);
+  }
+  // particles on edges of active agents
+  ctx.globalCompositeOperation = "lighter";
+  for (const l of links) {
+    if (!l.active) continue;
+    const s = l.source, d = l.target;
+    const len = Math.hypot(d.x - s.x, d.y - s.y) || 1;
+    const count = Math.max(2, Math.min(6, Math.round(len / 28)));
+    const speed = l.kindEdge === "branch" ? .35 : .55;
+    const col = l.kindEdge === "branch" ? COL.branch : l.kindEdge === "memory" ? COL.memory : COL.active;
+    for (let i = 0; i < count; i++) {
+      let p = (t * speed * 60 / len + i / count + l.seed) % 1;
+      if (l.kindEdge !== "branch") p = 1 - p; // flow toward the agent from its phase; out to the branch
+      const x = s.x + (d.x - s.x) * p, y = s.y + (d.y - s.y) * p;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, 4.5);
+      g.addColorStop(0, hexA(col, .95)); g.addColorStop(1, hexA(col, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.globalCompositeOperation = "source-over";
+
+  // nodes
+  for (const n of nodes) {
+    const col = colorOf(n);
+    const dim = sel && !neigh.has(n.id);
+    ctx.globalAlpha = dim ? .22 : 1;
+    const isActive = (n.kind === "agent" && n.state === "active") || (n.kind === "run" && n.live) || (n.kind === "rAgent" && n.state === "busy");
+    if (isActive && !dim) {
+      const pulse = .5 + .5 * Math.sin(t * 3.2 + (n.phaseOff || 0));
+      const rr = n.r * (2.2 + pulse * 1.6);
+      const g = ctx.createRadialGradient(n.x, n.y, n.r * .6, n.x, n.y, rr);
+      g.addColorStop(0, hexA(col, .55)); g.addColorStop(1, hexA(col, 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(n.x, n.y, rr, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = hexA(col, .7 - pulse * .5); ctx.lineWidth = 1.2 / k;
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 3 + pulse * 7, 0, Math.PI * 2); ctx.stroke();
+    }
+    if (n.kind === "session" && n.lead) {
+      const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 3.4);
+      g.addColorStop(0, hexA(col, .5)); g.addColorStop(1, hexA(col, 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(n.x, n.y, n.r * 3.4, 0, Math.PI * 2); ctx.fill();
+      ctx.save(); ctx.translate(n.x, n.y); ctx.rotate(t * .35);
+      ctx.strokeStyle = hexA(col, .55); ctx.lineWidth = 1.5 / k; ctx.setLineDash([6, 5]);
+      ctx.beginPath(); ctx.arc(0, 0, n.r + 9, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); ctx.setLineDash([]);
+    }
+    // body
+    if (n.kind === "phase") {
+      ctx.fillStyle = hexA(col, .18); ctx.strokeStyle = col; ctx.lineWidth = 1.4 / k;
+      ctx.beginPath(); ctx.moveTo(n.x, n.y - n.r); ctx.lineTo(n.x + n.r, n.y); ctx.lineTo(n.x, n.y + n.r); ctx.lineTo(n.x - n.r, n.y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    } else if (n.kind === "branch") {
+      ctx.fillStyle = hexA(col, .2); ctx.strokeStyle = col; ctx.lineWidth = 1.3 / k;
+      const s = n.r * 1.6; ctx.beginPath(); ctx.rect(n.x - s / 2, n.y - s / 2, s, s); ctx.fill(); ctx.stroke();
+    } else if (n.kind === "rTask") {
+      ctx.fillStyle = hexA(col, .25); ctx.strokeStyle = col; ctx.lineWidth = 1.2 / k;
+      ctx.beginPath(); ctx.moveTo(n.x, n.y - n.r * 1.2); ctx.lineTo(n.x + n.r * 1.1, n.y + n.r * .8); ctx.lineTo(n.x - n.r * 1.1, n.y + n.r * .8); ctx.closePath(); ctx.fill(); ctx.stroke();
+    } else if (n.kind === "rAgent") {
+      ctx.fillStyle = hexA(col, .25); ctx.strokeStyle = col; ctx.lineWidth = 1.4 / k;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) { const a = Math.PI / 3 * i + Math.PI / 6; ctx.lineTo(n.x + Math.cos(a) * n.r, n.y + Math.sin(a) * n.r); }
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    } else if (n.kind === "agent" && (n.state === "idle" || n.state === "stopped")) {
+      ctx.fillStyle = hexA(col, .14); ctx.strokeStyle = col; ctx.lineWidth = 1.5 / k;
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    } else {
+      const g = ctx.createRadialGradient(n.x - n.r * .35, n.y - n.r * .35, n.r * .1, n.x, n.y, n.r);
+      g.addColorStop(0, d3.color(col).brighter(1.2).formatRgb()); g.addColorStop(1, col);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fill();
+      if (n.kind === "agent" && n.state === "failed") {
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.4 / k; const q = n.r * .45;
+        ctx.beginPath(); ctx.moveTo(n.x - q, n.y - q); ctx.lineTo(n.x + q, n.y + q); ctx.moveTo(n.x + q, n.y - q); ctx.lineTo(n.x - q, n.y + q); ctx.stroke();
+      }
+    }
+    if (n.id === selectedId) {
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 / k;
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 5, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // labels (screen-constant size, culled by zoom so 100+ nodes stay readable)
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (const n of nodes) {
+    const dim = sel && !neigh.has(n.id);
+    let show = false, size = 11;
+    if (n.kind === "session") { show = true; size = n.lead ? 13 : 11.5; }
+    else if (n.kind === "run") { show = runCountInScope <= 12 || n.live || k > 1.05; size = 11.5; }
+    else if (n.kind === "phase") show = k > .55;
+    else if (n.kind === "agent") show = k > .7 || n.state === "active" || n.id === selectedId;
+    else if (n.kind === "branch") show = k > .95;
+    else if (n.kind === "rAgent") show = k > .5;
+    else if (n.kind === "rTask") show = k > 1.1;
+    else if (n.kind === "memory") { show = k > 1.9; size = 9.5; }
+    if (n === hoverNode || n.id === selectedId || (sel && neigh.has(n.id))) show = true;
+    if (!show) continue;
+    ctx.font = `${n.kind === "run" || n.lead ? 600 : 400} ${size / k}px -apple-system, Inter, system-ui, sans-serif`;
+    const text = n.label.length > 34 ? n.label.slice(0, 33) + "…" : n.label;
+    const y = n.y + n.r + 4 / k;
+    ctx.globalAlpha = dim ? .25 : 1;
+    ctx.lineWidth = 3 / k; ctx.strokeStyle = "rgba(4,6,13,.85)"; ctx.strokeText(text, n.x, y);
+    ctx.fillStyle = n.kind === "agent" && n.state === "active" ? COL.active : n.kind === "run" ? "#e4dcff" : n.lead ? COL.session : "rgba(219,228,255,.85)";
+    ctx.fillText(text, n.x, y);
+    if (n.kind === "run" && k > .5) {
+      ctx.font = `${9.5 / k}px ui-monospace, Menlo, monospace`; ctx.fillStyle = COL.muted;
+      ctx.fillText(`${n.data.status} · ${n.data.agents.length} agents`, n.x, y + 14 / k);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ------------------------------------------------------------------ timeline strip
+let tlScale = null, tlHits = [];
+function drawTimeline() {
+  if (!state) return;
+  tctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  tctx.clearRect(0, 0, TW, TH);
+  const now = state.generated_at * 1000;
+  const rows = timelineRows.filter(r => r.start).sort((a, b) => a.start - b.start);
+  if (!rows.length) return;
+  const t0 = Math.min(...rows.map(r => r.start));
+  const pad = 12, top = 22, bottom = 16;
+  tlScale = d3.scaleTime().domain([new Date(t0 - (now - t0) * .02), new Date(now + (now - t0) * .015)]).range([pad, TW - pad]);
+  // axis
+  tctx.font = "10px ui-monospace, Menlo, monospace"; tctx.fillStyle = COL.muted; tctx.textAlign = "center";
+  tctx.strokeStyle = "rgba(120,150,230,.12)"; tctx.lineWidth = 1;
+  for (const tk of tlScale.ticks(Math.max(3, Math.floor(TW / 140)))) {
+    const x = tlScale(tk);
+    tctx.beginPath(); tctx.moveTo(x, top - 4); tctx.lineTo(x, TH - bottom); tctx.stroke();
+    tctx.fillText(d3.timeFormat(now - t0 > 86400e3 ? "%b %d %H:%M" : "%H:%M")(tk), x, TH - bottom + 3);
+  }
+  // greedy lane packing
+  const laneEnds = [];
+  const avail = TH - top - bottom;
+  tlHits = [];
+  for (const r of rows) {
+    const end = r.end || (r.state === "active" || r.state === "idle" ? now : r.start + 60e3);
+    let lane = laneEnds.findIndex(e => e < r.start - 20e3);
+    if (lane < 0) { lane = laneEnds.length; laneEnds.push(0); }
+    laneEnds[lane] = end;
+    r._lane = lane; r._end = end;
+  }
+  const lh = Math.max(2, Math.min(9, avail / Math.max(1, laneEnds.length)));
+  const tms = performance.now() / 1000;
+  for (const r of rows) {
+    const x0 = tlScale(r.start), x1 = Math.max(x0 + 2, tlScale(r._end));
+    const y = top + r._lane * lh;
+    const col = COL[r.state] || COL.idle;
+    const isSel = r.node.id === selectedId;
+    tctx.fillStyle = r.state === "active" ? hexA(col, .55 + .35 * Math.sin(tms * 3 + r.node.phaseOff)) : hexA(col, r.state === "done" ? .75 : .45);
+    if (r.state === "active") { tctx.shadowColor = col; tctx.shadowBlur = 8; }
+    tctx.fillRect(x0, y, x1 - x0, Math.max(1.5, lh - 1.5));
+    tctx.shadowBlur = 0;
+    if (isSel) { tctx.strokeStyle = "#fff"; tctx.lineWidth = 1; tctx.strokeRect(x0 - .5, y - .5, x1 - x0 + 1, lh); }
+    tlHits.push({ x0, x1, y0: y, y1: y + lh, r });
+  }
+  // now marker
+  const xn = tlScale(new Date(now));
+  tctx.strokeStyle = hexA(COL.active, .7); tctx.setLineDash([3, 3]);
+  tctx.beginPath(); tctx.moveTo(xn, top - 6); tctx.lineTo(xn, TH - bottom); tctx.stroke(); tctx.setLineDash([]);
+  tctx.fillStyle = COL.active; tctx.textAlign = "right"; tctx.fillText("now", xn - 4, 6);
+}
+tlCanvas.addEventListener("mousemove", ev => {
+  const h = tlHits.find(h => ev.offsetX >= h.x0 - 1 && ev.offsetX <= h.x1 + 1 && ev.offsetY >= h.y0 && ev.offsetY <= h.y1);
+  if (h) showTip(ev.clientX, ev.clientY, h.r.node); else hideTip();
+});
+tlCanvas.addEventListener("mouseleave", hideTip);
+tlCanvas.addEventListener("click", ev => {
+  const h = tlHits.find(h => ev.offsetX >= h.x0 - 1 && ev.offsetX <= h.x1 + 1 && ev.offsetY >= h.y0 && ev.offsetY <= h.y1);
+  if (h) select(h.r.node.id, true);
+});
+
+// ------------------------------------------------------------------ tooltip + panel
+const tip = document.getElementById("tip");
+function showTip(cx, cy, n) {
+  const stage = document.getElementById("stage").getBoundingClientRect();
+  let sub = n.kind;
+  if (n.kind === "agent") sub = `${n.state} · ${n.data.phase || "-"} · ${fmtBytes(n.data.transcript_bytes)}`;
+  if (n.kind === "run") sub = `${n.data.status} · ${n.data.id}`;
+  if (n.kind === "branch") sub = `+${n.data.ahead ?? "?"} commits · ${n.data.dirty ?? "?"} uncommitted`;
+  if (n.kind === "memory") sub = n.data.key;
+  const last = n.kind === "agent" && n.data.last_tools.length ? n.data.last_tools[n.data.last_tools.length - 1] : null;
+  tip.innerHTML = `<div>${esc(n.label)}</div><div class="t2">${esc(sub)}</div>` + (last ? `<div class="t2">▸ ${esc(last.name)}: ${esc(last.input.slice(0, 90))}</div>` : "");
+  tip.style.display = "block";
+  const x = Math.min(cx - stage.left + 14, stage.width - 370), y = cy - stage.top + 14;
+  tip.style.left = Math.max(4, x) + "px"; tip.style.top = Math.min(y, stage.height - 60) + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+canvas.addEventListener("mousemove", ev => {
+  const n = pick(ev.offsetX, ev.offsetY);
+  hoverNode = n;
+  canvas.style.cursor = n ? "pointer" : "";
+  if (n) showTip(ev.clientX, ev.clientY, n); else hideTip();
+});
+canvas.addEventListener("mouseleave", () => { hoverNode = null; hideTip(); });
+canvas.addEventListener("click", ev => { const n = pick(ev.offsetX, ev.offsetY); select(n ? n.id : null); });
+document.getElementById("closePanel").onclick = () => select(null);
+window.addEventListener("keydown", ev => { if (ev.key === "Escape") select(null); });
+
+function select(id, center) {
+  selectedId = id;
+  const p = document.getElementById("panel");
+  document.getElementById("stage").classList.toggle("panel-open", !!id);
+  if (!id) { p.classList.remove("open"); return; }
+  renderPanel();
+  p.classList.add("open");
+  const n = nodeById.get(id);
+  if (center && n) d3.select(canvas).transition().duration(600).call(zoom.translateTo, n.x, n.y);
+}
+
+function kv(rows) { return `<div class="kv">${rows.filter(r => r[1] !== undefined && r[1] !== null && r[1] !== "").map(([k, v]) => `<div>${esc(k)}</div><div>${v}</div>`).join("")}</div>`; }
+function badge(text, col) { return `<span class="badge" style="color:${col}">${esc(text)}</span>`; }
+
+function memoryFor(agentNode) {
+  return nodes.filter(n => n.kind === "memory" && n.owner === agentNode.id).map(n => n.data);
+}
+
+function renderPanel() {
+  const n = selectedId && nodeById.get(selectedId);
+  const body = document.getElementById("panelBody");
+  if (!n) { document.getElementById("panel").classList.remove("open"); return; }
+  const d = n.data;
+  let h = `<h2>${esc(n.label)}</h2>`;
+  if (n.kind === "agent") {
+    const wt = (state.git.worktrees || []).find(w => w.path === d.worktree || (d.branch && w.branch === d.branch));
+    h += `<div class="sub">${esc(n.run.name)} · ${esc(n.run.id)} · agent ${esc(d.id)}</div>`;
+    h += kv([
+      ["state", badge(d.state, COL[d.state] || COL.idle)],
+      ["phase", esc(d.phase || "-")],
+      ["last write", esc(fmtAgo(d.age_s)) + " ago"],
+      ["transcript", esc(fmtBytes(d.transcript_bytes)) + ' <span style="color:var(--muted)">(agent-*.jsonl size)</span>'],
+      ["started", d.start_ms ? esc(new Date(d.start_ms).toLocaleTimeString()) : null],
+      ["finished", d.end_ms ? esc(new Date(d.end_ms).toLocaleTimeString()) : null],
+      ["tokens", d.tokens != null ? esc(d.tokens.toLocaleString()) : null],
+      ["tool calls", d.tool_calls != null ? esc(d.tool_calls) : null],
+      ["worktree", d.worktree ? esc(d.worktree.split("/").pop()) : null],
+      ["branch", wt ? esc(wt.branch) + ` <span style="color:var(--muted)">+${wt.ahead ?? "?"} / ${wt.dirty ?? "?"} dirty</span>` : (d.branch ? esc(d.branch) : null)],
+    ]);
+    h += `<h3>Last ${Math.min(5, d.last_tools.length)} tool calls</h3><ul>` +
+      (d.last_tools.length ? d.last_tools.slice().reverse().map(c => `<li><b>${esc(c.name)}</b>${esc(c.input)}${c.ts ? `<div style="color:var(--dim);margin-top:2px">${esc(new Date(c.ts).toLocaleTimeString())}</div>` : ""}</li>`).join("") : "<li>none found in the transcript tail</li>") + "</ul>";
+    const commits = d.commits.length ? d.commits : (wt ? wt.commits : []);
+    h += `<h3>Commits (${commits.length})${d.commits.length ? " from the journal result" : wt ? " ahead of " + esc(state.base) : ""}</h3><ul>` + (commits.length ? commits.map(c => `<li>${esc(c)}</li>`).join("") : "<li>none</li>") + "</ul>";
+    if (d.fixed && d.fixed.length) h += `<h3>Fixed (${d.fixed.length})</h3><ul>` + d.fixed.map(c => `<li>${esc(c)}</li>`).join("") + "</ul>";
+    const mem = memoryFor(n);
+    if (mem.length) h += `<h3>Ruflo memory (${mem.length})</h3>` + mem.map(m => `<div style="margin-bottom:8px"><div style="font:11px var(--mono);color:var(--memory);margin-bottom:3px">${esc(m.key)}</div><pre>${esc(m.value || "(value not in the local stores)")}</pre></div>`).join("");
+    if (d.summary) h += `<h3>Result summary</h3><pre>${esc(d.summary)}</pre>`;
+  } else if (n.kind === "run") {
+    const counts = d3.rollup(d.agents, v => v.length, a => a.state);
+    h += `<div class="sub">${esc(d.id)} · session ${esc(shortSess(d.session))}</div>`;
+    h += kv([
+      ["status", badge(d.status, d.status === "running" ? COL.active : d.status === "completed" ? COL.done : d.status === "failed" ? COL.failed : COL.stopped)],
+      ["phases", esc((d.phases || []).join(" → "))],
+      ["agents", [...counts].map(([s, c]) => `<span style="color:${COL[s] || COL.idle}">${c} ${esc(s)}</span>`).join(" · ")],
+      ["started", d.start_ms ? esc(new Date(d.start_ms).toLocaleString()) : null],
+      ["duration", d.duration_ms ? esc(fmtAgo(d.duration_ms / 1000)) : null],
+      ["tokens", d.tokens ? esc(Number(d.tokens).toLocaleString()) : null],
+      ["tool calls", d.tool_calls ? esc(d.tool_calls) : null],
+    ]);
+    if (d.description) h += `<h3>Description</h3><pre>${esc(d.description)}</pre>`;
+    h += `<h3>Agents</h3><ul>` + d.agents.map(a => `<li><span style="color:${COL[a.state] || COL.idle}">●</span> ${esc(a.label)} <span style="color:var(--muted)">${esc(a.phase || "")} · ${esc(fmtBytes(a.transcript_bytes))}</span></li>`).join("") + "</ul>";
+  } else if (n.kind === "phase") {
+    h += `<div class="sub">phase of ${esc(d.runName)} (${esc(d.run)})</div>`;
+    const kids = links.filter(l => l.source.id === n.id).map(l => l.target).filter(x => x.kind === "agent");
+    h += `<h3>Agents (${kids.length})</h3><ul>` + kids.map(a => `<li><span style="color:${COL[a.state]}">●</span> ${esc(a.label)} · ${esc(a.state)}</li>`).join("") + "</ul>";
+  } else if (n.kind === "branch") {
+    h += `<div class="sub">${esc(d.path || "")}</div>`;
+    h += kv([["branch", esc(d.branch)], ["ahead of base", esc(d.ahead ?? "?")], ["uncommitted", esc(d.dirty ?? "?")], ["HEAD", esc((d.head || "").slice(0, 10))], ["locked", d.locked ? "yes" : "no"]]);
+    h += `<h3>Commits ahead of ${esc(state.base)}</h3><ul>` + ((d.commits || []).length ? d.commits.map(c => `<li>${esc(c)}</li>`).join("") : "<li>none</li>") + "</ul>";
+  } else if (n.kind === "memory") {
+    h += `<div class="sub">${esc(d.key)}</div>`;
+    h += kv([["lane", esc(d.lane || "(none)")], ["store", esc(d.store)], ["updated", d.updated_at ? esc(new Date(Number(d.updated_at)).toLocaleString()) : null]]);
+    h += `<h3>Value</h3><pre>${esc(d.value || "(not in the local stores; listed by ruflo memory list)")}</pre>`;
+  } else if (n.kind === "rAgent") {
+    h += `<div class="sub">ruflo agent · ${esc(d.agentType)}</div>`;
+    h += kv([["name", esc(d.name)], ["status", badge(d.status, d.status === "busy" ? COL.active : COL.idle)], ["health", esc(d.health)], ["tasks", esc(d.taskCount)], ["created", esc(d.createdAt)]]);
+  } else if (n.kind === "rTask") {
+    h += `<div class="sub">ruflo task · ${esc(d.taskId)}</div>`;
+    h += kv([["type", esc(d.type)], ["status", esc(d.status)], ["priority", esc(d.priority)], ["progress", esc(d.progress)], ["assigned", esc((d.assignedTo || []).join(", "))], ["created", esc(d.createdAt)]]);
+    h += `<h3>Description</h3><pre>${esc(d.description)}</pre>`;
+  } else if (n.kind === "session") {
+    const all = d.runs.flatMap(r => r.agents);
+    h += `<div class="sub">${esc(d.id)}${n.lead ? " · lead (most recent activity)" : ""}</div>`;
+    h += kv([["workflow runs", esc(d.runs.length)], ["agents", esc(all.length)], ["active now", esc(all.filter(a => a.state === "active").length)], ["last activity", d.last_activity ? esc(new Date(d.last_activity * 1000).toLocaleString()) : null]]);
+    h += `<h3>Runs</h3><ul>` + d.runs.slice().sort((a, b) => (b.start_ms || 0) - (a.start_ms || 0)).map(r => `<li>${esc(r.name)} <span style="color:var(--muted)">${esc(r.status)} · ${r.agents.length} agents</span></li>`).join("") + "</ul>";
+  }
+  body.innerHTML = h;
+}
+
+// ------------------------------------------------------------------ top bar
+function chip(k, v, s, cls) { return `<div class="chip ${cls || ""}"><span class="k">${esc(k)}</span><span class="v">${v}</span>${s ? `<span class="s">${s}</span>` : ""}</div>`; }
+function renderTop(st) {
+  const sess = st.workflows.sessions || [];
+  const runs = sess.flatMap(s => s.runs.filter(r => inScope(r, st.generated_at)));
+  const agents = runs.flatMap(r => r.agents);
+  const cnt = s => agents.filter(a => a.state === s).length;
+  const wts = (st.git && st.git.worktrees) || [];
+  const gitReady = !!(st.git && st.git.worktrees);
+  const commits = !gitReady ? "…" : st.git.unique_ahead != null ? st.git.unique_ahead : wts.reduce((a, w) => a + (w.ahead || 0), 0);
+  const dirty = wts.reduce((a, w) => a + (w.dirty || 0), 0);
+  const rf = st.ruflo || {};
+  const dm = rf.daemon || {};
+  const py = st.pytest || {};
+  let pyV = "-", pyS = "no log", pyC = "";
+  if (py.present) {
+    const f = py.final, pc = py.progress_counts || {};
+    if (f) { pyV = py.status === "passed" ? "PASS" : "FAIL"; pyS = `${f.passed || 0} ok · ${(f.failed || 0) + (f.error || 0)} bad`; pyC = py.status === "passed" ? "done" : "bad"; }
+    else { pyV = (py.percent != null ? py.percent + "%" : "…"); pyS = `${pc.passed || 0} ok · ${(pc.failed || 0) + (pc.error || 0)} bad · ${py.status}`; pyC = (pc.failed || pc.error) ? "warn" : "active"; }
+  }
+  document.getElementById("chips").innerHTML = [
+    chip("active", cnt("active"), `${runs.filter(r => r.status === "running").length} runs live`, "active"),
+    chip("done", cnt("done"), `${cnt("idle")} idle · ${cnt("stopped")} stopped`, "done"),
+    chip("failed", cnt("failed"), "", cnt("failed") ? "bad" : ""),
+    chip("agents", agents.length, `${runs.length} runs`),
+    chip("commits", commits, `unique, ahead of base · ${dirty} dirty files`),
+    chip("memory", (rf.memory || []).length, "visual ns"),
+    chip("ruflo", `${(rf.agents || []).length}/${(rf.tasks || []).length}`, rf.fetched_at ? `agents/tasks · ${fmtAgo(st.generated_at - rf.fetched_at)} old` : rf.enabled ? "fetching…" : "off"),
+    chip("daemon", dm.present ? `${dm.workers_running || 0}/${dm.workers_total || 0}` : "-", dm.present ? (dm.running ? "running" : "not running") : "no state file"),
+    chip("pytest", pyV, pyS, pyC),
+  ].join("");
+  document.getElementById("sessName").textContent = sess[0] ? `lead ${shortSess(sess[0].id)} · ${st.base}` : "no sessions";
+}
+
+function renderLegend() {
+  const items = [["active", COL.active], ["done", COL.done], ["idle", COL.idle], ["stopped", COL.stopped], ["failed", COL.failed],
+    ["session", COL.session], ["run", COL.run], ["phase", COL.phase], ["branch", COL.branch], ["memory", COL.memory], ["ruflo agent", COL.rAgent], ["ruflo task", COL.rTask]];
+  document.getElementById("legend").innerHTML = items.map(([k, c]) => `<span><i style="background:${c};box-shadow:0 0 6px ${c}"></i>${k}</span>`).join("");
+}
+
+// ------------------------------------------------------------------ refresh loop (local /state.json only)
+async function refresh() {
+  try {
+    const res = await fetch("/state.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    state = await res.json();
+    lastOk = Date.now();
+    applyGraph(state);
+    renderTop(state);
+    if (selectedId) { if (nodeById.has(selectedId)) renderPanel(); else select(null); }
+    document.getElementById("updated").textContent = new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById("updated").textContent = "offline: " + e.message;
+  }
+  document.getElementById("pulse").classList.toggle("stale", Date.now() - lastOk > REFRESH_MS * 3);
+  setTimeout(refresh, REFRESH_MS);
+}
+
+function fit() {
+  if (!nodes.length) return;
+  const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const s = Math.min(4, .9 * Math.min(W / Math.max(1, x1 - x0 + 80), H / Math.max(1, y1 - y0 + 80)));
+  d3.select(canvas).transition().duration(700).call(zoom.transform, d3.zoomIdentity.translate(W / 2, H / 2).scale(s).translate(-(x0 + x1) / 2, -(y0 + y1) / 2));
+}
+document.getElementById("fit").onclick = fit;
+document.querySelectorAll("#scope button").forEach(b => {
+  b.classList.toggle("on", b.dataset.s === scope);
+  b.onclick = () => {
+    scope = b.dataset.s; store.set("swarmviz.scope", scope);
+    document.querySelectorAll("#scope button").forEach(x => x.classList.toggle("on", x === b));
+    if (state) { applyGraph(state); renderTop(state); setTimeout(fit, 900); }
+  };
+});
+
+let tlFrame = 0;
+function loop(t) {
+  draw(t);
+  if ((tlFrame++ & 3) === 0) drawTimeline();
+  requestAnimationFrame(loop);
+}
+renderLegend();
+refresh().then(() => setTimeout(() => {
+  fit();
+  // deep link: index.html#node=<node id> opens that node's panel
+  const m = /^#node=(.+)$/.exec(location.hash);
+  if (m && nodeById.has(decodeURIComponent(m[1]))) select(decodeURIComponent(m[1]));
+}, 1400));
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

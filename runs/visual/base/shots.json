@@ -1,0 +1,208 @@
+{
+  "step": "base",
+  "commit": "355dae64bd87",
+  "quality": "beauty",
+  "render_tokens_added": [],
+  "shot_table": [
+    {
+      "key": "a",
+      "title": "chase cam, real terrain, golden hour",
+      "prompt": "chase view of the j11 at 3000 m over the matterhorn at golden hour, flying east, for 6 seconds",
+      "environment": null,
+      "aircraft": "J11",
+      "camera": "chase",
+      "look": "golden hour, Google tiles"
+    },
+    {
+      "key": "b",
+      "title": "low pass over the desert",
+      "prompt": "chase view of the j11 at 1600 m over the desert, flying southwest, for 6 seconds",
+      "environment": "desert",
+      "aircraft": "J11",
+      "camera": "chase",
+      "look": "desert preset (Grand Canyon), noon"
+    },
+    {
+      "key": "c",
+      "title": "forest in heavy rain (storm weather)",
+      "prompt": "chase view of the j11 at 1700 m over the forest in heavy rain for 6 seconds",
+      "environment": "forest",
+      "aircraft": "J11",
+      "camera": "chase",
+      "look": "forest preset (Yosemite), storm rain"
+    },
+    {
+      "key": "d",
+      "title": "cockpit-shoulder view",
+      "prompt": "cockpit view of the j11 at 3000 m over the matterhorn at 10:00 for 6 seconds",
+      "environment": null,
+      "aircraft": "J11",
+      "camera": "cockpit",
+      "look": "behind the windshield"
+    }
+  ],
+  "written": "2026-11-09T16:13:36",
+  "rendered": true,
+  "shots": {
+    "a": {
+      "card_prompt": "chase view of the j11 at 3000 m over the matterhorn at golden hour, flying east, for 6 seconds",
+      "environment": null,
+      "camera": "chase",
+      "aircraft": "J11",
+      "quality": "beauty",
+      "commit": "355dae64bd87",
+      "render_tokens_added": [],
+      "run_id": "e4d1a0b0ef8b",
+      "status": "done",
+      "detail": "clip ready",
+      "run_dir": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\e4d1a0b0ef8b",
+      "card": {
+        "aircraft": "J11",
+        "latitude_deg": 46.005,
+        "longitude_deg": 7.72,
+        "google_tiles": {
+          "geoid_undulation_m": 52.52487119999998,
+          "geoid_model": "EGM96"
+        }
+      },
+      "frame": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\e4d1a0b0ef8b\\frames\\chase\\frame_0000.png",
+      "render": {
+        "render_quality": "beauty",
+        "beauty_path": null,
+        "anti_aliasing": {
+          "beauty": "TSR",
+          "labels": "DEFECT: label capture anti-aliasing show flag is on"
+        }
+      },
+      "edge_aliasing": {
+        "energy": null,
+        "control_energy": null,
+        "void": true,
+        "band_px": 2,
+        "control_stride": 2,
+        "silhouette_px": 783156,
+        "definition": "RMS of (luminance - 3x3 box mean) within band_px of the silhouette, over the edge contrast; lower is smoother; reported, not a gate"
+      }
+    },
+    "b": {
+      "card_prompt": "chase view of the j11 at 1600 m over the desert, flying southwest, for 6 seconds",
+      "environment": "desert",
+      "camera": "chase",
+      "aircraft": "J11",
+      "quality": "beauty",
+      "commit": "355dae64bd87",
+      "render_tokens_added": [],
+      "run_id": "7f05ada27583",
+      "status": "done",
+      "detail": "clip ready",
+      "run_dir": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\7f05ada27583",
+      "card": {
+        "aircraft": "J11",
+        "latitude_deg": 36.09,
+        "longitude_deg": -112.0,
+        "google_tiles": {
+          "geoid_undulation_m": -23.403480000000002,
+          "geoid_model": "EGM96"
+        }
+      },
+      "frame": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\7f05ada27583\\frames\\chase\\frame_0000.png",
+      "render": {
+        "render_quality": "beauty",
+        "beauty_path": null,
+        "anti_aliasing": {
+          "beauty": "TSR",
+          "labels": "DEFECT: label capture anti-aliasing show flag is on"
+        }
+      },
+      "edge_aliasing": {
+        "energy": 0.3313286580576074,
+        "control_energy": 0.36702527993563333,
+        "void": false,
+        "band_px": 2,
+        "control_stride": 2,
+        "silhouette_px": 801271,
+        "definition": "RMS of (luminance - 3x3 box mean) within band_px of the silhouette, over the edge contrast; lower is smoother; reported, not a gate"
+      }
+    },
+    "c": {
+      "card_prompt": "chase view of the j11 at 1700 m over the forest in heavy rain for 6 seconds",
+      "environment": "forest",
+      "camera": "chase",
+      "aircraft": "J11",
+      "quality": "beauty",
+      "commit": "355dae64bd87",
+      "render_tokens_added": [],
+      "run_id": "df8601b06ab7",
+      "status": "done",
+      "detail": "clip ready",
+      "run_dir": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\df8601b06ab7",
+      "card": {
+        "aircraft": "J11",
+        "latitude_deg": 37.7275,
+        "longitude_deg": -119.61,
+        "google_tiles": {
+          "geoid_undulation_m": -25.938956400000023,
+          "geoid_model": "EGM96"
+        }
+      },
+      "frame": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\df8601b06ab7\\frames\\chase\\frame_0000.png",
+      "render": {
+        "render_quality": "beauty",
+        "beauty_path": null,
+        "anti_aliasing": {
+          "beauty": "TSR",
+          "labels": "DEFECT: label capture anti-aliasing show flag is on"
+        }
+      },
+      "edge_aliasing": {
+        "energy": 0.3304515869038768,
+        "control_energy": 0.47300053288441785,
+        "void": false,
+        "band_px": 2,
+        "control_stride": 2,
+        "silhouette_px": 869606,
+        "definition": "RMS of (luminance - 3x3 box mean) within band_px of the silhouette, over the edge contrast; lower is smoother; reported, not a gate"
+      }
+    },
+    "d": {
+      "card_prompt": "cockpit view of the j11 at 3000 m over the matterhorn at 10:00 for 6 seconds",
+      "environment": null,
+      "camera": "cockpit",
+      "aircraft": "J11",
+      "quality": "beauty",
+      "commit": "355dae64bd87",
+      "render_tokens_added": [],
+      "run_id": "30ca2c0b1658",
+      "status": "done",
+      "detail": "clip ready",
+      "run_dir": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\30ca2c0b1658",
+      "card": {
+        "aircraft": "J11",
+        "latitude_deg": 46.005,
+        "longitude_deg": 7.72,
+        "google_tiles": {
+          "geoid_undulation_m": 52.52487119999998,
+          "geoid_model": "EGM96"
+        }
+      },
+      "frame": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\30ca2c0b1658\\frames\\cockpit\\frame_0000.png",
+      "render": {
+        "render_quality": "beauty",
+        "beauty_path": null,
+        "anti_aliasing": {
+          "beauty": "TSR",
+          "labels": "DEFECT: label capture anti-aliasing show flag is on"
+        }
+      },
+      "edge_aliasing": {
+        "energy": 0.27059636885892324,
+        "control_energy": 0.3274757126136612,
+        "void": false,
+        "band_px": 2,
+        "control_stride": 2,
+        "silhouette_px": 523304,
+        "definition": "RMS of (luminance - 3x3 box mean) within band_px of the silhouette, over the edge contrast; lower is smoother; reported, not a gate"
+      }
+    }
+  }
+}

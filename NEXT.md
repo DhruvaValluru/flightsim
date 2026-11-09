@@ -1212,3 +1212,74 @@ the parity discipline, and the do-not-regress list)
     night half-rate exposure rule, star disc size under TSR, and the
     per-preset lens values. Change them in core/sky/plan.py by probe
     render, not theory (gotcha 6).
+
+## Visual overhaul gotchas (continuing the numbering)
+
+35. **The visual overhaul has never been compiled or rendered
+    (2026-11-09, branch `claude/vibrant-gauss-olema4`, base `355dae64`).**
+    It was written on the Mac session flightsim-83. That Mac cannot build
+    or render: Xcode 27.2 is above UE 5.7.4's maximum of 26.9, and Cesium
+    for Unreal is not installed. Its state is **code written and reviewed,
+    not built or rendered**.
+
+    WHAT EXISTS, all of it behind `-Visual -quality=beauty` (or
+    `pathtrace`). Measure constructs none of it, and the physics is
+    unchanged.
+    - render path: TSR is really on in beauty (the scene capture clears
+      `ShowFlags.TemporalAA`, so beauty had been FXAA); Lumen
+      surface-cache and quality overrides; `-still-samples=N`
+      accumulation; path-traced hero stills (`-quality=pathtrace`, ray
+      tracing turned on for that one process only); an edge-aliasing
+      number in Gate 6; the four-shot contact sheet
+      (`scripts/render_visual_sheet.ps1`).
+    - look-dev: `FlightSimBeautyLook` and `core/scene/beauty_look.py`
+      (physical sun lux, a manual EV100 per sun band, Local Exposure,
+      filmic tonemap, three grades, a lens derived from the unchanged
+      FOV).
+    - world: `FlightSimClouds` / `FlightSimGroundDetail` and
+      `core/scene/world_beauty.py` (haze moved into the sky
+      atmosphere's Mie layer, layered clouds, the tiles look material,
+      rain readability, lightning, Poly Haven CC0 ground scatter).
+    - aircraft: PBR master materials, per-model look instances and
+      beauty-only FX (lights, contrails, vapour, afterburner, heat haze
+      off by default).
+    - verifier: `look_record` and `look_label_alignment` in
+      `flightsim.verify`, plus `experiments/look_label_check.py`.
+
+    The table is `docs/VISUAL_FIDELITY_PLAN.md` §8. Each lane's
+    decisions are in `docs/visual/PROBE_LOG.md`.
+
+    UNMEASURED: everything. No contact sheet, clip, Gate 6 beauty number
+    or label-alignment number exists. Every look constant is UNCALIBRATED
+    (set by probe render on the render machine). The open risks:
+    - the Cesium tiles material's parameter names (`baseColorTexture`,
+      `baseColorFactor`); a white tiles frame means they are wrong;
+    - whether Lumen runs inside a scene capture;
+    - whether the `-ini:` `r.RayTracing` override reaches
+      `IsRayTracingEnabled()`;
+    - the scatter import script `scripts/ue_import_scatter.py` does not
+      exist, so the scatter draws nothing;
+    - `look_label_alignment` is NOT RUN until the commandlet writes
+      `pixel_moving_effects` and `cloud_occlusion`;
+    - `experiments/gate_v_visual.py` was not on the branch yet.
+
+    FIRST COMMANDS ON THE RENDER MACHINE (Windows; every flag is in
+    `docs/visual/RENDER_RUNBOOK.md`, and the paste-in packet is
+    `docs/visual/WINDOWS_JOB.md`):
+    1. `git pull --ff-only` on the branch.
+    2. In Git Bash: `UE_ROOT="/c/Program Files/Epic Games/UE_5.7" bash
+       scripts/check_bridge_api.sh`. Every line must be ok.
+    3. At `355dae64`: `.\scripts\build_ue.ps1`, then Gate 6 into
+       `runs\gate6_base`, then the base contact sheet.
+    4. Back on the branch: `.\scripts\build_ue.ps1`, then re-run
+       `scripts\ue_create_materials.py` through UnrealEditor-Cmd.
+    5. `python experiments\gate6_visual.py`. It must be unchanged:
+       Gate 10-R `--against runs\gate6_base\full runs\gate6\full`, and
+       no new key in the measure `render.json`.
+    6. `.\scripts\render_visual_sheet.ps1 -Step head`, then
+       `-Compare base,head` into `runs\visual\final\`.
+
+    Gate 6 deletes the `frame_*.png` files under its `--out`. Copy the
+    decision-25 substitute still out of `runs\gate6\` before step 5.
+    Calibrate the exposure first (`UE_ZENITH_TRANSMITTANCE`, then
+    `EV100_BANDS`), because every other look probe is judged under it.

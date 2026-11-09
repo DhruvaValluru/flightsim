@@ -38,6 +38,8 @@ WEATHER_MATERIAL = re.compile(r'_weather_material\("(M_[A-Za-z0-9_]+)"\)')
 #: The storm weather's materials (core/scene/storm_weather.py, FlightSimWeather.cpp),
 #: their own helper as well.
 STORM_MATERIAL = re.compile(r'_storm_material\("(M_[A-Za-z0-9_]+)"\)')
+#: World lane (visual overhaul): the beauty world look's materials, their own helper.
+WORLD_BEAUTY_MATERIAL = re.compile(r'_world_beauty_material\("(M_[A-Za-z0-9_]+)"\)')
 
 
 def loaded_in_cpp():
@@ -52,7 +54,8 @@ def created_by_script():
     return (set(CREATED.findall(text)) | {name for _, name, _, _ in PASS_ROW.findall(text)}
             | {name for _, name, _ in LINEAR_ROW.findall(text)}
             | set(NEW_MATERIAL.findall(text)) | set(SKY_MATERIAL.findall(text))
-            | set(WEATHER_MATERIAL.findall(text)) | set(STORM_MATERIAL.findall(text)))
+            | set(WEATHER_MATERIAL.findall(text)) | set(STORM_MATERIAL.findall(text))
+            | set(WORLD_BEAUTY_MATERIAL.findall(text)))
 
 
 def test_every_material_the_commandlet_loads_is_created_by_the_script():
@@ -191,7 +194,9 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                "M_RainDrop",
                # The storm weather (FlightSimWeather.cpp).
                "M_RainDrops", "M_RainSplash", "M_LightningChannel", "M_StormCell",
-               "M_WindshieldRain"}
+               "M_WindshieldRain",
+               # World lane, visual overhaul (FlightSimClouds.cpp, beauty only).
+               "M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter"}
 COMMANDLET_CPP = BRIDGE / "Private" / "FlightSimRenderCommandlet.cpp"
 
 

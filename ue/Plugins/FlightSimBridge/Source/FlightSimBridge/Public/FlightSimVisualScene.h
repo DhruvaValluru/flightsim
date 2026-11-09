@@ -313,6 +313,11 @@ struct FFlightSimVisualSceneOptions
 	// skipped (recorded so), one rain in the air, not two. False (the
 	// default, -weather-backend=off) leaves this scene exactly as before.
 	bool bSkipRainParticles = false;
+	// The storm weather draws its own storm (M_StormCell and its lightning
+	// channels, on its own flash list): the weather look's rain shafts, bolt
+	// and point light are then skipped (recorded so), one storm in the frame,
+	// one lightning clock. False (the default) leaves this scene as before.
+	bool bSkipStormLook = false;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimVisualScene

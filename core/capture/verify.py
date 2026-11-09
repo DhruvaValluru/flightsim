@@ -82,6 +82,7 @@ import functools
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path, PureWindowsPath
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -758,7 +759,12 @@ def verify_pose_matches_spec(manifest: Dict) -> Check:
                     f"({offset[0]:g}, {offset[1]:g}, {offset[2]:g})")
 
         # -- aim ----------------------------------------------------------
-        if str(_spec_value(spec, "aim_mode", "aircraft")) == "aircraft":
+        # A cockpit camera is body-fixed and looks down the nose whatever
+        # aim_mode says (core/capture/poses.py); since its station comes
+        # from the FDM's EYEPOINT it can sit metres AHEAD of the CG, where
+        # "aimed at the aircraft" would mean looking backwards.
+        if preset != "cockpit" and \
+                str(_spec_value(spec, "aim_mode", "aircraft")) == "aircraft":
             to_aircraft = tuple(a - c for a, c in zip(aircraft, camera))
             span = math.sqrt(sum(v * v for v in to_aircraft))
             if span >= AIM_DEGENERATE_M:
@@ -8261,6 +8267,32 @@ def _card_cameras(run_dir) -> Dict[str, Dict]:
             for c in (card.get("cameras") or []) if isinstance(c, dict)}
 
 
+def _card_pose_row(poses: Dict, sample: int, t_s) -> Optional[int]:
+    """The row of the card's pose track that holds telemetry ``sample``
+    (at time ``t_s``), or None when the track has no such row.
+
+    A track on the telemetry clock holds sample k at row k. A camera with
+    motion (camera-motion-layer) ships its DENSE render-clock track, which
+    contains every telemetry time but at other rows, so the row is found
+    by time; on a telemetry-clock track both agree."""
+    times = poses.get("t_s") or []
+    if t_s is None:
+        return sample if len(times) > sample else None
+    try:
+        want = float(t_s)
+        if len(times) > sample and abs(float(times[sample]) - want) <= 1e-9:
+            return sample
+        import bisect
+        j = bisect.bisect_left([float(v) for v in times], want - 1e-9)
+        if j < len(times) and abs(float(times[j]) - want) <= 1e-9:
+            return j
+    except (TypeError, ValueError):
+        pass
+    # No row at that time: the old by-index row, so a corrupted track
+    # still fails the comparison rather than skipping it.
+    return sample if len(times) > sample else None
+
+
 def _own_neighbour_problem(manifest: Dict, record: Dict, neighbours: Dict,
                            primary_id: int, card: Dict[str, Dict]) -> Tuple[Optional[str], int]:
     """(the first disagreement, the number of cross-checks made) between a
@@ -8304,13 +8336,14 @@ def _own_neighbour_problem(manifest: Dict, record: Dict, neighbours: Dict,
                             f"manifest's own frame at sample {sample}"), checked
                 checked += 1
         poses = card.get(camera)
-        if poses and len(poses.get("t_s") or []) > sample:
+        row = _card_pose_row(poses, sample, target.get("t_s")) if poses else None
+        if row is not None:
             try:
-                where = (float(poses["north_m"][sample]), float(poses["east_m"][sample]),
-                         float(poses["alt_m"][sample]))
-                axes_card = axes_from_euler(float(poses["roll_deg"][sample]),
-                                            float(poses["pitch_deg"][sample]),
-                                            float(poses["yaw_deg"][sample]))
+                where = (float(poses["north_m"][row]), float(poses["east_m"][row]),
+                         float(poses["alt_m"][row]))
+                axes_card = axes_from_euler(float(poses["roll_deg"][row]),
+                                            float(poses["pitch_deg"][row]),
+                                            float(poses["yaw_deg"][row]))
             except (KeyError, IndexError, TypeError, ValueError):
                 return f"the run card's track for {camera} cannot be read at sample {sample}", checked
             gap = math.dist(where, (float(target["position_north_m"]),
@@ -9272,6 +9305,332 @@ def verify_world_record(manifest: Dict, run_dir=None) -> Check:
                              f"Windows clauses")
 
 
+# -- visual overhaul (verifier-tooling lane): the beauty look's record ----------
+#
+# look_record: each camera's render.json states a known quality
+# (measure | beauty | pathtrace), a measure render carries no beauty look
+# and no pixel-moving effect (Gate 6 passed on measure; it must stay what
+# it was), the sample counts are whole and the path tracer's are stated,
+# a beauty-only actor list comes with its occlusion decision, and every
+# pixel-moving key the look turns on is listed in pixel_moving_effects.
+#
+# look_label_alignment: every pixel-moving effect that is on either
+# records the transform that maps the labels onto the beauty or a
+# MEASURED displacement within the mask gate's tolerance; a beauty-only
+# cloud over the subject is within the visibility gate's tolerance (or
+# kept clear by construction); the beauty's field of view is the pose
+# solver's; and the labels are of the beauty's own frame and instant.
+# A bundle that fails it is "beauty-not-label-aligned" BY NAME, and the
+# dataset export refuses it -- the frames may be beautiful, they are not
+# labelled data.
+#
+# Both read only the keys of core/capture/beauty_look.py (schema:
+# docs/schemas/render_json_beauty_look.md) and are NOT RUN on a bundle
+# whose render.json predates them: an old bundle stays valid.
+
+FAIL_LOOK_QUALITY = "look.quality"
+FAIL_LOOK_MEASURE_ALTERED = "look.measure_altered"
+FAIL_LOOK_UNRECORDED = "look.pixel_moving_unrecorded"
+FAIL_LOOK_RECORD = "look.record"
+FAIL_LOOK_NOT_ALIGNED = "look.beauty_not_label_aligned"
+
+#: A pixel-moving effect with no transform must have MOVED pixels by no
+#: more than the tolerance mask_vs_geometry grants a drawn mesh's mask
+#: (the gate the labels passed under; not a new look setting).
+LOOK_ALIGNMENT_TOL_PX = MASK_TOL_PX_MESH
+#: A beauty-only actor may cover at most the visibility gate's tolerance
+#: of the subject where the mask shows it unoccluded.
+LOOK_OCCLUSION_TOL_FRACTION = VISIBILITY_TOL_FRACTION
+
+
+#: A label value that names a file (the labels block also holds prose).
+_LOOK_LABEL_FILE = re.compile(r"\.(png|f32|exr|json|bin|npy)$", re.IGNORECASE)
+
+
+def _whole_at_least_one(value) -> bool:
+    return (not isinstance(value, bool) and isinstance(value, (int, float))
+            and math.isfinite(float(value)) and float(value) == int(value) and int(value) >= 1)
+
+
+def _look_beauty_path(payload: Dict) -> Dict:
+    settings = payload.get("render_settings")
+    path = settings.get("beauty_path") if isinstance(settings, dict) else None
+    return path if isinstance(path, dict) else {}
+
+
+def _look_whole(value) -> Optional[int]:
+    return int(value) if _whole_at_least_one(value) else None
+
+
+def _look_path_tracer_spp(payload: Dict) -> Optional[int]:
+    """render_settings.beauty_path.path_tracer.samples_per_pixel (the
+    render path's record of PathTraceSpp), or None."""
+    tracer = _look_beauty_path(payload).get("path_tracer")
+    return _look_whole(tracer.get("samples_per_pixel")) if isinstance(tracer, dict) else None
+
+
+def _look_captures_per_frame(payload: Dict) -> Optional[int]:
+    """render_settings.beauty_path.accumulation.captures_per_frame, or None."""
+    accumulation = _look_beauty_path(payload).get("accumulation")
+    return (_look_whole(accumulation.get("captures_per_frame"))
+            if isinstance(accumulation, dict) else None)
+
+
+def _look_world_frames(payload: Dict) -> List[Dict]:
+    """look_applied.world_beauty.frames[]: the world lane's per-frame cloud
+    rows (FlightSimClouds.cpp), each with cloud_occludes_aircraft and
+    cloud_occlusion_complete."""
+    look = payload.get("look_applied")
+    world = look.get("world_beauty") if isinstance(look, dict) else None
+    frames = world.get("frames") if isinstance(world, dict) else None
+    return [f for f in frames if isinstance(f, dict)] if isinstance(frames, list) else []
+
+
+def verify_look_record(manifest: Dict, run_dir=None) -> Check:
+    """The beauty look's record against its own rules (section comment above).
+
+    NOT RUN with no render.json, or none that states a quality. FAIL
+    look.quality (an unknown quality), look.measure_altered (a measure
+    render with a look or a pixel-moving effect on), look.record (a
+    malformed record), look.pixel_moving_unrecorded (a look key that moves
+    pixels, on, and not listed)."""
+    from .beauty_look import (OCCLUSION_POLICIES, QUALITIES, has_look_record,
+                              look_anything_on, look_effects_on, listed,
+                              measured_effects_on, normalise_effects, quality_of)
+
+    graded: Dict[str, str] = {}
+    for camera, _folder, payload in _s4_renders(run_dir):
+        quality = quality_of(payload)
+        if quality is None:
+            continue
+
+        def fail(text: str, name: str) -> Check:
+            return Check("look_record", FAIL, f"{camera}: {text}", failure=name)
+
+        if quality not in QUALITIES:
+            return fail(f"render quality {quality!r} is not one of {', '.join(QUALITIES)}",
+                        FAIL_LOOK_QUALITY)
+        effects, problems = normalise_effects(payload.get("pixel_moving_effects"))
+        if problems:
+            return fail("; ".join(problems), FAIL_LOOK_RECORD)
+        on = [e for e in effects if e["on"]]
+        look = payload.get("beauty_look")
+        if look is not None and not isinstance(look, dict):
+            return fail(f"beauty_look is {type(look).__name__}, not an object", FAIL_LOOK_RECORD)
+        samples = payload.get("beauty_samples")
+        if samples is not None and not isinstance(samples, dict):
+            return fail(f"beauty_samples is {type(samples).__name__}, not an object", FAIL_LOOK_RECORD)
+        samples = samples or {}
+        for key in ("spatial", "temporal", "still_samples", "path_tracer_spp"):
+            if key in samples and not _whole_at_least_one(samples[key]):
+                return fail(f"beauty_samples.{key} = {samples[key]!r} is not a whole number "
+                            f"of at least 1", FAIL_LOOK_RECORD)
+        shutter = samples.get("shutter_s", 0.0)
+        if isinstance(shutter, bool) or not isinstance(shutter, (int, float)) \
+                or not math.isfinite(float(shutter)) or float(shutter) < 0.0:
+            return fail(f"beauty_samples.shutter_s = {shutter!r} is not a non-negative time",
+                        FAIL_LOOK_RECORD)
+        temporal = int(samples.get("temporal", 1))
+        measured = measured_effects_on(payload)
+        if quality == "measure":
+            if measured:
+                return fail(f"a measure render's beauty capture was measured with pixel-moving "
+                            f"show flag(s) on: {', '.join(key for key, _ in measured)}",
+                            FAIL_LOOK_MEASURE_ALTERED)
+            if look_anything_on(look):
+                return fail("a measure render carries a beauty look that applies something; the "
+                            "measure path is the one Gate 6 passed on and must render as it did",
+                            FAIL_LOOK_MEASURE_ALTERED)
+            if on:
+                return fail(f"a measure render has pixel-moving effect(s) on: "
+                            f"{', '.join(e['name'] for e in on)}", FAIL_LOOK_MEASURE_ALTERED)
+            if temporal > 1:
+                return fail(f"a measure render accumulated {temporal} temporal beauty samples",
+                            FAIL_LOOK_MEASURE_ALTERED)
+            # Still samples (jittered captures of one pose) and supersampling
+            # change the measure frame too: the commandlet captures a measure
+            # frame once (BeautySubFrames = 1) and never supersamples it.
+            stills = [f"beauty_samples.{key} {int(samples[key])}"
+                      for key in ("spatial", "still_samples") if int(samples.get(key, 1)) > 1]
+            per_frame = _look_captures_per_frame(payload)
+            if per_frame is not None and per_frame > 1:
+                stills.append(f"render_settings.beauty_path.accumulation.captures_per_frame "
+                              f"{per_frame}")
+            if stills:
+                return fail(f"a measure render accumulated beauty samples: {', '.join(stills)}",
+                            FAIL_LOOK_MEASURE_ALTERED)
+        if quality == "pathtrace":
+            # ONE number: the contract's beauty_samples.path_tracer_spp and the
+            # render path's own render_settings.beauty_path.path_tracer
+            # .samples_per_pixel are the same PathTraceSpp; either states it,
+            # and two that disagree are a malformed record.
+            traced = _look_path_tracer_spp(payload)
+            if "path_tracer_spp" not in samples and traced is None:
+                return fail("a path-traced render does not state its samples per pixel "
+                            "(beauty_samples.path_tracer_spp)", FAIL_LOOK_RECORD)
+            if "path_tracer_spp" in samples and traced is not None \
+                    and int(samples["path_tracer_spp"]) != traced:
+                return fail(f"beauty_samples.path_tracer_spp {int(samples['path_tracer_spp'])} is "
+                            f"not render_settings.beauty_path.path_tracer.samples_per_pixel "
+                            f"{traced}", FAIL_LOOK_RECORD)
+        actors = payload.get("beauty_only_actors")
+        if actors is not None:
+            if not isinstance(actors, list):
+                return fail(f"beauty_only_actors is {type(actors).__name__}, not a list",
+                            FAIL_LOOK_RECORD)
+            occlusion = payload.get("cloud_occlusion")
+            if actors and not (isinstance(occlusion, dict)
+                               and occlusion.get("policy") in OCCLUSION_POLICIES):
+                return fail(f"{len(actors)} beauty-only actor(s) with no occlusion decision "
+                            f"(cloud_occlusion.policy one of {', '.join(OCCLUSION_POLICIES)}): a "
+                            f"cloud in front of the subject in the beauty is absent from the mask",
+                            FAIL_LOOK_RECORD)
+        unlisted = [f"{key} ({name})" for key, name in look_effects_on(look or {}) + measured
+                    if not listed(on, name)]
+        if temporal > 1 and float(shutter) > 0.0 and not listed(on, "temporal_accumulation"):
+            unlisted.append(f"beauty_samples.temporal {temporal} over a {float(shutter):g} s "
+                            f"shutter (motion blur)")
+        if unlisted:
+            return fail(f"the look moves pixels and pixel_moving_effects does not say so: "
+                        f"{', '.join(unlisted)}", FAIL_LOOK_UNRECORDED)
+        graded[camera] = quality + (f", {len(on)} pixel-moving effect(s) listed" if on else "") \
+            + ("" if has_look_record(payload)
+               else " (no beauty-look record, an older build: the quality alone is graded)")
+    if not graded:
+        return Check("look_record", NOT_RUN,
+                     "no render.json states its render quality (no render, or an older build)")
+    return Check("look_record", PASS,
+                 "; ".join(f"{camera}: {words}" for camera, words in sorted(graded.items()))
+                 + " -- the look's record is consistent with its quality")
+
+
+def verify_look_label_alignment(manifest: Dict, run_dir=None) -> Check:
+    """The labels lie on the beauty, or the bundle is refused by name.
+
+    Graded only on a render.json that carries the beauty-look record (or
+    a frame's beauty_window_s); NOT RUN otherwise. FAIL
+    look.beauty_not_label_aligned, every reason listed."""
+    from .beauty_look import (classify_effect, has_look_record, normalise_effects)
+
+    implied: Dict[Tuple[str, str], float] = {}
+    for record in manifest.get("frames", []):
+        try:
+            implied[(str(record["camera_id"]), Path(str(record["file"])).name)] = math.degrees(
+                2.0 * math.atan(float(record["width_px"]) / (2.0 * float(record["fx_px"]))))
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            continue
+    graded, reasons, notes = [], [], []
+    fov_compared = 0
+    for camera, _folder, payload in _s4_renders(run_dir):
+        records = _render_frame_records(payload)
+        if not has_look_record(payload) and not any("beauty_window_s" in r for r in records):
+            continue
+        graded.append(camera)
+        # Integration: the label capture's own flags, read back by the
+        # commandlet after registration (render_settings.label_show_flags,
+        # beauty renders): a beauty-only lens or post flag on there means the
+        # labels saw the look.
+        label_flags = (payload.get("render_settings") or {}).get("label_show_flags")
+        if isinstance(label_flags, dict):
+            leaked = sorted(k for k, v in label_flags.items() if v is True)
+            if leaked:
+                reasons.append(f"{camera}: the label capture has beauty-only show flag(s) on: "
+                               f"{', '.join(leaked)}")
+        effects, _ = normalise_effects(payload.get("pixel_moving_effects"))
+        for effect in (e for e in effects if e["on"]):
+            aligned, words = classify_effect(effect, LOOK_ALIGNMENT_TOL_PX)
+            (notes if aligned else reasons).append(f"{camera}: {words}")
+        occlusion = payload.get("cloud_occlusion")
+        if isinstance(occlusion, dict) and occlusion.get("policy") == "labels_unoccluded":
+            fraction = occlusion.get("subject_occluded_fraction")
+            basis = str(occlusion.get("basis") or "").lower()
+            if isinstance(fraction, bool) or not isinstance(fraction, (int, float)) or basis != "measured":
+                reasons.append(f"{camera}: beauty-only actors may cover the subject where the mask "
+                               f"shows it, and the covered fraction is not measured ({fraction!r}, "
+                               f"{basis or 'no basis'})")
+            elif float(fraction) > LOOK_OCCLUSION_TOL_FRACTION:
+                reasons.append(f"{camera}: beauty-only actors cover {float(fraction):.3f} of the "
+                               f"subject the mask shows unoccluded (tol {LOOK_OCCLUSION_TOL_FRACTION})")
+        # The world lane's own per-frame rows (look_applied.world_beauty
+        # .frames[]): a frame its slab model flags as cloud over the
+        # aircraft, or one with a drawn cloud outside the model (so "not
+        # flagged" is only a lower bound), is not shown to be label aligned.
+        # A MEASURED covered fraction (above) supersedes the model.
+        measured_cover = (isinstance(occlusion, dict)
+                          and occlusion.get("policy") == "labels_unoccluded"
+                          and str(occlusion.get("basis") or "").lower() == "measured")
+        if not measured_cover:
+            world_frames = _look_world_frames(payload)
+            flagged = [str(f.get("frame", i)) for i, f in enumerate(world_frames)
+                       if f.get("cloud_occludes_aircraft") is True]
+            unmodelled = [str(f.get("frame", i)) for i, f in enumerate(world_frames)
+                          if f.get("cloud_occlusion_complete") is False]
+            if flagged:
+                reasons.append(f"{camera}: the world lane flags a cloud between the camera and the "
+                               f"aircraft in {len(flagged)} frame(s) ({', '.join(flagged[:5])}"
+                               f"{', ...' if len(flagged) > 5 else ''}) and the mask shows the "
+                               f"aircraft unoccluded")
+            if unmodelled:
+                reasons.append(f"{camera}: {len(unmodelled)} frame(s) draw a cloud the world lane's "
+                               f"occlusion model does not cover (cloud_occlusion_complete false), "
+                               f"so a cloud over the aircraft is not ruled out")
+        look = payload.get("beauty_look") if isinstance(payload.get("beauty_look"), dict) else {}
+        lens = look.get("camera") if isinstance(look.get("camera"), dict) else look
+        look_fov = lens.get("fov_deg") if isinstance(lens, dict) else None
+        if look_fov is None:
+            # What FFlightSimBeautyLook::Record writes: the lens it left alone.
+            applied = look.get("applied") if isinstance(look.get("applied"), dict) else {}
+            echo = applied.get("camera") if isinstance(applied.get("camera"), dict) else {}
+            look_fov = echo.get("fov_deg_unchanged")
+        for record in records:
+            frame = str(record.get("frame", ""))
+            where = f"{camera}/{frame}"
+            stem = Path(frame).stem
+            fov = record.get("beauty_fov_deg", look_fov)
+            solver = implied.get((camera, frame))
+            if isinstance(fov, (int, float)) and not isinstance(fov, bool) and solver is not None:
+                fov_compared += 1
+            if isinstance(fov, (int, float)) and not isinstance(fov, bool) and solver is not None \
+                    and abs(float(fov) - solver) > APPLIED_FOV_TOL_DEG:
+                reasons.append(f"{where}: the beauty's field of view {float(fov):.3f} deg is not "
+                               f"the pose solver's {solver:.3f} deg (tol {APPLIED_FOV_TOL_DEG})")
+            labels = record.get("labels")
+            if isinstance(labels, dict) and stem:
+                other = sorted(v for v in labels.values()
+                               if isinstance(v, str) and _LOOK_LABEL_FILE.search(v)
+                               and not Path(v).name.startswith((stem + "_", stem + ".")))
+                if other:
+                    reasons.append(f"{where}: label file(s) {', '.join(other)} are not of this frame")
+            window = record.get("beauty_window_s")
+            if window is not None:
+                try:
+                    t0, t1, t = float(window[0]), float(window[1]), float(record["t"])
+                    inside = t0 - 1e-9 <= t <= t1 + 1e-9
+                except (KeyError, TypeError, ValueError, IndexError):
+                    reasons.append(f"{where}: beauty_window_s {window!r} is not a [t0, t1] window "
+                                   f"with the record's t")
+                    continue
+                if not inside:
+                    reasons.append(f"{where}: the labels' instant {t:g} s is outside the beauty's "
+                                   f"window [{t0:g}, {t1:g}] s")
+    if not graded:
+        return Check("look_label_alignment", NOT_RUN,
+                     "no render.json carries the beauty-look record (no render, or an older "
+                     "build); mask_vs_geometry and box_vs_mask still grade the labels")
+    if reasons:
+        return Check("look_label_alignment", FAIL,
+                     "beauty-not-label-aligned: " + "; ".join(reasons)
+                     + ". Render the labelled set with -quality=measure, record the transform, "
+                       "or measure the displacement (experiments/look_label_check.py)",
+                     failure=FAIL_LOOK_NOT_ALIGNED)
+    return Check("look_label_alignment", PASS,
+                 f"{', '.join(graded)}: labels of the beauty's own frame and instant"
+                 + (f", at the pose solver's field of view ({fov_compared} frame(s) compared)"
+                    if fov_compared else
+                    "; the beauty's field of view was not compared (no beauty_fov_deg)")
+                 + (f"; {'; '.join(notes)}" if notes else "; no pixel-moving effect on"))
+
+
 #: A check that raised instead of returning its verdict: the run is not
 #: verified until the checker is fixed (the verdict names the check).
 FAIL_CHECKER_ERROR = "verify.checker_error"
@@ -9472,6 +9831,10 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     run("instrument_allan", verify_instrument_allan, manifest, run_dir)
     run("instrument_lever_arm", verify_instrument_lever_arm, manifest, run_dir)
     run("uncertainty_present", verify_uncertainty_present, manifest)
+    # Visual overhaul: the beauty look's record and label honesty -- NOT RUN
+    # on a render.json that predates the record, never a pass on absence.
+    run("look_record", verify_look_record, manifest, run_dir)
+    run("look_label_alignment", verify_look_label_alignment, manifest, run_dir)
 
     if other is not None:
         run("temporal_alignment", verify_alignment, manifest, other)

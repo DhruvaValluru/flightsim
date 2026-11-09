@@ -70,6 +70,12 @@ def _parts(aircraft: str) -> Optional[List[Dict]]:
     source = (path.parent / str(config.get("source_dir", ""))).resolve()
     parts = []
     for part in config.get("parts", []):
+        # An ``interior`` part (cockpit, seat, pilot: assets_pipeline/convert.py)
+        # sits inside the hull: no silhouette, no box extent. Skipped so it
+        # takes no slot of the area budget from a hull face (and its
+        # pitch_deg, which only the converter applies, is never needed).
+        if part.get("interior"):
+            continue
         mesh = source / str(part.get("file", ""))
         if not mesh.is_file():
             return None                    # partial source is not a model

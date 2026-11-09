@@ -1,4 +1,5 @@
 #include "FlightSimVisualScene.h"
+#include "FlightSimBeautyLook.h"
 
 #include "FlightSimRenderCommandlet.h"
 
@@ -22,6 +23,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "ProceduralMeshComponent.h"
@@ -681,18 +683,34 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		TSharedPtr<FJsonObject> AerosolRecord = NewRecord();
 		AerosolRecord->SetStringField(TEXT("component"),
 			TEXT("USkyAtmosphereComponent::MieScatteringScale"));
+		// Units (fix pass 2026-11-09): -aerosol= carries look.aerosol, a
+		// MULTIPLIER on the engine's default Mie extinction
+		// (core/scene/weather_visuals.py aerosol_scale). SetMieScatteringScale
+		// takes the coefficient itself in 1/km (MieScattering is White, the
+		// UE 5.7.4 defaults are 0.003996 scattering and 0.000444 absorption,
+		// SkyAtmosphereComponent.cpp), so the multiplier is converted here,
+		// absorption alongside so the albedo stays the engine's.
+		constexpr double SceneMieScatteringDefaultPerKm = 0.003996;
+		constexpr double SceneMieAbsorptionDefaultPerKm = 0.000444;
 		if (Options.AerosolMieScale >= 0.0)
 		{
-			Atmosphere->SetMieScatteringScale(static_cast<float>(Options.AerosolMieScale));
-			AerosolRecord->SetNumberField(TEXT("mie_scattering_scale"), Options.AerosolMieScale);
+			const double ScatteringPerKm = Options.AerosolMieScale * SceneMieScatteringDefaultPerKm;
+			const double AbsorptionPerKm = Options.AerosolMieScale * SceneMieAbsorptionDefaultPerKm;
+			Atmosphere->SetMieScatteringScale(static_cast<float>(ScatteringPerKm));
+			Atmosphere->SetMieAbsorptionScale(static_cast<float>(AbsorptionPerKm));
+			AerosolRecord->SetNumberField(TEXT("aerosol_multiplier"), Options.AerosolMieScale);
+			AerosolRecord->SetNumberField(TEXT("mie_scattering_scale"), ScatteringPerKm);
+			AerosolRecord->SetNumberField(TEXT("mie_absorption_scale"), AbsorptionPerKm);
+			AerosolRecord->SetStringField(TEXT("units"), TEXT("1/km (multiplier x the engine default)"));
 			AerosolRecord->SetBoolField(TEXT("applied"), true);
 		}
 		else
 		{
-			AerosolRecord->SetNumberField(TEXT("mie_scattering_scale"), 1.0);
+			AerosolRecord->SetNumberField(TEXT("mie_scattering_scale"), SceneMieScatteringDefaultPerKm);
+			AerosolRecord->SetStringField(TEXT("units"), TEXT("1/km (the engine default)"));
 			AerosolRecord->SetBoolField(TEXT("applied"), false);
 			AerosolRecord->SetStringField(TEXT("note"),
-				TEXT("engine default 1.0; the fog row carries the extinction "
+				TEXT("engine default 0.003996/km; the fog row carries the extinction "
 				     "(applying look.aerosol as well double counts)"));
 		}
 		LookApplied->SetObjectField(TEXT("aerosol"), AerosolRecord);
@@ -3162,9 +3180,10 @@ bool FFlightSimVisualScene::LoadSceneLevel(UWorld* World,
 
 void FFlightSimVisualScene::ApplyBeautyPostProcess(USceneCaptureComponent2D* Capture)
 {
-	FPostProcessSettings& Settings = Capture->PostProcessSettings;
-	Settings.bOverride_DynamicGlobalIlluminationMethod = true;
-	Settings.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Lumen;
-	Settings.bOverride_ReflectionMethod = true;
-	Settings.ReflectionMethod = EReflectionMethod::Lumen;
+	// Look-dev lane: the logic lives in FlightSimBeautyLook.cpp. Without a
+	// -beauty-look= sidecar it sets exactly what this body set before
+	// (Lumen GI + Lumen reflections); with one it adds the beauty look.
+	// The commandlet's process command line carries -beauty-look= (the
+	// commandlet's Params are tokenised from it, LaunchEngineLoop.cpp).
+	FFlightSimBeautyLook::Apply(Capture, FCommandLine::Get());
 }

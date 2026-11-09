@@ -134,6 +134,9 @@ from assets_pipeline.importer import COMPONENTS_MANIFEST_VERSION  # noqa: E402
 from assets_pipeline.obj_frame import (  # noqa: E402
     OBJ_FRAME, OBJ_FRAME_KEY, actor_to_obj, obj_winding,
 )
+from assets_pipeline.package_pins import (  # noqa: E402
+    PackagePinError, verify as verify_package_pins,
+)
 from core.capture import airframe as airframe_module  # noqa: E402
 from core.capture.airframe import fdm_xml_path  # noqa: E402
 from core.capture.objects import component_mesh_name  # noqa: E402
@@ -672,6 +675,160 @@ def measure_mesh_origin(extents: MeshExtents, airframe,
     return (round(origin_x, 4) + 0.0, 0.0, round(origin_z, 4) + 0.0), record
 
 
+# -- the package beyond the airframe .ac (j11-package lane, 2026-11-09) -------
+#
+# Three optional config keys bring more of an upstream FlightGear package
+# into the conversion, each checked against the pinned bytes first
+# (assets_pipeline/package_pins.py, ``package_files``):
+#
+# * ``livery`` -- the model XML's livery: FlightGear's ``<animation><type>
+#   material</type>`` swaps the texture of NAMED objects for the livery
+#   PNG (J-11A.xml: the hull, canopy frame, speedbrake, flaperons, elevons
+#   and rudders take Liveries/<name>.png; every other object keeps the
+#   .ac's own texture). The converter does the same swap, object by
+#   object, so the drawn texture is the one the package's model XML draws.
+# * parts[] rows with ``"interior": true`` -- cockpit interior, seat and
+#   pilot (sub-models the model XML places with ``<offsets>``; the summed
+#   offset is ``offset_m`` and the pitch ``pitch_deg``). They are written
+#   into the BODY part, so they take the aircraft's class and int_id with
+#   every other primitive of the aircraft actor (the commandlet's stencil
+#   loop) and no new component box exists. They do not move the measured
+#   nose / tail / gear anchors (kept out of ``extents``), and each vertex
+#   must lie inside the hull's own extents: one outside refuses
+#   (``aircraft.interior_outside_hull``), because it would grow the drawn
+#   silhouette beyond the airframe the labels measure.
+# * ``views`` -- package viewpoints (the -set.xml pilot eye), mapped to the
+#   actor frame for the camera; recorded only, nothing is drawn from them.
+
+#: An interior vertex may sit this far outside the hull's extents (cm)
+#: before it refuses: rounding of the .ac's own 4-6 decimals.
+INTERIOR_HULL_TOLERANCE_CM = 1.0
+
+
+def _pitch_model(v: Tuple[float, float, float],
+                 pitch_deg: float) -> Tuple[float, float, float]:
+    """A FlightGear ``<offsets><pitch-deg>`` rotation of a sub-model about
+    its own origin, in the FG model frame (+x aft, +y right, +z up), taken
+    as nose-up positive (a forward point, -x, rises): the right-handed
+    rotation about +y. [unverified here: the sign is FlightGear's
+    convention as remembered, not measured; the only use is the seat's
+    -5 deg.]"""
+    if not pitch_deg:
+        return v
+    t = math.radians(pitch_deg)
+    x, y, z = v
+    return (x * math.cos(t) + z * math.sin(t), y,
+            -x * math.sin(t) + z * math.cos(t))
+
+
+def _livery(config: Dict) -> Optional[Dict]:
+    """The config's ``livery`` block, checked for shape, or None."""
+    livery = config.get("livery")
+    if not livery:
+        return None
+    missing = [k for k in ("name", "texture", "replaces", "part", "objects", "source")
+               if not livery.get(k)]
+    if missing:
+        raise ConvertError(f"livery lacks {missing}", constraint="aircraft.livery_unmatched")
+    return livery
+
+
+#: Written beside the OBJs: which FlightGear (.ac) materials each MTL
+#: material was made from, with their specular / shininess, so the beauty
+#: look (scripts/aircraft_look.py) can derive a roughness from the package
+#: instead of a guess. The MTL itself is NOT given Ks / Ns: Interchange
+#: reads the MTL for the measured path's own instances, which stay as
+#: they were.
+MATERIAL_SOURCES_NAME = "material_sources.json"
+MATERIAL_SOURCES_MAGIC = "flightsim-aircraft-material-sources"
+
+
+def _record_material_source(sources: Dict[str, Dict], key: str, texture_rel,
+                            material, part_file: str, object_name: str,
+                            triangles: int) -> None:
+    row = sources.setdefault(key, {"texture": texture_rel, "ac_materials": {},
+                                   "objects": set()})
+    row["objects"].add(f"{part_file}:{object_name}")
+    if material is None:
+        name, values = "(none)", {"rgb": [0.8, 0.8, 0.8], "specular": [0.0, 0.0, 0.0],
+                                   "shininess": 0.0, "transparency": 0.0}
+    else:
+        name = f"{part_file}:{material.name}"
+        values = {"rgb": list(material.rgb), "specular": list(material.specular),
+                  "shininess": float(material.shininess),
+                  "transparency": float(material.transparency)}
+    entry = row["ac_materials"].setdefault(name, {**values, "triangles": 0})
+    entry["triangles"] += triangles
+
+
+def _material_sources_out(sources: Dict[str, Dict]) -> Dict:
+    return {
+        "magic": MATERIAL_SOURCES_MAGIC, "version": 1,
+        "note": "per MTL material: the .ac MATERIAL rows (rgb, spec, shi, trans) "
+                "its triangles came from, with triangle counts; the texture as a "
+                "package path (after the livery swap)",
+        "materials": {key: {"texture": row["texture"],
+                            "ac_materials": row["ac_materials"],
+                            "objects": sorted(row["objects"])}
+                      for key, row in sources.items()},
+    }
+
+
+def _interior_record(rows: List[Dict], interior: "MeshExtents",
+                     hull: "MeshExtents") -> Optional[Dict]:
+    """The manifest's ``interior`` block; refuses an interior vertex
+    outside the hull's extents."""
+    if not rows:
+        return None
+    if interior.count == 0:
+        raise ConvertError("the interior parts drew no geometry",
+                           constraint="aircraft.interior_outside_hull")
+    outside = []
+    for axis, label in enumerate("xyz"):
+        if interior.min[axis] < hull.min[axis] - INTERIOR_HULL_TOLERANCE_CM:
+            outside.append(f"{label} {interior.min[axis] / CM_PER_M:.3f} m below the hull's "
+                           f"{hull.min[axis] / CM_PER_M:.3f} m")
+        if interior.max[axis] > hull.max[axis] + INTERIOR_HULL_TOLERANCE_CM:
+            outside.append(f"{label} {interior.max[axis] / CM_PER_M:.3f} m above the hull's "
+                           f"{hull.max[axis] / CM_PER_M:.3f} m")
+    if outside:
+        raise ConvertError(
+            "an interior part reaches outside the hull's extents (" + "; ".join(outside)
+            + "): it would grow the drawn silhouette past the airframe the labels "
+              "measure", constraint="aircraft.interior_outside_hull")
+    return {
+        "parts": rows,
+        "drawn_in": "body",
+        "label": ("drawn in the body part: the aircraft's class and int_id (the "
+                  "commandlet stencils every primitive of the aircraft actor), no "
+                  "component, no box of its own; inside the hull's extents, so the "
+                  "measured nose / tail / gear anchors and the extremes the look "
+                  "lamps snap to are the hull's alone"),
+        "extent_actor_m": {
+            "x": [interior.min[0] / CM_PER_M, interior.max[0] / CM_PER_M],
+            "y": [interior.min[1] / CM_PER_M, interior.max[1] / CM_PER_M],
+            "z": [interior.min[2] / CM_PER_M, interior.max[2] / CM_PER_M],
+        },
+        "vertices": interior.count,
+    }
+
+
+def _view_records(config: Dict, mesh_origin_cm) -> Dict[str, Dict]:
+    """Each ``views`` entry with its point in the UE actor frame (cm)."""
+    out = {}
+    for name, view in (config.get("views") or {}).items():
+        point = tuple(float(v) for v in view["model_m"])
+        ue = model_to_ue(point)
+        out[name] = {
+            **view,
+            "actor_cm": [round(ue[i] * CM_PER_M + mesh_origin_cm[i], 2) + 0.0
+                         for i in range(3)],
+            "frame": "UE actor frame, cm, about the JSBSim structural datum "
+                     "(model_m mapped by model_to_ue, plus mesh_origin_actor_cm)",
+        }
+    return out
+
+
 #: Prefix of a textured material's name. NOT "tex_": Interchange names the
 #: texture asset of ``map_Kd wings_texture.png`` "TEX_wings_texture", UE
 #: asset names are case-insensitive, so a material "tex_wings_texture"
@@ -811,6 +968,14 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
             raise ConvertError(f"license file {license_file} does not exist")
         license_head = license_file.read_text(errors="replace").strip().splitlines()[0].strip()
 
+    # -- every pinned package file is the pinned content ----------------
+    try:
+        package_rows = verify_package_pins(config, source_dir)
+    except PackagePinError as exc:
+        raise ConvertError(exc.message, constraint="aircraft.package_pin") from exc
+    livery = _livery(config)
+    livery_applied: Dict[str, int] = defaultdict(int)
+
     out_dir = out_root / name
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -842,35 +1007,70 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     extents_gear = MeshExtents()
     component_extents: Dict[str, MeshExtents] = {
         stem: MeshExtents() for stem in component_parts.values()}
+    # The interior parts' own extents (never the hull's: they must not move
+    # the measured anchors), their triangles, and the per-material record
+    # of the FlightGear material each MTL material was made from.
+    extents_interior = MeshExtents()
+    interior_rows: List[Dict] = []
+    material_sources: Dict[str, Dict] = {}
 
     for part in config["parts"]:
         ac_path = source_dir / part["file"]
         model = parse_ac(ac_path)
         offset = tuple(part.get("offset_m", (0.0, 0.0, 0.0)))  # FG model frame
+        interior = bool(part.get("interior"))
+        pitch_deg = float(part.get("pitch_deg", 0.0))
+        if interior and part.get("component"):
+            raise ConvertError(
+                f"parts[] entry {part['file']!r} is both interior and a component; "
+                f"an interior part is drawn in the body", constraint="aircraft.interior_outside_hull")
         gear_part = _matches(part["file"], gear_part_patterns)
         component_stem = component_parts.get(part.get("component"))
-        part_extents = component_extents.get(component_stem, extents)
+        part_extents = (extents_interior if interior
+                        else component_extents.get(component_stem, extents))
+        part_triangles = 0
+        livery_here = livery is not None and livery["part"] == part["file"]
         for obj, verts in world_vertices(model):
             if _matches(obj.name, exclude):
                 continue
             target = "body"
             if component_stem is not None:
                 target = component_stem
-            else:
+            elif not interior:
                 for pattern, surface_name in claimed.items():
                     if re.fullmatch(pattern, obj.name):
                         target = surface_name
                         break
-            gear = gear_part or _matches(obj.name, gear_object_patterns)
+            gear = (not interior) and (gear_part or _matches(obj.name, gear_object_patterns))
             if gear and target == "body" and gear_component is not None:
                 target = "gear"     # a surface claim wins: it is articulated
             writer = writers[target]
             texture = None
+            texture_rel = None
             if obj.texture:
                 texture_path = (ac_path.parent / obj.texture)
+                if (livery_here and obj.name in livery["objects"]
+                        and Path(obj.texture).name == livery["replaces"]):
+                    # The model XML's material animation: this object
+                    # draws the livery, not the .ac's own texture.
+                    texture_path = source_dir / livery["texture"]
+                    livery_applied[obj.name] += 1
                 if texture_path.is_file() and texture_path.suffix.lower() == ".png":
                     texture = texture_path.name
+                    previous = textures_used.get(texture)
+                    if previous is not None and previous.resolve() != texture_path.resolve():
+                        raise ConvertError(
+                            f"two different package files are both named {texture!r} "
+                            f"({previous} and {texture_path}); the converted textures "
+                            f"share one folder and Interchange names each TEX_<stem>, "
+                            f"so one would silently replace the other",
+                            constraint="aircraft.texture_collision")
                     textures_used[texture] = texture_path
+                    try:
+                        texture_rel = texture_path.resolve().relative_to(
+                            source_dir.resolve()).as_posix()
+                    except ValueError:
+                        texture_rel = str(texture_path)
             for surf in obj.surfaces:
                 if not surf.is_polygon or len(surf.refs) < 3:
                     continue
@@ -880,6 +1080,9 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                 if transparency >= 0.9 and not texture:
                     continue    # invisible glass shells contribute nothing
                 key = writer.material_key(texture, rgb, transparency)
+                _record_material_source(material_sources, key, texture_rel, material,
+                                        part["file"], obj.name, len(surf.refs) - 2)
+                part_triangles += len(surf.refs) - 2
                 refs = surf.refs
                 for i in range(1, len(refs) - 1):
                     tri = []
@@ -890,7 +1093,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                         vertex_ac = verts[vi]
                         # .ac -> FG model frame, then the part offset (stated
                         # in the model XML, FG model frame), then -> UE, cm.
-                        vm = ac_to_model(vertex_ac)
+                        vm = _pitch_model(ac_to_model(vertex_ac), pitch_deg)
                         vm = (vm[0] + offset[0], vm[1] + offset[1], vm[2] + offset[2])
                         vu = model_to_ue(vm)
                         position_cm = (vu[0] * CM_PER_M, vu[1] * CM_PER_M,
@@ -914,6 +1117,20 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                         ]
                     writer.add_triangle(key, tri)
                     counts[target] += 1
+        if interior:
+            interior_rows.append({
+                "file": part["file"], "offset_m": list(offset), "pitch_deg": pitch_deg,
+                "triangles": part_triangles, "source": part.get("source", ""),
+            })
+
+    if livery is not None:
+        unmatched = [o for o in livery["objects"] if not livery_applied.get(o)]
+        if unmatched:
+            raise ConvertError(
+                f"livery {livery['name']!r}: {len(unmatched)} object(s) the model XML "
+                f"names carry no {livery['replaces']!r} texture in {livery['part']}: "
+                f"{', '.join(unmatched)}", constraint="aircraft.livery_unmatched")
+    interior_record = _interior_record(interior_rows, extents_interior, extents)
 
     for surface_name in surface_defs:
         if counts[surface_name] == 0:
@@ -1022,6 +1239,20 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
             "sha256": hashlib.sha256(vrp_xml.read_bytes()).hexdigest(),
         },
     }
+    # j11-package lane: the package beyond the .ac, each key only when the
+    # config uses it, so every other airframe's manifest is unchanged.
+    if package_rows:
+        manifest["package_files"] = package_rows
+    if livery is not None:
+        manifest["livery"] = {**livery, "objects_applied": dict(sorted(livery_applied.items()))}
+    if interior_record is not None:
+        manifest["interior"] = interior_record
+    if config.get("views"):
+        manifest["views"] = _view_records(config, mesh_origin_cm)
+    if material_sources:
+        (out_dir / MATERIAL_SOURCES_NAME).write_text(
+            json.dumps(_material_sources_out(material_sources), indent=1, sort_keys=True),
+            encoding="utf-8")
     manifest_path = out_dir / "mesh_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=1))
     return manifest_path
