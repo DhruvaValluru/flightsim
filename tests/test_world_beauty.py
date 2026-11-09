@@ -143,6 +143,27 @@ def test_overrides_are_validated_by_name():
 # -- the C++ pure blocks, compiled ----------------------------------------------------
 
 @NEEDS_CXX
+def test_the_cpp_overrides_loader_refuses_what_validate_overrides_refuses():
+    """Review fix: a misspelt section or a bool/string value must be refused by
+    the host too, never run silently on the defaults."""
+    body = CLOUDS_CPP.split("bool FFlightSimWorldBeauty::LoadOverrides", 1)[1].split(
+        "bool FFlightSimWorldBeauty::Build", 1)[0]
+    for section in wb.OVERRIDE_SECTIONS:
+        assert f'TEXT("{section}")' in body
+    assert 'TEXT("constants")' in body
+    assert "unknown section" in body
+    assert body.count("!= EJson::Number") == 2
+    assert "!= EJson::Object" in body
+    assert wb.validate_overrides({"atmospher": {}})
+    assert wb.validate_overrides({"constants": {"cloud_extinction_scale": True}})
+
+
+def test_every_frame_says_whether_the_cloud_occlusion_is_complete():
+    """Review fix: clouds the slab model does not cover make the row a lower bound."""
+    assert 'TEXT("cloud_occlusion_complete"), UnmodelledClouds == 0' in CLOUDS_CPP
+    assert 'UnmodelledClouds = Kept.Num();' in CLOUDS_CPP
+
+
 def test_the_cpp_world_tables_and_laws_are_the_python_ones(tmp_path):
     block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
     assert "#include" not in block and "FString" not in block and "TEXT(" not in block
