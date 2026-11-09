@@ -151,6 +151,22 @@ def derive_chase_offset(aircraft: str) -> tuple:
     return (_CHASE_RATIO_BACK_PER_M * length_m, 0.0,
             _CHASE_RATIO_UP_PER_M * length_m)
 
+#: How a chase offset on :data:`FALLBACK_CHASE_OFFSET` says so (the
+#: ``from`` of a defaulted chase camera with no mesh manifest).
+FALLBACK_CHASE_BASIS_PREFIX = "FALLBACK_CHASE_OFFSET (B747 framing)"
+
+
+def chase_unframed(preset: str, offset_basis: Optional[str]) -> Optional[str]:
+    """The named refusal (shot.chase_unframed) for a chase camera whose
+    offset is the B747 fallback, else None. For a tool that needs every
+    render framed from the airframe's own measured length (the contact
+    sheet's baselines); a run that accepts the fallback simply records it."""
+    if preset == "chase" and str(offset_basis or "").startswith(FALLBACK_CHASE_BASIS_PREFIX):
+        return (f"shot.chase_unframed: {offset_basis}. Import the airframe's mesh first "
+                f"(scripts/import_aircraft.py), then render again")
+    return None
+
+
 #: The wingman formation slot the webapp measured: 180 m abeam clears
 #: the tornado core's 150 m radius (the default 25 m sat INSIDE the
 #: funnel -- run c33db2c326e0). Behind distance is the commandlet's own
@@ -158,8 +174,88 @@ def derive_chase_offset(aircraft: str) -> tuple:
 WINGMAN_OFFSET = (-45.0, 180.0, 0.0)
 
 #: Cockpit-shoulder body-frame offset, the UE director's own figure
-#: (forward, right, up metres; left seat).
+#: (forward, right, up metres; left seat). A single B747-scale figure: the
+#: "cockpit" preset uses it only for an airframe whose FDM states no
+#: EYEPOINT (:func:`derive_cockpit_offset`); the legacy ``-camera=shoulder``
+#: host path keeps it (FlightSimCameraDirector.h ShoulderOffsetMetres).
 SHOULDER_OFFSET = (-6.0, -0.5, 1.6)
+
+#: Where the "cockpit" camera sits relative to the pilot's eye (the FDM's
+#: EYEPOINT), forward:right:up metres: just behind and above the right
+#: shoulder, so the near plane clears the pilot's head and the canopy and
+#: the frame reads "behind the windshield". UNCALIBRATED (probe
+#: shots-cockpit: contact-sheet shot d, the coaming and the canopy arch in
+#: frame with no head or seat in front of the lens).
+COCKPIT_EYE_NUDGE_M = (-0.35, 0.30, 0.10)
+_INCH_M = 0.0254
+_AIRCRAFT_CONFIG_DIR = _REPO / "assets" / "aircraft_config"
+
+
+def _fdm_name(aircraft: str) -> str:
+    """The FDM an aircraft name flies (assets/aircraft_config/<name>.json
+    ``fdm``), else the name itself."""
+    path = _AIRCRAFT_CONFIG_DIR / f"{aircraft}.json"
+    try:
+        return str(json.loads(path.read_text(encoding="utf-8")).get("fdm") or aircraft)
+    except (OSError, ValueError, AttributeError):
+        return str(aircraft)
+
+
+def _fdm_xml(fdm: str) -> Optional[Path]:
+    """The XML the flight model flies: the repository-owned airframe when
+    there is one, else the stock JSBSim aircraft (the choice
+    core.capture.airframe.fdm_xml_path makes; not imported from there:
+    core.capture imports FROM core.scenario)."""
+    owned = _REPO / "assets" / "fdm_root" / "aircraft" / fdm / f"{fdm}.xml"
+    if owned.is_file():
+        return owned
+    try:
+        from core.fdm.aircraft import default_root_dir
+
+        stock = default_root_dir() / "aircraft" / fdm / f"{fdm}.xml"
+    except Exception:  # noqa: BLE001 -- no jsbsim wheel: nothing to read
+        return None
+    return stock if stock.is_file() else None
+
+
+_COCKPIT_CACHE: Dict[str, Optional[tuple]] = {}
+
+
+def derive_cockpit_offset(aircraft: str) -> Optional[tuple]:
+    """The "cockpit" camera's body offset from the CG for ``aircraft``,
+    from its OWN FDM: the EYEPOINT relative to the CG (structural frame,
+    x aft, y right, z up) plus :data:`COCKPIT_EYE_NUDGE_M`. None when the
+    FDM cannot be read or states no EYEPOINT (the caller then uses
+    :data:`SHOULDER_OFFSET`). On the J-11 this is about (+8.4, +0.3, +1.6) m
+    -- the canopy -- where SHOULDER_OFFSET put the camera over the aft spine
+    between the fins."""
+    key = str(aircraft or "")
+    if key in _COCKPIT_CACHE:
+        return _COCKPIT_CACHE[key]
+    result = None
+    path = _fdm_xml(_fdm_name(key)) if key else None
+    if path is not None:
+        import xml.etree.ElementTree as ET
+
+        try:
+            root = ET.parse(path).getroot()
+            found = {}
+            for loc in root.iter("location"):
+                name = loc.get("name")
+                if name in ("EYEPOINT", "CG") and name not in found:
+                    scale = {"IN": _INCH_M, "M": 1.0}.get(str(loc.get("unit", "IN")).upper())
+                    if scale is None:
+                        continue
+                    found[name] = tuple(float(loc.find(axis).text) * scale for axis in "xyz")
+            if "EYEPOINT" in found and "CG" in found:
+                eye, cg = found["EYEPOINT"], found["CG"]
+                result = (round(cg[0] - eye[0] + COCKPIT_EYE_NUDGE_M[0], 3),
+                          round(eye[1] - cg[1] + COCKPIT_EYE_NUDGE_M[1], 3),
+                          round(eye[2] - cg[2] + COCKPIT_EYE_NUDGE_M[2], 3))
+        except (OSError, ET.ParseError, AttributeError, TypeError, ValueError):
+            result = None
+    _COCKPIT_CACHE[key] = result
+    return result
 
 #: World-anchored preset placements, local north/east metres about the
 #: spec origin + height above the spec's terrain datum. Ported from the
@@ -583,17 +679,29 @@ class CameraSpec:
         chase_derived = chase_offset is None
         if chase_derived:
             chase_offset = derive_chase_offset(aircraft or "")
+        chase_fallback = chase_derived and chase_offset == FALLBACK_CHASE_OFFSET
+        cockpit_offset = derive_cockpit_offset(aircraft or "") if preset == "cockpit" else None
         offset = {"chase": chase_offset,
                   "wingman": WINGMAN_OFFSET,
-                  "cockpit": SHOULDER_OFFSET}.get(preset, (0.0, 0.0, 0.0))
+                  "cockpit": cockpit_offset or SHOULDER_OFFSET}.get(preset, (0.0, 0.0, 0.0))
         local = {"ground": GROUND_OBSERVER_LOCAL,
                  "tower": TOWER_LOCAL}.get(preset)
         mode = "scene" if local is not None else "offset"
         north = local["north_m"] if local else 0.0
         east = local["east_m"] if local else 0.0
         alt = (terrain_elevation_m + local["up_m"]) if local else 0.0
-        if preset != "chase":
+        if preset == "cockpit":
+            offset_frm = (f"cockpit station from the {aircraft}'s own FDM EYEPOINT relative to "
+                          f"its CG, plus COCKPIT_EYE_NUDGE_M (UNCALIBRATED)"
+                          if cockpit_offset is not None else
+                          f"{frm}; SHOULDER_OFFSET (B747-scale, unscaled): no FDM EYEPOINT "
+                          f"readable for {aircraft or 'this aircraft'}")
+        elif preset != "chase":
             offset_frm = frm
+        elif chase_fallback:
+            offset_frm = (f"{FALLBACK_CHASE_BASIS_PREFIX}: no mesh manifest for "
+                          f"{aircraft or 'this aircraft'} on this machine (assets/generated/"
+                          f"{aircraft}/mesh_manifest.json), so nothing measured to scale")
         elif chase_derived:
             offset_frm = ("chase offset derived from this airframe's own "
                            "measured mesh length (no calibrated table entry)")

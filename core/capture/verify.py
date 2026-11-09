@@ -759,7 +759,12 @@ def verify_pose_matches_spec(manifest: Dict) -> Check:
                     f"({offset[0]:g}, {offset[1]:g}, {offset[2]:g})")
 
         # -- aim ----------------------------------------------------------
-        if str(_spec_value(spec, "aim_mode", "aircraft")) == "aircraft":
+        # A cockpit camera is body-fixed and looks down the nose whatever
+        # aim_mode says (core/capture/poses.py); since its station comes
+        # from the FDM's EYEPOINT it can sit metres AHEAD of the CG, where
+        # "aimed at the aircraft" would mean looking backwards.
+        if preset != "cockpit" and \
+                str(_spec_value(spec, "aim_mode", "aircraft")) == "aircraft":
             to_aircraft = tuple(a - c for a, c in zip(aircraft, camera))
             span = math.sqrt(sum(v * v for v in to_aircraft))
             if span >= AIM_DEGENERATE_M:
