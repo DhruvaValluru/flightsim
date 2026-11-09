@@ -514,7 +514,9 @@ CREATORS = (create_aircraft_paint, create_aircraft_bare_metal, create_aircraft_g
 #: The asset each creator makes (pinned to look.CLASS_MASTERS / FX_MASTERS by test).
 CREATED = ("M_AircraftPaint", "M_AircraftBareMetal", "M_AircraftGlass", "M_AircraftRubber",
            "M_NavLightEmissive", "M_AircraftContrail", "M_AircraftAfterburner",
-           "M_AircraftHeatHaze")
+           "M_AircraftHeatHaze",
+           # condensation-solver: built by scripts/aircraft_condensation_material.py.
+           "M_AircraftCondensation")
 
 
 def build_all():
@@ -530,4 +532,10 @@ def build_all():
             traceback.print_exc()
             print(f"MATERIAL-FAILED: {creator.__name__}")
             failed.append(creator.__name__)
+    try:  # condensation-solver: M_AircraftCondensation, its own module.
+        __import__("aircraft_condensation_material").build()
+    except Exception:
+        traceback.print_exc()
+        print("MATERIAL-FAILED: aircraft_condensation_material.build")
+        failed.append("aircraft_condensation_material.build")
     return failed

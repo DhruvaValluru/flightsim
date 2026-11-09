@@ -190,7 +190,8 @@ def test_every_look_constant_says_it_is_uncalibrated_and_names_its_probe(tmp_pat
     _write_model(tmp_path, [(0, 0, 0), (-10, -5, 0), (-10, 5, 0)], (0.0, 0.0, 0.0))
     manifest = look.build_manifest("J11", look.load_config("J11"), str(tmp_path), str(J11_FDM))
     groups = manifest["constants"]
-    assert set(groups) == {"lights", "contrail", "vapour", "afterburner", "heat_haze"}
+    assert set(groups) == {"lights", "contrail", "vapour", "afterburner", "heat_haze",
+                           "condensation"}  # condensation-solver
     for group in groups.values():
         for entry in group.values():
             assert entry["calibration"] == look.UNCALIBRATED
@@ -278,7 +279,10 @@ def test_the_masters_stay_out_of_the_world_materials_contract():
 
 
 def test_the_cpp_loads_the_fx_masters_and_sets_the_parameters_the_masters_expose():
-    text = FX_CPP.read_text(encoding="utf-8")
+    # M_AircraftCondensation is loaded and driven by FlightSimCondensation.cpp
+    # (condensation-solver), which FlightSimAircraftFX.cpp owns a member of.
+    text = FX_CPP.read_text(encoding="utf-8") + (
+        FX_CPP.parent / "FlightSimCondensation.cpp").read_text(encoding="utf-8")
     for name in look.FX_MASTERS:
         assert f'TEXT("{look.MASTER_ROOT}/{name}.{name}")' in text, name
     for names in look.FX_PARAMETERS.values():

@@ -2,7 +2,7 @@
   "schema": "flightsim-aircraft-look/1",
   "name": "J11",
   "default_class": "paint",
-  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. The J-11's MTL names are not measured on this machine (its source is fetched at import, not here), so it has no slot_rules: glass and rubber come from the automatic rules. Matte PLAAF grey: low clear coat. The landing lamp sits on the nose gear: assets/aircraft_config/J11.json keypoints_note measures the mesh's nose gear at x 7.5..8.2 m aft of the nose (7.85 m used); the 1.5 m drop below the nose tip is an estimate. Nozzles: the FDM's two AL-31F thruster lines (J11.xml, y +-20 in), x snapped to the mesh; the afterburner follows the engine file's milthrust/maxthrust.",
+  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. The J-11's MTL names are not measured on this machine (its source is fetched at import, not here), so it has no slot_rules: glass and rubber come from the automatic rules. Matte PLAAF grey: low clear coat. The landing lamp sits on the nose gear: assets/aircraft_config/J11.json keypoints_note measures the mesh's nose gear at x 7.5..8.2 m aft of the nose (7.85 m used); the 1.5 m drop below the nose tip is an estimate. Nozzles: the FDM's two AL-31F thruster lines (J11.xml, y +-20 in), x snapped to the mesh; the afterburner follows the engine file's milthrust/maxthrust. Condensation (condensation-solver): the Su-27/J-11 airframe has leading-edge root extensions, so LexEnabled is 1; the LEX apex offsets are the condensation defaults (6.0 m aft of the nose vertex, 1.2 m out, 0.2 m up, a 6.0 m vortex), estimated from the type's published planform, not measured on this mesh: UNCALIBRATED.",
   "slot_rules": [],
   "class_scalars": {
     "paint": {
@@ -109,5 +109,8 @@
         -1.5
       ]
     }
-  ]
+  ],
+  "condensation": {
+    "LexEnabled": 1.0
+  }
 }
