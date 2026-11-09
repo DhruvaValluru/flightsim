@@ -2481,11 +2481,13 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
     # -camera-index= (the capture loop's position in spec.cameras). Only an
     # UNSTATED sensor takes the documented default; a width that is there
     # but unreadable raises instead of quietly becoming 36 mm.
-    sensors = []
+    sensors, presets = [], []
     for camera in spec.cameras or default_cameras(spec):
         width = getattr(camera, "sensor_width_mm", None)
         value = getattr(width, "value", width)
         sensors.append(DEFAULT_SENSOR_WIDTH_MM if value is None else float(value))
+        preset = getattr(camera, "preset", None)
+        presets.append(str(getattr(preset, "value", preset) or "chase"))
     # The world the frame is drawn in: the card's preset, read the way the
     # world lane's host reads it (core.scene.beauty_look.world_preset_for_card).
     from core.scene.beauty_look import world_preset_for_card
@@ -2516,7 +2518,8 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
         # brightness stops land on the one EV100 the host applies.
         sun_intensity_scale=lit.get("sun_intensity_scale"),
         sky_light_scale=lit.get("sky_light_scale"),
-        brightness_ev=None if brightness is None else float(brightness))
+        brightness_ev=None if brightness is None else float(brightness),
+        camera_presets=presets if sensors else None)
     return write_beauty_look(plan, Path(out) / "beauty_look.json")
 
 

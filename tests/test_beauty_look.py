@@ -566,3 +566,18 @@ def test_the_weather_defaults_are_untouched():
 
     assert runs.WEATHER_DEFAULT_BACKEND == "procedural"
     assert runs.WEATHER_DEFAULT_GAIN == 4.0 and runs.WEATHER_DEFAULT_STYLE == "cinematic"
+
+
+def test_a_camera_inside_the_aircraft_gets_no_depth_of_field():
+    """The cinematic lens focuses on the aircraft from outside it; a cockpit
+    camera would focus on the datum behind it, so its DOF is off."""
+    p = plan(lens="cinematic", sensor_width_mm=[36.0, 36.0, 36.0],
+             camera_presets=["chase", "cockpit", "shoulder"])
+    assert p["camera"]["focus_per_camera"] == ["subject", "off", "off"]
+    assert plan(lens="standard", camera_presets=["chase"])["camera"]["focus_per_camera"] == ["off"]
+    with pytest.raises(BeautyLookError):
+        plan(sensor_width_mm=[36.0, 36.0], camera_presets=["chase"])
+    camera = LOOK_CPP[LOOK_CPP.index("// -- camera: sensor"):LOOK_CPP.index("// -- exposure:")]
+    assert 'TEXT("focus_per_camera")' in camera
+    assert camera.index('FocusBasis == TEXT("off")') < camera.index(
+        "Capture->ShowFlags.SetDepthOfField(State.bDepthOfField);")

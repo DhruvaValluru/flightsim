@@ -307,6 +307,11 @@ LENSES: Dict[str, Dict[str, Any]] = {
 }
 LENS_NAMES: Tuple[str, ...] = tuple(LENSES)
 DEFAULT_LENS = "standard"
+#: Camera presets that sit INSIDE the aircraft (core/scenario/camera.py
+#: CAMERA_PRESETS; "shoulder" is the legacy word): the actor origin is the
+#: JSBSim datum a few metres away inside the fuselage, so focusing there
+#: would blur the scene the camera looks at. Their depth of field is off.
+INSIDE_PRESETS = ("cockpit", "shoulder")
 #: The sensor width (mm) when the camera states none: the documented default
 #: lens (35 mm on a 36 mm sensor, FlightSimRenderCommandlet.cpp).
 DEFAULT_SENSOR_WIDTH_MM = 36.0
@@ -614,7 +619,8 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
                      physical_sky: bool = False, world_preset: Optional[str] = None,
                      sun_intensity_scale: Optional[float] = None,
                      sky_light_scale: Optional[float] = None,
-                     brightness_ev: Optional[float] = None) -> Dict[str, Any]:
+                     brightness_ev: Optional[float] = None,
+                     camera_presets: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     """The complete ``beauty_look.json``. Pure: same inputs, same bytes.
 
     ``sensor_width_mm``: one per camera pass, in the card's camera order
@@ -625,7 +631,10 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
     grade and whether a deck shadows the beam. ``sun_intensity_scale``,
     ``sky_light_scale``, ``brightness_ev``: the lighting look's (webapp
     render_look_for), which the host applies to the light and which the
-    exposure therefore meters (:func:`scene_light`) and adds."""
+    exposure therefore meters (:func:`scene_light`) and adds.
+    ``camera_presets``: one per camera, in the same order as the sensor
+    widths; a camera inside the aircraft (:data:`INSIDE_PRESETS`) gets no
+    depth of field (the host reads ``camera.focus_per_camera``)."""
     elevation = float(sun_elevation_deg)
     if not math.isfinite(elevation) or not -90.0 <= elevation <= 90.0:
         raise BeautyLookError(CONSTRAINT, f"a sun elevation of {sun_elevation_deg!r} deg "
@@ -639,6 +648,10 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
     if not sensors or any(not math.isfinite(s) or s <= 0.0 for s in sensors):
         raise BeautyLookError(CONSTRAINT, f"sensor widths {list(sensor_width_mm)!r} must be "
                                           f"positive millimetres, one per camera")
+    presets = [str(p or "chase") for p in (camera_presets or ["chase"] * len(sensors))]
+    if len(presets) != len(sensors):
+        raise BeautyLookError(CONSTRAINT, f"{len(presets)} camera presets for {len(sensors)} "
+                                          f"sensor widths: one of each per camera")
     brightness = 0.0 if brightness_ev is None else float(brightness_ev)
     if not math.isfinite(brightness):
         raise BeautyLookError(CONSTRAINT, f"brightness_ev {brightness_ev!r} is not a number of stops")
@@ -724,6 +737,12 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
             "depth_of_field": bool(lens_row["depth_of_field"]),
             "focus": ("per frame: |capture - aircraft actor| (the poses the manifest "
                       "records)") if lens_row["depth_of_field"] else "off (focal distance 0)",
+            # Per camera (the -camera-index= order): "subject" focuses on the
+            # aircraft each frame; "off" is a camera inside it (no DOF).
+            "focus_per_camera": [
+                ("off" if p in INSIDE_PRESETS else "subject") if lens_row["depth_of_field"]
+                else "off" for p in presets],
+            "camera_presets": presets,
             "sensor_width_mm": sensors,
             "fov": "the pose solver's, unchanged; focal length derived from it",
             "shutter_angle_deg": SHUTTER_ANGLE_DEG,

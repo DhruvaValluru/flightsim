@@ -209,6 +209,23 @@ namespace
 			{
 				return BeautyLookFail(TEXT("camera.depth_of_field is not true or false"));
 			}
+			// Per camera: a camera inside the aircraft (cockpit) would focus on
+			// the JSBSim datum a few metres behind it; the plan says "off".
+			FString FocusBasis = State.bDepthOfField ? TEXT("subject") : TEXT("off");
+			const TArray<TSharedPtr<FJsonValue>>* Focus = nullptr;
+			if (CameraJson->TryGetArrayField(TEXT("focus_per_camera"), Focus) && Focus != nullptr)
+			{
+				if (!Focus->IsValidIndex(CameraIndex) || !(*Focus)[CameraIndex]->TryGetString(FocusBasis))
+				{
+					return BeautyLookFail(FString::Printf(
+						TEXT("camera.focus_per_camera has no entry for -camera-index=%d"), CameraIndex));
+				}
+				if (FocusBasis == TEXT("off"))
+				{
+					State.bDepthOfField = false;
+				}
+			}
+			Echo->SetStringField(TEXT("focus_basis"), FocusBasis);
 			double ApertureF = 0.0, BlurAmount = 0.0, TargetFps = 0.0;
 			if (!BeautyLookNumber(CameraJson, TEXT("aperture_f"), ApertureF) ||
 			    !BeautyLookNumber(CameraJson, TEXT("MotionBlurAmount"), BlurAmount) ||
