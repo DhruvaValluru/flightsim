@@ -113,8 +113,8 @@ def test_the_overlay_keeps_the_card_visibility(row, visibility, rh):
         assert 0.0 <= p["fog_factor_after"] <= 1.0
         assert 0.0 < p["renormalised"] <= 1.0
         assert p["mie_after"] >= 0.0 and p["second_fog_ground_extinction_per_km"] >= 0.0
-        # the three terms sum to the Koschmieder beta of the card
-        total = (p["mie_after"] + p["second_fog_ground_extinction_per_km"]
+        # the three terms and the atmosphere's Rayleigh sum to the Koschmieder beta of the card
+        total = (wb.RAYLEIGH_GREEN_PER_KM + p["mie_after"] + p["second_fog_ground_extinction_per_km"]
                  + p["fog_factor_after"] * p["koschmieder_beta_per_km"])
         assert wb.KOSCHMIEDER / total == pytest.approx(visibility, rel=dh.VISIBILITY_TOLERANCE)
 

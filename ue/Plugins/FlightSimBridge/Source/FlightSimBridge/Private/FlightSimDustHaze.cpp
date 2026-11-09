@@ -183,7 +183,8 @@ namespace FlightSimDustHazePure
 		Out.SecondDensity = DensityRow * Scale;
 		double Ff = Beta > 0.0 ? FogFactorBefore - (Out.MieAfter - MieBefore + Out.SecondGroundPerKm) / Beta : 0.0;
 		Out.FogFactorAfter = Ff > 0.0 ? Ff : 0.0;
-		const double Total = Out.MieAfter + Out.SecondGroundPerKm + Out.FogFactorAfter * Beta;
+		// The atmosphere's own Rayleigh is the fourth term (world_beauty.mie_split).
+		const double Total = DustRayleighGreenPerKm + Out.MieAfter + Out.SecondGroundPerKm + Out.FogFactorAfter * Beta;
 		Out.VisibilityModelKm = Total > 0.0 ? DustKoschmieder / Total : 0.0;
 		return Out;
 	}
