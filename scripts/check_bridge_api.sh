@@ -344,6 +344,14 @@ beauty_check "premise: transmittance floor" "Engine/Classes/Components/SkyAtmosp
     "float TransmittanceMinLightElevationAngle;"
 beauty_check "premise: physical camera EV100" "Renderer/Private/PostProcess/PostProcessEyeAdaptation.cpp" \
     "FMath::Log2(FMath::Square(Settings.DepthOfFieldFstop) * Settings.CameraShutterSpeed * 100"
+# Integration fix, 2026-11-09: RenderWriteLookContract finds the rain
+# blendables (M_LensDrops, M_WindshieldRain) on the beauty capture by base
+# material and reads the windshield's Glass vector back.
+beauty_check "WeightedBlendable Weight/Object" "$BSCENE" "TObjectPtr<UObject> Object;"
+beauty_check "MaterialInterface GetBaseMaterial" "Engine/Public/Materials/MaterialInterface.h" \
+    "ENGINE_API UMaterial* GetBaseMaterial();"
+beauty_check "MID K2_GetVectorParameterValue" "Engine/Public/Materials/MaterialInstanceDynamic.h" \
+    "ENGINE_API FLinearColor K2_GetVectorParameterValue(FName ParameterName);"
 for f in MotionBlur DepthOfField Bloom LensFlares Tonemapper LocalExposure ScreenSpaceReflections; do
     showflag_check "$f"
 done
