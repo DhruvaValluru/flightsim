@@ -478,7 +478,12 @@ def encode_clip(frames: Path, clip: Path) -> bool:
     if ok:
         # The mp4 is the deliverable; ~600 MB of PNGs per cell is not. Keep
         # the manifest and the middle frame (the contact sheet's tile).
-        frame_files = sorted(frames.glob("frame_*.png"))
+        # Only the frames the mp4 holds (frame_NNNN.png) are pruned: a
+        # suffixed sibling (frame_NNNN_aces2.png, the ACES 2.0 display
+        # step's output, which the mp4 does NOT hold) is kept, and never
+        # picked as the "middle frame" in place of the engine's own.
+        frame_files = sorted(p for p in frames.glob("frame_*.png")
+                             if p.stem[6:].isdigit() and len(p.stem) == len("frame_0000"))
         keep = frame_files[len(frame_files) // 2] if frame_files else None
         for frame_file in frame_files:
             if frame_file != keep:

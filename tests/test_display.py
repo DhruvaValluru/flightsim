@@ -168,6 +168,31 @@ def test_measure_manifest_is_left_byte_identical(tmp_path, payload):
         json.loads(manifest.read_bytes()))
 
 
+def test_the_showcase_encoder_keeps_the_aces2_frames(tmp_path, monkeypatch):
+    # The web app's camera-less path runs the display step, then
+    # encode_clip, which prunes frames after a good encode. It used to
+    # glob frame_*.png: every _aces2.png was deleted (render.json still
+    # named them) and, for an odd frame count, the "middle frame" kept
+    # was an _aces2.png while every engine PNG went.
+    import subprocess
+    from experiments import showcase_matrix
+
+    clip = tmp_path / "clip.mp4"
+    for i in range(3):
+        (tmp_path / f"frame_{i:04d}.png").write_bytes(b"x")
+        (tmp_path / f"frame_{i:04d}_aces2.png").write_bytes(b"x")
+
+    def fake_run(command, capture_output):
+        clip.write_bytes(b"mp4")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(showcase_matrix.subprocess, "run", fake_run)
+    assert showcase_matrix.encode_clip(tmp_path, clip)
+    assert sorted(p.name for p in tmp_path.glob("frame_*.png")) == [
+        "frame_0000_aces2.png", "frame_0001.png", "frame_0001_aces2.png",
+        "frame_0002_aces2.png"]
+
+
 def test_missing_ocio_is_a_named_refusal(monkeypatch):
     monkeypatch.setitem(sys.modules, "PyOpenColorIO", None)
     with pytest.raises(display.DisplayError) as exc:
