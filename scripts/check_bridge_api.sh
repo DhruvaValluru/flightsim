@@ -402,6 +402,61 @@ if grep -qF 'GetCloudSampleNormAltitudeInLayer' "$UE_ROOT/Engine/Config/BaseMate
 else
     bad "world: NormAltitudeInLayer output" "not in BaseMaterialExpressions.ini: M_FlightSimCloudLayers' pin name changed"
 fi
+# -- AIRCRAFT LANE: engine surface the airframe look assumes ----------------
+# FlightSimAircraftFX.cpp (lights, bulbs, trails, plume, haze, the slot swap)
+# and scripts/ue_aircraft_master_materials.py (the masters' properties and
+# enums), written on a Mac that cannot compile UE 5.7 (visual overhaul V7).
+# Each line is one symbol grepped in the 5.7.4 headers when it was written.
+ENGINE_SRC="$UE_ROOT/Engine/Source"
+aircraft_check() {  # label, header (relative to $ENGINE_SRC or $UE_ROOT/Engine), fixed-string pattern
+    local header="$ENGINE_SRC/$2"
+    [ -f "$header" ] || header="$UE_ROOT/Engine/$2"
+    if [ ! -f "$header" ]; then
+        bad "$1" "header $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$header"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- FlightSimAircraftFX.cpp / ue_aircraft_master_materials.py need updating"
+    fi
+}
+RE="Runtime/Engine"
+aircraft_check "PointLight SetSourceRadius" "$RE/Classes/Components/PointLightComponent.h" "void SetSourceRadius"
+aircraft_check "LocalLight SetAttenuationRadius" "$RE/Classes/Components/LocalLightComponent.h" "void SetAttenuationRadius"
+aircraft_check "LocalLight SetIntensityUnits" "$RE/Classes/Components/LocalLightComponent.h" "void SetIntensityUnits"
+aircraft_check "ELightUnits::Candelas" "$RE/Classes/Engine/Scene.h" "Candelas UMETA"
+aircraft_check "SpotLight SetInnerConeAngle" "$RE/Classes/Components/SpotLightComponent.h" "void SetInnerConeAngle"
+aircraft_check "SpotLight SetOuterConeAngle" "$RE/Classes/Components/SpotLightComponent.h" "void SetOuterConeAngle"
+aircraft_check "Light SetLightColor" "$RE/Classes/Components/LightComponent.h" "void SetLightColor"
+aircraft_check "LightBase SetCastShadows" "$RE/Classes/Components/LightComponentBase.h" "void SetCastShadows"
+aircraft_check "Actor AttachToActor" "$RE/Classes/GameFramework/Actor.h" "bool AttachToActor(AActor* ParentActor, const FAttachmentTransformRules& AttachmentRules"
+aircraft_check "Actor SetActorRelativeLocation" "$RE/Classes/GameFramework/Actor.h" "void SetActorRelativeLocation(FVector NewRelativeLocation"
+aircraft_check "AttachmentRules KeepRelativeTransform" "$RE/Classes/Engine/EngineTypes.h" "static ENGINE_API FAttachmentTransformRules KeepRelativeTransform"
+aircraft_check "MeshComponent GetMaterial" "$RE/Classes/Components/MeshComponent.h" "virtual UMaterialInterface* GetMaterial(int32 ElementIndex) const override"
+aircraft_check "MID Create" "$RE/Public/Materials/MaterialInstanceDynamic.h" "static ENGINE_API UMaterialInstanceDynamic* Create( class UMaterialInterface* ParentMaterial, class UObject* InOuter"
+aircraft_check "MID SetVectorParameterValue" "$RE/Public/Materials/MaterialInstanceDynamic.h" "void SetVectorParameterValue(FName ParameterName, FLinearColor Value)"
+aircraft_check "Material bUseMaterialAttributes" "$RE/Public/Materials/Material.h" "uint8 bUseMaterialAttributes : 1"
+aircraft_check "Material bTangentSpaceNormal" "$RE/Public/Materials/Material.h" "uint8 bTangentSpaceNormal : 1"
+aircraft_check "Material RefractionMethod" "$RE/Public/Materials/Material.h" "TEnumAsByte<ERefractionMode> RefractionMethod"
+aircraft_check "Material TranslucencyLightingMode" "$RE/Public/Materials/Material.h" "TEnumAsByte<ETranslucencyLightingMode> TranslucencyLightingMode"
+aircraft_check "RefractionMode RM_2DOffset" "$RE/Classes/Engine/EngineTypes.h" "RM_2DOffset"
+aircraft_check "ShadingModel MSM_ClearCoat" "$RE/Classes/Engine/EngineTypes.h" "MSM_ClearCoat"
+aircraft_check "TLM_VolumetricNonDirectional" "$RE/Classes/Engine/EngineTypes.h" "TLM_VolumetricNonDirectional"
+aircraft_check "MP_MaterialAttributes (not Hidden)" "$RE/Public/SceneTypes.h" "MP_MaterialAttributes,"
+aircraft_check "MP_Refraction" "$RE/Public/SceneTypes.h" "MP_Refraction UMETA(DisplayName = \"Refraction\")"
+aircraft_check "MakeMaterialAttributes ClearCoat" "$RE/Public/Materials/MaterialExpressionMakeMaterialAttributes.h" "FExpressionInput ClearCoatRoughness;"
+aircraft_check "Fresnel ExponentIn" "$RE/Public/Materials/MaterialExpressionFresnel.h" "ExponentIn"
+aircraft_check "Custom CMOT_Float4" "$RE/Public/Materials/MaterialExpressionCustom.h" "CMOT_Float4"
+aircraft_check "MaterialExpressionLocalPosition" "$RE/Public/Materials/MaterialExpressionLocalPosition.h" "class UMaterialExpressionLocalPosition"
+aircraft_check "MaterialExpressionTransform" "$RE/Public/Materials/MaterialExpressionTransform.h" "TransformSourceType"
+aircraft_check "ProcMesh CreateMeshSection_LinearColor" "Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h" "void CreateMeshSection_LinearColor(int32 SectionIndex, const TArray<FVector>& Vertices, const TArray<int32>& Triangles, const TArray<FVector>& Normals, const TArray<FVector2D>& UV0, const TArray<FLinearColor>& VertexColors"
+aircraft_check "ProcMesh ClearMeshSection" "Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h" "void ClearMeshSection(int32 SectionIndex)"
+aircraft_check "RotationMatrix MakeFromX" "Runtime/Core/Public/Math/RotationMatrix.h" "MakeFromX(TVector<T> const& XAxis)"
+aircraft_check "Math UE_DOUBLE_PI" "Runtime/Core/Public/Math/UnrealMathUtility.h" "#define UE_DOUBLE_PI"
+if [ -f "$UE_ROOT/Engine/Content/EngineResources/WhiteSquareTexture.uasset" ]; then
+    ok "engine WhiteSquareTexture" "present"
+else
+    bad "engine WhiteSquareTexture" "missing: the aircraft masters' BaseColorMap default"
+fi
 
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }

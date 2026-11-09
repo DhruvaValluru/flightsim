@@ -123,3 +123,72 @@ def fix_materials(asset_root, mtl_dir, say=print):
             + (f"BaseColorMap {wanted['texture']}, weight 1" if wanted["texture"]
                else f"BaseColor ({r:.3f}, {g:.3f}, {b:.3f})"))
     return fixed, problems
+
+
+# -- the beauty look instances (visual overhaul V7, aircraft lane) -------------
+#
+# For every MTL material a separate instance of its class master
+# (scripts/aircraft_look.py plan_slots) at <asset root>/Look/MI_<slot>. The
+# imported instances above -- the ones the mesh assets reference and every
+# -quality=measure render draws -- are NOT touched: FlightSimAircraftFX.cpp
+# swaps a slot to its look instance on a -quality=beauty render only, so the
+# measured path stays byte-identical.
+
+def create_look_instances(asset_root, mtl_dir, name, say=print):
+    """Create or refresh the look instances of one aircraft and write its
+    look manifest beside the converted model. Returns (made, problems). A
+    missing master or look config is a PROBLEM line, not an exception: the
+    import (and every measure render) does not depend on the look."""
+    import unreal
+    import aircraft_look as look
+
+    problems = []
+    try:
+        config = look.load_config(name)
+    except (OSError, ValueError) as exc:
+        return 0, [f"look config: {exc}"]
+    slots = look.plan_slots(look.read_mtl_dir(mtl_dir), config)
+    lib = unreal.MaterialEditingLibrary
+    assets = unreal.EditorAssetLibrary
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    folder = f"{asset_root}/{look.LOOK_INSTANCE_FOLDER}"
+    made = 0
+    for slot, row in sorted(slots.items()):
+        if not assets.does_asset_exist(f"{asset_root}/{slot}"):
+            continue    # never imported (a dropped glass shell): nothing draws it
+        master = assets.load_asset(row["master"]) if assets.does_asset_exist(row["master"]) else None
+        if master is None:
+            problems.append(f"{row['master']} is not built (run scripts/ue_create_materials.py)")
+            continue
+        path = f"{folder}/{row['instance']}"
+        instance = assets.load_asset(path) if assets.does_asset_exist(path) else tools.create_asset(
+            row["instance"], folder, unreal.MaterialInstanceConstant,
+            unreal.MaterialInstanceConstantFactoryNew())
+        if instance is None:
+            problems.append(f"{path}: could not be created")
+            continue
+        lib.set_material_instance_parent(instance, master)
+        if row["texture"]:
+            texture_path = f"{asset_root}/{row['texture']}"
+            if not assets.does_asset_exist(texture_path):
+                problems.append(f"{path}: its texture {texture_path} is not imported")
+                continue
+            lib.set_material_instance_texture_parameter_value(
+                instance, "BaseColorMap", assets.load_asset(texture_path))
+        lib.set_material_instance_vector_parameter_value(
+            instance, "BaseColor", unreal.LinearColor(*row["base_color"]))
+        lib.set_material_instance_scalar_parameter_value(instance, "BaseColorMapWeight", row["weight"])
+        for key, value in row["scalars"].items():
+            lib.set_material_instance_scalar_parameter_value(instance, key, float(value))
+        for key, value in row["vectors"].items():
+            lib.set_material_instance_vector_parameter_value(instance, key, unreal.LinearColor(*value))
+        lib.update_material_instance(instance)
+        assets.save_loaded_asset(instance, only_if_is_dirty=False)
+        made += 1
+        say(f"{path}: {row['class']} ({row['rule']})")
+    try:
+        written = look.write_manifest(name, generated_dir=mtl_dir)
+        say(f"look manifest {written}")
+    except (OSError, ValueError) as exc:
+        problems.append(f"look manifest: {exc}")
+    return made, problems

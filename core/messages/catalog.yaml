@@ -199,6 +199,9 @@ aircraft.mesh_extent:
   sentence: "The aircraft's 3-D model does not measure the size its flight model says it is."
 aircraft.placeholder_drawn:
   sentence: "The pictures show a stand-in shape, not the real aircraft model, so they cannot be labelled."
+aircraft_look.manifest:
+  sentence: "The aircraft's beauty look file exists but cannot be read, so the beauty render was stopped rather than drawn without it."
+  hint: "Run the aircraft import step again; it rewrites the look file beside the converted model."
 
 # -- terrain and weather (webapp/runs.py, flightsim/capture.py) --------------
 

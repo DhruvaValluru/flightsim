@@ -1,6 +1,8 @@
 #include "FlightSimRenderCommandlet.h"
 
 #include "FlightSimBeautyLook.h"   // look-dev lane hook
+
+#include "FlightSimAircraftFX.h"  // aircraft lane (visual overhaul V7)
 #include "FlightSimCameraDirector.h"
 #include "FlightSimOrographic.h"
 #include "FlightSimSky.h"
@@ -2187,6 +2189,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (bVisual)
 	{
 		VisualScene.ApplyIceOverlay(Scenario.Aircraft);
+	}
+	// AIRCRAFT LANE (visual overhaul V7, FlightSimAircraftFX.h): the beauty-only
+	// airframe look. Never built under -quality=measure (byte-identical path).
+	FFlightSimAircraftFX AircraftFX;
+	if (bVisual && bBeauty && MeshAirframe.bLoaded && !bHideAircraft)
+	{
+		FFlightSimAircraftFXOptions AircraftFXOptions;
+		AircraftFXOptions.ParseParams(Params);
+		AircraftFXOptions.Aircraft = Scenario.Aircraft;
+		AircraftFXOptions.MeshManifestPath = MeshManifestPath;
+		AircraftFXOptions.Livery = MeshAirframe.Livery;
+		if (!AircraftFX.Build(World, AircraftFXOptions, Error)) { return Fail(Error); }
+		VisualScene.BeautyOnlyActors.Append(AircraftFX.BeautyOnlyActors);
 	}
 	if (MeshAirframe.bLoaded && MeshAirframe.DeclaredSurfaces == 0)
 	{
@@ -4670,6 +4685,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(Error);
 		}
+		// AIRCRAFT LANE (V7): strobe, reheat, trails at this step's FDM state.
+		if (AircraftFX.IsBuilt())
+		{
+			AircraftFX.Advance([&Scenario](const TCHAR* Name) { return Scenario.ReadProperty(Name); });
+		}
 		// The weather at this frame: the camera is where this capture looks
 		// from, the exposure the camera's own (the frame interval without one).
 		if (bVisual && Weather.IsBuilt())
@@ -6965,6 +6985,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			(*LandCover)->SetNumberField(TEXT("terrain_stencil"), LabelTerrainIntId);
 		}
 		Root->SetObjectField(TEXT("world_applied"), WorldRecord);
+	}
+	// AIRCRAFT LANE (V7): absent (render.json byte-identical) unless built.
+	if (AircraftFX.IsBuilt() && AircraftFX.Record.IsValid())
+	{
+		Root->SetObjectField(TEXT("aircraft_look"), AircraftFX.Record);
 	}
 	// S4: how every linear file this pass wrote is laid out, so a reader of
 	// render.json alone decodes it (ASCII only -- gotcha 13). Absent when

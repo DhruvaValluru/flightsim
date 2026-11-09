@@ -22,6 +22,7 @@ import unreal
 sys.path.insert(0, os.path.dirname(os.path.abspath(
     globals().get("__file__") or sys.argv[0])))
 from ue_aircraft_materials import fix_materials  # noqa: E402
+from ue_aircraft_materials import create_look_instances  # noqa: E402  (visual V7)
 
 FAILURES = []
 
@@ -57,6 +58,20 @@ def import_part(obj_path, destination, part, expected_triangles):
     # import and re-saving instead leaves the asset's render data broken
     # (measured: the body stopped rendering entirely). These are low-poly
     # assets; Nanite buys nothing here.
+    #
+    # Visual overhaul V7 (aircraft lane, 2026-11-09) re-decided this and
+    # KEEPS Nanite off for every airframe, beauty included. The plan's "Nanite
+    # on for VSM self-shadowing" does not hold: (1) the measured failure
+    # above (the capture drew the fallback) is exactly what a beauty capture
+    # would draw; (2) the mesh asset is shared by both quality paths, so a
+    # Nanite airframe would change every -quality=measure frame Gate 6 passed
+    # on; (3) virtual shadow maps shadow non-Nanite meshes too (beauty turns
+    # r.Shadow.Virtual.Enable on), so self-shadowing does not need it; (4)
+    # 3k-100k-triangle FlightGear meshes gain nothing from Nanite's cluster
+    # LOD. Revisit only with a higher-detail (>1M triangle) airframe, as a
+    # separate beauty-only asset, never by flipping this flag (gotcha 5).
+    # The render commandlet's FAssetCompilingManager::FinishAllCompilation()
+    # guard before the first capture (gotcha 4) stays as it is.
     pipeline = unreal.InterchangeGenericAssetsPipeline()
     pipeline.get_editor_property("mesh_pipeline").set_editor_property(
         "build_nanite", False)
@@ -144,6 +159,18 @@ def run():
             FAILURES.extend(f"{destination}: {p}" for p in problems)
         except Exception as exc:
             FAILURES.append(f"{destination}: material wiring failed: {exc!r}")
+        # Visual overhaul V7 (aircraft lane): the beauty look instances
+        # (<root>/Look/MI_<slot>) and assets/generated/<name>/look_manifest.json.
+        # Never an import failure: the mesh and every -quality=measure render
+        # are complete without them; a beauty render records what is absent.
+        try:
+            made, problems = create_look_instances(destination, source_dir,
+                                                   manifest.get("name", ""))
+            print(f"LOOK {destination}: {made} look instance(s)")
+            for problem in problems:
+                print(f"LOOK-PROBLEM {destination}: {problem}")
+        except Exception as exc:
+            print(f"LOOK-PROBLEM {destination}: look pass failed: {exc!r}")
 
 
 run()

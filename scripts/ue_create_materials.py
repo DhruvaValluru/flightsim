@@ -2931,6 +2931,23 @@ def create_world_tiles_beauty():
 
 # == END WORLD LANE ===============================================================
 
+# ==== AIRCRAFT LANE (visual overhaul V7) -- begin ============================
+# The aircraft master materials live in their own module (they are built
+# under /Game/FlightSim/Aircraft, not /Game/FlightSim, and the C++ loads the
+# per-model instances, not these): scripts/ue_aircraft_master_materials.py.
+# This block only calls it; the world lane's blocks are elsewhere in this file.
+def create_aircraft_masters():
+    import os
+    import sys
+    here = os.path.dirname(os.path.abspath(globals().get("__file__") or sys.argv[0]))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    from ue_aircraft_master_materials import build_all
+    failed = build_all()
+    if failed:
+        raise RuntimeError(f"aircraft masters not built: {', '.join(failed)}")
+# ==== AIRCRAFT LANE -- end ===================================================
+
 
 _FAILED = []
 
@@ -2992,5 +3009,7 @@ create_windshield_rain()
 create_world_collection()
 create_world_cloud_layers()
 create_world_tiles_beauty()
+
+create_aircraft_masters()  # AIRCRAFT LANE (V7)
 if _FAILED:
     raise SystemExit(f"materials not created: {', '.join(_FAILED)}")

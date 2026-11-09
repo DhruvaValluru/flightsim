@@ -1,0 +1,113 @@
+{
+  "schema": "flightsim-aircraft-look/1",
+  "name": "J11",
+  "default_class": "paint",
+  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. The J-11's MTL names are not measured on this machine (its source is fetched at import, not here), so it has no slot_rules: glass and rubber come from the automatic rules. Matte PLAAF grey: low clear coat. The landing lamp sits on the nose gear: assets/aircraft_config/J11.json keypoints_note measures the mesh's nose gear at x 7.5..8.2 m aft of the nose (7.85 m used); the 1.5 m drop below the nose tip is an estimate. Nozzles: the FDM's two AL-31F thruster lines (J11.xml, y +-20 in), x snapped to the mesh; the afterburner follows the engine file's milthrust/maxthrust.",
+  "slot_rules": [],
+  "class_scalars": {
+    "paint": {
+      "Roughness": 0.58,
+      "ClearCoat": 0.12,
+      "ClearCoatRoughness": 0.3,
+      "Metallic": 0.08,
+      "WearAmount": 0.3,
+      "GrimeAmount": 0.3
+    }
+  },
+  "class_vectors": {
+    "glass": {
+      "GlassTint": [
+        0.02,
+        0.024,
+        0.022,
+        1.0
+      ]
+    }
+  },
+  "nozzles": [
+    {
+      "id": "engine0",
+      "anchor": "fdm_thruster",
+      "index": 0,
+      "snap_radius_m": 0.35,
+      "radius_m": 0.5,
+      "afterburner": true
+    },
+    {
+      "id": "engine1",
+      "anchor": "fdm_thruster",
+      "index": 1,
+      "snap_radius_m": 0.35,
+      "radius_m": 0.5,
+      "afterburner": true
+    }
+  ],
+  "lights": [
+    {
+      "id": "nav_left",
+      "kind": "nav_red",
+      "anchor": "mesh_extreme",
+      "axis": "-y",
+      "offset_m": [
+        0.0,
+        0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "nav_right",
+      "kind": "nav_green",
+      "anchor": "mesh_extreme",
+      "axis": "+y",
+      "offset_m": [
+        0.0,
+        -0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "tail",
+      "kind": "nav_white",
+      "anchor": "mesh_extreme",
+      "axis": "-x",
+      "offset_m": [
+        0.05,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "strobe_left",
+      "kind": "strobe",
+      "anchor": "mesh_extreme",
+      "axis": "-y",
+      "offset_m": [
+        -0.15,
+        0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "strobe_right",
+      "kind": "strobe",
+      "anchor": "mesh_extreme",
+      "axis": "+y",
+      "offset_m": [
+        -0.15,
+        -0.05,
+        0.0
+      ]
+    },
+    {
+      "id": "landing",
+      "kind": "landing",
+      "anchor": "mesh_extreme",
+      "axis": "+x",
+      "offset_m": [
+        -7.85,
+        0.0,
+        -1.5
+      ]
+    }
+  ]
+}
