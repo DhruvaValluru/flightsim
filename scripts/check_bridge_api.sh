@@ -458,6 +458,81 @@ else
     bad "engine WhiteSquareTexture" "missing: the aircraft masters' BaseColorMap default"
 fi
 
+# -- hero lighting (hero-lighting lane, 2026-11-09) ---- BEGIN hero lighting --
+# FlightSimHeroLighting.cpp: the beauty sun / sky light quality. Each symbol
+# was grepped in the UE 5.7.4 headers and sources on the authoring Mac (which
+# cannot compile); re-checked here before a build. Cvar names are matched at
+# their DEFINITION (the quoted name in the file that registers it).
+hl_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
+    local f="$UE_ROOT/Engine/Source/Runtime/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- FlightSimHeroLighting.cpp needs updating"
+    fi
+}
+HLD="Engine/Classes/Components/DirectionalLightComponent.h"
+HLL="Engine/Classes/Components/LightComponent.h"
+HLB="Engine/Classes/Components/LightComponentBase.h"
+HLS="Engine/Classes/Components/SkyLightComponent.h"
+hl_check "hero: SetLightSourceAngle" "$HLD" "ENGINE_API void SetLightSourceAngle(float NewValue);"
+hl_check "hero: SetLightSourceSoftAngle" "$HLD" "ENGINE_API void SetLightSourceSoftAngle(float NewValue);"
+hl_check "hero: LightSourceAngle" "$HLD" "float LightSourceAngle;"
+hl_check "hero: LightSourceSoftAngle" "$HLD" "float LightSourceSoftAngle;"
+hl_check "hero: SetEnableLightShaftOcclusion" "$HLD" "ENGINE_API void SetEnableLightShaftOcclusion(bool bNewValue);"
+hl_check "hero: SetOcclusionMaskDarkness" "$HLD" "ENGINE_API void SetOcclusionMaskDarkness(float NewValue);"
+hl_check "hero: SetAtmosphereSunDiskColorScale" "$HLD" "ENGINE_API void SetAtmosphereSunDiskColorScale(FLinearColor NewValue);"
+hl_check "hero: SetEnableLightShaftBloom" "$HLL" "ENGINE_API void SetEnableLightShaftBloom(bool bNewValue);"
+hl_check "hero: SetBloomScale" "$HLL" "ENGINE_API void SetBloomScale(float NewValue);"
+hl_check "hero: SetBloomThreshold" "$HLL" "ENGINE_API void SetBloomThreshold(float NewValue);"
+hl_check "hero: SetBloomMaxBrightness" "$HLL" "ENGINE_API void SetBloomMaxBrightness(float NewValue);"
+hl_check "hero: SetVolumetricScatteringIntensity" "$HLL" "ENGINE_API void SetVolumetricScatteringIntensity(float NewIntensity);"
+hl_check "hero: ContactShadowLength" "$HLL" "float ContactShadowLength;"
+hl_check "hero: ContactShadowLengthInWS" "$HLL" "uint32 ContactShadowLengthInWS : 1;"
+hl_check "hero: ContactShadowCastingIntensity" "$HLL" "float ContactShadowCastingIntensity;"
+hl_check "hero: ContactShadowNonCastingIntensity" "$HLL" "float ContactShadowNonCastingIntensity;"
+hl_check "hero: SetCastVolumetricShadow" "$HLB" "ENGINE_API void SetCastVolumetricShadow(bool bNewValue);"
+hl_check "hero: SkyLight SetRealTimeCapture" "$HLS" "ENGINE_API void SetRealTimeCapture(bool bInRealTimeCapture);"
+hl_check "hero: SkyLight SetLowerHemisphereColor" "$HLS" "ENGINE_API void SetLowerHemisphereColor(const FLinearColor& InLowerHemisphereColor);"
+hl_check "hero: SkyLight SetCaptureIsDirty" "$HLS" "ENGINE_API void SetCaptureIsDirty();"
+hl_check "hero: SkyLight bLowerHemisphereIsBlack" "$HLS" "bool bLowerHemisphereIsBlack;"
+hl_check "hero: SkyLight LowerHemisphereColor" "$HLS" "FLinearColor LowerHemisphereColor;"
+hl_check "hero: SkyLight bCloudAmbientOcclusion" "$HLS" "uint32 bCloudAmbientOcclusion : 1;"
+hl_check "hero: SkyLight CloudAmbientOcclusionStrength" "$HLS" "float CloudAmbientOcclusionStrength;"
+hl_check "hero: SkyAtmosphere MieAnisotropy" "Engine/Classes/Components/SkyAtmosphereComponent.h" "float MieAnisotropy;"
+hl_check "hero: real-time lower hemisphere is absolute" "Renderer/Private/ReflectionEnvironmentRealTimeCapture.cpp" "PsPassParameters->LowerHemisphereSolidColor = SkyLight->LowerHemisphereColor;"
+hl_check "hero: sun disc from the source angle" "Renderer/Private/SkyAtmosphereRendering.cpp" "GetAtmosphereSunDiskColorScale() * Light.Proxy->GetOuterSpaceIlluminance() / SunSolidAngle"
+hl_check "hero: JSON TryGetObjectField" "Json/Public/Dom/JsonObject.h" "JSON_API bool TryGetObjectField(FStringView FieldName, const TSharedPtr<FJsonObject>*& OutObject) const;"
+hl_check "hero: IsRayTracingEnabled" "RenderCore/Public/RenderUtils.h" "extern RENDERCORE_API bool IsRayTracingEnabled();"
+hl_check "hero: show flag LightShafts" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_ALWAYS_ACCESSIBLE(LightShafts,"
+hl_check "hero: show flag ContactShadows" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_ALWAYS_ACCESSIBLE(ContactShadows,"
+hl_cvar() {  # cvar name, file (relative to $UE_ROOT/Engine/Source/Runtime)
+    hl_check "hero: cvar $1" "$2" "\"$1\""
+}
+hl_cvar r.Shadow.Virtual.ResolutionLodBiasDirectional "Renderer/Private/VirtualShadowMaps/VirtualShadowMapClipmap.cpp"
+hl_cvar r.Shadow.Virtual.MaxPhysicalPages "Renderer/Private/VirtualShadowMaps/VirtualShadowMapArray.cpp"
+hl_cvar r.Shadow.Virtual.SMRT.RayCountDirectional "Renderer/Private/VirtualShadowMaps/VirtualShadowMapArray.cpp"
+hl_cvar r.Shadow.Virtual.SMRT.SamplesPerRayDirectional "Renderer/Private/VirtualShadowMaps/VirtualShadowMapArray.cpp"
+hl_cvar r.ContactShadows "Core/Private/HAL/ConsoleManager.cpp"
+hl_cvar r.SkyLight.RealTimeReflectionCapture "Engine/Private/Components/SkyLightComponent.cpp"
+hl_cvar r.SkyLight.RealTimeReflectionCapture.TimeSlice "Renderer/Private/ReflectionEnvironmentRealTimeCapture.cpp"
+hl_cvar r.LightShaftQuality "Renderer/Private/LightShaftRendering.cpp"
+hl_cvar r.VolumetricFog "Renderer/Private/VolumetricFog.cpp"
+hl_cvar r.VolumetricFog.GridPixelSize "Renderer/Private/VolumetricFog.cpp"
+hl_cvar r.VolumetricFog.GridSizeZ "Renderer/Private/VolumetricFog.cpp"
+hl_cvar r.Lumen.ScreenProbeGather.ShortRangeAO "Renderer/Private/Lumen/LumenScreenProbeGather.cpp"
+hl_cvar r.Lumen.ScreenProbeGather.ScreenTraces "Renderer/Private/Lumen/LumenScreenProbeTracing.cpp"
+hl_cvar r.Lumen.ScreenProbeGather.ShortRangeAO.HardwareRayTracing "Renderer/Private/Lumen/LumenShortRangeAOHardwareRayTracing.cpp"
+hl_cvar r.Lumen.Reflections.ScreenTraces "Renderer/Private/Lumen/LumenReflectionTracing.cpp"
+hl_cvar r.Lumen.Reflections.MaxRoughnessToTrace "Renderer/Private/Lumen/LumenReflections.cpp"
+hl_cvar r.Lumen.Reflections.DownsampleFactor "Renderer/Private/Lumen/LumenReflections.cpp"
+hl_cvar r.Lumen.HardwareRayTracing "Renderer/Private/Lumen/LumenHardwareRayTracingCommon.cpp"
+hl_cvar r.Lumen.HardwareRayTracing.LightingMode "Renderer/Private/Lumen/LumenHardwareRayTracingCommon.cpp"
+hl_cvar r.Lumen.Reflections.HardwareRayTracing "Renderer/Private/Lumen/LumenReflectionHardwareRayTracing.cpp"
+# ------------------------------------------------------ END hero lighting --
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'

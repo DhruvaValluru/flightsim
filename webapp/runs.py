@@ -3275,6 +3275,8 @@ class RunManager:
         # The beauty look's sidecar (write_beauty_look_plan), beauty only:
         # None under measure adds nothing, so the pinned command stands.
         extra += beauty_look_render_flags(beauty_look)
+        from core.scene.hero_lighting import flags_beside   # hero-lighting lane: beside the beauty look only
+        extra += flags_beside(beauty_look)
         # Phase 2 (package A, contracts §9): the flag list comes from the
         # ONE builder the CLI also uses. Which passes get which flags:
         #   * a per-camera pass (the capture stage's loop hands in
@@ -3982,6 +3984,8 @@ class RunManager:
             spec, out, render_look_for(spec, event_note), sky=sky,
             lens=(run.look or {}).get("lens"), quality=quality)
         if beauty_look is not None:
+            from core.scene.hero_lighting import write_sidecar_beside   # hero-lighting lane
+            write_sidecar_beside(spec, beauty_look)
             beauty = json.loads(beauty_look.read_text(encoding="ascii"))
             run.conditions["beauty_look"] = (
                 f"beauty look: grade {beauty['grade']} ({beauty['grade_basis']}), "
