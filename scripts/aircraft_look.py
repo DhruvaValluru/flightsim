@@ -42,6 +42,10 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
+# wet-airframe-canopy module: its shader inputs and constants (stdlib only).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from aircraft_wet_layer import WET_SHADER_INPUTS, constants_group as _wet_constants  # noqa: E402
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_DIR = os.path.join(REPO, "assets", "aircraft_config")
 LOOK_DIR = os.path.join(CONFIG_DIR, "look")
@@ -139,6 +143,8 @@ SHADER_INPUTS = {
     "contrail_opacity": ("UV", "LocalPos", "Opacity", "Formation"),
     "afterburner_glow": ("UV", "Intensity", "CoreColour", "TipColour", "Shocks"),
     "heat_haze": ("UV", "LocalPos", "TimeS", "Strength"),
+    # wet-airframe-canopy: "aircraft_wet" and "canopy_scratch".
+    **WET_SHADER_INPUTS,
 }
 
 #: Automatic slot rules, applied after a config's own ``slot_rules``:
@@ -580,6 +586,8 @@ def build_manifest(name, config, generated_dir, fdm_xml, materials=None):
                                       "a full-reheat take-off beauty probe, rear quarter"),
             "heat_haze": _constants(HEAT_HAZE_DEFAULTS, {},
                                     "a -heat-haze=on beauty probe at idle, rear view"),
+            # wet-airframe-canopy (scripts/aircraft_wet_layer.py WET_DEFAULTS).
+            "wet": _wet_constants(),
         },
     }
 

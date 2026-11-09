@@ -190,7 +190,8 @@ def test_every_look_constant_says_it_is_uncalibrated_and_names_its_probe(tmp_pat
     _write_model(tmp_path, [(0, 0, 0), (-10, -5, 0), (-10, 5, 0)], (0.0, 0.0, 0.0))
     manifest = look.build_manifest("J11", look.load_config("J11"), str(tmp_path), str(J11_FDM))
     groups = manifest["constants"]
-    assert set(groups) == {"lights", "contrail", "vapour", "afterburner", "heat_haze"}
+    # "wet": the wet-airframe-canopy module (scripts/aircraft_wet_layer.py WET_DEFAULTS).
+    assert set(groups) == {"lights", "contrail", "vapour", "afterburner", "heat_haze", "wet"}
     for group in groups.values():
         for entry in group.values():
             assert entry["calibration"] == look.UNCALIBRATED
