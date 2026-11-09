@@ -451,6 +451,11 @@ namespace
 			// the sidecar's pixel_effects names it (Python refuses otherwise).
 			Capture->ShowFlags.SetSceneColorFringe(Settings.SceneFringeIntensity > 0.0f);
 			Echo->SetStringField(TEXT("BloomMethod"), TEXT("BM_SOG (standard)"));
+			// One owner of lens character on beauty: this lens. Under -sky= the
+			// plan's per-camera lens (FFlightSimSky::ApplyPostProcess, applied
+			// first) is replaced here, and the record says so.
+			Echo->SetStringField(TEXT("lens_character_owner"),
+				TEXT("the beauty lens; replaces the -sky= plan's grain, vignette and motion blur when one is set"));
 			State.Applied->SetObjectField(TEXT("lens_post"), Echo);
 		}
 		{
