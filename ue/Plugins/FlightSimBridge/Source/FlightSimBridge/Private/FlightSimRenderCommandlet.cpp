@@ -4783,11 +4783,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			USkyLightComponent::UpdateSkyCaptureContents(World);
 			FlushRenderingCommands();
 		}
-		// look-dev lane hook: per-frame focus at the aircraft (cinematic lens only).
-		FFlightSimBeautyLook::UpdatePerFrame(Capture, Scenario.Aircraft);
 		// Render-path lane: the beauty sub-frames of this pose (none on
 		// measure: BeautySubFrames is 1 there and this loop is empty). The
-		// last capture is the one read back below.
+		// last capture is the one read back below. The look-dev focus is
+		// set first so every sub-frame shares it.
+		// look-dev lane hook: per-frame focus at the aircraft (cinematic lens only).
+		FFlightSimBeautyLook::UpdatePerFrame(Capture, Scenario.Aircraft);
 		for (int32 SubFrame = 1; SubFrame < BeautySubFrames; ++SubFrame)
 		{
 			Capture->CaptureScene();

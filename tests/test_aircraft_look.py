@@ -371,7 +371,7 @@ def test_a_fetch_refuses_an_unpinned_or_unredistributable_candidate(tmp_path):
 
 def test_tree_digest_is_order_and_content_sensitive(tmp_path):
     (tmp_path / "a").mkdir()
-    (tmp_path / "a" / "x.txt").write_text("1")
+    (tmp_path / "a" / "x.txt").write_text("1", encoding="utf-8")
     first = models.tree_sha256(tmp_path)
-    (tmp_path / "a" / "x.txt").write_text("2")
+    (tmp_path / "a" / "x.txt").write_text("2", encoding="utf-8")
     assert models.tree_sha256(tmp_path) != first
