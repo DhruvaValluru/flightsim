@@ -29,6 +29,7 @@ Every switch the program reads, each with one decision. **ui**: stays exposed, i
 | `FLIGHTSIM_XPLANE_TERRAIN` | `xplane_terrain` | dev-only | unset | `core/xplane/devflags.py:38` |
 | `FLIGHTSIM_XPLANE_SKY` | `xplane_sky` | dev-only | unset | `core/xplane/devflags.py:50` |
 | `FLIGHTSIM_XPLANE_LIGHTING` | `xplane_lighting` | dev-only | unset | `core/xplane/devflags.py:43` |
+| `FLIGHTSIM_WORLD_BEAUTY_OVERRIDES` | `world_beauty_overrides` | dev-only | unset | `core/scene/look_match.py:36` |
 
 ## Keys not prefixed FLIGHTSIM_
 

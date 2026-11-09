@@ -187,6 +187,9 @@ SETTINGS: Tuple[Setting, ...] = (
     Setting("xplane_lighting", "FLIGHTSIM_XPLANE_LIGHTING", "dev-only", None,
             ("core/xplane/devflags.py:43",),
             "X-Plane comparison flag for developers; read in core/xplane/devflags.py (E5), never on the web path."),
+    Setting("world_beauty_overrides", "FLIGHTSIM_WORLD_BEAUTY_OVERRIDES", "dev-only", None,
+            ("core/scene/look_match.py:36",),
+            "Probe-render overrides file for the beauty world look (look_match.py writes it); render-machine calibration only, never on the web path."),
 )
 
 #: Every ``add_argument`` of flightsim/capture.py (the positional ``spec``
