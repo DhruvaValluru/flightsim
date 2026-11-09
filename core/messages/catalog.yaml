@@ -331,7 +331,7 @@ render.supersample:
   hint: "Use -supersample=N (1 to 4) only with -quality=beauty, or a smaller factor or output size."
 
 render.beauty_look:
-  sentence: "The beauty look cannot be planned or applied: an unknown grade or lens, a sun that cannot be lit, a camera without a sensor width, or a sidecar the renderer cannot read."
+  sentence: "The beauty look cannot be planned or applied: an unknown grade or lens, a sun that cannot be lit or that moves during the clip, a camera without a sensor width, or a sidecar the renderer cannot read."
   hint: "Use a known grade (golden hour, desert noon or storm) and lens (standard or cinematic), or render at the measure quality."
 
 # tiles-delight (core/scene/tiles_delight.py, the shader's Python twin):

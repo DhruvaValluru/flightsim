@@ -195,3 +195,33 @@ def test_the_label_mismatches_are_said_in_render_json():
     assert acc.index("if (!bPathTrace)") < acc.index('TEXT("history_across_frames")')
     assert acc.index("if (LinearCapture != nullptr)") < acc.index('TEXT("linear_capture")')
     assert "render-path: the path tracer replaces Lumen" in COMMANDLET
+
+
+def test_measure_render_json_gains_no_beauty_look_key():
+    """Record() is nullptr on measure; FJsonObject::SetObjectField would
+    then store a JSON null, so the write must sit behind the guard."""
+    write = 'Root->SetObjectField(TEXT("beauty_look"), BeautyLook);'
+    assert COMMANDLET.count(write) == 1
+    guard = "if (TSharedPtr<FJsonObject> BeautyLook = FFlightSimBeautyLook::Record())"
+    before = COMMANDLET[:COMMANDLET.index(write)]
+    assert before.rstrip().endswith(guard + " {")
+    look = (ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/"
+            "FlightSimBeautyLook.cpp").read_text(encoding="utf-8")
+    body = look[look.index("TSharedPtr<FJsonObject> FFlightSimBeautyLook::Record()"):]
+    body = re.sub(r"\s+", " ", body[:400])
+    assert "{ const FBeautyLookState& State = BeautyLookState(); if (!State.bApplied) { return nullptr; }" in body
+
+
+def test_a_beauty_look_with_an_animated_sun_refuses_by_name():
+    start = COMMANDLET.index("if (!FFlightSimBeautyLook::LastError().IsEmpty())")
+    block = COMMANDLET[start:COMMANDLET.index("auto SetCvar = ", start)]
+    assert "if (bSunAnimated && FFlightSimBeautyLook::Record().IsValid())" in block
+    assert 'return Fail(TEXT("render.beauty_look: -beauty-look= plans' in block
+
+
+def test_measure_render_json_gains_no_aircraft_look_key():
+    write = 'Root->SetObjectField(TEXT("aircraft_look")'
+    assert COMMANDLET.count(write) == 1
+    before = COMMANDLET[:COMMANDLET.index(write)][-120:]
+    guard = "if (AircraftFX.IsBuilt() && AircraftFX.Record.IsValid())"
+    assert guard in before and "}" not in before[before.index(guard):]

@@ -3176,6 +3176,17 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// that cannot be applied refuses; an applied EV100 is the exposure of record.
 		if (!FFlightSimBeautyLook::LastError().IsEmpty()) { return Fail(FFlightSimBeautyLook::LastError()); }
 		FFlightSimBeautyLook::RecordExposure(ExposureMode, ExposureSource, AppliedEv100, bAppliedEv100);
+		// Fix pass (shots-render): the look's grade, temperature band, EV100
+		// and sun lux are planned for ONE sun elevation; an animated sun
+		// (-sun-elev-end/-sun-azim-end) would carry the start's look to the
+		// end of the sweep, so the two are refused together by name.
+		if (bSunAnimated && FFlightSimBeautyLook::Record().IsValid())
+		{
+			return Fail(TEXT("render.beauty_look: -beauty-look= plans the grade, temperature band and ")
+			            TEXT("exposure for one sun elevation; with an animated sun (-sun-elev-end=, ")
+			            TEXT("-sun-azim-end=) the end frames would keep the start's look. Render the sweep ")
+			            TEXT("without the beauty look, or as stills"));
+		}
 		auto SetCvar = [](const TCHAR* Name, int32 Value)
 		{
 			if (IConsoleVariable* Variable =
