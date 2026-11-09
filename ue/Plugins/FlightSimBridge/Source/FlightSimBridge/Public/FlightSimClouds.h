@@ -66,6 +66,7 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "FlightSimDustHaze.h"
 #include "FlightSimGroundDetail.h"
 
 class AActor;
@@ -150,5 +151,7 @@ private:
 	const FFlightSimWeather* WeatherRef = nullptr;
 
 	FFlightSimGroundDetail Scatter;
+	// dust-humidity-haze: the overlay after ApplyAtmosphere (FlightSimDustHaze.h).
+	FFlightSimDustHaze DustHaze;
 	TArray<TSharedPtr<FJsonValue>> Frames;
 };

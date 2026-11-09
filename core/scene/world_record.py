@@ -212,7 +212,7 @@ def world_record(spec, look: Optional[Dict[str, Any]] = None) -> Optional[Applie
     if look is None:
         return None
     from . import night as night_module
-    from . import precipitation as rain_module
+    from . import dust_haze, precipitation as rain_module
 
     tests = predictions(spec, look)
     stated = [q for q in (getattr(spec.scene, "night", None),
@@ -230,6 +230,7 @@ def world_record(spec, look: Optional[Dict[str, Any]] = None) -> Optional[Applie
         "night": None if look["night"] is None else look["night"].to_dict(),
         "rain": look["rain"],
         "cloud_drift": look["cloud_drift"],
+        "dust_haze": dust_haze.spec_parameters(spec),  # dust-humidity-haze: expected world_beauty.dust_haze
         "null_tests": [t.to_dict() for t in tests],
         "windows_clauses": dict(WINDOWS_CLAUSES),
         "sky_band": {"elevation_deg": SKY_BAND_ELEVATION_DEG,
