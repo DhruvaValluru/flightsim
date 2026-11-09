@@ -274,6 +274,22 @@ rp_cvar r.PathTracing.Denoiser "Renderer/Private/PathTracingSpatialTemporalDenoi
 rp_cvar r.PathTracing.Denoiser.Name "Renderer/Private/PathTracingSpatialTemporalDenoising.cpp"
 rp_cvar r.RayTracing "Renderer/Private/DeferredShadingRenderer.cpp"
 rp_cvar r.RayTracing.Nanite.Mode "Engine/Private/Rendering/NaniteResources.cpp"
+# -- reference-frames lane (2026-11-09): the path-traced reference ----------
+# FlightSimRenderCommandlet.cpp pathtrace branch: the reference atmosphere
+# (a post-process override the -1 cvar inherits), the reference clouds and
+# the NNE denoiser's asset; each read in the 5.7.4 source on this date.
+rp_check "PostProcess PathTracingEnableReferenceAtmosphere" "Engine/Classes/Engine/Scene.h" "uint32 PathTracingEnableReferenceAtmosphere : 1;"
+rp_check "ref atmosphere inherits the post-process value" "Renderer/Private/PathTracing.cpp" "return EnableReferenceAtmosphereCVar < 0 ? View.FinalPostProcessSettings.PathTracingEnableReferenceAtmosphere != 0 : EnableReferenceAtmosphereCVar != 0;"
+rp_check "ref clouds need the ref atmosphere" "Renderer/Private/PathTracing.cpp" "if (!PathTracing::UsesReferenceAtmosphere(View) || !ShouldRenderVolumetricCloud(Scene, View.Family->EngineShowFlags))"
+rp_check "sky light skydome off under the ref atmosphere" "Renderer/Private/PathTracing.cpp" "const bool bEnableSkydome = !bUseAtmosphere;"
+rp_check "denoise on the last sample" "Renderer/Private/PathTracing.cpp" "(((Config.PathTracingData.Iteration + 1) == MaxSPP) ||"
+rp_check "default spatial denoiser is NNEDenoiser" "Renderer/Private/PathTracingSpatialTemporalDenoising.cpp" "\"NNEDenoiser\","
+rp_cvar NNEDenoiser.Asset "../../Plugins/NNE/NNEDenoiser/Source/NNEDenoiser/Private/NNEDenoiserViewExtension.cpp"
+rp_check "NNEDenoiser.Asset 3 is OIDN High Quality" "../../Plugins/NNE/NNEDenoiser/Source/NNEDenoiser/Private/NNEDenoiserViewExtension.cpp" "case 3: return TEXT(\"/NNEDenoiser/NNED_Oidn2-3_HighQuality.NNED_Oidn2-3_HighQuality\");"
+rp_check "NNEDenoiser registers only with ray tracing" "../../Plugins/NNE/NNEDenoiser/Source/NNEDenoiser/Private/NNEDenoise.cpp" "if (IsRayTracingAllowed())"
+rp_check "NNEDenoiser active only on path-traced families" "../../Plugins/NNE/NNEDenoiser/Source/NNEDenoiser/Private/NNEDenoiserViewExtension.cpp" "TimeoutCounter = !!InViewFamily.EngineShowFlags.PathTracing ? NO_SHOW_PATH_TRACING_TIMEOUT"
+rp_check "NNEDenoiser plugin enabled by default" "../../Plugins/NNE/NNEDenoiser/NNEDenoiser.uplugin" "\"EnabledByDefault\" : true,"
+# -- end reference-frames lane ------------------------------------------------
 
 # -- integration (visual overhaul, 2026-11-09) -------------------------------
 # RenderPinShowFlags / RegisterLabelCapture / RenderMakeLensFree /
@@ -667,11 +683,6 @@ aircraft_check "aces2: bloom and exposure before the LUT" "Shaders/Private/PostP
 # cannot compile); re-checked here before a build. Cvar names are matched at
 # their DEFINITION (the quoted name in the file that registers it).
 hl_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
-
-# -- supersample lane (visual overhaul, 2026-11-09): -supersample=N ---------
-# FlightSimSupersample.cpp and its hooks in FlightSimRenderCommandlet.cpp.
-# Each pattern is a fixed string read in the 5.7.4 source when written.
-ss_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
     local f="$UE_ROOT/Engine/Source/Runtime/$2"
     if [ ! -f "$f" ]; then
         bad "$1" "file $2 not found in $UE_ROOT"
@@ -741,6 +752,16 @@ hl_cvar r.Lumen.HardwareRayTracing.LightingMode "Renderer/Private/Lumen/LumenHar
 hl_cvar r.Lumen.Reflections.HardwareRayTracing "Renderer/Private/Lumen/LumenReflectionHardwareRayTracing.cpp"
 # ------------------------------------------------------ END hero lighting --
 
+# -- supersample lane (visual overhaul, 2026-11-09): -supersample=N ---------
+# FlightSimSupersample.cpp and its hooks in FlightSimRenderCommandlet.cpp.
+# Each pattern is a fixed string read in the 5.7.4 source when written.
+ss_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
+    local f="$UE_ROOT/Engine/Source/Runtime/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
         bad "$1" "not found in $2 -- FlightSimSupersample.cpp needs updating"
     fi
 }

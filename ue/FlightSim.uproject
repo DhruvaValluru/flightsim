@@ -17,6 +17,7 @@
 		{ "Name": "PythonScriptPlugin", "Enabled": true },
 		{ "Name": "PCG", "Enabled": true },
 		{ "Name": "GeometryScripting", "Enabled": true },
+		{ "Name": "NNEDenoiser", "Enabled": true },
 		{ "Name": "CesiumForUnreal", "Enabled": true, "Optional": true }
 	]
 }

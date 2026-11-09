@@ -356,6 +356,19 @@ ground_scatter.sidecar:
   sentence: "The ground scatter file cannot be read, is of another format or version, or carries no region or species."
   hint: "Write the scatter file again, or render without ground scatter."
 
+  sentence: "The ground scatter sidecar cannot be used: it is not JSON, it has the wrong format or version, or it lists no region or species."
+  hint: "Re-bake the scatter sidecar with the current format, or render without ground scatter."
+# reference-frames lane (core/scene/look_match.py, experiments/look_match.py):
+look_match.inputs:
+  sentence: "The look match cannot read what it was given: a frame, its label mask or depth, the beauty look, or the world overrides is missing or not in the expected form."
+  hint: "Point it at a path-traced frame and a beauty frame that were rendered with labels, and at readable look files."
+look_match.not_same_shot:
+  sentence: "The reference and the realtime frame are not the same shot: their size or their depth differs."
+  hint: "Render both from the same card and shot, changing only the quality (pathtrace for the reference, beauty for the realtime frame)."
+look_match.quality:
+  sentence: "The look match needs a path-traced reference and a beauty realtime frame, and one of the two was rendered at another quality."
+  hint: "Render the reference with the path tracer and the realtime frame at the beauty quality."
+
 # -- the batch runner (core/dataset/batch.py) --------------------------------
 
 batch.matrix:
