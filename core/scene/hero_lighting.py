@@ -26,8 +26,8 @@ Two halves
    engine side cannot know: the ground's albedo under the shot, turned
    into the luminance the sky light's lower hemisphere should have (a
    Lambertian ground: L = albedo x E_horizontal / pi). The engine-side
-   light quality (true solar disc, VSM, contact shadows, real-time sky
-   capture, Lumen hit lighting, light shafts, the sun disc) lives in
+   light quality (true solar disc, VSM, contact shadows, the sky light's
+   cloud AO and ground, Lumen hit lighting, light shafts, the sun disc) lives in
    FlightSimHeroLighting.cpp and is recorded in render.json
    ``hero_lighting``.
 

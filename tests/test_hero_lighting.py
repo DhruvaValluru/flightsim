@@ -313,6 +313,15 @@ def test_cpp_cvars_are_in_the_bridge_check():
         assert setter in block, setter
 
 
+def test_cpp_keeps_the_sky_light_captured_once():
+    # A scene capture never runs the real-time sky capture, and
+    # UpdateSkyCaptureContents skips a real-time sky light: switching it on
+    # leaves every beauty shadow lit by nothing (docs/VALIDITY.md, 5.7.4).
+    source = _read(CPP)
+    assert "SetRealTimeCapture(" not in source
+    assert "r.SkyLight.RealTimeReflectionCapture" not in source
+
+
 def test_cpp_label_exclusion_is_a_noop_before_apply():
     source = _read(CPP)
     body = source[source.index("void FFlightSimHeroLighting::ExcludeFromLabel"):]

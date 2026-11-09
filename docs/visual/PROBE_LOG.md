@@ -786,7 +786,9 @@ both on the beauty look only), `FlightSimRenderCommandlet.cpp` (4 lines),
      which is kept;
    - VSM: directional LOD bias, page pool, and SMRT ray and sample counts;
    - world-space contact shadows at airframe scale;
-   - the sky light as a real-time capture (no time slicing) with cloud AO,
+   - the sky light with cloud AO, left in the commandlet's capture-once
+     mode (skeptic fix: real-time capture never runs for a scene capture,
+     so turning it on lit every shadow with nothing; docs/VALIDITY.md),
      and its lower hemisphere set to the ground's radiance from the
      `-hero-lighting=` sidecar (Lambertian: albedo x E_h / pi);
    - Lumen short-range AO and screen traces, and reflections with hardware

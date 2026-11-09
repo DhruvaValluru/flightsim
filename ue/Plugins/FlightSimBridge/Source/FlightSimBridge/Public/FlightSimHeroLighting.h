@@ -15,8 +15,9 @@
 //     and sample counts);
 //   * world-space contact shadows short enough to act only at airframe
 //     scale (panel lines, canopy frame, pylons);
-//   * the sky light as a REAL-TIME capture, time slicing off, with cloud
-//     ambient occlusion, and the lower hemisphere replaced by the ground's
+//   * the sky light (left in the commandlet's capture-once mode: real-time
+//     capture never runs for a scene capture) with cloud ambient
+//     occlusion, and the lower hemisphere replaced by the ground's
 //     radiance from the -hero-lighting= sidecar (albedo x horizontal
 //     illuminance / pi, decided in Python);
 //   * Lumen: short-range AO and screen traces; reflections with hit

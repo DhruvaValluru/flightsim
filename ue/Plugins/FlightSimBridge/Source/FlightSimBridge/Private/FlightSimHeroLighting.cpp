@@ -21,8 +21,7 @@
 // read in UE 5.7.4's Classes/Components/{LightComponent,LightComponentBase,
 // DirectionalLightComponent,SkyLightComponent,SkyAtmosphereComponent}.h, every
 // cvar name at its definition in Renderer/Private (or Core's ConsoleManager.cpp
-// for r.ContactShadows, Engine's SkyLightComponent.cpp for
-// r.SkyLight.RealTimeReflectionCapture), and the show flags in
+// for r.ContactShadows), and the show flags in
 // Public/ShowFlagsValues.inl. scripts/check_bridge_api.sh re-checks them.
 //
 // Every constant here is UNCALIBRATED unless it says physics: a starting
@@ -305,10 +304,17 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 	TSharedPtr<FJsonObject> SkyRecord = MakeShared<FJsonObject>();
 	if (USkyLightComponent* Sky = Scene.SkyLightComponent)
 	{
-		Sky->SetRealTimeCapture(true);
+		// NOT real-time capture: a scene capture never runs it (FScene::
+		// AllocateAndCaptureFrameSkyEnvMap returns for bIsSceneCapture) and
+		// UpdateSkyCaptureContents skips a real-time sky light, so turning it
+		// on would light every beauty frame's shadows with nothing (5.7.4,
+		// docs/VALIDITY.md: 1.8/255 vs 172). The commandlet's capture-once
+		// (after this runs) picks up the settings below.
 		Sky->bCloudAmbientOcclusion = true;
 		Sky->CloudAmbientOcclusionStrength = HeroLightingCloudAoStrength;
-		SkyRecord->SetBoolField(TEXT("real_time_capture"), true);
+		SkyRecord->SetBoolField(TEXT("real_time_capture"), Sky->IsRealTimeCaptureEnabled());
+		SkyRecord->SetStringField(TEXT("capture"),
+			TEXT("captured once by the commandlet before the first frame (and per frame when the sun animates)"));
 		SkyRecord->SetBoolField(TEXT("cloud_ambient_occlusion"), true);
 		FLinearColor Lower = FLinearColor::Black;
 		const TSharedPtr<FJsonObject>* Ground = nullptr;
@@ -318,8 +324,8 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 			{
 				return false;
 			}
-			// Real-time capture replaces the lower hemisphere with this colour
-			// (absolute luminance, pre-exposed in ApplyLowerHemisphereColorPS).
+			// The capture replaces the lower hemisphere with this colour (alpha 1:
+			// a full lerp in ReflectionEnvironmentShaders.usf's copy to the cube face).
 			Sky->bLowerHemisphereIsBlack = true;
 			Sky->SetLowerHemisphereColor(Lower);
 			SkyRecord->SetStringField(TEXT("lower_hemisphere_basis"),
@@ -346,8 +352,6 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 	HeroLightingCvar(TEXT("r.Shadow.Virtual.SMRT.RayCountDirectional"), HeroLightingSmrtRayCountDirectional, Asked, ReadBack);
 	HeroLightingCvar(TEXT("r.Shadow.Virtual.SMRT.SamplesPerRayDirectional"), HeroLightingSmrtSamplesPerRay, Asked, ReadBack);
 	HeroLightingCvar(TEXT("r.ContactShadows"), 1.0f, Asked, ReadBack);
-	HeroLightingCvar(TEXT("r.SkyLight.RealTimeReflectionCapture"), 1.0f, Asked, ReadBack);
-	HeroLightingCvar(TEXT("r.SkyLight.RealTimeReflectionCapture.TimeSlice"), 0.0f, Asked, ReadBack);
 	HeroLightingCvar(TEXT("r.LightShaftQuality"), 1.0f, Asked, ReadBack);
 	HeroLightingCvar(TEXT("r.VolumetricFog"), 1.0f, Asked, ReadBack);
 	HeroLightingCvar(TEXT("r.VolumetricFog.GridPixelSize"), HeroLightingFogGridPixelSize, Asked, ReadBack);
