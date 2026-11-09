@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -304,6 +305,11 @@ def test_server_serves_page_and_state(fake_tree: Path, tmp_path: Path) -> None:
         st = json.loads(urllib.request.urlopen(base + "/state.json", timeout=5).read())
         assert [s["id"] for s in st["workflows"]["sessions"]][0] == "sess-lead"
         assert st["ruflo"]["enabled"] is False and st["pytest"]["present"] is False
+        # DNS rebinding: a foreign Host header is refused even though the socket is loopback
+        req = urllib.request.Request(base + "/state.json", headers={"Host": "attacker.example"})
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(req, timeout=5)
+        assert err.value.code == 403
     finally:
         srv.shutdown()
         srv.server_close()
@@ -322,3 +328,10 @@ def test_page_polls_only_local_state() -> None:
 def test_main_refuses_non_loopback_bind() -> None:
     with pytest.raises(SystemExit):
         sv.main(["--host", "0.0.0.0", "--once"])
+
+
+def test_host_is_loopback() -> None:
+    for ok in ("127.0.0.1:8787", "localhost:8787", "LOCALHOST", "[::1]:8787", "127.0.0.1"):
+        assert sv.host_is_loopback(ok), ok
+    for bad in (None, "", "attacker.example:8787", "127.0.0.1.attacker.example", "localhost.evil:80", "[::2]:8787"):
+        assert not sv.host_is_loopback(bad), bad

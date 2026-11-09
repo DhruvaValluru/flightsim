@@ -753,6 +753,26 @@ def main_repo_root(start: Path) -> Path:
     return start
 
 
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
+
+
+def host_is_loopback(host_header: str | None) -> bool:
+    """True when an HTTP Host header names this machine's loopback interface.
+
+    The server binds to loopback, but a web page from another origin can reach it by DNS
+    rebinding (its own hostname re-pointed at 127.0.0.1). The browser then sends that foreign
+    hostname as Host, so refusing it keeps transcript excerpts and memory values off other sites.
+    """
+    host = (host_header or "").strip().lower()
+    if not host:
+        return False
+    if host.startswith("["):
+        name = host.split("]", 1)[0] + "]"
+    else:
+        name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    return name in LOOPBACK_HOSTS
+
+
 def make_handler(collector: Collector, index_path: Path):
     class Handler(BaseHTTPRequestHandler):
         server_version = "SwarmViz/1"
@@ -770,6 +790,9 @@ def make_handler(collector: Collector, index_path: Path):
             self.wfile.write(body)
 
         def do_GET(self):  # noqa: N802
+            if not host_is_loopback(self.headers.get("Host")):
+                self._send(403, b"forbidden: Host must be 127.0.0.1 or localhost", "text/plain")
+                return
             url = urlparse(self.path)
             if url.path in ("/", "/index.html"):
                 try:
