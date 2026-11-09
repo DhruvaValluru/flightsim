@@ -751,3 +751,116 @@ $env:FLIGHTSIM_RENDER_QUALITY = "beauty";  .\.venv\Scripts\python.exe -m uvicorn
 Record each run's offsets here, and in ruflo under
 `visual-overhaul/verifier-tooling/probe-<date>`, before changing any
 constant above.
+
+## j11-package
+
+**What exists (code only, 2026-11-09, Mac; nothing rendered).** The J-11A
+now converts from much more of github.com/yanes19/SU-27SK @ 925cb531 than
+`Models/Su-27.ac` and the R-27R:
+- `docs/visual/J11_PACKAGE.md`: all 701 files of the package (path, bytes,
+  git blob sha1, purpose, used), generated from the GitHub tree API by
+  `python -m assets_pipeline.package_inventory <tree.json> assets/aircraft_config/J11.json docs/visual/J11_PACKAGE.md`.
+- `assets/aircraft_config/J11.json package_files`: 29 pinned files (git
+  blob sha1 + sha256 + bytes), checked by `assets_pipeline/package_pins.py`
+  after `fetch_source` and again before every convert; refusal
+  `aircraft.package_pin`. A manifest converted before the pins is stale
+  (`importer._package_pins_reason`), so the render machine re-converts and
+  re-imports the J-11 on its next run with no manual step.
+- Converter (`assets_pipeline/convert.py`): the model XML's livery material
+  animation, object by object (`livery`: PLAAF2Div onto the ten objects
+  J-11A.xml names; every other object keeps Su-27_Flanker_P01.png);
+  `interior` parts (panel.ac, seat2.ac, the pilot) with the summed
+  panel-zh.xml offsets and the seat's -5 deg pitch; `views.pilot_eye` from
+  J-11A-set.xml; `material_sources.json` beside the OBJs (the .ac
+  rgb/spec/shi/trans per MTL slot). Refusals `aircraft.livery_unmatched`,
+  `aircraft.interior_outside_hull`, `aircraft.texture_collision`
+  (core/messages/catalog.yaml).
+- Look (`scripts/aircraft_look.py`, `assets/aircraft_config/look/J11.json`):
+  `fg_material` derives per-slot roughness from the .ac shininess,
+  r = (2 / (shi + 2)) ** 0.25, triangle-weighted, clamped; the
+  `package_model_m` anchor puts lamps and nozzles where the package's model
+  XML puts them. `ue_aircraft_materials.create_look_instances` passes the
+  converter's record through.
+- Tests: `tests/test_j11_package.py` (40), plus the mechanism test in
+  `tests/test_aircraft_look.py` now on an inline config.
+
+**Measured on the Mac from the pinned files (converter run, no engine).**
+- 25 MTL slots; textures PLAAF2Div 4096x2048, Su-27_Flanker_P01 4096x2048,
+  su-27gears 1024, Glass_Cockpit 1024x512, R-27R 512, panel front 2048,
+  panel.wcs 1024x652 -> 1024x512 (the converter's power-of-two resample),
+  seat/pilot 128-512. All ten livery objects matched once.
+- Body triangles 9,577 -> 35,068 (panel 2,426, seat 19,489, pilot 3,576).
+  `parts`, `components` (the R-27R boxes), `mesh_extents_actor_cm`,
+  `mesh_extent_actor_m`, `mesh_origin_actor_cm` (0.0078, 0, -10.57) cm and
+  the measured vertex counts are byte-identical with and without the
+  interior/livery/pins.
+- Interior extents (actor, about the model origin): x -6.55..-3.86 m,
+  y -0.60..0.65 m, z 0.21..1.58 m; inside the hull and under the canopy.
+- The package carries NO normal, specular, metalness or light maps (one AO
+  map, for an instrument not imported); `glass.eff` has normal maps off.
+  So metallic is never derived and no normal map is bound; the masters'
+  procedural panel normals stay the only normal detail.
+- Nozzles: the old `fdm_thruster` anchors (J11.xml y +-20 in = +-0.51 m)
+  snapped to the TAIL STING at x 21.5 m: the beauty afterburner plume came
+  out of the tail cone. The package's petal rings (J-11A.xml Nozzles.xml
+  offset + NozzleL.xml) centre at (19.227, -1.277 / +1.263, -0.196) m; the
+  hull's own nozzle exits measure x 19.19 m, rim radius 0.45-0.58 m about
+  those lines. The FX nozzles now sit there (radius 0.5 m kept); thrust
+  still comes from the FDM engine index.
+- Lamps: LightPack.xml nav red/green at (16.12, -+7.5, 0.32) m (12 cm from
+  the nearest hull vertex), beacons (flashing, 400 cd) at the same points,
+  two landing lamps at (7.65, -+0.13, -0.48) m. The package's strobes and
+  tail light are commented out; the strobes are dropped, the tail lamp
+  stays on the measured aft vertex (stated as not from the package). The
+  taxi lamp has no FX kind and is not drawn.
+
+**Decisions.**
+- Interior, seat and pilot are drawn IN THE BODY PART: they take the
+  aircraft's class and int_id (the commandlet stencils every primitive of
+  the aircraft actor), get no component and no box, and must lie inside
+  the hull's extents (else `aircraft.interior_outside_hull`), so they can
+  never grow the silhouette the labels measure. They are kept out of the
+  extents that set the origin and anchors. No C++ change was needed
+  (no engine symbols used; nothing added to check_bridge_api.sh).
+- Glass and visor are class `glass` by slot rule (the MTL has no `d`, so
+  before this lane the canopy was PAINTED with Glass_Cockpit.png). The
+  cockpit, seat and pilot slots are class `rubber` (matte Default Lit, no
+  clear coat, no panel lines). Airframe paint roughness is NOT derived:
+  every Su-27.ac paint material is shi 128 spec 1 (an authoring habit,
+  roughness 0.35), which would make matte PLAAF grey glossy.
+- Not imported, recorded: the 85 animated instrument / console meshes
+  (Nasal / canvas), the stick, throttle and pedals, the nozzle petals
+  (throttle-animated, and J-11A.xml's second Nozzles.xml places one ring
+  3.2 m off the airframe), the other 13 liveries, the R-27ER / R-73 /
+  countermeasure stores (not in the FDM loadout), FlightGear's particle
+  effects (the FX lane draws its own).
+
+**Open, needs the render machine.**
+- Measure path: the interior is part of the shared body asset, so measure
+  draws it too. From outside it is hidden by the opaque canopy and the
+  hull (silhouette unchanged); a camera INSIDE the canopy now sees a
+  cockpit labelled as aircraft (it is aircraft). Check
+  `python experiments/gate6_visual.py` passes unchanged after the J-11
+  re-import.
+- Glass is opaque (aircraft lane decision), so the cockpit-shoulder shot
+  (SHOULDER_OFFSET 6 m behind the CG, outside the canopy) will NOT show
+  the pilot or panel through it. The interior shows from the pilot-eye
+  station (`mesh_manifest.json views.pilot_eye`, actor (-523, 0, 134) cm)
+  only if the single-sided canopy faces point outward (unverified: looked
+  at from inside they would then be culled). Probe: a J-11 render with an
+  explicit camera at the pilot-eye station, and the contact sheet's shot d.
+- The seat's pitch sign (`_pitch_model`, FG nose-up positive, from memory)
+  and the pilot sitting in the seat: look at the pilot-eye frame.
+- UNCALIBRATED: `fg_material` roughness_min 0.5 / max 0.95; beacon 400 cd;
+  the 0.5 m nozzle radius against the measured 0.45-0.58 m rim.
+
+**Render-machine steps.**
+1. Pull; the next J-11 render (or `python -m assets_pipeline.importer J11`)
+   finds the manifest stale, verifies the 29 pins, re-converts and
+   re-imports. Expect "29 pinned package file(s) verified".
+2. `UnrealEditor-Cmd ue/FlightSim.uproject -run=pythonscript -script="scripts/ue_fix_aircraft_materials.py J11"`;
+   `assets/generated/J11/look_manifest.json` must list mat_Glass_Cockpit
+   as glass and the cockpit slots with a `derived` roughness.
+3. `python experiments/gate6_visual.py` (measure unchanged).
+4. `python experiments/visual_contact_sheet.py` shots a and d; look at the
+   livery, the nozzle plume origin and the nav/beacon lamps at the tips.
