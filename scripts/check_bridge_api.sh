@@ -367,6 +367,12 @@ beauty_check "premise: per-pixel sun carries no CPU transmittance" \
     "return FLinearColor(FVector(GetOuterSpaceIlluminance()));"
 beauty_check "DirectionalLight bPerPixelAtmosphereTransmittance" \
     "Engine/Classes/Components/DirectionalLightComponent.h" "uint32 bPerPixelAtmosphereTransmittance : 1;"
+# The -aerosol= probe converts its multiplier to 1/km against these defaults
+# (FlightSimVisualScene.cpp SceneMie*DefaultPerKm).
+beauty_check "premise: Mie scattering default 0.003996/km" \
+    "Engine/Private/Components/SkyAtmosphereComponent.cpp" "MieScatteringScale = 0.003996f;"
+beauty_check "premise: Mie absorption default 0.000444/km" \
+    "Engine/Private/Components/SkyAtmosphereComponent.cpp" "MieAbsorptionScale = 0.000444f;"
 if grep -qF -- "getTransmittanceLutUvs(PHeight, LightZenithCosAngle, BottomRadius, TopRadius, TransmittanceLutUv);" \
     "$UE_ROOT/Engine/Shaders/Private/SkyAtmosphereCommon.ush" 2>/dev/null; then
     ok "premise: per-pixel transmittance at the pixel's sun angle" "present"
