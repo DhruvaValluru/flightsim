@@ -751,3 +751,104 @@ $env:FLIGHTSIM_RENDER_QUALITY = "beauty";  .\.venv\Scripts\python.exe -m uvicorn
 Record each run's offsets here, and in ruflo under
 `visual-overhaul/verifier-tooling/probe-<date>`, before changing any
 constant above.
+
+## supersample
+
+Lane: cleaner beauty frames through supersampling. Files:
+`ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimSupersample.{h,cpp}`,
+`core/capture/supersample.py` (the Python mirror), `tests/test_supersample.py`,
+three 1-2 line hooks in `FlightSimRenderCommandlet.cpp` (Configure before the
+beauty target is made, Downsample right after the beauty read-back, Record
+beside the beauty_look record), `experiments/visual_contact_sheet.py`
+(`--supersample N`, default 2 on a beauty sheet), a `render.supersample`
+refusal in `core/messages/catalog.yaml`, and a marked block in
+`scripts/check_bridge_api.sh`.
+
+### What it does
+
+`-supersample=N` (N from 1 to 4, `-quality=beauty` only) makes the beauty
+render target N times the output size on each axis. The frame read back from
+it is reduced to the output size by an exact N x N box before the PNG is
+written. The box works in linear light: each sRGB byte is decoded, the N^2
+values are averaged, and the result is encoded to the nearest byte. The
+beauty is tonemapped inside the engine (`SCS_FinalColorLDR` into an
+`RTF_RGBA8_SRGB` target), and this commandlet has no linear-HDR beauty
+readback, so the filter runs on the tonemapped frame. Every label capture
+keeps its own `Width x Height` target from the same pose and field of view,
+so the labels never see the larger frame. Without the flag the factor is 1
+and none of the hooks does anything. Measure and pathtrace renders refuse the
+flag by name. The flag is recorded in `render.json beauty_samples` with these
+fields: `supersample`, `spatial` = N^2, `supersample_filter` = box,
+`internal_width_px`/`internal_height_px`, the output size, the VRAM estimate
+and its budget, and `supersample_pixel_moving` = false.
+
+### Decision: box, not Lanczos-3 (measured)
+
+The test draws a synthetic half-plane edge. Each beauty sample is
+point-sampled at the internal pixel centres, and the label mask is
+point-sampled at the output pixel centres. The test then measures how far
+from the edge the reduced frame differs from the mask by more than one 8-bit
+step (reach), and where the edge reads back (position). Frame 96 x 64, edge
+offset 0.3 px, three angles:
+
+| N | box reach px | box position err px | box overshoot | Lanczos-3 reach px | Lanczos-3 overshoot |
+|---|---|---|---|---|---|
+| 2 | 0.20-0.34 | <= 0.20 | 0 | 2.20-2.37 | 8-10 % |
+| 3 | 0.20-0.44 | <= 0.10 | 0 | 2.20-2.43 | 6-8 % |
+| 4 | 0.20-0.50 | <= 0.05 | 0 | 2.20-2.40 | 5-8 % |
+
+The box changes only the output pixels the edge crosses, and it stays well
+inside the verifier's `MASK_TOL_PX` (1.0) and `LOOK_ALIGNMENT_TOL_PX`. The
+Lanczos-3 changes pixels about 2.4 px away and rings, so it would be a
+pixel-moving effect. The box is therefore not listed in
+`pixel_moving_effects`. The test also checks that a box shifted by one
+internal pixel is caught.
+
+### C++ and Python, number for number
+
+`tests/test_supersample.py` takes the `FLIGHTSIM-SUPERSAMPLE-PURE` block out
+of the .cpp, compiles it with the machine's C++ compiler (`-Wall -Werror`)
+and compares its output with `core/capture/supersample.py`. The comparison
+covers the decode and threshold tables, the encoder, the box (byte for byte,
+N 1-4, random data and every byte value), the VRAM estimate and the verdicts.
+
+### Memory (UNCALIBRATED)
+
+The estimate is internal pixels x (112 B for the render-resolution targets +
+24 B x (TSR history 200 %/100)^2). The budget is 7168 MiB of the render box's
+16 GiB; the Google tiles, Nanite, VSM and Lumen's scene cache keep the rest.
+`-supersample-vram-budget-mib=M` overrides the budget. With these numbers,
+4K internal (3840x2160: N 2 at 1920x1080, or N 4 at 960x540) is estimated at
+1645 MiB. N 3 at 1920x1080 (5760x3240) is 3702 MiB. 8K internal (N 2 at
+3840x2160, or N 4 at 1920x1080) is 6581 MiB; all of these pass. N 3 or N 4
+at 3840x2160 is over the budget and is refused as `render.supersample`. The internal side must also
+fit `GMaxTextureDimensions` (16384 is assumed when the RHI reports nothing).
+
+### Engine symbols
+
+The "supersample lane" block of `scripts/check_bridge_api.sh` checks these
+symbols: `GMaxTextureDimensions`, `UTextureRenderTarget2D::InitAutoFormat`,
+`RTF_RGBA8_SRGB`, `SCS_FinalColorLDR`, `FRenderTarget::ReadPixels(TArray<FColor>&)`,
+`FJsonObject::TryGetObjectField(FStringView, const TSharedPtr<FJsonObject>*&)`,
+`FParse::Value(..., int32&)` and `TArray::SetNumUninitialized`. Each was
+grepped in the 5.7.4 headers. The C++ is UNCOMPILED (no engine build was
+run).
+
+### Open items
+
+* The tile-streaming wait, the storm exposure meter and the TSR sub-frames
+  all run at the internal size. The meter reads luma statistics, which do
+  not depend on the size. Wall time grows by about N^2.
+* The linear EXR (`-linear`) and accumulation (`-accumulate`) captures stay
+  at the output size and are NOT supersampled.
+* Calibrate the bytes per pixel and the budget on the render box. Use stat
+  GPU or `r.DumpRenderTargetPoolMemory` at N 1 and N 2 on shot (a); the
+  slope is the per-pixel cost.
+
+### Render-machine commands
+
+```powershell
+.venv\Scripts\python -m experiments.visual_contact_sheet --quality beauty                  # -supersample=2 by default
+.venv\Scripts\python -m experiments.visual_contact_sheet --quality beauty --supersample 1  # A/B against no supersampling
+.venv\Scripts\python -m flightsim.verify runs\webapp\<beauty_id>
+```
