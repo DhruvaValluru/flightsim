@@ -292,12 +292,21 @@ LOCAL_EXPOSURE: Dict[str, float] = {
 #: aerial frame). UNCALIBRATED: set by probe render on the render machine
 #: (the lake/runway probe: wet-surface reflections at 300 m AGL, and the
 #: frame time it costs).
+#:
+#: Integration (2026-11-09): Lumen's per-view QUALITY and DISTANCE overrides
+#: (LumenReflectionQuality, LumenFinalGatherQuality, LumenSceneLightingQuality,
+#: LumenMaxTraceDistance, LumenSceneViewDistance, LumenSurfaceCacheResolution)
+#: have ONE owner, the render-path lane (FlightSimRenderCommandlet.cpp
+#: RenderBeautyLumen* constants, recorded in render.json
+#: render_settings.beauty_path.lumen_capture_overrides): they belong to the
+#: quality tier, not to a grade or a lens, and the render-path block runs
+#: after this look, so a value here was silently overwritten (this table's
+#: 2 km trace distance became 4 km while beauty_look echoed 2 km). The look
+#: keeps what only it sets.
 REFLECTIONS: Dict[str, Any] = {
-    "LumenReflectionQuality": 2.0,
-    "LumenFinalGatherQuality": 2.0,
-    "LumenSceneLightingQuality": 2.0,
+    "lumen_quality_owner": ("render-path lane: render.json "
+                            "render_settings.beauty_path.lumen_capture_overrides"),
     "LumenSceneDetail": 2.0,
-    "LumenMaxTraceDistance": 200000.0,
     "LumenFrontLayerTranslucencyReflections": True,
     "ScreenSpaceReflectionIntensity": 100.0,
     "ScreenSpaceReflectionQuality": 100.0,

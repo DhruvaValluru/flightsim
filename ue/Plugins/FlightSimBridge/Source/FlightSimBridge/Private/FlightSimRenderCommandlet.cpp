@@ -2969,6 +2969,44 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			IConsoleManager::Get().FindConsoleVariable(Name);
 		return Variable != nullptr ? Variable->GetInt() : -1;
 	};
+	// -- Integration (visual overhaul, 2026-11-09): ONE owner per setting -----
+	// Five lanes touch the beauty capture and the scene. Who owns what, and
+	// the order it is applied in (each later step may only touch what it
+	// owns; render.json render_settings.beauty_owners records the values
+	// read back at the end, since several differ by look):
+	//  1. Scene build (FFlightSimVisualScene::Build, before this point): sun
+	//     direction and lux (-sun-lux= / the card's scene.sun_lux, or the
+	//     -sky= plan's), X-Plane colours, the lighting block's scales and
+	//     temperature; SkyAtmosphere, height fog and clouds from the card;
+	//     with -sky=, FFlightSimSky owns the sun lux, its per-pixel
+	//     transmittance and the fog's inscattering.
+	//  2. World lane (FFlightSimWorldBeauty::Build, beauty only, earlier in
+	//     Main): SkyAtmosphere Mie / aerial perspective / ground albedo, the
+	//     fog's density share and volumetric fog, the sun's shadow-on-
+	//     atmosphere/cloud switches (never its lux or colour; never the
+	//     per-pixel transmittance a -sky= plan set), cloud materials, rain
+	//     readability, the SKY LIGHT's lightning pulse per frame. It never
+	//     touches the exposure: lightning is scene light the fixed exposure
+	//     sees, as a real camera would.
+	//  3. Exposure (above): the card's exposure triple, else look.ev100,
+	//     else -exposure-bias; with -sky=, the plan's physical camera.
+	//  4. Look-dev (ApplyBeautyPostProcess -> FFlightSimBeautyLook::Apply):
+	//     Lumen GI/reflection METHOD (same values as the -sky= plan), the
+	//     beauty EV100 ONLY on a plain manual exposure (a card triple or a
+	//     -sky= plan wins, recorded "applied: no"), sun TEMPERATURE only on an
+	//     uncoloured sun (never its lux), tonemap, grade, lens post (bloom,
+	//     flare, vignette, grain, fringe: the look's values replace the -sky=
+	//     plan's lens character on beauty), local exposure, DOF and motion
+	//     blur, LumenSceneDetail and SSR. NOT Lumen quality/distances.
+	//  5. Render-path (the block below): scalability, renderer cvars (AA,
+	//     VSM, SkyAtmosphere LUT quality, volumetric cloud tracing), TSR show
+	//     flags, and ALL Lumen per-view quality / distance / surface-cache
+	//     overrides; or the path tracer.
+	//  6. Storm meter (after warm-up): opens AutoExposureBias by a measured
+	//     number of stops on top of steps 3-4 (look_applied.storm_exposure),
+	//     copied to the linear and accumulation captures; constant after.
+	//  7. Per frame: the look-dev focus distance (UpdatePerFrame), the
+	//     world's sky-light pulse and cloud drift, the aircraft FX state.
 	if (bVisual && bBeauty)
 	{
 		FFlightSimVisualScene::ApplyBeautyPostProcess(Capture);
@@ -6985,6 +7023,44 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			BeautyPath->SetBoolField(TEXT("temporal_aa_show_flag"), Capture->ShowFlags.TemporalAA != 0);
 			BeautyPath->SetBoolField(TEXT("path_tracing_show_flag"), Capture->ShowFlags.PathTracing != 0);
 			RenderSettings->SetObjectField(TEXT("beauty_path"), BeautyPath);
+			// Integration: who owned each contested setting on this render and
+			// what the capture holds at the end (the order is the comment block
+			// at ApplyBeautyPostProcess). The lens values differ by look.
+			const FPostProcessSettings& Final = Capture->PostProcessSettings;
+			const bool bLookApplied = FFlightSimBeautyLook::Record().IsValid();
+			TSharedPtr<FJsonObject> Owners = MakeShared<FJsonObject>();
+			Owners->SetStringField(TEXT("order"),
+				TEXT("scene build (sun lux, sky, fog, clouds), world lane (atmosphere Mie, fog share, cloud ")
+				TEXT("materials, sky-light lightning pulse), exposure (card triple / look.ev100 / -exposure-bias / ")
+				TEXT("-sky= camera), look-dev (EV100 on a plain manual exposure, sun temperature, tonemap, grade, ")
+				TEXT("lens post, DOF, motion blur, SSR), render-path (scalability, cvars, TSR, Lumen quality), storm ")
+				TEXT("meter (bias), per frame (focus, sky pulse)"));
+			Owners->SetStringField(TEXT("lumen_quality"),
+				bPathTrace ? TEXT("render-path: the path tracer replaces Lumen")
+				           : TEXT("render-path (beauty_path.lumen_capture_overrides)"));
+			Owners->SetStringField(TEXT("exposure"), ExposureMode);
+			Owners->SetNumberField(TEXT("auto_exposure_bias"), Final.AutoExposureBias);
+			Owners->SetBoolField(TEXT("physical_camera_exposure"),
+				Final.bOverride_AutoExposureApplyPhysicalCameraExposure && Final.AutoExposureApplyPhysicalCameraExposure);
+			Owners->SetStringField(TEXT("sun_lux"), bPhysicalSky ? TEXT("-sky= plan") : TEXT("scene build (-sun-lux= / scene.sun_lux)"));
+			Owners->SetStringField(TEXT("sun_colour"), bLookApplied
+				? TEXT("look-dev temperature only on an uncoloured sun (beauty_look.applied.sun)")
+				: TEXT("scene build"));
+			Owners->SetStringField(TEXT("atmosphere_fog"), WorldBeauty.IsBuilt()
+				? TEXT("world lane over the scene build (look_applied.world_beauty.atmosphere)")
+				: TEXT("scene build"));
+			TSharedPtr<FJsonObject> Lens = MakeShared<FJsonObject>();
+			Lens->SetStringField(TEXT("owner"), bLookApplied ? TEXT("look-dev (-beauty-look=)")
+				: bPhysicalSky ? TEXT("-sky= plan") : TEXT("engine default"));
+			Lens->SetNumberField(TEXT("BloomIntensity"), Final.BloomIntensity);
+			Lens->SetNumberField(TEXT("LensFlareIntensity"), Final.LensFlareIntensity);
+			Lens->SetNumberField(TEXT("VignetteIntensity"), Final.VignetteIntensity);
+			Lens->SetNumberField(TEXT("FilmGrainIntensity"), Final.FilmGrainIntensity);
+			Lens->SetNumberField(TEXT("SceneFringeIntensity"), Final.SceneFringeIntensity);
+			Lens->SetNumberField(TEXT("MotionBlurAmount"), Final.MotionBlurAmount);
+			Lens->SetNumberField(TEXT("DepthOfFieldFstop"), Final.DepthOfFieldFstop);
+			Owners->SetObjectField(TEXT("lens_post"), Lens);
+			RenderSettings->SetObjectField(TEXT("beauty_owners"), Owners);
 		}
 
 		// Scene captures render at their target's size; the screen

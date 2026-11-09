@@ -516,6 +516,12 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	CloudLayers.Reset();
 	Overridden.Reset();
 	WeatherRef = &Weather;
+	{
+		// The commandlet's own test for a physical sky (FlightSimRenderCommandlet.cpp
+		// SkyPlanPath): -sky=<plan>.
+		FString SkyPlanArg;
+		bPhysicalSkyPlan = FParse::Value(Params, TEXT("sky="), SkyPlanArg) && !SkyPlanArg.IsEmpty();
+	}
 
 	// The tables in force: the pure block's defaults, then any overrides.
 	AtmosphereValues.SetNumZeroed(PresetCount * AtmosphereFieldCount);
@@ -806,12 +812,21 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	{
 		SunLight->bCastShadowsOnClouds = true;
 		SunLight->bCastShadowsOnAtmosphere = true;
-		SunLight->bPerPixelAtmosphereTransmittance = true;
+		// Integration (2026-11-09): a -sky= plan states the sun's per-pixel
+		// transmittance (FFlightSimSky::Build, plan sun.per_pixel_transmittance)
+		// and owns it; this look sets it only on a scene without a plan.
+		if (!bPhysicalSkyPlan)
+		{
+			SunLight->bPerPixelAtmosphereTransmittance = true;
+		}
 		SunLight->bCastVolumetricShadow = true;
 		SunLight->MarkRenderStateDirty();
-		Out->SetStringField(TEXT("sun"),
-			TEXT("bCastShadowsOnClouds, bCastShadowsOnAtmosphere, bPerPixelAtmosphereTransmittance, "
-			     "bCastVolumetricShadow on; bCastCloudShadows left as the scene set it"));
+		Out->SetStringField(TEXT("sun"), bPhysicalSkyPlan
+			? TEXT("bCastShadowsOnClouds, bCastShadowsOnAtmosphere, bCastVolumetricShadow on; "
+			       "bPerPixelAtmosphereTransmittance left as the -sky= plan set it; bCastCloudShadows left as the scene set it")
+			: TEXT("bCastShadowsOnClouds, bCastShadowsOnAtmosphere, bPerPixelAtmosphereTransmittance, "
+			       "bCastVolumetricShadow on; bCastCloudShadows left as the scene set it"));
+		Out->SetBoolField(TEXT("sun_per_pixel_transmittance"), SunLight->bPerPixelAtmosphereTransmittance != 0);
 		Out->SetBoolField(TEXT("sun_cast_cloud_shadows"), SunLight->bCastCloudShadows != 0);
 	}
 	Record->SetObjectField(TEXT("atmosphere"), Out);

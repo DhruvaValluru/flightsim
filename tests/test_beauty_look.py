@@ -291,7 +291,12 @@ def test_the_commandlet_hooks_are_in_place():
     assert "return Fail(FFlightSimBeautyLook::LastError());" in after
     assert "FFlightSimBeautyLook::RecordExposure(ExposureMode" in after
     focus = RENDER_CPP.index("FFlightSimBeautyLook::UpdatePerFrame(Capture, Scenario.Aircraft);")
-    assert RENDER_CPP.index("Capture->CaptureScene();", focus) - focus < 120
+    # The focus is set before the frame's first beauty capture: the
+    # render-path lane's still sub-frames (same pose) sit between the hook
+    # and the read-back capture, and see the same focus (integration).
+    between = RENDER_CPP[focus:RENDER_CPP.index("Capture->CaptureScene();", focus)]
+    assert len(between) < 600, between
+    assert "for (int32 SubFrame = 1; SubFrame < BeautySubFrames; ++SubFrame)" in between
     assert 'Root->SetObjectField(TEXT("beauty_look"), BeautyLook);' in RENDER_CPP
 
 

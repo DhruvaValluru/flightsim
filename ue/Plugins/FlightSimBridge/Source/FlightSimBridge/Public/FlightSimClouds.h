@@ -135,6 +135,9 @@ private:
 	void ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Tiles, double CardWetness);
 
 	bool bBuilt = false;
+	// A -sky= plan lights the scene (FFlightSimSky): it owns the sun's
+	// per-pixel atmosphere transmittance, which this look then leaves alone.
+	bool bPhysicalSkyPlan = false;
 	int32 Preset = 0;
 	// The tables in force (the pure block's defaults, then the overrides).
 	TArray<double> AtmosphereValues;   // PresetCount x AtmosphereFieldCount

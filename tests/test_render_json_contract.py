@@ -154,3 +154,31 @@ def test_the_record_with_motion_blur_on_and_unlisted_is_refused(bundle):
         entry["on"] = False
     record, _ = _grade(bundle, shaped)
     assert record.status == FAIL
+
+
+# -- one owner per contested setting (integration item 2) -------------------------
+
+LUMEN_RENDER_PATH = ("LumenReflectionQuality", "LumenFinalGatherQuality", "LumenSceneLightingQuality",
+                     "LumenMaxTraceDistance", "LumenSceneViewDistance", "LumenSurfaceCacheResolution")
+
+
+def test_lumen_quality_has_one_owner_the_render_path():
+    from core.scene import beauty_look as look
+    look_cpp = (PRIVATE / "FlightSimBeautyLook.cpp").read_text(encoding="utf-8")
+    for key in LUMEN_RENDER_PATH:
+        assert f"Settings.bOverride_{key}" not in look_cpp and f"(Reflections, {key})" not in look_cpp, key
+        assert key not in look.REFLECTIONS, key
+        assert f"Beauty.bOverride_{key} = true;" in COMMANDLET, key
+
+
+def test_the_order_of_application_is_written_at_the_call_site_and_recorded():
+    block = COMMANDLET[COMMANDLET.index("ONE owner per setting"):
+                       COMMANDLET.index("FFlightSimVisualScene::ApplyBeautyPostProcess(Capture);")]
+    for step in ("Scene build", "World lane", "Exposure", "Look-dev", "Render-path", "Storm meter", "Per frame"):
+        assert step in block, step
+    assert 'RenderSettings->SetObjectField(TEXT("beauty_owners"), Owners);' in COMMANDLET
+
+
+def test_the_world_look_leaves_a_sky_plans_transmittance_alone():
+    assert "if (!bPhysicalSkyPlan)\n\t\t{\n\t\t\tSunLight->bPerPixelAtmosphereTransmittance = true;" in CLOUDS
+    assert 'FParse::Value(Params, TEXT("sky="), SkyPlanArg)' in CLOUDS
