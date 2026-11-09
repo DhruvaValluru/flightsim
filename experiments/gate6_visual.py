@@ -477,6 +477,164 @@ def measure_exposure_control(control_dir: Path, manual_dir: Optional[Path] = Non
 # -- Phase 2 look clauses -------------------------------------------------
 
 
+# -- edge aliasing (visual plan V0 "Measure"; REPORTED, not a gate) --------
+#
+# "Edge-aliasing metric (high-frequency energy along the aircraft
+# silhouette) drops against today's baseline." This is that number, and
+# only a number: no threshold is set (none has been measured), so it never
+# passes or fails Gate 6. Definition, so a reader can recompute it:
+#
+#   * the silhouette is the aircraft body mask (shadow vs shadow_hidden,
+#     the same body test measure_aircraft_shadow uses), or a label mask;
+#   * the band is every pixel within ALIASING_BAND_PX of the mask's
+#     boundary (8-neighbour dilation XOR erosion);
+#   * the high-pass is luminance minus its 3x3 box mean;
+#   * energy = RMS of the high-pass over the band, divided by the edge
+#     contrast (|mean luminance just inside - just outside|), so a brighter
+#     sky does not read as more aliasing. Lower is smoother.
+#
+# Self-validation (the plan's §5 rule, "the metric must trip on a
+# deliberately broken input or the pass is void"): the same frame point-
+# sampled at ALIASING_CONTROL_STRIDE and blown back up by nearest neighbour
+# has staircased edges; its energy must come out HIGHER, or the number is
+# reported as void.
+
+#: Band half-width around the silhouette, pixels.
+ALIASING_BAND_PX = 2
+#: The aliased control's point-sampling stride.
+ALIASING_CONTROL_STRIDE = 2
+#: Below this edge contrast (8-bit counts) there is no edge to grade.
+ALIASING_MIN_CONTRAST = 8.0
+
+
+def _grow(mask, steps: int):
+    import numpy as np
+
+    out = mask.copy()
+    for _ in range(steps):
+        grown = out.copy()
+        grown[1:, :] |= out[:-1, :]
+        grown[:-1, :] |= out[1:, :]
+        grown[:, 1:] |= out[:, :-1]
+        grown[:, :-1] |= out[:, 1:]
+        grown[1:, 1:] |= out[:-1, :-1]
+        grown[:-1, :-1] |= out[1:, 1:]
+        grown[1:, :-1] |= out[:-1, 1:]
+        grown[:-1, 1:] |= out[1:, :-1]
+        out = grown
+    return out
+
+
+def _box3(image):
+    import numpy as np
+
+    padded = np.pad(image, 1, mode="edge")
+    total = np.zeros_like(image, dtype=float)
+    for dy in range(3):
+        for dx in range(3):
+            total += padded[dy:dy + image.shape[0], dx:dx + image.shape[1]]
+    return total / 9.0
+
+
+def edge_aliasing_energy(rgb, mask, band_px: int = ALIASING_BAND_PX) -> Optional[float]:
+    """Contrast-normalised high-frequency RMS along ``mask``'s boundary
+    (definition above), or None when the mask has no edge to grade."""
+    import numpy as np
+
+    mask = np.asarray(mask, dtype=bool)
+    if mask.sum() == 0 or (~mask).sum() == 0:
+        return None
+    light = luminance(rgb).astype(float)
+    outer = _grow(mask, band_px)
+    inner = ~_grow(~mask, band_px)
+    band = outer & ~inner
+    inside, outside = band & mask, band & ~mask
+    if band.sum() == 0 or inside.sum() == 0 or outside.sum() == 0:
+        return None
+    contrast = abs(float(light[inside].mean()) - float(light[outside].mean()))
+    if contrast < ALIASING_MIN_CONTRAST:
+        return None
+    high = light - _box3(light)
+    return float(np.sqrt(np.mean(high[band] ** 2)) / contrast)
+
+
+def aliased_control(rgb, stride: int = ALIASING_CONTROL_STRIDE):
+    """The same frame point-sampled every ``stride`` pixels and blown back
+    up by nearest neighbour: deliberately staircased edges."""
+    import numpy as np
+
+    small = rgb[:, ::stride, ::stride]
+    big = np.repeat(np.repeat(small, stride, axis=1), stride, axis=2)
+    return big[:, :rgb.shape[1], :rgb.shape[2]]
+
+
+def measure_edge_aliasing(frame_rgb, mask) -> dict:
+    """The reported row: the frame's energy, the aliased control's, and
+    whether the control tripped (``void`` when it did not)."""
+    import numpy as np
+
+    mask = np.asarray(mask, dtype=bool)
+    energy = edge_aliasing_energy(frame_rgb, mask)
+    control_mask = aliased_control(mask[None].astype(np.int64))[0].astype(bool)
+    control = edge_aliasing_energy(aliased_control(frame_rgb), control_mask)
+    void = energy is None or control is None or not control > energy
+    return {"energy": energy, "control_energy": control, "void": void,
+            "band_px": ALIASING_BAND_PX, "control_stride": ALIASING_CONTROL_STRIDE,
+            "silhouette_px": int(mask.sum()),
+            "definition": "RMS of (luminance - 3x3 box mean) within band_px of the "
+                          "silhouette, over the edge contrast; lower is smoother; "
+                          "reported, not a gate"}
+
+
+def aircraft_body_mask(shadow_still: Path, hidden_still: Path):
+    """The pixels the aircraft's own body occupies: what changes by more
+    than the body threshold when it is drawn (measure_aircraft_shadow's
+    test)."""
+    import numpy as np
+
+    with_aircraft = load_rgb(shadow_still)
+    without = load_rgb(hidden_still)
+    return np.abs(with_aircraft - without).max(axis=0) > THRESHOLDS["body_threshold"]
+
+
+def report_edge_aliasing(out: Path, baseline: Optional[Path] = None) -> Optional[dict]:
+    """Grade the shadow shot's silhouette and write ``out/aliasing.json``;
+    with ``baseline`` (another tree's aliasing.json or its directory) the
+    row carries the change against it. None when the shots do not exist."""
+    shadow = sorted((out / "shadow").glob("frame_*.png"))
+    hidden = sorted((out / "shadow_hidden").glob("frame_*.png"))
+    if not shadow or not hidden:
+        return None
+    row = measure_edge_aliasing(load_rgb(shadow[-1]),
+                                aircraft_body_mask(shadow[-1], hidden[-1]))
+    row["frame"] = str(shadow[-1])
+    if baseline is not None:
+        path = baseline / "aliasing.json" if baseline.is_dir() else baseline
+        try:
+            before = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            before = None
+        row["baseline"] = str(path)
+        if before and before.get("energy") is not None and row["energy"] is not None:
+            row["baseline_energy"] = before["energy"]
+            row["change"] = row["energy"] - before["energy"]
+    (out / "aliasing.json").write_text(json.dumps(row, indent=2), encoding="utf-8")
+    return row
+
+
+def edge_aliasing_line(row: dict) -> str:
+    """The one report line: [info], never PASS or FAIL."""
+    energy = row["energy"]
+    control = row["control_energy"]
+    line = (f"  [info] edge aliasing (reported, not a gate) "
+            f"{'no edge to grade' if energy is None else f'{energy:.4f}'}; aliased control "
+            f"{'n/a' if control is None else f'{control:.4f}'}; "
+            f"{'VOID: the control did not trip' if row['void'] else 'control tripped'}")
+    if "change" in row:
+        line += f"; change vs baseline {row['change']:+.4f}"
+    return line
+
+
 @dataclass(frozen=True)
 class LookClause:
     """A look clause's outcome: PASS, FAIL, or NOT RUN with the measurement
@@ -1188,6 +1346,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          f"within {PROBE_TOLERANCE:g}/255 (decision 15), write "
                          "rederived.json beside them; refuses by name when "
                          "no bias is within tolerance")
+    ap.add_argument("--aliasing-baseline", default=None, metavar="DIR|JSON",
+                    help="visual plan V0: compare the reported edge-aliasing "
+                         "number against another tree's aliasing.json "
+                         "(reported, never a gate)")
     args = ap.parse_args(argv)
     if args.rederive:
         try:
@@ -1339,6 +1501,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ]
     for check in checks:
         print(check.render())
+
+    # Visual plan V0 "Measure": reported beside the clauses, never one.
+    # A number that is never a gate must never change the gate's outcome:
+    # an error computing it is reported as [info] and the run goes on.
+    try:
+        aliasing = report_edge_aliasing(
+            out, Path(args.aliasing_baseline) if args.aliasing_baseline else None)
+    except Exception as error:  # noqa: BLE001 -- reported, never a gate
+        aliasing = None
+        print(f"  [info] edge aliasing (reported, not a gate) not computed: {error}")
+    if aliasing is not None:
+        print(edge_aliasing_line(aliasing))
 
     print(f"\n{RULE}\n4. the side-by-side\n{RULE}")
     substitute = Path(args.substitute_baseline) if args.substitute_baseline else None

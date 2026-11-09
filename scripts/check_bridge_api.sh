@@ -214,6 +214,67 @@ showflag_check LumenReflections
 showflag_check Grain
 showflag_check SceneColorFringe
 showflag_check Vignette
+# -- render-path lane (visual plan V0/V8): the beauty and path-trace path ----
+# FlightSimRenderCommandlet.cpp -quality=beauty|pathtrace, -still-samples,
+# -pathtrace-*. Paths are relative to $UE_ROOT/Engine/Source/Runtime; each
+# pattern is a fixed string read from the 5.7.4 source on 2026-11-09.
+RT="$UE_ROOT/Engine/Source/Runtime"
+rp_check() {  # label, file (relative to $RT), fixed-string pattern
+    if [ ! -f "$RT/$2" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$RT/$2"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- the render-path beauty block needs updating"
+    fi
+}
+rp_check "show flag TemporalAA" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_ALWAYS_ACCESSIBLE(TemporalAA,"
+rp_check "show flag PathTracing" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_ALWAYS_ACCESSIBLE(PathTracing,"
+rp_check "capture clears TemporalAA (why beauty sets it)" "Engine/Private/Components/SceneCaptureComponent.cpp" "ShowFlags.TemporalAA = false;"
+rp_check "TSR falls back without the flag" "Engine/Private/SceneView.cpp" "if (!Family->EngineShowFlags.TemporalAA || !Family->bRealtimeUpdate || !SupportsTSR(GetShaderPlatform()))"
+rp_check "capture family realtime when persistent" "Renderer/Private/SceneCaptureRendering.cpp" ".SetRealtimeUpdate(SceneCaptureComponent->bCaptureEveryFrame || SceneCaptureComponent->bAlwaysPersistRenderingState));"
+rp_check "capture Lumen off unless overridden" "Renderer/Private/SceneCaptureRendering.cpp" "By default, Lumen is disabled in scene captures"
+rp_check "capture view state needs persistence" "Engine/Private/Components/SceneCaptureComponent.cpp" "if ((bCaptureEveryFrame || bAlwaysPersistRenderingState) && ViewStateInterface == NULL)"
+rp_check "path tracer state lives in the view state" "Renderer/Private/PathTracing.cpp" "View.ViewState->PathTracingState = MakePimpl<FPathTracingState>();"
+rp_check "PostProcess LumenSurfaceCacheResolution" "Engine/Classes/Engine/Scene.h" "uint8 bOverride_LumenSurfaceCacheResolution : 1;"
+rp_check "PostProcess LumenSceneLightingQuality" "Engine/Classes/Engine/Scene.h" "uint32 bOverride_LumenSceneLightingQuality : 1;"
+rp_check "PostProcess LumenFinalGatherQuality" "Engine/Classes/Engine/Scene.h" "uint32 bOverride_LumenFinalGatherQuality : 1;"
+rp_check "PostProcess LumenReflectionQuality" "Engine/Classes/Engine/Scene.h" "uint8 bOverride_LumenReflectionQuality:1;"
+rp_check "PostProcess LumenSceneViewDistance" "Engine/Classes/Engine/Scene.h" "uint32 bOverride_LumenSceneViewDistance : 1;"
+rp_check "PostProcess LumenMaxTraceDistance" "Engine/Classes/Engine/Scene.h" "uint32 bOverride_LumenMaxTraceDistance : 1;"
+rp_check "PostProcess PathTracingSamplesPerPixel" "Engine/Classes/Engine/Scene.h" "int32 PathTracingSamplesPerPixel;"
+rp_check "PostProcess PathTracingMaxBounces" "Engine/Classes/Engine/Scene.h" "int32 PathTracingMaxBounces;"
+rp_check "PostProcess PathTracingEnableDenoiser" "Engine/Classes/Engine/Scene.h" "uint32 PathTracingEnableDenoiser : 1;"
+rp_check "Scalability::SetQualityLevels" "Engine/Public/Scalability.h" "ENGINE_API void SetQualityLevels(const FQualityLevels& QualityLevels, bool bForce = false);"
+rp_check "Scalability SetFromSingleQualityLevel" "Engine/Public/Scalability.h" "ENGINE_API void SetFromSingleQualityLevel(int32 Value);"
+rp_check "IsRayTracingEnabled" "RenderCore/Public/RenderUtils.h" "extern RENDERCORE_API bool IsRayTracingEnabled();"
+rp_check "GRHISupportsRayTracing" "RHI/Public/RHIGlobals.h" "#define GRHISupportsRayTracing"
+rp_check "GetSupportsPathTracing" "RHI/Public/DataDrivenShaderPlatformInfo.h" "static inline const bool GetSupportsPathTracing(const FStaticShaderPlatform Platform)"
+rp_check "GMaxRHIShaderPlatform" "RHI/Public/RHIShaderPlatform.h" "extern RHI_API EShaderPlatform GMaxRHIShaderPlatform;"
+rp_check "-ini: command-line override" "Core/Private/Misc/ConfigCacheIni.cpp" "const auto& IniSwitchIdentifier       = TEXT(\"-ini:\");"
+rp_cvar() {  # cvar name, file (relative to $RT)
+    rp_check "cvar $1" "$2" "TEXT(\"$1\")"
+}
+rp_cvar r.TSR.History.SampleCount "Renderer/Private/PostProcess/TemporalSuperResolution.cpp"
+rp_cvar r.TSR.History.ScreenPercentage "Renderer/Private/PostProcess/TemporalSuperResolution.cpp"
+rp_cvar r.SkyAtmosphere.FastSkyLUT "Renderer/Private/SkyAtmosphereRendering.cpp"
+rp_cvar r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque "Renderer/Private/SkyAtmosphereRendering.cpp"
+rp_cvar r.SkyAtmosphere.MultiScatteringLUT.HighQuality "Renderer/Private/SkyAtmosphereRendering.cpp"
+rp_cvar r.SkyAtmosphere.LUT32 "Renderer/Private/SkyAtmosphereRendering.cpp"
+rp_cvar r.SkyAtmosphere.SampleCountMax "Renderer/Private/SkyAtmosphereRendering.cpp"
+rp_cvar r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice "Renderer/Private/SkyAtmosphereRendering.cpp"
+rp_cvar r.VolumetricCloud "Renderer/Private/VolumetricCloudRendering.cpp"
+rp_cvar r.VolumetricCloud.HighQualityAerialPerspective "Renderer/Private/VolumetricCloudRendering.cpp"
+rp_cvar r.VolumetricRenderTarget.Mode "Renderer/Private/VolumetricRenderTarget.cpp"
+rp_cvar r.PathTracing "Renderer/Private/PathTracing.cpp"
+rp_cvar r.PathTracing.FilterWidth "Renderer/Private/PathTracing.cpp"
+rp_cvar r.PathTracing.EnableReferenceAtmosphere "Renderer/Private/PathTracing.cpp"
+rp_cvar r.PathTracing.EnableReferenceClouds "Renderer/Private/PathTracing.cpp"
+rp_cvar r.PathTracing.Denoiser "Renderer/Private/PathTracingSpatialTemporalDenoising.cpp"
+rp_cvar r.PathTracing.Denoiser.Name "Renderer/Private/PathTracingSpatialTemporalDenoising.cpp"
+rp_cvar r.RayTracing "Renderer/Private/DeferredShadingRenderer.cpp"
+rp_cvar r.RayTracing.Nanite.Mode "Engine/Private/Rendering/NaniteResources.cpp"
+
 if [ -f "$UE_ROOT/Engine/Content/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.uasset" ]; then
     ok "engine simple cloud material" "present"
 else
