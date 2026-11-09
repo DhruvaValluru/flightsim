@@ -158,6 +158,25 @@ gate, or the bundle is refused. The amodal masks (S2) already carry the
 "behind something" case for real occluders. Beauty-only actors are not
 real occluders, because the physics and the labels never see them.
 
+### `render_settings.label_show_flags` (object, beauty and pathtrace)
+
+The label capture's own show flags, read back by the commandlet after
+registration: anti-aliasing, temporal AA, motion blur, depth of field,
+bloom, lens flares, grain, vignette, local exposure, colour fringe, lens
+distortion, refraction, path tracing, eye adaptation, translucency, cloud
+and fog. Any `true` fails `look_label_alignment` (the labels saw the look).
+
+Why it exists (integration, 2026-11-09): UE 5.7 `USceneCaptureComponent::
+OnRegister` calls `UpdateShowFlags()`, which resets `ShowFlags` to the
+class default and re-applies only `ShowFlagSettings`. Flags set before
+`RegisterComponent()` were lost, which is the `"DEFECT: label capture
+anti-aliasing show flag is on"` in `tests/fixtures/engine_bundle_min`
+(a pre-overhaul render). The beauty's TSR, lens and path-tracing flags were
+lost the same way. On beauty and pathtrace the commandlet now pins every
+flag through `ShowFlagSettings` (`RenderPinShowFlags`). Measure renders keep
+the registration Gate 6 passed on, so their labels are unchanged and the
+recorded defect still stands there. Changing that is the owner's call.
+
 ### per frame (`frame_records[]`)
 
 - `beauty_window_s`: `[t0, t1]`, the beauty's exposure or accumulation

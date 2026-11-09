@@ -1236,6 +1236,53 @@ double UFlightSimRenderCommandlet::EsfrMtf50(const TArray<float>& Luminance, int
 
 namespace
 {
+	// -- Integration (visual overhaul, 2026-11-09): show flags that survive
+	// registration. UE 5.7 USceneCaptureComponent::OnRegister calls
+	// UpdateShowFlags() (SceneCaptureComponent.cpp), which RESETS ShowFlags to
+	// the archetype's (the class default: AntiAliasing on, TemporalAA and
+	// MotionBlur off) and re-applies only ShowFlagSettings. A flag set on
+	// ShowFlags before RegisterComponent() is therefore lost: measured on the
+	// owner's machine as render_settings.anti_aliasing.labels "DEFECT: label
+	// capture anti-aliasing show flag is on" (tests/fixtures/engine_bundle_min),
+	// and by the same mechanism the beauty capture's TSR, look-dev lens and
+	// path-tracing flags never reached the renderer. This writes every flag
+	// that differs from the archetype into ShowFlagSettings, so registration
+	// (and any later re-registration) rebuilds exactly ShowFlags as set.
+	struct FRenderShowFlagDiff
+	{
+		const FEngineShowFlags& Wanted;
+		const FEngineShowFlags& Reference;
+		TArray<FEngineShowFlagsSetting>& Out;
+
+		bool OnEngineShowFlag(uint32 Index, const FString& Name)
+		{
+			const bool bOn = Wanted.GetSingleFlag(Index);
+			if (bOn != Reference.GetSingleFlag(Index))
+			{
+				FEngineShowFlagsSetting Setting;
+				Setting.ShowFlagName = Name;
+				Setting.Enabled = bOn;
+				Out.Add(Setting);
+			}
+			return true;
+		}
+		bool OnCustomShowFlag(uint32 Index, const FString& Name) { return OnEngineShowFlag(Index, Name); }
+	};
+
+	// Call after the last ShowFlags change and before RegisterComponent().
+	// Returns how many flags differ from the archetype (recorded).
+	int32 RenderPinShowFlags(USceneCaptureComponent2D* Capture)
+	{
+		const USceneCaptureComponent* Archetype = Cast<USceneCaptureComponent>(Capture->GetArchetype());
+		const FEngineShowFlags Reference = Archetype != nullptr ? Archetype->ShowFlags : FEngineShowFlags(ESFIM_Game);
+		const FEngineShowFlags Wanted = Capture->ShowFlags;
+		TArray<FEngineShowFlagsSetting> Settings;
+		FRenderShowFlagDiff Diff{Wanted, Reference, Settings};
+		FEngineShowFlags::IterateAllFlags(Diff);
+		Capture->SetShowFlagSettings(Settings);   // UpdateShowFlags: archetype + Settings == Wanted
+		return Settings.Num();
+	}
+
 	// -- Integration (visual overhaul, 2026-11-09): the beauty-look contract --
 	// The verifier lane (core/capture/beauty_look.py LOOK_KEYS, graded by
 	// look_record / look_label_alignment in core/capture/verify.py; schema in
@@ -3237,6 +3284,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		Capture->HiddenActors.Add(Scenario.Aircraft);
 	}
+	// Integration: on beauty and pathtrace every show flag set above (the
+	// -sky= plan's, -NoShadows, the look-dev lens, TSR, the path tracer)
+	// would be reset to the class default by registration
+	// (RenderPinShowFlags says why); pinned so it reaches the renderer.
+	// Measure keeps the registration Gate 6 passed on.
+	if (bBeauty)
+	{
+		const int32 PinnedFlags = RenderPinShowFlags(Capture);
+		if (BeautyPath.IsValid())
+		{
+			BeautyPath->SetNumberField(TEXT("show_flags_pinned"), PinnedFlags);
+		}
+	}
 	Capture->RegisterComponent();
 	// W5: the rain streaks, on the BEAUTY capture only (the label captures
 	// below never receive a look blendable), for this camera's streak on the
@@ -3742,6 +3802,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Label->ShowFlags.SetDepthOfField(false);
 			Label->ShowFlags.SetLensFlares(false);
 			Label->ShowFlags.SetTranslucency(false);
+			// Integration (visual overhaul): every beauty-only lens and post
+			// flag the look-dev, aircraft and render-path lanes turn on in the
+			// beauty is off here too, by name. Label captures are fresh
+			// components (nothing is copied from the beauty), so these are the
+			// class defaults made explicit: grain, vignette, local exposure and
+			// colour fringe (tonemapper-stage), lens distortion, refraction (the
+			// heat haze), and the path tracer.
+			Label->ShowFlags.SetGrain(false);
+			Label->ShowFlags.SetVignette(false);
+			Label->ShowFlags.SetLocalExposure(false);
+			Label->ShowFlags.SetSceneColorFringe(false);
+			Label->ShowFlags.SetLensDistortion(false);
+			Label->ShowFlags.SetRefraction(false);
+			Label->ShowFlags.SetPathTracing(false);
 			// No exposure of any kind on a label capture. The ID pass replaces
 			// the tonemapper, but eye adaptation, the physical-camera EV100
 			// and pre-exposure still run in the chain; a scale on the stencil
@@ -3761,6 +3835,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			// byte-identical with the world look on and off.
 			Label->HiddenActors.Append(VisualScene.BeautyOnlyActors);
 		};
+		// Integration: registration resets ShowFlags to the class default
+		// (RenderPinShowFlags), which is why the owner's fixture records the
+		// label AA flag ON. On beauty and pathtrace the label flags are pinned
+		// so they survive it; measure keeps the registration it passed Gate 6
+		// with (its label bytes unchanged; the recorded DEFECT stands there and
+		// is the owner's call).
+		auto RegisterLabelCapture = [&](USceneCaptureComponent2D* Label)
+		{
+			if (bBeauty)
+			{
+				RenderPinShowFlags(Label);
+			}
+			Label->RegisterComponent();
+		};
 		auto MakeDepthCapture = [&](const TCHAR* Name) -> USceneCaptureComponent2D*
 		{
 			USceneCaptureComponent2D* Depth =
@@ -3768,7 +3856,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Depth->TextureTarget = LabelDepthTarget;
 			Depth->CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
 			ConfigureLabelCapture(Depth);
-			Depth->RegisterComponent();
+			RegisterLabelCapture(Depth);
 			return Depth;
 		};
 		LabelDepthAll = MakeDepthCapture(TEXT("LabelDepthAll"));
@@ -3849,7 +3937,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			LabelLandcover->PostProcessSettings.WeightedBlendables.Array.Add(
 				FWeightedBlendable(1.0f, LandcoverInstance));
 			LabelLandcover->PostProcessBlendWeight = 1.0f;
-			LabelLandcover->RegisterComponent();
+			RegisterLabelCapture(LabelLandcover);
 		}
 		for (FRenderLabelledObject& Entry : Labelled)
 		{
@@ -3924,7 +4012,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				Pass->PostProcessSettings.WeightedBlendables.Array.Add(
 					FWeightedBlendable(1.0f, Material));
 				Pass->PostProcessBlendWeight = 1.0f;
-				Pass->RegisterComponent();
+				RegisterLabelCapture(Pass);
 				return Pass;
 			};
 			if (bPassNormal)
@@ -3945,7 +4033,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				PassNormal->TextureTarget = PassNormalTarget;
 				PassNormal->CaptureSource = ESceneCaptureSource::SCS_Normal;
 				ConfigureLabelCapture(PassNormal);
-				PassNormal->RegisterComponent();
+				RegisterLabelCapture(PassNormal);
 			}
 			if (bPassVelocity)
 			{
@@ -3990,7 +4078,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				PassAlbedo->TextureTarget = PassAlbedoTarget;
 				PassAlbedo->CaptureSource = ESceneCaptureSource::SCS_BaseColor;
 				ConfigureLabelCapture(PassAlbedo);
-				PassAlbedo->RegisterComponent();
+				RegisterLabelCapture(PassAlbedo);
 			}
 			UE_LOG(LogFlightSimRender, Display,
 			       TEXT("passes: normal %s, velocity %s, albedo %s -- each an AA-free capture ")
@@ -4023,7 +4111,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Normal->TextureTarget = Target;
 			Normal->CaptureSource = ESceneCaptureSource::SCS_Normal;
 			ConfigureLabelCapture(Normal);
-			Normal->RegisterComponent();
+			RegisterLabelCapture(Normal);
 			return Normal;
 		};
 		auto MakeBaseColorCapture = [&](const TCHAR* Name, UTextureRenderTarget2D* Target) -> USceneCaptureComponent2D*
@@ -4032,7 +4120,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			BaseColor->TextureTarget = Target;
 			BaseColor->CaptureSource = ESceneCaptureSource::SCS_BaseColor;
 			ConfigureLabelCapture(BaseColor);
-			BaseColor->RegisterComponent();
+			RegisterLabelCapture(BaseColor);
 			return BaseColor;
 		};
 		auto MakeMaterialCapture = [&](const TCHAR* Name, UTextureRenderTarget2D* Target,
@@ -4045,7 +4133,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Pass->ShowFlags.SetPostProcessing(true);
 			Pass->PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0f, Material));
 			Pass->PostProcessBlendWeight = 1.0f;
-			Pass->RegisterComponent();
+			RegisterLabelCapture(Pass);
 			return Pass;
 		};
 		if (bPassNormal)
@@ -6390,6 +6478,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		CalibrationCapture->ShowFlags.SetDynamicShadows(false);
 		CalibrationCapture->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
 		CalibrationCapture->ShowOnlyActors.Add(Rig);
+		if (bBeauty)
+		{
+			// Integration: the beauty's look-dev lens (grain, colour fringe)
+			// is copied above; neither belongs on the slanted edge. Pinned so
+			// the flags survive registration (RenderPinShowFlags).
+			CalibrationCapture->ShowFlags.SetGrain(false);
+			CalibrationCapture->ShowFlags.SetSceneColorFringe(false);
+			CalibrationCapture->ShowFlags.SetLocalExposure(false);
+			RenderPinShowFlags(CalibrationCapture);
+		}
 		CalibrationCapture->RegisterComponent();
 
 		// The quads: /Engine/BasicShapes/Plane (100 cm a side, normal +Z),
@@ -6992,6 +7090,33 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				LabelDepthAll->ShowFlags.AntiAliasing != 0
 					? TEXT("DEFECT: label capture anti-aliasing show flag is on")
 					: TEXT("none"));
+			// Integration: every beauty-only flag on the label capture, read
+			// back after registration (core/capture/verify.py
+			// look_label_alignment fails a beauty render on any that is on).
+			// Beauty and pathtrace only, so a measure render.json is unchanged.
+			if (bBeauty)
+			{
+				const FEngineShowFlags& L = LabelDepthAll->ShowFlags;
+				TSharedPtr<FJsonObject> LabelFlags = MakeShared<FJsonObject>();
+				LabelFlags->SetBoolField(TEXT("anti_aliasing"), L.AntiAliasing != 0);
+				LabelFlags->SetBoolField(TEXT("temporal_aa"), L.TemporalAA != 0);
+				LabelFlags->SetBoolField(TEXT("motion_blur"), L.MotionBlur != 0);
+				LabelFlags->SetBoolField(TEXT("depth_of_field"), L.DepthOfField != 0);
+				LabelFlags->SetBoolField(TEXT("bloom"), L.Bloom != 0);
+				LabelFlags->SetBoolField(TEXT("lens_flares"), L.LensFlares != 0);
+				LabelFlags->SetBoolField(TEXT("grain"), L.Grain != 0);
+				LabelFlags->SetBoolField(TEXT("vignette"), L.Vignette != 0);
+				LabelFlags->SetBoolField(TEXT("local_exposure"), L.LocalExposure != 0);
+				LabelFlags->SetBoolField(TEXT("scene_color_fringe"), L.SceneColorFringe != 0);
+				LabelFlags->SetBoolField(TEXT("lens_distortion"), L.LensDistortion != 0);
+				LabelFlags->SetBoolField(TEXT("refraction"), L.Refraction != 0);
+				LabelFlags->SetBoolField(TEXT("path_tracing"), L.PathTracing != 0);
+				LabelFlags->SetBoolField(TEXT("eye_adaptation"), L.EyeAdaptation != 0);
+				LabelFlags->SetBoolField(TEXT("translucency"), L.Translucency != 0);
+				LabelFlags->SetBoolField(TEXT("cloud"), L.Cloud != 0);
+				LabelFlags->SetBoolField(TEXT("fog"), L.Fog != 0);
+				RenderSettings->SetObjectField(TEXT("label_show_flags"), LabelFlags);
+			}
 		}
 		if (AccumulateCapture != nullptr)
 		{

@@ -9436,6 +9436,16 @@ def verify_look_label_alignment(manifest: Dict, run_dir=None) -> Check:
         if not has_look_record(payload) and not any("beauty_window_s" in r for r in records):
             continue
         graded.append(camera)
+        # Integration: the label capture's own flags, read back by the
+        # commandlet after registration (render_settings.label_show_flags,
+        # beauty renders): a beauty-only lens or post flag on there means the
+        # labels saw the look.
+        label_flags = (payload.get("render_settings") or {}).get("label_show_flags")
+        if isinstance(label_flags, dict):
+            leaked = sorted(k for k, v in label_flags.items() if v is True)
+            if leaked:
+                reasons.append(f"{camera}: the label capture has beauty-only show flag(s) on: "
+                               f"{', '.join(leaked)}")
         effects, _ = normalise_effects(payload.get("pixel_moving_effects"))
         for effect in (e for e in effects if e["on"]):
             aligned, words = classify_effect(effect, LOOK_ALIGNMENT_TOL_PX)

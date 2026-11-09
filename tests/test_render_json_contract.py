@@ -182,3 +182,52 @@ def test_the_order_of_application_is_written_at_the_call_site_and_recorded():
 def test_the_world_look_leaves_a_sky_plans_transmittance_alone():
     assert "if (!bPhysicalSkyPlan)\n\t\t{\n\t\t\tSunLight->bPerPixelAtmosphereTransmittance = true;" in CLOUDS
     assert 'FParse::Value(Params, TEXT("sky="), SkyPlanArg)' in CLOUDS
+
+
+# -- label captures never inherit the beauty look (integration item 3) ------------
+
+LABEL_OFF = ("AntiAliasing", "TemporalAA", "MotionBlur", "DepthOfField", "Bloom", "LensFlares",
+             "Grain", "Vignette", "LocalExposure", "SceneColorFringe", "LensDistortion",
+             "Refraction", "PathTracing", "EyeAdaptation", "Translucency", "Cloud", "Fog")
+
+
+def _lambda(name: str) -> str:
+    start = COMMANDLET.index(f"auto {name} = [&]")
+    end = COMMANDLET.index("\n\t\t};", start)
+    return COMMANDLET[start:end]
+
+
+def test_every_beauty_only_flag_is_off_on_a_label_capture():
+    configure = _lambda("ConfigureLabelCapture")
+    for flag in LABEL_OFF:
+        assert f"Label->ShowFlags.Set{flag}(false);" in configure, flag
+    # label captures are fresh components: nothing is copied from the beauty
+    assert "Capture->ShowFlags" not in configure and "Capture->PostProcessSettings" not in configure
+
+
+def test_label_flags_survive_registration_on_beauty():
+    register = _lambda("RegisterLabelCapture")
+    assert "if (bBeauty)" in register and "RenderPinShowFlags(Label);" in register
+    configured = re.findall(r"ConfigureLabelCapture\((\w+)\);", COMMANDLET)
+    for name in set(configured):
+        assert f"\t{name}->RegisterComponent();" not in COMMANDLET, name
+    assert COMMANDLET.count("RegisterLabelCapture(") == len(configured)
+
+
+def test_the_beauty_capture_pins_its_flags_before_registering():
+    register = COMMANDLET.index("\n\tCapture->RegisterComponent();")
+    pin = COMMANDLET.rindex("RenderPinShowFlags(Capture);", 0, register)
+    assert "if (bBeauty)" in COMMANDLET[pin - 200:pin]
+    helper = _function(COMMANDLET, "int32 RenderPinShowFlags(")
+    assert "SetShowFlagSettings(Settings);" in helper and "IterateAllFlags" in helper
+
+
+def test_the_label_flags_are_recorded_and_a_leak_is_not_label_aligned(bundle):
+    for flag in ("anti_aliasing", "motion_blur", "depth_of_field", "grain", "path_tracing"):
+        assert f'LabelFlags->SetBoolField(TEXT("{flag}")' in COMMANDLET, flag
+    path = bundle / "frames" / "chase" / "render.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["render_settings"]["label_show_flags"] = {"anti_aliasing": True, "bloom": False}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    _, alignment = _grade(bundle, _commandlet_shaped(False, [], {"policy": "none_in_frame"}))
+    assert alignment.status == FAIL and "anti_aliasing" in alignment.detail

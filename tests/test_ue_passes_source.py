@@ -74,7 +74,7 @@ def test_the_normal_and_base_colour_captures_are_the_gbuffer_sources_under_the_l
     assert "CaptureSource = ESceneCaptureSource::SCS_BaseColor;" in base.group(1)
     for block in (normal.group(1), base.group(1)):
         assert "ConfigureLabelCapture(" in block      # AA-free, no fog, no cloud, no translucency
-        assert "RegisterComponent();" in block
+        assert "RegisterLabelCapture(" in block       # pinned on beauty (integration)
     assert "LinearNormalTarget = MakeLinearPassTarget(RTF_RGBA16f);" in source
     assert "LinearBaseColorTarget = MakeLinearPassTarget(RTF_RGBA16f);" in source
     assert 'LinearNormal = MakeNormalCapture(TEXT("LinearNormal"), LinearNormalTarget);' in source
