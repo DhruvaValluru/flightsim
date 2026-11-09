@@ -117,3 +117,18 @@ def test_a_radial_move_with_no_net_shift_is_not_aligned():
     assert report["beauty"]["offset_length_px"] <= llc.LOOK_ALIGNMENT_TOL_PX
     assert report["edge_p90_excess_over_measure_px"] > llc.LOOK_ALIGNMENT_TOL_PX
     assert report["verdict"] == "NOT ALIGNED"
+
+
+def test_a_blind_or_saturated_measurement_is_void_never_aligned(tmp_path):
+    """A metric that sees nothing (a flat beauty) or a shift at the search
+    edge must never certify alignment: VOID, and the CLI exits 2."""
+    m_pic, m_mask = scene()
+    flat = np.full_like(m_pic, 128)
+    blind = llc.compare(m_pic, m_mask, flat, m_mask)
+    assert blind["verdict"] == "VOID" and "beauty" in blind["void_reasons"]
+    edge = llc.compare(m_pic, m_mask, llc.shift_image(m_pic, llc.SEARCH_RADIUS_PX + 2, 0), m_mask)
+    assert edge["verdict"] == "VOID"
+    assert any("search edge" in reason for reason in edge["void_reasons"])
+    measure = write_bundle(tmp_path / "measure", m_pic, m_mask)
+    beauty = write_bundle(tmp_path / "flat", flat, m_mask)
+    assert llc.main(["--measure", str(measure), "--beauty", str(beauty)]) == 2
