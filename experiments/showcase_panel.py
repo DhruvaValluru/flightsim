@@ -282,14 +282,14 @@ def build_panel_clip(card_path: Path, manifest_path: Path, conditions: Dict,
     for index in range(len(renderer.records)):
         renderer.frame(index).save(work / f"panel_{index:04d}.png")
 
+    from core.capture.display import clip_encode_args   # the one tagged BT.709 encode
+
     out_clip.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run([
         str(_ffmpeg()), "-y",
         "-i", str(raw_clip),
         "-framerate", f"{float(fps):g}", "-i", str(work / "panel_%04d.png"),
-        "-filter_complex", "[0:v][1:v]vstack=inputs=2",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "19",
-        "-pix_fmt", "yuv420p", str(out_clip),
+        *clip_encode_args(19, filter_chain="[0:v][1:v]vstack=inputs=2"), str(out_clip),
     ], capture_output=True)
     for panel_file in work.glob("panel_*.png"):
         panel_file.unlink()

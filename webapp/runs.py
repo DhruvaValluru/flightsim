@@ -3431,6 +3431,7 @@ class RunManager:
         user picked, so each one gets its own video of the flight --
         every frame that camera took, at the rate it took them.
         """
+        from core.capture.display import clip_encode_args
         from experiments.showcase_matrix import FFMPEG
 
         clips = out / "clips"
@@ -3446,8 +3447,7 @@ class RunManager:
                 str(FFMPEG), "-y",
                 "-framerate", f"{self._capture_fps(manifest_path, camera_id):g}",
                 "-i", str(directory / "frame_%04d.png"),
-                "-c:v", "libx264", "-preset", "medium", "-crf", "19",
-                "-pix_fmt", "yuv420p", str(target),
+                *clip_encode_args(19), str(target),
             ])
             if done is not None and done.returncode == 0 and target.is_file():
                 made.append(camera_id)
@@ -3477,6 +3477,7 @@ class RunManager:
         render's 30 fps played a 3 s flight in 1 s -- the clip selector's
         "3 s" gave a one-second video (measured on the owner's machine).
         """
+        from core.capture.display import clip_encode_args
         from experiments.showcase_matrix import FFMPEG, FPS
 
         for camera_id in camera_ids:
@@ -3489,8 +3490,7 @@ class RunManager:
             done = _ffmpeg([
                 str(FFMPEG), "-y", "-framerate", f"{rate:g}",
                 "-i", str(directory / "frame_%04d.png"),
-                "-c:v", "libx264", "-preset", "medium", "-crf", "19",
-                "-pix_fmt", "yuv420p", str(clip),
+                *clip_encode_args(19), str(clip),
             ])
             if done is not None and done.returncode == 0 and clip.is_file():
                 return camera_id

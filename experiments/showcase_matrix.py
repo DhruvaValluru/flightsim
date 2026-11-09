@@ -464,13 +464,14 @@ def render_cell(card: Path, frames: Path, terrain_path: Path, mesh: Path,
 
 
 def encode_clip(frames: Path, clip: Path) -> bool:
+    from core.capture.display import clip_encode_args   # the one tagged BT.709 encode
+
     clip.parent.mkdir(parents=True, exist_ok=True)
     try:
         proc = subprocess.run([
             str(FFMPEG), "-y", "-framerate", str(FPS),
             "-i", str(frames / "frame_%04d.png"),
-            "-c:v", "libx264", "-preset", "medium", "-crf", "19",
-            "-pix_fmt", "yuv420p", str(clip),
+            *clip_encode_args(19), str(clip),
         ], capture_output=True)
     except OSError:                 # no ffmpeg on this machine: no clip
         return False

@@ -80,6 +80,31 @@ class DisplayError(Exception):
 
 # -- the look switch hooks (webapp) -------------------------------------------
 
+#: The colour arguments of every clip encode (sRGB PNG -> H.264 yuv420p):
+#: the BT.709 matrix in limited range, and the stream tagged so a player
+#: decodes it with the same matrix. Without them swscale converts RGB with
+#: its BT.601 default and leaves the stream untagged, which browsers read
+#: as BT.709: the clip's colours drift from the PNG the grade was tuned on.
+#: The transfer tag is sRGB's (iec61966-2-1), the PNG's own. Not a
+#: calibration: the standard's numbers, stated once for every encoder.
+CLIP_COLOUR_FILTER = "scale=out_color_matrix=bt709:out_range=tv"
+CLIP_COLOUR_TAGS = ("-colorspace", "bt709", "-color_primaries", "bt709",
+                    "-color_trc", "iec61966-2-1", "-color_range", "tv")
+
+
+def clip_encode_args(crf: int = 19, *, filter_chain: Optional[str] = None) -> list:
+    """The output arguments of a clip encode, colour included: libx264 at
+    ``crf``, the BT.709 conversion (appended to ``filter_chain`` when the
+    caller has one, else as ``-vf``), yuv420p and the colour tags. The ONE
+    source for the web app's per-camera and capture clips and the showcase
+    encoders, so a clip is always a tagged BT.709 copy of its PNGs."""
+    chain = (f"{filter_chain},{CLIP_COLOUR_FILTER}" if filter_chain
+             else CLIP_COLOUR_FILTER)
+    return [("-filter_complex" if filter_chain else "-vf"), chain,
+            "-c:v", "libx264", "-preset", "medium", "-crf", str(int(crf)),
+            "-pix_fmt", "yuv420p", *CLIP_COLOUR_TAGS]
+
+
 def wants_display(look: Optional[Dict[str, Any]]) -> bool:
     """Whether a run's look switch asks for the ACES 2.0 display step."""
     return bool(look) and str(look.get("display") or "").lower() == DISPLAY_WORD

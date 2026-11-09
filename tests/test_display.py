@@ -267,3 +267,21 @@ def test_bundle_end_to_end(tmp_path):
     assert (tmp_path / "frame_0000.png").read_bytes() == engine_png
     saved = json.loads((tmp_path / "render.json").read_text(encoding="utf-8"))
     assert saved["beauty_look"]["display"]["frames"] == ["frame_0000_aces2.png"]
+
+
+def test_every_clip_encode_is_a_tagged_bt709_copy_of_its_pngs():
+    """One encode helper: the BT.709 matrix (swscale's RGB default is
+    BT.601) and the stream's colour tags, on every clip encoder."""
+    args = display.clip_encode_args(19)
+    assert args[:2] == ["-vf", "scale=out_color_matrix=bt709:out_range=tv"]
+    for flag, value in (("-colorspace", "bt709"), ("-color_primaries", "bt709"),
+                        ("-color_trc", "iec61966-2-1"), ("-color_range", "tv"),
+                        ("-pix_fmt", "yuv420p"), ("-crf", "19")):
+        assert args[args.index(flag) + 1] == value, flag
+    stacked = display.clip_encode_args(19, filter_chain="[0:v][1:v]vstack=inputs=2")
+    assert stacked[:2] == ["-filter_complex",
+                           "[0:v][1:v]vstack=inputs=2,scale=out_color_matrix=bt709:out_range=tv"]
+    repo = Path(__file__).resolve().parents[1]
+    for name in ("webapp/runs.py", "experiments/showcase_matrix.py", "experiments/showcase_panel.py"):
+        source = (repo / name).read_text(encoding="utf-8")
+        assert '"yuv420p"' not in source and "clip_encode_args(19" in source, name
