@@ -269,7 +269,7 @@ def test_run_refuses_while_editor_is_owned(client, monkeypatch):
     # UnrealEditor-Cmd render that outlived pytest and orphaned 660 frames
     # into runs/webapp.
     monkeypatch.setattr(RunManager, "_execute",
-                        lambda self, run, spec, provenance: None)
+                        lambda self, run, spec, provenance, headless=False: None)
     # About the editor lock, not the mesh rule or the scene: hold the
     # mesh gate open and pin the flat scene so this measures the same
     # thing on a machine with or without local bakes.
@@ -369,7 +369,7 @@ def test_manager_refuses_second_concurrent_run(monkeypatch):
 
     # Occupy the manager without launching anything real.
     monkeypatch.setattr(RunManager, "_execute",
-                        lambda self, run, spec, provenance: None)
+                        lambda self, run, spec, provenance, headless=False: None)
     first = local.start(spec, provenance={})
     assert "run_id" in first
     second = local.start(spec, provenance={})
@@ -1148,6 +1148,60 @@ def test_calm_terrain_run_states_why_the_air_is_still(tmp_path, monkeypatch, con
     assert not (tmp_path / "calmtest" / "effect.json").exists()
 
 
+def test_the_look_switch_renders_beauty_and_is_recorded(tmp_path, monkeypatch, control_ridge, no_mesh_provisioning):
+    """A run with the look switch (webapp.runs.LOOK_SWITCHES) renders at
+    beauty with its lens and the automatic grade, and provenance.json and
+    the conditions strip record the switch, its source and the grade; the
+    same run without it keeps the configured measure quality."""
+    import json as jsonlib
+
+    from webapp.runs import RunState, place_on_scene, resolve_look_switch
+
+    monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "measure")
+    qualities = []
+
+    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera="chase", **kwargs):
+        qualities.append((kwargs.get("quality"), kwargs.get("beauty_look")))
+        frames.mkdir(parents=True, exist_ok=True)
+        (frames / "render.json").write_text("{}", encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(RunManager, "_render", staticmethod(fake_render))
+    monkeypatch.setattr(runs_module, "encode_clip",
+                        lambda frames, clip: bool(clip.write_bytes(b"x")) or True)
+    monkeypatch.setattr(runs_module, "build_panel_clip",
+                        lambda *a, **k: True)
+
+    local = RunManager(out_root=tmp_path)
+    for run_id, choice in (("looktest", "cinematic"), ("plaintest", None)):
+        spec = compile_prompt("fly the 747 at 5000 m over 2000 m mountains")
+        place_on_scene(spec)
+        run = RunState(run_id=run_id)
+        run.look = resolve_look_switch(choice, spec.prompt)
+        local._render_flow(run, spec, provenance={})
+        assert run.status == "done", run.detail
+        provenance = jsonlib.loads(
+            (tmp_path / run_id / "provenance.json").read_text(encoding="utf-8"))
+        if choice is None:
+            assert provenance["look"] is None
+            assert provenance["render_quality"] == "measure"
+            assert qualities[-1] == ("measure", None)
+            assert "look" not in run.conditions
+            assert not (tmp_path / run_id / "beauty_look.json").exists()
+            continue
+        assert qualities[-1][0] == "beauty" and qualities[-1][1] is not None
+        sidecar = jsonlib.loads(
+            (tmp_path / run_id / "beauty_look.json").read_text(encoding="utf-8"))
+        assert sidecar["lens"] == "cinematic"
+        assert provenance["render_quality"] == "beauty"
+        assert provenance["look"]["switch"] == "cinematic"
+        assert provenance["look"]["grade"] == sidecar["grade"]
+        assert provenance["look"]["grade_basis"] == sidecar["grade_basis"]
+        assert f"grade {sidecar['grade']}" in run.conditions["look"]
+        assert provenance["conditions"]["look"] == run.conditions["look"]
+
+
 def test_preflight_feels_the_orographic_field(control_ridge):
     """The plan flies through the same air as the run: with the orographic
     provider attached, the pre-flown track diverges from the still-air one
@@ -1246,7 +1300,7 @@ def test_stated_coordinates_without_a_bake_refuse_by_name(client, monkeypatch):
     # broken, the accepted run dies in this stub instead of launching a
     # real render.
     monkeypatch.setattr(RunManager, "_execute",
-                        lambda self, run, spec, provenance: None)
+                        lambda self, run, spec, provenance, headless=False: None)
     compiled = client.post("/compile", json={
         "prompt": "fly the 747 at 9000 m and 250 kt", "compiler": "regex"}
     ).json()
