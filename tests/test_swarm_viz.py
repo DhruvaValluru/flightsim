@@ -335,3 +335,32 @@ def test_host_is_loopback() -> None:
         assert sv.host_is_loopback(ok), ok
     for bad in (None, "", "attacker.example:8787", "127.0.0.1.attacker.example", "localhost.evil:80", "[::2]:8787"):
         assert not sv.host_is_loopback(bad), bad
+
+
+def test_ruflo_read_from_stores_without_the_cli(tmp_path: Path) -> None:
+    cf = tmp_path / ".claude-flow"
+    for sub, name, body in (("agents", "store.json", {"agents": {"a1": {"agentId": "a1", "status": "busy"}}}),
+                            ("tasks", "store.json", {"tasks": {"t1": {"taskId": "t1", "status": "in_progress"}}}),
+                            ("swarm", "swarm-state.json", {"swarms": {"s1": {"swarmId": "s1"}}})):
+        (cf / sub).mkdir(parents=True)
+        (cf / sub / name).write_text(json.dumps(body))
+    collector = sv.Collector(tmp_path / "projects", tmp_path, "base")
+    assert collector.ruflo_cli is False  # the CLI writes policy state; it stays opt-in
+    collector._git_at = time.time() + 3600
+    collector._kick = lambda: None  # no background thread may start in this test
+    st = collector.state()
+    assert st["ruflo"]["source"] == "stores"
+    assert [a["agentId"] for a in st["ruflo"]["agents"]] == ["a1"]
+    assert [t["taskId"] for t in st["ruflo"]["tasks"]] == ["t1"]
+    assert st["ruflo"]["swarm"]["swarms"][0]["swarmId"] == "s1"
+    assert sv.read_ruflo_stores(tmp_path / "missing")["agents"] == {"agents": []}
+
+
+def test_ruflo_cli_is_never_run_by_default(tmp_path: Path, monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(sv, "collect_ruflo_cli", lambda *a, **k: calls.append(a) or {})
+    collector = sv.Collector(tmp_path / "projects", tmp_path, "base")
+    collector._git_at = time.time() + 3600
+    collector.state()
+    time.sleep(0.05)
+    assert calls == []

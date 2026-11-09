@@ -8,9 +8,10 @@ Everything it shows comes from local files and local commands:
   <session>/workflows/.
 * git worktrees of this repository (``git worktree list --porcelain``), commits ahead of the
   base branch and uncommitted files per worktree.
-* ruflo: ``npx -y ruflo@3.74.1 agent list / task list / swarm status / memory list`` (cached,
-  refreshed in the background at most every 20 s), .claude-flow/daemon-state.json, and the ruflo
-  memory stores in .swarm/*.db read strictly read-only for the entry values.
+* ruflo: its JSON stores .claude-flow/agents/store.json, tasks/store.json, swarm/swarm-state.json
+  and daemon-state.json, and the memory stores .swarm/*.db, all read strictly read-only. The
+  ``npx ruflo@3.74.1 agent list / task list / ...`` CLI is opt-in (``--ruflo-cli``): every call
+  appends to the git-tracked .claude-flow/policy/state.json, so polling it would grow that file.
 * the background pytest log runs/visual/logs/pytest_merged.log.
 
 It never contacts GitHub, a PR, or CI. Python stdlib only.
@@ -591,8 +592,31 @@ RUFLO_COMMANDS = {
 }
 
 
+def _store_items(data, key: str) -> list:
+    """``{"agents": {id: {...}}}`` (the store) or ``{"agents": [...]}`` (the CLI) -> a list."""
+    items = data.get(key) if isinstance(data, dict) else None
+    if isinstance(items, dict):
+        items = list(items.values())
+    return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+
+def read_ruflo_stores(repo: Path) -> dict:
+    """Ruflo agents, tasks and swarms from its JSON stores, without running (or writing) anything."""
+    cf = repo / ".claude-flow"
+    swarm = _read_json(cf / "swarm" / "swarm-state.json")
+    swarms = _store_items(swarm, "swarms")
+    return {
+        "fetched_at": time.time(),
+        "source": "stores",
+        "agents": {"agents": _store_items(_read_json(cf / "agents" / "store.json"), "agents")},
+        "tasks": {"tasks": _store_items(_read_json(cf / "tasks" / "store.json"), "tasks")},
+        "swarm": {"swarms": swarms} if swarms else None,
+        "memory_list": None,
+    }
+
+
 def collect_ruflo_cli(repo: Path, runner=_run) -> dict:
-    out: dict = {"fetched_at": time.time()}
+    out: dict = {"fetched_at": time.time(), "source": "cli"}
     for name, args in RUFLO_COMMANDS.items():
         rc, text = runner(["npx", "-y", RUFLO_PKG, *args], cwd=repo, timeout=90.0)
         parsed = parse_cli_json(text)
@@ -664,11 +688,12 @@ class Collector:
     """Builds /state.json; slow sources (ruflo npx, git) refresh in background threads."""
 
     def __init__(self, projects_root: Path, repo: Path, base: str, use_ruflo: bool = True,
-                 pytest_log: Path | None = None) -> None:
+                 pytest_log: Path | None = None, ruflo_cli: bool = False) -> None:
         self.projects_root = projects_root
         self.repo = repo
         self.base = base
         self.use_ruflo = use_ruflo
+        self.ruflo_cli = use_ruflo and ruflo_cli
         self.pytest_log = pytest_log or (repo / "runs" / "visual" / "logs" / "pytest_merged.log")
         self._lock = threading.Lock()
         self._ruflo: dict = {}
@@ -699,7 +724,7 @@ class Collector:
     def _kick(self) -> None:
         now = time.time()
         with self._lock:
-            if self.use_ruflo and not self._ruflo_busy and now - self._ruflo.get("fetched_at", 0) > RUFLO_TTL_S:
+            if self.ruflo_cli and not self._ruflo_busy and now - self._ruflo.get("fetched_at", 0) > RUFLO_TTL_S:
                 self._ruflo_busy = True
                 threading.Thread(target=self._refresh_ruflo, daemon=True).start()
             if not self._git_busy and now - self._git_at > GIT_TTL_S:
@@ -710,6 +735,10 @@ class Collector:
         self._kick()
         now = time.time()
         wf = collect_workflows(self.projects_root, now)
+        if self.use_ruflo and not self.ruflo_cli:
+            stores = read_ruflo_stores(self.repo)
+            with self._lock:
+                self._ruflo = stores
         with self._lock:
             ruflo_cli = dict(self._ruflo)
             ruflo_busy = self._ruflo_busy
@@ -731,6 +760,7 @@ class Collector:
                 "fetched_at": ruflo_cli.get("fetched_at"),
                 "refreshing": ruflo_busy,
                 "enabled": self.use_ruflo,
+                "source": ruflo_cli.get("source"),
                 "agents": agents_cli.get("agents") or [],
                 "tasks": tasks_cli.get("tasks") or [],
                 "swarm": ruflo_cli.get("swarm"),
@@ -818,15 +848,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--projects-root", type=Path, default=DEFAULT_PROJECTS_ROOT)
     ap.add_argument("--repo", type=Path, default=None, help="repository main checkout (default: found with git)")
     ap.add_argument("--base", default=DEFAULT_BASE)
-    ap.add_argument("--no-ruflo", action="store_true", help="skip the npx ruflo CLI calls")
+    ap.add_argument("--no-ruflo", action="store_true", help="show no ruflo agents, tasks or swarms")
+    ap.add_argument("--ruflo-cli", action="store_true",
+                    help="ask the npx ruflo CLI every 20 s instead of reading its stores "
+                         "(each call appends to the tracked .claude-flow/policy/state.json)")
     ap.add_argument("--once", action="store_true", help="print /state.json once and exit")
     args = ap.parse_args(argv)
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         ap.error("this dashboard binds to loopback only")
     repo = (args.repo or main_repo_root(HERE)).resolve()
-    collector = Collector(args.projects_root, repo, args.base, use_ruflo=not args.no_ruflo)
+    collector = Collector(args.projects_root, repo, args.base, use_ruflo=not args.no_ruflo,
+                          ruflo_cli=args.ruflo_cli)
     if args.once:
-        if collector.use_ruflo:
+        if collector.ruflo_cli:
             collector._ruflo = collect_ruflo_cli(repo)
         collector._git = collect_git(repo, args.base)
         collector._git_at = time.time()
