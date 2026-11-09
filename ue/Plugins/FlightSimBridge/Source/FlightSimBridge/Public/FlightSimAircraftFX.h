@@ -1,0 +1,161 @@
+// The airframe's beauty look (visual overhaul V7, aircraft lane): PBR look
+// instances on the mesh's slots, real nav / strobe / landing lights with
+// glowing bulbs, contrails and wingtip vapour, the afterburner plume, and
+// (only when asked) the heat haze behind the nozzles.
+//
+// BEAUTY ONLY. The render commandlet builds it under -Visual -quality=beauty
+// with a mesh airframe drawn (not -HideAircraft); a -quality=measure render
+// never constructs one, so every measured frame, label and record is
+// byte-identical to before (Gate 6 passed on that path).
+//
+// What it reads (scripts/aircraft_look.py writes both inputs):
+//   * <mesh manifest dir>/look_manifest.json -- the lights and nozzles in
+//     the ACTOR frame (cm, about the JSBSim structural datum, the frame
+//     BuildMeshAirframe hangs the mesh in), each with how it was measured,
+//     and every look constant with its UNCALIBRATED stamp;
+//   * <asset_path_root>/Look/MI_<slot> -- one look instance per imported
+//     material slot (scripts/ue_aircraft_materials.py create_look_instances).
+// Either missing is RECORDED (render.json aircraft_look), never refused: the
+// look decorates a run that is complete without it. A look manifest that
+// exists but does not parse IS refused (aircraft_look.manifest): a broken
+// file must not pass as "no look".
+//
+// Labels match pixels:
+//   * the material swap changes shading only: no master uses world position
+//     offset, every class master is opaque (the canopy glass included), and
+//     custom depth / stencil are per-component settings the commandlet makes
+//     after this runs, so mask, class and depth see the same silhouette the
+//     beauty draws;
+//   * every FX element is its OWN actor attached to the aircraft and listed
+//     in BeautyOnlyActors -- never a component of the aircraft actor, whose
+//     every primitive the stencil loop labels as the aircraft. The label
+//     captures hide them;
+//   * point and spot lights move no geometry. The bulbs and the plume are
+//     additive (they hide nothing); the trails are translucent media (like
+//     the clouds and rain the label captures already omit, a trail in front
+//     of the aircraft does not remove it from the mask); the heat haze
+//     refracts (pixel-moving) and is OFF unless -heat-haze=on, and the record
+//     says so with its bound.
+//
+// Deterministic: every time-varying element (strobe phase, trail history,
+// afterburner glow, haze phase) is driven by the FDM's own state at the
+// captured step, never by wall-clock time (replay-identical: Gate 10-R).
+//
+// UNCOMPILED when written (the authoring Mac's Xcode is above UE 5.7's cap).
+// Every engine symbol was grepped in the UE 5.7.4 headers there; the list is
+// in scripts/check_bridge_api.sh's aircraft-lane block.
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Dom/JsonObject.h"
+#include "Templates/Function.h"
+
+class AActor;
+class UMaterialInstanceDynamic;
+class UPointLightComponent;
+class UProceduralMeshComponent;
+class USpotLightComponent;
+class UWorld;
+
+struct FFlightSimAircraftFXOptions
+{
+	AActor* Aircraft = nullptr;
+	// The -mesh= manifest the airframe was drawn from (its directory holds
+	// look_manifest.json; its asset_path_root holds the Look instances).
+	FString MeshManifestPath;
+	// The card's livery: a livery other than "default" keeps its own material
+	// on every slot (the record names that livery; the look does not repaint it).
+	FString Livery = TEXT("default");
+	// Per-element switches (-aircraft-look=off disables all; -aircraft-lights=,
+	// -contrails=, -afterburner=, -heat-haze= one each). Heat haze defaults OFF:
+	// it moves pixels.
+	bool bMaterials = true;
+	bool bLights = true;
+	bool bContrails = true;
+	bool bAfterburner = true;
+	bool bHeatHaze = false;
+	// Read the switches above from the commandlet's parameters.
+	void ParseParams(const FString& Params);
+};
+
+class FFlightSimAircraftFX
+{
+public:
+	// Swap the slots to their look instances and spawn every FX actor. False
+	// (with Error) only for a look manifest that exists and cannot be read.
+	bool Build(UWorld* World, const FFlightSimAircraftFXOptions& Options, FString& Error);
+
+	// Advance the time-varying elements to the FDM's state at this captured
+	// step: ReadProperty is the scenario's property reader (JSBSim names).
+	void Advance(TFunctionRef<double(const TCHAR*)> ReadProperty);
+
+	bool IsBuilt() const { return bBuilt; }
+
+	// Every actor drawn only in the beauty capture (the commandlet appends them
+	// to FFlightSimVisualScene::BeautyOnlyActors before any label capture).
+	TArray<AActor*> BeautyOnlyActors;
+	// render.json "aircraft_look" (absent from a render that built nothing).
+	TSharedPtr<FJsonObject> Record;
+
+private:
+	struct FLamp
+	{
+		FString Id;
+		FString Kind;
+		FVector ActorCm = FVector::ZeroVector;
+		double Candela = 0.0;
+		bool bStrobe = false;
+		bool bLanding = false;
+		UPointLightComponent* Point = nullptr;
+		USpotLightComponent* Spot = nullptr;
+		UMaterialInstanceDynamic* Bulb = nullptr;
+	};
+	struct FNozzle
+	{
+		FString Id;
+		FVector ActorCm = FVector::ZeroVector;
+		double RadiusCm = 50.0;
+		bool bAfterburner = false;
+		FString ThrustProperty;
+		double MilThrustLbs = 0.0;
+		double MaxThrustLbs = 0.0;
+		UMaterialInstanceDynamic* Plume = nullptr;
+		UPointLightComponent* PlumeLight = nullptr;
+		UMaterialInstanceDynamic* Haze = nullptr;
+	};
+	struct FTrailSample
+	{
+		FVector WorldCm = FVector::ZeroVector;
+		double TimeS = 0.0;
+	};
+	struct FTrail
+	{
+		FVector SourceActorCm = FVector::ZeroVector;
+		AActor* Owner = nullptr;
+		UProceduralMeshComponent* Mesh = nullptr;
+		TArray<FTrailSample> Samples;
+		bool bVapour = false;
+		bool bEverDrawn = false;
+	};
+
+	void ApplyMaterials(const FString& AssetRoot, const FFlightSimAircraftFXOptions& Options);
+	void BuildLamp(UWorld* World, const TSharedPtr<FJsonObject>& Row);
+	void BuildNozzle(UWorld* World, const TSharedPtr<FJsonObject>& Row, const FFlightSimAircraftFXOptions& Options);
+	AActor* SpawnAttached(UWorld* World, const FVector& ActorCm, const TCHAR* Name);
+	void RebuildTrail(FTrail& Trail, double NowS, double LifetimeS, double StartWidthM,
+	                  double SpreadMPerS, double FormationS);
+	double Constant(const TCHAR* Group, const TCHAR* Name, double Fallback) const;
+
+	bool bBuilt = false;
+	bool bFirstAdvance = true;
+	AActor* Aircraft = nullptr;
+	TSharedPtr<FJsonObject> Constants;
+	TArray<FLamp> Lamps;
+	TArray<FNozzle> Nozzles;
+	TArray<FTrail> Trails;
+	int32 ContrailFrames = 0;
+	int32 VapourFrames = 0;
+	double PeakAfterburner = 0.0;
+	int32 StrobeOnFrames = 0;
+	int32 LandingOnFrames = 0;
+};
