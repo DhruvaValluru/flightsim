@@ -537,3 +537,35 @@ def test_a_package_anchor_maps_like_every_converted_vertex():
     got, basis = look.resolve_anchor({"anchor": "package_model_m", "package_model_m": list(point),
                                       "source": "LightPack.xml"}, [], None, origin)
     assert got == pytest.approx(expected) and "LightPack.xml" in basis
+
+
+def test_the_preview_and_label_box_mesh_skips_the_interior_parts(tmp_path, monkeypatch):
+    """core/capture/aircraft_mesh.py feeds the engine-less preview and the
+    labels' mesh_tight_box_body_m from config parts[], capped at the
+    largest TRIANGLE_BUDGET faces. An interior part (inside the hull) must
+    not enter it: on the pinned J-11A the cockpit, seat and pilot took 89
+    of the 2600 slots from hull faces (skeptic review, 2026-11-09), and
+    the seat's pitch_deg is applied only by the converter."""
+    from core.capture import aircraft_mesh
+
+    quad = ("AC3Db\nMATERIAL \"m\" rgb 0.5 0.5 0.5 amb 0 0 0 emis 0 0 0 spec 0 0 0 "
+            "shi 0 trans 0\nOBJECT world\nkids 1\nOBJECT poly\nname \"{n}\"\nnumvert 4\n"
+            "{verts}numsurf 1\nSURF 0x10\nmat 0\nrefs 4\n0 0 0\n1 0 0\n2 0 0\n3 0 0\nkids 0\n")
+    big = "0 0 0\n10 0 0\n10 0 10\n0 0 10\n"
+    small = "1 0 1\n2 0 1\n2 0 2\n1 0 2\n"
+    src = tmp_path / "aircraft_src" / "toy" / "Models"
+    src.mkdir(parents=True)
+    (src / "hull.ac").write_text(quad.format(n="hull", verts=big), encoding="utf-8")
+    (src / "seat.ac").write_text(quad.format(n="seat", verts=small), encoding="utf-8")
+    config_dir = tmp_path / "aircraft_config"
+    config_dir.mkdir()
+    (config_dir / "TOY.json").write_text(json.dumps({
+        "name": "TOY", "source_dir": "../aircraft_src/toy",
+        "parts": [{"file": "Models/hull.ac"},
+                  {"file": "Models/seat.ac", "interior": True, "pitch_deg": -5.0}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(aircraft_mesh, "CONFIG_DIR", config_dir)
+    triangles = aircraft_mesh.load_triangles("TOY")
+    assert len(triangles) == 2                                  # the hull quad alone
+    (src / "seat.ac").unlink()
+    assert aircraft_mesh.available("TOY")       # an interior file is not part of the model
