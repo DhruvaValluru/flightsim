@@ -163,7 +163,10 @@ All three must hold:
   `bit-identical`, or `bounded` within what Gate 10-R already measured
   between two runs of one build.
 - `runs\gate6\full\render.json` has **no** `aircraft_look` key, **no**
-  `render_settings.beauty_path`, and **no** `look_applied.world_beauty`.
+  `beauty_look` key, **no** `render_settings.beauty_path`, and **no**
+  `look_applied.world_beauty`. These four are every field this branch adds
+  to the commandlet's `render.json`, and each is written only for a beauty
+  or path-traced capture.
 
 If any of them fails, measure was altered. Stop there and report it; that
 is the most important finding this runbook can produce.

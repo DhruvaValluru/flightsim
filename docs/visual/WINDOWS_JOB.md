@@ -15,7 +15,7 @@ Follow docs/visual/RENDER_RUNBOOK.md exactly, in order; it has every flag. Steps
     ue_fix_aircraft_materials.py J11 B747 A320 c172p DHC6 p51d A4.
  6. Gate 6 under measure must be UNCHANGED: same clauses and numbers as runs\gate6_base, Gate 10-R
     --against runs\gate6_base\full runs\gate6\full bit-identical or bounded, and no aircraft_look /
-    beauty_path / world_beauty key in runs\gate6\full\render.json. If not, STOP and report.
+    beauty_look / beauty_path / world_beauty key in runs\gate6\full\render.json. If not, STOP and report.
     Then gate6_visual.py --quality beauty --aliasing-baseline runs\gate6 and read render.json.
  7. .\scripts\render_visual_sheet.ps1 -Step head; -Step head_measure -Quality measure; -Step head_ss32 -StillSamples 32 -Shots a.
  8. .\scripts\render_visual_sheet.ps1 -Compare base,head; copy compare_base_vs_head.png and both shots.json into runs\visual\final\.
