@@ -59,19 +59,62 @@ namespace
 	const TCHAR* const AircraftFxParamFormation = TEXT("Formation");
 	const TCHAR* const AircraftFxParamTime = TEXT("TimeS");
 	const TCHAR* const AircraftFxParamStrength = TEXT("Strength");
+	const TCHAR* const AircraftFxParamBeamDirection = TEXT("BeamDirection");
+	const TCHAR* const AircraftFxParamBeamCos = TEXT("BeamCos");
+	const TCHAR* const AircraftFxParamCoreColour = TEXT("CoreColour");
+	const TCHAR* const AircraftFxParamTipColour = TEXT("TipColour");
+	const TCHAR* const AircraftFxParamShocks = TEXT("Shocks");
+	// scripts/aircraft_look.py nav_bulb_area_factor(): nav_bulb.hlsl's falloff
+	// integrated over one quad, per half-size squared (pinned by test). Used
+	// only for a look manifest that predates bulb_luminance_nits.
+	constexpr double AircraftFxNavBulbAreaFactor = 0.32715038;
+	// scripts/aircraft_look.py OMNI_BEAM_COS: no beam (drawn from every side).
+	constexpr double AircraftFxOmniBeamCos = -2.0;
+	// heat_haze.hlsl's envelope peak, (1 - u) x saturate(8 u) at u = 1/8
+	// (aircraft_look.py HEAT_HAZE_FADE_PEAK).
+	constexpr double AircraftFxHeatHazeFadePeak = 0.875;
+	// UE 5.7.4 Shaders/Private/DistortionCommon.ush OffsetFudgeFactor
+	// (check_bridge_api.sh pins it; aircraft_look.py UE_DISTORTION_OFFSET_FUDGE).
+	constexpr double AircraftFxDistortionOffsetFudge = 0.00023;
 	// The look instances: <asset_path_root>/Look/MI_<slot> (aircraft_look.py
 	// LOOK_INSTANCE_FOLDER / LOOK_INSTANCE_PREFIX).
 	const TCHAR* const AircraftFxLookFolder = TEXT("Look");
 	const TCHAR* const AircraftFxLookPrefix = TEXT("MI_");
 
-	bool AircraftFxSwitch(const FString& Params, const TCHAR* Key, bool Default)
+	// on/1/true or off/0/false; any other word is refused by name (it was
+	// read as "on", so -heat-haze=no turned the pixel-moving haze ON). Twin of
+	// scripts/aircraft_look.py parse_fx_switches.
+	bool AircraftFxSwitch(const FString& Params, const TCHAR* Key, bool Default, FString& Error)
 	{
 		FString Word;
 		if (!FParse::Value(*Params, Key, Word))
 		{
 			return Default;
 		}
-		return !(Word == TEXT("off") || Word == TEXT("0") || Word == TEXT("false"));
+		if (Word == TEXT("on") || Word == TEXT("1") || Word == TEXT("true"))
+		{
+			return true;
+		}
+		if (Word == TEXT("off") || Word == TEXT("0") || Word == TEXT("false"))
+		{
+			return false;
+		}
+		if (Error.IsEmpty())
+		{
+			Error = FString::Printf(TEXT("aircraft_look.switch: -%s%s is not on/1/true or off/0/false"), Key, *Word);
+		}
+		return Default;
+	}
+
+	bool AircraftFxPair(const TSharedPtr<FJsonObject>& Row, const TCHAR* Field, FVector2D& Out)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+		if (Row.IsValid() && Row->TryGetArrayField(Field, Values) && Values != nullptr && Values->Num() == 2)
+		{
+			Out = FVector2D((*Values)[0]->AsNumber(), (*Values)[1]->AsNumber());
+			return true;
+		}
+		return false;
 	}
 
 	FVector AircraftFxVector(const TSharedPtr<FJsonObject>& Row, const TCHAR* Field)
@@ -176,14 +219,30 @@ namespace
 
 void FFlightSimAircraftFXOptions::ParseParams(const FString& Params)
 {
-	const bool bAll = AircraftFxSwitch(Params, TEXT("aircraft-look="), true);
-	bMaterials = bAll && AircraftFxSwitch(Params, TEXT("aircraft-materials="), true);
-	bLights = bAll && AircraftFxSwitch(Params, TEXT("aircraft-lights="), true);
-	bContrails = bAll && AircraftFxSwitch(Params, TEXT("contrails="), true);
-	bAfterburner = bAll && AircraftFxSwitch(Params, TEXT("afterburner="), true);
+	SwitchError.Reset();
+	const bool bAll = AircraftFxSwitch(Params, TEXT("aircraft-look="), true, SwitchError);
+	// Every switch is parsed (no short-circuit), so a bad word is refused
+	// even under -aircraft-look=off.
+	const bool bMaterialsSwitch = AircraftFxSwitch(Params, TEXT("aircraft-materials="), true, SwitchError);
+	const bool bLightsSwitch = AircraftFxSwitch(Params, TEXT("aircraft-lights="), true, SwitchError);
+	const bool bContrailsSwitch = AircraftFxSwitch(Params, TEXT("contrails="), true, SwitchError);
+	const bool bAfterburnerSwitch = AircraftFxSwitch(Params, TEXT("afterburner="), true, SwitchError);
 	// Pixel-moving: off unless asked for by name.
-	bHeatHaze = bAll && AircraftFxSwitch(Params, TEXT("heat-haze="), false);
+	const bool bHeatHazeSwitch = AircraftFxSwitch(Params, TEXT("heat-haze="), false, SwitchError);
+	bMaterials = bAll && bMaterialsSwitch;
+	bLights = bAll && bLightsSwitch;
+	bContrails = bAll && bContrailsSwitch;
+	bAfterburner = bAll && bAfterburnerSwitch;
+	bHeatHaze = bAll && bHeatHazeSwitch;
 	Humidity.ParseParams(Params);  // condensation-solver: -humidity-pct=
+}
+
+double FFlightSimAircraftFX::HeatHazeMaxDisplacementPx(double MaterialOffset, double WidthPx, double HeightPx,
+                                                        double HFovDeg)
+{
+	const double TanHalf = FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(HFovDeg, 1.0, 179.0)) * 0.5);
+	return MaterialOffset * WidthPx * AircraftFxDistortionOffsetFudge / TanHalf *
+		FMath::Sqrt(WidthPx * WidthPx + HeightPx * HeightPx);
 }
 
 double FFlightSimAircraftFX::Constant(const TCHAR* Group, const TCHAR* Name, double Fallback) const
@@ -216,7 +275,13 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 {
 	Aircraft = Options.Aircraft;
 	Weather = Options.Weather;  // wet-airframe-canopy
+	CloudLayers = Options.CloudLayers;
 	Record = MakeShared<FJsonObject>();
+	if (!Options.SwitchError.IsEmpty())
+	{
+		Error = Options.SwitchError;
+		return false;
+	}
 	Record->SetStringField(TEXT("drawn_in"), TEXT("beauty capture only (-quality=beauty); every element is a ")
 		TEXT("beauty-only actor or a shading-only material swap, so mask, class and depth are those of the ")
 		TEXT("same frame's geometry"));
@@ -315,6 +380,7 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 			Row->SetStringField(TEXT("kind"), Lamp.Kind);
 			Row->SetField(TEXT("actor_cm"), AircraftFxVectorValue(Lamp.ActorCm));
 			Row->SetNumberField(TEXT("candela"), Lamp.Candela);
+			Row->SetNumberField(TEXT("bulb_luminance_nits"), Lamp.BulbNits);
 			Row->SetBoolField(TEXT("bulb_drawn"), Lamp.Bulb != nullptr);
 			LightRows.Add(MakeShared<FJsonValueObject>(Row));
 		}
@@ -344,8 +410,9 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 		Trail.Mesh = AircraftFxMesh(Trail.Owner, Name);
 		UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(ContrailMaterial, Trail.Mesh);
 		const TCHAR* Group = bVapour ? TEXT("vapour") : TEXT("contrail");
-		Instance->SetScalarParameterValue(FName(AircraftFxParamOpacity),
-			static_cast<float>(Constant(Group, TEXT("Opacity"), bVapour ? 0.35 : 0.55)));
+		Trail.Instance = Instance;
+		Trail.BaseOpacity = Constant(Group, TEXT("Opacity"), bVapour ? 0.35 : 0.55);
+		Instance->SetScalarParameterValue(FName(AircraftFxParamOpacity), static_cast<float>(Trail.BaseOpacity));
 		const double Lifetime = Constant(Group, TEXT("LifetimeS"), bVapour ? 0.8 : 25.0);
 		const double Formation = bVapour ? 0.0 : Constant(TEXT("contrail"), TEXT("FormationDelayS"), 0.15);
 		Instance->SetScalarParameterValue(FName(AircraftFxParamFormation),
@@ -382,6 +449,8 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 		TEXT("accelerations/Nz exceeds vapour.MinNz when the humidity is unavailable; vapour_frames counts ")
 		TEXT("only the frames these wingtip vapour trails drew (the humidity-gated tip ribbons' frames are in ")
 		TEXT("aircraft_look.condensation.per_frame)"));
+	ContrailRow->SetStringField(TEXT("in_cloud"), TEXT("a contrail's opacity x (1 - cover) of every cloud layer ")
+		TEXT("the aircraft is inside (base..top above the ground datum); contrail_in_cloud_frames counts them"));
 	ContrailRow->SetStringField(TEXT("label_convention"), TEXT("a trail is a translucent medium like the clouds ")
 		TEXT("and rain the label captures already omit: where it crosses in front of the aircraft the mask ")
 		TEXT("still says aircraft"));
@@ -396,9 +465,16 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 		if (Nozzle.Haze != nullptr)
 		{
 			HazeRow->SetBoolField(TEXT("drawn"), true);
-			// heat_haze.hlsl: the offset never exceeds Strength / 100 of the screen.
-			HazeRow->SetNumberField(TEXT("max_offset_screen_fraction"),
-				Constant(TEXT("heat_haze"), TEXT("Strength"), 0.6) * 0.01);
+			// heat_haze.hlsl: each offset component is at most Strength / 100 x
+			// the fade's peak (0.875) in REFRACTION units, not of the screen: the
+			// engine scales it by the view (HeatHazeMaxDisplacementPx), which the
+			// commandlet applies with the capture's width, height and FOV
+			// (render.json pixel_moving_effects heat_haze.max_displacement_px).
+			HazeRow->SetNumberField(TEXT("max_material_offset"),
+				Constant(TEXT("heat_haze"), TEXT("Strength"), 0.6) * 0.01 * AircraftFxHeatHazeFadePeak);
+			HazeRow->SetNumberField(TEXT("engine_offset_fudge"), AircraftFxDistortionOffsetFudge);
+			HazeRow->SetStringField(TEXT("bound_formula"), TEXT("px = max_material_offset x W x 0.00023 / ")
+				TEXT("tan(hFOV/2) x sqrt(W^2 + H^2) (UE 5.7.4 DistortionCommon.ush, along the diagonal)"));
 		}
 	}
 	Record->SetObjectField(TEXT("heat_haze"), HazeRow);
@@ -494,13 +570,34 @@ void FFlightSimAircraftFX::BuildLamp(UWorld* World, const TSharedPtr<FJsonObject
 	UMaterialInterface* BulbMaterial = LoadObject<UMaterialInterface>(nullptr, AircraftFxNavMaterialPath);
 	if (Mesh != nullptr && BulbMaterial != nullptr)
 	{
-		AircraftFxBulbSection(Mesh, Constant(TEXT("lights"), TEXT("BulbRadiusCm"), 18.0));
+		const double RadiusCm = Constant(TEXT("lights"), TEXT("BulbRadiusCm"), 18.0);
+		AircraftFxBulbSection(Mesh, RadiusCm);
 		Lamp.Bulb = UMaterialInstanceDynamic::Create(BulbMaterial, Mesh);
 		Lamp.Bulb->SetVectorParameterValue(FName(AircraftFxParamLightColour), Linear);
-		const double Emissive = FMath::Min(Lamp.Candela * Gain * Constant(TEXT("lights"), TEXT("BulbEmissivePerCd"), 2.0),
-		                                   Constant(TEXT("lights"), TEXT("BulbEmissiveMax"), 3000.0));
-		Lamp.Bulb->SetScalarParameterValue(FName(AircraftFxParamIntensity), static_cast<float>(Emissive));
+		// The bulb's luminance is the lamp's own candela over the sprite's
+		// effective area (aircraft_look.py bulb_luminance_nits): the light the
+		// lamp throws and the lamp the camera sees are one number, metered by
+		// the frame's one exposure. No cap.
+		if (!Row->TryGetNumberField(TEXT("bulb_luminance_nits"), Lamp.BulbNits))
+		{
+			const double RadiusM = FMath::Max(RadiusCm, 0.01) / AircraftFxCmPerMetre;
+			Lamp.BulbNits = Lamp.Candela * Gain / (AircraftFxNavBulbAreaFactor * RadiusM * RadiusM);
+		}
+		Lamp.Bulb->SetScalarParameterValue(FName(AircraftFxParamIntensity), static_cast<float>(Lamp.BulbNits));
 		Lamp.Bulb->SetScalarParameterValue(FName(AircraftFxParamStrobe), Lamp.bStrobe ? 0.0f : 1.0f);
+		// A landing lamp is a beam: its bulb fades outside the spot's own cone.
+		FVector2D BeamCos(AircraftFxOmniBeamCos, AircraftFxOmniBeamCos);
+		AircraftFxPair(Row, TEXT("beam_cos"), BeamCos);
+		FVector BeamDirection = AircraftFxVector(Row, TEXT("direction_actor"));
+		if (BeamDirection.IsNearlyZero())
+		{
+			BeamDirection = FVector(1.0, 0.0, 0.0);
+		}
+		BeamDirection = BeamDirection.GetSafeNormal();
+		Lamp.Bulb->SetVectorParameterValue(FName(AircraftFxParamBeamDirection),
+			FLinearColor(BeamDirection.X, BeamDirection.Y, BeamDirection.Z, 0.0f));
+		Lamp.Bulb->SetVectorParameterValue(FName(AircraftFxParamBeamCos),
+			FLinearColor(BeamCos.X, BeamCos.Y, 0.0f, 0.0f));
 		Mesh->SetMaterial(0, Lamp.Bulb);
 	}
 	if (Lamp.bLanding)
@@ -570,6 +667,20 @@ void FFlightSimAircraftFX::BuildNozzle(UWorld* World, const TSharedPtr<FJsonObje
 			AircraftFxConeSection(Mesh, 0.85 * Nozzle.RadiusCm, 0.3 * Nozzle.RadiusCm, Length);
 			Nozzle.Plume = UMaterialInstanceDynamic::Create(PlumeMaterial, Mesh);
 			Nozzle.Plume->SetScalarParameterValue(FName(AircraftFxParamIntensity), 0.0f);
+			// The flame's luminance from AfterburnerCandela, the plume light's
+			// own (aircraft_look.py plume_luminance): hue x core luminance.
+			const FVector Core = AircraftFxVector(Row, TEXT("plume_core_colour"));
+			const FVector Tip = AircraftFxVector(Row, TEXT("plume_tip_colour"));
+			Row->TryGetNumberField(TEXT("plume_luminance_nits"), Nozzle.PlumeLuminanceNits);
+			if (!Core.IsNearlyZero())
+			{
+				Nozzle.Plume->SetVectorParameterValue(FName(AircraftFxParamCoreColour),
+					FLinearColor(Core.X, Core.Y, Core.Z, 1.0f));
+				Nozzle.Plume->SetVectorParameterValue(FName(AircraftFxParamTipColour),
+					FLinearColor(Tip.X, Tip.Y, Tip.Z, 1.0f));
+			}
+			Nozzle.Plume->SetScalarParameterValue(FName(AircraftFxParamShocks),
+				static_cast<float>(Constant(TEXT("afterburner"), TEXT("Shocks"), 5.0)));
 			Mesh->SetMaterial(0, Nozzle.Plume);
 		}
 		Nozzle.PlumeLight = NewObject<UPointLightComponent>(Actor, TEXT("AfterburnerLight"));
@@ -739,11 +850,29 @@ void FFlightSimAircraftFX::Advance(TFunctionRef<double(const TCHAR*)> ReadProper
 		(!Condensation.HasHumidity() && ReadProperty(TEXT("accelerations/Nz")) > Constant(TEXT("vapour"), TEXT("MinNz"), 4.0));
 	const double SpeedCmS = ReadProperty(TEXT("velocities/vtrue-kts")) * AircraftFxMpsPerKnot * AircraftFxCmPerMetre;
 	ContrailFrames += bContrail ? 1 : 0;
+	// A contrail inside a cloud layer is inside the cloud: its opacity x
+	// (1 - cover) of every layer the aircraft is in (heights above the
+	// ground datum, engine Z = 0, as FFlightSimCloudLayer states).
+	const double AircraftZM = Aircraft->GetActorLocation().Z / AircraftFxCmPerMetre;
+	double CloudClear = 1.0;
+	for (const FFlightSimCloudLayer& Layer : CloudLayers)
+	{
+		if (AircraftZM >= Layer.BaseMetres && AircraftZM <= Layer.TopMetres)
+		{
+			CloudClear *= 1.0 - FMath::Clamp(Layer.CoverFraction, 0.0, 1.0);
+		}
+	}
+	ContrailInCloudFrames += (bContrail && CloudClear < 1.0) ? 1 : 0;
 	VapourFrames += bVapour ? 1 : 0;
 	for (FTrail& Trail : Trails)
 	{
 		const TCHAR* Group = Trail.bVapour ? TEXT("vapour") : TEXT("contrail");
 		const bool bActive = Trail.bVapour ? bVapour : bContrail;
+		if (!Trail.bVapour && Trail.Instance != nullptr)
+		{
+			Trail.Instance->SetScalarParameterValue(FName(AircraftFxParamOpacity),
+				static_cast<float>(Trail.BaseOpacity * CloudClear));
+		}
 		const FVector Source = Frame.TransformPosition(Trail.SourceActorCm);
 		if (bActive)
 		{
@@ -781,9 +910,16 @@ void FFlightSimAircraftFX::Advance(TFunctionRef<double(const TCHAR*)> ReadProper
 	{
 		(*ContrailRow)->SetNumberField(TEXT("contrail_frames"), ContrailFrames);
 		(*ContrailRow)->SetNumberField(TEXT("vapour_frames"), VapourFrames);
+		(*ContrailRow)->SetNumberField(TEXT("contrail_in_cloud_frames"), ContrailInCloudFrames);
 	}
 	TSharedPtr<FJsonObject> Afterburner = MakeShared<FJsonObject>();
 	Afterburner->SetNumberField(TEXT("peak_glow"), PeakAfterburner);
+	double PlumeNits = 0.0;
+	for (const FNozzle& Nozzle : Nozzles)
+	{
+		PlumeNits = FMath::Max(PlumeNits, Nozzle.PlumeLuminanceNits);
+	}
+	Afterburner->SetNumberField(TEXT("plume_luminance_nits_at_full_glow"), PlumeNits);
 	Afterburner->SetStringField(TEXT("rule"), TEXT("glow = saturate((thrust/max - mil/max) / (1 - mil/max)) x GlowGain, ")
 		TEXT("static sea-level ratings from the engine file; additive plume, hides nothing"));
 	Record->SetObjectField(TEXT("afterburner"), Afterburner);

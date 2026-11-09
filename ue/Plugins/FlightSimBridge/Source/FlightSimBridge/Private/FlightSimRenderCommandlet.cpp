@@ -1415,19 +1415,23 @@ namespace
 			TEXT("and depth labels of defocused terrain spread"),
 			TEXT("beauty capture: DepthOfField show flag and DepthOfFieldFocalDistance > 0 (look-dev per-frame focus)"))));
 		bool bHeatHaze = false;
-		double HazeFraction = -1.0;
+		double HazeOffset = -1.0;
 		if (In.AircraftLook != nullptr && In.AircraftLook->IsValid())
 		{
 			const TSharedPtr<FJsonObject>* Haze = nullptr;
 			if ((*In.AircraftLook)->TryGetObjectField(TEXT("heat_haze"), Haze) && Haze != nullptr && Haze->IsValid())
 			{
 				(*Haze)->TryGetBoolField(TEXT("drawn"), bHeatHaze);
-				(*Haze)->TryGetNumberField(TEXT("max_offset_screen_fraction"), HazeFraction);
+				(*Haze)->TryGetNumberField(TEXT("max_material_offset"), HazeOffset);
 			}
 		}
+		// aircraft lane fix pass: the material's peak offset through the
+		// engine's own 2D-offset scale at this capture's size and FOV.
 		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("heat_haze"), bHeatHaze,
-			HazeFraction >= 0.0 ? HazeFraction * In.Width : -1.0,
-			TEXT("bound: heat_haze.hlsl offsets by at most Strength / 100 of the screen; not measured"),
+			HazeOffset >= 0.0 ? FFlightSimAircraftFX::HeatHazeMaxDisplacementPx(
+				HazeOffset, In.Width, In.Height, Capture->FOVAngle) : -1.0,
+			TEXT("bound: heat_haze.hlsl's peak offset x width x 0.00023 / tan(hFOV/2) (UE 5.7.4 ")
+			TEXT("DistortionCommon.ush), along the diagonal, by construction; not measured"),
 			TEXT("aircraft_look.heat_haze (aircraft lane, -heat-haze=on only)"))));
 		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("path_tracer_filter"), In.bPathTrace, -1.0,
 			TEXT("not measured: the path tracer's pixel filter (r.PathTracing.FilterWidth) and the Nanite fallback ")
@@ -2073,6 +2077,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// tuned on) and where the number came from.
 	double AppliedSunLux = 0.0;
 	FString SunLuxSource;
+	TArray<FFlightSimCloudLayer> AircraftCloudLayers;  // aircraft lane: contrails fade inside a layer
 	if (bVisual)
 	{
 		FFlightSimVisualSceneOptions SceneOptions;
@@ -2387,6 +2392,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				(*StormWeather)->HasField(TEXT("cell"));
 		}
 		if (!VisualScene.Build(World, SceneOptions, Error)) { return Fail(Error); }
+		AircraftCloudLayers = SceneOptions.CloudLayers;
 		// The weather (FlightSimWeather.h): after the scene, so the storm can
 		// take over the look's cloud component; its actors join the scene's
 		// beauty-only list before any label capture is configured, and its
@@ -2571,6 +2577,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		AircraftFXOptions.MeshManifestPath = MeshManifestPath;
 		AircraftFXOptions.Livery = MeshAirframe.Livery;
 		AircraftFXOptions.Weather = Weather.IsBuilt() ? &Weather : nullptr;  // wet-airframe-canopy
+		AircraftFXOptions.CloudLayers = AircraftCloudLayers;
 
 		// condensation-solver: the card's dew point makes atmosphere/RH the stated day's.
 		AircraftFXOptions.Humidity.bCardStated = Card.AtmosphereProperties.Contains(TEXT("atmosphere/dew-point-R"));

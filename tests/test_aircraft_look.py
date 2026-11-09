@@ -11,6 +11,7 @@ tests pin that it says so.
 from __future__ import annotations
 
 import ast
+import math
 import json
 import re
 import sys
@@ -43,16 +44,6 @@ def test_every_aircraft_config_has_a_look_config_and_each_validates():
     for path in LOOKS:
         config = look.load_config(path.stem)
         assert config["name"] == path.stem
-
-
-def test_the_look_lives_outside_the_label_provenance_config():
-    """The aircraft config's sha256 is label provenance in every manifest
-    (core/capture/manifest.py asset_digests): no look key may sit in it."""
-    look_only = {"slot_rules", "class_scalars", "class_vectors", "lights", "nozzles",
-                 "default_class", "contrail", "vapour"}
-    for path in CONFIGS:
-        config = json.loads(path.read_text(encoding="utf-8"))
-        assert not look_only & set(config), (path.name, look_only & set(config))
 
 
 @pytest.mark.parametrize("change, word", [
@@ -287,6 +278,25 @@ def test_no_master_moves_a_vertex_and_the_glass_is_opaque():
         assert "blend_mode" not in body[:body.index("_finish(")]
 
 
+def test_the_glass_is_acrylic_face_on_and_its_fresnel_boost_is_never_clamped_away():
+    """F0 = 0.08 x Specular (UE): the canopy's Specular gives acrylic's F0
+    (n 1.49, 0.039); the Fresnel node's own 0.04 base is zeroed so face-on
+    adds nothing; Specular + ReflectionBoost <= 1, so the saturate never
+    swallows the boost (it did at Specular 1.0)."""
+    glass = look.CLASS_SCALARS["glass"]
+    f0 = look.UE_F0_PER_SPECULAR * glass["Specular"]
+    assert f0 == pytest.approx(look.GLASS_F0, abs=0.003)
+    assert look.GLASS_F0 == pytest.approx(0.039, abs=0.001)
+    assert 0.0 < glass["ReflectionBoost"] <= 1.0 - glass["Specular"]
+    text = MASTERS.read_text(encoding="utf-8")
+    body = text[text.index("def create_aircraft_glass"):text.index("def create_aircraft_rubber")]
+    assert 'fresnel.set_editor_property("base_reflect_fraction", 0.0)' in body
+    assert 's["ReflectionBoost"]' in body
+    for path in LOOKS:
+        overrides = json.loads(path.read_text(encoding="utf-8")).get("class_scalars", {}).get("glass", {})
+        assert "Specular" not in overrides and "ReflectionBoost" not in overrides, path.name
+
+
 def test_the_masters_stay_out_of_the_world_materials_contract():
     """tests/test_ue_materials.py pins every /Game/FlightSim/M_* path the C++
     loads to ue_create_materials.py: the aircraft masters live one folder down
@@ -310,8 +320,8 @@ def test_the_cpp_loads_the_fx_masters_and_sets_the_parameters_the_masters_expose
         assert f'TEXT("{look.MASTER_ROOT}/{name}.{name}")' in text, name
     for names in look.FX_PARAMETERS.values():
         for parameter in names:
-            if parameter in ("CoreColour", "TipColour", "Shocks"):
-                continue    # left at the master's defaults (not set per frame)
+            # every one, the plume's colours and shocks included (set at build
+            # from the look manifest: the flame's luminance is its candela's)
             assert f'TEXT("{parameter}")' in text, parameter
     assert f'TEXT("{look.LOOK_INSTANCE_FOLDER}")' in text
     assert f'TEXT("{look.LOOK_INSTANCE_PREFIX}")' in text
@@ -323,7 +333,23 @@ def test_every_fx_actor_is_its_own_beauty_only_actor_never_an_aircraft_component
     text = FX_CPP.read_text(encoding="utf-8")
     assert "NewObject<UPointLightComponent>(Aircraft" not in text
     assert not re.search(r"NewObject<\w+>\(\s*Aircraft\b", text)
-    assert text.count("BeautyOnlyActors.Add(") >= 2
+    # Every actor spawned is listed, in the function that spawns it (the
+    # condensation sites: in the same file, their spawn helper returns to the
+    # loop that lists them). A new FX actor spawned without being listed
+    # would be drawn AND stencilled in the label passes.
+    condensation = (FX_CPP.parent / "FlightSimCondensation.cpp").read_text(encoding="utf-8")
+    for source, per_function in ((text, True), (condensation, False)):
+        spawns = [m for m in re.finditer(r"([\w.]+) = World->SpawnActor<", source)]
+        assert len(spawns) == source.count("SpawnActor<") >= 2
+        assert source.count("BeautyOnlyActors.Add(") == len(spawns)
+        for match in spawns:
+            name = match.group(1)
+            scope = source
+            if per_function:
+                start = source.rfind("\n}\n", 0, match.start())
+                end = source.find("\n}\n", match.start())
+                scope = source[start:end]
+            assert f"BeautyOnlyActors.Add({name})" in scope, name
     assert "AttachToActor(Aircraft, FAttachmentTransformRules::KeepRelativeTransform)" in text
     # no wall clock: every time-varying element runs on the FDM's time
     assert "FPlatformTime" not in text and "GetTimeSeconds" not in text
@@ -334,8 +360,39 @@ def test_heat_haze_is_off_unless_asked_and_recorded_as_pixel_moving():
     header = FX_H.read_text(encoding="utf-8")
     text = FX_CPP.read_text(encoding="utf-8")
     assert "bool bHeatHaze = false;" in header
-    assert 'AircraftFxSwitch(Params, TEXT("heat-haze="), false)' in text
+    assert 'AircraftFxSwitch(Params, TEXT("heat-haze="), false, SwitchError)' in text
     assert 'SetBoolField(TEXT("pixel_moving"), true)' in text
+
+
+@pytest.mark.parametrize("params, haze", [
+    ("", False), ("-heat-haze=on", True), ("-heat-haze=1", True), ("-heat-haze=true", True),
+    ("-heat-haze=off", False), ("-aircraft-look=off -heat-haze=on", False),
+])
+def test_the_switch_twin_reads_on_and_off_and_the_aircraft_look_master_switch(params, haze):
+    assert look.parse_fx_switches(params)["heat-haze"] is haze
+
+
+@pytest.mark.parametrize("params", ["-heat-haze=no", "-heat-haze=none", "-contrails=yes",
+                                    "-aircraft-look=nah -heat-haze=off"])
+def test_a_switch_word_that_is_neither_on_nor_off_is_refused_by_name(params):
+    """It used to read as ON: -heat-haze=no drew the pixel-moving haze."""
+    with pytest.raises(look.LookError, match=r"^aircraft_look\.switch: "):
+        look.parse_fx_switches(params)
+
+
+def test_the_switch_twin_is_the_cpp_parse():
+    text = FX_CPP.read_text(encoding="utf-8")
+    body = text[text.index("bool AircraftFxSwitch("):text.index("bool AircraftFxPair(")]
+    for word in look.SWITCH_ON + look.SWITCH_OFF:
+        assert f'Word == TEXT("{word}")' in body, word
+    assert 'TEXT("aircraft_look.switch: ' in body
+    parse = text[text.index("void FFlightSimAircraftFXOptions::ParseParams"):]
+    parse = parse[:parse.index("\n}\n")]
+    for key, default in look.FX_SWITCHES:
+        assert f'AircraftFxSwitch(Params, TEXT("{key}"), {str(default).lower()}, SwitchError)' in parse, key
+    assert "if (!Options.SwitchError.IsEmpty())" in text
+    catalog = (REPO / "core" / "messages" / "catalog.yaml").read_text(encoding="utf-8")
+    assert re.search(r"^aircraft_look\.switch:$", catalog, re.M)
 
 
 def test_the_commandlet_builds_the_look_only_in_beauty_and_before_the_labels():
@@ -367,6 +424,282 @@ def test_nanite_stays_off_at_import_and_the_compile_guard_stays():
     assert '"build_nanite", False' in text
     assert "KEEPS Nanite off for every airframe" in text
     assert "FAssetCompilingManager::Get().FinishAllCompilation();" in COMMANDLET.read_text(encoding="utf-8")
+
+
+# -- fix pass: the lamps, the plume and the haze in physical units ---------------
+
+NAV_BULB = REPO / look.SHADER_DIR / "nav_bulb.hlsl"
+AFTERBURNER = REPO / look.SHADER_DIR / "afterburner_glow.hlsl"
+HEAT_HAZE = REPO / look.SHADER_DIR / "heat_haze.hlsl"
+
+
+def _squash(text):
+    return re.sub(r"\s+", " ", text)
+
+
+def test_the_bulb_area_is_the_hlsl_falloff_integrated_and_the_cpp_fallback_agrees():
+    text = NAV_BULB.read_text(encoding="utf-8")
+    assert f"float core = exp(-r2 * {look.NAV_BULB_CORE_K:.1f});" in text
+    assert f"float halo = exp(-r2 * {look.NAV_BULB_HALO_K:.1f}) * {look.NAV_BULB_HALO_WEIGHT};" in text
+    assert "float2 c = UV * 2.0 - 1.0;" in text
+    # an independent midpoint integral of the HLSL formula over the quad
+    n = 400
+    total = 0.0
+    for i in range(n):
+        x = -1.0 + (i + 0.5) * 2.0 / n
+        for j in range(n):
+            y = -1.0 + (j + 0.5) * 2.0 / n
+            r2 = x * x + y * y
+            total += math.exp(-r2 * 18.0) + 0.15 * math.exp(-r2 * 3.0)
+    assert look.nav_bulb_area_factor() == pytest.approx(total * (2.0 / n) ** 2, rel=1e-4)
+    cpp = re.search(r"AircraftFxNavBulbAreaFactor = ([\d.]+);", FX_CPP.read_text(encoding="utf-8"))
+    assert float(cpp.group(1)) == pytest.approx(look.nav_bulb_area_factor(), rel=1e-6)
+
+
+def _look_manifest(tmp_path, name="J11"):
+    _write_model(tmp_path, [(0, 0, 0), (-10, -5, 0), (-10, 5, 0), (-30, 0, 0)], (0.0, 0.0, 0.0))
+    return look.build_manifest(name, look.load_config(name), str(tmp_path), str(J11_FDM))
+
+
+def test_every_bulb_shows_the_candela_its_light_throws(tmp_path):
+    """Face-on, one quad at the bulb's luminance emits L x area: the lamp's
+    own candela x gain (no cap, no per-cd fudge): the light on the airframe
+    and the lamp the camera sees are one number."""
+    manifest = _look_manifest(tmp_path)
+    constants = {k: v["value"] for k, v in manifest["constants"]["lights"].items()}
+    assert "BulbEmissivePerCd" not in constants and "BulbEmissiveMax" not in constants
+    radius_m = constants["BulbRadiusCm"] / 100.0
+    area = look.nav_bulb_area_factor() * radius_m ** 2
+    assert manifest["lights"]
+    for lamp in manifest["lights"]:
+        intensity = lamp["bulb_luminance_nits"] * area
+        assert intensity == pytest.approx(lamp["candela"] * constants["LightVisualGain"], rel=1e-4), lamp["id"]
+    # a 40 cd nav lamp at the J-11's 6 cm bulb: tens of thousands of nits,
+    # near white at a noon EV100 15 (1.2 x 2^15 = 39322 cd/m2), as a real one
+    nav = next(lamp for lamp in manifest["lights"] if lamp["kind"] == "nav_red")
+    assert 2.0e4 < nav["bulb_luminance_nits"] < 6.0e4
+
+
+def test_a_flashing_lamp_is_driven_at_the_blondel_rey_peak_of_its_effective_minimum(tmp_path):
+    manifest = _look_manifest(tmp_path)
+    constants = {k: v["value"] for k, v in manifest["constants"]["lights"].items()}
+    t, a = constants["StrobeFlashS"], constants["BlondelReyS"]
+    flashing = [lamp for lamp in manifest["lights"] if lamp["strobe"]]
+    assert flashing
+    for lamp in flashing:
+        assert lamp["effective_candela"] == look.LIGHT_KINDS[lamp["kind"]][1]
+        # the flash the eye integrates: I t / (a + t) is the regulatory minimum
+        assert lamp["candela"] * t / (a + t) == pytest.approx(lamp["effective_candela"], rel=1e-4)
+    assert look.strobe_peak_candela(400.0, 0.12, 0.2) == pytest.approx(1066.67, abs=0.01)
+    for lamp in manifest["lights"]:
+        if not lamp["strobe"]:
+            assert "effective_candela" not in lamp and lamp["candela"] == look.LIGHT_KINDS[lamp["kind"]][1]
+
+
+def _cie_y(rgb):
+    """CIE 1931 y of a linear sRGB colour (the sRGB / D65 matrix)."""
+    r, g, b = rgb
+    x = 0.4124 * r + 0.3576 * g + 0.1805 * b
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    z = 0.0193 * r + 0.1192 * g + 0.9505 * b
+    return y / (x + y + z)
+
+
+def test_the_red_lamps_are_aviation_red():
+    """14 CFR 25.1397(a), from memory: aviation red y <= 0.335."""
+    for kind in ("nav_red", "beacon_red"):
+        assert _cie_y(look.LIGHT_KINDS[kind][0]) <= 0.335, kind
+
+
+def test_the_landing_bulb_is_a_beam_with_the_spot_lights_own_cone(tmp_path):
+    manifest = _look_manifest(tmp_path)
+    cone = manifest["constants"]["lights"]["LandingConeDeg"]["value"]
+    for lamp in manifest["lights"]:
+        if lamp["kind"] == "landing":
+            assert lamp["beam_cos"] == [pytest.approx(math.cos(math.radians(0.5 * cone)), abs=1e-6),
+                                        pytest.approx(math.cos(math.radians(cone)), abs=1e-6)]
+        else:
+            assert lamp["beam_cos"] == list(look.OMNI_BEAM_COS)
+    text = FX_CPP.read_text(encoding="utf-8")
+    assert "Lamp.Spot->SetInnerConeAngle(0.5f * Cone);" in text and "Lamp.Spot->SetOuterConeAngle(Cone);" in text
+    hlsl = _squash(NAV_BULB.read_text(encoding="utf-8"))
+    assert "BeamCos.y <= -1.0 ? 1.0" in hlsl and "dot(CameraDir, BeamDir)" in hlsl
+    masters = MASTERS.read_text(encoding="utf-8")
+    assert "MaterialExpressionCameraVectorWS" in masters
+
+
+def test_the_flame_and_its_light_are_one_number_at_full_glow(tmp_path):
+    """The plume's side-on intensity (its luminance over its emitting area,
+    both faces of the additive cone) is AfterburnerCandela, the plume light's."""
+    manifest = _look_manifest(tmp_path)
+    constants = {k: v["value"] for k, v in manifest["constants"]["afterburner"].items()}
+    rows = [n for n in manifest["nozzles"] if n["afterburner"]]
+    assert rows
+    for row in rows:
+        assert row["plume_luminance_nits"] * row["plume_effective_area_m2"] == pytest.approx(
+            constants["AfterburnerCandela"], rel=1e-3)
+        assert 1.0e4 <= row["plume_luminance_nits"] <= 1.0e6
+        assert row["plume_core_colour"] == [pytest.approx(c * row["plume_luminance_nits"], rel=1e-3)
+                                            for c in look.AFTERBURNER_CORE_HUE]
+    assert look._luminance(look.AFTERBURNER_CORE_HUE) == pytest.approx(1.0, abs=1e-3)
+    # the integral follows the HLSL and the C++ cone it is drawn on
+    hlsl = AFTERBURNER.read_text(encoding="utf-8")
+    for line in ("float body = (1.0 - along) * (1.0 - along);",
+                 "float diamonds = 0.7 + 0.3 * pow(abs(cos(along * Shocks * 3.14159265)), 6.0);",
+                 "float3 colour = lerp(CoreColour, TipColour, along);",
+                 "return colour * (Intensity * body * diamonds);"):
+        assert line in hlsl, line
+    r0, r1 = look.AFTERBURNER_CONE_RADII
+    assert (f"AircraftFxConeSection(Mesh, {r0} * Nozzle.RadiusCm, {r1} * Nozzle.RadiusCm, Length);"
+            in FX_CPP.read_text(encoding="utf-8"))
+    # a thin cylinder of uniform unit luminance: 4 r L of emitting area side-on
+    saved = look.AFTERBURNER_CONE_RADII, look.AFTERBURNER_CORE_HUE, look.AFTERBURNER_TIP_HUE
+    try:
+        look.AFTERBURNER_CONE_RADII = (1.0, 1.0)
+        look.AFTERBURNER_CORE_HUE = look.AFTERBURNER_TIP_HUE = (1.0, 1.0, 1.0)
+        # body (1 - u)^2 integrates to 1/3; shocks 0 make the diamonds 1.0
+        assert look.afterburner_effective_area_m2(100.0, 3.0, 0.0) == pytest.approx(4.0 * 3.0 / 3.0, rel=1e-4)
+    finally:
+        look.AFTERBURNER_CONE_RADII, look.AFTERBURNER_CORE_HUE, look.AFTERBURNER_TIP_HUE = saved
+
+
+def _haze_offset(u, local, time_s, strength):
+    """heat_haze.hlsl, line for line."""
+    fade = (1.0 - min(max(u, 0.0), 1.0)) * min(max(u * 8.0, 0.0), 1.0)
+    p = (local[0] / 25.0 + time_s * 6.0, local[1] / 25.0, local[2] / 25.0 + time_s * 1.5)
+    a = math.sin(p[0] * 1.7 + math.sin(p[1] * 2.3)) * math.cos(p[2] * 1.9 + p[0] * 0.4)
+    b = math.cos(p[1] * 1.3 + math.sin(p[2] * 2.9)) * math.sin(p[0] * 2.1 - p[2] * 0.6)
+    return a * strength * 0.01 * fade, b * strength * 0.01 * fade
+
+
+def test_the_recorded_haze_bound_covers_the_hlsl_envelope_and_the_engine_scale():
+    text = HEAT_HAZE.read_text(encoding="utf-8")
+    for line in ("float fade = (1.0 - saturate(UV.x)) * saturate(UV.x * 8.0);",
+                 "float3 p = LocalPos / 25.0 + float3(TimeS * 6.0, 0.0, TimeS * 1.5);",
+                 "return float2(a, b) * (Strength * 0.01 * fade);"):
+        assert line in text, line
+    strength = look.HEAT_HAZE_DEFAULTS["Strength"]
+    bound = look.heat_haze_max_material_offset(strength)
+    peak = 0.0
+    for i in range(41):
+        for j in range(9):
+            for k in range(9):
+                ox, oy = _haze_offset(i / 40.0, (j * 37.0, k * 23.0 - 90.0, j * k * 3.0), 0.37 * (i + j), strength)
+                peak = max(peak, abs(ox), abs(oy))
+    assert 0.0 < peak <= bound
+    # the engine (DistortionCommon.ush): UV_x = v W k / tan(hFOV/2), UV_y = v W k / tan of the height
+    for width, height, fov in ((1920, 1080, 60.0), (3840, 2160, 40.0), (1280, 720, 90.0)):
+        scale = width * look.UE_DISTORTION_OFFSET_FUDGE / math.tan(math.radians(fov) / 2.0)
+        px = math.hypot(bound * scale * width, bound * scale * height)
+        assert look.heat_haze_max_displacement_px(bound, width, height, fov) == pytest.approx(px)
+    # 1920 px at 55 degrees: about 8.6 px on x (the old record said 11.5 px of
+    # "screen fraction" that was not a bound of anything)
+    assert look.heat_haze_max_displacement_px(bound, 1920, 0, 55.0) == pytest.approx(8.55, abs=0.05)
+    fx = FX_CPP.read_text(encoding="utf-8")
+    assert "max_offset_screen_fraction" not in fx
+    assert 'SetNumberField(TEXT("max_material_offset")' in fx
+    assert "constexpr double AircraftFxHeatHazeFadePeak = 0.875;" in fx
+    assert f"constexpr double AircraftFxDistortionOffsetFudge = {look.UE_DISTORTION_OFFSET_FUDGE};" in fx
+    commandlet = COMMANDLET.read_text(encoding="utf-8")
+    assert "FFlightSimAircraftFX::HeatHazeMaxDisplacementPx(" in commandlet
+    assert 'TryGetNumberField(TEXT("max_material_offset"), HazeOffset)' in commandlet
+    api = (REPO / "scripts" / "check_bridge_api.sh").read_text(encoding="utf-8")
+    assert '"const float OffsetFudgeFactor = 0.00023;"' in api
+
+
+def test_a_contrail_inside_a_cloud_layer_fades_by_its_cover():
+    text = FX_CPP.read_text(encoding="utf-8")
+    assert "CloudClear *= 1.0 - FMath::Clamp(Layer.CoverFraction, 0.0, 1.0);" in text
+    assert "Trail.BaseOpacity * CloudClear" in text
+    assert "AircraftFXOptions.CloudLayers = AircraftCloudLayers;" in COMMANDLET.read_text(encoding="utf-8")
+
+
+def test_chipped_paint_shows_aluminium_not_iron():
+    for cls in ("paint", "bare_metal"):
+        r, g, b, _ = look.CLASS_VECTORS[cls]["WearColour"]
+        assert min(r, g, b) >= 0.88, cls
+
+
+def test_no_airliner_sized_lamp_on_the_j11(tmp_path):
+    """The 18 cm default bulb is an airliner's wingtip lens and glare."""
+    manifest = _look_manifest(tmp_path)
+    radius = manifest["constants"]["lights"]["BulbRadiusCm"]["value"]
+    assert radius < look.LIGHT_DEFAULTS["BulbRadiusCm"] and radius <= 8.0
+
+
+# -- fix pass: record and label honesty ------------------------------------------
+
+def test_every_constant_the_fx_reads_is_one_the_manifest_carries_with_the_same_fallback():
+    text = FX_CPP.read_text(encoding="utf-8")
+    groups = {"lights": look.LIGHT_DEFAULTS, "contrail": look.CONTRAIL_DEFAULTS,
+              "vapour": look.VAPOUR_DEFAULTS, "afterburner": look.AFTERBURNER_DEFAULTS,
+              "heat_haze": look.HEAT_HAZE_DEFAULTS}
+    number = r"([\d.]+(?:e[+-]?\d+)?)"
+    plain = re.findall(r'Constant\(TEXT\("(\w+)"\), TEXT\("(\w+)"\), ' + number + r"\)", text)
+    assert len(plain) >= 15
+    for group, name, fallback in plain:
+        assert name in groups[group], (group, name)
+        assert float(fallback) == groups[group][name], (group, name)
+    ternary = re.findall(r'Constant\(Group, TEXT\("(\w+)"\), (?:Trail\.)?bVapour \? ' + number + " : "
+                         + number + r"\)", text)
+    assert len(ternary) >= 5
+    for name, vapour, contrail in ternary:
+        assert float(vapour) == look.VAPOUR_DEFAULTS[name], name
+        assert float(contrail) == look.CONTRAIL_DEFAULTS[name], name
+
+
+def test_a_sampled_livery_is_kept_not_repainted():
+    text = FX_CPP.read_text(encoding="utf-8")
+    body = text[text.index("void FFlightSimAircraftFX::ApplyMaterials"):]
+    body = body[:body.index("\n}\n")]
+    branch = body.index('Options.Livery != TEXT("default")')
+    assert branch < body.index("Part->SetMaterial(")
+    assert "return;" in body[branch:body.index("TInlineComponentArray")]
+    assert "AircraftFXOptions.Livery = MeshAirframe.Livery;" in COMMANDLET.read_text(encoding="utf-8")
+
+
+def test_the_fx_masters_that_hide_nothing_are_additive_and_the_media_translucent():
+    text = MASTERS.read_text(encoding="utf-8")
+    for name in ("M_NavLightEmissive", "M_AircraftAfterburner"):
+        assert re.search(rf'_fx\("{name}", "BLEND_ADDITIVE"', text), name
+    for name in ("M_AircraftContrail", "M_AircraftHeatHaze"):
+        assert re.search(rf'_fx\("{name}", "BLEND_TRANSLUCENT"', text), name
+
+
+def test_the_look_config_digest_is_the_named_files(tmp_path):
+    _write_model(tmp_path, [(0, 0, 0), (-10, -5, 0), (-10, 5, 0)], (0.0, 0.0, 0.0))
+    data = json.loads(Path(look.write_manifest("J11", generated_dir=str(tmp_path))).read_text(encoding="ascii"))
+    assert data["look_config"] == "assets/aircraft_config/look/J11.json"
+    assert data["look_config_sha256"] == look.sha256_file(look.look_config_path("J11"))
+    assert data["look_config_canonical_json_sha256"] == look.sha256_text(
+        json.dumps(look.load_config("J11"), sort_keys=True))
+
+
+def test_the_look_keys_stay_out_of_every_aircraft_config():
+    """The aircraft config's sha256 is label provenance in every manifest
+    (core/capture/manifest.py asset_digests): no look key may sit in it.
+    The set is derived from the look schema (not a hand list), so a look
+    key moved into the provenance config fails here."""
+    look_only = look.KNOWN_KEYS - {"name", "note", "schema"}
+    assert {"light_constants", "condensation", "fg_material"} <= look_only
+    for path in CONFIGS:
+        config = json.loads(path.read_text(encoding="utf-8"))
+        assert not look_only & set(config), (path.name, look_only & set(config))
+
+
+def test_the_panel_groove_twin_matches_the_hlsl_lines():
+    text = _squash((REPO / look.SHADER_DIR / "panel_lines.hlsl").read_text(encoding="utf-8"))
+    for line in ("float p = max(pitches[i], 1.0);", "float d = (frac(coords[i] / p + 0.5) - 0.5) * p;",
+                 "float w = max(WidthCm, 0.01);", "float halfWidth = 0.5 * w + fw;",
+                 "float g = saturate(1.0 - abs(d) / halfWidth);", "g *= saturate(1.0 - fw / (2.0 * w));"):
+        assert line in text, line
+    import ue_aircraft_master_materials as masters
+    twin = _squash(ast.get_source_segment(MASTERS.read_text(encoding="utf-8"), next(
+        n for n in _masters_tree().body if isinstance(n, ast.FunctionDef) and n.name == "panel_groove")))
+    for line in ("p = max(pitch_cm, 1.0)", "w = max(width_cm, 0.01)", "half = 0.5 * w + fw",
+                 "g = min(max(1.0 - abs(d) / half, 0.0), 1.0)", "min(max(1.0 - fw / (2.0 * w), 0.0), 1.0)"):
+        assert line in twin, line
+    assert masters.panel_groove(10.0, 100.0, 0.4) == 0.0
 
 
 # -- model candidates -----------------------------------------------------------

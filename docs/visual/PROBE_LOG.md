@@ -555,7 +555,10 @@ C++ `FlightSimAircraftFX.cpp/.h`; candidate model table
   `render.json aircraft_look.contrail.label_convention`).
 - Heat haze refracts (moves pixels): OFF unless `-heat-haze=on`, beauty
   only, recorded as `aircraft_look.heat_haze.pixel_moving: true` with
-  `max_offset_screen_fraction` = Strength/100.
+  `max_material_offset` = Strength/100 x 0.875 (the HLSL's peak) and, in
+  `pixel_moving_effects`, the engine's bound in px (x width x 0.00023 /
+  tan(hFOV/2), along the diagonal: UE 5.7.4 DistortionCommon.ush; fix pass
+  2026-11-09, the old "screen fraction" was not the engine's scale).
 - All FX run on the FDM's time (strobe phase, trails, reheat glow, haze
   phase): replay-identical.
 - Lamps sit on measured body-vertex extremes (wingtips at -y/+y, tail at
@@ -574,19 +577,27 @@ C++ `FlightSimAircraftFX.cpp/.h`; candidate model table
   overrides in the look configs): roughness, clear coat, panel pitch / width /
   depth, wear, grime, glass tint. Probe: V7 side-by-side of each type against
   a reference photo at matched sun (reader's judgment).
-- `lights`: LightVisualGain, BulbRadiusCm, BulbEmissivePerCd,
-  BulbEmissiveMax, StrobePeriodS, StrobeFlashS, LandingMaxAglM,
-  LandingConeDeg, NavAttenuationM, LandingAttenuationM. Probe: dusk and noon
-  beauty of the type at chase range. (Candela values are 14 CFR 25.1391 /
-  25.1401 minimums from memory, not uncalibrated look numbers.)
+- `lights`: LightVisualGain, BulbRadiusCm (J-11: 6), StrobePeriodS,
+  StrobeFlashS, LandingMaxAglM, LandingConeDeg, NavAttenuationM,
+  LandingAttenuationM, BlondelReyS. Probe: dusk and noon beauty of the type
+  at chase range. (Candela values are 14 CFR 25.1391 / 25.1401 minimums from
+  memory, not uncalibrated look numbers; a flashing lamp is driven at the
+  Blondel-Rey peak of its effective minimum.) Fix pass 2026-11-09: the
+  bulb's luminance is no longer a constant (BulbEmissivePerCd 2, capped at
+  3000, made a 40 cd lamp show under 1 cd): it is the candela over the
+  sprite's integrated falloff (`bulb_luminance_nits` per lamp), so the bulb
+  and its light are one number under the frame's one exposure.
 - `contrail`: MaxTemperatureK 233.15, MinAltitudeM 7500, LifetimeS,
   FormationDelayS, StartWidthM, SpreadMPerS, Opacity, PreseedS. Probe: cruise
   beauty above 9 km, chase and side views.
 - `vapour`: MinNz 4, LifetimeS, StartWidthM, SpreadMPerS, Opacity. Probe:
   a 5 g pull-up.
 - `afterburner`: PlumeLengthRadii, AfterburnerCandela, GlowGain,
-  AttenuationM; core/tip colours in `M_AircraftAfterburner`. Probe: full
-  reheat take-off, rear quarter.
+  AttenuationM, Shocks; core/tip HUES in `aircraft_look.py`. The flame's
+  luminance is AfterburnerCandela over the plume's emitting area
+  (`plume_luminance_nits` per nozzle; fix pass: the old fixed 30 nit core
+  was about 1000x dimmer than its own 60000 cd light). Probe: full reheat
+  take-off, rear quarter.
 - `heat_haze`: LengthRadii, Strength. Probe: `-heat-haze=on` at idle, rear
   view.
 - `GLASS_MAX_DISSOLVE` 0.95, `RUBBER_MAX_KD` 0.06, `SNAP_MAX_AFT_M` 4.0,
@@ -638,7 +649,7 @@ platform; the `.sh` twins take the same arguments):
 7. Heat haze, once: re-render a beauty run's card with
    `scripts\render_ue_scenario.ps1 <runs\<id>\card.json> <out> -Visual -quality=beauty -mesh=<abs path to assets\generated\J11\mesh_manifest.json> -heat-haze=on`
    and compare mask edges behind the nozzles against the beauty frame
-   (bound: `aircraft_look.heat_haze.max_offset_screen_fraction`).
+   (bound: `pixel_moving_effects` heat_haze `max_displacement_px`).
 
 ## verifier-tooling
 

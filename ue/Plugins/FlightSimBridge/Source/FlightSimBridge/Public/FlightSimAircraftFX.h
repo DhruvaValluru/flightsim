@@ -51,6 +51,7 @@
 #include "FlightSimAircraftWet.h"  // wet-airframe-canopy
 
 #include "FlightSimCondensation.h"  // condensation-solver
+#include "FlightSimVisualScene.h"  // FFlightSimCloudLayer (fix pass: contrails in cloud)
 #include "Templates/Function.h"
 
 class AActor;
@@ -80,6 +81,14 @@ struct FFlightSimAircraftFXOptions
 	bool bHeatHaze = false;
 	// wet-airframe-canopy: the built weather (its rain wets the airframe), or null.
 	const FFlightSimWeather* Weather = nullptr;
+	// fix pass: the scene's cloud layers (heights above the ground datum,
+	// engine Z = 0, the convention FFlightSimCloudLayer states): a contrail
+	// drawn inside a layer fades by its cover (the trail is in the cloud).
+	TArray<FFlightSimCloudLayer> CloudLayers;
+	// fix pass: a switch word ParseParams could not read (on/1/true or
+	// off/0/false only), "" when every switch parsed; Build refuses it by
+	// name (aircraft_look.switch) -- a pixel-moving effect fails closed.
+	FString SwitchError;
 
 	// condensation-solver: where the vapour test's humidity comes from
 	// (-humidity-pct=; the commandlet sets bCardStated from the card).
@@ -101,6 +110,14 @@ public:
 
 	bool IsBuilt() const { return bBuilt; }
 
+	// The engine's bound on how far heat_haze.hlsl moves a pixel (px, along
+	// the diagonal) for its peak material offset (render.json
+	// aircraft_look.heat_haze.max_material_offset): UE 5.7.4
+	// DistortionCommon.ush scales a 2D offset by width x 0.00023 x
+	// 1/tan(hFOV/2), the same pixel count per unit on both axes. Twin of
+	// scripts/aircraft_look.py heat_haze_max_displacement_px.
+	static double HeatHazeMaxDisplacementPx(double MaterialOffset, double WidthPx, double HeightPx, double HFovDeg);
+
 	// Every actor drawn only in the beauty capture (the commandlet appends them
 	// to FFlightSimVisualScene::BeautyOnlyActors before any label capture).
 	TArray<AActor*> BeautyOnlyActors;
@@ -119,6 +136,7 @@ private:
 		UPointLightComponent* Point = nullptr;
 		USpotLightComponent* Spot = nullptr;
 		UMaterialInstanceDynamic* Bulb = nullptr;
+		double BulbNits = 0.0;  // the bulb's core luminance, cd/m2 (from its candela)
 	};
 	struct FNozzle
 	{
@@ -132,6 +150,7 @@ private:
 		UMaterialInstanceDynamic* Plume = nullptr;
 		UPointLightComponent* PlumeLight = nullptr;
 		UMaterialInstanceDynamic* Haze = nullptr;
+		double PlumeLuminanceNits = 0.0;  // the look manifest's, 0 when it predates it
 	};
 	struct FTrailSample
 	{
@@ -143,6 +162,8 @@ private:
 		FVector SourceActorCm = FVector::ZeroVector;
 		AActor* Owner = nullptr;
 		UProceduralMeshComponent* Mesh = nullptr;
+		UMaterialInstanceDynamic* Instance = nullptr;
+		double BaseOpacity = 0.0;
 		TArray<FTrailSample> Samples;
 		bool bVapour = false;
 		bool bEverDrawn = false;
@@ -166,6 +187,8 @@ private:
 	// condensation-solver: the humidity-gated vapour sites (FlightSimCondensation.h).
 	FFlightSimCondensation Condensation;
 	int32 ContrailFrames = 0;
+	int32 ContrailInCloudFrames = 0;
+	TArray<FFlightSimCloudLayer> CloudLayers;
 	int32 VapourFrames = 0;
 	double PeakAfterburner = 0.0;
 	int32 StrobeOnFrames = 0;

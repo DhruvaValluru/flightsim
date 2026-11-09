@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -106,18 +107,38 @@ CLASS_SCALARS = {
         "WearAmount": 0.1, "GrimeAmount": 0.25, "Specular": 0.5,
         "NoiseCm": 35.0, "EdgeStart": 0.02, "EdgeEnd": 0.2,
     },
+    # Canopy acrylic (PMMA, n 1.49): F0 = ((n - 1) / (n + 1))^2 = 0.039, and
+    # UE's F0 is 0.08 x Specular, so Specular 0.5 (polycarbonate, n 1.586,
+    # would be 0.64). The engine's BRDF already applies Schlick's grazing
+    # Fresnel to that F0; ReflectionBoost x pow(1 - N.V, FresnelExponent) on
+    # top is a NON-PHYSICAL look gain (a cockpit glass reads glossier than
+    # its F0 at mid angles), kept at most 1 - Specular so the saturate never
+    # swallows it: face-on F0 stays GLASS_F0 (the master sets the Fresnel
+    # node's own base reflect fraction to 0), grazing Specular <= 1.
     "glass": {
-        "Metallic": 0.0, "Roughness": 0.04, "Specular": 1.0, "FresnelExponent": 5.0,
-        "ReflectionBoost": 0.6,
+        "Metallic": 0.0, "Roughness": 0.04, "Specular": 0.5, "FresnelExponent": 5.0,
+        "ReflectionBoost": 0.5,
     },
     "rubber": {
         "Metallic": 0.0, "Roughness": 0.86, "Specular": 0.3, "RoughnessBreakup": 0.08,
     },
 }
+#: UE's dielectric F0 per unit Specular (ShadingCommon.ush
+#: DielectricSpecularToF0: 0.08 x Specular, UE 5.7.4) and the canopy F0 the
+#: glass Specular above is meant to give (acrylic, n 1.49: 0.039).
+UE_F0_PER_SPECULAR = 0.08
+GLASS_IOR = 1.49
+GLASS_F0 = ((GLASS_IOR - 1.0) / (GLASS_IOR + 1.0)) ** 2
+
+#: The F0 of the bare metal a chipped edge exposes: aluminium alloy skin
+#: (linear, about 0.91 0.92 0.92, from memory; iron's 0.56 0.57 0.58 read as
+#: dark steel). The wear lerps to metallic 0.9 with this as its colour.
+ALUMINIUM_F0 = (0.91, 0.92, 0.92)
+
 #: Every vector each class master exposes (linear RGBA), with its default.
 CLASS_VECTORS = {
-    "paint": {"PanelPitchCm": (120.0, 90.0, 45.0, 0.0), "WearColour": (0.56, 0.57, 0.6, 1.0)},
-    "bare_metal": {"PanelPitchCm": (90.0, 60.0, 35.0, 0.0), "WearColour": (0.75, 0.75, 0.77, 1.0)},
+    "paint": {"PanelPitchCm": (120.0, 90.0, 45.0, 0.0), "WearColour": (*ALUMINIUM_F0, 1.0)},
+    "bare_metal": {"PanelPitchCm": (90.0, 60.0, 35.0, 0.0), "WearColour": (*ALUMINIUM_F0, 1.0)},
     "glass": {"GlassTint": (0.018, 0.022, 0.026, 1.0)},
     "rubber": {},
 }
@@ -128,7 +149,7 @@ BASE_PARAMETERS = ("BaseColorMap", "BaseColor", "BaseColorMapWeight")
 #: The FX masters' parameters, by the names FlightSimAircraftFX.cpp sets
 #: (pinned to its text by tests/test_aircraft_look.py).
 FX_PARAMETERS = {
-    "M_NavLightEmissive": ("LightColour", "Intensity", "Strobe"),
+    "M_NavLightEmissive": ("LightColour", "Intensity", "Strobe", "BeamDirection", "BeamCos"),
     "M_AircraftContrail": ("Opacity", "Formation"),
     "M_AircraftAfterburner": ("Intensity", "CoreColour", "TipColour", "Shocks"),
     "M_AircraftHeatHaze": ("TimeS", "Strength"),
@@ -141,7 +162,7 @@ SHADER_DIR = "assets/shaders/aircraft"
 SHADER_INPUTS = {
     "panel_lines": ("LocalPos", "NormalWS", "AxisX", "AxisY", "AxisZ", "Pitch", "WidthCm", "Depth"),
     "aircraft_wear": ("LocalPos", "NormalWS", "WorldPosCm", "NoiseCm", "EdgeStart", "EdgeEnd"),
-    "nav_bulb": ("UV", "LightColour", "Intensity", "Strobe"),
+    "nav_bulb": ("UV", "LightColour", "Intensity", "Strobe", "CameraDir", "BeamDir", "BeamCos"),
     "contrail_opacity": ("UV", "LocalPos", "Opacity", "Formation"),
     "afterburner_glow": ("UV", "Intensity", "CoreColour", "TipColour", "Shocks"),
     "heat_haze": ("UV", "LocalPos", "TimeS", "Strength"),
@@ -336,16 +357,21 @@ LIGHT_KINDS = {
     # kind: (linear colour, candela, strobe). The candela values are the
     # regulatory minimums, from memory of 14 CFR 25.1391 (forward red /
     # green 40 cd, rear white 20 cd) and 25.1401 (anti-collision 400 cd
-    # effective); the landing lamp is the order of a PAR-64 lamp, from
-    # memory. What the frame shows is these times LIGHT_VISUAL_GAIN.
-    "nav_red": ((1.0, 0.05, 0.02), 40.0, False),
+    # EFFECTIVE: a flashing kind's lamp is driven at the Blondel-Rey peak,
+    # strobe_peak_candela); the landing lamp is the order of a PAR-64 lamp,
+    # from memory. What the frame shows is these times LightVisualGain.
+    # Aviation red (25.1397(a), from memory: y <= 0.335) is linear sRGB
+    # (1, 0, 0), CIE y 0.330; (1, 0.05, 0.02) was y 0.343, orange of it.
+    # NOT modelled: the 25.1385/25.1387 horizontal sectors (red / green
+    # 110 degrees forward, white 140 aft) -- the nav lamps are omnidirectional.
+    "nav_red": ((1.0, 0.0, 0.0), 40.0, False),
     "nav_green": ((0.05, 1.0, 0.25), 40.0, False),
     "nav_white": ((1.0, 0.95, 0.9), 20.0, False),
     "strobe": ((1.0, 1.0, 1.0), 400.0, True),
     # Flashing beacons (j11-package lane): the J-11A package's own
     # BeaconRed / BeaconGreen at its wingtip nav stations (LightPack.xml),
     # 400 cd as the anti-collision minimum above, from memory.
-    "beacon_red": ((1.0, 0.05, 0.02), 400.0, True),
+    "beacon_red": ((1.0, 0.0, 0.0), 400.0, True),
     "beacon_green": ((0.05, 1.0, 0.25), 400.0, True),
     "landing": ((1.0, 0.95, 0.85), 200000.0, False),
 }
@@ -637,20 +663,165 @@ CONTRAIL_DEFAULTS = {
 #: Wingtip vapour: short trails from the wingtip anchors above a load factor.
 VAPOUR_DEFAULTS = {"MinNz": 4.0, "LifetimeS": 0.8, "StartWidthM": 0.25,
                    "SpreadMPerS": 1.5, "Opacity": 0.35}
-#: Lights: what the frame shows is candela x LIGHT_VISUAL_GAIN; the strobe
+#: Lights: what the frame shows is candela x LightVisualGain; the strobe
 #: flashes StrobeFlashS every StrobePeriodS (25.1401: 40-100 flashes a
 #: minute, from memory) on the FDM's own time (replay-identical).
+#: BulbRadiusCm is the half-size of the glow sprite and the point light's
+#: source radius: 18 cm is an airliner's wingtip lens and glare, a fighter's
+#: lamp is far smaller (the J-11's look config overrides it). The bulb's
+#: luminance is NOT a constant: it is the candela over the sprite's effective
+#: area (bulb_luminance_nits), so the lamp the camera sees and the light it
+#: throws are one number. BlondelReyS is the Blondel-Rey constant a (0.2 s,
+#: from memory) that turns a flash's effective intensity into its peak.
 LIGHT_DEFAULTS = {"LightVisualGain": 1.0, "BulbRadiusCm": 18.0, "StrobePeriodS": 1.0,
                   "StrobeFlashS": 0.12, "LandingMaxAglM": 450.0,
                   "LandingConeDeg": 12.0, "NavAttenuationM": 40.0,
-                  "LandingAttenuationM": 900.0, "BulbEmissivePerCd": 2.0,
-                  "BulbEmissiveMax": 3000.0}
+                  "LandingAttenuationM": 900.0, "BlondelReyS": 0.2}
 #: The afterburner: glow = saturate((thrust / maxthrust - mil / max) / (1 - mil / max)),
 #: static sea-level ratings from the engine file (a lapse with altitude and
 #: Mach the ratio does not correct for), the plume a cone PlumeLengthRadii
-#: nozzle radii long, its light AfterburnerCandela at full glow.
+#: nozzle radii long, its light AfterburnerCandela at full glow. The flame's
+#: own luminance is derived from the same candela (plume_luminance), so the
+#: plume the camera sees and the light it throws agree; Shocks is the number
+#: of shock diamonds afterburner_glow.hlsl draws (the master's default).
 AFTERBURNER_DEFAULTS = {"PlumeLengthRadii": 7.0, "AfterburnerCandela": 6.0e4,
-                        "GlowGain": 1.0, "AttenuationM": 25.0}
+                        "GlowGain": 1.0, "AttenuationM": 25.0, "Shocks": 5.0}
+#: The plume's hue at the nozzle and at the tip (linear sRGB), normalised so
+#: the core's Rec.709 luminance is 1: the flame's colour, never its
+#: brightness (that is plume_luminance's). The old fixed emissives
+#: (30, 22, 18) and (20, 6, 1.5) divided by the core's luminance 23.41.
+AFTERBURNER_CORE_HUE = (1.2815, 0.9398, 0.7689)
+AFTERBURNER_TIP_HUE = (0.8543, 0.2563, 0.0641)
+#: FlightSimAircraftFX.cpp's plume cone: radius 0.85 R at the nozzle to 0.3 R
+#: at the tip (R the nozzle radius); pinned to the C++ text by test.
+AFTERBURNER_CONE_RADII = (0.85, 0.3)
+#: nav_bulb.hlsl's falloff over its quad (c = UV * 2 - 1, half-size
+#: BulbRadiusCm): exp(-18 r^2) + 0.15 exp(-3 r^2); pinned to the HLSL by test.
+NAV_BULB_CORE_K = 18.0
+NAV_BULB_HALO_K = 3.0
+NAV_BULB_HALO_WEIGHT = 0.15
+#: Rec.709 / sRGB luminance weights (the engine's Luminance()).
+REC709_Y = (0.2126, 0.7152, 0.0722)
+
+
+def _gauss_1d(k):
+    """The integral of exp(-k x^2) over x in [-1, 1]."""
+    return math.sqrt(math.pi / k) * math.erf(math.sqrt(k))
+
+
+def nav_bulb_area_factor():
+    """The integral of nav_bulb.hlsl's falloff over its quad, in units of
+    the half-size squared (both terms are separable Gaussians: exact). One
+    quad face-on emits L x this x R^2 candela for a core luminance L; the
+    two crossed quads edge-on add nothing, a diagonal view up to sqrt(3)."""
+    return _gauss_1d(NAV_BULB_CORE_K) ** 2 + NAV_BULB_HALO_WEIGHT * _gauss_1d(NAV_BULB_HALO_K) ** 2
+
+
+def bulb_luminance_nits(candela, gain, radius_cm):
+    """The bulb's core luminance (cd/m^2) whose face-on intensity is the
+    lamp's own candela x gain: one source for the light and its sprite."""
+    radius_m = max(float(radius_cm), 0.01) / CM_PER_M
+    return float(candela) * float(gain) / (nav_bulb_area_factor() * radius_m * radius_m)
+
+
+def strobe_peak_candela(effective_cd, flash_s, blondel_rey_s):
+    """The instantaneous intensity a flash of ``flash_s`` needs for its
+    Blondel-Rey effective intensity I_e = I t / (a + t) to be ``effective_cd``."""
+    t = max(float(flash_s), 1e-3)
+    return float(effective_cd) * (float(blondel_rey_s) + t) / t
+
+
+def _luminance(rgb):
+    return sum(w * c for w, c in zip(REC709_Y, rgb))
+
+
+def afterburner_glow_profile(u, shocks):
+    """afterburner_glow.hlsl's emission along the plume at UV.x = u (per
+    unit core luminance, colour and all): (colour, body x diamonds)."""
+    along = min(max(u, 0.0), 1.0)
+    body = (1.0 - along) ** 2
+    diamonds = 0.7 + 0.3 * abs(math.cos(along * shocks * math.pi)) ** 6.0
+    colour = tuple(c + (t - c) * along for c, t in zip(AFTERBURNER_CORE_HUE, AFTERBURNER_TIP_HUE))
+    return colour, body * diamonds
+
+
+def afterburner_effective_area_m2(radius_cm, length_radii, shocks, steps=4000):
+    """The plume's luminance-weighted projected area seen side-on (m^2):
+    I = L_core x this. The cone is two-sided and additive, so a ring of
+    radius r and length dx shows 4 r dx of emitting surface from the side
+    (the integral of |cos| around it, front and back faces both drawn)."""
+    r0, r1 = AFTERBURNER_CONE_RADII
+    radius_m = float(radius_cm) / CM_PER_M
+    length_m = float(length_radii) * radius_m
+    total = 0.0
+    for i in range(steps):
+        u = (i + 0.5) / steps
+        colour, weight = afterburner_glow_profile(u, shocks)
+        r = (r0 + (r1 - r0) * u) * radius_m
+        total += _luminance(colour) * weight * 4.0 * r * (length_m / steps)
+    return total
+
+
+def plume_luminance(radius_cm, constants):
+    """(core luminance cd/m^2, effective area m^2): the flame at full glow
+    whose side-on intensity is AfterburnerCandela, the plume light's own."""
+    area = afterburner_effective_area_m2(radius_cm, constants["PlumeLengthRadii"], constants["Shocks"])
+    return constants["AfterburnerCandela"] / max(area, 1e-6), area
+
+
+#: heat_haze.hlsl's envelope: fade = (1 - u) x saturate(8 u) peaks at u = 1/8
+#: (0.875); each offset component is a product of a sine and a cosine (<= 1).
+HEAT_HAZE_FADE_PEAK = 0.875
+#: UE 5.7.4 DistortionCommon.ush: a 2D-offset refraction is scaled by the
+#: view's width x OffsetFudgeFactor (0.00023) x the projection's M[0][0]
+#: (1 / tan(hFOV / 2)) on x, and by the same times the aspect on y in
+#: height units -- i.e. the same pixel count per unit on both axes.
+UE_DISTORTION_OFFSET_FUDGE = 0.00023
+
+
+#: FFlightSimAircraftFXOptions::ParseParams's switches: (key, default). A
+#: word other than these is refused by name (aircraft_look.switch).
+FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", True), ("aircraft-lights=", True),
+               ("contrails=", True), ("afterburner=", True), ("heat-haze=", False))
+SWITCH_ON = ("on", "1", "true")
+SWITCH_OFF = ("off", "0", "false")
+
+
+def parse_fx_switches(params):
+    """Twin of FFlightSimAircraftFXOptions::ParseParams (FParse::Value reads
+    the word after ``-key=`` up to whitespace): {key: bool}, every element
+    off under -aircraft-look=off; LookError("aircraft_look.switch: ...") for
+    any other word (it used to read as on: -heat-haze=no drew the haze)."""
+    words = {}
+    for key, default in FX_SWITCHES:
+        match = re.search(re.escape(key) + r'"?([^\s"]*)', params)
+        if match is None:
+            words[key] = default
+            continue
+        word = match.group(1)
+        if word in SWITCH_ON:
+            words[key] = True
+        elif word in SWITCH_OFF:
+            words[key] = False
+        else:
+            raise LookError(f"aircraft_look.switch: -{key}{word} is not on/1/true or off/0/false")
+    every = words.pop("aircraft-look=")
+    return {key[:-1]: every and value for key, value in words.items()}
+
+
+def heat_haze_max_material_offset(strength):
+    """The largest |component| heat_haze.hlsl returns (refraction units)."""
+    return float(strength) * 0.01 * HEAT_HAZE_FADE_PEAK
+
+
+def heat_haze_max_displacement_px(material_offset, width_px, height_px, hfov_deg):
+    """The engine's bound on how far a pixel moves (px, along the diagonal):
+    UV_x = v_x W k / tan(hFOV/2) of the width, UV_y = v_y W k / tan(hFOV/2)
+    of the WIDTH too (the aspect cancels the height), so per axis
+    v W^2 k / tan in x and v W H k / tan in y. Twin of
+    FFlightSimAircraftFX::HeatHazeMaxDisplacementPx."""
+    scale = float(width_px) * UE_DISTORTION_OFFSET_FUDGE / math.tan(math.radians(float(hfov_deg)) / 2.0)
+    return float(material_offset) * scale * math.hypot(float(width_px), float(height_px))
 #: Heat haze behind the nozzles: OFF unless -heat-haze=on (it refracts, so it
 #: moves pixels: recorded in render.json aircraft_look.heat_haze, never on in a
 #: measured shot).
@@ -686,7 +857,64 @@ def _constants(defaults, overrides, probe):
     return out
 
 
-def build_manifest(name, config, generated_dir, fdm_xml, materials=None):
+#: An omnidirectional lamp's beam cosines (nav_bulb.hlsl: outer <= -1 = no beam).
+OMNI_BEAM_COS = (-2.0, -2.0)
+
+
+def lamp_row(row, actor, basis, light_constants):
+    """One manifest lamp: where, what colour, its intensity (the peak for a
+    flashing kind, with the effective value it meets) and the bulb's
+    luminance derived from that intensity (one source for both)."""
+    colour, candela, strobe = LIGHT_KINDS[row["kind"]]
+    out = {"id": row["id"], "kind": row["kind"], "actor_cm": list(actor), "basis": basis,
+           "colour": list(colour), "candela": candela, "strobe": strobe}
+    if strobe:
+        peak = strobe_peak_candela(candela, light_constants["StrobeFlashS"], light_constants["BlondelReyS"])
+        out["effective_candela"] = candela
+        out["candela"] = round(peak, 3)
+        out["candela_basis"] = (f"peak = effective x (a + t) / t (Blondel-Rey, a "
+                                f"{light_constants['BlondelReyS']} s, flash t "
+                                f"{light_constants['StrobeFlashS']} s): {candela} cd effective")
+    radius = light_constants["BulbRadiusCm"]
+    out["bulb_luminance_nits"] = round(bulb_luminance_nits(out["candela"], light_constants["LightVisualGain"],
+                                                           radius), 3)
+    out["bulb_basis"] = (f"candela x LightVisualGain / ({nav_bulb_area_factor():.5f} x BulbRadiusCm^2): "
+                         f"nav_bulb.hlsl's falloff integrated over one quad face-on")
+    if row["kind"] == "landing":
+        out["direction_actor"] = list(row.get("direction_actor", (1.0, 0.0, -0.08)))
+        # the spot light's own cone (FlightSimAircraftFX.cpp: inner half the outer)
+        cone = math.radians(light_constants["LandingConeDeg"])
+        out["beam_cos"] = [round(math.cos(0.5 * cone), 6), round(math.cos(cone), 6)]
+    else:
+        out["beam_cos"] = list(OMNI_BEAM_COS)
+    return out
+
+
+def nozzle_row(row, actor, basis, fdm, afterburner_constants):
+    mil, mx = engine_thrust(fdm, row["index"]) if isinstance(row.get("index"), int) else (None, None)
+    radius_cm = round(float(row["radius_m"]) * CM_PER_M, 2)
+    out = {"id": row["id"], "actor_cm": list(actor), "basis": basis,
+           "axis_actor": [-1.0, 0.0, 0.0], "radius_cm": radius_cm,
+           "afterburner": bool(row.get("afterburner", False)) and mx is not None,
+           "thrust_property": f"propulsion/engine[{row.get('index', 0)}]/thrust-lbs",
+           "mil_thrust_lbs": mil, "max_thrust_lbs": mx}
+    if out["afterburner"]:
+        nits, area = plume_luminance(radius_cm, afterburner_constants)
+        out["plume_luminance_nits"] = round(nits, 3)
+        out["plume_effective_area_m2"] = round(area, 6)
+        out["plume_core_colour"] = [round(c * nits, 3) for c in AFTERBURNER_CORE_HUE]
+        out["plume_tip_colour"] = [round(c * nits, 3) for c in AFTERBURNER_TIP_HUE]
+        out["plume_basis"] = ("AfterburnerCandela / the plume's luminance-weighted side-on area "
+                              "(afterburner_glow.hlsl over the cone, both faces): the flame and its "
+                              "light are one number at full glow")
+    return out
+
+
+def _values(defaults, overrides):
+    return {key: float(overrides.get(key, value)) for key, value in defaults.items()}
+
+
+def build_manifest(name, config, generated_dir, fdm_xml, materials=None, config_path=None):
     """The look manifest for one converted aircraft (dict, JSON-ready)."""
     manifest_path = os.path.join(generated_dir, "mesh_manifest.json")
     with open(manifest_path, encoding="utf-8") as handle:
@@ -697,29 +925,24 @@ def build_manifest(name, config, generated_dir, fdm_xml, materials=None):
     if materials is None:
         materials = read_mtl_dir(generated_dir)
     slots = plan_slots(materials, config, read_material_sources(generated_dir))
+    light_constants = _values(LIGHT_DEFAULTS, config.get("light_constants", {}))
+    afterburner_constants = _values(AFTERBURNER_DEFAULTS, {})
     lights = []
     for row in config.get("lights", []):
         actor, basis = resolve_anchor(row, vertices, fdm, origin)
-        colour, candela, strobe = LIGHT_KINDS[row["kind"]]
-        out = {"id": row["id"], "kind": row["kind"], "actor_cm": list(actor), "basis": basis,
-               "colour": list(colour), "candela": candela, "strobe": strobe}
-        if row["kind"] == "landing":
-            out["direction_actor"] = list(row.get("direction_actor", (1.0, 0.0, -0.08)))
-        lights.append(out)
+        lights.append(lamp_row(row, actor, basis, light_constants))
     nozzles = []
     for row in config.get("nozzles", []):
         actor, basis = resolve_anchor(row, vertices, fdm, origin)
-        mil, mx = engine_thrust(fdm, row["index"]) if isinstance(row.get("index"), int) else (None, None)
-        nozzles.append({"id": row["id"], "actor_cm": list(actor), "basis": basis,
-                        "axis_actor": [-1.0, 0.0, 0.0],
-                        "radius_cm": round(float(row["radius_m"]) * CM_PER_M, 2),
-                        "afterburner": bool(row.get("afterburner", False)) and mx is not None,
-                        "thrust_property": f"propulsion/engine[{row.get('index', 0)}]/thrust-lbs",
-                        "mil_thrust_lbs": mil, "max_thrust_lbs": mx})
+        nozzles.append(nozzle_row(row, actor, basis, fdm, afterburner_constants))
+    config_path = config_path or look_config_path(name)
     return {
         "magic": LOOK_MANIFEST_MAGIC, "version": LOOK_MANIFEST_VERSION, "name": name,
-        "look_config": f"assets/aircraft_config/look/{name}.json",
-        "look_config_sha256": sha256_text(json.dumps(config, sort_keys=True)),
+        "look_config": os.path.relpath(config_path, REPO).replace(os.sep, "/"),
+        # sha256 of the named file (as every other *_sha256 here), and of the
+        # config as used (canonical JSON: the same unless a caller edited it).
+        "look_config_sha256": sha256_file(config_path) if os.path.isfile(config_path) else None,
+        "look_config_canonical_json_sha256": sha256_text(json.dumps(config, sort_keys=True)),
         "mesh_manifest_sha256": sha256_file(manifest_path),
         "body_part": part, "frame": "UE actor frame, cm, +X forward +Y right +Z up, "
                                     "about the JSBSim structural datum",
@@ -771,7 +994,7 @@ def write_manifest(name, generated_dir=None, config_path=None):
     """Build and write <generated>/<NAME>/look_manifest.json; returns its path."""
     generated_dir = generated_dir or os.path.join(GENERATED, name)
     config = load_config(name, config_path)
-    manifest = build_manifest(name, config, generated_dir, fdm_xml_for(name))
+    manifest = build_manifest(name, config, generated_dir, fdm_xml_for(name), config_path=config_path)
     out = os.path.join(generated_dir, LOOK_MANIFEST_NAME)
     tmp = out + ".tmp"
     with open(tmp, "w", encoding="ascii") as handle:
