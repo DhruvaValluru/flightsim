@@ -458,6 +458,15 @@ else
     bad "engine WhiteSquareTexture" "missing: the aircraft masters' BaseColorMap default"
 fi
 
+# -- ACES2-DISPLAY LANE: what the offline ACES 2.0 view assumes of -linear --
+# core/capture/display.py reads frame_NNNN_linear.exr (SCS_FinalColorHDR) as
+# graded, exposed, bloomed linear light with NO filmic curve. No C++ added;
+# these pin the engine behaviour that reading rests on (grepped in 5.7.4).
+aircraft_check "aces2: SCS_FinalColorHDR" "$RE/Classes/Engine/EngineTypes.h" "SCS_FinalColorHDR UMETA"
+aircraft_check "aces2: FinalColorHDR -> LinearNoToneCurve" "Runtime/Renderer/Private/PostProcess/PostProcessTonemap.cpp" "OutputDeviceValue = EDisplayOutputFormat::HDR_LinearNoToneCurve;"
+aircraft_check "aces2: bloom and exposure before the LUT" "Shaders/Private/PostProcessTonemap.usf" "FinalLinearColor += Bloom * (OneOverPreExposure * GlobalExposure"
+# -- end ACES2-DISPLAY LANE --------------------------------------------------
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'
