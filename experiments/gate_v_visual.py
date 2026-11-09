@@ -1066,7 +1066,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if not directory.is_dir():
                 print(f"NOT RUN {directory}: no such directory")
                 return 2
-        comparison = compare_reports(_report_for(before_dir, {}), _report_for(after_dir, {}))
+        comparison = compare_reports(_report_for(before_dir, overrides),
+                                     _report_for(after_dir, overrides))
         out = root / f"gate_v_compare_{before_dir.name}_vs_{after_dir.name}.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(comparison, indent=2), encoding="utf-8")

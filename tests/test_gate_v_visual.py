@@ -344,3 +344,12 @@ def test_every_threshold_is_named_uncalibrated_in_the_source():
     for name in gv.UNCALIBRATED:
         line = next(l for l in source.splitlines() if l.startswith(f"{name} ="))
         assert "UNCALIBRATED" in line or name == "CLOUD_TOLERANCE", line
+
+
+def test_compare_keeps_the_cloud_override(tmp_path):
+    write_step(tmp_path / "before", clouds=0.0)
+    write_step(tmp_path / "after", clouds=0.0)
+    assert gv.main(["--compare", "before", "after", "--root", str(tmp_path),
+                    "--expect-cloud", "a=0.9"]) == 0
+    comparison = json.loads((tmp_path / "gate_v_compare_before_vs_after.json").read_text())
+    assert comparison["shots"]["a"]["cloud_fraction"]["status"] == [gv.FAIL, gv.FAIL]
