@@ -200,6 +200,18 @@ aircraft.mesh_import:
   sentence: "The aircraft's 3-D model could not be fetched, converted or imported on this machine."
 aircraft.mesh_extent:
   sentence: "The aircraft's 3-D model does not measure the size its flight model says it is."
+# j11-package lane (assets_pipeline/package_pins.py, convert.py): the
+# package files beyond the airframe .ac.
+aircraft.package_pin:
+  sentence: "A file of the aircraft's model package is missing or is not the exact pinned version, so the model was not converted."
+  hint: "Fetch the package again at the pinned commit; the technical note names each file that differs."
+aircraft.interior_outside_hull:
+  sentence: "A cockpit part of the aircraft's model would stick out of the airframe, which would change the outline the labels measure, so the model was not converted."
+  hint: "Check the cockpit part's offset in the aircraft's model config against the package's model file."
+aircraft.livery_unmatched:
+  sentence: "The aircraft's paint scheme names parts of the model that carry no paint texture, so the model was not converted rather than drawn half-painted."
+aircraft.texture_collision:
+  sentence: "Two different textures of the aircraft's model share one file name, and one would silently replace the other, so the model was not converted."
 aircraft.placeholder_drawn:
   sentence: "The pictures show a stand-in shape, not the real aircraft model, so they cannot be labelled."
 aircraft_look.manifest:

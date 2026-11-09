@@ -217,17 +217,101 @@ def instance_name(slot):
     return LOOK_INSTANCE_PREFIX + slot
 
 
-def plan_slots(materials, config):
+# -- FlightGear material -> PBR (j11-package lane) ------------------------------
+#
+# A FlightGear .ac MATERIAL is fixed-function Phong: rgb (diffuse), spec
+# (specular colour) and shi (Phong exponent, 0-128). The converter records,
+# per MTL material, the .ac materials its triangles came from
+# (assets/generated/<NAME>/material_sources.json); a look config with an
+# ``fg_material`` block derives per-slot PBR scalars from them:
+#
+# * Roughness from shi: the Blinn-Phong exponent n and a microfacet
+#   distribution of the same lobe width are related by alpha^2 = 2 / (n + 2)
+#   (Walter et al. 2007's Phong <-> Beckmann match, from memory), and UE's
+#   roughness r has alpha = r^2, so r = (2 / (n + 2)) ** 0.25: shi 128 ->
+#   0.35, 64 -> 0.42, 10 -> 0.64, 0 -> 1.0. Triangle-weighted over the .ac
+#   materials of the slot, then clamped to the config's range.
+# * Specular from spec: the mean of the specular colour (UE Specular 0.5 is
+#   F0 4 %, a plain dielectric) -- off unless the config lists it, because
+#   FlightGear authors set spec 0 or 1 by habit.
+# * Metallic is NEVER derived: Phong carries no metal term, and the package
+#   ships no specular or metalness map (docs/visual/J11_PACKAGE.md), so a
+#   metallic would be invented; the class master's value stays.
+#
+# Precedence, least to most specific: the master's default, the config's
+# class_scalars (a class-wide look choice), the derived per-slot value (a
+# fact about this slot's own source material). Every derived value is a
+# formula applied to an artist's Phong number: UNCALIBRATED as a look.
+
+FG_DERIVABLE = ("Roughness", "Specular")
+FG_MATERIAL_KEYS = {"parameters", "classes", "roughness_min", "roughness_max", "source"}
+MATERIAL_SOURCES_NAME = "material_sources.json"
+MATERIAL_SOURCES_MAGIC = "flightsim-aircraft-material-sources"
+
+
+def roughness_from_shininess(shininess):
+    """UE roughness of a Phong exponent: (2 / (n + 2)) ** 0.25."""
+    n = max(float(shininess), 0.0)
+    return (2.0 / (n + 2.0)) ** 0.25
+
+
+def read_material_sources(directory):
+    """The converter's per-material record beside the OBJs, or {} when the
+    conversion predates it (nothing is derived then)."""
+    path = os.path.join(directory, MATERIAL_SOURCES_NAME)
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    if data.get("magic") != MATERIAL_SOURCES_MAGIC:
+        raise LookError(f"{path} is not a material sources file")
+    return data.get("materials", {})
+
+
+def derive_fg_scalars(source, cls, fg_config):
+    """(scalars, record) derived for one slot from its material source row,
+    or ({}, None) when the config derives nothing for this class."""
+    if not fg_config or not source or cls not in fg_config.get("classes", ()):
+        return {}, None
+    rows = [r for r in source.get("ac_materials", {}).values() if r.get("triangles", 0) > 0]
+    total = sum(r["triangles"] for r in rows)
+    if not total:
+        return {}, None
+    out, record = {}, {"ac_materials": sorted(source["ac_materials"]), "triangles": total}
+    wanted = fg_config.get("parameters", ())
+    if "Roughness" in wanted:
+        raw = sum(roughness_from_shininess(r["shininess"]) * r["triangles"] for r in rows) / total
+        lo = float(fg_config.get("roughness_min", 0.0))
+        hi = float(fg_config.get("roughness_max", 1.0))
+        out["Roughness"] = round(min(max(raw, lo), hi), 4)
+        record["roughness_from_shininess"] = round(raw, 4)
+    if "Specular" in wanted:
+        raw = sum(sum(r["specular"][:3]) / 3.0 * r["triangles"] for r in rows) / total
+        out["Specular"] = round(min(max(raw, 0.0), 1.0), 4)
+        record["specular_from_spec"] = round(raw, 4)
+    record["derived"] = dict(out)
+    record["basis"] = ("FlightGear .ac MATERIAL spec / shi, triangle-weighted "
+                       "(scripts/aircraft_look.py derive_fg_scalars); " + UNCALIBRATED)
+    return out, record
+
+
+def plan_slots(materials, config, sources=None):
     """{slot: {"class", "rule", "master", "instance", "texture", "base_color",
-    "weight", "scalars", "vectors"}} -- what each look instance is made of."""
+    "weight", "scalars", "vectors", "derived"}} -- what each look instance is
+    made of. ``sources`` is the converter's material_sources record
+    (:func:`read_material_sources`); without it nothing is derived."""
     from_texture = {}
     out = {}
+    sources = sources or {}
     for name, material in sorted(materials.items()):
         cls, rule = classify_slot(name, material, config)
         if cls not in CLASS_MASTERS:
             raise LookError(f"slot {name!r}: class {cls!r} is not one of {SLOT_CLASSES}")
         scalars = dict(CLASS_SCALARS[cls])
         scalars.update(config.get("class_scalars", {}).get(cls, {}))
+        derived, derived_record = derive_fg_scalars(sources.get(name), cls,
+                                                    config.get("fg_material"))
+        scalars.update(derived)
         vectors = {k: tuple(v) for k, v in CLASS_VECTORS[cls].items()}
         vectors.update({k: tuple(v) for k, v in config.get("class_vectors", {}).get(cls, {}).items()})
         if material.get("map_kd"):
@@ -242,7 +326,7 @@ def plan_slots(materials, config):
                      "master": f"{MASTER_ROOT}/{CLASS_MASTERS[cls]}",
                      "instance": instance_name(name), "texture": texture,
                      "base_color": base, "weight": weight,
-                     "scalars": scalars, "vectors": vectors}
+                     "scalars": scalars, "vectors": vectors, "derived": derived_record}
     return out
 
 
@@ -258,15 +342,20 @@ LIGHT_KINDS = {
     "nav_green": ((0.05, 1.0, 0.25), 40.0, False),
     "nav_white": ((1.0, 0.95, 0.9), 20.0, False),
     "strobe": ((1.0, 1.0, 1.0), 400.0, True),
+    # Flashing beacons (j11-package lane): the J-11A package's own
+    # BeaconRed / BeaconGreen at its wingtip nav stations (LightPack.xml),
+    # 400 cd as the anti-collision minimum above, from memory.
+    "beacon_red": ((1.0, 0.05, 0.02), 400.0, True),
+    "beacon_green": ((0.05, 1.0, 0.25), 400.0, True),
     "landing": ((1.0, 0.95, 0.85), 200000.0, False),
 }
-ANCHORS = ("mesh_extreme", "fdm_thruster", "structural_in")
+ANCHORS = ("mesh_extreme", "fdm_thruster", "structural_in", "package_model_m")
 AXES = {"+x": (0, 1.0), "-x": (0, -1.0), "+y": (1, 1.0), "-y": (1, -1.0),
         "+z": (2, 1.0), "-z": (2, -1.0)}
 REQUIRED_KEYS = ("schema", "name", "default_class")
 KNOWN_KEYS = set(REQUIRED_KEYS) | {"note", "slot_rules", "class_scalars", "class_vectors",
                                    "lights", "nozzles", "contrail", "vapour", "light_constants",
-                                   "condensation"}
+                                   "condensation", "fg_material"}
 
 
 def validate(config, path="look config"):
@@ -300,6 +389,7 @@ def validate(config, path="look config"):
         for name in values:
             if name not in allowed:
                 problems.append(f"{cls}.{name} is not a parameter of {CLASS_MASTERS[cls]}")
+    problems += _validate_fg_material(config.get("fg_material"))
     ids = set()
     for light in config.get("lights", []):
         problems += _validate_anchor(light, "light")
@@ -333,9 +423,35 @@ def _validate_anchor(row, what):
         out.append(f"{what} {row.get('id')!r}: fdm_thruster needs an integer index")
     if anchor == "structural_in" and (len(row.get("structural_in", [])) != 3 or not row.get("source")):
         out.append(f"{what} {row.get('id')!r}: structural_in needs [x, y, z] and a source")
+    if anchor == "package_model_m" and (len(row.get("package_model_m", [])) != 3
+                                        or not row.get("source")):
+        out.append(f"{what} {row.get('id')!r}: package_model_m needs [x, y, z] and a source")
     offset = row.get("offset_m", [0, 0, 0])
     if len(offset) != 3:
         out.append(f"{what} {row.get('id')!r}: offset_m needs three numbers")
+    return out
+
+
+def _validate_fg_material(block):
+    if block is None:
+        return []
+    out = []
+    unknown = set(block) - FG_MATERIAL_KEYS
+    if unknown:
+        out.append(f"fg_material: unknown keys {sorted(unknown)}")
+    for parameter in block.get("parameters", []):
+        if parameter == "Metallic":
+            out.append("fg_material: Metallic is never derived (Phong has no metal term)")
+        elif parameter not in FG_DERIVABLE:
+            out.append(f"fg_material: {parameter!r} is not one of {FG_DERIVABLE}")
+    for cls in block.get("classes", []):
+        if cls not in CLASS_MASTERS:
+            out.append(f"fg_material: class {cls!r} not in {SLOT_CLASSES}")
+    lo, hi = block.get("roughness_min", 0.0), block.get("roughness_max", 1.0)
+    if not (isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and 0.0 <= lo <= hi <= 1.0):
+        out.append("fg_material: needs 0 <= roughness_min <= roughness_max <= 1")
+    if not block.get("source"):
+        out.append("fg_material has no source")
     return out
 
 
@@ -457,11 +573,25 @@ def snap_nozzle(vertices, station_cm, radius_cm, max_aft_cm=SNAP_MAX_AFT_M * CM_
     return min(near, key=lambda v: v[0])
 
 
-def resolve_anchor(row, vertices, fdm):
+def package_model_to_actor_cm(point_m, mesh_origin_cm):
+    """A point the package's model XML states (FlightGear model frame,
+    metres: +x aft, +y right, +z up, about the model origin) in the UE actor
+    frame (cm): x negated, then mesh_origin_actor_cm, the same map the
+    converter applies to every vertex and part offset."""
+    x, y, z = (float(v) for v in point_m)
+    return (-x * CM_PER_M + mesh_origin_cm[0], y * CM_PER_M + mesh_origin_cm[1],
+            z * CM_PER_M + mesh_origin_cm[2])
+
+
+def resolve_anchor(row, vertices, fdm, mesh_origin_cm=(0.0, 0.0, 0.0)):
     """(actor_cm, basis) for one light or nozzle row."""
     offset = [float(v) * CM_PER_M for v in row.get("offset_m", (0.0, 0.0, 0.0))]
     anchor = row["anchor"]
-    if anchor == "mesh_extreme":
+    if anchor == "package_model_m":
+        point = package_model_to_actor_cm(row["package_model_m"], mesh_origin_cm)
+        basis = (f"the package's own position {row['package_model_m']} m (FlightGear model "
+                 f"frame) mapped to the actor frame about mesh_origin_actor_cm: {row['source']}")
+    elif anchor == "mesh_extreme":
         point = mesh_extreme(vertices, row["axis"])
         basis = (f"measured from vertices: the body vertex furthest along {row['axis']} "
                  f"(actor frame)")
@@ -562,13 +692,14 @@ def build_manifest(name, config, generated_dir, fdm_xml, materials=None):
     with open(manifest_path, encoding="utf-8") as handle:
         mesh_manifest = json.load(handle)
     part, vertices = mesh_vertices_actor(generated_dir, mesh_manifest)
+    origin = mesh_manifest["mesh_origin_actor_cm"]
     fdm = read_fdm(fdm_xml)
     if materials is None:
         materials = read_mtl_dir(generated_dir)
-    slots = plan_slots(materials, config)
+    slots = plan_slots(materials, config, read_material_sources(generated_dir))
     lights = []
     for row in config.get("lights", []):
-        actor, basis = resolve_anchor(row, vertices, fdm)
+        actor, basis = resolve_anchor(row, vertices, fdm, origin)
         colour, candela, strobe = LIGHT_KINDS[row["kind"]]
         out = {"id": row["id"], "kind": row["kind"], "actor_cm": list(actor), "basis": basis,
                "colour": list(colour), "candela": candela, "strobe": strobe}
@@ -577,8 +708,8 @@ def build_manifest(name, config, generated_dir, fdm_xml, materials=None):
         lights.append(out)
     nozzles = []
     for row in config.get("nozzles", []):
-        actor, basis = resolve_anchor(row, vertices, fdm)
-        mil, mx = engine_thrust(fdm, row["index"]) if row["anchor"] == "fdm_thruster" else (None, None)
+        actor, basis = resolve_anchor(row, vertices, fdm, origin)
+        mil, mx = engine_thrust(fdm, row["index"]) if isinstance(row.get("index"), int) else (None, None)
         nozzles.append({"id": row["id"], "actor_cm": list(actor), "basis": basis,
                         "axis_actor": [-1.0, 0.0, 0.0],
                         "radius_cm": round(float(row["radius_m"]) * CM_PER_M, 2),
@@ -593,7 +724,8 @@ def build_manifest(name, config, generated_dir, fdm_xml, materials=None):
         "body_part": part, "frame": "UE actor frame, cm, +X forward +Y right +Z up, "
                                     "about the JSBSim structural datum",
         "instance_root": f"{mesh_manifest.get('asset_path_root')}/{LOOK_INSTANCE_FOLDER}",
-        "slots": {slot: {"class": row["class"], "instance": row["instance"], "rule": row["rule"]}
+        "slots": {slot: dict({"class": row["class"], "instance": row["instance"], "rule": row["rule"]},
+                             **({"derived": row["derived"]} if row.get("derived") else {}))
                   for slot, row in slots.items()},
         "lights": lights, "nozzles": nozzles,
         "constants": {

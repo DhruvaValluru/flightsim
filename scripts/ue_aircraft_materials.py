@@ -147,7 +147,10 @@ def create_look_instances(asset_root, mtl_dir, name, say=print):
         config = look.load_config(name)
     except (OSError, ValueError) as exc:
         return 0, [f"look config: {exc}"]
-    slots = look.plan_slots(look.read_mtl_dir(mtl_dir), config)
+    # j11-package lane: the converter's material_sources.json (when present)
+    # lets a look config derive per-slot roughness from the FlightGear spec/shi.
+    slots = look.plan_slots(look.read_mtl_dir(mtl_dir), config,
+                            look.read_material_sources(mtl_dir))
     lib = unreal.MaterialEditingLibrary
     assets = unreal.EditorAssetLibrary
     tools = unreal.AssetToolsHelpers.get_asset_tools()
