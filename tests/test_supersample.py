@@ -295,6 +295,23 @@ def test_the_label_targets_stay_at_the_output_size():
     assert COMMANDLET.count("* Supersample") == 2      # the beauty target's two axes only
 
 
+def test_every_other_target_and_the_tile_selection_stay_at_the_output_size():
+    # Skeptic pass: not only the two label targets. Every render target the
+    # commandlet makes, except the beauty's, is Width x Height, and the
+    # Google tiles are selected for the OUTPUT viewport, so the beauty and
+    # every label capture of a step draw one and the same tile set.
+    sizes = re.findall(r"(\w+)->InitAutoFormat\(([^;]*)\);", COMMANDLET)
+    assert len(sizes) >= 9
+    for name, args in sizes:
+        if name == "RenderTarget":
+            assert args == "Width * Supersample, Height * Supersample"
+        else:
+            assert args == "Width, Height", (name, args)
+    assert re.search(r"GoogleTiles\.WaitForView\(Capture->GetComponentLocation\(\), "
+                     r"Capture->GetComponentRotation\(\),\s*Capture->FOVAngle, Width, Height, Error\)",
+                     COMMANDLET)
+
+
 def test_the_record_follows_the_beauty_look():
     look = COMMANDLET.index('Root->SetObjectField(TEXT("beauty_look"), BeautyLook);')
     record = COMMANDLET.index("FFlightSimSupersample::Record(Root);")

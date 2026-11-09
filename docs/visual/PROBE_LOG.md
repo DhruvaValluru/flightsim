@@ -836,9 +836,13 @@ run).
 
 ### Open items
 
-* The tile-streaming wait, the storm exposure meter and the TSR sub-frames
-  all run at the internal size. The meter reads luma statistics, which do
-  not depend on the size. Wall time grows by about N^2.
+* The storm exposure meter and the TSR sub-frames run at the internal
+  size. The meter reads luma statistics, which do not depend on the size.
+  Wall time grows by about N^2. The Google tiles are NOT selected at the
+  internal size: `GoogleTiles.WaitForView` is given the output `Width,
+  Height`, so the tiles' screen-space error is measured per output pixel
+  and the beauty and every label capture of a step draw the same tile set
+  (skeptic correction; pinned by a test).
 * The linear EXR (`-linear`) and accumulation (`-accumulate`) captures stay
   at the output size and are NOT supersampled.
 * Calibrate the bytes per pixel and the budget on the render box. Use stat
@@ -852,3 +856,34 @@ run).
 .venv\Scripts\python -m experiments.visual_contact_sheet --quality beauty --supersample 1  # A/B against no supersampling
 .venv\Scripts\python -m flightsim.verify runs\webapp\<beauty_id>
 ```
+
+### Skeptic review (2026-11-09)
+
+A second agent tried to break the lane in a detached worktree. What it
+checked, and what it found:
+
+* Engine symbols: every one in the marked block was grepped again in the
+  installed 5.7.4 (`Build.version` 5.7.4). `GMaxTextureDimensions` is a
+  `#define` for `GRHIGlobals.MaxTextureDimensions`, a `TRHIGlobal<int32>`
+  with an implicit `operator int32`, so `int32 MaxSide = GMaxTextureDimensions;`
+  compiles. `RHI` and `Json` are already dependencies in
+  `FlightSimBridge.Build.cs`. `scripts/check_bridge_api.sh` passes all
+  eight supersample lines.
+* Labels: all nine `InitAutoFormat` calls other than the beauty's are
+  `(Width, Height)` (label depth and id, land cover, passes, linear,
+  accumulate, calibration), and the beauty `RenderTarget` is read back only
+  by the storm meter (statistics) and the frame read-back (box-filtered
+  before anything indexes it). No half-pixel offset: output pixel x is
+  internal x*N .. x*N+N-1, whose footprint is exactly output [x, x+1).
+  A new test pins every target size and the output-size tile selection.
+* Measure path: without the flag Configure returns factor 1 and records
+  nothing; `InitAutoFormat(Width * 1, Height * 1)` and a factor-1
+  Downsample are the old behaviour. Pathtrace and measure refuse by name.
+* No sun, light, physics or asset change; nothing to pin or licence.
+* TSR memory: the engine itself drops the history to 1x when 2x the
+  internal size would pass `GMaxTextureDimensions` or a 4 GB resource
+  (`TemporalSuperResolution.cpp`, HistorySize), so at the largest sizes the
+  estimate is conservative rather than low.
+* Tests: 34 of 34 in `tests/test_supersample.py`; the only failure in the
+  shared set is the pre-existing utf-8 check on `tests/test_gate_v_visual.py`
+  and `tests/test_swarm_viz.py`.
