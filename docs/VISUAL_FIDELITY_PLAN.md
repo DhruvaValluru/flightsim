@@ -487,26 +487,65 @@ budgets per preset. Interactive host uses the same scene builder."
 
 ## 8. Status
 
-| Phase | State | What exists | Verified how |
+**Updated 2026-11-09, after the visual-overhaul session.** Mac session
+flightsim-83, swarm `swarm-1794241474984-rmywk3`, branch
+`claude/vibrant-gauss-olema4`, base commit `355dae64`, five look lanes
+merged at `ae836a29`. That Mac cannot compile or render: Xcode 27.2 is
+above UE 5.7.4's maximum of 26.9, and Cesium for Unreal is not installed.
+Every row that says **code written and reviewed, not built or rendered**
+means exactly that. The C++ has never been compiled, no frame has been
+rendered with it, and every look constant is UNCALIBRATED (set by probe
+render on the render machine).
+
+Each row lists its evidence: the commits (in `git log 355dae64..ae836a29`),
+the Python tests that pin the Python twin of each table, and the matching
+block of `scripts/check_bridge_api.sh`. On the Mac that script reports 226
+engine symbols `ok` against the UE 5.7.4 headers. Its one FAIL,
+`module CesiumRuntime`, was there before the session, because Cesium is not
+installed on the Mac. The per-lane decisions, constants and probes are in
+`docs/visual/PROBE_LOG.md`. The exact Windows sequence is in
+`docs/visual/RENDER_RUNBOOK.md`, and the paste-in job for the Windows
+session is `docs/visual/WINDOWS_JOB.md`.
+
+| Phase | State | What exists | Evidence |
 |---|---|---|---|
-| V0 | **Code written, not yet built or rendered** | `-quality=measure\|beauty`, `-warmup=N`, `-sun-lux=` on the render commandlet; Lumen GI/reflections as capture post-process overrides plus TSR/VSM cvars, read back into `render.json`; `FLIGHTSIM_RENDER_QUALITY=beauty` for the web app; `gate6_visual.py --quality beauty` | Python side: `tests/test_render_quality.py`. C++: **needs a build and a Gate 6 run on the render machine** |
-| V1 | **Python side done; the renderer consumes it through existing flags** | `core/environment/sun.py`, `environment.time_of_day` (SPEC_VERSION 7), both compilers, webapp sun look plus exposure interpolation, named refusals | `tests/test_sun.py`: pinned to NREL SPA (pvlib) within 0.02°, events, polar refusal, night refusal, compilers, command flags |
-| V1 remainder | Not started | Physical-lux sun with EV100 recalibration (the `-sun-lux` hook exists), moon and stars, weather-driven aerosols, pole-shadow azimuth clause | — |
-| V2 to V9 | Not started | — | — |
+| V0 render foundation | **Code written and reviewed, not built or rendered** | Earlier: `-quality=measure\|beauty`, `-warmup=N`, `-sun-lux=`, Lumen GI and reflections as capture overrides. This session (render-path lane): TSR really on in beauty (the scene capture clears `ShowFlags.TemporalAA`, so `r.AntiAliasingMethod=4` alone gave FXAA); Lumen surface cache 1.0 and quality overrides in the capture; Cinematic scalability; still accumulation `-still-samples=N` (1 to 64); path-traced hero stills `-quality=pathtrace` with a one-process `r.RayTracing` ini override (never in `DefaultEngine.ini`, where it would move measure pixels); everything asked and read back under `render_settings.beauty_path`; an edge-aliasing number in Gate 6 (reported, never a gate, with a point-sampled control); the four-shot contact sheet `experiments/visual_contact_sheet.py` with `scripts/render_visual_sheet.{ps1,sh}` | `ab548ac6`, `0c41c3f1`, `b76705b1`, `31e99409`, `e034ea30`, `8b91a41c`; `tests/test_render_path_beauty.py` (10 tests), `tests/test_visual_contact_sheet.py` (18), `tests/test_render_quality.py`; check_bridge_api "render-path lane" block |
+| V1 sun, sky, exposure | **Code written and reviewed, not built or rendered** (the earlier ephemeris half is pinned to NREL SPA by tests) | Earlier: `core/environment/sun.py`, `environment.time_of_day`. This session (look-dev lane): `FlightSimBeautyLook` applies the `-beauty-look=` sidecar that the web app writes on every beauty run. Sun lux is the Bird and Hulstrom clear-sky direct normal divided by the engine's zenith transmittance. The sun's colour temperature is set per elevation band. Exposure is a manual EV100 per sun-elevation band through the physical camera (no auto exposure, so no breathing), with Local Exposure on top. The filmic tonemap uses the engine's stated defaults. There are three grades: golden_hour, desert_noon and storm. Moon and stars are the earlier physical sky (NEXT.md gotcha 27, also never rendered). Moving haze into the sky atmosphere's Mie layer is the world lane's work (V6 row) | `44eae98d`, `501f634b`, `eaa26608`; `tests/test_beauty_look.py` (37 tests; each EV100 band is within 1.5 stops of the incident meter on the modelled illuminance); `tests/test_sun.py`; check_bridge_api "engine surface the beauty look assumes" |
+| V2 terrain geometry | **Not started as planned; partly superseded** | Google Photorealistic 3D Tiles are the ground of every terrain render (owner rule, CLAUDE.md), so the plan's Nanite chunks and far-field ring are not the route. The world lane added one thing here: the sky atmosphere's planet ground albedo fills the horizon beyond the tiles | `cd02c0d4` (`ground_albedo_*` in `core/scene/world_beauty.py`) |
+| V3 terrain surface | **Code written and reviewed, not built or rendered** (re-scoped from the imagery drape to the tiles) | `M_FlightSimTilesBeauty` on the Cesium tileset, plus Cesium smooth normals, both set by reflection by name and driven by `MPC_FlightSimWorld`. It applies de-haze and saturation, a near-field detail normal and micro-roughness that fade with range, wet darkening, and puddles on flat ground. The tiles stay the ground: nothing here can turn them off. The Cesium per-primitive parameter names (`baseColorTexture`, `baseColorFactor`) are UNVERIFIED; a white tiles frame means they are wrong | `cd02c0d4`, `c4807002`, `9ba19f05`; `tests/test_world_beauty.py` (25 tests; pins the C++ pure blocks to the Python); `tests/test_ue_materials.py` |
+| V4 vegetation | **Code written and reviewed, not built or rendered; assets incomplete** | `FFlightSimGroundDetail` places ground scatter from a seeded sidecar (`python -m core.scene.world_beauty --biome ... --seed ... --out ...`). The scatter is in the same frame's mask, class and depth (labelled `vegetation:all` when the card names it) and has no collision. Ten Poly Haven CC0 models are pinned in `assets/scatter/polyhaven_pins.json`, five of them fully. Still missing: the import script `scripts/ue_import_scatter.py` (until it exists, every species records "the mesh did not load"); the big trees, which were not downloaded and are drawn as nothing; and a land-cover mask, without which trees can stand on roofs or water | `02575abd`, `cd02c0d4`; `tests/test_world_beauty.py` |
+| V5 buildings, roads, water, airports | **Not started** | Buildings and roads appear only as part of the tiles' photogrammetry | — |
+| V6 clouds, precipitation, weather look | **Code written and reviewed, not built or rendered** | `FFlightSimWorldBeauty`. One atmosphere preset per card (clear, hazy, overcast, rain, storm) moves a share of the card's haze into the Mie layer, so the haze is counted once. `M_FlightSimCloudLayers` (seeded layered noise, four shapes) replaces the material on every engine-default cloud; the storm's `M_StormCell` is untouched. `-beauty-clouds=fair` adds an optional fair-weather layer. The storm weather's rain drops get a readability gain, and lightning becomes a sky-light pulse. Each frame records cloud occlusion with a completeness flag (`cloud_occlusion_complete: false` when a cloud is not modelled). All of it is beauty only: measure never constructs it. Storm weather stays on by default | `cd02c0d4`, `a7f18fbf`, `c4807002`, `0b1169cc`, `d35f877c`, `f408e40f`; `tests/test_world_beauty.py` |
+| V7 aircraft | **Code written and reviewed, not built or rendered** | Look configs for all seven airframes (`assets/aircraft_config/look/`), resolved into `look_manifest.json`. Master materials (paint as Clear Coat, bare metal, glass, rubber) and per-model `Look/MI_<slot>` instances. Beauty-only FX actors in `FlightSimAircraftFX`: nav, strobe and landing lights, contrails, vapour, afterburner, and heat haze (OFF unless `-heat-haze=on`). Two deviations from §4, on purpose: glass is opaque, because translucent glass would show sky where the mask says aircraft, and Nanite stays off for airframes. Higher-detail candidates for the J-11 and J-15 are listed behind a licence gate, but none is pinned, so none is usable. No redistributable J-35 model was found | `be8a77d5`, `9c0da7a6`, `0492fc61`, `46bc3838`, `e2abc9ba`, `301a03f2`, `0059185d`, `f64ee666`; `tests/test_aircraft_look.py` (27 tests); check_bridge_api "AIRCRAFT LANE" block |
+| V8 camera, post, beauty capture | **Code written and reviewed, not built or rendered** | The look-dev lens. Focal length is derived from the capture's FOV and the card's sensor; the FOV itself is never changed. Depth of field is on `cinematic` only, focused each frame on the aircraft. Motion blur is 180 degrees at the clip's fps. Bloom, image-based flare and grain are subtle. There is no vignette on `standard` (owner, 2026-10-11), and no lens distortion or chromatic aberration, so labels match pixels. Deviation: hero stills come from the path tracer through the scene capture, not from Movie Render Queue | `44eae98d`, `501f634b`, `ab548ac6`; `tests/test_beauty_look.py` |
+| V9 performance tiers | **Not started** | — | — |
+| Verifier (labels match pixels) | **Code written and reviewed, not run on a render** | `flightsim.verify` gains two checks, `look_record` and `look_label_alignment`. Their refusals are `look.quality`, `look.measure_altered`, `look.pixel_moving_unrecorded`, `look.record` and `look.beauty_not_label_aligned`. `experiments/look_label_check.py` measures the mask-edge offset in a measure bundle against a beauty bundle, with a 3 px self-validation control. The commandlet does not yet write `pixel_moving_effects` or `cloud_occlusion` (an integration step is in progress); until it does, `look_label_alignment` is NOT RUN on every bundle | `aa04c0a6`, `0db77323`, `bdaa0509`, `38c76b39`, `2b6bdf7d`, `521906f7`; `tests/test_look_verify.py` (32 tests), `tests/test_look_label_check.py` (8); `docs/schemas/render_json_beauty_look.md` |
+| Gate V (§5) | **Not on this branch yet** | Another lane is adding `experiments/gate_v_visual.py`. Until it lands, no §5 clause has a script | — |
+
+**Nothing above has been measured.** None of this work has a contact
+sheet, clip, Gate 6 beauty run or label-alignment number yet. The first
+measurements come from the runbook:
+
+- Gate 6 under measure, unchanged against the base commit;
+- the base and HEAD contact sheets;
+- the compare sheet in `runs/visual/final/`;
+- the chase clip;
+- `flightsim.verify` and `look_label_check` on a labelled beauty render;
+- the path-traced hero still.
 
 **Deviation from §4 V0, on purpose:** the renderer settings are applied
 **per capture at runtime** when `-quality=beauty`, not in
 `DefaultEngine.ini`. A project-wide ini change would alter every
-`measure` render that Gate 6 passed on. Nanite and mesh distance fields
-are startup-only project settings, so they arrive with V2, the first
-phase that has Nanite meshes to use them.
+`measure` render that Gate 6 passed on. `r.Nanite.ProjectEnabled`,
+`r.GenerateMeshDistanceFields` and `r.Lumen.HardwareRayTracing=False`
+were already in the ini (Phase 2 B4), so measure already runs with them.
+`r.RayTracing` is deliberately left out of the ini.
 
-**Next step on the render machine:**
-1. `./scripts/build_ue.sh` (or `.\scripts\build_ue.ps1`).
-2. `python experiments/gate6_visual.py`. It must still pass unchanged,
-   which proves `measure` is untouched.
-3. `python experiments/gate6_visual.py --quality beauty`. Read
-   `runs/gate6_beauty/full/render.json` (`cvar_*`, `gi_reflections`)
-   and look at the frames.
-4. Try `FLIGHTSIM_RENDER_QUALITY=beauty` with a prompt like "fly the
-   c172 over yosemite at golden hour".
+**Measure is untouched by construction.** Every new C++ line is gated on
+`-Visual -quality=beauty` (or `pathtrace`), a measure `render.json` gains
+no field, and the physics is unchanged. That claim is the first thing the
+render machine checks: Gate 6 under measure, then Gate 10-R comparing its
+frames with the base commit's Gate 6 frames.
+
+**Next step on the render machine:** follow
+`docs/visual/RENDER_RUNBOOK.md` in order.
