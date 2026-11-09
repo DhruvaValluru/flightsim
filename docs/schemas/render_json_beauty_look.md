@@ -5,6 +5,28 @@ graded by `look_record` and `look_label_alignment` in
 `core/capture/verify.py`. The render host writes these keys into each
 camera's `frames/<camera>/render.json`, beside the keys it already writes.
 
+**Who writes them (integration, 2026-11-09).** The render commandlet writes
+all five root keys on every `-quality=beauty` and `-quality=pathtrace`
+render, and none on `-quality=measure`:
+
+| key | written by | filled from |
+|---|---|---|
+| `beauty_look` | `FFlightSimBeautyLook::Record` (look-dev) | the `-beauty-look=` sidecar and what was read back; absent without a sidecar |
+| `pixel_moving_effects` | `RenderWriteLookContract` (FlightSimRenderCommandlet.cpp) | the beauty capture's show flags and post-process settings read back after every lane ran, and `aircraft_look.heat_haze` |
+| `beauty_samples` | `RenderWriteLookContract` | `render_settings.beauty_path.accumulation.captures_per_frame` (still samples), the TSR history constants, `-pathtrace-spp`, the engine motion blur's shutter |
+| `beauty_only_actors` | `RenderWriteLookContract` | `VisualScene.BeautyOnlyActors` (the weather, weather-look, rain, starfield and world fair-cumulus actors appended to it), `AircraftFX.BeautyOnlyActors`, and the world's volumetric cloud owners (hidden by the Cloud show flag) as `{"name", "source", "hidden_by"}` objects |
+| `cloud_occlusion` | `FFlightSimWorldBeauty::CloudOcclusionRecord` (world) | the per-frame slab model; `basis` is `"modelled"`, never `"measured"` |
+
+The commandlet writes one `pixel_moving_effects` entry for each of
+`motion_blur`, `depth_of_field`, `heat_haze`, `path_tracer_filter`,
+`chromatic_aberration` and `lens_distortion`, with `on` measured off the
+capture (`core/capture/beauty_look.py COMMANDLET_EFFECTS`). None carries a
+transform or a measured displacement yet, so a beauty render with any of
+them on is graded beauty-not-label-aligned until
+`experiments/look_label_check.py` measures it. That is the rule working:
+labelled sets come from `-quality=measure`. `tests/test_render_json_contract.py`
+checks the commandlet source against these tables.
+
 **Every key here is optional.** A render.json written before them stays
 valid: `look_record` grades only the quality (`scene.render_quality`, on
 every render.json since V0) and `look_label_alignment` reports NOT RUN.
@@ -58,6 +80,8 @@ the keys that move pixels:
 | `overscan`, `overscan_fraction` | `overscan` |
 | `upscale`, `upscaling`, `screen_percentage` | `upscale` |
 | `temporal_accumulation` | `temporal_accumulation` |
+| `MotionBlurAmount` (the C++ record's spelling) | `motion_blur` |
+| `SceneFringeIntensity` (the C++ record's spelling) | `chromatic_aberration` |
 
 A key counts as on when its value is `true`, a non-zero number, a word
 other than off/none/false/0, or an object whose `on`, `enabled` or

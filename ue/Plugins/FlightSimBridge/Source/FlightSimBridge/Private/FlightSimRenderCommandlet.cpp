@@ -19,6 +19,8 @@
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/VolumetricCloudComponent.h"   // integration: beauty_only_actors (world clouds)
+#include "UObject/UObjectIterator.h"
 #include "EngineUtils.h"
 #include "Dom/JsonObject.h"
 #include "Engine/DirectionalLight.h"
@@ -1230,6 +1232,211 @@ double UFlightSimRenderCommandlet::EsfrMtf50(const TArray<float>& Luminance, int
 		Previous = Mtf;
 	}
 	return (Lsfs / 2) * RenderEsfrOversample / double(Lsfs);
+}
+
+namespace
+{
+	// -- Integration (visual overhaul, 2026-11-09): the beauty-look contract --
+	// The verifier lane (core/capture/beauty_look.py LOOK_KEYS, graded by
+	// look_record / look_label_alignment in core/capture/verify.py; schema in
+	// docs/schemas/render_json_beauty_look.md) reads five root keys. Four are
+	// composed here from what the other lanes actually set, READ BACK off the
+	// beauty capture after every lane has run; "beauty_look" is the look-dev
+	// lane's own record (FFlightSimBeautyLook::Record). Written on beauty and
+	// pathtrace only, so a measure render.json gains no key.
+	// tests/test_render_json_contract.py pins every key and effect name here
+	// against the verifier's tables.
+	struct FRenderLookContractInputs
+	{
+		const USceneCaptureComponent2D* Capture = nullptr;
+		int32 Width = 0;
+		bool bPathTrace = false;
+		int32 CapturesPerFrame = 1;
+		int32 PathTraceSpp = 0;
+		double FramesPerSecond = 0.0;
+		float TsrHistorySamples = 0.0f;
+		float TsrHistoryScreenPercentage = 0.0f;
+		const TSharedPtr<FJsonObject>* AircraftLook = nullptr;   // render.json aircraft_look
+		const TArray<AActor*>* SceneBeautyOnly = nullptr;         // VisualScene.BeautyOnlyActors
+		const TArray<AActor*>* WeatherBeautyOnly = nullptr;       // Weather.BeautyOnlyActors
+		const TArray<AActor*>* AircraftBeautyOnly = nullptr;      // AircraftFX.BeautyOnlyActors
+		const FFlightSimWorldBeauty* World = nullptr;
+		UWorld* EngineWorld = nullptr;
+	};
+
+	TSharedPtr<FJsonObject> RenderPixelEffect(const TCHAR* Name, bool bOn, double BoundPx,
+	                                          const TCHAR* Basis, const TCHAR* Source)
+	{
+		// The verifier's entry: name, on, transform (null: none of these has a
+		// recorded label-to-beauty mapping), max_displacement_px and its basis.
+		// Only "measured" counts as evidence; a bound by construction is stated
+		// as such and graded beauty-not-label-aligned until measured
+		// (experiments/look_label_check.py).
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("name"), Name);
+		Entry->SetBoolField(TEXT("on"), bOn);
+		Entry->SetField(TEXT("transform"), MakeShared<FJsonValueNull>());
+		if (bOn && BoundPx >= 0.0)
+		{
+			Entry->SetNumberField(TEXT("max_displacement_px"), BoundPx);
+		}
+		else
+		{
+			Entry->SetField(TEXT("max_displacement_px"), MakeShared<FJsonValueNull>());
+		}
+		Entry->SetStringField(TEXT("displacement_basis"), Basis);
+		Entry->SetStringField(TEXT("source"), Source);
+		return Entry;
+	}
+
+	void RenderWriteLookContract(FJsonObject& Root, const FRenderLookContractInputs& In)
+	{
+		const USceneCaptureComponent2D* Capture = In.Capture;
+		const FPostProcessSettings& Post = Capture->PostProcessSettings;
+		const FEngineShowFlags& Flags = Capture->ShowFlags;
+
+		// -- pixel_moving_effects: every effect the lanes can turn on, on or off
+		TArray<TSharedPtr<FJsonValue>> Effects;
+		const bool bMotionBlur = Flags.MotionBlur != 0 && Post.MotionBlurAmount > 0.0f && Post.MotionBlurMax > 0.0f;
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("motion_blur"), bMotionBlur,
+			Post.MotionBlurMax / 100.0 * In.Width,
+			TEXT("bound: MotionBlurMax percent of the width, by construction; not measured"),
+			TEXT("beauty capture: MotionBlur show flag and MotionBlurAmount/MotionBlurMax (look-dev lens)"))));
+		const bool bDepthOfField = Flags.DepthOfField != 0 && Post.DepthOfFieldFocalDistance > 0.0f;
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("depth_of_field"), bDepthOfField, -1.0,
+			TEXT("not measured: zero at the focal plane (the aircraft, focused per frame), growing off it; the class ")
+			TEXT("and depth labels of defocused terrain spread"),
+			TEXT("beauty capture: DepthOfField show flag and DepthOfFieldFocalDistance > 0 (look-dev per-frame focus)"))));
+		bool bHeatHaze = false;
+		double HazeFraction = -1.0;
+		if (In.AircraftLook != nullptr && In.AircraftLook->IsValid())
+		{
+			const TSharedPtr<FJsonObject>* Haze = nullptr;
+			if ((*In.AircraftLook)->TryGetObjectField(TEXT("heat_haze"), Haze) && Haze != nullptr && Haze->IsValid())
+			{
+				(*Haze)->TryGetBoolField(TEXT("drawn"), bHeatHaze);
+				(*Haze)->TryGetNumberField(TEXT("max_offset_screen_fraction"), HazeFraction);
+			}
+		}
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("heat_haze"), bHeatHaze,
+			HazeFraction >= 0.0 ? HazeFraction * In.Width : -1.0,
+			TEXT("bound: heat_haze.hlsl offsets by at most Strength / 100 of the screen; not measured"),
+			TEXT("aircraft_look.heat_haze (aircraft lane, -heat-haze=on only)"))));
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("path_tracer_filter"), In.bPathTrace, -1.0,
+			TEXT("not measured: the path tracer's pixel filter (r.PathTracing.FilterWidth) and the Nanite fallback ")
+			TEXT("mesh it traces (render_settings.beauty_path.path_tracer.labels_note)"),
+			TEXT("-quality=pathtrace (render-path lane)"))));
+		const bool bFringe = Flags.SceneColorFringe != 0 && Post.SceneFringeIntensity > 0.0f;
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("chromatic_aberration"), bFringe, -1.0,
+			TEXT("not measured"),
+			TEXT("beauty capture: SceneColorFringe show flag and SceneFringeIntensity"))));
+		// No lane applies a lens distortion (no LUT, no lens component): stated off.
+		Effects.Add(MakeShared<FJsonValueObject>(RenderPixelEffect(TEXT("lens_distortion"), false, -1.0,
+			TEXT("not applied by any lane"), TEXT("none (look-dev pixel_effects.lens_distortion: not implemented)"))));
+		Root.SetArrayField(TEXT("pixel_moving_effects"), Effects);
+
+		// -- beauty_samples ------------------------------------------------------
+		TSharedPtr<FJsonObject> Samples = MakeShared<FJsonObject>();
+		// Still samples are jittered captures of ONE pose (spatial); no beauty
+		// capture advances time, so temporal is 1 (-accumulate=K is the separate
+		// S4 record graded by engine_accumulation).
+		Samples->SetNumberField(TEXT("spatial"), In.bPathTrace ? 1 : FMath::Max(1, In.CapturesPerFrame));
+		Samples->SetNumberField(TEXT("temporal"), 1);
+		Samples->SetNumberField(TEXT("still_samples"), In.bPathTrace ? 1 : FMath::Max(1, In.CapturesPerFrame));
+		if (In.bPathTrace)
+		{
+			Samples->SetNumberField(TEXT("path_tracer_spp"), FMath::Max(1, In.PathTraceSpp));
+		}
+		else
+		{
+			Samples->SetNumberField(TEXT("tsr_history_samples"), In.TsrHistorySamples);
+			Samples->SetNumberField(TEXT("tsr_history_screen_percentage"), In.TsrHistoryScreenPercentage);
+			Samples->SetBoolField(TEXT("tsr_temporal_aa_show_flag"), Flags.TemporalAA != 0);
+		}
+		double ShutterS = 0.0;
+		if (bMotionBlur)
+		{
+			const double Fps = Post.MotionBlurTargetFPS > 0 ? double(Post.MotionBlurTargetFPS) : In.FramesPerSecond;
+			ShutterS = Fps > 0.0 ? Post.MotionBlurAmount / Fps : 0.0;
+		}
+		Samples->SetNumberField(TEXT("shutter_s"), ShutterS);
+		Samples->SetStringField(TEXT("shutter_basis"), bMotionBlur
+			? TEXT("engine motion blur: MotionBlurAmount (fraction of the frame open) / MotionBlurTargetFPS (else the clip rate)")
+			: TEXT("no engine motion blur on the beauty capture"));
+		Root.SetObjectField(TEXT("beauty_samples"), Samples);
+
+		// -- beauty_only_actors ---------------------------------------------------
+		TArray<TSharedPtr<FJsonValue>> Actors;
+		TSet<const AActor*> Seen;
+		auto AddActor = [&](const AActor* Actor, const TCHAR* Source, const TCHAR* HiddenBy)
+		{
+			if (Actor == nullptr || Seen.Contains(Actor))
+			{
+				return;
+			}
+			Seen.Add(Actor);
+			TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+			Row->SetStringField(TEXT("name"), Actor->GetName());
+			Row->SetStringField(TEXT("source"), Source);
+			Row->SetStringField(TEXT("hidden_by"), HiddenBy);
+			Actors.Add(MakeShared<FJsonValueObject>(Row));
+		};
+		const TCHAR* const ByList = TEXT("HiddenActors on every label capture (ConfigureLabelCapture)");
+		if (In.AircraftBeautyOnly != nullptr)
+		{
+			for (const AActor* Actor : *In.AircraftBeautyOnly) { AddActor(Actor, TEXT("aircraft_fx"), ByList); }
+		}
+		if (In.WeatherBeautyOnly != nullptr)
+		{
+			for (const AActor* Actor : *In.WeatherBeautyOnly) { AddActor(Actor, TEXT("weather"), ByList); }
+		}
+		if (In.SceneBeautyOnly != nullptr)
+		{
+			for (const AActor* Actor : *In.SceneBeautyOnly)
+			{
+				const bool bCloud = Actor != nullptr && Actor->FindComponentByClass<UVolumetricCloudComponent>() != nullptr;
+				AddActor(Actor, bCloud ? TEXT("world") : TEXT("visual_scene"), ByList);
+			}
+		}
+		if (In.EngineWorld != nullptr)
+		{
+			// The scene's own volumetric clouds are not in the list: the label
+			// captures draw no cloud at all (Cloud show flag off).
+			for (TObjectIterator<UVolumetricCloudComponent> It; It; ++It)
+			{
+				if (*It != nullptr && It->GetWorld() == In.EngineWorld)
+				{
+					AddActor(It->GetOwner(), TEXT("world"), TEXT("Cloud show flag off on every label capture"));
+				}
+			}
+		}
+		Root.SetArrayField(TEXT("beauty_only_actors"), Actors);
+
+		// -- cloud_occlusion: the world lane's decision ---------------------------
+		TSharedPtr<FJsonObject> Occlusion;
+		if (In.World != nullptr && In.World->IsBuilt())
+		{
+			Occlusion = In.World->CloudOcclusionRecord();
+		}
+		else
+		{
+			Occlusion = MakeShared<FJsonObject>();
+			if (Actors.Num() == 0)
+			{
+				Occlusion->SetStringField(TEXT("policy"), TEXT("none_in_frame"));
+				Occlusion->SetStringField(TEXT("basis"), TEXT("no beauty-only actor and no cloud exists in the world"));
+			}
+			else
+			{
+				Occlusion->SetStringField(TEXT("policy"), TEXT("labels_unoccluded"));
+				Occlusion->SetField(TEXT("subject_occluded_fraction"), MakeShared<FJsonValueNull>());
+				Occlusion->SetStringField(TEXT("basis"),
+					TEXT("not modelled: the world beauty look was not built, so no lane estimated what the ")
+					TEXT("beauty-only actors cover"));
+			}
+		}
+		Root.SetObjectField(TEXT("cloud_occlusion"), Occlusion);
+	}
 }
 
 int32 UFlightSimRenderCommandlet::Main(const FString& Params)
@@ -7193,6 +7400,29 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Root->SetObjectField(TEXT("scene"), Scene);
 	// look-dev lane hook: render.json "beauty_look" (absent unless a sidecar was applied).
 	if (TSharedPtr<FJsonObject> BeautyLook = FFlightSimBeautyLook::Record()) { Root->SetObjectField(TEXT("beauty_look"), BeautyLook); }
+	// Integration: the verifier's beauty-look contract (pixel_moving_effects,
+	// beauty_samples, beauty_only_actors, cloud_occlusion), read back off the
+	// beauty capture after every lane ran. BeautyPath is null on measure, so a
+	// measure render.json gains none of these keys.
+	if (BeautyPath.IsValid())
+	{
+		FRenderLookContractInputs Contract;
+		Contract.Capture = Capture;
+		Contract.Width = Width;
+		Contract.bPathTrace = bPathTrace;
+		Contract.CapturesPerFrame = BeautySubFrames;
+		Contract.PathTraceSpp = PathTraceSpp;
+		Contract.FramesPerSecond = FramesPerSecond;
+		Contract.TsrHistorySamples = RenderBeautyTsrHistorySamples;
+		Contract.TsrHistoryScreenPercentage = RenderBeautyTsrHistoryScreenPercentage;
+		Contract.AircraftLook = AircraftFX.IsBuilt() ? &AircraftFX.Record : nullptr;
+		Contract.SceneBeautyOnly = &VisualScene.BeautyOnlyActors;
+		Contract.WeatherBeautyOnly = &Weather.BeautyOnlyActors;
+		Contract.AircraftBeautyOnly = &AircraftFX.BeautyOnlyActors;
+		Contract.World = &WorldBeauty;
+		Contract.EngineWorld = World;
+		RenderWriteLookContract(*Root, Contract);
+	}
 
 	// Environmental couplings, stated per run rather than assumed.
 	TSharedPtr<FJsonObject> Environment = MakeShared<FJsonObject>();

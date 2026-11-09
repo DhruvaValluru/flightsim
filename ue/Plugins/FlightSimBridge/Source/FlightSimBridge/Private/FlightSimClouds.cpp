@@ -509,6 +509,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	bBuilt = false;
 	Record = MakeShared<FJsonObject>();
 	Frames.Reset();
+	MaxOccludedFraction = 0.0;
+	OcclusionFrames = 0;
+	OcclusionFlaggedFrames = 0;
+	OcclusionIncompleteFrames = 0;
 	CloudLayers.Reset();
 	Overridden.Reset();
 	WeatherRef = &Weather;
@@ -1087,6 +1091,7 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 	// The clouds between the camera and the aircraft (the labels' honesty row).
 	TArray<TSharedPtr<FJsonValue>> Occlusions;
 	bool bOccluded = false;
+	double PathTransmittance = 1.0;
 	const double LengthM = FVector::Distance(CameraCm, AircraftCm) / WorldCmPerMetre;
 	for (const FCloudLayerState& Layer : CloudLayers)
 	{
@@ -1100,6 +1105,7 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 		Row->SetNumberField(TEXT("transmittance"), Occ.Transmittance);
 		Occlusions.Add(MakeShared<FJsonValueObject>(Row));
 		bOccluded = bOccluded || Occ.bFlagged;
+		PathTransmittance *= FMath::Clamp(Occ.Transmittance, 0.0, 1.0);
 	}
 	Frame->SetArrayField(TEXT("cloud_path"), Occlusions);
 	Frame->SetBoolField(TEXT("cloud_occludes_aircraft"), bOccluded);
@@ -1107,6 +1113,14 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 	// storm cell, another material's cloud, -beauty-clouds=engine, or the beauty
 	// cloud material missing): cloud_occludes_aircraft is then only a lower bound.
 	Frame->SetBoolField(TEXT("cloud_occlusion_complete"), UnmodelledClouds == 0);
+	// Integration (render.json cloud_occlusion): the covered fraction along the
+	// ray, summarised over the clip by CloudOcclusionRecord.
+	const double CoveredFraction = 1.0 - PathTransmittance;
+	Frame->SetNumberField(TEXT("cloud_covered_fraction_modelled"), CoveredFraction);
+	++OcclusionFrames;
+	OcclusionFlaggedFrames += bOccluded ? 1 : 0;
+	OcclusionIncompleteFrames += UnmodelledClouds == 0 ? 0 : 1;
+	MaxOccludedFraction = FMath::Max(MaxOccludedFraction, CoveredFraction);
 
 	if (Scatter.IsBuilt())
 	{
@@ -1114,4 +1128,42 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 	}
 	Frames.Add(MakeShared<FJsonValueObject>(Frame));
 	Record->SetArrayField(TEXT("frames"), Frames);
+}
+
+TSharedPtr<FJsonObject> FFlightSimWorldBeauty::CloudOcclusionRecord() const
+{
+	// Integration (2026-11-09): the verifier's render.json "cloud_occlusion"
+	// (docs/schemas/render_json_beauty_look.md), from this lane's own per-frame
+	// rows. The decision is the one ApplyClouds records: clouds stay where the
+	// card puts them and the mask is not edited -> "labels_unoccluded". The
+	// covered fraction is the slab model's (UNCALIBRATED extinction), so its
+	// basis is "modelled", never "measured".
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetStringField(TEXT("policy"), TEXT("labels_unoccluded"));
+	Out->SetStringField(TEXT("owner"), TEXT("world lane (FFlightSimWorldBeauty, look_applied.world_beauty.frames[])"));
+	Out->SetNumberField(TEXT("frames"), OcclusionFrames);
+	Out->SetNumberField(TEXT("frames_flagged_cloud_occludes_aircraft"), OcclusionFlaggedFrames);
+	Out->SetNumberField(TEXT("frames_with_unmodelled_clouds"), OcclusionIncompleteFrames);
+	Out->SetNumberField(TEXT("cloud_layers_modelled"), CloudLayers.Num());
+	Out->SetNumberField(TEXT("unmodelled_clouds"), UnmodelledClouds);
+	if (OcclusionIncompleteFrames > 0)
+	{
+		Out->SetField(TEXT("subject_occluded_fraction"), MakeShared<FJsonValueNull>());
+		Out->SetStringField(TEXT("basis"),
+			TEXT("not modelled: a drawn cloud is outside the slab model (the storm cell, another material's cloud, ")
+			TEXT("-beauty-clouds=engine, or the beauty cloud material missing)"));
+	}
+	else
+	{
+		Out->SetNumberField(TEXT("subject_occluded_fraction"), MaxOccludedFraction);
+		Out->SetStringField(TEXT("basis"), TEXT("modelled"));
+	}
+	Out->SetStringField(TEXT("method"),
+		TEXT("max over frames of 1 - prod(layer transmittance) along the camera-to-aircraft-origin ray ")
+		TEXT("(FlightSimWorldPure::Occlusion; per frame in look_applied.world_beauty.frames[].")
+		TEXT("cloud_covered_fraction_modelled)"));
+	Out->SetStringField(TEXT("not_modelled"),
+		TEXT("rain, contrails, wingtip vapour and the afterburner plume (beauty-only translucent media) are not in ")
+		TEXT("this fraction; experiments/look_label_check.py measures the covered fraction from the pixels"));
+	return Out;
 }

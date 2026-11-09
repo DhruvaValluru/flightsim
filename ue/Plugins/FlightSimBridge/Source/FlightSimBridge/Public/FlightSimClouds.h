@@ -105,6 +105,17 @@ public:
 	// look_applied.world_beauty (the same object the scene's LookApplied holds).
 	TSharedPtr<FJsonObject> Record;
 
+	// render.json root "cloud_occlusion" (the verifier's key, core/capture/
+	// beauty_look.py OCCLUSION_POLICIES): the world lane's decision -- clouds
+	// stay where the card puts them and the mask is not edited, so the policy
+	// is "labels_unoccluded" -- with the largest per-frame covered fraction the
+	// slab model gives (1 - the product of the layers' transmittances along
+	// the camera-to-aircraft ray). The fraction is MODELLED, never "measured":
+	// the verifier grades it beauty-not-label-aligned until
+	// experiments/look_label_check.py measures it. Null fraction when a drawn
+	// cloud is outside the model (cloud_occlusion_complete false on a frame).
+	TSharedPtr<FJsonObject> CloudOcclusionRecord() const;
+
 private:
 	struct FCloudLayerState
 	{
@@ -151,4 +162,9 @@ private:
 
 	FFlightSimGroundDetail Scatter;
 	TArray<TSharedPtr<FJsonValue>> Frames;
+	// The occlusion summary CloudOcclusionRecord reports (Advance keeps it).
+	double MaxOccludedFraction = 0.0;
+	int32 OcclusionFrames = 0;
+	int32 OcclusionFlaggedFrames = 0;
+	int32 OcclusionIncompleteFrames = 0;
 };

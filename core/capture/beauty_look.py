@@ -63,7 +63,24 @@ PIXEL_MOVING_KEYS: Dict[str, str] = {
     "upscaling": "upscale",
     "screen_percentage": "upscale",
     "temporal_accumulation": "temporal_accumulation",
+    # The C++ spellings the look-dev record actually carries
+    # (render.json beauty_look.plan.camera / .applied.lens_post echo UE's
+    # FPostProcessSettings member names; integration 2026-11-09).
+    "MotionBlurAmount": "motion_blur",
+    "SceneFringeIntensity": "chromatic_aberration",
 }
+
+#: Every effect name the render commandlet writes into
+#: ``pixel_moving_effects`` (FlightSimRenderCommandlet.cpp
+#: RenderWriteLookContract), on or off. Depth of field and the path
+#: tracer's pixel filter spread edges rather than shift them, but the class
+#: and depth labels of a defocused or filtered edge still disagree with the
+#: beauty, so they are listed and graded like the rest.
+COMMANDLET_EFFECTS = ("motion_blur", "depth_of_field", "heat_haze", "path_tracer_filter",
+                      "chromatic_aberration", "lens_distortion")
+
+#: Every effect name the verifier knows (look keys and the commandlet's).
+EFFECT_NAMES = tuple(sorted(set(PIXEL_MOVING_KEYS.values()) | set(COMMANDLET_EFFECTS)))
 
 #: Effect names that are the same thing under another spelling, so a
 #: ``motion_blur`` entry answers a ``temporal_accumulation`` key and back.
@@ -81,7 +98,11 @@ EQUIVALENT_EFFECTS: Dict[str, Tuple[str, ...]] = {
 OCCLUSION_POLICIES = ("labels_unoccluded", "kept_clear", "none_in_frame")
 
 #: The record keys this module introduces; a render.json carrying none
-#: of them predates the beauty-look record.
+#: of them predates the beauty-look record. The render commandlet writes
+#: all five on beauty and pathtrace renders (none on measure):
+#: ``beauty_look`` from FFlightSimBeautyLook::Record, the other four from
+#: RenderWriteLookContract (FlightSimRenderCommandlet.cpp), and
+#: ``cloud_occlusion`` from FFlightSimWorldBeauty::CloudOcclusionRecord.
 LOOK_KEYS = ("beauty_look", "pixel_moving_effects", "beauty_samples",
              "beauty_only_actors", "cloud_occlusion")
 
