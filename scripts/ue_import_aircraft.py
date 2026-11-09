@@ -21,7 +21,8 @@ import unreal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(
     globals().get("__file__") or sys.argv[0])))
-from ue_aircraft_materials import create_look_instances, fix_materials  # noqa: E402
+from ue_aircraft_materials import fix_materials  # noqa: E402
+from ue_aircraft_materials import create_look_instances  # noqa: E402  (visual V7)
 
 FAILURES = []
 

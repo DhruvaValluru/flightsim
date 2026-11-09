@@ -18,7 +18,8 @@ SCRIPTS = os.path.dirname(os.path.abspath(_SCRIPT))
 REPO = os.path.dirname(SCRIPTS)
 sys.path.insert(0, SCRIPTS)
 
-from ue_aircraft_materials import create_look_instances, fix_materials  # noqa: E402
+from ue_aircraft_materials import fix_materials  # noqa: E402
+from ue_aircraft_materials import create_look_instances  # noqa: E402  (visual V7)
 
 REPORT = os.path.join(REPO, "runs", "fix_aircraft_materials.txt")
 os.makedirs(os.path.dirname(REPORT), exist_ok=True)
