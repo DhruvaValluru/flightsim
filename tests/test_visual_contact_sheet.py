@@ -75,6 +75,7 @@ def test_shot_contents_match_the_brief():
     assert sheet.SHOTS["d"].camera == "cockpit"
     # a and d are over real terrain the compiler places (the Matterhorn)
     assert abs(_value(a["initial"], "latitude") - 46.0) < 0.1
+    assert sheet.SHOTS["a"].subject == sheet.SHOTS["d"].subject == ("matterhorn", "Matterhorn")
 
 
 # -- the tokens -------------------------------------------------------------
@@ -298,3 +299,148 @@ def test_shot_aliasing_reads_a_label_mask(tmp_path):
     row = sheet.shot_aliasing(tmp_path, "a")
     assert row is not None and row["energy"] is not None
     assert sheet.shot_aliasing(tmp_path, "b") is None
+
+
+def test_a_void_baseline_gives_no_change(tmp_path):
+    smooth, mask = _disk(supersample=8)
+    sky = np.full_like(smooth, 40)
+    for name, rgb in (("shadow", smooth), ("shadow_hidden", sky)):
+        (tmp_path / name).mkdir()
+        gate6.write_png_rgb(tmp_path / name / "frame_0000.png", rgb)
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "aliasing.json").write_text(json.dumps({"energy": 1.0, "void": True}),
+                                        encoding="utf-8")
+    row = gate6.report_edge_aliasing(tmp_path, base)
+    assert "change" not in row and row["change_void"] == "baseline void"
+    line = gate6.edge_aliasing_line(row)
+    assert "change vs baseline" not in line and "baseline void" in line
+    this_void = dict(row, void=True)
+    this_void.pop("change_void")
+    assert "change vs baseline" not in gate6.edge_aliasing_line(this_void)
+
+
+# -- fix pass (shots-render, 2026-11-09) --------------------------------------
+
+
+def _lit_and_framed(key):
+    client, _server = sheet._client()
+    shot = sheet.SHOTS[key]
+    body = {"prompt": shot.prompt, "compiler": "regex", "still": True}
+    payload = client.post("/compile", json=body).json()
+    payload, lit = sheet.light_shot(client, body, payload, shot.lighting, subject=shot.subject)
+    spec, framed = sheet.frame_subject(payload["spec"]["dict"], shot.subject)
+    return payload, lit, spec, framed
+
+
+@pytest.mark.parametrize("key", ["a", "d"])
+def test_a_and_d_frame_the_matterhorn_on_the_lens_axis(key):
+    """The director's heading is the one flown, and the Matterhorn sits on
+    it at the stand-off, inside the matterhorn bake, in a 54 deg lens."""
+    from core.scenario.camera import DEFAULT_FOCAL_MM, DEFAULT_SENSOR_H_MM, DEFAULT_SENSOR_W_MM
+    from webapp.runs import curated_key_at
+    import math
+
+    payload, lit, spec, framed = _lit_and_framed(key)
+    assert payload["validation"]["ok"]
+    heading = spec["initial"]["heading"]["value"]
+    assert heading == lit["heading_compiled_deg"] == framed["heading_deg"]
+    half_h = math.degrees(math.atan(DEFAULT_SENSOR_W_MM / 2 / DEFAULT_FOCAL_MM))
+    half_v = math.degrees(math.atan(DEFAULT_SENSOR_H_MM / 2 / DEFAULT_FOCAL_MM))
+    assert abs(framed["relative_bearing_deg"]) < 1.0 < half_h
+    assert 0.0 < framed["subject_elevation_angle_deg"] < half_v
+    start = (spec["initial"]["latitude"]["value"], spec["initial"]["longitude"]["value"])
+    assert curated_key_at(*start) == "matterhorn"
+    assert spec["initial"]["latitude"]["source"] == "inferred"
+    assert "SUBJECT_STANDOFF_M" in spec["initial"]["latitude"]["from"]
+    # the sun was solved where the flight starts, and still stands where the look wants it
+    assert abs(lit["relative_azimuth_error_deg"]) < 1.0
+
+
+def test_d_looks_at_the_matterhorn_from_the_j11_s_own_cockpit():
+    _payload, _lit, spec, _framed = _lit_and_framed("d")
+    framing = sheet.camera_framing(spec, "cockpit")
+    # the canopy, metres AHEAD of the CG (the old B747 figure sat 6 m aft, over the fins)
+    assert 7.0 < framing["offset_forward_m"] < 10.0 and 1.0 < framing["offset_up_m"] < 2.5
+    assert "EYEPOINT" in framing["basis"]
+
+
+def test_the_cockpit_station_comes_from_each_airframe_s_fdm():
+    from core.scenario.camera import COCKPIT_EYE_NUDGE_M, SHOULDER_OFFSET, CameraSpec, \
+        derive_cockpit_offset
+
+    j11 = derive_cockpit_offset("J11")
+    # J11.xml: EYEPOINT (172.45, 0, 38.00) in, CG (517.35, 0, -21.56) in
+    expected = ((517.35 - 172.45) * 0.0254 + COCKPIT_EYE_NUDGE_M[0],
+                COCKPIT_EYE_NUDGE_M[1], (38.0 + 21.56) * 0.0254 + COCKPIT_EYE_NUDGE_M[2])
+    assert j11 == pytest.approx(expected, abs=1e-3)
+    camera = CameraSpec.defaulted("cockpit", "cockpit", aircraft="J11")
+    assert camera.offset_forward_m.value == pytest.approx(j11[0])
+    assert derive_cockpit_offset("no_such_airframe") is None
+    fallback = CameraSpec.defaulted("cockpit", "cockpit", aircraft="no_such_airframe")
+    assert (fallback.offset_forward_m.value, fallback.offset_right_m.value,
+            fallback.offset_up_m.value) == SHOULDER_OFFSET
+    assert "SHOULDER_OFFSET" in fallback.offset_forward_m.frm
+
+
+def test_a_chase_on_the_b747_fallback_refuses_by_name():
+    spec = {"cameras": [{"preset": {"value": "chase"},
+                         "offset_forward_m": {"value": -110.0, "from": "FALLBACK_CHASE_OFFSET (B747 "
+                                              "framing): no mesh manifest for J11"},
+                         "offset_right_m": {"value": 0.0}, "offset_up_m": {"value": 12.0}}]}
+    with pytest.raises(sheet.ShotRefused, match=r"^shot\.chase_unframed: FALLBACK_CHASE_OFFSET"):
+        sheet.camera_framing(spec, "chase")
+    spec["cameras"][0]["offset_forward_m"] = {"value": -59.0, "from": "derived from the mesh"}
+    assert sheet.camera_framing(spec, "chase")["offset_forward_m"] == -59.0
+    assert sheet.camera_framing({"x": 1}, "chase") == {}
+
+
+def test_the_fallback_chase_says_it_is_the_fallback(monkeypatch, tmp_path):
+    import core.scenario.camera as camera
+
+    monkeypatch.setattr(camera, "_MESH_GENERATED_DIR", tmp_path)
+    chase = camera.CameraSpec.defaulted("chase", "chase", aircraft="J11")
+    assert chase.offset_forward_m.value == camera.FALLBACK_CHASE_OFFSET[0]
+    assert chase.offset_forward_m.frm.startswith("FALLBACK_CHASE_OFFSET (B747 framing)")
+
+
+def test_a_subject_outside_its_bake_refuses_by_name():
+    with pytest.raises(sheet.ShotRefused, match=r"^shot\.subject_unframed"):
+        sheet.subject_start(("matterhorn", "Matterhorn"), 0.0, standoff_m=30000.0)
+    with pytest.raises(sheet.ShotRefused, match=r"^shot\.subject_unframed"):
+        sheet.subject_start(("matterhorn", "Eiger"), 0.0)
+
+
+def test_the_sheet_ranges_are_the_commandlets():
+    import re
+
+    def cpp(name):
+        return int(re.search(rf"constexpr int32 {name} = (\d+);", COMMANDLET).group(1))
+
+    assert sheet.STILL_SAMPLES_MAX == cpp("RenderBeautyStillSamplesMax")
+    assert sheet.PATHTRACE_SPP_MAX == cpp("RenderPathTraceSppMax")
+    supersample = (ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/"
+                   "FlightSimSupersample.cpp").read_text(encoding="utf-8")
+    assert sheet.SUPERSAMPLE_MAX == int(re.search(r"constexpr int MaxFactor = (\d+);",
+                                                  supersample).group(1))
+    assert sheet.render_extra_tokens("beauty", sheet.STILL_SAMPLES_MAX, False, None)
+    assert sheet.render_extra_tokens("beauty", None, True, sheet.PATHTRACE_SPP_MAX)
+    for args in (("beauty", sheet.STILL_SAMPLES_MAX + 1, False, None),
+                 ("beauty", None, True, sheet.PATHTRACE_SPP_MAX + 1)):
+        with pytest.raises(ValueError):
+            sheet.render_extra_tokens(*args)
+    assert "is not a whole number from 1 to" in COMMANDLET
+    assert "a value is out of range" in COMMANDLET
+
+
+def test_the_clip_takes_no_still_samples(tmp_path, monkeypatch):
+    calls = []
+
+    def fake(shot, *, still=True, clip_seconds=None, tokens=(), **_k):
+        calls.append((still, list(tokens)))
+        raise sheet.ShotRefused("render: stub")
+
+    monkeypatch.setattr(sheet, "render_shot", fake)
+    assert sheet.main(["--step", "v0", "--shots", "a", "--still-samples", "4", "--clip",
+                       "--root", str(tmp_path)]) == 0
+    assert calls == [(True, ["-supersample=2", "-still-samples=4"]), (False, [])]

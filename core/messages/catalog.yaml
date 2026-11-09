@@ -315,8 +315,16 @@ render.still_samples:
   sentence: "Still accumulation was asked for on a render that is not a beauty render, or with a count out of range."
   hint: "Use -still-samples=N (1 to 64) only with -quality=beauty."
 render.pathtrace:
-  sentence: "The path-traced render cannot run here: it needs the Windows render host with hardware ray tracing turned on for that render."
-  hint: "Render the path-traced sheet on the Windows box, or ask for the beauty quality instead."
+  sentence: "The path-traced render cannot run here: it needs the Windows render host with hardware ray tracing turned on for that render, and it renders stills, not clips (a clip would take hours)."
+  hint: "Render the path-traced sheet on the Windows box as stills (pass -pathtrace-clip only to mean a path-traced clip), or ask for the beauty quality instead."
+# shots-render fix pass (core/terrain/glo30.py standoff_start, core/scenario/
+# camera.py chase_unframed; raised by experiments/visual_contact_sheet.py):
+shot.subject_unframed:
+  sentence: "The shot's subject cannot be put in front of the camera: the start that would put the summit ahead on the flown heading lies outside the place's prepared terrain, or the summit is not one of the place's."
+  hint: "Use a summit listed for the place in core/terrain/glo30.py, or a shorter stand-off."
+shot.chase_unframed:
+  sentence: "The chase camera would frame this aircraft from the fallback distance meant for a jumbo jet, because its mesh has not been imported on this machine."
+  hint: "Import the aircraft's mesh on this machine first, then render the sheet, so every baseline is framed from the aircraft's own measured length."
 # supersample lane (visual overhaul, FlightSimSupersample.cpp):
 render.supersample:
   sentence: "Supersampling was asked for on a render that is not a beauty render, with a factor out of range, or at a size whose internal frame would not fit the texture limit or the memory budget."
