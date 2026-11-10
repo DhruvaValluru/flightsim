@@ -2344,3 +2344,107 @@ shot c luma mean 3.6 (52.7 % crushed).
   removes an earlier sheet's side files first. gate_v_visual.py folds the ground ids into 0,
   read from `_ids.json` or the run's render.json. A head re-grade should now run
   aerial_perspective and texel_detail, and horizon_fill on a and d should be re-read.
+
+## round-2b weather-fx
+
+Round 2b, weather-fx lane (Mac, uncompiled, nothing rendered), 2026-11-09. Source: round 0
+(origin/phase-2-final 1a62d557, the Windows laptop at BEAUTY, D3D11 / PCD3D_SM5: no Lumen,
+VSM or Nanite), frames docs/visual/round_0/07, 09, 10 looked at one by one, with
+summary.json and scripts/run_test_scenarios.py for the prompts. Everything below is
+beauty-gated; the measure path, the physics and the Google tiles are untouched; the
+storm weather stays default-on. Every new number is UNCALIBRATED.
+
+**#07 heavy rain (tower view of the a320 at 1000 m in heavy rain): LIVE, fixed.**
+- Cause. The web app's default storm weather (procedural, -rain-gain=4, cinematic style)
+  draws the card's rain box: 20 x 20 x 16 m around the camera, PARTICLE_BUDGET 262 144
+  drops at every rate above about 1 mm/h (so the drawn count never follows the rate, only
+  the weight does), each a 1/15 s streak (60 cm at 9 m/s). A drop 1 m from the lens is a
+  60 cm streak at 1 m: the frame's height. Coverage D/streak x weight (about 11 at
+  25 mm/h) x gain 4 x the overhaul's beauty readability gain 1.5 clamps every streak
+  opaque. The frame is that: a grey wall of full-height vertical lines. The overhaul made
+  it worse (the 1.5), not better.
+- Fix (beauty only: FFlightSimWeather::ApplyBeautyRainReadability, whose one caller is the
+  beauty world look; Python twin core/scene/weather_look.py beauty_rain_shape, pinned by
+  tests/test_weather_fx.py). M_RainDrops (generation 5) gains Density, NearThin,
+  MaxStreak, MaxCoverage, DepthFade; their defaults (1, 0, 0, 1, 0) are the measure
+  shader value for value. Beauty sets: drawn streaks 1500 per mm/h (a 40 mm/h storm draws
+  60 000; floor 1 % of the card's), streak angle capped at 0.012 rad (1 mm/h) to 0.045 rad
+  (50 mm/h, log-interpolated: heavier rain, longer streaks; about 54 px at 1280 px and
+  54 deg), drops within 4 m of the lens thinned by (range / 4 m)^2 on the drop's own phase
+  (1 m keeps 1 in 16), one streak's coverage capped at 0.35, and exp(-range / 12 m) depth
+  fade. Recorded in look_applied.weather.rain.beauty_shape. Mean light is NOT conserved
+  (stated). The Niagara backend gets no shape (recorded). FlightSimRainParticles.cpp (the
+  -weather-backend=off rain) is not changed: superseded under the default.
+- Render machine. Plain Custom-node HLSL (branches, exp) in a lit translucent material
+  lit per vertex from the translucency volume: SM5 runs all of it; no Lumen, VSM or
+  Nanite is read. The thinning lowers the drawn quads (cheaper on the Intel GPU).
+- Probe wx-rain: re-render #07 and #06 at beauty. Pass: separate streaks, none longer
+  than about 5 % of the frame, the aircraft and the background readable through the rain;
+  look_applied.weather.rain.beauty_shape present. Then tune BEAUTY_RAIN_DROPS_PER_MMH and
+  BEAUTY_RAIN_MAX_COVERAGE (the C++ twin with it).
+
+**#09 thunderstorm (747 flying west at 2000 m): the cones ALREADY FIXED on the default
+path; the residue fixed.**
+- Cause, read from the frame and the code: the two hard-edged cones are the weather look's
+  M_RainShaft shafts (FlightSimWeatherLook.cpp: open tapered cones from the cloud base to
+  the ground, 3 km ahead, alternating sides, an UNLIT grey whose opacity is the same right
+  up to the silhouette; the bright ellipse at each foot is the open bottom). phase-2-final
+  has no aircraft spot light at all (git grep: no USpotLightComponent), so they were not
+  the landing lamps. On phase-2-final the weather look drew them beside the storm
+  weather's cell.
+- Already fixed for the web app's default: 288eda29 (world fix pass) stands the shafts
+  and the look's bolt down whenever the storm weather draws its cell
+  (SceneOptions.bSkipStormLook, FlightSimRenderCommandlet.cpp), and every thunderstorm card
+  carries weather.cell (core/scene/storm_weather.py card_block).
+- Live residue, fixed in beauty: (a) -weather-backend=off still draws the shafts:
+  ApplyBeautyWeatherLook sets M_RainShaft (generation 2, rebuilt in place by the new
+  WEATHER_LOOK_GENERATIONS stamp) ShaftSoftEdge 1 (rain_shaft_soft.hlsl fades the cone's
+  silhouette by its radial normal against the camera vector) and ShaftLight 0.35 (the
+  unlit grey dimmed; the storm meter opened it). Defaults 0 and 1 are the old cones.
+  (b) The overhaul's aircraft lamps (FlightSimAircraftFX.cpp, beauty only) scattered into
+  volumetric fog at the engine default 1: landing 0.3 and nav 0.5 now
+  (lights.LandingVolumetricScattering / NavVolumetricScattering, fallbacks here), the
+  landing spot's source radius the bulb's. The landing lamp is on only under 450 m AGL,
+  so #09 at 2000 m had it off either way. The lightning point light is unchanged.
+- Render machine: volumetric fog runs on SM5; the scattering fractions only scale it.
+  CameraVectorWS and the Custom node are SM5. The Intel GPU's volumetric fog grid is
+  the same cost either way.
+- Probe wx-cones: #09 as rendered (default backend): no cones (the cell's shaft only);
+  then the same prompt with FLIGHTSIM_WEATHER_BACKEND=off: soft, dim shafts with no
+  hard rim. A landing-light shot under 450 m AGL in rain: a soft beam, not a solid cone.
+
+**#10 tornado (c172 near a tornado over the Flint Hills at 600 m): funnel LIVE, fixed in
+part; the red ground's cause is outside this lane's files, LIVE, handed off.**
+- No tornado in the frame. The funnel is there but off the frame: the default aim is
+  "abeam" (webapp/runs.py tornado_axis: 2.5 core radii = 375 m beside the track at the
+  event centre, 0.45 x 51 m/s x 6 s = 139 m ahead), so from a chase camera about 20 m
+  behind it is about 67 deg off the axis, past the 27 deg half-width of the frame, for
+  the whole clip. Framing is the camera lane's (the tornado's bearing, or "ahead" for a
+  visible event). What this lane could fix: the funnel's look. It is drawn on the
+  engine's default grid material (gotcha 26: both vertex-colour materials rendered it
+  black). ApplyBeautyWeatherLook finds the scenario world's "TornadoFunnel" component and
+  gives it M_TornadoFunnel (new, generation 1): opaque, lit, grey-brown
+  BEAUTY_FUNNEL_COLOUR x a vertical striation noise, no vertex colour, no WPO. Same
+  geometry, so the labels' silhouettes are the beauty's (the label captures draw their
+  own pass materials). Recorded in look_applied.weather_look.beauty.
+- The red ground and the black voids. Not dust (no dust lane on phase-2-final), not
+  wetness (weather_look wetness is 0 for a tornado: STORM_RAIN_MMH applies to a
+  thunderstorm only), not the tiles' de-light (not on phase-2-final). The cause is the web
+  app's STORM_LOOK (webapp/runs.py): a severe-weather event puts the sun at 10 deg
+  elevation (azimuth 180) with exposure bias 9.6. A 10 deg sun's beam through the sky
+  atmosphere is strongly reddened, and it lights the prairie at grazing incidence; the
+  creek valleys and tree lines it leaves in shadow get only the sky light, which on SM5
+  without Lumen GI is near zero: pure black. On this branch the black voids are the
+  no-lumen-fallback lane's (SSGI, sky light x1.6 with MinOcclusion 0.2; already in, not
+  rendered). The red beam is still LIVE: STORM_LOOK is unchanged and is also the measure
+  path's look, so it is not changed from this lane. Beauty adds a storm preset
+  (wetness_floor 0.85 darkens the tiles a further 25 %) and only draws a deck if the scene
+  has a cloud component. Hand-off: in beauty, a storm look should shadow the beam (a deck)
+  or raise the sun (web-defaults / exposure-storm lane).
+- Render machine: M_TornadoFunnel is a plain lit opaque surface; the funnel casts no
+  shadow (SetCastShadow(false) as before).
+- Probe wx-funnel: the same prompt with "aim core" or "a tornado 2 km ahead" so the funnel
+  is in frame; pass: a grey-brown striated funnel, not a grid; look_applied.weather_look.
+  beauty.tornado_funnel names M_TornadoFunnel; mask and class unchanged against measure.
+  Probe wx-red: #10 at beauty; read render.json for the sun (10 deg) and whether a cloud
+  deck was drawn (world_beauty.clouds); ground luma p10 and the R/G ratio of the prairie.
