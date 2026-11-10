@@ -337,7 +337,10 @@ render.beauty_fallback_mode:
 camera.scene_frame_mismatch:
   sentence: "The camera would be placed far from the flight: the run card does not say which map projection its camera track was worked out in, so the render placed it in a different one."
   hint: "Run it again from the web app, which now states the projection for every beauty run with cameras."
-# round-1 hang (FlightSimRenderCommandlet.cpp FRenderCaptureWatchdog):
+# round-1 hang (FlightSimRenderCommandlet.cpp FRenderCaptureWatchdog): and the sky-capture bisection switches
+render.sky_capture_switch:
+  sentence: "A diagnostic switch for the sky-light capture was given a value it does not take."
+  hint: "Use -sky-capture-at=aircraft or -sky-capture-at=origin."
 render.capture_timeout:
   sentence: "The render stopped: the graphics card did not finish a frame within the time limit, so the run was ended instead of waiting forever."
   hint: "This computer's graphics may be too slow for the beauty look. Render on a machine with a dedicated graphics card, or use the measure look."

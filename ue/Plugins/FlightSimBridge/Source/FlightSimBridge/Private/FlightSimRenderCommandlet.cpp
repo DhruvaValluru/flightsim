@@ -67,6 +67,9 @@
 #include "HAL/RunnableThread.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformStackWalk.h"   // capture watchdog: the stuck threads' stacks
+#if PLATFORM_WINDOWS
+#include "Windows/WindowsHWrapper.h"   // capture watchdog: TerminateProcess
+#endif
 #include "Misc/ScopeLock.h"
 
 #include <atomic>
@@ -477,6 +480,15 @@ namespace
 					{
 						GLog->Flush();
 					}
+					// Round 1: std::_Exit left the editor "terminating" with one
+					// thread and 5 GB, holding the bridge DLL (exit runs DLL
+					// detach under the loader lock a stuck thread can hold).
+					// TerminateProcess skips all of it. A thread stuck inside
+					// the kernel-mode driver can still delay the teardown;
+					// that is the driver's, not ours.
+#if PLATFORM_WINDOWS
+					::TerminateProcess(::GetCurrentProcess(), 4);
+#endif
 					std::_Exit(4);
 				}
 			}
@@ -4844,12 +4856,50 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// aircraft-sharp (beauty raster only; measure and pathtrace untouched):
 	// the velocity frame starts here, so the first delivered frame's motion
 	// vectors run from the warm-up pose, not from where the aircraft spawned.
-	if (bVisual && bBeauty && !bPathTrace)
+	// Round-1 hang bisection (2026-11-09): every beauty run on the Windows
+	// iGPU (D3D11 SM5) deadlocked in the flush after
+	// USkyLightComponent::UpdateSkyCaptureContents, the render thread in a
+	// D3D11RHI wait, the GPU idle. Three things in that path are new since
+	// ef361bd6 or suspect, each with a switch (all default to today's path):
+	//  -sky-capture-start-frame=0  velocity frame AFTER the sky capture, not before
+	//  -sky-capture-at=origin      capture where the sky light spawned, not at the aircraft
+	//  -sky-capture-clouds=0       volumetric clouds hidden for the sky capture only
+	//  -sky-capture-beauty-only=0  every beauty-only actor (sea, rain, funnel...) hidden for it
+	bool bSkyStartFrameFirst = true;
 	{
-		UE_LOG(LogFlightSimRender, Display, TEXT("velocity frame: start"));
-		RenderBeautyStartSceneFrame(World);
-		BeatWatchdog(TEXT("the velocity frame (FScene::StartFrame)"));
-		UE_LOG(LogFlightSimRender, Display, TEXT("velocity frame: done"));
+		int32 Flag = 1;
+		FParse::Value(*Params, TEXT("sky-capture-start-frame="), Flag);
+		bSkyStartFrameFirst = Flag != 0;
+	}
+	FString SkyCaptureAt = TEXT("aircraft");
+	FParse::Value(*Params, TEXT("sky-capture-at="), SkyCaptureAt);
+	if (SkyCaptureAt != TEXT("aircraft") && SkyCaptureAt != TEXT("origin"))
+	{
+		return Fail(FString::Printf(TEXT("render.sky_capture_switch: -sky-capture-at=%s is not aircraft or origin"),
+		                            *SkyCaptureAt));
+	}
+	int32 SkyCaptureClouds = 1;
+	FParse::Value(*Params, TEXT("sky-capture-clouds="), SkyCaptureClouds);
+	int32 SkyCaptureBeautyOnly = 1;
+	FParse::Value(*Params, TEXT("sky-capture-beauty-only="), SkyCaptureBeautyOnly);
+	UE_LOG(LogFlightSimRender, Display,
+	       TEXT("sky capture switches: start-frame %s, at %s, clouds %s, beauty-only actors %s"),
+	       bSkyStartFrameFirst ? TEXT("before") : TEXT("after"), *SkyCaptureAt,
+	       SkyCaptureClouds != 0 ? TEXT("shown") : TEXT("hidden"),
+	       SkyCaptureBeautyOnly != 0 ? TEXT("shown") : TEXT("hidden"));
+	auto StartVelocityFrame = [&]()
+	{
+		if (bVisual && bBeauty && !bPathTrace)
+		{
+			UE_LOG(LogFlightSimRender, Display, TEXT("velocity frame: start"));
+			RenderBeautyStartSceneFrame(World);
+			BeatWatchdog(TEXT("the velocity frame (FScene::StartFrame)"));
+			UE_LOG(LogFlightSimRender, Display, TEXT("velocity frame: done"));
+		}
+	};
+	if (bSkyStartFrameFirst)
+	{
+		StartVelocityFrame();
 	}
 	// The sky light, captured here because real-time capture never runs for a
 	// scene capture: without this every shadow and every overcast is lit by
@@ -4860,7 +4910,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// ever gets, so it is taken FROM the aircraft (the sky light was spawned
 		// at the world origin, on the ground, under any layer the aircraft is
 		// above). Measure keeps the origin capture its gates were tuned on.
-		if (bBeauty && Scenario.Aircraft != nullptr)
+		if (bBeauty && Scenario.Aircraft != nullptr && SkyCaptureAt == TEXT("aircraft"))
 		{
 			AActor* SkyOwner = VisualScene.SkyLightComponent->GetOwner();
 			if (SkyOwner != nullptr)
@@ -4878,12 +4928,63 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				VisualScene.LookApplied->SetObjectField(TEXT("sky_light_capture"), SkyCapture);
 			}
 		}
-		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: start"));
+		// Bisection: what the sky capture is allowed to see (restored after).
+		TArray<USceneComponent*> SkyHidden;
+		if (SkyCaptureClouds == 0)
+		{
+			for (TObjectIterator<UVolumetricCloudComponent> It; It; ++It)
+			{
+				if (It->GetWorld() == World && It->IsVisible())
+				{
+					SkyHidden.Add(*It);
+				}
+			}
+		}
+		if (SkyCaptureBeautyOnly == 0)
+		{
+			for (AActor* Actor : VisualScene.BeautyOnlyActors)
+			{
+				if (Actor == nullptr)
+				{
+					continue;
+				}
+				TInlineComponentArray<USceneComponent*> Components(Actor);
+				for (USceneComponent* Component : Components)
+				{
+					if (Component != nullptr && Component->IsVisible())
+					{
+						SkyHidden.AddUnique(Component);
+					}
+				}
+			}
+		}
+		for (USceneComponent* Component : SkyHidden)
+		{
+			Component->SetVisibility(false);
+			Component->MarkRenderStateDirty();
+		}
+		if (SkyHidden.Num() > 0)
+		{
+			World->SendAllEndOfFrameUpdates();
+			FlushRenderingCommands();
+		}
+		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: start (%d components hidden for it)"),
+		       SkyHidden.Num());
 		VisualScene.SkyLightComponent->SetCaptureIsDirty();
 		USkyLightComponent::UpdateSkyCaptureContents(World);
 		FlushRenderingCommands();
 		BeatWatchdog(TEXT("the sky light capture"));
 		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: done"));
+		for (USceneComponent* Component : SkyHidden)
+		{
+			Component->SetVisibility(true);
+			Component->MarkRenderStateDirty();
+		}
+		if (SkyHidden.Num() > 0)
+		{
+			World->SendAllEndOfFrameUpdates();
+			FlushRenderingCommands();
+		}
 		for (int32 i = 0; i < 2; ++i)
 		{
 			World->SendAllEndOfFrameUpdates();
@@ -4893,6 +4994,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			BeatWatchdog(TEXT("a capture after the sky light capture"));
 			UE_LOG(LogFlightSimRender, Display, TEXT("post-sky capture %d/2 done"), i + 1);
 		}
+	}
+	if (!bSkyStartFrameFirst)
+	{
+		StartVelocityFrame();
 	}
 
 	// -- the storm meter: the exposure under a drawn cumulonimbus ----------
