@@ -79,6 +79,11 @@ struct FFlightSimAircraftFXOptions
 	bool bContrails = true;
 	bool bAfterburner = true;
 	bool bHeatHaze = false;
+	// round 5 (L4): the render carries -labels. The Thin Translucent canopy
+	// instance (Look/MI_<slot>_thin) is applied only when it does not: a
+	// translucent pane writes no depth and the ID / depth label captures draw
+	// no translucency, so a labelled frame keeps the opaque MI_<slot>.
+	bool bLabels = false;
 	// wet-airframe-canopy: the built weather (its rain wets the airframe), or null.
 	const FFlightSimWeather* Weather = nullptr;
 	// fix pass: the scene's cloud layers (heights above the ground datum,

@@ -46,6 +46,9 @@ import xml.etree.ElementTree as ET
 # wet-airframe-canopy module: its shader inputs and constants (stdlib only).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from aircraft_wet_layer import WET_SHADER_INPUTS, constants_group as _wet_constants  # noqa: E402
+# round 5 (L4): the vendored Physically Based API database (CC0, pinned by
+# sha256 in assets/looks/physically_based/PIN.json), the measured constants.
+import physically_based as _pb  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_DIR = os.path.join(REPO, "assets", "aircraft_config")
@@ -85,27 +88,52 @@ SLOT_CLASSES = tuple(CLASS_MASTERS)
 LOOK_INSTANCE_FOLDER = "Look"
 LOOK_INSTANCE_PREFIX = "MI_"
 
+#: round 5 (L4): the measured constants, read from the vendored Physically
+#: Based API database (linear sRGB; for a metal the base colour IS its F0).
+#: Aluminium 0.916 0.923 0.924, titanium 0.441 0.400 0.361, stainless steel
+#: 0.669 0.639 0.598; tyre rubber albedo 0.023, roughness 0.7, n 1.5; car
+#: paint n 1.5 (a dielectric: F0 0.04, UE Specular 0.5). Pinned by test to
+#: the database rows, so a re-vendor that moves a number moves these.
+ALUMINIUM_F0 = _pb.metal_f0("Aluminum")
+TITANIUM_F0 = _pb.metal_f0("Titanium")
+STEEL_F0 = _pb.metal_f0("Stainless Steel")
+TIRE = _pb.material("Tire")
+TIRE_ALBEDO = _pb.linear_color(TIRE)
+TIRE_ROUGHNESS = float(TIRE["roughness"])
+TIRE_IOR = float(TIRE["ior"])
+PAINT_IOR = float(_pb.material("Car Paint")["ior"])
+#: The named bare metals a slot rule may pick (``"metal": "titanium"`` on a
+#: bare_metal rule: the nozzle petals, a leading-edge strip, the spinner).
+METALS = {"aluminium": ALUMINIUM_F0, "titanium": TITANIUM_F0, "stainless_steel": STEEL_F0}
+
 #: Every scalar each class master exposes, with its default. Each value is a
-#: look choice, not a measurement -- UNCALIBRATED (probe: the V7 side-by-side
-#: of each type against a reference photo at matched sun, reader's judgment).
-#: Why paint is NOT metallic 0.6-0.9: a painted panel is a dielectric under a
-#: clear coat (F0 ~0.04); a high metallic on paint reads as chrome under
-#: Lumen reflections. The 0.6-0.9 band belongs to the bare_metal class (the
-#: P-51D's polished skin, exhaust and leading-edge panels), where it is
-#: physically right. Paint keeps a small "flake" metallic.
+#: look choice unless it says "measured" -- UNCALIBRATED otherwise (probe:
+#: the V7 side-by-side of each type against a reference photo at matched sun,
+#: reader's judgment).
+#: Why paint is NOT metallic: a painted panel is a dielectric under a clear
+#: coat (F0 0.04 at n 1.5, the database's car paint), and any metallic on
+#: paint reads as chrome under reflections; round 5 drops the old 0.15
+#: "flake". Bare metal is Metallic 1 with the measured F0 as its colour (the
+#: P-51D's polished skin, exhaust and leading-edge panels); its roughness
+#: 0.25-0.45 band comes from RoughnessBreakup's low-frequency noise. Paint's
+#: AlbedoMax caps a livery's pure white (a linear 1.0 reflects more than any
+#: paint; 0.9 is a fresh white enamel, from memory). The panel lines are
+#: kept low (PanelDepth, PanelDarkening): a hint, never a grid.
 CLASS_SCALARS = {
     "paint": {
-        "Metallic": 0.15, "Roughness": 0.42, "RoughnessBreakup": 0.12,
-        "ClearCoat": 0.6, "ClearCoatRoughness": 0.12,
-        "PanelDepth": 0.35, "PanelWidthCm": 0.35, "PanelDarkening": 0.25,
+        "Metallic": 0.0, "Roughness": 0.4, "RoughnessBreakup": 0.12,
+        "ClearCoat": 0.8, "ClearCoatRoughness": 0.1,
+        "PanelDepth": 0.2, "PanelWidthCm": 0.35, "PanelDarkening": 0.15,
         "WearAmount": 0.25, "GrimeAmount": 0.2, "Specular": 0.5,
         "NoiseCm": 35.0, "EdgeStart": 0.02, "EdgeEnd": 0.2,
+        "AlbedoMax": 0.9, "SootAmount": 0.45, "SootLengthRadii": 10.0,
     },
     "bare_metal": {
-        "Metallic": 0.9, "Roughness": 0.28, "RoughnessBreakup": 0.18,
-        "PanelDepth": 0.45, "PanelWidthCm": 0.3, "PanelDarkening": 0.2,
+        "Metallic": 1.0, "Roughness": 0.35, "RoughnessBreakup": 0.2,
+        "PanelDepth": 0.25, "PanelWidthCm": 0.3, "PanelDarkening": 0.15,
         "WearAmount": 0.1, "GrimeAmount": 0.25, "Specular": 0.5,
-        "NoiseCm": 35.0, "EdgeStart": 0.02, "EdgeEnd": 0.2,
+        "NoiseCm": 60.0, "EdgeStart": 0.02, "EdgeEnd": 0.2,
+        "MetalColourWeight": 0.7, "SootAmount": 0.45, "SootLengthRadii": 10.0,
     },
     # Canopy acrylic (PMMA, n 1.49): F0 = ((n - 1) / (n + 1))^2 = 0.039, and
     # UE's F0 is 0.08 x Specular, so Specular 0.5 (polycarbonate, n 1.586,
@@ -119,29 +147,78 @@ CLASS_SCALARS = {
         "Metallic": 0.0, "Roughness": 0.04, "Specular": 0.5, "FresnelExponent": 5.0,
         "ReflectionBoost": 0.5,
     },
+    # Measured tyre rubber (the database's "Tire": roughness 0.7, n 1.5 so
+    # Specular 0.5); the master floors the MTL's Kd at the measured albedo
+    # (RubberFloor), because a pure-black Kd reflects nothing, which no tyre does.
     "rubber": {
-        "Metallic": 0.0, "Roughness": 0.86, "Specular": 0.3, "RoughnessBreakup": 0.08,
+        "Metallic": 0.0, "Roughness": TIRE_ROUGHNESS,
+        "Specular": round(_pb.specular_from_ior(TIRE_IOR), 4), "RoughnessBreakup": 0.08,
     },
 }
 #: UE's dielectric F0 per unit Specular (ShadingCommon.ush
 #: DielectricSpecularToF0: 0.08 x Specular, UE 5.7.4) and the canopy F0 the
 #: glass Specular above is meant to give (acrylic, n 1.49: 0.039).
-UE_F0_PER_SPECULAR = 0.08
+UE_F0_PER_SPECULAR = _pb.UE_F0_PER_SPECULAR
 GLASS_IOR = 1.49
 GLASS_F0 = ((GLASS_IOR - 1.0) / (GLASS_IOR + 1.0)) ** 2
 
-#: The F0 of the bare metal a chipped edge exposes: aluminium alloy skin
-#: (linear, about 0.91 0.92 0.92, from memory; iron's 0.56 0.57 0.58 read as
-#: dark steel). The wear lerps to metallic 0.9 with this as its colour.
-ALUMINIUM_F0 = (0.91, 0.92, 0.92)
+#: The nozzle vectors the soot reads (exhaust_soot.hlsl): xyz the exit centre
+#: in the mesh's LOCAL frame (cm), w the exit radius (cm; 0 = none). The
+#: master default is "no nozzle"; create_look_instances sets them per model
+#: from the look manifest (nozzle_vectors).
+SOOT_NOZZLE_PARAMETERS = ("Nozzle0", "Nozzle1", "Nozzle2", "Nozzle3")
+NO_NOZZLE = (0.0, 0.0, 0.0, 0.0)
 
 #: Every vector each class master exposes (linear RGBA), with its default.
+#: WearColour: the bare metal a chipped edge exposes (the measured aluminium
+#: F0; the wear lerps to Metallic 1 with this as its colour). MetalF0: the
+#: bare_metal class's own metal (aluminium unless a slot rule names another).
 CLASS_VECTORS = {
-    "paint": {"PanelPitchCm": (120.0, 90.0, 45.0, 0.0), "WearColour": (*ALUMINIUM_F0, 1.0)},
-    "bare_metal": {"PanelPitchCm": (90.0, 60.0, 35.0, 0.0), "WearColour": (*ALUMINIUM_F0, 1.0)},
+    "paint": {"PanelPitchCm": (120.0, 90.0, 45.0, 0.0), "WearColour": (*ALUMINIUM_F0, 1.0),
+              **{name: NO_NOZZLE for name in SOOT_NOZZLE_PARAMETERS}},
+    "bare_metal": {"PanelPitchCm": (90.0, 60.0, 35.0, 0.0), "WearColour": (*ALUMINIUM_F0, 1.0),
+                   "MetalF0": (*ALUMINIUM_F0, 1.0),
+                   **{name: NO_NOZZLE for name in SOOT_NOZZLE_PARAMETERS}},
     "glass": {"GlassTint": (0.018, 0.022, 0.026, 1.0)},
-    "rubber": {},
+    "rubber": {"RubberFloor": (*TIRE_ALBEDO, 1.0)},
 }
+
+# -- round 5 (L4): the Thin Translucent canopy ----------------------------------
+#
+# A second instance for every GLASS slot, MI_<slot>_thin, parented to
+# M_AircraftGlassThin: blend Translucent, shading model Thin Translucent,
+# lighting mode Surface ForwardShading (what MaterialShared.cpp requires of
+# the model, UE 5.7.4), screen-space reflections on, no refraction (a thin
+# pane with parallel faces shifts nothing), n 1.5 so Specular 0.5, roughness
+# 0.02, and a Transmittance tint through the ThinTranslucentMaterialOutput
+# node. D3D11 SM5 supports it: the base pass has a dual-source-blend path
+# (PCD3D_SM5 bSupportsDualSourceBlending=true) and a single-target fallback.
+#
+# LABELS: a translucent surface writes no scene depth, and the ID and depth
+# label captures draw no translucency at all, so a thin canopy in a labelled
+# frame would put the far wall (or the sky) in the labels where the beauty
+# shows the canopy. FlightSimAircraftFX.cpp therefore applies MI_<slot>_thin
+# ONLY when the render carries no -labels; with -labels the opaque
+# MI_<slot> (M_AircraftGlass, which writes depth) stays, as before. The
+# opaque glass master is unchanged: it is the label-safe canopy.
+THIN_GLASS_MASTER = "M_AircraftGlassThin"
+THIN_CLASS = "glass_thin"
+THIN_INSTANCE_SUFFIX = "_thin"
+THIN_GLASS_IOR = 1.5
+THIN_SCALARS = {
+    "Metallic": 0.0, "Roughness": 0.02,
+    "Specular": round(_pb.specular_from_ior(THIN_GLASS_IOR), 4),
+    # the pane's own diffuse: the imported colour x this (a clear canopy is
+    # nearly black diffusely; a film of dirt lifts it). UNCALIBRATED.
+    "GlassDiffuse": 0.03,
+}
+#: Transmittance (linear RGB): a lightly tinted acrylic canopy, UNCALIBRATED
+#: (the measured soda-lime glass is 0.98-0.99 per cm; canopies are tinted).
+THIN_VECTORS = {"Transmittance": (0.80, 0.84, 0.82, 1.0)}
+
+
+def thin_instance_name(slot):
+    return instance_name(slot) + THIN_INSTANCE_SUFFIX
 #: The texture/colour parameters every class master shares (the names the
 #: imported Interchange instances use, so the MTL wiring of
 #: ue_aircraft_materials.plan carries straight over).
@@ -162,6 +239,8 @@ SHADER_DIR = "assets/shaders/aircraft"
 SHADER_INPUTS = {
     "panel_lines": ("LocalPos", "NormalWS", "AxisX", "AxisY", "AxisZ", "Pitch", "WidthCm", "Depth"),
     "aircraft_wear": ("LocalPos", "NormalWS", "WorldPosCm", "NoiseCm", "EdgeStart", "EdgeEnd"),
+    # round 5 (L4): exhaust soot aft of the nozzles (twin: soot_mask).
+    "exhaust_soot": ("LocalPos", *SOOT_NOZZLE_PARAMETERS, "LengthRadii", "Noise"),
     "nav_bulb": ("UV", "LightColour", "Intensity", "Strobe", "CameraDir", "BeamDir", "BeamCos"),
     "contrail_opacity": ("UV", "LocalPos", "Opacity", "Formation"),
     "afterburner_glow": ("UV", "Intensity", "CoreColour", "TipColour", "Shocks"),
@@ -223,15 +302,23 @@ def classify_slot(name, material, config):
     """(class, rule) for one MTL material: the config's ``slot_rules``
     (regex over the name, first full match wins), then glass by dissolve,
     rubber by a dark untextured Kd, then the config's ``default_class``."""
+    cls, rule, _ = classify_slot_rule(name, material, config)
+    return cls, rule
+
+
+def classify_slot_rule(name, material, config):
+    """:func:`classify_slot` plus the matching slot rule itself (None when a
+    built-in rule classified the slot): a rule may carry per-slot choices
+    such as ``metal``."""
     for rule in config.get("slot_rules", []):
         if re.fullmatch(rule["match"], name):
-            return rule["class"], f"slot_rules {rule['match']!r}"
+            return rule["class"], f"slot_rules {rule['match']!r}", rule
     if material.get("d", 1.0) < GLASS_MAX_DISSOLVE:
-        return "glass", f"MTL d {material['d']:.3f} < {GLASS_MAX_DISSOLVE}"
+        return "glass", f"MTL d {material['d']:.3f} < {GLASS_MAX_DISSOLVE}", None
     if not material.get("map_kd") and max(material.get("kd", (1, 1, 1))) <= RUBBER_MAX_KD:
-        return "rubber", f"untextured, Kd max <= {RUBBER_MAX_KD}"
+        return "rubber", f"untextured, Kd max <= {RUBBER_MAX_KD}", None
     default = config.get("default_class", "paint")
-    return default, "default_class"
+    return default, "default_class", None
 
 
 def instance_name(slot):
@@ -340,7 +427,7 @@ def plan_slots(materials, config, sources=None):
     out = {}
     sources = sources or {}
     for name, material in sorted(materials.items()):
-        cls, rule = classify_slot(name, material, config)
+        cls, rule, matched = classify_slot_rule(name, material, config)
         if cls not in CLASS_MASTERS:
             raise LookError(f"slot {name!r}: class {cls!r} is not one of {SLOT_CLASSES}")
         scalars = dict(CLASS_SCALARS[cls])
@@ -350,6 +437,10 @@ def plan_slots(materials, config, sources=None):
         scalars.update(derived)
         vectors = {k: tuple(v) for k, v in CLASS_VECTORS[cls].items()}
         vectors.update({k: tuple(v) for k, v in config.get("class_vectors", {}).get(cls, {}).items()})
+        metal = (matched or {}).get("metal")
+        if metal:
+            # a bare_metal rule naming its metal: the measured F0 of that metal
+            vectors["MetalF0"] = (*METALS[metal], 1.0)
         if material.get("map_kd"):
             texture = texture_asset_name(material["map_kd"])
             base, weight = (1.0, 1.0, 1.0, 1.0), 1.0
@@ -363,7 +454,73 @@ def plan_slots(materials, config, sources=None):
                      "instance": instance_name(name), "texture": texture,
                      "base_color": base, "weight": weight,
                      "scalars": scalars, "vectors": vectors, "derived": derived_record}
+        if metal:
+            out[name]["metal"] = metal
+        if cls == "glass":
+            # round 5 (L4): the Thin Translucent twin of the opaque canopy,
+            # applied by the C++ only on a render without -labels.
+            thin_scalars = dict(THIN_SCALARS)
+            thin_scalars.update(config.get("class_scalars", {}).get(THIN_CLASS, {}))
+            thin_vectors = {k: tuple(v) for k, v in THIN_VECTORS.items()}
+            thin_vectors.update({k: tuple(v) for k, v in
+                                 config.get("class_vectors", {}).get(THIN_CLASS, {}).items()})
+            out[name]["thin"] = {"master": f"{MASTER_ROOT}/{THIN_GLASS_MASTER}",
+                                 "instance": thin_instance_name(name),
+                                 "scalars": thin_scalars, "vectors": thin_vectors}
     return out
+
+
+# -- round 5 (L4): exhaust soot and the nozzle vectors ----------------------------
+
+def soot_mask(local_pos, nozzles, length_radii, noise=1.0):
+    """Python twin of exhaust_soot.hlsl: the soot mask (0..1) at a local
+    position (cm) for ``nozzles`` = [(x, y, z, radius_cm), ...] (radius <= 0
+    = none), fading over ``length_radii`` radii aft (-X) of each exit."""
+    px, py, pz = (float(v) for v in local_pos)
+    soot = 0.0
+    for nozzle in list(nozzles)[:len(SOOT_NOZZLE_PARAMETERS)]:
+        cx, cy, cz, r = (float(v) for v in nozzle)
+        if r <= 0.0:
+            continue
+        aft = cx - px
+        lateral = math.hypot(py - cy, pz - cz)
+        length_cm = max(float(length_radii), 0.5) * r
+        along = min(max((aft + 0.5 * r) / (length_cm + 0.5 * r), 0.0), 1.0)
+        width = r * (2.0 + max(aft, 0.0) / (3.0 * r))
+        lobe = math.exp(-(lateral * lateral) / (width * width))
+        fade = (1.0 - along) * (1.0 - along)
+        gate = 1.0 if aft >= -0.5 * r else 0.0
+        soot = max(soot, gate * fade * lobe)
+    n = min(max(float(noise), 0.0), 1.0)
+    return soot * (0.6 + 0.4 * n)
+
+
+def nozzle_vectors(nozzles, mesh_origin_cm):
+    """{Nozzle0..3: (x, y, z, radius_cm)} in the mesh's LOCAL frame from the
+    look manifest's nozzle rows (actor cm about the datum): the body mesh
+    hangs under MeshOrigin at mesh_origin_actor_cm with no rotation
+    (FlightSimRenderCommandlet.cpp BuildMeshAirframe), and the imported
+    asset lands in the actor frame's orientation (assets_pipeline/obj_frame.py),
+    so local = actor - origin. Rows past the fourth are left out, and said
+    (:func:`nozzle_vectors_overflow`)."""
+    out = {name: NO_NOZZLE for name in SOOT_NOZZLE_PARAMETERS}
+    for name, row in zip(SOOT_NOZZLE_PARAMETERS, nozzles):
+        x, y, z = row["actor_cm"]
+        out[name] = (round(x - mesh_origin_cm[0], 2) + 0.0, round(y - mesh_origin_cm[1], 2) + 0.0,
+                     round(z - mesh_origin_cm[2], 2) + 0.0, float(row["radius_cm"]))
+    return out
+
+
+def nozzle_vectors_overflow(nozzles):
+    """The ids of the nozzle rows the four soot vectors cannot carry."""
+    return [row["id"] for row in list(nozzles)[len(SOOT_NOZZLE_PARAMETERS):]]
+
+
+def labels_requested(params):
+    """Twin of FParse::Param(*Params, TEXT("labels")) as FFlightSimAircraftFXOptions
+    ::ParseParams reads it: a ``-labels`` (or ``/labels``) word of its own.
+    The C++ applies the thin canopy only when this is False."""
+    return re.search(r"(?:^|\s)[-/]labels(?=\s|$)", params) is not None
 
 
 # -- the config ----------------------------------------------------------------
@@ -421,15 +578,26 @@ def validate(config, path="look config"):
             problems.append(f"slot rule {rule!r}: bad regex ({exc})")
         if not rule.get("source"):
             problems.append(f"slot rule {rule.get('match')!r} has no source")
+        if "metal" in rule:
+            if rule.get("class") != "bare_metal":
+                problems.append(f"slot rule {rule.get('match')!r}: metal is a bare_metal choice")
+            if rule["metal"] not in METALS:
+                problems.append(f"slot rule {rule.get('match')!r}: metal {rule['metal']!r} not in "
+                                f"{sorted(METALS)}")
     for cls, values in list(config.get("class_scalars", {}).items()) + list(
             config.get("class_vectors", {}).items()):
-        if cls not in CLASS_MASTERS:
+        if cls == THIN_CLASS:
+            allowed, master = set(THIN_SCALARS) | set(THIN_VECTORS), THIN_GLASS_MASTER
+        elif cls in CLASS_MASTERS:
+            allowed, master = set(CLASS_SCALARS[cls]) | set(CLASS_VECTORS[cls]), CLASS_MASTERS[cls]
+        else:
             problems.append(f"class override for unknown class {cls!r}")
             continue
-        allowed = set(CLASS_SCALARS[cls]) | set(CLASS_VECTORS[cls])
         for name in values:
             if name not in allowed:
-                problems.append(f"{cls}.{name} is not a parameter of {CLASS_MASTERS[cls]}")
+                problems.append(f"{cls}.{name} is not a parameter of {master}")
+            elif name in SOOT_NOZZLE_PARAMETERS:
+                problems.append(f"{cls}.{name} is set from the manifest's nozzles, not the config")
     problems += _validate_fg_material(config.get("fg_material"))
     ids = set()
     for light in config.get("lights", []):
@@ -951,8 +1119,22 @@ def build_manifest(name, config, generated_dir, fdm_xml, materials=None, config_
         actor, basis = resolve_anchor(row, vertices, fdm, origin)
         nozzles.append(nozzle_row(row, actor, basis, fdm, afterburner_constants))
     config_path = config_path or look_config_path(name)
+    soot = nozzle_vectors(nozzles, origin)
+    thin_slots = sorted(slot for slot, row in slots.items() if row.get("thin"))
     return {
         "magic": LOOK_MANIFEST_MAGIC, "version": LOOK_MANIFEST_VERSION, "name": name,
+        # round 5 (L4): the soot nozzles every paint / bare-metal instance
+        # carries (local cm), and the thin-canopy rule the C++ follows.
+        "soot_nozzles_local_cm": {key: list(value) for key, value in soot.items()},
+        "soot_nozzles_left_out": nozzle_vectors_overflow(nozzles),
+        "thin_glass": {
+            "master": f"{MASTER_ROOT}/{THIN_GLASS_MASTER}", "suffix": THIN_INSTANCE_SUFFIX,
+            "slots": thin_slots,
+            "instances": [thin_instance_name(slot) for slot in thin_slots],
+            "rule": ("applied by FlightSimAircraftFX.cpp only on a render without -labels; "
+                     "with -labels the opaque MI_<slot> stays, so the ID and depth labels "
+                     "(captures that draw no translucency) keep the canopy"),
+        },
         "look_config": os.path.relpath(config_path, REPO).replace(os.sep, "/"),
         # sha256 of the named file (as every other *_sha256 here), and of the
         # config as used (canonical JSON: the same unless a caller edited it).
@@ -963,7 +1145,9 @@ def build_manifest(name, config, generated_dir, fdm_xml, materials=None, config_
                                     "about the JSBSim structural datum",
         "instance_root": f"{mesh_manifest.get('asset_path_root')}/{LOOK_INSTANCE_FOLDER}",
         "slots": {slot: dict({"class": row["class"], "instance": row["instance"], "rule": row["rule"]},
-                             **({"derived": row["derived"]} if row.get("derived") else {}))
+                             **({"derived": row["derived"]} if row.get("derived") else {}),
+                             **({"metal": row["metal"]} if row.get("metal") else {}),
+                             **({"thin_instance": row["thin"]["instance"]} if row.get("thin") else {}))
                   for slot, row in slots.items()},
         "lights": lights, "nozzles": nozzles,
         "constants": {
@@ -1005,11 +1189,16 @@ def fdm_xml_for(name):
     return os.path.join(FDM_AIRCRAFT, fdm, f"{fdm}.xml")
 
 
-def write_manifest(name, generated_dir=None, config_path=None):
-    """Build and write <generated>/<NAME>/look_manifest.json; returns its path."""
+def build_manifest_for(name, generated_dir=None, config_path=None):
+    """(manifest, generated_dir) for one converted aircraft from its look
+    config and flown FDM -- what :func:`write_manifest` writes."""
     generated_dir = generated_dir or os.path.join(GENERATED, name)
     config = load_config(name, config_path)
-    manifest = build_manifest(name, config, generated_dir, fdm_xml_for(name), config_path=config_path)
+    return build_manifest(name, config, generated_dir, fdm_xml_for(name), config_path=config_path), generated_dir
+
+
+def write_manifest_dict(manifest, generated_dir):
+    """Write a built manifest to <generated_dir>/look_manifest.json; its path."""
     out = os.path.join(generated_dir, LOOK_MANIFEST_NAME)
     tmp = out + ".tmp"
     with open(tmp, "w", encoding="ascii") as handle:
@@ -1017,6 +1206,12 @@ def write_manifest(name, generated_dir=None, config_path=None):
         handle.write("\n")
     os.replace(tmp, out)
     return out
+
+
+def write_manifest(name, generated_dir=None, config_path=None):
+    """Build and write <generated>/<NAME>/look_manifest.json; returns its path."""
+    manifest, generated_dir = build_manifest_for(name, generated_dir, config_path)
+    return write_manifest_dict(manifest, generated_dir)
 
 
 def main(argv):

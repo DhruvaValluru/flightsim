@@ -2,7 +2,7 @@
   "schema": "flightsim-aircraft-look/1",
   "name": "J11",
   "default_class": "paint",
-  "note": "Beauty-only look (scripts/aircraft_look.py). Every class parameter not stated here is the master default; every look number here is UNCALIBRATED: set by probe render on the render machine. Semi-matte PLAAF grey. Round 2 (cockpit-airframe, 2026-11-09): Roughness 0.58 -> 0.46, ClearCoat 0.12 -> 0.3, ClearCoatRoughness 0.3 -> 0.2, because the render machine's Gate V specular clause found NO interior airframe pixel above luma 180 on shots b, c and d (peak/median 4.5-18 but the peak never reached the cut): a sun glint needs both the smooth crease normals of body_beauty (the facets scattered it) and a narrower lobe than 0.58; still a painted fighter, not a gloss airliner. UNCALIBRATED.j11-package lane (2026-11-09): the slot names are now measured on the converted J-11A (25 MTL slots: assets_pipeline/convert.py over the pinned package, docs/visual/J11_PACKAGE.md); the cockpit interior, seat and pilot slots are matte (the rubber master: Default Lit, no clear coat, no panel lines) with a roughness derived from the package's own .ac shininess (fg_material); the canopy and the pilot's visor are glass. Lamps and nozzles sit at the package's own model-XML positions (package_model_m), mapped to the actor frame the way the converter maps every vertex. Fix pass (2026-11-09): light_constants.BulbRadiusCm 6 -- the default 18 cm glow sprite and point-light source radius is an airliner's wingtip lens and glare, about three times a fighter's wingtip nav lens; the bulb's luminance follows its candela over that area (scripts/aircraft_look.py bulb_luminance_nits), so a smaller bulb is brighter, not dimmer. UNCALIBRATED.",
+  "note": "Beauty-only look (scripts/aircraft_look.py). Every class parameter not stated here is the master default; every look number here is UNCALIBRATED: set by probe render on the render machine. Semi-matte PLAAF grey. Round 2 (cockpit-airframe, 2026-11-09): Roughness 0.58 -> 0.46, ClearCoat 0.12 -> 0.3, ClearCoatRoughness 0.3 -> 0.2, because the render machine's Gate V specular clause found NO interior airframe pixel above luma 180 on shots b, c and d (peak/median 4.5-18 but the peak never reached the cut): a sun glint needs both the smooth crease normals of body_beauty (the facets scattered it) and a narrower lobe than 0.58; still a painted fighter, not a gloss airliner. UNCALIBRATED.j11-package lane (2026-11-09): the slot names are now measured on the converted J-11A (25 MTL slots: assets_pipeline/convert.py over the pinned package, docs/visual/J11_PACKAGE.md); the cockpit interior, seat and pilot slots are matte (the rubber master: Default Lit, no clear coat, no panel lines) with a roughness derived from the package's own .ac shininess (fg_material); the canopy and the pilot's visor are glass. Lamps and nozzles sit at the package's own model-XML positions (package_model_m), mapped to the actor frame the way the converter maps every vertex. Fix pass (2026-11-09): light_constants.BulbRadiusCm 6 -- the default 18 cm glow sprite and point-light source radius is an airliner's wingtip lens and glare, about three times a fighter's wingtip nav lens; the bulb's luminance follows its candela over that area (scripts/aircraft_look.py bulb_luminance_nits), so a smaller bulb is brighter, not dimmer. UNCALIBRATED. Round 5 L4 (2026-11-10, physically calibrated materials): paint Metallic is 0 (a dielectric under a clear coat; the master's default now), the PLAAF grey is the MATTE variant: ClearCoat 0 (flat camouflage enamel, no lacquer), Roughness 0.5 -- the round-2 glint chase is left to the sun's specular on the smooth beauty normals and the hero shadows; the thin canopy (MI_<slot>_thin, applied without -labels only) transmits a warm gold-green tint. UNCALIBRATED.",
   "slot_rules": [
     {
       "match": "mat_Glass_Cockpit",
@@ -22,10 +22,8 @@
   ],
   "class_scalars": {
     "paint": {
-      "Roughness": 0.46,
-      "ClearCoat": 0.3,
-      "ClearCoatRoughness": 0.2,
-      "Metallic": 0.08,
+      "Roughness": 0.5,
+      "ClearCoat": 0.0,
       "WearAmount": 0.3,
       "GrimeAmount": 0.3
     }
@@ -36,6 +34,14 @@
         0.02,
         0.024,
         0.022,
+        1.0
+      ]
+    },
+    "glass_thin": {
+      "Transmittance": [
+        0.8,
+        0.78,
+        0.66,
         1.0
       ]
     }

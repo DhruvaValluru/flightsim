@@ -87,6 +87,9 @@ namespace
 	// LOOK_INSTANCE_FOLDER / LOOK_INSTANCE_PREFIX).
 	const TCHAR* const AircraftFxLookFolder = TEXT("Look");
 	const TCHAR* const AircraftFxLookPrefix = TEXT("MI_");
+	// round 5 (L4): the Thin Translucent canopy instance beside a glass slot's
+	// opaque one (aircraft_look.THIN_INSTANCE_SUFFIX), applied without -labels only.
+	const TCHAR* const AircraftFxThinSuffix = TEXT("_thin");
 
 	// on/1/true or off/0/false; any other word is refused by name (it was
 	// read as "on", so -heat-haze=no turned the pixel-moving haze ON). Twin of
@@ -241,6 +244,8 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& Params)
 	bContrails = bAll && bContrailsSwitch;
 	bAfterburner = bAll && bAfterburnerSwitch;
 	bHeatHaze = bAll && bHeatHazeSwitch;
+	// round 5 (L4): the same -labels word the commandlet reads (aircraft_look.labels_requested).
+	bLabels = FParse::Param(*Params, TEXT("labels"));
 	Humidity.ParseParams(Params);  // condensation-solver: -humidity-pct=
 }
 
@@ -582,10 +587,12 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	Row->SetArrayField(TEXT("beauty_meshes"), BeautyRows);
 	int32 Applied = 0;
 	int32 Unbound = 0;
+	int32 ThinApplied = 0;
 	// Slot names without a look instance, once each (AddUnique on the JSON
 	// values would compare pointers and never deduplicate a slot that several
 	// parts share).
 	TArray<FString> AbsentNames;
+	TArray<FString> ThinNames;
 	for (UStaticMeshComponent* Part : Parts)
 	{
 		for (int32 Slot = 0; Slot < Part->GetNumMaterials(); ++Slot)
@@ -600,7 +607,23 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 			const FString InstanceName = FString::Printf(TEXT("%s%s"), AircraftFxLookPrefix, *SlotName);
 			const FString Path = FString::Printf(TEXT("%s/%s/%s.%s"), *AssetRoot, AircraftFxLookFolder,
 			                                     *InstanceName, *InstanceName);
-			UMaterialInterface* LookInstance = LoadObject<UMaterialInterface>(nullptr, *Path);
+			// round 5 (L4): the Thin Translucent canopy, MI_<slot>_thin, where
+			// one exists and the render carries no -labels; otherwise (a
+			// labelled frame, or a slot that is not glass) the opaque MI_<slot>.
+			UMaterialInterface* LookInstance = nullptr;
+			bool bThin = false;
+			if (!Options.bLabels)
+			{
+				const FString ThinName = InstanceName + AircraftFxThinSuffix;
+				const FString ThinPath = FString::Printf(TEXT("%s/%s/%s.%s"), *AssetRoot, AircraftFxLookFolder,
+				                                         *ThinName, *ThinName);
+				LookInstance = LoadObject<UMaterialInterface>(nullptr, *ThinPath);
+				bThin = LookInstance != nullptr;
+			}
+			if (LookInstance == nullptr)
+			{
+				LookInstance = LoadObject<UMaterialInterface>(nullptr, *Path);
+			}
 			if (LookInstance == nullptr)
 			{
 				AbsentNames.AddUnique(SlotName);
@@ -611,13 +634,30 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 			Part->SetMaterial(Slot, LookMid != nullptr ? static_cast<UMaterialInterface*>(LookMid) : LookInstance);
 			if (LookMid != nullptr) { LookMids.Add(LookMid); }
 			++Applied;
+			if (bThin)
+			{
+				++ThinApplied;
+				ThinNames.AddUnique(SlotName);
+			}
 		}
 	}
 	Row->SetStringField(TEXT("state"), TEXT("look instances on the mesh's slots (shading only: no world position ")
-		TEXT("offset, every class master opaque, so the label silhouette is the beauty's)"));
+		TEXT("offset; every class master opaque but the thin canopy, which is applied only without -labels, ")
+		TEXT("so the label silhouette is the beauty's)"));
 	Row->SetStringField(TEXT("instance_root"), AssetRoot + TEXT("/") + AircraftFxLookFolder);
 	Row->SetNumberField(TEXT("slots_applied"), Applied);
 	Row->SetNumberField(TEXT("slots_without_material"), Unbound);
+	Row->SetNumberField(TEXT("slots_thin_translucent"), ThinApplied);
+	Row->SetBoolField(TEXT("labels"), Options.bLabels);
+	Row->SetStringField(TEXT("thin_glass"), Options.bLabels
+		? TEXT("label-safe opaque glass kept: -labels (the ID and depth captures draw no translucency)")
+		: TEXT("MI_<slot>_thin (Thin Translucent, Surface ForwardShading) where it exists: beauty without labels"));
+	TArray<TSharedPtr<FJsonValue>> Thin;
+	for (const FString& Name : ThinNames)
+	{
+		Thin.Add(MakeShared<FJsonValueString>(Name));
+	}
+	Row->SetArrayField(TEXT("slots_thin"), Thin);
 	TArray<TSharedPtr<FJsonValue>> Absent;
 	for (const FString& Name : AbsentNames)
 	{

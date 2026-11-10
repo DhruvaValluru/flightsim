@@ -143,6 +143,7 @@ def _run_look(tmp_path, monkeypatch, masters_built=True):
     existing = {f"{root}/mat_BOE", f"{root}/rgb_6b6b6b", f"{root}/rgb_c0c0c0", f"{root}/TEX_BOE"}
     if masters_built:
         existing |= {f"{look.MASTER_ROOT}/{m}" for m in look.CLASS_MASTERS.values()}
+        existing.add(f"{look.MASTER_ROOT}/{look.THIN_GLASS_MASTER}")  # round 5 (L4)
     fake = _FakeUnreal(existing)
     monkeypatch.setitem(sys.modules, "unreal", fake)
     _converted_model(tmp_path)
@@ -153,7 +154,8 @@ def _run_look(tmp_path, monkeypatch, masters_built=True):
 def test_create_look_instances_writes_only_under_look_and_never_reparents_an_imported_instance(
         tmp_path, monkeypatch):
     fake, made, problems = _run_look(tmp_path, monkeypatch)
-    assert problems == [] and made == 3
+    # round 5 (L4): the glass slot gets its Thin Translucent twin too
+    assert problems == [] and made == 4
     assert fake.writes
     for call, path in fake.writes:
         # every write is to <root>/Look/MI_<slot>: the imported <root>/<slot>
@@ -161,7 +163,7 @@ def test_create_look_instances_writes_only_under_look_and_never_reparents_an_imp
         assert path.startswith("/Game/Aircraft/J11/Look/MI_"), (call, path)
     assert {p for c, p in fake.writes if c == "create_asset"} == {
         "/Game/Aircraft/J11/Look/MI_mat_BOE", "/Game/Aircraft/J11/Look/MI_rgb_6b6b6b",
-        "/Game/Aircraft/J11/Look/MI_rgb_c0c0c0"}
+        "/Game/Aircraft/J11/Look/MI_rgb_6b6b6b_thin", "/Game/Aircraft/J11/Look/MI_rgb_c0c0c0"}
     assert (tmp_path / "look_manifest.json").is_file()
 
 

@@ -117,11 +117,12 @@ def test_the_look_instance_keeps_the_imported_materials_texture_wiring():
 def test_config_overrides_reach_only_their_class_and_paint_is_not_chrome():
     config = look.load_config("J11")
     plan = look.plan_slots(look.parse_mtl(MTL), config)
-    assert plan["mat_BOE"]["scalars"]["Roughness"] == config["class_scalars"]["paint"]["Roughness"] == 0.46
+    assert plan["mat_BOE"]["scalars"]["Roughness"] == config["class_scalars"]["paint"]["Roughness"] == 0.5
     assert plan["rgb_000000"]["scalars"]["Roughness"] == look.CLASS_SCALARS["rubber"]["Roughness"]
-    # A painted panel is a dielectric under a clear coat; 0.6-0.9 is bare metal's.
-    assert look.CLASS_SCALARS["paint"]["Metallic"] < 0.3
-    assert 0.6 <= look.CLASS_SCALARS["bare_metal"]["Metallic"] <= 0.9
+    # A painted panel is a dielectric under a clear coat (round 5: Metallic 0,
+    # the database's car paint); bare metal is a metal, Metallic 1.
+    assert look.CLASS_SCALARS["paint"]["Metallic"] == 0.0
+    assert look.CLASS_SCALARS["bare_metal"]["Metallic"] == 1.0
 
 
 # -- frames and anchors ---------------------------------------------------------
@@ -260,18 +261,21 @@ def test_the_master_module_builds_exactly_the_class_and_fx_masters():
     created = next(node.value for node in tree.body if isinstance(node, ast.Assign)
                    and any(getattr(t, "id", "") == "CREATED" for t in node.targets))
     names = tuple(ast.literal_eval(created))
-    assert set(names) == set(look.CLASS_MASTERS.values()) | set(look.FX_MASTERS)
+    assert set(names) == set(look.CLASS_MASTERS.values()) | set(look.FX_MASTERS) | {look.THIN_GLASS_MASTER}
     text = MASTERS.read_text(encoding="utf-8")
     for name in names:
-        assert f'"{name}"' in text
+        assert f'"{name}"' in text or f"look.THIN_GLASS_MASTER" in text
 
 
-def test_no_master_moves_a_vertex_and_the_glass_is_opaque():
+def test_no_master_moves_a_vertex_and_the_label_safe_glass_is_opaque():
     """Labels match pixels: no world position offset anywhere, and the canopy
-    glass draws in the label passes (which draw no translucency)."""
+    glass every -labels render draws (M_AircraftGlass) is opaque, so it draws
+    in the label passes (which draw no translucency). Round 5's Thin
+    Translucent canopy is a SEPARATE master, applied only without -labels
+    (tests/test_aircraft_pbr_materials.py pins that gate)."""
     text = MASTERS.read_text(encoding="utf-8")
     assert "WORLD_POSITION_OFFSET" not in text and "WorldPositionOffset" not in text
-    glass = text[text.index("def create_aircraft_glass"):text.index("def create_aircraft_rubber")]
+    glass = text[text.index("def create_aircraft_glass("):text.index("def create_aircraft_rubber")]
     assert "blend_mode" not in glass and "TRANSLUCENT" not in glass
     for cls in ("_surface", "def create_aircraft_rubber"):
         body = text[text.index(cls):]

@@ -8,23 +8,38 @@ gotcha 32), so every master is a classic Material with a classic shading
 model:
 
 * M_AircraftPaint     -- Clear Coat. Base colour from the imported texture
-  (BaseColorMap x weight, the Interchange instances' own names), panel
+  (BaseColorMap x weight, the Interchange instances' own names), capped at
+  AlbedoMax, Metallic 0 (a dielectric at n 1.5: Specular 0.5), panel
   lines (assets/shaders/aircraft/panel_lines.hlsl) in the normal and as a
-  cavity darkening, edge wear toward a bare-metal colour and metallic,
-  aft-running grime, roughness breakup (aircraft_wear.hlsl). The normal
-  is WORLD space (tangent_space_normal off): the FlightGear meshes are
-  imported with legacy tangents because MikkTSpace corrupts them
-  (gotcha 5), so nothing here depends on a tangent basis.
-* M_AircraftBareMetal -- Default Lit, the same graph without the coat.
+  low cavity darkening, edge wear toward the measured aluminium F0 and
+  Metallic 1, aft-running grime, roughness breakup (aircraft_wear.hlsl),
+  and exhaust soot aft of the look manifest's nozzles (exhaust_soot.hlsl:
+  darkens, roughens, kills the coat). The normal is WORLD space
+  (tangent_space_normal off): the FlightGear meshes are imported with
+  legacy tangents because MikkTSpace corrupts them (gotcha 5), so nothing
+  here depends on a tangent basis. A matte fighter (PLAAF grey) is this
+  master with ClearCoat 0 in its look config.
+* M_AircraftBareMetal -- Default Lit, the same graph without the coat:
+  Metallic 1, colour lerped toward the measured metal F0 (MetalF0:
+  aluminium, or the metal a slot rule names: titanium, stainless steel),
+  roughness 0.25-0.45 from low-frequency breakup.
 * M_AircraftGlass     -- Default Lit, OPAQUE: a dark tinted canopy whose
-  reflection comes from the specular lobe (Lumen reflections in beauty)
-  with a Fresnel boost at grazing angles. Opaque ON PURPOSE: the label
-  captures draw no translucency (FlightSimRenderCommandlet.cpp
-  ConfigureLabelCapture SetTranslucency(false)) and a translucent canopy
-  writes no custom depth, so a translucent glass would put sky in the
-  beauty where the mask says aircraft. Opaque glass keeps beauty, mask,
-  class and depth on the same silhouette.
-* M_AircraftRubber    -- Default Lit, rough dark dielectric (tyres, seals).
+  reflection comes from the specular lobe with a Fresnel boost at grazing
+  angles. Opaque ON PURPOSE: the label captures draw no translucency
+  (FlightSimRenderCommandlet.cpp ConfigureLabelCapture
+  SetTranslucency(false)) and a translucent canopy writes no depth, so a
+  translucent glass would put sky in the labels where the beauty shows the
+  canopy. This is the LABEL-SAFE canopy: every -labels render keeps it.
+* M_AircraftGlassThin -- round 5 (L4): Thin Translucent (blend Translucent,
+  lighting mode Surface ForwardShading, the ThinTranslucentMaterialOutput
+  node's Transmittance, screen-space reflections on, no refraction), n 1.5
+  so Specular 0.5, roughness 0.02. Parented by MI_<slot>_thin beside every
+  glass slot's opaque instance; FlightSimAircraftFX.cpp applies it ONLY on
+  a render without -labels (aircraft_look.THIN_* and labels_requested).
+  SM5 D3D11: the base pass dual-source-blends it (PCD3D_SM5
+  bSupportsDualSourceBlending=true) and has a single-target fallback.
+* M_AircraftRubber    -- Default Lit, the measured tyre (roughness 0.7,
+  n 1.5 so Specular 0.5), the MTL colour floored at the measured albedo.
 * M_NavLightEmissive, M_AircraftAfterburner -- Unlit ADDITIVE (they add
   light, hide nothing). M_AircraftContrail -- lit translucent.
   M_AircraftHeatHaze -- translucent refraction (2D offset), pixel-moving,
@@ -62,7 +77,11 @@ import aircraft_look as look  # noqa: E402
 import aircraft_wet_layer  # noqa: E402  (wet-airframe-canopy)
 
 REPO = os.path.dirname(_HERE)
-LOOK_GENERATION = "3"  # 2: wet-airframe-canopy wet layer and canopy scratches; 3: fix pass (acrylic glass, physical bulbs and plume)
+#: 2: wet-airframe-canopy wet layer and canopy scratches; 3: fix pass (acrylic
+#: glass, physical bulbs and plume); 4: round 5 L4 -- measured metals and
+#: rubber (Physically Based API), paint Metallic 0 with an albedo cap, low
+#: panel lines, exhaust soot, the Thin Translucent canopy master.
+LOOK_GENERATION = "4"
 LOOK_GENERATION_TAG = "FlightSimAircraftLookGeneration"
 #: The engine's white texture, the default of every BaseColorMap
 #: (Engine/Content/EngineResources/WhiteSquareTexture.uasset, present in 5.7.4).
@@ -229,6 +248,27 @@ def _saturate(material, source, x, y, source_out=""):
     return node
 
 
+def _min(material, a, b, x, y, a_out="", b_out=""):
+    return _binary(material, _u().MaterialExpressionMin, a, b, x, y, a_out, b_out)
+
+
+def _max(material, a, b, x, y, a_out="", b_out=""):
+    return _binary(material, _u().MaterialExpressionMax, a, b, x, y, a_out, b_out)
+
+
+def _set(target, value, *names):
+    """Set the first editor property of ``names`` the object has; a miss is
+    reported with the names tried (never silently skipped)."""
+    errors = []
+    for name in names:
+        try:
+            target.set_editor_property(name, value)
+            return name
+        except Exception as exc:  # the Python layer raises on an unknown property
+            errors.append(f"{name}: {exc}")
+    raise RuntimeError(f"none of {names} on {target.get_class().get_name()}: {errors}")
+
+
 def _shader(name):
     path = os.path.join(REPO, look.SHADER_DIR, f"{name}.hlsl")
     with open(path, encoding="utf-8") as handle:
@@ -327,18 +367,37 @@ def _surface(name, cls, coat):
     edge = _mul(material, _mask(material, wear, "r", -800, -250), s["WearAmount"], -650, -250)
     grime = _mul(material, _mask(material, wear, "g", -800, -150), s["GrimeAmount"], -650, -150)
     breakup = _mask(material, wear, "b", -800, -50)
+    # round 5 (L4): exhaust soot aft of the look manifest's nozzles (the
+    # instance's Nozzle0..3, local cm; the master default is none), broken up
+    # by the wear noise (z + 0.5 -> 0..1).
+    soot = _mul(material, _custom(material, "exhaust_soot", "CMOT_FLOAT1", {
+        "LocalPos": (local, ""),
+        **{name: (v[name], "") for name in look.SOOT_NOZZLE_PARAMETERS},
+        "LengthRadii": (s["SootLengthRadii"], ""),
+        "Noise": (_add(material, breakup, _const(material, 0.5, -800, 50), -700, 50), "")}, -1000, 100),
+        s["SootAmount"], -650, 100)
     base = _base_colour(material, -1300, 200)
-    # cavity: the groove and the grime darken the colour; the wear shows the metal.
-    darken = _saturate(material, _add(material, _mul(material, groove, s["PanelDarkening"], -600, -450),
-                                      grime, -450, -350), -300, -350)
+    if coat:
+        # a livery's pure white is capped at a paint's albedo
+        base = _min(material, base, s["AlbedoMax"], -1000, 250)
+    else:
+        # bare metal: the measured F0 of its metal, the texture's shading through it
+        base = _lerp(material, base, _mask(material, v["MetalF0"], "rgb", -1200, 350),
+                     s["MetalColourWeight"], -1000, 250)
+    # cavity: the groove, the grime and the soot darken the colour; the wear
+    # shows the metal (Metallic 1 at the measured aluminium F0).
+    darken = _saturate(material, _add(material, _add(
+        material, _mul(material, groove, s["PanelDarkening"], -600, -450), grime, -450, -350),
+        soot, -400, -300), -300, -350)
     dark = _lerp(material, base, _mul(material, base, _const(material, 0.35, -600, 300), -450, 300),
                  darken, -250, 200)
     colour = _lerp(material, dark, _mask(material, v["WearColour"], "rgb", -300, 100), edge, -100, 200)
-    metallic = _lerp(material, s["Metallic"], _const(material, 0.9, -300, 450), edge, -100, 450)
-    rough = _saturate(material, _add(
+    metallic = _lerp(material, s["Metallic"], _const(material, 1.0, -300, 450), edge, -100, 450)
+    rough = _saturate(material, _add(material, _add(
         material, _add(material, s["Roughness"], _mul(material, breakup, s["RoughnessBreakup"], -450, 550),
                        -300, 550),
-        _mul(material, grime, _const(material, 0.3, -450, 650), -300, 650), -150, 600), 0, 600)
+        _mul(material, grime, _const(material, 0.3, -450, 650), -300, 650), -150, 600),
+        _mul(material, soot, _const(material, 0.35, -450, 700), -300, 700), -100, 620), 0, 600)
     occlusion = _saturate(material, _add(material, _const(material, 1.0, -450, 750),
                                          _mul(material, groove, _const(material, -0.5, -600, 800),
                                               -450, 800), -300, 780), -150, 780)
@@ -350,7 +409,11 @@ def _surface(name, cls, coat):
     _link(_mask(material, panels, "rgb", -600, -600), "", out, "Normal")
     _link(occlusion, "", out, ("AmbientOcclusion", "Ambient Occlusion"))
     if coat:
-        _link(s["ClearCoat"], "", out, ("ClearCoat", "Clear Coat"))
+        # soot sits on top of the coat: no gloss where it lies
+        coat_amount = _mul(material, s["ClearCoat"], _saturate(material, _add(
+            material, _const(material, 1.0, -450, 900), _mul(material, soot, _const(material, -1.0, -600, 950),
+                                                              -450, 950), -300, 920), -150, 920), 0, 900)
+        _link(coat_amount, "", out, ("ClearCoat", "Clear Coat"))
         _link(s["ClearCoatRoughness"], "", out, ("ClearCoatRoughness", "Clear Coat Roughness"))
     _use_attributes(material, out)
     # wet-airframe-canopy: the weather's wetness (shading only, opaque, no WPO).
@@ -408,7 +471,11 @@ def create_aircraft_rubber():
     material.set_editor_property("shading_model", _enum(unreal.MaterialShadingModel, "MSM_DEFAULT_LIT"))
     s = {k: _scalar(material, k, v, -900, 100 * i)
          for i, (k, v) in enumerate(look.CLASS_SCALARS["rubber"].items())}
-    base = _base_colour(material, -900, 600)
+    # round 5 (L4): the measured tyre albedo floors the MTL's colour (a
+    # pure-black Kd reflects nothing; a tyre reflects 2.3 %).
+    floor = _mask(material, _vector(material, "RubberFloor", look.CLASS_VECTORS["rubber"]["RubberFloor"],
+                                    -1100, 500), "rgb", -900, 500)
+    base = _max(material, _base_colour(material, -900, 600), floor, -500, 550)
     out = _attributes(material, 100, 200)
     _link(base, "", out, ("BaseColor", "Base Color"))
     _link(s["Metallic"], "", out, "Metallic")
@@ -539,12 +606,59 @@ def create_aircraft_heat_haze():
     _finish(material, "M_AircraftHeatHaze")
 
 
+def create_aircraft_glass_thin():
+    """round 5 (L4): M_AircraftGlassThin, the Thin Translucent canopy. Built
+    beside (not instead of) the opaque M_AircraftGlass; applied by the C++
+    only on a render without -labels (aircraft_look.THIN_GLASS_MASTER)."""
+    unreal = _u()
+    material = _new(look.THIN_GLASS_MASTER)
+    if material is None:
+        return
+    # MaterialShared.cpp (5.7.4) requires of MSM_ThinTranslucent: a translucent
+    # blend mode, TLM_SurfacePerPixelLighting, no other shading model, and a
+    # ThinTranslucentMaterialOutput node; not the After-Motion-Blur pass (the
+    # default pass is before DOF).
+    material.set_editor_property("blend_mode", _enum(unreal.BlendMode, "BLEND_TRANSLUCENT"))
+    material.set_editor_property("shading_model", _enum(unreal.MaterialShadingModel,
+                                                        "MSM_THIN_TRANSLUCENT", "MSM_THINTRANSLUCENT"))
+    material.set_editor_property("translucency_lighting_mode", _enum(
+        unreal.TranslucencyLightingMode, "TLM_SURFACE_PER_PIXEL_LIGHTING", "TLM_SURFACEPERPIXELLIGHTING"))
+    # SSR on the pane (L1's screen-space reflections), the canopy in custom
+    # depth (its stencil id is the airframe's), one-sided like the opaque one,
+    # no refraction: a thin pane with parallel faces shifts nothing (and a
+    # refraction would move pixels).
+    _set(material, True, "screen_space_reflections", "b_screen_space_reflections")
+    _set(material, True, "allow_translucent_custom_depth_writes")
+    material.set_editor_property("two_sided", False)
+    material.set_editor_property("refraction_method", _enum(unreal.RefractionMode, "RM_NONE", "RM_None"))
+    s = {k: _scalar(material, k, v, -900, 100 * i) for i, (k, v) in enumerate(look.THIN_SCALARS.items())}
+    v = {k: _vector(material, k, d, -900, 700 + 120 * i) for i, (k, d) in enumerate(look.THIN_VECTORS.items())}
+    base = _base_colour(material, -900, 900)
+    colour = _mul(material, base, s["GlassDiffuse"], -300, 900)
+    out = _attributes(material, 100, 200)
+    _link(colour, "", out, ("BaseColor", "Base Color"))
+    _link(s["Metallic"], "", out, "Metallic")
+    _link(s["Specular"], "", out, "Specular")
+    _link(s["Roughness"], "", out, "Roughness")
+    # Opacity is left at the Make node's default (1: a whole pane; the
+    # transmittance, not the opacity, is what the sky comes through).
+    _use_attributes(material, out)
+    thin = _node(material, unreal.MaterialExpressionThinTranslucentMaterialOutput, 100, 700)
+    _link(_mask(material, v["Transmittance"], "rgb", -300, 700), "", thin,
+          ("TransmittanceColor", "Transmittance Color"))
+    # wet-airframe-canopy: rain beads and streaks on the pane (shading only).
+    aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], "glass")
+    _finish(material, look.THIN_GLASS_MASTER)
+
+
 #: Every master this module builds, in build order (class masters, then FX).
 CREATORS = (create_aircraft_paint, create_aircraft_bare_metal, create_aircraft_glass,
-            create_aircraft_rubber, create_nav_light_emissive, create_aircraft_contrail,
-            create_aircraft_afterburner, create_aircraft_heat_haze)
-#: The asset each creator makes (pinned to look.CLASS_MASTERS / FX_MASTERS by test).
+            create_aircraft_rubber, create_aircraft_glass_thin, create_nav_light_emissive,
+            create_aircraft_contrail, create_aircraft_afterburner, create_aircraft_heat_haze)
+#: The asset each creator makes (pinned to look.CLASS_MASTERS / THIN_GLASS_MASTER /
+#: FX_MASTERS by test).
 CREATED = ("M_AircraftPaint", "M_AircraftBareMetal", "M_AircraftGlass", "M_AircraftRubber",
+           "M_AircraftGlassThin",
            "M_NavLightEmissive", "M_AircraftContrail", "M_AircraftAfterburner",
            "M_AircraftHeatHaze",
            # condensation-solver: built by scripts/aircraft_condensation_material.py.

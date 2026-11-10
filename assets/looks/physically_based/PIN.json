@@ -1,0 +1,32 @@
+{
+  "name": "Physically Based API -- materials database",
+  "upstream": "https://github.com/AntonPalmqvist/physically-based-api",
+  "licence": "CC0-1.0",
+  "licence_file": "LICENSE",
+  "commit": "bed520ab9800de4fc9800304f6557f85ce788e69",
+  "commit_date": "2026-11-09T15:54:14Z",
+  "files": {
+    "materials.json": {
+      "upstream_path": "deploy/v2/materials.json",
+      "url": "https://raw.githubusercontent.com/AntonPalmqvist/physically-based-api/bed520ab9800de4fc9800304f6557f85ce788e69/deploy/v2/materials.json",
+      "sha256": "9f9b55460e01c69a24ca5021642e2980a33d852e0f77c5c5826f7d6c64e32692",
+      "schema_version": 2.2
+    },
+    "LICENSE": {
+      "upstream_path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/AntonPalmqvist/physically-based-api/bed520ab9800de4fc9800304f6557f85ce788e69/LICENSE",
+      "sha256": "5537d4d10b76b81b6e8dfd8b644480a4b1efa332fbb0cdb61126c5be781ef7b4"
+    }
+  },
+  "used_by": "scripts/physically_based.py (read by scripts/aircraft_look.py for the aircraft master materials' measured constants)",
+  "materials_used": [
+    "Aluminum",
+    "Titanium",
+    "Stainless Steel",
+    "Glass (Soda-lime)",
+    "Plastic (Acrylic)",
+    "Tire",
+    "Car Paint"
+  ],
+  "note": "Vendored whole (byte-identical to the upstream file at the pinned commit) so the sha256 is the upstream file's. Colours are linear sRGB base colours: for a metal the base colour is its normal-incidence reflectance F0 (metalness workflow); for a dielectric the ior gives F0 = ((n - 1) / (n + 1))^2."
+}
