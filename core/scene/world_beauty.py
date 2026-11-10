@@ -373,17 +373,28 @@ def layer_cover_and_shape(card_cover: Optional[float], thickness_m: float, prese
 
 # -- the drawn coverage (cloud_layers.hlsl) ---------------------------------------------
 
-#: The 4-octave value-noise fbm of cloud_layers.hlsl bunches around its mean
-#: (median 0.50, p90 0.68, p99 0.79): cutting it at 1 - cover drew a fraction
-#: of sky far below the stated cover. The shader cuts at the noise's QUANTILE
-#: instead: threshold = CLOUD_FBM_MEAN + CLOUD_FBM_SIGMA x probit(1 - cover),
-#: and the vertical profile shapes height only (applied after the cut). The
-#: two moments are the noise's own (measured on cloud_fbm below,
-#: tests/test_world_beauty.py re-measures them); they are properties of the
-#: noise, not look values.
-CLOUD_FBM_MEAN = 0.5
-CLOUD_FBM_SIGMA = 0.123
+#: Round 2 (clouds-sky, 2026-11-09): the shape noise is a Perlin-Worley field
+#: (cloud_shape), not the 4-octave value noise the first renders drew as
+#: smeared paint. It bunches around its mean like any fbm, so the shader cuts
+#: at the noise's QUANTILE: threshold = CLOUD_FBM_MEAN + CLOUD_FBM_SIGMA x
+#: probit(1 - cover) (the shape is near enough normal: the drawn share is
+#: within 10 % of the cover at 0.2..0.95, tests/test_world_beauty.py). The two
+#: moments are the noise's own (measured on cloud_shape below, re-measured by
+#: the test); they are properties of the noise, not look values.
+CLOUD_FBM_MEAN = 0.779
+CLOUD_FBM_SIGMA = 0.05
 #: The cut's soft edge is CLOUD_FBM_SIGMA / coverage_contrast wide.
+#: The shaping constants of cloud_layers.hlsl (UNCALIBRATED: set by probe
+#: render on the render machine): the top rounds by raising the cut to
+#: TOP_CUT_SIGMAS above the mean (domes, flat bases); the soft edge starts
+#: EROSION_CUT_SHARE x detail_erosion of its width below the quantile, which
+#: the erosion takes back on average (the drawn cover stays the stated one);
+#: the erosion is wispy (the detail noise) under CLOUD_WISP_HEIGHT of the
+#: layer and billowy (its inverse) above.
+CLOUD_TOP_CUT_SIGMAS = 3.5
+CLOUD_EROSION_CUT_SHARE = 0.5
+CLOUD_WISP_HEIGHT = 0.25
+_M32 = 0xFFFFFFFF
 
 
 def probit_approx(p: float) -> float:
@@ -395,53 +406,75 @@ def probit_approx(p: float) -> float:
 
 
 def coverage_threshold(cover: float) -> float:
-    """The fbm value the shader keeps cloud above, for a stated cover."""
+    """The shape value at the (1 - cover) quantile (before the erosion's
+    early start, cloud_density)."""
     return CLOUD_FBM_MEAN + CLOUD_FBM_SIGMA * probit_approx(1.0 - min(max(float(cover), 0.0), 1.0))
 
 
 def _pcg(v: int) -> int:
-    v &= 0xFFFFFFFF
-    state = (v * 747796405 + 2891336453) & 0xFFFFFFFF
-    word = (((state >> ((state >> 28) + 4)) ^ state) * 277803737) & 0xFFFFFFFF
-    return ((word >> 22) ^ word) & 0xFFFFFFFF
+    v &= _M32
+    state = (v * 747796405 + 2891336453) & _M32
+    word = (((state >> ((state >> 28) + 4)) ^ state) * 277803737) & _M32
+    return ((word >> 22) ^ word) & _M32
 
 
-def _lattice(ix: int, iy: int, iz: int, seed: int) -> float:
-    h = _pcg((iz & 0xFFFFFFFF) + seed)
-    h = _pcg((iy & 0xFFFFFFFF) + h)
-    h = _pcg((ix & 0xFFFFFFFF) + h)
-    return h / 4294967296.0
+def _hash3(ix: int, iy: int, iz: int, seed: int) -> int:
+    """cloud_layers.hlsl FWorldCloud::Hash3: one PCG round over a
+    multiply-xor mix of the cell (32-bit, two's complement)."""
+    return _pcg(((ix * 0x8DA6B343) & _M32) ^ ((iy * 0xD8163841) & _M32)
+                ^ ((iz * 0xCB1AB31F) & _M32) ^ (seed & _M32))
 
 
 def _fade(t: float) -> float:
     return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 
 
-def _value3(x: float, y: float, z: float, seed: int) -> float:
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+def _grad(h: int, x: float, y: float, z: float) -> float:
+    h &= 15
+    u = x if h < 8 else y
+    v = y if h < 4 else (x if h in (12, 14) else z)
+    return (u if (h & 1) == 0 else -u) + (v if (h & 2) == 0 else -v)
+
+
+def _perlin3(x: float, y: float, z: float, seed: int) -> float:
     ix, iy, iz = math.floor(x), math.floor(y), math.floor(z)
-    fx, fy, fz = _fade(x - ix), _fade(y - iy), _fade(z - iz)
+    fx, fy, fz = x - ix, y - iy, z - iz
+    u, v, w = _fade(fx), _fade(fy), _fade(fz)
 
-    def lerp(a, b, t):
-        return a + (b - a) * t
+    def g(a, b, c):
+        return _grad(_hash3(ix + a, iy + b, iz + c, seed), fx - a, fy - b, fz - c)
 
-    def lat(a, b, c):
-        return _lattice(ix + a, iy + b, iz + c, seed)
-
-    x00 = lerp(lat(0, 0, 0), lat(1, 0, 0), fx)
-    x10 = lerp(lat(0, 1, 0), lat(1, 1, 0), fx)
-    x01 = lerp(lat(0, 0, 1), lat(1, 0, 1), fx)
-    x11 = lerp(lat(0, 1, 1), lat(1, 1, 1), fx)
-    return lerp(lerp(x00, x10, fy), lerp(x01, x11, fy), fz)
+    return _lerp(_lerp(_lerp(g(0, 0, 0), g(1, 0, 0), u), _lerp(g(0, 1, 0), g(1, 1, 0), u), v),
+                 _lerp(_lerp(g(0, 0, 1), g(1, 0, 1), u), _lerp(g(0, 1, 1), g(1, 1, 1), u), v), w)
 
 
-def cloud_fbm(x: float, y: float, z: float, seed: int) -> float:
-    """cloud_layers.hlsl FWorldCloud::Fbm, number for number (double here)."""
+def _perlin_fbm(x: float, y: float, z: float, seed: int) -> float:
+    """FWorldCloud::PerlinFbm: four octaves of gradient noise, 0..1."""
     total, amp = 0.0, 0.5
     for octave in range(4):
-        total += amp * _value3(x, y, z, (seed + octave * 101) & 0xFFFFFFFF)
+        total += amp * _perlin3(x, y, z, (seed + octave * 101) & _M32)
         x, y, z = x * 2.03 + 17.1, y * 2.03 + 31.7, z * 2.03 + 7.3
         amp *= 0.5
-    return total / 0.9375
+    return min(max(0.5 + 0.5 * total / 0.9375, 0.0), 1.0)
+
+
+def _worley(x: float, y: float, z: float, seed: int) -> float:
+    """FWorldCloud::Worley: 1 - F1 over the 27 nearest cells, clamped to 0..1."""
+    ix, iy, iz = math.floor(x), math.floor(y), math.floor(z)
+    best = 9.0
+    for dz in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                cx, cy, cz = ix + dx, iy + dy, iz + dz
+                h = _hash3(cx, cy, cz, seed)
+                d = ((cx + (h & 1023) / 1024.0 - x) ** 2 + (cy + ((h >> 10) & 1023) / 1024.0 - y) ** 2
+                     + (cz + ((h >> 20) & 1023) / 1024.0 - z) ** 2)
+                best = min(best, d)
+    return 1.0 - min(math.sqrt(best), 1.0)
 
 
 def _remap(v: float, lo: float, hi: float) -> float:
@@ -453,21 +486,44 @@ def _smoothstep(e0: float, e1: float, x: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
 
+def cloud_shape(x: float, y: float, z: float, seed: int) -> float:
+    """cloud_layers.hlsl FWorldCloud::Shape, number for number (double here):
+    the gradient fbm dilated by an inverted Worley cell, then cut by a
+    two-octave Worley fbm (Schneider's Perlin-Worley base shape)."""
+    perlin = _perlin_fbm(x, y, z, seed)
+    cells = _worley(x, y, z, (seed + 211) & _M32)
+    pw = _remap(perlin, cells - 1.0, 1.0)
+    fbm = (0.75 * _worley(x * 2.03, y * 2.03, z * 2.03, (seed + 307) & _M32)
+           + 0.25 * _worley(x * 4.1, y * 4.1, z * 4.1, (seed + 401) & _M32))
+    return _remap(pw, fbm - 1.0, 1.0)
+
+
+def cloud_detail(x: float, y: float, z: float, seed: int) -> float:
+    """cloud_layers.hlsl FWorldCloud::Detail: the erosion's three-octave Worley fbm."""
+    return (0.625 * _worley(x, y, z, seed) + 0.25 * _worley(x * 2.03, y * 2.03, z * 2.03, (seed + 97) & _M32)
+            + 0.125 * _worley(x * 4.1, y * 4.1, z * 4.1, (seed + 193) & _M32))
+
+
 def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float, row: Dict[str, float]) -> float:
     """cloud_layers.hlsl's density (before x extinction), the Python replica
-    the coverage test samples: the quantile cut on the shape, the soft edge,
-    the erosion, then the vertical profile."""
+    the coverage test samples: the quantile cut on the shape (started early by
+    the erosion's share, raised over the top's rounding), the soft edge, the
+    erosion (only inside the cloud, as the shader's branch), the base fade."""
     h = min(max(norm_alt, 0.0), 1.0)
     base = _smoothstep(0.0, max(row["bottom_softness"], 1e-3), h)
     top = 1.0 - _smoothstep(1.0 - max(row["top_rounding"], 1e-3), 1.0, h)
     scale = max(row["shape_scale_km"], 1e-3)
-    shape = cloud_fbm(km[0] / scale, km[1] / scale, km[2] * 2.0 / scale, 7)
-    thr = coverage_threshold(cover)
-    density = _remap(shape, thr, thr + CLOUD_FBM_SIGMA / max(row["coverage_contrast"], 1e-3))
-    dscale = max(row["detail_scale_km"], 1e-3)
-    detail = cloud_fbm(km[0] / dscale, km[1] / dscale, km[2] / dscale, 13)
-    density = _remap(density, row["detail_erosion"] * (1.0 - detail) * (1.0 - density), 1.0)
-    return density * base * top
+    shape = cloud_shape(km[0] / scale, km[1] / scale, km[2] * 2.0 / scale, 7)
+    soft = CLOUD_FBM_SIGMA / max(row["coverage_contrast"], 1e-3)
+    thr = coverage_threshold(cover) - CLOUD_EROSION_CUT_SHARE * row["detail_erosion"] * soft
+    cut = _lerp(CLOUD_FBM_MEAN + CLOUD_TOP_CUT_SIGMAS * CLOUD_FBM_SIGMA, thr, top)
+    density = _remap(shape, cut, cut + soft)
+    if density > 0.0:
+        dscale = max(row["detail_scale_km"], 1e-3)
+        detail = cloud_detail(km[0] / dscale, km[1] / dscale, km[2] / dscale, 13)
+        wisp = _lerp(detail, 1.0 - detail, min(max(h / CLOUD_WISP_HEIGHT, 0.0), 1.0))
+        density = _remap(density, row["detail_erosion"] * wisp, 1.0)
+    return density * base
 
 
 def cloud_seed_offset_km(seed: int) -> Tuple[float, float, float]:
