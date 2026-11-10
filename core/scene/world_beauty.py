@@ -92,6 +92,21 @@ ATMOSPHERE_FIELDS: Tuple[str, ...] = (
 #: fog's extinction by ln(2)^2, so it draws the analytic beta: one haze, no seam
 #: at the hand-off, and the subject at 1.5 km keeps ~42 %. Rain and storm only
 #: (their haze is 3-10x a clear day's). UNCALIBRATED: set by probe render.
+#: Round 4 (round 3's #08 and head shot c went much darker: the C172 a near-black
+#: silhouette, the forest near black): the engine's volumetric fog scatters
+#: Albedo x Extinction, so the 0.48 cut the rain haze's IN-SCATTER with its
+#: extinction: the veil that lifted the dark near slope, forest and airframe
+#: (optically thin there, in-scatter ~ sigma x distance) fell to 48 %. The
+#: albedo is already white (an 8-bit colour: no headroom), so the in-scatter is
+#: put back on the lights instead (:func:`vfog_scattering_compensation`): the
+#: sun's and the sky light's VolumetricScatteringIntensity x 1 / 0.48. Only the
+#: extinction is scaled: the near veil is round 2's again, and #07's airframe
+#: still keeps ~42 % of its own light through the 1.5 km of rain (not 17 %).
+#: Stated, not hidden: the saturated airlight (beyond ~3 km) is then 1 / 0.48
+#: of a conserving fog's, which the beauty meter normalises away, so against it
+#: the 1.5 km airframe's contrast is ~0.42 / 2.08 = 0.2 of its clear-air
+#: contrast (round 2: 0.17, round 3: 0.47). What makes #07 read is the 250 mm
+#: lens (scripts/run_test_scenarios.py), 7x the pixels, not the haze.
 WET_VFOG_EXTINCTION_SCALE = 0.48
 
 #: UNCALIBRATED: set by probe render on the render machine (every number).
@@ -241,6 +256,16 @@ def mie_split(visibility_km: float, share: float, cap_per_km: float) -> Dict[str
 #: lobe's mean cosine (n+1)/(n+2) is the volumetric fog's g: one haze, one phase.
 FOG_EXPONENT_MIN = 1.0
 FOG_EXPONENT_MAX = 64.0
+
+
+def vfog_scattering_compensation(preset: str) -> float:
+    """The lights' volumetric-fog scattering factor for a world preset: a
+    row that scales the volumetric fog's extinction below 1 (the wet rows,
+    :data:`WET_VFOG_EXTINCTION_SCALE`) puts the in-scatter back by its
+    inverse, so only the extinction is scaled; 1 everywhere else. The C++
+    twin is FlightSimWorldPure::VFogScatteringCompensation."""
+    scale = float(ATMOSPHERE[preset]["vfog_extinction_scale"])
+    return 1.0 / scale if 0.0 < scale < 1.0 else 1.0
 
 
 def fog_directional_exponent(g: float) -> float:

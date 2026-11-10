@@ -560,6 +560,12 @@ public:
 	// exposure control). Nothing else in the scene changes.
 	void DarkenGround();
 	class USkyLightComponent* SkyLightComponent = nullptr;
+	// Beauty only (FFlightSimWorldBeauty::ApplyAtmosphere, visual round 4):
+	// the lights' volumetric-fog scattering factor (world_beauty.
+	// vfog_scattering_compensation), set on the sky light and the sun there;
+	// FFlightSimHeroLighting::Apply (which sets the sun's afterwards)
+	// multiplies by it. 1 on every other render.
+	double VolumetricFogScatteringScale = 1.0;
 
 private:
 	UMaterialInstanceDynamic* LensDropsInstance = nullptr;

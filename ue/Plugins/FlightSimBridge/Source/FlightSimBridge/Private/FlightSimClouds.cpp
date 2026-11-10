@@ -409,6 +409,15 @@ namespace FlightSimWorldPure
 	// than g = 0.5). Fitted, not a look value.
 	constexpr double FogExponentMin = 1.0;
 	constexpr double FogExponentMax = 64.0;
+	// world_beauty.vfog_scattering_compensation (round 4): the volumetric fog
+	// scatters Albedo x Extinction, so a row's extinction scale under 1 (the wet
+	// rows' WET_VFOG_EXTINCTION_SCALE) also cut the haze's in-scatter (round 3's
+	// #08 and head shot c went near black). The lights' volumetric scattering
+	// takes the inverse: only the extinction is scaled. 1 on every other row.
+	inline double VFogScatteringCompensation(double ExtinctionScale)
+	{
+		return ExtinctionScale > 0.0 && ExtinctionScale < 1.0 ? 1.0 / ExtinctionScale : 1.0;
+	}
 	inline double FogDirectionalExponentForG(double G)
 	{
 		const double Gc = G < 0.0 ? 0.0 : (G > 0.99 ? 0.99 : G);
@@ -1237,6 +1246,39 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 		FogRows.Add(MakeShared<FJsonValueObject>(FogRow));
 	}
 	Out->SetArrayField(TEXT("height_fog"), FogRows);
+	// Round 4: only the extinction is scaled. The volumetric fog's in-scatter is
+	// Albedo x Extinction (the albedo already white, an 8-bit colour), so the
+	// wet rows' extinction scale is undone on the lights' volumetric scattering:
+	// the sky light's here, the sun's here and in FFlightSimHeroLighting::Apply
+	// (which sets the sun's after this; it reads Scene.VolumetricFogScatteringScale).
+	{
+		const double Compensation = VFogScatteringCompensation(Row[AtmVFogExtinctionScale]);
+		Scene.VolumetricFogScatteringScale = Compensation;
+		TSharedPtr<FJsonObject> Inscatter = MakeShared<FJsonObject>();
+		Inscatter->SetNumberField(TEXT("lights_volumetric_scattering_scale"), Compensation);
+		if (Compensation != 1.0)
+		{
+			if (USkyLightComponent* Sky = Scene.SkyLightComponent)
+			{
+				Inscatter->SetNumberField(TEXT("sky_light_before"), Sky->VolumetricScatteringIntensity);
+				// The setter pushes the value to the proxy (no recapture).
+				Sky->SetVolumetricScatteringIntensity(static_cast<float>(Sky->VolumetricScatteringIntensity * Compensation));
+				Inscatter->SetNumberField(TEXT("sky_light"), Sky->VolumetricScatteringIntensity);
+			}
+			if (Scene.Sun != nullptr && Scene.Sun->GetLightComponent() != nullptr)
+			{
+				ULightComponent* Beam = Scene.Sun->GetLightComponent();
+				Inscatter->SetNumberField(TEXT("sun_before"), Beam->VolumetricScatteringIntensity);
+				Beam->SetVolumetricScatteringIntensity(static_cast<float>(Beam->VolumetricScatteringIntensity * Compensation));
+				Inscatter->SetNumberField(TEXT("sun"), Beam->VolumetricScatteringIntensity);
+			}
+		}
+		Inscatter->SetStringField(TEXT("basis"),
+			TEXT("world_beauty.vfog_scattering_compensation: 1 / the row's volumetric fog extinction scale, so the "
+			     "wet rows scale the fog's extinction only, not its in-scatter (round 3's #08 and head shot c lost "
+			     "the rain haze's veil); UNCALIBRATED"));
+		Out->SetObjectField(TEXT("volumetric_fog_inscatter"), Inscatter);
+	}
 
 	// The sun: shadows on the atmosphere and the clouds, per-pixel
 	// transmittance, volumetric shadow. The cloud SHADOW switch is the

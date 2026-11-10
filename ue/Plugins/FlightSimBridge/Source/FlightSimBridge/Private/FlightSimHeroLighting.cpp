@@ -291,9 +291,14 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 		SunRecord->SetNumberField(TEXT("light_shaft_bloom_threshold"), HeroLightingShaftBloomThreshold);
 
 		// Volumetric fog shafts from the sun.
-		SunLight->SetVolumetricScatteringIntensity(HeroLightingFogScattering);
+		// x the world look's in-scatter compensation (1 unless a wet row scales
+		// the volumetric fog's extinction: FFlightSimWorldBeauty::ApplyAtmosphere).
+		const float SunFogScattering =
+			HeroLightingFogScattering * static_cast<float>(Scene.VolumetricFogScatteringScale);
+		SunLight->SetVolumetricScatteringIntensity(SunFogScattering);
 		SunLight->SetCastVolumetricShadow(true);
-		SunRecord->SetNumberField(TEXT("volumetric_scattering_intensity"), HeroLightingFogScattering);
+		SunRecord->SetNumberField(TEXT("volumetric_scattering_intensity"), SunFogScattering);
+		SunRecord->SetNumberField(TEXT("volumetric_scattering_world_scale"), Scene.VolumetricFogScatteringScale);
 
 		// The sun disc: physical luminance, or hidden behind overcast (a
 		// 25 deg "disc" drawn through a storm deck is not a sun anyone sees).

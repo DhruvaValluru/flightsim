@@ -22,6 +22,7 @@ The measure quality must stay byte-identical: every new path is beauty-only
 and every new number defaults to "no change".
 """
 
+import importlib.util
 import json
 import math
 import re
@@ -403,7 +404,7 @@ def test_the_meter_design_lands_a_blown_frame_and_leaves_a_bright_one():
     assert _meter(dark, may_close=True) == _meter(dark, may_close=False)
 
 
-# -- visual round 3: #09's deck and tower read as cloud, not a box -----------------------
+# -- visual rounds 3 and 4: #09's deck and tower read as cloud, not a box or a wireframe --
 # Round 2's #09 (the cell drawn ahead, the deck above the 747): "the deck reads as a
 # hard-edged flat slab with vertical walls (box-shaped, visible corners)". What the
 # frame showed between the deck and the ground was the TOWER's lower part: a
@@ -411,10 +412,33 @@ def test_the_meter_design_lands_a_blown_frame_and_leaves_a_bright_one():
 # cent of that edge, so the 600 m erosion moved its silhouette by tens of metres --
 # a drum with a flat base, capped by the look's deck, itself a flat 100 m-edged band
 # at cover 0.95. The beauty's Ragged block warps the wall, lifts the base and the
-# deck's base unevenly, softens and erodes the deck's base.
+# deck's base unevenly and softens them.
+# Round 3's #09 (the block's first cut): "thin white line-work (a hatched grid band)
+# runs across the frame at wing height on both sides of the 747 and a white ribbon
+# climbs to the top-right corner; it reads as wireframe, not cloud". The causes, from
+# the shader: the base lift was one noise octave x 2.5 CLAMPED to 0..1, so the base
+# and the deck's base sat at exactly 0 or 300 m lift over most of their area (flat
+# plateaus) joined by risers of up to ~1.5 m per m (300 m steps seen edge-on: the
+# ribbon); the wall warp's slope reached ~1.1 m per m (creases); the deck's 400 m
+# base was eroded by a 4-octave noise sharpened 1 / (1 - 0.6) = 2.5x into thin,
+# lit, low-density fringes; the tower kept the measure's 250-500 m edges. The
+# constrained GPU marches 192 view samples over up to 80 km (~400 m steps,
+# FlightSimClouds.cpp CloudMarch): thin, hard features step-sampled that coarsely
+# draw as iso-lines, and the deck's underside, 300-400 m over the camera and seen
+# at a grazing angle out to the horizon, piles them up at wing height.
+# Round 4: unclamped gain-2 warps on one 5 km noise (larger than the frame's cloud),
+# soft_m = 1 km ramps on the wall, the base and the deck's base, and no erosion on
+# the deck's base. The march settings are untouched (raising them hung the iGPU).
 
 STORM_HLSL = (REPO / "assets" / "shaders" / "weather" / "storm_cell.hlsl").read_text(encoding="utf-8")
 MATERIALS_PY = (REPO / "scripts" / "ue_create_materials.py").read_text(encoding="utf-8")
+HERO_CPP = (SOURCE / "Private" / "FlightSimHeroLighting.cpp").read_text(encoding="utf-8")
+SCENE_H = (SOURCE / "Public" / "FlightSimVisualScene.h").read_text(encoding="utf-8")
+#: The constrained GPU's view march, m per step (192 samples over up to 80 km).
+MARCH_STEP_M = 80000.0 / 192.0
+#: Round 3's Ragged block, for the comparison: gain 2.5, clamped, the base's noise
+#: at half the scale, the deck's base eroded.
+ROUND_THREE_RAGGED = {"warp_m": 800.0, "base_m": 300.0, "scale_m": 1800.0}
 
 
 def _tower_edge_m(cell, ragged, azimuth_deg, up_m):
@@ -426,12 +450,27 @@ def _tower_edge_m(cell, ragged, azimuth_deg, up_m):
     return 0.0
 
 
+def _round_three_base_lift(cell, e, n):
+    """Round 3's base lift fraction: saturate(0.5 + 2.5 (noise - 0.5)), the noise
+    at half the warp's scale (seed + 5)."""
+    scale = ROUND_THREE_RAGGED["scale_m"] * 0.5
+    v = storm_cell.value_noise(e / scale, n / scale, 0.0, int(cell["noise"]["seed"]) + 5)
+    return min(1.0, max(0.0, 0.5 + 2.5 * (v - 0.5)))
+
+
+def _round_three_wall_warp(cell, e, n, u):
+    """Round 3's wall warp fraction: clamp(2.5 (noise - 0.5), -1, 1)."""
+    scale = ROUND_THREE_RAGGED["scale_m"]
+    v = storm_cell.value_noise(e / scale, n / scale, u * 0.5 / scale, int(cell["noise"]["seed"]) + 4)
+    return min(1.0, max(-1.0, 2.5 * (v - 0.5)))
+
+
 def test_round_two_tower_is_a_drum_and_the_ragged_warp_billows_it():
     cell = _round_one_747_cell()
     smooth = [_tower_edge_m(cell, None, a, 2000.0) for a in range(0, 360, 10)]
     assert max(smooth) - min(smooth) == 0.0                       # round 2: a perfect cylinder
     ragged = [_tower_edge_m(cell, storm_cell.BEAUTY_RAGGED, a, 2000.0) for a in range(0, 360, 10)]
-    assert max(ragged) - min(ragged) >= 600.0                     # beauty: a billowing wall
+    assert max(ragged) - min(ragged) >= 300.0                     # beauty: a billowing wall
     # never out past the warp, so the vantage's clearance (2500 m) still holds
     assert max(ragged) <= max(smooth) + storm_cell.BEAUTY_RAGGED["warp_m"] + storm_cell.EDGE_M
     assert storm_cell.BEAUTY_RAGGED["warp_m"] < storm_cell.BEAUTY_VANTAGE_CLEARANCE_M / 2.0
@@ -450,7 +489,7 @@ def test_the_ragged_base_and_deck_lift_upward_only():
             lifts.append(w["deck_lift"])
     assert min(cuts) >= cell["base_m"] and max(cuts) <= cell["base_m"] + lift
     assert min(lifts) >= 0.0 and max(lifts) <= lift            # the deck never comes down on the aircraft
-    assert max(cuts) - min(cuts) >= 0.5 * lift                 # a torn base, not a flat one
+    assert max(cuts) - min(cuts) >= 0.5 * lift                 # an uneven base, not a flat one
 
 
 def test_without_ragged_the_cell_is_the_measure_paths():
@@ -461,31 +500,98 @@ def test_without_ragged_the_cell_is_the_measure_paths():
         w = storm_cell.ragged_warp(cell, e, n, u, None)
         assert w == {"rt": math.hypot(e, n), "base_cut": cell["base_m"], "deck_lift": 0.0}
         assert storm_cell.extinction_at(cell, e, n, u, 0.0) == storm_cell.extinction_at(cell, e, n, u, 0.0, zero)
+    # the measure's ramps: 500 m wall, 250 m base, the deck's 100 m band
+    measure = {"wall": storm_cell.EDGE_M * 2.0, "base": storm_cell.EDGE_M, "deck": 100.0}
+    assert storm_cell.ragged_softness(None) == measure and storm_cell.ragged_softness(zero) == measure
+    assert storm_cell.deck_band(2450.0, 2400.0, 3900.0) == pytest.approx(0.5)
+    assert storm_cell.deck_band(2400.0, 2400.0, 3900.0) == 0.0 and storm_cell.deck_band(2500.0, 2400.0, 3900.0) == 1.0
+
+
+def test_round_three_warps_were_plateaus_and_creases_and_round_four_is_smooth():
+    cell = _round_one_747_cell()
+    points = [(r * math.sin(math.radians(a)), r * math.cos(math.radians(a)))
+              for a in range(0, 360, 5) for r in (500.0, 1500.0, 2400.0, 4000.0, 8000.0, 16000.0)]
+    # round 3: the base lift sat on its clamps over most of the area ...
+    three = [_round_three_base_lift(cell, e, n) for e, n in points]
+    assert sum(1 for w in three if w in (0.0, 1.0)) / len(three) > 0.3
+    # ... joined by risers steeper than 1 m per m (300 m steps, seen edge-on)
+    riser = max(abs(_round_three_base_lift(cell, e + 1.0, n) - _round_three_base_lift(cell, e, n))
+                for e, n in points) * ROUND_THREE_RAGGED["base_m"]
+    assert riser > 1.0
+    # ... and the wall warp's radial slope passed 1 m per m somewhere (a crease or fold)
+    crease = max(abs(_round_three_wall_warp(cell, e + 1.0, n, 2000.0) - _round_three_wall_warp(cell, e, n, 2000.0))
+                 for e, n in points) * ROUND_THREE_RAGGED["warp_m"]
+    assert crease > 1.0
+    # round 4: no clamp (no plateaus), one 5 km noise, slopes bounded well under 1
+    ragged = storm_cell.BEAUTY_RAGGED
+    bound = storm_cell.ragged_slope_bound(ragged)
+    assert bound["wall"] < 1.0 and bound["base"] < 0.2
+    assert ragged["scale_m"] >= 5000.0 and storm_cell.RAGGED_WARP_GAIN == 2.0
+    four = [storm_cell.ragged_warp(cell, e, n, 900.0, ragged, layer_base_m=2400.0)["deck_lift"] / ragged["base_m"]
+            for e, n in points]
+    assert not any(w in (0.0, 1.0) for w in four)
+    for (e, n), w in zip(points, four):
+        step = storm_cell.ragged_warp(cell, e + 1.0, n, 900.0, ragged, layer_base_m=2400.0)["deck_lift"]
+        assert abs(step - w * ragged["base_m"]) <= bound["base"] + 1e-9
+    # the warped radius grows with the radius along every ray: the wall never folds
+    for a in range(0, 360, 5):
+        az = math.radians(a)
+        previous = -1.0
+        for r in range(0, 4000, 25):
+            rt = storm_cell.ragged_warp(cell, r * math.sin(az), r * math.cos(az), 2000.0, ragged)["rt"]
+            assert rt >= previous
+            previous = rt
+
+
+def test_the_soft_ramps_and_the_uneroded_deck_base_are_smooth_at_the_march_step():
+    ragged = storm_cell.BEAUTY_RAGGED
+    soft = storm_cell.ragged_softness(ragged)
+    assert soft == {"wall": ragged["soft_m"], "base": ragged["soft_m"], "deck": ragged["soft_m"]}
+    assert ragged["soft_m"] >= 2.0 * MARCH_STEP_M                 # a ramp spans several steps
+    assert ragged["soft_m"] > storm_cell.EDGE_M * 2.0 and ragged["soft_m"] > 100.0
+    # the deck's base: a monotone ramp, never more than 0.6 of its band per step
+    cell = _round_one_747_cell()
+    for e, n in ((0.0, 0.0), (3000.0, 1000.0), (-6000.0, 4000.0)):
+        lift = storm_cell.ragged_warp(cell, e, n, 2400.0, ragged, layer_base_m=2400.0)["deck_lift"]
+        us = [2400.0 + lift + k * 10.0 for k in range(0, 101)]
+        bands = [storm_cell.deck_band(u, 2400.0, 3900.0, lift, ragged) for u in us]
+        assert bands == sorted(bands) and bands[0] == 0.0 and bands[-1] == 1.0
+        assert max(b - a for a, b in zip(bands, bands[40:])) <= 0.61   # over one 400 m step
+    # the tower's wall ramps inward over soft_m and its base upward over soft_m
+    radius = storm_cell.tower_radius_at(cell, 5000.0)
+    inside = storm_cell.shapes(cell, radius - soft["wall"] - 1.0, 0.0, 5000.0,
+                               dict(ragged, warp_m=1e-9))["tower"]
+    assert inside == pytest.approx(1.0)
+    # the shader: the ramps are the same names, and the deck's base is no longer eroded
+    assert "float wallSoft = Edge * 2.0;" in STORM_HLSL and "float baseSoft = Edge;" in STORM_HLSL
+    assert "wallSoft = max(Ragged.w, Edge * 2.0);" in STORM_HLSL
+    assert "baseSoft = max(Ragged.w, Edge);" in STORM_HLSL
+    assert "S.Eroded(band" not in STORM_HLSL and "seed + 6u" not in STORM_HLSL
 
 
 def test_the_shader_ragged_block_is_the_python_twin_and_off_by_default():
-    block = _block(STORM_HLSL, "float deckLift = 0.0;", "float f = saturate(")
+    block = _block(STORM_HLSL, "float baseSoft = Edge;", "float f = saturate(")
     assert "if (Ragged.x > 0.0)" in block
-    for constant in ("2.5 * (S.Value(float3(e, n, 0.0) / (scale * 0.5), (uint)Noise.x + 5u) - 0.5)",
-                     "2.5 * (S.Value(float3(e, n, u * 0.5) / scale, (uint)Noise.x + 4u) - 0.5)",
+    for constant in ("float wb = S.Value(float3(e, n, 0.0) / scale, (uint)Noise.x + 5u);",
+                     "float wr = 2.0 * (S.Value(float3(e, n, u * 0.5) / scale, (uint)Noise.x + 4u) - 0.5);",
                      "r < towerR * 1.25 + Ragged.x + Edge * 2.0",
                      "u < max(base, Layer.y) + Ragged.y + max(Ragged.w, 100.0) + Edge"):
         assert constant in block, constant
-    assert storm_cell.RAGGED_WARP_GAIN == 2.5
+    assert "clamp(" not in block and "saturate(" not in block        # no plateaus, no creases
+    assert storm_cell.RAGGED_WARP_GAIN == 2.0
     # the tower and the dome read the warped radius and base; the shaft does not
-    assert "S.Ss(radius, radius - Edge * 2.0, rt) * S.Ss(baseCut, baseCut + Edge, u)" in STORM_HLSL
+    assert "S.Ss(radius, radius - wallSoft, rt) * S.Ss(baseCut, baseCut + baseSoft, u)" in STORM_HLSL
     assert "tower = max(tower, S.Ss(dome, dome - Edge, rt));" in STORM_HLSL
     assert "float shaft = S.Ss(shaftR, shaftR * 0.6, r)" in STORM_HLSL
     # the deck: the measure path's 100 m band when Ragged is 0
     assert "float deckSoft = Ragged.x > 0.0 ? max(Ragged.w, 100.0) : 100.0;" in STORM_HLSL
     assert "float band = S.Ss(deckBase, deckBase + deckSoft, u) * S.Ss(Layer.z, Layer.z - 100.0, u);" \
         in STORM_HLSL
-    assert "if (Ragged.x > 0.0 && band > 0.0 && u < deckBase + deckSoft)" in STORM_HLSL
     # the material exposes it (a float4, default 0) and is rebuilt on every machine
     assert '"ExtinctionScale", "Ragged")' in MATERIALS_PY
     assert '"Layer", "Flash", "Glass", "Ragged")' in MATERIALS_PY
     assert '"Time": params["Time"], "Ragged": params["Ragged"]}' in MATERIALS_PY
-    assert '"M_StormCell": "3"' in MATERIALS_PY
+    assert '"M_StormCell": "4"' in MATERIALS_PY
 
 
 def test_the_cpp_ragged_constants_are_the_pythons_and_beauty_only():
@@ -494,9 +600,12 @@ def test_the_cpp_ragged_constants_are_the_pythons_and_beauty_only():
     assert f"constexpr double WeatherRaggedWarpM = {ragged['warp_m']};" in apply
     assert f"constexpr double WeatherRaggedBaseM = {ragged['base_m']};" in apply
     assert f"constexpr double WeatherRaggedScaleM = {ragged['scale_m']};" in apply
-    assert f"constexpr double WeatherRaggedDeckSoftM = {ragged['deck_soft_m']};" in apply
+    assert f"constexpr double WeatherRaggedSoftM = {ragged['soft_m']};" in apply
     assert f"constexpr double WeatherBeautyErosion = {storm_cell.BEAUTY_EROSION};" in apply
     assert 'SetVectorParameterValue(TEXT("Ragged")' in apply
+    assert "static_cast<float>(WeatherRaggedScaleM), static_cast<float>(WeatherRaggedSoftM)" in apply
+    assert 'Ragged->SetNumberField(TEXT("soft_m"), WeatherRaggedSoftM);' in apply
+    assert "DeckSoft" not in WEATHER_CPP
     assert "FLinearColor(NoiseDrawn.R, NoiseDrawn.G, static_cast<float>(WeatherBeautyErosion), NoiseDrawn.A)" \
         in apply
     assert storm_cell.EROSION < storm_cell.BEAUTY_EROSION < 1.0
@@ -507,12 +616,24 @@ def test_the_cpp_ragged_constants_are_the_pythons_and_beauty_only():
     assert "FLinearColor NoiseDrawn = FLinearColor(0.0f, 0.0f, 0.0f, 0.0f);" in WEATHER_H
 
 
-# -- visual round 3: #07's subject through the rain ---------------------------------------
+# -- visual rounds 3 and 4: #07's subject through the rain --------------------------------
 # Round 2's #07: the A320 at 1000 m, the tower camera 80 m up at (-800 E, 900 N): a
 # slant range of 1515 m at the start (37 deg up), ~30 px across at 35 mm, and within a
 # few grey levels of the frame around it. The rain look's haze (FogDensity 0.012) is
 # drawn by the beauty's volumetric fog at 0.1 x FogDensity per metre from the camera,
 # twice the analytic fog's beta (0.1 ln(2)^2 x FogDensity, which also starts 1500 m out).
+# Round 3's #07 (the extinction scaled by ln(2)^2): "a tiny bright speck, a few pixels,
+# not a recognisable A320 silhouette". Round 4 gives the scenario a 250 mm lens: a
+# tower spotter's telephoto, and the labels come from the same camera.
+
+SCENARIOS_PY = REPO / "scripts" / "run_test_scenarios.py"
+
+
+def _scenario_prompt(name):
+    spec = importlib.util.spec_from_file_location("run_test_scenarios_round4", SCENARIOS_PY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return next(prompt for title, prompt, _ in module.SCENARIOS if title == name)
 
 
 def test_round_two_tower_view_geometry():
@@ -527,6 +648,24 @@ def test_round_two_tower_view_geometry():
     assert elevation - half_vfov > 20.0
     span_px = 34.1 * (1280.0 / 2.0 / (36.0 / 2.0 / 35.0)) / slant
     assert 25.0 < span_px < 32.0
+
+
+def test_round_four_tower_view_is_a_telephoto_that_tracks_the_a320():
+    from core.nl.compiler import compile_prompt
+    prompt = _scenario_prompt("tower view, heavy rain")
+    assert "with a 250 mm lens" in prompt
+    spec = compile_prompt(prompt)
+    camera = spec.cameras[0]
+    assert camera.preset.value == "tower" and camera.aim_mode.value == "aircraft"
+    assert camera.focal_length_mm.value == 250.0 and camera.focal_length_mm.source.value == "user"
+    assert camera.sensor_width_mm.value == 36.0 and camera.width_px.value == 1280
+    # the A320's 34 m span at the 1515 m slant fills a sensible share of the 1280 px
+    span_px = 34.1 * (1280.0 / 2.0 / (36.0 / 2.0 / 250.0)) / 1515.0
+    assert 150.0 < span_px < 300.0
+    # the frame is 8 deg wide: only an aircraft-tracking aim keeps a 6 s pass in it
+    assert math.degrees(2.0 * math.atan(18.0 / 250.0)) < 10.0
+    # the same prompt without the lens is the round-2 framing (the 35 mm default)
+    assert compile_prompt(prompt.replace(" with a 250 mm lens", "")).cameras[0].focal_length_mm.value == 35.0
 
 
 def test_the_wet_rows_draw_the_analytic_haze_and_keep_the_subject():
@@ -545,3 +684,66 @@ def test_the_wet_rows_draw_the_analytic_haze_and_keep_the_subject():
     assert volumetric * wb.WET_VFOG_EXTINCTION_SCALE == pytest.approx(analytic, rel=0.01)
     rows = _function(CLOUDS_CPP, "inline double AtmosphereDefault(int Preset, int Field)")
     assert rows.count("4000.0, 0.3, 0.48,") == 2
+
+
+# -- visual round 4: #08 and head shot c went dark with the wet rows' extinction scale ----
+# Round 3's #08 (C172 over Fuji, sunrise, 1 mm/h) fell from luma 181 to 142: the slope
+# dark red-brown, the C172 a near-black silhouette under a sky that still clips; head
+# shot c (J-11 over the forest in heavy rain) "much darker than head2 c; the forest and
+# the J-11 near-black under a dark deck". The engine's volumetric fog scatters
+# Albedo x Extinction, so scaling the extinction by 0.48 also halved the rain haze's
+# IN-SCATTER: the veil that lifted the dark near slope, the forest and the airframe
+# (optically thin there, in-scatter ~ sigma x distance) fell to 48 %, and a frame whose
+# sky clips cannot be opened back up by the meter. The albedo is already white (an
+# 8-bit colour, no headroom), so the in-scatter is put back on the lights: the sun's
+# and the sky light's VolumetricScatteringIntensity x 1 / 0.48. The subject's own
+# light still comes through the 1.5 km of rain at 42 %, not 17 %.
+
+
+def test_the_wet_rows_put_the_in_scatter_back_on_the_lights():
+    scale = wb.WET_VFOG_EXTINCTION_SCALE
+    for preset in ("rain", "storm"):
+        assert wb.vfog_scattering_compensation(preset) == pytest.approx(1.0 / scale)
+    for preset in ("clear", "hazy", "overcast"):
+        assert wb.vfog_scattering_compensation(preset) == 1.0
+    # the thin-regime veil (in-scatter ~ albedo x sigma_s x d) is round 2's again ...
+    sigma = 0.1 * 0.012
+    for distance in (60.0, 300.0, 800.0):
+        round_two = sigma * distance
+        round_three = sigma * scale * distance
+        round_four = sigma * scale * wb.vfog_scattering_compensation("rain") * distance
+        assert round_three == pytest.approx(0.48 * round_two, rel=0.01)
+        assert round_four == pytest.approx(round_two)
+    # ... and the subject's transmittance is round 3's (the extinction alone is scaled)
+    assert math.exp(-sigma * scale * 1515.0) > 0.4
+
+
+def test_the_cpp_in_scatter_compensation_is_the_python_one_and_beauty_only():
+    pure = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
+    assert "inline double VFogScatteringCompensation(double ExtinctionScale)" in pure
+    assert "return ExtinctionScale > 0.0 && ExtinctionScale < 1.0 ? 1.0 / ExtinctionScale : 1.0;" in pure
+    for value, expected in ((0.48, 1.0 / 0.48), (1.0, 1.0), (0.0, 1.0), (-1.0, 1.0), (2.0, 1.0)):
+        assert (1.0 / value if 0.0 < value < 1.0 else 1.0) == expected
+    # the world look (beauty only) sets it on the sky light and the sun, from the row's scale
+    atmosphere = _function(CLOUDS_CPP, "void FFlightSimWorldBeauty::ApplyAtmosphere(")
+    assert "const double Compensation = VFogScatteringCompensation(Row[AtmVFogExtinctionScale]);" in atmosphere
+    assert "Scene.VolumetricFogScatteringScale = Compensation;" in atmosphere
+    assert "Sky->SetVolumetricScatteringIntensity(static_cast<float>(Sky->VolumetricScatteringIntensity * Compensation));" \
+        in atmosphere
+    assert "Beam->SetVolumetricScatteringIntensity(static_cast<float>(Beam->VolumetricScatteringIntensity * Compensation));" \
+        in atmosphere
+    assert 'Out->SetObjectField(TEXT("volumetric_fog_inscatter"), Inscatter);' in atmosphere
+    assert atmosphere.index("Fog->SetVolumetricFogExtinctionScale(") < atmosphere.index("Scene.VolumetricFogScatteringScale = ")
+    # the hero lighting, which sets the sun's after the world lane, multiplies by it
+    hero = _function(HERO_CPP, "bool FFlightSimHeroLighting::Apply(")
+    assert "HeroLightingFogScattering * static_cast<float>(Scene.VolumetricFogScatteringScale);" in hero
+    assert "SunLight->SetVolumetricScatteringIntensity(SunFogScattering);" in hero
+    assert "constexpr float HeroLightingFogScattering = 1.0f;" in HERO_CPP   # the physics default, kept
+    # the factor lives on the scene (1 by default: every other render is byte-identical)
+    scene_class = SCENE_H[SCENE_H.index("class FLIGHTSIMBRIDGE_API FFlightSimVisualScene"):]
+    assert "double VolumetricFogScatteringScale = 1.0;" in scene_class
+    assert "VolumetricFogScatteringScale" not in SCENE_H[:SCENE_H.index("class FLIGHTSIMBRIDGE_API FFlightSimVisualScene")]
+    assert SCENE_H.count("VolumetricFogScatteringScale") == 1
+    assert "VolumetricFogScatteringScale" not in RENDER_CPP
+    # the world lane runs before the hero lighting, so neither doubles the other
+    assert RENDER_CPP.index("WorldBeauty.Build(") < RENDER_CPP.index("FFlightSimHeroLighting::Apply(VisualScene")

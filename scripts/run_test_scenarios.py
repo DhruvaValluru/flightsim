@@ -58,8 +58,12 @@ SCENARIOS = [
      {"sun_azimuth_deg": 225.0, "sun_elevation_deg": 12.0}),
     ("a320 over sfo heading south, moderate rain",
      "wingman view of the a320 over sfo south at 3000 m in moderate rain for 6 seconds", {}),
+    # A tower spotter's telephoto (visual round 4): at the default 35 mm the
+    # A320 at a 1.2-1.5 km slant was a few-pixel speck; at 250 mm its 34 m span
+    # is ~200-250 px of the 1280 (the tower camera tracks the aircraft, and the
+    # labels come from the same camera).
     ("tower view, heavy rain",
-     "tower view of the a320 at 1000 m in heavy rain for 6 seconds", {}),
+     "tower view of the a320 at 1000 m in heavy rain with a 250 mm lens for 6 seconds", {}),
     ("c172 over fuji, sunrise, light rain",
      "chase view of the c172p over mount fuji at sunrise in light rain for 6 seconds", {}),
     ("747 through a thunderstorm",

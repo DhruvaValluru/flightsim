@@ -101,12 +101,40 @@ EDGE_M = 250.0
 #: beauty warps the tower's radius by up to ``warp_m`` with one octave of value
 #: noise ``scale_m`` across, lifts the base and the deck's base unevenly by up
 #: to ``base_m`` (upward only: the aircraft's clearance below the deck holds),
-#: softens the deck's base over ``deck_soft_m`` and erodes it there, and erodes
-#: every edge harder (``erosion``). UNCALIBRATED: set by probe render on the
-#: render machine. The C++ twin is FFlightSimWeather::ApplyBeautyStormVantage.
-RAGGED_WARP_GAIN = 2.5
-BEAUTY_RAGGED = {"warp_m": 800.0, "base_m": 300.0, "scale_m": 1800.0, "deck_soft_m": 400.0}
+#: softens the tower's wall (inward), its base and the deck's base (upward)
+#: over ``soft_m``, and erodes every edge harder (``erosion``).
+#: Round 4 (round 3's #09: thin white hatched lines across the frame and a
+#: ribbon, "wireframe, not cloud"): round 3's warps were RAGGED_WARP_GAIN 2.5
+#: and clamped, so the base sat exactly at 0 or 300 m lift over most of its
+#: area (flat plateaus) joined by risers of up to ~1.5 m per m (the base's noise
+#: was half the scale), and the wall's warp slope reached ~1.1 per m (creases,
+#: near-folds); the deck's 400 m base was eroded by a 4-octave noise sharpened
+#: 2.5x. The constrained GPU marches 192 view samples over up to 80 km (~400 m
+#: steps, FlightSimClouds.cpp CloudMarch): hard, flat and thin features
+#: step-sampled that coarsely draw as contour lines. Now gain 2 and no clamp
+#: (no plateaus, no creases), one 5 km noise for both warps, larger than the
+#: frame's cloud (the wall's slope <= :func:`ragged_slope_bound` ~0.85 < 1: it
+#: never folds; ~0.25 measured), ramps ``soft_m`` wide, and no erosion on the
+#: deck's base. The march settings are untouched.
+#: UNCALIBRATED: set by probe render on the render machine. The C++ twin is
+#: FFlightSimWeather::ApplyBeautyStormVantage.
+RAGGED_WARP_GAIN = 2.0
+BEAUTY_RAGGED = {"warp_m": 800.0, "base_m": 300.0, "scale_m": 5000.0, "soft_m": 1000.0}
 BEAUTY_EROSION = 0.6
+#: The steepest slope of one octave of value noise per lattice cell (the
+#: quintic fade's peak derivative 15/8, a lattice step of at most 1).
+VALUE_NOISE_SLOPE_MAX = 1.875
+
+
+def ragged_slope_bound(ragged: Dict[str, float]) -> Dict[str, float]:
+    """Upper bounds of the beauty warps' horizontal slopes (m per m): the
+    wall's radial displacement (a bound under 1 means the warped radius is
+    monotonic, so the wall never folds into thin sheets) and the base's lift."""
+    scale = max(float(ragged["scale_m"]), 1.0)
+    per_m = VALUE_NOISE_SLOPE_MAX * math.sqrt(2.0) / scale
+    return {"wall": RAGGED_WARP_GAIN * float(ragged["warp_m"]) * per_m,
+            "base": float(ragged["base_m"]) * per_m}
+
 
 #: The card's ``weather.cell`` keys, in their fixed order.
 CARD_KEYS = ("centre", "base_m", "top_m", "overshoot_m", "tower_radius_m", "anvil_radius_m",
@@ -257,16 +285,33 @@ def ragged_warp(cell: Dict[str, Any], e: float, n: float, u: float,
     warp, lift = float(ragged["warp_m"]), float(ragged["base_m"])
     scale = max(float(ragged["scale_m"]), 1.0)
     seed = int(cell["noise"]["seed"])
-    if u < max(base, float(layer_base_m)) + lift + max(float(ragged["deck_soft_m"]), 100.0) + EDGE_M:
-        wb = min(1.0, max(0.0, 0.5 + RAGGED_WARP_GAIN
-                          * (value_noise(e / (scale * 0.5), n / (scale * 0.5), 0.0, seed + 5) - 0.5)))
+    if u < max(base, float(layer_base_m)) + lift + max(float(ragged["soft_m"]), 100.0) + EDGE_M:
+        wb = value_noise(e / scale, n / scale, 0.0, seed + 5)
         out["base_cut"] = base + lift * wb
         out["deck_lift"] = lift * wb
     if r < tower_r * 1.25 + warp + EDGE_M * 2.0:
-        wr = min(1.0, max(-1.0, RAGGED_WARP_GAIN
-                          * (value_noise(e / scale, n / scale, u * 0.5 / scale, seed + 4) - 0.5)))
+        wr = RAGGED_WARP_GAIN * (value_noise(e / scale, n / scale, u * 0.5 / scale, seed + 4) - 0.5)
         out["rt"] = max(r + warp * wr, 0.0)
     return out
+
+
+def ragged_softness(ragged: Optional[Dict[str, float]]) -> Dict[str, float]:
+    """The ramps (m) of the tower's wall and base and the deck's base: the
+    measure path's (500, 250, 100) with no ``ragged``, else at least ``soft_m``."""
+    if not ragged or not float(ragged["warp_m"]) > 0.0:
+        return {"wall": EDGE_M * 2.0, "base": EDGE_M, "deck": 100.0}
+    soft = float(ragged["soft_m"])
+    return {"wall": max(soft, EDGE_M * 2.0), "base": max(soft, EDGE_M), "deck": max(soft, 100.0)}
+
+
+def deck_band(u: float, layer_base_m: float, layer_top_m: float, deck_lift: float = 0.0,
+              ragged: Optional[Dict[str, float]] = None) -> float:
+    """The look's deck's vertical profile (0..1) in storm_cell.hlsl's Layer
+    term, before its cover: the base lifted by ``deck_lift`` and softened over
+    :func:`ragged_softness`'s ``deck`` ramp (not eroded), the top over 100 m."""
+    soft = ragged_softness(ragged)["deck"]
+    deck_base = float(layer_base_m) + float(deck_lift)
+    return _smoothstep(deck_base, deck_base + soft, u) * _smoothstep(layer_top_m, layer_top_m - 100.0, u)
 
 
 def shapes(cell: Dict[str, Any], e: float, n: float, u: float,
@@ -282,7 +327,8 @@ def shapes(cell: Dict[str, Any], e: float, n: float, u: float,
     # The tower, flaring upward, with an overshooting dome over the top.
     f = min(1.0, max(0.0, (u - base) / (top - base)))
     radius = tower_r * (1.0 - TOWER_FLARE * 0.5 + TOWER_FLARE * f)
-    tower = (_smoothstep(radius, radius - EDGE_M * 2.0, rt) * _smoothstep(base_cut, base_cut + EDGE_M, u)
+    soft = ragged_softness(ragged)
+    tower = (_smoothstep(radius, radius - soft["wall"], rt) * _smoothstep(base_cut, base_cut + soft["base"], u)
              * _smoothstep(top + EDGE_M, top - EDGE_M, u))
     over = float(cell["overshoot_m"])
     if top - EDGE_M < u < top + over:

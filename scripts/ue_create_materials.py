@@ -565,8 +565,10 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_RainSplash 3: lit by the scene instead of a black sky sample (drop_lit).
 #: M_RainDrops 5: the beauty rain shape's five parameters (round-2b weather-fx).
 #: M_StormCell 3: the beauty's "Ragged" block (storm_cell.hlsl, visual round 3).
+#: M_StormCell 4: the Ragged block's soft ramps, unclamped warps and uneroded deck
+#: base (round 3's #09 hatched contour lines; storm_cell.hlsl).
 STORM_GENERATIONS = {"M_RainDrops": "5", "M_RainSplash": "3", "M_LightningChannel": "2",
-                     "M_StormCell": "3", "M_WindshieldRain": "2"}
+                     "M_StormCell": "4", "M_WindshieldRain": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
