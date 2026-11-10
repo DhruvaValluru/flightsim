@@ -117,7 +117,7 @@ def test_the_look_instance_keeps_the_imported_materials_texture_wiring():
 def test_config_overrides_reach_only_their_class_and_paint_is_not_chrome():
     config = look.load_config("J11")
     plan = look.plan_slots(look.parse_mtl(MTL), config)
-    assert plan["mat_BOE"]["scalars"]["Roughness"] == 0.58
+    assert plan["mat_BOE"]["scalars"]["Roughness"] == config["class_scalars"]["paint"]["Roughness"] == 0.46
     assert plan["rgb_000000"]["scalars"]["Roughness"] == look.CLASS_SCALARS["rubber"]["Roughness"]
     # A painted panel is a dielectric under a clear coat; 0.6-0.9 is bare metal's.
     assert look.CLASS_SCALARS["paint"]["Metallic"] < 0.3
