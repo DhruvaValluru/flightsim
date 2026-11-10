@@ -17,7 +17,7 @@ def test_pairs_numbers_and_one_sided_scenes(tmp_path):
         Image.new("RGB", (1280, 720), (shade,) * 3).save(folder / "01_a.jpg")
     Image.new("RGB", (1280, 720)).save(tmp_path / "round_1" / "02_new.jpg")
     out = visual_compare.compare(0, 1, tmp_path)
-    rows = json.loads((out / "compare.json").read_text())
+    rows = json.loads((out / "compare.json").read_text(encoding="utf-8"))
     assert rows[0]["scene"] == "01_a" and rows[0]["moved_share"] == 1.0
     assert rows[0]["mean_luma_0"] < rows[0]["mean_luma_1"]
     assert rows[1] == {"scene": "02_new", "only_in": "round_1"}
