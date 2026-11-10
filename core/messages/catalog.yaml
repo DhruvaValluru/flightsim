@@ -371,6 +371,11 @@ render.supersample:
 render.beauty_look:
   sentence: "The beauty look cannot be planned or applied: an unknown grade or lens, a sun that cannot be lit or that moves during the clip, a camera without a sensor width, or a sidecar the renderer cannot read."
   hint: "Use a known grade (golden hour, desert noon or storm) and lens (standard or cinematic), or render at the measure quality."
+# round 5 L1 (core/scene/beauty_look.py ENGINE_LOOK, FlightSimBeautyLook.cpp):
+# the per-effect A/B switches of the engine look.
+render.look_switch:
+  sentence: "A look switch for one of the renderer's effects was given a value it does not take, or names no effect."
+  hint: "Use -look-<effect>=on or off (a probe such as bloom-fft, df-shadows or fog-grid also takes auto), with an effect from the engine look's list; or leave the switch out to render as planned."
 
 # tiles-delight (core/scene/tiles_delight.py, the shader's Python twin):
 world_beauty.tiles_delight:

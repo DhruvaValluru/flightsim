@@ -2994,3 +2994,47 @@ M_FlightSimDistantClouds expected):**
 Failure witnesses: `distant_clouds.drawn` starting "nothing:" names why (material missing:
 run the editor script); a frame time that rose with the sheet on means the sheet is
 over-drawn (two-sided over the whole sky): first lower DISTANT_RADIUS_KM, then RINGS.
+
+## round-5 engine-look (lane L1)
+
+Lane: the renderer's built-in lighting and post effects, per world preset
+(`core/scene/beauty_look.py` ENGINE_LOOK, host `FlightSimBeautyLook.cpp`
+ApplyEngineLook, applied after the render-path, hero-lighting and no-lumen
+fallback hooks). Session 2026-11-10, code only on the Mac: **nothing below
+has been rendered or measured**. Every value is UNCALIBRATED; every effect
+has a `-look-<name>=on|off` switch (probes `auto|on|off`, `auto` off on the
+constrained GPU except the fog grid) on the command line or in
+`FLIGHTSIM_RENDER_SWITCHES`, and lands in render.json
+`beauty_look.applied.engine_look.<effect>` with what the earlier lanes had
+set (`before`, `*_before`, `*_read_back`). The sidecar is version 3.
+
+Effects and switches: ssgi, ssr, ssao, sun-shadows, df-shadows (probe),
+contact-shadows, local-exposure, bloom, bloom-fft (probe), lens-flare (drawn
+only with the sun within the frame's half-diagonal + 12 deg, decided once on
+frame 0), film-grain (GRAIN_STRENGTH 0.03 x preset scale x L2's stock scale),
+volumetric-fog (albedo only; distribution/extinction stay the world lane's),
+fog-grid (probe; auto = the fine grid every passing round drew), tsr (still
+warm-up 24 / samples 16; 20 / 12 constrained), filmback (36 x 24 mm record).
+
+### Probes (A/B pairs on #01 golden hour and #09 storm unless named)
+
+| probe | what to render | read |
+|---|---|---|
+| el-ssgi | #01, #09 as planned vs `-look-ssgi=off`; and `FLIGHTSIM_RENDER_SWITCHES=-look-ssgi=on` with r.SSGI.Quality 4 | canyon shade and belly luma p10; frame time |
+| el-ssr | #13, #06 vs `-look-ssr=off`; head shot d canopy | ocean / wet runway reflection present; time |
+| el-ssao | head shot a vs `-look-ssao=off` | darkening under the wing and in the intakes, no halo on the tiles |
+| el-csm | #01 vs `-look-sun-shadows=off` | the fin's shadow edge on the fuselage (PCSS penumbra vs PCF), ridge shadow edge |
+| el-dfs | #12 cockpit `-look-df-shadows=on` vs `auto` (off on the laptop) | the C172's shadow beyond the cascades; seconds per still |
+| el-contact | head shot a vs `-look-contact-shadows=off` | pylons / intakes grounded; no halo |
+| el-local | #01, #09 vs `-look-local-exposure=off` | valley floor and snow in one frame; the sky band unchanged between frames |
+| el-bloom | #05 vs `-look-bloom=off` | glints only, no veiling across the sky |
+| el-fft | #05 `-look-bloom-fft=on` vs `auto` | Gaussian vs convolution; seconds per still on the laptop |
+| el-flare | #05 vs `-look-lens-flare=off`; #04 must record `gate.drawn: false` | ghosts only when backlit |
+| el-grain | #01, #09 vs `-look-film-grain=off` | grain visible at 100 %, banding gone in the sky |
+| el-vfog | #06, #05 vs `-look-volumetric-fog=off` | haze tone at the albedo vs white |
+| el-fog-grid | #09 vs `-look-fog-grid=off` | shaft banding fine vs coarse; frame time |
+| el-tsr | head shot a vs `-look-tsr=off` | visual_round.py edge-aliasing number; seconds per still |
+
+Limits kept: no cloud-march cvar is touched; internal resolution unchanged;
+labels are separate captures (lighting and post never reach them); measure
+renders never read the sidecar.

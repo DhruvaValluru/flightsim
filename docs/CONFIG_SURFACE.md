@@ -33,7 +33,7 @@ Every switch the program reads, each with one decision. **ui**: stays exposed, i
 | `FLIGHTSIM_DISTANT_CLOUDS` | `distant_clouds` | dev-only | unset | `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp:982`, `core/scene/world_beauty.py:481` |
 | `FLIGHTSIM_SKY_HDRI` | `sky_hdri` | dev-only | unset | `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp:992`, `scripts/ue_create_materials.py:3347` |
 | `FLIGHTSIM_HDRI_CACHE` | `hdri_cache` | dev-only | unset | `core/scene/sky_hdri.py:81` |
-| `FLIGHTSIM_RENDER_SWITCHES` | `render_switches` | dev-only | unset | `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp:3354`, `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimHeroLighting.cpp:432`, `core/scene/hero_lighting.py:553` |
+| `FLIGHTSIM_RENDER_SWITCHES` | `render_switches` | dev-only | unset | `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp:3354`, `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimHeroLighting.cpp:432`, `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimBeautyLook.cpp:376`, `core/scene/hero_lighting.py:553` |
 
 ## Keys not prefixed FLIGHTSIM_
 

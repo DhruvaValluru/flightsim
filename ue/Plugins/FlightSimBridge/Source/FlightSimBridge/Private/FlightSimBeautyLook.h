@@ -26,12 +26,37 @@
 #include "CoreMinimal.h"
 
 class AActor;
+class FFlightSimVisualScene;
 class FJsonObject;
 class USceneCaptureComponent2D;
 
 class FFlightSimBeautyLook
 {
 public:
+	// Visual round 5, lane L1 (core/scene/beauty_look.py ENGINE_LOOK): the
+	// engine's built-in lighting and post effects, per world preset, each
+	// behind a -look-<name>=on|off switch (probes: auto|on|off; auto is off
+	// on the constrained GPU) read from the command line and then
+	// FLIGHTSIM_RENDER_SWITCHES. Apply() (below) sets the EARLY half on the
+	// capture's post-process settings as it reads the sidecar: SSAO, local
+	// exposure, bloom (Gaussian; FFT as a probe), the lens flare, the film
+	// grain and the filmback. ApplyEngineLook sets the LATE half after the
+	// render-path, hero-lighting and no-lumen-fallback hooks, so it is the
+	// owner of record of what it touches and reads back what it does not:
+	// SSGI / SSR quality and intensities, the sun's cascades, PCSS,
+	// distance-field shadows (probe) and contact shadows, the volumetric
+	// fog's albedo and grid (probe), and the still's TSR accumulation. A
+	// switch with a value it does not take refuses (render.look_switch).
+	// Nothing here touches the cloud march. Every value, every mode and
+	// every read-back lands in render.json beauty_look.applied.engine_look.
+	static bool ApplyEngineLook(FFlightSimVisualScene& Scene, USceneCaptureComponent2D* Beauty,
+	                            bool bConstrainedGpu, const TCHAR* Switches);
+
+	// Round 5: the warm-up captures and still samples the look's tsr row
+	// asks for (false when no sidecar applied or -look-tsr=off): the
+	// commandlet raises its defaults to them, never lowers a stated flag.
+	static bool StillAccumulation(int32& WarmupCaptures, int32& StillSamples);
+
 	// The V0 beauty overrides, then the sidecar named by -beauty-look= in
 	// CommandLine (if any). A sidecar that cannot be read or applied leaves
 	// LastError() set ("render.beauty_look: ..."); the commandlet refuses

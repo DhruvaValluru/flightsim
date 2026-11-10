@@ -208,8 +208,9 @@ SETTINGS: Tuple[Setting, ...] = (
     Setting("render_switches", "FLIGHTSIM_RENDER_SWITCHES", "dev-only", None,
             ("ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp:3354",
              "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimHeroLighting.cpp:432",
+             "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimBeautyLook.cpp:376",
              "core/scene/hero_lighting.py:553"),
-            "Extra commandlet switches appended to the render command line (-sky-capture-restore=, the round-5 shade probes in core/scene/hero_lighting.py DIAGNOSTIC_SWITCHES); read by the UE host, parsed in Python only to check and record them (render.sky_fill_probe refuses a bad value). Unset is the planned render; render-machine A/B probes only, never on the web path."),
+            "Extra commandlet switches appended to the render command line (-sky-capture-restore=, the round-5 shade probes in core/scene/hero_lighting.py DIAGNOSTIC_SWITCHES, the engine look's -look-<effect>= A/B switches in core/scene/beauty_look.py ENGINE_LOOK_SWITCHES); read by the UE host, parsed in Python only to check and record them (render.sky_fill_probe and render.look_switch refuse a bad value). Unset is the planned render; render-machine A/B probes only, never on the web path."),
 )
 
 #: Every ``add_argument`` of flightsim/capture.py (the positional ``spec``
