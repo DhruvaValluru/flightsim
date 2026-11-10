@@ -2818,3 +2818,39 @@ stand-in) and the frame is round 3's; the next step is `FTextureCompilingManager
 on the two textures by name. Expected look once jittered: the clear-world cumulus read as soft
 billows with dark flat bases and lit domes, no striping; the deck tops in #03 as rounded
 cells, no contour lines.
+
+## round-5 L6 sun position vs NREL SPA
+
+No UE involved (Mac, Python only). Two sun models feed a render: the run card's
+`core/environment/sun.py` (NOAA equations, `resolve`) and the renderer's
+`core/sky/astro.py` (`plan_sky` -> `sky.json` -> `FlightSimSky.cpp`, which only rotates the
+directional light to the given azimuth/elevation; no Cesium or SunPosition-plugin sun is
+computed in the bridge). Each was checked at the UTC instant it resolves for the 14 scenes of
+`scripts/run_test_scenarios.py` against `pvlib.solarposition.spa_python` (pvlib 0.16.1,
+apparent elevation, 1013.25 hPa, 10 C, delta_t 69 s). Error = great-circle angle between the
+sun directions (raw azimuth deltas of 1-2 deg at #07/#09/#13/#14 are the equinox-noon zenith at
+0,0, where azimuth is undefined; elevation error there is 0.002/0.006 deg).
+
+| # | scene | lat, lon | time | sun.py el / az | err deg | astro el / az | err deg |
+|---|---|---|---|---|---|---|---|
+| 01 | golden hour A-4 | 37.727, -119.610 | golden hour | 8.162 / 263.943 | 0.0024 | 6.000 / 265.678 | 0.0087 |
+| 02 | same, super bright | 37.727, -119.610 | golden hour | 8.162 / 263.943 | 0.0024 | 6.000 / 265.678 | 0.0087 |
+| 03 | a320 new york | 40.713, -74.006 | morning | 32.428 / 123.122 | 0.0031 | 31.237 / 121.443 | 0.0066 |
+| 04 | desert, sun behind (override 45/20) | 0, 0 | 17:30 | 7.615 / 270.050 | 0.0022 | 9.445 / 270.048 | 0.0090 |
+| 05 | desert, backlit (override 225/12) | 0, 0 | 17:30 | 7.615 / 270.050 | 0.0022 | 9.445 / 270.048 | 0.0090 |
+| 06 | a320 sfo | 37.621, -122.379 | noon | 52.484 / 180.000 | 0.0031 | 52.485 / 180.262 | 0.0076 |
+| 07 | tower, heavy rain | 0, 0 | noon | 89.959 / 180.000 | 0.0023 | 89.877 / 109.695 | 0.0072 |
+| 08 | c172 fuji sunrise | 35.420, 138.727 | sunrise | 3.176 / 92.451 | 0.0046 | 0.500 / 90.373 | 0.0067 |
+| 09 | 747 thunderstorm | 0, 0 | noon | 89.959 / 180.000 | 0.0023 | 89.877 / 109.695 | 0.0072 |
+| 10 | c172 tornado | 38.430, -96.600 | noon | 51.648 / 180.000 | 0.0031 | 51.648 / 180.249 | 0.0076 |
+| 11 | A-4 matterhorn | 46.005, 7.720 | noon | 43.962 / 180.000 | 0.0032 | 43.963 / 180.185 | 0.0078 |
+| 12 | c172 grand canyon | 36.090, -112.000 | noon | 54.003 / 180.000 | 0.0031 | 54.004 / 180.268 | 0.0076 |
+| 13 | 747 ocean | 0, 0 | noon | 89.959 / 180.000 | 0.0023 | 89.877 / 109.695 | 0.0072 |
+| 14 | hurricane (refused at run) | 0, 0 | noon | 89.959 / 180.000 | 0.0023 | 89.877 / 109.695 | 0.0072 |
+
+Max error: sun.py 0.0046 deg (#08), astro.py 0.0090 deg (#04/#05), both far under 0.1 deg. No
+fix; lane closed. The two models resolve named times to slightly different instants (e.g.
+golden hour 8.2 vs 6.0 deg, sunrise 3.2 vs 0.5 deg): that is a definition difference between
+`sun.ELEVATION_EVENTS` and the sky plan's rules, not an ephemeris error, and is left as is.
+UE's `USunPositionFunctionLibrary::GetSunPosition` (NOAA-style) was not added. Pinned by
+`tests/test_sun_vs_spa.py` (skips when pvlib is absent).

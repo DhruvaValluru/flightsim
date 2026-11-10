@@ -4,3 +4,6 @@ pycocotools==2.0.11
 # WebDataset's own reader (webdataset.WebDataset / tariterators) for the shard round trip.
 webdataset==1.0.2
 braceexpand==0.1.7
+# NREL SPA reference for the sun-position check (tests/test_sun_vs_spa.py). BSD-3.
+# https://github.com/pvlib/pvlib-python (pulls pandas).
+pvlib==0.16.1
