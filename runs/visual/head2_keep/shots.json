@@ -1,0 +1,116 @@
+{
+  "step": "head2_keep",
+  "commit": "6816852c4b99",
+  "quality": "beauty",
+  "render_tokens_added": [
+    "-supersample=2"
+  ],
+  "shot_table": [
+    {
+      "key": "a",
+      "title": "chase cam, real terrain, golden hour",
+      "prompt": "chase view of the j11 at 3800 m over the matterhorn at golden hour, flying southwest, for 6 seconds",
+      "environment": null,
+      "aircraft": "J11",
+      "camera": "chase",
+      "look": "golden hour, Google tiles",
+      "lighting": "golden_rim_backlight",
+      "subject": [
+        "matterhorn",
+        "Matterhorn"
+      ]
+    },
+    {
+      "key": "b",
+      "title": "low pass over the desert",
+      "prompt": "chase view of the j11 at 1600 m over the desert, flying southwest, for 6 seconds",
+      "environment": "desert",
+      "aircraft": "J11",
+      "camera": "chase",
+      "look": "desert preset (Grand Canyon), low cross-light",
+      "lighting": "desert_cross_relief",
+      "subject": null
+    },
+    {
+      "key": "c",
+      "title": "forest in heavy rain (storm weather)",
+      "prompt": "chase view of the j11 at 1700 m over the forest in heavy rain for 6 seconds",
+      "environment": "forest",
+      "aircraft": "J11",
+      "camera": "chase",
+      "look": "forest preset (Yosemite), storm rain",
+      "lighting": "storm_soft_sheen",
+      "subject": null
+    },
+    {
+      "key": "d",
+      "title": "cockpit view, the Matterhorn ahead",
+      "prompt": "cockpit view of the j11 with a 24 mm lens at 3800 m over the matterhorn at 10:00 for 6 seconds",
+      "environment": null,
+      "aircraft": "J11",
+      "camera": "cockpit",
+      "look": "pilot's eye behind the windshield, 24 mm",
+      "lighting": "cockpit_canopy_glint",
+      "subject": [
+        "matterhorn",
+        "Matterhorn"
+      ]
+    }
+  ],
+  "written": "2026-11-10T08:17:37",
+  "rendered": true,
+  "shots": {
+    "b": {
+      "card_prompt": "chase view of the j11 at 1600 m over the desert, flying southwest, for 6 seconds",
+      "environment": "desert",
+      "camera": "chase",
+      "aircraft": "J11",
+      "quality": "beauty",
+      "commit": "6816852c4b99",
+      "render_tokens_added": [
+        "-supersample=2"
+      ],
+      "run_id": "d88247a7f814",
+      "status": "failed",
+      "detail": "[camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log\nlast words:\n[2026.11.10-13.18.05:505][  0]LogFlightSimScenario: Display: trimmed state\n[2026.11.10-13.18.05:506][  0]LogFlightSimScenario: Display:   altitude 1600.000 m  CAS 350.000 kt  heading 345.000 deg  AGL 259.8 m  36.090000/-112.000000\n[2026.11.10-13.18.05:506][  0]LogFlightSimScenario: Display:   engine 0  throttle 0.339013  mixture 1.000000\n[2026.11.10-13.18.05:507][  0]LogFlightSimScenario: Display:   engine 1  throttle 0.339013  mixture 1.000000\n[2026.11.10-13.18.05:507][  0]LogFlightSimScenario: Display:   latched  elevator 0.000000  pitch trim -0.044450  aileron 0.000000  rudder -0.000000  gear 0.0\n[2026.11.10-13.18.05:508][  0]LogFlightSimRender: Display: waiting for shader compilation\n[2026.11.10-13.18.05:508][  0]LogFlightSimWeather: Display: cloud VolumetricCloudComponent (VolumetricCloud_0): /Temp/Untitled_1.Untitled:PersistentLevel.VolumetricCloud_0.VolumetricCloudComponent.MID_M_FlightSimCloudLayers_0, domain 3, used_with_volumetric_cloud yes, compiled\n[2026.11.10-13.18.05:509][  0]LogFlightSimRender: Display: warm-up: 16 captures (capture watchdog 300 s, gpu drain on)\n[2026.11.10-13.18.10:773][  0]LogD3D11RHI: Error: Result failed with error DXGI_ERROR_DEVICE_REMOVED DXGI_ERROR_DEVICE_HUNG\n[2026.11.10-13.18.12:775][  0]LogWindows: Error: appError called: Fatal error: [File:D:\\build\\++UE5\\Sync\\Engine\\Source\\Runtime\\Windows\\D3D11RHI\\Private\\D3D11Util.cpp] [Line: 166]\nUnreal Engine is exiting due to D3D device being lost. (Error: 0x887A0006 - 'HUNG')\n[2026.11.10-13.18.12:775][  0]LogWindows: Windows GetLastError: The operation completed successfully. (0)",
+      "run_dir": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\d88247a7f814",
+      "card": {
+        "aircraft": "J11",
+        "latitude_deg": 36.09,
+        "longitude_deg": -112.0,
+        "google_tiles": {
+          "geoid_undulation_m": -23.403480000000002,
+          "geoid_model": "EGM96"
+        }
+      },
+      "failed": "[camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log\nlast words:\n[2026.11.10-13.18.05:505][  0]LogFlightSimScenario: Display: trimmed state\n[2026.11.10-13.18.05:506][  0]LogFlightSimScenario: Display:   altitude 1600.000 m  CAS 350.000 kt  heading 345.000 deg  AGL 259.8 m  36.090000/-112.000000\n[2026.11.10-13.18.05:506][  0]LogFlightSimScenario: Display:   engine 0  throttle 0.339013  mixture 1.000000\n[2026.11.10-13.18.05:507][  0]LogFlightSimScenario: Display:   engine 1  throttle 0.339013  mixture 1.000000\n[2026.11.10-13.18.05:507][  0]LogFlightSimScenario: Display:   latched  elevator 0.000000  pitch trim -0.044450  aileron 0.000000  rudder -0.000000  gear 0.0\n[2026.11.10-13.18.05:508][  0]LogFlightSimRender: Display: waiting for shader compilation\n[2026.11.10-13.18.05:508][  0]LogFlightSimWeather: Display: cloud VolumetricCloudComponent (VolumetricCloud_0): /Temp/Untitled_1.Untitled:PersistentLevel.VolumetricCloud_0.VolumetricCloudComponent.MID_M_FlightSimCloudLayers_0, domain 3, used_with_volumetric_cloud yes, compiled\n[2026.11.10-13.18.05:509][  0]LogFlightSimRender: Display: warm-up: 16 captures (capture watchdog 300 s, gpu drain on)\n[2026.11.10-13.18.10:773][  0]LogD3D11RHI: Error: Result failed with error DXGI_ERROR_DEVICE_REMOVED DXGI_ERROR_DEVICE_HUNG\n[2026.11.10-13.18.12:775][  0]LogWindows: Error: appError called: Fatal error: [File:D:\\build\\++UE5\\Sync\\Engine\\Source\\Runtime\\Windows\\D3D11RHI\\Private\\D3D11Util.cpp] [Line: 166]\nUnreal Engine is exiting due to D3D device being lost. (Error: 0x887A0006 - 'HUNG')\n[2026.11.10-13.18.12:775][  0]LogWindows: Windows GetLastError: The operation completed successfully. (0)",
+      "hero_lighting": {
+        "intent": "desert_cross_relief",
+        "time_of_day": "2026-07-15T13:52Z",
+        "heading_deg": 345,
+        "date": "2026-07-15",
+        "when_utc": "2026-07-15T13:52:00Z",
+        "sun_elevation_deg": 15.984,
+        "sun_azimuth_deg": 74.765,
+        "relative_azimuth_deg": 89.765,
+        "wanted_elevation_deg": 16.0,
+        "wanted_relative_azimuth_deg": 90.0,
+        "elevation_error_deg": -0.016,
+        "relative_azimuth_error_deg": -0.235,
+        "camera_yaw_offset_deg": 0.0,
+        "basis": "hero lighting director: desert_cross_relief -- low morning cross-light from camera right: every butte throws a long shadow across the frame, which is what reads relief in a desert. Realised by the time of day (2026-07-15T13:52Z, sun 16.0 deg up at 74.8 deg, NOAA solar position) and the heading (345 deg); no second sun, no moved light",
+        "prompt": "chase view of the j11 at 1600 m over the desert, heading 345 for 6 seconds",
+        "heading_compiled_deg": 345.0
+      },
+      "camera_framing": {
+        "offset_forward_m": -74.65578014492755,
+        "offset_right_m": 0.0,
+        "offset_up_m": 10.665111449275363,
+        "basis": "chase offset derived from this airframe's own measured mesh length (no calibrated table entry)"
+      }
+    },
+    "a": {},
+    "c": {},
+    "d": {}
+  }
+}
