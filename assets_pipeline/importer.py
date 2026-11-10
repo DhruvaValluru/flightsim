@@ -305,36 +305,70 @@ def is_imported(name: str) -> bool:
             and not missing_assets(manifest) and not stale_assets(manifest))
 
 
+#: Every git call on a model source runs with these (render-machine finding,
+#: docs/visual/PROBE_LOG.md "## render-machine", 2026-11-09): a Windows
+#: machine whose global core.autocrlf is true checked the J11 source out with
+#: CRLF line endings, so 13 package_files pins (sha256 of the bytes on disk)
+#: failed aircraft.package_pin. The pins are of the committed bytes; the
+#: checkout must be byte-for-byte the blob, on every platform.
+GIT_BYTES = ("-c", "core.autocrlf=false", "-c", "core.eol=lf")
+
+
+def _git(source_dir: Path, *args: str) -> list:
+    """``git <GIT_BYTES> -C <source_dir> <args>``."""
+    return ["git", *GIT_BYTES, "-C", str(source_dir), *args]
+
+
+def _pin_line_endings(source_dir: Path, report: Report = print) -> bool:
+    """Store core.autocrlf=false in the source repo's own config (so a git
+    run by hand there keeps the bytes too). Returns True when it was not
+    already false: the working tree may hold converted files, and the caller
+    rewrites them from the index."""
+    current = subprocess.run(_git(source_dir, "config", "--local", "--get", "core.autocrlf"),
+                             capture_output=True, text=True, encoding="utf-8")
+    subprocess.run(_git(source_dir, "config", "--local", "core.autocrlf", "false"), check=True)
+    if current.returncode == 0 and current.stdout.strip().lower() == "false":
+        return False
+    report("source line endings pinned (core.autocrlf=false in its own config)")
+    return True
+
+
 def fetch_source(config: Dict, config_path: Path,
                  report: Report = print) -> Path:
-    """The model repo at the PINNED commit -- shallow, verified, idempotent."""
+    """The model repo at the PINNED commit -- shallow, verified, idempotent,
+    and byte-for-byte the committed blobs (GIT_BYTES)."""
     source_dir = (config_path.parent / config["source_dir"]).resolve()
     repo_url = config["license"]["repo"]
     commit = config["license"]["commit"]
     head = source_dir / ".git"
     if head.is_dir():
-        actual = subprocess.run(["git", "-C", str(source_dir), "rev-parse",
-                                 "HEAD"], capture_output=True, text=True)
+        actual = subprocess.run(_git(source_dir, "rev-parse", "HEAD"),
+                                capture_output=True, text=True, encoding="utf-8")
         if actual.returncode == 0 and actual.stdout.strip() == commit:
-            report(f"source already at {commit[:12]}")
+            if _pin_line_endings(source_dir, report):
+                # An earlier checkout under core.autocrlf=true: git's index
+                # says the files are clean, so only a fresh checkout from the
+                # index rewrites them with the committed bytes.
+                subprocess.run(_git(source_dir, "rm", "-r", "-q", "--cached", "."), check=True)
+                subprocess.run(_git(source_dir, "reset", "-q", "--hard", commit), check=True)
+                report(f"source at {commit[:12]} checked out again with the committed bytes")
+            else:
+                report(f"source already at {commit[:12]}")
             return source_dir
         report("source present but not at the pinned commit; re-fetching")
     source_dir.mkdir(parents=True, exist_ok=True)
     if not head.is_dir():
-        subprocess.run(["git", "init", "-q", str(source_dir)], check=True)
-        subprocess.run(["git", "-C", str(source_dir), "remote", "add",
-                        "origin", repo_url], check=True)
+        subprocess.run(["git", *GIT_BYTES, "init", "-q", str(source_dir)], check=True)
+        subprocess.run(_git(source_dir, "remote", "add", "origin", repo_url), check=True)
+    _pin_line_endings(source_dir, report)
     report(f"fetching {repo_url} @ {commit[:12]} (shallow)")
-    fetched = subprocess.run(["git", "-C", str(source_dir), "fetch",
-                              "--depth", "1", "origin", commit])
+    fetched = subprocess.run(_git(source_dir, "fetch", "--depth", "1", "origin", commit))
     if fetched.returncode != 0:
         # A host that refuses arbitrary-SHA shallow fetches gets the full
         # history instead; the checkout below still pins the commit.
         report("shallow fetch refused; fetching full history")
-        subprocess.run(["git", "-C", str(source_dir), "fetch", "origin"],
-                       check=True)
-    subprocess.run(["git", "-C", str(source_dir), "checkout", "-q", commit],
-                   check=True)
+        subprocess.run(_git(source_dir, "fetch", "origin"), check=True)
+    subprocess.run(_git(source_dir, "checkout", "-q", commit), check=True)
     return source_dir
 
 
