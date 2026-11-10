@@ -238,8 +238,9 @@ _COCKPIT_BASIS: Dict[str, str] = {}
 
 
 def _fdm_locations(aircraft: str) -> Dict[str, tuple]:
-    """The FDM's EYEPOINT and CG <location>s, metres in the structural
-    frame (x aft, y right, z up), by name; empty when unreadable."""
+    """The FDM's EYEPOINT, CG and VRP <location>s, metres in the
+    structural frame (x aft, y right, z up), by name; empty when
+    unreadable."""
     path = _fdm_xml(_fdm_name(aircraft)) if aircraft else None
     found: Dict[str, tuple] = {}
     if path is None:
@@ -250,7 +251,7 @@ def _fdm_locations(aircraft: str) -> Dict[str, tuple]:
         root = ET.parse(path).getroot()
         for loc in root.iter("location"):
             name = loc.get("name")
-            if name in ("EYEPOINT", "CG") and name not in found:
+            if name in ("EYEPOINT", "CG", "VRP") and name not in found:
                 scale = {"IN": _INCH_M, "M": 1.0}.get(str(loc.get("unit", "IN")).upper())
                 if scale is None:
                     continue
@@ -260,14 +261,17 @@ def _fdm_locations(aircraft: str) -> Dict[str, tuple]:
     return found
 
 
-def _model_pilot_eye_actor_m(aircraft: str) -> Optional[tuple]:
+def _model_pilot_eye_actor_m(aircraft: str, vrp: Optional[tuple] = None) -> Optional[tuple]:
     """(actor-frame point in metres, basis) of the aircraft config's
     ``views.pilot_eye``, or None. The converted mesh manifest's own
     ``views.pilot_eye.actor_cm`` when it is on this machine (the model
     point mapped to the actor frame plus the MEASURED mesh origin); else
     the config's model point mapped the same way with the model origin
-    taken at the structural datum (the J-11's measured origin is 0.0078,
-    0, -10.57 cm from it)."""
+    taken at the FDM's VRP (``vrp``, structural metres; the structural
+    datum when the FDM states none). The VRP is the convention FlightGear
+    models are built about: the J-11's VRP is the datum and its measured
+    origin 0.0078, 0, -10.57 cm from it; the c172p's measured origin is
+    0.10 m aft of its VRP, where the datum would be 1.2 m off."""
     manifest = _MESH_GENERATED_DIR / aircraft / "mesh_manifest.json"
     try:
         view = json.loads(manifest.read_text(encoding="utf-8"))["views"]["pilot_eye"]
@@ -282,8 +286,15 @@ def _model_pilot_eye_actor_m(aircraft: str) -> Optional[tuple]:
         x, y, z = (float(v) for v in model)
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    return ((-x + 0.0, y, z), "the aircraft config's views.pilot_eye, model origin at the "
-                              "structural datum (no mesh manifest on this machine)")
+    if vrp is not None:
+        origin = (-vrp[0] + 0.0, vrp[1], vrp[2])
+        where = "the FDM's VRP"
+    else:
+        origin = (0.0, 0.0, 0.0)
+        where = "the structural datum (the FDM states no VRP)"
+    return ((-x + origin[0] + 0.0, y + origin[1], z + origin[2]),
+            f"the aircraft config's views.pilot_eye, model origin at {where} "
+            f"(no mesh manifest on this machine)")
 
 
 def cockpit_offset_basis(aircraft: str) -> Optional[str]:
@@ -311,7 +322,8 @@ def derive_cockpit_offset(aircraft: str) -> Optional[tuple]:
     result = None
     found = _fdm_locations(key) if key else {}
     cg = found.get("CG")
-    model_eye = _model_pilot_eye_actor_m(key) if (key and cg is not None) else None
+    model_eye = (_model_pilot_eye_actor_m(key, found.get("VRP"))
+                 if (key and cg is not None) else None)
     if model_eye is not None:
         (ex, ey, ez), source = model_eye
         cg_actor = (-cg[0], cg[1], cg[2])

@@ -374,8 +374,9 @@ def test_the_cockpit_station_comes_from_each_airframe_s_fdm(monkeypatch, tmp_pat
         CameraSpec, derive_cockpit_offset
 
     # Round 2 (cockpit-airframe): an airframe whose config states the
-    # model's pilot eye (the J-11: views.pilot_eye) is placed there; one
-    # without (the c172p) keeps the FDM EYEPOINT rule. No mesh manifest here.
+    # model's pilot eye (the J-11: views.pilot_eye; since round 1 web scene
+    # 12, the c172p too) is placed there; one without (the p51d) keeps the
+    # FDM EYEPOINT rule. No mesh manifest here.
     monkeypatch.setattr(camera_module, "_MESH_GENERATED_DIR", tmp_path)
     monkeypatch.setattr(camera_module, "_COCKPIT_CACHE", {})
     monkeypatch.setattr(camera_module, "_COCKPIT_BASIS", {})
@@ -389,8 +390,11 @@ def test_the_cockpit_station_comes_from_each_airframe_s_fdm(monkeypatch, tmp_pat
     assert camera.offset_forward_m.value == pytest.approx(j11[0])
     assert "pilot eye" in camera.offset_forward_m.frm
     c172 = derive_cockpit_offset("c172p")
-    assert c172 is not None and "EYEPOINT" in camera_module.cockpit_offset_basis("c172p")
-    assert c172[1] == pytest.approx(COCKPIT_EYE_NUDGE_M[1], abs=1e-3)   # centreline eye
+    assert c172 is not None and "pilot eye" in camera_module.cockpit_offset_basis("c172p")
+    assert c172[1] == pytest.approx(-0.21, abs=1e-3)   # the left seat (c172p-views.xml)
+    p51d = derive_cockpit_offset("p51d")
+    assert p51d is not None and "EYEPOINT" in camera_module.cockpit_offset_basis("p51d")
+    assert p51d[1] == pytest.approx(COCKPIT_EYE_NUDGE_M[1], abs=1e-3)   # centreline eye
     assert derive_cockpit_offset("no_such_airframe") is None
     fallback = CameraSpec.defaulted("cockpit", "cockpit", aircraft="no_such_airframe")
     assert (fallback.offset_forward_m.value, fallback.offset_right_m.value,

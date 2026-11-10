@@ -435,5 +435,30 @@
       "value": 29.0,
       "source": "Cessna 172P main-tyre inflation pressure, from memory of the pilot's operating handbook [unverified here]"
     }
+  },
+  "views": {
+    "pilot_eye": {
+      "model_m": [
+        0.36,
+        -0.21,
+        0.273
+      ],
+      "pitch_deg": -12.0,
+      "fov_deg": 73.6,
+      "source": "c172p-views.xml (c172p-team/c172p at the pinned commit a15d83d1, included by c172p-main.xml) <view> <config> x-offset-m -0.21, y-offset-m 0.273, z-offset-m 0.36, pitch-offset-deg -12, default-field-of-view-deg 73.6: the left seat; FlightGear view offsets are x right, y up, z aft, so the model-frame point is (0.36, -0.21, 0.273) m. Read 2026-11-10 for round 1 web scene 12: the FDM EYEPOINT (c172p.xml, y 0) plus COCKPIT_EYE_NUDGE_M put the cockpit camera in the RIGHT seat, 0.25 m ahead of this eye. The model XML's -3 deg pitch is not applied, as the converter does not apply it to the mesh"
+    }
+  },
+  "beauty_mesh": {
+    "normals": "crease",
+    "two_sided": false,
+    "flip_objects": [
+      "glas_interior",
+      "glas_interior_back",
+      "glas_front_interior_left_side",
+      "glas_front_interior_right_side",
+      "leftwindow_interior",
+      "rightwindow_interior"
+    ],
+    "source": "round 1 web scene 12 (2026-11-10, C172 cockpit over the Grand Canyon): a dark faceted slab over about 80 % of the frame. c172-common.ac models its glazing twice: the outer shells (glas, leftwindow, rightwindow) face out, and inner shells (glas_interior 3 mm inside the windshield, glas_interior_back, glas_front_interior_*_side, left/rightwindow_interior; glass-alpha.png, trans 0.66, SURF 0x20) face the cabin (measured here from the pinned .ac: 97-100 % of their faces face the pilot's eye). A beauty render draws every glass slot with the OPAQUE M_AircraftGlass, so the inner windshield shell was the slab (a z-buffer preview of body.obj from the cockpit camera put glas_interior on 87 % of the frame). body_beauty.obj writes those six shells facing out (flip_objects): culled from the cabin, behind the outer glass from outside, same positions and slots. two_sided false: the cabin's other SURF 0x20 faces keep the measured body's sidedness. body.obj, which every measure frame and every label pass draws, is unchanged"
   }
 }

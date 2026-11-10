@@ -238,6 +238,21 @@ def instance_name(slot):
     return LOOK_INSTANCE_PREFIX + slot
 
 
+#: ue_aircraft_materials.INVALID_ASSET_NAME_CHARACTERS (pinned equal by
+#: tests/test_aircraft_materials.py): UE replaces each with "_" in an
+#: imported asset's name, so panel.wcs.png is TEX_panel_wcs.
+INVALID_ASSET_NAME_CHARACTERS = "\"' ,/.:|&!~\n\r\t@#(){}[]=;^%$`\\*?<>"
+
+
+def texture_asset_name(file_name):
+    """ue_aircraft_materials.texture_asset_name: the imported texture of an
+    MTL ``map_Kd`` file."""
+    name = "TEX_" + os.path.splitext(os.path.basename(file_name))[0]
+    for character in INVALID_ASSET_NAME_CHARACTERS:
+        name = name.replace(character, "_")
+    return name
+
+
 # -- FlightGear material -> PBR (j11-package lane) ------------------------------
 #
 # A FlightGear .ac MATERIAL is fixed-function Phong: rgb (diffuse), spec
@@ -336,7 +351,7 @@ def plan_slots(materials, config, sources=None):
         vectors = {k: tuple(v) for k, v in CLASS_VECTORS[cls].items()}
         vectors.update({k: tuple(v) for k, v in config.get("class_vectors", {}).get(cls, {}).items()})
         if material.get("map_kd"):
-            texture = "TEX_" + os.path.splitext(material["map_kd"])[0]
+            texture = texture_asset_name(material["map_kd"])
             base, weight = (1.0, 1.0, 1.0, 1.0), 1.0
         else:
             texture = None
