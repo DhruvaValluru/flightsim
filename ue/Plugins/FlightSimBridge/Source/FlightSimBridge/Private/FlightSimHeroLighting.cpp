@@ -362,6 +362,12 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 		// -sky-light-scale= (webapp.runs _render folds it in), so the scene's
 		// knob, the no-Lumen fallback's x1.6 and it multiply as one product.
 		// Absent: the sky light's colour is untouched.
+		// Round 4: the colour is the model sky's moved ALL the way to grey
+		// (STATED_FILL_NEUTRAL_SHARE 1, a neutral fill), already 8-bit exact
+		// (hero_lighting.srgb8_stored), and the ground's lower-hemisphere
+		// luminance above arrives divided by this colour and intensity_scale
+		// (hero_lighting.plan_sidecar), because the light's colour multiplies
+		// both hemispheres of the capture: the drawn ground stays albedo x E / pi.
 		const TSharedPtr<FJsonObject>* SkyFill = nullptr;
 		if (Plan.IsValid() && Plan->TryGetObjectField(TEXT("sky_light"), SkyFill) && SkyFill != nullptr)
 		{
@@ -387,8 +393,9 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 				TEXT("-sky-light-scale= (webapp.runs _render multiplies the lighting block's fill by it)"));
 			FillRecord->SetNumberField(TEXT("intensity"), Sky->Intensity);
 			FillRecord->SetStringField(TEXT("basis"),
-				TEXT("a stated sky fill lit as a fill: the model sky's blue moved toward grey, ")
-				TEXT("its luminance kept (core/scene/hero_lighting.py stated_fill_tint, UNCALIBRATED)"));
+				TEXT("a stated sky fill lit as a neutral fill: the model sky's blue moved to grey, ")
+				TEXT("its luminance kept, the ground hemisphere compensated ")
+				TEXT("(core/scene/hero_lighting.py stated_fill_tint, plan_sidecar; UNCALIBRATED)"));
 			SkyRecord->SetObjectField(TEXT("stated_fill"), FillRecord);
 		}
 		Sky->SetCaptureIsDirty();
