@@ -1947,6 +1947,71 @@ Read `git diff claude/vibrant-gauss-olema4...worktree-wf_d78a46c2-467-4` and tri
 - Not this lane: the utf-8 failure in tests/test_platform.py (tests/test_gate_v_visual.py,
   tests/test_swarm_viz.py) is fixed on claude/vibrant-gauss-olema4 by 43795f40. It clears when the lane merges.
 
+## exposure-storm
+
+Round 2, 2026-11-09, from the first Windows renders (ef361bd6, D3D11 /
+PCD3D_SM5, no Lumen GI). Written on the Mac; nothing here was rendered.
+
+**Shot c black (luma mean 3.6/255, p90 6.4/255, 52.7 % crushed).** Cause, read
+from the records: with a time of day stated (hero lighting sets
+2026-06-21T15:13Z, sun 28 deg) and FLIGHTSIM_SKY=physical, the -sky= plan owned
+the EV100 (its clear-sky incident meter, about EV100 14.1), and the beauty look
+wrote `exposure.ev100: null` ("the -sky= plan's EV100 stands"), so the rain
+deck's correction never applied. On top of that no Lumen GI ran, so the fill
+under the deck was the sky light alone. Fix:
+
+- ONE owner, `core.scene.beauty_look.exposure_target`: base (band, or the
+  plan's clear-sky EV100) + scene_light stops (the deck's
+  OVERCAST_ILLUMINANCE_FRACTION, the same number hero lighting uses; or the
+  lighting look's sun/fill scales) + grade offset - brightness stops. On the
+  -sky= path the host keeps the plan's camera and moves only
+  AutoExposureBias (`beauty_look.applied.exposure.applied` = "yes, over the
+  -sky= plan's camera", with `sky_plan_bias` beside the new one).
+- The exposure meter: the storm meter's loop, run for a beauty look that owns
+  the exposure under a deck (always) or when
+  `DoesPlatformSupportLumenGI(GMaxRHIShaderPlatform)` is false.
+  `beauty_look.applied.exposure.meter` records the shader platform, whether
+  Lumen GI is supported, and whether and why the meter ran;
+  `look_applied.storm_exposure.trigger` says which trigger opened it.
+
+Probes (UNCALIBRATED: `EXPOSURE_METER_TARGET_P90`, the 0.25 deck fraction):
+1. Shot c as rendered: read `beauty_look.applied.exposure` (expect ev100
+   about 2 stops under the plan's) and `look_applied.storm_exposure`
+   (p90 before and after, stops opened). Pass: gate_v_visual exposure p90 in
+   [120, 240], crushed fraction well under 0.5.
+2. The same shot with `-storm-meter-target=0.35` and `=0.55`: pick the target
+   whose frame reads like an overcast rain day, set
+   `EXPOSURE_METER_TARGET_P90["rain"]`.
+3. On a DX12 SM6 machine (Lumen runs): shot c again. The meter's
+   `stops_opened` is the deck's real darkness beyond the 2-stop prediction;
+   if it is consistently N stops, move the deck fraction toward 0.25 / 2^N.
+
+**Gate 6 beauty "exposure does not breathe" FAIL (sky band 12.51/255, limit
+8; 5.87 at 43795f40; the manual step control 12.38).** Gate 6 beauty runs
+with no `-beauty-look=` sidecar, so local exposure (neutral by engine default
+without a sidecar), the camera-motion layer (the cinematic switch only),
+lightning (storm only) and the auto-exposure range (manual exposure) are not
+in that render. What changed between the two commits for EVERY beauty render
+is hero lighting turning on the sun's screen-space light-shaft OCCLUSION
+(OcclusionMaskDarkness 0.4) with the LightShafts show flag. In 5.7.4 the mask
+is the frame's own depth blurred toward the sun's projected position, run
+whenever the sun is ahead of the camera (LightShaftRendering.cpp, W > 0),
+and it darkens the height fog's in-scatter (FogRendering.cpp
+OcclusionTexture), which covers the horizon sky. A bank swings the terrain
+through the mask, so the sky band moves with the roll. Fix: occlusion off on
+the beauty sun (FlightSimHeroLighting.cpp records why); shafts stay from the
+volumetric fog's and the atmosphere's world-space shadows; light-shaft bloom
+stays (threshold 6, the disc only). For beauty clips WITH a sidecar, local
+exposure's highlight scale was 0.85: the bilateral grid re-toned the sky by
+its neighbourhood as the horizon swung. It is now 1.0 (engine default); the
+shadow scale 0.8 still lifts the valleys.
+
+Probe 4 (confirms the cause): Gate 6 beauty at this commit. Pass: the sky
+band under 8/255 and the manual step under 8/255. If it still breathes,
+render `full` once with the beauty LightShafts show flag off
+(a local edit, not committed) to separate the shafts from the volumetric
+fog's temporal reprojection, the next suspect.
+
 ## render-machine
 
 Windows laptop (p3-windows), 2026-11-09. Intel(R) Graphics, driver 32.0.101.7076,

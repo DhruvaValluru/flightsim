@@ -260,15 +260,32 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 		SunLight->ContactShadowNonCastingIntensity = 0.0f;
 		SunRecord->SetNumberField(TEXT("contact_shadow_length_cm_world"), SunLight->ContactShadowLength);
 
-		// Light shafts: occlusion (fog/atmosphere in-scatter darkened behind
-		// the ridge and the airframe) and bloom (the shafts themselves).
-		SunLight->SetEnableLightShaftOcclusion(true);
+		// Light shafts: bloom (the shafts themselves) only. Round 2
+		// (exposure-storm, 2026-11-09): the SCREEN-SPACE occlusion is off.
+		// Its mask is the frame's own depth, blurred radially toward the
+		// sun's projected position (5.7.4 LightShaftRendering.cpp, run
+		// whenever the sun is in front of the camera, W > 0), and it darkens
+		// the height fog's in-scatter, which covers the horizon sky
+		// (FogRendering.cpp OcclusionTexture). When the aircraft banks, the
+		// terrain swings through that mask and the sky band's brightness
+		// moves with it: Gate 6 beauty's "exposure does not breathe" went
+		// from 5.87 to 12.51/255 when this lane turned it on for every beauty
+		// render. The shafts behind a ridge stay, from world-space shadows
+		// that do not depend on what is on screen: the volumetric fog's
+		// volumetric shadow (below) and the atmosphere's shadowing. This
+		// call runs after the world lane's sun-shafts row, so it is the
+		// owner of record for occlusion; that row's darkness is inert.
+		SunLight->SetEnableLightShaftOcclusion(false);
 		SunLight->SetOcclusionMaskDarkness(HeroLightingShaftOcclusionDarkness);
 		SunLight->SetEnableLightShaftBloom(!bOvercast);
 		SunLight->SetBloomScale(HeroLightingShaftBloomScale);
 		SunLight->SetBloomThreshold(HeroLightingShaftBloomThreshold);
 		SunLight->SetBloomMaxBrightness(HeroLightingShaftBloomMaxBrightness);
-		SunRecord->SetBoolField(TEXT("light_shaft_occlusion"), true);
+		SunRecord->SetBoolField(TEXT("light_shaft_occlusion"), false);
+		SunRecord->SetStringField(TEXT("light_shaft_occlusion_basis"),
+			TEXT("off: screen-space, so it re-tones the horizon sky as the bank moves the terrain on ")
+			TEXT("screen (Gate 6 beauty breathing); overrides the world lane's sun-shafts row; shafts ")
+			TEXT("come from the volumetric fog's and the atmosphere's world-space shadows"));
 		SunRecord->SetBoolField(TEXT("light_shaft_bloom"), !bOvercast);
 		SunRecord->SetNumberField(TEXT("light_shaft_bloom_scale"), HeroLightingShaftBloomScale);
 		SunRecord->SetNumberField(TEXT("light_shaft_bloom_threshold"), HeroLightingShaftBloomThreshold);

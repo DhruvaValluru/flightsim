@@ -14,6 +14,9 @@
 #include "GameFramework/Actor.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
+#include "RHIShaderPlatform.h"   // GMaxRHIShaderPlatform (exposure meter: the GI path)
+#include "RHIStrings.h"          // LexToString(EShaderPlatform)
+#include "RenderUtils.h"         // DoesPlatformSupportLumenGI
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -42,6 +45,11 @@ namespace
 		bool bExposureApplied = false;
 		double Ev100 = 0.0;
 		FString ExposureSource;
+		// Round 2: the exposure meter the commandlet runs before frame 0
+		// (ExposureMeter): under a deck, or when Lumen GI does not run.
+		bool bMeter = false;
+		double MeterTargetP90 = 0.0;
+		FString MeterTrigger;
 		int32 Frames = 0;
 		double FocusMinM = TNumericLimits<double>::Max();
 		double FocusMaxM = 0.0;
@@ -287,6 +295,17 @@ namespace
 			const bool bAsked = ExposureJson->TryGetNumberField(TEXT("ev100"), Ev100);
 			const bool bManual = Settings.bOverride_AutoExposureMethod &&
 				Settings.AutoExposureMethod == EAutoExposureMethod::AEM_Manual;
+			// Round 2, ONE exposure owner: the sidecar's EV100 is the -sky=
+			// plan's clear-sky meter moved by the deck and the lighting look
+			// (core/scene/beauty_look.py exposure_target). With -sky= on the
+			// command line the commandlet never applies a card triple (the two
+			// are exclusive there), so the physical camera already set IS the
+			// plan's: kept, and only the compensation moves.
+			bool bOverSkyPlan = false;
+			ExposureJson->TryGetBoolField(TEXT("over_sky_plan"), bOverSkyPlan);
+			FString SkyPlanArg;
+			const bool bSkyPlanRun = CommandLine != nullptr &&
+				FParse::Value(CommandLine, TEXT("sky="), SkyPlanArg) && !SkyPlanArg.IsEmpty();
 			if (!bAsked)
 			{
 				Echo->SetStringField(TEXT("applied"), TEXT("no: the sidecar states no EV100 (the -sky= plan, or a sun not in lux); the exposure stands"));
@@ -296,9 +315,39 @@ namespace
 				// -AutoExposure (the negative control) or the void tier.
 				Echo->SetStringField(TEXT("applied"), TEXT("no: the capture is not under manual exposure"));
 			}
+			else if (bPhysicalAlready && bOverSkyPlan && bSkyPlanRun)
+			{
+				const double PlanBias = Settings.AutoExposureBias;
+				const double ShutterS = Settings.CameraShutterSpeed > 0.0f
+					? 1.0 / static_cast<double>(Settings.CameraShutterSpeed) : 0.0;
+				if (!(ShutterS > 0.0) || !(Settings.CameraISO >= 1.0f) || !(Settings.DepthOfFieldFstop > 0.0f))
+				{
+					return BeautyLookFail(TEXT("the exposure over the -sky= plan: the plan's physical camera ")
+					                      TEXT("(f-number, shutter, ISO) is not set on the capture"));
+				}
+				const double CameraEv = FFlightSimBeautyLook::CameraEv100(
+					Settings.DepthOfFieldFstop, ShutterS, Settings.CameraISO);
+				Settings.bOverride_AutoExposureBias = true;
+				Settings.AutoExposureBias = static_cast<float>(CameraEv - Ev100);
+				State.bExposureApplied = true;
+				State.Ev100 = Ev100;
+				State.ExposureSource = FString::Printf(
+					TEXT("-beauty-look= EV100 %.2f over the -sky= plan's camera (f/%g, 1/%.0f s, ISO %g; ")
+					TEXT("compensation %.3f, the plan's was %.3f)"),
+					Ev100, Settings.DepthOfFieldFstop, Settings.CameraShutterSpeed, Settings.CameraISO,
+					Settings.AutoExposureBias, PlanBias);
+				Echo->SetStringField(TEXT("applied"), TEXT("yes, over the -sky= plan's camera"));
+				Echo->SetNumberField(TEXT("ev100"), Ev100);
+				Echo->SetNumberField(TEXT("camera_ev100"), CameraEv);
+				Echo->SetNumberField(TEXT("sky_plan_bias"), PlanBias);
+				Echo->SetNumberField(TEXT("CameraShutterSpeed"), Settings.CameraShutterSpeed);
+				Echo->SetNumberField(TEXT("CameraISO"), Settings.CameraISO);
+				Echo->SetNumberField(TEXT("AutoExposureBias"), Settings.AutoExposureBias);
+			}
 			else if (bPhysicalAlready)
 			{
-				// A card's exposure triple or the physical sky's camera wins.
+				// A card's exposure triple (or a -sky= plan the sidecar does not
+				// claim) wins.
 				Echo->SetStringField(TEXT("applied"),
 					TEXT("no: the capture already meters through a physical camera (card triple or -sky= plan)"));
 			}
@@ -342,6 +391,69 @@ namespace
 				Echo->SetNumberField(TEXT("CameraISO"), Settings.CameraISO);
 				Echo->SetNumberField(TEXT("AutoExposureBias"), Settings.AutoExposureBias);
 			}
+			// -- the exposure meter (round 2) -----------------------------
+			// The prediction above cannot know how dark the engine's own deck
+			// renders, nor how much fill is missing when Lumen GI does not
+			// run (the D3D11 / SM5 laptop: shot c at a luma mean of 3.6/255).
+			// The commandlet meters the frame once before frame 0 when this
+			// look owns the exposure and either holds (ExposureMeter).
+			const TSharedPtr<FJsonObject>* MeterJson = nullptr;
+			const bool bLumenGi = DoesPlatformSupportLumenGI(GMaxRHIShaderPlatform);
+			TSharedPtr<FJsonObject> MeterEcho = MakeShared<FJsonObject>();
+			MeterEcho->SetStringField(TEXT("shader_platform"), LexToString(GMaxRHIShaderPlatform));
+			MeterEcho->SetBoolField(TEXT("lumen_gi_supported"), bLumenGi);
+			MeterEcho->SetStringField(TEXT("lumen_gi_basis"),
+				TEXT("DoesPlatformSupportLumenGI(GMaxRHIShaderPlatform) (RenderUtils.h; r.Lumen.Supported, ")
+				TEXT("r.Lumen.Supported.SM5): a cvar that reads 1 does not make Lumen run"));
+			if (ExposureJson->TryGetObjectField(TEXT("meter"), MeterJson) && MeterJson != nullptr &&
+			    MeterJson->IsValid())
+			{
+				bool bDeck = false;
+				double DeckTarget = 0.0, NoLumenTarget = 0.0;
+				(*MeterJson)->TryGetBoolField(TEXT("deck"), bDeck);
+				if (!BeautyLookNumber(*MeterJson, TEXT("target_p90_luma"), DeckTarget) ||
+				    !BeautyLookNumber(*MeterJson, TEXT("no_lumen_gi_target_p90_luma"), NoLumenTarget))
+				{
+					return false;
+				}
+				if (!(DeckTarget > 0.0 && DeckTarget < 1.0) || !(NoLumenTarget > 0.0 && NoLumenTarget < 1.0))
+				{
+					return BeautyLookFail(TEXT("exposure.meter targets must be sRGB luma fractions in (0, 1)"));
+				}
+				if (!State.bExposureApplied)
+				{
+					MeterEcho->SetStringField(TEXT("runs"), TEXT("no: this look does not own the exposure"));
+				}
+				else if (bDeck)
+				{
+					State.bMeter = true;
+					State.MeterTargetP90 = DeckTarget;
+					State.MeterTrigger = TEXT("deck");
+				}
+				else if (!bLumenGi)
+				{
+					State.bMeter = true;
+					State.MeterTargetP90 = NoLumenTarget;
+					State.MeterTrigger = TEXT("no_lumen_gi");
+				}
+				else
+				{
+					MeterEcho->SetStringField(TEXT("runs"), TEXT("no: no deck, and Lumen GI runs"));
+				}
+				if (State.bMeter)
+				{
+					MeterEcho->SetStringField(TEXT("runs"), TEXT("yes"));
+					MeterEcho->SetStringField(TEXT("trigger"), State.MeterTrigger);
+					MeterEcho->SetNumberField(TEXT("target_p90_luma"), State.MeterTargetP90);
+					MeterEcho->SetStringField(TEXT("result"),
+						TEXT("look_applied.storm_exposure (the commandlet's meter loop)"));
+				}
+			}
+			else
+			{
+				MeterEcho->SetStringField(TEXT("runs"), TEXT("no: the sidecar states no meter"));
+			}
+			Echo->SetObjectField(TEXT("meter"), MeterEcho);
 			State.Applied->SetObjectField(TEXT("exposure"), Echo);
 		}
 
@@ -638,6 +750,18 @@ TSharedPtr<FJsonObject> FFlightSimBeautyLook::Record()
 		TEXT("masks, class, depth and boxes are separate captures of the same frame without this look; ")
 		TEXT("no visual-only actor is added (nothing occludes the aircraft in beauty that the masks lack)"));
 	return Root;
+}
+
+bool FFlightSimBeautyLook::ExposureMeter(double& TargetP90, FString& Trigger)
+{
+	const FBeautyLookState& State = BeautyLookState();
+	if (!State.bApplied || !State.bExposureApplied || !State.bMeter)
+	{
+		return false;
+	}
+	TargetP90 = State.MeterTargetP90;
+	Trigger = State.MeterTrigger;
+	return true;
 }
 
 const FString& FFlightSimBeautyLook::LastError()

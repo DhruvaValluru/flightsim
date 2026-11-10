@@ -50,8 +50,15 @@ What is decided here, and on what basis
   (core/scene/world_beauty.py select_preset, the same selector the world
   lane draws with) and the lighting look's sun and sky-fill scales move the
   target by log2 of the metered ratio, and its ``brightness_ev`` stops land
-  on top. A card's exposure triple or the physical sky's plan wins over the
-  band (the host keeps them, and says so).
+  on top. ONE owner (:func:`exposure_target`), two bases: the band, or,
+  with a -sky= plan, the plan's own clear-sky meter EV100 (round 2: before
+  it the plan's EV100 stood alone, so a storm under a deck was metered for
+  a clear sun and rendered black: the first Windows shot c, luma mean
+  3.6/255). The plan's camera is kept and only the compensation moves. A
+  card's exposure triple still wins (the host keeps it, and says so). Then
+  the frame is METERED once before frame 0 under a deck, or when Lumen GI
+  does not run (:data:`EXPOSURE_METER_TARGET_P90`): the prediction is
+  opened to what the engine really drew, and held over the clip.
 * **Tonemap.** UE's filmic (ACES-fitted) tonemapper with its 5.7
   constructor defaults set EXPLICITLY (read from Engine/Private/Scene.cpp),
   so the record names the curve rather than "default".
@@ -264,6 +271,28 @@ PRESET_GRADES: Dict[str, Optional[str]] = {
 #: number both lanes read).
 DECK_PRESETS = ("storm", "rain", "overcast")
 
+#: The exposure meter (FlightSimRenderCommandlet.cpp, the storm meter's
+#: loop): the beauty frame read back once before frame 0, its 90th-percentile
+#: sRGB luma opened to this target by AutoExposureBias, never closed, then
+#: constant over the clip (no breathing). The PREDICTED EV100 (the band or the
+#: -sky= plan, plus :func:`scene_light`'s deck stops) is the starting point;
+#: the meter measures what the prediction cannot know: how dark the engine's
+#: own deck and rain really render, and how much of the fill is missing when
+#: Lumen GI does not run (the D3D11 / SM5 laptop, 2026-11-09: shot c at a
+#: luma mean of 3.6/255). Per world preset under a deck; ``no_lumen_gi`` is
+#: the target any beauty look meters to when the host finds Lumen GI
+#: unsupported on its shader platform (DoesPlatformSupportLumenGI). The bright
+#: end of a clear frame is sunlit ground and sky, already above it, so the
+#: meter changes nothing there; it only stops a frame from going black.
+#: UNCALIBRATED: set by probe render on the render machine (shot c under rain
+#: and an overcast probe, the p90 luma read before and after).
+EXPOSURE_METER_TARGET_P90: Dict[str, float] = {
+    "storm": 0.40,
+    "rain": 0.45,
+    "overcast": 0.55,
+    "no_lumen_gi": 0.45,
+}
+
 # -- lenses --------------------------------------------------------------------
 
 #: The two lens presets. Keys in capitals are UE FPostProcessSettings names,
@@ -324,8 +353,19 @@ DEFAULT_SENSOR_WIDTH_MM = 36.0
 #: shadowed valley and hold the snow without moving the global exposure.
 #: UNCALIBRATED: set by probe render on the render machine (the Matterhorn
 #: north-face probe: valley floor and snowfield in one frame).
+#:
+#: Round 2 (2026-11-09, the first Windows renders): the HIGHLIGHT scale is 1
+#: (the engine's own default, Engine/Private/Scene.cpp), so local exposure
+#: never re-tones the sky. The bilateral grid adapts each pixel to the
+#: blurred luminance of its neighbourhood (a kernel half the frame wide), and
+#: a highlight scale below 1 pulled the sky band toward whatever the terrain
+#: beside it was doing: a bank that swings the horizon moves the sky band's
+#: tone frame to frame, which is exposure breathing by another name (Gate 6's
+#: clause). Only the SHADOW side stays below 1: it lifts the shadowed valley
+#: (darker than mid grey), which is what this lane is for, and the sky,
+#: always above mid grey, is never on that side of the curve.
 LOCAL_EXPOSURE: Dict[str, float] = {
-    "LocalExposureHighlightContrastScale": 0.85,
+    "LocalExposureHighlightContrastScale": 1.0,
     "LocalExposureShadowContrastScale": 0.8,
     "LocalExposureDetailStrength": 1.0,
     "LocalExposureBlurredLuminanceBlend": 0.6,
@@ -363,7 +403,7 @@ REFLECTIONS: Dict[str, Any] = {
 #: The constants a probe render must set, as the record lists them.
 UNCALIBRATED: Tuple[str, ...] = (
     "EV100_BANDS", "GRADES", "GOLDEN_HOUR_BELOW_DEG", "LENSES", "LOCAL_EXPOSURE",
-    "REFLECTIONS",
+    "REFLECTIONS", "EXPOSURE_METER_TARGET_P90",
 )
 
 
@@ -561,6 +601,35 @@ def scene_light(elevation_deg: float, altitude_m: float = 0.0, *,
             "horizontal_lux": round(clear * ratio, 1), "basis": basis}
 
 
+def exposure_target(base_ev100: float, light: Mapping[str, Any], grade_offset: float,
+                    brightness_ev: float) -> float:
+    """THE beauty EV100, one formula for both bases: the base (the elevation
+    band, or the -sky= plan's incident-meter EV100) moved by the scene's own
+    light (:func:`scene_light`: the deck's overcast fraction, or the
+    lighting look's sun and fill scales), the grade's offset, and the
+    lighting look's brightness stops. Lower EV100 = more exposure: a dimmer
+    scene opens by log2(ratio) stops."""
+    return float(base_ev100) + float(light["stops"]) + float(grade_offset) - float(brightness_ev)
+
+
+def exposure_meter(world_preset: Optional[str]) -> Dict[str, Any]:
+    """The exposure meter's row (:data:`EXPOSURE_METER_TARGET_P90`): metered
+    under a deck preset; otherwise only when the host finds no Lumen GI."""
+    deck = world_preset in DECK_PRESETS
+    row: Dict[str, Any] = {
+        "deck": deck,
+        "target_p90_luma": (EXPOSURE_METER_TARGET_P90[str(world_preset)] if deck
+                            else EXPOSURE_METER_TARGET_P90["no_lumen_gi"]),
+        "no_lumen_gi_target_p90_luma": EXPOSURE_METER_TARGET_P90["no_lumen_gi"],
+        "when": ("always: a cloud deck's own darkness is measured, not guessed" if deck
+                 else "only when the host finds Lumen GI unsupported on its shader platform"),
+        "method": ("the beauty frame read back once before frame 0; the 90th percentile "
+                   "of its sRGB luma opened to the target by AutoExposureBias, never "
+                   "closed below this EV100, constant over the clip"),
+    }
+    return row
+
+
 def shutter_seconds(fps: float) -> float:
     """The 180-degree shutter's exposure time at ``fps``."""
     if not (isinstance(fps, (int, float)) and math.isfinite(fps) and fps > 0):
@@ -622,7 +691,8 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
                      sun_intensity_scale: Optional[float] = None,
                      sky_light_scale: Optional[float] = None,
                      brightness_ev: Optional[float] = None,
-                     camera_presets: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+                     camera_presets: Optional[Sequence[str]] = None,
+                     sky_exposure: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """The complete ``beauty_look.json``. Pure: same inputs, same bytes.
 
     ``sensor_width_mm``: one per camera pass, in the card's camera order
@@ -636,7 +706,13 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
     exposure therefore meters (:func:`scene_light`) and adds.
     ``camera_presets``: one per camera, in the same order as the sensor
     widths; a camera inside the aircraft (:data:`INSIDE_PRESETS`) gets no
-    depth of field (the host reads ``camera.focus_per_camera``)."""
+    depth of field (the host reads ``camera.focus_per_camera``).
+    ``sky_exposure``: the -sky= plan's ``exposure`` block (core/sky/plan.py).
+    With it, the beauty look OWNS the exposure on the physical-sky path too:
+    the plan's incident-meter EV100 is the base, moved by the same deck and
+    lighting stops as the band (:func:`exposure_target`), realised through
+    the plan's own camera (the host changes only the compensation). Without
+    it (no plan EV100 to start from) the plan's exposure stands, as before."""
     elevation = float(sun_elevation_deg)
     if not math.isfinite(elevation) or not -90.0 <= elevation <= 90.0:
         raise BeautyLookError(CONSTRAINT, f"a sun elevation of {sun_elevation_deg!r} deg "
@@ -663,22 +739,43 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
     aperture = float(lens_row["aperture_f"])
     cam_ev = camera_ev100(aperture, shutter)
 
+    light = scene_light(elevation, altitude_m, world_preset=world_preset,
+                        sun_intensity_scale=sun_intensity_scale,
+                        sky_light_scale=sky_light_scale)
+    horizontal = clear_sky_horizontal_lux(elevation, altitude_m)
+    grade_offset = float(grade_row["ev100_offset"])
     if physical_sky:
         sun = {"lux": None, "source": "physical_sky",
                "transmittance": SUN_TRANSMITTANCE_OWNER,
                "basis": "the -sky= plan lights the scene (core/sky/plan.py)"}
-        exposure: Dict[str, Any] = {
-            "ev100": None, "basis": "the -sky= plan's EV100 (core/sky/plan.py) stands"}
+        sky_ev, sky_camera = _sky_plan_exposure(sky_exposure)
+        if sky_ev is None:
+            exposure: Dict[str, Any] = {
+                "ev100": None,
+                "basis": ("the -sky= plan's EV100 (core/sky/plan.py) stands: no plan EV100 "
+                          "was handed to the beauty look")}
+        else:
+            # ONE owner: the plan meters a CLEAR sky; the deck (and the
+            # lighting look's scales) move it exactly as they move the band.
+            # The plan's camera is kept (its f-number is part of the EV100);
+            # only the compensation changes.
+            sky_aperture, sky_shutter, sky_iso = sky_camera
+            target = exposure_target(sky_ev, light, grade_offset, brightness)
+            exposure = _exposure_row(
+                target, base="sky_plan", base_ev100=sky_ev,
+                base_basis=("the -sky= plan's incident-meter EV100 for a clear sky "
+                            "(core/sky/plan.py ev100_for)"),
+                light=light, grade_offset=grade_offset, brightness=brightness,
+                world_preset=world_preset, aperture=sky_aperture, shutter=sky_shutter,
+                iso=sky_iso, cam_ev=camera_ev100(sky_aperture, sky_shutter, sky_iso),
+                horizontal=horizontal)
+            exposure["over_sky_plan"] = True
+            exposure["camera_basis"] = ("the -sky= plan's physical camera, kept: the host "
+                                        "changes only AutoExposureBias")
     else:
         sun = sun_lux_for(elevation, altitude_m, stated_sun_lux)
         band_ev, band_basis = ev100_band(elevation)
-        light = scene_light(elevation, altitude_m, world_preset=world_preset,
-                            sun_intensity_scale=sun_intensity_scale,
-                            sky_light_scale=sky_light_scale)
-        # Lower EV100 = more exposure: a dimmer scene opens by log2(ratio)
-        # stops, and the lighting look's brightness stops brighten on top.
-        target = band_ev + light["stops"] + float(grade_row["ev100_offset"]) - brightness
-        horizontal = clear_sky_horizontal_lux(elevation, altitude_m)
+        target = exposure_target(band_ev, light, grade_offset, brightness)
     sun["colour"] = ("the engine's per-pixel atmosphere transmittance (one model, the "
                      "physical sky's): no temperature band, the beauty host never tints "
                      "the sun")
@@ -691,29 +788,13 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
             "basis": ("the sun is not in lux (at or below the horizon): the host's "
                       "unitless sun and its own exposure stand")}
     elif not physical_sky:
-        exposure = {
-            "ev100": round(target, 4),
-            "band_ev100": band_ev,
-            "grade_ev100_offset": float(grade_row["ev100_offset"]),
-            "scene_light_stops": light["stops"],
-            "scene_light_basis": light["basis"],
-            "brightness_ev": brightness,
-            "world_preset": world_preset,
-            "basis": band_basis,
-            "method": "manual (physical camera + compensation), constant over the clip",
-            "aperture_f": aperture,
-            "shutter_s": round(shutter, 8),
-            "shutter_angle_deg": SHUTTER_ANGLE_DEG,
-            "iso": CAMERA_ISO,
-            "camera_ev100": round(cam_ev, 4),
-            "AutoExposureBias": round(cam_ev - target, 4),
-            "meter_ev100_reference": (round(meter_ev100(horizontal), 3)
-                                      if horizontal > 0.0 else None),
-            # The CLEAR-sky reference (hero_lighting reads it and applies its
-            # own overcast fraction); the scene's own light is the next key.
-            "meter_horizontal_lux_reference": round(horizontal, 1),
-            "meter_horizontal_lux_scene": light["horizontal_lux"],
-        }
+        exposure = _exposure_row(
+            target, base="band", base_ev100=band_ev, base_basis=band_basis, light=light,
+            grade_offset=grade_offset, brightness=brightness, world_preset=world_preset,
+            aperture=aperture, shutter=shutter, iso=CAMERA_ISO, cam_ev=cam_ev,
+            horizontal=horizontal)
+    if exposure.get("ev100") is not None:
+        exposure["meter"] = exposure_meter(world_preset)
 
     post = {key: value for key, value in lens_row.items()
             if key[0].isupper()}
@@ -766,6 +847,62 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
         plan["note"] += ("; PIXEL-MOVING effects on: "
                          + ", ".join(plan["pixel_effects"]["pixel_moving"]))
     return plan
+
+
+def _sky_plan_exposure(block: Optional[Mapping[str, Any]]
+                       ) -> Tuple[Optional[float], Tuple[float, float, float]]:
+    """(EV100, (f-number, shutter s, ISO)) from a -sky= plan's ``exposure``
+    block, or (None, ...) when there is none; a block that is there but
+    unreadable refuses by name rather than quietly keeping the plan's."""
+    if not block:
+        return None, (0.0, 0.0, 0.0)
+    try:
+        ev = float(block["ev100"])
+        cam = block["camera"]
+        aperture, per_s, iso = float(cam["fstop"]), float(cam["shutter_per_s"]), float(cam["iso"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BeautyLookError(CONSTRAINT, f"the -sky= plan's exposure block is unreadable "
+                                          f"({exc!r}); it needs ev100 and camera "
+                                          f"{{fstop, shutter_per_s, iso}}") from exc
+    if (not all(math.isfinite(v) for v in (ev, aperture, per_s, iso))
+            or min(aperture, per_s, iso) <= 0.0):
+        raise BeautyLookError(CONSTRAINT, f"the -sky= plan's exposure (EV100 {ev!r}, f/{aperture!r}, "
+                                          f"1/{per_s!r} s, ISO {iso!r}) is not a physical camera")
+    return ev, (aperture, 1.0 / per_s, iso)
+
+
+def _exposure_row(target: float, *, base: str, base_ev100: float, base_basis: str,
+                  light: Mapping[str, Any], grade_offset: float, brightness: float,
+                  world_preset: Optional[str], aperture: float, shutter: float, iso: float,
+                  cam_ev: float, horizontal: float) -> Dict[str, Any]:
+    """The sidecar's exposure block: the same keys on both bases."""
+    return {
+        "ev100": round(target, 4),
+        "owner": "beauty_look (core/scene/beauty_look.py exposure_target)",
+        "base": base,
+        "base_ev100": base_ev100,
+        # The first name of the base, kept for records written before round 2.
+        "band_ev100": base_ev100 if base == "band" else None,
+        "grade_ev100_offset": grade_offset,
+        "scene_light_stops": light["stops"],
+        "scene_light_basis": light["basis"],
+        "brightness_ev": brightness,
+        "world_preset": world_preset,
+        "basis": base_basis,
+        "method": "manual (physical camera + compensation), constant over the clip",
+        "aperture_f": aperture,
+        "shutter_s": round(shutter, 8),
+        "shutter_angle_deg": SHUTTER_ANGLE_DEG,
+        "iso": iso,
+        "camera_ev100": round(cam_ev, 4),
+        "AutoExposureBias": round(cam_ev - target, 4),
+        "meter_ev100_reference": (round(meter_ev100(horizontal), 3)
+                                  if horizontal > 0.0 else None),
+        # The CLEAR-sky reference (hero_lighting reads it and applies its
+        # own overcast fraction); the scene's own light is the next key.
+        "meter_horizontal_lux_reference": round(horizontal, 1),
+        "meter_horizontal_lux_scene": light["horizontal_lux"],
+    }
 
 
 def write_beauty_look(plan: Mapping[str, Any], path: Path) -> Path:

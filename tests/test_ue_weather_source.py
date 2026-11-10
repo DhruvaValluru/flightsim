@@ -322,7 +322,7 @@ def test_the_storm_is_lit_by_multiple_scattering_and_its_exposure_is_metered():
     assert "bool DrawsCell() const { return bCell; }" in WEATHER_H
     # The commandlet meters after the warm-up captures and before the probe loop.
     warmup = COMMANDLET.index("for (int32 i = 0; i < WarmupCaptures; ++i)")
-    meter = COMMANDLET.index("if (Weather.DrawsCell() && !bAutoExposure)")
+    meter = COMMANDLET.index("if ((Weather.DrawsCell() || bBeautyMeter) && !bAutoExposure)")
     probe = COMMANDLET.index("// -- Phase 8B.0: the real-time probe loop")
     assert warmup < meter < probe
     metering = COMMANDLET[meter:probe]

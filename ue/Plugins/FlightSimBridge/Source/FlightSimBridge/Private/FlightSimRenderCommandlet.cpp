@@ -4706,7 +4706,26 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// more than StormMeterMaxStops open. Constant over the clip once set
 	// (Gate 6: no breathing); recorded in look_applied.storm_exposure.
 	// -AutoExposure meters itself and skips this; so does a cell not drawn.
-	if (Weather.DrawsCell() && !bAutoExposure)
+	// Round 2 (exposure-storm, 2026-11-09): the same loop also meters a
+	// BEAUTY look that owns the exposure under a cloud deck, or on a shader
+	// platform with no Lumen GI (FFlightSimBeautyLook::ExposureMeter; the
+	// sidecar states the target): the first Windows shot c, rain under a
+	// deck with no Lumen, rendered at a luma mean of 3.6/255. Measure never
+	// has a beauty look, and Gate 6 beauty runs without a sidecar, so
+	// neither reaches this branch through it.
+	double BeautyMeterTarget = 0.0;
+	FString BeautyMeterTrigger;
+	const bool bBeautyMeter = bVisual && bBeauty && !Weather.DrawsCell() &&
+		FFlightSimBeautyLook::ExposureMeter(BeautyMeterTarget, BeautyMeterTrigger);
+	if (bBeautyMeter)
+	{
+		double StatedMeterTarget = 0.0;
+		if (!FParse::Value(*Params, TEXT("storm-meter-target="), StatedMeterTarget))
+		{
+			StormMeterTarget = FMath::Clamp(BeautyMeterTarget, 0.05, 0.8);
+		}
+	}
+	if ((Weather.DrawsCell() || bBeautyMeter) && !bAutoExposure)
 	{
 		FPostProcessSettings& MeterSettings = Capture->PostProcessSettings;
 		MeterSettings.bOverride_AutoExposureBias = true;
@@ -4817,6 +4836,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		TSharedPtr<FJsonObject> MeterRow = MakeShared<FJsonObject>();
 		MeterRow->SetBoolField(TEXT("metered"), MeanBefore >= 0.0);
+		MeterRow->SetStringField(TEXT("trigger"), bBeautyMeter
+			? FString::Printf(TEXT("beauty look: %s (beauty_look.applied.exposure.meter)"), *BeautyMeterTrigger)
+			: FString(TEXT("storm cell drawn")));
 		MeterRow->SetNumberField(TEXT("target_p90_luma"), StormMeterTarget);
 		MeterRow->SetNumberField(TEXT("percentile"), StormMeterPercentile);
 		MeterRow->SetNumberField(TEXT("tolerance"), StormMeterTolerance);
