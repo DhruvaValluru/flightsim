@@ -30,6 +30,7 @@ Every switch the program reads, each with one decision. **ui**: stays exposed, i
 | `FLIGHTSIM_XPLANE_SKY` | `xplane_sky` | dev-only | unset | `core/xplane/devflags.py:50` |
 | `FLIGHTSIM_XPLANE_LIGHTING` | `xplane_lighting` | dev-only | unset | `core/xplane/devflags.py:43` |
 | `FLIGHTSIM_WORLD_BEAUTY_OVERRIDES` | `world_beauty_overrides` | dev-only | unset | `core/scene/look_match.py:36` |
+| `FLIGHTSIM_RENDER_SWITCHES` | `render_switches` | dev-only | unset | `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp:3354`, `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimHeroLighting.cpp:432`, `core/scene/hero_lighting.py:553` |
 
 ## Keys not prefixed FLIGHTSIM_
 

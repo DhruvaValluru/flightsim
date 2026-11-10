@@ -1274,7 +1274,7 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 			}
 		}
 		Inscatter->SetStringField(TEXT("basis"),
-			TEXT("world_beauty.vfog_scattering_compensation: 1 / the row's volumetric fog extinction scale, so the "
+			TEXT("1 / the row's volumetric fog extinction scale (world_beauty.vfog_scattering_compensation), so the "
 			     "wet rows scale the fog's extinction only, not its in-scatter (round 3's #08 and head shot c lost "
 			     "the rain haze's veil); UNCALIBRATED"));
 		Out->SetObjectField(TEXT("volumetric_fog_inscatter"), Inscatter);

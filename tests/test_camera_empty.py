@@ -88,6 +88,8 @@ def test_cli_render_path_refuses_when_one_camera_drew_nothing(tmp_path, capsys,
 
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    # Current too: the mtime half reads the gitignored local manifest.
+    monkeypatch.setattr(importer_module, "older_than_inputs_reason", lambda name: None)
     monkeypatch.setattr(headless, "run_headless", one_camera_only)
     spec = Path(__file__).resolve().parents[1] / "examples" / "cameras_multi.yaml"
     code = capture_main([str(spec), "--out", str(tmp_path / "o"),

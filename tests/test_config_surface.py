@@ -23,7 +23,7 @@ from webapp.runs import weather_backend_flags
 
 REPO = Path(__file__).resolve().parent.parent
 
-#: The 23 names Align froze on 2026-11-04 (the plan said 20; three more in scripts/).
+#: The 23 names Align froze on 2026-11-04 (the plan said 20; three more in scripts/), plus the dev-only probe names added since.
 FROZEN_NAMES = frozenset({
     "FLIGHTSIM_BRANCH", "FLIGHTSIM_CAPTURE_PASSES", "FLIGHTSIM_FFMPEG", "FLIGHTSIM_FONT",
     "FLIGHTSIM_GEOCODE_CACHE", "FLIGHTSIM_GEOCODER", "FLIGHTSIM_GOOGLE_TILES", "FLIGHTSIM_LLM",
@@ -32,6 +32,7 @@ FROZEN_NAMES = frozenset({
     "FLIGHTSIM_RENDER_TIMEOUT_SECONDS", "FLIGHTSIM_SKY", "FLIGHTSIM_STALL_SECONDS",
     "FLIGHTSIM_TERRAIN_PREFETCH", "FLIGHTSIM_WEATHER_BACKEND", "FLIGHTSIM_XPLANE_LIGHTING",
     "FLIGHTSIM_WORLD_BEAUTY_OVERRIDES",  # visual overhaul, dev-only probe overrides
+    "FLIGHTSIM_RENDER_SWITCHES",  # round 5 (2026-11-10), dev-only host A/B switches
     "FLIGHTSIM_XPLANE_SKY", "FLIGHTSIM_XPLANE_TERRAIN",
 })
 
@@ -64,9 +65,9 @@ def test_the_scan_detects_an_unlisted_name(tmp_path):
     assert scan_source_env_names([fake / "*.py"]) == {"FLIGHTSIM_ZZZ_TEST"}
     # The module's own table never counts as a read.
     assert scan_source_env_names([REPO / "core" / "config_surface.py"]) == set()
-    # The real scan is exactly the 24 frozen names: a 25th fails here by name.
+    # The real scan is exactly the 25 frozen names: a 26th fails here by name.
     real = _real_scan()
-    assert len(FROZEN_NAMES) == 24
+    assert len(FROZEN_NAMES) == 25
     assert real == FROZEN_NAMES, (
         f"new: {sorted(real - FROZEN_NAMES)}; gone: {sorted(FROZEN_NAMES - real)}")
     assert flightsim_env_names() == FROZEN_NAMES

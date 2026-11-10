@@ -341,6 +341,11 @@ camera.scene_frame_mismatch:
 render.sky_capture_switch:
   sentence: "A diagnostic switch for the sky-light capture was given a value it does not take."
   hint: "Use -sky-capture-at=aircraft or -sky-capture-at=origin; -sky-capture-restore and -gpu-drain take auto, on or off; -constrained-supersample takes cap or keep."
+# round 5 shade probes (core/scene/hero_lighting.py DIAGNOSTIC_SWITCHES,
+# FlightSimHeroLighting.cpp): beauty-only A/B switches on the sky light.
+render.sky_fill_probe:
+  sentence: "A diagnostic switch for the sky light's fill was given a value it does not take."
+  hint: "Use -sky-fill-probe=as-planned, red or off, -sky-cloud-ao=on or off, and a number of zero or more for -aerial-perspective-scale; or leave them out to render as planned."
 # round-1b hang (FlightSimRenderCommandlet.cpp RenderDrainGpu): on a constrained
 # graphics card the beauty run waits for each capture's GPU work and checks the
 # device; a removed device ends the run by name instead of hanging.

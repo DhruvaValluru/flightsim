@@ -190,6 +190,11 @@ SETTINGS: Tuple[Setting, ...] = (
     Setting("world_beauty_overrides", "FLIGHTSIM_WORLD_BEAUTY_OVERRIDES", "dev-only", None,
             ("core/scene/look_match.py:36",),
             "Probe-render overrides file for the beauty world look (look_match.py writes it); render-machine calibration only, never on the web path."),
+    Setting("render_switches", "FLIGHTSIM_RENDER_SWITCHES", "dev-only", None,
+            ("ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp:3354",
+             "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimHeroLighting.cpp:432",
+             "core/scene/hero_lighting.py:553"),
+            "Extra commandlet switches appended to the render command line (-sky-capture-restore=, the round-5 shade probes in core/scene/hero_lighting.py DIAGNOSTIC_SWITCHES); read by the UE host, parsed in Python only to check and record them (render.sky_fill_probe refuses a bad value). Unset is the planned render; render-machine A/B probes only, never on the web path."),
 )
 
 #: Every ``add_argument`` of flightsim/capture.py (the positional ``spec``

@@ -162,6 +162,13 @@ for m in $(module_names "$BRIDGE/Source/FlightSimBridge/FlightSimBridge.Build.cs
     # in the project (ue/Plugins/*, e.g. a project-level CesiumForUnreal).
     if [ -n "$(find "$UE_ROOT/Engine" "$PLUGIN" ue/Plugins -name "$m.Build.cs" 2>/dev/null | head -n 1)" ]; then
         ok "module $m" "resolves"
+    elif [ "$m" = CesiumRuntime ] && { [ "${FLIGHTSIM_CESIUM:-}" = 0 ] || [ -z "$(find ue/Plugins "$UE_ROOT/Engine/Plugins/Marketplace" -name CesiumForUnreal.uplugin 2>/dev/null | head -n 1)" ]; }; then
+        # Build.cs adds CesiumRuntime only when FindCesium finds
+        # CesiumForUnreal.uplugin (project Plugins, engine Marketplace) and
+        # FLIGHTSIM_CESIUM is not 0; otherwise this build has no such
+        # dependency and compiles WITH_FLIGHTSIM_CESIUM=0. Plugin present but
+        # its module missing still FAILs below.
+        ok "module $m" "not a dependency here (no Cesium for Unreal; WITH_FLIGHTSIM_CESIUM=0)"
     else
         bad "module $m" "no $m.Build.cs anywhere"
     fi

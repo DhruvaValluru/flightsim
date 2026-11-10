@@ -606,6 +606,8 @@ def test_render_passes_the_imported_mesh_to_the_wrapper(tmp_path, monkeypatch):
     commands = []
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    # Current too: the mtime half reads the gitignored local manifest.
+    monkeypatch.setattr(importer_module, "older_than_inputs_reason", lambda name: None)
     launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", _fake_run(commands))
     out = tmp_path / "rendered"

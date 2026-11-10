@@ -167,6 +167,8 @@ def _cli_command(out, monkeypatch):
     commands = []
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    # Current too: the mtime half reads the gitignored local manifest.
+    monkeypatch.setattr(importer_module, "older_than_inputs_reason", lambda name: None)
     launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", _fake_subprocess(
         commands, lambda c: any("render_ue_scenario" in str(p) for p in c)))
@@ -322,6 +324,8 @@ def test_the_cli_void_tier_forwards_no_scene(imported_repo, tmp_path,
     commands = []
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    # Current too: the mtime half reads the gitignored local manifest.
+    monkeypatch.setattr(importer_module, "older_than_inputs_reason", lambda name: None)
     launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", _fake_subprocess(
         commands, lambda c: any("render_ue_scenario" in str(p) for p in c)))
@@ -347,6 +351,8 @@ def test_the_cli_passes_argument_reaches_the_command_and_its_absence_adds_nothin
     commands = []
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    # Current too: the mtime half reads the gitignored local manifest.
+    monkeypatch.setattr(importer_module, "older_than_inputs_reason", lambda name: None)
     launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", _fake_subprocess(
         commands, lambda c: any("render_ue_scenario" in str(p) for p in c)))
