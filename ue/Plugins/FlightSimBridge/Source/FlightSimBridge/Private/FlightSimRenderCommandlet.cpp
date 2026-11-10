@@ -51,6 +51,10 @@
 #include "AssetCompilingManager.h"
 #include "RenderingThread.h"
 #include "SceneInterface.h"   // aircraft-sharp: FSceneInterface::StartFrame (beauty velocity frame)
+
+// diag-hang (round-1 beauty deadlock bisect; NOT for merge): a flushed breadcrumb per step.
+#include "Misc/OutputDeviceRedirector.h"
+#define FS_HANG_CRUMB(Msg) do { UE_LOG(LogFlightSimRender, Display, TEXT("hang-crumb: %s"), Msg); GLog->Flush(); } while (0)
 #include "RHI.h"
 // Render-path lane (visual plan V0/V8): IsRayTracingEnabled (RenderCore),
 // FDataDrivenShaderPlatformInfo::GetSupportsPathTracing (RHI) and the
@@ -4696,6 +4700,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 	}
 
+	FS_HANG_CRUMB(TEXT("clouds verified; warm-ups next"));
 	// Discarded warm-up captures. The first CaptureScene after the component is
 	// registered resolves nothing -- the scene proxies exist, but the capture's
 	// own rendering state is allocated by the call itself, and measured on this
@@ -4712,17 +4717,24 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	}
 	for (int32 i = 0; i < WarmupCaptures; ++i)
 	{
+		FS_HANG_CRUMB(*FString::Printf(TEXT("warm-up %d of %d: end-of-frame updates"), i, WarmupCaptures));
 		World->SendAllEndOfFrameUpdates();
+		FS_HANG_CRUMB(TEXT("warm-up: flush 1"));
 		FlushRenderingCommands();
+		FS_HANG_CRUMB(TEXT("warm-up: CaptureScene"));
 		Capture->CaptureScene();
+		FS_HANG_CRUMB(TEXT("warm-up: flush 2"));
 		FlushRenderingCommands();
+		FS_HANG_CRUMB(TEXT("warm-up: done"));
 	}
 	// aircraft-sharp (beauty raster only; measure and pathtrace untouched):
 	// the velocity frame starts here, so the first delivered frame's motion
 	// vectors run from the warm-up pose, not from where the aircraft spawned.
 	if (bVisual && bBeauty && !bPathTrace)
 	{
+		FS_HANG_CRUMB(TEXT("start-scene-frame after warm-ups"));
 		RenderBeautyStartSceneFrame(World);
+		FS_HANG_CRUMB(TEXT("start-scene-frame after warm-ups done"));
 	}
 	// The sky light, captured here because real-time capture never runs for a
 	// scene capture: without this every shadow and every overcast is lit by
@@ -4752,10 +4764,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 		}
 		VisualScene.SkyLightComponent->SetCaptureIsDirty();
+		FS_HANG_CRUMB(TEXT("sky light: update capture contents"));
 		USkyLightComponent::UpdateSkyCaptureContents(World);
 		FlushRenderingCommands();
 		for (int32 i = 0; i < 2; ++i)
 		{
+			FS_HANG_CRUMB(*FString::Printf(TEXT("sky light: settle capture %d"), i));
 			World->SendAllEndOfFrameUpdates();
 			FlushRenderingCommands();
 			Capture->CaptureScene();
@@ -4784,6 +4798,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// neither reaches this branch through it.
 	double BeautyMeterTarget = 0.0;
 	FString BeautyMeterTrigger;
+	FS_HANG_CRUMB(TEXT("sky light done; meter decision"));
 	const bool bBeautyMeter = bVisual && bBeauty && !Weather.DrawsCell() &&
 		FFlightSimBeautyLook::ExposureMeter(BeautyMeterTarget, BeautyMeterTrigger);
 	if (bBeautyMeter)
@@ -4814,6 +4829,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		TArray<FColor> MeterPixels;
 		for (; Rounds < StormMeterRounds; ++Rounds)
 		{
+			FS_HANG_CRUMB(*FString::Printf(TEXT("meter: round %d capture"), Rounds));
 			World->SendAllEndOfFrameUpdates();
 			FlushRenderingCommands();
 			Capture->CaptureScene();
@@ -4896,6 +4912,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		// The temporal history converges on the exposure the clip keeps
 		// before frame 0, as the warm-up did for the look's.
+		FS_HANG_CRUMB(TEXT("meter: rounds done, settle captures"));
 		for (int32 i = 0; i < StormMeterSettleCaptures; ++i)
 		{
 			World->SendAllEndOfFrameUpdates();
@@ -5543,6 +5560,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// last capture is the one read back below. The look-dev focus is
 		// set first so every sub-frame shares it.
 		// look-dev lane hook: per-frame focus at the aircraft (cinematic lens only).
+		FS_HANG_CRUMB(TEXT("frame: update-per-frame (a delivered frame begins)"));
 		FFlightSimBeautyLook::UpdatePerFrame(Capture, Scenario.Aircraft);
 		// aircraft-sharp: a still's sub-captures read zero object motion (the
 		// velocity frame rolled AFTER this pose was applied and flushed) and
@@ -5550,6 +5568,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// clears itself after one capture, SceneCaptureRendering.cpp).
 		if (bBeautyStill)
 		{
+			FS_HANG_CRUMB(TEXT("frame: still start-scene-frame"));
 			RenderBeautyStartSceneFrame(World);
 			Capture->bCameraCutThisFrame = true;
 		}
@@ -5565,6 +5584,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		if (bBeautyRaster)
 		{
 			RenderBeautyStartSceneFrame(World);
+			FS_HANG_CRUMB(TEXT("frame: start-scene-frame after delivered done"));
 		}
 
 		FTextureRenderTargetResource* Resource =
