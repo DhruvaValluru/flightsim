@@ -195,3 +195,72 @@ def create_look_instances(asset_root, mtl_dir, name, say=print):
     except (OSError, ValueError) as exc:
         problems.append(f"look manifest: {exc}")
     return made, problems
+
+
+# -- the slot check and the import record (round 2, cockpit-airframe lane) ----
+#
+# The render machine's first J-11 frames (2026-11-09) drew the airframe grey
+# and untextured: render.json aircraft_look.materials said 7 slots on look
+# instances and one on WorldGridMaterial, where the converted body has 25
+# MTL materials, and the import had reported nothing. After every import of a
+# manifest with beauty_parts, each imported mesh's slots are read back; a
+# slot without one of the MTL's own materials is an import FAILURE, and the
+# result goes to import_record.json beside the manifest, which
+# assets_pipeline/importer.py reads (a manifest whose record is missing or
+# names another manifest is not imported yet).
+
+#: assets_pipeline/importer.py IMPORT_RECORD_NAME / IMPORT_RECORD_MAGIC
+#: (pinned by tests/test_cockpit_airframe.py: this file runs inside UE,
+#: where the assets_pipeline package is not importable).
+IMPORT_RECORD_NAME = "import_record.json"
+IMPORT_RECORD_MAGIC = "flightsim-aircraft-import-record"
+
+
+def classify_slots(slots, mtl_names):
+    """``slots``: (part, slot index, slot name, material asset name or None)
+    rows; ``mtl_names``: the MTL materials. Returns {"bound": n,
+    "unbound": ["part[slot] name -> material", ...], "slots": {part:
+    [material names]}}. A slot is bound when its material is one of the MTL
+    materials (the imported instance Interchange made from the MTL)."""
+    names = set(mtl_names)
+    report = {"bound": 0, "unbound": [], "slots": {}}
+    for part, index, slot_name, material in slots:
+        report["slots"].setdefault(part, []).append(material)
+        if material is not None and material in names:
+            report["bound"] += 1
+        else:
+            report["unbound"].append(f"{part}[{index}] {slot_name} -> {material}")
+    return report
+
+
+def slot_report(asset_root, mtl_dir, parts):
+    """:func:`classify_slots` over the imported meshes ``parts`` under
+    ``asset_root`` (inside UE)."""
+    import unreal
+
+    rows = []
+    for part in parts:
+        mesh = unreal.load_asset(f"{asset_root}/{part}")
+        if mesh is None:
+            rows.append((part, 0, "(mesh)", None))
+            continue
+        for index, slot in enumerate(mesh.get_editor_property("static_materials")):
+            material = slot.get_editor_property("material_interface")
+            rows.append((part, index, str(slot.get_editor_property("material_slot_name")),
+                         material.get_name() if material is not None else None))
+    return classify_slots(rows, read_mtl_dir(mtl_dir).keys())
+
+
+def write_import_record(manifest_path, report):
+    """import_record.json beside the manifest: the manifest's sha256 and the
+    slot report. Returns the path written."""
+    import hashlib
+    import json
+
+    with open(manifest_path, "rb") as handle:
+        digest = hashlib.sha256(handle.read()).hexdigest()
+    path = os.path.join(os.path.dirname(os.path.abspath(manifest_path)), IMPORT_RECORD_NAME)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"magic": IMPORT_RECORD_MAGIC, "manifest_sha256": digest, **report},
+                  handle, indent=1)
+    return path

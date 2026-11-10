@@ -212,6 +212,12 @@ aircraft.livery_unmatched:
   sentence: "The aircraft's paint scheme names parts of the model that carry no paint texture, so the model was not converted rather than drawn half-painted."
 aircraft.texture_collision:
   sentence: "Two different textures of the aircraft's model share one file name, and one would silently replace the other, so the model was not converted."
+# round 2 cockpit-airframe lane (assets_pipeline/importer.py import_manifests,
+# scripts/ue_aircraft_materials.py slot_report): an import that left a mesh
+# slot without its own material.
+aircraft.material_slots:
+  sentence: "The aircraft model was imported, but some of its parts came in without their paint or texture and would be drawn plain grey, so the render was stopped."
+  hint: "Import the aircraft again; the technical note names each part and slot that came in without its material."
 aircraft.placeholder_drawn:
   sentence: "The pictures show a stand-in shape, not the real aircraft model, so they cannot be labelled."
 aircraft_look.manifest:

@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(
     globals().get("__file__") or sys.argv[0])))
 from ue_aircraft_materials import fix_materials  # noqa: E402
 from ue_aircraft_materials import create_look_instances  # noqa: E402  (visual V7)
+from ue_aircraft_materials import slot_report, write_import_record  # noqa: E402  (round 2)
 
 FAILURES = []
 
@@ -51,7 +52,7 @@ def _set_if_present(struct, name, value):
         pass
 
 
-def import_part(obj_path, destination, part, expected_triangles):
+def import_part(obj_path, destination, part, expected_triangles, keep_normals=False):
     # Nanite must be OFF at import time, in the pipeline options. Interchange
     # builds Nanite by default and a scene capture then draws the coarse
     # fallback (measured: 3563 of 24471 triangles); flipping the flag after
@@ -75,6 +76,14 @@ def import_part(obj_path, destination, part, expected_triangles):
     pipeline = unreal.InterchangeGenericAssetsPipeline()
     pipeline.get_editor_property("mesh_pipeline").set_editor_property(
         "build_nanite", False)
+    if keep_normals:
+        # Round 2 (cockpit-airframe): the beauty body carries the converter's
+        # crease-angle normals (vn). Interchange recomputes normals by default
+        # (InterchangeGenericAssetsPipelineSharedSettings.h bRecomputeNormals
+        # = true, UE 5.7.4), which on these unwelded triangles gives one
+        # normal per face: the faceting this part exists to remove.
+        _set_if_present(pipeline.get_editor_property("common_meshes_properties"),
+                        "recompute_normals", False)
     override = unreal.InterchangePipelineStackOverride()
     override.add_pipeline(pipeline)
     # Straight to the Interchange manager, NOT AssetTools.import_asset_tasks:
@@ -110,8 +119,14 @@ def import_part(obj_path, destination, part, expected_triangles):
     # real: the built body rendered nothing). The legacy tangent path builds
     # it correctly, and nothing here depends on MikkTSpace-exact tangents.
     build = unreal.EditorStaticMeshLibrary.get_lod_build_settings(mesh, 0)
+    rebuild = False
     if build.use_mikk_t_space:
         build.use_mikk_t_space = False
+        rebuild = True
+    if keep_normals and build.recompute_normals:
+        build.recompute_normals = False
+        rebuild = True
+    if rebuild:
         unreal.EditorStaticMeshLibrary.set_lod_build_settings(mesh, 0, build)
         unreal.EditorAssetLibrary.save_asset(asset_path)
     bounds = mesh.get_bounding_box()
@@ -138,7 +153,13 @@ def run():
             continue
         source_dir = os.path.dirname(os.path.abspath(manifest_path))
         destination = manifest["asset_path_root"]
-        for part in manifest["parts"]:
+        # Round 2 (cockpit-airframe): the beauty-only copies (manifest
+        # beauty_parts, e.g. body_beauty: the body with crease normals), after
+        # the measured parts, normals kept.
+        beauty = [(row["part"], row["triangles"], True)
+                  for row in (manifest.get("beauty_parts") or {}).values()]
+        for part, triangles, keep_normals in (
+                [(p, manifest["triangles"][p], False) for p in manifest["parts"]] + beauty):
             obj_path = os.path.join(source_dir, f"{part}.obj")
             if not os.path.isfile(obj_path):
                 FAILURES.append(f"missing {obj_path}")
@@ -146,8 +167,7 @@ def run():
             # One part's scripting error is that part's failure, by name;
             # the parts after it still import.
             try:
-                import_part(obj_path, destination, part,
-                            manifest["triangles"][part])
+                import_part(obj_path, destination, part, triangles, keep_normals)
             except Exception as exc:
                 FAILURES.append(f"{destination}/{part}: {exc!r}")
         # Interchange leaves every textured material black with its texture
@@ -171,6 +191,25 @@ def run():
                 print(f"LOOK-PROBLEM {destination}: {problem}")
         except Exception as exc:
             print(f"LOOK-PROBLEM {destination}: look pass failed: {exc!r}")
+        # Round 2 (cockpit-airframe): every slot of every imported mesh must
+        # draw one of the MTL's own materials. The render machine's first
+        # J-11 frames (2026-11-09, shot a render.json aircraft_look.materials)
+        # had 7 slots on look instances and a slot on WorldGridMaterial where
+        # the converted body has 25 MTL materials: an import that left slots
+        # unbound draws grey and untextured, and nothing said so. Only for a
+        # manifest with beauty_parts (the airframes this lane re-imports), so
+        # no other airframe's import outcome changes.
+        if manifest.get("beauty_parts"):
+            try:
+                parts = list(manifest["parts"]) + [row["part"] for row in manifest["beauty_parts"].values()]
+                report = slot_report(destination, source_dir, parts)
+                written = write_import_record(manifest_path, report)
+                print(f"SLOTS {destination}: {report['bound']} bound, "
+                      f"{len(report['unbound'])} unbound; record {written}")
+                FAILURES.extend(f"{destination}: slot {row} is not bound to an MTL material"
+                                for row in report["unbound"])
+            except Exception as exc:
+                FAILURES.append(f"{destination}: slot check failed: {exc!r}")
 
 
 run()
