@@ -1105,6 +1105,34 @@ pc_check "colour: blue correct around the tone curve" "Shaders/Private/PostProce
 pc_check "colour: blue correct undone after it" "Shaders/Private/PostProcessCombineLUTs.usf" "ColorAP1 = lerp( ColorAP1, mul( BlueCorrectInvAP1, ColorAP1 ), BlueCorrection );"
 # ------------------------------------------------------ END presets-colour --
 
+# -- round-1b hang (constrained GPU, 2026-11-10) ------ BEGIN constrained gpu --
+# FlightSimRenderCommandlet.cpp RenderDrainGpu / RenderDeviceRemovedNote, the
+# sky-capture restore (FlightSimBeautyFallback.cpp SuspendForSkyCapture,
+# FlightSimGoogleTiles.cpp SuspendBeautyHaze) and the reasoning they rest on.
+# Fixed strings grepped in the UE 5.7.4 source on the authoring Mac.
+cg_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
+    local f="$UE_ROOT/Engine/Source/Runtime/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- the constrained-gpu safeguards need updating"
+    fi
+}
+cg_check "constrained: RHIGetInterfaceType" "RHI/Public/DynamicRHI.h" "inline ERHIInterfaceType RHIGetInterfaceType()"
+cg_check "constrained: RHIGetNativeDevice" "RHI/Public/DynamicRHI.h" "virtual void* RHIGetNativeDevice() = 0;"
+cg_check "constrained: ERHIInterfaceType::D3D11" "RHI/Public/RHIDefinitions.h" "	D3D11,"
+cg_check "constrained: D3D11 native device is the ID3D11Device" "Windows/D3D11RHI/Private/D3D11Device.cpp" "void* FD3D11DynamicRHI::RHIGetNativeDevice()"
+cg_check "constrained: the unbounded GPU-idle poll" "Windows/D3D11RHI/Private/D3D11Commands.cpp" "void FD3D11DynamicRHI::RHIBlockUntilGPUIdle()"
+cg_check "constrained: cube faces flush the GPU" "Renderer/Private/ReflectionEnvironmentCapture.cpp" "InRHICmdList.SubmitCommandsAndFlushGPU();"
+cg_check "constrained: cube capture has no light shafts" "Renderer/Private/ReflectionEnvironmentCapture.cpp" "ViewFamily.EngineShowFlags.LightShafts = 0;"
+cg_check "constrained: GetEnvironmentVariable" "Core/Public/GenericPlatform/GenericPlatformMisc.h" "static CORE_API FString GetEnvironmentVariable(const TCHAR* VariableName);"
+cg_check "constrained: SetSecondFogDensity" "Engine/Classes/Components/ExponentialHeightFogComponent.h" "ENGINE_API void SetSecondFogDensity(float Value);"
+cg_check "constrained: SetMieAbsorptionScale" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetMieAbsorptionScale(float NewValue);"
+cg_check "constrained: float VolumetricScatteringIntensity;" "Engine/Classes/Components/LightComponentBase.h" "float VolumetricScatteringIntensity;"
+# ---------------------------------------------------- END constrained gpu --
+
 
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }

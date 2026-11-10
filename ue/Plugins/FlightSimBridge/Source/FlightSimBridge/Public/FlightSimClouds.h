@@ -110,6 +110,14 @@ public:
 	// (the render commandlet's teardown).
 	void RestoreCvars();
 
+	// Round 1 hang (2026-11-09): the constrained GPU class, the one predicate
+	// (FlightSimClouds.cpp CloudConstrainedGpu): an integrated adapter
+	// (GRHIDeviceIsIntegrated) or any adapter below SM6 (D3D11 SM5). It keeps
+	// ef361bd6's cloud and sky settings here; the render commandlet reads it
+	// for its own constrained-GPU safeguards (FlightSimRenderCommandlet.cpp
+	// "constrained gpu"). Beauty only: measure never asks.
+	static bool ConstrainedGpu();
+
 	// look_applied.world_beauty (the same object the scene's LookApplied holds).
 	TSharedPtr<FJsonObject> Record;
 

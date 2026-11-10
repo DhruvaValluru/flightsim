@@ -1071,6 +1071,13 @@ void FFlightSimWorldBeauty::RestoreCvars()
 	}
 }
 
+// Round 1 hang: the public face of CloudConstrainedGpu (the commandlet's
+// constrained-GPU safeguards read the same class this lane's settings do).
+bool FFlightSimWorldBeauty::ConstrainedGpu()
+{
+	return CloudConstrainedGpu();
+}
+
 void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm)
 {
 	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).

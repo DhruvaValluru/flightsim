@@ -340,7 +340,13 @@ camera.scene_frame_mismatch:
 # round-1 hang (FlightSimRenderCommandlet.cpp FRenderCaptureWatchdog): and the sky-capture bisection switches
 render.sky_capture_switch:
   sentence: "A diagnostic switch for the sky-light capture was given a value it does not take."
-  hint: "Use -sky-capture-at=aircraft or -sky-capture-at=origin."
+  hint: "Use -sky-capture-at=aircraft or -sky-capture-at=origin; -sky-capture-restore and -gpu-drain take auto, on or off; -constrained-supersample takes cap or keep."
+# round-1b hang (FlightSimRenderCommandlet.cpp RenderDrainGpu): on a constrained
+# graphics card the beauty run waits for each capture's GPU work and checks the
+# device; a removed device ends the run by name instead of hanging.
+render.gpu_lost:
+  sentence: "The render stopped: the graphics card stopped working while it drew the picture, and Windows reset it, so the run was ended instead of waiting forever."
+  hint: "This computer's graphics could not carry the beauty look for this shot. Try a smaller picture, the measure look, or a machine with a dedicated graphics card."
 render.capture_timeout:
   sentence: "The render stopped: the graphics card did not finish a frame within the time limit, so the run was ended instead of waiting forever."
   hint: "This computer's graphics may be too slow for the beauty look. Render on a machine with a dedicated graphics card, or use the measure look."
