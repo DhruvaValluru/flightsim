@@ -64,6 +64,7 @@ from assets_pipeline.convert import (  # noqa: E402
 )
 from core.capture.airframe import Airframe, Component, fdm_xml_path  # noqa: E402
 from assets_pipeline.mdl_scene import REST_ENV, MdlScene, Part  # noqa: E402
+from assets_pipeline.importer import INPUTS_KEY, conversion_inputs  # noqa: E402
 from assets_pipeline.obj_frame import (  # noqa: E402
     OBJ_FRAME, OBJ_FRAME_KEY, actor_to_obj_array, obj_winding,
 )
@@ -306,6 +307,9 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         # The OBJs' axis convention (decision 19); the importer's stale
         # rule re-converts a manifest without this exact stamp.
         OBJ_FRAME_KEY: OBJ_FRAME,
+        # Content hashes of every input; the importer re-converts when
+        # any differs (the config beauty_mesh block included).
+        INPUTS_KEY: conversion_inputs(Path(config_path)),
         "name": name,
         "fdm": config["fdm"],
         "fdm_config_name": fdm_name,

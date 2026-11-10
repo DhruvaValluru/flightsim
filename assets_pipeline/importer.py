@@ -281,7 +281,72 @@ def stale_manifest_reason(manifest_path: Path) -> Optional[str]:
     package = _package_pins_reason(manifest)
     if package:
         return package
-    return _unimportable_output_reason(Path(manifest_path), manifest)
+    unimportable = _unimportable_output_reason(Path(manifest_path), manifest)
+    if unimportable:
+        return unimportable
+    return _inputs_changed_reason(manifest)
+
+
+#: Manifest key: sha256 of every file the conversion read (the aircraft
+#: config with its beauty_mesh block, the converter and the modules it
+#: draws geometry with), keyed by repo-relative path. Content, not mtime:
+#: a checkout on Windows stamps every file with the checkout time, so an
+#: mtime rule both misses edits and re-converts for nothing.
+INPUTS_KEY = "inputs_sha256"
+
+#: Modules both converters draw the output with, besides the converter.
+_SHARED_INPUTS = ("assets_pipeline/obj_frame.py", "core/capture/airframe.py")
+_CONVERTER_INPUTS = {
+    "convert.py": ("assets_pipeline/convert.py", "assets_pipeline/acmodel.py",
+                   "assets_pipeline/smooth_normals.py",
+                   "assets_pipeline/package_pins.py",
+                   "core/capture/objects.py"),
+    "a4_mdl_convert.py": ("assets_pipeline/a4_mdl_convert.py",
+                          "assets_pipeline/convert.py",
+                          "assets_pipeline/mdl_scene.py"),
+}
+
+
+def _file_digest(path: Path) -> str:
+    # CRLF folded to LF so the Windows checkout and the Mac hash alike.
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def conversion_inputs(config_path: Path) -> Dict[str, str]:
+    """{repo-relative path: sha256} of every input that changes what the
+    converter writes for ``config_path``; the converters record it in the
+    manifest under :data:`INPUTS_KEY`."""
+    config_path = Path(config_path)
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        config = {}
+    script = "a4_mdl_convert.py" if config.get("converter") == "mdl" else "convert.py"
+    digests = {f"assets/aircraft_config/{config_path.name}": _file_digest(config_path)}
+    for rel in _CONVERTER_INPUTS[script] + _SHARED_INPUTS:
+        path = REPO / rel
+        if path.is_file():
+            digests[rel] = _file_digest(path)
+    return dict(sorted(digests.items()))
+
+
+def _inputs_changed_reason(manifest: Dict) -> Optional[str]:
+    """Stale when the config (beauty_mesh and all) or the converter code
+    the manifest was built from differs, by content, from what is here
+    now. A manifest whose name has no config here is not judged."""
+    config_path = CONFIG_DIR / f"{manifest.get('name')}.json"
+    if not config_path.is_file():
+        return None
+    recorded = manifest.get(INPUTS_KEY)
+    if not isinstance(recorded, dict):
+        return (f"the manifest records no {INPUTS_KEY}, so nothing says it was "
+                f"converted from the current {config_path.name} and converter")
+    current = conversion_inputs(config_path)
+    changed = sorted(k for k in set(current) | set(recorded)
+                     if current.get(k) != recorded.get(k))
+    if changed:
+        return f"changed since the conversion: {', '.join(changed)}"
+    return None
 
 
 def _package_pins_reason(manifest: Dict) -> Optional[str]:
