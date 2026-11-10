@@ -159,7 +159,9 @@ def test_the_cvars_are_saved_and_put_back():
     restore = SHAFTS_CPP[SHAFTS_CPP.index("void FFlightSimSunShafts::Restore"):]
     assert "Variable->Set(*Saved[i].Before, ECVF_SetByCode);" in restore
     assert "Saved.Reset();" in restore
-    assert "void FFlightSimWorldBeauty::RestoreCvars() { SunShafts.Restore(); }" in CLOUDS_CPP
+    world_restore = CLOUDS_CPP[CLOUDS_CPP.index("void FFlightSimWorldBeauty::RestoreCvars()"):]
+    world_restore = world_restore[:world_restore.index("\n}\n")]
+    assert "SunShafts.Restore();" in world_restore   # clouds-sky round 2 restores its own cvar beside it
     teardown = COMMANDLET[COMMANDLET.rindex("WorldBeauty.RestoreCvars();"):]
     assert teardown.index("Scenario.Teardown();") < 200
 

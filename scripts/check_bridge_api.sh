@@ -516,6 +516,29 @@ rp_check "world fix: Material OpacityMaskClipValue" "Engine/Public/Materials/Mat
 rp_check "world fix: Material bUsedWithInstancedStaticMeshes" "Engine/Public/Materials/Material.h" "uint8 bUsedWithInstancedStaticMeshes : 1;"
 rp_check "world fix: material SvPosition" "../../Shaders/Private/MaterialTemplate.ush" "float4 SvPosition;"
 # -- world lane fix pass -- end ------------------------------------------------
+# -- clouds-sky round 2 (visual overhaul, 2026-11-09) -- begin ----------------
+# FlightSimClouds.cpp: the march by GPU class, the per-layer shadow length,
+# the default layer's thinning, the fog on every cloud pixel and the sky's
+# multiple scattering. Each pattern was read in the 5.7.4 source on 2026-11-09
+# (paths under $RT); the two shader rows are the premises the banding fix
+# rests on (the view march is jittered, the shadow march is not).
+rp_check "clouds-sky: VolumetricCloud SetLayerHeight" "Engine/Classes/Components/VolumetricCloudComponent.h" "ENGINE_API void SetLayerHeight(float NewValue);"
+rp_check "clouds-sky: VolumetricCloud SetShadowTracingDistance" "Engine/Classes/Components/VolumetricCloudComponent.h" "ENGINE_API void SetShadowTracingDistance(float NewValue);"
+rp_check "clouds-sky: VolumetricCloud SetTracingMaxDistance" "Engine/Classes/Components/VolumetricCloudComponent.h" "ENGINE_API void SetTracingMaxDistance(float NewValue);"
+rp_check "clouds-sky: VolumetricCloud SetStopTracingTransmittanceThreshold" "Engine/Classes/Components/VolumetricCloudComponent.h" "ENGINE_API void SetStopTracingTransmittanceThreshold(float NewValue);"
+rp_check "clouds-sky: VolumetricCloud BaseViewRaySampleCount 96" "Engine/Classes/Components/VolumetricCloudComponent.h" "static constexpr float BaseViewRaySampleCount = 96.0f;"
+rp_check "clouds-sky: VolumetricCloud BaseShadowRaySampleCount 10" "Engine/Classes/Components/VolumetricCloudComponent.h" "static constexpr float BaseShadowRaySampleCount = 10.0f;"
+rp_check "clouds-sky: SkyAtmosphere SetMultiScatteringFactor" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetMultiScatteringFactor(float NewValue);"
+rp_check "clouds-sky: SkyAtmosphere MultiScatteringFactor" "Engine/Classes/Components/SkyAtmosphereComponent.h" "float MultiScatteringFactor;"
+rp_check "clouds-sky: GRHIDeviceIsIntegrated" "RHI/Public/RHIGlobals.h" "#define GRHIDeviceIsIntegrated"
+rp_check "clouds-sky: GRHIAdapterName" "RHI/Public/RHIGlobals.h" "#define GRHIAdapterName"
+rp_check "clouds-sky: RHIGlobals DeviceIsIntegrated" "RHI/Public/RHIGlobals.h" "bool DeviceIsIntegrated = false;"
+rp_cvar r.VolumetricCloud.ApplyFogOnAllPixel "Renderer/Private/VolumetricCloudRendering.cpp"
+rp_check "clouds-sky: view sample cap 768" "Renderer/Private/VolumetricCloudRendering.cpp" "TEXT(\"r.VolumetricCloud.ViewRaySampleMaxCount\"), 768,"
+rp_check "clouds-sky: shadow sample cap 80" "Renderer/Private/VolumetricCloudRendering.cpp" "TEXT(\"r.VolumetricCloud.Shadow.ViewRaySampleMaxCount\"), 80,"
+rp_check "clouds-sky: view march blue-noise jitter" "../../Shaders/Private/VolumetricCloud.usf" "t = TMin + BlueNoiseScalar(FullResPixelCoord, View.StateFrameIndexMod8) * StepT;"
+rp_check "clouds-sky: shadow march unjittered" "../../Shaders/Private/VolumetricCloud.usf" "const float ShadowJitterNorm = 0.5f; // InterleavedGradientNoise"
+# -- clouds-sky round 2 -- end -------------------------------------------------
 
 # -- sun-shafts-sky-occlusion (visual overhaul, 2026-11-09) -----------------
 # FlightSimSunShafts.cpp: the sun's light shafts and cloud shadow, the sky

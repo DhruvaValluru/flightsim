@@ -337,6 +337,70 @@ CLOUD_EXTINCTION_SCALE = 1.0
 #: estimated transmittance is flagged ``cloud_occludes_aircraft``. UNCALIBRATED.
 OCCLUSION_FLAG_TRANSMITTANCE = 0.5
 
+# -- clouds-sky round 2 (2026-11-09): the march, the default layer, the sky ------------
+# The first real renders (Intel iGPU, D3D11) banded shot d's clouds: 96 x 2 view
+# samples over an 80 km trace (400 m steps through 0.05/m cloud) and 10
+# UNJITTERED quadratic shadow samples over 15 km (the engine disables the shadow
+# jitter: VolumetricCloud.usf), so a cloud's light came in contours and most of
+# it went unlit (the dark navy veil over the sky). The C++ twin is
+# FlightSimClouds.cpp's pure block (CloudMarch, CloudShadowTracingKm,
+# CloudCappedTopM, SkyMultiScattering). UNCALIBRATED: set by probe render on
+# the render machine (every number).
+
+#: The march by GPU class (GRHIDeviceIsIntegrated): the component's view and
+#: shadow sample-count scales (the engine's 96 and 10 samples times these,
+#: under its caps 768 and 80) and the trace's max distance inside the layer.
+#: An integrated GPU keeps about the round-1 cost with the new noise.
+CLOUD_MARCH_FIELDS: Tuple[str, ...] = ("view_sample_count_scale", "shadow_sample_count_scale",
+                                       "tracing_max_distance_km")
+CLOUD_MARCH: Dict[str, Dict[str, float]] = {
+    "discrete": dict(view_sample_count_scale=6.0, shadow_sample_count_scale=6.0, tracing_max_distance_km=50.0),
+    "integrated": dict(view_sample_count_scale=4.0, shadow_sample_count_scale=4.0, tracing_max_distance_km=40.0),
+}
+#: The engine's base samples and caps (VolumetricCloudComponent.h, VolumetricCloudRendering.cpp).
+ENGINE_CLOUD_BASE_VIEW_SAMPLES = 96.0
+ENGINE_CLOUD_BASE_SHADOW_SAMPLES = 10.0
+ENGINE_CLOUD_VIEW_SAMPLE_CAP = 768.0
+ENGINE_CLOUD_SHADOW_SAMPLE_CAP = 80.0
+#: The shadow march spans the layer it lights, not 15 km: km per km of thickness, clamped.
+CLOUD_SHADOW_KM_PER_KM = 1.0
+CLOUD_SHADOW_MIN_KM = 1.0
+CLOUD_SHADOW_MAX_KM = 4.0
+#: The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
+#: stated layer) is thinned to the shape's depth; 0 keeps the layer as built.
+CLOUD_MAX_THICKNESS_M: Dict[str, float] = {"cumulus": 2000.0, "stratocumulus": 0.0,
+                                           "overcast": 2000.0, "nimbostratus": 0.0}
+#: USkyAtmosphereComponent::MultiScatteringFactor per preset (engine 1): the
+#: clear and hazy skies take a little more multiple scattering (paler and
+#: brighter towards the horizon from altitude); the weather presets keep 1.
+SKY_MULTI_SCATTERING: Dict[str, float] = {"clear": 1.25, "hazy": 1.15, "overcast": 1.0, "rain": 1.0,
+                                          "storm": 1.0}
+
+
+def cloud_march(integrated: bool) -> Dict[str, float]:
+    """The march row for the GPU class, with the engine's sample counts."""
+    row = dict(CLOUD_MARCH["integrated" if integrated else "discrete"])
+    row["view_samples_max"] = min(ENGINE_CLOUD_BASE_VIEW_SAMPLES * row["view_sample_count_scale"],
+                                  ENGINE_CLOUD_VIEW_SAMPLE_CAP)
+    row["shadow_samples"] = min(ENGINE_CLOUD_BASE_SHADOW_SAMPLES * row["shadow_sample_count_scale"],
+                                ENGINE_CLOUD_SHADOW_SAMPLE_CAP)
+    return row
+
+
+def cloud_shadow_tracing_km(thickness_m: float) -> float:
+    """The shadow march's length for a layer of this thickness."""
+    km = max(float(thickness_m), 0.0) / 1000.0 * CLOUD_SHADOW_KM_PER_KM
+    return min(max(km, CLOUD_SHADOW_MIN_KM), CLOUD_SHADOW_MAX_KM)
+
+
+def cloud_capped_top_m(shape: str, base_m: float, top_m: float, stated: bool) -> float:
+    """The drawn top: the default layer thinned to CLOUD_MAX_THICKNESS_M[shape];
+    a stated layer (the card's, or the -beauty-clouds=fair one) as built."""
+    cap = CLOUD_MAX_THICKNESS_M.get(shape, 0.0)
+    if stated or cap <= 0.0 or top_m - base_m <= cap:
+        return top_m
+    return base_m + cap
+
 
 def select_cloud(cover: float, thickness_m: float, preset: str) -> str:
     """The cloud shape for a layer: the storm and rain presets draw

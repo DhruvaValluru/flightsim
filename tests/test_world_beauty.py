@@ -346,7 +346,7 @@ def test_every_look_constant_is_labelled_uncalibrated():
     block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
     assert block.count("UNCALIBRATED: set by probe render on the render machine") >= 3
     assert "UNCALIBRATED: set by probe render on the render machine" in CLOUDS_CPP.split(
-        "WorldCloudViewSampleScale")[0]
+        "WorldCloudStopTransmittance")[0]
     for name in ("cloud_layers", "tiles_base_colour", "tiles_normal", "tiles_roughness"):
         assert "UNCALIBRATED" in (SHADERS / f"{name}.hlsl").read_text(encoding="utf-8"), name
     text = (REPO / "core" / "scene" / "world_beauty.py").read_text(encoding="utf-8")
@@ -753,6 +753,57 @@ static uint asuint(int v) { uint u; std::memcpy(&u, &v, 4); return u; }
         fx, fy, fz = (float(_f32(v)) for v in (x, y, z))
         assert float(out[2 * i]) == pytest.approx(wb.cloud_shape(fx, fy, fz, 7), abs=2e-4), (x, y, z)
         assert float(out[2 * i + 1]) == pytest.approx(wb.cloud_detail(fx, fy, fz, 13), abs=2e-4), (x, y, z)
+
+
+@NEEDS_CXX
+def test_the_cloud_march_and_the_sky_are_the_python_ones(tmp_path):
+    """Round 2 (clouds-sky): the march by GPU class, the shadow length, the
+    default layer's thinning and the sky's multiple scattering, C++ == Python;
+    the march stays under the engine's caps and steps finer than round 1."""
+    block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
+    thick = (0.0, 400.0, 1000.0, 2500.0, 3000.0, 6000.0)
+    tops = [(c, b, t, s) for c in range(4) for b, t in ((2940.0, 5940.0), (1500.0, 2700.0), (800.0, 2900.0))
+            for s in (0, 1)]
+    main = ["using namespace FlightSimWorldPure;", "int main() {",
+            "for (int m = 0; m < MarchCount; ++m) for (int f = 0; f < MarchFieldCount; ++f)"
+            " printf(\"march %s %s %.17g\\n\", MarchName(m), MarchFieldName(f), CloudMarch(m, f));"]
+    main += [f"printf(\"shadow %.17g\\n\", CloudShadowTracingKm({t!r}));" for t in thick]
+    main += [f"printf(\"top %.17g\\n\", CloudCappedTopM({c}, {b!r}, {t!r}, {'true' if s else 'false'}));"
+             for c, b, t, s in tops]
+    main.append("for (int p = 0; p < PresetCount; ++p) printf(\"sky %s %.17g\\n\", PresetName(p), SkyMultiScattering(p));")
+    main.append("return 0; }")
+    source = tmp_path / "march.cpp"
+    source.write_text("#include <cmath>\n#include <cstdint>\n#include <cstdio>\n#include <cstring>\n"
+                      + block + "\n" + "\n".join(main), encoding="utf-8")
+    # the block's other constants are the big test's; unused here is not an error
+    subprocess.run(["g++", "-std=c++17", "-O1", "-Wall", "-Werror", "-Wno-unused-const-variable",
+                    "-Wno-unused-variable", "-o", str(tmp_path / "march"), str(source)],
+                   check=True, capture_output=True, text=True)
+    lines = subprocess.run([str(tmp_path / "march")], check=True, capture_output=True, text=True).stdout.splitlines()
+    march = [line.split() for line in lines if line.startswith("march ")]
+    assert [(m, f) for _, m, f, _ in march] == [(m, f) for m in ("discrete", "integrated") for f in wb.CLOUD_MARCH_FIELDS]
+    for _, m, f, value in march:
+        assert float(value) == wb.CLOUD_MARCH[m][f], (m, f)
+    assert [float(l.split()[1]) for l in lines if l.startswith("shadow ")] == [wb.cloud_shadow_tracing_km(t) for t in thick]
+    assert [float(l.split()[1]) for l in lines if l.startswith("top ")] == [
+        wb.cloud_capped_top_m(wb.CLOUD_PRESETS[c], b, t, bool(s)) for c, b, t, s in tops]
+    sky = [line.split() for line in lines if line.startswith("sky ")]
+    assert {p: float(v) for _, p, v in sky} == wb.SKY_MULTI_SCATTERING
+    # under the engine's caps, and finer than round 1 (192 samples over 80 km, 10 shadow over 15 km)
+    for integrated in (False, True):
+        row = wb.cloud_march(integrated)
+        assert wb.ENGINE_CLOUD_BASE_VIEW_SAMPLES * row["view_sample_count_scale"] <= wb.ENGINE_CLOUD_VIEW_SAMPLE_CAP
+        assert wb.ENGINE_CLOUD_BASE_SHADOW_SAMPLES * row["shadow_sample_count_scale"] <= wb.ENGINE_CLOUD_SHADOW_SAMPLE_CAP
+        assert row["tracing_max_distance_km"] / row["view_samples_max"] <= 0.25 * 80.0 / 192.0 + 1e-12
+        assert wb.CLOUD_SHADOW_MAX_KM / row["shadow_samples"] < 0.25 * 15.0 / 10.0
+    # the -sky= plan's 3 km default slab is thinned for cumulus; a stated layer never is
+    assert wb.cloud_capped_top_m("cumulus", 2940.0, 5940.0, False) == 4940.0
+    assert wb.cloud_capped_top_m("cumulus", 2940.0, 5940.0, True) == 5940.0
+    assert wb.cloud_capped_top_m("nimbostratus", 1200.0, 7200.0, False) == 7200.0
+    # the C++ uses them where it draws: the GPU class, the per-layer shadow, the record
+    assert "GRHIDeviceIsIntegrated" in CLOUDS_CPP and "Cloud->SetShadowTracingDistance(ShadowTracingKm);" in CLOUDS_CPP
+    assert "Atmosphere->SetMultiScatteringFactor(static_cast<float>(SkyMultiScattering(Preset)));" in CLOUDS_CPP
+    assert 'Out->SetObjectField(TEXT("march"), MarchOut);' in CLOUDS_CPP
 
 
 def _f32(v):
