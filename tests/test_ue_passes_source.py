@@ -160,7 +160,8 @@ def test_the_velocity_check_persists_its_view_state_and_renders_first():
     assert 'FParse::Param(*Params, TEXT("velocity-check"))' in source
     # The first scene render after the step, before the beauty capture.
     check = source.index("VelocityCheck->CaptureScene();")
-    beauty = source.index("Capture->CaptureScene();\n\t\tFlushRenderingCommands();\n\n\t\tFTextureRenderTargetResource* Resource")
+    readback = source.index("FTextureRenderTargetResource* Resource =\n\t\t\tRenderTarget->GameThread_GetRenderTargetResource();")
+    beauty = source.rindex("Capture->CaptureScene();", 0, readback)
     assert check < beauty
     assert "if (bVelocityCheck && bPassVelocity)" in source
     assert "const float DxPx = VelocityCheckRaw[i].R * 0.5f * Width;" in source

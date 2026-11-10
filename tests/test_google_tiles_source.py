@@ -44,7 +44,11 @@ def test_the_key_comes_from_the_environment_and_is_never_recorded():
 def test_each_frame_loads_its_tiles_before_any_capture():
     wait = COMMANDLET.index("GoogleTiles.WaitForView(")
     velocity = COMMANDLET.index("// I6: the velocity pass renders FIRST")
-    beauty = COMMANDLET.index("		Capture->CaptureScene();\n		FlushRenderingCommands();\n\n")
+    # The beauty read-back (round 2 put the aircraft-sharp velocity roll
+    # between the beauty capture and it); the beauty capture is the last
+    # Capture->CaptureScene() before it.
+    readback = COMMANDLET.index("FTextureRenderTargetResource* Resource =\n\t\t\tRenderTarget->GameThread_GetRenderTargetResource();")
+    beauty = COMMANDLET.rindex("Capture->CaptureScene();", 0, readback)
     assert wait < velocity < beauty
     assert COMMANDLET.index("GoogleTiles.Enable(") < COMMANDLET.index(
         "TMap<int32, int32> StencilCounts;")   # tiles exist before the label groups
