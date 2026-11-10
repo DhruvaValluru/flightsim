@@ -6,6 +6,11 @@
 // (a drop on the lens is the glass's job) -- not the first metre, which faded out
 // exactly the drops wide enough to see (the owner's frame, 2026-10-09).
 //
+// The beauty rain shape (round-2b weather-fx, core/scene/weather_look.py
+// beauty_rain_shape): MaxStreak is the offset's streak cap (the coverage follows the
+// streak drawn), MaxCoverage caps one streak below opaque (no sheet), DepthFade fades
+// the coverage by exp(-range / DepthFade). Defaults (0, 1, 0) are the measure path's.
+//
 // Inputs:
 //   Rel      float3  the pixel's engine position minus the component's (cm)
 //   Drop     float2  UV1: diameter (mm), fall speed (m/s)
@@ -19,6 +24,9 @@
 //   Active   float   the share of drops shown here
 //   BoxHalf  float3  the box's half extent, engine cm
 //   GroundRelZ float the ground under the camera minus the component, cm
+//   MaxStreak float  the beauty streak's longest angular length, rad (0: no cap)
+//   MaxCoverage float the beauty cap on one streak's coverage (1: none)
+//   DepthFade float  the beauty coverage fade range, cm (0: none)
 struct FRainPixel
 {
 	float Ss(float e0, float e1, float x)
@@ -38,10 +46,19 @@ float speed = length(vel);
 float diameterCm = Drop.x * 0.1;
 float streak = max(speed * Shutter, diameterCm);
 float dist = max(length(Rel), 1.0);
+if (MaxStreak > 0.0)
+{
+	streak = max(min(streak, MaxStreak * dist), diameterCm);
+}
 float widthCm = Extra.x * 0.1;
 float width = max(widthCm, dist * PixelAngle);
 float coverage = (diameterCm / streak) * (widthCm / width) * Weight;
 float3 a = abs(Rel) / BoxHalf;
 float edge = (1.0 - R.Ss(0.8, 1.0, a.x)) * (1.0 - R.Ss(0.8, 1.0, a.y)) * (1.0 - R.Ss(0.8, 1.0, a.z));
 float nearFade = R.Ss(5.0, 30.0, dist);
-return saturate(coverage) * edge * nearFade;
+float shown = min(saturate(coverage), MaxCoverage);
+if (DepthFade > 0.0)
+{
+	shown *= exp(-dist / DepthFade);
+}
+return shown * edge * nearFade;

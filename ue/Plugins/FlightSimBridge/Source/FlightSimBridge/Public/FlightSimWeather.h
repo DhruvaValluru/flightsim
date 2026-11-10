@@ -169,6 +169,18 @@ struct FFlightSimFlashPower
 	double LeaderProgress = 0.0;
 };
 
+// round-2b weather-fx (2026-11-09): the BEAUTY rain shape, the C++ twin of
+// core/scene/weather_look.py beauty_rain_shape (tests/test_weather_fx.py pins
+// the two). The defaults are the measure path's shader (M_RainDrops's own).
+struct FFlightSimBeautyRainShape
+{
+	double DensityShare = 1.0;   // the share of the card's drops drawn
+	double NearThinM = 0.0;      // drops nearer than this thinned by (range / this)^2
+	double MaxStreakRad = 0.0;   // the streak's longest angular length (0: no cap)
+	double MaxCoverage = 1.0;    // the most one streak covers
+	double DepthFadeM = 0.0;     // coverage x exp(-range / this) (0: none)
+};
+
 struct FFlightSimThunderConstants
 {
 	double SoundSpeedMps = 340.0;
@@ -227,6 +239,10 @@ public:
 	// FFlightSimWorldBeauty under -quality=beauty only), recorded in
 	// Record.rain.beauty_readability_gain. Nothing without drawn drops.
 	void ApplyBeautyRainReadability(double Gain);
+	// round-2b weather-fx: the beauty rain shape for a rate and a drawn particle
+	// count (pure; ApplyBeautyRainReadability sets it on M_RainDrops and records
+	// it in Record.rain.beauty_shape).
+	static FFlightSimBeautyRainShape BeautyRainShape(double RateMmh, int32 Particles);
 
 	// Every registered volumetric cloud in the world checked the way the
 	// engine's cloud passes check it (a Volume material, flagged "Used with

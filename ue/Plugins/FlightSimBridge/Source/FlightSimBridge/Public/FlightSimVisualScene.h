@@ -449,6 +449,11 @@ public:
 	// M_LensDrops on the BEAUTY capture only, scaled by the block's rain
 	// rate; nothing without a rate.
 	void ApplyLensDropsToBeauty(USceneCaptureComponent2D* Beauty);
+	// round-2b weather-fx: BEAUTY ONLY (FFlightSimWorldBeauty::Build is the only
+	// caller). The rain shafts soft-edged and dimmed (M_RainShaft's ShaftSoftEdge,
+	// ShaftLight) and the scenario world's tornado funnel on M_TornadoFunnel;
+	// shading only, recorded in look_applied.weather_look.beauty.
+	void ApplyBeautyWeatherLook(UWorld* World);
 	// M_IceOverlay as the overlay material of every static mesh part of the
 	// airframe; its IceAmount follows the card's icing_schedule eta(t)
 	// (AdvanceWorld). Nothing without ice on the block.
@@ -561,6 +566,7 @@ private:
 	UMaterialInstanceDynamic* IceInstance = nullptr;
 	UMaterialInstanceDynamic* LightningInstance = nullptr;
 	UPointLightComponent* LightningLight = nullptr;
+	TArray<UMaterialInstanceDynamic*> ShaftInstances;   // round-2b weather-fx
 	double IceEtaMax = 0.0;
 	double IceOnsetSeconds = 0.0;
 	double IceRampSeconds = 0.0;

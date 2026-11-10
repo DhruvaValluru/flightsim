@@ -911,6 +911,8 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		}
 		Record->SetObjectField(TEXT("rain"), RainRow);
 	}
+	// round-2b weather-fx: the weather look's shafts and the tornado funnel (beauty only).
+	Scene.ApplyBeautyWeatherLook(World);
 	SkyLight = Scene.SkyLightComponent;
 	SkyLightBaseIntensity = SkyLight != nullptr ? SkyLight->Intensity : 1.0f;
 	LightningSkyGain = Row[AtmLightningSkyGain];

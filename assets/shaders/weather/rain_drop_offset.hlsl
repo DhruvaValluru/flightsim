@@ -5,6 +5,13 @@
 // drop's seed position p0 (component space, cm; the component sits at the camera),
 // so the vertex's own position minus the component's IS p0.
 //
+// The beauty rain shape (round-2b weather-fx, core/scene/weather_look.py
+// beauty_rain_shape; set only by FFlightSimWeather::ApplyBeautyRainReadability under
+// -quality=beauty): Density thins the drawn drops with the rate, NearThin thins the
+// drops near the lens by (range / NearThin)^2 on the drop's own phase, MaxStreak
+// caps the streak's angular length so a near drop never crosses the frame. Their
+// defaults (1, 0, 0) leave every drop exactly where the measure path draws it.
+//
 // Inputs:
 //   P0       float3  the vertex's position minus the component's (cm)
 //   Corner   float2  UV0: (0|1 across, 0|1 along)
@@ -19,12 +26,15 @@
 //   Shutter  float   the exposure, s
 //   PixelAngle float the angle of one pixel, rad
 //   Active   float   the share of drops shown here (weather.rain ambient_fraction .. 1)
+//   Density  float   the beauty share of the drops drawn (1: all)
+//   NearThin float   the beauty near-lens thinning range, cm (0: none)
+//   MaxStreak float  the beauty streak's longest angular length, rad (0: no cap)
 struct FRainDrop
 {
 	float3 Wrap(float3 v, float3 h) { return v - 2.0 * h * floor((v + h) / (2.0 * h)); }
 };
 FRainDrop R;
-if (Index >= Active)
+if (Index >= Active * Density)
 {
 	return -P0;   // collapsed onto the component origin: zero area, nothing drawn
 }
@@ -37,6 +47,18 @@ float3 along = speed > 1.0e-3 ? vel / speed : float3(0.0, 0.0, -1.0);
 float diameterCm = Drop.x * 0.1;
 float streak = max(speed * Shutter, diameterCm);
 float dist = max(length(rel), 1.0);
+if (NearThin > 0.0)
+{
+	float keep = dist / NearThin;
+	if (Extra.y >= keep * keep)
+	{
+		return -P0;   // thinned near the lens (the phase is the drop's own uniform draw)
+	}
+}
+if (MaxStreak > 0.0)
+{
+	streak = max(min(streak, MaxStreak * dist), diameterCm);
+}
 float3 side = cross(along, rel / dist);
 side = dot(side, side) > 1.0e-8 ? normalize(side) : normalize(cross(along, float3(1.0, 0.0, 0.0)));
 float width = max(Extra.x * 0.1, dist * PixelAngle);

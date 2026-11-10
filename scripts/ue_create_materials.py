@@ -498,7 +498,12 @@ WEATHER_SHADER_DIR = "assets/shaders/weather"
 #: parameter carries four floats where its shader input is a float4.
 DROPS_PARAMETERS = ("Shift", "FallTime", "BoxHalf", "WindVel", "CamVel", "Shutter",
                         "PixelAngle", "Active", "Weight", "GroundRelZ", "SkyRadianceScale",
-                        "FlashLux")
+                        "FlashLux", "Density", "NearThin", "MaxStreak", "MaxCoverage",
+                        "DepthFade")
+#: round-2b weather-fx: the beauty rain shape's parameters (beauty_rain_shape in
+#: core/scene/weather_look.py) and the defaults that are the measure path's shader.
+DROPS_BEAUTY_DEFAULTS = {"Density": 1.0, "NearThin": 0.0, "MaxStreak": 0.0,
+                         "MaxCoverage": 1.0, "DepthFade": 0.0}
 SPLASH_PARAMETERS = ("Time", "Splash", "GroundShift", "GroundRelZ", "DropMm", "Active",
                      "Weight", "SkyRadianceScale", "FlashLux")
 LIGHTNING_PARAMETERS = ("PixelAngle", "RadiusCm", "Power")
@@ -556,7 +561,8 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_StormCell 2: STORM_SCATTERING (2026-10-08). M_RainDrops 3: the near
 #: fade shortened to 30 cm (rain_drop_opacity.hlsl, 2026-10-09); 4 and
 #: M_RainSplash 3: lit by the scene instead of a black sky sample (drop_lit).
-STORM_GENERATIONS = {"M_RainDrops": "4", "M_RainSplash": "3", "M_LightningChannel": "2",
+#: M_RainDrops 5: the beauty rain shape's five parameters (round-2b weather-fx).
+STORM_GENERATIONS = {"M_RainDrops": "5", "M_RainSplash": "3", "M_LightningChannel": "2",
                      "M_StormCell": "2", "M_WindshieldRain": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
@@ -948,6 +954,9 @@ def finish(material, name):
     if name in WORLD_GENERATIONS:   # no-lumen-and-machine lane: the world look's stamp
         unreal.EditorAssetLibrary.set_metadata_tag(material, WORLD_GENERATION_TAG,
                                                    WORLD_GENERATIONS[name])
+    if name in WEATHER_LOOK_GENERATIONS:   # round-2b weather-fx: the weather look's stamp
+        unreal.EditorAssetLibrary.set_metadata_tag(material, WEATHER_LOOK_GENERATION_TAG,
+                                                   WEATHER_LOOK_GENERATIONS[name])
     unreal.MaterialEditingLibrary.recompile_material(material)
     unreal.EditorAssetLibrary.save_asset(f"{PATH}/{name}")
     print(f"MATERIAL-CREATED: {PATH}/{name}")
@@ -1919,7 +1928,8 @@ def create_rain_drops():
     lib = unreal.MaterialEditingLibrary
     _translucent_lit(material)
     params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i,
-                                      default=1.0 if name in ("Weight", "SkyRadianceScale") else 0.0)
+                                      default=DROPS_BEAUTY_DEFAULTS.get(
+                                          name, 1.0 if name in ("Weight", "SkyRadianceScale") else 0.0))
               for i, name in enumerate(DROPS_PARAMETERS) if name not in ("SkyRadianceScale",
                                                                              "FlashLux")}
     p0 = relative_position(material, lib, -1800, 900, True, "object")
@@ -1930,7 +1940,9 @@ def create_rain_drops():
         "Index": uv_channel(material, lib, 3, "r", -1800, 1550),
         "Shift": params["Shift"], "FallTime": params["FallTime"], "BoxHalf": params["BoxHalf"],
         "WindVel": params["WindVel"], "CamVel": params["CamVel"], "Shutter": params["Shutter"],
-        "PixelAngle": params["PixelAngle"], "Active": params["Active"]}, -900, 0)
+        "PixelAngle": params["PixelAngle"], "Active": params["Active"],
+        "Density": params["Density"], "NearThin": params["NearThin"],
+        "MaxStreak": params["MaxStreak"]}, -900, 0)
     lib.connect_material_property(offset, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
     rel = relative_position(material, lib, -1800, 1700, False, "object")
     opacity = custom(material, lib, "rain_drop_opacity", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
@@ -1939,7 +1951,9 @@ def create_rain_drops():
         "Index": uv_channel(material, lib, 3, "r", -1500, 1550),
         "WindVel": params["WindVel"], "CamVel": params["CamVel"], "Shutter": params["Shutter"],
         "PixelAngle": params["PixelAngle"], "Weight": params["Weight"], "Active": params["Active"],
-        "BoxHalf": params["BoxHalf"], "GroundRelZ": params["GroundRelZ"]}, -900, 400)
+        "BoxHalf": params["BoxHalf"], "GroundRelZ": params["GroundRelZ"],
+        "MaxStreak": params["MaxStreak"], "MaxCoverage": params["MaxCoverage"],
+        "DepthFade": params["DepthFade"]}, -900, 400)
     lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
     drop_lit(material, lib, -900, 800)
     finish_storm(material, "M_RainDrops")
@@ -2324,10 +2338,52 @@ RAIN_DROP_COLOUR = (0.62, 0.66, 0.70)
 RAIN_DROP_ROUGHNESS = 0.08
 
 
+# -- round-2b weather-fx (2026-11-09): the weather look's generation stamp -- begin --
+#: The weather-look materials whose graph changed after a machine built them,
+#: stamped like WORLD_GENERATIONS (WEATHER_LOOK_GENERATION_TAG): one stamped
+#: older (or not at all) is UPDATED IN PLACE on the next run (its graph cleared
+#: and built again on the same asset; never deleted, no redirect), with no
+#: FLIGHTSIM_REBUILD_MATERIALS. M_RainShaft 2: the beauty soft edge and light
+#: (ShaftSoftEdge, ShaftLight; their defaults draw generation 1's cones).
+#: M_TornadoFunnel 1: the funnel's beauty material. Bump with every graph change.
+WEATHER_LOOK_GENERATIONS = {"M_RainShaft": "2", "M_TornadoFunnel": "1"}
+WEATHER_LOOK_GENERATION_TAG = "FlightSimWeatherLookGeneration"
+#: M_RainShaft's beauty parameters (FlightSimWeatherLook.cpp ApplyBeautyWeatherLook)
+#: and the defaults that are the measure path's cones.
+SHAFT_BEAUTY_DEFAULTS = {"ShaftSoftEdge": 0.0, "ShaftLight": 1.0}
+#: M_TornadoFunnel's parameter (core/scene/weather_look.py BEAUTY_FUNNEL_COLOUR).
+FUNNEL_PARAMETERS = ("FunnelColour",)
+FUNNEL_COLOUR_DEFAULT = (0.30, 0.28, 0.26)
+
+
+def weather_look_stale(name):
+    """True when /Game/FlightSim/<name> exists but is not stamped with its
+    WEATHER_LOOK_GENERATIONS number: built by an older version of this script."""
+    if name not in WEATHER_LOOK_GENERATIONS:
+        return False
+    full = f"{PATH}/{name}"
+    if not unreal.EditorAssetLibrary.does_asset_exist(full):
+        return False
+    stamped = unreal.EditorAssetLibrary.get_metadata_tag(
+        unreal.EditorAssetLibrary.load_asset(full), WEATHER_LOOK_GENERATION_TAG)
+    return str(stamped) != WEATHER_LOOK_GENERATIONS[name]
+# -- round-2b weather-fx -- end ------------------------------------------------------
+
+
 def _weather_material(name):
     """/Game/FlightSim/<name> once; None when it already exists (the world
-    list stays exactly the world's, like the sky's helper)."""
+    list stays exactly the world's, like the sky's helper). One stamped older
+    than its WEATHER_LOOK_GENERATIONS number is cleared and built again in place."""
     full = f"{PATH}/{name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(full) and weather_look_stale(name):
+        material = unreal.EditorAssetLibrary.load_asset(full)
+        if material is None or not isinstance(material, unreal.Material):
+            raise RuntimeError(f"{full} exists but is not a Material: move it aside by hand "
+                               f"(no editor open) and run again")
+        unreal.MaterialEditingLibrary.delete_all_material_expressions(material)
+        print(f"MATERIAL-UPDATED: {full} (graph cleared; built again in place, "
+              f"weather look generation {WEATHER_LOOK_GENERATIONS[name]})")
+        return material
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         if rebuild_requested(name) and unreal.EditorAssetLibrary.delete_asset(full):
             print(f"MATERIAL-REBUILT: {full} (deleted to be built again)")
@@ -2603,7 +2659,9 @@ def create_rain_shaft():
     """M_RainShaft: translucent unlit two-sided grey; opacity =
     ShaftOpacity x vertical streaks (a noise stretched 40:1 in height) x
     the mesh's V (1 at the cloud base, 0 at the ground: UV0.y) faded,
-    softened where it meets the ground (DepthFade)."""
+    softened where it meets the ground (DepthFade). Round-2b weather-fx: x
+    rain_shaft_soft.hlsl (the cone's silhouette faded by ShaftSoftEdge) and the
+    grey x ShaftLight; their defaults (0, 1) draw the cones exactly as before."""
     material = _weather_material("M_RainShaft")
     if material is None:
         return
@@ -2627,13 +2685,57 @@ def create_rain_shaft():
     alpha = binary(material, lib, unreal.MaterialExpressionMultiply,
                    binary(material, lib, unreal.MaterialExpressionMultiply, opacity, streaks, -900, 100),
                    height, -750, 150)
+    # round-2b weather-fx: the soft silhouette (beauty sets ShaftSoftEdge 1).
+    soft_edge = scalar(material, lib, "ShaftSoftEdge", SHAFT_BEAUTY_DEFAULTS["ShaftSoftEdge"],
+                       -1200, 500)
+    camera = lib.create_material_expression(material, unreal.MaterialExpressionCameraVectorWS,
+                                            -1200, 650)
+    soft = custom(material, lib, "rain_shaft_soft", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
+        "Rel": relative_position(material, lib, -1500, 750, False, "object"),
+        "CamVec": (camera, ""), "SoftEdge": (soft_edge, "")}, -900, 500)
+    alpha = binary(material, lib, unreal.MaterialExpressionMultiply, alpha, soft, -650, 250)
     fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -550, 150)
     fade.set_editor_property("fade_distance_default", 20000.0)
     lib.connect_material_expressions(alpha, "", fade, "Opacity")
-    lib.connect_material_property(constant3(material, lib, (0.30, 0.33, 0.37), -550, 0), "",
-                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    light = scalar(material, lib, "ShaftLight", SHAFT_BEAUTY_DEFAULTS["ShaftLight"], -700, -150)
+    lib.connect_material_property(
+        binary(material, lib, unreal.MaterialExpressionMultiply,
+               constant3(material, lib, (0.30, 0.33, 0.37), -550, 0), light, -400, 0), "",
+        unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
     finish(material, "M_RainShaft")
+
+
+def create_tornado_funnel():
+    """M_TornadoFunnel (round-2b weather-fx): the scenario world's tornado funnel
+    in BEAUTY (FlightSimWeatherLook.cpp ApplyBeautyWeatherLook). Opaque, lit,
+    one-sided (the mesh carries both windings), no world position offset, no
+    vertex colour (NEXT.md gotcha 26: the funnel's vertex colours never reached
+    the shading); base colour FunnelColour x a vertical streak noise (0.7..1, a
+    noise stretched 30:1 in height: the condensation's striations), roughness 1.
+    A plain lit opaque surface: every pass runs on the D3D11 / SM5 render machine."""
+    material = _weather_material("M_TornadoFunnel")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    colour = vector(material, lib, FUNNEL_PARAMETERS[0], FUNNEL_COLOUR_DEFAULT + (1.0,), -900, 0)
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, -1300, 200)
+    stretch = lib.create_material_expression(material, unreal.MaterialExpressionConstant3Vector,
+                                             -1300, 300)
+    stretch.set_editor_property("constant", unreal.LinearColor(1.0, 1.0, 1.0 / 30.0, 1.0))
+    streaked = binary(material, lib, unreal.MaterialExpressionMultiply, world, stretch, -1150, 200)
+    streaks = lib.create_material_expression(material, unreal.MaterialExpressionNoise, -1000, 200)
+    streaks.set_editor_property("scale", 1.0 / 1500.0)
+    streaks.set_editor_property("levels", 3)
+    streaks.set_editor_property("output_min", 0.7)
+    streaks.set_editor_property("output_max", 1.0)
+    lib.connect_material_expressions(streaked, "", streaks, "Position")
+    base = binary(material, lib, unreal.MaterialExpressionMultiply,
+                  mask(material, lib, colour, "rgb", -800, 0), streaks, -700, 100)
+    lib.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(constant(material, lib, 1.0, -700, 250), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
+    finish(material, "M_TornadoFunnel")
 
 
 def create_lightning():
@@ -3212,6 +3314,7 @@ create_terrain_imagery_night()
 create_ground_surfaces()
 create_lens_drops()
 create_rain_shaft()
+create_tornado_funnel()   # round-2b weather-fx
 create_lightning()
 create_ice_overlay()
 create_rain_drop()

@@ -39,6 +39,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Math/RandomStream.h"
 #include "ProceduralMeshComponent.h"
+#include "UObject/UObjectIterator.h"
 
 namespace
 {
@@ -89,6 +90,22 @@ namespace
 	constexpr double ShaftOpacityAtReference = 0.55;
 	// eta at which the ice is fully drawn (icing's "severe" word).
 	constexpr double IceFullEta = 0.30;
+
+	// round-2b weather-fx (2026-11-09): the BEAUTY storm look (ApplyBeautyWeatherLook;
+	// core/scene/weather_look.py BEAUTY_SHAFT_*, BEAUTY_FUNNEL_COLOUR, pinned by
+	// tests/test_weather_fx.py). M_RainShaft's defaults (soft edge 0, light 1) are
+	// the measure path's hard, unlit-grey cones. UNCALIBRATED.
+	const TCHAR* const TornadoFunnelPath = TEXT("/Game/FlightSim/M_TornadoFunnel.M_TornadoFunnel");
+	const TCHAR* const LookShaftSoftEdgeParameter = TEXT("ShaftSoftEdge");
+	const TCHAR* const LookShaftLightParameter = TEXT("ShaftLight");
+	const TCHAR* const LookFunnelColourParameter = TEXT("FunnelColour");
+	// The scenario world's funnel component (FlightSimScenarioWorld.cpp).
+	const TCHAR* const LookFunnelComponentName = TEXT("TornadoFunnel");
+	constexpr double LookBeautyShaftSoftEdge = 1.0;
+	constexpr double LookBeautyShaftLight = 0.35;
+	constexpr float LookBeautyFunnelColourR = 0.30f;
+	constexpr float LookBeautyFunnelColourG = 0.28f;
+	constexpr float LookBeautyFunnelColourB = 0.26f;
 
 	double NumberOr(const TSharedPtr<FJsonObject>& Object, const TCHAR* Key, double Default)
 	{
@@ -211,6 +228,7 @@ bool FFlightSimVisualScene::ApplyWeatherLook(UWorld* World,
                                              FString& Error)
 {
 	WeatherLook.Reset();
+	ShaftInstances.Reset();
 	LensDropsInstance = nullptr;
 	IceInstance = nullptr;
 	LightningInstance = nullptr;
@@ -333,6 +351,7 @@ bool FFlightSimVisualScene::ApplyWeatherLook(UWorld* World,
 			ShaftInstance->SetScalarParameterValue(FName(WeatherShaftParameter),
 			                                       static_cast<float>(ShaftOpacity));
 			ShaftMesh->SetMaterial(0, ShaftInstance);
+			ShaftInstances.Add(ShaftInstance);
 			ShaftMesh->RegisterComponent();
 			Shaft->SetActorLocation(Location);
 			BeautyOnlyActors.Add(Shaft);
@@ -391,6 +410,77 @@ bool FFlightSimVisualScene::ApplyWeatherLook(UWorld* World,
 	Record->SetStringField(TEXT("ice_overlay"), IceEtaMax > 0.0 ? TEXT("asked") : TEXT("no ice"));
 	LookApplied->SetObjectField(TEXT("weather_look"), Record);
 	return true;
+}
+
+void FFlightSimVisualScene::ApplyBeautyWeatherLook(UWorld* World)
+{
+	// round-2b weather-fx: BEAUTY ONLY (FFlightSimWorldBeauty::Build, -quality=beauty,
+	// is the only caller). Round 0 #09 drew the rain shafts as two hard-edged,
+	// glowing cones; round 0 #10 drew no tornado. Shading only: no geometry moves,
+	// the funnel's new material is opaque with no world position offset, so the
+	// label captures (which draw their own pass materials) see the same silhouette.
+	if (!LookApplied.IsValid())
+	{
+		return;
+	}
+	TSharedPtr<FJsonObject> Beauty = MakeShared<FJsonObject>();
+	// The shafts (the -weather-backend=off path: under the storm weather they
+	// stand down for the cell, SceneOptions.bSkipStormLook).
+	for (UMaterialInstanceDynamic* Shaft : ShaftInstances)
+	{
+		if (Shaft != nullptr)
+		{
+			Shaft->SetScalarParameterValue(FName(LookShaftSoftEdgeParameter),
+			                               static_cast<float>(LookBeautyShaftSoftEdge));
+			Shaft->SetScalarParameterValue(FName(LookShaftLightParameter),
+			                               static_cast<float>(LookBeautyShaftLight));
+		}
+	}
+	Beauty->SetNumberField(TEXT("rain_shafts_softened"), ShaftInstances.Num());
+	Beauty->SetNumberField(TEXT("shaft_soft_edge"), LookBeautyShaftSoftEdge);
+	Beauty->SetNumberField(TEXT("shaft_light"), LookBeautyShaftLight);
+	// The tornado funnel: the scenario world draws it with the engine's default
+	// (grid) material, because both vertex-colour materials rendered it black
+	// (NEXT.md gotcha 26). Beauty gives it M_TornadoFunnel: a lit opaque
+	// grey-brown with vertical streaks, no vertex colour read.
+	UProceduralMeshComponent* Funnel = nullptr;
+	for (TObjectIterator<UProceduralMeshComponent> It; It; ++It)
+	{
+		if (*It != nullptr && It->GetWorld() == World && It->GetFName() == FName(LookFunnelComponentName))
+		{
+			Funnel = *It;
+			break;
+		}
+	}
+	if (Funnel == nullptr)
+	{
+		Beauty->SetStringField(TEXT("tornado_funnel"), TEXT("none in the world"));
+	}
+	else if (UMaterialInterface* FunnelMaterial = LoadObject<UMaterialInterface>(nullptr, TornadoFunnelPath))
+	{
+		UMaterialInstanceDynamic* FunnelInstance = UMaterialInstanceDynamic::Create(FunnelMaterial, Funnel);
+		FunnelInstance->SetVectorParameterValue(FName(LookFunnelColourParameter),
+			FLinearColor(LookBeautyFunnelColourR, LookBeautyFunnelColourG, LookBeautyFunnelColourB, 1.0f));
+		Funnel->SetMaterial(0, FunnelInstance);
+		Beauty->SetStringField(TEXT("tornado_funnel"), TornadoFunnelPath);
+	}
+	else
+	{
+		Beauty->SetStringField(TEXT("tornado_funnel"),
+			TEXT("the default material kept: M_TornadoFunnel did not load (run scripts/ue_create_materials.py)"));
+	}
+	Beauty->SetStringField(TEXT("basis"),
+		TEXT("core/scene/weather_look.py BEAUTY_SHAFT_*, BEAUTY_FUNNEL_COLOUR (UNCALIBRATED); shading only, "
+		     "the labels' silhouettes unchanged"));
+	const TSharedPtr<FJsonObject>* Record = nullptr;
+	if (LookApplied->TryGetObjectField(TEXT("weather_look"), Record) && Record != nullptr && Record->IsValid())
+	{
+		(*Record)->SetObjectField(TEXT("beauty"), Beauty);
+	}
+	else
+	{
+		LookApplied->SetObjectField(TEXT("weather_look_beauty"), Beauty);
+	}
 }
 
 void FFlightSimVisualScene::ApplyLensDropsToBeauty(USceneCaptureComponent2D* Beauty)

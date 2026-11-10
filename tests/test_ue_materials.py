@@ -190,6 +190,7 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                "M_Ground_Desert", "M_Ground_Forest", "M_Ground_Grassland", "M_Ground_Snow",
                "M_Ground_Bare", "M_Ground_City", "M_Ground_Ocean", "M_LensDrops",
                "M_RainShaft", "M_Lightning", "M_IceOverlay",
+               "M_TornadoFunnel",   # round-2b weather-fx: the funnel in beauty
                # The 3-D rain (FlightSimRainParticles.cpp).
                "M_RainDrop",
                # The storm weather (FlightSimWeather.cpp).
