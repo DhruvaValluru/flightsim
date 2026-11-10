@@ -223,6 +223,20 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 	{
 		NiagaraRain->SetVariableFloat(TEXT("User.Weight"), static_cast<float>(Weight * BeautyRainGain));
 	}
+	// round-2b weather-fx: the rain a camera shows, not a sheet (round 0 #07: a
+	// full-frame wall of vertical streaks). Beauty only, like the gain above:
+	// M_RainDrops's defaults are the measure path's shader.
+	const FFlightSimBeautyRainShape Shape = BeautyRainShape(RainRateMmh, Particles);
+	if (RainMaterial != nullptr)
+	{
+		RainMaterial->SetScalarParameterValue(TEXT("Density"), static_cast<float>(Shape.DensityShare));
+		RainMaterial->SetScalarParameterValue(TEXT("NearThin"),
+		                                      static_cast<float>(Shape.NearThinM * WeatherCmPerMetre));
+		RainMaterial->SetScalarParameterValue(TEXT("MaxStreak"), static_cast<float>(Shape.MaxStreakRad));
+		RainMaterial->SetScalarParameterValue(TEXT("MaxCoverage"), static_cast<float>(Shape.MaxCoverage));
+		RainMaterial->SetScalarParameterValue(TEXT("DepthFade"),
+		                                      static_cast<float>(Shape.DepthFadeM * WeatherCmPerMetre));
+	}
 	const TSharedPtr<FJsonObject>* Row = nullptr;
 	if (Record.IsValid() && Record->TryGetObjectField(TEXT("rain"), Row) && Row != nullptr && Row->IsValid())
 	{
@@ -230,7 +244,57 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		(*Row)->SetStringField(TEXT("beauty_readability_basis"),
 			TEXT("-quality=beauty: the drawn drops' opacity x this on top of the gain, so the streaks read on "
 			     "camera (a stated exaggeration, UNCALIBRATED; core/scene/world_beauty.py ATMOSPHERE)"));
+		TSharedPtr<FJsonObject> ShapeRow = MakeShared<FJsonObject>();
+		ShapeRow->SetNumberField(TEXT("density_share"), Shape.DensityShare);
+		ShapeRow->SetNumberField(TEXT("drawn_drops"), FMath::RoundToDouble(Shape.DensityShare * Particles));
+		ShapeRow->SetNumberField(TEXT("near_thin_m"), Shape.NearThinM);
+		ShapeRow->SetNumberField(TEXT("max_streak_rad"), Shape.MaxStreakRad);
+		ShapeRow->SetNumberField(TEXT("max_coverage"), Shape.MaxCoverage);
+		ShapeRow->SetNumberField(TEXT("depth_fade_m"), Shape.DepthFadeM);
+		ShapeRow->SetStringField(TEXT("applied_to"), RainMaterial != nullptr
+			? TEXT("M_RainDrops (the procedural backend's drops)")
+			: TEXT("nothing: the Niagara backend's system exposes no shape parameters"));
+		ShapeRow->SetStringField(TEXT("basis"),
+			TEXT("core/scene/weather_look.py beauty_rain_shape: the drawn count follows the rate, the streak's "
+			     "angular length is capped, the drops near the lens thinned, one streak's coverage capped and "
+			     "faded with range; mean light is NOT conserved (a stated look, UNCALIBRATED)"));
+		(*Row)->SetObjectField(TEXT("beauty_shape"), ShapeRow);
 	}
+}
+
+FFlightSimBeautyRainShape FFlightSimWeather::BeautyRainShape(double RateMmh, int32 Particles)
+{
+	// core/scene/weather_look.py BEAUTY_RAIN_* (pinned by tests/test_weather_fx.py).
+	constexpr double WeatherBeautyRainDropsPerMmh = 1500.0;
+	constexpr double WeatherBeautyRainMinShare = 0.01;
+	constexpr double WeatherBeautyRainNearThinM = 4.0;
+	constexpr double WeatherBeautyRainStreakRadLight = 0.012;
+	constexpr double WeatherBeautyRainStreakRadHeavy = 0.045;
+	constexpr double WeatherBeautyRainLightMmh = 1.0;
+	constexpr double WeatherBeautyRainHeavyMmh = 50.0;
+	constexpr double WeatherBeautyRainMaxCoverage = 0.35;
+	constexpr double WeatherBeautyRainDepthFadeM = 12.0;
+	const double Rate = FMath::Max(RateMmh, 0.0);
+	const double Count = static_cast<double>(FMath::Max(Particles, 1));
+	FFlightSimBeautyRainShape Shape;
+	Shape.DensityShare = FMath::Min(1.0, FMath::Max(WeatherBeautyRainMinShare,
+	                                                WeatherBeautyRainDropsPerMmh * Rate / Count));
+	double T = 0.0;
+	if (Rate >= WeatherBeautyRainHeavyMmh)
+	{
+		T = 1.0;
+	}
+	else if (Rate > WeatherBeautyRainLightMmh)
+	{
+		T = FMath::Loge(Rate / WeatherBeautyRainLightMmh)
+			/ FMath::Loge(WeatherBeautyRainHeavyMmh / WeatherBeautyRainLightMmh);
+	}
+	Shape.NearThinM = WeatherBeautyRainNearThinM;
+	Shape.MaxStreakRad = WeatherBeautyRainStreakRadLight
+		+ T * (WeatherBeautyRainStreakRadHeavy - WeatherBeautyRainStreakRadLight);
+	Shape.MaxCoverage = WeatherBeautyRainMaxCoverage;
+	Shape.DepthFadeM = WeatherBeautyRainDepthFadeM;
+	return Shape;
 }
 
 uint64 FFlightSimWeather::SplitMix64(uint64 X)

@@ -91,3 +91,79 @@ def weather_look_card_block(spec) -> Optional[Dict[str, Any]]:
         raise RuntimeError(f"weather_look card keys {list(block)} are not the fixed order "
                            f"{list(CARD_KEYS)}")
     return block
+
+
+# -- round-2b weather-fx (2026-11-09): the BEAUTY rain, shafts and funnel -- begin ----
+#
+# Round 0 (docs/visual/round_0/07, heavy rain from the tower) drew a full-frame
+# wall of vertical streaks: every one of the card's PARTICLE_BUDGET drops in the
+# 20 x 20 x 16 m box was drawn at every rate, each a 1/15 s cinematic streak (60 cm
+# at 9 m/s), so a drop 1 m from the lens ran the frame's height, and the opacity
+# weight x the web app's -rain-gain=4 x the beauty readability gain clamped each
+# streak opaque. The beauty capture now draws the rain a camera shows
+# (FlightSimWeather.cpp FFlightSimWeather::BeautyRainShape is the C++ twin;
+# tests/test_weather_fx.py pins the two): the drawn count follows the rate, the
+# streak's angular length is capped (a near drop cannot cross the frame), the
+# drops near the lens are thinned, each streak's coverage is capped below opaque
+# and fades with range. BEAUTY ONLY: FFlightSimWeather::ApplyBeautyRainReadability
+# (FFlightSimWorldBeauty, -quality=beauty) is the only caller; M_RainDrops's
+# defaults (Density 1, NearThin 0, MaxStreak 0, MaxCoverage 1, DepthFade 0) are
+# the measure path's shader, value for value. Every number is UNCALIBRATED: set
+# by probe render on the render machine (docs/visual/PROBE_LOG.md
+# ## round-2b weather-fx).
+
+#: Streaks drawn in the rain box per mm/h of rain (a 40 mm/h storm draws 60 000
+#: of the card's 262 144; 2 mm/h draws 3 000).
+BEAUTY_RAIN_DROPS_PER_MMH = 1500.0
+#: The fewest drawn, as a share of the card's particles (light rain still reads).
+BEAUTY_RAIN_MIN_SHARE = 0.01
+#: Drops nearer than this (m) are thinned by (range / this)^2: 1 m keeps 1 in 16.
+BEAUTY_RAIN_NEAR_THIN_M = 4.0
+#: The streak's longest angular length (rad) at the light and the heavy rate,
+#: log-interpolated between and held outside (heavier rain, longer streaks).
+BEAUTY_RAIN_STREAK_RAD_LIGHT = 0.012
+BEAUTY_RAIN_STREAK_RAD_HEAVY = 0.045
+BEAUTY_RAIN_LIGHT_MMH = 1.0
+BEAUTY_RAIN_HEAVY_MMH = 50.0
+#: The most one streak covers (never an opaque sheet).
+BEAUTY_RAIN_MAX_COVERAGE = 0.35
+#: Coverage x exp(-range / this): the far drops of the box fade into the rain's veil.
+BEAUTY_RAIN_DEPTH_FADE_M = 12.0
+BEAUTY_RAIN_KEYS = ("density_share", "near_thin_m", "max_streak_rad", "max_coverage",
+                    "depth_fade_m")
+
+
+def beauty_rain_shape(rate_mmh: float, particles: int) -> Dict[str, float]:
+    """The beauty rain's shape for the card's rain rate and drawn particle
+    count, keys in BEAUTY_RAIN_KEYS order (the C++ twin's fields)."""
+    import math
+
+    rate = max(float(rate_mmh), 0.0)
+    count = max(int(particles), 1)
+    share = min(1.0, max(BEAUTY_RAIN_MIN_SHARE, BEAUTY_RAIN_DROPS_PER_MMH * rate / count))
+    if rate <= BEAUTY_RAIN_LIGHT_MMH:
+        t = 0.0
+    elif rate >= BEAUTY_RAIN_HEAVY_MMH:
+        t = 1.0
+    else:
+        t = math.log(rate / BEAUTY_RAIN_LIGHT_MMH) / math.log(BEAUTY_RAIN_HEAVY_MMH
+                                                              / BEAUTY_RAIN_LIGHT_MMH)
+    streak = BEAUTY_RAIN_STREAK_RAD_LIGHT + t * (BEAUTY_RAIN_STREAK_RAD_HEAVY
+                                                 - BEAUTY_RAIN_STREAK_RAD_LIGHT)
+    return {"density_share": share, "near_thin_m": BEAUTY_RAIN_NEAR_THIN_M,
+            "max_streak_rad": streak, "max_coverage": BEAUTY_RAIN_MAX_COVERAGE,
+            "depth_fade_m": BEAUTY_RAIN_DEPTH_FADE_M}
+
+
+#: The weather look's rain shafts in beauty (M_RainShaft's ShaftSoftEdge and
+#: ShaftLight; 0 and 1 are the measure path's hard, unlit-grey cones). Round 0's
+#: #09 drew them as two hard-edged glowing cones under the 747. Under the storm
+#: weather (the web app's default) they stand down for the storm cell
+#: (SceneOptions.bSkipStormLook); this is the -weather-backend=off path.
+BEAUTY_SHAFT_SOFT_EDGE = 1.0
+BEAUTY_SHAFT_LIGHT = 0.35
+#: The tornado funnel's beauty material (M_TornadoFunnel's FunnelColour): a
+#: grey-brown condensation-and-debris albedo, linear. It replaces the engine's
+#: default grid material in beauty only (no vertex colour: NEXT.md gotcha 26).
+BEAUTY_FUNNEL_COLOUR = (0.30, 0.28, 0.26)
+# -- round-2b weather-fx -- end ---------------------------------------------------------

@@ -498,7 +498,12 @@ WEATHER_SHADER_DIR = "assets/shaders/weather"
 #: parameter carries four floats where its shader input is a float4.
 DROPS_PARAMETERS = ("Shift", "FallTime", "BoxHalf", "WindVel", "CamVel", "Shutter",
                         "PixelAngle", "Active", "Weight", "GroundRelZ", "SkyRadianceScale",
-                        "FlashLux")
+                        "FlashLux", "Density", "NearThin", "MaxStreak", "MaxCoverage",
+                        "DepthFade")
+#: round-2b weather-fx: the beauty rain shape's parameters (beauty_rain_shape in
+#: core/scene/weather_look.py) and the defaults that are the measure path's shader.
+DROPS_BEAUTY_DEFAULTS = {"Density": 1.0, "NearThin": 0.0, "MaxStreak": 0.0,
+                         "MaxCoverage": 1.0, "DepthFade": 0.0}
 SPLASH_PARAMETERS = ("Time", "Splash", "GroundShift", "GroundRelZ", "DropMm", "Active",
                      "Weight", "SkyRadianceScale", "FlashLux")
 LIGHTNING_PARAMETERS = ("PixelAngle", "RadiusCm", "Power")
@@ -556,7 +561,8 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_StormCell 2: STORM_SCATTERING (2026-10-08). M_RainDrops 3: the near
 #: fade shortened to 30 cm (rain_drop_opacity.hlsl, 2026-10-09); 4 and
 #: M_RainSplash 3: lit by the scene instead of a black sky sample (drop_lit).
-STORM_GENERATIONS = {"M_RainDrops": "4", "M_RainSplash": "3", "M_LightningChannel": "2",
+#: M_RainDrops 5: the beauty rain shape's five parameters (round-2b weather-fx).
+STORM_GENERATIONS = {"M_RainDrops": "5", "M_RainSplash": "3", "M_LightningChannel": "2",
                      "M_StormCell": "2", "M_WindshieldRain": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
@@ -1919,7 +1925,8 @@ def create_rain_drops():
     lib = unreal.MaterialEditingLibrary
     _translucent_lit(material)
     params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i,
-                                      default=1.0 if name in ("Weight", "SkyRadianceScale") else 0.0)
+                                      default=DROPS_BEAUTY_DEFAULTS.get(
+                                          name, 1.0 if name in ("Weight", "SkyRadianceScale") else 0.0))
               for i, name in enumerate(DROPS_PARAMETERS) if name not in ("SkyRadianceScale",
                                                                              "FlashLux")}
     p0 = relative_position(material, lib, -1800, 900, True, "object")
@@ -1930,7 +1937,9 @@ def create_rain_drops():
         "Index": uv_channel(material, lib, 3, "r", -1800, 1550),
         "Shift": params["Shift"], "FallTime": params["FallTime"], "BoxHalf": params["BoxHalf"],
         "WindVel": params["WindVel"], "CamVel": params["CamVel"], "Shutter": params["Shutter"],
-        "PixelAngle": params["PixelAngle"], "Active": params["Active"]}, -900, 0)
+        "PixelAngle": params["PixelAngle"], "Active": params["Active"],
+        "Density": params["Density"], "NearThin": params["NearThin"],
+        "MaxStreak": params["MaxStreak"]}, -900, 0)
     lib.connect_material_property(offset, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
     rel = relative_position(material, lib, -1800, 1700, False, "object")
     opacity = custom(material, lib, "rain_drop_opacity", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
@@ -1939,7 +1948,9 @@ def create_rain_drops():
         "Index": uv_channel(material, lib, 3, "r", -1500, 1550),
         "WindVel": params["WindVel"], "CamVel": params["CamVel"], "Shutter": params["Shutter"],
         "PixelAngle": params["PixelAngle"], "Weight": params["Weight"], "Active": params["Active"],
-        "BoxHalf": params["BoxHalf"], "GroundRelZ": params["GroundRelZ"]}, -900, 400)
+        "BoxHalf": params["BoxHalf"], "GroundRelZ": params["GroundRelZ"],
+        "MaxStreak": params["MaxStreak"], "MaxCoverage": params["MaxCoverage"],
+        "DepthFade": params["DepthFade"]}, -900, 400)
     lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
     drop_lit(material, lib, -900, 800)
     finish_storm(material, "M_RainDrops")
