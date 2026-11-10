@@ -2761,3 +2761,60 @@ contribution`) are the same in both plans.
     `-beauty-fallback=off` (DFAO and SSGI out). Whichever brings the red/fill back names the
     occluder.
   Three renders settle it; #01, #04 and #13 are not re-rendered (no switch, no change).
+
+## round-6 cloud strata (blue noise)
+
+Round 6, 2026-11-10, Mac, uncompiled; nothing rendered. Traced from the round-3 clear-sky
+frames (#03 A320 over New York, #12 C172 over the Grand Canyon, #13 747 over the ocean) and
+head3 shot d (b6a9aff2 at beauty, Windows laptop, Intel iGPU, D3D11 SM5).
+
+**The clouds are horizontal strata, pancake ledges and topographic contours, with no grain.**
+Zoomed to pixels (d.png is lossless): rows of long uniform runs with sharp changes between
+rows under a cloud base, stacked ledges on a cloud's side, contour lines on a deck top. Those
+are iso-altitude lines, not depth contours, and not noise: the march's slices.
+- `VolumetricCloud.usf` (5.7): StepT = (TMax - TMin) / N along the ray with TMin/TMax the
+  layer-slab intersections, so sample k sits at NormAlt (k + jitter) / N for EVERY pixel whose
+  ray leaves through the top: the samples lie on horizontal planes. At 0.03-0.05 /m x 78-400 m a
+  slice is opaque (optical depth about 4), so the frame is the first in-cloud slice's lighting
+  and the slice boundaries are the strata. The engine hides them with
+  `t = TMin + BlueNoiseScalar(pixel, StateFrameIndexMod8) * StepT` (128 x 128 x 64
+  spatiotemporal blue noise), which TSR's history averages over the still's eight sub-frames.
+- A rendering commandlet gets no jitter. `BlueNoise.cpp GetBlueNoiseGlobalParameters` binds a
+  1 x 1 black dummy unless BOTH `GEngine->BlueNoiseScalarTexture` and `BlueNoiseVec2Texture`
+  have a resource, under `ensure(IsRunningCommandlet() && IsAllowCommandletRendering())` ("the
+  load path won't be visited"). The renderer loads them lazily in `FSceneRenderer`'s constructor
+  (SceneRendering.cpp `LoadBlueNoiseTexture`), inside the first capture and after the
+  commandlet's `FAssetCompilingManager::FinishAllCompilation`; in the editor a texture whose DDC
+  build is pending answers as a default stand-in (`UTexture::IsDefaultTexture`,
+  `GetDefaultTexture2D`) and a commandlet never ticks the compiling manager (the same gap that
+  once hid the 747 body). Either way the start offset is one number for every pixel of every
+  capture: eight identical slices average to the slices. No grain anywhere in the clouds is the
+  witness that no jittered march was ever drawn.
+- `r.VolumetricRenderTarget.Mode` 3 composes the tracing target directly
+  (`VolumetricRenderTarget.cpp`: "No reconstruction needed" for modes 1 and 3), so the only
+  temporal averaging the clouds get is TSR's; that is as designed and unchanged.
+- The shadow march is unjittered by the engine (`ShadowJitterNorm = 0.5f`, "Disabled
+  jittering"); its 10 quadratic samples over 15 km on the constrained row stay (the constraint:
+  the Intel iGPU's march cost must not rise, a8c964fc's rise deadlocked it). A shorter shadow
+  distance would keep more of the 10 samples inside the layer (the loop breaks on leaving it),
+  i.e. more material evaluations, so it was not taken.
+
+Fix (beauty only; measure keeps the engine's lazy path byte for byte; no per-pixel cost on
+any GPU, the shader samples a texture either way): before the first warm-up capture the
+commandlet calls `GEngine->LoadBlueNoiseTexture(true)`, finishes asset compilation again,
+creates a resource for a texture left without one, flushes rendering commands, and records
+`render_settings.beauty_path.blue_noise` (`scalar` / `vec2`: `loaded`, `path`, `resource`,
+`default_stand_in`, `resource_created_here`, `size_x`, `size_y`; `cloud_march_jittered`). A
+not-ready state is a warning on the log. The constrained row in `FlightSimClouds.cpp` /
+`world_beauty.CLOUD_MARCH` is untouched (tests/test_cloud_jitter_blue_noise.py pins it).
+
+Probe r6 (#13, then #03 and head3 d; beauty, no switch): read
+`render_settings.beauty_path.blue_noise.cloud_march_jittered` true, `scalar.size_x` 128 and
+`scalar.size_y` 8192 (128 x 64 slices), `default_stand_in` false on both. Pass: the strata and
+contour lines are gone from the clouds (a zoom shows soft, faintly grainy edges instead of
+one-row terraces), the cloud shapes themselves unchanged (same cells, same cover). If
+`cloud_march_jittered` is false, the log line names which texture (loaded / resource /
+stand-in) and the frame is round 3's; the next step is `FTextureCompilingManager::FinishCompilation`
+on the two textures by name. Expected look once jittered: the clear-world cumulus read as soft
+billows with dark flat bases and lit domes, no striping; the deck tops in #03 as rounded
+cells, no contour lines.

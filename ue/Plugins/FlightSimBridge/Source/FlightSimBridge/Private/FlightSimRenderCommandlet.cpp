@@ -35,6 +35,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ColorManagement/ColorSpace.h"
+#include "Engine/Texture2D.h"   // clouds round 6: the blue-noise textures the cloud march jitters with
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "ImageUtils.h"
@@ -5078,6 +5079,102 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// from every frame while its 26-triangle ailerons rendered fine). Finish
 	// the builds before the first capture, exactly as with shaders above.
 	FAssetCompilingManager::Get().FinishAllCompilation();
+	// -- clouds round 6 (2026-11-10): the cloud march's jitter in a commandlet --
+	// Round 3's clear-sky frames (#03, #12, #13) and head3 shot d drew the
+	// volumetric clouds as horizontal strata, pancake ledges and topographic
+	// contours, with NO grain in them. The engine marches a layer in fixed
+	// altitude slices (StepT is the slab path over the sample count, so sample
+	// k sits at NormAlt (k + jitter) / N for every pixel: VolumetricCloud.usf),
+	// and at ExtinctionPerM x StepT of about 4 each slice is opaque, so a frame
+	// shows the slice boundaries unless the per-pixel, per-capture start
+	// jitter hides them: t = TMin + BlueNoiseScalar(pixel, StateFrameIndexMod8)
+	// * StepT, the spatiotemporal blue noise whose eight frames TSR's history
+	// averages over the still's sub-frames. That jitter is a pair of engine
+	// textures GEngine loads LAZILY, in the first FSceneRenderer's constructor
+	// (SceneRendering.cpp, LoadBlueNoiseTexture), i.e. inside the first capture
+	// and after the FinishAllCompilation above; in the editor a texture whose
+	// DDC build is still pending answers as a default stand-in
+	// (UTexture::IsDefaultTexture, Texture2D.cpp GetDefaultTexture2D), and a
+	// commandlet never ticks the compiling manager (the mesh note above), so it
+	// stays one; with no resource at all, BlueNoise.cpp
+	// GetBlueNoiseGlobalParameters hands the cloud pass a 1x1 black dummy under
+	// an ensure that allows exactly "IsRunningCommandlet() &&
+	// IsAllowCommandletRendering()". Either way the start offset is ONE number
+	// for every pixel of every capture, and eight identical slices average to
+	// the slices. So: load both textures the way the renderer does, finish
+	// their build with everything else, create a resource if loading left
+	// none, flush so the render thread's pointer is set before the first
+	// warm-up, and record what the cloud pass will find
+	// (render_settings.beauty_path.blue_noise). Beauty only: measure keeps the
+	// engine's lazy path byte for byte. No per-pixel cost on any GPU: the
+	// shader samples a texture either way, so the constrained-GPU march
+	// (FlightSimClouds.cpp CloudMarch, ef361bd6's row) is unchanged.
+	if (BeautyPath.IsValid())
+	{
+		GEngine->LoadBlueNoiseTexture(true);
+		FAssetCompilingManager::Get().FinishAllCompilation();
+		TSharedPtr<FJsonObject> BlueNoise = MakeShared<FJsonObject>();
+		bool bBlueNoiseReady = true;
+		auto DescribeBlueNoise = [&BlueNoise, &bBlueNoiseReady](const TCHAR* Key, UTexture2D* Texture)
+		{
+			TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+			Row->SetBoolField(TEXT("loaded"), Texture != nullptr);
+			Row->SetStringField(TEXT("path"), Texture != nullptr ? Texture->GetPathName() : FString(TEXT("none")));
+			bool bCreatedHere = false;
+			if (Texture != nullptr && Texture->GetResource() == nullptr)
+			{
+				Texture->UpdateResource();
+				bCreatedHere = true;
+			}
+			Row->SetBoolField(TEXT("resource_created_here"), bCreatedHere);
+			// The async-build stand-in is an editor notion (Texture.h, WITH_EDITOR);
+			// the render commandlet runs in the editor binary.
+#if WITH_EDITOR
+			const bool bStandIn = Texture != nullptr && Texture->IsDefaultTexture();
+#else
+			const bool bStandIn = false;
+#endif
+			Row->SetBoolField(TEXT("default_stand_in"), bStandIn);
+			const FTextureResource* Resource = Texture != nullptr ? Texture->GetResource() : nullptr;
+			Row->SetBoolField(TEXT("resource"), Resource != nullptr);
+			if (Resource != nullptr)
+			{
+				Row->SetNumberField(TEXT("size_x"), Resource->GetSizeX());
+				Row->SetNumberField(TEXT("size_y"), Resource->GetSizeY());
+			}
+			BlueNoise->SetObjectField(Key, Row);
+			bBlueNoiseReady = bBlueNoiseReady && Resource != nullptr && !bStandIn;
+		};
+		// GetBlueNoiseGlobalParameters needs BOTH, or the cloud pass gets the dummy.
+		DescribeBlueNoise(TEXT("scalar"), GEngine->BlueNoiseScalarTexture);
+		DescribeBlueNoise(TEXT("vec2"), GEngine->BlueNoiseVec2Texture);
+		FlushRenderingCommands();
+		BlueNoise->SetBoolField(TEXT("cloud_march_jittered"), bBlueNoiseReady);
+		BlueNoise->SetStringField(TEXT("basis"),
+			TEXT("VolumetricCloud.usf starts each view ray at TMin + BlueNoiseScalar(pixel, StateFrameIndexMod8) x ")
+			TEXT("StepT; BlueNoise.cpp GetBlueNoiseGlobalParameters binds a 1x1 black dummy unless both GEngine ")
+			TEXT("textures have a resource (an ensure allows that only in a rendering commandlet), and a texture ")
+			TEXT("still building answers as a default stand-in: either is one offset for every pixel of every ")
+			TEXT("capture, the altitude-slice banding of round 3. Loaded and built here, before the first capture"));
+		BeautyPath->SetObjectField(TEXT("blue_noise"), BlueNoise);
+		const FString ScalarPath = GEngine->BlueNoiseScalarTexture != nullptr
+			? GEngine->BlueNoiseScalarTexture->GetPathName() : FString(TEXT("none"));
+		const FString Vec2Path = GEngine->BlueNoiseVec2Texture != nullptr
+			? GEngine->BlueNoiseVec2Texture->GetPathName() : FString(TEXT("none"));
+		if (bBlueNoiseReady)
+		{
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("beauty: blue noise ready (scalar %s, vec2 %s): the cloud march's start jitter is per ")
+			       TEXT("pixel and per capture"), *ScalarPath, *Vec2Path);
+		}
+		else
+		{
+			UE_LOG(LogFlightSimRender, Warning,
+			       TEXT("beauty: blue noise NOT ready (scalar %s, vec2 %s): the cloud march's start jitter is one ")
+			       TEXT("number for every pixel (slice banding: BlueNoise.cpp's dummy); see ")
+			       TEXT("render_settings.beauty_path.blue_noise"), *ScalarPath, *Vec2Path);
+		}
+	}
 	// Every volumetric cloud's material checked the way the engine's cloud
 	// passes check it, BEFORE the first scene render: the engine asserts
 	// (a crash with a callstack) where this refuses by name
