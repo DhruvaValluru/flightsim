@@ -216,6 +216,12 @@ def collect(results) -> Path:
                      ("view.mp4", _first(run_dir / "clips", "*.mp4"))]
             if camera:
                 picks += [("frame.png", _first(run_dir / "frames" / camera, "frame_*[0-9].png")),
+                          # Round 5 (L5): the post-render beauty frame and its
+                          # 4K copy, when FLIGHTSIM_BEAUTY_POST wrote them.
+                          ("frame_beauty_post.png",
+                           _first(run_dir / "frames" / camera, "frame_*_beauty_post.png")),
+                          ("frame_beauty_4k.png",
+                           _first(run_dir / "frames" / camera, "frame_*_beauty_4k.png")),
                           ("boxes.png", _first(run_dir / "boxed" / camera, "*_boxes.png")),
                           ("box3d.png", _first(run_dir / "boxed3d" / camera, "*_box3d.png"))]
             have_clip = False

@@ -554,10 +554,14 @@ def test_a_planned_beauty_look_record_passes_verify_look_record(tmp_path):
 
 
 def test_the_config_surface_stays_frozen():
-    """No new FLIGHTSIM_* name: the beauty look needs no switch."""
-    source = (REPO / "webapp/runs.py").read_text(encoding="utf-8")
-    assert "FLIGHTSIM_BEAUTY" not in source
-    assert "FLIGHTSIM_BEAUTY" not in (REPO / "core/scene/beauty_look.py").read_text(encoding="utf-8")
+    """No new FLIGHTSIM_* name for the look: the beauty look needs no
+    switch. Round 5 (L5) added ONE name beside it, FLIGHTSIM_BEAUTY_POST,
+    the post-render pipeline's (registered in core/config_surface.py); no
+    FLIGHTSIM_BEAUTY_LOOK or other look switch exists."""
+    for path in ("webapp/runs.py", "core/scene/beauty_look.py"):
+        source = (REPO / path).read_text(encoding="utf-8")
+        names = set(re.findall(r"FLIGHTSIM_BEAUTY[A-Z_]*", source))
+        assert names <= {"FLIGHTSIM_BEAUTY_POST"}, (path, names)
 
 
 def test_the_weather_defaults_are_untouched():

@@ -113,6 +113,17 @@ ALLOWED_FUTURE: Dict[str, str] = {
     # (W5 landed W3's host-side look refusals -- look.precipitation_particles,
     # look.cloud_drift_parameter -- as TEXT("<name>: ...") emitters in
     # FlightSimVisualScene.cpp that the C++ scan reads, so neither is future.)
+    # Round 5 L5: the post-render beauty pipeline lives in scripts/
+    # beauty_post.py (loaded by webapp/runs.py and scripts/visual_round.py
+    # by path), outside the scanned packages; each name is a BeautyPostError
+    # it raises, and webapp/runs.py records "<name>: <message>" in the run's
+    # events. Claimed here because the scanner reads packages, not scripts.
+    "beauty_post.switch": "scripts/beauty_post.py",
+    "beauty_post.tool_missing": "scripts/beauty_post.py",
+    "beauty_post.tool_checksum": "scripts/beauty_post.py",
+    "beauty_post.input": "scripts/beauty_post.py",
+    "beauty_post.step": "scripts/beauty_post.py",
+    "beauty_post.upscale_vulkan": "scripts/beauty_post.py",
 }
 
 #: Catalogue sentences the guided page carries as static text rather

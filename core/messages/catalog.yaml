@@ -372,6 +372,26 @@ render.beauty_look:
   sentence: "The beauty look cannot be planned or applied: an unknown grade or lens, a sun that cannot be lit or that moves during the clip, a camera without a sensor width, or a sidecar the renderer cannot read."
   hint: "Use a known grade (golden hour, desert noon or storm) and lens (standard or cinematic), or render at the measure quality."
 
+# -- the post-render beauty pipeline (scripts/beauty_post.py, round 5 L5) ------
+beauty_post.switch:
+  sentence: "The post-render beauty switch is not understood: FLIGHTSIM_BEAUTY_POST must be on or off, with -<step> words for steps to leave out."
+  hint: "Set FLIGHTSIM_BEAUTY_POST=on, FLIGHTSIM_BEAUTY_POST=on,-halation,-upscale or FLIGHTSIM_BEAUTY_POST=off."
+beauty_post.tool_missing:
+  sentence: "A tool the post-render beauty pipeline needs (the denoiser, ffmpeg or the upscaler) is not in the tool cache and could not be fetched, so the pipeline did not run; the beauty frame and its labels are untouched."
+  hint: "Let the machine reach GitHub once so the pinned release is downloaded, or place the named zip in the tool cache yourself."
+beauty_post.tool_checksum:
+  sentence: "A downloaded tool does not match the pinned release's sha256, so it was deleted and not run."
+  hint: "Download again; if the digest still differs, the release has changed and the pinned digest in the post pipeline script needs a look."
+beauty_post.input:
+  sentence: "The post-render beauty pipeline found no beauty frame to work on."
+  hint: "Run it on a render directory that holds frame_NNNN.png, at the beauty quality."
+beauty_post.step:
+  sentence: "A step of the post-render beauty pipeline failed (its tool exited with an error), so there is no post-processed frame; the beauty frame and its labels are untouched."
+  hint: "The render record names the step, the tool and its last words."
+beauty_post.upscale_vulkan:
+  sentence: "The 4K upscale was skipped: the upscaler could not run on this machine's graphics (no Vulkan device). Every other step's output stands."
+  hint: "Nothing to do on the Intel laptop; a machine with a Vulkan-capable GPU writes the 4K copy."
+
 # tiles-delight (core/scene/tiles_delight.py, the shader's Python twin):
 world_beauty.tiles_delight:
   sentence: "The tile de-lighting cannot run: the colour and its coarse sample differ in shape or are not colours, or a setting is not a usable number."

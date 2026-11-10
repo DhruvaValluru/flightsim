@@ -40,7 +40,7 @@ def test_the_look_report_names_missing_keys(tmp_path):
         "beauty_look": {}, "render_settings": {"beauty_path": "x", "world_beauty": 1},
         "aircraft_look": 1, "hero_lighting": [{"pixel_moving_effects": 0}]}), encoding="utf-8")
     assert visual_round.look_report("r1", tmp_path / "runs") == {
-        "render_json": True, "look_keys_missing": [], "new_look_ran": True}
+        "render_json": True, "look_keys_missing": [], "new_look_ran": True, "beauty_post": False}
     (run / "render.json").write_text(json.dumps({"render_settings": {"quality": "beauty"}}), encoding="utf-8")
     report = visual_round.look_report("r1", tmp_path / "runs")
     assert report["new_look_ran"] is False and "beauty_look" in report["look_keys_missing"]
@@ -53,4 +53,4 @@ def test_the_look_report_reads_the_per_camera_render_json(tmp_path):
     camera.mkdir(parents=True)
     (camera / "render.json").write_text(json.dumps({k: {} for k in visual_round.LOOK_KEYS}), encoding="utf-8")
     assert visual_round.look_report("r2", tmp_path / "runs") == {
-        "render_json": True, "look_keys_missing": [], "new_look_ran": True}
+        "render_json": True, "look_keys_missing": [], "new_look_ran": True, "beauty_post": False}
