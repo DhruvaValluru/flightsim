@@ -24,6 +24,11 @@ WEATHER_CPP = (BRIDGE / "Private" / "FlightSimWeather.cpp").read_text(encoding="
 WEATHER_H = (BRIDGE / "Public" / "FlightSimWeather.h").read_text(encoding="utf-8")
 SCRIPT = (REPO / "scripts" / "ue_create_materials.py").read_text(encoding="utf-8")
 SHADERS = REPO / "assets" / "shaders" / "weather"
+LOOK_CPP = (BRIDGE / "Private" / "FlightSimWeatherLook.cpp").read_text(encoding="utf-8")
+SCENE_H = (BRIDGE / "Public" / "FlightSimVisualScene.h").read_text(encoding="utf-8")
+CLOUDS_CPP = (BRIDGE / "Private" / "FlightSimClouds.cpp").read_text(encoding="utf-8")
+FX_CPP = (BRIDGE / "Private" / "FlightSimAircraftFX.cpp").read_text(encoding="utf-8")
+CHECK = (REPO / "scripts" / "check_bridge_api.sh").read_text(encoding="utf-8")
 
 
 def _assigned(name):
@@ -122,3 +127,78 @@ def test_the_material_defaults_are_the_measure_paths_shader():
         assert f'"{name}": params["{name}"]' in creator.split("lib, \"rain_drop_opacity\"")[0], name
     for name in ("MaxStreak", "MaxCoverage", "DepthFade"):
         assert f'"{name}": params["{name}"]' in creator.split("lib, \"rain_drop_opacity\"")[1], name
+
+
+# -- #09 the cones ------------------------------------------------------------------
+
+
+def test_the_shafts_soften_on_the_beauty_path_only():
+    beauty = _function(LOOK_CPP, "void FFlightSimVisualScene::ApplyBeautyWeatherLook(")
+    assert "LookShaftSoftEdgeParameter" in beauty and "LookShaftLightParameter" in beauty
+    assert _cpp_constant(LOOK_CPP, "LookBeautyShaftSoftEdge") == weather_look.BEAUTY_SHAFT_SOFT_EDGE
+    assert _cpp_constant(LOOK_CPP, "LookBeautyShaftLight") == weather_look.BEAUTY_SHAFT_LIGHT
+    assert 'LookShaftSoftEdgeParameter = TEXT("ShaftSoftEdge")' in LOOK_CPP
+    assert 'LookShaftLightParameter = TEXT("ShaftLight")' in LOOK_CPP
+    # The shafts' instances are kept at build, set only by the beauty call.
+    assert "ShaftInstances.Add(ShaftInstance);" in LOOK_CPP
+    assert LOOK_CPP.count("LookShaftSoftEdgeParameter") == 2   # the name and the one set
+    assert "TArray<UMaterialInstanceDynamic*> ShaftInstances;" in SCENE_H
+    assert "void ApplyBeautyWeatherLook(UWorld* World);" in SCENE_H
+    # Its one caller is the beauty world look (built only under -quality=beauty).
+    build = CLOUDS_CPP[CLOUDS_CPP.index("bool FFlightSimWorldBeauty::Build("):]
+    assert build.count("Scene.ApplyBeautyWeatherLook(World);") == 1
+    assert CLOUDS_CPP.count("ApplyBeautyWeatherLook") == 1
+    # The material's defaults draw generation 1's cones; the stamp brings the graph.
+    assert _assigned("SHAFT_BEAUTY_DEFAULTS") == {"ShaftSoftEdge": 0.0, "ShaftLight": 1.0}
+    assert _assigned("WEATHER_LOOK_GENERATIONS")["M_RainShaft"] >= "2"
+    soft = (SHADERS / "rain_shaft_soft.hlsl").read_text(encoding="utf-8")
+    assert "if (SoftEdge <= 0.0)\n{\n\treturn 1.0;\n}" in soft
+    shaft = SCRIPT[SCRIPT.index("def create_rain_shaft"):SCRIPT.index("def create_tornado_funnel")]
+    assert 'custom(material, lib, "rain_shaft_soft"' in shaft
+    assert "MaterialExpressionCameraVectorWS" in shaft
+
+
+def test_a_stale_weather_look_material_is_updated_in_place():
+    maker = SCRIPT[SCRIPT.index("def _weather_material"):SCRIPT.index("def _world_xy_metres")]
+    assert "weather_look_stale(name)" in maker
+    assert "delete_all_material_expressions(material)" in maker
+    stamp = SCRIPT[SCRIPT.index("def finish(material, name)"):SCRIPT.index("def linear_default_texture")]
+    assert "WEATHER_LOOK_GENERATION_TAG" in stamp
+    assert set(_assigned("WEATHER_LOOK_GENERATIONS")) == {"M_RainShaft", "M_TornadoFunnel"}
+
+
+def test_the_lamps_scatter_a_stated_fraction_in_fog():
+    assert "Lamp.Spot->SetVolumetricScatteringIntensity(" in FX_CPP
+    assert "Lamp.Point->SetVolumetricScatteringIntensity(" in FX_CPP
+    assert 0.0 < _cpp_constant(FX_CPP, "AircraftFxLandingVolumetricScattering") < 1.0
+    assert 0.0 < _cpp_constant(FX_CPP, "AircraftFxNavVolumetricScattering") < 1.0
+    assert 'TEXT("landing_volumetric_scattering")' in FX_CPP
+    # The bulb's beam stays the spot's own cone (tests/test_aircraft_look.py).
+    assert "Lamp.Spot->SetInnerConeAngle(0.5f * Cone);" in FX_CPP
+
+
+# -- #10 the tornado ----------------------------------------------------------------
+
+
+def test_the_funnel_gets_a_lit_material_in_beauty_with_no_vertex_colour():
+    beauty = _function(LOOK_CPP, "void FFlightSimVisualScene::ApplyBeautyWeatherLook(")
+    assert "TObjectIterator<UProceduralMeshComponent>" in beauty
+    assert 'LookFunnelComponentName = TEXT("TornadoFunnel")' in LOOK_CPP
+    scenario = (BRIDGE / "Private" / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
+    assert 'NewObject<UProceduralMeshComponent>(Funnel, TEXT("TornadoFunnel"))' in scenario
+    assert "Funnel->SetMaterial(0, FunnelInstance);" in beauty
+    colour = tuple(float(v) for v in re.findall(r"LookBeautyFunnelColour[RGB] = ([0-9.]+)f;", LOOK_CPP))
+    assert colour == weather_look.BEAUTY_FUNNEL_COLOUR == _assigned("FUNNEL_COLOUR_DEFAULT")
+    funnel = SCRIPT[SCRIPT.index("def create_tornado_funnel"):SCRIPT.index("def create_lightning():")]
+    assert "VertexColor" not in funnel.split('"""', 2)[2]   # gotcha 26: no vertex colour read
+    assert "BLEND_TRANSLUCENT" not in funnel and "WORLD_POSITION_OFFSET" not in funnel
+    assert 'finish(material, "M_TornadoFunnel")' in funnel
+    assert "create_tornado_funnel()" in SCRIPT[SCRIPT.index("create_rain_shaft()\n"):]
+
+
+def test_the_engine_symbols_are_in_the_bridge_check():
+    block = CHECK[CHECK.index("BEGIN weather-fx"):CHECK.index("END weather-fx")]
+    for needle in ("SetVolumetricScatteringIntensity", "SetSourceRadius", "TObjectIterator",
+                   "SetMaterial", "SetScalarParameterValue", "SetVectorParameterValue",
+                   "UMaterialExpressionCameraVectorWS"):
+        assert needle in block, needle

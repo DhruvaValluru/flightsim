@@ -1017,6 +1017,31 @@ bf_cvar r.Shadow.MaxResolution "Core/Private/HAL/ConsoleManager.cpp"
 bf_cvar r.Lumen.Supported.SM5 "Renderer/Private/Lumen/Lumen.cpp"
 # ------------------------------------------------------ END beauty fallback --
 
+# -- round-2b weather-fx (2026-11-09) -- BEGIN weather-fx --
+# FlightSimAircraftFX.cpp (the lamps' volumetric scattering and source radius),
+# FlightSimWeatherLook.cpp (ApplyBeautyWeatherLook: the shafts' parameters and the
+# funnel's material) and FlightSimWeather.cpp (the beauty rain shape's parameters).
+# Each symbol grepped in the UE 5.7.4 headers on the authoring Mac (no compile there).
+wfx_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
+    local f="$UE_ROOT/Engine/Source/Runtime/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- the round-2b weather-fx code needs updating"
+    fi
+}
+wfx_check "weather-fx: Light SetVolumetricScatteringIntensity" "Engine/Classes/Components/LightComponent.h" "ENGINE_API void SetVolumetricScatteringIntensity(float NewIntensity);"
+wfx_check "weather-fx: PointLight SetSourceRadius" "Engine/Classes/Components/PointLightComponent.h" "ENGINE_API void SetSourceRadius(float bNewValue);"
+wfx_check "weather-fx: SpotLight is a PointLight" "Engine/Classes/Components/SpotLightComponent.h" "class USpotLightComponent : public UPointLightComponent"
+wfx_check "weather-fx: TObjectIterator" "CoreUObject/Public/UObject/UObjectIterator.h" "template< class T > class TObjectIterator"
+wfx_check "weather-fx: MeshComponent SetMaterial" "Engine/Classes/Components/MeshComponent.h" "ENGINE_API virtual void SetMaterial(int32 ElementIndex, UMaterialInterface* Material) override;"
+wfx_check "weather-fx: MID SetScalarParameterValue" "Engine/Public/Materials/MaterialInstanceDynamic.h" "ENGINE_API void SetScalarParameterValue(FName ParameterName, float Value);"
+wfx_check "weather-fx: MID SetVectorParameterValue" "Engine/Public/Materials/MaterialInstanceDynamic.h" "ENGINE_API void SetVectorParameterValue(FName ParameterName, FLinearColor Value);"
+wfx_check "weather-fx: CameraVectorWS expression (M_RainShaft)" "Engine/Public/Materials/MaterialExpressionCameraVectorWS.h" "class UMaterialExpressionCameraVectorWS"
+# ------------------------------------------------------ END weather-fx --
+
 
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
