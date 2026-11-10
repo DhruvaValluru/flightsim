@@ -17,6 +17,7 @@
 
 #include "CineCameraComponent.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/LightComponent.h"   // round 1b: the lamps' volumetric scattering for the sky capture
 #include "Components/MeshComponent.h"
 #include "Components/PrimitiveComponent.h"   // sky-capture bisection switches
 #include "Components/SceneCaptureComponent2D.h"
@@ -70,6 +71,12 @@
 #include "HAL/PlatformStackWalk.h"   // capture watchdog: the stuck threads' stacks
 #if PLATFORM_WINDOWS
 #include "Windows/WindowsHWrapper.h"   // capture watchdog: TerminateProcess
+// Round 1 hang: the constrained GPU's bounded drain and the watchdog's
+// device-removed reason (COM vtable calls on the RHI's own ID3D11Device; no
+// import library, no D3D11RHI module dependency).
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <d3d11.h>
+#include "Windows/HideWindowsPlatformTypes.h"
 #endif
 #include "Misc/ScopeLock.h"
 
@@ -316,6 +323,20 @@ namespace
 	// group level for beauty (4 = Cinematic, Scalability.h); probe: the
 	// contact sheet (experiments/visual_contact_sheet.py) at 3 and at 4.
 	constexpr int32 RenderBeautyScalabilityLevel = 4;
+	// Round 1b (2026-11-10): the largest beauty frame, in internal pixels, the
+	// constrained GPU (FFlightSimWorldBeauty::ConstrainedGpu) is given. Every
+	// round-1 web scene on d4e9c7dd rendered at 1920 x 1080 with no supersample
+	// on the render laptop's Intel iGPU; the only render still hanging was
+	// contact-sheet shot b, 1920 x 1080 at -supersample=2 (3840 x 2160 internal,
+	// 4x the pixels of every pass, 2.25x ef361bd6's round-0 sheet at 1280 x 720
+	// x 2). Per-pixel GPU work (the cloud march, volumetric fog, SSGI, SSR, TSR)
+	// scales with it: scenario 1 hung at 1920 x 1080 with 384 cloud view samples
+	// and renders with 192; shot b at 192 marches twice that per frame.
+	// UNCALIBRATED: the largest frame known to render with the current content.
+	constexpr int64 RenderConstrainedInternalPixelsMax = 1920 * 1080;
+	// The lamps' volumetric scattering at ef361bd6: the engine's default
+	// (ULightComponentBase), before 4a409844 stated 0.3 landing / 0.5 nav.
+	constexpr float RenderLampScatteringEf361bd6 = 1.0f;
 	// UNCALIBRATED: set by probe render on the render machine. TSR history
 	// samples per pixel (engine default 16, 32 is the most its metadata
 	// encodes, TemporalSuperResolution.cpp help text); probe: sheet shot (a)
@@ -421,9 +442,149 @@ namespace
 	// thread is the one stuck; std::_Exit runs no handlers that could wait on
 	// it. -capture-timeout-s=N sets the limit (0 disables). It changes no
 	// pixel, so measure runs keep it too.
-	// UNCALIBRATED: a beauty still on the iGPU should take seconds a capture;
-	// 900 s is ample for any stage that is merely slow.
-	constexpr double RenderCaptureTimeoutDefaultS = 900.0;
+	// UNCALIBRATED: a beauty still on the iGPU should take seconds a capture.
+	// Round 1b (2026-11-10): 300 s, down from 900. Windows' wrapper caps a run
+	// at 560 s and its kill left a zombie editor holding the bridge DLL, so
+	// this watchdog must fire (and TerminateProcess) well inside that; 300 s
+	// is still far above any stage that is merely slow (a 4K beauty warm-up
+	// capture on the iGPU is seconds), and the constrained GPU's bounded
+	// drain (RenderDrainGpu) reports a lost device before it, at 0.8 x this.
+	constexpr double RenderCaptureTimeoutDefaultS = 300.0;
+
+	// Round 1b (2026-11-10): why the round-1 hang read "GPU 0 %, CPU idle,
+	// render thread in a D3D11RHI wait". The render thread's stack (D3D11RHI
+	// -> Core -> KERNELBASE -> ntdll x2) is FPlatformProcess::Sleep inside
+	// FD3D11DynamicRHI::RHIBlockUntilGPUIdle (D3D11Commands.cpp): an unbounded
+	// 5 ms poll of a D3D11 event query that ignores GetData's HRESULT. The sky
+	// light capture reaches it from every cube face (ReflectionEnvironment-
+	// Capture.cpp CaptureSceneToScratchCubemap, the "FlushGPU" pass's
+	// SubmitAndBlockUntilGPUIdle), and it is the FIRST CPU-GPU sync of a
+	// beauty run. So (1) a removed or reset device (DXGI_ERROR_DEVICE_HUNG /
+	// _REMOVED / _RESET: Windows recovers the adapter, the event never
+	// signals) spins there forever with the GPU idle and nothing logged, and
+	// (2) the work it waits for is everything queued since the start: the
+	// warm-up captures of the beauty view, not only the cube faces. That is
+	// why hiding things for the capture alone changed nothing. This reads the
+	// device's removed reason so the watchdog's line says which it was.
+	FString RenderDeviceRemovedNote()
+	{
+#if PLATFORM_WINDOWS
+		if (GDynamicRHI != nullptr && RHIGetInterfaceType() == ERHIInterfaceType::D3D11)
+		{
+			if (ID3D11Device* Device = static_cast<ID3D11Device*>(GDynamicRHI->RHIGetNativeDevice()))
+			{
+				const HRESULT Reason = Device->GetDeviceRemovedReason();
+				return Reason == S_OK
+					? FString(TEXT("D3D11 device not removed (GetDeviceRemovedReason S_OK)"))
+					: FString::Printf(TEXT("D3D11 device REMOVED, reason 0x%08x (887a0006 hung, 887a0005 removed, ")
+					                  TEXT("887a0007 reset, 887a0020 driver internal error)"),
+					                  static_cast<uint32>(Reason));
+			}
+		}
+#endif
+		return TEXT("device removal not readable on this RHI");
+	}
+
+	// The constrained GPU's bounded drain (round 1b; -gpu-drain=). On the
+	// render thread, after the RHI thread is flushed (as RHIBlockUntilGPUIdle
+	// itself runs), one D3D11 event query is ended and polled WITH its HRESULT
+	// and the device's removed reason checked every second, up to TimeoutS
+	// (0: no limit). It changes no pixel: it only waits. Not D3D11: skipped
+	// (the RHI's own block is the hazard being bounded).
+	struct FRenderGpuDrain
+	{
+		bool bRan = false;
+		bool bDone = false;
+		bool bRemoved = false;
+		bool bTimedOut = false;
+		uint32 RemovedReason = 0;
+		double Seconds = 0.0;
+	};
+	FRenderGpuDrain RenderDrainGpu(double TimeoutS)
+	{
+		TSharedPtr<FRenderGpuDrain, ESPMode::ThreadSafe> Result = MakeShared<FRenderGpuDrain, ESPMode::ThreadSafe>();
+		ENQUEUE_RENDER_COMMAND(FlightSimConstrainedGpuDrain)(
+			[Result, TimeoutS](FRHICommandListImmediate& RHICmdList)
+			{
+				RHICmdList.ImmediateFlush(EImmediateFlushType::FlushRHIThread);
+#if PLATFORM_WINDOWS
+				if (GDynamicRHI == nullptr || RHIGetInterfaceType() != ERHIInterfaceType::D3D11)
+				{
+					return;
+				}
+				ID3D11Device* Device = static_cast<ID3D11Device*>(GDynamicRHI->RHIGetNativeDevice());
+				if (Device == nullptr)
+				{
+					return;
+				}
+				ID3D11DeviceContext* Context = nullptr;
+				Device->GetImmediateContext(&Context);
+				if (Context == nullptr)
+				{
+					return;
+				}
+				Result->bRan = true;
+				const double Start = FPlatformTime::Seconds();
+				D3D11_QUERY_DESC Desc = {};
+				Desc.Query = D3D11_QUERY_EVENT;
+				ID3D11Query* Query = nullptr;
+				HRESULT Hr = Device->CreateQuery(&Desc, &Query);
+				if (FAILED(Hr) || Query == nullptr)
+				{
+					Result->bRemoved = true;
+					Result->RemovedReason = static_cast<uint32>(Device->GetDeviceRemovedReason());
+					Context->Release();
+					return;
+				}
+				Context->End(Query);
+				Context->Flush();
+				double NextCheck = Start + 1.0;
+				for (;;)
+				{
+					BOOL bComplete = 0;   // not FALSE: HideWindowsPlatformTypes.h undefines it
+					Hr = Context->GetData(Query, &bComplete, sizeof(bComplete), 0);
+					const double Now = FPlatformTime::Seconds();
+					if (Hr == S_OK && bComplete)
+					{
+						Result->bDone = true;
+						break;
+					}
+					if (FAILED(Hr))
+					{
+						const HRESULT Reason = Device->GetDeviceRemovedReason();
+						Result->bRemoved = true;
+						Result->RemovedReason = static_cast<uint32>(Reason != S_OK ? Reason : Hr);
+						break;
+					}
+					if (Now >= NextCheck)
+					{
+						NextCheck = Now + 1.0;
+						const HRESULT Reason = Device->GetDeviceRemovedReason();
+						if (Reason != S_OK)
+						{
+							Result->bRemoved = true;
+							Result->RemovedReason = static_cast<uint32>(Reason);
+							break;
+						}
+					}
+					if (TimeoutS > 0.0 && Now - Start > TimeoutS)
+					{
+						Result->bTimedOut = true;
+						break;
+					}
+					FPlatformProcess::Sleep(0.002f);
+				}
+				Result->Seconds = FPlatformTime::Seconds() - Start;
+				Query->Release();
+				Context->Release();
+#else
+				(void)Result;
+				(void)TimeoutS;
+#endif
+			});
+		FlushRenderingCommands();
+		return *Result;
+	}
 	class FRenderCaptureWatchdog : public FRunnable
 	{
 	public:
@@ -463,12 +624,12 @@ namespace
 				{
 					UE_LOG(LogFlightSimRender, Error,
 						TEXT("render.capture_timeout: no capture stage finished in %.0f s (limit %.0f s, ")
-						TEXT("-capture-timeout-s=); stuck after '%s'; adapter '%s', RHI %s, shader platform %s. ")
+						TEXT("-capture-timeout-s=); stuck after '%s'; adapter '%s', RHI %s, shader platform %s; %s. ")
 						TEXT("The GPU did not return: lower the beauty cost on this adapter or render on a ")
 						TEXT("discrete GPU"),
 						IdleS, LimitS, *At, *GRHIAdapterName,
 						GDynamicRHI != nullptr ? GDynamicRHI->GetName() : TEXT("none"),
-						*LexToString(GMaxRHIShaderPlatform));
+						*LexToString(GMaxRHIShaderPlatform), *RenderDeviceRemovedNote());
 					// Where it is stuck: the game thread (waiting in a flush or a
 					// readback) and the render thread (what it waits on). Round 1
 					// read 0 % GPU and an idle editor: a deadlock, not a slow GPU.
@@ -3149,8 +3310,122 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                              VisualScene.BeautyOnlyActors);
 	}
 
+	// -- constrained GPU (round 1b, 2026-11-10) ------------------------------
+	// Shot b (contact sheet, Grand Canyon desert low pass, J-11) still hung in
+	// the sky light capture on d4e9c7dd. That wait (RHIBlockUntilGPUIdle, see
+	// RenderDeviceRemovedNote) is the run's first CPU-GPU sync, so what never
+	// finished may be any GPU work queued before it: the warm-up captures of
+	// the beauty view as much as the cube faces. On a constrained GPU, beauty
+	// raster only (measure and pathtrace never reach any of it), three
+	// safeguards, each with a switch (defaults keep the fix):
+	//  -constrained-supersample=cap|keep  cap: -supersample is lowered until
+	//      the internal frame fits RenderConstrainedInternalPixelsMax (the frame
+	//      size every passing render had); keep: as stated
+	//  -sky-capture-restore=auto|on|off   the sky light capture takes ef361bd6's
+	//      scene state for its duration (FFlightSimBeautyFallback::SuspendForSky-
+	//      Capture, FFlightSimGoogleTiles::SuspendBeautyHaze, the lamps' volumetric
+	//      scattering); auto = on on a constrained GPU
+	//  -gpu-drain=auto|on|off             a bounded, device-checked GPU drain
+	//      (RenderDrainGpu) after every warm-up capture and around the sky
+	//      capture: a lost device or a stuck GPU refuses by name (render.gpu_lost,
+	//      render.capture_timeout) at the capture that caused it, instead of
+	//      hanging in the next engine wait; auto = on on a constrained GPU
+	// A beauty run also reads these (and the -sky-capture-* bisection switches
+	// below) from the environment variable FLIGHTSIM_RENDER_SWITCHES, so a web
+	// app or contact-sheet run can be bisected without a new command line.
+	// Recorded in look_applied.constrained_gpu; logged on one line.
+	const bool bBeautyRasterRun = bVisual && bBeauty && !bPathTrace;
+	const bool bConstrainedGpu = bBeautyRasterRun && FFlightSimWorldBeauty::ConstrainedGpu();
+	const FString RenderSwitches = bBeauty
+		? Params + TEXT(" ") + FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"))
+		: Params;
+	FString SkyCaptureRestoreMode = TEXT("auto");
+	FParse::Value(*RenderSwitches, TEXT("sky-capture-restore="), SkyCaptureRestoreMode);
+	FString GpuDrainMode = TEXT("auto");
+	FParse::Value(*RenderSwitches, TEXT("gpu-drain="), GpuDrainMode);
+	FString ConstrainedSupersampleMode = TEXT("cap");
+	FParse::Value(*RenderSwitches, TEXT("constrained-supersample="), ConstrainedSupersampleMode);
+	auto AutoOnOff = [](const FString& Mode)
+	{
+		return Mode == TEXT("auto") || Mode == TEXT("on") || Mode == TEXT("off");
+	};
+	if (!AutoOnOff(SkyCaptureRestoreMode) || !AutoOnOff(GpuDrainMode))
+	{
+		return Fail(FString::Printf(TEXT("render.sky_capture_switch: -sky-capture-restore=%s, -gpu-drain=%s: ")
+		                            TEXT("each takes auto, on or off"), *SkyCaptureRestoreMode, *GpuDrainMode));
+	}
+	if (ConstrainedSupersampleMode != TEXT("cap") && ConstrainedSupersampleMode != TEXT("keep"))
+	{
+		return Fail(FString::Printf(TEXT("render.sky_capture_switch: -constrained-supersample=%s is not cap or keep"),
+		                            *ConstrainedSupersampleMode));
+	}
+	auto SwitchOn = [bBeautyRasterRun, bConstrainedGpu](const FString& Mode)
+	{
+		return bBeautyRasterRun && (Mode == TEXT("on") || (Mode == TEXT("auto") && bConstrainedGpu));
+	};
+	const bool bSkyCaptureRestore = SwitchOn(SkyCaptureRestoreMode);
+	const bool bGpuDrain = SwitchOn(GpuDrainMode);
+	FString SupersampleParams = Params;
+	int32 StatedFactor = 1;
+	int32 ConstrainedFactor = 1;
+	if (FParse::Value(*Params, TEXT("supersample="), StatedFactor))
+	{
+		ConstrainedFactor = StatedFactor;
+		while (bConstrainedGpu && ConstrainedFactor > 1
+		       && static_cast<int64>(Width) * ConstrainedFactor * static_cast<int64>(Height) * ConstrainedFactor
+		          > RenderConstrainedInternalPixelsMax)
+		{
+			--ConstrainedFactor;
+		}
+		if (ConstrainedSupersampleMode == TEXT("cap") && ConstrainedFactor != StatedFactor)
+		{
+			SupersampleParams.ReplaceInline(*FString::Printf(TEXT("supersample=%d"), StatedFactor),
+			                                *FString::Printf(TEXT("supersample=%d"), ConstrainedFactor));
+		}
+	}
+	const bool bSupersampleCapped = ConstrainedSupersampleMode == TEXT("cap") && ConstrainedFactor != StatedFactor;
+	if (bBeautyRasterRun)
+	{
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("constrained gpu: %s (integrated %s, SM6 %s); sky-capture-restore %s (%s), gpu-drain %s (%s), ")
+		       TEXT("constrained-supersample %s (stated %d, rendered %d, budget %lld px)"),
+		       bConstrainedGpu ? TEXT("yes") : TEXT("no"), GRHIDeviceIsIntegrated ? TEXT("yes") : TEXT("no"),
+		       GMaxRHIFeatureLevel >= ERHIFeatureLevel::SM6 ? TEXT("yes") : TEXT("no"),
+		       *SkyCaptureRestoreMode, bSkyCaptureRestore ? TEXT("on") : TEXT("off"),
+		       *GpuDrainMode, bGpuDrain ? TEXT("on") : TEXT("off"), *ConstrainedSupersampleMode,
+		       StatedFactor, bSupersampleCapped ? ConstrainedFactor : StatedFactor,
+		       static_cast<long long>(RenderConstrainedInternalPixelsMax));
+	}
+	TSharedPtr<FJsonObject> ConstrainedRecord;
+	if (bBeautyRasterRun && VisualScene.LookApplied.IsValid())
+	{
+		ConstrainedRecord = MakeShared<FJsonObject>();
+		ConstrainedRecord->SetBoolField(TEXT("constrained"), bConstrainedGpu);
+		ConstrainedRecord->SetBoolField(TEXT("rhi_device_is_integrated"), GRHIDeviceIsIntegrated);
+		ConstrainedRecord->SetBoolField(TEXT("feature_level_sm6"), GMaxRHIFeatureLevel >= ERHIFeatureLevel::SM6);
+		ConstrainedRecord->SetStringField(TEXT("adapter"), GRHIAdapterName);
+		ConstrainedRecord->SetStringField(TEXT("basis"),
+			TEXT("FFlightSimWorldBeauty::ConstrainedGpu (GRHIDeviceIsIntegrated, or a feature level below SM6): ")
+			TEXT("round 1 hang, the beauty renders on the Intel iGPU under D3D11 SM5"));
+		ConstrainedRecord->SetStringField(TEXT("sky_capture_restore_switch"), SkyCaptureRestoreMode);
+		ConstrainedRecord->SetBoolField(TEXT("sky_capture_restore"), bSkyCaptureRestore);
+		ConstrainedRecord->SetStringField(TEXT("gpu_drain_switch"), GpuDrainMode);
+		ConstrainedRecord->SetBoolField(TEXT("gpu_drain"), bGpuDrain);
+		TSharedPtr<FJsonObject> Ss = MakeShared<FJsonObject>();
+		Ss->SetStringField(TEXT("switch"), ConstrainedSupersampleMode);
+		Ss->SetNumberField(TEXT("stated"), StatedFactor);
+		Ss->SetNumberField(TEXT("rendered"), bSupersampleCapped ? ConstrainedFactor : StatedFactor);
+		Ss->SetNumberField(TEXT("internal_pixels_max"), static_cast<double>(RenderConstrainedInternalPixelsMax));
+		Ss->SetStringField(TEXT("internal_pixels_max_basis"),
+			TEXT("RenderConstrainedInternalPixelsMax, UNCALIBRATED: 1920 x 1080, the frame every round-1 web scene ")
+			TEXT("rendered at on the Intel iGPU; shot b at 3840 x 2160 internal hung"));
+		Ss->SetBoolField(TEXT("capped"), bSupersampleCapped);
+		ConstrainedRecord->SetObjectField(TEXT("supersample"), Ss);
+		VisualScene.LookApplied->SetObjectField(TEXT("constrained_gpu"), ConstrainedRecord);
+	}
+
 	// supersample lane hook: -supersample=N, beauty only, refused by name (FlightSimSupersample.h).
-	int32 Supersample = 1; { FString SsWhy; if (!FFlightSimSupersample::Configure(*Params, Quality, Width, Height, RenderBeautyTsrHistoryScreenPercentage, Supersample, SsWhy)) { return Fail(SsWhy); } }
+	int32 Supersample = 1; { FString SsWhy; if (!FFlightSimSupersample::Configure(*SupersampleParams, Quality, Width, Height, RenderBeautyTsrHistoryScreenPercentage, Supersample, SsWhy)) { return Fail(SsWhy); } }
 	UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>();
 	RenderTarget->RenderTargetFormat = RTF_RGBA8_SRGB;
 	RenderTarget->ClearColor = FLinearColor::Black;
@@ -4842,8 +5117,73 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			CaptureWatchdog->Beat(Stage);
 		}
 	};
-	UE_LOG(LogFlightSimRender, Display, TEXT("warm-up: %d captures (capture watchdog %.0f s)"),
-	       WarmupCaptures, CaptureTimeoutS);
+	// Round 1b: the constrained GPU's bounded drain (-gpu-drain=, see the
+	// "constrained GPU" block). Each capture's GPU work is waited for where it
+	// was queued, so a capture that takes the device down is named by its own
+	// stage and timed, not found later inside the engine's unbounded wait. A
+	// lost device or a timeout ends the process (exit 4, as the watchdog): the
+	// teardown's own engine waits would spin on the dead device. Bounded at
+	// 0.8 x the watchdog's limit, so the drain speaks first.
+	const double GpuDrainTimeoutS = CaptureTimeoutS > 0.0 ? 0.8 * CaptureTimeoutS : 0.0;
+	int32 GpuDrains = 0;
+	double GpuDrainLongestS = 0.0;
+	FString GpuDrainLongestAt;
+	bool bGpuDrainSkipNoted = false;
+	auto DrainGpu = [&](const FString& Stage)
+	{
+		if (!bGpuDrain)
+		{
+			return;
+		}
+		const FRenderGpuDrain Drain = RenderDrainGpu(GpuDrainTimeoutS);
+		if (!Drain.bRan)
+		{
+			if (!bGpuDrainSkipNoted)
+			{
+				UE_LOG(LogFlightSimRender, Display, TEXT("gpu drain: skipped (RHI %s is not D3D11)"),
+				       GDynamicRHI != nullptr ? GDynamicRHI->GetName() : TEXT("none"));
+				bGpuDrainSkipNoted = true;
+			}
+			return;
+		}
+		++GpuDrains;
+		if (Drain.Seconds > GpuDrainLongestS)
+		{
+			GpuDrainLongestS = Drain.Seconds;
+			GpuDrainLongestAt = Stage;
+		}
+		if (Drain.bRemoved || Drain.bTimedOut)
+		{
+			if (Drain.bRemoved)
+			{
+				UE_LOG(LogFlightSimRender, Error,
+					TEXT("render.gpu_lost: the D3D11 device was removed while the GPU ran %s (reason 0x%08x: ")
+					TEXT("887a0006 hung, 887a0005 removed, 887a0007 reset, 887a0020 driver internal error; ")
+					TEXT("%.1f s into the drain); adapter '%s'. The GPU did not survive this capture's work: ")
+					TEXT("lower the beauty cost on this adapter or render on a discrete GPU"),
+					*Stage, Drain.RemovedReason, Drain.Seconds, *GRHIAdapterName);
+			}
+			else
+			{
+				UE_LOG(LogFlightSimRender, Error,
+					TEXT("render.capture_timeout: the GPU did not finish %s within %.0f s (0.8 x ")
+					TEXT("-capture-timeout-s=); %s; adapter '%s'"),
+					*Stage, GpuDrainTimeoutS, *RenderDeviceRemovedNote(), *GRHIAdapterName);
+			}
+			if (GLog != nullptr)
+			{
+				GLog->Flush();
+			}
+#if PLATFORM_WINDOWS
+			::TerminateProcess(::GetCurrentProcess(), 4);
+#endif
+			std::_Exit(4);
+		}
+		UE_LOG(LogFlightSimRender, Display, TEXT("gpu drain: %s finished on the GPU in %.2f s"), *Stage, Drain.Seconds);
+		BeatWatchdog(*FString::Printf(TEXT("%s (GPU drained)"), *Stage));
+	};
+	UE_LOG(LogFlightSimRender, Display, TEXT("warm-up: %d captures (capture watchdog %.0f s, gpu drain %s)"),
+	       WarmupCaptures, CaptureTimeoutS, bGpuDrain ? TEXT("on") : TEXT("off"));
 	for (int32 i = 0; i < WarmupCaptures; ++i)
 	{
 		World->SendAllEndOfFrameUpdates();
@@ -4851,6 +5191,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Capture->CaptureScene();
 		FlushRenderingCommands();
 		BeatWatchdog(TEXT("a warm-up capture"));
+		DrainGpu(FString::Printf(TEXT("warm-up capture %d/%d"), i + 1, WarmupCaptures));
 		UE_LOG(LogFlightSimRender, Display, TEXT("warm-up capture %d/%d done"), i + 1, WarmupCaptures);
 	}
 	UE_LOG(LogFlightSimRender, Display, TEXT("warm-up done"));
@@ -4869,27 +5210,31 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	//  -sky-capture-tiles=0        the Cesium tilesets (the beauty tiles material) hidden for it
 	//  -sky-capture-primitives=0   every primitive hidden for it (sky, fog and clouds only)
 	// Round 1b: A-D all hung; the far scene the capture draws is what is left.
+	// Round 1b (2026-11-10): those six hid things from the capture ALONE, while
+	// the wait it hangs in also waits for the warm-ups' GPU work (see
+	// RenderDeviceRemovedNote), so a clean result from them never cleared the
+	// beauty view. Read from FLIGHTSIM_RENDER_SWITCHES too (beauty runs).
 	bool bSkyStartFrameFirst = true;
 	{
 		int32 Flag = 1;
-		FParse::Value(*Params, TEXT("sky-capture-start-frame="), Flag);
+		FParse::Value(*RenderSwitches, TEXT("sky-capture-start-frame="), Flag);
 		bSkyStartFrameFirst = Flag != 0;
 	}
 	FString SkyCaptureAt = TEXT("aircraft");
-	FParse::Value(*Params, TEXT("sky-capture-at="), SkyCaptureAt);
+	FParse::Value(*RenderSwitches, TEXT("sky-capture-at="), SkyCaptureAt);
 	if (SkyCaptureAt != TEXT("aircraft") && SkyCaptureAt != TEXT("origin"))
 	{
 		return Fail(FString::Printf(TEXT("render.sky_capture_switch: -sky-capture-at=%s is not aircraft or origin"),
 		                            *SkyCaptureAt));
 	}
 	int32 SkyCaptureClouds = 1;
-	FParse::Value(*Params, TEXT("sky-capture-clouds="), SkyCaptureClouds);
+	FParse::Value(*RenderSwitches, TEXT("sky-capture-clouds="), SkyCaptureClouds);
 	int32 SkyCaptureBeautyOnly = 1;
-	FParse::Value(*Params, TEXT("sky-capture-beauty-only="), SkyCaptureBeautyOnly);
+	FParse::Value(*RenderSwitches, TEXT("sky-capture-beauty-only="), SkyCaptureBeautyOnly);
 	int32 SkyCaptureTiles = 1;
-	FParse::Value(*Params, TEXT("sky-capture-tiles="), SkyCaptureTiles);
+	FParse::Value(*RenderSwitches, TEXT("sky-capture-tiles="), SkyCaptureTiles);
 	int32 SkyCapturePrimitives = 1;
-	FParse::Value(*Params, TEXT("sky-capture-primitives="), SkyCapturePrimitives);
+	FParse::Value(*RenderSwitches, TEXT("sky-capture-primitives="), SkyCapturePrimitives);
 	UE_LOG(LogFlightSimRender, Display, TEXT("sky capture switches: tiles %s, primitives %s"),
 	       SkyCaptureTiles != 0 ? TEXT("shown") : TEXT("hidden"),
 	       SkyCapturePrimitives != 0 ? TEXT("shown") : TEXT("hidden"));
@@ -4998,13 +5343,88 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			World->SendAllEndOfFrameUpdates();
 			FlushRenderingCommands();
 		}
-		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: start (%d components hidden for it)"),
-		       SkyHidden.Num());
+		// Round 1b, constrained GPU (-sky-capture-restore=): for this capture
+		// only, the scene state ef361bd6 had here, where every beauty shot
+		// rendered on the render laptop. What round 2 / 2b changed that is live
+		// at this point and is not ef361bd6's already: the beauty fallback's sky
+		// light fill and minimum occlusion and the sun's cascades
+		// (FFlightSimBeautyFallback::SuspendForSkyCapture; its renderer cvars
+		// equal the Cinematic level's, which ef361bd6 ran), the beauty ground's
+		// haze scale (FFlightSimGoogleTiles::SuspendBeautyHaze) and the lamps'
+		// volumetric scattering (4a409844; the engine's 1 before it). Already
+		// ef361bd6's on this GPU class: the clouds and the atmosphere's multiple
+		// scattering (FlightSimClouds.cpp CloudConstrainedGpu). Inert here: the
+		// sun's light-shaft occlusion (the cube capture's LightShafts show flag
+		// is 0, ReflectionEnvironmentCapture.cpp) and every beauty capture
+		// post-process (the cube capture is its own view family). The frames
+		// keep this render's values: all of it is put back after the capture.
+		TSharedPtr<FJsonObject> SkyRestoreRecord;
+		TArray<TPair<TWeakObjectPtr<ULightComponent>, float>> SkyLampScatterHeld;
+		if (bSkyCaptureRestore)
+		{
+			SkyRestoreRecord = MakeShared<FJsonObject>();
+			SkyRestoreRecord->SetObjectField(TEXT("beauty_fallback"),
+			                                 FFlightSimBeautyFallback::SuspendForSkyCapture(VisualScene));
+			SkyRestoreRecord->SetObjectField(TEXT("beauty_ground_haze"), GoogleTiles.SuspendBeautyHaze());
+			for (AActor* Actor : VisualScene.BeautyOnlyActors)
+			{
+				if (Actor == nullptr)
+				{
+					continue;
+				}
+				TInlineComponentArray<ULightComponent*> Lamps(Actor);
+				for (ULightComponent* Lamp : Lamps)
+				{
+					if (Lamp != nullptr && Lamp->VolumetricScatteringIntensity != RenderLampScatteringEf361bd6)
+					{
+						SkyLampScatterHeld.Emplace(TWeakObjectPtr<ULightComponent>(Lamp), Lamp->VolumetricScatteringIntensity);
+						Lamp->SetVolumetricScatteringIntensity(RenderLampScatteringEf361bd6);
+					}
+				}
+			}
+			SkyRestoreRecord->SetNumberField(TEXT("lamps_volumetric_scattering_held"), SkyLampScatterHeld.Num());
+			SkyRestoreRecord->SetNumberField(TEXT("lamps_volumetric_scattering_at_capture"),
+			                                 RenderLampScatteringEf361bd6);
+			SkyRestoreRecord->SetStringField(TEXT("already_ef361bd6"),
+				TEXT("clouds and the atmosphere's multiple scattering (FlightSimClouds.cpp CloudConstrainedGpu)"));
+			SkyRestoreRecord->SetStringField(TEXT("inert_in_capture"),
+				TEXT("the sun's light-shaft occlusion (the cube capture's LightShafts show flag is 0) and the beauty ")
+				TEXT("capture's post-process (SSGI, SSR, grade, exposure): the cube capture is its own view family"));
+			SkyRestoreRecord->SetStringField(TEXT("frames"), TEXT("this render's values, put back after the capture"));
+			if (ConstrainedRecord.IsValid())
+			{
+				ConstrainedRecord->SetObjectField(TEXT("sky_capture_restore_record"), SkyRestoreRecord);
+			}
+			const TSharedPtr<FJsonObject>* SkyCaptureRow = nullptr;
+			if (VisualScene.LookApplied.IsValid()
+			    && VisualScene.LookApplied->TryGetObjectField(TEXT("sky_light_capture"), SkyCaptureRow)
+			    && SkyCaptureRow != nullptr && SkyCaptureRow->IsValid())
+			{
+				(*SkyCaptureRow)->SetObjectField(TEXT("constrained_gpu_restore"), SkyRestoreRecord);
+			}
+		}
+		DrainGpu(TEXT("the work queued before the sky light capture"));
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("sky light capture: start (%d components hidden for it; ef361bd6 scene state %s)"),
+		       SkyHidden.Num(), bSkyCaptureRestore ? TEXT("restored") : TEXT("not restored"));
 		VisualScene.SkyLightComponent->SetCaptureIsDirty();
 		USkyLightComponent::UpdateSkyCaptureContents(World);
 		FlushRenderingCommands();
 		BeatWatchdog(TEXT("the sky light capture"));
 		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: done"));
+		DrainGpu(TEXT("the sky light capture"));
+		if (bSkyCaptureRestore)
+		{
+			FFlightSimBeautyFallback::ResumeAfterSkyCapture(VisualScene);
+			GoogleTiles.ResumeBeautyHaze();
+			for (const TPair<TWeakObjectPtr<ULightComponent>, float>& Held : SkyLampScatterHeld)
+			{
+				if (ULightComponent* Lamp = Held.Key.Get())
+				{
+					Lamp->SetVolumetricScatteringIntensity(Held.Value);
+				}
+			}
+		}
 		for (USceneComponent* Component : SkyHidden)
 		{
 			Component->SetVisibility(true);
@@ -5022,8 +5442,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Capture->CaptureScene();
 			FlushRenderingCommands();
 			BeatWatchdog(TEXT("a capture after the sky light capture"));
+			DrainGpu(FString::Printf(TEXT("post-sky capture %d/2"), i + 1));
 			UE_LOG(LogFlightSimRender, Display, TEXT("post-sky capture %d/2 done"), i + 1);
 		}
+	}
+	if (ConstrainedRecord.IsValid())
+	{
+		ConstrainedRecord->SetNumberField(TEXT("gpu_drains"), GpuDrains);
+		ConstrainedRecord->SetNumberField(TEXT("gpu_drain_longest_s"), GpuDrainLongestS);
+		ConstrainedRecord->SetStringField(TEXT("gpu_drain_longest_at"), GpuDrainLongestAt);
+		ConstrainedRecord->SetNumberField(TEXT("gpu_drain_timeout_s"), GpuDrainTimeoutS);
 	}
 	if (!bSkyStartFrameFirst)
 	{

@@ -74,6 +74,19 @@ namespace
 		bool bFallback = false;
 		FString Error;
 		TSharedPtr<FJsonObject> Record;
+		// Round 1 hang (SuspendForSkyCapture): the scene values ApplyScene
+		// replaced, and the values held across one sky light capture.
+		bool bSkyFilled = false;
+		float SkyIntensityBefore = 0.0f;
+		float SkyMinOcclusionBefore = 0.0f;
+		bool bSunCascaded = false;
+		int32 SunCascadesBefore = 0;
+		float SunDistributionBefore = 0.0f;
+		bool bSuspended = false;
+		float SkyIntensityHeld = 0.0f;
+		float SkyMinOcclusionHeld = 0.0f;
+		int32 SunCascadesHeld = 0;
+		float SunDistributionHeld = 0.0f;
 	};
 
 	FBeautyFallbackState& BeautyFallbackState()
@@ -139,6 +152,9 @@ bool FFlightSimBeautyFallback::ApplyScene(FFlightSimVisualScene& Scene, const TC
 	State.Error.Reset();
 	State.bApplied = false;
 	State.bFallback = false;
+	State.bSkyFilled = false;
+	State.bSunCascaded = false;
+	State.bSuspended = false;
 
 	FString Mode = TEXT("auto");
 	if (CommandLine != nullptr)
@@ -220,6 +236,9 @@ bool FFlightSimBeautyFallback::ApplyScene(FFlightSimVisualScene& Scene, const TC
 		if (USkyLightComponent* Sky = Scene.SkyLightComponent)
 		{
 			const float IntensityBefore = Sky->Intensity;
+			State.bSkyFilled = true;
+			State.SkyIntensityBefore = IntensityBefore;
+			State.SkyMinOcclusionBefore = Sky->MinOcclusion;
 			Sky->SetIntensity(IntensityBefore * BeautyFallbackSkyFill);
 			Sky->SetMinOcclusion(BeautyFallbackSkyMinOcclusion);
 			// Capture-once (a scene capture never runs real-time capture): the
@@ -227,6 +246,7 @@ bool FFlightSimBeautyFallback::ApplyScene(FFlightSimVisualScene& Scene, const TC
 			Sky->SetCaptureIsDirty();
 			Sky->MarkRenderStateDirty();
 			SkyRecord->SetNumberField(TEXT("intensity_before"), IntensityBefore);
+			SkyRecord->SetNumberField(TEXT("min_occlusion_before"), State.SkyMinOcclusionBefore);
 			SkyRecord->SetNumberField(TEXT("fill"), BeautyFallbackSkyFill);
 			SkyRecord->SetNumberField(TEXT("intensity"), Sky->Intensity);
 			SkyRecord->SetNumberField(TEXT("min_occlusion"), Sky->MinOcclusion);
@@ -260,6 +280,9 @@ bool FFlightSimBeautyFallback::ApplyScene(FFlightSimVisualScene& Scene, const TC
 		{
 			if (UDirectionalLightComponent* SunLight = Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()))
 			{
+				State.bSunCascaded = true;
+				State.SunCascadesBefore = SunLight->DynamicShadowCascades;
+				State.SunDistributionBefore = SunLight->CascadeDistributionExponent;
 				ShadowRecord->SetNumberField(TEXT("cascades_before"), SunLight->DynamicShadowCascades);
 				ShadowRecord->SetNumberField(TEXT("distribution_before"), SunLight->CascadeDistributionExponent);
 				SunLight->SetDynamicShadowCascades(BeautyFallbackCsmCascades);
@@ -321,4 +344,100 @@ void FFlightSimBeautyFallback::ApplyCapture(USceneCaptureComponent2D* Beauty)
 	PostRecord->SetStringField(TEXT("ReflectionMethod"), TEXT("ScreenSpace"));
 	PostRecord->SetNumberField(TEXT("ScreenSpaceReflectionQuality"), Settings.ScreenSpaceReflectionQuality);
 	State.Record->SetObjectField(TEXT("capture_post_process"), PostRecord);
+}
+
+// -- round 1 hang (2026-11-09): ef361bd6's scene state for the sky capture ----
+// The constrained GPU (FFlightSimWorldBeauty::ConstrainedGpu) deadlocked in
+// the sky light capture. ef361bd6 rendered every shot on that laptop, so for
+// the one capture the scene is given back what ef361bd6 had there: the sun's
+// cascade count and distribution and the sky light's intensity and minimum
+// occlusion as the scene built them. The renderer cvars are NOT touched: the
+// fallback asks the same values the Cinematic scalability level (applied after
+// ApplyScene, at a lower priority) gives, which ef361bd6 also ran
+// (BaseScalability.ini ShadowQuality@Cine, GlobalIlluminationQuality@Cine,
+// ReflectionQuality@Cine, EffectsQuality@Cine), so they are ef361bd6's already;
+// the record reads each back to show it. The per-view half (ApplyCapture) is the
+// beauty capture's only and the cube capture never reads it.
+TSharedPtr<FJsonObject> FFlightSimBeautyFallback::SuspendForSkyCapture(FFlightSimVisualScene& Scene)
+{
+	FBeautyFallbackState& State = BeautyFallbackState();
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	if (!State.bApplied || State.bSuspended)
+	{
+		Out->SetStringField(TEXT("applied"), State.bSuspended
+			? TEXT("nothing: already suspended")
+			: TEXT("nothing: the fallback never ran"));
+		return Out;
+	}
+	State.bSuspended = true;
+	TArray<TSharedPtr<FJsonValue>> Restored;
+	auto Row = [&Restored](const TCHAR* What, double Held, double Capture)
+	{
+		TSharedPtr<FJsonObject> R = MakeShared<FJsonObject>();
+		R->SetStringField(TEXT("what"), What);
+		R->SetNumberField(TEXT("frames"), Held);
+		R->SetNumberField(TEXT("sky_capture"), Capture);
+		Restored.Add(MakeShared<FJsonValueObject>(R));
+	};
+	if (State.bSkyFilled && Scene.SkyLightComponent != nullptr)
+	{
+		USkyLightComponent* Sky = Scene.SkyLightComponent;
+		State.SkyIntensityHeld = Sky->Intensity;
+		State.SkyMinOcclusionHeld = Sky->MinOcclusion;
+		Sky->SetIntensity(State.SkyIntensityBefore);
+		Sky->SetMinOcclusion(State.SkyMinOcclusionBefore);
+		Row(TEXT("sky_light.intensity"), State.SkyIntensityHeld, State.SkyIntensityBefore);
+		Row(TEXT("sky_light.min_occlusion"), State.SkyMinOcclusionHeld, State.SkyMinOcclusionBefore);
+	}
+	UDirectionalLightComponent* SunLight = Scene.Sun != nullptr
+		? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
+	if (State.bSunCascaded && SunLight != nullptr)
+	{
+		State.SunCascadesHeld = SunLight->DynamicShadowCascades;
+		State.SunDistributionHeld = SunLight->CascadeDistributionExponent;
+		SunLight->SetDynamicShadowCascades(State.SunCascadesBefore);
+		SunLight->SetCascadeDistributionExponent(State.SunDistributionBefore);
+		Row(TEXT("sun.dynamic_shadow_cascades"), State.SunCascadesHeld, State.SunCascadesBefore);
+		Row(TEXT("sun.cascade_distribution_exponent"), State.SunDistributionHeld, State.SunDistributionBefore);
+	}
+	Out->SetArrayField(TEXT("restored"), Restored);
+	TSharedPtr<FJsonObject> Cvars = MakeShared<FJsonObject>();
+	const TSharedPtr<FJsonObject>* Asked = nullptr;
+	if (State.Record.IsValid() && State.Record->TryGetObjectField(TEXT("cvars_asked"), Asked) && Asked != nullptr)
+	{
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Entry : (*Asked)->Values)
+		{
+			Cvars->SetStringField(Entry.Key, BeautyFallbackConsole(*Entry.Key));
+		}
+	}
+	Out->SetObjectField(TEXT("cvars_at_capture"), Cvars);
+	Out->SetStringField(TEXT("cvars_basis"),
+		TEXT("kept: each equals the Cinematic scalability level's value (BaseScalability.ini @Cine), which ef361bd6 ran too"));
+	Out->SetStringField(TEXT("per_view"), TEXT("the beauty capture's SSGI and SSR only; the cube capture never reads them"));
+	UE_LOG(LogFlightSimRender, Display,
+	       TEXT("beauty fallback: sky capture takes the scene's own sky light and sun cascades (%d value(s) held)"),
+	       Restored.Num());
+	return Out;
+}
+
+void FFlightSimBeautyFallback::ResumeAfterSkyCapture(FFlightSimVisualScene& Scene)
+{
+	FBeautyFallbackState& State = BeautyFallbackState();
+	if (!State.bSuspended)
+	{
+		return;
+	}
+	State.bSuspended = false;
+	if (State.bSkyFilled && Scene.SkyLightComponent != nullptr)
+	{
+		Scene.SkyLightComponent->SetIntensity(State.SkyIntensityHeld);
+		Scene.SkyLightComponent->SetMinOcclusion(State.SkyMinOcclusionHeld);
+	}
+	UDirectionalLightComponent* SunLight = Scene.Sun != nullptr
+		? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
+	if (State.bSunCascaded && SunLight != nullptr)
+	{
+		SunLight->SetDynamicShadowCascades(State.SunCascadesHeld);
+		SunLight->SetCascadeDistributionExponent(State.SunDistributionHeld);
+	}
 }

@@ -543,6 +543,9 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 	Out->SetStringField(TEXT("lane"), TEXT("round-2b terrain-ocean; beauty only; UNCALIBRATED"));
 	Out->SetBoolField(TEXT("tiles_drawn"), bEnabled);
 	BeautyGround = Out;
+	HazeFogRows.Reset();
+	HazeMieRows.Reset();
+	bHazeSuspended = false;
 	if (World == nullptr)
 	{
 		Out->SetStringField(TEXT("applied"), TEXT("nothing: no world"));
@@ -613,6 +616,10 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 				TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 				Row->SetNumberField(TEXT("fog_density_before"), Fog->FogDensity);
 				Row->SetNumberField(TEXT("second_fog_density_before"), Fog->SecondFogData.FogDensity);
+				FHazeFogRow& Held = HazeFogRows.AddDefaulted_GetRef();
+				Held.Fog = Fog;
+				Held.DensityBefore = Fog->FogDensity;
+				Held.SecondDensityBefore = Fog->SecondFogData.FogDensity;
 				Fog->SetFogDensity(static_cast<float>(Fog->FogDensity * Scale));
 				Fog->SetSecondFogDensity(static_cast<float>(Fog->SecondFogData.FogDensity * Scale));
 				Row->SetNumberField(TEXT("fog_density_after"), Fog->FogDensity);
@@ -626,6 +633,10 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 				TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 				Row->SetNumberField(TEXT("mie_scattering_scale_before"), Atmosphere->MieScatteringScale);
 				Row->SetNumberField(TEXT("mie_absorption_scale_before"), Atmosphere->MieAbsorptionScale);
+				FHazeMieRow& Held = HazeMieRows.AddDefaulted_GetRef();
+				Held.Atmosphere = Atmosphere;
+				Held.ScatteringBefore = Atmosphere->MieScatteringScale;
+				Held.AbsorptionBefore = Atmosphere->MieAbsorptionScale;
 				Atmosphere->SetMieScatteringScale(static_cast<float>(Atmosphere->MieScatteringScale * Scale));
 				Atmosphere->SetMieAbsorptionScale(static_cast<float>(Atmosphere->MieAbsorptionScale * Scale));
 				Row->SetNumberField(TEXT("mie_scattering_scale_after"), Atmosphere->MieScatteringScale);
@@ -750,4 +761,73 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 			TEXT("the sea state of the card (the waves are the material's two stated swells), tides, foam"));
 	}
 	return Out;
+}
+
+// -- round 1 hang (2026-11-09): ef361bd6's haze for the sky light capture ----
+// The constrained GPU deadlocked in the sky light capture; ef361bd6 (which had
+// no ApplyBeautyGround) rendered every shot there. For that one capture the
+// haze ApplyBeautyGround scaled is the scene's own again; the frames keep it.
+TSharedPtr<FJsonObject> FFlightSimGoogleTiles::SuspendBeautyHaze()
+{
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	if (bHazeSuspended || (HazeFogRows.Num() == 0 && HazeMieRows.Num() == 0))
+	{
+		Out->SetStringField(TEXT("applied"), bHazeSuspended
+			? TEXT("nothing: already suspended")
+			: TEXT("nothing: ApplyBeautyGround scaled no haze on this render"));
+		return Out;
+	}
+	bHazeSuspended = true;
+	int32 Held = 0;
+	for (FHazeFogRow& Row : HazeFogRows)
+	{
+		if (UExponentialHeightFogComponent* Fog = Row.Fog.Get())
+		{
+			Row.DensityHeld = Fog->FogDensity;
+			Row.SecondDensityHeld = Fog->SecondFogData.FogDensity;
+			Fog->SetFogDensity(Row.DensityBefore);
+			Fog->SetSecondFogDensity(Row.SecondDensityBefore);
+			++Held;
+		}
+	}
+	for (FHazeMieRow& Row : HazeMieRows)
+	{
+		if (USkyAtmosphereComponent* Atmosphere = Row.Atmosphere.Get())
+		{
+			Row.ScatteringHeld = Atmosphere->MieScatteringScale;
+			Row.AbsorptionHeld = Atmosphere->MieAbsorptionScale;
+			Atmosphere->SetMieScatteringScale(Row.ScatteringBefore);
+			Atmosphere->SetMieAbsorptionScale(Row.AbsorptionBefore);
+			++Held;
+		}
+	}
+	Out->SetNumberField(TEXT("components_held"), Held);
+	Out->SetStringField(TEXT("applied"),
+		TEXT("the height fog and the Mie layer at their values before ApplyBeautyGround, for the sky capture only"));
+	return Out;
+}
+
+void FFlightSimGoogleTiles::ResumeBeautyHaze()
+{
+	if (!bHazeSuspended)
+	{
+		return;
+	}
+	bHazeSuspended = false;
+	for (const FHazeFogRow& Row : HazeFogRows)
+	{
+		if (UExponentialHeightFogComponent* Fog = Row.Fog.Get())
+		{
+			Fog->SetFogDensity(Row.DensityHeld);
+			Fog->SetSecondFogDensity(Row.SecondDensityHeld);
+		}
+	}
+	for (const FHazeMieRow& Row : HazeMieRows)
+	{
+		if (USkyAtmosphereComponent* Atmosphere = Row.Atmosphere.Get())
+		{
+			Atmosphere->SetMieScatteringScale(Row.ScatteringHeld);
+			Atmosphere->SetMieAbsorptionScale(Row.AbsorptionHeld);
+		}
+	}
 }

@@ -67,6 +67,17 @@ public:
 	// fallback.
 	static void ApplyCapture(USceneCaptureComponent2D* Beauty);
 
+	// Round 1 hang (2026-11-09), the constrained GPU only (the commandlet's
+	// -sky-capture-restore=): for the ONE sky light capture, the scene values
+	// ApplyScene replaced go back to the scene's own (ef361bd6's): the sky
+	// light's intensity and minimum occlusion, the sun's cascade count and
+	// distribution. Resume puts this render's values back right after. The
+	// renderer cvars stay (their asks equal the Cinematic level's, which
+	// ef361bd6 ran); the returned record reads them back. A no-op before
+	// ApplyScene or when already suspended.
+	static TSharedPtr<FJsonObject> SuspendForSkyCapture(FFlightSimVisualScene& Scene);
+	static void ResumeAfterSkyCapture(FFlightSimVisualScene& Scene);
+
 	// render.json render_settings.beauty_fallback, or null when Apply never ran.
 	static TSharedPtr<FJsonObject> Record();
 

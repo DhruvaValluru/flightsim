@@ -125,6 +125,14 @@ public:
 	TSharedPtr<FJsonObject> ApplyBeautyGround(UWorld* World, double CameraAglM, double SeaRadiusM,
 	                                          TArray<AActor*>& BeautyOnlyActors);
 
+	// Round 1 hang (2026-11-09), the constrained GPU only (the commandlet's
+	// -sky-capture-restore=): ApplyBeautyGround's haze scale taken off for the
+	// ONE sky light capture (the fog layers and the Mie layer at the values the
+	// scene had before it, as ef361bd6 drew them) and put back after it. The
+	// record says what was held; nothing when the haze was not scaled.
+	TSharedPtr<FJsonObject> SuspendBeautyHaze();
+	void ResumeBeautyHaze();
+
 private:
 	bool bEnabled = false;
 	bool bViaIon = false;
@@ -145,4 +153,25 @@ private:
 	double TotalWaitSeconds = 0.0;
 	// round-2b terrain-ocean: ApplyBeautyGround's record (null: not run).
 	TSharedPtr<FJsonObject> BeautyGround;
+	// Round 1 hang: what ApplyBeautyGround scaled (the values before it), and
+	// what SuspendBeautyHaze held across the sky capture.
+	struct FHazeFogRow
+	{
+		TWeakObjectPtr<class UExponentialHeightFogComponent> Fog;
+		float DensityBefore = 0.0f;
+		float SecondDensityBefore = 0.0f;
+		float DensityHeld = 0.0f;
+		float SecondDensityHeld = 0.0f;
+	};
+	struct FHazeMieRow
+	{
+		TWeakObjectPtr<class USkyAtmosphereComponent> Atmosphere;
+		float ScatteringBefore = 0.0f;
+		float AbsorptionBefore = 0.0f;
+		float ScatteringHeld = 0.0f;
+		float AbsorptionHeld = 0.0f;
+	};
+	TArray<FHazeFogRow> HazeFogRows;
+	TArray<FHazeMieRow> HazeMieRows;
+	bool bHazeSuspended = false;
 };
