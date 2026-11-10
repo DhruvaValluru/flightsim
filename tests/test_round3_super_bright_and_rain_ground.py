@@ -126,7 +126,8 @@ def test_super_bright_lights_its_fill_as_a_fill_not_more_blue_sky(tmp_path):
     assert colour[0] >= colour[1] >= colour[2] and max(colour) == 1.0   # warm, 8-bit legal
     lit = [s * c * scale for s, c in zip(sky, colour)]
     assert _ratio(lit) > 2.0 * _ratio(sky)                          # much less blue ...
-    assert _ratio(lit) < 1.0                                        # ... and still a sky fill
+    # ... and since round 4 a neutral fill (tests/test_round4_super_bright_neutral.py).
+    assert _ratio(lit) == pytest.approx(1.0, abs=0.03)
     luma = (0.2126, 0.7152, 0.0722)
     assert sum(w * v for w, v in zip(luma, lit)) == pytest.approx(
         sum(w * v for w, v in zip(luma, sky)), rel=1e-4)            # its brightness kept

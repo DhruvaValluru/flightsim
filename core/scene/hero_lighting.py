@@ -301,7 +301,24 @@ OVERCAST_ILLUMINANCE_FRACTION = 0.25
 #: fill, not as more blue sky. The fill's luminance is kept (``intensity_scale``),
 #: so only its colour moves; the lower hemisphere (the ground) warms by the same
 #: tint. UNCALIBRATED: probe hl-fill, #02 against #01, the cliff shadows' R/B.
-STATED_FILL_NEUTRAL_SHARE = 0.75
+#:
+#: Round 4 (2026-11-10): 0.75 -> 1.0, and the ground no longer takes the tint.
+#: Round 2's #02 (6816852c, the round-3 tint in) still rendered blue/violet:
+#: mean sRGB 96/102/157, its luma bands (scene-linear after the filmic curve)
+#: R/B 0.18 in the shade, 0.4 in the midtones and 0.85 only in the sunlit
+#: highlights, flat from the top row to the bottom (so not the aerial
+#: perspective, which grows with distance). The highlights are the sun; all the
+#: rest is the fill, and on D3D11 SM5 (no Lumen) the fill is all a surface the
+#: 72 deg sun grazes or misses gets. 0.75 left that fill blue BY DESIGN (R/B 0.71
+#: on the model; round 3's test pinned it below 1, "still a sky fill"), and the
+#: fill is 1.35 x 1.66 x 1.6 = 3.6 x the captured noon sky. A fill a preset
+#: STATES is the photographer's fill (lighting.py: "how bright the shadows
+#: are"): neutral daylight. Share 1 makes it grey on the model, luminance kept.
+#: The host's light colour multiplies BOTH hemispheres of the capture, so at
+#: share 1 (tint 1.0/0.50/0.25) the hero ground (lower hemisphere) would turn
+#: orange-red; :func:`plan_sidecar` now divides the ground's luminance by the
+#: tint and its luminance factor, so the ground bounce keeps its albedo colour.
+STATED_FILL_NEUTRAL_SHARE = 1.0
 #: Rec. 709 luminance weights (linear RGB).
 _LUMA_709 = (0.2126, 0.7152, 0.0722)
 
@@ -337,7 +354,10 @@ def stated_fill_tint(sun_elevation_deg: float, altitude_m: float = 0.0,
     y = sum(w * c for w, c in zip(_LUMA_709, sky))
     raw = [(y / max(c, 1e-6)) ** float(share) for c in sky]
     peak = max(raw)
-    colour = [c / peak for c in raw]
+    # Round 4: the colour the host's light actually holds (SetLightColor keeps
+    # 8-bit sRGB), so the luminance factor and the ground's compensation are
+    # computed on what is drawn, not on a value the light cannot store.
+    colour = [srgb8_stored(c / peak) for c in raw]
     y_tinted = sum(w * c * t for w, c, t in zip(_LUMA_709, sky, colour))
     return {
         "color_linear_rgb": [round(c, 6) for c in colour],
@@ -347,8 +367,19 @@ def stated_fill_tint(sun_elevation_deg: float, altitude_m: float = 0.0,
         "basis": ("a stated fill (the lighting block's sky_fill): the model's clear-sky "
                   "irradiance colour (core.xplane.atmosphere.sky_irradiance) moved "
                   f"{float(share):g} of the way to grey in log space, its luminance kept "
-                  "(round 3, UNCALIBRATED)"),
+                  "(round 3; neutral since round 4, UNCALIBRATED)"),
     }
+
+
+def srgb8_stored(linear: float) -> float:
+    """``linear`` (0..1) as a light colour channel holds it: UE 5.7's
+    FLinearColor::ToFColor(true) (sRGB encode, floor of x 255.999) read back
+    by FLinearColor(FColor) (the sRGB decode)."""
+    v = min(max(float(linear), 0.0), 1.0)
+    enc = 12.92 * v if v <= 0.0031308 else 1.055 * v ** (1.0 / 2.4) - 0.055
+    code = min(int(math.floor(enc * 255.999)), 255)
+    e = code / 255.0
+    return e / 12.92 if e <= 0.04045 else ((e + 0.055) / 1.055) ** 2.4
 
 
 def plan_sidecar(*, surface: str, sun_elevation_deg: float, horizontal_lux: Optional[float],
@@ -372,8 +403,23 @@ def plan_sidecar(*, surface: str, sun_elevation_deg: float, horizontal_lux: Opti
         lux_basis += f" x {OVERCAST_ILLUMINANCE_FRACTION:g} under rain (UNCALIBRATED)"
     luminance = [round(a * float(horizontal_lux) / math.pi, 3) for a in albedo]
     extra: Dict[str, Any] = {}
+    ground_extra: Dict[str, Any] = {}
     if stated_fill and not raining and float(sun_elevation_deg) > 0.0:
-        extra["sky_light"] = stated_fill_tint(float(sun_elevation_deg), float(altitude_m))
+        fill = stated_fill_tint(float(sun_elevation_deg), float(altitude_m))
+        extra["sky_light"] = fill
+        # Round 4: the light's colour and its luminance factor multiply the
+        # whole capture, the ground's lower hemisphere included. Divided out
+        # here, so the ground bounce stays albedo x E / pi (no orange ground
+        # under a neutral fill); the host reads this field as before.
+        scale = float(fill["intensity_scale"])
+        ground_extra = {
+            "lower_hemisphere_luminance_rgb_drawn": luminance,
+            "lower_hemisphere_fill_compensation": (
+                "divided by the stated fill's colour and intensity_scale (sky_light), which "
+                "multiply the lower hemisphere too: the drawn ground is albedo x E / pi"),
+        }
+        luminance = [round(v / (c * scale), 3)
+                     for v, c in zip(luminance, fill["color_linear_rgb"])]
     return {
         "hero_lighting_version": HERO_LIGHTING_VERSION,
         "ground": {
@@ -383,6 +429,7 @@ def plan_sidecar(*, surface: str, sun_elevation_deg: float, horizontal_lux: Opti
             "horizontal_lux_basis": lux_basis,
             "lower_hemisphere_luminance_rgb": luminance,
             "model": "Lambertian ground: L = albedo x E_horizontal / pi (cd/m2)",
+            **ground_extra,
         },
         **extra,
         "sun_elevation_deg": round(float(sun_elevation_deg), 4),

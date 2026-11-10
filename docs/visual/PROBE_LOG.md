@@ -2668,3 +2668,30 @@ world's layer with no card cover is broken, `RAIN_DEFAULT_COVER` 0.6
 the constrained-GPU block). A stated cover (overcast) is kept, and a storm keeps 0.98.
 - Probe r3-rain: #06. Pass: the bay and the city read between clouds (or under them). Read
   `world_beauty.clouds.layers[0].cover` 0.6 and its base/top against the camera altitude.
+
+## round-4 super-bright neutral
+
+Round 4, 2026-11-10, Mac, uncompiled; nothing rendered. Traced from the round-2 frames
+(6816852c at beauty on the Windows laptop, D3D11 SM5, no Lumen; round 3's tint in).
+
+**#02 super bright: brighter now (luma 105 vs #01's 94) but blue/violet, mean sRGB 96/102/157.**
+Measured on the JPEG, scene-linear through UE's filmic curve: highlights R/B 0.85 (the sun),
+midtones 0.4, shade 0.18; the same in every sixth of the frame from top to bottom, so not the
+aerial perspective (it grows with distance). White balance (desert_noon WhiteTemp 6500) and the
+sun (atmosphere transmittance at 72 deg, preset 6300 K) are near white. The cast is the stated
+fill: on SM5 the sky light is all a surface the 72 deg sun grazes or misses gets, and super
+bright's fill is 1.35 x 1.66 (luminance restore) x 1.6 (no-Lumen fallback) = 3.6 x the captured
+noon sky. Round 3 moved it only 0.75 of the way to grey (R/B 0.71 on the model, pinned below 1
+by its test as "still a sky fill").
+- Fix (beauty only, a stated fill only): `STATED_FILL_NEUTRAL_SHARE` 1.0. At 72 deg the light
+  colour is 1.0/0.497/0.250 (8-bit exact, `hero_lighting.srgb8_stored`), luminance factor 1.94:
+  the fill is grey on the model at the sky's luminance. The light colour multiplies the ground's
+  lower hemisphere too, so `plan_sidecar` divides the ground by the colour and the factor
+  (`ground.lower_hemisphere_luminance_rgb_drawn` keeps albedo x E / pi); FlightSimHeroLighting.cpp
+  reads the same fields (comments and the record's basis only).
+- #01, #04, #13 (no stated fill) and measure (no sidecar): unchanged.
+- Probe r4-neutral: #02 against #01. Pass: #02's shade and midtones R/B (scene-linear) at or
+  above 0.8, highlights unchanged. Read `hero_lighting.sky_light.stated_fill` and the sky light's
+  `lower_hemisphere_color`. If the shade stays blue with the neutral fill applied, the fill is not
+  what lights it: render #02 with `-beauty-fallback=off` and with the fill at 0 to separate the
+  sky light from the atmosphere's and the fog's own in-scatter.
