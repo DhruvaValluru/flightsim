@@ -2695,3 +2695,69 @@ by its test as "still a sky fill").
   `lower_hemisphere_color`. If the shade stays blue with the neutral fill applied, the fill is not
   what lights it: render #02 with `-beauty-fallback=off` and with the fill at 0 to separate the
   sky light from the atmosphere's and the fog's own in-scatter.
+
+## round-5 super-bright shade
+
+Round 5, 2026-11-10, Mac, uncompiled; nothing rendered. Traced from the round-3 frames
+(b6a9aff2 at beauty on the Windows laptop, D3D11 SM5, no Lumen; round 4's neutral fill
+applied: render.json `hero_lighting.sky_light.stated_fill` 1/0.497/0.250, intensity 4.19).
+
+**#02 super bright: unchanged by the neutral fill, mean sRGB 95/102/159 (round 2: 96/102/157).**
+Diffed, not guessed. The complete beauty plan for #01 and #02 was built on the Mac with the
+calls `webapp.runs._render` makes (tests/test_round5_super_bright_shade.py `_plan`) and
+diffed. #02 differs from #01 in exactly: the relit sun (6 -> 72 deg, `sun.relit`), the
+exposure (EV100 11.60 -> 13.57: the physical meter at 72 deg is 15.28, so the frame is 1.7
+stops over it, 0.6 the preset's and 1.1 the round-3 open), the four knob flags
+(`-sun-intensity-scale=1.6 -sky-light-scale=2.62028 -sun-temperature=6300
+-sun-source-angle=0.45`), the haze (`-fog-density` 0.0012 -> 0.0005), the grade (golden_hour
+-> desert_noon; WhiteTemp 6500 and ColorGain 1 are the engine's neutral) and the hero fill
+(colour 1/0.497/0.250, factor 1.94, the ground hemisphere divided by both). The atmosphere,
+the clouds (cumulus 0.35 at 2-5 km) and the fog's in-scatter source (`sky-atmosphere ambient
+contribution`) are the same in both plans.
+- Measured on the JPEGs (linearised): #02's darkest 30 % in each of six horizontal bands is
+  R/B 0.06-0.12 and G/B about 0.13, the same from the top band to the bottom; the sunlit
+  highlights R/B 0.76-1.00. #01's shade is R/B 0.56-0.87, warm-purple. The A-4 a few metres
+  behind the camera in #02 is neutral on its lit and shaded faces (crop: R/B 0.95-1.06 on
+  its upper 40 %), the terrain beside it deep blue. A colour that saturated (bluer than the
+  model sky's 0.25/0.50/1.0) is Rayleigh's own scattering coefficient (the engine's
+  0.175/0.409/1.0): the shade is the atmosphere's in-scatter between camera and ground, and
+  there is no visible neutral fill under it to dilute it.
+- Not the sky light's colour: the engine multiplies it per frame (`View.SkyLightColor` in
+  SkyLightingDiffuseShared.ush, ReflectionEnvironmentShared.ush and VolumetricFog.usf;
+  `FSkyLightSceneProxy::LightColor = LightColor x Intensity`, SkyLightComponent.cpp 5.7),
+  nothing in the bridge sets it after the hero lane (VisualScene.Build's X-Plane ambient
+  comes before; the fallback's suspend/resume around the capture holds only the intensity
+  and min occlusion), and the frame did not move when the fill went from 0.75 grey to grey.
+  The hero ground (albedo x E / pi, 6462/6103/5385 drawn) should light a shaded wall warm
+  and bright (about a third of the sunlit rock) if the sky light reached it; it does not.
+- Not the grade or a LUT (neutral), not the sun's colour (6300 K and the per-pixel
+  transmittance at 72 deg are near white; the highlights measure so), not the lower
+  hemisphere (warm after the fill colour), not the X-Plane colours (none on the physical sky).
+- Open on the render machine, in order of weight: (1) the sky light's fill does not reach
+  the ground in the beauty frame (the capture: `USkyLightComponent::UpdateSkyCaptureContentsArray`
+  captures with temporary shaders or marks the capture incomplete while shaders compile; the
+  sky light's cloud AO under the clear world's cumulus; DFAO); (2) the atmosphere's aerial
+  perspective and the height fog's sky-ambient in-scatter at 72 deg, x1.6 by the sun knob and
+  1.7 stops up by the opened exposure, outrun a fill that is there.
+- Fix path: witnesses and switches, beauty only, defaults unchanged (every render without them
+  is byte-identical). `look_applied.sky_light_capture_result` records, right after the capture:
+  `processed_texture`, `shaders_compiling_at_capture`, `real_time_capture`, `intensity_at_capture`,
+  `light_color_linear`, `lower_hemisphere_solid`, `cloud_ambient_occlusion`, `min_occlusion`.
+  `hero_lighting.sky_light.probes` records three switches read from the command line or
+  `FLIGHTSIM_RENDER_SWITCHES` (core/scene/hero_lighting.py `DIAGNOSTIC_SWITCHES`,
+  `parse_diagnostic_switches`): `-sky-fill-probe=as-planned|red|off` (red: the sky light's
+  colour pure red; off: black), `-sky-cloud-ao=on|off`, `-aerial-perspective-scale=<x>`.
+  Measure never runs the hero lane, so never sees them.
+- Probes r5 (#02, beauty, FLIGHTSIM_SKY=physical; read `sky_light_capture_result` on every one):
+  * r5-a `FLIGHTSIM_RENDER_SWITCHES="-sky-fill-probe=red"`. Pass if the terrain shade turns red:
+    the sky light lights the shade and (2) holds, so the fix is the in-scatter (the aerial
+    perspective scale / the fog's sky ambient under a stated fill, or the exposure open).
+    If the shade stays blue and only the airframe reddens (or nothing does), (1) holds: the
+    fill does not reach the ground; read `processed_texture` and `shaders_compiling_at_capture`.
+  * r5-b `FLIGHTSIM_RENDER_SWITCHES="-aerial-perspective-scale=0"`. Pass if the blue leaves the
+    shade (the in-scatter is the atmosphere's); if it stays, it is the height fog's sky ambient
+    or a blue capture: compare with r5-a.
+  * r5-c, only if r5-a shows no red on the terrain: `"-sky-cloud-ao=off"`, then
+    `-beauty-fallback=off` (DFAO and SSGI out). Whichever brings the red/fill back names the
+    occluder.
+  Three renders settle it; #01, #04 and #13 are not re-rendered (no switch, no change).
