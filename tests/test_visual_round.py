@@ -21,7 +21,7 @@ def test_a_round_writes_each_frame_a_contact_sheet_and_the_summary(tmp_path):
               "run_id": "abc"} for n in (1, 2, 3, 4)]
     batch.append({"number": 5, "name": "shot 5", "prompt": "p", "outcome": "refused"})
     summary.write_text(json.dumps(batch))
-    out = visual_round.write_round(3, gallery, summary, tmp_path / "visual")
+    out = visual_round.write_round(3, gallery, summary, tmp_path / "visual", tmp_path / "runs")
     jpgs = sorted(p.name for p in out.glob("0*.jpg"))
     # 05's frame is stale, from an earlier batch: this batch refused it
     assert jpgs == [f"0{n}_shot_{n}.jpg" for n in (1, 2, 3, 4)]
@@ -30,4 +30,18 @@ def test_a_round_writes_each_frame_a_contact_sheet_and_the_summary(tmp_path):
     assert sheet.width == 4 * 480
     assert json.loads((out / "summary.json").read_text())[0] == {
         "number": 1, "name": "shot 1", "prompt": "p", "outcome": "done",
-        "why": None, "run_id": "abc", "lighting": None}
+        "why": None, "run_id": "abc", "lighting": None, "render_json": False}
+
+
+def test_the_look_report_names_missing_keys(tmp_path):
+    run = tmp_path / "runs" / "r1"
+    run.mkdir(parents=True)
+    (run / "render.json").write_text(json.dumps({
+        "beauty_look": {}, "render_settings": {"beauty_path": "x", "world_beauty": 1},
+        "aircraft_look": 1, "hero_lighting": [{"pixel_moving_effects": 0}]}))
+    assert visual_round.look_report("r1", tmp_path / "runs") == {
+        "render_json": True, "look_keys_missing": [], "new_look_ran": True}
+    (run / "render.json").write_text(json.dumps({"render_settings": {"quality": "beauty"}}))
+    report = visual_round.look_report("r1", tmp_path / "runs")
+    assert report["new_look_ran"] is False and "beauty_look" in report["look_keys_missing"]
+    assert visual_round.look_report("nope", tmp_path / "runs") == {"render_json": False}
