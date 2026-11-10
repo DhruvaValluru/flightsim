@@ -362,20 +362,35 @@ def test_d_looks_at_the_matterhorn_from_the_j11_s_own_cockpit():
     framing = sheet.camera_framing(spec, "cockpit")
     # the canopy, metres AHEAD of the CG (the old B747 figure sat 6 m aft, over the fins)
     assert 7.0 < framing["offset_forward_m"] < 10.0 and 1.0 < framing["offset_up_m"] < 2.5
-    assert "EYEPOINT" in framing["basis"]
+    # round 2 (cockpit-airframe): the model's own pilot eye, not the FDM EYEPOINT
+    assert "pilot eye" in framing["basis"]
+    assert next(c for c in spec["cameras"] if c["preset"]["value"] == "cockpit")[
+        "focal_length_mm"]["value"] == 24.0
 
 
-def test_the_cockpit_station_comes_from_each_airframe_s_fdm():
-    from core.scenario.camera import COCKPIT_EYE_NUDGE_M, SHOULDER_OFFSET, CameraSpec, \
-        derive_cockpit_offset
+def test_the_cockpit_station_comes_from_each_airframe_s_fdm(monkeypatch, tmp_path):
+    import core.scenario.camera as camera_module
+    from core.scenario.camera import COCKPIT_EYE_NUDGE_M, PILOT_EYE_NUDGE_M, SHOULDER_OFFSET, \
+        CameraSpec, derive_cockpit_offset
 
+    # Round 2 (cockpit-airframe): an airframe whose config states the
+    # model's pilot eye (the J-11: views.pilot_eye) is placed there; one
+    # without (the c172p) keeps the FDM EYEPOINT rule. No mesh manifest here.
+    monkeypatch.setattr(camera_module, "_MESH_GENERATED_DIR", tmp_path)
+    monkeypatch.setattr(camera_module, "_COCKPIT_CACHE", {})
+    monkeypatch.setattr(camera_module, "_COCKPIT_BASIS", {})
     j11 = derive_cockpit_offset("J11")
-    # J11.xml: EYEPOINT (172.45, 0, 38.00) in, CG (517.35, 0, -21.56) in
-    expected = ((517.35 - 172.45) * 0.0254 + COCKPIT_EYE_NUDGE_M[0],
-                COCKPIT_EYE_NUDGE_M[1], (38.0 + 21.56) * 0.0254 + COCKPIT_EYE_NUDGE_M[2])
+    # J-11A-set.xml pilot eye (5.23, 0, 1.45) m model frame; J11.xml CG
+    # (517.35, 0, -21.56) in.
+    expected = (517.35 * 0.0254 - 5.23 + PILOT_EYE_NUDGE_M[0], PILOT_EYE_NUDGE_M[1],
+                1.45 + 21.56 * 0.0254 + PILOT_EYE_NUDGE_M[2])
     assert j11 == pytest.approx(expected, abs=1e-3)
     camera = CameraSpec.defaulted("cockpit", "cockpit", aircraft="J11")
     assert camera.offset_forward_m.value == pytest.approx(j11[0])
+    assert "pilot eye" in camera.offset_forward_m.frm
+    c172 = derive_cockpit_offset("c172p")
+    assert c172 is not None and "EYEPOINT" in camera_module.cockpit_offset_basis("c172p")
+    assert c172[1] == pytest.approx(COCKPIT_EYE_NUDGE_M[1], abs=1e-3)   # centreline eye
     assert derive_cockpit_offset("no_such_airframe") is None
     fallback = CameraSpec.defaulted("cockpit", "cockpit", aircraft="no_such_airframe")
     assert (fallback.offset_forward_m.value, fallback.offset_right_m.value,

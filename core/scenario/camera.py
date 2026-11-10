@@ -187,6 +187,21 @@ SHOULDER_OFFSET = (-6.0, -0.5, 1.6)
 #: shots-cockpit: contact-sheet shot d, the coaming and the canopy arch in
 #: frame with no head or seat in front of the lens).
 COCKPIT_EYE_NUDGE_M = (-0.35, 0.30, 0.10)
+
+#: Where the "cockpit" camera sits relative to the MODEL's own pilot eye
+#: (the aircraft config's ``views.pilot_eye``: the FlightGear -set.xml
+#: view the package author placed in the modelled cockpit), forward:right:up
+#: metres. Round 2 (cockpit-airframe lane, 2026-11-09): on the J-11 the FDM
+#: EYEPOINT plus COCKPIT_EYE_NUDGE_M put the lens 0.5 m forward of and
+#: 0.28 m below the modelled pilot's eye, inside the instrument panel's
+#: hood, and the render machine's shot d was a faceted grey slab of
+#: glareshield across two thirds of the frame. At the modelled eye the
+#: pilot figure's own faces are behind the lens or nearer than the 0.1 m
+#: near plane (its head spans 5.20-5.49 m aft, the eye is at 5.23 m), so
+#: the frame shows the coaming, the canopy arch and the sky through the
+#: glass. A few centimetres up keeps the HUD frame below the Matterhorn
+#: line. UNCALIBRATED (probe shots-cockpit: contact-sheet shot d).
+PILOT_EYE_NUDGE_M = (0.0, 0.0, 0.03)
 _INCH_M = 0.0254
 _AIRCRAFT_CONFIG_DIR = _REPO / "assets" / "aircraft_config"
 
@@ -219,41 +234,99 @@ def _fdm_xml(fdm: str) -> Optional[Path]:
 
 
 _COCKPIT_CACHE: Dict[str, Optional[tuple]] = {}
+_COCKPIT_BASIS: Dict[str, str] = {}
+
+
+def _fdm_locations(aircraft: str) -> Dict[str, tuple]:
+    """The FDM's EYEPOINT and CG <location>s, metres in the structural
+    frame (x aft, y right, z up), by name; empty when unreadable."""
+    path = _fdm_xml(_fdm_name(aircraft)) if aircraft else None
+    found: Dict[str, tuple] = {}
+    if path is None:
+        return found
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.parse(path).getroot()
+        for loc in root.iter("location"):
+            name = loc.get("name")
+            if name in ("EYEPOINT", "CG") and name not in found:
+                scale = {"IN": _INCH_M, "M": 1.0}.get(str(loc.get("unit", "IN")).upper())
+                if scale is None:
+                    continue
+                found[name] = tuple(float(loc.find(axis).text) * scale for axis in "xyz")
+    except (OSError, ET.ParseError, AttributeError, TypeError, ValueError):
+        return {}
+    return found
+
+
+def _model_pilot_eye_actor_m(aircraft: str) -> Optional[tuple]:
+    """(actor-frame point in metres, basis) of the aircraft config's
+    ``views.pilot_eye``, or None. The converted mesh manifest's own
+    ``views.pilot_eye.actor_cm`` when it is on this machine (the model
+    point mapped to the actor frame plus the MEASURED mesh origin); else
+    the config's model point mapped the same way with the model origin
+    taken at the structural datum (the J-11's measured origin is 0.0078,
+    0, -10.57 cm from it)."""
+    manifest = _MESH_GENERATED_DIR / aircraft / "mesh_manifest.json"
+    try:
+        view = json.loads(manifest.read_text(encoding="utf-8"))["views"]["pilot_eye"]
+        point = tuple(float(v) / 100.0 for v in view["actor_cm"])
+        if len(point) == 3:
+            return point, "the converted mesh manifest's views.pilot_eye (actor frame)"
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    config = _AIRCRAFT_CONFIG_DIR / f"{aircraft}.json"
+    try:
+        model = json.loads(config.read_text(encoding="utf-8"))["views"]["pilot_eye"]["model_m"]
+        x, y, z = (float(v) for v in model)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return ((-x + 0.0, y, z), "the aircraft config's views.pilot_eye, model origin at the "
+                              "structural datum (no mesh manifest on this machine)")
+
+
+def cockpit_offset_basis(aircraft: str) -> Optional[str]:
+    """How :func:`derive_cockpit_offset` placed ``aircraft``'s cockpit
+    camera (None when it could not)."""
+    derive_cockpit_offset(aircraft)
+    return _COCKPIT_BASIS.get(str(aircraft or ""))
 
 
 def derive_cockpit_offset(aircraft: str) -> Optional[tuple]:
-    """The "cockpit" camera's body offset from the CG for ``aircraft``,
-    from its OWN FDM: the EYEPOINT relative to the CG (structural frame,
-    x aft, y right, z up) plus :data:`COCKPIT_EYE_NUDGE_M`. None when the
-    FDM cannot be read or states no EYEPOINT (the caller then uses
-    :data:`SHOULDER_OFFSET`). On the J-11 this is about (+8.4, +0.3, +1.6) m
-    -- the canopy -- where SHOULDER_OFFSET put the camera over the aft spine
-    between the fins."""
+    """The "cockpit" camera's body offset from the CG for ``aircraft``
+    (forward, right, up metres). First choice (round 2, cockpit-airframe):
+    the model's own pilot eye (the config's ``views.pilot_eye``, the
+    package's -set.xml view) relative to the FDM's CG, plus
+    :data:`PILOT_EYE_NUDGE_M`: the eye the cockpit was modelled around, so
+    the lens is in the pilot's head, not in the panel. Else the FDM's
+    EYEPOINT relative to the CG (structural frame, x aft, y right, z up)
+    plus :data:`COCKPIT_EYE_NUDGE_M`. None when the FDM cannot be read or
+    states neither (the caller then uses :data:`SHOULDER_OFFSET`). On the
+    J-11 the pilot eye gives about (+7.91, 0, +1.92) m; the EYEPOINT gave
+    (+8.41, +0.3, +1.61) m, inside the instrument panel's hood."""
     key = str(aircraft or "")
     if key in _COCKPIT_CACHE:
         return _COCKPIT_CACHE[key]
     result = None
-    path = _fdm_xml(_fdm_name(key)) if key else None
-    if path is not None:
-        import xml.etree.ElementTree as ET
-
-        try:
-            root = ET.parse(path).getroot()
-            found = {}
-            for loc in root.iter("location"):
-                name = loc.get("name")
-                if name in ("EYEPOINT", "CG") and name not in found:
-                    scale = {"IN": _INCH_M, "M": 1.0}.get(str(loc.get("unit", "IN")).upper())
-                    if scale is None:
-                        continue
-                    found[name] = tuple(float(loc.find(axis).text) * scale for axis in "xyz")
-            if "EYEPOINT" in found and "CG" in found:
-                eye, cg = found["EYEPOINT"], found["CG"]
-                result = (round(cg[0] - eye[0] + COCKPIT_EYE_NUDGE_M[0], 3),
-                          round(eye[1] - cg[1] + COCKPIT_EYE_NUDGE_M[1], 3),
-                          round(eye[2] - cg[2] + COCKPIT_EYE_NUDGE_M[2], 3))
-        except (OSError, ET.ParseError, AttributeError, TypeError, ValueError):
-            result = None
+    found = _fdm_locations(key) if key else {}
+    cg = found.get("CG")
+    model_eye = _model_pilot_eye_actor_m(key) if (key and cg is not None) else None
+    if model_eye is not None:
+        (ex, ey, ez), source = model_eye
+        cg_actor = (-cg[0], cg[1], cg[2])
+        result = (round(ex - cg_actor[0] + PILOT_EYE_NUDGE_M[0], 3) + 0.0,
+                  round(ey - cg_actor[1] + PILOT_EYE_NUDGE_M[1], 3) + 0.0,
+                  round(ez - cg_actor[2] + PILOT_EYE_NUDGE_M[2], 3) + 0.0)
+        _COCKPIT_BASIS[key] = (f"pilot eye of the {key}'s own model ({source}) relative to its "
+                               f"FDM CG, plus PILOT_EYE_NUDGE_M (UNCALIBRATED)")
+    elif cg is not None and "EYEPOINT" in found:
+        eye = found["EYEPOINT"]
+        result = (round(cg[0] - eye[0] + COCKPIT_EYE_NUDGE_M[0], 3),
+                  round(eye[1] - cg[1] + COCKPIT_EYE_NUDGE_M[1], 3),
+                  round(eye[2] - cg[2] + COCKPIT_EYE_NUDGE_M[2], 3))
+        _COCKPIT_BASIS[key] = (f"cockpit station from the {key}'s own FDM EYEPOINT relative to "
+                               f"its CG, plus COCKPIT_EYE_NUDGE_M (UNCALIBRATED)")
     _COCKPIT_CACHE[key] = result
     return result
 
@@ -691,8 +764,7 @@ class CameraSpec:
         east = local["east_m"] if local else 0.0
         alt = (terrain_elevation_m + local["up_m"]) if local else 0.0
         if preset == "cockpit":
-            offset_frm = (f"cockpit station from the {aircraft}'s own FDM EYEPOINT relative to "
-                          f"its CG, plus COCKPIT_EYE_NUDGE_M (UNCALIBRATED)"
+            offset_frm = (cockpit_offset_basis(aircraft or "")
                           if cockpit_offset is not None else
                           f"{frm}; SHOULDER_OFFSET (B747-scale, unscaled): no FDM EYEPOINT "
                           f"readable for {aircraft or 'this aircraft'}")

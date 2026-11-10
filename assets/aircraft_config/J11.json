@@ -628,5 +628,10 @@
       "fov_deg": 84.0,
       "source": "J-11A-set.xml <view n=\"0\"> <config> x-offset-m 0.00, y-offset-m 1.45, z-offset-m 5.23, pitch-offset-deg -17, default-field-of-view-deg 84; FlightGear view offsets are x right, y up, z aft, so the model-frame point is (5.23, 0, 1.45) m"
     }
+  },
+  "beauty_mesh": {
+    "normals": "crease",
+    "two_sided": true,
+    "source": "round 2 cockpit-airframe lane (2026-11-09): the render machine's first J-11 frames drew the airframe as flat facets (shot d's grey slab, shot a's toy jet) because the converter writes no vn and every triangle its own vertices. FlightGear draws Su-27.ac, panel.ac, seat2.ac and the pilot smooth: SURF 0x10 marks a smooth surface and each object states its crease (Su-27.ac: 31 objects at 30 deg, 9 at 45, one at 35, one at 180), and SURF 0x20 marks a two-sided one (the Canopy frame, HULL_Hull_Upper.001, most of panel.ac). body_beauty.obj carries those normals and back faces; body.obj, which every measure frame and every label pass draws, is unchanged"
   }
 }

@@ -15,7 +15,7 @@ like with like):
   c  the forest in heavy rain (the Phase 3 forest preset, Yosemite; the
      web app's storm weather is on by default and draws the rain)
   d  the cockpit view of the Matterhorn (the "cockpit" camera preset at
-     the J-11's own FDM eyepoint, behind the windshield)
+     the J-11 model's own pilot eye, behind the windshield, 24 mm lens)
 
 a and d are framed, not hoped for: the hero-lighting director solves the
 heading that puts the sun where the look wants it, and the start is then
@@ -143,9 +143,15 @@ SHOTS: Dict[str, Shot] = {
               "chase view of the j11 at 1700 m over the forest in heavy rain for 6 seconds",
               "forest", "J11", "chase", "forest preset (Yosemite), storm rain",
               "storm_soft_sheen"),
+    # Round 2 (cockpit-airframe): the camera is now the model's own pilot
+    # eye (core/scenario/camera.py derive_cockpit_offset) and the lens 24 mm,
+    # so the canopy arch, the coaming and the Matterhorn share the frame
+    # (round 1's 35 mm at the FDM eyepoint sat inside the panel's hood).
     "d": Shot("d", "cockpit view, the Matterhorn ahead",
-              "cockpit view of the j11 at 3800 m over the matterhorn at 10:00 for 6 seconds",
-              None, "J11", "cockpit", "behind the windshield", "cockpit_canopy_glint",
+              "cockpit view of the j11 with a 24 mm lens at 3800 m over the matterhorn "
+              "at 10:00 for 6 seconds",
+              None, "J11", "cockpit", "pilot's eye behind the windshield, 24 mm",
+              "cockpit_canopy_glint",
               ("matterhorn", "Matterhorn")),
 }
 SHOT_ORDER = ("a", "b", "c", "d")

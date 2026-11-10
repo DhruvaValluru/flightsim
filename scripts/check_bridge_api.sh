@@ -929,6 +929,28 @@ as_check "sharp: UpdateTransform keeps previous" "Renderer/Private/ScenePrivate.
 as_check "sharp: engine loop calls StartFrame" "Launch/Private/LaunchEngineLoop.cpp" "ENQUEUE_RENDER_COMMAND(FScene_StartFrame)"
 # -- aircraft-sharp -- end ----------------------------------------------------
 
+
+# -- cockpit-airframe (visual overhaul round 2, 2026-11-09) ------------------
+# FlightSimAircraftFX.cpp: the beauty body swap (mesh manifest beauty_parts ->
+# SetStaticMesh on a beauty render) and the slot count. Each pattern is a
+# fixed string read in the 5.7.4 headers when written (uses ss_check above).
+ss_check "cockpit-airframe: SMC SetStaticMesh" "Engine/Classes/Components/StaticMeshComponent.h" "ENGINE_API virtual bool SetStaticMesh(class UStaticMesh* NewMesh);"
+ss_check "cockpit-airframe: SMC GetStaticMesh" "Engine/Classes/Components/StaticMeshComponent.h" "TObjectPtr<UStaticMesh> GetStaticMesh() const"
+ss_check "cockpit-airframe: StaticMesh GetStaticMaterials" "Engine/Classes/Engine/StaticMesh.h" "const TArray<FStaticMaterial>& GetStaticMaterials() const"
+ss_check "cockpit-airframe: FStaticMaterial MaterialSlotName" "Engine/Classes/Engine/StaticMesh.h" "FName MaterialSlotName;"
+ss_check "cockpit-airframe: FJsonObject Values" "Json/Public/Dom/JsonObject.h" "TMap<FString, TSharedPtr<FJsonValue>> Values;"
+ss_check "cockpit-airframe: FJsonValue AsObject" "Json/Public/Dom/JsonValue.h" "JSON_API virtual const TSharedPtr<FJsonObject>& AsObject() const;"
+# ue_import_aircraft.py keep_normals (Python names of these UPROPERTYs):
+ss_check "cockpit-airframe: MeshBuildSettings bRecomputeNormals" "Engine/Classes/Engine/EngineTypes.h" "uint8 bRecomputeNormals:1;"
+ss_check "cockpit-airframe: StaticMesh StaticMaterials getter" "Engine/Classes/Engine/StaticMesh.h" "UPROPERTY(BlueprintGetter = GetStaticMaterials"
+if [ -f "$UE_ROOT/Engine/Plugins/Interchange/Runtime/Source/Pipelines/Public/InterchangeGenericAssetsPipelineSharedSettings.h" ] \
+   && grep -qF -- "bool bRecomputeNormals = true;" "$UE_ROOT/Engine/Plugins/Interchange/Runtime/Source/Pipelines/Public/InterchangeGenericAssetsPipelineSharedSettings.h"; then
+    ok "cockpit-airframe: Interchange CommonMeshes bRecomputeNormals" "present"
+else
+    bad "cockpit-airframe: Interchange CommonMeshes bRecomputeNormals" "not found -- ue_import_aircraft.py keep_normals needs updating"
+fi
+# -- cockpit-airframe end ----------------------------------------------------
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'

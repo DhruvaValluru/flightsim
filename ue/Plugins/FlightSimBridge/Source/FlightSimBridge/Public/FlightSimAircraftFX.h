@@ -195,6 +195,10 @@ private:
 	int32 LandingOnFrames = 0;
 	// wet-airframe-canopy: one MID per look slot (the wet scalars), the weather, the wetness.
 	TArray<UMaterialInstanceDynamic*> LookMids;
+	// cockpit-airframe (round 2): mesh manifest beauty_parts, measured part name
+	// -> its beauty-only copy's asset name (body -> body_beauty: the same
+	// triangles with the .ac crease normals and two-sided back faces).
+	TMap<FString, FString> BeautyMeshes;
 	const FFlightSimWeather* Weather = nullptr;
 	FFlightSimAircraftWet Wet;
 };

@@ -2179,3 +2179,118 @@ draw the J-11 as a smeared, ghosted blur.
   (-passes=velocity) the same engine reading implies its vectors also run
   from the spawn transform; measure is not touched here (Gate 6 / 10-R),
   so this is reported for the verifier's flow_vs_motion, not fixed.
+
+## cockpit-airframe (round 2)
+
+Mac, 2026-11-09, code only; nothing rendered. Read from the ef361bd6 frames
+(runs/visual/head, runs/visual/final) and the render-machine notes above.
+
+**Did the J-11 package re-import run on Windows? Not to completion, as far
+as the records show.** Evidence:
+- Step 7: every shot first refused `aircraft.package_pin` (CRLF checkout);
+  after the LF re-checkout, the first four-shot sheet ("after J11 LF
+  re-checkout", events_windows.log t 1794266334) has a start and no end:
+  the harness reaped it for low memory. That is the run that would have
+  re-converted (the manifest was stale by its pins) and re-imported.
+- Shot a's render.json: `aircraft_look.materials.slots_applied` 7 and
+  `slots_absent ["WorldGridMaterial"]`. The converted package body has 25
+  MTL slots (measured here, converter over the pinned files); every one of
+  them gets a look instance at import, so a completed import would show
+  about 27 applied slots (body + the two R-27R). `mesh.triangles` 37168 is
+  the NEW manifest's count (35068 + 2 x 1050), so the conversion ran; the
+  .uasset slots are not that conversion's.
+- So: the reaped run wrote the new manifest and (probably) saved some part
+  .uassets before it died; `importer.stale_assets` is by mtime and file
+  presence, so the next shot counted the import as done. The look instances
+  were never made for the new slot names, and `ApplyMaterials` skipped
+  null slots silently. Grey/untextured d and toy-like a follow from that
+  plus the faceting below. Shot a's wrong-slot count is the one fact that
+  is measured; the reaping of the import is inferred from the event log.
+
+**Why faceted.** The converter writes every triangle with its own three
+vertices and no `vn` (body.obj: 105,204 v, 0 vn, 35,068 f), and Interchange
+recomputes normals by default (InterchangeGenericAssetsPipelineSharedSettings.h
+`bRecomputeNormals = true`), so each triangle has one normal. FlightGear
+draws the same file smooth: SURF 0x10 is smooth shading and every Su-27.ac
+object states a `crease` (31 at 30 deg, 9 at 45, one 35, one 180);
+SURF 0x20 is two-sided (the Canopy frame, HULL_Hull_Upper.001, most of
+panel.ac), which our single-sided import culls from inside.
+
+**Why shot d was a slab.** The cockpit preset sat at the FDM EYEPOINT
+(J11.xml 172.45 in aft, 38 in up) plus COCKPIT_EYE_NUDGE_M: actor
+(-4.73, +0.30, +1.07) m about the structural datum. The modelled pilot's
+eye (J-11A-set.xml view 0) is (-5.23, 0, +1.34) m: the round-1 lens sat
+0.5 m forward of and 0.28 m below it, inside the instrument panel's hood
+(panel.ac x 3.86-6.55 m aft). A painter's-algorithm preview of body.obj
+from that station (scratch, not the engine) reproduces the slab over the
+lower-left of the frame.
+
+**What changed (all beauty-gated; body.obj, body.mtl and the R-27R OBJs
+are byte-identical to before on the pinned J-11 files, so every measure
+frame and every label pass draws what it drew).**
+- `assets_pipeline/smooth_normals.py`: per-corner normals by the .ac crease
+  angle over smooth faces, welded at 0.1 mm within one object; flat faces
+  keep the face normal. `acmodel.py` now reads `crease` and the 0x10 flag.
+- `convert.py`: for a config with `beauty_mesh` (J11 only) it also writes
+  `body_beauty.obj` (same triangles, same positions and UVs, same material
+  order; vn; a back face for every SURF 0x20 surface) and the manifest's
+  `beauty_parts`. Measured on the pinned J-11: 35,068 front + 10,190 back
+  triangles, 32,748 smooth / 2,320 flat; 99.9 % of corners agree in sign
+  with their written face normal. Not in `parts`: the commandlet would
+  attach it as a second body.
+- `scripts/ue_import_aircraft.py`: imports `beauty_parts` with Interchange
+  `recompute_normals` off and LOD0 `recompute_normals` off; after the look
+  pass, reads back every mesh slot (`static_materials`) and FAILS the import
+  for a slot that is not one of the MTL's materials (WorldGridMaterial,
+  none). It writes `import_record.json` (manifest sha256 + slot report).
+- `assets_pipeline/importer.py`: a manifest with `beauty_parts` is imported
+  only when its `import_record.json` names this manifest and lists no
+  unbound slot (so a reaped import runs again), else refusal
+  `aircraft.material_slots` (catalog). `fetch_source` sets
+  `core.autocrlf=false` on the model checkout, and a pin failure on a CRLF
+  checkout rewrites the tree with LF once (`git checkout-index -f -a`) and
+  verifies again. No other airframe's import rule changes.
+- `FlightSimAircraftFX.cpp` (look path of a beauty render only): swaps each
+  part with a `beauty_parts` copy onto it (`SetStaticMesh`) when the copy's
+  slot names equal the measured part's, before the look instances; records
+  `materials.beauty_meshes[]` (swapped / reason) and
+  `materials.slots_without_material` (null slots, previously skipped
+  silently). Same positions, so mask, custom depth and stencil agree with
+  the beauty pixels. Symbols in check_bridge_api.sh block "cockpit-airframe".
+- Cockpit camera (`core/scenario/camera.py derive_cockpit_offset`): the
+  model's own pilot eye (config `views.pilot_eye`; the manifest's actor_cm
+  with the measured mesh origin when present) relative to the FDM CG, plus
+  `PILOT_EYE_NUDGE_M` (0, 0, +0.03) m, UNCALIBRATED. J-11: (+7.911, 0,
+  +1.922) m from the CG (round 1: +8.41, +0.30, +1.61). Airframes without a
+  config pilot eye keep the EYEPOINT rule (B747, A320, c172p, A4, p51d,
+  DHC6 offsets unchanged). Shot d's prompt asks for a 24 mm lens (the rule
+  reader's "24 mm lens"); preview from the new station: the canopy arch
+  (visible now only because of the back faces) across the top, the
+  coaming and HUD frame across the bottom, open sky between, where the
+  Matterhorn stands (+5.5 deg from the start).
+- J-11 paint (look/J11.json): Roughness 0.58 -> 0.46, ClearCoat 0.12 -> 0.3,
+  ClearCoatRoughness 0.3 -> 0.2, UNCALIBRATED. Gate V specular found no
+  interior airframe pixel above luma 180 on b, c, d (peak/median 4.5-18):
+  the facets scattered the sun lobe and the paint was too rough for a glint.
+
+**Without Lumen (the D3D11 / SM5 fallback the render machine ran).** Nothing
+here depends on Lumen: the smooth normals and the narrower lobe act on the
+direct sun's specular, which the deferred renderer draws on SM5; the canopy
+glint is that same lobe. Reflections of the sky in the canopy fall back to
+whatever reflection method runs (SSR / sky light) and are not claimed.
+
+**Open, needs the render machine.**
+1. Pull; the next J-11 render re-converts (the converter and J11.json are
+   newer than the manifest) and re-imports; expect `IMPORTED
+   /Game/Aircraft/J11/body_beauty ... triangles=45258/45258`, `SLOTS
+   /Game/Aircraft/J11: N bound, 0 unbound` and import_record.json beside
+   the manifest. Run it in the foreground (it was reaped last time).
+2. Shot a render.json: `aircraft_look.materials.beauty_meshes[0].swapped`
+   true, `slots_applied` about 27, `slots_absent` [], `slots_without_material` 0.
+3. Gate 6 measure + Gate 10-R: unchanged (B747; and the J-11's measured
+   body.obj is byte-identical).
+4. Contact sheet a and d; Gate V specular on b, c, d. If the canopy glass
+   reads black from inside in d (it should be culled: canopy.glass is
+   single-sided, flag 0x10), say so.
+5. If `SetStaticMesh refused` appears in `beauty_meshes`, the aircraft body
+   component is not Movable in the commandlet world.
