@@ -1441,7 +1441,10 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			TEXT("round 1 marched 192 view samples over up to 80 km (400 m steps through 0.05/m cloud) and 10 "
 			     "unjittered quadratic shadow samples over 15 km: contour banding and unlit cloud. The view "
 			     "march is blue-noise jittered by the engine (VolumetricCloud.usf) and averaged by the still's "
-			     "captures; the shadow march spans the layer (CloudShadowTracingKm)"));
+			     "captures ONLY once the commandlet has loaded and built the blue-noise textures before the "
+			     "first capture (clouds round 6: render_settings.beauty_path.blue_noise; a commandlet otherwise "
+			     "gets BlueNoise.cpp's constant dummy, the altitude-slice strata of round 3); the shadow march "
+			     "spans the layer (CloudShadowTracingKm)"));
 		MarchOut->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED: set by probe render on the render machine"));
 		IConsoleVariable* FogAll = IConsoleManager::Get().FindConsoleVariable(WorldCloudFogAllPixelCvar);
 		if (FogAll != nullptr)

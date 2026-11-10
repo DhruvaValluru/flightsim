@@ -279,6 +279,19 @@ rp_cvar r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice "Renderer/Pr
 rp_cvar r.VolumetricCloud "Renderer/Private/VolumetricCloudRendering.cpp"
 rp_cvar r.VolumetricCloud.HighQualityAerialPerspective "Renderer/Private/VolumetricCloudRendering.cpp"
 rp_cvar r.VolumetricRenderTarget.Mode "Renderer/Private/VolumetricRenderTarget.cpp"
+# -- clouds round 6 (2026-11-10): the cloud march's blue-noise jitter --------
+# FlightSimRenderCommandlet.cpp loads and builds GEngine's blue-noise textures
+# before the first beauty capture; each line read in the 5.7 source that day.
+rp_check "UEngine::LoadBlueNoiseTexture" "Engine/Classes/Engine/Engine.h" "ENGINE_API void LoadBlueNoiseTexture(bool LoadVector2BlueNoiseTexture);"
+rp_check "GEngine blue-noise scalar texture" "Engine/Classes/Engine/Engine.h" "TObjectPtr<class UTexture2D> BlueNoiseScalarTexture;"
+rp_check "GEngine blue-noise vec2 texture" "Engine/Classes/Engine/Engine.h" "TObjectPtr<class UTexture2D> BlueNoiseVec2Texture;"
+rp_check "renderer loads blue noise lazily" "Renderer/Private/SceneRendering.cpp" "GEngine->LoadBlueNoiseTexture(LoadVector2BlueNoiseTexture);"
+rp_check "commandlet gets the blue-noise dummy" "Renderer/Private/BlueNoise.cpp" "ensure(IsRunningCommandlet() && IsAllowCommandletRendering());"
+rp_check "blue-noise dummy is 1x1" "Renderer/Private/BlueNoise.cpp" "Out.Dimensions = FIntVector(1,1,1);"
+rp_check "cloud march starts at a blue-noise offset" "../../Shaders/Private/VolumetricCloud.usf" "t = TMin + BlueNoiseScalar(FullResPixelCoord, View.StateFrameIndexMod8) * StepT;"
+rp_check "cloud shadow march is unjittered" "../../Shaders/Private/VolumetricCloud.usf" "const float ShadowJitterNorm = 0.5f; // InterleavedGradientNoise(SvPosition.xy, ShadowJitteringSeed); // Disabled jittering"
+rp_check "a building texture is a default stand-in" "Engine/Classes/Engine/Texture.h" "ENGINE_API virtual bool IsDefaultTexture() const;"
+rp_check "mode 3 composes the trace with no reconstruction" "Renderer/Private/VolumetricRenderTarget.cpp" "if (VRTMode == 1 || VRTMode == 3)"
 rp_cvar r.PathTracing "Renderer/Private/PathTracing.cpp"
 rp_cvar r.PathTracing.FilterWidth "Renderer/Private/PathTracing.cpp"
 rp_cvar r.PathTracing.EnableReferenceAtmosphere "Renderer/Private/PathTracing.cpp"

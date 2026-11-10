@@ -406,6 +406,19 @@ OCCLUSION_FLAG_TRANSMITTANCE = 0.5
 #: march, no default-layer thinning, no multiple-scattering change): round 1
 #: (2026-11-09) deadlocked every beauty run on the render laptop's Intel iGPU in
 #: the sky light capture and git bisect named this lane's round-2 commit.
+#:
+#: Clouds round 6 (2026-11-10): the march samples a layer in FIXED altitude
+#: slices (the engine's StepT is the slab path over the sample count, so sample
+#: k sits at NormAlt (k + jitter) / N for every pixel), and at extinction_per_m
+#: x StepT of about 4 each slice is opaque. The engine hides the slices with a
+#: per-pixel, per-capture blue-noise start offset that TSR averages over the
+#: still's sub-frames; a rendering COMMANDLET gets a constant one instead
+#: (BlueNoise.cpp's 1x1 dummy, or a texture still building answering as a
+#: default stand-in), which is why round 3's clear-sky frames drew horizontal
+#: strata, pancake ledges and topographic contours with no grain in them. The
+#: render commandlet now loads and builds the two blue-noise textures before
+#: its first capture and records render_settings.beauty_path.blue_noise
+#: (cloud_march_jittered). No row here changes: the fix adds no march cost.
 CLOUD_MARCH_FIELDS: Tuple[str, ...] = ("view_sample_count_scale", "shadow_sample_count_scale",
                                        "tracing_max_distance_km")
 CLOUD_MARCH: Dict[str, Dict[str, float]] = {
