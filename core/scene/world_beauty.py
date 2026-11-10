@@ -350,14 +350,17 @@ OCCLUSION_FLAG_TRANSMITTANCE = 0.5
 #: The march by GPU class (GRHIDeviceIsIntegrated): the component's view and
 #: shadow sample-count scales (the engine's 96 and 10 samples times these,
 #: under its caps 768 and 80) and the trace's max distance inside the layer.
-#: An integrated GPU keeps the round-1 sample counts (192 view, 12 shadow) over a
-#: 20 km march: the round-2 row (384 view, 40 shadow) hung every beauty run on the
-#: render laptop's Intel iGPU (round 1, 2026-11-09).
+#: The "integrated" row is the CONSTRAINED GPU class (C++ CloudConstrainedGpu: an
+#: integrated adapter or any feature level below SM6, e.g. D3D11 SM5) and is
+#: ef361bd6's march exactly (192 view, 10 shadow, 80 km, a fixed 15 km shadow
+#: march, no default-layer thinning, no multiple-scattering change): round 1
+#: (2026-11-09) deadlocked every beauty run on the render laptop's Intel iGPU in
+#: the sky light capture and git bisect named this lane's round-2 commit.
 CLOUD_MARCH_FIELDS: Tuple[str, ...] = ("view_sample_count_scale", "shadow_sample_count_scale",
                                        "tracing_max_distance_km")
 CLOUD_MARCH: Dict[str, Dict[str, float]] = {
     "discrete": dict(view_sample_count_scale=6.0, shadow_sample_count_scale=6.0, tracing_max_distance_km=50.0),
-    "integrated": dict(view_sample_count_scale=2.0, shadow_sample_count_scale=1.2, tracing_max_distance_km=20.0),
+    "integrated": dict(view_sample_count_scale=2.0, shadow_sample_count_scale=1.0, tracing_max_distance_km=80.0),
 }
 #: The engine's base samples and caps (VolumetricCloudComponent.h, VolumetricCloudRendering.cpp).
 ENGINE_CLOUD_BASE_VIEW_SAMPLES = 96.0
@@ -368,6 +371,8 @@ ENGINE_CLOUD_SHADOW_SAMPLE_CAP = 80.0
 CLOUD_SHADOW_KM_PER_KM = 1.0
 CLOUD_SHADOW_MIN_KM = 1.0
 CLOUD_SHADOW_MAX_KM = 4.0
+#: The constrained class's shadow march: ef361bd6's fixed 15 km.
+CLOUD_SHADOW_CONSTRAINED_KM = 15.0
 #: The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 #: stated layer) is thinned to the shape's depth; 0 keeps the layer as built.
 CLOUD_MAX_THICKNESS_M: Dict[str, float] = {"cumulus": 2000.0, "stratocumulus": 0.0,
@@ -387,6 +392,11 @@ def cloud_march(integrated: bool) -> Dict[str, float]:
     row["shadow_samples"] = min(ENGINE_CLOUD_BASE_SHADOW_SAMPLES * row["shadow_sample_count_scale"],
                                 ENGINE_CLOUD_SHADOW_SAMPLE_CAP)
     return row
+
+
+def cloud_shadow_tracing_km_for(constrained: bool, thickness_m: float) -> float:
+    """The shadow march for the GPU class (constrained: ef361bd6's fixed 15 km)."""
+    return CLOUD_SHADOW_CONSTRAINED_KM if constrained else cloud_shadow_tracing_km(thickness_m)
 
 
 def cloud_shadow_tracing_km(thickness_m: float) -> float:

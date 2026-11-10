@@ -31,6 +31,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "RHIGlobals.h"
+#include "RHI.h"   // GMaxRHIFeatureLevel (CloudConstrainedGpu)
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/UObjectIterator.h"
@@ -191,16 +192,18 @@ namespace FlightSimWorldPure
 	};
 	// The engine's samples are 96 x view scale (cap r.VolumetricCloud.ViewRaySampleMaxCount,
 	// 768) and 10 x shadow scale (cap r.VolumetricCloud.Shadow.ViewRaySampleMaxCount, 80);
-	// both rows stay under the caps. An integrated GPU (GRHIDeviceIsIntegrated: the
-	// render machine's Intel) keeps the round-1 sample counts (192 view; 12 shadow
-	// against 10) with the march shortened to 20 km so the steps stay finer than
-	// round 1's: the round-2 row (384 view, 40 shadow, with the gen-3 noise and fog
-	// on every pixel) hung every beauty run on that laptop (round 1, 2026-11-09).
+	// both rows stay under the caps. The CONSTRAINED row (an integrated GPU, or any
+	// adapter below SM6, e.g. D3D11 SM5) is ef361bd6's march exactly: 192 view and 10
+	// shadow samples, an 80 km trace and a 15 km shadow march, with no thinning of the
+	// default layer, no multiple-scattering change and no fog on every pixel. Round 1
+	// (2026-11-09): every beauty run on the render laptop's Intel iGPU (D3D11 SM5)
+	// deadlocked in the sky light capture, and git bisect named the commit that
+	// brought this lane's round-2 settings (a8c964fc); ef361bd6's code rendered.
 	inline double CloudMarch(int March, int Field)
 	{
 		static const double Rows[MarchCount][MarchFieldCount] = {
 			{6.0, 6.0, 50.0},   // discrete: 576 view, 60 shadow samples
-			{2.0, 1.2, 20.0},   // integrated: 192 view, 12 shadow samples
+			{2.0, 1.0, 80.0},   // constrained: 192 view, 10 shadow samples (ef361bd6)
 		};
 		return March >= 0 && March < MarchCount && Field >= 0 && Field < MarchFieldCount
 			? Rows[March][Field] : 0.0;
@@ -210,10 +213,17 @@ namespace FlightSimWorldPure
 	constexpr double CloudShadowKmPerKm = 1.0;
 	constexpr double CloudShadowMinKm = 1.0;
 	constexpr double CloudShadowMaxKm = 4.0;
+	// The constrained row's shadow march: ef361bd6's fixed 15 km.
+	constexpr double CloudShadowConstrainedKm = 15.0;
 	inline double CloudShadowTracingKm(double ThicknessM)
 	{
 		const double Km = (ThicknessM > 0.0 ? ThicknessM : 0.0) / 1000.0 * CloudShadowKmPerKm;
 		return Km < CloudShadowMinKm ? CloudShadowMinKm : (Km > CloudShadowMaxKm ? CloudShadowMaxKm : Km);
+	}
+	// The shadow march for the GPU class: the constrained class keeps 15 km.
+	inline double CloudShadowTracingKmFor(bool bConstrained, double ThicknessM)
+	{
+		return bConstrained ? CloudShadowConstrainedKm : CloudShadowTracingKm(ThicknessM);
 	}
 	// The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 	// stated layer) is thinned to the shape's depth: fair cumulus and a stratus
@@ -502,6 +512,14 @@ namespace FlightSimWorldPure
 
 namespace
 {
+	// The constrained GPU class (round 1 hang): an integrated adapter, or any
+	// adapter below SM6 (D3D11 SM5 runs no Lumen, VSM or Nanite either). It takes
+	// ef361bd6's cloud and sky settings (FlightSimWorldPure::CloudMarch's row).
+	bool CloudConstrainedGpu()
+	{
+		return GRHIDeviceIsIntegrated || GMaxRHIFeatureLevel < ERHIFeatureLevel::SM6;
+	}
+
 	const TCHAR* const WorldCloudMaterialPath =
 		TEXT("/Game/FlightSim/M_FlightSimCloudLayers.M_FlightSimCloudLayers");
 	const TCHAR* const WorldTilesMaterialPath =
@@ -1083,8 +1101,12 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	// clouds-sky round 2: the sky's multiple scattering (paler towards the
 	// horizon from altitude; FlightSimWorldPure::SkyMultiScattering).
 	Out->SetNumberField(TEXT("multi_scattering_factor_before"), Atmosphere->MultiScatteringFactor);
-	Atmosphere->SetMultiScatteringFactor(static_cast<float>(SkyMultiScattering(Preset)));
-	Out->SetNumberField(TEXT("multi_scattering_factor"), SkyMultiScattering(Preset));
+	// Not on a constrained GPU (CloudConstrainedGpu): ef361bd6 never set it.
+	if (!CloudConstrainedGpu())
+	{
+		Atmosphere->SetMultiScatteringFactor(static_cast<float>(SkyMultiScattering(Preset)));
+	}
+	Out->SetNumberField(TEXT("multi_scattering_factor"), Atmosphere->MultiScatteringFactor);
 	Out->SetStringField(TEXT("multi_scattering_basis"),
 		TEXT("world_beauty.SKY_MULTI_SCATTERING (UNCALIBRATED): shot d's sky at 3.8 km rendered near-black navy; "
 		     "more multiple scattering pales and lifts the clear sky towards the horizon"));
@@ -1296,7 +1318,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 	CloudSeedOffsetKm(static_cast<uint64_t>(static_cast<int64_t>(Seed)), SeedKm);
 	// clouds-sky round 2: the march budget by GPU class (the render machine's
 	// Intel iGPU under D3D11 must not time out; a discrete GPU takes more).
-	const bool bIntegratedGpu = GRHIDeviceIsIntegrated;
+	const bool bIntegratedGpu = CloudConstrainedGpu();
 	const int32 March = bIntegratedGpu ? MarchIntegrated : MarchDiscrete;
 	const float ViewScale = static_cast<float>(CloudMarch(March, MarchViewScale));
 	const float ShadowScale = static_cast<float>(CloudMarch(March, MarchShadowScale));
@@ -1305,7 +1327,9 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		TSharedPtr<FJsonObject> MarchOut = MakeShared<FJsonObject>();
 		MarchOut->SetStringField(TEXT("path"), ANSI_TO_TCHAR(MarchName(March)));
 		MarchOut->SetStringField(TEXT("path_basis"),
-			TEXT("GRHIDeviceIsIntegrated (the RHI's adapter): integrated keeps the round-1 sample counts over a 20 km march"));
+			TEXT("CloudConstrainedGpu (GRHIDeviceIsIntegrated, or a feature level below SM6): the constrained row is ef361bd6's march"));
+		MarchOut->SetBoolField(TEXT("rhi_device_is_integrated"), GRHIDeviceIsIntegrated);
+		MarchOut->SetBoolField(TEXT("feature_level_sm6"), GMaxRHIFeatureLevel >= ERHIFeatureLevel::SM6);
 		MarchOut->SetStringField(TEXT("adapter"), GRHIAdapterName);
 		for (int32 F = 0; F < MarchFieldCount; ++F)
 		{
@@ -1353,12 +1377,13 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		// thinned slab, the one drawn.
 		const double BuiltTopM = State.TopM;
 		const bool bStatedLayer = CardCover >= 0.0 || bFair;
-		State.TopM = CloudCappedTopM(State.Shape, State.BaseM, State.TopM, bStatedLayer);
+		State.TopM = CloudCappedTopM(State.Shape, State.BaseM, State.TopM, bStatedLayer || bIntegratedGpu);
 		if (State.TopM != BuiltTopM)
 		{
 			Cloud->SetLayerHeight(static_cast<float>((State.TopM - State.BaseM) / 1000.0));
 		}
-		const float ShadowTracingKm = static_cast<float>(CloudShadowTracingKm(State.TopM - State.BaseM));
+		const float ShadowTracingKm =
+			static_cast<float>(CloudShadowTracingKmFor(bIntegratedGpu, State.TopM - State.BaseM));
 		const double* CloudRow = &CloudValues[State.Shape * CloudFieldCount];
 		State.Material = UMaterialInstanceDynamic::Create(Base, Cloud);
 		State.Material->SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(State.Cover));

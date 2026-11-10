@@ -793,13 +793,16 @@ def test_the_cloud_march_and_the_sky_are_the_python_ones(tmp_path):
         wb.cloud_capped_top_m(wb.CLOUD_PRESETS[c], b, t, bool(s)) for c, b, t, s in tops]
     sky = [line.split() for line in lines if line.startswith("sky ")]
     assert {p: float(v) for _, p, v in sky} == wb.SKY_MULTI_SCATTERING
-    # under the engine's caps, and finer than round 1 (192 samples over 80 km, 10 shadow over 15 km)
-    for integrated in (False, True):
-        row = wb.cloud_march(integrated)
-        assert wb.ENGINE_CLOUD_BASE_VIEW_SAMPLES * row["view_sample_count_scale"] <= wb.ENGINE_CLOUD_VIEW_SAMPLE_CAP
-        assert wb.ENGINE_CLOUD_BASE_SHADOW_SAMPLES * row["shadow_sample_count_scale"] <= wb.ENGINE_CLOUD_SHADOW_SAMPLE_CAP
-        assert row["tracing_max_distance_km"] / row["view_samples_max"] <= 0.25 * 80.0 / 192.0 + 1e-12
-        assert wb.CLOUD_SHADOW_MAX_KM / row["shadow_samples"] < 0.25 * 15.0 / 10.0
+    # discrete: under the engine's caps, and finer than round 1 (192 samples over 80 km, 10 shadow over 15 km)
+    row = wb.cloud_march(False)
+    assert wb.ENGINE_CLOUD_BASE_VIEW_SAMPLES * row["view_sample_count_scale"] <= wb.ENGINE_CLOUD_VIEW_SAMPLE_CAP
+    assert wb.ENGINE_CLOUD_BASE_SHADOW_SAMPLES * row["shadow_sample_count_scale"] <= wb.ENGINE_CLOUD_SHADOW_SAMPLE_CAP
+    assert row["tracing_max_distance_km"] / row["view_samples_max"] <= 0.25 * 80.0 / 192.0 + 1e-12
+    assert wb.CLOUD_SHADOW_MAX_KM / row["shadow_samples"] < 0.25 * 15.0 / 10.0
+    # constrained (integrated or below SM6): ef361bd6's march exactly (the round-1 deadlock)
+    row = wb.cloud_march(True)
+    assert (row["view_samples_max"], row["shadow_samples"], row["tracing_max_distance_km"]) == (192.0, 10.0, 80.0)
+    assert wb.CLOUD_SHADOW_CONSTRAINED_KM == 15.0
     # the -sky= plan's 3 km default slab is thinned for cumulus; a stated layer never is
     assert wb.cloud_capped_top_m("cumulus", 2940.0, 5940.0, False) == 4940.0
     assert wb.cloud_capped_top_m("cumulus", 2940.0, 5940.0, True) == 5940.0
@@ -901,3 +904,28 @@ def test_the_detail_normal_is_micro_relief():
     for preset in wb.PRESETS:
         assert wb.ATMOSPHERE[preset]["tiles_detail_strength"] <= 0.15
     assert wb.WORLD_MPC_SCALARS["DetailFadeM"] <= 500.0
+
+
+def test_a_constrained_gpu_gets_ef361bd6_cloud_and_sky_settings():
+    """Round 1 (2026-11-09): every beauty render on the render laptop's Intel
+    iGPU (D3D11 SM5) deadlocked in the sky light capture; git bisect over
+    ef361bd6..1e3e0f0a named a8c964fc (this lane's round-2 march, shadow span,
+    layer thinning, multiple scattering and fog-on-all-pixel), and ef361bd6's
+    code rendered with the same materials. On a constrained GPU (integrated, or
+    a feature level below SM6) every one of those settings is ef361bd6's."""
+    assert "return GRHIDeviceIsIntegrated || GMaxRHIFeatureLevel < ERHIFeatureLevel::SM6;" in CLOUDS_CPP
+    assert "const bool bIntegratedGpu = CloudConstrainedGpu();" in CLOUDS_CPP
+    # multiple scattering: never set on the constrained class
+    guard = CLOUDS_CPP.index("if (!CloudConstrainedGpu())")
+    assert CLOUDS_CPP.index("Atmosphere->SetMultiScatteringFactor(", guard) - guard < 200
+    assert CLOUDS_CPP.count("Atmosphere->SetMultiScatteringFactor(") == 1
+    # fog on every pixel: discrete only
+    fog = CLOUDS_CPP.index("if (!bIntegratedGpu)")
+    assert CLOUDS_CPP.index("FogAll->Set(1, ECVF_SetByCode);", fog) - fog < 200
+    # no default-layer thinning, and the fixed 15 km shadow march
+    assert "CloudCappedTopM(State.Shape, State.BaseM, State.TopM, bStatedLayer || bIntegratedGpu)" in CLOUDS_CPP
+    assert "CloudShadowTracingKmFor(bIntegratedGpu, State.TopM - State.BaseM)" in CLOUDS_CPP
+    assert wb.cloud_shadow_tracing_km_for(True, 900.0) == 15.0
+    assert wb.cloud_shadow_tracing_km_for(False, 900.0) == wb.cloud_shadow_tracing_km(900.0)
+    assert "constexpr double CloudShadowConstrainedKm = 15.0;" in CLOUDS_CPP
+    assert "{2.0, 1.0, 80.0},   // constrained" in CLOUDS_CPP
