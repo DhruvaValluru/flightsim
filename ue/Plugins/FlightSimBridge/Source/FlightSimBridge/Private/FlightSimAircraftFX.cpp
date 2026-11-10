@@ -41,6 +41,12 @@ namespace
 	constexpr double AircraftFxKelvinPerRankine = 5.0 / 9.0;
 	constexpr int32 AircraftFxConeRings = 8;
 	constexpr int32 AircraftFxConeSides = 16;
+	// round-2b weather-fx (2026-11-09): the lamps' volumetric scattering
+	// (the engine's default is 1, a lit solid cone in fog). Fallbacks for a
+	// manifest without lights.LandingVolumetricScattering / NavVolumetricScattering;
+	// UNCALIBRATED, set by probe render (docs/visual/PROBE_LOG.md ## round-2b weather-fx).
+	constexpr double AircraftFxLandingVolumetricScattering = 0.3;
+	constexpr double AircraftFxNavVolumetricScattering = 0.5;
 	const TCHAR* const AircraftFxLookManifestName = TEXT("look_manifest.json");
 	const TCHAR* const AircraftFxLookManifestMagic = TEXT("flightsim-aircraft-look-manifest");
 	// scripts/aircraft_look.py MASTER_ROOT + FX_MASTERS.
@@ -404,6 +410,10 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 	Record->SetArrayField(TEXT("lights"), LightRows);
 	Record->SetStringField(TEXT("lights_note"), TEXT("point/spot lights move no geometry; the bulbs are additive ")
 		TEXT("(they hide nothing), beauty-only actors the label captures hide"));
+	Record->SetNumberField(TEXT("landing_volumetric_scattering"),
+		Constant(TEXT("lights"), TEXT("LandingVolumetricScattering"), AircraftFxLandingVolumetricScattering));
+	Record->SetNumberField(TEXT("nav_volumetric_scattering"),
+		Constant(TEXT("lights"), TEXT("NavVolumetricScattering"), AircraftFxNavVolumetricScattering));
 
 	const TArray<TSharedPtr<FJsonValue>>* NozzleRows = nullptr;
 	if (Look.IsValid() && Look->TryGetArrayField(TEXT("nozzles"), NozzleRows) && NozzleRows != nullptr)
@@ -690,6 +700,13 @@ void FFlightSimAircraftFX::BuildLamp(UWorld* World, const TSharedPtr<FJsonObject
 		Lamp.Spot->SetOuterConeAngle(Cone);
 		Lamp.Spot->SetAttenuationRadius(static_cast<float>(
 			Constant(TEXT("lights"), TEXT("LandingAttenuationM"), 900.0) * AircraftFxCmPerMetre));
+		// round-2b weather-fx: in fog or rain a lamp at full volumetric
+		// scattering draws its whole cone as a lit solid (round 0 #09: hard-edged
+		// cones under the 747). A stated fraction, UNCALIBRATED; the falloff
+		// between the inner and outer cone keeps its edge soft.
+		Lamp.Spot->SetVolumetricScatteringIntensity(static_cast<float>(
+			Constant(TEXT("lights"), TEXT("LandingVolumetricScattering"), AircraftFxLandingVolumetricScattering)));
+		Lamp.Spot->SetSourceRadius(static_cast<float>(Constant(TEXT("lights"), TEXT("BulbRadiusCm"), 18.0)));
 		Lamp.Spot->SetCastShadows(false);
 		Lamp.Spot->RegisterComponent();
 	}
@@ -704,6 +721,9 @@ void FFlightSimAircraftFX::BuildLamp(UWorld* World, const TSharedPtr<FJsonObject
 		Lamp.Point->SetSourceRadius(static_cast<float>(Constant(TEXT("lights"), TEXT("BulbRadiusCm"), 18.0)));
 		Lamp.Point->SetAttenuationRadius(static_cast<float>(
 			Constant(TEXT("lights"), TEXT("NavAttenuationM"), 40.0) * AircraftFxCmPerMetre));
+		// round-2b weather-fx: a halo in the fog, not a lit ball (UNCALIBRATED).
+		Lamp.Point->SetVolumetricScatteringIntensity(static_cast<float>(
+			Constant(TEXT("lights"), TEXT("NavVolumetricScattering"), AircraftFxNavVolumetricScattering)));
 		Lamp.Point->SetCastShadows(false);
 		Lamp.Point->RegisterComponent();
 	}
