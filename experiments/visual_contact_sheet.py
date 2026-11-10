@@ -590,6 +590,77 @@ def first_frame(run_dir: Path, camera: str) -> tuple:
     return None, None
 
 
+#: no-lumen-and-machine lane (2026-11-09): what Gate V
+#: (experiments/gate_v_visual.py) reads beside each ``<shot>.png``. On the
+#: first real renders aerial_perspective and texel_detail were NOT RUN
+#: ("0 ground pixels with depth"): the sheet copied the frame and its mask
+#: only, so Gate V had to reach back into the web run for the depth, and
+#: the mask labels terrain (int_id 2) where Gate V took only id 0 as ground.
+#: Each file below is a copy (or a straight extract) of the run's own labels:
+#: ``<shot>_depth.f32`` / ``_depth.png`` the depth label, ``<shot>_horizon.json``
+#: the frame sidecar's geometric horizon, ``<shot>_ids.json`` which mask ids
+#: are ground (render.json objects whose role is "scene" or class "terrain").
+GATE_V_SIDE_FILES = ("_depth.f32", "_depth.png")
+
+
+def ground_ids(objects: Sequence[dict]) -> List[int]:
+    """The mask ids Gate V grades as ground: 0 (nothing labelled) and every
+    render.json object whose role is "scene" or whose class is "terrain"."""
+    found = {0}
+    for row in objects or ():
+        if not isinstance(row, dict) or not isinstance(row.get("int_id"), int):
+            continue
+        if row.get("role") == "scene" or row.get("class") == "terrain":
+            found.add(int(row["int_id"]))
+    return sorted(found)
+
+
+def copy_gate_v_labels(frame: Path, directory: Path, key: str) -> Dict[str, str]:
+    """Copy what Gate V needs from beside ``frame`` to ``directory`` as
+    ``<key>...``; returns {file written: its source}. Never invents a label:
+    a file the run did not write is not written here either."""
+    written: Dict[str, str] = {}
+    # An earlier sheet's side files in this step would be graded against
+    # this frame: removed first, so only this run's labels stand beside it.
+    for suffix in (*GATE_V_SIDE_FILES, "_horizon.json", "_ids.json"):
+        old = directory / f"{key}{suffix}"
+        if old.is_file():
+            old.unlink()
+    for suffix in GATE_V_SIDE_FILES:
+        source = frame.with_name(f"{frame.stem}{suffix}")
+        if source.is_file():
+            target = directory / f"{key}{suffix}"
+            shutil.copy2(source, target)
+            written[target.name] = str(source)
+    try:
+        sidecar = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        sidecar = None
+    record = sidecar.get("frame") if isinstance(sidecar, dict) else None
+    horizon = ((record or {}).get("labels") or {}).get("horizon") if isinstance(record, dict) else None
+    if isinstance(horizon, dict) and horizon.get("polyline_px"):
+        target = directory / f"{key}_horizon.json"
+        target.write_text(json.dumps({"polyline_px": horizon["polyline_px"],
+                                      "source": str(frame.with_suffix(".json"))}, indent=1),
+                          encoding="utf-8")
+        written[target.name] = str(frame.with_suffix(".json"))
+    try:
+        manifest = json.loads((frame.parent / "render.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        manifest = None
+    if isinstance(manifest, dict) and isinstance(manifest.get("objects"), list):
+        target = directory / f"{key}_ids.json"
+        target.write_text(json.dumps({
+            "ground_ids": ground_ids(manifest["objects"]),
+            "objects": [{name: row.get(name) for name in ("int_id", "class", "role", "id")}
+                        for row in manifest["objects"] if isinstance(row, dict)],
+            "source": str(frame.parent / "render.json"),
+            "rule": "ground: id 0 and every object whose role is scene or class terrain"},
+            indent=1), encoding="utf-8")
+        written[target.name] = str(frame.parent / "render.json")
+    return written
+
+
 def card_summary(run_dir: Path) -> dict:
     try:
         card = json.loads((run_dir / "card.json").read_text(encoding="utf-8"))
@@ -736,7 +807,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 shutil.copy2(frame, directory / f"{key}.png")
                 if mask is not None:
                     shutil.copy2(mask, directory / f"{key}_mask.png")
-                row.update(frame=str(frame), render=render_summary(frame))
+                row.update(frame=str(frame), render=render_summary(frame),
+                           gate_v_labels=copy_gate_v_labels(frame, directory, key))
             if state.get("hero_lighting"):
                 row["hero_lighting"] = state["hero_lighting"]
             for record in ("subject_framing", "camera_framing"):

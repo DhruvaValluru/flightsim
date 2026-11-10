@@ -691,6 +691,8 @@ class ShotInputs:
     horizon_source: str = "none"
     expected_cloud: Optional[float] = None
     cloud_source: str = "none"
+    ground_ids: Tuple[int, ...] = (0,)
+    ground_ids_source: str = "id 0 only"
 
 
 _SIDE = re.compile(r"_(mask|depth|alone_\d+|normal|albedo|flow|horizon|id)$")
@@ -836,6 +838,43 @@ def _horizon_from_manifest(run_dir: Path, frame_hint: Optional[Path]):
     return None
 
 
+def _ground_ids(png: Path, frame_hint: Optional[Path]) -> Tuple[Tuple[int, ...], str]:
+    """The mask ids that are ground. The label mask gives terrain an id of
+    its own (render.json objects: terrain int_id 2, role "scene"), so id 0
+    alone is only the sky: on the first real renders every shot's
+    aerial_perspective and texel_detail were NOT RUN ("0 ground pixels with
+    depth") and horizon_fill FAILed on fill 0.0. Read from ``<shot>_ids.json``
+    (experiments/visual_contact_sheet.py writes it), else from the frame's
+    own render.json objects; id 0 alone when neither says."""
+    side = _read_json(png.with_name(f"{png.stem}_ids.json"))
+    if isinstance(side, dict) and isinstance(side.get("ground_ids"), list):
+        ids = sorted({0, *(int(v) for v in side["ground_ids"] if isinstance(v, int))})
+        return tuple(ids), f"{png.stem}_ids.json"
+    for render in ([frame_hint.parent / "render.json"] if frame_hint is not None else []) + \
+            [png.parent / "render.json"]:
+        manifest = _read_json(render)
+        if isinstance(manifest, dict) and isinstance(manifest.get("objects"), list):
+            ids = {0}
+            for row in manifest["objects"]:
+                if isinstance(row, dict) and isinstance(row.get("int_id"), int) and (
+                        row.get("role") == "scene" or row.get("class") == "terrain"):
+                    ids.add(int(row["int_id"]))
+            return tuple(sorted(ids)), str(render)
+    return (0,), "id 0 only"
+
+
+def ground_as_zero(ids, ground_ids: Sequence[int]):
+    """The mask with every ground id folded into 0, the id every clause here
+    reads as ground (the airframe, id 1 and its components, untouched)."""
+    import numpy as np
+
+    if ids is None or tuple(ground_ids) == (0,):
+        return ids
+    out = ids.copy()
+    out[np.isin(ids, [i for i in ground_ids if i != 0])] = 0
+    return out
+
+
 def resolve_inputs(directory: Path, key: str, png: Path, width: int, height: int,
                    overrides: Optional[dict] = None) -> ShotInputs:
     overrides = overrides or {}
@@ -847,6 +886,7 @@ def resolve_inputs(directory: Path, key: str, png: Path, width: int, height: int
     mask = png.with_name(f"{png.stem}_mask.png")
     inputs.mask = mask if mask.is_file() else None
     inputs.depth, inputs.depth_source = _load_depth(png, frame_hint, width, height)
+    inputs.ground_ids, inputs.ground_ids_source = _ground_ids(png, frame_hint)
 
     polyline, source = None, "none"
     if key in overrides.get("horizon", {}):
@@ -935,10 +975,12 @@ def measure_shot(inputs: ShotInputs) -> Dict[str, Any]:
         ids = load_id_mask(inputs.mask)
         if ids.shape != rgb.shape[:2]:
             ids = None
+        ids = ground_as_zero(ids, inputs.ground_ids)
     clauses = measure_frame(rgb, ids, inputs.depth, inputs.horizon, inputs.horizon_source,
                             inputs.expected_cloud, inputs.cloud_source)
     return {"png": str(inputs.png), "mask": str(inputs.mask) if ids is not None else None,
             "depth": inputs.depth_source, "horizon": inputs.horizon_source,
+            "ground_ids": list(inputs.ground_ids), "ground_ids_source": inputs.ground_ids_source,
             "expected_cloud": inputs.cloud_source,
             "clauses": {name: clause.to_dict() for name, clause in clauses.items()}}
 
