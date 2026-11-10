@@ -21,6 +21,11 @@ from PIL import Image, ImageDraw
 
 REPO = Path(__file__).resolve().parents[1]
 GALLERY = REPO / "runs" / "test_scenarios"
+RUN_ROOT = REPO / "runs" / "webapp"
+#: Keys the visual overhaul's beauty look writes into render.json. All of them
+#: present means the new look ran; any missing is a finding, not a pass.
+LOOK_KEYS = ("beauty_look", "beauty_path", "world_beauty", "aircraft_look",
+             "hero_lighting", "pixel_moving_effects")
 SUMMARY = REPO / "runs" / "test_scenarios.json"
 WIDTH = 1280
 THUMB = 480
@@ -31,11 +36,38 @@ def frames(gallery: Path) -> list:
     return sorted(gallery.glob("*_frame.png"))
 
 
+def _keys(node, found: set) -> set:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found.add(key)
+            _keys(value, found)
+    elif isinstance(node, list):
+        for value in node:
+            _keys(value, found)
+    return found
+
+
+def look_report(run_id, run_root: Path = RUN_ROOT) -> dict:
+    """Which LOOK_KEYS the run's render.json carries, anywhere in it."""
+    render = run_root / str(run_id or "-") / "render.json"
+    if not render.is_file():
+        return {"render_json": False}
+    found = _keys(json.loads(render.read_text(encoding="utf-8")), set())
+    missing = [k for k in LOOK_KEYS if k not in found]
+    return {"render_json": True, "look_keys_missing": missing, "new_look_ran": not missing}
+
+
 def write_round(number: int, gallery: Path = GALLERY, summary: Path = SUMMARY,
-                out_root: Path = REPO / "docs" / "visual") -> Path:
+                out_root: Path = REPO / "docs" / "visual",
+                run_root: Path = RUN_ROOT) -> Path:
     out = out_root / f"round_{number}"
     out.mkdir(parents=True, exist_ok=True)
     found = frames(gallery)
+    if summary.is_file():
+        # Only this batch: older batches leave frames in the same folder.
+        batch = json.loads(summary.read_text(encoding="utf-8"))
+        wanted = {f"{int(r['number']):02d}_" for r in batch if r.get("outcome") == "done"}
+        found = [p for p in found if p.name[:3] in wanted]
     if not found:
         raise SystemExit(f"no *_frame.png in {gallery}: run "
                          "scripts/run_test_scenarios.py --still first")
@@ -58,8 +90,9 @@ def write_round(number: int, gallery: Path = GALLERY, summary: Path = SUMMARY,
         draw.text((x + 4, y + 4), name[:60], fill=(220, 225, 230))
     sheet.save(out / "contact.jpg", quality=85)
     if summary.is_file():
-        rows_out = [{k: r.get(k) for k in ("number", "name", "prompt", "outcome",
-                                            "why", "run_id", "lighting")}
+        rows_out = [{**{k: r.get(k) for k in ("number", "name", "prompt", "outcome",
+                                               "why", "run_id", "lighting")},
+                     **(look_report(r.get("run_id"), run_root) if r.get("run_id") else {})}
                     for r in json.loads(summary.read_text(encoding="utf-8"))]
         (out / "summary.json").write_text(json.dumps(rows_out, indent=1), encoding="utf-8")
     return out
