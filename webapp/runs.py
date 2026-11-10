@@ -2892,6 +2892,77 @@ def _projected_origin(spec: ScenarioSpec, scene: Dict):
     return float(ox), float(oy), declared
 
 
+# -- round-2b terrain-ocean lane (2026-11-09): beauty only --------------------
+def beauty_scene_crs(spec: ScenarioSpec, scene: Dict, has_cameras: bool,
+                     quality: str) -> Optional[str]:
+    """The ``scene_crs`` a BEAUTY run's card must declare, or None.
+
+    A flat scene's cameras are solved in the origin's UTM zone
+    (core.capture.poses.SceneFrame.for_spec, ``declared=True``), but the
+    card declared that zone only when thermals or a weather event put a
+    position-coupled block on it. With neither -- the open ocean (no
+    thermals over water) -- the host placed the solved camera through the
+    GeoReferencing plugin's default EPSG:32631: round 0 #13 (the 747 over
+    the open North Atlantic, 35 N 45 W) drew its camera about 4400 km east,
+    over Algeria, with the horizon tilted by the Earth's curvature and no
+    aircraft in frame. Beauty only (the measure card stays byte-identical:
+    the owner's rule for this overhaul); a terrain scene declares its
+    raster's own CRS to the host and needs nothing."""
+    if quality != "beauty" or not has_cameras or scene.get("terrain"):
+        return None
+    return utm_zone_crs(float(spec.latitude.value), float(spec.longitude.value))
+
+
+#: The sea cap's radius is this share of the land-free distance the GLO-30
+#: cell mask guarantees (UNCALIBRATED: a margin inside the mask's cells).
+BEAUTY_SEA_RADIUS_SHARE = 0.9
+#: The widest land-free ring of cells looked for (core.terrain.ocean's listed
+#: points are clear for 3 cells, about 330 km).
+BEAUTY_SEA_MARGIN_CELLS_MAX = 3
+#: One degree of latitude, metres (the mask's cell height).
+_DEGREE_M = 111_195.0
+
+
+def beauty_sea_radius_m(scene: Dict, latitude_deg: float, longitude_deg: float,
+                        terrain_elevation_m: float) -> Optional[float]:
+    """The radius of the beauty render's sea surface over open ocean, or None.
+
+    Only a flat scene at a 0 m datum whose origin is open ocean by the GLO-30
+    cell mask (core.terrain.landmask.open_ocean, the rule
+    :func:`open_ocean_scene` uses): the widest margin of land-free cells
+    around the origin's cell, times the narrowest cell width in that ring
+    (longitude shrinks with latitude), times BEAUTY_SEA_RADIUS_SHARE. The
+    host draws M_Ground_Ocean out to it over the tiles (they stay drawn:
+    FlightSimGoogleTiles.cpp ApplyBeautyGround); no land is within it."""
+    if scene.get("terrain") or float(terrain_elevation_m) != 0.0:
+        return None
+    from core.terrain.landmask import open_ocean
+
+    lat, lon = float(latitude_deg), float(longitude_deg)
+    margin = 0
+    for cells in range(1, BEAUTY_SEA_MARGIN_CELLS_MAX + 1):
+        if not open_ocean(lat, lon, cells):
+            break
+        margin = cells
+    if margin == 0:
+        return None
+    widest_lat = min(89.0, abs(lat) + margin + 1)
+    cell_m = _DEGREE_M * math.cos(math.radians(widest_lat))
+    return float(round(margin * cell_m * BEAUTY_SEA_RADIUS_SHARE))
+
+
+def beauty_sea_flags(scene: Dict, card: Path, quality: str) -> List[str]:
+    """``-beauty-sea-radius-m=<r>`` for a beauty render over open ocean (the
+    card's own origin and datum), else nothing: a measure command is
+    unchanged."""
+    if quality != "beauty" or not Path(card).is_file():
+        return []
+    data = json.loads(Path(card).read_text(encoding="utf-8"))
+    radius = beauty_sea_radius_m(scene, data["latitude_deg"], data["longitude_deg"],
+                                 data.get("terrain_elevation_m", 0.0))
+    return [] if radius is None else [f"-beauty-sea-radius-m={radius:g}"]
+
+
 def apply_weather_event(spec: ScenarioSpec) -> None:
     """The thunderstorm COMPOSITION's spec edits, pre-digest and recorded.
 
@@ -3375,6 +3446,8 @@ class RunManager:
         # Lumen/TSR/VSM); "measure" keeps the pinned command byte-identical.
         # A run's look switch (run_render_quality) states its own quality.
         quality = quality or render_quality()
+        # round-2b terrain-ocean: the open sea's surface, beauty only.
+        extra += beauty_sea_flags(scene, card, quality)
         preset = RENDER_QUALITIES[quality]
         width, height = ((preset["width"], preset["height"]) if preset
                          else (WIDTH, HEIGHT))
@@ -4001,6 +4074,10 @@ class RunManager:
             run.conditions["route"] = route_conditions_note(route_flight)
         else:
             control_inputs = HANDS_OFF
+        # round-2b terrain-ocean: a beauty run's flat-scene cameras declare
+        # the frame they were solved in (beauty_scene_crs); measure unchanged.
+        scene_crs = scene_crs or beauty_scene_crs(
+            spec, scene, bool(capture_cameras), run_render_quality(run.look))
         card_arguments = dict(
             control_inputs=control_inputs,
             route=route_flight["card"] if route_flight is not None else None,
