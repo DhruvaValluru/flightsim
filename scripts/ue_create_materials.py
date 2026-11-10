@@ -945,6 +945,9 @@ def finish(material, name):
     if name in GRAPH_GENERATIONS:
         unreal.EditorAssetLibrary.set_metadata_tag(material, GRAPH_GENERATION_TAG,
                                                    GRAPH_GENERATIONS[name])
+    if name in WORLD_GENERATIONS:   # no-lumen-and-machine lane: the world look's stamp
+        unreal.EditorAssetLibrary.set_metadata_tag(material, WORLD_GENERATION_TAG,
+                                                   WORLD_GENERATIONS[name])
     unreal.MaterialEditingLibrary.recompile_material(material)
     unreal.EditorAssetLibrary.save_asset(f"{PATH}/{name}")
     print(f"MATERIAL-CREATED: {PATH}/{name}")
@@ -2832,20 +2835,73 @@ def world_stamp(material, name):
 # -- clouds-sky round 2 -- end ------------------------------------------------------
 
 
+# -- no-lumen-and-machine lane (2026-11-09): the world look's generation stamp --
+#: The generation of each world-look asset, stamped on it as metadata
+#: (WORLD_GENERATION_TAG) like GRAPH_GENERATIONS: an existing asset stamped
+#: with another one (or none) is brought up to this script's graph on the
+#: next run, with no FLIGHTSIM_REBUILD_MATERIALS. Measured on the Windows
+#: render machine (ef361bd6, docs/visual/PROBE_LOG.md "## render-machine"):
+#: these three had no stamp, so a machine that built an earlier head kept
+#: them (the tiles de-light and the collection's DelightAmount and
+#: DelightBlueGate never arrived), and FLIGHTSIM_REBUILD_MATERIALS=
+#: MPC_FlightSimWorld failed "could not create": the collection is
+#: referenced, delete_asset refuses unattended, and create_asset cannot
+#: make an asset that still exists. So a stale world asset is UPDATED IN
+#: PLACE, never deleted: a material's graph is cleared
+#: (MaterialEditingLibrary.delete_all_material_expressions) and built again
+#: on the same object; the collection's parameters are merged (an existing
+#: parameter keeps its Id, which the materials reference it by). Same path,
+#: so no reference breaks and no redirect is registered (the storm lane's
+#: lesson: a renamed asset's metadata follows the redirect). Bump a number
+#: with every change to that asset's graph or parameter list.
+WORLD_GENERATIONS = {"MPC_FlightSimWorld": "2", "M_FlightSimTilesBeauty": "2",
+                     "M_FlightSimCloudLayers": "3", "M_FlightSimScatter": "1"}  # clouds 3: round-2 Perlin-Worley shader
+WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
+
+
+def world_stale(name):
+    """True when /Game/FlightSim/<name> exists but is not stamped with its
+    WORLD_GENERATIONS number: built by an older version of this script."""
+    if name not in WORLD_GENERATIONS:
+        return False
+    full = f"{PATH}/{name}"
+    if not unreal.EditorAssetLibrary.does_asset_exist(full):
+        return False
+    stamped = unreal.EditorAssetLibrary.get_metadata_tag(
+        unreal.EditorAssetLibrary.load_asset(full), WORLD_GENERATION_TAG)
+    return str(stamped) != WORLD_GENERATIONS[name]
+
+
+def world_update_wanted(name):
+    """A stale stamp (world_stale) or FLIGHTSIM_REBUILD_MATERIALS naming it."""
+    if world_stale(name):
+        print(f"MATERIAL-STALE: {PATH}/{name} (built by an older version of this script; "
+              f"this one is world generation {WORLD_GENERATIONS[name]})")
+        return True
+    return rebuild_requested(name)
+
+
 def _world_beauty_material(name):
     """/Game/FlightSim/<name> once (WORLD_BEAUTY_MATERIALS); None when it already
-    exists unless FLIGHTSIM_REBUILD_MATERIALS names it or it is stamped with
-    an older WORLD_GRAPH_GENERATIONS number."""
+    exists at its WORLD_GENERATIONS stamp and FLIGHTSIM_REBUILD_MATERIALS does
+    not name it. A stale or named one is updated IN PLACE: its graph is
+    cleared and the creator builds it again on the same asset (never
+    deleted: see WORLD_GENERATIONS)."""
     if name not in WORLD_BEAUTY_MATERIALS:
         raise RuntimeError(f"{name} is not one of WORLD_BEAUTY_MATERIALS")
     full = f"{PATH}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
-        if ((world_graph_stale(name) or rebuild_requested(name))
-                and unreal.EditorAssetLibrary.delete_asset(full)):
-            print(f"MATERIAL-REBUILT: {full} (deleted to be built again)")
-        else:
+        if not world_update_wanted(name):
             print(f"MATERIAL-EXISTS: {full}")
             return None
+        material = unreal.EditorAssetLibrary.load_asset(full)
+        if material is None or not isinstance(material, unreal.Material):
+            raise RuntimeError(f"{full} exists but is not a Material: move it aside by hand "
+                               f"(no editor open) and run again")
+        unreal.MaterialEditingLibrary.delete_all_material_expressions(material)
+        print(f"MATERIAL-UPDATED: {full} (graph cleared; built again in place, "
+              f"world generation {WORLD_GENERATIONS[name]})")
+        return material
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     material = tools.create_asset(name, PATH, unreal.Material, unreal.MaterialFactoryNew())
     if material is None:
@@ -2884,25 +2940,51 @@ def create_world_collection():
     """MPC_FlightSimWorld: the scalars WORLD_COLLECTION_SCALARS, at their defaults
     (dry, ungraded: the tiles look as Cesium's own material draws them)."""
     full = f"{PATH}/{WORLD_COLLECTION}"
-    if unreal.EditorAssetLibrary.does_asset_exist(full) and not rebuild_requested(WORLD_COLLECTION):
-        print(f"MATERIAL-EXISTS: {full}")
-        return
     if unreal.EditorAssetLibrary.does_asset_exist(full):
-        unreal.EditorAssetLibrary.delete_asset(full)
-    tools = unreal.AssetToolsHelpers.get_asset_tools()
-    collection = tools.create_asset(WORLD_COLLECTION, PATH, unreal.MaterialParameterCollection,
-                                    unreal.MaterialParameterCollectionFactoryNew())
-    if collection is None:
-        raise SystemExit(f"could not create {full}")
-    scalars = []
-    for name, default in WORLD_COLLECTION_SCALARS.items():
-        entry = unreal.CollectionScalarParameter()
-        entry.set_editor_property("parameter_name", name)
-        entry.set_editor_property("default_value", float(default))
-        scalars.append(entry)
-    collection.set_editor_property("scalar_parameters", scalars)
+        if not world_update_wanted(WORLD_COLLECTION):
+            print(f"MATERIAL-EXISTS: {full}")
+            return
+        # In place (WORLD_GENERATIONS): the collection is referenced by the
+        # world materials, so delete_asset refuses it unattended.
+        collection = unreal.EditorAssetLibrary.load_asset(full)
+        if collection is None:
+            raise RuntimeError(f"{full} exists but does not load")
+        verb = "MATERIAL-UPDATED"
+    else:
+        tools = unreal.AssetToolsHelpers.get_asset_tools()
+        collection = tools.create_asset(WORLD_COLLECTION, PATH, unreal.MaterialParameterCollection,
+                                        unreal.MaterialParameterCollectionFactoryNew())
+        if collection is None:
+            raise SystemExit(f"could not create {full}")
+        verb = "MATERIAL-CREATED"
+    collection.set_editor_property(
+        "scalar_parameters",
+        merged_collection_scalars(list(collection.get_editor_property("scalar_parameters")),
+                                  unreal.CollectionScalarParameter))
+    unreal.EditorAssetLibrary.set_metadata_tag(collection, WORLD_GENERATION_TAG,
+                                               WORLD_GENERATIONS[WORLD_COLLECTION])
     unreal.EditorAssetLibrary.save_asset(full)
-    print(f"MATERIAL-CREATED: {full}")
+    print(f"{verb}: {full} (world generation {WORLD_GENERATIONS[WORLD_COLLECTION]})")
+
+
+def merged_collection_scalars(existing, make_entry):
+    """WORLD_COLLECTION_SCALARS over the collection's own entries: an entry
+    already there keeps its object (and so its Id, which every material
+    reading it references) with its default set to the table's; a missing
+    one is appended; one the table does not name is kept, untouched, so no
+    older material loses a parameter it reads."""
+    by_name = {str(entry.get_editor_property("parameter_name")): entry for entry in existing}
+    merged = []
+    for name, default in WORLD_COLLECTION_SCALARS.items():
+        entry = by_name.pop(name, None)
+        if entry is None:
+            entry = make_entry()
+            entry.set_editor_property("parameter_name", name)
+        entry.set_editor_property("default_value", float(default))
+        merged.append(entry)
+    merged.extend(entry for entry in existing
+                  if str(entry.get_editor_property("parameter_name")) in by_name)
+    return merged
 
 
 def world_collection_parameter(material, lib, name, x, y):

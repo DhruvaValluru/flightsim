@@ -2,6 +2,7 @@
 
 #include "FlightSimBeautyLook.h"   // look-dev lane hook
 #include "FlightSimHeroLighting.h" // hero-lighting lane hook
+#include "FlightSimBeautyFallback.h" // no-lumen-and-machine lane: the look without Lumen
 
 #include "FlightSimAircraftFX.h"  // aircraft lane (visual overhaul V7)
 #include "FlightSimCameraDirector.h"
@@ -2513,6 +2514,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				GoogleTiles.HideOwnTerrain(World);
 			}
 		}
+		// no-lumen-and-machine lane (FlightSimBeautyFallback.cpp): beauty only, not pathtrace; BEFORE the
+		// world lane (its lightning pulse keeps the sky light's intensity as its base, so the fill must be in
+		// it) and before the sky-light capture-once. Lumen GI unsupported here: DFAO, sky fill, CSM; recorded either way.
+		if (bBeauty && !bPathTrace && !FFlightSimBeautyFallback::ApplyScene(VisualScene, *Params)) { return Fail(FFlightSimBeautyFallback::LastError()); }
 		// World lane hook (visual overhaul): atmosphere depth, clouds, tiles look, rain, scatter.
 		// -quality=measure never reaches it (Gate 6's renders stay byte-identical).
 		if (bBeauty && !WorldBeauty.Build(World, *Params, WorldCardRoot, Scenario.Aircraft, Scenario.GeoReferencing,
@@ -3472,6 +3477,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	}
 	// hero-lighting lane hook (FlightSimHeroLighting.cpp): beauty-only sun/sky light quality; a bad sidecar refuses.
 	if (bVisual && bBeauty && !FFlightSimHeroLighting::Apply(VisualScene, Capture, bPathTrace, *Params)) { return Fail(FFlightSimHeroLighting::LastError()); }
+	// no-lumen-and-machine lane: the per-view half (SSGI, SSR) when ApplyScene took the fallback.
+	if (bVisual && bBeauty && !bPathTrace) { FFlightSimBeautyFallback::ApplyCapture(Capture); }
 	AntiAliasingMethod = ReadCvar(TEXT("r.AntiAliasingMethod"));
 	VirtualShadowMaps = ReadCvar(TEXT("r.Shadow.Virtual.Enable"));
 	if (bHideAircraft)
@@ -7578,6 +7585,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			BeautyPath->SetBoolField(TEXT("temporal_aa_show_flag"), Capture->ShowFlags.TemporalAA != 0);
 			BeautyPath->SetBoolField(TEXT("path_tracing_show_flag"), Capture->ShowFlags.PathTracing != 0);
 			RenderSettings->SetObjectField(TEXT("beauty_path"), BeautyPath);
+			// no-lumen-and-machine lane: which GI / shadow path ran (null on measure and pathtrace).
+			if (TSharedPtr<FJsonObject> Fallback = FFlightSimBeautyFallback::Record())
+			{
+				RenderSettings->SetObjectField(TEXT("beauty_fallback"), Fallback);
+			}
 			// Integration: who owned each contested setting on this render and
 			// what the capture holds at the end (the order is the comment block
 			// at ApplyBeautyPostProcess). The lens values differ by look.

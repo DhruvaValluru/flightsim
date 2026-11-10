@@ -327,6 +327,11 @@ render.still_samples:
 render.pathtrace:
   sentence: "The path-traced render cannot run here: it needs the Windows render host with hardware ray tracing turned on for that render, and it renders stills, not clips (a clip would take hours)."
   hint: "Render the path-traced sheet on the Windows box as stills (pass -pathtrace-clip only to mean a path-traced clip), or ask for the beauty quality instead."
+# no-lumen-and-machine lane (FlightSimBeautyFallback.cpp): the beauty look
+# without Lumen is chosen by -beauty-fallback=auto|force|off.
+render.beauty_fallback_mode:
+  sentence: "The beauty render was asked for a lighting fallback it does not know: the choices are automatic, forced, or off."
+  hint: "Leave the fallback setting out (automatic), or say force to try the no-Lumen look, or off to keep the plain look."
 # shots-render fix pass (core/terrain/glo30.py standoff_start, core/scenario/
 # camera.py chase_unframed; raised by experiments/visual_contact_sheet.py):
 shot.subject_unframed:

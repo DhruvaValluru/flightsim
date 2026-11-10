@@ -46,7 +46,6 @@ caller hears `aircraft.mesh_import` with the step that failed. Nothing
 here ever substitutes a different airframe or a placeholder.
 """
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -99,75 +98,6 @@ def mesh_manifest_path(name: str) -> Path:
     return GENERATED / name / "mesh_manifest.json"
 
 
-def imported_parts(manifest: Dict) -> List[str]:
-    """Every mesh asset a manifest puts in the project: its ``parts`` (the
-    meshes the commandlet attaches and every measure frame draws) and the
-    beauty-only copies of ``beauty_parts`` (round 2, cockpit-airframe:
-    ``body_beauty``, swapped in on -quality=beauty only)."""
-    return list(manifest["parts"]) + [
-        row["part"] for row in (manifest.get("beauty_parts") or {}).values()]
-
-
-#: Written by scripts/ue_aircraft_materials.py write_import_record after
-#: an import of a manifest with ``beauty_parts`` (same names there, pinned
-#: by tests/test_cockpit_airframe.py): the manifest's sha256 and every
-#: imported mesh slot's material.
-IMPORT_RECORD_NAME = "import_record.json"
-IMPORT_RECORD_MAGIC = "flightsim-aircraft-import-record"
-
-
-def import_record_reason(manifest_path: Path) -> Optional[str]:
-    """Why a manifest with ``beauty_parts`` is not imported yet, or None.
-
-    Round 2 (cockpit-airframe lane). The render machine's first J-11 frames
-    (2026-11-09) drew a grey, untextured airframe: 7 slots on look
-    instances and one on WorldGridMaterial where the converted body has 25
-    MTL materials. The re-import had run in a render the harness reaped
-    for low memory, and every rule here is by mtime and file presence, so
-    an import cut short after the body's .uasset was saved counted as
-    done. The import script now writes a record only when it reaches the
-    end; a missing record, or one written for another manifest, means the
-    editor import must run again. Only manifests with ``beauty_parts``: no
-    other airframe is re-imported by this rule."""
-    manifest_path = Path(manifest_path)
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not manifest.get("beauty_parts"):
-        return None
-    record_path = manifest_path.parent / IMPORT_RECORD_NAME
-    try:
-        record = json.loads(record_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return f"no import record at {record_path} (the editor import never finished)"
-    digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-    if record.get("magic") != IMPORT_RECORD_MAGIC or record.get("manifest_sha256") != digest:
-        return (f"the import record {record_path.name} was written for another "
-                f"conversion of the mesh")
-    if record.get("unbound"):
-        # Imported again on the next render, and refused by name again
-        # (import_manifests), rather than drawn grey.
-        return (f"the last import left {len(record['unbound'])} mesh slot(s) without "
-                f"their MTL material")
-    return None
-
-
-def unbound_slots(manifest_path: Path) -> List[str]:
-    """The unbound slots of the import record written for THIS manifest
-    (empty when there is none, or it was written for another conversion)."""
-    manifest_path = Path(manifest_path)
-    record_path = manifest_path.parent / IMPORT_RECORD_NAME
-    try:
-        record = json.loads(record_path.read_text(encoding="utf-8"))
-        digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
-    except (OSError, ValueError):
-        return []
-    if record.get("magic") != IMPORT_RECORD_MAGIC or record.get("manifest_sha256") != digest:
-        return []
-    return [str(row) for row in record.get("unbound") or []]
-
-
 def missing_assets(manifest_path: Path) -> List[str]:
     """Which of a manifest's parts have no .uasset in the Unreal project.
 
@@ -179,7 +109,7 @@ def missing_assets(manifest_path: Path) -> List[str]:
     # /Game/Aircraft/<name> is ue/Content/Aircraft/<name> on disk.
     root = manifest["asset_path_root"].replace("/Game/", "", 1)
     content = REPO / "ue" / "Content"
-    return [f"{manifest['name']}/{part}" for part in imported_parts(manifest)
+    return [f"{manifest['name']}/{part}" for part in manifest["parts"]
             if not (content / root / f"{part}.uasset").is_file()]
 
 
@@ -198,7 +128,7 @@ def stale_assets(manifest_path: Path) -> List[str]:
     root = manifest["asset_path_root"].replace("/Game/", "", 1)
     content = REPO / "ue" / "Content"
     since = manifest_path.stat().st_mtime
-    return [f"{manifest['name']}/{part}" for part in imported_parts(manifest)
+    return [f"{manifest['name']}/{part}" for part in manifest["parts"]
             if (content / root / f"{part}.uasset").is_file()
             and (content / root / f"{part}.uasset").stat().st_mtime < since]
 
@@ -372,47 +302,73 @@ def is_imported(name: str) -> bool:
     and a stale manifest renders the real mesh in the wrong place."""
     manifest = mesh_manifest_path(name)
     return (manifest.is_file() and stale_manifest_reason(manifest) is None
-            and not missing_assets(manifest) and not stale_assets(manifest)
-            and import_record_reason(manifest) is None)
+            and not missing_assets(manifest) and not stale_assets(manifest))
+
+
+#: Every git call on a model source runs with these (render-machine finding,
+#: docs/visual/PROBE_LOG.md "## render-machine", 2026-11-09): a Windows
+#: machine whose global core.autocrlf is true checked the J11 source out with
+#: CRLF line endings, so 13 package_files pins (sha256 of the bytes on disk)
+#: failed aircraft.package_pin. The pins are of the committed bytes; the
+#: checkout must be byte-for-byte the blob, on every platform.
+GIT_BYTES = ("-c", "core.autocrlf=false", "-c", "core.eol=lf")
+
+
+def _git(source_dir: Path, *args: str) -> list:
+    """``git <GIT_BYTES> -C <source_dir> <args>``."""
+    return ["git", *GIT_BYTES, "-C", str(source_dir), *args]
+
+
+def _pin_line_endings(source_dir: Path, report: Report = print) -> bool:
+    """Store core.autocrlf=false in the source repo's own config (so a git
+    run by hand there keeps the bytes too). Returns True when it was not
+    already false: the working tree may hold converted files, and the caller
+    rewrites them from the index."""
+    current = subprocess.run(_git(source_dir, "config", "--local", "--get", "core.autocrlf"),
+                             capture_output=True, text=True, encoding="utf-8")
+    subprocess.run(_git(source_dir, "config", "--local", "core.autocrlf", "false"), check=True)
+    if current.returncode == 0 and current.stdout.strip().lower() == "false":
+        return False
+    report("source line endings pinned (core.autocrlf=false in its own config)")
+    return True
 
 
 def fetch_source(config: Dict, config_path: Path,
                  report: Report = print) -> Path:
-    """The model repo at the PINNED commit -- shallow, verified, idempotent."""
+    """The model repo at the PINNED commit -- shallow, verified, idempotent,
+    and byte-for-byte the committed blobs (GIT_BYTES)."""
     source_dir = (config_path.parent / config["source_dir"]).resolve()
     repo_url = config["license"]["repo"]
     commit = config["license"]["commit"]
     head = source_dir / ".git"
     if head.is_dir():
-        actual = subprocess.run(["git", "-C", str(source_dir), "rev-parse",
-                                 "HEAD"], capture_output=True, text=True)
+        actual = subprocess.run(_git(source_dir, "rev-parse", "HEAD"),
+                                capture_output=True, text=True, encoding="utf-8")
         if actual.returncode == 0 and actual.stdout.strip() == commit:
-            report(f"source already at {commit[:12]}")
+            if _pin_line_endings(source_dir, report):
+                # An earlier checkout under core.autocrlf=true: git's index
+                # says the files are clean, so only a fresh checkout from the
+                # index rewrites them with the committed bytes.
+                subprocess.run(_git(source_dir, "rm", "-r", "-q", "--cached", "."), check=True)
+                subprocess.run(_git(source_dir, "reset", "-q", "--hard", commit), check=True)
+                report(f"source at {commit[:12]} checked out again with the committed bytes")
+            else:
+                report(f"source already at {commit[:12]}")
             return source_dir
         report("source present but not at the pinned commit; re-fetching")
     source_dir.mkdir(parents=True, exist_ok=True)
     if not head.is_dir():
-        subprocess.run(["git", "init", "-q", str(source_dir)], check=True)
-        subprocess.run(["git", "-C", str(source_dir), "remote", "add",
-                        "origin", repo_url], check=True)
-    # The pinned bytes are the repository's own (package_pins: git blob sha1
-    # and sha256 of the file as committed). A machine whose global git says
-    # core.autocrlf=true checks text files out with CRLF, and every pin of a
-    # text file then fails (measured on the Windows render machine,
-    # 2026-11-09: 13 of the J-11's 29 pins). This checkout keeps LF.
-    subprocess.run(["git", "-C", str(source_dir), "config", "core.autocrlf",
-                    "false"], check=True)
+        subprocess.run(["git", *GIT_BYTES, "init", "-q", str(source_dir)], check=True)
+        subprocess.run(_git(source_dir, "remote", "add", "origin", repo_url), check=True)
+    _pin_line_endings(source_dir, report)
     report(f"fetching {repo_url} @ {commit[:12]} (shallow)")
-    fetched = subprocess.run(["git", "-C", str(source_dir), "fetch",
-                              "--depth", "1", "origin", commit])
+    fetched = subprocess.run(_git(source_dir, "fetch", "--depth", "1", "origin", commit))
     if fetched.returncode != 0:
         # A host that refuses arbitrary-SHA shallow fetches gets the full
         # history instead; the checkout below still pins the commit.
         report("shallow fetch refused; fetching full history")
-        subprocess.run(["git", "-C", str(source_dir), "fetch", "origin"],
-                       check=True)
-    subprocess.run(["git", "-C", str(source_dir), "checkout", "-q", commit],
-                   check=True)
+        subprocess.run(_git(source_dir, "fetch", "origin"), check=True)
+    subprocess.run(_git(source_dir, "checkout", "-q", commit), check=True)
     return source_dir
 
 
@@ -427,41 +383,10 @@ def verify_source_pins(config: Dict, source_dir: Path,
     try:
         rows = verify(config, source_dir)
     except PackagePinError as exc:
-        # A checkout made before fetch_source set core.autocrlf=false holds
-        # CRLF copies of the text files: rewrite the working tree from the
-        # index with LF once, then verify again. Anything still differing
-        # is a real mismatch.
-        if not _rewrite_checkout_lf(source_dir, report):
-            raise AircraftAssetError("aircraft.package_pin", exc.message) from exc
-        try:
-            rows = verify(config, source_dir)
-        except PackagePinError as again:
-            raise AircraftAssetError("aircraft.package_pin", again.message) from again
+        raise AircraftAssetError("aircraft.package_pin", exc.message) from exc
     if rows:
         report(f"{len(rows)} pinned package file(s) verified (git blob sha1 + sha256)")
     return len(rows)
-
-
-def _rewrite_checkout_lf(source_dir: Path, report: Report = print) -> bool:
-    """Set core.autocrlf=false on the source checkout and rewrite every
-    tracked file from the index (git checkout-index -f -a). True when it
-    ran; False when the source is not a git checkout or git failed."""
-    source_dir = Path(source_dir)
-    if not (source_dir / ".git").is_dir():
-        return False
-    current = subprocess.run(["git", "-C", str(source_dir), "config", "--get",
-                              "core.autocrlf"], capture_output=True, text=True)
-    if current.stdout.strip().lower() == "false":
-        return False
-    report("pins differ on a CRLF checkout; rewriting the source with LF line ends")
-    try:
-        subprocess.run(["git", "-C", str(source_dir), "config", "core.autocrlf",
-                        "false"], check=True)
-        subprocess.run(["git", "-C", str(source_dir), "checkout-index", "-f", "-a"],
-                       check=True)
-    except (OSError, subprocess.CalledProcessError):
-        return False
-    return True
 
 
 def convert(config_path: Path, report: Report = print) -> Path:
@@ -528,15 +453,6 @@ def import_manifests(manifests: List[Path], report: Report = print) -> None:
     missing: List[str] = []
     for manifest_path in manifests:
         missing += missing_assets(Path(manifest_path))
-        # Round 2: an import that left a mesh slot without its MTL material
-        # draws that part grey and untextured; refuse it by name.
-        unbound = unbound_slots(Path(manifest_path))
-        if unbound:
-            raise AircraftAssetError(
-                "aircraft.material_slots",
-                f"the {Path(manifest_path).parent.name} import left {len(unbound)} mesh "
-                f"slot(s) without their MTL material: {', '.join(unbound[:8])}"
-                + (" ..." if len(unbound) > 8 else ""))
     if missing:
         raise AircraftAssetError(
             "aircraft.mesh_import",
@@ -630,8 +546,7 @@ def provision_models(names: Iterable[str], report: Report = print,
             continue
         manifest = mesh_manifest_path(name)
         needs_editor = ((not manifest.is_file()) or bool(missing_assets(manifest))
-                        or bool(stale_assets(manifest))
-                        or import_record_reason(manifest) is not None)
+                        or bool(stale_assets(manifest)))
         if needs_editor and not _editor_present() and \
                 unavailable_reason(name) is None:
             report(f"the {name} model needs the Unreal editor to import "
@@ -689,6 +604,6 @@ def ensure_model(name: str, report: Report = print) -> Path:
                 f"pinned commit is fetched from the upstream model "
                 f"repository, so this step needs network access") from exc
         manifest = convert(config_path, report)
-    if missing_assets(manifest) or stale_assets(manifest) or import_record_reason(manifest):
+    if missing_assets(manifest) or stale_assets(manifest):
         import_manifests([manifest], report)
     return manifest

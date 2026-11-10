@@ -933,9 +933,40 @@ def measure_albedo_sun_invariance(high_dir: Path, low_dir: Path) -> LookClause:
         ALBEDO_MEASUREMENT)
 
 
+#: Render-machine finding (docs/visual/PROBE_LOG.md "## render-machine",
+#: 2026-11-09): without --look this harness graded the look-clause renders
+#: an EARLIER run had left in --out (runs/gate6 held 6 October ones, which
+#: FAILed three clauses on a pass that rendered none of them). A look render
+#: is graded only on a run that asked for the look controls; any found
+#: otherwise is named and left alone.
+STALE_LOOK_RULE = "gate6.stale_look_renders"
+
+
+def stale_look_renders(out: Path) -> List[str]:
+    """The LOOK_RUNS directories under ``out`` holding a render.json."""
+    return [name for name in LOOK_RUNS if (out / name / "render.json").is_file()]
+
+
+def ungraded_look_clauses(out: Path) -> List[LookClause]:
+    """The look clauses of a run that did not ask for --look: every one NOT
+    RUN with its measurement stated, whatever is under ``out``. Renders found
+    there are an earlier run's: each clause names them (STALE_LOOK_RULE) and
+    none is read."""
+    stale = stale_look_renders(out)
+    templates = look_clauses(out / ".no-look-renders")   # never exists: every clause NOT RUN
+    if not stale:
+        return templates   # nothing there: the usual NOT RUN lines, unchanged
+    reason = (f"{STALE_LOOK_RULE}: --look not given, so the look renders in "
+              f"{out} ({', '.join(stale)}) are an earlier run's and are not graded; "
+              f"pass --look (with --skip-render to grade them) or move them out")
+    return [LookClause(clause.name, clause.status, reason, clause.measurement)
+            for clause in templates]
+
+
 def look_clauses(out: Path) -> List[LookClause]:
     """Every Phase 2 look clause: measured when its renders exist under
-    ``out``, else NOT RUN with the measurement stated."""
+    ``out``, else NOT RUN with the measurement stated. Called only on a run
+    that asked for --look (ungraded_look_clauses otherwise)."""
     def rendered(*names: str) -> bool:
         return all((out / name / "render.json").is_file() for name in names)
 
@@ -1554,7 +1585,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("         the footage is the owner's, and nothing stands in for it.")
 
     print(f"\n{RULE}\n5. Phase 2 look clauses (NOT RUN without their control renders)\n{RULE}")
-    looks = look_clauses(out)
+    looks = look_clauses(out) if args.look else ungraded_look_clauses(out)
+    stale = [] if args.look else stale_look_renders(out)
+    if stale:
+        print(f"  REFUSED {STALE_LOOK_RULE}: {', '.join(stale)} under {out} were not "
+              f"rendered by this run (no --look); not graded")
     for clause in looks:
         print(clause.render())
 
