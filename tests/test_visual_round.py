@@ -45,3 +45,12 @@ def test_the_look_report_names_missing_keys(tmp_path):
     report = visual_round.look_report("r1", tmp_path / "runs")
     assert report["new_look_ran"] is False and "beauty_look" in report["look_keys_missing"]
     assert visual_round.look_report("nope", tmp_path / "runs") == {"render_json": False}
+
+
+def test_the_look_report_reads_the_per_camera_render_json(tmp_path):
+    """Round 1: renders write runs/webapp/<id>/frames/<camera>/render.json."""
+    camera = tmp_path / "runs" / "r2" / "frames" / "chase"
+    camera.mkdir(parents=True)
+    (camera / "render.json").write_text(json.dumps({k: {} for k in visual_round.LOOK_KEYS}), encoding="utf-8")
+    assert visual_round.look_report("r2", tmp_path / "runs") == {
+        "render_json": True, "look_keys_missing": [], "new_look_ran": True}

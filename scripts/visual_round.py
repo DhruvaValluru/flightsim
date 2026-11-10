@@ -48,11 +48,20 @@ def _keys(node, found: set) -> set:
 
 
 def look_report(run_id, run_root: Path = RUN_ROOT) -> dict:
-    """Which LOOK_KEYS the run's render.json carries, anywhere in it."""
-    render = run_root / str(run_id or "-") / "render.json"
-    if not render.is_file():
+    """Which LOOK_KEYS the run's render.json carries, anywhere in it.
+
+    A web-app run writes one render.json per camera, under
+    frames/<camera>/render.json (round 1 found the top-level path empty);
+    the run's own top-level render.json is read too if there is one. The keys
+    of every file found are pooled."""
+    run_dir = run_root / str(run_id or "-")
+    renders = ([run_dir / "render.json"] if (run_dir / "render.json").is_file() else []) + \
+        sorted(run_dir.glob("frames/*/render.json"))
+    if not renders:
         return {"render_json": False}
-    found = _keys(json.loads(render.read_text(encoding="utf-8")), set())
+    found: set = set()
+    for render in renders:
+        _keys(json.loads(render.read_text(encoding="utf-8")), found)
     missing = [k for k in LOOK_KEYS if k not in found]
     return {"render_json": True, "look_keys_missing": missing, "new_look_ran": not missing}
 
