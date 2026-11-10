@@ -134,6 +134,7 @@ from assets_pipeline.importer import COMPONENTS_MANIFEST_VERSION  # noqa: E402
 from assets_pipeline.obj_frame import (  # noqa: E402
     OBJ_FRAME, OBJ_FRAME_KEY, actor_to_obj, obj_winding,
 )
+from assets_pipeline.smooth_normals import flipped, vertex_normals  # noqa: E402
 from assets_pipeline.package_pins import (  # noqa: E402
     PackagePinError, verify as verify_package_pins,
 )
@@ -829,6 +830,82 @@ def _view_records(config: Dict, mesh_origin_cm) -> Dict[str, Dict]:
     return out
 
 
+#: The part a body's beauty-only copy is written as (round 2,
+#: cockpit-airframe lane). NOT in the manifest's ``parts``: the commandlet
+#: attaches every part it lists, so a listed copy would draw the body twice.
+BEAUTY_BODY_PART = "body_beauty"
+
+
+def _beauty_mesh_config(config: Dict) -> Optional[Dict]:
+    """The config's ``beauty_mesh`` block, or None (no beauty copy)."""
+    block = config.get("beauty_mesh")
+    if not block:
+        return None
+    if block.get("normals") != "crease":
+        raise ConvertError(f"beauty_mesh.normals {block.get('normals')!r} is not 'crease'")
+    return block
+
+
+def _write_beauty_mesh(rows: List[tuple], block: Dict, body_writer: "ObjWriter",
+                       out_dir: Path) -> Dict:
+    """``body_beauty.obj``: the body's triangles, same positions, same UVs,
+    same materials in the same first-use order, with vertex normals by the
+    .ac crease angle (assets_pipeline/smooth_normals.py) and, when
+    ``two_sided``, a back face for every AC3D two-sided surface (SURF 0x20:
+    FlightGear draws both sides; the measured body draws one, so from the
+    pilot's eye the canopy frame and the cockpit tub, seen from inside,
+    are culled away). Beauty only: the commandlet swaps it onto the body
+    component on a -quality=beauty render (FlightSimAircraftFX.cpp
+    ApplyMaterials), so the label silhouette, the depth and every
+    -quality=measure frame are those of ``body``."""
+    triangles = [tuple(position for position, _ in row[1]) for row in rows]
+    normals = vertex_normals_actor(triangles, [r[2] for r in rows], [r[3] for r in rows],
+                                   [r[4] for r in rows])
+    writer = ObjWriter()
+    # The body's materials in the body's order, so the slots line up.
+    writer.materials = dict(body_writer.materials)
+    for key in body_writer.faces:
+        writer.faces[key] = []
+    two_sided = bool(block.get("two_sided"))
+    back_faces = 0
+    for (key, tri, _, _, _, sided), corner_normals in zip(rows, normals):
+        writer.add_triangle(key, tri, corner_normals)
+        if two_sided and sided:
+            writer.add_triangle(key, [tri[0], tri[2], tri[1]],
+                                [flipped(corner_normals[0]), flipped(corner_normals[2]),
+                                 flipped(corner_normals[1])])
+            back_faces += 1
+    writer.write(out_dir / f"{BEAUTY_BODY_PART}.obj")
+    smooth = sum(1 for r in rows if r[3])
+    return {
+        "body": {
+            "part": BEAUTY_BODY_PART,
+            "triangles": len(rows) + back_faces,
+            "front_triangles": len(rows),
+            "back_faces": back_faces,
+            "smooth_triangles": smooth,
+            "flat_triangles": len(rows) - smooth,
+            "normals": "per corner, by each .ac object's crease angle over its smooth "
+                       "(SURF 0x10) faces; flat faces keep their face normal",
+            "drawn_in": "beauty only: swapped onto the body component on -quality=beauty "
+                        "(FlightSimAircraftFX ApplyMaterials); same positions as body, so "
+                        "mask, depth and every measure frame are body's",
+            "source": block.get("source", ""),
+        },
+    }
+
+
+def vertex_normals_actor(triangles, groups, smooth, crease):
+    """:func:`assets_pipeline.smooth_normals.vertex_normals` for triangles
+    in the UE actor frame (cm, left-handed) wound as ObjWriter stores them:
+    computed in the OBJ's right-handed frame on the WRITTEN winding (the
+    normal Interchange reads), returned per stored corner in the actor
+    frame, which ObjWriter.write maps back with actor_to_obj."""
+    obj_tris = [tuple(actor_to_obj(p) for p in obj_winding(tri)) for tri in triangles]
+    obj_normals = vertex_normals(obj_tris, groups, smooth, crease, unit_m=0.01)
+    return [tuple(actor_to_obj(n) for n in obj_winding(corners)) for corners in obj_normals]
+
+
 #: Prefix of a textured material's name. NOT "tex_": Interchange names the
 #: texture asset of ``map_Kd wings_texture.png`` "TEX_wings_texture", UE
 #: asset names are case-insensitive, so a material "tex_wings_texture"
@@ -875,6 +952,7 @@ class ObjWriter:
     def __init__(self) -> None:
         self.vertices: List[Tuple[float, float, float]] = []
         self.uvs: List[Tuple[float, float]] = []
+        self.normals: List[Tuple[float, float, float]] = []
         self.faces: Dict[str, List[Tuple[Tuple[int, int], ...]]] = defaultdict(list)
         self.materials: Dict[str, Dict] = {}
 
@@ -889,12 +967,19 @@ class ObjWriter:
             }
         return key
 
-    def add_triangle(self, key: str, tri) -> None:
+    def add_triangle(self, key: str, tri, normals=None) -> None:
+        """``normals``: one unit normal per corner in the UE actor frame
+        (the beauty mesh only); a writer given none writes no ``vn``, so
+        the measured meshes' OBJs are byte-identical to before."""
         indices = []
-        for vertex, uv in tri:
+        for corner, (vertex, uv) in enumerate(tri):
             self.vertices.append(vertex)
             self.uvs.append(uv)
-            indices.append((len(self.vertices), len(self.uvs)))
+            if normals is not None:
+                self.normals.append(normals[corner])
+                indices.append((len(self.vertices), len(self.uvs), len(self.normals)))
+            else:
+                indices.append((len(self.vertices), len(self.uvs)))
         self.faces[key].append(tuple(indices))
 
     def write(self, obj_path: Path, texture_dir_relative: str = "") -> None:
@@ -905,11 +990,13 @@ class ObjWriter:
                 out.write("v %.6f %.6f %.6f\n" % actor_to_obj(v))
             for uv in self.uvs:
                 out.write("vt %.6f %.6f\n" % uv)
+            for n in self.normals:
+                out.write("vn %.6f %.6f %.6f\n" % actor_to_obj(n))
             for key, faces in self.faces.items():
                 out.write(f"usemtl {key}\n")
                 for face in faces:
-                    out.write("f " + " ".join(f"{vi}/{ti}"
-                                              for vi, ti in obj_winding(face)) + "\n")
+                    out.write("f " + " ".join("/".join(str(i) for i in corner)
+                                              for corner in obj_winding(face)) + "\n")
         with mtl_path.open("w") as out:
             for key, material in self.materials.items():
                 out.write(f"newmtl {key}\n")
@@ -1013,6 +1100,12 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     extents_interior = MeshExtents()
     interior_rows: List[Dict] = []
     material_sources: Dict[str, Dict] = {}
+    # Round 2 (cockpit-airframe): the body's triangles again, for the
+    # beauty-only smooth / two-sided copy of the body (_write_beauty_mesh).
+    # None when the config asks for no beauty mesh: nothing else changes.
+    beauty = _beauty_mesh_config(config)
+    beauty_rows: Optional[List[tuple]] = [] if beauty is not None else None
+    object_serial = 0
 
     for part in config["parts"]:
         ac_path = source_dir / part["file"]
@@ -1033,6 +1126,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         for obj, verts in world_vertices(model):
             if _matches(obj.name, exclude):
                 continue
+            object_serial += 1
             target = "body"
             if component_stem is not None:
                 target = component_stem
@@ -1117,6 +1211,9 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                         ]
                     writer.add_triangle(key, tri)
                     counts[target] += 1
+                    if beauty_rows is not None and target == "body":
+                        beauty_rows.append((key, tri, object_serial, surf.smooth,
+                                            obj.crease, surf.two_sided))
         if interior:
             interior_rows.append({
                 "file": part["file"], "offset_m": list(offset), "pitch_deg": pitch_deg,
@@ -1181,6 +1278,9 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         manifest_surfaces.append(record)
 
     writers["body"].write(out_dir / "body.obj")
+    beauty_record = None
+    if beauty_rows is not None:
+        beauty_record = _write_beauty_mesh(beauty_rows, beauty, writers["body"], out_dir)
     # ONE components list: the payload parts' rows, then the gear row.
     payload_rows = _component_records(
         component_parts, airframe, writers, counts, component_extents,
@@ -1249,6 +1349,8 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         manifest["interior"] = interior_record
     if config.get("views"):
         manifest["views"] = _view_records(config, mesh_origin_cm)
+    if beauty_record is not None:
+        manifest["beauty_parts"] = beauty_record
     if material_sources:
         (out_dir / MATERIAL_SOURCES_NAME).write_text(
             json.dumps(_material_sources_out(material_sources), indent=1, sort_keys=True),

@@ -70,6 +70,12 @@ class ACSurface:
         return (self.flags & 0x0F) == 0
 
     @property
+    def smooth(self) -> bool:
+        """SURF flag 0x10: smooth shaded (vertex normals shared across the
+        object's ``crease`` angle); clear means flat (one face normal)."""
+        return bool(self.flags & 0x10)
+
+    @property
     def two_sided(self) -> bool:
         return bool(self.flags & 0x20)
 
@@ -82,6 +88,10 @@ class ACObject:
     #: 3x3 row-major rotation, applied to this object's and children's vertices.
     rot: Optional[Tuple[float, ...]] = None
     loc: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    #: The object's ``crease`` angle (degrees): the largest angle between
+    #: two smooth-shaded faces that still share a vertex normal. None when
+    #: the file states none (the reader then uses its own default).
+    crease: Optional[float] = None
     vertices: List[Tuple[float, float, float]] = field(default_factory=list)
     surfaces: List[ACSurface] = field(default_factory=list)
     kids: List["ACObject"] = field(default_factory=list)
@@ -177,6 +187,8 @@ def parse_ac(path) -> ACModel:
                 obj.rot = tuple(float(t) for t in tokens[1:10])
             elif key == "loc":
                 obj.loc = (float(tokens[1]), float(tokens[2]), float(tokens[3]))
+            elif key == "crease" and len(tokens) > 1:
+                obj.crease = float(tokens[1])
             elif key == "data":
                 # Raw data block: the next line(s) hold that many bytes.
                 # CRLF-authored files (measured: the FGMEMBERS p51d) count
@@ -231,7 +243,7 @@ def parse_ac(path) -> ACModel:
                         return obj
                     obj.kids.append(parse_object())
                 return obj
-            # Unknown keys (crease, texrep, texoff, subdiv, hidden, locked,
+            # Unknown keys (texrep, texoff, subdiv, hidden, locked,
             # folded, url, shader...) carry no geometry; skipped.
 
     while index < len(lines) and lines[index].startswith("MATERIAL"):
