@@ -843,6 +843,10 @@ def _beauty_mesh_config(config: Dict) -> Optional[Dict]:
         return None
     if block.get("normals") != "crease":
         raise ConvertError(f"beauty_mesh.normals {block.get('normals')!r} is not 'crease'")
+    flip = block.get("flip_objects", [])
+    if not isinstance(flip, list) or not all(isinstance(p, str) and p for p in flip):
+        raise ConvertError(f"beauty_mesh.flip_objects {flip!r} is not a list of object-name "
+                           f"patterns")
     return block
 
 
@@ -857,7 +861,17 @@ def _write_beauty_mesh(rows: List[tuple], block: Dict, body_writer: "ObjWriter",
     are culled away). Beauty only: the commandlet swaps it onto the body
     component on a -quality=beauty render (FlightSimAircraftFX.cpp
     ApplyMaterials), so the label silhouette, the depth and every
-    -quality=measure frame are those of ``body``."""
+    -quality=measure frame are those of ``body``.
+
+    ``flip_objects`` (full-match patterns over the .ac object names): those
+    objects' triangles are written facing the other way, with no back face.
+    For an inner glass shell modelled facing the cabin (the c172p's
+    glas_interior, 3 mm inside the windshield; round 1 web scene 12,
+    2026-11-10): every aircraft glass slot draws the OPAQUE M_AircraftGlass
+    on a beauty render, so a shell facing the cabin is a dark slab across
+    the cockpit view. Flipped it faces out, is culled from the pilot's eye
+    and sits behind the windshield's own glass from outside; same
+    positions, same slots, so the silhouette and the slot match hold."""
     triangles = [tuple(position for position, _ in row[1]) for row in rows]
     normals = vertex_normals_actor(triangles, [r[2] for r in rows], [r[3] for r in rows],
                                    [r[4] for r in rows])
@@ -867,8 +881,18 @@ def _write_beauty_mesh(rows: List[tuple], block: Dict, body_writer: "ObjWriter",
     for key in body_writer.faces:
         writer.faces[key] = []
     two_sided = bool(block.get("two_sided"))
+    flip_patterns = list(block.get("flip_objects", []))
     back_faces = 0
-    for (key, tri, _, _, _, sided), corner_normals in zip(rows, normals):
+    flipped_faces = 0
+    for row, corner_normals in zip(rows, normals):
+        key, tri, sided = row[0], row[1], row[5]
+        name = row[6] if len(row) > 6 else ""
+        if flip_patterns and _matches(name, flip_patterns):
+            writer.add_triangle(key, [tri[0], tri[2], tri[1]],
+                                [flipped(corner_normals[0]), flipped(corner_normals[2]),
+                                 flipped(corner_normals[1])])
+            flipped_faces += 1
+            continue
         writer.add_triangle(key, tri, corner_normals)
         if two_sided and sided:
             writer.add_triangle(key, [tri[0], tri[2], tri[1]],
@@ -883,6 +907,7 @@ def _write_beauty_mesh(rows: List[tuple], block: Dict, body_writer: "ObjWriter",
             "triangles": len(rows) + back_faces,
             "front_triangles": len(rows),
             "back_faces": back_faces,
+            "flipped_faces": flipped_faces,
             "smooth_triangles": smooth,
             "flat_triangles": len(rows) - smooth,
             "normals": "per corner, by each .ac object's crease angle over its smooth "
@@ -1213,7 +1238,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                     counts[target] += 1
                     if beauty_rows is not None and target == "body":
                         beauty_rows.append((key, tri, object_serial, surf.smooth,
-                                            obj.crease, surf.two_sided))
+                                            obj.crease, surf.two_sided, obj.name))
         if interior:
             interior_rows.append({
                 "file": part["file"], "offset_m": list(offset), "pitch_deg": pitch_deg,

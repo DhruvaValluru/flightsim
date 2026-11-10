@@ -396,6 +396,25 @@ def import_missing_textures(asset_root, mtl_dir, say=print):
     return problems
 
 
+def _sibling_parent(asset_root, mtl_names):
+    """The parent of an MTL material instance Interchange did make under
+    ``asset_root``, or None: the fallback when INTERCHANGE_OBJ_PARENT (what
+    the B747's imported instances measured, 2026-10-07) does not load."""
+    import unreal
+
+    assets = unreal.EditorAssetLibrary
+    for name in sorted(asset_object_name(n) for n in mtl_names):
+        path = f"{asset_root}/{name}"
+        if not assets.does_asset_exist(path):
+            continue
+        material = assets.load_asset(path)
+        if isinstance(material, unreal.MaterialInstanceConstant):
+            parent = material.get_editor_property("parent")
+            if parent is not None:
+                return parent
+    return None
+
+
 def bind_slots(asset_root, mtl_dir, parts, say=print):
     """:func:`plan_slot_bindings` applied to the imported meshes ``parts``:
     each such slot gets the material asset of its name, created as an
@@ -406,7 +425,8 @@ def bind_slots(asset_root, mtl_dir, parts, say=print):
     assets = unreal.EditorAssetLibrary
     lib = unreal.MaterialEditingLibrary
     tools = unreal.AssetToolsHelpers.get_asset_tools()
-    rows = plan_slot_bindings(_mesh_slot_rows(asset_root, parts), read_mtl_dir(mtl_dir).keys())
+    mtl_names = list(read_mtl_dir(mtl_dir).keys())
+    rows = plan_slot_bindings(_mesh_slot_rows(asset_root, parts), mtl_names)
     bound, created, problems = 0, 0, []
     parent = None
     touched = set()
@@ -415,7 +435,8 @@ def bind_slots(asset_root, mtl_dir, parts, say=print):
         material = assets.load_asset(path) if assets.does_asset_exist(path) else None
         if material is None:
             if parent is None:
-                parent = unreal.load_asset(INTERCHANGE_OBJ_PARENT)
+                parent = unreal.load_asset(INTERCHANGE_OBJ_PARENT) \
+                    or _sibling_parent(asset_root, mtl_names)
             if parent is None:
                 problems.append(f"{path}: absent, and {INTERCHANGE_OBJ_PARENT} did not load")
                 continue

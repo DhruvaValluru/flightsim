@@ -121,14 +121,97 @@ def test_the_beauty_body_keeps_positions_slots_and_adds_back_faces(tmp_path):
         (tmp_path / "body.mtl").read_text(encoding="utf-8")
 
 
-def test_the_j11_config_asks_for_the_beauty_body_and_no_other_airframe_does():
+def test_the_j11_and_c172p_configs_ask_for_the_beauty_body_and_no_other_airframe_does():
     for path in sorted((ROOT / "assets/aircraft_config").glob("*.json")):
         config = json.loads(path.read_text(encoding="utf-8"))
         if path.stem == "J11":
             assert config["beauty_mesh"] == {**config["beauty_mesh"], "normals": "crease",
                                              "two_sided": True}
+        elif path.stem == "c172p":
+            # Round 1 web scene 12: the inner glass shells, flipped; nothing two-sided.
+            assert config["beauty_mesh"] == {**config["beauty_mesh"], "normals": "crease",
+                                             "two_sided": False}
+            assert "glas_interior" in config["beauty_mesh"]["flip_objects"]
         else:
             assert "beauty_mesh" not in config, path.name
+
+
+def test_flip_objects_face_the_other_way_with_no_back_face(tmp_path):
+    from assets_pipeline.convert import BEAUTY_BODY_PART, ObjWriter, _write_beauty_mesh
+
+    body = ObjWriter()
+    tri = [((0.0, 0.0, 0.0), (0, 0)), ((0.0, 100.0, 0.0), (1, 0)), ((100.0, 0.0, 0.0), (0, 1))]
+    key = body.material_key("glass-alpha.png", (1.0, 1.0, 1.0), 0.66)
+    rows = []
+    for serial, name in ((1, "glas_interior"), (2, "Panel_0")):
+        body.add_triangle(key, tri)
+        rows.append((key, tri, serial, True, 30.0, True, name))
+    body.write(tmp_path / "body.obj")
+    record = _write_beauty_mesh(rows, {"normals": "crease", "two_sided": True,
+                                       "flip_objects": ["glas_interior"]}, body, tmp_path)
+    # The flipped shell: no back face; the other two-sided surface keeps its back face.
+    assert record["body"]["flipped_faces"] == 1 and record["body"]["back_faces"] == 1
+    assert record["body"]["triangles"] == 3
+    beauty = (tmp_path / f"{BEAUTY_BODY_PART}.obj").read_text(encoding="utf-8")
+    vs = [tuple(map(float, l.split()[1:])) for l in beauty.splitlines() if l.startswith("v ")]
+    vns = [tuple(map(float, l.split()[1:])) for l in beauty.splitlines() if l.startswith("vn ")]
+    faces = [[tuple(int(i) for i in c.split("/")) for c in l.split()[1:]]
+             for l in beauty.splitlines() if l.startswith("f ")]
+
+    def winding_normal(face):
+        a, b, c = (vs[corner[0] - 1] for corner in face)
+        u = [b[i] - a[i] for i in range(3)]
+        w = [c[i] - a[i] for i in range(3)]
+        return (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
+
+    flipped_face, kept_face = faces[0], faces[1]
+    # Same positions, opposite winding, and the corner normals turned with it.
+    assert sorted(vs[c[0] - 1] for c in flipped_face) == sorted(vs[c[0] - 1] for c in kept_face)
+    assert _dot(winding_normal(flipped_face), winding_normal(kept_face)) < 0
+    assert _dot(vns[flipped_face[0][2] - 1], vns[kept_face[0][2] - 1]) < 0
+    # One slot, as the measured body has.
+    usemtl = lambda text: [l.split()[1] for l in text.splitlines() if l.startswith("usemtl")]
+    assert usemtl(beauty) == usemtl((tmp_path / "body.obj").read_text(encoding="utf-8"))
+
+
+def test_flip_objects_must_be_name_patterns():
+    from assets_pipeline.convert import ConvertError, _beauty_mesh_config
+
+    assert _beauty_mesh_config({"beauty_mesh": {"normals": "crease", "flip_objects": ["a.*"]}})
+    with pytest.raises(ConvertError, match="flip_objects"):
+        _beauty_mesh_config({"beauty_mesh": {"normals": "crease", "flip_objects": "glas"}})
+
+
+def test_the_c172p_cockpit_camera_is_at_its_model_s_left_seat_eye(monkeypatch, tmp_path):
+    """Round 1 web scene 12: the FDM EYEPOINT (y 0) plus COCKPIT_EYE_NUDGE_M
+    put the c172p camera in the right seat, 0.25 m ahead of the modelled
+    pilot's eye (c172p-views.xml view 0, now the config's views.pilot_eye)."""
+    import core.scenario.camera as camera
+
+    monkeypatch.setattr(camera, "_COCKPIT_CACHE", {})
+    monkeypatch.setattr(camera, "_COCKPIT_BASIS", {})
+    monkeypatch.setattr(camera, "_MESH_GENERATED_DIR", tmp_path)
+    config = json.loads((ROOT / "assets/aircraft_config/c172p.json").read_text(encoding="utf-8"))
+    assert config["views"]["pilot_eye"]["model_m"] == [0.36, -0.21, 0.273]
+    # No manifest: the model origin is taken at the FDM's VRP (c172p.xml 42.6, 0, 38.5 in).
+    vrp_actor = (-42.6 * 0.0254, 0.0, 38.5 * 0.0254)
+    cg_actor = (-41.0 * 0.0254, 0.0, 36.5 * 0.0254)
+    no_manifest = camera.derive_cockpit_offset("c172p")
+    assert no_manifest == pytest.approx(
+        (-0.36 + vrp_actor[0] - cg_actor[0], -0.21, 0.273 + vrp_actor[2] - cg_actor[2]
+         + camera.PILOT_EYE_NUDGE_M[2]), abs=1e-3)
+    assert "VRP" in camera.cockpit_offset_basis("c172p")
+    # With the converted manifest (the measured origin, -118.309, 0, 97.422 cm
+    # from the pinned c172-common.ac): the eye the convert writes.
+    monkeypatch.setattr(camera, "_COCKPIT_CACHE", {})
+    (tmp_path / "c172p").mkdir()
+    (tmp_path / "c172p" / "mesh_manifest.json").write_text(json.dumps(
+        {"views": {"pilot_eye": {"actor_cm": [-154.31, -21.0, 124.72]}}}), encoding="utf-8")
+    offset = camera.derive_cockpit_offset("c172p")
+    assert offset == pytest.approx((-0.502, -0.21, 0.35), abs=2e-3)
+    assert "mesh manifest" in camera.cockpit_offset_basis("c172p")
+    # The left seat, aft of the round-1 station (-0.248, +0.3, +0.392).
+    assert offset[1] < 0 and offset[0] < -0.248 - 0.2
 
 
 # -- import record and slots --------------------------------------------------
