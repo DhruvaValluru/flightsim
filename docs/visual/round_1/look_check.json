@@ -1,0 +1,167 @@
+{
+ "note": "visual_round.py looks for runs/webapp/<id>/render.json; the renders write frames/<camera>/render.json, so its render_json is false. This file is the same LOOK_KEYS check on the real path.",
+ "look_keys": [
+  "beauty_look",
+  "beauty_path",
+  "world_beauty",
+  "aircraft_look",
+  "hero_lighting",
+  "pixel_moving_effects"
+ ],
+ "runs": [
+  {
+   "number": 1,
+   "outcome": "done",
+   "run_id": "938abd3218f4",
+   "render_json": "runs/webapp/938abd3218f4/frames/chase/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 2,
+   "outcome": "done",
+   "run_id": "7787de2682ac",
+   "render_json": "runs/webapp/7787de2682ac/frames/chase/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 3,
+   "outcome": "done",
+   "run_id": "52283b919a6d",
+   "render_json": "runs/webapp/52283b919a6d/frames/chase/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 4,
+   "outcome": "done",
+   "run_id": "14affdb8f273",
+   "render_json": "runs/webapp/14affdb8f273/frames/chase/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 5,
+   "outcome": "done",
+   "run_id": "df63daa300db",
+   "render_json": "runs/webapp/df63daa300db/frames/chase/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 6,
+   "outcome": "done",
+   "run_id": "91a3404efafe",
+   "render_json": "runs/webapp/91a3404efafe/frames/wingman/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 7,
+   "outcome": "done",
+   "run_id": "cfbe6374c0ce",
+   "render_json": "runs/webapp/cfbe6374c0ce/frames/tower/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 8,
+   "outcome": "done",
+   "run_id": "9f09bb48b9bf",
+   "render_json": "runs/webapp/9f09bb48b9bf/frames/chase/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 9,
+   "outcome": "done",
+   "run_id": "1509ab4cb98d",
+   "render_json": "runs/webapp/1509ab4cb98d/frames/chase/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 10,
+   "outcome": "done",
+   "run_id": "63965f57e98d",
+   "render_json": "runs/webapp/63965f57e98d/frames/chase/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 11,
+   "outcome": "refused",
+   "run_id": null
+  },
+  {
+   "number": 12,
+   "outcome": "done",
+   "run_id": "b0c5643b5432",
+   "render_json": "runs/webapp/b0c5643b5432/frames/cockpit/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 13,
+   "outcome": "done",
+   "run_id": "deffe98c2c2b",
+   "render_json": "runs/webapp/deffe98c2c2b/frames/chase/render.json",
+   "look_keys_missing": [],
+   "new_look_ran": true,
+   "beauty_look": true,
+   "beauty_fallback_present": true,
+   "render_quality": "beauty",
+   "rhi": "D3D11"
+  },
+  {
+   "number": 14,
+   "outcome": "refused",
+   "run_id": null
+  }
+ ]
+}
