@@ -48,6 +48,13 @@ public:
 	static void RecordExposure(FString& ExposureMode, FString& ExposureSource,
 	                           double& AppliedEv100, bool& bAppliedEv100);
 
+	// Round 2: whether the commandlet meters the beauty frame once before
+	// frame 0 (its storm-meter loop), and to what 90th-percentile sRGB luma.
+	// True only when this look owns the exposure AND the sidecar's meter row
+	// says a deck, or the platform has no Lumen GI. Trigger: "deck" or
+	// "no_lumen_gi". Never true without a sidecar (Gate 6 beauty, measure).
+	static bool ExposureMeter(double& TargetP90, FString& Trigger);
+
 	// render.json "beauty_look", or null when no sidecar was applied (the
 	// manifest then has no such key, as before this lane).
 	static TSharedPtr<FJsonObject> Record();

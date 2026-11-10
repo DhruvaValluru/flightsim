@@ -843,6 +843,35 @@ ss_check "supersample: FParse::Value int32" "Core/Public/Misc/Parse.h" "static C
 ss_check "supersample: TArray SetNumUninitialized" "Core/Public/Containers/Array.h" "void SetNumUninitialized(SizeType NewNum"
 # -- supersample lane end ---------------------------------------------------
 
+# -- exposure-storm (visual overhaul round 2, 2026-11-09) ---- BEGIN exposure-storm --
+# FlightSimBeautyLook.cpp's one exposure owner over the -sky= plan's camera,
+# the exposure meter's GI-path detection, and the engine behaviour the
+# breathing fix (FlightSimHeroLighting.cpp, light-shaft occlusion off) rests
+# on. Each pattern is a fixed string grepped in the UE 5.7.4 source when written.
+es_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
+    local f="$UE_ROOT/Engine/Source/Runtime/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- the exposure-storm lane needs updating"
+    fi
+}
+es_check "exposure: DoesPlatformSupportLumenGI" "RenderCore/Public/RenderUtils.h" "extern RENDERCORE_API bool DoesPlatformSupportLumenGI(EShaderPlatform Platform, bool bSkipProjectCheck = false);"
+es_check "exposure: GMaxRHIShaderPlatform" "RHI/Public/RHIShaderPlatform.h" "extern RHI_API EShaderPlatform GMaxRHIShaderPlatform;"
+es_check "exposure: LexToString(EShaderPlatform)" "RHI/Public/RHIStrings.h" "RHI_API FString LexToString(EShaderPlatform Platform, bool bError = true);"
+es_check "exposure: Lumen.Supported.SM5 read" "RenderCore/Private/RenderUtils.cpp" "FindConsoleVariable(TEXT(\"r.Lumen.Supported.SM5\"))"
+es_check "exposure: CameraShutterSpeed" "Engine/Classes/Engine/Scene.h" "float CameraShutterSpeed;"
+es_check "exposure: CameraISO" "Engine/Classes/Engine/Scene.h" "float CameraISO;"
+es_check "exposure: DepthOfFieldFstop" "Engine/Classes/Engine/Scene.h" "float DepthOfFieldFstop;"
+es_check "exposure: AutoExposureBias" "Engine/Classes/Engine/Scene.h" "float AutoExposureBias;"
+es_check "exposure: Json TryGetBoolField" "Json/Public/Dom/JsonObject.h" "JSON_API bool TryGetBoolField(FStringView FieldName, bool& OutBool) const;"
+es_check "exposure: local exposure highlight default 1" "Engine/Private/Scene.cpp" "LocalExposureHighlightContrastScale = 1.0f;"
+es_check "breathing: shafts run whenever the sun is ahead" "Renderer/Private/LightShaftRendering.cpp" "return GetLightScreenPosition(View, LightSceneProxy).W > 0.0f;"
+es_check "breathing: fog reads the shaft occlusion" "Renderer/Private/FogRendering.cpp" "PassParameters->PS.OcclusionTexture = LightShaftOcclusionTexture"
+# ------------------------------------------------------ END exposure-storm --
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'
