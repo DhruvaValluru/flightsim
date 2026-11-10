@@ -477,6 +477,131 @@ def cloud_capped_top_m(shape: str, base_m: float, top_m: float, stated: bool) ->
     return base_m + cap
 
 
+# -- visual round 5, lane L3 (2026-11-10): the distant 2D cloud sheet -----------------------
+# Round 3's frames (#03, #06, #09, #13) drew thin, streaky volumetric clouds
+# that stopped a few tens of kilometres out and an EMPTY horizon. UE 5.7 still
+# ships /Engine/EngineSky/BP_Sky_Sphere with its panning-cloud materials
+# (M_Sky_Panning_Clouds, M_Sky_Panning_Clouds2, T_Sky_Clouds_M), but a sky sphere
+# covers the SkyAtmosphere, so the far deck is OUR sheet: one large disc drooping
+# with the earth's curvature at the cloud layer's altitude, an unlit translucent
+# material (assets/shaders/world/distant_clouds.hlsl) drawing the SAME
+# Perlin-Worley shape as the volumetric layer at its mid-altitude slice, with
+# cheap fake lighting. No depth write, no custom depth, hidden on every label
+# capture (BeautyOnlyActors), zero march cost. On the constrained GPU the
+# volumetric march's TracingMaxDistance shrinks to the near field where the
+# sheet takes over (distant_tracing_max_km): the engine's sample count is
+# SampleCountMax x saturate(path / r.VolumetricCloud.DistanceToSampleMaxCount),
+# non-decreasing in the path, so a shorter trace never adds a sample and only
+# shortens the step. The C++ twin is FlightSimClouds.cpp's pure block
+# (DistantSheet*, DistantLook). UNCALIBRATED: set by probe render on the render
+# machine (every number).
+
+#: The disc: radius, tessellation (rings densify towards the centre: ring i at
+#: radius x (i / rings)^2), the earth's radius for the droop.
+DISTANT_RADIUS_KM = 300.0
+DISTANT_RINGS = 48
+DISTANT_SEGMENTS = 96
+DISTANT_EARTH_RADIUS_KM = 6371.0
+#: The hand-over: the sheet fades in over DISTANT_FADE_KM ending at the volumetric
+#: march's trace distance; on the constrained GPU, with the sheet drawn, that
+#: trace shrinks to DISTANT_NEAR_FIELD_KM (never above the class's own row).
+DISTANT_FADE_KM = 8.0
+DISTANT_NEAR_FIELD_KM = 32.0
+#: The sheet is off with the camera inside the layer's slab and fades in over
+#: this many metres outside it (the volumetric layer draws the inside).
+DISTANT_INSIDE_RAMP_M = 200.0
+#: The fake lighting's constants (the material's scalar parameters). UNCALIBRATED.
+DISTANT_LOOK: Dict[str, float] = {
+    "RimFadeShare": 0.2,      # the sheet fades out over the outer share of the radius
+    "Albedo": 0.9,
+    "AmbientGain": 1.0,       # x the sky's distant scattered luminance
+    "SunWrap": 0.3,           # the N.L wrap
+    "BaseDarkening": 0.55,    # a base's ambient as a share of a top's
+    "BaseSunShare": 0.15,     # the sun's share through a base's thin parts
+    "SilverLining": 0.6,      # the thin edge's forward-scattered sun gain
+    "RimPower": 8.0,          # the forward lobe's exponent
+    "NormalStrength": 1.5,    # the relief's slope per unit thickness per km
+}
+#: The cover the sheet takes under a drawn storm cell with no redrawn layer:
+#: the nimbostratus row's default (the storm's own deck).
+DISTANT_STORM_SHAPE = "nimbostratus"
+
+
+def distant_clouds_mode(environ: Optional[Dict[str, str]] = None) -> str:
+    """The sheet's switch as the host reads it (``-distant-clouds=`` else
+    ``FLIGHTSIM_DISTANT_CLOUDS``): ``on`` (the default) or ``off``; any other
+    word is the host's refusal ``world_beauty.distant_clouds``."""
+    import os
+    word = ((os.environ if environ is None else environ).get("FLIGHTSIM_DISTANT_CLOUDS") or "").strip() or "on"
+    if word not in ("on", "off"):
+        raise ValueError(f"world_beauty.distant_clouds: -distant-clouds={word} is not on or off")
+    return word
+
+
+def distant_storm_cover() -> float:
+    """The sheet's cover under a drawn storm cell with no redrawn layer."""
+    return CLOUDS[DISTANT_STORM_SHAPE]["default_cover"]
+
+
+def distant_disc_vertex_count(rings: int = DISTANT_RINGS, segments: int = DISTANT_SEGMENTS) -> int:
+    """A centre vertex, then rings x segments."""
+    return 1 + rings * segments
+
+
+def distant_disc_triangle_count(rings: int = DISTANT_RINGS, segments: int = DISTANT_SEGMENTS) -> int:
+    """The fan about the centre, then two triangles per ring quad."""
+    return segments + 2 * (rings - 1) * segments
+
+
+def distant_ring_radius_km(ring: int, rings: int = DISTANT_RINGS, radius_km: float = DISTANT_RADIUS_KM) -> float:
+    """Ring ``ring`` of ``rings`` sits at radius x (ring / rings)^2: metre-fine
+    near the camera, kilometre-coarse at the rim."""
+    share = min(max(float(ring) / float(max(rings, 1)), 0.0), 1.0)
+    return radius_km * share * share
+
+
+def distant_droop_m(horizontal_km: float, earth_radius_km: float = DISTANT_EARTH_RADIUS_KM) -> float:
+    """The sheet's drop below its altitude at a horizontal distance: the
+    earth's curvature, d^2 / 2R (metres, negative downward)."""
+    d = float(horizontal_km)
+    return -(d * d / (2.0 * earth_radius_km)) * 1000.0
+
+
+def distant_droop_at_rim_m() -> float:
+    return distant_droop_m(DISTANT_RADIUS_KM)
+
+
+def distant_sheet_altitude_m(camera_m: float, base_m: float, top_m: float) -> Dict[str, Any]:
+    """Where the sheet sits for this frame: a camera below the slab's middle
+    sees cloud BASES (the sheet at the base), above it cloud TOPS (the sheet at
+    the top); ``fade`` is 0 inside the slab, 1 past DISTANT_INSIDE_RAMP_M outside."""
+    mid = 0.5 * (float(base_m) + float(top_m))
+    above = float(camera_m) >= mid
+    altitude = float(top_m) if above else float(base_m)
+    if float(camera_m) < float(base_m):
+        outside = float(base_m) - float(camera_m)
+    elif float(camera_m) > float(top_m):
+        outside = float(camera_m) - float(top_m)
+    else:
+        outside = 0.0
+    fade = min(max(outside / DISTANT_INSIDE_RAMP_M, 0.0), 1.0)
+    return {"altitude_m": altitude, "from_above": above, "fade": fade}
+
+
+def distant_tracing_max_km(constrained: bool, sheet_drawn: bool, row_km: float) -> float:
+    """The volumetric march's trace with the sheet: on the constrained GPU, with
+    the sheet drawn, the near field (never above the class's own row); every
+    other case keeps the row. Lowers the march's cost, never raises it."""
+    if constrained and sheet_drawn:
+        return min(float(row_km), DISTANT_NEAR_FIELD_KM)
+    return float(row_km)
+
+
+def distant_handover_km(trace_km: float) -> float:
+    """Where the sheet starts fading in: the trace's end less the fade's width."""
+    return max(float(trace_km) - DISTANT_FADE_KM, 0.0)
+
+
 #: Visual round 2 (weather scenes, 2026-11-10): BEAUTY ONLY, the aircraft is
 #: never drawn INSIDE a cloud deck. Round 1's tower view in heavy rain (an A320
 #: at 1000 m in the 800-3000 m rain deck) and its 747 in a thunderstorm (2000 m

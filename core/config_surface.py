@@ -190,6 +190,21 @@ SETTINGS: Tuple[Setting, ...] = (
     Setting("world_beauty_overrides", "FLIGHTSIM_WORLD_BEAUTY_OVERRIDES", "dev-only", None,
             ("core/scene/look_match.py:36",),
             "Probe-render overrides file for the beauty world look (look_match.py writes it); render-machine calibration only, never on the web path."),
+    Setting("distant_clouds", "FLIGHTSIM_DISTANT_CLOUDS", "dev-only", None,
+            ("ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp:982",
+             "core/scene/world_beauty.py:481"),
+            "off turns the beauty's distant 2D cloud sheet off (visual round 5 L3; on by default, beauty only, "
+            "-distant-clouds= is the flag); render-machine A/B probes only, never on the web path."),
+    Setting("sky_hdri", "FLIGHTSIM_SKY_HDRI", "dev-only", None,
+            ("ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp:992",
+             "scripts/ue_create_materials.py:3347"),
+            "Names a pinned Poly Haven CC0 sky (core/scene/sky_hdri.py HDRIS) as the sky light's specified "
+            "cubemap on the clear and hazy beauty presets (-sky-hdri= is the flag; the editor script imports it "
+            "under the same name); a render-machine probe for the #02 blue, never on the web path."),
+    Setting("hdri_cache", "FLIGHTSIM_HDRI_CACHE", "dev-only", None,
+            ("core/scene/sky_hdri.py:81",),
+            "Where the pinned sky HDRIs are downloaded and prepared (default %LOCALAPPDATA%\\flightsim\\hdri, "
+            "else ~/.cache/flightsim/hdri); never committed."),
     Setting("render_switches", "FLIGHTSIM_RENDER_SWITCHES", "dev-only", None,
             ("ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp:3354",
              "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimHeroLighting.cpp:432",

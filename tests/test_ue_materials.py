@@ -197,7 +197,9 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                "M_RainDrops", "M_RainSplash", "M_LightningChannel", "M_StormCell",
                "M_WindshieldRain",
                # World lane, visual overhaul (FlightSimClouds.cpp, beauty only).
-               "M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter"}
+               "M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter",
+               # Visual round 5, L3: the distant 2D cloud sheet (FlightSimClouds.cpp, beauty only).
+               "M_FlightSimDistantClouds"}
 COMMANDLET_CPP = BRIDGE / "Private" / "FlightSimRenderCommandlet.cpp"
 
 

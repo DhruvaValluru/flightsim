@@ -2839,7 +2839,8 @@ def create_ice_overlay():
 # Kept in this one block so the aircraft lane's block merges beside it.
 
 #: Created through _world_beauty_material (tests/test_ue_materials.py pins it).
-WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter")
+WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter",
+                          "M_FlightSimDistantClouds")   # visual round 5, L3: the distant sheet
 WORLD_SHADER_DIR = "assets/shaders/world"
 #: The collection the tiles' material reads and the render sets
 #: (world_beauty.WORLD_MPC / WORLD_MPC_SCALARS: names and defaults pinned equal).
@@ -2871,6 +2872,30 @@ WORLD_CLOUD_INPUTS = ("WorldPos", "NormAlt", "Coverage", "ExtinctionPerM", "Exti
 #: The cloud's single-scattering albedo (water droplets scatter almost all they
 #: intercept; the storm cell's own 0.98). UNCALIBRATED: set by probe render.
 WORLD_CLOUD_ALBEDO = 0.98
+# -- visual round 5, lane L3 (2026-11-10): the distant 2D cloud sheet -- begin ------
+#: M_FlightSimDistantClouds' scalar parameters (FlightSimClouds.cpp
+#: ApplyDistantClouds sets each by name) with the default a material has
+#: before the render sets them: the cumulus row's shape (world_beauty.CLOUDS),
+#: the constrained hand-over (world_beauty.distant_handover_km(
+#: DISTANT_NEAR_FIELD_KM) = 24, DISTANT_FADE_KM, DISTANT_RADIUS_KM) and the
+#: fake lighting's look (world_beauty.DISTANT_LOOK, pinned equal by
+#: tests/test_distant_clouds.py). UNCALIBRATED: set by probe render.
+WORLD_DISTANT_SCALARS = {
+    "Coverage": 0.35, "CoverageContrast": 1.6, "ShapeScaleKm": 2.5, "SliceKm": 2.0, "ThicknessKm": 1.2,
+    "HandoverKm": 24.0, "FadeKm": 8.0, "RadiusKm": 300.0, "SheetFade": 1.0,
+    "RimFadeShare": 0.2, "Albedo": 0.9, "AmbientGain": 1.0, "SunWrap": 0.3, "BaseDarkening": 0.55,
+    "BaseSunShare": 0.15, "SilverLining": 0.6, "RimPower": 8.0, "NormalStrength": 1.5,
+}
+WORLD_DISTANT_VECTORS = ("SeedOffsetKm", "WindOffsetM")
+#: The Custom node's inputs, in order: the engine's five (world position, camera,
+#: the atmosphere light's direction and illuminance, the sky's distant scattered
+#: luminance), then the scalars, then the vectors (distant_clouds.hlsl's header).
+WORLD_DISTANT_ENGINE_INPUTS = ("WorldPos", "CameraPos", "SunDir", "SunIlluminance", "SkyLum")
+WORLD_DISTANT_INPUTS = WORLD_DISTANT_ENGINE_INPUTS + tuple(WORLD_DISTANT_SCALARS) + WORLD_DISTANT_VECTORS
+#: The sky-light HDRI probe's import root (core/scene/sky_hdri.py HDRI_ASSET_DIR).
+SKY_HDRI_PATH = "/Game/FlightSim/Sky"
+SKY_HDRI_SHA_TAG = "FlightSimSkyHdriSha256"
+# -- visual round 5, lane L3 -- end -----------------------------------------------------
 #: The parameter names Cesium for Unreal sets on a tileset material's
 #: per-primitive instance for the glTF base colour. UNVERIFIED: the Cesium
 #: headers are not on the authoring machine; a first render whose tiles come out
@@ -2914,7 +2939,8 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: an asset stamped older (or not at all) is deleted and built again.
 #: Generation 2: cloud_layers.hlsl's Perlin-Worley shape, rounded tops and
 #: in-cloud erosion. Bump with every change to a listed material's shader.
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "2"}
+#: Distant clouds 1: visual round 5 L3's first distant_clouds.hlsl.
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "2", "M_FlightSimDistantClouds": "1"}
 
 
 def world_graph_stale(name):
@@ -2962,7 +2988,8 @@ def world_stamp(material, name):
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "2", "M_FlightSimTilesBeauty": "2",
-                     "M_FlightSimCloudLayers": "3", "M_FlightSimScatter": "1"}  # clouds 3: round-2 Perlin-Worley shader
+                     "M_FlightSimCloudLayers": "3", "M_FlightSimScatter": "1",  # clouds 3: round-2 Perlin-Worley shader
+                     "M_FlightSimDistantClouds": "1"}   # visual round 5, L3: the distant sheet
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
 
@@ -3251,6 +3278,127 @@ def create_world_scatter():
         lib.connect_material_property(node, "", prop)
     finish(material, "M_FlightSimScatter")
 
+
+# -- visual round 5, lane L3 (2026-11-10): the distant sheet and the sky HDRI probe --
+def create_world_distant_clouds():
+    """M_FlightSimDistantClouds: the distant 2D cloud sheet (FlightSimClouds.cpp
+    ApplyDistantClouds puts it on one earth-curved disc at the deck's altitude,
+    beauty only). UNLIT, TRANSLUCENT, two-sided; Apply Fogging per pixel (the
+    height fog and the aerial perspective fade it into the horizon haze) and
+    cloud fogging (the near volumetric clouds attenuate it); it never writes
+    custom depth or velocity, so the labels and the depth pass never see it.
+    distant_clouds.hlsl returns float4(emissive, opacity): the volumetric
+    layer's own shape noise at the layer's mid slice, cut at the cover's
+    quantile, lit cheaply from the SkyAtmosphere nodes (light 0)."""
+    material = _world_beauty_material("M_FlightSimDistantClouds")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    material.set_editor_property("two_sided", True)
+    material.set_editor_property("use_translucency_vertex_fog", True)   # Apply Fogging
+    material.set_editor_property("compute_fog_per_pixel", True)
+    material.set_editor_property("apply_cloud_fogging", True)
+    material.set_editor_property("allow_translucent_custom_depth_writes", False)
+    material.set_editor_property("output_translucent_velocity", False)
+    inputs = {}
+    inputs["WorldPos"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionWorldPosition, -1800, -500), "")
+    inputs["CameraPos"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionCameraPositionWS, -1800, -400), "")
+    sun_dir = lib.create_material_expression(material, unreal.MaterialExpressionSkyAtmosphereLightDirection,
+                                             -1800, -300)
+    sun_dir.set_editor_property("light_index", 0)
+    inputs["SunDir"] = (sun_dir, "")
+    illuminance = lib.create_material_expression(material, unreal.MaterialExpressionSkyAtmosphereLightIlluminance,
+                                                 -1800, -200)
+    illuminance.set_editor_property("light_index", 0)
+    inputs["SunIlluminance"] = (illuminance, "")
+    inputs["SkyLum"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionSkyAtmosphereDistantLightScatteredLuminance, -1800, -100), "")
+    for i, (name, default) in enumerate(WORLD_DISTANT_SCALARS.items()):
+        inputs[name] = (scalar(material, lib, name, default, -1800, 50 + 90 * i), "")
+    for i, name in enumerate(WORLD_DISTANT_VECTORS):
+        inputs[name] = (vector(material, lib, name, (0.0, 0.0, 0.0, 0.0), -1800, 1800 + 110 * i), "")
+    ordered = {name: inputs[name] for name in WORLD_DISTANT_INPUTS}
+    sheet = world_custom(material, lib, "distant_clouds", unreal.CustomMaterialOutputType.CMOT_FLOAT4,
+                         ordered, -900, 0)
+    lib.connect_material_property(mask(material, lib, sheet, "rgb", -600, -50), "",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    lib.connect_material_property(mask(material, lib, sheet, "a", -600, 150), "",
+                                  unreal.MaterialProperty.MP_OPACITY)
+    world_stamp(material, "M_FlightSimDistantClouds")
+    finish(material, "M_FlightSimDistantClouds")
+
+
+def create_sky_hdri():
+    """T_SkyHdri_<name> under SKY_HDRI_PATH: the sky-light HDRI probe's cubemap
+    (FlightSimClouds.cpp ApplySkyHdri, -sky-hdri=<name>). Only when
+    FLIGHTSIM_SKY_HDRI names a pin (core/scene/sky_hdri.py HDRIS); the
+    prepared, sun-clamped file must already be in the cache (python -m
+    core.scene.sky_hdri prepare <name>, the repo venv: the editor's Python has
+    no numpy). An unprepared or unpinned name is a RuntimeError the guard
+    reports by name, never a silent skip. The import is stamped with the
+    prepared file's sha256 and redone only when that changes."""
+    import json
+    import os
+    import sys
+    name = os.environ.get("FLIGHTSIM_SKY_HDRI", "").strip()
+    if not name or name == "off":
+        print("SKY-HDRI-SKIPPED: FLIGHTSIM_SKY_HDRI names no pinned sky (the captured sky lights the frames)")
+        return
+    module = _repo_file("core/scene/sky_hdri.py")
+    if module is None:
+        raise RuntimeError("core/scene/sky_hdri.py is not in this checkout")
+    root = str(module.parents[2])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from core.scene import sky_hdri
+    row = sky_hdri.pin(name)
+    source = sky_hdri.skylight_path(name)
+    sidecar = sky_hdri.sidecar_path(name)
+    if not source.is_file() or not sidecar.is_file():
+        raise RuntimeError(f"SKY-HDRI: {source} is not prepared: run python -m core.scene.sky_hdri prepare {name} "
+                           f"(the repo venv) first")
+    record = json.loads(sidecar.read_text(encoding="utf-8"))
+    if record.get("source_sha256") != row["sha256"]:
+        raise RuntimeError(f"SKY-HDRI: {sidecar} was prepared from sha256 {record.get('source_sha256')}, "
+                           f"the pin is {row['sha256']}: prepare again")
+    digest = sky_hdri.sha256_of(source)
+    if digest != record.get("skylight_sha256"):
+        raise RuntimeError(f"SKY-HDRI: {source} hashes {digest}, its sidecar says {record.get('skylight_sha256')}: "
+                           f"prepare again")
+    asset_name = f"{sky_hdri.HDRI_ASSET_PREFIX}{name}"
+    full = f"{SKY_HDRI_PATH}/{asset_name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(full) and not rebuild_requested(asset_name):
+        stamped = unreal.EditorAssetLibrary.get_metadata_tag(unreal.EditorAssetLibrary.load_asset(full),
+                                                             SKY_HDRI_SHA_TAG)
+        if str(stamped) == digest:
+            print(f"SKY-HDRI-EXISTS: {full}")
+            return
+    task = unreal.AssetImportTask()
+    task.set_editor_property("filename", str(source))
+    task.set_editor_property("destination_path", SKY_HDRI_PATH)
+    task.set_editor_property("destination_name", asset_name)
+    task.set_editor_property("automated", True)
+    task.set_editor_property("replace_existing", True)
+    task.set_editor_property("save", False)
+    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+    texture = unreal.load_asset(full)
+    if texture is None:
+        raise RuntimeError(f"SKY-HDRI: {source} did not import as {full}")
+    if not isinstance(texture, unreal.TextureCube):
+        raise RuntimeError(f"SKY-HDRI: {full} imported as {type(texture).__name__}, not a TextureCube "
+                           f"(the .hdr must be an equirectangular long-lat image)")
+    texture.set_editor_property("srgb", False)
+    texture.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_HDR)
+    unreal.EditorAssetLibrary.set_metadata_tag(texture, SKY_HDRI_SHA_TAG, digest)
+    unreal.EditorAssetLibrary.set_metadata_tag(texture, "FlightSimSkyHdriSource", row["sha256"])
+    unreal.EditorAssetLibrary.save_asset(full)
+    print(f"SKY-HDRI-IMPORTED: {full} ({row['licence']}; sun at image longitude "
+          f"{record.get('sun_longitude_deg', 0.0):.1f} deg, {record.get('clamped_pixels', 0)} sun pixels clamped)")
+
 # == END WORLD LANE ===============================================================
 
 # ==== AIRCRAFT LANE (visual overhaul V7) -- begin ============================
@@ -3333,6 +3481,8 @@ create_world_collection()
 create_world_cloud_layers()
 create_world_tiles_beauty()
 create_world_scatter()
+create_world_distant_clouds()   # visual round 5, L3: the distant sheet
+create_sky_hdri()               # visual round 5, L3: the sky HDRI probe (FLIGHTSIM_SKY_HDRI only)
 
 create_aircraft_masters()  # AIRCRAFT LANE (V7)
 if _FAILED:

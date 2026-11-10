@@ -17,6 +17,7 @@
 #include "Components/VolumetricCloudComponent.h"
 #include "Dom/JsonValue.h"
 #include "Engine/DirectionalLight.h"
+#include "Engine/TextureCube.h"
 #include "Engine/World.h"
 #include "FlightSimGoogleTiles.h"
 #include "FlightSimVisualScene.h"
@@ -30,6 +31,7 @@
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
+#include "ProceduralMeshComponent.h"   // the distant cloud sheet (visual round 5, L3)
 #include "RHIGlobals.h"
 #include "RHI.h"   // GMaxRHIFeatureLevel (CloudConstrainedGpu)
 #include "Serialization/JsonReader.h"
@@ -522,6 +524,117 @@ namespace FlightSimWorldPure
 		return Wet > Floor ? Wet : Floor;
 	}
 
+	// -- visual round 5, lane L3 (2026-11-10): the distant 2D cloud sheet --
+	// Round 3's frames drew thin, streaky volumetric clouds that stopped a few
+	// tens of km out and an EMPTY horizon. UE 5.7 still ships
+	// /Engine/EngineSky/BP_Sky_Sphere and its panning-cloud materials
+	// (M_Sky_Panning_Clouds, M_Sky_Panning_Clouds2, T_Sky_Clouds_M), but a sky
+	// sphere covers the SkyAtmosphere, so the far deck is our own sheet: one
+	// large disc drooping with the earth's curvature at the deck's altitude,
+	// unlit translucent (M_FlightSimDistantClouds, distant_clouds.hlsl: the same
+	// Perlin-Worley shape as the volumetric layer at its mid slice, cheap fake
+	// lighting), no depth, no custom depth, hidden on every label capture.
+	// On the constrained GPU the volumetric march's trace shrinks to the near
+	// field the sheet takes over (DistantTracingMaxKm): the engine's sample
+	// count is SampleCountMax x saturate(path / r.VolumetricCloud.
+	// DistanceToSampleMaxCount), non-decreasing in the path, so a shorter trace
+	// never adds a sample, only shortens the step. world_beauty.py DISTANT_* is
+	// the twin. UNCALIBRATED: set by probe render on the render machine (every number).
+	constexpr double DistantRadiusKm = 300.0;
+	constexpr int DistantRings = 48;
+	constexpr int DistantSegments = 96;
+	constexpr double DistantEarthRadiusKm = 6371.0;
+	constexpr double DistantFadeKm = 8.0;
+	constexpr double DistantNearFieldKm = 32.0;
+	constexpr double DistantInsideRampM = 200.0;
+	// world_beauty.DISTANT_LOOK, in order (the material's scalar parameters).
+	constexpr int DistantLookCount = 9;
+	inline const char* DistantLookName(int Field)
+	{
+		static const char* const Names[DistantLookCount] = {
+			"RimFadeShare", "Albedo", "AmbientGain", "SunWrap", "BaseDarkening", "BaseSunShare",
+			"SilverLining", "RimPower", "NormalStrength"};
+		return Field >= 0 && Field < DistantLookCount ? Names[Field] : "";
+	}
+	inline double DistantLook(int Field)
+	{
+		static const double Values[DistantLookCount] = {0.2, 0.9, 1.0, 0.3, 0.55, 0.15, 0.6, 8.0, 1.5};
+		return Field >= 0 && Field < DistantLookCount ? Values[Field] : 0.0;
+	}
+	// The cover the sheet takes under a drawn storm cell with no redrawn layer:
+	// the nimbostratus row's default (world_beauty.DISTANT_STORM_SHAPE).
+	constexpr int DistantStormShape = CloudNimbostratus;
+	inline double DistantStormCover(const double* CloudTable)
+	{
+		return CloudTable != nullptr ? CloudTable[DistantStormShape * CloudFieldCount + CldDefaultCover]
+		                             : CloudDefault(DistantStormShape, CldDefaultCover);
+	}
+	// The disc's size: a centre vertex, then Rings x Segments; a fan, then ring quads.
+	inline int DistantDiscVertexCount()
+	{
+		return 1 + DistantRings * DistantSegments;
+	}
+	inline int DistantDiscTriangleCount()
+	{
+		return DistantSegments + 2 * (DistantRings - 1) * DistantSegments;
+	}
+	// Ring i of N at radius x (i / N)^2: metre-fine near the camera, km-coarse at the rim.
+	inline double DistantRingRadiusKm(int Ring, int Rings, double RadiusKm)
+	{
+		const double Share = Rings > 0 ? (Ring < 0 ? 0.0 : (Ring > Rings ? 1.0 : static_cast<double>(Ring) / Rings)) : 0.0;
+		return RadiusKm * Share * Share;
+	}
+	// The earth's curvature: d^2 / 2R below the sheet's altitude (metres, negative down).
+	inline double DistantDroopM(double HorizontalKm)
+	{
+		return -(HorizontalKm * HorizontalKm / (2.0 * DistantEarthRadiusKm)) * 1000.0;
+	}
+	inline double DistantDroopAtRimM()
+	{
+		return DistantDroopM(DistantRadiusKm);
+	}
+	struct FDistantSheet
+	{
+		double AltitudeM;
+		bool bFromAbove;
+		double Fade;
+	};
+	// A camera below the slab's middle sees BASES (the sheet at the base), above
+	// it TOPS (at the top); the fade is 0 inside the slab, 1 past the ramp outside.
+	inline FDistantSheet DistantSheetAltitudeM(double CameraM, double BaseM, double TopM)
+	{
+		FDistantSheet Out;
+		const double Mid = 0.5 * (BaseM + TopM);
+		Out.bFromAbove = CameraM >= Mid;
+		Out.AltitudeM = Out.bFromAbove ? TopM : BaseM;
+		double Outside = 0.0;
+		if (CameraM < BaseM)
+		{
+			Outside = BaseM - CameraM;
+		}
+		else if (CameraM > TopM)
+		{
+			Outside = CameraM - TopM;
+		}
+		const double Fade = Outside / DistantInsideRampM;
+		Out.Fade = Fade < 0.0 ? 0.0 : (Fade > 1.0 ? 1.0 : Fade);
+		return Out;
+	}
+	// The march's trace with the sheet: constrained and drawn -> the near field
+	// (never above the row); every other case the row. Lowers cost, never raises it.
+	inline double DistantTracingMaxKm(bool bConstrained, bool bSheetDrawn, double RowKm)
+	{
+		if (bConstrained && bSheetDrawn)
+		{
+			return RowKm < DistantNearFieldKm ? RowKm : DistantNearFieldKm;
+		}
+		return RowKm;
+	}
+	inline double DistantHandoverKm(double TraceKm)
+	{
+		return TraceKm - DistantFadeKm > 0.0 ? TraceKm - DistantFadeKm : 0.0;
+	}
+
 	// Visual round 2 (weather scenes, 2026-11-10), world_beauty.aircraft_clear_layer:
 	// BEAUTY ONLY, the aircraft is never drawn INSIDE a deck. Round 1's tower view
 	// in heavy rain (an A320 at 1000 m in the 800-3000 m rain deck) and its 747 in
@@ -581,6 +694,15 @@ namespace
 	const TCHAR* const WorldTilesMaterialPath =
 		TEXT("/Game/FlightSim/M_FlightSimTilesBeauty.M_FlightSimTilesBeauty");
 	const TCHAR* const WorldCollectionPath = TEXT("/Game/FlightSim/MPC_FlightSimWorld.MPC_FlightSimWorld");
+	// Visual round 5, lane L3: the distant sheet's material and the sky HDRI
+	// probe's asset root (core/scene/sky_hdri.py HDRI_ASSET_DIR / HDRI_ASSET_PREFIX).
+	const TCHAR* const WorldDistantMaterialPath =
+		TEXT("/Game/FlightSim/M_FlightSimDistantClouds.M_FlightSimDistantClouds");
+	// The HDRI asset is /Game/FlightSim/Sky/T_SkyHdri_<name> (ApplySkyHdri's Printf
+	// literal: FString::Printf takes a literal format).
+	// The HDRI fill as a share of the sun's illuminance (sky_hdri.HDRI_FILL_SHARE).
+	// UNCALIBRATED: set by probe render on the render machine.
+	constexpr double WorldSkyHdriFillShareDefault = 0.15;
 	// The engine's simple cloud material, the one the look and the physical
 	// sky draw with: only clouds on it are redrawn (never M_StormCell).
 	const TCHAR* const WorldEngineCloudNeedle = TEXT("m_SimpleVolumetricCloud");
@@ -872,6 +994,21 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		return false;
 	}
 	const FString ScatterPath = FlagOrEnv(TEXT("ground-scatter="), TEXT("FLIGHTSIM_GROUND_SCATTER"));
+	// Visual round 5, lane L3: the distant sheet (on unless asked off) and the
+	// sky HDRI probe (off unless named): -distant-clouds= / FLIGHTSIM_DISTANT_CLOUDS,
+	// -sky-hdri= / FLIGHTSIM_SKY_HDRI.
+	FString DistantMode = TEXT("on");
+	const FString DistantFromEnv = FlagOrEnv(TEXT("distant-clouds="), TEXT("FLIGHTSIM_DISTANT_CLOUDS"));
+	if (!DistantFromEnv.IsEmpty())
+	{
+		DistantMode = DistantFromEnv;
+	}
+	if (DistantMode != TEXT("on") && DistantMode != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.distant_clouds: -distant-clouds=%s is not on or off"), *DistantMode);
+		return false;
+	}
+	const FString SkyHdriName = FlagOrEnv(TEXT("sky-hdri="), TEXT("FLIGHTSIM_SKY_HDRI"));
 
 	// -- what the card says --------------------------------------------------
 	// Key by key (WorldLookValue; world_beauty.card_inputs is the Python twin):
@@ -966,6 +1103,13 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	ApplyClouds(World, Scene, Weather, CloudsMode, bCardLayer ? CardCover : -1.0, CardBaseM, CardTopM, Seed);
 	// Visual round 2 (weather scenes): no deck, and no storm tower, drawn around the aircraft.
 	KeepAircraftClearOfClouds(Card, Aircraft, Weather);
+	// Visual round 5, lane L3: the far deck and the horizon (after the clearance:
+	// the sheet follows the slab that is drawn), then the sky HDRI probe.
+	ApplyDistantClouds(World, Scene, Weather, DistantMode, Seed);
+	if (!ApplySkyHdri(Scene, SkyHdriName, Params, Error))
+	{
+		return false;
+	}
 	ApplyTiles(World, Tiles, CardWetness);
 	// sun-shafts-sky-occlusion (FlightSimSunShafts.h): value-only, after the presets.
 	TSharedPtr<FJsonObject> SunShaftsOut;
@@ -1636,6 +1780,339 @@ void FFlightSimWorldBeauty::KeepAircraftClearOfClouds(const TSharedPtr<FJsonObje
 	Record->SetObjectField(TEXT("aircraft_clearance"), Out);
 }
 
+// Visual round 5, lane L3 (2026-11-10): the distant 2D cloud sheet. BEAUTY ONLY.
+// One UProceduralMeshComponent disc (FlightSimWorldPure::DistantRings x
+// DistantSegments, radius DistantRadiusKm, each ring dropped by the earth's
+// curvature) on M_FlightSimDistantClouds (unlit, translucent, two-sided; no
+// depth write, no custom depth, fog per pixel), centred on the camera and put
+// at the deck's base or top by Advance. It draws the SAME shape noise as the
+// volumetric layer at the layer's mid slice, cut at the same cover quantile,
+// so the far sheet continues the near cells; its light is faked in the shader
+// (distant_clouds.hlsl). Labels: the actor is in BeautyOnlyActors, so every
+// label capture hides it; the material writes no depth and no custom depth.
+// On the constrained GPU the volumetric march's TracingMaxDistance shrinks to
+// the near field the sheet fades in behind (never more samples: the engine's
+// count is non-decreasing in the traced path, VolumetricCloud.usf).
+void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualScene& Scene,
+                                               FFlightSimWeather& Weather, const FString& Mode, int32 Seed)
+{
+	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
+	using namespace FlightSimWorldPure;
+	DistantSheet = FDistantSheetState();
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetStringField(TEXT("mode"), Mode);
+	Out->SetStringField(TEXT("engine_content"),
+		TEXT("UE 5.7 still ships /Engine/EngineSky/BP_Sky_Sphere with M_Sky_Panning_Clouds, M_Sky_Panning_Clouds2(_Inst) "
+		     "and T_Sky_Clouds_M (read in the engine content on 2026-11-10); not used: a sky sphere covers the SkyAtmosphere"));
+	Out->SetStringField(TEXT("labels"),
+		TEXT("a translucent unlit disc: no depth write, no custom depth, no shadow; in BeautyOnlyActors, so every label "
+		     "capture hides it (mask, class, depth and boxes untouched); the measure quality never builds it"));
+	Out->SetBoolField(TEXT("pixel_moving"), false);
+	Out->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED: set by probe render on the render machine"));
+	if (Mode == TEXT("off"))
+	{
+		Out->SetStringField(TEXT("drawn"), TEXT("nothing (-distant-clouds=off)"));
+		Record->SetObjectField(TEXT("distant_clouds"), Out);
+		return;
+	}
+	// The deck the sheet continues: the first redrawn layer (its slab after the
+	// aircraft clearance), else the storm cell's own deck.
+	double BaseM = 0.0, TopM = 0.0, Cover = 0.0;
+	int32 Shape = CloudCumulus;
+	FString CoverBasis;
+	if (CloudLayers.Num() > 0)
+	{
+		const FCloudLayerState& Layer = CloudLayers[0];
+		BaseM = Layer.BaseM;
+		TopM = Layer.TopM;
+		Cover = Layer.Cover;
+		Shape = Layer.Shape;
+		CoverBasis = TEXT("the first redrawn layer (its slab after the aircraft clearance, its cover and shape row)");
+	}
+	else if (Weather.DrawsCell() && Weather.BeautyStormLayer(BaseM, TopM))
+	{
+		Shape = DistantStormShape;
+		Cover = DistantStormCover(CloudValues.GetData());
+		CoverBasis = TEXT("the storm cell's deck (world_beauty.DISTANT_STORM_SHAPE: the nimbostratus row's default cover)");
+	}
+	else
+	{
+		Out->SetStringField(TEXT("drawn"), TEXT("nothing: no redrawn layer and no storm deck to continue"));
+		Record->SetObjectField(TEXT("distant_clouds"), Out);
+		return;
+	}
+	if (!(TopM > BaseM))
+	{
+		Out->SetStringField(TEXT("drawn"), TEXT("nothing: the deck's slab is empty"));
+		Record->SetObjectField(TEXT("distant_clouds"), Out);
+		return;
+	}
+	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, WorldDistantMaterialPath);
+	if (Base == nullptr)
+	{
+		Out->SetStringField(TEXT("drawn"),
+			TEXT("nothing: M_FlightSimDistantClouds did not load (run scripts/ue_create_materials.py)"));
+		Record->SetObjectField(TEXT("distant_clouds"), Out);
+		return;
+	}
+
+	// The disc: a fan about the centre, then ring quads; two-sided material, so
+	// the winding is not load-bearing.
+	AActor* Actor = World->SpawnActor<AActor>();
+	UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(Actor, TEXT("DistantCloudSheet"));
+	Actor->SetRootComponent(Mesh);
+	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetCastShadow(false);
+	Mesh->SetRenderCustomDepth(false);
+	Mesh->SetReceivesDecals(false);
+	// Behind every other translucent (rain shafts, contrails): lower sorts first.
+	Mesh->SetTranslucentSortPriority(-100);
+	TArray<FVector> Vertices;
+	TArray<int32> Triangles;
+	TArray<FVector> Normals;
+	TArray<FVector2D> UV0;
+	Vertices.Add(FVector::ZeroVector);
+	Normals.Add(FVector::UpVector);
+	UV0.Add(FVector2D(0.0, 0.0));
+	for (int32 Ring = 1; Ring <= DistantRings; ++Ring)
+	{
+		const double RadiusKm = DistantRingRadiusKm(Ring, DistantRings, DistantRadiusKm);
+		const double RadiusCm = RadiusKm * 1000.0 * WorldCmPerMetre;
+		const double ZCm = DistantDroopM(RadiusKm) * WorldCmPerMetre;
+		for (int32 Seg = 0; Seg < DistantSegments; ++Seg)
+		{
+			const double Angle = 2.0 * PI * Seg / DistantSegments;
+			Vertices.Add(FVector(FMath::Cos(Angle) * RadiusCm, FMath::Sin(Angle) * RadiusCm, ZCm));
+			Normals.Add(FVector::UpVector);
+			UV0.Add(FVector2D(static_cast<double>(Ring) / DistantRings, static_cast<double>(Seg) / DistantSegments));
+		}
+	}
+	auto VertexIndex = [](int32 Ring, int32 Seg)
+	{
+		return Ring <= 0 ? 0 : 1 + (Ring - 1) * DistantSegments + (Seg % DistantSegments);
+	};
+	for (int32 Seg = 0; Seg < DistantSegments; ++Seg)
+	{
+		Triangles.Append({VertexIndex(0, 0), VertexIndex(1, Seg), VertexIndex(1, Seg + 1)});
+	}
+	for (int32 Ring = 1; Ring < DistantRings; ++Ring)
+	{
+		for (int32 Seg = 0; Seg < DistantSegments; ++Seg)
+		{
+			const int32 A = VertexIndex(Ring, Seg), B = VertexIndex(Ring, Seg + 1);
+			const int32 C = VertexIndex(Ring + 1, Seg), D = VertexIndex(Ring + 1, Seg + 1);
+			Triangles.Append({A, C, B, B, C, D});
+		}
+	}
+	check(Vertices.Num() == DistantDiscVertexCount() && Triangles.Num() == 3 * DistantDiscTriangleCount());
+	Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, {}, {}, false);
+	Mesh->RegisterComponent();
+	Actor->SetActorLocation(FVector::ZeroVector);   // Advance centres it on the camera
+
+	// The material: the layer's cover and shape row, the hand-over, the look.
+	double SeedKm[3] = {0.0, 0.0, 0.0};
+	CloudSeedOffsetKm(static_cast<uint64_t>(static_cast<int64_t>(Seed)), SeedKm);
+	const double* CloudRow = &CloudValues[Shape * CloudFieldCount];
+	const bool bConstrained = CloudConstrainedGpu();
+	const int32 March = bConstrained ? MarchIntegrated : MarchDiscrete;
+	const double RowKm = CloudMarch(March, MarchTracingMaxKm);
+	const double TraceKm = DistantTracingMaxKm(bConstrained, true, RowKm);
+	const double HandoverKm = DistantHandoverKm(TraceKm);
+	const double SliceKm = 0.5 * (BaseM + TopM) / 1000.0 + SeedKm[2];
+	UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(Base, Actor);
+	Material->SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(Cover));
+	Material->SetScalarParameterValue(TEXT("CoverageContrast"), static_cast<float>(CloudRow[CldCoverageContrast]));
+	Material->SetScalarParameterValue(TEXT("ShapeScaleKm"), static_cast<float>(CloudRow[CldShapeScaleKm]));
+	Material->SetScalarParameterValue(TEXT("SliceKm"), static_cast<float>(SliceKm));
+	Material->SetScalarParameterValue(TEXT("ThicknessKm"), static_cast<float>((TopM - BaseM) / 1000.0));
+	Material->SetScalarParameterValue(TEXT("HandoverKm"), static_cast<float>(HandoverKm));
+	Material->SetScalarParameterValue(TEXT("FadeKm"), static_cast<float>(DistantFadeKm));
+	Material->SetScalarParameterValue(TEXT("RadiusKm"), static_cast<float>(DistantRadiusKm));
+	Material->SetScalarParameterValue(TEXT("SheetFade"), 1.0f);
+	TSharedPtr<FJsonObject> Look = MakeShared<FJsonObject>();
+	for (int32 F = 0; F < DistantLookCount; ++F)
+	{
+		Material->SetScalarParameterValue(ANSI_TO_TCHAR(DistantLookName(F)), static_cast<float>(DistantLook(F)));
+		Look->SetNumberField(ANSI_TO_TCHAR(DistantLookName(F)), DistantLook(F));
+	}
+	Material->SetVectorParameterValue(TEXT("SeedOffsetKm"),
+		FLinearColor(static_cast<float>(SeedKm[0]), static_cast<float>(SeedKm[1]), static_cast<float>(SeedKm[2]), 0.0f));
+	Material->SetVectorParameterValue(TEXT("WindOffsetM"), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+	Mesh->SetMaterial(0, Material);
+	Scene.BeautyOnlyActors.Add(Actor);
+	DistantSheet.Actor = Actor;
+	DistantSheet.Mesh = Mesh;
+	DistantSheet.Material = Material;
+	DistantSheet.BaseM = BaseM;
+	DistantSheet.TopM = TopM;
+	DistantSheet.bDrawn = true;
+
+	// The volumetric march hands over: on the constrained GPU its trace shrinks
+	// to the near field (a shorter path never adds a sample).
+	TSharedPtr<FJsonObject> Trace = MakeShared<FJsonObject>();
+	Trace->SetBoolField(TEXT("constrained_gpu"), bConstrained);
+	Trace->SetNumberField(TEXT("row_tracing_max_distance_km"), RowKm);
+	Trace->SetNumberField(TEXT("tracing_max_distance_km"), TraceKm);
+	Trace->SetBoolField(TEXT("shrunk"), TraceKm < RowKm);
+	int32 LayersSet = 0;
+	if (TraceKm < RowKm)
+	{
+		for (FCloudLayerState& Layer : CloudLayers)
+		{
+			if (Layer.Component != nullptr)
+			{
+				Layer.Component->SetTracingMaxDistance(static_cast<float>(TraceKm));
+				++LayersSet;
+			}
+		}
+	}
+	Trace->SetNumberField(TEXT("layers_set"), LayersSet);
+	Trace->SetStringField(TEXT("basis"),
+		TEXT("world_beauty.distant_tracing_max_km: constrained and the sheet drawn -> min(row, DISTANT_NEAR_FIELD_KM). "
+		     "VolumetricCloud.usf: StepCount = SampleCountMax x saturate(path x InvDistanceToSampleCountMax) "
+		     "(r.VolumetricCloud.DistanceToSampleMaxCount, 15 km), non-decreasing in the path: a shorter trace never "
+		     "adds a sample, only shortens the step; the sheet fades in over FadeKm up to the trace's end"));
+	Out->SetObjectField(TEXT("volumetric_trace"), Trace);
+
+	Out->SetNumberField(TEXT("base_m"), BaseM);
+	Out->SetNumberField(TEXT("top_m"), TopM);
+	Out->SetNumberField(TEXT("cover"), Cover);
+	Out->SetStringField(TEXT("shape"), ANSI_TO_TCHAR(CloudName(Shape)));
+	Out->SetStringField(TEXT("cover_basis"), CoverBasis);
+	Out->SetNumberField(TEXT("coverage_contrast"), CloudRow[CldCoverageContrast]);
+	Out->SetNumberField(TEXT("shape_scale_km"), CloudRow[CldShapeScaleKm]);
+	Out->SetNumberField(TEXT("slice_km"), SliceKm);
+	Out->SetNumberField(TEXT("handover_km"), HandoverKm);
+	Out->SetNumberField(TEXT("fade_km"), DistantFadeKm);
+	Out->SetNumberField(TEXT("radius_km"), DistantRadiusKm);
+	Out->SetNumberField(TEXT("rings"), DistantRings);
+	Out->SetNumberField(TEXT("segments"), DistantSegments);
+	Out->SetNumberField(TEXT("vertices"), DistantDiscVertexCount());
+	Out->SetNumberField(TEXT("triangles"), DistantDiscTriangleCount());
+	Out->SetNumberField(TEXT("droop_at_rim_m"), DistantDroopAtRimM());
+	Out->SetNumberField(TEXT("inside_ramp_m"), DistantInsideRampM);
+	Out->SetObjectField(TEXT("look"), Look);
+	Out->SetStringField(TEXT("seed_offset_km"),
+		FString::Printf(TEXT("%.6f,%.6f,%.6f"), SeedKm[0], SeedKm[1], SeedKm[2]));
+	Out->SetStringField(TEXT("material"), WorldDistantMaterialPath);
+	Out->SetStringField(TEXT("lighting"),
+		TEXT("faked in distant_clouds.hlsl: N.L (wrapped) from the shape's screen-space gradient, the sun's illuminance "
+		     "and direction and the sky's distant scattered luminance from the SkyAtmosphere material nodes (atmosphere "
+		     "light 0), dark bases from below, a sun-coloured silver lining on backlit edges; height fog and aerial "
+		     "perspective applied per pixel (Apply Fogging)"));
+	Out->SetStringField(TEXT("sheet_altitude_law"),
+		TEXT("per frame (frames[].distant_sheet_*): at the deck's base with the camera below the slab's middle (bases), "
+		     "at its top above (tops); faded out inside the slab (world_beauty.distant_sheet_altitude_m)"));
+	Out->SetStringField(TEXT("drawn"),
+		TEXT("M_FlightSimDistantClouds on one earth-curved disc centred on the camera, re-centred and re-levelled per frame"));
+	Record->SetObjectField(TEXT("distant_clouds"), Out);
+}
+
+// Visual round 5, lane L3 (2026-11-10, optional probe): the pinned, sun-clamped
+// Poly Haven sky (core/scene/sky_hdri.py) as the sky light's SPECIFIED CUBEMAP
+// on the clear and hazy presets, so the fill's colour can be compared against
+// the captured sky's (the #02 blue). The sky light's intensity becomes
+// fill_share x the sun's illuminance / pi (the prepared cubemap's upper
+// hemisphere has mean luminance 1). Hero lighting (later) still sets the
+// light's colour; the commandlet's capture-once picks all of this up.
+bool FFlightSimWorldBeauty::ApplySkyHdri(FFlightSimVisualScene& Scene, const FString& Name, const TCHAR* Params,
+                                         FString& Error)
+{
+	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
+	using namespace FlightSimWorldPure;
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetStringField(TEXT("name"), Name);
+	Out->SetStringField(TEXT("preset"), ANSI_TO_TCHAR(PresetName(Preset)));
+	if (Name.IsEmpty() || Name == TEXT("off"))
+	{
+		Out->SetBoolField(TEXT("applied"), false);
+		Out->SetStringField(TEXT("sky"), TEXT("the scene's captured sky (no -sky-hdri=)"));
+		Record->SetObjectField(TEXT("sky_hdri"), Out);
+		return true;
+	}
+	for (const TCHAR C : Name)
+	{
+		if (!FChar::IsAlnum(C) && C != TEXT('_'))
+		{
+			Error = FString::Printf(TEXT("world_beauty.sky_hdri: -sky-hdri=%s is not a pinned sky name "
+			                             "(core/scene/sky_hdri.py HDRIS)"), *Name);
+			return false;
+		}
+	}
+	double FillShare = WorldSkyHdriFillShareDefault;
+	FParse::Value(Params, TEXT("sky-hdri-fill="), FillShare);
+	if (!(FillShare > 0.0) || !FMath::IsFinite(FillShare))
+	{
+		Error = FString::Printf(TEXT("world_beauty.sky_hdri: -sky-hdri-fill=%g is not a positive share"), FillShare);
+		return false;
+	}
+	double YawDeg = 0.0;
+	FParse::Value(Params, TEXT("sky-hdri-yaw="), YawDeg);
+	Out->SetNumberField(TEXT("fill_share"), FillShare);
+	Out->SetNumberField(TEXT("yaw_deg"), YawDeg);
+	if (Preset != PresetClear && Preset != PresetHazy)
+	{
+		Out->SetBoolField(TEXT("applied"), false);
+		Out->SetStringField(TEXT("sky"),
+			TEXT("the scene's captured sky: the HDRI probe applies to the clear and hazy presets only"));
+		Record->SetObjectField(TEXT("sky_hdri"), Out);
+		return true;
+	}
+	USkyLightComponent* Sky = Scene.SkyLightComponent;
+	if (Sky == nullptr)
+	{
+		Error = FString::Printf(TEXT("world_beauty.sky_hdri: the scene has no sky light to put %s on"), *Name);
+		return false;
+	}
+	const FString AssetPath = FString::Printf(TEXT("/Game/FlightSim/Sky/T_SkyHdri_%s.T_SkyHdri_%s"), *Name, *Name);
+	UTextureCube* Cube = LoadObject<UTextureCube>(nullptr, *AssetPath);
+	if (Cube == nullptr)
+	{
+		Error = FString::Printf(TEXT("world_beauty.sky_hdri: %s did not load (prepare it: python -m core.scene.sky_hdri ")
+		                        TEXT("prepare %s, then FLIGHTSIM_SKY_HDRI=%s scripts/ue_create_materials.py in the editor)"),
+		                        *AssetPath, *Name, *Name);
+		return false;
+	}
+	double SunLux = 0.0;
+	if (Scene.Sun != nullptr && Scene.Sun->GetLightComponent() != nullptr)
+	{
+		SunLux = Scene.Sun->GetLightComponent()->Intensity;
+	}
+	Out->SetBoolField(TEXT("real_time_capture_before"), Sky->IsRealTimeCaptureEnabled());
+	Out->SetNumberField(TEXT("source_type_before"), static_cast<int32>(Sky->SourceType));
+	Out->SetNumberField(TEXT("intensity_before"), Sky->Intensity);
+	// A real-time capture ignores the source type: off, as the capture-once expects.
+	Sky->SetRealTimeCapture(false);
+	Sky->SourceType = SLS_SpecifiedCubemap;
+	Sky->SetCubemap(Cube);
+	Sky->SetSourceCubemapAngle(static_cast<float>(YawDeg));
+	if (SunLux > 0.0)
+	{
+		Sky->SetIntensity(static_cast<float>(FillShare * SunLux / PI));
+	}
+	Sky->SetCaptureIsDirty();
+	Sky->MarkRenderStateDirty();
+	Out->SetBoolField(TEXT("applied"), true);
+	Out->SetStringField(TEXT("asset"), AssetPath);
+	Out->SetNumberField(TEXT("sun_lux_at_build"), SunLux);
+	Out->SetNumberField(TEXT("intensity"), Sky->Intensity);
+	Out->SetStringField(TEXT("intensity_basis"), SunLux > 0.0
+		? TEXT("fill_share x the sun light's illuminance / pi (the prepared cubemap's upper hemisphere has mean "
+		       "luminance 1: core/scene/sky_hdri.py prepare); the sun light read as set before this call")
+		: TEXT("kept: no sun light intensity to scale from"));
+	Out->SetStringField(TEXT("cubemap"),
+		TEXT("the pinned Poly Haven CC0 sky (core/scene/sky_hdri.py HDRIS, sha256-pinned, cached, never committed) with "
+		     "its sun disk clamped and its upper hemisphere normalised; the sidecar beside the cached file records the "
+		     "clamp and the sun's image longitude for -sky-hdri-yaw="));
+	Out->SetStringField(TEXT("watch"),
+		TEXT("the #02 blue: compare the shade's R/B against the captured-sky frame of the A/B pair; hero lighting's "
+		     "SetLightColor still tints this fill"));
+	Out->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED: set by probe render on the render machine"));
+	Record->SetObjectField(TEXT("sky_hdri"), Out);
+	return true;
+}
+
 void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Tiles, double CardWetness)
 {
 	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
@@ -1736,17 +2213,35 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 
 	// The clouds drift with the wind at their base, on the FDM's time (the
 	// scene's own law, FFlightSimVisualScene::CloudDriftOffsetMetres).
+	FVector DriftOffset = FVector::ZeroVector;
 	if (DriftMps > 0.0)
 	{
-		const FVector Offset = FFlightSimVisualScene::CloudDriftOffsetMetres(DriftMps, DriftFromDeg, TimeSeconds);
+		DriftOffset = FFlightSimVisualScene::CloudDriftOffsetMetres(DriftMps, DriftFromDeg, TimeSeconds);
 		for (FCloudLayerState& Layer : CloudLayers)
 		{
 			if (Layer.Material != nullptr)
 			{
 				Layer.Material->SetVectorParameterValue(TEXT("WindOffsetM"),
-					FLinearColor(static_cast<float>(Offset.X), static_cast<float>(Offset.Y), 0.0f, 0.0f));
+					FLinearColor(static_cast<float>(DriftOffset.X), static_cast<float>(DriftOffset.Y), 0.0f, 0.0f));
 			}
 		}
+	}
+	// Visual round 5, lane L3: the distant sheet follows the camera (its noise is
+	// in world space, so the clouds stay put), sits at the deck's base or top,
+	// fades out with the camera inside the slab, and drifts with the layer.
+	if (DistantSheet.bDrawn && DistantSheet.Actor != nullptr && DistantSheet.Material != nullptr)
+	{
+		const FDistantSheet Sheet = DistantSheetAltitudeM(CameraCm.Z / WorldCmPerMetre, DistantSheet.BaseM, DistantSheet.TopM);
+		DistantSheet.Actor->SetActorLocation(FVector(CameraCm.X, CameraCm.Y, Sheet.AltitudeM * WorldCmPerMetre));
+		DistantSheet.Material->SetScalarParameterValue(TEXT("SheetFade"), static_cast<float>(Sheet.Fade));
+		if (DriftMps > 0.0)
+		{
+			DistantSheet.Material->SetVectorParameterValue(TEXT("WindOffsetM"),
+				FLinearColor(static_cast<float>(DriftOffset.X), static_cast<float>(DriftOffset.Y), 0.0f, 0.0f));
+		}
+		Frame->SetNumberField(TEXT("distant_sheet_altitude_m"), Sheet.AltitudeM);
+		Frame->SetBoolField(TEXT("distant_sheet_from_above"), Sheet.bFromAbove);
+		Frame->SetNumberField(TEXT("distant_sheet_fade"), Sheet.Fade);
 	}
 
 	// The lightning: both schedules, and the sky light's pulse.

@@ -383,6 +383,13 @@ world_beauty.overrides:
 world_beauty.clouds:
   sentence: "The beauty clouds were asked for in a mode the world look does not know."
   hint: "Ask for the card's clouds, fair-weather clouds or the engine's clouds, or leave the choice out."
+# visual round 5, lane L3 (FlightSimClouds.cpp ApplyDistantClouds / ApplySkyHdri):
+world_beauty.distant_clouds:
+  sentence: "The distant cloud sheet was asked for in a mode the world look does not know."
+  hint: "Ask for -distant-clouds=on or off, or leave the choice out (on)."
+world_beauty.sky_hdri:
+  sentence: "The sky HDRI probe names a sky that is not pinned or not imported, a fill share that is not positive, or a scene with no sky light."
+  hint: "Name a sky from core/scene/sky_hdri.py, prepare it (python -m core.scene.sky_hdri prepare <name>) and import it with FLIGHTSIM_SKY_HDRI set when the editor runs scripts/ue_create_materials.py, or render without -sky-hdri=."
 
   sentence: "The beauty cloud source is not one the renderer knows."
   hint: "Use -beauty-clouds=card, fair or engine."
