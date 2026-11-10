@@ -132,8 +132,101 @@ def test_the_j11_and_c172p_configs_ask_for_the_beauty_body_and_no_other_airframe
             assert config["beauty_mesh"] == {**config["beauty_mesh"], "normals": "crease",
                                              "two_sided": False}
             assert "glas_interior" in config["beauty_mesh"]["flip_objects"]
+            # Round 2 scene 12: no blade in a beauty still of a running engine.
+            assert config["beauty_mesh"]["hide_objects"] == ["PropellerCowlPlugs", "Propeller"]
+            assert config["surfaces"]["propeller"]["objects"] == ["Propeller", "Spinner"]
+            # The measured parts keep both blade pairs: nothing new is excluded.
+            assert "Propeller" not in config["exclude"]
+            assert "PropellerCowlPlugs" not in config["exclude"]
         else:
             assert "beauty_mesh" not in config, path.name
+
+
+def _blade_rows(writer):
+    """Two objects on one slot (a blade and a spinner) and a blade alone
+    on a second slot, as rows _write_beauty_part takes."""
+    tri = [((0.0, 0.0, 0.0), (0, 0)), ((0.0, 100.0, 0.0), (1, 0)), ((100.0, 0.0, 0.0), (0, 1))]
+    fuselage = writer.material_key("fuselage.png", (1.0, 1.0, 1.0), 0.0)
+    rows = []
+    for serial, (name, key) in enumerate((("Propeller", fuselage), ("Spinner", fuselage)), 1):
+        writer.add_triangle(key, tri)
+        rows.append((key, tri, serial, True, 30.0, False, name))
+    return rows, fuselage
+
+
+def test_hide_objects_leave_the_objects_out_of_the_beauty_copy_only(tmp_path):
+    from assets_pipeline.convert import ObjWriter, _write_beauty_part
+
+    measured = ObjWriter()
+    rows, _ = _blade_rows(measured)
+    measured.write(tmp_path / "propeller.obj")
+    before = (tmp_path / "propeller.obj").read_bytes()
+    row = _write_beauty_part(rows, {"normals": "crease", "hide_objects": ["Propeller"]},
+                             measured, tmp_path, "propeller")
+    assert row["part"] == "propeller_beauty"
+    assert row["hidden_faces"] == 1 and row["hidden_objects"] == ["Propeller"]
+    assert row["front_triangles"] == 1 and row["triangles"] == 1
+    assert "label masks" in row["drawn_in"]
+    beauty = (tmp_path / "propeller_beauty.obj").read_text(encoding="utf-8")
+    assert sum(1 for l in beauty.splitlines() if l.startswith("f ")) == 1
+    # The slots are the measured part's, so the commandlet swaps it in.
+    usemtl = lambda text: [l.split()[1] for l in text.splitlines() if l.startswith("usemtl")]
+    assert usemtl(beauty) == usemtl((tmp_path / "propeller.obj").read_text(encoding="utf-8"))
+    # The measured part (every measure frame and its labels) is untouched.
+    assert (tmp_path / "propeller.obj").read_bytes() == before
+
+
+def test_hide_objects_refuse_to_empty_a_slot(tmp_path):
+    from assets_pipeline.convert import ConvertError, ObjWriter, _write_beauty_part
+
+    measured = ObjWriter()
+    rows, _ = _blade_rows(measured)
+    tri = rows[0][1]
+    alone = measured.material_key("prop.png", (1.0, 1.0, 1.0), 0.0)
+    measured.add_triangle(alone, tri)
+    rows.append((alone, tri, 3, True, 30.0, False, "Blade2"))
+    with pytest.raises(ConvertError, match="slot"):
+        _write_beauty_part(rows, {"normals": "crease", "hide_objects": ["Blade2"]},
+                           measured, tmp_path, "propeller")
+
+
+def test_hide_objects_must_be_patterns_that_name_a_converted_object():
+    from assets_pipeline.convert import ConvertError, _beauty_mesh_config, _check_hide_objects
+
+    assert _beauty_mesh_config({"beauty_mesh": {"normals": "crease", "hide_objects": ["P.*"]}})
+    with pytest.raises(ConvertError, match="hide_objects"):
+        _beauty_mesh_config({"beauty_mesh": {"normals": "crease", "hide_objects": "Propeller"}})
+    _check_hide_objects({"hide_objects": ["Propeller"]}, ["Spinner", "Propeller"])
+    with pytest.raises(ConvertError, match="matches no"):
+        _check_hide_objects({"hide_objects": ["Propeler"]}, ["Spinner", "Propeller"])
+
+
+def test_a_surface_gets_a_beauty_copy_only_when_an_object_is_hidden_from_it(tmp_path):
+    from assets_pipeline.convert import ObjWriter, _write_beauty_surfaces
+
+    writers = {"propeller": ObjWriter(), "rudder": ObjWriter()}
+    prop_rows, _ = _blade_rows(writers["propeller"])
+    rudder_rows, _ = _blade_rows(writers["rudder"])
+    rudder_rows = [r[:6] + ("rudder",) for r in rudder_rows]
+    out = _write_beauty_surfaces({"propeller": prop_rows, "rudder": rudder_rows},
+                                 {"normals": "crease", "hide_objects": ["Propeller"]},
+                                 writers, tmp_path)
+    assert list(out) == ["propeller"] and out["propeller"]["part"] == "propeller_beauty"
+    assert not (tmp_path / "rudder_beauty.obj").exists()
+    assert _write_beauty_surfaces(None, {"normals": "crease"}, writers, tmp_path) == {}
+
+
+def test_the_beauty_swap_and_the_import_take_every_beauty_part_by_its_part_name():
+    # A propeller_beauty row under beauty_parts["propeller"] is imported and
+    # swapped onto the component whose mesh is the "propeller" part, with
+    # no engine change: the swap is keyed by the measured mesh's name.
+    assert "BeautyMeshes.Add(Entry.Key, BeautyPart)" in FX_CPP
+    assert "BeautyMeshes.Find(Measured->GetName())" in FX_CPP
+    manifest = {"parts": ["body", "propeller"],
+                "beauty_parts": {"body": {"part": "body_beauty"},
+                                 "propeller": {"part": "propeller_beauty"}}}
+    assert importer.imported_parts(manifest) == ["body", "propeller", "body_beauty",
+                                                 "propeller_beauty"]
 
 
 def test_flip_objects_face_the_other_way_with_no_back_face(tmp_path):
@@ -195,11 +288,14 @@ def test_the_c172p_cockpit_camera_is_at_its_model_s_left_seat_eye(monkeypatch, t
     assert config["views"]["pilot_eye"]["model_m"] == [0.36, -0.21, 0.273]
     # No manifest: the model origin is taken at the FDM's VRP (c172p.xml 42.6, 0, 38.5 in).
     vrp_actor = (-42.6 * 0.0254, 0.0, 38.5 * 0.0254)
-    cg_actor = (-41.0 * 0.0254, 0.0, 36.5 * 0.0254)
+    # From the CG at the FDM's default loading (empty weight, pilot, fuel),
+    # the point the host puts on the track: JSBSim reads 1.0698, -0.0340,
+    # 0.9586 m (round 2 head2 shot d, _fdm_loaded_cg).
+    cg_actor = (-1.0698, -0.0340, 0.9586)
     no_manifest = camera.derive_cockpit_offset("c172p")
     assert no_manifest == pytest.approx(
-        (-0.36 + vrp_actor[0] - cg_actor[0], -0.21, 0.273 + vrp_actor[2] - cg_actor[2]
-         + camera.PILOT_EYE_NUDGE_M[2]), abs=1e-3)
+        (-0.36 + vrp_actor[0] - cg_actor[0], -0.21 - cg_actor[1],
+         0.273 + vrp_actor[2] - cg_actor[2] + camera.PILOT_EYE_NUDGE_M[2]), abs=1e-3)
     assert "VRP" in camera.cockpit_offset_basis("c172p")
     # With the converted manifest (the measured origin, -118.309, 0, 97.422 cm
     # from the pinned c172-common.ac): the eye the convert writes.
@@ -208,7 +304,7 @@ def test_the_c172p_cockpit_camera_is_at_its_model_s_left_seat_eye(monkeypatch, t
     (tmp_path / "c172p" / "mesh_manifest.json").write_text(json.dumps(
         {"views": {"pilot_eye": {"actor_cm": [-154.31, -21.0, 124.72]}}}), encoding="utf-8")
     offset = camera.derive_cockpit_offset("c172p")
-    assert offset == pytest.approx((-0.502, -0.21, 0.35), abs=2e-3)
+    assert offset == pytest.approx((-0.473, -0.176, 0.319), abs=2e-3)
     assert "mesh manifest" in camera.cockpit_offset_basis("c172p")
     # The left seat, aft of the round-1 station (-0.248, +0.3, +0.392).
     assert offset[1] < 0 and offset[0] < -0.248 - 0.2
@@ -348,10 +444,62 @@ def test_the_j11_cockpit_camera_is_at_the_model_s_pilot_eye(monkeypatch, tmp_pat
     (tmp_path / "J11" / "mesh_manifest.json").write_text(json.dumps(
         {"views": {"pilot_eye": {"actor_cm": [-522.99, 0.0, 134.43]}}}), encoding="utf-8")
     offset = camera.derive_cockpit_offset("J11")
-    cg_actor = (-517.35 * 0.0254, 0.0, -21.56 * 0.0254)
+    # The CG at the J11.xml default loading (half tanks), not its empty CG
+    # (517.35, 0, -21.56 in): JSBSim reads 12.7924, 0, -0.5446 m.
+    cg_actor = (-12.7924, 0.0, -0.5446)
     assert offset == pytest.approx((-5.2299 - cg_actor[0] + camera.PILOT_EYE_NUDGE_M[0],
                                     camera.PILOT_EYE_NUDGE_M[1],
                                     1.3443 - cg_actor[2] + camera.PILOT_EYE_NUDGE_M[2]), abs=1e-3)
     assert "mesh manifest" in camera.cockpit_offset_basis("J11")
     # Aft of and above the round-1 station (FDM EYEPOINT + nudge: 8.41 fwd, 1.61 up).
     assert offset[0] < 8.41 - 0.4 and offset[2] > 1.61 + 0.2
+    # head2 shot d: the empty CG put the lens 0.35 m forward of this eye.
+    assert offset[0] == pytest.approx(7.911 - 0.349, abs=2e-3)
+    assert "default loading" in camera.cockpit_offset_basis("J11")
+
+
+def test_the_loaded_cg_is_the_cg_jsbsim_flies():
+    """The hand CG of the FDM's default loading is JSBSim's own
+    inertia/cg-*-in at run_ic, the point the host puts on the track."""
+    jsbsim = pytest.importorskip("jsbsim")
+    import core.scenario.camera as camera
+    from core.fdm.aircraft import resolve
+
+    for aircraft in ("J11", "c172p"):
+        fdm = jsbsim.FGFDMExec(str(resolve(aircraft).root_dir))
+        fdm.set_debug_level(0)
+        fdm.load_model(aircraft)
+        fdm["ic/h-sl-ft"] = 5000.0
+        fdm["ic/vc-kts"] = 120.0
+        fdm.run_ic()
+        flown = tuple(fdm[f"inertia/cg-{axis}-in"] * 0.0254 for axis in "xyz")
+        assert camera._fdm_loaded_cg(aircraft) == pytest.approx(flown, abs=2e-3), aircraft
+    # The J-11's default fuel sits forward of its empty CG (13.141 m).
+    assert camera._fdm_loaded_cg("J11")[0] == pytest.approx(12.792, abs=1e-3)
+    assert camera._fdm_loaded_cg("no_such_airframe") is None
+
+
+def test_the_j11_pilot_eye_is_the_seated_pilot_s_eye_in_the_mesh():
+    """The J-11 eye against the package geometry (Su-27.ac, panel.ac,
+    seat2.ac, fighter_default.ac at the pinned commit, read 2026-11-10 in
+    the FG model frame, x aft, z up): the windscreen arch (Canopy /
+    GLS_Canopy_Rear.001 front bow) at x 4.53-4.65 m, z 1.56-1.62 m; the
+    canopy glass's crown z 1.725 m at x 5.1 m; the HUD (Panel.Cap.*,
+    Panel.wcs) x 4.47-4.73 m, top z 1.33 m; the pilot figure's goggles
+    (lunettes) x 5.23-5.29 m, z 1.41-1.51 m; the seat's head rest from
+    x 5.56 m. The lens (the views.pilot_eye plus PILOT_EYE_NUDGE_M) must
+    sit behind the arch, under the canopy, at the goggles, ahead of the
+    head rest, with the HUD below the line of sight."""
+    import core.scenario.camera as camera
+
+    config = json.loads((ROOT / "assets/aircraft_config/J11.json").read_text(encoding="utf-8"))
+    x, y, z = config["views"]["pilot_eye"]["model_m"]
+    z += camera.PILOT_EYE_NUDGE_M[2]
+    x -= camera.PILOT_EYE_NUDGE_M[0]
+    assert x > 4.65 + 0.5                 # well behind the windscreen arch
+    assert 5.23 <= x <= 5.29 and 1.41 <= z <= 1.51   # at the goggles
+    assert x < 5.56                       # ahead of the head rest
+    assert 1.725 - z > 0.2                # head room under the canopy crown
+    hud_deg = math.degrees(math.atan2(z - 1.33, x - 4.73))
+    assert 10.0 < hud_deg < 25.0          # the HUD frame low in the view (24 mm: 22.9 deg half)
+    assert y == 0.0
