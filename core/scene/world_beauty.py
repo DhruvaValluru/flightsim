@@ -79,6 +79,21 @@ ATMOSPHERE_FIELDS: Tuple[str, ...] = (
     "lightning_sky_gain",           # sky light x (1 + gain x flash) at a flash
 )
 
+#: Visual round 3 (round 2's #07, a tower view of an A320 at 1000 m in 10 mm/h
+#: rain: a flat grey frame, the airframe ~30 px at 1.2-1.5 km and within a few
+#: levels of the grey around it). The rain look's haze is FogDensity 0.012
+#: (lighting.RAIN_ANCHORS, 5x the default). The scene's analytic fog draws it as
+#: beta = FogDensity x 0.1 ln(2)^2 per metre (the law weather_visuals and the
+#: tiles' fog depth use) and starts 1500 m out; the beauty's volumetric fog
+#: (on inside vfog_distance_m, from the camera) draws FogDensity / 1000 per cm,
+#: 0.1 x FogDensity per metre [engine convention, unverified here]: about twice
+#: the analytic beta, over the whole subject range. At 0.0012 /m the airframe
+#: kept exp(-1.8) = 17 % of its contrast. The wet rows scale the volumetric
+#: fog's extinction by ln(2)^2, so it draws the analytic beta: one haze, no seam
+#: at the hand-off, and the subject at 1.5 km keeps ~42 %. Rain and storm only
+#: (their haze is 3-10x a clear day's). UNCALIBRATED: set by probe render.
+WET_VFOG_EXTINCTION_SCALE = 0.48
+
 #: UNCALIBRATED: set by probe render on the render machine (every number).
 #: Fix pass (2026-11-09): the rows no longer carry the planet's ground albedo
 #: (one law of the card's surface and wetness: ground_albedo_srgb) nor the
@@ -103,11 +118,11 @@ ATMOSPHERE: Dict[str, Dict[str, float]] = {
                      wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0),
     "rain": dict(mie_scale_height_km=1.0, mie_anisotropy=0.65, mie_share=0.3, mie_cap_per_km=0.8,
                  aerial_perspective_scale=1.0, vfog_distance_m=4000.0, vfog_scattering_distribution=0.3,
-                 vfog_extinction_scale=1.0, cloud_bottom_occlusion=0.85, rain_readability_gain=1.5,
+                 vfog_extinction_scale=WET_VFOG_EXTINCTION_SCALE, cloud_bottom_occlusion=0.85, rain_readability_gain=1.5,
                  wetness_floor=0.6, tiles_detail_strength=0.12, lightning_sky_gain=0.0),
     "storm": dict(mie_scale_height_km=1.8, mie_anisotropy=0.65, mie_share=0.3, mie_cap_per_km=0.8,
                   aerial_perspective_scale=1.0, vfog_distance_m=4000.0, vfog_scattering_distribution=0.3,
-                  vfog_extinction_scale=1.0, cloud_bottom_occlusion=0.9, rain_readability_gain=1.5,
+                  vfog_extinction_scale=WET_VFOG_EXTINCTION_SCALE, cloud_bottom_occlusion=0.9, rain_readability_gain=1.5,
                   wetness_floor=0.85, tiles_detail_strength=0.12, lightning_sky_gain=3.0),
 }
 

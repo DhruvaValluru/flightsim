@@ -400,6 +400,9 @@ private:
 	double LayerBaseDrawnMetres = 0.0;
 	double LayerTopDrawnMetres = 0.0;
 	double LayerExtinctionDrawn = 0.0;
+	// The Noise parameter as BuildCell drew it (seed, billow, erosion, updraft):
+	// the beauty vantage redraws it with BEAUTY_EROSION (visual round 3).
+	FLinearColor NoiseDrawn = FLinearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	// Beauty only (ApplyBeautyStormVantage); zero on every other render, so the
 	// measure path draws exactly what it drew.
 	FVector BeautyCellOffsetCm = FVector::ZeroVector;

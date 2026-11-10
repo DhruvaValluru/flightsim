@@ -401,3 +401,147 @@ def test_the_meter_design_lands_a_blown_frame_and_leaves_a_bright_one():
     # a dark frame still opens exactly as before
     dark = lambda opened: min(1.0, 0.1 * 2.0 ** (opened / 2.2))
     assert _meter(dark, may_close=True) == _meter(dark, may_close=False)
+
+
+# -- visual round 3: #09's deck and tower read as cloud, not a box -----------------------
+# Round 2's #09 (the cell drawn ahead, the deck above the 747): "the deck reads as a
+# hard-edged flat slab with vertical walls (box-shaped, visible corners)". What the
+# frame showed between the deck and the ground was the TOWER's lower part: a
+# smoothstep cylinder (500 m edge) whose 0.19 /m core is opaque at the first few per
+# cent of that edge, so the 600 m erosion moved its silhouette by tens of metres --
+# a drum with a flat base, capped by the look's deck, itself a flat 100 m-edged band
+# at cover 0.95. The beauty's Ragged block warps the wall, lifts the base and the
+# deck's base unevenly, softens and erodes the deck's base.
+
+STORM_HLSL = (REPO / "assets" / "shaders" / "weather" / "storm_cell.hlsl").read_text(encoding="utf-8")
+MATERIALS_PY = (REPO / "scripts" / "ue_create_materials.py").read_text(encoding="utf-8")
+
+
+def _tower_edge_m(cell, ragged, azimuth_deg, up_m):
+    """The outermost radius at which the tower's smooth shape reaches 0.5."""
+    az = math.radians(azimuth_deg)
+    for r in range(6000, 0, -25):
+        if storm_cell.shapes(cell, r * math.sin(az), r * math.cos(az), up_m, ragged)["tower"] >= 0.5:
+            return float(r)
+    return 0.0
+
+
+def test_round_two_tower_is_a_drum_and_the_ragged_warp_billows_it():
+    cell = _round_one_747_cell()
+    smooth = [_tower_edge_m(cell, None, a, 2000.0) for a in range(0, 360, 10)]
+    assert max(smooth) - min(smooth) == 0.0                       # round 2: a perfect cylinder
+    ragged = [_tower_edge_m(cell, storm_cell.BEAUTY_RAGGED, a, 2000.0) for a in range(0, 360, 10)]
+    assert max(ragged) - min(ragged) >= 600.0                     # beauty: a billowing wall
+    # never out past the warp, so the vantage's clearance (2500 m) still holds
+    assert max(ragged) <= max(smooth) + storm_cell.BEAUTY_RAGGED["warp_m"] + storm_cell.EDGE_M
+    assert storm_cell.BEAUTY_RAGGED["warp_m"] < storm_cell.BEAUTY_VANTAGE_CLEARANCE_M / 2.0
+
+
+def test_the_ragged_base_and_deck_lift_upward_only():
+    cell = _round_one_747_cell()
+    lift = storm_cell.BEAUTY_RAGGED["base_m"]
+    cuts, lifts = [], []
+    for a in range(0, 360, 7):
+        for r in (300.0, 1500.0, 2400.0, 8000.0):
+            e, n = r * math.sin(math.radians(a)), r * math.cos(math.radians(a))
+            w = storm_cell.ragged_warp(cell, e, n, cell["base_m"] - 100.0, storm_cell.BEAUTY_RAGGED,
+                                       layer_base_m=2400.0)
+            cuts.append(w["base_cut"])
+            lifts.append(w["deck_lift"])
+    assert min(cuts) >= cell["base_m"] and max(cuts) <= cell["base_m"] + lift
+    assert min(lifts) >= 0.0 and max(lifts) <= lift            # the deck never comes down on the aircraft
+    assert max(cuts) - min(cuts) >= 0.5 * lift                 # a torn base, not a flat one
+
+
+def test_without_ragged_the_cell_is_the_measure_paths():
+    cell = _round_one_747_cell()
+    zero = dict(storm_cell.BEAUTY_RAGGED, warp_m=0.0)
+    for e, n, u in ((0.0, 0.0, 3000.0), (2100.0, 300.0, 1100.0), (1800.0, -900.0, 2000.0),
+                    (500.0, 200.0, 400.0), (900.0, 900.0, 15000.0)):
+        w = storm_cell.ragged_warp(cell, e, n, u, None)
+        assert w == {"rt": math.hypot(e, n), "base_cut": cell["base_m"], "deck_lift": 0.0}
+        assert storm_cell.extinction_at(cell, e, n, u, 0.0) == storm_cell.extinction_at(cell, e, n, u, 0.0, zero)
+
+
+def test_the_shader_ragged_block_is_the_python_twin_and_off_by_default():
+    block = _block(STORM_HLSL, "float deckLift = 0.0;", "float f = saturate(")
+    assert "if (Ragged.x > 0.0)" in block
+    for constant in ("2.5 * (S.Value(float3(e, n, 0.0) / (scale * 0.5), (uint)Noise.x + 5u) - 0.5)",
+                     "2.5 * (S.Value(float3(e, n, u * 0.5) / scale, (uint)Noise.x + 4u) - 0.5)",
+                     "r < towerR * 1.25 + Ragged.x + Edge * 2.0",
+                     "u < max(base, Layer.y) + Ragged.y + max(Ragged.w, 100.0) + Edge"):
+        assert constant in block, constant
+    assert storm_cell.RAGGED_WARP_GAIN == 2.5
+    # the tower and the dome read the warped radius and base; the shaft does not
+    assert "S.Ss(radius, radius - Edge * 2.0, rt) * S.Ss(baseCut, baseCut + Edge, u)" in STORM_HLSL
+    assert "tower = max(tower, S.Ss(dome, dome - Edge, rt));" in STORM_HLSL
+    assert "float shaft = S.Ss(shaftR, shaftR * 0.6, r)" in STORM_HLSL
+    # the deck: the measure path's 100 m band when Ragged is 0
+    assert "float deckSoft = Ragged.x > 0.0 ? max(Ragged.w, 100.0) : 100.0;" in STORM_HLSL
+    assert "float band = S.Ss(deckBase, deckBase + deckSoft, u) * S.Ss(Layer.z, Layer.z - 100.0, u);" \
+        in STORM_HLSL
+    assert "if (Ragged.x > 0.0 && band > 0.0 && u < deckBase + deckSoft)" in STORM_HLSL
+    # the material exposes it (a float4, default 0) and is rebuilt on every machine
+    assert '"ExtinctionScale", "Ragged")' in MATERIALS_PY
+    assert '"Layer", "Flash", "Glass", "Ragged")' in MATERIALS_PY
+    assert '"Time": params["Time"], "Ragged": params["Ragged"]}' in MATERIALS_PY
+    assert '"M_StormCell": "3"' in MATERIALS_PY
+
+
+def test_the_cpp_ragged_constants_are_the_pythons_and_beauty_only():
+    apply = _function(WEATHER_CPP, "void FFlightSimWeather::ApplyBeautyStormVantage(")
+    ragged = storm_cell.BEAUTY_RAGGED
+    assert f"constexpr double WeatherRaggedWarpM = {ragged['warp_m']};" in apply
+    assert f"constexpr double WeatherRaggedBaseM = {ragged['base_m']};" in apply
+    assert f"constexpr double WeatherRaggedScaleM = {ragged['scale_m']};" in apply
+    assert f"constexpr double WeatherRaggedDeckSoftM = {ragged['deck_soft_m']};" in apply
+    assert f"constexpr double WeatherBeautyErosion = {storm_cell.BEAUTY_EROSION};" in apply
+    assert 'SetVectorParameterValue(TEXT("Ragged")' in apply
+    assert "FLinearColor(NoiseDrawn.R, NoiseDrawn.G, static_cast<float>(WeatherBeautyErosion), NoiseDrawn.A)" \
+        in apply
+    assert storm_cell.EROSION < storm_cell.BEAUTY_EROSION < 1.0
+    # BuildCell (every render) never sets it: the material's default 0 is the measure shader
+    build = _function(WEATHER_CPP, "bool FFlightSimWeather::BuildCell(")
+    assert 'TEXT("Ragged")' not in build
+    assert WEATHER_CPP.count('TEXT("Ragged")') == 1
+    assert "FLinearColor NoiseDrawn = FLinearColor(0.0f, 0.0f, 0.0f, 0.0f);" in WEATHER_H
+
+
+# -- visual round 3: #07's subject through the rain ---------------------------------------
+# Round 2's #07: the A320 at 1000 m, the tower camera 80 m up at (-800 E, 900 N): a
+# slant range of 1515 m at the start (37 deg up), ~30 px across at 35 mm, and within a
+# few grey levels of the frame around it. The rain look's haze (FogDensity 0.012) is
+# drawn by the beauty's volumetric fog at 0.1 x FogDensity per metre from the camera,
+# twice the analytic fog's beta (0.1 ln(2)^2 x FogDensity, which also starts 1500 m out).
+
+
+def test_round_two_tower_view_geometry():
+    tower = (-800.0, 900.0, 80.0)
+    aircraft = (0.0, 0.0, 1000.0)
+    horizontal = math.hypot(aircraft[0] - tower[0], aircraft[1] - tower[1])
+    slant = math.hypot(horizontal, aircraft[2] - tower[2])
+    assert slant == pytest.approx(1515.0, abs=2.0)
+    elevation = math.degrees(math.atan2(aircraft[2] - tower[2], horizontal))
+    half_vfov = math.degrees(math.atan(20.25 / 2.0 / 35.0))
+    # the aim is 37 deg up and the frame's bottom edge 21 deg up: no ground in the frame
+    assert elevation - half_vfov > 20.0
+    span_px = 34.1 * (1280.0 / 2.0 / (36.0 / 2.0 / 35.0)) / slant
+    assert 25.0 < span_px < 32.0
+
+
+def test_the_wet_rows_draw_the_analytic_haze_and_keep_the_subject():
+    assert wb.WET_VFOG_EXTINCTION_SCALE == pytest.approx(math.log(2.0) ** 2, abs=0.005)
+    for preset in ("rain", "storm"):
+        assert wb.ATMOSPHERE[preset]["vfog_extinction_scale"] == wb.WET_VFOG_EXTINCTION_SCALE
+    for preset in ("clear", "hazy", "overcast"):
+        assert wb.ATMOSPHERE[preset]["vfog_extinction_scale"] == 1.0   # unchanged
+    fog_density = 0.012                                                # lighting.rain_knobs(10 mm/h)
+    volumetric = 0.1 * fog_density
+    before = math.exp(-volumetric * 1.0 * 1515.0)
+    after = math.exp(-volumetric * wb.WET_VFOG_EXTINCTION_SCALE * 1515.0)
+    assert before < 0.2 and after > 0.4
+    # one haze: the volumetric fog's beta is now the analytic fog's
+    analytic = fog_density * 0.1 * math.log(2.0) ** 2
+    assert volumetric * wb.WET_VFOG_EXTINCTION_SCALE == pytest.approx(analytic, rel=0.01)
+    rows = _function(CLOUDS_CPP, "inline double AtmosphereDefault(int Preset, int Field)")
+    assert rows.count("4000.0, 0.3, 0.48,") == 2

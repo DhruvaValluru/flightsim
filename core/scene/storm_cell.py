@@ -93,6 +93,20 @@ SHAFT_NOISE_STRETCH = 8.0
 GLOW_DIFFUSION_M = 1500.0
 #: The shape's soft edges (m).
 EDGE_M = 250.0
+#: Visual round 3 (BEAUTY ONLY, the material's ``Ragged`` parameter; zero on every
+#: other render, so the measure path's shader is the one above). Round 2's #09
+#: drew the tower as a hard-walled drum with a flat base and the deck as a flat
+#: slab: at the core's ~0.19 /m the first few per cent of the 500 m edge are
+#: opaque, so the 600 m erosion moved the silhouette by tens of metres. The
+#: beauty warps the tower's radius by up to ``warp_m`` with one octave of value
+#: noise ``scale_m`` across, lifts the base and the deck's base unevenly by up
+#: to ``base_m`` (upward only: the aircraft's clearance below the deck holds),
+#: softens the deck's base over ``deck_soft_m`` and erodes it there, and erodes
+#: every edge harder (``erosion``). UNCALIBRATED: set by probe render on the
+#: render machine. The C++ twin is FFlightSimWeather::ApplyBeautyStormVantage.
+RAGGED_WARP_GAIN = 2.5
+BEAUTY_RAGGED = {"warp_m": 800.0, "base_m": 300.0, "scale_m": 1800.0, "deck_soft_m": 400.0}
+BEAUTY_EROSION = 0.6
 
 #: The card's ``weather.cell`` keys, in their fixed order.
 CARD_KEYS = ("centre", "base_m", "top_m", "overshoot_m", "tower_radius_m", "anvil_radius_m",
@@ -228,22 +242,53 @@ def fbm(x: float, y: float, z: float, seed: int) -> float:
     return total / norm
 
 
-def shapes(cell: Dict[str, Any], e: float, n: float, u: float) -> Dict[str, float]:
-    """The smooth shapes (0..1) before erosion: tower, anvil, shaft."""
+def ragged_warp(cell: Dict[str, Any], e: float, n: float, u: float,
+                 ragged: Optional[Dict[str, float]], layer_base_m: float = 0.0) -> Dict[str, float]:
+    """The beauty ragged warp (storm_cell.hlsl's ``Ragged`` block): the tower's
+    warped radius ``rt``, its lifted base ``base_cut`` and the deck's lift
+    ``deck_lift``. With no ``ragged`` (every render but -quality=beauty) the
+    smooth shape's own r and base, and no lift."""
+    base = float(cell["base_m"])
+    tower_r = float(cell["tower_radius_m"])
+    r = math.hypot(e, n)
+    out = {"rt": r, "base_cut": base, "deck_lift": 0.0}
+    if not ragged or not float(ragged["warp_m"]) > 0.0:
+        return out
+    warp, lift = float(ragged["warp_m"]), float(ragged["base_m"])
+    scale = max(float(ragged["scale_m"]), 1.0)
+    seed = int(cell["noise"]["seed"])
+    if u < max(base, float(layer_base_m)) + lift + max(float(ragged["deck_soft_m"]), 100.0) + EDGE_M:
+        wb = min(1.0, max(0.0, 0.5 + RAGGED_WARP_GAIN
+                          * (value_noise(e / (scale * 0.5), n / (scale * 0.5), 0.0, seed + 5) - 0.5)))
+        out["base_cut"] = base + lift * wb
+        out["deck_lift"] = lift * wb
+    if r < tower_r * 1.25 + warp + EDGE_M * 2.0:
+        wr = min(1.0, max(-1.0, RAGGED_WARP_GAIN
+                          * (value_noise(e / scale, n / scale, u * 0.5 / scale, seed + 4) - 0.5)))
+        out["rt"] = max(r + warp * wr, 0.0)
+    return out
+
+
+def shapes(cell: Dict[str, Any], e: float, n: float, u: float,
+           ragged: Optional[Dict[str, float]] = None) -> Dict[str, float]:
+    """The smooth shapes (0..1) before erosion: tower, anvil, shaft. ``ragged``
+    (beauty only, :data:`BEAUTY_RAGGED`) warps the tower's wall and base."""
     base = float(cell["base_m"])
     top = float(cell["top_m"])
     tower_r = float(cell["tower_radius_m"])
     r = math.hypot(e, n)
+    warped = ragged_warp(cell, e, n, u, ragged)
+    rt, base_cut = warped["rt"], warped["base_cut"]
     # The tower, flaring upward, with an overshooting dome over the top.
     f = min(1.0, max(0.0, (u - base) / (top - base)))
     radius = tower_r * (1.0 - TOWER_FLARE * 0.5 + TOWER_FLARE * f)
-    tower = (_smoothstep(radius, radius - EDGE_M * 2.0, r) * _smoothstep(base, base + EDGE_M, u)
+    tower = (_smoothstep(radius, radius - EDGE_M * 2.0, rt) * _smoothstep(base_cut, base_cut + EDGE_M, u)
              * _smoothstep(top + EDGE_M, top - EDGE_M, u))
     over = float(cell["overshoot_m"])
     if top - EDGE_M < u < top + over:
         h = (u - top) / over
         dome = OVERSHOOT_RADIUS_FRACTION * tower_r * math.sqrt(max(0.0, 1.0 - max(h, 0.0) ** 2))
-        tower = max(tower, _smoothstep(dome, dome - EDGE_M, r))
+        tower = max(tower, _smoothstep(dome, dome - EDGE_M, rt))
     # The anvil: displaced downwind with height, thinning toward its edge.
     bottom = float(cell["anvil_bottom_m"])
     lift = min(1.0, max(0.0, (u - bottom) / (top - bottom)))
@@ -261,10 +306,12 @@ def shapes(cell: Dict[str, Any], e: float, n: float, u: float) -> Dict[str, floa
     return {"tower": tower, "anvil": anvil, "shaft": shaft}
 
 
-def extinction_at(cell: Dict[str, Any], e: float, n: float, u: float, t: float = 0.0) -> float:
+def extinction_at(cell: Dict[str, Any], e: float, n: float, u: float, t: float = 0.0,
+                  ragged: Optional[Dict[str, float]] = None) -> float:
     """The cell's extinction (1/m) at a point at run time t -- the shader's
-    function, constant for constant."""
-    s = shapes(cell, e, n, u)
+    function, constant for constant. ``ragged`` is the beauty warp
+    (:data:`BEAUTY_RAGGED`; None on every other render)."""
+    s = shapes(cell, e, n, u, ragged)
     noise = cell["noise"]
     seed = int(noise["seed"])
     billow = float(noise["billow_m"])

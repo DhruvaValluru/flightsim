@@ -349,6 +349,13 @@ void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const
 {
 	constexpr double WeatherBeautyVantageClearanceM = 2500.0;
 	constexpr double WeatherBeautyRainShareFloor = 0.3;
+	// Visual round 3: core/scene/storm_cell.py BEAUTY_RAGGED, BEAUTY_EROSION
+	// (pinned by tests/test_weather_scenes.py). UNCALIBRATED.
+	constexpr double WeatherRaggedWarpM = 800.0;
+	constexpr double WeatherRaggedBaseM = 300.0;
+	constexpr double WeatherRaggedScaleM = 1800.0;
+	constexpr double WeatherRaggedDeckSoftM = 400.0;
+	constexpr double WeatherBeautyErosion = 0.6;
 	const TSharedPtr<FJsonObject>* CellRow = nullptr;
 	if (!bCell || StormMaterial == nullptr || !Record.IsValid() ||
 	    !Record->TryGetObjectField(TEXT("cell"), CellRow) || CellRow == nullptr || !CellRow->IsValid())
@@ -396,6 +403,30 @@ void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const
 		StormMaterial->SetVectorParameterValue(TEXT("Layer"),
 			FLinearColor(static_cast<float>(LayerCoverDrawn), static_cast<float>(LayerBaseM),
 			             static_cast<float>(LayerTopM), static_cast<float>(LayerExtinctionDrawn)));
+	}
+	// Visual round 3 (round 2's #09: the tower a hard-walled drum with a flat
+	// base, the deck a flat slab with 100 m edges): the material's Ragged
+	// block warps the tower's wall by up to WeatherRaggedWarpM, lifts its base
+	// and the deck's unevenly (upward only, so the clearance above holds),
+	// softens and erodes the deck's base, and every edge erodes harder.
+	StormMaterial->SetVectorParameterValue(TEXT("Ragged"),
+		FLinearColor(static_cast<float>(WeatherRaggedWarpM), static_cast<float>(WeatherRaggedBaseM),
+		             static_cast<float>(WeatherRaggedScaleM), static_cast<float>(WeatherRaggedDeckSoftM)));
+	StormMaterial->SetVectorParameterValue(TEXT("Noise"),
+		FLinearColor(NoiseDrawn.R, NoiseDrawn.G, static_cast<float>(WeatherBeautyErosion), NoiseDrawn.A));
+	{
+		TSharedPtr<FJsonObject> Ragged = WeatherRecord();
+		Ragged->SetNumberField(TEXT("warp_m"), WeatherRaggedWarpM);
+		Ragged->SetNumberField(TEXT("base_m"), WeatherRaggedBaseM);
+		Ragged->SetNumberField(TEXT("scale_m"), WeatherRaggedScaleM);
+		Ragged->SetNumberField(TEXT("deck_soft_m"), WeatherRaggedDeckSoftM);
+		Ragged->SetNumberField(TEXT("erosion"), WeatherBeautyErosion);
+		Ragged->SetNumberField(TEXT("erosion_card"), NoiseDrawn.B);
+		Ragged->SetStringField(TEXT("basis"),
+			TEXT("storm_cell.BEAUTY_RAGGED: the tower's wall warped by one octave of value noise, its base and the "
+			     "deck's lifted unevenly (upward only), the deck's base softened and eroded: a ragged cloud base, "
+			     "not a slab. Visual only; UNCALIBRATED"));
+		Row->SetObjectField(TEXT("ragged"), Ragged);
 	}
 	Row->SetBoolField(TEXT("deck_moved"), bLayerMoved);
 	Row->SetNumberField(TEXT("deck_base_m"), bLayerMoved ? LayerBaseM : LayerBaseDrawnMetres);
@@ -1483,6 +1514,10 @@ bool FFlightSimWeather::BuildCell(UWorld* World, const TSharedPtr<FJsonObject>& 
 	StormMaterial->SetVectorParameterValue(TEXT("Noise"),
 		FLinearColor(static_cast<float>(Seed), static_cast<float>(Billow), static_cast<float>(Erosion),
 		             static_cast<float>(Updraft)));
+	// Kept for the beauty's ragged edges (ApplyBeautyStormVantage); "Ragged"
+	// stays at the material's default 0 here, so this draw is the measure one.
+	NoiseDrawn = FLinearColor(static_cast<float>(Seed), static_cast<float>(Billow), static_cast<float>(Erosion),
+	                          static_cast<float>(Updraft));
 	StormMaterial->SetVectorParameterValue(TEXT("Drift"),
 		FLinearColor(static_cast<float>(Drift[0]), static_cast<float>(Drift[1]), 0.0f, 0.0f));
 	// The look's layer inside the storm's material (0 cover: none). Its depth

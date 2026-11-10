@@ -12,6 +12,11 @@
 //   Noise      float4  seed, billow_m, erosion, updraft_mps
 //   Drift      float4  anvil drift east, north (m/s), unused, unused
 //   Layer      float4  look.clouds cover (0..1), base_m, top_m, extinction (1/m)
+//   Ragged     float4  BEAUTY ONLY (0 on every other render: the shader below is then
+//                      the measure path's, expression for expression): warp_m (the
+//                      silhouette's noise displacement), base_m (the base's and the
+//                      deck's ragged depth, upward only), scale_m (the warp noise's
+//                      size), deck_soft_m (the deck's base softness)
 //   Time       float   run time, s
 struct FStormCell
 {
@@ -74,15 +79,43 @@ float n = dot(Rel, NorthAxis) / 100.0;
 float u = Rel.z / 100.0;
 float base = Geo1.x; float top = Geo1.y; float over = Geo1.z; float towerR = Geo1.w;
 float r = sqrt(e * e + n * n);
+// Visual round 3 (beauty only, storm_cell.ragged_*): the tower's smooth shape
+// is a cylinder whose 0.19 /m core is opaque at the first few per cent of its
+// 500 m edge, so the 600 m erosion moved the silhouette by tens of metres: a
+// hard-walled drum with a flat base. Ragged warps the tower's radius by one
+// octave of large-scale value noise and lifts the base (and the deck's) unevenly,
+// upward only, so the silhouette billows and the base is torn.
+// RAGGED_WARP_GAIN = 2.5 (one octave's 2.5 sigma to 1), seeds + 4u / + 5u. One
+// octave each, evaluated only where it can change the shape (the warp inside the
+// tower's reach, the lift below the highest lifted base): the constrained GPU's
+// march is not made much dearer per sample.
+float rt = r;
+float baseCut = base;
+float deckLift = 0.0;
+if (Ragged.x > 0.0)
+{
+	float scale = max(Ragged.z, 1.0);
+	if (u < max(base, Layer.y) + Ragged.y + max(Ragged.w, 100.0) + Edge)
+	{
+		float wb = saturate(0.5 + 2.5 * (S.Value(float3(e, n, 0.0) / (scale * 0.5), (uint)Noise.x + 5u) - 0.5));
+		baseCut = base + Ragged.y * wb;
+		deckLift = Ragged.y * wb;
+	}
+	if (r < towerR * 1.25 + Ragged.x + Edge * 2.0)
+	{
+		float wr = clamp(2.5 * (S.Value(float3(e, n, u * 0.5) / scale, (uint)Noise.x + 4u) - 0.5), -1.0, 1.0);
+		rt = max(r + Ragged.x * wr, 0.0);
+	}
+}
 float f = saturate((u - base) / (top - base));
 float radius = towerR * (1.0 - 0.25 * 0.5 + 0.25 * f);
-float tower = S.Ss(radius, radius - Edge * 2.0, r) * S.Ss(base, base + Edge, u)
+float tower = S.Ss(radius, radius - Edge * 2.0, rt) * S.Ss(baseCut, baseCut + Edge, u)
             * S.Ss(top + Edge, top - Edge, u);
 if (u > top - Edge && u < top + over)
 {
 	float h = (u - top) / over;
 	float dome = 0.5 * towerR * sqrt(max(0.0, 1.0 - max(h, 0.0) * max(h, 0.0)));
-	tower = max(tower, S.Ss(dome, dome - Edge, r));
+	tower = max(tower, S.Ss(dome, dome - Edge, rt));
 }
 float bottom = Geo2.y;
 float lift = saturate((u - bottom) / (top - bottom));
@@ -106,8 +139,18 @@ float sigma = Sigma.x * S.Eroded(tower, rise, erosion)
 // the layer is the engine default's job when no storm is on the card).
 if (Layer.x > 0.0)
 {
-	float band = S.Ss(Layer.y, Layer.y + 100.0, u) * S.Ss(Layer.z, Layer.z - 100.0, u);
+	// Beauty (Ragged.x > 0): the deck's base lifted unevenly (never below the
+	// stated base, so the aircraft's clearance holds), softened over
+	// deck_soft_m and eroded there, so it reads as a ragged cloud base, not a
+	// flat slab. Otherwise the measure path's 100 m band.
+	float deckBase = Layer.y + deckLift;
+	float deckSoft = Ragged.x > 0.0 ? max(Ragged.w, 100.0) : 100.0;
+	float band = S.Ss(deckBase, deckBase + deckSoft, u) * S.Ss(Layer.z, Layer.z - 100.0, u);
 	float cover = saturate((S.Fbm(float3(e, n, u * 4.0) / 2000.0, seed + 3u) - (1.0 - Layer.x)) / 0.15);
+	if (Ragged.x > 0.0 && band > 0.0 && u < deckBase + deckSoft)
+	{
+		band = S.Eroded(band, S.Fbm(float3(e, n, u) / billow, seed + 6u), erosion);
+	}
 	sigma += Layer.w * band * cover;
 }
 return sigma;
