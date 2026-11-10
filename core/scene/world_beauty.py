@@ -328,6 +328,16 @@ CLOUDS: Dict[str, Dict[str, float]] = {
 #: cloud (a stated stylisation, recorded; never the default). UNCALIBRATED.
 FAIR_LAYER = {"cover": 0.35, "base_m": 1500.0, "top_m": 2700.0}
 
+#: Round 3 (2026-11-10): the cover a RAIN world's layer gets when the card states
+#: none. The rain preset draws nimbostratus, whose default cover (0.98) is a solid
+#: sheet: round 1's #06 (A320 over SFO at 3000 m, moderate rain, no cloud on the
+#: card) showed cloud-top white and sky and no ground at all. A card that states a
+#: cover (an overcast word, a sampled deck) keeps it; a storm keeps its deck. 0.6
+#: is the low end of METAR "broken" (5/8): the layer reads as rain cloud and the
+#: ground reads through its gaps. UNCALIBRATED: set by probe render on the render
+#: machine (#06's lower half should show the bay and the city between clouds).
+RAIN_DEFAULT_COVER = 0.6
+
 #: The seeded noise offset spans this many km, so two seeds never share a sky.
 CLOUD_SEED_SPAN_KM = 1000.0
 #: The extinction scale on the material (1 = the row's 1/m read as the engine's
@@ -432,7 +442,8 @@ def layer_cover_and_shape(card_cover: Optional[float], thickness_m: float, prese
                           fair: bool) -> Tuple[float, str]:
     """The cover a redrawn layer gets and its shape (FlightSimClouds.cpp
     LayerCoverAndShape, the cover the occlusion row then uses): the fair layer
-    is FAIR_LAYER's cover; a card's cover is kept; otherwise the default cover
+    is FAIR_LAYER's cover; a card's cover is kept; a rain world's unstated
+    layer is RAIN_DEFAULT_COVER (broken, round 3); otherwise the default cover
     of the shape a cover-0 layer of this thickness would be. The shape is then
     chosen again from the cover in force. ``card_cover`` None (or below 0)
     means the card states none."""
@@ -442,6 +453,8 @@ def layer_cover_and_shape(card_cover: Optional[float], thickness_m: float, prese
         cover = FAIR_LAYER["cover"]
     elif stated:
         cover = float(card_cover)
+    elif preset == "rain":
+        cover = RAIN_DEFAULT_COVER
     else:
         cover = CLOUDS[guess]["default_cover"]
     return cover, select_cloud(cover, thickness_m, preset)

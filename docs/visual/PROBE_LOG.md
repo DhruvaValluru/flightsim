@@ -2621,3 +2621,50 @@ Probes (UNCALIBRATED):
 - pc-blue: #01 and #08 at beauty. Read the shadow midtone hue on the cliffs and the slope.
   Pass: 195-235 deg with R <= G. If it is still violet, render #01 with BlueCorrection 0.6 to
   separate the tonemap's share from the tiles'.
+
+## round-3 super-bright and rain ground
+
+Round 3, 2026-11-10, Mac, uncompiled; nothing rendered. Traced from the round-1 frames
+(d4e9c7dd at beauty on the Windows laptop, D3D11 SM5, no Lumen) against c87e9cb1.
+
+**#02 super bright: darker than #01 (mean luma 76 vs 96) under an indigo cast.** Measured on
+the JPEGs: #02 shadows (luma < 60, 47 % of the frame) average sRGB 14/26/107, highlights stay
+neutral (219/216/225); #01 shadows 41/30/51. The lit areas are white and the shade is pure
+sky: the cast is the fill, and the low luma is mostly that blue (luma weights blue at 0.11).
+- Cause 1, colour: the preset relights the physical sky's sun from 6 to 72 deg. The model's
+  clear-sky irradiance there is 0.25/0.50/1.0 (R/B 0.25; 0.45 at 6 deg), and the sky light
+  that captures it is multiplied by the preset's fill x1.35 and the no-Lumen fallback's x1.6.
+  With no GI bounce every shadowed wall is lit by that blue sky. The presets were chosen on
+  the measure path under the X-Plane ambient colour, which is compensated for the engine's sky.
+  Round 2b sends that colour white in beauty, and the physical sky never sends it at all.
+  Fix: a stated sky fill (preset or user, clear world only) is lit as a fill.
+  `core.scene.hero_lighting.stated_fill_tint` moves the model sky's colour 0.75 of the way to
+  grey in log space (`STATED_FILL_NEUTRAL_SHARE`) and keeps its luminance. At 72 deg the tint
+  is 1.0/0.59/0.35 and the fill comes out 0.42/0.50/0.59 (R/B 0.71). FlightSimHeroLighting.cpp
+  sets the colour (`hero_lighting.sky_light.stated_fill`). The luminance factor (1.66 at
+  72 deg) rides `-sky-light-scale=`, because this lane never changes an intensity
+  (`webapp.runs._render`, `with_stated_fill_scale`).
+- Cause 2, exposure: the relight re-meters the plan on the horizontal (EV100 11.6 -> 15.3),
+  and the beauty exposure closed by all of it. The scene is steep walls that the high sun
+  grazes and the low sun lit face on. Fix: `core.sky.plan.relight` records
+  `exposure.relit_from_ev100`. The beauty exposure closes by `RELIT_SUN_CLOSE_SHARE` (0.7) of
+  the gain only (`relit_sun_open_stops`, recorded as `exposure.relit_sun_open_stops`; #02
+  opens 1.10 stops: EV100 13.57). A relight to a lower sun is unchanged.
+- #01 (no lighting block) is byte-identical in every sidecar; measure never relights and
+  never writes a sidecar.
+- Probe r3-bright: #01 and #02. Pass: #02's mean luma is about 0.5 to 1 stop over #01's (110
+  to 130), and its shadow R/B is no lower than #01's. Read `exposure.relit_sun_open_stops`
+  and `hero_lighting.sky_light.stated_fill`.
+
+**#06 SFO moderate rain: a cloud deck and no ground.** The card states no cloud. The rain
+world redraws the physical sky's default layer as nimbostratus at its default cover 0.98: a
+solid sheet. The frame (contrast-stretched lower half) is a volumetric cloud top below the
+camera, with the march's contour banding and one gap at the lower right. The plan puts that
+layer at max(2, AGL + 1) km = 4-7 km, above the camera at 3 km, so the frame should not show
+the camera above it. The render.json (`world_beauty.clouds.layers[].base_m/top_m`, the camera
+Z) should be read to settle where the layer was drawn. Fix (beauty only, either way): a rain
+world's layer with no card cover is broken, `RAIN_DEFAULT_COVER` 0.6
+(world_beauty.py and the pure block's `LayerCoverAndShape` in FlightSimClouds.cpp, away from
+the constrained-GPU block). A stated cover (overcast) is kept, and a storm keeps 0.98.
+- Probe r3-rain: #06. Pass: the bay and the city read between clouds (or under them). Read
+  `world_beauty.clouds.layers[0].cover` 0.6 and its base/top against the camera altitude.

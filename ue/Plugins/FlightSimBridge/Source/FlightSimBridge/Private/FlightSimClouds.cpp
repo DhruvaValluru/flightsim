@@ -157,6 +157,9 @@ namespace FlightSimWorldPure
 	constexpr double FairCover = 0.35;
 	constexpr double FairBaseM = 1500.0;
 	constexpr double FairTopM = 2700.0;
+	// Round 3: a rain world's layer when the card states no cover (broken, not
+	// nimbostratus's 0.98 sheet: round 1's #06 showed no ground).
+	constexpr double RainDefaultCover = 0.6;
 	constexpr double CloudSeedSpanKm = 1000.0;
 	constexpr double CloudExtinctionScaleDefault = 1.0;
 	constexpr double OcclusionFlagTransmittanceDefault = 0.5;
@@ -414,8 +417,9 @@ namespace FlightSimWorldPure
 	}
 
 	// world_beauty.layer_cover_and_shape: the fair layer's cover, else the
-	// card's (CardCover >= 0), else the default cover of the shape a cover-0
-	// layer of this thickness would be; the shape then follows the cover.
+	// card's (CardCover >= 0), else RainDefaultCover in a rain world, else the
+	// default cover of the shape a cover-0 layer of this thickness would be; the
+	// shape then follows the cover.
 	// CloudTable: the cloud rows in force (CloudCount x CloudFieldCount, the
 	// overrides applied), or nullptr for the defaults.
 	inline int LayerCoverAndShape(double CardCover, double ThicknessM, int Preset, bool bFair,
@@ -425,7 +429,8 @@ namespace FlightSimWorldPure
 		const int Guess = SelectCloud(bStated ? CardCover : 0.0, ThicknessM, Preset);
 		const double GuessDefault = CloudTable != nullptr ? CloudTable[Guess * CloudFieldCount + CldDefaultCover]
 		                                                  : CloudDefault(Guess, CldDefaultCover);
-		const double Cover = bFair ? FairCover : (bStated ? CardCover : GuessDefault);
+		const double Cover = bFair ? FairCover
+		                           : (bStated ? CardCover : (Preset == PresetRain ? RainDefaultCover : GuessDefault));
 		if (OutCover != nullptr)
 		{
 			*OutCover = Cover;
@@ -1416,7 +1421,9 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Layer->SetStringField(TEXT("shape"), ANSI_TO_TCHAR(CloudName(State.Shape)));
 		Layer->SetNumberField(TEXT("cover"), State.Cover);
 		Layer->SetStringField(TEXT("cover_basis"), bFair ? TEXT("the fair-weather layer (stated)")
-			: (CardCover >= 0.0 ? TEXT("the card's look.clouds[0].cover") : TEXT("the shape's default (the card states none)")));
+			: (CardCover >= 0.0 ? TEXT("the card's look.clouds[0].cover")
+			   : (Preset == PresetRain ? TEXT("RainDefaultCover: a rain world, the card states none (broken, round 3)")
+			                           : TEXT("the shape's default (the card states none)"))));
 		Layer->SetNumberField(TEXT("base_m"), State.BaseM);
 		Layer->SetNumberField(TEXT("top_m"), State.TopM);
 		Layer->SetNumberField(TEXT("built_top_m"), BuiltTopM);

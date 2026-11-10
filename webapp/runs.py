@@ -3494,6 +3494,11 @@ class RunManager:
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").unlink(missing_ok=True)
         extra = list(extra or ())
+        # Round 3 (beauty only): a stated sky fill is lit as a fill; the host
+        # sets its colour (FlightSimHeroLighting.cpp) and its luminance factor
+        # rides this look's -sky-light-scale=. No sidecar (measure): the same look.
+        from core.scene.hero_lighting import with_stated_fill_scale
+        look = with_stated_fill_scale(look, beauty_look)
         # X-Plane lighting colours (sun, sky light, fog) for the legacy
         # look only: a physical sky plan lights the scene itself and is
         # left alone. No extraction on this machine -> no flags.

@@ -325,6 +325,23 @@ EXPOSURE_METER_TARGET_P90: Dict[str, float] = {
     "no_lumen_gi": 0.45,
 }
 
+#: Round 3 (2026-11-10): the share of a RELIT sun's meter gain the beauty
+#: exposure takes. A lighting block that moves the physical sky's sun
+#: (webapp.runs relight_sky_plan, core.sky.plan.relight) re-meters the plan's
+#: incident EV100 on the new sun's HORIZONTAL illuminance; the beauty exposure
+#: then closes by that whole gain. Round 1's #02 (super bright over #01's
+#: golden-hour Yosemite: sun 6 -> 72 deg) closed 3.7 stops (EV100 11.6 ->
+#: 15.3) for a frame of steep walls and slopes that gains far less than a
+#: horizontal meter does: the high sun grazes the walls the low sun lit face
+#: on, so #02 rendered DARKER than #01 (mean luma 76 vs 96) despite its +0.6 EV
+#: and x1.6 sun. The preset numbers were also chosen by eye on the measure
+#: path, where the calibrated look's exposure moves far less than a meter
+#: between dawn and noon. So the exposure closes by this share of the gain
+#: and opens the rest; a relight to a LOWER sun opens by the meter as before
+#: (no share). UNCALIBRATED: set by probe render on the render machine (#02
+#: against #01: super bright should read about 0.5 to 1 stop brighter).
+RELIT_SUN_CLOSE_SHARE = 0.7
+
 # -- lenses --------------------------------------------------------------------
 
 #: The two lens presets. Keys in capitals are UE FPostProcessSettings names,
@@ -435,7 +452,7 @@ REFLECTIONS: Dict[str, Any] = {
 #: The constants a probe render must set, as the record lists them.
 UNCALIBRATED: Tuple[str, ...] = (
     "EV100_BANDS", "GRADES", "GOLDEN_HOUR_BELOW_DEG", "LENSES", "LOCAL_EXPOSURE",
-    "REFLECTIONS", "EXPOSURE_METER_TARGET_P90", "TONEMAP_HUE",
+    "REFLECTIONS", "EXPOSURE_METER_TARGET_P90", "TONEMAP_HUE", "RELIT_SUN_CLOSE_SHARE",
 )
 
 
@@ -799,7 +816,8 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
             # The plan's camera is kept (its f-number is part of the EV100);
             # only the compensation changes.
             sky_aperture, sky_shutter, sky_iso = sky_camera
-            target = exposure_target(sky_ev, light, grade_offset, brightness)
+            relit_open = relit_sun_open_stops(sky_exposure)
+            target = exposure_target(sky_ev - relit_open, light, grade_offset, brightness)
             exposure = _exposure_row(
                 target, base="sky_plan", base_ev100=sky_ev,
                 base_basis=("the -sky= plan's incident-meter EV100 for a clear sky "
@@ -809,6 +827,13 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
                 iso=sky_iso, cam_ev=camera_ev100(sky_aperture, sky_shutter, sky_iso),
                 horizontal=horizontal)
             exposure["over_sky_plan"] = True
+            if relit_open > 0.0:
+                exposure["relit_sun_open_stops"] = round(relit_open, 4)
+                exposure["relit_sun_basis"] = (
+                    f"the lighting block relit the sun: the plan's meter moved from EV100 "
+                    f"{float(sky_exposure['relit_from_ev100']):g} to {sky_ev:g}; the exposure "
+                    f"closes by RELIT_SUN_CLOSE_SHARE ({RELIT_SUN_CLOSE_SHARE:g}) of that gain "
+                    f"(round 3, UNCALIBRATED)")
             exposure["camera_basis"] = ("the -sky= plan's physical camera, kept: the host "
                                         "changes only AutoExposureBias")
     else:
@@ -893,6 +918,24 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
         plan["note"] += ("; PIXEL-MOVING effects on: "
                          + ", ".join(plan["pixel_effects"]["pixel_moving"]))
     return plan
+
+
+def relit_sun_open_stops(block: Optional[Mapping[str, Any]]) -> float:
+    """The stops a relit sun's exposure opens back (round 3): the share
+    1 - :data:`RELIT_SUN_CLOSE_SHARE` of the meter gain the relight added
+    (core.sky.plan.relight records the instant's own EV100 as
+    ``relit_from_ev100``). 0 for a plan the lighting block did not relight,
+    and for a relight to a lower sun (the meter opens for it in full)."""
+    if not block or block.get("relit_from_ev100") is None:
+        return 0.0
+    try:
+        gain = float(block["ev100"]) - float(block["relit_from_ev100"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BeautyLookError(CONSTRAINT, f"the -sky= plan's relit exposure is unreadable "
+                                          f"({exc!r})") from exc
+    if not math.isfinite(gain) or gain <= 0.0:
+        return 0.0
+    return gain * (1.0 - RELIT_SUN_CLOSE_SHARE)
 
 
 def _sky_plan_exposure(block: Optional[Mapping[str, Any]]

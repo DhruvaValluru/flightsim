@@ -43,6 +43,7 @@ import math
 import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -279,11 +280,85 @@ GROUND_ALBEDO_RGB: Dict[str, Tuple[float, float, float]] = {
 #: tiles under the storm deck from the -calibration quad).
 OVERCAST_ILLUMINANCE_FRACTION = 0.25
 
+# -- the stated fill's colour (round 3, 2026-11-10) -------------------------------
+
+#: The share of the clear sky's blue the sky light loses when a lighting block
+#: STATES the fill (a preset's or the user's ``sky_fill``), in log space:
+#: tint_c = (Y / s_c) ** share, s the model's clear-sky irradiance colour at the
+#: sun (core.xplane.atmosphere.sky_irradiance), Y its luminance. 0 keeps the
+#: captured sky's colour, 1 makes the fill grey.
+#:
+#: Why: round 1's #02 ("super bright" over #01's golden-hour Yosemite) rendered a
+#: heavy indigo cast, its shadows at sRGB 14/26/107 against #01's 41/30/51. The
+#: preset moves the physical sky's sun from 6 to 72 deg, where the model's sky
+#: irradiance is 0.245/0.497/1.0 (R/B 0.25; at 6 deg 0.45), and multiplies that
+#: capture by its fill x1.35 and the no-Lumen fallback's x1.6 (2.16 in all) with
+#: no GI bounce to warm it: every shadowed wall is lit by pure blue sky. On the
+#: measure path the presets were chosen under the X-Plane ambient colour, which
+#: is compensated for the engine's sky (webapp.runs xplane_lighting_flags); round
+#: 2b sends it white in beauty and the physical sky never sends it, so a stated
+#: fill multiplied the raw blue. This restores the fill a preset asked for as a
+#: fill, not as more blue sky. The fill's luminance is kept (``intensity_scale``),
+#: so only its colour moves; the lower hemisphere (the ground) warms by the same
+#: tint. UNCALIBRATED: probe hl-fill, #02 against #01, the cliff shadows' R/B.
+STATED_FILL_NEUTRAL_SHARE = 0.75
+#: Rec. 709 luminance weights (linear RGB).
+_LUMA_709 = (0.2126, 0.7152, 0.0722)
+
+
+def _sky_fill_colour(sun_elevation_deg: float, altitude_m: float) -> Tuple[float, float, float]:
+    """The model's clear-sky irradiance colour at this sun (linear RGB over the
+    sun's top-of-atmosphere spectrum, peak 1); cached by the rounded inputs."""
+    return _sky_fill_colour_cached(round(float(sun_elevation_deg), 1),
+                                   round(max(float(altitude_m), 0.0), -1))
+
+
+@lru_cache(maxsize=64)
+def _sky_fill_colour_cached(elevation: float, altitude: float) -> Tuple[float, float, float]:
+    import numpy as np
+
+    from core.xplane.atmosphere import MODEL_SUN_ELEVATION_FLOOR_DEG, Atmosphere, sky_irradiance
+
+    atm = Atmosphere()
+    s = sky_irradiance(atm, altitude, max(elevation, MODEL_SUN_ELEVATION_FLOOR_DEG), 0.0)
+    s = np.asarray(s, dtype=float) / np.asarray(atm.solar_irradiance, dtype=float)
+    peak = float(np.max(s))
+    return tuple(float(v) / peak for v in s) if peak > 0.0 else (1.0, 1.0, 1.0)
+
+
+def stated_fill_tint(sun_elevation_deg: float, altitude_m: float = 0.0,
+                     share: float = STATED_FILL_NEUTRAL_SHARE) -> Dict[str, Any]:
+    """The sky light's colour and intensity factor for a STATED fill: the
+    model sky's colour moved ``share`` of the way to grey in log space, the
+    colour normalised to peak 1 (the host's 8-bit light colour) and
+    ``intensity_scale`` restoring the fill's luminance:
+    Y(sky x colour) x intensity_scale == Y(sky)."""
+    sky = _sky_fill_colour(sun_elevation_deg, altitude_m)
+    y = sum(w * c for w, c in zip(_LUMA_709, sky))
+    raw = [(y / max(c, 1e-6)) ** float(share) for c in sky]
+    peak = max(raw)
+    colour = [c / peak for c in raw]
+    y_tinted = sum(w * c * t for w, c, t in zip(_LUMA_709, sky, colour))
+    return {
+        "color_linear_rgb": [round(c, 6) for c in colour],
+        "intensity_scale": round(y / y_tinted, 6),
+        "model_sky_rgb": [round(c, 6) for c in sky],
+        "neutral_share": float(share),
+        "basis": ("a stated fill (the lighting block's sky_fill): the model's clear-sky "
+                  "irradiance colour (core.xplane.atmosphere.sky_irradiance) moved "
+                  f"{float(share):g} of the way to grey in log space, its luminance kept "
+                  "(round 3, UNCALIBRATED)"),
+    }
+
 
 def plan_sidecar(*, surface: str, sun_elevation_deg: float, horizontal_lux: Optional[float],
                  raining: bool, altitude_m: float = 0.0,
-                 time_of_day_basis: Optional[str] = None) -> Dict[str, Any]:
-    """The ``hero_lighting.json`` sidecar. Pure: same inputs, same bytes."""
+                 time_of_day_basis: Optional[str] = None,
+                 stated_fill: bool = False) -> Dict[str, Any]:
+    """The ``hero_lighting.json`` sidecar. Pure: same inputs, same bytes.
+    ``stated_fill``: the lighting block states the sky fill (a preset or the
+    user); a clear sky's light then takes :func:`stated_fill_tint` (round 3).
+    Under rain or a deck the sky is grey already and nothing is added."""
     from core.scene.beauty_look import clear_sky_horizontal_lux
 
     albedo = GROUND_ALBEDO_RGB.get(str(surface), GROUND_ALBEDO_RGB["unspecified"])
@@ -296,6 +371,9 @@ def plan_sidecar(*, surface: str, sun_elevation_deg: float, horizontal_lux: Opti
         horizontal_lux *= OVERCAST_ILLUMINANCE_FRACTION
         lux_basis += f" x {OVERCAST_ILLUMINANCE_FRACTION:g} under rain (UNCALIBRATED)"
     luminance = [round(a * float(horizontal_lux) / math.pi, 3) for a in albedo]
+    extra: Dict[str, Any] = {}
+    if stated_fill and not raining and float(sun_elevation_deg) > 0.0:
+        extra["sky_light"] = stated_fill_tint(float(sun_elevation_deg), float(altitude_m))
     return {
         "hero_lighting_version": HERO_LIGHTING_VERSION,
         "ground": {
@@ -306,9 +384,11 @@ def plan_sidecar(*, surface: str, sun_elevation_deg: float, horizontal_lux: Opti
             "lower_hemisphere_luminance_rgb": luminance,
             "model": "Lambertian ground: L = albedo x E_horizontal / pi (cd/m2)",
         },
+        **extra,
         "sun_elevation_deg": round(float(sun_elevation_deg), 4),
         "time_of_day_basis": time_of_day_basis,
-        "uncalibrated": ["GROUND_ALBEDO_RGB", "OVERCAST_ILLUMINANCE_FRACTION"],
+        "uncalibrated": ["GROUND_ALBEDO_RGB", "OVERCAST_ILLUMINANCE_FRACTION"]
+                        + (["STATED_FILL_NEUTRAL_SHARE"] if extra else []),
         "note": "VISUAL ONLY, beauty quality only (docs/visual/PROBE_LOG.md hero-lighting)",
     }
 
@@ -348,13 +428,43 @@ def write_sidecar_beside(spec: Any, beauty_look: Optional[Path]) -> Optional[Pat
     except (TypeError, ValueError):
         altitude = 0.0
     tod = getattr(spec, "time_of_day", None)
+    # Round 3: a fill the lighting block states (a preset's or the user's
+    # sky_fill) is lit as a fill, not as more blue sky (stated_fill_tint).
+    stated_fill = False
+    block = getattr(spec, "lighting", None)
+    if block is not None:
+        from core.scene import lighting as lighting_block
+
+        stated_fill = lighting_block.effective_values(
+            lighting_block.stated_values(block)).get("sky_fill") is not None
     plan = plan_sidecar(
         surface=str(getattr(getattr(spec, "surface", None), "value", "unspecified")),
         sun_elevation_deg=elevation,
         horizontal_lux=None if reference is None else float(reference),
         raining=raining, altitude_m=altitude,
-        time_of_day_basis=None if tod is None else getattr(tod, "frm", None))
+        time_of_day_basis=None if tod is None else getattr(tod, "frm", None),
+        stated_fill=stated_fill)
     return write_sidecar(plan, beauty_look.with_name(SIDECAR_NAME))
+
+
+def with_stated_fill_scale(look: Optional[Mapping[str, Any]],
+                           beauty_look: Optional[Path]) -> Optional[Mapping[str, Any]]:
+    """``look`` with its ``sky_light_scale`` multiplied by the hero sidecar's
+    stated-fill ``intensity_scale`` (round 3: the host sets only the fill's
+    colour, :func:`stated_fill_tint`; its luminance factor rides the lighting
+    block's own -sky-light-scale=). The same ``look`` object when there is no
+    sidecar (measure), no ``sky_light`` block or no stated scale, so every
+    other command is unchanged."""
+    if beauty_look is None or not look or look.get("sky_light_scale") is None:
+        return look
+    sidecar = Path(beauty_look).with_name(SIDECAR_NAME)
+    if not sidecar.is_file():
+        return look
+    fill = json.loads(sidecar.read_text(encoding="utf-8")).get("sky_light")
+    if not fill:
+        return look
+    return {**look, "sky_light_scale": round(float(look["sky_light_scale"])
+                                             * float(fill["intensity_scale"]), 6)}
 
 
 def flags_beside(beauty_look: Optional[Path]) -> List[str]:

@@ -632,7 +632,11 @@ def test_the_selection_boundaries_are_pinned():
 
 def test_the_layer_cover_law():
     assert wb.layer_cover_and_shape(None, 1200.0, "clear", False) == (0.35, "cumulus")
-    assert wb.layer_cover_and_shape(None, 1200.0, "rain", False) == (0.98, "nimbostratus")
+    # Round 3: a rain world with no card cover is broken (RAIN_DEFAULT_COVER), not a
+    # sheet; a storm keeps nimbostratus's own default, a stated cover is kept.
+    assert wb.layer_cover_and_shape(None, 1200.0, "rain", False) == (wb.RAIN_DEFAULT_COVER, "nimbostratus")
+    assert wb.layer_cover_and_shape(None, 1200.0, "storm", False) == (0.98, "nimbostratus")
+    assert wb.layer_cover_and_shape(0.95, 3000.0, "rain", False) == (0.95, "nimbostratus")
     assert wb.layer_cover_and_shape(0.9, 1200.0, "clear", False) == (0.9, "overcast")
     assert wb.layer_cover_and_shape(None, 1200.0, "clear", True) == (wb.FAIR_LAYER["cover"], "cumulus")
     assert ("State.Shape = LayerCoverAndShape(CardCover, State.TopM - State.BaseM, Preset, bFair, "

@@ -526,6 +526,9 @@ def relight(plan: Dict, *, elevation_deg: Optional[float], azimuth_deg: Optional
     horizontal = sun_lux + moon_lux + NIGHT_SKY_LUX
     ev100 = ev100_for(horizontal)
     exposure = out["exposure"]
+    # Round 3: the instant's own meter, kept so the beauty exposure can tell
+    # how far the relight moved it (core.scene.beauty_look RELIT_SUN_OPEN_SHARE).
+    exposure.setdefault("relit_from_ev100", exposure["ev100"])
     exposure["ev100"] = round(ev100, 3)
     exposure["horizontal_illuminance_lux"] = round(horizontal, 6)
     exposure["bias"] = round(CAMERA_EV100 - ev100, 4)

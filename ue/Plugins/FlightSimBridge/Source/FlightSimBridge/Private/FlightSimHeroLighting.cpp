@@ -354,6 +354,43 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 				TEXT("unchanged: no -hero-lighting= sidecar named a ground"));
 		}
 		SkyRecord->SetObjectField(TEXT("lower_hemisphere_color"), HeroLightingColorJson(Sky->LowerHemisphereColor));
+		// Round 3 (core/scene/hero_lighting.py stated_fill_tint): a fill the
+		// lighting block STATES (super bright's x1.35) is lit as a fill, not as
+		// more of the captured blue sky. Only the COLOUR is set here (peak 1: the
+		// light's 8-bit colour); this lane never changes an intensity. The factor
+		// that keeps the fill's luminance rides the lighting block's own
+		// -sky-light-scale= (webapp.runs _render folds it in), so the scene's
+		// knob, the no-Lumen fallback's x1.6 and it multiply as one product.
+		// Absent: the sky light's colour is untouched.
+		const TSharedPtr<FJsonObject>* SkyFill = nullptr;
+		if (Plan.IsValid() && Plan->TryGetObjectField(TEXT("sky_light"), SkyFill) && SkyFill != nullptr)
+		{
+			FLinearColor FillColor = FLinearColor::White;
+			double FillScale = 0.0;
+			if (!HeroLightingReadRgb(*SkyFill, TEXT("color_linear_rgb"), FillColor))
+			{
+				return false;
+			}
+			if (!(*SkyFill)->TryGetNumberField(TEXT("intensity_scale"), FillScale) ||
+			    !FMath::IsFinite(FillScale) || FillScale <= 0.0 ||
+			    FillColor.R > 1.0f || FillColor.G > 1.0f || FillColor.B > 1.0f)
+			{
+				return HeroLightingFail(TEXT("sky_light: color_linear_rgb must lie in [0, 1] and ")
+				                        TEXT("intensity_scale must be a positive number"));
+			}
+			// USkyLightComponent::SetLightColor stores FColor(ToFColor(true)): sRGB 8-bit.
+			Sky->SetLightColor(FillColor);
+			TSharedPtr<FJsonObject> FillRecord = MakeShared<FJsonObject>();
+			FillRecord->SetObjectField(TEXT("color_linear"), HeroLightingColorJson(FillColor));
+			FillRecord->SetNumberField(TEXT("intensity_scale"), FillScale);
+			FillRecord->SetStringField(TEXT("intensity_scale_applied_by"),
+				TEXT("-sky-light-scale= (webapp.runs _render multiplies the lighting block's fill by it)"));
+			FillRecord->SetNumberField(TEXT("intensity"), Sky->Intensity);
+			FillRecord->SetStringField(TEXT("basis"),
+				TEXT("a stated sky fill lit as a fill: the model sky's blue moved toward grey, ")
+				TEXT("its luminance kept (core/scene/hero_lighting.py stated_fill_tint, UNCALIBRATED)"));
+			SkyRecord->SetObjectField(TEXT("stated_fill"), FillRecord);
+		}
 		Sky->SetCaptureIsDirty();
 		Sky->MarkRenderStateDirty();
 	}

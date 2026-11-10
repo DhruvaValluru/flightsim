@@ -807,6 +807,8 @@ hl_check "hero: SetCastVolumetricShadow" "$HLB" "ENGINE_API void SetCastVolumetr
 hl_check "hero: SkyLight IsRealTimeCaptureEnabled" "$HLS" "ENGINE_API bool IsRealTimeCaptureEnabled() const;"
 hl_check "hero: SkyLight SetLowerHemisphereColor" "$HLS" "ENGINE_API void SetLowerHemisphereColor(const FLinearColor& InLowerHemisphereColor);"
 hl_check "hero: SkyLight SetCaptureIsDirty" "$HLS" "ENGINE_API void SetCaptureIsDirty();"
+# round 3 stated fill (core/scene/hero_lighting.py stated_fill_tint)
+hl_check "hero: SkyLight SetLightColor" "$HLS" "ENGINE_API void SetLightColor(FLinearColor NewLightColor);"
 hl_check "hero: SkyLight bLowerHemisphereIsBlack" "$HLS" "bool bLowerHemisphereIsBlack;"
 hl_check "hero: SkyLight LowerHemisphereColor" "$HLS" "FLinearColor LowerHemisphereColor;"
 hl_check "hero: SkyLight bCloudAmbientOcclusion" "$HLS" "uint32 bCloudAmbientOcclusion : 1;"
