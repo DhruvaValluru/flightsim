@@ -171,3 +171,95 @@ def test_a_missing_master_is_a_problem_line_not_an_exception(tmp_path, monkeypat
     assert all("is not built" in p for p in problems)
     assert fake.writes == []
     assert (tmp_path / "look_manifest.json").is_file()
+
+
+# -- round 1 contact sheet (2026-11-10): every J-11 slot binds ----------------
+
+#: The materials of the earlier J-11 conversion: the five slots the render
+#: machine's body kept bound when the full package was imported over it.
+_OLD_FIVE = ["mat_Su_27_Flanker_P01", "mat_Glass_Cockpit", "mat_su_27gears",
+             "rgb_000000", "rgb_878787"]
+#: body.obj's usemtl order for the full package (converted over the pinned files).
+_PACKAGE = ["mat_PLAAF2Div", "mat_Glass_Cockpit", "mat_Su_27_Flanker_P01", "mat_su_27gears",
+            "rgb_000000", "rgb_878787", "rgb_191919", "mat_panel_front_tex_2048_bevel",
+            "rgb_040404", "mat_panel_wcs", "rgb_010600", "mat_grey_blue_flood", "mat_texture",
+            "rgb_ff0000", "rgb_292c2d", "rgb_565656", "rgb_ffffff", "rgb_4784c0", "mat_K_36DM",
+            "rgb_050505", "rgb_2c2b23", "rgb_557a3a", "rgb_2a2a2a", "mat_fighter_pilot",
+            "mat_transp"]
+
+
+def _round1_rows():
+    """The body as the round-1 import left it: the old five bound, the twenty
+    new ones appended on WorldGridMaterial."""
+    order = _OLD_FIVE + [name for name in _PACKAGE if name not in _OLD_FIVE]
+    return [("body", index, name, name if name in _OLD_FIVE else "WorldGridMaterial")
+            for index, name in enumerate(order)]
+
+
+def test_the_round1_refusal_is_the_old_conversion_slots_plus_the_new_ones():
+    import ue_aircraft_materials as m
+
+    report = m.classify_slots(_round1_rows(), _PACKAGE)
+    assert report["bound"] == 5 and len(report["unbound"]) == 20
+    # The refusal's own first rows (runs/visual/head2 shot a, 2026-11-10).
+    assert report["unbound"][:3] == ["body[5] mat_PLAAF2Div -> WorldGridMaterial",
+                                     "body[6] rgb_191919 -> WorldGridMaterial",
+                                     "body[7] mat_panel_front_tex_2048_bevel -> WorldGridMaterial"]
+
+
+def test_bind_slots_puts_every_unbound_slot_on_its_own_material():
+    import ue_aircraft_materials as m
+
+    plan_rows = m.plan_slot_bindings(_round1_rows(), _PACKAGE)
+    assert len(plan_rows) == 20
+    assert ("body", 5, "mat_PLAAF2Div") in plan_rows
+    assert all(index >= 5 for _, index, _ in plan_rows)
+    rebound = [(part, index, name, name) for part, index, name, _ in _round1_rows()]
+    assert m.plan_slot_bindings(rebound, _PACKAGE) == []
+    assert m.classify_slots(rebound, _PACKAGE)["unbound"] == []
+
+
+def test_a_slot_named_for_no_mtl_material_is_left_to_the_slot_check():
+    import ue_aircraft_materials as m
+
+    rows = [("body", 0, "Material_1", None), ("body", 1, "mat_PLAAF2Div", None)]
+    assert m.plan_slot_bindings(rows, _PACKAGE) == [("body", 1, "mat_PLAAF2Div")]
+
+
+def test_a_beauty_copy_in_another_slot_order_is_an_incomplete_import():
+    import ue_aircraft_materials as m
+
+    stale = [row[2] for row in _round1_rows()]
+    beauty = {"body": {"part": "body_beauty", "triangles": 1}}
+    rows = ([("body", i, n, n) for i, n in enumerate(stale)]
+            + [("body_beauty", i, n, n) for i, n in enumerate(_PACKAGE)])
+    assert len(m.beauty_slot_mismatches(m.classify_slots(rows, _PACKAGE), beauty)) == 1
+    fresh = ([("body", i, n, n) for i, n in enumerate(_PACKAGE)]
+             + [("body_beauty", i, n, n) for i, n in enumerate(_PACKAGE)])
+    assert m.beauty_slot_mismatches(m.classify_slots(fresh, _PACKAGE), beauty) == []
+
+
+def test_texture_names_are_sanitised_as_ue_names_the_asset():
+    import aircraft_look
+    import ue_aircraft_materials as m
+
+    # panel.wcs.png: "." is not allowed in an object name (NameTypes.h).
+    assert texture_asset_name("panel.wcs.png") == "TEX_panel_wcs"
+    assert texture_asset_name("panel-front-tex-2048-bevel.png") == "TEX_panel-front-tex-2048-bevel"
+    assert aircraft_look.texture_asset_name("panel.wcs.png") == "TEX_panel_wcs"
+    assert aircraft_look.INVALID_ASSET_NAME_CHARACTERS == m.INVALID_ASSET_NAME_CHARACTERS
+    wired = plan(parse_mtl("newmtl mat_panel_wcs\nKd 1 1 1\nmap_Kd panel.wcs.png\n"))
+    assert wired["mat_panel_wcs"]["texture"] == "TEX_panel_wcs"
+
+
+def test_a_beauty_manifest_imports_fresh_and_binds_before_wiring():
+    source = (REPO / "scripts" / "ue_import_aircraft.py").read_text(encoding="utf-8")
+    run = source[source.index("def run():"):]
+    assert run.index("remove_stale_meshes(") < run.index("import_part(")
+    assert run.index("import_part(") < run.index("bind_slots(") < run.index("fix_materials(")
+    assert run.index("import_missing_textures(") < run.index("bind_slots(")
+    assert run.index("beauty_slot_mismatches(") < run.index("write_import_record(")
+    # Only for a manifest with beauty_parts: no other airframe's import changes.
+    for call in ("remove_stale_meshes(", "import_missing_textures("):
+        head = run[:run.index(call)].splitlines()
+        assert 'if manifest.get("beauty_parts"):' in "\n".join(head[-4:]), call

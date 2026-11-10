@@ -24,6 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(
 from ue_aircraft_materials import fix_materials  # noqa: E402
 from ue_aircraft_materials import create_look_instances  # noqa: E402  (visual V7)
 from ue_aircraft_materials import slot_report, write_import_record  # noqa: E402  (round 2)
+from ue_aircraft_materials import (  # noqa: E402  (round 1 contact sheet, 2026-11-10)
+    beauty_slot_mismatches, bind_slots, import_missing_textures, remove_stale_meshes)
 
 FAILURES = []
 
@@ -158,6 +160,17 @@ def run():
         # the measured parts, normals kept.
         beauty = [(row["part"], row["triangles"], True)
                   for row in (manifest.get("beauty_parts") or {}).values()]
+        all_parts = list(manifest["parts"]) + [row[0] for row in beauty]
+        # Round 1 contact sheet (2026-11-10): an import over an existing J-11
+        # body kept the earlier conversion's five slots and put the twenty new
+        # ones on WorldGridMaterial (scripts/ue_aircraft_materials.py, "binding
+        # every slot"). A manifest with beauty_parts imports every part fresh.
+        if manifest.get("beauty_parts"):
+            try:
+                FAILURES.extend(f"{destination}: {p}" for p in
+                                remove_stale_meshes(destination, all_parts))
+            except Exception as exc:
+                FAILURES.append(f"{destination}: removing the existing meshes failed: {exc!r}")
         for part, triangles, keep_normals in (
                 [(p, manifest["triangles"][p], False) for p in manifest["parts"]] + beauty):
             obj_path = os.path.join(source_dir, f"{part}.obj")
@@ -170,6 +183,18 @@ def run():
                 import_part(obj_path, destination, part, triangles, keep_normals)
             except Exception as exc:
                 FAILURES.append(f"{destination}/{part}: {exc!r}")
+        # Round 1 contact sheet: every slot named for an MTL material onto
+        # the asset of that name (made, with its texture, when Interchange
+        # made none), before fix_materials wires the colours and textures.
+        if manifest.get("beauty_parts"):
+            try:
+                FAILURES.extend(f"{destination}: {p}" for p in
+                                import_missing_textures(destination, source_dir))
+                bound, created, problems = bind_slots(destination, source_dir, all_parts)
+                print(f"BIND {destination}: {bound} slot(s) rebound, {created} material(s) made")
+                FAILURES.extend(f"{destination}: {p}" for p in problems)
+            except Exception as exc:
+                FAILURES.append(f"{destination}: slot binding failed: {exc!r}")
         # Interchange leaves every textured material black with its texture
         # unplugged (scripts/ue_aircraft_materials.py): wire each to the
         # colour and texture its MTL states, once all parts are in.
@@ -201,8 +226,13 @@ def run():
         # no other airframe's import outcome changes.
         if manifest.get("beauty_parts"):
             try:
-                parts = list(manifest["parts"]) + [row["part"] for row in manifest["beauty_parts"].values()]
-                report = slot_report(destination, source_dir, parts)
+                report = slot_report(destination, source_dir, all_parts)
+                # A beauty copy whose slots are not its part's, name for name,
+                # is never swapped in (FlightSimAircraftFX.cpp): an incomplete
+                # import, recorded so the next render imports again.
+                report["slot_mismatches"] = beauty_slot_mismatches(
+                    report, manifest["beauty_parts"])
+                FAILURES.extend(f"{destination}: {row}" for row in report["slot_mismatches"])
                 written = write_import_record(manifest_path, report)
                 print(f"SLOTS {destination}: {report['bound']} bound, "
                       f"{len(report['unbound'])} unbound; record {written}")

@@ -181,6 +181,19 @@ def test_a_manifest_with_beauty_parts_needs_its_own_finished_import_record(tmp_p
     assert importer.import_record_reason(path) is None
 
 
+def test_a_beauty_slot_mismatch_reimports_and_refuses(tmp_path):
+    import hashlib
+
+    path, _ = _manifest(tmp_path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    row = "body_beauty slots ['b', 'a'] are not body's ['a', 'b']"
+    (tmp_path / importer.IMPORT_RECORD_NAME).write_text(json.dumps(
+        {"magic": importer.IMPORT_RECORD_MAGIC, "manifest_sha256": digest, "unbound": [],
+         "slot_mismatches": [row]}), encoding="utf-8")
+    assert "beauty part" in importer.import_record_reason(path)
+    assert importer.unbound_slots(path) == [row]
+
+
 def test_other_airframes_are_not_held_to_the_import_record(tmp_path):
     path, manifest = _manifest(tmp_path, beauty=False)
     assert importer.import_record_reason(path) is None

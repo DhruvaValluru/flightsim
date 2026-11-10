@@ -52,9 +52,26 @@ def parse_mtl(text):
     return materials
 
 
+#: The characters UE replaces with "_" in an imported asset's name
+#: (Engine/Source/Runtime/Core/Public/UObject/NameTypes.h, UE 5.7.4:
+#: INVALID_OBJECTNAME_CHARACTERS and INVALID_LONGPACKAGE_CHARACTERS; the
+#: Interchange task sanitises with both, InterchangeTaskImportObject.cpp
+#: InternalGetPackageName). The J-11 package's panel.wcs.png imports as
+#: TEX_panel_wcs, not TEX_panel.wcs (round 1 contact sheet, 2026-11-10).
+INVALID_ASSET_NAME_CHARACTERS = "\"' ,/.:|&!~\n\r\t@#(){}[]=;^%$`\\*?<>"
+
+
+def asset_object_name(name):
+    """``name`` as UE names the imported asset (every invalid character
+    replaced with "_")."""
+    for character in INVALID_ASSET_NAME_CHARACTERS:
+        name = name.replace(character, "_")
+    return name
+
+
 def texture_asset_name(file_name):
     """The imported texture asset's name for an MTL ``map_Kd`` file."""
-    return TEXTURE_PREFIX + os.path.splitext(os.path.basename(file_name))[0]
+    return asset_object_name(TEXTURE_PREFIX + os.path.splitext(os.path.basename(file_name))[0])
 
 
 def read_mtl_dir(directory):
@@ -220,12 +237,14 @@ def classify_slots(slots, mtl_names):
     """``slots``: (part, slot index, slot name, material asset name or None)
     rows; ``mtl_names``: the MTL materials. Returns {"bound": n,
     "unbound": ["part[slot] name -> material", ...], "slots": {part:
-    [material names]}}. A slot is bound when its material is one of the MTL
-    materials (the imported instance Interchange made from the MTL)."""
+    [material names]}, "slot_names": {part: [slot names]}}. A slot is bound
+    when its material is one of the MTL materials (the imported instance
+    Interchange made from the MTL)."""
     names = set(mtl_names)
-    report = {"bound": 0, "unbound": [], "slots": {}}
+    report = {"bound": 0, "unbound": [], "slots": {}, "slot_names": {}}
     for part, index, slot_name, material in slots:
         report["slots"].setdefault(part, []).append(material)
+        report["slot_names"].setdefault(part, []).append(slot_name)
         if material is not None and material in names:
             report["bound"] += 1
         else:
@@ -233,9 +252,22 @@ def classify_slots(slots, mtl_names):
     return report
 
 
-def slot_report(asset_root, mtl_dir, parts):
-    """:func:`classify_slots` over the imported meshes ``parts`` under
-    ``asset_root`` (inside UE)."""
+def beauty_slot_mismatches(report, beauty_parts):
+    """Each measured part whose beauty copy's slot names are not its own,
+    name for name and in order: FlightSimAircraftFX.cpp keeps the measured
+    mesh on a beauty render for such a pair, so the import is incomplete.
+    ``report``: :func:`classify_slots`; ``beauty_parts``: the manifest's
+    {part: {"part": copy, ...}}."""
+    names = report.get("slot_names", {})
+    out = []
+    for part, row in sorted((beauty_parts or {}).items()):
+        mine, theirs = names.get(part), names.get(row["part"])
+        if mine is not None and theirs is not None and mine != theirs:
+            out.append(f"{row['part']} slots {theirs} are not {part}'s {mine}")
+    return out
+
+
+def _mesh_slot_rows(asset_root, parts):
     import unreal
 
     rows = []
@@ -248,7 +280,162 @@ def slot_report(asset_root, mtl_dir, parts):
             material = slot.get_editor_property("material_interface")
             rows.append((part, index, str(slot.get_editor_property("material_slot_name")),
                          material.get_name() if material is not None else None))
-    return classify_slots(rows, read_mtl_dir(mtl_dir).keys())
+    return rows
+
+
+def slot_report(asset_root, mtl_dir, parts):
+    """:func:`classify_slots` over the imported meshes ``parts`` under
+    ``asset_root`` (inside UE)."""
+    return classify_slots(_mesh_slot_rows(asset_root, parts), read_mtl_dir(mtl_dir).keys())
+
+
+# -- binding every slot to its MTL material (round 1 contact sheet, 2026-11-10) --
+#
+# The first import of the full yanes19 package on the render machine refused
+# aircraft.material_slots: body[5..24] on WorldGridMaterial, body[0..4] bound.
+# The five bound slots are exactly the materials of the EARLIER J-11
+# conversion (mat_Su_27_Flanker_P01, mat_Glass_Cockpit, mat_su_27gears,
+# rgb_000000, rgb_878787), and the twenty unbound ones follow in body.obj's
+# usemtl order with those five left out: Interchange imported over the
+# existing body StaticMesh, kept its five name-matched slots and appended the
+# new ones on UMaterial::GetDefaultMaterial (InterchangeMeshHelper.cpp
+# InternalMeshFactorySetupAssetMaterialArray, UE 5.7.4: a slot whose
+# material factory node resolves to no object), while body_beauty, imported
+# after it, bound all 25. So, for a manifest with beauty_parts:
+#   1. remove_stale_meshes: the parts' existing StaticMesh assets are deleted
+#      before the import, so every part is a first import (the path that has
+#      bound every slot of every airframe so far) and the body's slots come
+#      in body.obj's order, which is body_beauty's (the beauty swap in
+#      FlightSimAircraftFX.cpp needs the two name for name, in order);
+#   2. after the import, import_missing_textures and bind_slots put every
+#      slot whose NAME is an MTL material onto the asset of that name,
+#      creating the instance (Interchange's own OBJ parent) when Interchange
+#      made none; fix_materials then wires its colour and texture as for
+#      every other material.
+# Neither step runs for an airframe without beauty_parts.
+
+#: The parent Interchange's OBJ translator gives an MTL material without an
+#: ``illum`` line (InterchangeOBJTranslator.cpp, UE 5.7.4); the converters
+#: write none.
+INTERCHANGE_OBJ_PARENT = "/InterchangeAssets/Materials/PBRSurfaceMaterial_MR"
+
+
+def plan_slot_bindings(rows, mtl_names):
+    """``rows``: (part, slot index, slot name, material asset name or None).
+    Returns [(part, index, material asset name)] for every slot whose name is
+    an MTL material and whose material is not the asset of that name; a slot
+    named for no MTL material is left to :func:`classify_slots`."""
+    names = {asset_object_name(name) for name in mtl_names}
+    out = []
+    for part, index, slot_name, material in rows:
+        wanted = asset_object_name(str(slot_name))
+        if wanted in names and material != wanted:
+            out.append((part, index, wanted))
+    return out
+
+
+def remove_stale_meshes(asset_root, parts, say=print):
+    """Delete the existing StaticMesh of each part under ``asset_root`` so the
+    import that follows is a first import. Returns the problems (a mesh that
+    would not delete is imported over; bind_slots still binds it)."""
+    import unreal
+
+    assets = unreal.EditorAssetLibrary
+    problems = []
+    for part in parts:
+        path = f"{asset_root}/{part}"
+        if not assets.does_asset_exist(path):
+            continue
+        if assets.delete_asset(path):
+            say(f"{path}: existing mesh deleted before its import (a first import)")
+        else:
+            problems.append(f"{path}: could not delete the existing mesh; imported over it")
+    return problems
+
+
+def _set_param(struct, name, value):
+    try:
+        struct.set_editor_property(name, value)
+    except Exception:
+        pass
+
+
+def import_missing_textures(asset_root, mtl_dir, say=print):
+    """Import every MTL ``map_Kd`` file whose TEX_ asset is absent under
+    ``asset_root`` (a material Interchange did not make brought no texture
+    either). Returns the problems."""
+    import unreal
+
+    assets = unreal.EditorAssetLibrary
+    problems = []
+    for name, material in sorted(read_mtl_dir(mtl_dir).items()):
+        if not material["map_kd"]:
+            continue
+        texture = texture_asset_name(material["map_kd"])
+        if assets.does_asset_exist(f"{asset_root}/{texture}"):
+            continue
+        source_path = os.path.join(mtl_dir, material["map_kd"])
+        if not os.path.isfile(source_path):
+            problems.append(f"{name}: its texture file {source_path} is not beside the MTL")
+            continue
+        params = unreal.ImportAssetParameters()
+        params.set_editor_property("is_automated", True)
+        _set_param(params, "replace_existing", True)
+        _set_param(params, "destination_name", texture)
+        manager = unreal.InterchangeManager.get_interchange_manager_scripted()
+        source = unreal.InterchangeManager.create_source_data(source_path)
+        if not manager.import_asset(asset_root, source, params):
+            problems.append(f"{name}: Interchange refused {source_path}")
+            continue
+        assets.save_directory(asset_root, only_if_is_dirty=True, recursive=False)
+        if assets.does_asset_exist(f"{asset_root}/{texture}"):
+            say(f"{asset_root}/{texture}: imported from {material['map_kd']}")
+        else:
+            problems.append(f"{name}: {material['map_kd']} imported, but {asset_root}/{texture} "
+                            f"is not on disk")
+    return problems
+
+
+def bind_slots(asset_root, mtl_dir, parts, say=print):
+    """:func:`plan_slot_bindings` applied to the imported meshes ``parts``:
+    each such slot gets the material asset of its name, created as an
+    instance of Interchange's OBJ parent when absent. Returns (bound,
+    created, problems)."""
+    import unreal
+
+    assets = unreal.EditorAssetLibrary
+    lib = unreal.MaterialEditingLibrary
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    rows = plan_slot_bindings(_mesh_slot_rows(asset_root, parts), read_mtl_dir(mtl_dir).keys())
+    bound, created, problems = 0, 0, []
+    parent = None
+    touched = set()
+    for part, index, wanted in rows:
+        path = f"{asset_root}/{wanted}"
+        material = assets.load_asset(path) if assets.does_asset_exist(path) else None
+        if material is None:
+            if parent is None:
+                parent = unreal.load_asset(INTERCHANGE_OBJ_PARENT)
+            if parent is None:
+                problems.append(f"{path}: absent, and {INTERCHANGE_OBJ_PARENT} did not load")
+                continue
+            material = tools.create_asset(wanted, asset_root, unreal.MaterialInstanceConstant,
+                                          unreal.MaterialInstanceConstantFactoryNew())
+            if material is None:
+                problems.append(f"{path}: absent, and could not be created")
+                continue
+            lib.set_material_instance_parent(material, parent)
+            assets.save_loaded_asset(material, only_if_is_dirty=False)
+            created += 1
+            say(f"{path}: created (an instance of {INTERCHANGE_OBJ_PARENT})")
+        mesh = unreal.load_asset(f"{asset_root}/{part}")
+        mesh.set_material(index, material)
+        touched.add(part)
+        bound += 1
+        say(f"{asset_root}/{part}[{index}] -> {wanted}")
+    for part in sorted(touched):
+        assets.save_asset(f"{asset_root}/{part}", only_if_is_dirty=False)
+    return bound, created, problems
 
 
 def write_import_record(manifest_path, report):

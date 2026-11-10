@@ -150,12 +150,18 @@ def import_record_reason(manifest_path: Path) -> Optional[str]:
         # (import_manifests), rather than drawn grey.
         return (f"the last import left {len(record['unbound'])} mesh slot(s) without "
                 f"their MTL material")
+    if record.get("slot_mismatches"):
+        # Round 1 contact sheet: a beauty copy whose slots are not its part's
+        # is never swapped in; imported again, refused by name again.
+        return (f"the last import left {len(record['slot_mismatches'])} beauty part(s) "
+                f"with slots that are not their measured part's")
     return None
 
 
 def unbound_slots(manifest_path: Path) -> List[str]:
-    """The unbound slots of the import record written for THIS manifest
-    (empty when there is none, or it was written for another conversion)."""
+    """The unbound slots, then the beauty slot mismatches, of the import
+    record written for THIS manifest (empty when there is none, or it was
+    written for another conversion)."""
     manifest_path = Path(manifest_path)
     record_path = manifest_path.parent / IMPORT_RECORD_NAME
     try:
@@ -165,7 +171,8 @@ def unbound_slots(manifest_path: Path) -> List[str]:
         return []
     if record.get("magic") != IMPORT_RECORD_MAGIC or record.get("manifest_sha256") != digest:
         return []
-    return [str(row) for row in record.get("unbound") or []]
+    return ([str(row) for row in record.get("unbound") or []]
+            + [str(row) for row in record.get("slot_mismatches") or []])
 
 
 def missing_assets(manifest_path: Path) -> List[str]:
