@@ -2818,3 +2818,49 @@ stand-in) and the frame is round 3's; the next step is `FTextureCompilingManager
 on the two textures by name. Expected look once jittered: the clear-world cumulus read as soft
 billows with dark flat bases and lit domes, no striping; the deck tops in #03 as rounded
 cells, no contour lines.
+
+## round-5 L4 aircraft materials (Physically Based API)
+
+Visual round 5, lane L4, 2026-11-10 (Mac, uncompiled and unrendered; engine source read in
+/Users/Shared/Epic Games/UE_5.7, 5.7.4). The round-3 frames (head3 J-11, #03 A320, #13 747,
+#08 C172) read as plastic: a flat grey fuselage with no measured specular, a 0.15 "flake"
+metallic on paint, panel lines drawn as a grid, and an opaque dark canopy.
+
+- **Database vendored.** `assets/looks/physically_based/materials.json` is the upstream
+  `deploy/v2/materials.json` of github.com/AntonPalmqvist/physically-based-api at commit
+  `bed520ab`, CC0, sha256-pinned (`PIN.json`, `THIRD_PARTY_VISUAL.md`); `scripts/physically_based.py`
+  refuses an edited copy by name. `scripts/aircraft_look.py` takes its constants from it:
+  aluminium F0 0.916/0.923/0.924, titanium 0.441/0.400/0.361, stainless 0.669/0.639/0.598,
+  tyre albedo 0.023 / roughness 0.7 / n 1.5, car paint n 1.5.
+- **Paint** (`M_AircraftPaint`, Clear Coat): Metallic 0, Specular 0.5 (F0 0.04), base 0.4,
+  livery albedo capped at 0.9, panel lines lowered (depth 0.2, darkening 0.15), exhaust soot
+  (`exhaust_soot.hlsl`, the manifest's nozzles as `Nozzle0..3` local-cm vectors set per
+  instance at import) darkening, roughening and killing the coat. Airliners and the C172:
+  ClearCoat 1.0, coat roughness 0.08. The J-11 is the **matte** variant: ClearCoat 0,
+  roughness 0.5 (PLAAF grey is flat). The A-4 keeps its semi-gloss 0.25.
+- **Bare metal** (`M_AircraftBareMetal`): Metallic 1, colour lerped 0.7 toward the measured
+  `MetalF0` (aluminium; a slot rule may say `"metal": "titanium"` or `"stainless_steel"`),
+  roughness 0.35 with a 0.2 low-frequency breakup (the 0.25-0.45 band), NoiseCm 60. Edge wear
+  on both classes now exposes Metallic 1 at the measured aluminium F0.
+- **Rubber** (`M_AircraftRubber`): the measured tyre (roughness 0.7, Specular 0.5), the MTL
+  colour floored at the measured albedo (`RubberFloor`).
+- **Canopy**: a new `M_AircraftGlassThin` (Thin Translucent, Surface ForwardShading,
+  `ThinTranslucentMaterialOutput` Transmittance 0.80/0.84/0.82 -- the J-11 warm gold-green
+  0.80/0.78/0.66 -- n 1.5 so Specular 0.5, roughness 0.02, SSR on, custom-depth writes on, no
+  refraction) parented by `MI_<slot>_thin` beside every glass slot's opaque instance.
+  SM5 D3D11: MaterialShared.cpp requires translucent + TLM_SurfacePerPixelLighting + the
+  output node (all set); PCD3D_SM5 has `bSupportsDualSourceBlending=true` and the base pass
+  carries a single-target fallback. **Labels:** a translucent pane writes no depth and the ID /
+  depth captures draw no translucency, so `FlightSimAircraftFX.cpp` applies `MI_<slot>_thin`
+  only when the render carries no `-labels` (`FFlightSimAircraftFXOptions::bLabels`,
+  `FParse::Param(*Params, TEXT("labels"))`, twin `aircraft_look.labels_requested`); a labelled
+  frame keeps the opaque `M_AircraftGlass`, unchanged. Recorded in render.json
+  `aircraft_look.materials` (`slots_thin_translucent`, `slots_thin`, `thin_glass`, `labels`).
+- **Generation:** `LOOK_GENERATION` 3 -> 4 (every aircraft master rebuilds on the next
+  `scripts/ue_create_materials.py`). No mesh re-import: the look instances are refreshed by
+  the import step or `scripts/ue_fix_aircraft_materials.py` (`create_look_instances` now
+  also makes the `_thin` instances and sets the soot vectors). Slot order and the slot-mismatch
+  check are untouched (the four slot classes and `MI_<slot>` names are the same).
+- **Probe items (UNCALIBRATED):** AlbedoMax, SootAmount / SootLengthRadii, MetalColourWeight,
+  the thin canopy's Transmittance and GlassDiffuse, the coat roughness 0.08. A/B pair on #01
+  and the J-11 head shots: `-labels` on vs off shows the opaque vs thin canopy.

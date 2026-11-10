@@ -2,12 +2,13 @@
   "schema": "flightsim-aircraft-look/1",
   "name": "c172p",
   "default_class": "paint",
-  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. Smaller panels (light aircraft).",
+  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. Smaller panels (light aircraft). Round 5 L4 (2026-11-10, physically calibrated materials): paint Metallic is 0 (a dielectric under a clear coat; the master's default now), a polyurethane-finished light aircraft takes the full clear coat (1.0, coat roughness 0.08). UNCALIBRATED.",
   "slot_rules": [],
   "class_scalars": {
     "paint": {
-      "Roughness": 0.32,
-      "ClearCoat": 0.9
+      "Roughness": 0.35,
+      "ClearCoat": 1.0,
+      "ClearCoatRoughness": 0.08
     }
   },
   "class_vectors": {

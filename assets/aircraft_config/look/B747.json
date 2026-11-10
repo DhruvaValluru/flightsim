@@ -2,7 +2,7 @@
   "schema": "flightsim-aircraft-look/1",
   "name": "B747",
   "default_class": "paint",
-  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. Airliner gloss: full clear coat.",
+  "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. Airliner gloss: full clear coat. Round 5 L4 (2026-11-10, physically calibrated materials): paint Metallic is 0 (a dielectric under a clear coat; the master's default now), airliner gloss is the full clear coat (1.0, coat roughness 0.08) over a 0.35 base. UNCALIBRATED.",
   "slot_rules": [
     {
       "match": "mat_747_400_tire.*",
@@ -12,10 +12,9 @@
   ],
   "class_scalars": {
     "paint": {
-      "Roughness": 0.3,
+      "Roughness": 0.35,
       "ClearCoat": 1.0,
-      "ClearCoatRoughness": 0.06,
-      "Metallic": 0.1
+      "ClearCoatRoughness": 0.08
     }
   },
   "nozzles": [

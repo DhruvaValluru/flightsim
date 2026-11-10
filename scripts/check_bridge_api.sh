@@ -707,6 +707,24 @@ aircraft_check "ProcMesh CreateMeshSection_LinearColor" "Plugins/Runtime/Procedu
 aircraft_check "ProcMesh ClearMeshSection" "Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h" "void ClearMeshSection(int32 SectionIndex)"
 aircraft_check "RotationMatrix MakeFromX" "Runtime/Core/Public/Math/RotationMatrix.h" "MakeFromX(TVector<T> const& XAxis)"
 aircraft_check "Math UE_DOUBLE_PI" "Runtime/Core/Public/Math/UnrealMathUtility.h" "#define UE_DOUBLE_PI"
+# round 5 (L4, 2026-11-10): the Thin Translucent canopy master
+# (scripts/ue_aircraft_master_materials.py create_aircraft_glass_thin), the
+# measured-material graph nodes, and the -labels gate in FlightSimAircraftFX.cpp.
+aircraft_check "round5: ShadingModel MSM_ThinTranslucent" "$RE/Classes/Engine/EngineTypes.h" "MSM_ThinTranslucent"
+aircraft_check "round5: TLM_SurfacePerPixelLighting" "$RE/Classes/Engine/EngineTypes.h" "TLM_SurfacePerPixelLighting"
+aircraft_check "round5: RefractionMode RM_None" "$RE/Classes/Engine/EngineTypes.h" "RM_None"
+aircraft_check "round5: thin translucent needs Surface ForwardShading" "Runtime/Engine/Private/Materials/MaterialShared.cpp" "TranslucencyLightingMode != ETranslucencyLightingMode::TLM_SurfacePerPixelLighting"
+aircraft_check "round5: thin translucent needs the output node" "Runtime/Engine/Private/Materials/MaterialShared.cpp" "HasAnyExpressionsInMaterialAndFunctionsOfType<UMaterialExpressionThinTranslucentMaterialOutput>()"
+aircraft_check "round5: ThinTranslucentMaterialOutput TransmittanceColor" "$RE/Public/Materials/MaterialExpressionThinTranslucentMaterialOutput.h" "FExpressionInput TransmittanceColor;"
+aircraft_check "round5: Material bScreenSpaceReflections" "$RE/Public/Materials/Material.h" "uint8 bScreenSpaceReflections : 1;"
+aircraft_check "round5: Material AllowTranslucentCustomDepthWrites" "$RE/Public/Materials/Material.h" "uint8 AllowTranslucentCustomDepthWrites : 1;"
+aircraft_check "round5: Material TwoSided" "$RE/Public/Materials/Material.h" "uint8 TwoSided : 1;"
+aircraft_check "round5: D3D SM5 dual-source blending" "Config/Windows/DataDrivenPlatformInfo.ini" "bSupportsDualSourceBlending=true"
+aircraft_check "round5: thin translucent single-target fallback" "Shaders/Private/BasePassPixelShader.usf" "float AdjustedAlpha = saturate(1-dot(AdjustedDualBlendMul,float3(1.0f,1.0f,1.0f)/3.0f));"
+aircraft_check "round5: dual-source blending asked by the model" "Runtime/Engine/Private/Materials/MaterialShared.cpp" "bool bMaterialRequestsDualSourceBlending = Material->ShadingModel == MSM_ThinTranslucent;"
+aircraft_check "round5: MaterialExpressionMin" "$RE/Public/Materials/MaterialExpressionMin.h" "class UMaterialExpressionMin : public UMaterialExpression"
+aircraft_check "round5: MaterialExpressionMax" "$RE/Public/Materials/MaterialExpressionMax.h" "class UMaterialExpressionMax : public UMaterialExpression"
+aircraft_check "round5: FParse Param (the -labels gate)" "Runtime/Core/Public/Misc/Parse.h" "static CORE_API bool Param( const TCHAR* Stream, const TCHAR* Param );"
 # -- CONDENSATION (condensation-solver) --------------------------------------
 # FlightSimCondensation.cpp (the humidity-gated vapour sites: mesh vertices
 # read from LOD 0, the attached and world-space ribbons) and

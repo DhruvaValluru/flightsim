@@ -168,49 +168,76 @@ def create_look_instances(asset_root, mtl_dir, name, say=print):
     # lets a look config derive per-slot roughness from the FlightGear spec/shi.
     slots = look.plan_slots(look.read_mtl_dir(mtl_dir), config,
                             look.read_material_sources(mtl_dir))
+    # round 5 (L4): the look manifest is built FIRST, because its nozzle rows
+    # (actor cm) become every paint / bare-metal instance's soot vectors
+    # (local cm); it is written after the instances, as before.
+    manifest, soot = None, {}
+    try:
+        manifest, _ = look.build_manifest_for(name, generated_dir=mtl_dir)
+        soot = {key: tuple(value) for key, value in manifest["soot_nozzles_local_cm"].items()}
+        for left_out in manifest.get("soot_nozzles_left_out", []):
+            problems.append(f"nozzle {left_out!r}: past the fourth, no soot vector carries it")
+    except (OSError, ValueError, KeyError) as exc:
+        problems.append(f"look manifest: {exc}")
     lib = unreal.MaterialEditingLibrary
     assets = unreal.EditorAssetLibrary
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     folder = f"{asset_root}/{look.LOOK_INSTANCE_FOLDER}"
     made = 0
-    for slot, row in sorted(slots.items()):
-        if not assets.does_asset_exist(f"{asset_root}/{slot}"):
-            continue    # never imported (a dropped glass shell): nothing draws it
-        master = assets.load_asset(row["master"]) if assets.does_asset_exist(row["master"]) else None
+
+    def _instance(master_path, instance_name, texture, base_color, weight, scalars, vectors, what):
+        """Create or refresh one Look/<instance>; True when made."""
+        master = assets.load_asset(master_path) if assets.does_asset_exist(master_path) else None
         if master is None:
-            problems.append(f"{row['master']} is not built (run scripts/ue_create_materials.py)")
-            continue
-        path = f"{folder}/{row['instance']}"
+            problems.append(f"{master_path} is not built (run scripts/ue_create_materials.py)")
+            return False
+        path = f"{folder}/{instance_name}"
         instance = assets.load_asset(path) if assets.does_asset_exist(path) else tools.create_asset(
-            row["instance"], folder, unreal.MaterialInstanceConstant,
+            instance_name, folder, unreal.MaterialInstanceConstant,
             unreal.MaterialInstanceConstantFactoryNew())
         if instance is None:
             problems.append(f"{path}: could not be created")
-            continue
+            return False
         lib.set_material_instance_parent(instance, master)
-        if row["texture"]:
-            texture_path = f"{asset_root}/{row['texture']}"
+        if texture:
+            texture_path = f"{asset_root}/{texture}"
             if not assets.does_asset_exist(texture_path):
                 problems.append(f"{path}: its texture {texture_path} is not imported")
-                continue
+                return False
             lib.set_material_instance_texture_parameter_value(
                 instance, "BaseColorMap", assets.load_asset(texture_path))
         lib.set_material_instance_vector_parameter_value(
-            instance, "BaseColor", unreal.LinearColor(*row["base_color"]))
-        lib.set_material_instance_scalar_parameter_value(instance, "BaseColorMapWeight", row["weight"])
-        for key, value in row["scalars"].items():
+            instance, "BaseColor", unreal.LinearColor(*base_color))
+        lib.set_material_instance_scalar_parameter_value(instance, "BaseColorMapWeight", weight)
+        for key, value in scalars.items():
             lib.set_material_instance_scalar_parameter_value(instance, key, float(value))
-        for key, value in row["vectors"].items():
+        for key, value in vectors.items():
             lib.set_material_instance_vector_parameter_value(instance, key, unreal.LinearColor(*value))
         lib.update_material_instance(instance)
         assets.save_loaded_asset(instance, only_if_is_dirty=False)
-        made += 1
-        say(f"{path}: {row['class']} ({row['rule']})")
-    try:
-        written = look.write_manifest(name, generated_dir=mtl_dir)
-        say(f"look manifest {written}")
-    except (OSError, ValueError) as exc:
-        problems.append(f"look manifest: {exc}")
+        say(f"{path}: {what}")
+        return True
+
+    for slot, row in sorted(slots.items()):
+        if not assets.does_asset_exist(f"{asset_root}/{slot}"):
+            continue    # never imported (a dropped glass shell): nothing draws it
+        vectors = dict(row["vectors"])
+        if row["class"] in ("paint", "bare_metal"):
+            vectors.update(soot)
+        if _instance(row["master"], row["instance"], row["texture"], row["base_color"], row["weight"],
+                     row["scalars"], vectors, f"{row['class']} ({row['rule']})"):
+            made += 1
+        thin = row.get("thin")
+        if thin and _instance(thin["master"], thin["instance"], row["texture"], row["base_color"],
+                              row["weight"], thin["scalars"], thin["vectors"],
+                              f"{look.THIN_CLASS} (the canopy on a render without -labels)"):
+            made += 1
+    if manifest is not None:
+        try:
+            written = look.write_manifest_dict(manifest, mtl_dir)
+            say(f"look manifest {written}")
+        except OSError as exc:
+            problems.append(f"look manifest: {exc}")
     return made, problems
 
 
