@@ -1,0 +1,2674 @@
+LogWindows: Failed to load 'aqProf.dll' (GetLastError=126)
+LogWindows: File 'aqProf.dll' does not exist
+LogProfilingDebugging: Loading WinPixEventRuntime.dll for PIX profiling (from ../../../Engine/Binaries/ThirdParty/Windows/WinPixEventRuntime/x64).
+LogWindows: Failed to load 'VtuneApi.dll' (GetLastError=126)
+LogWindows: File 'VtuneApi.dll' does not exist
+LogWindows: Failed to load 'VtuneApi32e.dll' (GetLastError=126)
+LogWindows: File 'VtuneApi32e.dll' does not exist
+LogWindows: Started CrashReportClient (pid=9752)
+LogWindows: Enabling Tpause support
+LogWindows: Custom abort handler registered for crash reporting.
+LogInit: Display: Running engine for game: FlightSim
+LogCore: UTS: Unreal Trace Server launched successfully
+LogTrace: Initializing trace...
+LogCore: Display: Requested channels: 'cpu,gpu,frame,log,bookmark,screenshot,region'
+LogCore: No trace connection. Tracing to in-memory cache.
+LogTrace: Display: Control listening on port 1985
+LogTrace: Finished trace initialization.
+LogCsvProfiler: Display: Metadata set : platform="Windows"
+LogCsvProfiler: Display: Metadata set : config="Development"
+LogCsvProfiler: Display: Metadata set : buildversion="++UE5+Release-5.7-CL-51494982"
+LogCsvProfiler: Display: Metadata set : engineversion="5.7.4-51494982+++UE5+Release-5.7"
+LogCsvProfiler: Display: Metadata set : enginereleaseversion="5.7.4"
+LogCsvProfiler: Display: Metadata set : os="Windows 11 (25H2) [10.0.26200.9711] "
+LogCsvProfiler: Display: Metadata set : cpu="GenuineIntel|Intel(R) Core(TM) 5 210H"
+LogCsvProfiler: Display: Metadata set : pgoenabled="0"
+LogCsvProfiler: Display: Metadata set : pgoprofilingenabled="0"
+LogCsvProfiler: Display: Metadata set : ltoenabled="0"
+LogCsvProfiler: Display: Metadata set : asan="0"
+LogCsvProfiler: Display: Metadata set : mergedmodules="0"
+LogCsvProfiler: Display: Metadata set : commandline="" C:\Users\kanth\flightsim\ue\FlightSim.uproject -run=FlightSimBridge.FlightSimRender -scenario=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\card.json -frames=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\frames\chase -Visual -shot=showcase -fps=30 -width=1920 -height=1080 -sky=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\sky.json -fog-density=0.0012 -unattended -nopause -nosplash -stdout -FullStdOutLogOutput -RenderOffScreen -AllowCommandletRendering -camera-index=0 -labels -beauty-look=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\beauty_look.json -hero-lighting=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\hero_lighting.json -weather-backend=procedural -rain-gain=4 -rain-style=cinematic -deterministic -quality=beauty -GeorefTerrain -terrain=C:\Users\kanth\flightsim\runs\terrain\grand_canyon -imagery=C:\Users\kanth\flightsim\runs\terrain\grand_canyon_xplane_drape.json -mesh=C:\Users\kanth\flightsim\assets\generated\J11\mesh_manifest.json -telemetry=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\frames\chase\host_telemetry.json -NoSound -NoLoadingScreen -supersample=2""
+LogCsvProfiler: Display: Metadata set : loginid="72a337ddd1034978a6246c14d0b64f7a"
+LogCsvProfiler: Display: Metadata set : llm="0"
+LogStats: Stats thread started at 0.352869
+LogCsvProfiler: Display: Metadata set : systemresolution.resx="1280"
+LogCsvProfiler: Display: Metadata set : systemresolution.resy="720"
+LogICUInternationalization: ICU TimeZone Detection - Raw Offset: -5:00, Platform Override: ''
+LogInit: Session CrashGUID >====================================================
+         Session CrashGUID >   UECC-Windows-A828DF154DBBB641A01E508CC2B59D22
+         Session CrashGUID >====================================================
+LogConfig: No local boot hotfix file found at: [../../../../../../Users/kanth/flightsim/ue/Saved/PersistentDownloadDir/HotfixForNextBoot.txt]
+LogAudio: Display: Audio Device Manager not initializing due to all audio being disabled. If this is not intentional, please check command line arguments for "-nosound".
+LogPluginManager: Looking for build plugins target receipt
+LogPluginManager: Found matching target receipt: ../../../../../../Users/kanth/flightsim/ue/Binaries/Win64/FlightSimEditor.target
+LogPluginManager: Looking for enabled plugins target receipt
+LogConfig: Display: Loading VulkanPC ini files took 0.06 seconds
+LogConfig: Display: Loading IOS ini files took 0.06 seconds
+LogConfig: Display: Loading Mac ini files took 0.07 seconds
+LogConfig: Display: Loading Android ini files took 0.07 seconds
+LogPluginManager: Found matching target receipt: ../../../../../../Users/kanth/flightsim/ue/Binaries/Win64/FlightSimEditor.target
+LogConfig: Display: Loading Windows ini files took 0.08 seconds
+LogConfig: Display: Loading Unix ini files took 0.08 seconds
+LogConfig: Display: Loading TVOS ini files took 0.08 seconds
+LogConfig: Display: Loading Linux ini files took 0.09 seconds
+LogPluginManager: Mounting Engine plugin AudioInsights
+LogPluginManager: Mounting Engine plugin BaseMaterial
+LogConfig: Display: Loading VisionOS ini files took 0.05 seconds
+LogPluginManager: Mounting Engine plugin Bridge
+LogPluginManager: Mounting Engine plugin ChaosCloth
+LogPluginManager: Mounting Engine plugin ChaosInsights
+LogPluginManager: Mounting Engine plugin ChaosVD
+LogPluginManager: Mounting Engine plugin CmdLinkServer
+LogPluginManager: Mounting Engine plugin EnhancedInput
+LogPluginManager: Mounting Engine plugin Fab
+LogPluginManager: Mounting Engine plugin IoStoreInsights
+LogPluginManager: Mounting Engine plugin MassInsights
+LogPluginManager: Mounting Engine plugin MeshPainting
+LogPluginManager: Mounting Engine plugin PCG
+LogPluginManager: Mounting Engine plugin RenderGraphInsights
+LogPluginManager: Mounting Engine plugin TraceUtilities
+LogPluginManager: Mounting Engine plugin UbaController
+LogPluginManager: Mounting Engine plugin WorldMetrics
+LogPluginManager: Mounting Engine plugin XGEController
+LogPluginManager: Mounting Engine plugin AnimationSharing
+LogPluginManager: Mounting Engine plugin OodleNetwork
+LogPluginManager: Mounting Engine plugin CLionSourceCodeAccess
+LogPluginManager: Mounting Engine plugin CodeLiteSourceCodeAccess
+LogPluginManager: Mounting Engine plugin DumpGPUServices
+LogPluginManager: Mounting Engine plugin GitSourceControl
+LogPluginManager: Mounting Engine plugin KDevelopSourceCodeAccess
+LogPluginManager: Mounting Engine plugin N10XSourceCodeAccess
+LogPluginManager: Mounting Engine plugin NamingTokens
+LogPluginManager: Mounting Engine plugin GPUReshape
+LogPluginManager: Mounting Engine plugin NullSourceCodeAccess
+LogPluginManager: Mounting Engine plugin PlasticSourceControl
+LogPluginManager: Mounting Engine plugin PixWinPlugin
+LogPluginManager: Mounting Engine plugin PerforceSourceControl
+LogPluginManager: Mounting Engine plugin PluginUtils
+LogPluginManager: Mounting Engine plugin ProjectLauncher
+LogPluginManager: Mounting Engine plugin RenderDocPlugin
+LogPluginManager: Mounting Engine plugin RiderSourceCodeAccess
+LogPluginManager: Mounting Engine plugin PropertyAccessNode
+LogPluginManager: Mounting Engine plugin SubversionSourceControl
+LogPluginManager: Mounting Engine plugin UObjectPlugin
+LogPluginManager: Mounting Engine plugin TextureFormatOodle
+LogPluginManager: Mounting Engine plugin VisualStudioSourceCodeAccess
+LogPluginManager: Mounting Engine plugin VisualStudioCodeSourceCodeAccess
+LogPluginManager: Mounting Engine plugin AssetManagerEditor
+LogPluginManager: Mounting Engine plugin XCodeSourceCodeAccess
+LogPluginManager: Mounting Engine plugin BlueprintHeaderView
+LogPluginManager: Mounting Engine plugin BlueprintMaterialTextureNodes
+LogPluginManager: Mounting Engine plugin ChangelistReview
+LogPluginManager: Mounting Engine plugin ColorGrading
+LogPluginManager: Mounting Engine plugin CryptoKeys
+LogPluginManager: Mounting Engine plugin CurveEditorTools
+LogPluginManager: Mounting Engine plugin DataValidation
+LogPluginManager: Mounting Engine plugin EditorDebugTools
+LogPluginManager: Mounting Engine plugin EditorScriptingUtilities
+LogPluginManager: Mounting Engine plugin EngineAssetDefinitions
+LogPluginManager: Mounting Engine plugin FacialAnimation
+LogPluginManager: Mounting Engine plugin GeometryMode
+LogPluginManager: Mounting Engine plugin GameplayTagsEditor
+LogPluginManager: Mounting Engine plugin MobileLauncherProfileWizard
+LogPluginManager: Mounting Engine plugin MaterialAnalyzer
+LogPluginManager: Mounting Engine plugin ModelingToolsEditorMode
+LogPluginManager: Mounting Engine plugin MeshLODToolset
+LogPluginManager: Mounting Engine plugin MacGraphicsSwitching
+LogPluginManager: Mounting Engine plugin PluginBrowser
+LogPluginManager: Mounting Engine plugin ProxyLODPlugin
+LogPluginManager: Mounting Engine plugin SequencerAnimTools
+LogPluginManager: Mounting Engine plugin StylusInput
+LogPluginManager: Mounting Engine plugin SpeedTreeImporter
+LogPluginManager: Mounting Engine plugin UVEditor
+LogPluginManager: Mounting Engine plugin UMGWidgetPreview
+LogPluginManager: Mounting Engine plugin AdvancedRenamer
+LogPluginManager: Mounting Engine plugin WorldPartitionHLODUtilities
+LogPluginManager: Mounting Engine plugin AutomationUtils
+LogPluginManager: Mounting Engine plugin BackChannel
+LogPluginManager: Mounting Engine plugin ChaosCaching
+LogPluginManager: Mounting Engine plugin ChaosEditor
+LogPluginManager: Mounting Engine plugin ChaosNiagara
+LogPluginManager: Mounting Engine plugin ChaosUserDataPT
+LogPluginManager: Mounting Engine plugin ChaosSolverPlugin
+LogPluginManager: Mounting Engine plugin CharacterAI
+LogPluginManager: Mounting Engine plugin Dataflow
+LogPluginManager: Mounting Engine plugin EditorDataStorageFeatures
+LogPluginManager: Mounting Engine plugin EditorDataStorage
+LogPluginManager: Mounting Engine plugin EditorTelemetry
+LogPluginManager: Mounting Engine plugin Fracture
+LogPluginManager: Mounting Engine plugin EditorPerformance
+LogPluginManager: Mounting Engine plugin FullBodyIK
+LogPluginManager: Mounting Engine plugin GeometryCollectionPlugin
+LogPluginManager: Mounting Engine plugin GeometryFlow
+LogPluginManager: Mounting Engine plugin GlobalConfigurationData
+LogPluginManager: Mounting Engine plugin Landmass
+LogPluginManager: Mounting Engine plugin LevelSequenceNavigatorBridge
+LogPluginManager: Mounting Engine plugin GeometryDataflow
+LogPluginManager: Mounting Engine plugin LocalizableMessage
+LogPluginManager: Mounting Engine plugin MeshModelingToolsetExp
+LogPluginManager: Mounting Engine plugin LowLevelNetTrace
+LogPluginManager: Mounting Engine plugin NFORDenoise
+LogPluginManager: Mounting Engine plugin PlanarCut
+LogPluginManager: Mounting Engine plugin PlatformCrypto
+LogPluginManager: Mounting Engine plugin PythonScriptPlugin
+LogPluginManager: Mounting Engine plugin SequenceNavigator
+LogPluginManager: Mounting Engine plugin SkeletalReduction
+LogPluginManager: Mounting Engine plugin RuntimeTelemetry
+LogPluginManager: Mounting Engine plugin ToolPresets
+LogPluginManager: Mounting Engine plugin Water
+LogPluginManager: Mounting Engine plugin AlembicImporter
+LogPluginManager: Mounting Engine plugin CesiumForUnreal
+LogPluginManager: Mounting Engine plugin ActorSequence
+LogPluginManager: Mounting Engine plugin LevelSequenceEditor
+LogPluginManager: Mounting Engine plugin NNERuntimeORT
+LogPluginManager: Mounting Engine plugin SequenceValidator
+LogPluginManager: Mounting Engine plugin SequencerScripting
+LogPluginManager: Mounting Engine plugin NNEDenoiser
+LogPluginManager: Mounting Engine plugin LauncherChunkInstaller
+LogPluginManager: Mounting Engine plugin TemplateSequence
+LogPluginManager: Mounting Engine plugin InterchangeTests
+LogPluginManager: Mounting Engine plugin InterchangeEditor
+LogPluginManager: Mounting Engine plugin TcpMessaging
+LogPluginManager: Mounting Engine plugin Interchange
+LogPluginManager: Mounting Engine plugin EOSShared
+LogPluginManager: Mounting Engine plugin InterchangeAssets
+LogPluginManager: Mounting Engine plugin UdpMessaging
+LogPluginManager: Mounting Engine plugin OnlineBase
+LogPluginManager: Mounting Engine plugin OnlineServices
+LogPluginManager: Mounting Engine plugin OnlineSubsystem
+LogPluginManager: Mounting Engine plugin OnlineSubsystemNull
+LogPluginManager: Mounting Engine plugin OnlineSubsystemUtils
+LogPluginManager: Mounting Engine plugin ActorLayerUtilities
+LogPluginManager: Mounting Engine plugin AndroidDeviceProfileSelector
+LogPluginManager: Mounting Engine plugin AndroidMoviePlayer
+LogPluginManager: Mounting Engine plugin AndroidPermission
+LogPluginManager: Mounting Engine plugin AssetTags
+LogPluginManager: Mounting Engine plugin AudioCapture
+LogPluginManager: Mounting Engine plugin AppleMoviePlayer
+LogPluginManager: Mounting Engine plugin CableComponent
+LogPluginManager: Mounting Engine plugin AudioWidgets
+LogPluginManager: Mounting Engine plugin ArchVisCharacter
+LogPluginManager: Mounting Engine plugin ChunkDownloader
+LogPluginManager: Mounting Engine plugin ComputeFramework
+LogPluginManager: Mounting Engine plugin AppleImageUtils
+LogPluginManager: Mounting Engine plugin CustomMeshComponent
+LogPluginManager: Mounting Engine plugin AudioSynesthesia
+LogPluginManager: Mounting Engine plugin GeometryScripting
+LogPluginManager: Mounting Engine plugin GeometryProcessing
+LogPluginManager: Mounting Engine plugin GeometryCache
+LogPluginManager: Mounting Engine plugin GoogleCloudMessaging
+LogPluginManager: Mounting Engine plugin GeoReferencing
+LogPluginManager: Mounting Engine plugin HairStrands
+LogPluginManager: Mounting Engine plugin GooglePAD
+LogPluginManager: Mounting Engine plugin InputDebugging
+LogPluginManager: Mounting Engine plugin AndroidFileServer
+LogPluginManager: Mounting Engine plugin LinuxDeviceProfileSelector
+LogPluginManager: Mounting Engine plugin IOSDeviceProfileSelector
+LogPluginManager: Mounting Engine plugin LocationServicesBPLibrary
+LogPluginManager: Mounting Engine plugin Metasound
+LogPluginManager: Mounting Engine plugin ExampleDeviceProfileSelector
+LogPluginManager: Mounting Engine plugin MsQuic
+LogPluginManager: Mounting Engine plugin MobilePatchingUtils
+LogPluginManager: Mounting Engine plugin ProceduralMeshComponent
+LogPluginManager: Mounting Engine plugin PropertyAccessEditor
+LogPluginManager: Mounting Engine plugin PropertyBindingUtils
+LogPluginManager: Mounting Engine plugin MeshModelingToolset
+LogPluginManager: Mounting Engine plugin RigVM
+LogPluginManager: Mounting Engine plugin SignificanceManager
+LogPluginManager: Mounting Engine plugin ResonanceAudio
+LogPluginManager: Mounting Engine plugin SoundFields
+LogPluginManager: Mounting Engine plugin StateTree
+LogPluginManager: Mounting Engine plugin SunPosition
+LogPluginManager: Mounting Engine plugin Synthesis
+LogPluginManager: Mounting Engine plugin WaveTable
+LogPluginManager: Mounting Engine plugin WebMMoviePlayer
+LogPluginManager: Mounting Engine plugin WindowsDeviceProfileSelector
+LogPluginManager: Mounting Engine plugin WindowsMoviePlayer
+LogPluginManager: Mounting Engine plugin Paper2D
+LogPluginManager: Mounting Engine plugin EnvironmentQueryEditor
+LogPluginManager: Mounting Engine plugin AISupport
+LogPluginManager: Mounting Engine plugin AnimationData
+LogPluginManager: Mounting Engine plugin AnimationModifierLibrary
+LogPluginManager: Mounting Engine plugin ACLPlugin
+LogPluginManager: Mounting Engine plugin ControlRig
+LogPluginManager: Mounting Engine plugin BlendSpaceMotionAnalysis
+LogPluginManager: Mounting Engine plugin DeformerGraph
+LogPluginManager: Mounting Engine plugin EaseCurveTool
+LogPluginManager: Mounting Engine plugin ControlRigSpline
+LogPluginManager: Mounting Engine plugin ControlRigModules
+LogPluginManager: Mounting Engine plugin GameplayInsights
+LogPluginManager: Mounting Engine plugin IKRig
+LogPluginManager: Mounting Engine plugin TweeningUtils
+LogPluginManager: Mounting Engine plugin SkeletalMeshModelingTools
+LogPluginManager: Mounting Engine plugin EngineCameras
+LogPluginManager: Mounting Engine plugin GameplayCameras
+LogPluginManager: Mounting Engine plugin RigLogic
+LogPluginManager: Mounting Engine plugin CameraShakePreviewer
+LogPluginManager: Mounting Engine plugin CompositeCore
+LogPluginManager: Mounting Engine plugin GLTFExporter
+LogPluginManager: Mounting Engine plugin VariantManager
+LogPluginManager: Mounting Engine plugin DatasmithContent
+LogPluginManager: Mounting Engine plugin VariantManagerContent
+LogPluginManager: Mounting Engine plugin Niagara
+LogPluginManager: Mounting Engine plugin Cascade
+LogPluginManager: Mounting Engine plugin NiagaraPreviewContent
+LogPluginManager: Mounting Engine plugin NiagaraSimCaching
+LogPluginManager: Mounting Engine plugin AndroidMedia
+LogPluginManager: Mounting Engine plugin AvfMedia
+LogPluginManager: Mounting Engine plugin ImgMedia
+LogPluginManager: Mounting Engine plugin MediaPlayerEditor
+LogPluginManager: Mounting Engine plugin MediaCompositing
+LogPluginManager: Mounting Engine plugin MediaPlate
+LogPluginManager: Mounting Engine plugin WebMMedia
+LogPluginManager: Mounting Engine plugin WmfMedia
+LogPluginManager: Mounting Engine plugin MetaHumanSDK
+LogPluginManager: Mounting Engine plugin Takes
+LogPluginManager: Mounting Engine plugin ContentBrowserClassDataSource
+LogPluginManager: Mounting Engine plugin ContentBrowserFileDataSource
+LogPluginManager: Mounting Engine plugin LightMixer
+LogPluginManager: Mounting Engine plugin ObjectMixer
+LogPluginManager: Mounting Engine plugin OnlineSubsystemIOS
+LogPluginManager: Mounting Engine plugin PortableObjectFileDataSource
+LogPluginManager: Mounting Engine plugin ContentBrowserAssetDataSource
+LogPluginManager: Mounting Engine plugin SQLiteCore
+LogPluginManager: Mounting Engine plugin XInputDevice
+LogPluginManager: Mounting Engine plugin BaseCharacterFXEditor
+LogPluginManager: Mounting Engine plugin OnlineSubsystemGooglePlay
+LogPluginManager: Mounting Project plugin FlightSimBridge
+LogPluginManager: Mounting Project plugin JSBSimFlightDynamicsModel
+SourceControl: Revision control is disabled
+SourceControl: Revision control is disabled
+SourceControl: Revision control is disabled
+LogWindows: Failed to load 'WinPixGpuCapturer.dll' (GetLastError=126)
+LogWindows: File 'WinPixGpuCapturer.dll' does not exist
+PixWinPlugin: PIX capture plugin failed to initialize! Check that the process is launched from PIX.
+LogConfig: Applying CVar settings from Section [/Script/RenderDocPlugin.RenderDocPluginSettings] File [Engine]
+RenderDocPlugin: Display: RenderDoc plugin will not be loaded. Use '-AttachRenderDoc' on the cmd line or enable 'renderdoc.AutoAttach' in the plugin settings.
+LogStudioTelemetry: Started StudioTelemetry Session
+LogNFORDenoise: NFORDenoise function starting up
+LogStudioTelemetry: Started StudioTelemetry Session
+LogInit: Using libcurl 8.12.1
+LogInit:  - built for Windows
+LogInit:  - supports SSL with OpenSSL/1.1.1t
+LogInit:  - supports HTTP deflate (compression) using libz 1.3
+LogInit:  - other features:
+LogInit:      CURL_VERSION_SSL
+LogInit:      CURL_VERSION_LIBZ
+LogInit:      CURL_VERSION_IPV6
+LogInit:      CURL_VERSION_ASYNCHDNS
+LogInit:      CURL_VERSION_LARGEFILE
+LogInit:      CURL_VERSION_TLSAUTH_SRP
+LogInit:      CURL_VERSION_HTTP2
+LogInit:  CurlRequestOptions (configurable via config and command line):
+LogInit:  - bVerifyPeer = true  - Libcurl will verify peer certificate
+LogInit:  - bUseHttpProxy = false  - Libcurl will NOT use HTTP proxy
+LogInit:  - CVarHttpCurlReuseConnectionEnabled = true  - Libcurl will reuse connections
+LogInit:  - MaxHostConnections = 40  - Libcurl will limit the number of connections to a host
+LogInit:  - LocalHostAddr = Default
+LogInit:  - BufferSize = 65536
+LogInit: CreateHttpThread using FCurlMultiPollEventLoopHttpThread
+LogInit: Creating http thread with maximum 256 concurrent requests
+LogEOSShared: Loaded "C:/Program Files/Epic Games/UE_5.7/Engine/Binaries/Win64/EOSSDK-Win64-Shipping.dll"
+LogEOSShared: FEOSSDKManager::Initialize Initializing EOSSDK Version:1.19.0.3-49960398
+LogInit: WinSock: version 1.1 (2.2), MaxSocks=32767, MaxUdp=65467
+LogOnline: OSS: Created online subsystem instance for: NULL
+LogOnline: OSS: TryLoadSubsystemAndSetDefault: Loaded subsystem for type [NULL]
+LogConfig: Applying CVar settings from Section [/Script/CompositeCore.CompositeCorePluginSettings] File [Engine]
+LogInit: ExecutableName: UnrealEditor-Cmd.exe
+LogInit: Build: ++UE5+Release-5.7-CL-51494982
+LogInit: Platform=WindowsEditor
+LogInit: MachineId=72a337ddd1034978a6246c14d0b64f7a
+LogInit: DeviceId=
+LogInit: Engine Version: 5.7.4-51494982+++UE5+Release-5.7
+LogInit: Compatible Engine Version: 5.7.0-47537391+++UE5+Release-5.7
+LogInit: Net CL: 47537391
+LogInit: OS: Windows 11 (25H2) [10.0.26200.9711] (), CPU: Intel(R) Core(TM) 5 210H, GPU: Intel(R) Graphics
+LogInit: CPU Model ID: 6ba2, microcode revision: 5105
+LogInit: Compiled (64-bit): Mar  6 2026 12:43:05
+LogInit: Architecture: x64
+LogInit: Compiled with Visual C++: 19.44.35223.00
+LogInit: Build Configuration: Development
+LogInit: Branch Name: ++UE5+Release-5.7
+LogInit: Command Line:  C:\Users\kanth\flightsim\ue\FlightSim.uproject -run=FlightSimBridge.FlightSimRender -scenario=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\card.json -frames=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\frames\chase -Visual -shot=showcase -fps=30 -width=1920 -height=1080 -sky=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\sky.json -fog-density=0.0012 -unattended -nopause -nosplash -stdout -FullStdOutLogOutput -RenderOffScreen -AllowCommandletRendering -camera-index=0 -labels -beauty-look=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\beauty_look.json -hero-lighting=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\hero_lighting.json -weather-backend=procedural -rain-gain=4 -rain-style=cinematic -deterministic -quality=beauty -GeorefTerrain -terrain=C:\Users\kanth\flightsim\runs\terrain\grand_canyon -imagery=C:\Users\kanth\flightsim\runs\terrain\grand_canyon_xplane_drape.json -mesh=C:\Users\kanth\flightsim\assets\generated\J11\mesh_manifest.json -telemetry=C:\Users\kanth\flightsim\runs\webapp\07fa9abb54cb\frames\chase\host_telemetry.json -NoSound -NoLoadingScreen -supersample=2
+LogInit: Base Directory: C:/Program Files/Epic Games/UE_5.7/Engine/Binaries/Win64/
+LogInit: Allocator: Mimalloc
+LogInit: Installed Engine Build: 1
+LogInit: This binary is optimized with LTO: no, PGO: no, instrumented for PGO data collection: no
+LogDevObjectVersion: Number of dev versions registered: 36
+LogDevObjectVersion:   Dev-Blueprints (B0D832E4-1F89-4F0D-ACCF-7EB736FD4AA2): 10
+LogDevObjectVersion:   Dev-Build (E1C64328-A22C-4D53-A36C-8E866417BD8C): 0
+LogDevObjectVersion:   Dev-Core (375EC13C-06E4-48FB-B500-84F0262A717E): 4
+LogDevObjectVersion:   Dev-Editor (E4B068ED-F494-42E9-A231-DA0B2E46BB41): 40
+LogDevObjectVersion:   Dev-Framework (CFFC743F-43B0-4480-9391-14DF171D2073): 37
+LogDevObjectVersion:   Dev-Mobile (B02B49B5-BB20-44E9-A304-32B752E40360): 3
+LogDevObjectVersion:   Dev-Networking (A4E4105C-59A1-49B5-A7C5-40C4547EDFEE): 0
+LogDevObjectVersion:   Dev-Online (39C831C9-5AE6-47DC-9A44-9C173E1C8E7C): 0
+LogDevObjectVersion:   Dev-Physics (78F01B33-EBEA-4F98-B9B4-84EACCB95AA2): 20
+LogDevObjectVersion:   Dev-Platform (6631380F-2D4D-43E0-8009-CF276956A95A): 0
+LogDevObjectVersion:   Dev-Rendering (12F88B9F-8875-4AFC-A67C-D90C383ABD29): 49
+LogDevObjectVersion:   Dev-Sequencer (7B5AE74C-D270-4C10-A958-57980B212A5A): 13
+LogDevObjectVersion:   Dev-VR (D7296918-1DD6-4BDD-9DE2-64A83CC13884): 3
+LogDevObjectVersion:   Dev-LoadTimes (C2A15278-BFE7-4AFE-6C17-90FF531DF755): 1
+LogDevObjectVersion:   Private-Geometry (6EACA3D4-40EC-4CC1-B786-8BED09428FC5): 3
+LogDevObjectVersion:   Dev-AnimPhys (29E575DD-E0A3-4627-9D10-D276232CDCEA): 17
+LogDevObjectVersion:   Dev-Anim (AF43A65D-7FD3-4947-9873-3E8ED9C1BB05): 15
+LogDevObjectVersion:   Dev-ReflectionCapture (6B266CEC-1EC7-4B8F-A30B-E4D90942FC07): 1
+LogDevObjectVersion:   Dev-Automation (0DF73D61-A23F-47EA-B727-89E90C41499A): 1
+LogDevObjectVersion:   FortniteMain (601D1886-AC64-4F84-AA16-D3DE0DEAC7D6): 225
+LogDevObjectVersion:   FortniteValkyrie (8DBC2C5B-54A7-43E0-A768-FCBB7DA29060): 8
+LogDevObjectVersion:   FortniteSeason (5B4C06B7-2463-4AF8-805B-BF70CDF5D0DD): 15
+LogDevObjectVersion:   FortniteRelease (E7086368-6B23-4C58-8439-1B7016265E91): 17
+LogDevObjectVersion:   Dev-Enterprise (9DFFBCD6-494F-0158-E221-12823C92A888): 11
+LogDevObjectVersion:   Dev-Niagara (F2AED0AC-9AFE-416F-8664-AA7FFA26D6FC): 1
+LogDevObjectVersion:   Dev-Destruction (174F1F0B-B4C6-45A5-B13F-2EE8D0FB917D): 10
+LogDevObjectVersion:   Dev-Physics-Ext (35F94A83-E258-406C-A318-09F59610247C): 41
+LogDevObjectVersion:   Dev-PhysicsMaterial-Chaos (B68FC16E-8B1B-42E2-B453-215C058844FE): 1
+LogDevObjectVersion:   Dev-CineCamera (B2E18506-4273-CFC2-A54E-F4BB758BBA07): 1
+LogDevObjectVersion:   Dev-VirtualProduction (64F58936-FD1B-42BA-BA96-7289D5D0FA4E): 1
+LogDevObjectVersion:   UE5-Main (697DD581-E64F-41AB-AA4A-51ECBEB7B628): 121
+LogDevObjectVersion:   UE5-Release (D89B5E42-24BD-4D46-8412-ACA8DF641779): 61
+LogDevObjectVersion:   UE5-SpecialProject (59DA5D52-1232-4948-B878-597870B8E98B): 9
+LogDevObjectVersion:   Dev-MediaFramework (6F0ED827-A609-4895-9C91-998D90180EA4): 2
+LogDevObjectVersion:   Dev-NaniteResearch (30D58BE3-95EA-4282-A6E3-B159D8EBB06A): 1
+LogDevObjectVersion:   Dev-ComputeFramework (6304A3E7-0059-4F59-8CFC-21BD7721FD4E): 0
+LogInit: Presizing for max 25165824 objects, including 0 objects not considered by GC.
+LogInit: Object subsystem initialized
+LogConfig: Set CVar [[con.DebugEarlyDefault:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[con.DebugLateDefault:1]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[con.DebugLateCheat:1]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[LogNamedEventFilters:Frame *]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.setres:1280x720]]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[framepro.ScopeMinTimeMicroseconds:10]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[fx.NiagaraAllowRuntimeScalabilityChanges:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[QualityLevelMapping:high]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[r.Occlusion.SingleRHIThreadStall:1]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Nanite.Streaming.ReservedResources:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[D3D12.Bindless.ResourceDescriptorHeapSize:32768]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[D3D12.Bindless.SamplerDescriptorHeapSize:2048]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.PSOPrecache.GlobalShaders:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.VRS.EnableSoftware:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.VRS.ContrastAdaptiveShading:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[landscape.RenderNanite:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[con.DebugLateDefault:1]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[con.DebugLateCheat:1]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[LogNamedEventFilters:Frame *]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[framepro.ScopeMinTimeMicroseconds:10]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[QualityLevelMapping:high]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[r.Occlusion.SingleRHIThreadStall:1]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[D3D12.Bindless.ResourceDescriptorHeapSize:32768]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[D3D12.Bindless.SamplerDescriptorHeapSize:2048]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: Applying CVar settings from Section [/Script/Engine.RendererSettings] File [Engine]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VisualizeCalibrationColorMaterialPath:/Engine/EngineMaterials/PPM_DefaultCalibrationColor.PPM_DefaultCalibrationColor]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VisualizeCalibrationGrayscaleMaterialPath:/Engine/EngineMaterials/PPM_DefaultCalibrationGrayscale.PPM_DefaultCalibrationGrayscale]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.GPUCrashDebugging:0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[MaxSkinBones:(Default=65536,PerPlatform=(("Mobile", 256)))]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Shaders.RemoveUnusedInterpolators:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Shadow.DetectVertexShaderLayerAtRuntime:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Substrate.RoughDiffuse:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Substrate.SheenQuality:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Substrate.ShadingQuality:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Substrate.TileCoord8bits:0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Substrate.Glints:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Substrate.ClosuresPerPixel:4]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Refraction.Blur:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.CustomDepth:3]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.DynamicGlobalIlluminationMethod:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.ReflectionMethod:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Lumen.HardwareRayTracing:0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.GenerateMeshDistanceFields:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Shadow.Virtual.Enable:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Nanite.ProjectEnabled:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.AntiAliasingMethod:4]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.Substrate:0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.VirtualTextures:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[r.MegaLights.EnableForProject:0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Applying CVar settings from Section [/Script/Engine.RendererOverrideSettings] File [Engine]
+[2026.11.10-05.06.27:002][  0]LogConfig: Applying CVar settings from Section [/Script/Engine.StreamingSettings] File [Engine]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.MinBulkDataSizeForAsyncLoading:131072]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.AsyncLoadingThreadEnabled:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.EventDrivenLoaderEnabled:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.WarnIfTimeLimitExceeded:0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.TimeLimitExceededMultiplier:1.5]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.TimeLimitExceededMinTime:0.005]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.UseBackgroundLevelStreaming:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.PriorityAsyncLoadingExtraTime:15.0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.LevelStreamingActorsUpdateTimeLimit:5.0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.PriorityLevelStreamingActorsUpdateExtraTime:5.0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.LevelStreamingComponentsRegistrationGranularity:10]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.UnregisterComponentsTimeLimit:1.0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.LevelStreamingComponentsUnregistrationGranularity:5]]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[s.MaxPackageSummarySize:16384]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[s.FlushStreamingOnExit:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[FixedBootOrder:/Script/Engine/Default__SoundBase]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[FixedBootOrder:/Script/Engine/Default__MaterialInterface]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[FixedBootOrder:/Script/Engine/Default__DeviceProfileManager]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: Applying CVar settings from Section [/Script/Engine.GarbageCollectionSettings] File [Engine]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.MaxObjectsNotConsideredByGC:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.FlushStreamingOnGC:0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.NumRetriesBeforeForcingGC:10]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.AllowParallelGC:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.TimeBetweenPurgingPendingKillObjects:61.1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.MaxObjectsInEditor:25165824]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.IncrementalBeginDestroyEnabled:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.CreateGCClusters:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.MinGCClusterSize:5]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.AssetClustreringEnabled:0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.ActorClusteringEnabled:0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.VerifyUObjectsAreNotFGCObjects:0]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Set CVar [[gc.GarbageEliminationEnabled:1]]
+[2026.11.10-05.06.27:002][  0]LogConfig: Applying CVar settings from Section [/Script/Engine.NetworkSettings] File [Engine]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[NetworkEmulationProfiles:(ProfileName="Average",ToolTip="Simulates average internet conditions")]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[NetworkEmulationProfiles:(ProfileName="Bad",ToolTip="Simulates laggy internet conditions")]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[NetworkEmulationProfiles:(ProfileName="BufferBloat",ToolTip="Simulates a connection affected by buffer bloat (in and out)")]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: Applying CVar settings from Section [/Script/UnrealEd.CookerSettings] File [Engine]
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[DefaultASTCQualityBySpeed:2]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[DefaultASTCQualityBySize:3]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[DefaultASTCQualityBySizeHQ:4]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:WidgetBlueprint]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:GroupActor]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:MetaData]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:ObjectRedirector]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:NavMeshRenderingComponent]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:ReflectionCaptureComponent]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:TextRenderComponent]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:Font]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:InterpCurveEdSetup]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:MaterialExpression]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:NiagaraEmitter]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:NiagaraScript]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:ParticleEmitter]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:ParticleLODLevel]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:ParticleModule]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:SubUVAnimation]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:SoundNode]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:GameplayEffectUIData]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedServer:AmbientSound]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedClient:WidgetBlueprint]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedClient:GroupActor]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedClient:MetaData]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedClient:ObjectRedirector]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[ClassesExcludedOnDedicatedClient:InterpCurveEdSetup]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VersionedIntRValues:r.AllowStaticLighting]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VersionedIntRValues:r.MaterialEditor.LWCTruncateMode]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VersionedIntRValues:r.VelocityOutputPass]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VersionedIntRValues:r.SelectiveBasePassOutputs]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VersionedIntRValues:r.DBuffer]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VersionedIntRValues:r.Mobile.DBuffer]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VersionedIntRValues:r.Shaders.Symbols]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VersionedIntRValues:r.Shaders.GenerateSymbols]] deferred - dummy variable created
+[2026.11.10-05.06.27:002][  0]LogConfig: CVar [[VersionedIntRValues:r.Shaders.WriteSymbols]] deferred - dummy variable created
+[2026.11.10-05.06.27:003][  0]LogConfig: CVar [[VersionedIntRValues:r.Shaders.AllowUniqueSymbols]] deferred - dummy variable created
+[2026.11.10-05.06.27:003][  0]LogConfig: CVar [[VersionedIntRValues:r.Shaders.ExtraData]] deferred - dummy variable created
+[2026.11.10-05.06.27:003][  0]LogConfig: CVar [[VersionedIntRValues:r.Shaders.Optimize]] deferred - dummy variable created
+[2026.11.10-05.06.27:003][  0]LogConfig: CVar [[VersionedIntRValues:r.CompileShadersForDevelopment]] deferred - dummy variable created
+[2026.11.10-05.06.27:003][  0]LogConfig: CVar [[VersionedIntRValues:r.MobileHDR]] deferred - dummy variable created
+[2026.11.10-05.06.27:003][  0]LogConfig: CVar [[VersionedIntRValues:r.UsePreExposure]] deferred - dummy variable created
+[2026.11.10-05.06.27:003][  0]LogConfig: Applying CVar settings from Section [ViewDistanceQuality@3] File [Scalability]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.SkeletalMeshLODBias:0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.ViewDistanceScale:1.0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Applying CVar settings from Section [AntiAliasingQuality@3] File [Scalability]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.FXAA.Quality:4]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.TemporalAA.Quality:2]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.TSR.History.R11G11B10:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.TSR.History.ScreenPercentage:200]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.TSR.History.UpdateQuality:3]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.TSR.ShadingRejection.Flickering:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.TSR.RejectionAntiAliasingQuality:2]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.TSR.ReprojectionField:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.TSR.Resurrection:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Applying CVar settings from Section [ShadowQuality@3] File [Scalability]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.LightFunctionQuality:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.ShadowQuality:5]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.CSM.MaxCascades:10]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.MaxResolution:2048]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.MaxCSMResolution:2048]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.RadiusThreshold:0.01]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.DistanceScale:1.0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.CSM.TransitionScale:1.0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.PreShadowResolutionFactor:1.0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.DistanceFieldShadowing:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.VolumetricFog:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.VolumetricFog.GridPixelSize:8]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.VolumetricFog.GridSizeZ:128]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.VolumetricFog.HistoryMissSupersampleCount:4]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.LightMaxDrawDistanceScale:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.CapsuleShadows:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.Virtual.MaxPhysicalPages:4096]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.Virtual.ResolutionLodBiasDirectional:-1.5]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.Virtual.ResolutionLodBiasDirectionalMoving:-1.5]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.Virtual.ResolutionLodBiasLocal:0.0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.Virtual.ResolutionLodBiasLocalMoving:1.0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.Virtual.SMRT.RayCountDirectional:8]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.Virtual.SMRT.SamplesPerRayDirectional:4]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.Virtual.SMRT.RayCountLocal:8]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.Virtual.SMRT.SamplesPerRayLocal:4]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Shadow.Virtual.MarkCoarsePagesLocal:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Applying CVar settings from Section [GlobalIlluminationQuality@3] File [Scalability]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.DistanceFieldAO:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.SkylightIntensityMultiplier:1.0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.AOQuality:2]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.DiffuseIndirect.Allow:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.LumenScene.DirectLighting.MaxLightsPerTile:8]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.LumenScene.DirectLighting.UpdateFactor:32]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.LumenScene.Radiosity.UpdateFactor:64]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.LumenScene.Radiosity.ProbeSpacing:4]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.LumenScene.Radiosity.HemisphereProbeResolution:4]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.TraceMeshSDFs.Allow:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.RadianceCache.ProbeResolution:32]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.RadianceCache.NumProbesToTraceBudget:100]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.DownsampleFactor:16]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.NumAdaptiveProbes:8]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.TracingOctahedronResolution:8]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.IrradianceFormat:0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.StochasticInterpolation:0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.FullResolutionJitterWidth:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.TwoSidedFoliageBackfaceDiffuse:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.ScreenTraces.HZBTraversal.FullResDepth:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.ShortRangeAO.BentNormal:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.ShortRangeAO.HorizonSearch.HZB:0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.ShortRangeAO.HorizonSearch.ForegroundSampleRejectPower:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.GridPixelSize:32]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.TraceFromVolume:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.TracingOctahedronResolution:3]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.ProbeResolution:8]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.NumProbesToTraceBudget:70]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.RayTracing.Scene.BuildMode:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Applying CVar settings from Section [ReflectionQuality@3] File [Scalability]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.SSR.Quality:3]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.SSR.HalfResSceneColor:0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.Reflections.Allow:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.Reflections.DownsampleFactor:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.Reflections.MaxRoughnessToTraceForFoliage:0.4]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.MaxRoughnessToEvaluateRoughSpecularForFoliage:0.8]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.Reflections.ScreenSpaceReconstruction.NumSamples:5]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.Reflections.ScreenSpaceReconstruction.MinWeight:0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyReflections.FrontLayer.Allow:1]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyReflections.FrontLayer.Enable:0]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Applying CVar settings from Section [PostProcessQuality@3] File [Scalability]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.MotionBlurQuality:4]]
+[2026.11.10-05.06.27:003][  0]LogConfig: Set CVar [[r.MotionBlur.HalfResGather:0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.AmbientOcclusionMipLevelFactor:0.4]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.AmbientOcclusionMaxQuality:100]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.AmbientOcclusionLevels:-1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.AmbientOcclusionRadiusScale:1.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DepthOfFieldQuality:2]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.RenderTargetPoolMin:400]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.LensFlareQuality:2]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SceneColorFringeQuality:1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.EyeAdaptationQuality:2]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.BloomQuality:5]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Bloom.ScreenPercentage:50.000]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.FastBlurThreshold:100]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Upscale.Quality:3]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.LightShaftQuality:1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Filter.SizeScale:1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Tonemapper.Quality:5]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Gather.ResolutionDivisor:2         ; lower gathering resolution]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Gather.AccumulatorQuality:1        ; higher gathering accumulator quality]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Gather.PostfilterMethod:1          ; Median3x3 postfilering method]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Gather.EnableBokehSettings:0       ; no bokeh simulation when gathering]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Gather.RingCount:4                 ; medium number of samples when gathering]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Scatter.ForegroundCompositing:1    ; additive foreground scattering]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Scatter.BackgroundCompositing:2    ; additive background scattering]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Scatter.EnableBokehSettings:1      ; bokeh simulation when scattering]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Scatter.MaxSpriteRatio:0.1         ; only a maximum of 10% of scattered bokeh]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Recombine.Quality:1                ; cheap slight out of focus]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Recombine.EnableBokehSettings:0    ; no bokeh simulation on slight out of focus]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.TemporalAAQuality:1                ; more stable temporal accumulation]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Kernel.MaxForegroundRadius:0.025]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DOF.Kernel.MaxBackgroundRadius:0.025]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Applying CVar settings from Section [TextureQuality@3] File [Scalability]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Streaming.MipBias:0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Streaming.AmortizeCPUToGPUCopy:0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Streaming.MaxNumTexturesToStreamPerFrame:0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Streaming.Boost:1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.MaxAnisotropy:8]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.VT.MaxAnisotropy:8]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Streaming.LimitPoolSizeToVRAM:0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Streaming.PoolSize:1000]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Streaming.MaxEffectiveScreenSize:0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Applying CVar settings from Section [EffectsQuality@3] File [Scalability]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.TranslucencyLightingVolume.Dim:64]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.RefractionQuality:2]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SceneColorFormat:4]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.DetailMode:3]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.TranslucencyLightingVolume.Blur:1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.MaterialQualityLevel:1 ; High quality]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SSS.Scale:1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SSS.SampleSet:2]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SSS.Quality:1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SSS.HalfRes:0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SSGI.Quality:3]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.EmitterSpawnRateScale:1.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.ParticleLightQuality:2]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque:1 ; Always have FastSkyLUT 1 in this case to avoid wrong sky]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice:4]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution:16.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.FastSkyLUT:1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.FastSkyLUT.SampleCountMin:4.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.FastSkyLUT.SampleCountMax:128.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.SampleCountMin:4.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.SampleCountMax:128.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.TransmittanceLUT.UseSmallFormat:0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.TransmittanceLUT.SampleCount:10.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.SkyAtmosphere.MultiScatteringLUT.SampleCount:15.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[fx.Niagara.QualityLevel:3]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.Refraction.OffsetQuality:1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.DownsampleFactor:2]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.MaxStepCount:256]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.Shadows.Resolution:512]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.Shadows.Precision:0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.UseExistenceMask:0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Applying CVar settings from Section [FoliageQuality@3] File [Scalability]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[foliage.DensityScale:1.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[grass.DensityScale:1.0]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Applying CVar settings from Section [ShadingQuality@3] File [Scalability]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.HairStrands.SkyLighting.IntegrationType:2]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.HairStrands.SkyAO.SampleCount:4]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.HairStrands.Visibility.MSAA.SamplePerPixel:4]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Set CVar [[r.AnisotropicMaterials:1]]
+[2026.11.10-05.06.27:004][  0]LogConfig: Applying CVar settings from Section [LandscapeQuality@3] File [Scalability]
+[2026.11.10-05.06.27:008][  0]LogRHI: Using Default RHI: D3D12
+[2026.11.10-05.06.27:008][  0]LogRHI: Using Highest Feature Level of D3D12: SM6
+[2026.11.10-05.06.27:008][  0]LogRHI: Loading RHI module D3D12RHI
+[2026.11.10-05.06.27:011][  0]LogD3D12RHI: Loading WinPixEventRuntime.dll for PIX profiling (from ../../../Engine/Binaries/ThirdParty/Windows/WinPixEventRuntime/x64).
+[2026.11.10-05.06.27:011][  0]LogRHI: Checking if RHI D3D12 with Feature Level SM6 is supported by your system.
+[2026.11.10-05.06.27:076][  0]LogD3D12RHI: Intel Extensions Framework not supported by driver. Please check if a driver update is available.
+[2026.11.10-05.06.27:086][  0]LogD3D12RHI: Found D3D12 adapter 0: Intel(R) Graphics (VendorId: 8086, DeviceId: a7ab, SubSysId: 380417aa, Revision: 0004
+[2026.11.10-05.06.27:086][  0]LogD3D12RHI:   Max supported Feature Level 12_1, shader model 6.7, binding tier 3, wave ops supported, atomic64 unsupported
+[2026.11.10-05.06.27:086][  0]LogD3D12RHI:   Adapter has 128MB of dedicated video memory, 0MB of dedicated system memory, and 8038MB of shared system memory, 1 output[s], UMA:true
+[2026.11.10-05.06.27:087][  0]LogD3D12RHI:   Driver Version: 32.0.101.7076 (internal:32.0.101.7076, unified:101.7076)
+[2026.11.10-05.06.27:087][  0]LogD3D12RHI:      Driver Date: 9-12-2025
+[2026.11.10-05.06.27:096][  0]LogD3D12RHI: Found D3D12 adapter 1: Microsoft Basic Render Driver (VendorId: 1414, DeviceId: 008c, SubSysId: 0000, Revision: 0000
+[2026.11.10-05.06.27:096][  0]LogD3D12RHI:   Max supported Feature Level 12_1, shader model 6.7, binding tier 3, wave ops supported, atomic64 supported
+[2026.11.10-05.06.27:096][  0]LogD3D12RHI:   Adapter has 0MB of dedicated video memory, 0MB of dedicated system memory, and 8038MB of shared system memory, 0 output[s], UMA:true
+[2026.11.10-05.06.27:097][  0]LogD3D12RHI:   D3D10Warp Version: 10.0.26100.9711
+[2026.11.10-05.06.27:097][  0]LogD3D12RHI: DirectX Agility SDK runtime found.
+[2026.11.10-05.06.27:097][  0]LogD3D12RHI: Chosen D3D12 Adapter Id = 0
+[2026.11.10-05.06.27:097][  0]LogD3D12RHI: Adapter only supports up to Feature Level 'SM5', requested Feature Level was 'SM6'
+[2026.11.10-05.06.27:097][  0]LogRHI: RHI D3D12 with Feature Level SM6 is not supported on your system, attempting to fall back to RHI D3D11 with Feature Level SM5
+[2026.11.10-05.06.27:097][  0]LogRHI: Loading RHI module D3D11RHI
+[2026.11.10-05.06.27:099][  0]LogRHI: Checking if RHI D3D11 with Feature Level SM5 is supported by your system.
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI: D3D11 min allowed feature level: 11_0
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI: D3D11 max allowed feature level: 11_1
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI: D3D11 adapters:
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI: Testing D3D11 Adapter 0:
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI:     Description : Intel(R) Graphics
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI:     VendorId    : 8086
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI:     DeviceId    : a7ab
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI:     SubSysId    : 380417aa
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI:     Revision    : 0004
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI:     DedicatedVideoMemory : 134217728 bytes
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI:     DedicatedSystemMemory : 0 bytes
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI:     SharedSystemMemory : 8428908544 bytes
+[2026.11.10-05.06.27:100][  0]LogD3D11RHI:     AdapterLuid : 0 56968
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:    0. 'Intel(R) Graphics' (Feature Level 11_1)
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:       128/0/8038 MB DedicatedVideo/DedicatedSystem/SharedSystem, Outputs:1, VendorId:0x8086 UMA:true
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI: Testing D3D11 Adapter 1:
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:     Description : Microsoft Basic Render Driver
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:     VendorId    : 1414
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:     DeviceId    : 008c
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:     SubSysId    : 0000
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:     Revision    : 0000
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:     DedicatedVideoMemory : 0 bytes
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:     DedicatedSystemMemory : 0 bytes
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:     SharedSystemMemory : 8428908544 bytes
+[2026.11.10-05.06.27:218][  0]LogD3D11RHI:     AdapterLuid : 0 57947
+[2026.11.10-05.06.27:220][  0]LogD3D11RHI:    1. 'Microsoft Basic Render Driver' (Feature Level 11_1)
+[2026.11.10-05.06.27:220][  0]LogD3D11RHI:       0/0/8038 MB DedicatedVideo/DedicatedSystem/SharedSystem, Outputs:0, VendorId:0x1414 UMA:true
+[2026.11.10-05.06.27:220][  0]LogD3D11RHI: Chosen D3D11 Adapter:
+[2026.11.10-05.06.27:220][  0]LogD3D11RHI:     Description : Intel(R) Graphics
+[2026.11.10-05.06.27:220][  0]LogD3D11RHI:     VendorId    : 8086
+[2026.11.10-05.06.27:220][  0]LogD3D11RHI:     DeviceId    : a7ab
+[2026.11.10-05.06.27:220][  0]LogD3D11RHI:     SubSysId    : 380417aa
+[2026.11.10-05.06.27:220][  0]LogD3D11RHI:     Revision    : 0004
+[2026.11.10-05.06.27:220][  0]LogD3D11RHI:     DedicatedVideoMemory : 134217728 bytes
+[2026.11.10-05.06.27:220][  0]LogD3D11RHI:     DedicatedSystemMemory : 0 bytes
+[2026.11.10-05.06.27:221][  0]LogD3D11RHI:     SharedSystemMemory : 8428908544 bytes
+[2026.11.10-05.06.27:221][  0]LogD3D11RHI:     AdapterLuid : 0 56968
+[2026.11.10-05.06.27:221][  0]LogD3D11RHI: Integrated GPU (iGPU): true
+[2026.11.10-05.06.27:221][  0]LogRHI: RHI D3D11 with Feature Level SM5 is supported and will be used.
+[2026.11.10-05.06.27:221][  0]LogInit: Selected Device Profile: [WindowsEditor]
+[2026.11.10-05.06.27:221][  0]LogHAL: Display: Platform has ~ 16 GB [16857817088 / 17179869184 / 16], which maps to Larger [LargestMinGB=32, LargerMinGB=12, DefaultMinGB=8, SmallerMinGB=6, SmallestMinGB=0)
+[2026.11.10-05.06.27:221][  0]LogDeviceProfileManager: Going up to parent DeviceProfile [Windows]
+[2026.11.10-05.06.27:221][  0]LogDeviceProfileManager: Going up to parent DeviceProfile []
+[2026.11.10-05.06.27:221][  0]LogDeviceProfileManager: Pushing Device Profile CVar: [[UI.SlateSDFText.RasterizationMode:Bitmap -> Msdf]]
+[2026.11.10-05.06.27:221][  0]LogDeviceProfileManager: Pushing Device Profile CVar: [[UI.SlateSDFText.ResolutionLevel:2 -> 2]]
+[2026.11.10-05.06.27:221][  0]LogConfig: Applying CVar settings from Section [Startup] File [../../../Engine/Config/ConsoleVariables.ini]
+[2026.11.10-05.06.27:221][  0]LogConfig: Set CVar [[r.DumpShaderDebugInfo:2]]
+[2026.11.10-05.06.27:221][  0]LogConfig: Set CVar [[p.chaos.AllowCreatePhysxBodies:1]]
+[2026.11.10-05.06.27:221][  0]LogConfig: Set CVar [[fx.SkipVectorVMBackendOptimizations:1]]
+[2026.11.10-05.06.27:221][  0]LogConfig: Applying CVar settings from Section [Startup_Windows] File [../../../Engine/Config/ConsoleVariables.ini]
+[2026.11.10-05.06.27:221][  0]LogConfig: Applying CVar settings from Section [ConsoleVariables] File [Engine]
+[2026.11.10-05.06.27:221][  0]LogConfig: Set CVar [[WindowsApplication.UseWorkerThreadForRawInput:0]]
+[2026.11.10-05.06.27:221][  0]LogConfig: CVar [[Interchange.FeatureFlags.Import.SyncToBrowser:0]] deferred - dummy variable created
+[2026.11.10-05.06.27:221][  0]LogConfig: Applying CVar settings from Section [ConsoleVariables] File [C:/Users/kanth/flightsim/ue/Saved/Config/WindowsEditor/Editor.ini]
+[2026.11.10-05.06.27:222][  0]LogInit: Computer: DHRUTIV
+[2026.11.10-05.06.27:222][  0]LogInit: User: kanth
+[2026.11.10-05.06.27:222][  0]LogInit: CPU Page size=4096, Cores=8
+[2026.11.10-05.06.27:222][  0]LogInit: High frequency timer resolution =10.000000 MHz
+[2026.11.10-05.06.27:222][  0]LogInit: Handheld Device: 0
+[2026.11.10-05.06.27:222][  0]LogMemory: Process is running as part of a Windows Job with separate resource limits
+[2026.11.10-05.06.27:222][  0]LogMemory: Memory total: Physical=15.7GB (16GB approx) Virtual=26.7GB
+[2026.11.10-05.06.27:222][  0]LogMemory: Platform Memory Stats for WindowsEditor
+[2026.11.10-05.06.27:222][  0]LogMemory: Process Physical Memory: 572.73 MB used, 615.28 MB peak
+[2026.11.10-05.06.27:222][  0]LogMemory: Process Virtual Memory: 545.62 MB used, 567.51 MB peak
+[2026.11.10-05.06.27:222][  0]LogMemory: Physical Memory: 8407.72 MB used,  7669.14 MB free, 16076.87 MB total
+[2026.11.10-05.06.27:222][  0]LogMemory: Virtual Memory: 13647.84 MB used,  13693.03 MB free, 27340.87 MB total
+[2026.11.10-05.06.27:222][  0]LogCsvProfiler: Display: Metadata set : extradevelopmentmemorymb="0"
+[2026.11.10-05.06.27:225][  0]LogWindows: WindowsPlatformFeatures enabled
+[2026.11.10-05.06.27:228][  0]LogSpline: Registered spline type: TypeId=0x54E3AD22, Impl=MultiSpline, Value=Vector
+[2026.11.10-05.06.27:228][  0]LogChaosDD: Chaos Debug Draw Startup
+[2026.11.10-05.06.27:228][  0]LogInit: Physics initialised using underlying interface: Chaos
+[2026.11.10-05.06.27:228][  0]LogInit: Using OS detected language (en-US).
+[2026.11.10-05.06.27:228][  0]LogInit: Using OS detected locale (en-US).
+[2026.11.10-05.06.27:233][  0]LogTextLocalizationManager: No specific localization for 'en-US' exists, so 'en' will be used for the language.
+[2026.11.10-05.06.27:731][  0]LogObj: Display: Attempting to load config data for Default__SlateThemeManager before the Class has been constructed/registered/linked (likely during module loading or early startup). This will result in the load silently failing and should be fixed.
+[2026.11.10-05.06.27:843][  0]LogRHI: Using Default RHI: D3D12
+[2026.11.10-05.06.27:843][  0]LogRHI: Using Highest Feature Level of D3D12: SM6
+[2026.11.10-05.06.27:843][  0]LogRHI: Loading RHI module D3D12RHI
+[2026.11.10-05.06.27:843][  0]LogRHI: Checking if RHI D3D12 with Feature Level SM6 is supported by your system.
+[2026.11.10-05.06.27:843][  0]LogD3D12RHI: Adapter only supports up to Feature Level 'SM5', requested Feature Level was 'SM6'
+[2026.11.10-05.06.27:843][  0]LogRHI: RHI D3D12 with Feature Level SM6 is not supported on your system, attempting to fall back to RHI D3D11 with Feature Level SM5
+[2026.11.10-05.06.27:843][  0]LogRHI: Loading RHI module D3D11RHI
+[2026.11.10-05.06.27:843][  0]LogRHI: Checking if RHI D3D11 with Feature Level SM5 is supported by your system.
+[2026.11.10-05.06.27:843][  0]LogRHI: RHI D3D11 with Feature Level SM5 is supported and will be used.
+[2026.11.10-05.06.27:844][  0]LogWindows: Attached monitors:
+[2026.11.10-05.06.27:844][  0]LogWindows:     resolution: 1536x960, work area: (0, 0) -> (1536, 912), device: '\\.\DISPLAY1' [PRIMARY]
+[2026.11.10-05.06.27:844][  0]LogWindows: Found 1 attached monitors.
+[2026.11.10-05.06.27:844][  0]LogWindows: Gathering driver information using Windows Setup API
+[2026.11.10-05.06.27:844][  0]LogRHI: RHI Adapter Info:
+[2026.11.10-05.06.27:844][  0]LogRHI:             Name: Intel(R) Graphics
+[2026.11.10-05.06.27:844][  0]LogRHI:   Driver Version: 32.0.101.7076 (internal:32.0.101.7076, unified:101.7076)
+[2026.11.10-05.06.27:844][  0]LogRHI:      Driver Date: 9-12-2025
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI: Creating new Direct3DDevice
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI:     GPU DeviceId: 0xa7ab (for the marketing name, search the web for "GPU Device Id")
+[2026.11.10-05.06.27:844][  0]LogRHI: Texture pool is 1523 MB (70% of 2176 MB)
+[2026.11.10-05.06.27:844][  0]LogNvidiaAftermath: Nvidia Aftermath is disabled in D3D11 due to instability issues.
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI: Creating D3DDevice using adapter:
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI:     Description : Intel(R) Graphics
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI:     VendorId    : 8086
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI:     DeviceId    : a7ab
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI:     SubSysId    : 380417aa
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI:     Revision    : 0004
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI:     DedicatedVideoMemory : 134217728 bytes
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI:     DedicatedSystemMemory : 0 bytes
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI:     SharedSystemMemory : 8428908544 bytes
+[2026.11.10-05.06.27:844][  0]LogD3D11RHI:     AdapterLuid : 0 56968
+[2026.11.10-05.06.27:947][  0]LogNvidiaAftermath: Aftermath is not loaded.
+[2026.11.10-05.06.27:968][  0]LogD3D11RHI: Intel Extensions loaded requested version for UAVOverlap: 1.1.0
+[2026.11.10-05.06.27:968][  0]LogD3D11RHI: Intel Extensions loaded requested version Atomics Version: 3.4.1
+[2026.11.10-05.06.27:968][  0]LogD3D11RHI: Intel Extensions Framework enabled
+[2026.11.10-05.06.27:968][  0]LogD3D11RHI: RHI has support for 64 bit atomics
+[2026.11.10-05.06.27:968][  0]LogD3D11RHI: Async texture creation enabled
+[2026.11.10-05.06.27:968][  0]LogD3D11RHI: D3D11_MAP_WRITE_NO_OVERWRITE for dynamic buffer SRVs is supported
+[2026.11.10-05.06.27:968][  0]LogD3D11RHI: Array index from any shader is supported
+[2026.11.10-05.06.27:976][  0]LogVRS: Current RHI does not support Variable Rate Shading
+[2026.11.10-05.06.27:978][  0]LogCsvProfiler: Display: Metadata set : verbatimrhiname="D3D11"
+[2026.11.10-05.06.27:978][  0]LogCsvProfiler: Display: Metadata set : rhiname="D3D11"
+[2026.11.10-05.06.27:978][  0]LogCsvProfiler: Display: Metadata set : rhifeaturelevel="SM5"
+[2026.11.10-05.06.27:978][  0]LogCsvProfiler: Display: Metadata set : shaderplatform="PCD3D_SM5"
+[2026.11.10-05.06.27:978][  0]LogInit: Initializing FReadOnlyCVARCache
+[2026.11.10-05.06.27:983][  0]LogTextureFormatASTC: Display: ASTCEnc version 5.0.1 library loaded
+[2026.11.10-05.06.27:983][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatASTC
+[2026.11.10-05.06.27:983][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatDXT
+[2026.11.10-05.06.27:983][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatETC2
+[2026.11.10-05.06.27:983][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatIntelISPCTexComp
+[2026.11.10-05.06.27:983][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatUncompressed
+[2026.11.10-05.06.27:983][  0]LogTextureFormatOodle: Display: Oodle Texture TFO init; latest sdk version = 2.9.14
+[2026.11.10-05.06.27:983][  0]LogTextureFormatOodle: Display: Oodle Texture loading DLL: oo2tex_win64_2.9.14.dll
+[2026.11.10-05.06.27:983][  0]LogTextureFormatOodle: Display: Oodle Texture loading DLL: oo2tex_win64_2.9.5.dll
+[2026.11.10-05.06.27:985][  0]LogTextureFormatManager: Display: Loaded Base TextureFormat: TextureFormatOodle
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android_ASTC'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android_DXT'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android_ETC2'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android_OpenXR'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'AndroidClient'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android_ASTCClient'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android_DXTClient'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android_ETC2Client'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android_OpenXRClient'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android_Multi'
+[2026.11.10-05.06.28:009][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Android_MultiClient'
+[2026.11.10-05.06.28:022][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'IOS'
+[2026.11.10-05.06.28:022][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'IOSClient'
+[2026.11.10-05.06.28:034][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Linux'
+[2026.11.10-05.06.28:034][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'LinuxEditor'
+[2026.11.10-05.06.28:034][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'LinuxServer'
+[2026.11.10-05.06.28:034][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'LinuxClient'
+[2026.11.10-05.06.28:047][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Mac'
+[2026.11.10-05.06.28:047][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'MacEditor'
+[2026.11.10-05.06.28:047][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'MacServer'
+[2026.11.10-05.06.28:047][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'MacClient'
+[2026.11.10-05.06.28:059][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'TVOS'
+[2026.11.10-05.06.28:059][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'TVOSClient'
+[2026.11.10-05.06.28:071][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'Windows'
+[2026.11.10-05.06.28:072][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'WindowsEditor'
+[2026.11.10-05.06.28:072][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'WindowsServer'
+[2026.11.10-05.06.28:072][  0]LogTargetPlatformManager: Display: Loaded TargetPlatform 'WindowsClient'
+[2026.11.10-05.06.28:072][  0]LogTargetPlatformManager: Display: Building Assets For WindowsEditor
+[2026.11.10-05.06.28:074][  0]LogAudioDebug: Display: Lib vorbis DLL was dynamically loaded.
+[2026.11.10-05.06.28:106][  0]LogTargetPlatformManager: Unable to find shader format SF_METAL_ES3_1_IOS from hinted modules, loading all potential format modules to find it
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager: Loaded format module MetalShaderFormat
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_METAL_ES3_1_IOS
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_METAL_SM5_IOS
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_METAL_ES3_1_TVOS
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_METAL_SM5_TVOS
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_METAL_SM5
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_METAL_SM6
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_METAL_SIM
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_METAL_ES3_1
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager: Loaded format module ShaderFormatD3D
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   PCD3D_SM6
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   PCD3D_SM5
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   PCD3D_ES31
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager: Loaded format module ShaderFormatOpenGL
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   GLSL_150_ES31
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   GLSL_ES3_1_ANDROID
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager: Loaded format module ShaderFormatVectorVM
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   VVM_1_0
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager: Loaded format module VulkanShaderFormat
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_VULKAN_SM5
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_VULKAN_ES31_ANDROID
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_VULKAN_ES31
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_VULKAN_SM5_ANDROID
+[2026.11.10-05.06.28:111][  0]LogTargetPlatformManager:   SF_VULKAN_SM6
+[2026.11.10-05.06.28:111][  0]LogRendererCore: Ray tracing is disabled. Reason: disabled through project setting (r.RayTracing=0).
+[2026.11.10-05.06.28:113][  0]LogDerivedDataCache: Display: Memory: Max Cache Size: -1 MB
+[2026.11.10-05.06.28:114][  0]LogDerivedDataCache: FDerivedDataBackendGraph: Pak pak cache file ../../../../../../Users/kanth/flightsim/ue/DerivedDataCache/DDC.ddp not found, will not use a pak cache.
+[2026.11.10-05.06.28:114][  0]LogDerivedDataCache: Unable to find inner node Pak for hierarchy Hierarchy.
+[2026.11.10-05.06.28:114][  0]LogDerivedDataCache: FDerivedDataBackendGraph: CompressedPak pak cache file ../../../../../../Users/kanth/flightsim/ue/DerivedDataCache/Compressed.ddp not found, will not use a pak cache.
+[2026.11.10-05.06.28:114][  0]LogDerivedDataCache: Unable to find inner node CompressedPak for hierarchy Hierarchy.
+[2026.11.10-05.06.28:361][  0]LogDerivedDataCache: Display: ../../../Engine/DerivedDataCache/Compressed.ddp: Opened pak cache for reading. (1729 MiB)
+[2026.11.10-05.06.28:361][  0]LogDerivedDataCache: FDerivedDataBackendGraph: EnterprisePak pak cache file ../../../Enterprise/DerivedDataCache/Compressed.ddp not found, will not use a pak cache.
+[2026.11.10-05.06.28:361][  0]LogDerivedDataCache: Unable to find inner node EnterprisePak for hierarchy Hierarchy.
+[2026.11.10-05.06.28:361][  0]LogZenServiceInstance: Found Zen config default=C:/Users/kanth/AppData/Local/UnrealEngine/Common/Zen/Data
+[2026.11.10-05.06.28:361][  0]LogZenServiceInstance: Display: Launching zen utility 'C:/Program Files/Epic Games/UE_5.7/Engine/Binaries/Win64/zen.exe service status'.
+[2026.11.10-05.06.28:773][  0]LogZenServiceInstance: Display: Launching zen utility 'C:/Program Files/Epic Games/UE_5.7/Engine/Binaries/Win64/zen.exe service status'.
+[2026.11.10-05.06.29:189][  0]LogZenServiceInstance: Display: Read zen version cache file from 'C:/Users/kanth/AppData/Local/UnrealEngine/5.7/Saved/Zen/zen.version', version: '5.7.6-202510061608-windows-x64-release-9a1ebb9'
+[2026.11.10-05.06.29:189][  0]LogZenServiceInstance: InTree version at 'C:/Program Files/Epic Games/UE_5.7/Engine/Binaries/Win64/zenserver.exe' is '5.7.6-202510061608-windows-x64-release-9a1ebb9'
+[2026.11.10-05.06.29:189][  0]LogZenServiceInstance: Display: Read zen version cache file from 'C:/Users/kanth/AppData/Local/UnrealEngine/Common/Zen/Install/zen.version', version: '5.7.6-202510061608-windows-x64-release-9a1ebb9'
+[2026.11.10-05.06.29:190][  0]LogZenServiceInstance: Installed version at 'C:/Users/kanth/AppData/Local/UnrealEngine/Common/Zen/Install/zenserver.exe' is '5.7.6-202510061608-windows-x64-release-9a1ebb9'
+[2026.11.10-05.06.29:190][  0]LogZenServiceInstance: Display: Installed service at 'C:/Users/kanth/AppData/Local/UnrealEngine/Common/Zen/Install/zenserver.exe' is up to date
+[2026.11.10-05.06.29:191][  0]LogZenServiceInstance: No current process using the data dir found, launching a new instance
+[2026.11.10-05.06.29:191][  0]LogZenServiceInstance: Display: Launching executable 'C:/Users/kanth/AppData/Local/UnrealEngine/Common/Zen/Install/zenserver.exe', working dir 'C:/Users/kanth/AppData/Local/UnrealEngine/Common/Zen/Install', data dir 'C:/Users/kanth/AppData/Local/UnrealEngine/Common/Zen/Data', args '--port 8558 --data-dir C:\Users\kanth\AppData\Local\UnrealEngine\Common\Zen\Data --http asio --gc-cache-duration-seconds 1209600 --gc-interval-seconds 21600 --gc-low-diskspace-threshold 2147483648 --cache-bucket-limit-overwrites --quiet --http-forceloopback --owner-pid 12396  --child-id Zen_12396_Startup'
+[2026.11.10-05.06.29:283][  0]LogZenServiceInstance: Display: Unreal Zen Storage Server HTTP service at http://[::1]:8558 status: OK!.
+[2026.11.10-05.06.29:283][  0]LogZenServiceInstance: Local ZenServer AutoLaunch initialization completed in 0.096 seconds
+[2026.11.10-05.06.29:294][  0]LogDerivedDataCache: Display: ZenLocal: Using ZenServer HTTP service at [::1] with namespace ue.ddc status: OK!.
+[2026.11.10-05.06.29:299][  0]LogDerivedDataCache: C:/Users/kanth/AppData/Local/UnrealEngine/Common/DerivedDataCache: Speed tests took 0.01 seconds.
+[2026.11.10-05.06.29:299][  0]LogDerivedDataCache: Display: C:/Users/kanth/AppData/Local/UnrealEngine/Common/DerivedDataCache: Performance: Latency=0.02ms. RandomReadSpeed=1836.24MBs, RandomWriteSpeed=214.02MBs. Assigned SpeedClass 'Local'
+[2026.11.10-05.06.29:299][  0]LogDerivedDataCache: Local: Using data cache path C:/Users/kanth/AppData/Local/UnrealEngine/Common/DerivedDataCache: DeleteOnly
+[2026.11.10-05.06.29:299][  0]LogDerivedDataCache: ZenShared: Disabled because Host is set to 'None'
+[2026.11.10-05.06.29:299][  0]LogDerivedDataCache: Unable to find inner node ZenShared for hierarchy Hierarchy.
+[2026.11.10-05.06.29:299][  0]LogDerivedDataCache: Shared: Disabled because no path is configured.
+[2026.11.10-05.06.29:299][  0]LogDerivedDataCache: Unable to find inner node Shared for hierarchy Hierarchy.
+[2026.11.10-05.06.29:299][  0]LogDerivedDataCache: Cloud: Disabled because Host is set to 'None'
+[2026.11.10-05.06.29:299][  0]LogDerivedDataCache: Unable to find inner node Cloud for hierarchy Hierarchy.
+[2026.11.10-05.06.29:300][  0]LogShaderCompilers: Guid format shader working directory is 3 characters bigger than the processId version (../../../../../../Users/kanth/flightsim/ue/Intermediate/Shaders/WorkingDirectory/12396/).
+[2026.11.10-05.06.29:300][  0]LogShaderCompilers: Cleaned the shader compiler working directory 'C:/Users/kanth/AppData/Local/Temp/UnrealShaderWorkingDir/C80BF4264B8A262543DDD5AD101124BF/'.
+[2026.11.10-05.06.29:300][  0]LogXGEController: Cannot use XGE Controller as Incredibuild is not installed on this machine.
+[2026.11.10-05.06.29:300][  0]LogUbaHorde: Display: UBA/Horde Configuration [Uba.Provider.Horde]: Not Enabled
+[2026.11.10-05.06.29:300][  0]LogShaderCompilers: Display: No distributed shader compiler controller found
+[2026.11.10-05.06.29:300][  0]LogShaderCompilers: Display: Using 9 local workers for shader compilation
+[2026.11.10-05.06.29:302][  0]LogShaderCompilers: Display: Compiling shader autogen file: ../../../../../../Users/kanth/flightsim/ue/Intermediate/ShaderAutogen/PCD3D_SM5/AutogenShaderHeaders.ush
+[2026.11.10-05.06.29:302][  0]LogShaderCompilers: Display: Autogen file is unchanged, skipping write.
+[2026.11.10-05.06.30:267][  0]LogAssetRegistry: FAssetRegistry took 0.0003 seconds to start up
+[2026.11.10-05.06.30:267][  0]LogEditorDomain: Display: EditorDomain is Disabled
+[2026.11.10-05.06.30:486][  0]LogDeviceProfileManager: Display: Deviceprofile LinuxArm64Editor not found.
+[2026.11.10-05.06.30:486][  0]LogDeviceProfileManager: Display: Deviceprofile LinuxArm64 not found.
+[2026.11.10-05.06.30:517][  0]LogDeviceProfileManager: Active device profile: [000002EC0EF00500][000002EC0845C800 82] WindowsEditor
+[2026.11.10-05.06.30:517][  0]LogCsvProfiler: Display: Metadata set : deviceprofile="WindowsEditor"
+[2026.11.10-05.06.30:520][  0]LogStreaming: Display: FlushAsyncLoading(1): 1 QueuedPackages, 0 AsyncPackages
+[2026.11.10-05.06.30:521][  0]LogTextureEncodingSettings: Display: Texture Encode Speed: Final (cook).
+[2026.11.10-05.06.30:521][  0]LogTextureEncodingSettings: Display: Oodle Texture Encode Speed settings: Fast: RDO Off Lambda=0, Effort=Normal Final: RDO Off Lambda=0, Effort=Normal
+[2026.11.10-05.06.30:521][  0]LogTextureEncodingSettings: Display: Shared linear texture encoding: Disabled
+[2026.11.10-05.06.30:533][  0]LogStreaming: Display: Flushing package /Engine/Functions/Engine_MaterialFunctions01/Shading/PowerToRoughness (state: WaitingForIo) recursively from another package /Engine/EngineMaterials/DefaultTextMaterialOpaque (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:534][  0]LogStreaming: Display: Package /Engine/EngineMaterials/DefaultTextMaterialOpaque is adding a dynamic import to package /Engine/Functions/Engine_MaterialFunctions01/Shading/PowerToRoughness because of a recursive sync load
+[2026.11.10-05.06.30:534][  0]LogStreaming: Display: Flushing package /Engine/Functions/Engine_MaterialFunctions01/Shading/PowerToRoughness (state: DeferredPostLoad) recursively from another package /Engine/EngineMaterials/DefaultTextMaterialOpaque (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:534][  0]LogStreaming: Display: Flushing package /Engine/Functions/Engine_MaterialFunctions01/Shading/ConvertFromDiffSpec (state: WaitingForIo) recursively from another package /Engine/EngineMaterials/DefaultTextMaterialOpaque (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:534][  0]LogStreaming: Display: Package /Engine/EngineMaterials/DefaultTextMaterialOpaque is adding a dynamic import to package /Engine/Functions/Engine_MaterialFunctions01/Shading/ConvertFromDiffSpec because of a recursive sync load
+[2026.11.10-05.06.30:534][  0]LogStreaming: Display: Flushing package /Engine/Functions/Engine_MaterialFunctions01/Shading/ConvertFromDiffSpec (state: DeferredPostLoad) recursively from another package /Engine/EngineMaterials/DefaultTextMaterialOpaque (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:534][  0]LogStreaming: Display: Flushing package /Engine/EngineMaterials/WorldGridMaterial (state: WaitingForIo) recursively from another package /Engine/EngineMaterials/DefaultTextMaterialOpaque (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:537][  0]LogStreaming: Display: Flushing package /Engine/EngineMaterials/DefaultDeferredDecalMaterial (state: WaitingForIo) recursively from another package /Engine/EngineMaterials/WorldGridMaterial (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:538][  0]LogStreaming: Display: Flushing package /Engine/EngineMaterials/DefaultLightFunctionMaterial (state: WaitingForIo) recursively from another package /Engine/EngineMaterials/DefaultDeferredDecalMaterial (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:538][  0]LogStreaming: Display: Flushing package /Engine/EngineMaterials/DefaultPostProcessMaterial (state: WaitingForIo) recursively from another package /Engine/EngineMaterials/DefaultLightFunctionMaterial (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:540][  0]LogStreaming: Display: Package /Engine/EngineMaterials/DefaultLightFunctionMaterial is adding a dynamic import to package /Engine/EngineMaterials/DefaultPostProcessMaterial because of a recursive sync load
+[2026.11.10-05.06.30:540][  0]LogStreaming: Display: Flushing package /Engine/EngineMaterials/DefaultPostProcessMaterial (state: DeferredPostLoad) recursively from another package /Engine/EngineMaterials/DefaultLightFunctionMaterial (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:564][  0]LogStreaming: Display: Package /Engine/EngineMaterials/DefaultDeferredDecalMaterial is adding a dynamic import to package /Engine/EngineMaterials/DefaultLightFunctionMaterial because of a recursive sync load
+[2026.11.10-05.06.30:564][  0]LogStreaming: Display: Flushing package /Engine/EngineMaterials/DefaultLightFunctionMaterial (state: DeferredPostLoad) recursively from another package /Engine/EngineMaterials/DefaultDeferredDecalMaterial (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:575][  0]LogStreaming: Display: Package /Engine/EngineMaterials/WorldGridMaterial is adding a dynamic import to package /Engine/EngineMaterials/DefaultDeferredDecalMaterial because of a recursive sync load
+[2026.11.10-05.06.30:575][  0]LogStreaming: Display: Flushing package /Engine/EngineMaterials/DefaultDeferredDecalMaterial (state: DeferredPostLoad) recursively from another package /Engine/EngineMaterials/WorldGridMaterial (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:585][  0]LogStreaming: Display: Package /Engine/EngineMaterials/DefaultTextMaterialOpaque is adding a dynamic import to package /Engine/EngineMaterials/WorldGridMaterial because of a recursive sync load
+[2026.11.10-05.06.30:586][  0]LogStreaming: Display: Flushing package /Engine/EngineMaterials/WorldGridMaterial (state: DeferredPostLoad) recursively from another package /Engine/EngineMaterials/DefaultTextMaterialOpaque (state: CreateLinkerLoadExports) will result in a partially loaded package to avoid a deadlock.
+[2026.11.10-05.06.30:676][  0]LogMeshReduction: Display: Using QuadricMeshReduction for automatic static mesh reduction
+[2026.11.10-05.06.30:676][  0]LogMeshReduction: Display: Using SkeletalMeshReduction for automatic skeletal mesh reduction
+[2026.11.10-05.06.30:676][  0]LogMeshReduction: Display: Using ProxyLODMeshReduction for automatic mesh merging
+[2026.11.10-05.06.30:676][  0]LogMeshReduction: Display: No distributed automatic mesh merging module available
+[2026.11.10-05.06.30:676][  0]LogMeshMerging: No distributed automatic mesh merging module available
+[2026.11.10-05.06.30:911][  0]LogConfig: Applying CVar settings from Section [/Script/CQTest.CQTestSettings] File [Engine]
+[2026.11.10-05.06.30:981][  0]LogShaderCompilers: Display: Compiling shader autogen file: ../../../../../../Users/kanth/flightsim/ue/Intermediate/ShaderAutogen/PCD3D_SM6/AutogenShaderHeaders.ush
+[2026.11.10-05.06.30:982][  0]LogShaderCompilers: Display: Autogen file is unchanged, skipping write.
+[2026.11.10-05.06.30:982][  0]LogVirtualization: Display: VirtualizationSystem name found in ini file: None
+[2026.11.10-05.06.30:982][  0]LogVirtualization: Display: FNullVirtualizationSystem mounted, virtualization will be disabled
+[2026.11.10-05.06.30:997][  0]LogSlate: Border
+[2026.11.10-05.06.30:997][  0]LogSlate: BreadcrumbButton
+[2026.11.10-05.06.30:997][  0]LogSlate: Brushes.Title
+[2026.11.10-05.06.30:997][  0]LogSlate: ColorPicker.ColorThemes
+[2026.11.10-05.06.30:997][  0]LogSlate: Default
+[2026.11.10-05.06.30:997][  0]LogSlate: Icons.Save
+[2026.11.10-05.06.30:997][  0]LogSlate: Icons.Toolbar.Settings
+[2026.11.10-05.06.30:997][  0]LogSlate: ListView
+[2026.11.10-05.06.30:997][  0]LogSlate: SoftwareCursor_CardinalCross
+[2026.11.10-05.06.30:997][  0]LogSlate: SoftwareCursor_Grab
+[2026.11.10-05.06.30:997][  0]LogSlate: TableView.DarkRow
+[2026.11.10-05.06.30:997][  0]LogSlate: TableView.Row
+[2026.11.10-05.06.30:997][  0]LogSlate: TreeView
+[2026.11.10-05.06.31:091][  0]LogWorldPartition: Display: FWorldPartitionClassDescRegistry::Initialize started...
+[2026.11.10-05.06.31:093][  0]LogWorldPartition: Display: FWorldPartitionClassDescRegistry::Initialize took 1.958 ms
+[2026.11.10-05.06.31:106][  0]LogInit: XR: Instanced Stereo Rendering is Disabled
+[2026.11.10-05.06.31:106][  0]LogInit: XR: MultiViewport is Disabled
+[2026.11.10-05.06.31:106][  0]LogInit: XR: Mobile Multiview is Disabled
+[2026.11.10-05.06.31:123][  0]LogStats: UGameplayTagsManager::InitializeManager -  0.000 s
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT: No NPU adapter found with attributes (!GRAPHICS && (GENERIC_ML || CORE_COMPUTE)) (Windows 11 Version 24H2 or newer)!
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT: Available graphics and compute adapters:
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT: 0: Intel(R) Graphics (Compute, Graphics)
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT: 1: Microsoft Basic Render Driver (Compute, Graphics)
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT: No NPU adapter found!
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT: MakeRuntimeORTDml:
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT:   DirectML:  yes
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT:   RHI D3D12: no
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT:   D3D12:     yes
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT:   NPU:       no
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT: Interface availability:
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT:   GPU: yes
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT:   RDG: no
+[2026.11.10-05.06.31:262][  0]LogNNERuntimeORT:   NPU: no
+[2026.11.10-05.06.31:302][  0]LogNNERuntimeORT: No NPU adapter found with attributes (!GRAPHICS && (GENERIC_ML || CORE_COMPUTE)) (Windows 11 Version 24H2 or newer)!
+[2026.11.10-05.06.31:302][  0]LogNNERuntimeORT: Available graphics and compute adapters:
+[2026.11.10-05.06.31:302][  0]LogNNERuntimeORT: 0: Intel(R) Graphics (Compute, Graphics)
+[2026.11.10-05.06.31:302][  0]LogNNERuntimeORT: 1: Microsoft Basic Render Driver (Compute, Graphics)
+[2026.11.10-05.06.31:302][  0]LogNNERuntimeORT: No NPU adapter found!
+[2026.11.10-05.06.31:436][  0]LogMetaSound: Display: MetaSound Page Target Initialized to 'Default'
+[2026.11.10-05.06.31:436][  0]LogAudio: Display: Registering Engine Module Parameter Interfaces...
+[2026.11.10-05.06.31:439][  0]LogMetaSound: MetaSound Engine Initialized
+[2026.11.10-05.06.31:528][  0]LogNiagaraDebuggerClient: Niagara Debugger Client Initialized | Session: 02FA030BEC29408E8000000000003000 | Instance: 44D42ED4494840E367C170B68984F979 (DHRUTIV-12396).
+[2026.11.10-05.06.31:546][  0]LogCollectionManager: Loaded 0 collections in 0.001285 seconds
+[2026.11.10-05.06.31:548][  0]LogFileCache: Scanning file cache for directory 'C:/Users/kanth/flightsim/ue/Saved/Collections/' took 0.00s
+[2026.11.10-05.06.31:549][  0]LogFileCache: Scanning file cache for directory 'C:/Users/kanth/flightsim/ue/Content/Developers/kanth/Collections/' took 0.00s
+[2026.11.10-05.06.31:551][  0]LogFileCache: Scanning file cache for directory 'C:/Users/kanth/flightsim/ue/Content/Collections/' took 0.00s
+[2026.11.10-05.06.31:551][  0]LogCollectionManager: Fixed up redirectors for 0 collections in 0.000000 seconds (updated 0 objects)
+[2026.11.10-05.06.31:581][  0]LogChaosVDEditor: [FChaosVDExtensionsManager::RegisterExtension] Registering CVD Extension [FChaosVDGenericDebugDrawExtension] ...
+[2026.11.10-05.06.31:581][  0]LogChaosVDEditor: [FChaosVDExtensionsManager::RegisterExtension] Registering CVD Extension [FChaosVDAccelerationStructuresExtension] ...
+[2026.11.10-05.06.31:586][  0]LogTimingProfiler: Initialize
+[2026.11.10-05.06.31:586][  0]LogTimingProfiler: OnSessionChanged
+[2026.11.10-05.06.31:586][  0]LoadingProfiler: Initialize
+[2026.11.10-05.06.31:586][  0]LoadingProfiler: OnSessionChanged
+[2026.11.10-05.06.31:586][  0]LogNetworkingProfiler: Initialize
+[2026.11.10-05.06.31:586][  0]LogNetworkingProfiler: OnSessionChanged
+[2026.11.10-05.06.31:586][  0]LogMemoryProfiler: Initialize
+[2026.11.10-05.06.31:586][  0]LogMemoryProfiler: OnSessionChanged
+[2026.11.10-05.06.31:616][  0]LogConfig: Applying CVar settings from Section [/Script/PCG.PCGEngineSettings] File [Engine]
+[2026.11.10-05.06.31:645][  0]SourceControl: Revision control is disabled
+[2026.11.10-05.06.31:655][  0]SourceControl: Revision control is disabled
+[2026.11.10-05.06.31:840][  0]LogConfig: Applying CVar settings from Section [/Script/NNEDenoiser.NNEDenoiserSettings] File [Engine]
+[2026.11.10-05.06.31:859][  0]LogAndroidPermission: UAndroidPermissionCallbackProxy::GetInstance
+[2026.11.10-05.06.31:862][  0]LogAudioCaptureCore: Display: No Audio Capture implementations found. Audio input will be silent.
+[2026.11.10-05.06.31:862][  0]LogAudioCaptureCore: Display: No Audio Capture implementations found. Audio input will be silent.
+[2026.11.10-05.06.31:879][  0]LogGeoReferencing: Display: The engine is currently using Compressed Rotation Transforms. You may encounter accuracy issues with large neshes. We recommend setting all bSupportsSceneDataCompressedTransforms to false in the Engine/Config/[platform]/DataDrivenPlatformInfo.ini file
+[2026.11.10-05.06.32:032][  0]LogUObjectArray: 48967 objects as part of root set at end of initial load.
+[2026.11.10-05.06.32:032][  0]LogUObjectArray: CloseDisregardForGC: 0/0 objects in disregard for GC pool
+[2026.11.10-05.06.32:046][  0]LogInit: Executing Class /Script/FlightSimBridge.FlightSimRenderCommandlet
+[2026.11.10-05.06.32:047][  0]LogInit: Initializing Editor Engine...
+[2026.11.10-05.06.32:047][  0]LogEngine: Initializing Engine...
+[2026.11.10-05.06.32:091][  0]LogTedsSettings: UTedsSettingsEditorSubsystem::Initialize
+[2026.11.10-05.06.32:226][  0]LogTextureFormatOodle: Display: Oodle Texture loading DLL: oo2tex_win64_2.9.11.dll
+[2026.11.10-05.06.32:236][  0]LogTextureFormatOodle: Display: Oodle Texture loading DLL: oo2tex_win64_2.9.12.dll
+[2026.11.10-05.06.32:241][  0]LogAssetRegistry: Display: No AssetDiscovery cache present at ../../../../../../Users/kanth/flightsim/ue/Intermediate/CachedAssetRegistryDiscovery.bin. AssetRegistry discovery of files will be uncached.
+[2026.11.10-05.06.32:256][  0]LogAssetRegistry: Display: AssetDataGatherer spent 0.009s loading caches ../../../../../../Users/kanth/flightsim/ue/Intermediate/CachedAssetRegistry_*.bin.
+[2026.11.10-05.06.32:303][  0]LogNetVersion: Set ProjectVersion to 1.0.0.0. Version Checksum will be recalculated on next use.
+[2026.11.10-05.06.32:303][  0]LogInit: Texture streaming: Enabled
+[2026.11.10-05.06.32:308][  0]LogCsvProfiler: Display: Metadata set : largeworldcoordinates="1"
+[2026.11.10-05.06.32:310][  0]LogInit: Initializing Editor Engine Completed
+[2026.11.10-05.06.32:311][  0]LogContentValidation: Adding native validator /Script/DataValidation.DirtyFilesChangelistValidator
+[2026.11.10-05.06.32:311][  0]LogContentValidation: Adding native validator /Script/DataValidation.EditorValidator_Localization
+[2026.11.10-05.06.32:311][  0]LogContentValidation: Adding native validator /Script/DataValidation.EditorValidator_Material
+[2026.11.10-05.06.32:311][  0]LogContentValidation: Adding native validator /Script/DataValidation.PackageFileValidator
+[2026.11.10-05.06.32:312][  0]LogContentValidation: Adding native validator /Script/DataValidation.WorldPartitionChangelistValidator
+[2026.11.10-05.06.32:312][  0]LogContentValidation: Adding native validator /Script/InputBlueprintNodes.EnhancedInputUserWidgetValidator
+[2026.11.10-05.06.32:338][  0]LogNNEDenoiser: Ray Tracing is not enabled, therefore NNEDenoiser is not registered!
+[2026.11.10-05.06.32:343][  0]LogPython: Python enabled via CVar 'Engine.Python.IsEnabledByDefault'
+[2026.11.10-05.06.32:343][  0]LogPython: Using Python 3.11.8
+[2026.11.10-05.06.32:368][  0]LogPython: Display: No pip-enabled plugins with python dependencies found, skipping
+[2026.11.10-05.06.32:686][  0]LogComputeFramework: DG_LinearBlendSkin_Morph_Cloth/UpdateGraph_ComputeGraph/LinearBlendSkin_Morph_Cloth_OptimusNode_ComputeKernel_1: Loaded PCD3D_SM5 shaders from DDC.
+[2026.11.10-05.06.32:691][  0]LogComputeFramework: DG_LinearBlendSkin_Morph_Cloth_RecomputeNormals/UpdateGraph_ComputeGraph/LinearBlendSkin_Morph_Cloth_PositionOnly_OptimusNode_ComputeKernel_1: Loaded PCD3D_SM5 shaders from DDC.
+[2026.11.10-05.06.32:692][  0]LogComputeFramework: DG_LinearBlendSkin_Morph_Cloth_RecomputeNormals/UpdateGraph_ComputeGraph/ComputeNormalsTangents_OptimusNode_CustomComputeKernel_0: Loaded PCD3D_SM5 shaders from DDC.
+[2026.11.10-05.06.32:733][  0]LogLevelSequenceEditor: LevelSequenceEditor subsystem initialized.
+[2026.11.10-05.06.32:848][  0]LogPython: Display: Running start-up script C:/Program Files/Epic Games/UE_5.7/Engine/Plugins/Animation/IKRig/Content/Python/init_unreal.py... started...
+[2026.11.10-05.06.32:865][  0]LogPython: Display: Running start-up script C:/Program Files/Epic Games/UE_5.7/Engine/Plugins/Animation/IKRig/Content/Python/init_unreal.py... took 16.081 ms
+[2026.11.10-05.06.32:865][  0]LogPython: Display: Running start-up script C:/Program Files/Epic Games/UE_5.7/Engine/Plugins/Animation/ControlRig/Content/Python/init_unreal.py... started...
+[2026.11.10-05.06.32:875][  0]LogPython: registering <class 'ControlRigWorkflows.workflow_deformation_rig_preset.provider'>
+
+[2026.11.10-05.06.32:884][  0]LogPython: Display: Running start-up script C:/Program Files/Epic Games/UE_5.7/Engine/Plugins/Animation/ControlRig/Content/Python/init_unreal.py... took 19.873 ms (total: 35.955 ms)
+[2026.11.10-05.06.32:885][  0]LogFlightSimRender: Display: deterministic: r.TextureStreaming = 0
+[2026.11.10-05.06.32:885][  0]LogFlightSimRender: Display: deterministic: r.Streaming.FullyLoadUsedTextures = 1
+[2026.11.10-05.06.32:886][  0]LogFlightSimRender: Display: deterministic: r.ForceLOD = 0
+[2026.11.10-05.06.32:886][  0]LogFlightSimRender: Display: RHI: D3D11
+[2026.11.10-05.06.32:891][  0]LogGeoReferencing: Display: Enable World Bounds Checks is enabled in your World Settings. You might consider disabling it when working with large terrains, otherwise your pawns won't be able to go too far from the Origin
+[2026.11.10-05.06.32:892][  0]LogGeoReferencing: Display: Setting search path in ../../../Engine/Plugins/Runtime/GeoReferencing/Resources/PROJ 
+[2026.11.10-05.06.32:907][  0]LogFlightSimScenario: Display: thermals (Allen TM-2006-214019): 36 updrafts, w* 2.69 m/s, zi 1975 m over 4000 x 4000 m
+[2026.11.10-05.06.34:406][  0]LogFlightSimScenario: Display: terrain collision from 'grand_canyon' (EPSG:32612, sha 354cd02e9efd): 646412 verts, 1289610 triangles at stride 1 -- the flat slab is GONE for this run
+[2026.11.10-05.06.34:407][  0]LogFlightSimScenario: Display: ground: collision raster C:\Users\kanth\flightsim\runs\terrain\grand_canyon
+[2026.11.10-05.06.34:408][  0]LogJSBSim: Display: UJSBSimMovementComponent::LoadAircraft J11
+
+
+     JSBSim Flight Dynamics Model v1.2.4 Nov  4 2026 10:56:13
+            [JSBSim-ML v2.0]
+
+JSBSim startup beginning ...
+
+[2026.11.10-05.06.34:408][  0]LogJSBSim: Display: Initializing JSBSimFlightDynamicsModel using Data in 'C:/Users/kanth/flightsim/ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim'
+[4mReading Aircraft Configuration File[24m: [1mSu-27SK[22m
+                            Version: [1m2.0[22m
+
+
+[1mThis aircraft model is an [31mALPHA[0m[1m release!!!
+
+[0mThis aircraft model may not even properly load, and probably will not fly as expected.
+
+[31m[1mUse this model for development purposes ONLY!!![22m[0m
+
+  Description:   Models a Su-27SKM.
+  Model Author:  Yanes Bechir based on Aeromatic 0.95 output
+  Creation Date: 2016-08-23
+  Version:       $Revision: 0.03 $
+
+  Aircraft Metrics:
+    WingArea: 667.43
+    WingSpan: 48.23
+    Incidence: 2
+    Chord: 13.84
+    H. Tail Area: 133.49
+    H. Tail Arm: 28.74
+    V. Tail Area: 120.14
+    V. Tail Arm: 28.74
+    Eyepoint (x, y, z): 172.45 , 0 , 38
+    Ref Pt (x, y, z): 517.35 , 0 , 0
+    Visual Ref Pt (x, y, z): 0 , 0 , 0
+
+  Mass and Balance:
+    baseIxx: 54859 slug-ft2
+    baseIyy: 167365 slug-ft2
+    baseIzz: 169937 slug-ft2
+    baseIxy: -0 slug-ft2
+    baseIxz: 0 slug-ft2
+    baseIyz: -0 slug-ft2
+    Empty Weight: 36118 lbm
+    CG (x, y, z): 517.35 , 0 , -21.56
+    Point Mass Object: 0 lbs. at X, Y, Z (in.): 454.724  0  -15.9055
+    Point Mass Object: 0 lbs. at X, Y, Z (in.): 629.921  0  -15.9055
+    Point Mass Object: 230.21 lbs. at X, Y, Z (in.): 551.181  -190.394  -9.44882
+    Point Mass Object: 230.21 lbs. at X, Y, Z (in.): 551.181  190.394  -9.44882
+    Point Mass Object: 0 lbs. at X, Y, Z (in.): 582.677  -255.512  -0.787402
+    Point Mass Object: 0 lbs. at X, Y, Z (in.): 582.677  255.512  -0.787402
+    Point Mass Object: 0 lbs. at X, Y, Z (in.): 606.299  -298.031  6.14173
+    Point Mass Object: 0 lbs. at X, Y, Z (in.): 606.299  298.031  6.14173
+    Point Mass Object: 0 lbs. at X, Y, Z (in.): 533.465  -48.622  -52.126
+    Point Mass Object: 0 lbs. at X, Y, Z (in.): 533.465  48.622  -52.126
+    Point Mass Object: 176.37 lbs. at X, Y, Z (in.): 257.874  0  -15.9055
+    Point Mass Object: 8563 lbs. at X, Y, Z (in.): 517.35  0  -21.56
+
+  Ground Reactions: 
+    BOGEY NOSE
+      Location: 112.09 , 0 , -103.47
+      Spring Constant:  22142.7
+      Damping Constant: 1400.12 (linear)
+      Rebound Damping Constant: 1400.12 (linear)
+      Dynamic Friction: 0.5
+      Static Friction:  0.8
+      Rolling Friction: 0.02
+      Steering Type:    STEERABLE
+      Grouping:         NONE
+      Max Steer Angle:  35
+      Retractable:      1
+    BOGEY LEFT_MAIN
+      Location: 538.04 , -52.09 , -103.47
+      Spring Constant:  67142.2
+      Damping Constant: 33571.1 (linear)
+      Rebound Damping Constant: 33571.1 (linear)
+      Dynamic Friction: 0.5
+      Static Friction:  0.8
+      Rolling Friction: 0.02
+      Steering Type:    FIXED
+      Grouping:         LEFT
+      Max Steer Angle:  0
+      Retractable:      1
+    BOGEY RIGHT_MAIN
+      Location: 538.04 , 52.09 , -103.47
+      Spring Constant:  67142.2
+      Damping Constant: 33571.1 (linear)
+      Rebound Damping Constant: 33571.1 (linear)
+      Dynamic Friction: 0.5
+      Static Friction:  0.8
+      Rolling Friction: 0.02
+      Steering Type:    FIXED
+      Grouping:         RIGHT
+      Max Steer Angle:  0
+      Retractable:      1
+    STRUCTURE LEFT_WING
+      Location: 517.35 , -24.12 , -21.56
+      Spring Constant:  67142.2
+      Damping Constant: 67142.2 (linear)
+      Rebound Damping Constant: 67142.2 (linear)
+      Dynamic Friction: 1
+      Static Friction:  1
+    STRUCTURE RIGHT_WING
+      Location: 517.35 , 24.12 , -21.56
+      Spring Constant:  67142.2
+      Damping Constant: 67142.2 (linear)
+      Rebound Damping Constant: 67142.2 (linear)
+      Dynamic Friction: 1
+      Static Friction:  1
+
+    Declared properties
+
+      fcs/parachute_reef_pos_norm (initial value: 0)
+
+
+  External Reactions: 
+    
+    Frame: BODY
+    Location: (0, 0, 0)
+
+  Propulsion:
+       (FUEL) tank holds 7010.7 lbs. FUEL
+      currently at 50% of maximum capacity
+      Tank location (X, Y, Z): 260.35, 0, -21.56
+      Effective radius: 0 inches
+      Initial temperature: -9999 Fahrenheit
+      Priority: 1
+       (FUEL) tank holds 9171.23 lbs. FUEL
+      currently at 49.9999% of maximum capacity
+      Tank location (X, Y, Z): 517.35, 0, -21.56
+      Effective radius: 0 inches
+      Initial temperature: -9999 Fahrenheit
+      Priority: 1
+       (FUEL) tank holds 1168.45 lbs. FUEL
+      currently at 49.9996% of maximum capacity
+      Tank location (X, Y, Z): 517.35, -137, -21.56
+      Effective radius: 0 inches
+      Initial temperature: -9999 Fahrenheit
+      Priority: 1
+       (FUEL) tank holds 1168.45 lbs. FUEL
+      currently at 49.9996% of maximum capacity
+      Tank location (X, Y, Z): 517.35, 137, -21.56
+      Effective radius: 0 inches
+      Initial temperature: -9999 Fahrenheit
+      Priority: 1
+       (FUEL) tank holds 2204.62 lbs. FUEL
+      currently at 50% of maximum capacity
+      Tank location (X, Y, Z): 669.29, 0, -21.56
+      Effective radius: 0 inches
+      Initial temperature: -9999 Fahrenheit
+      Priority: 1
+    2 dimensional table with 6 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	0.0430	0.0488	0.0528	0.0694	0.0899	0.1183	0.1467	0.0000	
+	0.2000	0.0500	0.0501	0.0335	0.0544	0.0797	0.1049	0.1342	0.0000	
+	0.4000	0.0040	0.0047	0.0020	0.0272	0.0595	0.0891	0.1203	0.0000	
+	0.6000	0.0000	0.0000	0.0000	0.0000	0.0276	0.0718	0.1073	0.0000	
+	0.8000	0.0000	0.0000	0.0000	0.0000	0.0474	0.0868	0.0900	0.0000	
+	1.0000	0.0000	0.0000	0.0000	0.0000	0.0000	0.0552	0.0800	0.0000	
+    Function: propulsion/engine[0]/IdleThrust
+    2 dimensional table with 8 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	1.2600	1.0000	0.7400	0.5340	0.3720	0.2410	0.1490	0.0000	
+	0.2000	1.1710	0.9340	0.6970	0.5060	0.3550	0.2310	0.1430	0.0000	
+	0.4000	1.1500	0.9210	0.6920	0.5060	0.3570	0.2330	0.1450	0.0000	
+	0.6000	1.1810	0.9510	0.7210	0.5320	0.3780	0.2480	0.1540	0.0000	
+	0.8000	1.2580	1.0200	0.7820	0.5820	0.4170	0.2750	0.1700	0.0000	
+	1.0000	1.3690	1.1200	0.8710	0.6510	0.4750	0.3150	0.1950	0.0000	
+	1.2000	1.4850	1.2300	0.9750	0.7440	0.5450	0.3640	0.2250	0.0000	
+	1.4000	1.5941	1.3400	1.0860	0.8450	0.6280	0.4240	0.2630	0.0000	
+    Function: propulsion/engine[0]/MilThrust
+    2 dimensional table with 14 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	1.1816	1.0000	0.8184	0.6627	0.5280	0.3756	0.2327	0.0000	
+	0.2000	1.1308	0.9599	0.7890	0.6406	0.5116	0.3645	0.2258	0.0000	
+	0.4000	1.1150	0.9474	0.7798	0.6340	0.5070	0.3615	0.2240	0.0000	
+	0.6000	1.1284	0.9589	0.7894	0.6420	0.5134	0.3661	0.2268	0.0000	
+	0.8000	1.1707	0.9942	0.8177	0.6647	0.5309	0.3784	0.2345	0.0000	
+	1.0000	1.2411	1.0529	0.8648	0.7017	0.5596	0.3983	0.2467	0.0000	
+	1.2000	1.3287	1.1254	0.9221	0.7462	0.5936	0.4219	0.2614	0.0000	
+	1.4000	1.4365	1.2149	0.9933	0.8021	0.6360	0.4509	0.2794	0.0000	
+	1.6000	1.5711	1.3260	1.0809	0.8700	0.6874	0.4860	0.3011	0.0000	
+	1.8000	1.7301	1.4579	1.1857	0.9512	0.7495	0.5289	0.3277	0.0000	
+	2.0000	1.8314	1.5700	1.3086	1.0474	0.8216	0.5786	0.3585	0.0000	
+	2.2000	1.9700	1.6900	1.4100	1.2400	0.9100	0.6359	0.3940	0.0000	
+	2.4000	2.0700	1.8000	1.5300	1.3400	1.0000	0.7200	0.4600	0.0000	
+	2.6000	2.2000	1.9200	1.6400	1.4400	1.1000	0.8000	0.5200	0.0000	
+    Function: propulsion/engine[0]/AugThrust
+
+In file C:/Users/kanth/flightsim/ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/aircraft/J11/J11.xml: line 312
+Engine location ignored, only thruster location is used.
+
+In file C:/Users/kanth/flightsim/ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/aircraft/J11/J11.xml: line 317
+Engine orientation ignored, only thruster orientation is used.
+      X = 802.2500
+      Y = -20.0000
+      Z = 0.0000
+      Pitch = 0.0000 degrees
+      Yaw = 0.0000 degrees
+    2 dimensional table with 6 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	0.0430	0.0488	0.0528	0.0694	0.0899	0.1183	0.1467	0.0000	
+	0.2000	0.0500	0.0501	0.0335	0.0544	0.0797	0.1049	0.1342	0.0000	
+	0.4000	0.0040	0.0047	0.0020	0.0272	0.0595	0.0891	0.1203	0.0000	
+	0.6000	0.0000	0.0000	0.0000	0.0000	0.0276	0.0718	0.1073	0.0000	
+	0.8000	0.0000	0.0000	0.0000	0.0000	0.0474	0.0868	0.0900	0.0000	
+	1.0000	0.0000	0.0000	0.0000	0.0000	0.0000	0.0552	0.0800	0.0000	
+    Function: propulsion/engine[1]/IdleThrust
+    2 dimensional table with 8 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	1.2600	1.0000	0.7400	0.5340	0.3720	0.2410	0.1490	0.0000	
+	0.2000	1.1710	0.9340	0.6970	0.5060	0.3550	0.2310	0.1430	0.0000	
+	0.4000	1.1500	0.9210	0.6920	0.5060	0.3570	0.2330	0.1450	0.0000	
+	0.6000	1.1810	0.9510	0.7210	0.5320	0.3780	0.2480	0.1540	0.0000	
+	0.8000	1.2580	1.0200	0.7820	0.5820	0.4170	0.2750	0.1700	0.0000	
+	1.0000	1.3690	1.1200	0.8710	0.6510	0.4750	0.3150	0.1950	0.0000	
+	1.2000	1.4850	1.2300	0.9750	0.7440	0.5450	0.3640	0.2250	0.0000	
+	1.4000	1.5941	1.3400	1.0860	0.8450	0.6280	0.4240	0.2630	0.0000	
+    Function: propulsion/engine[1]/MilThrust
+    2 dimensional table with 14 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	1.1816	1.0000	0.8184	0.6627	0.5280	0.3756	0.2327	0.0000	
+	0.2000	1.1308	0.9599	0.7890	0.6406	0.5116	0.3645	0.2258	0.0000	
+	0.4000	1.1150	0.9474	0.7798	0.6340	0.5070	0.3615	0.2240	0.0000	
+	0.6000	1.1284	0.9589	0.7894	0.6420	0.5134	0.3661	0.2268	0.0000	
+	0.8000	1.1707	0.9942	0.8177	0.6647	0.5309	0.3784	0.2345	0.0000	
+	1.0000	1.2411	1.0529	0.8648	0.7017	0.5596	0.3983	0.2467	0.0000	
+	1.2000	1.3287	1.1254	0.9221	0.7462	0.5936	0.4219	0.2614	0.0000	
+	1.4000	1.4365	1.2149	0.9933	0.8021	0.6360	0.4509	0.2794	0.0000	
+	1.6000	1.5711	1.3260	1.0809	0.8700	0.6874	0.4860	0.3011	0.0000	
+	1.8000	1.7301	1.4579	1.1857	0.9512	0.7495	0.5289	0.3277	0.0000	
+	2.0000	1.8314	1.5700	1.3086	1.0474	0.8216	0.5786	0.3585	0.0000	
+	2.2000	1.9700	1.6900	1.4100	1.2400	0.9100	0.6359	0.3940	0.0000	
+	2.4000	2.0700	1.8000	1.5300	1.3400	1.0000	0.7200	0.4600	0.0000	
+	2.6000	2.2000	1.9200	1.6400	1.4400	1.1000	0.8000	0.5200	0.0000	
+    Function: propulsion/engine[1]/AugThrust
+
+In file C:/Users/kanth/flightsim/ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/aircraft/J11/J11.xml: line 338
+Engine location ignored, only thruster location is used.
+
+In file C:/Users/kanth/flightsim/ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/aircraft/J11/J11.xml: line 343
+Engine orientation ignored, only thruster orientation is used.
+      X = 802.2500
+      Y = 20.0000
+      Z = 0.0000
+      Pitch = 0.0000 degrees
+      Yaw = 0.0000 degrees
+
+    Declared properties
+
+      /controls/engines/engine/fuel-pump (initial value: 1.0000)
+
+      /controls/engines/engine[1]/fuel-pump (initial value: 1.0000)
+
+      propulsion/tank[0]/collector-valve (initial value: 1.0000)
+
+      propulsion/tank[2]/collector-valve (initial value: 1.0000)
+
+      propulsion/tank[3]/collector-valve (initial value: 1.0000)
+
+      propulsion/tank[4]/collector-valve (initial value: 1.0000)
+
+    Function: propulsion/tank[4]/tnk0-qt
+
+  System: Fuel
+
+[1m[34m    Channel [22mFuel pumping[0m
+
+    Loading Component "Tank0to collector" of type: SWITCH
+      Switch default value is: constant value -7.000000
+      Switch takes test 1 value (constant value 0.000000)
+      if any of the following are true: {
+        fuel-pump EQ constant value 0.000000
+        fuel-pump EQ constant value 0.000000
+        collector-valve EQ constant value 0.000000
+        contents-lbs LE constant value 0.000000
+        contents-lbs GE constant value 9170.230000
+        Nz LE constant value -0.500000
+      }
+      OUTPUT: external-flow-rate-pps
+      OUTPUT: tank0to-collector
+
+    Loading Component "Tank2to collector" of type: SWITCH
+      Switch default value is: constant value -7.000000
+      Switch takes test 1 value (constant value 0.000000)
+      if any of the following are true: {
+        fuel-pump EQ constant value 0.000000
+        fuel-pump EQ constant value 0.000000
+        contents-lbs GE constant value 1.000000
+        contents-lbs GE constant value 1.000000
+        collector-valve EQ constant value 0.000000
+        contents-lbs LE constant value 0.000000
+        contents-lbs GE constant value 9170.230000
+        Nz LE constant value -0.500000
+      }
+      OUTPUT: external-flow-rate-pps
+      OUTPUT: tank2to-collector
+
+    Loading Component "Tank3to collector" of type: SWITCH
+      Switch default value is: constant value -7.000000
+      Switch takes test 1 value (constant value 0.000000)
+      if any of the following are true: {
+        fuel-pump EQ constant value 0.000000
+        fuel-pump EQ constant value 0.000000
+        contents-lbs GE constant value 1.000000
+        contents-lbs GE constant value 1.000000
+        collector-valve EQ constant value 0.000000
+        contents-lbs LE constant value 0.000000
+        contents-lbs GE constant value 9170.230000
+        Nz LE constant value -0.500000
+      }
+      OUTPUT: external-flow-rate-pps
+      OUTPUT: tank3to-collector
+
+    Loading Component "Tank4to collector" of type: SWITCH
+      Switch default value is: constant value -7.000000
+      Switch takes test 1 value (constant value 0.000000)
+      if any of the following are true: {
+        fuel-pump EQ constant value 0.000000
+        fuel-pump EQ constant value 0.000000
+        tnk0-qt LE constant value 0.570000
+        collector-valve EQ constant value 0.000000
+        contents-lbs LE constant value 0.000000
+        contents-lbs GE constant value 9170.230000
+        Nz LE constant value -0.500000
+      }
+      OUTPUT: external-flow-rate-pps
+      OUTPUT: tank4to-collector
+
+    Loading Component "" of type: SUMMER
+      INPUTS: 
+       -external-flow-rate-pps
+       -external-flow-rate-pps
+       -external-flow-rate-pps
+       -external-flow-rate-pps
+      OUTPUT: external-flow-rate-pps
+      OUTPUT: fcs
+
+    Declared properties
+
+      systems/engines/emerdisable_afterburning (initial value: 0.0000)
+
+      systems/engines/cmd_t_L (initial value: 1.0000)
+
+      systems/engines/cmd_t_R (initial value: 1.0000)
+
+      fcs/yaw-damper-enable (initial value: 1.0000)
+
+      fcs/parachute_reef-cmd-norm (initial value: 0.0000)
+
+      fcs/parachute/drop_cmd (initial value: 0.0000)
+
+
+  FCS: FCS: Su-27SK
+
+[1m[34m    Channel [22mThrottle Control[0m
+
+    Loading Component "Throttle1" of type: SCHEDULED_GAIN
+    1 dimensional table with 6 rows.
+	0.0000	0.0000	
+	0.0685	0.0000	
+	0.0720	0.0000	
+	0.8280	1.0000	
+	0.8320	1.0000	
+	1.0000	2.0000	
+      INPUT: cmd_t_L
+      GAIN: constant value 1.000000
+      OUTPUT: throttle1-pos-norm
+      OUTPUT: throttle1
+      Scheduled by table: 
+    1 dimensional table with 6 rows.
+	0.0000	0.0000	
+	0.0685	0.0000	
+	0.0720	0.0000	
+	0.8280	1.0000	
+	0.8320	1.0000	
+	1.0000	2.0000	
+
+    Loading Component "Throttle2" of type: SCHEDULED_GAIN
+    1 dimensional table with 6 rows.
+	0.0000	0.0000	
+	0.0685	0.0000	
+	0.0720	0.0000	
+	0.8280	1.0000	
+	0.8320	1.0000	
+	1.0000	2.0000	
+      INPUT: cmd_t_R
+      GAIN: constant value 1.000000
+      OUTPUT: throttle2-pos-norm
+      OUTPUT: throttle2
+      Scheduled by table: 
+    1 dimensional table with 6 rows.
+	0.0000	0.0000	
+	0.0685	0.0000	
+	0.0720	0.0000	
+	0.8280	1.0000	
+	0.8320	1.0000	
+	1.0000	2.0000	
+
+    Loading Component "calculations/throttle1-pos-norm" of type: SWITCH
+      Switch default value is: throttle1-pos-norm
+      Switch takes test 1 value (throttle-cmd-norm)
+      if all of the following are true: {
+        emerdisable_afterburning eq constant value 1.000000
+      }
+      OUTPUT: throttle-pos-norm
+      OUTPUT: throttle1-pos-norm
+
+    Loading Component "calculations/throttle2-pos-norm" of type: SWITCH
+      Switch default value is: throttle2-pos-norm
+      Switch takes test 1 value (throttle-cmd-norm)
+      if all of the following are true: {
+        emerdisable_afterburning eq constant value 1.000000
+      }
+      OUTPUT: throttle-pos-norm
+      OUTPUT: throttle2-pos-norm
+
+[1m[34m    Channel [22mPitch[0m
+
+    Loading Component "Pitch Trim Sum" of type: SUMMER
+      Minimum limit: constant value -1.000000
+      Maximum limit: constant value 1.000000
+      INPUTS: 
+       elevator-cmd-norm
+       pitch-trim-cmd-norm
+      OUTPUT: pitch-trim-sum
+
+    Loading Component "Elevator Control" of type: AEROSURFACE_SCALE
+      INPUT: pitch-trim-sum
+      GAIN: constant value 1.000000
+      OUTPUT: elevator-pos-rad
+      OUTPUT: elevator-control
+      In/Out Mapping:
+        Input MIN: -1.0000
+        Input MAX: 1.0000
+        Output MIN: -0.5000
+        Output MAX: 0.5000
+
+    Loading Component "elevator normalization" of type: AEROSURFACE_SCALE
+      INPUT: elevator-pos-rad
+      GAIN: constant value 1.000000
+      OUTPUT: elevator-pos-norm
+      OUTPUT: elevator-normalization
+      In/Out Mapping:
+        Input MIN: -0.5000
+        Input MAX: 0.5000
+        Output MIN: -1.0000
+        Output MAX: 1.0000
+
+[1m[34m    Channel [22mRoll[0m
+
+    Loading Component "Roll Trim Sum" of type: SUMMER
+      Minimum limit: constant value -1.000000
+      Maximum limit: constant value 1.000000
+      INPUTS: 
+       aileron-cmd-norm
+       roll-trim-cmd-norm
+      OUTPUT: roll-trim-sum
+
+    Loading Component "Left Aileron Control" of type: AEROSURFACE_SCALE
+      INPUT: roll-trim-sum
+      GAIN: constant value 1.000000
+      OUTPUT: left-aileron-pos-rad
+      OUTPUT: left-aileron-control
+      In/Out Mapping:
+        Input MIN: -1.0000
+        Input MAX: 1.0000
+        Output MIN: -0.3500
+        Output MAX: 0.3500
+
+    Loading Component "Right Aileron Control" of type: AEROSURFACE_SCALE
+      INPUT: roll-trim-sum
+      GAIN: constant value 1.000000
+      OUTPUT: right-aileron-pos-rad
+      OUTPUT: right-aileron-control
+      In/Out Mapping:
+        Input MIN: -1.0000
+        Input MAX: 1.0000
+        Output MIN: -0.3500
+        Output MAX: 0.3500
+
+    Loading Component "left aileron normalization" of type: AEROSURFACE_SCALE
+      INPUT: left-aileron-pos-rad
+      GAIN: constant value 1.000000
+      OUTPUT: left-aileron-pos-norm
+      OUTPUT: left-aileron-normalization
+      In/Out Mapping:
+        Input MIN: -0.3500
+        Input MAX: 0.3500
+        Output MIN: -1.0000
+        Output MAX: 1.0000
+
+    Loading Component "right aileron normalization" of type: AEROSURFACE_SCALE
+      INPUT: right-aileron-pos-rad
+      GAIN: constant value 1.000000
+      OUTPUT: right-aileron-pos-norm
+      OUTPUT: right-aileron-normalization
+      In/Out Mapping:
+        Input MIN: -0.3500
+        Input MAX: 0.3500
+        Output MIN: -1.0000
+        Output MAX: 1.0000
+
+[1m[34m    Channel [22mYaw[0m
+
+    Loading Component "Rudder Command Sum" of type: SUMMER
+      Minimum limit: constant value -1.000000
+      Maximum limit: constant value 1.000000
+      INPUTS: 
+       rudder-cmd-norm
+       yaw-trim-cmd-norm
+      OUTPUT: rudder-command-sum
+
+    Loading Component "Yaw Damper Rate" of type: SCHEDULED_GAIN
+    1 dimensional table with 2 rows.
+	30.0000	0.0000	
+	60.0000	2.0000	
+      INPUT: r-aero-rad_sec
+      GAIN: yaw-damper-enable
+      OUTPUT: yaw-damper-rate
+      Scheduled by table: 
+    1 dimensional table with 2 rows.
+	30.0000	0.0000	
+	60.0000	2.0000	
+
+    Loading Component "Rudder Sum" of type: SUMMER
+      Minimum limit: constant value -1.100000
+      Maximum limit: constant value 1.100000
+      INPUTS: 
+       rudder-command-sum
+       yaw-damper-rate
+      OUTPUT: rudder-sum
+
+    Loading Component "Rudder Control" of type: AEROSURFACE_SCALE
+      INPUT: rudder-sum
+      GAIN: constant value 1.000000
+      OUTPUT: rudder-pos-rad
+      OUTPUT: rudder-control
+      In/Out Mapping:
+        Input MIN: -1.1000
+        Input MAX: 1.1000
+        Output MIN: -0.3500
+        Output MAX: 0.3500
+
+    Loading Component "rudder normalization" of type: AEROSURFACE_SCALE
+      INPUT: rudder-pos-rad
+      GAIN: constant value 1.000000
+      OUTPUT: rudder-pos-norm
+      OUTPUT: rudder-normalization
+      In/Out Mapping:
+        Input MIN: -0.3500
+        Input MAX: 0.3500
+        Output MIN: -1.0000
+        Output MAX: 1.0000
+
+[1m[34m    Channel [22mFlaps[0m
+
+    Loading Component "Flaps Control" of type: KINEMATIC
+      INPUT: flap-cmd-norm
+      DETENTS: 3
+        0.0000 0.0000
+        15.0000 4.0000
+        30.0000 3.0000
+      OUTPUT: flap-pos-deg
+      OUTPUT: flaps-control
+
+    Loading Component "flap normalization" of type: AEROSURFACE_SCALE
+      INPUT: flap-pos-deg
+      GAIN: constant value 1.000000
+      OUTPUT: flap-pos-norm
+      OUTPUT: flap-normalization
+      In/Out Mapping:
+        Input MIN: 0.0000
+        Input MAX: 30.0000
+        Output MIN: 0.0000
+        Output MAX: 1.0000
+
+[1m[34m    Channel [22mLanding Gear[0m
+
+    Loading Component "Gear Control" of type: KINEMATIC
+      INPUT: gear-cmd-norm
+      DETENTS: 2
+        0.0000 0.0000
+        1.0000 5.0000
+      OUTPUT: gear-pos-norm
+      OUTPUT: gear-control
+
+[1m[34m    Channel [22mSpeedbrake[0m
+
+    Loading Component "Speedbrake Control" of type: KINEMATIC
+      INPUT: speedbrake-cmd-norm
+      DETENTS: 2
+        0.0000 0.0000
+        1.0000 1.0000
+      OUTPUT: speedbrake-pos-norm
+      OUTPUT: speedbrake-control
+
+[1m[34m    Channel [22mDrag Parachute[0m
+
+    Loading Component "Parachute Control" of type: KINEMATIC
+      INPUT: parachute_reef-cmd-norm
+      DETENTS: 2
+        0.0000 0.0000
+        1.0000 0.9000
+      OUTPUT: parachute_reef_pos
+      OUTPUT: parachute-control
+
+    Loading Component "systems/parachute/release_drop" of type: SWITCH
+      Switch default value is: parachute_reef_pos
+      Switch takes test 1 value (constant value 0.000000)
+      if all of the following are true: {
+        parachute_reef_pos eq constant value 1.000000
+        drop_cmd eq constant value 1.000000
+      }
+      Switch takes test 2 value (constant value 0.000000)
+      if all of the following are true: {
+        parachute_reef_pos eq constant value 1.000000
+        vc-fps gt constant value 514.413823
+      }
+      OUTPUT: parachute_reef_pos_norm
+      OUTPUT: release_drop
+
+  Aerodynamics (Lift|Side|Drag axes):
+
+    1 dimensional table with 5 rows.
+	-0.2000	-0.6400	
+	0.0000	0.1200	
+	0.0870	0.4600	
+	0.2600	1.1200	
+	0.6000	0.4480	
+    Function: aero/force/Lift_alpha
+    Function: aero/force/Lift_flap
+    Function: aero/force/Lift_speedbrake
+    Function: aero/force/Lift_elevator
+    1 dimensional table with 5 rows.
+	-1.5700	0.8400	
+	-0.2600	0.0160	
+	0.0000	0.0067	
+	0.2600	0.0120	
+	1.5700	0.6400	
+    Function: aero/force/Drag_basic
+    Function: aero/force/Drag_induced
+    1 dimensional table with 4 rows.
+	0.0000	0.0000	
+	0.8100	0.0000	
+	1.1000	0.0230	
+	1.8000	0.0150	
+    Function: aero/force/Drag_mach
+    Function: aero/force/Drag_flap
+    Function: aero/force/Drag_gear
+    Function: aero/force/Drag_speedbrake
+    1 dimensional table with 5 rows.
+	-1.5700	1.2300	
+	-0.2600	0.0500	
+	0.0000	0.0000	
+	0.2600	0.0500	
+	1.5700	1.2300	
+    Function: aero/force/Drag_beta
+    Function: aero/force/Drag_elevator
+    Function: aero/force/Side_beta
+    Function: aero/moment/Roll_beta
+    Function: aero/moment/Roll_damp
+    Function: aero/moment/Roll_yaw
+    Function: aero/moment/Roll_aileron
+    Function: aero/moment/Roll_rudder
+    Function: aero/moment/Pitch_alpha
+    1 dimensional table with 2 rows.
+	0.0000	-1.1000	
+	2.0000	-0.4000	
+    Function: aero/moment/Pitch_elevator
+    Function: aero/moment/Pitch_damp
+    Function: aero/moment/Pitch_alphadot
+    Function: aero/moment/Yaw_beta
+    Function: aero/moment/Yaw_damp
+    Function: aero/moment/Yaw_rudder
+    Function: aero/moment/Yaw_aileron
+[2026.11.10-05.06.34:430][  0]LogJSBSim: Display: Model J11 Loaded successfully !
+[2026.11.10-05.06.34:430][  0]LogFlightSimScenario: Display: loaded 'J11' as "Su-27SK"; centre of gravity at (0.0, 0.0, 0.0) cm in the actor frame
+[2026.11.10-05.06.34:474][  0]LogFlightSimRender: Display: physical sky 2026-07-15T13:52:00+00:00: sun 74.8/16.0 deg, moon 66.6/1.0 deg (2% lit), 0 stars, EV100 13.18, clouds on
+[2026.11.10-05.06.34:543][  0]LogFlightSimRender: Warning: night lights: none in the sky plan
+[2026.11.10-05.06.34:614][  0]LogFlightSimRender: Display: drape material v1 on /Game/FlightSim/M_TerrainImagery.M_TerrainImagery: Imagery from material.textures.imagery, 1 parameter(s) applied, 35 absent from the material, 0 file(s) missing, 0 not in the sidecar
+[2026.11.10-05.06.34:871][  0]LogFlightSimRender: Display: TerrainGeoreferenced: 646412 verts, 1289610 triangles in 16 tiles (stride 1 = 30 m posting, budget 4000000, EPSG:32612, snowline 3500 m, classified yes)
+[2026.11.10-05.06.34:873][  0]LogFlightSimRender: Display: terrain 802x806 at 30 m/px, elevations -166..2651 m, sha 354cd02e9efd (georeferenced)
+[2026.11.10-05.06.34:878][  0]LogScript: Warning: Script Msg: No game viewport was found.
+[2026.11.10-05.06.34:880][  0]LogCesium: Warning: "Enable World Bounds Checks" in the world settings is currently enabled. Please consider disabling it to avoid potential issues.
+[2026.11.10-05.06.34:880][  0]LogCesium: Display: Caching Cesium requests in C:/Users/kanth/flightsim/ue/cesium-request-cache.sqlite
+[2026.11.10-05.06.34:881][  0]LogCesium: Loading tileset for asset ID 0
+[2026.11.10-05.06.34:881][  0]LogCesium: Loading tileset for asset ID 0 done
+[2026.11.10-05.06.34:881][  0]LogFlightSimGoogleTiles: Display: google tiles: origin 36.090000, -112.000000 at 1316.6 m ellipsoidal (1340.0 m orthometric + -23.4 m undulation), maximum screen-space error 8.0
+[2026.11.10-05.06.34:881][  0]LogFlightSimGoogleTiles: Display: google tiles: hid 2 actor(s) of the scene's own ground
+[2026.11.10-05.06.34:882][  0]LogFlightSimRender: Display: beauty fallback: path fallback (D3D11, PCD3D_SM5, Lumen GI no, VSM no)
+[2026.11.10-05.06.34:882][  0]LogFlightSimDustHaze: Display: dust haze: row dust, RH 50% f(RH) 1.072, second layer on
+[2026.11.10-05.06.34:905][  0]LogFlightSimSunShafts: Display: sun shafts: preset clear, tier interactive, sun set, sky light set, 3 cvar(s)
+[2026.11.10-05.06.34:905][  0]LogFlightSimWorldBeauty: Display: world beauty: preset clear, 1 cloud layer(s) redrawn, 0 override(s), scatter off
+[2026.11.10-05.06.34:932][  0]LogTexture: Display: Building textures: /Game/Aircraft/J11/TEX_grey-blue-flood.TEX_grey-blue-flood (TFO_AutoDXT, 128x128 x1x1x1) (Required Memory Estimate: 2.864554 MB), EncodeSpeed: Final
+[2026.11.10-05.06.34:933][  0]LogTexture: Display: Building textures: /Game/Aircraft/J11/TEX_K-36DM.TEX_K-36DM (TFO_AutoDXT, 512x512 x1x1x1) (Required Memory Estimate: 30.83325 MB), EncodeSpeed: Final
+[2026.11.10-05.06.34:933][  0]LogTexture: Display: Building textures: /Game/Aircraft/J11/TEX_fighter_pilot.TEX_fighter_pilot (TFO_AutoDXT, 512x512 x1x1x1) (Required Memory Estimate: 30.83325 MB), EncodeSpeed: Final
+[2026.11.10-05.06.34:933][  0]LogTexture: Display: Building textures: /Game/Aircraft/J11/TEX_panel_wcs.TEX_panel_wcs (TFO_AutoDXT, 1024x512 x1x1x1) (Required Memory Estimate: 79.916647 MB), EncodeSpeed: Final
+[2026.11.10-05.06.34:938][  0]LogFlightSimRender: Display: store payload:r27r_left:0 attached (/Game/Aircraft/J11/SM_J11_r27r_left as Store_payload_r27r_left_0 under MeshOrigin, offset (0.0, 0.0, 0.0) cm)
+[2026.11.10-05.06.34:940][  0]LogFlightSimRender: Display: store payload:r27r_right:0 attached (/Game/Aircraft/J11/SM_J11_r27r_right as Store_payload_r27r_right_0 under MeshOrigin, offset (0.0, 0.0, 0.0) cm)
+[2026.11.10-05.06.34:941][  0]LogFlightSimRender: Display: mesh airframe 'J11' (Shenyang J-11A (FlightGear SU-27SK package by Yanes Bechir / FGUK; Models/Su-27.ac, shared with the package's Su-27SK variant)) [GPL-2.0, https://github.com/yanes19/SU-27SK@925cb5317f3c]: 0 surfaces bound; manifest version 4, origin (0.0, 0.0, -10.6) cm in the actor frame
+[2026.11.10-05.06.34:946][  0]LogTexture: Display: Building textures: /Game/Aircraft/J11/TEX_panel-front-tex-2048-bevel.TEX_panel-front-tex-2048-bevel (TFO_AutoDXT, 2048x2048 x1x1x1) (Required Memory Estimate: 280.999983 MB), EncodeSpeed: Final
+[2026.11.10-05.06.34:962][  0]LogStaticMesh: Display: Waiting for static meshes to be ready 0/1 (/Game/Aircraft/J11/body) ...
+[2026.11.10-05.06.34:998][  0]LogTexture: Display: Building textures: /Game/Aircraft/J11/TEX_transp.TEX_transp (TFO_AutoDXT, 128x128 x1x1x1) (Required Memory Estimate: 3.583295 MB), EncodeSpeed: Final
+[2026.11.10-05.06.34:999][  0]LogTexture: Display: Building textures: /Game/Aircraft/J11/TEX_texture.TEX_texture (TFO_AutoDXT, 512x512 x1x1x1) (Required Memory Estimate: 30.83325 MB), EncodeSpeed: Final
+[2026.11.10-05.06.35:005][  0]LogStreaming: Warning: LoadPackage: SkipPackage: /Game/Aircraft/J11/Look/MI_mat_panel_wcs (0xB3387C6FAD00AF9F) - The package to load does not exist on disk or in the loader
+[2026.11.10-05.06.35:005][  0]LogUObjectGlobals: Warning: Failed to find object 'MaterialInterface /Game/Aircraft/J11/Look/MI_mat_panel_wcs.MI_mat_panel_wcs'
+[2026.11.10-05.06.35:008][  0]LogTexture: Display: Building textures: /Game/Aircraft/J11/TEX_PLAAF2Div.TEX_PLAAF2Div (TFO_AutoDXT, 4096x2048 x1x1x1) (Required Memory Estimate: 560.999969 MB), EncodeSpeed: Final
+[2026.11.10-05.06.35:029][  0]LogFlightSimAircraftFX: Display: aircraft look: 26 slot(s) on look instances, 1 absent
+[2026.11.10-05.06.35:060][  0]LogFlightSimCondensation: Display: condensation: 102291 vertices, sites placed, 2 tip ribbon(s), material present
+[2026.11.10-05.06.35:061][  0]LogFlightSimAircraftFX: Display: aircraft look: 7 lamp(s), 2 nozzle(s), 4 trail(s), 16 beauty-only actor(s) (C:\Users\kanth\flightsim\assets\generated\J11/look_manifest.json)
+[2026.11.10-05.06.35:062][  0]LogFlightSimRender: Display: mesh airframe 'J11' is one rigid body: no control surfaces declared, none animated
+[2026.11.10-05.06.35:062][  0]LogFlightSimRender: Display: 0 control surfaces bound to geometry
+[2026.11.10-05.06.35:064][  0]LogFlightSimRender: Display: consume-poses: camera 0 of 1, 30 solved samples
+[2026.11.10-05.06.35:064][  0]LogFlightSimRender: Display: beauty look: grade desert_noon, lens standard, exposure -beauty-look= EV100 13.18 over the -sky= plan's camera (f/4, 1/60 s, ISO 100; compensation -3.270, the plan's was -3.270), focal length 35.0 mm from FOV 54.43 deg
+[2026.11.10-05.06.35:068][  0]LogConfig: Applying CVar settings from Section [ViewDistanceQuality@Cine] File [Scalability]
+[2026.11.10-05.06.35:068][  0]LogConfig: Set CVar [[r.ViewDistanceScale:10.0]]
+[2026.11.10-05.06.35:068][  0]LogConfig: Applying CVar settings from Section [AntiAliasingQuality@Cine] File [Scalability]
+[2026.11.10-05.06.35:069][  0]LogConfig: Set CVar [[r.FXAA.Quality:5]]
+[2026.11.10-05.06.35:069][  0]LogConfig: Set CVar [[r.TSR.History.R11G11B10:0]]
+[2026.11.10-05.06.35:069][  0]LogConfig: Applying CVar settings from Section [ShadowQuality@Cine] File [Scalability]
+[2026.11.10-05.06.35:070][  0]LogConsoleManager: Warning: Setting the console variable 'r.Shadow.CSM.MaxCascades' with 'SetByScalability' was ignored as it is lower priority than the previous 'SetByCode'. Value remains '10'
+[2026.11.10-05.06.35:071][  0]LogConsoleManager: Warning: Setting the console variable 'r.Shadow.MaxResolution' with 'SetByScalability' was ignored as it is lower priority than the previous 'SetByCode'. Value remains '4096'
+[2026.11.10-05.06.35:071][  0]LogConsoleManager: Warning: Setting the console variable 'r.Shadow.MaxCSMResolution' with 'SetByScalability' was ignored as it is lower priority than the previous 'SetByCode'. Value remains '4096'
+[2026.11.10-05.06.35:072][  0]LogConfig: Set CVar [[r.Shadow.RadiusThreshold:0]]
+[2026.11.10-05.06.35:073][  0]LogConfig: Set CVar [[r.VolumetricFog.GridPixelSize:4]]
+[2026.11.10-05.06.35:073][  0]LogConfig: Set CVar [[r.VolumetricFog.HistoryMissSupersampleCount:16]]
+[2026.11.10-05.06.35:073][  0]LogConfig: Set CVar [[r.Shadow.Virtual.MaxPhysicalPages:8192]]
+[2026.11.10-05.06.35:073][  0]LogConfig: Set CVar [[r.Shadow.Virtual.ResolutionLodBiasLocalMoving:0.0]]
+[2026.11.10-05.06.35:074][  0]LogConfig: Set CVar [[r.Shadow.Virtual.SMRT.RayCountDirectional:16]]
+[2026.11.10-05.06.35:074][  0]LogConfig: Set CVar [[r.Shadow.Virtual.SMRT.SamplesPerRayDirectional:8]]
+[2026.11.10-05.06.35:075][  0]LogConfig: Set CVar [[r.Shadow.Virtual.SMRT.RayCountLocal:16]]
+[2026.11.10-05.06.35:075][  0]LogConfig: Set CVar [[r.Shadow.Virtual.SMRT.SamplesPerRayLocal:8]]
+[2026.11.10-05.06.35:075][  0]LogConfig: Applying CVar settings from Section [GlobalIlluminationQuality@Cine] File [Scalability]
+[2026.11.10-05.06.35:076][  0]LogConsoleManager: Warning: Setting the console variable 'r.DistanceFieldAO' with 'SetByScalability' was ignored as it is lower priority than the previous 'SetByCode'. Value remains '1'
+[2026.11.10-05.06.35:076][  0]LogConsoleManager: Warning: Setting the console variable 'r.AOQuality' with 'SetByScalability' was ignored as it is lower priority than the previous 'SetByCode'. Value remains '2'
+[2026.11.10-05.06.35:077][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.RadianceCache.NumProbesToTraceBudget:350]]
+[2026.11.10-05.06.35:078][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.DownsampleFactor:8]]
+[2026.11.10-05.06.35:078][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.NumAdaptiveProbes:4]]
+[2026.11.10-05.06.35:078][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.TracingOctahedronResolution:16]]
+[2026.11.10-05.06.35:079][  0]LogConfig: Set CVar [[r.Lumen.ScreenProbeGather.FullResolutionJitterWidth:.5]]
+[2026.11.10-05.06.35:079][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.TracingOctahedronResolution:4]]
+[2026.11.10-05.06.35:079][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.ProbeResolution:16]]
+[2026.11.10-05.06.35:079][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.NumProbesToTraceBudget:350]]
+[2026.11.10-05.06.35:081][  0]LogConfig: Applying CVar settings from Section [ReflectionQuality@Cine] File [Scalability]
+[2026.11.10-05.06.35:081][  0]LogConsoleManager: Warning: Setting the console variable 'r.SSR.Quality' with 'SetByScalability' was ignored as it is lower priority than the previous 'SetByCode'. Value remains '4'
+[2026.11.10-05.06.35:081][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyReflections.FrontLayer.Enable:1]]
+[2026.11.10-05.06.35:082][  0]LogConfig: Applying CVar settings from Section [PostProcessQuality@Cine] File [Scalability]
+[2026.11.10-05.06.35:082][  0]LogConfig: Set CVar [[r.GTAO.Numangles:4]]
+[2026.11.10-05.06.35:082][  0]LogConfig: Set CVar [[r.DepthOfFieldQuality:4]]
+[2026.11.10-05.06.35:083][  0]LogConfig: Set CVar [[r.RenderTargetPoolMin:1000]]
+[2026.11.10-05.06.35:083][  0]LogConfig: Set CVar [[r.LensFlareQuality:3]]
+[2026.11.10-05.06.35:083][  0]LogConfig: Set CVar [[r.Bloom.ScreenPercentage:100]]
+[2026.11.10-05.06.35:083][  0]LogConsoleManager: Warning: Setting the console variable 'r.LightShaftQuality' with 'SetByScalability' was ignored as it is lower priority than the previous 'SetByCode'. Value remains '1'
+[2026.11.10-05.06.35:085][  0]LogConfig: Set CVar [[r.DOF.Gather.ResolutionDivisor:1         ; do the gathering at full resolution]]
+[2026.11.10-05.06.35:085][  0]LogConfig: Set CVar [[r.DOF.Gather.EnableBokehSettings:1       ; bokeh simulation when gathering]]
+[2026.11.10-05.06.35:085][  0]LogConfig: Set CVar [[r.DOF.Gather.RingCount:5                 ; high number of samples when gathering]]
+[2026.11.10-05.06.35:086][  0]LogConfig: Set CVar [[r.DOF.Scatter.MaxSpriteRatio:0.25        ; only a maximum of 10% of scattered bokeh]]
+[2026.11.10-05.06.35:086][  0]LogConfig: Set CVar [[r.DOF.Recombine.Quality:2                ; highest slight out of focus]]
+[2026.11.10-05.06.35:087][  0]LogConfig: Set CVar [[r.DOF.Recombine.EnableBokehSettings:1    ; bokeh simulation on slight out of focus]]
+[2026.11.10-05.06.35:087][  0]LogConfig: Applying CVar settings from Section [TextureQuality@Cine] File [Scalability]
+[2026.11.10-05.06.35:088][  0]LogConfig: Set CVar [[r.Streaming.PoolSize:3000]]
+[2026.11.10-05.06.35:088][  0]LogConfig: Applying CVar settings from Section [EffectsQuality@Cine] File [Scalability]
+
+
+     JSBSim Flight Dynamics Model v1.2.4 Nov  4 2026 10:56:13[2026.11.10-05.06.35:088][  0]LogConsoleManager: Warning: Setting the console variable 'r.SSGI.Quality' with 'SetByScalability' was ignored as it is lower priority than the previous 'SetByCode'. Value remains '4'
+
+[2026.11.10-05.06.35:089][  0]LogConfig: Set CVar [[r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque:0]]
+            [JSBSim-ML v[2026.11.10-05.06.35:089][  0]LogConfig: Set CVar [[r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice:8]]
+2.0[2026.11.10-05.06.35:090][  0]LogConfig: Set CVar [[r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution:32.0]]
+]
+
+[2026.11.10-05.06.35:090][  0]LogConfig: Set CVar [[r.SkyAtmosphere.FastSkyLUT:0]]
+JSBSim startup beginning ...
+
+[2026.11.10-05.06.35:090][  0]LogConfig: Set CVar [[r.SkyAtmosphere.FastSkyLUT.SampleCountMax:256.0]]
+[2026.11.10-05.06.35:090][  0]LogConfig: Set CVar [[r.SkyAtmosphere.SampleCountMin:8.0]]
+[2026.11.10-05.06.35:092][  0]LogConfig: Set CVar [[r.SkyAtmosphere.SampleCountMax:256.0]]
+[2026.11.10-05.06.35:092][  0]LogConfig: Set CVar [[r.SkyAtmosphere.TransmittanceLUT.SampleCount:30.0]]
+[2026.11.10-05.06.35:092][  0]LogConfig: Set CVar [[r.SkyAtmosphere.MultiScatteringLUT.SampleCount:20.0]]
+[2026.11.10-05.06.35:093][  0]LogConfig: Set CVar [[fx.Niagara.QualityLevel:4]]
+[2026.11.10-05.06.35:093][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.ApplyFogInscattering:1]]
+[4m[2026.11.10-05.06.35:093][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.DownsampleFactor:1]]
+Reading Aircraft Configuration File[2026.11.10-05.06.35:094][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.MaxStepCount:1024]]
+[24m[2026.11.10-05.06.35:094][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.Shadows.Type:0]]
+: [2026.11.10-05.06.35:094][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.Shadows.Resolution:1024]]
+[1m[2026.11.10-05.06.35:095][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.Shadows.MaxSampleCount:16]]
+Su-27SK[2026.11.10-05.06.35:095][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.Shadows.Precision:1]]
+[22m[2026.11.10-05.06.35:095][  0]LogConfig: Set CVar [[r.HeterogeneousVolumes.UseExistenceMask:1]]
+
+[2026.11.10-05.06.35:096][  0]LogConfig: Set CVar [[r.Translucency.HeterogeneousVolumes.Type:0]]
+[2026.11.10-05.06.35:096][  0]LogConfig: Applying CVar settings from Section [FoliageQuality@Cine] File [Scalability]
+                            Version: [2026.11.10-05.06.35:096][  0]LogConfig: Applying CVar settings from Section [ShadingQuality@Cine] File [Scalability]
+[1m2.0[2026.11.10-05.06.35:097][  0]LogConfig: Set CVar [[r.HairStrands.SkyLighting.IntegrationType:1]]
+[22m[2026.11.10-05.06.35:097][  0]LogConfig: Set CVar [[r.HairStrands.SkyAO.SampleCount:8]]
+
+
+[2026.11.10-05.06.35:097][  0]LogConfig: Set CVar [[r.HairStrands.Visibility.MSAA.SamplePerPixel:8]]
+
+[2026.11.10-05.06.35:098][  0]LogConfig: Applying CVar settings from Section [LandscapeQuality@Cine] File [Scalability]
+[1mThis aircraft model is an [31m[2026.11.10-05.06.35:098][  0]LogFlightSimRender: Display: labels: object 'aircraft:J11:0' int_id 1 class_id 1 (primary): stencil on 1 mesh component(s)
+[2026.11.10-05.06.35:098][  0]LogFlightSimRender: Display: labels: object 'terrain' int_id 2 class_id 2 (scene): stencil on 19 mesh component(s)
+ALPHA[2026.11.10-05.06.35:098][  0]LogFlightSimRender: Display: labels: object 'payload:r27r_left:0' int_id 64 class_id 7 (component): stencil on 1 mesh component(s)
+[2026.11.10-05.06.35:098][  0]LogFlightSimRender: Display: labels: object 'payload:r27r_right:0' int_id 65 class_id 7 (component): stencil on 1 mesh component(s)
+[0m[2026.11.10-05.06.35:100][  0]LogFlightSimRender: Display: labels: object 'landing_gear:nose_gear:0' int_id 66 class_id 8 (component): stencil on 0 mesh component(s)
+[2026.11.10-05.06.35:100][  0]LogFlightSimRender: Display: labels: object 'landing_gear:left_main_gear:0' int_id 67 class_id 8 (component): stencil on 0 mesh component(s)
+[2026.11.10-05.06.35:100][  0]LogFlightSimRender: Display: labels: object 'landing_gear:right_main_gear:0' int_id 68 class_id 8 (component): stencil on 0 mesh component(s)
+[2026.11.10-05.06.35:101][  0]LogFlightSimRender: Display: labels: ID image (depth ownership, 7 objects, card objects[]), class image, depth as float32 and 16-bit (0.10 m/unit, saturating at 6553.5 m), one alone pass per aircraft; every label capture AA-free
+[2026.11.10-05.06.35:101][  0]LogLoad: Game class is 'GameModeBase'
+[1m release!!![2026.11.10-05.06.35:102][  0]LogWorld: Bringing World /Temp/Untitled_1.Untitled up for play (max tick rate 60) at 2026.11.10-00.06.35
+
+
+[2026.11.10-05.06.35:102][  0]LogWorld: Bringing up level for play took: 0.000469
+[2026.11.10-05.06.35:102][  0]LogJSBSim: Display: UJSBSimMovementComponent::LoadAircraft J11
+[2026.11.10-05.06.35:102][  0]LogJSBSim: Display: DeInitializeJSBSim
+[0m[2026.11.10-05.06.35:103][  0]LogJSBSim: Display: Initializing JSBSimFlightDynamicsModel using Data in 'C:/Users/kanth/flightsim/ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim'
+This aircraft model may not even properly load, and probably will not fly as expected.
+
+[31m[1mUse this model for development purposes ONLY!!![22m[0m
+
+  Description:   Models a Su-27SKM.
+  Model Author:  Yanes Bechir based on Aeromatic 0.95 output
+  Creation Date: 2016-08-23
+  Version:       $Revision: 0.03 $
+
+  Aircraft Metrics:
+    WingArea: 667.4300
+    WingSpan: 48.2300
+    Incidence: 2.0000
+    Chord: 13.8400
+    H. Tail Area: 133.4900
+    H. Tail Arm: 28.7400
+    V. Tail Area: 120.1400
+    V. Tail Arm: 28.7400
+    Eyepoint (x, y, z): 172.4500 , 0.0000 , 38.0000
+    Ref Pt (x, y, z): 517.3500 , 0.0000 , 0.0000
+    Visual Ref Pt (x, y, z): 0.0000 , 0.0000 , 0.0000
+
+  Mass and Balance:
+    baseIxx: 54859.0000 slug-ft2
+    baseIyy: 167365.0000 slug-ft2
+    baseIzz: 169937.0000 slug-ft2
+    baseIxy: -0.0000 slug-ft2
+    baseIxz: 0.0000 slug-ft2
+    baseIyz: -0.0000 slug-ft2
+    Empty Weight: 36118.0000 lbm
+    CG (x, y, z): 517.3500 , 0.0000 , -21.5600
+    Point Mass Object: 0.0000 lbs. at X, Y, Z (in.): 454.7244  0.0000  -15.9055
+    Point Mass Object: 0.0000 lbs. at X, Y, Z (in.): 629.9213  0.0000  -15.9055
+    Point Mass Object: 230.2100 lbs. at X, Y, Z (in.): 551.1811  -190.3937  -9.4488
+    Point Mass Object: 230.2100 lbs. at X, Y, Z (in.): 551.1811  190.3937  -9.4488
+    Point Mass Object: 0.0000 lbs. at X, Y, Z (in.): 582.6772  -255.5118  -0.7874
+    Point Mass Object: 0.0000 lbs. at X, Y, Z (in.): 582.6772  255.5118  -0.7874
+    Point Mass Object: 0.0000 lbs. at X, Y, Z (in.): 606.2992  -298.0315  6.1417
+    Point Mass Object: 0.0000 lbs. at X, Y, Z (in.): 606.2992  298.0315  6.1417
+    Point Mass Object: 0.0000 lbs. at X, Y, Z (in.): 533.4646  -48.6220  -52.1260
+    Point Mass Object: 0.0000 lbs. at X, Y, Z (in.): 533.4646  48.6220  -52.1260
+    Point Mass Object: 176.3698 lbs. at X, Y, Z (in.): 257.8740  0.0000  -15.9055
+    Point Mass Object: 8563.0000 lbs. at X, Y, Z (in.): 517.3500  0.0000  -21.5600
+
+  Ground Reactions: 
+    BOGEY NOSE
+      Location: 112.0900 , 0.0000 , -103.4700
+      Spring Constant:  22142.6700
+      Damping Constant: 1400.1200 (linear)
+      Rebound Damping Constant: 1400.1200 (linear)
+      Dynamic Friction: 0.5000
+      Static Friction:  0.8000
+      Rolling Friction: 0.0200
+      Steering Type:    STEERABLE
+      Grouping:         NONE
+      Max Steer Angle:  35.0000
+      Retractable:      1
+    BOGEY LEFT_MAIN
+      Location: 538.0400 , -52.0900 , -103.4700
+      Spring Constant:  67142.2500
+      Damping Constant: 33571.1200 (linear)
+      Rebound Damping Constant: 33571.1200 (linear)
+      Dynamic Friction: 0.5000
+      Static Friction:  0.8000
+      Rolling Friction: 0.0200
+      Steering Type:    FIXED
+      Grouping:         LEFT
+      Max Steer Angle:  0.0000
+      Retractable:      1
+    BOGEY RIGHT_MAIN
+      Location: 538.0400 , 52.0900 , -103.4700
+      Spring Constant:  67142.2500
+      Damping Constant: 33571.1200 (linear)
+      Rebound Damping Constant: 33571.1200 (linear)
+      Dynamic Friction: 0.5000
+      Static Friction:  0.8000
+      Rolling Friction: 0.0200
+      Steering Type:    FIXED
+      Grouping:         RIGHT
+      Max Steer Angle:  0.0000
+      Retractable:      1
+    STRUCTURE LEFT_WING
+      Location: 517.3500 , -24.1200 , -21.5600
+      Spring Constant:  67142.2500
+      Damping Constant: 67142.2500 (linear)
+      Rebound Damping Constant: 67142.2500 (linear)
+      Dynamic Friction: 1.0000
+      Static Friction:  1.0000
+    STRUCTURE RIGHT_WING
+      Location: 517.3500 , 24.1200 , -21.5600
+      Spring Constant:  67142.2500
+      Damping Constant: 67142.2500 (linear)
+      Rebound Damping Constant: 67142.2500 (linear)
+      Dynamic Friction: 1.0000
+      Static Friction:  1.0000
+
+    Declared properties
+
+      fcs/parachute_reef_pos_norm (initial value: 0.0000)
+
+
+  External Reactions: 
+    
+    Frame: BODY
+    Location: (0.0000, 0.0000, 0.0000)
+
+  Propulsion:
+       (FUEL) tank holds 7010.7000 lbs. FUEL
+      currently at 50.0000% of maximum capacity
+      Tank location (X, Y, Z): 260.3500, 0.0000, -21.5600
+      Effective radius: 0.0000 inches
+      Initial temperature: -9999.0000 Fahrenheit
+      Priority: 1
+       (FUEL) tank holds 9171.2300 lbs. FUEL
+      currently at 49.9999% of maximum capacity
+      Tank location (X, Y, Z): 517.3500, 0.0000, -21.5600
+      Effective radius: 0.0000 inches
+      Initial temperature: -9999.0000 Fahrenheit
+      Priority: 1
+       (FUEL) tank holds 1168.4500 lbs. FUEL
+      currently at 49.9996% of maximum capacity
+      Tank location (X, Y, Z): 517.3500, -137.0000, -21.5600
+      Effective radius: 0.0000 inches
+      Initial temperature: -9999.0000 Fahrenheit
+      Priority: 1
+       (FUEL) tank holds 1168.4500 lbs. FUEL
+      currently at 49.9996% of maximum capacity
+      Tank location (X, Y, Z): 517.3500, 137.0000, -21.5600
+      Effective radius: 0.0000 inches
+      Initial temperature: -9999.0000 Fahrenheit
+      Priority: 1
+       (FUEL) tank holds 2204.6200 lbs. FUEL
+      currently at 50.0000% of maximum capacity
+      Tank location (X, Y, Z): 669.2900, 0.0000, -21.5600
+      Effective radius: 0.0000 inches
+      Initial temperature: -9999.0000 Fahrenheit
+      Priority: 1
+    2 dimensional table with 6 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	0.0430	0.0488	0.0528	0.0694	0.0899	0.1183	0.1467	0.0000	
+	0.2000	0.0500	0.0501	0.0335	0.0544	0.0797	0.1049	0.1342	0.0000	
+	0.4000	0.0040	0.0047	0.0020	0.0272	0.0595	0.0891	0.1203	0.0000	
+	0.6000	0.0000	0.0000	0.0000	0.0000	0.0276	0.0718	0.1073	0.0000	
+	0.8000	0.0000	0.0000	0.0000	0.0000	0.0474	0.0868	0.0900	0.0000	
+	1.0000	0.0000	0.0000	0.0000	0.0000	0.0000	0.0552	0.0800	0.0000	
+    Function: propulsion/engine[0]/IdleThrust
+    2 dimensional table with 8 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	1.2600	1.0000	0.7400	0.5340	0.3720	0.2410	0.1490	0.0000	
+	0.2000	1.1710	0.9340	0.6970	0.5060	0.3550	0.2310	0.1430	0.0000	
+	0.4000	1.1500	0.9210	0.6920	0.5060	0.3570	0.2330	0.1450	0.0000	
+	0.6000	1.1810	0.9510	0.7210	0.5320	0.3780	0.2480	0.1540	0.0000	
+	0.8000	1.2580	1.0200	0.7820	0.5820	0.4170	0.2750	0.1700	0.0000	
+	1.0000	1.3690	1.1200	0.8710	0.6510	0.4750	0.3150	0.1950	0.0000	
+	1.2000	1.4850	1.2300	0.9750	0.7440	0.5450	0.3640	0.2250	0.0000	
+	1.4000	1.5941	1.3400	1.0860	0.8450	0.6280	0.4240	0.2630	0.0000	
+    Function: propulsion/engine[0]/MilThrust
+    2 dimensional table with 14 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	1.1816	1.0000	0.8184	0.6627	0.5280	0.3756	0.2327	0.0000	
+	0.2000	1.1308	0.9599	0.7890	0.6406	0.5116	0.3645	0.2258	0.0000	
+	0.4000	1.1150	0.9474	0.7798	0.6340	0.5070	0.3615	0.2240	0.0000	
+	0.6000	1.1284	0.9589	0.7894	0.6420	0.5134	0.3661	0.2268	0.0000	
+	0.8000	1.1707	0.9942	0.8177	0.6647	0.5309	0.3784	0.2345	0.0000	
+	1.0000	1.2411	1.0529	0.8648	0.7017	0.5596	0.3983	0.2467	0.0000	
+	1.2000	1.3287	1.1254	0.9221	0.7462	0.5936	0.4219	0.2614	0.0000	
+	1.4000	1.4365	1.2149	0.9933	0.8021	0.6360	0.4509	0.2794	0.0000	
+	1.6000	1.5711	1.3260	1.0809	0.8700	0.6874	0.4860	0.3011	0.0000	
+	1.8000	1.7301	1.4579	1.1857	0.9512	0.7495	0.5289	0.3277	0.0000	
+	2.0000	1.8314	1.5700	1.3086	1.0474	0.8216	0.5786	0.3585	0.0000	
+	2.2000	1.9700	1.6900	1.4100	1.2400	0.9100	0.6359	0.3940	0.0000	
+	2.4000	2.0700	1.8000	1.5300	1.3400	1.0000	0.7200	0.4600	0.0000	
+	2.6000	2.2000	1.9200	1.6400	1.4400	1.1000	0.8000	0.5200	0.0000	
+    Function: propulsion/engine[0]/AugThrust
+
+In file C:/Users/kanth/flightsim/ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/aircraft/J11/J11.xml: line 312
+Engine location ignored, only thruster location is used.
+
+In file C:/Users/kanth/flightsim/ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/aircraft/J11/J11.xml: line 317
+Engine orientation ignored, only thruster orientation is used.
+      X = 802.2500
+      Y = -20.0000
+      Z = 0.0000
+      Pitch = 0.0000 degrees
+      Yaw = 0.0000 degrees
+    2 dimensional table with 6 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	0.0430	0.0488	0.0528	0.0694	0.0899	0.1183	0.1467	0.0000	
+	0.2000	0.0500	0.0501	0.0335	0.0544	0.0797	0.1049	0.1342	0.0000	
+	0.4000	0.0040	0.0047	0.0020	0.0272	0.0595	0.0891	0.1203	0.0000	
+	0.6000	0.0000	0.0000	0.0000	0.0000	0.0276	0.0718	0.1073	0.0000	
+	0.8000	0.0000	0.0000	0.0000	0.0000	0.0474	0.0868	0.0900	0.0000	
+	1.0000	0.0000	0.0000	0.0000	0.0000	0.0000	0.0552	0.0800	0.0000	
+    Function: propulsion/engine[1]/IdleThrust
+    2 dimensional table with 8 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	1.2600	1.0000	0.7400	0.5340	0.3720	0.2410	0.1490	0.0000	
+	0.2000	1.1710	0.9340	0.6970	0.5060	0.3550	0.2310	0.1430	0.0000	
+	0.4000	1.1500	0.9210	0.6920	0.5060	0.3570	0.2330	0.1450	0.0000	
+	0.6000	1.1810	0.9510	0.7210	0.5320	0.3780	0.2480	0.1540	0.0000	
+	0.8000	1.2580	1.0200	0.7820	0.5820	0.4170	0.2750	0.1700	0.0000	
+	1.0000	1.3690	1.1200	0.8710	0.6510	0.4750	0.3150	0.1950	0.0000	
+	1.2000	1.4850	1.2300	0.9750	0.7440	0.5450	0.3640	0.2250	0.0000	
+	1.4000	1.5941	1.3400	1.0860	0.8450	0.6280	0.4240	0.2630	0.0000	
+    Function: propulsion/engine[1]/MilThrust
+    2 dimensional table with 14 rows, 8 columns.
+		-10000.0000	0.0000	10000.0000	20000.0000	30000.0000	40000.0000	50000.0000	60000.0000	
+	0.0000	1.1816	1.0000	0.8184	0.6627	0.5280	0.3756	0.2327	0.0000	
+	0.2000	1.1308	0.9599	0.7890	0.6406	0.5116	0.3645	0.2258	0.0000	
+	0.4000	1.1150	0.9474	0.7798	0.6340	0.5070	0.3615	0.2240	0.0000	
+	0.6000	1.1284	0.9589	0.7894	0.6420	0.5134	0.3661	0.2268	0.0000	
+	0.8000	1.1707	0.9942	0.8177	0.6647	0.5309	0.3784	0.2345	0.0000	
+	1.0000	1.2411	1.0529	0.8648	0.7017	0.5596	0.3983	0.2467	0.0000	
+	1.2000	1.3287	1.1254	0.9221	0.7462	0.5936	0.4219	0.2614	0.0000	
+	1.4000	1.4365	1.2149	0.9933	0.8021	0.6360	0.4509	0.2794	0.0000	
+	1.6000	1.5711	1.3260	1.0809	0.8700	0.6874	0.4860	0.3011	0.0000	
+	1.8000	1.7301	1.4579	1.1857	0.9512	0.7495	0.5289	0.3277	0.0000	
+	2.0000	1.8314	1.5700	1.3086	1.0474	0.8216	0.5786	0.3585	0.0000	
+	2.2000	1.9700	1.6900	1.4100	1.2400	0.9100	0.6359	0.3940	0.0000	
+	2.4000	2.0700	1.8000	1.5300	1.3400	1.0000	0.7200	0.4600	0.0000	
+	2.6000	2.2000	1.9200	1.6400	1.4400	1.1000	0.8000	0.5200	0.0000	
+    Function: propulsion/engine[1]/AugThrust
+
+In file C:/Users/kanth/flightsim/ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/aircraft/J11/J11.xml: line 338
+Engine location ignored, only thruster location is used.
+
+In file C:/Users/kanth/flightsim/ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/aircraft/J11/J11.xml: line 343
+Engine orientation ignored, only thruster orientation is used.
+      X = 802.2500
+      Y = 20.0000
+      Z = 0.0000
+      Pitch = 0.0000 degrees
+      Yaw = 0.0000 degrees
+
+    Declared properties
+
+      /controls/engines/engine/fuel-pump (initial value: 1.0000)
+
+      /controls/engines/engine[1]/fuel-pump (initial value: 1.0000)
+
+      propulsion/tank[0]/collector-valve (initial value: 1.0000)
+
+      propulsion/tank[2]/collector-valve (initial value: 1.0000)
+
+      propulsion/tank[3]/collector-valve (initial value: 1.0000)
+
+      propulsion/tank[4]/collector-valve (initial value: 1.0000)
+
+    Function: propulsion/tank[4]/tnk0-qt
+
+  System: Fuel
+
+[1m[34m    Channel [22mFuel pumping[0m
+
+    Loading Component "Tank0to collector" of type: SWITCH
+      Switch default value is: constant value -7.000000
+      Switch takes test 1 value (constant value 0.000000)
+      if any of the following are true: {
+        fuel-pump EQ constant value 0.000000
+        fuel-pump EQ constant value 0.000000
+        collector-valve EQ constant value 0.000000
+        contents-lbs LE constant value 0.000000
+        contents-lbs GE constant value 9170.230000
+        Nz LE constant value -0.500000
+      }
+      OUTPUT: external-flow-rate-pps
+      OUTPUT: tank0to-collector
+
+    Loading Component "Tank2to collector" of type: SWITCH
+      Switch default value is: constant value -7.000000
+      Switch takes test 1 value (constant value 0.000000)
+      if any of the following are true: {
+        fuel-pump EQ constant value 0.000000
+        fuel-pump EQ constant value 0.000000
+        contents-lbs GE constant value 1.000000
+        contents-lbs GE constant value 1.000000
+        collector-valve EQ constant value 0.000000
+        contents-lbs LE constant value 0.000000
+        contents-lbs GE constant value 9170.230000
+        Nz LE constant value -0.500000
+      }
+      OUTPUT: external-flow-rate-pps
+      OUTPUT: tank2to-collector
+
+    Loading Component "Tank3to collector" of type: SWITCH
+      Switch default value is: constant value -7.000000
+      Switch takes test 1 value (constant value 0.000000)
+      if any of the following are true: {
+        fuel-pump EQ constant value 0.000000
+        fuel-pump EQ constant value 0.000000
+        contents-lbs GE constant value 1.000000
+        contents-lbs GE constant value 1.000000
+        collector-valve EQ constant value 0.000000
+        contents-lbs LE constant value 0.000000
+        contents-lbs GE constant value 9170.230000
+        Nz LE constant value -0.500000
+      }
+      OUTPUT: external-flow-rate-pps
+      OUTPUT: tank3to-collector
+
+    Loading Component "Tank4to collector" of type: SWITCH
+      Switch default value is: constant value -7.000000
+      Switch takes test 1 value (constant value 0.000000)
+      if any of the following are true: {
+        fuel-pump EQ constant value 0.000000
+        fuel-pump EQ constant value 0.000000
+        tnk0-qt LE constant value 0.570000
+        collector-valve EQ constant value 0.000000
+        contents-lbs LE constant value 0.000000
+        contents-lbs GE constant value 9170.230000
+        Nz LE constant value -0.500000
+      }
+      OUTPUT: external-flow-rate-pps
+      OUTPUT: tank4to-collector
+
+    Loading Component "" of type: SUMMER
+      INPUTS: 
+       -external-flow-rate-pps
+       -external-flow-rate-pps
+       -external-flow-rate-pps
+       -external-flow-rate-pps
+      OUTPUT: external-flow-rate-pps
+      OUTPUT: fcs
+
+    Declared properties
+
+      systems/engines/emerdisable_afterburning (initial value: 0.0000)
+
+      systems/engines/cmd_t_L (initial value: 1.0000)
+
+      systems/engines/cmd_t_R (initial value: 1.0000)
+
+      fcs/yaw-damper-enable (initial value: 1.0000)
+
+      fcs/parachute_reef-cmd-norm (initial value: 0.0000)
+
+      fcs/parachute/drop_cmd (initial value: 0.0000)
+
+
+  FCS: FCS: Su-27SK
+
+[1m[34m    Channel [22mThrottle Control[0m
+
+    Loading Component "Throttle1" of type: SCHEDULED_GAIN
+    1 dimensional table with 6 rows.
+	0.0000	0.0000	
+	0.0685	0.0000	
+	0.0720	0.0000	
+	0.8280	1.0000	
+	0.8320	1.0000	
+	1.0000	2.0000	
+      INPUT: cmd_t_L
+      GAIN: constant value 1.000000
+      OUTPUT: throttle1-pos-norm
+      OUTPUT: throttle1
+      Scheduled by table: 
+    1 dimensional table with 6 rows.
+	0.0000	0.0000	
+	0.0685	0.0000	
+	0.0720	0.0000	
+	0.8280	1.0000	
+	0.8320	1.0000	
+	1.0000	2.0000	
+
+    Loading Component "Throttle2" of type: SCHEDULED_GAIN
+    1 dimensional table with 6 rows.
+	0.0000	0.0000	
+	0.0685	0.0000	
+	0.0720	0.0000	
+	0.8280	1.0000	
+	0.8320	1.0000	
+	1.0000	2.0000	
+      INPUT: cmd_t_R
+      GAIN: constant value 1.000000
+      OUTPUT: throttle2-pos-norm
+      OUTPUT: throttle2
+      Scheduled by table: 
+    1 dimensional table with 6 rows.
+	0.0000	0.0000	
+	0.0685	0.0000	
+	0.0720	0.0000	
+	0.8280	1.0000	
+	0.8320	1.0000	
+	1.0000	2.0000	
+
+    Loading Component "calculations/throttle1-pos-norm" of type: SWITCH
+      Switch default value is: throttle1-pos-norm
+      Switch takes test 1 value (throttle-cmd-norm)
+      if all of the following are true: {
+        emerdisable_afterburning eq constant value 1.000000
+      }
+      OUTPUT: throttle-pos-norm
+      OUTPUT: throttle1-pos-norm
+
+    Loading Component "calculations/throttle2-pos-norm" of type: SWITCH
+      Switch default value is: throttle2-pos-norm
+      Switch takes test 1 value (throttle-cmd-norm)
+      if all of the following are true: {
+        emerdisable_afterburning eq constant value 1.000000
+      }
+      OUTPUT: throttle-pos-norm
+      OUTPUT: throttle2-pos-norm
+
+[1m[34m    Channel [22mPitch[0m
+
+    Loading Component "Pitch Trim Sum" of type: SUMMER
+      Minimum limit: constant value -1.000000
+      Maximum limit: constant value 1.000000
+      INPUTS: 
+       elevator-cmd-norm
+       pitch-trim-cmd-norm
+      OUTPUT: pitch-trim-sum
+
+    Loading Component "Elevator Control" of type: AEROSURFACE_SCALE
+      INPUT: pitch-trim-sum
+      GAIN: constant value 1.000000
+      OUTPUT: elevator-pos-rad
+      OUTPUT: elevator-control
+      In/Out Mapping:
+        Input MIN: -1.0000
+        Input MAX: 1.0000
+        Output MIN: -0.5000
+        Output MAX: 0.5000
+
+    Loading Component "elevator normalization" of type: AEROSURFACE_SCALE
+      INPUT: elevator-pos-rad
+      GAIN: constant value 1.000000
+      OUTPUT: elevator-pos-norm
+      OUTPUT: elevator-normalization
+      In/Out Mapping:
+        Input MIN: -0.5000
+        Input MAX: 0.5000
+        Output MIN: -1.0000
+        Output MAX: 1.0000
+
+[1m[34m    Channel [22mRoll[0m
+
+    Loading Component "Roll Trim Sum" of type: SUMMER
+      Minimum limit: constant value -1.000000
+      Maximum limit: constant value 1.000000
+      INPUTS: 
+       aileron-cmd-norm
+       roll-trim-cmd-norm
+      OUTPUT: roll-trim-sum
+
+    Loading Component "Left Aileron Control" of type: AEROSURFACE_SCALE
+      INPUT: roll-trim-sum
+      GAIN: constant value 1.000000
+      OUTPUT: left-aileron-pos-rad
+      OUTPUT: left-aileron-control
+      In/Out Mapping:
+        Input MIN: -1.0000
+        Input MAX: 1.0000
+        Output MIN: -0.3500
+        Output MAX: 0.3500
+
+    Loading Component "Right Aileron Control" of type: AEROSURFACE_SCALE
+      INPUT: roll-trim-sum
+      GAIN: constant value 1.000000
+      OUTPUT: right-aileron-pos-rad
+      OUTPUT: right-aileron-control
+      In/Out Mapping:
+        Input MIN: -1.0000
+        Input MAX: 1.0000
+        Output MIN: -0.3500
+        Output MAX: 0.3500
+
+    Loading Component "left aileron normalization" of type: AEROSURFACE_SCALE
+      INPUT: left-aileron-pos-rad
+      GAIN: constant value 1.000000
+      OUTPUT: left-aileron-pos-norm
+      OUTPUT: left-aileron-normalization
+      In/Out Mapping:
+        Input MIN: -0.3500
+        Input MAX: 0.3500
+        Output MIN: -1.0000
+        Output MAX: 1.0000
+
+    Loading Component "right aileron normalization" of type: AEROSURFACE_SCALE
+      INPUT: right-aileron-pos-rad
+      GAIN: constant value 1.000000
+      OUTPUT: right-aileron-pos-norm
+      OUTPUT: right-aileron-normalization
+      In/Out Mapping:
+        Input MIN: -0.3500
+        Input MAX: 0.3500
+        Output MIN: -1.0000
+        Output MAX: 1.0000
+
+[1m[34m    Channel [22mYaw[0m
+
+    Loading Component "Rudder Command Sum" of type: SUMMER
+      Minimum limit: constant value -1.000000
+      Maximum limit: constant value 1.000000
+      INPUTS: 
+       rudder-cmd-norm
+       yaw-trim-cmd-norm
+      OUTPUT: rudder-command-sum
+
+    Loading Component "Yaw Damper Rate" of type: SCHEDULED_GAIN
+    1 dimensional table with 2 rows.
+	30.0000	0.0000	
+	60.0000	2.0000	
+      INPUT: r-aero-rad_sec
+      GAIN: yaw-damper-enable
+      OUTPUT: yaw-damper-rate
+      Scheduled by table: 
+    1 dimensional table with 2 rows.
+	30.0000	0.0000	
+	60.0000	2.0000	
+
+    Loading Component "Rudder Sum" of type: SUMMER
+      Minimum limit: constant value -1.100000
+      Maximum limit: constant value 1.100000
+      INPUTS: 
+       rudder-command-sum
+       yaw-damper-rate
+      OUTPUT: rudder-sum
+
+    Loading Component "Rudder Control" of type: AEROSURFACE_SCALE
+      INPUT: rudder-sum
+      GAIN: constant value 1.000000
+      OUTPUT: rudder-pos-rad
+      OUTPUT: rudder-control
+      In/Out Mapping:
+        Input MIN: -1.1000
+        Input MAX: 1.1000
+        Output MIN: -0.3500
+        Output MAX: 0.3500
+
+    Loading Component "rudder normalization" of type: AEROSURFACE_SCALE
+      INPUT: rudder-pos-rad
+      GAIN: constant value 1.000000
+      OUTPUT: rudder-pos-norm
+      OUTPUT: rudder-normalization
+      In/Out Mapping:
+        Input MIN: -0.3500
+        Input MAX: 0.3500
+        Output MIN: -1.0000
+        Output MAX: 1.0000
+
+[1m[34m    Channel [22mFlaps[0m
+
+    Loading Component "Flaps Control" of type: KINEMATIC
+      INPUT: flap-cmd-norm
+      DETENTS: 3
+        0.0000 0.0000
+        15.0000 4.0000
+        30.0000 3.0000
+      OUTPUT: flap-pos-deg
+      OUTPUT: flaps-control
+
+    Loading Component "flap normalization" of type: AEROSURFACE_SCALE
+      INPUT: flap-pos-deg
+      GAIN: constant value 1.000000
+      OUTPUT: flap-pos-norm
+      OUTPUT: flap-normalization
+      In/Out Mapping:
+        Input MIN: 0.0000
+        Input MAX: 30.0000
+        Output MIN: 0.0000
+        Output MAX: 1.0000
+
+[1m[34m    Channel [22mLanding Gear[0m
+
+    Loading Component "Gear Control" of type: KINEMATIC
+      INPUT: gear-cmd-norm
+      DETENTS: 2
+        0.0000 0.0000
+        1.0000 5.0000
+      OUTPUT: gear-pos-norm
+      OUTPUT: gear-control
+
+[1m[34m    Channel [22mSpeedbrake[0m
+
+    Loading Component "Speedbrake Control" of type: KINEMATIC
+      INPUT: speedbrake-cmd-norm
+      DETENTS: 2
+        0.0000 0.0000
+        1.0000 1.0000
+      OUTPUT: speedbrake-pos-norm
+      OUTPUT: speedbrake-control
+
+[1m[34m    Channel [22mDrag Parachute[0m
+
+    Loading Component "Parachute Control" of type: KINEMATIC
+      INPUT: parachute_reef-cmd-norm
+      DETENTS: 2
+        0.0000 0.0000
+        1.0000 0.9000
+      OUTPUT: parachute_reef_pos
+      OUTPUT: parachute-control
+
+    Loading Component "systems/parachute/release_drop" of type: SWITCH
+      Switch default value is: parachute_reef_pos
+      Switch takes test 1 value (constant value 0.000000)
+      if all of the following are true: {
+        parachute_reef_pos eq constant value 1.000000
+        drop_cmd eq constant value 1.000000
+      }
+      Switch takes test 2 value (constant value 0.000000)
+      if all of the following are true: {
+        parachute_reef_pos eq constant value 1.000000
+        vc-fps gt constant value 514.413823
+      }
+      OUTPUT: parachute_reef_pos_norm
+      OUTPUT: release_drop
+
+  Aerodynamics (Lift|Side|Drag axes):
+
+    1 dimensional table with 5 rows.
+	-0.2000	-0.6400	
+	0.0000	0.1200	
+	0.0870	0.4600	
+	0.2600	1.1200	
+	0.6000	0.4480	
+    Function: aero/force/Lift_alpha
+    Function: aero/force/Lift_flap
+    Function: aero/force/Lift_speedbrake
+    Function: aero/force/Lift_elevator
+    1 dimensional table with 5 rows.
+	-1.5700	0.8400	
+	-0.2600	0.0160	
+	0.0000	0.0067	
+	0.2600	0.0120	
+	1.5700	0.6400	
+    Function: aero/force/Drag_basic
+    Function: aero/force/Drag_induced
+    1 dimensional table with 4 rows.
+	0.0000	0.0000	
+	0.8100	0.0000	
+	1.1000	0.0230	
+	1.8000	0.0150	
+    Function: aero/force/Drag_mach
+    Function: aero/force/Drag_flap
+    Function: aero/force/Drag_gear
+    Function: aero/force/Drag_speedbrake
+    1 dimensional table with 5 rows.
+	-1.5700	1.2300	
+	-0.2600	0.0500	
+	0.0000	0.0000	
+	0.2600	0.0500	
+	1.5700	1.2300	
+    Function: aero/force/Drag_beta
+    Function: aero/force/Drag_elevator
+    Function: aero/force/Side_beta
+    Function: aero/moment/Roll_beta
+    Function: aero/moment/Roll_damp
+    Function: aero/moment/Roll_yaw
+    Function: aero/moment/Roll_aileron
+    Function: aero/moment/Roll_rudder
+    Function: aero/moment/Pitch_alpha
+    1 dimensional table with 2 rows.
+	0.0000	-1.1000	
+	2.0000	-0.4000	
+    Function: aero/moment/Pitch_elevator
+    Function: aero/moment/Pitch_damp
+    Function: aero/moment/Pitch_alphadot
+    Function: aero/moment/Yaw_beta
+    Function: aero/moment/Yaw_damp
+    Function: aero/moment/Yaw_rudder
+    Function: aero/moment/Yaw_aileron
+[2026.11.10-05.06.35:127][  0]LogJSBSim: Display: Model J11 Loaded successfully !
+
+[34m[1m  Mass Properties Report (English units: lbf, in, slug-ft^2)[0m
+                                  [2026.11.10-05.06.35:127][  0]LogJSBSim: Display: PrepareJSBSim - Setting Initial Conditiond and computing initial state
+[4m    Weight    CG-X    CG-Y    CG-Z         Ixx         Iyy         Izz         Ixy         Ixz         Iyz[24m
+[1m    Base Vehicle                  [22m     36118.0   517.4     0.0   -21.6     54859.0    167365.0    169937.0        -0.0         0.0        -0.0
+[1m0   pylon0-load                   [22m         0.0   454.7     0.0   -15.9         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m1   pylon1-load                   [22m         0.0   629.9     0.0   -15.9         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m2   pylon2-load                   [22m       230.2   551.2  -190.4    -9.4         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m3   pylon3-load                   [22m       230.2   551.2   190.4    -9.4         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m4   pylon4-load                   [22m         0.0   582.7  -255.5    -0.8         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m5   pylon5-load                   [22m         0.0   582.7   255.5    -0.8         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m6   pylon6-load                   [22m         0.0   606.3  -298.0     6.1         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m7   pylon7-load                   [22m         0.0   606.3   298.0     6.1         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m8   pylon8-load                   [22m         0.0   533.5   -48.6   -52.1         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m9   pylon9-load                   [22m         0.0   533.5    48.6   -52.1         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m10  pilot                         [22m       176.4   257.9     0.0   -15.9         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m11  Payload                       [22m      8563.0   517.4     0.0   -21.6         0.0         0.0         0.0        -0.0         0.0        -0.0
+[1m0   Fuel                          [22m     3505.35  260.35       0  -21.56           0           0           0
+[1m1   Fuel                          [22m     4585.61  517.35       0  -21.56           0           0           0
+[1m2   Fuel                          [22m      584.22  517.35    -137  -21.56           0           0           0
+[1m3   Fuel                          [22m      584.22  517.35     137  -21.56           0           0           0
+[1m4   Fuel                          [22m     1102.31  669.29       0  -21.56           0           0           0
+    [4m                                                                                                                                        [24m
+[1m    Total:                           55679.5   503.6     0.0   -21.4     63210.5    223262.1    234154.4         0.0        -4.3         0.0[22m
+
+[34m[1mEnd of vehicle configuration loading.
+-------------------------------------------------------------------------------[0m
+  Full Trim
+
+  Trim successful
+
+[34m------------------------------------------------------------------[0m
+[1mState Report at sim time: 0.000000 seconds[0m
+  [4mPosition[24m
+    ECI:   [2026.11.10-05.06.35:137][  0]LogJSBSim: Display: Trim Complete
+-6343504.880391135, -15700725.53403821, 12261183.40321418 (x,y,z, in ft)
+    ECEF:  -6343504.880391 , -15700725.534038 , 12261183.403214 (x,y,z, in ft)
+    Local: 36.090000, -112.000000, 5249.343832 (geodetic lat, lon, alt ASL in deg and ft)
+
+  [4mOrientation[24m
+    ECI:   159.737071474007, -52.64581075843861, 93.24198343128138 (phi, theta, psi in deg)
+    Local: -0.09880684747844569, 1.418453367156265, 344.9999999999998 (phi, theta, psi in deg)
+
+  [4mVelocity[24m
+    ECI:   1127.915834145586, -66.3488932048906, 495.2459968397137 (x,y,z in ft/s)
+    ECEF:  -16.99912763084418, 396.2267777038435, 495.2459968397137 (x,y,z in ft/s)
+    Local: 612.857825 , -164.190480 , -0.000100 (n,e,d in ft/sec)
+    Body:  634.276405 , -0.003633 , 15.705705 (u,v,w in ft/sec)
+
+  [4mBody Rates (relative to given frame, expressed in body frame)[24m
+    ECI:   0.003321151098640461, 0.0008779456842809367, -0.002378123253733527 (p,q,r in deg/s)
+    ECEF:  0, 0, 0 (p,q,r in deg/s)
+[2026.11.10-05.06.35:138][  0]LogCesium: Warning: "Enable World Bounds Checks" in the world settings is currently enabled. Please consider disabling it to avoid potential issues.
+  Longitudinal Trim[2026.11.10-05.06.35:138][  0]LogCesium: Loading tileset for asset ID 2275207
+
+[2026.11.10-05.06.35:138][  0]LogCesium: Loading tileset for asset ID 2275207 done
+[2026.11.10-05.06.35:138][  0]LogScript: Warning: Script Msg: No game viewport was found.
+
+  Trim successful
+  Trim Results: 
+       Angle of Attack:   1.42  wdot:  5.84e-04 Tolerance: 1e-03  Passed
+              Throttle:   0.34  udot: -1.70e-04 Tolerance: 1e-03  Passed
+            Pitch Trim:  -0.04  qdot: -1.19e-08 Tolerance: 1e-04  Passed
+[2026.11.10-05.06.35:142][  0]LogFlightSimScenario: Display: re-trimmed in still air (tLongitudinal)
+[2026.11.10-05.06.35:142][  0]LogFlightSimScenario: Display: AGL check against the collision raster: elevation under the start point 1340.2 m (spec's flat value 1340.0 m)
+[2026.11.10-05.06.35:143][  0]LogFlightSimScenario: Display: trimmed state
+[2026.11.10-05.06.35:143][  0]LogFlightSimScenario: Display:   altitude 1600.000 m  CAS 350.000 kt  heading 345.000 deg  AGL 259.8 m  36.090000/-112.000000
+[2026.11.10-05.06.35:143][  0]LogFlightSimScenario: Display:   engine 0  throttle 0.339013  mixture 1.000000
+[2026.11.10-05.06.35:143][  0]LogFlightSimScenario: Display:   engine 1  throttle 0.339013  mixture 1.000000
+[2026.11.10-05.06.35:144][  0]LogFlightSimScenario: Display:   latched  elevator 0.000000  pitch trim -0.044450  aileron 0.000000  rudder -0.000000  gear 0.0
+[2026.11.10-05.06.35:144][  0]LogFlightSimRender: Display: waiting for shader compilation
+[2026.11.10-05.06.35:144][  0]LogFlightSimWeather: Display: cloud VolumetricCloudComponent (VolumetricCloud_0): /Temp/Untitled_1.Untitled:PersistentLevel.VolumetricCloud_0.VolumetricCloudComponent.MID_M_FlightSimCloudLayers_0, domain 3, used_with_volumetric_cloud yes, compiled
+[2026.11.10-05.06.35:145][  0]LogFlightSimRender: Display: warm-up: 16 captures (capture watchdog 900 s)
+[2026.11.10-05.06.35:153][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:268][  0]LogFlightSimRender: Display: warm-up capture 1/16 done
+[2026.11.10-05.06.35:268][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:305][  0]LogFlightSimRender: Display: warm-up capture 2/16 done
+[2026.11.10-05.06.35:305][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:309][  0]LogFlightSimRender: Display: warm-up capture 3/16 done
+[2026.11.10-05.06.35:309][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:313][  0]LogFlightSimRender: Display: warm-up capture 4/16 done
+[2026.11.10-05.06.35:313][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:317][  0]LogFlightSimRender: Display: warm-up capture 5/16 done
+[2026.11.10-05.06.35:318][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:322][  0]LogFlightSimRender: Display: warm-up capture 6/16 done
+[2026.11.10-05.06.35:322][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:326][  0]LogFlightSimRender: Display: warm-up capture 7/16 done
+[2026.11.10-05.06.35:326][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:331][  0]LogFlightSimRender: Display: warm-up capture 8/16 done
+[2026.11.10-05.06.35:331][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:335][  0]LogFlightSimRender: Display: warm-up capture 9/16 done
+[2026.11.10-05.06.35:335][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:339][  0]LogFlightSimRender: Display: warm-up capture 10/16 done
+[2026.11.10-05.06.35:339][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:343][  0]LogFlightSimRender: Display: warm-up capture 11/16 done
+[2026.11.10-05.06.35:343][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:347][  0]LogFlightSimRender: Display: warm-up capture 12/16 done
+[2026.11.10-05.06.35:348][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:352][  0]LogFlightSimRender: Display: warm-up capture 13/16 done
+[2026.11.10-05.06.35:352][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:356][  0]LogFlightSimRender: Display: warm-up capture 14/16 done
+[2026.11.10-05.06.35:356][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:360][  0]LogFlightSimRender: Display: warm-up capture 15/16 done
+[2026.11.10-05.06.35:360][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.10-05.06.35:364][  0]LogFlightSimRender: Display: warm-up capture 16/16 done
+[2026.11.10-05.06.35:364][  0]LogFlightSimRender: Display: warm-up done
+[2026.11.10-05.06.35:364][  0]LogFlightSimRender: Display: sky capture switches: tiles shown, primitives shown
+[2026.11.10-05.06.35:364][  0]LogFlightSimRender: Display: sky capture switches: start-frame before, at aircraft, clouds shown, beauty-only actors shown
+[2026.11.10-05.06.35:365][  0]LogFlightSimRender: Display: velocity frame: start
+[2026.11.10-05.06.35:365][  0]LogFlightSimRender: Display: velocity frame: done
+[2026.11.10-05.06.35:365][  0]LogFlightSimRender: Display: sky light capture: start (0 components hidden for it)
+[2026.11.10-05.08.29:302][  0]LogDerivedDataCache: C:/Users/kanth/AppData/Local/UnrealEngine/Common/DerivedDataCache: Maintenance finished in +00:00:00.003 and deleted 0 files with total size 0 MiB and 0 empty folders. Scanned 0 files in 1 folders with total size 0 MiB.
+[2026.11.10-05.15.22:599][  0]LogStats: FPlatformStackWalk::StackWalkAndDump -  0.075 s
+[2026.11.10-05.15.22:599][  0]LogOutputDevice: Error: === Handled ensure: ===
+[2026.11.10-05.15.22:599][  0]LogOutputDevice: Error: 
+[2026.11.10-05.15.22:599][  0]LogOutputDevice: Error: Ensure condition failed: IsInGameThread() || IsInAsyncLoadingThread()  [File:D:\build\++UE5\Sync\LocalInstall\Engine\Source\Editor\UnrealEd\Public\TickableEditorObject.h] [Line: 51] 
+[2026.11.10-05.15.22:599][  0]LogOutputDevice: Error: 
+[2026.11.10-05.15.22:599][  0]LogOutputDevice: Error: Stack: 
+[2026.11.10-05.15.22:600][  0]LogOutputDevice: Error: [Callstack] 0x000002ec36656135 UnrealEditor-MegascansPlugin.dll!`FTCPServer::FTCPServer'::`2'::`dynamic atexit destructor for 'PackageImporter''() []
+[2026.11.10-05.15.22:600][  0]LogOutputDevice: Error: [Callstack] 0x00007ffdcbf29c85 ucrtbase.dll!UnknownFunction []
+[2026.11.10-05.15.22:600][  0]LogOutputDevice: Error: [Callstack] 0x00007ffdcbf298a7 ucrtbase.dll!UnknownFunction []
+[2026.11.10-05.15.22:600][  0]LogOutputDevice: Error: [Callstack] 0x00007ffdcbf2985d ucrtbase.dll!UnknownFunction []
+[2026.11.10-05.15.22:601][  0]LogOutputDevice: Error: [Callstack] 0x000002ec36649ddd UnrealEditor-MegascansPlugin.dll!dllmain_crt_process_detach() [D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\dll_dllmain.cpp:182]
+[2026.11.10-05.15.22:601][  0]LogOutputDevice: Error: [Callstack] 0x000002ec36649f05 UnrealEditor-MegascansPlugin.dll!dllmain_dispatch() [D:\a\_work\1\s\src\vctools\crt\vcstartup\src\startup\dll_dllmain.cpp:293]
+[2026.11.10-05.15.22:601][  0]LogOutputDevice: Error: [Callstack] 0x00007ffdce69ef6a ntdll.dll!UnknownFunction []
+[2026.11.10-05.15.22:602][  0]LogOutputDevice: Error: [Callstack] 0x00007ffdce59b2e3 ntdll.dll!UnknownFunction []
+[2026.11.10-05.15.22:602][  0]LogOutputDevice: Error: [Callstack] 0x00007ffdce60027f ntdll.dll!UnknownFunction []
+[2026.11.10-05.15.22:602][  0]LogOutputDevice: Error: [Callstack] 0x00007ffdce5fef8e ntdll.dll!UnknownFunction []
+[2026.11.10-05.15.22:602][  0]LogOutputDevice: Error: [Callstack] 0x00007ffdcd2717ab KERNEL32.DLL!UnknownFunction []
+[2026.11.10-05.15.22:602][  0]LogOutputDevice: Error: [Callstack] 0x00007ffdcd25dda7 KERNEL32.DLL!UnknownFunction []
+[2026.11.10-05.15.22:603][  0]LogOutputDevice: Error: [Callstack] 0x00007ffdce5fee4c ntdll.dll!UnknownFunction []
+[2026.11.10-05.15.22:603][  0]LogOutputDevice: Error: 

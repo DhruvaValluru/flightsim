@@ -1,0 +1,148 @@
+[
+ {
+  "number": 1,
+  "name": "golden hour A-4, flying east",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "938abd3218f4",
+  "lighting": {},
+  "render_json": false
+ },
+ {
+  "number": 2,
+  "name": "same, super bright preset",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "7787de2682ac",
+  "lighting": {
+   "preset": "super_bright"
+  },
+  "render_json": false
+ },
+ {
+  "number": 3,
+  "name": "a320 over new york, wide lens (terrain download)",
+  "prompt": "chase view of the a320 over new york city at 600 m in the morning with a 18 mm lens for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "52283b919a6d",
+  "lighting": {},
+  "render_json": false
+ },
+ {
+  "number": 4,
+  "name": "desert A-4, sun behind the camera",
+  "prompt": "chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "14affdb8f273",
+  "lighting": {
+   "sun_azimuth_deg": 45.0,
+   "sun_elevation_deg": 20.0
+  },
+  "render_json": false
+ },
+ {
+  "number": 5,
+  "name": "desert A-4, backlit",
+  "prompt": "chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "df63daa300db",
+  "lighting": {
+   "sun_azimuth_deg": 225.0,
+   "sun_elevation_deg": 12.0
+  },
+  "render_json": false
+ },
+ {
+  "number": 6,
+  "name": "a320 over sfo heading south, moderate rain",
+  "prompt": "wingman view of the a320 over sfo south at 3000 m in moderate rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "91a3404efafe",
+  "lighting": {},
+  "render_json": false
+ },
+ {
+  "number": 7,
+  "name": "tower view, heavy rain",
+  "prompt": "tower view of the a320 at 1000 m in heavy rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "cfbe6374c0ce",
+  "lighting": {},
+  "render_json": false
+ },
+ {
+  "number": 8,
+  "name": "c172 over fuji, sunrise, light rain",
+  "prompt": "chase view of the c172p over mount fuji at sunrise in light rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "9f09bb48b9bf",
+  "lighting": {},
+  "render_json": false
+ },
+ {
+  "number": 9,
+  "name": "747 through a thunderstorm",
+  "prompt": "chase view of the 747 flying west through a thunderstorm at 2000 m for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "1509ab4cb98d",
+  "lighting": {},
+  "render_json": false
+ },
+ {
+  "number": 10,
+  "name": "c172 near a tornado",
+  "prompt": "chase view of the c172p near a tornado over the flint hills at 600 m for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "63965f57e98d",
+  "lighting": {},
+  "render_json": false
+ },
+ {
+  "number": 11,
+  "name": "A-4 over the matterhorn, strong wind, severe turbulence",
+  "prompt": "chase view of the a4 over the matterhorn at 5000 m in strong wind and severe turbulence, flying north, for 6 seconds",
+  "outcome": "refused",
+  "why": "[envelope.trim_feasible] This aircraft cannot fly steadily at the requested speed, height and weight; its flight model does not reach there.",
+  "run_id": null,
+  "lighting": {}
+ },
+ {
+  "number": 12,
+  "name": "c172 cockpit over the grand canyon",
+  "prompt": "cockpit view of the c172p over the grand canyon at 2500 m flying east for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "b0c5643b5432",
+  "lighting": {},
+  "render_json": false
+ },
+ {
+  "number": 13,
+  "name": "747 cruise over the ocean",
+  "prompt": "chase view of the 747 over the ocean at 10000 m at noon for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "deffe98c2c2b",
+  "lighting": {},
+  "render_json": false
+ },
+ {
+  "number": 14,
+  "name": "hurricane (should be refused: not supported)",
+  "prompt": "fly the 747 through a hurricane",
+  "outcome": "refused",
+  "why": "[prompt.unsupported] The request asks for \u201churricane\u201d, which this simulator does not model.",
+  "run_id": null,
+  "lighting": {}
+ }
+]
