@@ -17,6 +17,7 @@
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Engine/Scene.h"
+#include "Engine/StaticMesh.h"  // cockpit-airframe: the beauty body swap
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -302,6 +303,21 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 			if (FJsonSerializer::Deserialize(Reader, MeshManifest) && MeshManifest.IsValid())
 			{
 				MeshManifest->TryGetStringField(TEXT("asset_path_root"), AssetRoot);
+				// cockpit-airframe (round 2): assets_pipeline/convert.py
+				// _write_beauty_mesh, {"body": {"part": "body_beauty", ...}}.
+				const TSharedPtr<FJsonObject>* BeautyParts = nullptr;
+				if (MeshManifest->TryGetObjectField(TEXT("beauty_parts"), BeautyParts) && BeautyParts != nullptr)
+				{
+					for (const TPair<FString, TSharedPtr<FJsonValue>>& Entry : (*BeautyParts)->Values)
+					{
+						const TSharedPtr<FJsonObject> Row = Entry.Value.IsValid() ? Entry.Value->AsObject() : nullptr;
+						FString BeautyPart;
+						if (Row.IsValid() && Row->TryGetStringField(TEXT("part"), BeautyPart))
+						{
+							BeautyMeshes.Add(Entry.Key, BeautyPart);
+						}
+					}
+				}
 			}
 		}
 	}
@@ -502,7 +518,60 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	}
 	TInlineComponentArray<UStaticMeshComponent*> Parts;
 	Aircraft->GetComponents(Parts);
+	// cockpit-airframe (round 2): a part with a beauty copy (mesh manifest
+	// beauty_parts) draws the copy on this beauty render: the same triangles at
+	// the same positions with the .ac crease normals and two-sided back faces,
+	// so the silhouette, custom depth and stencil (component settings, kept by
+	// SetStaticMesh) are the measured part's. Swapped only when the copy's
+	// slots are the measured part's slots, name for name, so the look
+	// instances below land on the same materials.
+	TArray<TSharedPtr<FJsonValue>> BeautyRows;
+	for (UStaticMeshComponent* Part : Parts)
+	{
+		UStaticMesh* Measured = Part != nullptr ? Part->GetStaticMesh().Get() : nullptr;
+		const FString* BeautyName = Measured != nullptr ? BeautyMeshes.Find(Measured->GetName()) : nullptr;
+		if (BeautyName == nullptr)
+		{
+			continue;
+		}
+		const FString BeautyPath = FString::Printf(TEXT("%s/%s.%s"), *AssetRoot, **BeautyName, **BeautyName);
+		UStaticMesh* BeautyMesh = LoadObject<UStaticMesh>(nullptr, *BeautyPath);
+		FString Reason;
+		if (BeautyMesh == nullptr)
+		{
+			Reason = TEXT("not imported (run the import step: assets_pipeline/importer.py)");
+		}
+		else
+		{
+			const TArray<FStaticMaterial>& From = Measured->GetStaticMaterials();
+			const TArray<FStaticMaterial>& To = BeautyMesh->GetStaticMaterials();
+			bool bSameSlots = From.Num() == To.Num();
+			for (int32 Slot = 0; bSameSlots && Slot < From.Num(); ++Slot)
+			{
+				bSameSlots = From[Slot].MaterialSlotName == To[Slot].MaterialSlotName;
+			}
+			if (!bSameSlots)
+			{
+				Reason = TEXT("its material slots differ from the measured part's; the measured mesh is kept");
+			}
+			else if (!Part->SetStaticMesh(BeautyMesh))
+			{
+				Reason = TEXT("SetStaticMesh refused (component mobility); the measured mesh is kept");
+			}
+		}
+		TSharedPtr<FJsonObject> BeautyRow = MakeShared<FJsonObject>();
+		BeautyRow->SetStringField(TEXT("part"), Measured->GetName());
+		BeautyRow->SetStringField(TEXT("beauty_mesh"), BeautyPath);
+		BeautyRow->SetBoolField(TEXT("swapped"), Reason.IsEmpty());
+		if (!Reason.IsEmpty())
+		{
+			BeautyRow->SetStringField(TEXT("reason"), Reason);
+		}
+		BeautyRows.Add(MakeShared<FJsonValueObject>(BeautyRow));
+	}
+	Row->SetArrayField(TEXT("beauty_meshes"), BeautyRows);
 	int32 Applied = 0;
+	int32 Unbound = 0;
 	// Slot names without a look instance, once each (AddUnique on the JSON
 	// values would compare pointers and never deduplicate a slot that several
 	// parts share).
@@ -514,6 +583,7 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 			UMaterialInterface* Current = Part->GetMaterial(Slot);
 			if (Current == nullptr)
 			{
+				++Unbound;  // cockpit-airframe: counted, was skipped silently
 				continue;
 			}
 			const FString SlotName = Current->GetName();
@@ -537,6 +607,7 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 		TEXT("offset, every class master opaque, so the label silhouette is the beauty's)"));
 	Row->SetStringField(TEXT("instance_root"), AssetRoot + TEXT("/") + AircraftFxLookFolder);
 	Row->SetNumberField(TEXT("slots_applied"), Applied);
+	Row->SetNumberField(TEXT("slots_without_material"), Unbound);
 	TArray<TSharedPtr<FJsonValue>> Absent;
 	for (const FString& Name : AbsentNames)
 	{
