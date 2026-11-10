@@ -1,0 +1,162 @@
+{
+ "generator": {
+  "name": "spectral_film_lut",
+  "url": "https://github.com/JanLohse/spectral_film_lut",
+  "commit": "a15043f6fe2d365d0c359d22e0868076800916d9",
+  "tag": "v0.18.14",
+  "licence": "MIT",
+  "script": "scripts/make_film_luts.py",
+  "versions": {
+   "spectral_film_lut": "0.0.0+a15043f",
+   "colour": "0.4.7",
+   "numpy": "2.4.6",
+   "numba": "0.68.1",
+   "scipy": "1.17.1"
+  }
+ },
+ "note": "display-referred sRGB in and out, applied after the tonemapper by scripts/beauty_post.py (ffmpeg lut3d tetrahedral) or in-engine via scripts/cube_to_ue_lut.py; the grey axis is neutralised and the tone curve normalised to black 0 / white 1 (module doc)",
+ "luts": [
+  {
+   "stock": "kodak_ektachrome_100d",
+   "description": "Kodak Ektachrome 100D slide, projected: punchier, saturated stock for clear desert-noon frames",
+   "negative": "Kodak Ektachrome 100D",
+   "print": null,
+   "scene_recovery": "inverse Narkowicz ACES fit x(2.51x+0.03)/(x(2.43x+0.59)+0.14) on display-linear, so the stock's curve replaces the tonemapper's",
+   "params": {
+    "input_colorspace": null,
+    "output_gamut": "Rec. 709",
+    "gamma_func": "sRGB",
+    "white_balance": 1,
+    "color_masking": 0.3,
+    "white_clip": true,
+    "exp_comp": 0.3,
+    "exp_kelvin": 6500,
+    "projector_kelvin": 6500
+   },
+   "size": 33,
+   "space_in": "sRGB (display-referred, sRGB curve, Rec. 709 primaries)",
+   "space_out": "sRGB (display-referred, sRGB curve, Rec. 709 primaries)",
+   "grey_axis_neutralised": true,
+   "raw_grey_cast_max_pct": 25.92,
+   "raw_grey_cast_max_at": 0.086,
+   "gain_clamp": [
+    0.2,
+    5.0
+   ],
+   "tone_curve_normalised": {
+    "raw_black": 0.008,
+    "raw_white": 0.9996
+   },
+   "neutral_curve": [
+    0.0,
+    0.0522,
+    0.1648,
+    0.2855,
+    0.3899,
+    0.4949,
+    0.6079,
+    0.7206,
+    0.8421,
+    0.9641,
+    1.0
+   ],
+   "file": "kodak_ektachrome_100d.cube",
+   "sha256": "1f73a608c62f584f93553e19e0318104da179e0bb22b7a3501152ea6a9263bff",
+   "licence": "CC0-1.0"
+  },
+  {
+   "stock": "kodak_portra_160",
+   "description": "Kodak Portra 160 colour negative, scanned (ACES-like inversion): soft, natural daylight stock for golden-hour and overcast frames",
+   "negative": "Kodak Portra 160",
+   "print": null,
+   "scene_recovery": "inverse Narkowicz ACES fit x(2.51x+0.03)/(x(2.43x+0.59)+0.14) on display-linear, so the stock's curve replaces the tonemapper's",
+   "params": {
+    "input_colorspace": null,
+    "output_gamut": "Rec. 709",
+    "gamma_func": "sRGB",
+    "inversion": true,
+    "custom_inversion": false,
+    "inversion_gamma": 3.0,
+    "exp_comp": 0.5,
+    "exp_kelvin": 6500,
+    "projector_kelvin": 6500
+   },
+   "size": 33,
+   "space_in": "sRGB (display-referred, sRGB curve, Rec. 709 primaries)",
+   "space_out": "sRGB (display-referred, sRGB curve, Rec. 709 primaries)",
+   "grey_axis_neutralised": true,
+   "raw_grey_cast_max_pct": 49.79,
+   "raw_grey_cast_max_at": 0.051,
+   "gain_clamp": [
+    0.2,
+    5.0
+   ],
+   "tone_curve_normalised": {
+    "raw_black": 0.0337,
+    "raw_white": 0.9866
+   },
+   "neutral_curve": [
+    0.0,
+    0.0666,
+    0.1619,
+    0.2547,
+    0.348,
+    0.4454,
+    0.5483,
+    0.6607,
+    0.7861,
+    0.9135,
+    1.0
+   ],
+   "file": "kodak_portra_160.cube",
+   "sha256": "09a94a1e1e845f7a7a75263d3fa8e2ae54a32c02ab29eaf0294803bd2b9d714d",
+   "licence": "CC0-1.0"
+  },
+  {
+   "stock": "kodak_vision3_250d_2383",
+   "description": "Kodak Vision3 250D 5207 negative printed on Vision 2383: the muted motion-picture print look for storm frames",
+   "negative": "Kodak Vision3 250D 5207",
+   "print": "Kodak Vision 2383",
+   "scene_recovery": "inverse Narkowicz ACES fit x(2.51x+0.03)/(x(2.43x+0.59)+0.14) on display-linear, so the stock's curve replaces the tonemapper's",
+   "params": {
+    "input_colorspace": null,
+    "output_gamut": "Rec. 709",
+    "gamma_func": "sRGB",
+    "exp_comp": 0.3,
+    "exp_kelvin": 6500,
+    "projector_kelvin": 6500,
+    "white_clip": true
+   },
+   "size": 33,
+   "space_in": "sRGB (display-referred, sRGB curve, Rec. 709 primaries)",
+   "space_out": "sRGB (display-referred, sRGB curve, Rec. 709 primaries)",
+   "grey_axis_neutralised": true,
+   "raw_grey_cast_max_pct": 45.98,
+   "raw_grey_cast_max_at": 0.055,
+   "gain_clamp": [
+    0.2,
+    5.0
+   ],
+   "tone_curve_normalised": {
+    "raw_black": 0.0075,
+    "raw_white": 0.9531
+   },
+   "neutral_curve": [
+    0.0,
+    0.0537,
+    0.1688,
+    0.2873,
+    0.3999,
+    0.5067,
+    0.6034,
+    0.6954,
+    0.7879,
+    0.8872,
+    1.0
+   ],
+   "file": "kodak_vision3_250d_2383.cube",
+   "sha256": "a515159709a7bd9577e84158490c6034ca54171a9838cffc6dc74001f55d8460",
+   "licence": "CC0-1.0"
+  }
+ ]
+}

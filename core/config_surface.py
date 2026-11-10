@@ -205,6 +205,15 @@ SETTINGS: Tuple[Setting, ...] = (
             ("core/scene/sky_hdri.py:81",),
             "Where the pinned sky HDRIs are downloaded and prepared (default %LOCALAPPDATA%\\flightsim\\hdri, "
             "else ~/.cache/flightsim/hdri); never committed."),
+    Setting("beauty_post", "FLIGHTSIM_BEAUTY_POST", "dev-only", None,
+            ("scripts/beauty_post.py:73", "webapp/runs.py:3614", "scripts/visual_round.py:150"),
+            "Round 5 (L5): the post-render beauty pipeline (scripts/beauty_post.py: OIDN denoise on noisy "
+            "presets, the film-stock LUT, halation, seeded grain, vignette, optional Real-ESRGAN 4K) over "
+            "each beauty frame, writing frame_NNNN_beauty_post.png beside it and its record under "
+            "render.json beauty_post. ``on`` runs every step, ``on,-halation,-upscale`` leaves steps out "
+            "(the A/B pairs), unset or ``off`` runs nothing. Beauty quality only; the original frame and "
+            "the labels are never touched. Tools are fetched once into %LOCALAPPDATA%\\\\flightsim\\\\tools "
+            "and checked by sha256; a missing one is refused by name."),
     Setting("render_switches", "FLIGHTSIM_RENDER_SWITCHES", "dev-only", None,
             ("ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp:3354",
              "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimHeroLighting.cpp:432",

@@ -3597,6 +3597,42 @@ class RunManager:
         return (frames / "render.json").is_file()
 
     @staticmethod
+    def _beauty_post(run, out: Path, beauty_look: Path, **post_kw) -> Optional[List[Dict]]:
+        """Round 5 (L5): scripts/beauty_post.py over the run's render bundles
+        when FLIGHTSIM_BEAUTY_POST says so (``on``, with ``-<step>`` words
+        for steps to leave out); None when it is off. The beauty look's
+        sidecar chooses the film stock, whether the frame is noisy enough
+        to denoise and whose grain it carries. A refusal is recorded in
+        render.json by the pipeline and named in the run's events.
+        ``post_kw`` reach beauty_post.apply_to_run (tests: fake tools)."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "beauty_post", REPO / "scripts" / "beauty_post.py")
+        beauty_post = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(beauty_post)
+        try:
+            off = beauty_post.wanted()
+        except beauty_post.BeautyPostError as exc:
+            run.push("beauty_post", f"{exc.constraint}: {exc.message}")
+            return None
+        if off is None:
+            return None
+        run.push("beauty_post", "post-render beauty pipeline: denoise, film grade, "
+                                "halation, grain, vignette, 4K (beauty_post.png beside each frame)")
+        plan = json.loads(Path(beauty_look).read_text(encoding="ascii"))
+        try:
+            records = beauty_post.apply_to_run(out, plan, off=off, **post_kw)
+        except beauty_post.BeautyPostError as exc:
+            run.push("beauty_post", f"refused, {exc.constraint}: {exc.message}")
+            return None
+        ran = [s["step"] for s in records[0].get("steps", ()) if s.get("ran")]
+        run.conditions["beauty_post"] = (
+            f"post-render beauty: {', '.join(ran) or 'no step'} on "
+            f"{sum(len(r.get('frames', ())) for r in records)} frame(s); VISUAL ONLY")
+        return records
+
+    @staticmethod
     def _capture_fps(manifest_path: Path, camera_id: str) -> float:
         """The rate this camera's frames were actually taken at.
 
@@ -4467,6 +4503,15 @@ class RunManager:
             return
         elif capture_display.wants_display(run.look):  # aces2-display, camera-less
             capture_display.apply_to_bundle(frames, run.look)  # refusals -> render.json
+
+        # Round 5 (L5): the post-render beauty pipeline, beauty only and only
+        # when FLIGHTSIM_BEAUTY_POST=on. It writes frame_NNNN_beauty_post.png
+        # beside each frame and its record under render.json beauty_post;
+        # the frames the labels were measured on are never opened for
+        # writing. A refusal is recorded there and said here by name; the
+        # run goes on, since the beauty frame is the product.
+        if beauty_look is not None:
+            self._beauty_post(run, out, beauty_look)
 
         if capture_solved is not None:
             run.push("manifest", "writing the capture manifest, the "
