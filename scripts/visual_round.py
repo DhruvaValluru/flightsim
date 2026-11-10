@@ -36,6 +36,11 @@ def write_round(number: int, gallery: Path = GALLERY, summary: Path = SUMMARY,
     out = out_root / f"round_{number}"
     out.mkdir(parents=True, exist_ok=True)
     found = frames(gallery)
+    if summary.is_file():
+        # Only this batch: older batches leave frames in the same folder.
+        batch = json.loads(summary.read_text(encoding="utf-8"))
+        wanted = {f"{int(r['number']):02d}_" for r in batch if r.get("outcome") == "done"}
+        found = [p for p in found if p.name[:3] in wanted]
     if not found:
         raise SystemExit(f"no *_frame.png in {gallery}: run "
                          "scripts/run_test_scenarios.py --still first")
