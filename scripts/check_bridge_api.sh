@@ -843,6 +843,72 @@ ss_check "supersample: FParse::Value int32" "Core/Public/Misc/Parse.h" "static C
 ss_check "supersample: TArray SetNumUninitialized" "Core/Public/Containers/Array.h" "void SetNumUninitialized(SizeType NewNum"
 # -- supersample lane end ---------------------------------------------------
 
+# -- beauty fallback (no-lumen-and-machine lane, 2026-11-09) -- BEGIN beauty fallback --
+# FlightSimBeautyFallback.cpp: the beauty look when this process cannot run
+# Lumen GI (the render laptop: D3D11 / PCD3D_SM5). Each symbol was grepped in
+# the UE 5.7.4 headers and sources on the authoring Mac (which cannot
+# compile); re-checked here before a build. Cvar names at their DEFINITION.
+bf_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
+    local f="$UE_ROOT/Engine/Source/Runtime/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- FlightSimBeautyFallback.cpp needs updating"
+    fi
+}
+BFR="RenderCore/Public/RenderUtils.h"
+BFS="Engine/Classes/Engine/Scene.h"
+BFK="Engine/Classes/Components/SkyLightComponent.h"
+BFD="Engine/Classes/Components/DirectionalLightComponent.h"
+bf_check "fallback: DoesPlatformSupportLumenGI" "$BFR" "extern RENDERCORE_API bool DoesPlatformSupportLumenGI(EShaderPlatform Platform, bool bSkipProjectCheck = false);"
+bf_check "fallback: DoesPlatformSupportVirtualShadowMaps" "$BFR" "RENDERCORE_API bool DoesPlatformSupportVirtualShadowMaps(EShaderPlatform Platform);"
+bf_check "fallback: DoesPlatformSupportNanite" "$BFR" "RENDERCORE_API bool DoesPlatformSupportNanite(EShaderPlatform Platform, bool bCheckForProjectSetting = true);"
+bf_check "fallback: IsRayTracingEnabled" "$BFR" "extern RENDERCORE_API bool IsRayTracingEnabled();"
+bf_check "fallback: Lumen on SM5 only with r.Lumen.Supported.SM5" "RenderCore/Private/RenderUtils.cpp" "const bool bAllowSM5 = bLumenSupportedSM5 && IsFeatureLevelSupported(Platform, ERHIFeatureLevel::SM5);"
+bf_check "fallback: VSM needs Nanite's platform" "RenderCore/Private/RenderUtils.cpp" "return DoesPlatformSupportNanite(Platform);"
+bf_check "fallback: DoesPlatformSupportDistanceFields" "Engine/Public/SceneManagement.h" "ENGINE_API bool DoesPlatformSupportDistanceFields(const FStaticShaderPlatform Platform);"
+bf_check "fallback: DoesProjectSupportDistanceFields" "Engine/Public/SceneManagement.h" "ENGINE_API bool DoesProjectSupportDistanceFields();"
+bf_check "fallback: GMaxRHIFeatureLevel" "RHI/Public/RHIFeatureLevel.h" "extern RHI_API ERHIFeatureLevel::Type GMaxRHIFeatureLevel;"
+bf_check "fallback: GMaxRHIShaderPlatform" "RHI/Public/RHIShaderPlatform.h" "extern RHI_API EShaderPlatform GMaxRHIShaderPlatform;"
+bf_check "fallback: LexToString feature level" "RHI/Public/RHIStrings.h" "RHI_API FString LexToString(ERHIFeatureLevel::Type Level);"
+bf_check "fallback: LexToString shader platform" "RHI/Public/RHIStrings.h" "RHI_API FString LexToString(EShaderPlatform Platform, bool bError = true);"
+bf_check "fallback: PostProcess GI method override" "$BFS" "uint32 bOverride_DynamicGlobalIlluminationMethod : 1;"
+bf_check "fallback: PostProcess GI method" "$BFS" "TEnumAsByte<EDynamicGlobalIlluminationMethod::Type> DynamicGlobalIlluminationMethod;"
+bf_check "fallback: PostProcess reflection method override" "$BFS" "uint8 bOverride_ReflectionMethod:1;"
+bf_check "fallback: PostProcess reflection method" "$BFS" "TEnumAsByte<EReflectionMethod::Type> ReflectionMethod;"
+bf_check "fallback: PostProcess SSR quality override" "$BFS" "uint8 bOverride_ScreenSpaceReflectionQuality:1;"
+bf_check "fallback: PostProcess SSR quality" "$BFS" "float ScreenSpaceReflectionQuality;"
+bf_check "fallback: GI method ScreenSpace" "Engine/Classes/Engine/EngineTypes.h" "ScreenSpace UMETA(DisplayName=\"Screen Space (Beta)\"),"
+bf_check "fallback: SSGI runs on the view's ScreenSpace method" "Renderer/Private/ScreenSpaceRayTracing.cpp" "if (View.FinalPostProcessSettings.DynamicGlobalIlluminationMethod != EDynamicGlobalIlluminationMethod::ScreenSpace)"
+bf_check "fallback: SSGI when Lumen GI does not render" "Renderer/Private/IndirectLightRendering.cpp" "DiffuseIndirectMethod = EDiffuseIndirectMethod::SSGI;"
+bf_check "fallback: SkyLight SetIntensity" "$BFK" "ENGINE_API void SetIntensity(float NewIntensity);"
+bf_check "fallback: SkyLight SetMinOcclusion" "$BFK" "ENGINE_API void SetMinOcclusion(float InMinOcclusion);"
+bf_check "fallback: SkyLight MinOcclusion" "$BFK" "float MinOcclusion;"
+bf_check "fallback: SkyLight OcclusionMaxDistance" "$BFK" "float OcclusionMaxDistance;"
+bf_check "fallback: SkyLight SetCaptureIsDirty" "$BFK" "ENGINE_API void SetCaptureIsDirty();"
+bf_check "fallback: SkyLight IsRealTimeCaptureEnabled" "$BFK" "ENGINE_API bool IsRealTimeCaptureEnabled() const;"
+bf_check "fallback: Light Intensity" "Engine/Classes/Components/LightComponentBase.h" "float Intensity;"
+bf_check "fallback: Light CastShadows" "Engine/Classes/Components/LightComponentBase.h" "uint32 CastShadows:1;"
+bf_check "fallback: Directional SetDynamicShadowCascades" "$BFD" "ENGINE_API void SetDynamicShadowCascades(int32 NewValue);"
+bf_check "fallback: Directional SetCascadeDistributionExponent" "$BFD" "ENGINE_API void SetCascadeDistributionExponent(float NewValue);"
+bf_check "fallback: Directional DynamicShadowCascades" "$BFD" "int32 DynamicShadowCascades;"
+bf_check "fallback: Directional CascadeDistributionExponent" "$BFD" "float CascadeDistributionExponent;"
+bf_check "fallback: Directional DynamicShadowDistanceMovableLight" "$BFD" "float DynamicShadowDistanceMovableLight;"
+bf_cvar() {  # cvar name, file (relative to $UE_ROOT/Engine/Source/Runtime)
+    bf_check "fallback: cvar $1" "$2" "TEXT(\"$1\"),"
+}
+bf_cvar r.SSGI.Quality "Renderer/Private/ScreenSpaceRayTracing.cpp"
+bf_cvar r.SSR.Quality "Renderer/Private/ScreenSpaceRayTracing.cpp"
+bf_cvar r.DistanceFieldAO "Renderer/Private/DistanceFieldAmbientOcclusion.cpp"
+bf_cvar r.AOQuality "Renderer/Private/DistanceFieldAmbientOcclusion.cpp"
+bf_cvar r.Shadow.CSM.MaxCascades "Renderer/Private/SceneRendering.cpp"
+bf_cvar r.Shadow.MaxCSMResolution "Core/Private/HAL/ConsoleManager.cpp"
+bf_cvar r.Shadow.MaxResolution "Core/Private/HAL/ConsoleManager.cpp"
+bf_cvar r.Lumen.Supported.SM5 "Renderer/Private/Lumen/Lumen.cpp"
+# ------------------------------------------------------ END beauty fallback --
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'
