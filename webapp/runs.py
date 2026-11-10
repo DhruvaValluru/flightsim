@@ -2461,7 +2461,9 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
     when the render quality is beauty; None otherwise (measure: nothing is
     written and no flag is added). ``look`` is the look the render is given
     (its sun elevation chooses the band and grade); ``sky`` the physical-sky
-    sidecar, whose plan then keeps the sun and the exposure. ``grade`` /
+    sidecar, whose plan then keeps the sun and whose clear-sky EV100 is the
+    base the beauty look's one exposure owner moves (the deck, the lighting
+    look). ``grade`` /
     ``lens``: None for the automatic grade and the standard lens.
     ``quality``: the run's own quality (run_render_quality: a look switch);
     None for the configured one."""
@@ -2474,9 +2476,15 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
 
     lens = lens or DEFAULT_LENS
     elevation = float((look or {}).get("sun_elev", DEFAULT_LOOK["sun_elev"]))
+    sky_exposure = None
     if sky is not None:
-        elevation = float(json.loads(Path(sky).read_text(encoding="ascii"))
-                          ["sun"]["elevation_deg"])
+        sky_plan = json.loads(Path(sky).read_text(encoding="ascii"))
+        elevation = float(sky_plan["sun"]["elevation_deg"])
+        # Round 2: ONE exposure owner. The plan's clear-sky EV100 is the
+        # base the beauty look moves by the deck and the lighting look
+        # (core.scene.beauty_look.exposure_target); the plan's own camera
+        # is kept. A plan with no exposure block leaves its exposure alone.
+        sky_exposure = sky_plan.get("exposure")
     # One width per camera, in spec.cameras order: the host indexes them by
     # -camera-index= (the capture loop's position in spec.cameras). Only an
     # UNSTATED sensor takes the documented default; a width that is there
@@ -2519,7 +2527,8 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
         sun_intensity_scale=lit.get("sun_intensity_scale"),
         sky_light_scale=lit.get("sky_light_scale"),
         brightness_ev=None if brightness is None else float(brightness),
-        camera_presets=presets if sensors else None)
+        camera_presets=presets if sensors else None,
+        sky_exposure=sky_exposure)
     return write_beauty_look(plan, Path(out) / "beauty_look.json")
 
 
