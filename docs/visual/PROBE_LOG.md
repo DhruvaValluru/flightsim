@@ -2344,3 +2344,99 @@ shot c luma mean 3.6 (52.7 % crushed).
   removes an earlier sheet's side files first. gate_v_visual.py folds the ground ids into 0,
   read from `_ids.json` or the run's render.json. A head re-grade should now run
   aerial_perspective and texel_detail, and horizon_fill on a and d should be re-read.
+
+## round-2b presets-colour
+
+Round 2b, 2026-11-09, Mac, uncompiled; nothing rendered. Traced from the round 0 frames
+(docs/visual/round_0 on origin/phase-2-final, rendered at beauty on the Windows laptop at
+1a62d557) against this branch.
+
+**#02 "super bright" equal to #01: LIVE, fixed.** Measured first: the two JPEGs are
+byte-identical (md5 c3b30ecd...), and so are #04 and #05 (3476b477...), which differ only in a
+stated sun azimuth (45 vs 225 deg). So the whole lighting block was dropped, not just the
+preset. Trace: run_test_scenarios.py sets `spec["lighting"]["preset"]`. POST /run reads it
+back (`ScenarioSpec.from_dict`). On the legacy sun path `render_look_for` layers it correctly:
+sun 72 deg, x1.6 sun, x1.35 fill, +0.6 EV. But with `FLIGHTSIM_SKY=physical`, the render
+machine's sky (see "exposure-storm" above), `render_look_for` returns before
+`lighting_look`. The `-sky=` plan keeps the instant's sun, and the run records "lighting block
+NOT applied". This branch had not changed that. A second cause was hidden behind it on the
+legacy path. The round-2 single exposure owner metered the preset's own scales: super bright's
+x1.6 / x1.35 read as +0.64 stops, which closed the EV100 and cancelled its +0.6 EV. The preset
+then rendered no brighter than natural at the same sun.
+
+Fix, beauty only:
+- `webapp.runs.relight_sky_plan` now applies the lighting block over the physical sky. It
+  layers the block on the plan's sun. A stated or preset elevation/azimuth moves the sun in
+  sky.json (`core.sky.plan.relight`, which is pure: the exposure is re-metered, stars and
+  night lights are dropped for a day sun, and `sun.relit` records where the sun came from).
+  The engine knobs go as flags (`_render`, the `elif beauty_look` branch). The haze goes
+  through `-fog-density=`. Brightness and scales go to the beauty exposure. The
+  `conditions.lighting` and `conditions.sky` lines say what was applied.
+- `write_beauty_look_plan` meters only the scales that the RAIN look filled in. A stated or
+  preset scale is applied and recorded as `exposure.lighting_scales_unmetered` (the presets
+  were chosen on the measure path, where nothing meters them).
+- Trace (Python, this branch): the legacy super bright EV100 goes from 15.04 to 14.40 (band 15.0
+  - 0.6). The physical sky moves the sun from 6.0 to 72 deg and the flags go out. For natural,
+  nothing changes in either path.
+- Measure is unchanged: `render_look_for` is untouched, and the relight runs only when
+  `quality == "beauty"`.
+
+**Blue-purple shadow cast (01, 08, 13): partly fixed by the overhaul, the rest fixed here.**
+Measured on the round-0 JPEGs:
+- 01: shadows (luma < 60) average 18/17/46, midtones (60-120) 79/71/92, hue about 263 deg
+  (violet). A sky-blue fill sits near 205-215 deg.
+- 08: lit slope 180/163/171 (magenta).
+- 13: 10/37/85. That is plain blue (R < G < B), not purple. It is the dark-exposure problem,
+  which belongs to other lanes.
+
+Each candidate source, checked:
+- Unclamped Rayleigh sky: not the source. `core.xplane.atmosphere.sky_irradiance` stays sky
+  blue (R < G < B, hue 195-235 deg) at every sun from 3 to 89 deg (pinned by test).
+- No ground bounce: ALREADY FIXED by the overhaul. `FlightSimHeroLighting.cpp` sets the sky
+  light's lower hemisphere to the ground albedo x E / pi. The baked blue-violet shadows in
+  Google's aerial photogrammetry are tiles-delight's job (`DelightBlueGate`), also already on
+  this branch.
+- WhiteTemp: not the source. The grades now carry one warmth knob each (golden_hour 6700,
+  storm 6100 cool by design), and ColorGain is neutral everywhere.
+- X-Plane colours: LIVE on this branch. Round 2's `beauty_xplane_condition` reads `ocast`
+  under any rain or deck world. The compensation divides by a CLEAR, sea-level model's
+  transmittance, so a low sun gets a deep-blue key and a warm fill. #08's prompt (sunrise, sun
+  3.2 deg, light rain) now sends `-xplane-direct=60:102:255 -xplane-ambient=255:245:235`: the
+  blue sun plus a red-leaning fill is the magenta slope. Fix: `xplane_lighting_flags(...,
+  beauty=True)` sends the sun and sky light white with condition `beauty:<table>`, and keeps
+  the horizon (fog) colour. In beauty the engine's per-pixel transmittance owns the sun's
+  colour (beauty_look's rule), and the sky light is the engine's capture plus the hero
+  ground. `FlightSimVisualScene.cpp` records the white in `xplane_lighting.compensation`.
+  Measure keeps its colours.
+- Tonemap: LIVE. UE's filmic path skews saturated blues toward violet. FPostProcessSettings::
+  BlueCorrection exists for exactly that (Scene.h: "Bright blue desaturates instead of going
+  to violet"; engine default 0.6). The beauty plan's `tonemap.BlueCorrection` is now 1.0
+  (`TONEMAP_HUE`, UNCALIBRATED), applied by `FlightSimBeautyLook.cpp`. Its inverse after the
+  curve holds luminance, so the round-2 exposure owner (EV100) and the exposure meter's p90 do
+  not move. ExpandGamut stays at the engine's 1.0: its wide-gamut blue lies further from
+  violet than sRGB's.
+
+**Checked against the round-2 owners.** Exposure: one owner, `exposure_target`. Only the
+choice of metered scales changed, and the meter still only opens, so it cannot close a
+brighter preset back down. Grade: WhiteTemp is still the one warmth knob, and no ColorGain
+was added. Sun colour: the atmosphere is still its only owner (the beauty X-Plane sun is
+now white, which agrees with it).
+
+**Render-machine check (D3D11 / SM5: no Lumen, VSM or Nanite).**
+- The relight, the flags and the exposure are Python plus existing commandlet flags. The
+  knob flags are applied after the physical sky (`FlightSimVisualScene.cpp`), and
+  BeautyFallback's sky x1.6 multiplies on top.
+- The X-Plane colours are plain light colours.
+- BlueCorrection runs in PostProcessCombineLUTs.usf, which runs on every RHI.
+- None of the four depends on Lumen, VSM or Nanite.
+- The engine symbols are in `scripts/check_bridge_api.sh` "presets-colour" (all ok against
+  5.7.4).
+
+Probes (UNCALIBRATED):
+- pc-preset: round 0 #01 and #02 at beauty, FLIGHTSIM_SKY=physical. Pass: the frames differ,
+  #02's sun is high, #02's luma mean is above #01's, and `render.json` has
+  `look_applied.lighting.sun_intensity_scale` 1.6. Then #04 and #05: the shadows point opposite
+  ways.
+- pc-blue: #01 and #08 at beauty. Read the shadow midtone hue on the cliffs and the slope.
+  Pass: 195-235 deg with R <= G. If it is still violet, render #01 with BlueCorrection 0.6 to
+  separate the tonemap's share from the tiles'.
