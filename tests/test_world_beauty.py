@@ -413,7 +413,11 @@ def test_the_cloud_material_parameters_are_the_ones_the_cpp_sets():
     assert int(_script_dict("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"]) >= 2
     assert create.index('world_stamp(material, "M_FlightSimCloudLayers")') < create.index("finish(material")
     beauty = SCRIPT[SCRIPT.index("def _world_beauty_material"):SCRIPT.index("def world_shader")]
-    assert "world_graph_stale(name) or rebuild_requested(name)" in beauty
+    # The no-lumen-and-machine lane's update-in-place path decides (a stale
+    # WORLD_GENERATIONS stamp or FLIGHTSIM_REBUILD_MATERIALS), never a delete.
+    assert "world_update_wanted(name)" in beauty
+    assert "delete_asset" not in beauty
+    assert int(_script_dict("WORLD_GENERATIONS")["M_FlightSimCloudLayers"]) >= 3
 
 
 def test_the_tiles_shaders_read_what_the_script_wires():

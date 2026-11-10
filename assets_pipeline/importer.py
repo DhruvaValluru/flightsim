@@ -46,6 +46,7 @@ caller hears `aircraft.mesh_import` with the step that failed. Nothing
 here ever substitutes a different airframe or a placeholder.
 """
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -98,6 +99,75 @@ def mesh_manifest_path(name: str) -> Path:
     return GENERATED / name / "mesh_manifest.json"
 
 
+def imported_parts(manifest: Dict) -> List[str]:
+    """Every mesh asset a manifest puts in the project: its ``parts`` (the
+    meshes the commandlet attaches and every measure frame draws) and the
+    beauty-only copies of ``beauty_parts`` (round 2, cockpit-airframe:
+    ``body_beauty``, swapped in on -quality=beauty only)."""
+    return list(manifest["parts"]) + [
+        row["part"] for row in (manifest.get("beauty_parts") or {}).values()]
+
+
+#: Written by scripts/ue_aircraft_materials.py write_import_record after
+#: an import of a manifest with ``beauty_parts`` (same names there, pinned
+#: by tests/test_cockpit_airframe.py): the manifest's sha256 and every
+#: imported mesh slot's material.
+IMPORT_RECORD_NAME = "import_record.json"
+IMPORT_RECORD_MAGIC = "flightsim-aircraft-import-record"
+
+
+def import_record_reason(manifest_path: Path) -> Optional[str]:
+    """Why a manifest with ``beauty_parts`` is not imported yet, or None.
+
+    Round 2 (cockpit-airframe lane). The render machine's first J-11 frames
+    (2026-11-09) drew a grey, untextured airframe: 7 slots on look
+    instances and one on WorldGridMaterial where the converted body has 25
+    MTL materials. The re-import had run in a render the harness reaped
+    for low memory, and every rule here is by mtime and file presence, so
+    an import cut short after the body's .uasset was saved counted as
+    done. The import script now writes a record only when it reaches the
+    end; a missing record, or one written for another manifest, means the
+    editor import must run again. Only manifests with ``beauty_parts``: no
+    other airframe is re-imported by this rule."""
+    manifest_path = Path(manifest_path)
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not manifest.get("beauty_parts"):
+        return None
+    record_path = manifest_path.parent / IMPORT_RECORD_NAME
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return f"no import record at {record_path} (the editor import never finished)"
+    digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    if record.get("magic") != IMPORT_RECORD_MAGIC or record.get("manifest_sha256") != digest:
+        return (f"the import record {record_path.name} was written for another "
+                f"conversion of the mesh")
+    if record.get("unbound"):
+        # Imported again on the next render, and refused by name again
+        # (import_manifests), rather than drawn grey.
+        return (f"the last import left {len(record['unbound'])} mesh slot(s) without "
+                f"their MTL material")
+    return None
+
+
+def unbound_slots(manifest_path: Path) -> List[str]:
+    """The unbound slots of the import record written for THIS manifest
+    (empty when there is none, or it was written for another conversion)."""
+    manifest_path = Path(manifest_path)
+    record_path = manifest_path.parent / IMPORT_RECORD_NAME
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    except (OSError, ValueError):
+        return []
+    if record.get("magic") != IMPORT_RECORD_MAGIC or record.get("manifest_sha256") != digest:
+        return []
+    return [str(row) for row in record.get("unbound") or []]
+
+
 def missing_assets(manifest_path: Path) -> List[str]:
     """Which of a manifest's parts have no .uasset in the Unreal project.
 
@@ -109,7 +179,7 @@ def missing_assets(manifest_path: Path) -> List[str]:
     # /Game/Aircraft/<name> is ue/Content/Aircraft/<name> on disk.
     root = manifest["asset_path_root"].replace("/Game/", "", 1)
     content = REPO / "ue" / "Content"
-    return [f"{manifest['name']}/{part}" for part in manifest["parts"]
+    return [f"{manifest['name']}/{part}" for part in imported_parts(manifest)
             if not (content / root / f"{part}.uasset").is_file()]
 
 
@@ -128,7 +198,7 @@ def stale_assets(manifest_path: Path) -> List[str]:
     root = manifest["asset_path_root"].replace("/Game/", "", 1)
     content = REPO / "ue" / "Content"
     since = manifest_path.stat().st_mtime
-    return [f"{manifest['name']}/{part}" for part in manifest["parts"]
+    return [f"{manifest['name']}/{part}" for part in imported_parts(manifest)
             if (content / root / f"{part}.uasset").is_file()
             and (content / root / f"{part}.uasset").stat().st_mtime < since]
 
@@ -302,7 +372,8 @@ def is_imported(name: str) -> bool:
     and a stale manifest renders the real mesh in the wrong place."""
     manifest = mesh_manifest_path(name)
     return (manifest.is_file() and stale_manifest_reason(manifest) is None
-            and not missing_assets(manifest) and not stale_assets(manifest))
+            and not missing_assets(manifest) and not stale_assets(manifest)
+            and import_record_reason(manifest) is None)
 
 
 #: Every git call on a model source runs with these (render-machine finding,
@@ -383,10 +454,41 @@ def verify_source_pins(config: Dict, source_dir: Path,
     try:
         rows = verify(config, source_dir)
     except PackagePinError as exc:
-        raise AircraftAssetError("aircraft.package_pin", exc.message) from exc
+        # A checkout made before fetch_source set core.autocrlf=false holds
+        # CRLF copies of the text files: rewrite the working tree from the
+        # index with LF once, then verify again. Anything still differing
+        # is a real mismatch.
+        if not _rewrite_checkout_lf(source_dir, report):
+            raise AircraftAssetError("aircraft.package_pin", exc.message) from exc
+        try:
+            rows = verify(config, source_dir)
+        except PackagePinError as again:
+            raise AircraftAssetError("aircraft.package_pin", again.message) from again
     if rows:
         report(f"{len(rows)} pinned package file(s) verified (git blob sha1 + sha256)")
     return len(rows)
+
+
+def _rewrite_checkout_lf(source_dir: Path, report: Report = print) -> bool:
+    """Set core.autocrlf=false on the source checkout and rewrite every
+    tracked file from the index (git checkout-index -f -a). True when it
+    ran; False when the source is not a git checkout or git failed."""
+    source_dir = Path(source_dir)
+    if not (source_dir / ".git").is_dir():
+        return False
+    current = subprocess.run(["git", "-C", str(source_dir), "config", "--get",
+                              "core.autocrlf"], capture_output=True, text=True)
+    if current.stdout.strip().lower() == "false":
+        return False
+    report("pins differ on a CRLF checkout; rewriting the source with LF line ends")
+    try:
+        subprocess.run(["git", "-C", str(source_dir), "config", "core.autocrlf",
+                        "false"], check=True)
+        subprocess.run(["git", "-C", str(source_dir), "checkout-index", "-f", "-a"],
+                       check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return True
 
 
 def convert(config_path: Path, report: Report = print) -> Path:
@@ -453,6 +555,15 @@ def import_manifests(manifests: List[Path], report: Report = print) -> None:
     missing: List[str] = []
     for manifest_path in manifests:
         missing += missing_assets(Path(manifest_path))
+        # Round 2: an import that left a mesh slot without its MTL material
+        # draws that part grey and untextured; refuse it by name.
+        unbound = unbound_slots(Path(manifest_path))
+        if unbound:
+            raise AircraftAssetError(
+                "aircraft.material_slots",
+                f"the {Path(manifest_path).parent.name} import left {len(unbound)} mesh "
+                f"slot(s) without their MTL material: {', '.join(unbound[:8])}"
+                + (" ..." if len(unbound) > 8 else ""))
     if missing:
         raise AircraftAssetError(
             "aircraft.mesh_import",
@@ -546,7 +657,8 @@ def provision_models(names: Iterable[str], report: Report = print,
             continue
         manifest = mesh_manifest_path(name)
         needs_editor = ((not manifest.is_file()) or bool(missing_assets(manifest))
-                        or bool(stale_assets(manifest)))
+                        or bool(stale_assets(manifest))
+                        or import_record_reason(manifest) is not None)
         if needs_editor and not _editor_present() and \
                 unavailable_reason(name) is None:
             report(f"the {name} model needs the Unreal editor to import "
@@ -604,6 +716,6 @@ def ensure_model(name: str, report: Report = print) -> Path:
                 f"pinned commit is fetched from the upstream model "
                 f"repository, so this step needs network access") from exc
         manifest = convert(config_path, report)
-    if missing_assets(manifest) or stale_assets(manifest):
+    if missing_assets(manifest) or stale_assets(manifest) or import_record_reason(manifest):
         import_manifests([manifest], report)
     return manifest
