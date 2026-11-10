@@ -56,6 +56,31 @@ HERO_LIGHTING_PREFIX = "-hero-lighting="
 #: The sidecar's file name, written beside ``beauty_look.json``.
 SIDECAR_NAME = "hero_lighting.json"
 
+#: Round 5 (2026-11-10) shade probes: beauty-only A/B switches the host
+#: (FlightSimHeroLighting.cpp, the sky-light block) reads from the command
+#: line or ``FLIGHTSIM_RENDER_SWITCHES`` (the channel -sky-capture-restore=
+#: uses), recorded in render.json ``hero_lighting.sky_light.probes``. Each
+#: name maps to its accepted words, or to ``None`` for a number >= 0. The
+#: default of every one is the planned render, so a run that states none is
+#: byte-identical to before.
+#:
+#: Why they exist: #02 "super bright" kept its blue shade (mean sRGB 96/102/157
+#: -> 95/102/159) when round 4 made the stated fill neutral. Diffed plan to
+#: plan, #01 and #02 differ only in the relit sun (6 -> 72 deg), the opened
+#: exposure, the preset's four knob flags, the haze and this lane's fill; the
+#: engine applies the sky light's colour per frame (View.SkyLightColor), so the
+#: fill was never what coloured the shade. The shade's colour on the frame is
+#: Rayleigh's (R/B 0.06-0.12 in every row of the JPEG) and the airframe beside
+#: the camera is neutral: the shade is the atmosphere's in-scatter between
+#: camera and ground with (near) no fill under it. These switches split "the
+#: fill does not reach the ground" (red / off / cloud AO) from "the
+#: in-scatter outruns it" (aerial perspective) on the render machine.
+DIAGNOSTIC_SWITCHES: Dict[str, Optional[Tuple[str, ...]]] = {
+    "sky-fill-probe": ("as-planned", "red", "off"),
+    "sky-cloud-ao": ("on", "off"),
+    "aerial-perspective-scale": None,
+}
+
 
 class HeroLightingError(ValueError):
     """A lighting intent that cannot be realised as asked, refused by name."""
@@ -521,3 +546,35 @@ def flags_beside(beauty_look: Optional[Path]) -> List[str]:
         return []
     sidecar = Path(beauty_look).with_name(SIDECAR_NAME)
     return [f"{HERO_LIGHTING_PREFIX}{sidecar.resolve()}"] if sidecar.is_file() else []
+
+
+def parse_diagnostic_switches(text: str) -> Dict[str, Any]:
+    """The round-5 shade probes stated in ``text`` (a command line and/or the
+    FLIGHTSIM_RENDER_SWITCHES value), the way the host parses them: each of
+    :data:`DIAGNOSTIC_SWITCHES` by its first ``-name=value`` token, a word
+    checked against its accepted words, a number checked finite and >= 0.
+    Unstated switches are left out (the host renders as planned).
+    HeroLightingError names a value the host would refuse by name
+    (``render.sky_fill_probe``)."""
+    out: Dict[str, Any] = {}
+    for name, words in DIAGNOSTIC_SWITCHES.items():
+        match = re.search(rf"(?:^|\s)-?{re.escape(name)}=(\S*)", text or "")
+        if match is None:
+            continue
+        value = match.group(1)
+        if words is not None:
+            if value not in words:
+                raise HeroLightingError(
+                    "render.sky_fill_probe",
+                    f"render.sky_fill_probe: -{name}={value} is not one of {', '.join(words)}")
+            out[name] = value
+            continue
+        try:
+            number = float(value)
+        except ValueError:
+            number = math.nan
+        if not math.isfinite(number) or number < 0.0:
+            raise HeroLightingError("render.sky_fill_probe",
+                                    f"render.sky_fill_probe: -{name}={value} is not a number >= 0")
+        out[name] = number
+    return out

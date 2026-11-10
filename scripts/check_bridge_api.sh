@@ -798,6 +798,12 @@ hl_check "hero: SetEnableLightShaftBloom" "$HLL" "ENGINE_API void SetEnableLight
 hl_check "hero: SetBloomScale" "$HLL" "ENGINE_API void SetBloomScale(float NewValue);"
 hl_check "hero: SetBloomThreshold" "$HLL" "ENGINE_API void SetBloomThreshold(float NewValue);"
 hl_check "hero: SetBloomMaxBrightness" "$HLL" "ENGINE_API void SetBloomMaxBrightness(float NewValue);"
+# round 5 shade probes (FlightSimHeroLighting.cpp sky-light block; the commandlet's sky_light_capture_result)
+hl_check "hero: SkyLight GetProcessedSkyTexture" "$HLS" "const FTexture* GetProcessedSkyTexture() const"
+hl_check "hero: SkyLight bCloudAmbientOcclusion" "$HLS" "uint32 bCloudAmbientOcclusion : 1;"
+hl_check "hero: SkyLight MinOcclusion" "$HLS" "float MinOcclusion;"
+hl_check "hero: SkyLight LightColor (FColor, sRGB 8-bit)" "$HLB" "FColor LightColor;"
+hl_check "hero: SkyAtmosphere SetAerialPespectiveViewDistanceScale" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetAerialPespectiveViewDistanceScale(float NewValue);"
 hl_check "hero: SetVolumetricScatteringIntensity" "$HLL" "ENGINE_API void SetVolumetricScatteringIntensity(float NewIntensity);"
 hl_check "hero: ContactShadowLength" "$HLL" "float ContactShadowLength;"
 hl_check "hero: ContactShadowLengthInWS" "$HLL" "uint32 ContactShadowLengthInWS : 1;"

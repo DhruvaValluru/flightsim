@@ -11,6 +11,7 @@
 #include "Dom/JsonValue.h"
 #include "Engine/DirectionalLight.h"
 #include "HAL/IConsoleManager.h"
+#include "HAL/PlatformMisc.h"      // FLIGHTSIM_RENDER_SWITCHES (round 5 shade probes)
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "RenderUtils.h"
@@ -400,6 +401,87 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 		}
 		Sky->SetCaptureIsDirty();
 		Sky->MarkRenderStateDirty();
+
+		// -- round 5 shade probes (core/scene/hero_lighting.py DIAGNOSTIC_SWITCHES) --
+		// Round 4's neutral fill changed nothing in #02 (mean sRGB 96/102/157 ->
+		// 95/102/159), and its shade is Rayleigh-coloured in every row (R/B
+		// 0.06-0.12 on the JPEG) while the airframe beside the camera is neutral:
+		// the shade is lit by the atmosphere's in-scatter, not by this sky light.
+		// The engine applies the light's colour per frame (View.SkyLightColor in
+		// SkyLightingDiffuseShared.ush and VolumetricFog.usf), so the fill is
+		// either not reaching the ground or is small beside the in-scatter. Three
+		// beauty-only A/B switches, from the command line or
+		// FLIGHTSIM_RENDER_SWITCHES (the same channel as -sky-capture-restore=),
+		// each defaulting to the planned render; every value is recorded.
+		//  -sky-fill-probe=as-planned|red|off  red: the fill's colour is pure red
+		//      (an unmistakable witness of what the sky light lights); off: the
+		//      colour is black, so the sky light lights nothing (the frame
+		//      without any fill; this lane never changes an intensity)
+		//  -sky-cloud-ao=on|off                off: no cloud ambient occlusion on
+		//      the sky light (the clear world's cumulus layer sits over the shot)
+		//  -aerial-perspective-scale=<x>       the atmosphere's aerial perspective
+		//      view distance scale (0: no in-scatter between camera and ground;
+		//      the world lane's row value otherwise)
+		{
+			const FString Switches = FString(CommandLine != nullptr ? CommandLine : TEXT("")) + TEXT(" ")
+				+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+			TSharedPtr<FJsonObject> Probe = MakeShared<FJsonObject>();
+			Probe->SetStringField(TEXT("source"),
+				TEXT("-flags or FLIGHTSIM_RENDER_SWITCHES (beauty only; defaults are the planned render)"));
+			FString FillProbe = TEXT("as-planned");
+			FParse::Value(*Switches, TEXT("sky-fill-probe="), FillProbe);
+			if (FillProbe == TEXT("red"))
+			{
+				Sky->SetLightColor(FLinearColor(1.0f, 0.0f, 0.0f, 1.0f));
+			}
+			else if (FillProbe == TEXT("off"))
+			{
+				Sky->SetLightColor(FLinearColor::Black);
+			}
+			else if (FillProbe != TEXT("as-planned"))
+			{
+				return HeroLightingFail(FString::Printf(
+					TEXT("render.sky_fill_probe: -sky-fill-probe=%s is not as-planned, red or off"), *FillProbe));
+			}
+			Probe->SetStringField(TEXT("sky_fill_probe"), FillProbe);
+			FString CloudAo = TEXT("on");
+			FParse::Value(*Switches, TEXT("sky-cloud-ao="), CloudAo);
+			if (CloudAo == TEXT("off"))
+			{
+				Sky->bCloudAmbientOcclusion = false;
+			}
+			else if (CloudAo != TEXT("on"))
+			{
+				return HeroLightingFail(FString::Printf(
+					TEXT("render.sky_fill_probe: -sky-cloud-ao=%s is not on or off"), *CloudAo));
+			}
+			Probe->SetStringField(TEXT("sky_cloud_ao"), CloudAo);
+			double AerialScale = -1.0;
+			if (FParse::Value(*Switches, TEXT("aerial-perspective-scale="), AerialScale))
+			{
+				if (!FMath::IsFinite(AerialScale) || AerialScale < 0.0)
+				{
+					return HeroLightingFail(FString::Printf(
+						TEXT("render.sky_fill_probe: -aerial-perspective-scale=%g is not a number >= 0"), AerialScale));
+				}
+				if (Scene.Atmosphere != nullptr)
+				{
+					Scene.Atmosphere->SetAerialPespectiveViewDistanceScale(static_cast<float>(AerialScale));
+					Scene.Atmosphere->MarkRenderStateDirty();
+				}
+				Probe->SetNumberField(TEXT("aerial_perspective_scale"), AerialScale);
+			}
+			else
+			{
+				Probe->SetStringField(TEXT("aerial_perspective_scale"), TEXT("as-planned (the world lane's row)"));
+			}
+			Probe->SetObjectField(TEXT("sky_light_after_probes"), HeroLightingColorJson(FLinearColor(Sky->LightColor)));
+			Probe->SetNumberField(TEXT("sky_light_intensity_after_probes"), Sky->Intensity);
+			Probe->SetBoolField(TEXT("cloud_ambient_occlusion_after_probes"), Sky->bCloudAmbientOcclusion != 0);
+			SkyRecord->SetObjectField(TEXT("probes"), Probe);
+			Sky->SetCaptureIsDirty();
+			Sky->MarkRenderStateDirty();
+		}
 	}
 	else
 	{

@@ -5421,12 +5421,42 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		UE_LOG(LogFlightSimRender, Display,
 		       TEXT("sky light capture: start (%d components hidden for it; ef361bd6 scene state %s)"),
 		       SkyHidden.Num(), bSkyCaptureRestore ? TEXT("restored") : TEXT("not restored"));
+		// Round 5 (#02's blue shade): the engine skips or marks incomplete a
+		// SLS_CapturedScene capture taken while shaders compile
+		// (USkyLightComponent::UpdateSkyCaptureContentsArray), and a sky light
+		// with no processed texture lights the shade with nothing. Witnessed
+		// here, not assumed: look_applied.sky_light_capture_result.
+		const bool bShadersCompilingAtSkyCapture =
+			GShaderCompilingManager != nullptr && GShaderCompilingManager->IsCompiling();
 		VisualScene.SkyLightComponent->SetCaptureIsDirty();
 		USkyLightComponent::UpdateSkyCaptureContents(World);
 		FlushRenderingCommands();
 		BeatWatchdog(TEXT("the sky light capture"));
 		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: done"));
 		DrainGpu(TEXT("the sky light capture"));
+		if (VisualScene.LookApplied.IsValid())
+		{
+			USkyLightComponent* SkyAfter = VisualScene.SkyLightComponent;
+			TSharedPtr<FJsonObject> CaptureResult = MakeShared<FJsonObject>();
+			CaptureResult->SetBoolField(TEXT("processed_texture"), SkyAfter->GetProcessedSkyTexture() != nullptr);
+			CaptureResult->SetBoolField(TEXT("shaders_compiling_at_capture"), bShadersCompilingAtSkyCapture);
+			CaptureResult->SetBoolField(TEXT("real_time_capture"), SkyAfter->IsRealTimeCaptureEnabled());
+			CaptureResult->SetNumberField(TEXT("intensity_at_capture"), SkyAfter->Intensity);
+			const FLinearColor LightColour(SkyAfter->LightColor);
+			TSharedPtr<FJsonObject> Colour = MakeShared<FJsonObject>();
+			Colour->SetNumberField(TEXT("r"), LightColour.R);
+			Colour->SetNumberField(TEXT("g"), LightColour.G);
+			Colour->SetNumberField(TEXT("b"), LightColour.B);
+			CaptureResult->SetObjectField(TEXT("light_color_linear"), Colour);
+			CaptureResult->SetBoolField(TEXT("lower_hemisphere_solid"), SkyAfter->bLowerHemisphereIsBlack != 0);
+			CaptureResult->SetBoolField(TEXT("cloud_ambient_occlusion"), SkyAfter->bCloudAmbientOcclusion != 0);
+			CaptureResult->SetNumberField(TEXT("min_occlusion"), SkyAfter->MinOcclusion);
+			CaptureResult->SetStringField(TEXT("basis"),
+				TEXT("read back from the sky light right after USkyLightComponent::UpdateSkyCaptureContents; ")
+				TEXT("processed_texture false means the capture did not happen and the shade is lit by the ")
+				TEXT("atmosphere's in-scatter alone (round 5, docs/visual/PROBE_LOG.md)"));
+			VisualScene.LookApplied->SetObjectField(TEXT("sky_light_capture_result"), CaptureResult);
+		}
 		if (bSkyCaptureRestore)
 		{
 			FFlightSimBeautyFallback::ResumeAfterSkyCapture(VisualScene);
