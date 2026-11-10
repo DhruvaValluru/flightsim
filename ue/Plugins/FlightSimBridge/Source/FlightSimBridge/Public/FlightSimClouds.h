@@ -84,6 +84,7 @@ class FFlightSimVisualScene;
 class FFlightSimWeather;
 class UMaterialInstanceDynamic;
 class UMaterialParameterCollection;
+class UProceduralMeshComponent;
 class USkyLightComponent;
 class UVolumetricCloudComponent;
 class UWorld;
@@ -159,6 +160,18 @@ private:
 	// world_beauty.aircraft_clearance).
 	void KeepAircraftClearOfClouds(const TSharedPtr<FJsonObject>& Card, AActor* Aircraft,
 	                               FFlightSimWeather& Weather);
+	// Visual round 5, lane L3: the distant 2D cloud sheet (one earth-curved
+	// translucent disc at the deck's altitude, M_FlightSimDistantClouds; no
+	// depth, no custom depth, BeautyOnlyActors) and, on the constrained GPU,
+	// the volumetric march's trace shrunk to the near field it hands over to.
+	// Recorded in world_beauty.distant_clouds. -distant-clouds=on|off.
+	void ApplyDistantClouds(UWorld* World, FFlightSimVisualScene& Scene, FFlightSimWeather& Weather,
+	                        const FString& Mode, int32 Seed);
+	// Visual round 5, lane L3 (optional probe): -sky-hdri=<name> puts the
+	// pinned, sun-clamped Poly Haven sky (core/scene/sky_hdri.py, imported as
+	// /Game/FlightSim/Sky/T_SkyHdri_<name>) on the sky light as its specified
+	// cubemap, clear and hazy presets only. Recorded in world_beauty.sky_hdri.
+	bool ApplySkyHdri(FFlightSimVisualScene& Scene, const FString& Name, const TCHAR* Params, FString& Error);
 
 	bool bBuilt = false;
 	// A -sky= plan lights the scene (FFlightSimSky): it owns the sun's
@@ -184,6 +197,18 @@ private:
 	TArray<FString> Overridden;
 
 	TArray<FCloudLayerState> CloudLayers;
+	// Visual round 5, lane L3: the distant sheet (ApplyDistantClouds; Advance
+	// re-centres it on the camera and sets its altitude and fade per frame).
+	struct FDistantSheetState
+	{
+		AActor* Actor = nullptr;
+		UProceduralMeshComponent* Mesh = nullptr;
+		UMaterialInstanceDynamic* Material = nullptr;
+		double BaseM = 0.0;
+		double TopM = 0.0;
+		bool bDrawn = false;
+	};
+	FDistantSheetState DistantSheet;
 	// Drawn clouds the per-frame occlusion row does not model (ApplyClouds).
 	int32 UnmodelledClouds = 0;
 	double DriftMps = 0.0;

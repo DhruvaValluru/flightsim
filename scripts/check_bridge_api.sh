@@ -559,6 +559,51 @@ rp_check "clouds-sky: shadow sample cap 80" "Renderer/Private/VolumetricCloudRen
 rp_check "clouds-sky: view march blue-noise jitter" "../../Shaders/Private/VolumetricCloud.usf" "t = TMin + BlueNoiseScalar(FullResPixelCoord, View.StateFrameIndexMod8) * StepT;"
 rp_check "clouds-sky: shadow march unjittered" "../../Shaders/Private/VolumetricCloud.usf" "const float ShadowJitterNorm = 0.5f; // InterleavedGradientNoise"
 # -- clouds-sky round 2 -- end -------------------------------------------------
+# -- visual round 5, lane L3 (2026-11-10): the distant cloud sheet, the sky HDRI probe --
+# FlightSimClouds.cpp ApplyDistantClouds / ApplySkyHdri and the material the
+# editor script builds (scripts/ue_create_materials.py create_world_distant_clouds).
+# Each pattern was read in the 5.7 source on 2026-11-10.
+# The engine-content finding, recorded either way (the sky sphere is NOT used:
+# it would cover the SkyAtmosphere; the far deck is our own translucent sheet).
+if [ -f "$UE_ROOT/Engine/Content/EngineSky/BP_Sky_Sphere.uasset" ] && \
+   [ -f "$UE_ROOT/Engine/Content/EngineSky/M_Sky_Panning_Clouds2.uasset" ]; then
+    ok "distant: EngineSky sky sphere" "UE 5.7 still ships BP_Sky_Sphere + M_Sky_Panning_Clouds2 (recorded, not used)"
+else
+    ok "distant: EngineSky sky sphere" "absent in this engine (recorded; not used either way)"
+fi
+PMC="../../Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h"
+rp_check "distant: ProceduralMesh CreateMeshSection_LinearColor" "$PMC" "void CreateMeshSection_LinearColor(int32 SectionIndex, const TArray<FVector>& Vertices, const TArray<int32>& Triangles, const TArray<FVector>& Normals, const TArray<FVector2D>& UV0, const TArray<FLinearColor>& VertexColors, const TArray<FProcMeshTangent>& Tangents, bool bCreateCollision, bool bSRGBConversion = false)"
+rp_check "distant: Primitive SetRenderCustomDepth" "Engine/Classes/Components/PrimitiveComponent.h" "ENGINE_API void SetRenderCustomDepth(bool bValue);"
+rp_check "distant: Primitive SetTranslucentSortPriority" "Engine/Classes/Components/PrimitiveComponent.h" "ENGINE_API void SetTranslucentSortPriority(int32 NewTranslucentSortPriority);"
+rp_check "distant: Primitive SetReceivesDecals" "Engine/Classes/Components/PrimitiveComponent.h" "ENGINE_API void SetReceivesDecals(bool bNewReceivesDecals);"
+rp_check "distant: Primitive SetCastShadow" "Engine/Classes/Components/PrimitiveComponent.h" "ENGINE_API void SetCastShadow(bool NewCastShadow);"
+rp_check "distant: Material Apply Fogging" "Engine/Public/Materials/Material.h" "uint8 bUseTranslucencyVertexFog : 1;"
+rp_check "distant: Material bComputeFogPerPixel" "Engine/Public/Materials/Material.h" "uint8 bComputeFogPerPixel : 1;"
+rp_check "distant: Material bApplyCloudFogging" "Engine/Public/Materials/Material.h" "uint8 bApplyCloudFogging : 1;"
+rp_check "distant: Material AllowTranslucentCustomDepthWrites" "Engine/Public/Materials/Material.h" "uint8 AllowTranslucentCustomDepthWrites : 1;"
+rp_check "distant: Material bOutputTranslucentVelocity" "Engine/Public/Materials/Material.h" "uint8 bOutputTranslucentVelocity : 1;"
+rp_check "distant: SkyAtmosphereLightDirection node" "Engine/Public/Materials/MaterialExpressionSkyAtmosphereLightDirection.h" "class UMaterialExpressionSkyAtmosphereLightDirection"
+rp_check "distant: SkyAtmosphereLightIlluminance node" "Engine/Public/Materials/MaterialExpressionSkyAtmosphereLightIlluminance.h" "class UMaterialExpressionSkyAtmosphereLightIlluminance"
+rp_check "distant: SkyAtmosphereDistantLightScatteredLuminance node" "Engine/Public/Materials/MaterialExpressionSkyAtmosphereLightIlluminance.h" "class UMaterialExpressionSkyAtmosphereDistantLightScatteredLuminance"
+rp_check "distant: sky light node LightIndex" "Engine/Public/Materials/MaterialExpressionSkyAtmosphereLightDirection.h" "int32 LightIndex;"
+rp_check "distant: translucency applies cloud fogging" "../../Shaders/Private/BasePassPixelShader.usf" "TranslucentBasePass.ApplyVolumetricCloudOnTransparent > 0.0f"
+# The march's cost law the trace shrink rests on: the sample count is
+# non-decreasing in the traced path, capped at SampleCountMax past
+# r.VolumetricCloud.DistanceToSampleMaxCount, so a shorter trace never adds a sample.
+rp_check "distant: cloud sample count law" "../../Shaders/Private/VolumetricCloud.usf" "RenderVolumetricCloudParameters.SampleCountMax * saturate((TMax - TMin) * RenderVolumetricCloudParameters.InvDistanceToSampleCountMax)"
+rp_cvar r.VolumetricCloud.DistanceToSampleMaxCount "Renderer/Private/VolumetricCloudRendering.cpp"
+rp_check "distant: trace clamps TMax" "../../Shaders/Private/VolumetricCloud.usf" "const float MarchingDistance = min(RenderVolumetricCloudParameters.TracingMaxDistance, TMax - TMin);"
+# The sky HDRI probe (ApplySkyHdri).
+rp_check "sky-hdri: SLS_SpecifiedCubemap" "Engine/Classes/Components/SkyLightComponent.h" "SLS_SpecifiedCubemap,"
+rp_check "sky-hdri: SkyLight SourceType" "Engine/Classes/Components/SkyLightComponent.h" "TEnumAsByte<enum ESkyLightSourceType> SourceType;"
+rp_check "sky-hdri: SkyLight Cubemap" "Engine/Classes/Components/SkyLightComponent.h" "TObjectPtr<class UTextureCube> Cubemap;"
+rp_check "sky-hdri: SkyLight SetCubemap" "Engine/Classes/Components/SkyLightComponent.h" "ENGINE_API void SetCubemap(UTextureCube* NewCubemap);"
+rp_check "sky-hdri: SkyLight SetSourceCubemapAngle" "Engine/Classes/Components/SkyLightComponent.h" "ENGINE_API void SetSourceCubemapAngle(float NewValue);"
+rp_check "sky-hdri: SkyLight SetRealTimeCapture" "Engine/Classes/Components/SkyLightComponent.h" "ENGINE_API void SetRealTimeCapture(bool bInRealTimeCapture);"
+rp_check "sky-hdri: SkyLight SetCaptureIsDirty" "Engine/Classes/Components/SkyLightComponent.h" "ENGINE_API void SetCaptureIsDirty();"
+rp_check "sky-hdri: SkyLight IsRealTimeCaptureEnabled" "Engine/Classes/Components/SkyLightComponent.h" "IsRealTimeCaptureEnabled()"
+rp_check "sky-hdri: UTextureCube header" "Engine/Classes/Engine/TextureCube.h" "class UTextureCube"
+# -- visual round 5, lane L3 -- end --------------------------------------------
 
 # -- sun-shafts-sky-occlusion (visual overhaul, 2026-11-09) -----------------
 # FlightSimSunShafts.cpp: the sun's light shafts and cloud shadow, the sky

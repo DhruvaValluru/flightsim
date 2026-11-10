@@ -2900,3 +2900,97 @@ metallic on paint, panel lines drawn as a grid, and an opaque dark canopy.
 - **Probe items (UNCALIBRATED):** AlbedoMax, SootAmount / SootLengthRadii, MetalColourWeight,
   the thin canopy's Transmittance and GlassDiffuse, the coat roughness 0.08. A/B pair on #01
   and the J-11 head shots: `-labels` on vs off shows the opaque vs thin canopy.
+
+## round-5 distant clouds (L3)
+
+Round 5 lane L3, 2026-11-10, Mac, uncompiled; nothing rendered. Target: round 3's #03, #06,
+#09 and #13 (thin, streaky volumetric clouds that end a few tens of km out; an empty horizon).
+
+**Engine content.** UE 5.7 still ships `/Engine/EngineSky/BP_Sky_Sphere` (and a misspelt
+`BP_Sky_Shere`), `SM_SkySphere`, `M_Sky_Panning_Clouds`, `M_Sky_Panning_Clouds2(_Inst)`,
+`T_Sky_Clouds_M`, the three colour curves, and `EngineSky/VolumetricClouds/` (the simple
+cloud material, `T_CloudMask`, `T_CloudPattern`, `CloudWeatherTexture`). Not used: a sky
+sphere is an opaque dome and would cover the SkyAtmosphere (`check_bridge_api.sh` records
+the finding as an ok line either way).
+
+**Design (zero march cost).** `FFlightSimWorldBeauty::ApplyDistantClouds` spawns ONE
+`UProceduralMeshComponent` disc (48 rings x 96 segments, radius 300 km, ring i at
+300 x (i/48)^2 km, each ring dropped by d^2 / 2R_earth: 7.1 km at the rim) on
+`M_FlightSimDistantClouds`: unlit, translucent, two-sided, Apply Fogging per pixel, cloud
+fogging on, no custom-depth write, no velocity; `SetRenderCustomDepth(false)`,
+`SetCastShadow(false)`, no collision, translucent sort priority -100, in
+`Scene.BeautyOnlyActors` (hidden on every label capture). `distant_clouds.hlsl` evaluates
+the volumetric layer's own Perlin-Worley shape at the layer's mid-altitude slice (same seed
+offset, same wind, same quantile cut at the layer's cover), so the far sheet continues the
+near cells; its normal is solved from the shape's screen-space derivatives (no second
+sample); light = sun illuminance x albedo / pi x wrapped N.L + the sky's distant scattered
+luminance x albedo (both from the SkyAtmosphere material nodes, light 0), bases darkened
+from below, a sun-coloured silver lining on backlit thin edges (forward lobe, exponent 8);
+opacity = density boosted by the slant path (1 / |cos|), faded in over 8 km up to the
+volumetric march's trace end, out over the outer 20 % of the disc, off with the camera
+inside the slab. `Advance` re-centres the disc on the camera every frame and puts it at
+the deck's base (camera below the slab's middle: bases) or top (above: tops), recorded per
+frame (`frames[].distant_sheet_altitude_m / _from_above / _fade`). Source deck: the first
+redrawn layer (after the aircraft clearance), else the storm cell's deck at the nimbostratus
+row's cover; none -> recorded, nothing drawn.
+
+**The march hands over.** On the constrained GPU (`CloudConstrainedGpu`), with the sheet
+drawn, every redrawn layer's `TracingMaxDistance` goes from the row's 80 km to
+`DISTANT_NEAR_FIELD_KM` 32 km (`distant_tracing_max_km`; the discrete row's 50 km is kept).
+Cost law (`VolumetricCloud.usf`): StepCount = SampleCountMax x saturate(path x
+InvDistanceToSampleCountMax), InvDistanceToSampleCountMax = 1 / r.VolumetricCloud.
+DistanceToSampleMaxCount (15 km), so the count is non-decreasing in the traced path and a
+shorter trace never adds a sample; it only shortens the step (417 m -> 167 m on the
+constrained row) and lets the transmittance exit come sooner. The constrained march row
+itself (192 view, 10 shadow, 80 km) is untouched; `world_beauty.CLOUD_MARCH` and
+tests/test_cloud_jitter_blue_noise.py still pin it. Recorded in
+`look_applied.world_beauty.distant_clouds.volumetric_trace`.
+
+**Switches.** `-distant-clouds=on|off` / `FLIGHTSIM_DISTANT_CLOUDS` (default on, beauty
+only; an unknown word refuses `world_beauty.distant_clouds`). `-sky-hdri=<name>` /
+`FLIGHTSIM_SKY_HDRI` (default off), `-sky-hdri-fill=<share>` (default 0.15 of the sun's
+illuminance), `-sky-hdri-yaw=<deg>` (the cubemap's rotation; the sidecar's
+`sun_longitude_deg` is the image's sun azimuth, 36.1 deg for qwantani_puresky).
+
+**Sky HDRI probe (optional, clear and hazy presets only).** `core/scene/sky_hdri.py` pins
+Poly Haven's `qwantani_puresky` 4K (CC0, sha256 5776f890...14d1, 17.9 MB), fetches it
+into `%LOCALAPPDATA%\flightsim\hdri` at first use, refuses a wrong digest by name, and
+writes a sky-light copy with the sun disk CLAMPED at 32 x the upper hemisphere's median
+luminance (measured on the Mac: 3,534 pixels held 69 % of the upper hemisphere's energy;
+an unclipped sun in a specified cubemap would light the scene a second time beside the
+directional light) and the upper hemisphere's mean luminance normalised to 1. The editor
+script imports it as `/Game/FlightSim/Sky/T_SkyHdri_<name>` when `FLIGHTSIM_SKY_HDRI`
+names it; `ApplySkyHdri` sets `SourceType = SLS_SpecifiedCubemap`, the cubemap, the yaw,
+real-time capture off, and intensity = fill_share x the sun light's lux / pi. The #02
+history says watch the blue: the record keeps `intensity_before`, `sun_lux_at_build` and
+the fill share for the A/B.
+
+**Probe r5-L3 (Windows, after the build and the material rebuild; MATERIAL-CREATED
+M_FlightSimDistantClouds expected):**
+1. `#13` (747 over the ocean) and `#03` (A320 over New York) at beauty, default switches,
+   then the same two with `-distant-clouds=off` (via FLIGHTSIM_RENDER_SWITCHES or
+   FLIGHTSIM_DISTANT_CLOUDS=off). Pass: the horizon carries a continuous, hazed deck that
+   the near volumetric cells run into with no visible seam at ~24-32 km; the far deck is
+   fogged to the sky's colour at the horizon (aerial perspective, not a grey band); no
+   change in the mask, class or depth PNGs between the pair (byte-identical labels).
+   Read `look_applied.world_beauty.distant_clouds` (drawn, base_m/top_m, cover,
+   volumetric_trace.shrunk true on the laptop) and the frame time: it must not rise against
+   the off frame (the trace shrank, the sheet is one pass).
+2. `#09` (747 through a thunderstorm): the storm deck's continuation to the horizon under
+   the cell (cover_basis names the storm deck). Pass: the frame's horizon is closed by
+   deck, the M_StormCell tower untouched.
+3. `head5 d` from 3.8 km (above the deck): the sheet at the top, sunlit tops with a dark
+   contrast where the relief faces away from the sun; a visible silver lining only when the
+   sun is low and behind the cloud.
+4. Sky HDRI, `#01` and `#02` only: `python -m core.scene.sky_hdri prepare qwantani_puresky`,
+   `FLIGHTSIM_SKY_HDRI=qwantani_puresky` for the editor script (SKY-HDRI-IMPORTED on the
+   log), then the render with `-sky-hdri=qwantani_puresky`, paired with the captured sky.
+   Measure the shade's mean sRGB (round 3's #02: 95/102/159). Pass: the shade's R/B moves
+   toward the airframe's (neutral), the sky light's `intensity` in the record is 0.15 x
+   sun lux / pi, and no second sun shows on the airframe (the clamp held). If the blue
+   persists, the fill is not the cause (hero lighting's round-5 shade probes are next).
+   If a blue CAST appears where the captured sky had none, the HDRI's white balance (5400 K)
+   is the suspect: lower `-sky-hdri-fill=` or drop the probe; never a global tint.
+Failure witnesses: `distant_clouds.drawn` starting "nothing:" names why (material missing:
+run the editor script); a frame time that rose with the sheet on means the sheet is
+over-drawn (two-sided over the whole sky): first lower DISTANT_RADIUS_KM, then RINGS.
