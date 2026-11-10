@@ -34,11 +34,24 @@ for the actor origin that puts the CG on the commanded point). So
 
     body = ((cg_x - x) / 39.3701, y / 39.3701, (cg_z - z) / 39.3701)
 
-with the CG read from the same XML's ``<location name="CG">``. Checked
-against three numbers that come from nowhere near this code: the
-c172p's tips land at +-5.46 m (its wingspan is 10.91 m), the A320's at
-+-16.96 m (33.92 m), and the A320's nose-to-tail is 37.5 m against the
-type's 37.57 m.
+with the CG the FDM flies at its DEFAULT LOADING: the empty weight at
+the XML's ``<location name="CG">`` plus every ``<pointmass>`` and every
+tank's ``<contents>`` (core.scenario.camera._fdm_loaded_cg, equal to
+JSBSim's own inertia/cg-*-in after run_ic). Not the empty CG: the
+plugin places the actor by JSBSim's RUNTIME CG
+(UJSBSimMovementComponent::CGLocalPosition, recomputed every tick) and
+the telemetry's lat/lon/alt is that point, while the mesh is fixed in
+the actor frame about the structural datum (mesh_origin_actor_cm). So a
+keypoint taken about the empty CG sat off the drawn aircraft by the
+loaded-minus-empty CG: 0.35 m forward on the J-11 (half-tank fuel),
+0.39 m forward and 0.11 m up on the A320, 6 cm low on the B747, 3-4 cm
+on the c172p (pilot and fuel). Still not modelled: a spec ``loading``
+block's own station and fuel writes, and fuel burned in flight (the
+telemetry's cg_x_m records the flown CG per sample). Checked against
+three numbers that come from nowhere near this code: the c172p's tips
+land at +-5.46 m (its wingspan is 10.91 m), the A320's at +-16.96 m
+(33.92 m), and the A320's nose-to-tail is 37.5 m against the type's
+37.57 m.
 
 The 3-D box is the airframe's OVERALL extents, not a tight hull:
 nose-to-tail in x, the FDM wingspan in y, and in z from the lowest gear
@@ -131,6 +144,8 @@ class Airframe:
     height_m: float
     dimensions_source: str
     span_source: str
+    #: The CG the body frame is about, structural inches: the FDM's
+    #: default loading (see the module docstring), not the XML's empty CG.
     cg_structural_in: Tuple[float, float, float]
     keypoints: Dict[str, Keypoint]
     config_sha256: str
@@ -140,6 +155,8 @@ class Airframe:
     components: Tuple[Component, ...] = ()
     #: The config's default loadout (``loading.loadout``), {} when none.
     loadout: Dict = field(default_factory=dict)
+    #: Where cg_structural_in came from, in words.
+    cg_source: str = ""
 
     # -- the box ----------------------------------------------------------
 
@@ -180,6 +197,7 @@ class Airframe:
             "dimensions_source": self.dimensions_source,
             "span_source": self.span_source,
             "cg_structural_in": list(self.cg_structural_in),
+            "cg_source": self.cg_source,
             "body_frame": "metres about the CG: x forward, y right, z down",
             "box_body_m": {k: list(v) for k, v in box.items()},
             "keypoints": [self.keypoints[n].to_dict() for n in KEYPOINT_NAMES
@@ -323,6 +341,24 @@ def _read_components(config: Dict, path: Path, model: Dict,
     return tuple(out)
 
 
+def loaded_cg_in(aircraft: str, xml_path: Path,
+                 empty_cg_in: Tuple[float, float, float]
+                 ) -> Tuple[Tuple[float, float, float], str]:
+    """(CG in structural inches, its description): the CG of the FDM's
+    default loading read from ``xml_path`` -- the point the host places
+    the mesh by and the telemetry describes -- else, when the XML states
+    no weights, the empty CG it names, said so."""
+    from ..scenario.camera import _fdm_loaded_cg
+
+    loaded = _fdm_loaded_cg(aircraft, xml_path)
+    if loaded is None:
+        return (tuple(float(v) for v in empty_cg_in),
+                "its <location name=\"CG\"> (the XML states no weights to load)")
+    return (tuple(float(v) / INCH_M for v in loaded),
+            "the FDM's CG at its default loading (empty weight, pointmasses and "
+            "tank contents; the point the host flies)")
+
+
 def structural_to_body(point_in: Tuple[float, float, float],
                        cg_in: Tuple[float, float, float]
                        ) -> Tuple[float, float, float]:
@@ -366,7 +402,7 @@ def load_airframe(aircraft: str, config_dir: Optional[Path] = None
     if not xml_path.is_file():
         raise AirframeLabelError(f"FDM XML for {fdm!r} not found at {xml_path}")
     model = _read_fdm(xml_path)
-    cg = model["cg_in"]
+    cg, cg_words = loaded_cg_in(aircraft, xml_path, model["cg_in"])
 
     keypoints: Dict[str, Keypoint] = {}
     missing: List[str] = []
@@ -388,7 +424,7 @@ def load_airframe(aircraft: str, config_dir: Optional[Path] = None
                 name, structural_to_body(loc, cg),
                 source=f"{xml_path.name} <contact type=\"{kind}\" "
                        f"name=\"{definition['fdm_contact']}\"> location, "
-                       f"about the same file's <location name=\"CG\">",
+                       f"about {cg_words}",
                 basis="fdm")
         elif "fdm_wingspan" in definition:
             side = definition["fdm_wingspan"]
@@ -438,4 +474,5 @@ def load_airframe(aircraft: str, config_dir: Optional[Path] = None
         missing=tuple(missing),
         components=components,
         loadout=loadout,
+        cg_source=f"{xml_path.name}: {cg_words}",
     )

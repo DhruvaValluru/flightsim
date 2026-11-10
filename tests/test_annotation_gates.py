@@ -295,8 +295,9 @@ def _pinhole(record, point):
 
 
 #: The payload pod's box in the primary's body frame (metres about the
-#: CG): on the crown of the fuselage, 0.5 m proud of the airframe box.
-PAYLOAD_BOX_BODY = {"forward": (-10.0, 10.0), "right": (-6.0, 6.0), "down": (-15.0, -12.0)}
+#: CG): a pod 0.37 m outboard of the left wingtip at the aft face, so the chase
+#: frame gains one pixel column from it, within TIGHT_INSIDE_TOL_PX of bbox_2d.
+PAYLOAD_BOX_BODY = {"forward": (-36.9, -30.0), "right": (-32.6, -28.0), "down": (-3.0, 3.0)}
 PAYLOAD_INT_ID = 64
 
 

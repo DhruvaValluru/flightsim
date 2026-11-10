@@ -264,7 +264,7 @@ def _fdm_locations(aircraft: str) -> Dict[str, tuple]:
 _WEIGHT_LB = {"LBS": 1.0, "LB": 1.0, "KG": 2.20462262185}
 
 
-def _fdm_loaded_cg(aircraft: str) -> Optional[tuple]:
+def _fdm_loaded_cg(aircraft: str, xml_path: Optional[Path] = None) -> Optional[tuple]:
     """The CG of the FDM's own default loading, metres in the structural
     frame (x aft, y right, z up): the empty weight at <location name="CG">
     plus every <pointmass> and every <tank>'s <contents>, sum(m r) / sum(m)
@@ -279,8 +279,15 @@ def _fdm_loaded_cg(aircraft: str) -> Optional[tuple]:
     12.792 m, 0.349 m forward of the empty CG at 13.141 m (measured with
     the .venv JSBSim 2026-11-10), so an eye offset taken from the empty CG
     put head2 shot d's lens 0.35 m forward of the modelled eye, under the
-    canopy bow with the glareshield hood looming."""
-    path = _fdm_xml(_fdm_name(aircraft)) if aircraft else None
+    canopy bow with the glareshield hood looming.
+
+    ``xml_path``, when given, is the XML to read instead of the one the
+    aircraft name resolves to (core.capture.airframe passes the file it
+    read and hashed, so its keypoints and this CG come from one file).
+    The labels' body frame is about this point for the same reason
+    (core.capture.airframe.load_airframe)."""
+    path = (Path(xml_path) if xml_path is not None
+            else _fdm_xml(_fdm_name(aircraft)) if aircraft else None)
     if path is None:
         return None
     import xml.etree.ElementTree as ET

@@ -43,11 +43,15 @@ from tests.test_camera_poses import FRAME, make_columns
 def test_structural_to_body_mapping_against_the_fdm_s_own_geometry():
     """Three figures that come from nowhere near this code: the c172p's
     wingtips must land at +-half its <wingspan>, the A320's likewise, and
-    the A320's nose-to-tail must be its overall length."""
+    the A320's nose-to-tail must be its overall length. About the
+    centreline: the body frame is about the default-loading CG, which the
+    c172p's left-seat pilot puts 3.4 cm left of it."""
     c172 = load_airframe("c172p")
-    assert c172.keypoints["left_wingtip"].body_m[1] == pytest.approx(
+    centreline = c172.cg_structural_in[1] * 0.0254
+    assert centreline == pytest.approx(-0.034, abs=0.001)
+    assert c172.keypoints["left_wingtip"].body_m[1] + centreline == pytest.approx(
         -c172.span_m / 2.0, abs=0.02)
-    assert c172.keypoints["right_wingtip"].body_m[1] == pytest.approx(
+    assert c172.keypoints["right_wingtip"].body_m[1] + centreline == pytest.approx(
         c172.span_m / 2.0, abs=0.02)
     a320 = load_airframe("A320")
     assert a320.keypoints["left_wingtip"].body_m[1] == pytest.approx(
@@ -155,9 +159,14 @@ def test_labels_match_hand_arithmetic():
     fx = record["fx_px"]
     # The CG sits on the principal point at 1000 m.
     assert labels["bbox_3d_camera"]["cg_m"] == pytest.approx([0.0, 0.0, 1000.0])
-    # The nose is 33.71 m further north: deeper, not displaced.
+    # The nose is 33.71 m further north: deeper, not displaced sideways;
+    # 5.7 cm above the default-loading CG (fuel low in the wings), so up
+    # by fy * 0.057 / depth.
     nose = labels["keypoints"]["nose"]
-    assert (nose["u"], nose["v"]) == pytest.approx((640.0, 360.0))
+    down = airframe.keypoints["nose"].body_m[2]
+    assert down == pytest.approx(-0.0573, abs=0.001)
+    assert (nose["u"], nose["v"]) == pytest.approx(
+        (640.0, 360.0 + record["fy_px"] * down / nose["depth_m"]))
     assert nose["depth_m"] == pytest.approx(1000.0 + airframe.keypoints["nose"].body_m[0])
     # Wingtips +-span/2 abeam, 1.27 m aft: +-(32.23 * fx / 1001.27) px.
     half = airframe.span_m / 2.0
