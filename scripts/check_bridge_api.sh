@@ -1045,6 +1045,105 @@ bf_cvar r.Shadow.MaxResolution "Core/Private/HAL/ConsoleManager.cpp"
 bf_cvar r.Lumen.Supported.SM5 "Renderer/Private/Lumen/Lumen.cpp"
 # ------------------------------------------------------ END beauty fallback --
 
+# -- round-5 engine look (lane L1, 2026-11-10) -- BEGIN engine look --
+# FlightSimBeautyLook.cpp ApplyEngineLook: the renderer's built-in lighting and
+# post effects per world preset (core/scene/beauty_look.py ENGINE_LOOK). Each
+# post-process member and its bOverride_ was read in Scene.h, each light / fog
+# member and setter in its component header, each cvar at its definition, and
+# the engine-default kernel and grain textures in SceneRendering.cpp, on the
+# authoring Mac (no compile there); re-checked here before a build is spent.
+el_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
+    local f="$UE_ROOT/Engine/Source/Runtime/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- FlightSimBeautyLook.cpp (engine look) needs updating"
+    fi
+}
+ELS="Engine/Classes/Engine/Scene.h"
+ELD="Engine/Classes/Components/DirectionalLightComponent.h"
+ELL="Engine/Classes/Components/LightComponent.h"
+ELF="Engine/Classes/Components/ExponentialHeightFogComponent.h"
+for p in IndirectLightingIntensity AmbientOcclusionIntensity AmbientOcclusionRadius \
+         AmbientOcclusionQuality AmbientOcclusionPower AmbientOcclusionStaticFraction \
+         AmbientOcclusionMipBlend AmbientOcclusionTemporalBlendWeight AmbientOcclusionRadiusInWS \
+         BloomSizeScale BloomConvolutionSize BloomConvolutionScatterDispersion \
+         BloomConvolutionPreFilterMin BloomConvolutionPreFilterMax BloomConvolutionPreFilterMult \
+         BloomConvolutionBufferScale LensFlareBokehSize FilmGrainIntensity \
+         FilmGrainIntensityShadows FilmGrainIntensityMidtones FilmGrainIntensityHighlights \
+         FilmGrainShadowsMax FilmGrainHighlightsMin FilmGrainHighlightsMax FilmGrainTexelSize \
+         DepthOfFieldSqueezeFactor ScreenSpaceReflectionIntensity ScreenSpaceReflectionQuality \
+         ScreenSpaceReflectionMaxRoughness; do
+    el_check "engine look: PostProcess $p" "$ELS" "bOverride_$p"
+done
+el_check "engine look: EBloomMethod BM_FFT" "$ELS" "BM_FFT"
+el_check "engine look: AmbientOcclusionRadiusInWS is a bit" "$ELS" "uint32 AmbientOcclusionRadiusInWS:1;"
+el_check "engine look: GI method None" "Engine/Classes/Engine/EngineTypes.h" "namespace EDynamicGlobalIlluminationMethod"
+el_check "engine look: reflection method None" "Engine/Classes/Engine/EngineTypes.h" "namespace EReflectionMethod"
+el_check "engine look: Directional SetDynamicShadowDistanceMovableLight" "$ELD" "ENGINE_API void SetDynamicShadowDistanceMovableLight(float NewValue);"
+el_check "engine look: Directional SetShadowDistanceFadeoutFraction" "$ELD" "ENGINE_API void SetShadowDistanceFadeoutFraction(float NewValue);"
+el_check "engine look: Directional SetCascadeTransitionFraction" "$ELD" "ENGINE_API void SetCascadeTransitionFraction(float NewValue);"
+el_check "engine look: Directional ShadowDistanceFadeoutFraction" "$ELD" "float ShadowDistanceFadeoutFraction;"
+el_check "engine look: Directional CascadeTransitionFraction" "$ELD" "float CascadeTransitionFraction;"
+el_check "engine look: Directional DistanceFieldShadowDistance" "$ELD" "float DistanceFieldShadowDistance;"
+el_check "engine look: Directional LightSourceAngle" "$ELD" "float LightSourceAngle;"
+el_check "engine look: Light bUseRayTracedDistanceFieldShadows" "$ELL" "bool bUseRayTracedDistanceFieldShadows;"
+el_check "engine look: Light SetUseRayTracedDistanceFieldShadows" "$ELL" "ENGINE_API void SetUseRayTracedDistanceFieldShadows(bool bNewValue);"
+el_check "engine look: Light ContactShadowLength" "$ELL" "float ContactShadowLength;"
+el_check "engine look: Light ContactShadowLengthInWS" "$ELL" "uint32 ContactShadowLengthInWS : 1;"
+el_check "engine look: Light ContactShadowCastingIntensity" "$ELL" "float ContactShadowCastingIntensity;"
+el_check "engine look: Light ContactShadowNonCastingIntensity" "$ELL" "float ContactShadowNonCastingIntensity;"
+el_check "engine look: Light GetDirection" "$ELL" "ENGINE_API FVector GetDirection() const;"
+el_check "engine look: Light VolumetricScatteringIntensity" "Engine/Classes/Components/LightComponentBase.h" "float VolumetricScatteringIntensity;"
+el_check "engine look: Fog SetVolumetricFogAlbedo" "$ELF" "ENGINE_API void SetVolumetricFogAlbedo(FColor NewValue);"
+el_check "engine look: Fog VolumetricFogAlbedo" "$ELF" "FColor VolumetricFogAlbedo;"
+el_check "engine look: Fog VolumetricFogScatteringDistribution" "$ELF" "float VolumetricFogScatteringDistribution;"
+el_check "engine look: Fog VolumetricFogExtinctionScale" "$ELF" "float VolumetricFogExtinctionScale;"
+el_check "engine look: Fog VolumetricFogDistance" "$ELF" "float VolumetricFogDistance;"
+el_check "engine look: Fog bEnableVolumetricFog" "$ELF" "bool bEnableVolumetricFog;"
+el_check "engine look: SceneComponent GetForwardVector" "Engine/Classes/Components/SceneComponent.h" "ENGINE_API FVector GetForwardVector() const;"
+el_check "engine look: SceneCapture2D TextureTarget" "Engine/Classes/Components/SceneCaptureComponent2D.h" "TObjectPtr<class UTextureRenderTarget2D> TextureTarget;"
+el_check "engine look: RenderTarget2D SizeX" "Engine/Classes/Engine/TextureRenderTarget2D.h" "int32 SizeX;"
+el_check "engine look: ObjectIterator" "CoreUObject/Public/UObject/UObjectIterator.h" "class TObjectIterator"
+# The premises: film grain and FFT bloom fall back to the engine's own textures
+# when the post-process texture is null, and SSAO runs on intensity > 0.
+el_check "engine look: premise default grain texture" "Renderer/Private/SceneRendering.cpp" "FilmGrainTexture = GEngine->DefaultFilmGrainTexture;"
+el_check "engine look: premise default bloom kernel" "Renderer/Private/SceneRendering.cpp" "BloomConvolutionTexture = GEngine->DefaultBloomKernelTexture;"
+el_check "engine look: premise SSAO on intensity" "Renderer/Private/CompositionLighting/CompositionLighting.cpp" "View.FinalPostProcessSettings.AmbientOcclusionIntensity > 0"
+el_check "engine look: premise PCSS is FilterMethod 1" "Renderer/Private/ShadowRendering.cpp" "TEXT(\" 1: PCSS (experimental)\\n\"),"
+el_cvar() {  # cvar name, file (relative to $UE_ROOT/Engine/Source/Runtime)
+    el_check "engine look: cvar $1" "$2" "TEXT(\"$1\"),"
+}
+el_cvar r.SSGI.Quality "Renderer/Private/ScreenSpaceRayTracing.cpp"
+el_cvar r.SSR.Quality "Renderer/Private/ScreenSpaceRayTracing.cpp"
+el_cvar r.SSR.HalfResSceneColor "Renderer/Private/ScreenSpaceRayTracing.cpp"
+el_cvar r.AmbientOcclusionMaxQuality "Renderer/Private/CompositionLighting/PostProcessAmbientOcclusion.cpp"
+el_cvar r.AmbientOcclusionLevels "Renderer/Private/CompositionLighting/PostProcessAmbientOcclusion.cpp"
+el_cvar r.Shadow.MaxResolution "Core/Private/HAL/ConsoleManager.cpp"
+el_cvar r.Shadow.MaxCSMResolution "Core/Private/HAL/ConsoleManager.cpp"
+el_cvar r.Shadow.CSM.MaxCascades "Renderer/Private/SceneRendering.cpp"
+el_cvar r.Shadow.FilterMethod "Renderer/Private/ShadowRendering.cpp"
+el_cvar r.Shadow.MaxSoftKernelSize "Renderer/Private/ShadowRendering.cpp"
+el_cvar r.DistanceFieldShadowing "Renderer/Private/DistanceFieldShadowing.cpp"
+el_cvar r.ContactShadows "Core/Private/HAL/ConsoleManager.cpp"
+el_cvar r.LensFlareQuality "Renderer/Private/PostProcess/PostProcessLensFlares.cpp"
+el_cvar r.FilmGrain "Renderer/Private/SceneRendering.cpp"
+el_cvar r.VolumetricFog "Renderer/Private/VolumetricFog.cpp"
+el_cvar r.VolumetricFog.GridPixelSize "Renderer/Private/VolumetricFog.cpp"
+el_cvar r.VolumetricFog.GridSizeZ "Renderer/Private/VolumetricFog.cpp"
+el_cvar r.TSR.History.ScreenPercentage "Renderer/Private/PostProcess/TemporalSuperResolution.cpp"
+el_cvar r.TSR.History.SampleCount "Renderer/Private/PostProcess/TemporalSuperResolution.cpp"
+for f in ScreenSpaceAO AmbientOcclusion RayTracedDistanceFieldShadows ContactShadows LensFlares Grain Bloom; do
+    if grep -qE -- "$(showflag_pattern "$f")" "$UE_ROOT/Engine/Source/Runtime/Engine/Public/ShowFlagsValues.inl" 2>/dev/null; then
+        ok "engine look: show flag $f" "present"
+    else
+        bad "engine look: show flag $f" "not found in ShowFlagsValues.inl"
+    fi
+done
+# ------------------------------------------------------ END engine look --
+
 # -- round-2b weather-fx (2026-11-09) -- BEGIN weather-fx --
 # FlightSimAircraftFX.cpp (the lamps' volumetric scattering and source radius),
 # FlightSimWeatherLook.cpp (ApplyBeautyWeatherLook: the shafts' parameters and the

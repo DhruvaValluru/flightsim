@@ -81,6 +81,22 @@ What is decided here, and on what basis
 * **Local exposure and reflections** (:data:`LOCAL_EXPOSURE`,
   :data:`REFLECTIONS`): UE 5.1+ bilateral local exposure for shadowed
   valleys; Lumen and screen-space reflection quality raised.
+* **The engine look** (visual round 5, lane L1; :data:`ENGINE_LOOK`,
+  :func:`engine_look_for`): the renderer's built-in lighting and post
+  effects, PER WORLD PRESET (core/scene/world_beauty.py PRESETS: clear,
+  hazy, overcast, rain, storm): screen-space GI and reflections, SSAO, the
+  sun's cascaded and distance-field shadows (PCSS), contact shadows, local
+  exposure, bloom (Gaussian, plus FFT convolution as a probe), the lens
+  flare (drawn only with the sun in or just outside the frame), the film
+  grain's shadow/midtone/highlight split, the volumetric fog's albedo and
+  grid, the still's TSR warm-up and accumulation, and the full-frame
+  filmback. Every effect has a ``-look-<name>=`` switch
+  (:data:`ENGINE_LOOK_SWITCHES`, read from the command line or
+  ``FLIGHTSIM_RENDER_SWITCHES``) and every value lands in render.json
+  ``beauty_look.applied.engine_look``; the costly ones are PROBES whose
+  ``auto`` is off on the constrained GPU (``FFlightSimWorldBeauty::
+  ConstrainedGpu``: the Intel iGPU under D3D11 SM5) and on elsewhere.
+  Nothing here touches the cloud march.
 
 Every number marked UNCALIBRATED is a starting point chosen by reasoning,
 not measured: it is set by a probe render on the render machine
@@ -102,7 +118,11 @@ from .weather_look import STORMS as _WEATHER_STORMS
 #: is outer-space lux under the engine's per-pixel transmittance, and the
 #: plan carries no sun temperature (a version-1 sidecar's lux was a ground
 #: direct normal over a zenith factor, and must not reach a version-2 host).
-BEAUTY_LOOK_VERSION = 2
+#: 3 (visual round 5, L1): the ``engine_look`` block is required, and bloom,
+#: lens flare, film grain and the screen-space reflection values moved out
+#: of the lens and reflections rows into it (a version-3 host reads them
+#: from there only, so a version-2 sidecar must not reach it).
+BEAUTY_LOOK_VERSION = 3
 
 #: The refusal name for every problem with a beauty look (Python and host).
 CONSTRAINT = "render.beauty_look"
@@ -352,19 +372,16 @@ RELIT_SUN_CLOSE_SHARE = 0.7
 #: and cinematic carries a light one, stated. MotionBlurMax is the cap on
 #: the smear, in percent of the frame width. Chromatic aberration
 #: (SceneFringeIntensity) is 0 on both: it moves pixels off the labels.
+#: Round 5 (L1): bloom, lens flare and film grain are no longer the lens's;
+#: they are per WORLD PRESET in :data:`ENGINE_LOOK` (one owner each), so a
+#: storm and a clear noon differ where a real camera's would.
 #: UNCALIBRATED: set by probe render on the render machine (the lens probe:
-#: the same clip through standard and cinematic, bloom and flare read on
-#: the sun-in-frame shot).
+#: the same clip through standard and cinematic).
 LENSES: Dict[str, Dict[str, Any]] = {
     "standard": {
         "aperture_f": 4.0,
         "depth_of_field": False,
-        "BloomIntensity": 0.35,
-        "BloomThreshold": -1.0,
-        "LensFlareIntensity": 0.12,
-        "LensFlareThreshold": 8.0,
         "VignetteIntensity": 0.0,
-        "FilmGrainIntensity": 0.02,
         "SceneFringeIntensity": 0.0,
         "MotionBlurMax": 1.0,
         "MotionBlurPerObjectSize": 0.0,
@@ -373,12 +390,7 @@ LENSES: Dict[str, Dict[str, Any]] = {
     "cinematic": {
         "aperture_f": 2.0,
         "depth_of_field": True,
-        "BloomIntensity": 0.45,
-        "BloomThreshold": -1.0,
-        "LensFlareIntensity": 0.18,
-        "LensFlareThreshold": 8.0,
         "VignetteIntensity": 0.2,
-        "FilmGrainIntensity": 0.035,
         "SceneFringeIntensity": 0.0,
         "MotionBlurMax": 1.0,
         "MotionBlurPerObjectSize": 0.0,
@@ -421,13 +433,9 @@ LOCAL_EXPOSURE: Dict[str, float] = {
     "LocalExposureMiddleGreyBias": 0.0,
 }
 
-#: Lumen and screen-space reflection quality for beauty (the GI and
-#: reflection METHOD overrides are the V0 ones, unchanged). Lumen's
-#: qualities are clamped by the engine to [0.25, 2] in the editor UI;
-#: LumenMaxTraceDistance is in cm (default 20000 = 200 m, short for an
-#: aerial frame). UNCALIBRATED: set by probe render on the render machine
-#: (the lake/runway probe: wet-surface reflections at 300 m AGL, and the
-#: frame time it costs).
+#: Lumen reflection settings for beauty (the GI and reflection METHOD
+#: overrides are the V0 ones, unchanged). Round 5 (L1): the screen-space
+#: reflection values are per world preset in :data:`ENGINE_LOOK` ``ssr``.
 #:
 #: Integration (2026-11-09): Lumen's per-view QUALITY and DISTANCE overrides
 #: (LumenReflectionQuality, LumenFinalGatherQuality, LumenSceneLightingQuality,
@@ -438,21 +446,429 @@ LOCAL_EXPOSURE: Dict[str, float] = {
 #: quality tier, not to a grade or a lens, and the render-path block runs
 #: after this look, so a value here was silently overwritten (this table's
 #: 2 km trace distance became 4 km while beauty_look echoed 2 km). The look
-#: keeps what only it sets.
+#: keeps what only it sets. UNCALIBRATED: set by probe render on the render
+#: machine (the canopy probe: LumenSceneDetail 1 and 2 on head shot d).
 REFLECTIONS: Dict[str, Any] = {
     "lumen_quality_owner": ("render-path lane: render.json "
                             "render_settings.beauty_path.lumen_capture_overrides"),
+    "ssr_owner": "ENGINE_LOOK ssr (per world preset; beauty_look.applied.engine_look.ssr)",
     "LumenSceneDetail": 2.0,
     "LumenFrontLayerTranslucencyReflections": True,
-    "ScreenSpaceReflectionIntensity": 100.0,
-    "ScreenSpaceReflectionQuality": 100.0,
-    "ScreenSpaceReflectionMaxRoughness": 0.6,
 }
+
+# -- the engine look (visual round 5, lane L1) ----------------------------------
+
+#: The world presets the engine look is keyed by: core/scene/world_beauty.py
+#: PRESETS, chosen by the same selector the world lane draws with
+#: (:func:`world_preset_for_card`). A plan with no card falls back through
+#: the grade (:data:`GRADE_LOOK_PRESET`).
+ENGINE_LOOK_PRESETS: Tuple[str, ...] = ("clear", "hazy", "overcast", "rain", "storm")
+GRADE_LOOK_PRESET: Dict[str, str] = {
+    "golden_hour": "clear", "desert_noon": "clear", "storm": "storm", "overcast": "overcast",
+}
+
+#: The refusal name for a ``-look-<name>=`` switch given a value it does not
+#: take (Python and host).
+LOOK_SWITCH_CONSTRAINT = "render.look_switch"
+
+#: The switch words. An EFFECT switch takes on|off: ``off`` is the A/B
+#: control, defined per effect by its ``off_means`` row (either the effect
+#: off, or the frame as the earlier lanes drew it). A PROBE switch takes
+#: auto|on|off: ``auto`` is off on the constrained GPU and on elsewhere,
+#: so the Intel laptop sees it only when a run asks (-look-<name>=on on one
+#: scene first; the hard limit on the cloud march is never touched by any
+#: of them).
+EFFECT_SWITCH_WORDS: Tuple[str, ...] = ("on", "off")
+PROBE_SWITCH_WORDS: Tuple[str, ...] = ("auto", "on", "off")
+LOOK_SWITCH_PREFIX = "-look-"
+
+#: THE grain strength: the one constant L1 (this table) and L2 (the film
+#: stock) share. The per-preset ``FilmGrainIntensity`` is this times the
+#: preset's ``grain_scale``; a film stock scales it again through
+#: :func:`film_grain_for` ``stock_scale`` (L2's per-stock number), never by
+#: its own constant. UE's FilmGrainIntensity is 0..1 (0.03 reads as a fine
+#: ISO-200 negative at 1080p). UNCALIBRATED: set by probe render on the
+#: render machine (probe el-grain: #01 at 0.03 and 0.06 against a scanned
+#: negative's grain at the same magnification).
+GRAIN_STRENGTH = 0.03
+
+#: Every engine-look effect: its switch, whether it is a probe, what its
+#: ``off`` means, which UE member or cvar each value is, and the value per
+#: world preset. Keys in capitals are FPostProcessSettings members (Scene.h)
+#: or light / fog component members, set verbatim by the host with their
+#: bOverride_; ``cvars`` are renderer console variables set at code priority
+#: for this process only and read back; ``cvars_constrained`` replace them on
+#: the constrained GPU. ``stage`` says what a row touches: ``capture`` (the
+#: beauty capture's post-process settings and show flags only) or ``scene``
+#: (the sun, the fog, renderer cvars). The host applies every row in ONE
+#: place, FFlightSimBeautyLook::ApplyEngineLook, after the render-path,
+#: hero-lighting and no-lumen-fallback hooks (local exposure rides the
+#: look's own post-process block, with its switch), so it is the owner of
+#: record of what it sets and reads back what it does not. Every number is UNCALIBRATED: set by probe render
+#: on the render machine (the probe named per row, docs/visual/PROBE_LOG.md
+#: "## round-5 engine-look"); the A/B pair for each is the scene with the
+#: effect on and with ``-look-<name>=off``.
+ENGINE_LOOK: Dict[str, Dict[str, Any]] = {
+    # 1. Screen-space GI: the stand-in for Lumen's bounce on a platform with
+    # no Lumen GI (the no-lumen fallback already selects the ScreenSpace
+    # method on it; this row sets its quality and the indirect intensity).
+    "ssgi": {
+        "switch": "ssgi", "probe": False, "stage": "scene",
+        "off_means": ("DynamicGlobalIlluminationMethod None on the fallback path (the sky light "
+                      "alone fills the shade); Lumen machines keep Lumen"),
+        "cvars": {"r.SSGI.Quality": 4.0},
+        "cvars_constrained": {"r.SSGI.Quality": 3.0},
+        "per_preset": {
+            "clear": {"IndirectLightingIntensity": 1.0},
+            "hazy": {"IndirectLightingIntensity": 1.05},
+            "overcast": {"IndirectLightingIntensity": 1.15},
+            "rain": {"IndirectLightingIntensity": 1.15},
+            "storm": {"IndirectLightingIntensity": 1.1},
+        },
+        "probe_name": "el-ssgi (#01 canyon shade and #09 belly, quality 3 and 4, on and off)",
+    },
+    # 2. Screen-space reflections: canopy glass, wet ground, the ocean.
+    "ssr": {
+        "switch": "ssr", "probe": False, "stage": "scene",
+        "off_means": "ReflectionMethod None (sky light specular only)",
+        "cvars": {"r.SSR.Quality": 4.0, "r.SSR.HalfResSceneColor": 0.0},
+        "cvars_constrained": {"r.SSR.Quality": 3.0, "r.SSR.HalfResSceneColor": 0.0},
+        "per_preset": {
+            "clear": {"ScreenSpaceReflectionIntensity": 100.0, "ScreenSpaceReflectionQuality": 100.0,
+                      "ScreenSpaceReflectionMaxRoughness": 0.6},
+            "hazy": {"ScreenSpaceReflectionIntensity": 100.0, "ScreenSpaceReflectionQuality": 100.0,
+                     "ScreenSpaceReflectionMaxRoughness": 0.6},
+            "overcast": {"ScreenSpaceReflectionIntensity": 100.0, "ScreenSpaceReflectionQuality": 100.0,
+                         "ScreenSpaceReflectionMaxRoughness": 0.6},
+            "rain": {"ScreenSpaceReflectionIntensity": 100.0, "ScreenSpaceReflectionQuality": 100.0,
+                     "ScreenSpaceReflectionMaxRoughness": 0.7},
+            "storm": {"ScreenSpaceReflectionIntensity": 100.0, "ScreenSpaceReflectionQuality": 100.0,
+                      "ScreenSpaceReflectionMaxRoughness": 0.7},
+        },
+        "per_preset_constrained": {"ScreenSpaceReflectionQuality": 80.0},
+        "probe_name": "el-ssr (#13 ocean and #06 wet runway, on and off; the canopy in head shot d)",
+    },
+    # 3. SSAO: the darkening under wings, in intakes and along panel seams.
+    # The radius is view-space (RadiusInWS false: locked to the 400-unit
+    # view scale), so one number serves the airframe at 100 m and the
+    # terrain at 3 km.
+    "ssao": {
+        "switch": "ssao", "probe": False, "stage": "capture",
+        "off_means": "AmbientOcclusionIntensity 0 (no SSAO)",
+        "cvars": {"r.AmbientOcclusionMaxQuality": 100.0, "r.AmbientOcclusionLevels": -1.0},
+        "cvars_constrained": {"r.AmbientOcclusionMaxQuality": 100.0, "r.AmbientOcclusionLevels": -1.0},
+        "per_preset": {
+            "clear": {"AmbientOcclusionIntensity": 0.6, "AmbientOcclusionRadius": 150.0,
+                      "AmbientOcclusionQuality": 100.0, "AmbientOcclusionPower": 2.0,
+                      "AmbientOcclusionStaticFraction": 1.0, "AmbientOcclusionMipBlend": 0.6,
+                      "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": False},
+            "hazy": {"AmbientOcclusionIntensity": 0.55, "AmbientOcclusionRadius": 150.0,
+                     "AmbientOcclusionQuality": 100.0, "AmbientOcclusionPower": 2.0,
+                     "AmbientOcclusionStaticFraction": 1.0, "AmbientOcclusionMipBlend": 0.6,
+                     "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": False},
+            "overcast": {"AmbientOcclusionIntensity": 0.7, "AmbientOcclusionRadius": 200.0,
+                         "AmbientOcclusionQuality": 100.0, "AmbientOcclusionPower": 2.0,
+                         "AmbientOcclusionStaticFraction": 1.0, "AmbientOcclusionMipBlend": 0.6,
+                         "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": False},
+            "rain": {"AmbientOcclusionIntensity": 0.7, "AmbientOcclusionRadius": 200.0,
+                     "AmbientOcclusionQuality": 100.0, "AmbientOcclusionPower": 2.0,
+                     "AmbientOcclusionStaticFraction": 1.0, "AmbientOcclusionMipBlend": 0.6,
+                     "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": False},
+            "storm": {"AmbientOcclusionIntensity": 0.65, "AmbientOcclusionRadius": 200.0,
+                      "AmbientOcclusionQuality": 100.0, "AmbientOcclusionPower": 2.0,
+                      "AmbientOcclusionStaticFraction": 1.0, "AmbientOcclusionMipBlend": 0.6,
+                      "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": False},
+        },
+        "probe_name": "el-ssao (head shot a under the wing and the intakes, 0.4 / 0.6 / 0.8 and off)",
+    },
+    # 4. Sun shadows. The scene builds the sun with 6 cascades over 20 km
+    # (FlightSimVisualScene.cpp) and the no-lumen fallback packs 8 cascades
+    # at exponent 4 over the same 20 km: at 1080p a cascade then spans
+    # kilometres and the airframe's shadow on itself is mush ("plastic").
+    # Here the cascades cover only the kilometres the camera resolves (the
+    # Google tiles carry their own baked sun shading beyond), 4096-texel
+    # maps, and PCSS (r.Shadow.FilterMethod 1) widens the penumbra with
+    # distance from the caster from the sun's own LightSourceAngle (the
+    # hero-lighting lane's 0.5357 deg disc, read back, never set here).
+    # Distances in metres (the host multiplies by 100).
+    "sun_shadows": {
+        "switch": "sun-shadows", "probe": False, "stage": "scene",
+        "off_means": ("the earlier lanes' sun shadows stand (the scene's 6 cascades over 20 km, or the "
+                      "fallback's 8 at exponent 4), uniform PCF"),
+        "cvars": {"r.Shadow.MaxResolution": 4096.0, "r.Shadow.MaxCSMResolution": 4096.0,
+                  "r.Shadow.CSM.MaxCascades": 10.0, "r.Shadow.MaxSoftKernelSize": 40.0},
+        "cvars_constrained": {"r.Shadow.MaxResolution": 4096.0, "r.Shadow.MaxCSMResolution": 4096.0,
+                              "r.Shadow.CSM.MaxCascades": 10.0, "r.Shadow.MaxSoftKernelSize": 40.0},
+        "per_preset": {
+            "clear": {"DynamicShadowCascades": 8, "CascadeDistributionExponent": 3.5,
+                      "DynamicShadowDistanceMovableLight_m": 6000.0,
+                      "ShadowDistanceFadeoutFraction": 0.15, "CascadeTransitionFraction": 0.1,
+                      "r.Shadow.FilterMethod": 1},
+            "hazy": {"DynamicShadowCascades": 8, "CascadeDistributionExponent": 3.5,
+                     "DynamicShadowDistanceMovableLight_m": 5000.0,
+                     "ShadowDistanceFadeoutFraction": 0.15, "CascadeTransitionFraction": 0.1,
+                     "r.Shadow.FilterMethod": 1},
+            "overcast": {"DynamicShadowCascades": 6, "CascadeDistributionExponent": 3.0,
+                         "DynamicShadowDistanceMovableLight_m": 4000.0,
+                         "ShadowDistanceFadeoutFraction": 0.15, "CascadeTransitionFraction": 0.1,
+                         "r.Shadow.FilterMethod": 0},
+            "rain": {"DynamicShadowCascades": 6, "CascadeDistributionExponent": 3.0,
+                     "DynamicShadowDistanceMovableLight_m": 3500.0,
+                     "ShadowDistanceFadeoutFraction": 0.15, "CascadeTransitionFraction": 0.1,
+                     "r.Shadow.FilterMethod": 0},
+            "storm": {"DynamicShadowCascades": 6, "CascadeDistributionExponent": 3.0,
+                      "DynamicShadowDistanceMovableLight_m": 3000.0,
+                      "ShadowDistanceFadeoutFraction": 0.15, "CascadeTransitionFraction": 0.1,
+                      "r.Shadow.FilterMethod": 0},
+        },
+        "probe_name": "el-csm (#01 fin shadow on the fuselage and the ridge shadow edge; PCF vs PCSS)",
+    },
+    # 5. Distance-field shadows: beyond the cascades, from static meshes with
+    # a mesh distance field (DefaultEngine.ini r.GenerateMeshDistanceFields=
+    # True since Phase 2, so measure renders already run with the fields
+    # built; this row is beauty only, on the sun). Cesium tiles are runtime
+    # meshes with no distance field, so these come from the aircraft alone.
+    # A PROBE: an extra shadow pass, off on the constrained GPU by default.
+    "df_shadows": {
+        "switch": "df-shadows", "probe": True, "stage": "scene",
+        "off_means": "bUseRayTracedDistanceFieldShadows false (shadows end at the cascades)",
+        "cvars": {"r.DistanceFieldShadowing": 1.0},
+        "cvars_constrained": {"r.DistanceFieldShadowing": 1.0},
+        "per_preset": {
+            "clear": {"bUseRayTracedDistanceFieldShadows": True, "DistanceFieldShadowDistance_m": 30000.0},
+            "hazy": {"bUseRayTracedDistanceFieldShadows": True, "DistanceFieldShadowDistance_m": 30000.0},
+            "overcast": {"bUseRayTracedDistanceFieldShadows": True, "DistanceFieldShadowDistance_m": 15000.0},
+            "rain": {"bUseRayTracedDistanceFieldShadows": True, "DistanceFieldShadowDistance_m": 15000.0},
+            "storm": {"bUseRayTracedDistanceFieldShadows": True, "DistanceFieldShadowDistance_m": 15000.0},
+        },
+        "probe_name": "el-dfs (#12 cockpit: the C172's shadow on the canyon floor beyond the cascades; frame time)",
+    },
+    # 6. Contact shadows on the sun, in SCREEN space (a fraction of the frame
+    # per ray), replacing the hero-lighting lane's 150 cm world-space length
+    # on beauty: the short rays ground pylons, intakes and the canopy frame
+    # without a halo on the tiles. Smaller under a deck, where the sun is
+    # wide and contact shadows read false.
+    "contact_shadows": {
+        "switch": "contact-shadows", "probe": False, "stage": "scene",
+        "off_means": "the hero-lighting lane's 150 cm world-space contact shadows stand",
+        "cvars": {"r.ContactShadows": 1.0},
+        "cvars_constrained": {"r.ContactShadows": 1.0},
+        "per_preset": {
+            "clear": {"ContactShadowLength": 0.02, "ContactShadowLengthInWS": False,
+                      "ContactShadowCastingIntensity": 1.0, "ContactShadowNonCastingIntensity": 0.0},
+            "hazy": {"ContactShadowLength": 0.02, "ContactShadowLengthInWS": False,
+                     "ContactShadowCastingIntensity": 1.0, "ContactShadowNonCastingIntensity": 0.0},
+            "overcast": {"ContactShadowLength": 0.015, "ContactShadowLengthInWS": False,
+                         "ContactShadowCastingIntensity": 1.0, "ContactShadowNonCastingIntensity": 0.0},
+            "rain": {"ContactShadowLength": 0.015, "ContactShadowLengthInWS": False,
+                     "ContactShadowCastingIntensity": 1.0, "ContactShadowNonCastingIntensity": 0.0},
+            "storm": {"ContactShadowLength": 0.01, "ContactShadowLengthInWS": False,
+                      "ContactShadowCastingIntensity": 1.0, "ContactShadowNonCastingIntensity": 0.0},
+        },
+        "probe_name": "el-contact (head shot a pylons and intakes at 0.02 / 0.05; no halo on the tiles)",
+    },
+    # 7. Local exposure, per preset. The HIGHLIGHT scale stays 1 on every
+    # preset (round 2: below 1 it re-tones the sky band as the bank swings
+    # the terrain through the bilateral grid's neighbourhood -- exposure
+    # breathing by another name, Gate 6); the shadow side lifts the valley
+    # and the belly, more under a deck where the frame is all shadow.
+    "local_exposure": {
+        "switch": "local-exposure", "probe": False, "stage": "capture",
+        "off_means": "every scale 1 (the bilateral grid changes nothing)",
+        "cvars": {}, "cvars_constrained": {},
+        "per_preset": {
+            "clear": {"LocalExposureHighlightContrastScale": 1.0, "LocalExposureShadowContrastScale": 0.75,
+                      "LocalExposureDetailStrength": 1.1, "LocalExposureBlurredLuminanceBlend": 0.6,
+                      "LocalExposureMiddleGreyBias": 0.0},
+            "hazy": {"LocalExposureHighlightContrastScale": 1.0, "LocalExposureShadowContrastScale": 0.8,
+                     "LocalExposureDetailStrength": 1.1, "LocalExposureBlurredLuminanceBlend": 0.6,
+                     "LocalExposureMiddleGreyBias": 0.0},
+            "overcast": {"LocalExposureHighlightContrastScale": 1.0, "LocalExposureShadowContrastScale": 0.8,
+                         "LocalExposureDetailStrength": 1.0, "LocalExposureBlurredLuminanceBlend": 0.6,
+                         "LocalExposureMiddleGreyBias": 0.0},
+            "rain": {"LocalExposureHighlightContrastScale": 1.0, "LocalExposureShadowContrastScale": 0.85,
+                     "LocalExposureDetailStrength": 1.0, "LocalExposureBlurredLuminanceBlend": 0.6,
+                     "LocalExposureMiddleGreyBias": 0.0},
+            "storm": {"LocalExposureHighlightContrastScale": 1.0, "LocalExposureShadowContrastScale": 0.85,
+                      "LocalExposureDetailStrength": 1.0, "LocalExposureBlurredLuminanceBlend": 0.6,
+                      "LocalExposureMiddleGreyBias": 0.0},
+        },
+        "probe_name": "el-local (#01 valley floor and snow in one frame; #09 belly; sky band held)",
+    },
+    # 8. Bloom: the standard sum-of-Gaussians, low. A real lens blooms a
+    # little around the sun's glints and specular hits, not across the sky.
+    "bloom": {
+        "switch": "bloom", "probe": False, "stage": "capture",
+        "off_means": "BloomIntensity 0 and the Bloom show flag off",
+        "cvars": {}, "cvars_constrained": {},
+        "per_preset": {
+            "clear": {"BloomMethod": "BM_SOG", "BloomIntensity": 0.25, "BloomThreshold": -1.0, "BloomSizeScale": 4.0},
+            "hazy": {"BloomMethod": "BM_SOG", "BloomIntensity": 0.3, "BloomThreshold": -1.0, "BloomSizeScale": 4.0},
+            "overcast": {"BloomMethod": "BM_SOG", "BloomIntensity": 0.2, "BloomThreshold": -1.0, "BloomSizeScale": 4.0},
+            "rain": {"BloomMethod": "BM_SOG", "BloomIntensity": 0.3, "BloomThreshold": -1.0, "BloomSizeScale": 4.0},
+            "storm": {"BloomMethod": "BM_SOG", "BloomIntensity": 0.3, "BloomThreshold": -1.0, "BloomSizeScale": 4.0},
+        },
+        "probe_name": "el-bloom (#05 backlit glints at 0.2 / 0.4 and off)",
+    },
+    # 9. Convolution bloom: BM_FFT with the engine's default kernel
+    # (/Engine/EngineMaterials/DefaultBloomKernel, loaded by the renderer when
+    # BloomConvolutionTexture is null: SceneRendering.cpp). The intensity is
+    # the bloom row's. A PROBE: two FFTs a frame, off on the constrained GPU
+    # by default; -look-bloom-fft=on lands it on one scene first.
+    "bloom_fft": {
+        "switch": "bloom-fft", "probe": True, "stage": "capture",
+        "off_means": "the bloom row's BM_SOG",
+        "cvars": {}, "cvars_constrained": {},
+        "per_preset": {
+            "clear": {"BloomMethod": "BM_FFT", "BloomConvolutionSize": 1.0, "BloomConvolutionScatterDispersion": 1.0,
+                      "BloomConvolutionPreFilterMin": 7.0, "BloomConvolutionPreFilterMax": 15000.0,
+                      "BloomConvolutionPreFilterMult": 15.0, "BloomConvolutionBufferScale": 0.133},
+            "hazy": {"BloomMethod": "BM_FFT", "BloomConvolutionSize": 1.0, "BloomConvolutionScatterDispersion": 1.2,
+                     "BloomConvolutionPreFilterMin": 7.0, "BloomConvolutionPreFilterMax": 15000.0,
+                     "BloomConvolutionPreFilterMult": 15.0, "BloomConvolutionBufferScale": 0.133},
+            "overcast": {"BloomMethod": "BM_FFT", "BloomConvolutionSize": 1.0, "BloomConvolutionScatterDispersion": 1.0,
+                         "BloomConvolutionPreFilterMin": 7.0, "BloomConvolutionPreFilterMax": 15000.0,
+                         "BloomConvolutionPreFilterMult": 15.0, "BloomConvolutionBufferScale": 0.133},
+            "rain": {"BloomMethod": "BM_FFT", "BloomConvolutionSize": 1.0, "BloomConvolutionScatterDispersion": 1.3,
+                     "BloomConvolutionPreFilterMin": 7.0, "BloomConvolutionPreFilterMax": 15000.0,
+                     "BloomConvolutionPreFilterMult": 15.0, "BloomConvolutionBufferScale": 0.133},
+            "storm": {"BloomMethod": "BM_FFT", "BloomConvolutionSize": 1.0, "BloomConvolutionScatterDispersion": 1.3,
+                      "BloomConvolutionPreFilterMin": 7.0, "BloomConvolutionPreFilterMax": 15000.0,
+                      "BloomConvolutionPreFilterMult": 15.0, "BloomConvolutionBufferScale": 0.133},
+        },
+        "probe_name": "el-fft (#05 backlit: Gaussian vs FFT, and the frame time on the laptop)",
+    },
+    # 10. Lens flare: the image-based ghosts, low, with a high threshold, and
+    # DRAWN ONLY when the sun is in or just outside the frame: the host
+    # measures the angle between the camera axis and the sun on the first
+    # frame (UpdatePerFrame) and keeps the flare when it is within the
+    # frame's half-diagonal plus ``sun_in_frame_margin_deg``; otherwise the
+    # intensity is 0 and the show flag off for the clip (decided once: no
+    # flicker at the boundary). #05 (backlit) and a sun-in-frame still get
+    # it; #04 (sun behind the camera) never does. The bokeh shape is the
+    # engine's own (LensFlareBokehShape null: PostProcessLensFlares.cpp keeps
+    # its analytic shape); a hexagonal iris texture is a later import.
+    "lens_flare": {
+        "switch": "lens-flare", "probe": False, "stage": "capture",
+        "off_means": "LensFlareIntensity 0 and the LensFlares show flag off",
+        "cvars": {"r.LensFlareQuality": 2.0}, "cvars_constrained": {"r.LensFlareQuality": 2.0},
+        "per_preset": {
+            "clear": {"LensFlareIntensity": 0.2, "LensFlareThreshold": 12.0, "LensFlareBokehSize": 3.0,
+                      "sun_in_frame_margin_deg": 12.0},
+            "hazy": {"LensFlareIntensity": 0.25, "LensFlareThreshold": 12.0, "LensFlareBokehSize": 3.0,
+                     "sun_in_frame_margin_deg": 12.0},
+            "overcast": {"LensFlareIntensity": 0.1, "LensFlareThreshold": 12.0, "LensFlareBokehSize": 3.0,
+                         "sun_in_frame_margin_deg": 12.0},
+            "rain": {"LensFlareIntensity": 0.15, "LensFlareThreshold": 12.0, "LensFlareBokehSize": 3.0,
+                     "sun_in_frame_margin_deg": 12.0},
+            "storm": {"LensFlareIntensity": 0.15, "LensFlareThreshold": 12.0, "LensFlareBokehSize": 3.0,
+                      "sun_in_frame_margin_deg": 12.0},
+        },
+        "probe_name": "el-flare (#05 backlit on and off; #04 must show none)",
+    },
+    # 11. Film grain: the engine's grain texture (DefaultFilmGrainTexture,
+    # loaded when FilmGrainTexture is null) at GRAIN_STRENGTH x grain_scale,
+    # split by tone: a colour negative's grain shows in the midtones and
+    # shadows, less in the clean highlights; it also hides the sky's 8-bit
+    # banding. A dim or wet scene reads as a faster stock: more grain.
+    "film_grain": {
+        "switch": "film-grain", "probe": False, "stage": "capture",
+        "off_means": "FilmGrainIntensity 0 and the Grain show flag off",
+        "cvars": {"r.FilmGrain": 1.0}, "cvars_constrained": {"r.FilmGrain": 1.0},
+        "per_preset": {
+            "clear": {"grain_scale": 1.0, "FilmGrainIntensityShadows": 1.0, "FilmGrainIntensityMidtones": 1.0,
+                      "FilmGrainIntensityHighlights": 0.7, "FilmGrainShadowsMax": 0.09,
+                      "FilmGrainHighlightsMin": 0.5, "FilmGrainHighlightsMax": 1.0, "FilmGrainTexelSize": 1.0},
+            "hazy": {"grain_scale": 1.1, "FilmGrainIntensityShadows": 1.0, "FilmGrainIntensityMidtones": 1.0,
+                     "FilmGrainIntensityHighlights": 0.7, "FilmGrainShadowsMax": 0.09,
+                     "FilmGrainHighlightsMin": 0.5, "FilmGrainHighlightsMax": 1.0, "FilmGrainTexelSize": 1.0},
+            "overcast": {"grain_scale": 1.2, "FilmGrainIntensityShadows": 1.0, "FilmGrainIntensityMidtones": 1.0,
+                         "FilmGrainIntensityHighlights": 0.7, "FilmGrainShadowsMax": 0.09,
+                         "FilmGrainHighlightsMin": 0.5, "FilmGrainHighlightsMax": 1.0, "FilmGrainTexelSize": 1.0},
+            "rain": {"grain_scale": 1.3, "FilmGrainIntensityShadows": 1.0, "FilmGrainIntensityMidtones": 1.0,
+                     "FilmGrainIntensityHighlights": 0.7, "FilmGrainShadowsMax": 0.09,
+                     "FilmGrainHighlightsMin": 0.5, "FilmGrainHighlightsMax": 1.0, "FilmGrainTexelSize": 1.1},
+            "storm": {"grain_scale": 1.4, "FilmGrainIntensityShadows": 1.0, "FilmGrainIntensityMidtones": 1.0,
+                      "FilmGrainIntensityHighlights": 0.7, "FilmGrainShadowsMax": 0.09,
+                      "FilmGrainHighlightsMin": 0.5, "FilmGrainHighlightsMax": 1.0, "FilmGrainTexelSize": 1.2},
+        },
+        "probe_name": "el-grain (#01 and #09 at 1x and 2x GRAIN_STRENGTH, against a scanned negative)",
+    },
+    # 12. Volumetric fog: the droplet albedo per weather (sRGB 8-bit, the
+    # component's FColor): water haze near white, dust and rain curtains a
+    # little grey. The scattering distribution (g), the extinction scale and
+    # the fog distance are the WORLD lane's per-row values
+    # (core/scene/world_beauty.py, incl. the wet rows' extinction scaling and
+    # its in-scatter compensation on the lights), and the sun's
+    # VolumetricScatteringIntensity is the hero-lighting lane's: all read back
+    # here, never set, so the one haze stays one haze.
+    "volumetric_fog": {
+        "switch": "volumetric-fog", "probe": False, "stage": "scene",
+        "off_means": "VolumetricFogAlbedo white (the engine default every earlier round drew)",
+        "cvars": {"r.VolumetricFog": 1.0}, "cvars_constrained": {"r.VolumetricFog": 1.0},
+        "per_preset": {
+            "clear": {"VolumetricFogAlbedo_srgb8": [235, 235, 235]},
+            "hazy": {"VolumetricFogAlbedo_srgb8": [230, 228, 224]},
+            "overcast": {"VolumetricFogAlbedo_srgb8": [240, 240, 240]},
+            "rain": {"VolumetricFogAlbedo_srgb8": [232, 232, 234]},
+            "storm": {"VolumetricFogAlbedo_srgb8": [225, 225, 228]},
+        },
+        "probe_name": "el-vfog (#06 rain haze and #05 dust at the albedo and at white)",
+    },
+    # 13. The volumetric fog grid. The fine grid (GridPixelSize 4, GridSizeZ
+    # 128) is what the hero-lighting lane set and every passing round
+    # rendered with on the laptop; the coarse grid is the engine's (8, 64).
+    # A PROBE with ``auto`` = ON on both GPUs (no regression on the frames
+    # that passed): its A/B is -look-fog-grid=off, the time the fine grid
+    # costs. Costs are per fog voxel, not per cloud-march step.
+    "fog_grid": {
+        "switch": "fog-grid", "probe": True, "auto_on_constrained": True, "stage": "scene",
+        "off_means": "the engine's coarse grid (r.VolumetricFog.GridPixelSize 8, GridSizeZ 64)",
+        "cvars": {"r.VolumetricFog.GridPixelSize": 4.0, "r.VolumetricFog.GridSizeZ": 128.0},
+        "cvars_constrained": {"r.VolumetricFog.GridPixelSize": 4.0, "r.VolumetricFog.GridSizeZ": 128.0},
+        "cvars_off": {"r.VolumetricFog.GridPixelSize": 8.0, "r.VolumetricFog.GridSizeZ": 64.0},
+        "per_preset": {p: {} for p in ("clear", "hazy", "overcast", "rain", "storm")},
+        "probe_name": "el-fog-grid (#09 shaft banding fine vs coarse; frame time on the laptop)",
+    },
+    # 14. Stills: TSR with more warm-up and accumulation. A still's beauty
+    # frame is the last of ``still_samples`` captures of one pose (the
+    # render-path lane's RenderBeautyStillSamplesDefault 8) after
+    # ``warmup_captures`` discarded ones (16): both raised here so TSR's
+    # history (32 samples a pixel at 200 % of the output, the render-path
+    # lane's cvars, read back) converges before the frame is kept. The
+    # internal resolution is untouched (the constrained supersample cap
+    # stands). Fewer on the constrained GPU: each capture is a drained frame.
+    "tsr": {
+        "switch": "tsr", "probe": False, "stage": "scene",
+        "off_means": "the commandlet's own warm-up (16) and still samples (8)",
+        "cvars": {}, "cvars_constrained": {},
+        "per_preset": {p: {"warmup_captures": 24, "still_samples": 16}
+                       for p in ("clear", "hazy", "overcast", "rain", "storm")},
+        "per_preset_constrained": {"warmup_captures": 20, "still_samples": 12},
+        "probe_name": "el-tsr (head shot a edge-aliasing number at 8 and 16 samples; seconds per still)",
+    },
+    # 15. The filmback: a full-frame 36 x 24 mm sensor. The width is what the
+    # camera row already carries (it derives the focal length from the FOV);
+    # the height is the 3:2 sensor's, of which a 16:9 frame uses 20.25 mm
+    # (cropped top and bottom, the FOV unchanged). No anamorphic squeeze.
+    "filmback": {
+        "switch": "filmback", "probe": False, "stage": "capture",
+        "off_means": "the camera row's sensor width alone (the pre-round-5 record)",
+        "cvars": {}, "cvars_constrained": {},
+        "per_preset": {p: {"sensor_width_mm": 36.0, "sensor_height_mm": 24.0, "DepthOfFieldSqueezeFactor": 1.0}
+                       for p in ("clear", "hazy", "overcast", "rain", "storm")},
+        "probe_name": "none: a record of the sensor, no pixel changes",
+    },
+}
+
+#: switch word -> effect key, in table order.
+ENGINE_LOOK_SWITCHES: Dict[str, str] = {row["switch"]: key for key, row in ENGINE_LOOK.items()}
 
 #: The constants a probe render must set, as the record lists them.
 UNCALIBRATED: Tuple[str, ...] = (
     "EV100_BANDS", "GRADES", "GOLDEN_HOUR_BELOW_DEG", "LENSES", "LOCAL_EXPOSURE",
     "REFLECTIONS", "EXPOSURE_METER_TARGET_P90", "TONEMAP_HUE", "RELIT_SUN_CLOSE_SHARE",
+    "ENGINE_LOOK", "GRAIN_STRENGTH",
 )
 
 
@@ -475,6 +891,101 @@ def validate_lens(name: Any) -> str:
         raise BeautyLookError(CONSTRAINT, f"beauty lens {name!r} is not one of "
                                           f"{', '.join(LENS_NAMES)}")
     return word
+
+
+def look_preset_for(world_preset: Optional[str], grade: str) -> Tuple[str, str]:
+    """(engine-look preset, basis): the world preset when the card names one
+    (:data:`ENGINE_LOOK_PRESETS`), else the grade's (:data:`GRADE_LOOK_PRESET`)."""
+    word = str(world_preset) if world_preset is not None else ""
+    if word in ENGINE_LOOK_PRESETS:
+        return word, f"world preset {word} (core/scene/world_beauty.py select_preset)"
+    fallback = GRADE_LOOK_PRESET[validate_grade(grade)]
+    return fallback, f"no world preset: the {grade} grade's ({fallback})"
+
+
+def film_grain_for(preset: str, stock_scale: float = 1.0) -> Dict[str, Any]:
+    """The film-grain row for ``preset`` with ``FilmGrainIntensity`` =
+    :data:`GRAIN_STRENGTH` x the preset's ``grain_scale`` x ``stock_scale``
+    (L2's per-stock number; 1 for no stock). ONE grain constant, two scales,
+    both recorded."""
+    if preset not in ENGINE_LOOK_PRESETS:
+        raise BeautyLookError(CONSTRAINT, f"engine-look preset {preset!r} is not one of "
+                                          f"{', '.join(ENGINE_LOOK_PRESETS)}")
+    scale = float(stock_scale)
+    if not math.isfinite(scale) or scale < 0.0:
+        raise BeautyLookError(CONSTRAINT, f"a film stock's grain scale of {stock_scale!r} is not a "
+                                          f"number of 0 or more")
+    row = dict(ENGINE_LOOK["film_grain"]["per_preset"][preset])
+    row["GrainStrength"] = GRAIN_STRENGTH
+    row["stock_scale"] = scale
+    row["FilmGrainIntensity"] = round(GRAIN_STRENGTH * float(row["grain_scale"]) * scale, 6)
+    return row
+
+
+def engine_look_for(preset: str, stock_scale: float = 1.0) -> Dict[str, Any]:
+    """The sidecar's ``engine_look`` block for one preset: per effect its
+    switch, probe flag, ``off_means``, the values (``values``, and
+    ``values_constrained`` where the constrained GPU takes different ones),
+    the cvars (``cvars``, ``cvars_constrained``, ``cvars_off``) and the
+    probe that sets them. The host chooses the constrained column itself
+    (FFlightSimWorldBeauty::ConstrainedGpu) and records which it took."""
+    if preset not in ENGINE_LOOK_PRESETS:
+        raise BeautyLookError(CONSTRAINT, f"engine-look preset {preset!r} is not one of "
+                                          f"{', '.join(ENGINE_LOOK_PRESETS)}")
+    out: Dict[str, Any] = {"preset": preset, "switch_prefix": LOOK_SWITCH_PREFIX,
+                           "switch_source": "the command line, then FLIGHTSIM_RENDER_SWITCHES"}
+    for key, row in ENGINE_LOOK.items():
+        values = (film_grain_for(preset, stock_scale) if key == "film_grain"
+                  else dict(row["per_preset"][preset]))
+        effect: Dict[str, Any] = {
+            "switch": f"{LOOK_SWITCH_PREFIX}{row['switch']}",
+            "switch_words": list(PROBE_SWITCH_WORDS if row["probe"] else EFFECT_SWITCH_WORDS),
+            "probe": bool(row["probe"]),
+            "stage": row["stage"],
+            "off_means": row["off_means"],
+            "values": values,
+            "cvars": dict(row["cvars"]),
+            "cvars_constrained": dict(row["cvars_constrained"]),
+            "probe_name": row["probe_name"],
+        }
+        if row["probe"]:
+            effect["auto"] = ("on on every GPU (the fine grid every passing round rendered with)"
+                              if row.get("auto_on_constrained")
+                              else "off on the constrained GPU, on elsewhere")
+            effect["auto_on_constrained"] = bool(row.get("auto_on_constrained", False))
+        if "per_preset_constrained" in row:
+            effect["values_constrained"] = {**values, **row["per_preset_constrained"]}
+        if "cvars_off" in row:
+            effect["cvars_off"] = dict(row["cvars_off"])
+        out[key] = effect
+    return out
+
+
+def parse_look_switches(text: Optional[str]) -> Dict[str, str]:
+    """``{switch word: value}`` for every ``-look-<name>=<value>`` token in
+    ``text`` (a command line or FLIGHTSIM_RENDER_SWITCHES), checked against
+    the effect's words (:data:`EFFECT_SWITCH_WORDS`, or
+    :data:`PROBE_SWITCH_WORDS` for a probe). An unknown name or a value the
+    switch does not take raises BeautyLookError by name
+    (:data:`LOOK_SWITCH_CONSTRAINT`), as the host refuses it. Unstated
+    switches are left out (the host renders as planned)."""
+    import re
+
+    out: Dict[str, str] = {}
+    for match in re.finditer(rf"(?:^|\s){re.escape(LOOK_SWITCH_PREFIX)}([A-Za-z0-9-]+)=(\S*)", text or ""):
+        name, value = match.group(1), match.group(2)
+        key = ENGINE_LOOK_SWITCHES.get(name)
+        if key is None:
+            raise BeautyLookError(LOOK_SWITCH_CONSTRAINT,
+                                  f"{LOOK_SWITCH_CONSTRAINT}: {LOOK_SWITCH_PREFIX}{name}= is not a look switch; "
+                                  f"the switches are {', '.join(ENGINE_LOOK_SWITCHES)}")
+        words = PROBE_SWITCH_WORDS if ENGINE_LOOK[key]["probe"] else EFFECT_SWITCH_WORDS
+        if value not in words:
+            raise BeautyLookError(LOOK_SWITCH_CONSTRAINT,
+                                  f"{LOOK_SWITCH_CONSTRAINT}: {LOOK_SWITCH_PREFIX}{name}={value} is not one of "
+                                  f"{', '.join(words)}")
+        out[name] = value
+    return out
 
 
 def _band(bands: Sequence[Tuple[float, float]], elevation_deg: float) -> Tuple[float, str]:
@@ -739,12 +1250,24 @@ def focal_length_mm(sensor_width_mm: float, horizontal_fov_deg: float) -> float:
     return sensor_width_mm / (2.0 * math.tan(math.radians(horizontal_fov_deg) / 2.0))
 
 
-def pixel_effects(lens: Mapping[str, Any], width_px: int) -> Dict[str, Any]:
+def pixel_effects(lens: Mapping[str, Any], width_px: int,
+                  engine_look: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """What each beauty effect does to label agreement: ``moves`` (shifts
     pixels off the geometry the labels describe), ``softens`` (spreads
     edges, the centroid stays), ``none``. Masks, class, depth and boxes
-    come from their own captures of the SAME frame, without these."""
+    come from their own captures of the SAME frame, without these.
+    ``engine_look`` (:func:`engine_look_for`) carries bloom, flare and
+    grain since round 5; without it (a lens alone) they read as off."""
     blur_px = float(lens["MotionBlurMax"]) / 100.0 * int(width_px)
+
+    def look_value(effect: str, key: str) -> float:
+        if not engine_look:
+            return 0.0
+        return float(engine_look[effect]["values"][key])
+
+    bloom = look_value("bloom", "BloomIntensity")
+    flare = look_value("lens_flare", "LensFlareIntensity")
+    grain = look_value("film_grain", "FilmGrainIntensity")
     effects = {
         "lens_distortion": {"on": False, "effect": "moves", "note": "not implemented"},
         "chromatic_aberration": {"on": float(lens["SceneFringeIntensity"]) > 0.0,
@@ -759,12 +1282,15 @@ def pixel_effects(lens: Mapping[str, Any], width_px: int) -> Dict[str, Any]:
                                  "most; label captures render with motion blur off")},
         "depth_of_field": {"on": bool(lens["depth_of_field"]), "effect": "softens",
                            "note": "focused at the aircraft; the background softens"},
-        "bloom": {"on": float(lens["BloomIntensity"]) > 0.0, "effect": "softens",
-                  "note": "screen-space glow may lighten pixels just outside the mask"},
-        "lens_flare": {"on": float(lens["LensFlareIntensity"]) > 0.0, "effect": "none",
-                       "note": "image-based ghosts from bright pixels; no geometry"},
+        "bloom": {"on": bloom > 0.0, "effect": "softens", "BloomIntensity": bloom,
+                  "note": ("screen-space glow may lighten pixels just outside the mask; "
+                           "ENGINE_LOOK bloom (per world preset; bloom_fft is a probe)")},
+        "lens_flare": {"on": flare > 0.0, "effect": "none", "LensFlareIntensity": flare,
+                       "note": ("image-based ghosts from bright pixels; no geometry; drawn only "
+                                "with the sun in or just outside the frame (ENGINE_LOOK lens_flare)")},
         "vignette": {"on": float(lens["VignetteIntensity"]) > 0.0, "effect": "none"},
-        "film_grain": {"on": float(lens["FilmGrainIntensity"]) > 0.0, "effect": "none"},
+        "film_grain": {"on": grain > 0.0, "effect": "none", "FilmGrainIntensity": grain,
+                       "note": "ENGINE_LOOK film_grain: GRAIN_STRENGTH x the preset's and the stock's scales"},
     }
     effects["pixel_moving"] = sorted(name for name, row in effects.items()
                                      if isinstance(row, dict) and row["on"]
@@ -787,8 +1313,12 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
                      camera_presets: Optional[Sequence[str]] = None,
                      sky_exposure: Optional[Mapping[str, Any]] = None,
                      unmetered_scales: Optional[Mapping[str, float]] = None,
-                     deck_drawn: Optional[bool] = None) -> Dict[str, Any]:
+                     deck_drawn: Optional[bool] = None,
+                     stock_grain_scale: float = 1.0) -> Dict[str, Any]:
     """The complete ``beauty_look.json``. Pure: same inputs, same bytes.
+
+    ``stock_grain_scale``: the film stock's grain scale (L2), applied to
+    :data:`GRAIN_STRENGTH` through :func:`film_grain_for`; 1 for none.
 
     ``sensor_width_mm``: one per camera pass, in the card's camera order
     (the host picks by ``-camera-index=``). ``physical_sky``: the -sky= plan
@@ -914,6 +1444,9 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
 
     post = {key: value for key, value in lens_row.items()
             if key[0].isupper()}
+    look_preset, look_preset_basis = look_preset_for(world_preset, grade_name)
+    engine_look = engine_look_for(look_preset, stock_grain_scale)
+    engine_look["preset_basis"] = look_preset_basis
     plan = {
         "beauty_look_version": BEAUTY_LOOK_VERSION,
         "grade": grade_name,
@@ -952,9 +1485,13 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
             "shutter_policy": dict(SHUTTER_POLICY),
         },
         "lens_post": post,
-        "local_exposure": {"LocalExposureMethod": "Bilateral", **LOCAL_EXPOSURE},
+        # Round 5: per world preset (ENGINE_LOOK local_exposure); the host
+        # applies this row and the engine_look row names the switch.
+        "local_exposure": {"LocalExposureMethod": "Bilateral",
+                           **engine_look["local_exposure"]["values"]},
         "reflections": dict(REFLECTIONS),
-        "pixel_effects": pixel_effects(lens_row, width_px),
+        "engine_look": engine_look,
+        "pixel_effects": pixel_effects(lens_row, width_px, engine_look),
         "uncalibrated": list(UNCALIBRATED),
         "note": ("VISUAL ONLY, beauty quality only; every UNCALIBRATED value is set by a "
                  "probe render on the render machine (docs/visual/PROBE_LOG.md)"),

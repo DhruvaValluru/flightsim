@@ -2017,7 +2017,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// fewer would put black frames into the run. Beauty wants more, so
 	// TSR and Lumen have history before anything is kept.
 	int32 WarmupCaptures = bBeauty ? 16 : 2;
-	FParse::Value(*Params, TEXT("warmup="), WarmupCaptures);
+	// Round 5 L1: a stated -warmup= wins over the beauty look's tsr row.
+	const bool bWarmupStated = FParse::Value(*Params, TEXT("warmup="), WarmupCaptures);
 	WarmupCaptures = FMath::Max(WarmupCaptures, 2);
 
 	// Gate 6 controls. -Visual builds the §6.6 scene; the A/B switches exist
@@ -3645,6 +3646,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	//     VSM, SkyAtmosphere LUT quality, volumetric cloud tracing), TSR show
 	//     flags, and ALL Lumen per-view quality / distance / surface-cache
 	//     overrides; or the path tracer.
+	//  5b. Engine look (round 5 L1, FFlightSimBeautyLook::ApplyEngineLook,
+	//     after 5 and the hero-lighting and no-lumen-fallback hooks): per
+	//     world preset, each behind -look-<name>=: SSGI / SSR quality and
+	//     intensities, SSAO, the sun's cascades, PCSS, distance-field and
+	//     contact shadows, bloom (FFT as a probe), the lens flare (sun in
+	//     frame only), the film grain, the fog's albedo and grid (probe), the
+	//     still's TSR warm-up and samples, the filmback. It reads back what
+	//     it replaces (applied.engine_look.<effect>.before / *_before).
 	//  6. Storm meter (after warm-up): opens AutoExposureBias by a measured
 	//     number of stops on top of steps 3-4 (look_applied.storm_exposure),
 	//     copied to the linear and accumulation captures; constant after.
@@ -3910,6 +3919,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (bVisual && bBeauty && !FFlightSimHeroLighting::Apply(VisualScene, Capture, bPathTrace, *Params)) { return Fail(FFlightSimHeroLighting::LastError()); }
 	// no-lumen-and-machine lane: the per-view half (SSGI, SSR) when ApplyScene took the fallback.
 	if (bVisual && bBeauty && !bPathTrace) { FFlightSimBeautyFallback::ApplyCapture(Capture); }
+	// round 5 L1 (FlightSimBeautyLook.cpp ApplyEngineLook, step 4b of the owner
+	// list above): the engine look, per world preset, after every lane whose
+	// values it replaces or reads back; a -look-<name>= switch with a value it
+	// does not take refuses by name (render.look_switch).
+	if (bVisual && bBeauty && !bPathTrace &&
+	    !FFlightSimBeautyLook::ApplyEngineLook(VisualScene, Capture, bConstrainedGpu, *RenderSwitches))
+	{
+		return Fail(FFlightSimBeautyLook::LastError());
+	}
 	AntiAliasingMethod = ReadCvar(TEXT("r.AntiAliasingMethod"));
 	VirtualShadowMaps = ReadCvar(TEXT("r.Shadow.Virtual.Enable"));
 	if (bHideAircraft)
@@ -5293,6 +5311,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		UE_LOG(LogFlightSimRender, Display, TEXT("gpu drain: %s finished on the GPU in %.2f s"), *Stage, Drain.Seconds);
 		BeatWatchdog(*FString::Printf(TEXT("%s (GPU drained)"), *Stage));
 	};
+	// Round 5 L1: the beauty look's tsr row (ENGINE_LOOK) asks for more
+	// warm-up so TSR's history converges before frame 0; raised, never
+	// lowered, and a stated -warmup= wins.
+	{
+		int32 LookWarmup = 0, LookStillSamples = 0;
+		if (!bWarmupStated && FFlightSimBeautyLook::StillAccumulation(LookWarmup, LookStillSamples))
+		{
+			WarmupCaptures = FMath::Max(WarmupCaptures, LookWarmup);
+		}
+	}
 	UE_LOG(LogFlightSimRender, Display, TEXT("warm-up: %d captures (capture watchdog %.0f s, gpu drain %s)"),
 	       WarmupCaptures, CaptureTimeoutS, bGpuDrain ? TEXT("on") : TEXT("off"));
 	for (int32 i = 0; i < WarmupCaptures; ++i)
@@ -6064,8 +6092,18 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	}
 	else if (bVisual && bBeauty && DeliveredFrames <= RenderBeautyStillMaxFrames)
 	{
-		BeautySubFrames = RenderBeautyStillSamplesDefault;
-		BeautySubFramesBasis = TEXT("beauty still default (RenderBeautyStillSamplesDefault, UNCALIBRATED)");
+		// Round 5 L1: the beauty look's tsr row asks for more accumulation
+		// (ENGINE_LOOK tsr still_samples); raised over the default, never
+		// lowered, capped like a stated -still-samples= (which wins above).
+		int32 LookWarmup = 0, LookStillSamples = 0;
+		const bool bLookSamples = FFlightSimBeautyLook::StillAccumulation(LookWarmup, LookStillSamples) &&
+			LookStillSamples > RenderBeautyStillSamplesDefault;
+		BeautySubFrames = bLookSamples
+			? FMath::Min(LookStillSamples, RenderBeautyStillSamplesMax) : RenderBeautyStillSamplesDefault;
+		BeautySubFramesBasis = bLookSamples
+			? FString::Printf(TEXT("beauty still: the beauty look's tsr row (ENGINE_LOOK, UNCALIBRATED) over the default %d"),
+			                  RenderBeautyStillSamplesDefault)
+			: FString(TEXT("beauty still default (RenderBeautyStillSamplesDefault, UNCALIBRATED)"));
 	}
 	// aircraft-sharp (visual overhaul round 2): a tack-sharp airframe in a
 	// still. BEAUTY RASTER ONLY -- measure (Gate 6 / Gate 10-R) and the path
