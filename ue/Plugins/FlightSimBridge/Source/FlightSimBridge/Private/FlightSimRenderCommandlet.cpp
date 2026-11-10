@@ -18,6 +18,7 @@
 #include "CineCameraComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/MeshComponent.h"
+#include "Components/PrimitiveComponent.h"   // sky-capture bisection switches
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -4865,6 +4866,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	//  -sky-capture-at=origin      capture where the sky light spawned, not at the aircraft
 	//  -sky-capture-clouds=0       volumetric clouds hidden for the sky capture only
 	//  -sky-capture-beauty-only=0  every beauty-only actor (sea, rain, funnel...) hidden for it
+	//  -sky-capture-tiles=0        the Cesium tilesets (the beauty tiles material) hidden for it
+	//  -sky-capture-primitives=0   every primitive hidden for it (sky, fog and clouds only)
+	// Round 1b: A-D all hung; the far scene the capture draws is what is left.
 	bool bSkyStartFrameFirst = true;
 	{
 		int32 Flag = 1;
@@ -4882,6 +4886,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	FParse::Value(*Params, TEXT("sky-capture-clouds="), SkyCaptureClouds);
 	int32 SkyCaptureBeautyOnly = 1;
 	FParse::Value(*Params, TEXT("sky-capture-beauty-only="), SkyCaptureBeautyOnly);
+	int32 SkyCaptureTiles = 1;
+	FParse::Value(*Params, TEXT("sky-capture-tiles="), SkyCaptureTiles);
+	int32 SkyCapturePrimitives = 1;
+	FParse::Value(*Params, TEXT("sky-capture-primitives="), SkyCapturePrimitives);
+	UE_LOG(LogFlightSimRender, Display, TEXT("sky capture switches: tiles %s, primitives %s"),
+	       SkyCaptureTiles != 0 ? TEXT("shown") : TEXT("hidden"),
+	       SkyCapturePrimitives != 0 ? TEXT("shown") : TEXT("hidden"));
 	UE_LOG(LogFlightSimRender, Display,
 	       TEXT("sky capture switches: start-frame %s, at %s, clouds %s, beauty-only actors %s"),
 	       bSkyStartFrameFirst ? TEXT("before") : TEXT("after"), *SkyCaptureAt,
@@ -4954,6 +4965,25 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 					if (Component != nullptr && Component->IsVisible())
 					{
 						SkyHidden.AddUnique(Component);
+					}
+				}
+			}
+		}
+		if (SkyCaptureTiles == 0 || SkyCapturePrimitives == 0)
+		{
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				const bool bTileset = It->GetClass()->GetName().Contains(TEXT("Cesium3DTileset"));
+				if (SkyCapturePrimitives != 0 && !bTileset)
+				{
+					continue;
+				}
+				TInlineComponentArray<UPrimitiveComponent*> Primitives(*It);
+				for (UPrimitiveComponent* Primitive : Primitives)
+				{
+					if (Primitive != nullptr && Primitive->IsVisible())
+					{
+						SkyHidden.AddUnique(Primitive);
 					}
 				}
 			}
