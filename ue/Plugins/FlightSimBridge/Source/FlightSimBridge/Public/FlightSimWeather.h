@@ -244,6 +244,34 @@ public:
 	// it in Record.rain.beauty_shape).
 	static FFlightSimBeautyRainShape BeautyRainShape(double RateMmh, int32 Particles);
 
+	// -- visual round 2 (weather scenes, 2026-11-10): BEAUTY ONLY -------------
+	// Round 1's 747 "through a thunderstorm" flew 350 m behind the microburst
+	// the cell is centred on, at 2000 m: inside the 0.19 /m tower and the look's
+	// deck. The frame was the cloud's inside (flat blue: the sky light alone,
+	// metered up), the airframe gone, only its translucent nav lights drawn.
+	// The look's deck drawn inside the cell's material (M_StormCell's Layer
+	// term): its base and drawn top above the datum; false when there is none.
+	bool BeautyStormLayer(double& OutBaseM, double& OutTopM) const;
+	// FFlightSimWorldBeauty (-quality=beauty) only: the cell DRAWN ahead along
+	// the aircraft's track until the clip's track stays a clearance outside the
+	// tower (BeautyVantageShiftM; the cell's material, its lightning and the
+	// flash light move together, the microburst and every number the physics
+	// reads stay); the look's deck drawn at the given slab (the world lane keeps
+	// it clear of the aircraft); and the rain at the aircraft never under
+	// BeautyRainShareFloor of the shaft's (the deck now above it rains). Without
+	// a drawn cell, or a heading, nothing moves. Recorded in
+	// Record.cell.beauty_vantage.
+	void ApplyBeautyStormVantage(const FVector& AircraftCm, const FVector& AircraftForward, double TrackM,
+	                             double LayerBaseM, double LayerTopM, bool bLayerMoved);
+	// Pure (core/scene/storm_cell.py beauty_vantage_shift_m, pinned by
+	// tests/test_weather_scenes.py): metres the drawn cell moves along the
+	// heading so the track [start, start + TrackM along it] stays ClearanceM
+	// outside the tower's radius at the aircraft's height; 0 when it already
+	// does, or when the aircraft is above or below the tower.
+	static double BeautyVantageShiftM(double StartEastM, double StartNorthM, double HeadingDeg, double TrackM,
+	                                  double AircraftUpM, double CloudBaseM, double CloudTopM,
+	                                  double CloudOvershootM, double CloudTowerRadiusM, double ClearanceM);
+
 	// Every registered volumetric cloud in the world checked the way the
 	// engine's cloud passes check it (a Volume material, flagged "Used with
 	// Volumetric Cloud", compiled without errors), each logged; false with
@@ -363,6 +391,19 @@ private:
 	double CellAlbedo = 0.98;
 	UVolumetricCloudComponent* StormClouds = nullptr;
 	UMaterialInstanceDynamic* StormMaterial = nullptr;
+	// The tower's geometry and the look's deck as BuildCell drew them, for the
+	// beauty vantage (ApplyBeautyStormVantage).
+	double CellTopM = 0.0;
+	double CellOvershootM = 0.0;
+	double CellTowerRadiusM = 0.0;
+	double LayerCoverDrawn = 0.0;
+	double LayerBaseDrawnMetres = 0.0;
+	double LayerTopDrawnMetres = 0.0;
+	double LayerExtinctionDrawn = 0.0;
+	// Beauty only (ApplyBeautyStormVantage); zero on every other render, so the
+	// measure path draws exactly what it drew.
+	FVector BeautyCellOffsetCm = FVector::ZeroVector;
+	double BeautyRainShareFloor = 0.0;
 
 	// -- lightning -----------------------------------------------------------
 	FFlightSimLightCurve Curve;

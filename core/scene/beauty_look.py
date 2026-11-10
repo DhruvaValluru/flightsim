@@ -596,16 +596,48 @@ def grade_for(sun_elevation_deg: float, weather_event: Optional[str] = None,
                            f"{GOLDEN_HOUR_BELOW_DEG:g} deg")
 
 
+#: Visual round 2 (weather scenes, 2026-11-10): the rain rate from which the
+#: commandlet draws a nimbostratus deck when the card states no layer
+#: (FlightSimRenderCommandlet.cpp RainDeckMinMmh). Under it a ``rain`` world
+#: has NO deck over the sun.
+RAIN_DECK_MIN_MMH = 4.0
+
+
+def deck_drawn_for_card(card: Optional[Mapping[str, Any]],
+                        weather_draws_cell: bool = False) -> bool:
+    """Whether the render draws a cloud deck over the sun for this card, read
+    the way the commandlet builds the look's layers: a storm (the commandlet's
+    storm deck, or the cell; a tornado keeps its storm exposure), a rain rate of
+    :data:`RAIN_DECK_MIN_MMH` or more (its rain deck), or a stated layer of
+    overcast cover (core/scene/world_beauty.py OVERCAST_COVER). Round 1's C172
+    over Fuji at sunrise in 1 mm/h rain was exposed two stops open for a deck
+    that light rain never draws, and rendered fully white."""
+    from core.scene.world_beauty import OVERCAST_COVER
+
+    preset, inputs = world_preset_for_card(card, weather_draws_cell)
+    weather = card.get("weather_look") if isinstance(card, Mapping) else None
+    word = str(weather.get("storm", "")) if isinstance(weather, Mapping) else ""
+    if inputs["storm"] or preset == "storm" or word in STORM_EVENTS:
+        return True
+    if float(inputs["rain_rate_mmh"]) >= RAIN_DECK_MIN_MMH:
+        return True
+    return float(inputs["cloud_cover"]) >= OVERCAST_COVER
+
+
 def scene_light(elevation_deg: float, altitude_m: float = 0.0, *,
                 world_preset: Optional[str] = None,
                 sun_intensity_scale: Optional[float] = None,
-                sky_light_scale: Optional[float] = None) -> Dict[str, Any]:
+                sky_light_scale: Optional[float] = None,
+                deck: Optional[bool] = None) -> Dict[str, Any]:
     """The light the scene actually gets, as a ratio of the clear-sky meter:
     under a cloud deck (:data:`DECK_PRESETS`) the overcast fraction of the
     clear sky (the direct beam is shadowed, so the lighting look's sun scale
     does not count again); otherwise the lighting look's sun scale on the
     direct beam plus its sky-fill scale on the diffuse. ``stops`` =
-    log2(ratio), added to the band's EV100 (negative opens the exposure)."""
+    log2(ratio), added to the band's EV100 (negative opens the exposure).
+    ``deck``: whether the render really draws a deck (:func:`deck_drawn_for_card`);
+    False keeps a deck preset (light rain) under the open sky it is drawn in;
+    None reads the preset alone, as before."""
     from core.scene.hero_lighting import OVERCAST_ILLUMINANCE_FRACTION
 
     clear = clear_sky_horizontal_lux(elevation_deg, altitude_m)
@@ -614,7 +646,7 @@ def scene_light(elevation_deg: float, altitude_m: float = 0.0, *,
     if clear <= 0.0:
         return {"ratio": 1.0, "stops": 0.0, "horizontal_lux": 0.0,
                 "basis": "the sun is down: no clear-sky reference"}
-    if world_preset in DECK_PRESETS:
+    if under_deck(world_preset, deck):
         ratio = float(OVERCAST_ILLUMINANCE_FRACTION)
         basis = (f"world preset {world_preset}: a cloud deck shadows the beam; "
                  f"{ratio:g} of the clear sky (core/scene/hero_lighting.py "
@@ -628,6 +660,8 @@ def scene_light(elevation_deg: float, altitude_m: float = 0.0, *,
         ratio = (sun_scale * direct + sky_scale * diffuse) / clear
         basis = (f"clear-sky meter with the lighting look's sun x{sun_scale:g} on the "
                  f"direct beam and sky fill x{sky_scale:g} on the diffuse")
+        if world_preset in DECK_PRESETS:
+            basis += f" (world preset {world_preset} with no deck drawn: the sun is not shadowed)"
     ratio = max(ratio, 1e-3)
     return {"ratio": round(ratio, 6), "stops": round(math.log2(ratio), 4),
             "horizontal_lux": round(clear * ratio, 1), "basis": basis}
@@ -644,10 +678,16 @@ def exposure_target(base_ev100: float, light: Mapping[str, Any], grade_offset: f
     return float(base_ev100) + float(light["stops"]) + float(grade_offset) - float(brightness_ev)
 
 
-def exposure_meter(world_preset: Optional[str]) -> Dict[str, Any]:
+def under_deck(world_preset: Optional[str], deck: Optional[bool] = None) -> bool:
+    """A deck preset whose deck is drawn (``deck`` None: the preset alone)."""
+    return world_preset in DECK_PRESETS and (deck is None or bool(deck))
+
+
+def exposure_meter(world_preset: Optional[str], deck_drawn: Optional[bool] = None) -> Dict[str, Any]:
     """The exposure meter's row (:data:`EXPOSURE_METER_TARGET_P90`): metered
-    under a deck preset; otherwise only when the host finds no Lumen GI."""
-    deck = world_preset in DECK_PRESETS
+    under a deck preset whose deck is drawn; otherwise only when the host finds
+    no Lumen GI."""
+    deck = under_deck(world_preset, deck_drawn)
     row: Dict[str, Any] = {
         "deck": deck,
         "target_p90_luma": (EXPOSURE_METER_TARGET_P90[str(world_preset)] if deck
@@ -657,7 +697,9 @@ def exposure_meter(world_preset: Optional[str]) -> Dict[str, Any]:
                  else "only when the host finds Lumen GI unsupported on its shader platform"),
         "method": ("the beauty frame read back once before frame 0; the 90th percentile "
                    "of its sRGB luma opened to the target by AutoExposureBias, never "
-                   "closed below this EV100, constant over the clip"),
+                   "closed below this EV100 unless the frame clips (the host's highlight "
+                   "guard, look_applied.storm_exposure.highlight_guard), constant over "
+                   "the clip"),
     }
     return row
 
@@ -727,7 +769,8 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
                      brightness_ev: Optional[float] = None,
                      camera_presets: Optional[Sequence[str]] = None,
                      sky_exposure: Optional[Mapping[str, Any]] = None,
-                     unmetered_scales: Optional[Mapping[str, float]] = None) -> Dict[str, Any]:
+                     unmetered_scales: Optional[Mapping[str, float]] = None,
+                     deck_drawn: Optional[bool] = None) -> Dict[str, Any]:
     """The complete ``beauty_look.json``. Pure: same inputs, same bytes.
 
     ``sensor_width_mm``: one per camera pass, in the card's camera order
@@ -751,7 +794,11 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
     ``unmetered_scales``: the lighting look's scales the host applies but the
     exposure deliberately does NOT meter (a user's or a preset's stated
     look, webapp.runs write_beauty_look_plan; round 2b). Recorded in the
-    exposure row as ``lighting_scales_unmetered``; they move no number here."""
+    exposure row as ``lighting_scales_unmetered``; they move no number here.
+    ``deck_drawn``: whether the render draws a deck over the sun
+    (:func:`deck_drawn_for_card`); False keeps a deck preset with no deck
+    drawn (light rain) exposed for the open sky it is lit by; None reads the
+    preset alone (visual round 2)."""
     elevation = float(sun_elevation_deg)
     if not math.isfinite(elevation) or not -90.0 <= elevation <= 90.0:
         raise BeautyLookError(CONSTRAINT, f"a sun elevation of {sun_elevation_deg!r} deg "
@@ -780,7 +827,7 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
 
     light = scene_light(elevation, altitude_m, world_preset=world_preset,
                         sun_intensity_scale=sun_intensity_scale,
-                        sky_light_scale=sky_light_scale)
+                        sky_light_scale=sky_light_scale, deck=deck_drawn)
     horizontal = clear_sky_horizontal_lux(elevation, altitude_m)
     grade_offset = float(grade_row["ev100_offset"])
     if physical_sky:
@@ -833,7 +880,7 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
             aperture=aperture, shutter=shutter, iso=CAMERA_ISO, cam_ev=cam_ev,
             horizontal=horizontal)
     if exposure.get("ev100") is not None:
-        exposure["meter"] = exposure_meter(world_preset)
+        exposure["meter"] = exposure_meter(world_preset, deck_drawn)
     if unmetered_scales:
         exposure["lighting_scales_unmetered"] = {
             **{str(k): float(v) for k, v in sorted(unmetered_scales.items())},

@@ -302,3 +302,60 @@ def glow_illuminance_lux(intensity_cd: float, distance_m: float) -> float:
     exp(-d / GLOW_DIFFUSION_M), d floored at EDGE_M (the shader's form)."""
     d = max(float(distance_m), EDGE_M)
     return float(intensity_cd) / (d * d) * math.exp(-d / GLOW_DIFFUSION_M)
+
+
+# -- the beauty vantage (visual round 2, weather scenes, 2026-11-10) ---------------
+#: BEAUTY ONLY (FFlightSimWeather::ApplyBeautyStormVantage, called by the world
+#: lane under -quality=beauty). Round 1's "747 through a thunderstorm" flew 350 m
+#: behind the microburst this cell is centred on, at 2000 m: inside the tower
+#: (CORE extinction ~0.19 /m, a few tens of metres of visibility) and the look's
+#: deck. The frame was the cloud's inside -- flat blue, the sky light alone
+#: metered up -- with only the airframe's translucent nav lights drawn over it.
+#: The beauty frame DRAWS the cell ahead along the track until the clip's track
+#: stays this clearance outside the tower at the aircraft's height; the
+#: microburst, the wind and every physics number stay where the card puts them.
+#: UNCALIBRATED: set by probe render on the render machine.
+BEAUTY_VANTAGE_CLEARANCE_M = 2500.0
+#: Above the base only ``ambient_fraction`` of the shaft's drops fall (0 for a
+#: storm with no stated rate): round 1's 747 flew in dry cloud. With the deck
+#: drawn above it (world_beauty.aircraft_clear_layer), the beauty rain at the
+#: aircraft is at least this share of the shaft's. UNCALIBRATED.
+BEAUTY_RAIN_SHARE_FLOOR = 0.3
+
+
+def tower_radius_at(cell: Dict[str, Any], u: float) -> float:
+    """The tower's outer radius (m) at height u (m above the datum), as
+    :func:`shapes` flares it."""
+    base, top = float(cell["base_m"]), float(cell["top_m"])
+    f = min(1.0, max(0.0, (float(u) - base) / (top - base)))
+    return float(cell["tower_radius_m"]) * (1.0 - TOWER_FLARE * 0.5 + TOWER_FLARE * f)
+
+
+def beauty_vantage_shift_m(start_east_m: float, start_north_m: float, heading_deg: float,
+                           track_m: float, aircraft_up_m: float, base_m: float, top_m: float,
+                           overshoot_m: float, tower_radius_m: float,
+                           clearance_m: float = BEAUTY_VANTAGE_CLEARANCE_M) -> float:
+    """Metres the DRAWN cell moves along the heading so the clip's track (the
+    start, ENU metres of the cell centre, then ``track_m`` along the heading)
+    stays ``clearance_m`` outside the tower's radius at the aircraft's height;
+    0 when it already does, or when the aircraft is under the base or over the
+    top (by EDGE_M). The C++ twin is FFlightSimWeather::BeautyVantageShiftM."""
+    base, top = float(base_m), float(top_m)
+    up = float(aircraft_up_m)
+    if not tower_radius_m > 0.0 or not top > base or up < base - EDGE_M \
+            or up > top + max(float(overshoot_m), 0.0) + EDGE_M:
+        return 0.0
+    f = min(1.0, max(0.0, (up - base) / (top - base)))
+    radius = float(tower_radius_m) * (1.0 - TOWER_FLARE * 0.5 + TOWER_FLARE * f)
+    need = radius + max(float(clearance_m), 0.0)
+    h = math.radians(float(heading_deg))
+    de, dn = math.sin(h), math.cos(h)
+    track = max(float(track_m), 0.0)
+    along = -(float(start_east_m) * de + float(start_north_m) * dn)
+    across = abs(float(start_north_m) * de - float(start_east_m) * dn)
+    if across >= need:
+        return 0.0
+    half = math.sqrt(need * need - across * across)
+    if along - half >= track or along + half <= 0.0:
+        return 0.0
+    return track + half - along

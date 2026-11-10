@@ -326,7 +326,12 @@ def test_the_storm_is_lit_by_multiple_scattering_and_its_exposure_is_metered():
     probe = COMMANDLET.index("// -- Phase 8B.0: the real-time probe loop")
     assert warmup < meter < probe
     metering = COMMANDLET[meter:probe]
-    for needle in ("ReadPixels(MeterPixels)", "FMath::Clamp(Opened + Step, 0.0, StormMeterMaxStops)",
+    for needle in ("ReadPixels(MeterPixels)", "FMath::Clamp(Opened + Step, Lowest, StormMeterMaxStops)",
+                   # measure never closes: the floor is 0 there (visual round 2's highlight
+                   # guard closes a clipping BEAUTY frame only)
+                   "const double Lowest = bBlown ? -BeautyMeterMaxCloseStops : FMath::Min(0.0, Opened);",
+                   "const bool bBlown = bMeterMayClose && Bright > BeautyMeterHighlightP90;",
+                   "const bool bMeterMayClose = bVisual && bBeauty;",
                    'TEXT("storm_exposure")', "MeterSettings.AutoExposureBias =",
                    # the clip keeps a measured exposure: the last round never steps
                    'MeterNote = TEXT("out of rounds; the last measured exposure stands");',

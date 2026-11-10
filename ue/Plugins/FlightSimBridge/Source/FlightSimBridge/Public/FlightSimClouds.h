@@ -25,16 +25,21 @@
 //   look's layer, the physical sky's) is redrawn with M_FlightSimCloudLayers
 //   (scripts/ue_create_materials.py, assets/shaders/world/cloud_layers.hlsl):
 //   layered seeded noise, cumulus / stratocumulus / overcast / nimbostratus
-//   shapes chosen from the layer's cover and thickness. The layer's base,
-//   top and cover stay the card's. The storm's M_StormCell is never touched.
+//   shapes chosen from the layer's cover and thickness. The layer's cover
+//   stays the card's; its base and top too, unless the aircraft would fly
+//   INSIDE it: then the slab moves clear of the aircraft, thickness kept
+//   (visual round 2, KeepAircraftClearOfClouds). The storm's M_StormCell is
+//   never redrawn (its deck and tower are kept clear the same way, by the
+//   weather's ApplyBeautyStormVantage).
 //   -beauty-clouds=fair adds a fair-weather cumulus layer when the card has
 //   none (a stated stylisation); -beauty-clouds=engine leaves the clouds as
 //   built.
 // * LABEL HONESTY FOR CLOUDS. Volumetric clouds write no depth and no
 //   stencil: the mask, class and depth passes never see them. A cloud
 //   between the camera and the aircraft would hide in the beauty what the
-//   mask shows. Decision (recorded): clouds stay where the card puts them;
-//   every frame records the camera-to-aircraft path through each layer, its
+//   mask shows. Decision (recorded): clouds stay where the card puts them,
+//   except a deck the aircraft would be INSIDE, which moves off it so the
+//   subject the mask shows is not buried in cloud; every frame records the camera-to-aircraft path through each layer, its
 //   estimated transmittance and a cloud_occludes_aircraft flag, so a
 //   consumer drops or down-weights those frames. The mask is not edited.
 // * TILES LOOK. When the Google tiles draw, their material becomes
@@ -141,6 +146,11 @@ private:
 	                 const FString& Mode, double CardCover, double CardBaseM, double CardTopM,
 	                 int32 Seed);
 	void ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Tiles, double CardWetness);
+	// Visual round 2 (weather scenes): every redrawn deck, and the storm cell's
+	// deck and tower, kept clear of the aircraft (beauty only; recorded in
+	// world_beauty.aircraft_clearance).
+	void KeepAircraftClearOfClouds(const TSharedPtr<FJsonObject>& Card, AActor* Aircraft,
+	                               FFlightSimWeather& Weather);
 
 	bool bBuilt = false;
 	// A -sky= plan lights the scene (FFlightSimSky): it owns the sun's

@@ -297,6 +297,124 @@ FFlightSimBeautyRainShape FFlightSimWeather::BeautyRainShape(double RateMmh, int
 	return Shape;
 }
 
+// -- visual round 2 (weather scenes, 2026-11-10): the beauty storm vantage ---------
+// core/scene/storm_cell.py BEAUTY_VANTAGE_CLEARANCE_M, BEAUTY_RAIN_SHARE_FLOOR,
+// TOWER_FLARE, EDGE_M (pinned by tests/test_weather_scenes.py). UNCALIBRATED: set
+// by probe render on the render machine.
+double FFlightSimWeather::BeautyVantageShiftM(double StartEastM, double StartNorthM, double HeadingDeg,
+                                              double TrackM, double AircraftUpM, double CloudBaseM, double CloudTopM,
+                                              double CloudOvershootM, double CloudTowerRadiusM, double ClearanceM)
+{
+	constexpr double WeatherVantageTowerFlare = 0.25;
+	constexpr double WeatherVantageEdgeM = 250.0;
+	if (!(CloudTowerRadiusM > 0.0) || !(CloudTopM > CloudBaseM) || AircraftUpM < CloudBaseM - WeatherVantageEdgeM ||
+	    AircraftUpM > CloudTopM + FMath::Max(CloudOvershootM, 0.0) + WeatherVantageEdgeM)
+	{
+		return 0.0;   // under the base (the shaft's rain, no cloud) or over the top
+	}
+	// The tower's radius at the aircraft's height (storm_cell.shapes: flaring upward).
+	const double F = FMath::Clamp((AircraftUpM - CloudBaseM) / (CloudTopM - CloudBaseM), 0.0, 1.0);
+	const double Radius = CloudTowerRadiusM * (1.0 - WeatherVantageTowerFlare * 0.5 + WeatherVantageTowerFlare * F);
+	const double Need = Radius + FMath::Max(ClearanceM, 0.0);
+	const double H = FMath::DegreesToRadians(HeadingDeg);
+	const double DirE = FMath::Sin(H);
+	const double DirN = FMath::Cos(H);
+	const double Track = FMath::Max(TrackM, 0.0);
+	// The cell centre (the ENU origin) seen from the start: along and across the track.
+	const double Along = -(StartEastM * DirE + StartNorthM * DirN);
+	const double Across = FMath::Abs(StartNorthM * DirE - StartEastM * DirN);
+	if (Across >= Need)
+	{
+		return 0.0;
+	}
+	const double HalfChord = FMath::Sqrt(Need * Need - Across * Across);
+	if (Along - HalfChord >= Track || Along + HalfChord <= 0.0)
+	{
+		return 0.0;   // the track never comes within Need of the centre
+	}
+	// Ahead until the tower's near edge (at this offset) is past the clip's end.
+	return Track + HalfChord - Along;
+}
+
+bool FFlightSimWeather::BeautyStormLayer(double& OutBaseM, double& OutTopM) const
+{
+	OutBaseM = LayerBaseDrawnMetres;
+	OutTopM = LayerTopDrawnMetres;
+	return bCell && LayerCoverDrawn > 0.0 && LayerTopDrawnMetres > LayerBaseDrawnMetres;
+}
+
+void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const FVector& AircraftForward,
+                                                double TrackM, double LayerBaseM, double LayerTopM,
+                                                bool bLayerMoved)
+{
+	constexpr double WeatherBeautyVantageClearanceM = 2500.0;
+	constexpr double WeatherBeautyRainShareFloor = 0.3;
+	const TSharedPtr<FJsonObject>* CellRow = nullptr;
+	if (!bCell || StormMaterial == nullptr || !Record.IsValid() ||
+	    !Record->TryGetObjectField(TEXT("cell"), CellRow) || CellRow == nullptr || !CellRow->IsValid())
+	{
+		return;
+	}
+	TSharedPtr<FJsonObject> Row = WeatherRecord();
+	const FVector StartEnu = EngineToEnu(AircraftCm);
+	const double ForwardE = FVector::DotProduct(AircraftForward, EastAxis);
+	const double ForwardN = FVector::DotProduct(AircraftForward, NorthAxis);
+	Row->SetNumberField(TEXT("clearance_m"), WeatherBeautyVantageClearanceM);
+	Row->SetNumberField(TEXT("track_m"), TrackM);
+	Row->SetArrayField(TEXT("aircraft_start_enu_m"), WeatherJsonVector(StartEnu));
+	double ShiftM = 0.0;
+	if (FMath::Sqrt(ForwardE * ForwardE + ForwardN * ForwardN) > 1.0e-3)
+	{
+		const double HeadingDeg = FMath::RadiansToDegrees(FMath::Atan2(ForwardE, ForwardN));
+		ShiftM = BeautyVantageShiftM(StartEnu.X, StartEnu.Y, HeadingDeg, TrackM, StartEnu.Z, BaseM, CellTopM,
+		                             CellOvershootM, CellTowerRadiusM, WeatherBeautyVantageClearanceM);
+		Row->SetNumberField(TEXT("heading_deg"), HeadingDeg);
+		const double H = FMath::DegreesToRadians(HeadingDeg);
+		BeautyCellOffsetCm = EnuVectorToEngine(FVector(ShiftM * FMath::Sin(H), ShiftM * FMath::Cos(H), 0.0))
+			* WeatherCmPerMetre;
+	}
+	else
+	{
+		Row->SetStringField(TEXT("heading_deg"),
+			TEXT("none: no aircraft, or its forward vector has no horizontal part; the cell is not moved"));
+	}
+	Row->SetNumberField(TEXT("shift_m"), ShiftM);
+	Row->SetArrayField(TEXT("drawn_offset_cm"), WeatherJsonVector(BeautyCellOffsetCm));
+	if (!BeautyCellOffsetCm.IsZero())
+	{
+		// The tower, its anvil and shaft (the material's frame), the bolts and the
+		// flash light move together; the microburst the physics flies does not.
+		StormMaterial->SetVectorParameterValue(TEXT("CellCentreCm"), WeatherColour(CentreEngineCm + BeautyCellOffsetCm));
+		if (LightningActor != nullptr)
+		{
+			LightningActor->SetActorLocation(LightningActor->GetActorLocation() + BeautyCellOffsetCm);
+		}
+	}
+	// The look's deck: the world lane's slab (kept clear of the aircraft).
+	if (bLayerMoved && LayerCoverDrawn > 0.0)
+	{
+		StormMaterial->SetVectorParameterValue(TEXT("Layer"),
+			FLinearColor(static_cast<float>(LayerCoverDrawn), static_cast<float>(LayerBaseM),
+			             static_cast<float>(LayerTopM), static_cast<float>(LayerExtinctionDrawn)));
+	}
+	Row->SetBoolField(TEXT("deck_moved"), bLayerMoved);
+	Row->SetNumberField(TEXT("deck_base_m"), bLayerMoved ? LayerBaseM : LayerBaseDrawnMetres);
+	Row->SetNumberField(TEXT("deck_top_m"), bLayerMoved ? LayerTopM : LayerTopDrawnMetres);
+	// Rain at the aircraft: above the base only the ambient fraction falls (0 for
+	// a storm with no stated rate), so round 1's 747 flew in dry cloud.
+	if (bRain)
+	{
+		BeautyRainShareFloor = WeatherBeautyRainShareFloor;
+	}
+	Row->SetNumberField(TEXT("rain_share_floor"), BeautyRainShareFloor);
+	Row->SetStringField(TEXT("basis"),
+		TEXT("-quality=beauty: the cell is DRAWN shift_m ahead along the aircraft's track so the clip's track "
+		     "stays clearance_m outside the tower (storm_cell.beauty_vantage_shift_m); the look's deck at the "
+		     "world lane's slab (world_beauty.aircraft_clear_layer); the drawn rain at least rain_share_floor of "
+		     "the shaft's. VISUAL ONLY: the downburst, the wind and every physics number stand; UNCALIBRATED"));
+	(*CellRow)->SetObjectField(TEXT("beauty_vantage"), Row);
+}
+
 uint64 FFlightSimWeather::SplitMix64(uint64 X)
 {
 	uint64 Z = X + 0x9E3779B97F4A7C15ull;
@@ -1381,6 +1499,14 @@ bool FFlightSimWeather::BuildCell(UWorld* World, const TSharedPtr<FJsonObject>& 
 	StormMaterial->SetVectorParameterValue(TEXT("Layer"),
 		FLinearColor(static_cast<float>(Options.LayerCover), static_cast<float>(Options.LayerBaseMetres),
 		             static_cast<float>(LayerTopDrawnM), static_cast<float>(LayerExtinctionPerM)));
+	// Kept for the beauty vantage (ApplyBeautyStormVantage); nothing else reads them.
+	CellTopM = Top;
+	CellOvershootM = Over;
+	CellTowerRadiusM = Tower;
+	LayerCoverDrawn = Options.LayerCover;
+	LayerBaseDrawnMetres = Options.LayerBaseMetres;
+	LayerTopDrawnMetres = LayerTopDrawnM;
+	LayerExtinctionDrawn = LayerExtinctionPerM;
 	GlowDiffusionM = Glow;
 	CellAlbedo = Albedo;
 	StormMaterial->SetVectorParameterValue(TEXT("Flash"),
@@ -1850,8 +1976,10 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 			if (bLit)
 			{
 				const double Cd = IntensityCd(Curve, Flash, Power);
+				// The flash where it is DRAWN (BeautyCellOffsetCm: zero but on the beauty vantage).
 				const double DistanceM = FMath::Max(
-					1.0, FVector::Distance(View.CameraCm, EnuToEngineCm(Flash.CentroidEnu)) / WeatherCmPerMetre);
+					1.0, FVector::Distance(View.CameraCm, EnuToEngineCm(Flash.CentroidEnu) + BeautyCellOffsetCm)
+						/ WeatherCmPerMetre);
 				FlashLux += Cd / (DistanceM * DistanceM);
 				if (Cd > BestCd)
 				{
@@ -1872,7 +2000,7 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 			FlashLight->SetIntensity(static_cast<float>(BestCd));
 			if (Best != nullptr)
 			{
-				FlashLight->SetWorldLocation(EnuToEngineCm(Best->CentroidEnu));
+				FlashLight->SetWorldLocation(EnuToEngineCm(Best->CentroidEnu) + BeautyCellOffsetCm);
 			}
 		}
 		if (StormMaterial != nullptr)
@@ -1898,7 +2026,8 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 	{
 		return;
 	}
-	const double Share = ShaftShare(CameraEnu);
+	// BeautyRainShareFloor is 0 but on the beauty storm vantage (the deck above the aircraft rains).
+	const double Share = FMath::Max(ShaftShare(CameraEnu), BeautyRainShareFloor);
 	const FVector BoxHalfCm = BoxHalfM * WeatherCmPerMetre;
 	const FVector Shift(WeatherWrap(AirDisplacementCm.X - View.CameraCm.X, BoxHalfCm.X),
 	                    WeatherWrap(AirDisplacementCm.Y - View.CameraCm.Y, BoxHalfCm.Y),

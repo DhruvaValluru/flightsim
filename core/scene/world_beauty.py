@@ -414,6 +414,43 @@ def cloud_capped_top_m(shape: str, base_m: float, top_m: float, stated: bool) ->
     return base_m + cap
 
 
+#: Visual round 2 (weather scenes, 2026-11-10): BEAUTY ONLY, the aircraft is
+#: never drawn INSIDE a cloud deck. Round 1's tower view in heavy rain (an A320
+#: at 1000 m in the 800-3000 m rain deck) and its 747 in a thunderstorm (2000 m
+#: in the 1200-2700 m storm deck) drew the airframe behind hundreds of metres of
+#: 0.02-0.045 /m cloud: a flat grey or flat blue frame where the mask shows an
+#: aircraft. A deck whose slab, widened by this clearance, holds the aircraft is
+#: moved clear of it, its thickness kept: a rain or storm deck goes ABOVE (the
+#: rain falls from it onto the aircraft), any other deck to the nearer side. The
+#: measure quality never builds the world look, so its decks stand.
+#: UNCALIBRATED: set by probe render on the render machine.
+AIRCRAFT_LAYER_CLEARANCE_M = 400.0
+
+
+def aircraft_clear_layer(base_m: float, top_m: float, aircraft_m: float,
+                         clearance_m: float = AIRCRAFT_LAYER_CLEARANCE_M,
+                         rain_deck: bool = False) -> Dict[str, Any]:
+    """The drawn slab of a deck kept clear of the aircraft (heights above the
+    scene datum): ``{base_m, top_m, moved, above}``. Unmoved when the aircraft
+    is more than ``clearance_m`` outside [base, top] or the slab is empty. The
+    C++ twin is FlightSimWorldPure::AircraftClearLayer (FlightSimClouds.cpp)."""
+    base, top, z = float(base_m), float(top_m), float(aircraft_m)
+    clear = max(float(clearance_m), 0.0)
+    thick = top - base
+    out = {"base_m": base, "top_m": top, "moved": False, "above": True}
+    if not thick > 0.0 or z < base - clear or z > top + clear:
+        return out
+    above = bool(rain_deck) or (z - base) <= (top - z) or z - clear <= 0.0
+    if above:
+        new_base = z + clear
+        out.update(base_m=new_base, top_m=new_base + thick)
+    else:
+        new_top = z - clear
+        out.update(base_m=max(new_top - thick, 0.0), top_m=new_top)
+    out.update(moved=True, above=above)
+    return out
+
+
 def select_cloud(cover: float, thickness_m: float, preset: str) -> str:
     """The cloud shape for a layer: the storm and rain presets draw
     nimbostratus; a deck of CLOUD_OVERCAST_COVER or more is overcast; a thin

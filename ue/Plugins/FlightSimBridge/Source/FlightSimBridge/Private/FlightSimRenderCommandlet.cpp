@@ -118,6 +118,20 @@ namespace
 	constexpr int32 StormMeterRounds = 5;
 	constexpr double StormMeterMaxStops = 8.0;
 	constexpr int32 StormMeterSettleCaptures = 4;
+	// Visual round 2 (weather scenes, 2026-11-10): on a BEAUTY render the meter
+	// also closes a frame that is clipping. Round 1's C172 over Fuji at sunrise
+	// in light rain rendered fully white: the exposure was opened two stops for
+	// a deck light rain never draws, and the meter only ever opened. A p90 over
+	// the highlight bound is brought back to the highlight target, never more
+	// than the close cap; a frame between the target and the bound is left as
+	// the look exposed it (a sunlit sky is meant to be bright), so only a frame
+	// that is clipping moves. A p90 pinned at 255 says only "at least": that
+	// round steps a fixed number of stops down. Measure never closes (bBeauty).
+	// UNCALIBRATED: set by probe render on the render machine.
+	constexpr double BeautyMeterHighlightP90 = 0.92;
+	constexpr double BeautyMeterHighlightTarget = 0.80;
+	constexpr double BeautyMeterMaxCloseStops = 6.0;
+	constexpr double BeautyMeterSaturatedStepStops = 2.0;
 	// The exposure the rain's drops streak over when the card states no
 	// camera triple: 1/1000 s, a daylight video camera's order (stated).
 	// It decides whether the rain is SEEN from a moving aircraft: a
@@ -5038,8 +5052,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// black (the owner's first storm frame, 2026-10-08: nothing visible). A
 	// camera meters: the frame is captured and read back, and the bias
 	// opened until the frame's mean sRGB luma reaches the target (the
-	// constants above), never closed below the look's exposure and never
-	// more than StormMeterMaxStops open. Constant over the clip once set
+	// constants above), never closed below the look's exposure (on a beauty
+	// render only a CLIPPING frame is closed: the highlight guard, visual
+	// round 2) and never more than StormMeterMaxStops open. Constant over the clip once set
 	// (Gate 6: no breathing); recorded in look_applied.storm_exposure.
 	// -AutoExposure meters itself and skips this; so does a cell not drawn.
 	// Round 2 (exposure-storm, 2026-11-09): the same loop also meters a
@@ -5079,6 +5094,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		int32 Rounds = 0;
 		FString MeterNote = TEXT("within tolerance of the target");
 		TArray<FColor> MeterPixels;
+		// Visual round 2: a beauty meter may also close a clipping frame (the
+		// constants above); measure keeps the open-only meter, byte for byte.
+		const bool bMeterMayClose = bVisual && bBeauty;
+		bool bMeterClosed = false;
 		for (; Rounds < StormMeterRounds; ++Rounds)
 		{
 			World->SendAllEndOfFrameUpdates();
@@ -5128,7 +5147,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				MeanBefore = Mean;
 				BrightBefore = Bright;
 			}
-			if (FMath::Abs(Bright - StormMeterTarget) <= StormMeterTolerance)
+			// A beauty frame whose bright end is clipping (BeautyMeterHighlightP90).
+			const bool bBlown = bMeterMayClose && Bright > BeautyMeterHighlightP90;
+			if (!bBlown && FMath::Abs(Bright - StormMeterTarget) <= StormMeterTolerance)
 			{
 				break;
 			}
@@ -5139,18 +5160,34 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			// sRGB-encoded luma goes about as the 1/2.2 power of the light:
 			// the stops that would land the target, damped (0.8) against the
-			// tonemapper's shoulder, the sum clamped to [0, the cap].
-			const double Step =
-				2.2 * 0.8 * FMath::Log2(StormMeterTarget / FMath::Max(Bright, 1.0 / 255.0));
-			const double Next = FMath::Clamp(Opened + Step, 0.0, StormMeterMaxStops);
+			// tonemapper's shoulder, the sum clamped to [0, the cap]. A
+			// clipping beauty frame aims at the highlight target instead, at
+			// least BeautyMeterSaturatedStepStops down while its p90 is pinned
+			// at 255, the sum clamped to [-the close cap, the cap]. Otherwise the
+			// floor is 0, or where an already closed beauty frame stands: a
+			// frame that is merely bright (not clipping) is never closed.
+			const double Want = bBlown ? BeautyMeterHighlightTarget : StormMeterTarget;
+			double Step = 2.2 * 0.8 * FMath::Log2(Want / FMath::Max(Bright, 1.0 / 255.0));
+			if (bBlown && Bright >= 254.0 / 255.0)
+			{
+				Step = FMath::Min(Step, -BeautyMeterSaturatedStepStops);
+			}
+			const double Lowest = bBlown ? -BeautyMeterMaxCloseStops : FMath::Min(0.0, Opened);
+			const double Next = FMath::Clamp(Opened + Step, Lowest, StormMeterMaxStops);
 			if (FMath::IsNearlyEqual(Next, Opened, 0.01))
 			{
 				MeterNote = Next >= StormMeterMaxStops
 					? TEXT("at the cap: darker than the cap allows for is the engine's cloud "
 					       "model, not the storm's")
-					: TEXT("the look's exposure already lands the target or brighter");
+					: (bBlown
+						? TEXT("at the close cap: the frame still clips at the most the beauty meter closes")
+						: (Opened < 0.0
+							? TEXT("closed off the clipping highlights; the bright end now sits between the "
+							       "target and the highlight bound")
+							: TEXT("the look's exposure already lands the target or brighter")));
 				break;
 			}
+			bMeterClosed = bMeterClosed || Next < 0.0;
 			Opened = Next;
 			MeterSettings.AutoExposureBias = static_cast<float>(BiasBefore + Opened);
 		}
@@ -5195,6 +5232,21 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		MeterRow->SetNumberField(TEXT("bias_after"), MeterSettings.AutoExposureBias);
 		MeterRow->SetNumberField(TEXT("rounds"), Rounds);
 		MeterRow->SetStringField(TEXT("note"), MeterNote);
+		if (bMeterMayClose)
+		{
+			// Beauty only (measure's row is unchanged): the highlight guard.
+			TSharedPtr<FJsonObject> Guard = MakeShared<FJsonObject>();
+			Guard->SetNumberField(TEXT("highlight_p90"), BeautyMeterHighlightP90);
+			Guard->SetNumberField(TEXT("highlight_target_p90"), BeautyMeterHighlightTarget);
+			Guard->SetNumberField(TEXT("max_close_stops"), BeautyMeterMaxCloseStops);
+			Guard->SetNumberField(TEXT("saturated_step_stops"), BeautyMeterSaturatedStepStops);
+			Guard->SetBoolField(TEXT("closed"), bMeterClosed);
+			Guard->SetStringField(TEXT("basis"),
+				TEXT("visual round 2: a beauty frame whose p90 luma is over highlight_p90 is clipping and is "
+				     "closed towards highlight_target_p90 (never more than max_close_stops); a frame between "
+				     "the target and highlight_p90 stays as the look exposed it; UNCALIBRATED"));
+			MeterRow->SetObjectField(TEXT("highlight_guard"), Guard);
+		}
 		MeterRow->SetStringField(TEXT("basis"),
 			TEXT("the beauty frame read back before frame 0, the 90th percentile of its sRGB luma ")
 			TEXT("(Rec. 709 weights; the cloud base and the horizon, not the dark ground) opened ")
@@ -8252,6 +8304,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		+ (StormMeterOpened > 0.0
 			? FString::Printf(TEXT("; opened %.2f stops by the storm meter (look_applied.")
 			                  TEXT("storm_exposure)"), StormMeterOpened)
+			// Beauty only: the meter's highlight guard closed a clipping frame.
+			: StormMeterOpened < 0.0
+			? FString::Printf(TEXT("; closed %.2f stops by the beauty meter's highlight guard ")
+			                  TEXT("(look_applied.storm_exposure.highlight_guard)"), -StormMeterOpened)
 			: FString()));
 	Scene->SetBoolField(TEXT("physical_sky"), bPhysicalSky);
 	if (bPhysicalSky)
