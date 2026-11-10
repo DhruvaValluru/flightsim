@@ -360,7 +360,7 @@ What changed (beauty only; `look_applied.world_beauty.clouds.march` and
 - cloud_layers.hlsl is now a Perlin-Worley shape with domed tops (the cut rises
   with height) and in-cloud Worley erosion;
 - the march depends on the GPU class (`GRHIDeviceIsIntegrated`):
-  - integrated: 384 view and 40 shadow samples over 40 km;
+  - integrated: 384 view and 40 shadow samples over 40 km (round 1 hang, 2026-11-09: lowered to 192 view and 12 shadow over 20 km, and fog-all-pixel discrete-only);
   - discrete: 576 view and 60 shadow samples over 50 km;
 - the shadow march spans the layer: 1 km per km of thickness, clamped to 1..4 km;
 - the plan's default 3 km slab is thinned to 2 km for cumulus;

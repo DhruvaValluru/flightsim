@@ -350,12 +350,14 @@ OCCLUSION_FLAG_TRANSMITTANCE = 0.5
 #: The march by GPU class (GRHIDeviceIsIntegrated): the component's view and
 #: shadow sample-count scales (the engine's 96 and 10 samples times these,
 #: under its caps 768 and 80) and the trace's max distance inside the layer.
-#: An integrated GPU keeps about the round-1 cost with the new noise.
+#: An integrated GPU keeps the round-1 sample counts (192 view, 12 shadow) over a
+#: 20 km march: the round-2 row (384 view, 40 shadow) hung every beauty run on the
+#: render laptop's Intel iGPU (round 1, 2026-11-09).
 CLOUD_MARCH_FIELDS: Tuple[str, ...] = ("view_sample_count_scale", "shadow_sample_count_scale",
                                        "tracing_max_distance_km")
 CLOUD_MARCH: Dict[str, Dict[str, float]] = {
     "discrete": dict(view_sample_count_scale=6.0, shadow_sample_count_scale=6.0, tracing_max_distance_km=50.0),
-    "integrated": dict(view_sample_count_scale=4.0, shadow_sample_count_scale=4.0, tracing_max_distance_km=40.0),
+    "integrated": dict(view_sample_count_scale=2.0, shadow_sample_count_scale=1.2, tracing_max_distance_km=20.0),
 }
 #: The engine's base samples and caps (VolumetricCloudComponent.h, VolumetricCloudRendering.cpp).
 ENGINE_CLOUD_BASE_VIEW_SAMPLES = 96.0

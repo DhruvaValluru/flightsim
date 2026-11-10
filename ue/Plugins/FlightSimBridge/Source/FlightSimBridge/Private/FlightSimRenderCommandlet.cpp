@@ -62,7 +62,15 @@
 #include "Serialization/JsonWriter.h"
 #include "ShaderCompiler.h"
 #include "TextureResource.h"
+#include "RHIStrings.h"            // capture watchdog: LexToString(EShaderPlatform)
+#include "HAL/Runnable.h"         // capture watchdog
+#include "HAL/RunnableThread.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformStackWalk.h"   // capture watchdog: the stuck threads' stacks
+#include "Misc/ScopeLock.h"
 
+#include <atomic>
+#include <cstdlib>   // std::_Exit (capture watchdog)
 #include <limits>
 
 DEFINE_LOG_CATEGORY(LogFlightSimRender);
@@ -397,6 +405,100 @@ namespace
 			});
 		FlushRenderingCommands();
 	}
+
+	// The capture watchdog (round 1 hang, 2026-11-09). On the render laptop's
+	// Intel iGPU (D3D11 SM5) a beauty run at ec221502 stopped after the
+	// warm-up captures for 30+ min with the editor idle: the game thread sat
+	// in a flush waiting on the GPU and nothing ever said so. A commandlet has
+	// no hitch detector, so this thread does it: every capture stage beats,
+	// and a stage that has not beaten for the limit ends the process with
+	// exit code 4 and a line that names the stage, the adapter and the RHI
+	// (render.capture_timeout). The process is ended hard because the game
+	// thread is the one stuck; std::_Exit runs no handlers that could wait on
+	// it. -capture-timeout-s=N sets the limit (0 disables). It changes no
+	// pixel, so measure runs keep it too.
+	// UNCALIBRATED: a beauty still on the iGPU should take seconds a capture;
+	// 900 s is ample for any stage that is merely slow.
+	constexpr double RenderCaptureTimeoutDefaultS = 900.0;
+	class FRenderCaptureWatchdog : public FRunnable
+	{
+	public:
+		explicit FRenderCaptureWatchdog(double InLimitS) : LimitS(InLimitS)
+		{
+			LastBeatS = FPlatformTime::Seconds();
+			Thread = FRunnableThread::Create(this, TEXT("FlightSimCaptureWatchdog"), 64 * 1024);
+		}
+		virtual ~FRenderCaptureWatchdog() override
+		{
+			bStop = true;
+			if (Thread != nullptr)
+			{
+				Thread->WaitForCompletion();
+				delete Thread;
+			}
+		}
+		void Beat(const TCHAR* InStage)
+		{
+			FScopeLock Guard(&Lock);
+			Stage = InStage;
+			LastBeatS = FPlatformTime::Seconds();
+		}
+		virtual uint32 Run() override
+		{
+			while (!bStop)
+			{
+				FPlatformProcess::Sleep(1.0f);
+				FString At;
+				double IdleS = 0.0;
+				{
+					FScopeLock Guard(&Lock);
+					At = Stage;
+					IdleS = FPlatformTime::Seconds() - LastBeatS;
+				}
+				if (!bStop && IdleS > LimitS)
+				{
+					UE_LOG(LogFlightSimRender, Error,
+						TEXT("render.capture_timeout: no capture stage finished in %.0f s (limit %.0f s, ")
+						TEXT("-capture-timeout-s=); stuck after '%s'; adapter '%s', RHI %s, shader platform %s. ")
+						TEXT("The GPU did not return: lower the beauty cost on this adapter or render on a ")
+						TEXT("discrete GPU"),
+						IdleS, LimitS, *At, *GRHIAdapterName,
+						GDynamicRHI != nullptr ? GDynamicRHI->GetName() : TEXT("none"),
+						*LexToString(GMaxRHIShaderPlatform));
+					// Where it is stuck: the game thread (waiting in a flush or a
+					// readback) and the render thread (what it waits on). Round 1
+					// read 0 % GPU and an idle editor: a deadlock, not a slow GPU.
+					DumpThreadStack(TEXT("game"), GGameThreadId);
+					if (GRenderThreadId != 0 && GRenderThreadId != GGameThreadId)
+					{
+						DumpThreadStack(TEXT("render"), GRenderThreadId);
+					}
+					if (GLog != nullptr)
+					{
+						GLog->Flush();
+					}
+					std::_Exit(4);
+				}
+			}
+			return 0;
+		}
+	private:
+		static void DumpThreadStack(const TCHAR* Name, uint32 ThreadId)
+		{
+			constexpr SIZE_T StackBytes = 64 * 1024;
+			TArray<ANSICHAR> Stack;
+			Stack.SetNumZeroed(StackBytes);
+			FPlatformStackWalk::ThreadStackWalkAndDump(Stack.GetData(), StackBytes, 0, ThreadId);
+			UE_LOG(LogFlightSimRender, Error, TEXT("render.capture_timeout: %s thread (%u) stack:\n%s"),
+			       Name, ThreadId, ANSI_TO_TCHAR(Stack.GetData()));
+		}
+		const double LimitS;
+		FCriticalSection Lock;
+		FString Stage = TEXT("start");
+		double LastBeatS = 0.0;
+		std::atomic<bool> bStop{false};
+		FRunnableThread* Thread = nullptr;
+	};
 
 	// A pixel of a world point through a capture's transform and FOV, and
 	// whether the point is in front of it (ProjectToPixel's arithmetic,
@@ -4710,19 +4812,44 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		WarmupCaptures = FMath::Max(WarmupCaptures, 16);
 	}
+	// The capture watchdog (FRenderCaptureWatchdog): armed after the shader
+	// and asset compiles (those are waited on above and may take minutes),
+	// beaten by every capture stage from here to the last frame.
+	double CaptureTimeoutS = RenderCaptureTimeoutDefaultS;
+	FParse::Value(*Params, TEXT("capture-timeout-s="), CaptureTimeoutS);
+	TUniquePtr<FRenderCaptureWatchdog> CaptureWatchdog;
+	if (CaptureTimeoutS > 0.0)
+	{
+		CaptureWatchdog = MakeUnique<FRenderCaptureWatchdog>(CaptureTimeoutS);
+	}
+	auto BeatWatchdog = [&CaptureWatchdog](const TCHAR* Stage)
+	{
+		if (CaptureWatchdog.IsValid())
+		{
+			CaptureWatchdog->Beat(Stage);
+		}
+	};
+	UE_LOG(LogFlightSimRender, Display, TEXT("warm-up: %d captures (capture watchdog %.0f s)"),
+	       WarmupCaptures, CaptureTimeoutS);
 	for (int32 i = 0; i < WarmupCaptures; ++i)
 	{
 		World->SendAllEndOfFrameUpdates();
 		FlushRenderingCommands();
 		Capture->CaptureScene();
 		FlushRenderingCommands();
+		BeatWatchdog(TEXT("a warm-up capture"));
+		UE_LOG(LogFlightSimRender, Display, TEXT("warm-up capture %d/%d done"), i + 1, WarmupCaptures);
 	}
+	UE_LOG(LogFlightSimRender, Display, TEXT("warm-up done"));
 	// aircraft-sharp (beauty raster only; measure and pathtrace untouched):
 	// the velocity frame starts here, so the first delivered frame's motion
 	// vectors run from the warm-up pose, not from where the aircraft spawned.
 	if (bVisual && bBeauty && !bPathTrace)
 	{
+		UE_LOG(LogFlightSimRender, Display, TEXT("velocity frame: start"));
 		RenderBeautyStartSceneFrame(World);
+		BeatWatchdog(TEXT("the velocity frame (FScene::StartFrame)"));
+		UE_LOG(LogFlightSimRender, Display, TEXT("velocity frame: done"));
 	}
 	// The sky light, captured here because real-time capture never runs for a
 	// scene capture: without this every shadow and every overcast is lit by
@@ -4751,15 +4878,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				VisualScene.LookApplied->SetObjectField(TEXT("sky_light_capture"), SkyCapture);
 			}
 		}
+		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: start"));
 		VisualScene.SkyLightComponent->SetCaptureIsDirty();
 		USkyLightComponent::UpdateSkyCaptureContents(World);
 		FlushRenderingCommands();
+		BeatWatchdog(TEXT("the sky light capture"));
+		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: done"));
 		for (int32 i = 0; i < 2; ++i)
 		{
 			World->SendAllEndOfFrameUpdates();
 			FlushRenderingCommands();
 			Capture->CaptureScene();
 			FlushRenderingCommands();
+			BeatWatchdog(TEXT("a capture after the sky light capture"));
+			UE_LOG(LogFlightSimRender, Display, TEXT("post-sky capture %d/2 done"), i + 1);
 		}
 	}
 
@@ -4818,11 +4950,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			FlushRenderingCommands();
 			Capture->CaptureScene();
 			FlushRenderingCommands();
+			BeatWatchdog(TEXT("an exposure meter capture"));
+			UE_LOG(LogFlightSimRender, Display, TEXT("exposure meter round %d: captured, reading back"), Rounds + 1);
 			FTextureRenderTargetResource* MeterResource =
 				RenderTarget->GameThread_GetRenderTargetResource();
 			MeterPixels.Reset();
-			if (MeterResource == nullptr || !MeterResource->ReadPixels(MeterPixels) ||
-			    MeterPixels.Num() == 0)
+			const bool bMeterRead = MeterResource != nullptr && MeterResource->ReadPixels(MeterPixels);
+			BeatWatchdog(TEXT("an exposure meter readback"));
+			UE_LOG(LogFlightSimRender, Display, TEXT("exposure meter round %d: read back (%s)"), Rounds + 1,
+			       bMeterRead ? TEXT("ok") : TEXT("failed"));
+			if (!bMeterRead || MeterPixels.Num() == 0)
 			{
 				Opened = OpenedMeasured;
 				MeterSettings.AutoExposureBias = static_cast<float>(BiasBefore + Opened);
@@ -4902,7 +5039,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			FlushRenderingCommands();
 			Capture->CaptureScene();
 			FlushRenderingCommands();
+			BeatWatchdog(TEXT("an exposure settle capture"));
 		}
+		UE_LOG(LogFlightSimRender, Display, TEXT("exposure meter: settled"));
 		TSharedPtr<FJsonObject> MeterRow = MakeShared<FJsonObject>();
 		MeterRow->SetBoolField(TEXT("metered"), MeanBefore >= 0.0);
 		MeterRow->SetStringField(TEXT("trigger"), bBeautyMeter
@@ -5557,9 +5696,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			Capture->CaptureScene();
 			FlushRenderingCommands();
+			BeatWatchdog(TEXT("a beauty sub-frame capture"));
 		}
 		Capture->CaptureScene();
 		FlushRenderingCommands();
+		BeatWatchdog(TEXT("a frame capture"));
 		// aircraft-sharp: the next delivered frame's motion vectors start at
 		// THIS frame's transforms (clips: one frame of motion, the shutter rule).
 		if (bBeautyRaster)
@@ -6824,6 +6965,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		FrameRecords.Add(MakeShared<FJsonValueObject>(Record));
 		++Captured;
 	}
+	// The frames are in: what follows (encode, manifest) is CPU work the
+	// watchdog has no business timing.
+	CaptureWatchdog.Reset();
 
 	if (bConsumePoses && NextCapture != CaptureTimes.Num())
 	{

@@ -337,6 +337,10 @@ render.beauty_fallback_mode:
 camera.scene_frame_mismatch:
   sentence: "The camera would be placed far from the flight: the run card does not say which map projection its camera track was worked out in, so the render placed it in a different one."
   hint: "Run it again from the web app, which now states the projection for every beauty run with cameras."
+# round-1 hang (FlightSimRenderCommandlet.cpp FRenderCaptureWatchdog):
+render.capture_timeout:
+  sentence: "The render stopped: the graphics card did not finish a frame within the time limit, so the run was ended instead of waiting forever."
+  hint: "This computer's graphics may be too slow for the beauty look. Render on a machine with a dedicated graphics card, or use the measure look."
 # shots-render fix pass (core/terrain/glo30.py standoff_start, core/scenario/
 # camera.py chase_unframed; raised by experiments/visual_contact_sheet.py):
 shot.subject_unframed:

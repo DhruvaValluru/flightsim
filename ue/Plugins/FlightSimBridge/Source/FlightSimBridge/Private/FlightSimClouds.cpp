@@ -192,12 +192,15 @@ namespace FlightSimWorldPure
 	// The engine's samples are 96 x view scale (cap r.VolumetricCloud.ViewRaySampleMaxCount,
 	// 768) and 10 x shadow scale (cap r.VolumetricCloud.Shadow.ViewRaySampleMaxCount, 80);
 	// both rows stay under the caps. An integrated GPU (GRHIDeviceIsIntegrated: the
-	// render machine's Intel) keeps about the round-1 cost with the new noise.
+	// render machine's Intel) keeps the round-1 sample counts (192 view; 12 shadow
+	// against 10) with the march shortened to 20 km so the steps stay finer than
+	// round 1's: the round-2 row (384 view, 40 shadow, with the gen-3 noise and fog
+	// on every pixel) hung every beauty run on that laptop (round 1, 2026-11-09).
 	inline double CloudMarch(int March, int Field)
 	{
 		static const double Rows[MarchCount][MarchFieldCount] = {
 			{6.0, 6.0, 50.0},   // discrete: 576 view, 60 shadow samples
-			{4.0, 4.0, 40.0},   // integrated: 384 view, 40 shadow samples
+			{2.0, 1.2, 20.0},   // integrated: 192 view, 12 shadow samples
 		};
 		return March >= 0 && March < MarchCount && Field >= 0 && Field < MarchFieldCount
 			? Rows[March][Field] : 0.0;
@@ -1302,7 +1305,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		TSharedPtr<FJsonObject> MarchOut = MakeShared<FJsonObject>();
 		MarchOut->SetStringField(TEXT("path"), ANSI_TO_TCHAR(MarchName(March)));
 		MarchOut->SetStringField(TEXT("path_basis"),
-			TEXT("GRHIDeviceIsIntegrated (the RHI's adapter): integrated keeps about the round-1 cost"));
+			TEXT("GRHIDeviceIsIntegrated (the RHI's adapter): integrated keeps the round-1 sample counts over a 20 km march"));
 		MarchOut->SetStringField(TEXT("adapter"), GRHIAdapterName);
 		for (int32 F = 0; F < MarchFieldCount; ++F)
 		{
@@ -1325,7 +1328,12 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			{
 				CloudFogAllPixelBefore = FogAll->GetString();
 			}
-			FogAll->Set(1, ECVF_SetByCode);
+			// Fog on every cloud pixel costs a full-screen pass per capture:
+			// discrete GPUs only (the round-1 hang on the Intel iGPU).
+			if (!bIntegratedGpu)
+			{
+				FogAll->Set(1, ECVF_SetByCode);
+			}
 		}
 		MarchOut->SetStringField(WorldCloudFogAllPixelCvar,
 			FogAll != nullptr ? FogAll->GetString() : FString(TEXT("absent")));
