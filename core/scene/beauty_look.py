@@ -353,8 +353,19 @@ DEFAULT_SENSOR_WIDTH_MM = 36.0
 #: shadowed valley and hold the snow without moving the global exposure.
 #: UNCALIBRATED: set by probe render on the render machine (the Matterhorn
 #: north-face probe: valley floor and snowfield in one frame).
+#:
+#: Round 2 (2026-11-09, the first Windows renders): the HIGHLIGHT scale is 1
+#: (the engine's own default, Engine/Private/Scene.cpp), so local exposure
+#: never re-tones the sky. The bilateral grid adapts each pixel to the
+#: blurred luminance of its neighbourhood (a kernel half the frame wide), and
+#: a highlight scale below 1 pulled the sky band toward whatever the terrain
+#: beside it was doing: a bank that swings the horizon moves the sky band's
+#: tone frame to frame, which is exposure breathing by another name (Gate 6's
+#: clause). Only the SHADOW side stays below 1: it lifts the shadowed valley
+#: (darker than mid grey), which is what this lane is for, and the sky,
+#: always above mid grey, is never on that side of the curve.
 LOCAL_EXPOSURE: Dict[str, float] = {
-    "LocalExposureHighlightContrastScale": 0.85,
+    "LocalExposureHighlightContrastScale": 1.0,
     "LocalExposureShadowContrastScale": 0.8,
     "LocalExposureDetailStrength": 1.0,
     "LocalExposureBlurredLuminanceBlend": 0.6,

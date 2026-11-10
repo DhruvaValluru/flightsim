@@ -18,6 +18,7 @@ PRIVATE = REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private"
 LOOK_CPP = (PRIVATE / "FlightSimBeautyLook.cpp").read_text(encoding="utf-8")
 LOOK_H = (PRIVATE / "FlightSimBeautyLook.h").read_text(encoding="utf-8")
 RENDER_CPP = (PRIVATE / "FlightSimRenderCommandlet.cpp").read_text(encoding="utf-8")
+HERO_CPP = (PRIVATE / "FlightSimHeroLighting.cpp").read_text(encoding="utf-8")
 API = (REPO / "scripts" / "check_bridge_api.sh").read_text(encoding="utf-8")
 
 
@@ -129,6 +130,19 @@ def test_the_meter_symbols_are_checked_before_a_build():
     block = API[API.index("BEGIN exposure-storm"):API.index("END exposure-storm")]
     for needle in ("DoesPlatformSupportLumenGI", "GMaxRHIShaderPlatform", "LexToString(EShaderPlatform"):
         assert needle in block, needle
+
+
+# -- breathing --------------------------------------------------------------------
+
+
+def test_local_exposure_never_retones_the_sky():
+    assert bl.LOCAL_EXPOSURE["LocalExposureHighlightContrastScale"] == 1.0
+    assert bl.LOCAL_EXPOSURE["LocalExposureShadowContrastScale"] < 1.0
+
+
+def test_the_beauty_sun_has_no_screen_space_shaft_occlusion():
+    assert "SunLight->SetEnableLightShaftOcclusion(false);" in HERO_CPP
+    assert "SunLight->SetEnableLightShaftOcclusion(true);" not in HERO_CPP
 
 
 # -- the web app ------------------------------------------------------------------
