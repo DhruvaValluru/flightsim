@@ -113,8 +113,8 @@ struct FWorldCloud
 				for (int dx = -1; dx <= 1; ++dx)
 				{
 					uint h = Hash3(ix + dx, iy + dy, iz + dz, seed);
-					float3 f = float3(ix + dx, iy + dy, iz + dz)
-						+ float3(h & 1023u, (h >> 10u) & 1023u, (h >> 20u) & 1023u) / 1024.0;
+					float3 f = float3((float)(ix + dx), (float)(iy + dy), (float)(iz + dz))
+						+ float3((float)(h & 1023u), (float)((h >> 10u) & 1023u), (float)((h >> 20u) & 1023u)) / 1024.0;
 					float3 d = f - p;
 					best = min(best, dot(d, d));
 				}
