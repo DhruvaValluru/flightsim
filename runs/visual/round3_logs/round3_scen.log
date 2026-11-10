@@ -1,0 +1,147 @@
+
+[1] golden hour A-4, flying east
+    chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds
+    run 2f84d1430075 started
+    queued: 
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    labels: engine labels attached on 1 of 1 frame(s) (0 without a bundle)
+    done: clip ready
+    -> DONE: clip ready
+
+[2] same, super bright preset
+    chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds
+    run 380a43ad3e5e started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[3] a320 over new york, wide lens (terrain download)
+    chase view of the a320 over new york city at 600 m in the morning with a 18 mm lens for 6 seconds
+    run 92bfdd434b55 started
+    aircraft: importing 1 aircraft into the Unreal project
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[4] desert A-4, sun behind the camera
+    chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds
+    run 349703c1794c started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[5] desert A-4, backlit
+    chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds
+    run 782e717c2957 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    labels: engine labels attached on 1 of 1 frame(s) (0 without a bundle)
+    done: clip ready
+    -> DONE: clip ready
+
+[6] a320 over sfo heading south, moderate rain
+    wingman view of the a320 over sfo south at 3000 m in moderate rain for 6 seconds
+    run 79dd75450462 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): wingman
+    done: clip ready
+    -> DONE: clip ready
+
+[7] tower view, heavy rain
+    tower view of the a320 at 1000 m in heavy rain for 6 seconds
+    run c011b00e0090 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): tower
+    done: clip ready
+    -> DONE: clip ready
+
+[8] c172 over fuji, sunrise, light rain
+    chase view of the c172p over mount fuji at sunrise in light rain for 6 seconds
+    run 58a6e2966d31 started
+    aircraft: importing 1 aircraft into the Unreal project
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[9] 747 through a thunderstorm
+    chase view of the 747 flying west through a thunderstorm at 2000 m for 6 seconds
+    run f6cb06aa33a4 started
+    aircraft: importing 1 aircraft into the Unreal project
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    labels: engine labels attached on 1 of 1 frame(s) (0 without a bundle)
+    done: clip ready
+    -> DONE: clip ready
+
+[10] c172 near a tornado
+    chase view of the c172p near a tornado over the flint hills at 600 m for 6 seconds
+    run 7d83117b0f85 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[11] A-4 over the matterhorn, strong wind, severe turbulence
+    chase view of the a4 over the matterhorn at 5000 m in strong wind and severe turbulence, flying north, for 6 seconds
+    -> REFUSED: [envelope.trim_feasible] This aircraft cannot fly steadily at the requested speed, height and weight; its flight model does not reach there.
+
+[12] c172 cockpit over the grand canyon
+    cockpit view of the c172p over the grand canyon at 2500 m flying east for 6 seconds
+    run 8ec13ede7fe0 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): cockpit
+    encoding: encoding frames to mp4
+    done: clip ready
+    -> DONE: clip ready
+
+[13] 747 cruise over the ocean
+    chase view of the 747 over the ocean at 10000 m at noon for 6 seconds
+    run 84e2590c2f8e started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    labels: engine labels attached on 1 of 1 frame(s) (0 without a bundle)
+    done: clip ready
+    -> DONE: clip ready
+
+[14] hurricane (should be refused: not supported)
+    fly the 747 through a hurricane
+    -> REFUSED: [prompt.unsupported] The request asks for “hurricane”, which this simulator does not model.
+
+================ summary ================
+ 1. DONE     golden hour A-4, flying east  [run 2f84d1430075]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+ 2. DONE     same, super bright preset  [run 380a43ad3e5e]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+ 3. DONE     a320 over new york, wide lens (terrain download)  [run 92bfdd434b55]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+ 4. DONE     desert A-4, sun behind the camera  [run 349703c1794c]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+ 5. DONE     desert A-4, backlit  [run 782e717c2957]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+ 6. DONE     a320 over sfo heading south, moderate rain  [run 79dd75450462]
+      clip: 1 frames of wingman at 30.0 fps = 0.0 s of flight
+ 7. DONE     tower view, heavy rain  [run c011b00e0090]
+      clip: 1 frames of tower at 30.0 fps = 0.0 s of flight
+ 8. DONE     c172 over fuji, sunrise, light rain  [run 58a6e2966d31]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+ 9. DONE     747 through a thunderstorm  [run f6cb06aa33a4]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+10. DONE     c172 near a tornado  [run 7d83117b0f85]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+11. REFUSED  A-4 over the matterhorn, strong wind, severe turbulence
+      [envelope.trim_feasible] This aircraft cannot fly steadily at the requested speed, height and weight; its flight model does not reach there.
+12. DONE     c172 cockpit over the grand canyon  [run 8ec13ede7fe0]
+      clip: 1 frames of cockpit at 30.0 fps = 0.0 s of flight
+13. DONE     747 cruise over the ocean  [run 84e2590c2f8e]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+14. REFUSED  hurricane (should be refused: not supported)
+      [prompt.unsupported] The request asks for “hurricane”, which this simulator does not model.
+
+written: C:\Users\kanth\flightsim\runs\test_scenarios.json
+all results in one folder: C:\Users\kanth\flightsim\runs\test_scenarios
+open: C:\Users\kanth\flightsim\runs\test_scenarios\index.html
