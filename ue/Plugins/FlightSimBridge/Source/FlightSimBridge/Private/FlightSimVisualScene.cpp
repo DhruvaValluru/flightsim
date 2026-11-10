@@ -800,10 +800,16 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 			Options.XPlaneCondition.EndsWith(TEXT("/model"))
 				? TEXT("atmosphere model (core/xplane/atmosphere.py)")
 				: TEXT("simulator sky_colors lookup, extracted locally (scripts/extract_xplane.py)"));
+		// Round 2b presets-colour: a beauty render sends the sun and sky-light
+		// colours white (condition "beauty:<table>"); only the horizon applies.
 		XPlaneRecord->SetStringField(TEXT("compensation"),
-			TEXT("sun and sky-light colours arrive divided by what this engine's sky "
-			     "atmosphere already applies (webapp.runs.xplane_lighting_flags): the "
-			     "sun is an atmosphere sun light, the sky light a real-time capture"));
+			Options.XPlaneCondition.StartsWith(TEXT("beauty:"))
+				? TEXT("beauty: sun and sky-light colours sent white (the atmosphere's "
+				       "transmittance and the sky capture own them; webapp.runs."
+				       "xplane_lighting_flags beauty=True); only the horizon colour applies")
+				: TEXT("sun and sky-light colours arrive divided by what this engine's sky "
+				       "atmosphere already applies (webapp.runs.xplane_lighting_flags): the "
+				       "sun is an atmosphere sun light, the sky light a real-time capture"));
 		LookApplied->SetObjectField(TEXT("xplane_lighting"), XPlaneRecord);
 	}
 

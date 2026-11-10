@@ -514,6 +514,11 @@ namespace
 			FLIGHTSIM_BEAUTY_FLOAT(Tonemap, FilmBlackClip)
 			FLIGHTSIM_BEAUTY_FLOAT(Tonemap, FilmWhiteClip)
 			FLIGHTSIM_BEAUTY_FLOAT(Tonemap, ToneCurveAmount)
+			// Round 2b presets-colour: the hue guard (core/scene/beauty_look.py
+			// TONEMAP_HUE). FPostProcessSettings::BlueCorrection keeps a saturated
+			// sky-blue shadow fill from skewing to violet through the AP1 tone
+			// curve (PostProcessCombineLUTs.usf, every RHI incl. D3D11 SM5).
+			FLIGHTSIM_BEAUTY_FLOAT(Tonemap, BlueCorrection)
 			Capture->ShowFlags.SetTonemapper(true);
 			State.Applied->SetObjectField(TEXT("tonemap"), Echo);
 		}
