@@ -1,0 +1,54 @@
+
+   Id Name           Wait CPUms
+   -- ----           ---- -----
+13448         UserRequest 17406
+22996         UserRequest  2422
+29448         UserRequest  1938
+21944         UserRequest  1359
+18724         UserRequest  1281
+13524         UserRequest  1266
+23016         UserRequest  1250
+25012         UserRequest  1219
+29472         UserRequest  1141
+16624         UserRequest  1078
+32096         UserRequest  1000
+ 3364      ExecutionDelay   688
+16200      ExecutionDelay   375
+26152      ExecutionDelay   266
+19364             Unknown   250
+34536      ExecutionDelay   203
+ 9320         UserRequest   188
+20428         UserRequest   172
+24404             Unknown    78
+20076         UserRequest    78
+22780         UserRequest    78
+23404      ExecutionDelay    78
+17072      ExecutionDelay    62
+ 7352         UserRequest    62
+19608         UserRequest    47
+ 7660         UserRequest    16
+21828         UserRequest    16
+31836         UserRequest     0
+34136         UserRequest     0
+33940        EventPairLow     0
+20564        EventPairLow     0
+31564             Unknown     0
+21912         UserRequest     0
+20704         UserRequest     0
+16388         UserRequest     0
+32092         UserRequest     0
+28916         UserRequest     0
+30852         UserRequest     0
+29044         UserRequest     0
+23800         UserRequest     0
+17588        EventPairLow     0
+28708         UserRequest     0
+24776         UserRequest     0
+34616        EventPairLow     0
+18288         UserRequest     0
+19048         UserRequest     0
+12884         UserRequest     0
+18200             Unknown     0
+
+
+
