@@ -2005,3 +2005,53 @@ D3D11, 16 GB. UE 5.7.4 CL 51494982. Base 355dae64; head ef361bd6 (the job named
 - Step 13, path trace: refused by name, render.pathtrace: the RHI (D3D11) reports no ray
   tracing on this GPU or driver. No hero still. This laptop cannot make it.
 - Step 14 not run, as instructed. Ruflo memory not written: no ruflo on this machine.
+
+## no-lumen-fallback
+
+Round 2, no-lumen-and-machine lane (Mac, uncompiled), 2026-11-09. From the render-machine
+renders at ef361bd6: render.json render_settings.rhi D3D11, shader_platform PCD3D_SM5, so
+DoesPlatformSupportLumenGI is false (SM5 only with r.Lumen.Supported.SM5) and
+DoesPlatformSupportVirtualShadowMaps is DoesPlatformSupportNanite. Lumen GI and reflections,
+VSM and Nanite did not run although the cvars read back 1: shot b's shadow side crushed,
+shot c luma mean 3.6 (52.7 % crushed).
+
+- New FlightSimBeautyFallback.cpp. ApplyScene runs on beauty only, not pathtrace. It runs
+  after the scene build and BEFORE the world lane, whose lightning pulse keeps the sky light's
+  intensity as its base, so the fill survives the storm frames. ApplyCapture sets the beauty
+  capture's per-view post-process. Recorded in render.json render_settings.beauty_fallback:
+  machine (rhi, feature level, shader platform, the engine's support answers), path ("lumen" or
+  "fallback"), and every cvar before, asked and read back. `-beauty-fallback=auto|force|off`;
+  force lets the DX12 host probe this path. An unknown value refuses as
+  render.beauty_fallback_mode.
+- The look without Lumen: SSGI (DynamicGlobalIlluminationMethod ScreenSpace on the capture;
+  r.SSGI.Quality 4) and SSR (ReflectionMethod ScreenSpace, quality 100; r.SSR.Quality 4).
+  Distance-field AO (r.DistanceFieldAO 1, r.AOQuality 2) when the platform and project support
+  distance fields. Sky light x1.6 with MinOcclusion 0.2, marked dirty before the commandlet's
+  capture-once. Without VSM: CSM with r.Shadow.CSM.MaxCascades 10, r.Shadow.MaxCSMResolution
+  4096, r.Shadow.MaxResolution 4096, and the sun at 8 cascades with distribution exponent 4.
+  Contact shadows stay the hero-lighting lane's.
+- Probes, all UNCALIBRATED. nl-fill: shot b shadow-side luma p10 and shot c luma mean,
+  against the same shots on the DX12 host with Lumen; the fill is right when they meet.
+  nl-ssgi: shot b at SSGI 2 and 4. nl-dfao: shot b with and without DFAO. nl-csm: shot a,
+  the aircraft's self-shadow and the ridge shadow edge.
+- Limits, not done here: SSGI reads the previous capture, so the first capture of a run has
+  none (stills accumulate 8 captures). The fill does not fix exposure. Shot c's darkness is
+  also the storm meter's and the exposure owners'. The ghosted aircraft (motion blur and TSR
+  history) belongs to other lanes.
+- Machine friction fixed: MPC_FlightSimWorld, M_FlightSimTilesBeauty, M_FlightSimCloudLayers
+  and M_FlightSimScatter now carry WORLD_GENERATIONS stamps (FlightSimWorldGeneration). A stale
+  or FLIGHTSIM_REBUILD_MATERIALS-named one is UPDATED IN PLACE, never deleted. A material has
+  its graph cleared and built again on the same asset. The collection's parameters are merged,
+  and an existing one keeps its Id. The "could not create" crash is gone, and moving .uasset
+  files by hand is no longer needed. importer.fetch_source runs every git call with
+  `-c core.autocrlf=false -c core.eol=lf`, stores autocrlf=false in the source repo, and
+  re-checks out an earlier CRLF checkout from the index. Gate 6 without --look no longer grades
+  an earlier run's look renders: they are named as gate6.stale_look_renders and left NOT RUN.
+- Gate V "0 ground pixels with depth": the cause was the mask, not a missing depth. Windows'
+  gate found the depth through shots.json's frame path. The label mask gives terrain int_id 2,
+  and Gate V took only id 0 (the sky) as ground, so horizon_fill also FAILed on fill 0.0.
+  Fixed: visual_contact_sheet.py copies `<shot>_depth.f32/.png`, writes `<shot>_horizon.json`
+  from the frame sidecar and `<shot>_ids.json` (the ground ids from render.json objects), and
+  removes an earlier sheet's side files first. gate_v_visual.py folds the ground ids into 0,
+  read from `_ids.json` or the run's render.json. A head re-grade should now run
+  aerial_perspective and texel_detail, and horizon_fill on a and d should be re-read.
