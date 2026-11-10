@@ -310,6 +310,9 @@ def _caption(key: str, row: dict) -> tuple:
     aliasing = (row.get("edge_aliasing") or {}).get("energy")
     if aliasing is not None:
         bits.append(f"edge aliasing {aliasing:.3f}")
+    sharp = sharpness_caption(row.get("render"))
+    if sharp:
+        bits.append(sharp)
     if row.get("commit"):
         bits.append(str(row["commit"])[:12])
     return first, "  |  ".join(str(b) for b in bits)
@@ -608,9 +611,40 @@ def render_summary(frame: Optional[Path]) -> dict:
     except (OSError, ValueError):
         return {}
     settings = manifest.get("render_settings", {})
+    flags = settings.get("beauty_show_flags")
     return {"render_quality": manifest.get("scene", {}).get("render_quality"),
             "beauty_path": settings.get("beauty_path"),
-            "anti_aliasing": settings.get("anti_aliasing")}
+            "anti_aliasing": settings.get("anti_aliasing"),
+            # aircraft-sharp: what the tile's caption says about the airframe
+            # comes from the render's own record, never from the request.
+            "rhi": settings.get("rhi"),
+            "shader_platform": settings.get("shader_platform"),
+            "motion_blur": flags.get("motion_blur") if isinstance(flags, dict) else None}
+
+
+def sharpness_caption(render: Optional[dict]) -> Optional[str]:
+    """The caption's word on the airframe, from the render record: the
+    beauty_path.aircraft_sharp block (still/clip, TSR as resolved) and the
+    MEASURED beauty motion-blur show flag. None for a record with neither
+    (a render made before the aircraft-sharp fix says nothing)."""
+    if not isinstance(render, dict):
+        return None
+    path = render.get("beauty_path")
+    sharp = path.get("aircraft_sharp") if isinstance(path, dict) else None
+    blur = render.get("motion_blur")
+    if isinstance(sharp, dict) and blur is None:
+        blur = sharp.get("motion_blur")
+    if not isinstance(sharp, dict) and blur is None:
+        return None
+    bits = []
+    if isinstance(sharp, dict) and sharp.get("kind"):
+        bits.append(str(sharp["kind"]))
+    if blur is not None:
+        bits.append("motion blur ON" if blur else "no motion blur")
+    tsr = (sharp or {}).get("tsr") if isinstance(sharp, dict) else None
+    if isinstance(tsr, dict) and tsr.get("resolved"):
+        bits.append(str(tsr["resolved"]).split(" ")[0])
+    return ", ".join(bits) if bits else None
 
 
 def encode_clip(frames_dir: Path, out: Path, fps: float = 30.0) -> Optional[Path]:

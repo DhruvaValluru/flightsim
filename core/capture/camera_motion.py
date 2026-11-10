@@ -642,12 +642,34 @@ def look_motion(look: Optional[Mapping[str, Any]], preset: str) -> Optional[Dict
     return {"profile": "tripod_fluid_head", "seed": 0, "intensity": 1.0, "source": source}
 
 
+def is_still_camera(camera) -> bool:
+    """A camera that takes ONE frame (the web UI's 1-frame preview sets
+    ``capture_count`` 1, webapp/server.py): a still. Read defensively, so a
+    camera-like object without the field is not a still."""
+    count = getattr(camera, "capture_count", None)
+    value = getattr(count, "value", count)
+    try:
+        return int(value or 0) == 1
+    except (TypeError, ValueError):
+        return False
+
+
 def apply_look_motion(spec, look: Optional[Mapping[str, Any]]) -> List[str]:
     """Give every camera that states no motion the look switch's block;
-    a stated block is never moved. Returns the camera ids changed."""
+    a stated block is never moved. Returns the camera ids changed.
+
+    aircraft-sharp (visual overhaul round 2): a STILL camera
+    (:func:`is_still_camera`) gets no look motion. A still is one instant;
+    its beauty sub-captures are one pose, and a shake sampled at that
+    instant only offsets the framing the director chose (with nothing to
+    show for it but a tilted, off-centre airframe). The camera keeps no
+    motion block, so its track digest is the plain solve's, byte-identical.
+    A motion block the user STATED is still never moved."""
     changed = []
     for camera in getattr(spec, "cameras", None) or []:
         if getattr(camera, "motion", None) is not None:
+            continue
+        if is_still_camera(camera):
             continue
         block = look_motion(look, str(camera.preset.value))
         if block is not None:

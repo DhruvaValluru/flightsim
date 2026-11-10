@@ -872,6 +872,40 @@ es_check "breathing: shafts run whenever the sun is ahead" "Renderer/Private/Lig
 es_check "breathing: fog reads the shaft occlusion" "Renderer/Private/FogRendering.cpp" "PassParameters->PS.OcclusionTexture = LightShaftOcclusionTexture"
 # ------------------------------------------------------ END exposure-storm --
 
+
+# -- aircraft-sharp (visual overhaul round 2, 2026-11-09) -- begin ----------
+# FlightSimRenderCommandlet.cpp (RenderBeautyStartSceneFrame, the still's
+# camera cut, render_settings.beauty_path.aircraft_sharp) and
+# FlightSimBeautyLook.cpp (ApplyShutterPolicy). Fixed strings read in the
+# 5.7.4 source when written; the engine BEHAVIOUR the fix rests on (only
+# FEngineLoop::Tick calls FScene::StartFrame; only StartFrame rolls a
+# primitive's PreviousLocalToWorld) is pinned by the last three.
+as_check() {  # label, file (relative to $UE_ROOT/Engine/Source/Runtime), fixed-string pattern
+    local f="$UE_ROOT/Engine/Source/Runtime/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- the aircraft-sharp hooks need re-reading"
+    fi
+}
+as_check "sharp: FSceneInterface::StartFrame" "Engine/Public/SceneInterface.h" "virtual void StartFrame() {}"
+as_check "sharp: UWorld::Scene" "Engine/Classes/Engine/World.h" "class FSceneInterface*						Scene;"
+as_check "sharp: ENQUEUE_RENDER_COMMAND" "RenderCore/Public/RenderingThread.h" "#define ENQUEUE_RENDER_COMMAND(Type)"
+as_check "sharp: bCameraCutThisFrame" "Engine/Classes/Components/SceneCaptureComponent2D.h" "uint32 bCameraCutThisFrame : 1;"
+as_check "sharp: bAlwaysPersistRenderingState" "Engine/Classes/Components/SceneCaptureComponent.h" "bool bAlwaysPersistRenderingState;"
+as_check "sharp: SupportsTSR" "RenderCore/Public/RenderUtils.h" "RENDERCORE_API bool SupportsTSR(const FStaticShaderPlatform Platform);"
+as_check "sharp: GMaxRHIShaderPlatform" "RHI/Public/RHIShaderPlatform.h" "extern RHI_API EShaderPlatform GMaxRHIShaderPlatform;"
+as_check "sharp: LexToString(EShaderPlatform)" "RHI/Public/RHIStrings.h" "RHI_API FString LexToString(EShaderPlatform Platform, bool bError = true);"
+as_check "sharp: USceneComponent::Mobility" "Engine/Classes/Components/SceneComponent.h" "TEnumAsByte<EComponentMobility::Type> Mobility;"
+as_check "sharp: MotionBlurAmount" "Engine/Classes/Engine/Scene.h" "float MotionBlurAmount;"
+as_check "sharp: SetMotionBlur show flag" "Engine/Public/ShowFlagsValues.inl" "SHOWFLAG_ALWAYS_ACCESSIBLE(MotionBlur, SFG_PostProcess"
+as_check "sharp: StartFrame rolls previous" "Renderer/Private/RendererScene.cpp" "VelocityData.PreviousLocalToWorld = VelocityData.LocalToWorld;"
+as_check "sharp: UpdateTransform keeps previous" "Renderer/Private/ScenePrivate.h" "if (!VelocityData.bPreviousLocalToWorldValid)"
+as_check "sharp: engine loop calls StartFrame" "Launch/Private/LaunchEngineLoop.cpp" "ENQUEUE_RENDER_COMMAND(FScene_StartFrame)"
+# -- aircraft-sharp -- end ----------------------------------------------------
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'

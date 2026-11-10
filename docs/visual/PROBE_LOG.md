@@ -2070,3 +2070,66 @@ D3D11, 16 GB. UE 5.7.4 CL 51494982. Base 355dae64; head ef361bd6 (the job named
 - Step 13, path trace: refused by name, render.pathtrace: the RHI (D3D11) reports no ray
   tracing on this GPU or driver. No hero still. This laptop cannot make it.
 - Step 14 not run, as instructed. Ruflo memory not written: no ruflo on this machine.
+
+## aircraft-sharp
+
+Visual overhaul round 2, 2026-11-09 (Mac, uncompiled; engine source read in
+/Users/Shared/Epic Games/UE_5.7, 5.7.4). The owner on round 1: head a and b
+draw the J-11 as a smeared, ghosted blur.
+
+- What the record said: shot a was a still (beauty_path.accumulation
+  delivered_frames 1, captures_per_frame 8), beauty motion blur on
+  (MotionBlurAmount 0.5, MotionBlurMax 1 % = 12.8 px at 1280), TSR. The look
+  switch was "beauty" (standard lens), so the camera-motion layer did NOT
+  move these shots (look_motion is cinematic-only). The smear on the
+  airframe is horizontal and about 13 px: the MotionBlurMax clamp.
+- ROOT CAUSE (engine source): a primitive's PreviousLocalToWorld is rolled
+  forward only by FSceneVelocityData::StartFrame (RendererScene.cpp), via
+  FScene::StartFrame (ScenePrivate.h), which only FEngineLoop::Tick calls
+  (LaunchEngineLoop.cpp, render command FScene_StartFrame).
+  FSceneVelocityData::UpdateTransform sets "previous" only for a NEW entry.
+  The commandlet ticks the world (FlightSimScenarioWorld::Step, World->Tick)
+  but never the engine loop, so every moved primitive's previous transform
+  stayed at the one it was registered with. The airframe's motion vector was
+  its displacement since spawn on EVERY capture, the 8 still sub-captures
+  included: motion blur drew it at the clamp, and TSR reprojected history
+  along it (the ghost). The terrain is static, so only the camera's own
+  motion (view-state previous matrices, rolled per capture) touched it:
+  sharp Matterhorn, smeared jet.
+- The fix, BEAUTY RASTER ONLY (bVisual && bBeauty && !bPathTrace; measure
+  and the path tracer never reach it, so Gate 6 measure and Gate 10-R stay
+  bit-identical by construction):
+  * RenderBeautyStartSceneFrame (the engine loop's own call, enqueued the
+    same way) after the warm-ups and after every delivered beauty frame: a
+    clip's motion vectors span one delivered frame, so its motion blur is
+    the 180-degree shutter rule, not the flight since spawn;
+  * a still (DeliveredFrames <= RenderBeautyStillMaxFrames):
+    FFlightSimBeautyLook::ApplyShutterPolicy turns motion blur off (show flag
+    and MotionBlurAmount 0, echoed in beauty_look.applied.camera), the
+    velocity frame is rolled once more after the pose is applied (zero
+    object motion on every sub-capture), and the first sub-capture is a
+    camera cut (bCameraCutThisFrame: TSR history reset at this pose). All N
+    sub-captures share one sim time and one pose (nothing steps between);
+  * the camera-motion layer's look motion is skipped for a still camera
+    (capture_count 1, the web UI's 1-frame preview); a stated block is kept.
+- The J-11 writes velocities: every airframe part is a Movable
+  UStaticMeshComponent (HasDynamicTransform), the look's masters carry no
+  world position offset, so r.Velocity.EnableVertexDeformation is not
+  involved. render.json beauty_path.aircraft_sharp counts the actor's
+  primitives and the Movable ones instead of asserting it.
+- TSR under D3D11: PCD3D_SM5 has bSupportsGen5TemporalAA=true
+  (Config/Windows/DataDrivenPlatformInfo.ini), the capture is realtime
+  (bAlwaysPersistRenderingState) and the beauty sets the TemporalAA flag, so
+  SceneView.cpp SetupAntiAliasingMethod keeps AAM_TSR: TSR did run.
+  aircraft_sharp.tsr records the three conditions and the resolved name.
+- What it should change on the render machine: shot a and b airframes
+  sharp; look_label_check's beauty edge p90 (6 px in round 1) back near the
+  measure floor (2 px); flightsim.verify look_label_alignment no longer
+  FAILs on motion_blur for a still (it is off and recorded off).
+- NOT measured, said: the clip's motion blur time scale is
+  (1 / MotionBlurTargetFPS) / the family's DeltaRealTime
+  (SceneVisibility.cpp UpdateMotionBlurTimeScale), and the commandlet's
+  real delta is not set from the clip rate. For the MEASURE velocity pass
+  (-passes=velocity) the same engine reading implies its vectors also run
+  from the spawn transform; measure is not touched here (Gate 6 / 10-R),
+  so this is reported for the verifier's flow_vs_motion, not fixed.

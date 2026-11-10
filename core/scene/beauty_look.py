@@ -171,6 +171,20 @@ IES_CLEAR_DIFFUSE_KLX = (0.8, 15.5, 0.5)
 CAMERA_ISO = 100.0
 SHUTTER_ANGLE_DEG = 180.0
 
+#: aircraft-sharp (visual overhaul round 2): the shutter is for CLIPS. A
+#: still is one instant -- its beauty sub-captures share one sim time and one
+#: pose -- so the host turns motion blur off on a still
+#: (FFlightSimBeautyLook::ApplyShutterPolicy; render.json
+#: render_settings.beauty_path.aircraft_sharp records which ran). Round 1's
+#: stills drew the J-11 as a smeared, ghosted blur: the commandlet never
+#: rolled the engine's velocity frame, so the airframe's motion vector was
+#: its displacement since spawn (docs/visual/PROBE_LOG.md "## aircraft-sharp").
+SHUTTER_POLICY = {
+    "clip": "motion blur on at the 180-degree shutter (MotionBlurAmount over MotionBlurTargetFPS)",
+    "still": "motion blur off: one instant, one pose; the airframe is drawn tack sharp",
+    "host": "FFlightSimBeautyLook::ApplyShutterPolicy (a still is at most one delivered frame)",
+}
+
 # -- tonemap -------------------------------------------------------------------
 
 #: UE 5.7's filmic tonemapper constants, set explicitly to the engine's own
@@ -661,9 +675,11 @@ def pixel_effects(lens: Mapping[str, Any], width_px: int) -> Dict[str, Any]:
                                  "SceneFringeIntensity": float(lens["SceneFringeIntensity"])},
         "motion_blur": {"on": True, "effect": "softens",
                         "max_smear_px": round(blur_px, 2),
-                        "note": ("smears along screen velocity, at most MotionBlurMax % of "
-                                 "the width; the chase aircraft moves little on screen, the "
-                                 "ground most; label captures render with motion blur off")},
+                        "stills": "off (SHUTTER_POLICY: the host turns it off on a still)",
+                        "note": ("clips only: smears along screen velocity over one "
+                                 "delivered frame, at most MotionBlurMax % of the width; "
+                                 "the chase aircraft moves little on screen, the ground "
+                                 "most; label captures render with motion blur off")},
         "depth_of_field": {"on": bool(lens["depth_of_field"]), "effect": "softens",
                            "note": "focused at the aircraft; the background softens"},
         "bloom": {"on": float(lens["BloomIntensity"]) > 0.0, "effect": "softens",
@@ -832,6 +848,7 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
             "MotionBlurAmount": SHUTTER_ANGLE_DEG / 360.0,
             "MotionBlurTargetFPS": int(round(float(fps))),
             "fps": float(fps),
+            "shutter_policy": dict(SHUTTER_POLICY),
         },
         "lens_post": post,
         "local_exposure": {"LocalExposureMethod": "Bilateral", **LOCAL_EXPOSURE},
