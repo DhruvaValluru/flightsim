@@ -596,6 +596,39 @@ void FFlightSimBeautyLook::UpdatePerFrame(USceneCaptureComponent2D* Capture, con
 	}
 }
 
+void FFlightSimBeautyLook::ApplyShutterPolicy(USceneCaptureComponent2D* Capture, bool bStill)
+{
+	if (Capture == nullptr)
+	{
+		return;
+	}
+	FBeautyLookState& State = BeautyLookState();
+	if (bStill)
+	{
+		// The owner's round-1 verdict: the jet in a still was a smeared,
+		// ghosted blur. A still has no shutter interval to blur over (its
+		// sub-captures are one pose at one sim time), so motion blur is off:
+		// the show flag (SceneView reads it) AND the amount, so nothing
+		// downstream that reads either half sees blur.
+		Capture->ShowFlags.SetMotionBlur(false);
+		Capture->PostProcessSettings.bOverride_MotionBlurAmount = true;
+		Capture->PostProcessSettings.MotionBlurAmount = 0.0f;
+	}
+	if (!State.bApplied || !State.Applied.IsValid())
+	{
+		return;
+	}
+	const TSharedPtr<FJsonObject>* Camera = nullptr;
+	if (State.Applied->TryGetObjectField(TEXT("camera"), Camera) && Camera != nullptr && Camera->IsValid())
+	{
+		(*Camera)->SetNumberField(TEXT("MotionBlurAmount"), Capture->PostProcessSettings.MotionBlurAmount);
+		(*Camera)->SetBoolField(TEXT("motion_blur_show_flag"), Capture->ShowFlags.MotionBlur != 0);
+		(*Camera)->SetStringField(TEXT("shutter_policy"), bStill
+			? TEXT("still: motion blur OFF (one pose, one sim time; the plan's 180-degree shutter is for clips)")
+			: TEXT("clip: the plan's 180-degree shutter (MotionBlurAmount over MotionBlurTargetFPS)"));
+	}
+}
+
 void FFlightSimBeautyLook::RecordExposure(FString& ExposureMode, FString& ExposureSource,
                                           double& AppliedEv100, bool& bAppliedEv100)
 {

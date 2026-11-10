@@ -43,6 +43,14 @@ public:
 	// capture's FOV implies (a keyframed focal move changes the FOV).
 	static void UpdatePerFrame(USceneCaptureComponent2D* Capture, const AActor* Subject);
 
+	// aircraft-sharp (visual overhaul round 2): the shutter for this run.
+	// A STILL (bStill) is one instant: motion blur off (show flag and
+	// MotionBlurAmount 0), so the airframe is tack sharp. A clip keeps the
+	// plan's 180-degree shutter. Works with or without a -beauty-look=
+	// sidecar (the -sky= plan's motion blur is turned off for a still too)
+	// and echoes the decision into the record's applied.camera.
+	static void ApplyShutterPolicy(USceneCaptureComponent2D* Capture, bool bStill);
+
 	// The commandlet's exposure record follows an applied beauty EV100 (no
 	// change when the sidecar left the exposure alone).
 	static void RecordExposure(FString& ExposureMode, FString& ExposureSource,

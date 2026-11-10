@@ -49,6 +49,7 @@
 #include "Serialization/JsonReader.h"
 #include "AssetCompilingManager.h"
 #include "RenderingThread.h"
+#include "SceneInterface.h"   // aircraft-sharp: FSceneInterface::StartFrame (beauty velocity frame)
 #include "RHI.h"
 // Render-path lane (visual plan V0/V8): IsRayTracingEnabled (RenderCore),
 // FDataDrivenShaderPlatformInfo::GetSupportsPathTracing (RHI) and the
@@ -367,6 +368,34 @@ namespace
 	constexpr int32 RenderPathTraceBouncesDefault = 8;
 	constexpr int32 RenderPathTraceDenoiseDefault = 1;
 	static_assert(sizeof(float) == 4, "the linear .f32 files are declared float32");
+
+	// aircraft-sharp (visual overhaul round 2, BEAUTY ONLY). Read in the 5.7.4
+	// source: a primitive's PreviousLocalToWorld (its motion vector's "from")
+	// is rolled forward ONLY by FSceneVelocityData::StartFrame
+	// (RendererScene.cpp), through FScene::StartFrame (ScenePrivate.h), which
+	// ONLY FEngineLoop::Tick calls (LaunchEngineLoop.cpp, render command
+	// FScene_StartFrame). FSceneVelocityData::UpdateTransform (ScenePrivate.h)
+	// sets the previous transform only when the entry is new. A commandlet
+	// never runs FEngineLoop::Tick, so every moved primitive kept the
+	// transform it was first registered with as "previous" for the whole run:
+	// the J-11's motion vector was its displacement since spawn. That is the
+	// round-1 smear (motion blur clamps it to MotionBlurMax, 12.8 px at 1280)
+	// and the ghost (TSR reprojects history along the same wrong vector).
+	// This is the engine loop's own call, enqueued the same way.
+	void RenderBeautyStartSceneFrame(UWorld* World)
+	{
+		FSceneInterface* SceneInterface = World != nullptr ? World->Scene : nullptr;
+		if (SceneInterface == nullptr)
+		{
+			return;
+		}
+		ENQUEUE_RENDER_COMMAND(FlightSimBeautyStartSceneFrame)(
+			[SceneInterface](FRHICommandListImmediate& RHICmdList)
+			{
+				SceneInterface->StartFrame();
+			});
+		FlushRenderingCommands();
+	}
 
 	// A pixel of a world point through a capture's transform and FOV, and
 	// whether the point is in front of it (ProjectToPixel's arithmetic,
@@ -4655,6 +4684,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Capture->CaptureScene();
 		FlushRenderingCommands();
 	}
+	// aircraft-sharp (beauty raster only; measure and pathtrace untouched):
+	// the velocity frame starts here, so the first delivered frame's motion
+	// vectors run from the warm-up pose, not from where the aircraft spawned.
+	if (bVisual && bBeauty && !bPathTrace)
+	{
+		RenderBeautyStartSceneFrame(World);
+	}
 	// The sky light, captured here because real-time capture never runs for a
 	// scene capture: without this every shadow and every overcast is lit by
 	// nothing (measured on 5.7.4: the plain under a layer, 1.8/255; with it, 172).
@@ -5095,6 +5131,93 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		BeautySubFrames = RenderBeautyStillSamplesDefault;
 		BeautySubFramesBasis = TEXT("beauty still default (RenderBeautyStillSamplesDefault, UNCALIBRATED)");
 	}
+	// aircraft-sharp (visual overhaul round 2): a tack-sharp airframe in a
+	// still. BEAUTY RASTER ONLY -- measure (Gate 6 / Gate 10-R) and the path
+	// tracer never enter, so their captures are byte-for-byte what they were.
+	//  * velocity frame: RenderBeautyStartSceneFrame after the warm-ups and
+	//    after every delivered beauty frame, so a motion vector spans ONE
+	//    delivered frame (a clip's motion blur is then the shutter rule's,
+	//    not the displacement since spawn);
+	//  * a still: motion blur off (FFlightSimBeautyLook::ApplyShutterPolicy),
+	//    the velocity frame rolled once more after the pose is applied (every
+	//    sub-capture then reads zero object motion), and the FIRST sub-capture
+	//    a camera cut (bCameraCutThisFrame: TSR history reset at this pose),
+	//    so the N captures accumulate this pose and nothing else. All N share
+	//    the step's sim time and pose (nothing steps between them, below).
+	const bool bBeautyRaster = bVisual && bBeauty && !bPathTrace;
+	const bool bBeautyStill = bBeautyRaster && DeliveredFrames <= RenderBeautyStillMaxFrames;
+	if (bBeautyRaster)
+	{
+		FFlightSimBeautyLook::ApplyShutterPolicy(Capture, bBeautyStill);
+	}
+	if (bBeautyRaster && BeautyPath.IsValid())
+	{
+		TSharedPtr<FJsonObject> Sharp = MakeShared<FJsonObject>();
+		Sharp->SetStringField(TEXT("kind"), bBeautyStill ? TEXT("still") : TEXT("clip"));
+		Sharp->SetBoolField(TEXT("motion_blur"), Capture->ShowFlags.MotionBlur != 0 &&
+			Capture->PostProcessSettings.MotionBlurAmount > 0.0f);
+		Sharp->SetStringField(TEXT("motion_blur_rule"),
+			TEXT("off for a still (one instant); on for a clip at the beauty look's 180-degree shutter"));
+		Sharp->SetStringField(TEXT("velocity_frame"),
+			TEXT("FSceneInterface::StartFrame after the warm-ups and after each delivered beauty frame ")
+			TEXT("(the commandlet has no FEngineLoop::Tick to call it): a motion vector spans one delivered frame"));
+		Sharp->SetStringField(TEXT("still_sub_captures"), bBeautyStill
+			? TEXT("one sim time, one pose; velocity frame rolled after the pose (zero object motion); the first ")
+			  TEXT("sub-capture is a camera cut (TSR history reset at this pose)")
+			: TEXT("n/a: a clip is one capture a frame, TSR history carried across frames"));
+		Sharp->SetStringField(TEXT("motion_blur_time_scale"),
+			TEXT("engine: (1 / MotionBlurTargetFPS) / the family's DeltaRealTime (SceneVisibility.cpp ")
+			TEXT("UpdateMotionBlurTimeScale); the commandlet's real delta is not set by the clip rate: unmeasured"));
+		// The airframe writes velocities only as a MOVABLE primitive
+		// (FPrimitiveSceneProxy::HasDynamicTransform -> velocity data); the
+		// look's materials carry no world position offset (aircraft_look),
+		// so r.Velocity.EnableVertexDeformation is not involved. Counted off
+		// the actor, not asserted.
+		int32 AirframePrimitives = 0;
+		int32 AirframeMovable = 0;
+		if (Scenario.Aircraft != nullptr)
+		{
+			TInlineComponentArray<UPrimitiveComponent*> AirframeParts;
+			Scenario.Aircraft->GetComponents(AirframeParts);
+			for (const UPrimitiveComponent* Part : AirframeParts)
+			{
+				++AirframePrimitives;
+				AirframeMovable += Part->Mobility == EComponentMobility::Movable ? 1 : 0;
+			}
+		}
+		Sharp->SetNumberField(TEXT("aircraft_primitives"), AirframePrimitives);
+		Sharp->SetNumberField(TEXT("aircraft_primitives_movable"), AirframeMovable);
+		Sharp->SetBoolField(TEXT("aircraft_writes_velocity"),
+			AirframePrimitives > 0 && AirframeMovable == AirframePrimitives);
+		// TSR really ran? SceneView.cpp SetupAntiAliasingMethod falls back
+		// from AAM_TSR to FXAA without the TemporalAA show flag, a realtime
+		// family (bAlwaysPersistRenderingState / bCaptureEveryFrame on a
+		// capture, SceneCaptureRendering.cpp) or SupportsTSR (RenderUtils.h,
+		// the platform's bSupportsGen5TemporalAA; PCD3D_SM5 has it).
+		IConsoleVariable* AaMethod = IConsoleManager::Get().FindConsoleVariable(TEXT("r.AntiAliasingMethod"));
+		const bool bTsrAsked = AaMethod != nullptr && AaMethod->GetInt() == 4;
+		const bool bTsrPlatform = SupportsTSR(GMaxRHIShaderPlatform);
+		const bool bTsrRealtime = Capture->bAlwaysPersistRenderingState || Capture->bCaptureEveryFrame;
+		const bool bTsrFlags = Capture->ShowFlags.AntiAliasing != 0 && Capture->ShowFlags.TemporalAA != 0;
+		TSharedPtr<FJsonObject> Tsr = MakeShared<FJsonObject>();
+		Tsr->SetBoolField(TEXT("asked"), bTsrAsked);
+		Tsr->SetBoolField(TEXT("platform_supports_tsr"), bTsrPlatform);
+		Tsr->SetBoolField(TEXT("capture_realtime"), bTsrRealtime);
+		Tsr->SetBoolField(TEXT("show_flags"), bTsrFlags);
+		Tsr->SetStringField(TEXT("shader_platform"), LexToString(GMaxRHIShaderPlatform));
+		Tsr->SetStringField(TEXT("resolved"), !bTsrAsked ? TEXT("not asked")
+			: (bTsrPlatform && bTsrRealtime && bTsrFlags) ? TEXT("TSR")
+			: TEXT("FXAA (TSR fell back: see the three conditions)"));
+		Sharp->SetObjectField(TEXT("tsr"), Tsr);
+		BeautyPath->SetObjectField(TEXT("aircraft_sharp"), Sharp);
+		if (bTsrAsked && !(bTsrPlatform && bTsrRealtime && bTsrFlags))
+		{
+			UE_LOG(LogFlightSimRender, Warning,
+			       TEXT("beauty: r.AntiAliasingMethod=4 asked but TSR cannot run on this capture (platform %d, ")
+			       TEXT("realtime %d, show flags %d); the engine draws FXAA"),
+			       bTsrPlatform ? 1 : 0, bTsrRealtime ? 1 : 0, bTsrFlags ? 1 : 0);
+		}
+	}
 	if (BeautyPath.IsValid())
 	{
 		TSharedPtr<FJsonObject> SubFrames = MakeShared<FJsonObject>();
@@ -5366,6 +5489,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// set first so every sub-frame shares it.
 		// look-dev lane hook: per-frame focus at the aircraft (cinematic lens only).
 		FFlightSimBeautyLook::UpdatePerFrame(Capture, Scenario.Aircraft);
+		// aircraft-sharp: a still's sub-captures read zero object motion (the
+		// velocity frame rolled AFTER this pose was applied and flushed) and
+		// start from a camera cut (TSR history reset at this pose; the flag
+		// clears itself after one capture, SceneCaptureRendering.cpp).
+		if (bBeautyStill)
+		{
+			RenderBeautyStartSceneFrame(World);
+			Capture->bCameraCutThisFrame = true;
+		}
 		for (int32 SubFrame = 1; SubFrame < BeautySubFrames; ++SubFrame)
 		{
 			Capture->CaptureScene();
@@ -5373,6 +5505,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		Capture->CaptureScene();
 		FlushRenderingCommands();
+		// aircraft-sharp: the next delivered frame's motion vectors start at
+		// THIS frame's transforms (clips: one frame of motion, the shutter rule).
+		if (bBeautyRaster)
+		{
+			RenderBeautyStartSceneFrame(World);
+		}
 
 		FTextureRenderTargetResource* Resource =
 			RenderTarget->GameThread_GetRenderTargetResource();
