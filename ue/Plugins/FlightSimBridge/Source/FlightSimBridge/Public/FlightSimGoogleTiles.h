@@ -99,6 +99,32 @@ public:
 	// when none is found.
 	static FString CesiumPluginVersion();
 
+	// -- round-2b terrain-ocean (2026-11-09): BEAUTY ONLY --------------------
+	// The commandlet calls it once, under -quality=beauty, after the whole
+	// scene (world lane, dust haze, weather) is built and the camera sits at
+	// its first pose; a measure render never does. Two things, both visual:
+	//
+	// * the ground reads through the haze. Round 0 #06 (SFO, moderate rain,
+	//   3000 m) was a flat grey slab: the rain's Koschmieder extinction
+	//   (visibility 5 km) drawn as height fog with a ~50 km scale height left
+	//   the tiles 3 km below at optical depth ~10 (only the fog's 8 % max
+	//   opacity floor showed). When the camera is CameraAglM >= 1000 m above
+	//   the origin's ground, the height fog (both layers) and the sky
+	//   atmosphere's Mie layer are scaled by ONE factor so the optical depth
+	//   along the read ray (the camera's height over sin 10 deg) is at most
+	//   1.5. UNCALIBRATED; recorded with every number before and after.
+	// * the open sea's surface. SeaRadiusM > 0 (-beauty-sea-radius-m=, which
+	//   webapp/runs.py sends only for a beauty render over open ocean, the
+	//   radius inside the GLO-30 land-free cells) draws a spherical cap of
+	//   M_Ground_Ocean at sea level (Earth's curvature, 2 m above the geoid)
+	//   over Google's matte ocean imagery: water colour, the waves' normal,
+	//   the sky's reflection (screen-space and sky-light; no Lumen needed).
+	//   The tiles stay drawn under it (the owner's rule: never off). The cap
+	//   is added to BeautyOnlyActors, so no label pass ever sees it.
+	// Returns the record (also written into Record() as beauty_ground).
+	TSharedPtr<FJsonObject> ApplyBeautyGround(UWorld* World, double CameraAglM, double SeaRadiusM,
+	                                          TArray<AActor*>& BeautyOnlyActors);
+
 private:
 	bool bEnabled = false;
 	bool bViaIon = false;
@@ -117,4 +143,6 @@ private:
 	int32 TileRefreshes = 0;
 	double LongestWaitSeconds = 0.0;
 	double TotalWaitSeconds = 0.0;
+	// round-2b terrain-ocean: ApplyBeautyGround's record (null: not run).
+	TSharedPtr<FJsonObject> BeautyGround;
 };

@@ -332,6 +332,11 @@ render.pathtrace:
 render.beauty_fallback_mode:
   sentence: "The beauty render was asked for a lighting fallback it does not know: the choices are automatic, forced, or off."
   hint: "Leave the fallback setting out (automatic), or say force to try the no-Lumen look, or off to keep the plain look."
+# round-2b terrain-ocean lane (FlightSimRenderCommandlet.cpp, beauty only): a
+# flat scene's cameras solved in one map projection and placed in another.
+camera.scene_frame_mismatch:
+  sentence: "The camera would be placed far from the flight: the run card does not say which map projection its camera track was worked out in, so the render placed it in a different one."
+  hint: "Run it again from the web app, which now states the projection for every beauty run with cameras."
 # shots-render fix pass (core/terrain/glo30.py standoff_start, core/scenario/
 # camera.py chase_unframed; raised by experiments/visual_contact_sheet.py):
 shot.subject_unframed:

@@ -3008,6 +3008,32 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 	}
 
+	// round-2b terrain-ocean lane hook (beauty only; measure never reaches it). Round 0 #13: a flat card with
+	// cameras but no scene_crs placed the solved camera through the plugin's default EPSG:32631 while Python
+	// solved it in the origin's UTM zone (4400 km off over the Atlantic); refuse that by name, then thin the
+	// haze so the ground reads and draw the open sea (FlightSimGoogleTiles.h ApplyBeautyGround).
+	if (bBeauty && bVisual)
+	{
+		if (bConsumePoses)
+		{
+			FVector CameraOriginEngine;
+			Scenario.GeoReferencing->ProjectedToEngine(
+				FVector(CameraOriginXMetres, CameraOriginYMetres, Card.TerrainElevationMetres), CameraOriginEngine);
+			const double OffM = FVector2D(CameraOriginEngine.X, CameraOriginEngine.Y).Size() / 100.0;
+			if (OffM > 1000.0)
+			{
+				return Fail(FString::Printf(
+					TEXT("camera.scene_frame_mismatch: the card's camera origin lands %.0f km from the scene origin ")
+					TEXT("in this host's projection (%s); the card must declare the frame its cameras were solved ")
+					TEXT("in (scene_crs)"), OffM / 1000.0, *Scenario.GeoReferencing->ProjectedCRS));
+			}
+		}
+		double SeaRadiusM = 0.0;
+		FParse::Value(*Params, TEXT("beauty-sea-radius-m="), SeaRadiusM);
+		GoogleTiles.ApplyBeautyGround(World, Director->GetActorLocation().Z / 100.0, SeaRadiusM,
+		                              VisualScene.BeautyOnlyActors);
+	}
+
 	// supersample lane hook: -supersample=N, beauty only, refused by name (FlightSimSupersample.h).
 	int32 Supersample = 1; { FString SsWhy; if (!FFlightSimSupersample::Configure(*Params, Quality, Width, Height, RenderBeautyTsrHistoryScreenPercentage, Supersample, SsWhy)) { return Fail(SsWhy); } }
 	UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>();

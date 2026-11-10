@@ -19,6 +19,13 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/UnrealType.h"
+// round-2b terrain-ocean (ApplyBeautyGround, beauty only): the haze it thins
+// and the sea cap it draws.
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "ProceduralMeshComponent.h"
+#include "UObject/UObjectIterator.h"
 
 #ifndef WITH_FLIGHTSIM_CESIUM
 #define WITH_FLIGHTSIM_CESIUM 0
@@ -302,6 +309,11 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record() const
 {
 	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 	Out->SetBoolField(TEXT("enabled"), bEnabled);
+	if (BeautyGround.IsValid())
+	{
+		// round-2b terrain-ocean: what the beauty render did so the ground reads.
+		Out->SetObjectField(TEXT("beauty_ground"), BeautyGround);
+	}
 	if (!DeclinedReason.IsEmpty())
 	{
 		// Not drawn: the reason, and nothing claimed for tiles that were never
@@ -478,5 +490,264 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyLook(UMaterialInterfac
 	(void)Material;
 	Out->SetStringField(TEXT("applied"), TEXT("nothing: this build has no Cesium for Unreal plugin"));
 #endif
+	return Out;
+}
+
+// -- round-2b terrain-ocean (2026-11-09): the beauty ground --------------------
+// BEAUTY ONLY: the commandlet's one caller is gated on -quality=beauty. Every
+// constant below is UNCALIBRATED (stated, set for a probe render on the render
+// machine) and recorded. Nothing here moves a pixel the labels describe: the
+// haze is not geometry, and the sea cap is a beauty-only actor no label pass
+// draws, at the sea level the tiles' own ocean already stands at.
+
+namespace FlightSimBeautyGroundPure
+{
+	// The read ray: from the camera's height down at this depression (the
+	// lower third of a level 16:9 frame); its optical depth is capped.
+	constexpr double ReadDepressionDeg = 10.0;
+	constexpr double ReadOpticalDepthMax = 1.5;     // transmittance 0.22
+	constexpr double ReadMinAglM = 1000.0;          // below: the haze is the near field's, left alone
+	constexpr double MinHazeScale = 0.05;
+	// core/scene/weather_visuals.py ENGINE_FOG_DENSITY_PER_EXTINCTION: the
+	// FogDensity that draws 1 /m of extinction, 1 / (0.1 ln(2)^2).
+	constexpr double FogDensityPerExtinctionPerM = 20.813689810056077;
+	constexpr double EarthRadiusM = 6371008.8;      // the mean radius (IUGG)
+	constexpr double SeaLiftM = 2.0;                // above the tiles' geoid sea; the sea departs ~1 m from it
+	constexpr int32 SeaRings = 64;
+	constexpr int32 SeaSegments = 96;
+	constexpr double CmPerM = 100.0;
+
+	// The vertical column (metres, density-ratio weighted) of an exp2 height
+	// fog layer between the ground (Z 0) and the camera's height: UE draws
+	// Density * 2^(-Falloff (z - FogHeight)) with Falloff per cm =
+	// FogHeightFalloff / 1000 (SceneCore.cpp, HeightFogCommon.ush), so per
+	// metre FogHeightFalloff / 10.
+	inline double FogColumnM(double FogHeightFalloff, double FogHeightM, double TopM)
+	{
+		const double F = FMath::Max(FogHeightFalloff, 0.0) / 10.0;
+		const double AtGround = FMath::Pow(2.0, F * FogHeightM);
+		if (F * TopM < 1.0e-6)
+		{
+			return AtGround * TopM;
+		}
+		return AtGround * (1.0 - FMath::Pow(2.0, -F * TopM)) / (F * FMath::Loge(2.0));
+	}
+}
+
+TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, double CameraAglM,
+                                                                 double SeaRadiusM,
+                                                                 TArray<AActor*>& BeautyOnlyActors)
+{
+	using namespace FlightSimBeautyGroundPure;
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetStringField(TEXT("lane"), TEXT("round-2b terrain-ocean; beauty only; UNCALIBRATED"));
+	Out->SetBoolField(TEXT("tiles_drawn"), bEnabled);
+	BeautyGround = Out;
+	if (World == nullptr)
+	{
+		Out->SetStringField(TEXT("applied"), TEXT("nothing: no world"));
+		return Out;
+	}
+
+	// -- the haze the ground is read through ---------------------------------
+	TSharedPtr<FJsonObject> Haze = MakeShared<FJsonObject>();
+	Out->SetObjectField(TEXT("haze"), Haze);
+	Haze->SetNumberField(TEXT("camera_agl_m"), CameraAglM);
+	Haze->SetNumberField(TEXT("read_depression_deg"), ReadDepressionDeg);
+	Haze->SetNumberField(TEXT("read_optical_depth_max"), ReadOpticalDepthMax);
+	Haze->SetNumberField(TEXT("read_min_agl_m"), ReadMinAglM);
+	if (CameraAglM < ReadMinAglM)
+	{
+		Haze->SetStringField(TEXT("applied"),
+			TEXT("nothing: the camera is below read_min_agl_m; the ground is near and the haze is the near field's"));
+	}
+	else
+	{
+		const double SinRead = FMath::Sin(FMath::DegreesToRadians(ReadDepressionDeg));
+		TArray<UExponentialHeightFogComponent*> Fogs;
+		double FogDepth = 0.0;   // vertical optical depth of every visible fog layer, ground to camera
+		for (TObjectIterator<UExponentialHeightFogComponent> It; It; ++It)
+		{
+			UExponentialHeightFogComponent* Fog = *It;
+			if (Fog == nullptr || Fog->GetWorld() != World || !Fog->IsVisible())
+			{
+				continue;
+			}
+			Fogs.Add(Fog);
+			const double FogHeightM = Fog->GetComponentLocation().Z / CmPerM;
+			FogDepth += Fog->FogDensity / FogDensityPerExtinctionPerM
+				* FogColumnM(Fog->FogHeightFalloff, FogHeightM, CameraAglM);
+			FogDepth += Fog->SecondFogData.FogDensity / FogDensityPerExtinctionPerM
+				* FogColumnM(Fog->SecondFogData.FogHeightFalloff,
+				             FogHeightM + Fog->SecondFogData.FogHeightOffset / CmPerM, CameraAglM);
+		}
+		TArray<USkyAtmosphereComponent*> Atmospheres;
+		double MieDepth = 0.0;   // vertical optical depth of the Mie layer, ground to camera
+		for (TObjectIterator<USkyAtmosphereComponent> It; It; ++It)
+		{
+			USkyAtmosphereComponent* Atmosphere = *It;
+			if (Atmosphere == nullptr || Atmosphere->GetWorld() != World || !Atmosphere->IsVisible())
+			{
+				continue;
+			}
+			Atmospheres.Add(Atmosphere);
+			// 1/km at the ground (the coefficient colour times its scale; green),
+			// falling as exp(-h / H) with H = MieExponentialDistribution km.
+			const double SigmaPerKm = Atmosphere->MieScatteringScale * Atmosphere->MieScattering.G
+				+ Atmosphere->MieAbsorptionScale * Atmosphere->MieAbsorption.G;
+			const double ScaleKm = FMath::Max(static_cast<double>(Atmosphere->MieExponentialDistribution), 0.001);
+			MieDepth += SigmaPerKm * ScaleKm * (1.0 - FMath::Exp(-(CameraAglM / 1000.0) / ScaleKm));
+		}
+		const double ReadDepth = (FogDepth + MieDepth) / SinRead;
+		Haze->SetNumberField(TEXT("read_distance_m"), CameraAglM / SinRead);
+		Haze->SetNumberField(TEXT("fog_optical_depth_before"), FogDepth / SinRead);
+		Haze->SetNumberField(TEXT("mie_optical_depth_before"), MieDepth / SinRead);
+		const double Scale = ReadDepth > ReadOpticalDepthMax
+			? FMath::Clamp(ReadOpticalDepthMax / ReadDepth, MinHazeScale, 1.0) : 1.0;
+		Haze->SetNumberField(TEXT("scale"), Scale);
+		if (Scale < 1.0)
+		{
+			TArray<TSharedPtr<FJsonValue>> FogRows;
+			for (UExponentialHeightFogComponent* Fog : Fogs)
+			{
+				TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+				Row->SetNumberField(TEXT("fog_density_before"), Fog->FogDensity);
+				Row->SetNumberField(TEXT("second_fog_density_before"), Fog->SecondFogData.FogDensity);
+				Fog->SetFogDensity(static_cast<float>(Fog->FogDensity * Scale));
+				Fog->SetSecondFogDensity(static_cast<float>(Fog->SecondFogData.FogDensity * Scale));
+				Row->SetNumberField(TEXT("fog_density_after"), Fog->FogDensity);
+				Row->SetNumberField(TEXT("second_fog_density_after"), Fog->SecondFogData.FogDensity);
+				FogRows.Add(MakeShared<FJsonValueObject>(Row));
+			}
+			Haze->SetArrayField(TEXT("height_fog"), FogRows);
+			TArray<TSharedPtr<FJsonValue>> MieRows;
+			for (USkyAtmosphereComponent* Atmosphere : Atmospheres)
+			{
+				TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+				Row->SetNumberField(TEXT("mie_scattering_scale_before"), Atmosphere->MieScatteringScale);
+				Row->SetNumberField(TEXT("mie_absorption_scale_before"), Atmosphere->MieAbsorptionScale);
+				Atmosphere->SetMieScatteringScale(static_cast<float>(Atmosphere->MieScatteringScale * Scale));
+				Atmosphere->SetMieAbsorptionScale(static_cast<float>(Atmosphere->MieAbsorptionScale * Scale));
+				Row->SetNumberField(TEXT("mie_scattering_scale_after"), Atmosphere->MieScatteringScale);
+				Row->SetNumberField(TEXT("mie_absorption_scale_after"), Atmosphere->MieAbsorptionScale);
+				MieRows.Add(MakeShared<FJsonValueObject>(Row));
+			}
+			Haze->SetArrayField(TEXT("mie"), MieRows);
+			Haze->SetNumberField(TEXT("read_optical_depth_after"), ReadDepth * Scale);
+			Haze->SetStringField(TEXT("applied"),
+				TEXT("the height fog and the Mie layer scaled by one factor so the ground reads along the read ray"));
+		}
+		else
+		{
+			Haze->SetStringField(TEXT("applied"), TEXT("nothing: the read ray's optical depth is within the cap"));
+		}
+		Haze->SetStringField(TEXT("not_claimed"),
+			TEXT("the card's visibility: the physics never reads the fog, and the near-field rain is the drops' "
+			     "(look_applied.rain_particles / weather), not this haze"));
+	}
+
+	// -- the open sea's surface ----------------------------------------------
+	TSharedPtr<FJsonObject> Sea = MakeShared<FJsonObject>();
+	Out->SetObjectField(TEXT("sea"), Sea);
+	Sea->SetNumberField(TEXT("radius_m"), SeaRadiusM);
+	UMaterialInterface* OceanBase = SeaRadiusM > 0.0
+		? LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/FlightSim/M_Ground_Ocean.M_Ground_Ocean"))
+		: nullptr;
+	if (SeaRadiusM <= 0.0)
+	{
+		Sea->SetStringField(TEXT("drawn"), TEXT("nothing: no -beauty-sea-radius-m (not an open-ocean beauty render)"));
+	}
+	else if (OceanBase == nullptr)
+	{
+		Sea->SetStringField(TEXT("drawn"),
+			TEXT("nothing: /Game/FlightSim/M_Ground_Ocean did not load (run scripts/ue_create_materials.py)"));
+	}
+	else
+	{
+		// A spherical cap at sea level about the origin: the engine frame is
+		// the local tangent plane there (Z 0 = orthometric 0 = the geoid the
+		// tiles' ocean stands on), so the sea falls R - sqrt(R^2 - r^2) below
+		// it at distance r and its horizon is the tiles' horizon.
+		const double RadiusM = FMath::Min(SeaRadiusM, 0.5 * EarthRadiusM);
+		TArray<FVector> Vertices;
+		TArray<FVector> Normals;
+		TArray<FProcMeshTangent> Tangents;
+		TArray<FVector2D> UV;
+		TArray<FLinearColor> Colours;
+		TArray<int32> Triangles;
+		auto AddVertex = [&](double Rm, double Angle)
+		{
+			const double X = Rm * FMath::Cos(Angle);
+			const double Y = Rm * FMath::Sin(Angle);
+			const double Drop = EarthRadiusM - FMath::Sqrt(EarthRadiusM * EarthRadiusM - Rm * Rm);
+			Vertices.Add(FVector(X, Y, SeaLiftM - Drop) * CmPerM);
+			Normals.Add(FVector(X, Y, EarthRadiusM - Drop).GetSafeNormal());
+			Tangents.Add(FProcMeshTangent(FVector(-FMath::Sin(Angle), FMath::Cos(Angle), 0.0), false));
+			UV.Add(FVector2D(X / 1000.0, Y / 1000.0));
+			Colours.Add(FLinearColor::White);
+		};
+		AddVertex(0.0, 0.0);   // 0: the centre
+		for (int32 Ring = 1; Ring <= SeaRings; ++Ring)
+		{
+			// Finer near the camera: r = R (ring / rings)^2.
+			const double Fraction = static_cast<double>(Ring) / SeaRings;
+			for (int32 Segment = 0; Segment < SeaSegments; ++Segment)
+			{
+				AddVertex(RadiusM * Fraction * Fraction, 2.0 * PI * Segment / SeaSegments);
+			}
+		}
+		auto RingVertex = [](int32 Ring, int32 Segment)
+		{
+			return 1 + (Ring - 1) * SeaSegments + (Segment % SeaSegments);
+		};
+		// Wound clockwise seen from above (+Z), the winding the scene's own
+		// ground faces up with (FlightSimVisualScene.cpp: A, B, C / B, D, C).
+		for (int32 Segment = 0; Segment < SeaSegments; ++Segment)
+		{
+			Triangles.Append({0, RingVertex(1, Segment + 1), RingVertex(1, Segment)});
+		}
+		for (int32 Ring = 1; Ring < SeaRings; ++Ring)
+		{
+			for (int32 Segment = 0; Segment < SeaSegments; ++Segment)
+			{
+				const int32 P0 = RingVertex(Ring, Segment);
+				const int32 P1 = RingVertex(Ring, Segment + 1);
+				const int32 Q0 = RingVertex(Ring + 1, Segment);
+				const int32 Q1 = RingVertex(Ring + 1, Segment + 1);
+				Triangles.Append({P0, P1, Q0, P1, Q1, Q0});
+			}
+		}
+		AActor* SeaActor = World->SpawnActor<AActor>();
+		UProceduralMeshComponent* SeaMesh = NewObject<UProceduralMeshComponent>(SeaActor, TEXT("BeautySea"));
+		SeaActor->SetRootComponent(SeaMesh);
+		SeaMesh->SetMobility(EComponentMobility::Movable);
+		SeaMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV, Colours, Tangents,
+		                                       false /* no collision */);
+		SeaMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		SeaMesh->SetCastShadow(false);
+		UMaterialInstanceDynamic* SeaMaterial = UMaterialInstanceDynamic::Create(OceanBase, SeaMesh);
+		// The calm sea: the ground material's wet-ground puddles off.
+		SeaMaterial->SetScalarParameterValue(FName(TEXT("Wetness")), 0.0f);
+		SeaMesh->SetMaterial(0, SeaMaterial);
+		SeaMesh->RegisterComponent();
+		SeaActor->SetActorLocation(FVector::ZeroVector);
+		// NOT tagged FlightSim.terrain (HideOwnTerrain would hide it); beauty
+		// only, so the label, depth and mask passes never draw it.
+		BeautyOnlyActors.Add(SeaActor);
+		Sea->SetStringField(TEXT("drawn"),
+			TEXT("a spherical cap of M_Ground_Ocean at sea level over the tiles' ocean (beauty-only actor)"));
+		Sea->SetStringField(TEXT("material"), TEXT("/Game/FlightSim/M_Ground_Ocean"));
+		Sea->SetNumberField(TEXT("lift_m"), SeaLiftM);
+		Sea->SetNumberField(TEXT("earth_radius_m"), EarthRadiusM);
+		Sea->SetNumberField(TEXT("rings"), SeaRings);
+		Sea->SetNumberField(TEXT("segments"), SeaSegments);
+		Sea->SetNumberField(TEXT("edge_drop_m"),
+			EarthRadiusM - FMath::Sqrt(EarthRadiusM * EarthRadiusM - RadiusM * RadiusM));
+		Sea->SetStringField(TEXT("reflection"),
+			TEXT("the material's own (roughness 0.04, specular 0.5): screen-space reflections and the sky "
+			     "light, both drawn on D3D11 / SM5 without Lumen"));
+		Sea->SetStringField(TEXT("not_claimed"),
+			TEXT("the sea state of the card (the waves are the material's two stated swells), tides, foam"));
+	}
 	return Out;
 }
