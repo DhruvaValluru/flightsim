@@ -2515,13 +2515,18 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
         presets.append(str(getattr(preset, "value", preset) or "chase"))
     # The world the frame is drawn in: the card's preset, read the way the
     # world lane's host reads it (core.scene.beauty_look.world_preset_for_card).
-    from core.scene.beauty_look import world_preset_for_card
+    from core.scene.beauty_look import deck_drawn_for_card, world_preset_for_card
 
     card_path = Path(out) / "card.json"
     world_preset = None
+    # Visual round 2: whether the render really draws a deck over the sun (light
+    # rain under 4 mm/h draws none; round 1's Fuji sunrise was exposed two stops
+    # open for one and rendered white). None (no card) reads the preset alone.
+    deck_drawn = None
     if card_path.is_file():
-        world_preset, _inputs = world_preset_for_card(
-            json.loads(card_path.read_text(encoding="utf-8")))
+        card_json = json.loads(card_path.read_text(encoding="utf-8"))
+        world_preset, _inputs = world_preset_for_card(card_json)
+        deck_drawn = deck_drawn_for_card(card_json)
     lit = look or {}
     brightness = (lit.get("lighting") or {}).get("brightness_ev")
     scene_block = getattr(spec, "scene", None)
@@ -2568,7 +2573,8 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
         brightness_ev=None if brightness is None else float(brightness),
         camera_presets=presets if sensors else None,
         sky_exposure=sky_exposure,
-        unmetered_scales=unmetered or None)
+        unmetered_scales=unmetered or None,
+        deck_drawn=deck_drawn)
     return write_beauty_look(plan, Path(out) / "beauty_look.json")
 
 

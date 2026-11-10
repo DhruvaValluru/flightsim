@@ -226,6 +226,8 @@ def test_the_cpp_world_tables_and_laws_are_the_python_ones(tmp_path):
                 " CloudExtinctionScaleDefault, OcclusionFlagTransmittanceDefault, LightningReferenceLuxDefault,"
                 " DetailFadeMDefault, DetailScaleMDefault);")
     main.append("printf(\"puddle %.17g\\n\", PuddleShareDefault);")
+    # visual round 2: the deck clearance (its law: tests/test_weather_scenes.py)
+    main.append("printf(\"aclear %.17g\\n\", AircraftLayerClearanceM);")
     main.append("return 0; }")
     lines = _compile_and_run(tmp_path, block, "\n".join(main))
 
@@ -283,6 +285,7 @@ def test_the_cpp_world_tables_and_laws_are_the_python_ones(tmp_path):
                       wb.LIGHTNING_REFERENCE_LUX, wb.WORLD_MPC_SCALARS["DetailFadeM"],
                       wb.WORLD_MPC_SCALARS["DetailScaleM"]]
     assert float(next(l for l in lines if l.startswith("puddle ")).split()[1]) == wb.PUDDLE_SHARE_OF_WETNESS
+    assert float(next(l for l in lines if l.startswith("aclear ")).split()[1]) == wb.AIRCRAFT_LAYER_CLEARANCE_M
 
 
 @NEEDS_CXX

@@ -512,6 +512,48 @@ namespace FlightSimWorldPure
 		const double Wet = CardWetness < 0.0 ? 0.0 : (CardWetness > 1.0 ? 1.0 : CardWetness);
 		return Wet > Floor ? Wet : Floor;
 	}
+
+	// Visual round 2 (weather scenes, 2026-11-10), world_beauty.aircraft_clear_layer:
+	// BEAUTY ONLY, the aircraft is never drawn INSIDE a deck. Round 1's tower view
+	// in heavy rain (an A320 at 1000 m in the 800-3000 m rain deck) and its 747 in
+	// a thunderstorm (2000 m in the storm deck) drew the airframe behind hundreds
+	// of metres of cloud. A deck whose slab, widened by the clearance, holds the
+	// aircraft moves clear of it with its thickness kept: a rain or storm deck goes
+	// ABOVE (its rain falls onto the aircraft), any other to the nearer side.
+	// UNCALIBRATED: set by probe render on the render machine.
+	constexpr double AircraftLayerClearanceM = 400.0;
+	struct FLayerClear
+	{
+		double BaseM;
+		double TopM;
+		bool bMoved;
+		bool bAbove;
+	};
+	inline FLayerClear AircraftClearLayer(double BaseM, double TopM, double AircraftM, double ClearM,
+	                                      bool bRainDeck)
+	{
+		const double Clear = ClearM > 0.0 ? ClearM : 0.0;
+		const double Thick = TopM - BaseM;
+		FLayerClear Out{BaseM, TopM, false, true};
+		if (!(Thick > 0.0) || AircraftM < BaseM - Clear || AircraftM > TopM + Clear)
+		{
+			return Out;
+		}
+		const bool bAbove = bRainDeck || (AircraftM - BaseM) <= (TopM - AircraftM) || AircraftM - Clear <= 0.0;
+		if (bAbove)
+		{
+			Out.BaseM = AircraftM + Clear;
+			Out.TopM = Out.BaseM + Thick;
+		}
+		else
+		{
+			Out.TopM = AircraftM - Clear;
+			Out.BaseM = Out.TopM - Thick > 0.0 ? Out.TopM - Thick : 0.0;
+		}
+		Out.bMoved = true;
+		Out.bAbove = bAbove;
+		return Out;
+	}
 }
 // FLIGHTSIM-WORLD-PURE-END
 
@@ -913,6 +955,8 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	DustHaze.Apply(World, Scene, Params, Card, VisibilityKm, WorldObject(Record, TEXT("atmosphere")), DustOut);
 	Record->SetObjectField(TEXT("dust_haze"), DustOut);
 	ApplyClouds(World, Scene, Weather, CloudsMode, bCardLayer ? CardCover : -1.0, CardBaseM, CardTopM, Seed);
+	// Visual round 2 (weather scenes): no deck, and no storm tower, drawn around the aircraft.
+	KeepAircraftClearOfClouds(Card, Aircraft, Weather);
 	ApplyTiles(World, Tiles, CardWetness);
 	// sun-shafts-sky-occlusion (FlightSimSunShafts.h): value-only, after the presets.
 	TSharedPtr<FJsonObject> SunShaftsOut;
@@ -1465,6 +1509,86 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		? TEXT("M_FlightSimCloudLayers on every engine-material cloud (the storm's M_StormCell kept)")
 		: TEXT("no cloud on the engine material to redraw"));
 	Record->SetObjectField(TEXT("clouds"), Out);
+}
+
+// Visual round 2 (weather scenes, 2026-11-10): BEAUTY ONLY. Round 1 drew the
+// aircraft INSIDE cloud: #07 (an A320 at 1000 m in the commandlet's 800-3000 m
+// rain deck, 0.045 /m nimbostratus) was a flat grey frame, and #09 (a 747 at
+// 2000 m, 350 m behind the microburst the storm cell is centred on: inside the
+// 0.19 /m tower and the 1200-2700 m storm deck) a flat blue one, the cloud's
+// inside lit by the sky light alone and metered up, only the 747's translucent
+// nav lights drawn over it. Every redrawn deck moves clear of the aircraft
+// (FlightSimWorldPure::AircraftClearLayer, its thickness kept), the storm's own
+// deck too, and the storm's tower is drawn ahead of the clip's track
+// (FFlightSimWeather::ApplyBeautyStormVantage). The per-frame occlusion row reads
+// the moved slabs (the ones drawn). Nothing here reaches the physics: the
+// microburst stays where the card puts it.
+void FFlightSimWorldBeauty::KeepAircraftClearOfClouds(const TSharedPtr<FJsonObject>& Card, AActor* Aircraft,
+                                                      FFlightSimWeather& Weather)
+{
+	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
+	using namespace FlightSimWorldPure;
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	// Heights above the scene datum, the frame of the decks and of the cell (the
+	// scenario world's own ExpectedAboveGround: altitude_m - terrain_elevation_m).
+	const double AircraftUpM = FMath::Max(0.0, WorldNumber(Card, TEXT("altitude_m"), 0.0) -
+	                                               WorldNumber(Card, TEXT("terrain_elevation_m"), 0.0));
+	const bool bRainDeck = Preset == PresetRain || Preset == PresetStorm;
+	Out->SetNumberField(TEXT("aircraft_above_datum_m"), AircraftUpM);
+	Out->SetNumberField(TEXT("clearance_m"), AircraftLayerClearanceM);
+	Out->SetBoolField(TEXT("rain_deck_goes_above"), bRainDeck);
+	Out->SetStringField(TEXT("law"),
+		TEXT("the law of world_beauty.aircraft_clear_layer, a deck whose slab widened by clearance_m holds the aircraft "
+		     "moves clear of it with its thickness kept (a rain or storm deck above, others to the nearer side); "
+		     "UNCALIBRATED"));
+	TArray<TSharedPtr<FJsonValue>> Rows;
+	for (FCloudLayerState& State : CloudLayers)
+	{
+		const FLayerClear Clear =
+			AircraftClearLayer(State.BaseM, State.TopM, AircraftUpM, AircraftLayerClearanceM, bRainDeck);
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		Row->SetStringField(TEXT("component"), State.Component != nullptr ? State.Component->GetName() : FString());
+		Row->SetNumberField(TEXT("base_m_before"), State.BaseM);
+		Row->SetNumberField(TEXT("top_m_before"), State.TopM);
+		Row->SetBoolField(TEXT("moved"), Clear.bMoved);
+		if (Clear.bMoved && State.Component != nullptr)
+		{
+			State.Component->SetLayerBottomAltitude(static_cast<float>(Clear.BaseM / 1000.0));
+			State.Component->SetLayerHeight(static_cast<float>((Clear.TopM - Clear.BaseM) / 1000.0));
+			State.BaseM = Clear.BaseM;
+			State.TopM = Clear.TopM;
+			Row->SetStringField(TEXT("side"), Clear.bAbove ? TEXT("above") : TEXT("below"));
+		}
+		Row->SetNumberField(TEXT("base_m"), State.BaseM);
+		Row->SetNumberField(TEXT("top_m"), State.TopM);
+		Rows.Add(MakeShared<FJsonValueObject>(Row));
+	}
+	Out->SetArrayField(TEXT("layers"), Rows);
+	if (Weather.DrawsCell())
+	{
+		double LayerBaseM = 0.0, LayerTopM = 0.0;
+		const bool bLayer = Weather.BeautyStormLayer(LayerBaseM, LayerTopM);
+		const FLayerClear Clear = bLayer
+			? AircraftClearLayer(LayerBaseM, LayerTopM, AircraftUpM, AircraftLayerClearanceM, true)
+			: FLayerClear{LayerBaseM, LayerTopM, false, true};
+		// The clip's track: the card's airspeed over its duration (a true airspeed
+		// above the stated one stays inside the vantage's clearance).
+		const double TravelM = FMath::Max(0.0, WorldNumber(Card, TEXT("airspeed_kt"), 0.0)) * (1852.0 / 3600.0)
+			* FMath::Max(0.0, WorldNumber(Card, TEXT("duration_s"), 0.0));
+		Weather.ApplyBeautyStormVantage(
+			Aircraft != nullptr ? Aircraft->GetActorLocation() : FVector::ZeroVector,
+			Aircraft != nullptr ? Aircraft->GetActorForwardVector() : FVector::ZeroVector,
+			TravelM, Clear.BaseM, Clear.TopM, Clear.bMoved);
+		TSharedPtr<FJsonObject> Storm = MakeShared<FJsonObject>();
+		Storm->SetBoolField(TEXT("deck_drawn_in_cell"), bLayer);
+		Storm->SetBoolField(TEXT("deck_moved"), Clear.bMoved);
+		Storm->SetNumberField(TEXT("deck_base_m"), Clear.BaseM);
+		Storm->SetNumberField(TEXT("deck_top_m"), Clear.TopM);
+		Storm->SetNumberField(TEXT("track_m"), TravelM);
+		Storm->SetStringField(TEXT("vantage"), TEXT("look_applied.weather.cell.beauty_vantage"));
+		Out->SetObjectField(TEXT("storm"), Storm);
+	}
+	Record->SetObjectField(TEXT("aircraft_clearance"), Out);
 }
 
 void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Tiles, double CardWetness)
