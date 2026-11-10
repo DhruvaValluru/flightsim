@@ -183,6 +183,10 @@ private:
 	// cloud sky AO, the still tier's fog grid (FlightSimSunShafts.h).
 	FFlightSimSunShafts SunShafts;
 
+	// clouds-sky round 2: the cloud cvar ApplyClouds wrote and its value
+	// before (empty: untouched), put back by RestoreCvars.
+	FString CloudFogAllPixelBefore;
+
 	// dust-humidity-haze: the overlay after ApplyAtmosphere (FlightSimDustHaze.h).
 	FFlightSimDustHaze DustHaze;
 	TArray<TSharedPtr<FJsonValue>> Frames;

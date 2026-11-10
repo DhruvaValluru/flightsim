@@ -346,7 +346,7 @@ def test_every_look_constant_is_labelled_uncalibrated():
     block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
     assert block.count("UNCALIBRATED: set by probe render on the render machine") >= 3
     assert "UNCALIBRATED: set by probe render on the render machine" in CLOUDS_CPP.split(
-        "WorldCloudViewSampleScale")[0]
+        "WorldCloudStopTransmittance")[0]
     for name in ("cloud_layers", "tiles_base_colour", "tiles_normal", "tiles_roughness"):
         assert "UNCALIBRATED" in (SHADERS / f"{name}.hlsl").read_text(encoding="utf-8"), name
     text = (REPO / "core" / "scene" / "world_beauty.py").read_text(encoding="utf-8")
@@ -409,6 +409,11 @@ def test_the_cloud_material_parameters_are_the_ones_the_cpp_sets():
     assert "material.set_editor_property(STORM_USAGE_PROPERTY, True)" in create
     assert "MD_VOLUME" in create and "storm_scattering(" in create
     assert '"NormAltitudeInLayer"' in create
+    # round 2: the new shader reaches a machine that built round 1 (stamped, stale rebuilt)
+    assert int(_script_dict("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"]) >= 2
+    assert create.index('world_stamp(material, "M_FlightSimCloudLayers")') < create.index("finish(material")
+    beauty = SCRIPT[SCRIPT.index("def _world_beauty_material"):SCRIPT.index("def world_shader")]
+    assert "world_graph_stale(name) or rebuild_requested(name)" in beauty
 
 
 def test_the_tiles_shaders_read_what_the_script_wires():
@@ -657,12 +662,14 @@ def test_apply_tiles_maps_the_python_parameters():
 
 
 def test_the_drawn_cloud_cover_is_the_stated_cover():
-    """The quantile cut: the drawn share of cloud columns (mid-layer, after the
-    erosion) is within 15 % of the stated cover for every shape at the covers it
-    is drawn with. The noise's moments are the shader's constants."""
+    """The quantile cut: the drawn share of cloud (at a height every shape's
+    profile leaves whole, after the erosion) is within 15 % of the stated cover
+    for every shape at the covers it is drawn with. The noise's moments and the
+    shaping constants are the shader's."""
     import random
     rng = random.Random(11)
-    samples = [wb.cloud_fbm(rng.uniform(0, 300), rng.uniform(0, 300), rng.uniform(0, 300), 7) for _ in range(6000)]
+    samples = [wb.cloud_shape(rng.uniform(0, 300), rng.uniform(0, 300), rng.uniform(0, 300), 7)
+               for _ in range(6000)]
     mean = sum(samples) / len(samples)
     sd = (sum((v - mean) ** 2 for v in samples) / len(samples)) ** 0.5
     assert mean == pytest.approx(wb.CLOUD_FBM_MEAN, abs=0.01)
@@ -670,16 +677,138 @@ def test_the_drawn_cloud_cover_is_the_stated_cover():
     hlsl = (SHADERS / "cloud_layers.hlsl").read_text(encoding="utf-8")
     assert f"const float FBM_MEAN = {wb.CLOUD_FBM_MEAN};" in hlsl
     assert f"const float FBM_SIGMA = {wb.CLOUD_FBM_SIGMA};" in hlsl
+    assert f"const float TOP_CUT_SIGMAS = {wb.CLOUD_TOP_CUT_SIGMAS};" in hlsl
+    assert f"const float EROSION_CUT_SHARE = {wb.CLOUD_EROSION_CUT_SHARE};" in hlsl
+    assert f"const float WISP_HEIGHT = {wb.CLOUD_WISP_HEIGHT};" in hlsl
     assert "4.91 * (pow(p, 0.14) - pow(1.0 - p, 0.14))" in hlsl
-    assert "return density * profile * ExtinctionPerM * ExtinctionScale;" in hlsl
+    assert "return density * base * ExtinctionPerM * ExtinctionScale;" in hlsl
     for shape, covers in (("cumulus", (0.2, 0.35, 0.5, 0.7)), ("stratocumulus", (0.5, 0.7)),
-                          ("nimbostratus", (0.5, 0.7))):
+                          ("nimbostratus", (0.5, 0.7)), ("overcast", (0.95,))):
         row = wb.CLOUDS[shape]
+        # 0.25: above every row's bottom_softness, below every row's top rounding
+        assert row["bottom_softness"] <= 0.25 <= 1.0 - row["top_rounding"]
         for cover in covers:
             n = 1500
-            hits = sum(wb.cloud_density((rng.uniform(0, 200), rng.uniform(0, 200), rng.uniform(1, 3)), 0.5,
+            hits = sum(wb.cloud_density((rng.uniform(0, 500), rng.uniform(0, 500), rng.uniform(1, 3)), 0.25,
                                         cover, row) > 0.0 for _ in range(n))
             assert hits / n == pytest.approx(cover, rel=0.15), (shape, cover, hits / n)
+
+
+def test_the_cloud_tops_round_and_the_bases_stay_flat():
+    """The top rounds by the cut, not by a density fade: the drawn share
+    shrinks towards the top (domes) while the base keeps its cover (a flat
+    base faded over bottom_softness only)."""
+    import random
+    row = wb.CLOUDS["cumulus"]
+
+    def share(h, seed):
+        rng = random.Random(seed)
+        n = 500
+        return sum(wb.cloud_density((rng.uniform(0, 200), rng.uniform(0, 200), 1.0), h, 0.35, row) > 0.0
+                   for _ in range(n)) / n
+
+    low, mid, high = share(0.1, 3), share(0.3, 3), share(0.9, 3)
+    assert low == pytest.approx(mid, abs=0.06)
+    assert high < 0.5 * mid
+    assert wb.cloud_density((1.0, 1.0, 1.0), 1.0, 0.35, row) == 0.0
+
+
+@NEEDS_CXX
+def test_the_cloud_shader_noise_is_the_pythons(tmp_path):
+    """FWorldCloud (cloud_layers.hlsl) compiled as C++ with HLSL's float3,
+    asuint and intrinsics: its Shape and Detail are cloud_shape and
+    cloud_detail to single precision."""
+    hlsl = (SHADERS / "cloud_layers.hlsl").read_text(encoding="utf-8")
+    struct = hlsl[hlsl.index("struct FWorldCloud"):hlsl.index("\n};\n") + 4]
+    shims = r"""
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+using uint = uint32_t;
+struct float3 { float x, y, z; float3() : x(0), y(0), z(0) {}
+    float3(float a, float b, float c) : x(a), y(b), z(c) {} };
+static float3 operator+(float3 a, float3 b) { return float3(a.x + b.x, a.y + b.y, a.z + b.z); }
+static float3 operator-(float3 a, float3 b) { return float3(a.x - b.x, a.y - b.y, a.z - b.z); }
+static float3 operator*(float3 a, float s) { return float3(a.x * s, a.y * s, a.z * s); }
+static float3 operator/(float3 a, float s) { return float3(a.x / s, a.y / s, a.z / s); }
+static float3 floor(float3 a) { return float3(std::floor(a.x), std::floor(a.y), std::floor(a.z)); }
+static float dot(float3 a, float3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+static float min(float a, float b) { return a < b ? a : b; }
+static float max(float a, float b) { return a > b ? a : b; }
+static float clamp(float v, float a, float b) { return min(max(v, a), b); }
+static float saturate(float v) { return clamp(v, 0.0f, 1.0f); }
+static float lerp(float a, float b, float t) { return a + (b - a) * t; }
+static uint asuint(int v) { uint u; std::memcpy(&u, &v, 4); return u; }
+"""
+    points = [(0.3, 0.7, 0.1), (12.25, -3.5, 7.75), (-41.3, 18.9, -2.2), (517.6, 902.1, 333.3)]
+    main = "int main() { FWorldCloud C;\n" + "".join(
+        f"printf(\"%.9g %.9g\\n\", (double)C.Shape(float3({x}f, {y}f, {z}f), 7u), "
+        f"(double)C.Detail(float3({x}f, {y}f, {z}f), 13u));\n" for x, y, z in points) + "return 0; }\n"
+    (tmp_path / "cloud.cpp").write_text(shims + struct + "\n" + main, encoding="utf-8")
+    subprocess.run(["g++", "-std=c++17", "-o", str(tmp_path / "cloud"), str(tmp_path / "cloud.cpp")],
+                   check=True, capture_output=True, text=True)
+    out = subprocess.run([str(tmp_path / "cloud")], check=True, capture_output=True, text=True).stdout.split()
+    for i, (x, y, z) in enumerate(points):
+        fx, fy, fz = (float(_f32(v)) for v in (x, y, z))
+        assert float(out[2 * i]) == pytest.approx(wb.cloud_shape(fx, fy, fz, 7), abs=2e-4), (x, y, z)
+        assert float(out[2 * i + 1]) == pytest.approx(wb.cloud_detail(fx, fy, fz, 13), abs=2e-4), (x, y, z)
+
+
+@NEEDS_CXX
+def test_the_cloud_march_and_the_sky_are_the_python_ones(tmp_path):
+    """Round 2 (clouds-sky): the march by GPU class, the shadow length, the
+    default layer's thinning and the sky's multiple scattering, C++ == Python;
+    the march stays under the engine's caps and steps finer than round 1."""
+    block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
+    thick = (0.0, 400.0, 1000.0, 2500.0, 3000.0, 6000.0)
+    tops = [(c, b, t, s) for c in range(4) for b, t in ((2940.0, 5940.0), (1500.0, 2700.0), (800.0, 2900.0))
+            for s in (0, 1)]
+    main = ["using namespace FlightSimWorldPure;", "int main() {",
+            "for (int m = 0; m < MarchCount; ++m) for (int f = 0; f < MarchFieldCount; ++f)"
+            " printf(\"march %s %s %.17g\\n\", MarchName(m), MarchFieldName(f), CloudMarch(m, f));"]
+    main += [f"printf(\"shadow %.17g\\n\", CloudShadowTracingKm({t!r}));" for t in thick]
+    main += [f"printf(\"top %.17g\\n\", CloudCappedTopM({c}, {b!r}, {t!r}, {'true' if s else 'false'}));"
+             for c, b, t, s in tops]
+    main.append("for (int p = 0; p < PresetCount; ++p) printf(\"sky %s %.17g\\n\", PresetName(p), SkyMultiScattering(p));")
+    main.append("return 0; }")
+    source = tmp_path / "march.cpp"
+    source.write_text("#include <cmath>\n#include <cstdint>\n#include <cstdio>\n#include <cstring>\n"
+                      + block + "\n" + "\n".join(main), encoding="utf-8")
+    # the block's other constants are the big test's; unused here is not an error
+    subprocess.run(["g++", "-std=c++17", "-O1", "-Wall", "-Werror", "-Wno-unused-const-variable",
+                    "-Wno-unused-variable", "-o", str(tmp_path / "march"), str(source)],
+                   check=True, capture_output=True, text=True)
+    lines = subprocess.run([str(tmp_path / "march")], check=True, capture_output=True, text=True).stdout.splitlines()
+    march = [line.split() for line in lines if line.startswith("march ")]
+    assert [(m, f) for _, m, f, _ in march] == [(m, f) for m in ("discrete", "integrated") for f in wb.CLOUD_MARCH_FIELDS]
+    for _, m, f, value in march:
+        assert float(value) == wb.CLOUD_MARCH[m][f], (m, f)
+    assert [float(l.split()[1]) for l in lines if l.startswith("shadow ")] == [wb.cloud_shadow_tracing_km(t) for t in thick]
+    assert [float(l.split()[1]) for l in lines if l.startswith("top ")] == [
+        wb.cloud_capped_top_m(wb.CLOUD_PRESETS[c], b, t, bool(s)) for c, b, t, s in tops]
+    sky = [line.split() for line in lines if line.startswith("sky ")]
+    assert {p: float(v) for _, p, v in sky} == wb.SKY_MULTI_SCATTERING
+    # under the engine's caps, and finer than round 1 (192 samples over 80 km, 10 shadow over 15 km)
+    for integrated in (False, True):
+        row = wb.cloud_march(integrated)
+        assert wb.ENGINE_CLOUD_BASE_VIEW_SAMPLES * row["view_sample_count_scale"] <= wb.ENGINE_CLOUD_VIEW_SAMPLE_CAP
+        assert wb.ENGINE_CLOUD_BASE_SHADOW_SAMPLES * row["shadow_sample_count_scale"] <= wb.ENGINE_CLOUD_SHADOW_SAMPLE_CAP
+        assert row["tracing_max_distance_km"] / row["view_samples_max"] <= 0.25 * 80.0 / 192.0 + 1e-12
+        assert wb.CLOUD_SHADOW_MAX_KM / row["shadow_samples"] < 0.25 * 15.0 / 10.0
+    # the -sky= plan's 3 km default slab is thinned for cumulus; a stated layer never is
+    assert wb.cloud_capped_top_m("cumulus", 2940.0, 5940.0, False) == 4940.0
+    assert wb.cloud_capped_top_m("cumulus", 2940.0, 5940.0, True) == 5940.0
+    assert wb.cloud_capped_top_m("nimbostratus", 1200.0, 7200.0, False) == 7200.0
+    # the C++ uses them where it draws: the GPU class, the per-layer shadow, the record
+    assert "GRHIDeviceIsIntegrated" in CLOUDS_CPP and "Cloud->SetShadowTracingDistance(ShadowTracingKm);" in CLOUDS_CPP
+    assert "Atmosphere->SetMultiScatteringFactor(static_cast<float>(SkyMultiScattering(Preset)));" in CLOUDS_CPP
+    assert 'Out->SetObjectField(TEXT("march"), MarchOut);' in CLOUDS_CPP
+
+
+def _f32(v):
+    import struct
+    return struct.unpack("f", struct.pack("f", v))[0]
 
 
 def test_the_dehaze_never_clips_and_every_shader_shares_the_wet_law():

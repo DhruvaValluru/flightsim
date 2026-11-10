@@ -341,6 +341,52 @@ not `baseColorTexture` / `baseColorFactor`: fix `CESIUM_BASE_COLOUR_*` in the
 material script and rebuild that one material
 (`FLIGHTSIM_REBUILD_MATERIALS=M_FlightSimTilesBeauty`).
 
+### clouds-sky round 2 (2026-11-09, Mac, not rendered)
+
+Read from the first real renders (ef361bd6, Intel iGPU, D3D11). Shot d's clouds
+were smeared paint with wavy banding and a dark navy veil over the sky. The
+causes, from the 5.7.4 source:
+- the march was 96 x 2 = 192 view samples over up to 80 km in the layer (about
+  400 m steps through 0.05/m cloud, each step opaque or empty);
+- the shadow march was 10 quadratic samples over 15 km, and the engine leaves
+  it UNJITTERED (`VolumetricCloud.usf`: `ShadowJitterNorm = 0.5f`). The cloud's
+  light came in contours, and any far sample that touched another cell blacked
+  it out;
+- the value-noise shape had the vertical profile multiplied in, so it drew
+  vertical smears.
+
+What changed (beauty only; `look_applied.world_beauty.clouds.march` and
+`layers[]` record it):
+- cloud_layers.hlsl is now a Perlin-Worley shape with domed tops (the cut rises
+  with height) and in-cloud Worley erosion;
+- the march depends on the GPU class (`GRHIDeviceIsIntegrated`):
+  - integrated: 384 view and 40 shadow samples over 40 km;
+  - discrete: 576 view and 60 shadow samples over 50 km;
+- the shadow march spans the layer: 1 km per km of thickness, clamped to 1..4 km;
+- the plan's default 3 km slab is thinned to 2 km for cumulus;
+- `r.VolumetricCloud.ApplyFogOnAllPixel` is set to 1;
+- the clear sky's `MultiScatteringFactor` is 1.25 (1.15 when hazy).
+
+The material needs a rebuild: `M_FlightSimCloudLayers` is stamped generation 2
+and rebuilds itself on the next `ue_create_materials.py` run.
+
+Probes, each UNCALIBRATED until done:
+1. Shot d with integrated scales 4 / 4 / 40, and again with 3 / 3 / 30 if a
+   capture times out. Watch for a D3D11 device-removed error in the log.
+   Record the capture time.
+2. Shot d sky band: compare luma and saturation with this round's head d.
+   Pixel (640, 5) was (15, 33, 63). Try `SKY_MULTI_SCATTERING` clear 1.0, 1.25
+   and 1.5 with `-world-beauty-overrides`. That needs the field added to the
+   overrides schema first; until then, edit the table.
+3. Cover: run a card with look.clouds cover 0.35 and compare Gate V
+   `cloud_fraction` against 0.35.
+
+Not a cloud issue: Gate V horizon_fill FAILed on a and d with `fill 0.0` from
+DEPTH. On every shot the depth label had no finite pixel under the horizon
+("0 ground pixels with depth" for aerial_perspective too). Shot d's contrast
+was 0.62, a pass. The fill clause reads the label depth, which the Windows run
+wrote without ground. That belongs to the labels/verifier lane.
+
 ## look-dev
 
 Lane: light, exposure, post, camera feel. Files:

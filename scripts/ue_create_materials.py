@@ -2796,16 +2796,52 @@ WORLD_SCATTER_SCALARS = {"RoughnessFactor": 0.8}
 WORLD_SCATTER_VECTORS = {"BaseColorFactor": (1.0, 1.0, 1.0, 1.0)}
 #: The opacity mask's clip (the dithered fade and the leaf alpha both cut here).
 WORLD_SCATTER_OPACITY_CLIP = 0.5
+# -- clouds-sky round 2 (2026-11-09) -- begin --------------------------------------
+#: The graph generation of each world-lane material whose Custom node body
+#: changed after a machine built it (the render machine kept the round-1
+#: M_FlightSimCloudLayers: PROBE_LOG.md ## render-machine step 5). Stamped
+#: with GRAPH_GENERATION_TAG like GRAPH_GENERATIONS (kept to the If-pin five);
+#: an asset stamped older (or not at all) is deleted and built again.
+#: Generation 2: cloud_layers.hlsl's Perlin-Worley shape, rounded tops and
+#: in-cloud erosion. Bump with every change to a listed material's shader.
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "2"}
+
+
+def world_graph_stale(name):
+    """True when /Game/FlightSim/<name> exists but is not stamped with its
+    WORLD_GRAPH_GENERATIONS number (built from an older shader)."""
+    if name not in WORLD_GRAPH_GENERATIONS:
+        return False
+    full = f"{PATH}/{name}"
+    if not unreal.EditorAssetLibrary.does_asset_exist(full):
+        return False
+    stamped = unreal.EditorAssetLibrary.get_metadata_tag(
+        unreal.EditorAssetLibrary.load_asset(full), GRAPH_GENERATION_TAG)
+    if str(stamped) == WORLD_GRAPH_GENERATIONS[name]:
+        return False
+    print(f"MATERIAL-STALE: {full} (built from an older shader; this one is generation "
+          f"{WORLD_GRAPH_GENERATIONS[name]})")
+    return True
+
+
+def world_stamp(material, name):
+    """The WORLD_GRAPH_GENERATIONS stamp, set before finish() saves the asset."""
+    if name in WORLD_GRAPH_GENERATIONS:
+        unreal.EditorAssetLibrary.set_metadata_tag(material, GRAPH_GENERATION_TAG,
+                                                   WORLD_GRAPH_GENERATIONS[name])
+# -- clouds-sky round 2 -- end ------------------------------------------------------
 
 
 def _world_beauty_material(name):
     """/Game/FlightSim/<name> once (WORLD_BEAUTY_MATERIALS); None when it already
-    exists unless FLIGHTSIM_REBUILD_MATERIALS names it."""
+    exists unless FLIGHTSIM_REBUILD_MATERIALS names it or it is stamped with
+    an older WORLD_GRAPH_GENERATIONS number."""
     if name not in WORLD_BEAUTY_MATERIALS:
         raise RuntimeError(f"{name} is not one of WORLD_BEAUTY_MATERIALS")
     full = f"{PATH}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
-        if rebuild_requested(name) and unreal.EditorAssetLibrary.delete_asset(full):
+        if ((world_graph_stale(name) or rebuild_requested(name))
+                and unreal.EditorAssetLibrary.delete_asset(full)):
             print(f"MATERIAL-REBUILT: {full} (deleted to be built again)")
         else:
             print(f"MATERIAL-EXISTS: {full}")
@@ -2909,6 +2945,7 @@ def create_world_cloud_layers():
     albedo = scalar(material, lib, "Albedo", WORLD_CLOUD_ALBEDO, -600, 200)
     lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
     storm_scattering(material, lib, -600, 700)
+    world_stamp(material, "M_FlightSimCloudLayers")
     finish(material, "M_FlightSimCloudLayers")
 
 

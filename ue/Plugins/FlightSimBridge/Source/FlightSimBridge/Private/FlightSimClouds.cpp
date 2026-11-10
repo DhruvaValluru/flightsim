@@ -30,6 +30,7 @@
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
+#include "RHIGlobals.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/UObjectIterator.h"
@@ -158,6 +159,85 @@ namespace FlightSimWorldPure
 	constexpr double CloudSeedSpanKm = 1000.0;
 	constexpr double CloudExtinctionScaleDefault = 1.0;
 	constexpr double OcclusionFlagTransmittanceDefault = 0.5;
+
+	// -- clouds-sky round 2 (2026-11-09): the march, the default layer, the sky --
+	// The first real renders (Intel iGPU, D3D11) banded shot d's clouds: 96 x 2
+	// view samples over an 80 km trace (400 m steps through 0.05/m cloud) and
+	// 10 UNJITTERED quadratic shadow samples over 15 km (the engine disables
+	// the shadow jitter), so a cloud's light came in contours and most of it
+	// went unlit. world_beauty.py CLOUD_MARCH and the laws below are the twin.
+	// UNCALIBRATED: set by probe render on the render machine (every number).
+	enum : int
+	{
+		MarchDiscrete = 0,
+		MarchIntegrated = 1,
+		MarchCount = 2
+	};
+	inline const char* MarchName(int March)
+	{
+		static const char* const Names[MarchCount] = {"discrete", "integrated"};
+		return March >= 0 && March < MarchCount ? Names[March] : "discrete";
+	}
+	constexpr int MarchFieldCount = 3;
+	inline const char* MarchFieldName(int Field)
+	{
+		static const char* const Names[MarchFieldCount] = {
+			"view_sample_count_scale", "shadow_sample_count_scale", "tracing_max_distance_km"};
+		return Field >= 0 && Field < MarchFieldCount ? Names[Field] : "";
+	}
+	enum : int
+	{
+		MarchViewScale = 0, MarchShadowScale, MarchTracingMaxKm
+	};
+	// The engine's samples are 96 x view scale (cap r.VolumetricCloud.ViewRaySampleMaxCount,
+	// 768) and 10 x shadow scale (cap r.VolumetricCloud.Shadow.ViewRaySampleMaxCount, 80);
+	// both rows stay under the caps. An integrated GPU (GRHIDeviceIsIntegrated: the
+	// render machine's Intel) keeps about the round-1 cost with the new noise.
+	inline double CloudMarch(int March, int Field)
+	{
+		static const double Rows[MarchCount][MarchFieldCount] = {
+			{6.0, 6.0, 50.0},   // discrete: 576 view, 60 shadow samples
+			{4.0, 4.0, 40.0},   // integrated: 384 view, 40 shadow samples
+		};
+		return March >= 0 && March < MarchCount && Field >= 0 && Field < MarchFieldCount
+			? Rows[March][Field] : 0.0;
+	}
+	// The shadow march spans the layer it lights (a cell's self-shadow and its
+	// neighbour's), not 15 km: kilometres per kilometre of thickness, clamped.
+	constexpr double CloudShadowKmPerKm = 1.0;
+	constexpr double CloudShadowMinKm = 1.0;
+	constexpr double CloudShadowMaxKm = 4.0;
+	inline double CloudShadowTracingKm(double ThicknessM)
+	{
+		const double Km = (ThicknessM > 0.0 ? ThicknessM : 0.0) / 1000.0 * CloudShadowKmPerKm;
+		return Km < CloudShadowMinKm ? CloudShadowMinKm : (Km > CloudShadowMaxKm ? CloudShadowMaxKm : Km);
+	}
+	// The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
+	// stated layer) is thinned to the shape's depth: fair cumulus and a stratus
+	// deck are 1-2 km deep; 0 keeps the layer as built.
+	inline double CloudMaxThicknessM(int Cloud)
+	{
+		static const double Rows[CloudCount] = {2000.0, 0.0, 2000.0, 0.0};
+		return Cloud >= 0 && Cloud < CloudCount ? Rows[Cloud] : 0.0;
+	}
+	inline double CloudCappedTopM(int Cloud, double BaseM, double TopM, bool bStated)
+	{
+		const double Cap = CloudMaxThicknessM(Cloud);
+		if (bStated || Cap <= 0.0 || TopM - BaseM <= Cap)
+		{
+			return TopM;
+		}
+		return BaseM + Cap;
+	}
+	// USkyAtmosphereComponent::MultiScatteringFactor per preset: the engine's
+	// LUT under-lights the sky seen from altitude (shot d's near-black navy at
+	// 3.8 km); the clear and hazy skies take a little more multiple scattering
+	// (paler, brighter towards the horizon). The weather presets keep 1.
+	inline double SkyMultiScattering(int Preset)
+	{
+		static const double Rows[PresetCount] = {1.25, 1.15, 1.0, 1.0, 1.0};
+		return Preset >= 0 && Preset < PresetCount ? Rows[Preset] : 1.0;
+	}
 	constexpr double LightningReferenceLuxDefault = 50.0;
 	constexpr double DetailFadeMDefault = 400.0;
 	constexpr double DetailScaleMDefault = 2.0;
@@ -429,11 +509,15 @@ namespace
 	const TCHAR* const WorldEngineCloudNeedle = TEXT("m_SimpleVolumetricCloud");
 	// The cloud component's quality in beauty. UNCALIBRATED: set by probe
 	// render on the render machine (render time against the clouds' noise).
-	constexpr float WorldCloudViewSampleScale = 2.0f;
-	constexpr float WorldCloudShadowSampleScale = 1.0f;
-	constexpr float WorldCloudShadowTracingKm = 15.0f;
-	constexpr float WorldCloudTracingMaxKm = 80.0f;
+	// Round 2: the sample counts, the trace and shadow distances are
+	// FlightSimWorldPure::CloudMarch / CloudShadowTracingKm (by GPU class).
 	constexpr float WorldCloudStopTransmittance = 0.005f;
+	// Round 2 (clouds-sky): fog on every cloud-buffer pixel, not only where the
+	// coverage is > 0 ("removes visual discontinuities when cloud coverage is
+	// close to or flips to 0": VolumetricCloudRendering.cpp help text), so the
+	// thin far cloud at the horizon fogs like the sky behind it.
+	// UNCALIBRATED: set by probe render on the render machine.
+	const TCHAR* const WorldCloudFogAllPixelCvar = TEXT("r.VolumetricCloud.ApplyFogOnAllPixel");
 	constexpr double WorldCmPerMetre = 100.0;
 
 	double WorldNumber(const TSharedPtr<FJsonObject>& Object, const TCHAR* Key, double Default)
@@ -950,7 +1034,19 @@ namespace FlightSimTilesDelight
 }
 
 // sun-shafts-sky-occlusion: the commandlet's teardown forwards here.
-void FFlightSimWorldBeauty::RestoreCvars() { SunShafts.Restore(); }
+void FFlightSimWorldBeauty::RestoreCvars()
+{
+	SunShafts.Restore();
+	// clouds-sky round 2: the fog-on-every-cloud-pixel cvar, as it was.
+	if (!CloudFogAllPixelBefore.IsEmpty())
+	{
+		if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(WorldCloudFogAllPixelCvar))
+		{
+			Variable->Set(*CloudFogAllPixelBefore, ECVF_SetByCode);
+		}
+		CloudFogAllPixelBefore.Empty();
+	}
+}
 
 void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm)
 {
@@ -979,6 +1075,14 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	Atmosphere->SetAerialPespectiveViewDistanceScale(static_cast<float>(Row[AtmAerialPerspectiveScale]));
 	const FColor Albedo = WorldAlbedo(Surface, GroundWetness);
 	Atmosphere->SetGroundAlbedo(Albedo);
+	// clouds-sky round 2: the sky's multiple scattering (paler towards the
+	// horizon from altitude; FlightSimWorldPure::SkyMultiScattering).
+	Out->SetNumberField(TEXT("multi_scattering_factor_before"), Atmosphere->MultiScatteringFactor);
+	Atmosphere->SetMultiScatteringFactor(static_cast<float>(SkyMultiScattering(Preset)));
+	Out->SetNumberField(TEXT("multi_scattering_factor"), SkyMultiScattering(Preset));
+	Out->SetStringField(TEXT("multi_scattering_basis"),
+		TEXT("world_beauty.SKY_MULTI_SCATTERING (UNCALIBRATED): shot d's sky at 3.8 km rendered near-black navy; "
+		     "more multiple scattering pales and lifts the clear sky towards the horizon"));
 	Out->SetNumberField(TEXT("mie_scale_height_km"), Row[AtmMieScaleHeightKm]);
 	Out->SetNumberField(TEXT("mie_anisotropy"), Row[AtmMieAnisotropy]);
 	Out->SetNumberField(TEXT("aerial_perspective_view_distance_scale"), Row[AtmAerialPerspectiveScale]);
@@ -1185,6 +1289,46 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 	const double* AtmRow = &AtmosphereValues[Preset * AtmosphereFieldCount];
 	double SeedKm[3] = {0.0, 0.0, 0.0};
 	CloudSeedOffsetKm(static_cast<uint64_t>(static_cast<int64_t>(Seed)), SeedKm);
+	// clouds-sky round 2: the march budget by GPU class (the render machine's
+	// Intel iGPU under D3D11 must not time out; a discrete GPU takes more).
+	const bool bIntegratedGpu = GRHIDeviceIsIntegrated;
+	const int32 March = bIntegratedGpu ? MarchIntegrated : MarchDiscrete;
+	const float ViewScale = static_cast<float>(CloudMarch(March, MarchViewScale));
+	const float ShadowScale = static_cast<float>(CloudMarch(March, MarchShadowScale));
+	const float TracingMaxKm = static_cast<float>(CloudMarch(March, MarchTracingMaxKm));
+	{
+		TSharedPtr<FJsonObject> MarchOut = MakeShared<FJsonObject>();
+		MarchOut->SetStringField(TEXT("path"), ANSI_TO_TCHAR(MarchName(March)));
+		MarchOut->SetStringField(TEXT("path_basis"),
+			TEXT("GRHIDeviceIsIntegrated (the RHI's adapter): integrated keeps about the round-1 cost"));
+		MarchOut->SetStringField(TEXT("adapter"), GRHIAdapterName);
+		for (int32 F = 0; F < MarchFieldCount; ++F)
+		{
+			MarchOut->SetNumberField(ANSI_TO_TCHAR(MarchFieldName(F)), CloudMarch(March, F));
+		}
+		MarchOut->SetNumberField(TEXT("view_samples_max"),
+			FMath::Min(UVolumetricCloudComponent::BaseViewRaySampleCount * ViewScale, 768.0f));
+		MarchOut->SetNumberField(TEXT("shadow_samples"),
+			FMath::Min(UVolumetricCloudComponent::BaseShadowRaySampleCount * ShadowScale, 80.0f));
+		MarchOut->SetStringField(TEXT("banding_basis"),
+			TEXT("round 1 marched 192 view samples over up to 80 km (400 m steps through 0.05/m cloud) and 10 "
+			     "unjittered quadratic shadow samples over 15 km: contour banding and unlit cloud. The view "
+			     "march is blue-noise jittered by the engine (VolumetricCloud.usf) and averaged by the still's "
+			     "captures; the shadow march spans the layer (CloudShadowTracingKm)"));
+		MarchOut->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED: set by probe render on the render machine"));
+		IConsoleVariable* FogAll = IConsoleManager::Get().FindConsoleVariable(WorldCloudFogAllPixelCvar);
+		if (FogAll != nullptr)
+		{
+			if (CloudFogAllPixelBefore.IsEmpty())
+			{
+				CloudFogAllPixelBefore = FogAll->GetString();
+			}
+			FogAll->Set(1, ECVF_SetByCode);
+		}
+		MarchOut->SetStringField(WorldCloudFogAllPixelCvar,
+			FogAll != nullptr ? FogAll->GetString() : FString(TEXT("absent")));
+		Out->SetObjectField(TEXT("march"), MarchOut);
+	}
 	TArray<TSharedPtr<FJsonValue>> Layers;
 	for (UVolumetricCloudComponent* Cloud : Components)
 	{
@@ -1194,6 +1338,17 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		State.TopM = (Cloud->LayerBottomAltitude + Cloud->LayerHeight) * 1000.0;
 		State.Shape = LayerCoverAndShape(CardCover, State.TopM - State.BaseM, Preset, bFair, CloudValues.GetData(),
 		                                 &State.Cover);
+		// clouds-sky round 2: the default layer (no card layer, not the stated
+		// fair one) thinned to the shape's depth; the occlusion row reads the
+		// thinned slab, the one drawn.
+		const double BuiltTopM = State.TopM;
+		const bool bStatedLayer = CardCover >= 0.0 || bFair;
+		State.TopM = CloudCappedTopM(State.Shape, State.BaseM, State.TopM, bStatedLayer);
+		if (State.TopM != BuiltTopM)
+		{
+			Cloud->SetLayerHeight(static_cast<float>((State.TopM - State.BaseM) / 1000.0));
+		}
+		const float ShadowTracingKm = static_cast<float>(CloudShadowTracingKm(State.TopM - State.BaseM));
 		const double* CloudRow = &CloudValues[State.Shape * CloudFieldCount];
 		State.Material = UMaterialInstanceDynamic::Create(Base, Cloud);
 		State.Material->SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(State.Cover));
@@ -1213,10 +1368,10 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Cloud->SetMaterial(State.Material);
 		Cloud->SetbUsePerSampleAtmosphericLightTransmittance(true);
 		Cloud->SetSkyLightCloudBottomOcclusion(static_cast<float>(AtmRow[AtmCloudBottomOcclusion]));
-		Cloud->SetViewSampleCountScale(WorldCloudViewSampleScale);
-		Cloud->SetShadowViewSampleCountScale(WorldCloudShadowSampleScale);
-		Cloud->SetShadowTracingDistance(WorldCloudShadowTracingKm);
-		Cloud->SetTracingMaxDistance(WorldCloudTracingMaxKm);
+		Cloud->SetViewSampleCountScale(ViewScale);
+		Cloud->SetShadowViewSampleCountScale(ShadowScale);
+		Cloud->SetShadowTracingDistance(ShadowTracingKm);
+		Cloud->SetTracingMaxDistance(TracingMaxKm);
 		Cloud->SetStopTracingTransmittanceThreshold(WorldCloudStopTransmittance);
 		Cloud->SetGroundAlbedo(WorldAlbedo(Surface, GroundWetness));
 		CloudLayers.Add(State);
@@ -1229,6 +1384,11 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			: (CardCover >= 0.0 ? TEXT("the card's look.clouds[0].cover") : TEXT("the shape's default (the card states none)")));
 		Layer->SetNumberField(TEXT("base_m"), State.BaseM);
 		Layer->SetNumberField(TEXT("top_m"), State.TopM);
+		Layer->SetNumberField(TEXT("built_top_m"), BuiltTopM);
+		Layer->SetStringField(TEXT("top_basis"), State.TopM != BuiltTopM
+			? TEXT("the default layer thinned to the shape's depth (world_beauty.CLOUD_MAX_THICKNESS_M)")
+			: (bStatedLayer ? TEXT("the stated layer, as built") : TEXT("as built (within the shape's depth)")));
+		Layer->SetNumberField(TEXT("shadow_tracing_distance_km"), ShadowTracingKm);
 		for (int32 F = 0; F < CloudFieldCount; ++F)
 		{
 			Layer->SetNumberField(ANSI_TO_TCHAR(CloudFieldName(F)), CloudRow[F]);
@@ -1242,13 +1402,14 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 	Out->SetArrayField(TEXT("layers"), Layers);
 	Out->SetNumberField(TEXT("unmodelled_clouds"), UnmodelledClouds);
 	Out->SetStringField(TEXT("coverage_law"),
-		TEXT("cloud_layers.hlsl cuts the shape noise at its (1 - cover) quantile: FBM_MEAN 0.5 + FBM_SIGMA 0.123 x "
-		     "probit(1 - cover) (the noise's own moments, world_beauty.CLOUD_FBM_*), the vertical profile after the "
-		     "cut, so the drawn share of sky is the stated cover"));
-	Out->SetNumberField(TEXT("view_sample_count_scale"), WorldCloudViewSampleScale);
-	Out->SetNumberField(TEXT("shadow_view_sample_count_scale"), WorldCloudShadowSampleScale);
-	Out->SetNumberField(TEXT("shadow_tracing_distance_km"), WorldCloudShadowTracingKm);
-	Out->SetNumberField(TEXT("tracing_max_distance_km"), WorldCloudTracingMaxKm);
+		TEXT("cloud_layers.hlsl (round 2: Perlin-Worley shape, domed tops, in-cloud erosion) cuts the shape noise "
+		     "at its (1 - cover) quantile: FBM_MEAN 0.779 + FBM_SIGMA 0.05 x probit(1 - cover) (the noise's own "
+		     "moments, world_beauty.CLOUD_FBM_*), started early by half the erosion's share of the soft edge, so "
+		     "the drawn share of sky at full profile is the stated cover"));
+	Out->SetNumberField(TEXT("view_sample_count_scale"), ViewScale);
+	Out->SetNumberField(TEXT("shadow_view_sample_count_scale"), ShadowScale);
+	Out->SetStringField(TEXT("shadow_tracing_distance_km"), TEXT("per layer (layers[].shadow_tracing_distance_km)"));
+	Out->SetNumberField(TEXT("tracing_max_distance_km"), TracingMaxKm);
 	Out->SetNumberField(TEXT("drift_mps"), DriftMps);
 	Out->SetNumberField(TEXT("drift_from_deg"), DriftFromDeg);
 	Out->SetStringField(TEXT("drawn"), Layers.Num() > 0
