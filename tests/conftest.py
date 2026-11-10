@@ -23,6 +23,13 @@ os.environ.setdefault("FLIGHTSIM_TERRAIN_PREFETCH", "off")
 # plugin, no bakes and no network, so it runs with them off. A test of the
 # default deletes the variable (monkeypatch.delenv) and sees them on.
 os.environ.setdefault("FLIGHTSIM_GOOGLE_TILES", "off")
+# The owner's rule: Unreal never runs on the Mac (renders and builds are
+# Windows only). Point the suite at an engine root that does not exist, so
+# no code path (e.g. capture's auto-import of an outdated model) can find
+# and launch the real editor here. Tests that need an engine fake their own
+# UE_ROOT with monkeypatch.
+if sys.platform == "darwin":
+    os.environ["UE_ROOT"] = "/nonexistent/flightsim-tests-never-launch-ue"
 
 from core.util.platform import ue_available  # noqa: E402
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import shutil
+
+import pytest
 from pathlib import Path
 
 from core.util import platform as plat
@@ -95,6 +97,11 @@ def test_binary_stale_capture_render_refuses_by_name(tmp_path, capsys, monkeypat
     import assets_pipeline.importer as importer_module
 
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    # Current as well as imported: an outdated model would be re-imported
+    # by launching the editor, which no test may do.
+    monkeypatch.setattr(importer_module, "older_than_inputs_reason", lambda name: None)
+    monkeypatch.setattr(importer_module, "provision_models",
+                        lambda *a, **k: pytest.fail("the test reached a model import"))
     monkeypatch.setattr(plat, "ue_available", lambda: True)
     monkeypatch.setattr(plat, "ue_bridge_binary", lambda repo: built)
     # A machine with a real build carries a stamp; this bridge has none.
