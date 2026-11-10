@@ -200,6 +200,24 @@ TONEMAP: Dict[str, float] = {
     "ToneCurveAmount": 1.0,
 }
 
+#: Round 2b (presets-colour): the tonemapper's hue guard, NOT one of the
+#: engine's defaults. UE 5.7.4's FPostProcessSettings::BlueCorrection
+#: (Scene.h: "Bright blue desaturates instead of going to violet"; Scene.cpp
+#: default 0.6) lerps a blue-correct matrix in around the AP1 tone curve
+#: (PostProcessCombineLUTs.usf) and undoes it after, so a saturated sky-blue
+#: fill keeps its hue instead of skewing to violet; luminance is held by the
+#: inverse, so the exposure owner's EV100 and the exposure meter's p90 do
+#: not move with it. Round 0 (scenes 01, 08) read shadow midtones at hue
+#: ~263 deg (violet) where a sky-blue fill sits near 205-215 deg. ExpandGamut
+#: stays the engine's 1.0: its wide-gamut blue lies FURTHER from violet than
+#: sRGB's, so it does not cause the cast. Applied in the combine-LUT pass,
+#: which runs on every RHI (the D3D11 / SM5 render machine included).
+#: UNCALIBRATED: set by probe render on the render machine (probe pc-blue:
+#: round 0 scene 01 again, the cliff shadows' midtone hue read at 0.6 and 1.0).
+TONEMAP_HUE: Dict[str, float] = {
+    "BlueCorrection": 1.0,
+}
+
 # -- grades --------------------------------------------------------------------
 
 #: The four named grades, as UE post-process colour grading. Vectors are
@@ -417,7 +435,7 @@ REFLECTIONS: Dict[str, Any] = {
 #: The constants a probe render must set, as the record lists them.
 UNCALIBRATED: Tuple[str, ...] = (
     "EV100_BANDS", "GRADES", "GOLDEN_HOUR_BELOW_DEG", "LENSES", "LOCAL_EXPOSURE",
-    "REFLECTIONS", "EXPOSURE_METER_TARGET_P90",
+    "REFLECTIONS", "EXPOSURE_METER_TARGET_P90", "TONEMAP_HUE",
 )
 
 
@@ -708,7 +726,8 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
                      sky_light_scale: Optional[float] = None,
                      brightness_ev: Optional[float] = None,
                      camera_presets: Optional[Sequence[str]] = None,
-                     sky_exposure: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+                     sky_exposure: Optional[Mapping[str, Any]] = None,
+                     unmetered_scales: Optional[Mapping[str, float]] = None) -> Dict[str, Any]:
     """The complete ``beauty_look.json``. Pure: same inputs, same bytes.
 
     ``sensor_width_mm``: one per camera pass, in the card's camera order
@@ -728,7 +747,11 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
     the plan's incident-meter EV100 is the base, moved by the same deck and
     lighting stops as the band (:func:`exposure_target`), realised through
     the plan's own camera (the host changes only the compensation). Without
-    it (no plan EV100 to start from) the plan's exposure stands, as before."""
+    it (no plan EV100 to start from) the plan's exposure stands, as before.
+    ``unmetered_scales``: the lighting look's scales the host applies but the
+    exposure deliberately does NOT meter (a user's or a preset's stated
+    look, webapp.runs write_beauty_look_plan; round 2b). Recorded in the
+    exposure row as ``lighting_scales_unmetered``; they move no number here."""
     elevation = float(sun_elevation_deg)
     if not math.isfinite(elevation) or not -90.0 <= elevation <= 90.0:
         raise BeautyLookError(CONSTRAINT, f"a sun elevation of {sun_elevation_deg!r} deg "
@@ -811,6 +834,11 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
             horizontal=horizontal)
     if exposure.get("ev100") is not None:
         exposure["meter"] = exposure_meter(world_preset)
+    if unmetered_scales:
+        exposure["lighting_scales_unmetered"] = {
+            **{str(k): float(v) for k, v in sorted(unmetered_scales.items())},
+            "basis": ("stated by the user or a lighting preset: applied to the light and "
+                      "left unmetered, so the frame shows the look asked for (round 2b)")}
 
     post = {key: value for key, value in lens_row.items()
             if key[0].isupper()}
@@ -826,8 +854,9 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
         "sun_elevation_deg": round(elevation, 4),
         "sun": sun,
         "exposure": exposure,
-        "tonemap": {"tonemapper": "UE filmic (ACES-fitted), engine 5.7 defaults stated",
-                    **TONEMAP},
+        "tonemap": {"tonemapper": ("UE filmic (ACES-fitted), engine 5.7 curve defaults "
+                                   "stated; BlueCorrection raised (TONEMAP_HUE)"),
+                    **TONEMAP, **TONEMAP_HUE},
         "color_grade": {key: grade_row[key] for key in
                         ("ColorSaturation", "ColorContrast", "ColorGamma", "ColorGain",
                          "ColorOffset", "WhiteTemp", "WhiteTint")},

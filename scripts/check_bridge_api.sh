@@ -1017,6 +1017,28 @@ bf_cvar r.Shadow.MaxResolution "Core/Private/HAL/ConsoleManager.cpp"
 bf_cvar r.Lumen.Supported.SM5 "Renderer/Private/Lumen/Lumen.cpp"
 # ------------------------------------------------------ END beauty fallback --
 
+# -- presets-colour (visual overhaul round 2b, 2026-11-09) -- BEGIN presets-colour --
+# FlightSimBeautyLook.cpp's tonemap hue guard (core/scene/beauty_look.py
+# TONEMAP_HUE): FPostProcessSettings::BlueCorrection, and the combine-LUT pass
+# that applies it on every RHI. Fixed strings grepped in the UE 5.7.4 source.
+pc_check() {  # label, file (relative to $UE_ROOT/Engine), fixed-string pattern
+    local f="$UE_ROOT/Engine/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- the presets-colour lane needs updating"
+    fi
+}
+pc_check "colour: BlueCorrection" "Source/Runtime/Engine/Classes/Engine/Scene.h" "float BlueCorrection;"
+pc_check "colour: bOverride_BlueCorrection" "Source/Runtime/Engine/Classes/Engine/Scene.h" "uint8 bOverride_BlueCorrection : 1;"
+pc_check "colour: BlueCorrection's purpose" "Source/Runtime/Engine/Classes/Engine/Scene.h" "Bright blue desaturates instead of going to violet."
+pc_check "colour: BlueCorrection default 0.6" "Source/Runtime/Engine/Private/Scene.cpp" "BlueCorrection = 0.6f;"
+pc_check "colour: blue correct around the tone curve" "Shaders/Private/PostProcessCombineLUTs.usf" "ColorAP1 = lerp( ColorAP1, mul( BlueCorrectAP1, ColorAP1 ), BlueCorrection );"
+pc_check "colour: blue correct undone after it" "Shaders/Private/PostProcessCombineLUTs.usf" "ColorAP1 = lerp( ColorAP1, mul( BlueCorrectInvAP1, ColorAP1 ), BlueCorrection );"
+# ------------------------------------------------------ END presets-colour --
+
 
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
