@@ -473,3 +473,69 @@ def plan_sky(time_value: str, weather_date: Optional[str], lat: float,
     if night_lights:
         plan["night_lights"] = night_lights
     return plan
+
+
+# -- the lighting block over the physical sky (beauty only) ----------------------
+
+#: The floor a relit sun may not go under: core/scene/lighting.py
+#: RANGES["sun_elevation_deg"], the lighting validator's own floor.
+RELIGHT_MIN_ELEVATION_DEG = 2.0
+
+
+def relight(plan: Dict, *, elevation_deg: Optional[float], azimuth_deg: Optional[float],
+            basis: str) -> Dict:
+    """``plan`` with the sun moved to the lighting block's exact degrees
+    (round 2b, presets-colour; the web app calls this for a BEAUTY render
+    only, so a measure render's sky.json is byte-identical).
+
+    Before this the physical sky dropped the whole lighting block: the sun
+    stayed where the instant put it, and a preset run came out
+    byte-identical to the run without it (round 0: scene 02 equal to 01,
+    scene 05 equal to 04). ``elevation_deg`` / ``azimuth_deg`` (the COMPASS
+    bearing the light comes from, as the plan records it): None keeps that
+    coordinate. The exposure block follows the new sun with the same meter
+    (:func:`sun_horizontal_lux`, :func:`ev100_for`), the moon's and the
+    night sky's share kept, and stars are no longer drawn once the sun is
+    above :data:`STARS_BELOW_SUN_ELEVATION_DEG`. The instant, the moon and
+    the clouds stay the instant's; only the sun moves, and ``sun.relit``
+    records where from. Pure: same inputs, same bytes. ValueError for a sun
+    outside :data:`RELIGHT_MIN_ELEVATION_DEG`..90 (the lighting validator
+    refuses it first, by name, as ``lighting.range``)."""
+    import copy
+
+    out = copy.deepcopy(plan)
+    if elevation_deg is None and azimuth_deg is None:
+        return out
+    sun = out["sun"]
+    was = {"elevation_deg": sun["elevation_deg"], "azimuth_deg": sun["azimuth_deg"]}
+    if elevation_deg is not None:
+        elevation = float(elevation_deg)
+        if not math.isfinite(elevation) or not \
+                RELIGHT_MIN_ELEVATION_DEG <= elevation <= 90.0:
+            raise ValueError(f"a relit sun at {elevation_deg!r} deg is outside "
+                             f"{RELIGHT_MIN_ELEVATION_DEG:g}..90")
+        sun["elevation_deg"] = round(elevation, 4)
+    if azimuth_deg is not None:
+        sun["azimuth_deg"] = round(float(azimuth_deg) % 360.0, 4)
+    elevation = float(sun["elevation_deg"])
+    sun_lux = sun_horizontal_lux(elevation)
+    sun["horizontal_illuminance_lux"] = round(sun_lux, 6)
+    sun["transmittance_min_elevation_deg"] = 90.0 if elevation > 0 else -90.0
+    sun["relit"] = {"from": was, "basis": str(basis)}
+    moon_lux = float((out.get("moon") or {}).get("horizontal_illuminance_lux", 0.0))
+    horizontal = sun_lux + moon_lux + NIGHT_SKY_LUX
+    ev100 = ev100_for(horizontal)
+    exposure = out["exposure"]
+    exposure["ev100"] = round(ev100, 3)
+    exposure["horizontal_illuminance_lux"] = round(horizontal, 6)
+    exposure["bias"] = round(CAMERA_EV100 - ev100, 4)
+    stars = out.get("stars") or {}
+    if elevation >= STARS_BELOW_SUN_ELEVATION_DEG and stars.get("drawn"):
+        stars.update(drawn=False, count=0, batches=[],
+                     note=(f"sun relit to {elevation:+.1f} deg: the sky out-shines "
+                           f"the stars, none drawn"))
+    if elevation >= STARS_BELOW_SUN_ELEVATION_DEG and "night_lights" in out:
+        # Planned only for a night instant; a relit day draws no city lights.
+        out.pop("night_lights")
+        sun["relit"]["night_lights"] = "dropped: the relit sun is up"
+    return out

@@ -1978,7 +1978,8 @@ def xplane_lighting_flags(look: Optional[Dict],
                           tables: Optional[Dict] = None,
                           source: Optional[str] = None,
                           compensate: bool = True,
-                          condition: Optional[str] = None) -> List[str]:
+                          condition: Optional[str] = None,
+                          beauty: bool = False) -> List[str]:
     """The -xplane-* render flags for a look, or [] when there is no
     extracted X-Plane lighting table on this machine.
 
@@ -2006,6 +2007,19 @@ def xplane_lighting_flags(look: Optional[Dict],
     out white (the engine computes the same atmosphere per pixel); a
     table's colours come out as the tint that lands the lit result on
     the table's colour.
+
+    ``beauty`` (round 2b, presets-colour; a beauty render only, so every
+    measure command stands): the sun and sky-light colours go WHITE and the
+    condition is recorded as ``beauty:<condition>``; the horizon (fog
+    in-scatter) colour is unchanged. Under the beauty look the engine's
+    per-pixel transmittance is the one owner of the sun's colour
+    (core/scene/beauty_look.py) and the sky light is the engine's own
+    capture plus the hero-lighting ground in its lower hemisphere. The
+    compensation's divisor is a CLEAR sea-level model, so under the beauty
+    world's deck (``ocast``) at a low sun it sent a deep-blue sun (a
+    sunrise rain run: 60:102:255) and a warm sky light (255:245:235): a
+    blue key plus a red-leaning fill, the purple cast round 0 read on lit
+    slopes and in shadow midtones.
     """
     import os
 
@@ -2051,6 +2065,9 @@ def xplane_lighting_flags(look: Optional[Dict],
         colours = engine_light_colours(
             {name: colours[name] for name in ("direct", "ambient", "sky_horizon")},
             sun_elev, sun_azim)
+    if beauty:
+        colours = {**colours, "direct": (255, 255, 255), "ambient": (255, 255, 255)}
+        condition = f"beauty:{condition}"
 
     def triple(name: str) -> str:
         return ":".join(str(channel) for channel in colours[name])
@@ -2514,6 +2531,28 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
         altitude = float(altitude or 0.0)
     except (TypeError, ValueError):
         altitude = 0.0
+    # Round 2b (presets-colour): which of the lighting look's two scales the
+    # exposure meters. A scale the RAIN look filled in (weather dimming the
+    # light) is metered, so a rainy day is not a dark frame. A scale the user
+    # or a PRESET stated is the look asked for and is NOT metered away: the
+    # meter used to read "super bright"'s sun x1.6 and fill x1.35 as +0.64
+    # stops and close the exposure by them, cancelling its +0.6 EV, so the
+    # preset rendered no brighter than "natural" at the same sun. The
+    # presets were chosen by eye on the measure path, where nothing meters
+    # them; unmetered, beauty keeps that meaning.
+    from core.scene import lighting as lighting_block
+
+    block = getattr(spec, "lighting", None)
+    chosen = lighting_block.effective_values(
+        lighting_block.stated_values(block) if block is not None else {})
+    metered: Dict[str, Optional[float]] = {}
+    unmetered: Dict[str, float] = {}
+    for key, knob in (("sun_intensity_scale", "sun_intensity"), ("sky_light_scale", "sky_fill")):
+        value = lit.get(key)
+        if value is not None and chosen.get(knob) is not None:
+            unmetered[key] = float(value)
+            value = None
+        metered[key] = value
     plan = plan_beauty_look(
         elevation, fps=FPS, width_px=RENDER_QUALITIES["beauty"]["width"],
         sensor_width_mm=sensors or [DEFAULT_SENSOR_WIDTH_MM], grade=grade, lens=lens,
@@ -2522,13 +2561,14 @@ def write_beauty_look_plan(spec: ScenarioSpec, out: Path, look: Optional[Dict],
         stated_sun_lux=None if stated is None else float(stated),
         physical_sky=sky is not None, world_preset=world_preset,
         # The lighting look's knobs the host applies to the light
-        # (FlightSimVisualScene.cpp): the exposure meters them, and the
-        # brightness stops land on the one EV100 the host applies.
-        sun_intensity_scale=lit.get("sun_intensity_scale"),
-        sky_light_scale=lit.get("sky_light_scale"),
+        # (FlightSimVisualScene.cpp): the exposure meters the rain look's,
+        # and the brightness stops land on the one EV100 the host applies.
+        sun_intensity_scale=metered["sun_intensity_scale"],
+        sky_light_scale=metered["sky_light_scale"],
         brightness_ev=None if brightness is None else float(brightness),
         camera_presets=presets if sensors else None,
-        sky_exposure=sky_exposure)
+        sky_exposure=sky_exposure,
+        unmetered_scales=unmetered or None)
     return write_beauty_look(plan, Path(out) / "beauty_look.json")
 
 
@@ -2802,6 +2842,58 @@ def physical_sky_enabled(spec: ScenarioSpec) -> bool:
     """
     override = os.environ.get("FLIGHTSIM_SKY", "").strip().lower()
     return override == "physical"
+
+
+def relight_sky_plan(spec: ScenarioSpec, sky: Path, event_note) -> Optional[Dict]:
+    """The lighting block over the physical sky, for a BEAUTY render (round
+    2b, presets-colour; the caller never calls it under measure, so a
+    measure run's sky.json and command stand byte for byte).
+
+    Before this, FLIGHTSIM_SKY=physical (the render machine's sky) dropped
+    the whole block (:func:`render_look_for` returns before
+    :func:`lighting_look`): round 0's "super bright" scene 02 rendered
+    byte-identical to 01, and 05 (sun from 225 deg) to 04 (sun from 45).
+    Now the block layers on the PLAN's sun exactly as it layers on the
+    calibrated look's: a stated or preset elevation / azimuth moves the sun
+    in ``sky`` (core.sky.plan.relight, rewritten in place, its exposure
+    re-metered for the new sun), and the returned look carries the engine
+    knobs (sent as flags by ``_render``), the haze (``-fog-density=``), the
+    brightness stops and the scales (the beauty look's one exposure owner).
+    None when the block is the default and no rain look applies: the plan
+    and the run are then untouched."""
+    from core.render.flags import DEFAULT_LOOK
+    from core.scene import lighting
+    from core.sky.plan import relight
+
+    block = getattr(spec, "lighting", None)
+    if (block is None or block.is_default()) and rain_rate(spec) is None:
+        return None
+    plan = json.loads(Path(sky).read_text(encoding="ascii"))
+    base = {
+        "sun_elev": round(float(plan["sun"]["elevation_deg"]), 2),
+        "sun_azim": round(lighting.compass_to_engine_azimuth(
+            float(plan["sun"]["azimuth_deg"])), 2),
+        "exposure_bias": DEFAULT_LOOK["exposure_bias"],
+        "fog_density": (STORM_LOOK if event_note else DEFAULT_LOOK)["fog_density"],
+        "note": f"the physical sky's sun at {plan['instant_utc']} (core/sky/plan.py)",
+    }
+    look = lighting_look(spec, base)
+    if look is None:
+        return None
+    values = lighting.effective_values(
+        lighting.stated_values(block) if block is not None else {})
+    elevation, azimuth = values["sun_elevation_deg"], values["sun_azimuth_deg"]
+    if elevation is not None or azimuth is not None:
+        plan = relight(plan, elevation_deg=elevation, azimuth_deg=azimuth,
+                       basis=f"the lighting block ('{values['preset']}', webapp.runs."
+                             f"relight_sky_plan), beauty only")
+        Path(sky).write_text(json.dumps(plan, indent=1), encoding="ascii")
+    look["lighting"]["over_physical_sky"] = True
+    where = "moved in sky.json" if "relit" in plan["sun"] else "is the plan's own"
+    look["note"] = (f"{look['note']}; applied over the physical sky (beauty): the sun "
+                    f"{where}, the knobs as flags, the brightness and scales in the "
+                    f"beauty exposure")
+    return look
 
 
 def night_lights_for(scene: Dict) -> Optional[Path]:
@@ -3335,8 +3427,17 @@ class RunManager:
         # look only: a physical sky plan lights the scene itself and is
         # left alone. No extraction on this machine -> no flags.
         if sky is None:
+            # Beauty (a sidecar): the sun and sky-light colours go white
+            # (presets-colour, round 2b); measure keeps its pinned colours.
             extra += xplane_lighting_flags(
-                look, condition=beauty_xplane_condition(beauty_look))
+                look, condition=beauty_xplane_condition(beauty_look),
+                beauty=beauty_look is not None)
+        elif beauty_look is not None:
+            # Beauty over the physical sky: the lighting block's engine knobs
+            # (render_flags sends them only on the legacy sun path). A look
+            # without knobs adds nothing; measure never gets here.
+            from core.render.flags import lighting_flags
+            extra += lighting_flags(look)
         # The beauty look's sidecar (write_beauty_look_plan), beauty only:
         # None under measure adds nothing, so the pinned command stands.
         extra += beauty_look_render_flags(beauty_look)
@@ -4035,23 +4136,36 @@ class RunManager:
         # The physical sky (stated time of day, or FLIGHTSIM_SKY): planned
         # before provenance so its summary rides in the conditions.
         sky = None
+        quality = run_render_quality(run.look)
+        # The look every render pass of this run is given (one value, so the
+        # beauty sidecar and the commandlet flags cannot disagree).
+        render_look = render_look_for(spec, event_note)
         if physical_sky_enabled(spec):
             sky = write_sky_plan(spec, scene,
                                  (spec.cameras or default_cameras(spec))[0],
                                  out, push=run.push)
+            if quality == "beauty":
+                # Round 2b (presets-colour): a beauty render takes the
+                # lighting block over the physical sky -- the sun moves in
+                # sky.json, the knobs ride as flags -- where before it was
+                # dropped whole. Measure keeps its sky.json byte-identical.
+                sky_lit = relight_sky_plan(spec, sky, event_note)
+                if sky_lit is not None:
+                    render_look = sky_lit
+                    run.conditions["lighting"] = sky_lit["note"]
             plan = json.loads(sky.read_text(encoding="ascii"))
             run.conditions["sky"] = (
                 f"physical sky at {plan['instant_utc']} "
                 f"({plan['time_basis']}): sun "
                 f"{plan['sun']['elevation_deg']:+.1f} deg, moon "
                 f"{plan['moon']['illuminated_fraction']:.0%} lit, EV100 "
-                f"{plan['exposure']['ev100']:+.1f}; clouds VISUAL ONLY")
+                f"{plan['exposure']['ev100']:+.1f}; clouds VISUAL ONLY"
+                + ("; sun relit by the lighting block" if "relit" in plan["sun"] else ""))
         # The beauty look (beauty quality only; None under measure).
         # A look switch (the page's option or a prompt word) renders THIS
         # run at beauty with its lens; the grade stays automatic.
-        quality = run_render_quality(run.look)
         beauty_look = write_beauty_look_plan(
-            spec, out, render_look_for(spec, event_note), sky=sky,
+            spec, out, render_look, sky=sky,
             lens=(run.look or {}).get("lens"), quality=quality)
         if beauty_look is not None:
             from core.scene.hero_lighting import write_sidecar_beside   # hero-lighting lane
@@ -4227,7 +4341,7 @@ class RunManager:
                         # no per-camera host flight existed and the check
                         # reported NOT RUN on every web run.
                         telemetry=telemetry,
-                        look=render_look_for(spec, event_note),
+                        look=render_look,
                         camera_flags=camera_flags, extra=list(extra) + pass_extra,
                         sky=sky, beauty_look=beauty_look, quality=quality),
                     look=run.look)  # aces2-display: -linear + the ACES 2.0 view
@@ -4251,7 +4365,7 @@ class RunManager:
                 return
         elif not self._render(card, frames, scene, mesh, aircraft,
                               telemetry=out / "telemetry.json",
-                              look=render_look_for(spec, event_note),
+                              look=render_look,
                               camera_flags=camera_flags, sky=sky,
                               # aces2-display: -linear for the ACES 2.0 view.
                               extra=capture_display.commandlet_tokens(run.look) or None,
