@@ -261,6 +261,76 @@ def _fdm_locations(aircraft: str) -> Dict[str, tuple]:
     return found
 
 
+_WEIGHT_LB = {"LBS": 1.0, "LB": 1.0, "KG": 2.20462262185}
+
+
+def _fdm_loaded_cg(aircraft: str) -> Optional[tuple]:
+    """The CG of the FDM's own default loading, metres in the structural
+    frame (x aft, y right, z up): the empty weight at <location name="CG">
+    plus every <pointmass> and every <tank>'s <contents>, sum(m r) / sum(m)
+    (what JSBSim's FGMassBalance computes when nothing writes a station or
+    a tank). None when the XML cannot be read or states no weight.
+
+    The host places the airframe so that JSBSim's RUNTIME CG
+    (UJSBSimMovementComponent::CGLocalPosition) is on the flown point, and
+    the cockpit camera's offset is applied from that point. The empty CG
+    the XML names is not that point: on the J-11 the default fuel (half
+    tanks, 10 940 lb, forward of the empty CG) puts the runtime CG at
+    12.792 m, 0.349 m forward of the empty CG at 13.141 m (measured with
+    the .venv JSBSim 2026-11-10), so an eye offset taken from the empty CG
+    put head2 shot d's lens 0.35 m forward of the modelled eye, under the
+    canopy bow with the glareshield hood looming."""
+    path = _fdm_xml(_fdm_name(aircraft)) if aircraft else None
+    if path is None:
+        return None
+    import xml.etree.ElementTree as ET
+
+    def location_m(element) -> Optional[tuple]:
+        loc = element.find("location")
+        if loc is None:
+            return None
+        scale = {"IN": _INCH_M, "M": 1.0}.get(str(loc.get("unit", "IN")).upper())
+        if scale is None:
+            return None
+        return tuple(float(loc.find(axis).text) * scale for axis in "xyz")
+
+    def weight_lb(element) -> Optional[float]:
+        if element is None:
+            return None
+        factor = _WEIGHT_LB.get(str(element.get("unit", "LBS")).upper())
+        return None if factor is None else float(element.text) * factor
+
+    try:
+        root = ET.parse(path).getroot()
+        mass_balance = root.find("mass_balance")
+        if mass_balance is None:
+            return None
+        masses = []
+        empty = weight_lb(mass_balance.find("emptywt"))
+        cg = None
+        for loc in mass_balance.findall("location"):
+            if loc.get("name") == "CG":
+                scale = {"IN": _INCH_M, "M": 1.0}.get(str(loc.get("unit", "IN")).upper())
+                cg = tuple(float(loc.find(axis).text) * scale for axis in "xyz")
+        if empty is None or cg is None:
+            return None
+        masses.append((empty, cg))
+        for point in mass_balance.iter("pointmass"):
+            weight, where = weight_lb(point.find("weight")), location_m(point)
+            if weight and where is not None:
+                masses.append((weight, where))
+        for tank in root.iter("tank"):
+            contents, where = weight_lb(tank.find("contents")), location_m(tank)
+            if contents and where is not None:
+                masses.append((contents, where))
+    except (OSError, ET.ParseError, AttributeError, TypeError, ValueError):
+        return None
+    total = sum(m for m, _ in masses)
+    if total <= 0.0:
+        return None
+    return tuple(sum(m * r[k] for m, r in masses) / total for k in range(3))
+
+
 def _model_pilot_eye_actor_m(aircraft: str, vrp: Optional[tuple] = None) -> Optional[tuple]:
     """(actor-frame point in metres, basis) of the aircraft config's
     ``views.pilot_eye``, or None. The converted mesh manifest's own
@@ -308,13 +378,15 @@ def derive_cockpit_offset(aircraft: str) -> Optional[tuple]:
     """The "cockpit" camera's body offset from the CG for ``aircraft``
     (forward, right, up metres). First choice (round 2, cockpit-airframe):
     the model's own pilot eye (the config's ``views.pilot_eye``, the
-    package's -set.xml view) relative to the FDM's CG, plus
+    package's -set.xml view) relative to the FDM's CG at its default
+    loading (:func:`_fdm_loaded_cg`, the point the host flies), plus
     :data:`PILOT_EYE_NUDGE_M`: the eye the cockpit was modelled around, so
     the lens is in the pilot's head, not in the panel. Else the FDM's
     EYEPOINT relative to the CG (structural frame, x aft, y right, z up)
     plus :data:`COCKPIT_EYE_NUDGE_M`. None when the FDM cannot be read or
     states neither (the caller then uses :data:`SHOULDER_OFFSET`). On the
-    J-11 the pilot eye gives about (+7.91, 0, +1.92) m; the EYEPOINT gave
+    J-11 the pilot eye gives about (+7.56, 0, +2.03) m (+7.91 from the
+    empty CG: head2 shot d, 0.35 m forward of the eye); the EYEPOINT gave
     (+8.41, +0.3, +1.61) m, inside the instrument panel's hood."""
     key = str(aircraft or "")
     if key in _COCKPIT_CACHE:
@@ -326,12 +398,18 @@ def derive_cockpit_offset(aircraft: str) -> Optional[tuple]:
                  if (key and cg is not None) else None)
     if model_eye is not None:
         (ex, ey, ez), source = model_eye
-        cg_actor = (-cg[0], cg[1], cg[2])
+        # The point the host puts on the flown track is JSBSim's runtime
+        # CG, not the XML's empty CG (_fdm_loaded_cg; head2 shot d).
+        loaded = _fdm_loaded_cg(key)
+        cg_used = loaded if loaded is not None else cg
+        cg_actor = (-cg_used[0], cg_used[1], cg_used[2])
         result = (round(ex - cg_actor[0] + PILOT_EYE_NUDGE_M[0], 3) + 0.0,
                   round(ey - cg_actor[1] + PILOT_EYE_NUDGE_M[1], 3) + 0.0,
                   round(ez - cg_actor[2] + PILOT_EYE_NUDGE_M[2], 3) + 0.0)
+        cg_words = ("CG at its default loading (empty weight, pointmasses and tank contents)"
+                    if loaded is not None else "empty CG")
         _COCKPIT_BASIS[key] = (f"pilot eye of the {key}'s own model ({source}) relative to its "
-                               f"FDM CG, plus PILOT_EYE_NUDGE_M (UNCALIBRATED)")
+                               f"FDM {cg_words}, plus PILOT_EYE_NUDGE_M (UNCALIBRATED)")
     elif cg is not None and "EYEPOINT" in found:
         eye = found["EYEPOINT"]
         result = (round(cg[0] - eye[0] + COCKPIT_EYE_NUDGE_M[0], 3),

@@ -843,11 +843,18 @@ def _beauty_mesh_config(config: Dict) -> Optional[Dict]:
         return None
     if block.get("normals") != "crease":
         raise ConvertError(f"beauty_mesh.normals {block.get('normals')!r} is not 'crease'")
-    flip = block.get("flip_objects", [])
-    if not isinstance(flip, list) or not all(isinstance(p, str) and p for p in flip):
-        raise ConvertError(f"beauty_mesh.flip_objects {flip!r} is not a list of object-name "
-                           f"patterns")
+    for field in ("flip_objects", "hide_objects"):
+        patterns = block.get(field, [])
+        if not isinstance(patterns, list) or not all(isinstance(p, str) and p for p in patterns):
+            raise ConvertError(f"beauty_mesh.{field} {patterns!r} is not a list of object-name "
+                               f"patterns")
     return block
+
+
+def _beauty_part_name(part: str) -> str:
+    """The beauty-only copy of a measured part: ``body`` -> ``body_beauty``,
+    ``propeller`` -> ``propeller_beauty``."""
+    return f"{part}_beauty"
 
 
 def _write_beauty_mesh(rows: List[tuple], block: Dict, body_writer: "ObjWriter",
@@ -871,20 +878,80 @@ def _write_beauty_mesh(rows: List[tuple], block: Dict, body_writer: "ObjWriter",
     on a beauty render, so a shell facing the cabin is a dark slab across
     the cockpit view. Flipped it faces out, is culled from the pilot's eye
     and sits behind the windshield's own glass from outside; same
-    positions, same slots, so the silhouette and the slot match hold."""
-    triangles = [tuple(position for position, _ in row[1]) for row in rows]
-    normals = vertex_normals_actor(triangles, [r[2] for r in rows], [r[3] for r in rows],
-                                   [r[4] for r in rows])
-    writer = ObjWriter()
-    # The body's materials in the body's order, so the slots line up.
-    writer.materials = dict(body_writer.materials)
-    for key in body_writer.faces:
-        writer.faces[key] = []
-    two_sided = bool(block.get("two_sided"))
+    positions, same slots, so the silhouette and the slot match hold.
+
+    ``hide_objects`` (full-match patterns): those objects' triangles are
+    not written at all (round 2 scene 12, 2026-11-10: the c172p's static
+    PropellerCowlPlugs blade, which FlightGear selects only while the cowl
+    plugs are fitted, stood still across the cockpit view of a running
+    engine). See :func:`_write_beauty_part`."""
+    return {"body": _write_beauty_part(rows, block, body_writer, out_dir, "body")}
+
+
+def _write_beauty_surfaces(surface_rows: Optional[Dict[str, List[tuple]]], block: Dict,
+                           writers: Dict[str, "ObjWriter"], out_dir: Path) -> Dict:
+    """A ``<surface>_beauty`` copy (:func:`_write_beauty_part`) of each
+    control surface that ``beauty_mesh.hide_objects`` takes an object out
+    of; a surface it takes nothing from has no copy and draws its measured
+    part as before. The manifest rows, by surface."""
+    out = {}
+    patterns = list(block.get("hide_objects", []))
+    for surface, rows in sorted((surface_rows or {}).items()):
+        if any(_matches(r[6], patterns) for r in rows):
+            out[surface] = _write_beauty_part(rows, block, writers[surface], out_dir, surface)
+    return out
+
+
+def _check_hide_objects(block: Optional[Dict], seen_names: Sequence[str]) -> None:
+    """Every ``beauty_mesh.hide_objects`` pattern must name a converted
+    object: a pattern that matches nothing hides nothing, silently."""
+    if not block:
+        return
+    for pattern in block.get("hide_objects", []):
+        if not any(re.fullmatch(pattern, name) for name in seen_names):
+            raise ConvertError(f"beauty_mesh.hide_objects pattern {pattern!r} matches no "
+                               f"converted object of the body or a control surface")
+
+
+def _write_beauty_part(rows: List[tuple], block: Dict, measured_writer: "ObjWriter",
+                       out_dir: Path, part: str) -> Dict:
+    """``<part>_beauty.obj`` from the measured part's rows (key, tri,
+    object serial, smooth, crease, two-sided, object name): crease
+    normals, ``two_sided`` back faces, ``flip_objects`` turned and
+    ``hide_objects`` left out (see :func:`_write_beauty_mesh`). Its manifest
+    row. Refused by name when a hidden object would leave one of the
+    measured part's slots with no triangle: the commandlet swaps a copy in
+    only when its slots are the measured part's, name for name, so that
+    copy would never be drawn.
+
+    A hidden object is out of the beauty frame AND out of that frame's
+    label masks (the label captures draw the swapped component), so the
+    labels keep matching the pixels; every -quality=measure frame and its
+    labels draw the measured part, which keeps the object."""
     flip_patterns = list(block.get("flip_objects", []))
+    hide_patterns = list(block.get("hide_objects", []))
+    hidden_rows = [r for r in rows if hide_patterns and _matches(r[6] if len(r) > 6 else "",
+                                                                 hide_patterns)]
+    kept = [r for r in rows if not (hide_patterns and _matches(r[6] if len(r) > 6 else "",
+                                                               hide_patterns))]
+    triangles = [tuple(position for position, _ in row[1]) for row in kept]
+    normals = vertex_normals_actor(triangles, [r[2] for r in kept], [r[3] for r in kept],
+                                   [r[4] for r in kept])
+    writer = ObjWriter()
+    # The measured part's materials in its order, so the slots line up.
+    writer.materials = dict(measured_writer.materials)
+    for key in measured_writer.faces:
+        writer.faces[key] = []
+    emptied = sorted({r[0] for r in hidden_rows} - {r[0] for r in kept})
+    if emptied:
+        raise ConvertError(
+            f"beauty_mesh.hide_objects leaves {part} slot(s) {emptied} with no triangle; the "
+            f"beauty copy's slots would not be the measured part's and it would never be "
+            f"swapped in")
+    two_sided = bool(block.get("two_sided"))
     back_faces = 0
     flipped_faces = 0
-    for row, corner_normals in zip(rows, normals):
+    for row, corner_normals in zip(kept, normals):
         key, tri, sided = row[0], row[1], row[5]
         name = row[6] if len(row) > 6 else ""
         if flip_patterns and _matches(name, flip_patterns):
@@ -899,25 +966,35 @@ def _write_beauty_mesh(rows: List[tuple], block: Dict, body_writer: "ObjWriter",
                                 [flipped(corner_normals[0]), flipped(corner_normals[2]),
                                  flipped(corner_normals[1])])
             back_faces += 1
-    writer.write(out_dir / f"{BEAUTY_BODY_PART}.obj")
-    smooth = sum(1 for r in rows if r[3])
-    return {
-        "body": {
-            "part": BEAUTY_BODY_PART,
-            "triangles": len(rows) + back_faces,
-            "front_triangles": len(rows),
-            "back_faces": back_faces,
-            "flipped_faces": flipped_faces,
-            "smooth_triangles": smooth,
-            "flat_triangles": len(rows) - smooth,
-            "normals": "per corner, by each .ac object's crease angle over its smooth "
-                       "(SURF 0x10) faces; flat faces keep their face normal",
-            "drawn_in": "beauty only: swapped onto the body component on -quality=beauty "
-                        "(FlightSimAircraftFX ApplyMaterials); same positions as body, so "
-                        "mask, depth and every measure frame are body's",
-            "source": block.get("source", ""),
-        },
+    beauty_part = _beauty_part_name(part)
+    writer.write(out_dir / f"{beauty_part}.obj")
+    smooth = sum(1 for r in kept if r[3])
+    row = {
+        "part": beauty_part,
+        "triangles": len(kept) + back_faces,
+        "front_triangles": len(kept),
+        "back_faces": back_faces,
+        "flipped_faces": flipped_faces,
+        "smooth_triangles": smooth,
+        "flat_triangles": len(kept) - smooth,
+        "normals": "per corner, by each .ac object's crease angle over its smooth "
+                   "(SURF 0x10) faces; flat faces keep their face normal",
+        "drawn_in": f"beauty only: swapped onto the {part} component on -quality=beauty "
+                    f"(FlightSimAircraftFX ApplyMaterials); same positions as {part}, so "
+                    f"mask, depth and every measure frame are {part}'s",
+        "source": block.get("source", ""),
     }
+    if hide_patterns:
+        row["hidden_faces"] = len(hidden_rows)
+        row["hidden_objects"] = sorted({r[6] for r in hidden_rows})
+        if hidden_rows:
+            row["drawn_in"] = (
+                f"beauty only: swapped onto the {part} component on -quality=beauty "
+                f"(FlightSimAircraftFX ApplyMaterials); same positions as {part} less the "
+                f"hidden objects, which the beauty frame's label masks (drawn from the "
+                f"swapped component) leave out with it; every measure frame and its "
+                f"labels are {part}'s")
+    return row
 
 
 def vertex_normals_actor(triangles, groups, smooth, crease):
@@ -1130,6 +1207,12 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     # None when the config asks for no beauty mesh: nothing else changes.
     beauty = _beauty_mesh_config(config)
     beauty_rows: Optional[List[tuple]] = [] if beauty is not None else None
+    # A control surface's triangles too, when beauty_mesh.hide_objects is
+    # stated: a surface that loses an object gets its own beauty copy
+    # (round 2 scene 12: the c172p's propeller blades, a still image of a
+    # prop at cruise RPM).
+    beauty_surface_rows: Optional[Dict[str, List[tuple]]] = (
+        defaultdict(list) if beauty is not None and beauty.get("hide_objects") else None)
     object_serial = 0
 
     for part in config["parts"]:
@@ -1239,6 +1322,10 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                     if beauty_rows is not None and target == "body":
                         beauty_rows.append((key, tri, object_serial, surf.smooth,
                                             obj.crease, surf.two_sided, obj.name))
+                    elif beauty_surface_rows is not None and target in surface_defs:
+                        beauty_surface_rows[target].append(
+                            (key, tri, object_serial, surf.smooth, obj.crease,
+                             surf.two_sided, obj.name))
         if interior:
             interior_rows.append({
                 "file": part["file"], "offset_m": list(offset), "pitch_deg": pitch_deg,
@@ -1305,7 +1392,11 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     writers["body"].write(out_dir / "body.obj")
     beauty_record = None
     if beauty_rows is not None:
+        _check_hide_objects(beauty, [r[6] for r in beauty_rows] + [
+            r[6] for rows in (beauty_surface_rows or {}).values() for r in rows])
         beauty_record = _write_beauty_mesh(beauty_rows, beauty, writers["body"], out_dir)
+        beauty_record.update(_write_beauty_surfaces(beauty_surface_rows, beauty, writers,
+                                                    out_dir))
     # ONE components list: the payload parts' rows, then the gear row.
     payload_rows = _component_records(
         component_parts, airframe, writers, counts, component_extents,

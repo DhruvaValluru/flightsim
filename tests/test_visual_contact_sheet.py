@@ -381,17 +381,19 @@ def test_the_cockpit_station_comes_from_each_airframe_s_fdm(monkeypatch, tmp_pat
     monkeypatch.setattr(camera_module, "_COCKPIT_CACHE", {})
     monkeypatch.setattr(camera_module, "_COCKPIT_BASIS", {})
     j11 = derive_cockpit_offset("J11")
-    # J-11A-set.xml pilot eye (5.23, 0, 1.45) m model frame; J11.xml CG
-    # (517.35, 0, -21.56) in.
-    expected = (517.35 * 0.0254 - 5.23 + PILOT_EYE_NUDGE_M[0], PILOT_EYE_NUDGE_M[1],
-                1.45 + 21.56 * 0.0254 + PILOT_EYE_NUDGE_M[2])
+    # J-11A-set.xml pilot eye (5.23, 0, 1.45) m model frame; the J11.xml
+    # CG at its default loading (half tanks; JSBSim reads 12.7924, 0,
+    # -0.5446 m), not its empty CG (517.35, 0, -21.56 in).
+    expected = (12.7924 - 5.23 + PILOT_EYE_NUDGE_M[0], PILOT_EYE_NUDGE_M[1],
+                1.45 + 0.5446 + PILOT_EYE_NUDGE_M[2])
     assert j11 == pytest.approx(expected, abs=1e-3)
     camera = CameraSpec.defaulted("cockpit", "cockpit", aircraft="J11")
     assert camera.offset_forward_m.value == pytest.approx(j11[0])
     assert "pilot eye" in camera.offset_forward_m.frm
     c172 = derive_cockpit_offset("c172p")
     assert c172 is not None and "pilot eye" in camera_module.cockpit_offset_basis("c172p")
-    assert c172[1] == pytest.approx(-0.21, abs=1e-3)   # the left seat (c172p-views.xml)
+    # The left seat (c172p-views.xml y -0.21 m) from the loaded CG's y -0.034 m.
+    assert c172[1] == pytest.approx(-0.21 + 0.034, abs=1e-3)
     p51d = derive_cockpit_offset("p51d")
     assert p51d is not None and "EYEPOINT" in camera_module.cockpit_offset_basis("p51d")
     assert p51d[1] == pytest.approx(COCKPIT_EYE_NUDGE_M[1], abs=1e-3)   # centreline eye
