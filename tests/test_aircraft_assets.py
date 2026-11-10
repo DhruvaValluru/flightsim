@@ -757,7 +757,9 @@ def test_a_version_1_or_2_manifest_is_stale_and_rebuilds(tmp_path, monkeypatch):
     def current(manifest_path: Path) -> None:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
         data.update({"version": 3, "mesh_origin_actor_cm": [-2979.82, 0.0, 13.86],
-                     importer.OBJ_FRAME_KEY: importer.OBJ_FRAME})
+                     importer.OBJ_FRAME_KEY: importer.OBJ_FRAME,
+                     importer.INPUTS_KEY: importer.conversion_inputs(
+                         importer.CONFIG_DIR / "TEST.json")})
         manifest_path.write_text(json.dumps(data), encoding="utf-8")
 
     steps = []
@@ -1066,7 +1068,8 @@ def test_converter_output_unchanged_without_components(tmp_path, monkeypatch):
         "mass_lb": 100.0,
     }
     # Everything about the body is the same manifest as the plain run.
-    changed = {"version", "parts", "triangles", "components", "source"}
+    changed = {"version", "parts", "triangles", "components", "source",
+               importer.INPUTS_KEY}   # the two configs differ
     assert {k: v for k, v in loaded.items() if k not in changed} == \
         {k: v for k, v in plain.items() if k not in changed}
     assert loaded["mesh_length_m"] == plain["mesh_length_m"] == pytest.approx(10.0)

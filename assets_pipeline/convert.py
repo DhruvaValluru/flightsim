@@ -130,7 +130,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from assets_pipeline.acmodel import (  # noqa: E402
     ac_to_model, model_to_ue, parse_ac, world_vertices,
 )
-from assets_pipeline.importer import COMPONENTS_MANIFEST_VERSION  # noqa: E402
+from assets_pipeline.importer import (  # noqa: E402
+    COMPONENTS_MANIFEST_VERSION, INPUTS_KEY, conversion_inputs)
 from assets_pipeline.obj_frame import (  # noqa: E402
     OBJ_FRAME, OBJ_FRAME_KEY, actor_to_obj, obj_winding,
 )
@@ -1419,6 +1420,9 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         # The OBJs' axis convention (decision 19); the importer's stale
         # rule re-converts a manifest without this exact stamp.
         OBJ_FRAME_KEY: OBJ_FRAME,
+        # Content hashes of every input; the importer re-converts when
+        # any differs (the config beauty_mesh block included).
+        INPUTS_KEY: conversion_inputs(Path(config_path)),
         "name": name,
         "fdm": config["fdm"],
         "fdm_config_name": fdm_name,

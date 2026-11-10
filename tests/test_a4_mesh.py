@@ -264,7 +264,9 @@ def test_old_a4_manifest_is_stale(tmp_path):
         path.write_text(json.dumps({
             "version": version, "name": name, "parts": [], "textures": [],
             "mesh_origin_actor_cm": [-100.0, 0.0, 10.0],
-            importer.OBJ_FRAME_KEY: importer.OBJ_FRAME, **extra}), encoding="utf-8")
+            importer.OBJ_FRAME_KEY: importer.OBJ_FRAME,
+            importer.INPUTS_KEY: importer.conversion_inputs(
+                importer.CONFIG_DIR / f"{name}.json"), **extra}), encoding="utf-8")
         return path
 
     reason = importer.stale_manifest_reason(write("A4", 3))
@@ -402,7 +404,8 @@ def test_a_manifest_from_a_left_handed_conversion_is_stale(tmp_path):
     before decision 19) is re-converted and re-imported by A7's rule."""
     path = tmp_path / "mesh_manifest.json"
     base = {"version": 4, "name": "A4", "parts": [], "textures": [], "components": [],
-            "mesh_origin_actor_cm": [-100.0, 0.0, 10.0]}
+            "mesh_origin_actor_cm": [-100.0, 0.0, 10.0],
+            importer.INPUTS_KEY: importer.conversion_inputs(importer.CONFIG_DIR / "A4.json")}
     path.write_text(json.dumps(base), encoding="utf-8")
     reason = importer.stale_manifest_reason(path)
     assert reason and "mirror" in reason and "decision 19" in reason
@@ -412,3 +415,34 @@ def test_a_manifest_from_a_left_handed_conversion_is_stale(tmp_path):
     path.write_text(json.dumps({**base, importer.OBJ_FRAME_KEY: importer.OBJ_FRAME}),
                     encoding="utf-8")
     assert importer.stale_manifest_reason(path) is None
+
+
+def test_a_changed_beauty_mesh_makes_the_model_stale(tmp_path, monkeypatch):
+    """The Windows c172p report: a config that gained beauty_mesh.hide_objects
+    after the conversion read as "already converted". The manifest records a
+    content hash of every input, so any config edit makes it stale."""
+    config_dir = tmp_path / "aircraft_config"
+    config_dir.mkdir()
+    config_path = config_dir / "c172p.json"
+    config = json.loads((importer.CONFIG_DIR / "c172p.json").read_text(encoding="utf-8"))
+    config["beauty_mesh"] = {k: v for k, v in (config.get("beauty_mesh") or {}).items()
+                             if k != "hide_objects"}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setattr(importer, "CONFIG_DIR", config_dir)
+    path = tmp_path / "mesh_manifest.json"
+    base = {"version": 3, "name": "c172p", "parts": [], "textures": [],
+            "mesh_origin_actor_cm": [0.0, 0.0, 0.0],
+            importer.OBJ_FRAME_KEY: importer.OBJ_FRAME,
+            importer.INPUTS_KEY: importer.conversion_inputs(config_path)}
+    path.write_text(json.dumps(base), encoding="utf-8")
+    assert importer.stale_manifest_reason(path) is None
+    # CRLF line endings alone (a Windows checkout) change nothing
+    config_path.write_bytes(config_path.read_bytes().replace(b"\n", b"\r\n"))
+    assert importer.stale_manifest_reason(path) is None
+    config["beauty_mesh"]["hide_objects"] = ["propeller"]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    reason = importer.stale_manifest_reason(path)
+    assert reason and "c172p.json" in reason
+    # an older manifest that records no hashes at all is stale too
+    path.write_text(json.dumps({**base, importer.INPUTS_KEY: None}), encoding="utf-8")
+    assert importer.INPUTS_KEY in importer.stale_manifest_reason(path)
