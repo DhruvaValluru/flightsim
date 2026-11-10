@@ -2448,3 +2448,80 @@ part; the red ground's cause is outside this lane's files, LIVE, handed off.**
   beauty.tornado_funnel names M_TornadoFunnel; mask and class unchanged against measure.
   Probe wx-red: #10 at beauty; read render.json for the sun (10 deg) and whether a cloud
   deck was drawn (world_beauty.clouds); ground luma p10 and the R/G ratio of the prairie.
+
+## round-2b terrain-ocean
+
+Round 2b, terrain-ocean lane (Mac, uncompiled, no UE run), 2026-11-09. Inputs: round 0
+(`docs/visual/round_0`, phase-2-final 1a62d557, laptop default) and round 0b
+(`docs/visual/round_100`, same 14 prompts, `FLIGHTSIM_RENDER_QUALITY=beauty`) on
+origin/phase-2-final. #06 and #13 are identical between the two rounds. Prompts from
+scripts/run_test_scenarios.py there: #06 "wingman view of the a320 over sfo south at 3000 m
+in moderate rain for 6 seconds"; #13 "chase view of the 747 over the ocean at 10000 m at
+noon for 6 seconds". No render.json reached the Mac, so each cause below is traced from the
+frame, the code and an offline replay of the web app's planning (compile_prompt +
+provision_place on this branch).
+
+**#06, SFO in rain: flat grey slab, vertical streaks. LIVE on this branch; fixed here.**
+- Not the tiles, the backstop or a load wait. SFO baked (the run went through), the bake's
+  backstop and ground carry `FlightSim.terrain` and `HideOwnTerrain` hides them, and every
+  frame waits for Cesium's 100 % before capture (WaitForView), as in #03 New York, which drew.
+- Cause: the rain fog. 4 mm/h reconciles to visibility 4.98 km (`look_block`:
+  fog_extinction 7.85e-4 /m, FogDensity 0.0163), drawn as ONE exponential height fog with
+  falloff 0.0002 (a ~50 km scale height: uniform over 3 km) and max opacity 0.92. From
+  3000 m the read ray to the ground (10 deg down, 17 km) is at optical depth ~10 (fog 9.2 +
+  Mie 1.3 after the world lane's MieSplit, rain row): the tiles are under 92 % fog at every
+  pixel, which is the flat grey (179,178,174) with a hard edge at the tiles' horizon; the
+  sky stays navy. The streaks are the rain lane's (lens drops / drops), not ground.
+- Fix (beauty only): `FFlightSimGoogleTiles::ApplyBeautyGround`, called once by the
+  commandlet under `if (bBeauty && bVisual)` after the world lane and the first camera
+  pose. For a camera >= 1000 m above the origin's ground it sums the vertical optical depth
+  of every visible height fog layer (UE's exp2 density, falloff/1000 per cm, both layers)
+  and of the sky atmosphere's Mie layer (scale x colour, exp(-h/H)), divides by sin 10 deg,
+  and when that read depth exceeds 1.5 scales the fog densities and the Mie scales by one
+  factor (floor 0.05). Replayed numbers: SFO rain at 3000 m scale 0.144 (read depth 10.4 ->
+  1.5); a clear default day at 3000 m unchanged (1.15); a clear default at 10 km scale 0.54.
+  Recorded in render.json `google_tiles.beauty_ground.haze` (every number before/after).
+  The tiles stay on; the card's visibility, the rain drops and the physics are untouched.
+- Render machine (D3D11 / SM5, no Lumen/VSM/Nanite): height fog, volumetric fog and the sky
+  atmosphere's Mie are all SM5 paths; scaling FogDensity scales the volumetric fog's
+  extinction too. UNCALIBRATED: ReadDepressionDeg 10, ReadOpticalDepthMax 1.5,
+  ReadMinAglM 1000, MinHazeScale 0.05. Probe: re-render #06 and #08 (light rain); the lower
+  half should show SFO's bay and city through a grey veil; read `beauty_ground.haze.scale`.
+
+**#13, 747 over the ocean: near-black, no aircraft, horizon at ~35 deg. LIVE; fixed here.**
+- Not roll: every chase pose has roll 0 (core/capture/poses.py), and a roll-free camera's
+  horizon is level. Contrast-stretching the frame shows brown, ridged desert under a hazy
+  limb: land, where the open North Atlantic should be.
+- Cause: a frame mismatch. "over the ocean" stages 35 N, 45 W (core/terrain/ocean.py), a
+  flat scene; Python solves the cameras in the origin's UTM zone (SceneFrame.for_spec,
+  EPSG:32623, declared=True), but webapp/runs.py put `scene_crs` on the card only when
+  thermals or a weather event needed it, and the ocean has no thermals. The host then
+  placed the camera through the GeoReferencing plugin's default ProjectedCRS EPSG:32631
+  (GeoReferencingSystem.h): the origin's easting/northing read in zone 31 is 35 N, 3 E,
+  4338 km east, over the Algerian Saharan Atlas. The Earth's curvature over 4338 km tilts
+  local vertical by 39 deg (the tilted horizon), the camera sits ~1300 km above that ground
+  in the atmosphere's frame (the navy-black sky), and the aircraft is 4338 km away.
+- Fix (beauty only): `beauty_scene_crs` declares the origin's UTM zone on a beauty card with
+  cameras over a flat scene; the host refuses a consume-poses camera whose origin lands
+  more than 1 km from the scene origin as `camera.scene_frame_mismatch` (catalog), beauty
+  only. The ocean look: `beauty_sea_radius_m` (the widest land-free ring of GLO-30 cells
+  around the origin, up to 3, x the narrowest cell width there x 0.9; 35 N 45 W: 233 km)
+  is sent as `-beauty-sea-radius-m=` on beauty renders, and ApplyBeautyGround draws a
+  spherical cap of M_Ground_Ocean (water colours 0.01-0.02/0.06-0.12/0.10-0.17, roughness
+  0.04, specular 0.5, two stated swells) at sea level, 2 m above the geoid, following the
+  Earth's curvature so its horizon is the tiles'. It is a beauty-only actor (no label,
+  depth or mask pass sees it), untagged (HideOwnTerrain leaves it), and the tiles stay
+  drawn under it. The haze cap above also applies at 10 km (clear default: scale 0.54).
+- Render machine: the sky's reflection on the sea is the material's own specular through
+  screen-space reflections (the no-Lumen fallback turns them on) and the sky light; neither
+  needs Lumen. The cap is a 6145-vertex procedural mesh. Probe: re-render #13; expect the
+  747 centred, a level horizon about 3 deg below the view line, dark blue water with a
+  bright grazing-angle sky reflection; read `google_tiles.beauty_ground.sea`. The sky's
+  darkness at altitude is the world lane's (SkyMultiScattering) and the exposure owners'.
+- NOT fixed, flagged: the same frame mismatch is live in MEASURE for any flat scene with
+  cameras and no thermals or event outside UTM zone 31 (the measure card is left
+  byte-identical by this overhaul's rule; un-gating `beauty_scene_crs` is the one-line fix
+  when the owner allows a measure change). The CLI capture path was not audited here.
+- Unrelated pre-existing failure seen: tests/test_google_tiles_source.py
+  test_each_frame_loads_its_tiles_before_any_capture fails on c9390503 itself (its pinned
+  `Capture->CaptureScene(); FlushRenderingCommands();` text no longer exists).

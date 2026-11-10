@@ -1043,6 +1043,46 @@ wfx_check "weather-fx: CameraVectorWS expression (M_RainShaft)" "Engine/Public/M
 # ------------------------------------------------------ END weather-fx --
 
 
+# -- round-2b terrain-ocean (2026-11-09) -------------- BEGIN terrain-ocean --
+# FlightSimGoogleTiles.cpp ApplyBeautyGround (beauty only: the haze the ground
+# is read through, the open sea's cap) and the commandlet's camera-frame check.
+# Each fixed string was grepped in the UE 5.7.4 headers/sources on the Mac.
+to_check() {  # label, file (relative to $UE_ROOT/Engine), fixed-string pattern
+    local f="$UE_ROOT/Engine/$2"
+    if [ ! -f "$f" ]; then
+        bad "$1" "file $2 not found in $UE_ROOT"
+    elif grep -qF -- "$3" "$f"; then
+        ok "$1" "present"
+    else
+        bad "$1" "not found in $2 -- FlightSimGoogleTiles.cpp ApplyBeautyGround needs updating"
+    fi
+}
+to_check "terrain-ocean: fog FogDensity" "Source/Runtime/Engine/Classes/Components/ExponentialHeightFogComponent.h" "float FogDensity;"
+to_check "terrain-ocean: fog FogHeightFalloff" "Source/Runtime/Engine/Classes/Components/ExponentialHeightFogComponent.h" "float FogHeightFalloff;"
+to_check "terrain-ocean: fog SecondFogData" "Source/Runtime/Engine/Classes/Components/ExponentialHeightFogComponent.h" "FExponentialHeightFogData SecondFogData;"
+to_check "terrain-ocean: fog SetFogDensity" "Source/Runtime/Engine/Classes/Components/ExponentialHeightFogComponent.h" "ENGINE_API void SetFogDensity(float Value);"
+to_check "terrain-ocean: fog SetSecondFogDensity" "Source/Runtime/Engine/Classes/Components/ExponentialHeightFogComponent.h" "ENGINE_API void SetSecondFogDensity(float Value);"
+to_check "terrain-ocean: second fog FogHeightOffset" "Source/Runtime/Engine/Public/Rendering/ExponentialHeightFogData.h" "float FogHeightOffset = 0.0f;"
+to_check "terrain-ocean: fog falloff per cm / 1000" "Source/Runtime/Renderer/Private/SceneCore.cpp" "FogData[0].HeightFalloff = State.FogHeightFalloff / 1000.0f;"
+to_check "terrain-ocean: fog density exp2" "Shaders/Private/HeightFogCommon.ush" "exp2(-Exponent)"
+to_check "terrain-ocean: Mie MieScatteringScale" "Source/Runtime/Engine/Classes/Components/SkyAtmosphereComponent.h" "float MieScatteringScale;"
+to_check "terrain-ocean: Mie MieScattering" "Source/Runtime/Engine/Classes/Components/SkyAtmosphereComponent.h" "FLinearColor MieScattering;"
+to_check "terrain-ocean: Mie MieAbsorptionScale" "Source/Runtime/Engine/Classes/Components/SkyAtmosphereComponent.h" "float MieAbsorptionScale;"
+to_check "terrain-ocean: Mie MieAbsorption" "Source/Runtime/Engine/Classes/Components/SkyAtmosphereComponent.h" "FLinearColor MieAbsorption;"
+to_check "terrain-ocean: Mie MieExponentialDistribution" "Source/Runtime/Engine/Classes/Components/SkyAtmosphereComponent.h" "float MieExponentialDistribution;"
+to_check "terrain-ocean: SetMieScatteringScale" "Source/Runtime/Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetMieScatteringScale(float NewValue);"
+to_check "terrain-ocean: SetMieAbsorptionScale" "Source/Runtime/Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetMieAbsorptionScale(float NewValue);"
+to_check "terrain-ocean: SceneComponent IsVisible" "Source/Runtime/Engine/Classes/Components/SceneComponent.h" "ENGINE_API virtual bool IsVisible() const;"
+to_check "terrain-ocean: SetCastShadow" "Source/Runtime/Engine/Classes/Components/PrimitiveComponent.h" "ENGINE_API void SetCastShadow(bool NewCastShadow);"
+to_check "terrain-ocean: MID Create" "Source/Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h" "static ENGINE_API UMaterialInstanceDynamic* Create( class UMaterialInterface* ParentMaterial, class UObject* InOuter, FName Name = NAME_None);"
+to_check "terrain-ocean: TObjectIterator header" "Source/Runtime/CoreUObject/Public/UObject/UObjectIterator.h" "class TObjectIterator"
+to_check "terrain-ocean: ProcMesh CreateMeshSection_LinearColor" "Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h" "void CreateMeshSection_LinearColor(int32 SectionIndex, const TArray<FVector>& Vertices, const TArray<int32>& Triangles, const TArray<FVector>& Normals, const TArray<FVector2D>& UV0, const TArray<FLinearColor>& VertexColors, const TArray<FProcMeshTangent>& Tangents, bool bCreateCollision"
+to_check "terrain-ocean: FProcMeshTangent ctor" "Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h" "FProcMeshTangent(FVector InTangentX, bool bInFlipTangentY)"
+to_check "terrain-ocean: GeoRef ProjectedToEngine" "Plugins/Runtime/GeoReferencing/Source/GeoReferencing/Public/GeoReferencingSystem.h" "void ProjectedToEngine(const FVector& ProjectedCoordinates, FVector& EngineCoordinates);"
+to_check "terrain-ocean: GeoRef default ProjectedCRS 32631" "Plugins/Runtime/GeoReferencing/Source/GeoReferencing/Public/GeoReferencingSystem.h" "FString ProjectedCRS = FString(TEXT(\"EPSG:32631\"));"
+# ---------------------------------------------------- END terrain-ocean --
+
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'
