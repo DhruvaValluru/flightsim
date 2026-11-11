@@ -3347,11 +3347,18 @@ WORLD_TILES_DETAIL_SCALARS = {"DetailAmount": 0.45, "SharpenAmount": 0.6, "Sharp
 #: ApplyBeautyGround): each ocean shader's Custom inputs, in order, the
 #: material's scalars (a 7 m/s trade-wind sea, UNCALIBRATED) and the
 #: generated wave normal (assets/terrain_detail/PIN.json "ocean").
-WORLD_OCEAN_INPUTS = {name: ("WorldPos", "NormalWS", "TimeS", "WindSpeedMS", "WindDirX", "WindDirY", "OceanN")
-                      for name in ("ocean_normal", "ocean_roughness", "ocean_colour")}
+#: Generation 2 (round 10's #13: a tile grid and SSR streaks): the sea draws
+#: its own sky reflection and sun glint as emissive (ocean_emissive.hlsl) from
+#: the atmosphere nodes the distant clouds already use on the render machine.
+WORLD_OCEAN_INPUTS = {name: ("WorldPos", "CameraPos", "NormalWS", "TimeS", "SunDir", "SunIlluminance", "SkyLum",
+                             "WindSpeedMS", "WindDirX", "WindDirY", "OceanN")
+                      for name in ("ocean_normal", "ocean_emissive", "ocean_colour")}
 WORLD_OCEAN_SCALARS = {"WindSpeedMS": 7.0, "WindDirX": 1.0, "WindDirY": 0.3}
-#: Water's F0 0.02 as the engine's Specular (F0 = 0.08 x Specular).
-WORLD_OCEAN_SPECULAR = 0.25
+#: The engine's specular is OFF (and the surface fully rough): its screen-space
+#: reflections drew round 10's blocky streaks on the D3D11 path; the water's
+#: F0 0.02 reflection is ocean_emissive.hlsl's own.
+WORLD_OCEAN_SPECULAR = 0.0
+WORLD_OCEAN_ROUGHNESS = 1.0
 # -- lane B -- end --------------------------------------------------------------------
 #: M_FlightSimScatter (the ground scatter's master, world_beauty.SCATTER_MATERIAL):
 #: the imported glTF's maps as parameters, the tiles' Wetness and Saturation from
@@ -3429,7 +3436,7 @@ def world_stamp(material, name):
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "3", "M_FlightSimTilesBeauty": "3",   # 3: lane B terrain detail
                      "M_FlightSimCloudLayers": "4", "M_FlightSimScatter": "1",  # clouds 4: round-7 weather-field shader
                      "M_FlightSimDistantClouds": "2",   # distant 2: round-7 weather-field shared noise
-                     "M_FlightSimOceanBeauty": "1"}     # lane B: the beauty sea
+                     "M_FlightSimOceanBeauty": "2"}     # lane B: the beauty sea (2: round-10 #13, own reflection)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
 
@@ -3781,12 +3788,13 @@ def world_tiles_detail(material, lib, common, uv, factor):
 def create_world_ocean_beauty():
     """M_FlightSimOceanBeauty: the beauty sea cap's water (FlightSimGoogleTiles.cpp
     ApplyBeautyGround loads it before M_Ground_Ocean, which stays the flat
-    scene's measure ground, untouched). The generated Phillips wave normal in
-    three drifting octaves (ocean_normal.hlsl, world-space: the tangent-space
-    switch is off), the unresolved Cox-Munk slope variance as roughness
-    (ocean_roughness.hlsl), the deep sea's body colour and Monahan's whitecaps
-    (ocean_colour.hlsl), water's specular. No WPO: the sea's geometry is the
-    cap's."""
+    scene's measure ground, untouched). Generation 2: the sky's reflection
+    (Fresnel, horizon to zenith) and the Cox-Munk sun glint drawn as emissive
+    (ocean_emissive.hlsl) from the atmosphere nodes, the engine specular off
+    (no screen-space reflection streaks); the generated Phillips wave normal
+    only where the pixel resolves it (ocean_normal.hlsl, world-space: the
+    tangent-space switch is off); the deep sea's body colour and Monahan's
+    whitecaps (ocean_colour.hlsl). No WPO: the sea's geometry is the cap's."""
     material = _world_beauty_material("M_FlightSimOceanBeauty")
     if material is None:
         return
@@ -3802,20 +3810,35 @@ def create_world_ocean_beauty():
             "NormalWS": (lib.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS,
                                                          -1800, -200), ""),
             "TimeS": (lib.create_material_expression(material, unreal.MaterialExpressionTime, -1800, -100), ""),
+            "CameraPos": (lib.create_material_expression(material, unreal.MaterialExpressionCameraPositionWS,
+                                                          -1800, -400), ""),
             "OceanN": (texture_object(material, lib, wave, unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL,
                                       -1800, 500), "")}
+    # The atmosphere light and the sky, as M_FlightSimDistantClouds reads them.
+    sun_dir = lib.create_material_expression(material, unreal.MaterialExpressionSkyAtmosphereLightDirection,
+                                             -1800, -600)
+    sun_dir.set_editor_property("light_index", 0)
+    pins["SunDir"] = (sun_dir, "")
+    illuminance = lib.create_material_expression(material, unreal.MaterialExpressionSkyAtmosphereLightIlluminance,
+                                                 -1800, -700)
+    illuminance.set_editor_property("light_index", 0)
+    pins["SunIlluminance"] = (illuminance, "")
+    pins["SkyLum"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionSkyAtmosphereDistantLightScatteredLuminance, -1800, -800), "")
     for i, (name, default) in enumerate(WORLD_OCEAN_SCALARS.items()):
         pins[name] = (scalar(material, lib, name, default, -1800, 50 + 110 * i), "")
     outputs = {"ocean_colour": (unreal.CustomMaterialOutputType.CMOT_FLOAT3, unreal.MaterialProperty.MP_BASE_COLOR),
                "ocean_normal": (unreal.CustomMaterialOutputType.CMOT_FLOAT3, unreal.MaterialProperty.MP_NORMAL),
-               "ocean_roughness": (unreal.CustomMaterialOutputType.CMOT_FLOAT1,
-                                   unreal.MaterialProperty.MP_ROUGHNESS)}
+               "ocean_emissive": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)}
     for row, (shader, (output_type, prop)) in enumerate(outputs.items()):
         node = world_custom(material, lib, shader, output_type,
                             {name: pins[name] for name in WORLD_OCEAN_INPUTS[shader]}, -900, -300 + 400 * row)
         lib.connect_material_property(node, "", prop)
     lib.connect_material_property(constant(material, lib, WORLD_OCEAN_SPECULAR, -900, 900), "",
                                   unreal.MaterialProperty.MP_SPECULAR)
+    lib.connect_material_property(constant(material, lib, WORLD_OCEAN_ROUGHNESS, -900, 1000), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
     finish(material, "M_FlightSimOceanBeauty")
 
 

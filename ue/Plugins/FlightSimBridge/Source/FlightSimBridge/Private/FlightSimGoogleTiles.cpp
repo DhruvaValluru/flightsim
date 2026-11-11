@@ -784,9 +784,9 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 			TEXT("a spherical cap of the sea material at sea level over the tiles' ocean (beauty-only actor)"));
 		Sea->SetStringField(TEXT("material"), OceanBase->GetPathName());
 		Sea->SetStringField(TEXT("material_basis"), bOceanBeauty
-			? TEXT("M_FlightSimOceanBeauty (lane B): Phillips-spectrum wave normal in three drifting octaves, the "
-			       "unresolved Cox-Munk slope variance as roughness (sun glitter, Fresnel toward the horizon), deep-sea "
-			       "body colour, Monahan whitecaps at WindSpeedMS 7 (UNCALIBRATED)")
+			? TEXT("M_FlightSimOceanBeauty (lane B, generation 2): its own sky reflection (Fresnel, horizon to "
+			       "zenith) and Cox-Munk sun glint as emissive from the atmosphere nodes, the Phillips wave normal only "
+			       "where resolved, deep-sea body colour, Monahan whitecaps at WindSpeedMS 7 (UNCALIBRATED)")
 			: TEXT("M_Ground_Ocean: M_FlightSimOceanBeauty did not load (run scripts/ue_create_materials.py)"));
 		Sea->SetNumberField(TEXT("lift_m"), SeaLiftM);
 		Sea->SetNumberField(TEXT("earth_radius_m"), EarthRadiusM);
@@ -795,8 +795,8 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 		Sea->SetNumberField(TEXT("edge_drop_m"),
 			EarthRadiusM - FMath::Sqrt(EarthRadiusM * EarthRadiusM - RadiusM * RadiusM));
 		Sea->SetStringField(TEXT("reflection"), bOceanBeauty
-			? TEXT("the material's own (roughness from the unresolved wave slopes, specular 0.25 = water's F0 0.02): "
-			       "screen-space reflections and the sky light, both drawn on D3D11 / SM5 without Lumen")
+			? TEXT("the material's own emissive (water's F0 0.02, the sky shaped from SkyLum, the sun's GGX glint); "
+			       "the engine specular is off (Specular 0), so no screen-space reflection draws on the sea")
 			: TEXT("the material's own (roughness 0.04, specular 0.5): screen-space reflections and the sky "
 			       "light, both drawn on D3D11 / SM5 without Lumen"));
 		Sea->SetStringField(TEXT("not_claimed"),

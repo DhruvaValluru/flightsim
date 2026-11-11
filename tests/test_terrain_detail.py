@@ -115,21 +115,38 @@ def test_the_tiles_material_wires_the_detail_and_can_be_built_without_it():
 
 def test_the_ocean_material_is_beauty_only_and_reads_what_the_script_wires():
     assert "M_FlightSimOceanBeauty" in _literal("WORLD_BEAUTY_MATERIALS")
-    assert _literal("WORLD_GENERATIONS")["M_FlightSimOceanBeauty"] == "1"
+    # 2: round 10's #13 (a tile grid and screen-space reflection streaks)
+    assert _literal("WORLD_GENERATIONS")["M_FlightSimOceanBeauty"] == "2"
     inputs = _literal("WORLD_OCEAN_INPUTS")
+    assert set(inputs) == {"ocean_normal", "ocean_emissive", "ocean_colour"}
+    assert not (SHADERS / "ocean_roughness.hlsl").exists()
     scalars = set(_literal("WORLD_OCEAN_SCALARS"))
+    engine = {"WorldPos", "CameraPos", "NormalWS", "TimeS", "SunDir", "SunIlluminance", "SkyLum", "OceanN"}
     shared = None
     for name, pins in inputs.items():
         hlsl = _shader(name)
         for pin in pins:
             assert re.search(rf"//\s+{pin}\s", hlsl), (name, pin)
-            assert pin in scalars | {"WorldPos", "NormalWS", "TimeS", "OceanN"}, (name, pin)
+            assert pin in scalars | engine, (name, pin)
         block = _block(hlsl, "// shared: ocean", "// end shared")
         shared = block if shared is None else shared
         assert block == shared, f"{name}: the shared ocean block differs"
         assert "0.003 + 0.00512 * max(windMs, 0.0)" in hlsl   # Cox & Munk 1954, clean sea
         assert "3.84e-6 * pow(max(WindSpeedMS, 0.0), 3.41)" in hlsl   # Monahan & O'Muircheartaigh 1980
-    assert _literal("WORLD_OCEAN_SPECULAR") == 0.25   # water's F0 0.02 = 0.08 x Specular
+        # the tile's own trilinear sampler (never the shared point-mip one), and
+        # no octave coarser than 256 m: from 10 km the tile is not drawn at all
+        assert "View.MaterialTextureBilinearWrapedSampler" not in hlsl and "OceanNSampler" in hlsl
+        assert "1357.0" not in hlsl and "float tiles[2] = {256.0, 54.0};" in block
+    emissive = _shader("ocean_emissive")
+    assert "0.02 + 0.98 * pow(1.0 - nv, 5.0)" in emissive        # Schlick, water F0 0.02
+    assert "float alpha = sqrt(variance);" in emissive           # the glint's width is Cox-Munk's
+    # the engine's specular is off: no screen-space reflection on the sea
+    assert _literal("WORLD_OCEAN_SPECULAR") == 0.0 and _literal("WORLD_OCEAN_ROUGHNESS") == 1.0
+    create = SCRIPT[SCRIPT.index("def create_world_ocean_beauty"):SCRIPT.index("def create_world_scatter")]
+    assert "MP_EMISSIVE_COLOR" in create and "MP_ROUGHNESS" in create
+    for node in ("SkyAtmosphereLightDirection", "SkyAtmosphereLightIlluminance",
+                 "SkyAtmosphereDistantLightScatteredLuminance"):
+        assert f"unreal.MaterialExpression{node}" in create, node
     assert re.search(r"^create_world_ocean_beauty\(\)", SCRIPT, re.M)
     # M_Ground_Ocean (the flat scene's measure ground) is left as it was
     ground = SCRIPT[SCRIPT.index("def create_ground("):SCRIPT.index("def create_ground_surfaces")]

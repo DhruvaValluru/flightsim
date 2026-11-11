@@ -3311,3 +3311,31 @@ delete M_FlightSimOceanBeauty.
 - #03/#06/#07 (cities): TerrainDetailScale 0 in `parameters`; only the sharpen changes them.
 - Cost: compare the beauty frame times of #01 with FLIGHTSIM_TERRAIN_DETAIL=off; tile memory
   at SSE 6 vs 8 (`google_tiles` load stats). If the iGPU runs out, FLIGHTSIM_GOOGLE_TILES_BEAUTY_SSE=8.
+
+### lane-B round-10 ocean (M_FlightSimOceanBeauty generation 2)
+
+Round 10 (vis-windows f3561163, `docs/visual/round_10/13_747_cruise_over_the_ocean.jpg`) drew
+generation 1 on #13: a flat blue sea, a rectangular perspective grid of lighter blocks and
+bright streaks along the view lines below the horizon, no glint. Read from the frame:
+- the blocks and streaks are the engine's reflection of the cloud deck on a 0.44-rough
+  surface (screen-space reflections' blocky, streaky trace on the D3D11 / SM5 path), plus
+  the 1357 m octave of the wave tile still drawn at 10 km through the shared point-mip
+  sampler (its repeats a grid at that range);
+- the sea had no sun lobe because the engine's GGX sun highlight from a noon sun sits
+  below the chase camera's frame, and the only other light on the water was SSR / sky-light.
+
+Generation 2 (beauty only, no geometry): Specular 0 and roughness 1 (no SSR, no captures,
+no sky-light specular on the sea); `ocean_emissive.hlsl` draws the reflection itself from
+the atmosphere nodes the distant clouds already use (SkyAtmosphereLightDirection /
+LightIlluminance / DistantLightScatteredLuminance): the sky in the mirror direction shaped
+from HORIZON_GAIN 1.5 x SkyLum (pale) to ZENITH_TINT (0.35, 0.55, 0.95) x SkyLum, times
+Schlick F0 0.02 and Smith shadowing (dark blue straight down, brightening to the horizon);
+the sun glint as GGX with the Cox-Munk variance, varied +-35 % by a 6 km wind-streak field
+(a soft, patchy lobe). The wave tile is drawn only where the pixel resolves it (256 m and
+54 m octaves; 1357 m removed) with its own trilinear sampler (OceanNSampler).
+
+Needs `scripts/ue_create_materials.py` (the stamp 2 rebuilds the asset in place); no C++
+needed for the look (the C++ edit is only the render.json wording). Probe #13: no grid, no
+streaks; a dark blue gradient brightening toward the horizon; with the sun ahead or low (a
+different hour) a soft glint lobe. Too bright at the horizon -> HORIZON_GAIN 1.2; sea too
+black -> ZENITH_TINT x1.3. The horizon haze line is lane E's.
