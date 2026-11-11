@@ -1459,3 +1459,29 @@ def test_a_rejected_response_carries_the_model_s_raw_text_in_its_details():
     with pytest.raises(LLMCompileError) as info:
         compile_prompt_llm("a chase camera", client=fake_client("not json {"))
     assert info.value.details["raw_response"] == "not json {"
+
+
+def test_an_unstated_speed_is_the_models_guess_and_planned_above_the_stall():
+    """Round 7: "747 cruise over the ocean at 10000 m" came back from the
+    model as an INFERRED 250 kt, which no planner may move, and was refused
+    (airspeed.stall_margin) where another compile flew it. With no speed in
+    knots or Mach in the prompt the value is a declared guess (model), and
+    plan_flyable_defaults lifts it above the stall at the commanded altitude."""
+    from webapp.runs import plan_flyable_defaults
+
+    prompt = "chase view of the 747 cruise over the ocean at 10000 m at noon"
+    client = fake_client({"fields": {"aircraft": entry("B747", "user", "747"),
+                                     "altitude": entry(10000.0, "user", "10000 m"),
+                                     "airspeed": entry(250.0, "inferred", "cruise")},
+                          "notes": [], "questions": []})
+    spec = compile_prompt_llm(prompt, client=client).spec
+    assert str(spec.airspeed.source) == "model"
+    plan_flyable_defaults(spec)
+    assert not any(v.constraint == "airspeed.stall_margin" for v in validate(spec).violations)
+
+
+def test_a_stated_speed_stays_the_users():
+    client = fake_client({"fields": {"airspeed": entry(250.0, "user", "250 knots")},
+                          "notes": [], "questions": []})
+    spec = compile_prompt_llm("the 747 at 10000 m and 250 knots", client=client).spec
+    assert str(spec.airspeed.source) == "user" and float(spec.airspeed.value) == 250.0

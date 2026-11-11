@@ -1476,6 +1476,15 @@ def _model_place_verdict(lat_entry, lon_entry, fields, prompt) -> str:
             f"land is there; dropped")
 
 
+def _stated_airspeed(prompt: str):
+    """The speed the prompt states in knots or Mach, or None: the regex
+    compiler's own _airspeed vocabulary, so the two compilers agree on what
+    "stated" means."""
+    from .compiler import _airspeed
+
+    return _airspeed(prompt.lower())[0]
+
+
 def _overlay(spec: ScenarioSpec, name: str, entry: Dict[str, Any]) -> None:
     """Set one spec field from a parsed model entry, with provenance."""
     source = {"user": Source.USER, "inferred": Source.INFERRED,
@@ -1627,6 +1636,20 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
 
         for field_name, entry in payload["fields"].items():
             _overlay(spec, field_name, entry)
+
+        # A speed the prompt does not STATE is the model's guess, never the
+        # user's: round 7's "747 cruise over the ocean at 10000 m" came back as
+        # an "inferred" 250 kt, which the planners may not move, so the same
+        # prompt was refused (airspeed.stall_margin) on one compile and flown
+        # on another. Only a number in knots or a Mach number is a stated
+        # speed (the regex compiler's own vocabulary); anything else the
+        # model sets is demoted to a declared guess (source model), which
+        # plan_flyable_defaults lifts above the stall at the commanded altitude.
+        if "airspeed" in payload["fields"] and _stated_airspeed(prompt) is None \
+                and str(spec.airspeed.source) in ("user", "inferred"):
+            spec.airspeed = Quantity(value=float(spec.airspeed.value), unit=spec.airspeed.unit,
+                                     source=Source.MODEL,
+                                     frm=f"{spec.airspeed.frm} (no speed stated: the model's guess)")
 
         # An aircraft the prompt NAMES (the deterministic vocabulary's phrases,
         # whole words) is the user's, not the model's to reinterpret: a model
