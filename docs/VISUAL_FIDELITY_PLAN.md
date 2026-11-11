@@ -109,7 +109,7 @@ against the source before rendering.
 | **swisstopo swissBUILDINGS3D** | swisstopo OGD | Real 3D buildings (Zermatt) |
 | **JRC Global Surface Water** | Free with attribution (verify) | Water mask |
 | **OurAirports** | Public domain | Runway positions and headings |
-| Google Photorealistic 3D Tiles / Cesium ion World Terrain + Bing | Commercial ToS (caching and offline use restricted) | **Owner decision. Default: refused.** |
+| Google Photorealistic 3D Tiles / Cesium ion World Terrain + Bing | Commercial ToS (caching and offline use restricted) | **Owner decision 2026-11-10/11: approved, streamed through the Cesium ion token, including for the labelled dataset.** |
 
 ### 3.4 Material and model assets
 | Source | License | Use |
@@ -363,8 +363,10 @@ is void.
 
 ## 6. Owner decisions needed
 
-1. **Photogrammetry** (Google 3D Tiles / Cesium ion): biggest single jump
-   toward MSFS in cities, but proprietary ToS. Default: refused.
+1. **Photogrammetry** (Google 3D Tiles / Cesium ion): **decided.** The owner
+   approved it on 2026-11-10 and again on 2026-11-11 ("the cesium token like
+   policy allows it too"), including for the labelled dataset. The tiles are
+   always on (CLAUDE.md).
 2. **Megascans/Fab** assets vs CC0-only.
 3. **Physics raster**: does the high-res near-field DEM (V2.2) also feed
    collision/AGL, or stay scenery? (Parity tests must be re-run if yes.)
