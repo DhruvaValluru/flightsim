@@ -32,6 +32,13 @@
 //   Veil       float   this shell's grey veil (rain_veil.shell_veil_alpha)
 //   GroundRelZ float   the ground under the camera minus the camera, cm
 //   Seed       float   the card's rain seed (masked to 24 bits)
+//   VeilVary   float   lane D round 26: the veil's share varied by falling curtains (0: uniform)
+//
+// Round 26 (#07: "a flat grey field"): the veil is uniform round the shell, so through a
+// long lens the frame is one grey. With VeilVary the veil is x (1 + VeilVary x (2n - 1)),
+// n a smooth value noise in (arc, height) with cells a fifth of the radius across and
+// 0.8 radius tall, falling at the drops' speed: denser and thinner curtains of rain at
+// three depths, the structure a heavy-rain photograph shows. VeilVary 0: unchanged.
 struct FCurtain
 {
 	uint Pcg(uint v)
@@ -80,4 +87,19 @@ if (C.U(hs) < StreakDensity)
 	float ends = C.Ss(0.0, 0.1 * len, f) * C.Ss(len, len * 0.7, f);
 	streak = across * ends * (0.4 + 0.6 * C.U(C.Pcg(hs + 2u))) * StreakAlpha;
 }
-return saturate(Veil + streak * (1.0 - Veil));
+float veil = Veil;
+if (VeilVary > 0.0)
+{
+	float2 g = float2(arc / (Radius * 0.2), (Rel.z + FallCmps * Time) / (Radius * 0.8));
+	float2 gi = floor(g);
+	float2 gf = g - gi;
+	gf = gf * gf * (3.0 - 2.0 * gf);
+	uint sx = (uint)Seed + 17u;
+	float n00 = C.U(C.Pcg(asuint((int)gi.x) ^ C.Pcg(asuint((int)gi.y) ^ sx)));
+	float n10 = C.U(C.Pcg(asuint((int)gi.x + 1) ^ C.Pcg(asuint((int)gi.y) ^ sx)));
+	float n01 = C.U(C.Pcg(asuint((int)gi.x) ^ C.Pcg(asuint((int)gi.y + 1) ^ sx)));
+	float n11 = C.U(C.Pcg(asuint((int)gi.x + 1) ^ C.Pcg(asuint((int)gi.y + 1) ^ sx)));
+	float n = lerp(lerp(n00, n10, gf.x), lerp(n01, n11, gf.x), gf.y);
+	veil = saturate(Veil * (1.0 + VeilVary * (2.0 * n - 1.0)));
+}
+return saturate(veil + streak * (1.0 - veil));

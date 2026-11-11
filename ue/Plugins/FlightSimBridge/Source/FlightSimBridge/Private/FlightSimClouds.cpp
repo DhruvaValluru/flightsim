@@ -784,6 +784,9 @@ namespace
 	// UNCALIBRATED: set by probe render on the render machine.
 	const TCHAR* const WorldCloudFogAllPixelCvar = TEXT("r.VolumetricCloud.ApplyFogOnAllPixel");
 	constexpr double WorldCmPerMetre = 100.0;
+	// world_beauty.STORM_DECK_CLEARANCE_M (lane D, round 26): a storm preset's deck
+	// above the aircraft hangs this low over it, so a level chase frame's top is deck.
+	constexpr double StormDeckClearanceM = 150.0;
 
 	double WorldNumber(const TSharedPtr<FJsonObject>& Object, const TCHAR* Key, double Default)
 	{
@@ -1335,34 +1338,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 				HazeRow->SetNumberField(TEXT("fog_height_falloff"), Falloff);
 				HazeRow->SetNumberField(TEXT("camera_above_fog_m"), AboveFogM);
 				HazeRow->SetNumberField(TEXT("column_m"), ColumnM);
-				// Round 12's #15 (a pale white fog under the storm deck): the fog's light
-				// is the CLEAR sky's ambient above the deck and the sun's lobe; under a
-				// drawn deck, the deck's diffuse transmission instead and no sun lobe
-				// (rain_veil.STORM_FOG_AMBIENT_RGB).
-				if (bDeckAbove)
-				{
-					const FLinearColor Ambient(0.20f, 0.21f, 0.23f);
-					HazeRow->SetStringField(TEXT("sky_atmosphere_ambient_scale_before"),
-						Fog->SkyAtmosphereAmbientContributionColorScale.ToString());
-					Fog->SetSkyAtmosphereAmbientContributionColorScale(Ambient);
-					Fog->SetDirectionalInscatteringColor(FLinearColor::Black);
-					HazeRow->SetStringField(TEXT("sky_atmosphere_ambient_scale"), Ambient.ToString());
-					HazeRow->SetBoolField(TEXT("directional_inscattering_off"), true);
-				}
 				HazeRows.Add(MakeShared<FJsonValueObject>(HazeRow));
 			}
 			Haze->SetArrayField(TEXT("height_fog"), HazeRows);
 			Haze->SetNumberField(TEXT("rain_rate_mmh"), HazeRate);
-			// The volumetric fog's sun light under the deck (rain_veil.STORM_SUN_FOG_SHARE).
-			if (bDeckAbove && Scene.Sun != nullptr && Scene.Sun->GetLightComponent() != nullptr)
-			{
-				constexpr double StormSunFogShare = 0.15;
-				ULightComponent* Beam = Scene.Sun->GetLightComponent();
-				Haze->SetNumberField(TEXT("sun_volumetric_scattering_before"), Beam->VolumetricScatteringIntensity);
-				Beam->SetVolumetricScatteringIntensity(
-					static_cast<float>(Beam->VolumetricScatteringIntensity * StormSunFogShare));
-				Haze->SetNumberField(TEXT("sun_volumetric_scattering"), Beam->VolumetricScatteringIntensity);
-			}
 		}
 		Haze->SetStringField(TEXT("law"),
 			TEXT("rain_veil.rain_haze_fog: in a storm preset with rain and no stated visibility, the fog's falloff "
@@ -1370,6 +1349,66 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 			     "rain's extinction (0.35 R^0.66 /km), never thinner than the scene's fog; -rain-veil=off keeps "
 			     "the scene's fog. UNCALIBRATED"));
 		Record->SetObjectField(TEXT("rain_haze"), Haze);
+		// Round 12 / round 26 (lane D): THE LIGHT UNDER A STORM DECK, with or without
+		// rain (#10's tornado has none). The fog was lit by the CLEAR sky above the deck
+		// (the SkyAtmosphere ambient at white, FlightSimSky.cpp) and by the sun's lobe;
+		// the volumetric fog and the veil by the sun (1 / 0.48) and by the sky light,
+		// whose captured lower hemisphere is the GROUND (SLS_CapturedScene: the tiles,
+		// green over #10's prairie: r24 measured the funnel 73/94/81 with the fog and the
+		// veil on, 68/70/79 off). Under a drawn storm deck: the fog's ambient is the
+		// deck's diffuse transmission (rain_veil.STORM_FOG_AMBIENT_RGB), no sun lobe, the
+		// sun's volumetric scattering x STORM_SUN_FOG_SHARE, and the sky light's lower
+		// hemisphere a solid dark neutral (STORM_LOWER_HEMISPHERE: a wet ground under a
+		// storm returns little light, and no colour of its own) unless the hero
+		// lighting's sidecar states one. -rain-veil=off keeps the scene's.
+		TSharedPtr<FJsonObject> DeckLight = MakeShared<FJsonObject>();
+		const bool bDeckLight = Preset == PresetStorm && bDeckAbove && RainVeilMode == TEXT("on");
+		DeckLight->SetBoolField(TEXT("applied"), bDeckLight);
+		if (bDeckLight)
+		{
+			const FLinearColor Ambient(0.20f, 0.21f, 0.23f);
+			TArray<TSharedPtr<FJsonValue>> FogRows;
+			for (TObjectIterator<UExponentialHeightFogComponent> It; It; ++It)
+			{
+				UExponentialHeightFogComponent* Fog = *It;
+				if (Fog == nullptr || Fog->GetWorld() != World || !Fog->IsVisible())
+				{
+					continue;
+				}
+				TSharedPtr<FJsonObject> FogRow = MakeShared<FJsonObject>();
+				FogRow->SetStringField(TEXT("sky_atmosphere_ambient_scale_before"),
+					Fog->SkyAtmosphereAmbientContributionColorScale.ToString());
+				Fog->SetSkyAtmosphereAmbientContributionColorScale(Ambient);
+				Fog->SetDirectionalInscatteringColor(FLinearColor::Black);
+				FogRow->SetStringField(TEXT("sky_atmosphere_ambient_scale"), Ambient.ToString());
+				FogRow->SetBoolField(TEXT("directional_inscattering_off"), true);
+				FogRows.Add(MakeShared<FJsonValueObject>(FogRow));
+			}
+			DeckLight->SetArrayField(TEXT("height_fog"), FogRows);
+			if (Scene.Sun != nullptr && Scene.Sun->GetLightComponent() != nullptr)
+			{
+				constexpr double StormSunFogShare = 0.15;
+				ULightComponent* Beam = Scene.Sun->GetLightComponent();
+				DeckLight->SetNumberField(TEXT("sun_volumetric_scattering_before"), Beam->VolumetricScatteringIntensity);
+				Beam->SetVolumetricScatteringIntensity(
+					static_cast<float>(Beam->VolumetricScatteringIntensity * StormSunFogShare));
+				DeckLight->SetNumberField(TEXT("sun_volumetric_scattering"), Beam->VolumetricScatteringIntensity);
+			}
+			USkyLightComponent* DeckSky = Scene.SkyLightComponent;
+			if (DeckSky != nullptr && !DeckSky->bLowerHemisphereIsBlack)
+			{
+				const FLinearColor Lower(0.0f, 0.0f, 0.0f);
+				DeckSky->bLowerHemisphereIsBlack = true;
+				DeckSky->SetLowerHemisphereColor(Lower);
+				DeckLight->SetStringField(TEXT("sky_light_lower_hemisphere"), Lower.ToString());
+			}
+			else
+			{
+				DeckLight->SetStringField(TEXT("sky_light_lower_hemisphere"),
+					DeckSky == nullptr ? TEXT("no sky light") : TEXT("kept: already solid (the hero lighting's)"));
+			}
+		}
+		Record->SetObjectField(TEXT("storm_deck_light"), DeckLight);
 	}
 	// round-2b weather-fx: the weather look's shafts and the tornado funnel (beauty only).
 	Scene.ApplyBeautyWeatherLook(World);
@@ -2038,7 +2077,7 @@ void FFlightSimWorldBeauty::KeepAircraftClearOfClouds(const TSharedPtr<FJsonObje
 	                                               WorldNumber(Card, TEXT("terrain_elevation_m"), 0.0));
 	const bool bRainDeck = Preset == PresetRain || Preset == PresetStorm;
 	Out->SetNumberField(TEXT("aircraft_above_datum_m"), AircraftUpM);
-	Out->SetNumberField(TEXT("clearance_m"), AircraftLayerClearanceM);
+	Out->SetNumberField(TEXT("clearance_m"), Preset == PresetStorm ? StormDeckClearanceM : AircraftLayerClearanceM);
 	Out->SetBoolField(TEXT("rain_deck_goes_above"), bRainDeck);
 	Out->SetStringField(TEXT("law"),
 		TEXT("the law of world_beauty.aircraft_clear_layer, a deck whose slab widened by clearance_m holds the aircraft "
@@ -2048,7 +2087,8 @@ void FFlightSimWorldBeauty::KeepAircraftClearOfClouds(const TSharedPtr<FJsonObje
 	for (FCloudLayerState& State : CloudLayers)
 	{
 		const FLayerClear Clear =
-			AircraftClearLayer(State.BaseM, State.TopM, AircraftUpM, AircraftLayerClearanceM, bRainDeck);
+			AircraftClearLayer(State.BaseM, State.TopM, AircraftUpM,
+			                   Preset == PresetStorm ? StormDeckClearanceM : AircraftLayerClearanceM, bRainDeck);
 		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 		Row->SetStringField(TEXT("component"), State.Component != nullptr ? State.Component->GetName() : FString());
 		Row->SetNumberField(TEXT("base_m_before"), State.BaseM);

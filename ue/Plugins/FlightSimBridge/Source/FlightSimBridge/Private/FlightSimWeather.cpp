@@ -343,8 +343,9 @@ namespace FlightSimRainVeil
 	constexpr double VeilBetaA = 0.35;
 	constexpr double VeilBetaB = 0.66;
 	constexpr double VeilStreakPixels = 2.0;
-	constexpr double VeilShadeUnderDeck = 0.15;
-	constexpr double VeilShadeOpen = 0.5;
+	constexpr double VeilShadeUnderDeck = 0.85;
+	constexpr double VeilShadeOpen = 1.0;
+	constexpr double VeilVary = 0.6;
 	constexpr double ScudToneUnderDeck = 0.5;
 	constexpr double ScudToneOpen = 0.7;
 	constexpr double VeilStreakDensityA = 0.08;
@@ -497,6 +498,7 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 		const double Veil = ShellVeilAlpha(RainRateMmh, Inner, Radii[Shell]);
 		Material->SetScalarParameterValue(TEXT("Radius"), static_cast<float>(R));
 		Material->SetScalarParameterValue(TEXT("Shade"), static_cast<float>(VeilShade));
+		Material->SetScalarParameterValue(TEXT("VeilVary"), static_cast<float>(VeilVary));
 		Material->SetScalarParameterValue(TEXT("StreakDensity"), static_cast<float>(StreakDensity(RainRateMmh)));
 		Material->SetScalarParameterValue(TEXT("StreakAlpha"), static_cast<float>(VeilStreakAlpha));
 		Material->SetScalarParameterValue(TEXT("Veil"), static_cast<float>(Veil));

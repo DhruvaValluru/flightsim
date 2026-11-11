@@ -779,6 +779,18 @@ def distant_handover_km(trace_km: float) -> float:
 #: measure quality never builds the world look, so its decks stand.
 #: UNCALIBRATED: set by probe render on the render machine.
 AIRCRAFT_LAYER_CLEARANCE_M = 400.0
+#: Lane D, round 26 (#15: "no full deck: the ground shows"): 400 m above a level
+#: chase camera, the deck sat above the frame's top edge out to where the rain haze
+#: had already hidden it. A storm preset's deck hangs STORM_DECK_CLEARANCE_M over the
+#: aircraft (a hurricane's base at 2000 m is low and close), so the frame's top is
+#: deck. The storm cell's deck (#09) keeps AIRCRAFT_LAYER_CLEARANCE_M. UNCALIBRATED.
+STORM_DECK_CLEARANCE_M = 150.0
+
+
+def deck_clearance_m(preset: str) -> float:
+    """The clearance a redrawn deck keeps from the aircraft: STORM_DECK_CLEARANCE_M in
+    a storm preset, else AIRCRAFT_LAYER_CLEARANCE_M (FlightSimClouds.cpp)."""
+    return STORM_DECK_CLEARANCE_M if preset == "storm" else AIRCRAFT_LAYER_CLEARANCE_M
 
 
 def aircraft_clear_layer(base_m: float, top_m: float, aircraft_m: float,
