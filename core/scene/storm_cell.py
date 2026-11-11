@@ -159,7 +159,12 @@ BEAUTY_SHAFT = {"streak_scale": 0.35, "rim_erosion": 0.5, "density_floor": 0.25,
 #:   aircraft clearance (world_beauty.AIRCRAFT_LAYER_CLEARANCE_M).
 #: UNCALIBRATED: set by probe render on the render machine (#09 first). The C++
 #: twin is FFlightSimWeather::ApplyBeautyStormVantage.
-BEAUTY_CURTAIN = {"flare": 0.8, "ground_thin": 0.5, "scud_depth_m": 300.0, "scud_cover": 0.5}
+#: Round 19 (#09: "a curved white rain curtain of ring-like arcs"): the volumetric scud
+#: band (scud_depth_m) is OFF in beauty. A 300 m band of 3x-squashed noise marched at
+#: the constrained GPU's fixed altitude slices (~400 m steps) draws its slices as rings
+#: of constant altitude round the view: arcs, not rags. The scud is the veil's cards
+#: alone (rain_veil, M_ScudCard). The shader keeps the term (Curtain.z 0: not evaluated).
+BEAUTY_CURTAIN = {"flare": 0.8, "ground_thin": 0.5, "scud_depth_m": 0.0, "scud_cover": 0.5}
 CURTAIN_RIM_SHARE = 0.25
 SCUD_SCALE_M = 700.0
 SCUD_SQUASH = 3.0

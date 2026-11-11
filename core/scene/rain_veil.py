@@ -92,8 +92,13 @@ SCUD_SEED_SALT = 0x5C0D
 #: "bright white cartoon cumulus puffs" in a pale fog. Their base colour is scaled by
 #: Shade: under a drawn deck (the light there is the deck's diffuse transmission) and
 #: in the open rain. UNCALIBRATED.
-VEIL_SHADE_UNDER_DECK = 0.3
-VEIL_SHADE_OPEN = 0.6
+VEIL_SHADE_UNDER_DECK = 0.15
+VEIL_SHADE_OPEN = 0.5
+#: Round 19 (#15 and #09 still drew white puffs): the scud card is now MODULATE
+#: (M_ScudCard 3): the scene behind it x lerp(1, SCUD_TONE, rag). Under a deck a rag
+#: keeps half the light behind it; in open rain 0.7.
+SCUD_TONE_UNDER_DECK = 0.5
+SCUD_TONE_OPEN = 0.7
 #: The beauty's cinematic rain keeps this share of the camera's own motion: round 12's
 #: #15 flew INTO the wind, so the wind lay along the view and the cinematic streaks
 #: (the camera's motion left out) fell straight down. A little of the aircraft's
@@ -248,3 +253,8 @@ def streak_cap_rad(max_streak_rad: float, pixel_angle_rad: float) -> float:
     """The beauty streak cap for a view: scaled by the pixel angle below the reference
     (a long lens), held above it."""
     return float(max_streak_rad) * min(1.0, float(pixel_angle_rad) / BEAUTY_REFERENCE_PIXEL_RAD)
+
+
+def scud_tone(deck_above: bool) -> float:
+    """The modulate scud's tone: SCUD_TONE_UNDER_DECK under a drawn deck, else SCUD_TONE_OPEN."""
+    return SCUD_TONE_UNDER_DECK if deck_above else SCUD_TONE_OPEN

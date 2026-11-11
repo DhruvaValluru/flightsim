@@ -76,8 +76,11 @@ def test_the_curtain_flares_and_thins_toward_the_ground_with_no_hard_rim():
 
 
 def test_the_scud_is_ragged_and_only_under_the_base():
+    """The volumetric scud band's law (off in beauty since round 19: its slices drew
+    rings in #09; tested at a stated depth so the shader term stays honest)."""
+    assert storm_cell.BEAUTY_CURTAIN["scud_depth_m"] == 0.0
     cell = _cell()
-    curtain = storm_cell.BEAUTY_CURTAIN
+    curtain = dict(storm_cell.BEAUTY_CURTAIN, scud_depth_m=300.0)
     base = cell["base_m"]
     under = [storm_cell.scud_at(cell, k * 137.0, k * 59.0, base - 150.0, 0.0, None, curtain) for k in range(400)]
     covered = sum(1 for v in under if v > 0.0) / len(under)
@@ -270,7 +273,7 @@ def test_the_veil_is_beauty_only_and_hidden_from_every_label():
     assert "if (VeilActor != nullptr)" in advance and "if (ScudMesh == nullptr)" in advance
     assert WEATHER_CPP.count("StepBeautyRainVeil(View, Wind, CameraVelocity, Share, PixelAngle);") == 1
     # the materials exist in the script, stamped, with their shader inputs
-    assert '"M_RainCurtain": "2"' in SCRIPT and '"M_ScudCard": "2"' in SCRIPT
+    assert '"M_RainCurtain": "2"' in SCRIPT and '"M_ScudCard": "3"' in SCRIPT
     assert 'custom(material, lib, "rain_curtain"' in SCRIPT and 'custom(material, lib, "scud_card"' in SCRIPT
     assert "create_rain_curtain()" in SCRIPT and "create_scud_card()" in SCRIPT
 
@@ -372,7 +375,7 @@ def test_round12_the_veil_and_scud_are_shaded_and_torn():
     assert 'ScudMaterial->SetScalarParameterValue(TEXT("Shade")' in WEATHER_CPP
     assert 'Material->SetScalarParameterValue(TEXT("Shade")' in WEATHER_CPP
     assert 'shade = scalar(material, lib, "Shade", 1.0' in SCRIPT
-    assert '"M_RainCurtain": "2"' in SCRIPT and '"M_ScudCard": "2"' in SCRIPT
+    assert '"M_RainCurtain": "2"' in SCRIPT and '"M_ScudCard": "3"' in SCRIPT
     scud = (SHADERS / "scud_card.hlsl").read_text(encoding="utf-8")
     assert "float tear = S.Value(" in scud and "S.Ss(0.55, 0.68," in scud
     assert "0.55 * falloff" not in scud                            # the falloff no longer makes the shape
@@ -388,3 +391,25 @@ def test_round12_the_storm_fog_is_lit_by_the_deck_not_the_clear_sky():
     assert "Fog->SetDirectionalInscatteringColor(FLinearColor::Black);" in haze
     assert f"constexpr double StormSunFogShare = {rain_veil.STORM_SUN_FOG_SHARE};" in haze
     assert haze.count("if (bDeckAbove") == 2
+
+
+# -- round 19: dark rags, no arcs ------------------------------------------------------
+
+
+def test_round19_the_scud_is_a_modulate_rag_darker_than_what_is_behind_it():
+    creator = SCRIPT[SCRIPT.index("def create_scud_card"):SCRIPT.index("def create_rain_splash")]
+    assert "_translucent_unlit(material, unreal.BlendMode.BLEND_MODULATE)" in creator
+    assert "_translucent_lit(material)" not in creator and "_veil_lit(" not in creator
+    assert "MP_EMISSIVE_COLOR" in creator and "MP_OPACITY" not in creator
+    assert 'tone = scalar(material, lib, "Shade", 1.0' in creator
+    assert 0.0 < rain_veil.scud_tone(True) < rain_veil.scud_tone(False) < 1.0
+    for cpp, py in (("ScudToneUnderDeck", rain_veil.SCUD_TONE_UNDER_DECK),
+                    ("ScudToneOpen", rain_veil.SCUD_TONE_OPEN)):
+        assert _cpp_constant(_veil_cpp(), cpp) == py, cpp
+    assert 'ScudMaterial->SetScalarParameterValue(TEXT("Shade"), static_cast<float>(ScudTone));' in WEATHER_CPP
+
+
+def test_round19_the_volumetric_scud_band_is_off_in_beauty():
+    apply = _function(WEATHER_CPP, "void FFlightSimWeather::ApplyBeautyStormVantage(")
+    assert _cpp_constant(apply, "WeatherBeautyScudDepthM") == storm_cell.BEAUTY_CURTAIN["scud_depth_m"] == 0.0
+    assert "if (Curtain.z > 0.0)" in STORM_HLSL     # the term is skipped, not evaluated

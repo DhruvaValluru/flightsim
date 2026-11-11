@@ -3177,6 +3177,25 @@ wide bars.** Causes, read from the code:
   frame around the 747 should now sit darker than the aircraft.
 Re-probe #15 and #07 at beauty, plus #09.
 
+**Round 19 (ran 0e69e89a): the rain slants now. #15 and #09 still drew small bright-white
+puffs, #09 showed ring-like white arcs round the 747, and #07 is still a grey void.**
+* Puffs: the scud cards were LIT translucent surfaces. Forward shading lights them with the
+  sun, which the deck's cloud shadow does not reach on a translucent surface, so they drew
+  white at any albedo or Shade. M_ScudCard 3 is MODULATE and unlit: the scene behind it x
+  lerp(1, tone, rag), with tone 0.5 under a deck and 0.7 in the open. A rag is now always
+  darker than what is behind it, at any exposure.
+* Arcs in #09: the volumetric scud band (storm_cell.hlsl Curtain.z, a 300 m band of
+  3x-squashed noise) sat between the constrained GPU's fixed altitude slices (about 400 m
+  steps). It drew its slices as rings of constant altitude round the view. It is off in beauty
+  (scud_depth_m 0, not evaluated), and the scud is the cards alone. The curtain shells are not
+  the arcs: they are camera-centred cylinders, which draw vertical, and they carry no cloud
+  noise.
+* Pale frame: the veil's Shade is now 0.15 under a deck (was 0.3) and 0.5 in the open (was
+  0.6). Exposure (lane A's meter) is unchanged.
+* #07: not changed by this round. It is a 250 mm lens looking up from the tower at 1.5 km in
+  heavy rain, with no ground and no deck structure in the frame. Read its render.json
+  rain_veil and haze rows before the next fix.
+
 ## lane A: aircraft too shadowed (2026-11-11)
 
 Owner: "the planes are being too shadowed". Round 5 (f7232cc7): #06 (A320, SFO, moderate rain)
