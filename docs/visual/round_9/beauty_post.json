@@ -1,0 +1,19 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "06_a320_over_sfo_heading_south_moderate_rain": {
+   "post": "06_a320_over_sfo_heading_south_moderate_rain_post.jpg",
+   "source": "06_a320_over_sfo_heading_south_moderate_rain_frame_beauty_post.png"
+  },
+  "07_tower_view_heavy_rain": {
+   "post": "07_tower_view_heavy_rain_post.jpg",
+   "source": "07_tower_view_heavy_rain_frame_beauty_post.png"
+  },
+  "15_747_in_hurricane_like_weather_the_refusal_s_sugg": {
+   "post": "15_747_in_hurricane_like_weather_the_refusal_s_sugg_post.jpg",
+   "source": "15_747_in_hurricane_like_weather_the_refusal_s_sugg_frame_beauty_post.png"
+  }
+ }
+}

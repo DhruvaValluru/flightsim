@@ -1,0 +1,45 @@
+﻿{
+    "round":  9,
+    "commit":  "697c4ca6",
+    "full":  false,
+    "scenes":  [
+                   6,
+                   7,
+                   9,
+                   15
+               ],
+    "switches":  "",
+    "prep":  [
+                 "build"
+             ],
+    "seconds":  {
+                    "build":  17.8,
+                    "scenes":  1824.3
+                },
+    "outcomes":  [
+                     {
+                         "number":  6,
+                         "outcome":  "done",
+                         "seconds":  229.5,
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  7,
+                         "outcome":  "done",
+                         "seconds":  284.9,
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  9,
+                         "outcome":  "failed",
+                         "seconds":  1181.8,
+                         "why":  "[camera.render] the render commandlet produced no render.json for camera \u0027camera0\u0027 (pass 1 of 1); see render.log\nlast words:\n[2026.11.11-09.02.30:980][  0]LogFlightSimWeather: Display: cloud VolumetricCloud (Actor_4): /Temp/Untitled_1.Untitled:PersistentLevel.Actor_4.VolumetricCloud.MID_M_StormCell_0, domain 3, used_with_volumetric_cloud yes, compiled\n[2026.11.11-09.02.30:980][  0]LogFlightSimRender: Display: warm-up: 20 captures (capture watchdog 300 s, gpu drain on)\n[2026.11.11-09.02.40:080][  0]LogFlightSimRender: Display: gpu drain: warm-up capture 1/20 finished on the GPU in 4.27 s\n[2026.11.11-09.02.40:081][  0]LogFlightSimRender: Display: warm-up capture 1/20 done\n[2026.11.11-09.02.43:981][  0]LogFlightSimRender: Display: gpu drain: warm-up capture 2/20 finished on the GPU in 3.88 s\n[2026.11.11-09.02.43:981][  0]LogFlightSimRender: Display: warm-up capture 2/20 done\n[2026.11.11-09.02.47:890][  0]LogFlightSimRender: Display: gpu drain: warm-up capture 3/20 finished on the GPU in 3.90 s\n[2026.11.11-09.02.47:890][  0]LogFlightSimRender: Display: warm-up capture 3/20 done\n[2026.11.11-09.02.51:906][  0]LogD3D11RHI: Error: Result failed with error DXGI_ERROR_DEVICE_REMOVED DXGI_ERROR_DEVICE_HUNG\n[2026.11.11-09.02.53:652][  0]LogWindows: Error: appError called: Fatal error: [File:D:\\build\\++UE5\\Sync\\Engine\\Source\\Runtime\\Windows\\D3D11RHI\\Private\\D3D11Util.cpp] [Line: 166]\nUnreal Engine is exiting due to D3D device being lost. (Error: 0x887A0006 - \u0027HUNG\u0027)\n[2026.11.11-09.02.53:653][  0]LogWindows: Windows GetLastError: The operation completed successfully. (0)"
+                     },
+                     {
+                         "number":  15,
+                         "outcome":  "done",
+                         "seconds":  125.1,
+                         "why":  "clip ready"
+                     }
+                 ]
+}

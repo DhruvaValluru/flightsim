@@ -1,0 +1,55 @@
+[
+ {
+  "number": 6,
+  "name": "a320 over sfo heading south, moderate rain",
+  "prompt": "wingman view of the a320 over sfo south at 3000 m in moderate rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "fa3ebd45717e",
+  "lighting": {},
+  "seconds": 229.5,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 7,
+  "name": "tower view, heavy rain",
+  "prompt": "tower view of the a320 at 1000 m in heavy rain with a 250 mm lens for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "92790f2f85e0",
+  "lighting": {},
+  "seconds": 284.9,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 9,
+  "name": "747 through a thunderstorm",
+  "prompt": "chase view of the 747 flying west through a thunderstorm at 2000 m for 6 seconds",
+  "outcome": "failed",
+  "why": "[camera.render] the render commandlet produced no render.json for camera 'camera0' (pass 1 of 1); see render.log\nlast words:\n[2026.11.11-09.02.30:980][  0]LogFlightSimWeather: Display: cloud VolumetricCloud (Actor_4): /Temp/Untitled_1.Untitled:PersistentLevel.Actor_4.VolumetricCloud.MID_M_StormCell_0, domain 3, used_with_volumetric_cloud yes, compiled\n[2026.11.11-09.02.30:980][  0]LogFlightSimRender: Display: warm-up: 20 captures (capture watchdog 300 s, gpu drain on)\n[2026.11.11-09.02.40:080][  0]LogFlightSimRender: Display: gpu drain: warm-up capture 1/20 finished on the GPU in 4.27 s\n[2026.11.11-09.02.40:081][  0]LogFlightSimRender: Display: warm-up capture 1/20 done\n[2026.11.11-09.02.43:981][  0]LogFlightSimRender: Display: gpu drain: warm-up capture 2/20 finished on the GPU in 3.88 s\n[2026.11.11-09.02.43:981][  0]LogFlightSimRender: Display: warm-up capture 2/20 done\n[2026.11.11-09.02.47:890][  0]LogFlightSimRender: Display: gpu drain: warm-up capture 3/20 finished on the GPU in 3.90 s\n[2026.11.11-09.02.47:890][  0]LogFlightSimRender: Display: warm-up capture 3/20 done\n[2026.11.11-09.02.51:906][  0]LogD3D11RHI: Error: Result failed with error DXGI_ERROR_DEVICE_REMOVED DXGI_ERROR_DEVICE_HUNG\n[2026.11.11-09.02.53:652][  0]LogWindows: Error: appError called: Fatal error: [File:D:\\build\\++UE5\\Sync\\Engine\\Source\\Runtime\\Windows\\D3D11RHI\\Private\\D3D11Util.cpp] [Line: 166]\nUnreal Engine is exiting due to D3D device being lost. (Error: 0x887A0006 - 'HUNG')\n[2026.11.11-09.02.53:653][  0]LogWindows: Windows GetLastError: The operation completed successfully. (0)",
+  "run_id": "7d6f1ee27afe",
+  "lighting": {},
+  "seconds": 1181.8,
+  "render_json": false
+ },
+ {
+  "number": 15,
+  "name": "747 in hurricane-like weather (the refusal's suggestion)",
+  "prompt": "chase view of the 747 at 2000 m in strong wind, severe turbulence and heavy rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "00fe2ef7dfa9",
+  "lighting": {},
+  "seconds": 125.1,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ }
+]
