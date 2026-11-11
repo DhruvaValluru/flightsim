@@ -96,7 +96,7 @@ def test_render_json_names_the_compile_result_the_fallback_and_the_generation():
 
 
 def test_the_masters_rebuild_in_place_at_generation_7():
-    assert re.search(r'^LOOK_GENERATION = "8"$', MASTERS, re.M)
+    assert re.search(r'^LOOK_GENERATION = "9"$', MASTERS, re.M)
     new = _def("_new", "_finish")
     assert "delete_all_material_expressions(material)" in new
     assert "delete_asset" not in new                       # never deleted: the look instances reference it
@@ -114,10 +114,14 @@ def test_the_coat_master_is_plain_clear_coat_and_never_darker_than_flat():
     coat = _def("create_aircraft_paint_coat", "create_aircraft_bare_metal")
     assert '"MSM_CLEAR_COAT"' in coat
     assert "_base_colour(material" in coat
-    for absent in ("_custom(", "add_wet_layer", "_use_attributes", "tangent_space_normal", "AlbedoMax",
+    for absent in ("_custom(", "add_wet_layer", "tangent_space_normal", "AlbedoMax",
                    "VertexNormalWS", "MP_NORMAL"):
         assert absent not in coat, absent
-    assert '"MP_CUSTOM_DATA0", "MP_CLEAR_COAT"' in coat and '"MP_CUSTOM_DATA1", "MP_CLEAR_COAT_ROUGHNESS"' in coat
+    # Round 51: UE 5.7's Python has no clear-coat MaterialProperty, so the
+    # coat goes through MakeMaterialAttributes (still no Custom node).
+    assert "MP_CUSTOM_DATA0" not in coat.split("# Round 51")[0]
+    assert '("ClearCoat", "Clear Coat")' in coat and '("ClearCoatRoughness", "Clear Coat Roughness")' in coat
+    assert "_use_attributes(material, out)" in coat
     assert look.COAT_SCALARS == {k: look.CLASS_SCALARS["paint"][k]
                                  for k in ("Metallic", "Specular", "Roughness", "ClearCoat", "ClearCoatRoughness")}
     assert look.COAT_SCALARS["Metallic"] == 0.0

@@ -87,7 +87,7 @@ REPO = os.path.dirname(_HERE)
 #: compile-checked fallback and -aircraft-probe=coat).
 #: 8: both round-47 lanes -- M_AircraftContrail FormationRamp (#13) and the
 #: round-25 in-place rebuild, sentinel and coat master.
-LOOK_GENERATION = "8"
+LOOK_GENERATION = "9"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.
@@ -544,16 +544,22 @@ def create_aircraft_paint_coat():
     lib = unreal.MaterialEditingLibrary
     s = {key: _scalar(material, key, value, -500, 300 + 100 * i)
          for i, (key, value) in enumerate(look.COAT_SCALARS.items())}
-    lib.connect_material_property(_base_colour(material, -900, 0), "", unreal.MaterialProperty.MP_BASE_COLOR)
-    lib.connect_material_property(s["Metallic"], "", unreal.MaterialProperty.MP_METALLIC)
-    lib.connect_material_property(s["Specular"], "", unreal.MaterialProperty.MP_SPECULAR)
-    lib.connect_material_property(s["Roughness"], "", unreal.MaterialProperty.MP_ROUGHNESS)
-    lib.connect_material_property(s["ClearCoat"], "", _enum(unreal.MaterialProperty, "MP_CUSTOM_DATA0", "MP_CLEAR_COAT"))
-    lib.connect_material_property(s["ClearCoatRoughness"], "", _enum(unreal.MaterialProperty, "MP_CUSTOM_DATA1", "MP_CLEAR_COAT_ROUGHNESS"))
-    # The sentinel, x0 into the AO (otherwise unconnected: AO 1).
-    lib.connect_material_property(_add(material, _const(material, 1.0, -300, 900), _mul(
+    # Round 51: UE 5.7's Python MaterialProperty has no clear-coat pin
+    # (MP_CUSTOM_DATA0 / MP_CLEAR_COAT absent), so the coat master goes
+    # through MakeMaterialAttributes, the route the class masters use --
+    # still no Custom node.
+    out = _attributes(material, 0, 0)
+    _link(_base_colour(material, -900, 0), "", out, ("BaseColor", "Base Color"))
+    _link(s["Metallic"], "", out, "Metallic")
+    _link(s["Specular"], "", out, "Specular")
+    _link(s["Roughness"], "", out, "Roughness")
+    _link(s["ClearCoat"], "", out, ("ClearCoat", "Clear Coat"))
+    _link(s["ClearCoatRoughness"], "", out, ("ClearCoatRoughness", "Clear Coat Roughness"))
+    # The sentinel, x0 into the AO (otherwise AO 1).
+    _link(_add(material, _const(material, 1.0, -300, 900), _mul(
         material, _generation(material, -500, 1000), _const(material, 0.0, -500, 1100), -300, 1000), -150, 950),
-        "", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
+        "", out, ("AmbientOcclusion", "Ambient Occlusion"))
+    _use_attributes(material, out)
     _finish(material, name)
 
 
