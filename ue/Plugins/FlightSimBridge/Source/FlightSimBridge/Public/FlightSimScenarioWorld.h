@@ -510,7 +510,8 @@ public:
 	// render commandlet under -quality=beauty only (FlightSimTornadoBeauty.cpp),
 	// after Build and before the world lane dresses the markers: it rebuilds the
 	// funnel's and the wall cloud's mesh sections in place (smooth, tapered,
-	// ragged; UV0.x carries the coverage M_TornadoFunnel's dithered mask reads)
+	// ragged; UV0.x carries the coverage M_TornadoFunnel's mask reads; the funnel's
+	// translucent sheath is section 1)
 	// and adds two beauty-only puff actors -- the swirling dust cloud at the
 	// ground and the scud under the wall cloud -- to BeautyOnlyActors. Measure
 	// never calls it, so its renders keep the Build meshes byte for byte. The

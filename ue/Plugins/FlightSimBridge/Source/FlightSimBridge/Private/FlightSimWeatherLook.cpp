@@ -452,7 +452,8 @@ void FFlightSimVisualScene::ApplyBeautyWeatherLook(UWorld* World)
 	// material, darker (a rain-free base in its own shadow).
 	// Lane C (2026-11-11): by now FFlightSimScenarioWorld::BuildBeautyTornado has
 	// rebuilt both meshes (smooth, ragged, UV0.x coverage) and M_TornadoFunnel is
-	// generation 3 (masked, dithered soft edge, still depth-writing); the funnel a
+	// generation 4 (masked, a torn clip, still depth-writing; the soft edge is the
+	// funnel's translucent sheath, M_TornadoFunnelSoft); the funnel a
 	// cool condensation grey, the wall cloud near-black (weather_look.BEAUTY_*).
 	UProceduralMeshComponent* Funnel = nullptr;
 	UProceduralMeshComponent* WallCloud = nullptr;

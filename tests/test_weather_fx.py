@@ -199,7 +199,8 @@ def test_a_stale_weather_look_material_is_updated_in_place():
     assert "delete_all_material_expressions(material)" in maker
     stamp = SCRIPT[SCRIPT.index("def finish(material, name)"):SCRIPT.index("def linear_default_texture")]
     assert "WEATHER_LOOK_GENERATION_TAG" in stamp
-    assert set(_assigned("WEATHER_LOOK_GENERATIONS")) == {"M_RainShaft", "M_TornadoFunnel", "M_TornadoPuff"}
+    assert set(_assigned("WEATHER_LOOK_GENERATIONS")) == {"M_RainShaft", "M_TornadoFunnel", "M_TornadoPuff",
+                                                           "M_TornadoFunnelSoft"}
 
 
 def test_the_lamps_scatter_a_stated_fraction_in_fog():

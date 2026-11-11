@@ -900,7 +900,7 @@ def test_the_atmosphere_counts_the_haze_once_with_one_phase():
     body = CLOUDS_CPP[CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyAtmosphere"):
                       CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyClouds")]
     assert "Fog->SetDirectionalInscatteringExponent(static_cast<float>(FogExponent));" in body
-    assert "WorldAlbedo(Surface, GroundWetness)" in body
+    assert "WorldAlbedo(Surface, GroundWetness, StormNeutralAlbedo())" in body   # lane C: the storm bounce
     assert 'static_assert(SunPerPixelTransmittance, ' in body
     ini = (REPO / "ue" / "Config" / "DefaultEngine.ini").read_text(encoding="utf-8")
     assert "r.SupportExpFogMatchesVolumetricFog" not in ini   # the measure renders' fog stays as it was
