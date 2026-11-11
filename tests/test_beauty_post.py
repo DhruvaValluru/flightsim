@@ -350,7 +350,8 @@ def test_look_choices_follow_the_beauty_look():
     assert choice["noisy"] and choice["stock"] == bl.FILM_STOCKS["storm"]
     assert choice["cube"] == REPO / storm["film_stock"]["cube"] and choice["cube"].is_file()
     assert choice["grain"] is (not bl.FILM_GRAIN_IN_ENGINE)
-    quiet = dict(storm, world_preset="clear", lens_post={"FilmGrainIntensity": 0.0})
+    quiet = dict(storm, world_preset="clear",
+                 engine_look={"film_grain": {"values": {"FilmGrainIntensity": 0.0}}})
     assert bp.look_choices(quiet)["noisy"] is False and bp.look_choices(quiet)["grain"] is True
     assert set(bp.NOISY_PRESETS) <= {"storm", "rain", "hazy", "overcast", "clear"}
 

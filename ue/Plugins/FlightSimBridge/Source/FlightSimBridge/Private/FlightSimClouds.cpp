@@ -1969,7 +1969,7 @@ void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualSc
 	}
 	Trace->SetNumberField(TEXT("layers_set"), LayersSet);
 	Trace->SetStringField(TEXT("basis"),
-		TEXT("world_beauty.distant_tracing_max_km: constrained and the sheet drawn -> min(row, DISTANT_NEAR_FIELD_KM). "
+		TEXT("the distant tracing (world_beauty.distant_tracing_max_km), constrained and the sheet drawn -> min(row, DISTANT_NEAR_FIELD_KM). "
 		     "VolumetricCloud.usf: StepCount = SampleCountMax x saturate(path x InvDistanceToSampleCountMax) "
 		     "(r.VolumetricCloud.DistanceToSampleMaxCount, 15 km), non-decreasing in the path: a shorter trace never "
 		     "adds a sample, only shortens the step; the sheet fades in over FadeKm up to the trace's end"));

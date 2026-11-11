@@ -625,7 +625,11 @@ def look_choices(plan: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     plan = plan or {}
     stock = plan.get("film_stock") or (film_stock_for(plan["grade"]) if plan.get("grade") else None)
     cube = REPO / stock["cube"] if stock and stock.get("cube") else None
-    engine_grain = float((plan.get("lens_post") or {}).get("FilmGrainIntensity", 0.0)) > 0.0
+    # The engine's grain lives in the engine look (round 5 L1: engine_look.film_grain.values);
+    # older sidecars carried it in lens_post.
+    grain_values = (((plan.get("engine_look") or {}).get("film_grain") or {}).get("values")
+                    or plan.get("lens_post") or {})
+    engine_grain = float(grain_values.get("FilmGrainIntensity", 0.0)) > 0.0
     return {
         "cube": cube,
         "stock": stock["stock"] if stock else None,

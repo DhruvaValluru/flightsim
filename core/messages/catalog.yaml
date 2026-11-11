@@ -1394,3 +1394,12 @@ check.look_record:
   sentence: "The beauty look's record agrees with the render's quality, and every effect that moves pixels is listed."
 check.look_label_alignment:
   sentence: "The labels lie on the beauty picture: of its own frame and instant, at the solved field of view, with every pixel-moving effect mapped or measured within tolerance."
+sky_hdri.unknown:
+  sentence: "The sky HDRI asked for is not one of the pinned skies."
+  hint: "Name one of the pinned skies, or render without the sky HDRI probe."
+sky_hdri.licence:
+  sentence: "The pinned sky HDRI carries a licence the project does not allow."
+  hint: "Only CC0, CC-BY, MIT, Apache or BSD skies may be pinned; pick another sky."
+sky_hdri.format:
+  sentence: "The downloaded sky HDRI is not a 32-bit RLE RGBE Radiance file the preparer can read."
+  hint: "Delete the cached file and prepare the sky again; its checksum pin decides what is accepted."
