@@ -257,7 +257,9 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	// (167/155/147) and lit grey (89/82/92). The imported materials stand until
 	// a bisect inside the masters finds the cause; -aircraft-materials=on is the
 	// probe. Labels never depended on them.
-	const bool bMaterialsSwitch = AircraftFxSwitch(Params, TEXT("aircraft-materials="), false, SwitchError);
+	// Final sweep: ON again, with the flat paint master by default (below,
+	// -aircraft-probe= absent). Off (round 22's default) blacked out #12's canopy.
+	const bool bMaterialsSwitch = AircraftFxSwitch(Params, TEXT("aircraft-materials="), true, SwitchError);
 	const bool bLightsSwitch = AircraftFxSwitch(Params, TEXT("aircraft-lights="), true, SwitchError);
 	const bool bContrailsSwitch = AircraftFxSwitch(Params, TEXT("contrails="), true, SwitchError);
 	const bool bAfterburnerSwitch = AircraftFxSwitch(Params, TEXT("afterburner="), true, SwitchError);
@@ -302,6 +304,17 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 			}
 			Probes.AddUnique(Word);
 		}
+	}
+	else
+	{
+		// Final sweep (round 44): the default paint is the flat master. The
+		// bisect (r27-r40) found the gen-4..6 paint and bare-metal masters
+		// darken the aircraft (C172 12/10/10 vs 89/82/92 under overcast) while
+		// M_AircraftProbeFlat on the same instance inputs matched the imported
+		// materials exactly; glass and rubber keep their look instances, so the
+		// cockpit canopy stays the thin translucent glass (#12 went 75 % black
+		// with every look instance off). -aircraft-probe=none: the full masters.
+		Probes.Add(TEXT("flat"));
 	}
 	Humidity.ParseParams(Params);  // condensation-solver: -humidity-pct=
 }

@@ -970,7 +970,7 @@ UE_DISTORTION_OFFSET_FUDGE = 0.00023
 
 #: FFlightSimAircraftFXOptions::ParseParams's switches: (key, default). A
 #: word other than these is refused by name (aircraft_look.switch).
-FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", False), ("aircraft-lights=", True),
+FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", True), ("aircraft-lights=", True),
                ("contrails=", True), ("afterburner=", True), ("heat-haze=", False))
 SWITCH_ON = ("on", "1", "true")
 SWITCH_OFF = ("off", "0", "false")
@@ -1034,13 +1034,18 @@ PROBE_DEFAULT_LIT_MASTER = "M_AircraftPaintDefaultLit"
 PROBE_TANGENT_NORMAL_MASTER = "M_AircraftPaintTangentNormal"
 
 
+#: The probes applied when -aircraft-probe= is absent (the host's ParseParams
+#: else branch): the flat paint master, the final sweep's default.
+DEFAULT_AIRCRAFT_PROBES = ("flat",)
+
+
 def parse_aircraft_probes(params):
     """Twin of the host's -aircraft-probe= parse: the probe words in the order
     given (duplicates once), () when absent, ``none`` or empty;
     LookError("aircraft_look.switch: ...") for an unknown word."""
     match = re.search(r"(?:^|\s)-?" + re.escape(AIRCRAFT_PROBE_KEY) + r'"?([^\s"]*)', params)
     if match is None:
-        return ()
+        return DEFAULT_AIRCRAFT_PROBES
     out = []
     for word in match.group(1).split(","):
         word = word.strip()

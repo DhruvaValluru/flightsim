@@ -17,8 +17,10 @@ MASTERS = (REPO / "scripts/ue_aircraft_master_materials.py").read_text(encoding=
 
 
 def test_parse_matches_the_host_words():
-    assert look.parse_aircraft_probes("") == ()
-    assert look.parse_aircraft_probes("-aircraft-materials=on") == ()
+    # final sweep: absent means the flat paint default; "none" means the full masters
+    assert look.parse_aircraft_probes("") == ("flat",)
+    assert look.parse_aircraft_probes("-aircraft-materials=on") == ("flat",)
+    assert look.parse_aircraft_probes("-aircraft-probe=none") == ()
     assert look.parse_aircraft_probes("-aircraft-materials=on -aircraft-probe=nocoat,noao") == ("nocoat", "noao")
     assert look.parse_aircraft_probes("-aircraft-probe=flat,flat,none") == ("flat",)
     assert look.parse_aircraft_probes("-aircraft-probe=measured-mesh") == ("measured-mesh",)
