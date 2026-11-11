@@ -33,12 +33,22 @@
 //   GroundRelZ float   the ground under the camera minus the camera, cm
 //   Seed       float   the card's rain seed (masked to 24 bits)
 //   VeilVary   float   lane D round 26: the veil's share varied by falling curtains (0: uniform)
+//   VaryScale  float   round 47: the curtains' cell size as a share of the wide-lens one (1:
+//                      generation 5; the C++ sets min(1, pixel angle / the 54 deg reference))
 //
 // Round 26 (#07: "a flat grey field"): the veil is uniform round the shell, so through a
 // long lens the frame is one grey. With VeilVary the veil is x (1 + VeilVary x (2n - 1)),
 // n a smooth value noise in (arc, height) with cells a fifth of the radius across and
 // 0.8 radius tall, falling at the drops' speed: denser and thinner curtains of rain at
 // three depths, the structure a heavy-rain photograph shows. VeilVary 0: unchanged.
+//
+// Round 47 (round 44's #07 still a flat grey field): the curtain cells were a fifth of
+// the radius across and 0.8 of it tall -- 11.3 deg x 38.7 deg at EVERY shell (an angle,
+// like round 9's streak bars). Through #07's 250 mm lens (8.2 x 4.6 deg) one cell is
+// wider and taller than the frame, so every shell's veil was one value across the
+// picture: uniform. VaryScale shrinks the cells with the view's pixel angle (the same
+// rule as the streak cap, rain_veil.streak_cap_rad): about 5 curtains across #07's
+// frame, unchanged (1) at any lens of 54 deg or wider. -veil-lens-cells=off is the A/B.
 struct FCurtain
 {
 	uint Pcg(uint v)
@@ -90,7 +100,8 @@ if (C.U(hs) < StreakDensity)
 float veil = Veil;
 if (VeilVary > 0.0)
 {
-	float2 g = float2(arc / (Radius * 0.2), (Rel.z + FallCmps * Time) / (Radius * 0.8));
+	float vs = VaryScale > 0.0 ? min(VaryScale, 1.0) : 1.0;
+	float2 g = float2(arc / (Radius * 0.2 * vs), (Rel.z + FallCmps * Time) / (Radius * 0.8 * vs));
 	float2 gi = floor(g);
 	float2 gf = g - gi;
 	gf = gf * gf * (3.0 - 2.0 * gf);

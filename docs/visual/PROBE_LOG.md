@@ -3563,3 +3563,48 @@ with a tangent-space (0, 0, 1) normal, the imported / flat normal path). default
 tangentnormal act on paint slots only (bare metal is already Default Lit); defaultlit wins if
 both are given. Reading: whichever single probe brings the A-4 to about 167 is the cause; the
 A-4 in sun is the clean test (no rain, no wet).
+
+## round 47: #13's four lines are the contrails; #07's curtains vs the 250 mm lens (2026-11-11)
+
+Mac, uncompiled, nothing rendered. Read from round 44's frames (vis-windows `ef44ace6`).
+
+**#13 four straight light lines (rounds 5-44): the 747's four contrails, not the sea.**
+- Evidence (13_747_cruise_over_the_ocean.jpg, a high-pass of the luma): the lines meet at
+  (634, 203), eye level. Their slopes (dx/dy from the vanishing point) are 0.69 (inner pair)
+  and 1.22 (outer pair): lateral offset over height below the camera. Their ratio, 0.565, is
+  the JSBSim B747 thrusters' (y +-460 in and +-820 in: 0.561); with the chase offset's 12 m
+  up (camera.CHASE_OFFSETS B747) plus the engines' ~3 m below the reference, 0.69 x 17 m =
+  11.7 m and 1.22 x 17 m = 20.8 m: the thrusters exactly. The outer lines extrapolate through
+  the outboard nacelles. Across a line the profile is a tent ~24 px wide at the bottom row and
+  ~16 px at y 600 (a 1.2-1.5 m ribbon at 34-60 m), +20 grey at y 700, +10 at y 600, 0 by
+  y 500: brighter with age, i.e. still forming.
+- Cause: contrail_opacity.hlsl's ramp was `smoothstep(Formation, Formation + 0.04, UV.x)`
+  with UV.x = age / LifetimeS. At LifetimeS 25 s that is 1 s, 250 m at cruise, so everywhere a
+  110 m chase frame shows the trails they are 3-10 % formed: four faint, thin lines with no
+  join to the engines, which read as marks on the sea. Every sea fix (cap seams, lift, depth
+  pull) left them because they were never on the sea.
+- Fix (beauty only: the FX is built only under -quality=beauty and is in BeautyOnlyActors):
+  FormationRamp scalar (LOOK_GENERATION 7; default 0.04 = generation 6), set by the C++ to
+  contrail.FormationRampS (0.25 s, ~62 m) / LifetimeS. A/B: `-contrail-formation-ramp=off`
+  (generation 6's ramp); `-contrails=off` removes them (the cause check).
+- Windows: #13 default -> four white trails from the engines, opaque by ~100 m behind them,
+  streaming to the frame's bottom; `-contrails=off` -> a sea with no lines (confirms the
+  cause); `-contrail-formation-ramp=off` -> round 44's faint lines. Read
+  `aircraft_look.contrail.formation_ramp_on` and `contrail_frames`.
+
+**#07 flat grey field: the falling curtains were wider than the 250 mm frame.**
+- Geometry: the tower camera looks up ~40 deg at the A320 1.5 km away; the 250 mm frame
+  (8.2 x 4.6 deg) holds no ground or runway at any fog, so the ground cannot be made
+  readable without moving the camera (which would move measure frames and labels). The
+  background is the height fog's fixed storm inscatter: one grey by construction.
+- Cause: rain_curtain.hlsl's VeilVary cells are a fifth of the shell radius across and 0.8 of
+  it tall: 11.3 x 38.7 deg at every shell. Through 8.2 x 4.6 deg one cell covers the frame,
+  so each shell's veil is one value across the picture (round 36's fix did nothing at
+  250 mm). The same angle-vs-lens fault as round 9's streak bars.
+- Fix: VaryScale (M_RainCurtain 6; default 1 = generation 5) = min(1, pixel angle /
+  BEAUTY_REFERENCE_PIXEL_RAD) per frame (rain_veil.veil_vary_scale), so ~5 curtains across
+  #07's frame; 1 at 54 deg or wider (#06, #09, #15 unchanged). A/B: `-veil-lens-cells=off`.
+- Windows: #07 default -> soft vertical bands of denser and thinner rain (a few per frame
+  width) over the grey; off -> round 44. Contrast is small by construction (veil tone
+  Shade 0.85 x the scene behind it: about +-4 % luminance); if the bands are too faint the
+  knob is VEIL_VARY / VEIL_SHADE_UNDER_DECK. Read `rain_veil.vary_lens_cells`.

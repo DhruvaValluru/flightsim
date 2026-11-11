@@ -79,6 +79,9 @@ struct FFlightSimAircraftFXOptions
 	bool bContrails = true;
 	bool bAfterburner = true;
 	bool bHeatHaze = false;
+	// Round 47 (#13's four light lines): the contrail forms over contrail.FormationRampS
+	// (on) or over generation 6's 0.04 of its lifetime (off, -contrail-formation-ramp=off).
+	bool bContrailFormationRamp = true;
 	// round 5 (L4): the render carries -labels. The Thin Translucent canopy
 	// instance (Look/MI_<slot>_thin) is applied only when it does not: a
 	// translucent pane writes no depth and the ID / depth label captures draw

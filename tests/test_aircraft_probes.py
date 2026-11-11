@@ -50,7 +50,7 @@ def test_each_probe_sets_what_the_twin_says():
 
 
 def test_the_gen5_masters_carry_the_probe_handles_at_the_gen4_values():
-    assert re.search(r'^LOOK_GENERATION = "6"$', MASTERS, re.M)
+    assert re.search(r'^LOOK_GENERATION = "7"$', MASTERS, re.M)
     for cls in ("paint", "bare_metal"):
         assert look.CLASS_SCALARS[cls]["PanelNormalAmount"] == 1.0
         assert look.CLASS_SCALARS[cls]["PanelAoAmount"] == 1.0

@@ -762,3 +762,31 @@ def test_tree_digest_is_order_and_content_sensitive(tmp_path):
     first = models.tree_sha256(tmp_path)
     (tmp_path / "a" / "x.txt").write_text("2", encoding="utf-8")
     assert models.tree_sha256(tmp_path) != first
+
+
+# -- round 47: #13's four light lines are the contrails' 1 s formation ramp ---------
+
+def test_round47_the_contrail_forms_over_seconds_not_a_share_of_its_lifetime():
+    shader = (REPO / look.SHADER_DIR / "contrail_opacity.hlsl").read_text(encoding="utf-8")
+    assert "float ramp = FormationRamp > 0.0 ? FormationRamp : 0.04;" in shader
+    assert "float formed = smoothstep(Formation, Formation + ramp, UV.x);" in shader
+    assert "Formation + 0.04" not in shader
+    assert look.SHADER_INPUTS["contrail_opacity"][-1] == "FormationRamp"
+    assert look.FX_PARAMETERS["M_AircraftContrail"] == ("Opacity", "Formation", "FormationRamp")
+    masters = MASTERS.read_text(encoding="utf-8")
+    assert re.search(r'^LOOK_GENERATION = "7"$', masters, re.M)
+    assert '"FormationRamp": (_scalar(material, ramp_name, 0.04,' in masters
+    # 747 cruise: the ramp is under a wingspan of flight, not generation 6's 250 m
+    ramp_s = look.CONTRAIL_DEFAULTS["FormationRampS"]
+    assert 0.04 * look.CONTRAIL_DEFAULTS["LifetimeS"] == 1.0 and ramp_s * 250.0 < 70.0
+    text = FX_CPP.read_text(encoding="utf-8")
+    assert 'Constant(TEXT("contrail"), TEXT("FormationRampS"), 0.25) / FMath::Max(Lifetime, 0.01)' in text
+    assert "SetScalarParameterValue(FName(AircraftFxParamFormationRamp)" in text
+    assert "!bVapour && Options.bContrailFormationRamp" in text
+    assert "constexpr double AircraftFxLegacyFormationRamp = 0.04;" in text
+    assert 'TEXT("formation_ramp_on")' in text
+    # the A/B word, parsed like every FX switch (twin and C++)
+    assert look.parse_fx_switches("")["contrail-formation-ramp"] is True
+    assert look.parse_fx_switches("-contrail-formation-ramp=off")["contrail-formation-ramp"] is False
+    assert look.parse_fx_switches("-contrails=off")["contrail-formation-ramp"] is True
+    assert "bContrailFormationRamp = bAll && bFormationRampSwitch;" in text
