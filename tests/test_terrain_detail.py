@@ -115,8 +115,15 @@ def test_the_tiles_material_wires_the_detail_and_can_be_built_without_it():
 
 def test_the_ocean_material_is_beauty_only_and_reads_what_the_script_wires():
     assert "M_FlightSimOceanBeauty" in _literal("WORLD_BEAUTY_MATERIALS")
-    # 2: round 10's #13 (a tile grid and screen-space reflection streaks)
-    assert _literal("WORLD_GENERATIONS")["M_FlightSimOceanBeauty"] == "2"
+    # 2: round 10's #13 (a tile grid and screen-space reflection streaks);
+    # 3: round 19's #13 (the cap's radial edges as lines, no waves or glint)
+    assert _literal("WORLD_GENERATIONS")["M_FlightSimOceanBeauty"] == "3"
+    for name in ("ocean_normal", "ocean_emissive", "ocean_colour"):
+        hlsl = _shader(name)
+        # shaded from the sphere's up, never the cap's interpolated vertex normals
+        assert "float3 up = S.Up(p);" in hlsl and "normalize(NormalWS)" not in hlsl, name
+        assert "tilt += S.Swell(p.xy, windDir, TimeS, footprintM);" in hlsl, name
+    assert "SHEEN_SHARE" in _shader("ocean_emissive")
     inputs = _literal("WORLD_OCEAN_INPUTS")
     assert set(inputs) == {"ocean_normal", "ocean_emissive", "ocean_colour"}
     assert not (SHADERS / "ocean_roughness.hlsl").exists()
@@ -157,6 +164,11 @@ def test_the_beauty_sea_draws_the_beauty_material_first():
     body = TILES_CPP[TILES_CPP.index("FFlightSimGoogleTiles::ApplyBeautyGround"):]
     assert body.index("OceanBeautyPath) : nullptr") < body.index("LoadObject<UMaterialInterface>(nullptr, OceanGroundPath)")
     assert 'TEXT("/Game/FlightSim/M_FlightSimOceanBeauty.M_FlightSimOceanBeauty")' in body
+    # round 19: the cap fine enough and lifted with the camera, so the tiles'
+    # own ocean never stands above it (its sag let only its edges show)
+    assert "constexpr int32 SeaRings = 128;" in TILES_CPP and "constexpr int32 SeaSegments = 256;" in TILES_CPP
+    assert "FMath::Clamp(SeaLiftPerAglM * CameraAglM, SeaLiftM, SeaLiftMaxM)" in body
+    assert "Vertices.Add(FVector(X, Y, LiftM - Drop) * CmPerM);" in body
 
 
 def test_the_finer_tiles_are_beauty_only_and_a_stated_error_wins():

@@ -25,7 +25,17 @@
 //   * the waves' texture only where the pixel resolves its texels (the 256 m and
 //     54 m octaves, a low camera), with the tile's own trilinear sampler.
 // The body colour (lit by the engine's diffuse) is the deep sea's dark
-// water-leaving colour. UNCALIBRATED: HORIZON_GAIN, ZENITH_TINT, PATCHINESS and
+// water-leaving colour.
+//
+// Round 19 (vis-windows ba78a46b) drew generation 2 as Google's matte ocean with
+// four light lines from the horizon: the cap's flat triangles sagged below the
+// sphere and the tiles' ocean stood above them except along the cap's radial
+// edges (the C++ now refines and lifts the cap). Generation 3 also shades from
+// the sphere's own up (FOceanSurface::Up), never the cap's interpolated vertex
+// normals; adds a swell resolved from mid altitude (three long waves, phases
+// and amplitudes broken by smooth fields), wind streaks and slicks stretched
+// along the wind (8 x 1.2 km) that vary the roughness, a paler reflected horizon,
+// and a broad sheen lobe so a noon chase view has light on the water. UNCALIBRATED: HORIZON_GAIN, ZENITH_TINT, PATCHINESS and
 // the body colour, set by probe render on the render machine
 // (docs/visual/PROBE_LOG.md ## lane-B terrain detail, round-10 ocean).
 //
@@ -48,7 +58,11 @@ const float FOAM_ALBEDO = 0.6;
 // The reflected sky relative to SkyLum: the horizon's pale brightness and the
 // zenith's darker blue (the shape of a clear sky's radiance with elevation).
 const float HORIZON_GAIN = 1.5;
+const float HORIZON_PALE = 0.4;     // the reflected horizon sky's share of grey (it is whitish)
 const float3 ZENITH_TINT = float3(0.35, 0.55, 0.95);
+// The glint's broad sheen: its share of the sun's specular and its width.
+const float SHEEN_SHARE = 0.15;
+const float SHEEN_WIDTH = 2.5;
 struct FOceanSurface
 {
 	// shared: ocean (ocean_normal.hlsl, ocean_emissive.hlsl, ocean_colour.hlsl)
@@ -80,14 +94,53 @@ struct FOceanSurface
 		float c = Value2(float2(0.28 * q.x + 0.96 * q.y, -0.96 * q.x + 0.28 * q.y) * 4.11 + float2(5.3, 29.9));
 		return (a + 0.5 * b + 0.25 * c) / 1.75;
 	}
+	// The sea's up at p (metres): the sphere the cap is cut from (centre
+	// EarthRadiusM below the origin; the cap's lift moves it < 1e-5 rad), so
+	// the shading never reads the cap's interpolated vertex normals.
+	float3 Up(float3 pm)
+	{
+		return normalize(float3(pm.x, pm.y, pm.z + 6371008.8));
+	}
+	// Wind streaks and slicks: a 0..1 field stretched along the wind (8 km
+	// along, 1.2 km across), as the sea reads in a photo from altitude.
+	float Streaks(float2 pm, float2 windDir)
+	{
+		float along = dot(pm, windDir);
+		float across = dot(pm, float2(-windDir.y, windDir.x));
+		return Macro(float2(along / 8.0, across / 1.2), 1000.0);
+	}
+	// The swell (the normal's horizontal part): three long waves near the wind's
+	// direction, their phases warped and their amplitudes enveloped by smooth
+	// fields so no stripe repeats, each drawn only where the pixel resolves it
+	// (a few pixels per wavelength) and travelling at its deep-water speed.
+	float2 Swell(float2 pm, float2 windDir, float timeS, float footprintM)
+	{
+		float lengths[3] = {310.0, 190.0, 120.0};
+		float slopes[3] = {0.022, 0.018, 0.014};
+		float turns[3] = {0.0, 0.45, -0.35};
+		float warp = 12.566 * Macro(pm, 1800.0);
+		float2 tilt = float2(0.0, 0.0);
+		[unroll] for (int i = 0; i < 3; ++i)
+		{
+			float seen = 1.0 - smoothstep(lengths[i] / 10.0, lengths[i] / 4.0, footprintM);
+			float s, c;
+			sincos(turns[i], s, c);
+			float2 d = float2(c * windDir.x - s * windDir.y, s * windDir.x + c * windDir.y);
+			float k = 6.2831853 / lengths[i];
+			float phase = k * dot(d, pm) - sqrt(9.81 * k) * timeS + warp * (0.6 + 0.3 * i);
+			float envelope = lerp(0.4, 1.4, Macro(pm + float2(731.0 * i, 293.0 * i), 1200.0));
+			tilt -= seen * envelope * slopes[i] * cos(phase) * d;
+		}
+		return tilt;
+	}
 	// Cox & Munk (1954), clean sea: the total mean-square slope at wind U m/s.
 	float SlopeVariance(float windMs)
 	{
 		return 0.003 + 0.00512 * max(windMs, 0.0);
 	}
-	// The sea state at p (metres). The Cox-Munk variance, varied +-PATCHINESS
-	// by a 6 km field (real seas carry wind streaks and slicks: the glint
-	// lobe is patchy, never a flat disc). Only the wave octaves whose texels
+	// The sea state at p (metres). The Cox-Munk variance, varied +-45 % by
+	// the wind streaks (slicks are smoother, so they reflect a sharper, brighter
+	// sky; the glint lobe is patchy, never a flat disc). Only the wave octaves whose texels
 	// the pixel resolves are drawn from the Phillips tile (256 m and 54 m,
 	// assets/terrain_detail/ocean, OpenGL normal with slope RMS 0.35), with
 	// the tile's own trilinear sampler, rotated and drifting downwind; from a
@@ -98,7 +151,7 @@ struct FOceanSurface
 	void Waves(Texture2D tex, SamplerState samp, float3 p, float3 dpx, float3 dpy, float footprintM, float timeS,
 	           float windMs, float2 windDir, out float2 tilt, out float variance, out float crest)
 	{
-		float total = SlopeVariance(windMs) * lerp(0.65, 1.35, Macro(p.xy, 6000.0));
+		float total = SlopeVariance(windMs) * lerp(0.55, 1.45, Streaks(p.xy, windDir));
 		float tiles[2] = {256.0, 54.0};
 		float shares[2] = {0.35, 0.3};
 		float angles[2] = {-0.6, 1.1};
@@ -142,7 +195,8 @@ float2 windDir = normalize(float2(WindDirX, WindDirY) + float2(1e-4, 0.0));
 float2 tilt;
 float variance, crest;
 S.Waves(OceanN, OceanNSampler, p, dpx, dpy, footprintM, TimeS, WindSpeedMS, windDir, tilt, variance, crest);
-float3 up = normalize(NormalWS);
+float3 up = S.Up(p);   // the sphere's, not the cap's interpolated normal
+tilt += S.Swell(p.xy, windDir, TimeS, footprintM);
 float3 n = normalize(up + float3(tilt, 0.0));
 // Monahan & O'Muircheartaigh 1980: whitecap share W = 3.84e-6 U^3.41; the
 // resolved crest measure is Rayleigh-like, so |s| > sqrt(-ln W) covers W.
@@ -156,10 +210,15 @@ float g1v = 2.0 * nv / (nv + sqrt(a2 + (1.0 - a2) * nv * nv));
 // The sky in the mirror direction, from the pale horizon to the bluer zenith.
 float3 r = reflect(-v, n);
 float elevation = saturate(dot(r, up));
-float3 sky = SkyLum * lerp(HORIZON_GAIN.xxx, ZENITH_TINT, sqrt(elevation));
+float3 pale = lerp(SkyLum, dot(SkyLum, float3(0.2126, 0.7152, 0.0722)).xxx, HORIZON_PALE);
+float3 sky = lerp(pale * HORIZON_GAIN, SkyLum * ZENITH_TINT, sqrt(elevation));
 float fresnel = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
 float3 reflected = fresnel * g1v * sky;
-// The sun glint: GGX (Cox-Munk width), Schlick at the half vector, Smith both ways.
+// The sun glint: GGX (Cox-Munk width), Schlick at the half vector, Smith both
+// ways; plus a broad sheen lobe (SHEEN_SHARE of the energy at SHEEN_WIDTH x the
+// width, at most 0.65): Cox & Munk's measured peakedness puts more of the
+// slopes in the tails than a single lobe, which is what lights a chase view's
+// sea toward the sun's azimuth when the sharp lobe is out of frame (noon).
 float3 l = normalize(SunDir);
 float nl = dot(n, l);
 float3 glint = float3(0.0, 0.0, 0.0);
@@ -167,10 +226,18 @@ float3 glint = float3(0.0, 0.0, 0.0);
 {
 	float3 h = normalize(l + v);
 	float nh = saturate(dot(n, h));
-	float q = nh * nh * (a2 - 1.0) + 1.0;
-	float d = a2 / (3.14159265 * q * q);
 	float fh = 0.02 + 0.98 * pow(1.0 - saturate(dot(v, h)), 5.0);
-	float g1l = 2.0 * nl / (nl + sqrt(a2 + (1.0 - a2) * nl * nl));
-	glint = SunIlluminance * fh * d * g1v * g1l / (4.0 * nv);
+	float lobe = 0.0;
+	[unroll] for (int k = 0; k < 2; ++k)
+	{
+		float ak = k == 0 ? alpha : min(SHEEN_WIDTH * alpha, 0.65);
+		float b2 = ak * ak;
+		float q = nh * nh * (b2 - 1.0) + 1.0;
+		float d = b2 / (3.14159265 * q * q);
+		float gv = 2.0 * nv / (nv + sqrt(b2 + (1.0 - b2) * nv * nv));
+		float gl = 2.0 * nl / (nl + sqrt(b2 + (1.0 - b2) * nl * nl));
+		lobe += (k == 0 ? 1.0 - SHEEN_SHARE : SHEEN_SHARE) * d * gv * gl;
+	}
+	glint = SunIlluminance * fh * lobe / (4.0 * nv);
 }
 return max(reflected + glint, 0.0) * (1.0 - foam);

@@ -540,8 +540,18 @@ namespace FlightSimBeautyGroundPure
 	constexpr double FogDensityPerExtinctionPerM = 20.813689810056077;
 	constexpr double EarthRadiusM = 6371008.8;      // the mean radius (IUGG)
 	constexpr double SeaLiftM = 2.0;                // above the tiles' geoid sea; the sea departs ~1 m from it
-	constexpr int32 SeaRings = 64;
-	constexpr int32 SeaSegments = 96;
+	// Lane B, round 19 (2026-11-11): #13 drew Google's matte ocean with the
+	// cap showing only as four light lines along its radial edges: the cap's
+	// flat triangles sag below the sphere (a 15 km chord at 233 km with 96
+	// segments: 4.4 m) and the tiles' own ocean stood above it everywhere but
+	// at the edges. Finer (256 segments, 128 rings: the widest chord ~5.7 km,
+	// sag ~0.7 m) and lifted with the camera's height (0.2 % of it, 2..40 m:
+	// 20 m from 10 km, a fraction of a pixel there), so the cap is the sea
+	// the camera sees. The tiles stay drawn under it.
+	constexpr double SeaLiftPerAglM = 0.002;
+	constexpr double SeaLiftMaxM = 40.0;
+	constexpr int32 SeaRings = 128;
+	constexpr int32 SeaSegments = 256;
 	constexpr double CmPerM = 100.0;
 
 	// The vertical column (metres, density-ratio weighted) of an exp2 height
@@ -715,6 +725,7 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 		// tiles' ocean stands on), so the sea falls R - sqrt(R^2 - r^2) below
 		// it at distance r and its horizon is the tiles' horizon.
 		const double RadiusM = FMath::Min(SeaRadiusM, 0.5 * EarthRadiusM);
+		const double LiftM = FMath::Clamp(SeaLiftPerAglM * CameraAglM, SeaLiftM, SeaLiftMaxM);
 		TArray<FVector> Vertices;
 		TArray<FVector> Normals;
 		TArray<FProcMeshTangent> Tangents;
@@ -726,7 +737,7 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 			const double X = Rm * FMath::Cos(Angle);
 			const double Y = Rm * FMath::Sin(Angle);
 			const double Drop = EarthRadiusM - FMath::Sqrt(EarthRadiusM * EarthRadiusM - Rm * Rm);
-			Vertices.Add(FVector(X, Y, SeaLiftM - Drop) * CmPerM);
+			Vertices.Add(FVector(X, Y, LiftM - Drop) * CmPerM);
 			Normals.Add(FVector(X, Y, EarthRadiusM - Drop).GetSafeNormal());
 			Tangents.Add(FProcMeshTangent(FVector(-FMath::Sin(Angle), FMath::Cos(Angle), 0.0), false));
 			UV.Add(FVector2D(X / 1000.0, Y / 1000.0));
@@ -788,7 +799,14 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 			       "zenith) and Cox-Munk sun glint as emissive from the atmosphere nodes, the Phillips wave normal only "
 			       "where resolved, deep-sea body colour, Monahan whitecaps at WindSpeedMS 7 (UNCALIBRATED)")
 			: TEXT("M_Ground_Ocean: M_FlightSimOceanBeauty did not load (run scripts/ue_create_materials.py)"));
-		Sea->SetNumberField(TEXT("lift_m"), SeaLiftM);
+		Sea->SetNumberField(TEXT("lift_m"), LiftM);
+		Sea->SetStringField(TEXT("lift_basis"),
+			TEXT("max(2 m, 0.2 % of the camera's height), at most 40 m: above the tiles' own ocean and the cap's "
+			     "chord sag, so the tiles' matte ocean never shows through (round 19's #13 lines)"));
+		{
+			const double WidestChordM = 2.0 * PI * RadiusM / SeaSegments;
+			Sea->SetNumberField(TEXT("max_chord_sag_m"), WidestChordM * WidestChordM / (8.0 * EarthRadiusM));
+		}
 		Sea->SetNumberField(TEXT("earth_radius_m"), EarthRadiusM);
 		Sea->SetNumberField(TEXT("rings"), SeaRings);
 		Sea->SetNumberField(TEXT("segments"), SeaSegments);

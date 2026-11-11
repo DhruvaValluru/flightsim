@@ -3410,3 +3410,27 @@ needed for the look (the C++ edit is only the render.json wording). Probe #13: n
 streaks; a dark blue gradient brightening toward the horizon; with the sun ahead or low (a
 different hour) a soft glint lobe. Too bright at the horizon -> HORIZON_GAIN 1.2; sea too
 black -> ZENITH_TINT x1.3. The horizon haze line is lane E's.
+
+### lane-B round-19 ocean (M_FlightSimOceanBeauty generation 3, the cap refined and lifted)
+
+Round 19 (vis-windows ba78a46b) drew generation 2 on #13 as a flat uniform blue with four
+straight light lines from the horizon toward the camera. Read: the uniform blue is Google's
+matte ocean imagery, not the material; the cap's flat triangles sag below the sphere (96
+segments: a 15 km chord at the 233 km rim, 4.4 m) and the tiles' ocean stood above them
+everywhere except along the cap's radial edges, where the cap (our emissive sea) showed as
+thin lines converging on its centre. Round 10's grid was the same poke-through.
+- C++ (FlightSimGoogleTiles.cpp ApplyBeautyGround): 256 segments x 128 rings (widest chord
+  ~5.7 km, sag ~0.7 m; 32,769 vertices) and the lift max(2 m, 0.2 % of the camera's height),
+  at most 40 m (20 m from 10 km; sub-pixel there). Recorded: `sea.lift_m`, `lift_basis`,
+  `max_chord_sag_m`. The tiles stay drawn under it.
+- Material (generation 3): shaded from the sphere's own up (no vertex-normal interpolation
+  can crease it); a swell (310 / 190 / 120 m, slopes 0.022 / 0.018 / 0.014, phases and
+  envelopes broken by smooth fields) drawn where resolved; wind streaks and slicks (8 x 1.2 km
+  along the wind) varying the Cox-Munk roughness +-45 %; the reflected horizon 40 % greyer;
+  a broad sheen lobe (15 % of the sun's specular at 2.5x the width) so a noon chase view has
+  light on the water toward the sun's azimuth. No azimuth wrap exists in the sky term (it
+  reads only the reflected ray's elevation).
+- Needs the C++ rebuild AND scripts/ue_create_materials.py (stamp 3). Probe #13: no lines;
+  `google_tiles.beauty_ground.sea.lift_m` 20; streaky, slightly varied blue with a brighter
+  sheen toward the sun and a paler horizon. Lines still there -> the tiles' ocean stands
+  higher than 20 m: raise SeaLiftPerAglM.
