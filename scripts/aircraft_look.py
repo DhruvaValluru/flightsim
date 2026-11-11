@@ -964,7 +964,7 @@ UE_DISTORTION_OFFSET_FUDGE = 0.00023
 
 #: FFlightSimAircraftFXOptions::ParseParams's switches: (key, default). A
 #: word other than these is refused by name (aircraft_look.switch).
-FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", True), ("aircraft-lights=", True),
+FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", False), ("aircraft-lights=", True),
                ("contrails=", True), ("afterburner=", True), ("heat-haze=", False))
 SWITCH_ON = ("on", "1", "true")
 SWITCH_OFF = ("off", "0", "false")

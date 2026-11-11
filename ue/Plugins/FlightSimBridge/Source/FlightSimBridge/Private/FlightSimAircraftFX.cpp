@@ -240,7 +240,13 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	const bool bAll = AircraftFxSwitch(Params, TEXT("aircraft-look="), true, SwitchError);
 	// Every switch is parsed (no short-circuit), so a bad word is refused
 	// even under -aircraft-look=off.
-	const bool bMaterialsSwitch = AircraftFxSwitch(Params, TEXT("aircraft-materials="), true, SwitchError);
+	// Round 22 (2026-11-11): OFF by default. With the gen-4 look instances the
+	// A-4 drew tan (111/98/84 in its mask, #4) and the C172 near-black under
+	// overcast (27/18/17, #8); -aircraft-materials=off drew them white
+	// (167/155/147) and lit grey (89/82/92). The imported materials stand until
+	// a bisect inside the masters finds the cause; -aircraft-materials=on is the
+	// probe. Labels never depended on them.
+	const bool bMaterialsSwitch = AircraftFxSwitch(Params, TEXT("aircraft-materials="), false, SwitchError);
 	const bool bLightsSwitch = AircraftFxSwitch(Params, TEXT("aircraft-lights="), true, SwitchError);
 	const bool bContrailsSwitch = AircraftFxSwitch(Params, TEXT("contrails="), true, SwitchError);
 	const bool bAfterburnerSwitch = AircraftFxSwitch(Params, TEXT("afterburner="), true, SwitchError);
