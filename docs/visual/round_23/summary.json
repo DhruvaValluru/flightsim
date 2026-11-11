@@ -1,0 +1,75 @@
+[
+ {
+  "number": 1,
+  "name": "golden hour A-4, flying east",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "8dc665e28d0a",
+  "lighting": {},
+  "seconds": 99.4,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 4,
+  "name": "desert A-4, sun behind the camera",
+  "prompt": "chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "9dd2f6441744",
+  "lighting": {
+   "sun_azimuth_deg": 45.0,
+   "sun_elevation_deg": 20.0
+  },
+  "seconds": 99.0,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 6,
+  "name": "a320 over sfo heading south, moderate rain",
+  "prompt": "wingman view of the a320 over sfo south at 3000 m in moderate rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "107623b65d0f",
+  "lighting": {},
+  "seconds": 200.2,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 8,
+  "name": "c172 over fuji, sunrise, light rain",
+  "prompt": "chase view of the c172p over mount fuji at sunrise in light rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "c3a66fa746de",
+  "lighting": {},
+  "seconds": 104.0,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 13,
+  "name": "747 cruise over the ocean",
+  "prompt": "chase view of the 747 over the ocean at 10000 m at noon for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "593ada06697f",
+  "lighting": {},
+  "seconds": 88.5,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ }
+]
