@@ -20,7 +20,7 @@
 // Inputs (the script's WORLD_OCEAN_INPUTS["ocean_roughness"], all three nodes alike):
 //   WorldPos     float3     absolute world position, cm
 //   NormalWS     float3     the vertex normal, world space (the sea cap's: radial)
-//   Time         float      seconds (the material's Time node)
+//   TimeS        float      seconds (the material's Time node)
 //   WindSpeedMS  float      the sea state's wind, m/s (Cox-Munk; Monahan's whitecaps)
 //   WindDirX     float      the downwind direction, world x ...
 //   WindDirY     float      ... and y (normalised here)
@@ -116,7 +116,7 @@ float footprintM = max(max(length(dpx), length(dpy)), 1e-3);
 float2 windDir = normalize(float2(WindDirX, WindDirY) + float2(1e-4, 0.0));
 float2 tilt;
 float unresolved, crest;
-S.Waves(OceanN, p, dpx, dpy, footprintM, Time, WindSpeedMS, windDir, tilt, unresolved, crest);
+S.Waves(OceanN, p, dpx, dpy, footprintM, TimeS, WindSpeedMS, windDir, tilt, unresolved, crest);
 // Monahan & O'Muircheartaigh 1980: whitecap share W = 3.84e-6 U^3.41; the
 // resolved crest measure is Rayleigh-like, so |s| > sqrt(-ln W) covers W.
 float cover = clamp(3.84e-6 * pow(max(WindSpeedMS, 0.0), 3.41), 1e-5, 0.2);

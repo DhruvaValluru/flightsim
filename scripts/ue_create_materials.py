@@ -3020,7 +3020,7 @@ WORLD_TILES_DETAIL_SCALARS = {"DetailAmount": 0.45, "SharpenAmount": 0.6, "Sharp
 #: ApplyBeautyGround): each ocean shader's Custom inputs, in order, the
 #: material's scalars (a 7 m/s trade-wind sea, UNCALIBRATED) and the
 #: generated wave normal (assets/terrain_detail/PIN.json "ocean").
-WORLD_OCEAN_INPUTS = {name: ("WorldPos", "NormalWS", "Time", "WindSpeedMS", "WindDirX", "WindDirY", "OceanN")
+WORLD_OCEAN_INPUTS = {name: ("WorldPos", "NormalWS", "TimeS", "WindSpeedMS", "WindDirX", "WindDirY", "OceanN")
                       for name in ("ocean_normal", "ocean_roughness", "ocean_colour")}
 WORLD_OCEAN_SCALARS = {"WindSpeedMS": 7.0, "WindDirX": 1.0, "WindDirY": 0.3}
 #: Water's F0 0.02 as the engine's Specular (F0 = 0.08 x Specular).
@@ -3472,7 +3472,7 @@ def create_world_ocean_beauty():
                                                          -1800, -300), ""),
             "NormalWS": (lib.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS,
                                                          -1800, -200), ""),
-            "Time": (lib.create_material_expression(material, unreal.MaterialExpressionTime, -1800, -100), ""),
+            "TimeS": (lib.create_material_expression(material, unreal.MaterialExpressionTime, -1800, -100), ""),
             "OceanN": (texture_object(material, lib, wave, unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL,
                                       -1800, 500), "")}
     for i, (name, default) in enumerate(WORLD_OCEAN_SCALARS.items()):

@@ -123,7 +123,7 @@ def test_the_ocean_material_is_beauty_only_and_reads_what_the_script_wires():
         hlsl = _shader(name)
         for pin in pins:
             assert re.search(rf"//\s+{pin}\s", hlsl), (name, pin)
-            assert pin in scalars | {"WorldPos", "NormalWS", "Time", "OceanN"}, (name, pin)
+            assert pin in scalars | {"WorldPos", "NormalWS", "TimeS", "OceanN"}, (name, pin)
         block = _block(hlsl, "// shared: ocean", "// end shared")
         shared = block if shared is None else shared
         assert block == shared, f"{name}: the shared ocean block differs"
