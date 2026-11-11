@@ -16,7 +16,8 @@
 #     no stamp = all three):
 #       build      ue\Plugins\*\Source, ue\Config, ue\FlightSim.uproject
 #       materials  scripts\ue_create_materials.py, assets\shaders, assets\looks, core\scene\sky_hdri.py
-#       aircraft   scripts\*aircraft*.py, assets\aircraft_config
+#       aircraft   scripts\*aircraft*.py, assets\aircraft_config, assets_pipeline
+#                  (the converter: a change re-converts and re-imports the airframes)
 #     -Prep all forces every step; -Prep none skips them.
 #  3. Starts the web app (beauty, FLIGHTSIM_BEAUTY_POST=on unless already set),
 #     runs scripts\run_test_scenarios.py --still --only <scenes> (--resume on a
@@ -108,7 +109,7 @@ if ($Prep -eq "all") {
             $changed = @(git diff --name-only $since HEAD)
             if ($changed | Where-Object { $_ -match '^ue/Plugins/[^/]+/Source/|^ue/Config/|^ue/FlightSim\.uproject$' }) { $steps += "build" }
             if ($changed | Where-Object { $_ -match '^scripts/ue_create_materials\.py$|^scripts/fetch_weather_textures\.py$|^scripts/ue_aircraft_master_materials\.py$|^scripts/aircraft_look\.py$|^scripts/aircraft_wet_layer\.py$|^assets/shaders/|^assets/looks/|^core/scene/sky_hdri\.py$' }) { $steps += "materials" }
-            if ($changed | Where-Object { $_ -match '^scripts/[^/]*aircraft[^/]*\.py$|^assets/aircraft_config/' }) { $steps += "aircraft" }
+            if ($changed | Where-Object { $_ -match '^scripts/[^/]*aircraft[^/]*\.py$|^assets/aircraft_config/|^assets_pipeline/' }) { $steps += "aircraft" }
         }
     }
 }

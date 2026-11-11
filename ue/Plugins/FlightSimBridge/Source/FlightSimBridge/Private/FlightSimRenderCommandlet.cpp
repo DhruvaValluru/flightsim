@@ -998,6 +998,15 @@ namespace
 		// the card object id that named their mesh (payload:store_sta2:0 ->
 		// Store_payload_store_sta2_0).
 		TMap<FString, UStaticMeshComponent*> StoreOfId;
+		// Retractable gear (owner decision 2026-11-11, render round 47): the
+		// manifest's retractable_gear part, attached under MeshOrigin and
+		// drawn only while the flown gear/gear-pos-norm is >= GearHiddenBelow
+		// (the animator's visibility binding). Null without the block.
+		UStaticMeshComponent* GearComponent = nullptr;
+		FString GearPart;
+		FString GearProperty;
+		double GearHiddenBelow = 0.01;
+		bool bGearDrawnAtStart = true;
 	};
 
 	// Objects (Phase 3, C4): the card's objects[]; every entry whose parent
@@ -1007,7 +1016,8 @@ namespace
 	bool BuildMeshAirframe(AActor* Aircraft, UFlightSimSurfaceAnimator* Animator,
 	                       const FString& ManifestPath, const FString& CardAircraft,
 	                       const FString& Livery, FMeshAirframe& Out, FString& Error,
-	                       const TArray<FFlightSimSceneObject>* Objects = nullptr)
+	                       const TArray<FFlightSimSceneObject>* Objects = nullptr,
+	                       int32 StartGearUp = -1)
 	{
 		FString Text;
 		if (!FFileHelper::LoadFileToString(Text, *ManifestPath))
@@ -1294,6 +1304,82 @@ namespace
 				       RowOriginCm.X - Out.MeshOriginActorCm.X, RowOriginCm.Y - Out.MeshOriginActorCm.Y,
 				       RowOriginCm.Z - Out.MeshOriginActorCm.Z);
 			}
+		}
+
+		// Retractable gear (owner decision 2026-11-11, render round 47: an
+		// airborne retractable-gear airframe cruises gear-up). The converter
+		// splits a retractable-gear airframe's gear_geometry triangles into
+		// their own part (assets_pipeline/convert.py RETRACTABLE_GEAR_PART)
+		// and names it in the manifest's retractable_gear block. It is
+		// attached under MeshOrigin like the body (same vertex frame, no
+		// offset) and drawn only while the flown gear/gear-pos-norm is >=
+		// hidden_below: the animator reads it every step, and the card's
+		// start_gear_up sets it before the first, so every pass -- beauty,
+		// measure and each label capture -- draws the gear the labels
+		// describe (core/capture/labels.py: a retracted gear has no box).
+		// Visibility, not bHiddenInGame: the part keeps its stencil, so a
+		// gear that comes down is labelled as the aircraft's pixels.
+		const TSharedPtr<FJsonObject>* GearBlock = nullptr;
+		if (Manifest->TryGetObjectField(TEXT("retractable_gear"), GearBlock) &&
+		    GearBlock != nullptr && GearBlock->IsValid())
+		{
+			(*GearBlock)->TryGetStringField(TEXT("part"), Out.GearPart);
+			(*GearBlock)->TryGetStringField(TEXT("property"), Out.GearProperty);
+			(*GearBlock)->TryGetNumberField(TEXT("hidden_below"), Out.GearHiddenBelow);
+			if (Out.GearPart.IsEmpty() || Out.GearProperty.IsEmpty())
+			{
+				Error = FString::Printf(
+					TEXT("mesh manifest '%s' has a retractable_gear block without a part ")
+					TEXT("and a property; re-run assets_pipeline/convert.py"), *ManifestPath);
+				return false;
+			}
+			// A C7 gear component already attached as a store (its card mesh is
+			// the gear part) is the one hidden; otherwise the part is attached here.
+			for (const TPair<FString, UStaticMeshComponent*>& Pair : Out.StoreOfId)
+			{
+				UStaticMeshComponent* Candidate = Pair.Value;
+				if (Candidate != nullptr && Candidate->GetStaticMesh() != nullptr &&
+				    Candidate->GetStaticMesh()->GetName() == Out.GearPart)
+				{
+					Out.GearComponent = Candidate;
+				}
+			}
+			if (Out.GearComponent == nullptr)
+			{
+				UStaticMesh* GearMesh = LoadPart(Out.GearPart);
+				if (GearMesh == nullptr)
+				{
+					Error = FString::Printf(
+						TEXT("mesh asset %s/%s (the retractable gear) did not load. Run the ")
+						TEXT("import step (scripts/import_aircraft.py %s) -- the gear must be ")
+						TEXT("its own part to be drawn only while it is down"),
+						*AssetRoot, *Out.GearPart, *Out.Name);
+					return false;
+				}
+				UStaticMeshComponent* Gear = NewObject<UStaticMeshComponent>(Aircraft, TEXT("MeshGear"));
+				Gear->SetupAttachment(MeshOrigin);
+				Gear->SetMobility(EComponentMobility::Movable);
+				Gear->SetStaticMesh(GearMesh);
+				Gear->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				Gear->RegisterComponent();
+				Out.GearComponent = Gear;
+			}
+			// Only the primary flies an FDM (a traffic actor has no animator and
+			// keeps its gear drawn, as before).
+			Out.bGearDrawnAtStart = !(Animator != nullptr && StartGearUp == 1);
+			Out.GearComponent->SetVisibility(Out.bGearDrawnAtStart);
+			if (Animator != nullptr)
+			{
+				Animator->AddVisibilityBinding(Out.GearProperty,
+				                               static_cast<float>(Out.GearHiddenBelow),
+				                               Out.GearComponent);
+			}
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("retractable gear %s/%s as %s: drawn while %s >= %g; %s at the start ")
+			       TEXT("(card start_gear_up %d)"),
+			       *AssetRoot, *Out.GearPart, *Out.GearComponent->GetName(), *Out.GearProperty,
+			       Out.GearHiddenBelow, Out.bGearDrawnAtStart ? TEXT("drawn") : TEXT("hidden"),
+			       StartGearUp);
 		}
 
 		// Phase 10 (package 7): the sampled livery. "default" is the
@@ -3068,7 +3154,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		if (!BuildMeshAirframe(Scenario.Aircraft, Animator, MeshManifestPath,
 		                       Card.Aircraft, Card.Livery, MeshAirframe, Error,
-		                       &Card.Objects))
+		                       &Card.Objects, Card.StartGearUp))
 		{
 			return Fail(Error);
 		}
@@ -9000,6 +9086,29 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Root->SetNumberField(TEXT("height"), Height);
 	Root->SetNumberField(TEXT("frames"), Captured);
 	Root->SetNumberField(TEXT("bound_surfaces"), Animator->GetBoundSurfaceCount());
+	// Retractable gear (round 47): what the gear part did over the run, read
+	// back off the binding. Only for a manifest with a retractable_gear block.
+	if (MeshAirframe.GearComponent != nullptr)
+	{
+		TSharedPtr<FJsonObject> GearRecord = MakeShared<FJsonObject>();
+		GearRecord->SetStringField(TEXT("part"), MeshAirframe.GearPart);
+		GearRecord->SetStringField(TEXT("component"), MeshAirframe.GearComponent->GetName());
+		GearRecord->SetStringField(TEXT("property"), MeshAirframe.GearProperty);
+		GearRecord->SetNumberField(TEXT("hidden_below"), MeshAirframe.GearHiddenBelow);
+		GearRecord->SetBoolField(TEXT("drawn_at_start"), MeshAirframe.bGearDrawnAtStart);
+		GearRecord->SetBoolField(TEXT("drawn_at_end"), MeshAirframe.GearComponent->IsVisible());
+		for (const FFlightSimVisibilityBinding& Visibility : Animator->VisibilityBindings)
+		{
+			if (Visibility.TargetComponent.Get() == static_cast<USceneComponent*>(MeshAirframe.GearComponent))
+			{
+				GearRecord->SetBoolField(TEXT("property_read"), Visibility.bRead);
+				GearRecord->SetNumberField(TEXT("last_value"), Visibility.CurrentValue);
+				GearRecord->SetNumberField(TEXT("steps_drawn"), Visibility.DrawnTicks);
+				GearRecord->SetNumberField(TEXT("steps_hidden"), Visibility.HiddenTicks);
+			}
+		}
+		Root->SetObjectField(TEXT("retractable_gear"), GearRecord);
+	}
 	// Peaks over the bindings that are attached to geometry only. Including the
 	// unattached ones would report the gear binding's 90 degrees, which nothing
 	// on screen ever did.

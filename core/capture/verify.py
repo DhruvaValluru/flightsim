@@ -2650,12 +2650,36 @@ def _pinhole(record: Dict, cam) -> Optional[Tuple[float, float]]:
     return (cx + record["fx_px"] * x / z, cy + record["fy_px"] * y / z)
 
 
+#: Retractable gear (owner decision 2026-11-11, render round 47): the
+#: mesh manifest's ``retractable_gear`` part is drawn only while the
+#: frame's recorded ``gear/gear-pos-norm`` is at or above this value
+#: (FlightSimRenderCommandlet.cpp, the animator's visibility binding).
+#: Named here, not imported from the producer (core/capture/labels.py
+#: GEAR_POSITION_CHANNEL / GEAR_RETRACTED_BELOW and
+#: assets_pipeline/convert.py GEAR_HIDDEN_BELOW say the same).
+GEAR_POSITION_CHANNEL = "gear/gear-pos-norm"
+GEAR_RETRACTED_BELOW = 0.01
+
+
+def _frame_gear_retracted(record: Dict) -> bool:
+    """Whether the frame's recorded gear position (the recorder's whole
+    row, ``record["state"]``) is below GEAR_RETRACTED_BELOW. Absent: down."""
+    state = record.get("state") if isinstance(record, dict) else None
+    if isinstance(state, dict) and state.get(GEAR_POSITION_CHANNEL) is not None:
+        try:
+            return float(state[GEAR_POSITION_CHANNEL]) < GEAR_RETRACTED_BELOW
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
 @functools.lru_cache(maxsize=8)
-def _mesh_vertices_actor_m(path: str, sha: str):
+def _mesh_vertices_actor_m(path: str, sha: str, without: Tuple[str, ...] = ()):
     """The unique vertices of every part OBJ beside a mesh manifest, in
     actor-frame metres about the model origin (the frame the converter
     measured ``mesh_extent_actor_m`` in, and wrote each part in place),
-    or None when a part is missing. ``sha`` keys the cache only."""
+    or None when a part is missing. ``sha`` keys the cache only.
+    ``without``: parts left out (a retracted gear is not drawn)."""
     import numpy as np
 
     manifest_path = Path(path)
@@ -2665,6 +2689,8 @@ def _mesh_vertices_actor_m(path: str, sha: str):
         return None
     rows: List[List[str]] = []
     for part in mesh.get("parts") or []:
+        if part in without:
+            continue
         obj = manifest_path.parent / f"{part}.obj"
         if not obj.is_file():
             return None
@@ -2688,10 +2714,14 @@ def _mesh_asset(manifest: Dict, entry: Dict, airframe_block: Dict, primary: bool
     return {"path": f"assets/generated/{aircraft}/mesh_manifest.json", "sha256": sha}
 
 
-def _mesh_points_body(manifest: Dict, airframe_block: Dict, run_dir=None, asset=None):
+def _mesh_points_body(manifest: Dict, airframe_block: Dict, run_dir=None, asset=None,
+                      gear_retracted: bool = False):
     """(N x 3 array of an aircraft's mesh vertices in body metres about
     the CG -- forward, right, down -- , basis), or (None, None). ``asset``
     is that aircraft's citation (_mesh_asset); absent, the primary's.
+    ``gear_retracted``: the frame's gear is up, so the mesh manifest's
+    ``retractable_gear`` part (which the commandlet does not draw then)
+    is left out of the silhouette.
 
     The same citation, digest and re-basing as _hull_box_body's measured
     extent, applied to every vertex instead of the extent's two ends:
@@ -2727,7 +2757,11 @@ def _mesh_points_body(manifest: Dict, airframe_block: Dict, run_dir=None, asset=
     version = mesh.get("version")
     if not (isinstance(version, (int, float)) and version >= 3 and origin):
         return None, None
-    vertices = _mesh_vertices_actor_m(str(candidate), str(sha))
+    gear = mesh.get("retractable_gear") if gear_retracted else None
+    without: Tuple[str, ...] = ()
+    if isinstance(gear, dict) and gear.get("part"):
+        without = (str(gear["part"]),)
+    vertices = _mesh_vertices_actor_m(str(candidate), str(sha), without)
     if vertices is None:
         extent = mesh.get("mesh_extent_actor_m") or {}
         if not all(k in extent for k in "xyz"):
@@ -2755,8 +2789,11 @@ def _mesh_points_body(manifest: Dict, airframe_block: Dict, run_dir=None, asset=
     body = np.column_stack((ox + vertices[:, 0] - cg[0],
                             oy + vertices[:, 1] - cg[1],
                             -(oz + vertices[:, 2] - cg[2])))
+    gear_note = (f"; the retracted gear part {without[0]!r} left out, as the "
+                 f"commandlet draws it only while {GEAR_POSITION_CHANNEL} >= "
+                 f"{GEAR_RETRACTED_BELOW:g}" if without else "")
     return body, (f"silhouette from {len(body)} mesh vertices of {path} "
-                  f"(control surfaces at rest)")
+                  f"(control surfaces at rest{gear_note})")
 
 
 def _hull_box_body(manifest: Dict, airframe_block: Dict, primary: bool,
@@ -2882,7 +2919,11 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes, run_dir=No
     points = None
     outer_bound = None
     if asset:
-        body_points, points_basis = _mesh_points_body(manifest, airframe, run_dir, asset)
+        # The primary flies the FDM, so its gear part follows the frame's
+        # recorded gear position; traffic draws its gear always.
+        body_points, points_basis = _mesh_points_body(
+            manifest, airframe, run_dir, asset,
+            gear_retracted=primary and _frame_gear_retracted(record))
         if body_points is not None:
             import numpy as np
 

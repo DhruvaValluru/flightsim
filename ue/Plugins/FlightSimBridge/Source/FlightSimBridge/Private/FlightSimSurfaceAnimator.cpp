@@ -115,6 +115,47 @@ void UFlightSimSurfaceAnimator::TickComponent(
 	{
 		bAnySurfaceMoved = true;
 	}
+
+	// The retractable gear: drawn only while the FDM's gear position is at or
+	// above the threshold. Read, never written to the FDM; the only write is
+	// the part's visibility, so every capture after this tick sees one state.
+	for (FFlightSimVisibilityBinding& Visibility : VisibilityBindings)
+	{
+		FString Value;
+		Movement->CommandConsole(Visibility.PropertyName, FString(), Value);
+		if (Value.IsEmpty())
+		{
+			// Not on this airframe: the part keeps the state it was built with.
+			continue;
+		}
+		Visibility.bRead = true;
+		Visibility.CurrentValue = FCString::Atof(*Value);
+		const bool bDrawn = Visibility.CurrentValue >= Visibility.HiddenBelow;
+		if (bDrawn)
+		{
+			++Visibility.DrawnTicks;
+		}
+		else
+		{
+			++Visibility.HiddenTicks;
+		}
+		if (Visibility.TargetComponent != nullptr &&
+		    Visibility.TargetComponent->IsVisible() != bDrawn)
+		{
+			Visibility.TargetComponent->SetVisibility(bDrawn);
+		}
+	}
+}
+
+void UFlightSimSurfaceAnimator::AddVisibilityBinding(const FString& Property,
+                                                     float HiddenBelow,
+                                                     USceneComponent* Component)
+{
+	FFlightSimVisibilityBinding Visibility;
+	Visibility.PropertyName = Property;
+	Visibility.HiddenBelow = HiddenBelow;
+	Visibility.TargetComponent = Component;
+	VisibilityBindings.Add(Visibility);
 }
 
 float UFlightSimSurfaceAnimator::GetPeakDeflectionDegrees() const
