@@ -463,8 +463,17 @@ ENGINE_CLOUD_SHADOW_SAMPLE_CAP = 80.0
 CLOUD_SHADOW_KM_PER_KM = 1.0
 CLOUD_SHADOW_MIN_KM = 1.0
 CLOUD_SHADOW_MAX_KM = 4.0
-#: The constrained class's shadow march: ef361bd6's fixed 15 km.
-CLOUD_SHADOW_CONSTRAINED_KM = 15.0
+#: The constrained class's shadow march (C++ CloudShadowConstrainedKm). ef361bd6
+#: marched a fixed 15 km: 10 unjittered quadratic samples, 150 m then 450 m
+#: steps, each opaque or empty at cloud extinction, so a cell's light came in
+#: contours and its base was lit like its top (round 4's flat-lit puffs).
+#: Round 7 (lane E, 2026-11-11): 6 km, the same 10 samples (60 m to 1.1 km
+#: steps): a cell shadows itself and its base darkens. The cheaper weather-field
+#: shape (cloud_shape: 43 + 54 lattice hashes a sample against 113 + 81) pays
+#: for the extra in-layer evaluations; the sample counts and the trace stay
+#: ef361bd6's (a8c964fc's rise in SAMPLES deadlocked the Intel iGPU).
+#: UNCALIBRATED: probe #13 / #03 (capture time against round 6's).
+CLOUD_SHADOW_CONSTRAINED_KM = 6.0
 #: The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 #: stated layer) is thinned to the shape's depth; 0 keeps the layer as built.
 CLOUD_MAX_THICKNESS_M: Dict[str, float] = {"cumulus": 2000.0, "stratocumulus": 0.0,
@@ -487,7 +496,7 @@ def cloud_march(integrated: bool) -> Dict[str, float]:
 
 
 def cloud_shadow_tracing_km_for(constrained: bool, thickness_m: float) -> float:
-    """The shadow march for the GPU class (constrained: ef361bd6's fixed 15 km)."""
+    """The shadow march for the GPU class (constrained: a fixed CLOUD_SHADOW_CONSTRAINED_KM)."""
     return CLOUD_SHADOW_CONSTRAINED_KM if constrained else cloud_shadow_tracing_km(thickness_m)
 
 

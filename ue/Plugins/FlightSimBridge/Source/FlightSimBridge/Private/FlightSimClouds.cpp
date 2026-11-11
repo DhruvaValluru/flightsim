@@ -227,14 +227,19 @@ namespace FlightSimWorldPure
 	constexpr double CloudShadowKmPerKm = 1.0;
 	constexpr double CloudShadowMinKm = 1.0;
 	constexpr double CloudShadowMaxKm = 4.0;
-	// The constrained row's shadow march: ef361bd6's fixed 15 km.
-	constexpr double CloudShadowConstrainedKm = 15.0;
+	// The constrained row's shadow march. ef361bd6 marched a fixed 15 km (10 quadratic
+	// samples: 150 m then 450 m steps, opaque or empty at cloud extinction, so a cell's
+	// light came in contours and its base was lit like its top). Round 7 (lane E): 6 km,
+	// the same 10 samples (60 m to 1.1 km steps), so a cell shadows itself and its base
+	// darkens; the cheaper weather-field shape (cloud_layers.hlsl) pays for the extra
+	// in-layer evaluations. The sample counts and the trace stay ef361bd6's.
+	constexpr double CloudShadowConstrainedKm = 6.0;
 	inline double CloudShadowTracingKm(double ThicknessM)
 	{
 		const double Km = (ThicknessM > 0.0 ? ThicknessM : 0.0) / 1000.0 * CloudShadowKmPerKm;
 		return Km < CloudShadowMinKm ? CloudShadowMinKm : (Km > CloudShadowMaxKm ? CloudShadowMaxKm : Km);
 	}
-	// The shadow march for the GPU class: the constrained class keeps 15 km.
+	// The shadow march for the GPU class: the constrained class a fixed CloudShadowConstrainedKm.
 	inline double CloudShadowTracingKmFor(bool bConstrained, double ThicknessM)
 	{
 		return bConstrained ? CloudShadowConstrainedKm : CloudShadowTracingKm(ThicknessM);

@@ -102,11 +102,11 @@ def test_the_constrained_gpu_march_did_not_move():
     the one that rendered (a8c964fc's rise deadlocked it, bisected)."""
     assert world_beauty.CLOUD_MARCH["integrated"] == {
         "view_sample_count_scale": 2.0, "shadow_sample_count_scale": 1.0, "tracing_max_distance_km": 80.0}
-    assert world_beauty.CLOUD_SHADOW_CONSTRAINED_KM == 15.0
+    assert world_beauty.CLOUD_SHADOW_CONSTRAINED_KM == 6.0   # round 7: a shorter march, never more samples
     rows = re.search(r"static const double Rows\[MarchCount\]\[MarchFieldCount\] = \{(.*?)\};", CLOUDS, re.S)
     constrained = re.search(r"\{([\d., ]+)\},\s*// constrained", rows.group(1)).group(1)
     assert [float(v) for v in constrained.split(",")] == [2.0, 1.0, 80.0]
-    assert "constexpr double CloudShadowConstrainedKm = 15.0;" in CLOUDS
+    assert "constexpr double CloudShadowConstrainedKm = 6.0;" in CLOUDS
     assert "return GRHIDeviceIsIntegrated || GMaxRHIFeatureLevel < ERHIFeatureLevel::SM6;" in CLOUDS
     # the commandlet's cloud cvars are the round-2 set: no sample-count cvar was added
     beauty = COMMANDLET[COMMANDLET.index("TSharedPtr<FJsonObject> BeautyPath;"):

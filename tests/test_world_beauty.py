@@ -809,7 +809,7 @@ def test_the_cloud_march_and_the_sky_are_the_python_ones(tmp_path):
     # constrained (integrated or below SM6): ef361bd6's march exactly (the round-1 deadlock)
     row = wb.cloud_march(True)
     assert (row["view_samples_max"], row["shadow_samples"], row["tracing_max_distance_km"]) == (192.0, 10.0, 80.0)
-    assert wb.CLOUD_SHADOW_CONSTRAINED_KM == 15.0
+    assert wb.CLOUD_SHADOW_CONSTRAINED_KM == 6.0   # round 7: shorter, same 10 samples
     # the -sky= plan's 3 km default slab is thinned for cumulus; a stated layer never is
     assert wb.cloud_capped_top_m("cumulus", 2940.0, 5940.0, False) == 4940.0
     assert wb.cloud_capped_top_m("cumulus", 2940.0, 5940.0, True) == 5940.0
@@ -932,7 +932,7 @@ def test_a_constrained_gpu_gets_ef361bd6_cloud_and_sky_settings():
     # no default-layer thinning, and the fixed 15 km shadow march
     assert "CloudCappedTopM(State.Shape, State.BaseM, State.TopM, bStatedLayer || bIntegratedGpu)" in CLOUDS_CPP
     assert "CloudShadowTracingKmFor(bIntegratedGpu, State.TopM - State.BaseM)" in CLOUDS_CPP
-    assert wb.cloud_shadow_tracing_km_for(True, 900.0) == 15.0
+    assert wb.cloud_shadow_tracing_km_for(True, 900.0) == 6.0
     assert wb.cloud_shadow_tracing_km_for(False, 900.0) == wb.cloud_shadow_tracing_km(900.0)
-    assert "constexpr double CloudShadowConstrainedKm = 15.0;" in CLOUDS_CPP
+    assert "constexpr double CloudShadowConstrainedKm = 6.0;" in CLOUDS_CPP
     assert "{2.0, 1.0, 80.0},   // constrained" in CLOUDS_CPP
