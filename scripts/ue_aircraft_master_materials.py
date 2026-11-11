@@ -81,7 +81,7 @@ REPO = os.path.dirname(_HERE)
 #: glass, physical bulbs and plume); 4: round 5 L4 -- measured metals and
 #: rubber (Physically Based API), paint Metallic 0 with an albedo cap, low
 #: panel lines, exhaust soot, the Thin Translucent canopy master.
-LOOK_GENERATION = "4"
+LOOK_GENERATION = "5"
 LOOK_GENERATION_TAG = "FlightSimAircraftLookGeneration"
 #: The engine's white texture, the default of every BaseColorMap
 #: (Engine/Content/EngineResources/WhiteSquareTexture.uasset, present in 5.7.4).
@@ -398,15 +398,21 @@ def _surface(name, cls, coat):
                        -300, 550),
         _mul(material, grime, _const(material, 0.3, -450, 650), -300, 650), -150, 600),
         _mul(material, soot, _const(material, 0.35, -450, 700), -300, 700), -100, 620), 0, 600)
+    # round 23 (LOOK_GENERATION 5): PanelAoAmount scales the groove's AO term
+    # (0 = AO exactly 1: -aircraft-probe=noao).
     occlusion = _saturate(material, _add(material, _const(material, 1.0, -450, 750),
-                                         _mul(material, groove, _const(material, -0.5, -600, 800),
+                                         _mul(material, _mul(material, groove, s["PanelAoAmount"], -750, 820),
+                                              _const(material, -0.5, -600, 800),
                                               -450, 800), -300, 780), -150, 780)
     out = _attributes(material, 300, 200)
     _link(colour, "", out, ("BaseColor", "Base Color"))
     _link(metallic, "", out, "Metallic")
     _link(s["Specular"], "", out, "Specular")
     _link(rough, "", out, "Roughness")
-    _link(_mask(material, panels, "rgb", -600, -600), "", out, "Normal")
+    # round 23 (LOOK_GENERATION 5): PanelNormalAmount lerps the Normal from the
+    # vertex normal (0: -aircraft-probe=nonormal) to panel_lines' (1, gen 4).
+    _link(_lerp(material, normal, _mask(material, panels, "rgb", -600, -600), s["PanelNormalAmount"],
+                -400, -650), "", out, "Normal")
     _link(occlusion, "", out, ("AmbientOcclusion", "Ambient Occlusion"))
     if coat:
         # soot sits on top of the coat: no gloss where it lies
@@ -423,6 +429,27 @@ def _surface(name, cls, coat):
 
 def create_aircraft_paint():
     _surface("M_AircraftPaint", "paint", coat=True)
+
+
+def create_aircraft_probe_flat():
+    """M_AircraftProbeFlat (round 23, the -aircraft-probe=flat bisect): a plain
+    Default Lit dielectric -- the look instance's BaseColor / BaseColorMap /
+    BaseColorMapWeight (copied onto a MID by FlightSimAircraftFX.cpp),
+    Metallic 0, Specular 0.5, Roughness 0.5; no Normal (the mesh's own, in
+    tangent space), no AO, no coat, no wet layer, no custom node. Opaque, no
+    WPO: labels unchanged."""
+    unreal = _u()
+    name = look.PROBE_FLAT_MASTER
+    material = _new(name)
+    if material is None:
+        return
+    material.set_editor_property("shading_model", _enum(unreal.MaterialShadingModel, "MSM_DEFAULT_LIT"))
+    lib = unreal.MaterialEditingLibrary
+    lib.connect_material_property(_base_colour(material, -900, 0), "", unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(_const(material, 0.0, -400, 300), "", unreal.MaterialProperty.MP_METALLIC)
+    lib.connect_material_property(_const(material, 0.5, -400, 400), "", unreal.MaterialProperty.MP_SPECULAR)
+    lib.connect_material_property(_const(material, 0.5, -400, 500), "", unreal.MaterialProperty.MP_ROUGHNESS)
+    _finish(material, name)
 
 
 def create_aircraft_bare_metal():
@@ -653,12 +680,13 @@ def create_aircraft_glass_thin():
 
 #: Every master this module builds, in build order (class masters, then FX).
 CREATORS = (create_aircraft_paint, create_aircraft_bare_metal, create_aircraft_glass,
-            create_aircraft_rubber, create_aircraft_glass_thin, create_nav_light_emissive,
+            create_aircraft_rubber, create_aircraft_glass_thin, create_aircraft_probe_flat,
+            create_nav_light_emissive,
             create_aircraft_contrail, create_aircraft_afterburner, create_aircraft_heat_haze)
 #: The asset each creator makes (pinned to look.CLASS_MASTERS / THIN_GLASS_MASTER /
 #: FX_MASTERS by test).
 CREATED = ("M_AircraftPaint", "M_AircraftBareMetal", "M_AircraftGlass", "M_AircraftRubber",
-           "M_AircraftGlassThin",
+           "M_AircraftGlassThin", "M_AircraftProbeFlat",
            "M_NavLightEmissive", "M_AircraftContrail", "M_AircraftAfterburner",
            "M_AircraftHeatHaze",
            # condensation-solver: built by scripts/aircraft_condensation_material.py.

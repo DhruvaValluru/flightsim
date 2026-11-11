@@ -1357,6 +1357,17 @@ wfx_check "lane A: BoxSphereBounds GetBox" "Core/Public/Math/BoxSphereBounds.h" 
 wfx_check "lane A: CeilToInt32(double)" "Core/Public/GenericPlatform/GenericPlatformMath.h" "static inline int32 CeilToInt32(double F)"
 # ------------------------------------------------------------ END lane A --
 
+# -- round 23 (2026-11-11) -- BEGIN aircraft probes --
+# FlightSimAircraftFX.cpp -aircraft-probe= (the look masters' bisect).
+wfx_check "probes: FParse::Value(FString, bShouldStopOnSeparator)" "Core/Public/Misc/Parse.h" "static CORE_API bool Value( const TCHAR* Stream, const TCHAR* Match, FString& Value, bool bShouldStopOnSeparator =true, const TCHAR** OptStreamGotTo = nullptr);"
+wfx_check "probes: MaterialInterface GetBaseMaterial" "Engine/Public/Materials/MaterialInterface.h" "ENGINE_API UMaterial* GetBaseMaterial();"
+wfx_check "probes: GetScalarParameterValue" "Engine/Public/Materials/MaterialInterface.h" "ENGINE_API bool GetScalarParameterValue(const FHashedMaterialParameterInfo& ParameterInfo, float& OutValue, bool bOveriddenOnly = false) const;"
+wfx_check "probes: GetVectorParameterValue" "Engine/Public/Materials/MaterialInterface.h" "ENGINE_API bool GetVectorParameterValue(const FHashedMaterialParameterInfo& ParameterInfo, FLinearColor& OutValue, bool bOveriddenOnly = false) const;"
+wfx_check "probes: GetTextureParameterValue" "Engine/Public/Materials/MaterialInterface.h" "ENGINE_API virtual bool GetTextureParameterValue(const FHashedMaterialParameterInfo& ParameterInfo, class UTexture*& OutValue, bool bOveriddenOnly = false) const;"
+wfx_check "probes: FHashedMaterialParameterInfo(FName)" "Engine/Public/Materials/MaterialParameters.h" "FMemoryImageMaterialParameterInfo(const FName& InName, EMaterialParameterAssociation InAssociation = EMaterialParameterAssociation::GlobalParameter, int32 InIndex = INDEX_NONE)"
+wfx_check "probes: MID SetTextureParameterValue" "Engine/Public/Materials/MaterialInstanceDynamic.h" "ENGINE_API void SetTextureParameterValue(FName ParameterName, class UTexture* Value);"
+# ---------------------------------------------------- END aircraft probes --
+
 
 # -- visual push lane C (2026-11-11) -- BEGIN tornado-beauty --
 # FlightSimTornadoBeauty.cpp (the beauty's funnel, wall cloud and puffs) and

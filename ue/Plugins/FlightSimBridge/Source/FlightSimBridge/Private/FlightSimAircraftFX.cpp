@@ -22,7 +22,9 @@
 #include "HAL/PlatformMisc.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/Material.h"           // round 23: GetBaseMaterial()->GetName() (probe slots)
 #include "Materials/MaterialInterface.h"
+#include "Engine/Texture.h"               // round 23: the flat probe copies BaseColorMap
 #include "Math/RotationMatrix.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
@@ -59,6 +61,9 @@ namespace
 		TEXT("/Game/FlightSim/Aircraft/M_AircraftAfterburner.M_AircraftAfterburner");
 	const TCHAR* const AircraftFxHeatHazeMaterialPath =
 		TEXT("/Game/FlightSim/Aircraft/M_AircraftHeatHaze.M_AircraftHeatHaze");
+	// Round 23: -aircraft-probe=flat (scripts/aircraft_look.py PROBE_FLAT_MASTER).
+	const TCHAR* const AircraftFxProbeFlatMaterialPath =
+		TEXT("/Game/FlightSim/Aircraft/M_AircraftProbeFlat.M_AircraftProbeFlat");
 	// scripts/aircraft_look.py FX_PARAMETERS (pinned by tests/test_aircraft_look.py).
 	const TCHAR* const AircraftFxParamLightColour = TEXT("LightColour");
 	const TCHAR* const AircraftFxParamIntensity = TEXT("Intensity");
@@ -259,6 +264,35 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	bHeatHaze = bAll && bHeatHazeSwitch;
 	// round 5 (L4): the same -labels word the commandlet reads (aircraft_look.labels_requested).
 	bLabels = FParse::Param(*Params, TEXT("labels"));
+	// Round 23: the master bisect probes (aircraft_look.parse_aircraft_probes).
+	// bShouldStopOnSeparator false: the value is a comma list.
+	Probes.Reset();
+	FString ProbeList;
+	if (FParse::Value(*Params, TEXT("aircraft-probe="), ProbeList, false))
+	{
+		TArray<FString> Words;
+		ProbeList.ParseIntoArray(Words, TEXT(","), true);
+		for (FString Word : Words)
+		{
+			Word.TrimStartAndEndInline();
+			if (Word.IsEmpty() || Word == TEXT("none"))
+			{
+				continue;
+			}
+			const bool bKnown = Word == TEXT("nocoat") || Word == TEXT("noao") || Word == TEXT("nonormal") ||
+				Word == TEXT("nowear") || Word == TEXT("flat") || Word == TEXT("measured-mesh");
+			if (!bKnown)
+			{
+				if (SwitchError.IsEmpty())
+				{
+					SwitchError = FString::Printf(TEXT("aircraft_look.switch: -aircraft-probe=%s: '%s' is not one of ")
+						TEXT("nocoat, noao, nonormal, nowear, flat, measured-mesh"), *ProbeList, *Word);
+				}
+				continue;
+			}
+			Probes.AddUnique(Word);
+		}
+	}
 	Humidity.ParseParams(Params);  // condensation-solver: -humidity-pct=
 }
 
@@ -402,6 +436,13 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 		Record->SetStringField(TEXT("materials"), Options.bMaterials
 			? TEXT("absent: the mesh manifest names no asset_path_root")
 			: TEXT("off (-aircraft-look=off or -aircraft-materials=off)"));
+		if (Options.Probes.Num() > 0)
+		{
+			// Round 23: a probe needs the look instances to act on.
+			Record->SetStringField(TEXT("materials_probes"), FString::Printf(
+				TEXT("ignored: -aircraft-probe=%s needs -aircraft-materials=on"),
+				*FString::Join(Options.Probes, TEXT(","))));
+		}
 	}
 
 	// -- lights, nozzles, trails ---------------------------------------------
@@ -554,7 +595,12 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	// slots are the measured part's slots, name for name, so the look
 	// instances below land on the same materials.
 	TArray<TSharedPtr<FJsonValue>> BeautyRows;
-	for (UStaticMeshComponent* Part : Parts)
+	// Round 23: -aircraft-probe=measured-mesh keeps the measured mesh (the
+	// round-22 A/B swapped the mesh AND the materials together: the beauty
+	// copy is swapped only here).
+	const bool bProbeMeasuredMesh = Options.Probes.Contains(TEXT("measured-mesh"));
+	Row->SetBoolField(TEXT("beauty_mesh_swap"), !bProbeMeasuredMesh);
+	for (UStaticMeshComponent* Part : bProbeMeasuredMesh ? TInlineComponentArray<UStaticMeshComponent*>() : Parts)
 	{
 		UStaticMesh* Measured = Part != nullptr ? Part->GetStaticMesh().Get() : nullptr;
 		const FString* BeautyName = Measured != nullptr ? BeautyMeshes.Find(Measured->GetName()) : nullptr;
@@ -601,6 +647,24 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	int32 Applied = 0;
 	int32 Unbound = 0;
 	int32 ThinApplied = 0;
+	// Round 23: the probes in force (recorded below) and the flat master.
+	int32 ProbedSlots = 0;
+	UMaterialInterface* ProbeFlat = Options.Probes.Contains(TEXT("flat"))
+		? LoadObject<UMaterialInterface>(nullptr, AircraftFxProbeFlatMaterialPath) : nullptr;
+	{
+		TArray<TSharedPtr<FJsonValue>> ProbeWords;
+		for (const FString& Word : Options.Probes)
+		{
+			ProbeWords.Add(MakeShared<FJsonValueString>(Word));
+		}
+		Row->SetArrayField(TEXT("probes"), ProbeWords);
+		if (Options.Probes.Contains(TEXT("flat")) && ProbeFlat == nullptr)
+		{
+			Row->SetStringField(TEXT("probe_flat"), FString::Printf(
+				TEXT("absent: %s not found (run scripts/ue_create_materials.py: LOOK_GENERATION 5); the look ")
+				TEXT("instances stand"), AircraftFxProbeFlatMaterialPath));
+		}
+	}
 	// Slot names without a look instance, once each (AddUnique on the JSON
 	// values would compare pointers and never deduplicate a slot that several
 	// parts share).
@@ -642,8 +706,67 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 				AbsentNames.AddUnique(SlotName);
 				continue;
 			}
+			// Round 23: the bisect probes, on the paint and bare-metal slots only
+			// (aircraft_look.PROBE_MASTERS); glass and rubber keep their instances.
+			const UMaterial* ProbeBase = LookInstance->GetBaseMaterial();
+			const FString ProbeBaseName = ProbeBase != nullptr ? ProbeBase->GetName() : FString();
+			const bool bProbeSlot = Options.Probes.Num() > 0 &&
+				(ProbeBaseName == TEXT("M_AircraftPaint") || ProbeBaseName == TEXT("M_AircraftBareMetal"));
+			if (bProbeSlot && Options.Probes.Contains(TEXT("flat")) && ProbeFlat != nullptr)
+			{
+				// A plain lit dielectric with the instance's own colour and texture.
+				UMaterialInstanceDynamic* FlatMid = UMaterialInstanceDynamic::Create(ProbeFlat, Part);
+				if (FlatMid != nullptr)
+				{
+					FLinearColor ProbeColour = FLinearColor::White;
+					UTexture* ProbeTexture = nullptr;
+					float ProbeWeight = 0.0f;
+					if (LookInstance->GetVectorParameterValue(FHashedMaterialParameterInfo(FName(TEXT("BaseColor"))), ProbeColour))
+					{
+						FlatMid->SetVectorParameterValue(TEXT("BaseColor"), ProbeColour);
+					}
+					if (LookInstance->GetTextureParameterValue(FHashedMaterialParameterInfo(FName(TEXT("BaseColorMap"))), ProbeTexture)
+					    && ProbeTexture != nullptr)
+					{
+						FlatMid->SetTextureParameterValue(TEXT("BaseColorMap"), ProbeTexture);
+					}
+					if (LookInstance->GetScalarParameterValue(FHashedMaterialParameterInfo(FName(TEXT("BaseColorMapWeight"))), ProbeWeight))
+					{
+						FlatMid->SetScalarParameterValue(TEXT("BaseColorMapWeight"), ProbeWeight);
+					}
+					Part->SetMaterial(Slot, FlatMid);
+					++Applied;
+					++ProbedSlots;
+					continue;
+				}
+			}
 			// wet-airframe-canopy: a MID of the look instance, so the wet scalars can be set per step.
 			UMaterialInstanceDynamic* LookMid = UMaterialInstanceDynamic::Create(LookInstance, Part);
+			if (bProbeSlot && LookMid != nullptr)
+			{
+				// Scalar overrides on the gen-5 masters' own parameters
+				// (aircraft_look.AIRCRAFT_PROBES); a parameter a master lacks
+				// (ClearCoat on bare metal) is a no-op.
+				if (Options.Probes.Contains(TEXT("nocoat")))
+				{
+					LookMid->SetScalarParameterValue(TEXT("ClearCoat"), 0.0f);
+				}
+				if (Options.Probes.Contains(TEXT("noao")))
+				{
+					LookMid->SetScalarParameterValue(TEXT("PanelAoAmount"), 0.0f);
+				}
+				if (Options.Probes.Contains(TEXT("nonormal")))
+				{
+					LookMid->SetScalarParameterValue(TEXT("PanelNormalAmount"), 0.0f);
+				}
+				if (Options.Probes.Contains(TEXT("nowear")))
+				{
+					LookMid->SetScalarParameterValue(TEXT("WearAmount"), 0.0f);
+					LookMid->SetScalarParameterValue(TEXT("GrimeAmount"), 0.0f);
+					LookMid->SetScalarParameterValue(TEXT("SootAmount"), 0.0f);
+				}
+				++ProbedSlots;
+			}
 			Part->SetMaterial(Slot, LookMid != nullptr ? static_cast<UMaterialInterface*>(LookMid) : LookInstance);
 			if (LookMid != nullptr) { LookMids.Add(LookMid); }
 			++Applied;
@@ -661,6 +784,7 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	Row->SetNumberField(TEXT("slots_applied"), Applied);
 	Row->SetNumberField(TEXT("slots_without_material"), Unbound);
 	Row->SetNumberField(TEXT("slots_thin_translucent"), ThinApplied);
+	Row->SetNumberField(TEXT("slots_probed"), ProbedSlots);
 	Row->SetBoolField(TEXT("labels"), Options.bLabels);
 	Row->SetStringField(TEXT("thin_glass"), Options.bLabels
 		? TEXT("label-safe opaque glass kept: -labels (the ID and depth captures draw no translucency)")

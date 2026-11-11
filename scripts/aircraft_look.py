@@ -119,6 +119,10 @@ METALS = {"aluminium": ALUMINIUM_F0, "titanium": TITANIUM_F0, "stainless_steel":
 #: AlbedoMax caps a livery's pure white (a linear 1.0 reflects more than any
 #: paint; 0.9 is a fresh white enamel, from memory). The panel lines are
 #: kept low (PanelDepth, PanelDarkening): a hint, never a grid.
+#: PanelNormalAmount and PanelAoAmount (round 23, LOOK_GENERATION 5) are the
+#: bisect probes' handles, 1 = the gen-4 graph: the Normal output lerps from the
+#: vertex normal to panel_lines' (0 = the vertex normal) and the groove's AO
+#: term scales by the second (0 = AO exactly 1); -aircraft-probe=nonormal,noao.
 CLASS_SCALARS = {
     "paint": {
         "Metallic": 0.0, "Roughness": 0.4, "RoughnessBreakup": 0.12,
@@ -127,6 +131,7 @@ CLASS_SCALARS = {
         "WearAmount": 0.25, "GrimeAmount": 0.2, "Specular": 0.5,
         "NoiseCm": 35.0, "EdgeStart": 0.02, "EdgeEnd": 0.2,
         "AlbedoMax": 0.9, "SootAmount": 0.45, "SootLengthRadii": 10.0,
+        "PanelNormalAmount": 1.0, "PanelAoAmount": 1.0,
     },
     "bare_metal": {
         "Metallic": 1.0, "Roughness": 0.35, "RoughnessBreakup": 0.2,
@@ -134,6 +139,7 @@ CLASS_SCALARS = {
         "WearAmount": 0.1, "GrimeAmount": 0.25, "Specular": 0.5,
         "NoiseCm": 60.0, "EdgeStart": 0.02, "EdgeEnd": 0.2,
         "MetalColourWeight": 0.7, "SootAmount": 0.45, "SootLengthRadii": 10.0,
+        "PanelNormalAmount": 1.0, "PanelAoAmount": 1.0,
     },
     # Canopy acrylic (PMMA, n 1.49): F0 = ((n - 1) / (n + 1))^2 = 0.039, and
     # UE's F0 is 0.08 x Specular, so Specular 0.5 (polycarbonate, n 1.586,
@@ -990,6 +996,50 @@ def parse_fx_switches(params):
             raise LookError(f"aircraft_look.switch: -{key}{word} is not on/1/true or off/0/false")
     every = words.pop("aircraft-look=")
     return {key[:-1]: every and value for key, value in words.items()}
+
+
+#: Round 23 (2026-11-11): the bisect probes inside the look masters, for a
+#: render with -aircraft-materials=on (round 22: the gen-4 instances drew the
+#: A-4 tan and the C172 near-black, each in the ground's colour). Read by
+#: FFlightSimAircraftFXOptions::ParseParams from ``-aircraft-probe=`` (a comma
+#: list, no spaces) and applied to the paint and bare-metal slots' MIDs by
+#: FFlightSimAircraftFX::ApplyMaterials; recorded in render.json
+#: aircraft_look.materials.probes. Word -> what it does:
+AIRCRAFT_PROBES = {
+    "nocoat": "ClearCoat 0 (the coat lobe and its refraction off; paint only)",
+    "noao": "PanelAoAmount 0 (the material AO output is exactly 1)",
+    "nonormal": "PanelNormalAmount 0 (the Normal output is the vertex normal, the panel_lines lean bypassed)",
+    "nowear": "WearAmount, GrimeAmount and SootAmount 0 (no edge metal, no cavity darkening)",
+    "flat": ("M_AircraftProbeFlat: a plain Default Lit dielectric (Metallic 0, Specular 0.5, Roughness 0.5, "
+             "no Normal, AO, coat or wet layer) with the look instance's own BaseColor, BaseColorMap and "
+             "BaseColorMapWeight"),
+    "measured-mesh": ("the beauty mesh swap is skipped: the measured body (Interchange's recomputed normals, "
+                      "no two-sided back faces) wears the look instances"),
+}
+AIRCRAFT_PROBE_KEY = "aircraft-probe="
+#: The masters a probe acts on (glass and rubber keep their instances).
+PROBE_MASTERS = ("M_AircraftPaint", "M_AircraftBareMetal")
+PROBE_FLAT_MASTER = "M_AircraftProbeFlat"
+
+
+def parse_aircraft_probes(params):
+    """Twin of the host's -aircraft-probe= parse: the probe words in the order
+    given (duplicates once), () when absent, ``none`` or empty;
+    LookError("aircraft_look.switch: ...") for an unknown word."""
+    match = re.search(r"(?:^|\s)-?" + re.escape(AIRCRAFT_PROBE_KEY) + r'"?([^\s"]*)', params)
+    if match is None:
+        return ()
+    out = []
+    for word in match.group(1).split(","):
+        word = word.strip()
+        if word in ("", "none"):
+            continue
+        if word not in AIRCRAFT_PROBES:
+            raise LookError(f"aircraft_look.switch: -{AIRCRAFT_PROBE_KEY}{match.group(1)}: {word!r} is not one "
+                            f"of {', '.join(AIRCRAFT_PROBES)}")
+        if word not in out:
+            out.append(word)
+    return tuple(out)
 
 
 def heat_haze_max_material_offset(strength):
