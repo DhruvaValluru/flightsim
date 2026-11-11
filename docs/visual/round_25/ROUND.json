@@ -1,0 +1,24 @@
+﻿{
+    "round":  25,
+    "commit":  "c8cc272c",
+    "full":  false,
+    "scenes":  [
+                   10
+               ],
+    "switches":  "-deck-shadow=off -storm-ground-albedo=surface",
+    "prep":  [
+                 "build"
+             ],
+    "seconds":  {
+                    "build":  16,
+                    "scenes":  101.8
+                },
+    "outcomes":  [
+                     {
+                         "number":  10,
+                         "outcome":  "done",
+                         "seconds":  100.4,
+                         "why":  "clip ready"
+                     }
+                 ]
+}
