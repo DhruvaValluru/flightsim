@@ -383,6 +383,14 @@ void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const
 	constexpr double WeatherBeautyShaftRimErosion = 0.5;
 	constexpr double WeatherBeautyShaftDensityFloor = 0.25;
 	constexpr double WeatherBeautyShaftAlbedo = 0.55;
+	// Lane D (2026-11-11): core/scene/storm_cell.py BEAUTY_CURTAIN (round 4's #09: a
+	// hard ring over a glowing cylinder). The material's Curtain parameter (default
+	// 0: generation 5's shader): the shaft flares, softens and thins toward the
+	// ground, and ragged scud hangs under the base and the deck. UNCALIBRATED.
+	constexpr double WeatherBeautyCurtainFlare = 0.8;
+	constexpr double WeatherBeautyCurtainGroundThin = 0.5;
+	constexpr double WeatherBeautyScudDepthM = 300.0;
+	constexpr double WeatherBeautyScudCover = 0.5;
 	const TSharedPtr<FJsonObject>* CellRow = nullptr;
 	if (!bCell || StormMaterial == nullptr || !Record.IsValid() ||
 	    !Record->TryGetObjectField(TEXT("cell"), CellRow) || CellRow == nullptr || !CellRow->IsValid())
@@ -445,6 +453,22 @@ void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const
 	// Round 6: the rain shaft's albedo (the streaks, rim and floor are the
 	// shader's own constants under the Ragged gate set above).
 	StormMaterial->SetScalarParameterValue(TEXT("ShaftAlbedo"), static_cast<float>(WeatherBeautyShaftAlbedo));
+	StormMaterial->SetVectorParameterValue(TEXT("Curtain"),
+		FLinearColor(static_cast<float>(WeatherBeautyCurtainFlare), static_cast<float>(WeatherBeautyCurtainGroundThin),
+		             static_cast<float>(WeatherBeautyScudDepthM), static_cast<float>(WeatherBeautyScudCover)));
+	{
+		TSharedPtr<FJsonObject> Curtain = WeatherRecord();
+		Curtain->SetNumberField(TEXT("flare"), WeatherBeautyCurtainFlare);
+		Curtain->SetNumberField(TEXT("ground_thin"), WeatherBeautyCurtainGroundThin);
+		Curtain->SetNumberField(TEXT("scud_depth_m"), WeatherBeautyScudDepthM);
+		Curtain->SetNumberField(TEXT("scud_cover"), WeatherBeautyScudCover);
+		Curtain->SetStringField(TEXT("basis"),
+			TEXT("storm_cell.BEAUTY_CURTAIN: the shaft hangs from the lifted base, flares toward the ground, its "
+			     "edge the wall's warped radius (no circle) softened over 75 % of it, thinning toward the ground "
+			     "(the column's water kept); ragged scud in a band under the base and the deck, drifting at half "
+			     "the anvil's drift. Visual only; UNCALIBRATED"));
+		Row->SetObjectField(TEXT("curtain"), Curtain);
+	}
 	{
 		TSharedPtr<FJsonObject> Shaft = WeatherRecord();
 		Shaft->SetNumberField(TEXT("streak_scale"), WeatherBeautyShaftStreakScale);

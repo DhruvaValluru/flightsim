@@ -514,12 +514,12 @@ LIGHTNING_PARAMETERS = ("PixelAngle", "RadiusCm", "Power")
 #: measure path's albedo, value for value.
 STORM_PARAMETERS = ("CellCentreCm", "EastAxis", "NorthAxis", "Geo1", "Geo2", "Sigma", "Noise",
                     "Drift", "Layer", "Time", "FlashRelCm", "Flash", "ShaftAlbedo",
-                    "ExtinctionScale", "Ragged")
+                    "ExtinctionScale", "Ragged", "Curtain")
 STORM_SCALAR_DEFAULTS = {"ExtinctionScale": 1.0, "ShaftAlbedo": 1.0}
 WINDSHIELD_PARAMETERS = ("Time", "Glass", "Seed")
 #: The vector parameters whose shader input is a float4 (RGB appended with A).
 WEATHER_FLOAT4_PARAMETERS = ("Splash", "Power", "Geo1", "Geo2", "Sigma", "Noise", "Drift",
-                             "Layer", "Flash", "Glass", "Ragged")
+                             "Layer", "Flash", "Glass", "Ragged", "Curtain")
 #: The storm's albedo default (core/scene/storm_cell.py ALBEDO; the host sets
 #: the card's into Flash.z, the material's base colour reads this parameter).
 STORM_ALBEDO_PARAMETER = "Albedo"
@@ -575,10 +575,12 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_StormCell 5: the beauty rain shaft's streaks, eroded rim and density floor
 #: (storm_cell.hlsl's Ragged shaft block) and its albedo (storm_shaft_albedo.hlsl,
 #: the ShaftAlbedo parameter; visual round 6, round 4's #09 glowing cylinder).
+#: M_StormCell 6: the beauty precipitation curtain and scud ("Curtain", storm_cell.hlsl;
+#: lane D 2026-11-11, round 4's #09 ring and cylinder; default 0 = generation 5).
 #: M_RainDrops 6: the beauty streak's softness and per-drop variation (Soft, Vary;
 #: lane D 2026-11-11, round 4's "scratches on the lens"; default 0 = generation 5).
 STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChannel": "2",
-                     "M_StormCell": "5", "M_WindshieldRain": "2"}
+                     "M_StormCell": "6", "M_WindshieldRain": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -2080,7 +2082,7 @@ def create_storm_cell():
         "Rel": rel, "EastAxis": params["EastAxis"], "NorthAxis": params["NorthAxis"],
         "Geo1": params["Geo1"], "Geo2": params["Geo2"], "Sigma": params["Sigma"],
         "Noise": params["Noise"], "Drift": params["Drift"], "Layer": params["Layer"],
-        "Time": params["Time"], "Ragged": params["Ragged"]}, -900, 0)
+        "Time": params["Time"], "Ragged": params["Ragged"], "Curtain": params["Curtain"]}, -900, 0)
     scaled = binary(material, lib, unreal.MaterialExpressionMultiply, extinction,
                     params["ExtinctionScale"][0], -600, 0)
     lib.connect_material_property(scaled, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
