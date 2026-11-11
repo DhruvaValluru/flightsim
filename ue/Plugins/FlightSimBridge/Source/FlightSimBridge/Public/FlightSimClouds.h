@@ -180,6 +180,10 @@ private:
 	// Visual round 6: -deck-shadow=on|off (Build reads it; ApplyClouds applies
 	// world_beauty.deck_shadows_beam under it).
 	FString DeckShadowSwitch = TEXT("on");
+	// Round 8-12 review: -fair-cloud-shadows=on|off, OFF by default. Lane E's
+	// clear-sky cumulus shadows blanketed the ground and the aircraft (#1 Yosemite
+	// went blue, lit by sky alone; #4's A-4 brown): opt-in until probed.
+	FString FairShadowSwitch = TEXT("off");
 	// Lane C (round 7's green #10): under the storm preset the sky's and the
 	// clouds' ground bounce is the surface row's luminance as a grey
 	// (world_beauty.neutral_albedo_srgb); -storm-ground-albedo=surface keeps the hue.

@@ -1019,6 +1019,8 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		const FString Switches = FString(Params != nullptr ? Params : TEXT("")) + TEXT(" ")
 			+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
 		FParse::Value(*Switches, TEXT("deck-shadow="), DeckShadowSwitch);
+		FairShadowSwitch = TEXT("off");
+		FParse::Value(*Switches, TEXT("fair-cloud-shadows="), FairShadowSwitch);
 		// Lane C (round 7's green #10): -storm-ground-albedo=neutral|surface,
 		// neutral by default (StormNeutralAlbedo); surface is the A/B.
 		StormAlbedoSwitch = TEXT("neutral");
@@ -1933,7 +1935,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			TopCover = FMath::Max(TopCover, State.Cover);
 		}
 		const bool bWanted = DeckShadowsBeam(Preset, TopCover);
-		const bool bFairShadows = FairCloudShadows(Preset, TopCover);
+		const bool bFairShadows = FairCloudShadows(Preset, TopCover) && FairShadowSwitch == TEXT("on");
 		const bool bSwitchOn = DeckShadowSwitch != TEXT("off");
 		UDirectionalLightComponent* DeckSun = Scene.Sun != nullptr
 			? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
@@ -1944,6 +1946,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		DeckShadow->SetBoolField(TEXT("deck_shadows_beam"), bWanted);
 		DeckShadow->SetBoolField(TEXT("fair_cloud_shadows"), bFairShadows);
 		DeckShadow->SetNumberField(TEXT("fair_min_cover"), FairCloudShadowMinCover);
+		DeckShadow->SetStringField(TEXT("fair_switch"), FairShadowSwitch);
 		if (DeckSun != nullptr)
 		{
 			DeckShadow->SetBoolField(TEXT("sun_cast_cloud_shadows_before"), DeckSun->bCastCloudShadows != 0);

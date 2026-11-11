@@ -995,6 +995,8 @@ def test_round7_a_clear_worlds_cumulus_casts_its_shadows(tmp_path):
     assert got == [wb.fair_cloud_shadows(wb.PRESETS[p], [c]) for p, c in cases]
     assert [float(l.split()[1]) for l in lines if l.startswith("min ")] == [wb.FAIR_CLOUD_SHADOW_MIN_COVER]
     assert wb.fair_cloud_shadows("clear", [0.35]) and not wb.fair_cloud_shadows("storm", [1.0])
-    assert "const bool bFairShadows = FairCloudShadows(Preset, TopCover);" in CLOUDS_CPP
+    # rounds 8-12: opt-in (-fair-cloud-shadows=on); off they blanketed #1 blue
+    assert 'const bool bFairShadows = FairCloudShadows(Preset, TopCover) && FairShadowSwitch == TEXT("on");' in CLOUDS_CPP
+    assert 'FString FairShadowSwitch = TEXT("off");' in CLOUDS_H if "CLOUDS_H" in globals() else True
     assert "if ((bWanted || bFairShadows) && bSwitchOn)" in CLOUDS_CPP
     assert 'DeckShadow->SetBoolField(TEXT("fair_cloud_shadows"), bFairShadows);' in CLOUDS_CPP
