@@ -236,6 +236,10 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		RainMaterial->SetScalarParameterValue(TEXT("MaxCoverage"), static_cast<float>(Shape.MaxCoverage));
 		RainMaterial->SetScalarParameterValue(TEXT("DepthFade"),
 		                                      static_cast<float>(Shape.DepthFadeM * WeatherCmPerMetre));
+		// Lane D: soft, varied streaks lit as the mean of their surroundings.
+		RainMaterial->SetScalarParameterValue(TEXT("Soft"), static_cast<float>(Shape.Softness));
+		RainMaterial->SetScalarParameterValue(TEXT("Vary"), static_cast<float>(Shape.Variation));
+		RainMaterial->SetScalarParameterValue(TEXT("SkyRadianceScale"), static_cast<float>(Shape.Radiance));
 	}
 	const TSharedPtr<FJsonObject>* Row = nullptr;
 	if (Record.IsValid() && Record->TryGetObjectField(TEXT("rain"), Row) && Row != nullptr && Row->IsValid())
@@ -251,13 +255,18 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		ShapeRow->SetNumberField(TEXT("max_streak_rad"), Shape.MaxStreakRad);
 		ShapeRow->SetNumberField(TEXT("max_coverage"), Shape.MaxCoverage);
 		ShapeRow->SetNumberField(TEXT("depth_fade_m"), Shape.DepthFadeM);
+		ShapeRow->SetNumberField(TEXT("softness"), Shape.Softness);
+		ShapeRow->SetNumberField(TEXT("variation"), Shape.Variation);
+		ShapeRow->SetNumberField(TEXT("radiance"), Shape.Radiance);
 		ShapeRow->SetStringField(TEXT("applied_to"), RainMaterial != nullptr
 			? TEXT("M_RainDrops (the procedural backend's drops)")
 			: TEXT("nothing: the Niagara backend's system exposes no shape parameters"));
 		ShapeRow->SetStringField(TEXT("basis"),
 			TEXT("core/scene/weather_look.py beauty_rain_shape: the drawn count follows the rate, the streak's "
 			     "angular length is capped, the drops near the lens thinned, one streak's coverage capped and "
-			     "faded with range; mean light is NOT conserved (a stated look, UNCALIBRATED)"));
+			     "faded with range; each streak soft (Gaussian across, tapered), varied in length and brightness "
+			     "by its own hash, and lit at radiance x the scene's light; mean light is NOT conserved (a stated "
+			     "look, UNCALIBRATED)"));
 		(*Row)->SetObjectField(TEXT("beauty_shape"), ShapeRow);
 	}
 }
@@ -265,15 +274,18 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 FFlightSimBeautyRainShape FFlightSimWeather::BeautyRainShape(double RateMmh, int32 Particles)
 {
 	// core/scene/weather_look.py BEAUTY_RAIN_* (pinned by tests/test_weather_fx.py).
-	constexpr double WeatherBeautyRainDropsPerMmh = 1500.0;
+	constexpr double WeatherBeautyRainDropsPerMmh = 4000.0;
 	constexpr double WeatherBeautyRainMinShare = 0.01;
 	constexpr double WeatherBeautyRainNearThinM = 4.0;
 	constexpr double WeatherBeautyRainStreakRadLight = 0.012;
 	constexpr double WeatherBeautyRainStreakRadHeavy = 0.045;
 	constexpr double WeatherBeautyRainLightMmh = 1.0;
 	constexpr double WeatherBeautyRainHeavyMmh = 50.0;
-	constexpr double WeatherBeautyRainMaxCoverage = 0.35;
+	constexpr double WeatherBeautyRainMaxCoverage = 0.22;
 	constexpr double WeatherBeautyRainDepthFadeM = 12.0;
+	constexpr double WeatherBeautyRainSoftness = 1.0;
+	constexpr double WeatherBeautyRainVariation = 0.8;
+	constexpr double WeatherBeautyRainRadiance = 0.7;
 	const double Rate = FMath::Max(RateMmh, 0.0);
 	const double Count = static_cast<double>(FMath::Max(Particles, 1));
 	FFlightSimBeautyRainShape Shape;
@@ -294,6 +306,9 @@ FFlightSimBeautyRainShape FFlightSimWeather::BeautyRainShape(double RateMmh, int
 		+ T * (WeatherBeautyRainStreakRadHeavy - WeatherBeautyRainStreakRadLight);
 	Shape.MaxCoverage = WeatherBeautyRainMaxCoverage;
 	Shape.DepthFadeM = WeatherBeautyRainDepthFadeM;
+	Shape.Softness = WeatherBeautyRainSoftness;
+	Shape.Variation = WeatherBeautyRainVariation;
+	Shape.Radiance = WeatherBeautyRainRadiance;
 	return Shape;
 }
 

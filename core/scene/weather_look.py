@@ -112,9 +112,9 @@ def weather_look_card_block(spec) -> Optional[Dict[str, Any]]:
 # by probe render on the render machine (docs/visual/PROBE_LOG.md
 # ## round-2b weather-fx).
 
-#: Streaks drawn in the rain box per mm/h of rain (a 40 mm/h storm draws 60 000
-#: of the card's 262 144; 2 mm/h draws 3 000).
-BEAUTY_RAIN_DROPS_PER_MMH = 1500.0
+#: Streaks drawn in the rain box per mm/h of rain (lane D: a 40 mm/h storm draws
+#: 160 000 of the card's 262 144; 2 mm/h draws 8 000).
+BEAUTY_RAIN_DROPS_PER_MMH = 4000.0
 #: The fewest drawn, as a share of the card's particles (light rain still reads).
 BEAUTY_RAIN_MIN_SHARE = 0.01
 #: Drops nearer than this (m) are thinned by (range / this)^2: 1 m keeps 1 in 16.
@@ -126,11 +126,33 @@ BEAUTY_RAIN_STREAK_RAD_HEAVY = 0.045
 BEAUTY_RAIN_LIGHT_MMH = 1.0
 BEAUTY_RAIN_HEAVY_MMH = 50.0
 #: The most one streak covers (never an opaque sheet).
-BEAUTY_RAIN_MAX_COVERAGE = 0.35
+BEAUTY_RAIN_MAX_COVERAGE = 0.22
 #: Coverage x exp(-range / this): the far drops of the box fade into the rain's veil.
 BEAUTY_RAIN_DEPTH_FADE_M = 12.0
+# Lane D (2026-11-11, the round-4 review: "sparse, thin, straight white lines that
+# read as scratches on the lens; real rain is dense, soft, varied in length and
+# brightness, and lit by the background"). Three more beauty terms, each a no-op
+# at its material default (M_RainDrops generation 6):
+# * softness: the streak drawn (1 + softness) x wider with a Gaussian profile
+#   across it and tapered ends (the profiles are normalised to a mean of 1, so a
+#   soft streak carries the hard one's light, spread out: motion blur, not a line);
+# * variation: each drop's streak length x 0.45..1.55 and its coverage x 0.4..1.0,
+#   from a hash of its index (the drop's own: deterministic, Gate 10-R);
+# * radiance: the drops' base colour x this (SkyRadianceScale): the translucency
+#   volume lights a drop with the sun the deck shadows on the ground; a drop is the
+#   mean of its surroundings (Garg & Nayar), under a deck a little above the
+#   background, never a white line.
+# With the softer, fainter streak the drawn count rises (1500 -> 4000 per mm/h:
+# 40 000 at 10 mm/h, 160 000 at 40 mm/h of the card's 262 144) and one streak's
+# cap falls (0.35 -> 0.22): many faint streaks, a sheet of rain, not scratches.
+#: Streak softness (0: the measure path's hard quad).
+BEAUTY_RAIN_SOFTNESS = 1.0
+#: Per-drop length and brightness variation (0: every drop alike).
+BEAUTY_RAIN_VARIATION = 0.8
+#: The drops' radiance scale (SkyRadianceScale; 1: the measure path's).
+BEAUTY_RAIN_RADIANCE = 0.7
 BEAUTY_RAIN_KEYS = ("density_share", "near_thin_m", "max_streak_rad", "max_coverage",
-                    "depth_fade_m")
+                    "depth_fade_m", "softness", "variation", "radiance")
 
 
 def beauty_rain_shape(rate_mmh: float, particles: int) -> Dict[str, float]:
@@ -152,7 +174,8 @@ def beauty_rain_shape(rate_mmh: float, particles: int) -> Dict[str, float]:
                                                  - BEAUTY_RAIN_STREAK_RAD_LIGHT)
     return {"density_share": share, "near_thin_m": BEAUTY_RAIN_NEAR_THIN_M,
             "max_streak_rad": streak, "max_coverage": BEAUTY_RAIN_MAX_COVERAGE,
-            "depth_fade_m": BEAUTY_RAIN_DEPTH_FADE_M}
+            "depth_fade_m": BEAUTY_RAIN_DEPTH_FADE_M, "softness": BEAUTY_RAIN_SOFTNESS,
+            "variation": BEAUTY_RAIN_VARIATION, "radiance": BEAUTY_RAIN_RADIANCE}
 
 
 #: The weather look's rain shafts in beauty (M_RainShaft's ShaftSoftEdge and

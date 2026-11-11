@@ -84,7 +84,10 @@ def test_the_cpp_twin_carries_the_python_numbers():
              "WeatherBeautyRainLightMmh": "BEAUTY_RAIN_LIGHT_MMH",
              "WeatherBeautyRainHeavyMmh": "BEAUTY_RAIN_HEAVY_MMH",
              "WeatherBeautyRainMaxCoverage": "BEAUTY_RAIN_MAX_COVERAGE",
-             "WeatherBeautyRainDepthFadeM": "BEAUTY_RAIN_DEPTH_FADE_M"}
+             "WeatherBeautyRainDepthFadeM": "BEAUTY_RAIN_DEPTH_FADE_M",
+             "WeatherBeautyRainSoftness": "BEAUTY_RAIN_SOFTNESS",
+             "WeatherBeautyRainVariation": "BEAUTY_RAIN_VARIATION",
+             "WeatherBeautyRainRadiance": "BEAUTY_RAIN_RADIANCE"}
     for cpp, py in pairs.items():
         assert _cpp_constant(body, cpp) == getattr(weather_look, py), cpp
     assert "FMath::Loge(Rate / WeatherBeautyRainLightMmh)" in body
@@ -94,7 +97,8 @@ def test_the_cpp_twin_carries_the_python_numbers():
 def test_the_shape_is_set_on_the_beauty_path_only_and_recorded():
     readability = _function(WEATHER_CPP, "void FFlightSimWeather::ApplyBeautyRainReadability(")
     assert "BeautyRainShape(RainRateMmh, Particles)" in readability
-    for name in ("Density", "NearThin", "MaxStreak", "MaxCoverage", "DepthFade"):
+    for name in ("Density", "NearThin", "MaxStreak", "MaxCoverage", "DepthFade", "Soft", "Vary",
+                 "SkyRadianceScale"):
         assert f'RainMaterial->SetScalarParameterValue(TEXT("{name}")' in readability, name
         # Nowhere else: the measure path keeps the material's defaults.
         assert WEATHER_CPP.count(f'TEXT("{name}")') == 1, name
@@ -107,7 +111,7 @@ def test_the_shape_is_set_on_the_beauty_path_only_and_recorded():
 def test_the_material_defaults_are_the_measure_paths_shader():
     defaults = _assigned("DROPS_BEAUTY_DEFAULTS")
     assert defaults == {"Density": 1.0, "NearThin": 0.0, "MaxStreak": 0.0, "MaxCoverage": 1.0,
-                        "DepthFade": 0.0}
+                        "DepthFade": 0.0, "Soft": 0.0, "Vary": 0.0}
     assert set(defaults) <= set(_assigned("DROPS_PARAMETERS"))
     assert _assigned("STORM_GENERATIONS")["M_RainDrops"] >= "5"   # the shader body changed
     offset = (SHADERS / "rain_drop_offset.hlsl").read_text(encoding="utf-8")
@@ -127,6 +131,37 @@ def test_the_material_defaults_are_the_measure_paths_shader():
         assert f'"{name}": params["{name}"]' in creator.split("lib, \"rain_drop_opacity\"")[0], name
     for name in ("MaxStreak", "MaxCoverage", "DepthFade"):
         assert f'"{name}": params["{name}"]' in creator.split("lib, \"rain_drop_opacity\"")[1], name
+
+
+def test_lane_d_the_beauty_streaks_are_soft_varied_and_background_lit():
+    """Round 4's review: thin straight white lines that read as scratches. The
+    beauty streak is soft (wider, Gaussian across, tapered), varied by its own
+    hash, dimmer than the scene's light, and many more are drawn; each term is
+    a no-op at its material default."""
+    shape = weather_look.beauty_rain_shape(10.0, 262144)
+    assert shape["softness"] > 0.0 and 0.0 < shape["variation"] <= 1.0
+    assert 0.0 < shape["radiance"] < 1.0
+    assert shape["density_share"] * 262144 >= 30000   # a sheet of streaks at 10 mm/h
+    assert shape["max_coverage"] <= 0.25
+    offset = (SHADERS / "rain_drop_offset.hlsl").read_text(encoding="utf-8")
+    opacity = (SHADERS / "rain_drop_opacity.hlsl").read_text(encoding="utf-8")
+    for text in (offset, opacity):
+        assert "if (Vary > 0.0)" in text and "if (Soft > 0.0)" in text
+        assert "R.Pcg(asuint(Index) ^ 0x68E31DA4u)" in text      # one length hash in both
+        assert "streak *= lerp(1.0, 0.45 + 1.1 * h, Vary);" in text
+        assert "width *= 1.0 + Soft;" in text
+    # The profiles are normalised to a mean of 1 (the soft streak keeps its light).
+    xs = [i / 1000.0 for i in range(-1000, 1001)]
+    assert abs(sum(math.exp(-4.0 * x * x) for x in xs) / len(xs) - 0.441) < 0.002
+    ts = [i / 2000.0 for i in range(2001)]
+    assert abs(sum(math.sqrt(math.sin(math.pi * t)) for t in ts) / len(ts) - 0.763) < 0.003
+    assert "exp(-4.0 * x * x) / 0.441" in opacity and "/ 0.763" in opacity
+    assert _assigned("STORM_GENERATIONS")["M_RainDrops"] == "6"
+    creator = SCRIPT[SCRIPT.index("def create_rain_drops"):SCRIPT.index("def create_rain_splash")]
+    before, after = creator.split("lib, \"rain_drop_opacity\"")
+    for name in ("Soft", "Vary"):
+        assert f'"{name}": params["{name}"]' in before and f'"{name}": params["{name}"]' in after
+    assert '"Corner": uv_channel(material, lib, 0, "rg"' in after
 
 
 # -- #09 the cones ------------------------------------------------------------------

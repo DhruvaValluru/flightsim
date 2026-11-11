@@ -499,11 +499,11 @@ WEATHER_SHADER_DIR = "assets/shaders/weather"
 DROPS_PARAMETERS = ("Shift", "FallTime", "BoxHalf", "WindVel", "CamVel", "Shutter",
                         "PixelAngle", "Active", "Weight", "GroundRelZ", "SkyRadianceScale",
                         "FlashLux", "Density", "NearThin", "MaxStreak", "MaxCoverage",
-                        "DepthFade")
+                        "DepthFade", "Soft", "Vary")
 #: round-2b weather-fx: the beauty rain shape's parameters (beauty_rain_shape in
 #: core/scene/weather_look.py) and the defaults that are the measure path's shader.
 DROPS_BEAUTY_DEFAULTS = {"Density": 1.0, "NearThin": 0.0, "MaxStreak": 0.0,
-                         "MaxCoverage": 1.0, "DepthFade": 0.0}
+                         "MaxCoverage": 1.0, "DepthFade": 0.0, "Soft": 0.0, "Vary": 0.0}
 SPLASH_PARAMETERS = ("Time", "Splash", "GroundShift", "GroundRelZ", "DropMm", "Active",
                      "Weight", "SkyRadianceScale", "FlashLux")
 LIGHTNING_PARAMETERS = ("PixelAngle", "RadiusCm", "Power")
@@ -575,7 +575,9 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_StormCell 5: the beauty rain shaft's streaks, eroded rim and density floor
 #: (storm_cell.hlsl's Ragged shaft block) and its albedo (storm_shaft_albedo.hlsl,
 #: the ShaftAlbedo parameter; visual round 6, round 4's #09 glowing cylinder).
-STORM_GENERATIONS = {"M_RainDrops": "5", "M_RainSplash": "3", "M_LightningChannel": "2",
+#: M_RainDrops 6: the beauty streak's softness and per-drop variation (Soft, Vary;
+#: lane D 2026-11-11, round 4's "scratches on the lens"; default 0 = generation 5).
+STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChannel": "2",
                      "M_StormCell": "5", "M_WindshieldRain": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
@@ -1955,7 +1957,7 @@ def create_rain_drops():
         "WindVel": params["WindVel"], "CamVel": params["CamVel"], "Shutter": params["Shutter"],
         "PixelAngle": params["PixelAngle"], "Active": params["Active"],
         "Density": params["Density"], "NearThin": params["NearThin"],
-        "MaxStreak": params["MaxStreak"]}, -900, 0)
+        "MaxStreak": params["MaxStreak"], "Soft": params["Soft"], "Vary": params["Vary"]}, -900, 0)
     lib.connect_material_property(offset, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
     rel = relative_position(material, lib, -1800, 1700, False, "object")
     opacity = custom(material, lib, "rain_drop_opacity", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
@@ -1966,7 +1968,8 @@ def create_rain_drops():
         "PixelAngle": params["PixelAngle"], "Weight": params["Weight"], "Active": params["Active"],
         "BoxHalf": params["BoxHalf"], "GroundRelZ": params["GroundRelZ"],
         "MaxStreak": params["MaxStreak"], "MaxCoverage": params["MaxCoverage"],
-        "DepthFade": params["DepthFade"]}, -900, 400)
+        "DepthFade": params["DepthFade"], "Corner": uv_channel(material, lib, 0, "rg", -1500, 1100),
+        "Soft": params["Soft"], "Vary": params["Vary"]}, -900, 400)
     lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
     drop_lit(material, lib, -900, 800)
     finish_storm(material, "M_RainDrops")

@@ -179,6 +179,10 @@ struct FFlightSimBeautyRainShape
 	double MaxStreakRad = 0.0;   // the streak's longest angular length (0: no cap)
 	double MaxCoverage = 1.0;    // the most one streak covers
 	double DepthFadeM = 0.0;     // coverage x exp(-range / this) (0: none)
+	// Lane D (2026-11-11): soft, varied, background-lit streaks (M_RainDrops 6).
+	double Softness = 0.0;       // the streak (1 + this) wider, Gaussian across, tapered (0: hard)
+	double Variation = 0.0;      // per-drop length and brightness spread (0: none)
+	double Radiance = 1.0;       // the drops' SkyRadianceScale (1: the measure path's)
 };
 
 struct FFlightSimThunderConstants

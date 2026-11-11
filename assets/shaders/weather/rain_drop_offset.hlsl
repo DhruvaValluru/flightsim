@@ -29,9 +29,22 @@
 //   Density  float   the beauty share of the drops drawn (1: all)
 //   NearThin float   the beauty near-lens thinning range, cm (0: none)
 //   MaxStreak float  the beauty streak's longest angular length, rad (0: no cap)
+//   Soft     float   lane D: the beauty streak drawn (1 + Soft) x wider (0: the hard quad)
+//   Vary     float   lane D: the beauty per-drop length spread, 0.45..1.55 at 1 (0: none)
+//
+// Lane D (2026-11-11, weather_look.BEAUTY_RAIN_SOFTNESS / _VARIATION): the opacity
+// (rain_drop_opacity.hlsl) carries the matching profile and the same hash, so the
+// coverage follows the streak drawn. Both 0: the expressions below are the measure
+// path's, value for value.
 struct FRainDrop
 {
 	float3 Wrap(float3 v, float3 h) { return v - 2.0 * h * floor((v + h) / (2.0 * h)); }
+	uint Pcg(uint v)
+	{
+		uint state = v * 747796405u + 2891336453u;
+		uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+		return (word >> 22u) ^ word;
+	}
 };
 FRainDrop R;
 if (Index >= Active * Density)
@@ -46,6 +59,12 @@ float speed = length(vel);
 float3 along = speed > 1.0e-3 ? vel / speed : float3(0.0, 0.0, -1.0);
 float diameterCm = Drop.x * 0.1;
 float streak = max(speed * Shutter, diameterCm);
+if (Vary > 0.0)
+{
+	// The drop's own length factor (the opacity's twin hash): a sheet of varied streaks.
+	float h = (R.Pcg(asuint(Index) ^ 0x68E31DA4u) & 0xFFFFFFu) / 16777216.0;
+	streak *= lerp(1.0, 0.45 + 1.1 * h, Vary);
+}
 float dist = max(length(rel), 1.0);
 if (NearThin > 0.0)
 {
@@ -62,5 +81,9 @@ if (MaxStreak > 0.0)
 float3 side = cross(along, rel / dist);
 side = dot(side, side) > 1.0e-8 ? normalize(side) : normalize(cross(along, float3(1.0, 0.0, 0.0)));
 float width = max(Extra.x * 0.1, dist * PixelAngle);
+if (Soft > 0.0)
+{
+	width *= 1.0 + Soft;   // a soft streak is wider; its profile (opacity) keeps its light
+}
 float3 corner = along * (Corner.y - 0.5) * streak + side * (Corner.x - 0.5) * width;
 return rel + corner - P0;
