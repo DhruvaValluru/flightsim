@@ -308,3 +308,12 @@ def test_the_subject_meter_is_beauty_only_and_never_touches_a_label_capture():
     assert block.count("Capture->HiddenActors.AddUnique(Scenario.Aircraft)") == 1
     assert block.count("Capture->HiddenActors.Remove(Scenario.Aircraft)") == 1
     assert block.index("HiddenActors.AddUnique") < block.index("HiddenActors.Remove")
+
+
+def test_the_lifted_sea_cap_is_beauty_only_so_label_depth_stays_on_the_tiles():
+    """Round 19 lane B lifts the beauty sea cap ~20 m over Google's ocean tiles:
+    it must be a beauty-only actor (hidden from every label capture), so the
+    depth, ID and mask passes keep the tiles' own sea surface."""
+    tiles = (PRIVATE / "FlightSimGoogleTiles.cpp").read_text(encoding="utf-8")
+    ground = tiles[tiles.index("TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround("):]
+    assert "BeautyOnlyActors.Add(SeaActor);" in ground
