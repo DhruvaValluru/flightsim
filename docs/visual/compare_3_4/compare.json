@@ -1,0 +1,86 @@
+[
+ {
+  "scene": "01_golden_hour_a_4_flying_east",
+  "mean_abs_change": 0.0,
+  "moved_share": 0.0,
+  "mean_luma_3": 95.5,
+  "mean_luma_4": 95.5
+ },
+ {
+  "scene": "02_same_super_bright_preset",
+  "mean_abs_change": 0.0,
+  "moved_share": 0.0,
+  "mean_luma_3": 106.6,
+  "mean_luma_4": 106.6
+ },
+ {
+  "scene": "03_a320_over_new_york_wide_lens_terrain_download",
+  "mean_abs_change": 0.72,
+  "moved_share": 0.012,
+  "mean_luma_3": 91.2,
+  "mean_luma_4": 91.2
+ },
+ {
+  "scene": "04_desert_a_4_sun_behind_the_camera",
+  "mean_abs_change": 0.65,
+  "moved_share": 0.0233,
+  "mean_luma_3": 122.6,
+  "mean_luma_4": 122.7
+ },
+ {
+  "scene": "05_desert_a_4_backlit",
+  "mean_abs_change": 0.04,
+  "moved_share": 0.0,
+  "mean_luma_3": 162.4,
+  "mean_luma_4": 162.4
+ },
+ {
+  "scene": "06_a320_over_sfo_heading_south_moderate_rain",
+  "mean_abs_change": 2.02,
+  "moved_share": 0.0027,
+  "mean_luma_3": 68.5,
+  "mean_luma_4": 70.3
+ },
+ {
+  "scene": "07_tower_view_heavy_rain",
+  "mean_abs_change": 28.57,
+  "moved_share": 0.7879,
+  "mean_luma_3": 80.3,
+  "mean_luma_4": 108.3
+ },
+ {
+  "scene": "08_c172_over_fuji_sunrise_light_rain",
+  "mean_abs_change": 18.85,
+  "moved_share": 0.4756,
+  "mean_luma_3": 143.2,
+  "mean_luma_4": 162.0
+ },
+ {
+  "scene": "09_747_through_a_thunderstorm",
+  "mean_abs_change": 18.2,
+  "moved_share": 0.5238,
+  "mean_luma_3": 33.6,
+  "mean_luma_4": 46.5
+ },
+ {
+  "scene": "10_c172_near_a_tornado",
+  "mean_abs_change": 11.42,
+  "moved_share": 0.4132,
+  "mean_luma_3": 81.6,
+  "mean_luma_4": 72.3
+ },
+ {
+  "scene": "12_c172_cockpit_over_the_grand_canyon",
+  "mean_abs_change": 0.86,
+  "moved_share": 0.0151,
+  "mean_luma_3": 83.1,
+  "mean_luma_4": 83.1
+ },
+ {
+  "scene": "13_747_cruise_over_the_ocean",
+  "mean_abs_change": 2.72,
+  "moved_share": 0.0572,
+  "mean_luma_3": 60.3,
+  "mean_luma_4": 61.6
+ }
+]
