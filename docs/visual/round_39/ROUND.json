@@ -1,0 +1,32 @@
+﻿{
+    "round":  39,
+    "commit":  "029ead47",
+    "full":  false,
+    "scenes":  [
+                   4,
+                   8
+               ],
+    "switches":  "-aircraft-materials=on -aircraft-probe=nocoat,noao,nonormal,nowear,nowet,rawbase",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  199
+                },
+    "outcomes":  [
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  96.0,
+                         "spec_sha256":  "9386284b5b90c09edbf98f1694778c412d11d1689ac276cece868e72dd311e00",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  8,
+                         "outcome":  "done",
+                         "seconds":  100.8,
+                         "spec_sha256":  "12d9f6f108c853765e86017db7ab96c95eb4e1fa4180a1b0299492c3d55a7345",
+                         "why":  "clip ready"
+                     }
+                 ]
+}
