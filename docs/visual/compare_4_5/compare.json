@@ -1,0 +1,134 @@
+[
+ {
+  "scene": "01_golden_hour_a_4_flying_east",
+  "mean_abs_change": 7.44,
+  "moved_share": 0.1936,
+  "mean_luma_4": 95.5,
+  "mean_luma_5": 91.9
+ },
+ {
+  "scene": "01_golden_hour_a_4_flying_east_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "02_same_super_bright_preset",
+  "mean_abs_change": 6.2,
+  "moved_share": 0.1812,
+  "mean_luma_4": 106.6,
+  "mean_luma_5": 103.3
+ },
+ {
+  "scene": "02_same_super_bright_preset_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "03_a320_over_new_york_wide_lens_terrain_download",
+  "mean_abs_change": 6.44,
+  "moved_share": 0.1642,
+  "mean_luma_4": 91.2,
+  "mean_luma_5": 88.6
+ },
+ {
+  "scene": "03_a320_over_new_york_wide_lens_terrain_download_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "04_desert_a_4_sun_behind_the_camera",
+  "mean_abs_change": 22.84,
+  "moved_share": 0.9946,
+  "mean_luma_4": 122.7,
+  "mean_luma_5": 99.8
+ },
+ {
+  "scene": "04_desert_a_4_sun_behind_the_camera_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "05_desert_a_4_backlit",
+  "mean_abs_change": 16.0,
+  "moved_share": 0.7808,
+  "mean_luma_4": 162.4,
+  "mean_luma_5": 176.5
+ },
+ {
+  "scene": "05_desert_a_4_backlit_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "06_a320_over_sfo_heading_south_moderate_rain",
+  "mean_abs_change": 3.62,
+  "moved_share": 0.0109,
+  "mean_luma_4": 70.3,
+  "mean_luma_5": 66.9
+ },
+ {
+  "scene": "06_a320_over_sfo_heading_south_moderate_rain_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "07_tower_view_heavy_rain",
+  "mean_abs_change": 2.07,
+  "moved_share": 0.0092,
+  "mean_luma_4": 108.3,
+  "mean_luma_5": 106.3
+ },
+ {
+  "scene": "07_tower_view_heavy_rain_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "08_c172_over_fuji_sunrise_light_rain",
+  "mean_abs_change": 32.08,
+  "moved_share": 0.5303,
+  "mean_luma_4": 162.0,
+  "mean_luma_5": 130.0
+ },
+ {
+  "scene": "08_c172_over_fuji_sunrise_light_rain_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "09_747_through_a_thunderstorm",
+  "mean_abs_change": 29.51,
+  "moved_share": 0.9562,
+  "mean_luma_4": 46.5,
+  "mean_luma_5": 71.8
+ },
+ {
+  "scene": "09_747_through_a_thunderstorm_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "10_c172_near_a_tornado",
+  "mean_abs_change": 27.99,
+  "moved_share": 0.7684,
+  "mean_luma_4": 72.3,
+  "mean_luma_5": 50.6
+ },
+ {
+  "scene": "10_c172_near_a_tornado_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "12_c172_cockpit_over_the_grand_canyon",
+  "mean_abs_change": 20.19,
+  "moved_share": 0.9361,
+  "mean_luma_4": 83.1,
+  "mean_luma_5": 99.3
+ },
+ {
+  "scene": "12_c172_cockpit_over_the_grand_canyon_post",
+  "only_in": "round_5"
+ },
+ {
+  "scene": "13_747_cruise_over_the_ocean",
+  "mean_abs_change": 16.94,
+  "moved_share": 0.9136,
+  "mean_luma_4": 61.6,
+  "mean_luma_5": 76.0
+ },
+ {
+  "scene": "13_747_cruise_over_the_ocean_post",
+  "only_in": "round_5"
+ }
+]
