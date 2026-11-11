@@ -280,17 +280,20 @@ def classify_slots(slots, mtl_names):
 
 
 def beauty_slot_mismatches(report, beauty_parts):
-    """Each measured part whose beauty copy's slot names are not its own,
-    name for name and in order: FlightSimAircraftFX.cpp keeps the measured
-    mesh on a beauty render for such a pair, so the import is incomplete.
-    ``report``: :func:`classify_slots`; ``beauty_parts``: the manifest's
-    {part: {"part": copy, ...}}."""
+    """Each measured part whose slot names are not its beauty copy's FIRST
+    slot names, name for name and in order: FlightSimAircraftFX.cpp keeps
+    the measured mesh on a beauty render for such a pair, so the import is
+    incomplete. Round 25 (scene #12): the copy may carry beauty-only slots
+    after the measured ones (a ``beauty_only`` interior part:
+    assets_pipeline/convert.py), which the host draws with the copy's own
+    materials. ``report``: :func:`classify_slots`; ``beauty_parts``: the
+    manifest's {part: {"part": copy, ...}}."""
     names = report.get("slot_names", {})
     out = []
     for part, row in sorted((beauty_parts or {}).items()):
         mine, theirs = names.get(part), names.get(row["part"])
-        if mine is not None and theirs is not None and mine != theirs:
-            out.append(f"{row['part']} slots {theirs} are not {part}'s {mine}")
+        if mine is not None and theirs is not None and list(theirs[:len(mine)]) != list(mine):
+            out.append(f"{row['part']} slots {theirs} do not start with {part}'s {mine}")
     return out
 
 

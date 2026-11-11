@@ -17,6 +17,16 @@
   "parts": [
     {
       "file": "Models/c172-common.ac"
+    },
+    {
+      "file": "Models/Interior/Panel/c172p-panel/c172p-interior.ac",
+      "interior": true,
+      "beauty_only": true,
+      "texture_dir": "Models",
+      "exclude": [
+        "glass_panel"
+      ],
+      "source": "round 25 scene 12 (2026-11-11, C172 cockpit over the Grand Canyon): the cockpit view drew the cowl, the glareshield and the canopy frame but no instrument panel, because the config converted only c172-common.ac (the exterior). c172p.xml (pinned commit a15d83d1) <model> c172p (Interior/Panel/c172p-panel/c172p.xml, no <offsets>, drawn unless /params/glass) loads c172p-interior.ac at the model origin with <texture-path>../../../../Models</texture-path>: the panel board and gauge faces (panel_1_gauges 1624 faces, panel_1_1_right, panel_1_1.inf, InstrumentCover, all panel.png), pedestal, seats, door cards, firewall, carpet and the controls (111 objects, 26683 triangles; measured here from the pinned file: every vertex inside c172-common.ac's extents, the gauge faces at model x -0.375..-0.359 m, 0.72 m ahead of views.pilot_eye, 95 % of their faces facing that eye). glass_panel (25 faces, trans 0.85, untextured) is left out: the beauty path draws glass with the opaque M_AircraftGlass, which would cover every gauge. The gauge needles (Instruments/*/*.xml, each its own .ac with animations) are not converted. beauty_only: in body_beauty only, so body.obj and every measure frame are unchanged"
     }
   ],
   "exclude": [

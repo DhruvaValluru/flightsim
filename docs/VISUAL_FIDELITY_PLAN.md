@@ -549,6 +549,11 @@ CLI `flightsim capture` renders measure frames only.
 - The gen-4..6 aircraft paint masters darken the aircraft (flat master on the same inputs is right;
   coat, AO, normal, wear, wet, raw-base and Default Lit probes did not move the gen-6 pixels -- the
   probe plumbing itself is suspect). Paint uses the flat master until found.
+  Round 25 (PROBE_LOG "## round 25"): rounds 37-39 are byte-identical frames and the texture is
+  gone -- the default material of a master that fails to compile. The host now compile-checks
+  the masters and falls back to M_AircraftPaintCoat (clear coat, no Custom node), then flat;
+  the default is the masters again, -aircraft-probe=flat / coat the A/B. #12's panel: the c172p
+  interior .ac as a beauty-only part of body_beauty. Both await a Windows round.
 - A ghost check inside verify (the round summary has one: `ghost.score`, all < 0.6 in round 44).
 
 **Owner decision 2026-11-11: gear-up cruise.** Retractable-gear airframes airborne above 100 ft AGL

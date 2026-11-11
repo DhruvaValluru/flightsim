@@ -1367,6 +1367,14 @@ wfx_check "probes: GetTextureParameterValue" "Engine/Public/Materials/MaterialIn
 wfx_check "probes: FHashedMaterialParameterInfo(FName)" "Engine/Public/Materials/MaterialParameters.h" "FMemoryImageMaterialParameterInfo(const FName& InName, EMaterialParameterAssociation InAssociation = EMaterialParameterAssociation::GlobalParameter, int32 InIndex = INDEX_NONE)"
 wfx_check "probes: MID SetTextureParameterValue" "Engine/Public/Materials/MaterialInstanceDynamic.h" "ENGINE_API void SetTextureParameterValue(FName ParameterName, class UTexture* Value);"
 wfx_check "probes r24: MID CopyParameterOverrides" "Engine/Public/Materials/MaterialInstanceDynamic.h" "ENGINE_API void CopyParameterOverrides(UMaterialInstance* MaterialInstance);"
+# round 25: the class masters' compile check (AircraftFxCompileProblem) and its fallback.
+wfx_check "masters r25: Material GetMaterialResource(EShaderPlatform)" "Engine/Public/Materials/Material.h" "ENGINE_API virtual FMaterialResource* GetMaterialResource(EShaderPlatform InShaderPlatform, EMaterialQualityLevel::Type QualityLevel = EMaterialQualityLevel::Num) override;"
+wfx_check "masters r25: MaterialInterface GetMaterial" "Engine/Public/Materials/MaterialInterface.h" "virtual class UMaterial* GetMaterial() PURE_VIRTUAL(UMaterialInterface::GetMaterial,return NULL;);"
+wfx_check "masters r25: FMaterial FinishCompilation" "Engine/Public/MaterialShared.h" "ENGINE_API void FinishCompilation();"
+wfx_check "masters r25: FMaterial GetCompileErrors" "Engine/Public/MaterialShared.h" "const TArray<FString>& GetCompileErrors() const { return CompileErrors; }"
+wfx_check "masters r25: FMaterial GetGameThreadShaderMap" "Engine/Public/MaterialShared.h" "class FMaterialShaderMap* GetGameThreadShaderMap() const"
+wfx_check "masters r25: GShaderPlatformForFeatureLevel" "RHI/Public/RHIGlobals.h" "#define GShaderPlatformForFeatureLevel"
+wfx_check "panel r25: StaticMesh GetStaticMaterials" "Engine/Classes/Engine/StaticMesh.h" "const TArray<FStaticMaterial>& GetStaticMaterials() const"
 # ---------------------------------------------------- END aircraft probes --
 
 

@@ -25,6 +25,9 @@
 #include "Materials/Material.h"           // round 23: GetBaseMaterial()->GetName() (probe slots)
 #include "Materials/MaterialInterface.h"
 #include "Engine/Texture.h"               // round 23: the flat probe copies BaseColorMap
+#include "MaterialShared.h"               // round 25: FMaterialResource (the masters' compile check)
+#include "RHI.h"                          // round 25: GShaderPlatformForFeatureLevel
+#include "Runtime/Launch/Resources/Version.h"
 #include "Math/RotationMatrix.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
@@ -34,6 +37,15 @@
 #include "Serialization/JsonSerializer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFlightSimAircraftFX, Log, All);
+
+// Round 25: material resources are keyed by shader platform on UE 5.7 and
+// later and by feature level before (FlightSimWeather.cpp's twin, its own
+// name: unity builds merge the two files).
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 7)
+#define FLIGHTSIM_AIRCRAFT_MATERIAL_RESOURCE(Base, World, Platform) ((Base)->GetMaterialResource(Platform))
+#else
+#define FLIGHTSIM_AIRCRAFT_MATERIAL_RESOURCE(Base, World, Platform) ((Base)->GetMaterialResource((World)->GetFeatureLevel()))
+#endif
 
 namespace
 {
@@ -70,6 +82,51 @@ namespace
 	// Round 24: -aircraft-probe=tangentnormal (aircraft_look.PROBE_TANGENT_NORMAL_MASTER).
 	const TCHAR* const AircraftFxProbeTangentNormalMaterialPath =
 		TEXT("/Game/FlightSim/Aircraft/M_AircraftPaintTangentNormal.M_AircraftPaintTangentNormal");
+	// Round 25: -aircraft-probe=coat and the compile fallback (aircraft_look.PROBE_COAT_MASTER).
+	const TCHAR* const AircraftFxProbeCoatMaterialPath =
+		TEXT("/Game/FlightSim/Aircraft/M_AircraftPaintCoat.M_AircraftPaintCoat");
+	// Round 25: scripts/ue_aircraft_master_materials.py LOOK_GENERATION_PARAMETER.
+	const TCHAR* const AircraftFxLookGenerationParam = TEXT("LookGeneration");
+
+	// Round 25: why a material would draw the engine's default material on
+	// this render (it failed to compile for the world's shader platform, or
+	// has no shader map), or empty when it compiled. Rounds 37-40 drew
+	// byte-identical frames under five different -aircraft-probe= words and
+	// basecolor-debug drew a lit, untextured airframe: the default material
+	// a failed compile draws, which no probe could reach. The same check as
+	// FlightSimWeather.cpp's cloud materials.
+	FString AircraftFxCompileProblem(UMaterialInterface* Material, UWorld* World)
+	{
+		if (Material == nullptr)
+		{
+			return TEXT("absent");
+		}
+		if (World == nullptr)
+		{
+			return FString();   // nothing to check against; drawn as before
+		}
+		UMaterial* Base = Material->GetMaterial();
+		if (Base == nullptr)
+		{
+			return TEXT("has no base material");
+		}
+		const EShaderPlatform Platform = GShaderPlatformForFeatureLevel[World->GetFeatureLevel()];
+		FMaterialResource* Resource = FLIGHTSIM_AIRCRAFT_MATERIAL_RESOURCE(Base, World, Platform);
+		if (Resource == nullptr)
+		{
+			return TEXT("has no material resource for this shader platform");
+		}
+		Resource->FinishCompilation();
+		if (Resource->GetCompileErrors().Num() > 0)
+		{
+			return TEXT("failed to compile: ") + FString::Join(Resource->GetCompileErrors(), TEXT(" | "));
+		}
+		if (Resource->GetGameThreadShaderMap() == nullptr)
+		{
+			return TEXT("has no shader map after compiling");
+		}
+		return FString();
+	}
 	// scripts/aircraft_look.py FX_PARAMETERS (pinned by tests/test_aircraft_look.py).
 	const TCHAR* const AircraftFxParamLightColour = TEXT("LightColour");
 	const TCHAR* const AircraftFxParamIntensity = TEXT("Intensity");
@@ -291,31 +348,28 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 				Word == TEXT("nowear") || Word == TEXT("flat") || Word == TEXT("measured-mesh") ||
 				// round 24 (LOOK_GENERATION 6)
 				Word == TEXT("nowet") || Word == TEXT("rawbase") || Word == TEXT("defaultlit") ||
-				Word == TEXT("basecolor-debug") || Word == TEXT("tangentnormal");
+				Word == TEXT("basecolor-debug") || Word == TEXT("tangentnormal") ||
+				// round 25 (LOOK_GENERATION 7)
+				Word == TEXT("coat");
 			if (!bKnown)
 			{
 				if (SwitchError.IsEmpty())
 				{
 					SwitchError = FString::Printf(TEXT("aircraft_look.switch: -aircraft-probe=%s: '%s' is not one of ")
 						TEXT("nocoat, noao, nonormal, nowear, flat, measured-mesh, nowet, rawbase, defaultlit, ")
-						TEXT("basecolor-debug, tangentnormal"), *ProbeList, *Word);
+						TEXT("basecolor-debug, tangentnormal, coat"), *ProbeList, *Word);
 				}
 				continue;
 			}
 			Probes.AddUnique(Word);
 		}
 	}
-	else
-	{
-		// Final sweep (round 44): the default paint is the flat master. The
-		// bisect (r27-r40) found the gen-4..6 paint and bare-metal masters
-		// darken the aircraft (C172 12/10/10 vs 89/82/92 under overcast) while
-		// M_AircraftProbeFlat on the same instance inputs matched the imported
-		// materials exactly; glass and rubber keep their look instances, so the
-		// cockpit canopy stays the thin translucent glass (#12 went 75 % black
-		// with every look instance off). -aircraft-probe=none: the full masters.
-		Probes.Add(TEXT("flat"));
-	}
+	// Round 25: -aircraft-probe= absent draws the class masters (gen 7),
+	// each compile-checked on the render's shader platform, falling back to
+	// M_AircraftPaintCoat, then to M_AircraftProbeFlat (ApplyMaterials;
+	// aircraft_look.MASTER_FALLBACK_ORDER). The final sweep's default
+	// (round 44, 1e5ba438: every paint slot on the flat master) is
+	// -aircraft-probe=flat; -aircraft-probe=coat forces the coat master.
 	Humidity.ParseParams(Params);  // condensation-solver: -humidity-pct=
 }
 
@@ -642,14 +696,19 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 		{
 			const TArray<FStaticMaterial>& From = Measured->GetStaticMaterials();
 			const TArray<FStaticMaterial>& To = BeautyMesh->GetStaticMaterials();
-			bool bSameSlots = From.Num() == To.Num();
+			// Round 25 (scene #12): the copy may carry beauty-only slots AFTER
+			// the measured part's (a beauty_only interior part, the c172p's
+			// instrument panel: assets_pipeline/convert.py), so the measured
+			// slots must be the copy's first ones, name for name, in order
+			// (ue_aircraft_materials.beauty_slot_mismatches, the twin).
+			bool bSameSlots = From.Num() <= To.Num();
 			for (int32 Slot = 0; bSameSlots && Slot < From.Num(); ++Slot)
 			{
 				bSameSlots = From[Slot].MaterialSlotName == To[Slot].MaterialSlotName;
 			}
 			if (!bSameSlots)
 			{
-				Reason = TEXT("its material slots differ from the measured part's; the measured mesh is kept");
+				Reason = TEXT("its first material slots are not the measured part's; the measured mesh is kept");
 			}
 			else if (!Part->SetStaticMesh(BeautyMesh))
 			{
@@ -660,6 +719,12 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 		BeautyRow->SetStringField(TEXT("part"), Measured->GetName());
 		BeautyRow->SetStringField(TEXT("beauty_mesh"), BeautyPath);
 		BeautyRow->SetBoolField(TEXT("swapped"), Reason.IsEmpty());
+		if (BeautyMesh != nullptr)
+		{
+			// Round 25: slots only the beauty copy has (a beauty_only interior).
+			BeautyRow->SetNumberField(TEXT("beauty_only_slots"), FMath::Max(
+				0, BeautyMesh->GetStaticMaterials().Num() - Measured->GetStaticMaterials().Num()));
+		}
 		if (!Reason.IsEmpty())
 		{
 			BeautyRow->SetStringField(TEXT("reason"), Reason);
@@ -672,8 +737,38 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	int32 ThinApplied = 0;
 	// Round 23: the probes in force (recorded below) and the flat master.
 	int32 ProbedSlots = 0;
-	UMaterialInterface* ProbeFlat = Options.Probes.Contains(TEXT("flat"))
-		? LoadObject<UMaterialInterface>(nullptr, AircraftFxProbeFlatMaterialPath) : nullptr;
+	// Round 25: the flat and coat masters are loaded on every beauty render:
+	// they are the compile fallback of a class master (below).
+	UMaterialInterface* ProbeFlat = LoadObject<UMaterialInterface>(nullptr, AircraftFxProbeFlatMaterialPath);
+	UMaterialInterface* ProbeCoat = LoadObject<UMaterialInterface>(nullptr, AircraftFxProbeCoatMaterialPath);
+	UWorld* const CompileWorld = Aircraft != nullptr ? Aircraft->GetWorld() : nullptr;
+	// Round 25: each master's compile result on this shader platform, once
+	// (empty = compiled), its LookGeneration sentinel, the slots that fell
+	// back and the probe parameters the drawn master lacks.
+	TMap<FString, FString> MasterProblems;
+	TMap<FString, double> MasterGenerations;
+	TArray<FString> MissingProbeParameters;
+	TMap<FString, int32> FallbackSlots;
+	auto CompileProblemOf = [&MasterProblems, CompileWorld](UMaterialInterface* Material) -> FString
+	{
+		if (Material == nullptr)
+		{
+			return TEXT("absent");
+		}
+		const UMaterial* Base = Material->GetMaterial();
+		const FString Key = Base != nullptr ? Base->GetName() : Material->GetName();
+		if (const FString* Known = MasterProblems.Find(Key))
+		{
+			return *Known;
+		}
+		const FString Problem = AircraftFxCompileProblem(Material, CompileWorld);
+		MasterProblems.Add(Key, Problem);
+		if (!Problem.IsEmpty())
+		{
+			UE_LOG(LogFlightSimAircraftFX, Warning, TEXT("aircraft look: %s %s"), *Key, *Problem);
+		}
+		return Problem;
+	};
 	UMaterialInterface* ProbeDefaultLit = Options.Probes.Contains(TEXT("defaultlit"))
 		? LoadObject<UMaterialInterface>(nullptr, AircraftFxProbeDefaultLitMaterialPath) : nullptr;
 	UMaterialInterface* ProbeTangentNormal = Options.Probes.Contains(TEXT("tangentnormal"))
@@ -697,11 +792,17 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 				TEXT("absent: %s not found (run scripts/ue_create_materials.py: LOOK_GENERATION 6); the look ")
 				TEXT("instances stand"), AircraftFxProbeTangentNormalMaterialPath));
 		}
-		if (Options.Probes.Contains(TEXT("flat")) && ProbeFlat == nullptr)
+		if (ProbeFlat == nullptr)
 		{
 			Row->SetStringField(TEXT("probe_flat"), FString::Printf(
 				TEXT("absent: %s not found (run scripts/ue_create_materials.py: LOOK_GENERATION 5); the look ")
 				TEXT("instances stand"), AircraftFxProbeFlatMaterialPath));
+		}
+		if (ProbeCoat == nullptr)
+		{
+			Row->SetStringField(TEXT("probe_coat"), FString::Printf(
+				TEXT("absent: %s not found (run scripts/ue_create_materials.py: LOOK_GENERATION 7); no coat ")
+				TEXT("fallback, the flat master is the only one"), AircraftFxProbeCoatMaterialPath));
 		}
 	}
 	// Slot names without a look instance, once each (AddUnique on the JSON
@@ -749,9 +850,65 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 			// (aircraft_look.PROBE_MASTERS); glass and rubber keep their instances.
 			const UMaterial* ProbeBase = LookInstance->GetBaseMaterial();
 			const FString ProbeBaseName = ProbeBase != nullptr ? ProbeBase->GetName() : FString();
-			const bool bProbeSlot = Options.Probes.Num() > 0 &&
+			// Round 25: every paint / bare-metal slot, probes or not (the
+			// compile fallback below acts on all of them).
+			const bool bProbeSlot =
 				(ProbeBaseName == TEXT("M_AircraftPaint") || ProbeBaseName == TEXT("M_AircraftBareMetal"));
-			if (bProbeSlot && Options.Probes.Contains(TEXT("flat")) && ProbeFlat != nullptr)
+			UMaterialInstance* LookMic = Cast<UMaterialInstance>(LookInstance);
+			// Round 24: a paint slot onto a twin master (the paint graph on
+			// MSM_DEFAULT_LIT, or with a tangent-space normal), with this
+			// instance's overrides; defaultlit wins if both are asked.
+			UMaterialInterface* PaintTwin = Options.Probes.Contains(TEXT("defaultlit")) ? ProbeDefaultLit
+				: (Options.Probes.Contains(TEXT("tangentnormal")) ? ProbeTangentNormal : nullptr);
+			if (!(bProbeSlot && ProbeBaseName == TEXT("M_AircraftPaint") && LookMic != nullptr))
+			{
+				PaintTwin = nullptr;
+			}
+			// Round 25: the plain master this slot draws instead of its class
+			// master: -aircraft-probe=flat, -aircraft-probe=coat, or the class
+			// master (or its twin) failed to compile on this shader platform
+			// (it would draw the engine's default material: rounds 37-40),
+			// then the coat master if it compiled, else the flat one.
+			UMaterialInterface* Plain = nullptr;
+			if (bProbeSlot)
+			{
+				if (Options.Probes.Contains(TEXT("flat")) && ProbeFlat != nullptr)
+				{
+					Plain = ProbeFlat;
+				}
+				else if (Options.Probes.Contains(TEXT("coat")) && ProbeCoat != nullptr && LookMic != nullptr)
+				{
+					Plain = ProbeCoat;
+				}
+				else
+				{
+					UMaterialInterface* Drawn = PaintTwin != nullptr ? PaintTwin : LookInstance;
+					if (!CompileProblemOf(Drawn).IsEmpty())
+					{
+						Plain = (ProbeCoat != nullptr && LookMic != nullptr && CompileProblemOf(ProbeCoat).IsEmpty())
+							? ProbeCoat : ProbeFlat;
+						if (Plain != nullptr)
+						{
+							FallbackSlots.FindOrAdd(Plain->GetName()) += 1;
+						}
+					}
+				}
+			}
+			if (Plain != nullptr && Plain == ProbeCoat)
+			{
+				// Round 25: the clear-coat paint with no Custom node, every
+				// override of the look instance (colour, texture, roughness, coat).
+				UMaterialInstanceDynamic* CoatMid = UMaterialInstanceDynamic::Create(ProbeCoat, Part);
+				if (CoatMid != nullptr)
+				{
+					CoatMid->CopyParameterOverrides(LookMic);
+					Part->SetMaterial(Slot, CoatMid);
+					++Applied;
+					++ProbedSlots;
+					continue;
+				}
+			}
+			if (Plain != nullptr && Plain == ProbeFlat)
 			{
 				// A plain lit dielectric with the instance's own colour and texture.
 				UMaterialInstanceDynamic* FlatMid = UMaterialInstanceDynamic::Create(ProbeFlat, Part);
@@ -781,13 +938,7 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 			}
 			// wet-airframe-canopy: a MID of the look instance, so the wet scalars can be set per step.
 			UMaterialInstanceDynamic* LookMid = nullptr;
-			UMaterialInstance* LookMic = Cast<UMaterialInstance>(LookInstance);
-			// Round 24: a paint slot onto a twin master (the paint graph on
-			// MSM_DEFAULT_LIT, or with a tangent-space normal), with this
-			// instance's overrides; defaultlit wins if both are asked.
-			UMaterialInterface* PaintTwin = Options.Probes.Contains(TEXT("defaultlit")) ? ProbeDefaultLit
-				: (Options.Probes.Contains(TEXT("tangentnormal")) ? ProbeTangentNormal : nullptr);
-			if (bProbeSlot && PaintTwin != nullptr && ProbeBaseName == TEXT("M_AircraftPaint") && LookMic != nullptr)
+			if (PaintTwin != nullptr)
 			{
 				LookMid = UMaterialInstanceDynamic::Create(PaintTwin, Part);
 				if (LookMid != nullptr)
@@ -801,6 +952,16 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 			}
 			if (bProbeSlot && LookMid != nullptr)
 			{
+				// Round 25: which graph this slot draws (the master's
+				// LookGeneration sentinel; absent = built before generation 7).
+				{
+					float Generation = 0.0f;
+					const UMaterial* DrawnBase = LookMid->GetMaterial();
+					const FString DrawnName = DrawnBase != nullptr ? DrawnBase->GetName() : LookMid->GetName();
+					MasterGenerations.Add(DrawnName, LookMid->GetScalarParameterValue(
+						FHashedMaterialParameterInfo(FName(AircraftFxLookGenerationParam)), Generation)
+						? static_cast<double>(Generation) : -1.0);
+				}
 				// Round 24 (aircraft_wet_layer.PROBE_SCALARS on the gen-6 masters).
 				if (Options.Probes.Contains(TEXT("nowet")))
 				{
@@ -835,7 +996,29 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 					LookMid->SetScalarParameterValue(TEXT("GrimeAmount"), 0.0f);
 					LookMid->SetScalarParameterValue(TEXT("SootAmount"), 0.0f);
 				}
-				++ProbedSlots;
+				// Round 25: a probe whose parameter the drawn master lacks is
+				// inert (a master built before its generation); recorded by name.
+				{
+					TArray<const TCHAR*> Wanted;
+					if (Options.Probes.Contains(TEXT("nowet"))) { Wanted.Add(TEXT("WetLayerAmount")); }
+					if (Options.Probes.Contains(TEXT("rawbase"))) { Wanted.Add(TEXT("RawBaseAmount")); }
+					if (Options.Probes.Contains(TEXT("basecolor-debug"))) { Wanted.Add(TEXT("BaseDebug")); }
+					if (Options.Probes.Contains(TEXT("noao"))) { Wanted.Add(TEXT("PanelAoAmount")); }
+					if (Options.Probes.Contains(TEXT("nonormal"))) { Wanted.Add(TEXT("PanelNormalAmount")); }
+					if (Options.Probes.Contains(TEXT("nowear"))) { Wanted.Add(TEXT("WearAmount")); }
+					for (const TCHAR* Name : Wanted)
+					{
+						float Value = 0.0f;
+						if (!LookMid->GetScalarParameterValue(FHashedMaterialParameterInfo(FName(Name)), Value))
+						{
+							MissingProbeParameters.AddUnique(FString(Name));
+						}
+					}
+				}
+				if (Options.Probes.Num() > 0)
+				{
+					++ProbedSlots;
+				}
 			}
 			Part->SetMaterial(Slot, LookMid != nullptr ? static_cast<UMaterialInterface*>(LookMid) : LookInstance);
 			if (LookMid != nullptr) { LookMids.Add(LookMid); }
@@ -855,6 +1038,46 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	Row->SetNumberField(TEXT("slots_without_material"), Unbound);
 	Row->SetNumberField(TEXT("slots_thin_translucent"), ThinApplied);
 	Row->SetNumberField(TEXT("slots_probed"), ProbedSlots);
+	// Round 25: the class masters' compile results on this shader platform,
+	// the slots that fell back to a plain master, the graph generations drawn
+	// and any probe parameter the drawn master lacks.
+	{
+		TSharedPtr<FJsonObject> Compile = MakeShared<FJsonObject>();
+		for (const TPair<FString, FString>& Entry : MasterProblems)
+		{
+			Compile->SetStringField(Entry.Key, Entry.Value.IsEmpty() ? FString(TEXT("compiled")) : Entry.Value);
+		}
+		Row->SetObjectField(TEXT("master_compile"), Compile);
+		TSharedPtr<FJsonObject> Fallback = MakeShared<FJsonObject>();
+		for (const TPair<FString, int32>& Entry : FallbackSlots)
+		{
+			Fallback->SetNumberField(Entry.Key, Entry.Value);
+		}
+		Row->SetObjectField(TEXT("slots_fallback"), Fallback);
+		TSharedPtr<FJsonObject> Generations = MakeShared<FJsonObject>();
+		for (const TPair<FString, double>& Entry : MasterGenerations)
+		{
+			if (Entry.Value < 0.0)
+			{
+				Generations->SetStringField(Entry.Key, TEXT("absent: built before LOOK_GENERATION 7 (run ")
+					TEXT("scripts/ue_create_materials.py)"));
+			}
+			else
+			{
+				Generations->SetNumberField(Entry.Key, Entry.Value);
+			}
+		}
+		Row->SetObjectField(TEXT("master_generation"), Generations);
+		TArray<TSharedPtr<FJsonValue>> Missing;
+		for (const FString& Name : MissingProbeParameters)
+		{
+			Missing.Add(MakeShared<FJsonValueString>(Name));
+		}
+		Row->SetArrayField(TEXT("probe_parameters_missing"), Missing);
+		Row->SetStringField(TEXT("fallback_rule"), TEXT("a paint / bare-metal slot draws its class master when it ")
+			TEXT("compiled on this shader platform, else M_AircraftPaintCoat (no Custom node), else ")
+			TEXT("M_AircraftProbeFlat; -aircraft-probe=flat / coat force one (aircraft_look.MASTER_FALLBACK_ORDER)"));
+	}
 	Row->SetBoolField(TEXT("labels"), Options.bLabels);
 	Row->SetStringField(TEXT("thin_glass"), Options.bLabels
 		? TEXT("label-safe opaque glass kept: -labels (the ID and depth captures draw no translucency)")

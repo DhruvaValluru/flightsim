@@ -80,8 +80,18 @@ REPO = os.path.dirname(_HERE)
 #: 2: wet-airframe-canopy wet layer and canopy scratches; 3: fix pass (acrylic
 #: glass, physical bulbs and plume); 4: round 5 L4 -- measured metals and
 #: rubber (Physically Based API), paint Metallic 0 with an albedo cap, low
-#: panel lines, exhaust soot, the Thin Translucent canopy master.
-LOOK_GENERATION = "6"
+#: panel lines, exhaust soot, the Thin Translucent canopy master; 5/6: the
+#: round 23/24 probe handles; 7 (round 25): rebuilt IN PLACE (never deleted:
+#: _new), a LookGeneration sentinel scalar the host reads back, and the
+#: Custom-node-free clear-coat master M_AircraftPaintCoat (the host's
+#: compile-checked fallback and -aircraft-probe=coat).
+LOOK_GENERATION = "7"
+#: Round 25: every paint / bare-metal master carries this scalar (default
+#: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
+#: read which graph a render drew (render.json aircraft_look.materials.
+#: master_generation): rounds 37-40 drew byte-identical frames under five
+#: different probes, and nothing on the page said which graph was drawn.
+LOOK_GENERATION_PARAMETER = "LookGeneration"
 LOOK_GENERATION_TAG = "FlightSimAircraftLookGeneration"
 #: The engine's white texture, the default of every BaseColorMap
 #: (Engine/Content/EngineResources/WhiteSquareTexture.uasset, present in 5.7.4).
@@ -139,15 +149,34 @@ def _rebuild_requested(name):
 
 
 def _new(name):
-    """Create MASTER_ROOT/<name> once; None when it exists at this generation."""
+    """Create MASTER_ROOT/<name> once; None when it exists at this generation.
+
+    Round 25: a stale (or FLIGHTSIM_REBUILD_MATERIALS-named) master is
+    cleared and built again IN PLACE, the way scripts/ue_create_materials.py
+    rebuilds a weather look (_weather_material), never deleted: every
+    per-model look instance references it, and before this a delete that
+    the editor refused printed MATERIAL-EXISTS and kept the old graph
+    silently (the round-5 materials log: MATERIAL-EXISTS for M_AircraftPaint
+    with no REBUILT line; delete-then-build also lost M_StormCell outright,
+    2026-10-09)."""
     unreal = _u()
     full = _path(name)
     if unreal.EditorAssetLibrary.does_asset_exist(full):
-        if _rebuild_requested(name) and unreal.EditorAssetLibrary.delete_asset(full):
-            print(f"MATERIAL-REBUILT: {full}")
-        else:
+        if not _rebuild_requested(name):
             print(f"MATERIAL-EXISTS: {full}")
             return None
+        material = unreal.EditorAssetLibrary.load_asset(full)
+        if material is None or not isinstance(material, unreal.Material):
+            raise RuntimeError(f"{full} exists but is not a Material: move it aside by hand "
+                               f"(no editor open) and run again")
+        unreal.MaterialEditingLibrary.delete_all_material_expressions(material)
+        # The graph is gone; the flags the builders set are reset to the
+        # factory's, so a builder that does not set one gets the default.
+        material.set_editor_property("use_material_attributes", False)
+        material.set_editor_property("tangent_space_normal", True)
+        print(f"MATERIAL-UPDATED: {full} (graph cleared; built again in place, "
+              f"look generation {LOOK_GENERATION})")
+        return material
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     material = tools.create_asset(name, look.MASTER_ROOT, unreal.Material, unreal.MaterialFactoryNew())
     if material is None:
@@ -325,6 +354,11 @@ def _base_colour(material, x, y):
     return _lerp(material, colour, tex, weight, x + 250, y + 100)
 
 
+def _generation(material, x, y):
+    """The LookGeneration sentinel scalar (round 25)."""
+    return _scalar(material, LOOK_GENERATION_PARAMETER, float(LOOK_GENERATION), x, y)
+
+
 def _attributes(material, x, y):
     return _node(material, _u().MaterialExpressionMakeMaterialAttributes, x, y)
 
@@ -410,6 +444,9 @@ def _surface(name, cls, coat, shading_model=None, tangent_normal=False):
                                          _mul(material, _mul(material, groove, s["PanelAoAmount"], -750, 820),
                                               _const(material, -0.5, -600, 800),
                                               -450, 800), -300, 780), -150, 780)
+    # round 25 (LOOK_GENERATION 7): the generation sentinel, x0 into the AO.
+    occlusion = _add(material, occlusion, _mul(material, _generation(material, -450, 880),
+                                               _const(material, 0.0, -600, 880), -300, 880), -100, 800)
     out = _attributes(material, 300, 200)
     _link(colour, "", out, ("BaseColor", "Base Color"))
     _link(metallic, "", out, "Metallic")
@@ -472,6 +509,49 @@ def create_aircraft_probe_flat():
     lib.connect_material_property(_const(material, 0.0, -400, 300), "", unreal.MaterialProperty.MP_METALLIC)
     lib.connect_material_property(_const(material, 0.5, -400, 400), "", unreal.MaterialProperty.MP_SPECULAR)
     lib.connect_material_property(_const(material, 0.5, -400, 500), "", unreal.MaterialProperty.MP_ROUGHNESS)
+    _finish(material, name)
+
+
+def create_aircraft_paint_coat():
+    """M_AircraftPaintCoat (round 25): the paint as a plain Clear Coat
+    material with NO Custom node, no world-space normal, no attributes and
+    no wet graft -- only engine nodes, so it compiles wherever the flat
+    probe does. Base colour: the look instance's BaseColor / BaseColorMap /
+    BaseColorMapWeight exactly as M_AircraftProbeFlat (no albedo cap, so it
+    is never darker than flat); Metallic, Specular, Roughness, ClearCoat and
+    ClearCoatRoughness are parameters of the paint's names, so
+    FlightSimAircraftFX.cpp's CopyParameterOverrides carries the look
+    config's numbers (the A-4's Roughness 0.5, ClearCoat 0.25). The normal
+    is the mesh's own (tangent space, unconnected).
+
+    Why: rounds 37-39 (-aircraft-probe=defaultlit / tangentnormal /
+    nocoat,noao,nonormal,nowear,nowet,rawbase) drew byte-identical frames
+    and round 40's basecolor-debug drew the same lit airframe, untextured
+    (the A-4's red tail stripe gone) -- the engine's default material,
+    which a material that fails to compile draws; only the flat master,
+    the one without Custom nodes, changed pixels. The host compile-checks
+    the class masters and falls back to this one (then to flat), recorded
+    in render.json aircraft_look.materials.master_compile. Opaque, no WPO:
+    labels unchanged."""
+    unreal = _u()
+    name = look.PROBE_COAT_MASTER
+    material = _new(name)
+    if material is None:
+        return
+    material.set_editor_property("shading_model", _enum(unreal.MaterialShadingModel, "MSM_CLEAR_COAT"))
+    lib = unreal.MaterialEditingLibrary
+    s = {key: _scalar(material, key, value, -500, 300 + 100 * i)
+         for i, (key, value) in enumerate(look.COAT_SCALARS.items())}
+    lib.connect_material_property(_base_colour(material, -900, 0), "", unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(s["Metallic"], "", unreal.MaterialProperty.MP_METALLIC)
+    lib.connect_material_property(s["Specular"], "", unreal.MaterialProperty.MP_SPECULAR)
+    lib.connect_material_property(s["Roughness"], "", unreal.MaterialProperty.MP_ROUGHNESS)
+    lib.connect_material_property(s["ClearCoat"], "", _enum(unreal.MaterialProperty, "MP_CUSTOM_DATA0", "MP_CLEAR_COAT"))
+    lib.connect_material_property(s["ClearCoatRoughness"], "", _enum(unreal.MaterialProperty, "MP_CUSTOM_DATA1", "MP_CLEAR_COAT_ROUGHNESS"))
+    # The sentinel, x0 into the AO (otherwise unconnected: AO 1).
+    lib.connect_material_property(_add(material, _const(material, 1.0, -300, 900), _mul(
+        material, _generation(material, -500, 1000), _const(material, 0.0, -500, 1100), -300, 1000), -150, 950),
+        "", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
     _finish(material, name)
 
 
@@ -705,13 +785,14 @@ def create_aircraft_glass_thin():
 CREATORS = (create_aircraft_paint, create_aircraft_bare_metal, create_aircraft_glass,
             create_aircraft_rubber, create_aircraft_glass_thin, create_aircraft_probe_flat,
             create_aircraft_paint_default_lit, create_aircraft_paint_tangent_normal,
+            create_aircraft_paint_coat,
             create_nav_light_emissive,
             create_aircraft_contrail, create_aircraft_afterburner, create_aircraft_heat_haze)
 #: The asset each creator makes (pinned to look.CLASS_MASTERS / THIN_GLASS_MASTER /
 #: FX_MASTERS by test).
 CREATED = ("M_AircraftPaint", "M_AircraftBareMetal", "M_AircraftGlass", "M_AircraftRubber",
            "M_AircraftGlassThin", "M_AircraftProbeFlat", "M_AircraftPaintDefaultLit",
-           "M_AircraftPaintTangentNormal",
+           "M_AircraftPaintTangentNormal", "M_AircraftPaintCoat",
            "M_NavLightEmissive", "M_AircraftContrail", "M_AircraftAfterburner",
            "M_AircraftHeatHaze",
            # condensation-solver: built by scripts/aircraft_condensation_material.py.
