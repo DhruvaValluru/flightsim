@@ -1,0 +1,15 @@
+# 1 9805573aa8aa exit 1 verification FAILED (35 passed, 2 failed, 33 not run | FAIL ['component_boxes', 'look_label_alignment'] | refused annotation.component_box (component_boxes), look.beauty_not_label_aligned (look_label_alignment) | ghost None
+# 2 d037e9fbb7ab exit 1 verification FAILED (35 passed, 2 failed, 33 not run | FAIL ['component_boxes', 'look_label_alignment'] | refused annotation.component_box (component_boxes), look.beauty_not_label_aligned (look_label_alignment) | ghost None
+# 3 bbc49fe58ecc exit 1 verification FAILED (34 passed, 1 failed, 35 not run | FAIL ['look_label_alignment'] | refused look.beauty_not_label_aligned (look_label_alignment) | ghost None
+# 4 1deb57341f3a exit 1 verification FAILED (36 passed, 1 failed, 33 not run | FAIL ['look_label_alignment'] | refused look.beauty_not_label_aligned (look_label_alignment) | ghost None
+# 5 2b6c20464857 exit 1 verification FAILED (36 passed, 1 failed, 33 not run | FAIL ['look_label_alignment'] | refused look.beauty_not_label_aligned (look_label_alignment) | ghost None
+# 6 945317096d18 exit 1 verification FAILED (35 passed, 1 failed, 34 not run | FAIL ['look_label_alignment'] | refused look.beauty_not_label_aligned (look_label_alignment) | ghost None
+# 7 e846553b356a exit 1 verification FAILED (35 passed, 1 failed, 34 not run | FAIL ['look_label_alignment'] | refused look.beauty_not_label_aligned (look_label_alignment) | ghost None
+# 8 343569c54caf exit 1 verification FAILED (37 passed, 1 failed, 32 not run | FAIL ['look_label_alignment'] | refused look.beauty_not_label_aligned (look_label_alignment) | ghost None
+# 9 2c3511f23b87 exit 1 verification FAILED (34 passed, 1 failed, 35 not run | FAIL ['look_label_alignment'] | refused look.beauty_not_label_aligned (look_label_alignment) | ghost None
+#10 219f3f8f8572 exit 1 verification FAILED (35 passed, 2 failed, 33 not run | FAIL ['tight_box_present', 'look_label_alignment'] | refused annotation.tight_box_null (tight_box_present), look.beauty_not_label_aligned (look_label_alignment) | ghost None
+#11 d15adf7aba7d exit 1 verification FAILED (36 passed, 1 failed, 33 not run | FAIL ['look_label_alignment'] | refused look.beauty_not_label_aligned (look_label_alignment) | ghost None
+#12 320cb9ac8485 exit 1 verification FAILED (31 passed, 3 failed, 36 not run | FAIL ['mask_vs_geometry', 'depth_vs_geometry', 'look_label_alignment'] | refused annotation.mask_offset (mask_vs_geometry), annotation.depth_range (depth_vs_geometry), look.beauty_not_label_aligned (look_label_alignment) | ghost None
+#13 824581285f4f exit 1 verification FAILED (30 passed, 2 failed, 38 not run | FAIL ['tight_box_present', 'look_label_alignment'] | refused annotation.tight_box_null (tight_box_present), look.beauty_not_label_aligned (look_label_alignment) | ghost None
+#14 refused: no run
+#15 2b122f166837 exit 1 verification FAILED (35 passed, 1 failed, 34 not run | FAIL ['look_label_alignment'] | refused look.beauty_not_label_aligned (look_label_alignment) | ghost None

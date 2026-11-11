@@ -1,0 +1,846 @@
+{
+  "step": "head44",
+  "commit": "7c017618ae5a",
+  "quality": "beauty",
+  "render_tokens_added": [
+    "-supersample=2"
+  ],
+  "shot_table": [
+    {
+      "key": "a",
+      "title": "chase cam, real terrain, golden hour",
+      "prompt": "chase view of the j11 at 3800 m over the matterhorn at golden hour, flying southwest, for 6 seconds",
+      "environment": null,
+      "aircraft": "J11",
+      "camera": "chase",
+      "look": "golden hour, Google tiles",
+      "lighting": "golden_rim_backlight",
+      "subject": [
+        "matterhorn",
+        "Matterhorn"
+      ]
+    },
+    {
+      "key": "b",
+      "title": "low pass over the desert",
+      "prompt": "chase view of the j11 at 1600 m over the desert, flying southwest, for 6 seconds",
+      "environment": "desert",
+      "aircraft": "J11",
+      "camera": "chase",
+      "look": "desert preset (Grand Canyon), low cross-light",
+      "lighting": "desert_cross_relief",
+      "subject": null
+    },
+    {
+      "key": "c",
+      "title": "forest in heavy rain (storm weather)",
+      "prompt": "chase view of the j11 at 1700 m over the forest in heavy rain for 6 seconds",
+      "environment": "forest",
+      "aircraft": "J11",
+      "camera": "chase",
+      "look": "forest preset (Yosemite), storm rain",
+      "lighting": "storm_soft_sheen",
+      "subject": null
+    },
+    {
+      "key": "d",
+      "title": "cockpit view, the Matterhorn ahead",
+      "prompt": "cockpit view of the j11 with a 24 mm lens at 3800 m over the matterhorn at 10:00 for 6 seconds",
+      "environment": null,
+      "aircraft": "J11",
+      "camera": "cockpit",
+      "look": "pilot's eye behind the windshield, 24 mm",
+      "lighting": "cockpit_canopy_glint",
+      "subject": [
+        "matterhorn",
+        "Matterhorn"
+      ]
+    }
+  ],
+  "written": "2026-11-11T07:55:02",
+  "rendered": true,
+  "shots": {
+    "a": {
+      "card_prompt": "chase view of the j11 at 3800 m over the matterhorn at golden hour, flying southwest, for 6 seconds",
+      "environment": null,
+      "camera": "chase",
+      "aircraft": "J11",
+      "quality": "beauty",
+      "commit": "7c017618ae5a",
+      "render_tokens_added": [
+        "-supersample=2"
+      ],
+      "run_id": "a6291f473af6",
+      "status": "done",
+      "detail": "clip ready",
+      "run_dir": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\a6291f473af6",
+      "card": {
+        "aircraft": "J11",
+        "latitude_deg": 46.01764,
+        "longitude_deg": 7.726946,
+        "google_tiles": {
+          "geoid_undulation_m": 52.4796145075085,
+          "geoid_model": "EGM96"
+        }
+      },
+      "frame": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\a6291f473af6\\frames\\chase\\frame_0000.png",
+      "render": {
+        "render_quality": "beauty",
+        "beauty_path": {
+          "scalability_before": -1,
+          "scalability_asked": 4,
+          "scalability_applied": 4,
+          "lumen_capture_overrides": {
+            "surface_cache_resolution": 1,
+            "scene_lighting_quality": 2,
+            "final_gather_quality": 2,
+            "reflection_quality": 2,
+            "scene_view_distance_cm": 400000,
+            "max_trace_distance_cm": 400000
+          },
+          "cvars_asked": {
+            "r.AntiAliasingMethod": 4,
+            "r.Shadow.Virtual.Enable": 1,
+            "r.SkyAtmosphere.FastSkyLUT": 0,
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": 0,
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": 1,
+            "r.SkyAtmosphere.LUT32": 1,
+            "r.SkyAtmosphere.SampleCountMax": 256,
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": 8,
+            "r.VolumetricCloud": 1,
+            "r.VolumetricCloud.HighQualityAerialPerspective": 1,
+            "r.VolumetricRenderTarget.Mode": 3,
+            "r.TSR.History.SampleCount": 32,
+            "r.TSR.History.ScreenPercentage": 200
+          },
+          "cvars_before_override": {
+            "r.AntiAliasingMethod": "4",
+            "r.Shadow.Virtual.Enable": "1",
+            "r.SkyAtmosphere.FastSkyLUT": "0",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": "0",
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": "0",
+            "r.SkyAtmosphere.LUT32": "0",
+            "r.SkyAtmosphere.SampleCountMax": "256",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": "8",
+            "r.VolumetricCloud": "1",
+            "r.VolumetricCloud.HighQualityAerialPerspective": "0",
+            "r.VolumetricRenderTarget.Mode": "0",
+            "r.TSR.History.SampleCount": "16",
+            "r.TSR.History.ScreenPercentage": "200"
+          },
+          "cvars_read_back": {
+            "r.AntiAliasingMethod": "4",
+            "r.Shadow.Virtual.Enable": "1",
+            "r.SkyAtmosphere.FastSkyLUT": "0",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": "0",
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": "1",
+            "r.SkyAtmosphere.LUT32": "1",
+            "r.SkyAtmosphere.SampleCountMax": "256",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": "8",
+            "r.VolumetricCloud": "1",
+            "r.VolumetricCloud.HighQualityAerialPerspective": "1",
+            "r.VolumetricRenderTarget.Mode": "3",
+            "r.TSR.History.SampleCount": "32",
+            "r.TSR.History.ScreenPercentage": "200"
+          },
+          "calibration": "UNCALIBRATED: every constant here is set by probe render on the render machine (docs/visual/PROBE_LOG.md, render-path)",
+          "show_flags_pinned": 7,
+          "blue_noise": {
+            "scalar": {
+              "loaded": true,
+              "path": "/Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64",
+              "resource_created_here": false,
+              "default_stand_in": false,
+              "resource": true,
+              "size_x": 128,
+              "size_y": 8192
+            },
+            "vec2": {
+              "loaded": true,
+              "path": "/Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64",
+              "resource_created_here": false,
+              "default_stand_in": false,
+              "resource": true,
+              "size_x": 128,
+              "size_y": 8192
+            },
+            "cloud_march_jittered": true,
+            "basis": "VolumetricCloud.usf starts each view ray at TMin + BlueNoiseScalar(pixel, StateFrameIndexMod8) x StepT; BlueNoise.cpp GetBlueNoiseGlobalParameters binds a 1x1 black dummy unless both GEngine textures have a resource (an ensure allows that only in a rendering commandlet), and a texture still building answers as a default stand-in: either is one offset for every pixel of every capture, the altitude-slice banding of round 3. Loaded and built here, before the first capture"
+          },
+          "aircraft_sharp": {
+            "kind": "still",
+            "motion_blur": false,
+            "motion_blur_rule": "off for a still (one instant); on for a clip at the beauty look's 180-degree shutter",
+            "velocity_frame": "FSceneInterface::StartFrame after the warm-ups and after each delivered beauty frame (the commandlet has no FEngineLoop::Tick to call it): a motion vector spans one delivered frame",
+            "still_sub_captures": "one sim time, one pose; velocity frame rolled after the pose (zero object motion); the first sub-capture is a camera cut (TSR history reset at this pose)",
+            "motion_blur_time_scale": "engine: (1 / MotionBlurTargetFPS) / the family's DeltaRealTime (SceneVisibility.cpp UpdateMotionBlurTimeScale); the commandlet's real delta is not set by the clip rate: unmeasured",
+            "aircraft_primitives": 3,
+            "aircraft_primitives_movable": 3,
+            "aircraft_writes_velocity": true,
+            "tsr": {
+              "asked": true,
+              "platform_supports_tsr": true,
+              "capture_realtime": true,
+              "show_flags": true,
+              "shader_platform": "PCD3D_SM5",
+              "resolved": "TSR"
+            }
+          },
+          "accumulation": {
+            "captures_per_frame": 12,
+            "delivered_frames": 1,
+            "total_captures": 12,
+            "basis": "beauty still: the beauty look's tsr row (ENGINE_LOOK, UNCALIBRATED) over the default 8",
+            "method": "the engine's own temporal accumulation: TSR's jittered history (r.TSR.History.SampleCount caps what it keeps) and Lumen's radiance cache, over repeated captures of one pose; no hand-rolled average, so the tonemapper sees the converged HDR scene",
+            "labels": "rendered once per frame after the last beauty capture, same camera pose, no jitter",
+            "history_across_frames": "TSR keeps its history from the previous delivered frame and reprojects it across the camera move; with one capture a frame (a clip) a moving silhouette can ghost where the label masks, rendered without history, show nothing; unmeasured"
+          },
+          "quality": "beauty",
+          "temporal_aa_show_flag": true,
+          "path_tracing_show_flag": false
+        },
+        "anti_aliasing": {
+          "beauty": "TSR",
+          "labels": "none"
+        },
+        "rhi": "D3D11",
+        "shader_platform": "PCD3D_SM5",
+        "motion_blur": false
+      },
+      "gate_v_labels": {
+        "a_depth.f32": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\a6291f473af6\\frames\\chase\\frame_0000_depth.f32",
+        "a_depth.png": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\a6291f473af6\\frames\\chase\\frame_0000_depth.png",
+        "a_horizon.json": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\a6291f473af6\\frames\\chase\\frame_0000.json",
+        "a_ids.json": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\a6291f473af6\\frames\\chase\\render.json"
+      },
+      "hero_lighting": {
+        "intent": "golden_rim_backlight",
+        "time_of_day": "2026-03-20T17:03Z",
+        "heading_deg": 229,
+        "date": "2026-03-20",
+        "when_utc": "2026-03-20T17:03:00Z",
+        "sun_elevation_deg": 5.97,
+        "sun_azimuth_deg": 263.987,
+        "relative_azimuth_deg": 34.987,
+        "wanted_elevation_deg": 6.0,
+        "wanted_relative_azimuth_deg": 35.0,
+        "elevation_error_deg": -0.03,
+        "relative_azimuth_error_deg": -0.013,
+        "camera_yaw_offset_deg": 0.0,
+        "basis": "hero lighting director: golden_rim_backlight -- three-quarter backlight at golden hour: the sun 35 deg off the lens axis, just outside a chase lens's half-width, so the airframe's sun-side edge rims and the haze glows without the disc flaring the frame. Realised by the time of day (2026-03-20T17:03Z, sun 6.0 deg up at 264.0 deg, NOAA solar position) and the heading (229 deg); no second sun, no moved light",
+        "prompt": "chase view of the j11 at 3800 m over the matterhorn at golden hour, heading 229 for 6 seconds",
+        "heading_compiled_deg": 229.0
+      },
+      "subject_framing": {
+        "subject": "Matterhorn",
+        "location": "matterhorn",
+        "summit_lat_deg": 45.97636,
+        "summit_lon_deg": 7.65853,
+        "summit_elevation_m": 4478.0,
+        "start_lat_deg": 46.01764,
+        "start_lon_deg": 7.726946,
+        "heading_deg": 229.0,
+        "standoff_m": 7000.0,
+        "bearing_to_subject_deg": 229.049,
+        "relative_bearing_deg": 0.049,
+        "subject_elevation_angle_deg": 5.53,
+        "uncalibrated": [
+          "SUBJECT_STANDOFF_M"
+        ]
+      },
+      "camera_framing": {
+        "offset_forward_m": -74.65578014492755,
+        "offset_right_m": 0.0,
+        "offset_up_m": 10.665111449275363,
+        "basis": "chase offset derived from this airframe's own measured mesh length (no calibrated table entry)"
+      },
+      "edge_aliasing": {
+        "energy": 0.2281899483048978,
+        "control_energy": 0.3472257515390178,
+        "void": false,
+        "band_px": 2,
+        "control_stride": 2,
+        "silhouette_px": 685686,
+        "definition": "RMS of (luminance - 3x3 box mean) within band_px of the silhouette, over the edge contrast; lower is smoother; reported, not a gate"
+      }
+    },
+    "b": {
+      "card_prompt": "chase view of the j11 at 1600 m over the desert, flying southwest, for 6 seconds",
+      "environment": "desert",
+      "camera": "chase",
+      "aircraft": "J11",
+      "quality": "beauty",
+      "commit": "7c017618ae5a",
+      "render_tokens_added": [
+        "-supersample=2"
+      ],
+      "run_id": "e7323dc14fcf",
+      "status": "done",
+      "detail": "clip ready",
+      "run_dir": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\e7323dc14fcf",
+      "card": {
+        "aircraft": "J11",
+        "latitude_deg": 36.09,
+        "longitude_deg": -112.0,
+        "google_tiles": {
+          "geoid_undulation_m": -23.403480000000002,
+          "geoid_model": "EGM96"
+        }
+      },
+      "frame": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\e7323dc14fcf\\frames\\chase\\frame_0000.png",
+      "render": {
+        "render_quality": "beauty",
+        "beauty_path": {
+          "scalability_before": -1,
+          "scalability_asked": 4,
+          "scalability_applied": 4,
+          "lumen_capture_overrides": {
+            "surface_cache_resolution": 1,
+            "scene_lighting_quality": 2,
+            "final_gather_quality": 2,
+            "reflection_quality": 2,
+            "scene_view_distance_cm": 400000,
+            "max_trace_distance_cm": 400000
+          },
+          "cvars_asked": {
+            "r.AntiAliasingMethod": 4,
+            "r.Shadow.Virtual.Enable": 1,
+            "r.SkyAtmosphere.FastSkyLUT": 0,
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": 0,
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": 1,
+            "r.SkyAtmosphere.LUT32": 1,
+            "r.SkyAtmosphere.SampleCountMax": 256,
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": 8,
+            "r.VolumetricCloud": 1,
+            "r.VolumetricCloud.HighQualityAerialPerspective": 1,
+            "r.VolumetricRenderTarget.Mode": 3,
+            "r.TSR.History.SampleCount": 32,
+            "r.TSR.History.ScreenPercentage": 200
+          },
+          "cvars_before_override": {
+            "r.AntiAliasingMethod": "4",
+            "r.Shadow.Virtual.Enable": "1",
+            "r.SkyAtmosphere.FastSkyLUT": "0",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": "0",
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": "0",
+            "r.SkyAtmosphere.LUT32": "0",
+            "r.SkyAtmosphere.SampleCountMax": "256",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": "8",
+            "r.VolumetricCloud": "1",
+            "r.VolumetricCloud.HighQualityAerialPerspective": "0",
+            "r.VolumetricRenderTarget.Mode": "0",
+            "r.TSR.History.SampleCount": "16",
+            "r.TSR.History.ScreenPercentage": "200"
+          },
+          "cvars_read_back": {
+            "r.AntiAliasingMethod": "4",
+            "r.Shadow.Virtual.Enable": "1",
+            "r.SkyAtmosphere.FastSkyLUT": "0",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": "0",
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": "1",
+            "r.SkyAtmosphere.LUT32": "1",
+            "r.SkyAtmosphere.SampleCountMax": "256",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": "8",
+            "r.VolumetricCloud": "1",
+            "r.VolumetricCloud.HighQualityAerialPerspective": "1",
+            "r.VolumetricRenderTarget.Mode": "3",
+            "r.TSR.History.SampleCount": "32",
+            "r.TSR.History.ScreenPercentage": "200"
+          },
+          "calibration": "UNCALIBRATED: every constant here is set by probe render on the render machine (docs/visual/PROBE_LOG.md, render-path)",
+          "show_flags_pinned": 7,
+          "blue_noise": {
+            "scalar": {
+              "loaded": true,
+              "path": "/Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64",
+              "resource_created_here": false,
+              "default_stand_in": false,
+              "resource": true,
+              "size_x": 128,
+              "size_y": 8192
+            },
+            "vec2": {
+              "loaded": true,
+              "path": "/Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64",
+              "resource_created_here": false,
+              "default_stand_in": false,
+              "resource": true,
+              "size_x": 128,
+              "size_y": 8192
+            },
+            "cloud_march_jittered": true,
+            "basis": "VolumetricCloud.usf starts each view ray at TMin + BlueNoiseScalar(pixel, StateFrameIndexMod8) x StepT; BlueNoise.cpp GetBlueNoiseGlobalParameters binds a 1x1 black dummy unless both GEngine textures have a resource (an ensure allows that only in a rendering commandlet), and a texture still building answers as a default stand-in: either is one offset for every pixel of every capture, the altitude-slice banding of round 3. Loaded and built here, before the first capture"
+          },
+          "aircraft_sharp": {
+            "kind": "still",
+            "motion_blur": false,
+            "motion_blur_rule": "off for a still (one instant); on for a clip at the beauty look's 180-degree shutter",
+            "velocity_frame": "FSceneInterface::StartFrame after the warm-ups and after each delivered beauty frame (the commandlet has no FEngineLoop::Tick to call it): a motion vector spans one delivered frame",
+            "still_sub_captures": "one sim time, one pose; velocity frame rolled after the pose (zero object motion); the first sub-capture is a camera cut (TSR history reset at this pose)",
+            "motion_blur_time_scale": "engine: (1 / MotionBlurTargetFPS) / the family's DeltaRealTime (SceneVisibility.cpp UpdateMotionBlurTimeScale); the commandlet's real delta is not set by the clip rate: unmeasured",
+            "aircraft_primitives": 3,
+            "aircraft_primitives_movable": 3,
+            "aircraft_writes_velocity": true,
+            "tsr": {
+              "asked": true,
+              "platform_supports_tsr": true,
+              "capture_realtime": true,
+              "show_flags": true,
+              "shader_platform": "PCD3D_SM5",
+              "resolved": "TSR"
+            }
+          },
+          "accumulation": {
+            "captures_per_frame": 12,
+            "delivered_frames": 1,
+            "total_captures": 12,
+            "basis": "beauty still: the beauty look's tsr row (ENGINE_LOOK, UNCALIBRATED) over the default 8",
+            "method": "the engine's own temporal accumulation: TSR's jittered history (r.TSR.History.SampleCount caps what it keeps) and Lumen's radiance cache, over repeated captures of one pose; no hand-rolled average, so the tonemapper sees the converged HDR scene",
+            "labels": "rendered once per frame after the last beauty capture, same camera pose, no jitter",
+            "history_across_frames": "TSR keeps its history from the previous delivered frame and reprojects it across the camera move; with one capture a frame (a clip) a moving silhouette can ghost where the label masks, rendered without history, show nothing; unmeasured"
+          },
+          "quality": "beauty",
+          "temporal_aa_show_flag": true,
+          "path_tracing_show_flag": false
+        },
+        "anti_aliasing": {
+          "beauty": "TSR",
+          "labels": "none"
+        },
+        "rhi": "D3D11",
+        "shader_platform": "PCD3D_SM5",
+        "motion_blur": false
+      },
+      "gate_v_labels": {
+        "b_depth.f32": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\e7323dc14fcf\\frames\\chase\\frame_0000_depth.f32",
+        "b_depth.png": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\e7323dc14fcf\\frames\\chase\\frame_0000_depth.png",
+        "b_horizon.json": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\e7323dc14fcf\\frames\\chase\\frame_0000.json",
+        "b_ids.json": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\e7323dc14fcf\\frames\\chase\\render.json"
+      },
+      "hero_lighting": {
+        "intent": "desert_cross_relief",
+        "time_of_day": "2026-07-15T13:52Z",
+        "heading_deg": 345,
+        "date": "2026-07-15",
+        "when_utc": "2026-07-15T13:52:00Z",
+        "sun_elevation_deg": 15.984,
+        "sun_azimuth_deg": 74.765,
+        "relative_azimuth_deg": 89.765,
+        "wanted_elevation_deg": 16.0,
+        "wanted_relative_azimuth_deg": 90.0,
+        "elevation_error_deg": -0.016,
+        "relative_azimuth_error_deg": -0.235,
+        "camera_yaw_offset_deg": 0.0,
+        "basis": "hero lighting director: desert_cross_relief -- low morning cross-light from camera right: every butte throws a long shadow across the frame, which is what reads relief in a desert. Realised by the time of day (2026-07-15T13:52Z, sun 16.0 deg up at 74.8 deg, NOAA solar position) and the heading (345 deg); no second sun, no moved light",
+        "prompt": "chase view of the j11 at 1600 m over the desert, heading 345 for 6 seconds",
+        "heading_compiled_deg": 345.0
+      },
+      "camera_framing": {
+        "offset_forward_m": -74.65578014492755,
+        "offset_right_m": 0.0,
+        "offset_up_m": 10.665111449275363,
+        "basis": "chase offset derived from this airframe's own measured mesh length (no calibrated table entry)"
+      },
+      "edge_aliasing": {
+        "energy": null,
+        "control_energy": null,
+        "void": true,
+        "band_px": 2,
+        "control_stride": 2,
+        "silhouette_px": 838921,
+        "definition": "RMS of (luminance - 3x3 box mean) within band_px of the silhouette, over the edge contrast; lower is smoother; reported, not a gate"
+      }
+    },
+    "c": {
+      "card_prompt": "chase view of the j11 at 1700 m over the forest in heavy rain for 6 seconds",
+      "environment": "forest",
+      "camera": "chase",
+      "aircraft": "J11",
+      "quality": "beauty",
+      "commit": "7c017618ae5a",
+      "render_tokens_added": [
+        "-supersample=2"
+      ],
+      "run_id": "d8fe81f33e08",
+      "status": "done",
+      "detail": "clip ready",
+      "run_dir": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\d8fe81f33e08",
+      "card": {
+        "aircraft": "J11",
+        "latitude_deg": 37.7275,
+        "longitude_deg": -119.61,
+        "google_tiles": {
+          "geoid_undulation_m": -25.938956400000023,
+          "geoid_model": "EGM96"
+        }
+      },
+      "frame": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\d8fe81f33e08\\frames\\chase\\frame_0000.png",
+      "render": {
+        "render_quality": "beauty",
+        "beauty_path": {
+          "scalability_before": -1,
+          "scalability_asked": 4,
+          "scalability_applied": 4,
+          "lumen_capture_overrides": {
+            "surface_cache_resolution": 1,
+            "scene_lighting_quality": 2,
+            "final_gather_quality": 2,
+            "reflection_quality": 2,
+            "scene_view_distance_cm": 400000,
+            "max_trace_distance_cm": 400000
+          },
+          "cvars_asked": {
+            "r.AntiAliasingMethod": 4,
+            "r.Shadow.Virtual.Enable": 1,
+            "r.SkyAtmosphere.FastSkyLUT": 0,
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": 0,
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": 1,
+            "r.SkyAtmosphere.LUT32": 1,
+            "r.SkyAtmosphere.SampleCountMax": 256,
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": 8,
+            "r.VolumetricCloud": 1,
+            "r.VolumetricCloud.HighQualityAerialPerspective": 1,
+            "r.VolumetricRenderTarget.Mode": 3,
+            "r.TSR.History.SampleCount": 32,
+            "r.TSR.History.ScreenPercentage": 200
+          },
+          "cvars_before_override": {
+            "r.AntiAliasingMethod": "4",
+            "r.Shadow.Virtual.Enable": "1",
+            "r.SkyAtmosphere.FastSkyLUT": "0",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": "0",
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": "0",
+            "r.SkyAtmosphere.LUT32": "0",
+            "r.SkyAtmosphere.SampleCountMax": "256",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": "8",
+            "r.VolumetricCloud": "1",
+            "r.VolumetricCloud.HighQualityAerialPerspective": "0",
+            "r.VolumetricRenderTarget.Mode": "0",
+            "r.TSR.History.SampleCount": "16",
+            "r.TSR.History.ScreenPercentage": "200"
+          },
+          "cvars_read_back": {
+            "r.AntiAliasingMethod": "4",
+            "r.Shadow.Virtual.Enable": "1",
+            "r.SkyAtmosphere.FastSkyLUT": "0",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": "0",
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": "1",
+            "r.SkyAtmosphere.LUT32": "1",
+            "r.SkyAtmosphere.SampleCountMax": "256",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": "8",
+            "r.VolumetricCloud": "1",
+            "r.VolumetricCloud.HighQualityAerialPerspective": "1",
+            "r.VolumetricRenderTarget.Mode": "3",
+            "r.TSR.History.SampleCount": "32",
+            "r.TSR.History.ScreenPercentage": "200"
+          },
+          "calibration": "UNCALIBRATED: every constant here is set by probe render on the render machine (docs/visual/PROBE_LOG.md, render-path)",
+          "show_flags_pinned": 7,
+          "blue_noise": {
+            "scalar": {
+              "loaded": true,
+              "path": "/Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64",
+              "resource_created_here": false,
+              "default_stand_in": false,
+              "resource": true,
+              "size_x": 128,
+              "size_y": 8192
+            },
+            "vec2": {
+              "loaded": true,
+              "path": "/Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64",
+              "resource_created_here": false,
+              "default_stand_in": false,
+              "resource": true,
+              "size_x": 128,
+              "size_y": 8192
+            },
+            "cloud_march_jittered": true,
+            "basis": "VolumetricCloud.usf starts each view ray at TMin + BlueNoiseScalar(pixel, StateFrameIndexMod8) x StepT; BlueNoise.cpp GetBlueNoiseGlobalParameters binds a 1x1 black dummy unless both GEngine textures have a resource (an ensure allows that only in a rendering commandlet), and a texture still building answers as a default stand-in: either is one offset for every pixel of every capture, the altitude-slice banding of round 3. Loaded and built here, before the first capture"
+          },
+          "aircraft_sharp": {
+            "kind": "still",
+            "motion_blur": false,
+            "motion_blur_rule": "off for a still (one instant); on for a clip at the beauty look's 180-degree shutter",
+            "velocity_frame": "FSceneInterface::StartFrame after the warm-ups and after each delivered beauty frame (the commandlet has no FEngineLoop::Tick to call it): a motion vector spans one delivered frame",
+            "still_sub_captures": "one sim time, one pose; velocity frame rolled after the pose (zero object motion); the first sub-capture is a camera cut (TSR history reset at this pose)",
+            "motion_blur_time_scale": "engine: (1 / MotionBlurTargetFPS) / the family's DeltaRealTime (SceneVisibility.cpp UpdateMotionBlurTimeScale); the commandlet's real delta is not set by the clip rate: unmeasured",
+            "aircraft_primitives": 3,
+            "aircraft_primitives_movable": 3,
+            "aircraft_writes_velocity": true,
+            "tsr": {
+              "asked": true,
+              "platform_supports_tsr": true,
+              "capture_realtime": true,
+              "show_flags": true,
+              "shader_platform": "PCD3D_SM5",
+              "resolved": "TSR"
+            }
+          },
+          "accumulation": {
+            "captures_per_frame": 12,
+            "delivered_frames": 1,
+            "total_captures": 12,
+            "basis": "beauty still: the beauty look's tsr row (ENGINE_LOOK, UNCALIBRATED) over the default 8",
+            "method": "the engine's own temporal accumulation: TSR's jittered history (r.TSR.History.SampleCount caps what it keeps) and Lumen's radiance cache, over repeated captures of one pose; no hand-rolled average, so the tonemapper sees the converged HDR scene",
+            "labels": "rendered once per frame after the last beauty capture, same camera pose, no jitter",
+            "history_across_frames": "TSR keeps its history from the previous delivered frame and reprojects it across the camera move; with one capture a frame (a clip) a moving silhouette can ghost where the label masks, rendered without history, show nothing; unmeasured"
+          },
+          "quality": "beauty",
+          "temporal_aa_show_flag": true,
+          "path_tracing_show_flag": false
+        },
+        "anti_aliasing": {
+          "beauty": "TSR",
+          "labels": "none"
+        },
+        "rhi": "D3D11",
+        "shader_platform": "PCD3D_SM5",
+        "motion_blur": false
+      },
+      "gate_v_labels": {
+        "c_depth.f32": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\d8fe81f33e08\\frames\\chase\\frame_0000_depth.f32",
+        "c_depth.png": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\d8fe81f33e08\\frames\\chase\\frame_0000_depth.png",
+        "c_horizon.json": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\d8fe81f33e08\\frames\\chase\\frame_0000.json",
+        "c_ids.json": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\d8fe81f33e08\\frames\\chase\\render.json"
+      },
+      "hero_lighting": {
+        "intent": "storm_soft_sheen",
+        "time_of_day": "2026-06-21T15:13Z",
+        "heading_deg": 61,
+        "date": "2026-06-21",
+        "when_utc": "2026-06-21T15:13:00Z",
+        "sun_elevation_deg": 28.049,
+        "sun_azimuth_deg": 80.91,
+        "relative_azimuth_deg": 19.91,
+        "wanted_elevation_deg": 28.0,
+        "wanted_relative_azimuth_deg": 20.0,
+        "elevation_error_deg": 0.049,
+        "relative_azimuth_error_deg": -0.09,
+        "camera_yaw_offset_deg": 0.0,
+        "basis": "hero lighting director: storm_soft_sheen -- the bright patch of the overcast ahead of the camera: soft wrap on the airframe and a specular sheen off the wet canopy and wet ground toward the lens. Realised by the time of day (2026-06-21T15:13Z, sun 28.0 deg up at 80.9 deg, NOAA solar position) and the heading (61 deg); no second sun, no moved light",
+        "prompt": "chase view of the j11 at 1700 m over the forest in heavy rain, heading 061 for 6 seconds",
+        "heading_compiled_deg": 61.0
+      },
+      "camera_framing": {
+        "offset_forward_m": -74.65578014492755,
+        "offset_right_m": 0.0,
+        "offset_up_m": 10.665111449275363,
+        "basis": "chase offset derived from this airframe's own measured mesh length (no calibrated table entry)"
+      },
+      "edge_aliasing": {
+        "energy": 0.3840541053483332,
+        "control_energy": null,
+        "void": true,
+        "band_px": 2,
+        "control_stride": 2,
+        "silhouette_px": 876409,
+        "definition": "RMS of (luminance - 3x3 box mean) within band_px of the silhouette, over the edge contrast; lower is smoother; reported, not a gate"
+      }
+    },
+    "d": {
+      "card_prompt": "cockpit view of the j11 with a 24 mm lens at 3800 m over the matterhorn at 10:00 for 6 seconds",
+      "environment": null,
+      "camera": "cockpit",
+      "aircraft": "J11",
+      "quality": "beauty",
+      "commit": "7c017618ae5a",
+      "render_tokens_added": [
+        "-supersample=2"
+      ],
+      "run_id": "ee7f6e766023",
+      "status": "done",
+      "detail": "clip ready",
+      "run_dir": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ee7f6e766023",
+      "card": {
+        "aircraft": "J11",
+        "latitude_deg": 45.915275,
+        "longitude_deg": 7.68042,
+        "google_tiles": {
+          "geoid_undulation_m": 52.53771083534403,
+          "geoid_model": "EGM96"
+        }
+      },
+      "frame": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ee7f6e766023\\frames\\cockpit\\frame_0000.png",
+      "render": {
+        "render_quality": "beauty",
+        "beauty_path": {
+          "scalability_before": -1,
+          "scalability_asked": 4,
+          "scalability_applied": 4,
+          "lumen_capture_overrides": {
+            "surface_cache_resolution": 1,
+            "scene_lighting_quality": 2,
+            "final_gather_quality": 2,
+            "reflection_quality": 2,
+            "scene_view_distance_cm": 400000,
+            "max_trace_distance_cm": 400000
+          },
+          "cvars_asked": {
+            "r.AntiAliasingMethod": 4,
+            "r.Shadow.Virtual.Enable": 1,
+            "r.SkyAtmosphere.FastSkyLUT": 0,
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": 0,
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": 1,
+            "r.SkyAtmosphere.LUT32": 1,
+            "r.SkyAtmosphere.SampleCountMax": 256,
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": 8,
+            "r.VolumetricCloud": 1,
+            "r.VolumetricCloud.HighQualityAerialPerspective": 1,
+            "r.VolumetricRenderTarget.Mode": 3,
+            "r.TSR.History.SampleCount": 32,
+            "r.TSR.History.ScreenPercentage": 200
+          },
+          "cvars_before_override": {
+            "r.AntiAliasingMethod": "4",
+            "r.Shadow.Virtual.Enable": "1",
+            "r.SkyAtmosphere.FastSkyLUT": "0",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": "0",
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": "0",
+            "r.SkyAtmosphere.LUT32": "0",
+            "r.SkyAtmosphere.SampleCountMax": "256",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": "8",
+            "r.VolumetricCloud": "1",
+            "r.VolumetricCloud.HighQualityAerialPerspective": "0",
+            "r.VolumetricRenderTarget.Mode": "0",
+            "r.TSR.History.SampleCount": "16",
+            "r.TSR.History.ScreenPercentage": "200"
+          },
+          "cvars_read_back": {
+            "r.AntiAliasingMethod": "4",
+            "r.Shadow.Virtual.Enable": "1",
+            "r.SkyAtmosphere.FastSkyLUT": "0",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": "0",
+            "r.SkyAtmosphere.MultiScatteringLUT.HighQuality": "1",
+            "r.SkyAtmosphere.LUT32": "1",
+            "r.SkyAtmosphere.SampleCountMax": "256",
+            "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": "8",
+            "r.VolumetricCloud": "1",
+            "r.VolumetricCloud.HighQualityAerialPerspective": "1",
+            "r.VolumetricRenderTarget.Mode": "3",
+            "r.TSR.History.SampleCount": "32",
+            "r.TSR.History.ScreenPercentage": "200"
+          },
+          "calibration": "UNCALIBRATED: every constant here is set by probe render on the render machine (docs/visual/PROBE_LOG.md, render-path)",
+          "show_flags_pinned": 7,
+          "blue_noise": {
+            "scalar": {
+              "loaded": true,
+              "path": "/Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64",
+              "resource_created_here": false,
+              "default_stand_in": false,
+              "resource": true,
+              "size_x": 128,
+              "size_y": 8192
+            },
+            "vec2": {
+              "loaded": true,
+              "path": "/Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64",
+              "resource_created_here": false,
+              "default_stand_in": false,
+              "resource": true,
+              "size_x": 128,
+              "size_y": 8192
+            },
+            "cloud_march_jittered": true,
+            "basis": "VolumetricCloud.usf starts each view ray at TMin + BlueNoiseScalar(pixel, StateFrameIndexMod8) x StepT; BlueNoise.cpp GetBlueNoiseGlobalParameters binds a 1x1 black dummy unless both GEngine textures have a resource (an ensure allows that only in a rendering commandlet), and a texture still building answers as a default stand-in: either is one offset for every pixel of every capture, the altitude-slice banding of round 3. Loaded and built here, before the first capture"
+          },
+          "aircraft_sharp": {
+            "kind": "still",
+            "motion_blur": false,
+            "motion_blur_rule": "off for a still (one instant); on for a clip at the beauty look's 180-degree shutter",
+            "velocity_frame": "FSceneInterface::StartFrame after the warm-ups and after each delivered beauty frame (the commandlet has no FEngineLoop::Tick to call it): a motion vector spans one delivered frame",
+            "still_sub_captures": "one sim time, one pose; velocity frame rolled after the pose (zero object motion); the first sub-capture is a camera cut (TSR history reset at this pose)",
+            "motion_blur_time_scale": "engine: (1 / MotionBlurTargetFPS) / the family's DeltaRealTime (SceneVisibility.cpp UpdateMotionBlurTimeScale); the commandlet's real delta is not set by the clip rate: unmeasured",
+            "aircraft_primitives": 3,
+            "aircraft_primitives_movable": 3,
+            "aircraft_writes_velocity": true,
+            "tsr": {
+              "asked": true,
+              "platform_supports_tsr": true,
+              "capture_realtime": true,
+              "show_flags": true,
+              "shader_platform": "PCD3D_SM5",
+              "resolved": "TSR"
+            }
+          },
+          "accumulation": {
+            "captures_per_frame": 12,
+            "delivered_frames": 1,
+            "total_captures": 12,
+            "basis": "beauty still: the beauty look's tsr row (ENGINE_LOOK, UNCALIBRATED) over the default 8",
+            "method": "the engine's own temporal accumulation: TSR's jittered history (r.TSR.History.SampleCount caps what it keeps) and Lumen's radiance cache, over repeated captures of one pose; no hand-rolled average, so the tonemapper sees the converged HDR scene",
+            "labels": "rendered once per frame after the last beauty capture, same camera pose, no jitter",
+            "history_across_frames": "TSR keeps its history from the previous delivered frame and reprojects it across the camera move; with one capture a frame (a clip) a moving silhouette can ghost where the label masks, rendered without history, show nothing; unmeasured"
+          },
+          "quality": "beauty",
+          "temporal_aa_show_flag": true,
+          "path_tracing_show_flag": false
+        },
+        "anti_aliasing": {
+          "beauty": "TSR",
+          "labels": "none"
+        },
+        "rhi": "D3D11",
+        "shader_platform": "PCD3D_SM5",
+        "motion_blur": false
+      },
+      "gate_v_labels": {
+        "d_depth.f32": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ee7f6e766023\\frames\\cockpit\\frame_0000_depth.f32",
+        "d_depth.png": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ee7f6e766023\\frames\\cockpit\\frame_0000_depth.png",
+        "d_horizon.json": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ee7f6e766023\\frames\\cockpit\\frame_0000.json",
+        "d_ids.json": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ee7f6e766023\\frames\\cockpit\\render.json"
+      },
+      "hero_lighting": {
+        "intent": "cockpit_canopy_glint",
+        "time_of_day": "2026-03-20T09:19Z",
+        "heading_deg": 346,
+        "date": "2026-03-20",
+        "when_utc": "2026-03-20T09:19:00Z",
+        "sun_elevation_deg": 34.961,
+        "sun_azimuth_deg": 136.383,
+        "relative_azimuth_deg": 150.383,
+        "wanted_elevation_deg": 35.0,
+        "wanted_relative_azimuth_deg": 150.0,
+        "elevation_error_deg": -0.039,
+        "relative_azimuth_error_deg": 0.383,
+        "camera_yaw_offset_deg": 0.0,
+        "basis": "hero lighting director: cockpit_canopy_glint -- the sun behind and above the pilot's right shoulder: the coaming and the canopy arch catch it, and the glints stay on the glass rather than in the lens. Realised by the time of day (2026-03-20T09:19Z, sun 35.0 deg up at 136.4 deg, NOAA solar position) and the heading (346 deg); no second sun, no moved light",
+        "prompt": "cockpit view of the j11 with a 24 mm lens at 3800 m over the matterhorn at 10:00, heading 346 for 6 seconds",
+        "heading_compiled_deg": 346.0
+      },
+      "subject_framing": {
+        "subject": "Matterhorn",
+        "location": "matterhorn",
+        "summit_lat_deg": 45.97636,
+        "summit_lon_deg": 7.65853,
+        "summit_elevation_m": 4478.0,
+        "start_lat_deg": 45.915275,
+        "start_lon_deg": 7.68042,
+        "heading_deg": 346.0,
+        "standoff_m": 7000.0,
+        "bearing_to_subject_deg": 346.016,
+        "relative_bearing_deg": 0.016,
+        "subject_elevation_angle_deg": 5.53,
+        "uncalibrated": [
+          "SUBJECT_STANDOFF_M"
+        ]
+      },
+      "camera_framing": {
+        "offset_forward_m": 7.562,
+        "offset_right_m": 0.0,
+        "offset_up_m": 1.919,
+        "basis": "pilot eye of the J11's own model (the converted mesh manifest's views.pilot_eye (actor frame)) relative to its FDM CG at its default loading (empty weight, pointmasses and tank contents), plus PILOT_EYE_NUDGE_M (UNCALIBRATED)"
+      },
+      "edge_aliasing": {
+        "energy": 0.5063759848233825,
+        "control_energy": 0.6771774562149332,
+        "void": false,
+        "band_px": 2,
+        "control_stride": 2,
+        "silhouette_px": 528366,
+        "definition": "RMS of (luminance - 3x3 box mean) within band_px of the silhouette, over the edge contrast; lower is smoother; reported, not a gate"
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+r43 c0b1f6ceaeb2 spec f16db732eb9f frame [37, 39, 34] funnel [25, 35, 25] sky [79, 92, 77] C172 [126, 133, 126]
+   storm_deck_light: {"applied": true, "height_fog": [{"sky_atmosphere_ambient_scale_before": "(R=1.000000,G=1.000000,B=1.000000,A=1.000000)", "fog_inscattering_luminance": "(R=1500.000000,G=1500.000000,B=1500.000000,A=1.000000)", "sky_atmosphere_ambient_scale": "(R=0.000000,G=0.000000,B=0.000000,A=1.000000)", "directional_inscattering_off": true}], "sun_volumetric_scattering_before": 2.0833332538604736, "sun_volumetric_scattering": 0.3125, "sky_light_lower_hemisphere": "kept: already solid (the hero lighting's)"}
+r45 1524f4aa3fb5 spec f16db732eb9f frame [38, 43, 42] funnel [29, 44, 35] sky [73, 94, 90] C172 [135, 144, 140]
+   storm_deck_light: {"applied": false}
