@@ -3374,6 +3374,14 @@ WORLD_OCEAN_SCALARS = {"WindSpeedMS": 7.0, "WindDirX": 1.0, "WindDirY": 0.3}
 #: F0 0.02 reflection is ocean_emissive.hlsl's own.
 WORLD_OCEAN_SPECULAR = 0.0
 WORLD_OCEAN_ROUGHNESS = 1.0
+#: Generation 4 (round 26's #13: Google's ocean tiles still covered the cap,
+#: their ~6 km tile edges the four lines): the share of its distance each sea
+#: vertex is moved toward the camera along its own line of sight (the
+#: material's world position offset). The projection is unchanged, only the
+#: depth: 1 % is 150 m nearer at 15 km, so the sea wins the depth test over
+#: open water; the tiles stay drawn under it. The sea cap is a beauty-only
+#: actor no label, depth or mask pass draws, so no label moves.
+WORLD_OCEAN_DEPTH_PULL = 0.01
 # -- lane B -- end --------------------------------------------------------------------
 #: M_FlightSimScatter (the ground scatter's master, world_beauty.SCATTER_MATERIAL):
 #: the imported glTF's maps as parameters, the tiles' Wetness and Saturation from
@@ -3453,7 +3461,7 @@ def world_stamp(material, name):
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "3", "M_FlightSimTilesBeauty": "3",   # 3: lane B terrain detail
                      "M_FlightSimCloudLayers": "5", "M_FlightSimScatter": "1",  # clouds 5: round-10 rounded, warped, LOD
                      "M_FlightSimDistantClouds": "3",   # distant 3: round-10 rounded, warped, far LOD
-                     "M_FlightSimOceanBeauty": "3"}     # lane B: the beauty sea (2: round-10 own reflection; 3: round-19 sphere up, swell, streaks, sheen)
+                     "M_FlightSimOceanBeauty": "4"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
 
@@ -3814,7 +3822,9 @@ def create_world_ocean_beauty():
     (no screen-space reflection streaks); the generated Phillips wave normal
     only where the pixel resolves it (ocean_normal.hlsl, world-space: the
     tangent-space switch is off); the deep sea's body colour and Monahan's
-    whitecaps (ocean_colour.hlsl). No WPO: the sea's geometry is the cap's."""
+    whitecaps (ocean_colour.hlsl). Generation 4: the depth pull (WORLD_OCEAN_DEPTH_PULL),
+    a world position offset along each vertex's line of sight: the same pixels, nearer
+    depth, so the sea wins over the tiles' ocean; the cap is in no label pass."""
     material = _world_beauty_material("M_FlightSimOceanBeauty")
     if material is None:
         return
@@ -3859,6 +3869,16 @@ def create_world_ocean_beauty():
                                   unreal.MaterialProperty.MP_SPECULAR)
     lib.connect_material_property(constant(material, lib, WORLD_OCEAN_ROUGHNESS, -900, 1000), "",
                                   unreal.MaterialProperty.MP_ROUGHNESS)
+    # Generation 4 (round 26): the depth pull. (CameraPos - WorldPos) x DepthPull
+    # moves each vertex along its own line of sight, so it projects to the same
+    # pixel, only nearer: the sea wins the depth test against the tiles' ocean.
+    toward = binary(material, lib, unreal.MaterialExpressionSubtract,
+                    lib.create_material_expression(material, unreal.MaterialExpressionCameraPositionWS, -1500, 1200),
+                    lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, -1500, 1300),
+                    -1300, 1250)
+    pull = binary(material, lib, unreal.MaterialExpressionMultiply, toward,
+                  scalar(material, lib, "DepthPull", WORLD_OCEAN_DEPTH_PULL, -1300, 1400), -1100, 1250)
+    lib.connect_material_property(pull, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
     finish(material, "M_FlightSimOceanBeauty")
 
 

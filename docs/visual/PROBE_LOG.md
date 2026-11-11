@@ -3465,3 +3465,28 @@ lit grey; flat does NOT (it keeps body_beauty's normals). If so, the fault is bo
 normals on the visible faces (check with scripts/ue_inspect_aircraft.py outward_share on the
 beauty part), not the masters. If instead nonormal restores it, the panel_lines normal is
 wrong at distance (the coordinator's suspect) and the fix is in panel_lines.hlsl.
+
+### lane-B round-26 ocean (M_FlightSimOceanBeauty generation 4: the depth pull)
+
+Round 26 (vis-windows 13266ae8, `sea.lift_m` 20.02) kept the uniform blue and the four
+lines. Line geometry, read from the frame: the lines are straight and meet at (640, ~207),
+about 38 px above the sea's horizon (~245): that is eye level, the 3.2 deg dip of the horizon
+from 10 km, so they are PARALLEL horizontal world lines along the flight direction. With the
+horizon at y 240 they sit at 290 / 560 px from centre at the bottom row (480 px below eye
+level): lateral offsets of 0.6 h and 1.2 h, ~6 and ~12 km either side of the track, fading
+by mid-frame. Unchanged by the cap's 96 -> 256 segments and by three material generations, so
+they are neither the cap's seams nor the material: a ~6 km grid of Google's ocean tile edges.
+The uniform blue is the tiles' ocean (the gen-3 glint would have brightened the bottom rows
+several-fold). So the tiles' ocean stands more than 20 m above the cap there.
+- Generation 4: the cap material pulls each vertex 1 % of its distance toward the camera
+  along its own line of sight (WPO = (CameraPos - WorldPos) x DepthPull 0.01): the pixel it
+  projects to is unchanged, its depth is 150 m nearer at 15 km, so the sea wins the depth test
+  over open water. The tiles stay drawn. The cap is a beauty-only actor (no label, depth or
+  mask pass draws it); the aircraft is ~100 m from the camera, far nearer than 1 % of the sea.
+- Sheen lobe doubled: 30 % of the sun's specular at 3.5x the Cox-Munk width (at most 0.8).
+- C++: `sea.tiles_height_probes` (visibility traces at the origin and 5 / 20 km out; the cap
+  has no collision, so a hit is the tiles': `hit_z_m` against `cap_z_m`) and `depth_basis`.
+- Needs scripts/ue_create_materials.py (stamp 4) and the C++ rebuild for the probes. Probe
+  #13: the lines gone; the bottom rows brighter (glare below a noon camera) fading to a
+  darker blue, paler at the horizon; read `tiles_height_probes`. Lines still there -> raise
+  DepthPull on the material (0.03).

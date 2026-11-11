@@ -35,7 +35,21 @@
 // normals; adds a swell resolved from mid altitude (three long waves, phases
 // and amplitudes broken by smooth fields), wind streaks and slicks stretched
 // along the wind (8 x 1.2 km) that vary the roughness, a paler reflected horizon,
-// and a broad sheen lobe so a noon chase view has light on the water. UNCALIBRATED: HORIZON_GAIN, ZENITH_TINT, PATCHINESS and
+// and a broad sheen lobe so a noon chase view has light on the water.
+//
+// Round 26 (vis-windows 13266ae8, lift 20 m) still showed the uniform blue and
+// four light lines; the lines are parallel to the flight direction (they meet at
+// eye level, the horizon's 3.2 deg dip above the sea's horizon from 10 km), about
+// 6 and 12 km to each side and gone by mid-frame: a ~6 km grid, Google's ocean
+// tile edges, so the tiles' ocean still covers the cap. Generation 4: the cap's
+// vertices are pulled toward the camera along their line of sight by DepthPull
+// (1 %) in the material's world position offset: every pixel lands where it was
+// (the move is along the view ray, so the projection is unchanged) but the sea's
+// depth is 1 % nearer (150 m at 15 km), so it wins the depth test against the
+// tiles' ocean over open water while the tiles stay drawn. The cap is a
+// beauty-only actor no label pass draws; the aircraft is far nearer than 1 %.
+// The sheen lobe is doubled (30 % at 3.5x the width) so the bright glare below
+// a noon chase camera reads. UNCALIBRATED: HORIZON_GAIN, ZENITH_TINT, PATCHINESS and
 // the body colour, set by probe render on the render machine
 // (docs/visual/PROBE_LOG.md ## lane-B terrain detail, round-10 ocean).
 //
@@ -61,8 +75,8 @@ const float HORIZON_GAIN = 1.5;
 const float HORIZON_PALE = 0.4;     // the reflected horizon sky's share of grey (it is whitish)
 const float3 ZENITH_TINT = float3(0.35, 0.55, 0.95);
 // The glint's broad sheen: its share of the sun's specular and its width.
-const float SHEEN_SHARE = 0.15;
-const float SHEEN_WIDTH = 2.5;
+const float SHEEN_SHARE = 0.3;
+const float SHEEN_WIDTH = 3.5;
 struct FOceanSurface
 {
 	// shared: ocean (ocean_normal.hlsl, ocean_emissive.hlsl, ocean_colour.hlsl)
@@ -216,7 +230,7 @@ float fresnel = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
 float3 reflected = fresnel * g1v * sky;
 // The sun glint: GGX (Cox-Munk width), Schlick at the half vector, Smith both
 // ways; plus a broad sheen lobe (SHEEN_SHARE of the energy at SHEEN_WIDTH x the
-// width, at most 0.65): Cox & Munk's measured peakedness puts more of the
+// width, at most 0.8): Cox & Munk's measured peakedness puts more of the
 // slopes in the tails than a single lobe, which is what lights a chase view's
 // sea toward the sun's azimuth when the sharp lobe is out of frame (noon).
 float3 l = normalize(SunDir);
@@ -230,7 +244,7 @@ float3 glint = float3(0.0, 0.0, 0.0);
 	float lobe = 0.0;
 	[unroll] for (int k = 0; k < 2; ++k)
 	{
-		float ak = k == 0 ? alpha : min(SHEEN_WIDTH * alpha, 0.65);
+		float ak = k == 0 ? alpha : min(SHEEN_WIDTH * alpha, 0.8);
 		float b2 = ak * ak;
 		float q = nh * nh * (b2 - 1.0) + 1.0;
 		float d = b2 / (3.14159265 * q * q);
