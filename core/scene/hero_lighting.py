@@ -45,7 +45,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from core.environment import sun as sun_model
 
@@ -79,6 +79,10 @@ DIAGNOSTIC_SWITCHES: Dict[str, Optional[Tuple[str, ...]]] = {
     "sky-fill-probe": ("as-planned", "red", "off"),
     "sky-cloud-ao": ("auto", "on", "off"),
     "aerial-perspective-scale": None,
+    # 2026-11-11, #10 green under the tornado's storm deck (STORM_LOWER_HEMISPHERE_SWITCHES).
+    "storm-lower-hemisphere": ("neutral", "surface"),
+    # 2026-11-11, #02 super bright's blue shade (STATED_FILL_FOG_SWITCHES).
+    "stated-fill-fog": ("tint", "sky"),
 }
 #: Lane A (2026-11-11, "the planes are being too shadowed"): ``-sky-cloud-ao``
 #: defaults to ``auto`` -- the sky light's cloud ambient occlusion is OFF when
@@ -332,6 +336,47 @@ GROUND_ALBEDO_RGB: Dict[str, Tuple[float, float, float]] = {
 #: tiles under the storm deck from the -calibration quad).
 OVERCAST_ILLUMINANCE_FRACTION = 0.25
 
+#: 2026-11-11, #10 ("c172 near a tornado") green over the whole frame: the sky
+#: light's lower hemisphere under a STORM deck. The commandlet runs this lane
+#: AFTER the world lane (FlightSimRenderCommandlet.cpp: WorldBeauty.Build, then
+#: FFlightSimHeroLighting::Apply), so the world lane's storm_deck_light black
+#: lower hemisphere was always overwritten by this sidecar's ground: the
+#: grassland row (0.10, 0.14, 0.06), G/B 2.3, at albedo x E x 0.25 / pi --
+#: about 950 cd/m2 of green, brighter than the deck underside the capture sees
+#: above. Every surface and medium that takes the sky light's SH (the volumetric
+#: fog, the deck's ambient, the funnel's sides) went green, while the ground,
+#: facing up, stayed its own red-brown (round 44: sky 86/99/87, funnel 22/33/23,
+#: ground 8/5/5). Under a storm deck the ground keeps its luminance and loses
+#: its hue: a wet ground under a storm returns little colour of its own (lane D).
+#: ``-storm-lower-hemisphere=surface`` (command line or FLIGHTSIM_RENDER_SWITCHES)
+#: puts the surface's colour back, for the A/B. Beauty only (the sidecar is).
+STORM_LOWER_HEMISPHERE_SWITCHES: Tuple[str, ...] = ("neutral", "surface")
+STORM_LOWER_HEMISPHERE_DEFAULT = "neutral"
+#: Rec. 709 luminance weights (linear RGB): the grey that keeps the ground's luminance.
+REC709_LUMA: Tuple[float, float, float] = (0.2126, 0.7152, 0.0722)
+
+#: 2026-11-11, #02 super bright's blue cast, still there after the neutral fill
+#: (round 4), with the sky light and the aerial perspective excluded by the
+#: round-5 probes: the remaining in-scatter is the HEIGHT FOG's, whose colour is
+#: the SkyAtmosphere's ambient (FlightSimSky.cpp: SkyAtmosphereAmbientContribution
+#: ColorScale white, FogInscatteringColor black), the clear sky at the relit
+#: 72 deg sun (R/B 0.25 on the model), x1.6 by the sun knob, under an exposure
+#: opened 1.7 stops over the physical meter. Round 44 measures an additive blue
+#: veil on every luma band (sRGB B - R: +67 in the shade, +70 and +49 in the
+#: midtones, -7 in the highlights; #01: +20, +8, -17, -46). Under a STATED fill
+#: the fog's ambient takes the colour the fill takes (stated_fill_tint's
+#: ``color_linear_rgb``): the haze is the fill's light, not more blue sky.
+#: ``-stated-fill-fog=sky`` keeps the sky's hue, for the A/B. Clear world,
+#: stated fill and beauty only.
+STATED_FILL_FOG_SWITCHES: Tuple[str, ...] = ("tint", "sky")
+STATED_FILL_FOG_DEFAULT = "tint"
+
+
+def neutral_ground_luminance(rgb: Sequence[float]) -> List[float]:
+    """A grey of the same Rec. 709 luminance as ``rgb`` (cd/m2, rounded as the sidecar's)."""
+    y = sum(w * float(c) for w, c in zip(REC709_LUMA, rgb))
+    return [round(y, 3)] * 3
+
 # -- the stated fill's colour (round 3, 2026-11-10) -------------------------------
 
 #: The share of the clear sky's blue the sky light loses when a lighting block
@@ -437,11 +482,15 @@ def srgb8_stored(linear: float) -> float:
 def plan_sidecar(*, surface: str, sun_elevation_deg: float, horizontal_lux: Optional[float],
                  raining: bool, altitude_m: float = 0.0,
                  time_of_day_basis: Optional[str] = None,
-                 stated_fill: bool = False) -> Dict[str, Any]:
+                 stated_fill: bool = False, storm_deck: bool = False) -> Dict[str, Any]:
     """The ``hero_lighting.json`` sidecar. Pure: same inputs, same bytes.
     ``stated_fill``: the lighting block states the sky fill (a preset or the
     user); a clear sky's light then takes :func:`stated_fill_tint` (round 3).
-    Under rain or a deck the sky is grey already and nothing is added."""
+    Under rain or a deck the sky is grey already and nothing is added.
+    ``storm_deck``: the world is the storm preset (a drawn storm deck); the
+    ground's lower hemisphere is then its luminance as a grey
+    (:data:`STORM_LOWER_HEMISPHERE_SWITCHES`), the surface's colour kept
+    beside it for the host's ``-storm-lower-hemisphere=surface``."""
     from core.scene.beauty_look import clear_sky_horizontal_lux
 
     albedo = GROUND_ALBEDO_RGB.get(str(surface), GROUND_ALBEDO_RGB["unspecified"])
@@ -472,6 +521,13 @@ def plan_sidecar(*, surface: str, sun_elevation_deg: float, horizontal_lux: Opti
         }
         luminance = [round(v / (c * scale), 3)
                      for v, c in zip(luminance, fill["color_linear_rgb"])]
+    if storm_deck:
+        ground_extra["lower_hemisphere_luminance_rgb_surface"] = luminance
+        ground_extra["lower_hemisphere_storm_deck"] = (
+            "neutral: the surface's luminance as a grey under a storm deck (#10 green, "
+            "2026-11-11); -storm-lower-hemisphere=surface draws "
+            "lower_hemisphere_luminance_rgb_surface")
+        luminance = neutral_ground_luminance(luminance)
     return {
         "hero_lighting_version": HERO_LIGHTING_VERSION,
         "ground": {
@@ -497,6 +553,16 @@ def write_sidecar(plan: Mapping[str, Any], path: Path) -> Path:
     path = Path(path)
     path.write_text(json.dumps(plan, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     return path
+
+
+def storm_deck_look(look: Mapping[str, Any]) -> bool:
+    """Whether the beauty look (beauty_look.json) is the storm world: its world
+    preset is ``storm`` (the world lane's storm deck), or no card named a world
+    and the grade is ``storm`` from a storm event (a tornado, a thunderstorm)."""
+    preset = look.get("world_preset")
+    if preset is not None:
+        return str(preset) == "storm"
+    return look.get("grade") == "storm" and str(look.get("grade_basis", "")).startswith("weather event")
 
 
 def write_sidecar_beside(spec: Any, beauty_look: Optional[Path]) -> Optional[Path]:
@@ -542,7 +608,7 @@ def write_sidecar_beside(spec: Any, beauty_look: Optional[Path]) -> Optional[Pat
         horizontal_lux=None if reference is None else float(reference),
         raining=raining, altitude_m=altitude,
         time_of_day_basis=None if tod is None else getattr(tod, "frm", None),
-        stated_fill=stated_fill)
+        stated_fill=stated_fill, storm_deck=storm_deck_look(look))
     return write_sidecar(plan, beauty_look.with_name(SIDECAR_NAME))
 
 
