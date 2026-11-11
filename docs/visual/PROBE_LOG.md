@@ -3263,6 +3263,28 @@ Probes r7 (beauty, no switch unless named; every value UNCALIBRATED):
 4. #04 and #02: the sky at the horizon is whiter than the zenith (saturation falls from the top
    row to the row just above the horizon).
 
+### Round 10 follow-up (lane E, 2026-11-11): cubist cumulus in rows
+
+Round 10's #13 (f3561163) drew the round-7 field as blocky cauliflower with flat-sided cells stacked
+in rows to the horizon. Causes: Voronoi creases (plain Worley F1), three axis-aligned lattices,
+straight walls from the base to 40 % up (top_rounding 0.6) with a thin soft edge (contrast 1.6) the
+erosion could barely carve, and full-detail noise at every distance slicing into far strata.
+- `SmoothWorley2`: the 9 cell distances blended by a polynomial smooth minimum (0.35 cell): rounded
+  cells, soft saddles. The plane is domain-warped by a gradient-noise pair (0.45 cell); the mid and
+  small lattices are rotated 35 and 78.5 degrees; the cell weights favour the large cells
+  (0.55 / 0.3 / 0.15 at 2.4x / 1x / 0.46x the cell size): fewer, bigger cumulus among many small.
+- Cumulus row: `top_rounding` 0.75 (domes from a quarter up), `coverage_contrast` 0.9 (soft edge
+  ~1.8x wider, carved by the billowy erosion).
+- Far LOD (`CameraPos` input, new): `far = smoothstep(6, 20 km)`; the small cells and billow fade
+  to their means, the erosion fades out, the soft edge widens to 2x. The distant sheet draws
+  `far = 1` with the same 2x edge, so the hand-over shows no change of texture.
+- Moments: mean 0.550, sigma 0.069 (0.0695 near, 0.0673 far); the drawn cover is still the stated.
+- Cost per sample (lattice hashes): near (< 6 km) shape 51 + erosion 54, against 43 + 54; far
+  (> 20 km) shape 34, no erosion. A cruise frame's samples are mostly far: cost at or below round 7.
+- Needs: bridge rebuild (cumulus row), `ue_create_materials.py` (clouds 4/5, distant 3/3, in place).
+- Probe: #13, #03, #12 (beauty, no switch). Pass: soft rounded cumulus of mixed sizes, no
+  straight walls or facets, no rows or strata towards the horizon; capture time not above round 10's.
+
 ## lane-B terrain detail
 
 Lane B of the 4-lane visual push (Mac, uncompiled, no UE run), 2026-11-11. The owner: scenes
