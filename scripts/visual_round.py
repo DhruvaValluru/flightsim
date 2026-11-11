@@ -172,10 +172,74 @@ def write_round(number: int, gallery: Path = GALLERY, summary: Path = SUMMARY,
     if summary.is_file():
         rows_out = [{**{k: r.get(k) for k in ("number", "name", "prompt", "outcome",
                                                "why", "run_id", "lighting", "seconds", "spec_sha256")},
-                     **(look_report(r.get("run_id"), run_root) if r.get("run_id") else {})}
+                     **(look_report(r.get("run_id"), run_root) if r.get("run_id") else {}),
+                     **(ghost_report(r.get("run_id"), run_root) if r.get("run_id") else {})}
                     for r in json.loads(summary.read_text(encoding="utf-8"))]
         (out / "summary.json").write_text(json.dumps(rows_out, indent=1), encoding="utf-8")
     return out
+
+
+#: A ghost is a faint shifted copy of the aircraft outside its mask (round 36's
+#: rain veil pasted four). The score is the best normalised cross-correlation of
+#: the aircraft's own patch (beauty, grey, mean-removed) at offsets that clear
+#: the mask's box; above GHOST_SUSPECT it is flagged. A report, never a gate:
+#: a sky or sea with structure can correlate too. UNCALIBRATED.
+GHOST_SUSPECT = 0.6
+GHOST_STRIDE_PX = 4
+
+
+def ghost_score(beauty, mask, stride: int = GHOST_STRIDE_PX):
+    """(score, (dx, dy)) for a beauty frame and its ID mask (numpy arrays,
+    HxWx3 and HxW); None when there is no aircraft or no room to search."""
+    import numpy as np
+
+    grey = np.asarray(beauty, dtype=np.float32)[..., :3].mean(axis=2)
+    ys, xs = np.nonzero(np.asarray(mask) == 1)
+    if ys.size < 50:
+        return None
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    patch = grey[y0:y1, x0:x1]
+    patch = patch - patch.mean()
+    norm = float(np.sqrt((patch * patch).sum()))
+    if norm == 0.0:
+        return None
+    h, w = patch.shape
+    H, W = grey.shape
+    best, where = -1.0, (0, 0)
+    for ty in range(0, H - h + 1, stride):
+        for tx in range(0, W - w + 1, stride):
+            if ty < y1 and ty + h > y0 and tx < x1 and tx + w > x0:
+                continue                     # overlaps the aircraft itself
+            win = grey[ty:ty + h, tx:tx + w]
+            win = win - win.mean()
+            den = norm * float(np.sqrt((win * win).sum()))
+            if den > 0.0:
+                score = float((patch * win).sum() / den)
+                if score > best:
+                    best, where = score, (int(tx - x0), int(ty - y0))
+    return (best, where) if best > -1.0 else None
+
+
+def ghost_report(run_id, run_root: Path = RUN_ROOT) -> dict:
+    """{"ghost": {...}} for the run's first labelled frame, or {} without one."""
+    from PIL import Image
+    import numpy as np
+
+    run_dir = run_root / str(run_id or "-")
+    masks = sorted(run_dir.glob("frames/*/frame_*_mask.png"))
+    if not masks:
+        return {}
+    beauty = masks[0].with_name(masks[0].name.replace("_mask.png", ".png"))
+    if not beauty.is_file():
+        return {}
+    got = ghost_score(np.asarray(Image.open(beauty).convert("RGB")),
+                      np.asarray(Image.open(masks[0]).convert("L")))
+    if got is None:
+        return {"ghost": {"score": None, "basis": "no aircraft pixels in the mask"}}
+    score, offset = got
+    return {"ghost": {"score": round(score, 3), "offset_px": list(offset),
+                      "suspected": score > GHOST_SUSPECT, "threshold": GHOST_SUSPECT,
+                      "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"}}
 
 
 def main() -> int:

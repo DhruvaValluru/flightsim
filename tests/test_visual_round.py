@@ -54,3 +54,22 @@ def test_the_look_report_reads_the_per_camera_render_json(tmp_path):
     (camera / "render.json").write_text(json.dumps({k: {} for k in visual_round.LOOK_KEYS}), encoding="utf-8")
     assert visual_round.look_report("r2", tmp_path / "runs") == {
         "render_json": True, "look_keys_missing": [], "new_look_ran": True, "beauty_post": False}
+
+
+def test_a_ghost_copy_of_the_aircraft_is_scored_and_a_clean_frame_is_not():
+    import numpy as np
+
+    from visual_round import GHOST_SUSPECT, ghost_score
+
+    rng = np.random.default_rng(7)
+    frame = rng.normal(120, 4, (200, 300, 3)).clip(0, 255)
+    mask = np.zeros((200, 300), np.uint8)
+    plane = np.zeros((30, 60)); plane[12:18, :] = 90; plane[:, 26:34] = 90
+    frame[80:110, 120:180] += plane[..., None]
+    mask[80:110, 120:180][plane > 0] = 1
+    clean, _ = ghost_score(frame, mask)
+    ghosted = frame.copy()
+    ghosted[30:60, 40:100] += 0.35 * plane[..., None]       # a faint copy up-left
+    score, offset = ghost_score(ghosted, mask)
+    assert clean < GHOST_SUSPECT < score
+    assert abs(offset[0] + 80) <= 4 and abs(offset[1] + 50) <= 4    # one search stride
