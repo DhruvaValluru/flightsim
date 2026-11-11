@@ -19,6 +19,7 @@
 #include "Engine/Scene.h"
 #include "Engine/StaticMesh.h"  // cockpit-airframe: the beauty body swap
 #include "Engine/World.h"
+#include "HAL/PlatformMisc.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -227,9 +228,15 @@ namespace
 	}
 }
 
-void FFlightSimAircraftFXOptions::ParseParams(const FString& Params)
+void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 {
 	SwitchError.Reset();
+	// Rounds 13-18: the A/B channel (FLIGHTSIM_RENDER_SWITCHES, what
+	// visual_fix_round.ps1 -Switches sets) was never read here, so
+	// -aircraft-materials=off rendered identical frames. The command line,
+	// then the environment, as the world look reads them.
+	const FString Params = CommandLine + TEXT(" ")
+		+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
 	const bool bAll = AircraftFxSwitch(Params, TEXT("aircraft-look="), true, SwitchError);
 	// Every switch is parsed (no short-circuit), so a bad word is refused
 	// even under -aircraft-look=off.
