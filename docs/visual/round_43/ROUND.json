@@ -1,0 +1,51 @@
+﻿{
+    "round":  43,
+    "commit":  "20d4a035",
+    "full":  false,
+    "scenes":  [
+                   7,
+                   9,
+                   10,
+                   15
+               ],
+    "switches":  "",
+    "prep":  [
+                 "build",
+                 "materials"
+             ],
+    "seconds":  {
+                    "build":  14.8,
+                    "materials":  8.7,
+                    "scenes":  733
+                },
+    "outcomes":  [
+                     {
+                         "number":  7,
+                         "outcome":  "done",
+                         "seconds":  241.4,
+                         "spec_sha256":  "cf3697a5b8c94e5a54c30f373f30fae193d9e68ed10878f721f27d32361af7a4",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  9,
+                         "outcome":  "done",
+                         "seconds":  281.5,
+                         "spec_sha256":  "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  10,
+                         "outcome":  "done",
+                         "seconds":  106.3,
+                         "spec_sha256":  "f16db732eb9f2d0529845a94365064e6846b1c81b0351ab82d5c2bdbc28b442e",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  15,
+                         "outcome":  "done",
+                         "seconds":  101.0,
+                         "spec_sha256":  "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+                         "why":  "clip ready"
+                     }
+                 ]
+}
