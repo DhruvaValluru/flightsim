@@ -1,0 +1,35 @@
+﻿{
+    "round":  53,
+    "commit":  "434ba7e6",
+    "full":  false,
+    "scenes":  [
+                   4,
+                   8
+               ],
+    "switches":  "",
+    "prep":  [
+                 "materials",
+                 "aircraft"
+             ],
+    "seconds":  {
+                    "materials":  9.8,
+                    "aircraft":  32.5,
+                    "scenes":  275.1
+                },
+    "outcomes":  [
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  156.5,
+                         "spec_sha256":  "9386284b5b90c09edbf98f1694778c412d11d1689ac276cece868e72dd311e00",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  8,
+                         "outcome":  "done",
+                         "seconds":  116.2,
+                         "spec_sha256":  "12d9f6f108c853765e86017db7ab96c95eb4e1fa4180a1b0299492c3d55a7345",
+                         "why":  "clip ready"
+                     }
+                 ]
+}
