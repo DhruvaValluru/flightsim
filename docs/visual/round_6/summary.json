@@ -1,0 +1,30 @@
+[
+ {
+  "number": 11,
+  "name": "A-4 over the matterhorn, strong wind, severe turbulence",
+  "prompt": "chase view of the a4 over the matterhorn at 5000 m in strong wind and severe turbulence, flying north, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "a1fc65b5b53a",
+  "lighting": {},
+  "seconds": 145.3,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 15,
+  "name": "747 in hurricane-like weather (the refusal's suggestion)",
+  "prompt": "chase view of the 747 at 2000 m in strong wind, severe turbulence and heavy rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "17fe619f3b95",
+  "lighting": {},
+  "seconds": 189.3,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ }
+]
