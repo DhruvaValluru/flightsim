@@ -54,3 +54,11 @@ assets/cie/** -text
 assets/camera_profiles/** -text
 assets/instrument_profiles/** -text
 assets/illuminants/** -text
+
+# Round 5 on Windows (f7232cc7): a CRLF checkout changed the bytes of
+# physically_based/materials.json and its PIN.json sha256 refused. The film
+# LUTs and their film_luts.json pins, the Physically Based vendor drop, and
+# the aircraft look configs (whose sha256 the look record carries) stay
+# byte-exact on every platform.
+assets/looks/** -text
+assets/aircraft_config/look/** -text
