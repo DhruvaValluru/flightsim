@@ -1,0 +1,99 @@
+[
+ {
+  "number": 1,
+  "name": "golden hour A-4, flying east",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "13c4709739fc",
+  "lighting": {},
+  "seconds": 366.3,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 3,
+  "name": "a320 over new york, wide lens (terrain download)",
+  "prompt": "chase view of the a320 over new york city at 600 m in the morning with a 18 mm lens for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "b46b9d3e543a",
+  "lighting": {},
+  "seconds": 119.8,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 4,
+  "name": "desert A-4, sun behind the camera",
+  "prompt": "chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "522296bce081",
+  "lighting": {
+   "sun_azimuth_deg": 45.0,
+   "sun_elevation_deg": 20.0
+  },
+  "seconds": 120.1,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 6,
+  "name": "a320 over sfo heading south, moderate rain",
+  "prompt": "wingman view of the a320 over sfo south at 3000 m in moderate rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "3590910c3416",
+  "lighting": {},
+  "seconds": 115.7,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 8,
+  "name": "c172 over fuji, sunrise, light rain",
+  "prompt": "chase view of the c172p over mount fuji at sunrise in light rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "d6d4d936c816",
+  "lighting": {},
+  "seconds": 139.0,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 10,
+  "name": "c172 near a tornado",
+  "prompt": "chase view of the c172p near a tornado over the flint hills at 600 m for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "cb87af3e5745",
+  "lighting": {},
+  "seconds": 134.5,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 13,
+  "name": "747 cruise over the ocean",
+  "prompt": "chase view of the 747 over the ocean at 10000 m at noon for 6 seconds",
+  "outcome": "refused",
+  "why": "[airspeed.stall_margin] A speed of 250 knots is too slow for this aircraft to keep flying; it needs at least 273.999 knots.",
+  "run_id": null,
+  "lighting": {},
+  "seconds": 3.5
+ }
+]
