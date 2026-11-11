@@ -11,6 +11,15 @@ Two Claude sessions share the work:
 - **The Windows session** renders. It does not change code; it runs one
   command per round and reports back.
 
+## Nothing waits on the other side
+
+Owner's rule, 2026-11-11, typed on Windows: nothing sits idle waiting on the
+other side. Every message carries the next action: the commit, plus the exact
+`visual_fix_round.ps1 -Round N -Scenes ...` command, or "final sweep"
+(`-Full`) when nothing is left to fix. No acks. The receiver acts at once.
+A report from Windows is itself the trigger for flightsim-83's next fix,
+and flightsim-83's reply is the next round's command.
+
 ## Sizing a round
 
 | Round | What renders | Command |
