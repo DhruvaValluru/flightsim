@@ -1,0 +1,77 @@
+  [PASS] manifest_version: manifest_version 8, spec 4fbe2d15390d01b7
+  [PASS] fields_finite: 1 frame records checked
+  [PASS] json_schema: valid against capture_manifest.v8.schema.json
+  [PASS] intrinsics_match_spec: 1 frames carry the lens their spec states, and fx/fy match focal/sensor*pixels to 2.27e-13 px
+  [PASS] projection_matrix: 38 projections through P agree with the recorded parameters to 4.70e-11 px (tol 0.001 px)
+  [PASS] pose_matches_spec: 2 placement/aim clauses graded against the stated cameras; worst placement gap 0.000 m, worst aim error 0.00 deg
+  [PASS] geometry_recovery: 1 frames; quaternion-vs-euler reprojection gap 0.0000 px (tol 0.5); 0 aircraft behind camera; 0 aimed frames without the aircraft in frame
+  [PASS] landmark_reprojection: 11 landmark projections agree with the engine's own to within 0.00 px (tol 2.0). (41 landmarks, 11 in-frame projections, worst off-axis radius 0.40 of the half-diagonal)
+  [NOT RUN] cross_view_consistency: no landmark was seen by two cameras at the same instant; capture two cameras on a shared schedule with a landmark in both frames to exercise this
+  [PASS] count_exactness: 1 camera(s) requested an exact image count and got exactly it; every camera's frames are densely indexed
+  [NOT RUN] aircraft_state_consistency: no telemetry sample was captured by more than one camera, so there is nothing to cross-check
+  [PASS] flight_agreement: 1 frames against 2 host flight(s); the manifest's aircraft track matches the host's recorded flight to within 0.00 m (solved over 'host flight', tol 0.5 m)
+  [PASS] host_determinism: 2 host flights of one card were byte-identical (aecd6bdb5eff, 30 samples): the host is reproducible, which is what makes solving over one of its flights and re-flying for the pixels sound rather than an assumption
+  [PASS] capture_time_agreement: 1 frames rendered within 0.0000 s of the instant each record states (tol 0.05 s)
+  [PASS] label_geometry: 1 labelled frames re-projected independently; worst disagreement 0.0000 (px or m) at camera0/0 bbox v0; tolerance 0.05
+  [PASS] keypoints_in_box: 7 projected keypoints, every one inside its frame's box (tolerance 0.5 px)
+  [PASS] drawn_airframe: 1 camera(s): camera0: mesh at (-0.3, 0.0, 0.0) cm in the actor frame, manifest version 4, origin measured from vertices
+  [PASS] label_files: 8 declared label files present across ['camera0']
+  [NOT RUN] mask_containment: superseded for manifest 8 by box_vs_mask (the ID image carries every object's int_id; the tight box of each is graded against its projected hull there); this single-id containment test is the version-5 check
+  [NOT RUN] depth_range: superseded for manifest 8 by depth_vs_geometry (per object: the depth under the mask against the projected hull band, the nearest keypoint and the record); this single-id span test is the version-5 check
+  [PASS] mask_integers_only: 1 ID images hold only [1, 2, 64, 65, 66] of the declared [1, 2, 64, 65, 66, 67, 68, 69] (0 background); the class image agrees at every labelled pixel; the engine counted no non-integer ids
+  [PASS] component_coverage: 1 ID images read; 3 component-frames with pixels each carry their record
+  [PASS] component_boxes: 3 component records: tight box inside its own hull and its parent's tight box (tol 1 px)
+  [PASS] mask_vs_geometry: 1 object-frames; worst box-centre offset 0.29 % of span at camera0/frame_0000.png aircraft:A4:0 (0.7 px of 256 px span) (tol 2 %); worst extent 0.35 % at camera0/frame_0000.png aircraft:A4:0 (255x115 px vs hull 256x115) (tol 5 %)
+  [PASS] box_vs_mask: 1 object-frames; lowest IoU 0.986 at camera0/frame_0000.png aircraft:A4:0 (256 px span, floor 0.8) (floors 0.8 at >= 64 px, 0.5 at >= 16 px); 1 records' bbox_2d_tight re-counted from the ID image to a pixel
+  [PASS] tight_box_present: 1 object-frames: bbox_2d_tight present and inside bbox_2d
+  [PASS] label_geometry_3d: 1 object-frames: 3-D box placed by the verifier's own rotation (largest gap 9e-13 m), full box / cut box / fraction inside from its own projection; 1 data-file truncation / facing sections agree; 1 hiding breakdowns recounted from the ID image
+  [PASS] depth_vs_geometry: 1 object-frames within the hull's depth band at 1 % + 2 m; nearest surface at most 0.07 m beyond the nearest keypoint at camera0/frame_0000.png aircraft:A4:0 (tail at 35.7 m, mask from 35.8 m); median depth vs projected CG depth differs by at most 2.1 m at camera0/frame_0000.png aircraft:A4:0 (median 40.3 m, CG 42.4 m); 1 records' depth_min_m / depth_median_m are the same pixels to 0.05 m
+  [PASS] visibility_vs_scene: 1 object-frames: visible pixels inside the alone footprint, hidden pixels explained by something nearer (worst unexplained 0.00 % at none; tol 3 %), overlaps owned by the nearer object, and 1 records' fractions and occluders re-counted from the files
+  [PASS] identity_stable: 8 objects keep one integer each across 1 frames and 1 camera(s) (['camera0']), and the engine's render.json echoes the same list
+  [PASS] applied_intrinsics: 1 frames of ['camera0'] rendered at the record's lens and picture size; worst field-of-view gap 0.0000 deg (tol 0.1 deg)
+  [PASS] sensor_undistortion: 7 sensor keypoints undistorted with the verifier's own inverse of the recorded profile; worst return error 0.0000 px at  (tolerance 0.05)
+  [NOT RUN] sensor_files: no camera ran the sensor post-pass (every profile ideal, or no frames rendered)
+  [PASS] frame_integrity: 1 frames hash to the engine's own record across ['camera0']
+  [PASS] applied_pose: 1 frames: the engine applied the solved pose to 0.0000 m / 0.0000 deg (tol 0.1 m / 0.05 deg)
+  [NOT RUN] instruments: no telemetry_measured.json in the run (instruments profile ideal, or none stated)
+  [PASS] datum: heights EGM2008 orthometric (GLO-30); EGM96 bilinear undulation +52.525 m at the origin (bilinear +52.525 m) agrees with the checker's own read of the grid to 0.0000 m; ellipsoidal origin 1911.7 m = orthometric 1859.2 m + N
+  [PASS] datum_independent: PROJ +inv vgridshift on matterhorn_geoid.gtx (5x6 nodes at 0.250000 deg, corner on whole nodes) reads +52.525 m at the origin (block +52.525 m) and agrees with the producer's full-grid values to 2.13e-06 m over 100 interior points; inf outside
+  [NOT RUN] dis_roundtrip: no Entity State PDU log: the run was captured without --dis (no dis_entity_state.bin, no index, no dis.entity_state record)
+  [PASS] georeference: 1 render.json georeference block(s) agree with the manifest: EPSG:32632 about the frame origin, the stated vertical convention, undulation at the origin 52.525 m
+  [NOT RUN] wake_selftest: the card states no wake: nothing to re-evaluate
+  [NOT RUN] host_physics: no render.json carries the engine's physics keys: the engine side is a Windows step
+  [NOT RUN] building_vs_footprint: the manifest names no footprint set (no scene.buildings): nothing to carry the ID image back against
+  [NOT RUN] runway_vs_geometry: the manifest names no runway (no scene.runway): nothing to grade
+  [NOT RUN] landcover_vs_geometry: the manifest names no land cover (no landcover block): nothing to carry the frames onto
+  [NOT RUN] normals_vs_depth: no render.json frame record declares normal_png (no -passes=normal, or no engine pass at all): render on Windows with -labels -passes=normal to exercise this
+  [NOT RUN] flow_vs_motion: no render.json frame record declares flow_f32 (no -passes=velocity, or no engine pass at all): render on Windows with -labels -passes=velocity to exercise this
+  [NOT RUN] albedo_range: no render.json frame record declares albedo_png (no -passes=albedo, or no engine pass at all): render on Windows with -labels -passes=albedo to exercise this
+  [NOT RUN] psf_slanted_edge: no camera carries a sensing.optics block: no PSF was applied
+  [NOT RUN] blur_vs_flow: no camera carries a sensing.motion_blur block: no blur was applied
+  [NOT RUN] radiometry_grey_card: no camera carries a sensing.radiometry block
+  [NOT RUN] engine_linear_passes: no render.json frame record declares labels.normal or labels.basecolor (render on Windows with -labels -passes=normal,albedo to exercise this)
+  [NOT RUN] velocity_readback: no render.json frame record declares labels.velocity (render on Windows with -labels -velocity-check to exercise this)
+  [PASS] engine_readbacks: 5 read-back(s): the console values parse, the lens attenuation is a fraction, the colour space is linear, a sun in lux says so and was set to it
+  [NOT RUN] calibration_frame: no render.json carries a calibration record (render on Windows with -calibration -sun-lux= to exercise this)
+  [NOT RUN] engine_accumulation: no render.json frame record carries an accumulation (render on Windows with -accumulate=K to exercise this)
+  [NOT RUN] night_exposure: the manifest carries no look.night block: no night was asked for
+  [NOT RUN] world_record: no scene.world record beside a card look and no render.json world_applied: the world engine side is a Windows step
+  [NOT RUN] flow_vs_keypoints: no passes.json names a flow pass (no camera asks for it in cameras[i].passes, or no render): render on Windows with the pass asked for to exercise this
+  [NOT RUN] flow_static_null: no passes.json names a flow pass (no camera asks for it in cameras[i].passes, or no render): render on Windows with the pass asked for to exercise this
+  [NOT RUN] disparity_vs_right_depth: no camera block declares a stereo rig (cameras[i].stereo)
+  [NOT RUN] points_vs_depth: no passes.json names a points pass (no camera asks for it in cameras[i].passes, or no render): render on Windows with the pass asked for to exercise this
+  [NOT RUN] amodal_contains_visible: no object record carries an amodal box (no camera asks for amodal)
+  [NOT RUN] ir_proxy_declared: no IR frame under frames/ (0 camera(s) declare sensing.ir; the proxy is written after a render's ID image and depth exist)
+  [NOT RUN] applied_readback: 1 record(s), none carrying a readback
+  [PASS] null_effect: 1 null test(s) re-graded from their own numbers; every verdict agrees
+  [NOT RUN] instrument_allan: the manifest carries no instruments block (a run before the FDM-rate observer)
+  [NOT RUN] instrument_lever_arm: the manifest carries no instruments block (a run before the FDM-rate observer)
+  [NOT RUN] uncertainty_present: no uncertainty block: the capture did not run the dt/2 twin (--uncertainty or record.sensitivity_pairs)
+  [PASS] look_record: camera0: beauty -- the look's record is consistent with its quality
+  [PASS] look_label_alignment: camera0: labels of the beauty's own frame and instant, at the pose solver's field of view (1 frame(s) compared); no pixel-moving effect on
+  [NOT RUN] temporal_alignment: needs a second capture of the SAME simulation with a different camera set: run flightsim.capture again with other cameras and pass --against <that run dir>
+verification PASSED (37 passed, 0 failed, 33 not run, 2 superseded)
+  NOT RUN (no independent reference available for these; they are NOT counted as passes): cross_view_consistency, aircraft_state_consistency, sensor_files, instruments, dis_roundtrip, wake_selftest, host_physics, building_vs_footprint, runway_vs_geometry, landcover_vs_geometry, normals_vs_depth, flow_vs_motion, albedo_range, psf_slanted_edge, blur_vs_flow, radiometry_grey_card, engine_linear_passes, velocity_readback, calibration_frame, engine_accumulation, night_exposure, world_record, flow_vs_keypoints, flow_static_null, disparity_vs_right_depth, points_vs_depth, amodal_contains_visible, ir_proxy_declared, applied_readback, instrument_allan, instrument_lever_arm, uncertainty_present, temporal_alignment
+  SUPERSEDED on this manifest (each names the check that replaced it above; not counted as passes, and not waiting for any evidence): mask_containment, depth_range
+  recorded: runs\webapp\d7528b4c8c29\verification.json
+  per frame: runs\webapp\d7528b4c8c29\frame_checks.json (0 frame(s) failing)
