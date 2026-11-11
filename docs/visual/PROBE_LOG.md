@@ -3688,3 +3688,55 @@ The host's swap rule and ue_aircraft_materials.beauty_slot_mismatches are now "t
 slots are the copy's first ones". Gauge faces sit 0.72 m ahead of views.pilot_eye, 95 % facing
 it. Expect in #12: the grey panel with its gauge faces under the glareshield (needles, separate
 instrument models, are not converted).
+
+## #02 blue: the tiles' baked sky-shade (2026-11-11)
+
+Mac, uncompiled; nothing rendered. Read from round 51 (#02), round 44 (#01, #02) and the
+round-5 probe records (d811bb8d: runs/visual/round5_probes, NOTES.md).
+
+**Measured (sRGB means of the JPEGs).** Round 51 #02 raw: frame 66/67/119, shade (lower-right
+quadrant) 52/56/122 (B - R +70); by luma band B - R +51 (< 40), +70, +54, +23, -3 (> 180): the
+sunlit tops are neutral (rock top-left's brightest tenth 225/211/215). The `_post` frame is
+less blue (83/82/112, shade 73/73/111): the cast is the engine's, not the post's (the
+Ektachrome LUT's grey axis is neutral). By material at the same distance: the cliffs' darkest
+5 % 1/3/45 and the top-left rock's 8/12/68, but the scatter trees' darkest 5 % 3/2/19 (left)
+and 3/2/27 (middle); the A-4's lit top 245/238/233. An additive veil (fog, aerial
+perspective, sky light's SH) would sit on the trees and the rock alike; this sits on the tile
+texels only. #01 against #02, band by band in linear light: B gains x8.5 in #01's darkest
+tenth and x1.7 in its brightest; R x3.7 and x0.85. The shading is the same in both frames (the
+same dark walls at a 6 and a 72 deg sun): it is the photograph's, baked.
+
+**Cause (about 70 %).** The tiles' texture is the capture day's light: a texel that day's sun
+missed is the rock's albedo times the SKY, violet-blue. The beauty frame draws its own sun on
+it. #01's 6 deg sun is deep orange and turns that blue into the purple-grey shade #01 has
+(+20); #02's sun at 72 deg is near white (6300 K, the per-pixel transmittance at 72 deg, read
+back 255:255:255) and the frame is 1.7 stops over the meter, so the bake's blue is drawn
+bright, and the filmic toe saturates it. Everything else that could light it was already
+taken away by render: round 5 r5a (sky light pure red: the shade lost green, stayed blue), r5b
+(sky light black, aerial perspective 0, fog grid off, sun shadows off: 66/73/130, still blue),
+round 56 (the fog's sky-ambient tinted: B - R moved 3). tiles_delight did not catch it: it
+lifts a texel darker than 0.6 of its 32-texel mean, and a wall wholly in shade (the right-hand
+cliff) is its own mean. Not the terrain detail (a luminance ratio, hue kept) or the grade.
+
+**Fix (beauty only).** `assets/shaders/world/tiles_shade_neutral.hlsl`, a Custom node in
+M_FlightSimTilesBeauty right after the de-light (Python twin `core/scene/tiles_shade_neutral.py`):
+w = violet (B / max(R, G) - 1, gain 4) x dark (1 - luma / 0.30, absolute) x not-level (open
+water, slope = 1 - normal.z under 0.005..0.02, keeps its colour) x `ShadeNeutralAmount`; the
+texel moves w of the way to the grey of its own Rec. 709 luma (brightness kept). The amount is
+an MPC_FlightSimWorld scalar: clear 1, hazy 1, overcast / rain / storm 0, a city card 0.
+Amount 0 returns the input under a `[branch]`. Recorded at `world_beauty.tiles.shade_neutral`
+(`amount`, `preset_amount`, `switch`, `luma_knee`, `blue_gate`). Measure never draws the
+material. WORLD_GENERATIONS M_FlightSimTilesBeauty and MPC_FlightSimWorld 3 -> 4.
+- Windows prep: `scripts/ue_create_materials.py` once (the stamps bring the collection's new
+  scalar and the material's new node in place), then the bridge build. Only scenes over tiles
+  under a clear or hazy world change: #01 and #02 (and any other clear non-city tile scene).
+- Probe s02: #02 default, then `FLIGHTSIM_RENDER_SWITCHES="-tiles-shade-neutral=off"` (the A/B:
+  amount 0, the frame before this change). Read `world_beauty.tiles.shade_neutral.amount` (1 and
+  0) and `world_beauty.tiles.parameters.ShadeNeutralAmount` (no `ShadeNeutralAmount_set` "NOT
+  SET": a NOT SET means the collection was not rebuilt). Pass: the default frame's shade
+  (lower-right quadrant) B - R under +30 with its luma within 10 % of the A/B's; the sunlit rock
+  and the A-4 unchanged; the trees unchanged; the A/B back at ~+70. Expected look: the walls in
+  shade read as grey-brown granite, lit only by the frame's own (warm) fill and the bake's
+  brightness, no indigo. Also re-render #01 (its purple shade should warm a little: +20 -> ~+5).
+  If the default frame stays blue with amount 1 recorded, the bake is not the source: the next
+  suspect is the exposure open (`RELIT_SUN_CLOSE_SHARE`), probed with `-exposure-bias=-1.1`.

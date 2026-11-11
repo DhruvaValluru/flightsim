@@ -1028,6 +1028,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// neutral by default (StormNeutralAlbedo); surface is the A/B.
 		StormAlbedoSwitch = TEXT("neutral");
 		FParse::Value(*Switches, TEXT("storm-ground-albedo="), StormAlbedoSwitch);
+		// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default
+		// (FlightSimTilesShade; ApplyTiles sets ShadeNeutralAmount from it).
+		TilesShadeSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("tiles-shade-neutral="), TilesShadeSwitch);
 	}
 
 	// The tables in force: the pure block's defaults, then any overrides.
@@ -2492,6 +2496,48 @@ bool FFlightSimWorldBeauty::ApplySkyHdri(FFlightSimVisualScene& Scene, const FSt
 	return true;
 }
 
+// #02 blue (2026-11-11): the tiles' baked sky-shade toward grey under a drawn sun
+// (assets/shaders/world/tiles_shade_neutral.hlsl; Python twin
+// core/scene/tiles_shade_neutral.py, whose SHADE_NEUTRAL_DEFAULTS and constants
+// tests/test_tiles_shade_neutral.py pins to the numbers below). BEAUTY ONLY:
+// only FFlightSimWorldBeauty::ApplyTiles sets ShadeNeutralAmount. No engine call
+// beyond the collection's SetScalarParameterValue. UNCALIBRATED: every number.
+namespace FlightSimTilesShade
+{
+	// ShadeNeutralAmount per FlightSimWorldPure preset: clear, hazy, overcast, rain, storm.
+	constexpr double ShadeNeutralAmounts[FlightSimWorldPure::PresetCount] = {1.0, 1.0, 0.0, 0.0, 0.0};
+	constexpr double ShadeLumaKnee = 0.30;
+	constexpr double ShadeBlueGate = 4.0;
+
+	inline double PresetAmount(int32 Preset)
+	{
+		return Preset >= 0 && Preset < FlightSimWorldPure::PresetCount ? ShadeNeutralAmounts[Preset] : 0.0;
+	}
+
+	// 0 over a city card (blue glass and roofs are colour) or with the switch off.
+	inline double AmountFor(int32 Preset, const FString& Surface, const FString& Switch)
+	{
+		return (Switch == TEXT("off") || Surface == TEXT("city")) ? 0.0 : PresetAmount(Preset);
+	}
+
+	// render.json world_beauty.tiles.shade_neutral.
+	TSharedPtr<FJsonObject> ShadeRecord(int32 Preset, const FString& Surface, const FString& Switch)
+	{
+		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+		Out->SetNumberField(TEXT("amount"), AmountFor(Preset, Surface, Switch));
+		Out->SetNumberField(TEXT("preset_amount"), PresetAmount(Preset));
+		Out->SetStringField(TEXT("switch"), Switch == TEXT("off") ? FString(TEXT("off")) : FString(TEXT("on")));
+		Out->SetNumberField(TEXT("luma_knee"), ShadeLumaKnee);
+		Out->SetNumberField(TEXT("blue_gate"), ShadeBlueGate);
+		Out->SetStringField(TEXT("basis"),
+			TEXT("the photogrammetry's baked sky-shade (violet-blue, darker than the knee, not level) moved toward "
+			     "the grey of its own luma under a drawn sun; shader per frame, nothing stored (Google tile policy)"));
+		Out->SetBoolField(TEXT("pixel_moving"), false);
+		Out->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED"));
+		return Out;
+	}
+}
+
 void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Tiles, double CardWetness)
 {
 	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
@@ -2546,6 +2592,8 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 			{TEXT("GroundAltitudeKnown"), 1.0},
 			// lane B: no aerial rock / soil detail on a city's facades and roofs.
 			{TEXT("TerrainDetailScale"), Surface == TEXT("city") ? 0.0 : 1.0},
+			// #02 blue: the baked sky-shade neutraliser (FlightSimTilesShade above).
+			{TEXT("ShadeNeutralAmount"), FlightSimTilesShade::AmountFor(Preset, Surface, TilesShadeSwitch)},
 		};
 		for (const FWorldScalar& Scalar : Scalars)
 		{
@@ -2577,6 +2625,8 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 		     "frame grade alone"));
 	Out->SetObjectField(TEXT("parameters"), Parameters);
 	Out->SetObjectField(TEXT("delight"), FlightSimTilesDelight::DelightRecord(Preset));   // tiles-delight hook
+	Out->SetObjectField(TEXT("shade_neutral"),                                            // #02 blue
+		FlightSimTilesShade::ShadeRecord(Preset, Surface, TilesShadeSwitch));
 	Out->SetStringField(TEXT("wetness_basis"), TEXT("max(the card's wetness, the preset's wetness_floor)"));
 	Out->SetStringField(TEXT("rule"),
 		TEXT("the tiles stay the ground of every terrain render (the owner's rule); this changes their shading only"));

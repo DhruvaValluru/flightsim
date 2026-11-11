@@ -189,6 +189,10 @@ private:
 	// (world_beauty.neutral_albedo_srgb); -storm-ground-albedo=surface keeps the hue.
 	FString StormAlbedoSwitch = TEXT("neutral");
 	bool StormNeutralAlbedo() const;
+	// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default; off
+	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)
+	// for the A/B. Anything but "off" draws as "on".
+	FString TilesShadeSwitch = TEXT("on");
 	int32 Preset = 0;
 	// The tables in force (the pure block's defaults, then the overrides).
 	TArray<double> AtmosphereValues;   // PresetCount x AtmosphereFieldCount
