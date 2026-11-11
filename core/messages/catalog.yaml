@@ -379,6 +379,22 @@ render.beauty_look:
 render.subject_meter:
   sentence: "The subject-meter switch was given a value it does not take."
   hint: "Use -subject-meter=on or off; or leave it out to meter the beauty exposure on the aircraft as planned."
+# -- lane D (visual round 7): the beauty rain veil and the storm selection ----
+world_beauty.rain_veil:
+  sentence: "The rain-veil switch was given a value it does not take."
+  hint: "Use -rain-veil=on or off (or FLIGHTSIM_RAIN_VEIL); or leave it out to draw the rain veil as planned."
+weather.rain_veil:
+  sentence: "A material the beauty rain veil needs is not built on this machine."
+  hint: "Run the material script in the editor (it builds the rain curtain and scud materials), or render with -rain-veil=off."
+world_beauty.is_severe_rain:
+  sentence: "Heavy rain in a strong wind selected the storm look (a record, not a refusal)."
+  hint: "State a lighter rain or wind to keep the rain look; the rule is rain of 8 mm/h or more in wind of 10 m/s or more."
+rain_veil.rain_haze_fog:
+  sentence: "The rain's haze was carried up to the camera under a storm deck (a record, not a refusal)."
+  hint: "State a visibility to set the haze yourself, or render with -rain-veil=off to keep the scene's fog."
+rain_veil.scud_card:
+  sentence: "Low torn scud was drawn under the storm deck (a record, not a refusal)."
+  hint: "Render with -rain-veil=off to draw no scud."
 render.look_switch:
   sentence: "A look switch for one of the renderer's effects was given a value it does not take, or names no effect."
   hint: "Use -look-<effect>=on or off (a probe such as bloom-fft, df-shadows or fog-grid also takes auto), with an effect from the engine look's list; or leave the switch out to render as planned."

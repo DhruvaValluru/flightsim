@@ -205,6 +205,17 @@ SETTINGS: Tuple[Setting, ...] = (
             ("core/scene/sky_hdri.py:81",),
             "Where the pinned sky HDRIs are downloaded and prepared (default %LOCALAPPDATA%\\flightsim\\hdri, "
             "else ~/.cache/flightsim/hdri); never committed."),
+    Setting("rain_veil", "FLIGHTSIM_RAIN_VEIL", "dev-only", None,
+            ("ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp:1104",
+             "core/scene/rain_veil.py:34"),
+            "off draws no beauty rain veil (the curtain shells, the scud cards and the rain haze) for "
+            "an A/B (visual round 7, lane D; on by default, beauty only, -rain-veil= on the command "
+            "line wins). Recorded in render.json world_beauty."),
+    Setting("terrain_detail", "FLIGHTSIM_TERRAIN_DETAIL", "dev-only", None,
+            ("scripts/ue_create_materials.py:3323",),
+            "off builds M_FlightSimTilesBeauty without lane B's CC0 terrain detail (the fallback if the "
+            "shared sampler fails to compile on the render machine); read only when the material "
+            "script runs. Beauty only."),
     Setting("batch_min_free_mb", "FLIGHTSIM_BATCH_MIN_FREE_MB", "dev-only", "4096",
             ("scripts/run_test_scenarios.py:642",),
             "The free memory (MB) the scenario batch waits for before each scene (default 4096; "

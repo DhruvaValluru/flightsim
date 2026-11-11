@@ -34,6 +34,8 @@ FROZEN_NAMES = frozenset({
     "FLIGHTSIM_WORLD_BEAUTY_OVERRIDES",  # visual overhaul, dev-only probe overrides
     "FLIGHTSIM_RENDER_SWITCHES",  # round 5 (2026-11-10), dev-only host A/B switches
     "FLIGHTSIM_BATCH_MIN_FREE_MB",  # round 6 (2026-11-10), the batch memory wait
+    "FLIGHTSIM_RAIN_VEIL",          # round 7 lane D (2026-11-11), the beauty rain veil A/B
+    "FLIGHTSIM_TERRAIN_DETAIL",     # round 7 lane B (2026-11-11), the terrain-detail fallback
     "FLIGHTSIM_BEAUTY_POST",  # round 5 L5 (2026-11-10), the post-render beauty pipeline
     "FLIGHTSIM_XPLANE_SKY", "FLIGHTSIM_XPLANE_TERRAIN",
     # visual round 5 lane L3 (2026-11-10): the distant sheet's switch, the sky HDRI probe and its cache
@@ -69,9 +71,9 @@ def test_the_scan_detects_an_unlisted_name(tmp_path):
     assert scan_source_env_names([fake / "*.py"]) == {"FLIGHTSIM_ZZZ_TEST"}
     # The module's own table never counts as a read.
     assert scan_source_env_names([REPO / "core" / "config_surface.py"]) == set()
-    # The real scan is exactly the 30 frozen names: a 31st fails here by name.
+    # The real scan is exactly the 32 frozen names: a 33rd fails here by name.
     real = _real_scan()
-    assert len(FROZEN_NAMES) == 30
+    assert len(FROZEN_NAMES) == 32
     assert real == FROZEN_NAMES, (
         f"new: {sorted(real - FROZEN_NAMES)}; gone: {sorted(FROZEN_NAMES - real)}")
     assert flightsim_env_names() == FROZEN_NAMES
