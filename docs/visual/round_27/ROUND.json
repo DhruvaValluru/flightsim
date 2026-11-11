@@ -1,0 +1,35 @@
+﻿{
+    "round":  27,
+    "commit":  "8c868405",
+    "full":  false,
+    "scenes":  [
+                   4,
+                   8
+               ],
+    "switches":  "-aircraft-materials=on",
+    "prep":  [
+                 "build",
+                 "materials",
+                 "aircraft"
+             ],
+    "seconds":  {
+                    "build":  2,
+                    "materials":  11.3,
+                    "aircraft":  23.8,
+                    "scenes":  244.4
+                },
+    "outcomes":  [
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  113.8,
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  8,
+                         "outcome":  "done",
+                         "seconds":  128.7,
+                         "why":  "clip ready"
+                     }
+                 ]
+}
