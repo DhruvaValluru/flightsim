@@ -1,0 +1,30 @@
+﻿{
+    "round":  12,
+    "commit":  "73720fe8",
+    "full":  false,
+    "scenes":  [
+                   10,
+                   15
+               ],
+    "switches":  "",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  281.3
+                },
+    "outcomes":  [
+                     {
+                         "number":  10,
+                         "outcome":  "done",
+                         "seconds":  149.0,
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  15,
+                         "outcome":  "done",
+                         "seconds":  130.5,
+                         "why":  "clip ready"
+                     }
+                 ]
+}

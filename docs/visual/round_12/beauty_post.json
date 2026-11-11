@@ -1,0 +1,15 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "10_c172_near_a_tornado": {
+   "post": "10_c172_near_a_tornado_post.jpg",
+   "source": "10_c172_near_a_tornado_frame_beauty_post.png"
+  },
+  "15_747_in_hurricane_like_weather_the_refusal_s_sugg": {
+   "post": "15_747_in_hurricane_like_weather_the_refusal_s_sugg_post.jpg",
+   "source": "15_747_in_hurricane_like_weather_the_refusal_s_sugg_frame_beauty_post.png"
+  }
+ }
+}
