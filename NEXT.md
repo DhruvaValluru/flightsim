@@ -13,7 +13,8 @@ the loop is `docs/visual/FIX_ROUND_PROTOCOL.md`. Each scene's compile is pinned 
 - An LLM-compiled prompt drifts between rounds (lens, heading, origin); pin it.
 - A material that samples SceneColor at offsets pastes ghost copies of the aircraft.
 - The round script's prep classes decide what rebuilds: add new material scripts to the materials rule.
-- Owner decision pending: stock airframes cruise gear-down (JSBSim default); gear-up moves physics baselines.
+- Gear (owner, 2026-11-11): retractable airframes start airborne gear-up (core/fdm/gear.py, 6dda3f70); baselines moved, e.g. A320 trim thrust 11943 -> 6541.6 lbf.
+- Measured subject cover (3680856c): beauty+labels renders write cloud_occlusion basis "measured"; first render is round 47, uncompiled until then.
 - #12 cockpit (round 46): canopy clear, but no instrument panel is drawn (cowl, glareshield and frame only);
   its mask_vs_geometry and depth_vs_geometry clauses fail because the camera sits inside the hull.
 

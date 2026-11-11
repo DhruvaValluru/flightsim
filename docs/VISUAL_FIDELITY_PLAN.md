@@ -551,10 +551,11 @@ CLI `flightsim capture` renders measure frames only.
   probe plumbing itself is suspect). Paint uses the flat master until found.
 - A ghost check inside verify (the round summary has one: `ghost.score`, all < 0.6 in round 44).
 
-**Owner decision pending:** stock JSBSim airframes (747, A320, ...) start airborne with the gear
-DOWN (JSBSim's default). Starting them gear-up was built and reverted: it moves recorded physics
-baselines (A320 engine-out thrust 11943 -> 6542 lbf, a refused trim succeeds), which the
-"physics doesn't change" rule forbids without the owner.
+**Owner decision 2026-11-11: gear-up cruise.** Retractable-gear airframes airborne above 100 ft AGL
+start gear-up unless the prompt says landing, approach, final, take-off or gear down (core/fdm/gear.py,
+6dda3f70; the run card's start_gear_up carries it to UE). The owner approved the moved physics baselines:
+A320 trim thrust 11943 -> 6541.6 lbf, the engine-out altitude effect 3.1 -> 1.72 m, and the Global 5000
+trimming 300 kt at 10 km.
 
 
 **Updated 2026-11-09, after the visual-overhaul session.** Mac session
