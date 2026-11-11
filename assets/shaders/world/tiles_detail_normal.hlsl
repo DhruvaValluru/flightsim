@@ -26,6 +26,7 @@
 //   NormalWS            float3  the vertex normal, world space
 //   GroundAltitudeM     float   the engine origin's orthometric height (MPC_FlightSimWorld)
 //   GroundAltitudeKnown float   1 when the render set it (else the snowline is not applied)
+//   TerrainDetailScale  float   the card surface's share (MPC_FlightSimWorld: 0 over a city)
 //   DetailAmount        float   0 = the tiles' smooth normal
 //   NormalAmount        float   the aerial normals' share
 //   BumpAmount          float   the tile relief's height per footprint
@@ -215,7 +216,7 @@ float dBt = ddy_fine(relief);
 float3 n = normalize(NormalWS);
 float rangeM = length(WorldPos - CameraPos) / 100.0;
 float fade = 1.0 - smoothstep(FarFadeStartM, max(FarFadeEndM, FarFadeStartM + 1.0), rangeM);
-float amount = DetailAmount * fade;
+float amount = DetailAmount * TerrainDetailScale * fade;
 [branch] if (amount <= 0.001)
 {
 	return n;
@@ -224,7 +225,7 @@ float3 w0, w1;
 float water, forest;
 T.Weights(a, n, GroundAltitudeM + p.z, SnowlineM, SNOW_RAMP_M, GroundAltitudeKnown, w0, w1, water, forest);
 float land = 1.0 - water;
-float bump = BumpAmount * footprintM * fade * land * (1.0 + FOREST_BUMP_GAIN * forest);
+float bump = BumpAmount * TerrainDetailScale * footprintM * fade * land * (1.0 + FOREST_BUMP_GAIN * forest);
 float3 r1 = cross(dpy, n);
 float3 r2 = cross(n, dpx);
 float det = dot(dpx, r1);
@@ -240,11 +241,11 @@ float3 tilt = float3(0.0, 0.0, 0.0);
 [branch] if (w1.z > 0.02) { tilt += w1.z * T.Role(SoilN, SOIL_TILE_M, p, dpx, dpy, footprintM, n, false); }
 float macro = lerp(0.6, 1.25, T.Value2(p.xy / 1500.0));
 float3 detailed = nb + tilt * saturate(amount * macro * land) * NormalAmount;
-[branch] if (forest * CanopyAmount > 0.02)
+[branch] if (forest * CanopyAmount * TerrainDetailScale > 0.02)
 {
 	float visible = 1.0 - smoothstep(CROWN_M / 4.0, CROWN_M / 2.0, footprintM);
 	float2 crown = T.CrownTilt(p.xy, CROWN_M);
-	detailed += float3(crown, 0.0) * saturate(forest * CanopyAmount * visible * fade);
+	detailed += float3(crown, 0.0) * saturate(forest * CanopyAmount * TerrainDetailScale * visible * fade);
 }
 // Never tilted past the horizon of the vertex normal (no black facets).
 float3 outN = normalize(detailed);

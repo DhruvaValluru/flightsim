@@ -40,6 +40,7 @@
 //   NormalWS            float3  the vertex normal, world space
 //   GroundAltitudeM     float   the engine origin's orthometric height (MPC_FlightSimWorld)
 //   GroundAltitudeKnown float   1 when the render set it (else the snowline is not applied)
+//   TerrainDetailScale  float   the card surface's share (MPC_FlightSimWorld: 0 over a city)
 //   DetailAmount        float   0 = the tiles' own texture (and no canopy)
 //   SharpenAmount       float   the unsharp mask's gain
 //   CanopyAmount        float   the crowns' depth
@@ -208,7 +209,7 @@ float3 a = max(Albedo, 0.0);
 float rangeM = length(WorldPos - CameraPos) / 100.0;
 float fade = 1.0 - smoothstep(FarFadeStartM, max(FarFadeEndM, FarFadeStartM + 1.0), rangeM);
 float3 sharp = max(a + SharpenAmount * fade * (a - max(AlbedoMid, 0.0)), 0.5 * a);
-float amount = DetailAmount * fade;
+float amount = DetailAmount * TerrainDetailScale * fade;
 [branch] if (amount <= 0.001)
 {
 	return sharp;
@@ -228,10 +229,10 @@ float shown = 0.0;
 ratio += 1.0 - shown;   // a role under the branch threshold is neutral
 float macro = lerp(0.6, 1.25, T.Value2(p.xy / 1500.0));
 float3 c = sharp * lerp(1.0, clamp(ratio, 0.4, 1.8), saturate(amount * macro * (1.0 - water)));
-[branch] if (forest * CanopyAmount > 0.02)
+[branch] if (forest * CanopyAmount * TerrainDetailScale > 0.02)
 {
 	float visible = 1.0 - smoothstep(CROWN_M / 4.0, CROWN_M / 2.0, footprintM);
 	float h = T.Crowns(p.xy, CROWN_M);
-	c *= lerp(1.0, lerp(CANOPY_GAP, CANOPY_TOP, h), saturate(forest * CanopyAmount * visible * fade));
+	c *= lerp(1.0, lerp(CANOPY_GAP, CANOPY_TOP, h), saturate(forest * CanopyAmount * TerrainDetailScale * visible * fade));
 }
 return max(c, 0.0);

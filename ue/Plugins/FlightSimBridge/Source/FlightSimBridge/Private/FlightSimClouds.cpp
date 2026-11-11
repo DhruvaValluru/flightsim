@@ -2229,6 +2229,8 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 			// the origin's orthometric height; the tiles are enabled here).
 			{TEXT("GroundAltitudeM"), Tiles.GetOriginOrthometricHeightM()},
 			{TEXT("GroundAltitudeKnown"), 1.0},
+			// lane B: no aerial rock / soil detail on a city's facades and roofs.
+			{TEXT("TerrainDetailScale"), Surface == TEXT("city") ? 0.0 : 1.0},
 		};
 		for (const FWorldScalar& Scalar : Scalars)
 		{

@@ -663,7 +663,8 @@ def test_apply_tiles_maps_the_python_parameters():
                        "DelightAmount": "FlightSimTilesDelight::AmountFor(Preset)",
                        "DelightBlueGate": "FlightSimTilesDelight::DelightBlueGate",
                        # lane B terrain detail: the snowline's altitude
-                       "GroundAltitudeM": "Tiles.GetOriginOrthometricHeightM()", "GroundAltitudeKnown": "1.0"}
+                       "GroundAltitudeM": "Tiles.GetOriginOrthometricHeightM()", "GroundAltitudeKnown": "1.0",
+                       "TerrainDetailScale": 'Surface == TEXT("city") ? 0.0 : 1.0'}
     assert set(mapping) == set(wb.WORLD_MPC_SCALARS)
     # the ground state is set only when the tiles really draw with the beauty material
     assert 'MaterialRoute == TEXT("UFunction SetMaterial") || MaterialRoute == TEXT("UPROPERTY Material")' in body

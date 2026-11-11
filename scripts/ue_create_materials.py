@@ -2917,6 +2917,9 @@ WORLD_COLLECTION_SCALARS = {
     # snowline is an altitude (FlightSimClouds.cpp sets both; Known 0 = unset).
     "GroundAltitudeM": 0.0,
     "GroundAltitudeKnown": 0.0,
+    # lane B: the detail's share by the card's surface (0 over a city: the
+    # aerial rock and soil maps are not facades or roofs; 1 elsewhere).
+    "TerrainDetailScale": 1.0,
 }
 #: M_FlightSimCloudLayers' scalar parameters (FlightSimClouds.cpp sets each by
 #: name) with the default a material has before the render sets them, and its
@@ -2994,11 +2997,13 @@ TERRAIN_DETAIL_ENV = "FLIGHTSIM_TERRAIN_DETAIL"
 #: Each detail shader's Custom inputs, in order (the texture objects last).
 WORLD_TILES_DETAIL_INPUTS = {
     "tiles_detail_surface": ("Albedo", "AlbedoMid", "WorldPos", "CameraPos", "NormalWS", "GroundAltitudeM",
-                             "GroundAltitudeKnown", "DetailAmount", "SharpenAmount", "CanopyAmount",
+                             "GroundAltitudeKnown", "TerrainDetailScale", "DetailAmount", "SharpenAmount",
+                             "CanopyAmount",
                              "SnowlineM", "FarFadeStartM", "FarFadeEndM",
                              "RockD", "ScreeD", "SnowD", "GrassD", "SandD", "SoilD"),
     "tiles_detail_normal": ("Albedo", "AlbedoLow", "WorldPos", "CameraPos", "NormalWS", "GroundAltitudeM",
-                            "GroundAltitudeKnown", "DetailAmount", "NormalAmount", "BumpAmount",
+                            "GroundAltitudeKnown", "TerrainDetailScale", "DetailAmount", "NormalAmount",
+                            "BumpAmount",
                             "CanopyAmount", "SnowlineM", "FarFadeStartM", "FarFadeEndM",
                             "RockN", "ScreeN", "SnowN", "GrassN", "SandN", "SoilN"),
 }
