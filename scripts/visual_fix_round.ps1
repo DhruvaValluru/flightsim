@@ -104,7 +104,7 @@ if ($Prep -eq "all") {
         } else {
             $changed = @(git diff --name-only $since HEAD)
             if ($changed | Where-Object { $_ -match '^ue/Plugins/[^/]+/Source/|^ue/Config/|^ue/FlightSim\.uproject$' }) { $steps += "build" }
-            if ($changed | Where-Object { $_ -match '^scripts/ue_create_materials\.py$|^assets/shaders/|^assets/looks/|^core/scene/sky_hdri\.py$' }) { $steps += "materials" }
+            if ($changed | Where-Object { $_ -match '^scripts/ue_create_materials\.py$|^scripts/fetch_weather_textures\.py$|^assets/shaders/|^assets/looks/|^core/scene/sky_hdri\.py$' }) { $steps += "materials" }
             if ($changed | Where-Object { $_ -match '^scripts/[^/]*aircraft[^/]*\.py$|^assets/aircraft_config/' }) { $steps += "aircraft" }
         }
     }
@@ -120,6 +120,11 @@ if ($steps -contains "build") {
 if ($steps -contains "materials") {
     Run-Step "materials" {
         $log = Join-Path $repo "runs\visual\round_${Round}_materials.log"
+        # pinned, git-ignored textures the materials import (lane D's windscreen film)
+        if (Test-Path (Join-Path $repo "scripts\fetch_weather_textures.py")) {
+            & $py scripts\fetch_weather_textures.py
+            if ($LASTEXITCODE -ne 0) { Refuse "prep.textures" "fetch_weather_textures.py exit $LASTEXITCODE" }
+        }
         & $ed $proj -run=pythonscript "-script=$(Join-Path $repo 'scripts\ue_create_materials.py')" -unattended -nopause -nosplash -stdout -FullStdOutLogOutput *> $log
         if (Select-String -Path $log -Pattern "MATERIAL-FAILED" -Quiet) { Refuse "prep.materials" "MATERIAL-FAILED in $log" }
         & $py scripts\launch_check.py materials --stamp
