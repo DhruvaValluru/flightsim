@@ -699,6 +699,18 @@ def measure_mesh_origin(extents: MeshExtents, airframe,
 #   must lie inside the hull's own extents: one outside refuses
 #   (``aircraft.interior_outside_hull``), because it would grow the drawn
 #   silhouette beyond the airframe the labels measure.
+#   Round 25 (scene #12, the c172p cockpit drew no instrument panel): an
+#   interior row may also say ``"beauty_only": true`` -- its triangles go
+#   ONLY into the body's beauty copy (``body_beauty``, after the measured
+#   body's slots, in their own slots), never into body.obj, so every
+#   -quality=measure frame and its labels are byte-identical and the
+#   beauty frame's labels (drawn from the swapped copy) carry the panel
+#   with its pixels. It needs a ``beauty_mesh`` block. ``texture_dir``
+#   (relative to source_dir) is where the part's .ac textures live when the
+#   model XML moves them (FlightGear ``<texture-path>``; c172p's panel XML
+#   reads them from Models/), and ``exclude`` adds object patterns for
+#   that part only (the panel's 85 %-transparent instrument glass, which
+#   the opaque glass master would draw as a slab over the gauges).
 # * ``views`` -- package viewpoints (the -set.xml pilot eye), mapped to the
 #   actor frame for the camera; recorded only, nothing is drawn from them.
 
@@ -859,7 +871,8 @@ def _beauty_part_name(part: str) -> str:
 
 
 def _write_beauty_mesh(rows: List[tuple], block: Dict, body_writer: "ObjWriter",
-                       out_dir: Path) -> Dict:
+                       out_dir: Path, extra_rows: Sequence[tuple] = (),
+                       extra_writer: Optional["ObjWriter"] = None) -> Dict:
     """``body_beauty.obj``: the body's triangles, same positions, same UVs,
     same materials in the same first-use order, with vertex normals by the
     .ac crease angle (assets_pipeline/smooth_normals.py) and, when
@@ -885,8 +898,14 @@ def _write_beauty_mesh(rows: List[tuple], block: Dict, body_writer: "ObjWriter",
     not written at all (round 2 scene 12, 2026-11-10: the c172p's static
     PropellerCowlPlugs blade, which FlightGear selects only while the cowl
     plugs are fitted, stood still across the cockpit view of a running
-    engine). See :func:`_write_beauty_part`."""
-    return {"body": _write_beauty_part(rows, block, body_writer, out_dir, "body")}
+    engine). See :func:`_write_beauty_part`.
+
+    ``extra_rows`` / ``extra_writer`` (round 25): the ``beauty_only``
+    interior parts' triangles and materials, written after the body's
+    (their slots after the measured body's, so the measured slots stay the
+    copy's first ones: the host's swap rule)."""
+    return {"body": _write_beauty_part(rows, block, body_writer, out_dir, "body",
+                                       extra_rows, extra_writer)}
 
 
 def _write_beauty_surfaces(surface_rows: Optional[Dict[str, List[tuple]]], block: Dict,
@@ -915,7 +934,8 @@ def _check_hide_objects(block: Optional[Dict], seen_names: Sequence[str]) -> Non
 
 
 def _write_beauty_part(rows: List[tuple], block: Dict, measured_writer: "ObjWriter",
-                       out_dir: Path, part: str) -> Dict:
+                       out_dir: Path, part: str, extra_rows: Sequence[tuple] = (),
+                       extra_writer: Optional["ObjWriter"] = None) -> Dict:
     """``<part>_beauty.obj`` from the measured part's rows (key, tri,
     object serial, smooth, crease, two-sided, object name): crease
     normals, ``two_sided`` back faces, ``flip_objects`` turned and
@@ -935,20 +955,31 @@ def _write_beauty_part(rows: List[tuple], block: Dict, measured_writer: "ObjWrit
                                                                  hide_patterns)]
     kept = [r for r in rows if not (hide_patterns and _matches(r[6] if len(r) > 6 else "",
                                                                hide_patterns))]
-    triangles = [tuple(position for position, _ in row[1]) for row in kept]
-    normals = vertex_normals_actor(triangles, [r[2] for r in kept], [r[3] for r in kept],
-                                   [r[4] for r in kept])
     writer = ObjWriter()
     # The measured part's materials in its order, so the slots line up.
     writer.materials = dict(measured_writer.materials)
     for key in measured_writer.faces:
         writer.faces[key] = []
     emptied = sorted({r[0] for r in hidden_rows} - {r[0] for r in kept})
+    # Round 25: beauty-only rows (an interior part the measured mesh does
+    # not carry), their new materials after the measured ones.
+    extra = list(extra_rows)
+    if extra and extra_writer is not None:
+        for key, material in extra_writer.materials.items():
+            if key not in writer.materials:
+                writer.materials[key] = material
+                writer.faces[key] = []
+    measured_keys = set(measured_writer.materials)
+    beauty_only_slots = [key for key in writer.materials if key not in measured_keys]
     if emptied:
         raise ConvertError(
             f"beauty_mesh.hide_objects leaves {part} slot(s) {emptied} with no triangle; the "
             f"beauty copy's slots would not be the measured part's and it would never be "
             f"swapped in")
+    kept = kept + extra
+    triangles = [tuple(position for position, _ in row[1]) for row in kept]
+    normals = vertex_normals_actor(triangles, [r[2] for r in kept], [r[3] for r in kept],
+                                   [r[4] for r in kept])
     two_sided = bool(block.get("two_sided"))
     back_faces = 0
     flipped_faces = 0
@@ -995,6 +1026,13 @@ def _write_beauty_part(rows: List[tuple], block: Dict, measured_writer: "ObjWrit
                 f"hidden objects, which the beauty frame's label masks (drawn from the "
                 f"swapped component) leave out with it; every measure frame and its "
                 f"labels are {part}'s")
+    if extra:
+        row["beauty_only_triangles"] = len(extra)
+        row["beauty_only_slots"] = beauty_only_slots
+        row["drawn_in"] += (f"; plus {len(extra)} beauty-only interior triangle(s) in "
+                            f"{len(beauty_only_slots)} slot(s) after {part}'s (no measure frame "
+                            f"draws them; the beauty frame's labels, drawn from the swapped "
+                            f"component, carry them with their pixels)")
     return row
 
 
@@ -1214,6 +1252,10 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     # prop at cruise RPM).
     beauty_surface_rows: Optional[Dict[str, List[tuple]]] = (
         defaultdict(list) if beauty is not None and beauty.get("hide_objects") else None)
+    # Round 25: the beauty-only interior parts' triangles and materials
+    # (appended to the body's beauty copy after the measured body's slots).
+    beauty_only_writer = ObjWriter()
+    beauty_only_rows: List[tuple] = []
     object_serial = 0
 
     for part in config["parts"]:
@@ -1222,6 +1264,14 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         offset = tuple(part.get("offset_m", (0.0, 0.0, 0.0)))  # FG model frame
         interior = bool(part.get("interior"))
         pitch_deg = float(part.get("pitch_deg", 0.0))
+        beauty_only = bool(part.get("beauty_only"))
+        if beauty_only and (not interior or beauty is None):
+            raise ConvertError(
+                f"parts[] entry {part['file']!r} is beauty_only, which needs \"interior\": true and a "
+                f"beauty_mesh block (its triangles live only in the body's beauty copy)",
+                constraint="aircraft.interior_outside_hull")
+        part_exclude = list(exclude) + list(part.get("exclude", []))
+        texture_dir = (source_dir / part["texture_dir"]) if part.get("texture_dir") else None
         if interior and part.get("component"):
             raise ConvertError(
                 f"parts[] entry {part['file']!r} is both interior and a component; "
@@ -1233,7 +1283,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         part_triangles = 0
         livery_here = livery is not None and livery["part"] == part["file"]
         for obj, verts in world_vertices(model):
-            if _matches(obj.name, exclude):
+            if _matches(obj.name, part_exclude):
                 continue
             object_serial += 1
             target = "body"
@@ -1247,11 +1297,11 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
             gear = (not interior) and (gear_part or _matches(obj.name, gear_object_patterns))
             if gear and target == "body" and gear_component is not None:
                 target = "gear"     # a surface claim wins: it is articulated
-            writer = writers[target]
+            writer = beauty_only_writer if beauty_only else writers[target]
             texture = None
             texture_rel = None
             if obj.texture:
-                texture_path = (ac_path.parent / obj.texture)
+                texture_path = ((texture_dir or ac_path.parent) / obj.texture)
                 if (livery_here and obj.name in livery["objects"]
                         and Path(obj.texture).name == livery["replaces"]):
                     # The model XML's material animation: this object
@@ -1318,6 +1368,11 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                             (p, ((p[0] + p[2]) * 1e-4, (p[1] + p[2]) * 1e-4))
                             for p, _ in tri
                         ]
+                    if beauty_only:
+                        # Round 25: the beauty copy only (body.obj unchanged).
+                        beauty_only_rows.append((key, tri, object_serial, surf.smooth,
+                                                 obj.crease, surf.two_sided, obj.name))
+                        continue
                     writer.add_triangle(key, tri)
                     counts[target] += 1
                     if beauty_rows is not None and target == "body":
@@ -1331,6 +1386,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
             interior_rows.append({
                 "file": part["file"], "offset_m": list(offset), "pitch_deg": pitch_deg,
                 "triangles": part_triangles, "source": part.get("source", ""),
+                **({"beauty_only": True} if beauty_only else {}),
             })
 
     if livery is not None:
@@ -1395,7 +1451,8 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     if beauty_rows is not None:
         _check_hide_objects(beauty, [r[6] for r in beauty_rows] + [
             r[6] for rows in (beauty_surface_rows or {}).values() for r in rows])
-        beauty_record = _write_beauty_mesh(beauty_rows, beauty, writers["body"], out_dir)
+        beauty_record = _write_beauty_mesh(beauty_rows, beauty, writers["body"], out_dir,
+                                           beauty_only_rows, beauty_only_writer)
         beauty_record.update(_write_beauty_surfaces(beauty_surface_rows, beauty, writers,
                                                     out_dir))
     # ONE components list: the payload parts' rows, then the gear row.

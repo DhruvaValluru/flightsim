@@ -17,9 +17,11 @@ MASTERS = (REPO / "scripts/ue_aircraft_master_materials.py").read_text(encoding=
 
 
 def test_parse_matches_the_host_words():
-    # final sweep: absent means the flat paint default; "none" means the full masters
-    assert look.parse_aircraft_probes("") == ("flat",)
-    assert look.parse_aircraft_probes("-aircraft-materials=on") == ("flat",)
+    # round 25: absent means the class masters (compile-checked, coat then flat fallback)
+    assert look.parse_aircraft_probes("") == ()
+    assert look.parse_aircraft_probes("-aircraft-materials=on") == ()
+    assert look.parse_aircraft_probes("-aircraft-probe=flat") == ("flat",)
+    assert look.parse_aircraft_probes("-aircraft-probe=coat") == ("coat",)
     assert look.parse_aircraft_probes("-aircraft-probe=none") == ()
     assert look.parse_aircraft_probes("-aircraft-materials=on -aircraft-probe=nocoat,noao") == ("nocoat", "noao")
     assert look.parse_aircraft_probes("-aircraft-probe=flat,flat,none") == ("flat",)
@@ -34,7 +36,8 @@ def test_parse_matches_the_host_words():
 
 
 def test_each_probe_sets_what_the_twin_says():
-    block = FX_CPP[FX_CPP.index("// Round 23: the bisect probes, on the paint"):FX_CPP.index("++ProbedSlots;\n\t\t\t}")]
+    block = FX_CPP[FX_CPP.index("// Round 23: the bisect probes, on the paint"):
+                   FX_CPP.index("// Round 25: a probe whose parameter the drawn master lacks")]
     assert 'LookMid->SetScalarParameterValue(TEXT("ClearCoat"), 0.0f);' in block
     assert 'LookMid->SetScalarParameterValue(TEXT("PanelAoAmount"), 0.0f);' in block
     assert 'LookMid->SetScalarParameterValue(TEXT("PanelNormalAmount"), 0.0f);' in block
@@ -50,7 +53,7 @@ def test_each_probe_sets_what_the_twin_says():
 
 
 def test_the_gen5_masters_carry_the_probe_handles_at_the_gen4_values():
-    assert re.search(r'^LOOK_GENERATION = "7"$', MASTERS, re.M)
+    assert re.search(r'^LOOK_GENERATION = "8"$', MASTERS, re.M)
     for cls in ("paint", "bare_metal"):
         assert look.CLASS_SCALARS[cls]["PanelNormalAmount"] == 1.0
         assert look.CLASS_SCALARS[cls]["PanelAoAmount"] == 1.0

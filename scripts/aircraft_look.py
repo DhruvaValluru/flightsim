@@ -1032,6 +1032,10 @@ AIRCRAFT_PROBES = {
                         "is emitted (read with -subject-meter=off)"),
     "tangentnormal": ("paint slots on M_AircraftPaintTangentNormal (the same clear-coat graph, its normal in "
                       "tangent space as (0, 0, 1): the imported materials' normal path), overrides copied"),
+    # Round 25 (LOOK_GENERATION 7):
+    "coat": ("M_AircraftPaintCoat: a plain Clear Coat master with no Custom node (the flat probe's base colour, "
+             "the instance's Metallic / Specular / Roughness / ClearCoat / ClearCoatRoughness overrides copied); "
+             "also the host's fallback when a class master fails to compile"),
 }
 AIRCRAFT_PROBE_KEY = "aircraft-probe="
 #: The masters a probe acts on (glass and rubber keep their instances).
@@ -1039,11 +1043,26 @@ PROBE_MASTERS = ("M_AircraftPaint", "M_AircraftBareMetal")
 PROBE_FLAT_MASTER = "M_AircraftProbeFlat"
 PROBE_DEFAULT_LIT_MASTER = "M_AircraftPaintDefaultLit"
 PROBE_TANGENT_NORMAL_MASTER = "M_AircraftPaintTangentNormal"
+#: Round 25: the Custom-node-free clear-coat paint (scripts/
+#: ue_aircraft_master_materials.py create_aircraft_paint_coat) and its
+#: parameter defaults: the paint class's numbers, no albedo cap (its base
+#: colour is the flat probe's exactly, so it is never darker than flat).
+PROBE_COAT_MASTER = "M_AircraftPaintCoat"
+COAT_SCALARS = {key: CLASS_SCALARS["paint"][key]
+                for key in ("Metallic", "Specular", "Roughness", "ClearCoat", "ClearCoatRoughness")}
+#: Round 25: what the host draws on a paint / bare-metal slot with no
+#: -aircraft-probe=flat / coat: the class master when it compiled on the
+#: render platform, else the coat master, else the flat one
+#: (FlightSimAircraftFX.cpp AircraftFxCompileProblem; render.json
+#: aircraft_look.materials.master_compile and slots_fallback).
+MASTER_FALLBACK_ORDER = ("class master", PROBE_COAT_MASTER, PROBE_FLAT_MASTER)
 
 
 #: The probes applied when -aircraft-probe= is absent (the host's ParseParams
-#: else branch): the flat paint master, the final sweep's default.
-DEFAULT_AIRCRAFT_PROBES = ("flat",)
+#: else branch). Round 25: none -- the class masters (gen 7, compile-checked,
+#: MASTER_FALLBACK_ORDER); the final sweep's flat default (1e5ba438) is
+#: -aircraft-probe=flat.
+DEFAULT_AIRCRAFT_PROBES = ()
 
 
 def parse_aircraft_probes(params):

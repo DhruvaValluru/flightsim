@@ -262,7 +262,8 @@ def test_the_master_module_builds_exactly_the_class_and_fx_masters():
                    and any(getattr(t, "id", "") == "CREATED" for t in node.targets))
     names = tuple(ast.literal_eval(created))
     assert set(names) == (set(look.CLASS_MASTERS.values()) | set(look.FX_MASTERS) | {look.THIN_GLASS_MASTER}
-                          | {look.PROBE_FLAT_MASTER, look.PROBE_DEFAULT_LIT_MASTER, look.PROBE_TANGENT_NORMAL_MASTER})
+                          | {look.PROBE_FLAT_MASTER, look.PROBE_DEFAULT_LIT_MASTER, look.PROBE_TANGENT_NORMAL_MASTER,
+                             look.PROBE_COAT_MASTER})
     text = MASTERS.read_text(encoding="utf-8")
     for name in names:
         assert f'"{name}"' in text or f"look.THIN_GLASS_MASTER" in text
@@ -774,7 +775,7 @@ def test_round47_the_contrail_forms_over_seconds_not_a_share_of_its_lifetime():
     assert look.SHADER_INPUTS["contrail_opacity"][-1] == "FormationRamp"
     assert look.FX_PARAMETERS["M_AircraftContrail"] == ("Opacity", "Formation", "FormationRamp")
     masters = MASTERS.read_text(encoding="utf-8")
-    assert re.search(r'^LOOK_GENERATION = "7"$', masters, re.M)
+    assert re.search(r'^LOOK_GENERATION = "8"$', masters, re.M)
     assert '"FormationRamp": (_scalar(material, ramp_name, 0.04,' in masters
     # 747 cruise: the ramp is under a wingspan of flight, not generation 6's 250 m
     ramp_s = look.CONTRAIL_DEFAULTS["FormationRampS"]

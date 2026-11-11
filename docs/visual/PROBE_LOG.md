@@ -3639,3 +3639,52 @@ Mac, uncompiled, nothing rendered. Read from round 44's frames (vis-windows `ef4
   width) over the grey; off -> round 44. Contrast is small by construction (veil tone
   Shade 0.85 x the scene behind it: about +-4 % luminance); if the bands are too faint the
   knob is VEIL_VARY / VEIL_SHADE_UNDER_DECK. Read `rain_veil.vary_lens_cells`.
+
+## round 25: the masters drew the default material; the c172p panel (2026-11-11)
+
+**Masters.** Read from the vis-windows frames (A-4 #4, the aircraft box 610-670 x 340-395):
+rounds 37 (defaultlit), 38 (tangentnormal) and 39 (nocoat,noao,nonormal,nowear,nowet,rawbase), all
+at 029ead47 after round 36's build + materials prep, are BYTE-IDENTICAL whole frames (mean
+|diff| 0.000; airframe 92.7/80.2/68.9). A different parent master, a different shading model,
+a different normal space and six scalar handles cannot all be no-ops on a drawn graph. Round 40
+(basecolor-debug: lit base 0, emissive x 2000) drew the same lit airframe (93.1/80.5/69.3), and
+the A-4's red tail stripe (its BaseColorMap) is gone in every gen-4..6 frame while the flat probe
+(round 29) shows it. That is the engine's default material, which a material that fails to
+compile (or has no shader map) draws: every probe kept the Custom-node graph (panel_lines,
+aircraft_wear, exhaust_soot), only flat (no Custom node) changed pixels. The ground tint is a
+grey default-material albedo in warm bounce light, not a shading normal. The exact compile
+error is not on the page (no materials log after round 5, which also shows MATERIAL-EXISTS for
+M_AircraftPaint with no REBUILT line: _new kept a master silently when delete_asset failed).
+
+Fix (LOOK_GENERATION 7, beauty only, no pixel moves against the mask):
+- FlightSimAircraftFX.cpp AircraftFxCompileProblem: each paint / bare-metal slot's master (or
+  its round-24 twin) is FinishCompilation-checked on the world's shader platform (the cloud
+  materials' check in FlightSimWeather.cpp); a failure draws M_AircraftPaintCoat (new: plain
+  MSM_CLEAR_COAT, no Custom node, no attributes, the flat probe's base colour with no albedo
+  cap, the instance's Metallic / Specular / Roughness / ClearCoat / ClearCoatRoughness via
+  CopyParameterOverrides), then M_AircraftProbeFlat. render.json aircraft_look.materials:
+  master_compile {master: "compiled" | "failed to compile: <errors>"}, slots_fallback,
+  master_generation (the LookGeneration sentinel; "absent" = a pre-7 graph),
+  probe_parameters_missing.
+- The masters rebuild IN PLACE (delete_all_material_expressions, like _weather_material),
+  never deleted; MATERIAL-UPDATED in the log.
+- Default (-aircraft-probe= absent): the class masters with that fallback. A/B words:
+  -aircraft-probe=flat (the final sweep's default, 1e5ba438), -aircraft-probe=coat.
+- Windows round: scripts/ue_create_materials.py (stamp 7), the C++ build, the aircraft import,
+  scenes 4 and 8 with "", "-aircraft-probe=coat" and "-aircraft-probe=flat". Expect: coat and
+  flat keep the tail stripe and the white A-4 (about 167/155/147 in its mask; coat adds a sun
+  glint); master_compile names the error if the class master fails (then "" equals coat). If
+  M_AircraftPaint compiles and "" is still dark, the graph itself is the cause, not the compile.
+
+**#12 panel.** The c172p config converted only Models/c172-common.ac. c172p.xml loads the panel
+as Interior/Panel/c172p-panel/c172p.xml (no offsets), whose c172p-interior.ac (111 objects:
+panel_1_gauges, panel_1_1_right, InstrumentCover, pedestal, seats, door cards, firewall; textures
+from Models/ by <texture-path>) is now a parts[] row with interior + beauty_only + texture_dir
+"Models" + exclude ["glass_panel"] (85 %-transparent untextured instrument glass the opaque glass
+master would draw over every gauge). beauty_only (convert.py): its triangles go only into
+body_beauty, after the measured slots (one new slot, mat_fuel_selector); body.obj and every
+measured OBJ are byte-identical (converted here from the pinned commit: cmp of all 11 OBJs).
+The host's swap rule and ue_aircraft_materials.beauty_slot_mismatches are now "the measured
+slots are the copy's first ones". Gauge faces sit 0.72 m ahead of views.pilot_eye, 95 % facing
+it. Expect in #12: the grey panel with its gauge faces under the glareshield (needles, separate
+instrument models, are not converted).
