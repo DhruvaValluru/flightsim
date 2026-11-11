@@ -82,45 +82,31 @@ def _lens(focal_mm):
 
 def test_the_hazard_slot_frames_the_aircraft_and_the_abeam_funnel():
     """From the hazard slot, aimed at the aircraft, the abeam axis is inside the
-    half-width for every frame; from the per-airframe slot it never was. Lane C
-    (2026-11-11): the slot stands far enough off that the funnel reads at a
-    believable size, ground contact to wall cloud inside the frame."""
+    half-width for every frame; from the per-airframe slot it never was. Lane C,
+    round 7 fix: the aircraft reads at 40 px or more at the clip's 1280 px and the
+    funnel, ground contact to wall cloud, stays inside the frame."""
     speed, ahead0, abeam = _flyby_geometry()
     forward, right, up = camera_mod.HAZARD_CHASE_OFFSET
     half_w, half_h = _lens(camera_mod.HAZARD_CHASE_FOCAL_MM)
-    assert 51.0 < half_w < 53.0 and 35.0 < half_h < 37.0           # a 104 x 72 deg lens
+    assert 56.0 < half_w < 57.0 and 40.0 < half_h < 40.5             # a 113 x 80 deg lens
     aim = math.degrees(math.atan2(-right, -forward))               # the aircraft's bearing
-    assert aim == pytest.approx(81.3, abs=0.1)
+    assert aim == pytest.approx(90.0, abs=0.1)
     lateral = math.hypot(forward, right)
     pitch = math.degrees(math.atan2(-up, lateral))
     agl = 600.0
     top_m = weather_look.FUNNEL_TOP_SHARE * tornado.TOP_M
     camera_agl = agl + up
-    offs, spans, distances = [], [], []
-    for t in (0.0, 1.5, 3.0, 4.5, 6.0):
+    offs = []
+    for t in (0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0):
         f = ahead0 - speed * t
         axis_m = math.hypot(abeam - right, f - forward)
-        distances.append(axis_m)
         offs.append(math.degrees(math.atan2(abeam - right, f - forward)) - aim)
-        # The ground contact and the funnel's top, relative to the view axis.
         low = -math.degrees(math.atan(camera_agl / axis_m)) - pitch
         high = math.degrees(math.atan((top_m - camera_agl) / axis_m)) - pitch
         assert low > -half_h + 3.0                                  # the ground contact in frame
-        assert high < half_h - 3.0                                  # so is the funnel's top
-        spans.append((high - low) / (2.0 * half_h))
-    assert offs[0] == pytest.approx(-7.2, abs=0.3) and offs[-1] == pytest.approx(20.0, abs=0.3)
+        assert high < half_h - 3.0                                  # so is the wall cloud's base
+    assert offs[0] == pytest.approx(-16.6, abs=0.3) and offs[-1] == pytest.approx(20.1, abs=0.3)
     assert all(abs(o) < half_w - 15.0 for o in offs)               # the axis, with room for the body
-    assert 630.0 < min(distances) < 640.0 and max(distances) < 665.0
-    # Believable size: round 5's slot put the funnel across 95 % of the frame's
-    # height; the lane C slot keeps it under 75 %.
-    assert max(spans) < 0.75
-    old_f, old_r, old_u = (-30.0, -110.0, 32.0)
-    old_half_h = _lens(15.0)[1]
-    old_pitch = math.degrees(math.atan2(-old_u, math.hypot(old_f, old_r)))
-    old_axis = math.hypot(abeam - old_r, ahead0 - speed * 3.0 - old_f)
-    old_span = (math.degrees(math.atan((top_m - agl - old_u) / old_axis))
-                + math.degrees(math.atan((agl + old_u) / old_axis))) / (2.0 * old_half_h)
-    assert old_span > 0.9 and math.degrees(math.atan((agl + old_u) / old_axis)) + old_pitch > old_half_h
     # Round 4's slot (CHASE_OFFSETS c172p, the 35 mm lens): outside at both ends.
     old_f, _, _ = camera_mod.CHASE_OFFSETS["c172p"]
     old_half_w, _ = _lens(camera_mod.DEFAULT_FOCAL_MM)
@@ -128,8 +114,15 @@ def test_the_hazard_slot_frames_the_aircraft_and_the_abeam_funnel():
         bearing = math.degrees(math.atan2(abeam, ahead0 - speed * t - old_f))
         assert bearing > 2.0 * old_half_w
     assert camera_agl < top_m                                      # the camera under the wall cloud
-    # The aircraft stays readable: wider than 2 deg at the frame's centre.
-    assert math.degrees(2.0 * math.atan(5.5 / math.hypot(lateral, up))) > 2.0
+    # The aircraft reads at 40 px or more: seen side-on (the aim is abeam), its
+    # 8.3 m fuselage across the clip's 1280 px.
+    width_px = camera_mod.DEFAULT_WIDTH_PX
+    fuselage_deg = math.degrees(2.0 * math.atan(8.3 / 2.0 / math.hypot(lateral, up)))
+    assert width_px * fuselage_deg / (2.0 * half_w) > 50.0
+    # Round 7's slot (-40, -260, +80, 14 mm): the same measure gave ~21 px.
+    old_dist = math.hypot(math.hypot(-40.0, -260.0), 80.0)
+    old_px = width_px * math.degrees(2.0 * math.atan(8.3 / 2.0 / old_dist)) / (2.0 * _lens(14.0)[0])
+    assert old_px < 25.0
 
 
 def test_the_flyby_default_camera_takes_the_hazard_slot_and_the_core_keeps_its_wingman():
