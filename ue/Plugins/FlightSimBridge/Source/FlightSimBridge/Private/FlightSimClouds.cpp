@@ -1306,7 +1306,6 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 			     "the scene's fog. UNCALIBRATED"));
 		Record->SetObjectField(TEXT("rain_haze"), Haze);
 	}
-	}
 	// round-2b weather-fx: the weather look's shafts and the tornado funnel (beauty only).
 	Scene.ApplyBeautyWeatherLook(World);
 	SkyLight = Scene.SkyLightComponent;
