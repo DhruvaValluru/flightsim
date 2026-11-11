@@ -490,7 +490,7 @@ LINEAR_DEFAULT_TEXTURE = "T_LinearDefault"
 
 #: Every storm-weather material, by name (one /Game/FlightSim path each).
 STORM_MATERIALS = ("M_RainDrops", "M_RainSplash", "M_LightningChannel", "M_StormCell",
-                     "M_WindshieldRain")
+                     "M_WindshieldRain", "M_RainCurtain", "M_ScudCard")
 #: The Custom node bodies, committed as HLSL beside the Python twins they
 #: mirror (tests/test_weather.py pins their constants to core/scene/*.py).
 WEATHER_SHADER_DIR = "assets/shaders/weather"
@@ -516,7 +516,28 @@ STORM_PARAMETERS = ("CellCentreCm", "EastAxis", "NorthAxis", "Geo1", "Geo2", "Si
                     "Drift", "Layer", "Time", "FlashRelCm", "Flash", "ShaftAlbedo",
                     "ExtinctionScale", "Ragged", "Curtain")
 STORM_SCALAR_DEFAULTS = {"ExtinctionScale": 1.0, "ShaftAlbedo": 1.0}
-WINDSHIELD_PARAMETERS = ("Time", "Glass", "Seed")
+WINDSHIELD_PARAMETERS = ("Time", "Glass", "Seed", "Film", "FilmV")
+#: Lane D (2026-11-11): the windscreen's water film (windshield_film.hlsl), the
+#: pinned CC0 ambientCG "Leaking 019 C" maps (scripts/fetch_weather_textures.py,
+#: THIRD_PARTY_VISUAL.md) imported as these; a checkout without them builds the
+#: drops alone (Film then has nothing to sample and stays a no-op).
+WINDSHIELD_FILM_FILES = {"N": "data/textures/weather/leaking019c/normal_gl.jpg",
+                         "H": "data/textures/weather/leaking019c/height.jpg"}
+WINDSHIELD_FILM_TILES = 1.5
+#: Lane D (2026-11-11): the beauty rain veil (core/scene/rain_veil.py,
+#: FlightSimWeather.cpp ApplyBeautyRainVeil): the curtain's shells and the scud cards.
+CURTAIN_PARAMETERS = ("WindVel", "FallCmps", "Time", "Radius", "StreakRad", "StreakDensity",
+                      "StreakAlpha", "Veil", "GroundRelZ", "Seed")
+SCUD_PARAMETERS = ("Time",)
+#: The curtain's and the scud's albedo as lit translucent surfaces: the rain veil
+#: and a rag of cloud scatter nearly all they intercept (grey-white, lit by the
+#: translucency volume like the drops, drop_lit). Stated.
+CURTAIN_ALBEDO = 0.8
+SCUD_ALBEDO = 0.85
+#: Depth fades (cm): the curtain against nearer geometry, the scud against the
+#: aircraft and the tiles it meets (soft, no hard line where a card cuts them).
+CURTAIN_DEPTH_FADE_CM = 300.0
+SCUD_DEPTH_FADE_CM = 4000.0
 #: The vector parameters whose shader input is a float4 (RGB appended with A).
 WEATHER_FLOAT4_PARAMETERS = ("Splash", "Power", "Geo1", "Geo2", "Sigma", "Noise", "Drift",
                              "Layer", "Flash", "Glass", "Ragged", "Curtain")
@@ -575,12 +596,16 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_StormCell 5: the beauty rain shaft's streaks, eroded rim and density floor
 #: (storm_cell.hlsl's Ragged shaft block) and its albedo (storm_shaft_albedo.hlsl,
 #: the ShaftAlbedo parameter; visual round 6, round 4's #09 glowing cylinder).
+#: M_WindshieldRain 3: the beauty water film (windshield_film.hlsl, Film / FilmV; lane D).
+#: M_RainCurtain 1 and M_ScudCard 1: the beauty rain veil (lane D, rain_curtain.hlsl,
+#: scud_card.hlsl).
 #: M_StormCell 6: the beauty precipitation curtain and scud ("Curtain", storm_cell.hlsl;
 #: lane D 2026-11-11, round 4's #09 ring and cylinder; default 0 = generation 5).
 #: M_RainDrops 6: the beauty streak's softness and per-drop variation (Soft, Vary;
 #: lane D 2026-11-11, round 4's "scratches on the lens"; default 0 = generation 5).
 STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChannel": "2",
-                     "M_StormCell": "6", "M_WindshieldRain": "2"}
+                     "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "1",
+                     "M_ScudCard": "1"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -1977,6 +2002,74 @@ def create_rain_drops():
     finish_storm(material, "M_RainDrops")
 
 
+def _veil_lit(material, lib, albedo, x, y):
+    """The veil's light: a lit translucent surface of ``albedo``, so the curtain
+    and the scud take the light under the deck, not a painted grey. Lit PER
+    PIXEL with forward shading (the sun through its cloud shadow and the sky
+    light), not from the translucency volume as the drops are: the volume's
+    cascades end some tens of metres from the camera, and the far shell (250 m)
+    and the scud (up to 2.5 km) lie outside them. Per-vertex volume lighting is
+    the fallback when the engine names no per-pixel mode."""
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
+    lighting = (getattr(unreal.TranslucencyLightingMode, "TLM_SURFACE_PER_PIXEL_LIGHTING", None)
+                or getattr(unreal.TranslucencyLightingMode, "TLM_VOLUMETRIC_PER_VERTEX_NON_DIRECTIONAL",
+                           None))
+    if lighting is not None:
+        material.set_editor_property("translucency_lighting_mode", lighting)
+    lib.connect_material_property(constant(material, lib, albedo, x, y), "",
+                                  unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(constant(material, lib, 1.0, x, y + 80), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
+
+
+def create_rain_curtain():
+    """M_RainCurtain: one shell of the beauty rain veil (rain_curtain.hlsl into
+    the opacity, depth-faded against nearer geometry), lit like the drops.
+    Lane D, 2026-11-11; BEAUTY ONLY (FlightSimWeather.cpp ApplyBeautyRainVeil)."""
+    material = _storm_material("M_RainCurtain")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    _translucent_lit(material)
+    params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i)
+              for i, name in enumerate(CURTAIN_PARAMETERS)}
+    opacity = custom(material, lib, "rain_curtain", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
+        "Rel": relative_position(material, lib, -1800, 700, False, "camera"),
+        "WindVel": params["WindVel"], "FallCmps": params["FallCmps"], "Time": params["Time"],
+        "Radius": params["Radius"], "StreakRad": params["StreakRad"], "StreakDensity": params["StreakDensity"],
+        "StreakAlpha": params["StreakAlpha"], "Veil": params["Veil"],
+        "GroundRelZ": params["GroundRelZ"], "Seed": params["Seed"]}, -900, 0)
+    fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -600, 0)
+    fade.set_editor_property("fade_distance_default", CURTAIN_DEPTH_FADE_CM)
+    lib.connect_material_expressions(opacity, "", fade, "Opacity")
+    lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
+    _veil_lit(material, lib, CURTAIN_ALBEDO, -600, 300)
+    finish_storm(material, "M_RainCurtain")
+
+
+def create_scud_card():
+    """M_ScudCard: a torn cloud card of the beauty rain veil (scud_card.hlsl into
+    the opacity: UV0 the card, UV1 its alpha and seed, set per frame by the host),
+    depth-faded, lit like the drops. Lane D, 2026-11-11; BEAUTY ONLY."""
+    material = _storm_material("M_ScudCard")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    _translucent_lit(material)
+    params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i)
+              for i, name in enumerate(SCUD_PARAMETERS)}
+    opacity = custom(material, lib, "scud_card", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
+        "UV": uv_channel(material, lib, 0, "rg", -1800, 300),
+        "Card": uv_channel(material, lib, 1, "rg", -1800, 450),
+        "Time": params["Time"]}, -900, 0)
+    fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -600, 0)
+    fade.set_editor_property("fade_distance_default", SCUD_DEPTH_FADE_CM)
+    lib.connect_material_expressions(opacity, "", fade, "Opacity")
+    lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
+    _veil_lit(material, lib, SCUD_ALBEDO, -600, 300)
+    finish_storm(material, "M_ScudCard")
+
+
 def create_rain_splash():
     """M_RainSplash: the splash slots' crowns on the ground under the camera."""
     material = _storm_material("M_RainSplash")
@@ -2127,6 +2220,33 @@ def create_windshield_rain():
     drops = custom(material, lib, "windshield", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
         "UV": (screen, "ViewportUV"), "Aspect": (aspect, ""), "Time": params["Time"],
         "Glass": params["Glass"], "Seed": params["Seed"]}, -1100, 0)
+    # Lane D (generation 3): the water film over the drops, when the pinned maps
+    # are in the checkout (Film 0, every render but beauty: the drops exactly).
+    film_files = {key: _repo_file(rel) for key, rel in WINDSHIELD_FILM_FILES.items()}
+    if all(film_files.values()):
+        film_n = import_texture(film_files["N"], "T_WindshieldWater_N", False, True, False)
+        film_h = import_texture(film_files["H"], "T_WindshieldWater_H", False, False, False)
+        tiled = binary(material, lib, unreal.MaterialExpressionMultiply,
+                       mask(material, lib, screen, "rg", -1600, 600, source_out="ViewportUV"),
+                       binary(material, lib, unreal.MaterialExpressionAppendVector,
+                              binary(material, lib, unreal.MaterialExpressionMultiply, aspect,
+                                     constant(material, lib, WINDSHIELD_FILM_TILES, -1600, 750), -1450, 750),
+                              constant(material, lib, WINDSHIELD_FILM_TILES, -1600, 850), -1300, 750),
+                       -1150, 600)
+        film_uv = binary(material, lib, unreal.MaterialExpressionAdd, tiled,
+                         binary(material, lib, unreal.MaterialExpressionAppendVector,
+                                constant(material, lib, 0.0, -1300, 950), params["FilmV"][0], -1150, 950),
+                         -1000, 700)
+        normal = _sample(material, lib, film_n, film_uv, unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL,
+                         -850, 600)
+        height = _sample(material, lib, film_h, film_uv, unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR,
+                         -850, 800)
+        drops = custom(material, lib, "windshield_film", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
+            "Drops": (drops, ""), "Normal": (normal, "RGB"), "Height": (height, "R"),
+            "Film": params["Film"], "Aspect": (aspect, "")}, -650, 300)
+    else:
+        print("WINDSHIELD-FILM: the pinned maps are not in the checkout "
+              "(scripts/fetch_weather_textures.py); M_WindshieldRain draws the drops alone")
     shifted = binary(material, lib, unreal.MaterialExpressionAdd,
                      mask(material, lib, screen, "rg", -900, -150, source_out="ViewportUV"),
                      mask(material, lib, drops, "rg", -900, 0), -700, -100)
@@ -3537,6 +3657,8 @@ create_rain_splash()
 create_lightning_channel()
 create_storm_cell()
 create_windshield_rain()
+create_rain_curtain()   # lane D: the beauty rain veil
+create_scud_card()
 # World lane (visual overhaul): the collection first, the tiles material reads it.
 create_world_collection()
 create_world_cloud_layers()

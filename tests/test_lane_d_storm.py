@@ -174,3 +174,134 @@ def test_the_rain_deck_is_a_soft_deck_not_puffs():
     assert row["coverage_contrast"] <= 0.8 and row["shape_scale_km"] >= 9.0
     assert "{0.045, 9.0, 0.6, 0.3, 0.1, 0.4, 0.8, 0.98},      // nimbostratus" in CLOUDS_CPP
 
+
+# -- the rain veil: the curtain at depth and the scud ---------------------------------
+
+from core.scene import rain_veil  # noqa: E402
+
+WEATHER_H = (BRIDGE / "Public" / "FlightSimWeather.h").read_text(encoding="utf-8")
+SHADERS = REPO / "assets" / "shaders" / "weather"
+
+
+def test_the_veil_follows_the_rain_and_layers_the_depth():
+    # visibility (Koschmieder 3.912 / beta) of the order of heavy and tropical rain
+    assert 1.5 < 3.912 / rain_veil.rain_extinction_per_km(10.0) < 4.0
+    assert 0.6 < 3.912 / rain_veil.rain_extinction_per_km(40.0) < 1.5
+    assert rain_veil.rain_extinction_per_km(0.0) == 0.0
+    veils = [rain_veil.shell_veil_alpha(40.0, i) for i in range(3)]
+    assert veils == sorted(veils) and veils[-1] < 0.6   # deeper slabs veil more; never a wall
+    # the near shell (inside a chase camera's 40-60 m) barely veils the subject
+    assert rain_veil.shell_veil_alpha(10.0, 0) < 0.06
+    assert rain_veil.streak_density(10.0) < rain_veil.streak_density(40.0) <= rain_veil.VEIL_STREAK_DENSITY_MAX
+    assert not rain_veil.scud_drawn(4.0, False) and rain_veil.scud_drawn(10.0, False)
+    assert rain_veil.scud_drawn(0.0, True)
+
+
+def test_the_scud_cards_are_deterministic_carried_by_the_wind_and_clear_of_the_lens():
+    band = rain_veil.scud_band(2000.0, 2500.0)
+    assert band == (1700.0, 2450.0)
+    assert rain_veil.scud_band(2000.0, None) == (1700.0, 2400.0)
+    assert rain_veil.scud_band(2000.0, 1500.0) == (1700.0, 2400.0)   # a deck below: not its base
+    camera = (0.0, 0.0, 2000.0)
+    a = rain_veil.scud_cards(3, 2.0, camera, camera, (0.0, -12.86), band)
+    b = rain_veil.scud_cards(3, 2.0, camera, camera, (0.0, -12.86), band)
+    assert a == b and len(a) == rain_veil.SCUD_CARDS
+    assert tuple(a[0]) == rain_veil.CARD_KEYS
+    for card in a:
+        assert band[0] <= card["up_m"] <= band[1]
+        assert abs(card["east_m"]) <= rain_veil.SCUD_BOX_HALF_M
+        d = math.dist((card["east_m"], card["north_m"], card["up_m"]), camera)
+        if d < rain_veil.SCUD_CAMERA_CLEAR_M + 0.5 * card["width_m"]:
+            assert card["alpha"] == 0.0
+    # one second later every card's air has moved 12.86 m south (unless it wrapped)
+    c = rain_veil.scud_card(3, 5, 3.0, camera, camera, (0.0, -12.86), band)
+    d0 = rain_veil.scud_card(3, 5, 2.0, camera, camera, (0.0, -12.86), band)
+    assert c["north_m"] == pytest.approx(d0["north_m"] - 12.86) or abs(c["north_m"] - d0["north_m"]) > 4000
+
+
+def _veil_cpp():
+    start = WEATHER_CPP.index("namespace FlightSimRainVeil")
+    return WEATHER_CPP[start:WEATHER_CPP.index("// -- visual round 2 (weather scenes", start)]
+
+
+def test_the_cpp_veil_carries_the_python_numbers():
+    veil = _veil_cpp()
+    pairs = {"VeilShellRadiusNearM": rain_veil.VEIL_SHELL_RADII_M[0],
+             "VeilShellRadiusMidM": rain_veil.VEIL_SHELL_RADII_M[1],
+             "VeilShellRadiusFarM": rain_veil.VEIL_SHELL_RADII_M[2],
+             "VeilHeightRadii": rain_veil.VEIL_HEIGHT_RADII, "VeilBetaA": rain_veil.VEIL_BETA_A,
+             "VeilBetaB": rain_veil.VEIL_BETA_B, "VeilStreakRad": rain_veil.VEIL_STREAK_RAD,
+             "VeilStreakDensityA": rain_veil.VEIL_STREAK_DENSITY_A,
+             "VeilStreakDensityMax": rain_veil.VEIL_STREAK_DENSITY_MAX,
+             "VeilStreakAlpha": rain_veil.VEIL_STREAK_ALPHA, "ScudBoxHalfM": rain_veil.SCUD_BOX_HALF_M,
+             "ScudBandBelowM": rain_veil.SCUD_BAND_BELOW_M, "ScudDeckGapM": rain_veil.SCUD_DECK_GAP_M,
+             "ScudNoDeckTopM": rain_veil.SCUD_NO_DECK_TOP_M, "ScudWidthMinM": rain_veil.SCUD_WIDTH_M[0],
+             "ScudWidthMaxM": rain_veil.SCUD_WIDTH_M[1], "ScudAspectMin": rain_veil.SCUD_ASPECT[0],
+             "ScudAspectMax": rain_veil.SCUD_ASPECT[1], "ScudAlphaMin": rain_veil.SCUD_ALPHA[0],
+             "ScudAlphaMax": rain_veil.SCUD_ALPHA[1], "ScudCameraClearM": rain_veil.SCUD_CAMERA_CLEAR_M,
+             "ScudEdgeShare": rain_veil.SCUD_EDGE_SHARE, "ScudMinRainMmh": rain_veil.SCUD_MIN_RAIN_MMH}
+    for name, value in pairs.items():
+        assert _cpp_constant(veil, name) == value, name
+    assert f"constexpr int32 VeilSegments = {rain_veil.VEIL_SEGMENTS};" in veil
+    assert f"constexpr int32 ScudCards = {rain_veil.SCUD_CARDS};" in veil
+    assert f"constexpr uint64 ScudSeedSalt = 0x{rain_veil.SCUD_SEED_SALT:X};" in veil
+    # the same channels of the same hash, card for card
+    for channel in range(7):
+        assert f"Unit(ScudSeed, Index, {channel})" in veil, channel
+    assert "Smooth(Clear, Clear * 1.5, ToCameraM)" in veil
+    assert "WindEnuMps.X * T" in veil and "WindEnuMps.Y * T" in veil
+    shader = (SHADERS / "rain_curtain.hlsl").read_text(encoding="utf-8")
+    assert "float cellL = cellW * 60.0;" in shader and rain_veil.VEIL_STREAK_ASPECT == 60.0
+
+
+def test_the_veil_is_beauty_only_and_hidden_from_every_label():
+    veil = _veil_cpp()
+    assert veil.count("BeautyOnlyActors.Add(VeilActor);") == 1
+    assert veil.count("BeautyOnlyActors.Add(ScudActor);") == 1
+    assert "bool ApplyBeautyRainVeil(UWorld* World" in WEATHER_H
+    # its one caller is the beauty world look (built only under -quality=beauty)
+    assert CLOUDS_CPP.count("Weather.ApplyBeautyRainVeil(") == 1
+    build = CLOUDS_CPP[CLOUDS_CPP.index("bool FFlightSimWorldBeauty::Build("):]
+    assert "Weather.ApplyBeautyRainVeil(" in build
+    assert 'FlagOrEnv(TEXT("rain-veil="), TEXT("FLIGHTSIM_RAIN_VEIL"))' in CLOUDS_CPP
+    # per frame: nothing unless the beauty built it
+    advance = _function(WEATHER_CPP, "void FFlightSimWeather::StepBeautyRainVeil(")
+    assert "if (VeilActor != nullptr)" in advance and "if (ScudMesh == nullptr)" in advance
+    assert WEATHER_CPP.count("StepBeautyRainVeil(View, Wind, Share);") == 1
+    # the materials exist in the script, stamped, with their shader inputs
+    assert '"M_RainCurtain": "1"' in SCRIPT and '"M_ScudCard": "1"' in SCRIPT
+    assert 'custom(material, lib, "rain_curtain"' in SCRIPT and 'custom(material, lib, "scud_card"' in SCRIPT
+    assert "create_rain_curtain()" in SCRIPT and "create_scud_card()" in SCRIPT
+
+
+# -- the windscreen water film (the pinned CC0 asset) ---------------------------------
+
+
+def test_the_water_film_is_pinned_listed_and_a_no_op_off_the_beauty_path():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("fetch_weather_textures",
+                                                  REPO / "scripts" / "fetch_weather_textures.py")
+    fetch = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fetch)
+    listing = (REPO / "THIRD_PARTY_VISUAL.md").read_text(encoding="utf-8")
+    for name, pin in fetch.PINS.items():
+        assert pin["licence"] == "CC0-1.0"
+        assert re.fullmatch(r"[0-9a-f]{64}", pin["zip_sha256"]) and pin["zip_sha256"] in listing
+        assert pin["zip_url"] in listing and pin["page"] in listing
+        assert pin["zip_bytes"] < 4_000_000                          # small
+        for member in pin["members"].values():
+            assert re.fullmatch(r"[0-9a-f]{64}", member["sha256"]) and member["sha256"] in listing
+            assert member["bytes"] < 500_000
+    # the material reads exactly the fetched files
+    files = SCRIPT[SCRIPT.index("WINDSHIELD_FILM_FILES = "):SCRIPT.index("WINDSHIELD_FILM_TILES")]
+    for file in fetch.PINS["leaking019c"]["members"]:
+        assert f"data/textures/weather/leaking019c/{file}" in files
+    assert '"M_WindshieldRain": "3"' in SCRIPT
+    film = (SHADERS / "windshield_film.hlsl").read_text(encoding="utf-8")
+    assert "if (Film <= 0.0)\n{\n\treturn Drops;\n}" in film
+    # Film is set only from the beauty veil's value (0 until ApplyBeautyRainVeil runs)
+    assert "BeautyFilm = FlightSimRainVeil::BeautyWindshieldFilm;" in WEATHER_CPP
+    assert WEATHER_CPP.count("BeautyFilm = ") == 1
+    assert "double BeautyFilm = 0.0;" in WEATHER_H
+    assert _cpp_constant(WEATHER_CPP, "BeautyWindshieldFilm") == rain_veil.BEAUTY_WINDSHIELD_FILM

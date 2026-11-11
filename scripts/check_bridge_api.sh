@@ -573,6 +573,11 @@ else
 fi
 PMC="../../Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h"
 rp_check "distant: ProceduralMesh CreateMeshSection_LinearColor" "$PMC" "void CreateMeshSection_LinearColor(int32 SectionIndex, const TArray<FVector>& Vertices, const TArray<int32>& Triangles, const TArray<FVector>& Normals, const TArray<FVector2D>& UV0, const TArray<FLinearColor>& VertexColors, const TArray<FProcMeshTangent>& Tangents, bool bCreateCollision, bool bSRGBConversion = false)"
+# Lane D (2026-11-11): the beauty rain veil's scud cards (FlightSimWeather.cpp
+# AdvanceBeautyRainVeil) update their quads per frame with UV1 (alpha, seed);
+# read in the 5.7 source on 2026-11-11.
+rp_check "rain-veil: ProceduralMesh UpdateMeshSection_LinearColor with UV1..3" "$PMC" "UE_API void UpdateMeshSection_LinearColor(int32 SectionIndex, const TArray<FVector>& Vertices, const TArray<FVector>& Normals, const TArray<FVector2D>& UV0, const TArray<FVector2D>& UV1, const TArray<FVector2D>& UV2, const TArray<FVector2D>& UV3,"
+rp_check "rain-veil: ProceduralMesh CreateMeshSection_LinearColor with UV1..3" "$PMC" "UE_API void CreateMeshSection_LinearColor(int32 SectionIndex, const TArray<FVector>& Vertices, const TArray<int32>& Triangles, const TArray<FVector>& Normals, const TArray<FVector2D>& UV0, const TArray<FVector2D>& UV1, const TArray<FVector2D>& UV2, const TArray<FVector2D>& UV3,"
 rp_check "distant: Primitive SetRenderCustomDepth" "Engine/Classes/Components/PrimitiveComponent.h" "ENGINE_API void SetRenderCustomDepth(bool bValue);"
 rp_check "distant: Primitive SetTranslucentSortPriority" "Engine/Classes/Components/PrimitiveComponent.h" "ENGINE_API void SetTranslucentSortPriority(int32 NewTranslucentSortPriority);"
 rp_check "distant: Primitive SetReceivesDecals" "Engine/Classes/Components/PrimitiveComponent.h" "ENGINE_API void SetReceivesDecals(bool bNewReceivesDecals);"

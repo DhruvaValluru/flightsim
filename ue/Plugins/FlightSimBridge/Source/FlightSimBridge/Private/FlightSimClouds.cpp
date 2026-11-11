@@ -1034,6 +1034,19 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		return false;
 	}
 	const FString SkyHdriName = FlagOrEnv(TEXT("sky-hdri="), TEXT("FLIGHTSIM_SKY_HDRI"));
+	// Lane D (2026-11-11): the beauty rain veil (on unless asked off): -rain-veil= /
+	// FLIGHTSIM_RAIN_VEIL (core/scene/rain_veil.py).
+	FString RainVeilMode = TEXT("on");
+	const FString RainVeilFromEnv = FlagOrEnv(TEXT("rain-veil="), TEXT("FLIGHTSIM_RAIN_VEIL"));
+	if (!RainVeilFromEnv.IsEmpty())
+	{
+		RainVeilMode = RainVeilFromEnv;
+	}
+	if (RainVeilMode != TEXT("on") && RainVeilMode != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.rain_veil: -rain-veil=%s is not on or off"), *RainVeilMode);
+		return false;
+	}
 
 	// -- what the card says --------------------------------------------------
 	// Key by key (WorldLookValue; world_beauty.card_inputs is the Python twin):
@@ -1193,6 +1206,35 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 				     "look's rain particles and streaks are unchanged"));
 		}
 		Record->SetObjectField(TEXT("rain"), RainRow);
+	}
+	// Lane D: the rain veil -- the curtain at depth and, in a storm or heavy rain,
+	// the scud under the drawn deck (after the clearance: the deck it hangs under
+	// is the one drawn). Heights above the scene datum (KeepAircraftClearOfClouds).
+	{
+		const double AircraftUpM = FMath::Max(0.0, WorldNumber(Card, TEXT("altitude_m"), 0.0) -
+		                                               WorldNumber(Card, TEXT("terrain_elevation_m"), 0.0));
+		bool bDeckAbove = false;
+		double DeckBaseM = 0.0;
+		for (const FCloudLayerState& State : CloudLayers)
+		{
+			if (State.Cover > 0.0 && State.BaseM > AircraftUpM && (!bDeckAbove || State.BaseM < DeckBaseM))
+			{
+				bDeckAbove = true;
+				DeckBaseM = State.BaseM;
+			}
+		}
+		double CellDeckBaseM = 0.0, CellDeckTopM = 0.0;
+		if (Weather.BeautyStormLayer(CellDeckBaseM, CellDeckTopM) && CellDeckBaseM > AircraftUpM &&
+		    (!bDeckAbove || CellDeckBaseM < DeckBaseM))
+		{
+			bDeckAbove = true;
+			DeckBaseM = CellDeckBaseM;
+		}
+		if (!Weather.ApplyBeautyRainVeil(World, Aircraft != nullptr ? Aircraft->GetActorLocation() : FVector::ZeroVector,
+		                                 AircraftUpM, Preset == PresetStorm, bDeckAbove, DeckBaseM, RainVeilMode, Error))
+		{
+			return false;
+		}
 	}
 	// round-2b weather-fx: the weather look's shafts and the tornado funnel (beauty only).
 	Scene.ApplyBeautyWeatherLook(World);

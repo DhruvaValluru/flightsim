@@ -3088,3 +3088,49 @@ applied twice (the host must not set a ColorGradingLUT for the same stock). If t
 reads too strong, the next knob is `exp_comp` and `push_pull` in `make_film_luts.STOCKS`
 (regenerate from the scratch venv; `film_luts.json` carries the new sha256 and
 tests/test_film_luts.py checks the files against it).
+
+## lane D (2026-11-11): the storm look -- "the hurricane does not look real"
+
+The owner on #15 ("chase view of the 747 at 2000 m in strong wind, severe turbulence and heavy
+rain for 6 seconds", what #14's hurricane refusal suggests; #14 stays the refusal), and round
+4's review of #06, #07 and #09. Everything below is BEAUTY ONLY and UNCALIBRATED. The labels
+are unchanged: every new actor is in FFlightSimWeather::BeautyOnlyActors, and every new
+material parameter defaults to the measure path's shader.
+* #15 drew the RAIN preset: no storm word, a broken 0.6 deck, sunlit gaps. Now, heavy rain
+  (8 mm/h or more) in a strong wind (10 m/s or more, the larger of weather.rain.wind_enu_mps
+  and look.cloud_drift.mps) is the STORM preset (world_beauty.is_severe_rain;
+  FlightSimClouds.cpp SelectPreset's WindMps). That gives the unbroken 0.98 nimbostratus deck
+  that shadows the beam, the storm haze, wetness and grade. beauty_look.world_preset_for_card
+  uses the same wind, so the exposure and the grade see the same world.
+* Rain (M_RainDrops 6): soft streaks (2x wide, Gaussian across, tapered), each drop's own
+  length 0.45..1.55 and brightness 0.4..1, SkyRadianceScale 0.7, 4000 drops per mm/h,
+  coverage cap 0.22.
+* Rain veil (M_RainCurtain 1, M_ScudCard 1; core/scene/rain_veil.py): three curtain shells
+  round the camera (25, 80, 250 m). Each carries the grey veil of its slab
+  (beta = 0.35 R^0.66 /km, a stated fit: 2.4 km visibility at 10 mm/h, 1 km at 40 mm/h) and
+  streaks falling along the wind. In a storm or rain of 8 mm/h or more, 40 torn scud cards
+  hang from 300 m under the aircraft to 50 m under the drawn deck, carried by the wind and
+  never within 120 m of the lens. Switch: `-rain-veil=off` / `FLIGHTSIM_RAIN_VEIL=off`.
+* #09 cell (M_StormCell 6, Curtain): the shaft hangs from the lifted base. It flares 0.8x
+  toward the ground, its edge is the wall's warped radius softened over 75 %, and it thins by
+  half toward the ground. Ragged scud fills a 300 m band under the base and the deck.
+* #06 deck: RAIN_DEFAULT_COVER 0.6 -> 0.72, nimbostratus coverage_contrast 1.2 -> 0.8,
+  shape 6 -> 9 km, erosion 0.2 -> 0.3: grey thin places, not puffs.
+* Cockpit glass (M_WindshieldRain 3): a water film from the pinned CC0 ambientCG "Leaking 019
+  C" maps (`python scripts/fetch_weather_textures.py` BEFORE ue_create_materials;
+  THIRD_PARTY_VISUAL.md).
+
+Render machine: run `python scripts/fetch_weather_textures.py`, then
+scripts/ue_create_materials.py, which rebuilds M_RainDrops 6, M_StormCell 6 and
+M_WindshieldRain 3 and creates M_RainCurtain and M_ScudCard. Then the C++ build. Cost on the
+Intel iGPU: 3 shells of cheap translucent overdraw, 40 quads, one fbm in the scud band only.
+The volumetric march is unchanged.
+
+Probes, in order: #15, #09, #07 and #06 at beauty, each against `FLIGHTSIM_RAIN_VEIL=off`.
+* #15 pass: a dark unbroken deck, grey rain veil, rags of scud streaming past, slanted soft
+  streaks, and the 747 readable (not black).
+* #09 pass: no ring and no cylinder; a soft grey curtain under a ragged base.
+* #07 pass: depth layers of rain in front of the tower view, not a flat grey void.
+* #06 pass: no isolated puffs.
+* Knobs: rain_veil.VEIL_BETA_A (haze), VEIL_STREAK_ALPHA, SCUD_ALPHA,
+  weather_look.BEAUTY_RAIN_RADIANCE, storm_cell.BEAUTY_CURTAIN.
