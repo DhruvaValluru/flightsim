@@ -119,7 +119,7 @@ def available_mb():
             return status.ullAvailPhys / 2**20
         meminfo = Path("/proc/meminfo")
         if meminfo.is_file():
-            for line in meminfo.read_text().splitlines():
+            for line in meminfo.read_text(encoding="utf-8").splitlines():
                 if line.startswith("MemAvailable:"):
                     return int(line.split()[1]) / 1024
         if sys.platform == "darwin":

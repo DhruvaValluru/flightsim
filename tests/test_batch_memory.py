@@ -54,7 +54,7 @@ def test_the_summary_is_on_disk_after_every_scene_and_a_stop_is_named(tmp_path):
 
     def run(server, number, name, prompt, edits, args):
         # the scenes before this one are already written
-        on_disk = [r["number"] for r in json.loads(summary.read_text())] if summary.is_file() else []
+        on_disk = [r["number"] for r in json.loads(summary.read_text(encoding="utf-8"))] if summary.is_file() else []
         seen.append(on_disk)
         return {"number": number, "name": name, "prompt": prompt, "outcome": "done"}
 
@@ -63,7 +63,7 @@ def test_the_summary_is_on_disk_after_every_scene_and_a_stop_is_named(tmp_path):
                          summary, _gather(tmp_path))
     assert code == 3
     assert seen == [[], [1], [1, 2]]
-    assert [r["number"] for r in json.loads(summary.read_text())] == [1, 2, 3]
+    assert [r["number"] for r in json.loads(summary.read_text(encoding="utf-8"))] == [1, 2, 3]
 
 
 def test_resume_runs_only_what_the_last_batch_did_not_finish(tmp_path):
@@ -71,7 +71,7 @@ def test_resume_runs_only_what_the_last_batch_did_not_finish(tmp_path):
     summary.write_text(json.dumps([
         {"number": 1, "name": "s1", "outcome": "done", "run_id": "a"},
         {"number": 2, "name": "s2", "outcome": "refused"},
-        {"number": 3, "name": "s3", "outcome": "failed"}]))
+        {"number": 3, "name": "s3", "outcome": "failed"}]), encoding="utf-8")
     ran = []
 
     def run(server, number, name, prompt, edits, args):
@@ -81,7 +81,7 @@ def test_resume_runs_only_what_the_last_batch_did_not_finish(tmp_path):
     code = rts.run_batch(_args(resume=True), set(range(1, 6)), SCENES, run, lambda: None,
                          summary, _gather(tmp_path))
     assert code == 0 and ran == [3, 4, 5]
-    rows = json.loads(summary.read_text())
+    rows = json.loads(summary.read_text(encoding="utf-8"))
     assert [r["number"] for r in rows] == [1, 2, 3, 4, 5]
     assert rows[0]["run_id"] == "a"
 
@@ -97,10 +97,10 @@ def test_a_helper_left_behind_by_a_finished_pass_is_reaped(tmp_path):
 
     pid_file = tmp_path / "pid"
     child = (f"import subprocess,sys; p=subprocess.Popen([sys.executable,'-c',"
-             f"'import time; time.sleep(60)']); open({str(pid_file)!r},'w').write(str(p.pid))")
+             f"'import time; time.sleep(60)']); open({str(pid_file)!r},'w',encoding='utf-8').write(str(p.pid))")
     result = run_headless([sys.executable, "-c", child], tmp_path / "log", stall=None, timeout=60)
     assert result.returncode == 0
-    pid = int(pid_file.read_text())
+    pid = int(pid_file.read_text(encoding="utf-8"))
     for _ in range(50):
         alive = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
                                capture_output=True, text=True).stdout.strip()
