@@ -343,8 +343,10 @@ namespace FlightSimRainVeil
 	constexpr double VeilBetaA = 0.35;
 	constexpr double VeilBetaB = 0.66;
 	constexpr double VeilStreakPixels = 2.0;
-	constexpr double VeilShadeUnderDeck = 0.3;
-	constexpr double VeilShadeOpen = 0.6;
+	constexpr double VeilShadeUnderDeck = 0.15;
+	constexpr double VeilShadeOpen = 0.5;
+	constexpr double ScudToneUnderDeck = 0.5;
+	constexpr double ScudToneOpen = 0.7;
 	constexpr double VeilStreakDensityA = 0.08;
 	constexpr double VeilStreakDensityMax = 0.6;
 	constexpr double VeilStreakAlpha = 0.25;
@@ -566,7 +568,10 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 	ScudMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	ScudMesh->SetCastShadow(false);
 	ScudMaterial = UMaterialInstanceDynamic::Create(ScudBase, ScudActor);
-	ScudMaterial->SetScalarParameterValue(TEXT("Shade"), static_cast<float>(VeilShade));
+	// Round 19: M_ScudCard 3 is MODULATE; Shade is its tone (rain_veil.scud_tone).
+	const double ScudTone = bDeck && DeckBaseM > AircraftUpM ? ScudToneUnderDeck : ScudToneOpen;
+	ScudMaterial->SetScalarParameterValue(TEXT("Shade"), static_cast<float>(ScudTone));
+	Row->SetNumberField(TEXT("scud_tone"), ScudTone);
 	ScudMesh->SetMaterial(0, ScudMaterial);
 	ScudMesh->RegisterComponent();
 	Row->SetNumberField(TEXT("scud_cards"), ScudCards);
@@ -733,7 +738,8 @@ void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const
 	// ground, and ragged scud hangs under the base and the deck. UNCALIBRATED.
 	constexpr double WeatherBeautyCurtainFlare = 0.8;
 	constexpr double WeatherBeautyCurtainGroundThin = 0.5;
-	constexpr double WeatherBeautyScudDepthM = 300.0;
+	// Round 19: 0 (storm_cell.BEAUTY_CURTAIN): the band's slices drew rings in #09.
+	constexpr double WeatherBeautyScudDepthM = 0.0;
 	constexpr double WeatherBeautyScudCover = 0.5;
 	const TSharedPtr<FJsonObject>* CellRow = nullptr;
 	if (!bCell || StormMaterial == nullptr || !Record.IsValid() ||

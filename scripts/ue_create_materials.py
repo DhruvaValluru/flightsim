@@ -600,13 +600,14 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_RainCurtain 1 and M_ScudCard 1: the beauty rain veil (lane D, rain_curtain.hlsl,
 #: scud_card.hlsl). 2: the Shade scalar on the base colour and the round-12 shaders
 #: (the streaks in the shell's surface frame, pixel-wide; torn rags, not puffs).
+#: M_ScudCard 3: MODULATE, unlit (round 19: lit cards drew white under the deck).
 #: M_StormCell 6: the beauty precipitation curtain and scud ("Curtain", storm_cell.hlsl;
 #: lane D 2026-11-11, round 4's #09 ring and cylinder; default 0 = generation 5).
 #: M_RainDrops 6: the beauty streak's softness and per-drop variation (Soft, Vary;
 #: lane D 2026-11-11, round 4's "scratches on the lens"; default 0 = generation 5).
 STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChannel": "2",
                      "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "2",
-                     "M_ScudCard": "2"}
+                     "M_ScudCard": "3"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -2052,16 +2053,25 @@ def create_rain_curtain():
 
 
 def create_scud_card():
-    """M_ScudCard: a torn cloud card of the beauty rain veil (scud_card.hlsl into
-    the opacity: UV0 the card, UV1 its alpha and seed, set per frame by the host),
-    depth-faded, lit like the drops. Lane D, 2026-11-11; BEAUTY ONLY."""
+    """M_ScudCard: a torn cloud card of the beauty rain veil (scud_card.hlsl: UV0 the
+    card, UV1 its alpha and seed, set per frame by the host), depth-faded. Lane D,
+    2026-11-11; BEAUTY ONLY.
+
+    Generation 3 (round 19's #15 and #09: "small bright-white popcorn puffs" even
+    at Shade 0.3): a LIT card is lit per pixel by the sun, which the deck's cloud
+    shadow does not reach on a translucent surface, so under the storm it drew
+    brighter than everything round it whatever its albedo. Scud under a storm deck
+    is the darkest cloud in the frame: the card is now MODULATE, unlit -- the scene
+    behind it times lerp(1, Shade, rag) -- so a rag is always darker than what is
+    behind it (a dark torn shape, never a white puff), at any exposure and any sun.
+    Shade is the host's rain_veil.SCUD_TONE (0.5: half the light behind)."""
     material = _storm_material("M_ScudCard")
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary
-    _translucent_lit(material)
+    _translucent_unlit(material, unreal.BlendMode.BLEND_MODULATE)
     params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i)
-              for i, name in enumerate(SCUD_PARAMETERS) if name != "Shade"}   # Shade: _veil_lit
+              for i, name in enumerate(SCUD_PARAMETERS) if name != "Shade"}
     opacity = custom(material, lib, "scud_card", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
         "UV": uv_channel(material, lib, 0, "rg", -1800, 300),
         "Card": uv_channel(material, lib, 1, "rg", -1800, 450),
@@ -2069,8 +2079,9 @@ def create_scud_card():
     fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -600, 0)
     fade.set_editor_property("fade_distance_default", SCUD_DEPTH_FADE_CM)
     lib.connect_material_expressions(opacity, "", fade, "Opacity")
-    lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
-    _veil_lit(material, lib, SCUD_ALBEDO, -600, 300)
+    tone = scalar(material, lib, "Shade", 1.0, -600, 300)
+    darken = lerp(material, lib, constant(material, lib, 1.0, -600, 200), tone, fade, -400, 200)
+    lib.connect_material_property(darken, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     finish_storm(material, "M_ScudCard")
 
 
