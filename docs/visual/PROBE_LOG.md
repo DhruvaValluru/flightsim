@@ -3120,6 +3120,18 @@ material parameter defaults to the measure path's shader.
   C" maps (`python scripts/fetch_weather_textures.py` BEFORE ue_create_materials;
   THIRD_PARTY_VISUAL.md).
 
+* Round 6's #15 (rendered before lane D: rain preset, 0.6 deck, blue sky, bright magenta
+  ground, sparse dashes). Under the new storm selection it draws a 0.98 deck that shadows the
+  beam, so the low sun stops reddening the ground. In a storm preset with rain and no stated
+  visibility, the height fog now also carries the rain's own haze up to the camera
+  (rain_veil.rain_haze_fog; render.json world_beauty.rain_haze). Its falloff is opened to
+  halve once under the deck, and its density gives the camera's height the rain's
+  extinction. The engine's 0.2 falloff had halved the fog every 50 m, so at 2 km there was
+  none and the distance read blue.
+  The straight seam band under the aircraft is NOT diagnosed (no render here). The suspects
+  are the end of the cloud shadow on the ground and the volumetric fog's 4 km hand-off; read
+  both from render.json on the next #15.
+
 Render machine: run `python scripts/fetch_weather_textures.py`, then
 scripts/ue_create_materials.py, which rebuilds M_RainDrops 6, M_StormCell 6 and
 M_WindshieldRain 3 and creates M_RainCurtain and M_ScudCard. Then the C++ build. Cost on the

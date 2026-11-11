@@ -90,6 +90,23 @@ SCUD_SEED_SALT = 0x5C0D
 #: set with the veil (beauty only), 0 on every other render.
 BEAUTY_WINDSHIELD_FILM = 1.0
 
+#: Round 6's #15 (lane D follow-up): under the rain preset's 0.6 deck the frame was
+#: a blue sky and a bright ground at 2000 m; the scene's height fog (the rain look's
+#: haze, lighting.RAIN_ANCHORS) halves every 1 / (falloff / 10) m -- 50 m at the
+#: engine's 0.2 -- so at a chase camera 2 km up the rain made no haze at all. In a
+#: STORM preset with rain and no stated visibility, the beauty makes the rain's own
+#: haze: the fog's falloff opened so it halves over the column from the fog's base to
+#: the deck (RAIN_HAZE_FALLOFF_COLUMN = 1: once over the column), and its density
+#: set so the extinction AT THE CAMERA'S HEIGHT is the rain's (rain_extinction_per_km),
+#: by the project's law beta = FogDensity x FOG_BETA_PER_DENSITY per metre
+#: (core/scene/world_beauty.py's WET_VFOG note: 0.1 ln(2)^2). Never thinner than the
+#: scene's own fog. UNCALIBRATED: #15 and #09 first.
+FOG_BETA_PER_DENSITY = 0.1 * math.log(2.0) ** 2
+RAIN_HAZE_FALLOFF_COLUMN = 1.0
+#: The column is never taken as shorter than this (m): a deck 300 m over the fog
+#: would otherwise make the fog a thin slab.
+RAIN_HAZE_MIN_COLUMN_M = 1000.0
+
 CARD_KEYS = ("east_m", "north_m", "up_m", "width_m", "height_m", "alpha")
 
 
@@ -176,3 +193,18 @@ def scud_cards(seed: int, t: float, centre_enu_m: Sequence[float], camera_enu_m:
                count: int = SCUD_CARDS) -> List[Dict[str, float]]:
     """Every card at run time t (:func:`scud_card` for index 0 .. count - 1)."""
     return [scud_card(seed, i, t, centre_enu_m, camera_enu_m, wind_en_mps, band) for i in range(count)]
+
+
+def rain_haze_fog(rate_mmh: float, camera_above_fog_m: float, column_m: float,
+                  fog_density: float, fog_falloff: float) -> Dict[str, float]:
+    """The storm's rain haze on the height fog: ``falloff`` (the engine's
+    FogHeightFalloff: density x 2^(-falloff / 10 x metres above the fog)) opened to
+    halve once over the column, and ``density`` so the camera's height sees the
+    rain's extinction. Neither is ever below / above the scene's own (density at
+    least ``fog_density``, falloff at most ``fog_falloff``)."""
+    column = max(float(column_m), RAIN_HAZE_MIN_COLUMN_M)
+    falloff = min(float(fog_falloff), 10.0 * RAIN_HAZE_FALLOFF_COLUMN / column)
+    beta_per_m = rain_extinction_per_km(rate_mmh) / 1000.0
+    above = max(float(camera_above_fog_m), 0.0)
+    density = beta_per_m / FOG_BETA_PER_DENSITY * 2.0 ** (falloff / 10.0 * above)
+    return {"density": max(float(fog_density), density), "falloff": falloff}

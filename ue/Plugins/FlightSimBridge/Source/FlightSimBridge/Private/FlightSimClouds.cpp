@@ -1235,6 +1235,52 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		{
 			return false;
 		}
+		// Lane D follow-up (round 6's #15: a blue sky and a bright ground 2 km under
+		// a rain deck): in a storm preset with drawn rain and no stated visibility,
+		// the height fog carries the rain's own haze up to the camera
+		// (FFlightSimWeather::RainHazeFog, rain_veil.rain_haze_fog). Off with the veil.
+		TSharedPtr<FJsonObject> Haze = MakeShared<FJsonObject>();
+		const double HazeRate = Weather.DrawnRainRateMmh();
+		const bool bHaze = Preset == PresetStorm && HazeRate > 0.0 && VisibilityKm <= 0.0 &&
+		                   RainVeilMode == TEXT("on") && Aircraft != nullptr;
+		Haze->SetBoolField(TEXT("applied"), bHaze);
+		if (bHaze)
+		{
+			TArray<TSharedPtr<FJsonValue>> HazeRows;
+			for (TObjectIterator<UExponentialHeightFogComponent> It; It; ++It)
+			{
+				UExponentialHeightFogComponent* Fog = *It;
+				if (Fog == nullptr || Fog->GetWorld() != World || !Fog->IsVisible())
+				{
+					continue;
+				}
+				const double FogZM = Fog->GetComponentLocation().Z / WorldCmPerMetre;
+				const double AboveFogM = Aircraft->GetActorLocation().Z / WorldCmPerMetre - FogZM;
+				const double ColumnM = bDeckAbove ? DeckBaseM : AircraftUpM + 1000.0;
+				double Density = Fog->FogDensity, Falloff = Fog->FogHeightFalloff;
+				FFlightSimWeather::RainHazeFog(HazeRate, AboveFogM, ColumnM, Fog->FogDensity, Fog->FogHeightFalloff,
+				                               Density, Falloff);
+				TSharedPtr<FJsonObject> HazeRow = MakeShared<FJsonObject>();
+				HazeRow->SetNumberField(TEXT("fog_density_before"), Fog->FogDensity);
+				HazeRow->SetNumberField(TEXT("fog_height_falloff_before"), Fog->FogHeightFalloff);
+				Fog->SetFogDensity(static_cast<float>(Density));
+				Fog->SetFogHeightFalloff(static_cast<float>(Falloff));
+				HazeRow->SetNumberField(TEXT("fog_density"), Density);
+				HazeRow->SetNumberField(TEXT("fog_height_falloff"), Falloff);
+				HazeRow->SetNumberField(TEXT("camera_above_fog_m"), AboveFogM);
+				HazeRow->SetNumberField(TEXT("column_m"), ColumnM);
+				HazeRows.Add(MakeShared<FJsonValueObject>(HazeRow));
+			}
+			Haze->SetArrayField(TEXT("height_fog"), HazeRows);
+			Haze->SetNumberField(TEXT("rain_rate_mmh"), HazeRate);
+		}
+		Haze->SetStringField(TEXT("law"),
+			TEXT("rain_veil.rain_haze_fog: in a storm preset with rain and no stated visibility, the fog's falloff "
+			     "halves it once over the column under the deck and its density gives the camera's height the "
+			     "rain's extinction (0.35 R^0.66 /km), never thinner than the scene's fog; -rain-veil=off keeps "
+			     "the scene's fog. UNCALIBRATED"));
+		Record->SetObjectField(TEXT("rain_haze"), Haze);
+	}
 	}
 	// round-2b weather-fx: the weather look's shafts and the tornado funnel (beauty only).
 	Scene.ApplyBeautyWeatherLook(World);

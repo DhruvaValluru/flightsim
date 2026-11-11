@@ -380,6 +380,21 @@ namespace FlightSimRainVeil
 	}
 }
 
+void FFlightSimWeather::RainHazeFog(double RateMmh, double CameraAboveFogM, double ColumnM, double FogDensity,
+                                    double FogFalloff, double& OutDensity, double& OutFalloff)
+{
+	// rain_veil.FOG_BETA_PER_DENSITY (0.1 ln(2)^2), RAIN_HAZE_FALLOFF_COLUMN, RAIN_HAZE_MIN_COLUMN_M.
+	constexpr double RainHazeFogBetaPerDensity = 0.048045301391820145;
+	constexpr double RainHazeFalloffColumn = 1.0;
+	constexpr double RainHazeMinColumnM = 1000.0;
+	const double Column = FMath::Max(ColumnM, RainHazeMinColumnM);
+	OutFalloff = FMath::Min(FogFalloff, 10.0 * RainHazeFalloffColumn / Column);
+	const double BetaPerM = FlightSimRainVeil::RainExtinctionPerKm(RateMmh) / 1000.0;
+	const double Density = BetaPerM / RainHazeFogBetaPerDensity
+		* FMath::Pow(2.0, OutFalloff / 10.0 * FMath::Max(CameraAboveFogM, 0.0));
+	OutDensity = FMath::Max(FogDensity, Density);
+}
+
 bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& AircraftCm, double AircraftUpM,
                                             bool bStorm, bool bDeck, double DeckBaseM, const FString& Mode,
                                             FString& Error)

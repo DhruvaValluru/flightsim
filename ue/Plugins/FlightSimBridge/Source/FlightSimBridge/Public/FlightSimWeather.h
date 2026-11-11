@@ -292,6 +292,12 @@ public:
 	bool ApplyBeautyRainVeil(UWorld* World, const FVector& AircraftCm, double AircraftUpM, bool bStorm,
 	                         bool bDeck, double DeckBaseM, const FString& Mode, FString& Error);
 	bool DrawsRainVeil() const { return VeilActor != nullptr; }
+	// Pure (core/scene/rain_veil.py rain_haze_fog): the storm's rain haze on the
+	// height fog -- its falloff opened to halve once over the column, its density set
+	// so the camera's height sees the rain's extinction; never thinner than the scene's.
+	static void RainHazeFog(double RateMmh, double CameraAboveFogM, double ColumnM, double FogDensity,
+	                        double FogFalloff, double& OutDensity, double& OutFalloff);
+	double DrawnRainRateMmh() const { return bRain ? RainRateMmh : 0.0; }
 
 	// Every registered volumetric cloud in the world checked the way the
 	// engine's cloud passes check it (a Volume material, flagged "Used with

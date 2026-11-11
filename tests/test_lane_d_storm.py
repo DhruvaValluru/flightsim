@@ -305,3 +305,30 @@ def test_the_water_film_is_pinned_listed_and_a_no_op_off_the_beauty_path():
     assert WEATHER_CPP.count("BeautyFilm = ") == 1
     assert "double BeautyFilm = 0.0;" in WEATHER_H
     assert _cpp_constant(WEATHER_CPP, "BeautyWindshieldFilm") == rain_veil.BEAUTY_WINDSHIELD_FILM
+
+
+# -- round 6's #15: the rain's own haze up to the camera ------------------------------
+
+
+def test_the_storm_rain_haze_reaches_the_camera_and_never_thins_the_fog():
+    # the engine's 0.2 falloff halves the fog every 50 m: nothing left at 2 km
+    haze = rain_veil.rain_haze_fog(10.0, 2000.0, 2400.0, 0.012, 0.2)
+    assert haze["falloff"] == pytest.approx(10.0 / 2400.0)
+    at_camera = haze["density"] * 2.0 ** (-haze["falloff"] / 10.0 * 2000.0) * rain_veil.FOG_BETA_PER_DENSITY
+    assert at_camera * 1000.0 == pytest.approx(rain_veil.rain_extinction_per_km(10.0))
+    # never thinner, never a steeper falloff than the scene's own fog
+    thick = rain_veil.rain_haze_fog(10.0, 2000.0, 2400.0, 5.0, 0.001)
+    assert thick == {"density": 5.0, "falloff": 0.001}
+    # a deck 300 m up is taken as a 1 km column
+    assert rain_veil.rain_haze_fog(10.0, 0.0, 300.0, 0.0, 0.2)["falloff"] == pytest.approx(0.01)
+
+
+def test_the_cpp_rain_haze_is_the_pythons_and_storm_only():
+    body = _function(WEATHER_CPP, "void FFlightSimWeather::RainHazeFog(")
+    assert _cpp_constant(body, "RainHazeFogBetaPerDensity") == pytest.approx(rain_veil.FOG_BETA_PER_DENSITY)
+    assert _cpp_constant(body, "RainHazeFalloffColumn") == rain_veil.RAIN_HAZE_FALLOFF_COLUMN
+    assert _cpp_constant(body, "RainHazeMinColumnM") == rain_veil.RAIN_HAZE_MIN_COLUMN_M
+    assert "OutDensity = FMath::Max(FogDensity, Density);" in body
+    assert "const bool bHaze = Preset == PresetStorm && HazeRate > 0.0 && VisibilityKm <= 0.0 &&" in CLOUDS_CPP
+    assert CLOUDS_CPP.count("FFlightSimWeather::RainHazeFog(") == 1
+    assert 'Record->SetObjectField(TEXT("rain_haze"), Haze);' in CLOUDS_CPP
