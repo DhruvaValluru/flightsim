@@ -1027,6 +1027,70 @@ def frame_traffic(spec) -> int:
     return moved
 
 
+#: Visual round 6: the tornado FLYBY's chase framing. Round 4's #10 ("c172
+#: near a tornado") drew no tornado: the "abeam" vortex axis sits 2.5 core
+#: radii (375 m) to the RIGHT of the track at the 45 %-of-the-run point
+#: (webapp.runs tornado_axis; the physics flies it and is not moved), so from
+#: the per-airframe chase slot 28 m behind the c172 it stood 66 deg off the
+#: view axis at the first frame and 111 deg at the last, past the 27 deg
+#: half-width of the 35 mm lens. The camera is the one thing that may move
+#: (the labels follow it): a plannable chase camera of a tornado flyby takes
+#: the HAZARD slot, left of and a little above the aircraft, aimed at the
+#: aircraft as every chase camera is, with a HAZARD_CHASE_FOCAL_MM lens
+#: (hfov 2 atan(18 / 15) = 100 deg, vfov 68 deg on the 36 x 20.25 mm sensor).
+#: Geometry for the 6 s c172 clip (51.4 m/s, the axis 139 m ahead / 375 m
+#: right of the start): the aim direction is atan2(110, 30) = 75 deg right of
+#: the heading; the axis is 485 m from the camera's track, at 71 deg at the
+#: first frame (4 deg left of centre) and 106 deg at the last (31 deg right
+#: of centre), inside the 50 deg half-width throughout; the aircraft sits at
+#: the frame's centre, 118 m away (4 deg, ~75 px wide at 1920). Vertically
+#: (aircraft 600 m AGL, camera 632 m, pitch -16 deg, +-34 deg): the ground
+#: contact's skirt at the frame's bottom, the funnel to its 750 m top and the
+#: wall cloud's underside at the frame's top; a lower AGL shows more skirt,
+#: less wall cloud. A stated camera field is never moved (plan() refuses by
+#: name). tests/test_visual_round6.py pins the arithmetic. UNCALIBRATED:
+#: probe render #10 on the render machine.
+HAZARD_CHASE_OFFSET = (-30.0, -110.0, 32.0)
+HAZARD_CHASE_FOCAL_MM = 15.0
+FRAMED_FOR_HAZARD = ("framed to show the aircraft and the tornado funnel (the abeam "
+                     "axis 375 m right of the track; core/scenario/camera.py "
+                     "HAZARD_CHASE_OFFSET, HAZARD_CHASE_FOCAL_MM)")
+_HAZARD_FIELDS = ("offset_forward_m", "offset_right_m", "offset_up_m", "focal_length_mm")
+
+
+def hazard_framing_wanted(spec) -> bool:
+    """A tornado flyby (the "abeam" aim: the funnel beside the track, which
+    the default chase slot never sees). The through-the-core run keeps its
+    wingman (default_cameras)."""
+    return (str(spec.weather_event.value) == "tornado"
+            and str(spec.weather_event.detail.get("aim", "abeam")) == "abeam")
+
+
+def _plan_hazard_slot(camera: "CameraSpec") -> bool:
+    """Move one chase camera's plannable offsets and lens to the hazard slot;
+    False when a field is stated (nothing moves) or it is already there."""
+    fields = [getattr(camera, name) for name in _HAZARD_FIELDS]
+    if any(q.source not in PLANNABLE_SOURCES for q in fields):
+        return False
+    values = HAZARD_CHASE_OFFSET + (HAZARD_CHASE_FOCAL_MM,)
+    if all(float(q.value) == v for q, v in zip(fields, values)):
+        return False
+    for name, value in zip(_HAZARD_FIELDS, values):
+        camera.plan(name, float(value), frm=FRAMED_FOR_HAZARD)
+    return True
+
+
+def frame_hazard(spec) -> int:
+    """Re-plan every plannable chase camera of a tornado flyby to the hazard
+    slot (:data:`HAZARD_CHASE_OFFSET`, :data:`HAZARD_CHASE_FOCAL_MM`);
+    returns how many moved. Nothing else is touched: not the vortex, not the
+    flight, not a camera the user stated."""
+    if not hazard_framing_wanted(spec):
+        return 0
+    return sum(1 for camera in spec.cameras
+               if str(camera.preset.value) == "chase" and _plan_hazard_slot(camera))
+
+
 def default_cameras(spec) -> List["CameraSpec"]:
     """The documented default camera set for a camera-less spec.
 
@@ -1043,7 +1107,12 @@ def default_cameras(spec) -> List["CameraSpec"]:
     if (str(spec.weather_event.value) == "tornado"
             and str(spec.weather_event.detail.get("aim")) == "core"):
         preset = "wingman"
-    return [CameraSpec.defaulted(
+    camera = CameraSpec.defaulted(
         camera_id="camera0", preset=preset, aircraft=aircraft,
         terrain_elevation_m=terrain,
-        frm="no camera stated; the documented default view")]
+        frm="no camera stated; the documented default view")
+    # Visual round 6: the tornado flyby's chase camera takes the hazard slot
+    # (frame_hazard), so the funnel beside the track is in the frame.
+    if preset == "chase" and hazard_framing_wanted(spec):
+        _plan_hazard_slot(camera)
+    return [camera]

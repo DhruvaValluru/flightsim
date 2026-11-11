@@ -3,8 +3,9 @@
 Round 4 (docs/visual/round_4) showed #10 ("c172 near a tornado over the Flint
 Hills at 600 m") with no tornado in the frame and the prairie red (ground R/G
 2.2 under a neutral sky), and #09's rain shaft as a smooth glowing cylinder.
-Pinned here by reading the source (no engine on this machine): the vortex
-axis is placed where the chase camera sees it, the funnel stops at a wall
+Pinned here by reading the source (no engine on this machine): the flyby's
+chase camera takes a slot that sees the funnel (the vortex and the flight
+are not moved: the owner's physics limit), the funnel stops at a wall
 cloud that turns at the model's own exterior rate, the beauty deck shadows
 the storm look's 10 deg beam, and the beauty shaft gets streaks, an eroded
 rim and a grey albedo inside the measure shaft's own volume -- each Python
@@ -21,6 +22,8 @@ from pathlib import Path
 import pytest
 
 from core.environment import tornado
+from core.scenario import camera as camera_mod
+from core.scenario.camera import default_cameras
 from core.scene import storm_cell, weather_look, world_beauty
 
 REPO = Path(__file__).resolve().parents[1]
@@ -39,13 +42,6 @@ CHECK = (REPO / "scripts" / "check_bridge_api.sh").read_text(encoding="utf-8")
 RUNNER_PY = (REPO / "core" / "scenario" / "runner.py").read_text(encoding="utf-8")
 RUNS_PY = (REPO / "webapp" / "runs.py").read_text(encoding="utf-8")
 
-#: The chase camera's frame: 55 deg horizontal (webapp.runs write_sky_plan's
-#: fallback, camera.py "Horizontal FOV ~54.4 deg"), 16:9, pitched about 6 deg
-#: down (round 4's #10: the horizon at row 215 of 720).
-CHASE_HALF_WIDTH_DEG = 27.5
-CHASE_HALF_HEIGHT_DEG = math.degrees(math.atan(math.tan(math.radians(27.5)) * 9.0 / 16.0))
-CHASE_PITCH_DOWN_DEG = 6.0
-C172_CHASE_BACK_M = 28.0
 
 
 def _assigned(name):
@@ -66,64 +62,116 @@ def _function(text, signature):
     return text[start:text.index("\n}\n", start)]
 
 
-# -- #10: the axis is where the chase camera looks ----------------------------------
+# -- #10: the chase camera looks where the funnel is (the vortex is not moved) ------
 
 
-def test_the_abeam_axis_stands_ahead_of_the_whole_run_inside_the_chase_frame():
-    """Round 4's #10: 139 m ahead, 375 m abeam = 67 deg off the view axis. Now
-    the c172's 6 s run (309 m) plus the standoff (3.5 x 600 m AGL = 2100 m)
-    ahead: inside the 27.5 deg half-width for every frame, its ground contact
-    inside the frame's lower half, the vortex wind at the aircraft a breeze."""
-    run_m = 100.0 * 1852.0 / 3600.0 * 6.0
-    ahead, abeam = tornado.abeam_placement("abeam", run_m, 600.0)
-    assert abeam == pytest.approx(2.5 * tornado.R_CORE_M) == 375.0
-    assert ahead == pytest.approx(run_m + 3.5 * 600.0)
-    for travelled in (0.0, run_m):                      # the first and the last frame
-        along = ahead - travelled + C172_CHASE_BACK_M
-        bearing = math.degrees(math.atan2(abeam, along))
-        depression = math.degrees(math.atan2(600.0, along))
-        assert bearing < CHASE_HALF_WIDTH_DEG * 0.5, (travelled, bearing)
-        assert depression < CHASE_HALF_HEIGHT_DEG + CHASE_PITCH_DOWN_DEG, (travelled, depression)
-    # Round 4's placement, for the record: outside the frame.
-    old = math.degrees(math.atan2(375.0, 0.45 * run_m + C172_CHASE_BACK_M))
-    assert old > 2 * CHASE_HALF_WIDTH_DEG
-    # The wind the aircraft feels at the end of the clip: the Rankine exterior.
-    r_end = math.hypot(ahead - run_m, abeam)
-    assert tornado.V_MAX_MPS * tornado.R_CORE_M / r_end < 5.0
+def _flyby_geometry():
+    """Round 4's #10 as the card flies it: the c172 at 100 kt for 6 s, the
+    abeam axis 45 % of the still-air run ahead and 2.5 core radii to the
+    RIGHT of the track (webapp.runs tornado_axis / severe_event_centre; the
+    physics is not moved)."""
+    speed = 100.0 * 1852.0 / 3600.0
+    run_m = speed * 6.0
+    return speed, 0.45 * run_m, 2.5 * tornado.R_CORE_M
 
 
-def test_the_placement_rule_keeps_core_and_stated_distances():
-    run_m = 1000.0
-    assert tornado.abeam_placement("core", run_m, 600.0) == (pytest.approx(450.0), 0.0)
-    assert tornado.abeam_placement("core", run_m, 600.0, 3000.0) == (3000.0, 0.0)
-    assert tornado.abeam_placement("abeam", run_m, 600.0, 2000.0) == (2000.0, 375.0)
-    # The standoff floor: a low pass still gets 1.5 km.
-    assert tornado.abeam_placement("abeam", run_m, 100.0)[0] == pytest.approx(run_m + 1500.0)
-    assert tornado.FRAME_AHEAD_MIN_M == 1500.0 and tornado.FRAME_AHEAD_PER_AGL == 3.5
+def _lens(focal_mm):
+    return (math.degrees(math.atan(camera_mod.DEFAULT_SENSOR_W_MM / 2.0 / focal_mm)),
+            math.degrees(math.atan(camera_mod.DEFAULT_SENSOR_H_MM / 2.0 / focal_mm)))
 
 
-def test_the_web_app_and_the_runner_place_the_axis_by_the_one_rule():
+def test_the_hazard_slot_frames_the_aircraft_and_the_abeam_funnel():
+    """From the hazard slot, aimed at the aircraft, the abeam axis is inside the
+    half-width for every frame; from the per-airframe slot it never was."""
+    speed, ahead0, abeam = _flyby_geometry()
+    forward, right, up = camera_mod.HAZARD_CHASE_OFFSET
+    half_w, half_h = _lens(camera_mod.HAZARD_CHASE_FOCAL_MM)
+    assert 49.0 < half_w < 51.0 and 33.0 < half_h < 35.0           # a 100 x 68 deg lens
+    aim = math.degrees(math.atan2(-right, -forward))               # the aircraft's bearing
+    assert aim == pytest.approx(74.7, abs=0.1)
+    offs = []
+    for t in (0.0, 1.5, 3.0, 4.5, 6.0):
+        f = ahead0 - speed * t
+        bearing = math.degrees(math.atan2(abeam - right, f - forward))
+        offs.append(bearing - aim)
+    assert offs[0] == pytest.approx(-3.9, abs=0.2) and offs[-1] == pytest.approx(31.4, abs=0.2)
+    assert all(abs(o) < half_w - 15.0 for o in offs)               # the axis, with room for the body
+    # Round 4's slot (CHASE_OFFSETS c172p, the 35 mm lens): outside at both ends.
+    old_f, _, _ = camera_mod.CHASE_OFFSETS["c172p"]
+    old_half_w, _ = _lens(camera_mod.DEFAULT_FOCAL_MM)
+    for t in (0.0, 6.0):
+        bearing = math.degrees(math.atan2(abeam, ahead0 - speed * t - old_f))
+        assert bearing > 2.0 * old_half_w
+    # Vertically, the aircraft 600 m AGL: pitch to the aircraft, the ground
+    # contact's skirt at the bottom, the funnel's top and the wall cloud's
+    # underside inside the top.
+    lateral = math.hypot(forward, right)
+    pitch = math.degrees(math.atan2(-up, lateral))
+    # The closest approach (the pass abeam), the steepest angles: the binding case.
+    agl, axis_m = 600.0, abeam - right
+    top_m = weather_look.FUNNEL_TOP_SHARE * tornado.TOP_M
+    lowest = agl + up - axis_m * math.tan(math.radians(half_h - pitch))
+    highest = agl + up + axis_m * math.tan(math.radians(half_h + pitch))
+    assert axis_m == pytest.approx(485.0, abs=5.0)
+    assert lowest < 0.055 * tornado.TOP_M                           # the dust skirt is in frame
+    assert highest > top_m                                          # so is the wall cloud's base
+    assert agl + up < top_m                                         # the camera under the wall cloud
+    # The aircraft stays readable: wider than 3 deg at the frame's centre.
+    assert math.degrees(2.0 * math.atan(4.14 / math.hypot(lateral, up))) > 3.0
+
+
+def test_the_flyby_default_camera_takes_the_hazard_slot_and_the_core_keeps_its_wingman():
     from core.nl.compiler import compile_prompt
-    from webapp.runs import tornado_axis
 
-    spec = compile_prompt("fly the c172p near a tornado at 600 m, heading 90, for 6 seconds")
-    assert spec.weather_event.detail["aim"] == "abeam"
-    seconds = float(spec.duration.value)
-    run_m = float(spec.airspeed.value) * 1852.0 / 3600.0 * seconds
-    agl = float(spec.altitude.value) - float(spec.terrain_elevation.value or 0.0)
-    ahead, abeam = tornado.abeam_placement("abeam", run_m, agl)
-    north, east = tornado_axis(spec, {}, seconds)
-    hdg = math.radians(float(spec.heading.value))
-    assert north == pytest.approx(ahead * math.cos(hdg) + abeam * math.cos(hdg + math.pi / 2))
-    assert east == pytest.approx(ahead * math.sin(hdg) + abeam * math.sin(hdg + math.pi / 2))
-    # The headless runner builds its TornadoVortex from the same function.
-    assert "abeam_placement(" in RUNNER_PY and "abeam_placement(" in RUNS_PY
-    assert "2.5 * R_CORE_M" not in RUNNER_PY and "2.5 * R_CORE_M" not in RUNS_PY
-
+    flyby = compile_prompt("fly the c172p near a tornado at 600 m for 6 seconds")
+    assert flyby.weather_event.detail["aim"] == "abeam"
+    cam = default_cameras(flyby)[0]
+    assert str(cam.preset.value) == "chase"
+    assert (float(cam.offset_forward_m.value), float(cam.offset_right_m.value),
+            float(cam.offset_up_m.value)) == camera_mod.HAZARD_CHASE_OFFSET
+    assert float(cam.focal_length_mm.value) == camera_mod.HAZARD_CHASE_FOCAL_MM
+    assert str(cam.offset_right_m.source) == "derived"
+    assert cam.offset_right_m.frm == camera_mod.FRAMED_FOR_HAZARD
     through = compile_prompt("fly the c172p through a tornado at 600 m for 6 seconds")
-    assert through.weather_event.detail["aim"] == "core"
-    n, e = tornado_axis(through, {}, 6.0)
-    assert math.hypot(n, e) == pytest.approx(0.45 * float(through.airspeed.value) * 1852.0 / 3600.0 * 6.0)
+    assert str(default_cameras(through)[0].preset.value) == "wingman"
+    plain = compile_prompt("fly the c172p at 600 m for 6 seconds")
+    plain_cam = default_cameras(plain)[0]
+    assert (float(plain_cam.offset_forward_m.value), float(plain_cam.offset_right_m.value),
+            float(plain_cam.offset_up_m.value)) == camera_mod.CHASE_OFFSETS["c172p"]
+    assert float(plain_cam.focal_length_mm.value) == camera_mod.DEFAULT_FOCAL_MM
+
+
+def test_frame_hazard_moves_plannable_chase_cameras_only():
+    from core.nl.compiler import compile_prompt
+
+    spec = compile_prompt("chase view of the c172p near a tornado at 600 m for 6 seconds")
+    assert spec.cameras and str(spec.cameras[0].preset.value) == "chase"
+    assert camera_mod.frame_hazard(spec) == 1
+    cam = spec.cameras[0]
+    assert float(cam.offset_right_m.value) == camera_mod.HAZARD_CHASE_OFFSET[1]
+    assert float(cam.focal_length_mm.value) == camera_mod.HAZARD_CHASE_FOCAL_MM
+    assert camera_mod.frame_hazard(spec) == 0                       # idempotent
+    # A stated field holds the whole camera still.
+    stated = compile_prompt("chase view of the c172p near a tornado at 600 m for 6 seconds")
+    stated.cameras[0].set("offset_right_m", 40.0, frm="the user's camera")
+    assert camera_mod.frame_hazard(stated) == 0
+    assert float(stated.cameras[0].offset_forward_m.value) == camera_mod.CHASE_OFFSETS["c172p"][0]
+    # Not a tornado flyby: nothing moves.
+    storm = compile_prompt("chase view of the 747 through a thunderstorm at 2000 m for 6 seconds")
+    assert camera_mod.frame_hazard(storm) == 0
+    # The web app runs it among the planners, after the camera defaults.
+    assert "plan_camera_defaults(spec)\n" in RUNS_PY
+    assert RUNS_PY.index("frame_hazard(spec)") > RUNS_PY.index("plan_camera_defaults(spec)\n")
+
+
+def test_the_vortex_and_the_flight_are_not_moved():
+    """The owner's limit: the physics does not change. The abeam axis stays
+    2.5 core radii beside the 45 %-of-the-run point in both hosts; only the
+    camera moved."""
+    assert "offset = 0.0 if aim == \"core\" else 2.5 * R_CORE_M" in RUNNER_PY
+    assert "offset = 0.0 if aim == \"core\" else 2.5 * R_CORE_M" in RUNS_PY
+    assert "0.45 * u.kt_to_mps(float(spec.airspeed.value)) * seconds" in RUNNER_PY
+    assert "abeam_placement" not in (REPO / "core" / "environment" / "tornado.py").read_text(encoding="utf-8")
 
 
 # -- #10: the funnel and its wall cloud ---------------------------------------------
@@ -131,9 +179,9 @@ def test_the_web_app_and_the_runner_place_the_axis_by_the_one_rule():
 
 def test_the_funnel_stops_at_a_wall_cloud_that_turns_at_the_exterior_rate():
     block = SCENARIO_CPP[SCENARIO_CPP.index("// -- tornado funnel marker"):SCENARIO_CPP.index("// -- the aircraft")]
-    assert _cpp_constant(block, "TornadoFunnelTopShare") == weather_look.FUNNEL_TOP_SHARE == 0.6
+    assert _cpp_constant(block, "TornadoFunnelTopShare") == weather_look.FUNNEL_TOP_SHARE == 0.5
     assert _cpp_constant(block, "TornadoFunnelTopRadii") == weather_look.FUNNEL_TOP_RADII
-    assert _cpp_constant(block, "TornadoWallTopShare") == weather_look.WALL_TOP_SHARE == 0.9
+    assert _cpp_constant(block, "TornadoWallTopShare") == weather_look.WALL_TOP_SHARE == 0.8
     assert _cpp_constant(block, "TornadoWallRadii") == weather_look.WALL_RADII == 4.5
     # The condensation funnel reaches FunnelTopMetres, not the wind model's top.
     assert "const double FunnelTopMetres = TornadoFunnelTopShare * Card.TornadoTopMetres;" in block

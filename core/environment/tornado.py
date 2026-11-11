@@ -25,7 +25,7 @@ derived in C++.
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 from .base import Position, Term, WindNED, WindProvider
 
@@ -44,46 +44,6 @@ FADE_TOP_M = 3000.0
 STANDARD = ("Rankine combined vortex (solid-body core, 1/r exterior; "
             "Davies-Jones 1986 review); schematic core updraft; "
             "EF2-band v_max as a documented middle choice")
-
-#: Where the axis sits for the "abeam" aim (the prompt said "near", not
-#: "through"): ABEAM_RADII core radii beside the track (375 m: at 1.2 radii
-#: the chase camera lived inside the funnel mesh, probe-measured) and
-#: AHEAD of the clip's whole still-air run by a standoff, so the funnel
-#: stays in front of the aircraft for every frame. Visual round 4's #10
-#: ("c172 near a tornado") put the axis at the 45 %-of-the-run point, 139 m
-#: ahead of a 6 s c172 clip: from the chase camera the axis sat 67 deg off
-#: the view axis, past the 27 deg half-width of the frame, so no tornado
-#: was in the frame at all (docs/visual/PROBE_LOG.md ## round-2b
-#: weather-fx, #10). The standoff is the larger of FRAME_AHEAD_MIN_M and
-#: FRAME_AHEAD_PER_AGL x the aircraft's height above ground: the funnel's
-#: ground contact then sits atan(1 / 3.5) = 16 deg below the camera's
-#: horizontal (the chase frame's lower half) and the axis within
-#: atan(375 / 1500) = 14 deg of the heading. A stated distance ("a tornado
-#: 2 km ahead", weather_event.detail ahead_m) wins over the standoff. The
-#: wind at the aircraft follows the placement (Rankine 1/r: 3.6 m/s at
-#: 2100 m): the model is unchanged, only where the card puts the vortex.
-ABEAM_RADII = 2.5
-FRAME_AHEAD_MIN_M = 1500.0
-FRAME_AHEAD_PER_AGL = 3.5
-
-
-def abeam_placement(aim: str, still_air_run_m: float, agl_m: float,
-                    stated_ahead_m: Optional[float] = None,
-                    r_core_m: float = R_CORE_M) -> Tuple[float, float]:
-    """``(ahead_m, abeam_m)`` of the vortex axis from the run's start, along
-    and to the right of the heading. ``core`` (the prompt said through /
-    into): the stated distance, else 45 % of the run, on the track.
-    ``abeam``: the stated distance, else the whole run plus the framing
-    standoff; ABEAM_RADII core radii to the right either way."""
-    run = max(float(still_air_run_m), 0.0)
-    if stated_ahead_m is not None:
-        ahead = float(stated_ahead_m)
-    elif aim == "core":
-        ahead = 0.45 * run
-    else:
-        ahead = run + max(FRAME_AHEAD_MIN_M, FRAME_AHEAD_PER_AGL * max(float(agl_m), 0.0))
-    abeam = 0.0 if aim == "core" else ABEAM_RADII * float(r_core_m)
-    return ahead, abeam
 
 
 class TornadoVortex(WindProvider):

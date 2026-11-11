@@ -289,22 +289,13 @@ def environment_for(spec: ScenarioSpec, landcover_json=None,
         centre_n = n0 + ahead * _math.cos(hdg)
         centre_e = e0 + ahead * _math.sin(hdg)
         if event == "tornado":
-            from ..environment.tornado import TornadoVortex, abeam_placement
+            from ..environment.tornado import R_CORE_M, TornadoVortex
 
-            # The axis: core on the track at the 45 % point; abeam (the
-            # default) ahead of the whole run by the framing standoff and
-            # ABEAM_RADII core radii to the right (abeam_placement, the
-            # one rule the web app's tornado_axis places by as well).
             aim = str(spec.weather_event.detail.get("aim", "abeam"))
-            run_m = u.kt_to_mps(float(spec.airspeed.value)) * seconds
-            agl_m = (float(spec.altitude.value)
-                     - float(spec.terrain_elevation.value or 0.0))
-            along, abeam = abeam_placement(
-                aim, run_m, agl_m,
-                None if stated is None else float(stated))
+            offset = 0.0 if aim == "core" else 2.5 * R_CORE_M
             stack.add(TornadoVortex(
-                n0 + along * _math.cos(hdg) + abeam * _math.cos(hdg + _math.pi / 2),
-                e0 + along * _math.sin(hdg) + abeam * _math.sin(hdg + _math.pi / 2)))
+                centre_n + offset * _math.cos(hdg + _math.pi / 2),
+                centre_e + offset * _math.sin(hdg + _math.pi / 2)))
         else:
             from ..environment.downburst import Downburst
 

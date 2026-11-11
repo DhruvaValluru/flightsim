@@ -1810,9 +1810,9 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 		// modelled column condenses. Drawn on every render quality (both
 		// meshes are the scenario world's), so the labels see the beauty's
 		// silhouettes.
-		constexpr double TornadoFunnelTopShare = 0.6;
+		constexpr double TornadoFunnelTopShare = 0.5;
 		constexpr double TornadoFunnelTopRadii = 1.3;
-		constexpr double TornadoWallTopShare = 0.9;
+		constexpr double TornadoWallTopShare = 0.8;
 		constexpr double TornadoWallRadii = 4.5;
 		const double FunnelTopMetres = TornadoFunnelTopShare * Card.TornadoTopMetres;
 		const double WallTopMetres = TornadoWallTopShare * Card.TornadoTopMetres;
