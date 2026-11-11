@@ -346,6 +346,8 @@ namespace FlightSimRainVeil
 	constexpr double VeilShadeUnderDeck = 0.85;
 	constexpr double VeilShadeOpen = 1.0;
 	constexpr double VeilVary = 0.6;
+	// Round 47: the curtain cells' scale is never above this (the wide-lens cells).
+	constexpr double VeilVaryScaleMax = 1.0;
 	constexpr double ScudToneUnderDeck = 0.5;
 	constexpr double ScudToneOpen = 0.7;
 	constexpr double VeilStreakDensityA = 0.08;
@@ -517,6 +519,11 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 	Row->SetNumberField(TEXT("rain_rate_mmh"), RainRateMmh);
 	Row->SetNumberField(TEXT("extinction_per_km"), RainExtinctionPerKm(RainRateMmh));
 	Row->SetNumberField(TEXT("streak_density"), StreakDensity(RainRateMmh));
+	Row->SetBoolField(TEXT("vary_lens_cells"), bBeautyVeilLensCells);
+	Row->SetStringField(TEXT("vary_lens_cells_basis"), bBeautyVeilLensCells
+		? TEXT("round 47: the falling-curtain cells x min(1, pixel angle / 2 tan(27 deg) / 1280) per frame "
+		       "(VaryScale; #07's 250 mm lens drew one cell wider than the frame); -veil-lens-cells=off is the A/B")
+		: TEXT("-veil-lens-cells=off: generation 5's cells (a fifth of the radius across at every lens)"));
 	Row->SetStringField(TEXT("curtain_basis"),
 		TEXT("rain_veil: each shell the grey veil 1 - exp(-beta x its slab), beta = 0.35 R^0.66 /km (a STATED fit "
 		     "of visibility in rain), and streaks falling along the drops' path in the wind at one angular size on "
@@ -587,6 +594,16 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 	return true;
 }
 
+double FFlightSimWeather::VeilVaryScale(double PixelAngle, bool bLensCells)
+{
+	// rain_veil.veil_vary_scale: the streak cap's rule (streak_cap_rad) for the curtains.
+	if (!bLensCells || PixelAngle <= 0.0)
+	{
+		return FlightSimRainVeil::VeilVaryScaleMax;
+	}
+	return FMath::Min(FlightSimRainVeil::VeilVaryScaleMax, PixelAngle / FlightSimRainVeil::BeautyReferencePixelRad);
+}
+
 void FFlightSimWeather::StepBeautyRainVeil(const FFlightSimWeatherView& View, const FVector& Wind,
                                            const FVector& CamVel, double Share, double PixelAngle)
 {
@@ -603,6 +620,8 @@ void FFlightSimWeather::StepBeautyRainVeil(const FFlightSimWeatherView& View, co
 			// The drops' path as the beauty's streaks draw it (the cinematic share of the camera's motion).
 			Material->SetVectorParameterValue(TEXT("WindVel"), WeatherColour(Wind - CamVel));
 			Material->SetScalarParameterValue(TEXT("StreakRad"), static_cast<float>(VeilStreakPixels * PixelAngle));
+			Material->SetScalarParameterValue(TEXT("VaryScale"),
+				static_cast<float>(VeilVaryScale(PixelAngle, bBeautyVeilLensCells)));
 			Material->SetScalarParameterValue(TEXT("GroundRelZ"), static_cast<float>(View.GroundZCm - View.CameraCm.Z));
 			Material->SetScalarParameterValue(TEXT("Veil"),
 				static_cast<float>(ShellVeilAlpha(Rate, Inner, VeilShellRadiiM[Shell])));

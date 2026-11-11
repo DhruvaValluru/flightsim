@@ -76,6 +76,9 @@ namespace
 	const TCHAR* const AircraftFxParamStrobe = TEXT("Strobe");
 	const TCHAR* const AircraftFxParamOpacity = TEXT("Opacity");
 	const TCHAR* const AircraftFxParamFormation = TEXT("Formation");
+	const TCHAR* const AircraftFxParamFormationRamp = TEXT("FormationRamp");
+	// contrail_opacity.hlsl generation 6's fixed ramp (an age fraction).
+	constexpr double AircraftFxLegacyFormationRamp = 0.04;
 	const TCHAR* const AircraftFxParamTime = TEXT("TimeS");
 	const TCHAR* const AircraftFxParamStrength = TEXT("Strength");
 	const TCHAR* const AircraftFxParamBeamDirection = TEXT("BeamDirection");
@@ -265,11 +268,13 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	const bool bAfterburnerSwitch = AircraftFxSwitch(Params, TEXT("afterburner="), true, SwitchError);
 	// Pixel-moving: off unless asked for by name.
 	const bool bHeatHazeSwitch = AircraftFxSwitch(Params, TEXT("heat-haze="), false, SwitchError);
+	const bool bFormationRampSwitch = AircraftFxSwitch(Params, TEXT("contrail-formation-ramp="), true, SwitchError);
 	bMaterials = bAll && bMaterialsSwitch;
 	bLights = bAll && bLightsSwitch;
 	bContrails = bAll && bContrailsSwitch;
 	bAfterburner = bAll && bAfterburnerSwitch;
 	bHeatHaze = bAll && bHeatHazeSwitch;
+	bContrailFormationRamp = bAll && bFormationRampSwitch;
 	// round 5 (L4): the same -labels word the commandlet reads (aircraft_look.labels_requested).
 	bLabels = FParse::Param(*Params, TEXT("labels"));
 	// Round 23: the master bisect probes (aircraft_look.parse_aircraft_probes).
@@ -525,6 +530,12 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 		const double Formation = bVapour ? 0.0 : Constant(TEXT("contrail"), TEXT("FormationDelayS"), 0.15);
 		Instance->SetScalarParameterValue(FName(AircraftFxParamFormation),
 			static_cast<float>(Formation / FMath::Max(Lifetime, 0.01)));
+		// Round 47 (#13): the ramp in seconds (LOOK_GENERATION 7's FormationRamp); off,
+		// generation 6's 0.04 of the lifetime (1 s, 250 m at cruise: the four lines).
+		const double Ramp = !bVapour && Options.bContrailFormationRamp
+			? Constant(TEXT("contrail"), TEXT("FormationRampS"), 0.25) / FMath::Max(Lifetime, 0.01)
+			: AircraftFxLegacyFormationRamp;
+		Instance->SetScalarParameterValue(FName(AircraftFxParamFormationRamp), static_cast<float>(Ramp));
 		Trail.Mesh->SetMaterial(0, Instance);
 		Trail.Mesh->RegisterComponent();
 		BeautyOnlyActors.Add(Trail.Owner);
@@ -551,6 +562,12 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 	ContrailRow->SetStringField(TEXT("material"), ContrailMaterial != nullptr
 		? AircraftFxContrailMaterialPath : TEXT("absent"));
 	ContrailRow->SetBoolField(TEXT("enabled"), Options.bContrails);
+	ContrailRow->SetBoolField(TEXT("formation_ramp_on"), Options.bContrailFormationRamp);
+	ContrailRow->SetStringField(TEXT("formation_ramp_basis"), Options.bContrailFormationRamp
+		? TEXT("round 47: the trail forms over contrail.FormationRampS after FormationDelayS (FormationRamp = "
+		       "FormationRampS / LifetimeS); -contrail-formation-ramp=off is the A/B")
+		: TEXT("-contrail-formation-ramp=off: generation 6's ramp, 0.04 of LifetimeS (1 s at 25 s: #13's four "
+		       "faint lines that read as marks on the sea)"));
 	ContrailRow->SetStringField(TEXT("rule"), TEXT("drawn while atmosphere/T-R is below contrail.MaxTemperatureK ")
 		TEXT("and position/h-sl-meters above contrail.MinAltitudeM (Schmidt-Appleman threshold, no humidity ")
 		TEXT("modelled); wingtip vapour from the humidity test (aircraft_look.condensation), or while ")

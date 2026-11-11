@@ -102,6 +102,12 @@ VEIL_SHADE_OPEN = 1.0
 #: Round 26 (#07's flat grey field): the veil varied by falling curtains, x (1 +
 #: VEIL_VARY x (2n - 1)) over a smooth noise a fifth of the shell's radius across.
 VEIL_VARY = 0.6
+#: Round 47 (round 44's #07 still a flat grey field): the curtain cells are an ANGLE
+#: (a fifth of the radius across, 0.8 tall: 11.3 x 38.7 deg at every shell), so through
+#: #07's 250 mm lens (8.2 x 4.6 deg) one cell covered the frame and the veil was one
+#: value. The cells now scale like the streak cap (:func:`streak_cap_rad`), never above
+#: this; -veil-lens-cells=off keeps generation 5's (the A/B). M_RainCurtain 6.
+VEIL_VARY_SCALE_MAX = 1.0
 #: Round 19 (#15 and #09 still drew white puffs): the scud card is now MODULATE
 #: (M_ScudCard 3): the scene behind it x lerp(1, SCUD_TONE, rag). Under a deck a rag
 #: keeps half the light behind it; in open rain 0.7.
@@ -271,3 +277,13 @@ def streak_cap_rad(max_streak_rad: float, pixel_angle_rad: float) -> float:
 def scud_tone(deck_above: bool) -> float:
     """The modulate scud's tone: SCUD_TONE_UNDER_DECK under a drawn deck, else SCUD_TONE_OPEN."""
     return SCUD_TONE_UNDER_DECK if deck_above else SCUD_TONE_OPEN
+
+
+def veil_vary_scale(pixel_angle_rad: float, lens_cells: bool = True) -> float:
+    """The curtain cells' scale (M_RainCurtain's VaryScale) for a view: the pixel angle
+    over BEAUTY_REFERENCE_PIXEL_RAD below the reference (a long lens), VEIL_VARY_SCALE_MAX
+    at it and wider, and always VEIL_VARY_SCALE_MAX with ``lens_cells`` off."""
+    angle = float(pixel_angle_rad)
+    if not lens_cells or angle <= 0.0:
+        return VEIL_VARY_SCALE_MAX
+    return min(VEIL_VARY_SCALE_MAX, angle / BEAUTY_REFERENCE_PIXEL_RAD)

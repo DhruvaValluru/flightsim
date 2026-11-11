@@ -233,7 +233,7 @@ BASE_PARAMETERS = ("BaseColorMap", "BaseColor", "BaseColorMapWeight")
 #: (pinned to its text by tests/test_aircraft_look.py).
 FX_PARAMETERS = {
     "M_NavLightEmissive": ("LightColour", "Intensity", "Strobe", "BeamDirection", "BeamCos"),
-    "M_AircraftContrail": ("Opacity", "Formation"),
+    "M_AircraftContrail": ("Opacity", "Formation", "FormationRamp"),
     "M_AircraftAfterburner": ("Intensity", "CoreColour", "TipColour", "Shocks"),
     "M_AircraftHeatHaze": ("TimeS", "Strength"),
     # condensation-solver (scripts/aircraft_condensation_material.py PARAMETERS).
@@ -248,7 +248,7 @@ SHADER_INPUTS = {
     # round 5 (L4): exhaust soot aft of the nozzles (twin: soot_mask).
     "exhaust_soot": ("LocalPos", *SOOT_NOZZLE_PARAMETERS, "LengthRadii", "Noise"),
     "nav_bulb": ("UV", "LightColour", "Intensity", "Strobe", "CameraDir", "BeamDir", "BeamCos"),
-    "contrail_opacity": ("UV", "LocalPos", "Opacity", "Formation"),
+    "contrail_opacity": ("UV", "LocalPos", "Opacity", "Formation", "FormationRamp"),
     "afterburner_glow": ("UV", "Intensity", "CoreColour", "TipColour", "Shocks"),
     "heat_haze": ("UV", "LocalPos", "TimeS", "Strength"),
     # wet-airframe-canopy: "aircraft_wet" and "canopy_scratch".
@@ -848,6 +848,10 @@ CONTRAIL_DEFAULTS = {
     "MaxTemperatureK": 233.15, "MinAltitudeM": 7500.0, "LifetimeS": 25.0,
     "FormationDelayS": 0.15, "StartWidthM": 1.2, "SpreadMPerS": 0.9,
     "Opacity": 0.55, "PreseedS": 8.0,
+    # Round 47 (#13's four light lines): the trail forms over this many seconds
+    # after FormationDelayS (the material ramp was 0.04 of LifetimeS: 1 s, 250 m at
+    # cruise). About one wingspan of a 747 at 250 m/s. UNCALIBRATED.
+    "FormationRampS": 0.25,
 }
 #: Wingtip vapour: short trails from the wingtip anchors above a load factor.
 VAPOUR_DEFAULTS = {"MinNz": 4.0, "LifetimeS": 0.8, "StartWidthM": 0.25,
@@ -971,7 +975,10 @@ UE_DISTORTION_OFFSET_FUDGE = 0.00023
 #: FFlightSimAircraftFXOptions::ParseParams's switches: (key, default). A
 #: word other than these is refused by name (aircraft_look.switch).
 FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", True), ("aircraft-lights=", True),
-               ("contrails=", True), ("afterburner=", True), ("heat-haze=", False))
+               ("contrails=", True), ("afterburner=", True), ("heat-haze=", False),
+               # Round 47 (#13): the contrail's formation ramp in seconds (on) or
+               # generation 6's 0.04 of the lifetime (off, the A/B).
+               ("contrail-formation-ramp=", True))
 SWITCH_ON = ("on", "1", "true")
 SWITCH_OFF = ("off", "0", "false")
 

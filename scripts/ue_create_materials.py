@@ -527,7 +527,7 @@ WINDSHIELD_FILM_TILES = 1.5
 #: Lane D (2026-11-11): the beauty rain veil (core/scene/rain_veil.py,
 #: FlightSimWeather.cpp ApplyBeautyRainVeil): the curtain's shells and the scud cards.
 CURTAIN_PARAMETERS = ("WindVel", "FallCmps", "Time", "Radius", "StreakRad", "StreakDensity",
-                      "StreakAlpha", "Veil", "GroundRelZ", "Seed", "Shade", "VeilVary")
+                      "StreakAlpha", "Veil", "GroundRelZ", "Seed", "Shade", "VeilVary", "VaryScale")
 SCUD_PARAMETERS = ("Time", "Shade")
 #: The curtain's and the scud's albedo as lit translucent surfaces: the rain veil
 #: and a rag of cloud scatter nearly all they intercept (grey-white, lit by the
@@ -605,13 +605,15 @@ STORM_SCATTERING_PROPERTIES = {
 #: the lit veil carried #10's green).
 #: M_RainCurtain 5: ONE SceneColor tap at offset 0 (round 36: four offset taps drew
 #: ghost copies of the aircraft).
+#: M_RainCurtain 6: VaryScale, the falling curtains' cells shrunk with a long lens (round 44's
+#: #07: at 250 mm one cell was wider than the frame; default 1 = generation 5).
 #: M_ScudCard 3: MODULATE, unlit (round 19: lit cards drew white under the deck).
 #: M_StormCell 6: the beauty precipitation curtain and scud ("Curtain", storm_cell.hlsl;
 #: lane D 2026-11-11, round 4's #09 ring and cylinder; default 0 = generation 5).
 #: M_RainDrops 6: the beauty streak's softness and per-drop variation (Soft, Vary;
 #: lane D 2026-11-11, round 4's "scratches on the lens"; default 0 = generation 5).
 STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChannel": "2",
-                     "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "5",
+                     "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "6",
                      "M_ScudCard": "3"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
@@ -2045,14 +2047,16 @@ def create_rain_curtain():
     lib = unreal.MaterialEditingLibrary
     _translucent_unlit(material, unreal.BlendMode.BLEND_TRANSLUCENT)
     params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i)
-              for i, name in enumerate(CURTAIN_PARAMETERS) if name != "Shade"}   # Shade: the tone
+              for i, name in enumerate(CURTAIN_PARAMETERS) if name not in ("Shade", "VaryScale")}   # Shade: the tone
+    # Generation 6 (round 47): VaryScale defaults to 1, the generation-5 cells.
+    params["VaryScale"] = weather_parameter(material, lib, "VaryScale", -1800, 760, default=1.0)
     opacity = custom(material, lib, "rain_curtain", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
         "Rel": relative_position(material, lib, -1800, 700, False, "camera"),
         "WindVel": params["WindVel"], "FallCmps": params["FallCmps"], "Time": params["Time"],
         "Radius": params["Radius"], "StreakRad": params["StreakRad"], "StreakDensity": params["StreakDensity"],
         "StreakAlpha": params["StreakAlpha"], "Veil": params["Veil"],
         "GroundRelZ": params["GroundRelZ"], "Seed": params["Seed"],
-        "VeilVary": params["VeilVary"]}, -900, 0)
+        "VeilVary": params["VeilVary"], "VaryScale": params["VaryScale"]}, -900, 0)
     fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -600, 0)
     fade.set_editor_property("fade_distance_default", CURTAIN_DEPTH_FADE_CM)
     lib.connect_material_expressions(opacity, "", fade, "Opacity")

@@ -81,7 +81,8 @@ REPO = os.path.dirname(_HERE)
 #: glass, physical bulbs and plume); 4: round 5 L4 -- measured metals and
 #: rubber (Physically Based API), paint Metallic 0 with an albedo cap, low
 #: panel lines, exhaust soot, the Thin Translucent canopy master.
-LOOK_GENERATION = "6"
+#: 7: round 47 -- M_AircraftContrail's FormationRamp (#13's four light lines).
+LOOK_GENERATION = "7"
 LOOK_GENERATION_TAG = "FlightSimAircraftLookGeneration"
 #: The engine's white texture, the default of every BaseColorMap
 #: (Engine/Content/EngineResources/WhiteSquareTexture.uasset, present in 5.7.4).
@@ -621,12 +622,15 @@ def create_aircraft_contrail():
     lighting = getattr(unreal.TranslucencyLightingMode, "TLM_VOLUMETRIC_NON_DIRECTIONAL", None)
     if lighting is not None:
         material.set_editor_property("translucency_lighting_mode", lighting)
-    opacity_name, formation_name = look.FX_PARAMETERS["M_AircraftContrail"]
+    opacity_name, formation_name, ramp_name = look.FX_PARAMETERS["M_AircraftContrail"]
     opacity = _custom(material, "contrail_opacity", "CMOT_FLOAT1", {
         "UV": (_uv(material, -700, 0), ""),
         "LocalPos": (_node(material, unreal.MaterialExpressionLocalPosition, -700, 100), ""),
         "Opacity": (_scalar(material, opacity_name, 0.55, -700, 200), ""),
-        "Formation": (_scalar(material, formation_name, 0.01, -700, 300), "")}, -400, 100)
+        "Formation": (_scalar(material, formation_name, 0.01, -700, 300), ""),
+        # LOOK_GENERATION 7 (round 47, #13): the formation ramp as an age fraction;
+        # 0.04 is generation 6's fixed ramp (the C++ sets FormationRampS / LifetimeS).
+        "FormationRamp": (_scalar(material, ramp_name, 0.04, -700, 400), "")}, -400, 100)
     lib = unreal.MaterialEditingLibrary
     lib.connect_material_property(_const3(material, (0.92, 0.94, 0.97), -400, -100), "",
                                   unreal.MaterialProperty.MP_BASE_COLOR)

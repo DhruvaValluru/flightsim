@@ -10,8 +10,16 @@
 //   LocalPos  float3  local position, cm (noise)
 //   Opacity   float   peak opacity
 //   Formation float   age fraction before which the trail has not formed yet
+//   FormationRamp float age fraction over which it forms (0.04: generation 6; the C++ sets
+//                 contrail.FormationRampS / LifetimeS)
 // Returns float opacity.
-float formed = smoothstep(Formation, Formation + 0.04, UV.x);
+// Round 47 (#13's "four straight light lines on the sea", rounds 5-44): the ramp was
+// 0.04 of the LIFETIME, 1 s (250 m at a 747's cruise) for a 25 s trail, so from a
+// chase camera 110 m back every trail was still forming where the frame shows it: four
+// faint, thin, engine-less lines that read as marks on the sea. FormationRamp states
+// the ramp in seconds (LOOK_GENERATION 7); -contrail-formation-ramp=off is the A/B.
+float ramp = FormationRamp > 0.0 ? FormationRamp : 0.04;
+float formed = smoothstep(Formation, Formation + ramp, UV.x);
 float fade = 1.0 - smoothstep(0.35, 1.0, UV.x);
 float across = 1.0 - abs(UV.y * 2.0 - 1.0);
 across = across * across * (3.0 - 2.0 * across);

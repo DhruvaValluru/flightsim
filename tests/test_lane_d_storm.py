@@ -273,7 +273,7 @@ def test_the_veil_is_beauty_only_and_hidden_from_every_label():
     assert "if (VeilActor != nullptr)" in advance and "if (ScudMesh == nullptr)" in advance
     assert WEATHER_CPP.count("StepBeautyRainVeil(View, Wind, CameraVelocity, Share, PixelAngle);") == 1
     # the materials exist in the script, stamped, with their shader inputs
-    assert '"M_RainCurtain": "5"' in SCRIPT and '"M_ScudCard": "3"' in SCRIPT
+    assert '"M_RainCurtain": "6"' in SCRIPT and '"M_ScudCard": "3"' in SCRIPT
     assert 'custom(material, lib, "rain_curtain"' in SCRIPT and 'custom(material, lib, "scud_card"' in SCRIPT
     assert "create_rain_curtain()" in SCRIPT and "create_scud_card()" in SCRIPT
 
@@ -375,7 +375,7 @@ def test_round12_the_veil_and_scud_are_shaded_and_torn():
     assert 'ScudMaterial->SetScalarParameterValue(TEXT("Shade")' in WEATHER_CPP
     assert 'Material->SetScalarParameterValue(TEXT("Shade")' in WEATHER_CPP
     assert 'shade = scalar(material, lib, "Shade", 1.0' in SCRIPT
-    assert '"M_RainCurtain": "5"' in SCRIPT and '"M_ScudCard": "3"' in SCRIPT
+    assert '"M_RainCurtain": "6"' in SCRIPT and '"M_ScudCard": "3"' in SCRIPT
     scud = (SHADERS / "scud_card.hlsl").read_text(encoding="utf-8")
     assert "float tear = S.Value(" in scud and "S.Ss(0.55, 0.68," in scud
     assert "0.55 * falloff" not in scud                            # the falloff no longer makes the shape
@@ -469,3 +469,44 @@ def test_round26_the_veil_is_neutral_grey_at_any_light():
     scud = SCRIPT[SCRIPT.index("def create_scud_card"):SCRIPT.index("def create_rain_splash")]
     assert 'tone = scalar(material, lib, "Shade", 1.0' in scud
     assert rain_veil.VEIL_SHADE_UNDER_DECK < rain_veil.VEIL_SHADE_OPEN == 1.0
+
+
+# -- round 47: #07's curtains shrink with a long lens ------------------------------
+
+
+def test_round47_the_curtain_cells_scale_with_the_lens_and_hold_at_a_wide_one():
+    ref = rain_veil.BEAUTY_REFERENCE_PIXEL_RAD
+    assert rain_veil.veil_vary_scale(ref) == rain_veil.VEIL_VARY_SCALE_MAX == 1.0
+    assert rain_veil.veil_vary_scale(ref * 2.0) == 1.0            # wider: generation 5's cells
+    assert rain_veil.veil_vary_scale(ref / 7.0) == pytest.approx(1.0 / 7.0)
+    assert rain_veil.veil_vary_scale(ref / 7.0, lens_cells=False) == 1.0   # the A/B
+    assert rain_veil.veil_vary_scale(0.0) == 1.0
+    # #07's 250 mm frame (8.2 deg across): a cell is a fifth of the radius x the scale
+    # wide, so at 54 deg one cell is 11.3 deg (wider than the frame) and now several fit.
+    hfov = 2.0 * math.atan(18.0 / 250.0)
+    pixel = 2.0 * math.tan(hfov / 2.0) / 1280.0
+    cell = math.atan(0.2 * rain_veil.veil_vary_scale(pixel))
+    assert math.atan(0.2) > hfov and hfov / cell > 4.0
+
+
+def test_round47_the_curtain_shader_cpp_and_script_carry_vary_scale():
+    shader = (SHADERS / "rain_curtain.hlsl").read_text(encoding="utf-8")
+    assert "float vs = VaryScale > 0.0 ? min(VaryScale, 1.0) : 1.0;" in shader
+    assert "arc / (Radius * 0.2 * vs)" in shader and "/ (Radius * 0.8 * vs)" in shader
+    assert '"VaryScale"' in SCRIPT and '"VaryScale": params["VaryScale"]' in SCRIPT
+    assert 'weather_parameter(material, lib, "VaryScale", -1800, 760, default=1.0)' in SCRIPT
+    assert '"M_RainCurtain": "6"' in SCRIPT
+    assert _cpp_constant(_veil_cpp(), "VeilVaryScaleMax") == rain_veil.VEIL_VARY_SCALE_MAX
+    scale = _function(WEATHER_CPP, "double FFlightSimWeather::VeilVaryScale(")
+    assert "PixelAngle / FlightSimRainVeil::BeautyReferencePixelRad" in scale
+    assert "if (!bLensCells || PixelAngle <= 0.0)" in scale
+    step = _function(WEATHER_CPP, "void FFlightSimWeather::StepBeautyRainVeil(")
+    assert 'TEXT("VaryScale")' in step and "VeilVaryScale(PixelAngle, bBeautyVeilLensCells)" in step
+    # the A/B: the command line or FLIGHTSIM_RENDER_SWITCHES, refused unless on|off,
+    # set before the veil is built, recorded
+    build = CLOUDS_CPP[CLOUDS_CPP.index("bool FFlightSimWorldBeauty::Build("):]
+    assert 'FParse::Value(*Switches, TEXT("veil-lens-cells="), VeilLensCellsSwitch);' in build
+    assert build.index("Weather.SetBeautyVeilLensCells(") < build.index("Weather.ApplyBeautyRainVeil(")
+    assert "-veil-lens-cells=%s is not on or off" in build
+    assert 'TEXT("vary_lens_cells")' in WEATHER_CPP
+    assert "void SetBeautyVeilLensCells(bool bOn)" in WEATHER_H

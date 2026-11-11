@@ -298,6 +298,12 @@ public:
 	static void RainHazeFog(double RateMmh, double CameraAboveFogM, double ColumnM, double FogDensity,
 	                        double FogFalloff, double& OutDensity, double& OutFalloff);
 	double DrawnRainRateMmh() const { return bRain ? RainRateMmh : 0.0; }
+	// Round 47 (#07, 250 mm: one falling-curtain cell wider than the frame): the veil's
+	// curtain cells shrink with the view's pixel angle (on) or keep generation 5's fixed
+	// angle (off). -veil-lens-cells=on|off / FLIGHTSIM_RENDER_SWITCHES; set before
+	// ApplyBeautyRainVeil (rain_veil.veil_vary_scale is the Python twin).
+	void SetBeautyVeilLensCells(bool bOn) { bBeautyVeilLensCells = bOn; }
+	static double VeilVaryScale(double PixelAngle, bool bLensCells);
 
 	// Every registered volumetric cloud in the world checked the way the
 	// engine's cloud passes check it (a Volume material, flagged "Used with
@@ -441,6 +447,7 @@ private:
 	AActor* VeilActor = nullptr;
 	TArray<UMaterialInstanceDynamic*> VeilShellMaterials;
 	TArray<double> VeilShellRadiiM;
+	bool bBeautyVeilLensCells = true;
 	AActor* ScudActor = nullptr;
 	UProceduralMeshComponent* ScudMesh = nullptr;
 	UMaterialInstanceDynamic* ScudMaterial = nullptr;

@@ -1116,6 +1116,22 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		Error = FString::Printf(TEXT("world_beauty.rain_veil: -rain-veil=%s is not on or off"), *RainVeilMode);
 		return false;
 	}
+	// Round 47 (#07's flat grey field through a 250 mm lens): the veil's falling
+	// curtains shrink with the lens (on) or keep generation 5's cells (off), from the
+	// command line or FLIGHTSIM_RENDER_SWITCHES like -deck-shadow=.
+	FString VeilLensCellsSwitch = TEXT("on");
+	{
+		const FString Switches = FString(Params != nullptr ? Params : TEXT("")) + TEXT(" ")
+			+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+		FParse::Value(*Switches, TEXT("veil-lens-cells="), VeilLensCellsSwitch);
+	}
+	if (VeilLensCellsSwitch != TEXT("on") && VeilLensCellsSwitch != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.rain_veil: -veil-lens-cells=%s is not on or off"),
+		                        *VeilLensCellsSwitch);
+		return false;
+	}
+	Weather.SetBeautyVeilLensCells(VeilLensCellsSwitch == TEXT("on"));
 
 	// -- what the card says --------------------------------------------------
 	// Key by key (WorldLookValue; world_beauty.card_inputs is the Python twin):
