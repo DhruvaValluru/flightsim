@@ -14,6 +14,8 @@ the loop is `docs/visual/FIX_ROUND_PROTOCOL.md`. Each scene's compile is pinned 
 - A material that samples SceneColor at offsets pastes ghost copies of the aircraft.
 - The round script's prep classes decide what rebuilds: add new material scripts to the materials rule.
 - Owner decision pending: stock airframes cruise gear-down (JSBSim default); gear-up moves physics baselines.
+- #12 cockpit (round 46): canopy clear, but no instrument panel is drawn (cowl, glareshield and frame only);
+  its mask_vs_geometry and depth_vs_geometry clauses fail because the camera sits inside the hull.
 
 **The drawn flight path (2026-10-09, `phase-2-testing`; docs/ROUTE.md is
 the record).** LANDED: the `route` spec block (core/scenario/blocks.py
