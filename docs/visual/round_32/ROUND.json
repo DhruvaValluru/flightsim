@@ -1,0 +1,23 @@
+﻿{
+    "round":  32,
+    "commit":  "b51e22ab",
+    "full":  false,
+    "scenes":  [
+                   10
+               ],
+    "switches":  "-look-volumetric-fog=off",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  111.2
+                },
+    "outcomes":  [
+                     {
+                         "number":  10,
+                         "outcome":  "done",
+                         "seconds":  109.9,
+                         "why":  "clip ready"
+                     }
+                 ]
+}
