@@ -156,6 +156,15 @@ namespace FlightSimWorldPure
 	constexpr double CloudOvercastCover = 0.85;
 	constexpr double StratocumulusMaxThicknessM = 900.0;
 	constexpr double StratocumulusMinCover = 0.5;
+	// Round 7 (lane E, world_beauty.FAIR_CLOUD_SHADOW_PRESETS / _MIN_COVER,
+	// fair_cloud_shadows): a clear or hazy world whose drawn layer covers at
+	// least this casts its cumulus shadows on the ground (round 4's clear
+	// scenes drew clouds over unshadowed ground).
+	constexpr double FairCloudShadowMinCover = 0.1;
+	inline bool FairCloudShadows(int Preset, double Cover)
+	{
+		return (Preset == PresetClear || Preset == PresetHazy) && Cover >= FairCloudShadowMinCover;
+	}
 	// Visual round 6: the deck shadows the beam (world_beauty.DECK_SHADOW_PRESETS,
 	// DECK_SHADOW_MIN_COVER, deck_shadows_beam): a deck preset with a drawn layer
 	// of at least this cover turns the sun's cloud shadows on in beauty.
@@ -1752,6 +1761,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			TopCover = FMath::Max(TopCover, State.Cover);
 		}
 		const bool bWanted = DeckShadowsBeam(Preset, TopCover);
+		const bool bFairShadows = FairCloudShadows(Preset, TopCover);
 		const bool bSwitchOn = DeckShadowSwitch != TEXT("off");
 		UDirectionalLightComponent* DeckSun = Scene.Sun != nullptr
 			? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
@@ -1760,10 +1770,15 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		DeckShadow->SetNumberField(TEXT("top_cover"), TopCover);
 		DeckShadow->SetNumberField(TEXT("min_cover"), DeckShadowMinCover);
 		DeckShadow->SetBoolField(TEXT("deck_shadows_beam"), bWanted);
+		DeckShadow->SetBoolField(TEXT("fair_cloud_shadows"), bFairShadows);
+		DeckShadow->SetNumberField(TEXT("fair_min_cover"), FairCloudShadowMinCover);
 		if (DeckSun != nullptr)
 		{
 			DeckShadow->SetBoolField(TEXT("sun_cast_cloud_shadows_before"), DeckSun->bCastCloudShadows != 0);
-			if (bWanted && bSwitchOn)
+			// Round 7 (lane E): a clear or hazy world's drawn fair cumulus casts
+			// its shadows on the ground too (round 4's clear scenes had none):
+			// the same switch, the same -deck-shadow=off A/B.
+			if ((bWanted || bFairShadows) && bSwitchOn)
 			{
 				DeckSun->bCastCloudShadows = true;
 				DeckSun->MarkRenderStateDirty();
@@ -1771,7 +1786,9 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			DeckShadow->SetBoolField(TEXT("sun_cast_cloud_shadows"), DeckSun->bCastCloudShadows != 0);
 		}
 		DeckShadow->SetStringField(TEXT("applied"), DeckSun == nullptr ? TEXT("no sun light in the scene")
-			: (!bWanted ? TEXT("not a deck preset with a drawn layer of min_cover: the scene's switch stands")
+			: (!bWanted ? (bFairShadows && bSwitchOn
+				? TEXT("a clear or hazy world's drawn cumulus (fair_min_cover) casts its cloud shadows (round 7)")
+				: TEXT("not a deck preset with a drawn layer of min_cover: the scene's switch stands"))
 			   : (bSwitchOn ? TEXT("the sun casts the drawn deck's cloud shadow (bCastCloudShadows)")
 			                : TEXT("-deck-shadow=off: the scene's switch stands"))));
 		DeckShadow->SetStringField(TEXT("basis"),

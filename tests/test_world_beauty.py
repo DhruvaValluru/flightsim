@@ -975,3 +975,23 @@ def _compile_block_and_run(tmp_path, main):
                     "-Wno-unused-variable", "-o", str(tmp_path / "round7"), str(source)],
                    check=True, capture_output=True, text=True)
     return subprocess.run([str(tmp_path / "round7")], check=True, capture_output=True, text=True).stdout.splitlines()
+
+
+@NEEDS_CXX
+def test_round7_a_clear_worlds_cumulus_casts_its_shadows(tmp_path):
+    """Round 7 (lane E): clear and hazy worlds with a drawn layer of at least
+    FAIR_CLOUD_SHADOW_MIN_COVER turn the sun's cloud shadows on (C++ ==
+    Python); the deck law and the -deck-shadow=off A/B are untouched."""
+    cases = [(p, c) for p in range(5) for c in (0.0, 0.0999, 0.1, 0.35, 0.9)]
+    main = ["using namespace FlightSimWorldPure;", "int main() {"]
+    main += [f"printf(\"fair %d\\n\", FairCloudShadows({p}, {c!r}) ? 1 : 0);" for p, c in cases]
+    main.append("printf(\"min %.17g\\n\", FairCloudShadowMinCover);")
+    main.append("return 0; }")
+    lines = _compile_block_and_run(tmp_path, "\n".join(main))
+    got = [l.split()[1] == "1" for l in lines if l.startswith("fair ")]
+    assert got == [wb.fair_cloud_shadows(wb.PRESETS[p], [c]) for p, c in cases]
+    assert [float(l.split()[1]) for l in lines if l.startswith("min ")] == [wb.FAIR_CLOUD_SHADOW_MIN_COVER]
+    assert wb.fair_cloud_shadows("clear", [0.35]) and not wb.fair_cloud_shadows("storm", [1.0])
+    assert "const bool bFairShadows = FairCloudShadows(Preset, TopCover);" in CLOUDS_CPP
+    assert "if ((bWanted || bFairShadows) && bSwitchOn)" in CLOUDS_CPP
+    assert 'DeckShadow->SetBoolField(TEXT("fair_cloud_shadows"), bFairShadows);' in CLOUDS_CPP

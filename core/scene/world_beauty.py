@@ -183,6 +183,25 @@ def deck_shadows_beam(preset: str, layer_covers: Sequence[float]) -> bool:
         float(cover) >= DECK_SHADOW_MIN_COVER for cover in layer_covers)
 
 
+#: Round 7 (lane E, 2026-11-11; C++ FairCloudShadows): round 4's clear scenes
+#: drew cumulus over ground with no cloud shadows on it. A clear or hazy world
+#: whose drawn layer covers at least FAIR_CLOUD_SHADOW_MIN_COVER turns the
+#: same switch on (bCastCloudShadows), so the cells' shadows dapple the tiles,
+#: the fog and the aircraft. The beam still lights the uncovered share, so the
+#: meter's clear-sky basis (beauty_look.scene_light) stands. Same cost as the
+#: deck's (the engine's cloud shadow map) and the same -deck-shadow=off A/B;
+#: recorded as world_beauty.clouds.deck_shadow.fair_cloud_shadows.
+#: UNCALIBRATED: probe #03 / #12.
+FAIR_CLOUD_SHADOW_PRESETS: Tuple[str, ...] = ("clear", "hazy")
+FAIR_CLOUD_SHADOW_MIN_COVER = 0.1
+
+
+def fair_cloud_shadows(preset: str, layer_covers: Sequence[float]) -> bool:
+    """Whether a clear or hazy world's drawn cumulus casts its cloud shadows."""
+    return preset in FAIR_CLOUD_SHADOW_PRESETS and any(
+        float(cover) >= FAIR_CLOUD_SHADOW_MIN_COVER for cover in layer_covers)
+
+
 def select_preset(storm: bool, rain_rate_mmh: float, precipitation_rain: bool,
                   cloud_cover: float, visibility_km: float) -> str:
     """The look preset for a card: a drawn or stated storm (is_storm_word) is ``storm``;
