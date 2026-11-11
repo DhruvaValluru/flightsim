@@ -88,6 +88,12 @@ public:
 	// "no_lumen_gi". Never true without a sidecar (Gate 6 beauty, measure).
 	static bool ExposureMeter(double& TargetP90, FString& Trigger);
 
+	// Lane A (2026-11-11): whether this look owns the beauty exposure (a
+	// sidecar applied an exposure). The commandlet's SUBJECT meter (the
+	// aircraft's own pixels, after the frame meter) runs only then, so Gate 6
+	// beauty (no sidecar) and measure (no look) never reach it.
+	static bool OwnsExposure();
+
 	// render.json "beauty_look", or null when no sidecar was applied (the
 	// manifest then has no such key, as before this lane).
 	static TSharedPtr<FJsonObject> Record();

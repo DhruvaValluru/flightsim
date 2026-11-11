@@ -77,9 +77,36 @@ SIDECAR_NAME = "hero_lighting.json"
 #: in-scatter outruns it" (aerial perspective) on the render machine.
 DIAGNOSTIC_SWITCHES: Dict[str, Optional[Tuple[str, ...]]] = {
     "sky-fill-probe": ("as-planned", "red", "off"),
-    "sky-cloud-ao": ("on", "off"),
+    "sky-cloud-ao": ("auto", "on", "off"),
     "aerial-perspective-scale": None,
 }
+#: Lane A (2026-11-11, "the planes are being too shadowed"): ``-sky-cloud-ao``
+#: defaults to ``auto`` -- the sky light's cloud ambient occlusion is OFF when
+#: the commandlet's one sky capture is taken at the aircraft with the
+#: volumetric clouds in it (its defaults), because that cube already holds the
+#: clouds overhead: under a deck its upper hemisphere is the deck's grey
+#: underside, the deck's diffuse transmission, and the cloud AO multiplied the
+#: fill again by the same deck's occlusion. With round 6's deck shadow on the
+#: beam (core/scene/world_beauty.py deck_shadows_beam) nothing else reached the
+#: airframe: round 5's #06 and #08 rendered black. ``on`` restores the old sky
+#: light for an A/B. The host decides (FlightSimHeroLighting.cpp); this is the
+#: rule's twin for tests and the probe log.
+SKY_CLOUD_AO_DEFAULT = "auto"
+
+
+def sky_cloud_ao_applies(switch: str = SKY_CLOUD_AO_DEFAULT, capture_clouds: int = 1,
+                         capture_at: str = "aircraft") -> bool:
+    """Whether the host leaves the sky light's cloud AO on (the twin of the
+    -sky-cloud-ao= block): ``off`` never, ``on`` always, ``auto`` only when
+    the capture does NOT already hold the clouds overhead."""
+    if switch not in DIAGNOSTIC_SWITCHES["sky-cloud-ao"]:
+        raise HeroLightingError("render.sky_fill_probe",
+                                f"render.sky_fill_probe: -sky-cloud-ao={switch} is not auto, on or off")
+    if switch == "off":
+        return False
+    if switch == "on":
+        return True
+    return not (int(capture_clouds) != 0 and capture_at == "aircraft")
 
 
 class HeroLightingError(ValueError):

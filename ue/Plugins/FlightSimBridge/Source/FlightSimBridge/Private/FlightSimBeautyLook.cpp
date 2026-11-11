@@ -1619,6 +1619,12 @@ bool FFlightSimBeautyLook::ExposureMeter(double& TargetP90, FString& Trigger)
 	return true;
 }
 
+bool FFlightSimBeautyLook::OwnsExposure()
+{
+	const FBeautyLookState& State = BeautyLookState();
+	return State.bApplied && State.bExposureApplied;
+}
+
 const FString& FFlightSimBeautyLook::LastError()
 {
 	return BeautyLookState().Error;
