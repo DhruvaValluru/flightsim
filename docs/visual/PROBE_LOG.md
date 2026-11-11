@@ -3223,6 +3223,19 @@ darker with slanted rain, but has no deck in the frame. #07 is a flat grey field
   tone relative to that local mean: 0.85 under a deck, 1.0 in the open. The veil is neutral
   grey under any light, and darker than the scene under a deck. The scud cards are already
   a single-scalar modulate, so they are neutral too.
+
+**Round 36 (029ead47).**
+* Ghost aircraft in #07, #09 and #15: generation 4's four SceneColor taps, 0.08 of the
+  screen apart, pasted shifted copies of the scene into the veil. M_RainCurtain 5 takes ONE
+  tap at the pixel's own UV, so the veil is lerp(scene, lum(scene) x Shade, alpha): no spatial
+  copies.
+* #10 still green with the unlit veil: it is the HEIGHT FOG's inscatter, which is the
+  SkyAtmosphere ambient. Scaling that ambient by (0.20, 0.21, 0.23) kept the grassland's hue.
+  Under a storm deck, the ambient contribution is now 0 and the fog's own inscattering is a
+  neutral grey of rain_veil.STORM_FOG_INSCATTER_NITS = 1500 cd/m^2 (a stated overcast-base
+  luminance). It is recorded as storm_deck_light.height_fog[].fog_inscattering_luminance.
+  The volumetric fog keeps its white albedo; its light is the sun (x 0.15) and the sky light,
+  whose lower hemisphere is now black.
 * #07 depth: the veil now varies by falling curtains (M_RainCurtain 3, VeilVary 0.6), smooth
   noise a fifth of each shell's radius across, falling at the drops' speed. That gives denser
   and thinner rain at three depths through the haze. Open-rain Shade goes back to 0.8: the
