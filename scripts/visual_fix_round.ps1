@@ -104,7 +104,7 @@ if ($Prep -eq "all") {
         } else {
             $changed = @(git diff --name-only $since HEAD)
             if ($changed | Where-Object { $_ -match '^ue/Plugins/[^/]+/Source/|^ue/Config/|^ue/FlightSim\.uproject$' }) { $steps += "build" }
-            if ($changed | Where-Object { $_ -match '^scripts/ue_create_materials\.py$|^scripts/fetch_weather_textures\.py$|^assets/shaders/|^assets/looks/|^core/scene/sky_hdri\.py$' }) { $steps += "materials" }
+            if ($changed | Where-Object { $_ -match '^scripts/ue_create_materials\.py$|^scripts/fetch_weather_textures\.py$|^scripts/ue_aircraft_master_materials\.py$|^scripts/aircraft_look\.py$|^scripts/aircraft_wet_layer\.py$|^assets/shaders/|^assets/looks/|^core/scene/sky_hdri\.py$' }) { $steps += "materials" }
             if ($changed | Where-Object { $_ -match '^scripts/[^/]*aircraft[^/]*\.py$|^assets/aircraft_config/' }) { $steps += "aircraft" }
         }
     }
