@@ -1,0 +1,31 @@
+﻿{
+    "round":  14,
+    "commit":  "9cffdc84",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   4
+               ],
+    "switches":  "-beauty-look=off",
+    "prep":  [
+                 "build"
+             ],
+    "seconds":  {
+                    "build":  16.3,
+                    "scenes":  194.3
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  98.7,
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  93.8,
+                         "why":  "clip ready"
+                     }
+                 ]
+}
