@@ -46,6 +46,9 @@ param(
     # render switches for this round only (FLIGHTSIM_RENDER_SWITCHES, e.g.
     # "-look-ssgi=off -deck-shadow=off"): an A/B pass is its own round number
     [string]$Switches = "",
+    # compile every scene afresh (and re-pin it); by default a round replays the
+    # spec pinned in runs\visual\specs\<NN>.json on that scene's first compile
+    [switch]$Recompile,
     [int]$Port = 8008
 )
 
@@ -155,6 +158,8 @@ try {
     }
     if (-not $up) { Refuse "webapp.not_up" "no answer on port $Port in 120 s; see $serverLog.err" }
     $batch = @("scripts\run_test_scenarios.py", "--still", "--server", "http://127.0.0.1:$Port")
+    $batch += @("--spec-dir", (Join-Path $repo "runs\visual\specs"))
+    if ($Recompile) { $batch += "--recompile" }
     if (-not $Full) { $batch += @("--only") + ($sceneList | ForEach-Object { "$_" }) }
     Run-Step "scenes" {
         & $py @batch
@@ -193,7 +198,7 @@ if (Test-Path (Join-Path $out "summary.json")) { $summary = Get-Content (Join-Pa
 $record = [ordered]@{
     round = $Round; commit = $head; full = [bool]$Full; scenes = $sceneList; switches = $Switches
     prep = $steps; seconds = $timings
-    outcomes = @($summary | ForEach-Object { [ordered]@{ number = $_.number; outcome = $_.outcome; seconds = $_.seconds; why = $_.why } })
+    outcomes = @($summary | ForEach-Object { [ordered]@{ number = $_.number; outcome = $_.outcome; seconds = $_.seconds; spec_sha256 = $_.spec_sha256; why = $_.why } })
 }
 $record | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $out "ROUND.json") -Encoding utf8
 

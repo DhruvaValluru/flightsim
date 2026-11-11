@@ -230,21 +230,56 @@ def apply_lighting(spec_dict, edits) -> None:
 
 def run_one(server, number, name, prompt, edits, args):
     result = {"number": number, "name": name, "prompt": prompt, "lighting": edits}
-    body = {"prompt": prompt, "compiler": args.compiler}
-    if args.still:
-        body["still"] = True
+    # Rounds 33-35: every round re-compiled each prompt with the LLM, which read
+    # #13 as 85 mm heading east one round and 35 mm heading north the next, so
+    # cross-round A/Bs compared different shots. --spec-dir pins the compile:
+    # the first round saves each scene's compiled spec as <NN>.json, later
+    # rounds replay it (--recompile compiles afresh and saves over it). The
+    # spec's sha256 rides the row, so two rounds are comparable only when equal.
+    pinned = _pinned_spec_path(args, number)
+    if pinned is not None and pinned.is_file() and not getattr(args, "recompile", False):
+        saved = json.loads(pinned.read_text(encoding="utf-8"))
+        result["compiler"] = saved.get("compiler")
+        result["notes"] = saved.get("notes", [])
+        result["spec_pinned"] = str(pinned)
+        spec_dict = saved["spec"]
     else:
-        body["clip_seconds"] = args.clip
-    status, payload = call(server, "POST", "/compile", body)
-    if status != 200 or "spec" not in payload:
-        return {**result, "outcome": "refused", "why": why(payload)}
-    result["compiler"] = payload.get("compiler")
-    result["notes"] = payload["spec"].get("notes", [])
-    if not payload["validation"]["ok"]:
-        return {**result, "outcome": "refused", "why": why(payload["validation"])}
-    spec_dict = payload["spec"]["dict"]
+        body = {"prompt": prompt, "compiler": args.compiler}
+        if args.still:
+            body["still"] = True
+        else:
+            body["clip_seconds"] = args.clip
+        status, payload = call(server, "POST", "/compile", body)
+        if status != 200 or "spec" not in payload:
+            return {**result, "outcome": "refused", "why": why(payload)}
+        result["compiler"] = payload.get("compiler")
+        result["notes"] = payload["spec"].get("notes", [])
+        if not payload["validation"]["ok"]:
+            return {**result, "outcome": "refused", "why": why(payload["validation"])}
+        spec_dict = payload["spec"]["dict"]
+        if pinned is not None:
+            pinned.parent.mkdir(parents=True, exist_ok=True)
+            pinned.write_text(json.dumps({"prompt": prompt, "compiler": result["compiler"],
+                                          "notes": result["notes"], "spec": spec_dict},
+                                         indent=1, sort_keys=True), encoding="utf-8")
+            result["spec_pinned"] = str(pinned)
+    result["spec_sha256"] = spec_sha256(spec_dict)
+    spec_dict = json.loads(json.dumps(spec_dict))   # lighting edits never touch the pinned copy
     apply_lighting(spec_dict, edits)
-    return run_spec(server, result, spec_dict, payload.get("compiler"), args)
+    return run_spec(server, result, spec_dict, result.get("compiler"), args)
+
+
+def _pinned_spec_path(args, number):
+    spec_dir = getattr(args, "spec_dir", None)
+    return Path(spec_dir) / f"{int(number):02d}.json" if spec_dir else None
+
+
+def spec_sha256(spec_dict) -> str:
+    """The compiled spec's identity: sha256 of its canonical JSON."""
+    import hashlib
+
+    return hashlib.sha256(json.dumps(spec_dict, sort_keys=True, separators=(",", ":"))
+                          .encode("utf-8")).hexdigest()
 
 
 def run_spec(server, result, spec_dict, compiler_name, args):
@@ -649,6 +684,11 @@ def main() -> int:
                         help="free memory a scene waits for (0: no check)")
     parser.add_argument("--memory-wait", type=float, default=600.0,
                         help="seconds to wait for the app and memory before stopping")
+    parser.add_argument("--spec-dir", default=None,
+                        help="pin each scene's compiled spec here as <NN>.json: saved on the first "
+                             "compile, replayed after (visual rounds compare like with like)")
+    parser.add_argument("--recompile", action="store_true",
+                        help="with --spec-dir: compile afresh and save over the pinned spec")
     parser.add_argument("--collect", action="store_true",
                         help="gather the last batch's results (runs/test_scenarios.json) "
                              "into runs/test_scenarios/ and stop")

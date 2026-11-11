@@ -119,3 +119,32 @@ def test_every_scene_row_carries_its_wall_seconds(tmp_path):
     assert rts.run_batch(_args(), {1, 2}, SCENES, run, lambda: None, summary, _gather(tmp_path)) == 0
     rows = json.loads(summary.read_text(encoding="utf-8"))
     assert all(isinstance(r["seconds"], float) and r["seconds"] >= 0 for r in rows)
+
+
+def test_a_pinned_spec_is_compiled_once_and_replayed(tmp_path, monkeypatch):
+    """Rounds 33-35: the LLM compiled #13 as two different shots in two rounds.
+    --spec-dir saves the first compile and replays it; --recompile refreshes it."""
+    compiles, runs = [], []
+    spec = {"aircraft": "B747", "cameras": [{"focal_length_mm": 35.0}]}
+
+    def call(server, method, path, body=None, timeout=0):
+        compiles.append(body["prompt"])
+        return 200, {"compiler": "llm", "spec": {"dict": dict(spec), "notes": []},
+                     "validation": {"ok": True}}
+
+    def run_spec(server, result, spec_dict, compiler, args):
+        runs.append((spec_dict, result["spec_sha256"]))
+        return {**result, "outcome": "done"}
+
+    monkeypatch.setattr(rts, "call", call)
+    monkeypatch.setattr(rts, "run_spec", run_spec)
+    args = SimpleNamespace(compiler="llm", still=True, clip=3.0, spec_dir=str(tmp_path), recompile=False)
+    first = rts.run_one("s", 13, "n", "p", {}, args)
+    spec["cameras"][0]["focal_length_mm"] = 85.0          # the LLM reads it differently next time
+    second = rts.run_one("s", 13, "n", "p", {}, args)
+    assert len(compiles) == 1 and first["spec_sha256"] == second["spec_sha256"]
+    assert runs[1][0]["cameras"][0]["focal_length_mm"] == 35.0
+    args.recompile = True
+    third = rts.run_one("s", 13, "n", "p", {}, args)
+    assert len(compiles) == 2 and third["spec_sha256"] != first["spec_sha256"]
+    assert (tmp_path / "13.json").is_file()
