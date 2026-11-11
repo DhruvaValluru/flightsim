@@ -1,0 +1,30 @@
+﻿{
+    "round":  11,
+    "commit":  "2757174c",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   4
+               ],
+    "switches":  "-subject-meter=off",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  175.1
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  83.8,
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  89.5,
+                         "why":  "clip ready"
+                     }
+                 ]
+}
