@@ -3590,6 +3590,7 @@ class RunManager:
             # backend rides in extra, only when FLIGHTSIM_WEATHER_BACKEND
             # asks for it.
             telemetry=telemetry, extra=list(extra) + weather_backend_flags())
+        command = with_render_switches(command)
         log = frames.parent / "render.log"
         # Unattended and watched (core/render/headless.py): no window, no
         # OS error box, no stdin; a pass that writes nothing for the stall
@@ -4680,3 +4681,31 @@ class RunManager:
             # verification are the product and the page shows them.
             run.push("done", "images ready (no mp4: install ffmpeg for "
                              "clips -- winget install ffmpeg)")
+
+
+def with_render_switches(command, switches=None):
+    """The render command with FLIGHTSIM_RENDER_SWITCHES on its argv.
+
+    Rounds 13-18: the switches reached only the engine code that reads the
+    environment itself, so -aircraft-materials=off and -beauty-look=off
+    rendered the planned frame. Now every switch rides the command line,
+    right after -run=, AHEAD of the planned flags: UE's FParse::Value takes
+    the first match, so a switch wins over a planned flag of the same name.
+    ``-beauty-look=off`` means a no-sidecar run: the planned
+    -beauty-look=<sidecar> token is dropped and nothing replaces it (the
+    engine look, grade and exposure plan are not applied).
+    """
+    import os
+    import shlex
+
+    text = os.environ.get("FLIGHTSIM_RENDER_SWITCHES", "") if switches is None else switches
+    tokens = shlex.split(text, posix=True) if text.strip() else []
+    if not tokens:
+        return list(command)
+    from core.scene.beauty_look import BEAUTY_LOOK_PREFIX
+
+    beauty_off = f"{BEAUTY_LOOK_PREFIX}off" in tokens
+    tokens = [t for t in tokens if t != f"{BEAUTY_LOOK_PREFIX}off"]
+    command = [c for c in command if not (beauty_off and str(c).startswith(BEAUTY_LOOK_PREFIX))]
+    at = next((i + 1 for i, c in enumerate(command) if str(c).startswith("-run=")), len(command))
+    return command[:at] + tokens + command[at:]
