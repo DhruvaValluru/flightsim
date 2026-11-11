@@ -1,0 +1,37 @@
+﻿{
+    "round":  17,
+    "commit":  "9cffdc84",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   4,
+                   8
+               ],
+    "switches":  "",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  404
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  103.9,
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  94.0,
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  8,
+                         "outcome":  "done",
+                         "seconds":  203.7,
+                         "why":  "clip ready"
+                     }
+                 ]
+}

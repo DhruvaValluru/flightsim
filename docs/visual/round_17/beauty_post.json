@@ -1,0 +1,19 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "01_golden_hour_a_4_flying_east": {
+   "post": "01_golden_hour_a_4_flying_east_post.jpg",
+   "source": "01_golden_hour_a_4_flying_east_frame_beauty_post.png"
+  },
+  "04_desert_a_4_sun_behind_the_camera": {
+   "post": "04_desert_a_4_sun_behind_the_camera_post.jpg",
+   "source": "04_desert_a_4_sun_behind_the_camera_frame_beauty_post.png"
+  },
+  "08_c172_over_fuji_sunrise_light_rain": {
+   "post": "08_c172_over_fuji_sunrise_light_rain_post.jpg",
+   "source": "08_c172_over_fuji_sunrise_light_rain_frame_beauty_post.png"
+  }
+ }
+}
