@@ -171,7 +171,7 @@ def write_round(number: int, gallery: Path = GALLERY, summary: Path = SUMMARY,
             {"steps_off": sorted(post), "frames": posted}, indent=1), encoding="utf-8")
     if summary.is_file():
         rows_out = [{**{k: r.get(k) for k in ("number", "name", "prompt", "outcome",
-                                               "why", "run_id", "lighting")},
+                                               "why", "run_id", "lighting", "seconds")},
                      **(look_report(r.get("run_id"), run_root) if r.get("run_id") else {})}
                     for r in json.loads(summary.read_text(encoding="utf-8"))]
         (out / "summary.json").write_text(json.dumps(rows_out, indent=1), encoding="utf-8")

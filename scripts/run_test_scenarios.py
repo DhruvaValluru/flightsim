@@ -711,11 +711,15 @@ def run_batch(args, wanted, scenarios=None, run=None, ready=None, summary: Path 
             print(f"\n[{number}] {name}\n    -> STOPPED: {refusal}")
             break
         print(f"\n[{number}] {name}\n    {prompt}")
+        started = time.monotonic()
         try:
             outcome = run(args.server, number, name, prompt, edits, args)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             outcome = {"number": number, "name": name, "prompt": prompt,
                        "outcome": "failed", "why": f"could not reach the app: {exc}"}
+        # wall seconds for the scene, engine start to frame on disk: what a
+        # fix round costs, so the round can be sized (visual_fix_round.ps1)
+        outcome["seconds"] = round(time.monotonic() - started, 1)
         results.append(outcome)
         write_summary(results, summary)
         print(f"    -> {outcome['outcome'].upper()}: {str(outcome.get('why', ''))[:200]}")

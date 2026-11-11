@@ -108,3 +108,14 @@ def test_a_helper_left_behind_by_a_finished_pass_is_reaped(tmp_path):
             break
         time.sleep(0.1)
     assert not alive or alive.startswith("Z")
+
+
+def test_every_scene_row_carries_its_wall_seconds(tmp_path):
+    summary = tmp_path / "s.json"
+
+    def run(server, number, name, prompt, edits, args):
+        return {"number": number, "name": name, "outcome": "done"}
+
+    assert rts.run_batch(_args(), {1, 2}, SCENES, run, lambda: None, summary, _gather(tmp_path)) == 0
+    rows = json.loads(summary.read_text(encoding="utf-8"))
+    assert all(isinstance(r["seconds"], float) and r["seconds"] >= 0 for r in rows)
