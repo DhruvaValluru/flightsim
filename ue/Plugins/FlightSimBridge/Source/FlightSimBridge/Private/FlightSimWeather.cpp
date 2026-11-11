@@ -359,6 +359,15 @@ void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const
 	constexpr double WeatherRaggedScaleM = 5000.0;
 	constexpr double WeatherRaggedSoftM = 1000.0;
 	constexpr double WeatherBeautyErosion = 0.6;
+	// Visual round 6: core/scene/storm_cell.py BEAUTY_SHAFT (round 4's #09 drew
+	// the rain shaft as a smooth glowing cylinder). The streaks, the eroded rim
+	// and the density floor ride the Ragged gate in storm_cell.hlsl; the albedo
+	// is the material's ShaftAlbedo parameter (storm_shaft_albedo.hlsl; its
+	// default 1 is the measure path's albedo, value for value). UNCALIBRATED.
+	constexpr double WeatherBeautyShaftStreakScale = 0.35;
+	constexpr double WeatherBeautyShaftRimErosion = 0.5;
+	constexpr double WeatherBeautyShaftDensityFloor = 0.25;
+	constexpr double WeatherBeautyShaftAlbedo = 0.55;
 	const TSharedPtr<FJsonObject>* CellRow = nullptr;
 	if (!bCell || StormMaterial == nullptr || !Record.IsValid() ||
 	    !Record->TryGetObjectField(TEXT("cell"), CellRow) || CellRow == nullptr || !CellRow->IsValid())
@@ -418,6 +427,22 @@ void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const
 		             static_cast<float>(WeatherRaggedScaleM), static_cast<float>(WeatherRaggedSoftM)));
 	StormMaterial->SetVectorParameterValue(TEXT("Noise"),
 		FLinearColor(NoiseDrawn.R, NoiseDrawn.G, static_cast<float>(WeatherBeautyErosion), NoiseDrawn.A));
+	// Round 6: the rain shaft's albedo (the streaks, rim and floor are the
+	// shader's own constants under the Ragged gate set above).
+	StormMaterial->SetScalarParameterValue(TEXT("ShaftAlbedo"), static_cast<float>(WeatherBeautyShaftAlbedo));
+	{
+		TSharedPtr<FJsonObject> Shaft = WeatherRecord();
+		Shaft->SetNumberField(TEXT("streak_scale"), WeatherBeautyShaftStreakScale);
+		Shaft->SetNumberField(TEXT("rim_erosion"), WeatherBeautyShaftRimErosion);
+		Shaft->SetNumberField(TEXT("density_floor"), WeatherBeautyShaftDensityFloor);
+		Shaft->SetNumberField(TEXT("albedo_scale"), WeatherBeautyShaftAlbedo);
+		Shaft->SetStringField(TEXT("basis"),
+			TEXT("storm_cell.BEAUTY_SHAFT: the curtain noise sampled finer across (vertical streaks), the rim "
+			     "eroded by it (inward only), the density floor opened, the albedo scaled in the shaft "
+			     "(storm_shaft_albedo.hlsl): grey rain, not a luminous cylinder. Evaluated inside the measure "
+			     "shaft's volume only; visual only; UNCALIBRATED"));
+		Row->SetObjectField(TEXT("shaft"), Shaft);
+	}
 	{
 		TSharedPtr<FJsonObject> Ragged = WeatherRecord();
 		Ragged->SetNumberField(TEXT("warp_m"), WeatherRaggedWarpM);

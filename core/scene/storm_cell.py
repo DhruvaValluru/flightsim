@@ -121,6 +121,30 @@ EDGE_M = 250.0
 RAGGED_WARP_GAIN = 2.0
 BEAUTY_RAGGED = {"warp_m": 800.0, "base_m": 300.0, "scale_m": 5000.0, "soft_m": 1000.0}
 BEAUTY_EROSION = 0.6
+#: Visual round 6 (BEAUTY ONLY, under the same ``Ragged.x > 0`` gate; the measure
+#: path's shaft is the expression above, unchanged). Round 4's #09 drew the rain
+#: shaft as a smooth glowing cylinder: its curtain noise was sampled at the
+#: 600 m billow scale (one feature across the whole 900 m radius), its rim was
+#: the measure's radial smoothstep alone, its density floor 0.6 left little
+#: contrast, and its albedo was the cloud's 0.98, so under the dark base the
+#: ambient-lit shaft read brighter than the cloud and the ground (mean sRGB
+#: 52/63/92 against 26/36/57). Now, inside the measure shaft's own volume only
+#: (no sample outside it is made dearer: the one fbm the shaft already paid for
+#: is sampled differently, and the rim can only move INWARD):
+#: * ``streak_scale``: the curtain noise's horizontal scale as a share of the
+#:   billow (its 8x vertical stretch kept): finer across, long in height --
+#:   vertical streaks, not one soft blob;
+#: * ``rim_erosion``: the shaft's radial shape eroded by that noise (the
+#:   tower's own Eroded law), so the silhouette breaks up and the edges fade;
+#: * ``density_floor``: the density's floor, the rest the noise's (0.25 + 0.75 x
+#:   noise: structure the measure's 0.6 + 0.4 x noise never had);
+#: * ``albedo_scale``: the shaft's single-scattering albedo as a share of the
+#:   cloud's (storm_shaft_albedo.hlsl, the material's base colour, parameter
+#:   ShaftAlbedo, default 1 = the measure's): rain is grey, not luminous.
+#: UNCALIBRATED: set by probe render on the render machine (#09 first). The
+#: C++ twin is FFlightSimWeather::ApplyBeautyStormVantage.
+BEAUTY_SHAFT = {"streak_scale": 0.35, "rim_erosion": 0.5, "density_floor": 0.25,
+                "albedo_scale": 0.55}
 #: The steepest slope of one octave of value noise per lattice cell (the
 #: quintic fade's peak derivative 15/8, a lattice step of at most 1).
 VALUE_NOISE_SLOPE_MAX = 1.875
@@ -366,15 +390,40 @@ def extinction_at(cell: Dict[str, Any], e: float, n: float, u: float, t: float =
     rise = fbm(e / billow, n / billow, (u - w * t) / billow, seed)
     drift = fbm((e - drift_v[0] * t) / billow, (n - drift_v[1] * t) / billow, u / billow,
                 seed + 1)
-    curtain = fbm(e / billow, n / billow, u / (billow * SHAFT_NOISE_STRETCH), seed + 2)
+    beauty_shaft = bool(ragged) and float(ragged["warp_m"]) > 0.0
+    across = billow * (BEAUTY_SHAFT["streak_scale"] if beauty_shaft else 1.0)
+    curtain = fbm(e / across, n / across, u / (billow * SHAFT_NOISE_STRETCH), seed + 2)
     erosion = float(noise["erosion"])
 
-    def eroded(shape: float, value: float) -> float:
-        return min(1.0, max(0.0, (shape - (1.0 - value) * erosion) / (1.0 - erosion)))
+    def eroded(shape: float, value: float, strength: float = erosion) -> float:
+        return min(1.0, max(0.0, (shape - (1.0 - value) * strength) / (1.0 - strength)))
 
+    if beauty_shaft:
+        # Round 6 (storm_cell.hlsl's Ragged shaft block): the rim eroded by the
+        # streak noise (inward only), the density floor opened.
+        floor = BEAUTY_SHAFT["density_floor"]
+        shaft = (eroded(s["shaft"], curtain, BEAUTY_SHAFT["rim_erosion"])
+                 * (floor + (1.0 - floor) * curtain))
+    else:
+        shaft = s["shaft"] * (0.6 + 0.4 * curtain)
     return (float(cell["extinction_core_per_m"]) * eroded(s["tower"], rise)
             + float(cell["extinction_anvil_per_m"]) * eroded(s["anvil"], drift)
-            + float(cell["shaft"]["extinction_per_m"]) * s["shaft"] * (0.6 + 0.4 * curtain))
+            + float(cell["shaft"]["extinction_per_m"]) * shaft)
+
+
+def shaft_albedo_scale(cell: Dict[str, Any], e: float, n: float, u: float,
+                       albedo_scale: float = 1.0) -> float:
+    """storm_shaft_albedo.hlsl's factor on the material's albedo: 1 outside the
+    shaft, ``albedo_scale`` in it (the measure shaft's own radial and vertical
+    smoothsteps, no noise), lerped by the shaft shape. ``albedo_scale`` 1 (the
+    parameter's default, every render but beauty) returns exactly 1."""
+    if float(albedo_scale) >= 1.0:
+        return 1.0
+    base = float(cell["base_m"])
+    shaft_r = float(cell["shaft"]["radius_m"])
+    shape = (_smoothstep(shaft_r, shaft_r * 0.6, math.hypot(e, n))
+             * _smoothstep(base + EDGE_M * 0.5, base - EDGE_M * 0.5, u))
+    return 1.0 + shape * (float(albedo_scale) - 1.0)
 
 
 def transmittance(cell: Dict[str, Any], start: Sequence[float], end: Sequence[float],

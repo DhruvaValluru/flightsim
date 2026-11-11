@@ -156,6 +156,15 @@ namespace FlightSimWorldPure
 	constexpr double CloudOvercastCover = 0.85;
 	constexpr double StratocumulusMaxThicknessM = 900.0;
 	constexpr double StratocumulusMinCover = 0.5;
+	// Visual round 6: the deck shadows the beam (world_beauty.DECK_SHADOW_PRESETS,
+	// DECK_SHADOW_MIN_COVER, deck_shadows_beam): a deck preset with a drawn layer
+	// of at least this cover turns the sun's cloud shadows on in beauty.
+	constexpr double DeckShadowMinCover = 0.5;
+	inline bool DeckShadowsBeam(int Preset, double Cover)
+	{
+		return (Preset == PresetStorm || Preset == PresetRain || Preset == PresetOvercast)
+			&& Cover >= DeckShadowMinCover;
+	}
 	constexpr double FairCover = 0.35;
 	constexpr double FairBaseM = 1500.0;
 	constexpr double FairTopM = 2700.0;
@@ -934,6 +943,13 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// SkyPlanPath): -sky=<plan>.
 		FString SkyPlanArg;
 		bPhysicalSkyPlan = FParse::Value(Params, TEXT("sky="), SkyPlanArg) && !SkyPlanArg.IsEmpty();
+		// Visual round 6: -deck-shadow=on|off, the command line or
+		// FLIGHTSIM_RENDER_SWITCHES (the round 5 probes' channel); the
+		// default is the planned render (on). Read in ApplyClouds.
+		DeckShadowSwitch = TEXT("on");
+		const FString Switches = FString(Params != nullptr ? Params : TEXT("")) + TEXT(" ")
+			+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+		FParse::Value(*Switches, TEXT("deck-shadow="), DeckShadowSwitch);
 	}
 
 	// The tables in force: the pure block's defaults, then any overrides.
@@ -1682,6 +1698,54 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Layers.Add(MakeShared<FJsonValueObject>(Layer));
 	}
 	Out->SetArrayField(TEXT("layers"), Layers);
+	// Visual round 6: the deck SHADOWS the beam. Round 4's #10 drew the Flint
+	// Hills red: the storm look's 10 deg sun, reddened by the per-pixel
+	// transmittance, lit the prairie at grazing incidence under a nimbostratus
+	// deck that cast no shadow (the sun's switch was left as the scene set it:
+	// off), while beauty_look.scene_light metered the frame as if the deck
+	// shadowed the beam. Under a deck preset whose drawn layer covers at least
+	// DeckShadowMinCover the sun casts the volumetric cloud's shadow (the
+	// switch the stated fair layer turns on above), so the tiles, the fog and
+	// the aircraft get the deck's grey diffuse light and its holes' beams, not
+	// the clear-sky beam. The cost is the engine's cloud shadow map, one
+	// low-resolution march per capture, not the per-pixel view march.
+	// -deck-shadow=off keeps the scene's switch (an A/B). Recorded either way.
+	{
+		TSharedPtr<FJsonObject> DeckShadow = MakeShared<FJsonObject>();
+		double TopCover = 0.0;
+		for (const FCloudLayerState& State : CloudLayers)
+		{
+			TopCover = FMath::Max(TopCover, State.Cover);
+		}
+		const bool bWanted = DeckShadowsBeam(Preset, TopCover);
+		const bool bSwitchOn = DeckShadowSwitch != TEXT("off");
+		UDirectionalLightComponent* DeckSun = Scene.Sun != nullptr
+			? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
+		DeckShadow->SetStringField(TEXT("switch"), DeckShadowSwitch);
+		DeckShadow->SetStringField(TEXT("preset"), ANSI_TO_TCHAR(PresetName(Preset)));
+		DeckShadow->SetNumberField(TEXT("top_cover"), TopCover);
+		DeckShadow->SetNumberField(TEXT("min_cover"), DeckShadowMinCover);
+		DeckShadow->SetBoolField(TEXT("deck_shadows_beam"), bWanted);
+		if (DeckSun != nullptr)
+		{
+			DeckShadow->SetBoolField(TEXT("sun_cast_cloud_shadows_before"), DeckSun->bCastCloudShadows != 0);
+			if (bWanted && bSwitchOn)
+			{
+				DeckSun->bCastCloudShadows = true;
+				DeckSun->MarkRenderStateDirty();
+			}
+			DeckShadow->SetBoolField(TEXT("sun_cast_cloud_shadows"), DeckSun->bCastCloudShadows != 0);
+		}
+		DeckShadow->SetStringField(TEXT("applied"), DeckSun == nullptr ? TEXT("no sun light in the scene")
+			: (!bWanted ? TEXT("not a deck preset with a drawn layer of min_cover: the scene's switch stands")
+			   : (bSwitchOn ? TEXT("the sun casts the drawn deck's cloud shadow (bCastCloudShadows)")
+			                : TEXT("-deck-shadow=off: the scene's switch stands"))));
+		DeckShadow->SetStringField(TEXT("basis"),
+			TEXT("the law of world_beauty.deck_shadows_beam -- under an overcast the ground gets the deck's "
+			     "diffuse transmission, not the clear-sky beam (round 4's #10: a 10 deg red beam on the Flint "
+			     "Hills); beauty only; UNCALIBRATED"));
+		Out->SetObjectField(TEXT("deck_shadow"), DeckShadow);
+	}
 	Out->SetNumberField(TEXT("unmodelled_clouds"), UnmodelledClouds);
 	Out->SetStringField(TEXT("coverage_law"),
 		TEXT("cloud_layers.hlsl (round 2: Perlin-Worley shape, domed tops, in-cloud erosion) cuts the shape noise "

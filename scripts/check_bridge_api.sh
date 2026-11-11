@@ -1232,6 +1232,19 @@ wfx_check "weather-fx: MID SetVectorParameterValue" "Engine/Public/Materials/Mat
 wfx_check "weather-fx: CameraVectorWS expression (M_RainShaft)" "Engine/Public/Materials/MaterialExpressionCameraVectorWS.h" "class UMaterialExpressionCameraVectorWS"
 # ------------------------------------------------------ END weather-fx --
 
+# -- visual round 6 (2026-11-10) -- BEGIN round6 --
+# FlightSimScenarioWorld.cpp (the wall cloud actor's own spin), FlightSimClouds.cpp
+# (the deck's cloud shadow on the sun, the -deck-shadow= switch) and
+# scripts/ue_create_materials.py (M_TornadoFunnel generation 2: local-space,
+# time-scrolled streaks). tests/test_visual_round6.py pins this block.
+wfx_check "round6: Actor SetActorRotation" "Engine/Classes/GameFramework/Actor.h" "ENGINE_API bool SetActorRotation(FRotator NewRotation, ETeleportType Teleport = ETeleportType::None);"
+wfx_check "round6: DirectionalLight bCastCloudShadows" "Engine/Classes/Components/DirectionalLightComponent.h" "uint32 bCastCloudShadows : 1;"
+wfx_check "round6: GetEnvironmentVariable (-deck-shadow= via FLIGHTSIM_RENDER_SWITCHES)" "Core/Public/GenericPlatform/GenericPlatformMisc.h" "static CORE_API FString GetEnvironmentVariable(const TCHAR* VariableName);"
+wfx_check "round6: TransformPosition expression (M_TornadoFunnel)" "Engine/Public/Materials/MaterialExpressionTransformPosition.h" "class UMaterialExpressionTransformPosition"
+wfx_check "round6: TransformPosition world source" "Engine/Public/Materials/MaterialExpressionTransformPosition.h" "TRANSFORMPOSSOURCE_World"
+wfx_check "round6: Time expression (M_TornadoFunnel)" "Engine/Public/Materials/MaterialExpressionTime.h" "class UMaterialExpressionTime"
+# ------------------------------------------------------ END round6 --
+
 
 # -- round-2b terrain-ocean (2026-11-09) -------------- BEGIN terrain-ocean --
 # FlightSimGoogleTiles.cpp ApplyBeautyGround (beauty only: the haze the ground

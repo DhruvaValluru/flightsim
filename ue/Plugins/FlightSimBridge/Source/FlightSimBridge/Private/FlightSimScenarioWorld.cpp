@@ -1712,10 +1712,11 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 	}
 
 	// -- tornado funnel marker (Phase 9.3, VISUAL) -------------------------
-	// A dark tapered tube at the vortex axis, ground to top_m: a SCHEMATIC
-	// MARKER of where the modelled core is, not condensation physics -- the
-	// wind field above cares nothing for this mesh, and the conditions
-	// strip labels it. Vertex-coloured procedural mesh like the terrain
+	// A dark tapered tube at the vortex axis, ground to the wall cloud's
+	// base, under a ragged wall cloud (visual round 6): a SCHEMATIC MARKER
+	// of where the modelled core is, not condensation physics -- the wind
+	// field above cares nothing for these meshes, and the conditions strip
+	// labels it. Vertex-coloured procedural meshes like the terrain
 	// (gotcha 6: the colour was picked by probe render, not theory).
 	if (Card.bTornado)
 	{
@@ -1798,6 +1799,54 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 				Triangles.Append({A, C, B, B, C, D});
 			}
 		};
+		// Visual round 6 (2026-11-10): the funnel's shape and its wall cloud,
+		// core/scene/weather_look.py FUNNEL_TOP_SHARE, FUNNEL_TOP_RADII,
+		// WALL_TOP_SHARE, WALL_RADII (pinned by tests/test_visual_round6.py).
+		// Round 4's funnel ran from the ground to the WIND model's top_m
+		// (1.5 km) with no cloud over it. The condensation funnel now stops
+		// at FunnelTopShare x top_m, where a ragged wall cloud (its own
+		// actor, "TornadoWallCloud") hangs, WallRadii core radii across. The
+		// wind model is untouched: these shares only say how much of the
+		// modelled column condenses. Drawn on every render quality (both
+		// meshes are the scenario world's), so the labels see the beauty's
+		// silhouettes.
+		constexpr double TornadoFunnelTopShare = 0.6;
+		constexpr double TornadoFunnelTopRadii = 1.3;
+		constexpr double TornadoWallTopShare = 0.9;
+		constexpr double TornadoWallRadii = 4.5;
+		const double FunnelTopMetres = TornadoFunnelTopShare * Card.TornadoTopMetres;
+		const double WallTopMetres = TornadoWallTopShare * Card.TornadoTopMetres;
+		const double WallDepthMetres = WallTopMetres - FunnelTopMetres;
+
+		auto SpawnMarker = [&](const TCHAR* Name) -> AActor*
+		{
+			AActor* Marker = World->SpawnActor<AActor>();
+			UProceduralMeshComponent* Mesh =
+				NewObject<UProceduralMeshComponent>(Marker, Name);
+			Marker->SetRootComponent(Mesh);
+			Mesh->SetMobility(EComponentMobility::Movable);
+			Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles,
+			                                    Normals, {}, Colours, {},
+			                                    false);
+			Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Mesh->SetCastShadow(false);
+			// The DEFAULT material, on purpose: both vertex-colour materials
+			// rendered this mesh black under the storm sun (probe-measured,
+			// lit AND unlit -- the vertex-colour path for procedural sections
+			// is an open question recorded in NEXT.md), while the default
+			// grid material provably reads as a solid grey funnel in this
+			// exact light. Visible and honest beats subtle and invisible.
+			// Beauty swaps in M_TornadoFunnel (FlightSimWeatherLook.cpp).
+			Mesh->SetMaterial(0, UMaterial::GetDefaultMaterial(
+				EMaterialDomain::MD_Surface));
+			Mesh->RegisterComponent();
+			// Vertices are relative to the ground axis point, so rotating the
+			// actor spins the mesh about the vortex axis.
+			Marker->SetActorLocation(AxisEngine);
+			Vertices.Reset(); Normals.Reset(); Colours.Reset(); Triangles.Reset();
+			return Marker;
+		};
+
 		int32 RingIndex = 0;
 		// Dust skirt: wide brown-grey cone at ground contact.
 		AddRing(2.2 * RCore, 0.0, 0.0,
@@ -1805,14 +1854,16 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 		AddRing(0.45 * RCore, 0.055 * Card.TornadoTopMetres, 0.0,
 		        FLinearColor(0.24f, 0.20f, 0.165f, 1.0f), 0.6);
 		Stitch(RingIndex, RingIndex + 1); RingIndex += 2;
-		// The funnel: concave profile, narrow at ground, flaring to the top.
+		// The funnel: concave profile, narrow at ground, flaring to
+		// TornadoFunnelTopRadii core radii at the wall cloud's base.
 		const int32 FunnelFirstRing = RingIndex;
 		for (int32 Ring = 0; Ring < Rings; ++Ring)
 		{
 			const double F = static_cast<double>(Ring) / (Rings - 1);
-			const double Radius = RCore * (0.26 + 0.92 * FMath::Pow(F, 1.8));
+			const double Radius = RCore
+				* (0.26 + (TornadoFunnelTopRadii - 0.26) * FMath::Pow(F, 1.8));
 			const float Shade = 0.14f + 0.20f * static_cast<float>(F);
-			AddRing(Radius, F * Card.TornadoTopMetres, 0.35 * RCore * F,
+			AddRing(Radius, F * FunnelTopMetres, 0.35 * RCore * F,
 			        FLinearColor(Shade, Shade, Shade * 1.05f, 1.0f), 1.0);
 			if (Ring > 0)
 			{
@@ -1820,44 +1871,51 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 			}
 		}
 		RingIndex += Rings;
-		// No wall-cloud disc: at chase-camera distances a 700 m disc reads
-		// as a screen-filling artifact, not a cloud (probe-measured). The
-		// funnel flares wide at its top instead; real cloud cover is task
-		// 12's volumetric pass.
-
-		AActor* Funnel = World->SpawnActor<AActor>();
-		UProceduralMeshComponent* FunnelMesh =
-			NewObject<UProceduralMeshComponent>(Funnel, TEXT("TornadoFunnel"));
-		Funnel->SetRootComponent(FunnelMesh);
-		FunnelMesh->SetMobility(EComponentMobility::Movable);
-		FunnelMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles,
-		                                          Normals, {}, Colours, {},
-		                                          false);
-		FunnelMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		FunnelMesh->SetCastShadow(false);
-		// The DEFAULT material, on purpose: both vertex-colour materials
-		// rendered this mesh black under the storm sun (probe-measured,
-		// lit AND unlit -- the vertex-colour path for procedural sections
-		// is an open question recorded in NEXT.md), while the default
-		// grid material provably reads as a solid grey funnel in this
-		// exact light. Visible and honest beats subtle and invisible.
-		FunnelMesh->SetMaterial(0, UMaterial::GetDefaultMaterial(
-			EMaterialDomain::MD_Surface));
-		FunnelMesh->RegisterComponent();
-		// Vertices are relative to the ground axis point, so rotating the
-		// actor spins the funnel about its own axis.
-		Funnel->SetActorLocation(AxisEngine);
-		TornadoFunnel = Funnel;
+		TornadoFunnel = SpawnMarker(TEXT("TornadoFunnel"));
 		TornadoOmegaDegPerSec = FMath::RadiansToDegrees(
 			Card.TornadoVMaxMps / Card.TornadoRCoreMetres);
+
+		// The wall cloud: a ragged lowered lens from the funnel's top to
+		// WallTopMetres, widest a third of the way up, closed over the top.
+		// Its own actor: it turns at the Rankine EXTERIOR rate at its own
+		// radius, omega x (r_core / r_wall)^2 (weather_look.
+		// wall_cloud_omega_scale) -- a wall cloud turns slowly, the funnel
+		// fast, both from the one model.
+		RingIndex = 0;
+		const double WallRings[6][3] = {
+			// {height share of the wall's depth, radius in core radii, ragged}
+			{0.00, TornadoFunnelTopRadii, 0.8},
+			{0.12, 0.7 * TornadoWallRadii, 1.0},
+			{0.35, TornadoWallRadii, 1.0},
+			{0.75, 0.93 * TornadoWallRadii, 1.0},
+			{1.00, 0.55 * TornadoWallRadii, 0.8},
+			{1.06, 0.4, 0.3},
+		};
+		for (int32 Ring = 0; Ring < 6; ++Ring)
+		{
+			const float Shade = 0.11f + 0.05f * static_cast<float>(WallRings[Ring][0]);
+			AddRing(WallRings[Ring][1] * RCore,
+			        FunnelTopMetres + WallRings[Ring][0] * WallDepthMetres, 0.0,
+			        FLinearColor(Shade, Shade, Shade * 1.05f, 1.0f),
+			        WallRings[Ring][2]);
+			if (Ring > 0)
+			{
+				Stitch(RingIndex + Ring - 1, RingIndex + Ring);
+			}
+		}
+		TornadoWallCloud = SpawnMarker(TEXT("TornadoWallCloud"));
+		TornadoWallOmegaDegPerSec = TornadoOmegaDegPerSec
+			/ (TornadoWallRadii * TornadoWallRadii);
 		UE_LOG(LogFlightSimScenario, Display,
 		       TEXT("tornado: Rankine vortex v_max %.1f m/s, core %.0f m at ")
-		       TEXT("local (%.0f, %.0f) m; funnel mesh is a VISUAL marker of ")
-		       TEXT("the modelled core (rotating at the core rate ")
-		       TEXT("%.1f deg/s), not condensation"),
+		       TEXT("local (%.0f, %.0f) m; funnel (to %.0f m, rotating at the ")
+		       TEXT("core rate %.1f deg/s) and wall cloud (to %.0f m, %.0f m ")
+		       TEXT("across, %.2f deg/s): each a VISUAL marker of the modelled ")
+		       TEXT("core, not condensation"),
 		       Card.TornadoVMaxMps, Card.TornadoRCoreMetres,
 		       Card.TornadoCentreNorthMetres, Card.TornadoCentreEastMetres,
-		       TornadoOmegaDegPerSec);
+		       FunnelTopMetres, TornadoOmegaDegPerSec, WallTopMetres,
+		       2.0 * TornadoWallRadii * RCore, TornadoWallOmegaDegPerSec);
 	}
 
 	// -- the aircraft ------------------------------------------------------
@@ -2706,6 +2764,13 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 	{
 		TornadoFunnel->SetActorRotation(FRotator(
 			0.0, FMath::Fmod(TimeSeconds * TornadoOmegaDegPerSec, 360.0),
+			0.0));
+	}
+	// The wall cloud at the Rankine exterior rate at its own radius (round 6).
+	if (TornadoWallCloud != nullptr)
+	{
+		TornadoWallCloud->SetActorRotation(FRotator(
+			0.0, FMath::Fmod(TimeSeconds * TornadoWallOmegaDegPerSec, 360.0),
 			0.0));
 	}
 

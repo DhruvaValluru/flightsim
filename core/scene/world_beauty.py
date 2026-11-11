@@ -154,6 +154,35 @@ def is_storm_word(word: Optional[str]) -> bool:
     return word in STORM_WORDS
 
 
+#: Visual round 6 (2026-11-10): the deck SHADOWS the beam. Round 4's #10 ("c172
+#: near a tornado over the Flint Hills") drew the prairie red (ground R/G 2.2
+#: under a neutral grey sky, measured on the JPEG) with black creek valleys: the
+#: web app's STORM_LOOK puts a storm's sun at 10 deg elevation, the engine's
+#: per-pixel transmittance reddens that grazing beam, and the beauty's
+#: nimbostratus deck did NOT shadow it -- the sun's cloud-shadow switch was
+#: "left as the scene set it" (off), while beauty_look.scene_light metered the
+#: frame as if "a cloud deck shadows the beam". The light under an overcast is
+#: the deck's diffuse transmission, neutral grey; the beam does not reach the
+#: ground. So in beauty, under a deck preset whose drawn layer covers at least
+#: DECK_SHADOW_MIN_COVER, the sun casts the volumetric cloud's shadow
+#: (UDirectionalLightComponent::bCastCloudShadows, the switch the stated fair
+#: layer already turns on): the deck shadows the tiles, the fog and the
+#: aircraft; its holes (cover < 1) still let beams through. Cost: the engine's
+#: cloud shadow map (one low-resolution march per capture, not the per-pixel
+#: view march). ``-deck-shadow=off`` (the command line or
+#: FLIGHTSIM_RENDER_SWITCHES) keeps the scene's switch for an A/B; recorded in
+#: world_beauty.clouds.deck_shadow. UNCALIBRATED: probe #10 first.
+DECK_SHADOW_PRESETS: Tuple[str, ...] = ("storm", "rain", "overcast")
+DECK_SHADOW_MIN_COVER = 0.5
+
+
+def deck_shadows_beam(preset: str, layer_covers: Sequence[float]) -> bool:
+    """Whether the beauty turns the sun's cloud shadows on: a deck preset with a
+    drawn layer of cover >= DECK_SHADOW_MIN_COVER."""
+    return preset in DECK_SHADOW_PRESETS and any(
+        float(cover) >= DECK_SHADOW_MIN_COVER for cover in layer_covers)
+
+
 def select_preset(storm: bool, rain_rate_mmh: float, precipitation_rain: bool,
                   cloud_cover: float, visibility_km: float) -> str:
     """The look preset for a card: a drawn or stated storm (is_storm_word) is ``storm``;

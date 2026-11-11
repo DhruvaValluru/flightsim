@@ -3223,19 +3223,32 @@ def severe_event_centre(spec: ScenarioSpec, scene: Dict,
 
 
 def tornado_axis(spec: ScenarioSpec, scene: Dict, seconds: float):
-    """(north_m, east_m) of the vortex AXIS: the event centre plus the
-    recorded aim's abeam offset (core = on the track; abeam = the
-    2.5-core-radii flyby)."""
+    """(north_m, east_m) of the vortex AXIS. ``core`` (the prompt said
+    through / into): the event centre (severe_event_centre: the 45 %-ahead
+    point of the flown track, or the stated distance) on the track.
+    ``abeam`` (the default: "near a tornado"): core/environment/tornado.py
+    abeam_placement, a fixed feature on the heading like a stated distance
+    -- the whole still-air run plus the framing standoff ahead of the
+    start, ABEAM_RADII core radii to the right -- so the funnel stands in
+    the chase camera's frame for every frame of the clip (round 4's #10
+    drew no tornado: the axis at 139 m ahead / 375 m abeam sat 67 deg off
+    the view axis). The headless runner (core/scenario/runner.py) places
+    it with the same function."""
     import math as _math
 
-    from core.environment.tornado import R_CORE_M
+    from core.environment.tornado import abeam_placement
+    from core.fdm import units as u2
 
-    centre_n, centre_e = severe_event_centre(spec, scene, seconds)
     hdg = _math.radians(float(spec.heading.value))
     aim = str(spec.weather_event.detail.get("aim", "abeam"))
-    offset = 0.0 if aim == "core" else 2.5 * R_CORE_M
-    return (centre_n + offset * _math.cos(hdg + _math.pi / 2),
-            centre_e + offset * _math.sin(hdg + _math.pi / 2))
+    if aim == "core":
+        centre_n, centre_e = severe_event_centre(spec, scene, seconds)
+        return centre_n, centre_e
+    run_m = u2.kt_to_mps(float(spec.airspeed.value)) * float(seconds)
+    agl_m = float(spec.altitude.value) - float(spec.terrain_elevation.value or 0.0)
+    ahead, abeam = abeam_placement(aim, run_m, agl_m, event_ahead_m(spec))
+    return (ahead * _math.cos(hdg) + abeam * _math.cos(hdg + _math.pi / 2),
+            ahead * _math.sin(hdg) + abeam * _math.sin(hdg + _math.pi / 2))
 
 
 #: Documented height above local ground for the world-anchored preset
@@ -4055,15 +4068,20 @@ class RunManager:
                 # the camera will cross the funnel mesh and the frames
                 # honestly show the inside of the marker; "abeam" is the
                 # 2.5-core-radii flyby (at 1.2 radii the chase camera
-                # lived inside the mesh, probe-measured). tornado_axis
-                # applies the offset; the hazard check uses the same one.
+                # lived inside the mesh, probe-measured), ahead of the
+                # whole run by the framing standoff (round 6: the funnel
+                # in the chase frame, core/environment/tornado.py
+                # abeam_placement). tornado_axis applies both; the hazard
+                # check uses the same one.
                 vortex = TornadoVortex(*tornado_axis(spec, scene,
                                                      seconds_))
                 tornado_block = vortex.card_block(ox, oy)
                 event_note = ("tornado: Rankine vortex (EF2-band, v_max "
-                              "50 m/s, core 150 m) abeam the track; funnel "
-                              "mesh is a VISUAL marker, not condensation; "
-                              "wind point-sampled at the CG -- no "
+                              "50 m/s, core 150 m) abeam the track, ahead "
+                              "of the clip's run so the funnel stays in "
+                              "frame; funnel and wall cloud meshes are a "
+                              "VISUAL marker, not condensation; wind "
+                              "point-sampled at the CG -- no "
                               "span-differential airloads")
             else:
                 from core.environment.downburst import Downburst

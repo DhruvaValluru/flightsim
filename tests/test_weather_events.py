@@ -152,9 +152,12 @@ def test_funnel_is_labeled_a_visual_marker():
     text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
     assert "VISUAL marker of" in text
     assert "not condensation" in text
-    # And the mesh never enters the physics: no collision on the funnel.
-    funnel = text.split("TornadoFunnel", 1)[-1].split("RegisterComponent", 1)[0]
+    # And the meshes never enter the physics: no collision on the funnel or
+    # its wall cloud (round 6: both spawned by the SpawnMarker lambda).
+    funnel = text.split("auto SpawnMarker", 1)[-1].split("RegisterComponent", 1)[0]
     assert "NoCollision" in funnel
+    assert 'SpawnMarker(TEXT("TornadoFunnel"))' in text
+    assert 'SpawnMarker(TEXT("TornadoWallCloud"))' in text
 
 
 def test_through_a_tornado_aims_the_core_at_the_track():
