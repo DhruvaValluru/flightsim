@@ -904,6 +904,35 @@ def component_label_record(obj, parent_entry: Dict, record: Dict,
     return entry
 
 
+def component_alignment_diagnostic(hull, tight, alone, int_id: int) -> Optional[Dict]:
+    """Recorded diagnostic (not a gate): where a component's pixels sit
+    against its projected hull, px. ``tight_minus_hull`` per edge and the
+    centre offset; ``alone_minus_hull`` the same for its alone pass (the
+    unoccluded footprint), so an occluder is told apart from a geometry
+    or pose offset. None when there is no hull or no tight box."""
+    def is_box(b):
+        return isinstance(b, (list, tuple)) and len(b) == 4
+
+    if not is_box(hull) or not is_box(tight):
+        return None
+
+    def against(box):
+        edges = [round(float(box[k]) - float(hull[k]), 2) for k in range(4)]
+        centre = [round((float(box[0]) + float(box[2]) - float(hull[0]) - float(hull[2])) / 2.0, 2),
+                  round((float(box[1]) + float(box[3]) - float(hull[1]) - float(hull[3])) / 2.0, 2)]
+        return {"edges": edges, "centre": centre}
+
+    out = {"hull": [round(float(v), 2) for v in hull], "tight_minus_hull": against(tight)}
+    if alone is not None:
+        import numpy as np
+
+        ys, xs = np.nonzero(alone == int_id)
+        if xs.size:
+            out["alone_minus_hull"] = against(
+                [float(xs.min()), float(ys.min()), float(xs.max()) + 1.0, float(ys.max()) + 1.0])
+    return out
+
+
 def tight_box_basis(entry: Dict) -> Optional[str]:
     """Why an object's ``bbox_2d_tight`` is null, from its measured keys
     (None when the box exists): ``out of frame`` when ``fraction_in_frame``
@@ -1974,6 +2003,11 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
             }
             if kids:
                 basis["engine"]["rollup_children"] = resolve_ids(kids, objects)
+            if entry.get("parent") is not None:
+                diag = component_alignment_diagnostic(
+                    entry.get("bbox_2d_hull"), entry["bbox_2d_tight"], own_alone, int_id)
+                if diag is not None:
+                    basis["engine"]["hull_vs_pixels_px"] = diag
             why = tight_box_basis(entry)
             if retracted:
                 basis["bbox_2d_tight"] = GEAR_RETRACTED_BASIS
