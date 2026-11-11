@@ -1,6 +1,8 @@
 #include "FlightSimGoogleTiles.h"
 
 #include "Async/TaskGraphInterfaces.h"
+#include "CollisionQueryParams.h"
+#include "Engine/HitResult.h"
 #include "Containers/Ticker.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -797,6 +799,50 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 		// NOT tagged FlightSim.terrain (HideOwnTerrain would hide it); beauty
 		// only, so the label, depth and mask passes never draw it.
 		BeautyOnlyActors.Add(SeaActor);
+		// Round 26 (lane B): where the tiles' own ocean stands against the cap,
+		// measured, so the next round reads it instead of guessing (rounds 10,
+		// 19 and 26 drew the tiles' ocean over the cap). Visibility traces
+		// down at the origin and 5 km and 20 km out on four sides; the cap has
+		// no collision, so a hit is the tiles' (or nothing: the tiles had not
+		// streamed their physics yet, recorded as such).
+		{
+			TArray<TSharedPtr<FJsonValue>> Probes;
+			const double Offsets[3] = {0.0, 5000.0, 20000.0};
+			const FVector2D Sides[4] = {{1.0, 0.0}, {-1.0, 0.0}, {0.0, 1.0}, {0.0, -1.0}};
+			FCollisionQueryParams Params(FName(TEXT("FlightSimSeaProbe")), true);
+			for (const double OffsetM : Offsets)
+			{
+				for (int32 Side = 0; Side < (OffsetM > 0.0 ? 4 : 1); ++Side)
+				{
+					const double X = Sides[Side].X * OffsetM;
+					const double Y = Sides[Side].Y * OffsetM;
+					FHitResult Hit;
+					TSharedPtr<FJsonObject> Probe = MakeShared<FJsonObject>();
+					Probe->SetNumberField(TEXT("x_m"), X);
+					Probe->SetNumberField(TEXT("y_m"), Y);
+					if (World->LineTraceSingleByChannel(Hit, FVector(X, Y, 2000.0) * CmPerM, FVector(X, Y, -2000.0) * CmPerM,
+					                                    ECC_Visibility, Params))
+					{
+						const double Drop = EarthRadiusM - FMath::Sqrt(EarthRadiusM * EarthRadiusM - X * X - Y * Y);
+						Probe->SetNumberField(TEXT("hit_z_m"), Hit.ImpactPoint.Z / CmPerM);
+						Probe->SetNumberField(TEXT("cap_z_m"), LiftM - Drop);
+						Probe->SetStringField(TEXT("actor"), Hit.GetActor() != nullptr ? Hit.GetActor()->GetClass()->GetName()
+						                                                                 : FString(TEXT("none")));
+					}
+					else
+					{
+						Probe->SetStringField(TEXT("hit"), TEXT("nothing within +-2 km (no tile physics streamed here yet)"));
+					}
+					Probes.Add(MakeShared<FJsonValueObject>(Probe));
+				}
+			}
+			Sea->SetArrayField(TEXT("tiles_height_probes"), Probes);
+		}
+		Sea->SetStringField(TEXT("depth_basis"), bOceanBeauty
+			? TEXT("M_FlightSimOceanBeauty generation 4 pulls each vertex 1 % of its distance toward the camera "
+			       "along its line of sight (WPO DepthPull): the same pixels, a nearer depth, so the sea wins over "
+			       "the tiles' ocean; the lift adds to it")
+			: TEXT("the lift only (M_Ground_Ocean has no depth pull)"));
 		Sea->SetStringField(TEXT("drawn"),
 			TEXT("a spherical cap of the sea material at sea level over the tiles' ocean (beauty-only actor)"));
 		Sea->SetStringField(TEXT("material"), OceanBase->GetPathName());

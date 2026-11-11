@@ -109,15 +109,24 @@ def test_the_tiles_material_wires_the_detail_and_can_be_built_without_it():
     assert "-no-detail" in create   # stamped apart: the next run with the detail builds it again
     # a file off its pin is never imported
     assert "hashes {digest}, its pin is" in create
-    # no WPO anywhere in lane B's materials: the labels' geometry is the tiles'
-    assert "MP_WORLD_POSITION_OFFSET" not in create
+    # no WPO in the tiles material: the labels' geometry is the tiles'
+    tiles = SCRIPT[SCRIPT.index("def create_world_tiles_beauty"):SCRIPT.index("def create_world_ocean_beauty")]
+    assert "MP_WORLD_POSITION_OFFSET" not in tiles
 
 
 def test_the_ocean_material_is_beauty_only_and_reads_what_the_script_wires():
     assert "M_FlightSimOceanBeauty" in _literal("WORLD_BEAUTY_MATERIALS")
     # 2: round 10's #13 (a tile grid and screen-space reflection streaks);
     # 3: round 19's #13 (the cap's radial edges as lines, no waves or glint)
-    assert _literal("WORLD_GENERATIONS")["M_FlightSimOceanBeauty"] == "3"
+    # 4: round 26's #13 (the tiles' ocean still over the cap): the depth pull
+    assert _literal("WORLD_GENERATIONS")["M_FlightSimOceanBeauty"] == "4"
+    assert _literal("WORLD_OCEAN_DEPTH_PULL") == 0.01
+    ocean = SCRIPT[SCRIPT.index("def create_world_ocean_beauty"):SCRIPT.index("def create_world_scatter")]
+    # the only WPO: each vertex along its own line of sight (camera - vertex), so its pixel stays
+    assert ocean.count("MP_WORLD_POSITION_OFFSET") == 1
+    assert "MaterialExpressionCameraPositionWS, -1500, 1200" in ocean and '"DepthPull", WORLD_OCEAN_DEPTH_PULL' in ocean
+    # the sea cap is a beauty-only actor (no label pass draws it)
+    assert "BeautyOnlyActors.Add(SeaActor);" in TILES_CPP and 'TEXT("tiles_height_probes")' in TILES_CPP
     for name in ("ocean_normal", "ocean_emissive", "ocean_colour"):
         hlsl = _shader(name)
         # shaded from the sphere's up, never the cap's interpolated vertex normals
