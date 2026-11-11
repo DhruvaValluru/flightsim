@@ -527,8 +527,8 @@ WINDSHIELD_FILM_TILES = 1.5
 #: Lane D (2026-11-11): the beauty rain veil (core/scene/rain_veil.py,
 #: FlightSimWeather.cpp ApplyBeautyRainVeil): the curtain's shells and the scud cards.
 CURTAIN_PARAMETERS = ("WindVel", "FallCmps", "Time", "Radius", "StreakRad", "StreakDensity",
-                      "StreakAlpha", "Veil", "GroundRelZ", "Seed")
-SCUD_PARAMETERS = ("Time",)
+                      "StreakAlpha", "Veil", "GroundRelZ", "Seed", "Shade")
+SCUD_PARAMETERS = ("Time", "Shade")
 #: The curtain's and the scud's albedo as lit translucent surfaces: the rain veil
 #: and a rag of cloud scatter nearly all they intercept (grey-white, lit by the
 #: translucency volume like the drops, drop_lit). Stated.
@@ -598,14 +598,15 @@ STORM_SCATTERING_PROPERTIES = {
 #: the ShaftAlbedo parameter; visual round 6, round 4's #09 glowing cylinder).
 #: M_WindshieldRain 3: the beauty water film (windshield_film.hlsl, Film / FilmV; lane D).
 #: M_RainCurtain 1 and M_ScudCard 1: the beauty rain veil (lane D, rain_curtain.hlsl,
-#: scud_card.hlsl).
+#: scud_card.hlsl). 2: the Shade scalar on the base colour and the round-12 shaders
+#: (the streaks in the shell's surface frame, pixel-wide; torn rags, not puffs).
 #: M_StormCell 6: the beauty precipitation curtain and scud ("Curtain", storm_cell.hlsl;
 #: lane D 2026-11-11, round 4's #09 ring and cylinder; default 0 = generation 5).
 #: M_RainDrops 6: the beauty streak's softness and per-drop variation (Soft, Vary;
 #: lane D 2026-11-11, round 4's "scratches on the lens"; default 0 = generation 5).
 STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChannel": "2",
-                     "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "1",
-                     "M_ScudCard": "1"}
+                     "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "2",
+                     "M_ScudCard": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -2016,8 +2017,11 @@ def _veil_lit(material, lib, albedo, x, y):
                            None))
     if lighting is not None:
         material.set_editor_property("translucency_lighting_mode", lighting)
-    lib.connect_material_property(constant(material, lib, albedo, x, y), "",
-                                  unreal.MaterialProperty.MP_BASE_COLOR)
+    # Round 12: x "Shade" (default 1), the deck's shade the host sets (rain_veil.veil_shade).
+    shade = scalar(material, lib, "Shade", 1.0, x, y + 160)
+    lib.connect_material_property(
+        binary(material, lib, unreal.MaterialExpressionMultiply, constant(material, lib, albedo, x, y), shade,
+               x + 200, y), "", unreal.MaterialProperty.MP_BASE_COLOR)
     lib.connect_material_property(constant(material, lib, 1.0, x, y + 80), "",
                                   unreal.MaterialProperty.MP_ROUGHNESS)
 
@@ -2032,7 +2036,7 @@ def create_rain_curtain():
     lib = unreal.MaterialEditingLibrary
     _translucent_lit(material)
     params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i)
-              for i, name in enumerate(CURTAIN_PARAMETERS)}
+              for i, name in enumerate(CURTAIN_PARAMETERS) if name != "Shade"}   # Shade: _veil_lit
     opacity = custom(material, lib, "rain_curtain", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
         "Rel": relative_position(material, lib, -1800, 700, False, "camera"),
         "WindVel": params["WindVel"], "FallCmps": params["FallCmps"], "Time": params["Time"],
@@ -2057,7 +2061,7 @@ def create_scud_card():
     lib = unreal.MaterialEditingLibrary
     _translucent_lit(material)
     params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i)
-              for i, name in enumerate(SCUD_PARAMETERS)}
+              for i, name in enumerate(SCUD_PARAMETERS) if name != "Shade"}   # Shade: _veil_lit
     opacity = custom(material, lib, "scud_card", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
         "UV": uv_channel(material, lib, 0, "rg", -1800, 300),
         "Card": uv_channel(material, lib, 1, "rg", -1800, 450),

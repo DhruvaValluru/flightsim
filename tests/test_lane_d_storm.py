@@ -230,7 +230,8 @@ def test_the_cpp_veil_carries_the_python_numbers():
              "VeilShellRadiusMidM": rain_veil.VEIL_SHELL_RADII_M[1],
              "VeilShellRadiusFarM": rain_veil.VEIL_SHELL_RADII_M[2],
              "VeilHeightRadii": rain_veil.VEIL_HEIGHT_RADII, "VeilBetaA": rain_veil.VEIL_BETA_A,
-             "VeilBetaB": rain_veil.VEIL_BETA_B, "VeilStreakRad": rain_veil.VEIL_STREAK_RAD,
+             "VeilBetaB": rain_veil.VEIL_BETA_B, "VeilStreakPixels": rain_veil.VEIL_STREAK_PIXELS,
+             "VeilShadeUnderDeck": rain_veil.VEIL_SHADE_UNDER_DECK, "VeilShadeOpen": rain_veil.VEIL_SHADE_OPEN,
              "VeilStreakDensityA": rain_veil.VEIL_STREAK_DENSITY_A,
              "VeilStreakDensityMax": rain_veil.VEIL_STREAK_DENSITY_MAX,
              "VeilStreakAlpha": rain_veil.VEIL_STREAK_ALPHA, "ScudBoxHalfM": rain_veil.SCUD_BOX_HALF_M,
@@ -267,9 +268,9 @@ def test_the_veil_is_beauty_only_and_hidden_from_every_label():
     # per frame: nothing unless the beauty built it
     advance = _function(WEATHER_CPP, "void FFlightSimWeather::StepBeautyRainVeil(")
     assert "if (VeilActor != nullptr)" in advance and "if (ScudMesh == nullptr)" in advance
-    assert WEATHER_CPP.count("StepBeautyRainVeil(View, Wind, Share);") == 1
+    assert WEATHER_CPP.count("StepBeautyRainVeil(View, Wind, CameraVelocity, Share, PixelAngle);") == 1
     # the materials exist in the script, stamped, with their shader inputs
-    assert '"M_RainCurtain": "1"' in SCRIPT and '"M_ScudCard": "1"' in SCRIPT
+    assert '"M_RainCurtain": "2"' in SCRIPT and '"M_ScudCard": "2"' in SCRIPT
     assert 'custom(material, lib, "rain_curtain"' in SCRIPT and 'custom(material, lib, "scud_card"' in SCRIPT
     assert "create_rain_curtain()" in SCRIPT and "create_scud_card()" in SCRIPT
 
@@ -332,3 +333,58 @@ def test_the_cpp_rain_haze_is_the_pythons_and_storm_only():
     assert "const bool bHaze = Preset == PresetStorm && HazeRate > 0.0 && VisibilityKm <= 0.0 &&" in CLOUDS_CPP
     assert CLOUDS_CPP.count("FFlightSimWeather::RainHazeFog(") == 1
     assert 'Record->SetObjectField(TEXT("rain_haze"), Haze);' in CLOUDS_CPP
+
+
+# -- round 12's #15 and round 9's #07 -------------------------------------------------
+
+
+def test_round12_the_streaks_slant_and_keep_their_screen_size_at_every_lens():
+    # the cinematic style keeps a share of the camera's motion on the beauty path only
+    advance = _function(WEATHER_CPP, "void FFlightSimWeather::Advance(")
+    assert "CameraVelocity = CameraVelocity * BeautyCameraShare;" in advance
+    assert "double BeautyCameraShare = 0.0;" in WEATHER_H
+    readability = _function(WEATHER_CPP, "void FFlightSimWeather::ApplyBeautyRainReadability(")
+    assert "BeautyCameraShare = FlightSimRainVeil::BeautyCameraMotionShare;" in readability
+    assert WEATHER_CPP.count("BeautyCameraShare = ") == 1
+    assert _cpp_constant(WEATHER_CPP, "BeautyCameraMotionShare") == rain_veil.BEAUTY_CAMERA_MOTION_SHARE
+    assert _cpp_constant(WEATHER_CPP, "BeautyReferencePixelRad") == pytest.approx(
+        rain_veil.BEAUTY_REFERENCE_PIXEL_RAD, rel=1e-12)
+    # the cap shrinks with a long lens and holds at a wide one
+    ref = rain_veil.BEAUTY_REFERENCE_PIXEL_RAD
+    assert rain_veil.streak_cap_rad(0.045, ref / 7.0) == pytest.approx(0.045 / 7.0)
+    assert rain_veil.streak_cap_rad(0.045, ref * 2.0) == 0.045
+    assert "BeautyMaxStreakRad * FMath::Min(1.0, PixelAngle / FlightSimRainVeil::BeautyReferencePixelRad)" \
+        in advance
+    # the curtain: the shell's surface frame, pixel-wide streaks, the beauty's streak path
+    shader = (SHADERS / "rain_curtain.hlsl").read_text(encoding="utf-8")
+    assert "float arc = atan2(Rel.y, Rel.x) * Radius;" in shader
+    assert "float2 v2 = float2(dot(fallVel.xy, tangent), fallVel.z);" in shader
+    assert "cross(dir, float3(0.0, 0.0, 1.0))" not in shader     # the world-fixed frame is gone
+    step = _function(WEATHER_CPP, "void FFlightSimWeather::StepBeautyRainVeil(")
+    assert 'TEXT("StreakRad"), static_cast<float>(VeilStreakPixels * PixelAngle)' in step
+    assert 'WeatherColour(Wind - CamVel)' in step
+
+
+def test_round12_the_veil_and_scud_are_shaded_and_torn():
+    assert rain_veil.veil_shade(True) == rain_veil.VEIL_SHADE_UNDER_DECK < rain_veil.veil_shade(False) < 1.0
+    veil = _veil_cpp()
+    assert "VeilShade = bDeck && DeckBaseM > AircraftUpM ? VeilShadeUnderDeck : VeilShadeOpen;" in WEATHER_CPP
+    assert 'ScudMaterial->SetScalarParameterValue(TEXT("Shade")' in WEATHER_CPP
+    assert 'Material->SetScalarParameterValue(TEXT("Shade")' in WEATHER_CPP
+    assert 'shade = scalar(material, lib, "Shade", 1.0' in SCRIPT
+    assert '"M_RainCurtain": "2"' in SCRIPT and '"M_ScudCard": "2"' in SCRIPT
+    scud = (SHADERS / "scud_card.hlsl").read_text(encoding="utf-8")
+    assert "float tear = S.Value(" in scud and "S.Ss(0.55, 0.68," in scud
+    assert "0.55 * falloff" not in scud                            # the falloff no longer makes the shape
+    assert veil
+
+
+def test_round12_the_storm_fog_is_lit_by_the_deck_not_the_clear_sky():
+    haze = CLOUDS_CPP[CLOUDS_CPP.index("const bool bHaze = Preset == PresetStorm"):]
+    haze = haze[:haze.index('Record->SetObjectField(TEXT("rain_haze"), Haze);')]
+    r, g, b = rain_veil.STORM_FOG_AMBIENT_RGB
+    assert f"const FLinearColor Ambient({r:.2f}f, {g:.2f}f, {b:.2f}f);" in haze
+    assert "Fog->SetSkyAtmosphereAmbientContributionColorScale(Ambient);" in haze
+    assert "Fog->SetDirectionalInscatteringColor(FLinearColor::Black);" in haze
+    assert f"constexpr double StormSunFogShare = {rain_veil.STORM_SUN_FOG_SHARE};" in haze
+    assert haze.count("if (bDeckAbove") == 2

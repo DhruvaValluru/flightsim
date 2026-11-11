@@ -4,11 +4,15 @@
 // a grey veil (Veil = 1 - exp(-beta x slab), rain_veil.shell_veil_alpha) and the
 // streaks falling through it along the drops' path in the wind.
 //
-// The streaks: the pixel's offset from the camera in a frame whose third axis is the
-// fall direction (WindVel minus the fall speed); across it the lattice is
-// StreakRad x Radius wide (the same angular size on every shell), along it
-// VEIL_STREAK_ASPECT = 60 times longer and scrolled at the fall speed, so the
-// streaks fall at the drops' own speed and slant with the wind. A cell holds a
+// The streaks: drawn in the shell's own surface frame -- s the arc length round
+// the cylinder, z the height -- along the fall velocity's projection onto the
+// surface at that pixel (the tangential wind and the fall), so every azimuth
+// slants with the wind and none smears into wide bars (round 12: a world-fixed
+// frame collapsed to one column where the shell faced the wind axis; round 9's
+// #07: StreakRad was an angle, 14 px wide through a 250 mm lens). Across the
+// streak the lattice is StreakRad x Radius wide, StreakRad set per frame as
+// VEIL_STREAK_PIXELS pixels (the same on-screen width at every lens and shell),
+// along it VEIL_STREAK_ASPECT = 60 times longer, scrolled at the fall speed. A cell holds a
 // streak with probability StreakDensity; each has its own length, phase and brightness
 // (a hash of its cell), a Gaussian across and soft ends. No texture: a hashed
 // integer lattice (no tile, no repeat).
@@ -50,18 +54,20 @@ if (Rel.z < GroundRelZ)
 	return 0.0;   // below the ground: the shell is cut there
 }
 float3 fallVel = WindVel - float3(0.0, 0.0, FallCmps);
-float speed = max(length(fallVel), 1.0);
-float3 dir = fallVel / speed;
-float3 side = cross(dir, float3(0.0, 0.0, 1.0));
-side = dot(side, side) > 1.0e-6 ? normalize(side) : float3(1.0, 0.0, 0.0);
-float3 other = cross(dir, side);
-float cellW = max(Radius * StreakRad, 1.0);
+float2 radial = Rel.xy / max(length(Rel.xy), 1.0);
+float2 tangent = float2(-radial.y, radial.x);
+// The fall velocity on the surface: (tangential, vertical), unit.
+float2 v2 = float2(dot(fallVel.xy, tangent), fallVel.z);
+float speed = max(length(v2), 1.0);
+float2 u2 = v2 / speed;
+float arc = atan2(Rel.y, Rel.x) * Radius;
+float2 q = float2(arc, Rel.z);
+float cellW = max(Radius * StreakRad, 0.5);
 float cellL = cellW * 60.0;
-float a = dot(Rel, side) / cellW;
-float b = dot(Rel, other) / (cellW * 4.0);
+float a = (q.x * u2.y - q.y * u2.x) / cellW;
 float column = floor(a);
-uint h = C.Pcg(asuint((int)column) ^ C.Pcg(asuint((int)floor(b)) ^ (uint)Seed));
-float along = (dot(Rel, dir) - speed * Time) / cellL + C.U(h);
+uint h = C.Pcg(asuint((int)column) ^ (uint)Seed);
+float along = (dot(q, u2) - speed * Time) / cellL + C.U(h);
 float segment = floor(along);
 uint hs = C.Pcg(h ^ asuint((int)segment));
 float streak = 0.0;
