@@ -1,0 +1,23 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "07_tower_view_heavy_rain": {
+   "post": "07_tower_view_heavy_rain_post.jpg",
+   "source": "07_tower_view_heavy_rain_frame_beauty_post.png"
+  },
+  "09_747_through_a_thunderstorm": {
+   "post": "09_747_through_a_thunderstorm_post.jpg",
+   "source": "09_747_through_a_thunderstorm_frame_beauty_post.png"
+  },
+  "13_747_cruise_over_the_ocean": {
+   "post": "13_747_cruise_over_the_ocean_post.jpg",
+   "source": "13_747_cruise_over_the_ocean_frame_beauty_post.png"
+  },
+  "15_747_in_hurricane_like_weather_the_refusal_s_sugg": {
+   "post": "15_747_in_hurricane_like_weather_the_refusal_s_sugg_post.jpg",
+   "source": "15_747_in_hurricane_like_weather_the_refusal_s_sugg_frame_beauty_post.png"
+  }
+ }
+}
