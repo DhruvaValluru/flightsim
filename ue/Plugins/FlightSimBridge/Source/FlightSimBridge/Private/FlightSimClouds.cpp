@@ -2225,6 +2225,10 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 			// tiles-delight hook (FlightSimTilesDelight above).
 			{TEXT("DelightAmount"), FlightSimTilesDelight::AmountFor(Preset)},
 			{TEXT("DelightBlueGate"), FlightSimTilesDelight::DelightBlueGate},
+			// lane B terrain detail: the snowline is an altitude (engine Z 0 is
+			// the origin's orthometric height; the tiles are enabled here).
+			{TEXT("GroundAltitudeM"), Tiles.GetOriginOrthometricHeightM()},
+			{TEXT("GroundAltitudeKnown"), 1.0},
 		};
 		for (const FWorldScalar& Scalar : Scalars)
 		{

@@ -73,6 +73,10 @@ public:
 
 	bool IsEnabled() const { return bEnabled; }
 	AActor* GetTilesetActor() const { return Tileset.Get(); }
+	// Lane B terrain detail (2026-11-11): the engine origin's orthometric
+	// height (engine Z 0), so the beauty tiles material's snowline is an
+	// altitude (MPC_FlightSimWorld GroundAltitudeM). Meaningful only enabled.
+	double GetOriginOrthometricHeightM() const { return OriginEllipsoidHeightM - UndulationM; }
 
 	// For render.json: the source, the settings, the load statistics and
 	// the attribution. Never the key.
@@ -90,7 +94,10 @@ public:
 	// GenerateSmoothNormals) and the record says which names were found, and
 	// lists the tileset's rendering properties so the render machine sees the
 	// real names. Applied only on a Cesium for Unreal 2.x or later (the
-	// installed plugin's VersionName). Returns the record (never fails: a
+	// installed plugin's VersionName). Lane B (2026-11-11): the beauty's
+	// finer tile selection, maximum screen-space error BeautyScreenSpaceError
+	// (FLIGHTSIM_GOOGLE_TILES_BEAUTY_SSE, default 6) unless
+	// FLIGHTSIM_GOOGLE_TILES_SSE states one. Returns the record (never fails: a
 	// look that cannot be applied is recorded, the tiles draw as before).
 	TSharedPtr<FJsonObject> ApplyBeautyLook(class UMaterialInterface* Material);
 
