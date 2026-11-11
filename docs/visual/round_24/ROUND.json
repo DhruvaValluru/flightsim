@@ -1,0 +1,26 @@
+﻿{
+    "round":  24,
+    "commit":  "db9f6984",
+    "full":  false,
+    "scenes":  [
+                   10
+               ],
+    "switches":  "-look-volumetric-fog=off -rain-veil=off",
+    "prep":  [
+                 "build",
+                 "materials"
+             ],
+    "seconds":  {
+                    "build":  20.4,
+                    "materials":  8.7,
+                    "scenes":  115.5
+                },
+    "outcomes":  [
+                     {
+                         "number":  10,
+                         "outcome":  "done",
+                         "seconds":  114.1,
+                         "why":  "clip ready"
+                     }
+                 ]
+}
