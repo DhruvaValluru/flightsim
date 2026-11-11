@@ -30,7 +30,7 @@ def test_a_round_writes_each_frame_a_contact_sheet_and_the_summary(tmp_path):
     assert sheet.width == 4 * 480
     assert json.loads((out / "summary.json").read_text(encoding="utf-8"))[0] == {
         "number": 1, "name": "shot 1", "prompt": "p", "outcome": "done",
-        "why": None, "run_id": "abc", "lighting": None, "render_json": False}
+        "why": None, "run_id": "abc", "lighting": None, "seconds": None, "render_json": False}
 
 
 def test_the_look_report_names_missing_keys(tmp_path):

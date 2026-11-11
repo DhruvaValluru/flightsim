@@ -294,3 +294,17 @@ def test_the_web_app_runs_the_post_pipeline_only_with_a_beauty_look():
     assert re.search(r"if beauty_look is not None:\s*$", source[:call].rstrip() + "\n", re.M) or \
         source[:call].rstrip().endswith("if beauty_look is not None:")
     assert "if (quality or render_quality()) != \"beauty\":\n        return None" in source
+
+
+def test_the_subject_meter_is_beauty_only_and_never_touches_a_label_capture():
+    """Lane A's subject meter (round 7) moves only the beauty capture's exposure
+    bias: gated on beauty owning the exposure, no label capture named in its
+    block, and the aircraft it hides for the mask shown again before the frame."""
+    start = RENDER_CPP.index('SubjectMeterSwitch == TEXT("on"))')
+    gate = RENDER_CPP[RENDER_CPP.rindex("if (", 0, start):start]
+    assert "bBeauty" in gate and "OwnsExposure()" in gate
+    block = RENDER_CPP[start:RENDER_CPP.index('SetObjectField(TEXT("subject_exposure")', start)]
+    assert "ConfigureLabelCapture" not in block and "LabelCapture" not in block
+    assert block.count("Capture->HiddenActors.AddUnique(Scenario.Aircraft)") == 1
+    assert block.count("Capture->HiddenActors.Remove(Scenario.Aircraft)") == 1
+    assert block.index("HiddenActors.AddUnique") < block.index("HiddenActors.Remove")
