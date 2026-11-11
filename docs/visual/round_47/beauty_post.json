@@ -1,0 +1,59 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "01_golden_hour_a_4_flying_east": {
+   "post": "01_golden_hour_a_4_flying_east_post.jpg",
+   "source": "01_golden_hour_a_4_flying_east_frame_beauty_post.png"
+  },
+  "02_same_super_bright_preset": {
+   "post": "02_same_super_bright_preset_post.jpg",
+   "source": "02_same_super_bright_preset_frame_beauty_post.png"
+  },
+  "03_a320_over_new_york_wide_lens_terrain_download": {
+   "post": "03_a320_over_new_york_wide_lens_terrain_download_post.jpg",
+   "source": "03_a320_over_new_york_wide_lens_terrain_download_frame_beauty_post.png"
+  },
+  "04_desert_a_4_sun_behind_the_camera": {
+   "post": "04_desert_a_4_sun_behind_the_camera_post.jpg",
+   "source": "04_desert_a_4_sun_behind_the_camera_frame_beauty_post.png"
+  },
+  "05_desert_a_4_backlit": {
+   "post": "05_desert_a_4_backlit_post.jpg",
+   "source": "05_desert_a_4_backlit_frame_beauty_post.png"
+  },
+  "06_a320_over_sfo_heading_south_moderate_rain": {
+   "post": "06_a320_over_sfo_heading_south_moderate_rain_post.jpg",
+   "source": "06_a320_over_sfo_heading_south_moderate_rain_frame_beauty_post.png"
+  },
+  "07_tower_view_heavy_rain": {
+   "post": "07_tower_view_heavy_rain_post.jpg",
+   "source": "07_tower_view_heavy_rain_frame_beauty_post.png"
+  },
+  "08_c172_over_fuji_sunrise_light_rain": {
+   "post": "08_c172_over_fuji_sunrise_light_rain_post.jpg",
+   "source": "08_c172_over_fuji_sunrise_light_rain_frame_beauty_post.png"
+  },
+  "10_c172_near_a_tornado": {
+   "post": "10_c172_near_a_tornado_post.jpg",
+   "source": "10_c172_near_a_tornado_frame_beauty_post.png"
+  },
+  "11_a_4_over_the_matterhorn_strong_wind_severe_turbu": {
+   "post": "11_a_4_over_the_matterhorn_strong_wind_severe_turbu_post.jpg",
+   "source": "11_a_4_over_the_matterhorn_strong_wind_severe_turbu_frame_beauty_post.png"
+  },
+  "12_c172_cockpit_over_the_grand_canyon": {
+   "post": "12_c172_cockpit_over_the_grand_canyon_post.jpg",
+   "source": "12_c172_cockpit_over_the_grand_canyon_frame_beauty_post.png"
+  },
+  "13_747_cruise_over_the_ocean": {
+   "post": "13_747_cruise_over_the_ocean_post.jpg",
+   "source": "13_747_cruise_over_the_ocean_frame_beauty_post.png"
+  },
+  "15_747_in_hurricane_like_weather_the_refusal_s_sugg": {
+   "post": "15_747_in_hurricane_like_weather_the_refusal_s_sugg_post.jpg",
+   "source": "15_747_in_hurricane_like_weather_the_refusal_s_sugg_frame_beauty_post.png"
+  }
+ }
+}
