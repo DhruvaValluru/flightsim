@@ -1,0 +1,33 @@
+[
+ {
+  "number": 1,
+  "name": "golden hour A-4, flying east",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "df7d2920a24c",
+  "lighting": {},
+  "seconds": 114.3,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ },
+ {
+  "number": 4,
+  "name": "desert A-4, sun behind the camera",
+  "prompt": "chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "f1c5bfa50db2",
+  "lighting": {
+   "sun_azimuth_deg": 45.0,
+   "sun_elevation_deg": 20.0
+  },
+  "seconds": 114.5,
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true
+ }
+]
