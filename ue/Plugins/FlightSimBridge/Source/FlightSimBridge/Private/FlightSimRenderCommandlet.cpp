@@ -160,7 +160,7 @@ namespace
 	constexpr double SubjectMeterMidFloorP50 = 0.30;
 	constexpr double SubjectMeterMidTarget = 0.36;
 	constexpr double SubjectMeterMaxCloseStops = 3.0;
-	constexpr double SubjectMeterMaxOpenStops = 2.0;
+	constexpr double SubjectMeterMaxOpenStops = 1.0;   // round 7: 2 stops bleached #4 and #6
 	constexpr double SubjectMeterSaturatedStepStops = 1.0;
 	constexpr double SubjectMeterHighPercentile = 0.97;
 	constexpr int32 SubjectMeterRounds = 4;
@@ -6128,6 +6128,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				TEXT("; subject meter moved %+.2f stops (aircraft p50 %.3f -> %.3f, p97 %.3f -> %.3f)"),
 				SubjectMeterStops, SubjP50Before, SubjP50, SubjP97Before, SubjP97);
 		}
+		// Round 7 (the A-4 drew as a see-through checkerboard): the mask's
+		// captures with the aircraft HIDDEN left the background in TSR's history
+		// where the aircraft now is, and the few settle captures did not wash it
+		// out. Re-run the full warm-up with the aircraft shown and the final
+		// exposure, so frame 0 starts from a converged history.
+		for (int32 SubjRewarm = 0; SubjRewarm < WarmupCaptures; ++SubjRewarm)
+		{
+			World->SendAllEndOfFrameUpdates();
+			FlushRenderingCommands();
+			Capture->CaptureScene();
+			FlushRenderingCommands();
+			BeatWatchdog(TEXT("a subject meter re-warm capture"));
+		}
+		SubjectRow->SetNumberField(TEXT("rewarm_captures"), WarmupCaptures);
 		UE_LOG(LogFlightSimRender, Display,
 		       TEXT("subject exposure: %d aircraft pixels, p50 %.3f -> %.3f, p97 %.3f -> %.3f, %+.2f stops, ")
 		       TEXT("%d rounds: %s"), SubjMaskPixels, SubjP50Before, SubjP50, SubjP97Before, SubjP97, SubjectMeterStops,

@@ -374,7 +374,7 @@ SUBJECT_METER: Dict[str, float] = {
     "mid_floor_p50": 0.30,
     "mid_target_p50": 0.36,
     "max_close_stops": 3.0,
-    "max_open_stops": 2.0,
+    "max_open_stops": 1.0,   # round 7: 2 stops bleached #4 and #6 (the frame, not just the aircraft)
     "saturated_step_stops": 1.0,
     "high_percentile": 0.97,
     "rounds": 4,
