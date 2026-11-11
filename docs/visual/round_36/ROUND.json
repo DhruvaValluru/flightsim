@@ -1,0 +1,61 @@
+﻿{
+    "round":  36,
+    "commit":  "029ead47",
+    "full":  false,
+    "scenes":  [
+                   7,
+                   9,
+                   10,
+                   13,
+                   15
+               ],
+    "switches":  "",
+    "prep":  [
+                 "build",
+                 "materials",
+                 "aircraft"
+             ],
+    "seconds":  {
+                    "build":  21.6,
+                    "materials":  12.7,
+                    "aircraft":  24.1,
+                    "scenes":  879.4
+                },
+    "outcomes":  [
+                     {
+                         "number":  7,
+                         "outcome":  "done",
+                         "seconds":  255.9,
+                         "spec_sha256":  "cf3697a5b8c94e5a54c30f373f30fae193d9e68ed10878f721f27d32361af7a4",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  9,
+                         "outcome":  "done",
+                         "seconds":  290.2,
+                         "spec_sha256":  "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  10,
+                         "outcome":  "done",
+                         "seconds":  114.9,
+                         "spec_sha256":  "f16db732eb9f2d0529845a94365064e6846b1c81b0351ab82d5c2bdbc28b442e",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  13,
+                         "outcome":  "done",
+                         "seconds":  105.2,
+                         "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  15,
+                         "outcome":  "done",
+                         "seconds":  109.5,
+                         "spec_sha256":  "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+                         "why":  "clip ready"
+                     }
+                 ]
+}
