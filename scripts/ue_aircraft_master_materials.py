@@ -87,7 +87,7 @@ REPO = os.path.dirname(_HERE)
 #: compile-checked fallback and -aircraft-probe=coat).
 #: 8: both round-47 lanes -- M_AircraftContrail FormationRamp (#13) and the
 #: round-25 in-place rebuild, sentinel and coat master.
-LOOK_GENERATION = "9"
+LOOK_GENERATION = "10"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.
@@ -265,6 +265,14 @@ def _lerp(material, a, b, alpha, x, y, a_out="", b_out="", alpha_out=""):
     return node
 
 
+def _rgba(material, vector_parameter, x, y):
+    """A float4 from a vector parameter: Append(its RGB output, its A output)."""
+    node = _node(material, _u().MaterialExpressionAppendVector, x, y)
+    _link(vector_parameter, "", node, "A")
+    _link(vector_parameter, "A", node, "B")
+    return node
+
+
 def _mask(material, source, channels, x, y, source_out=""):
     node = _node(material, _u().MaterialExpressionComponentMask, x, y)
     for flag in ("r", "g", "b", "a"):
@@ -413,7 +421,12 @@ def _surface(name, cls, coat, shading_model=None, tangent_normal=False):
     # by the wear noise (z + 0.5 -> 0..1).
     soot = _mul(material, _custom(material, "exhaust_soot", "CMOT_FLOAT1", {
         "LocalPos": (local, ""),
-        **{name: (v[name], "") for name in look.SOOT_NOZZLE_PARAMETERS},
+        # Round 51: a vector parameter's default output is its RGB (float3);
+        # exhaust_soot reads float4 nozzles (w = radius), so each input is
+        # Append(RGB, A) -- the compile error "expected 16 elements, have 12"
+        # that sent every M_AircraftPaint slot to the fallback.
+        **{name: (_rgba(material, v[name], -1150, 100 + 40 * i), "")
+           for i, name in enumerate(look.SOOT_NOZZLE_PARAMETERS)},
         "LengthRadii": (s["SootLengthRadii"], ""),
         "Noise": (_add(material, breakup, _const(material, 0.5, -800, 50), -700, 50), "")}, -1000, 100),
         s["SootAmount"], -650, 100)
