@@ -1,0 +1,24 @@
+﻿{
+    "round":  55,
+    "commit":  "434ba7e6",
+    "full":  false,
+    "scenes":  [
+                   10
+               ],
+    "switches":  "-storm-lower-hemisphere=surface",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  113.3
+                },
+    "outcomes":  [
+                     {
+                         "number":  10,
+                         "outcome":  "done",
+                         "seconds":  111.8,
+                         "spec_sha256":  "f16db732eb9f2d0529845a94365064e6846b1c81b0351ab82d5c2bdbc28b442e",
+                         "why":  "clip ready"
+                     }
+                 ]
+}
