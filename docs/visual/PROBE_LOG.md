@@ -3563,3 +3563,34 @@ with a tangent-space (0, 0, 1) normal, the imported / flat normal path). default
 tangentnormal act on paint slots only (bare metal is already Default Lit); defaultlit wins if
 both are given. Reading: whichever single probe brings the A-4 to about 167 is the cause; the
 A-4 in sun is the clean test (no rain, no wet).
+
+## #10 green and #02 blue: the hero lane's lower hemisphere and the fog's sky ambient (2026-11-11)
+
+Mac, uncompiled; nothing rendered. Read from round 44 (full sweep) and round 45 (#10, `-rain-veil=off`).
+
+**#10 green.** Round 44: sky 86/99/87, deck 71/84/70, funnel 22/33/23, but the ground 8/5/5
+(red-brown, not green). Everything that takes the sky light's SH (the volumetric fog, the
+deck's ambient, the funnel's sides) is green; only the up-facing ground is not. Cause: the
+commandlet runs `FFlightSimHeroLighting::Apply` AFTER `WorldBeauty.Build`, so the world lane's
+storm_deck_light black lower hemisphere was always overwritten by the hero sidecar's ground,
+`GROUND_ALBEDO_RGB["grassland"]` (0.10, 0.14, 0.06; G/B 2.3) x E x 0.25 / pi, about 950 cd/m2
+of green under the deck (its record still said black). The r45 green with the veil off fits
+(the hero ground does not depend on the veil); r31's neutral frame predates the pinned specs
+(04093d48), so its compile need not have named grassland. Fix: under the storm world
+(`hero_lighting.storm_deck_look`) the sidecar states the ground as a grey of the same
+luminance and keeps the colour as `lower_hemisphere_luminance_rgb_surface`.
+- Probe g10: #10 default, then `FLIGHTSIM_RENDER_SWITCHES="-storm-lower-hemisphere=surface"`.
+  Pass: the default frame's sky and funnel neutral (G within 3 of R and B), the A/B green
+  again. Read `hero_lighting.sky_light.storm_lower_hemisphere` and `lower_hemisphere_color`.
+  Also re-check #09 and #15 (storm world: same change).
+
+**#02 blue.** Round 44, by luma band (sRGB B - R): #02 +67, +70, +49, +14, -7; #01 +20, +8, -17,
+-49, -46. An additive blue veil over every band; the sky light and the aerial perspective were
+excluded in round 5. The remaining in-scatter is the height fog's: FlightSimSky.cpp sets its
+colour black and its SkyAtmosphere ambient scale white, so it is the clear sky's blue at the
+relit 72 deg sun. Fix (a guess, so switched): under a STATED fill the fog's ambient scale is
+multiplied by the fill's colour (sidecar `sky_light.color_linear_rgb`, 1/0.497/0.250 at 72 deg).
+- Probe b02: #02 default, then `FLIGHTSIM_RENDER_SWITCHES="-stated-fill-fog=sky"`. Pass: the
+  default frame's shade (luma < 40) B - R under +30 and the A/B back at ~+67. Read
+  `hero_lighting.sky_light.probes.stated_fill_fog_rows`. If both frames stay blue, the fog is
+  excluded too: the volumetric fog's sky-atmosphere term or the exposure open are next.

@@ -892,6 +892,9 @@ hl_check "hero: SkyLight bCloudAmbientOcclusion" "$HLS" "uint32 bCloudAmbientOcc
 hl_check "hero: SkyLight MinOcclusion" "$HLS" "float MinOcclusion;"
 hl_check "hero: SkyLight LightColor (FColor, sRGB 8-bit)" "$HLB" "FColor LightColor;"
 hl_check "hero: SkyAtmosphere SetAerialPespectiveViewDistanceScale" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetAerialPespectiveViewDistanceScale(float NewValue);"
+# 2026-11-11 #02: the stated fill tints the height fog's sky-atmosphere ambient (-stated-fill-fog=)
+hl_check "hero: Fog SetSkyAtmosphereAmbientContributionColorScale" "Engine/Classes/Components/ExponentialHeightFogComponent.h" "ENGINE_API void SetSkyAtmosphereAmbientContributionColorScale(FLinearColor NewValue);"
+hl_check "hero: Fog SkyAtmosphereAmbientContributionColorScale" "Engine/Classes/Components/ExponentialHeightFogComponent.h" "FLinearColor SkyAtmosphereAmbientContributionColorScale;"
 hl_check "hero: SetVolumetricScatteringIntensity" "$HLL" "ENGINE_API void SetVolumetricScatteringIntensity(float NewIntensity);"
 hl_check "hero: ContactShadowLength" "$HLL" "float ContactShadowLength;"
 hl_check "hero: ContactShadowLengthInWS" "$HLL" "uint32 ContactShadowLengthInWS : 1;"

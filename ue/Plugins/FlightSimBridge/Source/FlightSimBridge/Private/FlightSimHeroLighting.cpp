@@ -4,6 +4,7 @@
 #include "FlightSimVisualScene.h"
 
 #include "Components/DirectionalLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h" // #02: the stated fill tints the fog's sky ambient
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
@@ -17,6 +18,7 @@
 #include "RenderUtils.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "UObject/UObjectIterator.h"
 
 // UNCOMPILED when written: see the header. Every member and setter below was
 // read in UE 5.7.4's Classes/Components/{LightComponent,LightComponentBase,
@@ -348,6 +350,33 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 			{
 				return false;
 			}
+			// 2026-11-11, #10 green (core/scene/hero_lighting.py STORM_LOWER_HEMISPHERE_SWITCHES):
+			// this lane runs AFTER the world lane's storm_deck_light, so under a storm
+			// deck the ground drawn here is the sky light's whole lower hemisphere. The
+			// sidecar states it as a grey of the surface's luminance and keeps the
+			// surface's colour beside it; -storm-lower-hemisphere=surface (command line
+			// or FLIGHTSIM_RENDER_SWITCHES) draws that colour instead, for the A/B.
+			if ((*Ground)->HasField(TEXT("lower_hemisphere_luminance_rgb_surface")))
+			{
+				const FString GroundSwitches = FString(CommandLine != nullptr ? CommandLine : TEXT("")) + TEXT(" ")
+					+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+				FString StormLower = TEXT("neutral");
+				FParse::Value(*GroundSwitches, TEXT("storm-lower-hemisphere="), StormLower);
+				if (StormLower == TEXT("surface"))
+				{
+					if (!HeroLightingReadRgb(*Ground, TEXT("lower_hemisphere_luminance_rgb_surface"), Lower))
+					{
+						return false;
+					}
+				}
+				else if (StormLower != TEXT("neutral"))
+				{
+					return HeroLightingFail(FString::Printf(
+						TEXT("render.sky_fill_probe: -storm-lower-hemisphere=%s is not neutral or surface"),
+						*StormLower));
+				}
+				SkyRecord->SetStringField(TEXT("storm_lower_hemisphere"), StormLower);
+			}
 			// The capture replaces the lower hemisphere with this colour (alpha 1:
 			// a full lerp in ReflectionEnvironmentShaders.usf's copy to the cube face).
 			Sky->bLowerHemisphereIsBlack = true;
@@ -507,6 +536,52 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 			else
 			{
 				Probe->SetStringField(TEXT("aerial_perspective_scale"), TEXT("as-planned (the world lane's row)"));
+			}
+			// 2026-11-11, #02 super bright's blue shade (core/scene/hero_lighting.py
+			// STATED_FILL_FOG_SWITCHES): the sky light and the aerial perspective were
+			// excluded by the round-5 probes; the height fog's in-scatter is the
+			// SkyAtmosphere's ambient (FlightSimSky.cpp: ambient scale white, fog colour
+			// black), the clear sky's blue at the relit sun. Under a STATED fill the
+			// fog's ambient takes the fill's colour (the sidecar's sky_light), so the
+			// haze is the fill's light. -stated-fill-fog=sky keeps the sky's hue (A/B).
+			{
+				FString FillFog = TEXT("tint");
+				FParse::Value(*Switches, TEXT("stated-fill-fog="), FillFog);
+				if (FillFog != TEXT("tint") && FillFog != TEXT("sky"))
+				{
+					return HeroLightingFail(FString::Printf(
+						TEXT("render.sky_fill_probe: -stated-fill-fog=%s is not tint or sky"), *FillFog));
+				}
+				Probe->SetStringField(TEXT("stated_fill_fog"), FillFog);
+				const TSharedPtr<FJsonObject>* FogFill = nullptr;
+				FLinearColor FogTint = FLinearColor::White;
+				if (FillFog == TEXT("tint") && Plan.IsValid() &&
+				    Plan->TryGetObjectField(TEXT("sky_light"), FogFill) && FogFill != nullptr)
+				{
+					if (!HeroLightingReadRgb(*FogFill, TEXT("color_linear_rgb"), FogTint))
+					{
+						return false;
+					}
+					TArray<TSharedPtr<FJsonValue>> FogRows;
+					for (TObjectIterator<UExponentialHeightFogComponent> It; It; ++It)
+					{
+						UExponentialHeightFogComponent* Fog = *It;
+						if (Fog == nullptr || Fog->GetWorld() != Sky->GetWorld() || !Fog->IsVisible())
+						{
+							continue;
+						}
+						const FLinearColor AmbientBefore = Fog->SkyAtmosphereAmbientContributionColorScale;
+						const FLinearColor AmbientAfter(AmbientBefore.R * FogTint.R, AmbientBefore.G * FogTint.G,
+						                                AmbientBefore.B * FogTint.B, AmbientBefore.A);
+						Fog->SetSkyAtmosphereAmbientContributionColorScale(AmbientAfter);
+						TSharedPtr<FJsonObject> FogRow = MakeShared<FJsonObject>();
+						FogRow->SetStringField(TEXT("component"), Fog->GetName());
+						FogRow->SetObjectField(TEXT("sky_atmosphere_ambient_scale_before"), HeroLightingColorJson(AmbientBefore));
+						FogRow->SetObjectField(TEXT("sky_atmosphere_ambient_scale"), HeroLightingColorJson(AmbientAfter));
+						FogRows.Add(MakeShared<FJsonValueObject>(FogRow));
+					}
+					Probe->SetArrayField(TEXT("stated_fill_fog_rows"), FogRows);
+				}
 			}
 			Probe->SetObjectField(TEXT("sky_light_after_probes"), HeroLightingColorJson(FLinearColor(Sky->LightColor)));
 			Probe->SetNumberField(TEXT("sky_light_intensity_after_probes"), Sky->Intensity);

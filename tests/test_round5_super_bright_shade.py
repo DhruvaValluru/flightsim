@@ -134,7 +134,8 @@ def test_the_hero_lanes_fill_colour_is_the_last_word_on_the_sky_lights_colour():
 
 
 def test_the_host_reads_the_probes_the_python_twin_names():
-    sky = HERO_CPP[HERO_CPP.index("// -- round 5 shade probes"):HERO_CPP.index('SkyRecord->SetObjectField(TEXT("probes"), Probe);')]
+    # From the sky light block: -storm-lower-hemisphere= (2026-11-11) is read where the ground is drawn.
+    sky = HERO_CPP[HERO_CPP.index("// -- the sky light"):HERO_CPP.index('SkyRecord->SetObjectField(TEXT("probes"), Probe);')]
     assert 'GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"))' in sky
     for name, words in hl.DIAGNOSTIC_SWITCHES.items():
         assert f'TEXT("{name}=")' in sky, name
@@ -145,7 +146,7 @@ def test_the_host_reads_the_probes_the_python_twin_names():
     assert "SetIntensity(" not in HERO_CPP                 # the lane never changes an intensity
     assert "Sky->bCloudAmbientOcclusion = false;" in sky
     assert "Scene.Atmosphere->SetAerialPespectiveViewDistanceScale(static_cast<float>(AerialScale));" in sky
-    assert sky.count("render.sky_fill_probe:") == 3                                 # every refusal by name
+    assert sky.count("render.sky_fill_probe:") == 5                                 # every refusal by name
     # Outside the stated-fill slice round 3 pins ("the lane never changes an intensity"):
     fill = HERO_CPP[HERO_CPP.index('TryGetObjectField(TEXT("sky_light"), SkyFill)'):]
     assert "SetIntensity(" not in fill[:fill.index("Sky->SetCaptureIsDirty();")]
