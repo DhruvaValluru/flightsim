@@ -527,7 +527,7 @@ WINDSHIELD_FILM_TILES = 1.5
 #: Lane D (2026-11-11): the beauty rain veil (core/scene/rain_veil.py,
 #: FlightSimWeather.cpp ApplyBeautyRainVeil): the curtain's shells and the scud cards.
 CURTAIN_PARAMETERS = ("WindVel", "FallCmps", "Time", "Radius", "StreakRad", "StreakDensity",
-                      "StreakAlpha", "Veil", "GroundRelZ", "Seed", "Shade")
+                      "StreakAlpha", "Veil", "GroundRelZ", "Seed", "Shade", "VeilVary")
 SCUD_PARAMETERS = ("Time", "Shade")
 #: The curtain's and the scud's albedo as lit translucent surfaces: the rain veil
 #: and a rag of cloud scatter nearly all they intercept (grey-white, lit by the
@@ -537,6 +537,9 @@ SCUD_ALBEDO = 0.85
 #: Depth fades (cm): the curtain against nearer geometry, the scud against the
 #: aircraft and the tiles it meets (soft, no hard line where a card cuts them).
 CURTAIN_DEPTH_FADE_CM = 300.0
+#: The veil's colour taps (veil_tone.hlsl): four SceneColor samples this screen
+#: fraction apart (a local mean of the scene behind the veil).
+VEIL_TAP = 0.08
 SCUD_DEPTH_FADE_CM = 4000.0
 #: The vector parameters whose shader input is a float4 (RGB appended with A).
 WEATHER_FLOAT4_PARAMETERS = ("Splash", "Power", "Geo1", "Geo2", "Sigma", "Noise", "Drift",
@@ -600,13 +603,16 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_RainCurtain 1 and M_ScudCard 1: the beauty rain veil (lane D, rain_curtain.hlsl,
 #: scud_card.hlsl). 2: the Shade scalar on the base colour and the round-12 shaders
 #: (the streaks in the shell's surface frame, pixel-wide; torn rags, not puffs).
+#: M_RainCurtain 3: VeilVary, falling curtains in the veil (round 26's #07 flat grey field).
+#: M_RainCurtain 4: UNLIT, the neutral grey of the scene behind it (veil_tone.hlsl; r31/r32:
+#: the lit veil carried #10's green).
 #: M_ScudCard 3: MODULATE, unlit (round 19: lit cards drew white under the deck).
 #: M_StormCell 6: the beauty precipitation curtain and scud ("Curtain", storm_cell.hlsl;
 #: lane D 2026-11-11, round 4's #09 ring and cylinder; default 0 = generation 5).
 #: M_RainDrops 6: the beauty streak's softness and per-drop variation (Soft, Vary;
 #: lane D 2026-11-11, round 4's "scratches on the lens"; default 0 = generation 5).
 STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChannel": "2",
-                     "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "2",
+                     "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "4",
                      "M_ScudCard": "3"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
@@ -2029,26 +2035,42 @@ def _veil_lit(material, lib, albedo, x, y):
 
 def create_rain_curtain():
     """M_RainCurtain: one shell of the beauty rain veil (rain_curtain.hlsl into
-    the opacity, depth-faded against nearer geometry), lit like the drops.
-    Lane D, 2026-11-11; BEAUTY ONLY (FlightSimWeather.cpp ApplyBeautyRainVeil)."""
+    the opacity, depth-faded against nearer geometry). Generation 4 (round 26: the
+    lit veil carried the sky light's green ground bounce): UNLIT, its colour the
+    neutral grey of the scene behind it (veil_tone.hlsl: four SceneColor taps
+    VEIL_TAP apart, their luminance, x Shade). Lane D, 2026-11-11; BEAUTY ONLY
+    (FlightSimWeather.cpp ApplyBeautyRainVeil)."""
     material = _storm_material("M_RainCurtain")
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary
-    _translucent_lit(material)
+    _translucent_unlit(material, unreal.BlendMode.BLEND_TRANSLUCENT)
     params = {name: weather_parameter(material, lib, name, -1800, -600 + 110 * i)
-              for i, name in enumerate(CURTAIN_PARAMETERS) if name != "Shade"}   # Shade: _veil_lit
+              for i, name in enumerate(CURTAIN_PARAMETERS) if name != "Shade"}   # Shade: the tone
     opacity = custom(material, lib, "rain_curtain", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
         "Rel": relative_position(material, lib, -1800, 700, False, "camera"),
         "WindVel": params["WindVel"], "FallCmps": params["FallCmps"], "Time": params["Time"],
         "Radius": params["Radius"], "StreakRad": params["StreakRad"], "StreakDensity": params["StreakDensity"],
         "StreakAlpha": params["StreakAlpha"], "Veil": params["Veil"],
-        "GroundRelZ": params["GroundRelZ"], "Seed": params["Seed"]}, -900, 0)
+        "GroundRelZ": params["GroundRelZ"], "Seed": params["Seed"],
+        "VeilVary": params["VeilVary"]}, -900, 0)
     fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -600, 0)
     fade.set_editor_property("fade_distance_default", CURTAIN_DEPTH_FADE_CM)
     lib.connect_material_expressions(opacity, "", fade, "Opacity")
     lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
-    _veil_lit(material, lib, CURTAIN_ALBEDO, -600, 300)
+    taps = {}
+    for i, (key, offset) in enumerate((("A", (-VEIL_TAP, -VEIL_TAP)), ("B", (VEIL_TAP, -VEIL_TAP)),
+                                       ("C", (-VEIL_TAP, VEIL_TAP)), ("D", (VEIL_TAP, VEIL_TAP)))):
+        tap = lib.create_material_expression(material, unreal.MaterialExpressionSceneColor, -1200, 400 + 120 * i)
+        mode = getattr(unreal, "MaterialSceneAttributeInputMode", None)
+        if mode is not None and hasattr(mode, "OFFSET_FRACTION"):
+            tap.set_editor_property("input_mode", mode.OFFSET_FRACTION)
+        tap.set_editor_property("const_input", unreal.Vector2D(*offset))
+        taps[key] = (mask(material, lib, tap, "rgb", -1000, 400 + 120 * i), "")
+    tone = custom(material, lib, "veil_tone", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
+        "A": taps["A"], "B": taps["B"], "C": taps["C"], "D": taps["D"],
+        "Shade": (scalar(material, lib, "Shade", 1.0, -1000, 900), "")}, -700, 500)
+    lib.connect_material_property(tone, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     finish_storm(material, "M_RainCurtain")
 
 

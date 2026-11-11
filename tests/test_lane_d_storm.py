@@ -273,7 +273,7 @@ def test_the_veil_is_beauty_only_and_hidden_from_every_label():
     assert "if (VeilActor != nullptr)" in advance and "if (ScudMesh == nullptr)" in advance
     assert WEATHER_CPP.count("StepBeautyRainVeil(View, Wind, CameraVelocity, Share, PixelAngle);") == 1
     # the materials exist in the script, stamped, with their shader inputs
-    assert '"M_RainCurtain": "2"' in SCRIPT and '"M_ScudCard": "3"' in SCRIPT
+    assert '"M_RainCurtain": "4"' in SCRIPT and '"M_ScudCard": "3"' in SCRIPT
     assert 'custom(material, lib, "rain_curtain"' in SCRIPT and 'custom(material, lib, "scud_card"' in SCRIPT
     assert "create_rain_curtain()" in SCRIPT and "create_scud_card()" in SCRIPT
 
@@ -369,13 +369,13 @@ def test_round12_the_streaks_slant_and_keep_their_screen_size_at_every_lens():
 
 
 def test_round12_the_veil_and_scud_are_shaded_and_torn():
-    assert rain_veil.veil_shade(True) == rain_veil.VEIL_SHADE_UNDER_DECK < rain_veil.veil_shade(False) < 1.0
+    assert rain_veil.veil_shade(True) == rain_veil.VEIL_SHADE_UNDER_DECK < rain_veil.veil_shade(False) <= 1.0
     veil = _veil_cpp()
     assert "VeilShade = bDeck && DeckBaseM > AircraftUpM ? VeilShadeUnderDeck : VeilShadeOpen;" in WEATHER_CPP
     assert 'ScudMaterial->SetScalarParameterValue(TEXT("Shade")' in WEATHER_CPP
     assert 'Material->SetScalarParameterValue(TEXT("Shade")' in WEATHER_CPP
     assert 'shade = scalar(material, lib, "Shade", 1.0' in SCRIPT
-    assert '"M_RainCurtain": "2"' in SCRIPT and '"M_ScudCard": "3"' in SCRIPT
+    assert '"M_RainCurtain": "4"' in SCRIPT and '"M_ScudCard": "3"' in SCRIPT
     scud = (SHADERS / "scud_card.hlsl").read_text(encoding="utf-8")
     assert "float tear = S.Value(" in scud and "S.Ss(0.55, 0.68," in scud
     assert "0.55 * falloff" not in scud                            # the falloff no longer makes the shape
@@ -383,14 +383,22 @@ def test_round12_the_veil_and_scud_are_shaded_and_torn():
 
 
 def test_round12_the_storm_fog_is_lit_by_the_deck_not_the_clear_sky():
+    # round 26: under ANY storm deck (rain or not: #10's tornado), not only with rain haze
+    deck = CLOUDS_CPP[CLOUDS_CPP.index("const bool bDeckLight = "):]
+    deck = deck[:deck.index('Record->SetObjectField(TEXT("storm_deck_light"), DeckLight);')]
+    assert "const bool bDeckLight = Preset == PresetStorm && bDeckAbove && RainVeilMode == TEXT(\"on\");" \
+        in CLOUDS_CPP
+    r, g, b = rain_veil.STORM_FOG_AMBIENT_RGB
+    assert f"const FLinearColor Ambient({r:.2f}f, {g:.2f}f, {b:.2f}f);" in deck
+    assert "Fog->SetSkyAtmosphereAmbientContributionColorScale(Ambient);" in deck
+    assert "Fog->SetDirectionalInscatteringColor(FLinearColor::Black);" in deck
+    assert f"constexpr double StormSunFogShare = {rain_veil.STORM_SUN_FOG_SHARE};" in deck
+    # the green: the captured sky light's lower hemisphere (the tiles) made solid and dark
+    assert "DeckSky->bLowerHemisphereIsBlack = true;" in deck
+    assert "if (DeckSky != nullptr && !DeckSky->bLowerHemisphereIsBlack)" in deck   # the hero sidecar wins
     haze = CLOUDS_CPP[CLOUDS_CPP.index("const bool bHaze = Preset == PresetStorm"):]
     haze = haze[:haze.index('Record->SetObjectField(TEXT("rain_haze"), Haze);')]
-    r, g, b = rain_veil.STORM_FOG_AMBIENT_RGB
-    assert f"const FLinearColor Ambient({r:.2f}f, {g:.2f}f, {b:.2f}f);" in haze
-    assert "Fog->SetSkyAtmosphereAmbientContributionColorScale(Ambient);" in haze
-    assert "Fog->SetDirectionalInscatteringColor(FLinearColor::Black);" in haze
-    assert f"constexpr double StormSunFogShare = {rain_veil.STORM_SUN_FOG_SHARE};" in haze
-    assert haze.count("if (bDeckAbove") == 2
+    assert "SetSkyAtmosphereAmbientContributionColorScale" not in haze
 
 
 # -- round 19: dark rags, no arcs ------------------------------------------------------
@@ -413,3 +421,44 @@ def test_round19_the_volumetric_scud_band_is_off_in_beauty():
     apply = _function(WEATHER_CPP, "void FFlightSimWeather::ApplyBeautyStormVantage(")
     assert _cpp_constant(apply, "WeatherBeautyScudDepthM") == storm_cell.BEAUTY_CURTAIN["scud_depth_m"] == 0.0
     assert "if (Curtain.z > 0.0)" in STORM_HLSL     # the term is skipped, not evaluated
+
+
+
+# -- round 26: a low full deck, falling curtains, the green ---------------------------
+
+
+def test_round26_the_storm_deck_hangs_low_over_the_aircraft():
+    assert wb.deck_clearance_m("storm") == wb.STORM_DECK_CLEARANCE_M < wb.AIRCRAFT_LAYER_CLEARANCE_M
+    assert wb.deck_clearance_m("rain") == wb.AIRCRAFT_LAYER_CLEARANCE_M
+    out = wb.aircraft_clear_layer(1500.0, 2700.0, 2000.0, wb.deck_clearance_m("storm"), True)
+    assert out["base_m"] == 2000.0 + wb.STORM_DECK_CLEARANCE_M and out["above"]
+    assert f"constexpr double StormDeckClearanceM = {wb.STORM_DECK_CLEARANCE_M};" in CLOUDS_CPP
+    assert "Preset == PresetStorm ? StormDeckClearanceM : AircraftLayerClearanceM, bRainDeck);" in CLOUDS_CPP
+    # the cell's deck (#09) keeps the wide clearance
+    assert "AircraftClearLayer(LayerBaseM, LayerTopM, AircraftUpM, AircraftLayerClearanceM, true)" in CLOUDS_CPP
+
+
+def test_round26_the_veil_carries_falling_curtains():
+    shader = (SHADERS / "rain_curtain.hlsl").read_text(encoding="utf-8")
+    assert "if (VeilVary > 0.0)" in shader
+    assert "veil = saturate(Veil * (1.0 + VeilVary * (2.0 * n - 1.0)));" in shader
+    assert '"VeilVary": params["VeilVary"]' in SCRIPT
+    assert _cpp_constant(_veil_cpp(), "VeilVary") == rain_veil.VEIL_VARY
+    assert _cpp_constant(_veil_cpp(), "VeilShadeOpen") == rain_veil.VEIL_SHADE_OPEN
+
+
+def test_round26_the_veil_is_neutral_grey_at_any_light():
+    """r31/r32: #10's green was the rain veil's (a lit surface taking the sky light's
+    green ground bounce). Generation 4: unlit, its colour the scene's local luminance."""
+    creator = SCRIPT[SCRIPT.index("def create_rain_curtain"):SCRIPT.index("def create_scud_card")]
+    assert "_translucent_unlit(material, unreal.BlendMode.BLEND_TRANSLUCENT)" in creator
+    assert "_translucent_lit(" not in creator and "_veil_lit(" not in creator
+    assert creator.count("unreal.MaterialExpressionSceneColor") == 1 and '"rgb"' in creator
+    assert 'custom(material, lib, "veil_tone"' in creator and "MP_EMISSIVE_COLOR" in creator
+    tone = (SHADERS / "veil_tone.hlsl").read_text(encoding="utf-8")
+    assert "float lum = dot(mean, float3(0.2126, 0.7152, 0.0722));" in tone
+    assert "return float3(lum, lum, lum) * Shade;" in tone          # grey: equal channels
+    # the scud is a modulate rag of one scalar tone: neutral too
+    scud = SCRIPT[SCRIPT.index("def create_scud_card"):SCRIPT.index("def create_rain_splash")]
+    assert 'tone = scalar(material, lib, "Shade", 1.0' in scud
+    assert rain_veil.VEIL_SHADE_UNDER_DECK < rain_veil.VEIL_SHADE_OPEN == 1.0

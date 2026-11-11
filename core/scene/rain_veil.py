@@ -92,8 +92,16 @@ SCUD_SEED_SALT = 0x5C0D
 #: "bright white cartoon cumulus puffs" in a pale fog. Their base colour is scaled by
 #: Shade: under a drawn deck (the light there is the deck's diffuse transmission) and
 #: in the open rain. UNCALIBRATED.
-VEIL_SHADE_UNDER_DECK = 0.15
-VEIL_SHADE_OPEN = 0.5
+#: Round 26 (generation 4: the veil is UNLIT, its colour the luminance of the scene
+#: behind it x Shade -- veil_tone.hlsl): Shade is now the veil's tone RELATIVE TO THE
+#: SCENE'S LOCAL MEAN, not a lit albedo: a little darker under a deck, the mean in the
+#: open. Neutral by construction (r31/r32: the lit veil carried #10's green).
+VEIL_SHADE_UNDER_DECK = 0.85
+#: Round 26: 0.8 in the open (#07's streaks drew darker than the grey behind them).
+VEIL_SHADE_OPEN = 1.0
+#: Round 26 (#07's flat grey field): the veil varied by falling curtains, x (1 +
+#: VEIL_VARY x (2n - 1)) over a smooth noise a fifth of the shell's radius across.
+VEIL_VARY = 0.6
 #: Round 19 (#15 and #09 still drew white puffs): the scud card is now MODULATE
 #: (M_ScudCard 3): the scene behind it x lerp(1, SCUD_TONE, rag). Under a deck a rag
 #: keeps half the light behind it; in open rain 0.7.

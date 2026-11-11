@@ -3196,6 +3196,39 @@ puffs, #09 showed ring-like white arcs round the 747, and #07 is still a grey vo
   heavy rain, with no ground and no deck structure in the frame. Read its render.json
   rain_veil and haze rows before the next fix.
 
+**Round 26 (8c868405).** #09 is good: no arcs, a domed underside over the shaft. #15 is
+darker with slanted rain, but has no deck in the frame. #07 is a flat grey field. #10 is green
+(r24: the fog and the veil on, funnel 73/94/81; both off, 68/70/79).
+* #15 deck: it sat 400 m over the aircraft, so a level chase frame's top edge looked under
+  it until the rain haze had hidden it. A storm preset's deck now hangs
+  world_beauty.STORM_DECK_CLEARANCE_M = 150 m over the aircraft (FlightSimClouds.cpp
+  StormDeckClearanceM; the cell's #09 deck keeps 400 m). The scud band follows it.
+* The green, read from the code: the sky light is SLS_CapturedScene, captured once by the
+  commandlet, so its lower hemisphere is the tiles, green over #10's prairie. The volumetric
+  fog and the lit veil take the sky light. Under a storm deck the upper hemisphere is dark,
+  so the green ground bounce dominates both. The fog's SkyAtmosphere ambient (the clear sky)
+  was a second term; lane C's neutral ground albedo already covers the atmosphere's own
+  bounce.
+  Fix (world_beauty.storm_deck_light in render.json): under ANY drawn storm deck, with or
+  without rain, so #10 too:
+  * the sky light's lower hemisphere is a solid black, unless the hero lighting's sidecar
+    states one;
+  * the fog ambient is the deck's grey (0.20, 0.21, 0.23);
+  * there is no sun lobe, and the sun's volumetric scattering is x 0.15.
+  The capture runs after WorldBeauty.Build, so it picks this up.
+* r31/r32 then showed that the green is the RAIN VEIL's: with -rain-veil=off the funnel is
+  46/48/57 (neutral); with -look-volumetric-fog=off it is 28/43/34 (still green). Fixed at the
+  source: M_RainCurtain 4 is UNLIT, and its colour is the luminance of the scene behind it
+  (four SceneColor taps 0.08 of the screen apart, veil_tone.hlsl) x Shade. Shade is now the
+  tone relative to that local mean: 0.85 under a deck, 1.0 in the open. The veil is neutral
+  grey under any light, and darker than the scene under a deck. The scud cards are already
+  a single-scalar modulate, so they are neutral too.
+* #07 depth: the veil now varies by falling curtains (M_RainCurtain 3, VeilVary 0.6), smooth
+  noise a fifth of each shell's radius across, falling at the drops' speed. That gives denser
+  and thinner rain at three depths through the haze. Open-rain Shade goes back to 0.8: the
+  r26 streaks drew darker than the grey behind them. No distant ground is in a 250 mm frame
+  looking up, so the structure has to come from the rain itself.
+
 ## lane A: aircraft too shadowed (2026-11-11)
 
 Owner: "the planes are being too shadowed". Round 5 (f7232cc7): #06 (A320, SFO, moderate rain)
