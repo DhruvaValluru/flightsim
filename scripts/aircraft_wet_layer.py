@@ -154,6 +154,7 @@ _PIN_ALIASES = {
     "AmbientOcclusion": ("AmbientOcclusion", "Ambient Occlusion"),
     "ClearCoat": ("ClearCoat", "Clear Coat"),
     "ClearCoatRoughness": ("ClearCoatRoughness", "Clear Coat Roughness"),
+    "EmissiveColor": ("EmissiveColor", "Emissive Color", "Emissive"),
 }
 
 
@@ -211,10 +212,24 @@ def _pack4(material, lib, nodes, x, y):
     return out
 
 
-def add_wet_layer(material, lib, slot_class):
+#: Round 24 (2026-11-11, LOOK_GENERATION 6): the bisect handles grafted onto
+#: the paint and bare-metal masters only (``raw_base`` given), as master
+#: scalars with these defaults (the defaults are the gen-5 graph exactly):
+#: WetLayerAmount 0 bypasses this graft (Make takes Break's BaseColor,
+#: Roughness and ClearCoat; -aircraft-probe=nowet); RawBaseAmount 1 feeds
+#: Make.BaseColor straight from _base_colour (no AlbedoMax, cavity, wear or
+#: wet; rawbase); BaseDebug 1 zeroes the lit base colour and emits the final
+#: base colour x BaseDebugNits (basecolor-debug; read it with
+#: -subject-meter=off). scripts/aircraft_look.py AIRCRAFT_PROBES.
+PROBE_SCALARS = {"WetLayerAmount": 1.0, "RawBaseAmount": 0.0, "BaseDebug": 0.0, "BaseDebugNits": 2000.0}
+
+
+def add_wet_layer(material, lib, slot_class, raw_base=None):
     """Graft the wet layer onto a built class master (after its attributes
     are wired, before _finish): Break -> aircraft_wet.hlsl -> Make. Opaque,
-    no WPO; the paint's clear coat follows the wet coat mask."""
+    no WPO; the paint's clear coat follows the wet coat mask. ``raw_base``
+    (the paint / bare-metal masters' _base_colour output) adds the round-24
+    probe handles (:data:`PROBE_SCALARS`)."""
     unreal = lib._u()
     x, y = 600, 1600
     brk, make = _graft(material, lib, x, y)
@@ -247,14 +262,36 @@ def add_wet_layer(material, lib, slot_class):
     wet.set_editor_property("additional_outputs", [coat_out])
     for name in PASS_THROUGH:
         lib._link(brk, name, make, _pin(name))
-    lib._link(lib._mask(material, wet, "rgb", x + 650, y - 100), "", make, _pin("BaseColor"))
-    lib._link(lib._mask(material, wet, "a", x + 650, y), "", make, "Roughness")
+    wet_albedo = lib._mask(material, wet, "rgb", x + 650, y - 100)
+    wet_rough = lib._mask(material, wet, "a", x + 650, y)
+    coat_alpha, coat_alpha_out = wet, WET_COAT_OUTPUT
+    if raw_base is None:
+        lib._link(wet_albedo, "", make, _pin("BaseColor"))
+        lib._link(wet_rough, "", make, "Roughness")
+    else:
+        p = {name: lib._scalar(material, name, value, x + 300, y + 2200 + 100 * i)
+             for i, (name, value) in enumerate(PROBE_SCALARS.items())}
+        colour = lib._lerp(material, brk, wet_albedo, p["WetLayerAmount"], x + 750, y - 150, a_out="BaseColor")
+        colour = lib._lerp(material, colour, raw_base, p["RawBaseAmount"], x + 850, y - 150)
+        lit = lib._mul(material, colour, lib._add(material, lib._const(material, 1.0, x + 850, y - 250),
+                                                  lib._mul(material, p["BaseDebug"],
+                                                           lib._const(material, -1.0, x + 750, y - 300),
+                                                           x + 800, y - 300), x + 900, y - 250),
+                       x + 950, y - 150)
+        lib._link(lit, "", make, _pin("BaseColor"))
+        emissive = lib._mul(material, colour, lib._mul(material, p["BaseDebug"], p["BaseDebugNits"],
+                                                       x + 850, y - 400), x + 950, y - 400)
+        lib._link(emissive, "", make, _pin("EmissiveColor"))
+        lib._link(lib._lerp(material, brk, wet_rough, p["WetLayerAmount"], x + 750, y, a_out="Roughness"),
+                  "", make, "Roughness")
+        coat_alpha = lib._mul(material, wet, p["WetLayerAmount"], x + 700, y + 100, a_out=WET_COAT_OUTPUT)
+        coat_alpha_out = ""
     if slot_class in COATED_CLASSES:
         one = lib._const(material, 1.0, x + 650, y + 100)
-        coat = lib._lerp(material, brk, one, wet, x + 750, y + 150, a_out="ClearCoat",
-                         alpha_out=WET_COAT_OUTPUT)
-        coat_rough = lib._lerp(material, brk, const["WetCoatRoughness"], wet, x + 750, y + 250,
-                               a_out="ClearCoatRoughness", alpha_out=WET_COAT_OUTPUT)
+        coat = lib._lerp(material, brk, one, coat_alpha, x + 750, y + 150, a_out="ClearCoat",
+                         alpha_out=coat_alpha_out)
+        coat_rough = lib._lerp(material, brk, const["WetCoatRoughness"], coat_alpha, x + 750, y + 250,
+                               a_out="ClearCoatRoughness", alpha_out=coat_alpha_out)
         lib._link(coat, "", make, _pin("ClearCoat"))
         lib._link(coat_rough, "", make, _pin("ClearCoatRoughness"))
     _commit(lib, material, make)

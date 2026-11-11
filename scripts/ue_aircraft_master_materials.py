@@ -81,7 +81,7 @@ REPO = os.path.dirname(_HERE)
 #: glass, physical bulbs and plume); 4: round 5 L4 -- measured metals and
 #: rubber (Physically Based API), paint Metallic 0 with an albedo cap, low
 #: panel lines, exhaust soot, the Thin Translucent canopy master.
-LOOK_GENERATION = "5"
+LOOK_GENERATION = "6"
 LOOK_GENERATION_TAG = "FlightSimAircraftLookGeneration"
 #: The engine's white texture, the default of every BaseColorMap
 #: (Engine/Content/EngineResources/WhiteSquareTexture.uasset, present in 5.7.4).
@@ -336,15 +336,20 @@ def _use_attributes(material, attributes):
         attributes, "", _enum(unreal.MaterialProperty, "MP_MATERIAL_ATTRIBUTES"))
 
 
-def _surface(name, cls, coat):
-    """M_AircraftPaint (coat) / M_AircraftBareMetal (no coat)."""
+def _surface(name, cls, coat, shading_model=None, tangent_normal=False):
+    """M_AircraftPaint (coat) / M_AircraftBareMetal (no coat). ``shading_model``
+    overrides the model (round 24: M_AircraftPaintDefaultLit, the paint graph
+    on MSM_DEFAULT_LIT for -aircraft-probe=defaultlit). ``tangent_normal``
+    (round 24: M_AircraftPaintTangentNormal, -aircraft-probe=tangentnormal):
+    the material's normal is TANGENT space and the Normal output the constant
+    (0, 0, 1), the imported materials' (and the flat probe's) normal path."""
     unreal = _u()
     material = _new(name)
     if material is None:
         return
     material.set_editor_property("shading_model", _enum(
-        unreal.MaterialShadingModel, "MSM_CLEAR_COAT" if coat else "MSM_DEFAULT_LIT"))
-    material.set_editor_property("tangent_space_normal", False)
+        unreal.MaterialShadingModel, shading_model or ("MSM_CLEAR_COAT" if coat else "MSM_DEFAULT_LIT")))
+    material.set_editor_property("tangent_space_normal", bool(tangent_normal))
     s = {k: _scalar(material, k, v, -1800, 100 * i)
          for i, (k, v) in enumerate(look.CLASS_SCALARS[cls].items())}
     v = {k: _vector(material, k, d, -1800, 1300 + 120 * i)
@@ -377,6 +382,7 @@ def _surface(name, cls, coat):
         "Noise": (_add(material, breakup, _const(material, 0.5, -800, 50), -700, 50), "")}, -1000, 100),
         s["SootAmount"], -650, 100)
     base = _base_colour(material, -1300, 200)
+    raw_base = base   # round 24: -aircraft-probe=rawbase feeds Make.BaseColor from here
     if coat:
         # a livery's pure white is capped at a paint's albedo
         base = _min(material, base, s["AlbedoMax"], -1000, 250)
@@ -411,8 +417,11 @@ def _surface(name, cls, coat):
     _link(rough, "", out, "Roughness")
     # round 23 (LOOK_GENERATION 5): PanelNormalAmount lerps the Normal from the
     # vertex normal (0: -aircraft-probe=nonormal) to panel_lines' (1, gen 4).
-    _link(_lerp(material, normal, _mask(material, panels, "rgb", -600, -600), s["PanelNormalAmount"],
-                -400, -650), "", out, "Normal")
+    if tangent_normal:
+        _link(_const3(material, (0.0, 0.0, 1.0), -400, -650), "", out, "Normal")
+    else:
+        _link(_lerp(material, normal, _mask(material, panels, "rgb", -600, -600), s["PanelNormalAmount"],
+                    -400, -650), "", out, "Normal")
     _link(occlusion, "", out, ("AmbientOcclusion", "Ambient Occlusion"))
     if coat:
         # soot sits on top of the coat: no gloss where it lies
@@ -423,12 +432,26 @@ def _surface(name, cls, coat):
         _link(s["ClearCoatRoughness"], "", out, ("ClearCoatRoughness", "Clear Coat Roughness"))
     _use_attributes(material, out)
     # wet-airframe-canopy: the weather's wetness (shading only, opaque, no WPO).
-    aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], cls)
+    aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], cls, raw_base=raw_base)
     _finish(material, name)
 
 
 def create_aircraft_paint():
     _surface("M_AircraftPaint", "paint", coat=True)
+
+
+def create_aircraft_paint_default_lit():
+    """M_AircraftPaintDefaultLit (round 24, -aircraft-probe=defaultlit): the
+    paint graph exactly, on MSM_DEFAULT_LIT (its coat attributes are then
+    ignored). FlightSimAircraftFX.cpp parents a MID to it and copies the
+    look instance's overrides."""
+    _surface(look.PROBE_DEFAULT_LIT_MASTER, "paint", coat=True, shading_model="MSM_DEFAULT_LIT")
+
+
+def create_aircraft_paint_tangent_normal():
+    """M_AircraftPaintTangentNormal (round 24, -aircraft-probe=tangentnormal):
+    the paint graph exactly (clear coat), its normal in TANGENT space, (0, 0, 1)."""
+    _surface(look.PROBE_TANGENT_NORMAL_MASTER, "paint", coat=True, tangent_normal=True)
 
 
 def create_aircraft_probe_flat():
@@ -681,12 +704,14 @@ def create_aircraft_glass_thin():
 #: Every master this module builds, in build order (class masters, then FX).
 CREATORS = (create_aircraft_paint, create_aircraft_bare_metal, create_aircraft_glass,
             create_aircraft_rubber, create_aircraft_glass_thin, create_aircraft_probe_flat,
+            create_aircraft_paint_default_lit, create_aircraft_paint_tangent_normal,
             create_nav_light_emissive,
             create_aircraft_contrail, create_aircraft_afterburner, create_aircraft_heat_haze)
 #: The asset each creator makes (pinned to look.CLASS_MASTERS / THIN_GLASS_MASTER /
 #: FX_MASTERS by test).
 CREATED = ("M_AircraftPaint", "M_AircraftBareMetal", "M_AircraftGlass", "M_AircraftRubber",
-           "M_AircraftGlassThin", "M_AircraftProbeFlat",
+           "M_AircraftGlassThin", "M_AircraftProbeFlat", "M_AircraftPaintDefaultLit",
+           "M_AircraftPaintTangentNormal",
            "M_NavLightEmissive", "M_AircraftContrail", "M_AircraftAfterburner",
            "M_AircraftHeatHaze",
            # condensation-solver: built by scripts/aircraft_condensation_material.py.

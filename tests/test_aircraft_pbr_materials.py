@@ -272,8 +272,8 @@ def test_the_soot_hlsl_matches_its_twin_line_for_line():
 
 # -- the masters module -----------------------------------------------------------
 
-def test_the_masters_rebuild_at_generation_5_with_the_measured_graph():
-    assert re.search(r'^LOOK_GENERATION = "5"$', MASTERS, re.M)   # round 23: the probe handles
+def test_the_masters_rebuild_at_generation_6_with_the_measured_graph():
+    assert re.search(r'^LOOK_GENERATION = "6"$', MASTERS, re.M)   # round 24: the probe handles
     surface = _body(MASTERS, "_surface")
     assert '_custom(material, "exhaust_soot", "CMOT_FLOAT1"' in surface
     assert '_min(material, base, s["AlbedoMax"]' in surface
