@@ -550,6 +550,11 @@ namespace FlightSimBeautyGroundPure
 	// the camera sees. The tiles stay drawn under it.
 	constexpr double SeaLiftPerAglM = 0.002;
 	constexpr double SeaLiftMaxM = 40.0;
+	// Below this camera height over the sea the cap is NOT lifted past SeaLiftM:
+	// a low pass ("skim the sea", a ditching) has the aircraft within metres of
+	// the water, where a 20 m lift would hide it in the beauty and not in the
+	// labels (the cap is beauty-only). Recorded as sea.low_pass.
+	constexpr double SeaLowPassAglM = 100.0;
 	constexpr int32 SeaRings = 128;
 	constexpr int32 SeaSegments = 256;
 	constexpr double CmPerM = 100.0;
@@ -725,7 +730,8 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 		// tiles' ocean stands on), so the sea falls R - sqrt(R^2 - r^2) below
 		// it at distance r and its horizon is the tiles' horizon.
 		const double RadiusM = FMath::Min(SeaRadiusM, 0.5 * EarthRadiusM);
-		const double LiftM = FMath::Clamp(SeaLiftPerAglM * CameraAglM, SeaLiftM, SeaLiftMaxM);
+		const bool bLowPass = CameraAglM < SeaLowPassAglM;
+		const double LiftM = bLowPass ? SeaLiftM : FMath::Clamp(SeaLiftPerAglM * CameraAglM, SeaLiftM, SeaLiftMaxM);
 		TArray<FVector> Vertices;
 		TArray<FVector> Normals;
 		TArray<FProcMeshTangent> Tangents;
@@ -800,6 +806,8 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 			       "where resolved, deep-sea body colour, Monahan whitecaps at WindSpeedMS 7 (UNCALIBRATED)")
 			: TEXT("M_Ground_Ocean: M_FlightSimOceanBeauty did not load (run scripts/ue_create_materials.py)"));
 		Sea->SetNumberField(TEXT("lift_m"), LiftM);
+		Sea->SetBoolField(TEXT("low_pass"), bLowPass);
+		Sea->SetNumberField(TEXT("low_pass_agl_m"), SeaLowPassAglM);
 		Sea->SetStringField(TEXT("lift_basis"),
 			TEXT("max(2 m, 0.2 % of the camera's height), at most 40 m: above the tiles' own ocean and the cap's "
 			     "chord sag, so the tiles' matte ocean never shows through (round 19's #13 lines)"));
