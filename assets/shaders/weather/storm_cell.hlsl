@@ -149,10 +149,21 @@ float billow = Noise.y;
 float erosion = Noise.z;
 float rise = (tower > 0.0) ? S.Fbm(float3(e, n, u - Noise.w * Time) / billow, seed) : 0.0;
 float drift = (anvil > 0.0) ? S.Fbm(float3(e - Drift.x * Time, n - Drift.y * Time, u) / billow, seed + 1u) : 0.0;
-float curtain = (shaft > 0.0) ? S.Fbm(float3(e / billow, n / billow, u / (billow * 8.0)), seed + 2u) : 0.0;
+// Visual round 6 (beauty only, storm_cell.BEAUTY_SHAFT; round 4's #09 drew the
+// shaft as a smooth glowing cylinder): the one curtain fbm the shaft already
+// pays for is sampled SHAFT_STREAK_SCALE = 0.35 finer across (its 8x vertical
+// stretch kept: vertical streaks), the rim is eroded by it (RIM_EROSION 0.5,
+// inward only: never a sample outside the measure's radius) and the density
+// floor opens to 0.25. Ragged.x == 0: the measure path's shaft, expression for
+// expression. The shaft's albedo is storm_shaft_albedo.hlsl's.
+float across = Ragged.x > 0.0 ? billow * 0.35 : billow;
+float curtain = (shaft > 0.0) ? S.Fbm(float3(e / across, n / across, u / (billow * 8.0)), seed + 2u) : 0.0;
+float shaftDensity = Ragged.x > 0.0
+	? S.Eroded(shaft, curtain, 0.5) * (0.25 + 0.75 * curtain)
+	: shaft * (0.6 + 0.4 * curtain);
 float sigma = Sigma.x * S.Eroded(tower, rise, erosion)
             + Sigma.y * S.Eroded(anvil, drift, erosion)
-            + Sigma.z * shaft * (0.6 + 0.4 * curtain);
+            + Sigma.z * shaftDensity;
 // The look.clouds layer the storm's material also draws (not in the Python twin:
 // the layer is the engine default's job when no storm is on the card).
 if (Layer.x > 0.0)

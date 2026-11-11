@@ -509,8 +509,13 @@ SPLASH_PARAMETERS = ("Time", "Splash", "GroundShift", "GroundRelZ", "DropMm", "A
 LIGHTNING_PARAMETERS = ("PixelAngle", "RadiusCm", "Power")
 #: "Ragged" (visual round 3): the beauty's ragged edges (storm_cell.BEAUTY_RAGGED),
 #: default 0 -- the measure path's shader, expression for expression.
+#: "ShaftAlbedo" (visual round 6): the rain shaft's albedo as a share of the cloud's
+#: (storm_shaft_albedo.hlsl, storm_cell.BEAUTY_SHAFT albedo_scale), default 1 -- the
+#: measure path's albedo, value for value.
 STORM_PARAMETERS = ("CellCentreCm", "EastAxis", "NorthAxis", "Geo1", "Geo2", "Sigma", "Noise",
-                    "Drift", "Layer", "Time", "FlashRelCm", "Flash", "ExtinctionScale", "Ragged")
+                    "Drift", "Layer", "Time", "FlashRelCm", "Flash", "ShaftAlbedo",
+                    "ExtinctionScale", "Ragged")
+STORM_SCALAR_DEFAULTS = {"ExtinctionScale": 1.0, "ShaftAlbedo": 1.0}
 WINDSHIELD_PARAMETERS = ("Time", "Glass", "Seed")
 #: The vector parameters whose shader input is a float4 (RGB appended with A).
 WEATHER_FLOAT4_PARAMETERS = ("Splash", "Power", "Geo1", "Geo2", "Sigma", "Noise", "Drift",
@@ -567,8 +572,11 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_StormCell 3: the beauty's "Ragged" block (storm_cell.hlsl, visual round 3).
 #: M_StormCell 4: the Ragged block's soft ramps, unclamped warps and uneroded deck
 #: base (round 3's #09 hatched contour lines; storm_cell.hlsl).
+#: M_StormCell 5: the beauty rain shaft's streaks, eroded rim and density floor
+#: (storm_cell.hlsl's Ragged shaft block) and its albedo (storm_shaft_albedo.hlsl,
+#: the ShaftAlbedo parameter; visual round 6, round 4's #09 glowing cylinder).
 STORM_GENERATIONS = {"M_RainDrops": "5", "M_RainSplash": "3", "M_LightningChannel": "2",
-                     "M_StormCell": "4", "M_WindshieldRain": "2"}
+                     "M_StormCell": "5", "M_WindshieldRain": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -2059,7 +2067,7 @@ def create_storm_cell():
     material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
     material.set_editor_property(STORM_USAGE_PROPERTY, True)
     params = {name: weather_parameter(material, lib, name, -1800, -800 + 110 * i,
-                                      default=1.0 if name == "ExtinctionScale" else 0.0)
+                                      default=STORM_SCALAR_DEFAULTS.get(name, 0.0))
               for i, name in enumerate(STORM_PARAMETERS)}
     world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition,
                                            -1800, 800)
@@ -2073,8 +2081,15 @@ def create_storm_cell():
     scaled = binary(material, lib, unreal.MaterialExpressionMultiply, extinction,
                     params["ExtinctionScale"][0], -600, 0)
     lib.connect_material_property(scaled, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
-    albedo = scalar(material, lib, STORM_ALBEDO_PARAMETER, STORM_ALBEDO_DEFAULT, -600, 200)
-    lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    albedo = scalar(material, lib, STORM_ALBEDO_PARAMETER, STORM_ALBEDO_DEFAULT, -900, 200)
+    # Visual round 6: the rain shaft's albedo (storm_shaft_albedo.hlsl): Albedo x
+    # lerp(1, ShaftAlbedo, the shaft's shape); ShaftAlbedo 1 returns exactly 1.
+    shaft_albedo = custom(material, lib, "storm_shaft_albedo", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
+        "Rel": rel, "EastAxis": params["EastAxis"], "NorthAxis": params["NorthAxis"],
+        "Geo1": params["Geo1"], "Sigma": params["Sigma"], "ShaftAlbedo": params["ShaftAlbedo"]}, -900, 300)
+    lib.connect_material_property(
+        binary(material, lib, unreal.MaterialExpressionMultiply, albedo, shaft_albedo, -600, 200),
+        "", unreal.MaterialProperty.MP_BASE_COLOR)
     glow = custom(material, lib, "storm_glow", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
         "Rel": rel, "FlashRel": params["FlashRelCm"], "Flash": params["Flash"],
         "Extinction": (extinction, "")}, -600, 400)
@@ -2350,8 +2365,17 @@ RAIN_DROP_ROUGHNESS = 0.08
 #: and built again on the same asset; never deleted, no redirect), with no
 #: FLIGHTSIM_REBUILD_MATERIALS. M_RainShaft 2: the beauty soft edge and light
 #: (ShaftSoftEdge, ShaftLight; their defaults draw generation 1's cones).
-#: M_TornadoFunnel 1: the funnel's beauty material. Bump with every graph change.
-WEATHER_LOOK_GENERATIONS = {"M_RainShaft": "2", "M_TornadoFunnel": "1"}
+#: M_TornadoFunnel 1: the funnel's beauty material. 2 (visual round 6): the streaks
+#: in the mesh's LOCAL space (they spin with the funnel; world-space noise stood
+#: still under a rotating mesh) scrolled down by Time, and the dust skirt's tint
+#: by local height. Bump with every graph change.
+WEATHER_LOOK_GENERATIONS = {"M_RainShaft": "2", "M_TornadoFunnel": "2"}
+#: M_TornadoFunnel's streak scroll (cm/s down the funnel's local axis: condensation
+#: drawn into the inflow reads as a downward flow) and the skirt's tint, lerped to
+#: white over FUNNEL_SKIRT_HEIGHT_CM of local height. UNCALIBRATED.
+FUNNEL_STREAK_SCROLL_CM_PER_S = 1500.0
+FUNNEL_SKIRT_TINT = (0.85, 0.72, 0.60)
+FUNNEL_SKIRT_HEIGHT_CM = 20000.0
 WEATHER_LOOK_GENERATION_TAG = "FlightSimWeatherLookGeneration"
 #: M_RainShaft's beauty parameters (FlightSimWeatherLook.cpp ApplyBeautyWeatherLook)
 #: and the defaults that are the measure path's cones.
@@ -2718,25 +2742,57 @@ def create_tornado_funnel():
     vertex colour (NEXT.md gotcha 26: the funnel's vertex colours never reached
     the shading); base colour FunnelColour x a vertical streak noise (0.7..1, a
     noise stretched 30:1 in height: the condensation's striations), roughness 1.
-    A plain lit opaque surface: every pass runs on the D3D11 / SM5 render machine."""
+    A plain lit opaque surface: every pass runs on the D3D11 / SM5 render machine.
+    Generation 2 (visual round 6): the streak noise reads the mesh's LOCAL position
+    (TransformPosition world -> local), so it turns with the spinning funnel and
+    the wall cloud (a world-space noise stood still under the rotating mesh), and
+    scrolls down the local axis by FUNNEL_STREAK_SCROLL_CM_PER_S x Time; the
+    lowest FUNNEL_SKIRT_HEIGHT_CM take FUNNEL_SKIRT_TINT (the dust skirt). Still
+    opaque, no WPO, no vertex colour: the labels' silhouettes are the beauty's."""
     material = _weather_material("M_TornadoFunnel")
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary
     colour = vector(material, lib, FUNNEL_PARAMETERS[0], FUNNEL_COLOUR_DEFAULT + (1.0,), -900, 0)
-    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, -1300, 200)
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, -1700, 200)
+    local = lib.create_material_expression(material, unreal.MaterialExpressionTransformPosition,
+                                           -1550, 200)
+    local.set_editor_property("transform_source_type",
+                              unreal.MaterialPositionTransformSource.TRANSFORMPOSSOURCE_WORLD)
+    local.set_editor_property("transform_type",
+                              unreal.MaterialPositionTransformSource.TRANSFORMPOSSOURCE_LOCAL)
+    lib.connect_material_expressions(world, "", local, "")
     stretch = lib.create_material_expression(material, unreal.MaterialExpressionConstant3Vector,
-                                             -1300, 300)
+                                             -1400, 300)
     stretch.set_editor_property("constant", unreal.LinearColor(1.0, 1.0, 1.0 / 30.0, 1.0))
-    streaked = binary(material, lib, unreal.MaterialExpressionMultiply, world, stretch, -1150, 200)
+    time = lib.create_material_expression(material, unreal.MaterialExpressionTime, -1400, 450)
+    scroll = lib.create_material_expression(material, unreal.MaterialExpressionConstant3Vector,
+                                            -1400, 550)
+    scroll.set_editor_property("constant",
+                               unreal.LinearColor(0.0, 0.0, FUNNEL_STREAK_SCROLL_CM_PER_S / 30.0, 1.0))
+    streaked = binary(material, lib, unreal.MaterialExpressionAdd,
+                      binary(material, lib, unreal.MaterialExpressionMultiply, local, stretch,
+                             -1250, 200),
+                      binary(material, lib, unreal.MaterialExpressionMultiply, time, scroll,
+                             -1250, 450), -1100, 200)
     streaks = lib.create_material_expression(material, unreal.MaterialExpressionNoise, -1000, 200)
     streaks.set_editor_property("scale", 1.0 / 1500.0)
     streaks.set_editor_property("levels", 3)
     streaks.set_editor_property("output_min", 0.7)
     streaks.set_editor_property("output_max", 1.0)
     lib.connect_material_expressions(streaked, "", streaks, "Position")
+    # The dust skirt: the lowest FUNNEL_SKIRT_HEIGHT_CM of local height tinted.
+    height = unary(material, lib, unreal.MaterialExpressionSaturate,
+                   binary(material, lib, unreal.MaterialExpressionDivide,
+                          mask(material, lib, local, "b", -1250, 650),
+                          constant(material, lib, FUNNEL_SKIRT_HEIGHT_CM, -1250, 730), -1100, 650),
+                   -950, 650)
+    skirt = lerp(material, lib, constant3(material, lib, FUNNEL_SKIRT_TINT, -950, 750),
+                 constant3(material, lib, (1.0, 1.0, 1.0), -950, 830), height, -800, 650)
     base = binary(material, lib, unreal.MaterialExpressionMultiply,
-                  mask(material, lib, colour, "rgb", -800, 0), streaks, -700, 100)
+                  binary(material, lib, unreal.MaterialExpressionMultiply,
+                         mask(material, lib, colour, "rgb", -800, 0), streaks, -700, 100),
+                  skirt, -550, 100)
     lib.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
     lib.connect_material_property(constant(material, lib, 1.0, -700, 250), "",
                                   unreal.MaterialProperty.MP_ROUGHNESS)

@@ -177,6 +177,9 @@ private:
 	// A -sky= plan lights the scene (FFlightSimSky): it owns the sun's
 	// per-pixel atmosphere transmittance, which this look then leaves alone.
 	bool bPhysicalSkyPlan = false;
+	// Visual round 6: -deck-shadow=on|off (Build reads it; ApplyClouds applies
+	// world_beauty.deck_shadows_beam under it).
+	FString DeckShadowSwitch = TEXT("on");
 	int32 Preset = 0;
 	// The tables in force (the pure block's defaults, then the overrides).
 	TArray<double> AtmosphereValues;   // PresetCount x AtmosphereFieldCount

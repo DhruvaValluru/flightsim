@@ -646,6 +646,10 @@ private:
 	// is deterministic and replay-identical.
 	AActor* TornadoFunnel = nullptr;
 	double TornadoOmegaDegPerSec = 0.0;
+	// Visual round 6: the wall cloud over the funnel, turning at the Rankine
+	// exterior rate at its own radius (weather_look.wall_cloud_omega_scale).
+	AActor* TornadoWallCloud = nullptr;
+	double TornadoWallOmegaDegPerSec = 0.0;
 
 	// Phase 2: the traffic tracks, copied from the card at Populate so
 	// Step() needs no card reference for them; parallel to TrafficActors.

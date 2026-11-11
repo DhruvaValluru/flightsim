@@ -167,3 +167,48 @@ BEAUTY_SHAFT_LIGHT = 0.35
 #: default grid material in beauty only (no vertex colour: NEXT.md gotcha 26).
 BEAUTY_FUNNEL_COLOUR = (0.30, 0.28, 0.26)
 # -- round-2b weather-fx -- end ---------------------------------------------------------
+
+# -- visual round 6 (2026-11-10): the funnel's shape and its wall cloud -- begin -------
+#
+# Round 4's #10 drew no tornado (the axis was out of the chase frame: tornado.py
+# abeam_placement), and the funnel mesh itself ran from the ground to the wind
+# model's top_m (1500 m) with no cloud over it: a 1.5 km condensation funnel
+# standing in clear air. FlightSimScenarioWorld.cpp now draws, on EVERY render
+# quality (the labels see the same meshes as the beauty: both are the scenario
+# world's, not beauty-only actors):
+#
+# * the dust skirt at the ground (unchanged: 2.2 core radii, 5.5 % of top_m);
+# * the condensation funnel from the ground to FUNNEL_TOP_SHARE x top_m (750 m
+#   at the model's 1500 m: a low cloud base, the sense of a tornadic storm, and
+#   low enough that the flyby's hazard-slot chase camera, 485 m from the axis
+#   with a 68 deg vertical field (core/scenario/camera.py HAZARD_CHASE_*),
+#   sees the ground contact, the whole funnel and the wall cloud's underside),
+#   concave, narrow at the ground, FUNNEL_TOP_RADII core radii at its top, the
+#   mesh spinning at the core's solid-body rate v_max / r_core (unchanged);
+# * a WALL CLOUD: a ragged lowered lens from the funnel's top to
+#   WALL_TOP_SHARE x top_m (1200 m), WALL_RADII core radii across (675 m: its
+#   footprint covers the track, 150 m and more above a 600 m flyby), its own
+#   actor ("TornadoWallCloud") spinning at the Rankine EXTERIOR rate at its
+#   own radius, omega x (r_core / r_wall)^2 (0.9 deg/s at 4.5 radii: a wall
+#   cloud turns slowly, the funnel fast; both from the one model).
+#
+# The wind model (core/environment/tornado.py) is untouched: top_m and
+# fade_top_m still fade the WIND; these shares only say how much of that
+# column condenses. The beauty gives both meshes M_TornadoFunnel
+# (FlightSimWeatherLook.cpp ApplyBeautyWeatherLook): the funnel
+# BEAUTY_FUNNEL_COLOUR, the wall cloud BEAUTY_WALL_CLOUD_COLOUR (darker: a
+# rain-free base in its own shadow). UNCALIBRATED: set by probe render on the
+# render machine (#10 first). tests/test_visual_round6.py pins the C++.
+FUNNEL_TOP_SHARE = 0.5
+FUNNEL_TOP_RADII = 1.3
+WALL_TOP_SHARE = 0.8
+WALL_RADII = 4.5
+BEAUTY_WALL_CLOUD_COLOUR = (0.16, 0.16, 0.17)
+
+
+def wall_cloud_omega_scale(wall_radii: float = WALL_RADII) -> float:
+    """The wall cloud's spin as a share of the core's omega = v_max / r_core:
+    the Rankine exterior's angular rate at r_wall = wall_radii x r_core is
+    v_t / r_wall = v_max r_core / r_wall^2 = omega / wall_radii^2."""
+    return 1.0 / (float(wall_radii) ** 2)
+# -- visual round 6 -- end ---------------------------------------------------------------

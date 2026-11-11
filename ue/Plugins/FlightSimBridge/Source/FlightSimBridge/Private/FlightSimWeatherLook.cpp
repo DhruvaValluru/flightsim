@@ -99,13 +99,18 @@ namespace
 	const TCHAR* const LookShaftSoftEdgeParameter = TEXT("ShaftSoftEdge");
 	const TCHAR* const LookShaftLightParameter = TEXT("ShaftLight");
 	const TCHAR* const LookFunnelColourParameter = TEXT("FunnelColour");
-	// The scenario world's funnel component (FlightSimScenarioWorld.cpp).
+	// The scenario world's funnel component (FlightSimScenarioWorld.cpp) and,
+	// visual round 6, its wall cloud (weather_look.BEAUTY_WALL_CLOUD_COLOUR).
 	const TCHAR* const LookFunnelComponentName = TEXT("TornadoFunnel");
+	const TCHAR* const LookWallCloudComponentName = TEXT("TornadoWallCloud");
 	constexpr double LookBeautyShaftSoftEdge = 1.0;
 	constexpr double LookBeautyShaftLight = 0.35;
 	constexpr float LookBeautyFunnelColourR = 0.30f;
 	constexpr float LookBeautyFunnelColourG = 0.28f;
 	constexpr float LookBeautyFunnelColourB = 0.26f;
+	constexpr float LookBeautyWallCloudColourR = 0.16f;
+	constexpr float LookBeautyWallCloudColourG = 0.16f;
+	constexpr float LookBeautyWallCloudColourB = 0.17f;
 
 	double NumberOr(const TSharedPtr<FJsonObject>& Object, const TCHAR* Key, double Default)
 	{
@@ -443,32 +448,50 @@ void FFlightSimVisualScene::ApplyBeautyWeatherLook(UWorld* World)
 	// (grid) material, because both vertex-colour materials rendered it black
 	// (NEXT.md gotcha 26). Beauty gives it M_TornadoFunnel: a lit opaque
 	// grey-brown with vertical streaks, no vertex colour read.
+	// Round 6: the wall cloud over it ("TornadoWallCloud") takes the same
+	// material, darker (a rain-free base in its own shadow).
 	UProceduralMeshComponent* Funnel = nullptr;
+	UProceduralMeshComponent* WallCloud = nullptr;
 	for (TObjectIterator<UProceduralMeshComponent> It; It; ++It)
 	{
-		if (*It != nullptr && It->GetWorld() == World && It->GetFName() == FName(LookFunnelComponentName))
+		if (*It == nullptr || It->GetWorld() != World)
+		{
+			continue;
+		}
+		if (It->GetFName() == FName(LookFunnelComponentName))
 		{
 			Funnel = *It;
-			break;
+		}
+		else if (It->GetFName() == FName(LookWallCloudComponentName))
+		{
+			WallCloud = *It;
 		}
 	}
-	if (Funnel == nullptr)
+	UMaterialInterface* FunnelMaterial = Funnel != nullptr || WallCloud != nullptr
+		? LoadObject<UMaterialInterface>(nullptr, TornadoFunnelPath) : nullptr;
+	auto Dress = [&](UProceduralMeshComponent* Mesh, const TCHAR* Key, float R, float G, float B)
 	{
-		Beauty->SetStringField(TEXT("tornado_funnel"), TEXT("none in the world"));
-	}
-	else if (UMaterialInterface* FunnelMaterial = LoadObject<UMaterialInterface>(nullptr, TornadoFunnelPath))
-	{
-		UMaterialInstanceDynamic* FunnelInstance = UMaterialInstanceDynamic::Create(FunnelMaterial, Funnel);
-		FunnelInstance->SetVectorParameterValue(FName(LookFunnelColourParameter),
-			FLinearColor(LookBeautyFunnelColourR, LookBeautyFunnelColourG, LookBeautyFunnelColourB, 1.0f));
-		Funnel->SetMaterial(0, FunnelInstance);
-		Beauty->SetStringField(TEXT("tornado_funnel"), TornadoFunnelPath);
-	}
-	else
-	{
-		Beauty->SetStringField(TEXT("tornado_funnel"),
-			TEXT("the default material kept: M_TornadoFunnel did not load (run scripts/ue_create_materials.py)"));
-	}
+		if (Mesh == nullptr)
+		{
+			Beauty->SetStringField(Key, TEXT("none in the world"));
+		}
+		else if (FunnelMaterial != nullptr)
+		{
+			UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(FunnelMaterial, Mesh);
+			Instance->SetVectorParameterValue(FName(LookFunnelColourParameter), FLinearColor(R, G, B, 1.0f));
+			Mesh->SetMaterial(0, Instance);
+			Beauty->SetStringField(Key, TornadoFunnelPath);
+		}
+		else
+		{
+			Beauty->SetStringField(Key,
+				TEXT("the default material kept: M_TornadoFunnel did not load (run scripts/ue_create_materials.py)"));
+		}
+	};
+	Dress(Funnel, TEXT("tornado_funnel"),
+	      LookBeautyFunnelColourR, LookBeautyFunnelColourG, LookBeautyFunnelColourB);
+	Dress(WallCloud, TEXT("tornado_wall_cloud"),
+	      LookBeautyWallCloudColourR, LookBeautyWallCloudColourG, LookBeautyWallCloudColourB);
 	Beauty->SetStringField(TEXT("basis"),
 		TEXT("core/scene/weather_look.py BEAUTY_SHAFT_*, BEAUTY_FUNNEL_COLOUR (UNCALIBRATED); shading only, "
 		     "the labels' silhouettes unchanged"));

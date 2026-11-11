@@ -591,7 +591,7 @@ def test_the_shader_ragged_block_is_the_python_twin_and_off_by_default():
     assert '"ExtinctionScale", "Ragged")' in MATERIALS_PY
     assert '"Layer", "Flash", "Glass", "Ragged")' in MATERIALS_PY
     assert '"Time": params["Time"], "Ragged": params["Ragged"]}' in MATERIALS_PY
-    assert '"M_StormCell": "4"' in MATERIALS_PY
+    assert '"M_StormCell": "5"' in MATERIALS_PY   # round 6: the beauty shaft (storm_shaft_albedo.hlsl)
 
 
 def test_the_cpp_ragged_constants_are_the_pythons_and_beauty_only():

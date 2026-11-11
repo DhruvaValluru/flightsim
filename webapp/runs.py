@@ -66,7 +66,7 @@ import sys
 sys.path.insert(0, str(REPO))
 
 from core.scenario.camera import (  # noqa: E402
-    CHASE_OFFSETS, CameraSpec, default_cameras, derive_chase_offset,
+    CHASE_OFFSETS, CameraSpec, default_cameras, derive_chase_offset, frame_hazard,
 )
 from core.scenario.card import write_run_card  # noqa: E402
 from core.scenario.randomization import (  # noqa: E402
@@ -911,6 +911,11 @@ def provision_flight(spec: ScenarioSpec, *, per_case: bool = False) -> Dict[str,
     # moves onto the raster under it; stated placements never move and
     # refuse by name in the verdict).
     plan_camera_defaults(spec)
+    # Visual round 6: a tornado flyby's plannable chase camera takes the
+    # hazard slot (core/scenario/camera.py frame_hazard), so the funnel
+    # beside the track is in the frame; the vortex and the flight are not
+    # moved, and a stated camera field never is.
+    frame_hazard(spec)
     # Randomisation draws AFTER the camera planner (its jitter is about
     # the planned placement) and BEFORE the host projection; off by
     # default. Same sampler as /compile: value-idempotent.

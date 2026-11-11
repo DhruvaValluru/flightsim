@@ -185,8 +185,12 @@ def test_the_funnel_gets_a_lit_material_in_beauty_with_no_vertex_colour():
     assert "TObjectIterator<UProceduralMeshComponent>" in beauty
     assert 'LookFunnelComponentName = TEXT("TornadoFunnel")' in LOOK_CPP
     scenario = (BRIDGE / "Private" / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
-    assert 'NewObject<UProceduralMeshComponent>(Funnel, TEXT("TornadoFunnel"))' in scenario
-    assert "Funnel->SetMaterial(0, FunnelInstance);" in beauty
+    # Round 6: the funnel and its wall cloud are spawned by one lambda, named
+    # at the call; the beauty dresses each through Dress(...).
+    assert "NewObject<UProceduralMeshComponent>(Marker, Name)" in scenario
+    assert 'SpawnMarker(TEXT("TornadoFunnel"))' in scenario
+    assert "Mesh->SetMaterial(0, Instance);" in beauty
+    assert 'Dress(Funnel, TEXT("tornado_funnel")' in beauty
     colour = tuple(float(v) for v in re.findall(r"LookBeautyFunnelColour[RGB] = ([0-9.]+)f;", LOOK_CPP))
     assert colour == weather_look.BEAUTY_FUNNEL_COLOUR == _assigned("FUNNEL_COLOUR_DEFAULT")
     funnel = SCRIPT[SCRIPT.index("def create_tornado_funnel"):SCRIPT.index("def create_lightning():")]
