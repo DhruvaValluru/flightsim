@@ -62,3 +62,7 @@ assets/illuminants/** -text
 # byte-exact on every platform.
 assets/looks/** -text
 assets/aircraft_config/look/** -text
+
+# Lane B terrain detail (2026-11-11): the Poly Haven maps, the generated ocean
+# normal and the PIN.json whose sha256 rows cover them stay byte-exact.
+assets/terrain_detail/** -text

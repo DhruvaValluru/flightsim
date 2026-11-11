@@ -1,0 +1,184 @@
+{
+  "format": "flightsim.terrain_detail_pins",
+  "version": 1,
+  "pinned": "2026-11-11 (lane B, non-urban terrain detail): every file downloaded, its md5 checked against the Poly Haven API, its sha256 computed",
+  "licence_basis": "Poly Haven: every asset CC0 1.0 (https://polyhaven.com/license); no attribution required, kept here as the pin",
+  "roles": {
+    "rock": {
+      "asset": "rocky_terrain_02",
+      "title": "Rocky Terrain 02",
+      "authors": {
+        "Amal Kumar": "All"
+      },
+      "source": "https://polyhaven.com/a/rocky_terrain_02",
+      "licence": "CC0-1.0",
+      "files_hash": "a4c0d422c59c4234227eb04c1fa9d28694c60fbe",
+      "tile_m": 90.0,
+      "files": {
+        "albedo": {
+          "path": "assets/terrain_detail/polyhaven/rocky_terrain_02/rocky_terrain_02_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rocky_terrain_02/rocky_terrain_02_diff_1k.jpg",
+          "size": 843188,
+          "md5": "cf604d3868398a6a996cb5ba330dd3ab",
+          "sha256": "d570c10b1d5302f4fde9e0e94f4cbab0d5e112fc3fe2b3b91c38a98bd3ddaf4b"
+        },
+        "normal_gl": {
+          "path": "assets/terrain_detail/polyhaven/rocky_terrain_02/rocky_terrain_02_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rocky_terrain_02/rocky_terrain_02_nor_gl_1k.jpg",
+          "size": 993692,
+          "md5": "c1636176f0fa8eb9b924ebdecd47ddfd",
+          "sha256": "f4f9d9671c660f4e509e96d5da3091887dfd557e1353e313fa2d1dc789499ffd"
+        }
+      }
+    },
+    "scree": {
+      "asset": "aerial_rocks_04",
+      "title": "Aerial Rocks 04",
+      "authors": {
+        "Rob Tuytel": "All"
+      },
+      "source": "https://polyhaven.com/a/aerial_rocks_04",
+      "licence": "CC0-1.0",
+      "files_hash": "dc43dffab8e915bc54ac64899dcfe8cec826f8b9",
+      "tile_m": 80.0,
+      "files": {
+        "albedo": {
+          "path": "assets/terrain_detail/polyhaven/aerial_rocks_04/aerial_rocks_04_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_rocks_04/aerial_rocks_04_diff_1k.jpg",
+          "size": 841479,
+          "md5": "7ca11c8d520150d14c193056420ac086",
+          "sha256": "5ac472016a6740bd3c62b1d719bf128e0659022fb35853f4e847737522337ffa"
+        },
+        "normal_gl": {
+          "path": "assets/terrain_detail/polyhaven/aerial_rocks_04/aerial_rocks_04_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_rocks_04/aerial_rocks_04_nor_gl_1k.jpg",
+          "size": 1242717,
+          "md5": "ba53584e58dcb1c43eb2435465dfa13d",
+          "sha256": "b4fe185783020d81b595397ef3b920475268a4873dc8b6efdd58f4312e07140b"
+        }
+      }
+    },
+    "snow": {
+      "asset": "snow_field_aerial",
+      "title": "Snow Field Aerial",
+      "authors": {
+        "Rob Tuytel": "All"
+      },
+      "source": "https://polyhaven.com/a/snow_field_aerial",
+      "licence": "CC0-1.0",
+      "files_hash": "8b68358190d77b84a36bbf447f4104701f125808",
+      "tile_m": 80.0,
+      "files": {
+        "albedo": {
+          "path": "assets/terrain_detail/polyhaven/snow_field_aerial/snow_field_aerial_col_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/snow_field_aerial/snow_field_aerial_col_1k.jpg",
+          "size": 754873,
+          "md5": "62563cb0342c3428295342cb2b9f593b",
+          "sha256": "902e1fef8f1bcc2f158fbb118239e29159978fd7b8e241d2d0f404b8dbecf718"
+        },
+        "normal_gl": {
+          "path": "assets/terrain_detail/polyhaven/snow_field_aerial/snow_field_aerial_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/snow_field_aerial/snow_field_aerial_nor_gl_1k.jpg",
+          "size": 640692,
+          "md5": "ad6ac060c44cdc8e279a363294740b78",
+          "sha256": "2037817e0166673e68039c4dd2c56fa014d6999e1d6d492e2e3e7e3cfec3862b"
+        }
+      }
+    },
+    "grass": {
+      "asset": "aerial_grass_rock",
+      "title": "Aerial Grass Rock",
+      "authors": {
+        "Rob Tuytel": "All"
+      },
+      "source": "https://polyhaven.com/a/aerial_grass_rock",
+      "licence": "CC0-1.0",
+      "files_hash": "d610669c24e20d7c2effc4c116c718176f5b044a",
+      "tile_m": 15.0,
+      "files": {
+        "albedo": {
+          "path": "assets/terrain_detail/polyhaven/aerial_grass_rock/aerial_grass_rock_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_grass_rock/aerial_grass_rock_diff_1k.jpg",
+          "size": 666655,
+          "md5": "e920ce36afd0abff000b8366d3d768d3",
+          "sha256": "57b8041bfe0d0f01430e4dbaad45e7ddddf0a9fc97317f90dbc51f7b0d9e1b5d"
+        },
+        "normal_gl": {
+          "path": "assets/terrain_detail/polyhaven/aerial_grass_rock/aerial_grass_rock_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_grass_rock/aerial_grass_rock_nor_gl_1k.jpg",
+          "size": 904956,
+          "md5": "c8aa4c4f09b113cc7edef89ddeaccad9",
+          "sha256": "1aa3e23bff453f152e089b9f83aa36b4901651e019f7e2ca01d5331a9bbbda78"
+        }
+      }
+    },
+    "sand": {
+      "asset": "aerial_sand",
+      "title": "Aerial Sand",
+      "authors": {
+        "Rob Tuytel": "All"
+      },
+      "source": "https://polyhaven.com/a/aerial_sand",
+      "licence": "CC0-1.0",
+      "files_hash": "565565540b90dade32a407cdd8315dd05684d05e",
+      "tile_m": 15.0,
+      "files": {
+        "albedo": {
+          "path": "assets/terrain_detail/polyhaven/aerial_sand/aerial_sand_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_sand/aerial_sand_diff_1k.jpg",
+          "size": 490916,
+          "md5": "717c892f44895790e6a39ced994e1598",
+          "sha256": "d5195c44aec087d2a30d3ca3a3fa3458a1898986e0572e9a8043f8245598557a"
+        },
+        "normal_gl": {
+          "path": "assets/terrain_detail/polyhaven/aerial_sand/aerial_sand_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_sand/aerial_sand_nor_gl_1k.jpg",
+          "size": 665488,
+          "md5": "094ef18a596f9b1de34264cd21f8c9d2",
+          "sha256": "cba74d670a681dfcdd72db72afbcb9879c7ec9f5854adae24cac8da2c432ad99"
+        }
+      }
+    },
+    "soil": {
+      "asset": "dirt_aerial_02",
+      "title": "Dirt Aerial 02",
+      "authors": {
+        "Rob Tuytel": "All"
+      },
+      "source": "https://polyhaven.com/a/dirt_aerial_02",
+      "licence": "CC0-1.0",
+      "files_hash": "d0806565a3a304dcabf0e4b982761a3797c564e6",
+      "tile_m": 20.0,
+      "files": {
+        "albedo": {
+          "path": "assets/terrain_detail/polyhaven/dirt_aerial_02/dirt_aerial_02_diff_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt_aerial_02/dirt_aerial_02_diff_1k.jpg",
+          "size": 431838,
+          "md5": "fa7ac6aa4b3be031c6f1648c4a2880d6",
+          "sha256": "6a039c20e1e702733b88c429c06994cc9403c1a049e72af70750db1ea3e3e743"
+        },
+        "normal_gl": {
+          "path": "assets/terrain_detail/polyhaven/dirt_aerial_02/dirt_aerial_02_nor_gl_1k.jpg",
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt_aerial_02/dirt_aerial_02_nor_gl_1k.jpg",
+          "size": 607060,
+          "md5": "75dff8d842cc18fa44939fc2f9b6258b",
+          "sha256": "4abbec8698563135d236a7bdc4d4bac5d7932aa4eb022e0557e6842f35dd9254"
+        }
+      }
+    }
+  },
+  "ocean": {
+    "asset": "ocean_normal_512",
+    "title": "FlightSim ocean wave normal (Phillips spectrum)",
+    "source": "scripts/make_ocean_normal.py (this repository)",
+    "licence": "CC0-1.0",
+    "tile_m": 256.0,
+    "files": {
+      "normal_gl": {
+        "path": "assets/terrain_detail/ocean/ocean_normal_512.png",
+        "size": 665378,
+        "sha256": "0744cfae56654861fe372055ad73f5d9d6bf78ba9a7a907a4c8945743ad6f4c9"
+      }
+    }
+  }
+}

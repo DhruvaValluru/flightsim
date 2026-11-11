@@ -80,3 +80,35 @@ Notes.
   `vignette`, `scale`) and the PNG and PPM codecs.
 - Open Image Denoise's release bundles its own runtime libraries under the
   same Apache-2.0 licence (its `doc/LICENSE.txt` in the zip).
+
+## Terrain and ocean detail (committed: `assets/terrain_detail/`)
+
+Lane B of the non-urban visual push (2026-11-11). Beauty only:
+`M_FlightSimTilesBeauty` lays them over the Google tiles as detail (the tiles
+stay the ground), and `M_FlightSimOceanBeauty` draws the open sea with the
+ocean normal. Imported by `scripts/ue_create_materials.py`
+(`TERRAIN_DETAIL_TEXTURES`), which checks each file's sha256 against
+`assets/terrain_detail/PIN.json` before importing. 1K JPEGs, albedo and
+OpenGL normal only (roughness is a per-role constant), 9.1 MB in all.
+CC0 needs no attribution; the rows are the pins.
+
+| role | asset | licence | file (Poly Haven 1K) | bytes | sha256 |
+| --- | --- | --- | --- | --- | --- |
+| rock | Rocky Terrain 02 (Amal Kumar), 90 m tile, https://polyhaven.com/a/rocky_terrain_02 | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rocky_terrain_02/rocky_terrain_02_diff_1k.jpg | 843,188 | `d570c10b1d5302f4fde9e0e94f4cbab0d5e112fc3fe2b3b91c38a98bd3ddaf4b` |
+| rock | (normal) | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rocky_terrain_02/rocky_terrain_02_nor_gl_1k.jpg | 993,692 | `f4f9d9671c660f4e509e96d5da3091887dfd557e1353e313fa2d1dc789499ffd` |
+| scree | Aerial Rocks 04 (Rob Tuytel), 80 m tile, https://polyhaven.com/a/aerial_rocks_04 | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_rocks_04/aerial_rocks_04_diff_1k.jpg | 841,479 | `5ac472016a6740bd3c62b1d719bf128e0659022fb35853f4e847737522337ffa` |
+| scree | (normal) | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_rocks_04/aerial_rocks_04_nor_gl_1k.jpg | 1,242,717 | `b4fe185783020d81b595397ef3b920475268a4873dc8b6efdd58f4312e07140b` |
+| snow | Snow Field Aerial (Rob Tuytel), 80 m tile, https://polyhaven.com/a/snow_field_aerial | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/snow_field_aerial/snow_field_aerial_col_1k.jpg | 754,873 | `902e1fef8f1bcc2f158fbb118239e29159978fd7b8e241d2d0f404b8dbecf718` |
+| snow | (normal) | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/snow_field_aerial/snow_field_aerial_nor_gl_1k.jpg | 640,692 | `2037817e0166673e68039c4dd2c56fa014d6999e1d6d492e2e3e7e3cfec3862b` |
+| grass | Aerial Grass Rock (Rob Tuytel), 15 m tile, https://polyhaven.com/a/aerial_grass_rock | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_grass_rock/aerial_grass_rock_diff_1k.jpg | 666,655 | `57b8041bfe0d0f01430e4dbaad45e7ddddf0a9fc97317f90dbc51f7b0d9e1b5d` |
+| grass | (normal) | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_grass_rock/aerial_grass_rock_nor_gl_1k.jpg | 904,956 | `1aa3e23bff453f152e089b9f83aa36b4901651e019f7e2ca01d5331a9bbbda78` |
+| sand | Aerial Sand (Rob Tuytel), 15 m tile, https://polyhaven.com/a/aerial_sand | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_sand/aerial_sand_diff_1k.jpg | 490,916 | `d5195c44aec087d2a30d3ca3a3fa3458a1898986e0572e9a8043f8245598557a` |
+| sand | (normal) | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_sand/aerial_sand_nor_gl_1k.jpg | 665,488 | `cba74d670a681dfcdd72db72afbcb9879c7ec9f5854adae24cac8da2c432ad99` |
+| soil | Dirt Aerial 02 (Rob Tuytel), 20 m tile, https://polyhaven.com/a/dirt_aerial_02 | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt_aerial_02/dirt_aerial_02_diff_1k.jpg | 431,838 | `6a039c20e1e702733b88c429c06994cc9403c1a049e72af70750db1ea3e3e743` |
+| soil | (normal) | CC0-1.0 | https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt_aerial_02/dirt_aerial_02_nor_gl_1k.jpg | 607,060 | `4abbec8698563135d236a7bdc4d4bac5d7932aa4eb022e0557e6842f35dd9254` |
+| ocean | FlightSim ocean wave normal, 256 m tile: this project's own output of `scripts/make_ocean_normal.py` (Phillips spectrum, Tessendorf 2001; seed and parameters in `assets/terrain_detail/ocean/ocean_normal.json`) | CC0-1.0 (dedicated) | `assets/terrain_detail/ocean/ocean_normal_512.png` (512 x 512 RGB) | 665,378 | `0744cfae56654861fe372055ad73f5d9d6bf78ba9a7a907a4c8945743ad6f4c9` |
+
+Why a generated ocean normal: Poly Haven and ambientCG were both searched on
+2026-11-11 and carry no water normal maps; other "water normal" files in
+circulation (for example three.js's `waternormals.jpg`) have no stated
+licence for the image itself, so none was taken.
