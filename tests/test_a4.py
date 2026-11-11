@@ -6,6 +6,8 @@ The physics is generated from the A-4E model's aircraft.cfg
 (test_a4_mesh.py); see docs/A4_SYNC.md.
 """
 
+from pathlib import Path
+
 import pytest
 
 from core.fdm import FlightDynamics
@@ -136,7 +138,7 @@ def test_mesh_wing_agrees_with_the_flight_models_reference_geometry():
 
 # -- configuration and performance -----------------------------------------
 
-def test_a4_starts_airborne_with_gear_up_but_stock_aircraft_are_untouched():
+def test_a4_starts_airborne_with_gear_up_and_so_do_stock_retractable_airframes():
     a4 = FlightDynamics("A4")
     a4.set_initial_conditions({"h-sl-ft": 10000.0, "vc-kts": 350.0})
     assert a4.props.get("gear/gear-pos-norm") == 0.0
@@ -144,7 +146,7 @@ def test_a4_starts_airborne_with_gear_up_but_stock_aircraft_are_untouched():
 
     stock = FlightDynamics("f16")
     stock.set_initial_conditions({"h-sl-ft": 10000.0, "vc-kts": 350.0})
-    assert stock.props.get("gear/gear-pos-norm") == 1.0   # JSBSim default
+    assert stock.props.get("gear/gear-pos-norm") == 0.0   # core.fdm.gear: retractable, airborne
 
     ground = FlightDynamics("A4")
     ground.set_initial_conditions({"h-agl-ft": 7.0, "vc-kts": 0,
@@ -259,3 +261,33 @@ def test_a4_default_speed_trims_over_the_matterhorn():
                           "and severe turbulence, flying north, for 6 seconds")
     codes = [v.constraint for v in validate(spec).violations]
     assert "envelope.trim_feasible" not in codes, codes
+
+
+def test_every_retractable_gear_starts_up_airborne_unless_the_prompt_keeps_it_down():
+    """Round 10: the 747 cruised at 10 km gear-down (JSBSim's default). The rule
+    is core.fdm.gear: retractable gear, airborne above 100 ft AGL, no gear-down
+    words. Fixed gear is untouched; the card carries the same answer to UE."""
+    from core.fdm.gear import gear_down_requested, start_gear_up
+
+    for name in ("B747", "f16"):
+        fdm = FlightDynamics(name)
+        fdm.set_initial_conditions({"h-sl-ft": 30000.0, "vc-kts": 280.0})
+        assert fdm.props.get("gear/gear-pos-norm") == 0.0, name
+    c172 = FlightDynamics("c172p")
+    c172.set_initial_conditions({"h-sl-ft": 5000.0, "vc-kts": 100.0})
+    assert c172.props.get("gear/gear-pos-norm") == 1.0      # fixed gear
+    approach = FlightDynamics("B747")
+    approach.keep_gear_down = True
+    approach.set_initial_conditions({"h-sl-ft": 3000.0, "vc-kts": 160.0})
+    assert approach.props.get("gear/gear-pos-norm") == 1.0
+    assert start_gear_up("B747", 10000.0, 0.0, "747 cruise over the ocean")
+    assert not start_gear_up("B747", 600.0, 0.0, "747 on final approach to sfo")
+    assert not start_gear_up("c172p", 3000.0, 0.0, "c172 over fuji")
+    assert gear_down_requested("landing at jfk") and not gear_down_requested("cruise at fl350")
+
+
+def test_the_unreal_host_reads_the_cards_gear_answer():
+    cpp = (Path(__file__).resolve().parents[1] / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/"
+           "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
+    assert 'TryGetBoolField(TEXT("start_gear_up"), bGearUp)' in cpp
+    assert "Card.StartGearUp >= 0 ? Card.StartGearUp == 1" in cpp

@@ -630,6 +630,8 @@ def fdm_at_initial_conditions(spec: ScenarioSpec) -> FlightDynamics:
         build = (FlightDynamics.with_tecs if bool(spec.hold_state.value)
                  else FlightDynamics)
         fdm = build(str(spec.aircraft.value), rate_hz=float(spec.rate.value))
+    from ..fdm.gear import gear_down_requested
+    fdm.keep_gear_down = gear_down_requested(spec.prompt, spec.name)
     fdm.set_initial_conditions(
         {
             "h-sl-ft": u.m_to_ft(float(spec.altitude.value)),

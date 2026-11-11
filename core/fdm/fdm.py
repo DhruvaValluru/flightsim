@@ -351,23 +351,29 @@ class FlightDynamics:
         self.props.refresh()
 
     #: Height above which a repo-owned airframe starts with its gear up.
-    _GEAR_UP_AGL_FT = 100.0
+
+    #: Set by the scenario runner when the prompt keeps the gear down (an
+    #: approach, a landing, "gear down"): core.fdm.gear.gear_down_requested.
+    keep_gear_down = False
 
     def _retract_gear_if_airborne(self) -> None:
-        """Start an airborne repo-owned airframe clean, not gear-down.
+        """Start an airborne retractable-gear airframe clean, not gear-down.
 
-        JSBSim's default is gear extended, which for the A4 means flying
-        350 kt with the gear down against the model's own 220 kt gear limit
-        and roughly doubling drag. Scoped to airframes this repository owns
-        (``ac.REPO_ROOT_DIR``): stock aircraft keep JSBSim's default so
-        their recorded behaviour does not move.
+        JSBSim's default is gear extended: a 747 cruising at 10 km flew with
+        its gear down (visual round 10, #13), and the A4 350 kt against its own
+        220 kt gear limit. The rule is core.fdm.gear: above GEAR_UP_AGL_FT, an
+        airframe whose XML declares retractable gear starts gear-up unless the
+        scenario asked for the gear down (keep_gear_down). Fixed gear is never
+        touched. The Unreal host reads the same rule from the run card.
         """
-        if self.model.root_dir != ac.REPO_ROOT_DIR:
+        from . import gear
+
+        if self.keep_gear_down or not gear.has_retractable_gear(self.model.name):
             return
         if not (self.props.has("gear/gear-cmd-norm")
                 and self.props.has("gear/gear-pos-norm")):
             return
-        if self.props.get("position/h-agl-ft") > self._GEAR_UP_AGL_FT:
+        if self.props.get("position/h-agl-ft") > gear.GEAR_UP_AGL_FT:
             self.props.set("gear/gear-cmd-norm", 0.0)
             self.props.set("gear/gear-pos-norm", 0.0)
 

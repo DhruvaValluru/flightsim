@@ -557,6 +557,8 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # Verified by cranking the same JSBSim at this altitude (patch 4):
         # full rich kills a force-started piston above ~3 km density altitude.
         "engine_mixture": discovered_engine_mixture(spec),
+        # core.fdm.gear: the Unreal host starts the gear where the headless FDM does.
+        "start_gear_up": _start_gear_up(spec),
     }
     if turbulence_provider is not None:
         # A Phase 7 turbulence provider (lee rotor, or a scheduled Dryden)
@@ -813,3 +815,10 @@ def write_run_card(spec: ScenarioSpec, path: Path,
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(card, indent=1), encoding="utf-8")
     return path
+
+
+def _start_gear_up(spec) -> bool:
+    from ..fdm.gear import start_gear_up
+
+    return start_gear_up(str(spec.aircraft.value), float(spec.altitude.value),
+                         float(spec.terrain_elevation.value), spec.prompt, spec.name)

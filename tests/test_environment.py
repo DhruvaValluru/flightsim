@@ -30,8 +30,9 @@ HERE = Position(latitude_deg=0.0, longitude_deg=0.0, altitude_m=1000.0,
                 agl_m=1000.0, terrain_elevation_m=0.0)
 
 
-def trimmed(altitude_m=3000.0, cas_kt=250.0, rate_hz=120.0, aircraft="B747"):
+def trimmed(altitude_m=3000.0, cas_kt=250.0, rate_hz=120.0, aircraft="B747", gear_down=False):
     fdm = FlightDynamics(aircraft, rate_hz=rate_hz)
+    fdm.keep_gear_down = gear_down
     fdm.set_initial_conditions(
         {"h-sl-ft": u.m_to_ft(altitude_m), "vc-kts": cas_kt, "gamma-deg": 0.0,
          "phi-deg": 0.0, "psi-true-deg": 0.0, "beta-deg": 0.0,
@@ -180,7 +181,9 @@ def test_reseeding_every_step_destroys_the_turbulence_process():
     from core.fdm import SimulationError
 
     def peak_turbulence(reseed):
-        fdm = trimmed(altitude_m=1000.0)
+        # The regression was measured gear-down (JSBSim's default before
+        # core.fdm.gear); the gear is not the subject, so it stays down here.
+        fdm = trimmed(altitude_m=1000.0, gear_down=True)
         fdm.props.set_many(DrydenTurbulence("moderate", seed=3).configure())
         worst = 0.0
         try:

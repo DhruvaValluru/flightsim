@@ -112,6 +112,9 @@ struct FFlightSimScenarioCard
 	FString SpecDigest;
 	FString Aircraft;
 	double AltitudeMetres = 0.0;
+	// core.fdm.gear via the run card: an airborne retractable-gear start is
+	// gear-up unless the prompt keeps it down. -1 = absent (an older card).
+	int32 StartGearUp = -1;
 	double AirspeedKnots = 0.0;
 	double HeadingDegrees = 0.0;
 	double LatitudeDegrees = 0.0;

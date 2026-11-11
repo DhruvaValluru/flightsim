@@ -243,8 +243,8 @@ def test_the_engine_out_shows_in_the_columns_and_the_flag_flips_once(c172p_run, 
     t0 = a["t"][0]
     before = [v for t, v in zip(a["t"], a["engine0_thrust_n"]) if t - t0 < 0.95]
     after = [v for t, v in zip(a["t"], a["engine0_thrust_n"]) if t - t0 > 1.05]
-    assert min(before) > 50000.0 and set(after) == {0.0}
-    assert a["engine0_n1_pct"][-1] < 25.0 and a["engine1_n1_pct"][-1] > 80.0
+    assert min(before) > 28000.0 and set(after) == {0.0}   # 6541.6 lbf gear-up trim
+    assert a["engine0_n1_pct"][-1] < 25.0 and a["engine1_n1_pct"][-1] > 65.0
     flag = a[FLAG_COLUMN]
     assert flag[0] == 0.0 and flag[-1] == 1.0 and flag == sorted(flag)
     c = c172p_run.telemetry.columns
@@ -307,7 +307,9 @@ def test_the_null_pairs_on_the_c172p_hardover_reaches_the_jam_is_honestly_silent
 
 @pytest.mark.timeout(600)
 def test_the_null_pairs_on_the_a320_engine_out_open_loop_and_under_tecs_and_the_jam_under_tecs():
-    """Measured: engine-out vs none, open loop 6 s: altitude 3.1 m,
+    """Measured (gear down, before 2026-11-11): engine-out vs none, open
+    loop 6 s: altitude 3.1 m; with the clean gear-up trim the lost engine
+    is 6541.6 lbf, not 11943, and the altitude effect is 1.72 m,
     heading 0.82 deg, TAS 7.3 kt; under TECS: altitude 10.0 m, heading
     0.63 deg, TAS 3.0 kt (the energy loop reacts, the yaw is not
     compensated: TECS has no lateral loop -- stated, not fixed); the
@@ -318,7 +320,7 @@ def test_the_null_pairs_on_the_a320_engine_out_open_loop_and_under_tecs_and_the_
     open_loop = quiet(run_null_pair, a320_spec(ENGINE_OUT), "failures.events")
     assert open_loop.verdict == "reached"
     effect = {e.channel: e for e in open_loop.effects}
-    assert effect["altitude_m"].peak_abs > 2.0 and effect["heading_deg"].peak_abs > 0.5
+    assert effect["altitude_m"].peak_abs > 1.5 and effect["heading_deg"].peak_abs > 0.3   # 1.72 m, 0.44 deg clean
     held = quiet(run_null_pair, a320_spec(ENGINE_OUT, hold=True), "failures.events")
     assert held.verdict == "reached"
     effect = {e.channel: e for e in held.effects}

@@ -67,7 +67,9 @@ def test_trim_succeeds_in_the_envelope_and_holds():
 
 def test_trim_outside_the_envelope_raises_rather_than_continuing():
     """JSBSim logs 'Trim Failed!!!' and carries on with partial state."""
-    fdm = cruise(altitude_m=10000, cas_kt=300)   # M0.835, past this model's tables
+    # 340 kt CAS at 10 km (about M0.92). 300 kt (M0.835) refused only with the
+    # gear down; clean (core.fdm.gear, owner 2026-11-11) it trims, 320 kt does not.
+    fdm = cruise(altitude_m=10000, cas_kt=340)
     fdm.start_engines()
     with pytest.raises(TrimError) as exc:
         fdm.trim(TrimMode.LONGITUDINAL)

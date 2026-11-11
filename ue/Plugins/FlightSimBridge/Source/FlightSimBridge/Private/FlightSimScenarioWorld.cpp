@@ -857,6 +857,10 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 	if (!ReadNumber(Root, TEXT("rate_hz"), Out.RateHz, Error)) { return false; }
 	if (!ReadNumber(Root, TEXT("sample_interval_s"), Out.SampleIntervalSeconds, Error)) { return false; }
 
+	{
+		bool bGearUp = false;
+		Out.StartGearUp = Root->TryGetBoolField(TEXT("start_gear_up"), bGearUp) ? (bGearUp ? 1 : 0) : -1;
+	}
 	if (!Root->TryGetBoolField(TEXT("mass_held"), Out.bMassHeld))
 	{
 		Error = TEXT("run card has no boolean field 'mass_held'");
@@ -1958,7 +1962,11 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 	}
 	const double AglFeet =
 		(Card.AltitudeMetres - Card.TerrainElevationMetres) / 0.3048;
-	const bool bStartGearUp = bRepoOwnedAirframe && AglFeet > 100.0;
+	// The card's start_gear_up (core.fdm.gear: every retractable-gear airframe,
+	// not only the repo's own; round 10's 747 cruised at 10 km gear-down) wins;
+	// an older card without it keeps the repo-owned rule.
+	const bool bStartGearUp = Card.StartGearUp >= 0 ? Card.StartGearUp == 1
+		: (bRepoOwnedAirframe && AglFeet > 100.0);
 	Movement->bStartWithGearDown = !bStartGearUp;
 	if (bStartGearUp)
 	{

@@ -453,23 +453,24 @@ def test_a_float_writes_zero_and_a_zero_command_is_honestly_silent(build):
 
 @pytest.mark.timeout(300)
 def test_engine_out_on_the_a320_turbine_is_zero_thrust_from_the_next_step_and_stays(build):
-    """The engine-out thrust check: cutoff at 1 s, thrust 11943 lbf ->
-    0.0 on the next step and on every one of the following 5 s, N1
-    83.66 -> below 25 % at 5 s, engine 1 untouched; set-running reads 0;
+    """The engine-out thrust check: cutoff at 1 s, thrust 6541.6 lbf (the
+    clean, gear-up trim: core.fdm.gear, owner 2026-11-11; 11943 gear-down)
+    -> 0.0 on the next step and on every one of the following 5 s, N1
+    69.6 -> below 25 % at 5 s, engine 1 untouched; set-running reads 0;
     the active engine is restored to -1."""
     fdm = a320(build)
     schedule, recorder = fly(fdm, [{"kind": "engine_out", "target": 0, "at_s": 1.0}], 6.0)
     record = {r.name: r for r in schedule.applied_variables(recorder)}["failures.engine_out[0]"]
     p = record.parameters
     assert p["engine_type"] == "turbine" and 0.0 <= p["t_applied_s"] - 1.0 < fdm.dt
-    assert p["before"]["thrust_lbf"] == pytest.approx(11943.05, abs=0.5)
+    assert p["before"]["thrust_lbf"] == pytest.approx(6541.59, abs=0.5)
     assert p["after"]["thrust_lbf"] == 0.0 and p["after"]["set_running"] == 0.0
     assert record.readback.property == CUTOFF_CMD and record.readback.agrees
     assert record.null_test.ok and record.null_test.with_value == 0.0
-    assert record.null_test.without_value == pytest.approx(u.lbf_to_n(11943.05), abs=3.0)
+    assert record.null_test.without_value == pytest.approx(u.lbf_to_n(6541.59), abs=3.0)
     assert fdm.props.get("propulsion/engine/thrust-lbs") == 0.0
-    assert fdm.props.get("propulsion/engine/n1") < 25.0 and p["before"]["n1_pct"] > 83.0
-    assert fdm.props.get("propulsion/engine[1]/thrust-lbs") > 11900.0
+    assert fdm.props.get("propulsion/engine/n1") < 25.0 and p["before"]["n1_pct"] > 65.0
+    assert fdm.props.get("propulsion/engine[1]/thrust-lbs") > 6500.0
     assert fdm.props.get(ACTIVE_ENGINE) == -1.0
     assert set(record.properties_written) == {ACTIVE_ENGINE, CUTOFF_CMD}
     assert "engine0_thrust_n" in record.telemetry_columns and "engine0_n1_pct" in record.telemetry_columns
@@ -482,9 +483,9 @@ def test_engine_out_on_the_a320_turbine_is_zero_thrust_from_the_next_step_and_st
     after = [i for i, t in enumerate(recorder.columns["t"]) if t - t0 > 1.05]
     assert len(after) >= 45
     assert {recorder.columns["engine0_thrust_n"][i] for i in after} == {0.0}
-    assert min(recorder.columns["engine1_thrust_n"][i] for i in after) > u.lbf_to_n(11900.0)
-    assert recorder.columns["engine0_thrust_n"][0] > u.lbf_to_n(11900.0)
-    assert recorder.columns["engine0_n1_pct"][-1] < 25.0 < 80.0 < recorder.columns["engine1_n1_pct"][-1]
+    assert min(recorder.columns["engine1_thrust_n"][i] for i in after) > u.lbf_to_n(6500.0)
+    assert recorder.columns["engine0_thrust_n"][0] > u.lbf_to_n(6500.0)
+    assert recorder.columns["engine0_n1_pct"][-1] < 25.0 < 65.0 < recorder.columns["engine1_n1_pct"][-1]
     assert "engine0_rpm" not in recorder.columns
     # The R2 measured channels are NaN when no instruments are stated (not
     # measured); every other column is finite.
@@ -499,7 +500,8 @@ def test_a_bare_set_running_zero_relights_a_turbine_in_flight_so_it_is_not_the_w
     """The blueprint's ``set-running = 0``, measured: thrust 0 on the
     next step only; FGTurbine::Calculate L146-L147 enters tpStart while
     Cutoff is false and qbar > 30, and Start() L292-L309 relights the
-    engine with N2 above idle -- 11942.99 lbf again on the second step."""
+    engine with N2 above idle -- 6541.57 lbf (the gear-up trim) again on
+    the second step."""
     fdm = a320(build)
     fdm.run_for(1.0)
     fdm.props.set("propulsion/engine/set-running", 0.0)
@@ -507,7 +509,7 @@ def test_a_bare_set_running_zero_relights_a_turbine_in_flight_so_it_is_not_the_w
     first = fdm.props.get("propulsion/engine/thrust-lbs")
     fdm.step()
     second = fdm.props.get("propulsion/engine/thrust-lbs")
-    assert first == 0.0 and second > 11900.0
+    assert first == 0.0 and second > 6500.0
     assert fdm.props.get("propulsion/engine/set-running") == 1.0
 
 
