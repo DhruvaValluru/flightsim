@@ -3,6 +3,7 @@
 #     .\scripts\visual_fix_round.ps1 -Round 6 -Scenes 11,15        # just these scenes, one still each
 #     .\scripts\visual_fix_round.ps1 -Round 9 -Full                # all scenes + head shots vs the last head
 #     .\scripts\visual_fix_round.ps1 -Round 6 -Scenes 1 -NoPush    # look locally, push nothing
+#     .\scripts\visual_fix_round.ps1 -Round 8 -Scenes 6 -Switches "-look-ssgi=off"   # an A/B pass
 #
 # Owner, 2026-11-11: a fix round renders only the scenes the fix touches,
 # one still each, and does the expensive prep only when its inputs changed.
@@ -41,6 +42,9 @@ param(
     [ValidateSet("auto", "all", "none")][string]$Prep = "auto",
     [string]$CompareWith = "",
     [switch]$NoPush,
+    # render switches for this round only (FLIGHTSIM_RENDER_SWITCHES, e.g.
+    # "-look-ssgi=off -deck-shadow=off"): an A/B pass is its own round number
+    [string]$Switches = "",
     [int]$Port = 8008
 )
 
@@ -131,6 +135,7 @@ Set-Content -Path $stampFile -Value $head -Encoding ascii
 # 3. the scenes, one still each, through the web app as on the page
 if (-not $env:FLIGHTSIM_RENDER_QUALITY) { $env:FLIGHTSIM_RENDER_QUALITY = "beauty" }
 if (-not $env:FLIGHTSIM_BEAUTY_POST) { $env:FLIGHTSIM_BEAUTY_POST = "on" }
+$env:FLIGHTSIM_RENDER_SWITCHES = $Switches
 $gallery = Join-Path $repo "runs\test_scenarios"
 if (Test-Path $gallery) { Remove-Item -Recurse -Force $gallery }   # derived copies; runs\webapp keeps the runs
 $serverLog = Join-Path $repo "runs\visual\round_${Round}_server.log"
@@ -179,7 +184,7 @@ if ($Full) {
 $summary = @()
 if (Test-Path (Join-Path $out "summary.json")) { $summary = Get-Content (Join-Path $out "summary.json") -Raw | ConvertFrom-Json }
 $record = [ordered]@{
-    round = $Round; commit = $head; full = [bool]$Full; scenes = $Scenes
+    round = $Round; commit = $head; full = [bool]$Full; scenes = $Scenes; switches = $Switches
     prep = $steps; seconds = $timings
     outcomes = @($summary | ForEach-Object { [ordered]@{ number = $_.number; outcome = $_.outcome; seconds = $_.seconds; why = $_.why } })
 }
@@ -201,7 +206,7 @@ try {
     Copy-Item (Join-Path $out "*") $dest -Recurse
     git add "docs/visual/round_$Round"
     $done = @($summary | Where-Object { $_.outcome -eq "done" }).Count
-    git commit -q -m "Visual round $Round on ${head}: $done of $(@($summary).Count) rendered$(if ($Full) { ', full sweep' }) [skip ci]"
+    git commit -q -m "Visual round $Round on ${head}: $done of $(@($summary).Count) rendered$(if ($Full) { ', full sweep' })$(if ($Switches) { ", switches $Switches" }) [skip ci]"
     git push -q origin vis-windows
     if ($LASTEXITCODE -ne 0) { Refuse "git.push" "push to vis-windows failed" }
     Write-Host "`npushed vis-windows $((git rev-parse --short=8 HEAD).Trim()): docs/visual/round_$Round"
