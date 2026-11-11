@@ -165,7 +165,8 @@ BEAUTY_SHAFT_LIGHT = 0.35
 #: The tornado funnel's beauty material (M_TornadoFunnel's FunnelColour): a
 #: grey-brown condensation-and-debris albedo, linear. It replaces the engine's
 #: default grid material in beauty only (no vertex colour: NEXT.md gotcha 26).
-BEAUTY_FUNNEL_COLOUR = (0.30, 0.28, 0.26)
+#: Lane C (2026-11-11): a cool condensation grey (round 5 read it as a tan cone).
+BEAUTY_FUNNEL_COLOUR = (0.24, 0.245, 0.26)
 # -- round-2b weather-fx -- end ---------------------------------------------------------
 
 # -- visual round 6 (2026-11-10): the funnel's shape and its wall cloud -- begin -------
@@ -203,7 +204,8 @@ FUNNEL_TOP_SHARE = 0.5
 FUNNEL_TOP_RADII = 1.3
 WALL_TOP_SHARE = 0.8
 WALL_RADII = 4.5
-BEAUTY_WALL_CLOUD_COLOUR = (0.16, 0.16, 0.17)
+#: Lane C: near-black, a rain-free base under a storm deck.
+BEAUTY_WALL_CLOUD_COLOUR = (0.10, 0.105, 0.115)
 
 
 def wall_cloud_omega_scale(wall_radii: float = WALL_RADII) -> float:
@@ -212,3 +214,65 @@ def wall_cloud_omega_scale(wall_radii: float = WALL_RADII) -> float:
     v_t / r_wall = v_max r_core / r_wall^2 = omega / wall_radii^2."""
     return 1.0 / (float(wall_radii) ** 2)
 # -- visual round 6 -- end ---------------------------------------------------------------
+
+
+# -- visual push lane C (2026-11-11): the tornado in BEAUTY -- begin --------------------
+#
+# Round 5 (f7232cc7) drew #10's tornado as a tan cone on a faceted octagonal base
+# filling the frame. The scenario world's markers above are drawn on EVERY quality and
+# measure must stay byte-identical, so the beauty refines them in place instead
+# (FlightSimTornadoBeauty.cpp FFlightSimScenarioWorld::BuildBeautyTornado, called by the
+# render commandlet under -quality=beauty only): a smooth, tapered, ragged funnel with a
+# soft sheath, a broad wall-cloud underside whose rim thins into the storm deck (both
+# depth-writing, M_TornadoFunnel generation 3: a dithered soft edge from each vertex's
+# coverage), and camera-facing smoke puffs (Kenney's CC0 puffs, assets/looks/tornado/)
+# for the swirling dust cloud at the ground and the scud under the wall cloud
+# (translucent, beauty-only actors, as every cloud). The wind model is untouched.
+# These are the C++'s constants, pinned by tests/test_tornado_look.py. UNCALIBRATED.
+BEAUTY_TORNADO_FUNNEL = {
+    "segments": 64, "rings": 96, "base_radii": 0.16, "taper_power": 2.6,
+    "ground_coverage": 0.25, "contact_share": 0.12, "bend_radii": 0.12,
+    "sheath_scale": 1.35, "sheath_pad_radii": 0.08, "sheath_coverage": 0.4,
+}
+#: The wall cloud's beauty profile: (height share of its depth, radius in core radii,
+#: coverage, ragged), from the funnel's top outward, up into the deck and closed.
+BEAUTY_TORNADO_WALL_PROFILE = (
+    (0.00, 1.30, 1.00, 0.3), (0.04, 2.00, 1.00, 0.6), (0.10, 2.90, 1.00, 1.0),
+    (0.18, 3.70, 0.90, 1.4), (0.28, 4.40, 0.60, 1.8), (0.40, 5.00, 0.30, 2.2),
+    (0.55, 5.40, 0.00, 2.5), (0.75, 4.20, 0.00, 1.0), (1.00, 2.50, 1.00, 0.8),
+    (1.06, 0.40, 1.00, 0.3),
+)
+BEAUTY_TORNADO_WALL_SEGMENTS = 64
+#: The puffs: dust at the ground contact, debris up the funnel's foot, scud about the
+#: wall cloud's base (counts, core-radii ranges, sizes in m, opacities, colours).
+BEAUTY_TORNADO_PUFFS = {
+    "dust": {"count": 36, "radii": (0.25, 2.4), "size_m": (60.0, 200.0),
+             "top_share": 0.06, "opacity": (0.45, 0.80), "colour": (0.30, 0.25, 0.19)},
+    "debris": {"count": 8, "radii": (0.3, 0.7), "share": (0.05, 0.14), "size_m": (50.0, 90.0)},
+    "scud": {"count": 28, "radii": (1.6, 5.0), "band_m": 40.0, "size_m": (120.0, 260.0),
+             "opacity": (0.50, 0.85), "colour": (0.09, 0.09, 0.10)},
+}
+#: The dust cloud turns at the Rankine exterior rate at this radius (omega / radii^2).
+BEAUTY_TORNADO_DUST_SPIN_RADII = 1.6
+
+
+def beauty_funnel_radius_radii(height_share: float) -> float:
+    """The beauty funnel's radius in core radii at a share of its height (before
+    the ragged noise): base + (FUNNEL_TOP_RADII - base) x F^taper."""
+    f = min(max(float(height_share), 0.0), 1.0)
+    c = BEAUTY_TORNADO_FUNNEL
+    return c["base_radii"] + (FUNNEL_TOP_RADII - c["base_radii"]) * f ** c["taper_power"]
+
+
+def beauty_funnel_coverage(height_share: float) -> float:
+    """The core shell's coverage (UV0.x) at a share of its height: ground_coverage at
+    the ground rising (smoothstep) to 1 at contact_share."""
+    c = BEAUTY_TORNADO_FUNNEL
+    t = min(max(float(height_share) / c["contact_share"], 0.0), 1.0)
+    return c["ground_coverage"] + (1.0 - c["ground_coverage"]) * t * t * (3.0 - 2.0 * t)
+
+
+def dust_omega_scale() -> float:
+    """The dust cloud's spin as a share of the core's omega."""
+    return wall_cloud_omega_scale(BEAUTY_TORNADO_DUST_SPIN_RADII)
+# -- visual push lane C -- end ------------------------------------------------------------

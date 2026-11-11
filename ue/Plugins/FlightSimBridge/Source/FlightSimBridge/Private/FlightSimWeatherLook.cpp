@@ -105,12 +105,12 @@ namespace
 	const TCHAR* const LookWallCloudComponentName = TEXT("TornadoWallCloud");
 	constexpr double LookBeautyShaftSoftEdge = 1.0;
 	constexpr double LookBeautyShaftLight = 0.35;
-	constexpr float LookBeautyFunnelColourR = 0.30f;
-	constexpr float LookBeautyFunnelColourG = 0.28f;
+	constexpr float LookBeautyFunnelColourR = 0.24f;
+	constexpr float LookBeautyFunnelColourG = 0.245f;
 	constexpr float LookBeautyFunnelColourB = 0.26f;
-	constexpr float LookBeautyWallCloudColourR = 0.16f;
-	constexpr float LookBeautyWallCloudColourG = 0.16f;
-	constexpr float LookBeautyWallCloudColourB = 0.17f;
+	constexpr float LookBeautyWallCloudColourR = 0.10f;
+	constexpr float LookBeautyWallCloudColourG = 0.105f;
+	constexpr float LookBeautyWallCloudColourB = 0.115f;
 
 	double NumberOr(const TSharedPtr<FJsonObject>& Object, const TCHAR* Key, double Default)
 	{
@@ -450,6 +450,10 @@ void FFlightSimVisualScene::ApplyBeautyWeatherLook(UWorld* World)
 	// grey-brown with vertical streaks, no vertex colour read.
 	// Round 6: the wall cloud over it ("TornadoWallCloud") takes the same
 	// material, darker (a rain-free base in its own shadow).
+	// Lane C (2026-11-11): by now FFlightSimScenarioWorld::BuildBeautyTornado has
+	// rebuilt both meshes (smooth, ragged, UV0.x coverage) and M_TornadoFunnel is
+	// generation 3 (masked, dithered soft edge, still depth-writing); the funnel a
+	// cool condensation grey, the wall cloud near-black (weather_look.BEAUTY_*).
 	UProceduralMeshComponent* Funnel = nullptr;
 	UProceduralMeshComponent* WallCloud = nullptr;
 	for (TObjectIterator<UProceduralMeshComponent> It; It; ++It)
