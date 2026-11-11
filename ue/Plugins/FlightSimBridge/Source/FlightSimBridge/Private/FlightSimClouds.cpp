@@ -1748,8 +1748,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 	}
 	Out->SetNumberField(TEXT("unmodelled_clouds"), UnmodelledClouds);
 	Out->SetStringField(TEXT("coverage_law"),
-		TEXT("cloud_layers.hlsl (round 2: Perlin-Worley shape, domed tops, in-cloud erosion) cuts the shape noise "
-		     "at its (1 - cover) quantile: FBM_MEAN 0.779 + FBM_SIGMA 0.05 x probit(1 - cover) (the noise's own "
+		TEXT("cloud_layers.hlsl (round 7: a Nubis-style 2D weather field, flat bases, domed tops, in-cloud erosion) cuts the shape noise "
+		     "at its (1 - cover) quantile: FBM_MEAN 0.535 + FBM_SIGMA 0.073 x probit(1 - cover) (the noise's own "
 		     "moments, world_beauty.CLOUD_FBM_*), started early by half the erosion's share of the soft edge, so "
 		     "the drawn share of sky at full profile is the stated cover"));
 	Out->SetNumberField(TEXT("view_sample_count_scale"), ViewScale);

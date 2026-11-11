@@ -714,8 +714,11 @@ def layer_cover_and_shape(card_cover: Optional[float], thickness_m: float, prese
 #: within 10 % of the cover at 0.2..0.95, tests/test_world_beauty.py). The two
 #: moments are the noise's own (measured on cloud_shape below, re-measured by
 #: the test); they are properties of the noise, not look values.
-CLOUD_FBM_MEAN = 0.779
-CLOUD_FBM_SIGMA = 0.05
+#: Round 7 (lane E, 2026-11-11): the shape is a Nubis-style 2D weather field
+#: (cloud_shape: clusters and gaps, three cell sizes, one 3D billow octave);
+#: its moments re-measured on 40000 samples: mean 0.535, sigma 0.073.
+CLOUD_FBM_MEAN = 0.535
+CLOUD_FBM_SIGMA = 0.073
 #: The cut's soft edge is CLOUD_FBM_SIGMA / coverage_contrast wide.
 #: The shaping constants of cloud_layers.hlsl (UNCALIBRATED: set by probe
 #: render on the render machine): the top rounds by raising the cut to
@@ -785,14 +788,16 @@ def _perlin3(x: float, y: float, z: float, seed: int) -> float:
                  _lerp(_lerp(g(0, 0, 1), g(1, 0, 1), u), _lerp(g(0, 1, 1), g(1, 1, 1), u), v), w)
 
 
-def _perlin_fbm(x: float, y: float, z: float, seed: int) -> float:
-    """FWorldCloud::PerlinFbm: four octaves of gradient noise, 0..1."""
-    total, amp = 0.0, 0.5
-    for octave in range(4):
-        total += amp * _perlin3(x, y, z, (seed + octave * 101) & _M32)
-        x, y, z = x * 2.03 + 17.1, y * 2.03 + 31.7, z * 2.03 + 7.3
-        amp *= 0.5
-    return min(max(0.5 + 0.5 * total / 0.9375, 0.0), 1.0)
+def _perlin2(x: float, y: float, seed: int) -> float:
+    """FWorldCloud::Perlin2: gradient noise on the plane (the z = 0 lattice row)."""
+    ix, iy = math.floor(x), math.floor(y)
+    fx, fy = x - ix, y - iy
+    u, v = _fade(fx), _fade(fy)
+
+    def g(a, b):
+        return _grad(_hash3(ix + a, iy + b, 0, seed), fx - a, fy - b, 0.0)
+
+    return _lerp(_lerp(g(0, 0), g(1, 0), u), _lerp(g(0, 1), g(1, 1), u), v)
 
 
 def _worley(x: float, y: float, z: float, seed: int) -> float:
@@ -810,6 +815,18 @@ def _worley(x: float, y: float, z: float, seed: int) -> float:
     return 1.0 - min(math.sqrt(best), 1.0)
 
 
+def _worley2(x: float, y: float, seed: int) -> float:
+    """FWorldCloud::Worley2: 1 - F1 over the 9 nearest cells of the plane."""
+    ix, iy = math.floor(x), math.floor(y)
+    best = 9.0
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            cx, cy = ix + dx, iy + dy
+            h = _hash3(cx, cy, 0, seed)
+            best = min(best, (cx + (h & 1023) / 1024.0 - x) ** 2 + (cy + ((h >> 10) & 1023) / 1024.0 - y) ** 2)
+    return 1.0 - min(math.sqrt(best), 1.0)
+
+
 def _remap(v: float, lo: float, hi: float) -> float:
     return min(max((v - lo) / max(hi - lo, 1e-4), 0.0), 1.0)
 
@@ -820,21 +837,25 @@ def _smoothstep(e0: float, e1: float, x: float) -> float:
 
 
 def cloud_shape(x: float, y: float, z: float, seed: int) -> float:
-    """cloud_layers.hlsl FWorldCloud::Shape, number for number (double here):
-    the gradient fbm dilated by an inverted Worley cell, then cut by a
-    two-octave Worley fbm (Schneider's Perlin-Worley base shape)."""
-    perlin = _perlin_fbm(x, y, z, seed)
-    cells = _worley(x, y, z, (seed + 211) & _M32)
-    pw = _remap(perlin, cells - 1.0, 1.0)
-    fbm = (0.75 * _worley(x * 2.03, y * 2.03, z * 2.03, (seed + 307) & _M32)
-           + 0.25 * _worley(x * 4.1, y * 4.1, z * 4.1, (seed + 401) & _M32))
-    return _remap(pw, fbm - 1.0, 1.0)
+    """cloud_layers.hlsl FWorldCloud::Shape, number for number (double here).
+    Round 7 (Nubis-style): a 2D weather field -- a cluster term (two octaves
+    of plane gradient noise at ~6x the cell size: the fields and the gaps), a
+    three-scale plane Worley (clouds of many sizes) -- plus one octave of 3D
+    gradient noise (the only height term: bulging sides). The footprint is a
+    plane field, so the shader's rising cut draws flat-based domes whose height
+    grows with the column's excess over the cut."""
+    cluster = 0.5 + 0.5 * (0.667 * _perlin2(x * 0.17 + 3.1, y * 0.17 + 7.9, (seed + 503) & _M32)
+                           + 0.333 * _perlin2(x * 0.35 + 11.3, y * 0.35 + 5.1, (seed + 557) & _M32))
+    cells = (0.5 * _worley2(x * 0.47 + 2.9, y * 0.47 + 8.3, (seed + 401) & _M32)
+             + 0.35 * _worley2(x, y, (seed + 211) & _M32)
+             + 0.15 * _worley2(x * 2.17 + 5.3, y * 2.17 + 1.7, (seed + 307) & _M32))
+    billow = 0.5 + 0.5 * _perlin3(x * 1.9, y * 1.9, z * 1.9, seed)
+    return 0.42 * cluster + 0.5 * cells + 0.08 * billow
 
 
 def cloud_detail(x: float, y: float, z: float, seed: int) -> float:
-    """cloud_layers.hlsl FWorldCloud::Detail: the erosion's three-octave Worley fbm."""
-    return (0.625 * _worley(x, y, z, seed) + 0.25 * _worley(x * 2.03, y * 2.03, z * 2.03, (seed + 97) & _M32)
-            + 0.125 * _worley(x * 4.1, y * 4.1, z * 4.1, (seed + 193) & _M32))
+    """cloud_layers.hlsl FWorldCloud::Detail: the erosion's two-octave Worley fbm."""
+    return 0.7 * _worley(x, y, z, seed) + 0.3 * _worley(x * 2.03, y * 2.03, z * 2.03, (seed + 97) & _M32)
 
 
 def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float, row: Dict[str, float]) -> float:
