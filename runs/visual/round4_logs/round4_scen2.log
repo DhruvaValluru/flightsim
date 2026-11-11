@@ -1,0 +1,65 @@
+﻿
+[9] 747 through a thunderstorm
+    chase view of the 747 flying west through a thunderstorm at 2000 m for 6 seconds
+    run 7845e405a468 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    encoding: encoding frames to mp4
+    done: clip ready
+    -> DONE: clip ready
+
+[10] c172 near a tornado
+    chase view of the c172p near a tornado over the flint hills at 600 m for 6 seconds
+    run aaed68dec667 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    failed: [camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log
+last words:
+[2026.11.11-00.37.34:096][  2
+    -> FAILED: [camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log
+last words:
+[2026.11.11-00.37.34:096][  2]LogInit: Display: LogCesium: Error: [2026-11-10
+
+[11] A-4 over the matterhorn, strong wind, severe turbulence
+    chase view of the a4 over the matterhorn at 5000 m in strong wind and severe turbulence, flying north, for 6 seconds
+    -> REFUSED: [envelope.trim_feasible] This aircraft cannot fly steadily at the requested speed, height and weight; its flight model does not reach there.
+
+[12] c172 cockpit over the grand canyon
+    cockpit view of the c172p over the grand canyon at 2500 m flying east for 6 seconds
+    run 42277360dd80 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): cockpit
+    done: clip ready
+    -> DONE: clip ready
+
+[13] 747 cruise over the ocean
+    chase view of the 747 over the ocean at 10000 m at noon for 6 seconds
+    run 685e3cc51fba started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[14] hurricane (should be refused: not supported)
+    fly the 747 through a hurricane
+    -> REFUSED: [prompt.unsupported] The request asks for “hurricane”, which this simulator does not model.
+
+================ summary ================
+ 9. DONE     747 through a thunderstorm  [run 7845e405a468]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+10. FAILED   c172 near a tornado  [run aaed68dec667]
+      [camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log
+last words:
+[2026.11.11-00.37.34:096][  2]LogInit: Display: LogCesium: Error: [2026-11-10 19:34:34.441] [error] [TilesetContentMa
+11. REFUSED  A-4 over the matterhorn, strong wind, severe turbulence
+      [envelope.trim_feasible] This aircraft cannot fly steadily at the requested speed, height and weight; its flight model does not reach there.
+12. DONE     c172 cockpit over the grand canyon  [run 42277360dd80]
+      clip: 1 frames of cockpit at 30.0 fps = 0.0 s of flight
+13. DONE     747 cruise over the ocean  [run 685e3cc51fba]
+      clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+14. REFUSED  hurricane (should be refused: not supported)
+      [prompt.unsupported] The request asks for “hurricane”, which this simulator does not model.
+
+written: C:\Users\kanth\flightsim\runs\test_scenarios.json
+all results in one folder: C:\Users\kanth\flightsim\runs\test_scenarios
+open: C:\Users\kanth\flightsim\runs\test_scenarios\index.html

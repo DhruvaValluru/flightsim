@@ -1,0 +1,71 @@
+﻿
+[1] golden hour A-4, flying east
+    chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds
+    run 9f256bd34322 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[2] same, super bright preset
+    chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds
+    run cf706f055178 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[3] a320 over new york, wide lens (terrain download)
+    chase view of the a320 over new york city at 600 m in the morning with a 18 mm lens for 6 seconds
+    run fc8fb342c812 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[4] desert A-4, sun behind the camera
+    chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds
+    run d40e8f74118f started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    labels: engine labels attached on 1 of 1 frame(s) (0 without a bundle)
+    done: clip ready
+    -> DONE: clip ready
+
+[5] desert A-4, backlit
+    chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds
+    run a44f62977a77 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[6] a320 over sfo heading south, moderate rain
+    wingman view of the a320 over sfo south at 3000 m in moderate rain for 6 seconds
+    run 330be31fdee5 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): wingman
+    done: clip ready
+    -> DONE: clip ready
+
+[7] tower view, heavy rain
+    tower view of the a320 at 1000 m in heavy rain with a 250 mm lens for 6 seconds
+    run 3543abedb8d0 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): tower
+    done: clip ready
+    -> DONE: clip ready
+
+[8] c172 over fuji, sunrise, light rain
+    chase view of the c172p over mount fuji at sunrise in light rain for 6 seconds
+    run 5a07932a9c45 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
+    done: clip ready
+    -> DONE: clip ready
+
+[9] 747 through a thunderstorm
+    chase view of the 747 flying west through a thunderstorm at 2000 m for 6 seconds
+    run 5f8da167e4a2 started
+    host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+    rendering: rendering 1 camera pass(es): chase
