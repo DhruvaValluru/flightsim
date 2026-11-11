@@ -84,6 +84,12 @@ struct FFlightSimAircraftFXOptions
 	// translucent pane writes no depth and the ID / depth label captures draw
 	// no translucency, so a labelled frame keeps the opaque MI_<slot>.
 	bool bLabels = false;
+	// Round 23 (2026-11-11): the bisect probes inside the look masters,
+	// -aircraft-probe=<comma list> of nocoat, noao, nonormal, nowear, flat,
+	// measured-mesh (scripts/aircraft_look.py AIRCRAFT_PROBES, the twin).
+	// Effective only with -aircraft-materials=on; recorded in render.json
+	// aircraft_look.materials.probes either way.
+	TArray<FString> Probes;
 	// wet-airframe-canopy: the built weather (its rain wets the airframe), or null.
 	const FFlightSimWeather* Weather = nullptr;
 	// fix pass: the scene's cloud layers (heights above the ground datum,

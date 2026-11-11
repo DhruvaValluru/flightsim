@@ -261,7 +261,8 @@ def test_the_master_module_builds_exactly_the_class_and_fx_masters():
     created = next(node.value for node in tree.body if isinstance(node, ast.Assign)
                    and any(getattr(t, "id", "") == "CREATED" for t in node.targets))
     names = tuple(ast.literal_eval(created))
-    assert set(names) == set(look.CLASS_MASTERS.values()) | set(look.FX_MASTERS) | {look.THIN_GLASS_MASTER}
+    assert set(names) == (set(look.CLASS_MASTERS.values()) | set(look.FX_MASTERS) | {look.THIN_GLASS_MASTER}
+                          | {look.PROBE_FLAT_MASTER})
     text = MASTERS.read_text(encoding="utf-8")
     for name in names:
         assert f'"{name}"' in text or f"look.THIN_GLASS_MASTER" in text

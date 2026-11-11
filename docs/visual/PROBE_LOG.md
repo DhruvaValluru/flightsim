@@ -3434,3 +3434,34 @@ thin lines converging on its centre. Round 10's grid was the same poke-through.
   `google_tiles.beauty_ground.sea.lift_m` 20; streaky, slightly varied blue with a brighter
   sheen toward the sun and a paler horizon. Lines still there -> the tiles' ocean stands
   higher than 20 m: raise SeaLiftPerAglM.
+
+## round 23: aircraft look master bisect (2026-11-11)
+
+Round 22 (bfb04c34): with -aircraft-materials=on the A-4 in #4 drew 111/98/84 (tan) and the C172
+in #8 27/18/17 (near-black, reddish) in their masks; off: 167/155/147 and 89/82/92. Both dark
+airframes take the GROUND's colour (tan desert, red-brown Fuji): light from the sky light's lower
+hemisphere and no sun, i.e. a shading normal that faces down/inward on the visible skin.
+
+Probes (-aircraft-probe=<comma list>, only with -aircraft-materials=on; render.json
+aircraft_look.materials.probes and slots_probed; scripts/aircraft_look.py AIRCRAFT_PROBES):
+nocoat (ClearCoat 0), noao (PanelAoAmount 0: AO exactly 1), nonormal (PanelNormalAmount 0: the
+Normal output is VertexNormalWS), nowear (Wear/Grime/Soot 0), flat (M_AircraftProbeFlat, plain
+Default Lit with the instance's own colour/texture, the mesh's own normal), measured-mesh (the
+body_beauty swap skipped). LOOK_GENERATION 5 (the two new handles default to 1 = the gen-4 graph;
+the flat master is new): run scripts/ue_create_materials.py before the round.
+
+Prediction (by reading the graph, not a render): at #4/#8 framing (about 3 cm per pixel on the
+skin) panel_lines' grooves are 0 (g *= saturate(1 - fwidth / (2 x 0.35 cm))), so its normal IS
+normalize(VertexNormalWS) = Parameters.TangentToWorld[2], the same vector the imported
+tangent-space material lights with (MaterialTemplate.ush; HLSLMaterialTranslator VertexNormal),
+and the AO is exactly 1 there. nocoat cannot absorb (SimpleClearCoatTransmittance needs
+Metallic > 0); nowear caps at x0.35 cavity darkening and 0.25 metallic, not the 10x seen under
+the overcast nor the ground tint. So nonormal / noao / nocoat should NOT restore the airframe;
+nowear at most a little. The confound in round 22's A/B: FlightSimAircraftFX::ApplyMaterials is
+also the only place the beauty mesh (body_beauty: converter crease-angle vn + coincident back
+faces for AC3D two-sided surfaces) is swapped in, so -aircraft-materials=off also put the
+measured body (Interchange's recomputed normals) back. Expected: measured-mesh restores white /
+lit grey; flat does NOT (it keeps body_beauty's normals). If so, the fault is body_beauty's
+normals on the visible faces (check with scripts/ue_inspect_aircraft.py outward_share on the
+beauty part), not the masters. If instead nonormal restores it, the panel_lines normal is
+wrong at distance (the coordinator's suspect) and the fix is in panel_lines.hlsl.
