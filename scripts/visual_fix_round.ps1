@@ -37,7 +37,8 @@
 
 param(
     [Parameter(Mandatory = $true)][int]$Round,
-    [int[]]$Scenes = @(),
+    # a string, split on commas: "powershell -File" turns an int[] "11,15" into 1115
+    [string]$Scenes = "",
     [switch]$Full,
     [ValidateSet("auto", "all", "none")][string]$Prep = "auto",
     [string]$CompareWith = "",
@@ -76,7 +77,8 @@ function Run-Step($name, [scriptblock]$body) {
 }
 
 if (-not (Test-Path $py)) { Refuse "python.venv" "no $py -- run .\scripts\setup.ps1 first" }
-if (-not $Full -and $Scenes.Count -eq 0) { Refuse "round.no_scenes" "name the scenes (-Scenes 11,15) or pass -Full" }
+$sceneList = @($Scenes -split '[,\s]+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
+if (-not $Full -and $sceneList.Count -eq 0) { Refuse "round.no_scenes" "name the scenes (-Scenes 11,15) or pass -Full" }
 
 # 1. the branch, fast-forward only
 git fetch -q origin
@@ -148,7 +150,7 @@ try {
     }
     if (-not $up) { Refuse "webapp.not_up" "no answer on port $Port in 120 s; see $serverLog.err" }
     $batch = @("scripts\run_test_scenarios.py", "--still", "--server", "http://127.0.0.1:$Port")
-    if (-not $Full) { $batch += @("--only") + ($Scenes | ForEach-Object { "$_" }) }
+    if (-not $Full) { $batch += @("--only") + ($sceneList | ForEach-Object { "$_" }) }
     Run-Step "scenes" {
         & $py @batch
         if ($LASTEXITCODE -eq 3) {
@@ -184,7 +186,7 @@ if ($Full) {
 $summary = @()
 if (Test-Path (Join-Path $out "summary.json")) { $summary = Get-Content (Join-Path $out "summary.json") -Raw | ConvertFrom-Json }
 $record = [ordered]@{
-    round = $Round; commit = $head; full = [bool]$Full; scenes = $Scenes; switches = $Switches
+    round = $Round; commit = $head; full = [bool]$Full; scenes = $sceneList; switches = $Switches
     prep = $steps; seconds = $timings
     outcomes = @($summary | ForEach-Object { [ordered]@{ number = $_.number; outcome = $_.outcome; seconds = $_.seconds; why = $_.why } })
 }

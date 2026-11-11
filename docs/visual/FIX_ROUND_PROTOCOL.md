@@ -27,6 +27,10 @@ and flightsim-83's reply is the next round's command.
 | Fix round | only the scenes the fix touches, one still each | `.\scripts\visual_fix_round.ps1 -Round N -Scenes 11,15` |
 | Final sweep | every scene, plus head shots against the last head | `.\scripts\visual_fix_round.ps1 -Round N -Full` |
 
+`-Scenes` takes a comma list as one string ("11,15"), so it works from
+`powershell -File` as well as from `-Command "& .\scripts\visual_fix_round.ps1 ..."`.
+`-Switches "-look-ssgi=off"` makes an A/B pass its own round number.
+
 The script rebuilds, recreates materials and re-imports aircraft **only when
 their inputs changed** since the last prepared commit
 (`runs\visual\prep_stamp.txt`). A round where only Python or a scene changed
