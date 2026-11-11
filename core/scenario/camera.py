@@ -1035,23 +1035,28 @@ def frame_traffic(spec) -> int:
 #: view axis at the first frame and 111 deg at the last, past the 27 deg
 #: half-width of the 35 mm lens. The camera is the one thing that may move
 #: (the labels follow it): a plannable chase camera of a tornado flyby takes
-#: the HAZARD slot, left of and a little above the aircraft, aimed at the
-#: aircraft as every chase camera is, with a HAZARD_CHASE_FOCAL_MM lens
-#: (hfov 2 atan(18 / 15) = 100 deg, vfov 68 deg on the 36 x 20.25 mm sensor).
+#: the HAZARD slot, left of and above the aircraft, aimed at the
+#: aircraft as every chase camera is, with a HAZARD_CHASE_FOCAL_MM lens.
+#: Visual push lane C (2026-11-11): round 5's slot (-30, -110, +32) with a
+#: 15 mm lens stood 485 m from the axis, so the 750 m funnel spanned 95 % of
+#: the frame's height (and its ground contact fell 1-3 deg BELOW the frame's
+#: bottom): a tornado filling the frame, not one photographed. The slot moves
+#: further left and up so the same physics (the axis 375 m right of the track,
+#: unmoved) reads at a believable size: (-40, -260, +80) with a 14 mm lens
+#: (hfov 2 atan(18 / 14) = 104 deg, vfov 72 deg on the 36 x 20.25 mm sensor).
 #: Geometry for the 6 s c172 clip (51.4 m/s, the axis 139 m ahead / 375 m
-#: right of the start): the aim direction is atan2(110, 30) = 75 deg right of
-#: the heading; the axis is 485 m from the camera's track, at 71 deg at the
-#: first frame (4 deg left of centre) and 106 deg at the last (31 deg right
-#: of centre), inside the 50 deg half-width throughout; the aircraft sits at
-#: the frame's centre, 118 m away (4 deg, ~75 px wide at 1920). Vertically
-#: (aircraft 600 m AGL, camera 632 m, pitch -16 deg, +-34 deg): the ground
-#: contact's skirt at the frame's bottom, the funnel to its 750 m top and the
-#: wall cloud's underside at the frame's top; a lower AGL shows more skirt,
-#: less wall cloud. A stated camera field is never moved (plan() refuses by
+#: right of the start): the aim is atan2(260, 40) = 81 deg right of the
+#: heading; the axis is 635..660 m from the camera, 7 deg left of centre at the
+#: first frame and 20 deg right of it at the last, inside the 52 deg half-width;
+#: the aircraft at the frame's centre, 275 m away (2.3 deg, ~42 px at 1920).
+#: Vertically (aircraft 600 m AGL, camera 680 m, under the wall cloud's 750 m
+#: base; pitch -17 deg, +-36 deg): the ground contact 6 deg inside the frame's
+#: bottom, the funnel's 750 m top 13 deg inside its top, the funnel ~73 % of
+#: the frame's height. A stated camera field is never moved (plan() refuses by
 #: name). tests/test_visual_round6.py pins the arithmetic. UNCALIBRATED:
 #: probe render #10 on the render machine.
-HAZARD_CHASE_OFFSET = (-30.0, -110.0, 32.0)
-HAZARD_CHASE_FOCAL_MM = 15.0
+HAZARD_CHASE_OFFSET = (-40.0, -260.0, 80.0)
+HAZARD_CHASE_FOCAL_MM = 14.0
 FRAMED_FOR_HAZARD = ("framed to show the aircraft and the tornado funnel (the abeam "
                      "axis 375 m right of the track; core/scenario/camera.py "
                      "HAZARD_CHASE_OFFSET, HAZARD_CHASE_FOCAL_MM)")

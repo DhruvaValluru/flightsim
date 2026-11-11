@@ -1353,6 +1353,26 @@ wfx_check "lane A: CeilToInt32(double)" "Core/Public/GenericPlatform/GenericPlat
 # ------------------------------------------------------------ END lane A --
 
 
+# -- visual push lane C (2026-11-11) -- BEGIN tornado-beauty --
+# FlightSimTornadoBeauty.cpp (the beauty's funnel, wall cloud and puffs) and
+# scripts/ue_create_materials.py (M_TornadoFunnel generation 3, M_TornadoPuff).
+# tests/test_tornado_look.py pins this block.
+to_check "tornado-beauty: ProceduralMesh ClearAllMeshSections" "Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h" "UE_API void ClearAllMeshSections();"
+to_check "tornado-beauty: ProceduralMesh CreateMeshSection_LinearColor" "Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h" "void CreateMeshSection_LinearColor(int32 SectionIndex, const TArray<FVector>& Vertices, const TArray<int32>& Triangles, const TArray<FVector>& Normals, const TArray<FVector2D>& UV0, const TArray<FLinearColor>& VertexColors, const TArray<FProcMeshTangent>& Tangents, bool bCreateCollision, bool bSRGBConversion = false)"
+to_check "tornado-beauty: MaterialBillboard AddElement" "Source/Runtime/Engine/Classes/Components/MaterialBillboardComponent.h" "ENGINE_API void AddElement("
+to_check "tornado-beauty: SceneComponent SetupAttachment" "Source/Runtime/Engine/Classes/Components/SceneComponent.h" "ENGINE_API void SetupAttachment(USceneComponent* InParent, FName InSocketName = NAME_None);"
+to_check "tornado-beauty: MID Create" "Source/Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h" "static ENGINE_API UMaterialInstanceDynamic* Create( class UMaterialInterface* ParentMaterial, class UObject* InOuter, FName Name = NAME_None);"
+to_check "tornado-beauty: RandomStream FRandRange" "Source/Runtime/Core/Public/Math/RandomStream.h" "FRandRange( FVector::FReal InMin, FVector::FReal InMax ) const"
+to_check "tornado-beauty: Material OpacityMaskClipValue" "Source/Runtime/Engine/Public/Materials/Material.h" "float OpacityMaskClipValue;"
+to_check "tornado-beauty: Material TranslucencyLightingMode" "Source/Runtime/Engine/Public/Materials/Material.h" "TEnumAsByte<ETranslucencyLightingMode> TranslucencyLightingMode;"
+to_check "tornado-beauty: TLM_SurfacePerPixelLighting" "Source/Runtime/Engine/Classes/Engine/EngineTypes.h" "TLM_SurfacePerPixelLighting"
+to_check "tornado-beauty: VertexNormalWS expression" "Source/Runtime/Engine/Public/Materials/MaterialExpressionVertexNormalWS.h" "class UMaterialExpressionVertexNormalWS"
+to_check "tornado-beauty: CameraVectorWS expression" "Source/Runtime/Engine/Public/Materials/MaterialExpressionCameraVectorWS.h" "class UMaterialExpressionCameraVectorWS"
+to_check "tornado-beauty: DepthFade expression" "Source/Runtime/Engine/Public/Materials/MaterialExpressionDepthFade.h" "class UMaterialExpressionDepthFade"
+to_check "tornado-beauty: ScreenPosition PixelPosition pin" "Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp" "Outputs.Add(FExpressionOutput(TEXT(\"PixelPosition\")));"
+to_check "tornado-beauty: View StateFrameIndexMod8 (the dither)" "Source/Runtime/Engine/Public/SceneView.h" "VIEW_UNIFORM_BUFFER_MEMBER(uint32, StateFrameIndexMod8)"
+# ---------------------------------------------- END tornado-beauty --
+
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
 MISSING=$("$PYBIN" - <<'PY'

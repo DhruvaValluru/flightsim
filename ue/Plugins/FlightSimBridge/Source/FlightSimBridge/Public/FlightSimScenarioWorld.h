@@ -506,6 +506,20 @@ public:
 
 	void Teardown();
 
+	// Visual push lane C (2026-11-11): the tornado in BEAUTY. Called by the
+	// render commandlet under -quality=beauty only (FlightSimTornadoBeauty.cpp),
+	// after Build and before the world lane dresses the markers: it rebuilds the
+	// funnel's and the wall cloud's mesh sections in place (smooth, tapered,
+	// ragged; UV0.x carries the coverage M_TornadoFunnel's dithered mask reads)
+	// and adds two beauty-only puff actors -- the swirling dust cloud at the
+	// ground and the scud under the wall cloud -- to BeautyOnlyActors. Measure
+	// never calls it, so its renders keep the Build meshes byte for byte. The
+	// markers keep their actors, names and spin; the wind is untouched. False
+	// (Record says why) when the card has no tornado or the markers are absent.
+	bool BuildBeautyTornado(const FFlightSimScenarioCard& Card,
+	                        TArray<AActor*>& BeautyOnlyActors,
+	                        const TSharedPtr<FJsonObject>& Record);
+
 	double ReadProperty(const TCHAR* Name) const;
 
 	UWorld* World = nullptr;
@@ -650,6 +664,18 @@ private:
 	// exterior rate at its own radius (weather_look.wall_cloud_omega_scale).
 	AActor* TornadoWallCloud = nullptr;
 	double TornadoWallOmegaDegPerSec = 0.0;
+	// Lane C: where Build put the markers (the vortex axis at the ground, in
+	// projected and engine coordinates, and the seeded shape phase), kept so
+	// BuildBeautyTornado draws on the same axis; and its two beauty-only puff
+	// actors, each spun from SIM time at the Rankine rate at its own radius.
+	FVector TornadoAxisEngine = FVector::ZeroVector;
+	FVector TornadoCentreProjected = FVector::ZeroVector;
+	double TornadoGroundMetres = 0.0;
+	double TornadoShapePhase = 0.0;
+	AActor* TornadoDust = nullptr;
+	double TornadoDustOmegaDegPerSec = 0.0;
+	AActor* TornadoScud = nullptr;
+	double TornadoScudOmegaDegPerSec = 0.0;
 
 	// Phase 2: the traffic tracks, copied from the card at Populate so
 	// Step() needs no card reference for them; parallel to TrafficActors.

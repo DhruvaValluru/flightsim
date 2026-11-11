@@ -2861,6 +2861,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// world lane (its lightning pulse keeps the sky light's intensity as its base, so the fill must be in
 		// it) and before the sky-light capture-once. Lumen GI unsupported here: DFAO, sky fill, CSM; recorded either way.
 		if (bBeauty && !bPathTrace && !FFlightSimBeautyFallback::ApplyScene(VisualScene, *Params)) { return Fail(FFlightSimBeautyFallback::LastError()); }
+		// Visual push lane C (FlightSimTornadoBeauty.cpp): the tornado's smooth funnel, wall cloud and
+		// puffs, BEAUTY ONLY and before the world lane dresses the markers (ApplyBeautyWeatherLook) and
+		// before any label capture reads BeautyOnlyActors. Measure keeps Build's meshes byte for byte.
+		if (bBeauty && Card.bTornado)
+		{
+			Scenario.BuildBeautyTornado(Card, VisualScene.BeautyOnlyActors, VisualScene.LookApplied);
+		}
 		// World lane hook (visual overhaul): atmosphere depth, clouds, tiles look, rain, scatter.
 		// -quality=measure never reaches it (Gate 6's renders stay byte-identical).
 		if (bBeauty && !WorldBeauty.Build(World, *Params, WorldCardRoot, Scenario.Aircraft, Scenario.GeoReferencing,

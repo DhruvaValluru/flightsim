@@ -1872,6 +1872,11 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 		}
 		RingIndex += Rings;
 		TornadoFunnel = SpawnMarker(TEXT("TornadoFunnel"));
+		// Lane C: the axis kept for the beauty's refinement (BuildBeautyTornado).
+		TornadoAxisEngine = AxisEngine;
+		TornadoCentreProjected = CentreProjected;
+		TornadoGroundMetres = GroundMetres;
+		TornadoShapePhase = Phase;
 		TornadoOmegaDegPerSec = FMath::RadiansToDegrees(
 			Card.TornadoVMaxMps / Card.TornadoRCoreMetres);
 
@@ -2771,6 +2776,20 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 	{
 		TornadoWallCloud->SetActorRotation(FRotator(
 			0.0, FMath::Fmod(TimeSeconds * TornadoWallOmegaDegPerSec, 360.0),
+			0.0));
+	}
+
+	// Lane C: the beauty's dust cloud and scud (nullptr on measure).
+	if (TornadoDust != nullptr)
+	{
+		TornadoDust->SetActorRotation(FRotator(
+			0.0, FMath::Fmod(TimeSeconds * TornadoDustOmegaDegPerSec, 360.0),
+			0.0));
+	}
+	if (TornadoScud != nullptr)
+	{
+		TornadoScud->SetActorRotation(FRotator(
+			0.0, FMath::Fmod(TimeSeconds * TornadoScudOmegaDegPerSec, 360.0),
 			0.0));
 	}
 
