@@ -91,7 +91,7 @@ def test_the_markers_keep_their_actors_and_spin_and_the_puffs_spin_too():
             in BEAUTY_CPP)
     assert "TornadoScudOmegaDegPerSec = TornadoWallOmegaDegPerSec;" in BEAUTY_CPP
     assert _cpp("BeautyDustSpinRadii") == weather_look.BEAUTY_TORNADO_DUST_SPIN_RADII
-    assert weather_look.dust_omega_scale() == pytest.approx(1.0 / 1.6 ** 2)
+    assert weather_look.dust_omega_scale() == pytest.approx(1.0)
 
 
 # -- labels --------------------------------------------------------------------------
@@ -106,20 +106,37 @@ def test_the_puffs_are_beauty_only_and_the_funnel_writes_depth():
     assert "BLEND_MASKED" in body and "BLEND_TRANSLUCENT" not in body
     assert "MP_OPACITY_MASK" in body and "WORLD_POSITION_OFFSET" not in body
     assert "VertexColor" not in body                                  # gotcha 26
-    assert _assigned("WEATHER_LOOK_GENERATIONS")["M_TornadoFunnel"] == "3"
+    assert _assigned("WEATHER_LOOK_GENERATIONS")["M_TornadoFunnel"] == "4"
+    # The sheath (section 1) is translucent and only ever drawn with its own material.
+    soft = _function(SCRIPT, "create_tornado_funnel_soft", "create_tornado_puff():")
+    assert "BLEND_TRANSLUCENT" in soft and "MP_OPACITY_MASK" not in soft and "VertexColor" not in soft
+    assert _assigned("WEATHER_LOOK_GENERATIONS")["M_TornadoFunnelSoft"] == "1"
+    assert "create_tornado_funnel_soft()" in SCRIPT[SCRIPT.index("create_tornado_funnel()   #"):]
+    assert "Replace(FunnelMesh, 1, FunnelSheath);" in BEAUTY_CPP
+    assert BEAUTY_CPP.index("if (SoftMaterial != nullptr)") < BEAUTY_CPP.index("Replace(FunnelMesh, 1, FunnelSheath);")
+    assert "FunnelMesh->SetMaterial(1, Soft);" in BEAUTY_CPP
     puff = _function(SCRIPT, "create_tornado_puff", "create_rain_drop():")
     assert "BLEND_TRANSLUCENT" in puff and "MP_OPACITY_MASK" not in puff
     assert "create_tornado_puff()" in SCRIPT[SCRIPT.index("create_tornado_funnel()   #"):]
 
 
-def test_the_mask_shader_dithers_coverage_by_the_frame():
+def test_the_core_mask_is_a_plain_torn_clip_and_the_sheath_is_soft():
+    """Round 7 rendered generation 3's dither as a stipple: the core's clip is now
+    deterministic (the labels see its silhouette exactly), the soft edge the sheath."""
     hlsl = (SHADERS / "tornado_funnel_mask.hlsl").read_text(encoding="utf-8")
     funnel = _function(SCRIPT, "create_tornado_funnel", "create_lightning():")
-    for pin in ("Coverage", "Normal", "CamVec", "Noise", "Pixel", "EdgeSoft", "NoiseAmp"):
+    for pin in ("Coverage", "Normal", "CamVec", "Noise", "EdgeSoft", "NoiseAmp"):
         assert f'"{pin}":' in funnel and pin in hlsl
-    assert "View.StateFrameIndexMod8" in hlsl
-    assert "return alpha + 0.4999 - dither;" in hlsl
+    code = "\n".join(l for l in hlsl.splitlines() if not l.startswith("//"))
+    assert "dither" not in code.lower() and "View." not in code and "Pixel" not in funnel
+    assert "return saturate(Coverage * edge + NoiseAmp * (Noise - 0.5));" in hlsl
     assert _assigned("FUNNEL_MASK_CLIP") == 0.5
+    assert _assigned("FUNNEL_STREAK_MIN") < 0.7                       # round 7: no visible texture at 0.7
+    assert 'streaks.set_editor_property("output_min", FUNNEL_STREAK_MIN)' in funnel
+    soft_hlsl = (SHADERS / "tornado_funnel_soft.hlsl").read_text(encoding="utf-8")
+    soft = _function(SCRIPT, "create_tornado_funnel_soft", "create_tornado_puff():")
+    for pin in ("Coverage", "Normal", "CamVec", "Noise", "Streaks", "Opacity", "EdgeSoft"):
+        assert f'"{pin}":' in soft and pin in soft_hlsl
     assert 0.0 < _assigned("FUNNEL_MASK_EDGE_SOFT") < 1.0
     uv = (SHADERS / "tornado_puff_uv.hlsl").read_text(encoding="utf-8")
     puff = _function(SCRIPT, "create_tornado_puff", "create_rain_drop():")
@@ -168,9 +185,14 @@ def test_the_wall_profile_is_the_pythons_and_dissolves_at_the_rim():
 def test_the_puff_constants_are_the_pythons():
     p = weather_look.BEAUTY_TORNADO_PUFFS
     assert _cpp("BeautyDustPuffs") == p["dust"]["count"]
+    assert _cpp("BeautyDustArms") == p["dust"]["arms"]
+    assert _cpp("BeautyDustSpiralTurns") == p["dust"]["spiral_turns"]
+    assert _cpp("BeautyDustJitterRadii") == p["dust"]["jitter_radii"]
     assert (_cpp("BeautyDustRadiiMin"), _cpp("BeautyDustRadiiMax")) == p["dust"]["radii"]
     assert (_cpp("BeautyDustSizeMinM"), _cpp("BeautyDustSizeMaxM")) == p["dust"]["size_m"]
-    assert _cpp("BeautyDustTopShare") == p["dust"]["top_share"]
+    assert _cpp("BeautyDustTopM") == p["dust"]["top_m"]
+    assert (_cpp("BeautySheathColourR"), _cpp("BeautySheathColourG"), _cpp("BeautySheathColourB")) \
+        == weather_look.BEAUTY_TORNADO_SHEATH_COLOUR
     assert (_cpp("BeautyDustOpacityMin"), _cpp("BeautyDustOpacityMax")) == p["dust"]["opacity"]
     assert (_cpp("BeautyDustColourR"), _cpp("BeautyDustColourG"), _cpp("BeautyDustColourB")) == p["dust"]["colour"]
     assert _cpp("BeautyDebrisPuffs") == p["debris"]["count"]
@@ -183,8 +205,14 @@ def test_the_puff_constants_are_the_pythons():
     assert (_cpp("BeautyScudSizeMinM"), _cpp("BeautyScudSizeMaxM")) == p["scud"]["size_m"]
     assert (_cpp("BeautyScudOpacityMin"), _cpp("BeautyScudOpacityMax")) == p["scud"]["opacity"]
     assert (_cpp("BeautyScudColourR"), _cpp("BeautyScudColourG"), _cpp("BeautyScudColourB")) == p["scud"]["colour"]
-    # The dust is low: no puff centre above the dust band plus its own size.
-    assert p["dust"]["top_share"] * 1500.0 < 100.0
+    # Round 7: one beige blob wider than the funnel is tall. The whirl is a few
+    # core radii across, low (its tallest puff well under the funnel's height),
+    # and darker than the funnel.
+    assert 2.0 * weather_look.dust_whirl_extent_radii() < 3.5
+    funnel_height_m = weather_look.FUNNEL_TOP_SHARE * 1500.0
+    assert p["dust"]["top_m"] + p["dust"]["size_m"][1] < 0.2 * funnel_height_m
+    assert 2.0 * weather_look.dust_whirl_extent_radii() * 150.0 < 0.6 * funnel_height_m
+    assert max(p["dust"]["colour"]) < min(weather_look.BEAUTY_FUNNEL_COLOUR)
     # The scud is darker than the funnel; the wall cloud darker still than the funnel.
     assert max(p["scud"]["colour"]) < min(weather_look.BEAUTY_FUNNEL_COLOUR)
     assert max(weather_look.BEAUTY_WALL_CLOUD_COLOUR) < min(weather_look.BEAUTY_FUNNEL_COLOUR)
@@ -229,6 +257,62 @@ def test_the_lane_c_engine_symbols_are_in_the_bridge_check():
     block = CHECK[CHECK.index("BEGIN tornado-beauty"):CHECK.index("END tornado-beauty")]
     for needle in ("ClearAllMeshSections", "CreateMeshSection_LinearColor", "AddElement(",
                    "SetupAttachment", "UMaterialInstanceDynamic* Create(", "FRandRange",
-                   "OpacityMaskClipValue", "TLM_SurfacePerPixelLighting", "PixelPosition",
-                   "StateFrameIndexMod8", "MaterialExpressionDepthFade"):
+                   "OpacityMaskClipValue", "TLM_SurfacePerPixelLighting", "CeilToDouble",
+                   "SetVectorParameterValue", "MaterialExpressionDepthFade"):
         assert needle in block, needle
+
+
+# -- round 7's green #10: the storm deck's ground bounce ------------------------------
+
+
+def test_the_storm_ground_bounce_is_a_neutral_grey_of_the_same_luminance(tmp_path):
+    """The C++ pure NeutralAlbedoSrgb equals world_beauty.neutral_albedo_srgb on every
+    surface row and wetness, and keeps the row's linear luminance."""
+    from core.scene import world_beauty as wb
+    import subprocess
+
+    from tests.test_world_beauty import CLOUDS_CPP, _block
+
+    def _compile_and_run(tmp, pure, main_text):
+        # The pure block alone with this one main: its unused helpers would trip
+        # test_world_beauty's -Werror, so warnings stay warnings here.
+        source = tmp / "pure.cpp"
+        source.write_text("#include <cmath>\n#include <cstdint>\n#include <cstdio>\n#include <cstring>\n"
+                          + pure + "\n" + main_text, encoding="utf-8")
+        binary = tmp / "pure"
+        subprocess.run(["g++", "-std=c++17", "-O1", "-w", "-o", str(binary), str(source)],
+                       check=True, capture_output=True, text=True)
+        return subprocess.run([str(binary)], check=True, capture_output=True, text=True).stdout.splitlines()
+
+    block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
+    cases = [(s, w) for s in wb.GROUND_ALBEDO_SRGB for w in (0.0, 0.85, 1.0)]
+    main = ["using namespace FlightSimWorldPure;", "int main() {"]
+    for s, w in cases:
+        main.append(f"{{ int R[3]; int N[3]; GroundAlbedoSrgb(GroundSurfaceIndex(\"{s}\"), {w!r}, R);"
+                    " NeutralAlbedoSrgb(R, N); printf(\"n %d %d %d\\n\", N[0], N[1], N[2]); }")
+    main.append("return 0; }")
+    lines = _compile_and_run(tmp_path, block, "\n".join(main))
+    got = [tuple(map(int, l.split()[1:])) for l in lines if l.startswith("n ")]
+    assert got == [wb.neutral_albedo_srgb(wb.ground_albedo_srgb(s, w)) for s, w in cases]
+    grass = wb.ground_albedo_srgb("grassland", 0.85)
+    grey = wb.neutral_albedo_srgb(grass)
+    assert grey[0] == grey[1] == grey[2]
+    lum = lambda rgb: sum(k * wb._srgb_to_linear(c) for k, c in zip((0.2126, 0.7152, 0.0722), rgb))
+    assert lum(grey) == pytest.approx(lum(grass), rel=0.03)
+    # Storm only, and the A/B keeps the hue.
+    assert wb.world_ground_albedo_srgb("grassland", 0.85, "storm") == grey
+    assert wb.world_ground_albedo_srgb("grassland", 0.85, "storm", "surface") == grass
+    assert wb.world_ground_albedo_srgb("grassland", 0.85, "rain") == grass
+    assert wb.STORM_GROUND_ALBEDO_DEFAULT == "neutral"
+
+
+def test_the_world_lane_uses_the_neutral_bounce_under_the_storm_preset():
+    from tests.test_world_beauty import CLOUDS_CPP
+
+    assert "Atmosphere->SetGroundAlbedo(Albedo);" in CLOUDS_CPP
+    assert "const FColor Albedo = WorldAlbedo(Surface, GroundWetness, StormNeutralAlbedo());" in CLOUDS_CPP
+    assert "Cloud->SetGroundAlbedo(WorldAlbedo(Surface, GroundWetness, StormNeutralAlbedo()));" in CLOUDS_CPP
+    assert ('return Preset == FlightSimWorldPure::PresetStorm && StormAlbedoSwitch != TEXT("surface");'
+            in CLOUDS_CPP)
+    assert 'FParse::Value(*Switches, TEXT("storm-ground-albedo="), StormAlbedoSwitch);' in CLOUDS_CPP
+    assert "WorldAlbedo(Surface, GroundWetness)" not in CLOUDS_CPP     # every call site decides

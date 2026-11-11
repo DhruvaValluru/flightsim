@@ -192,6 +192,7 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                "M_RainShaft", "M_Lightning", "M_IceOverlay",
                "M_TornadoFunnel",   # round-2b weather-fx: the funnel in beauty
                "M_TornadoPuff",     # visual push lane C: the tornado's dust and scud puffs
+               "M_TornadoFunnelSoft",  # lane C round 7 fix: the funnel's translucent sheath
                # The 3-D rain (FlightSimRainParticles.cpp).
                "M_RainDrop",
                # The storm weather (FlightSimWeather.cpp).

@@ -247,8 +247,8 @@ def wall_cloud_omega_scale(wall_radii: float = WALL_RADII) -> float:
 # (FlightSimTornadoBeauty.cpp FFlightSimScenarioWorld::BuildBeautyTornado, called by the
 # render commandlet under -quality=beauty only): a smooth, tapered, ragged funnel with a
 # soft sheath, a broad wall-cloud underside whose rim thins into the storm deck (both
-# depth-writing, M_TornadoFunnel generation 3: a dithered soft edge from each vertex's
-# coverage), and camera-facing smoke puffs (Kenney's CC0 puffs, assets/looks/tornado/)
+# depth-writing, M_TornadoFunnel generation 4: a torn clip of each vertex's coverage;
+# the funnel's soft edge a translucent sheath, M_TornadoFunnelSoft), and camera-facing smoke puffs (Kenney's CC0 puffs, assets/looks/tornado/)
 # for the swirling dust cloud at the ground and the scud under the wall cloud
 # (translucent, beauty-only actors, as every cloud). The wind model is untouched.
 # These are the C++'s constants, pinned by tests/test_tornado_look.py. UNCALIBRATED.
@@ -268,15 +268,22 @@ BEAUTY_TORNADO_WALL_PROFILE = (
 BEAUTY_TORNADO_WALL_SEGMENTS = 64
 #: The puffs: dust at the ground contact, debris up the funnel's foot, scud about the
 #: wall cloud's base (counts, core-radii ranges, sizes in m, opacities, colours).
+#: Round 7 fix: round 7 drew the dust as one beige blob wider than the funnel is
+#: tall (36 puffs of 60-200 m out to 2.4 core radii). It is now a low, ragged, darker
+#: WHIRL: 64 small puffs on 3 log-spiral arms (0.75 turn from 0.15 to 1.3 core radii,
+#: jittered 0.18 radii), centres within 35 m of the ground, spun at the core rate.
 BEAUTY_TORNADO_PUFFS = {
-    "dust": {"count": 36, "radii": (0.25, 2.4), "size_m": (60.0, 200.0),
-             "top_share": 0.06, "opacity": (0.45, 0.80), "colour": (0.30, 0.25, 0.19)},
-    "debris": {"count": 8, "radii": (0.3, 0.7), "share": (0.05, 0.14), "size_m": (50.0, 90.0)},
+    "dust": {"count": 64, "arms": 3, "spiral_turns": 0.75, "jitter_radii": 0.18,
+             "radii": (0.15, 1.3), "size_m": (22.0, 70.0),
+             "top_m": 35.0, "opacity": (0.35, 0.70), "colour": (0.15, 0.125, 0.10)},
+    "debris": {"count": 10, "radii": (0.2, 0.5), "share": (0.02, 0.06), "size_m": (18.0, 40.0)},
     "scud": {"count": 28, "radii": (1.6, 5.0), "band_m": 40.0, "size_m": (120.0, 260.0),
              "opacity": (0.50, 0.85), "colour": (0.09, 0.09, 0.10)},
 }
 #: The dust cloud turns at the Rankine exterior rate at this radius (omega / radii^2).
-BEAUTY_TORNADO_DUST_SPIN_RADII = 1.6
+BEAUTY_TORNADO_DUST_SPIN_RADII = 1.0
+#: The funnel's translucent sheath (M_TornadoFunnelSoft's FunnelColour): the funnel's grey.
+BEAUTY_TORNADO_SHEATH_COLOUR = BEAUTY_FUNNEL_COLOUR
 
 
 def beauty_funnel_radius_radii(height_share: float) -> float:
@@ -293,6 +300,13 @@ def beauty_funnel_coverage(height_share: float) -> float:
     c = BEAUTY_TORNADO_FUNNEL
     t = min(max(float(height_share) / c["contact_share"], 0.0), 1.0)
     return c["ground_coverage"] + (1.0 - c["ground_coverage"]) * t * t * (3.0 - 2.0 * t)
+
+
+def dust_whirl_extent_radii() -> float:
+    """The dust whirl's widest reach from the axis, in core radii (the outermost
+    arm radius plus its jitter): the whirl is this x 2 core radii across."""
+    d = BEAUTY_TORNADO_PUFFS["dust"]
+    return d["radii"][1] + d["jitter_radii"]
 
 
 def dust_omega_scale() -> float:

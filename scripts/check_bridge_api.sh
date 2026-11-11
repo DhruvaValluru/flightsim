@@ -1374,8 +1374,8 @@ to_check "tornado-beauty: TLM_SurfacePerPixelLighting" "Source/Runtime/Engine/Cl
 to_check "tornado-beauty: VertexNormalWS expression" "Source/Runtime/Engine/Public/Materials/MaterialExpressionVertexNormalWS.h" "class UMaterialExpressionVertexNormalWS"
 to_check "tornado-beauty: CameraVectorWS expression" "Source/Runtime/Engine/Public/Materials/MaterialExpressionCameraVectorWS.h" "class UMaterialExpressionCameraVectorWS"
 to_check "tornado-beauty: DepthFade expression" "Source/Runtime/Engine/Public/Materials/MaterialExpressionDepthFade.h" "class UMaterialExpressionDepthFade"
-to_check "tornado-beauty: ScreenPosition PixelPosition pin" "Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp" "Outputs.Add(FExpressionOutput(TEXT(\"PixelPosition\")));"
-to_check "tornado-beauty: View StateFrameIndexMod8 (the dither)" "Source/Runtime/Engine/Public/SceneView.h" "VIEW_UNIFORM_BUFFER_MEMBER(uint32, StateFrameIndexMod8)"
+to_check "tornado-beauty: MID SetVectorParameterValue" "Source/Runtime/Engine/Public/Materials/MaterialInstanceDynamic.h" "ENGINE_API void SetVectorParameterValue(FName ParameterName, FLinearColor Value);"
+to_check "tornado-beauty: CeilToDouble (the dust whirl)" "Source/Runtime/Core/Public/Math/UnrealMathUtility.h" "CeilToDouble"
 # ---------------------------------------------- END tornado-beauty --
 
 # -- plugin dependencies must be enabled in the uproject --------------------

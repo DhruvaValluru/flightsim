@@ -11,11 +11,13 @@
 //  * rebuilds the funnel's and the wall cloud's mesh section 0 IN PLACE (same
 //    actors, same component names, same spin from SIM time) with smooth,
 //    high-resolution geometry: a tapered funnel with seeded multi-octave ragged
-//    radii and a soft outer sheath, and a broad, flatter wall-cloud underside whose
-//    rim rises and thins into the storm deck. UV0.x carries each vertex's
-//    COVERAGE (1 solid .. 0 gone) and UV0.y its height share; M_TornadoFunnel
-//    (generation 3, scripts/ue_create_materials.py) turns them into a dithered
-//    opacity mask, eroded by noise and by the silhouette's grazing angle;
+//    radii (section 0, the core) and a soft outer sheath (section 1), and a broad,
+//    flatter wall-cloud underside whose rim rises and thins into the storm deck.
+//    UV0.x carries each vertex's COVERAGE (1 solid .. 0 gone) and UV0.y its height
+//    share; M_TornadoFunnel (generation 4, scripts/ue_create_materials.py) clips the
+//    core where coverage x the grazing fade, moved by an erosion noise, falls below
+//    0.5 (a torn edge, no dither: round 7 rendered generation 3's dither as a
+//    stipple), and the sheath takes M_TornadoFunnelSoft (translucent: the soft edge);
 //  * adds two beauty-only actors of camera-facing smoke puffs (Kenney's CC0 puffs,
 //    assets/looks/tornado/, through M_TornadoPuff): the low swirling dust cloud at
 //    the ground contact (replacing the solid cone, which the refined funnel mesh no
@@ -24,10 +26,11 @@
 //
 // Labels: the funnel and the wall cloud stay DEPTH-WRITING (BLEND_MASKED): a pixel
 // the beauty shows as funnel is funnel in the label depth captures too, so the
-// funnel occludes the aircraft in the labels exactly where it is solid. The soft
-// fringe is a dither the beauty's TSR resolves into a soft edge; the AA-free label
-// captures see one frame of that dither, i.e. the same coverage in expectation, on
-// fringe pixels only. The puffs are TRANSLUCENT (no depth) and listed in
+// funnel occludes the aircraft in the labels exactly where it is solid. The core's
+// clip is deterministic (no dither, no temporal term), so the label captures see the
+// beauty's core silhouette pixel for pixel. The sheath is TRANSLUCENT (no depth): a
+// soft, thin condensation edge, like a cloud, is not an occluder in the labels. The
+// puffs are TRANSLUCENT (no depth) too, and listed in
 // BeautyOnlyActors, the policy every cloud in this project already follows
 // (FlightSimClouds.cpp): thin smoke is not an occluder in the labels. Physics is
 // untouched: no wind, no vortex placement, no flight state is read or written here
@@ -97,21 +100,30 @@ namespace FlightSimTornadoBeautyLocal
 	// The puffs: {count, radius range (core radii), size range (m), opacity range}.
 	// Dust at the ground contact, a few debris puffs up the funnel's foot, scud
 	// in a band about the wall cloud's base.
-	constexpr int32 BeautyDustPuffs = 36;
-	constexpr double BeautyDustRadiiMin = 0.25;
-	constexpr double BeautyDustRadiiMax = 2.4;
-	constexpr double BeautyDustSizeMinM = 60.0;
-	constexpr double BeautyDustSizeMaxM = 200.0;
-	constexpr double BeautyDustTopShare = 0.06;
-	constexpr double BeautyDustOpacityMin = 0.45;
-	constexpr double BeautyDustOpacityMax = 0.80;
-	constexpr int32 BeautyDebrisPuffs = 8;
-	constexpr double BeautyDebrisRadiiMin = 0.3;
-	constexpr double BeautyDebrisRadiiMax = 0.7;
-	constexpr double BeautyDebrisShareMin = 0.05;
-	constexpr double BeautyDebrisShareMax = 0.14;
-	constexpr double BeautyDebrisSizeMinM = 50.0;
-	constexpr double BeautyDebrisSizeMaxM = 90.0;
+	// Round 7 (lane C fix): round 7 drew the dust as one beige blob wider than the
+	// funnel is tall (36 puffs of 60-200 m out to 2.4 core radii). The dust is now
+	// a low, ragged, darker WHIRL: many small puffs on BeautyDustArms log-spiral
+	// arms (BeautyDustSpiralTurns turns from the core out to BeautyDustRadiiMax),
+	// jittered by BeautyDustJitterRadii, their centres within BeautyDustTopM of
+	// the ground; a few debris puffs up the funnel's foot.
+	constexpr int32 BeautyDustPuffs = 64;
+	constexpr int32 BeautyDustArms = 3;
+	constexpr double BeautyDustSpiralTurns = 0.75;
+	constexpr double BeautyDustJitterRadii = 0.18;
+	constexpr double BeautyDustRadiiMin = 0.15;
+	constexpr double BeautyDustRadiiMax = 1.3;
+	constexpr double BeautyDustSizeMinM = 22.0;
+	constexpr double BeautyDustSizeMaxM = 70.0;
+	constexpr double BeautyDustTopM = 35.0;
+	constexpr double BeautyDustOpacityMin = 0.35;
+	constexpr double BeautyDustOpacityMax = 0.70;
+	constexpr int32 BeautyDebrisPuffs = 10;
+	constexpr double BeautyDebrisRadiiMin = 0.2;
+	constexpr double BeautyDebrisRadiiMax = 0.5;
+	constexpr double BeautyDebrisShareMin = 0.02;
+	constexpr double BeautyDebrisShareMax = 0.06;
+	constexpr double BeautyDebrisSizeMinM = 18.0;
+	constexpr double BeautyDebrisSizeMaxM = 40.0;
 	constexpr int32 BeautyScudPuffs = 28;
 	constexpr double BeautyScudRadiiMin = 1.6;
 	constexpr double BeautyScudRadiiMax = 5.0;
@@ -122,16 +134,21 @@ namespace FlightSimTornadoBeautyLocal
 	constexpr double BeautyScudOpacityMax = 0.85;
 	// The dust cloud spins at the Rankine exterior rate at this radius
 	// (omega / radii^2, weather_look.wall_cloud_omega_scale's law).
-	constexpr double BeautyDustSpinRadii = 1.6;
-	constexpr float BeautyDustColourR = 0.30f;
-	constexpr float BeautyDustColourG = 0.25f;
-	constexpr float BeautyDustColourB = 0.19f;
+	constexpr double BeautyDustSpinRadii = 1.0;
+	constexpr float BeautyDustColourR = 0.15f;
+	constexpr float BeautyDustColourG = 0.125f;
+	constexpr float BeautyDustColourB = 0.10f;
+	// The sheath's colour (M_TornadoFunnelSoft's FunnelColour): the funnel's grey.
+	constexpr float BeautySheathColourR = 0.24f;
+	constexpr float BeautySheathColourG = 0.245f;
+	constexpr float BeautySheathColourB = 0.26f;
 	constexpr float BeautyScudColourR = 0.09f;
 	constexpr float BeautyScudColourG = 0.09f;
 	constexpr float BeautyScudColourB = 0.10f;
 	constexpr int32 BeautyPuffSeedSalt = 0x70A2D0;
 
 	const TCHAR* const TornadoPuffPath = TEXT("/Game/FlightSim/M_TornadoPuff.M_TornadoPuff");
+	const TCHAR* const TornadoFunnelSoftPath = TEXT("/Game/FlightSim/M_TornadoFunnelSoft.M_TornadoFunnelSoft");
 
 	double TornadoBeautySmooth01(double X)
 	{
@@ -265,12 +282,16 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		}
 	};
 
-	// -- the funnel: core shell + sheath --------------------------------------
-	FTornadoBeautyRingMesh Funnel;
-	Funnel.Segments = BeautyFunnelSegments;
+	// -- the funnel: the core (section 0, masked, depth-writing) and the sheath
+	// (section 1, translucent M_TornadoFunnelSoft: the soft condensation edge) --
+	FTornadoBeautyRingMesh FunnelCore;
+	FTornadoBeautyRingMesh FunnelSheath;
+	FunnelCore.Segments = BeautyFunnelSegments;
+	FunnelSheath.Segments = BeautyFunnelSegments;
 	for (int32 Shell = 0; Shell < 2; ++Shell)
 	{
-		const int32 First = Funnel.Vertices.Num() / Funnel.Segments;
+		FTornadoBeautyRingMesh& Funnel = Shell == 0 ? FunnelCore : FunnelSheath;
+		const int32 First = 0;
 		for (int32 Ring = 0; Ring < BeautyFunnelRings; ++Ring)
 		{
 			const double F = static_cast<double>(Ring) / (BeautyFunnelRings - 1);
@@ -318,20 +339,36 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		}
 	}
 
-	auto Replace = [](UProceduralMeshComponent* Mesh, const FTornadoBeautyRingMesh& Ring)
+	auto Replace = [](UProceduralMeshComponent* Mesh, int32 Section, const FTornadoBeautyRingMesh& Ring)
 	{
 		TArray<FVector> Normals;
 		TArray<int32> Triangles;
 		Ring.Finish(Normals, Triangles);
-		Mesh->ClearAllMeshSections();
+		if (Section == 0)
+		{
+			Mesh->ClearAllMeshSections();
+		}
 		// No vertex colours (NEXT.md gotcha 26): the material reads UV0 only.
-		Mesh->CreateMeshSection_LinearColor(0, Ring.Vertices, Triangles, Normals, Ring.UV0,
+		Mesh->CreateMeshSection_LinearColor(Section, Ring.Vertices, Triangles, Normals, Ring.UV0,
 		                                    TArray<FLinearColor>(), TArray<FProcMeshTangent>(),
 		                                    false);
 		return Triangles.Num() / 3;
 	};
-	const int32 FunnelTriangles = Replace(FunnelMesh, Funnel);
-	const int32 WallTriangles = Replace(WallMesh, Wall);
+	int32 FunnelTriangles = Replace(FunnelMesh, 0, FunnelCore);
+	const int32 WallTriangles = Replace(WallMesh, 0, Wall);
+	// The sheath: drawn only when its translucent material loads (never the
+	// opaque default: a second opaque shell would fatten the silhouette).
+	UMaterialInterface* SoftMaterial = LoadObject<UMaterialInterface>(nullptr, TornadoFunnelSoftPath);
+	FString SheathNote = TEXT("not drawn: M_TornadoFunnelSoft did not load (run scripts/ue_create_materials.py)");
+	if (SoftMaterial != nullptr)
+	{
+		FunnelTriangles += Replace(FunnelMesh, 1, FunnelSheath);
+		UMaterialInstanceDynamic* Soft = UMaterialInstanceDynamic::Create(SoftMaterial, FunnelMesh);
+		Soft->SetVectorParameterValue(FName(TEXT("FunnelColour")),
+			FLinearColor(BeautySheathColourR, BeautySheathColourG, BeautySheathColourB, 1.0f));
+		FunnelMesh->SetMaterial(1, Soft);
+		SheathNote = TEXT("drawn: translucent, no depth (the labels see the core only)");
+	}
 
 	// -- the puffs (beauty-only, translucent) ---------------------------------
 	UMaterialInterface* PuffMaterial = LoadObject<UMaterialInterface>(nullptr, TornadoPuffPath);
@@ -349,9 +386,9 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		return Actor;
 	};
 	auto AddPuff = [&](AActor* Actor, const FString& Name, double RadiusM, double ElevationM,
-	                   double SizeM, double Opacity, const FLinearColor& Colour)
+	                   double SizeM, double Opacity, const FLinearColor& Colour, double Angle = -1.0)
 	{
-		const double A = Stream.FRandRange(0.0, 2.0 * PI);
+		const double A = Angle >= 0.0 ? Angle : Stream.FRandRange(0.0, 2.0 * PI);
 		UMaterialBillboardComponent* Puff = NewObject<UMaterialBillboardComponent>(Actor, *Name);
 		Puff->SetupAttachment(Actor->GetRootComponent());
 		Puff->SetMobility(EComponentMobility::Movable);
@@ -383,14 +420,22 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		const FLinearColor Dust(BeautyDustColourR, BeautyDustColourG, BeautyDustColourB, 1.0f);
 		for (int32 I = 0; I < BeautyDustPuffs; ++I)
 		{
-			const double U = FMath::Sqrt(Stream.FRand());
-			const double RadiusM = RCore * FMath::Lerp(BeautyDustRadiiMin, BeautyDustRadiiMax, U);
-			const double SizeM = FMath::Lerp(BeautyDustSizeMinM, BeautyDustSizeMaxM,
-			                                 0.4 * Stream.FRand() + 0.6 * U);
-			const double ElevationM = 0.3 * SizeM
-				+ Stream.FRand() * BeautyDustTopShare * TopM * (1.0 - 0.5 * U);
+			// Along arm (I % arms), U from the core out; a log-spiral: the angle
+			// grows with ln(radius), so the arms trail like inflow bands.
+			const double U = (static_cast<double>(I / BeautyDustArms) + Stream.FRand())
+				/ FMath::CeilToDouble(static_cast<double>(BeautyDustPuffs) / BeautyDustArms);
+			const double Radii = BeautyDustRadiiMin * FMath::Pow(BeautyDustRadiiMax / BeautyDustRadiiMin, U);
+			const double Angle = FMath::Fmod(2.0 * PI * (static_cast<double>(I % BeautyDustArms) / BeautyDustArms
+				+ BeautyDustSpiralTurns * U) + Phase + 4.0 * PI, 2.0 * PI);
+			const double RadiusM = RCore * FMath::Max(0.05, Radii + Stream.FRandRange(-BeautyDustJitterRadii,
+			                                                                          BeautyDustJitterRadii));
+			// Bigger puffs near the core (the debris column), smaller at the arms' ends.
+			const double SizeM = FMath::Lerp(BeautyDustSizeMaxM, BeautyDustSizeMinM,
+			                                 0.6 * U + 0.4 * Stream.FRand());
+			const double ElevationM = 0.25 * SizeM + Stream.FRand() * BeautyDustTopM * (1.0 - 0.6 * U);
 			AddPuff(TornadoDust, FString::Printf(TEXT("TornadoDustPuff_%d"), I), RadiusM, ElevationM,
-			        SizeM, FMath::Lerp(BeautyDustOpacityMin, BeautyDustOpacityMax, Stream.FRand()), Dust);
+			        SizeM, FMath::Lerp(BeautyDustOpacityMin, BeautyDustOpacityMax, Stream.FRand()), Dust,
+			        Angle);
 		}
 		for (int32 I = 0; I < BeautyDebrisPuffs; ++I)
 		{
@@ -417,13 +462,14 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 	{
 		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 		Row->SetNumberField(TEXT("funnel_triangles"), FunnelTriangles);
+		Row->SetStringField(TEXT("funnel_sheath"), SheathNote);
 		Row->SetNumberField(TEXT("wall_cloud_triangles"), WallTriangles);
 		Row->SetStringField(TEXT("puffs"), PuffNote);
 		Row->SetNumberField(TEXT("puff_count"), PuffCount);
 		Row->SetNumberField(TEXT("dust_spin_deg_s"), TornadoDustOmegaDegPerSec);
 		Row->SetNumberField(TEXT("scud_spin_deg_s"), TornadoScudOmegaDegPerSec);
 		Row->SetStringField(TEXT("labels"),
-			TEXT("funnel and wall cloud depth-writing (BLEND_MASKED, dithered fringe: the labels see the "
+			TEXT("funnel core and wall cloud depth-writing (BLEND_MASKED, plain clip: the labels see the "
 			     "beauty's silhouette); the puffs translucent and in BeautyOnlyActors, as every cloud"));
 		Row->SetStringField(TEXT("not_claimed"),
 			TEXT("a visual marker of the modelled core, not condensation or debris physics; UNCALIBRATED"));

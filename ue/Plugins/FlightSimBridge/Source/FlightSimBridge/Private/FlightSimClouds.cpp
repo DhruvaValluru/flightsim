@@ -354,6 +354,29 @@ namespace FlightSimWorldPure
 			Out[C] = static_cast<int>(std::floor(S * 255.0 + 0.5));
 		}
 	}
+	// Visual push lane C (round 7's green #10): under the STORM preset the
+	// sky's and the clouds' ground bounce is a grey of the surface row's own
+	// linear luminance (Rec. 709 weights), not the row's hue
+	// (world_beauty.neutral_albedo_srgb). A storm deck extinguishes the sun on
+	// its underside, so the engine's ground-bounce term (lit by the sun, blind
+	// to the deck's shadow on the ground) is nearly all the light it shows: the
+	// grassland row's G/B 2.5 in linear light turned the deck, the sky light
+	// that captures it and every lit surface under it green.
+	inline void NeutralAlbedoSrgb(const int In[3], int Out[3])
+	{
+		double Lin[3];
+		for (int C = 0; C < 3; ++C)
+		{
+			double V = In[C] / 255.0;
+			V = V < 0.0 ? 0.0 : (V > 1.0 ? 1.0 : V);
+			Lin[C] = V <= 0.04045 ? V / 12.92 : std::pow((V + 0.055) / 1.055, 2.4);
+		}
+		double Y = 0.2126 * Lin[0] + 0.7152 * Lin[1] + 0.0722 * Lin[2];
+		Y = Y < 0.0 ? 0.0 : (Y > 1.0 ? 1.0 : Y);
+		const double S = Y <= 0.0031308 ? Y * 12.92 : 1.055 * std::pow(Y, 1.0 / 2.4) - 0.055;
+		const int G = static_cast<int>(std::floor(S * 255.0 + 0.5));
+		Out[0] = G; Out[1] = G; Out[2] = G;
+	}
 	// Physical constants (not look values).
 	constexpr double Koschmieder = 3.912;
 	constexpr double RayleighGreenPerKm = 0.013558;
@@ -794,12 +817,19 @@ namespace
 
 	// The planet's ground albedo: the card's surface, the ground's wetness
 	// (FlightSimWorldPure::GroundAlbedoSrgb, world_beauty.ground_albedo_srgb).
-	FColor WorldAlbedo(const FString& Surface, double Wetness)
+	// bNeutral (lane C, the storm preset): the row's luminance as a grey
+	// (FlightSimWorldPure::NeutralAlbedoSrgb).
+	FColor WorldAlbedo(const FString& Surface, double Wetness, bool bNeutral = false)
 	{
 		// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
 		using namespace FlightSimWorldPure;
 		int Rgb[3] = {0, 0, 0};
 		GroundAlbedoSrgb(GroundSurfaceIndex(TCHAR_TO_ANSI(*Surface)), Wetness, Rgb);
+		if (bNeutral)
+		{
+			const int Row[3] = {Rgb[0], Rgb[1], Rgb[2]};
+			NeutralAlbedoSrgb(Row, Rgb);
+		}
 		return FColor(static_cast<uint8>(FMath::Clamp(Rgb[0], 0, 255)), static_cast<uint8>(FMath::Clamp(Rgb[1], 0, 255)),
 		              static_cast<uint8>(FMath::Clamp(Rgb[2], 0, 255)), 255);
 	}
@@ -955,6 +985,11 @@ bool FFlightSimWorldBeauty::LoadOverrides(const FString& Path, FString& Error)
 	return true;
 }
 
+bool FFlightSimWorldBeauty::StormNeutralAlbedo() const
+{
+	return Preset == FlightSimWorldPure::PresetStorm && StormAlbedoSwitch != TEXT("surface");
+}
+
 bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSharedPtr<FJsonObject>& Card,
                                   AActor* Aircraft, AGeoReferencingSystem* GeoReferencing,
                                   FFlightSimVisualScene& Scene, FFlightSimWeather& Weather,
@@ -984,6 +1019,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		const FString Switches = FString(Params != nullptr ? Params : TEXT("")) + TEXT(" ")
 			+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
 		FParse::Value(*Switches, TEXT("deck-shadow="), DeckShadowSwitch);
+		// Lane C (round 7's green #10): -storm-ground-albedo=neutral|surface,
+		// neutral by default (StormNeutralAlbedo); surface is the A/B.
+		StormAlbedoSwitch = TEXT("neutral");
+		FParse::Value(*Switches, TEXT("storm-ground-albedo="), StormAlbedoSwitch);
 	}
 
 	// The tables in force: the pure block's defaults, then any overrides.
@@ -1477,8 +1516,10 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	Atmosphere->SetMieExponentialDistribution(static_cast<float>(Row[AtmMieScaleHeightKm]));
 	Atmosphere->SetMieAnisotropy(static_cast<float>(Row[AtmMieAnisotropy]));
 	Atmosphere->SetAerialPespectiveViewDistanceScale(static_cast<float>(Row[AtmAerialPerspectiveScale]));
-	const FColor Albedo = WorldAlbedo(Surface, GroundWetness);
+	const FColor Albedo = WorldAlbedo(Surface, GroundWetness, StormNeutralAlbedo());
 	Atmosphere->SetGroundAlbedo(Albedo);
+	Out->SetStringField(TEXT("storm_ground_albedo"), StormAlbedoSwitch);
+	Out->SetBoolField(TEXT("ground_albedo_neutral"), StormNeutralAlbedo());
 	// clouds-sky round 2: the sky's multiple scattering (paler towards the
 	// horizon from altitude; FlightSimWorldPure::SkyMultiScattering).
 	Out->SetNumberField(TEXT("multi_scattering_factor_before"), Atmosphere->MultiScatteringFactor);
@@ -1843,7 +1884,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Cloud->SetShadowTracingDistance(ShadowTracingKm);
 		Cloud->SetTracingMaxDistance(TracingMaxKm);
 		Cloud->SetStopTracingTransmittanceThreshold(WorldCloudStopTransmittance);
-		Cloud->SetGroundAlbedo(WorldAlbedo(Surface, GroundWetness));
+		Cloud->SetGroundAlbedo(WorldAlbedo(Surface, GroundWetness, StormNeutralAlbedo()));
 		CloudLayers.Add(State);
 
 		TSharedPtr<FJsonObject> Layer = MakeShared<FJsonObject>();

@@ -438,6 +438,37 @@ def ground_albedo_srgb(surface: Optional[str], wetness: float) -> Tuple[int, int
     return tuple(_linear_to_srgb_byte(_srgb_to_linear(b) * k) for b in row)
 
 
+#: Visual push lane C (round 7's green #10): under the STORM preset the sky's and
+#: the clouds' ground bounce is the surface row's luminance as a grey
+#: (neutral_albedo_srgb; FlightSimClouds.cpp FlightSimWorldPure::NeutralAlbedoSrgb,
+#: FFlightSimWorldBeauty::StormNeutralAlbedo). A storm deck extinguishes the sun
+#: on its underside, so the engine's ground-bounce term -- lit by the sun and blind
+#: to the deck's shadow on the ground -- is nearly all the light the underside
+#: shows; the grassland row's G/B of 2.5 in linear light turned the deck green, and
+#: with it the sky light that captures the deck (cloud AO auto-off since lane A)
+#: and every lit surface under it. ``-storm-ground-albedo=surface`` (command line
+#: or FLIGHTSIM_RENDER_SWITCHES) keeps the hue for an A/B. Beauty only.
+STORM_GROUND_ALBEDO_SWITCHES: Tuple[str, ...] = ("neutral", "surface")
+STORM_GROUND_ALBEDO_DEFAULT = "neutral"
+
+
+def neutral_albedo_srgb(rgb: Sequence[int]) -> Tuple[int, int, int]:
+    """A grey sRGB albedo of the same linear (Rec. 709) luminance as ``rgb``."""
+    lin = [_srgb_to_linear(b) for b in rgb]
+    y = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    g = _linear_to_srgb_byte(y)
+    return (g, g, g)
+
+
+def world_ground_albedo_srgb(surface: Optional[str], wetness: float, preset: str,
+                             switch: str = STORM_GROUND_ALBEDO_DEFAULT) -> Tuple[int, int, int]:
+    """The albedo the world lane gives the sky atmosphere and the cloud layers."""
+    rgb = ground_albedo_srgb(surface, wetness)
+    if preset == "storm" and switch != "surface":
+        return neutral_albedo_srgb(rgb)
+    return rgb
+
+
 # -- the cloud presets -------------------------------------------------------------
 
 CLOUD_PRESETS: Tuple[str, ...] = ("cumulus", "stratocumulus", "overcast", "nimbostratus")

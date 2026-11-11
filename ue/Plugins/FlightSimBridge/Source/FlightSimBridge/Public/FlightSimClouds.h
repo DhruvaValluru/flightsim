@@ -180,6 +180,11 @@ private:
 	// Visual round 6: -deck-shadow=on|off (Build reads it; ApplyClouds applies
 	// world_beauty.deck_shadows_beam under it).
 	FString DeckShadowSwitch = TEXT("on");
+	// Lane C (round 7's green #10): under the storm preset the sky's and the
+	// clouds' ground bounce is the surface row's luminance as a grey
+	// (world_beauty.neutral_albedo_srgb); -storm-ground-albedo=surface keeps the hue.
+	FString StormAlbedoSwitch = TEXT("neutral");
+	bool StormNeutralAlbedo() const;
 	int32 Preset = 0;
 	// The tables in force (the pure block's defaults, then the overrides).
 	TArray<double> AtmosphereValues;   // PresetCount x AtmosphereFieldCount

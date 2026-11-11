@@ -2497,7 +2497,11 @@ RAIN_DROP_ROUGHNESS = 0.08
 #: soft edge (tornado_funnel_mask.hlsl: the mesh's UV0.x coverage x the silhouette's
 #: grazing fade, eroded by noise), still depth-writing. M_TornadoPuff 1: the beauty's
 #: smoke puffs. Bump with every graph change.
-WEATHER_LOOK_GENERATIONS = {"M_RainShaft": "2", "M_TornadoFunnel": "3", "M_TornadoPuff": "1"}
+#: 4 (round 7 fix): the dither removed (it rendered as a stipple), a plain torn
+#: clip, stronger striations and erosion shading; M_TornadoFunnelSoft 1: the
+#: funnel's translucent sheath, the soft edge.
+WEATHER_LOOK_GENERATIONS = {"M_RainShaft": "2", "M_TornadoFunnel": "4", "M_TornadoPuff": "1",
+                            "M_TornadoFunnelSoft": "1"}
 #: M_TornadoFunnel's streak scroll (cm/s down the funnel's local axis: condensation
 #: drawn into the inflow reads as a downward flow) and the skirt's tint, lerped to
 #: white over FUNNEL_SKIRT_HEIGHT_CM of local height. UNCALIBRATED.
@@ -2521,6 +2525,13 @@ FUNNEL_MASK_NOISE_AMP = 0.45
 FUNNEL_MASK_NOISE_M = 40.0
 FUNNEL_MASK_SCROLL_CM_PER_S = 800.0
 FUNNEL_MASK_CLIP = 0.5
+#: Round 7 fix: the striations' floor (was 0.7: no visible texture), how far the
+#: erosion noise darkens the core's albedo, and the sheath's peak opacity and its
+#: grazing fade (M_TornadoFunnelSoft). UNCALIBRATED.
+FUNNEL_STREAK_MIN = 0.45
+FUNNEL_EROSION_DARKEN = 0.35
+FUNNEL_SOFT_OPACITY = 1.0
+FUNNEL_SOFT_EDGE = 0.6
 #: M_TornadoPuff (lane C): the parameters FlightSimTornadoBeauty.cpp sets per puff,
 #: the atlas (assets/looks/tornado/, Kenney CC0, PIN.json) imported as T_TornadoPuffs,
 #: the slow churn (rad/s), how much the puff's grey shades its colour (the darkest
@@ -2902,7 +2913,12 @@ def create_tornado_funnel():
     (FlightSimTornadoBeauty.cpp's beauty meshes) x the silhouette's grazing fade,
     eroded by a FUNNEL_MASK_NOISE_M local-space noise scrolled down the axis, kept
     where it beats a per-pixel dither TSR resolves. Masked, so still depth-writing:
-    the label depth captures see the beauty's funnel; no WPO, no vertex colour."""
+    the label depth captures see the beauty's funnel; no WPO, no vertex colour.
+    Generation 4 (round 7 fix): round 7 rendered the dither as a stipple, so the
+    clip is plain again (a torn edge from the erosion noise, no dither); the soft
+    edge is the funnel's translucent sheath (M_TornadoFunnelSoft). The condensation
+    texture is stronger: the striations span FUNNEL_STREAK_MIN..1 and the erosion
+    noise darkens the albedo by up to FUNNEL_EROSION_DARKEN."""
     material = _weather_material("M_TornadoFunnel")
     if material is None:
         return
@@ -2932,7 +2948,7 @@ def create_tornado_funnel():
     streaks = lib.create_material_expression(material, unreal.MaterialExpressionNoise, -1000, 200)
     streaks.set_editor_property("scale", 1.0 / 1500.0)
     streaks.set_editor_property("levels", 3)
-    streaks.set_editor_property("output_min", 0.7)
+    streaks.set_editor_property("output_min", FUNNEL_STREAK_MIN)
     streaks.set_editor_property("output_max", 1.0)
     lib.connect_material_expressions(streaked, "", streaks, "Position")
     # The dust skirt: the lowest FUNNEL_SKIRT_HEIGHT_CM of local height tinted.
@@ -2947,10 +2963,9 @@ def create_tornado_funnel():
                   binary(material, lib, unreal.MaterialExpressionMultiply,
                          mask(material, lib, colour, "rgb", -800, 0), streaks, -700, 100),
                   skirt, -550, 100)
-    lib.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
     lib.connect_material_property(constant(material, lib, 1.0, -700, 250), "",
                                   unreal.MaterialProperty.MP_ROUGHNESS)
-    # Generation 3 (lane C): the dithered, depth-writing soft edge.
+    # Generation 3/4 (lane C): the torn, depth-writing edge.
     material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
     material.set_editor_property("opacity_mask_clip_value", FUNNEL_MASK_CLIP)
     erosion_scroll = lib.create_material_expression(material, unreal.MaterialExpressionConstant3Vector,
@@ -2974,14 +2989,17 @@ def create_tornado_funnel():
     uv = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -1000, 1050)
     normal = lib.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS, -1000, 1150)
     camera = lib.create_material_expression(material, unreal.MaterialExpressionCameraVectorWS, -1000, 1250)
-    pixel = lib.create_material_expression(material, unreal.MaterialExpressionScreenPosition, -1000, 1350)
     soft_mask = custom(material, lib, "tornado_funnel_mask", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
         "Coverage": (mask(material, lib, uv, "r", -850, 1050), ""),
         "Normal": (normal, ""), "CamVec": (camera, ""), "Noise": (erosion, ""),
-        "Pixel": (pixel, "PixelPosition"),
         "EdgeSoft": (constant(material, lib, FUNNEL_MASK_EDGE_SOFT, -850, 1450), ""),
         "NoiseAmp": (constant(material, lib, FUNNEL_MASK_NOISE_AMP, -850, 1530), "")}, -650, 1050)
     lib.connect_material_property(soft_mask, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+    # The condensation's texture: the erosion noise darkens the albedo in its gaps.
+    shade = lerp(material, lib, constant(material, lib, 1.0 - FUNNEL_EROSION_DARKEN, -700, 850),
+                 constant(material, lib, 1.0, -700, 920), erosion, -550, 850)
+    lib.connect_material_property(binary(material, lib, unreal.MaterialExpressionMultiply, base, shade,
+                                         -400, 100), "", unreal.MaterialProperty.MP_BASE_COLOR)
     finish(material, "M_TornadoFunnel")
 
 
@@ -3002,6 +3020,76 @@ def create_lightning():
                          constant(material, lib, 60.0, -600, 300), -450, 250), -300, 100)
     lib.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     finish(material, "M_Lightning")
+
+
+def create_tornado_funnel_soft():
+    """M_TornadoFunnelSoft (round 7 fix, lane C): the funnel's SHEATH, section 1 of the
+    beauty's funnel mesh (FlightSimTornadoBeauty.cpp; BEAUTY ONLY -- measure never
+    builds the section). Translucent, lit per pixel (TLM_SURFACE_PER_PIXEL_LIGHTING),
+    roughness 1, no depth write: the condensation's soft, torn edge around the masked
+    core, which alone carries the depth the labels see. Base colour FunnelColour x
+    the core's striations; opacity tornado_funnel_soft.hlsl -- SoftOpacity x the
+    sheath's UV0.x coverage x the grazing fade x the erosion and the striations --
+    faded into the ground by DepthFade."""
+    material = _weather_material("M_TornadoFunnelSoft")
+    if material is None:
+        return
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    material.set_editor_property("translucency_lighting_mode",
+                                 unreal.TranslucencyLightingMode.TLM_SURFACE_PER_PIXEL_LIGHTING)
+    lib = unreal.MaterialEditingLibrary
+    colour = vector(material, lib, FUNNEL_PARAMETERS[0], FUNNEL_COLOUR_DEFAULT + (1.0,), -900, 0)
+    opacity = scalar(material, lib, "SoftOpacity", FUNNEL_SOFT_OPACITY, -900, 500)
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, -1700, 200)
+    local = lib.create_material_expression(material, unreal.MaterialExpressionTransformPosition,
+                                           -1550, 200)
+    local.set_editor_property("transform_source_type",
+                              unreal.MaterialPositionTransformSource.TRANSFORMPOSSOURCE_WORLD)
+    local.set_editor_property("transform_type",
+                              unreal.MaterialPositionTransformSource.TRANSFORMPOSSOURCE_LOCAL)
+    lib.connect_material_expressions(world, "", local, "")
+    time = lib.create_material_expression(material, unreal.MaterialExpressionTime, -1400, 450)
+
+    def noise(stretch_z, scroll_cm_s, feature_cm, lo, y):
+        stretch = lib.create_material_expression(material, unreal.MaterialExpressionConstant3Vector, -1400, y)
+        stretch.set_editor_property("constant", unreal.LinearColor(1.0, 1.0, stretch_z, 1.0))
+        scroll = lib.create_material_expression(material, unreal.MaterialExpressionConstant3Vector,
+                                                -1400, y + 80)
+        scroll.set_editor_property("constant", unreal.LinearColor(0.0, 0.0, scroll_cm_s * stretch_z, 1.0))
+        moved = binary(material, lib, unreal.MaterialExpressionAdd,
+                       binary(material, lib, unreal.MaterialExpressionMultiply, local, stretch, -1250, y),
+                       binary(material, lib, unreal.MaterialExpressionMultiply, time, scroll, -1250, y + 80),
+                       -1100, y)
+        node = lib.create_material_expression(material, unreal.MaterialExpressionNoise, -1000, y)
+        node.set_editor_property("scale", 1.0 / feature_cm)
+        node.set_editor_property("levels", 4)
+        node.set_editor_property("output_min", lo)
+        node.set_editor_property("output_max", 1.0)
+        lib.connect_material_expressions(moved, "", node, "Position")
+        return node
+
+    streaks = noise(1.0 / 30.0, FUNNEL_STREAK_SCROLL_CM_PER_S, 1500.0, 0.0, 200)
+    erosion = noise(0.25, FUNNEL_MASK_SCROLL_CM_PER_S, FUNNEL_MASK_NOISE_M * 100.0, 0.0, 400)
+    uv = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -1000, 650)
+    normal = lib.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS, -1000, 750)
+    camera = lib.create_material_expression(material, unreal.MaterialExpressionCameraVectorWS, -1000, 850)
+    alpha = custom(material, lib, "tornado_funnel_soft", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
+        "Coverage": (mask(material, lib, uv, "r", -850, 650), ""),
+        "Normal": (normal, ""), "CamVec": (camera, ""), "Noise": (erosion, ""), "Streaks": (streaks, ""),
+        "Opacity": (opacity, ""),
+        "EdgeSoft": (constant(material, lib, FUNNEL_SOFT_EDGE, -850, 950), "")}, -650, 650)
+    fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -450, 650)
+    fade.set_editor_property("fade_distance_default", PUFF_DEPTH_FADE_CM)
+    lib.connect_material_expressions(alpha, "", fade, "Opacity")
+    shade = lerp(material, lib, constant(material, lib, FUNNEL_STREAK_MIN, -850, 150),
+                 constant(material, lib, 1.0, -850, 220), streaks, -700, 150)
+    lib.connect_material_property(binary(material, lib, unreal.MaterialExpressionMultiply,
+                                         mask(material, lib, colour, "rgb", -750, 0), shade, -550, 50),
+                                  "", unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(constant(material, lib, 1.0, -550, 200), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
+    lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
+    finish(material, "M_TornadoFunnelSoft")
 
 
 def create_tornado_puff():
@@ -3974,6 +4062,7 @@ create_lens_drops()
 create_rain_shaft()
 create_tornado_funnel()   # round-2b weather-fx
 create_tornado_puff()     # visual push lane C: the tornado's dust and scud
+create_tornado_funnel_soft()  # lane C round 7 fix: the funnel's translucent sheath
 create_lightning()
 create_ice_overlay()
 create_rain_drop()
