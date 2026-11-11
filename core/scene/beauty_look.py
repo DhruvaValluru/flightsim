@@ -353,6 +353,58 @@ EXPOSURE_METER_TARGET_P90: Dict[str, float] = {
     "no_lumen_gi": 0.45,
 }
 
+#: Lane A (2026-11-11): the SUBJECT meter, the host's last word on a beauty
+#: exposure this look owns (FlightSimRenderCommandlet.cpp, after the frame
+#: meter above; these are its constants' twins, pinned by test). A
+#: photographer meters the aircraft, not the sky behind it. Round 4's #04 and
+#: #13 drew the airframe as clipped white plastic (the frame meter opened a
+#: dark canyon / ocean frame by its p90 and the white paint went over the top);
+#: round 5's #06 and #08 drew it black under a bright deck (the frame's p90 was
+#: the cloud base). The aircraft's pixels are found by difference (a capture
+#: with it hidden against one with it shown, inside its projected bounds): a
+#: subject whose 97th-percentile sRGB luma clips is closed to the highlight
+#: target; one whose median is under the floor is opened toward the mid
+#: target, never past its own highlight bound nor a clipping frame. Constant
+#: over the clip (no breathing). ``-subject-meter=off`` keeps the frame
+#: meter's exposure. UNCALIBRATED: set by probe render on the render machine
+#: (docs/visual/PROBE_LOG.md "## lane A": #04, #13, #06, #08, #01).
+SUBJECT_METER: Dict[str, float] = {
+    "highlight_p97": 0.94,
+    "highlight_target_p97": 0.88,
+    "mid_floor_p50": 0.30,
+    "mid_target_p50": 0.36,
+    "max_close_stops": 3.0,
+    "max_open_stops": 2.0,
+    "saturated_step_stops": 1.0,
+    "high_percentile": 0.97,
+    "rounds": 4,
+    "mask_luma_delta": 16,
+    "min_pixels": 200,
+}
+#: The frame meter's highlight bound (the host's BeautyMeterHighlightP90): a
+#: frame clipping past it is never opened further by the subject meter.
+FRAME_HIGHLIGHT_P90 = 0.92
+
+
+def subject_meter_step(p50: float, p97: float, frame_p90: float, stops: float) -> float:
+    """One subject-meter step in stops (0 = settled): the twin of the host's
+    SubjectMeterStep. ``p50``/``p97`` are the aircraft's sRGB luma
+    percentiles (0..1), ``frame_p90`` the whole frame's, ``stops`` what the
+    subject meter has moved the bias by so far."""
+    m = SUBJECT_METER
+    step = 0.0
+    if p97 > m["highlight_p97"]:
+        step = 2.2 * 0.8 * math.log2(m["highlight_target_p97"] / p97)
+        if p97 >= 254.0 / 255.0:
+            step = min(step, -m["saturated_step_stops"])
+    elif p50 < m["mid_floor_p50"] and frame_p90 < FRAME_HIGHLIGHT_P90:
+        step = 2.2 * 0.8 * math.log2(m["mid_target_p50"] / max(p50, 1.0 / 255.0))
+        step = min(step, 2.2 * math.log2(m["highlight_p97"] / max(p97, 1.0 / 255.0)))
+        step = max(step, 0.0)
+    nxt = min(max(stops + step, -m["max_close_stops"]), m["max_open_stops"])
+    return 0.0 if abs(nxt - stops) < 0.05 else nxt - stops
+
+
 #: Round 3 (2026-11-10): the share of a RELIT sun's meter gain the beauty
 #: exposure takes. A lighting block that moves the physical sky's sun
 #: (webapp.runs relight_sky_plan, core.sky.plan.relight) re-meters the plan's
@@ -500,6 +552,14 @@ LOOK_SWITCH_PREFIX = "-look-"
 #: negative's grain at the same magnification).
 GRAIN_STRENGTH = 0.03
 
+#: Lane A (2026-11-11): the SSAO radius, WORLD space, cm. Airframe scale: the
+#: occlusion a real airframe has lives within a metre or two of the crease
+#: (wing root, under the wing, engine pylons, intakes), so a 2 m kernel holds
+#: it and leaves the open skin lit by the sky it sees. UNCALIBRATED: set by
+#: probe render on the render machine (probe la-ssao: #06 and #01 at 1 / 2 /
+#: 4 m, the belly and the wing root; docs/visual/PROBE_LOG.md "## lane A").
+AO_RADIUS_WS_CM = 200.0
+
 #: Every engine-look effect: its switch, whether it is a probe, what its
 #: ``off`` means, which UE member or cvar each value is, and the value per
 #: world preset. Keys in capitals are FPostProcessSettings members (Scene.h)
@@ -557,35 +617,40 @@ ENGINE_LOOK: Dict[str, Dict[str, Any]] = {
         "probe_name": "el-ssr (#13 ocean and #06 wet runway, on and off; the canopy in head shot d)",
     },
     # 3. SSAO: the darkening under wings, in intakes and along panel seams.
-    # The radius is view-space (RadiusInWS false: locked to the 400-unit
-    # view scale), so one number serves the airframe at 100 m and the
-    # terrain at 3 km.
+    # Lane A (2026-11-11): the radius is in WORLD space at the airframe's
+    # scale (AO_RADIUS_WS_CM). It was view-space (locked to the 400-unit
+    # view scale), a fixed share of the FRAME: on an airframe a few hundred
+    # pixels wide that kernel spans whole wings, so the fuselage, wings and
+    # tail occluded each other's sky light all over ("the planes are being
+    # too shadowed"), most of all where the sky light is the only light
+    # (under a deck, the shade side at golden hour). The Google tiles carry
+    # their own baked occlusion, so they lose nothing they need.
     "ssao": {
         "switch": "ssao", "probe": False, "stage": "capture",
         "off_means": "AmbientOcclusionIntensity 0 (no SSAO)",
         "cvars": {"r.AmbientOcclusionMaxQuality": 100.0, "r.AmbientOcclusionLevels": -1.0},
         "cvars_constrained": {"r.AmbientOcclusionMaxQuality": 100.0, "r.AmbientOcclusionLevels": -1.0},
         "per_preset": {
-            "clear": {"AmbientOcclusionIntensity": 0.6, "AmbientOcclusionRadius": 150.0,
+            "clear": {"AmbientOcclusionIntensity": 0.6, "AmbientOcclusionRadius": AO_RADIUS_WS_CM,
                       "AmbientOcclusionQuality": 100.0, "AmbientOcclusionPower": 2.0,
                       "AmbientOcclusionStaticFraction": 1.0, "AmbientOcclusionMipBlend": 0.6,
-                      "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": False},
-            "hazy": {"AmbientOcclusionIntensity": 0.55, "AmbientOcclusionRadius": 150.0,
+                      "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": True},
+            "hazy": {"AmbientOcclusionIntensity": 0.55, "AmbientOcclusionRadius": AO_RADIUS_WS_CM,
                      "AmbientOcclusionQuality": 100.0, "AmbientOcclusionPower": 2.0,
                      "AmbientOcclusionStaticFraction": 1.0, "AmbientOcclusionMipBlend": 0.6,
-                     "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": False},
-            "overcast": {"AmbientOcclusionIntensity": 0.7, "AmbientOcclusionRadius": 200.0,
+                     "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": True},
+            "overcast": {"AmbientOcclusionIntensity": 0.7, "AmbientOcclusionRadius": AO_RADIUS_WS_CM,
                          "AmbientOcclusionQuality": 100.0, "AmbientOcclusionPower": 2.0,
                          "AmbientOcclusionStaticFraction": 1.0, "AmbientOcclusionMipBlend": 0.6,
-                         "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": False},
-            "rain": {"AmbientOcclusionIntensity": 0.7, "AmbientOcclusionRadius": 200.0,
+                         "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": True},
+            "rain": {"AmbientOcclusionIntensity": 0.7, "AmbientOcclusionRadius": AO_RADIUS_WS_CM,
                      "AmbientOcclusionQuality": 100.0, "AmbientOcclusionPower": 2.0,
                      "AmbientOcclusionStaticFraction": 1.0, "AmbientOcclusionMipBlend": 0.6,
-                     "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": False},
-            "storm": {"AmbientOcclusionIntensity": 0.65, "AmbientOcclusionRadius": 200.0,
+                     "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": True},
+            "storm": {"AmbientOcclusionIntensity": 0.65, "AmbientOcclusionRadius": AO_RADIUS_WS_CM,
                       "AmbientOcclusionQuality": 100.0, "AmbientOcclusionPower": 2.0,
                       "AmbientOcclusionStaticFraction": 1.0, "AmbientOcclusionMipBlend": 0.6,
-                      "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": False},
+                      "AmbientOcclusionTemporalBlendWeight": 0.1, "AmbientOcclusionRadiusInWS": True},
         },
         "probe_name": "el-ssao (head shot a under the wing and the intakes, 0.4 / 0.6 / 0.8 and off)",
     },
@@ -939,7 +1004,7 @@ UNCALIBRATED: Tuple[str, ...] = (
     "EV100_BANDS", "GRADES", "GOLDEN_HOUR_BELOW_DEG", "LENSES", "LOCAL_EXPOSURE",
     "REFLECTIONS", "EXPOSURE_METER_TARGET_P90", "TONEMAP_HUE", "RELIT_SUN_CLOSE_SHARE",
     "ENGINE_LOOK", "GRAIN_STRENGTH",
-    "FILM_STOCKS",
+    "FILM_STOCKS", "SUBJECT_METER", "AO_RADIUS_WS_CM",
 )
 
 

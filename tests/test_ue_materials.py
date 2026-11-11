@@ -191,6 +191,7 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                "M_Ground_Bare", "M_Ground_City", "M_Ground_Ocean", "M_LensDrops",
                "M_RainShaft", "M_Lightning", "M_IceOverlay",
                "M_TornadoFunnel",   # round-2b weather-fx: the funnel in beauty
+               "M_TornadoPuff",     # visual push lane C: the tornado's dust and scud puffs
                # The 3-D rain (FlightSimRainParticles.cpp).
                "M_RainDrop",
                # The storm weather (FlightSimWeather.cpp).
@@ -200,7 +201,9 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                # World lane, visual overhaul (FlightSimClouds.cpp, beauty only).
                "M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter",
                # Visual round 5, L3: the distant 2D cloud sheet (FlightSimClouds.cpp, beauty only).
-               "M_FlightSimDistantClouds"}
+               "M_FlightSimDistantClouds",
+               # Lane B (2026-11-11): the beauty sea cap (FlightSimGoogleTiles.cpp, beauty only).
+               "M_FlightSimOceanBeauty"}
 COMMANDLET_CPP = BRIDGE / "Private" / "FlightSimRenderCommandlet.cpp"
 
 

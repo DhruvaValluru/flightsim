@@ -82,42 +82,54 @@ def _lens(focal_mm):
 
 def test_the_hazard_slot_frames_the_aircraft_and_the_abeam_funnel():
     """From the hazard slot, aimed at the aircraft, the abeam axis is inside the
-    half-width for every frame; from the per-airframe slot it never was."""
+    half-width for every frame; from the per-airframe slot it never was. Lane C
+    (2026-11-11): the slot stands far enough off that the funnel reads at a
+    believable size, ground contact to wall cloud inside the frame."""
     speed, ahead0, abeam = _flyby_geometry()
     forward, right, up = camera_mod.HAZARD_CHASE_OFFSET
     half_w, half_h = _lens(camera_mod.HAZARD_CHASE_FOCAL_MM)
-    assert 49.0 < half_w < 51.0 and 33.0 < half_h < 35.0           # a 100 x 68 deg lens
+    assert 51.0 < half_w < 53.0 and 35.0 < half_h < 37.0           # a 104 x 72 deg lens
     aim = math.degrees(math.atan2(-right, -forward))               # the aircraft's bearing
-    assert aim == pytest.approx(74.7, abs=0.1)
-    offs = []
+    assert aim == pytest.approx(81.3, abs=0.1)
+    lateral = math.hypot(forward, right)
+    pitch = math.degrees(math.atan2(-up, lateral))
+    agl = 600.0
+    top_m = weather_look.FUNNEL_TOP_SHARE * tornado.TOP_M
+    camera_agl = agl + up
+    offs, spans, distances = [], [], []
     for t in (0.0, 1.5, 3.0, 4.5, 6.0):
         f = ahead0 - speed * t
-        bearing = math.degrees(math.atan2(abeam - right, f - forward))
-        offs.append(bearing - aim)
-    assert offs[0] == pytest.approx(-3.9, abs=0.2) and offs[-1] == pytest.approx(31.4, abs=0.2)
+        axis_m = math.hypot(abeam - right, f - forward)
+        distances.append(axis_m)
+        offs.append(math.degrees(math.atan2(abeam - right, f - forward)) - aim)
+        # The ground contact and the funnel's top, relative to the view axis.
+        low = -math.degrees(math.atan(camera_agl / axis_m)) - pitch
+        high = math.degrees(math.atan((top_m - camera_agl) / axis_m)) - pitch
+        assert low > -half_h + 3.0                                  # the ground contact in frame
+        assert high < half_h - 3.0                                  # so is the funnel's top
+        spans.append((high - low) / (2.0 * half_h))
+    assert offs[0] == pytest.approx(-7.2, abs=0.3) and offs[-1] == pytest.approx(20.0, abs=0.3)
     assert all(abs(o) < half_w - 15.0 for o in offs)               # the axis, with room for the body
+    assert 630.0 < min(distances) < 640.0 and max(distances) < 665.0
+    # Believable size: round 5's slot put the funnel across 95 % of the frame's
+    # height; the lane C slot keeps it under 75 %.
+    assert max(spans) < 0.75
+    old_f, old_r, old_u = (-30.0, -110.0, 32.0)
+    old_half_h = _lens(15.0)[1]
+    old_pitch = math.degrees(math.atan2(-old_u, math.hypot(old_f, old_r)))
+    old_axis = math.hypot(abeam - old_r, ahead0 - speed * 3.0 - old_f)
+    old_span = (math.degrees(math.atan((top_m - agl - old_u) / old_axis))
+                + math.degrees(math.atan((agl + old_u) / old_axis))) / (2.0 * old_half_h)
+    assert old_span > 0.9 and math.degrees(math.atan((agl + old_u) / old_axis)) + old_pitch > old_half_h
     # Round 4's slot (CHASE_OFFSETS c172p, the 35 mm lens): outside at both ends.
     old_f, _, _ = camera_mod.CHASE_OFFSETS["c172p"]
     old_half_w, _ = _lens(camera_mod.DEFAULT_FOCAL_MM)
     for t in (0.0, 6.0):
         bearing = math.degrees(math.atan2(abeam, ahead0 - speed * t - old_f))
         assert bearing > 2.0 * old_half_w
-    # Vertically, the aircraft 600 m AGL: pitch to the aircraft, the ground
-    # contact's skirt at the bottom, the funnel's top and the wall cloud's
-    # underside inside the top.
-    lateral = math.hypot(forward, right)
-    pitch = math.degrees(math.atan2(-up, lateral))
-    # The closest approach (the pass abeam), the steepest angles: the binding case.
-    agl, axis_m = 600.0, abeam - right
-    top_m = weather_look.FUNNEL_TOP_SHARE * tornado.TOP_M
-    lowest = agl + up - axis_m * math.tan(math.radians(half_h - pitch))
-    highest = agl + up + axis_m * math.tan(math.radians(half_h + pitch))
-    assert axis_m == pytest.approx(485.0, abs=5.0)
-    assert lowest < 0.055 * tornado.TOP_M                           # the dust skirt is in frame
-    assert highest > top_m                                          # so is the wall cloud's base
-    assert agl + up < top_m                                         # the camera under the wall cloud
-    # The aircraft stays readable: wider than 3 deg at the frame's centre.
-    assert math.degrees(2.0 * math.atan(4.14 / math.hypot(lateral, up))) > 3.0
+    assert camera_agl < top_m                                      # the camera under the wall cloud
+    # The aircraft stays readable: wider than 2 deg at the frame's centre.
+    assert math.degrees(2.0 * math.atan(5.5 / math.hypot(lateral, up))) > 2.0
 
 
 def test_the_flyby_default_camera_takes_the_hazard_slot_and_the_core_keeps_its_wingman():
@@ -246,13 +258,15 @@ def test_the_cpp_deck_shadow_is_the_pythons_and_switchable():
     pure = CLOUDS_CPP[CLOUDS_CPP.index("FLIGHTSIM-WORLD-PURE-BEGIN"):CLOUDS_CPP.index("FLIGHTSIM-WORLD-PURE-END")]
     assert _cpp_constant(pure, "DeckShadowMinCover") == world_beauty.DECK_SHADOW_MIN_COVER
     law = _function(pure, "inline bool DeckShadowsBeam(int Preset, double Cover)")
+    law = law[:law.index("\n\t}\n")]   # the law alone (the pure block indents its bodies)
     for preset in world_beauty.DECK_SHADOW_PRESETS:
         assert f"Preset == Preset{preset.capitalize()}" in law
     assert "Preset == PresetClear" not in law and "Preset == PresetHazy" not in law
     apply = _function(CLOUDS_CPP, "void FFlightSimWorldBeauty::ApplyClouds(")
     assert "const bool bWanted = DeckShadowsBeam(Preset, TopCover);" in apply
     assert "TopCover = FMath::Max(TopCover, State.Cover);" in apply
-    assert "if (bWanted && bSwitchOn)\n\t\t\t{\n\t\t\t\tDeckSun->bCastCloudShadows = true;" in apply
+    # round 7 (lane E): the clear world's fair cumulus shares the switch (world_beauty.fair_cloud_shadows)
+    assert "if ((bWanted || bFairShadows) && bSwitchOn)\n\t\t\t{\n\t\t\t\tDeckSun->bCastCloudShadows = true;" in apply
     assert 'Out->SetObjectField(TEXT("deck_shadow"), DeckShadow);' in apply
     # The switch: the command line or FLIGHTSIM_RENDER_SWITCHES, default on.
     build = _function(CLOUDS_CPP, "bool FFlightSimWorldBeauty::Build(")

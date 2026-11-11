@@ -3146,3 +3146,168 @@ Probes, in order: #15, #09, #07 and #06 at beauty, each against `FLIGHTSIM_RAIN_
 * #06 pass: no isolated puffs.
 * Knobs: rain_veil.VEIL_BETA_A (haze), VEIL_STREAK_ALPHA, SCUD_ALPHA,
   weather_look.BEAUTY_RAIN_RADIANCE, storm_cell.BEAUTY_CURTAIN.
+
+## lane A: aircraft too shadowed (2026-11-11)
+
+Owner: "the planes are being too shadowed". Round 5 (f7232cc7): #06 (A320, SFO, moderate rain)
+and #08 (C172, Fuji sunrise, light rain) near-black silhouettes; #01 (A-4, Yosemite golden hour)
+gold and dark. Round 4 review: #04 and #13 the opposite, clipped white plastic.
+
+Cause under a deck: the sky light's cloud ambient occlusion (FlightSimHeroLighting.cpp,
+strength 1 since the hero-lighting lane) counted the deck twice. The commandlet takes its one
+sky capture AT THE AIRCRAFT with the volumetric clouds in it, so the cube's upper hemisphere
+already is the deck's underside (its diffuse transmission); the cloud AO then multiplies the
+fill again by the same deck's top-down occlusion. In round 4 the beam was not cloud-shadowed,
+so the sun lit the airframe anyway; round 6's deck shadow (world_beauty.deck_shadows_beam,
+in the round-5 render) took the beam, and nothing was left but SSGI from a dark ground.
+
+Changes (beauty only; measure has no hero lighting, no beauty look, no subject meter):
+- `-sky-cloud-ao=auto` (new default): cloud AO off when the capture holds the clouds at the
+  aircraft (the defaults), on otherwise; `on` is the old sky light. Twin:
+  `hero_lighting.sky_cloud_ao_applies`. Needs the C++ rebuild.
+- SSAO radius WORLD space, `AO_RADIUS_WS_CM` 200 cm on every preset (was view-space 150/200,
+  a fixed share of the frame that spans a small airframe's wings). Python only (sidecar).
+  UNCALIBRATED: probe la-ssao, #06 and #01 at 100 / 200 / 400 cm, the belly and wing root.
+- The subject meter (FlightSimRenderCommandlet.cpp, twin `beauty_look.SUBJECT_METER` and
+  `subject_meter_step`): the aircraft's pixels (hidden vs shown inside its projected bounds,
+  16 sRGB codes, at least 200 pixels), after the frame meter; p97 over 0.94 closes to 0.88
+  (at most 3 stops); a median under 0.30 opens toward 0.36 (at most 2 stops, never past the
+  subject's 0.94 nor a frame whose p90 is over 0.92). Constant over the clip.
+  `-subject-meter=off` is the A/B. Recorded in render.json look_applied.subject_exposure.
+  Every number UNCALIBRATED: probe la-subject.
+
+Probe la-deck: #06 and #08 with the defaults against `-sky-cloud-ao=on` (and `-deck-shadow=off`
+for the round-4 control). Pass: the airframe reads as an evenly lit mid grey under the deck
+(white paint about as bright as the cloud base, never black), the belly a little darker than
+the top. Read look_applied.sky_light_capture_result.cloud_ambient_occlusion (false) and
+hero_lighting.sky_light.probes.sky_capture_holds_clouds (true).
+
+Probe la-subject: #04, #13 (whites below clipping: subject p97 at most 0.94, the paint showing
+the sky's reflection and gloss variation), #06, #08 (opened, not black) and #01 with
+`-subject-meter=off` as the control; read look_applied.subject_exposure (mask_pixels, p50/p97
+before and after, stops). If the mask catches rain streaks or misses a small aircraft, raise
+`mask_luma_delta` or lower `min_pixels`; if whites still clip, lower `highlight_target_p97`.
+
+## round-7 clouds and sky (lane E)
+
+Round 7, 2026-11-11, Mac, uncompiled; nothing rendered. Read from round 4's frames
+(14da9437 at beauty on the Windows laptop, Intel iGPU, D3D11 SM5).
+
+**Fair cumulus were smeared, flat-lit strokes in a uniform carpet (#03, #04, #12, #13); the clear
+sky saturated with no horizon band; no aerial perspective in #01; no cloud shadows on the ground.**
+- Shape: the 3D Perlin-Worley field had one cell size (2.5 km Worley cells) and varied as much
+  with height as across. `FWorldCloud::Shape` (cloud_layers.hlsl and distant_clouds.hlsl,
+  text-equal; Python `world_beauty.cloud_shape`) is now a Nubis-style 2D weather field: a cluster
+  term (fields and gaps ~15 km across), Worley cells at three sizes, one 3D billow octave. A
+  column stands on the flat base and rises until the cut (raised over `top_rounding`) catches it:
+  big clouds tower, small ones stay low domes. Moments re-measured: mean 0.535, sigma 0.073; the
+  drawn share is still the stated cover (tests). Cheaper per sample: 43 + 54 lattice hashes
+  (shape + in-cloud erosion) against 113 + 81. The distant sheet evaluates the same plane field,
+  so its footprint continues the volumetric cells past the hand-over.
+- Light: the constrained shadow march is 6 km, not 15 (`CLOUD_SHADOW_CONSTRAINED_KM`,
+  `CloudShadowConstrainedKm`), the same 10 samples: 60 m to 1.1 km steps instead of 150 m then
+  450 m, so a cell shadows itself and its base darkens. View/shadow sample counts and the 80 km
+  trace are ef361bd6's; the cheaper shape pays for the extra in-layer evaluations.
+- Sky: a clear world whose card states no visibility (randomization's unsampled 0) kept the
+  engine's Mie layer (0.004 /km). It now splits the Mie layer at `CLEAR_DEFAULT_VISIBILITY_KM` 40
+  (about 0.045 /km scattering at the ground, scale height 1.2 km): horizon whitening, a paler sky
+  towards it, aerial perspective on far terrain. The height fog keeps its density; a stated
+  visibility, `-aerosol=` and the other presets are unchanged. Record:
+  `world_beauty.atmosphere.default_visibility_km`.
+- Cloud shadows: clear and hazy worlds with a drawn layer of cover >= 0.1 turn
+  `bCastCloudShadows` on (`fair_cloud_shadows`), same switch and `-deck-shadow=off` A/B as the deck.
+- No third-party asset: every field is generated in the shader from a hashed lattice (no texture,
+  no tile, no repeat), so nothing is added to THIRD_PARTY_VISUAL.md.
+
+Needs: the bridge rebuilt (FlightSimClouds.cpp), then `ue_create_materials.py`
+(M_FlightSimCloudLayers generation 3/4 and M_FlightSimDistantClouds 2/2 rebuild in place).
+
+Probes r7 (beauty, no switch unless named; every value UNCALIBRATED):
+1. #13 first. Read the capture time against round 6's (a D3D11 device-removed error or a timeout:
+   put the shadow march back to 15 km first, the shape second). Pass: separate cumulus of many
+   sizes with clear gaps, flat darker bases, lit domes; no repeating carpet.
+2. #03 and #12: the same, plus dappled cloud shadows on the ground
+   (`clouds.deck_shadow.fair_cloud_shadows` true). A/B: `FLIGHTSIM_RENDER_SWITCHES="-deck-shadow=off"`.
+3. #01: the ridges 5-10 km off lose contrast and turn bluish-grey against the foreground; read
+   `atmosphere.default_visibility_km` 40. Too milky: try 60 km; still contrasty: 25 km.
+4. #04 and #02: the sky at the horizon is whiter than the zenith (saturation falls from the top
+   row to the row just above the horizon).
+
+## lane-B terrain detail
+
+Lane B of the 4-lane visual push (Mac, uncompiled, no UE run), 2026-11-11. The owner: scenes
+"in mountains and stuff when it's not over cities" are "not hyper realistic enough... very
+lackluster"; the round-4 review adds #13 "a flat, oversaturated royal-blue plane", #01/#02
+"forest reads as a painted texture with no canopy depth", #04/#12 "smeared and soft up close".
+Lane B owns the ground and water SURFACES (lane E owns the sky, clouds and aerial
+perspective). Everything is BEAUTY ONLY (M_FlightSimTilesBeauty and the sea cap are set only
+by -quality=beauty) and moves no geometry (no WPO), so measure renders stay byte-identical and
+the labels still match the pixels. Physics untouched.
+
+**Assets** (THIRD_PARTY_VISUAL.md "Terrain and ocean detail"; `assets/terrain_detail/PIN.json`,
+`-text`): six Poly Haven CC0 aerial maps at 1K, albedo + OpenGL normal (rock
+rocky_terrain_02 90 m, scree aerial_rocks_04 80 m, snow snow_field_aerial 80 m, grass
+aerial_grass_rock 15 m, sand aerial_sand 15 m, soil dirt_aerial_02 20 m; 8.4 MB), and a
+generated CC0 ocean normal (`scripts/make_ocean_normal.py`: Phillips spectrum, 256 m tile,
+512 px, 0.67 MB; no CC0 water normal exists on Poly Haven or ambientCG). GPU memory: 12 maps
+x 1K BC1/BC5 with mips ~ 13 MB, the ocean's ~0.35 MB.
+
+**What changed.**
+- `M_FlightSimTilesBeauty` (world generation 3): `tiles_detail_surface.hlsl` between the
+  de-light and the grade: an unsharp mask of the tiles' own texture (SharpenAmount 0.6 at
+  SharpenMipBias 1.5: the #04/#12 softness), then the role detail as a LUMINANCE RATIO (the
+  hue stays Google's; #10's prairie is not re-tinted) at DetailAmount 0.45. Roles per pixel
+  from the tile: steep -> rock, mid slope -> scree, bright neutral above SnowlineM 2700 m ->
+  snow, green -> grass, warm bright -> sand, else soil; blue dark flat (water) none. Range
+  octaves: tile x 4^i, i from the pixel footprint (a texel ~ a pixel at every range), two
+  blended, each rotated; a 1.5 km macro noise varies the amount. Forest (dark green): jittered
+  crown domes 7 m apart, gaps x0.55, shown where a crown spans > 2-4 px.
+  `tiles_detail_normal.hlsl` -> tiles_normal's NormalWS: the tile's own relief (luminance /
+  local mean as a footprint-scaled height, Mikkelsen's surface gradient; x2 on forest:
+  canopy depth), the roles' normals (NormalAmount 0.7), the crowns' domes. Far fade 25-60 km.
+  Samples use explicit gradients behind per-role dynamic branches (a pixel pays for 1-2
+  roles, 2 octaves, cliffs 2 projections); the twelve maps share the view's bilinear wrap
+  sampler (no SM5 sampler slots).
+- `MPC_FlightSimWorld` (generation 3): GroundAltitudeM / GroundAltitudeKnown (the snowline is
+  an altitude; FlightSimClouds.cpp sets them from the tiles' origin) and TerrainDetailScale
+  (0 over a city card: no rock texture on facades; 1 elsewhere).
+- `M_FlightSimOceanBeauty` (new; the sea cap loads it before M_Ground_Ocean, which stays the
+  measure flat-scene ground): the Phillips normal in three drifting octaves (1357 / 256 /
+  54 m), the unresolved Cox-Munk slope variance (U = 7 m/s: 0.039) as roughness (from 10 km
+  ~0.44: the broad sun glitter and the Fresnel brightening toward the horizon instead of a
+  mirror with one pin-point sun), deep-sea body colour (0.003, 0.010, 0.020) instead of the
+  bright cyan, Monahan whitecaps (0.3 % at 7 m/s), specular 0.25 (water F0 0.02).
+- Beauty tiles: maximum screen-space error 6 (FLIGHTSIM_GOOGLE_TILES_BEAUTY_SSE) unless
+  FLIGHTSIM_GOOGLE_TILES_SSE states one; measure stays 8. Recorded in
+  `look_applied.world_beauty.tiles.maximum_screen_space_error`.
+
+**Needs on the render machine:** a C++ rebuild (FlightSimGoogleTiles.cpp/.h,
+FlightSimClouds.cpp) AND `scripts/ue_create_materials.py` (the generation stamps rebuild
+MPC_FlightSimWorld, M_FlightSimTilesBeauty in place and create M_FlightSimOceanBeauty; the
+textures import as /Game/FlightSim/T_TerrainDetail_<Role>_{D,N} and T_OceanWaveNormal,
+sha256-checked). Without the rebuild the material still draws (snowline off, detail on
+everywhere, the sea still M_Ground_Ocean). Expect TEXTURE-IMPORTED x13 and
+"MATERIAL-NOTE: M_FlightSimTilesBeauty carries the lane B terrain detail".
+
+**UNVERIFIED / the way back.** `View.MaterialTextureBilinearWrapedSampler` (the shared sampler
+name in Custom HLSL on 5.7): a compile error naming it -> replace it with the per-texture
+sampler (`<Name>Sampler`, e.g. `tex` -> pass RockDSampler) or rebuild without the detail:
+`$env:FLIGHTSIM_TERRAIN_DETAIL = "off"` then `scripts/ue_create_materials.py` (the asset is
+stamped `3-no-detail`, so the next normal run builds the detail again). The ocean has no
+switch: if it fails, the sea falls back to M_Ground_Ocean only when the asset is absent, so
+delete M_FlightSimOceanBeauty.
+
+**Probes (every amount UNCALIBRATED):**
+- #01/#02 Yosemite 1500 m: forest crowns with sun-side highlights and dark gaps within ~3 km;
+  granite walls textured as rock, not smeared. Too grainy -> DetailAmount 0.3, BumpAmount 0.4.
+- #04/#05 desert 2000 m: crisp sand/soil, no colour change (A/B the hue on a flat patch).
+- #08 Fuji: scree on the flanks, snow above the snowline only (needs the C++ rebuild:
+  `parameters.GroundAltitudeKnown` 1).
+- #11 Matterhorn 5000 m: rock faces, snow fields textured; no tiling visible at 20 km.
+- #12 Grand Canyon cockpit 2500 m: layered walls textured as rock, terraces as scree/sand.
+- #13 ocean 10 km: dark blue-grey sea, a broad glitter patch toward the sun, brighter toward
+  the horizon, faint whitecap specks; `google_tiles.beauty_ground.sea.material` names
+  M_FlightSimOceanBeauty.
+- #03/#06/#07 (cities): TerrainDetailScale 0 in `parameters`; only the sharpen changes them.
+- Cost: compare the beauty frame times of #01 with FLIGHTSIM_TERRAIN_DETAIL=off; tile memory
+  at SSE 6 vs 8 (`google_tiles` load stats). If the iGPU runs out, FLIGHTSIM_GOOGLE_TILES_BEAUTY_SSE=8.

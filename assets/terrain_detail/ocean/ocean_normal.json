@@ -1,0 +1,22 @@
+{
+  "format": "flightsim.ocean_normal",
+  "version": 1,
+  "generator": "scripts/make_ocean_normal.py (Phillips spectrum, Tessendorf 2001)",
+  "licence": "CC0-1.0 (this project's own output)",
+  "size": 512,
+  "patch_m": 256.0,
+  "wind_ms": 10.0,
+  "wind_dir": [
+    1.0,
+    0.0
+  ],
+  "seed": 20261111,
+  "against_wind": 0.25,
+  "min_texels_per_wave": 4.0,
+  "convention": "OpenGL (green = slope toward image-up), RGB = n * 0.5 + 0.5",
+  "spread_power": 4.0,
+  "encoded_slope_rms": 0.35,
+  "encoded_slope_rms_basis": "the slope field normalised to this RMS (the spectrum's amplitude is arbitrary)",
+  "png_sha256": "0744cfae56654861fe372055ad73f5d9d6bf78ba9a7a907a4c8945743ad6f4c9",
+  "pixels_sha256": "6b8a169b971bf80205cecf523f7b97e8a9db23719826848afcd7d0c6988a60da"
+}

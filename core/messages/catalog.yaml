@@ -345,7 +345,7 @@ render.sky_capture_switch:
 # FlightSimHeroLighting.cpp): beauty-only A/B switches on the sky light.
 render.sky_fill_probe:
   sentence: "A diagnostic switch for the sky light's fill was given a value it does not take."
-  hint: "Use -sky-fill-probe=as-planned, red or off, -sky-cloud-ao=on or off, and a number of zero or more for -aerial-perspective-scale; or leave them out to render as planned."
+  hint: "Use -sky-fill-probe=as-planned, red or off, -sky-cloud-ao=auto, on or off, and a number of zero or more for -aerial-perspective-scale; or leave them out to render as planned."
 # round-1b hang (FlightSimRenderCommandlet.cpp RenderDrainGpu): on a constrained
 # graphics card the beauty run waits for each capture's GPU work and checks the
 # device; a removed device ends the run by name instead of hanging.
@@ -373,6 +373,12 @@ render.beauty_look:
   hint: "Use a known grade (golden hour, desert noon or storm) and lens (standard or cinematic), or render at the measure quality."
 # round 5 L1 (core/scene/beauty_look.py ENGINE_LOOK, FlightSimBeautyLook.cpp):
 # the per-effect A/B switches of the engine look.
+# lane A (2026-11-11, FlightSimRenderCommandlet.cpp subject meter;
+# core/scene/beauty_look.py SUBJECT_METER): the beauty exposure metered on the
+# aircraft's own pixels; -subject-meter=off keeps the frame meter's for an A/B.
+render.subject_meter:
+  sentence: "The subject-meter switch was given a value it does not take."
+  hint: "Use -subject-meter=on or off; or leave it out to meter the beauty exposure on the aircraft as planned."
 render.look_switch:
   sentence: "A look switch for one of the renderer's effects was given a value it does not take, or names no effect."
   hint: "Use -look-<effect>=on or off (a probe such as bloom-fft, df-shadows or fog-grid also takes auto), with an effect from the engine look's list; or leave the switch out to render as planned."
