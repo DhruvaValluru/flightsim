@@ -3490,3 +3490,30 @@ several-fold). So the tiles' ocean stands more than 20 m above the cap there.
   #13: the lines gone; the bottom rows brighter (glare below a noon camera) fading to a
   darker blue, paler at the horizon; read `tiles_height_probes`. Lines still there -> raise
   DepthPull on the material (0.03).
+
+## round 24: aircraft master bisect, second round (2026-11-11)
+
+Round 23 (r27-r30 at 8c868405, aircraft-mask mean RGB, A-4 #4 | C172 #8): off 167/155/147 |
+89/82/92; on 107/95/81 | 12/10/10; measured-mesh 105/92/78 | 12/10/10 (mesh refuted); flat
+168/157/148 | 89/82/92 (= off: the instance's colour, texture and weight are right);
+nocoat,noao,nonormal,nowear 106/95/82 | 31/25/26. With those four probes the paint graph's
+attributes are, by reading: BaseColor min(base, 0.9) through an identity dry wet node, Metallic 0,
+Specular 0.5, Roughness about 0.4-0.5, Normal VertexNormalWS (world space), AO 1, ClearCoat 0.
+Read and ruled out: every Break/Make pin name (BreakMaterialAttributes outputs and the Make inputs
+in 5.7.4 match, and _link raises on a miss, so no pin can be silently unconnected); the Custom
+node's "return"/"WetCoat" outputs (RebuildOutputs); the engine's clear-coat indirect path at
+ClearCoat 0 (RemapClearCoatDiffuseAndSpecularColor and ClearCoatBxDF reduce to Default Lit); the
+dry wetness (TargetWetness 0 without drawn rain). What remains is the shading model and the
+world-space normal path, which no gen-5 probe could change, and the wet graft and base chain as
+built (not as read).
+
+Gen-6 probes (LOOK_GENERATION 6; handles aircraft_wet_layer.PROBE_SCALARS, defaults = gen 5):
+nowet (WetLayerAmount 0: Make takes Break's BaseColor / Roughness / ClearCoat), rawbase
+(RawBaseAmount 1: Make.BaseColor straight from _base_colour), basecolor-debug (lit base 0,
+emissive = final base x BaseDebugNits 2000; read with -subject-meter=off), defaultlit (paint
+slots on M_AircraftPaintDefaultLit: the same graph on MSM_DEFAULT_LIT, overrides copied with
+CopyParameterOverrides), tangentnormal (M_AircraftPaintTangentNormal: the same clear-coat graph
+with a tangent-space (0, 0, 1) normal, the imported / flat normal path). defaultlit and
+tangentnormal act on paint slots only (bare metal is already Default Lit); defaultlit wins if
+both are given. Reading: whichever single probe brings the A-4 to about 167 is the cause; the
+A-4 in sun is the clean test (no rain, no wet).

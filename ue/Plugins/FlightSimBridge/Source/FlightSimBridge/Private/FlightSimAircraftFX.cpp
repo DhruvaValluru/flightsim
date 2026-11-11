@@ -64,6 +64,12 @@ namespace
 	// Round 23: -aircraft-probe=flat (scripts/aircraft_look.py PROBE_FLAT_MASTER).
 	const TCHAR* const AircraftFxProbeFlatMaterialPath =
 		TEXT("/Game/FlightSim/Aircraft/M_AircraftProbeFlat.M_AircraftProbeFlat");
+	// Round 24: -aircraft-probe=defaultlit (scripts/aircraft_look.py PROBE_DEFAULT_LIT_MASTER).
+	const TCHAR* const AircraftFxProbeDefaultLitMaterialPath =
+		TEXT("/Game/FlightSim/Aircraft/M_AircraftPaintDefaultLit.M_AircraftPaintDefaultLit");
+	// Round 24: -aircraft-probe=tangentnormal (aircraft_look.PROBE_TANGENT_NORMAL_MASTER).
+	const TCHAR* const AircraftFxProbeTangentNormalMaterialPath =
+		TEXT("/Game/FlightSim/Aircraft/M_AircraftPaintTangentNormal.M_AircraftPaintTangentNormal");
 	// scripts/aircraft_look.py FX_PARAMETERS (pinned by tests/test_aircraft_look.py).
 	const TCHAR* const AircraftFxParamLightColour = TEXT("LightColour");
 	const TCHAR* const AircraftFxParamIntensity = TEXT("Intensity");
@@ -280,13 +286,17 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 				continue;
 			}
 			const bool bKnown = Word == TEXT("nocoat") || Word == TEXT("noao") || Word == TEXT("nonormal") ||
-				Word == TEXT("nowear") || Word == TEXT("flat") || Word == TEXT("measured-mesh");
+				Word == TEXT("nowear") || Word == TEXT("flat") || Word == TEXT("measured-mesh") ||
+				// round 24 (LOOK_GENERATION 6)
+				Word == TEXT("nowet") || Word == TEXT("rawbase") || Word == TEXT("defaultlit") ||
+				Word == TEXT("basecolor-debug") || Word == TEXT("tangentnormal");
 			if (!bKnown)
 			{
 				if (SwitchError.IsEmpty())
 				{
 					SwitchError = FString::Printf(TEXT("aircraft_look.switch: -aircraft-probe=%s: '%s' is not one of ")
-						TEXT("nocoat, noao, nonormal, nowear, flat, measured-mesh"), *ProbeList, *Word);
+						TEXT("nocoat, noao, nonormal, nowear, flat, measured-mesh, nowet, rawbase, defaultlit, ")
+						TEXT("basecolor-debug, tangentnormal"), *ProbeList, *Word);
 				}
 				continue;
 			}
@@ -651,6 +661,10 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	int32 ProbedSlots = 0;
 	UMaterialInterface* ProbeFlat = Options.Probes.Contains(TEXT("flat"))
 		? LoadObject<UMaterialInterface>(nullptr, AircraftFxProbeFlatMaterialPath) : nullptr;
+	UMaterialInterface* ProbeDefaultLit = Options.Probes.Contains(TEXT("defaultlit"))
+		? LoadObject<UMaterialInterface>(nullptr, AircraftFxProbeDefaultLitMaterialPath) : nullptr;
+	UMaterialInterface* ProbeTangentNormal = Options.Probes.Contains(TEXT("tangentnormal"))
+		? LoadObject<UMaterialInterface>(nullptr, AircraftFxProbeTangentNormalMaterialPath) : nullptr;
 	{
 		TArray<TSharedPtr<FJsonValue>> ProbeWords;
 		for (const FString& Word : Options.Probes)
@@ -658,6 +672,18 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 			ProbeWords.Add(MakeShared<FJsonValueString>(Word));
 		}
 		Row->SetArrayField(TEXT("probes"), ProbeWords);
+		if (Options.Probes.Contains(TEXT("defaultlit")) && ProbeDefaultLit == nullptr)
+		{
+			Row->SetStringField(TEXT("probe_defaultlit"), FString::Printf(
+				TEXT("absent: %s not found (run scripts/ue_create_materials.py: LOOK_GENERATION 6); the look ")
+				TEXT("instances stand"), AircraftFxProbeDefaultLitMaterialPath));
+		}
+		if (Options.Probes.Contains(TEXT("tangentnormal")) && ProbeTangentNormal == nullptr)
+		{
+			Row->SetStringField(TEXT("probe_tangentnormal"), FString::Printf(
+				TEXT("absent: %s not found (run scripts/ue_create_materials.py: LOOK_GENERATION 6); the look ")
+				TEXT("instances stand"), AircraftFxProbeTangentNormalMaterialPath));
+		}
 		if (Options.Probes.Contains(TEXT("flat")) && ProbeFlat == nullptr)
 		{
 			Row->SetStringField(TEXT("probe_flat"), FString::Printf(
@@ -741,10 +767,41 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 				}
 			}
 			// wet-airframe-canopy: a MID of the look instance, so the wet scalars can be set per step.
-			UMaterialInstanceDynamic* LookMid = UMaterialInstanceDynamic::Create(LookInstance, Part);
+			UMaterialInstanceDynamic* LookMid = nullptr;
+			UMaterialInstance* LookMic = Cast<UMaterialInstance>(LookInstance);
+			// Round 24: a paint slot onto a twin master (the paint graph on
+			// MSM_DEFAULT_LIT, or with a tangent-space normal), with this
+			// instance's overrides; defaultlit wins if both are asked.
+			UMaterialInterface* PaintTwin = Options.Probes.Contains(TEXT("defaultlit")) ? ProbeDefaultLit
+				: (Options.Probes.Contains(TEXT("tangentnormal")) ? ProbeTangentNormal : nullptr);
+			if (bProbeSlot && PaintTwin != nullptr && ProbeBaseName == TEXT("M_AircraftPaint") && LookMic != nullptr)
+			{
+				LookMid = UMaterialInstanceDynamic::Create(PaintTwin, Part);
+				if (LookMid != nullptr)
+				{
+					LookMid->CopyParameterOverrides(LookMic);
+				}
+			}
+			if (LookMid == nullptr)
+			{
+				LookMid = UMaterialInstanceDynamic::Create(LookInstance, Part);
+			}
 			if (bProbeSlot && LookMid != nullptr)
 			{
-				// Scalar overrides on the gen-5 masters' own parameters
+				// Round 24 (aircraft_wet_layer.PROBE_SCALARS on the gen-6 masters).
+				if (Options.Probes.Contains(TEXT("nowet")))
+				{
+					LookMid->SetScalarParameterValue(TEXT("WetLayerAmount"), 0.0f);
+				}
+				if (Options.Probes.Contains(TEXT("rawbase")))
+				{
+					LookMid->SetScalarParameterValue(TEXT("RawBaseAmount"), 1.0f);
+				}
+				if (Options.Probes.Contains(TEXT("basecolor-debug")))
+				{
+					LookMid->SetScalarParameterValue(TEXT("BaseDebug"), 1.0f);
+				}
+				// Scalar overrides on the gen-5/6 masters' own parameters
 				// (aircraft_look.AIRCRAFT_PROBES); a parameter a master lacks
 				// (ClearCoat on bare metal) is a no-op.
 				if (Options.Probes.Contains(TEXT("nocoat")))

@@ -217,7 +217,7 @@ def test_the_masters_builder_calls_the_layer_once_per_master():
     surface = text[text.index("def _surface"):text.index("def create_aircraft_paint")]
     glass = text[text.index("def create_aircraft_glass"):text.index("def create_aircraft_rubber")]
     rubber = text[text.index("def create_aircraft_rubber"):text.index("def _fx(")]
-    assert surface.count("aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], cls)") == 1
+    assert surface.count("aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], cls, raw_base=raw_base)") == 1
     assert glass.count('aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], "glass")') == 1
     assert glass.count("aircraft_wet_layer.add_canopy_scratch(material, sys.modules[__name__])") == 1
     assert "aircraft_wet_layer" not in rubber

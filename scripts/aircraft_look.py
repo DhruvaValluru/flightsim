@@ -1015,11 +1015,23 @@ AIRCRAFT_PROBES = {
              "BaseColorMapWeight"),
     "measured-mesh": ("the beauty mesh swap is skipped: the measured body (Interchange's recomputed normals, "
                       "no two-sided back faces) wears the look instances"),
+    # Round 24 (LOOK_GENERATION 6; the handles are aircraft_wet_layer.PROBE_SCALARS):
+    "nowet": "WetLayerAmount 0: Make takes Break's BaseColor, Roughness and ClearCoat (the wet graft bypassed)",
+    "rawbase": ("RawBaseAmount 1: Make.BaseColor straight from _base_colour (no AlbedoMax, cavity, wear "
+                "or wet)"),
+    "defaultlit": ("paint slots on M_AircraftPaintDefaultLit (the same graph on MSM_DEFAULT_LIT), the look "
+                   "instance's overrides copied"),
+    "basecolor-debug": ("BaseDebug 1: the lit base colour is 0 and the final base colour x BaseDebugNits "
+                        "is emitted (read with -subject-meter=off)"),
+    "tangentnormal": ("paint slots on M_AircraftPaintTangentNormal (the same clear-coat graph, its normal in "
+                      "tangent space as (0, 0, 1): the imported materials' normal path), overrides copied"),
 }
 AIRCRAFT_PROBE_KEY = "aircraft-probe="
 #: The masters a probe acts on (glass and rubber keep their instances).
 PROBE_MASTERS = ("M_AircraftPaint", "M_AircraftBareMetal")
 PROBE_FLAT_MASTER = "M_AircraftProbeFlat"
+PROBE_DEFAULT_LIT_MASTER = "M_AircraftPaintDefaultLit"
+PROBE_TANGENT_NORMAL_MASTER = "M_AircraftPaintTangentNormal"
 
 
 def parse_aircraft_probes(params):

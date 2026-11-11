@@ -1366,6 +1366,7 @@ wfx_check "probes: GetVectorParameterValue" "Engine/Public/Materials/MaterialInt
 wfx_check "probes: GetTextureParameterValue" "Engine/Public/Materials/MaterialInterface.h" "ENGINE_API virtual bool GetTextureParameterValue(const FHashedMaterialParameterInfo& ParameterInfo, class UTexture*& OutValue, bool bOveriddenOnly = false) const;"
 wfx_check "probes: FHashedMaterialParameterInfo(FName)" "Engine/Public/Materials/MaterialParameters.h" "FMemoryImageMaterialParameterInfo(const FName& InName, EMaterialParameterAssociation InAssociation = EMaterialParameterAssociation::GlobalParameter, int32 InIndex = INDEX_NONE)"
 wfx_check "probes: MID SetTextureParameterValue" "Engine/Public/Materials/MaterialInstanceDynamic.h" "ENGINE_API void SetTextureParameterValue(FName ParameterName, class UTexture* Value);"
+wfx_check "probes r24: MID CopyParameterOverrides" "Engine/Public/Materials/MaterialInstanceDynamic.h" "ENGINE_API void CopyParameterOverrides(UMaterialInstance* MaterialInstance);"
 # ---------------------------------------------------- END aircraft probes --
 
 
