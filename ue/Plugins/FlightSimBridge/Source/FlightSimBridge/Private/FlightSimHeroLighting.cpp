@@ -338,7 +338,8 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 		SkyRecord->SetBoolField(TEXT("real_time_capture"), Sky->IsRealTimeCaptureEnabled());
 		SkyRecord->SetStringField(TEXT("capture"),
 			TEXT("captured once by the commandlet before the first frame (and per frame when the sun animates)"));
-		SkyRecord->SetBoolField(TEXT("cloud_ambient_occlusion"), true);
+		SkyRecord->SetStringField(TEXT("cloud_ambient_occlusion"),
+			TEXT("decided by -sky-cloud-ao= (auto by default): probes.cloud_ambient_occlusion_after_probes"));
 		FLinearColor Lower = FLinearColor::Black;
 		const TSharedPtr<FJsonObject>* Ground = nullptr;
 		if (Plan.IsValid() && Plan->TryGetObjectField(TEXT("ground"), Ground) && Ground != nullptr)
@@ -422,7 +423,9 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 		//      (an unmistakable witness of what the sky light lights); off: the
 		//      colour is black, so the sky light lights nothing (the frame
 		//      without any fill; this lane never changes an intensity)
-		//  -sky-cloud-ao=on|off                off: no cloud ambient occlusion on
+		//  -sky-cloud-ao=auto|on|off           auto (the default since lane A,
+		//      2026-11-11): off when the capture already holds the clouds (below);
+		//      off: no cloud ambient occlusion on
 		//      the sky light (the clear world's cumulus layer sits over the shot)
 		//  -aerial-perspective-scale=<x>       the atmosphere's aerial perspective
 		//      view distance scale (0: no in-scatter between camera and ground;
@@ -449,18 +452,43 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 					TEXT("render.sky_fill_probe: -sky-fill-probe=%s is not as-planned, red or off"), *FillProbe));
 			}
 			Probe->SetStringField(TEXT("sky_fill_probe"), FillProbe);
-			FString CloudAo = TEXT("on");
+			// Lane A (2026-11-11, "the planes are being too shadowed"): auto, the
+			// default, turns the cloud AO OFF when the commandlet's one capture
+			// is taken at the aircraft with the volumetric clouds in it (its
+			// defaults: -sky-capture-at=aircraft, -sky-capture-clouds=1). That
+			// cube already holds the clouds overhead -- under a deck its whole
+			// upper hemisphere IS the deck's grey underside, the deck's diffuse
+			// transmission -- and the cloud AO multiplies the sky light again by
+			// the same deck's top-down occlusion (sampled at each pixel's XY,
+			// whatever its height). Counted twice, a nimbostratus deck takes the
+			// fill to ~0; round 6's deck shadow (world_beauty.deck_shadows_beam)
+			// then removed the beam as well, and round 5's #06 A320 and #08
+			// C172 rendered as black silhouettes (round 4, beam unshadowed:
+			// lit). Counted once, an airframe under an overcast is lit by the
+			// deck it sees: an even grey. A capture without the clouds (or taken
+			// at the origin, under a different sky) keeps the cloud AO.
+			FString CloudAo = TEXT("auto");
 			FParse::Value(*Switches, TEXT("sky-cloud-ao="), CloudAo);
-			if (CloudAo == TEXT("off"))
+			int32 CaptureClouds = 1;
+			FParse::Value(*Switches, TEXT("sky-capture-clouds="), CaptureClouds);
+			FString CaptureAt = TEXT("aircraft");
+			FParse::Value(*Switches, TEXT("sky-capture-at="), CaptureAt);
+			const bool bCaptureHoldsClouds = CaptureClouds != 0 && CaptureAt == TEXT("aircraft");
+			if (CloudAo == TEXT("off") || (CloudAo == TEXT("auto") && bCaptureHoldsClouds))
 			{
 				Sky->bCloudAmbientOcclusion = false;
 			}
-			else if (CloudAo != TEXT("on"))
+			else if (CloudAo != TEXT("on") && CloudAo != TEXT("auto"))
 			{
 				return HeroLightingFail(FString::Printf(
-					TEXT("render.sky_fill_probe: -sky-cloud-ao=%s is not on or off"), *CloudAo));
+					TEXT("render.sky_fill_probe: -sky-cloud-ao=%s is not auto, on or off"), *CloudAo));
 			}
 			Probe->SetStringField(TEXT("sky_cloud_ao"), CloudAo);
+			Probe->SetBoolField(TEXT("sky_capture_holds_clouds"), bCaptureHoldsClouds);
+			Probe->SetStringField(TEXT("sky_cloud_ao_basis"),
+				TEXT("auto: off when the one sky capture is taken at the aircraft with the clouds in it ")
+				TEXT("(the cube already holds the deck overhead; the cloud AO would count it twice and ")
+				TEXT("black out an airframe under an overcast); on otherwise (lane A, 2026-11-11)"));
 			double AerialScale = -1.0;
 			if (FParse::Value(*Switches, TEXT("aerial-perspective-scale="), AerialScale))
 			{
