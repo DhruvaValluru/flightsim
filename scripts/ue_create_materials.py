@@ -3285,6 +3285,9 @@ WORLD_COLLECTION_SCALARS = {
     # lane B: the detail's share by the card's surface (0 over a city: the
     # aerial rock and soil maps are not facades or roofs; 1 elsewhere).
     "TerrainDetailScale": 1.0,
+    # #02 blue (2026-11-11): the baked sky-shade neutraliser
+    # (core/scene/tiles_shade_neutral.py): 0 is a pass-through.
+    "ShadeNeutralAmount": 0.0,
 }
 #: M_FlightSimCloudLayers' scalar parameters (FlightSimClouds.cpp sets each by
 #: name) with the default a material has before the render sets them, and its
@@ -3340,6 +3343,8 @@ WORLD_TILES_INPUTS = {
     "tiles_roughness": ("WorldPos", "CameraPos", "NormalWS", "Wetness", "PuddleAmount", "DetailFadeM"),
     # tiles-delight: runs first; its output is the other nodes' Albedo.
     "tiles_delight": ("Albedo", "AlbedoLow", "DelightAmount", "DelightRatioKnee", "DelightBlueGate"),
+    # #02 blue (2026-11-11): runs right after the de-light; its output is Albedo.
+    "tiles_shade_neutral": ("Albedo", "NormalWS", "ShadeNeutralAmount"),
 }
 #: tiles-delight: the material's own scalar parameters (not the collection's:
 #: the render does not set them), at tiles_delight.DELIGHT_MIP_BIAS and
@@ -3481,7 +3486,7 @@ def world_stamp(material, name):
 #: so no reference breaks and no redirect is registered (the storm lane's
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
-WORLD_GENERATIONS = {"MPC_FlightSimWorld": "3", "M_FlightSimTilesBeauty": "3",   # 3: lane B terrain detail
+WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "4",   # 3: lane B terrain detail; 4: #02 shade neutral
                      "M_FlightSimCloudLayers": "5", "M_FlightSimScatter": "1",  # clouds 5: round-10 rounded, warped, LOD
                      "M_FlightSimDistantClouds": "3",   # distant 3: round-10 rounded, warped, far LOD
                      "M_FlightSimOceanBeauty": "4"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull)
@@ -3710,6 +3715,12 @@ def create_world_tiles_beauty():
                                      unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                                      {name: common[name] for name in WORLD_TILES_INPUTS["tiles_delight"]},
                                      -1200, -400), "")
+    # #02 blue (2026-11-11): the baked sky-shade toward grey under a drawn sun
+    # (tiles_shade_neutral.hlsl; ShadeNeutralAmount 0 is an exact pass-through).
+    common["Albedo"] = (world_custom(material, lib, "tiles_shade_neutral",
+                                     unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                                     {name: common[name] for name in WORLD_TILES_INPUTS["tiles_shade_neutral"]},
+                                     -1050, -400), "")
     # lane B: the terrain detail between the de-light and the grade (the
     # detailed albedo replaces Albedo; the detailed normal feeds tiles_normal).
     detail_normal = world_tiles_detail(material, lib, common, uv, factor)

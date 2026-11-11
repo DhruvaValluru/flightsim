@@ -34,7 +34,7 @@ import math
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from . import tiles_delight
+from . import tiles_delight, tiles_shade_neutral
 from .rain_field import MASK64, splitmix64, unit
 from .weather_look import STORMS
 
@@ -1147,6 +1147,9 @@ WORLD_MPC_SCALARS: Dict[str, float] = {
     # lane B: the detail's share by the card's surface (0 over a city: the
     # aerial rock and soil maps are not facades or roofs; 1 elsewhere).
     "TerrainDetailScale": 1.0,
+    # #02 blue (2026-11-11): the baked sky-shade neutraliser
+    # (core/scene/tiles_shade_neutral.py): 0 is a pass-through.
+    "ShadeNeutralAmount": 0.0,
 }
 #: How much of the wetness becomes standing water on flat ground. UNCALIBRATED.
 PUDDLE_SHARE_OF_WETNESS = 0.5
@@ -1192,9 +1195,12 @@ def tiles_dehaze(albedo: Sequence[float], dehaze: float = TILES_DEHAZE) -> Tuple
     return tuple(out)
 
 
-def tiles_parameters(preset: str, card_wetness: float) -> Dict[str, float]:
+def tiles_parameters(preset: str, card_wetness: float, surface: str = "",
+                     shade_switch: str = tiles_shade_neutral.SWITCH_DEFAULT) -> Dict[str, float]:
     """The collection's values for a preset and the card's wetness (the larger
-    of the card's and the preset's floor)."""
+    of the card's and the preset's floor). ``surface`` is the card's surface
+    word and ``shade_switch`` the -tiles-shade-neutral= switch (the baked
+    sky-shade neutraliser's amount reads both)."""
     row = ATMOSPHERE[preset]
     wet = max(min(max(card_wetness, 0.0), 1.0), row["wetness_floor"])
     out = dict(WORLD_MPC_SCALARS)
@@ -1203,7 +1209,10 @@ def tiles_parameters(preset: str, card_wetness: float) -> Dict[str, float]:
                 "DetailStrength": row["tiles_detail_strength"],
                 # tiles-delight: the preset's de-light amount (tiles_delight.DELIGHT_DEFAULTS).
                 "DelightAmount": tiles_delight.amount_for(preset),
-                "DelightBlueGate": tiles_delight.DELIGHT_BLUE_GATE})
+                "DelightBlueGate": tiles_delight.DELIGHT_BLUE_GATE,
+                "TerrainDetailScale": 0.0 if surface == "city" else 1.0,
+                # #02 blue: the preset's amount, 0 over a city or with the switch off.
+                "ShadeNeutralAmount": tiles_shade_neutral.amount_for(preset, surface, shade_switch)})
     return out
 
 
