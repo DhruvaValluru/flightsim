@@ -291,3 +291,16 @@ def test_the_unreal_host_reads_the_cards_gear_answer():
            "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
     assert 'TryGetBoolField(TEXT("start_gear_up"), bGearUp)' in cpp
     assert "Card.StartGearUp >= 0 ? Card.StartGearUp == 1" in cpp
+
+
+def test_the_start_gear_switch_keeps_the_gear_down_for_an_ab(monkeypatch):
+    """Round 50 (#09 hang bisect): -start-gear=down in FLIGHTSIM_RENDER_SWITCHES."""
+    from core.fdm.gear import gear_down_requested, start_gear_up
+
+    monkeypatch.setenv("FLIGHTSIM_RENDER_SWITCHES", "-look-ssgi=off -start-gear=down")
+    assert gear_down_requested("747 cruise") and not start_gear_up("B747", 10000.0, 0.0, "747 cruise")
+    monkeypatch.setenv("FLIGHTSIM_RENDER_SWITCHES", "-start-gear=auto")
+    assert start_gear_up("B747", 10000.0, 0.0, "747 cruise")
+    monkeypatch.setenv("FLIGHTSIM_RENDER_SWITCHES", "-start-gear=sideways")
+    with pytest.raises(ValueError):
+        gear_down_requested("747 cruise")

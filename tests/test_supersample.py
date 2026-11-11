@@ -305,6 +305,10 @@ def test_every_other_target_and_the_tile_selection_stay_at_the_output_size():
     for name, args in sizes:
         if name == "RenderTarget":
             assert args == "Width * Supersample, Height * Supersample"
+        elif name == "CoverTarget":
+            # The measured subject cover (3680856c): its own half-size
+            # capture, never the output's, so the tile selection is unaffected.
+            assert args == "CoverMeasure.CaptureWidth, CoverMeasure.CaptureHeight"
         else:
             assert args == "Width, Height", (name, args)
     assert re.search(r"GoogleTiles\.WaitForView\(Capture->GetComponentLocation\(\), "

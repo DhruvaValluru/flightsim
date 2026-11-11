@@ -47,8 +47,31 @@ def has_retractable_gear(aircraft: str) -> bool:
         return False
 
 
+#: A/B override (round 50, #09's GPU hang bisect): ``-start-gear=down`` in
+#: FLIGHTSIM_RENDER_SWITCHES (what visual_fix_round.ps1 -Switches sets) keeps
+#: JSBSim's gear-down start for every airframe, in the headless FDM and the
+#: run card alike, so the two cannot drift. ``auto`` (or absent) is the rule.
+START_GEAR_SWITCH = re.compile(r"(?:^|\s)-start-gear=(\S+)")
+
+
+def start_gear_override() -> Optional[str]:
+    """``"down"`` or ``"auto"`` from FLIGHTSIM_RENDER_SWITCHES; a bad word is refused."""
+    import os
+
+    m = START_GEAR_SWITCH.search(os.environ.get("FLIGHTSIM_RENDER_SWITCHES", ""))
+    if not m:
+        return None
+    word = m.group(1).lower()
+    if word not in ("down", "auto"):
+        raise ValueError(f"-start-gear={m.group(1)}: expected down or auto")
+    return word
+
+
 def gear_down_requested(*texts: Optional[str]) -> bool:
-    """Whether any of the texts (the prompt, the scenario name) asks for the gear down."""
+    """Whether any of the texts (the prompt, the scenario name) asks for the gear
+    down, or the -start-gear=down A/B switch is set."""
+    if start_gear_override() == "down":
+        return True
     return any(t and GEAR_DOWN_WORDS.search(t) for t in texts)
 
 
