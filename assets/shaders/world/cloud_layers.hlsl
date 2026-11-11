@@ -41,6 +41,7 @@
 // Inputs (the Custom node's, named exactly so; the script's WORLD_CLOUD_INPUTS):
 //   WorldPos         float3  the sample's absolute world position, cm
 //   NormAlt          float   0 at the layer's base, 1 at its top (Cloud Sample Attributes)
+//   CameraPos        float3  the camera's absolute world position, cm (the far field's level of detail)
 //   Coverage         float   the layer's cover, 0..1
 //   ExtinctionPerM   float   a full cell's extinction, 1/m
 //   ExtinctionScale  float   the engine-unit factor (the WX.4-style probe sets it)
@@ -52,10 +53,18 @@
 //   CoverageContrast float   how hard the coverage threshold cuts (the edge is FBM_SIGMA / contrast wide)
 //   SeedOffsetKm     float3  the card's seeded noise offset (world_beauty.cloud_seed_offset_km)
 //   WindOffsetM      float3  the drift since t = 0, engine metres (the scene's drift law)
-const float FBM_MEAN = 0.535;
-const float FBM_SIGMA = 0.073;
+const float FBM_MEAN = 0.55;
+const float FBM_SIGMA = 0.069;
 const float TOP_CUT_SIGMAS = 3.5;
 const float EROSION_CUT_SHARE = 0.5;
+// Round 10: the far field's level of detail, by the sample's distance from
+// the camera (km): full detail nearer than LOD_NEAR_KM, the plane field only
+// (no small cells, no billow, no erosion) past LOD_FAR_KM, and a soft edge
+// (1 + FAR_SOFTEN) x as wide there, so the far rows do not stack into hard
+// strata. UNCALIBRATED (world_beauty.CLOUD_LOD_*).
+const float LOD_NEAR_KM = 6.0;
+const float LOD_FAR_KM = 20.0;
+const float FAR_SOFTEN = 1.0;
 const float WISP_HEIGHT = 0.25;
 struct FWorldCloud
 {
@@ -137,12 +146,15 @@ struct FWorldCloud
 		}
 		return 1.0 - min(sqrt(best), 1.0);
 	}
-	// The same on the plane (9 cells): a footprint, not a volume.
-	float Worley2(float x, float y, uint seed)
+	// The same on the plane (9 cells), ROUNDED (round 10): the nearest
+	// distances are blended by a polynomial smooth minimum (width 0.35 cell),
+	// so two cells meet in a soft saddle instead of a Voronoi crease (the
+	// flat-sided, faceted cells of round 10's #13).
+	float SmoothWorley2(float x, float y, uint seed)
 	{
 		float ix = floor(x); float iy = floor(y);
 		int cx = (int)ix; int cy = (int)iy;
-		float best = 9.0;
+		float d = 9.0;
 		for (int dy = -1; dy <= 1; ++dy)
 		{
 			for (int dx = -1; dx <= 1; ++dx)
@@ -150,34 +162,57 @@ struct FWorldCloud
 				uint h = Hash3(cx + dx, cy + dy, 0, seed);
 				float ex = (float)(cx + dx) + (float)(h & 1023u) / 1024.0 - x;
 				float ey = (float)(cy + dy) + (float)((h >> 10u) & 1023u) / 1024.0 - y;
-				best = min(best, ex * ex + ey * ey);
+				float e = sqrt(ex * ex + ey * ey);
+				float k = max(0.35 - max(d - e, e - d), 0.0) / 0.35;
+				d = min(d, e) - k * k * 0.35 * 0.25;
 			}
 		}
-		return 1.0 - min(sqrt(best), 1.0);
+		return 1.0 - min(max(d, 0.0), 1.0);
 	}
 	float Remap(float v, float lo, float hi)
 	{
 		return saturate((v - lo) / max(hi - lo, 1e-4));
 	}
-	// Round 7 (Nubis-style weather field, world_beauty.cloud_shape): the
-	// footprint is a 2D weather map, so a cloud is a column with a flat base
-	// whose height grows with its excess over the cut (the cut rises with
-	// height: domes), not a 3D blob sliced by the march. Three terms:
-	//   cluster: two octaves of plane gradient noise at ~6x the cell size,
-	//            the fields and the clear gaps between them;
-	//   cells:   plane Worley at 2.1x, 1x and 0.46x the cell size, so the
-	//            clouds come in many sizes (one large, a few mid, many small);
-	//   billow:  one octave of 3D gradient noise, the only height term, so the
-	//            sides bulge instead of standing straight.
-	float Shape(float3 p, uint seed)
+	// The weather field (round 7, reworked round 10; world_beauty.cloud_shape).
+	// Round 10's #13 drew cubist cauliflower in rows: Voronoi creases, three
+	// axis-aligned lattices that lined up into rows, and one size class. Now:
+	//   warp:    the plane is displaced by a pair of gradient noises (0.45
+	//            cell), so no cell edge is straight and no lattice row survives;
+	//   cluster: two octaves of plane gradient noise at ~6x the cell size
+	//            (unwarped): the fields and the clear gaps between them;
+	//   cells:   ROUNDED Worley at 2.4x, 1x and 0.46x the cell size, the two
+	//            smaller lattices rotated 35 and 78.5 degrees, weighted to the
+	//            large one (a few big cumulus, many small);
+	//   billow:  one octave of 3D gradient noise (bulging sides).
+	// Far is the level of detail (0 near, 1 far): the small cells and the
+	// billow fade to their means (0.5985, 0.5) and are skipped at 1, so the far
+	// field is smoother and cheaper and keeps the same mean and nearly the same
+	// spread (the cut, hence the cover, stays the stated one).
+	float ShapeLod(float3 p, float far, uint seed)
 	{
+		float wx = Perlin2(p.x * 0.6 + 1.7, p.y * 0.6 + 9.2, seed + 601u);
+		float wy = Perlin2(p.x * 0.6 + 13.1, p.y * 0.6 + 2.3, seed + 613u);
+		float qx = p.x + 0.45 * wx;
+		float qy = p.y + 0.45 * wy;
 		float cluster = 0.5 + 0.5 * (0.667 * Perlin2(p.x * 0.17 + 3.1, p.y * 0.17 + 7.9, seed + 503u)
 			+ 0.333 * Perlin2(p.x * 0.35 + 11.3, p.y * 0.35 + 5.1, seed + 557u));
-		float cells = 0.5 * Worley2(p.x * 0.47 + 2.9, p.y * 0.47 + 8.3, seed + 401u)
-			+ 0.35 * Worley2(p.x, p.y, seed + 211u)
-			+ 0.15 * Worley2(p.x * 2.17 + 5.3, p.y * 2.17 + 1.7, seed + 307u);
-		float billow = 0.5 + 0.5 * Perlin(p * 1.9, seed);
+		float big = SmoothWorley2(qx * 0.42 + 2.9, qy * 0.42 + 8.3, seed + 401u);
+		float mid = SmoothWorley2(0.8191 * qx - 0.5736 * qy, 0.5736 * qx + 0.8191 * qy, seed + 211u);
+		float small = 0.5985;
+		float billow = 0.5;
+		if (far < 1.0)
+		{
+			float bx = 0.1994 * qx - 0.9799 * qy;
+			float by = 0.9799 * qx + 0.1994 * qy;
+			small = lerp(SmoothWorley2(bx * 2.17 + 5.3, by * 2.17 + 1.7, seed + 307u), 0.5985, far);
+			billow = lerp(0.5 + 0.5 * Perlin(float3(qx * 1.9, qy * 1.9, p.z * 1.9), seed), 0.5, far);
+		}
+		float cells = 0.55 * big + 0.3 * mid + 0.15 * small;
 		return 0.42 * cluster + 0.5 * cells + 0.08 * billow;
+	}
+	float Shape(float3 p, uint seed)
+	{
+		return ShapeLod(p, 0.0, seed);
 	}
 	// The erosion noise: a two-octave Worley fbm (world_beauty.cloud_detail).
 	float Detail(float3 p, uint seed)
@@ -196,23 +231,24 @@ float base = smoothstep(0.0, max(BottomSoftness, 1e-3), h);
 float top = 1.0 - smoothstep(1.0 - max(TopRounding, 1e-3), 1.0, h);
 // The weather field: cells of ShapeScaleKm on the plane; its one 3D octave
 // varies twice as fast with height (the sides bulge every few hundred m).
-float shape = C.Shape(float3(km.x, km.y, km.z * 2.0) / max(ShapeScaleKm, 1e-3), 7u);
+float far = smoothstep(LOD_NEAR_KM, LOD_FAR_KM, length(WorldPos - CameraPos) / 100000.0);
+float shape = C.ShapeLod(float3(km.x, km.y, km.z * 2.0) / max(ShapeScaleKm, 1e-3), far, 7u);
 // Coverage: the shape kept above the noise's (1 - cover) QUANTILE, so the drawn
 // share of sky is the stated cover; the soft edge (FBM_SIGMA / contrast wide)
 // starts EROSION_CUT_SHARE x DetailErosion of its width early, which the
 // erosion below takes back on average.
 float cover = saturate(Coverage);
-float soft = FBM_SIGMA / max(CoverageContrast, 1e-3);
+float soft = FBM_SIGMA / max(CoverageContrast, 1e-3) * (1.0 + FAR_SOFTEN * far);
 float thr = FBM_MEAN + FBM_SIGMA * C.Probit(1.0 - cover) - EROSION_CUT_SHARE * DetailErosion * soft;
 float cut = lerp(FBM_MEAN + TOP_CUT_SIGMAS * FBM_SIGMA, thr, top);
 float density = C.Remap(shape, cut, cut + soft);
 [branch]
-if (density > 0.0)
+if (density > 0.0 && far < 1.0)
 {
 	// Erosion by the detail noise: wispy (the noise) under WISP_HEIGHT of the
 	// layer, billowy (its inverse) above; a full core is never eroded.
 	float detail = C.Detail(km / max(DetailScaleKm, 1e-3), 13u);
 	float wisp = lerp(detail, 1.0 - detail, saturate(h / WISP_HEIGHT));
-	density = C.Remap(density, DetailErosion * wisp, 1.0);
+	density = C.Remap(density, DetailErosion * (1.0 - far) * wisp, 1.0);
 }
 return density * base * ExtinctionPerM * ExtinctionScale;

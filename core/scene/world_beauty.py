@@ -494,9 +494,13 @@ CLOUD_FIELDS: Tuple[str, ...] = (
 #: (2 rho r_e) with LWC 0.2 to 0.5 g/m^3, r_e 5 to 10 um), below the storm
 #: tower's 0.19 /m (core/scene/storm_cell.py).
 CLOUDS: Dict[str, Dict[str, float]] = {
+    # Round 10: top_rounding 0.6 -> 0.75 (the dome starts a quarter up, not 40 %:
+    # round 10's #13 drew straight-walled blocks) and coverage_contrast 1.6 -> 0.9
+    # (a soft edge nearly twice as wide, which the billowy erosion carves into
+    # cauliflower instead of a hard wall). UNCALIBRATED.
     "cumulus": dict(extinction_per_m=0.05, shape_scale_km=2.5, detail_scale_km=0.35,
-                    detail_erosion=0.35, bottom_softness=0.08, top_rounding=0.6,
-                    coverage_contrast=1.6, default_cover=0.35),
+                    detail_erosion=0.35, bottom_softness=0.08, top_rounding=0.75,
+                    coverage_contrast=0.9, default_cover=0.35),
     "stratocumulus": dict(extinction_per_m=0.04, shape_scale_km=4.0, detail_scale_km=0.5,
                           detail_erosion=0.25, bottom_softness=0.15, top_rounding=0.3,
                           coverage_contrast=1.3, default_cover=0.6),
@@ -849,9 +853,10 @@ def layer_cover_and_shape(card_cover: Optional[float], thickness_m: float, prese
 #: the test); they are properties of the noise, not look values.
 #: Round 7 (lane E, 2026-11-11): the shape is a Nubis-style 2D weather field
 #: (cloud_shape: clusters and gaps, three cell sizes, one 3D billow octave);
-#: its moments re-measured on 40000 samples: mean 0.535, sigma 0.073.
-CLOUD_FBM_MEAN = 0.535
-CLOUD_FBM_SIGMA = 0.073
+#: its moments re-measured on 40000 samples: mean 0.535, sigma 0.073. Round 10
+#: (rounded, warped, far LOD): mean 0.550, sigma 0.0695 near and 0.0673 far, pinned 0.069.
+CLOUD_FBM_MEAN = 0.55
+CLOUD_FBM_SIGMA = 0.069
 #: The cut's soft edge is CLOUD_FBM_SIGMA / coverage_contrast wide.
 #: The shaping constants of cloud_layers.hlsl (UNCALIBRATED: set by probe
 #: render on the render machine): the top rounds by raising the cut to
@@ -969,20 +974,51 @@ def _smoothstep(e0: float, e1: float, x: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
 
-def cloud_shape(x: float, y: float, z: float, seed: int) -> float:
-    """cloud_layers.hlsl FWorldCloud::Shape, number for number (double here).
-    Round 7 (Nubis-style): a 2D weather field -- a cluster term (two octaves
-    of plane gradient noise at ~6x the cell size: the fields and the gaps), a
-    three-scale plane Worley (clouds of many sizes) -- plus one octave of 3D
-    gradient noise (the only height term: bulging sides). The footprint is a
-    plane field, so the shader's rising cut draws flat-based domes whose height
-    grows with the column's excess over the cut."""
+def _smooth_worley2(x: float, y: float, seed: int) -> float:
+    """FWorldCloud::SmoothWorley2: 1 - F1 over the 9 nearest plane cells, the
+    distances blended by a polynomial smooth minimum 0.35 wide (no creases)."""
+    ix, iy = math.floor(x), math.floor(y)
+    d = 9.0
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            cx, cy = ix + dx, iy + dy
+            h = _hash3(cx, cy, 0, seed)
+            e = math.sqrt((cx + (h & 1023) / 1024.0 - x) ** 2 + (cy + ((h >> 10) & 1023) / 1024.0 - y) ** 2)
+            k = max(0.35 - max(d - e, e - d), 0.0) / 0.35
+            d = min(d, e) - k * k * 0.35 * 0.25
+    return 1.0 - min(max(d, 0.0), 1.0)
+
+
+#: The far terms' means (cloud_shape's small cells and billow), the values they
+#: fade to at far = 1 (measured on 20000 samples; the shader's literals).
+CLOUD_SMALL_CELL_MEAN = 0.5985
+CLOUD_BILLOW_MEAN = 0.5
+
+
+def cloud_shape(x: float, y: float, z: float, seed: int, far: float = 0.0) -> float:
+    """cloud_layers.hlsl FWorldCloud::ShapeLod (Shape at far = 0), number for
+    number (double here). Round 7's Nubis-style 2D weather field, reworked in
+    round 10 after #13's cubist rows: the plane is domain-warped (0.45 cell);
+    a cluster term (two octaves of plane gradient noise, unwarped: the fields
+    and gaps); ROUNDED Worley cells (smooth minimum, no creases) at 2.4x, 1x
+    and 0.46x the cell size, the two smaller lattices rotated so no rows line
+    up, weighted to the large cells; one 3D billow octave. ``far`` (0..1) fades
+    the small cells and the billow to their means: the far field is smoother,
+    cheaper and keeps the mean."""
+    wx = _perlin2(x * 0.6 + 1.7, y * 0.6 + 9.2, (seed + 601) & _M32)
+    wy = _perlin2(x * 0.6 + 13.1, y * 0.6 + 2.3, (seed + 613) & _M32)
+    qx, qy = x + 0.45 * wx, y + 0.45 * wy
     cluster = 0.5 + 0.5 * (0.667 * _perlin2(x * 0.17 + 3.1, y * 0.17 + 7.9, (seed + 503) & _M32)
                            + 0.333 * _perlin2(x * 0.35 + 11.3, y * 0.35 + 5.1, (seed + 557) & _M32))
-    cells = (0.5 * _worley2(x * 0.47 + 2.9, y * 0.47 + 8.3, (seed + 401) & _M32)
-             + 0.35 * _worley2(x, y, (seed + 211) & _M32)
-             + 0.15 * _worley2(x * 2.17 + 5.3, y * 2.17 + 1.7, (seed + 307) & _M32))
-    billow = 0.5 + 0.5 * _perlin3(x * 1.9, y * 1.9, z * 1.9, seed)
+    big = _smooth_worley2(qx * 0.42 + 2.9, qy * 0.42 + 8.3, (seed + 401) & _M32)
+    mid = _smooth_worley2(0.8191 * qx - 0.5736 * qy, 0.5736 * qx + 0.8191 * qy, (seed + 211) & _M32)
+    small, billow = CLOUD_SMALL_CELL_MEAN, CLOUD_BILLOW_MEAN
+    if far < 1.0:
+        bx, by = 0.1994 * qx - 0.9799 * qy, 0.9799 * qx + 0.1994 * qy
+        small = _lerp(_smooth_worley2(bx * 2.17 + 5.3, by * 2.17 + 1.7, (seed + 307) & _M32),
+                      CLOUD_SMALL_CELL_MEAN, far)
+        billow = _lerp(0.5 + 0.5 * _perlin3(qx * 1.9, qy * 1.9, z * 1.9, seed), CLOUD_BILLOW_MEAN, far)
+    cells = 0.55 * big + 0.3 * mid + 0.15 * small
     return 0.42 * cluster + 0.5 * cells + 0.08 * billow
 
 
@@ -991,7 +1027,18 @@ def cloud_detail(x: float, y: float, z: float, seed: int) -> float:
     return 0.7 * _worley(x, y, z, seed) + 0.3 * _worley(x * 2.03, y * 2.03, z * 2.03, (seed + 97) & _M32)
 
 
-def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float, row: Dict[str, float]) -> float:
+#: Round 10: the far field's level of detail (cloud_layers.hlsl LOD_NEAR_KM,
+#: LOD_FAR_KM, FAR_SOFTEN): far = smoothstep(near, far, camera distance in km)
+#: drops the small cells, the billow and the erosion, and widens the soft edge
+#: (1 + FAR_SOFTEN x far), so the rows towards the horizon do not stack into
+#: hard strata; cheaper there too. UNCALIBRATED.
+CLOUD_LOD_NEAR_KM = 6.0
+CLOUD_LOD_FAR_KM = 20.0
+CLOUD_FAR_SOFTEN = 1.0
+
+
+def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float, row: Dict[str, float],
+                  distance_km: float = 0.0) -> float:
     """cloud_layers.hlsl's density (before x extinction), the Python replica
     the coverage test samples: the quantile cut on the shape (started early by
     the erosion's share, raised over the top's rounding), the soft edge, the
@@ -1000,16 +1047,17 @@ def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float,
     base = _smoothstep(0.0, max(row["bottom_softness"], 1e-3), h)
     top = 1.0 - _smoothstep(1.0 - max(row["top_rounding"], 1e-3), 1.0, h)
     scale = max(row["shape_scale_km"], 1e-3)
-    shape = cloud_shape(km[0] / scale, km[1] / scale, km[2] * 2.0 / scale, 7)
-    soft = CLOUD_FBM_SIGMA / max(row["coverage_contrast"], 1e-3)
+    far = _smoothstep(CLOUD_LOD_NEAR_KM, CLOUD_LOD_FAR_KM, distance_km)
+    shape = cloud_shape(km[0] / scale, km[1] / scale, km[2] * 2.0 / scale, 7, far)
+    soft = CLOUD_FBM_SIGMA / max(row["coverage_contrast"], 1e-3) * (1.0 + CLOUD_FAR_SOFTEN * far)
     thr = coverage_threshold(cover) - CLOUD_EROSION_CUT_SHARE * row["detail_erosion"] * soft
     cut = _lerp(CLOUD_FBM_MEAN + CLOUD_TOP_CUT_SIGMAS * CLOUD_FBM_SIGMA, thr, top)
     density = _remap(shape, cut, cut + soft)
-    if density > 0.0:
+    if density > 0.0 and far < 1.0:
         dscale = max(row["detail_scale_km"], 1e-3)
         detail = cloud_detail(km[0] / dscale, km[1] / dscale, km[2] / dscale, 13)
         wisp = _lerp(detail, 1.0 - detail, min(max(h / CLOUD_WISP_HEIGHT, 0.0), 1.0))
-        density = _remap(density, row["detail_erosion"] * wisp, 1.0)
+        density = _remap(density, row["detail_erosion"] * (1.0 - far) * wisp, 1.0)
     return density * base
 
 

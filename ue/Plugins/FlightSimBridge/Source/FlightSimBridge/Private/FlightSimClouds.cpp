@@ -140,7 +140,7 @@ namespace FlightSimWorldPure
 	inline double CloudDefault(int Cloud, int Field)
 	{
 		static const double Rows[CloudCount][CloudFieldCount] = {
-			{0.05, 2.5, 0.35, 0.35, 0.08, 0.6, 1.6, 0.35},    // cumulus
+			{0.05, 2.5, 0.35, 0.35, 0.08, 0.75, 0.9, 0.35},   // cumulus (round 10: domes from a quarter up, a wider soft edge)
 			{0.04, 4.0, 0.5, 0.25, 0.15, 0.3, 1.3, 0.6},      // stratocumulus
 			{0.03, 8.0, 0.8, 0.15, 0.2, 0.15, 1.0, 0.95},     // overcast
 			{0.045, 9.0, 0.6, 0.3, 0.1, 0.4, 0.8, 0.98},      // nimbostratus
@@ -1974,8 +1974,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 	}
 	Out->SetNumberField(TEXT("unmodelled_clouds"), UnmodelledClouds);
 	Out->SetStringField(TEXT("coverage_law"),
-		TEXT("cloud_layers.hlsl (round 7: a Nubis-style 2D weather field, flat bases, domed tops, in-cloud erosion) cuts the shape noise "
-		     "at its (1 - cover) quantile: FBM_MEAN 0.535 + FBM_SIGMA 0.073 x probit(1 - cover) (the noise's own "
+		TEXT("cloud_layers.hlsl (round 10: a rounded, domain-warped 2D weather field, flat bases, domed tops, a smoother far field) cuts the shape noise "
+		     "at its (1 - cover) quantile: FBM_MEAN 0.55 + FBM_SIGMA 0.069 x probit(1 - cover) (the noise's own "
 		     "moments, world_beauty.CLOUD_FBM_*), started early by half the erosion's share of the soft edge, so "
 		     "the drawn share of sky at full profile is the stated cover"));
 	Out->SetNumberField(TEXT("view_sample_count_scale"), ViewScale);

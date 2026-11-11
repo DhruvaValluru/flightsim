@@ -398,7 +398,7 @@ def test_the_cloud_material_parameters_are_the_ones_the_cpp_sets():
                                  CLOUDS_CPP))
     assert set_scalars == set(scalars)
     assert set_vectors == set(vectors)
-    assert set(inputs) == set(scalars) | set(vectors) | {"WorldPos", "NormAlt"}
+    assert set(inputs) == set(scalars) | set(vectors) | {"WorldPos", "NormAlt", "CameraPos"}   # CameraPos: round 10 far LOD
     hlsl = (SHADERS / "cloud_layers.hlsl").read_text(encoding="utf-8")
     for name in inputs:
         assert re.search(rf"//\s+{name}\s", hlsl), name
@@ -758,7 +758,9 @@ static uint asuint(int v) { uint u; std::memcpy(&u, &v, 4); return u; }
     points = [(0.3, 0.7, 0.1), (12.25, -3.5, 7.75), (-41.3, 18.9, -2.2), (517.6, 902.1, 333.3)]
     main = "int main() { FWorldCloud C;\n" + "".join(
         f"printf(\"%.9g %.9g\\n\", (double)C.Shape(float3({x}f, {y}f, {z}f), 7u), "
-        f"(double)C.Detail(float3({x}f, {y}f, {z}f), 13u));\n" for x, y, z in points) + "return 0; }\n"
+        f"(double)C.Detail(float3({x}f, {y}f, {z}f), 13u));\n" for x, y, z in points) + "".join(
+        f"printf(\"%.9g\\n\", (double)C.ShapeLod(float3({x}f, {y}f, {z}f), 1.0f, 7u));\n"
+        for x, y, z in points) + "return 0; }\n"
     (tmp_path / "cloud.cpp").write_text(shims + struct + "\n" + main, encoding="utf-8")
     subprocess.run(["g++", "-std=c++17", "-o", str(tmp_path / "cloud"), str(tmp_path / "cloud.cpp")],
                    check=True, capture_output=True, text=True)
@@ -767,6 +769,8 @@ static uint asuint(int v) { uint u; std::memcpy(&u, &v, 4); return u; }
         fx, fy, fz = (float(_f32(v)) for v in (x, y, z))
         assert float(out[2 * i]) == pytest.approx(wb.cloud_shape(fx, fy, fz, 7), abs=2e-4), (x, y, z)
         assert float(out[2 * i + 1]) == pytest.approx(wb.cloud_detail(fx, fy, fz, 13), abs=2e-4), (x, y, z)
+        # round 10: the far level of detail (the distant sheet's)
+        assert float(out[2 * len(points) + i]) == pytest.approx(wb.cloud_shape(fx, fy, fz, 7, 1.0), abs=2e-4)
 
 
 @NEEDS_CXX
