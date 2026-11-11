@@ -92,6 +92,11 @@ SCENARIOS = [
      "chase view of the 747 over the ocean at 10000 m at noon for 6 seconds", {}),
     ("hurricane (should be refused: not supported)",
      "fly the 747 through a hurricane", {}),
+    # What #14's refusal suggests instead, so the batch renders a 747 in
+    # the nearest supported weather; #14 stays the refusal check.
+    ("747 in hurricane-like weather (the refusal's suggestion)",
+     "chase view of the 747 at 2000 m in strong wind, severe turbulence and heavy rain "
+     "for 6 seconds", {}),
 ]
 
 DONE = ("done", "failed")

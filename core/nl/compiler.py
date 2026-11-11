@@ -384,7 +384,11 @@ def _airspeed(text: str) -> Tuple[Quantity, Quantity]:
 #: mattered. Values sit mid-envelope for each model.
 CRUISE_DEFAULT_KT: Dict[str, float] = {
     "B747": 250.0, "737": 250.0, "A320": 250.0, "global5000": 250.0,
-    "c172p": 100.0, "f16": 350.0, "f15": 350.0, "A4": 350.0,
+    "c172p": 100.0, "f16": 350.0, "f15": 350.0,
+    # MEASURED: the stock A4 trims 180..350 kt at 3000 m, 180..320 kt at
+    # 5000 m and 180..280 kt at 7000 m (10 kt steps, configure_from_spec,
+    # 2026-11-11). 350 kt refused "the a4 over the matterhorn at 5000 m".
+    "A4": 270.0,
     "J11": 350.0,
     # MEASURED, not the type's cruise. The only stated cruise is "around
     # 150 KIAS" (dhc6-help.xml at the config's pinned commit), which the

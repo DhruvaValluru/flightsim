@@ -49,7 +49,7 @@ def _scenes():
 
 
 def test_fourteen_scenes():
-    assert len(SCENARIOS) == 14
+    assert len(SCENARIOS) == 15
 
 
 @pytest.mark.parametrize("scene", list(_scenes()), ids=lambda s: f"{s[0]:02d}")

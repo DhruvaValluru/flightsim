@@ -29,7 +29,8 @@ def _clean(fdm):
 
 def test_a4_default_cruise_is_a_fighter_speed():
     spec = compile_prompt("fly the A4 at 3000 m for 10 seconds")
-    assert float(spec.airspeed.value) == 350.0
+    # 270 kt: the middle of the measured 3000..7000 m trim band (compiler.py)
+    assert float(spec.airspeed.value) == 270.0
 
 
 def test_a4_receives_steady_wind_and_turbulence():
@@ -248,3 +249,13 @@ def test_the_preview_model_s_span_is_the_flown_fdm_s():
            / "A4" / "A4.xml").read_text(encoding="utf-8")
     feet = float(re.search(r'<wingspan\s+unit="FT"\s*>\s*([\d.]+)\s*</wingspan>', xml).group(1))
     assert AIRFRAMES["A4"]["span_m"] == pytest.approx(feet * 0.3048, abs=0.005)
+
+
+def test_a4_default_speed_trims_over_the_matterhorn():
+    """Visual round 5 #11: the bare A4 prompt at 5000 m refused on trim at the
+    old 350 kt default; the measured default trims there."""
+    from core.scenario.validate import validate
+    spec = compile_prompt("chase view of the a4 over the matterhorn at 5000 m in strong wind "
+                          "and severe turbulence, flying north, for 6 seconds")
+    codes = [v.constraint for v in validate(spec).violations]
+    assert "envelope.trim_feasible" not in codes, codes
