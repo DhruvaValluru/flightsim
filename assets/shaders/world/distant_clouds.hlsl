@@ -10,7 +10,7 @@
 // streaky volumetric clouds that ended a few tens of kilometres out and an
 // EMPTY horizon; the engine's own sky-sphere panning clouds would cover the
 // SkyAtmosphere. This sheet draws the far deck and the horizon with ZERO
-// march cost: one shape evaluation per covered pixel (the SAME Perlin-Worley
+// march cost: one shape evaluation per covered pixel (the SAME weather-field
 // shape as cloud_layers.hlsl at the layer's mid-altitude slice, the SAME
 // quantile cut, so the far sheet continues the near volumetric cells), and
 // the normal comes from the shape's screen-space derivatives (ddx/ddy), not
@@ -53,8 +53,8 @@
 //   SheetFade        float   per frame: 0 with the camera inside the layer, 1 clear of it
 //   SeedOffsetKm     float3  the card's seeded noise offset (world_beauty.cloud_seed_offset_km)
 //   WindOffsetM      float3  the drift since t = 0, engine metres (the scene's drift law)
-const float FBM_MEAN = 0.779;
-const float FBM_SIGMA = 0.05;
+const float FBM_MEAN = 0.535;
+const float FBM_SIGMA = 0.073;
 const float PI_DC = 3.14159265;
 // shared: world cloud noise (cloud_layers.hlsl FWorldCloud, text-equal)
 struct FWorldCloud
@@ -102,18 +102,18 @@ struct FWorldCloud
 		return lerp(lerp(lerp(g000, g100, u), lerp(g010, g110, u), v),
 		            lerp(lerp(g001, g101, u), lerp(g011, g111, u), v), w);
 	}
-	// Four octaves of gradient noise, weights 1/2..1/16 renormalised, mapped to 0..1.
-	float PerlinFbm(float3 p, uint seed)
+	// Gradient noise on the plane (the z = 0 lattice row, 4 corners).
+	float Perlin2(float x, float y, uint seed)
 	{
-		float sum = 0.0;
-		float amp = 0.5;
-		for (int o = 0; o < 4; ++o)
-		{
-			sum += amp * Perlin(p, seed + (uint)o * 101u);
-			p = p * 2.03 + float3(17.1, 31.7, 7.3);
-			amp *= 0.5;
-		}
-		return saturate(0.5 + 0.5 * sum / 0.9375);
+		float ix = floor(x); float iy = floor(y);
+		int cx = (int)ix; int cy = (int)iy;
+		float fx = x - ix; float fy = y - iy;
+		float u = Fade(fx); float v = Fade(fy);
+		float g00 = Grad(Hash3(cx, cy, 0, seed), fx, fy, 0.0);
+		float g10 = Grad(Hash3(cx + 1, cy, 0, seed), fx - 1.0, fy, 0.0);
+		float g01 = Grad(Hash3(cx, cy + 1, 0, seed), fx, fy - 1.0, 0.0);
+		float g11 = Grad(Hash3(cx + 1, cy + 1, 0, seed), fx - 1.0, fy - 1.0, 0.0);
+		return lerp(lerp(g00, g10, u), lerp(g01, g11, u), v);
 	}
 	// Inverted cellular noise: 1 at a feature point, 0 a cell away (F1, 27 cells).
 	float Worley(float3 p, uint seed)
@@ -137,25 +137,52 @@ struct FWorldCloud
 		}
 		return 1.0 - min(sqrt(best), 1.0);
 	}
+	// The same on the plane (9 cells): a footprint, not a volume.
+	float Worley2(float x, float y, uint seed)
+	{
+		float ix = floor(x); float iy = floor(y);
+		int cx = (int)ix; int cy = (int)iy;
+		float best = 9.0;
+		for (int dy = -1; dy <= 1; ++dy)
+		{
+			for (int dx = -1; dx <= 1; ++dx)
+			{
+				uint h = Hash3(cx + dx, cy + dy, 0, seed);
+				float ex = (float)(cx + dx) + (float)(h & 1023u) / 1024.0 - x;
+				float ey = (float)(cy + dy) + (float)((h >> 10u) & 1023u) / 1024.0 - y;
+				best = min(best, ex * ex + ey * ey);
+			}
+		}
+		return 1.0 - min(sqrt(best), 1.0);
+	}
 	float Remap(float v, float lo, float hi)
 	{
 		return saturate((v - lo) / max(hi - lo, 1e-4));
 	}
-	// The Perlin-Worley shape: perlin dilated by a Worley cell, then cut by a
-	// two-octave Worley fbm (world_beauty.cloud_shape).
+	// Round 7 (Nubis-style weather field, world_beauty.cloud_shape): the
+	// footprint is a 2D weather map, so a cloud is a column with a flat base
+	// whose height grows with its excess over the cut (the cut rises with
+	// height: domes), not a 3D blob sliced by the march. Three terms:
+	//   cluster: two octaves of plane gradient noise at ~6x the cell size,
+	//            the fields and the clear gaps between them;
+	//   cells:   plane Worley at 2.1x, 1x and 0.46x the cell size, so the
+	//            clouds come in many sizes (one large, a few mid, many small);
+	//   billow:  one octave of 3D gradient noise, the only height term, so the
+	//            sides bulge instead of standing straight.
 	float Shape(float3 p, uint seed)
 	{
-		float perlin = PerlinFbm(p, seed);
-		float cells = Worley(p, seed + 211u);
-		float pw = Remap(perlin, cells - 1.0, 1.0);
-		float fbm = 0.75 * Worley(p * 2.03, seed + 307u) + 0.25 * Worley(p * 4.1, seed + 401u);
-		return Remap(pw, fbm - 1.0, 1.0);
+		float cluster = 0.5 + 0.5 * (0.667 * Perlin2(p.x * 0.17 + 3.1, p.y * 0.17 + 7.9, seed + 503u)
+			+ 0.333 * Perlin2(p.x * 0.35 + 11.3, p.y * 0.35 + 5.1, seed + 557u));
+		float cells = 0.5 * Worley2(p.x * 0.47 + 2.9, p.y * 0.47 + 8.3, seed + 401u)
+			+ 0.35 * Worley2(p.x, p.y, seed + 211u)
+			+ 0.15 * Worley2(p.x * 2.17 + 5.3, p.y * 2.17 + 1.7, seed + 307u);
+		float billow = 0.5 + 0.5 * Perlin(p * 1.9, seed);
+		return 0.42 * cluster + 0.5 * cells + 0.08 * billow;
 	}
-	// The erosion noise: a three-octave Worley fbm (world_beauty.cloud_detail).
+	// The erosion noise: a two-octave Worley fbm (world_beauty.cloud_detail).
 	float Detail(float3 p, uint seed)
 	{
-		return 0.625 * Worley(p, seed) + 0.25 * Worley(p * 2.03, seed + 97u)
-			+ 0.125 * Worley(p * 4.1, seed + 193u);
+		return 0.7 * Worley(p, seed) + 0.3 * Worley(p * 2.03, seed + 97u);
 	}
 };
 // end shared

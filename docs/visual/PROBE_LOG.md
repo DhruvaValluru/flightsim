@@ -3129,3 +3129,48 @@ the sky's reflection and gloss variation), #06, #08 (opened, not black) and #01 
 `-subject-meter=off` as the control; read look_applied.subject_exposure (mask_pixels, p50/p97
 before and after, stops). If the mask catches rain streaks or misses a small aircraft, raise
 `mask_luma_delta` or lower `min_pixels`; if whites still clip, lower `highlight_target_p97`.
+
+## round-7 clouds and sky (lane E)
+
+Round 7, 2026-11-11, Mac, uncompiled; nothing rendered. Read from round 4's frames
+(14da9437 at beauty on the Windows laptop, Intel iGPU, D3D11 SM5).
+
+**Fair cumulus were smeared, flat-lit strokes in a uniform carpet (#03, #04, #12, #13); the clear
+sky saturated with no horizon band; no aerial perspective in #01; no cloud shadows on the ground.**
+- Shape: the 3D Perlin-Worley field had one cell size (2.5 km Worley cells) and varied as much
+  with height as across. `FWorldCloud::Shape` (cloud_layers.hlsl and distant_clouds.hlsl,
+  text-equal; Python `world_beauty.cloud_shape`) is now a Nubis-style 2D weather field: a cluster
+  term (fields and gaps ~15 km across), Worley cells at three sizes, one 3D billow octave. A
+  column stands on the flat base and rises until the cut (raised over `top_rounding`) catches it:
+  big clouds tower, small ones stay low domes. Moments re-measured: mean 0.535, sigma 0.073; the
+  drawn share is still the stated cover (tests). Cheaper per sample: 43 + 54 lattice hashes
+  (shape + in-cloud erosion) against 113 + 81. The distant sheet evaluates the same plane field,
+  so its footprint continues the volumetric cells past the hand-over.
+- Light: the constrained shadow march is 6 km, not 15 (`CLOUD_SHADOW_CONSTRAINED_KM`,
+  `CloudShadowConstrainedKm`), the same 10 samples: 60 m to 1.1 km steps instead of 150 m then
+  450 m, so a cell shadows itself and its base darkens. View/shadow sample counts and the 80 km
+  trace are ef361bd6's; the cheaper shape pays for the extra in-layer evaluations.
+- Sky: a clear world whose card states no visibility (randomization's unsampled 0) kept the
+  engine's Mie layer (0.004 /km). It now splits the Mie layer at `CLEAR_DEFAULT_VISIBILITY_KM` 40
+  (about 0.045 /km scattering at the ground, scale height 1.2 km): horizon whitening, a paler sky
+  towards it, aerial perspective on far terrain. The height fog keeps its density; a stated
+  visibility, `-aerosol=` and the other presets are unchanged. Record:
+  `world_beauty.atmosphere.default_visibility_km`.
+- Cloud shadows: clear and hazy worlds with a drawn layer of cover >= 0.1 turn
+  `bCastCloudShadows` on (`fair_cloud_shadows`), same switch and `-deck-shadow=off` A/B as the deck.
+- No third-party asset: every field is generated in the shader from a hashed lattice (no texture,
+  no tile, no repeat), so nothing is added to THIRD_PARTY_VISUAL.md.
+
+Needs: the bridge rebuilt (FlightSimClouds.cpp), then `ue_create_materials.py`
+(M_FlightSimCloudLayers generation 3/4 and M_FlightSimDistantClouds 2/2 rebuild in place).
+
+Probes r7 (beauty, no switch unless named; every value UNCALIBRATED):
+1. #13 first. Read the capture time against round 6's (a D3D11 device-removed error or a timeout:
+   put the shadow march back to 15 km first, the shape second). Pass: separate cumulus of many
+   sizes with clear gaps, flat darker bases, lit domes; no repeating carpet.
+2. #03 and #12: the same, plus dappled cloud shadows on the ground
+   (`clouds.deck_shadow.fair_cloud_shadows` true). A/B: `FLIGHTSIM_RENDER_SWITCHES="-deck-shadow=off"`.
+3. #01: the ridges 5-10 km off lose contrast and turn bluish-grey against the foreground; read
+   `atmosphere.default_visibility_km` 40. Too milky: try 60 km; still contrasty: 25 km.
+4. #04 and #02: the sky at the horizon is whiter than the zenith (saturation falls from the top
+   row to the row just above the horizon).

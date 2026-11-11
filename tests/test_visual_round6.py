@@ -246,13 +246,15 @@ def test_the_cpp_deck_shadow_is_the_pythons_and_switchable():
     pure = CLOUDS_CPP[CLOUDS_CPP.index("FLIGHTSIM-WORLD-PURE-BEGIN"):CLOUDS_CPP.index("FLIGHTSIM-WORLD-PURE-END")]
     assert _cpp_constant(pure, "DeckShadowMinCover") == world_beauty.DECK_SHADOW_MIN_COVER
     law = _function(pure, "inline bool DeckShadowsBeam(int Preset, double Cover)")
+    law = law[:law.index("\n\t}\n")]   # the law alone (the pure block indents its bodies)
     for preset in world_beauty.DECK_SHADOW_PRESETS:
         assert f"Preset == Preset{preset.capitalize()}" in law
     assert "Preset == PresetClear" not in law and "Preset == PresetHazy" not in law
     apply = _function(CLOUDS_CPP, "void FFlightSimWorldBeauty::ApplyClouds(")
     assert "const bool bWanted = DeckShadowsBeam(Preset, TopCover);" in apply
     assert "TopCover = FMath::Max(TopCover, State.Cover);" in apply
-    assert "if (bWanted && bSwitchOn)\n\t\t\t{\n\t\t\t\tDeckSun->bCastCloudShadows = true;" in apply
+    # round 7 (lane E): the clear world's fair cumulus shares the switch (world_beauty.fair_cloud_shadows)
+    assert "if ((bWanted || bFairShadows) && bSwitchOn)\n\t\t\t{\n\t\t\t\tDeckSun->bCastCloudShadows = true;" in apply
     assert 'Out->SetObjectField(TEXT("deck_shadow"), DeckShadow);' in apply
     # The switch: the command line or FLIGHTSIM_RENDER_SWITCHES, default on.
     build = _function(CLOUDS_CPP, "bool FFlightSimWorldBeauty::Build(")

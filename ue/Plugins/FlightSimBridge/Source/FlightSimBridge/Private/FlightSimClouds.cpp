@@ -156,6 +156,15 @@ namespace FlightSimWorldPure
 	constexpr double CloudOvercastCover = 0.85;
 	constexpr double StratocumulusMaxThicknessM = 900.0;
 	constexpr double StratocumulusMinCover = 0.5;
+	// Round 7 (lane E, world_beauty.FAIR_CLOUD_SHADOW_PRESETS / _MIN_COVER,
+	// fair_cloud_shadows): a clear or hazy world whose drawn layer covers at
+	// least this casts its cumulus shadows on the ground (round 4's clear
+	// scenes drew clouds over unshadowed ground).
+	constexpr double FairCloudShadowMinCover = 0.1;
+	inline bool FairCloudShadows(int Preset, double Cover)
+	{
+		return (Preset == PresetClear || Preset == PresetHazy) && Cover >= FairCloudShadowMinCover;
+	}
 	// Visual round 6: the deck shadows the beam (world_beauty.DECK_SHADOW_PRESETS,
 	// DECK_SHADOW_MIN_COVER, deck_shadows_beam): a deck preset with a drawn layer
 	// of at least this cover turns the sun's cloud shadows on in beauty.
@@ -227,14 +236,19 @@ namespace FlightSimWorldPure
 	constexpr double CloudShadowKmPerKm = 1.0;
 	constexpr double CloudShadowMinKm = 1.0;
 	constexpr double CloudShadowMaxKm = 4.0;
-	// The constrained row's shadow march: ef361bd6's fixed 15 km.
-	constexpr double CloudShadowConstrainedKm = 15.0;
+	// The constrained row's shadow march. ef361bd6 marched a fixed 15 km (10 quadratic
+	// samples: 150 m then 450 m steps, opaque or empty at cloud extinction, so a cell's
+	// light came in contours and its base was lit like its top). Round 7 (lane E): 6 km,
+	// the same 10 samples (60 m to 1.1 km steps), so a cell shadows itself and its base
+	// darkens; the cheaper weather-field shape (cloud_layers.hlsl) pays for the extra
+	// in-layer evaluations. The sample counts and the trace stay ef361bd6's.
+	constexpr double CloudShadowConstrainedKm = 6.0;
 	inline double CloudShadowTracingKm(double ThicknessM)
 	{
 		const double Km = (ThicknessM > 0.0 ? ThicknessM : 0.0) / 1000.0 * CloudShadowKmPerKm;
 		return Km < CloudShadowMinKm ? CloudShadowMinKm : (Km > CloudShadowMaxKm ? CloudShadowMaxKm : Km);
 	}
-	// The shadow march for the GPU class: the constrained class keeps 15 km.
+	// The shadow march for the GPU class: the constrained class a fixed CloudShadowConstrainedKm.
 	inline double CloudShadowTracingKmFor(bool bConstrained, double ThicknessM)
 	{
 		return bConstrained ? CloudShadowConstrainedKm : CloudShadowTracingKm(ThicknessM);
@@ -394,6 +408,17 @@ namespace FlightSimWorldPure
 		// atmosphere's own) + Mie + fog = Beta at the ground, counted once.
 		Out.FogFactor = Beta > 0.0 ? (Haze - Mie > 0.0 ? Haze - Mie : 0.0) / Beta : 0.0;
 		return Out;
+	}
+	// Round 7 (lane E, world_beauty.CLEAR_DEFAULT_VISIBILITY_KM): a CLEAR world
+	// whose card states no visibility (an unsampled 0) gets the Mie layer of a
+	// 40 km clear day instead of the engine's near-aerosol-free default, so the
+	// horizon whitens, the sky desaturates towards it and far ridges take aerial
+	// perspective (round 4's #01, #03, #12, #13). The height fog is left as the
+	// scene built it (FogFactor 1): only the atmosphere's aerosol is added.
+	constexpr double ClearDefaultVisibilityKm = 40.0;
+	inline double AerosolVisibilityKm(int Preset, double VisibilityKm)
+	{
+		return VisibilityKm > 0.0 ? VisibilityKm : (Preset == PresetClear ? ClearDefaultVisibilityKm : 0.0);
 	}
 
 	inline int SelectCloud(double Cover, double ThicknessM, int Preset)
@@ -1363,6 +1388,24 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 			     "into the atmosphere's Mie layer; the fog keeps the rest of the haze, so Rayleigh + Mie + fog "
 			     "= the Koschmieder beta at the ground (extinction counted once)"));
 	}
+	else if (!bAerosolProbe && AerosolVisibilityKm(Preset, VisibilityKm) > 0.0)
+	{
+		// Round 7: the clear world's default aerosol; the fog keeps its density.
+		const double DefaultKm = AerosolVisibilityKm(Preset, VisibilityKm);
+		const FMieSplit Split = MieSplit(DefaultKm, Row[AtmMieShare], Row[AtmMieCapPerKm]);
+		Atmosphere->SetMieScatteringScale(static_cast<float>(Split.MieScatteringPerKm));
+		Atmosphere->SetMieAbsorptionScale(static_cast<float>(Split.MieAbsorptionPerKm));
+		Out->SetNumberField(TEXT("default_visibility_km"), DefaultKm);
+		Out->SetNumberField(TEXT("mie_scattering_scale_per_km"), Split.MieScatteringPerKm);
+		Out->SetNumberField(TEXT("mie_absorption_scale_per_km"), Split.MieAbsorptionPerKm);
+		Out->SetNumberField(TEXT("mie_share"), Row[AtmMieShare]);
+		Out->SetNumberField(TEXT("mie_cap_per_km"), Row[AtmMieCapPerKm]);
+		Out->SetNumberField(TEXT("fog_factor"), FogFactor);
+		Out->SetStringField(TEXT("mie_basis"),
+			TEXT("the card states no visibility_km: a clear world takes the Mie layer of a "
+			     "ClearDefaultVisibilityKm day (world_beauty.CLEAR_DEFAULT_VISIBILITY_KM, UNCALIBRATED) for the "
+			     "horizon haze and the aerial perspective; the height fog is kept as the scene built it"));
+	}
 	else
 	{
 		Out->SetStringField(TEXT("mie_basis"), bAerosolProbe
@@ -1718,6 +1761,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			TopCover = FMath::Max(TopCover, State.Cover);
 		}
 		const bool bWanted = DeckShadowsBeam(Preset, TopCover);
+		const bool bFairShadows = FairCloudShadows(Preset, TopCover);
 		const bool bSwitchOn = DeckShadowSwitch != TEXT("off");
 		UDirectionalLightComponent* DeckSun = Scene.Sun != nullptr
 			? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
@@ -1726,10 +1770,15 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		DeckShadow->SetNumberField(TEXT("top_cover"), TopCover);
 		DeckShadow->SetNumberField(TEXT("min_cover"), DeckShadowMinCover);
 		DeckShadow->SetBoolField(TEXT("deck_shadows_beam"), bWanted);
+		DeckShadow->SetBoolField(TEXT("fair_cloud_shadows"), bFairShadows);
+		DeckShadow->SetNumberField(TEXT("fair_min_cover"), FairCloudShadowMinCover);
 		if (DeckSun != nullptr)
 		{
 			DeckShadow->SetBoolField(TEXT("sun_cast_cloud_shadows_before"), DeckSun->bCastCloudShadows != 0);
-			if (bWanted && bSwitchOn)
+			// Round 7 (lane E): a clear or hazy world's drawn fair cumulus casts
+			// its shadows on the ground too (round 4's clear scenes had none):
+			// the same switch, the same -deck-shadow=off A/B.
+			if ((bWanted || bFairShadows) && bSwitchOn)
 			{
 				DeckSun->bCastCloudShadows = true;
 				DeckSun->MarkRenderStateDirty();
@@ -1737,7 +1786,9 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			DeckShadow->SetBoolField(TEXT("sun_cast_cloud_shadows"), DeckSun->bCastCloudShadows != 0);
 		}
 		DeckShadow->SetStringField(TEXT("applied"), DeckSun == nullptr ? TEXT("no sun light in the scene")
-			: (!bWanted ? TEXT("not a deck preset with a drawn layer of min_cover: the scene's switch stands")
+			: (!bWanted ? (bFairShadows && bSwitchOn
+				? TEXT("a clear or hazy world's drawn cumulus (fair_min_cover) casts its cloud shadows (round 7)")
+				: TEXT("not a deck preset with a drawn layer of min_cover: the scene's switch stands"))
 			   : (bSwitchOn ? TEXT("the sun casts the drawn deck's cloud shadow (bCastCloudShadows)")
 			                : TEXT("-deck-shadow=off: the scene's switch stands"))));
 		DeckShadow->SetStringField(TEXT("basis"),
@@ -1748,8 +1799,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 	}
 	Out->SetNumberField(TEXT("unmodelled_clouds"), UnmodelledClouds);
 	Out->SetStringField(TEXT("coverage_law"),
-		TEXT("cloud_layers.hlsl (round 2: Perlin-Worley shape, domed tops, in-cloud erosion) cuts the shape noise "
-		     "at its (1 - cover) quantile: FBM_MEAN 0.779 + FBM_SIGMA 0.05 x probit(1 - cover) (the noise's own "
+		TEXT("cloud_layers.hlsl (round 7: a Nubis-style 2D weather field, flat bases, domed tops, in-cloud erosion) cuts the shape noise "
+		     "at its (1 - cover) quantile: FBM_MEAN 0.535 + FBM_SIGMA 0.073 x probit(1 - cover) (the noise's own "
 		     "moments, world_beauty.CLOUD_FBM_*), started early by half the erosion's share of the soft edge, so "
 		     "the drawn share of sky at full profile is the stated cover"));
 	Out->SetNumberField(TEXT("view_sample_count_scale"), ViewScale);

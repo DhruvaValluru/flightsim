@@ -2996,7 +2996,9 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: Generation 2: cloud_layers.hlsl's Perlin-Worley shape, rounded tops and
 #: in-cloud erosion. Bump with every change to a listed material's shader.
 #: Distant clouds 1: visual round 5 L3's first distant_clouds.hlsl.
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "2", "M_FlightSimDistantClouds": "1"}
+#: Round 7 (lane E, 2026-11-11): clouds 3 / distant 2, the Nubis-style weather
+#: field both shaders share (FWorldCloud::Shape, world_beauty.cloud_shape).
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "3", "M_FlightSimDistantClouds": "2"}
 
 
 def world_graph_stale(name):
@@ -3044,8 +3046,8 @@ def world_stamp(material, name):
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "2", "M_FlightSimTilesBeauty": "2",
-                     "M_FlightSimCloudLayers": "3", "M_FlightSimScatter": "1",  # clouds 3: round-2 Perlin-Worley shader
-                     "M_FlightSimDistantClouds": "1"}   # visual round 5, L3: the distant sheet
+                     "M_FlightSimCloudLayers": "4", "M_FlightSimScatter": "1",  # clouds 4: round-7 weather-field shader
+                     "M_FlightSimDistantClouds": "2"}   # distant 2: round-7 weather-field shared noise
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
 
