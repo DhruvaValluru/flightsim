@@ -15,7 +15,7 @@ render, and none on `-quality=measure`:
 | `pixel_moving_effects` | `RenderWriteLookContract` (FlightSimRenderCommandlet.cpp) | the beauty capture's show flags and post-process settings read back after every lane ran, and `aircraft_look.heat_haze` |
 | `beauty_samples` | `RenderWriteLookContract` | `render_settings.beauty_path.accumulation.captures_per_frame` (still samples), the TSR history constants, `-pathtrace-spp`, the engine motion blur's shutter |
 | `beauty_only_actors` | `RenderWriteLookContract` | `VisualScene.BeautyOnlyActors` (the weather, weather-look, rain, starfield and world fair-cumulus actors appended to it), `AircraftFX.BeautyOnlyActors`, and the world's volumetric cloud owners (hidden by the Cloud show flag) as `{"name", "source", "hidden_by"}` objects |
-| `cloud_occlusion` | `FFlightSimWorldBeauty::CloudOcclusionRecord` (world) | the per-frame slab model; `basis` is `"modelled"`, never `"measured"` |
+| `cloud_occlusion` | `FFlightSimWorldBeauty::CloudOcclusionRecord` (world), then `RenderMergeMeasuredCover` (commandlet) | the per-frame slab model (`basis` `"modelled"`), replaced on a beauty raster render by the measured cover (`basis` `"measured"`, below) when it ran |
 
 The commandlet writes one `pixel_moving_effects` entry for each of
 `motion_blur`, `depth_of_field`, `heat_haze`, `path_tracer_filter`,
@@ -181,6 +181,48 @@ The world lane's per-frame rows, `look_applied.world_beauty.frames[]`
 (a drawn cloud outside the slab model, so "not flagged" is only a lower
 bound), makes the run beauty-not-label-aligned unless `cloud_occlusion`
 carries a `"measured"` covered fraction, which supersedes the model.
+
+**The measured cover (2026-11-11).** On a `-quality=beauty` raster render
+with `-labels` (never on measure or pathtrace), the commandlet measures
+the covered fraction itself (`FlightSimRenderCommandlet.cpp`, constants at
+`RenderCoverCaptureDivisor`). For each sampled delivered frame it takes two
+extra captures at half the output size (`capture_px`) from the beauty's
+camera, pose and field of view: one as the beauty draws, one with every
+`beauty_only_actors` entry hidden (`HiddenActors`) and the Cloud show flag
+off. Both come from their own capture component: lens-free, no TSR, no
+persistent view state, manual exposure, no post blendables. The beauty
+capture's hidden list and temporal history are never touched, and the
+captures run after the frame's readback, so the beauty frame is unaffected.
+Inside the subject's label mask (the primary `int_id` in
+`frame_NNNN_mask.png`; a capture pixel counts when at least 3/4 of its
+2x2 block is the subject), a pixel is covered when its sRGB luma differs
+between the two captures by more than 10 % of the brighter one and by
+more than 3 codes. The frame's fraction is covered pixels / mask pixels.
+Every delivered frame is sampled up to 64, then at a fixed stride. A
+frame whose mask shows no subject pixel is measured as 0. The fraction is
+an upper bound: a hidden cloud's shadow and reflection on the subject also
+count as covered. The thresholds are UNCALIBRATED (stated, not tuned).
+
+When every sampled frame was measured, the policy stays
+`labels_unoccluded` and the record carries:
+
+| key | meaning |
+|---|---|
+| `subject_occluded_fraction` | the max over the sampled frames |
+| `basis` | `"measured"` |
+| `method` | the rule above, in words |
+| `threshold` | `{"relative_luma": 0.10, "luma_floor_codes": 3, "mask_block_share": 0.75, "basis": ...}` |
+| `capture_px` | `[width, height]` of the two captures |
+| `frames_measured`, `frames_delivered`, `sample` | how many frames, out of how many, at what stride |
+| `measured_frames` | per frame: `frame`, `subject_label_pixels`, `mask_pixels`, `changed_pixels`, `fraction` (or `not_measured` with the reason) |
+| `modelled_fraction`, `modelled_basis`, `modelled_method` | the world lane's numbers it replaced (`modelled_fraction` null when the model had none) |
+
+When it did not run (`-measure-cover=off` on the command line or in
+`FLIGHTSIM_RENDER_SWITCHES`, no `-labels`, no subject, an engine-metered
+exposure, pathtrace) or a sampled frame could not be measured, the
+modelled fraction (or null) stands, `basis` gains `"; cover not measured:
+<why>"`, and `measured_cover` holds the reason. The verifier's rule is
+unchanged: only `basis == "measured"` at or below the tolerance is aligned.
 
 Decision (verifier-tooling, 2026-11-09): a cloud in front of the
 aircraft in the beauty and absent from the mask is a label error, not a

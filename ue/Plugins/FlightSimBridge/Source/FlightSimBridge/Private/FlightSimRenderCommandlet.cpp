@@ -1714,6 +1714,138 @@ namespace
 		return Out;
 	}
 
+	// -- The measured cover (2026-11-11): render.json cloud_occlusion ----------
+	// look_label_alignment (core/capture/verify.py) grades a beauty render whose
+	// cloud_occlusion.policy is labels_unoccluded only on a "measured"
+	// subject_occluded_fraction; the world lane's slab model is "modelled". So,
+	// beauty raster only (-quality=beauty; never measure, never pathtrace), each
+	// sampled delivered frame takes two more captures at 1/RenderCoverCaptureDivisor
+	// of the output size from the beauty's camera, pose and field of view: one as
+	// the beauty draws (beauty-only actors and the Cloud show flag as the beauty
+	// has them), one with every beauty_only_actors entry hidden (HiddenActors, the
+	// label captures' mechanism) and the Cloud show flag off (the world's
+	// volumetric clouds, as on every label capture). Inside the subject's label
+	// mask (frame_NNNN_mask.png == the primary int_id, a capture pixel counted
+	// when at least RenderCoverMaskBlockShare of its block is the subject) a pixel
+	// is covered when its sRGB luma differs between the two by more than
+	// RenderCoverRelativeThreshold of the brighter one AND more than
+	// RenderCoverLumaFloorCodes codes. fraction = covered / mask pixels; the max
+	// over the sampled frames is the record. Every delivered frame is sampled up
+	// to RenderCoverMaxSampledFrames, then a fixed stride. The cover capture is
+	// its OWN component (no persistent view state, no TSR, lens-free, manual
+	// exposure, no blendables): the beauty capture's hidden list and temporal
+	// history are never touched, and it runs after the frame's readback, beside
+	// the label captures, so the beauty frame is unaffected (no re-warm needed,
+	// unlike the subject meter, which hides the aircraft on the beauty capture
+	// itself). An UPPER bound: hiding a cloud also removes its shadow and its
+	// reflection on the subject, which count as covered. -measure-cover=off
+	// (the command line or FLIGHTSIM_RENDER_SWITCHES) skips it. UNCALIBRATED
+	// thresholds (stated, not tuned on a render).
+	constexpr int32 RenderCoverCaptureDivisor = 2;
+	constexpr double RenderCoverRelativeThreshold = 0.10;
+	constexpr int32 RenderCoverLumaFloorCodes = 3;
+	constexpr double RenderCoverMaskBlockShare = 0.75;
+	constexpr int32 RenderCoverMaxSampledFrames = 64;
+
+	int32 RenderCoverLuma(const FColor& Colour)
+	{
+		return FMath::Clamp(static_cast<int32>(0.2126 * Colour.R + 0.7152 * Colour.G + 0.0722 * Colour.B + 0.5), 0, 255);
+	}
+
+	// The cover capture follows the beauty's post-process settings at each
+	// frame (copied by the caller) minus what would make the two captures
+	// differ by anything but the beauty-only actors: the lens (RenderMakeLensFree),
+	// the post blendables (the rain on the glass is graded as a
+	// pixel_moving_effect, not here) and any metered exposure.
+	void RenderMakeCoverCapture(USceneCaptureComponent2D* Cover)
+	{
+		RenderMakeLensFree(Cover);
+		FPostProcessSettings& Post = Cover->PostProcessSettings;
+		Post.WeightedBlendables.Array.Reset();
+		Post.bOverride_AutoExposureMethod = true;
+		Post.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
+	}
+
+	struct FRenderCoverMeasure
+	{
+		bool bAttempted = false;   // the cover capture was built and ran
+		FString NotRun;            // why the fraction is not a measurement (empty: measured)
+		int32 CaptureWidth = 0;
+		int32 CaptureHeight = 0;
+		int32 Stride = 1;
+		int32 FramesDelivered = 0;
+		int32 FramesSampled = 0;
+		int32 FramesMeasured = 0;
+		double MaxFraction = 0.0;
+		TArray<TSharedPtr<FJsonValue>> Frames;
+
+		bool IsMeasured() const { return bAttempted && NotRun.IsEmpty() && FramesMeasured > 0; }
+	};
+
+	// Writes the measurement into the cloud_occlusion record (policy
+	// labels_unoccluded only). Measured: subject_occluded_fraction is the max
+	// over the sampled frames with basis "measured", the modelled numbers kept
+	// under modelled_fraction / modelled_basis / modelled_method. Not measured:
+	// today's modelled (or null) fraction stands and basis says why.
+	void RenderMergeMeasuredCover(FJsonObject& Occlusion, const FRenderCoverMeasure& Cover)
+	{
+		FString Policy;
+		Occlusion.TryGetStringField(TEXT("policy"), Policy);
+		if (Policy != TEXT("labels_unoccluded"))
+		{
+			Occlusion.SetStringField(TEXT("measured_cover"),
+				FString::Printf(TEXT("not merged: policy %s"), *Policy));
+			return;
+		}
+		FString ModelledBasis;
+		Occlusion.TryGetStringField(TEXT("basis"), ModelledBasis);
+		if (!Cover.IsMeasured())
+		{
+			const FString Why = Cover.NotRun.IsEmpty() ? FString(TEXT("no frame was measured")) : Cover.NotRun;
+			Occlusion.SetStringField(TEXT("basis"), ModelledBasis + TEXT("; cover not measured: ") + Why);
+			Occlusion.SetStringField(TEXT("measured_cover"), Why);
+			if (Cover.Frames.Num() > 0)
+			{
+				Occlusion.SetArrayField(TEXT("measured_frames"), Cover.Frames);
+			}
+			return;
+		}
+		const TSharedPtr<FJsonValue> Modelled = Occlusion.Values.FindRef(TEXT("subject_occluded_fraction"));
+		Occlusion.SetField(TEXT("modelled_fraction"),
+			Modelled.IsValid() ? Modelled : TSharedPtr<FJsonValue>(MakeShared<FJsonValueNull>()));
+		Occlusion.SetStringField(TEXT("modelled_basis"), ModelledBasis);
+		FString ModelledMethod;
+		if (Occlusion.TryGetStringField(TEXT("method"), ModelledMethod))
+		{
+			Occlusion.SetStringField(TEXT("modelled_method"), ModelledMethod);
+		}
+		Occlusion.SetNumberField(TEXT("subject_occluded_fraction"), Cover.MaxFraction);
+		Occlusion.SetStringField(TEXT("basis"), TEXT("measured"));
+		Occlusion.SetStringField(TEXT("method"),
+			TEXT("max over the sampled frames of covered / mask pixels: two lens-free, manual-exposure captures ")
+			TEXT("from the beauty's camera, one as the beauty draws, one with beauty_only_actors hidden and the ")
+			TEXT("Cloud show flag off; a mask pixel (the primary int_id in the label mask) is covered when its ")
+			TEXT("sRGB luma differs by more than threshold of the brighter AND more than luma_floor_codes; an ")
+			TEXT("upper bound (a hidden cloud's shadow and reflection on the subject count as covered)"));
+		TSharedPtr<FJsonObject> Threshold = MakeShared<FJsonObject>();
+		Threshold->SetNumberField(TEXT("relative_luma"), RenderCoverRelativeThreshold);
+		Threshold->SetNumberField(TEXT("luma_floor_codes"), RenderCoverLumaFloorCodes);
+		Threshold->SetNumberField(TEXT("mask_block_share"), RenderCoverMaskBlockShare);
+		Threshold->SetStringField(TEXT("basis"), TEXT("UNCALIBRATED: stated, not tuned on a render"));
+		Occlusion.SetObjectField(TEXT("threshold"), Threshold);
+		TArray<TSharedPtr<FJsonValue>> CapturePx;
+		CapturePx.Add(MakeShared<FJsonValueNumber>(Cover.CaptureWidth));
+		CapturePx.Add(MakeShared<FJsonValueNumber>(Cover.CaptureHeight));
+		Occlusion.SetArrayField(TEXT("capture_px"), CapturePx);
+		Occlusion.SetNumberField(TEXT("frames_measured"), Cover.FramesMeasured);
+		Occlusion.SetNumberField(TEXT("frames_delivered"), Cover.FramesDelivered);
+		Occlusion.SetStringField(TEXT("sample"), FString::Printf(
+			TEXT("every %d delivered frame(s) from frame 0 (every frame up to %d, then a fixed stride)"),
+			Cover.Stride, RenderCoverMaxSampledFrames));
+		Occlusion.SetArrayField(TEXT("measured_frames"), Cover.Frames);
+		Occlusion.SetStringField(TEXT("measured_cover"), TEXT("-measure-cover=on (FlightSimRenderCommandlet.cpp)"));
+	}
+
 	// -- Integration (visual overhaul, 2026-11-09): the beauty-look contract --
 	// The verifier lane (core/capture/beauty_look.py LOOK_KEYS, graded by
 	// look_record / look_label_alignment in core/capture/verify.py; schema in
@@ -1741,6 +1873,7 @@ namespace
 		const TArray<AActor*>* AircraftBeautyOnly = nullptr;      // AircraftFX.BeautyOnlyActors
 		const FFlightSimWorldBeauty* World = nullptr;
 		UWorld* EngineWorld = nullptr;
+		const FRenderCoverMeasure* Cover = nullptr;               // the measured cover (beauty)
 	};
 
 	TSharedPtr<FJsonObject> RenderPixelEffect(const TCHAR* Name, bool bOn, double BoundPx,
@@ -1965,6 +2098,10 @@ namespace
 					TEXT("not modelled: the world beauty look was not built, so no lane estimated what the ")
 					TEXT("beauty-only actors cover"));
 			}
+		}
+		if (In.Cover != nullptr)
+		{
+			RenderMergeMeasuredCover(*Occlusion, *In.Cover);
 		}
 		Root.SetObjectField(TEXT("cloud_occlusion"), Occlusion);
 	}
@@ -6524,6 +6661,103 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		BeautyPath->SetObjectField(TEXT("accumulation"), SubFrames);
 	}
 
+	// -- the measured cover (2026-11-11; constants and rule at
+	// RenderCoverCaptureDivisor) ----------------------------------------------
+	// Beauty raster only: on measure and pathtrace no component is built and
+	// nothing below runs, so their frames are what they were. Built here,
+	// after every lane and meter has set the beauty capture; its post-process
+	// settings are re-copied from the beauty at each sampled frame.
+	FString MeasureCoverSwitch = TEXT("on");
+	FParse::Value(*RenderSwitches, TEXT("measure-cover="), MeasureCoverSwitch);
+	if (MeasureCoverSwitch != TEXT("on") && MeasureCoverSwitch != TEXT("off"))
+	{
+		return Fail(FString::Printf(TEXT("render.measure_cover: -measure-cover=%s is not on or off"),
+		                            *MeasureCoverSwitch));
+	}
+	FRenderCoverMeasure CoverMeasure;
+	CoverMeasure.FramesDelivered = DeliveredFrames;
+	CoverMeasure.Stride = FMath::Max(1, (DeliveredFrames + RenderCoverMaxSampledFrames - 1) / RenderCoverMaxSampledFrames);
+	UTextureRenderTarget2D* CoverTarget = nullptr;
+	USceneCaptureComponent2D* CoverCapture = nullptr;
+	TArray<AActor*> CoverBeautyOnly;
+	bool bCoverBeautyCloud = false;
+	if (bPathTrace)
+	{
+		CoverMeasure.NotRun = TEXT("-quality=pathtrace: the cover is measured on beauty raster renders only");
+	}
+	else if (!bBeautyRaster)
+	{
+		CoverMeasure.NotRun = TEXT("not a beauty raster render");
+	}
+	else if (MeasureCoverSwitch == TEXT("off"))
+	{
+		CoverMeasure.NotRun = TEXT("-measure-cover=off");
+	}
+	else if (!bLabels)
+	{
+		CoverMeasure.NotRun = TEXT("no label mask to measure inside (-labels not given)");
+	}
+	else if (bHideAircraft || Scenario.Aircraft == nullptr || LabelPrimaryIntId == 0)
+	{
+		CoverMeasure.NotRun = TEXT("no subject in the label mask (no aircraft, or it is hidden)");
+	}
+	else if (!(Capture->PostProcessSettings.bOverride_AutoExposureMethod &&
+	           Capture->PostProcessSettings.AutoExposureMethod == EAutoExposureMethod::AEM_Manual))
+	{
+		CoverMeasure.NotRun = TEXT("the beauty's exposure is metered by the engine (not manual): a fresh capture ")
+		                      TEXT("would not share it");
+	}
+	else
+	{
+		for (const TArray<AActor*>* CoverList : {&VisualScene.BeautyOnlyActors, &Weather.BeautyOnlyActors,
+		                                         &AircraftFX.BeautyOnlyActors})
+		{
+			for (AActor* CoverActor : *CoverList)
+			{
+				if (CoverActor != nullptr)
+				{
+					CoverBeautyOnly.AddUnique(CoverActor);
+				}
+			}
+		}
+		CoverMeasure.CaptureWidth = FMath::Max(1, Width / RenderCoverCaptureDivisor);
+		CoverMeasure.CaptureHeight = FMath::Max(1, Height / RenderCoverCaptureDivisor);
+		CoverTarget = NewObject<UTextureRenderTarget2D>();
+		CoverTarget->RenderTargetFormat = RTF_RGBA8_SRGB;
+		CoverTarget->ClearColor = FLinearColor::Black;
+		CoverTarget->bAutoGenerateMips = false;
+		CoverTarget->InitAutoFormat(CoverMeasure.CaptureWidth, CoverMeasure.CaptureHeight);
+		CoverTarget->UpdateResourceImmediate(true);
+		CoverCapture = NewObject<USceneCaptureComponent2D>(Director, TEXT("CoverCapture"));
+		CoverCapture->SetupAttachment(Director->Camera);
+		CoverCapture->SetMobility(EComponentMobility::Movable);
+		CoverCapture->TextureTarget = CoverTarget;
+		CoverCapture->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+		CoverCapture->bCaptureEveryFrame = false;
+		CoverCapture->bCaptureOnMovement = false;
+		// No view state: each capture is a fresh view, so the shown and hidden
+		// captures never blend through a history (TSR, cloud reconstruction).
+		CoverCapture->bAlwaysPersistRenderingState = false;
+		CoverCapture->FOVAngle = Capture->FOVAngle;
+		CoverCapture->ShowFlags = Capture->ShowFlags;
+		CoverCapture->ShowFlags.SetAntiAliasing(false);
+		CoverCapture->ShowFlags.SetTemporalAA(false);
+		CoverCapture->PostProcessSettings = Capture->PostProcessSettings;
+		CoverCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
+		CoverCapture->HiddenActors = Capture->HiddenActors;
+		CoverCapture->HiddenComponents = Capture->HiddenComponents;
+		RenderMakeCoverCapture(CoverCapture);
+		RenderPinShowFlags(CoverCapture);
+		CoverCapture->RegisterComponent();
+		bCoverBeautyCloud = CoverCapture->ShowFlags.Cloud != 0;
+		CoverMeasure.bAttempted = true;
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("measured cover: %dx%d captures, %d beauty-only actor(s) hidden (+ Cloud show flag), every %d ")
+		       TEXT("frame(s) of %d; -measure-cover=off skips it"),
+		       CoverMeasure.CaptureWidth, CoverMeasure.CaptureHeight, CoverBeautyOnly.Num(), CoverMeasure.Stride,
+		       DeliveredFrames);
+	}
+
 	TArray<TSharedPtr<FJsonValue>> FrameRecords;
 	TArray<FColor> Pixels;
 	int32 Captured = 0;
@@ -6853,6 +7087,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// S4: this frame's metric depth (+inf for sky), handed from the label
 		// bundle to the linear passes, which write 0, 0, 0 where it is sky.
 		TArray<float> LabelDepthThisFrame;
+		TArray<uint8> LabelMaskThisFrame;   // the label mask, kept for the measured cover only
 		if (bLabels)
 		{
 			// Every label capture sees what the colour capture saw: the same
@@ -7235,6 +7470,131 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			Record->SetObjectField(TEXT("labels"), Labels);
 			LabelDepthThisFrame = MoveTemp(DepthMetres);
+			if (CoverCapture != nullptr)
+			{
+				LabelMaskThisFrame = MoveTemp(Mask);   // the measured cover's subject mask (below)
+			}
+		}
+		// -- the measured cover (rule at RenderCoverCaptureDivisor): after the
+		// beauty readback and beside the labels; the beauty capture is not touched.
+		if (CoverCapture != nullptr && Captured % CoverMeasure.Stride == 0)
+		{
+			++CoverMeasure.FramesSampled;
+			const int32 CoverW = CoverMeasure.CaptureWidth;
+			const int32 CoverH = CoverMeasure.CaptureHeight;
+			TSharedPtr<FJsonObject> CoverRow = MakeShared<FJsonObject>();
+			CoverRow->SetStringField(TEXT("frame"), FrameName);
+			FString CoverWhy;
+			int32 CoverSubjectLabelPixels = 0;
+			TArray<int32> CoverMask;   // capture pixel indices of the subject
+			if (LabelMaskThisFrame.Num() != Width * Height)
+			{
+				CoverWhy = TEXT("the label mask of this frame was not kept");
+			}
+			else
+			{
+				const uint8 CoverSubjectId = static_cast<uint8>(FMath::Clamp(LabelPrimaryIntId, 0, 255));
+				for (const uint8 CoverId : LabelMaskThisFrame)
+				{
+					CoverSubjectLabelPixels += CoverId == CoverSubjectId ? 1 : 0;
+				}
+				for (int32 CoverY = 0; CoverY < CoverH; ++CoverY)
+				{
+					const int32 CoverY0 = static_cast<int32>(static_cast<int64>(CoverY) * Height / CoverH);
+					const int32 CoverY1 = static_cast<int32>(static_cast<int64>(CoverY + 1) * Height / CoverH);
+					for (int32 CoverX = 0; CoverX < CoverW; ++CoverX)
+					{
+						const int32 CoverX0 = static_cast<int32>(static_cast<int64>(CoverX) * Width / CoverW);
+						const int32 CoverX1 = static_cast<int32>(static_cast<int64>(CoverX + 1) * Width / CoverW);
+						int32 CoverIn = 0;
+						int32 CoverAll = 0;
+						for (int32 CoverPy = CoverY0; CoverPy < CoverY1; ++CoverPy)
+						{
+							for (int32 CoverPx = CoverX0; CoverPx < CoverX1; ++CoverPx)
+							{
+								++CoverAll;
+								CoverIn += LabelMaskThisFrame[CoverPy * Width + CoverPx] == CoverSubjectId ? 1 : 0;
+							}
+						}
+						if (CoverAll > 0 && CoverIn >= RenderCoverMaskBlockShare * CoverAll)
+						{
+							CoverMask.Add(CoverY * CoverW + CoverX);
+						}
+					}
+				}
+			}
+			int32 CoverChanged = 0;
+			double CoverFraction = 0.0;
+			if (CoverWhy.IsEmpty() && CoverSubjectLabelPixels > 0 && CoverMask.Num() == 0)
+			{
+				CoverWhy = FString::Printf(TEXT("the subject's %d label pixel(s) fill no %dx%d capture pixel"),
+				                           CoverSubjectLabelPixels, RenderCoverCaptureDivisor, RenderCoverCaptureDivisor);
+			}
+			else if (CoverWhy.IsEmpty() && CoverMask.Num() > 0)
+			{
+				// This frame's beauty settings, minus the lens and any metering.
+				CoverCapture->FOVAngle = Capture->FOVAngle;
+				CoverCapture->PostProcessSettings = Capture->PostProcessSettings;
+				RenderMakeCoverCapture(CoverCapture);
+				const auto CoverShownHidden = CoverCapture->HiddenActors;
+				auto CoverRead = [&](TArray<FColor>& CoverOut) -> bool
+				{
+					CoverCapture->CaptureScene();
+					FlushRenderingCommands();
+					BeatWatchdog(TEXT("a measured cover capture"));
+					FTextureRenderTargetResource* CoverResource = CoverTarget->GameThread_GetRenderTargetResource();
+					CoverOut.Reset();
+					const bool bCoverRead = CoverResource != nullptr && CoverResource->ReadPixels(CoverOut);
+					return bCoverRead && CoverOut.Num() == CoverW * CoverH;
+				};
+				TArray<FColor> CoverShown, CoverHidden;
+				CoverCapture->ShowFlags.SetCloud(bCoverBeautyCloud);
+				const bool bCoverShown = CoverRead(CoverShown);
+				CoverCapture->HiddenActors.Append(CoverBeautyOnly);
+				CoverCapture->ShowFlags.SetCloud(false);
+				const bool bCoverHidden = bCoverShown && CoverRead(CoverHidden);
+				CoverCapture->HiddenActors = CoverShownHidden;
+				CoverCapture->ShowFlags.SetCloud(bCoverBeautyCloud);
+				if (!bCoverHidden)
+				{
+					CoverWhy = TEXT("a measured cover capture could not be read back");
+				}
+				else
+				{
+					for (const int32 CoverIndex : CoverMask)
+					{
+						const int32 CoverShownLuma = RenderCoverLuma(CoverShown[CoverIndex]);
+						const int32 CoverHiddenLuma = RenderCoverLuma(CoverHidden[CoverIndex]);
+						const int32 CoverDelta = FMath::Abs(CoverShownLuma - CoverHiddenLuma);
+						if (CoverDelta > RenderCoverLumaFloorCodes &&
+						    CoverDelta > RenderCoverRelativeThreshold * FMath::Max(CoverShownLuma, CoverHiddenLuma))
+						{
+							++CoverChanged;
+						}
+					}
+					CoverFraction = static_cast<double>(CoverChanged) / CoverMask.Num();
+				}
+			}
+			CoverRow->SetNumberField(TEXT("subject_label_pixels"), CoverSubjectLabelPixels);
+			CoverRow->SetNumberField(TEXT("mask_pixels"), CoverMask.Num());
+			if (CoverWhy.IsEmpty())
+			{
+				// A frame whose mask shows no subject pixel has nothing a
+				// beauty-only actor can cover where the mask shows it: 0, measured.
+				++CoverMeasure.FramesMeasured;
+				CoverMeasure.MaxFraction = FMath::Max(CoverMeasure.MaxFraction, CoverFraction);
+				CoverRow->SetNumberField(TEXT("changed_pixels"), CoverChanged);
+				CoverRow->SetNumberField(TEXT("fraction"), CoverFraction);
+			}
+			else
+			{
+				CoverRow->SetStringField(TEXT("not_measured"), CoverWhy);
+				if (CoverMeasure.NotRun.IsEmpty())
+				{
+					CoverMeasure.NotRun = FrameName + TEXT(": ") + CoverWhy;
+				}
+			}
+			CoverMeasure.Frames.Add(MakeShared<FJsonValueObject>(CoverRow));
 		}
 		// S4: under -accumulate the frame's linear file is the accumulation
 		// (written below), so the instantaneous one is not written over it.
@@ -9331,6 +9691,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Contract.AircraftBeautyOnly = &AircraftFX.BeautyOnlyActors;
 		Contract.World = &WorldBeauty;
 		Contract.EngineWorld = World;
+		Contract.Cover = &CoverMeasure;
 		RenderWriteLookContract(*Root, Contract);
 	}
 

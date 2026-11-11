@@ -336,3 +336,120 @@ def test_profile_reads_the_linear_exrs_lens(tmp_path):
     assert linear_exr_lens(frame) == "lens_free"
     (tmp_path / "render.json").write_text("{not json", encoding="utf-8")
     assert linear_exr_lens(frame) == ""
+
+
+# -- the measured cover (2026-11-11): cloud_occlusion graded on beauty -----------
+
+MERGE = _function(COMMANDLET, "void RenderMergeMeasuredCover(")
+COVER_SETUP = COMMANDLET[COMMANDLET.index('FString MeasureCoverSwitch = TEXT("on");'):
+                         COMMANDLET.index("TArray<TSharedPtr<FJsonValue>> FrameRecords;")]
+COVER_FRAME = COMMANDLET[COMMANDLET.index("if (CoverCapture != nullptr && Captured % CoverMeasure.Stride == 0)"):
+                         COMMANDLET.index("// S4: under -accumulate the frame's linear file is the accumulation")]
+
+
+def test_the_measured_cover_is_beauty_raster_only_and_switchable():
+    assert 'FParse::Value(*RenderSwitches, TEXT("measure-cover="), MeasureCoverSwitch);' in COVER_SETUP
+    assert "render.measure_cover:" in COVER_SETUP
+    catalog = (ROOT / "core/messages/catalog.yaml").read_text(encoding="utf-8")
+    assert "render.measure_cover:" in catalog
+    build = COVER_SETUP.index('NewObject<USceneCaptureComponent2D>(Director, TEXT("CoverCapture"))')
+    for gate in ("else if (!bBeautyRaster)", 'else if (MeasureCoverSwitch == TEXT("off"))',
+                 "else if (!bLabels)", "if (bPathTrace)"):
+        assert COVER_SETUP.index(gate) < build, gate
+    # RenderSwitches carries FLIGHTSIM_RENDER_SWITCHES on beauty (the subject meter's channel)
+    assert 'GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"))' in COMMANDLET
+    # a component of its own: no view state, no TSR, lens-free, pinned flags
+    for line in ("CoverCapture->bAlwaysPersistRenderingState = false;",
+                 "CoverCapture->ShowFlags.SetTemporalAA(false);",
+                 "RenderMakeCoverCapture(CoverCapture);", "RenderPinShowFlags(CoverCapture);"):
+        assert line in COVER_SETUP, line
+    assert COVER_SETUP.index("RenderPinShowFlags(CoverCapture);") < \
+        COVER_SETUP.index("CoverCapture->RegisterComponent();")
+    helper = _function(COMMANDLET, "void RenderMakeCoverCapture(")
+    assert "RenderMakeLensFree(Cover);" in helper and "WeightedBlendables.Array.Reset();" in helper
+    assert "AEM_Manual" in helper
+
+
+def test_the_measured_cover_never_touches_the_beauty_capture():
+    for block in (COVER_SETUP, COVER_FRAME):
+        rest = block.replace("CoverCapture->", "")
+        assert "Capture->HiddenActors" not in rest.replace("= Capture->HiddenActors;", "")
+        assert "Capture->CaptureScene()" not in rest
+        assert "ConfigureLabelCapture" not in block
+    # shown, then hidden (beauty-only actors and the Cloud flag), then restored
+    shown = COVER_FRAME.index("const bool bCoverShown = CoverRead(CoverShown);")
+    hide = COVER_FRAME.index("CoverCapture->HiddenActors.Append(CoverBeautyOnly);")
+    cloud = COVER_FRAME.index("CoverCapture->ShowFlags.SetCloud(false);")
+    hidden = COVER_FRAME.index("CoverRead(CoverHidden)")
+    restore = COVER_FRAME.index("CoverCapture->HiddenActors = CoverShownHidden;")
+    assert shown < hide < hidden < restore and shown < cloud < hidden
+    # after the beauty frame's readback and the labels (the subject mask)
+    frame = COMMANDLET.index("if (CoverCapture != nullptr && Captured % CoverMeasure.Stride == 0)")
+    assert COMMANDLET.index("!Resource->ReadPixels(Pixels)") < frame
+    assert COMMANDLET.index("LabelMaskThisFrame = MoveTemp(Mask);") < frame
+    assert "LabelPrimaryIntId" in COVER_FRAME and "RenderCoverRelativeThreshold" in COVER_FRAME
+
+
+def test_the_merge_writes_measured_only_from_a_measurement():
+    assert "RenderMergeMeasuredCover(*Occlusion, *In.Cover);" in CONTRACT
+    assert "Contract.Cover = &CoverMeasure;" in COMMANDLET
+    measured = MERGE.index('TEXT("basis"), TEXT("measured")')
+    assert MERGE.index("if (!Cover.IsMeasured())") < measured
+    assert MERGE.index('if (Policy != TEXT("labels_unoccluded"))') < measured
+    for key in ("subject_occluded_fraction", "method", "threshold", "capture_px", "frames_measured",
+                "modelled_fraction", "modelled_basis", "measured_frames"):
+        assert f'TEXT("{key}")' in MERGE, key
+    assert 'TEXT("; cover not measured: ")' in MERGE
+    # the constants the schema documents
+    for line in ("RenderCoverCaptureDivisor = 2;", "RenderCoverRelativeThreshold = 0.10;",
+                 "RenderCoverLumaFloorCodes = 3;", "RenderCoverMaskBlockShare = 0.75;",
+                 "RenderCoverMaxSampledFrames = 64;"):
+        assert line in COMMANDLET, line
+    schema = (ROOT / "docs/schemas/render_json_beauty_look.md").read_text(encoding="utf-8")
+    assert "-measure-cover=off" in schema and "modelled_fraction" in schema
+
+
+def _measured_cover(fraction):
+    """cloud_occlusion as RenderMergeMeasuredCover writes it for a measured cover."""
+    return {
+        "policy": "labels_unoccluded", "owner": "world lane", "frames": 1,
+        "subject_occluded_fraction": fraction, "basis": "measured",
+        "method": "max over the sampled frames of covered / mask pixels",
+        "threshold": {"relative_luma": 0.10, "luma_floor_codes": 3, "mask_block_share": 0.75,
+                      "basis": "UNCALIBRATED"},
+        "capture_px": [960, 540], "frames_measured": 1, "frames_delivered": 1,
+        "sample": "every 1 delivered frame(s) from frame 0",
+        "measured_frames": [{"frame": "frame_0000.png", "subject_label_pixels": 5000, "mask_pixels": 1200,
+                             "changed_pixels": int(round(fraction * 1200)), "fraction": fraction}],
+        "modelled_fraction": 0.4, "modelled_basis": "modelled", "modelled_method": "slab model",
+        "measured_cover": "-measure-cover=on",
+    }
+
+
+CLOUD = [{"name": "FairCumulus", "source": "world", "hidden_by": "HiddenActors"}]
+
+
+@pytest.mark.parametrize("fraction,ok", [(0.0, True), (0.02, True), (0.03, True), (0.05, False), (0.4, False)])
+def test_a_measured_cover_is_graded_against_the_tolerance(bundle, fraction, ok):
+    record, alignment = _grade(bundle, _commandlet_shaped(False, CLOUD, _measured_cover(fraction)))
+    assert record.status == PASS, record.detail
+    assert (alignment.status == PASS) is ok, alignment.detail
+    if not ok:
+        assert alignment.failure == FAIL_LOOK_NOT_ALIGNED and "cover" in alignment.detail
+
+
+def test_a_measured_cover_supersedes_the_world_lanes_flagged_frames(bundle):
+    shaped = _commandlet_shaped(False, CLOUD, _measured_cover(0.01))
+    shaped["look_applied"] = {"world_beauty": {"frames": [
+        {"frame": 0, "cloud_occludes_aircraft": True, "cloud_occlusion_complete": False}]}}
+    _, alignment = _grade(bundle, shaped)
+    assert alignment.status == PASS, alignment.detail
+
+
+def test_a_cover_that_did_not_run_keeps_the_model_and_is_not_aligned(bundle):
+    occlusion = {"policy": "labels_unoccluded", "subject_occluded_fraction": 0.0,
+                 "basis": "modelled; cover not measured: -measure-cover=off",
+                 "measured_cover": "-measure-cover=off"}
+    _, alignment = _grade(bundle, _commandlet_shaped(False, CLOUD, occlusion))
+    assert alignment.status == FAIL and alignment.failure == FAIL_LOOK_NOT_ALIGNED
+    assert "not measured" in alignment.detail

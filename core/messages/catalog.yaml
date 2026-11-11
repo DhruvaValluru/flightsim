@@ -379,6 +379,13 @@ render.beauty_look:
 render.subject_meter:
   sentence: "The subject-meter switch was given a value it does not take."
   hint: "Use -subject-meter=on or off; or leave it out to meter the beauty exposure on the aircraft as planned."
+# the measured cover (2026-11-11, FlightSimRenderCommandlet.cpp RenderCoverCaptureDivisor):
+# render.json cloud_occlusion.subject_occluded_fraction measured from two
+# low-resolution captures (beauty-only actors shown and hidden) inside the
+# subject's label mask; -measure-cover=off keeps the modelled fraction.
+render.measure_cover:
+  sentence: "The measured-cover switch was given a value it does not take."
+  hint: "Use -measure-cover=on or off; or leave it out to measure what the beauty-only actors cover of the subject."
 # -- lane D (visual round 7): the beauty rain veil and the storm selection ----
 world_beauty.rain_veil:
   sentence: "The rain-veil switch was given a value it does not take."
