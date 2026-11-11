@@ -1,5 +1,20 @@
 # Resume here
 
+## Visual overhaul, 2026-11-11 (rounds 5-46, branch claude/vibrant-gauss-olema4)
+
+Fix rounds run on the Windows laptop with `scripts/visual_fix_round.ps1 -Round N -Scenes "a,b"`
+(`-Full` for the sweep, `-Switches` for an A/B, `-Recompile` to re-pin a scene's spec);
+the loop is `docs/visual/FIX_ROUND_PROTOCOL.md`. Each scene's compile is pinned at
+`runs/visual/specs/<NN>.json` (compare rounds only where `spec_sha256` matches). Every
+`FLIGHTSIM_RENDER_SWITCHES` token reaches the engine argv ahead of the planned flags
+(`webapp/runs.py with_render_switches`). Results, causes and the open list:
+`docs/VISUAL_FIDELITY_PLAN.md` section 8, "Update 2026-11-11". Gotchas learned:
+- A switch that "does nothing" may never reach the engine: check render.log's command line first.
+- An LLM-compiled prompt drifts between rounds (lens, heading, origin); pin it.
+- A material that samples SceneColor at offsets pastes ghost copies of the aircraft.
+- The round script's prep classes decide what rebuilds: add new material scripts to the materials rule.
+- Owner decision pending: stock airframes cruise gear-down (JSBSim default); gear-up moves physics baselines.
+
 **The drawn flight path (2026-10-09, `phase-2-testing`; docs/ROUTE.md is
 the record).** LANDED: the `route` spec block (core/scenario/blocks.py
 RouteSpec, absent-canonical, no version bump), the route module

@@ -487,6 +487,72 @@ budgets per preset. Interactive host uses the same scene builder."
 
 ## 8. Status
 
+### Update 2026-11-11: rendered rounds 5 to 40 on the Windows laptop
+
+Everything below was rendered on the Windows render box (Intel iGPU, D3D11 SM5, UE 5.7.4,
+Cesium + Google Photorealistic 3D Tiles) from branch `claude/vibrant-gauss-olema4`, round by
+round through `scripts/visual_fix_round.ps1` (`docs/visual/FIX_ROUND_PROTOCOL.md`). Frames and
+`ROUND.json` per round are on branch `vis-windows` under `docs/visual/round_N/`; reviews are on
+`phase-2-final` `docs/visual/`. Numbers are mean RGB measured on the frames.
+
+**Settled by measurement**
+
+| Problem | Cause (proved by) | Fix |
+|---|---|---|
+| #1 Yosemite deep blue at golden hour, A-4 brown | fair-weather cumulus shadows blanketed the ground and aircraft (r17 vs r10: frame 40/51/113 -> 87/74/93) | fair-weather cloud shadows opt-in (`-fair-cloud-shadows=on`), `9cffdc84` |
+| A-4 see-through checkerboard | the subject meter's aircraft-hidden captures poisoned TSR history | full warm-up again after metering, `089d086b` |
+| Frames bleached | subject meter opened up to 2 stops | at most 1 stop, `089d086b` |
+| Aircraft tan / near-black (A-4 111/98/84, C172 27/18/17) | the gen-4/5 aircraft look masters (r22 off: 167/155/147, 89/82/92; r29 plain probe master on the same inputs matches off exactly) | look materials **off by default** `bfb04c34`; `-aircraft-materials=on` + `-aircraft-probe=` bisect the masters (see below) |
+| #10 green tornado scene | the rain veil, a lit translucent surface taking the prairie-green ground bounce (r31 veil off: sky 98/101/114 neutral; r32 fog off: still green) | unlit veil toned from the scene behind it, `029ead47` |
+| #9 ring arcs under the storm cell | volumetric scud band between the iGPU's fixed altitude slices | band off; modulate scud cards, `21d98e9c` |
+| #15 white popcorn scud, pale frame | lit translucent scud under a deck the cloud shadow cannot reach; fog lit by the clear sky above the deck | modulate unlit scud, deck-lit fog, low deck, `0e69e89a` / `21d98e9c` / `029ead47` |
+| #13 blocky cumulus rows | hard Voronoi cells on axis-aligned grids | rounded, warped, rotated cells with a far LOD, `be749d6a` |
+| #13 refused (stall) on some compiles | the LLM marked an unstated 250 kt "inferred", which planners may not move | unstated speeds are model guesses, `697c4ca6` |
+| A/B switches that did nothing (r13-r18) | `FLIGHTSIM_RENDER_SWITCHES` never reached the engine argv | every switch rides the argv ahead of the planned flags, `85b5457c` |
+| Cross-round A/Bs compared different shots | each round re-compiled prompts with the LLM | each scene's compile pinned at `runs/visual/specs/<NN>.json`, `spec_sha256` per row, `04093d48` |
+
+**Kept from the rounds:** CC0 terrain detail on the tiles (Poly Haven, lane B), soft rounded
+cumulus with self-shadowed bases (#3 and #12 judged good in r19), the sharper Yosemite forest and
+rock, the beauty ocean over open water, dense soft rain streaks, the windscreen film (ambientCG
+CC0), the tornado's smooth funnel and close hazard framing. Every third-party asset is pinned by
+URL and sha256 in `THIRD_PARTY_VISUAL.md`.
+
+**Final sweep (round 44, `7c017618`, vis-windows `ef44ace6`, `docs/visual/final/`):** 14 of 15
+scenes rendered (#14 the hurricane refusal, by design); the chase clip `chase_clip.mp4` (15 s,
+J-11 at golden hour over real terrain); head shots round 5 -> 44: 4 better, 0 same, 0 worse
+(p3-mac's review, phase-2-final `e4aae905` `docs/visual/final/REVIEW.md`). Judged good: #1, #3, #4,
+#6, #9 (domed cell and shaft), #11 (Matterhorn), #15 (dark storm). The aircraft paint default after
+the sweep is the flat master (`1e5ba438`, look instances on for glass and rubber; round 46 checks
+it on #1 #4 #8 #12).
+
+**Labels (verify on every round-44 run): 0 of 14 pass.** Every beauty run fails
+`look.beauty_not_label_aligned` (the beauty-only actors' cover over the subject is modelled, never
+measured, so the clause cannot pass) -- **no beauty frame is certified label-aligned until that
+measurement exists.** Also failing: `annotation.component_box` on #1 and #2 (`store_sta2` 3.4 px off
+its hull; manifest, CG and pose ruled out; `hull_vs_pixels_px` diagnostic recorded per component),
+`annotation.tight_box_null` on #10 and #13, `annotation.mask_offset` and `annotation.depth_range` on
+#12 (the cockpit; round 46). Full text `docs/visual/final/verify_round44.txt`. The labels pair with
+the BEAUTY frame on the web-app path (`-labels` in the same commandlet run as `-quality=beauty`); the
+CLI `flightsim capture` renders measure frames only.
+
+**Open (not fixed):**
+- #10 green tornado scene: neither the veil nor the volumetric fog (r45: green with the veil off at
+  the same commit); the funnel material or another sky source.
+- #13 four straight light lines on the sea (present since round 5; not the tiles: tiles at z 0 under
+  the cap at 20 m; not the distant-cloud disc).
+- #2 super-bright preset: blue cast (sky light and aerial perspective excluded in round 5).
+- #7 tower view in heavy rain: a flat grey field around the readable A320.
+- The gen-4..6 aircraft paint masters darken the aircraft (flat master on the same inputs is right;
+  coat, AO, normal, wear, wet, raw-base and Default Lit probes did not move the gen-6 pixels -- the
+  probe plumbing itself is suspect). Paint uses the flat master until found.
+- A ghost check inside verify (the round summary has one: `ghost.score`, all < 0.6 in round 44).
+
+**Owner decision pending:** stock JSBSim airframes (747, A320, ...) start airborne with the gear
+DOWN (JSBSim's default). Starting them gear-up was built and reverted: it moves recorded physics
+baselines (A320 engine-out thrust 11943 -> 6542 lbf, a refused trim succeeds), which the
+"physics doesn't change" rule forbids without the owner.
+
+
 **Updated 2026-11-09, after the visual-overhaul session.** Mac session
 flightsim-83, swarm `swarm-1794241474984-rmywk3`, branch
 `claude/vibrant-gauss-olema4`, base commit `355dae64`, five look lanes
