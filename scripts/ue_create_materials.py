@@ -537,9 +537,6 @@ SCUD_ALBEDO = 0.85
 #: Depth fades (cm): the curtain against nearer geometry, the scud against the
 #: aircraft and the tiles it meets (soft, no hard line where a card cuts them).
 CURTAIN_DEPTH_FADE_CM = 300.0
-#: The veil's colour taps (veil_tone.hlsl): four SceneColor samples this screen
-#: fraction apart (a local mean of the scene behind the veil).
-VEIL_TAP = 0.08
 SCUD_DEPTH_FADE_CM = 4000.0
 #: The vector parameters whose shader input is a float4 (RGB appended with A).
 WEATHER_FLOAT4_PARAMETERS = ("Splash", "Power", "Geo1", "Geo2", "Sigma", "Noise", "Drift",
@@ -606,13 +603,15 @@ STORM_SCATTERING_PROPERTIES = {
 #: M_RainCurtain 3: VeilVary, falling curtains in the veil (round 26's #07 flat grey field).
 #: M_RainCurtain 4: UNLIT, the neutral grey of the scene behind it (veil_tone.hlsl; r31/r32:
 #: the lit veil carried #10's green).
+#: M_RainCurtain 5: ONE SceneColor tap at offset 0 (round 36: four offset taps drew
+#: ghost copies of the aircraft).
 #: M_ScudCard 3: MODULATE, unlit (round 19: lit cards drew white under the deck).
 #: M_StormCell 6: the beauty precipitation curtain and scud ("Curtain", storm_cell.hlsl;
 #: lane D 2026-11-11, round 4's #09 ring and cylinder; default 0 = generation 5).
 #: M_RainDrops 6: the beauty streak's softness and per-drop variation (Soft, Vary;
 #: lane D 2026-11-11, round 4's "scratches on the lens"; default 0 = generation 5).
 STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChannel": "2",
-                     "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "4",
+                     "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "5",
                      "M_ScudCard": "3"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
@@ -2037,8 +2036,8 @@ def create_rain_curtain():
     """M_RainCurtain: one shell of the beauty rain veil (rain_curtain.hlsl into
     the opacity, depth-faded against nearer geometry). Generation 4 (round 26: the
     lit veil carried the sky light's green ground bounce): UNLIT, its colour the
-    neutral grey of the scene behind it (veil_tone.hlsl: four SceneColor taps
-    VEIL_TAP apart, their luminance, x Shade). Lane D, 2026-11-11; BEAUTY ONLY
+    neutral grey of the scene behind it (veil_tone.hlsl: the luminance of the scene at
+    the pixel's own UV x Shade; generation 5, round 36: no offset taps). Lane D, 2026-11-11; BEAUTY ONLY
     (FlightSimWeather.cpp ApplyBeautyRainVeil)."""
     material = _storm_material("M_RainCurtain")
     if material is None:
@@ -2058,17 +2057,15 @@ def create_rain_curtain():
     fade.set_editor_property("fade_distance_default", CURTAIN_DEPTH_FADE_CM)
     lib.connect_material_expressions(opacity, "", fade, "Opacity")
     lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
-    taps = {}
-    for i, (key, offset) in enumerate((("A", (-VEIL_TAP, -VEIL_TAP)), ("B", (VEIL_TAP, -VEIL_TAP)),
-                                       ("C", (-VEIL_TAP, VEIL_TAP)), ("D", (VEIL_TAP, VEIL_TAP)))):
-        tap = lib.create_material_expression(material, unreal.MaterialExpressionSceneColor, -1200, 400 + 120 * i)
-        mode = getattr(unreal, "MaterialSceneAttributeInputMode", None)
-        if mode is not None and hasattr(mode, "OFFSET_FRACTION"):
-            tap.set_editor_property("input_mode", mode.OFFSET_FRACTION)
-        tap.set_editor_property("const_input", unreal.Vector2D(*offset))
-        taps[key] = (mask(material, lib, tap, "rgb", -1000, 400 + 120 * i), "")
+    # Round 36: ONE tap at the pixel's own UV (offset 0). Generation 4's four taps
+    # 0.08 of the screen apart pasted shifted copies of the scene (ghost aircraft).
+    tap = lib.create_material_expression(material, unreal.MaterialExpressionSceneColor, -1200, 400)
+    mode = getattr(unreal, "MaterialSceneAttributeInputMode", None)
+    if mode is not None and hasattr(mode, "OFFSET_FRACTION"):
+        tap.set_editor_property("input_mode", mode.OFFSET_FRACTION)
+    tap.set_editor_property("const_input", unreal.Vector2D(0.0, 0.0))
     tone = custom(material, lib, "veil_tone", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
-        "A": taps["A"], "B": taps["B"], "C": taps["C"], "D": taps["D"],
+        "A": (mask(material, lib, tap, "rgb", -1000, 400), ""),
         "Shade": (scalar(material, lib, "Shade", 1.0, -1000, 900), "")}, -700, 500)
     lib.connect_material_property(tone, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     finish_storm(material, "M_RainCurtain")

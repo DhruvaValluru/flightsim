@@ -123,7 +123,12 @@ BEAUTY_REFERENCE_PIXEL_RAD = 2.0 * math.tan(math.radians(27.0)) / 1280.0
 #: by the sun's directional inscattering lobe, neither of which the deck shadows. The
 #: beauty scales the ambient to the deck's diffuse transmission (a cool grey), turns the
 #: sun lobe off, and cuts the sun's share of the volumetric fog's light. UNCALIBRATED.
-STORM_FOG_AMBIENT_RGB = (0.20, 0.21, 0.23)
+#: Round 36 (#10 still green: the scaled ambient keeps its hue, the grassland's
+#: bounce): the ambient contribution is OFF under a storm deck and the fog's own
+#: inscattering is a neutral grey of STORM_FOG_INSCATTER_NITS (cd/m^2, the physical sky's
+#: units: an overcast storm base, ~1000-3000 nits; a stated value). UNCALIBRATED.
+STORM_FOG_AMBIENT_RGB = (0.0, 0.0, 0.0)
+STORM_FOG_INSCATTER_NITS = 1500.0
 STORM_SUN_FOG_SHARE = 0.15
 
 #: The windscreen's water film (M_WindshieldRain 3, windshield_film.hlsl: the

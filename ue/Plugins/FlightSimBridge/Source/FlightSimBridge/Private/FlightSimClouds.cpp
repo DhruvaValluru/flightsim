@@ -1366,7 +1366,14 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		DeckLight->SetBoolField(TEXT("applied"), bDeckLight);
 		if (bDeckLight)
 		{
-			const FLinearColor Ambient(0.20f, 0.21f, 0.23f);
+			// Round 36 (#10 still green with the unlit veil: the HEIGHT FOG's inscatter,
+			// the SkyAtmosphere ambient whose hue is the grassland's bounce under the deck;
+			// scaling it kept the hue): the ambient contribution is OFF and the fog's own
+			// inscattering is a neutral grey luminance (rain_veil.STORM_FOG_INSCATTER_NITS:
+			// the light under a storm deck, a stated overcast-base luminance).
+			const FLinearColor Ambient(0.0f, 0.0f, 0.0f);
+			constexpr float StormFogInscatterNits = 1500.0f;
+			const FLinearColor Inscatter(StormFogInscatterNits, StormFogInscatterNits, StormFogInscatterNits);
 			TArray<TSharedPtr<FJsonValue>> FogRows;
 			for (TObjectIterator<UExponentialHeightFogComponent> It; It; ++It)
 			{
@@ -1379,6 +1386,8 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 				FogRow->SetStringField(TEXT("sky_atmosphere_ambient_scale_before"),
 					Fog->SkyAtmosphereAmbientContributionColorScale.ToString());
 				Fog->SetSkyAtmosphereAmbientContributionColorScale(Ambient);
+				Fog->SetFogInscatteringColor(Inscatter);
+				FogRow->SetStringField(TEXT("fog_inscattering_luminance"), Inscatter.ToString());
 				Fog->SetDirectionalInscatteringColor(FLinearColor::Black);
 				FogRow->SetStringField(TEXT("sky_atmosphere_ambient_scale"), Ambient.ToString());
 				FogRow->SetBoolField(TEXT("directional_inscattering_off"), true);
