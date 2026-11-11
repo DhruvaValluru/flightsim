@@ -1,0 +1,73 @@
+{
+ "run_id": "9038510cc125",
+ "blue_noise": {
+  "scalar": {
+   "loaded": true,
+   "path": "/Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64",
+   "resource_created_here": false,
+   "default_stand_in": false,
+   "resource": true,
+   "size_x": 128,
+   "size_y": 8192
+  },
+  "vec2": {
+   "loaded": true,
+   "path": "/Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64",
+   "resource_created_here": false,
+   "default_stand_in": false,
+   "resource": true,
+   "size_x": 128,
+   "size_y": 8192
+  },
+  "cloud_march_jittered": true,
+  "basis": "VolumetricCloud.usf starts each view ray at TMin + BlueNoiseScalar(pixel, StateFrameIndexMod8) x StepT; BlueNoise.cpp GetBlueNoiseGlobalParameters binds a 1x1 black dummy unless both GEngine textures have a resource (an ensure allows that only in a rendering commandlet), and a texture still building answers as a default stand-in: either is one offset for every pixel of every capture, the altitude-slice banding of round 3. Loaded and built here, before the first capture"
+ },
+ "distant_clouds": {
+  "mode": "on",
+  "engine_content": "UE 5.7 still ships /Engine/EngineSky/BP_Sky_Sphere with M_Sky_Panning_Clouds, M_Sky_Panning_Clouds2(_Inst) and T_Sky_Clouds_M (read in the engine content on 2026-11-10); not used: a sky sphere covers the SkyAtmosphere",
+  "labels": "a translucent unlit disc: no depth write, no custom depth, no shadow; in BeautyOnlyActors, so every label capture hides it (mask, class, depth and boxes untouched); the measure quality never builds it",
+  "pixel_moving": false,
+  "calibration": "UNCALIBRATED: set by probe render on the render machine",
+  "volumetric_trace": {
+   "constrained_gpu": true,
+   "row_tracing_max_distance_km": 80,
+   "tracing_max_distance_km": 32,
+   "shrunk": true,
+   "layers_set": 1,
+   "basis": "the distant tracing (world_beauty.distant_tracing_max_km), constrained and the sheet drawn -> min(row, DISTANT_NEAR_FIELD_KM). VolumetricCloud.usf: StepCount = SampleCountMax x saturate(path x InvDistanceToSampleCountMax) (r.VolumetricCloud.DistanceToSampleMaxCount, 15 km), non-decreasing in the path: a shorter trace never adds a sample, only shortens the step; the sheet fades in over FadeKm up to the trace's end"
+  },
+  "base_m": 11000,
+  "top_m": 14000,
+  "cover": 0.35,
+  "shape": "cumulus",
+  "cover_basis": "the first redrawn layer (its slab after the aircraft clearance, its cover and shape row)",
+  "coverage_contrast": 1.6,
+  "shape_scale_km": 2.5,
+  "slice_km": 404.7164624235318,
+  "handover_km": 24,
+  "fade_km": 8,
+  "radius_km": 300,
+  "rings": 48,
+  "segments": 96,
+  "vertices": 4609,
+  "triangles": 9120,
+  "droop_at_rim_m": -7063.255375922146,
+  "inside_ramp_m": 200,
+  "look": {
+   "RimFadeShare": 0.2,
+   "Albedo": 0.9,
+   "AmbientGain": 1,
+   "SunWrap": 0.3,
+   "BaseDarkening": 0.55,
+   "BaseSunShare": 0.15,
+   "SilverLining": 0.6,
+   "RimPower": 8,
+   "NormalStrength": 1.5
+  },
+  "seed_offset_km": "652.448486,368.189516,392.216462",
+  "material": "/Game/FlightSim/M_FlightSimDistantClouds.M_FlightSimDistantClouds",
+  "lighting": "faked in distant_clouds.hlsl: N.L (wrapped) from the shape's screen-space gradient, the sun's illuminance and direction and the sky's distant scattered luminance from the SkyAtmosphere material nodes (atmosphere light 0), dark bases from below, a sun-coloured silver lining on backlit edges; height fog and aerial perspective applied per pixel (Apply Fogging)",
+  "sheet_altitude_law": "per frame (frames[].distant_sheet_*): at the deck's base with the camera below the slab's middle (bases), at its top above (tops); faded out inside the slab (world_beauty.distant_sheet_altitude_m)",
+  "drawn": "M_FlightSimDistantClouds on one earth-curved disc centred on the camera, re-centred and re-levelled per frame"
+ }
+}

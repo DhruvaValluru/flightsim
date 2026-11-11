@@ -1,0 +1,10 @@
+02:46:50	sun_shadows_off	613b82c81128	93s	switches=-look-sun-shadows=off	post=on	failed | [camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log
+last words:
+[2026.11.11-07.46.29:885][  0]LogFlig
+ALL-VARIANTS-DONE
+02:48:32	r5a_sky_fill_red	378b72875983	87s	switches=-sky-fill-probe=red	post=on	done | clip ready
+02:50:01	r5b_fill_off_ap0	649f44f26fa0	77s	switches=-sky-fill-probe=off -aerial-perspective-scale=0	post=on	failed | [camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log
+last words:
+[2026.11.11-07.49.42:856][  0]LogFlig
+ALL-VARIANTS-DONE
+verify ed8b25d0ffee exit 1

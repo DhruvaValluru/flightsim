@@ -1,0 +1,18 @@
+CHAIN 02:28:32 batch B finished
+CHAIN 02:28:36 visual_round 5 exit 0 : round 5: 24 frames in C:\Users\kanth\flightsim\docs\visual\round_5
+CHAIN 02:37:48 head5 exit 0 in 552s
+CHAIN 02:37:49 compare exit 0 : wrote C:\Users\kanth\flightsim\runs\visual\compare_head4_vs_head5.png
+02:39:41	sun_shadows_off	7faa09cccabe	108s	switches=-look-sun-shadows=off	post=on	failed | [camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log
+last words:
+[2026.11.11-07.39.14:756][  0]LogFlig
+02:41:13	post_off	5ba5c3ae2210	88s	switches=	post=off	failed | [camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log
+last words:
+[2026.11.11-07.40.52:793][  0]LogFlig
+ALL-VARIANTS-DONE
+CHAIN 02:41:16 A/B done
+02:41:59	r5a_sky_fill_red		40s	switches=-sky-fill-probe=red	post=on	failed | could not reach the app: <urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>
+02:42:11	r5b_fill_off_ap0	d2bb72577680	8s	switches=-sky-fill-probe=off -aerial-perspective-scale=0	post=on	failed | no such run
+ALL-VARIANTS-DONE
+CHAIN 02:42:14 probes done
+CHAIN 02:42:16 verify on ed8b25d0ffee exit 1 :   recorded: runs\webapp\ed8b25d0ffee\verification.json   per frame: runs\webapp\ed8b25d0ffee\frame_checks.json (0 frame(s) failing) 
+CHAIN 02:42:16 ALL DONE

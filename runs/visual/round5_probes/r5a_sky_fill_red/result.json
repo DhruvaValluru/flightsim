@@ -1,0 +1,34 @@
+[
+  {
+    "number": 2,
+    "name": "same, super bright preset",
+    "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+    "lighting": {
+      "preset": "super_bright"
+    },
+    "compiler": "regex",
+    "notes": [],
+    "run_id": "378b72875983",
+    "outcome": "done",
+    "why": "clip ready",
+    "clip": "clip: 1 frames of chase at 30.0 fps = 0.0 s of flight",
+    "conditions": {
+      "wind_note": "calm; no terrain-driven airflow (orographic forcing is wind over terrain)",
+      "turbulence": "none",
+      "turbulence_seed": null,
+      "physics_ground": "georeferenced yosemite raster at true position; physics ground is the heightfield raster (AGL parity measured); track pre-flown for clearance; ground texture: X-Plane 12 textures by slope/height classification, MODIS snow cover for month 03 (approximated)",
+      "lighting": "lighting 'super_bright'; sun 72 deg up, light from 266 deg (compass); brightness +0.6 EV; sun x1.6; colour 6300 K; shadow softness 0.45 deg; sky fill x1.35; haze 0.0005 (VISUAL; preset values are uncalibrated starting points, not a Gate 6 measured look); on top of: the physical sky's sun at 2026-03-21T01:36:38+00:00 (core/sky/plan.py); applied over the physical sky (beauty): the sun moved in sky.json, the knobs as flags, the brightness and scales in the beauty exposure",
+      "sky": "physical sky at 2026-03-21T01:36:38+00:00 (golden hour: sun setting through +6.0 deg): sun +72.0 deg, moon 5% lit, EV100 +15.3; clouds VISUAL ONLY; sun relit by the lighting block",
+      "beauty_look": "beauty look: grade desert_noon (sun 72.0 deg, at or above 15 deg), lens standard; VISUAL ONLY, uncalibrated",
+      "beauty_post": "post-render beauty: lut, halation, vignette, ffmpeg_pass on 1 frame(s); VISUAL ONLY"
+    },
+    "frames_page": "http://127.0.0.1:8008/frames.html?run=378b72875983&camera=chase",
+    "gallery_files": [
+      "02_same_super_bright_preset_clip.mp4",
+      "02_same_super_bright_preset_frame.png",
+      "02_same_super_bright_preset_frame_beauty_post.png",
+      "02_same_super_bright_preset_boxes.png",
+      "02_same_super_bright_preset_box3d.png"
+    ]
+  }
+]

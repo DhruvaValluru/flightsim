@@ -1,0 +1,12 @@
+01_golden_hour_a_4_flying_ea r5 luma 92 rgb 105/86/89 | r4 luma 95 rgb 109/89/93
+02_same_super_bright_preset. r5 luma 103 rgb 92/99/155 | r4 luma 106 rgb 95/102/159
+03_a320_over_new_york_wide_l r5 luma 89 rgb 79/89/111 | r4 luma 91 rgb 82/92/113
+04_desert_a_4_sun_behind_the r5 luma 100 rgb 105/97/101 | r4 luma 123 rgb 132/119/119
+05_desert_a_4_backlit.jpg    r5 luma 176 rgb 183/175/166 | r4 luma 162 rgb 181/159/129
+06_a320_over_sfo_heading_sou r5 luma 67 rgb 50/68/106 | r4 luma 70 rgb 53/71/109
+07_tower_view_heavy_rain.jpg r5 luma 107 rgb 106/106/111 | r4 luma 108 rgb 108/108/110
+08_c172_over_fuji_sunrise_li r5 luma 130 rgb 132/129/129 | r4 luma 162 rgb 167/160/159
+09_747_through_a_thunderstor r5 luma 72 rgb 56/72/110 | r4 luma 47 rgb 35/46/80
+10_c172_near_a_tornado.jpg   r5 luma 51 rgb 53/49/52 | r4 luma 73 rgb 84/67/71
+12_c172_cockpit_over_the_gra r5 luma 99 rgb 86/102/122 | r4 luma 83 rgb 70/85/106
+13_747_cruise_over_the_ocean r5 luma 76 rgb 34/86/136 | r4 luma 62 rgb 24/69/122

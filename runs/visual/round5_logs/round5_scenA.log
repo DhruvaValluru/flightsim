@@ -1,0 +1,80 @@
+01:47:45 
+01:47:45 [1] golden hour A-4, flying east
+01:47:45     chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds
+01:47:46     run ed8b25d0ffee started
+01:47:51     host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+01:47:56     rendering: rendering 1 camera pass(es): chase
+01:49:42     labels: engine labels attached on 1 of 1 frame(s) (0 without a bundle)
+01:49:46     done: clip ready
+01:49:47     -> DONE: clip ready
+01:49:47 
+01:49:47 [2] same, super bright preset
+01:49:47     chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds
+01:49:48     run 2d4f05bd314e started
+01:49:53     host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+01:50:03     rendering: rendering 1 camera pass(es): chase
+01:51:33     labels: engine labels attached on 1 of 1 frame(s) (0 without a bundle)
+01:51:38     done: clip ready
+01:51:38     -> DONE: clip ready
+01:51:38 
+01:51:38 [3] a320 over new york, wide lens (terrain download)
+01:51:38     chase view of the a320 over new york city at 600 m in the morning with a 18 mm lens for 6 seconds
+01:51:39     run 2cabf684721d started
+01:51:44     host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+01:51:49     rendering: rendering 1 camera pass(es): chase
+01:53:59     done: clip ready
+01:53:59     -> DONE: clip ready
+01:54:00 
+01:54:00 [4] desert A-4, sun behind the camera
+01:54:00     chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds
+01:54:00     run 066c39b88c42 started
+01:54:05     host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+01:54:10     rendering: rendering 1 camera pass(es): chase
+01:55:51     beauty_post: post-render beauty pipeline: denoise, film grade, halation, grain, vignette (beauty_post.png beside each frame)
+01:55:56     done: clip ready
+01:55:56     -> DONE: clip ready
+01:55:56 
+01:55:56 [5] desert A-4, backlit
+01:55:56     chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds
+01:55:57     run c7354bf67e2f started
+01:56:02     host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+01:56:07     rendering: rendering 1 camera pass(es): chase
+01:57:57     done: clip ready
+01:57:57     -> DONE: clip ready
+01:57:57 
+01:57:57 [6] a320 over sfo heading south, moderate rain
+01:57:58     wingman view of the a320 over sfo south at 3000 m in moderate rain for 6 seconds
+01:57:58     run 27b1ee2954ae started
+01:58:03     host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+01:58:08     rendering: rendering 1 camera pass(es): wingman
+02:00:44     beauty_post: post-render beauty pipeline: denoise, film grade, halation, grain, vignette (beauty_post.png beside each frame)
+02:00:49     done: clip ready
+02:00:49     -> DONE: clip ready
+02:00:49 
+02:00:49 [7] tower view, heavy rain
+02:00:49     tower view of the a320 at 1000 m in heavy rain with a 250 mm lens for 6 seconds
+02:00:50     run eeff322af38f started
+02:00:55     host flight: flying the scenario in the host first, so the labels describe the flight the pixels show
+02:01:00     rendering: rendering 1 camera pass(es): tower
+02:03:30     done: clip ready
+02:03:30     -> DONE: clip ready
+02:03:30 
+02:03:30 ================ summary ================
+02:03:30  1. DONE     golden hour A-4, flying east  [run ed8b25d0ffee]
+02:03:30       clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+02:03:30  2. DONE     same, super bright preset  [run 2d4f05bd314e]
+02:03:30       clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+02:03:30  3. DONE     a320 over new york, wide lens (terrain download)  [run 2cabf684721d]
+02:03:30       clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+02:03:30  4. DONE     desert A-4, sun behind the camera  [run 066c39b88c42]
+02:03:30       clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+02:03:30  5. DONE     desert A-4, backlit  [run c7354bf67e2f]
+02:03:30       clip: 1 frames of chase at 30.0 fps = 0.0 s of flight
+02:03:30  6. DONE     a320 over sfo heading south, moderate rain  [run 27b1ee2954ae]
+02:03:30       clip: 1 frames of wingman at 30.0 fps = 0.0 s of flight
+02:03:30  7. DONE     tower view, heavy rain  [run eeff322af38f]
+02:03:30       clip: 1 frames of tower at 30.0 fps = 0.0 s of flight
+02:03:30 
+02:03:31 written: C:\Users\kanth\flightsim\runs\test_scenarios.json
+02:03:31 all results in one folder: C:\Users\kanth\flightsim\runs\test_scenarios
+02:03:31 open: C:\Users\kanth\flightsim\runs\test_scenarios\index.html

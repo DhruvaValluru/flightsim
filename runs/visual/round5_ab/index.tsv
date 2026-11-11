@@ -1,0 +1,5 @@
+02:44:52	post_off	1f312f9e0511	123s	switches=	post=off	done | clip ready
+02:46:50	sun_shadows_off	613b82c81128	93s	switches=-look-sun-shadows=off	post=on	failed | [camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log
+last words:
+[2026.11.11-07.46.29:885][  0]LogFlig
+02:52:50	sun_shadows_off_fallback	bb0320f8cee7	128s	switches=-look-sun-shadows=off -look-fog-grid=off	post=on	done | clip ready

@@ -1,0 +1,86 @@
+{
+ "main_02": {
+  "run_id": "2d4f05bd314e",
+  "sky_light_capture_result": {
+   "processed_texture": true,
+   "shaders_compiling_at_capture": false,
+   "real_time_capture": false,
+   "intensity_at_capture": 2.6202800273895264,
+   "light_color_linear": {
+    "r": 1,
+    "g": 0.4969329833984375,
+    "b": 0.25015828013420105
+   },
+   "lower_hemisphere_solid": true,
+   "cloud_ambient_occlusion": true,
+   "min_occlusion": 0,
+   "basis": "read back from the sky light right after USkyLightComponent::UpdateSkyCaptureContents; processed_texture false means the capture did not happen and the shade is lit by the atmosphere's in-scatter alone (round 5, docs/visual/PROBE_LOG.md)"
+  },
+  "mean_rgb": [
+   92,
+   99,
+   155
+  ],
+  "lower_right_rgb": [
+   78,
+   91,
+   161
+  ]
+ },
+ "r5a_sky_fill_red": {
+  "run_id": "378b72875983",
+  "sky_light_capture_result": {
+   "processed_texture": true,
+   "shaders_compiling_at_capture": false,
+   "real_time_capture": false,
+   "intensity_at_capture": 2.6202800273895264,
+   "light_color_linear": {
+    "r": 1,
+    "g": 0,
+    "b": 0
+   },
+   "lower_hemisphere_solid": true,
+   "cloud_ambient_occlusion": true,
+   "min_occlusion": 0,
+   "basis": "read back from the sky light right after USkyLightComponent::UpdateSkyCaptureContents; processed_texture false means the capture did not happen and the shade is lit by the atmosphere's in-scatter alone (round 5, docs/visual/PROBE_LOG.md)"
+  },
+  "mean_rgb": [
+   91,
+   78,
+   135
+  ],
+  "lower_right_rgb": [
+   77,
+   71,
+   143
+  ]
+ },
+ "r5b_fill_off_ap0_fallback": {
+  "run_id": "7e82351a5cb7",
+  "sky_light_capture_result": {
+   "processed_texture": true,
+   "shaders_compiling_at_capture": false,
+   "real_time_capture": false,
+   "intensity_at_capture": 2.6202800273895264,
+   "light_color_linear": {
+    "r": 0,
+    "g": 0,
+    "b": 0
+   },
+   "lower_hemisphere_solid": true,
+   "cloud_ambient_occlusion": true,
+   "min_occlusion": 0,
+   "basis": "read back from the sky light right after USkyLightComponent::UpdateSkyCaptureContents; processed_texture false means the capture did not happen and the shade is lit by the atmosphere's in-scatter alone (round 5, docs/visual/PROBE_LOG.md)"
+  },
+  "mean_rgb": [
+   66,
+   73,
+   130
+  ],
+  "lower_right_rgb": [
+   53,
+   67,
+   140
+  ]
+ }
+}

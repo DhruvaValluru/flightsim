@@ -1,0 +1,27 @@
+[
+  {
+    "number": 2,
+    "name": "same, super bright preset",
+    "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+    "lighting": {
+      "preset": "super_bright"
+    },
+    "compiler": "regex",
+    "notes": [],
+    "run_id": "649f44f26fa0",
+    "outcome": "failed",
+    "why": "[camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log\nlast words:\n[2026.11.11-07.49.42:856][  0]LogFlightSimRender: Display: post-sky capture 1/2 done\n[2026.11.11-07.49.44:377][  0]LogFlightSimRender: Display: gpu drain: post-sky capture 2/2 finished on the GPU in 1.51 s\n[2026.11.11-07.49.44:379][  0]LogFlightSimRender: Display: post-sky capture 2/2 done\n[2026.11.11-07.49.44:389][  0]LogFlightSimRender: Display: exposure meter round 1: captured, reading back\n[2026.11.11-07.49.45:906][  0]LogFlightSimRender: Display: exposure meter round 1: read back (ok)\n[2026.11.11-07.49.45:938][  0]LogFlightSimRender: Display: exposure meter: settled\n[2026.11.11-07.49.45:938][  0]LogFlightSimRender: Display: storm exposure: metered p90 luma 0.576 -> 0.576 (target 0.45; mean 0.497 -> 0.497), bias -3.67 -> -3.67 (0.00 stops opened of 8), 0 rounds: the look's exposure already lands the target or brighter\n[2026.11.11-07.49.45:941][  1]LogFlightSimRender: Display: stepping 360 frames of 0.008333 s, capturing every 4 (30.0 Hz) at 1280x720\n[2026.11.11-07.49.56:655][  2]LogD3D11RHI: Error: Result failed with error DXGI_ERROR_DEVICE_REMOVED DXGI_ERROR_DEVICE_HUNG\n[2026.11.11-07.49.58:268][  2]LogWindows: Error: appError called: Fatal error: [File:D:\\build\\++UE5\\Sync\\Engine\\Source\\Runtime\\Windows\\D3D11RHI\\Private\\D3D11Util.cpp] [Line: 166]\nUnreal Engine is exiting due to D3D device being lost. (Error: 0x887A0006 - 'HUNG')\n[2026.11.11-07.49.58:269][  2]LogWindows: Windows GetLastError: The operation completed successfully. (0)",
+    "clip": null,
+    "conditions": {
+      "wind_note": "calm; no terrain-driven airflow (orographic forcing is wind over terrain)",
+      "turbulence": "none",
+      "turbulence_seed": null,
+      "physics_ground": "georeferenced yosemite raster at true position; physics ground is the heightfield raster (AGL parity measured); track pre-flown for clearance; ground texture: X-Plane 12 textures by slope/height classification, MODIS snow cover for month 03 (approximated)",
+      "lighting": "lighting 'super_bright'; sun 72 deg up, light from 266 deg (compass); brightness +0.6 EV; sun x1.6; colour 6300 K; shadow softness 0.45 deg; sky fill x1.35; haze 0.0005 (VISUAL; preset values are uncalibrated starting points, not a Gate 6 measured look); on top of: the physical sky's sun at 2026-03-21T01:36:38+00:00 (core/sky/plan.py); applied over the physical sky (beauty): the sun moved in sky.json, the knobs as flags, the brightness and scales in the beauty exposure",
+      "sky": "physical sky at 2026-03-21T01:36:38+00:00 (golden hour: sun setting through +6.0 deg): sun +72.0 deg, moon 5% lit, EV100 +15.3; clouds VISUAL ONLY; sun relit by the lighting block",
+      "beauty_look": "beauty look: grade desert_noon (sun 72.0 deg, at or above 15 deg), lens standard; VISUAL ONLY, uncalibrated"
+    },
+    "frames_page": "http://127.0.0.1:8008/frames.html?run=649f44f26fa0&camera=chase",
+    "gallery_files": []
+  }
+]

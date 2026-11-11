@@ -1,0 +1,3938 @@
+{
+	"host": "unreal",
+	"spec_digest": "da5ade62a50e389b381d063123938c6b13d81ae88f498ee6d7b20f3e76bd36e0",
+	"airframe": "Douglas A-4E Skyhawk, VA-12 livery (P3D exterior model, one rigid body, gear stowed) (FDM A4)",
+	"mesh":
+	{
+		"name": "A4",
+		"mesh_airframe": "Douglas A-4E Skyhawk, VA-12 livery (P3D exterior model, one rigid body, gear stowed)",
+		"fdm": "A4",
+		"license": "All rights reserved; model author-owned, used with permission",
+		"repo": "https://github.com/dhruvavalluru/flightsim-a4-model",
+		"commit": "4611813a1ae1047896029e2ceca793b034409418"
+	},
+	"drawn":
+	{
+		"kind": "mesh",
+		"mesh_origin_actor_cm": [
+			-0.31309999999999999,
+			0,
+			0
+		],
+		"manifest_version": 4,
+		"origin_basis": "measured from vertices: nose keypoint (x), VRP (z: no gear geometry identifiable in the model (no gear_geometry patterns matched))",
+		"triangles": 283850
+	},
+	"objects": [
+		{
+			"id": "aircraft:A4:0",
+			"int_id": 1,
+			"class": "aircraft",
+			"class_id": 1,
+			"role": "primary",
+			"alone_pass": true,
+			"parent": null
+		},
+		{
+			"id": "terrain",
+			"int_id": 2,
+			"class": "terrain",
+			"class_id": 2,
+			"role": "scene",
+			"alone_pass": false,
+			"parent": null
+		},
+		{
+			"id": "payload:store_sta2:0",
+			"int_id": 64,
+			"class": "payload",
+			"class_id": 7,
+			"role": "component",
+			"alone_pass": true,
+			"parent": "aircraft:A4:0"
+		},
+		{
+			"id": "payload:drop_tank_sta3:0",
+			"int_id": 65,
+			"class": "payload",
+			"class_id": 7,
+			"role": "component",
+			"alone_pass": true,
+			"parent": "aircraft:A4:0"
+		},
+		{
+			"id": "payload:store_sta4:0",
+			"int_id": 66,
+			"class": "payload",
+			"class_id": 7,
+			"role": "component",
+			"alone_pass": true,
+			"parent": "aircraft:A4:0"
+		},
+		{
+			"id": "landing_gear:nose_gear:0",
+			"int_id": 67,
+			"class": "landing_gear",
+			"class_id": 8,
+			"role": "component",
+			"alone_pass": false,
+			"parent": "aircraft:A4:0"
+		},
+		{
+			"id": "landing_gear:left_main_gear:0",
+			"int_id": 68,
+			"class": "landing_gear",
+			"class_id": 8,
+			"role": "component",
+			"alone_pass": false,
+			"parent": "aircraft:A4:0"
+		},
+		{
+			"id": "landing_gear:right_main_gear:0",
+			"int_id": 69,
+			"class": "landing_gear",
+			"class_id": 8,
+			"role": "component",
+			"alone_pass": false,
+			"parent": "aircraft:A4:0"
+		}
+	],
+	"labels_id_source": "card objects[]",
+	"width": 1280,
+	"height": 720,
+	"frames": 1,
+	"bound_surfaces": 0,
+	"surface_peak_deg":
+	{
+	},
+	"camera_preset": "chase",
+	"camera_keeps_horizon_level": true,
+	"camera_consume_poses": true,
+	"camera_index": 0,
+	"render_settings":
+	{
+		"console":
+		{
+			"r.AntiAliasingMethod": "4",
+			"r.DynamicGlobalIlluminationMethod": "1",
+			"r.ReflectionMethod": "1",
+			"r.Lumen.HardwareRayTracing": "0",
+			"r.GenerateMeshDistanceFields": "1",
+			"r.Shadow.Virtual.Enable": "1",
+			"r.Nanite.ProjectEnabled": "1",
+			"r.Nanite": "1",
+			"r.CustomDepth": "3",
+			"r.ScreenPercentage": "100",
+			"r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange": "1",
+			"r.Substrate": "0",
+			"r.TextureStreaming": "0",
+			"r.Streaming.FullyLoadUsedTextures": "1",
+			"r.ForceLOD": "0",
+			"r.Velocity.ForceOutput": "0",
+			"r.EyeAdaptation.LensAttenuation": "0.78",
+			"r.UsePreExposure": "absent",
+			"r.VelocityOutputPass": "0",
+			"landscape.RenderNanite": "1",
+			"r.VirtualTextures": "1",
+			"r.MegaLights": "absent",
+			"r.MegaLights.EnableForProject": "0"
+		},
+		"label_show_flags":
+		{
+			"anti_aliasing": false,
+			"temporal_aa": false,
+			"motion_blur": false,
+			"depth_of_field": false,
+			"bloom": false,
+			"lens_flares": false,
+			"grain": false,
+			"vignette": false,
+			"local_exposure": false,
+			"scene_color_fringe": false,
+			"lens_distortion": false,
+			"refraction": false,
+			"path_tracing": false,
+			"eye_adaptation": false,
+			"translucency": false,
+			"cloud": false,
+			"fog": false
+		},
+		"anti_aliasing":
+		{
+			"beauty": "TSR",
+			"labels": "none"
+		},
+		"beauty_show_flags":
+		{
+			"anti_aliasing": true,
+			"temporal_aa": true,
+			"motion_blur": false,
+			"bloom": true,
+			"fog": true,
+			"atmosphere": true,
+			"volumetric_fog": true,
+			"light_shafts": true,
+			"cloud": true,
+			"depth_of_field": false,
+			"lens_flares": false,
+			"dynamic_shadows": true
+		},
+		"beauty_path":
+		{
+			"scalability_before": -1,
+			"scalability_asked": 4,
+			"scalability_applied": 4,
+			"lumen_capture_overrides":
+			{
+				"surface_cache_resolution": 1,
+				"scene_lighting_quality": 2,
+				"final_gather_quality": 2,
+				"reflection_quality": 2,
+				"scene_view_distance_cm": 400000,
+				"max_trace_distance_cm": 400000
+			},
+			"cvars_asked":
+			{
+				"r.AntiAliasingMethod": 4,
+				"r.Shadow.Virtual.Enable": 1,
+				"r.SkyAtmosphere.FastSkyLUT": 0,
+				"r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": 0,
+				"r.SkyAtmosphere.MultiScatteringLUT.HighQuality": 1,
+				"r.SkyAtmosphere.LUT32": 1,
+				"r.SkyAtmosphere.SampleCountMax": 256,
+				"r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": 8,
+				"r.VolumetricCloud": 1,
+				"r.VolumetricCloud.HighQualityAerialPerspective": 1,
+				"r.VolumetricRenderTarget.Mode": 3,
+				"r.TSR.History.SampleCount": 32,
+				"r.TSR.History.ScreenPercentage": 200
+			},
+			"cvars_before_override":
+			{
+				"r.AntiAliasingMethod": "4",
+				"r.Shadow.Virtual.Enable": "1",
+				"r.SkyAtmosphere.FastSkyLUT": "0",
+				"r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": "0",
+				"r.SkyAtmosphere.MultiScatteringLUT.HighQuality": "0",
+				"r.SkyAtmosphere.LUT32": "0",
+				"r.SkyAtmosphere.SampleCountMax": "256",
+				"r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": "8",
+				"r.VolumetricCloud": "1",
+				"r.VolumetricCloud.HighQualityAerialPerspective": "0",
+				"r.VolumetricRenderTarget.Mode": "0",
+				"r.TSR.History.SampleCount": "16",
+				"r.TSR.History.ScreenPercentage": "200"
+			},
+			"cvars_read_back":
+			{
+				"r.AntiAliasingMethod": "4",
+				"r.Shadow.Virtual.Enable": "1",
+				"r.SkyAtmosphere.FastSkyLUT": "0",
+				"r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque": "0",
+				"r.SkyAtmosphere.MultiScatteringLUT.HighQuality": "1",
+				"r.SkyAtmosphere.LUT32": "1",
+				"r.SkyAtmosphere.SampleCountMax": "256",
+				"r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice": "8",
+				"r.VolumetricCloud": "1",
+				"r.VolumetricCloud.HighQualityAerialPerspective": "1",
+				"r.VolumetricRenderTarget.Mode": "3",
+				"r.TSR.History.SampleCount": "32",
+				"r.TSR.History.ScreenPercentage": "200"
+			},
+			"calibration": "UNCALIBRATED: every constant here is set by probe render on the render machine (docs/visual/PROBE_LOG.md, render-path)",
+			"show_flags_pinned": 7,
+			"blue_noise":
+			{
+				"scalar":
+				{
+					"loaded": true,
+					"path": "/Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64",
+					"resource_created_here": false,
+					"default_stand_in": false,
+					"resource": true,
+					"size_x": 128,
+					"size_y": 8192
+				},
+				"vec2":
+				{
+					"loaded": true,
+					"path": "/Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64",
+					"resource_created_here": false,
+					"default_stand_in": false,
+					"resource": true,
+					"size_x": 128,
+					"size_y": 8192
+				},
+				"cloud_march_jittered": true,
+				"basis": "VolumetricCloud.usf starts each view ray at TMin + BlueNoiseScalar(pixel, StateFrameIndexMod8) x StepT; BlueNoise.cpp GetBlueNoiseGlobalParameters binds a 1x1 black dummy unless both GEngine textures have a resource (an ensure allows that only in a rendering commandlet), and a texture still building answers as a default stand-in: either is one offset for every pixel of every capture, the altitude-slice banding of round 3. Loaded and built here, before the first capture"
+			},
+			"aircraft_sharp":
+			{
+				"kind": "still",
+				"motion_blur": false,
+				"motion_blur_rule": "off for a still (one instant); on for a clip at the beauty look's 180-degree shutter",
+				"velocity_frame": "FSceneInterface::StartFrame after the warm-ups and after each delivered beauty frame (the commandlet has no FEngineLoop::Tick to call it): a motion vector spans one delivered frame",
+				"still_sub_captures": "one sim time, one pose; velocity frame rolled after the pose (zero object motion); the first sub-capture is a camera cut (TSR history reset at this pose)",
+				"motion_blur_time_scale": "engine: (1 / MotionBlurTargetFPS) / the family's DeltaRealTime (SceneVisibility.cpp UpdateMotionBlurTimeScale); the commandlet's real delta is not set by the clip rate: unmeasured",
+				"aircraft_primitives": 4,
+				"aircraft_primitives_movable": 4,
+				"aircraft_writes_velocity": true,
+				"tsr":
+				{
+					"asked": true,
+					"platform_supports_tsr": true,
+					"capture_realtime": true,
+					"show_flags": true,
+					"shader_platform": "PCD3D_SM5",
+					"resolved": "TSR"
+				}
+			},
+			"accumulation":
+			{
+				"captures_per_frame": 12,
+				"delivered_frames": 1,
+				"total_captures": 12,
+				"basis": "beauty still: the beauty look's tsr row (ENGINE_LOOK, UNCALIBRATED) over the default 8",
+				"method": "the engine's own temporal accumulation: TSR's jittered history (r.TSR.History.SampleCount caps what it keeps) and Lumen's radiance cache, over repeated captures of one pose; no hand-rolled average, so the tonemapper sees the converged HDR scene",
+				"labels": "rendered once per frame after the last beauty capture, same camera pose, no jitter",
+				"history_across_frames": "TSR keeps its history from the previous delivered frame and reprojects it across the camera move; with one capture a frame (a clip) a moving silhouette can ghost where the label masks, rendered without history, show nothing; unmeasured"
+			},
+			"quality": "beauty",
+			"temporal_aa_show_flag": true,
+			"path_tracing_show_flag": false
+		},
+		"beauty_fallback":
+		{
+			"module": "FlightSimBeautyFallback.cpp (no-lumen-and-machine lane)",
+			"mode": "auto",
+			"machine":
+			{
+				"rhi": "D3D11",
+				"feature_level": "SM5",
+				"shader_platform": "PCD3D_SM5",
+				"lumen_gi_supported": false,
+				"virtual_shadow_maps_supported": false,
+				"nanite_supported": false,
+				"distance_fields_supported": true,
+				"ray_tracing_enabled": false,
+				"r.Lumen.Supported.SM5": "0",
+				"basis": "DoesPlatformSupportLumenGI / DoesPlatformSupportVirtualShadowMaps / DoesPlatformSupportNanite (RenderUtils.h) and DoesPlatformSupportDistanceFields && DoesProjectSupportDistanceFields (SceneManagement.h) on GMaxRHIShaderPlatform; the cvars reading 1 says nothing about what ran"
+			},
+			"path": "fallback",
+			"gi": "SSGI (screen space) plus the sky light",
+			"gi_note": "SSGI reads the previous capture's scene colour (ScreenSpaceRayTracing.cpp IsScreenSpaceDiffuseIndirectSupported needs PrevViewInfo), so the first capture of a run has none; a still's accumulation captures and a clip's later frames have it",
+			"sky_occlusion": "distance-field AO",
+			"sky_light":
+			{
+				"intensity_before": 1,
+				"min_occlusion_before": 0,
+				"fill": 1.6000000238418579,
+				"intensity": 1.6000000238418579,
+				"min_occlusion": 0.20000000298023224,
+				"occlusion_max_distance_cm": 1000,
+				"cast_shadows": true,
+				"real_time_capture": false,
+				"recapture": "marked dirty here; captured by the commandlet before the first frame (per frame when the sun animates)"
+			},
+			"shadows":
+			{
+				"method": "cascaded shadow maps",
+				"cascades_before": 6,
+				"distribution_before": 3,
+				"cascades": 8,
+				"distribution_exponent": 4,
+				"distance_movable_cm": 2000000,
+				"contact_shadows": "the hero-lighting lane's (beauty capture show flag and the sun's world-space length)"
+			},
+			"nanite": "unsupported: Nanite meshes draw their fallback meshes in every capture (labels too), so labels still match pixels",
+			"cvars_before":
+			{
+				"r.SSGI.Quality": "3",
+				"r.SSR.Quality": "3",
+				"r.DistanceFieldAO": "1",
+				"r.AOQuality": "2",
+				"r.Shadow.CSM.MaxCascades": "10",
+				"r.Shadow.MaxCSMResolution": "2048",
+				"r.Shadow.MaxResolution": "2048"
+			},
+			"cvars_asked":
+			{
+				"r.SSGI.Quality": 4,
+				"r.SSR.Quality": 4,
+				"r.DistanceFieldAO": 1,
+				"r.AOQuality": 2,
+				"r.Shadow.CSM.MaxCascades": 10,
+				"r.Shadow.MaxCSMResolution": 4096,
+				"r.Shadow.MaxResolution": 4096
+			},
+			"cvars_read_back":
+			{
+				"r.SSGI.Quality": "4",
+				"r.SSR.Quality": "4",
+				"r.DistanceFieldAO": "1",
+				"r.AOQuality": "2",
+				"r.Shadow.CSM.MaxCascades": "10",
+				"r.Shadow.MaxCSMResolution": "4096",
+				"r.Shadow.MaxResolution": "4096"
+			},
+			"pixel_moving_effects": [],
+			"labels": "beauty only: label captures read stencil, depth and GBuffer, which lighting does not change",
+			"calibration": "UNCALIBRATED: each constant is set by the probe named in docs/visual/PROBE_LOG.md \"## no-lumen-fallback\"",
+			"capture_post_process":
+			{
+				"DynamicGlobalIlluminationMethod": "ScreenSpace",
+				"ReflectionMethod": "ScreenSpace",
+				"ScreenSpaceReflectionQuality": 100
+			}
+		},
+		"beauty_owners":
+		{
+			"order": "scene build (sun lux, sky, fog, clouds), world lane (atmosphere Mie, fog share, cloud materials, sky-light lightning pulse), exposure (card triple / look.ev100 / -exposure-bias / -sky= camera), look-dev (EV100 on a plain manual exposure, sun temperature, tonemap, grade, lens post, DOF, motion blur, SSR), render-path (scalability, cvars, TSR, Lumen quality), storm meter (bias), per frame (focus, sky pulse)",
+			"lumen_quality": "render-path (beauty_path.lumen_capture_overrides)",
+			"exposure": "beauty_ev100",
+			"auto_exposure_bias": -1.6951093673706055,
+			"physical_camera_exposure": true,
+			"sun_lux": "-sky= plan",
+			"sun_colour": "look-dev temperature only on an uncoloured sun (beauty_look.applied.sun)",
+			"atmosphere_fog": "world lane over the scene build (look_applied.world_beauty.atmosphere)",
+			"lens_post":
+			{
+				"owner": "look-dev (-beauty-look=)",
+				"BloomIntensity": 0.25,
+				"LensFlareIntensity": 0,
+				"VignetteIntensity": 0,
+				"FilmGrainIntensity": 0.029999999329447746,
+				"SceneFringeIntensity": 0,
+				"MotionBlurAmount": 0,
+				"DepthOfFieldFstop": 4
+			}
+		},
+		"capture_size_px": [
+			1280,
+			720
+		],
+		"screen_percentage": "captures render at capture_size_px; r.ScreenPercentage recorded in console",
+		"exposure_mode": "beauty_ev100",
+		"exposure_source": "-beauty-look= EV100 11.60 over the -sky= plan's camera (f/4, 1/60 s, ISO 100; compensation -1.695, the plan's was -1.695); storm meter opened 0.00 stops (p90 luma 0.537 -> 0.537, target 0.45)",
+		"ev100": 11.602,
+		"exposure_bias": 11,
+		"extend_default_luminance_range": "1",
+		"rhi": "D3D11",
+		"shader_platform": "PCD3D_SM5",
+		"working_colour_space": "sRGB / Rec.709 primaries, linear",
+		"deterministic_pins": true,
+		"cockpit_offset_m": [
+			-6,
+			-0.5,
+			1.6000000238418579
+		],
+		"chase_offset_m": [
+			-170,
+			0,
+			16
+		],
+		"wingman_offset_m": [
+			-45,
+			180,
+			0
+		],
+		"preset_offset_rule": "Python's (core/scenario/camera.py FALLBACK_CHASE_OFFSET, WINGMAN_OFFSET, SHOULDER_OFFSET): body offsets from the CG, unscaled; chase as flown is the shot constant or -chase="
+	},
+	"look_applied":
+	{
+		"sun":
+		{
+			"sun_elevation_deg": 12,
+			"engine_sun_yaw_deg": 180,
+			"component": "ADirectionalLight (existing sun)",
+			"cast_shadows": true,
+			"intensity": 8,
+			"light_units": "unitless",
+			"note": "the unitless 8.0 sun every Gate 6 clause was tuned on; no luminance chain describes it"
+		},
+		"aerosol":
+		{
+			"component": "USkyAtmosphereComponent::MieScatteringScale",
+			"mie_scattering_scale": 0.0039960000000000004,
+			"units": "1/km (the engine default)",
+			"applied": false,
+			"note": "engine default 0.003996/km; the fog row carries the extinction (applying look.aerosol as well double counts)"
+		},
+		"fog":
+		{
+			"fog_density": 0.0012000000569969416,
+			"component": "UExponentialHeightFogComponent::FogDensity",
+			"fog_height_falloff": 0.00020000000000000001,
+			"fog_max_opacity": 0.92000000000000004,
+			"start_distance_m": 1500
+		},
+		"clouds":
+		{
+			"component": "UVolumetricCloudComponent (LayerBottomAltitude / LayerHeight; coverage through the cloud material)",
+			"layers_requested": 0,
+			"drawn": false
+		},
+		"cloud_drift":
+		{
+			"cloud_drift_mps": 0,
+			"cloud_drift_from_deg": 0,
+			"applied": false,
+			"note": "not modelled this phase: no per-tick wind offset is written to the cloud material"
+		},
+		"night":
+		{
+			"stars_requested": false,
+			"moon_requested": false,
+			"stars": "not modelled",
+			"moon": "not modelled",
+			"night_sky": "the existing sun below the horizon only (sky atmosphere twilight)"
+		},
+		"not_claimed": [
+			"precipitation_particles",
+			"moon",
+			"stars",
+			"cloud_drift",
+			"sea_state",
+			"foliage_sway"
+		],
+		"precipitation":
+		{
+			"precipitation": "none",
+			"wetness": 0,
+			"particles": false,
+			"particles_note": "not drawn: the card carries no rain_particles block, or its mesh or material is absent",
+			"component": "Wetness scalar on the georeferenced terrain material instance",
+			"wetness_parameter": "not set (dry)",
+			"wetness_applied_to": "nothing (wetness 0)"
+		},
+		"terrain_material":
+		{
+			"tangents": "per vertex of every georeferenced tile: tangent X the raster's east direction in the surface (dP/du); bitangent +V (south, the row direction) by construction -- the engine's cross(N, T) is +Y, flipped exactly when the georeferencing puts north along +Y",
+			"north_axis_measured": "-Y",
+			"flip_tangent_y": false,
+			"version": 1,
+			"material": "/Game/FlightSim/M_TerrainImagery.M_TerrainImagery",
+			"sidecar": "C:\\Users\\kanth\\flightsim\\runs\\terrain\\yosemite_xplane_drape.json",
+			"applied": [
+				"Imagery"
+			],
+			"absent": [
+				"Roles",
+				"SnowCover",
+				"WaterMask",
+				"DetailValley",
+				"DetailScrub",
+				"DetailRock",
+				"DetailCliff",
+				"DetailSnow",
+				"NormalValley",
+				"NormalScrub",
+				"NormalRock",
+				"NormalCliff",
+				"NormalSnow",
+				"SnowAlbedo",
+				"SnowNormal",
+				"Noise",
+				"DetailMetresValley",
+				"DetailMetresScrub",
+				"DetailMetresRock",
+				"DetailMetresCliff",
+				"DetailMetresSnow",
+				"SnowMetres",
+				"NoiseMetres",
+				"DetailStrength",
+				"DetailFadeStartM",
+				"DetailFadeEndM",
+				"SnowSlopeLowCos",
+				"SnowSlopeHighCos",
+				"SnowBand",
+				"RoughnessValley",
+				"RoughnessScrub",
+				"RoughnessRock",
+				"RoughnessCliff",
+				"RoughnessSnow",
+				"RoughnessWater"
+			],
+			"missing_files": [],
+			"not_in_sidecar": [],
+			"textures":
+			{
+				"Imagery":
+				{
+					"file": "C:\\Users\\kanth\\flightsim\\runs\\terrain/yosemite_xplane_base.png",
+					"width": 3453,
+					"height": 2682,
+					"mips": 1,
+					"srgb": true,
+					"texel": "albedo (sRGB)",
+					"uv": "the composite's UV0 (clamp)"
+				}
+			},
+			"scalars":
+			{
+			},
+			"imagery_source": "material.textures.imagery",
+			"not_claimed": "the material's graph (the detail, snow, water and roughness rules) is scripts/ue_create_materials.py's; that each map reads as intended, that every in-memory mip uploads, and the extracted normals' green convention against +V are the first Windows build's measurements; no normal is extracted for any ground texture yet"
+		},
+		"weather":
+		{
+			"asked": false
+		},
+		"weather_look_beauty":
+		{
+			"rain_shafts_softened": 0,
+			"shaft_soft_edge": 1,
+			"shaft_light": 0.34999999999999998,
+			"tornado_funnel": "none in the world",
+			"tornado_wall_cloud": "none in the world",
+			"basis": "core/scene/weather_look.py BEAUTY_SHAFT_*, BEAUTY_FUNNEL_COLOUR (UNCALIBRATED); shading only, the labels' silhouettes unchanged"
+		},
+		"world_beauty":
+		{
+			"quality": "beauty",
+			"preset": "clear",
+			"inputs":
+			{
+				"visibility_km": 0,
+				"rain_rate_mmh": 0,
+				"precipitation_rain": false,
+				"storm": false,
+				"storm_word": "",
+				"storm_words": "weather_look.STORMS (thunderstorm, tornado), or a drawn storm cell",
+				"surface": "",
+				"ground_wetness": 0,
+				"look_basis": "per key: card.look when it states the key, else card.randomization.look (world_beauty.card_inputs)",
+				"card_cover": 0,
+				"card_wetness": 0,
+				"seed": 0
+			},
+			"calibration": "UNCALIBRATED: every look value is set by probe render on the render machine (docs/visual/PROBE_LOG.md ## world; core/scene/world_beauty.py is the table)",
+			"overridden": [],
+			"overrides_file": "",
+			"visual_only": "nothing here reaches the flight model; the measure quality never builds it",
+			"atmosphere":
+			{
+				"multi_scattering_factor_before": 1,
+				"multi_scattering_factor": 1,
+				"multi_scattering_basis": "world_beauty.SKY_MULTI_SCATTERING (UNCALIBRATED): shot d's sky at 3.8 km rendered near-black navy; more multiple scattering pales and lifts the clear sky towards the horizon",
+				"mie_scale_height_km": 1.2,
+				"mie_anisotropy": 0.80000000000000004,
+				"aerial_perspective_view_distance_scale": 1,
+				"ground_albedo_srgb": "92,96,78",
+				"ground_albedo_basis": "the atmosphere's multiple-scattering ground bounce (the only engine pass that reads it; the main view draws no albedo-lit ground): the card's surface row (world_beauty.GROUND_ALBEDO_SRGB, UNCALIBRATED) darkened by the tiles' wet law at the ground's wetness",
+				"ground_albedo_surface": "default",
+				"ground_albedo_wetness": 0,
+				"mie_basis": "kept: the card states no visibility_km",
+				"applied": true,
+				"height_fog": [
+					{
+						"fog_density_before": 0.0012000000569969416,
+						"fog_density_after": 0.0012000000569969416,
+						"directional_inscattering_exponent": 2,
+						"directional_inscattering_basis": "the pow lobe whose mean cosine (n+1)/(n+2) is the volumetric fog's g, clamped (FlightSimWorldPure::FogDirectionalExponentForG)",
+						"volumetric_fog": true,
+						"volumetric_fog_distance_m": 8000,
+						"volumetric_fog_scattering_distribution": 0.75,
+						"volumetric_fog_extinction_scale": 1
+					}
+				],
+				"volumetric_fog_inscatter":
+				{
+					"lights_volumetric_scattering_scale": 1,
+					"basis": "1 / the row's volumetric fog extinction scale (world_beauty.vfog_scattering_compensation), so the wet rows scale the fog's extinction only, not its in-scatter (round 3's #08 and head shot c lost the rain haze's veil); UNCALIBRATED"
+				},
+				"sun": "bCastShadowsOnClouds, bCastShadowsOnAtmosphere, bCastVolumetricShadow on; bPerPixelAtmosphereTransmittance left as the -sky= plan set it; bCastCloudShadows left as the scene set it",
+				"sun_per_pixel_transmittance": true,
+				"sun_transmittance_model": "world_beauty.SUN_PER_PIXEL_TRANSMITTANCE: the engine's atmosphere alone reddens and dims the beam along the true slant path; beauty_look reads the same flag for the light's lux and colour",
+				"sun_cast_cloud_shadows": false,
+				"contact_shading":
+				{
+					"r.Lumen.ScreenProbeGather.ShortRangeAO": "1",
+					"r.Lumen.ScreenProbeGather.ShortRangeAO.HorizonSearch": "1",
+					"sun_contact_shadow_length": 0.05000000074505806,
+					"pixel_moving": false,
+					"calibration": "UNCALIBRATED"
+				}
+			},
+			"dust_haze":
+			{
+				"pixel_moving": false,
+				"calibration": "UNCALIBRATED: every DUST_ROWS value, RH_GAMMA, the inversion height and the second fog density are set by probe render on the render machine (docs/visual/PROBE_LOG.md ## dust-humidity-haze; core/scene/dust_haze.py is the table)",
+				"row": "none",
+				"row_basis": "none of the card's words select dust or haze",
+				"aerosol": "continental",
+				"rh": 0.5,
+				"rh_pct": 50,
+				"rh_basis": "default",
+				"gamma": 0.29999999999999999,
+				"f_rh": 1.2311444133449163,
+				"inversion_height_m": 1500,
+				"visibility_target_km": null,
+				"visibility_model_km": null,
+				"mie_before": 0.0044400002807378769,
+				"mie_after": 0.0044400002807378769,
+				"mie_basis": "kept: no visibility_km on the card, or the -aerosol= probe set the Mie scale",
+				"fog_density_ratio": 1,
+				"mie_absorption_rgb": [
+					1,
+					1,
+					1
+				],
+				"mie_absorption_green_per_km": 0.00044400000479072332,
+				"other_absorption": "kept: the none row tints nothing",
+				"height_fog": [
+					{
+						"fog_density_before": 0.0012000000569969416,
+						"fog_density_after": 0.0012000000569969416
+					}
+				],
+				"second_fog":
+				{
+					"density": 0,
+					"falloff": 0.014999999999999999,
+					"offset_m": 1500,
+					"fog_z_m": 0,
+					"ground_extinction_per_km": 0,
+					"drawn": false,
+					"shape": "the engine's exponential fog, not a slab: density doubles every 1/(falloff x 0.1) m below the inversion and halves as fast above it"
+				},
+				"subject_transmittance": "1: no second layer is drawn",
+				"labels": "values only: nothing moves a pixel; the second layer's camera-to-aircraft transmittance is a cloud_path row each frame, flagged (cloud_occludes_aircraft) under the occlusion threshold",
+				"applied": true
+			},
+			"clouds":
+			{
+				"mode": "card",
+				"labels": "volumetric clouds write no depth or stencil: the mask, class and depth never see them. Clouds stay where the card puts them; each frame records the camera-to-aircraft path through every layer, its estimated transmittance and cloud_occludes_aircraft (frames[]); the mask is not edited",
+				"kept_other_material": [],
+				"fair_layer_added": false,
+				"march":
+				{
+					"path": "integrated",
+					"path_basis": "CloudConstrainedGpu (GRHIDeviceIsIntegrated, or a feature level below SM6): the constrained row is ef361bd6's march",
+					"rhi_device_is_integrated": true,
+					"feature_level_sm6": false,
+					"adapter": "Intel(R) Graphics",
+					"view_sample_count_scale": 2,
+					"shadow_sample_count_scale": 1,
+					"tracing_max_distance_km": 80,
+					"view_samples_max": 192,
+					"shadow_samples": 10,
+					"banding_basis": "round 1 marched 192 view samples over up to 80 km (400 m steps through 0.05/m cloud) and 10 unjittered quadratic shadow samples over 15 km: contour banding and unlit cloud. The view march is blue-noise jittered by the engine (VolumetricCloud.usf) and averaged by the still's captures ONLY once the commandlet has loaded and built the blue-noise textures before the first capture (clouds round 6: render_settings.beauty_path.blue_noise; a commandlet otherwise gets BlueNoise.cpp's constant dummy, the altitude-slice strata of round 3); the shadow march spans the layer (CloudShadowTracingKm)",
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"r.VolumetricCloud.ApplyFogOnAllPixel": "0"
+				},
+				"layers": [
+					{
+						"component": "VolumetricCloudComponent",
+						"shape": "cumulus",
+						"cover": 0.34999999999999998,
+						"cover_basis": "the shape's default (the card states none)",
+						"base_m": 2000,
+						"top_m": 5000,
+						"built_top_m": 5000,
+						"top_basis": "as built (within the shape's depth)",
+						"shadow_tracing_distance_km": 15,
+						"extinction_per_m": 0.050000000000000003,
+						"shape_scale_km": 2.5,
+						"detail_scale_km": 0.34999999999999998,
+						"detail_erosion": 0.34999999999999998,
+						"bottom_softness": 0.080000000000000002,
+						"top_rounding": 0.59999999999999998,
+						"coverage_contrast": 1.6000000000000001,
+						"default_cover": 0.34999999999999998,
+						"extinction_scale": 1,
+						"seed_offset_km": "652.448486,368.189516,392.216462",
+						"material": "/Game/FlightSim/M_FlightSimCloudLayers.M_FlightSimCloudLayers"
+					}
+				],
+				"deck_shadow":
+				{
+					"switch": "on",
+					"preset": "clear",
+					"top_cover": 0.34999999999999998,
+					"min_cover": 0.5,
+					"deck_shadows_beam": false,
+					"sun_cast_cloud_shadows_before": false,
+					"sun_cast_cloud_shadows": false,
+					"applied": "not a deck preset with a drawn layer of min_cover: the scene's switch stands",
+					"basis": "the law of world_beauty.deck_shadows_beam -- under an overcast the ground gets the deck's diffuse transmission, not the clear-sky beam (round 4's #10: a 10 deg red beam on the Flint Hills); beauty only; UNCALIBRATED"
+				},
+				"unmodelled_clouds": 0,
+				"coverage_law": "cloud_layers.hlsl (round 2: Perlin-Worley shape, domed tops, in-cloud erosion) cuts the shape noise at its (1 - cover) quantile: FBM_MEAN 0.779 + FBM_SIGMA 0.05 x probit(1 - cover) (the noise's own moments, world_beauty.CLOUD_FBM_*), started early by half the erosion's share of the soft edge, so the drawn share of sky at full profile is the stated cover",
+				"view_sample_count_scale": 2,
+				"shadow_view_sample_count_scale": 1,
+				"shadow_tracing_distance_km": "per layer (layers[].shadow_tracing_distance_km)",
+				"tracing_max_distance_km": 80,
+				"drift_mps": 0,
+				"drift_from_deg": 0,
+				"drawn": "M_FlightSimCloudLayers on every engine-material cloud (the storm's M_StormCell kept)"
+			},
+			"aircraft_clearance":
+			{
+				"aircraft_above_datum_m": 270,
+				"clearance_m": 400,
+				"rain_deck_goes_above": false,
+				"law": "the law of world_beauty.aircraft_clear_layer, a deck whose slab widened by clearance_m holds the aircraft moves clear of it with its thickness kept (a rain or storm deck above, others to the nearer side); UNCALIBRATED",
+				"layers": [
+					{
+						"component": "VolumetricCloudComponent",
+						"base_m_before": 2000,
+						"top_m_before": 5000,
+						"moved": false,
+						"base_m": 2000,
+						"top_m": 5000
+					}
+				]
+			},
+			"distant_clouds":
+			{
+				"mode": "on",
+				"engine_content": "UE 5.7 still ships /Engine/EngineSky/BP_Sky_Sphere with M_Sky_Panning_Clouds, M_Sky_Panning_Clouds2(_Inst) and T_Sky_Clouds_M (read in the engine content on 2026-11-10); not used: a sky sphere covers the SkyAtmosphere",
+				"labels": "a translucent unlit disc: no depth write, no custom depth, no shadow; in BeautyOnlyActors, so every label capture hides it (mask, class, depth and boxes untouched); the measure quality never builds it",
+				"pixel_moving": false,
+				"calibration": "UNCALIBRATED: set by probe render on the render machine",
+				"volumetric_trace":
+				{
+					"constrained_gpu": true,
+					"row_tracing_max_distance_km": 80,
+					"tracing_max_distance_km": 32,
+					"shrunk": true,
+					"layers_set": 1,
+					"basis": "the distant tracing (world_beauty.distant_tracing_max_km), constrained and the sheet drawn -> min(row, DISTANT_NEAR_FIELD_KM). VolumetricCloud.usf: StepCount = SampleCountMax x saturate(path x InvDistanceToSampleCountMax) (r.VolumetricCloud.DistanceToSampleMaxCount, 15 km), non-decreasing in the path: a shorter trace never adds a sample, only shortens the step; the sheet fades in over FadeKm up to the trace's end"
+				},
+				"base_m": 2000,
+				"top_m": 5000,
+				"cover": 0.34999999999999998,
+				"shape": "cumulus",
+				"cover_basis": "the first redrawn layer (its slab after the aircraft clearance, its cover and shape row)",
+				"coverage_contrast": 1.6000000000000001,
+				"shape_scale_km": 2.5,
+				"slice_km": 395.71646242353182,
+				"handover_km": 24,
+				"fade_km": 8,
+				"radius_km": 300,
+				"rings": 48,
+				"segments": 96,
+				"vertices": 4609,
+				"triangles": 9120,
+				"droop_at_rim_m": -7063.2553759221464,
+				"inside_ramp_m": 200,
+				"look":
+				{
+					"RimFadeShare": 0.20000000000000001,
+					"Albedo": 0.90000000000000002,
+					"AmbientGain": 1,
+					"SunWrap": 0.29999999999999999,
+					"BaseDarkening": 0.55000000000000004,
+					"BaseSunShare": 0.14999999999999999,
+					"SilverLining": 0.59999999999999998,
+					"RimPower": 8,
+					"NormalStrength": 1.5
+				},
+				"seed_offset_km": "652.448486,368.189516,392.216462",
+				"material": "/Game/FlightSim/M_FlightSimDistantClouds.M_FlightSimDistantClouds",
+				"lighting": "faked in distant_clouds.hlsl: N.L (wrapped) from the shape's screen-space gradient, the sun's illuminance and direction and the sky's distant scattered luminance from the SkyAtmosphere material nodes (atmosphere light 0), dark bases from below, a sun-coloured silver lining on backlit edges; height fog and aerial perspective applied per pixel (Apply Fogging)",
+				"sheet_altitude_law": "per frame (frames[].distant_sheet_*): at the deck's base with the camera below the slab's middle (bases), at its top above (tops); faded out inside the slab (world_beauty.distant_sheet_altitude_m)",
+				"drawn": "M_FlightSimDistantClouds on one earth-curved disc centred on the camera, re-centred and re-levelled per frame"
+			},
+			"sky_hdri":
+			{
+				"name": "",
+				"preset": "clear",
+				"applied": false,
+				"sky": "the scene's captured sky (no -sky-hdri=)"
+			},
+			"tiles":
+			{
+				"cesium_version": "2.30.0",
+				"api_basis": "UNVERIFIED: Cesium for Unreal reached by reflection by name (no Cesium headers on the authoring machine); found/not found below is the render machine's answer",
+				"material": "/Game/FlightSim/M_FlightSimTilesBeauty.M_FlightSimTilesBeauty",
+				"material_route": "UFunction SetMaterial",
+				"generate_smooth_normals": true,
+				"refreshed": true,
+				"tileset_properties": [
+					"Root:USceneComponent*",
+					"Georeference:TSoftObjectPtr<ACesiumGeoreference>",
+					"ResolvedGeoreference:ACesiumGeoreference*",
+					"CreditSystem:TSoftObjectPtr<ACesiumCreditSystem>",
+					"ResolvedCreditSystem:ACesiumCreditSystem*",
+					"CameraManager:TSoftObjectPtr<ACesiumCameraManager>",
+					"ResolvedCameraManager:ACesiumCameraManager*",
+					"BoundingVolumePoolComponent:UCesiumBoundingVolumePoolComponent*",
+					"ShowCreditsOnScreen:bool",
+					"MaximumScreenSpaceError:double",
+					"ApplyDpiScaling:EApplyDpiScaling",
+					"PreloadAncestors:bool",
+					"PreloadSiblings:bool",
+					"ForbidHoles:bool",
+					"MaximumSimultaneousTileLoads:int32",
+					"MaximumCachedBytes:int64",
+					"LoadingDescendantLimit:int32",
+					"EnableFrustumCulling:bool",
+					"EnableFogCulling:bool",
+					"EnforceCulledScreenSpaceError:bool",
+					"CulledScreenSpaceError:double",
+					"CanEnableOcclusionCulling:bool",
+					"EnableOcclusionCulling:bool",
+					"OcclusionPoolSize:int32",
+					"DelayRefinementForOcclusion:bool",
+					"SuspendUpdate:bool",
+					"UpdateInEditor:bool",
+					"UnloadEditorTilesInPlayMode:bool",
+					"LogSelectionStats:bool",
+					"LogSharedAssetStats:bool",
+					"DrawTileInfo:bool",
+					"BodyInstance:FBodyInstance",
+					"OnTilesetLoaded:FCompletedLoadTrigger",
+					"UseLodTransitions:bool",
+					"LodTransitionLength:float",
+					"LoadProgress:float",
+					"TilesetSource:ETilesetSource",
+					"Url:FString",
+					"IonAssetID:int64",
+					"IonAccessToken:FString",
+					"CesiumIonServer:UCesiumIonServer*",
+					"RequestHeaders:TMap",
+					"CreatePhysicsMeshes:bool",
+					"EnableDoubleSidedCollisions:bool",
+					"CreateNavCollision:bool",
+					"AlwaysIncludeTangents:bool",
+					"GenerateSmoothNormals:bool",
+					"EnableWaterMask:bool",
+					"IgnoreKhrMaterialsUnlit:bool",
+					"ReceiveDecals:bool",
+					"Material:UMaterialInterface*",
+					"TranslucentMaterial:UMaterialInterface*",
+					"WaterMaterial:UMaterialInterface*",
+					"CustomDepthParameters:FCustomDepthParameters",
+					"PointCloudShading:FCesiumPointCloudShading",
+					"RuntimeVirtualTextures:TArray",
+					"VirtualTextureRenderPassType:ERuntimeVirtualTextureMainPassType",
+					"TranslucencySortPriority:int32",
+					"PlatformName:FString",
+					"_pLifecycleEventReceiver:UObject*"
+				],
+				"applied": "the beauty look",
+				"collection": "/Game/FlightSim/MPC_FlightSimWorld.MPC_FlightSimWorld",
+				"dehaze_law": "soft toe: removal Dehaze x HAZE_RGB (0.010, 0.015, 0.022) x a / (a + k), k = h / (1 - 0.5), white kept white; a dark texel keeps at least half of itself (world_beauty.TILES_HAZE_RGB, TILES_DEHAZE_TOE, UNCALIBRATED)",
+				"grade_basis": "Dehaze and Saturation are the tileset's imagery correction (world_beauty.TILES_DEHAZE, TILES_SATURATION, UNCALIBRATED), one value for every weather; the weather's grade is beauty_look's frame grade alone",
+				"parameters":
+				{
+					"Wetness": 0,
+					"PuddleAmount": 0,
+					"Dehaze": 0.80000000000000004,
+					"Saturation": 1.05,
+					"DetailStrength": 0.12,
+					"DetailFadeM": 400,
+					"DetailScaleM": 2,
+					"DelightAmount": 0.5,
+					"DelightBlueGate": 4
+				},
+				"delight":
+				{
+					"amount": 0.5,
+					"mip_bias": 5,
+					"ratio_knee": 0.59999999999999998,
+					"blue_gate": 4,
+					"preset": "clear",
+					"basis": "shader per frame, nothing stored (Google tile policy)",
+					"pixel_moving": false,
+					"calibration": "UNCALIBRATED",
+					"contact_shading": "world_beauty.atmosphere.contact_shading"
+				},
+				"wetness_basis": "max(the card's wetness, the preset's wetness_floor)",
+				"rule": "the tiles stay the ground of every terrain render (the owner's rule); this changes their shading only"
+			},
+			"sun_shafts":
+			{
+				"preset": "clear",
+				"tier": "interactive",
+				"tier_basis": "derived: no accumulation flag, engine defaults for per-frame cost",
+				"sun":
+				{
+					"applied": "yes",
+					"light_shaft_occlusion": true,
+					"occlusion_mask_darkness": 0.40000000000000002,
+					"occlusion_depth_range_m": 20000,
+					"light_shaft_bloom": true,
+					"bloom_scale": 0.20000000000000001,
+					"bloom_threshold": 8,
+					"bloom_max_brightness": 100,
+					"cloud_shadow_on_atmosphere_strength": 1,
+					"cloud_shadow_on_surface_strength": 1,
+					"cloud_shadow_extent_km": 150,
+					"cloud_shadow_map_resolution_scale": 2,
+					"cloud_shadow_ray_sample_count_scale": 2,
+					"cast_shadows_on_atmosphere": true,
+					"cast_cloud_shadows": false,
+					"cloud_shadow_note": "the sun casts no cloud shadow in this scene: the cloud-shadow strengths are recorded but have no effect (the switch is the scene's, not this module's)"
+				},
+				"sky_light":
+				{
+					"applied": "yes",
+					"cloud_ambient_occlusion": true,
+					"cloud_ambient_occlusion_strength": 0.5,
+					"cloud_ambient_occlusion_extent_km": 150,
+					"cloud_ambient_occlusion_map_resolution_scale": 2,
+					"cloud_ambient_occlusion_aperture_scale": 0.050000000000000003,
+					"real_time_capture": false
+				},
+				"cvars":
+				{
+					"r.VolumetricCloud.ShadowMap": [
+						"1",
+						"1"
+					],
+					"r.VolumetricCloud.SkyAO": [
+						"1",
+						"1"
+					],
+					"r.LightShaftQuality": [
+						"1",
+						"1"
+					]
+				},
+				"cvars_skipped": [],
+				"cvars_dropped": "LightShaftNumSamples: ECVF_ReadOnly in the 5.7.4 LightShaftRendering.cpp, a runtime set is refused",
+				"cvars_scope": "process-wide while the beauty render runs (label captures in the same run share them, but draw no fog, atmosphere or cloud and read stencil / depth / normal / base colour); put back at teardown",
+				"show_flags":
+				{
+					"light_shafts": true,
+					"volumetric_fog": true,
+					"where": "on for the beauty capture (FlightSimRenderCommandlet.cpp beauty block); LightShafts is off on every label capture (ConfigureLabelCapture) and on the calibration capture, since the sun's light-shaft bloom adds into SceneColor on any view with the flag on; the measured value is render_settings.beauty_show_flags"
+				},
+				"pixel_moving": false,
+				"basis": "value-only: radiance, no surface moves",
+				"labels": "not in PIXEL_MOVING_KEYS; no Gate V bloom-ceiling clause exists (gate_v_visual.py has no bloom metric): look_label_check's mask-edge distance covers it, and the probe log asks for a label-bytes A/B with the module on and off",
+				"calibration": "UNCALIBRATED: every value is set by probe render on the render machine (docs/visual/PROBE_LOG.md ## sun-shafts-sky-occlusion; core/scene/sun_shafts.py is the table)"
+			},
+			"rain":
+			{
+				"applied_to": "nothing: the storm weather draws no drops (-weather-backend=off or no rain); the weather look's rain particles and streaks are unchanged"
+			},
+			"lightning":
+			{
+				"sky_gain": 0,
+				"reference_lux": 50,
+				"sky_light_base_intensity": 1.6000000238418579,
+				"weather_look_schedule": false,
+				"storm_weather_flashes": false,
+				"law": "sky light x (1 + sky_gain x clamp(max(weather-look flash, storm flash lux / reference_lux), 0, 1)) per frame; each frame's values in frames[]"
+			},
+			"ground_scatter":
+			{
+				"drawn": "nothing: no -ground-scatter=<sidecar>"
+			},
+			"frames": [
+				{
+					"frame": 0,
+					"t_s": 0.0083333333329999992,
+					"distant_sheet_altitude_m": 2000,
+					"distant_sheet_from_above": false,
+					"distant_sheet_fade": 1,
+					"flash_weather_look": 0,
+					"flash_storm_lux": 0,
+					"sky_light_scale": 1,
+					"cloud_path": [
+						{
+							"path_m": 0,
+							"tau": 0,
+							"transmittance": 1
+						}
+					],
+					"cloud_occludes_aircraft": false,
+					"cloud_occlusion_complete": true,
+					"cloud_covered_fraction_modelled": 0
+				}
+			]
+		},
+		"constrained_gpu":
+		{
+			"constrained": true,
+			"rhi_device_is_integrated": true,
+			"feature_level_sm6": false,
+			"adapter": "Intel(R) Graphics",
+			"basis": "FFlightSimWorldBeauty::ConstrainedGpu (GRHIDeviceIsIntegrated, or a feature level below SM6): round 1 hang, the beauty renders on the Intel iGPU under D3D11 SM5",
+			"sky_capture_restore_switch": "auto",
+			"sky_capture_restore": true,
+			"gpu_drain_switch": "auto",
+			"gpu_drain": true,
+			"supersample":
+			{
+				"switch": "cap",
+				"stated": 1,
+				"rendered": 1,
+				"internal_pixels_max": 2073600,
+				"internal_pixels_max_basis": "RenderConstrainedInternalPixelsMax, UNCALIBRATED: 1920 x 1080, the frame every round-1 web scene rendered at on the Intel iGPU; shot b at 3840 x 2160 internal hung",
+				"capped": false
+			},
+			"sky_capture_restore_record":
+			{
+				"beauty_fallback":
+				{
+					"restored": [
+						{
+							"what": "sky_light.intensity",
+							"frames": 1.6000000238418579,
+							"sky_capture": 1
+						},
+						{
+							"what": "sky_light.min_occlusion",
+							"frames": 0.20000000298023224,
+							"sky_capture": 0
+						},
+						{
+							"what": "sun.dynamic_shadow_cascades",
+							"frames": 8,
+							"sky_capture": 6
+						},
+						{
+							"what": "sun.cascade_distribution_exponent",
+							"frames": 3.5,
+							"sky_capture": 3
+						}
+					],
+					"cvars_at_capture":
+					{
+						"r.SSGI.Quality": "3",
+						"r.SSR.Quality": "3",
+						"r.DistanceFieldAO": "1",
+						"r.AOQuality": "2",
+						"r.Shadow.CSM.MaxCascades": "10",
+						"r.Shadow.MaxCSMResolution": "4096",
+						"r.Shadow.MaxResolution": "4096"
+					},
+					"cvars_basis": "kept: each equals the Cinematic scalability level's value (BaseScalability.ini @Cine), which ef361bd6 ran too",
+					"per_view": "the beauty capture's SSGI and SSR only; the cube capture never reads them"
+				},
+				"beauty_ground_haze":
+				{
+					"applied": "nothing: ApplyBeautyGround scaled no haze on this render"
+				},
+				"lamps_volumetric_scattering_held": 5,
+				"lamps_volumetric_scattering_at_capture": 1,
+				"already_ef361bd6": "clouds and the atmosphere's multiple scattering (FlightSimClouds.cpp CloudConstrainedGpu)",
+				"inert_in_capture": "the sun's light-shaft occlusion (the cube capture's LightShafts show flag is 0) and the beauty capture's post-process (SSGI, SSR, grade, exposure): the cube capture is its own view family",
+				"frames": "this render's values, put back after the capture"
+			},
+			"gpu_drains": 24,
+			"gpu_drain_longest_s": 3.0647009015083313,
+			"gpu_drain_longest_at": "warm-up capture 1/20",
+			"gpu_drain_timeout_s": 240
+		},
+		"cloud_materials": [
+			"cloud VolumetricCloudComponent (VolumetricCloud_0): /Temp/Untitled_1.Untitled:PersistentLevel.VolumetricCloud_0.VolumetricCloudComponent.MID_M_FlightSimCloudLayers_0, domain 3, used_with_volumetric_cloud yes, compiled"
+		],
+		"sky_light_capture":
+		{
+			"position": "the aircraft at the first kept frame",
+			"z_m": 269.99999999906868,
+			"not_done": "no recapture when the aircraft crosses a cloud layer (captured once; per frame only when the sun animates)",
+			"constrained_gpu_restore":
+			{
+				"beauty_fallback":
+				{
+					"restored": [
+						{
+							"what": "sky_light.intensity",
+							"frames": 1.6000000238418579,
+							"sky_capture": 1
+						},
+						{
+							"what": "sky_light.min_occlusion",
+							"frames": 0.20000000298023224,
+							"sky_capture": 0
+						},
+						{
+							"what": "sun.dynamic_shadow_cascades",
+							"frames": 8,
+							"sky_capture": 6
+						},
+						{
+							"what": "sun.cascade_distribution_exponent",
+							"frames": 3.5,
+							"sky_capture": 3
+						}
+					],
+					"cvars_at_capture":
+					{
+						"r.SSGI.Quality": "3",
+						"r.SSR.Quality": "3",
+						"r.DistanceFieldAO": "1",
+						"r.AOQuality": "2",
+						"r.Shadow.CSM.MaxCascades": "10",
+						"r.Shadow.MaxCSMResolution": "4096",
+						"r.Shadow.MaxResolution": "4096"
+					},
+					"cvars_basis": "kept: each equals the Cinematic scalability level's value (BaseScalability.ini @Cine), which ef361bd6 ran too",
+					"per_view": "the beauty capture's SSGI and SSR only; the cube capture never reads them"
+				},
+				"beauty_ground_haze":
+				{
+					"applied": "nothing: ApplyBeautyGround scaled no haze on this render"
+				},
+				"lamps_volumetric_scattering_held": 5,
+				"lamps_volumetric_scattering_at_capture": 1,
+				"already_ef361bd6": "clouds and the atmosphere's multiple scattering (FlightSimClouds.cpp CloudConstrainedGpu)",
+				"inert_in_capture": "the sun's light-shaft occlusion (the cube capture's LightShafts show flag is 0) and the beauty capture's post-process (SSGI, SSR, grade, exposure): the cube capture is its own view family",
+				"frames": "this render's values, put back after the capture"
+			}
+		},
+		"sky_light_capture_result":
+		{
+			"processed_texture": true,
+			"shaders_compiling_at_capture": false,
+			"real_time_capture": false,
+			"intensity_at_capture": 1,
+			"light_color_linear":
+			{
+				"r": 1,
+				"g": 1,
+				"b": 1
+			},
+			"lower_hemisphere_solid": true,
+			"cloud_ambient_occlusion": true,
+			"min_occlusion": 0,
+			"basis": "read back from the sky light right after USkyLightComponent::UpdateSkyCaptureContents; processed_texture false means the capture did not happen and the shade is lit by the atmosphere's in-scatter alone (round 5, docs/visual/PROBE_LOG.md)"
+		},
+		"storm_exposure":
+		{
+			"metered": true,
+			"trigger": "beauty look: no_lumen_gi (beauty_look.applied.exposure.meter)",
+			"target_p90_luma": 0.45000000000000001,
+			"percentile": 0.90000000000000002,
+			"tolerance": 0.050000000000000003,
+			"p90_luma_before": 0.53725490196078429,
+			"p90_luma_after": 0.53725490196078429,
+			"mean_luma_before": 0.47832540502875404,
+			"mean_luma_after": 0.47832540502875404,
+			"stops_opened": 0,
+			"max_stops": 8,
+			"bias_before": -1.6951093673706055,
+			"bias_after": -1.6951093673706055,
+			"rounds": 0,
+			"note": "the look's exposure already lands the target or brighter",
+			"highlight_guard":
+			{
+				"highlight_p90": 0.92000000000000004,
+				"highlight_target_p90": 0.80000000000000004,
+				"max_close_stops": 6,
+				"saturated_step_stops": 2,
+				"closed": false,
+				"basis": "visual round 2: a beauty frame whose p90 luma is over highlight_p90 is clipping and is closed towards highlight_target_p90 (never more than max_close_stops); a frame between the target and highlight_p90 stays as the look exposed it; UNCALIBRATED"
+			},
+			"basis": "the beauty frame read back before frame 0, the 90th percentile of its sRGB luma (Rec. 709 weights; the cloud base and the horizon, not the dark ground) opened to the target by AutoExposureBias; a camera meters the light it gets, constant over the clip; the linear and accumulation captures carry the same bias"
+		},
+		"source": "flags (the card carries no look block)",
+		"probe_overrides": [],
+		"exposure":
+		{
+			"mode": "beauty_ev100",
+			"source": "-beauty-look= EV100 11.60 over the -sky= plan's camera (f/4, 1/60 s, ISO 100; compensation -1.695, the plan's was -1.695); storm meter opened 0.00 stops (p90 luma 0.537 -> 0.537, target 0.45)",
+			"ev100": 11.602
+		}
+	},
+	"georeference":
+	{
+		"geographic_crs": "EPSG:4326",
+		"projected_crs": "EPSG:32611",
+		"origin":
+		{
+			"lat_deg": 37.727499999999999,
+			"lon_deg": -119.61,
+			"x_m": 269983.47532163467,
+			"y_m": 4178788.3075516829
+		},
+		"vertical_convention": "orthometric heights passed to AGeoReferencingSystem as ellipsoidal; engine ECEF radially low by undulation_origin_m",
+		"undulation_origin_m": -25.938956400000023
+	},
+	"google_tiles":
+	{
+		"enabled": true,
+		"beauty_ground":
+		{
+			"lane": "round-2b terrain-ocean; beauty only; UNCALIBRATED",
+			"tiles_drawn": true,
+			"haze":
+			{
+				"camera_agl_m": 275.99987353477627,
+				"read_depression_deg": 10,
+				"read_optical_depth_max": 1.5,
+				"read_min_agl_m": 1000,
+				"applied": "nothing: the camera is below read_min_agl_m; the ground is near and the haze is the near field's"
+			},
+			"sea":
+			{
+				"radius_m": 0,
+				"drawn": "nothing: no -beauty-sea-radius-m (not an open-ocean beauty render)"
+			}
+		},
+		"source": "Google Photorealistic 3D Tiles via Cesium for Unreal",
+		"route": "Cesium ion",
+		"ion_asset_id": 2275207,
+		"maximum_screen_space_error": 8,
+		"origin_lat_deg": 37.727499999999999,
+		"origin_lon_deg": -119.61,
+		"origin_ellipsoidal_height_m": 1204.0610435999999,
+		"undulation_used_m": -25.938956400000023,
+		"hidden_scene_ground_actors": 2,
+		"frames_waited": 1,
+		"longest_wait_s": 7.2709297984838486,
+		"total_wait_s": 7.2709297984838486,
+		"tileset_reloads": 0,
+		"attribution": "Imagery and 3D data: Google. Per-tile data-provider credits are shown by Cesium on screen and are not drawn into these frames; the Google Maps Platform terms govern display, attribution, caching and any derived use of these images.",
+		"not_claimed": "the tiles' surface agrees with the baked heightfield the physics and the labels' geometry use; the ground in the pixels is Google's, the ground the checks use is the bake"
+	},
+	"aircraft_look":
+	{
+		"drawn_in": "beauty capture only (-quality=beauty); every element is a beauty-only actor or a shading-only material swap, so mask, class and depth are those of the same frame's geometry",
+		"look_manifest": "C:\\Users\\kanth\\flightsim\\assets\\generated\\A4/look_manifest.json",
+		"look_config_sha256": "c4e7743a5969680f7c79c419d67d27390cddae72fe76915dac8a9d8d0aa96b8b",
+		"look_mesh_manifest_sha256": "bb0b712335e63aa580871d2b093fe69da2a3731d1cb9bfe5c31dd97d98218db5",
+		"constants":
+		{
+			"afterburner":
+			{
+				"AfterburnerCandela":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a full-reheat take-off beauty probe, rear quarter",
+					"value": 60000
+				},
+				"AttenuationM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a full-reheat take-off beauty probe, rear quarter",
+					"value": 25
+				},
+				"GlowGain":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a full-reheat take-off beauty probe, rear quarter",
+					"value": 1
+				},
+				"PlumeLengthRadii":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a full-reheat take-off beauty probe, rear quarter",
+					"value": 7
+				},
+				"Shocks":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a full-reheat take-off beauty probe, rear quarter",
+					"value": 5
+				}
+			},
+			"condensation":
+			{
+				"ConeLengthBodyFraction":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.17999999999999999
+				},
+				"ConeLocalMach":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 1.1499999999999999
+				},
+				"ConeMachMax":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 1.05
+				},
+				"ConeMachMin":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.84999999999999998
+				},
+				"CoreRadiusSpanFraction":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.029999999999999999
+				},
+				"CpMinPerCL":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 1.2
+				},
+				"LexAftOfNoseM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 6
+				},
+				"LexAlphaOnsetDeg":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 12
+				},
+				"LexCpPerDeg":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.12
+				},
+				"LexEnabled":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0
+				},
+				"LexLengthM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 6
+				},
+				"LexSpanM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 1.2
+				},
+				"LexUpM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.20000000000000001
+				},
+				"LifetimeS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 1.2
+				},
+				"OnsetCoolingK":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 6
+				},
+				"OpacityPerGkg":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.59999999999999998
+				},
+				"SheetChordFraction":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.55000000000000004
+				},
+				"SheetCpMinAtZeroLift":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.29999999999999999
+				},
+				"SheetSpanEndFraction":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.90000000000000002
+				},
+				"SheetSpanStartFraction":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.34999999999999998
+				},
+				"TipSpreadMPerS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 1.2
+				},
+				"TipStartWidthM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.29999999999999999
+				},
+				"VisibleMinGkg":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a humid low pass at M 0.95 and a 5 g pull-up in the forest rain scene (docs/visual/PROBE_LOG.md condensation-solver)",
+					"value": 0.050000000000000003
+				}
+			},
+			"contrail":
+			{
+				"FormationDelayS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a cruise beauty probe above 9 km, chase and side views",
+					"value": 0.14999999999999999
+				},
+				"LifetimeS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a cruise beauty probe above 9 km, chase and side views",
+					"value": 25
+				},
+				"MaxTemperatureK":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a cruise beauty probe above 9 km, chase and side views",
+					"value": 233.15000000000001
+				},
+				"MinAltitudeM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a cruise beauty probe above 9 km, chase and side views",
+					"value": 7500
+				},
+				"Opacity":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a cruise beauty probe above 9 km, chase and side views",
+					"value": 0.55000000000000004
+				},
+				"PreseedS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a cruise beauty probe above 9 km, chase and side views",
+					"value": 8
+				},
+				"SpreadMPerS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a cruise beauty probe above 9 km, chase and side views",
+					"value": 0.90000000000000002
+				},
+				"StartWidthM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a cruise beauty probe above 9 km, chase and side views",
+					"value": 1.2
+				}
+			},
+			"heat_haze":
+			{
+				"LengthRadii":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a -heat-haze=on beauty probe at idle, rear view",
+					"value": 14
+				},
+				"Strength":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a -heat-haze=on beauty probe at idle, rear view",
+					"value": 0.59999999999999998
+				}
+			},
+			"lights":
+			{
+				"BlondelReyS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a dusk and a noon beauty probe of the type at chase range",
+					"value": 0.20000000000000001
+				},
+				"BulbRadiusCm":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a dusk and a noon beauty probe of the type at chase range",
+					"value": 18
+				},
+				"LandingAttenuationM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a dusk and a noon beauty probe of the type at chase range",
+					"value": 900
+				},
+				"LandingConeDeg":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a dusk and a noon beauty probe of the type at chase range",
+					"value": 12
+				},
+				"LandingMaxAglM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a dusk and a noon beauty probe of the type at chase range",
+					"value": 450
+				},
+				"LightVisualGain":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a dusk and a noon beauty probe of the type at chase range",
+					"value": 1
+				},
+				"NavAttenuationM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a dusk and a noon beauty probe of the type at chase range",
+					"value": 40
+				},
+				"StrobeFlashS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a dusk and a noon beauty probe of the type at chase range",
+					"value": 0.12
+				},
+				"StrobePeriodS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a dusk and a noon beauty probe of the type at chase range",
+					"value": 1
+				}
+			},
+			"vapour":
+			{
+				"LifetimeS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a 5 g pull-up beauty probe",
+					"value": 0.80000000000000004
+				},
+				"MinNz":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a 5 g pull-up beauty probe",
+					"value": 4
+				},
+				"Opacity":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a 5 g pull-up beauty probe",
+					"value": 0.34999999999999998
+				},
+				"SpreadMPerS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a 5 g pull-up beauty probe",
+					"value": 1.5
+				},
+				"StartWidthM":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a 5 g pull-up beauty probe",
+					"value": 0.25
+				}
+			},
+			"wet":
+			{
+				"BeadAmountBareMetal":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0
+				},
+				"BeadAmountGlass":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 1
+				},
+				"BeadAmountPaint":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0.29999999999999999
+				},
+				"BeadingMaxKts":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 60
+				},
+				"CanopyCentreXCm":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0
+				},
+				"CanopyCentreYCm":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0
+				},
+				"CanopyCentreZCm":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0
+				},
+				"PorosityBareMetal":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0.12
+				},
+				"PorosityGlass":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0
+				},
+				"PorosityPaint":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0.29999999999999999
+				},
+				"RivuletFullMmh":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 10
+				},
+				"ScratchAnisotropy":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0.5
+				},
+				"ScratchDensity":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0.59999999999999998
+				},
+				"StreakLengthCm":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 30
+				},
+				"StreakPitchCm":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 2.5
+				},
+				"StreakSpeedPerKt":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0.5
+				},
+				"WetCoatRoughness":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0.029999999999999999
+				},
+				"WetDryTauS":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 90
+				},
+				"WetRoughness":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 0.080000000000000002
+				},
+				"WetSaturationMmh":
+				{
+					"calibration": "UNCALIBRATED: set by probe render on the render machine",
+					"probe": "a storm-weather beauty chase at shot c range and a canopy close-up into the sun",
+					"value": 4
+				}
+			}
+		},
+		"materials":
+		{
+			"beauty_meshes": [],
+			"state": "look instances on the mesh's slots (shading only: no world position offset; every class master opaque but the thin canopy, which is applied only without -labels, so the label silhouette is the beauty's)",
+			"instance_root": "/Game/Aircraft/A4/Look",
+			"slots_applied": 5,
+			"slots_without_material": 0,
+			"slots_thin_translucent": 0,
+			"labels": true,
+			"thin_glass": "label-safe opaque glass kept: -labels (the ID and depth captures draw no translucency)",
+			"slots_thin": [],
+			"slots_absent": []
+		},
+		"lights": [
+			{
+				"id": "nav_left",
+				"kind": "nav_red",
+				"actor_cm": [
+					-213.18000000000001,
+					-406.99000000000001,
+					-40.789999999999999
+				],
+				"candela": 40,
+				"bulb_luminance_nits": 3773.7020000000002,
+				"bulb_drawn": true
+			},
+			{
+				"id": "nav_right",
+				"kind": "nav_green",
+				"actor_cm": [
+					-259.20999999999998,
+					407.80000000000001,
+					-52
+				],
+				"candela": 40,
+				"bulb_luminance_nits": 3773.7020000000002,
+				"bulb_drawn": true
+			},
+			{
+				"id": "tail",
+				"kind": "nav_white",
+				"actor_cm": [
+					-632.5,
+					-12.76,
+					297.95999999999998
+				],
+				"candela": 20,
+				"bulb_luminance_nits": 1886.8510000000001,
+				"bulb_drawn": true
+			},
+			{
+				"id": "strobe_left",
+				"kind": "strobe",
+				"actor_cm": [
+					-228.18000000000001,
+					-406.99000000000001,
+					-40.789999999999999
+				],
+				"candela": 1066.6669999999999,
+				"bulb_luminance_nits": 100632.073,
+				"bulb_drawn": true
+			},
+			{
+				"id": "strobe_right",
+				"kind": "strobe",
+				"actor_cm": [
+					-274.20999999999998,
+					407.80000000000001,
+					-52
+				],
+				"candela": 1066.6669999999999,
+				"bulb_luminance_nits": 100632.073,
+				"bulb_drawn": true
+			}
+		],
+		"lights_note": "point/spot lights move no geometry; the bulbs are additive (they hide nothing), beauty-only actors the label captures hide",
+		"landing_volumetric_scattering": 0.29999999999999999,
+		"nav_volumetric_scattering": 0.5,
+		"contrail":
+		{
+			"material": "/Game/FlightSim/Aircraft/M_AircraftContrail.M_AircraftContrail",
+			"enabled": true,
+			"rule": "drawn while atmosphere/T-R is below contrail.MaxTemperatureK and position/h-sl-meters above contrail.MinAltitudeM (Schmidt-Appleman threshold, no humidity modelled); wingtip vapour from the humidity test (aircraft_look.condensation), or while accelerations/Nz exceeds vapour.MinNz when the humidity is unavailable; vapour_frames counts only the frames these wingtip vapour trails drew (the humidity-gated tip ribbons' frames are in aircraft_look.condensation.per_frame)",
+			"in_cloud": "a contrail's opacity x (1 - cover) of every cloud layer the aircraft is inside (base..top above the ground datum); contrail_in_cloud_frames counts them",
+			"label_convention": "a trail is a translucent medium like the clouds and rain the label captures already omit: where it crosses in front of the aircraft the mask still says aircraft",
+			"contrail_frames": 0,
+			"vapour_frames": 0,
+			"contrail_in_cloud_frames": 0
+		},
+		"heat_haze":
+		{
+			"drawn": false,
+			"pixel_moving": true,
+			"switch": "-heat-haze=on (off by default; never on in a measured shot)"
+		},
+		"beauty_only_actors": 11,
+		"condensation":
+		{
+			"model": "isentropic+Magnus",
+			"formula": "T_l = T (p_l/p)^0.2857; dq = q_v(RH,T,p) - q_sat(T_l,p_l); opacity = clamp(OpacityPerGkg x (q_v - q_sat(T_l + OnsetCoolingK, p_l))), 0 below VisibleMinGkg. tip: Gamma = Nz W/(rho V b pi/4), dp = 0.87 rho Gamma^2/(4 pi^2 rc^2), rc = CoreRadiusSpanFraction b; sheet: CL = Nz W/(qbar S), Cp_min = -(SheetCpMinAtZeroLift + CpMinPerCL CL), p_l = p(1 + 0.7 M^2 Cp_min); lex: alpha > LexAlphaOnsetDeg, Cp = -LexCpPerDeg (alpha - onset); cone: ConeMachMin <= M <= ConeMachMax, T_l/T = (1+0.2M^2)/(1+0.2 ConeLocalMach^2), p_l/p = (T_l/T)^3.5, ending at the recompression shock. Python twin core/scene/condensation.py",
+			"constants":
+			{
+				"CpMinPerCL": 1.2,
+				"CoreRadiusSpanFraction": 0.029999999999999999,
+				"LexAlphaOnsetDeg": 12,
+				"ConeLocalMach": 1.1499999999999999,
+				"ConeMachMin": 0.84999999999999998,
+				"ConeMachMax": 1.05,
+				"OpacityPerGkg": 0.59999999999999998,
+				"LifetimeS": 1.2,
+				"VisibleMinGkg": 0.050000000000000003,
+				"OnsetCoolingK": 6,
+				"SheetCpMinAtZeroLift": 0.29999999999999999,
+				"LexCpPerDeg": 0.12,
+				"LexEnabled": 0,
+				"LexAftOfNoseM": 6,
+				"LexSpanM": 1.2,
+				"LexUpM": 0.20000000000000001,
+				"LexLengthM": 6,
+				"ConeLengthBodyFraction": 0.17999999999999999,
+				"SheetSpanStartFraction": 0.34999999999999998,
+				"SheetSpanEndFraction": 0.90000000000000002,
+				"SheetChordFraction": 0.55000000000000004,
+				"TipStartWidthM": 0.29999999999999999,
+				"TipSpreadMPerS": 1.2
+			},
+			"calibration": "UNCALIBRATED: every constant, the 0.87 Lamb-Oseen factor and the compressible Cp form are engineering approximations; set by probe render on the render machine (a humid low pass at M 0.95; a 5 g pull-up in the forest rain scene)",
+			"label_convention": "translucent media: not in mask, class or depth (trail convention)",
+			"pixel_moving": false,
+			"humidity": "unavailable: the card states no dew point -- the Nz fallback (vapour.MinNz) runs",
+			"fallback_used": true,
+			"per_frame": [
+				{
+					"t": 0.0083333333329999992,
+					"fallback": true
+				}
+			],
+			"sites":
+			{
+				"vertices_read": 386826,
+				"tip_left_actor_cm": [
+					-213.1799975830078,
+					-411.99319458007812,
+					-40.792400360107422
+				],
+				"tip_right_actor_cm": [
+					-259.21138491210939,
+					412.798095703125,
+					-52.001300811767578
+				],
+				"cone_collar_station_cm": -198.81965136108391,
+				"cone_collar_radius_cm": 412.09384155273438,
+				"sheet_stations": 12,
+				"lex": false,
+				"placement": "tips at the +/-Y vertex extremes; the cone collar at the X slice of largest (Y span x Z span), radius half that slice's Y span, the shock ConeLengthBodyFraction x body length aft; the sheet over the wing chord measured in span bands (the cluster of largest X extent), at the 90th-percentile Z; the LEX at the look config's offsets"
+			},
+			"material": "/Game/FlightSim/Aircraft/M_AircraftCondensation.M_AircraftCondensation",
+			"drawn": true,
+			"fallback_frames": 1,
+			"humid_frames": 0
+		},
+		"afterburner":
+		{
+			"peak_glow": 0,
+			"plume_luminance_nits_at_full_glow": 0,
+			"rule": "glow = saturate((thrust/max - mil/max) / (1 - mil/max)) x GlowGain, static sea-level ratings from the engine file; additive plume, hides nothing"
+		},
+		"strobe_on_frames": 1,
+		"landing_light_on_frames": 1
+	},
+	"scene":
+	{
+		"visual": true,
+		"shot": "showcase",
+		"dynamic_shadows": true,
+		"aircraft_hidden": false,
+		"near_terrain_hidden": false,
+		"ground_darkened_at_s": -1,
+		"aerial_perspective_off": false,
+		"render_quality": "beauty",
+		"warmup_captures": 20,
+		"cvar_anti_aliasing_method": 4,
+		"cvar_virtual_shadow_maps": 1,
+		"gi_reflections": "Lumen GI + Lumen reflections (capture post-process override)",
+		"exposure": "manual physical camera, EV100 11.60 (f/4.0, 1/60 s, ISO 100, bias -1.69)",
+		"physical_sky": true,
+		"sky":
+		{
+			"plan": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\1f312f9e0511\\sky.json",
+			"instant_utc": "2026-03-21T01:36:38+00:00",
+			"sun_azimuth_deg": 265.67829999999998,
+			"sun_elevation_deg": 6,
+			"sun_illuminance_lux": 120000,
+			"moon_azimuth_deg": 262.57920000000001,
+			"moon_elevation_deg": 31.699000000000002,
+			"moon_illuminated_fraction": 0.053999999999999999,
+			"moon_above_horizon": true,
+			"stars_drawn": 0,
+			"clouds_drawn": true,
+			"clouds_note": "UE simple volumetric cloud layer (VISUAL ONLY)",
+			"ev100": 11.602,
+			"global_illumination": "lumen",
+			"reflections": "lumen",
+			"shadows": "virtual shadow maps",
+			"post_process": "external",
+			"warmup_captures": 20,
+			"night_lights_sha256": "",
+			"night_lights_attribution": "",
+			"night_lights_note": "none in the sky plan"
+		},
+		"terrain_sha256": "103499666088394853d11911c6af2cda3da9a9dd2b51e94d058c4e897dbd7312",
+		"terrain_peak_m": 3547.2421875,
+		"terrain_georeferenced": true,
+		"terrain_crs": "EPSG:32611",
+		"terrain_name": "yosemite",
+		"terrain_posting_m": 30,
+		"terrain_stride": 1,
+		"terrain_tiles": 20,
+		"terrain_triangles": 2053900,
+		"terrain_material": "true-colour satellite imagery drape (see imagery_* fields; acquisition-date and resolution limits in VALIDITY.md)",
+		"imagery_dataset": "Local simulator-derived ground textures, tiled by a slope/height classification (approximated)",
+		"imagery_file": "yosemite_xplane_drape.png",
+		"imagery_sha256": "93b4f69a1350df5a0fb0422738d76d3bed01e994742ae9a4651644f78e8ac482",
+		"imagery_license": "Local simulator-derived texture set",
+		"imagery_attribution": "Ground textures and water colour: local simulator-derived data; Snow cover: NASA Earth Observations, MODIS/Terra MOD10C1 monthly snow cover (NSIDC), via the local simulator's Snow Cover bitmaps",
+		"physics_ground": "flat slab at spec terrain_elevation; visual terrain carries no collision",
+		"livery": "default",
+		"fog_density": 0.0011999999999999999,
+		"sun_animated": false,
+		"camera_preset": "chase",
+		"camera_inherits_roll": false
+	},
+	"beauty_look":
+	{
+		"sidecar": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\1f312f9e0511\\beauty_look.json",
+		"plan":
+		{
+			"beauty_look_version": 3,
+			"grade": "golden_hour",
+			"grade_basis": "sun 6.0 deg, below 15 deg",
+			"lens": "standard",
+			"world_preset": "clear",
+			"sun_elevation_deg": 6,
+			"sun":
+			{
+				"lux": null,
+				"source": "physical_sky",
+				"transmittance": "engine_per_pixel",
+				"basis": "the -sky= plan lights the scene (core/sky/plan.py)",
+				"colour": "the engine's per-pixel atmosphere transmittance (one model, the physical sky's): no temperature band, the beauty host never tints the sun"
+			},
+			"exposure":
+			{
+				"ev100": 11.602,
+				"owner": "beauty_look (core/scene/beauty_look.py exposure_target)",
+				"base": "sky_plan",
+				"base_ev100": 11.602,
+				"band_ev100": null,
+				"grade_ev100_offset": 0,
+				"scene_light_stops": 0,
+				"scene_light_basis": "clear-sky meter with the lighting look's sun x1 on the direct beam and sky fill x1 on the diffuse",
+				"brightness_ev": 0,
+				"world_preset": "clear",
+				"basis": "the -sky= plan's incident-meter EV100 for a clear sky (core/sky/plan.py ev100_for)",
+				"method": "manual (physical camera + compensation), constant over the clip",
+				"aperture_f": 4,
+				"shutter_s": 0.016666670000000001,
+				"shutter_angle_deg": 180,
+				"iso": 100,
+				"camera_ev100": 9.9069000000000003,
+				"AutoExposureBias": -1.6951000000000001,
+				"meter_ev100_reference": 11.879,
+				"meter_horizontal_lux_reference": 9418.1000000000004,
+				"meter_horizontal_lux_scene": 9418.1000000000004,
+				"over_sky_plan": true,
+				"camera_basis": "the -sky= plan's physical camera, kept: the host changes only AutoExposureBias",
+				"meter":
+				{
+					"deck": false,
+					"target_p90_luma": 0.45000000000000001,
+					"no_lumen_gi_target_p90_luma": 0.45000000000000001,
+					"when": "only when the host finds Lumen GI unsupported on its shader platform",
+					"method": "the beauty frame read back once before frame 0; the 90th percentile of its sRGB luma opened to the target by AutoExposureBias, never closed below this EV100 unless the frame clips (the host's highlight guard, look_applied.storm_exposure.highlight_guard), constant over the clip"
+				}
+			},
+			"tonemap":
+			{
+				"tonemapper": "UE filmic (ACES-fitted), engine 5.7 curve defaults stated; BlueCorrection raised (TONEMAP_HUE)",
+				"FilmSlope": 0.88,
+				"FilmToe": 0.55000000000000004,
+				"FilmShoulder": 0.26000000000000001,
+				"FilmBlackClip": 0,
+				"FilmWhiteClip": 0.040000000000000001,
+				"ToneCurveAmount": 1,
+				"BlueCorrection": 1
+			},
+			"color_grade":
+			{
+				"ColorSaturation": [
+					1,
+					1,
+					1,
+					1.04
+				],
+				"ColorContrast": [
+					1,
+					1,
+					1,
+					1.04
+				],
+				"ColorGamma": [
+					1,
+					1,
+					1,
+					1
+				],
+				"ColorGain": [
+					1,
+					1,
+					1,
+					1
+				],
+				"ColorOffset": [
+					0,
+					0,
+					0,
+					0
+				],
+				"WhiteTemp": 6700,
+				"WhiteTint": 0
+			},
+			"film_stock":
+			{
+				"stock": "kodak_portra_160",
+				"cube": "assets/looks/film/kodak_portra_160.cube",
+				"sha256": "09a94a1e1e845f7a7a75263d3fa8e2ae54a32c02ab29eaf0294803bd2b9d714d",
+				"description": "Kodak Portra 160 colour negative, scanned (ACES-like inversion): soft, natural daylight stock for golden-hour and overcast frames",
+				"space": "display-referred sRGB in and out, after the tonemapper",
+				"applied_by": "scripts/beauty_post.py (ffmpeg lut3d, tetrahedral) when FLIGHTSIM_BEAUTY_POST=on; or in-engine via scripts/cube_to_ue_lut.py",
+				"grain_in_engine": true
+			},
+			"camera":
+			{
+				"aperture_f": 4,
+				"depth_of_field": false,
+				"focus": "off (focal distance 0)",
+				"focus_per_camera": [
+					"off"
+				],
+				"camera_presets": [
+					"chase"
+				],
+				"sensor_width_mm": [
+					36
+				],
+				"fov": "the pose solver's, unchanged; focal length derived from it",
+				"shutter_angle_deg": 180,
+				"MotionBlurAmount": 0.5,
+				"MotionBlurTargetFPS": 30,
+				"fps": 30,
+				"shutter_policy":
+				{
+					"clip": "motion blur on at the 180-degree shutter (MotionBlurAmount over MotionBlurTargetFPS)",
+					"still": "motion blur off: one instant, one pose; the airframe is drawn tack sharp",
+					"host": "FFlightSimBeautyLook::ApplyShutterPolicy (a still is at most one delivered frame)"
+				}
+			},
+			"lens_post":
+			{
+				"VignetteIntensity": 0,
+				"SceneFringeIntensity": 0,
+				"MotionBlurMax": 1,
+				"MotionBlurPerObjectSize": 0,
+				"DepthOfFieldBladeCount": 7
+			},
+			"local_exposure":
+			{
+				"LocalExposureMethod": "Bilateral",
+				"LocalExposureHighlightContrastScale": 1,
+				"LocalExposureShadowContrastScale": 0.75,
+				"LocalExposureDetailStrength": 1.1000000000000001,
+				"LocalExposureBlurredLuminanceBlend": 0.59999999999999998,
+				"LocalExposureMiddleGreyBias": 0
+			},
+			"reflections":
+			{
+				"lumen_quality_owner": "render-path lane: render.json render_settings.beauty_path.lumen_capture_overrides",
+				"ssr_owner": "ENGINE_LOOK ssr (per world preset; beauty_look.applied.engine_look.ssr)",
+				"LumenSceneDetail": 2,
+				"LumenFrontLayerTranslucencyReflections": true
+			},
+			"engine_look":
+			{
+				"preset": "clear",
+				"switch_prefix": "-look-",
+				"switch_source": "the command line, then FLIGHTSIM_RENDER_SWITCHES",
+				"ssgi":
+				{
+					"switch": "-look-ssgi",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "scene",
+					"off_means": "DynamicGlobalIlluminationMethod None on the fallback path (the sky light alone fills the shade); Lumen machines keep Lumen",
+					"values":
+					{
+						"IndirectLightingIntensity": 1
+					},
+					"cvars":
+					{
+						"r.SSGI.Quality": 4
+					},
+					"cvars_constrained":
+					{
+						"r.SSGI.Quality": 3
+					},
+					"probe_name": "el-ssgi (#01 canyon shade and #09 belly, quality 3 and 4, on and off)"
+				},
+				"ssr":
+				{
+					"switch": "-look-ssr",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "scene",
+					"off_means": "ReflectionMethod None (sky light specular only)",
+					"values":
+					{
+						"ScreenSpaceReflectionIntensity": 100,
+						"ScreenSpaceReflectionQuality": 100,
+						"ScreenSpaceReflectionMaxRoughness": 0.59999999999999998
+					},
+					"cvars":
+					{
+						"r.SSR.Quality": 4,
+						"r.SSR.HalfResSceneColor": 0
+					},
+					"cvars_constrained":
+					{
+						"r.SSR.Quality": 3,
+						"r.SSR.HalfResSceneColor": 0
+					},
+					"probe_name": "el-ssr (#13 ocean and #06 wet runway, on and off; the canopy in head shot d)",
+					"values_constrained":
+					{
+						"ScreenSpaceReflectionIntensity": 100,
+						"ScreenSpaceReflectionQuality": 80,
+						"ScreenSpaceReflectionMaxRoughness": 0.59999999999999998
+					}
+				},
+				"ssao":
+				{
+					"switch": "-look-ssao",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "capture",
+					"off_means": "AmbientOcclusionIntensity 0 (no SSAO)",
+					"values":
+					{
+						"AmbientOcclusionIntensity": 0.59999999999999998,
+						"AmbientOcclusionRadius": 150,
+						"AmbientOcclusionQuality": 100,
+						"AmbientOcclusionPower": 2,
+						"AmbientOcclusionStaticFraction": 1,
+						"AmbientOcclusionMipBlend": 0.59999999999999998,
+						"AmbientOcclusionTemporalBlendWeight": 0.10000000000000001,
+						"AmbientOcclusionRadiusInWS": false
+					},
+					"cvars":
+					{
+						"r.AmbientOcclusionMaxQuality": 100,
+						"r.AmbientOcclusionLevels": -1
+					},
+					"cvars_constrained":
+					{
+						"r.AmbientOcclusionMaxQuality": 100,
+						"r.AmbientOcclusionLevels": -1
+					},
+					"probe_name": "el-ssao (head shot a under the wing and the intakes, 0.4 / 0.6 / 0.8 and off)"
+				},
+				"sun_shadows":
+				{
+					"switch": "-look-sun-shadows",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "scene",
+					"off_means": "the earlier lanes' sun shadows stand (the scene's 6 cascades over 20 km, or the fallback's 8 at exponent 4), uniform PCF",
+					"values":
+					{
+						"DynamicShadowCascades": 8,
+						"CascadeDistributionExponent": 3.5,
+						"DynamicShadowDistanceMovableLight_m": 6000,
+						"ShadowDistanceFadeoutFraction": 0.14999999999999999,
+						"CascadeTransitionFraction": 0.10000000000000001,
+						"r.Shadow.FilterMethod": 1
+					},
+					"cvars":
+					{
+						"r.Shadow.MaxResolution": 4096,
+						"r.Shadow.MaxCSMResolution": 4096,
+						"r.Shadow.CSM.MaxCascades": 10,
+						"r.Shadow.MaxSoftKernelSize": 40
+					},
+					"cvars_constrained":
+					{
+						"r.Shadow.MaxResolution": 4096,
+						"r.Shadow.MaxCSMResolution": 4096,
+						"r.Shadow.CSM.MaxCascades": 10,
+						"r.Shadow.MaxSoftKernelSize": 40
+					},
+					"probe_name": "el-csm (#01 fin shadow on the fuselage and the ridge shadow edge; PCF vs PCSS)"
+				},
+				"df_shadows":
+				{
+					"switch": "-look-df-shadows",
+					"switch_words": [
+						"auto",
+						"on",
+						"off"
+					],
+					"probe": true,
+					"stage": "scene",
+					"off_means": "bUseRayTracedDistanceFieldShadows false (shadows end at the cascades)",
+					"values":
+					{
+						"bUseRayTracedDistanceFieldShadows": true,
+						"DistanceFieldShadowDistance_m": 30000
+					},
+					"cvars":
+					{
+						"r.DistanceFieldShadowing": 1
+					},
+					"cvars_constrained":
+					{
+						"r.DistanceFieldShadowing": 1
+					},
+					"probe_name": "el-dfs (#12 cockpit: the C172's shadow on the canyon floor beyond the cascades; frame time)",
+					"auto": "off on the constrained GPU, on elsewhere",
+					"auto_on_constrained": false
+				},
+				"contact_shadows":
+				{
+					"switch": "-look-contact-shadows",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "scene",
+					"off_means": "the hero-lighting lane's 150 cm world-space contact shadows stand",
+					"values":
+					{
+						"ContactShadowLength": 0.02,
+						"ContactShadowLengthInWS": false,
+						"ContactShadowCastingIntensity": 1,
+						"ContactShadowNonCastingIntensity": 0
+					},
+					"cvars":
+					{
+						"r.ContactShadows": 1
+					},
+					"cvars_constrained":
+					{
+						"r.ContactShadows": 1
+					},
+					"probe_name": "el-contact (head shot a pylons and intakes at 0.02 / 0.05; no halo on the tiles)"
+				},
+				"local_exposure":
+				{
+					"switch": "-look-local-exposure",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "capture",
+					"off_means": "every scale 1 (the bilateral grid changes nothing)",
+					"values":
+					{
+						"LocalExposureHighlightContrastScale": 1,
+						"LocalExposureShadowContrastScale": 0.75,
+						"LocalExposureDetailStrength": 1.1000000000000001,
+						"LocalExposureBlurredLuminanceBlend": 0.59999999999999998,
+						"LocalExposureMiddleGreyBias": 0
+					},
+					"cvars":
+					{
+					},
+					"cvars_constrained":
+					{
+					},
+					"probe_name": "el-local (#01 valley floor and snow in one frame; #09 belly; sky band held)"
+				},
+				"bloom":
+				{
+					"switch": "-look-bloom",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "capture",
+					"off_means": "BloomIntensity 0 and the Bloom show flag off",
+					"values":
+					{
+						"BloomMethod": "BM_SOG",
+						"BloomIntensity": 0.25,
+						"BloomThreshold": -1,
+						"BloomSizeScale": 4
+					},
+					"cvars":
+					{
+					},
+					"cvars_constrained":
+					{
+					},
+					"probe_name": "el-bloom (#05 backlit glints at 0.2 / 0.4 and off)"
+				},
+				"bloom_fft":
+				{
+					"switch": "-look-bloom-fft",
+					"switch_words": [
+						"auto",
+						"on",
+						"off"
+					],
+					"probe": true,
+					"stage": "capture",
+					"off_means": "the bloom row's BM_SOG",
+					"values":
+					{
+						"BloomMethod": "BM_FFT",
+						"BloomConvolutionSize": 1,
+						"BloomConvolutionScatterDispersion": 1,
+						"BloomConvolutionPreFilterMin": 7,
+						"BloomConvolutionPreFilterMax": 15000,
+						"BloomConvolutionPreFilterMult": 15,
+						"BloomConvolutionBufferScale": 0.13300000000000001
+					},
+					"cvars":
+					{
+					},
+					"cvars_constrained":
+					{
+					},
+					"probe_name": "el-fft (#05 backlit: Gaussian vs FFT, and the frame time on the laptop)",
+					"auto": "off on the constrained GPU, on elsewhere",
+					"auto_on_constrained": false
+				},
+				"lens_flare":
+				{
+					"switch": "-look-lens-flare",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "capture",
+					"off_means": "LensFlareIntensity 0 and the LensFlares show flag off",
+					"values":
+					{
+						"LensFlareIntensity": 0.20000000000000001,
+						"LensFlareThreshold": 12,
+						"LensFlareBokehSize": 3,
+						"sun_in_frame_margin_deg": 12
+					},
+					"cvars":
+					{
+						"r.LensFlareQuality": 2
+					},
+					"cvars_constrained":
+					{
+						"r.LensFlareQuality": 2
+					},
+					"probe_name": "el-flare (#05 backlit on and off; #04 must show none)"
+				},
+				"film_grain":
+				{
+					"switch": "-look-film-grain",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "capture",
+					"off_means": "FilmGrainIntensity 0 and the Grain show flag off",
+					"values":
+					{
+						"grain_scale": 1,
+						"FilmGrainIntensityShadows": 1,
+						"FilmGrainIntensityMidtones": 1,
+						"FilmGrainIntensityHighlights": 0.69999999999999996,
+						"FilmGrainShadowsMax": 0.089999999999999997,
+						"FilmGrainHighlightsMin": 0.5,
+						"FilmGrainHighlightsMax": 1,
+						"FilmGrainTexelSize": 1,
+						"GrainStrength": 0.029999999999999999,
+						"stock_scale": 1,
+						"FilmGrainIntensity": 0.029999999999999999
+					},
+					"cvars":
+					{
+						"r.FilmGrain": 1
+					},
+					"cvars_constrained":
+					{
+						"r.FilmGrain": 1
+					},
+					"probe_name": "el-grain (#01 and #09 at 1x and 2x GRAIN_STRENGTH, against a scanned negative)"
+				},
+				"volumetric_fog":
+				{
+					"switch": "-look-volumetric-fog",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "scene",
+					"off_means": "VolumetricFogAlbedo white (the engine default every earlier round drew)",
+					"values":
+					{
+						"VolumetricFogAlbedo_srgb8": [
+							235,
+							235,
+							235
+						]
+					},
+					"cvars":
+					{
+						"r.VolumetricFog": 1
+					},
+					"cvars_constrained":
+					{
+						"r.VolumetricFog": 1
+					},
+					"probe_name": "el-vfog (#06 rain haze and #05 dust at the albedo and at white)"
+				},
+				"fog_grid":
+				{
+					"switch": "-look-fog-grid",
+					"switch_words": [
+						"auto",
+						"on",
+						"off"
+					],
+					"probe": true,
+					"stage": "scene",
+					"off_means": "the engine's coarse grid (r.VolumetricFog.GridPixelSize 8, GridSizeZ 64)",
+					"values":
+					{
+					},
+					"cvars":
+					{
+						"r.VolumetricFog.GridPixelSize": 4,
+						"r.VolumetricFog.GridSizeZ": 128
+					},
+					"cvars_constrained":
+					{
+						"r.VolumetricFog.GridPixelSize": 4,
+						"r.VolumetricFog.GridSizeZ": 128
+					},
+					"probe_name": "el-fog-grid (#09 shaft banding fine vs coarse; frame time on the laptop)",
+					"auto": "on on every GPU (the fine grid every passing round rendered with)",
+					"auto_on_constrained": true,
+					"cvars_off":
+					{
+						"r.VolumetricFog.GridPixelSize": 8,
+						"r.VolumetricFog.GridSizeZ": 64
+					}
+				},
+				"tsr":
+				{
+					"switch": "-look-tsr",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "scene",
+					"off_means": "the commandlet's own warm-up (16) and still samples (8)",
+					"values":
+					{
+						"warmup_captures": 24,
+						"still_samples": 16
+					},
+					"cvars":
+					{
+					},
+					"cvars_constrained":
+					{
+					},
+					"probe_name": "el-tsr (head shot a edge-aliasing number at 8 and 16 samples; seconds per still)",
+					"values_constrained":
+					{
+						"warmup_captures": 20,
+						"still_samples": 12
+					}
+				},
+				"filmback":
+				{
+					"switch": "-look-filmback",
+					"switch_words": [
+						"on",
+						"off"
+					],
+					"probe": false,
+					"stage": "capture",
+					"off_means": "the camera row's sensor width alone (the pre-round-5 record)",
+					"values":
+					{
+						"sensor_width_mm": 36,
+						"sensor_height_mm": 24,
+						"DepthOfFieldSqueezeFactor": 1
+					},
+					"cvars":
+					{
+					},
+					"cvars_constrained":
+					{
+					},
+					"probe_name": "none: a record of the sensor, no pixel changes"
+				},
+				"preset_basis": "world preset clear (core/scene/world_beauty.py select_preset)"
+			},
+			"pixel_effects":
+			{
+				"lens_distortion":
+				{
+					"on": false,
+					"effect": "moves",
+					"note": "not implemented"
+				},
+				"chromatic_aberration":
+				{
+					"on": false,
+					"effect": "moves",
+					"SceneFringeIntensity": 0
+				},
+				"motion_blur":
+				{
+					"on": true,
+					"effect": "softens",
+					"max_smear_px": 19.199999999999999,
+					"stills": "off (SHUTTER_POLICY: the host turns it off on a still)",
+					"note": "clips only: smears along screen velocity over one delivered frame, at most MotionBlurMax % of the width; the chase aircraft moves little on screen, the ground most; label captures render with motion blur off"
+				},
+				"depth_of_field":
+				{
+					"on": false,
+					"effect": "softens",
+					"note": "focused at the aircraft; the background softens"
+				},
+				"bloom":
+				{
+					"on": true,
+					"effect": "softens",
+					"BloomIntensity": 0.25,
+					"note": "screen-space glow may lighten pixels just outside the mask; ENGINE_LOOK bloom (per world preset; bloom_fft is a probe)"
+				},
+				"lens_flare":
+				{
+					"on": true,
+					"effect": "none",
+					"LensFlareIntensity": 0.20000000000000001,
+					"note": "image-based ghosts from bright pixels; no geometry; drawn only with the sun in or just outside the frame (ENGINE_LOOK lens_flare)"
+				},
+				"vignette":
+				{
+					"on": false,
+					"effect": "none"
+				},
+				"film_grain":
+				{
+					"on": true,
+					"effect": "none",
+					"FilmGrainIntensity": 0.029999999999999999,
+					"note": "ENGINE_LOOK film_grain: GRAIN_STRENGTH x the preset's and the stock's scales"
+				},
+				"pixel_moving": []
+			},
+			"uncalibrated": [
+				"EV100_BANDS",
+				"GRADES",
+				"GOLDEN_HOUR_BELOW_DEG",
+				"LENSES",
+				"LOCAL_EXPOSURE",
+				"REFLECTIONS",
+				"EXPOSURE_METER_TARGET_P90",
+				"TONEMAP_HUE",
+				"RELIT_SUN_CLOSE_SHARE",
+				"ENGINE_LOOK",
+				"GRAIN_STRENGTH",
+				"FILM_STOCKS"
+			],
+			"note": "VISUAL ONLY, beauty quality only; every UNCALIBRATED value is set by a probe render on the render machine (docs/visual/PROBE_LOG.md)"
+		},
+		"applied":
+		{
+			"engine_look":
+			{
+				"preset": "clear",
+				"preset_basis": "world preset clear (core/scene/world_beauty.py select_preset)",
+				"switch_source": "-look-<name>= on the command line, then FLIGHTSIM_RENDER_SWITCHES; unstated renders as planned",
+				"late_half": "applied",
+				"local_exposure":
+				{
+					"switch": "-look-local-exposure",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "every scale 1 (the bilateral grid changes nothing)",
+					"constrained_column": false,
+					"LocalExposureHighlightContrastScale": 1,
+					"LocalExposureShadowContrastScale": 0.75,
+					"LocalExposureDetailStrength": 1.1000000238418579,
+					"LocalExposureBlurredLuminanceBlend": 0.60000002384185791,
+					"LocalExposureMiddleGreyBias": 0,
+					"LocalExposureMethod": "Bilateral"
+				},
+				"ssgi":
+				{
+					"switch": "-look-ssgi",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "DynamicGlobalIlluminationMethod None on the fallback path (the sky light alone fills the shade); Lumen machines keep Lumen",
+					"constrained_column": true,
+					"method_before": "ScreenSpace",
+					"IndirectLightingIntensity": 1,
+					"cvars":
+					{
+						"before":
+						{
+							"r.SSGI.Quality": "4"
+						},
+						"asked":
+						{
+							"r.SSGI.Quality": 3
+						},
+						"read_back":
+						{
+							"r.SSGI.Quality": "3"
+						}
+					},
+					"method": "ScreenSpace",
+					"r.SSGI.Quality_read_back": "3"
+				},
+				"ssr":
+				{
+					"switch": "-look-ssr",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "ReflectionMethod None (sky light specular only)",
+					"constrained_column": true,
+					"method_before": "ScreenSpace",
+					"ScreenSpaceReflectionIntensity": 100,
+					"ScreenSpaceReflectionQuality": 80,
+					"ScreenSpaceReflectionMaxRoughness": 0.60000002384185791,
+					"cvars":
+					{
+						"before":
+						{
+							"r.SSR.Quality": "4",
+							"r.SSR.HalfResSceneColor": "0"
+						},
+						"asked":
+						{
+							"r.SSR.Quality": 3,
+							"r.SSR.HalfResSceneColor": 0
+						},
+						"read_back":
+						{
+							"r.SSR.Quality": "3",
+							"r.SSR.HalfResSceneColor": "0"
+						}
+					},
+					"method": "ScreenSpace"
+				},
+				"ssao":
+				{
+					"switch": "-look-ssao",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "AmbientOcclusionIntensity 0 (no SSAO)",
+					"constrained_column": true,
+					"AmbientOcclusionIntensity": 0.60000002384185791,
+					"AmbientOcclusionRadius": 150,
+					"AmbientOcclusionQuality": 100,
+					"AmbientOcclusionPower": 2,
+					"AmbientOcclusionStaticFraction": 1,
+					"AmbientOcclusionMipBlend": 0.60000002384185791,
+					"AmbientOcclusionTemporalBlendWeight": 0.10000000149011612,
+					"AmbientOcclusionRadiusInWS": false,
+					"cvars":
+					{
+						"before":
+						{
+							"r.AmbientOcclusionMaxQuality": "100",
+							"r.AmbientOcclusionLevels": "-1"
+						},
+						"asked":
+						{
+							"r.AmbientOcclusionMaxQuality": 100,
+							"r.AmbientOcclusionLevels": -1
+						},
+						"read_back":
+						{
+							"r.AmbientOcclusionMaxQuality": "100",
+							"r.AmbientOcclusionLevels": "-1"
+						}
+					}
+				},
+				"sun_shadows":
+				{
+					"switch": "-look-sun-shadows",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "the earlier lanes' sun shadows stand (the scene's 6 cascades over 20 km, or the fallback's 8 at exponent 4), uniform PCF",
+					"constrained_column": true,
+					"before":
+					{
+						"DynamicShadowCascades": 8,
+						"CascadeDistributionExponent": 4,
+						"DynamicShadowDistanceMovableLight_m": 20000,
+						"ShadowDistanceFadeoutFraction": 0.10000000149011612,
+						"CascadeTransitionFraction": 0.10000000149011612
+					},
+					"cvars":
+					{
+						"before":
+						{
+							"r.Shadow.MaxResolution": "4096",
+							"r.Shadow.MaxCSMResolution": "4096",
+							"r.Shadow.CSM.MaxCascades": "10",
+							"r.Shadow.MaxSoftKernelSize": "40"
+						},
+						"asked":
+						{
+							"r.Shadow.MaxResolution": 4096,
+							"r.Shadow.MaxCSMResolution": 4096,
+							"r.Shadow.CSM.MaxCascades": 10,
+							"r.Shadow.MaxSoftKernelSize": 40
+						},
+						"read_back":
+						{
+							"r.Shadow.MaxResolution": "4096",
+							"r.Shadow.MaxCSMResolution": "4096",
+							"r.Shadow.CSM.MaxCascades": "10",
+							"r.Shadow.MaxSoftKernelSize": "40"
+						}
+					},
+					"cvars_per_preset":
+					{
+						"before":
+						{
+							"r.Shadow.FilterMethod": "0"
+						},
+						"asked":
+						{
+							"r.Shadow.FilterMethod": 1
+						},
+						"read_back":
+						{
+							"r.Shadow.FilterMethod": "1"
+						}
+					},
+					"DynamicShadowCascades": 8,
+					"CascadeDistributionExponent": 3.5,
+					"DynamicShadowDistanceMovableLight_m": 6000,
+					"ShadowDistanceFadeoutFraction": 0.15000000596046448,
+					"CascadeTransitionFraction": 0.10000000149011612,
+					"LightSourceAngle_deg_read_back": 0.53570002317428589,
+					"r.Shadow.FilterMethod_read_back": "1",
+					"r.Shadow.Virtual.Enable_read_back": "1"
+				},
+				"df_shadows":
+				{
+					"switch": "-look-df-shadows",
+					"mode": "auto",
+					"probe": true,
+					"on": false,
+					"off_means": "bUseRayTracedDistanceFieldShadows false (shadows end at the cascades)",
+					"constrained_column": true,
+					"bUseRayTracedDistanceFieldShadows_before": true,
+					"DistanceFieldShadowDistance_m_before": 512,
+					"bUseRayTracedDistanceFieldShadows": false,
+					"DistanceFieldShadowDistance_m": 512,
+					"casters": "static meshes with a mesh distance field (the aircraft); Cesium tiles are runtime meshes with none"
+				},
+				"contact_shadows":
+				{
+					"switch": "-look-contact-shadows",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "the hero-lighting lane's 150 cm world-space contact shadows stand",
+					"constrained_column": true,
+					"ContactShadowLength_before": 150,
+					"ContactShadowLengthInWS_before": true,
+					"cvars":
+					{
+						"before":
+						{
+							"r.ContactShadows": "1"
+						},
+						"asked":
+						{
+							"r.ContactShadows": 1
+						},
+						"read_back":
+						{
+							"r.ContactShadows": "1"
+						}
+					},
+					"ContactShadowLength": 0.019999999552965164,
+					"ContactShadowLengthInWS": false,
+					"ContactShadowCastingIntensity": 1,
+					"ContactShadowNonCastingIntensity": 0
+				},
+				"bloom":
+				{
+					"switch": "-look-bloom",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "BloomIntensity 0 and the Bloom show flag off",
+					"constrained_column": true,
+					"BloomIntensity": 0.25,
+					"BloomThreshold": -1,
+					"BloomSizeScale": 4,
+					"BloomMethod": "BM_SOG"
+				},
+				"bloom_fft":
+				{
+					"switch": "-look-bloom-fft",
+					"mode": "auto",
+					"probe": true,
+					"on": false,
+					"off_means": "the bloom row's BM_SOG",
+					"constrained_column": true
+				},
+				"lens_flare":
+				{
+					"switch": "-look-lens-flare",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "LensFlareIntensity 0 and the LensFlares show flag off",
+					"constrained_column": true,
+					"LensFlareIntensity": 0.20000000298023224,
+					"LensFlareThreshold": 12,
+					"LensFlareBokehSize": 3,
+					"cvars":
+					{
+						"before":
+						{
+							"r.LensFlareQuality": "3"
+						},
+						"asked":
+						{
+							"r.LensFlareQuality": 2
+						},
+						"read_back":
+						{
+							"r.LensFlareQuality": "2"
+						}
+					},
+					"gate":
+					{
+						"sun_angle_from_axis_deg": 176.55871758752164,
+						"half_diagonal_fov_deg": 30.543343342934385,
+						"margin_deg": 12,
+						"drawn": false,
+						"decision": "off for the clip: the sun is away from the frame (LensFlareIntensity 0, LensFlares show flag off)",
+						"LensFlareIntensity": 0
+					},
+					"bokeh_shape": "engine default (LensFlareBokehShape null: PostProcessLensFlares.cpp keeps its own shape); a hexagonal iris texture is a later import"
+				},
+				"film_grain":
+				{
+					"switch": "-look-film-grain",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "FilmGrainIntensity 0 and the Grain show flag off",
+					"constrained_column": true,
+					"FilmGrainIntensity": 0.029999999329447746,
+					"FilmGrainIntensityShadows": 1,
+					"FilmGrainIntensityMidtones": 1,
+					"FilmGrainIntensityHighlights": 0.69999998807907104,
+					"FilmGrainShadowsMax": 0.090000003576278687,
+					"FilmGrainHighlightsMin": 0.5,
+					"FilmGrainHighlightsMax": 1,
+					"FilmGrainTexelSize": 1,
+					"GrainStrength": 0.029999999999999999,
+					"grain_scale": 1,
+					"stock_scale": 1,
+					"texture": "engine default (FilmGrainTexture null: GEngine->DefaultFilmGrainTexture, BaseEngine.ini DefaultFilmGrainTextureName)",
+					"cvars":
+					{
+						"before":
+						{
+							"r.FilmGrain": "1"
+						},
+						"asked":
+						{
+							"r.FilmGrain": 1
+						},
+						"read_back":
+						{
+							"r.FilmGrain": "1"
+						}
+					}
+				},
+				"volumetric_fog":
+				{
+					"switch": "-look-volumetric-fog",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "VolumetricFogAlbedo white (the engine default every earlier round drew)",
+					"constrained_column": true,
+					"cvars":
+					{
+						"before":
+						{
+							"r.VolumetricFog": "1"
+						},
+						"asked":
+						{
+							"r.VolumetricFog": 1
+						},
+						"read_back":
+						{
+							"r.VolumetricFog": "1"
+						}
+					},
+					"fog_components": [
+						{
+							"albedo_before": "(R=255,G=255,B=255,A=255)",
+							"VolumetricFogAlbedo": "(R=235,G=235,B=235,A=255)",
+							"volumetric_fog": true,
+							"scattering_distribution_read_back": 0.75,
+							"extinction_scale_read_back": 1,
+							"distance_m_read_back": 8000
+						}
+					],
+					"sun_volumetric_scattering_intensity_read_back": 1,
+					"owners": "distribution, extinction and distance: the world lane's row (core/scene/world_beauty.py, incl. the wet rows' extinction scaling); the sun's scattering: the hero-lighting lane; read back here"
+				},
+				"fog_grid":
+				{
+					"switch": "-look-fog-grid",
+					"mode": "auto",
+					"probe": true,
+					"on": true,
+					"off_means": "the engine's coarse grid (r.VolumetricFog.GridPixelSize 8, GridSizeZ 64)",
+					"constrained_column": true,
+					"cvars":
+					{
+						"before":
+						{
+							"r.VolumetricFog.GridPixelSize": "4",
+							"r.VolumetricFog.GridSizeZ": "128"
+						},
+						"asked":
+						{
+							"r.VolumetricFog.GridPixelSize": 4,
+							"r.VolumetricFog.GridSizeZ": 128
+						},
+						"read_back":
+						{
+							"r.VolumetricFog.GridPixelSize": "4",
+							"r.VolumetricFog.GridSizeZ": "128"
+						}
+					},
+					"basis": "per fog voxel, not per cloud-march step; the fine grid is what every passing round rendered with"
+				},
+				"tsr":
+				{
+					"switch": "-look-tsr",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "the commandlet's own warm-up (16) and still samples (8)",
+					"constrained_column": true,
+					"warmup_captures": 20,
+					"still_samples": 12,
+					"applied_by": "the commandlet raises its warm-up and still-sample defaults to these (a stated -warmup= or -still-samples= wins); render_settings records the counts it ran",
+					"r.TSR.History.ScreenPercentage_read_back": "200",
+					"r.TSR.History.SampleCount_read_back": "32",
+					"internal_resolution": "unchanged: the render-path lane's supersample cap stands (at most 1920 x 1080 internal on the constrained GPU)"
+				},
+				"filmback":
+				{
+					"switch": "-look-filmback",
+					"mode": "on",
+					"probe": false,
+					"on": true,
+					"off_means": "the camera row's sensor width alone (the pre-round-5 record)",
+					"constrained_column": true,
+					"DepthOfFieldSqueezeFactor": 1,
+					"sensor_width_mm": 36,
+					"sensor_height_mm": 24,
+					"DepthOfFieldSensorWidth_read_back": 36,
+					"sensor_height_used_mm": 20.25,
+					"crop": "the frame's aspect crops the 3:2 sensor top and bottom; the FOV is the pose solver's, unchanged"
+				},
+				"constrained_gpu": true,
+				"labels": "beauty capture and its lights only: label captures are separate captures of the same frame (lighting and post never reach stencil, depth or the GBuffer)"
+			},
+			"camera":
+			{
+				"focus_basis": "off",
+				"aperture_source": "the exposure's (card triple or -sky= plan) f/4 kept; the lens's f/4 not applied",
+				"camera_index": 0,
+				"sensor_width_mm": 36,
+				"fov_deg_unchanged": 54.432224273681641,
+				"focal_length_mm_from_fov": 34.999999129568295,
+				"DepthOfFieldFstop": 4,
+				"depth_of_field": false,
+				"MotionBlurAmount": 0,
+				"MotionBlurTargetFPS": 30,
+				"motion_blur_show_flag": false,
+				"shutter_policy": "still: motion blur OFF (one pose, one sim time; the plan's 180-degree shutter is for clips)"
+			},
+			"exposure":
+			{
+				"applied": "yes, over the -sky= plan's camera",
+				"ev100": 11.602,
+				"camera_ev100": 9.9068905956085178,
+				"sky_plan_bias": -1.694599986076355,
+				"CameraShutterSpeed": 60,
+				"CameraISO": 100,
+				"AutoExposureBias": -1.6951093673706055,
+				"meter":
+				{
+					"shader_platform": "PCD3D_SM5",
+					"lumen_gi_supported": false,
+					"lumen_gi_basis": "DoesPlatformSupportLumenGI(GMaxRHIShaderPlatform) (RenderUtils.h; r.Lumen.Supported, r.Lumen.Supported.SM5): a cvar that reads 1 does not make Lumen run",
+					"runs": "yes",
+					"trigger": "no_lumen_gi",
+					"target_p90_luma": 0.45000000000000001,
+					"result": "look_applied.storm_exposure (the commandlet's meter loop)"
+				}
+			},
+			"sun":
+			{
+				"colour_owner": "the engine's per-pixel atmosphere transmittance; the beauty look sets no sun temperature",
+				"per_pixel_transmittance": true,
+				"use_temperature_read_back": false,
+				"light_color_read_back": "255:255:255",
+				"intensity_read_back": 120000
+			},
+			"tonemap":
+			{
+				"FilmSlope": 0.87999999523162842,
+				"FilmToe": 0.55000001192092896,
+				"FilmShoulder": 0.25999999046325684,
+				"FilmBlackClip": 0,
+				"FilmWhiteClip": 0.039999999105930328,
+				"ToneCurveAmount": 1,
+				"BlueCorrection": 1
+			},
+			"color_grade":
+			{
+				"ColorSaturation": [
+					1,
+					1,
+					1,
+					1.04
+				],
+				"ColorContrast": [
+					1,
+					1,
+					1,
+					1.04
+				],
+				"ColorGamma": [
+					1,
+					1,
+					1,
+					1
+				],
+				"ColorGain": [
+					1,
+					1,
+					1,
+					1
+				],
+				"ColorOffset": [
+					0,
+					0,
+					0,
+					0
+				],
+				"WhiteTemp": 6700,
+				"WhiteTint": 0
+			},
+			"lens_post":
+			{
+				"VignetteIntensity": 0,
+				"SceneFringeIntensity": 0,
+				"MotionBlurMax": 1,
+				"MotionBlurPerObjectSize": 0,
+				"DepthOfFieldBladeCount": 7,
+				"bloom_flare_grain_owner": "ENGINE_LOOK per world preset (applied.engine_look.bloom / bloom_fft / lens_flare / film_grain)",
+				"lens_character_owner": "the beauty lens; replaces the -sky= plan's grain, vignette and motion blur when one is set"
+			},
+			"local_exposure":
+			{
+				"LocalExposureHighlightContrastScale": 1,
+				"LocalExposureShadowContrastScale": 0.75,
+				"LocalExposureDetailStrength": 1.1000000238418579,
+				"LocalExposureBlurredLuminanceBlend": 0.60000002384185791,
+				"LocalExposureMiddleGreyBias": 0,
+				"LocalExposureMethod": "Bilateral"
+			},
+			"reflections":
+			{
+				"lumen_quality_owner": "render-path lane (render_settings.beauty_path.lumen_capture_overrides)",
+				"ssr_owner": "ENGINE_LOOK ssr (applied.engine_look.ssr)",
+				"LumenSceneDetail": 2,
+				"LumenFrontLayerTranslucencyReflections": true
+			}
+		},
+		"per_frame":
+		{
+			"frames": 1,
+			"focal_length_mm_min": 34.999999129568295,
+			"focal_length_mm_max": 34.999999129568295
+		},
+		"labels": "masks, class, depth and boxes are separate captures of the same frame without this look; no visual-only actor is added (nothing occludes the aircraft in beauty that the masks lack)"
+	},
+	"pixel_moving_effects": [
+		{
+			"name": "motion_blur",
+			"on": false,
+			"transform": null,
+			"max_displacement_px": null,
+			"displacement_basis": "bound: MotionBlurMax percent of the width, by construction; not measured",
+			"source": "beauty capture: MotionBlur show flag and MotionBlurAmount/MotionBlurMax (look-dev lens)"
+		},
+		{
+			"name": "depth_of_field",
+			"on": false,
+			"transform": null,
+			"max_displacement_px": null,
+			"displacement_basis": "not measured: zero at the focal plane (the aircraft, focused per frame), growing off it; the class and depth labels of defocused terrain spread",
+			"source": "beauty capture: DepthOfField show flag and DepthOfFieldFocalDistance > 0 (look-dev per-frame focus)"
+		},
+		{
+			"name": "heat_haze",
+			"on": false,
+			"transform": null,
+			"max_displacement_px": null,
+			"displacement_basis": "bound: heat_haze.hlsl's peak offset x width x 0.00023 / tan(hFOV/2) (UE 5.7.4 DistortionCommon.ush), along the diagonal, by construction; not measured",
+			"source": "aircraft_look.heat_haze (aircraft lane, -heat-haze=on only)"
+		},
+		{
+			"name": "path_tracer_filter",
+			"on": false,
+			"transform": null,
+			"max_displacement_px": null,
+			"displacement_basis": "not measured: the path tracer's pixel filter (r.PathTracing.FilterWidth) and the Nanite fallback mesh it traces (render_settings.beauty_path.path_tracer.labels_note)",
+			"source": "-quality=pathtrace (render-path lane)"
+		},
+		{
+			"name": "chromatic_aberration",
+			"on": false,
+			"transform": null,
+			"max_displacement_px": null,
+			"displacement_basis": "not measured",
+			"source": "beauty capture: SceneColorFringe show flag and SceneFringeIntensity"
+		},
+		{
+			"name": "lens_drops",
+			"on": false,
+			"transform": null,
+			"max_displacement_px": null,
+			"displacement_basis": "bound: M_LensDrops samples the scene mirrored within an 1/18-screen cell, at most 0.6/18 of the viewport per axis, by construction; not measured",
+			"source": "beauty capture: M_LensDrops in WeightedBlendables (rain look, a camera with no weather rain)"
+		},
+		{
+			"name": "windshield_rain",
+			"on": false,
+			"transform": null,
+			"max_displacement_px": null,
+			"displacement_basis": "bound: windshield.hlsl refracts by at most 0.4 / cells of the height (Glass.w), by construction; not measured",
+			"source": "beauty capture: M_WindshieldRain in WeightedBlendables (storm weather, cockpit/shoulder camera)"
+		},
+		{
+			"name": "lens_distortion",
+			"on": false,
+			"transform": null,
+			"max_displacement_px": null,
+			"displacement_basis": "not applied by any lane",
+			"source": "none (look-dev pixel_effects.lens_distortion: not implemented)"
+		}
+	],
+	"beauty_samples":
+	{
+		"spatial": 12,
+		"temporal": 1,
+		"still_samples": 12,
+		"tsr_history_samples": 32,
+		"tsr_history_screen_percentage": 200,
+		"tsr_temporal_aa_show_flag": true,
+		"shutter_s": 0,
+		"shutter_basis": "no engine motion blur on the beauty capture"
+	},
+	"beauty_only_actors": [
+		{
+			"name": "Actor_7",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_8",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_9",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_10",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_11",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_12",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_13",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_14",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_15",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_16",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_17",
+			"source": "aircraft_fx",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "Actor_6",
+			"source": "visual_scene",
+			"hidden_by": "HiddenActors on every label capture (ConfigureLabelCapture)"
+		},
+		{
+			"name": "VolumetricCloud_0",
+			"source": "world",
+			"hidden_by": "Cloud show flag off on every label capture"
+		}
+	],
+	"cloud_occlusion":
+	{
+		"policy": "labels_unoccluded",
+		"owner": "world lane (FFlightSimWorldBeauty, look_applied.world_beauty.frames[])",
+		"frames": 1,
+		"frames_flagged_cloud_occludes_aircraft": 0,
+		"frames_with_unmodelled_clouds": 0,
+		"cloud_layers_modelled": 1,
+		"unmodelled_clouds": 0,
+		"subject_occluded_fraction": 0,
+		"basis": "modelled",
+		"method": "max over frames of 1 - prod(layer transmittance) along the camera-to-aircraft-origin ray (FlightSimWorldPure::Occlusion; per frame in look_applied.world_beauty.frames[].cloud_covered_fraction_modelled)",
+		"not_modelled": "rain, contrails, wingtip vapour and the afterburner plume (beauty-only translucent media) are not in this fraction; experiments/look_label_check.py measures the covered fraction from the pixels"
+	},
+	"hero_lighting":
+	{
+		"module": "FlightSimHeroLighting.cpp (hero-lighting lane)",
+		"direction": "the sun's direction is the scenario's time of day, date and heading (core/scene/hero_lighting.py solves them per shot); nothing here adds or moves a light",
+		"sidecar": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\1f312f9e0511\\hero_lighting.json",
+		"plan":
+		{
+			"hero_lighting_version": 1,
+			"ground":
+			{
+				"surface": "unspecified",
+				"albedo_rgb": [
+					0.17999999999999999,
+					0.17000000000000001,
+					0.14999999999999999
+				],
+				"horizontal_lux": 9418.1000000000004,
+				"horizontal_lux_basis": "the beauty look's meter reference (beauty_look.json)",
+				"lower_hemisphere_luminance_rgb": [
+					539.61699999999996,
+					509.63900000000001,
+					449.68099999999998
+				],
+				"model": "Lambertian ground: L = albedo x E_horizontal / pi (cd/m2)"
+			},
+			"sun_elevation_deg": 6,
+			"time_of_day_basis": "time of day 'golden hour' (render sun only; see core.environment.sun)",
+			"uncalibrated": [
+				"GROUND_ALBEDO_RGB",
+				"OVERCAST_ILLUMINANCE_FRACTION"
+			],
+			"note": "VISUAL ONLY, beauty quality only (docs/visual/PROBE_LOG.md hero-lighting)"
+		},
+		"sun":
+		{
+			"source_angle_basis": "the true solar disc (physics) plus an UNCALIBRATED soft angle",
+			"source_angle_deg": 0.53570002317428589,
+			"source_soft_angle_deg": 0.5,
+			"overcast": false,
+			"contact_shadow_length_cm_world": 150,
+			"light_shaft_occlusion": false,
+			"light_shaft_occlusion_basis": "off: screen-space, so it re-tones the horizon sky as the bank moves the terrain on screen (Gate 6 beauty breathing); overrides the world lane's sun-shafts row; shafts come from the volumetric fog's and the atmosphere's world-space shadows",
+			"light_shaft_bloom": true,
+			"light_shaft_bloom_scale": 0.11999999731779099,
+			"light_shaft_bloom_threshold": 6,
+			"volumetric_scattering_intensity": 1,
+			"volumetric_scattering_world_scale": 1,
+			"sun_disk_color_scale": 1
+		},
+		"aureole":
+		{
+			"mie_anisotropy": 0.80000001192092896,
+			"owner": "world lane (FlightSimClouds.cpp); read back, not set"
+		},
+		"sky_light":
+		{
+			"real_time_capture": false,
+			"capture": "captured once by the commandlet before the first frame (and per frame when the sun animates)",
+			"cloud_ambient_occlusion": true,
+			"lower_hemisphere_basis": "ground albedo x horizontal illuminance / pi, from the sidecar",
+			"lower_hemisphere_color":
+			{
+				"r": 539.61700439453125,
+				"g": 509.63900756835938,
+				"b": 449.68099975585938,
+				"a": 1
+			},
+			"probes":
+			{
+				"source": "-flags or FLIGHTSIM_RENDER_SWITCHES (beauty only; defaults are the planned render)",
+				"sky_fill_probe": "as-planned",
+				"sky_cloud_ao": "on",
+				"aerial_perspective_scale": "as-planned (the world lane's row)",
+				"sky_light_after_probes":
+				{
+					"r": 1,
+					"g": 1,
+					"b": 1,
+					"a": 1
+				},
+				"sky_light_intensity_after_probes": 1.6000000238418579,
+				"cloud_ambient_occlusion_after_probes": true
+			}
+		},
+		"reflections":
+		{
+			"route": "software fallback: ray tracing is not enabled in this process; screen traces then the surface cache",
+			"ray_tracing_enabled": false
+		},
+		"path_tracer": false,
+		"cvars_asked":
+		{
+			"r.Shadow.Virtual.ResolutionLodBiasDirectional": -1.5,
+			"r.Shadow.Virtual.MaxPhysicalPages": 8192,
+			"r.Shadow.Virtual.SMRT.RayCountDirectional": 16,
+			"r.Shadow.Virtual.SMRT.SamplesPerRayDirectional": 12,
+			"r.ContactShadows": 1,
+			"r.LightShaftQuality": 1,
+			"r.VolumetricFog": 1,
+			"r.VolumetricFog.GridPixelSize": 4,
+			"r.VolumetricFog.GridSizeZ": 128,
+			"r.Lumen.ScreenProbeGather.ShortRangeAO": 1,
+			"r.Lumen.ScreenProbeGather.ScreenTraces": 1,
+			"r.Lumen.Reflections.ScreenTraces": 1,
+			"r.Lumen.Reflections.MaxRoughnessToTrace": 0.40000000596046448,
+			"r.Lumen.Reflections.DownsampleFactor": 1
+		},
+		"cvars_read_back":
+		{
+			"r.Shadow.Virtual.ResolutionLodBiasDirectional": "-1.5",
+			"r.Shadow.Virtual.MaxPhysicalPages": "8192",
+			"r.Shadow.Virtual.SMRT.RayCountDirectional": "16",
+			"r.Shadow.Virtual.SMRT.SamplesPerRayDirectional": "12",
+			"r.ContactShadows": "1",
+			"r.LightShaftQuality": "1",
+			"r.VolumetricFog": "1",
+			"r.VolumetricFog.GridPixelSize": "4",
+			"r.VolumetricFog.GridSizeZ": "128",
+			"r.Lumen.ScreenProbeGather.ShortRangeAO": "1",
+			"r.Lumen.ScreenProbeGather.ScreenTraces": "1",
+			"r.Lumen.Reflections.ScreenTraces": "1",
+			"r.Lumen.Reflections.MaxRoughnessToTrace": "0.4",
+			"r.Lumen.Reflections.DownsampleFactor": "1"
+		},
+		"pixel_moving_effects": [],
+		"labels": "beauty only: label captures read stencil, depth, GBuffer and velocity, which lighting does not change, and ExcludeFromLabel turns light shafts and contact shadows off on them",
+		"calibration": "UNCALIBRATED except the solar disc and the unit scales: each value is set by the probe named in docs/visual/PROBE_LOG.md \"## hero-lighting\""
+	},
+	"environment":
+	{
+		"turbulence": "none",
+		"wind_speed_kt": 0,
+		"wind_from_deg": 0,
+		"wind_schedule": false,
+		"orographic": false,
+		"downburst": false,
+		"rotor": false,
+		"log_profile": false,
+		"thermals": false,
+		"turbulence_schedule": false,
+		"orographic_follow_schedule": false
+	},
+	"frame_records": [
+		{
+			"frame": "frame_0000.png",
+			"sha256": "3f36c3bc3334b488b219b7d48f473f2735a27e2485e097e69b6f5b6b7369e61e",
+			"deterministic_pins": true,
+			"t": 0.0083333333329999992,
+			"roll_deg": 7.8978995420199286e-06,
+			"pitch_deg": 1.4889156341307015,
+			"aileron_cmd": 0,
+			"camera_roll_deg": 0,
+			"beauty_fov_deg": 54.432224273681641,
+			"labels":
+			{
+				"mask": "frame_0000_mask.png",
+				"class_mask": "frame_0000_class.png",
+				"depth": "frame_0000_depth.png",
+				"depth_scale_m": 0.10000000000000001,
+				"depth_saturation_m": 6553.5,
+				"silhouette_pixels": 8315,
+				"visible_pixels": 7389,
+				"occlusion_fraction": 0.11136500300661456,
+				"classes": "0 sky, 1 aircraft, 2 terrain, 3 building, 4 vegetation, 5 water, 6 cloud, 7 payload, 8 landing_gear",
+				"method": "depth ownership: show-only depth per int_id against the scene depth; alone pass per aircraft",
+				"depth_f32": "frame_0000_depth.f32",
+				"anti_aliasing": "none",
+				"id_source": "card objects[]",
+				"unlabelled_geometry_pixels": 0,
+				"non_integer_id_pixels": 0,
+				"objects": [
+					{
+						"id": "aircraft:A4:0",
+						"int_id": 1,
+						"class_id": 1,
+						"pixels": 7389,
+						"pixels_alone": 8315,
+						"alone_png": "frame_0000_alone_1.png",
+						"visible_fraction": 0.88863499699338544,
+						"occluded_by": [],
+						"depth_min_m": 35.796890258789062,
+						"depth_median_m": 40.118274688720703
+					},
+					{
+						"id": "terrain",
+						"int_id": 2,
+						"class_id": 2,
+						"pixels": 912229,
+						"pixels_alone": null,
+						"alone_png": null,
+						"visible_fraction": null,
+						"occluded_by": [],
+						"depth_min_m": 490.57522583007812,
+						"depth_median_m": 780.23443603515625
+					},
+					{
+						"id": "payload:store_sta2:0",
+						"int_id": 64,
+						"class_id": 7,
+						"pixels": 373,
+						"pixels_alone": 493,
+						"alone_png": "frame_0000_alone_64.png",
+						"visible_fraction": 0.7565922920892495,
+						"occluded_by": [
+							1
+						],
+						"depth_min_m": 39.912139892578125,
+						"depth_median_m": 40.868656158447266
+					},
+					{
+						"id": "payload:drop_tank_sta3:0",
+						"int_id": 65,
+						"class_id": 7,
+						"pixels": 183,
+						"pixels_alone": 433,
+						"alone_png": "frame_0000_alone_65.png",
+						"visible_fraction": 0.42263279445727481,
+						"occluded_by": [
+							1
+						],
+						"depth_min_m": 40.406059265136719,
+						"depth_median_m": 40.744457244873047
+					},
+					{
+						"id": "payload:store_sta4:0",
+						"int_id": 66,
+						"class_id": 7,
+						"pixels": 370,
+						"pixels_alone": 479,
+						"alone_png": "frame_0000_alone_66.png",
+						"visible_fraction": 0.77244258872651361,
+						"occluded_by": [
+							1
+						],
+						"depth_min_m": 39.807052612304688,
+						"depth_median_m": 40.748258590698242
+					},
+					{
+						"id": "landing_gear:nose_gear:0",
+						"int_id": 67,
+						"class_id": 8,
+						"pixels": 0,
+						"pixels_alone": null,
+						"alone_png": null,
+						"visible_fraction": null,
+						"occluded_by": [],
+						"depth_min_m": null,
+						"depth_median_m": null
+					},
+					{
+						"id": "landing_gear:left_main_gear:0",
+						"int_id": 68,
+						"class_id": 8,
+						"pixels": 0,
+						"pixels_alone": null,
+						"alone_png": null,
+						"visible_fraction": null,
+						"occluded_by": [],
+						"depth_min_m": null,
+						"depth_median_m": null
+					},
+					{
+						"id": "landing_gear:right_main_gear:0",
+						"int_id": 69,
+						"class_id": 8,
+						"pixels": 0,
+						"pixels_alone": null,
+						"alone_png": null,
+						"visible_fraction": null,
+						"occluded_by": [],
+						"depth_min_m": null,
+						"depth_median_m": null
+					}
+				]
+			},
+			"camera_index": 0,
+			"camera_applied_north_m": -0.044739505276083946,
+			"camera_applied_east_m": -40.395772325689904,
+			"camera_applied_alt_m": 1506.0000020135194,
+			"camera_applied_yaw_deg": 90.000011126836284,
+			"camera_grid_convergence_deg": -1.5980714864979408,
+			"camera_applied_pitch_deg": -8.1301023541559516,
+			"camera_applied_roll_deg": 0,
+			"lit_pixels": 888803,
+			"n_z": 0.99621214749999998,
+			"wind_down_fps": -5.2592736430000001e-14,
+			"turb_down_fps": 0,
+			"w20_fps": 0,
+			"altitude_m": 1500.000002,
+			"cas_kt": 349.9999995,
+			"tas_kt": 374.22324070000002,
+			"heading_deg": 90.00001112713278,
+			"agl_m": 269.03297382528001,
+			"wind_north_fps": 2.081547292e-13,
+			"wind_east_fps": 3.6379788070000001e-12,
+			"surface_component_deg":
+			{
+			},
+			"landmarks":
+			{
+				"air_0_40_l":
+				{
+					"visible": false,
+					"px": -503.06024070442646,
+					"py": 355.4922508246454
+				},
+				"air_0_40_r":
+				{
+					"visible": false,
+					"px": 1844.1644357963373,
+					"py": 364.75429246564943
+				},
+				"air_0_40_u":
+				{
+					"visible": false,
+					"px": 640.00800627273168,
+					"py": -980.19664129965986
+				},
+				"air_0_40_d":
+				{
+					"visible": false,
+					"px": 640.00480790249424,
+					"py": 1384.850576121793
+				},
+				"air_0_400_l":
+				{
+					"visible": false,
+					"px": -8665.8258175423089,
+					"py": 323.57069404049804
+				},
+				"air_0_400_r":
+				{
+					"visible": false,
+					"px": 16494.062428368739,
+					"py": 423.05336602443913
+				},
+				"air_0_400_u":
+				{
+					"visible": false,
+					"px": -1,
+					"py": -1
+				},
+				"air_0_400_d":
+				{
+					"visible": false,
+					"px": 639.99946214374643,
+					"py": 5337.8164954241465
+				},
+				"ground_0":
+				{
+					"visible": false,
+					"px": 640.00062406358427,
+					"py": 4478.6259626581477
+				},
+				"air_1_40_l":
+				{
+					"visible": true,
+					"px": 455.98712966622043,
+					"py": 214.4495137359317
+				},
+				"air_1_40_r":
+				{
+					"visible": true,
+					"px": 883.49506823288959,
+					"py": 214.75750104367188
+				},
+				"air_1_40_u":
+				{
+					"visible": false,
+					"px": 669.44059533210884,
+					"py": -5.8327937141189068
+				},
+				"air_1_40_d":
+				{
+					"visible": true,
+					"px": 668.0442275321069,
+					"py": 424.58637495402411
+				},
+				"air_1_400_l":
+				{
+					"visible": false,
+					"px": -1371.8000711524919,
+					"py": 213.19670136390371
+				},
+				"air_1_400_r":
+				{
+					"visible": false,
+					"px": 2912.8316084779658,
+					"py": 216.28983842370718
+				},
+				"air_1_400_u":
+				{
+					"visible": false,
+					"px": 677.94063562057329,
+					"py": -2625.9020033516008
+				},
+				"air_1_400_d":
+				{
+					"visible": false,
+					"px": 663.1109455005236,
+					"py": 1945.2309743495969
+				},
+				"ground_1":
+				{
+					"visible": false,
+					"px": 664.66822680078269,
+					"py": 1465.2115090380114
+				},
+				"air_2_40_l":
+				{
+					"visible": true,
+					"px": 548.6785432282968,
+					"py": 200.82324535364216
+				},
+				"air_2_40_r":
+				{
+					"visible": true,
+					"px": 794.94334940592603,
+					"py": 200.92584520845818
+				},
+				"air_2_40_u":
+				{
+					"visible": true,
+					"px": 671.91941554763969,
+					"py": 75.030241592601897
+				},
+				"air_2_40_d":
+				{
+					"visible": true,
+					"px": 671.03851351071376,
+					"py": 323.24692978876629
+				},
+				"air_2_400_l":
+				{
+					"visible": false,
+					"px": -526.92809083183181,
+					"py": 200.41273294043449
+				},
+				"air_2_400_r":
+				{
+					"visible": false,
+					"px": 1937.5519285060429,
+					"py": 201.44161878955697
+				},
+				"air_2_400_u":
+				{
+					"visible": false,
+					"px": 676.59232595424669,
+					"py": -1241.6818282073943
+				},
+				"air_2_400_d":
+				{
+					"visible": false,
+					"px": 667.60938536017363,
+					"py": 1289.4915247103902
+				},
+				"ground_2":
+				{
+					"visible": false,
+					"px": 668.90942222240244,
+					"py": 923.17287569512689
+				},
+				"air_3_40_l":
+				{
+					"visible": true,
+					"px": 589.14462543628474,
+					"py": 194.87806681462058
+				},
+				"air_3_40_r":
+				{
+					"visible": true,
+					"px": 756.54995198527229,
+					"py": 194.92561906677858
+				},
+				"air_3_40_u":
+				{
+					"visible": true,
+					"px": 673.00458747857215,
+					"py": 109.68737109309853
+				},
+				"air_3_40_d":
+				{
+					"visible": true,
+					"px": 672.38268255081164,
+					"py": 278.51132461473827
+				},
+				"air_3_400_l":
+				{
+					"visible": false,
+					"px": -148.95805320553137,
+					"py": 194.6942046581658
+				},
+				"air_3_400_r":
+				{
+					"visible": false,
+					"px": 1525.671881750678,
+					"py": 195.17087486538145
+				},
+				"air_3_400_u":
+				{
+					"visible": false,
+					"px": 676.12643052798887,
+					"py": -737.77638478033305
+				},
+				"air_3_400_d":
+				{
+					"visible": false,
+					"px": 669.85127125328881,
+					"py": 965.69491813518403
+				},
+				"ground_3":
+				{
+					"visible": true,
+					"px": 671.29244366004423,
+					"py": 574.47045226062755
+				},
+				"terrain_nw":
+				{
+					"visible": false,
+					"px": -1,
+					"py": -1
+				},
+				"terrain_ne":
+				{
+					"visible": false,
+					"px": -278.65010689196509,
+					"py": 70.368157821030522
+				},
+				"terrain_sw":
+				{
+					"visible": false,
+					"px": -1,
+					"py": -1
+				},
+				"terrain_se":
+				{
+					"visible": false,
+					"px": 1596.0678454360745,
+					"py": 81.589635789918162
+				},
+				"terrain_peak":
+				{
+					"visible": true,
+					"px": 1269.6340654631954,
+					"py": 33.517208335008199
+				},
+				"near_peak":
+				{
+					"visible": true,
+					"px": 1269.6340654631954,
+					"py": 33.517208335008199,
+					"range_m": 19573.584723906828
+				},
+				"far_peak":
+				{
+					"visible": false,
+					"px": 639.29584744315287,
+					"py": 4572.8491904154389,
+					"range_m": 278.94031405266992
+				},
+				"valley":
+				{
+					"visible": true,
+					"px": 309.10135102511896,
+					"py": 201.82776498913759,
+					"range_m": 18449.263547632869
+				},
+				"aircraft_ground":
+				{
+					"visible": false,
+					"px": 640.06342082718652,
+					"py": 4479.0764807829828,
+					"range_m": 279.19790690543635
+				}
+			},
+			"applied_focal_length_mm": 35,
+			"applied_sensor_width_mm": 36,
+			"applied_fov_deg": 54.432224273681641,
+			"applied_width_px": 1280,
+			"applied_height_px": 720
+		}
+	],
+	"telemetry": "C:\\Users\\kanth\\flightsim\\runs\\webapp\\1f312f9e0511\\frames\\chase\\host_telemetry.json"
+}

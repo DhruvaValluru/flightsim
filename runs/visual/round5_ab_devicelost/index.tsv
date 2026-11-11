@@ -1,0 +1,6 @@
+02:39:41	sun_shadows_off	7faa09cccabe	108s	switches=-look-sun-shadows=off	post=on	failed | [camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log
+last words:
+[2026.11.11-07.39.14:756][  0]LogFlig
+02:41:13	post_off	5ba5c3ae2210	88s	switches=	post=off	failed | [camera.render] the render commandlet produced no render.json for camera 'chase' (pass 1 of 1); see render.log
+last words:
+[2026.11.11-07.40.52:793][  0]LogFlig

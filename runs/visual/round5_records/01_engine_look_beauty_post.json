@@ -1,0 +1,542 @@
+{
+ "run_id": "ed8b25d0ffee",
+ "engine_look": {
+  "preset": "clear",
+  "preset_basis": "world preset clear (core/scene/world_beauty.py select_preset)",
+  "switch_source": "-look-<name>= on the command line, then FLIGHTSIM_RENDER_SWITCHES; unstated renders as planned",
+  "late_half": "applied",
+  "local_exposure": {
+   "switch": "-look-local-exposure",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "every scale 1 (the bilateral grid changes nothing)",
+   "constrained_column": false,
+   "LocalExposureHighlightContrastScale": 1,
+   "LocalExposureShadowContrastScale": 0.75,
+   "LocalExposureDetailStrength": 1.100000023841858,
+   "LocalExposureBlurredLuminanceBlend": 0.6000000238418579,
+   "LocalExposureMiddleGreyBias": 0,
+   "LocalExposureMethod": "Bilateral"
+  },
+  "ssgi": {
+   "switch": "-look-ssgi",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "DynamicGlobalIlluminationMethod None on the fallback path (the sky light alone fills the shade); Lumen machines keep Lumen",
+   "constrained_column": true,
+   "method_before": "ScreenSpace",
+   "IndirectLightingIntensity": 1,
+   "cvars": {
+    "before": {
+     "r.SSGI.Quality": "4"
+    },
+    "asked": {
+     "r.SSGI.Quality": 3
+    },
+    "read_back": {
+     "r.SSGI.Quality": "3"
+    }
+   },
+   "method": "ScreenSpace",
+   "r.SSGI.Quality_read_back": "3"
+  },
+  "ssr": {
+   "switch": "-look-ssr",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "ReflectionMethod None (sky light specular only)",
+   "constrained_column": true,
+   "method_before": "ScreenSpace",
+   "ScreenSpaceReflectionIntensity": 100,
+   "ScreenSpaceReflectionQuality": 80,
+   "ScreenSpaceReflectionMaxRoughness": 0.6000000238418579,
+   "cvars": {
+    "before": {
+     "r.SSR.Quality": "4",
+     "r.SSR.HalfResSceneColor": "0"
+    },
+    "asked": {
+     "r.SSR.Quality": 3,
+     "r.SSR.HalfResSceneColor": 0
+    },
+    "read_back": {
+     "r.SSR.Quality": "3",
+     "r.SSR.HalfResSceneColor": "0"
+    }
+   },
+   "method": "ScreenSpace"
+  },
+  "ssao": {
+   "switch": "-look-ssao",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "AmbientOcclusionIntensity 0 (no SSAO)",
+   "constrained_column": true,
+   "AmbientOcclusionIntensity": 0.6000000238418579,
+   "AmbientOcclusionRadius": 150,
+   "AmbientOcclusionQuality": 100,
+   "AmbientOcclusionPower": 2,
+   "AmbientOcclusionStaticFraction": 1,
+   "AmbientOcclusionMipBlend": 0.6000000238418579,
+   "AmbientOcclusionTemporalBlendWeight": 0.10000000149011612,
+   "AmbientOcclusionRadiusInWS": false,
+   "cvars": {
+    "before": {
+     "r.AmbientOcclusionMaxQuality": "100",
+     "r.AmbientOcclusionLevels": "-1"
+    },
+    "asked": {
+     "r.AmbientOcclusionMaxQuality": 100,
+     "r.AmbientOcclusionLevels": -1
+    },
+    "read_back": {
+     "r.AmbientOcclusionMaxQuality": "100",
+     "r.AmbientOcclusionLevels": "-1"
+    }
+   }
+  },
+  "sun_shadows": {
+   "switch": "-look-sun-shadows",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "the earlier lanes' sun shadows stand (the scene's 6 cascades over 20 km, or the fallback's 8 at exponent 4), uniform PCF",
+   "constrained_column": true,
+   "before": {
+    "DynamicShadowCascades": 8,
+    "CascadeDistributionExponent": 4,
+    "DynamicShadowDistanceMovableLight_m": 20000,
+    "ShadowDistanceFadeoutFraction": 0.10000000149011612,
+    "CascadeTransitionFraction": 0.10000000149011612
+   },
+   "cvars": {
+    "before": {
+     "r.Shadow.MaxResolution": "4096",
+     "r.Shadow.MaxCSMResolution": "4096",
+     "r.Shadow.CSM.MaxCascades": "10",
+     "r.Shadow.MaxSoftKernelSize": "40"
+    },
+    "asked": {
+     "r.Shadow.MaxResolution": 4096,
+     "r.Shadow.MaxCSMResolution": 4096,
+     "r.Shadow.CSM.MaxCascades": 10,
+     "r.Shadow.MaxSoftKernelSize": 40
+    },
+    "read_back": {
+     "r.Shadow.MaxResolution": "4096",
+     "r.Shadow.MaxCSMResolution": "4096",
+     "r.Shadow.CSM.MaxCascades": "10",
+     "r.Shadow.MaxSoftKernelSize": "40"
+    }
+   },
+   "cvars_per_preset": {
+    "before": {
+     "r.Shadow.FilterMethod": "0"
+    },
+    "asked": {
+     "r.Shadow.FilterMethod": 1
+    },
+    "read_back": {
+     "r.Shadow.FilterMethod": "1"
+    }
+   },
+   "DynamicShadowCascades": 8,
+   "CascadeDistributionExponent": 3.5,
+   "DynamicShadowDistanceMovableLight_m": 6000,
+   "ShadowDistanceFadeoutFraction": 0.15000000596046448,
+   "CascadeTransitionFraction": 0.10000000149011612,
+   "LightSourceAngle_deg_read_back": 0.5357000231742859,
+   "r.Shadow.FilterMethod_read_back": "1",
+   "r.Shadow.Virtual.Enable_read_back": "1"
+  },
+  "df_shadows": {
+   "switch": "-look-df-shadows",
+   "mode": "auto",
+   "probe": true,
+   "on": false,
+   "off_means": "bUseRayTracedDistanceFieldShadows false (shadows end at the cascades)",
+   "constrained_column": true,
+   "bUseRayTracedDistanceFieldShadows_before": true,
+   "DistanceFieldShadowDistance_m_before": 512,
+   "bUseRayTracedDistanceFieldShadows": false,
+   "DistanceFieldShadowDistance_m": 512,
+   "casters": "static meshes with a mesh distance field (the aircraft); Cesium tiles are runtime meshes with none"
+  },
+  "contact_shadows": {
+   "switch": "-look-contact-shadows",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "the hero-lighting lane's 150 cm world-space contact shadows stand",
+   "constrained_column": true,
+   "ContactShadowLength_before": 150,
+   "ContactShadowLengthInWS_before": true,
+   "cvars": {
+    "before": {
+     "r.ContactShadows": "1"
+    },
+    "asked": {
+     "r.ContactShadows": 1
+    },
+    "read_back": {
+     "r.ContactShadows": "1"
+    }
+   },
+   "ContactShadowLength": 0.019999999552965164,
+   "ContactShadowLengthInWS": false,
+   "ContactShadowCastingIntensity": 1,
+   "ContactShadowNonCastingIntensity": 0
+  },
+  "bloom": {
+   "switch": "-look-bloom",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "BloomIntensity 0 and the Bloom show flag off",
+   "constrained_column": true,
+   "BloomIntensity": 0.25,
+   "BloomThreshold": -1,
+   "BloomSizeScale": 4,
+   "BloomMethod": "BM_SOG"
+  },
+  "bloom_fft": {
+   "switch": "-look-bloom-fft",
+   "mode": "auto",
+   "probe": true,
+   "on": false,
+   "off_means": "the bloom row's BM_SOG",
+   "constrained_column": true
+  },
+  "lens_flare": {
+   "switch": "-look-lens-flare",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "LensFlareIntensity 0 and the LensFlares show flag off",
+   "constrained_column": true,
+   "LensFlareIntensity": 0.20000000298023224,
+   "LensFlareThreshold": 12,
+   "LensFlareBokehSize": 3,
+   "cvars": {
+    "before": {
+     "r.LensFlareQuality": "3"
+    },
+    "asked": {
+     "r.LensFlareQuality": 2
+    },
+    "read_back": {
+     "r.LensFlareQuality": "2"
+    }
+   },
+   "gate": {
+    "sun_angle_from_axis_deg": 176.55871758752164,
+    "half_diagonal_fov_deg": 30.543343342934385,
+    "margin_deg": 12,
+    "drawn": false,
+    "decision": "off for the clip: the sun is away from the frame (LensFlareIntensity 0, LensFlares show flag off)",
+    "LensFlareIntensity": 0
+   },
+   "bokeh_shape": "engine default (LensFlareBokehShape null: PostProcessLensFlares.cpp keeps its own shape); a hexagonal iris texture is a later import"
+  },
+  "film_grain": {
+   "switch": "-look-film-grain",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "FilmGrainIntensity 0 and the Grain show flag off",
+   "constrained_column": true,
+   "FilmGrainIntensity": 0.029999999329447746,
+   "FilmGrainIntensityShadows": 1,
+   "FilmGrainIntensityMidtones": 1,
+   "FilmGrainIntensityHighlights": 0.699999988079071,
+   "FilmGrainShadowsMax": 0.09000000357627869,
+   "FilmGrainHighlightsMin": 0.5,
+   "FilmGrainHighlightsMax": 1,
+   "FilmGrainTexelSize": 1,
+   "GrainStrength": 0.03,
+   "grain_scale": 1,
+   "stock_scale": 1,
+   "texture": "engine default (FilmGrainTexture null: GEngine->DefaultFilmGrainTexture, BaseEngine.ini DefaultFilmGrainTextureName)",
+   "cvars": {
+    "before": {
+     "r.FilmGrain": "1"
+    },
+    "asked": {
+     "r.FilmGrain": 1
+    },
+    "read_back": {
+     "r.FilmGrain": "1"
+    }
+   }
+  },
+  "volumetric_fog": {
+   "switch": "-look-volumetric-fog",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "VolumetricFogAlbedo white (the engine default every earlier round drew)",
+   "constrained_column": true,
+   "cvars": {
+    "before": {
+     "r.VolumetricFog": "1"
+    },
+    "asked": {
+     "r.VolumetricFog": 1
+    },
+    "read_back": {
+     "r.VolumetricFog": "1"
+    }
+   },
+   "fog_components": [
+    {
+     "albedo_before": "(R=255,G=255,B=255,A=255)",
+     "VolumetricFogAlbedo": "(R=235,G=235,B=235,A=255)",
+     "volumetric_fog": true,
+     "scattering_distribution_read_back": 0.75,
+     "extinction_scale_read_back": 1,
+     "distance_m_read_back": 8000
+    }
+   ],
+   "sun_volumetric_scattering_intensity_read_back": 1,
+   "owners": "distribution, extinction and distance: the world lane's row (core/scene/world_beauty.py, incl. the wet rows' extinction scaling); the sun's scattering: the hero-lighting lane; read back here"
+  },
+  "fog_grid": {
+   "switch": "-look-fog-grid",
+   "mode": "auto",
+   "probe": true,
+   "on": true,
+   "off_means": "the engine's coarse grid (r.VolumetricFog.GridPixelSize 8, GridSizeZ 64)",
+   "constrained_column": true,
+   "cvars": {
+    "before": {
+     "r.VolumetricFog.GridPixelSize": "4",
+     "r.VolumetricFog.GridSizeZ": "128"
+    },
+    "asked": {
+     "r.VolumetricFog.GridPixelSize": 4,
+     "r.VolumetricFog.GridSizeZ": 128
+    },
+    "read_back": {
+     "r.VolumetricFog.GridPixelSize": "4",
+     "r.VolumetricFog.GridSizeZ": "128"
+    }
+   },
+   "basis": "per fog voxel, not per cloud-march step; the fine grid is what every passing round rendered with"
+  },
+  "tsr": {
+   "switch": "-look-tsr",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "the commandlet's own warm-up (16) and still samples (8)",
+   "constrained_column": true,
+   "warmup_captures": 20,
+   "still_samples": 12,
+   "applied_by": "the commandlet raises its warm-up and still-sample defaults to these (a stated -warmup= or -still-samples= wins); render_settings records the counts it ran",
+   "r.TSR.History.ScreenPercentage_read_back": "200",
+   "r.TSR.History.SampleCount_read_back": "32",
+   "internal_resolution": "unchanged: the render-path lane's supersample cap stands (at most 1920 x 1080 internal on the constrained GPU)"
+  },
+  "filmback": {
+   "switch": "-look-filmback",
+   "mode": "on",
+   "probe": false,
+   "on": true,
+   "off_means": "the camera row's sensor width alone (the pre-round-5 record)",
+   "constrained_column": true,
+   "DepthOfFieldSqueezeFactor": 1,
+   "sensor_width_mm": 36,
+   "sensor_height_mm": 24,
+   "DepthOfFieldSensorWidth_read_back": 36,
+   "sensor_height_used_mm": 20.25,
+   "crop": "the frame's aspect crops the 3:2 sensor top and bottom; the FOV is the pose solver's, unchanged"
+  },
+  "constrained_gpu": true,
+  "labels": "beauty capture and its lights only: label captures are separate captures of the same frame (lighting and post never reach stencil, depth or the GBuffer)"
+ },
+ "beauty_post": {
+  "beauty_post_version": 1,
+  "output": "frame_NNNN_beauty_post.png",
+  "steps_off": [
+   "upscale"
+  ],
+  "look": {
+   "film_stock": "C:\\Users\\kanth\\flightsim\\assets\\looks\\film\\kodak_portra_160.cube",
+   "noisy": false,
+   "grain_in_pipeline": false,
+   "upscale": false,
+   "world_preset": "clear",
+   "grade": "golden_hour"
+  },
+  "note": "VISUAL ONLY: the original beauty frame and every label pass are untouched; this output moves and invents pixels (denoise, halation, grain, upscale)",
+  "labels_match": "frame_NNNN.png and frame_NNNN_beauty_post.png (native size); never frame_NNNN_beauty_4k.png without the upscale step's scale_factor",
+  "frames": [
+   "frame_0000_beauty_post.png"
+  ],
+  "steps": [
+   {
+    "step": "denoise",
+    "ran": false,
+    "why": "the look's world preset is not one of ['storm', 'rain', 'hazy']"
+   },
+   {
+    "step": "grain",
+    "ran": false,
+    "why": "the engine's film grain is on (beauty_look FILM_GRAIN_IN_ENGINE)"
+   },
+   {
+    "step": "lut",
+    "ran": true,
+    "tool": "ffmpeg",
+    "tool_name": "ffmpeg (BtbN FFmpeg-Builds, win64 LGPL, release branch 8.1)",
+    "version": "n8.1.3-34-ga35157abb9 (autobuild-2026-11-09-12-42)",
+    "sha256": "7bdec3860d33145a7cd68146eb8e1414e8881cac76205401211fbdad38ef0ed3",
+    "exe": "C:\\Users\\kanth\\AppData\\Local\\flightsim\\tools\\ffmpeg-7bdec3860d33\\ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1\\bin\\ffmpeg.exe",
+    "args": [
+     "C:\\Users\\kanth\\AppData\\Local\\flightsim\\tools\\ffmpeg-7bdec3860d33\\ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1\\bin\\ffmpeg.exe",
+     "-nostdin",
+     "-hide_banner",
+     "-loglevel",
+     "error",
+     "-y",
+     "-i",
+     "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ed8b25d0ffee\\frames\\chase\\frame_0000.png",
+     "-filter_complex",
+     "[0:v]format=gbrp16le,lut3d=file='C\\:/Users/kanth/flightsim/assets/looks/film/kodak_portra_160.cube':interp=tetrahedral,split[a][b];[b]colorlevels=rimin=0.72:gimin=0.72:bimin=0.72,gblur=sigma=14,colorchannelmixer=rr=1:gg=0.35:bb=0.12[h];[a][h]blend=all_mode=screen:all_opacity=0.12,format=gbrp,vignette=angle=PI/8,format=rgb24[out]",
+     "-map",
+     "[out]",
+     "-frames:v",
+     "1",
+     "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ed8b25d0ffee\\frames\\chase\\frame_0000_beauty_post.png"
+    ],
+    "params": {
+     "cube": "C:\\Users\\kanth\\flightsim\\assets\\looks\\film\\kodak_portra_160.cube",
+     "sha256": "09a94a1e1e845f7a7a75263d3fa8e2ae54a32c02ab29eaf0294803bd2b9d714d",
+     "interp": "tetrahedral"
+    },
+    "seconds": 1.656,
+    "shared_pass": true
+   },
+   {
+    "step": "halation",
+    "ran": true,
+    "tool": "ffmpeg",
+    "tool_name": "ffmpeg (BtbN FFmpeg-Builds, win64 LGPL, release branch 8.1)",
+    "version": "n8.1.3-34-ga35157abb9 (autobuild-2026-11-09-12-42)",
+    "sha256": "7bdec3860d33145a7cd68146eb8e1414e8881cac76205401211fbdad38ef0ed3",
+    "exe": "C:\\Users\\kanth\\AppData\\Local\\flightsim\\tools\\ffmpeg-7bdec3860d33\\ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1\\bin\\ffmpeg.exe",
+    "args": [
+     "C:\\Users\\kanth\\AppData\\Local\\flightsim\\tools\\ffmpeg-7bdec3860d33\\ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1\\bin\\ffmpeg.exe",
+     "-nostdin",
+     "-hide_banner",
+     "-loglevel",
+     "error",
+     "-y",
+     "-i",
+     "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ed8b25d0ffee\\frames\\chase\\frame_0000.png",
+     "-filter_complex",
+     "[0:v]format=gbrp16le,lut3d=file='C\\:/Users/kanth/flightsim/assets/looks/film/kodak_portra_160.cube':interp=tetrahedral,split[a][b];[b]colorlevels=rimin=0.72:gimin=0.72:bimin=0.72,gblur=sigma=14,colorchannelmixer=rr=1:gg=0.35:bb=0.12[h];[a][h]blend=all_mode=screen:all_opacity=0.12,format=gbrp,vignette=angle=PI/8,format=rgb24[out]",
+     "-map",
+     "[out]",
+     "-frames:v",
+     "1",
+     "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ed8b25d0ffee\\frames\\chase\\frame_0000_beauty_post.png"
+    ],
+    "params": {
+     "threshold": 0.72,
+     "sigma": 14.0,
+     "tint": [
+      1.0,
+      0.35,
+      0.12
+     ],
+     "opacity": 0.12
+    },
+    "seconds": 1.656,
+    "shared_pass": true
+   },
+   {
+    "step": "vignette",
+    "ran": true,
+    "tool": "ffmpeg",
+    "tool_name": "ffmpeg (BtbN FFmpeg-Builds, win64 LGPL, release branch 8.1)",
+    "version": "n8.1.3-34-ga35157abb9 (autobuild-2026-11-09-12-42)",
+    "sha256": "7bdec3860d33145a7cd68146eb8e1414e8881cac76205401211fbdad38ef0ed3",
+    "exe": "C:\\Users\\kanth\\AppData\\Local\\flightsim\\tools\\ffmpeg-7bdec3860d33\\ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1\\bin\\ffmpeg.exe",
+    "args": [
+     "C:\\Users\\kanth\\AppData\\Local\\flightsim\\tools\\ffmpeg-7bdec3860d33\\ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1\\bin\\ffmpeg.exe",
+     "-nostdin",
+     "-hide_banner",
+     "-loglevel",
+     "error",
+     "-y",
+     "-i",
+     "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ed8b25d0ffee\\frames\\chase\\frame_0000.png",
+     "-filter_complex",
+     "[0:v]format=gbrp16le,lut3d=file='C\\:/Users/kanth/flightsim/assets/looks/film/kodak_portra_160.cube':interp=tetrahedral,split[a][b];[b]colorlevels=rimin=0.72:gimin=0.72:bimin=0.72,gblur=sigma=14,colorchannelmixer=rr=1:gg=0.35:bb=0.12[h];[a][h]blend=all_mode=screen:all_opacity=0.12,format=gbrp,vignette=angle=PI/8,format=rgb24[out]",
+     "-map",
+     "[out]",
+     "-frames:v",
+     "1",
+     "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ed8b25d0ffee\\frames\\chase\\frame_0000_beauty_post.png"
+    ],
+    "params": {
+     "angle": "PI/8"
+    },
+    "seconds": 1.656,
+    "shared_pass": true
+   },
+   {
+    "step": "ffmpeg_pass",
+    "ran": true,
+    "tool": "ffmpeg",
+    "version": "n8.1.3-34-ga35157abb9 (autobuild-2026-11-09-12-42)",
+    "sha256": "7bdec3860d33145a7cd68146eb8e1414e8881cac76205401211fbdad38ef0ed3",
+    "args": [
+     "C:\\Users\\kanth\\AppData\\Local\\flightsim\\tools\\ffmpeg-7bdec3860d33\\ffmpeg-n8.1.3-34-ga35157abb9-win64-lgpl-8.1\\bin\\ffmpeg.exe",
+     "-nostdin",
+     "-hide_banner",
+     "-loglevel",
+     "error",
+     "-y",
+     "-i",
+     "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ed8b25d0ffee\\frames\\chase\\frame_0000.png",
+     "-filter_complex",
+     "[0:v]format=gbrp16le,lut3d=file='C\\:/Users/kanth/flightsim/assets/looks/film/kodak_portra_160.cube':interp=tetrahedral,split[a][b];[b]colorlevels=rimin=0.72:gimin=0.72:bimin=0.72,gblur=sigma=14,colorchannelmixer=rr=1:gg=0.35:bb=0.12[h];[a][h]blend=all_mode=screen:all_opacity=0.12,format=gbrp,vignette=angle=PI/8,format=rgb24[out]",
+     "-map",
+     "[out]",
+     "-frames:v",
+     "1",
+     "C:\\Users\\kanth\\flightsim\\runs\\webapp\\ed8b25d0ffee\\frames\\chase\\frame_0000_beauty_post.png"
+    ],
+    "params": {
+     "filter_graph": "[0:v]format=gbrp16le,lut3d=file='C\\:/Users/kanth/flightsim/assets/looks/film/kodak_portra_160.cube':interp=tetrahedral,split[a][b];[b]colorlevels=rimin=0.72:gimin=0.72:bimin=0.72,gblur=sigma=14,colorchannelmixer=rr=1:gg=0.35:bb=0.12[h];[a][h]blend=all_mode=screen:all_opacity=0.12,format=gbrp,vignette=angle=PI/8,format=rgb24[out]",
+     "intermediate": "gbrp16le",
+     "lut": {
+      "cube": "C:\\Users\\kanth\\flightsim\\assets\\looks\\film\\kodak_portra_160.cube",
+      "sha256": "09a94a1e1e845f7a7a75263d3fa8e2ae54a32c02ab29eaf0294803bd2b9d714d",
+      "interp": "tetrahedral"
+     }
+    },
+    "seconds": 1.656
+   },
+   {
+    "step": "upscale",
+    "ran": false,
+    "why": "switched off",
+    "opt_in": "FLIGHTSIM_BEAUTY_POST=on,+upscale (it invents detail; off by default)"
+   }
+  ],
+  "per_frame": [
+   {
+    "input": "frame_0000.png",
+    "output": "frame_0000_beauty_post.png",
+    "grain_seed": null
+   }
+  ]
+ }
+}

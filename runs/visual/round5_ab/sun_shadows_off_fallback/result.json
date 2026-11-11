@@ -1,0 +1,31 @@
+[
+  {
+    "number": 1,
+    "name": "golden hour A-4, flying east",
+    "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+    "lighting": {},
+    "compiler": "regex",
+    "notes": [],
+    "run_id": "bb0320f8cee7",
+    "outcome": "done",
+    "why": "clip ready",
+    "clip": "clip: 1 frames of chase at 30.0 fps = 0.0 s of flight",
+    "conditions": {
+      "wind_note": "calm; no terrain-driven airflow (orographic forcing is wind over terrain)",
+      "turbulence": "none",
+      "turbulence_seed": null,
+      "physics_ground": "georeferenced yosemite raster at true position; physics ground is the heightfield raster (AGL parity measured); track pre-flown for clearance; ground texture: X-Plane 12 textures by slope/height classification, MODIS snow cover for month 03 (approximated)",
+      "sky": "physical sky at 2026-03-21T01:36:38+00:00 (golden hour: sun setting through +6.0 deg): sun +6.0 deg, moon 5% lit, EV100 +11.6; clouds VISUAL ONLY",
+      "beauty_look": "beauty look: grade golden_hour (sun 6.0 deg, below 15 deg), lens standard; VISUAL ONLY, uncalibrated",
+      "beauty_post": "post-render beauty: lut, halation, vignette, ffmpeg_pass on 1 frame(s); VISUAL ONLY"
+    },
+    "frames_page": "http://127.0.0.1:8008/frames.html?run=bb0320f8cee7&camera=chase",
+    "gallery_files": [
+      "01_golden_hour_a_4_flying_east_clip.mp4",
+      "01_golden_hour_a_4_flying_east_frame.png",
+      "01_golden_hour_a_4_flying_east_frame_beauty_post.png",
+      "01_golden_hour_a_4_flying_east_boxes.png",
+      "01_golden_hour_a_4_flying_east_box3d.png"
+    ]
+  }
+]

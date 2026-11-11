@@ -1,0 +1,583 @@
+{
+  "beauty_look_version": 3,
+  "grade": "desert_noon",
+  "grade_basis": "sun 72.0 deg, at or above 15 deg",
+  "lens": "standard",
+  "world_preset": "clear",
+  "sun_elevation_deg": 72.0,
+  "sun": {
+    "lux": null,
+    "source": "physical_sky",
+    "transmittance": "engine_per_pixel",
+    "basis": "the -sky= plan lights the scene (core/sky/plan.py)",
+    "colour": "the engine's per-pixel atmosphere transmittance (one model, the physical sky's): no temperature band, the beauty host never tints the sun"
+  },
+  "exposure": {
+    "ev100": 13.5738,
+    "owner": "beauty_look (core/scene/beauty_look.py exposure_target)",
+    "base": "sky_plan",
+    "base_ev100": 15.276,
+    "band_ev100": null,
+    "grade_ev100_offset": 0.0,
+    "scene_light_stops": 0.0,
+    "scene_light_basis": "clear-sky meter with the lighting look's sun x1 on the direct beam and sky fill x1 on the diffuse",
+    "brightness_ev": 0.6,
+    "world_preset": "clear",
+    "basis": "the -sky= plan's incident-meter EV100 for a clear sky (core/sky/plan.py ev100_for)",
+    "method": "manual (physical camera + compensation), constant over the clip",
+    "aperture_f": 4.0,
+    "shutter_s": 0.01666667,
+    "shutter_angle_deg": 180.0,
+    "iso": 100.0,
+    "camera_ev100": 9.9069,
+    "AutoExposureBias": -3.6669,
+    "meter_ev100_reference": 15.461,
+    "meter_horizontal_lux_reference": 112788.2,
+    "meter_horizontal_lux_scene": 112788.2,
+    "over_sky_plan": true,
+    "relit_sun_open_stops": 1.1022,
+    "relit_sun_basis": "the lighting block relit the sun: the plan's meter moved from EV100 11.602 to 15.276; the exposure closes by RELIT_SUN_CLOSE_SHARE (0.7) of that gain (round 3, UNCALIBRATED)",
+    "camera_basis": "the -sky= plan's physical camera, kept: the host changes only AutoExposureBias",
+    "meter": {
+      "deck": false,
+      "target_p90_luma": 0.45,
+      "no_lumen_gi_target_p90_luma": 0.45,
+      "when": "only when the host finds Lumen GI unsupported on its shader platform",
+      "method": "the beauty frame read back once before frame 0; the 90th percentile of its sRGB luma opened to the target by AutoExposureBias, never closed below this EV100 unless the frame clips (the host's highlight guard, look_applied.storm_exposure.highlight_guard), constant over the clip"
+    },
+    "lighting_scales_unmetered": {
+      "sky_light_scale": 1.35,
+      "sun_intensity_scale": 1.6,
+      "basis": "stated by the user or a lighting preset: applied to the light and left unmetered, so the frame shows the look asked for (round 2b)"
+    }
+  },
+  "tonemap": {
+    "tonemapper": "UE filmic (ACES-fitted), engine 5.7 curve defaults stated; BlueCorrection raised (TONEMAP_HUE)",
+    "FilmSlope": 0.88,
+    "FilmToe": 0.55,
+    "FilmShoulder": 0.26,
+    "FilmBlackClip": 0.0,
+    "FilmWhiteClip": 0.04,
+    "ToneCurveAmount": 1.0,
+    "BlueCorrection": 1.0
+  },
+  "color_grade": {
+    "ColorSaturation": [
+      1.0,
+      1.0,
+      1.0,
+      0.96
+    ],
+    "ColorContrast": [
+      1.0,
+      1.0,
+      1.0,
+      1.08
+    ],
+    "ColorGamma": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "ColorGain": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "ColorOffset": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "WhiteTemp": 6500.0,
+    "WhiteTint": 0.0
+  },
+  "film_stock": {
+    "stock": "kodak_ektachrome_100d",
+    "cube": "assets/looks/film/kodak_ektachrome_100d.cube",
+    "sha256": "1f73a608c62f584f93553e19e0318104da179e0bb22b7a3501152ea6a9263bff",
+    "description": "Kodak Ektachrome 100D slide, projected: punchier, saturated stock for clear desert-noon frames",
+    "space": "display-referred sRGB in and out, after the tonemapper",
+    "applied_by": "scripts/beauty_post.py (ffmpeg lut3d, tetrahedral) when FLIGHTSIM_BEAUTY_POST=on; or in-engine via scripts/cube_to_ue_lut.py",
+    "grain_in_engine": true
+  },
+  "camera": {
+    "aperture_f": 4.0,
+    "depth_of_field": false,
+    "focus": "off (focal distance 0)",
+    "focus_per_camera": [
+      "off"
+    ],
+    "camera_presets": [
+      "chase"
+    ],
+    "sensor_width_mm": [
+      36.0
+    ],
+    "fov": "the pose solver's, unchanged; focal length derived from it",
+    "shutter_angle_deg": 180.0,
+    "MotionBlurAmount": 0.5,
+    "MotionBlurTargetFPS": 30,
+    "fps": 30.0,
+    "shutter_policy": {
+      "clip": "motion blur on at the 180-degree shutter (MotionBlurAmount over MotionBlurTargetFPS)",
+      "still": "motion blur off: one instant, one pose; the airframe is drawn tack sharp",
+      "host": "FFlightSimBeautyLook::ApplyShutterPolicy (a still is at most one delivered frame)"
+    }
+  },
+  "lens_post": {
+    "VignetteIntensity": 0.0,
+    "SceneFringeIntensity": 0.0,
+    "MotionBlurMax": 1.0,
+    "MotionBlurPerObjectSize": 0.0,
+    "DepthOfFieldBladeCount": 7
+  },
+  "local_exposure": {
+    "LocalExposureMethod": "Bilateral",
+    "LocalExposureHighlightContrastScale": 1.0,
+    "LocalExposureShadowContrastScale": 0.75,
+    "LocalExposureDetailStrength": 1.1,
+    "LocalExposureBlurredLuminanceBlend": 0.6,
+    "LocalExposureMiddleGreyBias": 0.0
+  },
+  "reflections": {
+    "lumen_quality_owner": "render-path lane: render.json render_settings.beauty_path.lumen_capture_overrides",
+    "ssr_owner": "ENGINE_LOOK ssr (per world preset; beauty_look.applied.engine_look.ssr)",
+    "LumenSceneDetail": 2.0,
+    "LumenFrontLayerTranslucencyReflections": true
+  },
+  "engine_look": {
+    "preset": "clear",
+    "switch_prefix": "-look-",
+    "switch_source": "the command line, then FLIGHTSIM_RENDER_SWITCHES",
+    "ssgi": {
+      "switch": "-look-ssgi",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "scene",
+      "off_means": "DynamicGlobalIlluminationMethod None on the fallback path (the sky light alone fills the shade); Lumen machines keep Lumen",
+      "values": {
+        "IndirectLightingIntensity": 1.0
+      },
+      "cvars": {
+        "r.SSGI.Quality": 4.0
+      },
+      "cvars_constrained": {
+        "r.SSGI.Quality": 3.0
+      },
+      "probe_name": "el-ssgi (#01 canyon shade and #09 belly, quality 3 and 4, on and off)"
+    },
+    "ssr": {
+      "switch": "-look-ssr",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "scene",
+      "off_means": "ReflectionMethod None (sky light specular only)",
+      "values": {
+        "ScreenSpaceReflectionIntensity": 100.0,
+        "ScreenSpaceReflectionQuality": 100.0,
+        "ScreenSpaceReflectionMaxRoughness": 0.6
+      },
+      "cvars": {
+        "r.SSR.Quality": 4.0,
+        "r.SSR.HalfResSceneColor": 0.0
+      },
+      "cvars_constrained": {
+        "r.SSR.Quality": 3.0,
+        "r.SSR.HalfResSceneColor": 0.0
+      },
+      "probe_name": "el-ssr (#13 ocean and #06 wet runway, on and off; the canopy in head shot d)",
+      "values_constrained": {
+        "ScreenSpaceReflectionIntensity": 100.0,
+        "ScreenSpaceReflectionQuality": 80.0,
+        "ScreenSpaceReflectionMaxRoughness": 0.6
+      }
+    },
+    "ssao": {
+      "switch": "-look-ssao",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "capture",
+      "off_means": "AmbientOcclusionIntensity 0 (no SSAO)",
+      "values": {
+        "AmbientOcclusionIntensity": 0.6,
+        "AmbientOcclusionRadius": 150.0,
+        "AmbientOcclusionQuality": 100.0,
+        "AmbientOcclusionPower": 2.0,
+        "AmbientOcclusionStaticFraction": 1.0,
+        "AmbientOcclusionMipBlend": 0.6,
+        "AmbientOcclusionTemporalBlendWeight": 0.1,
+        "AmbientOcclusionRadiusInWS": false
+      },
+      "cvars": {
+        "r.AmbientOcclusionMaxQuality": 100.0,
+        "r.AmbientOcclusionLevels": -1.0
+      },
+      "cvars_constrained": {
+        "r.AmbientOcclusionMaxQuality": 100.0,
+        "r.AmbientOcclusionLevels": -1.0
+      },
+      "probe_name": "el-ssao (head shot a under the wing and the intakes, 0.4 / 0.6 / 0.8 and off)"
+    },
+    "sun_shadows": {
+      "switch": "-look-sun-shadows",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "scene",
+      "off_means": "the earlier lanes' sun shadows stand (the scene's 6 cascades over 20 km, or the fallback's 8 at exponent 4), uniform PCF",
+      "values": {
+        "DynamicShadowCascades": 8,
+        "CascadeDistributionExponent": 3.5,
+        "DynamicShadowDistanceMovableLight_m": 6000.0,
+        "ShadowDistanceFadeoutFraction": 0.15,
+        "CascadeTransitionFraction": 0.1,
+        "r.Shadow.FilterMethod": 1
+      },
+      "cvars": {
+        "r.Shadow.MaxResolution": 4096.0,
+        "r.Shadow.MaxCSMResolution": 4096.0,
+        "r.Shadow.CSM.MaxCascades": 10.0,
+        "r.Shadow.MaxSoftKernelSize": 40.0
+      },
+      "cvars_constrained": {
+        "r.Shadow.MaxResolution": 4096.0,
+        "r.Shadow.MaxCSMResolution": 4096.0,
+        "r.Shadow.CSM.MaxCascades": 10.0,
+        "r.Shadow.MaxSoftKernelSize": 40.0
+      },
+      "probe_name": "el-csm (#01 fin shadow on the fuselage and the ridge shadow edge; PCF vs PCSS)"
+    },
+    "df_shadows": {
+      "switch": "-look-df-shadows",
+      "switch_words": [
+        "auto",
+        "on",
+        "off"
+      ],
+      "probe": true,
+      "stage": "scene",
+      "off_means": "bUseRayTracedDistanceFieldShadows false (shadows end at the cascades)",
+      "values": {
+        "bUseRayTracedDistanceFieldShadows": true,
+        "DistanceFieldShadowDistance_m": 30000.0
+      },
+      "cvars": {
+        "r.DistanceFieldShadowing": 1.0
+      },
+      "cvars_constrained": {
+        "r.DistanceFieldShadowing": 1.0
+      },
+      "probe_name": "el-dfs (#12 cockpit: the C172's shadow on the canyon floor beyond the cascades; frame time)",
+      "auto": "off on the constrained GPU, on elsewhere",
+      "auto_on_constrained": false
+    },
+    "contact_shadows": {
+      "switch": "-look-contact-shadows",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "scene",
+      "off_means": "the hero-lighting lane's 150 cm world-space contact shadows stand",
+      "values": {
+        "ContactShadowLength": 0.02,
+        "ContactShadowLengthInWS": false,
+        "ContactShadowCastingIntensity": 1.0,
+        "ContactShadowNonCastingIntensity": 0.0
+      },
+      "cvars": {
+        "r.ContactShadows": 1.0
+      },
+      "cvars_constrained": {
+        "r.ContactShadows": 1.0
+      },
+      "probe_name": "el-contact (head shot a pylons and intakes at 0.02 / 0.05; no halo on the tiles)"
+    },
+    "local_exposure": {
+      "switch": "-look-local-exposure",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "capture",
+      "off_means": "every scale 1 (the bilateral grid changes nothing)",
+      "values": {
+        "LocalExposureHighlightContrastScale": 1.0,
+        "LocalExposureShadowContrastScale": 0.75,
+        "LocalExposureDetailStrength": 1.1,
+        "LocalExposureBlurredLuminanceBlend": 0.6,
+        "LocalExposureMiddleGreyBias": 0.0
+      },
+      "cvars": {},
+      "cvars_constrained": {},
+      "probe_name": "el-local (#01 valley floor and snow in one frame; #09 belly; sky band held)"
+    },
+    "bloom": {
+      "switch": "-look-bloom",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "capture",
+      "off_means": "BloomIntensity 0 and the Bloom show flag off",
+      "values": {
+        "BloomMethod": "BM_SOG",
+        "BloomIntensity": 0.25,
+        "BloomThreshold": -1.0,
+        "BloomSizeScale": 4.0
+      },
+      "cvars": {},
+      "cvars_constrained": {},
+      "probe_name": "el-bloom (#05 backlit glints at 0.2 / 0.4 and off)"
+    },
+    "bloom_fft": {
+      "switch": "-look-bloom-fft",
+      "switch_words": [
+        "auto",
+        "on",
+        "off"
+      ],
+      "probe": true,
+      "stage": "capture",
+      "off_means": "the bloom row's BM_SOG",
+      "values": {
+        "BloomMethod": "BM_FFT",
+        "BloomConvolutionSize": 1.0,
+        "BloomConvolutionScatterDispersion": 1.0,
+        "BloomConvolutionPreFilterMin": 7.0,
+        "BloomConvolutionPreFilterMax": 15000.0,
+        "BloomConvolutionPreFilterMult": 15.0,
+        "BloomConvolutionBufferScale": 0.133
+      },
+      "cvars": {},
+      "cvars_constrained": {},
+      "probe_name": "el-fft (#05 backlit: Gaussian vs FFT, and the frame time on the laptop)",
+      "auto": "off on the constrained GPU, on elsewhere",
+      "auto_on_constrained": false
+    },
+    "lens_flare": {
+      "switch": "-look-lens-flare",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "capture",
+      "off_means": "LensFlareIntensity 0 and the LensFlares show flag off",
+      "values": {
+        "LensFlareIntensity": 0.2,
+        "LensFlareThreshold": 12.0,
+        "LensFlareBokehSize": 3.0,
+        "sun_in_frame_margin_deg": 12.0
+      },
+      "cvars": {
+        "r.LensFlareQuality": 2.0
+      },
+      "cvars_constrained": {
+        "r.LensFlareQuality": 2.0
+      },
+      "probe_name": "el-flare (#05 backlit on and off; #04 must show none)"
+    },
+    "film_grain": {
+      "switch": "-look-film-grain",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "capture",
+      "off_means": "FilmGrainIntensity 0 and the Grain show flag off",
+      "values": {
+        "grain_scale": 1.0,
+        "FilmGrainIntensityShadows": 1.0,
+        "FilmGrainIntensityMidtones": 1.0,
+        "FilmGrainIntensityHighlights": 0.7,
+        "FilmGrainShadowsMax": 0.09,
+        "FilmGrainHighlightsMin": 0.5,
+        "FilmGrainHighlightsMax": 1.0,
+        "FilmGrainTexelSize": 1.0,
+        "GrainStrength": 0.03,
+        "stock_scale": 1.0,
+        "FilmGrainIntensity": 0.03
+      },
+      "cvars": {
+        "r.FilmGrain": 1.0
+      },
+      "cvars_constrained": {
+        "r.FilmGrain": 1.0
+      },
+      "probe_name": "el-grain (#01 and #09 at 1x and 2x GRAIN_STRENGTH, against a scanned negative)"
+    },
+    "volumetric_fog": {
+      "switch": "-look-volumetric-fog",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "scene",
+      "off_means": "VolumetricFogAlbedo white (the engine default every earlier round drew)",
+      "values": {
+        "VolumetricFogAlbedo_srgb8": [
+          235,
+          235,
+          235
+        ]
+      },
+      "cvars": {
+        "r.VolumetricFog": 1.0
+      },
+      "cvars_constrained": {
+        "r.VolumetricFog": 1.0
+      },
+      "probe_name": "el-vfog (#06 rain haze and #05 dust at the albedo and at white)"
+    },
+    "fog_grid": {
+      "switch": "-look-fog-grid",
+      "switch_words": [
+        "auto",
+        "on",
+        "off"
+      ],
+      "probe": true,
+      "stage": "scene",
+      "off_means": "the engine's coarse grid (r.VolumetricFog.GridPixelSize 8, GridSizeZ 64)",
+      "values": {},
+      "cvars": {
+        "r.VolumetricFog.GridPixelSize": 4.0,
+        "r.VolumetricFog.GridSizeZ": 128.0
+      },
+      "cvars_constrained": {
+        "r.VolumetricFog.GridPixelSize": 4.0,
+        "r.VolumetricFog.GridSizeZ": 128.0
+      },
+      "probe_name": "el-fog-grid (#09 shaft banding fine vs coarse; frame time on the laptop)",
+      "auto": "on on every GPU (the fine grid every passing round rendered with)",
+      "auto_on_constrained": true,
+      "cvars_off": {
+        "r.VolumetricFog.GridPixelSize": 8.0,
+        "r.VolumetricFog.GridSizeZ": 64.0
+      }
+    },
+    "tsr": {
+      "switch": "-look-tsr",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "scene",
+      "off_means": "the commandlet's own warm-up (16) and still samples (8)",
+      "values": {
+        "warmup_captures": 24,
+        "still_samples": 16
+      },
+      "cvars": {},
+      "cvars_constrained": {},
+      "probe_name": "el-tsr (head shot a edge-aliasing number at 8 and 16 samples; seconds per still)",
+      "values_constrained": {
+        "warmup_captures": 20,
+        "still_samples": 12
+      }
+    },
+    "filmback": {
+      "switch": "-look-filmback",
+      "switch_words": [
+        "on",
+        "off"
+      ],
+      "probe": false,
+      "stage": "capture",
+      "off_means": "the camera row's sensor width alone (the pre-round-5 record)",
+      "values": {
+        "sensor_width_mm": 36.0,
+        "sensor_height_mm": 24.0,
+        "DepthOfFieldSqueezeFactor": 1.0
+      },
+      "cvars": {},
+      "cvars_constrained": {},
+      "probe_name": "none: a record of the sensor, no pixel changes"
+    },
+    "preset_basis": "world preset clear (core/scene/world_beauty.py select_preset)"
+  },
+  "pixel_effects": {
+    "lens_distortion": {
+      "on": false,
+      "effect": "moves",
+      "note": "not implemented"
+    },
+    "chromatic_aberration": {
+      "on": false,
+      "effect": "moves",
+      "SceneFringeIntensity": 0.0
+    },
+    "motion_blur": {
+      "on": true,
+      "effect": "softens",
+      "max_smear_px": 19.2,
+      "stills": "off (SHUTTER_POLICY: the host turns it off on a still)",
+      "note": "clips only: smears along screen velocity over one delivered frame, at most MotionBlurMax % of the width; the chase aircraft moves little on screen, the ground most; label captures render with motion blur off"
+    },
+    "depth_of_field": {
+      "on": false,
+      "effect": "softens",
+      "note": "focused at the aircraft; the background softens"
+    },
+    "bloom": {
+      "on": true,
+      "effect": "softens",
+      "BloomIntensity": 0.25,
+      "note": "screen-space glow may lighten pixels just outside the mask; ENGINE_LOOK bloom (per world preset; bloom_fft is a probe)"
+    },
+    "lens_flare": {
+      "on": true,
+      "effect": "none",
+      "LensFlareIntensity": 0.2,
+      "note": "image-based ghosts from bright pixels; no geometry; drawn only with the sun in or just outside the frame (ENGINE_LOOK lens_flare)"
+    },
+    "vignette": {
+      "on": false,
+      "effect": "none"
+    },
+    "film_grain": {
+      "on": true,
+      "effect": "none",
+      "FilmGrainIntensity": 0.03,
+      "note": "ENGINE_LOOK film_grain: GRAIN_STRENGTH x the preset's and the stock's scales"
+    },
+    "pixel_moving": []
+  },
+  "uncalibrated": [
+    "EV100_BANDS",
+    "GRADES",
+    "GOLDEN_HOUR_BELOW_DEG",
+    "LENSES",
+    "LOCAL_EXPOSURE",
+    "REFLECTIONS",
+    "EXPOSURE_METER_TARGET_P90",
+    "TONEMAP_HUE",
+    "RELIT_SUN_CLOSE_SHARE",
+    "ENGINE_LOOK",
+    "GRAIN_STRENGTH",
+    "FILM_STOCKS"
+  ],
+  "note": "VISUAL ONLY, beauty quality only; every UNCALIBRATED value is set by a probe render on the render machine (docs/visual/PROBE_LOG.md)"
+}
