@@ -154,7 +154,8 @@ def test_the_material_samples_the_same_texture_at_the_mip_bias_and_feeds_the_gra
     assert _script_literal("WORLD_TILES_DELIGHT_SCALARS") == {
         "DelightMipBias": td.DELIGHT_MIP_BIAS, "DelightRatioKnee": td.DELIGHT_RATIO_KNEE}
     create = SCRIPT[SCRIPT.index("def create_world_tiles_beauty"):SCRIPT.index("# == END WORLD LANE")]
-    assert create.count("texture_parameter(material, lib, CESIUM_BASE_COLOUR_TEXTURE") == 2
+    # the base colour, the de-light's coarse mip, lane B's unsharp-mask blur
+    assert create.count("texture_parameter(material, lib, CESIUM_BASE_COLOUR_TEXTURE") == 3
     assert "TMVM_MIP_BIAS" in create
     # MaterialEditingLibrary finds a pin by its shortened graph name: MipBias -> Bias
     assert 'low, "Bias")' in create and 'low, "MipBias")' not in create

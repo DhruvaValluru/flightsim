@@ -996,6 +996,14 @@ WORLD_MPC_SCALARS: Dict[str, float] = {
     # tiles-delight (core/scene/tiles_delight.py): 0 is a pass-through.
     "DelightAmount": 0.0,
     "DelightBlueGate": 4.0,
+    # lane B terrain detail (2026-11-11): the engine origin's orthometric
+    # height, so tiles_detail_*.hlsl's snowline is an altitude. Set by
+    # FlightSimClouds.cpp from the tiles' origin; Known 0 = unset (no snowline).
+    "GroundAltitudeM": 0.0,
+    "GroundAltitudeKnown": 0.0,
+    # lane B: the detail's share by the card's surface (0 over a city: the
+    # aerial rock and soil maps are not facades or roofs; 1 elsewhere).
+    "TerrainDetailScale": 1.0,
 }
 #: How much of the wetness becomes standing water on flat ground. UNCALIBRATED.
 PUDDLE_SHARE_OF_WETNESS = 0.5

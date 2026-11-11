@@ -3010,7 +3010,8 @@ def create_ice_overlay():
 
 #: Created through _world_beauty_material (tests/test_ue_materials.py pins it).
 WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter",
-                          "M_FlightSimDistantClouds")   # visual round 5, L3: the distant sheet
+                          "M_FlightSimDistantClouds",   # visual round 5, L3: the distant sheet
+                          "M_FlightSimOceanBeauty")     # lane B (2026-11-11): the beauty sea cap
 WORLD_SHADER_DIR = "assets/shaders/world"
 #: The collection the tiles' material reads and the render sets
 #: (world_beauty.WORLD_MPC / WORLD_MPC_SCALARS: names and defaults pinned equal).
@@ -3026,6 +3027,13 @@ WORLD_COLLECTION_SCALARS = {
     # tiles-delight (core/scene/tiles_delight.py): 0 is a pass-through.
     "DelightAmount": 0.0,
     "DelightBlueGate": 4.0,
+    # lane B terrain detail: the engine origin's orthometric height, so the
+    # snowline is an altitude (FlightSimClouds.cpp sets both; Known 0 = unset).
+    "GroundAltitudeM": 0.0,
+    "GroundAltitudeKnown": 0.0,
+    # lane B: the detail's share by the card's surface (0 over a city: the
+    # aerial rock and soil maps are not facades or roofs; 1 elsewhere).
+    "TerrainDetailScale": 1.0,
 }
 #: M_FlightSimCloudLayers' scalar parameters (FlightSimClouds.cpp sets each by
 #: name) with the default a material has before the render sets them, and its
@@ -3086,6 +3094,52 @@ WORLD_TILES_INPUTS = {
 #: the render does not set them), at tiles_delight.DELIGHT_MIP_BIAS and
 #: DELIGHT_RATIO_KNEE. UNCALIBRATED.
 WORLD_TILES_DELIGHT_SCALARS = {"DelightMipBias": 5.0, "DelightRatioKnee": 0.6}
+# -- lane B (2026-11-11): non-urban terrain detail and the beauty ocean -- begin --
+#: The CC0 detail maps (assets/terrain_detail/PIN.json: Poly Haven aerial
+#: textures, THIRD_PARTY_VISUAL.md). Each role's albedo ("<Role>D", sRGB) and
+#: OpenGL normal ("<Role>N", TC_Normalmap) is imported once as
+#: T_TerrainDetail_<Role>_{D,N}, its source sha256 checked against the pin
+#: first and stamped on the asset (TERRAIN_DETAIL_SHA_TAG): a changed pin is
+#: imported again, a file that does not hash to its pin is refused by name.
+TERRAIN_DETAIL_PIN = "assets/terrain_detail/PIN.json"
+TERRAIN_DETAIL_ROLES = ("rock", "scree", "snow", "grass", "sand", "soil")
+TERRAIN_DETAIL_SHA_TAG = "FlightSimSourceSha256"
+#: Building the material without the detail (the tiles' own texture, as
+#: before lane B): FLIGHTSIM_TERRAIN_DETAIL=off when the material script runs.
+#: The way back if a render machine's compiler refuses a detail node.
+TERRAIN_DETAIL_ENV = "FLIGHTSIM_TERRAIN_DETAIL"
+#: Each detail shader's Custom inputs, in order (the texture objects last).
+WORLD_TILES_DETAIL_INPUTS = {
+    "tiles_detail_surface": ("Albedo", "AlbedoMid", "WorldPos", "CameraPos", "NormalWS", "GroundAltitudeM",
+                             "GroundAltitudeKnown", "TerrainDetailScale", "DetailAmount", "SharpenAmount",
+                             "CanopyAmount",
+                             "SnowlineM", "FarFadeStartM", "FarFadeEndM",
+                             "RockD", "ScreeD", "SnowD", "GrassD", "SandD", "SoilD"),
+    "tiles_detail_normal": ("Albedo", "AlbedoLow", "WorldPos", "CameraPos", "NormalWS", "GroundAltitudeM",
+                            "GroundAltitudeKnown", "TerrainDetailScale", "DetailAmount", "NormalAmount",
+                            "BumpAmount",
+                            "CanopyAmount", "SnowlineM", "FarFadeStartM", "FarFadeEndM",
+                            "RockN", "ScreeN", "SnowN", "GrassN", "SandN", "SoilN"),
+}
+#: The detail's own material scalars (not the collection's: no render sets
+#: them; a probe tunes them on a material instance or here). UNCALIBRATED: set
+#: by probe render on the render machine (PROBE_LOG.md ## lane-B terrain detail).
+#: SharpenMipBias is the unsharp mask's blur (the tiles' texture that many
+#: mips coarser); the snowline sits above Yosemite's domes (2700 m) and below
+#: the Matterhorn's and Fuji's snowfields.
+WORLD_TILES_DETAIL_SCALARS = {"DetailAmount": 0.45, "SharpenAmount": 0.6, "SharpenMipBias": 1.5,
+                              "NormalAmount": 0.7, "BumpAmount": 0.6, "CanopyAmount": 0.7,
+                              "SnowlineM": 2700.0, "FarFadeStartM": 25000.0, "FarFadeEndM": 60000.0}
+#: M_FlightSimOceanBeauty (the beauty sea cap, FlightSimGoogleTiles.cpp
+#: ApplyBeautyGround): each ocean shader's Custom inputs, in order, the
+#: material's scalars (a 7 m/s trade-wind sea, UNCALIBRATED) and the
+#: generated wave normal (assets/terrain_detail/PIN.json "ocean").
+WORLD_OCEAN_INPUTS = {name: ("WorldPos", "NormalWS", "TimeS", "WindSpeedMS", "WindDirX", "WindDirY", "OceanN")
+                      for name in ("ocean_normal", "ocean_roughness", "ocean_colour")}
+WORLD_OCEAN_SCALARS = {"WindSpeedMS": 7.0, "WindDirX": 1.0, "WindDirY": 0.3}
+#: Water's F0 0.02 as the engine's Specular (F0 = 0.08 x Specular).
+WORLD_OCEAN_SPECULAR = 0.25
+# -- lane B -- end --------------------------------------------------------------------
 #: M_FlightSimScatter (the ground scatter's master, world_beauty.SCATTER_MATERIAL):
 #: the imported glTF's maps as parameters, the tiles' Wetness and Saturation from
 #: the collection. Each scatter shader's Custom inputs, in order, and the
@@ -3159,9 +3213,10 @@ def world_stamp(material, name):
 #: so no reference breaks and no redirect is registered (the storm lane's
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
-WORLD_GENERATIONS = {"MPC_FlightSimWorld": "2", "M_FlightSimTilesBeauty": "2",
+WORLD_GENERATIONS = {"MPC_FlightSimWorld": "3", "M_FlightSimTilesBeauty": "3",   # 3: lane B terrain detail
                      "M_FlightSimCloudLayers": "4", "M_FlightSimScatter": "1",  # clouds 4: round-7 weather-field shader
-                     "M_FlightSimDistantClouds": "2"}   # distant 2: round-7 weather-field shared noise
+                     "M_FlightSimDistantClouds": "2",   # distant 2: round-7 weather-field shared noise
+                     "M_FlightSimOceanBeauty": "1"}     # lane B: the beauty sea
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
 
@@ -3384,6 +3439,9 @@ def create_world_tiles_beauty():
                                      unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                                      {name: common[name] for name in WORLD_TILES_INPUTS["tiles_delight"]},
                                      -1200, -400), "")
+    # lane B: the terrain detail between the de-light and the grade (the
+    # detailed albedo replaces Albedo; the detailed normal feeds tiles_normal).
+    detail_normal = world_tiles_detail(material, lib, common, uv, factor)
     outputs = {"tiles_base_colour": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                                      unreal.MaterialProperty.MP_BASE_COLOR),
                "tiles_normal": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,
@@ -3391,11 +3449,161 @@ def create_world_tiles_beauty():
                "tiles_roughness": (unreal.CustomMaterialOutputType.CMOT_FLOAT1,
                                    unreal.MaterialProperty.MP_ROUGHNESS)}
     for row, (shader, (output_type, prop)) in enumerate(outputs.items()):
-        node = world_custom(material, lib, shader, output_type,
-                            {name: common[name] for name in WORLD_TILES_INPUTS[shader]},
-                            -900, -300 + 400 * row)
+        pins = {name: common[name] for name in WORLD_TILES_INPUTS[shader]}
+        if shader == "tiles_normal" and detail_normal is not None:
+            pins["NormalWS"] = (detail_normal, "")
+        node = world_custom(material, lib, shader, output_type, pins, -900, -300 + 400 * row)
         lib.connect_material_property(node, "", prop)
     finish(material, "M_FlightSimTilesBeauty")
+    if detail_normal is None:
+        # Stamped apart, so the next run with the detail on builds it again.
+        unreal.EditorAssetLibrary.set_metadata_tag(
+            material, WORLD_GENERATION_TAG, f"{WORLD_GENERATIONS['M_FlightSimTilesBeauty']}-no-detail")
+        unreal.EditorAssetLibrary.save_asset(f"{PATH}/M_FlightSimTilesBeauty")
+
+
+def terrain_detail_pin():
+    """assets/terrain_detail/PIN.json, parsed; None when the checkout lacks it."""
+    import json
+    source = _repo_file(TERRAIN_DETAIL_PIN)
+    return None if source is None else json.loads(source.read_text(encoding="utf-8"))
+
+
+def pinned_texture(row, name, srgb, normal_map):
+    """/Game/FlightSim/<name> from one PIN.json file row ({"path", "sha256"}):
+    the committed file hashed against its pin (a mismatch is a RuntimeError,
+    never an import), imported once and stamped with the sha256
+    (TERRAIN_DETAIL_SHA_TAG); an asset stamped with another digest is
+    imported again over itself."""
+    import hashlib
+    source = _repo_file(row["path"])
+    if source is None:
+        raise RuntimeError(f"{row['path']} is not in this checkout (git lfs? a partial clone?)")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    if digest != row["sha256"]:
+        raise RuntimeError(f"{row['path']} hashes {digest}, its pin is {row['sha256']} "
+                           f"(a CRLF checkout? assets/terrain_detail/** is -text in .gitattributes)")
+    full = f"{PATH}/{name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(full):
+        texture = unreal.load_asset(full)
+        if str(unreal.EditorAssetLibrary.get_metadata_tag(texture, TERRAIN_DETAIL_SHA_TAG)) == digest:
+            return texture
+    texture = import_texture(source, name, srgb, normal_map, False)
+    unreal.EditorAssetLibrary.set_metadata_tag(texture, TERRAIN_DETAIL_SHA_TAG, digest)
+    unreal.EditorAssetLibrary.save_asset(full)
+    print(f"TEXTURE-IMPORTED: {full} ({row['path']}, sha256 {digest[:12]})")
+    return texture
+
+
+def texture_object(material, lib, texture, sampler, x, y):
+    """A TextureObject node (a Custom node's Texture2D input) of a fixed asset."""
+    node = lib.create_material_expression(material, unreal.MaterialExpressionTextureObject, x, y)
+    node.set_editor_property("texture", texture)
+    node.set_editor_property("sampler_type", sampler)
+    return node
+
+
+def world_tiles_detail(material, lib, common, uv, factor):
+    """Lane B: the terrain detail nodes of M_FlightSimTilesBeauty
+    (tiles_detail_surface.hlsl, tiles_detail_normal.hlsl). The detailed
+    albedo replaces common["Albedo"] (so the grade, the wetness and the
+    puddles of tiles_base_colour act on it); the detailed world normal is
+    returned for tiles_normal. None (and nothing added) when
+    FLIGHTSIM_TERRAIN_DETAIL=off or the checkout has no PIN.json: the
+    tiles then look as before lane B, said so. A pinned file that does not
+    hash to its pin is a RuntimeError (the material is reported failed by
+    name, never built with a wrong texture)."""
+    import os
+    if os.environ.get(TERRAIN_DETAIL_ENV, "").strip().lower() == "off":
+        print(f"MATERIAL-NOTE: M_FlightSimTilesBeauty built without the terrain detail ({TERRAIN_DETAIL_ENV}=off)")
+        return None
+    pin = terrain_detail_pin()
+    if pin is None:
+        print(f"MATERIAL-NOTE: {TERRAIN_DETAIL_PIN} is not on this checkout; M_FlightSimTilesBeauty has no "
+              f"terrain detail")
+        return None
+    # The textures first: a file off its pin leaves the material as before
+    # lane B (said so by name), never a tiles material that fails to build.
+    textures = {}
+    try:
+        for role in TERRAIN_DETAIL_ROLES:
+            files = pin["roles"][role]["files"]
+            stem = f"T_TerrainDetail_{role.capitalize()}"
+            textures[role] = (pinned_texture(files["albedo"], f"{stem}_D", True, False),
+                              pinned_texture(files["normal_gl"], f"{stem}_N", False, True))
+    except (RuntimeError, KeyError) as error:
+        print(f"MATERIAL-NOTE: M_FlightSimTilesBeauty built without the terrain detail: {error}")
+        return None
+    pins = dict(common)
+    for i, (name, default) in enumerate(WORLD_TILES_DETAIL_SCALARS.items()):
+        pins[name] = (scalar(material, lib, name, default, -2600, -1200 - 110 * i), "")
+    # The unsharp mask's blur: the tiles' texture SharpenMipBias mips coarser.
+    mid = texture_parameter(material, lib, CESIUM_BASE_COLOUR_TEXTURE, False, -1800, -1100,
+                            default=unreal.load_asset(
+                                "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"))
+    lib.connect_material_expressions(uv, "", mid, "UVs")
+    mid.set_editor_property("mip_value_mode", unreal.TextureMipValueMode.TMVM_MIP_BIAS)
+    lib.connect_material_expressions(pins["SharpenMipBias"][0], "", mid, "Bias")
+    pins["AlbedoMid"] = (binary(material, lib, unreal.MaterialExpressionMultiply,
+                                mask(material, lib, mid, "rgb", -1550, -1100),
+                                mask(material, lib, factor, "rgb", -1550, -100), -1400, -1000), "")
+    for i, role in enumerate(TERRAIN_DETAIL_ROLES):
+        albedo, normal = textures[role]
+        pins[f"{role.capitalize()}D"] = (texture_object(
+            material, lib, albedo, unreal.MaterialSamplerType.SAMPLERTYPE_COLOR, -2300, -2400 + 220 * i), "")
+        pins[f"{role.capitalize()}N"] = (texture_object(
+            material, lib, normal, unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL, -2100, -2400 + 220 * i), "")
+    surface = world_custom(material, lib, "tiles_detail_surface", unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                           {name: pins[name] for name in WORLD_TILES_DETAIL_INPUTS["tiles_detail_surface"]},
+                           -1050, -900)
+    normal = world_custom(material, lib, "tiles_detail_normal", unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                          {name: pins[name] for name in WORLD_TILES_DETAIL_INPUTS["tiles_detail_normal"]},
+                          -1050, -1300)
+    common["Albedo"] = (surface, "")
+    print("MATERIAL-NOTE: M_FlightSimTilesBeauty carries the lane B terrain detail (6 CC0 roles, "
+          "assets/terrain_detail/PIN.json)")
+    return normal
+
+
+def create_world_ocean_beauty():
+    """M_FlightSimOceanBeauty: the beauty sea cap's water (FlightSimGoogleTiles.cpp
+    ApplyBeautyGround loads it before M_Ground_Ocean, which stays the flat
+    scene's measure ground, untouched). The generated Phillips wave normal in
+    three drifting octaves (ocean_normal.hlsl, world-space: the tangent-space
+    switch is off), the unresolved Cox-Munk slope variance as roughness
+    (ocean_roughness.hlsl), the deep sea's body colour and Monahan's whitecaps
+    (ocean_colour.hlsl), water's specular. No WPO: the sea's geometry is the
+    cap's."""
+    material = _world_beauty_material("M_FlightSimOceanBeauty")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    material.set_editor_property("tangent_space_normal", False)
+    material.set_editor_property("two_sided", False)
+    pin = terrain_detail_pin()
+    if pin is None:
+        raise RuntimeError(f"{TERRAIN_DETAIL_PIN} is not in this checkout: the ocean's wave normal is pinned there")
+    wave = pinned_texture(pin["ocean"]["files"]["normal_gl"], "T_OceanWaveNormal", False, True)
+    pins = {"WorldPos": (lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition,
+                                                         -1800, -300), ""),
+            "NormalWS": (lib.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS,
+                                                         -1800, -200), ""),
+            "TimeS": (lib.create_material_expression(material, unreal.MaterialExpressionTime, -1800, -100), ""),
+            "OceanN": (texture_object(material, lib, wave, unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL,
+                                      -1800, 500), "")}
+    for i, (name, default) in enumerate(WORLD_OCEAN_SCALARS.items()):
+        pins[name] = (scalar(material, lib, name, default, -1800, 50 + 110 * i), "")
+    outputs = {"ocean_colour": (unreal.CustomMaterialOutputType.CMOT_FLOAT3, unreal.MaterialProperty.MP_BASE_COLOR),
+               "ocean_normal": (unreal.CustomMaterialOutputType.CMOT_FLOAT3, unreal.MaterialProperty.MP_NORMAL),
+               "ocean_roughness": (unreal.CustomMaterialOutputType.CMOT_FLOAT1,
+                                   unreal.MaterialProperty.MP_ROUGHNESS)}
+    for row, (shader, (output_type, prop)) in enumerate(outputs.items()):
+        node = world_custom(material, lib, shader, output_type,
+                            {name: pins[name] for name in WORLD_OCEAN_INPUTS[shader]}, -900, -300 + 400 * row)
+        lib.connect_material_property(node, "", prop)
+    lib.connect_material_property(constant(material, lib, WORLD_OCEAN_SPECULAR, -900, 900), "",
+                                  unreal.MaterialProperty.MP_SPECULAR)
+    finish(material, "M_FlightSimOceanBeauty")
 
 
 def create_world_scatter():
@@ -3653,6 +3861,7 @@ create_windshield_rain()
 create_world_collection()
 create_world_cloud_layers()
 create_world_tiles_beauty()
+create_world_ocean_beauty()     # lane B: the beauty sea cap's water
 create_world_scatter()
 create_world_distant_clouds()   # visual round 5, L3: the distant sheet
 create_sky_hdri()               # visual round 5, L3: the sky HDRI probe (FLIGHTSIM_SKY_HDRI only)

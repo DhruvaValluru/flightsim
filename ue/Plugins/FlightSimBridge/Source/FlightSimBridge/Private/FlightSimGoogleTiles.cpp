@@ -469,6 +469,33 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyLook(UMaterialInterfac
 	{
 		Out->SetStringField(TEXT("generate_smooth_normals"), TEXT("not found: no bool GenerateSmoothNormals"));
 	}
+	// Lane B (2026-11-11): the beauty's finer tile selection. The non-urban
+	// photogrammetry is the coarse LODs smeared over a slope; one step finer
+	// is about 1.8x the tiles (UNCALIBRATED on the iGPU's shared memory: the
+	// load wait and the frame's memory are in render.json). A stated
+	// FLIGHTSIM_GOOGLE_TILES_SSE wins (the measure's setting, unchanged).
+	{
+		const bool bStated = !FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_GOOGLE_TILES_SSE"))
+			.TrimStartAndEnd().IsEmpty();
+		const double BeautySse = FMath::Clamp(EnvNumber(TEXT("FLIGHTSIM_GOOGLE_TILES_BEAUTY_SSE"), 6.0), 1.0, 64.0);
+		TSharedPtr<FJsonObject> Sse = MakeShared<FJsonObject>();
+		Sse->SetNumberField(TEXT("before"), MaximumScreenSpaceError);
+		if (!bStated && BeautySse < MaximumScreenSpaceError)
+		{
+			MaximumScreenSpaceError = BeautySse;
+			Tiles->SetMaximumScreenSpaceError(MaximumScreenSpaceError);
+			bChanged = true;
+			Sse->SetStringField(TEXT("applied"), TEXT("the beauty's (FLIGHTSIM_GOOGLE_TILES_BEAUTY_SSE, default 6)"));
+		}
+		else
+		{
+			Sse->SetStringField(TEXT("applied"), bStated
+				? TEXT("nothing: FLIGHTSIM_GOOGLE_TILES_SSE states the error")
+				: TEXT("nothing: the beauty's is not finer"));
+		}
+		Sse->SetNumberField(TEXT("after"), MaximumScreenSpaceError);
+		Out->SetObjectField(TEXT("maximum_screen_space_error"), Sse);
+	}
 	if (bChanged)
 	{
 		// Rebuilds the loaded tiles with the new settings; every frame's
@@ -661,9 +688,17 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 	TSharedPtr<FJsonObject> Sea = MakeShared<FJsonObject>();
 	Out->SetObjectField(TEXT("sea"), Sea);
 	Sea->SetNumberField(TEXT("radius_m"), SeaRadiusM);
-	UMaterialInterface* OceanBase = SeaRadiusM > 0.0
-		? LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/FlightSim/M_Ground_Ocean.M_Ground_Ocean"))
-		: nullptr;
+	// Lane B (2026-11-11): the beauty sea (M_FlightSimOceanBeauty: Phillips
+	// waves, Cox-Munk glitter, whitecaps); M_Ground_Ocean, the flat scene's
+	// measure ground, only when it has not been built.
+	const TCHAR* const OceanBeautyPath = TEXT("/Game/FlightSim/M_FlightSimOceanBeauty.M_FlightSimOceanBeauty");
+	const TCHAR* const OceanGroundPath = TEXT("/Game/FlightSim/M_Ground_Ocean.M_Ground_Ocean");
+	UMaterialInterface* OceanBase = SeaRadiusM > 0.0 ? LoadObject<UMaterialInterface>(nullptr, OceanBeautyPath) : nullptr;
+	const bool bOceanBeauty = OceanBase != nullptr;
+	if (SeaRadiusM > 0.0 && OceanBase == nullptr)
+	{
+		OceanBase = LoadObject<UMaterialInterface>(nullptr, OceanGroundPath);
+	}
 	if (SeaRadiusM <= 0.0)
 	{
 		Sea->SetStringField(TEXT("drawn"), TEXT("nothing: no -beauty-sea-radius-m (not an open-ocean beauty render)"));
@@ -671,7 +706,7 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 	else if (OceanBase == nullptr)
 	{
 		Sea->SetStringField(TEXT("drawn"),
-			TEXT("nothing: /Game/FlightSim/M_Ground_Ocean did not load (run scripts/ue_create_materials.py)"));
+			TEXT("nothing: neither M_FlightSimOceanBeauty nor M_Ground_Ocean loaded (run scripts/ue_create_materials.py)"));
 	}
 	else
 	{
@@ -746,19 +781,26 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 		// only, so the label, depth and mask passes never draw it.
 		BeautyOnlyActors.Add(SeaActor);
 		Sea->SetStringField(TEXT("drawn"),
-			TEXT("a spherical cap of M_Ground_Ocean at sea level over the tiles' ocean (beauty-only actor)"));
-		Sea->SetStringField(TEXT("material"), TEXT("/Game/FlightSim/M_Ground_Ocean"));
+			TEXT("a spherical cap of the sea material at sea level over the tiles' ocean (beauty-only actor)"));
+		Sea->SetStringField(TEXT("material"), OceanBase->GetPathName());
+		Sea->SetStringField(TEXT("material_basis"), bOceanBeauty
+			? TEXT("M_FlightSimOceanBeauty (lane B): Phillips-spectrum wave normal in three drifting octaves, the "
+			       "unresolved Cox-Munk slope variance as roughness (sun glitter, Fresnel toward the horizon), deep-sea "
+			       "body colour, Monahan whitecaps at WindSpeedMS 7 (UNCALIBRATED)")
+			: TEXT("M_Ground_Ocean: M_FlightSimOceanBeauty did not load (run scripts/ue_create_materials.py)"));
 		Sea->SetNumberField(TEXT("lift_m"), SeaLiftM);
 		Sea->SetNumberField(TEXT("earth_radius_m"), EarthRadiusM);
 		Sea->SetNumberField(TEXT("rings"), SeaRings);
 		Sea->SetNumberField(TEXT("segments"), SeaSegments);
 		Sea->SetNumberField(TEXT("edge_drop_m"),
 			EarthRadiusM - FMath::Sqrt(EarthRadiusM * EarthRadiusM - RadiusM * RadiusM));
-		Sea->SetStringField(TEXT("reflection"),
-			TEXT("the material's own (roughness 0.04, specular 0.5): screen-space reflections and the sky "
-			     "light, both drawn on D3D11 / SM5 without Lumen"));
+		Sea->SetStringField(TEXT("reflection"), bOceanBeauty
+			? TEXT("the material's own (roughness from the unresolved wave slopes, specular 0.25 = water's F0 0.02): "
+			       "screen-space reflections and the sky light, both drawn on D3D11 / SM5 without Lumen")
+			: TEXT("the material's own (roughness 0.04, specular 0.5): screen-space reflections and the sky "
+			       "light, both drawn on D3D11 / SM5 without Lumen"));
 		Sea->SetStringField(TEXT("not_claimed"),
-			TEXT("the sea state of the card (the waves are the material's two stated swells), tides, foam"));
+			TEXT("the sea state of the card (the waves are the material's stated 7 m/s sea), tides"));
 	}
 	return Out;
 }
