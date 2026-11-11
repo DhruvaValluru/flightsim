@@ -205,6 +205,11 @@ SETTINGS: Tuple[Setting, ...] = (
             ("core/scene/sky_hdri.py:81",),
             "Where the pinned sky HDRIs are downloaded and prepared (default %LOCALAPPDATA%\\flightsim\\hdri, "
             "else ~/.cache/flightsim/hdri); never committed."),
+    Setting("batch_min_free_mb", "FLIGHTSIM_BATCH_MIN_FREE_MB", "dev-only", "4096",
+            ("scripts/run_test_scenarios.py:642",),
+            "The free memory (MB) the scenario batch waits for before each scene (default 4096; "
+            "--min-free-mb is the flag); a batch that cannot get it within --memory-wait refuses "
+            "by name (batch.low_memory). Render-machine batches only, never the web path."),
     Setting("beauty_post", "FLIGHTSIM_BEAUTY_POST", "dev-only", None,
             ("scripts/beauty_post.py:79", "webapp/runs.py:3616", "scripts/visual_round.py:150"),
             "Round 5 (L5): the post-render beauty pipeline (scripts/beauty_post.py: OIDN denoise on noisy "
