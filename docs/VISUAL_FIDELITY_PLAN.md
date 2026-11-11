@@ -523,7 +523,8 @@ J-11 at golden hour over real terrain); head shots round 5 -> 44: 4 better, 0 sa
 (p3-mac's review, phase-2-final `e4aae905` `docs/visual/final/REVIEW.md`). Judged good: #1, #3, #4,
 #6, #9 (domed cell and shaft), #11 (Matterhorn), #15 (dark storm). The aircraft paint default after
 the sweep is the flat master (`1e5ba438`, look instances on for glass and rubber; round 46 checks
-it on #1 #4 #8 #12).
+it: round 46, vis-windows `6692c1d6`: #12's canopy clear again (black pixels 86.9 % -> 13.1 %), the
+exterior aircraft identical to materials-off: A-4 #4 167/153/143, C172 #8 90/83/93 in their masks).
 
 **Labels (verify on every round-44 run): 0 of 14 pass.** Every beauty run fails
 `look.beauty_not_label_aligned` (the beauty-only actors' cover over the subject is modelled, never
@@ -531,7 +532,8 @@ measured, so the clause cannot pass) -- **no beauty frame is certified label-ali
 measurement exists.** Also failing: `annotation.component_box` on #1 and #2 (`store_sta2` 3.4 px off
 its hull; manifest, CG and pose ruled out; `hull_vs_pixels_px` diagnostic recorded per component),
 `annotation.tight_box_null` on #10 and #13, `annotation.mask_offset` and `annotation.depth_range` on
-#12 (the cockpit; round 46). Full text `docs/visual/final/verify_round44.txt`. The labels pair with
+#12 (the cockpit camera sits inside the aircraft's hull, so hull corners and the tail project behind
+it: a limit of those two checks for an interior camera, not a pixel fault; still failing in round 46). Full text `docs/visual/final/verify_round44.txt`. The labels pair with
 the BEAUTY frame on the web-app path (`-labels` in the same commandlet run as `-quality=beauty`); the
 CLI `flightsim capture` renders measure frames only.
 
