@@ -3442,7 +3442,7 @@ def world_stamp(material, name):
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "3", "M_FlightSimTilesBeauty": "3",   # 3: lane B terrain detail
                      "M_FlightSimCloudLayers": "5", "M_FlightSimScatter": "1",  # clouds 5: round-10 rounded, warped, LOD
                      "M_FlightSimDistantClouds": "3",   # distant 3: round-10 rounded, warped, far LOD
-                     "M_FlightSimOceanBeauty": "2"}     # lane B: the beauty sea (2: round-10 #13, own reflection)
+                     "M_FlightSimOceanBeauty": "3"}     # lane B: the beauty sea (2: round-10 own reflection; 3: round-19 sphere up, swell, streaks, sheen)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
 
