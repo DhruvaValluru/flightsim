@@ -74,6 +74,43 @@ struct FFlightSimSurfaceBinding
 	float AccumulatedDegrees = 0.0f;
 };
 
+// One part drawn only while a JSBSim property is at or above a threshold:
+// the retractable landing gear (owner decision 2026-11-11, render round 47),
+// "gear/gear-pos-norm" below 0.01 = retracted = not drawn, the same rule
+// core/capture/labels.py GEAR_RETRACTED_BELOW applies to the labels. The
+// value is READ from the FDM every tick, like a surface's; the component's
+// visibility (not bHiddenInGame) is what changes, so it keeps its stencil
+// and every capture, beauty, measure and label pass alike, sees one state.
+USTRUCT(BlueprintType)
+struct FFlightSimVisibilityBinding
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim")
+	FString PropertyName;
+
+	// Drawn while the property is >= this; hidden below it.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim")
+	float HiddenBelow = 0.01f;
+
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "FlightSim")
+	TObjectPtr<USceneComponent> TargetComponent = nullptr;
+
+	// Latest value read from the FDM; whether the property was readable.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightSim")
+	float CurrentValue = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightSim")
+	bool bRead = false;
+
+	// Ticks the part was drawn / hidden over the run (render.json records them).
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightSim")
+	int32 DrawnTicks = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightSim")
+	int32 HiddenTicks = 0;
+};
+
 UCLASS(ClassGroup = (FlightSim), meta = (BlueprintSpawnableComponent))
 class FLIGHTSIMBRIDGE_API UFlightSimSurfaceAnimator : public UActorComponent
 {
@@ -128,6 +165,16 @@ public:
 	// is computing deflections into the void.
 	UFUNCTION(BlueprintPure, Category = "FlightSim")
 	int32 GetBoundSurfaceCount() const;
+
+	// Parts drawn only while their property is >= HiddenBelow (the
+	// retractable gear). Not cleared by ClearBindings: a manifest's surface
+	// table and its gear are separate rows.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim")
+	TArray<FFlightSimVisibilityBinding> VisibilityBindings;
+
+	UFUNCTION(BlueprintCallable, Category = "FlightSim")
+	void AddVisibilityBinding(const FString& Property, float HiddenBelow,
+	                          USceneComponent* Component);
 
 private:
 	bool bAnySurfaceMoved = false;

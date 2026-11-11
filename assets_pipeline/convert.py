@@ -104,7 +104,12 @@ OPTIONAL ``gear_geometry``: ``{"parts": [regex...], "objects":
 files and/or object names whose vertices are landing gear (tyres, struts;
 NOT doors or wells), so the lowest gear vertex can be told from the
 lowest fuselage or nacelle vertex; absent or empty, the z origin falls
-back to the VRP and the manifest says so -- and OPTIONAL
+back to the VRP and the manifest says so; when the FDM's XML declares a
+retractable gear unit and no single landing_gear component takes them
+(C7), the matched triangles are written to their own part ``gear``
+(``RETRACTABLE_GEAR_PART``, plus ``gear_beauty`` with a beauty mesh) and
+the manifest's ``retractable_gear`` block tells the commandlet to draw it
+only while ``gear/gear-pos-norm`` >= 0.01 -- and OPTIONAL
 ``model_origin_offset_m``: ``[x, y, z]`` in the UE actor frame, metres,
 default ``[0, 0, 0]``, for a model whose origin is DOCUMENTED to need a
 correction on top of the measured one (state the source in the config
@@ -323,6 +328,59 @@ def _gear_patterns(config: Dict) -> Tuple[List[str], List[str]]:
                     f"compile: {exc}") from exc
         out.append(list(patterns))
     return out[0], out[1]
+
+
+#: Retractable gear (owner decision 2026-11-11, render round 47: an
+#: airborne retractable-gear airframe cruises gear-up). core/fdm/gear.py's
+#: rule, on the same JSBSim XML: a ``<retractable>1</retractable>`` gear
+#: unit. Named here, not imported: core.fdm's package import pulls in the
+#: FDM itself (tests/test_retractable_gear_part.py pins the two equal).
+RETRACTABLE_GEAR_RE = re.compile(r"<retractable>\s*1\s*</retractable>")
+#: The OBJ stem / asset name / manifest part of the gear-matched triangles
+#: of a retractable-gear airframe (B747, J11, p51d), attached under
+#: MeshOrigin by FlightSimRenderCommandlet.cpp and drawn only while the
+#: flown gear is down.
+RETRACTABLE_GEAR_PART = "gear"
+#: The channel and threshold the gear is hidden by: core/capture/labels.py
+#: GEAR_POSITION_CHANNEL / GEAR_RETRACTED_BELOW (a retracted gear has no
+#: label box), so the pixels and the labels follow ONE rule.
+GEAR_POSITION_PROPERTY = "gear/gear-pos-norm"
+GEAR_HIDDEN_BELOW = 0.01
+
+
+def fdm_has_retractable_gear(xml_path: Path) -> bool:
+    """Whether the JSBSim XML declares a retractable gear unit (the rule
+    core.fdm.gear.has_retractable_gear applies to the flown airframe)."""
+    try:
+        text = Path(xml_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return bool(RETRACTABLE_GEAR_RE.search(text))
+
+
+def _retractable_gear_record(part: str, triangles: int, extents_gear: "MeshExtents",
+                             config: Dict) -> Dict:
+    """The manifest's ``retractable_gear`` block: which part draws the
+    gear, and the per-frame rule the commandlet hides it by."""
+    return {
+        "part": part,
+        "property": GEAR_POSITION_PROPERTY,
+        "hidden_below": GEAR_HIDDEN_BELOW,
+        "triangles": int(triangles),
+        "vertices": int(extents_gear.count),
+        "mesh_extent_actor_m": extents_gear.to_manifest()["mesh_extent_actor_m"],
+        "patterns": dict(zip(("parts", "objects"), _gear_patterns(config))),
+        "basis": (
+            "the gear_geometry-matched triangles of a retractable-gear airframe "
+            "(its JSBSim XML declares <retractable>1</retractable>), in their own "
+            "part so the commandlet draws them only while the flown "
+            f"{GEAR_POSITION_PROPERTY} is >= {GEAR_HIDDEN_BELOW:g}, read every "
+            "step (UFlightSimSurfaceAnimator visibility binding) and from the "
+            "card's start_gear_up before the first; hidden in every pass, "
+            "beauty, measure and label alike, matching core/capture/labels.py "
+            "GEAR_RETRACTED_BELOW (a retracted gear has no box). The measured "
+            "extents and the z anchor still include the gear vertices"),
+    }
 
 
 def _component_parts(config: Dict) -> Dict[str, str]:
@@ -1227,7 +1285,16 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     # triangles (the same ``gear`` flag that anchors z) into its own OBJ;
     # with no component declared the gear stays in the body as before.
     gear_component = _gear_component(config)
-    if gear_component is not None:
+    # Retractable gear (owner decision 2026-11-11): with no C7 component the
+    # gear-matched triangles of a retractable-gear airframe go to their own
+    # part (RETRACTABLE_GEAR_PART), so the commandlet can stop drawing them
+    # while the flown gear is up. Fixed gear, or no gear patterns: the gear
+    # stays in the body exactly as before. The flown FDM's XML decides (the
+    # one core.fdm.gear reads), the same file the VRP comes from.
+    retractable = (bool(gear_part_patterns or gear_object_patterns)
+                   and fdm_has_retractable_gear(vrp_xml))
+    gear_split = gear_component is None and retractable
+    if gear_component is not None or gear_split:
         writers["gear"] = ObjWriter()
     counts: Dict[str, int] = defaultdict(int)
     textures_used: Dict[str, Path] = {}
@@ -1256,6 +1323,11 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
     # (appended to the body's beauty copy after the measured body's slots).
     beauty_only_writer = ObjWriter()
     beauty_only_rows: List[tuple] = []
+    # The split gear's triangles too, for its beauty copy (gear_beauty): the
+    # J-11A's UC_* objects were in body_beauty; split out, they keep the
+    # same crease normals in their own copy (normals never cross objects).
+    beauty_gear_rows: Optional[List[tuple]] = (
+        [] if beauty is not None and gear_split else None)
     object_serial = 0
 
     for part in config["parts"]:
@@ -1295,7 +1367,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                         target = surface_name
                         break
             gear = (not interior) and (gear_part or _matches(obj.name, gear_object_patterns))
-            if gear and target == "body" and gear_component is not None:
+            if gear and target == "body" and (gear_component is not None or gear_split):
                 target = "gear"     # a surface claim wins: it is articulated
             writer = beauty_only_writer if beauty_only else writers[target]
             texture = None
@@ -1382,6 +1454,9 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
                         beauty_surface_rows[target].append(
                             (key, tri, object_serial, surf.smooth, obj.crease,
                              surf.two_sided, obj.name))
+                    elif beauty_gear_rows is not None and target == "gear":
+                        beauty_gear_rows.append((key, tri, object_serial, surf.smooth,
+                                                 obj.crease, surf.two_sided, obj.name))
         if interior:
             interior_rows.append({
                 "file": part["file"], "offset_m": list(offset), "pitch_deg": pitch_deg,
@@ -1447,25 +1522,45 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         manifest_surfaces.append(record)
 
     writers["body"].write(out_dir / "body.obj")
+    # The retractable gear's own part, when any gear triangle was split out
+    # (patterns that match nothing leave nothing to hide: no part, no block).
+    gear_part_written = gear_split and counts.get("gear", 0) > 0
+    if gear_split and not gear_part_written:
+        counts.pop("gear", None)
+    if gear_part_written:
+        writers["gear"].write(out_dir / f"{RETRACTABLE_GEAR_PART}.obj")
     beauty_record = None
     if beauty_rows is not None:
         _check_hide_objects(beauty, [r[6] for r in beauty_rows] + [
-            r[6] for rows in (beauty_surface_rows or {}).values() for r in rows])
+            r[6] for rows in (beauty_surface_rows or {}).values() for r in rows] + [
+            r[6] for r in (beauty_gear_rows or [])])
         beauty_record = _write_beauty_mesh(beauty_rows, beauty, writers["body"], out_dir,
                                            beauty_only_rows, beauty_only_writer)
         beauty_record.update(_write_beauty_surfaces(beauty_surface_rows, beauty, writers,
                                                     out_dir))
+        if gear_part_written and beauty_gear_rows:
+            beauty_record[RETRACTABLE_GEAR_PART] = _write_beauty_part(
+                beauty_gear_rows, beauty, writers["gear"], out_dir, RETRACTABLE_GEAR_PART)
     # ONE components list: the payload parts' rows, then the gear row.
     payload_rows = _component_records(
         component_parts, airframe, writers, counts, component_extents,
         out_dir, name, mesh_origin_cm)
     manifest_components = list(payload_rows)
+    retractable_record = None
     if gear_component is not None:
         gear_row = _gear_component_row(extents_gear, config, mesh_origin_cm,
                                        counts["gear"])
         counts[gear_row["part"]] = counts.pop("gear")
         writers["gear"].write(out_dir / f"{gear_row['part']}.obj")
         manifest_components.append(gear_row)
+        if retractable:
+            # A C7 gear component of a retractable-gear airframe: the same
+            # rule hides its component mesh (none today: c172p, DHC6 are fixed).
+            retractable_record = _retractable_gear_record(
+                gear_row["part"], gear_row["triangles"], extents_gear, config)
+    elif gear_part_written:
+        retractable_record = _retractable_gear_record(
+            RETRACTABLE_GEAR_PART, counts[RETRACTABLE_GEAR_PART], extents_gear, config)
 
     manifest = {
         "magic": "flightsim-aircraft-mesh",
@@ -1491,6 +1586,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         },
         "units": "cm, UE actor frame (+X forward +Y right +Z up)",
         "parts": ["body"] + list(surface_defs)
+                 + ([RETRACTABLE_GEAR_PART] if gear_part_written else [])
                  + [row["part"] for row in manifest_components],
         "asset_path_root": f"/Game/Aircraft/{name}",
         "surfaces": manifest_surfaces,
@@ -1528,6 +1624,10 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         manifest["views"] = _view_records(config, mesh_origin_cm)
     if beauty_record is not None:
         manifest["beauty_parts"] = beauty_record
+    # Only for a retractable-gear airframe whose gear is identifiable, so
+    # every other airframe's manifest is unchanged.
+    if retractable_record is not None:
+        manifest["retractable_gear"] = retractable_record
     if material_sources:
         (out_dir / MATERIAL_SOURCES_NAME).write_text(
             json.dumps(_material_sources_out(material_sources), indent=1, sort_keys=True),
