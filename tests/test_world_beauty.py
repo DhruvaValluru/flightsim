@@ -936,3 +936,42 @@ def test_a_constrained_gpu_gets_ef361bd6_cloud_and_sky_settings():
     assert wb.cloud_shadow_tracing_km_for(False, 900.0) == wb.cloud_shadow_tracing_km(900.0)
     assert "constexpr double CloudShadowConstrainedKm = 6.0;" in CLOUDS_CPP
     assert "{2.0, 1.0, 80.0},   // constrained" in CLOUDS_CPP
+
+
+@NEEDS_CXX
+def test_round7_a_clear_world_without_a_stated_visibility_gets_a_clear_days_aerosol(tmp_path):
+    """Round 7 (lane E): an unsampled visibility (0) in a CLEAR world splits the
+    Mie layer at CLEAR_DEFAULT_VISIBILITY_KM (horizon haze, aerial perspective);
+    a stated visibility and every other preset are unchanged. C++ == Python,
+    and the host keeps the height fog's density on that path."""
+    cases = [(p, v) for p in range(5) for v in (0.0, -1.0, 8.0, 40.0)]
+    main = ["using namespace FlightSimWorldPure;", "int main() {"]
+    main += [f"printf(\"aer %.17g\\n\", AerosolVisibilityKm({p}, {v!r}));" for p, v in cases]
+    main.append("printf(\"def %.17g\\n\", ClearDefaultVisibilityKm);")
+    main.append("return 0; }")
+    lines = _compile_block_and_run(tmp_path, "\n".join(main))
+    got = [float(l.split()[1]) for l in lines if l.startswith("aer ")]
+    assert got == [wb.aerosol_visibility_km(wb.PRESETS[p], v) for p, v in cases]
+    assert [float(l.split()[1]) for l in lines if l.startswith("def ")] == [wb.CLEAR_DEFAULT_VISIBILITY_KM]
+    assert wb.aerosol_visibility_km("clear", 0.0) == wb.CLEAR_DEFAULT_VISIBILITY_KM
+    assert wb.aerosol_visibility_km("overcast", 0.0) == 0.0
+    assert wb.aerosol_visibility_km("clear", 12.0) == 12.0
+    # ~10x the engine's default Mie scattering (0.003996 /km) and under the clear row's cap
+    split = wb.mie_split(wb.CLEAR_DEFAULT_VISIBILITY_KM, wb.ATMOSPHERE["clear"]["mie_share"],
+                         wb.ATMOSPHERE["clear"]["mie_cap_per_km"])
+    assert 0.02 < split["mie_scattering_per_km"] < wb.ATMOSPHERE["clear"]["mie_cap_per_km"]
+    path = CLOUDS_CPP[CLOUDS_CPP.index("else if (!bAerosolProbe && AerosolVisibilityKm(Preset, VisibilityKm) > 0.0)"):]
+    path = path[:path.index("\n\telse\n")]
+    assert "Atmosphere->SetMieScatteringScale(" in path and "FogFactor =" not in path
+
+
+def _compile_block_and_run(tmp_path, main):
+    """The pure block with main, unused constants allowed (only a few are read)."""
+    block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
+    source = tmp_path / "round7.cpp"
+    source.write_text("#include <cmath>\n#include <cstdint>\n#include <cstdio>\n#include <cstring>\n"
+                      + block + "\n" + main, encoding="utf-8")
+    subprocess.run(["g++", "-std=c++17", "-O1", "-Wall", "-Werror", "-Wno-unused-const-variable",
+                    "-Wno-unused-variable", "-o", str(tmp_path / "round7"), str(source)],
+                   check=True, capture_output=True, text=True)
+    return subprocess.run([str(tmp_path / "round7")], check=True, capture_output=True, text=True).stdout.splitlines()

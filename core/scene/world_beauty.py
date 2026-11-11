@@ -279,6 +279,28 @@ def mie_split(visibility_km: float, share: float, cap_per_km: float) -> Dict[str
     }
 
 
+#: Round 7 (lane E, 2026-11-11; C++ ClearDefaultVisibilityKm): a CLEAR world
+#: whose card states no visibility (randomization leaves it an unsampled 0)
+#: got the engine's near aerosol-free Mie layer (0.004 /km scattering): a
+#: saturated blue sky with no whitening at the horizon and Yosemite's ridges
+#: 10 km off as contrasty as the foreground (round 4's #01, #03, #12, #13). It
+#: now takes the Mie layer of a 40 km clear day (mie_split at the row's share
+#: and cap: ~0.05 /km at the ground, Mie scale height 1.2 km), so the horizon
+#: whitens and distance hazes through the atmosphere's own scattering. Only
+#: the atmosphere's aerosol: the height fog keeps the density the scene built.
+#: A stated visibility, the -aerosol= probe and every other preset unchanged.
+#: UNCALIBRATED: set by probe render on the render machine.
+CLEAR_DEFAULT_VISIBILITY_KM = 40.0
+
+
+def aerosol_visibility_km(preset: str, visibility_km: float) -> float:
+    """The visibility the Mie layer is split at: the card's, else
+    CLEAR_DEFAULT_VISIBILITY_KM for a clear world, else 0 (the engine's own)."""
+    if visibility_km > 0.0:
+        return float(visibility_km)
+    return CLEAR_DEFAULT_VISIBILITY_KM if preset == "clear" else 0.0
+
+
 #: The analytic height fog's sun lobe is pow(cos, n) / 4 pi beyond the
 #: volumetric fog's distance (the project keeps r.SupportExpFogMatchesVolumetricFog
 #: at 0, so the measure renders' fog is untouched); its exponent is fitted so the

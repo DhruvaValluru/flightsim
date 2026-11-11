@@ -400,6 +400,17 @@ namespace FlightSimWorldPure
 		Out.FogFactor = Beta > 0.0 ? (Haze - Mie > 0.0 ? Haze - Mie : 0.0) / Beta : 0.0;
 		return Out;
 	}
+	// Round 7 (lane E, world_beauty.CLEAR_DEFAULT_VISIBILITY_KM): a CLEAR world
+	// whose card states no visibility (an unsampled 0) gets the Mie layer of a
+	// 40 km clear day instead of the engine's near-aerosol-free default, so the
+	// horizon whitens, the sky desaturates towards it and far ridges take aerial
+	// perspective (round 4's #01, #03, #12, #13). The height fog is left as the
+	// scene built it (FogFactor 1): only the atmosphere's aerosol is added.
+	constexpr double ClearDefaultVisibilityKm = 40.0;
+	inline double AerosolVisibilityKm(int Preset, double VisibilityKm)
+	{
+		return VisibilityKm > 0.0 ? VisibilityKm : (Preset == PresetClear ? ClearDefaultVisibilityKm : 0.0);
+	}
 
 	inline int SelectCloud(double Cover, double ThicknessM, int Preset)
 	{
@@ -1367,6 +1378,24 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 			TEXT("a share of the card's haze (3.912 / visibility less Rayleigh) moved from the height fog "
 			     "into the atmosphere's Mie layer; the fog keeps the rest of the haze, so Rayleigh + Mie + fog "
 			     "= the Koschmieder beta at the ground (extinction counted once)"));
+	}
+	else if (!bAerosolProbe && AerosolVisibilityKm(Preset, VisibilityKm) > 0.0)
+	{
+		// Round 7: the clear world's default aerosol; the fog keeps its density.
+		const double DefaultKm = AerosolVisibilityKm(Preset, VisibilityKm);
+		const FMieSplit Split = MieSplit(DefaultKm, Row[AtmMieShare], Row[AtmMieCapPerKm]);
+		Atmosphere->SetMieScatteringScale(static_cast<float>(Split.MieScatteringPerKm));
+		Atmosphere->SetMieAbsorptionScale(static_cast<float>(Split.MieAbsorptionPerKm));
+		Out->SetNumberField(TEXT("default_visibility_km"), DefaultKm);
+		Out->SetNumberField(TEXT("mie_scattering_scale_per_km"), Split.MieScatteringPerKm);
+		Out->SetNumberField(TEXT("mie_absorption_scale_per_km"), Split.MieAbsorptionPerKm);
+		Out->SetNumberField(TEXT("mie_share"), Row[AtmMieShare]);
+		Out->SetNumberField(TEXT("mie_cap_per_km"), Row[AtmMieCapPerKm]);
+		Out->SetNumberField(TEXT("fog_factor"), FogFactor);
+		Out->SetStringField(TEXT("mie_basis"),
+			TEXT("the card states no visibility_km: a clear world takes the Mie layer of a "
+			     "ClearDefaultVisibilityKm day (world_beauty.CLEAR_DEFAULT_VISIBILITY_KM, UNCALIBRATED) for the "
+			     "horizon haze and the aerial perspective; the height fog is kept as the scene built it"));
 	}
 	else
 	{
