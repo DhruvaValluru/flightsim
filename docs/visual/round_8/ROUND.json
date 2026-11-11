@@ -1,0 +1,26 @@
+﻿{
+    "round":  8,
+    "commit":  "0902cde5",
+    "full":  false,
+    "scenes":  [
+                   6
+               ],
+    "switches":  "-look-ssgi=off",
+    "prep":  [
+                 "build",
+                 "materials"
+             ],
+    "seconds":  {
+                    "build":  8.4,
+                    "materials":  11.8,
+                    "scenes":  201.4
+                },
+    "outcomes":  [
+                     {
+                         "number":  6,
+                         "outcome":  "done",
+                         "seconds":  200.0,
+                         "why":  "clip ready"
+                     }
+                 ]
+}

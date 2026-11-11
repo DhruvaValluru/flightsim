@@ -1,0 +1,11 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "06_a320_over_sfo_heading_south_moderate_rain": {
+   "post": "06_a320_over_sfo_heading_south_moderate_rain_post.jpg",
+   "source": "06_a320_over_sfo_heading_south_moderate_rain_frame_beauty_post.png"
+  }
+ }
+}
