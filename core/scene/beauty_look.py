@@ -1209,7 +1209,7 @@ def world_preset_for_card(card: Optional[Mapping[str, Any]],
     the exposure follow the world the frame is drawn in.
     ``weather_draws_cell``: the storm weather draws a cell (a thunderstorm
     event; the host also counts that as a storm)."""
-    from core.scene.world_beauty import select_preset
+    from core.scene.world_beauty import card_wind_mps, select_preset
 
     def obj(parent: Any, key: str) -> Dict[str, Any]:
         value = parent.get(key) if isinstance(parent, Mapping) else None
@@ -1235,9 +1235,11 @@ def world_preset_for_card(card: Optional[Mapping[str, Any]],
         if num(layer, "top_m") > num(layer, "base_m"):
             cover = num(layer, "cover")
     visibility = num(look, "visibility_km")
+    # Lane D: the card's wind (heavy rain in a strong wind is the storm look).
+    wind = card_wind_mps(dict(card))
     inputs = {"storm": storm, "rain_rate_mmh": rain, "precipitation_rain": rain_word,
-              "cloud_cover": cover, "visibility_km": visibility}
-    return select_preset(storm, rain, rain_word, cover, visibility), inputs
+              "cloud_cover": cover, "visibility_km": visibility, "wind_mps": wind}
+    return select_preset(storm, rain, rain_word, cover, visibility, wind), inputs
 
 
 def grade_for(sun_elevation_deg: float, weather_event: Optional[str] = None,

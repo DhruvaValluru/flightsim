@@ -18,6 +18,11 @@
 //                      deck's lift, upward only), scale_m (the warp noise's size),
 //                      soft_m (the softness of the tower's wall and base and the
 //                      deck's base, inward / upward only)
+//   Curtain    float4  LANE D, BEAUTY ONLY (0 on every other render: the shader is then
+//                      generation 5's, expression for expression): flare (the shaft's
+//                      radius grows by this share from the base to the ground), ground_thin
+//                      (its density falls by this share toward the ground), scud_depth_m
+//                      (the ragged scud band under the base and the deck), scud_cover (0..1)
 //   Time       float   run time, s
 struct FStormCell
 {
@@ -144,6 +149,20 @@ float anvil = S.Ss(anvilR, anvilR - Edge * 4.0, ra) * S.Ss(anvilFloor, anvilFloo
             * S.Ss(top + Edge, top - Edge, u);
 float shaftR = Sigma.w;
 float shaft = S.Ss(shaftR, shaftR * 0.6, r) * S.Ss(base + Edge * 0.5, base - Edge * 0.5, u);
+// Lane D (2026-11-11, beauty only, storm_cell.BEAUTY_CURTAIN; round 4's #09 drew the
+// shaft as a glowing cylinder under a hard ring). A precipitation curtain is not a
+// cylinder: it hangs from the (lifted, ragged) base, spreads as it falls (flare),
+// its edge is the wall's warped radius (rt: no circle) fading over 75 % of the
+// radius, and it thins toward the ground (ground_thin) where the rain spreads and
+// evaporates; the column's water is kept (density / the flared area's radius share).
+float fall = 1.0;
+if (Curtain.x > 0.0)
+{
+	float below = saturate((baseCut - u) / max(baseCut, 1.0));
+	float rOut = shaftR * (1.0 + Curtain.x * below);
+	shaft = S.Ss(rOut, rOut * 0.25, rt) * S.Ss(baseCut + Edge, baseCut - Edge * 2.0, u);
+	fall = (1.0 - Curtain.y * below) / (1.0 + Curtain.x * below);
+}
 uint seed = (uint)Noise.x;
 float billow = Noise.y;
 float erosion = Noise.z;
@@ -161,6 +180,7 @@ float curtain = (shaft > 0.0) ? S.Fbm(float3(e / across, n / across, u / (billow
 float shaftDensity = Ragged.x > 0.0
 	? S.Eroded(shaft, curtain, 0.5) * (0.25 + 0.75 * curtain)
 	: shaft * (0.6 + 0.4 * curtain);
+shaftDensity *= fall;
 float sigma = Sigma.x * S.Eroded(tower, rise, erosion)
             + Sigma.y * S.Eroded(anvil, drift, erosion)
             + Sigma.z * shaftDensity;
@@ -178,5 +198,23 @@ if (Layer.x > 0.0)
 	float band = S.Ss(deckBase, deckBase + deckSoft, u) * S.Ss(Layer.z, Layer.z - 100.0, u);
 	float cover = saturate((S.Fbm(float3(e, n, u * 4.0) / 2000.0, seed + 3u) - (1.0 - Layer.x)) / 0.15);
 	sigma += Layer.w * band * cover;
+}
+// Lane D (beauty only): SCUD -- low, ragged fragments in a band scud_depth_m deep
+// under the cell's lifted base (inside the anvil's reach) and under the deck,
+// drifting at SCUD_DRIFT_SHARE = 0.5 of the anvil's drift, a 4-octave fbm SCUD_SCALE_M
+// = 700 m across squashed SCUD_SQUASH = 3x in height (torn, flat-bottomed
+// rags), cut at 0.62 - 0.2 x cover over a 0.08 ramp, SCUD_SIGMA_SHARE = 0.1 of the
+// core's extinction. Evaluated only inside the band (one fbm there, none elsewhere).
+if (Curtain.z > 0.0)
+{
+	float deckBase = Layer.x > 0.0 ? Layer.y + deckLift : 1.0e9;
+	float scudTop = r < Geo2.x ? min(baseCut, deckBase) : deckBase;
+	if (u < scudTop && u > scudTop - Curtain.z)
+	{
+		float band = S.Ss(scudTop - Curtain.z, scudTop - Curtain.z * 0.4, u) * S.Ss(scudTop, scudTop - 60.0, u);
+		float3 q = float3(e - 0.5 * Drift.x * Time, n - 0.5 * Drift.y * Time, u * 3.0) / 700.0;
+		float rag = saturate((S.Fbm(q, seed + 7u) - (0.62 - 0.2 * Curtain.w)) / 0.08);
+		sigma += Sigma.x * 0.1 * band * rag;
+	}
 }
 return sigma;

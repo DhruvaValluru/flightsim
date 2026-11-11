@@ -179,6 +179,10 @@ struct FFlightSimBeautyRainShape
 	double MaxStreakRad = 0.0;   // the streak's longest angular length (0: no cap)
 	double MaxCoverage = 1.0;    // the most one streak covers
 	double DepthFadeM = 0.0;     // coverage x exp(-range / this) (0: none)
+	// Lane D (2026-11-11): soft, varied, background-lit streaks (M_RainDrops 6).
+	double Softness = 0.0;       // the streak (1 + this) wider, Gaussian across, tapered (0: hard)
+	double Variation = 0.0;      // per-drop length and brightness spread (0: none)
+	double Radiance = 1.0;       // the drops' SkyRadianceScale (1: the measure path's)
 };
 
 struct FFlightSimThunderConstants
@@ -272,6 +276,29 @@ public:
 	                                  double AircraftUpM, double CloudBaseM, double CloudTopM,
 	                                  double CloudOvershootM, double CloudTowerRadiusM, double ClearanceM);
 
+	// -- lane D (2026-11-11): the beauty rain veil, BEAUTY ONLY ----------------
+	// core/scene/rain_veil.py is the Python twin (tests/test_lane_d_storm.py pins
+	// the two). FFlightSimWorldBeauty (-quality=beauty) only: the rain CURTAIN (three
+	// open cylinders round the camera in M_RainCurtain: the grey veil of the slab
+	// each stands for and streaks falling along the drops' path in the wind) and,
+	// in a storm preset or heavy rain, the SCUD (camera-facing torn cards in
+	// M_ScudCard in a band from under the aircraft to under the drawn deck, carried
+	// by the wind). Both actors in BeautyOnlyActors (every label capture hides
+	// them); every card a pure function of (seed, index, run time). Nothing without
+	// drawn drops (the procedural or Niagara rain), or with Mode "off"
+	// (-rain-veil=off / FLIGHTSIM_RAIN_VEIL=off). Recorded in Record.rain_veil.
+	// AircraftUpM and DeckBaseM are heights above the scene datum (the decks'
+	// frame); bDeck says a deck is drawn above the aircraft.
+	bool ApplyBeautyRainVeil(UWorld* World, const FVector& AircraftCm, double AircraftUpM, bool bStorm,
+	                         bool bDeck, double DeckBaseM, const FString& Mode, FString& Error);
+	bool DrawsRainVeil() const { return VeilActor != nullptr; }
+	// Pure (core/scene/rain_veil.py rain_haze_fog): the storm's rain haze on the
+	// height fog -- its falloff opened to halve once over the column, its density set
+	// so the camera's height sees the rain's extinction; never thinner than the scene's.
+	static void RainHazeFog(double RateMmh, double CameraAboveFogM, double ColumnM, double FogDensity,
+	                        double FogFalloff, double& OutDensity, double& OutFalloff);
+	double DrawnRainRateMmh() const { return bRain ? RainRateMmh : 0.0; }
+
 	// Every registered volumetric cloud in the world checked the way the
 	// engine's cloud passes check it (a Volume material, flagged "Used with
 	// Volumetric Cloud", compiled without errors), each logged; false with
@@ -325,6 +352,7 @@ private:
 	FVector WindEngineCmPerS(const FVector& CameraEnu) const;
 	double ShaftShare(const FVector& CameraEnu) const;
 	void StartRainNoise();
+	void StepBeautyRainVeil(const FFlightSimWeatherView& View, const FVector& Wind, double Share);
 	void PlayThunder(UWorld* World, const FFlightSimFlash& Flash, const FVector& ListenerEnu,
 	                 double NowSeconds);
 
@@ -407,6 +435,19 @@ private:
 	// measure path draws exactly what it drew.
 	FVector BeautyCellOffsetCm = FVector::ZeroVector;
 	double BeautyRainShareFloor = 0.0;
+
+	// -- lane D: the beauty rain veil (ApplyBeautyRainVeil) ---------------------
+	AActor* VeilActor = nullptr;
+	TArray<UMaterialInstanceDynamic*> VeilShellMaterials;
+	TArray<double> VeilShellRadiiM;
+	AActor* ScudActor = nullptr;
+	UProceduralMeshComponent* ScudMesh = nullptr;
+	UMaterialInstanceDynamic* ScudMaterial = nullptr;
+	double ScudBandBottomM = 0.0;
+	double ScudBandTopM = 0.0;
+	double ScudDatumZCm = 0.0;
+	uint64 ScudSeed = 0;
+	double BeautyFilm = 0.0;   // the windscreen water film (0 but on the beauty path)
 
 	// -- lightning -----------------------------------------------------------
 	FFlightSimLightCurve Curve;

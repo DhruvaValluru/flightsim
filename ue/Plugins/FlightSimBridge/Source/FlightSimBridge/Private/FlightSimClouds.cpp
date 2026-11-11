@@ -143,7 +143,7 @@ namespace FlightSimWorldPure
 			{0.05, 2.5, 0.35, 0.35, 0.08, 0.6, 1.6, 0.35},    // cumulus
 			{0.04, 4.0, 0.5, 0.25, 0.15, 0.3, 1.3, 0.6},      // stratocumulus
 			{0.03, 8.0, 0.8, 0.15, 0.2, 0.15, 1.0, 0.95},     // overcast
-			{0.045, 6.0, 0.6, 0.2, 0.1, 0.4, 1.2, 0.98},      // nimbostratus
+			{0.045, 9.0, 0.6, 0.3, 0.1, 0.4, 0.8, 0.98},      // nimbostratus
 		};
 		return Cloud >= 0 && Cloud < CloudCount && Field >= 0 && Field < CloudFieldCount
 			? Rows[Cloud][Field] : 0.0;
@@ -179,7 +179,7 @@ namespace FlightSimWorldPure
 	constexpr double FairTopM = 2700.0;
 	// Round 3: a rain world's layer when the card states no cover (broken, not
 	// nimbostratus's 0.98 sheet: round 1's #06 showed no ground).
-	constexpr double RainDefaultCover = 0.6;
+	constexpr double RainDefaultCover = 0.72;
 	constexpr double CloudSeedSpanKm = 1000.0;
 	constexpr double CloudExtinctionScaleDefault = 1.0;
 	constexpr double OcclusionFlagTransmittanceDefault = 0.5;
@@ -360,10 +360,19 @@ namespace FlightSimWorldPure
 	constexpr double MieSingleScatterAlbedo = 0.9;
 	constexpr double MinVisibilityKm = 0.05;
 
-	inline int SelectPreset(bool bStorm, double RainRateMmh, bool bPrecipitationRain, double CloudCover,
-	                        double VisibilityKm)
+	// world_beauty.SEVERE_RAIN_MMH / SEVERE_WIND_MPS (lane D, 2026-11-11): heavy rain
+	// in a strong wind is the storm look (#15, the hurricane's suggested weather).
+	constexpr double SevereRainMmh = 8.0;
+	constexpr double SevereWindMps = 10.0;
+	inline bool IsSevereRain(double RainRateMmh, double WindMps)
 	{
-		if (bStorm)
+		return RainRateMmh >= SevereRainMmh && WindMps >= SevereWindMps;
+	}
+
+	inline int SelectPreset(bool bStorm, double RainRateMmh, bool bPrecipitationRain, double CloudCover,
+	                        double VisibilityKm, double WindMps = 0.0)
+	{
+		if (bStorm || IsSevereRain(RainRateMmh, WindMps))
 		{
 			return PresetStorm;
 		}
@@ -1050,6 +1059,19 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		return false;
 	}
 	const FString SkyHdriName = FlagOrEnv(TEXT("sky-hdri="), TEXT("FLIGHTSIM_SKY_HDRI"));
+	// Lane D (2026-11-11): the beauty rain veil (on unless asked off): -rain-veil= /
+	// FLIGHTSIM_RAIN_VEIL (core/scene/rain_veil.py).
+	FString RainVeilMode = TEXT("on");
+	const FString RainVeilFromEnv = FlagOrEnv(TEXT("rain-veil="), TEXT("FLIGHTSIM_RAIN_VEIL"));
+	if (!RainVeilFromEnv.IsEmpty())
+	{
+		RainVeilMode = RainVeilFromEnv;
+	}
+	if (RainVeilMode != TEXT("on") && RainVeilMode != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.rain_veil: -rain-veil=%s is not on or off"), *RainVeilMode);
+		return false;
+	}
 
 	// -- what the card says --------------------------------------------------
 	// Key by key (WorldLookValue; world_beauty.card_inputs is the Python twin):
@@ -1088,7 +1110,37 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	                                      WorldNumber(WeatherLook, TEXT("wetness"), 0.0));
 	const int32 Seed = static_cast<int32>(WorldNumber(WeatherLook, TEXT("seed"),
 	                                                  WorldNumber(Card, TEXT("seed"), 0.0)));
-	Preset = SelectPreset(bStorm, RainRate, bRainWord, bCardLayer ? CardCover : 0.0, VisibilityKm);
+	// Lane D: the card's wind (world_beauty.card_wind_mps): the larger of the storm
+	// weather's wind at the camera and the wind at cloud base.
+	double WindMps = 0.0;
+	{
+		const TSharedPtr<FJsonObject> WeatherBlock = WorldObject(Card, TEXT("weather"));
+		const TSharedPtr<FJsonObject> RainBlock = WorldObject(WeatherBlock, TEXT("rain"));
+		const TArray<TSharedPtr<FJsonValue>>* WindArray = nullptr;
+		if (RainBlock.IsValid() && RainBlock->TryGetArrayField(TEXT("wind_enu_mps"), WindArray) &&
+		    WindArray != nullptr && WindArray->Num() == 3)
+		{
+			double SumSquares = 0.0;
+			for (const TSharedPtr<FJsonValue>& Component : *WindArray)
+			{
+				const double C = Component.IsValid() ? Component->AsNumber() : 0.0;
+				SumSquares += C * C;
+			}
+			WindMps = FMath::Sqrt(SumSquares);
+		}
+		const TSharedPtr<FJsonValue> WindDrift = WorldLookValue(Card, TEXT("cloud_drift"), EJson::Object);
+		double DriftWind = 0.0;
+		if (WindDrift.IsValid() && WindDrift->AsObject()->TryGetNumberField(TEXT("mps"), DriftWind))
+		{
+			WindMps = FMath::Max(WindMps, DriftWind);
+		}
+		if (!FMath::IsFinite(WindMps))
+		{
+			WindMps = 0.0;
+		}
+	}
+	const bool bSevereRain = IsSevereRain(RainRate, WindMps);
+	Preset = SelectPreset(bStorm, RainRate, bRainWord, bCardLayer ? CardCover : 0.0, VisibilityKm, WindMps);
 	GroundWetness = TilesWetness(CardWetness, AtmosphereValues[Preset * AtmosphereFieldCount + AtmWetnessFloor]);
 	const TSharedPtr<FJsonValue> DriftValue = WorldLookValue(Card, TEXT("cloud_drift"), EJson::Object);
 	if (DriftValue.IsValid())
@@ -1110,6 +1162,11 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		Inputs->SetNumberField(TEXT("rain_rate_mmh"), RainRate);
 		Inputs->SetBoolField(TEXT("precipitation_rain"), bRainWord);
 		Inputs->SetBoolField(TEXT("storm"), bStorm);
+		Inputs->SetNumberField(TEXT("wind_mps"), WindMps);
+		Inputs->SetBoolField(TEXT("severe_rain"), bSevereRain);
+		Inputs->SetStringField(TEXT("severe_rain_basis"),
+			TEXT("world_beauty.is_severe_rain: rain >= 8 mm/h in wind >= 10 m/s (the larger of weather.rain.wind_enu_mps "
+			     "and look.cloud_drift.mps) draws the storm preset; visual only, UNCALIBRATED"));
 		Inputs->SetStringField(TEXT("storm_word"), StormWordValue);
 		Inputs->SetStringField(TEXT("storm_words"), TEXT("weather_look.STORMS (thunderstorm, tornado), or a drawn storm cell"));
 		Inputs->SetStringField(TEXT("surface"), Surface);
@@ -1174,6 +1231,81 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 				     "look's rain particles and streaks are unchanged"));
 		}
 		Record->SetObjectField(TEXT("rain"), RainRow);
+	}
+	// Lane D: the rain veil -- the curtain at depth and, in a storm or heavy rain,
+	// the scud under the drawn deck (after the clearance: the deck it hangs under
+	// is the one drawn). Heights above the scene datum (KeepAircraftClearOfClouds).
+	{
+		const double AircraftUpM = FMath::Max(0.0, WorldNumber(Card, TEXT("altitude_m"), 0.0) -
+		                                               WorldNumber(Card, TEXT("terrain_elevation_m"), 0.0));
+		bool bDeckAbove = false;
+		double DeckBaseM = 0.0;
+		for (const FCloudLayerState& State : CloudLayers)
+		{
+			if (State.Cover > 0.0 && State.BaseM > AircraftUpM && (!bDeckAbove || State.BaseM < DeckBaseM))
+			{
+				bDeckAbove = true;
+				DeckBaseM = State.BaseM;
+			}
+		}
+		double CellDeckBaseM = 0.0, CellDeckTopM = 0.0;
+		if (Weather.BeautyStormLayer(CellDeckBaseM, CellDeckTopM) && CellDeckBaseM > AircraftUpM &&
+		    (!bDeckAbove || CellDeckBaseM < DeckBaseM))
+		{
+			bDeckAbove = true;
+			DeckBaseM = CellDeckBaseM;
+		}
+		if (!Weather.ApplyBeautyRainVeil(World, Aircraft != nullptr ? Aircraft->GetActorLocation() : FVector::ZeroVector,
+		                                 AircraftUpM, Preset == PresetStorm, bDeckAbove, DeckBaseM, RainVeilMode, Error))
+		{
+			return false;
+		}
+		// Lane D follow-up (round 6's #15: a blue sky and a bright ground 2 km under
+		// a rain deck): in a storm preset with drawn rain and no stated visibility,
+		// the height fog carries the rain's own haze up to the camera
+		// (FFlightSimWeather::RainHazeFog, rain_veil.rain_haze_fog). Off with the veil.
+		TSharedPtr<FJsonObject> Haze = MakeShared<FJsonObject>();
+		const double HazeRate = Weather.DrawnRainRateMmh();
+		const bool bHaze = Preset == PresetStorm && HazeRate > 0.0 && VisibilityKm <= 0.0 &&
+		                   RainVeilMode == TEXT("on") && Aircraft != nullptr;
+		Haze->SetBoolField(TEXT("applied"), bHaze);
+		if (bHaze)
+		{
+			TArray<TSharedPtr<FJsonValue>> HazeRows;
+			for (TObjectIterator<UExponentialHeightFogComponent> It; It; ++It)
+			{
+				UExponentialHeightFogComponent* Fog = *It;
+				if (Fog == nullptr || Fog->GetWorld() != World || !Fog->IsVisible())
+				{
+					continue;
+				}
+				const double FogZM = Fog->GetComponentLocation().Z / WorldCmPerMetre;
+				const double AboveFogM = Aircraft->GetActorLocation().Z / WorldCmPerMetre - FogZM;
+				const double ColumnM = bDeckAbove ? DeckBaseM : AircraftUpM + 1000.0;
+				double Density = Fog->FogDensity, Falloff = Fog->FogHeightFalloff;
+				FFlightSimWeather::RainHazeFog(HazeRate, AboveFogM, ColumnM, Fog->FogDensity, Fog->FogHeightFalloff,
+				                               Density, Falloff);
+				TSharedPtr<FJsonObject> HazeRow = MakeShared<FJsonObject>();
+				HazeRow->SetNumberField(TEXT("fog_density_before"), Fog->FogDensity);
+				HazeRow->SetNumberField(TEXT("fog_height_falloff_before"), Fog->FogHeightFalloff);
+				Fog->SetFogDensity(static_cast<float>(Density));
+				Fog->SetFogHeightFalloff(static_cast<float>(Falloff));
+				HazeRow->SetNumberField(TEXT("fog_density"), Density);
+				HazeRow->SetNumberField(TEXT("fog_height_falloff"), Falloff);
+				HazeRow->SetNumberField(TEXT("camera_above_fog_m"), AboveFogM);
+				HazeRow->SetNumberField(TEXT("column_m"), ColumnM);
+				HazeRows.Add(MakeShared<FJsonValueObject>(HazeRow));
+			}
+			Haze->SetArrayField(TEXT("height_fog"), HazeRows);
+			Haze->SetNumberField(TEXT("rain_rate_mmh"), HazeRate);
+		}
+		Haze->SetStringField(TEXT("law"),
+			TEXT("rain_veil.rain_haze_fog: in a storm preset with rain and no stated visibility, the fog's falloff "
+			     "halves it once over the column under the deck and its density gives the camera's height the "
+			     "rain's extinction (0.35 R^0.66 /km), never thinner than the scene's fog; -rain-veil=off keeps "
+			     "the scene's fog. UNCALIBRATED"));
+		Record->SetObjectField(TEXT("rain_haze"), Haze);
+	}
 	}
 	// round-2b weather-fx: the weather look's shafts and the tornado funnel (beauty only).
 	Scene.ApplyBeautyWeatherLook(World);

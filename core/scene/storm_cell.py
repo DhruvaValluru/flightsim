@@ -145,6 +145,29 @@ BEAUTY_EROSION = 0.6
 #: C++ twin is FFlightSimWeather::ApplyBeautyStormVantage.
 BEAUTY_SHAFT = {"streak_scale": 0.35, "rim_erosion": 0.5, "density_floor": 0.25,
                 "albedo_scale": 0.55}
+#: Lane D (2026-11-11, BEAUTY ONLY: the material's ``Curtain`` parameter, 0 on every
+#: other render, so the measure path's shader is generation 5's). Round 4's #09: a
+#: hard-edged toroidal ring with a glowing cylindrical shaft beneath it.
+#: * ``flare``: the shaft's radius grows by this share from the (lifted) base to the
+#:   ground, its edge the wall's warped radius (no circle) fading over 75 % of it;
+#:   the column's water is kept (density / (1 + flare x depth share));
+#: * ``ground_thin``: the density falls by this share toward the ground (the rain
+#:   spreads and evaporates: a soft foot, not a bright footprint);
+#: * ``scud_depth_m`` / ``scud_cover``: the low, ragged scud band under the base
+#:   (and, in the shader only, under the look's deck, which the Python twin does
+#:   not carry), SCUD_* below. 300 m keeps the scud inside the world lane's 400 m
+#:   aircraft clearance (world_beauty.AIRCRAFT_LAYER_CLEARANCE_M).
+#: UNCALIBRATED: set by probe render on the render machine (#09 first). The C++
+#: twin is FFlightSimWeather::ApplyBeautyStormVantage.
+BEAUTY_CURTAIN = {"flare": 0.8, "ground_thin": 0.5, "scud_depth_m": 300.0, "scud_cover": 0.5}
+CURTAIN_RIM_SHARE = 0.25
+SCUD_SCALE_M = 700.0
+SCUD_SQUASH = 3.0
+SCUD_DRIFT_SHARE = 0.5
+SCUD_SIGMA_SHARE = 0.1
+SCUD_CUT = 0.62
+SCUD_CUT_PER_COVER = 0.2
+SCUD_RAMP = 0.08
 #: The steepest slope of one octave of value noise per lattice cell (the
 #: quintic fade's peak derivative 15/8, a lattice step of at most 1).
 VALUE_NOISE_SLOPE_MAX = 1.875
@@ -376,12 +399,55 @@ def shapes(cell: Dict[str, Any], e: float, n: float, u: float,
     return {"tower": tower, "anvil": anvil, "shaft": shaft}
 
 
+def curtain_shaft(cell: Dict[str, Any], e: float, n: float, u: float,
+                  ragged: Optional[Dict[str, float]], curtain: Dict[str, float]) -> Dict[str, float]:
+    """The beauty curtain's shaft shape and its density factor (storm_cell.hlsl's
+    ``Curtain.x > 0`` block): the flared, warped, softened shape hanging from the
+    lifted base, and the (1 - ground_thin x below) / (1 + flare x below) factor."""
+    warped = ragged_warp(cell, e, n, u, ragged)
+    base_cut = warped["base_cut"]
+    below = min(1.0, max(0.0, (base_cut - u) / max(base_cut, 1.0)))
+    flare = float(curtain["flare"])
+    r_out = float(cell["shaft"]["radius_m"]) * (1.0 + flare * below)
+    shape = (_smoothstep(r_out, r_out * CURTAIN_RIM_SHARE, warped["rt"])
+             * _smoothstep(base_cut + EDGE_M, base_cut - EDGE_M * 2.0, u))
+    return {"shaft": shape,
+            "fall": (1.0 - float(curtain["ground_thin"]) * below) / (1.0 + flare * below)}
+
+
+def scud_at(cell: Dict[str, Any], e: float, n: float, u: float, t: float,
+            ragged: Optional[Dict[str, float]], curtain: Dict[str, float]) -> float:
+    """The beauty scud's extinction (1/m) under the cell's lifted base, inside the
+    anvil's radius (storm_cell.hlsl's ``Curtain.z > 0`` block without the deck)."""
+    depth = float(curtain["scud_depth_m"])
+    if depth <= 0.0 or math.hypot(e, n) >= float(cell["anvil_radius_m"]):
+        return 0.0
+    top = ragged_warp(cell, e, n, u, ragged)["base_cut"]
+    if not (top - depth < u < top):
+        return 0.0
+    band = _smoothstep(top - depth, top - depth * 0.4, u) * _smoothstep(top, top - 60.0, u)
+    drift = cell["anvil_drift_enu_mps"]
+    rag = fbm((e - SCUD_DRIFT_SHARE * drift[0] * t) / SCUD_SCALE_M,
+              (n - SCUD_DRIFT_SHARE * drift[1] * t) / SCUD_SCALE_M,
+              u * SCUD_SQUASH / SCUD_SCALE_M, int(cell["noise"]["seed"]) + 7)
+    cut = SCUD_CUT - SCUD_CUT_PER_COVER * float(curtain["scud_cover"])
+    rag = min(1.0, max(0.0, (rag - cut) / SCUD_RAMP))
+    return float(cell["extinction_core_per_m"]) * SCUD_SIGMA_SHARE * band * rag
+
+
 def extinction_at(cell: Dict[str, Any], e: float, n: float, u: float, t: float = 0.0,
-                  ragged: Optional[Dict[str, float]] = None) -> float:
+                  ragged: Optional[Dict[str, float]] = None,
+                  curtain: Optional[Dict[str, float]] = None) -> float:
     """The cell's extinction (1/m) at a point at run time t -- the shader's
     function, constant for constant. ``ragged`` is the beauty warp
-    (:data:`BEAUTY_RAGGED`; None on every other render)."""
+    (:data:`BEAUTY_RAGGED`; None on every other render); ``curtain`` the beauty
+    curtain and scud (:data:`BEAUTY_CURTAIN`; None on every other render)."""
     s = shapes(cell, e, n, u, ragged)
+    fall = 1.0
+    if curtain and float(curtain["flare"]) > 0.0:
+        c = curtain_shaft(cell, e, n, u, ragged, curtain)
+        s = dict(s, shaft=c["shaft"])
+        fall = c["fall"]
     noise = cell["noise"]
     seed = int(noise["seed"])
     billow = float(noise["billow_m"])
@@ -392,7 +458,7 @@ def extinction_at(cell: Dict[str, Any], e: float, n: float, u: float, t: float =
                 seed + 1)
     beauty_shaft = bool(ragged) and float(ragged["warp_m"]) > 0.0
     across = billow * (BEAUTY_SHAFT["streak_scale"] if beauty_shaft else 1.0)
-    curtain = fbm(e / across, n / across, u / (billow * SHAFT_NOISE_STRETCH), seed + 2)
+    curtain_noise = fbm(e / across, n / across, u / (billow * SHAFT_NOISE_STRETCH), seed + 2)
     erosion = float(noise["erosion"])
 
     def eroded(shape: float, value: float, strength: float = erosion) -> float:
@@ -402,13 +468,17 @@ def extinction_at(cell: Dict[str, Any], e: float, n: float, u: float, t: float =
         # Round 6 (storm_cell.hlsl's Ragged shaft block): the rim eroded by the
         # streak noise (inward only), the density floor opened.
         floor = BEAUTY_SHAFT["density_floor"]
-        shaft = (eroded(s["shaft"], curtain, BEAUTY_SHAFT["rim_erosion"])
-                 * (floor + (1.0 - floor) * curtain))
+        shaft = (eroded(s["shaft"], curtain_noise, BEAUTY_SHAFT["rim_erosion"])
+                 * (floor + (1.0 - floor) * curtain_noise))
     else:
-        shaft = s["shaft"] * (0.6 + 0.4 * curtain)
-    return (float(cell["extinction_core_per_m"]) * eroded(s["tower"], rise)
-            + float(cell["extinction_anvil_per_m"]) * eroded(s["anvil"], drift)
-            + float(cell["shaft"]["extinction_per_m"]) * shaft)
+        shaft = s["shaft"] * (0.6 + 0.4 * curtain_noise)
+    shaft *= fall
+    sigma = (float(cell["extinction_core_per_m"]) * eroded(s["tower"], rise)
+             + float(cell["extinction_anvil_per_m"]) * eroded(s["anvil"], drift)
+             + float(cell["shaft"]["extinction_per_m"]) * shaft)
+    if curtain and float(curtain["scud_depth_m"]) > 0.0:
+        sigma += scud_at(cell, e, n, u, t, ragged, curtain)
+    return sigma
 
 
 def shaft_albedo_scale(cell: Dict[str, Any], e: float, n: float, u: float,

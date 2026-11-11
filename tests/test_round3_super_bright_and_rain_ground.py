@@ -204,8 +204,8 @@ def test_a_rain_world_without_a_card_cover_draws_broken_cloud():
 
 
 def test_the_host_draws_the_same_rain_cover():
-    assert "constexpr double RainDefaultCover = 0.6;" in CLOUDS_CPP
-    assert wb.RAIN_DEFAULT_COVER == 0.6
+    assert "constexpr double RainDefaultCover = 0.72;" in CLOUDS_CPP   # lane D: was 0.6 (#06 puffs)
+    assert wb.RAIN_DEFAULT_COVER == 0.72
     assert ("(bStated ? CardCover : (Preset == PresetRain ? RainDefaultCover : GuessDefault))"
             in CLOUDS_CPP)
     assert "RainDefaultCover: a rain world, the card states none" in CLOUDS_CPP

@@ -36,6 +36,29 @@ clamped, upper hemisphere normalised); the sidecar beside it records the clamp.
 CC0 needs no attribution; the entry is kept so every pinned asset is listed in
 one place.
 
+## Weather textures (lane D, 2026-11-11; cached, never committed: `data/textures/weather/`)
+
+Fetched and checked by `python scripts/fetch_weather_textures.py` (its `PINS`
+holds every digest below; `--check` verifies without fetching). Used only by the
+beauty windscreen water film on a cockpit camera (M_WindshieldRain generation 3,
+`assets/shaders/weather/windshield_film.hlsl`, imported as `T_WindshieldWater_N`
+and `T_WindshieldWater_H` by `scripts/ue_create_materials.py`). Only the two maps
+are kept, about 0.4 MB.
+
+| name | title | licence | source | file | sha256 |
+| --- | --- | --- | --- | --- | --- |
+| `leaking019c` (zip) | Leaking 019 C, ambientCG | CC0-1.0 (https://docs.ambientcg.com/license/: "All ambientCG assets are provided under the Creative Commons CC0 1.0 Universal License") | https://ambientcg.com/a/Leaking019C | https://ambientcg.com/get?file=Leaking019C_1K-JPG.zip (redirected on 2026-11-11 to https://acg-download.struffelproductions.com/file/ambientCG-Web/download/Leaking019C_J3FPnb71/Leaking019C_1K-JPG.zip; 2,304,286 bytes) | `fbac60faa458fba2cbd4d63cfc815346573af09db328fe99df287614af279706` |
+| `leaking019c/normal_gl.jpg` | its OpenGL normal map (`Leaking019C_1K-JPG_NormalGL.jpg`, 1024 x 1024) | CC0-1.0 | as above | from the zip, 156,156 bytes | `e88c1c745f486f8bf2cc095ff8e20bb897045c6ba00ed9da9eb4509f5b5ccc41` |
+| `leaking019c/height.jpg` | its displacement map (`Leaking019C_1K-JPG_Displacement.jpg`, 1024 x 1024) | CC0-1.0 | as above | from the zip, 235,018 bytes | `66be629c57708a0b4cf344c8dc2817c8fb60c667002fae3195603c669c671102` |
+
+CC0 needs no attribution; the entry is the pin. No third-party rain-streak,
+scud or cloud-noise texture is used. The rain curtain (`rain_curtain.hlsl`),
+the scud (`scud_card.hlsl`, `storm_cell.hlsl`) and the streaks
+(`rain_drop_*.hlsl`) are hashed-lattice procedural noise written in this
+repository. The one CC0 particle pack looked at (Kenney "Particle Pack",
+kenney.nl) serves its download only behind a browser check, so it could not be
+pinned by URL and sha256 from a script.
+
 ## Film-stock LUTs (committed: `assets/looks/film/`)
 
 - **Generator: spectral_film_lut** by Jan Lohse, MIT.

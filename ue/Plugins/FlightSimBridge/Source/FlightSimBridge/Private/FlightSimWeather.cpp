@@ -108,6 +108,9 @@ namespace
 	const TCHAR* const WeatherStormMaterialPath = TEXT("/Game/FlightSim/M_StormCell.M_StormCell");
 	const TCHAR* const WeatherWindshieldMaterialPath =
 		TEXT("/Game/FlightSim/M_WindshieldRain.M_WindshieldRain");
+	// Lane D: the beauty rain veil's materials (core/scene/rain_veil.py).
+	const TCHAR* const WeatherCurtainMaterialPath = TEXT("/Game/FlightSim/M_RainCurtain.M_RainCurtain");
+	const TCHAR* const WeatherScudMaterialPath = TEXT("/Game/FlightSim/M_ScudCard.M_ScudCard");
 	const TCHAR* const WeatherNiagaraRainPath =
 		TEXT("/Game/FlightSim/Weather/NS_FlightSimRain.NS_FlightSimRain");
 
@@ -236,6 +239,10 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		RainMaterial->SetScalarParameterValue(TEXT("MaxCoverage"), static_cast<float>(Shape.MaxCoverage));
 		RainMaterial->SetScalarParameterValue(TEXT("DepthFade"),
 		                                      static_cast<float>(Shape.DepthFadeM * WeatherCmPerMetre));
+		// Lane D: soft, varied streaks lit as the mean of their surroundings.
+		RainMaterial->SetScalarParameterValue(TEXT("Soft"), static_cast<float>(Shape.Softness));
+		RainMaterial->SetScalarParameterValue(TEXT("Vary"), static_cast<float>(Shape.Variation));
+		RainMaterial->SetScalarParameterValue(TEXT("SkyRadianceScale"), static_cast<float>(Shape.Radiance));
 	}
 	const TSharedPtr<FJsonObject>* Row = nullptr;
 	if (Record.IsValid() && Record->TryGetObjectField(TEXT("rain"), Row) && Row != nullptr && Row->IsValid())
@@ -251,13 +258,18 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		ShapeRow->SetNumberField(TEXT("max_streak_rad"), Shape.MaxStreakRad);
 		ShapeRow->SetNumberField(TEXT("max_coverage"), Shape.MaxCoverage);
 		ShapeRow->SetNumberField(TEXT("depth_fade_m"), Shape.DepthFadeM);
+		ShapeRow->SetNumberField(TEXT("softness"), Shape.Softness);
+		ShapeRow->SetNumberField(TEXT("variation"), Shape.Variation);
+		ShapeRow->SetNumberField(TEXT("radiance"), Shape.Radiance);
 		ShapeRow->SetStringField(TEXT("applied_to"), RainMaterial != nullptr
 			? TEXT("M_RainDrops (the procedural backend's drops)")
 			: TEXT("nothing: the Niagara backend's system exposes no shape parameters"));
 		ShapeRow->SetStringField(TEXT("basis"),
 			TEXT("core/scene/weather_look.py beauty_rain_shape: the drawn count follows the rate, the streak's "
 			     "angular length is capped, the drops near the lens thinned, one streak's coverage capped and "
-			     "faded with range; mean light is NOT conserved (a stated look, UNCALIBRATED)"));
+			     "faded with range; each streak soft (Gaussian across, tapered), varied in length and brightness "
+			     "by its own hash, and lit at radiance x the scene's light; mean light is NOT conserved (a stated "
+			     "look, UNCALIBRATED)"));
 		(*Row)->SetObjectField(TEXT("beauty_shape"), ShapeRow);
 	}
 }
@@ -265,15 +277,18 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 FFlightSimBeautyRainShape FFlightSimWeather::BeautyRainShape(double RateMmh, int32 Particles)
 {
 	// core/scene/weather_look.py BEAUTY_RAIN_* (pinned by tests/test_weather_fx.py).
-	constexpr double WeatherBeautyRainDropsPerMmh = 1500.0;
+	constexpr double WeatherBeautyRainDropsPerMmh = 4000.0;
 	constexpr double WeatherBeautyRainMinShare = 0.01;
 	constexpr double WeatherBeautyRainNearThinM = 4.0;
 	constexpr double WeatherBeautyRainStreakRadLight = 0.012;
 	constexpr double WeatherBeautyRainStreakRadHeavy = 0.045;
 	constexpr double WeatherBeautyRainLightMmh = 1.0;
 	constexpr double WeatherBeautyRainHeavyMmh = 50.0;
-	constexpr double WeatherBeautyRainMaxCoverage = 0.35;
+	constexpr double WeatherBeautyRainMaxCoverage = 0.22;
 	constexpr double WeatherBeautyRainDepthFadeM = 12.0;
+	constexpr double WeatherBeautyRainSoftness = 1.0;
+	constexpr double WeatherBeautyRainVariation = 0.8;
+	constexpr double WeatherBeautyRainRadiance = 0.7;
 	const double Rate = FMath::Max(RateMmh, 0.0);
 	const double Count = static_cast<double>(FMath::Max(Particles, 1));
 	FFlightSimBeautyRainShape Shape;
@@ -294,7 +309,328 @@ FFlightSimBeautyRainShape FFlightSimWeather::BeautyRainShape(double RateMmh, int
 		+ T * (WeatherBeautyRainStreakRadHeavy - WeatherBeautyRainStreakRadLight);
 	Shape.MaxCoverage = WeatherBeautyRainMaxCoverage;
 	Shape.DepthFadeM = WeatherBeautyRainDepthFadeM;
+	Shape.Softness = WeatherBeautyRainSoftness;
+	Shape.Variation = WeatherBeautyRainVariation;
+	Shape.Radiance = WeatherBeautyRainRadiance;
 	return Shape;
+}
+
+// -- lane D (2026-11-11): the beauty rain veil ------------------------------------------
+// core/scene/rain_veil.py VEIL_* / SCUD_* (pinned by tests/test_lane_d_storm.py).
+// BEAUTY ONLY: FFlightSimWorldBeauty is the only caller; both actors are in
+// BeautyOnlyActors. UNCALIBRATED: set by probe render on the render machine.
+namespace FlightSimRainVeil
+{
+	constexpr double VeilShellRadiusNearM = 25.0;
+	constexpr double VeilShellRadiusMidM = 80.0;
+	constexpr double VeilShellRadiusFarM = 250.0;
+	constexpr int32 VeilSegments = 24;
+	constexpr double VeilHeightRadii = 1.5;
+	constexpr double VeilBetaA = 0.35;
+	constexpr double VeilBetaB = 0.66;
+	constexpr double VeilStreakRad = 0.0015;
+	constexpr double VeilStreakDensityA = 0.08;
+	constexpr double VeilStreakDensityMax = 0.6;
+	constexpr double VeilStreakAlpha = 0.25;
+	constexpr int32 ScudCards = 40;
+	constexpr double ScudBoxHalfM = 2500.0;
+	constexpr double ScudBandBelowM = 300.0;
+	constexpr double ScudDeckGapM = 50.0;
+	constexpr double ScudNoDeckTopM = 400.0;
+	constexpr double ScudWidthMinM = 150.0;
+	constexpr double ScudWidthMaxM = 450.0;
+	constexpr double ScudAspectMin = 0.3;
+	constexpr double ScudAspectMax = 0.6;
+	constexpr double ScudAlphaMin = 0.35;
+	constexpr double ScudAlphaMax = 0.75;
+	constexpr double ScudCameraClearM = 120.0;
+	constexpr double ScudEdgeShare = 0.15;
+	constexpr double ScudMinRainMmh = 8.0;
+	constexpr uint64 ScudSeedSalt = 0x5C0D;
+	// rain_veil.BEAUTY_WINDSHIELD_FILM: the windscreen water film's strength.
+	constexpr double BeautyWindshieldFilm = 1.0;
+
+	// rain_veil.rain_extinction_per_km
+	inline double RainExtinctionPerKm(double RateMmh)
+	{
+		return RateMmh > 0.0 ? VeilBetaA * FMath::Pow(RateMmh, VeilBetaB) : 0.0;
+	}
+	// rain_veil.shell_veil_alpha
+	inline double ShellVeilAlpha(double RateMmh, double InnerM, double OuterM)
+	{
+		return 1.0 - FMath::Exp(-RainExtinctionPerKm(RateMmh) * (OuterM - InnerM) / 1000.0);
+	}
+	// rain_veil.streak_density
+	inline double StreakDensity(double RateMmh)
+	{
+		return FMath::Min(VeilStreakDensityMax, VeilStreakDensityA * FMath::Sqrt(FMath::Max(RateMmh, 0.0)));
+	}
+	inline double Wrap(double V, double Half)
+	{
+		return V - 2.0 * Half * FMath::FloorToDouble((V + Half) / (2.0 * Half));
+	}
+	inline double Smooth(double E0, double E1, double X)
+	{
+		if (E0 == E1)
+		{
+			return X < E0 ? 0.0 : 1.0;
+		}
+		const double T = FMath::Clamp((X - E0) / (E1 - E0), 0.0, 1.0);
+		return T * T * (3.0 - 2.0 * T);
+	}
+}
+
+void FFlightSimWeather::RainHazeFog(double RateMmh, double CameraAboveFogM, double ColumnM, double FogDensity,
+                                    double FogFalloff, double& OutDensity, double& OutFalloff)
+{
+	// rain_veil.FOG_BETA_PER_DENSITY (0.1 ln(2)^2), RAIN_HAZE_FALLOFF_COLUMN, RAIN_HAZE_MIN_COLUMN_M.
+	constexpr double RainHazeFogBetaPerDensity = 0.048045301391820145;
+	constexpr double RainHazeFalloffColumn = 1.0;
+	constexpr double RainHazeMinColumnM = 1000.0;
+	const double Column = FMath::Max(ColumnM, RainHazeMinColumnM);
+	OutFalloff = FMath::Min(FogFalloff, 10.0 * RainHazeFalloffColumn / Column);
+	const double BetaPerM = FlightSimRainVeil::RainExtinctionPerKm(RateMmh) / 1000.0;
+	const double Density = BetaPerM / RainHazeFogBetaPerDensity
+		* FMath::Pow(2.0, OutFalloff / 10.0 * FMath::Max(CameraAboveFogM, 0.0));
+	OutDensity = FMath::Max(FogDensity, Density);
+}
+
+bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& AircraftCm, double AircraftUpM,
+                                            bool bStorm, bool bDeck, double DeckBaseM, const FString& Mode,
+                                            FString& Error)
+{
+	using namespace FlightSimRainVeil;
+	TSharedPtr<FJsonObject> Row = WeatherRecord();
+	Row->SetStringField(TEXT("mode"), Mode);
+	Row->SetStringField(TEXT("labels"),
+		TEXT("both actors in BeautyOnlyActors: every label capture hides them (ConfigureLabelCapture)"));
+	Row->SetStringField(TEXT("calibration"),
+		TEXT("UNCALIBRATED: core/scene/rain_veil.py is the table; set by probe render on the render machine"));
+	if (Record.IsValid())
+	{
+		Record->SetObjectField(TEXT("rain_veil"), Row);
+	}
+	if (Mode == TEXT("off") || !bRain || World == nullptr || RainRateMmh <= 0.0)
+	{
+		Row->SetStringField(TEXT("drawn"), Mode == TEXT("off")
+			? TEXT("nothing: -rain-veil=off")
+			: TEXT("nothing: the storm weather draws no rain here"));
+		return true;
+	}
+	// The windscreen's water film (a cockpit camera's beauty glass, M_WindshieldRain 3):
+	// FlightSimRainVeil::BeautyWindshieldFilm, applied per frame with the glass's Time.
+	BeautyFilm = FlightSimRainVeil::BeautyWindshieldFilm;
+	Row->SetNumberField(TEXT("windshield_film"), BeautyFilm);
+	Row->SetStringField(TEXT("windshield_film_source"),
+		TEXT("ambientCG Leaking 019 C (CC0-1.0), scripts/fetch_weather_textures.py; THIRD_PARTY_VISUAL.md"));
+	UMaterialInterface* CurtainBase = LoadObject<UMaterialInterface>(nullptr, WeatherCurtainMaterialPath);
+	if (CurtainBase == nullptr)
+	{
+		Error = FString::Printf(TEXT("weather.rain_veil: %s (scripts/ue_create_materials.py) did not load; the "
+		                             "beauty rain veil is drawn by it or refused (-rain-veil=off to render without)"),
+		                        WeatherCurtainMaterialPath);
+		return false;
+	}
+	// -- the curtain: three open cylinders round the camera (moved per frame) ----
+	const double Radii[3] = {VeilShellRadiusNearM, VeilShellRadiusMidM, VeilShellRadiusFarM};
+	VeilActor = World->SpawnActor<AActor>();
+	VeilActor->Tags.Add(FName(TEXT("FlightSim.weather")));
+	BeautyOnlyActors.Add(VeilActor);
+	USceneComponent* VeilRoot = NewObject<USceneComponent>(VeilActor, TEXT("RainVeilRoot"));
+	VeilActor->SetRootComponent(VeilRoot);
+	VeilRoot->SetMobility(EComponentMobility::Movable);
+	VeilRoot->RegisterComponent();
+	const double D0 = FMath::Max(D0Mm, 0.5);
+	const double FallCmps = TerminalVelocityMps(D0) * FallSpeedFactor * WeatherCmPerMetre;
+	TArray<TSharedPtr<FJsonValue>> Shells;
+	for (int32 Shell = 0; Shell < 3; ++Shell)
+	{
+		const double R = Radii[Shell] * WeatherCmPerMetre;
+		const double H = Radii[Shell] * VeilHeightRadii * WeatherCmPerMetre;
+		TArray<FVector> Vertices;
+		TArray<int32> Triangles;
+		TArray<FVector2D> UV0;
+		for (int32 K = 0; K <= VeilSegments; ++K)
+		{
+			const double A = 2.0 * PI * K / VeilSegments;
+			const FVector Ring(R * FMath::Cos(A), R * FMath::Sin(A), 0.0);
+			Vertices.Add(Ring + FVector(0.0, 0.0, -H));
+			Vertices.Add(Ring + FVector(0.0, 0.0, H));
+			UV0.Add(FVector2D(static_cast<double>(K) / VeilSegments, 0.0));
+			UV0.Add(FVector2D(static_cast<double>(K) / VeilSegments, 1.0));
+			if (K < VeilSegments)
+			{
+				const int32 B = 2 * K;
+				Triangles.Append({B, B + 1, B + 2, B + 1, B + 3, B + 2});
+			}
+		}
+		UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(
+			VeilActor, *FString::Printf(TEXT("RainCurtain%d"), Shell));
+		Mesh->SetupAttachment(VeilRoot);
+		Mesh->SetMobility(EComponentMobility::Movable);
+		Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, {}, UV0, {}, {}, false /* no collision */);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->SetCastShadow(false);
+		UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(CurtainBase, VeilActor);
+		const double Inner = Shell > 0 ? Radii[Shell - 1] : 0.0;
+		const double Veil = ShellVeilAlpha(RainRateMmh, Inner, Radii[Shell]);
+		Material->SetScalarParameterValue(TEXT("Radius"), static_cast<float>(R));
+		Material->SetScalarParameterValue(TEXT("StreakRad"), static_cast<float>(VeilStreakRad));
+		Material->SetScalarParameterValue(TEXT("StreakDensity"), static_cast<float>(StreakDensity(RainRateMmh)));
+		Material->SetScalarParameterValue(TEXT("StreakAlpha"), static_cast<float>(VeilStreakAlpha));
+		Material->SetScalarParameterValue(TEXT("Veil"), static_cast<float>(Veil));
+		Material->SetScalarParameterValue(TEXT("FallCmps"), static_cast<float>(FallCmps));
+		Material->SetScalarParameterValue(TEXT("Seed"), static_cast<float>((RainSeed + Shell) & 0xFFFFFF));
+		Mesh->SetMaterial(0, Material);
+		Mesh->RegisterComponent();
+		VeilShellMaterials.Add(Material);
+		VeilShellRadiiM.Add(Radii[Shell]);
+		TSharedPtr<FJsonObject> ShellRow = WeatherRecord();
+		ShellRow->SetNumberField(TEXT("radius_m"), Radii[Shell]);
+		ShellRow->SetNumberField(TEXT("veil"), Veil);
+		Shells.Add(MakeShared<FJsonValueObject>(ShellRow));
+	}
+	Row->SetArrayField(TEXT("curtain_shells"), Shells);
+	Row->SetNumberField(TEXT("rain_rate_mmh"), RainRateMmh);
+	Row->SetNumberField(TEXT("extinction_per_km"), RainExtinctionPerKm(RainRateMmh));
+	Row->SetNumberField(TEXT("streak_density"), StreakDensity(RainRateMmh));
+	Row->SetStringField(TEXT("curtain_basis"),
+		TEXT("rain_veil: each shell the grey veil 1 - exp(-beta x its slab), beta = 0.35 R^0.66 /km (a STATED fit "
+		     "of visibility in rain), and streaks falling along the drops' path in the wind at one angular size on "
+		     "every shell; lit by the translucency volume like the drops"));
+
+	// -- the scud: torn cards under the deck, carried by the wind -----------------
+	const bool bScud = bStorm || RainRateMmh >= ScudMinRainMmh;
+	Row->SetBoolField(TEXT("scud_drawn"), bScud);
+	if (!bScud)
+	{
+		Row->SetStringField(TEXT("scud"), TEXT("not drawn: neither a storm preset nor rain of 8 mm/h or more"));
+		return true;
+	}
+	UMaterialInterface* ScudBase = LoadObject<UMaterialInterface>(nullptr, WeatherScudMaterialPath);
+	if (ScudBase == nullptr)
+	{
+		Error = FString::Printf(TEXT("weather.rain_veil: %s (scripts/ue_create_materials.py) did not load"),
+		                        WeatherScudMaterialPath);
+		return false;
+	}
+	ScudBandBottomM = AircraftUpM - ScudBandBelowM;
+	ScudBandTopM = (bDeck && DeckBaseM > AircraftUpM) ? DeckBaseM - ScudDeckGapM : AircraftUpM + ScudNoDeckTopM;
+	ScudBandTopM = FMath::Max(ScudBandTopM, ScudBandBottomM + 1.0);
+	ScudDatumZCm = AircraftCm.Z - AircraftUpM * WeatherCmPerMetre;
+	ScudSeed = RainSeed ^ ScudSeedSalt;
+	ScudActor = World->SpawnActor<AActor>();
+	ScudActor->Tags.Add(FName(TEXT("FlightSim.weather")));
+	BeautyOnlyActors.Add(ScudActor);
+	ScudMesh = NewObject<UProceduralMeshComponent>(ScudActor, TEXT("ScudCards"));
+	ScudActor->SetRootComponent(ScudMesh);
+	ScudMesh->SetMobility(EComponentMobility::Movable);
+	{
+		// Placeholder quads at the origin; StepBeautyRainVeil places every card.
+		TArray<FVector> Vertices;
+		TArray<int32> Triangles;
+		TArray<FVector2D> UV0, UV1;
+		for (int32 I = 0; I < ScudCards; ++I)
+		{
+			const int32 B = Vertices.Num();
+			for (int32 C = 0; C < 4; ++C)
+			{
+				Vertices.Add(FVector::ZeroVector);
+				UV0.Add(FVector2D(C & 1, C >> 1));
+				UV1.Add(FVector2D(0.0, 0.0));
+			}
+			Triangles.Append({B, B + 2, B + 1, B + 1, B + 2, B + 3});
+		}
+		ScudMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, {}, UV0, UV1, {}, {}, {}, {},
+		                                        false /* no collision */);
+	}
+	ScudMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ScudMesh->SetCastShadow(false);
+	ScudMaterial = UMaterialInstanceDynamic::Create(ScudBase, ScudActor);
+	ScudMesh->SetMaterial(0, ScudMaterial);
+	ScudMesh->RegisterComponent();
+	Row->SetNumberField(TEXT("scud_cards"), ScudCards);
+	Row->SetNumberField(TEXT("scud_band_bottom_m"), ScudBandBottomM);
+	Row->SetNumberField(TEXT("scud_band_top_m"), ScudBandTopM);
+	Row->SetBoolField(TEXT("scud_under_deck"), bDeck && DeckBaseM > AircraftUpM);
+	Row->SetStringField(TEXT("scud_basis"),
+		TEXT("rain_veil.scud_card: camera-facing torn cards (scud_card.hlsl) in a 5 km box round the camera carried "
+		     "by the wind at the camera, from 300 m under the aircraft to 50 m under the drawn deck, none within "
+		     "120 m (+ half a card) of the lens; a pure function of (seed, index, run time)"));
+	return true;
+}
+
+void FFlightSimWeather::StepBeautyRainVeil(const FFlightSimWeatherView& View, const FVector& Wind, double Share)
+{
+	using namespace FlightSimRainVeil;
+	if (VeilActor != nullptr)
+	{
+		VeilActor->SetActorLocation(View.CameraCm);
+		const double Rate = RainRateMmh * FMath::Clamp(Share, 0.0, 1.0);
+		for (int32 Shell = 0; Shell < VeilShellMaterials.Num(); ++Shell)
+		{
+			UMaterialInstanceDynamic* Material = VeilShellMaterials[Shell];
+			const double Inner = Shell > 0 ? VeilShellRadiiM[Shell - 1] : 0.0;
+			Material->SetScalarParameterValue(TEXT("Time"), static_cast<float>(View.TimeSeconds));
+			Material->SetVectorParameterValue(TEXT("WindVel"), WeatherColour(Wind));
+			Material->SetScalarParameterValue(TEXT("GroundRelZ"), static_cast<float>(View.GroundZCm - View.CameraCm.Z));
+			Material->SetScalarParameterValue(TEXT("Veil"),
+				static_cast<float>(ShellVeilAlpha(Rate, Inner, VeilShellRadiiM[Shell])));
+			Material->SetScalarParameterValue(TEXT("StreakDensity"), static_cast<float>(StreakDensity(Rate)));
+		}
+	}
+	if (ScudMesh == nullptr)
+	{
+		return;
+	}
+	// rain_veil.scud_card, card for card (the box round the camera).
+	const double T = View.TimeSeconds;
+	const FVector CameraEnu = EngineToEnu(View.CameraCm);
+	const double CameraUpM = (View.CameraCm.Z - ScudDatumZCm) / WeatherCmPerMetre;
+	const FVector Up(0.0, 0.0, 1.0);
+	TArray<FVector> Vertices;
+	TArray<FVector2D> UV0, UV1;
+	Vertices.Reserve(ScudCards * 4);
+	UV0.Reserve(ScudCards * 4);
+	UV1.Reserve(ScudCards * 4);
+	const double Half = ScudBoxHalfM;
+	for (int32 I = 0; I < ScudCards; ++I)
+	{
+		const uint64 Index = static_cast<uint64>(I);
+		const double E0 = (2.0 * Unit(ScudSeed, Index, 0) - 1.0) * Half + WindEnuMps.X * T;
+		const double N0 = (2.0 * Unit(ScudSeed, Index, 1) - 1.0) * Half + WindEnuMps.Y * T;
+		const double DE = Wrap(E0 - CameraEnu.X, Half);
+		const double DN = Wrap(N0 - CameraEnu.Y, Half);
+		const double UpM = ScudBandBottomM + (ScudBandTopM - ScudBandBottomM) * Unit(ScudSeed, Index, 2);
+		const double WidthM = ScudWidthMinM + (ScudWidthMaxM - ScudWidthMinM) * Unit(ScudSeed, Index, 3);
+		const double HeightM = WidthM * (ScudAspectMin + (ScudAspectMax - ScudAspectMin) * Unit(ScudSeed, Index, 4));
+		double Alpha = ScudAlphaMin + (ScudAlphaMax - ScudAlphaMin) * Unit(ScudSeed, Index, 5);
+		const double Edge = Half * ScudEdgeShare;
+		Alpha *= Smooth(Half, Half - Edge, FMath::Abs(DE)) * Smooth(Half, Half - Edge, FMath::Abs(DN));
+		const double ToCameraM = FMath::Sqrt(DE * DE + DN * DN + (UpM - CameraUpM) * (UpM - CameraUpM));
+		const double Clear = ScudCameraClearM + 0.5 * WidthM;
+		Alpha *= Smooth(Clear, Clear * 1.5, ToCameraM);
+		FVector Centre = View.CameraCm + (EastAxis * DE + NorthAxis * DN) * WeatherCmPerMetre;
+		Centre.Z = ScudDatumZCm + UpM * WeatherCmPerMetre;
+		const FVector ToCam = (View.CameraCm - Centre).GetSafeNormal();
+		FVector Right = FVector::CrossProduct(Up, ToCam).GetSafeNormal();
+		if (Right.IsNearlyZero())
+		{
+			Right = EastAxis;
+		}
+		const FVector CardUp = FVector::CrossProduct(ToCam, Right);
+		const FVector W = Right * (0.5 * WidthM * WeatherCmPerMetre);
+		const FVector Hh = CardUp * (0.5 * HeightM * WeatherCmPerMetre);
+		const FVector2D Card(Alpha, Unit(ScudSeed, Index, 6));
+		Vertices.Append({Centre - W - Hh, Centre + W - Hh, Centre - W + Hh, Centre + W + Hh});
+		UV0.Append({FVector2D(0.0, 0.0), FVector2D(1.0, 0.0), FVector2D(0.0, 1.0), FVector2D(1.0, 1.0)});
+		UV1.Append({Card, Card, Card, Card});
+	}
+	ScudMesh->UpdateMeshSection_LinearColor(0, Vertices, {}, UV0, UV1, {}, {}, {}, {});
+	if (ScudMaterial != nullptr)
+	{
+		ScudMaterial->SetScalarParameterValue(TEXT("Time"), static_cast<float>(T));
+	}
 }
 
 // -- visual round 2 (weather scenes, 2026-11-10): the beauty storm vantage ---------
@@ -368,6 +704,14 @@ void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const
 	constexpr double WeatherBeautyShaftRimErosion = 0.5;
 	constexpr double WeatherBeautyShaftDensityFloor = 0.25;
 	constexpr double WeatherBeautyShaftAlbedo = 0.55;
+	// Lane D (2026-11-11): core/scene/storm_cell.py BEAUTY_CURTAIN (round 4's #09: a
+	// hard ring over a glowing cylinder). The material's Curtain parameter (default
+	// 0: generation 5's shader): the shaft flares, softens and thins toward the
+	// ground, and ragged scud hangs under the base and the deck. UNCALIBRATED.
+	constexpr double WeatherBeautyCurtainFlare = 0.8;
+	constexpr double WeatherBeautyCurtainGroundThin = 0.5;
+	constexpr double WeatherBeautyScudDepthM = 300.0;
+	constexpr double WeatherBeautyScudCover = 0.5;
 	const TSharedPtr<FJsonObject>* CellRow = nullptr;
 	if (!bCell || StormMaterial == nullptr || !Record.IsValid() ||
 	    !Record->TryGetObjectField(TEXT("cell"), CellRow) || CellRow == nullptr || !CellRow->IsValid())
@@ -430,6 +774,22 @@ void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const
 	// Round 6: the rain shaft's albedo (the streaks, rim and floor are the
 	// shader's own constants under the Ragged gate set above).
 	StormMaterial->SetScalarParameterValue(TEXT("ShaftAlbedo"), static_cast<float>(WeatherBeautyShaftAlbedo));
+	StormMaterial->SetVectorParameterValue(TEXT("Curtain"),
+		FLinearColor(static_cast<float>(WeatherBeautyCurtainFlare), static_cast<float>(WeatherBeautyCurtainGroundThin),
+		             static_cast<float>(WeatherBeautyScudDepthM), static_cast<float>(WeatherBeautyScudCover)));
+	{
+		TSharedPtr<FJsonObject> Curtain = WeatherRecord();
+		Curtain->SetNumberField(TEXT("flare"), WeatherBeautyCurtainFlare);
+		Curtain->SetNumberField(TEXT("ground_thin"), WeatherBeautyCurtainGroundThin);
+		Curtain->SetNumberField(TEXT("scud_depth_m"), WeatherBeautyScudDepthM);
+		Curtain->SetNumberField(TEXT("scud_cover"), WeatherBeautyScudCover);
+		Curtain->SetStringField(TEXT("basis"),
+			TEXT("storm_cell.BEAUTY_CURTAIN: the shaft hangs from the lifted base, flares toward the ground, its "
+			     "edge the wall's warped radius (no circle) softened over 75 % of it, thinning toward the ground "
+			     "(the column's water kept); ragged scud in a band under the base and the deck, drifting at half "
+			     "the anvil's drift. Visual only; UNCALIBRATED"));
+		Row->SetObjectField(TEXT("curtain"), Curtain);
+	}
 	{
 		TSharedPtr<FJsonObject> Shaft = WeatherRecord();
 		Shaft->SetNumberField(TEXT("streak_scale"), WeatherBeautyShaftStreakScale);
@@ -2115,6 +2475,8 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 		RainMaterial->SetScalarParameterValue(TEXT("GroundRelZ"), static_cast<float>(GroundRelZ));
 		RainMaterial->SetScalarParameterValue(TEXT("FlashLux"), static_cast<float>(FlashLux));
 	}
+	// Lane D: the beauty rain veil (nothing unless FFlightSimWorldBeauty built it).
+	StepBeautyRainVeil(View, Wind, Share);
 	if (NiagaraRain != nullptr)
 	{
 		NiagaraRain->SetWorldLocation(View.CameraCm);
@@ -2145,6 +2507,11 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 	if (WindshieldMaterial != nullptr)
 	{
 		WindshieldMaterial->SetScalarParameterValue(TEXT("Time"), static_cast<float>(T));
+		// Lane D: the beauty water film (BeautyFilm is 0 unless ApplyBeautyRainVeil ran),
+		// scrolled up the glass at the run-off (screen heights / s over the film's tiles).
+		WindshieldMaterial->SetScalarParameterValue(TEXT("Film"), static_cast<float>(BeautyFilm));
+		WindshieldMaterial->SetScalarParameterValue(TEXT("FilmV"),
+			static_cast<float>(BeautyFilm > 0.0 ? WindshieldRunoffMps / WeatherGlassViewHeightM * T * 1.5 : 0.0));
 	}
 	if (RainNoise.IsValid())
 	{
