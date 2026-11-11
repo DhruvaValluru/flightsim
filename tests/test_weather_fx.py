@@ -97,7 +97,9 @@ def test_the_cpp_twin_carries_the_python_numbers():
 def test_the_shape_is_set_on_the_beauty_path_only_and_recorded():
     readability = _function(WEATHER_CPP, "void FFlightSimWeather::ApplyBeautyRainReadability(")
     assert "BeautyRainShape(RainRateMmh, Particles)" in readability
-    for name in ("Density", "NearThin", "MaxStreak", "MaxCoverage", "DepthFade", "Soft", "Vary",
+    # MaxStreak is set per frame in Advance, scaled by the lens (lane D, round 9's #07).
+    assert "BeautyMaxStreakRad = Shape.MaxStreakRad;" in readability
+    for name in ("Density", "NearThin", "MaxCoverage", "DepthFade", "Soft", "Vary",
                  "SkyRadianceScale"):
         assert f'RainMaterial->SetScalarParameterValue(TEXT("{name}")' in readability, name
         # Nowhere else: the measure path keeps the material's defaults.

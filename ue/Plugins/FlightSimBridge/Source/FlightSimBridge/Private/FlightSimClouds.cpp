@@ -1335,10 +1335,34 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 				HazeRow->SetNumberField(TEXT("fog_height_falloff"), Falloff);
 				HazeRow->SetNumberField(TEXT("camera_above_fog_m"), AboveFogM);
 				HazeRow->SetNumberField(TEXT("column_m"), ColumnM);
+				// Round 12's #15 (a pale white fog under the storm deck): the fog's light
+				// is the CLEAR sky's ambient above the deck and the sun's lobe; under a
+				// drawn deck, the deck's diffuse transmission instead and no sun lobe
+				// (rain_veil.STORM_FOG_AMBIENT_RGB).
+				if (bDeckAbove)
+				{
+					const FLinearColor Ambient(0.20f, 0.21f, 0.23f);
+					HazeRow->SetStringField(TEXT("sky_atmosphere_ambient_scale_before"),
+						Fog->SkyAtmosphereAmbientContributionColorScale.ToString());
+					Fog->SetSkyAtmosphereAmbientContributionColorScale(Ambient);
+					Fog->SetDirectionalInscatteringColor(FLinearColor::Black);
+					HazeRow->SetStringField(TEXT("sky_atmosphere_ambient_scale"), Ambient.ToString());
+					HazeRow->SetBoolField(TEXT("directional_inscattering_off"), true);
+				}
 				HazeRows.Add(MakeShared<FJsonValueObject>(HazeRow));
 			}
 			Haze->SetArrayField(TEXT("height_fog"), HazeRows);
 			Haze->SetNumberField(TEXT("rain_rate_mmh"), HazeRate);
+			// The volumetric fog's sun light under the deck (rain_veil.STORM_SUN_FOG_SHARE).
+			if (bDeckAbove && Scene.Sun != nullptr && Scene.Sun->GetLightComponent() != nullptr)
+			{
+				constexpr double StormSunFogShare = 0.15;
+				ULightComponent* Beam = Scene.Sun->GetLightComponent();
+				Haze->SetNumberField(TEXT("sun_volumetric_scattering_before"), Beam->VolumetricScatteringIntensity);
+				Beam->SetVolumetricScatteringIntensity(
+					static_cast<float>(Beam->VolumetricScatteringIntensity * StormSunFogShare));
+				Haze->SetNumberField(TEXT("sun_volumetric_scattering"), Beam->VolumetricScatteringIntensity);
+			}
 		}
 		Haze->SetStringField(TEXT("law"),
 			TEXT("rain_veil.rain_haze_fog: in a storm preset with rain and no stated visibility, the fog's falloff "

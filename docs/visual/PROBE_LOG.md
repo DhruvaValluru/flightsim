@@ -3147,6 +3147,36 @@ Probes, in order: #15, #09, #07 and #06 at beauty, each against `FLIGHTSIM_RAIN_
 * Knobs: rain_veil.VEIL_BETA_A (haze), VEIL_STREAK_ALPHA, SCUD_ALPHA,
   weather_look.BEAUTY_RAIN_RADIANCE, storm_cell.BEAUTY_CURTAIN.
 
+**Round 12's #15 (ran lane D: storm preset, rain_haze 0.012 -> 0.034, veil on) read as a
+pale white fog with white cartoon puffs and vertical dashes; round 9's #07 a grey void of
+wide bars.** Causes, read from the code:
+* White haze: the physical sky lights the height fog by the SkyAtmosphere's ambient
+  (FlightSimSky.cpp sets SkyAtmosphereAmbientContributionColorScale to white and the fog's
+  own inscatter colour to black). That ambient is the CLEAR sky above the deck, and the
+  sun's directional inscattering lobe is not shadowed by the deck either. Raising the rain
+  haze to 0.034 therefore filled the frame with clear-sky light. The volumetric fog also
+  took the sun at 1 / 0.48 (the wet rows' compensation).
+  Fix: under a drawn storm deck, the ambient scale becomes (0.20, 0.21, 0.23), the deck's
+  diffuse transmission. The sun lobe is turned off, and the sun's volumetric scattering is
+  cut to 0.15 of the compensated value (recorded in rain_haze.height_fog[] and
+  sun_volumetric_scattering).
+* White puffs: the scud cards were lit per pixel by the sun the deck should hide, at albedo
+  0.85, and their shape was an ellipse from the falloff. Fix: the base colour is x Shade
+  (0.3 under a deck, 0.6 in open rain). The cards are torn by a second noise and are mostly
+  noise-shaped, with a ragged underside (M_ScudCard 2).
+* No wind slant: #15 flies into the wind, so the wind lies along the view, and the
+  cinematic style drops the camera's motion, so the streaks fell straight down. Fix: the
+  beauty keeps 0.15 of the camera's motion (19 m/s at 128 m/s), so streaks rush back from
+  the direction of travel. Separately, the curtain's streak frame was world-fixed: it
+  collapsed to bars where a shell faces the wind axis. It now uses the shell's surface
+  frame (arc, height) along the projected fall velocity (M_RainCurtain 2).
+* #07's bars: the curtain cell (0.0015 rad) and the drop streak cap (0.045 rad) were angles,
+  about 7x too big through the 250 mm lens. Both now scale with the pixel angle: 2 px
+  curtain streaks, and the cap is held at 54 deg / 1280 px and shrinks with longer lenses.
+* Exposure: lane A's subject meter is not changed here. With the fog lit by the deck, the
+  frame around the 747 should now sit darker than the aircraft.
+Re-probe #15 and #07 at beauty, plus #09.
+
 ## lane A: aircraft too shadowed (2026-11-11)
 
 Owner: "the planes are being too shadowed". Round 5 (f7232cc7): #06 (A320, SFO, moderate rain)

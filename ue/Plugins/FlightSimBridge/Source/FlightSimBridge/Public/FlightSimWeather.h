@@ -352,7 +352,8 @@ private:
 	FVector WindEngineCmPerS(const FVector& CameraEnu) const;
 	double ShaftShare(const FVector& CameraEnu) const;
 	void StartRainNoise();
-	void StepBeautyRainVeil(const FFlightSimWeatherView& View, const FVector& Wind, double Share);
+	void StepBeautyRainVeil(const FFlightSimWeatherView& View, const FVector& Wind, const FVector& CamVel,
+	                        double Share, double PixelAngle);
 	void PlayThunder(UWorld* World, const FFlightSimFlash& Flash, const FVector& ListenerEnu,
 	                 double NowSeconds);
 
@@ -448,6 +449,12 @@ private:
 	double ScudDatumZCm = 0.0;
 	uint64 ScudSeed = 0;
 	double BeautyFilm = 0.0;   // the windscreen water film (0 but on the beauty path)
+	// Round 12 follow-up, all 0 / 1 but on the beauty path: the share of the camera's
+	// motion the cinematic streaks keep, the streak cap scaled by the lens per frame,
+	// and the veil's shade.
+	double BeautyCameraShare = 0.0;
+	double BeautyMaxStreakRad = 0.0;
+	double VeilShade = 1.0;
 
 	// -- lightning -----------------------------------------------------------
 	FFlightSimLightCurve Curve;

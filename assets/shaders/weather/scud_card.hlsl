@@ -5,6 +5,12 @@
 // the card (stretched 2.5x along it, slowly boiling in time) cut against a radial
 // falloff, so the edge is ragged and soft and the middle thin in places, never a
 // disc or a square.
+// Round 12 (#15: "bright white cartoon cumulus puffs"): the falloff carried the
+// shape (0.55 of it against a 5 x 2-cell noise: an ellipse with a soft rim). Now
+// the noise carries it: 9 x 3 cells, a second fbm tears holes through the middle
+// (TEAR 0.6), the falloff only fades the card's edge (0.25) and is flat-bottomed
+// (the lower half fades over less: a torn, ragged underside, wispier top),
+// and the cut is narrower (0.55..0.68): rags and streamers, not puffs.
 //
 // Inputs (the Custom node's, named exactly so):
 //   UV      float2  UV0: 0..1 across and up the card
@@ -51,7 +57,7 @@ if (Card.x <= 0.0)
 }
 uint seed = (uint)(Card.y * 16777216.0);
 float2 c = (UV - 0.5) * 2.0;
-float3 p = float3(UV.x * 5.0, UV.y * 2.0, Time * 0.05);
+float3 p = float3(UV.x * 9.0, UV.y * 3.0, Time * 0.05);
 float n = 0.0;
 float amp = 0.5;
 [unroll] for (int k = 0; k < 4; ++k)
@@ -61,6 +67,8 @@ float amp = 0.5;
 	amp *= 0.5;
 }
 n /= 0.9375;
-float falloff = 1.0 - dot(c, c);
-float rag = S.Ss(0.35, 0.75, n + 0.55 * falloff - 0.3);
+float tear = S.Value(float3(UV.x * 4.0, UV.y * 1.5, Time * 0.03), seed + 11u);
+float cy = c.y < 0.0 ? c.y * 1.3 : c.y * 0.9;
+float falloff = saturate(1.0 - (c.x * c.x + cy * cy));
+float rag = S.Ss(0.55, 0.68, n - 0.6 * (1.0 - tear) * 0.5 + 0.25 * falloff) * S.Ss(0.0, 0.25, falloff);
 return rag * Card.x;

@@ -206,6 +206,15 @@ namespace
 
 // -- the closed forms ----------------------------------------------------------
 
+// Round 12 follow-up (rain_veil.BEAUTY_CAMERA_MOTION_SHARE, BEAUTY_REFERENCE_PIXEL_RAD):
+// read by the beauty rain shape below and by Advance.
+namespace FlightSimRainVeil
+{
+	constexpr double BeautyCameraMotionShare = 0.15;
+	// 2 tan(27 deg) / 1280: the pixel angle of 54 deg over 1280 px.
+	constexpr double BeautyReferencePixelRad = 0.000796133514835045;
+}
+
 void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 {
 	// Visual overhaul, world lane (2026-11-09): BEAUTY ONLY (FFlightSimWorldBeauty
@@ -235,7 +244,10 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		RainMaterial->SetScalarParameterValue(TEXT("Density"), static_cast<float>(Shape.DensityShare));
 		RainMaterial->SetScalarParameterValue(TEXT("NearThin"),
 		                                      static_cast<float>(Shape.NearThinM * WeatherCmPerMetre));
-		RainMaterial->SetScalarParameterValue(TEXT("MaxStreak"), static_cast<float>(Shape.MaxStreakRad));
+		// The streak cap is set per frame in Advance, scaled by the lens (round 9's #07).
+		BeautyMaxStreakRad = Shape.MaxStreakRad;
+		// Round 12's #15: the cinematic streaks keep a share of the camera's motion.
+		BeautyCameraShare = FlightSimRainVeil::BeautyCameraMotionShare;
 		RainMaterial->SetScalarParameterValue(TEXT("MaxCoverage"), static_cast<float>(Shape.MaxCoverage));
 		RainMaterial->SetScalarParameterValue(TEXT("DepthFade"),
 		                                      static_cast<float>(Shape.DepthFadeM * WeatherCmPerMetre));
@@ -256,6 +268,8 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		ShapeRow->SetNumberField(TEXT("drawn_drops"), FMath::RoundToDouble(Shape.DensityShare * Particles));
 		ShapeRow->SetNumberField(TEXT("near_thin_m"), Shape.NearThinM);
 		ShapeRow->SetNumberField(TEXT("max_streak_rad"), Shape.MaxStreakRad);
+		ShapeRow->SetNumberField(TEXT("max_streak_reference_pixel_rad"), FlightSimRainVeil::BeautyReferencePixelRad);
+		ShapeRow->SetNumberField(TEXT("camera_motion_share"), BeautyCameraShare);
 		ShapeRow->SetNumberField(TEXT("max_coverage"), Shape.MaxCoverage);
 		ShapeRow->SetNumberField(TEXT("depth_fade_m"), Shape.DepthFadeM);
 		ShapeRow->SetNumberField(TEXT("softness"), Shape.Softness);
@@ -328,7 +342,9 @@ namespace FlightSimRainVeil
 	constexpr double VeilHeightRadii = 1.5;
 	constexpr double VeilBetaA = 0.35;
 	constexpr double VeilBetaB = 0.66;
-	constexpr double VeilStreakRad = 0.0015;
+	constexpr double VeilStreakPixels = 2.0;
+	constexpr double VeilShadeUnderDeck = 0.3;
+	constexpr double VeilShadeOpen = 0.6;
 	constexpr double VeilStreakDensityA = 0.08;
 	constexpr double VeilStreakDensityMax = 0.6;
 	constexpr double VeilStreakAlpha = 0.25;
@@ -440,6 +456,9 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 	VeilActor->SetRootComponent(VeilRoot);
 	VeilRoot->SetMobility(EComponentMobility::Movable);
 	VeilRoot->RegisterComponent();
+	// Round 12: the veil and the scud in the deck's shade (rain_veil.veil_shade).
+	VeilShade = bDeck && DeckBaseM > AircraftUpM ? VeilShadeUnderDeck : VeilShadeOpen;
+	Row->SetNumberField(TEXT("shade"), VeilShade);
 	const double D0 = FMath::Max(D0Mm, 0.5);
 	const double FallCmps = TerminalVelocityMps(D0) * FallSpeedFactor * WeatherCmPerMetre;
 	TArray<TSharedPtr<FJsonValue>> Shells;
@@ -475,7 +494,7 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 		const double Inner = Shell > 0 ? Radii[Shell - 1] : 0.0;
 		const double Veil = ShellVeilAlpha(RainRateMmh, Inner, Radii[Shell]);
 		Material->SetScalarParameterValue(TEXT("Radius"), static_cast<float>(R));
-		Material->SetScalarParameterValue(TEXT("StreakRad"), static_cast<float>(VeilStreakRad));
+		Material->SetScalarParameterValue(TEXT("Shade"), static_cast<float>(VeilShade));
 		Material->SetScalarParameterValue(TEXT("StreakDensity"), static_cast<float>(StreakDensity(RainRateMmh)));
 		Material->SetScalarParameterValue(TEXT("StreakAlpha"), static_cast<float>(VeilStreakAlpha));
 		Material->SetScalarParameterValue(TEXT("Veil"), static_cast<float>(Veil));
@@ -547,6 +566,7 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 	ScudMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	ScudMesh->SetCastShadow(false);
 	ScudMaterial = UMaterialInstanceDynamic::Create(ScudBase, ScudActor);
+	ScudMaterial->SetScalarParameterValue(TEXT("Shade"), static_cast<float>(VeilShade));
 	ScudMesh->SetMaterial(0, ScudMaterial);
 	ScudMesh->RegisterComponent();
 	Row->SetNumberField(TEXT("scud_cards"), ScudCards);
@@ -560,7 +580,8 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 	return true;
 }
 
-void FFlightSimWeather::StepBeautyRainVeil(const FFlightSimWeatherView& View, const FVector& Wind, double Share)
+void FFlightSimWeather::StepBeautyRainVeil(const FFlightSimWeatherView& View, const FVector& Wind,
+                                           const FVector& CamVel, double Share, double PixelAngle)
 {
 	using namespace FlightSimRainVeil;
 	if (VeilActor != nullptr)
@@ -572,7 +593,9 @@ void FFlightSimWeather::StepBeautyRainVeil(const FFlightSimWeatherView& View, co
 			UMaterialInstanceDynamic* Material = VeilShellMaterials[Shell];
 			const double Inner = Shell > 0 ? VeilShellRadiiM[Shell - 1] : 0.0;
 			Material->SetScalarParameterValue(TEXT("Time"), static_cast<float>(View.TimeSeconds));
-			Material->SetVectorParameterValue(TEXT("WindVel"), WeatherColour(Wind));
+			// The drops' path as the beauty's streaks draw it (the cinematic share of the camera's motion).
+			Material->SetVectorParameterValue(TEXT("WindVel"), WeatherColour(Wind - CamVel));
+			Material->SetScalarParameterValue(TEXT("StreakRad"), static_cast<float>(VeilStreakPixels * PixelAngle));
 			Material->SetScalarParameterValue(TEXT("GroundRelZ"), static_cast<float>(View.GroundZCm - View.CameraCm.Z));
 			Material->SetScalarParameterValue(TEXT("Veil"),
 				static_cast<float>(ShellVeilAlpha(Rate, Inner, VeilShellRadiiM[Shell])));
@@ -2359,7 +2382,8 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 	PreviousCameraVelocity = CameraVelocity;
 	if (bCinematicRain)
 	{
-		CameraVelocity = FVector::ZeroVector;
+		// BeautyCameraShare is 0 but on the beauty path (rain_veil.BEAUTY_CAMERA_MOTION_SHARE).
+		CameraVelocity = CameraVelocity * BeautyCameraShare;
 	}
 	if (Dt > 0.0)
 	{
@@ -2474,9 +2498,15 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 		RainMaterial->SetScalarParameterValue(TEXT("Active"), static_cast<float>(Share));
 		RainMaterial->SetScalarParameterValue(TEXT("GroundRelZ"), static_cast<float>(GroundRelZ));
 		RainMaterial->SetScalarParameterValue(TEXT("FlashLux"), static_cast<float>(FlashLux));
+		if (BeautyMaxStreakRad > 0.0)
+		{
+			// rain_veil.streak_cap_rad: the cap at the reference pixel, scaled down with a longer lens.
+			RainMaterial->SetScalarParameterValue(TEXT("MaxStreak"), static_cast<float>(
+				BeautyMaxStreakRad * FMath::Min(1.0, PixelAngle / FlightSimRainVeil::BeautyReferencePixelRad)));
+		}
 	}
 	// Lane D: the beauty rain veil (nothing unless FFlightSimWorldBeauty built it).
-	StepBeautyRainVeil(View, Wind, Share);
+	StepBeautyRainVeil(View, Wind, CameraVelocity, Share, PixelAngle);
 	if (NiagaraRain != nullptr)
 	{
 		NiagaraRain->SetWorldLocation(View.CameraCm);

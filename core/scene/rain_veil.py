@@ -57,8 +57,10 @@ VEIL_HEIGHT_RADII = 1.5
 #: visibility in heavy and in tropical rain. A STATED fit, not a measurement.
 VEIL_BETA_A = 0.35
 VEIL_BETA_B = 0.66
-#: The streak cell's angular width (rad): about two pixels at 1280 px over 54 deg.
-VEIL_STREAK_RAD = 0.0015
+#: The streak cell's width in PIXELS (the shader's StreakRad is set per frame as this x
+#: the view's pixel angle: round 9's #07 through a 250 mm lens drew a fixed 0.0015 rad
+#: as 14 px bars).
+VEIL_STREAK_PIXELS = 2.0
 #: A streak cell is this many widths long (before the per-streak length draw).
 VEIL_STREAK_ASPECT = 60.0
 #: The share of streak cells that hold a streak: STREAK_DENSITY_A x sqrt(R), capped.
@@ -84,6 +86,32 @@ SCUD_EDGE_SHARE = 0.15
 #: (world_beauty.SEVERE_RAIN_MMH) -- or any storm.
 SCUD_MIN_RAIN_MMH = 8.0
 SCUD_SEED_SALT = 0x5C0D
+
+#: Round 12's #15 (lane D follow-up): the veil and the scud drew WHITE -- lit per pixel
+#: by the sun the deck should hide (forward shading takes the directional light) --
+#: "bright white cartoon cumulus puffs" in a pale fog. Their base colour is scaled by
+#: Shade: under a drawn deck (the light there is the deck's diffuse transmission) and
+#: in the open rain. UNCALIBRATED.
+VEIL_SHADE_UNDER_DECK = 0.3
+VEIL_SHADE_OPEN = 0.6
+#: The beauty's cinematic rain keeps this share of the camera's own motion: round 12's
+#: #15 flew INTO the wind, so the wind lay along the view and the cinematic streaks
+#: (the camera's motion left out) fell straight down. A little of the aircraft's
+#: 128 m/s (19 m/s) tilts every streak away from the direction of travel, as rain
+#: rushes past in a photograph from an aircraft; the measure path's style is unchanged.
+BEAUTY_CAMERA_MOTION_SHARE = 0.15
+#: The beauty streak cap (weather_look.beauty_rain_shape max_streak_rad) is an angle at
+#: this pixel angle (54 deg over 1280 px); a longer lens scales it down with the pixel,
+#: so round 9's #07 (250 mm) draws streaks of the same on-screen length, not bars.
+BEAUTY_REFERENCE_PIXEL_RAD = 2.0 * math.tan(math.radians(27.0)) / 1280.0
+#: Under a drawn storm deck the height fog's light (round 12: a pale white fog): the
+#: physical sky lights the fog by the SkyAtmosphere's ambient (FlightSimSky.cpp:
+#: SkyAtmosphereAmbientContributionColorScale white), the CLEAR sky above the deck, and
+#: by the sun's directional inscattering lobe, neither of which the deck shadows. The
+#: beauty scales the ambient to the deck's diffuse transmission (a cool grey), turns the
+#: sun lobe off, and cuts the sun's share of the volumetric fog's light. UNCALIBRATED.
+STORM_FOG_AMBIENT_RGB = (0.20, 0.21, 0.23)
+STORM_SUN_FOG_SHARE = 0.15
 
 #: The windscreen's water film (M_WindshieldRain 3, windshield_film.hlsl: the
 #: pinned CC0 ambientCG "Leaking 019 C" maps) on a cockpit camera's beauty glass:
@@ -208,3 +236,15 @@ def rain_haze_fog(rate_mmh: float, camera_above_fog_m: float, column_m: float,
     above = max(float(camera_above_fog_m), 0.0)
     density = beta_per_m / FOG_BETA_PER_DENSITY * 2.0 ** (falloff / 10.0 * above)
     return {"density": max(float(fog_density), density), "falloff": falloff}
+
+
+def veil_shade(deck_above: bool) -> float:
+    """The veil's and the scud's base-colour scale: VEIL_SHADE_UNDER_DECK under a drawn
+    deck, VEIL_SHADE_OPEN otherwise."""
+    return VEIL_SHADE_UNDER_DECK if deck_above else VEIL_SHADE_OPEN
+
+
+def streak_cap_rad(max_streak_rad: float, pixel_angle_rad: float) -> float:
+    """The beauty streak cap for a view: scaled by the pixel angle below the reference
+    (a long lens), held above it."""
+    return float(max_streak_rad) * min(1.0, float(pixel_angle_rad) / BEAUTY_REFERENCE_PIXEL_RAD)
