@@ -64,6 +64,8 @@ def test_storm_deck_ground_is_a_grey_of_the_surface_luminance():
     ({"world_preset": "rain", "grade": "storm"}, False),
     ({"world_preset": "clear", "grade": "desert_noon"}, False),
     ({"world_preset": None, "grade": "storm", "grade_basis": "weather event tornado"}, True),
+    # Round 55 (#10): the tornado card's look says "clear" while the world lane draws the storm.
+    ({"world_preset": "clear", "grade": "storm", "grade_basis": "weather event tornado"}, True),
     ({"world_preset": None, "grade": "storm", "grade_basis": "rain is stated"}, False),
     ({}, False),
 ])

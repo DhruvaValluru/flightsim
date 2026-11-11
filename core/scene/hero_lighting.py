@@ -559,9 +559,12 @@ def storm_deck_look(look: Mapping[str, Any]) -> bool:
     """Whether the beauty look (beauty_look.json) is the storm world: its world
     preset is ``storm`` (the world lane's storm deck), or no card named a world
     and the grade is ``storm`` from a storm event (a tornado, a thunderstorm)."""
-    preset = look.get("world_preset")
-    if preset is not None:
-        return str(preset) == "storm"
+    # Round 55: a tornado card's beauty_look.json says world_preset "clear"
+    # with grade "storm" from the weather event, while the world lane draws
+    # the storm deck from the same storm word -- so a storm event wins over
+    # the preset, or the green ground fill stays under the deck (#10).
+    if str(look.get("world_preset") or "") == "storm":
+        return True
     return look.get("grade") == "storm" and str(look.get("grade_basis", "")).startswith("weather event")
 
 
