@@ -206,12 +206,13 @@ SETTINGS: Tuple[Setting, ...] = (
             "Where the pinned sky HDRIs are downloaded and prepared (default %LOCALAPPDATA%\\flightsim\\hdri, "
             "else ~/.cache/flightsim/hdri); never committed."),
     Setting("beauty_post", "FLIGHTSIM_BEAUTY_POST", "dev-only", None,
-            ("scripts/beauty_post.py:73", "webapp/runs.py:3614", "scripts/visual_round.py:150"),
+            ("scripts/beauty_post.py:79", "webapp/runs.py:3616", "scripts/visual_round.py:150"),
             "Round 5 (L5): the post-render beauty pipeline (scripts/beauty_post.py: OIDN denoise on noisy "
             "presets, the film-stock LUT, halation, seeded grain, vignette, optional Real-ESRGAN 4K) over "
             "each beauty frame, writing frame_NNNN_beauty_post.png beside it and its record under "
-            "render.json beauty_post. ``on`` runs every step, ``on,-halation,-upscale`` leaves steps out "
-            "(the A/B pairs), unset or ``off`` runs nothing. Beauty quality only; the original frame and "
+            "render.json beauty_post. ``on`` runs every step but the upscale, ``on,-halation,-lut`` leaves steps out "
+            "(the A/B pairs), ``on,+upscale`` adds the Real-ESRGAN 4K (off by default: it invents detail; "
+            "its record says labels_scale native with the scale factor to beauty_4k), unset or ``off`` runs nothing. Beauty quality only; the original frame and "
             "the labels are never touched. Tools are fetched once into %LOCALAPPDATA%\\\\flightsim\\\\tools "
             "and checked by sha256; a missing one is refused by name."),
     Setting("render_switches", "FLIGHTSIM_RENDER_SWITCHES", "dev-only", None,

@@ -3069,13 +3069,19 @@ The post pipeline (`scripts/beauty_post.py`, `FLIGHTSIM_BEAUTY_POST=on`): OIDN 2
 on 16-bit planar RGB, halation (threshold 0.72, blur 14 px, tint 1/0.35/0.12, screen 12 %),
 seeded grain (strength 6; off while `FILM_GRAIN_IN_ENGINE` and the look's FilmGrainIntensity
 > 0), vignette PI/8 (corners 73 %; PI/6 measured 56 %, too much for the owner's 2026-10-11
-rule), optional Real-ESRGAN x4 then Lanczos to 3840 x 2160. Every step's tool, version, sha256
+rule), and only with `+upscale` (off by default: the frames are ML training data and
+Real-ESRGAN invents detail) Real-ESRGAN x4 then Lanczos to 3840 x 2160, its record stating
+`invents_detail: true`, `labels_scale: "native"`, the native and upscaled sizes and the
+per-axis scale factor (boxes, keypoints and masks stay at the native size; the native-size
+`beauty_post.png` is the post frame that matches them). Every step's tool, version, sha256
 and arguments go to render.json `beauty_post`; the ffmpeg graph was run on a synthetic frame
 with a local ffmpeg 9.0 (identity LUT bit-exact, halation touches the highlight edge only).
 
 Probe r5-post (#01 and #09; `FLIGHTSIM_BEAUTY_POST=on` against `on,-lut`, `on,-halation`,
-`on,-vignette`, and `off`): read `beauty_post.steps[*].ran`, `device_ran` on #09, and the
-`beauty_4k.png` or the named `beauty_post.upscale_vulkan` skip. Pass: the graded frame reads
+`on,-vignette`, and `off`; the upscale separately with `on,+upscale`): read
+`beauty_post.steps[*].ran`, `device_ran` on #09, and, on the `+upscale` run only, the
+`beauty_4k.png` (with `labels_scale` and `scale_factor` in its step) or the named
+`beauty_post.upscale_vulkan` skip; plain `on` writes no `beauty_4k.png`. Pass: the graded frame reads
 as the stock (Portra's soft warm toe on #01, the 2383 print's muted storm on #09) with the
 sky and the white aircraft still neutral; a cast on the white quad means the LUT is being
 applied twice (the host must not set a ColorGradingLUT for the same stock). If the stock

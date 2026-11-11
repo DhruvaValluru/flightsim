@@ -112,15 +112,21 @@ CUBE = REPO / "assets/looks/film/kodak_portra_160.cube"
 
 @pytest.mark.parametrize("value, expect", [
     (None, None), ("", None), ("off", None), ("OFF", None), ("0", None),
-    ("on", frozenset()), ("On", frozenset()),
+    # The upscale is opt-in: ``on`` alone leaves it off (it invents detail).
+    ("on", frozenset({"upscale"})), ("On", frozenset({"upscale"})),
     ("on,-halation,-upscale", frozenset({"halation", "upscale"})),
-    ("on, no-grain ", frozenset({"grain"})),
+    ("on, no-grain ", frozenset({"grain", "upscale"})),
+    ("on,+upscale", frozenset()), ("ON, +Upscale", frozenset()),
+    ("on,+upscale,-halation", frozenset({"halation"})),
+    ("on,+upscale,-upscale", frozenset({"upscale"})),
+    ("on,-upscale,+upscale", frozenset()),
 ])
 def test_the_switch_parses(value, expect):
     assert bp.parse_switch(value) == expect
 
 
-@pytest.mark.parametrize("value", ["maybe", "on,-bloom", "on,halation", "on,-"])
+@pytest.mark.parametrize("value", ["maybe", "on,-bloom", "on,halation", "on,-", "on,+halation",
+                                   "on,+bloom", "on,+", "upscale", "+upscale"])
 def test_a_bad_switch_is_refused_by_name(value):
     with pytest.raises(bp.BeautyPostError) as caught:
         bp.parse_switch(value)
@@ -133,6 +139,15 @@ def test_wanted_reads_the_environment(monkeypatch):
     assert bp.wanted() is None
     monkeypatch.setenv("FLIGHTSIM_BEAUTY_POST", "on,-upscale")
     assert bp.wanted() == frozenset({"upscale"})
+    monkeypatch.setenv("FLIGHTSIM_BEAUTY_POST", "on")
+    assert bp.wanted() == frozenset({"upscale"}), "on alone must not upscale"
+    monkeypatch.setenv("FLIGHTSIM_BEAUTY_POST", "on,+upscale")
+    assert bp.wanted() == frozenset()
+
+
+def test_the_upscale_is_the_only_opt_in_step():
+    assert bp.OPT_IN_STEPS == ("upscale",)
+    assert set(bp.OPT_IN_STEPS) <= set(bp.STEPS)
 
 
 # -- builders --------------------------------------------------------------------------
@@ -229,6 +244,33 @@ def test_a_frame_runs_every_step_and_leaves_the_originals_alone(bundle, tools):
     assert not list(bundle.glob("*_beauty_post_*")), "the scratch folder was removed"
 
 
+def test_the_upscale_record_says_it_invents_detail_and_the_labels_stay_native(bundle, tools):
+    record = bp.post_frame(bundle / "frame_0000.png", cube=CUBE, noisy=False, grain=False,
+                           upscale=True, override=tools)
+    up = next(s for s in record["steps"] if s["step"] == "upscale")
+    assert up["ran"] is True and up["output"] == "frame_0000_beauty_4k.png"
+    assert up["invents_detail"] is True
+    assert up["labels_scale"] == "native"
+    assert up["native_size"] == [32, 16] and up["upscaled_size"] == [3840, 2160]
+    assert up["scale_factor"] == [120.0, 135.0]
+    assert up["labels_frame"] == "frame_0000_beauty_post.png"
+    note = up["labels_note"]
+    for word in ("Boxes", "keypoints", "masks", "native size 32 x 16", "frame_0000_beauty_4k.png",
+                 "scale x by 120", "y by 135", "invents detail"):
+        assert word in note, word
+    # The native-size post frame is the one that matches the labels.
+    with Image.open(bundle / "frame_0000.png") as a, Image.open(bundle / "frame_0000_beauty_post.png") as b:
+        assert a.size == b.size == (32, 16)
+
+
+def test_the_upscale_factor_of_a_16_9_frame_is_even(tmp_path, tools):
+    frame = _frame(tmp_path / "f", size=(1920, 1080))
+    record = bp.post_frame(frame, cube=None, noisy=False, grain=False, upscale=True, override=tools)
+    up = record["steps"][-1]
+    assert up["native_size"] == [1920, 1080] and up["scale_factor"] == [2.0, 2.0]
+    assert "scale x by 2 and y by 2" in up["labels_note"]
+
+
 def test_the_denoiser_falls_back_to_the_cpu_and_says_so(bundle, tools, monkeypatch):
     monkeypatch.setenv("FAKE_OIDN_NO_GPU", "1")
     record = bp.post_frame(bundle / "frame_0000.png", cube=None, noisy=True, grain=False,
@@ -257,6 +299,7 @@ def test_steps_switched_off_are_recorded_as_such(bundle, tools):
     by = {s["step"]: s for s in record["steps"]}
     for step in ("denoise", "halation", "upscale", "lut"):
         assert by[step]["ran"] is False and by[step]["why"] == "switched off", step
+    assert "+upscale" in by["upscale"]["opt_in"]
     assert by["grain"]["ran"] and by["vignette"]["ran"]
     assert not (bundle / "frame_0000_beauty_4k.png").exists()
 
@@ -297,6 +340,7 @@ def test_the_bundle_record_goes_into_render_json(bundle, tools):
     assert record["look"]["world_preset"] == "storm" and record["look"]["film_stock"] == str(CUBE)
     assert record["per_frame"][0]["grain_seed"] == bp.frame_seed(bundle / "frame_0000.png")
     assert "VISUAL ONLY" in record["note"]
+    assert "never frame_NNNN_beauty_4k.png" in record["labels_match"]
 
 
 def test_a_missing_tool_is_refused_by_name_and_recorded(bundle, tmp_path):
@@ -456,6 +500,74 @@ def test_the_web_app_does_nothing_when_the_switch_is_off(monkeypatch, tmp_path):
     assert RunManager._beauty_post(Run(), tmp_path, tmp_path / "beauty_look.json") is None
 
 
+def test_apply_to_run_does_not_upscale_unless_asked(tmp_path, tools):
+    run = tmp_path / "run"
+    _frame(run / "frames" / "chase")
+    records = bp.apply_to_run(run, {}, override=tools)
+    up = records[0]["steps"][-1]
+    assert up["step"] == "upscale" and up["ran"] is False and up["why"] == "not asked for"
+    assert not list(run.rglob("*_beauty_4k.png"))
+    assert records[0]["look"]["upscale"] is False
+
+
+def test_the_command_line_does_not_upscale_unless_asked(tmp_path, tools):
+    run = tmp_path / "run"
+    _frame(run / "frames" / "chase")
+    tool_args = [f"--tool={k}={v}" for k, v in tools.items()]
+    assert bp.main([str(run), "--no-fetch", *tool_args]) == 0
+    assert not list(run.rglob("*_beauty_4k.png"))
+    assert bp.main([str(run), "--no-fetch", "--upscale", *tool_args]) == 0
+    assert list(run.rglob("*_beauty_4k.png"))
+
+
+def _web_app_run(tmp_path):
+    from core.scene import beauty_look as bl
+
+    out = tmp_path / "run"
+    _frame(out / "frames" / "chase")
+    (out / "frames" / "chase" / "render.json").write_text("{}", encoding="ascii")
+    plan = bl.plan_beauty_look(40.0, fps=30, width_px=1920)
+    (out / "beauty_look.json").write_text(json.dumps(plan), encoding="ascii")
+    return out
+
+
+class _Run:
+    def __init__(self):
+        self.conditions, self.events = {}, []
+
+    def push(self, status, detail=""):
+        self.events.append((status, detail))
+
+
+def test_the_web_app_does_not_upscale_on_plain_on(monkeypatch, tmp_path, tools):
+    monkeypatch.setenv("FLIGHTSIM_BEAUTY_POST", "on")
+    from webapp.runs import RunManager
+
+    out = _web_app_run(tmp_path)
+    run = _Run()
+    records = RunManager._beauty_post(run, out, out / "beauty_look.json", override=tools)
+    assert records and not list(out.rglob("*_beauty_4k.png"))
+    assert "upscale" not in " ".join(d for _, d in run.events)
+    record = json.loads((out / "frames" / "chase" / "render.json").read_text(encoding="utf-8"))["beauty_post"]
+    assert "upscale" in record["steps_off"]
+    assert next(s for s in record["steps"] if s["step"] == "upscale")["ran"] is False
+
+
+def test_the_web_app_upscales_on_plus_upscale_and_records_the_scale(monkeypatch, tmp_path, tools):
+    monkeypatch.setenv("FLIGHTSIM_BEAUTY_POST", "on,+upscale")
+    from webapp.runs import RunManager
+
+    out = _web_app_run(tmp_path)
+    run = _Run()
+    RunManager._beauty_post(run, out, out / "beauty_look.json", override=tools)
+    assert (out / "frames" / "chase" / "frame_0000_beauty_4k.png").is_file()
+    record = json.loads((out / "frames" / "chase" / "render.json").read_text(encoding="utf-8"))["beauty_post"]
+    up = next(s for s in record["steps"] if s["step"] == "upscale")
+    assert up["ran"] is True and up["invents_detail"] is True and up["labels_scale"] == "native"
+    assert up["native_size"] == [32, 16] and up["upscaled_size"] == [3840, 2160]
+    assert "invents detail" in " ".join(d for _, d in run.events)
+
+
 def test_the_web_app_runs_it_when_on(monkeypatch, tmp_path, tools):
     monkeypatch.setenv("FLIGHTSIM_BEAUTY_POST", "on,-upscale")
     from core.scene import beauty_look as bl
@@ -513,3 +625,80 @@ def test_visual_round_carries_the_post_frames(tmp_path, tools, monkeypatch):
     # Off: the round is written as before, no post files.
     out = vr.write_round(6, gallery, summary, tmp_path / "docs", runs, post=None)
     assert not (out / "contact_post.jpg").exists() and (out / "contact.jpg").is_file()
+
+
+# -- the labels are never touched, by any step -----------------------------------------------
+
+#: The label and pass files a render bundle carries (FlightSimRenderCommandlet.cpp
+#: writes them beside each frame; the capture manifest holds the boxes and
+#: keypoints). beauty_post must neither open nor write any of them.
+LABEL_FILES = ("frame_0000_mask.png", "frame_0000_class.png", "frame_0000_depth.png",
+               "frame_0000_depth.f32", "frame_0000_landcover_id.png", "frame_0000_landcover.png",
+               "frame_0000_flow.f32", "frame_0000_velocity.f32", "frame_0000_normal.f32",
+               "frame_0000_basecolor.f32", "frame_0000_linear.exr", "capture_manifest.json")
+#: The denoiser's guide AOVs: read (never written) when present, by design.
+AOV_GUIDES = ("frame_0000_albedo.png", "frame_0000_normal.png")
+
+
+def test_no_step_reads_or_writes_a_label_file(tmp_path, tools, monkeypatch):
+    import builtins
+    import io
+
+    frames = tmp_path / "run" / "frames" / "chase"
+    _frame(frames)
+    for name in LABEL_FILES:
+        if name.endswith(".png"):
+            _frame(frames, name)
+        else:
+            (frames / name).write_bytes(b"label bytes " + name.encode())
+    for name in AOV_GUIDES:
+        _frame(frames, name)
+    host = {"render_quality": "beauty",
+            "labels": {"boxes": [[1.25, 2.5, 30.0, 14.75]], "keypoints": [[3.0, 4.0]],
+                       "mask": "frame_0000_mask.png"}}
+    (frames / "render.json").write_text(json.dumps(host), encoding="ascii")
+    before = _digests(frames)
+    stamps = {p.name: p.stat().st_mtime_ns for p in frames.iterdir()}
+
+    opened = []
+    real_open, real_io_open = builtins.open, io.open
+
+    def spy(real):
+        def wrapped(file, mode="r", *a, **kw):
+            opened.append((Path(str(file)).name, mode))
+            return real(file, mode, *a, **kw)
+        return wrapped
+
+    monkeypatch.setattr(builtins, "open", spy(real_open))
+    monkeypatch.setattr(io, "open", spy(real_io_open))
+    commands = []
+
+    def runner(args):
+        commands.append([str(a) for a in args])
+        return bp._run(args)
+
+    record = bp.apply_to_bundle(frames, cube=CUBE, noisy=True, grain=True, upscale=True,
+                                override=tools, runner=runner)
+    monkeypatch.setattr(builtins, "open", real_open)
+    monkeypatch.setattr(io, "open", real_io_open)
+
+    ran = [s["step"] for s in record["steps"] if s.get("ran")]
+    assert ran == ["denoise", "lut", "halation", "grain", "vignette", "ffmpeg_pass", "upscale"]
+    assert record["steps"][0]["aovs"] == ["albedo", "normal"]
+    labels = set(LABEL_FILES)
+    assert not [o for o in opened if o[0] in labels], "a label file was opened"
+    assert all("r" in mode and "w" not in mode and "+" not in mode
+               for name, mode in opened if name in AOV_GUIDES), opened
+    for args in commands:
+        assert not any(Path(a).name in labels or Path(a).name in AOV_GUIDES for a in args), args
+    after = _digests(frames)
+    for name in (*LABEL_FILES, *AOV_GUIDES, "frame_0000.png"):
+        assert after[name] == before[name], name
+        assert (frames / name).stat().st_mtime_ns == stamps[name], name
+    new = {n for n in set(after) - set(before) if not n.endswith(".args.json")}  # the fake's trace
+    assert new == {"frame_0000_beauty_post.png", "frame_0000_beauty_4k.png"}, new
+    payload = json.loads((frames / "render.json").read_text(encoding="ascii"))
+    assert {k: v for k, v in payload.items() if k != "beauty_post"} == host, \
+        "the host's render.json (and any label in it) is kept byte for byte in value"
+    # Every frame the pipeline takes is a beauty frame, never a label pass.
+    assert [p.name for p in bp.frames_in(frames)] == ["frame_0000.png"]

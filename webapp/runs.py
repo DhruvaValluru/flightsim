@@ -3600,7 +3600,8 @@ class RunManager:
     def _beauty_post(run, out: Path, beauty_look: Path, **post_kw) -> Optional[List[Dict]]:
         """Round 5 (L5): scripts/beauty_post.py over the run's render bundles
         when FLIGHTSIM_BEAUTY_POST says so (``on``, with ``-<step>`` words
-        for steps to leave out); None when it is off. The beauty look's
+        for steps to leave out and ``+upscale`` for the opt-in Real-ESRGAN
+        4K, which invents detail and is off by default); None when it is off. The beauty look's
         sidecar chooses the film stock, whether the frame is noisy enough
         to denoise and whose grain it carries. A refusal is recorded in
         render.json by the pipeline and named in the run's events.
@@ -3618,11 +3619,15 @@ class RunManager:
             return None
         if off is None:
             return None
+        upscale = "upscale" not in off
         run.push("beauty_post", "post-render beauty pipeline: denoise, film grade, "
-                                "halation, grain, vignette, 4K (beauty_post.png beside each frame)")
+                                "halation, grain, vignette"
+                                + (", 4K upscale (invents detail; labels stay at the native size)"
+                                   if upscale else "")
+                                + " (beauty_post.png beside each frame)")
         plan = json.loads(Path(beauty_look).read_text(encoding="ascii"))
         try:
-            records = beauty_post.apply_to_run(out, plan, off=off, **post_kw)
+            records = beauty_post.apply_to_run(out, plan, off=off, upscale=upscale, **post_kw)
         except beauty_post.BeautyPostError as exc:
             run.push("beauty_post", f"refused, {exc.constraint}: {exc.message}")
             return None

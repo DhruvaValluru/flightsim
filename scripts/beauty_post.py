@@ -5,11 +5,13 @@ Visual round 5, lane L5. Runs on the Windows render machine after each
 beauty frame when ``FLIGHTSIM_BEAUTY_POST=on`` (webapp/runs.py after the
 render, scripts/visual_round.py for the round's gallery). For every
 ``frame_NNNN.png`` it writes ``frame_NNNN_beauty_post.png`` beside it (and
-``frame_NNNN_beauty_4k.png`` when the upscale runs). The original beauty
-frame and every label pass are never opened for writing: labels must match
+``frame_NNNN_beauty_4k.png`` when the opt-in upscale runs). The original
+beauty frame and every label pass are never opened: labels must match
 pixels, and this pipeline moves and invents pixels, so its output is a
 separate file and its record is in render.json under ``beauty_post``
-(each step, its tool's version and sha256, its arguments).
+(each step, its tool's version and sha256, its arguments). The output is ML
+training data: ``frame_NNNN_beauty_post.png`` keeps the frame's native size,
+so it is the post frame the boxes, keypoints and masks match.
 
 The steps, in order (each has an off word, see :func:`parse_switch`):
 
@@ -29,10 +31,14 @@ The steps, in order (each has an off word, see :func:`parse_switch`):
    (core/scene/beauty_look.py FILM_GRAIN_IN_ENGINE and the look's
    FilmGrainIntensity); the record says which.
 5. ``vignette`` ffmpeg ``vignette``, subtle (angle PI/8, corners at 73 %).
-6. ``upscale``  Real-ESRGAN-ncnn-vulkan x4 then a Lanczos resize to
-   3840 x 2160, written as ``frame_NNNN_beauty_4k.png``. A Vulkan failure on
-   the Intel chip is recorded by name (``beauty_post.upscale_vulkan``) and
-   the step skipped; the other steps' output stands.
+6. ``upscale``  OFF unless asked for (``on,+upscale``): Real-ESRGAN invents
+   detail no render drew. Real-ESRGAN-ncnn-vulkan x4 then a Lanczos resize to
+   3840 x 2160, written as ``frame_NNNN_beauty_4k.png``. Its record says
+   ``invents_detail: true`` and ``labels_scale: "native"`` with the native
+   and upscaled sizes and the factor a box, keypoint or mask must be scaled
+   by to match the 4K file. A Vulkan failure on the Intel chip is recorded
+   by name (``beauty_post.upscale_vulkan``) and the step skipped; the other
+   steps' output stands.
 
 Tools (:data:`TOOLS`) are pinned release zips with their sha256, fetched
 once into ``%LOCALAPPDATA%\\flightsim\\tools`` (``~/.cache/flightsim/tools``
@@ -42,7 +48,7 @@ A tool that is missing and cannot be fetched is refused by name
 and refused (``beauty_post.tool_checksum``). Nothing is skipped silently.
 
     python scripts/beauty_post.py <run dir or frames dir> [--look beauty_look.json]
-        [--off halation,upscale] [--tool ffmpeg=/path/ffmpeg] [--no-fetch]
+        [--off halation,vignette] [--upscale] [--tool ffmpeg=/path/ffmpeg] [--no-fetch]
 """
 from __future__ import annotations
 
@@ -67,11 +73,15 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[1]
 
 BEAUTY_POST_VERSION = 1
-#: The environment switch (core/config_surface.py): ``on`` runs every step,
-#: ``on,-halation,-upscale`` (or ``no-halation``) runs all but those, ``off``
-#: or unset runs nothing.
+#: The environment switch (core/config_surface.py): ``on`` runs every step
+#: but the opt-in ones, ``on,-halation`` (or ``no-halation``) leaves steps
+#: out, ``on,+upscale`` adds an opt-in step, ``off`` or unset runs nothing.
 ENV_SWITCH = "FLIGHTSIM_BEAUTY_POST"
 STEPS = ("denoise", "lut", "halation", "grain", "vignette", "upscale")
+#: Steps that run only when a ``+<step>`` word asks for them. The upscale
+#: invents detail (Real-ESRGAN hallucinates texture) and changes the pixel
+#: grid the labels are measured on, so ``on`` alone never runs it.
+OPT_IN_STEPS = ("upscale",)
 #: World presets (core/scene/world_beauty.py PRESETS, recorded in the beauty
 #: look as world_preset) whose frames are noisy enough to denoise: fog,
 #: rain, storm. A clear or overcast frame keeps its pixels.
@@ -155,22 +165,33 @@ class BeautyPostError(RuntimeError):
 
 def parse_switch(value: Optional[str]) -> Optional[FrozenSet[str]]:
     """``FLIGHTSIM_BEAUTY_POST`` -> the steps switched OFF (a frozenset) when
-    the pipeline runs, None when it does not. ``on`` runs everything;
-    ``on,-halation,no-upscale`` runs all but those; ``off`` or empty runs
-    nothing. An unknown word is refused by name (beauty_post.switch)."""
+    the pipeline runs, None when it does not. ``on`` runs every step but the
+    opt-in ones (:data:`OPT_IN_STEPS`: the upscale), so ``on`` is
+    ``{"upscale"}``; ``on,-halation,no-grain`` leaves those out too;
+    ``on,+upscale`` runs the upscale as well; ``off`` or empty runs nothing.
+    Words apply left to right. An unknown word, or ``+`` on a step that is
+    not opt-in, is refused by name (beauty_post.switch)."""
     words = [w.strip().lower() for w in str(value or "").split(",") if w.strip()]
     if not words or words[0] in ("off", "0", "false", "no"):
         return None
     if words[0] not in ("on", "1", "true", "yes"):
         raise BeautyPostError("beauty_post.switch",
                               f"{ENV_SWITCH}={value!r}: the first word must be on or off")
-    off = set()
+    off = set(OPT_IN_STEPS)
     for word in words[1:]:
+        if word.startswith("+"):
+            step = word[1:]
+            if step not in OPT_IN_STEPS:
+                raise BeautyPostError("beauty_post.switch",
+                                      f"{ENV_SWITCH}={value!r}: {word!r}: only an opt-in step "
+                                      f"({list(OPT_IN_STEPS)}) takes +<step>; the others run with on")
+            off.discard(step)
+            continue
         step = word[1:] if word.startswith("-") else word[3:] if word.startswith("no-") else None
         if step not in STEPS:
             raise BeautyPostError("beauty_post.switch",
-                                  f"{ENV_SWITCH}={value!r}: {word!r} is not -<step> or no-<step> "
-                                  f"for a step in {list(STEPS)}")
+                                  f"{ENV_SWITCH}={value!r}: {word!r} is not -<step>, no-<step> "
+                                  f"or +<opt-in step> for a step in {list(STEPS)}")
         off.add(step)
     return frozenset(off)
 
@@ -395,6 +416,30 @@ def resize_args(exe: str, src: Path, dst: Path, params: Mapping[str, Any] = PARA
             "-vf", f"scale={width}:{height}:flags={params['resize']}", "-frames:v", "1", str(dst)]
 
 
+def upscale_label_record(native: Path, big: Path,
+                         params: Mapping[str, Any] = PARAMS["upscale"]) -> Dict[str, Any]:
+    """What the upscale's record says for the labels: it invents detail, the
+    labels stay at the native size, and the factor that carries a native
+    box, keypoint or mask onto the 4K file (per axis: the resize is to a
+    fixed size, so a frame that is not 16:9 scales unevenly)."""
+    height, width = read_png(native).shape[:2]
+    out_w, out_h = (int(v) for v in params["size"])
+    sx, sy = out_w / width, out_h / height
+    return {
+        "invents_detail": True,
+        "labels_scale": "native",
+        "native_size": [width, height],
+        "upscaled_size": [out_w, out_h],
+        "scale_factor": [round(sx, 6), round(sy, 6)],
+        "labels_frame": native.name,
+        "labels_note": (
+            f"Boxes, keypoints and masks are at the native size {width} x {height} "
+            f"(the frame and {native.name}); to match {big.name} ({out_w} x {out_h}) "
+            f"scale x by {sx:.6g} and y by {sy:.6g}. Real-ESRGAN invents detail no render "
+            f"drew: {native.name}, not {big.name}, is the post frame that matches the labels."),
+    }
+
+
 def frame_seed(frame: Path) -> int:
     """The grain seed: the frame's name, so a re-render of the same frame grains alike."""
     return zlib.crc32(frame.name.encode("utf-8")) & 0x7FFFFFFF
@@ -526,7 +571,8 @@ def post_frame(frame: Path, *, cube: Optional[Path], noisy: bool, grain: bool, u
         # 6. upscale
         if "upscale" in off or not upscale:
             steps.append({"step": "upscale", "ran": False,
-                          "why": "switched off" if "upscale" in off else "not asked for"})
+                          "why": "switched off" if "upscale" in off else "not asked for",
+                          "opt_in": f"{ENV_SWITCH}=on,+upscale (it invents detail; off by default)"})
         else:
             tool = ensure_tool("realesrgan", tools_dir, fetch=fetch, override=override)
             p = params["upscale"]
@@ -552,7 +598,8 @@ def post_frame(frame: Path, *, cube: Optional[Path], noisy: bool, grain: bool, u
                                           resize_args=[str(a) for a in rargs],
                                           resize_tool={"tool": "ffmpeg", "version": ffmpeg["version"],
                                                        "sha256": ffmpeg["sha256"]},
-                                          output=big.name))
+                                          output=big.name,
+                                          **upscale_label_record(out, big, p)))
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return {"input": frame.name, "output": out.name, "steps": steps}
@@ -583,6 +630,8 @@ def apply_to_bundle(bundle_dir, *, cube: Optional[Path], noisy: bool, grain: boo
                     if look else {})},
         "note": ("VISUAL ONLY: the original beauty frame and every label pass are untouched; "
                  "this output moves and invents pixels (denoise, halation, grain, upscale)"),
+        "labels_match": ("frame_NNNN.png and frame_NNNN" + OUTPUT_SUFFIX + " (native size); "
+                         "never frame_NNNN" + UPSCALE_SUFFIX + " without the upscale step's scale_factor"),
     }
     error: Optional[BeautyPostError] = None
     try:
@@ -651,12 +700,13 @@ def bundles_in(root: Path) -> List[Path]:
 
 
 def apply_to_run(run_dir, plan: Optional[Mapping[str, Any]] = None, *, off: FrozenSet[str] = frozenset(),
-                 upscale: bool = True, tools_dir: Optional[Path] = None, fetch: bool = True,
+                 upscale: bool = False, tools_dir: Optional[Path] = None, fetch: bool = True,
                  override: Optional[Mapping[str, Path]] = None, runner: Runner = _run) -> List[Dict[str, Any]]:
     """Every render bundle of a run through :func:`apply_to_bundle` with the
     beauty look's choices (``plan``: the run's beauty_look.json, read from
-    the run when None). Returns the records; the first refusal is raised
-    after the record is written."""
+    the run when None). ``upscale``: False unless asked for (the switch's
+    ``+upscale``): it invents detail. Returns the records; the first refusal
+    is raised after the record is written."""
     run_dir = Path(run_dir)
     if plan is None:
         sidecar = run_dir / "beauty_look.json"
@@ -678,7 +728,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("run", type=Path, help="a run directory (beauty_look.json, frames/) or a frames directory")
     parser.add_argument("--look", type=Path, default=None, help="the beauty_look.json to read instead")
     parser.add_argument("--off", default="", help="steps to skip, comma-separated")
-    parser.add_argument("--no-upscale", action="store_true")
+    parser.add_argument("--upscale", action="store_true",
+                        help="also run the Real-ESRGAN 4K upscale (off by default: it invents detail)")
+    parser.add_argument("--no-upscale", action="store_true", help="the default; kept for old commands")
     parser.add_argument("--no-fetch", action="store_true", help="refuse rather than download a missing tool")
     parser.add_argument("--tools-dir", type=Path, default=None)
     parser.add_argument("--tool", action="append", default=[], metavar="NAME=PATH",
@@ -696,7 +748,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error(f"--off {unknown}: not steps in {list(STEPS)}")
     plan = json.loads(args.look.read_text(encoding="utf-8")) if args.look else None
     try:
-        records = apply_to_run(args.run, plan, off=off, upscale=not args.no_upscale,
+        records = apply_to_run(args.run, plan, off=off, upscale=args.upscale and not args.no_upscale,
                                tools_dir=args.tools_dir, fetch=not args.no_fetch,
                                override=override or None)
     except BeautyPostError as exc:
