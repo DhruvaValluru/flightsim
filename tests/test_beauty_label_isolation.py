@@ -220,9 +220,14 @@ def test_a_label_blendable_is_only_a_label_material():
 
 def test_only_the_beauty_siblings_copy_the_beauty_settings_and_each_is_lens_free():
     copies = sorted(set(re.findall(r"(\w+)->PostProcessSettings = Capture->PostProcessSettings;", CODE)))
-    assert copies == ["AccumulateCapture", "CalibrationCapture", "LinearCapture"], copies
+    # CoverCapture: the measured cover (2026-11-11), lens-free through
+    # RenderMakeCoverCapture, which calls RenderMakeLensFree.
+    assert copies == ["AccumulateCapture", "CalibrationCapture", "CoverCapture", "LinearCapture"], copies
     flag_copies = sorted(set(re.findall(r"(\w+)->ShowFlags = Capture->ShowFlags;", CODE)))
-    assert flag_copies == ["AccumulateCapture", "CalibrationCapture", "LinearCapture"], flag_copies
+    assert flag_copies == ["AccumulateCapture", "CalibrationCapture", "CoverCapture", "LinearCapture"], \
+        flag_copies
+    assert "RenderMakeLensFree(Cover);" in _block_after(CODE, "void RenderMakeCoverCapture(")
+    assert "RenderMakeCoverCapture(CoverCapture);" in CODE and "RenderPinShowFlags(CoverCapture);" in CODE
     lens_free = _block_after(CODE, "void RenderMakeLensFree(")
     for flag in ("SetBloom", "SetLensFlares", "SetGrain", "SetVignette", "SetSceneColorFringe",
                  "SetLocalExposure", "SetMotionBlur", "SetDepthOfField"):
