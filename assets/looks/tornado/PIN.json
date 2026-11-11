@@ -1,0 +1,50 @@
+{
+  "name": "Kenney Smoke Particles -- four white puffs, packed as the tornado's puff atlas",
+  "author": "Kenney Vleugels (www.kenney.nl)",
+  "upstream": "https://kenney.nl/assets/smoke-particles",
+  "licence": "CC0-1.0",
+  "licence_file": "LICENSE",
+  "mirror": "https://github.com/fighter-435/Break-the-Battle-Formation (the pack's PNGs and its licence.txt, unmodified; kenney.nl serves only signed download links, which cannot be pinned)",
+  "commit": "cc899ce7e9eeb2e127d677b24f0bc2420452142c",
+  "commit_date": "2026-04-04T15:52:48Z",
+  "files": {
+    "whitePuff00.png": {
+      "upstream_path": "sci-fi-fps/assets/Kenney's_assets/PNG/White puff/whitePuff00.png",
+      "url": "https://raw.githubusercontent.com/fighter-435/Break-the-Battle-Formation/cc899ce7e9eeb2e127d677b24f0bc2420452142c/sci-fi-fps/assets/Kenney%27s_assets/PNG/White%20puff/whitePuff00.png",
+      "bytes": 57599,
+      "sha256": "33f894c2279bee9f77874dbfa3c0e9f071a0ee5e1a7065dcc40196029d699f58"
+    },
+    "whitePuff07.png": {
+      "upstream_path": "sci-fi-fps/assets/Kenney's_assets/PNG/White puff/whitePuff07.png",
+      "url": "https://raw.githubusercontent.com/fighter-435/Break-the-Battle-Formation/cc899ce7e9eeb2e127d677b24f0bc2420452142c/sci-fi-fps/assets/Kenney%27s_assets/PNG/White%20puff/whitePuff07.png",
+      "bytes": 58796,
+      "sha256": "810f3959b1beea2fe2ad077c8dd01caf48e04bf4422743fe680676948ed253ee"
+    },
+    "whitePuff16.png": {
+      "upstream_path": "sci-fi-fps/assets/Kenney's_assets/PNG/White puff/whitePuff16.png",
+      "url": "https://raw.githubusercontent.com/fighter-435/Break-the-Battle-Formation/cc899ce7e9eeb2e127d677b24f0bc2420452142c/sci-fi-fps/assets/Kenney%27s_assets/PNG/White%20puff/whitePuff16.png",
+      "bytes": 62341,
+      "sha256": "603f5f2faa71e1c18e5a2eb45ed16e01aa7642ca8222d4e80fa32a038979d764"
+    },
+    "whitePuff22.png": {
+      "upstream_path": "sci-fi-fps/assets/Kenney's_assets/PNG/White puff/whitePuff22.png",
+      "url": "https://raw.githubusercontent.com/fighter-435/Break-the-Battle-Formation/cc899ce7e9eeb2e127d677b24f0bc2420452142c/sci-fi-fps/assets/Kenney%27s_assets/PNG/White%20puff/whitePuff22.png",
+      "bytes": 62775,
+      "sha256": "e64dbe5dc2b5d484c29b450b2856fbfe6299aa4cea1ec506bd25ff262c5db8c7"
+    },
+    "LICENSE": {
+      "upstream_path": "sci-fi-fps/assets/Kenney's_assets/license.txt",
+      "url": "https://raw.githubusercontent.com/fighter-435/Break-the-Battle-Formation/cc899ce7e9eeb2e127d677b24f0bc2420452142c/sci-fi-fps/assets/Kenney%27s_assets/license.txt",
+      "bytes": 473,
+      "sha256": "2070f53570f285a213f6ca5e75c1ef75c7104e5530cb533b795a42597b29b055"
+    }
+  },
+  "atlas": {
+    "file": "puffs_atlas.png",
+    "made_by": "scripts/make_tornado_puffs.py (standard library; deterministic)",
+    "layout": "512 x 512, 8-bit grey + alpha, 2 x 2 tiles of 256 px in reading order (PuffTile 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right)",
+    "tiles": ["whitePuff00.png", "whitePuff07.png", "whitePuff16.png", "whitePuff22.png"],
+    "sha256": "bb3513978381acf63200dbec6eaee6c5fca7df31c57747b4de24f75b64389da3"
+  },
+  "used_by": "scripts/ue_create_materials.py create_tornado_puff (T_TornadoPuffs, M_TornadoPuff), drawn by FlightSimTornadoBeauty.cpp in beauty only"
+}

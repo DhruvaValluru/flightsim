@@ -54,6 +54,32 @@ one place.
   The stock names (Kodak Portra, Ektachrome, Vision3, Vision) are their
   manufacturers' trademarks, used to say which datasheet was emulated.
 
+## Tornado smoke puffs (committed: `assets/looks/tornado/`, visual push lane C)
+
+The tornado's dust cloud and the wall cloud's scud in beauty
+(`FlightSimTornadoBeauty.cpp`, drawn through `M_TornadoPuff`). Four PNGs of
+Kenney's "Smoke Particles" pack, packed unaltered in shape into one 512 x 512
+grey + alpha atlas (`puffs_atlas.png`, 177,335 bytes, sha256
+`bb3513978381acf63200dbec6eaee6c5fca7df31c57747b4de24f75b64389da3`) by
+`scripts/make_tornado_puffs.py` (standard library, deterministic; `--fetch`
+downloads the pinned inputs and checks each digest). kenney.nl hands out only
+signed download links, so the inputs are pinned at a GitHub mirror that carries
+the pack and its licence file unmodified; `assets/looks/tornado/PIN.json` has
+each file's URL, size and sha256.
+
+| file | author | licence | source | sha256 |
+| --- | --- | --- | --- | --- |
+| `whitePuff00.png` (57,599 bytes) | Kenney Vleugels (kenney.nl) | CC0-1.0 | https://raw.githubusercontent.com/fighter-435/Break-the-Battle-Formation/cc899ce7e9eeb2e127d677b24f0bc2420452142c/sci-fi-fps/assets/Kenney%27s_assets/PNG/White%20puff/whitePuff00.png | `33f894c2279bee9f77874dbfa3c0e9f071a0ee5e1a7065dcc40196029d699f58` |
+| `whitePuff07.png` (58,796 bytes) | Kenney Vleugels (kenney.nl) | CC0-1.0 | same commit, `PNG/White puff/whitePuff07.png` | `810f3959b1beea2fe2ad077c8dd01caf48e04bf4422743fe680676948ed253ee` |
+| `whitePuff16.png` (62,341 bytes) | Kenney Vleugels (kenney.nl) | CC0-1.0 | same commit, `PNG/White puff/whitePuff16.png` | `603f5f2faa71e1c18e5a2eb45ed16e01aa7642ca8222d4e80fa32a038979d764` |
+| `whitePuff22.png` (62,775 bytes) | Kenney Vleugels (kenney.nl) | CC0-1.0 | same commit, `PNG/White puff/whitePuff22.png` | `e64dbe5dc2b5d484c29b450b2856fbfe6299aa4cea1ec506bd25ff262c5db8c7` |
+| `LICENSE` (the pack's `license.txt`, 473 bytes) | Kenney Vleugels | CC0-1.0 | same commit, `license.txt` | `2070f53570f285a213f6ca5e75c1ef75c7104e5530cb533b795a42597b29b055` |
+
+CC0 needs no attribution (the pack's licence: "Credit ... would be nice but is
+not mandatory"); credit is given here anyway. No OpenVDB volume is used: the
+render machine is D3D11 / SM5, and UE 5.7's sparse volume textures and
+heterogeneous volumes need SM6.
+
 ## Post-render tools (cached, never committed: `%LOCALAPPDATA%\flightsim\tools`)
 
 Pinned in `scripts/beauty_post.py` `TOOLS`; the sha256 is GitHub's own
