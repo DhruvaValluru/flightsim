@@ -143,7 +143,7 @@ namespace FlightSimWorldPure
 			{0.05, 2.5, 0.35, 0.35, 0.08, 0.6, 1.6, 0.35},    // cumulus
 			{0.04, 4.0, 0.5, 0.25, 0.15, 0.3, 1.3, 0.6},      // stratocumulus
 			{0.03, 8.0, 0.8, 0.15, 0.2, 0.15, 1.0, 0.95},     // overcast
-			{0.045, 6.0, 0.6, 0.2, 0.1, 0.4, 1.2, 0.98},      // nimbostratus
+			{0.045, 9.0, 0.6, 0.3, 0.1, 0.4, 0.8, 0.98},      // nimbostratus
 		};
 		return Cloud >= 0 && Cloud < CloudCount && Field >= 0 && Field < CloudFieldCount
 			? Rows[Cloud][Field] : 0.0;
@@ -170,7 +170,7 @@ namespace FlightSimWorldPure
 	constexpr double FairTopM = 2700.0;
 	// Round 3: a rain world's layer when the card states no cover (broken, not
 	// nimbostratus's 0.98 sheet: round 1's #06 showed no ground).
-	constexpr double RainDefaultCover = 0.6;
+	constexpr double RainDefaultCover = 0.72;
 	constexpr double CloudSeedSpanKm = 1000.0;
 	constexpr double CloudExtinctionScaleDefault = 1.0;
 	constexpr double OcclusionFlagTransmittanceDefault = 0.5;
@@ -346,10 +346,19 @@ namespace FlightSimWorldPure
 	constexpr double MieSingleScatterAlbedo = 0.9;
 	constexpr double MinVisibilityKm = 0.05;
 
-	inline int SelectPreset(bool bStorm, double RainRateMmh, bool bPrecipitationRain, double CloudCover,
-	                        double VisibilityKm)
+	// world_beauty.SEVERE_RAIN_MMH / SEVERE_WIND_MPS (lane D, 2026-11-11): heavy rain
+	// in a strong wind is the storm look (#15, the hurricane's suggested weather).
+	constexpr double SevereRainMmh = 8.0;
+	constexpr double SevereWindMps = 10.0;
+	inline bool IsSevereRain(double RainRateMmh, double WindMps)
 	{
-		if (bStorm)
+		return RainRateMmh >= SevereRainMmh && WindMps >= SevereWindMps;
+	}
+
+	inline int SelectPreset(bool bStorm, double RainRateMmh, bool bPrecipitationRain, double CloudCover,
+	                        double VisibilityKm, double WindMps = 0.0)
+	{
+		if (bStorm || IsSevereRain(RainRateMmh, WindMps))
 		{
 			return PresetStorm;
 		}
@@ -1063,7 +1072,37 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	                                      WorldNumber(WeatherLook, TEXT("wetness"), 0.0));
 	const int32 Seed = static_cast<int32>(WorldNumber(WeatherLook, TEXT("seed"),
 	                                                  WorldNumber(Card, TEXT("seed"), 0.0)));
-	Preset = SelectPreset(bStorm, RainRate, bRainWord, bCardLayer ? CardCover : 0.0, VisibilityKm);
+	// Lane D: the card's wind (world_beauty.card_wind_mps): the larger of the storm
+	// weather's wind at the camera and the wind at cloud base.
+	double WindMps = 0.0;
+	{
+		const TSharedPtr<FJsonObject> WeatherBlock = WorldObject(Card, TEXT("weather"));
+		const TSharedPtr<FJsonObject> RainBlock = WorldObject(WeatherBlock, TEXT("rain"));
+		const TArray<TSharedPtr<FJsonValue>>* WindArray = nullptr;
+		if (RainBlock.IsValid() && RainBlock->TryGetArrayField(TEXT("wind_enu_mps"), WindArray) &&
+		    WindArray != nullptr && WindArray->Num() == 3)
+		{
+			double SumSquares = 0.0;
+			for (const TSharedPtr<FJsonValue>& Component : *WindArray)
+			{
+				const double C = Component.IsValid() ? Component->AsNumber() : 0.0;
+				SumSquares += C * C;
+			}
+			WindMps = FMath::Sqrt(SumSquares);
+		}
+		const TSharedPtr<FJsonValue> WindDrift = WorldLookValue(Card, TEXT("cloud_drift"), EJson::Object);
+		double DriftWind = 0.0;
+		if (WindDrift.IsValid() && WindDrift->AsObject()->TryGetNumberField(TEXT("mps"), DriftWind))
+		{
+			WindMps = FMath::Max(WindMps, DriftWind);
+		}
+		if (!FMath::IsFinite(WindMps))
+		{
+			WindMps = 0.0;
+		}
+	}
+	const bool bSevereRain = IsSevereRain(RainRate, WindMps);
+	Preset = SelectPreset(bStorm, RainRate, bRainWord, bCardLayer ? CardCover : 0.0, VisibilityKm, WindMps);
 	GroundWetness = TilesWetness(CardWetness, AtmosphereValues[Preset * AtmosphereFieldCount + AtmWetnessFloor]);
 	const TSharedPtr<FJsonValue> DriftValue = WorldLookValue(Card, TEXT("cloud_drift"), EJson::Object);
 	if (DriftValue.IsValid())
@@ -1085,6 +1124,11 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		Inputs->SetNumberField(TEXT("rain_rate_mmh"), RainRate);
 		Inputs->SetBoolField(TEXT("precipitation_rain"), bRainWord);
 		Inputs->SetBoolField(TEXT("storm"), bStorm);
+		Inputs->SetNumberField(TEXT("wind_mps"), WindMps);
+		Inputs->SetBoolField(TEXT("severe_rain"), bSevereRain);
+		Inputs->SetStringField(TEXT("severe_rain_basis"),
+			TEXT("world_beauty.is_severe_rain: rain >= 8 mm/h in wind >= 10 m/s (the larger of weather.rain.wind_enu_mps "
+			     "and look.cloud_drift.mps) draws the storm preset; visual only, UNCALIBRATED"));
 		Inputs->SetStringField(TEXT("storm_word"), StormWordValue);
 		Inputs->SetStringField(TEXT("storm_words"), TEXT("weather_look.STORMS (thunderstorm, tornado), or a drawn storm cell"));
 		Inputs->SetStringField(TEXT("surface"), Surface);

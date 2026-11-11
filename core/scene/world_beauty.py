@@ -183,14 +183,36 @@ def deck_shadows_beam(preset: str, layer_covers: Sequence[float]) -> bool:
         float(cover) >= DECK_SHADOW_MIN_COVER for cover in layer_covers)
 
 
+#: Lane D (2026-11-11, the owner: "the hurricane does not look real"). #15 ("the
+#: 747 at 2000 m in strong wind, severe turbulence and heavy rain", what #14's
+#: hurricane refusal suggests) states no storm word, so it drew the RAIN preset: a
+#: broken 0.6 deck with gaps of sunlit ground, the look of a shower, not of the
+#: inside of a tropical storm. Heavy rain driven by a strong wind is a storm to the
+#: eye: the same dark, unbroken nimbostratus deck that shadows the beam, the storm
+#: haze and wetness. VISUAL ONLY (the preset is the beauty look's table; the flight
+#: model reads none of it). The wind is the card's own: the storm weather's wind at
+#: the camera (weather.rain.wind_enu_mps) or the wind at cloud base
+#: (look.cloud_drift.mps), the larger. 8 mm/h is the bottom of heavy rain in the
+#: compiler's words (core/nl: "heavy rain" is 10 mm/h); 10 m/s is about 20 kt, a
+#: "strong breeze" on Beaufort 6 (the compiler's "strong wind" is 25 kt). UNCALIBRATED.
+SEVERE_RAIN_MMH = 8.0
+SEVERE_WIND_MPS = 10.0
+
+
+def is_severe_rain(rain_rate_mmh: float, wind_mps: float) -> bool:
+    """Heavy rain in a strong wind (SEVERE_RAIN_MMH, SEVERE_WIND_MPS): the storm look."""
+    return float(rain_rate_mmh) >= SEVERE_RAIN_MMH and float(wind_mps) >= SEVERE_WIND_MPS
+
+
 def select_preset(storm: bool, rain_rate_mmh: float, precipitation_rain: bool,
-                  cloud_cover: float, visibility_km: float) -> str:
-    """The look preset for a card: a drawn or stated storm (is_storm_word) is ``storm``;
+                  cloud_cover: float, visibility_km: float, wind_mps: float = 0.0) -> str:
+    """The look preset for a card: a drawn or stated storm (is_storm_word), or
+    heavy rain in a strong wind (is_severe_rain, lane D), is ``storm``;
     any stated rain rate or a ``rain`` word is ``rain``; a deck of
     OVERCAST_COVER or more is ``overcast``; air under HAZY_VISIBILITY_KM is
     ``hazy``; anything else is ``clear``. A visibility of 0 or less means
     "not stated" and never selects ``hazy``."""
-    if storm:
+    if storm or is_severe_rain(rain_rate_mmh, wind_mps):
         return "storm"
     if rain_rate_mmh > 0.0 or precipitation_rain:
         return "rain"
@@ -225,6 +247,7 @@ def card_inputs(card: Dict[str, Any]) -> Dict[str, Any]:
     word = _look_value(card, "precipitation", (str,))
     wetness = _look_value(card, "wetness", (int, float))
     clouds = _look_value(card, "clouds", (list,))
+    wind = card_wind_mps(card)
     cover = base = top = None
     if clouds and isinstance(clouds[0], dict):
         layer = clouds[0]
@@ -242,14 +265,35 @@ def card_inputs(card: Dict[str, Any]) -> Dict[str, Any]:
         "wetness": max(float(wetness or 0.0), float(weather_look.get("wetness") or 0.0)),
         "seed": int(weather_look.get("seed", card.get("seed", 0)) or 0),
         "surface": weather_look.get("surface"),
+        "wind_mps": wind,
     }
+
+
+def card_wind_mps(card: Dict[str, Any]) -> float:
+    """The card's wind for the severe-rain look (lane D): the larger of the storm
+    weather's wind at the camera (|weather.rain.wind_enu_mps|) and the wind at
+    cloud base (look.cloud_drift.mps, card.look else randomization.look)."""
+    import math
+
+    wind = 0.0
+    rain = ((card.get("weather") or {}).get("rain") or {})
+    vector = rain.get("wind_enu_mps") if isinstance(rain, dict) else None
+    if isinstance(vector, list) and len(vector) == 3:
+        try:
+            wind = math.sqrt(sum(float(c) ** 2 for c in vector))
+        except (TypeError, ValueError):
+            wind = 0.0
+    drift = _look_value(card, "cloud_drift", (dict,))
+    if isinstance(drift, dict) and isinstance(drift.get("mps"), (int, float)):
+        wind = max(wind, float(drift["mps"]))
+    return wind if math.isfinite(wind) else 0.0
 
 
 def card_preset(card: Dict[str, Any], draws_cell: bool = False) -> str:
     """select_preset on card_inputs (the host's own call)."""
     i = card_inputs(card)
     return select_preset(i["storm"] or draws_cell, i["rain_rate_mmh"], i["precipitation_rain"],
-                         i["card_cover"] or 0.0, i["visibility_km"])
+                         i["card_cover"] or 0.0, i["visibility_km"], i["wind_mps"])
 
 
 def mie_split(visibility_km: float, share: float, cap_per_km: float) -> Dict[str, float]:
@@ -388,9 +432,9 @@ CLOUDS: Dict[str, Dict[str, float]] = {
     "overcast": dict(extinction_per_m=0.03, shape_scale_km=8.0, detail_scale_km=0.8,
                      detail_erosion=0.15, bottom_softness=0.2, top_rounding=0.15,
                      coverage_contrast=1.0, default_cover=0.95),
-    "nimbostratus": dict(extinction_per_m=0.045, shape_scale_km=6.0, detail_scale_km=0.6,
-                         detail_erosion=0.2, bottom_softness=0.1, top_rounding=0.4,
-                         coverage_contrast=1.2, default_cover=0.98),
+    "nimbostratus": dict(extinction_per_m=0.045, shape_scale_km=9.0, detail_scale_km=0.6,
+                         detail_erosion=0.3, bottom_softness=0.1, top_rounding=0.4,
+                         coverage_contrast=0.8, default_cover=0.98),
 }
 
 #: The fair-weather layer ``-beauty-clouds=fair`` adds when the card states no
@@ -405,7 +449,16 @@ FAIR_LAYER = {"cover": 0.35, "base_m": 1500.0, "top_m": 2700.0}
 #: is the low end of METAR "broken" (5/8): the layer reads as rain cloud and the
 #: ground reads through its gaps. UNCALIBRATED: set by probe render on the render
 #: machine (#06's lower half should show the bay and the city between clouds).
-RAIN_DEFAULT_COVER = 0.6
+#: Lane D (2026-11-11, round 4's #06: "odd isolated puff blobs under a navy deck"):
+#: at 0.6 the nimbostratus noise, cut hard (coverage_contrast 1.2), left separate
+#: rounded cells, cumulus-like puffs, not a rain deck. Rain falls from a deck that
+#: is mostly unbroken with ragged thin spots: 0.72 (just under OVERCAST_COVER, so the
+#: frame is still the rain world whose ground reads through the deck), and the
+#: nimbostratus row cuts softer (coverage_contrast 0.8: its edge FBM_SIGMA / 0.8
+#: wide) at a larger scale (shape_scale_km 9) with more ragged erosion
+#: (detail_erosion 0.3), so the thin places are grey veils the ground shows
+#: through dimly, not holes around puffs. UNCALIBRATED: #06 first.
+RAIN_DEFAULT_COVER = 0.72
 
 #: The seeded noise offset spans this many km, so two seeds never share a sky.
 CLOUD_SEED_SPAN_KM = 1000.0

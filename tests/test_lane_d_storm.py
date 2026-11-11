@@ -10,6 +10,7 @@ and a no-op at its material default, and the Python and C++ twins agree.
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
@@ -110,3 +111,66 @@ def test_the_shader_and_the_cpp_carry_the_python_numbers_beauty_only():
     assert storm_cell.SCUD_SQUASH == 3.0 and storm_cell.SCUD_SIGMA_SHARE == 0.1
     assert (storm_cell.SCUD_CUT, storm_cell.SCUD_CUT_PER_COVER, storm_cell.SCUD_RAMP) == (0.62, 0.2, 0.08)
     assert '"M_StormCell": "6"' in SCRIPT and '"Curtain": params["Curtain"]' in SCRIPT
+
+
+# -- the severe-rain look: #15 draws the storm preset ---------------------------------
+
+from core.scene import world_beauty as wb  # noqa: E402
+
+CLOUDS_CPP = (BRIDGE / "Private" / "FlightSimClouds.cpp").read_text(encoding="utf-8")
+
+
+def _card_for(prompt):
+    from core.nl.compiler import compile_prompt
+    from core.scene import storm_weather
+    from core.scenario.card import world_look_card_block
+    from core.scene.weather_look import weather_look_card_block
+
+    spec = compile_prompt(prompt)
+    card = {"weather_look": weather_look_card_block(spec), "look": world_look_card_block(spec)}
+    weather = storm_weather.card_block(spec)
+    if weather is not None:
+        card["weather"] = weather
+    return card
+
+
+def test_heavy_rain_in_a_strong_wind_is_the_storm_look():
+    assert wb.select_preset(False, 10.0, False, 0.0, 0.0, 12.9) == "storm"
+    assert wb.select_preset(False, 10.0, False, 0.0, 0.0, 5.0) == "rain"      # heavy rain, light wind
+    assert wb.select_preset(False, 2.0, False, 0.0, 0.0, 20.0) == "rain"      # light rain, strong wind
+    assert wb.select_preset(False, 0.0, False, 0.0, 0.0, 30.0) == "clear"     # wind alone is no storm
+    assert wb.select_preset(False, 10.0, False, 0.0, 0.0) == "rain"           # the old call is unchanged
+    card = {"weather_look": {"rain_rate_mmh": 10.0}, "weather": {"rain": {"wind_enu_mps": [0.0, -12.86, 0.0]}}}
+    assert wb.card_wind_mps(card) == pytest.approx(12.86)
+    assert wb.card_preset(card) == "storm"
+    drift = {"weather_look": {"rain_rate_mmh": 10.0}, "look": {"cloud_drift": {"mps": 11.0, "from_deg": 0.0}}}
+    assert wb.card_preset(drift) == "storm"
+
+
+def test_the_hurricane_suggestion_draws_the_storm_and_the_refusal_stands():
+    card = _card_for("chase view of the 747 at 2000 m in strong wind, severe turbulence and heavy rain "
+                     "for 6 seconds")
+    assert card["weather_look"]["storm"] is None            # no storm word: the physics is unchanged
+    assert wb.card_preset(card) == "storm"
+    from core.scene.beauty_look import world_preset_for_card
+    assert world_preset_for_card(card)[0] == "storm"        # the grade and the meter see the same world
+    assert wb.card_preset(_card_for("747 through a thunderstorm")) == "storm"
+
+
+def test_the_cpp_twin_reads_the_same_wind_and_thresholds():
+    assert f"constexpr double SevereRainMmh = {wb.SEVERE_RAIN_MMH};" in CLOUDS_CPP
+    assert f"constexpr double SevereWindMps = {wb.SEVERE_WIND_MPS};" in CLOUDS_CPP
+    assert "if (bStorm || IsSevereRain(RainRateMmh, WindMps))" in CLOUDS_CPP
+    assert "double VisibilityKm, double WindMps = 0.0)" in CLOUDS_CPP
+    assert "SelectPreset(bStorm, RainRate, bRainWord, bCardLayer ? CardCover : 0.0, VisibilityKm, WindMps);" \
+        in CLOUDS_CPP
+    assert 'RainBlock->TryGetArrayField(TEXT("wind_enu_mps"), WindArray)' in CLOUDS_CPP
+    assert 'WorldLookValue(Card, TEXT("cloud_drift"), EJson::Object)' in CLOUDS_CPP
+
+
+def test_the_rain_deck_is_a_soft_deck_not_puffs():
+    row = wb.CLOUDS["nimbostratus"]
+    assert wb.RAIN_DEFAULT_COVER < wb.OVERCAST_COVER and wb.RAIN_DEFAULT_COVER >= 0.7
+    assert row["coverage_contrast"] <= 0.8 and row["shape_scale_km"] >= 9.0
+    assert "{0.045, 9.0, 0.6, 0.3, 0.1, 0.4, 0.8, 0.98},      // nimbostratus" in CLOUDS_CPP
+
