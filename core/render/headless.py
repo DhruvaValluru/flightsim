@@ -137,6 +137,20 @@ def kill_tree(process: subprocess.Popen) -> None:
         pass
 
 
+def reap_group(process: subprocess.Popen) -> None:
+    """After a child exited on its own, kill whatever it left behind in
+    its process group (shader workers, crash reporters), so a long batch
+    does not pile up engine helpers. POSIX only: the child ran in its own
+    session (popen_kwargs), so the group is only ever its own. On Windows
+    the batch driver waits for no editor process before the next scene."""
+    if sys.platform == "win32":
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
 def _newest_write(paths: Sequence[Path]) -> float:
     """The latest modification time (and size, folded in) under ``paths``."""
     newest = 0.0
@@ -219,6 +233,7 @@ def run_headless(command: Sequence[str], log: Path, watch: Sequence[Path] = (),
         while True:
             try:
                 code = process.wait(timeout=poll_seconds)
+                reap_group(process)
                 return HeadlessResult(code, seconds=time.monotonic() - started)
             except subprocess.TimeoutExpired:
                 pass

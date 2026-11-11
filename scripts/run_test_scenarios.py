@@ -19,6 +19,18 @@ shows them all on one page.
     python scripts/run_test_scenarios.py --collect       # (re)gather the last batch's results
     python scripts/run_test_scenarios.py --matrix        # Phase 3 D6: {A4,J11} x {desert,forest}
     python scripts/run_test_scenarios.py --matrix --list # print the four cells
+    python scripts/run_test_scenarios.py --resume        # skip what the last batch finished
+
+Bounded memory (the 16 GB Windows laptop, round 4: the batch was killed for
+low memory at scene 9 of 14). Each scene's render is its own
+UnrealEditor-Cmd process the app starts and reaps; this driver keeps
+nothing but the small result rows. Before each scene it waits until the app
+is idle with no editor process left and the machine has
+``--min-free-mb`` (FLIGHTSIM_BATCH_MIN_FREE_MB, default 4096) of free
+memory; still short after ``--memory-wait`` seconds, the batch stops with
+``batch.low_memory`` named. The summary is rewritten after every scene, so
+a batch killed half way leaves its finished scenes on disk and ``--resume``
+runs only the rest.
 
 Open http://127.0.0.1:8008, or each run's frames page, to look at the
 results. Run it with the venv's python (--matrix reads webapp.runs).
@@ -29,6 +41,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import shutil
 import sys
@@ -82,6 +95,93 @@ SCENARIOS = [
 ]
 
 DONE = ("done", "failed")
+#: Outcomes --resume does not run again (a failed scene is retried).
+FINISHED = ("done", "refused")
+DEFAULT_MIN_FREE_MB = 4096
+
+
+def available_mb():
+    """Free physical memory in MB, or None where it cannot be read."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class Status(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            status = Status()
+            status.dwLength = ctypes.sizeof(Status)
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return None
+            return status.ullAvailPhys / 2**20
+        meminfo = Path("/proc/meminfo")
+        if meminfo.is_file():
+            for line in meminfo.read_text().splitlines():
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024
+        if sys.platform == "darwin":
+            import subprocess
+            out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=10).stdout
+            page = int(re.search(r"page size of (\d+)", out).group(1))
+            pages = sum(int(m) for m in re.findall(
+                r"Pages (?:free|inactive|speculative):\s+(\d+)", out))
+            return pages * page / 2**20
+    except Exception:
+        return None
+    return None
+
+
+def wait_ready(server, min_free_mb, wait_seconds, poll=5.0,
+               probe=available_mb, status=None, sleep=time.sleep, clock=time.monotonic):
+    """Wait until the app is idle with no editor process left and at
+    least ``min_free_mb`` is free. None when ready; else the named refusal
+    (``batch.low_memory`` / ``batch.app_busy``) as one sentence."""
+    status = status or (lambda: call(server, "GET", "/status", timeout=30))
+    deadline = clock() + max(0.0, float(wait_seconds))
+    while True:
+        try:
+            code, state = status()
+        except (urllib.error.URLError, TimeoutError, OSError):
+            code, state = 0, {}
+        busy = code != 200 or state.get("busy") or state.get("editor_running")
+        free = probe()
+        enough = free is None or not min_free_mb or free >= min_free_mb
+        if not busy and enough:
+            return None
+        if clock() >= deadline:
+            if busy:
+                return ("[batch.app_busy] the app still had a render or an editor process "
+                        f"running (or did not answer) after {wait_seconds:g} s; the batch "
+                        "stopped before this scene")
+            return (f"[batch.low_memory] only {free:.0f} MB free, {min_free_mb:.0f} MB wanted, "
+                    f"after waiting {wait_seconds:g} s; the batch stopped before this scene "
+                    "(run again with --resume once memory is back)")
+        sleep(poll)
+
+
+def load_previous(path: Path = None) -> dict:
+    """The last batch's rows by number, for --resume."""
+    path = path or SUMMARY
+    if not path.is_file():
+        return {}
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return {}
+    return {int(r["number"]): r for r in rows if isinstance(r, dict) and "number" in r}
+
+
+def write_summary(results, path: Path = None) -> None:
+    """Rewrite the summary atomically (a kill mid-write leaves the old one)."""
+    path = path or SUMMARY
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(sorted(results, key=lambda r: int(r["number"])),
+                              indent=2, default=str), encoding="utf-8")
+    tmp.replace(path)
 
 
 def call(server: str, method: str, path: str, body=None, timeout: float = 3600.0):
@@ -536,6 +636,14 @@ def main() -> int:
                         help="Phase 3 D6: run {A4,J11} x {desert,forest} from the default run, "
                              "changing only the aircraft and the environment; verify each cell "
                              "and diff the cards (with --list: print the four cells)")
+    parser.add_argument("--resume", action="store_true",
+                        help="keep the last batch's done/refused scenes and run only the rest")
+    parser.add_argument("--min-free-mb", type=float,
+                        default=float(os.environ.get("FLIGHTSIM_BATCH_MIN_FREE_MB",
+                                                     DEFAULT_MIN_FREE_MB)),
+                        help="free memory a scene waits for (0: no check)")
+    parser.add_argument("--memory-wait", type=float, default=600.0,
+                        help="seconds to wait for the app and memory before stopping")
     parser.add_argument("--collect", action="store_true",
                         help="gather the last batch's results (runs/test_scenarios.json) "
                              "into runs/test_scenarios/ and stop")
@@ -569,18 +677,44 @@ def main() -> int:
         return run_matrix(args)
 
     wanted = set(args.only or range(1, len(SCENARIOS) + 1))
-    results = []
-    for number, (name, prompt, edits) in enumerate(SCENARIOS, 1):
+    return run_batch(args, wanted)
+
+
+def run_batch(args, wanted, scenarios=None, run=None, ready=None, summary: Path = None,
+              gather=None) -> int:
+    """Run the wanted scenarios one by one, each after wait_ready, the
+    summary rewritten after each; --resume keeps the last batch's
+    done/refused rows. 0, or 3 when the batch stopped early by name."""
+    scenarios = scenarios or SCENARIOS
+    run = run or run_one
+    summary = summary or SUMMARY
+    gather = gather or collect
+    ready = ready or (lambda: wait_ready(args.server, args.min_free_mb, args.memory_wait))
+    kept = load_previous(summary) if getattr(args, "resume", False) else {}
+    kept = {n: r for n, r in kept.items() if r.get("outcome") in FINISHED}
+    results = list(kept.values())
+    stopped = None
+    for number, (name, prompt, edits) in enumerate(scenarios, 1):
         if number not in wanted:
             continue
+        if number in kept:
+            print(f"\n[{number}] {name}: {kept[number]['outcome']} in the last batch, kept (--resume)")
+            continue
+        refusal = ready()
+        if refusal:
+            stopped = refusal
+            print(f"\n[{number}] {name}\n    -> STOPPED: {refusal}")
+            break
         print(f"\n[{number}] {name}\n    {prompt}")
         try:
-            outcome = run_one(args.server, number, name, prompt, edits, args)
+            outcome = run(args.server, number, name, prompt, edits, args)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             outcome = {"number": number, "name": name, "prompt": prompt,
                        "outcome": "failed", "why": f"could not reach the app: {exc}"}
         results.append(outcome)
+        write_summary(results, summary)
         print(f"    -> {outcome['outcome'].upper()}: {str(outcome.get('why', ''))[:200]}")
+    results.sort(key=lambda r: int(r["number"]))
 
     print("\n================ summary ================")
     for r in results:
@@ -590,11 +724,13 @@ def main() -> int:
             print(f"      {r['clip']}")
         if r["outcome"] != "done":
             print(f"      {str(r.get('why', ''))[:240]}")
-    index = collect(results)
-    SUMMARY.parent.mkdir(parents=True, exist_ok=True)
-    SUMMARY.write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
-    print(f"\nwritten: {SUMMARY}")
+    index = gather(results)
+    write_summary(results, summary)
+    print(f"\nwritten: {summary}")
     print(f"all results in one folder: {index.parent}\nopen: {index}")
+    if stopped:
+        print(f"stopped early: {stopped}")
+        return 3
     return 0
 
 
