@@ -1,0 +1,30 @@
+﻿{
+    "round":  28,
+    "commit":  "8c868405",
+    "full":  false,
+    "scenes":  [
+                   4,
+                   8
+               ],
+    "switches":  "-aircraft-materials=on -aircraft-probe=measured-mesh",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  219.9
+                },
+    "outcomes":  [
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  99.0,
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  8,
+                         "outcome":  "done",
+                         "seconds":  119.1,
+                         "why":  "clip ready"
+                     }
+                 ]
+}
