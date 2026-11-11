@@ -3088,3 +3088,44 @@ applied twice (the host must not set a ColorGradingLUT for the same stock). If t
 reads too strong, the next knob is `exp_comp` and `push_pull` in `make_film_luts.STOCKS`
 (regenerate from the scratch venv; `film_luts.json` carries the new sha256 and
 tests/test_film_luts.py checks the files against it).
+
+## lane A: aircraft too shadowed (2026-11-11)
+
+Owner: "the planes are being too shadowed". Round 5 (f7232cc7): #06 (A320, SFO, moderate rain)
+and #08 (C172, Fuji sunrise, light rain) near-black silhouettes; #01 (A-4, Yosemite golden hour)
+gold and dark. Round 4 review: #04 and #13 the opposite, clipped white plastic.
+
+Cause under a deck: the sky light's cloud ambient occlusion (FlightSimHeroLighting.cpp,
+strength 1 since the hero-lighting lane) counted the deck twice. The commandlet takes its one
+sky capture AT THE AIRCRAFT with the volumetric clouds in it, so the cube's upper hemisphere
+already is the deck's underside (its diffuse transmission); the cloud AO then multiplies the
+fill again by the same deck's top-down occlusion. In round 4 the beam was not cloud-shadowed,
+so the sun lit the airframe anyway; round 6's deck shadow (world_beauty.deck_shadows_beam,
+in the round-5 render) took the beam, and nothing was left but SSGI from a dark ground.
+
+Changes (beauty only; measure has no hero lighting, no beauty look, no subject meter):
+- `-sky-cloud-ao=auto` (new default): cloud AO off when the capture holds the clouds at the
+  aircraft (the defaults), on otherwise; `on` is the old sky light. Twin:
+  `hero_lighting.sky_cloud_ao_applies`. Needs the C++ rebuild.
+- SSAO radius WORLD space, `AO_RADIUS_WS_CM` 200 cm on every preset (was view-space 150/200,
+  a fixed share of the frame that spans a small airframe's wings). Python only (sidecar).
+  UNCALIBRATED: probe la-ssao, #06 and #01 at 100 / 200 / 400 cm, the belly and wing root.
+- The subject meter (FlightSimRenderCommandlet.cpp, twin `beauty_look.SUBJECT_METER` and
+  `subject_meter_step`): the aircraft's pixels (hidden vs shown inside its projected bounds,
+  16 sRGB codes, at least 200 pixels), after the frame meter; p97 over 0.94 closes to 0.88
+  (at most 3 stops); a median under 0.30 opens toward 0.36 (at most 2 stops, never past the
+  subject's 0.94 nor a frame whose p90 is over 0.92). Constant over the clip.
+  `-subject-meter=off` is the A/B. Recorded in render.json look_applied.subject_exposure.
+  Every number UNCALIBRATED: probe la-subject.
+
+Probe la-deck: #06 and #08 with the defaults against `-sky-cloud-ao=on` (and `-deck-shadow=off`
+for the round-4 control). Pass: the airframe reads as an evenly lit mid grey under the deck
+(white paint about as bright as the cloud base, never black), the belly a little darker than
+the top. Read look_applied.sky_light_capture_result.cloud_ambient_occlusion (false) and
+hero_lighting.sky_light.probes.sky_capture_holds_clouds (true).
+
+Probe la-subject: #04, #13 (whites below clipping: subject p97 at most 0.94, the paint showing
+the sky's reflection and gloss variation), #06, #08 (opened, not black) and #01 with
+`-subject-meter=off` as the control; read look_applied.subject_exposure (mask_pixels, p50/p97
+before and after, stops). If the mask catches rain streaks or misses a small aircraft, raise
+`mask_luma_delta` or lower `min_pixels`; if whites still clip, lower `highlight_target_p97`.

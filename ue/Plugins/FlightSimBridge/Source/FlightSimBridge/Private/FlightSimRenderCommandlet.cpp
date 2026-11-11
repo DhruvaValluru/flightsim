@@ -140,6 +140,57 @@ namespace
 	constexpr double BeautyMeterHighlightTarget = 0.80;
 	constexpr double BeautyMeterMaxCloseStops = 6.0;
 	constexpr double BeautyMeterSaturatedStepStops = 2.0;
+	// Lane A (2026-11-11): the SUBJECT meter, beauty only, after the frame
+	// meter. A photographer meters the aircraft, not the sky behind it: round
+	// 4's #04 and #13 drew the airframe as clipped white plastic (the frame
+	// meter opened a dark ocean/canyon frame by its p90 and the white paint
+	// went over the top), and round 5's #06 and #08 drew it black under a
+	// bright deck (the frame's p90 was the cloud base). The aircraft's pixels
+	// are found by difference (one capture with it hidden, one with it shown,
+	// inside its projected bounds), then: a subject whose 97th-percentile
+	// sRGB luma clips is closed to the highlight target; a subject whose
+	// median is below the floor is opened toward the mid target, never past
+	// the subject's own highlight bound nor a clipping frame. Constant over
+	// the clip once set (Gate 6: no breathing). Python twin: core/scene/
+	// beauty_look.py SUBJECT_METER and subject_meter_step. UNCALIBRATED: set
+	// by probe render on the render machine (docs/visual/PROBE_LOG.md
+	// "## lane A": #04, #13, #06, #08, #01).
+	constexpr double SubjectMeterHighlightP97 = 0.94;
+	constexpr double SubjectMeterHighlightTarget = 0.88;
+	constexpr double SubjectMeterMidFloorP50 = 0.30;
+	constexpr double SubjectMeterMidTarget = 0.36;
+	constexpr double SubjectMeterMaxCloseStops = 3.0;
+	constexpr double SubjectMeterMaxOpenStops = 2.0;
+	constexpr double SubjectMeterSaturatedStepStops = 1.0;
+	constexpr double SubjectMeterHighPercentile = 0.97;
+	constexpr int32 SubjectMeterRounds = 4;
+	constexpr int32 SubjectMeterMaskLumaDelta = 16;   // sRGB codes, shown vs hidden
+	constexpr int32 SubjectMeterMinPixels = 200;
+
+	// One subject meter step (stops; 0 = settled), the twin of
+	// beauty_look.subject_meter_step: Stops is what the subject meter has
+	// moved the bias by so far.
+	double SubjectMeterStep(double P50, double P97, double FrameP90, double Stops)
+	{
+		double Step = 0.0;
+		if (P97 > SubjectMeterHighlightP97)
+		{
+			Step = 2.2 * 0.8 * FMath::Log2(SubjectMeterHighlightTarget / P97);
+			if (P97 >= 254.0 / 255.0)
+			{
+				Step = FMath::Min(Step, -SubjectMeterSaturatedStepStops);
+			}
+		}
+		else if (P50 < SubjectMeterMidFloorP50 && FrameP90 < BeautyMeterHighlightP90)
+		{
+			Step = 2.2 * 0.8 * FMath::Log2(SubjectMeterMidTarget / FMath::Max(P50, 1.0 / 255.0));
+			// never past the subject's own highlight bound
+			Step = FMath::Min(Step, 2.2 * FMath::Log2(SubjectMeterHighlightP97 / FMath::Max(P97, 1.0 / 255.0)));
+			Step = FMath::Max(Step, 0.0);
+		}
+		const double Next = FMath::Clamp(Stops + Step, -SubjectMeterMaxCloseStops, SubjectMeterMaxOpenStops);
+		return FMath::Abs(Next - Stops) < 0.05 ? 0.0 : Next - Stops;
+	}
 	// The exposure the rain's drops streak over when the card states no
 	// camera triple: 1/1000 s, a daylight video camera's order (stated).
 	// It decides whether the rain is SEEN from a moving aircraft: a
@@ -3487,6 +3538,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// The stops the storm meter (before the first frame) opened the manual
 	// exposure by; 0 when no cell is drawn. The scene record states it.
 	double StormMeterOpened = 0.0;
+	double SubjectMeterStops = 0.0;   // lane A: the subject meter's stops (beauty only)
 	bool bWeatherShutterRecorded = false;
 	double AppliedEv100 = 0.0;
 	bool bAppliedEv100 = false;
@@ -5848,6 +5900,231 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		       BrightBefore, Bright, StormMeterTarget, MeanBefore, Mean, BiasBefore,
 		       static_cast<double>(MeterSettings.AutoExposureBias), Opened, StormMeterMaxStops,
 		       Rounds, *MeterNote);
+	}
+
+	// -- lane A (2026-11-11): the subject meter (constants at the top) -------
+	// Beauty only, and only when the beauty look owns the exposure (never
+	// measure, never Gate 6 beauty, which runs without a sidecar); after the
+	// frame meter, so it is the last word on the bias. -subject-meter=off
+	// (the command line or FLIGHTSIM_RENDER_SWITCHES) keeps the frame meter's
+	// exposure for an A/B. Labels are separate captures: no label moves.
+	FString SubjectMeterSwitch = TEXT("on");
+	FParse::Value(*RenderSwitches, TEXT("subject-meter="), SubjectMeterSwitch);
+	if (SubjectMeterSwitch != TEXT("on") && SubjectMeterSwitch != TEXT("off"))
+	{
+		return Fail(FString::Printf(TEXT("render.subject_meter: -subject-meter=%s is not on or off"),
+		                            *SubjectMeterSwitch));
+	}
+	if (bVisual && bBeauty && !bPathTrace && !bAutoExposure && !bHideAircraft && Scenario.Aircraft != nullptr
+	    && FFlightSimBeautyLook::OwnsExposure() && SubjectMeterSwitch == TEXT("on"))
+	{
+		TSharedPtr<FJsonObject> SubjectRow = MakeShared<FJsonObject>();
+		FPostProcessSettings& SubjectSettings = Capture->PostProcessSettings;
+		SubjectSettings.bOverride_AutoExposureBias = true;
+		const double SubjectBiasBefore = SubjectSettings.AutoExposureBias;
+		const int32 SubjW = RenderTarget->SizeX;
+		const int32 SubjH = RenderTarget->SizeY;
+		// The aircraft's projected bounds (its static meshes: body, hinges,
+		// stores; not the FX), padded, clamped to the frame.
+		FBox2D SubjRect(ForceInit);
+		for (UStaticMeshComponent* SubjPart : TInlineComponentArray<UStaticMeshComponent*>(Scenario.Aircraft))
+		{
+			if (SubjPart == nullptr || !SubjPart->IsVisible())
+			{
+				continue;
+			}
+			const FBox SubjBox = SubjPart->Bounds.GetBox();
+			for (int32 SubjCorner = 0; SubjCorner < 8; ++SubjCorner)
+			{
+				const FVector SubjCornerCm((SubjCorner & 1) ? SubjBox.Max.X : SubjBox.Min.X, (SubjCorner & 2) ? SubjBox.Max.Y : SubjBox.Min.Y,
+				                (SubjCorner & 4) ? SubjBox.Max.Z : SubjBox.Min.Z);
+				FVector2D SubjPixel;
+				if (RenderPixelInFront(Capture, SubjW, SubjH, SubjCornerCm, SubjPixel))
+				{
+					SubjRect += SubjPixel;
+				}
+			}
+		}
+		FString SubjectNote = TEXT("settled");
+		double SubjP50Before = -1.0, SubjP97Before = -1.0, SubjP50 = -1.0, SubjP97 = -1.0, SubjFrameP90 = -1.0;
+		int32 SubjMaskPixels = 0;
+		int32 SubjectRounds = 0;
+		auto SubjCaptureRead = [&](TArray<FColor>& SubjOut, int32 SubjCaptures) -> bool
+		{
+			for (int32 SubjI = 0; SubjI < SubjCaptures; ++SubjI)
+			{
+				World->SendAllEndOfFrameUpdates();
+				FlushRenderingCommands();
+				Capture->CaptureScene();
+				FlushRenderingCommands();
+				BeatWatchdog(TEXT("a subject meter capture"));
+			}
+			FTextureRenderTargetResource* SubjResource = RenderTarget->GameThread_GetRenderTargetResource();
+			SubjOut.Reset();
+			const bool bSubjRead = SubjResource != nullptr && SubjResource->ReadPixels(SubjOut);
+			BeatWatchdog(TEXT("a subject meter readback"));
+			return bSubjRead && SubjOut.Num() == SubjW * SubjH;
+		};
+		auto SubjLuma = [](const FColor& SubjColour) -> int32
+		{
+			return FMath::Clamp(static_cast<int32>(0.2126 * SubjColour.R + 0.7152 * SubjColour.G + 0.0722 * SubjColour.B + 0.5), 0, 255);
+		};
+		const int32 SubjX0 = SubjRect.bIsValid ? FMath::Clamp(FMath::FloorToInt32(SubjRect.Min.X) - 4, 0, SubjW) : 0;
+		const int32 SubjX1 = SubjRect.bIsValid ? FMath::Clamp(FMath::CeilToInt32(SubjRect.Max.X) + 4, 0, SubjW) : 0;
+		const int32 SubjY0 = SubjRect.bIsValid ? FMath::Clamp(FMath::FloorToInt32(SubjRect.Min.Y) - 4, 0, SubjH) : 0;
+		const int32 SubjY1 = SubjRect.bIsValid ? FMath::Clamp(FMath::CeilToInt32(SubjRect.Max.Y) + 4, 0, SubjH) : 0;
+		TArray<int32> SubjMask;   // pixel indices of the aircraft
+		TArray<FColor> SubjHidden, SubjShown;
+		if (SubjX1 - SubjX0 < 4 || SubjY1 - SubjY0 < 4)
+		{
+			SubjectNote = TEXT("the aircraft is not in front of the camera: the frame meter's exposure stands");
+		}
+		else
+		{
+			// The mask: the aircraft hidden for two captures (the temporal history
+			// lets go of it), then shown for three, read back at the same bias.
+			Capture->HiddenActors.AddUnique(Scenario.Aircraft);
+			const bool bSubjHiddenRead = SubjCaptureRead(SubjHidden, 2);
+			Capture->HiddenActors.Remove(Scenario.Aircraft);
+			const bool bSubjShownRead = bSubjHiddenRead && SubjCaptureRead(SubjShown, 3);
+			if (bSubjShownRead)
+			{
+				for (int32 SubjY = SubjY0; SubjY < SubjY1; ++SubjY)
+				{
+					for (int32 SubjX = SubjX0; SubjX < SubjX1; ++SubjX)
+					{
+						const int32 SubjIndex = SubjY * SubjW + SubjX;
+						if (FMath::Abs(SubjLuma(SubjShown[SubjIndex]) - SubjLuma(SubjHidden[SubjIndex])) >= SubjectMeterMaskLumaDelta)
+						{
+							SubjMask.Add(SubjIndex);
+						}
+					}
+				}
+			}
+			SubjMaskPixels = SubjMask.Num();
+			if (!bSubjShownRead)
+			{
+				SubjectNote = TEXT("a meter frame could not be read back: the frame meter's exposure stands");
+			}
+			else if (SubjMaskPixels < SubjectMeterMinPixels)
+			{
+				SubjectNote = TEXT("the aircraft covers too few pixels to meter: the frame meter's exposure stands");
+			}
+		}
+		if (SubjMaskPixels >= SubjectMeterMinPixels)
+		{
+			TArray<FColor>& SubjFrame = SubjShown;
+			for (; SubjectRounds < SubjectMeterRounds; ++SubjectRounds)
+			{
+				if (SubjectRounds > 0 && !SubjCaptureRead(SubjFrame, 1))
+				{
+					SubjectNote = TEXT("a meter frame could not be read back: the last measured exposure stands");
+					break;
+				}
+				uint32 SubjHist[256] = {};
+				uint32 SubjFrameHist[256] = {};
+				for (const FColor& SubjColour : SubjFrame)
+				{
+					++SubjFrameHist[SubjLuma(SubjColour)];
+				}
+				for (const int32 SubjIndex : SubjMask)
+				{
+					++SubjHist[SubjLuma(SubjFrame[SubjIndex])];
+				}
+				auto SubjPercentile = [](const uint32 (&SubjHistIn)[256], uint32 SubjTotal, double SubjQ) -> double
+				{
+					const uint32 SubjWanted = static_cast<uint32>(SubjQ * SubjTotal);
+					uint32 SubjSeen = 0;
+					int32 SubjBin = 0;
+					for (; SubjBin < 255 && SubjSeen + SubjHistIn[SubjBin] < SubjWanted; ++SubjBin)
+					{
+						SubjSeen += SubjHistIn[SubjBin];
+					}
+					return SubjBin / 255.0;
+				};
+				SubjP50 = SubjPercentile(SubjHist, static_cast<uint32>(SubjMask.Num()), 0.5);
+				SubjP97 = SubjPercentile(SubjHist, static_cast<uint32>(SubjMask.Num()), SubjectMeterHighPercentile);
+				SubjFrameP90 = SubjPercentile(SubjFrameHist, static_cast<uint32>(SubjFrame.Num()), StormMeterPercentile);
+				if (SubjP50Before < 0.0)
+				{
+					SubjP50Before = SubjP50;
+					SubjP97Before = SubjP97;
+				}
+				if (SubjectRounds + 1 == SubjectMeterRounds)
+				{
+					SubjectNote = TEXT("out of rounds: the last measured exposure stands");
+					break;
+				}
+				const double SubjStep = SubjectMeterStep(SubjP50, SubjP97, SubjFrameP90, SubjectMeterStops);
+				if (SubjStep == 0.0)
+				{
+					break;
+				}
+				SubjectMeterStops += SubjStep;
+				SubjectSettings.AutoExposureBias = static_cast<float>(SubjectBiasBefore + SubjectMeterStops);
+			}
+			if (SubjectMeterStops != 0.0)
+			{
+				for (USceneCaptureComponent2D* SubjSibling : {LinearCapture, AccumulateCapture})
+				{
+					if (SubjSibling != nullptr)
+					{
+						SubjSibling->PostProcessSettings.bOverride_AutoExposureBias = true;
+						SubjSibling->PostProcessSettings.AutoExposureBias = SubjectSettings.AutoExposureBias;
+					}
+				}
+			}
+		}
+		// The temporal history converges on the kept exposure (and the shown
+		// aircraft) before frame 0.
+		if (SubjMaskPixels > 0 || SubjX1 - SubjX0 >= 4)
+		{
+			for (int32 SubjI = 0; SubjI < StormMeterSettleCaptures; ++SubjI)
+			{
+				World->SendAllEndOfFrameUpdates();
+				FlushRenderingCommands();
+				Capture->CaptureScene();
+				FlushRenderingCommands();
+				BeatWatchdog(TEXT("a subject meter settle capture"));
+			}
+		}
+		SubjectRow->SetNumberField(TEXT("mask_pixels"), SubjMaskPixels);
+		SubjectRow->SetNumberField(TEXT("p50_luma_before"), SubjP50Before);
+		SubjectRow->SetNumberField(TEXT("p97_luma_before"), SubjP97Before);
+		SubjectRow->SetNumberField(TEXT("p50_luma_after"), SubjP50);
+		SubjectRow->SetNumberField(TEXT("p97_luma_after"), SubjP97);
+		SubjectRow->SetNumberField(TEXT("frame_p90_luma"), SubjFrameP90);
+		SubjectRow->SetNumberField(TEXT("stops"), SubjectMeterStops);
+		SubjectRow->SetNumberField(TEXT("bias_before"), SubjectBiasBefore);
+		SubjectRow->SetNumberField(TEXT("bias_after"), SubjectSettings.AutoExposureBias);
+		SubjectRow->SetNumberField(TEXT("rounds"), SubjectRounds);
+		SubjectRow->SetNumberField(TEXT("highlight_p97"), SubjectMeterHighlightP97);
+		SubjectRow->SetNumberField(TEXT("highlight_target_p97"), SubjectMeterHighlightTarget);
+		SubjectRow->SetNumberField(TEXT("mid_floor_p50"), SubjectMeterMidFloorP50);
+		SubjectRow->SetNumberField(TEXT("mid_target_p50"), SubjectMeterMidTarget);
+		SubjectRow->SetNumberField(TEXT("max_close_stops"), SubjectMeterMaxCloseStops);
+		SubjectRow->SetNumberField(TEXT("max_open_stops"), SubjectMeterMaxOpenStops);
+		SubjectRow->SetStringField(TEXT("note"), SubjectNote);
+		SubjectRow->SetStringField(TEXT("basis"),
+			TEXT("lane A: the aircraft's pixels (shown minus hidden inside its projected bounds), metered ")
+			TEXT("after the frame meter: a clipping subject (p97 over highlight_p97) is closed to ")
+			TEXT("highlight_target_p97; a dark subject (median under mid_floor_p50) is opened toward ")
+			TEXT("mid_target_p50, never past its own highlight bound nor a clipping frame; constant over ")
+			TEXT("the clip; -subject-meter=off for the A/B; UNCALIBRATED"));
+		if (VisualScene.LookApplied.IsValid())
+		{
+			VisualScene.LookApplied->SetObjectField(TEXT("subject_exposure"), SubjectRow);
+		}
+		if (SubjectMeterStops != 0.0)
+		{
+			ExposureSource += FString::Printf(
+				TEXT("; subject meter moved %+.2f stops (aircraft p50 %.3f -> %.3f, p97 %.3f -> %.3f)"),
+				SubjectMeterStops, SubjP50Before, SubjP50, SubjP97Before, SubjP97);
+		}
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("subject exposure: %d aircraft pixels, p50 %.3f -> %.3f, p97 %.3f -> %.3f, %+.2f stops, ")
+		       TEXT("%d rounds: %s"), SubjMaskPixels, SubjP50Before, SubjP50, SubjP97Before, SubjP97, SubjectMeterStops,
+		       SubjectRounds, *SubjectNote);
 	}
 
 	// -- Phase 8B.0: the real-time probe loop ------------------------------
@@ -8901,6 +9178,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			: StormMeterOpened < 0.0
 			? FString::Printf(TEXT("; closed %.2f stops by the beauty meter's highlight guard ")
 			                  TEXT("(look_applied.storm_exposure.highlight_guard)"), -StormMeterOpened)
+			: FString())
+		// Lane A, beauty only: the subject meter's stops on top.
+		+ (SubjectMeterStops != 0.0
+			? FString::Printf(TEXT("; moved %+.2f stops by the subject meter (look_applied.subject_exposure)"),
+			                  SubjectMeterStops)
 			: FString()));
 	Scene->SetBoolField(TEXT("physical_sky"), bPhysicalSky);
 	if (bPhysicalSky)

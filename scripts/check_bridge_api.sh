@@ -1336,6 +1336,22 @@ cg_check "constrained: SetMieAbsorptionScale" "Engine/Classes/Components/SkyAtmo
 cg_check "constrained: float VolumetricScatteringIntensity;" "Engine/Classes/Components/LightComponentBase.h" "float VolumetricScatteringIntensity;"
 # ---------------------------------------------------- END constrained gpu --
 
+# -- lane A (2026-11-11) -- BEGIN lane A --
+# FlightSimHeroLighting.cpp (-sky-cloud-ao=auto) and FlightSimRenderCommandlet.cpp
+# (the subject meter: the aircraft's static meshes projected, hidden for one
+# capture). tests/test_lane_a_aircraft_light.py pins the C++ side.
+wfx_check "lane A: SkyLight bCloudAmbientOcclusion" "Engine/Classes/Components/SkyLightComponent.h" "uint32 bCloudAmbientOcclusion : 1;"
+wfx_check "lane A: TInlineComponentArray(const AActor*)" "Engine/Classes/GameFramework/Actor.h" "TInlineComponentArray(const AActor* Actor, bool bIncludeFromChildActors = false);"
+wfx_check "lane A: SceneComponent Bounds" "Engine/Classes/Components/SceneComponent.h" "FBoxSphereBounds Bounds;"
+wfx_check "lane A: SceneComponent IsVisible" "Engine/Classes/Components/SceneComponent.h" "ENGINE_API virtual bool IsVisible() const;"
+wfx_check "lane A: SceneCapture HiddenActors" "Engine/Classes/Components/SceneCaptureComponent.h" "TArray<TObjectPtr<AActor>> HiddenActors;"
+wfx_check "lane A: FBox2D(EForceInit)" "Core/Public/Math/Box2D.h" "explicit TBox2<T>( EForceInit )"
+wfx_check "lane A: FBox2D += point" "Core/Public/Math/Box2D.h" "inline TBox2<T>& operator+=( const TVector2<T> &Other );"
+wfx_check "lane A: FBox2D bIsValid" "Core/Public/Math/Box2D.h" "bool bIsValid;"
+wfx_check "lane A: BoxSphereBounds GetBox" "Core/Public/Math/BoxSphereBounds.h" "TBox<T> GetBox() const"
+wfx_check "lane A: CeilToInt32(double)" "Core/Public/GenericPlatform/GenericPlatformMath.h" "static inline int32 CeilToInt32(double F)"
+# ------------------------------------------------------------ END lane A --
+
 
 # -- plugin dependencies must be enabled in the uproject --------------------
 PYBIN=$(pick_python) || { bad "python" "no working python (.venv, python3, python)"; PYBIN=false; }
