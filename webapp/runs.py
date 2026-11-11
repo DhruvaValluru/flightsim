@@ -3836,9 +3836,14 @@ class RunManager:
         Prefers the named lines and falls back to the tail, so an
         unrecognised failure still says something.
         """
+        # Only the log's tail (2 MB): the last words are at the end, and a
+        # long batch should not pull every engine log whole into the server.
         try:
-            lines = log.read_text(encoding="utf-8",
-                                  errors="replace").splitlines()
+            with open(log, "rb") as handle:
+                handle.seek(0, 2)
+                size = handle.tell()
+                handle.seek(max(0, size - (2 << 20)))
+                lines = handle.read().decode("utf-8", errors="replace").splitlines()
         except OSError:
             return ""
         wanted = ("LogFlightSim", "Error:", "Fatal", "commandlet",
