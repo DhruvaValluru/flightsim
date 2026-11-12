@@ -1,0 +1,11 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "09_747_through_a_thunderstorm": {
+   "post": "09_747_through_a_thunderstorm_post.jpg",
+   "source": "09_747_through_a_thunderstorm_frame_beauty_post.png"
+  }
+ }
+}
