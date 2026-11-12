@@ -26,8 +26,6 @@ DOMAINS = {
                            ["alpine", "coastal", "urban", "desert"], "instance density and frame time inside the hardware budget"),
     "aircraft_exterior": (["pbr_materials", "glass", "decals_wear", "control_surface_motion", "gear_flaps", "propeller_blur", "exhaust_heat", "nav_lights"],
                           list(SCENARIOS), "no dark-aircraft regression (docs/visual round review); albedo within calibrated range"),
-    "cockpit": (["panel_geometry", "gauge_needles", "glass_displays", "switchgear", "canopy_reflections", "night_lighting"],
-                ["night_ifr", "storm", "alpine"], "instrument readback matches FDM state to stated tolerance"),
     "atmosphere_clouds": (["volumetric_cloud_types", "cloud_shadows", "aerial_perspective", "sun_moon_ephemeris", "stars_milky_way", "haze_dust", "god_rays"],
                           list(SCENARIOS), "radiometric check against SkyAtmosphere reference values"),
     "weather_fx": (["rain_drops", "windscreen_water", "lightning", "snow", "turbulence_visual", "fog", "thunder_audio"],

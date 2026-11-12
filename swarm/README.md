@@ -1,7 +1,7 @@
 # Hyper-realism swarm
 
 Runs hundreds of agents, one per work item in `manifest.json`
-(domain x component x scenario, 457 items), each writing only inside its own
+(domain x component x scenario, 439 items), each writing only inside its own
 lane directory.
 
 ## Order of operations
