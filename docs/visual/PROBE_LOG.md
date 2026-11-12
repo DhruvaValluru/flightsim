@@ -3688,3 +3688,72 @@ The host's swap rule and ue_aircraft_materials.beauty_slot_mismatches are now "t
 slots are the copy's first ones". Gauge faces sit 0.72 m ahead of views.pilot_eye, 95 % facing
 it. Expect in #12: the grey panel with its gauge faces under the glareshield (needles, separate
 instrument models, are not converted).
+## round 52: the cumulus tiers are the shadow march and the extruded field (2026-11-11)
+
+Mac, uncompiled, nothing rendered. Read from round 51's #04, #12, #13 (vis-windows `2daa0f45`)
+and round 44's; traced in UE 5.7's `VolumetricCloud.usf` and in a Python replica of the
+constrained march (engine march laws, the shader's own density twin `world_beauty.cloud_density`).
+
+**The tiers.** The cumulus bases and sides are flat horizontal tiers with straight vertical
+edges (#04's mesas over the rim, #12's shelves under the domes, #13's curtains). Round 6
+blamed the VIEW march's altitude slices and loaded the blue noise; every round since records
+`render_settings.beauty_path.blue_noise.cloud_march_jittered` true and the tiers stayed. Not
+the view march: its start is jittered per pixel and per capture.
+1. The SHADOW march is unjittered by the engine (`const float ShadowJitterNorm = 0.5f; //
+   InterleavedGradientNoise(...) Disabled jittering`). On the constrained row it is 10
+   quadratic samples over 6 km: segments of 60, 180, 300 ... 1140 m sampled at their middles
+   (30 m ... 5.4 km). At the cumulus row's 0.05 /m every segment is opaque (optical depth 3 to
+   57), so the sun's transmittance at a point is a PRODUCT OF ON/OFF STEPS, one per shadow
+   sample, each switching where that fixed offset towards the sun crosses a cloud: hard
+   iso-altitude lines and copies of the neighbours' outlines, the same in every capture.
+2. The weather field is a plane pattern (the 3D billow is 0.08 of it, and none past 20 km)
+   cut by a height-only threshold: every cell is an extrusion with vertical walls, which (1)
+   lights in flat tiers.
+- Replica (scratch, camera 2000 m under a 2940-4940 m cumulus layer, sun 20 deg up behind,
+  constrained march): with the engine's shadow march the field draws round 51's look
+  (stacked blocks, vertical facets, flat shelves, strips towards the horizon); the same view
+  march with the sun term replaced by a height ramp draws soft rounded cells (1 is the facets);
+  the walls stay vertical in every variant without a 3D term (2).
+
+**Fix (beauty only; no march sample, no cvar).**
+1. `cloud_layers.hlsl` reads the engine's `Cloud Sample Attributes.ShadowSampleDistance` (0 on
+   a view sample) and treats a shadow sample as the segment it stands for: footprint =
+   `ShadowFootprintKm` x sqrt(distance km), the quadratic march's 2 sqrt(L d) / N
+   (`CloudShadowFootprintPerSqrtKm`: 0.49 on the constrained row, 0.03-0.07 on the discrete).
+   The point is dithered over a cube `SHADOW_DITHER` (2) footprints wide by a hash of its own
+   position (which moves with the view ray's blue-noise start: per pixel and per capture, so
+   TSR averages it), the soft edge widens by `SHADOW_SOFTEN` (1) x footprint per cell (after
+   the cut: the drawn cover is unchanged), and a sample wider than the erosion noise reads its
+   mean (`DETAIL_MEAN` 0.479) instead of evaluating it.
+2. The field's warp grows with height: `SideBulge` (0.35 cells) x sin(3 (h - 0.5)) on top of
+   the 0.45 warp (`FWorldCloud::ShapeLodBulge`, the warp vectors already computed), so the
+   outline moves with height and the walls lean and bulge; 0 at mid-layer, the distant
+   sheet's slice (the sheet calls `ShapeLod` = `ShapeLodBulge(.., 0)`, unchanged).
+- Cost: the constrained row stays ef361bd6's 192 / 10 / 80 km with the 6 km shadow march. Per
+  shadow sample one PCG hash and a sqrt; per sample a sin; on the constrained row shadow
+  samples 4-10 (d > 0.51 km) skip the erosion's 54 hashes. Net: fewer lattice hashes per frame.
+- Replica numbers (tests/test_cloud_tiers.py): the sun's transmittance 10 m apart in height at
+  200 in-cloud points jumps by up to 0.24 on round 51's march, 0.05 filtered; the mean sun
+  term about 17 % lower (the dither reaches into neighbours: a softer, slightly greyer
+  cloud). Below the rounding, round 51's far field is cloud or clear the same at every height;
+  with the bulge the outline moves and the cover stays the stated one.
+- Side effect: the engine's cloud shadow map (ground cloud shadows: fair -fair-cloud-shadows=on,
+  deck shadows) evaluates the same material with ShadowSampleDistance > 0, so its shadows get
+  the same softening, with a static dither the map's spatial filter blurs.
+- Generations: `M_FlightSimCloudLayers` graph 5 / world 6, `M_FlightSimDistantClouds` graph 4 /
+  world 4 (shared noise text). An unset `ShadowFootprintKm` / `SideBulge` is 0 = round 51.
+
+**A/B.** `-look-cloud-tiers=off` (command line or `FLIGHTSIM_RENDER_SWITCHES`) sets both to 0
+on every layer: round 51's clouds exactly (a shadow sample is then a view sample's computation,
+bit for bit). Another word refuses `world_beauty.clouds`. Recorded:
+`look_applied.world_beauty.clouds.march.cloud_tiers`, per layer `cloud_tiers`,
+`shadow_footprint_km_per_sqrt_km`, `side_bulge_cells`.
+
+**Windows.** Prep: `materials` (generation bumps) and a bridge rebuild. Render #04, #12, #13
+(beauty, no switch), one still each. Pass: no stacked shelves or vertical facets on the
+cumulus; flat, darker bases; lit, rounded sun-side domes; sides that lean and bulge; a faint
+grain at most; capture time not above round 51's (the march has fewer hashes). Then #13 with
+`FLIGHTSIM_RENDER_SWITCHES="-look-cloud-tiers=off"`: round 51's tiers come back (the cause
+check). Knobs (UNCALIBRATED): grain -> SHADOW_DITHER 1; clouds too grey -> SHADOW_DITHER 1
+and SHADOW_SOFTEN 0.5; walls still straight -> SideBulge 0.5 (world_beauty.CLOUD_SIDE_BULGE,
+C++ CloudSideBulge).

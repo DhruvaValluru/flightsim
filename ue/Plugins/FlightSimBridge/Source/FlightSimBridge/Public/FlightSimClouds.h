@@ -188,6 +188,9 @@ private:
 	// clouds' ground bounce is the surface row's luminance as a grey
 	// (world_beauty.neutral_albedo_srgb); -storm-ground-albedo=surface keeps the hue.
 	FString StormAlbedoSwitch = TEXT("neutral");
+	// Round 52: -look-cloud-tiers=on|off (Build reads it; ApplyClouds sets
+	// the cloud material's ShadowFootprintKm and SideBulge under it, 0 when off).
+	FString CloudTiersSwitch = TEXT("on");
 	bool StormNeutralAlbedo() const;
 	int32 Preset = 0;
 	// The tables in force (the pure block's defaults, then the overrides).

@@ -3293,11 +3293,17 @@ WORLD_CLOUD_SCALARS = {
     "Coverage": 0.35, "ExtinctionPerM": 0.05, "ExtinctionScale": 1.0, "ShapeScaleKm": 2.5,
     "DetailScaleKm": 0.35, "DetailErosion": 0.35, "BottomSoftness": 0.08, "TopRounding": 0.75,
     "CoverageContrast": 0.9,
+    # Round 52: a shadow sample's footprint per sqrt(km) (0 = round 51's march, the
+    # default a material has before the bridge sets it) and the layer's thickness.
+    "ShadowFootprintKm": 0.0, "LayerThicknessKm": 1.2,
+    # Round 52: the sides' bulge, cells (0 = round 51's vertical walls).
+    "SideBulge": 0.0,
 }
 WORLD_CLOUD_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 WORLD_CLOUD_INPUTS = ("WorldPos", "NormAlt", "CameraPos", "Coverage", "ExtinctionPerM", "ExtinctionScale",
                       "ShapeScaleKm", "DetailScaleKm", "DetailErosion", "BottomSoftness", "TopRounding",
-                      "CoverageContrast", "SeedOffsetKm", "WindOffsetM")
+                      "CoverageContrast", "SeedOffsetKm", "WindOffsetM",
+                      "ShadowDist", "ShadowFootprintKm", "LayerThicknessKm", "SideBulge")   # round 52
 #: The cloud's single-scattering albedo (water droplets scatter almost all they
 #: intercept; the storm cell's own 0.98). UNCALIBRATED: set by probe render.
 WORLD_CLOUD_ALBEDO = 0.98
@@ -3434,7 +3440,10 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: field both shaders share (FWorldCloud::Shape, world_beauty.cloud_shape).
 #: Round 10: clouds 4 / distant 3, the rounded, warped field with a far level
 #: of detail (the cloud material gains a CameraPos input).
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "4", "M_FlightSimDistantClouds": "3"}
+#: Round 52: clouds 5 / distant 4, the shadow samples' footprint and the sides'
+#: bulge (inputs ShadowDist, ShadowFootprintKm, LayerThicknessKm, SideBulge:
+#: round 51's tiers); the distant sheet's shared noise gains ShapeLodBulge.
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "5", "M_FlightSimDistantClouds": "4"}
 
 
 def world_graph_stale(name):
@@ -3482,8 +3491,8 @@ def world_stamp(material, name):
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "3", "M_FlightSimTilesBeauty": "3",   # 3: lane B terrain detail
-                     "M_FlightSimCloudLayers": "5", "M_FlightSimScatter": "1",  # clouds 5: round-10 rounded, warped, LOD
-                     "M_FlightSimDistantClouds": "3",   # distant 3: round-10 rounded, warped, far LOD
+                     "M_FlightSimCloudLayers": "6", "M_FlightSimScatter": "1",  # clouds 6: round-52 shadow footprint, side bulge
+                     "M_FlightSimDistantClouds": "4",   # distant 4: round-52 shared noise (ShapeLodBulge)
                      "M_FlightSimOceanBeauty": "4"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
@@ -3643,8 +3652,10 @@ def create_world_cloud_layers():
     inputs = {}
     inputs["WorldPos"] = (lib.create_material_expression(
         material, unreal.MaterialExpressionWorldPosition, -1800, -200), "")
-    inputs["NormAlt"] = (lib.create_material_expression(
-        material, unreal.MaterialExpressionCloudSampleAttribute, -1800, -50), "NormAltitudeInLayer")
+    attributes = lib.create_material_expression(material, unreal.MaterialExpressionCloudSampleAttribute, -1800, -50)
+    inputs["NormAlt"] = (attributes, "NormAltitudeInLayer")
+    # Round 52: the engine's shadow-sample distance (0 on a view sample), same node.
+    inputs["ShadowDist"] = (attributes, "ShadowSampleDistance")
     # Round 10: the far field's level of detail reads the camera's distance.
     inputs["CameraPos"] = (lib.create_material_expression(
         material, unreal.MaterialExpressionCameraPositionWS, -1800, 20), "")

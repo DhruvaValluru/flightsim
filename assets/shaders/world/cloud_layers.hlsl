@@ -38,6 +38,31 @@
 // 81), which pays for the shorter shadow march that gives the cells their
 // self-shadowed, darker bases (world_beauty.cloud_shadow_tracing_km_for).
 //
+// Round 52 (2026-11-11), after round 51's #04, #12 and #13: the cumulus bases
+// and sides were sliced into flat horizontal tiers with straight edges. The
+// view march is blue-noise jittered (round 6) but the engine's SHADOW march
+// is not (VolumetricCloud.usf: ShadowJitterNorm = 0.5, "Disabled jittering"):
+// on the constrained GPU it is 10 quadratic samples over 6 km, segments of
+// 60 m to 1.1 km, and at 0.05 /m each segment is opaque (optical depth 3 to
+// 57). The sun's transmittance at a point is a product of on/off steps, one
+// per shadow sample, each switching where that FIXED offset towards the sun
+// crosses the cloud's surface; on a field that is mostly a plane pattern cut
+// by a height-only threshold those crossings are iso-altitude lines, the same
+// on every cloud and every capture, so TSR has nothing to average. Fix (no
+// sample added): a SHADOW sample (the engine's ShadowSampleDistance > 0) is
+// the average over its segment's footprint (ShadowFootprintKm x sqrt of its
+// distance, the quadratic march's segment length; FlightSimClouds.cpp sets it
+// from the march, 0 = round 51): the sample point is dithered over the
+// footprint by a hash of its position (which moves with the view ray's
+// blue-noise start, so it changes per pixel and per capture and TSR averages
+// it), the soft edge widens by the footprint, and a sample whose footprint is
+// wider than the erosion noise reads the noise at its mean (cheaper: it would
+// average away).
+// A view sample (ShadowDist 0) is unchanged. The second half: the plane field
+// made every cell an extrusion with vertical walls, which the march lit in
+// tiers; its warp now grows with height (SideBulge, ShapeLodBulge: no hash
+// added), so the walls lean and bulge. -look-cloud-tiers=off sets both to 0.
+//
 // Inputs (the Custom node's, named exactly so; the script's WORLD_CLOUD_INPUTS):
 //   WorldPos         float3  the sample's absolute world position, cm
 //   NormAlt          float   0 at the layer's base, 1 at its top (Cloud Sample Attributes)
@@ -53,6 +78,10 @@
 //   CoverageContrast float   how hard the coverage threshold cuts (the edge is FBM_SIGMA / contrast wide)
 //   SeedOffsetKm     float3  the card's seeded noise offset (world_beauty.cloud_seed_offset_km)
 //   WindOffsetM      float3  the drift since t = 0, engine metres (the scene's drift law)
+//   ShadowDist       float   the shadow sample's distance from its view sample, cm; 0 for a view sample (Cloud Sample Attributes)
+//   ShadowFootprintKm float  a shadow sample's footprint per sqrt(km) of distance; 0 = the round-51 march (round 52)
+//   LayerThicknessKm float   the layer's thickness, km (the footprint's share of NormAlt)
+//   SideBulge        float   the sides' bulge, cells (round 52; 0 = round 51's vertical walls)
 const float FBM_MEAN = 0.55;
 const float FBM_SIGMA = 0.069;
 const float TOP_CUT_SIGMAS = 3.5;
@@ -65,6 +94,16 @@ const float EROSION_CUT_SHARE = 0.5;
 const float LOD_NEAR_KM = 6.0;
 const float LOD_FAR_KM = 20.0;
 const float FAR_SOFTEN = 1.0;
+// Round 52: a shadow sample's dither, in footprints (a cube that many footprints
+// wide: the replica's tiers went at 2), and its soft edge's widening per cell of footprint.
+// UNCALIBRATED (world_beauty.CLOUD_SHADOW_DITHER / CLOUD_SHADOW_SOFTEN).
+const float SHADOW_DITHER = 2.0;
+const float SHADOW_SOFTEN = 1.0;
+// The erosion noise's own mean (world_beauty.CLOUD_DETAIL_MEAN, measured on
+// its Python replica cloud_detail; tests/test_cloud_tiers.py re-measures it).
+const float DETAIL_MEAN = 0.479;
+// The bulge's turn over the layer (world_beauty.CLOUD_BULGE_TURN). UNCALIBRATED.
+const float BULGE_TURN = 3.0;
 const float WISP_HEIGHT = 0.25;
 struct FWorldCloud
 {
@@ -188,12 +227,15 @@ struct FWorldCloud
 	// billow fade to their means (0.5985, 0.5) and are skipped at 1, so the far
 	// field is smoother and cheaper and keeps the same mean and nearly the same
 	// spread (the cut, hence the cover, stays the stated one).
-	float ShapeLod(float3 p, float far, uint seed)
+	// Round 52: bulge (cells) adds to the warp's 0.45, so a height-varying
+	// bulge moves the cells' outlines with altitude along the same warp vectors
+	// (no hash added); 0 is round 51's ShapeLod exactly.
+	float ShapeLodBulge(float3 p, float far, float bulge, uint seed)
 	{
 		float wx = Perlin2(p.x * 0.6 + 1.7, p.y * 0.6 + 9.2, seed + 601u);
 		float wy = Perlin2(p.x * 0.6 + 13.1, p.y * 0.6 + 2.3, seed + 613u);
-		float qx = p.x + 0.45 * wx;
-		float qy = p.y + 0.45 * wy;
+		float qx = p.x + (0.45 + bulge) * wx;
+		float qy = p.y + (0.45 + bulge) * wy;
 		float cluster = 0.5 + 0.5 * (0.667 * Perlin2(p.x * 0.17 + 3.1, p.y * 0.17 + 7.9, seed + 503u)
 			+ 0.333 * Perlin2(p.x * 0.35 + 11.3, p.y * 0.35 + 5.1, seed + 557u));
 		float big = SmoothWorley2(qx * 0.42 + 2.9, qy * 0.42 + 8.3, seed + 401u);
@@ -210,6 +252,10 @@ struct FWorldCloud
 		float cells = 0.55 * big + 0.3 * mid + 0.15 * small;
 		return 0.42 * cluster + 0.5 * cells + 0.08 * billow;
 	}
+	float ShapeLod(float3 p, float far, uint seed)
+	{
+		return ShapeLodBulge(p, far, 0.0, seed);
+	}
 	float Shape(float3 p, uint seed)
 	{
 		return ShapeLod(p, 0.0, seed);
@@ -224,6 +270,18 @@ FWorldCloud C;
 // Kilometres, offset by the seed and carried by the wind (horizontal only).
 float3 km = (WorldPos / 100.0 - WindOffsetM) / 1000.0 + SeedOffsetKm;
 float h = saturate(NormAlt);
+// Round 52: a shadow sample's footprint (0 for a view sample, and with the
+// filter off); dithered over it by a hash of the sample's own position.
+float footKm = ShadowFootprintKm * sqrt(max(ShadowDist, 0.0) / 100000.0);
+[branch]
+if (footKm > 0.0)
+{
+	uint hs = C.Hash3(asint(WorldPos.x), asint(WorldPos.y), asint(WorldPos.z), 977u);
+	float3 u = float3((float)(hs & 1023u), (float)((hs >> 10u) & 1023u), (float)((hs >> 20u) & 1023u)) / 1023.0 - 0.5;
+	float3 dKm = u * (SHADOW_DITHER * footKm);
+	km += dKm;
+	h = saturate(NormAlt + dKm.z / max(LayerThicknessKm, 1e-3));
+}
 // The base fades over BottomSoftness (a soft, nearly flat base); the top
 // ROUNDS: over TopRounding the cut rises to TOP_CUT_SIGMAS above the mean, so
 // only a cell's core reaches the top (domes, not a density fade).
@@ -232,7 +290,13 @@ float top = 1.0 - smoothstep(1.0 - max(TopRounding, 1e-3), 1.0, h);
 // The weather field: cells of ShapeScaleKm on the plane; its one 3D octave
 // varies twice as fast with height (the sides bulge every few hundred m).
 float far = smoothstep(LOD_NEAR_KM, LOD_FAR_KM, length(WorldPos - CameraPos) / 100000.0);
-float shape = C.ShapeLod(float3(km.x, km.y, km.z * 2.0) / max(ShapeScaleKm, 1e-3), far, 7u);
+// Round 52: the sides bulge. The weather field is a plane pattern, so a cell's
+// outline was the same at every height (vertical walls, flat shelves where the
+// cut barely moves): its warp grows by SideBulge x sin(BULGE_TURN (h - 0.5))
+// cells, so the outline moves with height (0 at mid-layer, the distant sheet's
+// slice; 0 with SideBulge 0: round 51).
+float bulge = SideBulge * sin(BULGE_TURN * (h - 0.5));
+float shape = C.ShapeLodBulge(float3(km.x, km.y, km.z * 2.0) / max(ShapeScaleKm, 1e-3), far, bulge, 7u);
 // Coverage: the shape kept above the noise's (1 - cover) QUANTILE, so the drawn
 // share of sky is the stated cover; the soft edge (FBM_SIGMA / contrast wide)
 // starts EROSION_CUT_SHARE x DetailErosion of its width early, which the
@@ -241,13 +305,23 @@ float cover = saturate(Coverage);
 float soft = FBM_SIGMA / max(CoverageContrast, 1e-3) * (1.0 + FAR_SOFTEN * far);
 float thr = FBM_MEAN + FBM_SIGMA * C.Probit(1.0 - cover) - EROSION_CUT_SHARE * DetailErosion * soft;
 float cut = lerp(FBM_MEAN + TOP_CUT_SIGMAS * FBM_SIGMA, thr, top);
+// Round 52: a shadow sample's edge widens by its footprint (after the cut, so
+// the cut and the drawn cover stay the stated ones); + 0 for a view sample.
+soft += SHADOW_SOFTEN * footKm / max(ShapeScaleKm, 1e-3);
 float density = C.Remap(shape, cut, cut + soft);
 [branch]
 if (density > 0.0 && far < 1.0)
 {
 	// Erosion by the detail noise: wispy (the noise) under WISP_HEIGHT of the
 	// layer, billowy (its inverse) above; a full core is never eroded.
-	float detail = C.Detail(km / max(DetailScaleKm, 1e-3), 13u);
+	// Round 52: a shadow sample whose footprint is wider than the noise reads
+	// the noise's mean (DETAIL_MEAN) instead of evaluating it (54 hashes saved).
+	float detail = DETAIL_MEAN;
+	[branch]
+	if (footKm < max(DetailScaleKm, 1e-3))
+	{
+		detail = C.Detail(km / max(DetailScaleKm, 1e-3), 13u);
+	}
 	float wisp = lerp(detail, 1.0 - detail, saturate(h / WISP_HEIGHT));
 	density = C.Remap(density, DetailErosion * (1.0 - far) * wisp, 1.0);
 }

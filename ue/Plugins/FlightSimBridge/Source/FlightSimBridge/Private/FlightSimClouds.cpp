@@ -253,6 +253,34 @@ namespace FlightSimWorldPure
 	{
 		return bConstrained ? CloudShadowConstrainedKm : CloudShadowTracingKm(ThicknessM);
 	}
+	// Round 52 (round 51's #04, #12, #13: cumulus sliced into flat horizontal tiers):
+	// the engine's shadow march is unjittered (VolumetricCloud.usf ShadowJitterNorm =
+	// 0.5), and on the constrained row its 10 quadratic segments (60 m to 1.1 km) are
+	// each opaque at cloud extinction, so the sun's light is on/off steps at fixed
+	// offsets: iso-altitude tiers no capture averages. M_FlightSimCloudLayers treats a
+	// shadow sample as its segment's footprint (cloud_layers.hlsl: dithered, softened,
+	// erosion noise at its mean past its size); this is the material's ShadowFootprintKm, the
+	// quadratic march's segment 2 sqrt(L d) / N per sqrt(d): 2 sqrt(L) / N. 0 with
+	// -look-cloud-tiers=off (round 51's march exactly). No sample is added.
+	// world_beauty.cloud_shadow_footprint_per_sqrt_km is the twin.
+	inline double CloudShadowFootprintPerSqrtKm(double ShadowKm, double ShadowSamples, bool bFilterOn)
+	{
+		if (!bFilterOn || !(ShadowSamples > 0.0) || !(ShadowKm > 0.0))
+		{
+			return 0.0;
+		}
+		return 2.0 * std::sqrt(ShadowKm) / ShadowSamples;
+	}
+	// Round 52, the second half of the tiers: the weather field is a plane pattern, so
+	// a cell's outline was the same at every height (vertical walls). The material's
+	// SideBulge (cells) grows the field's warp with height (cloud_layers.hlsl: x
+	// sin(BULGE_TURN (h - 0.5)), 0 at mid-layer), so the sides lean and bulge; no hash
+	// added. 0 with -look-cloud-tiers=off. UNCALIBRATED (world_beauty.CLOUD_SIDE_BULGE).
+	constexpr double CloudSideBulge = 0.35;
+	inline double CloudSideBulgeFor(bool bTiersOn)
+	{
+		return bTiersOn ? CloudSideBulge : 0.0;
+	}
 	// The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 	// stated layer) is thinned to the shape's depth: fair cumulus and a stratus
 	// deck are 1-2 km deep; 0 keeps the layer as built.
@@ -1028,6 +1056,18 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// neutral by default (StormNeutralAlbedo); surface is the A/B.
 		StormAlbedoSwitch = TEXT("neutral");
 		FParse::Value(*Switches, TEXT("storm-ground-albedo="), StormAlbedoSwitch);
+		// Round 52: -look-cloud-tiers=on|off (on by default): the cloud
+		// material's shadow-sample footprint (CloudShadowFootprintPerSqrtKm) and
+		// side bulge (CloudSideBulgeFor); off is round 51's clouds exactly.
+		// Another word refuses by name.
+		CloudTiersSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("look-cloud-tiers="), CloudTiersSwitch);
+	}
+	if (CloudTiersSwitch != TEXT("on") && CloudTiersSwitch != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-tiers=%s is not on or off"),
+		                        *CloudTiersSwitch);
+		return false;
 	}
 
 	// The tables in force: the pure block's defaults, then any overrides.
@@ -1910,6 +1950,14 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			     "first capture (clouds round 6: render_settings.beauty_path.blue_noise; a commandlet otherwise "
 			     "gets BlueNoise.cpp's constant dummy, the altitude-slice strata of round 3); the shadow march "
 			     "spans the layer (CloudShadowTracingKm)"));
+		MarchOut->SetStringField(TEXT("cloud_tiers"), CloudTiersSwitch);
+		MarchOut->SetStringField(TEXT("cloud_tiers_basis"),
+			TEXT("round 52: the engine's shadow march is unjittered (ShadowJitterNorm 0.5) and each quadratic "
+			     "segment is opaque at cloud extinction, so the sun's light came in on/off iso-altitude tiers; "
+			     "M_FlightSimCloudLayers dithers and softens a shadow sample over its segment's footprint "
+			     "(ShadowFootprintKm = 2 sqrt(shadow km) / shadow samples, per layer), and the plane weather "
+			     "field's vertical walls lean and bulge with height (SideBulge); no sample added. "
+			     "-look-cloud-tiers=off sets both 0: round 51's clouds"));
 		MarchOut->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED: set by probe render on the render machine"));
 		IConsoleVariable* FogAll = IConsoleManager::Get().FindConsoleVariable(WorldCloudFogAllPixelCvar);
 		if (FogAll != nullptr)
@@ -1966,6 +2014,16 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			FLinearColor(static_cast<float>(SeedKm[0]), static_cast<float>(SeedKm[1]),
 			             static_cast<float>(SeedKm[2]), 0.0f));
 		State.Material->SetVectorParameterValue(TEXT("WindOffsetM"), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+		// Round 52: the shadow samples' footprint (0 = round 51's march) and the
+		// layer's thickness the footprint's vertical share is read against.
+		const double ShadowSamples = FMath::Min(UVolumetricCloudComponent::BaseShadowRaySampleCount * ShadowScale, 80.0f);
+		const double ShadowFootprint =
+			CloudShadowFootprintPerSqrtKm(ShadowTracingKm, ShadowSamples, CloudTiersSwitch == TEXT("on"));
+		State.Material->SetScalarParameterValue(TEXT("ShadowFootprintKm"), static_cast<float>(ShadowFootprint));
+		State.Material->SetScalarParameterValue(TEXT("LayerThicknessKm"),
+		                                        static_cast<float>((State.TopM - State.BaseM) / 1000.0));
+		const double SideBulge = CloudSideBulgeFor(CloudTiersSwitch == TEXT("on"));
+		State.Material->SetScalarParameterValue(TEXT("SideBulge"), static_cast<float>(SideBulge));
 		Cloud->SetMaterial(State.Material);
 		Cloud->SetbUsePerSampleAtmosphericLightTransmittance(true);
 		Cloud->SetSkyLightCloudBottomOcclusion(static_cast<float>(AtmRow[AtmCloudBottomOcclusion]));
@@ -1992,6 +2050,9 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			? TEXT("the default layer thinned to the shape's depth (world_beauty.CLOUD_MAX_THICKNESS_M)")
 			: (bStatedLayer ? TEXT("the stated layer, as built") : TEXT("as built (within the shape's depth)")));
 		Layer->SetNumberField(TEXT("shadow_tracing_distance_km"), ShadowTracingKm);
+		Layer->SetNumberField(TEXT("shadow_footprint_km_per_sqrt_km"), ShadowFootprint);
+		Layer->SetStringField(TEXT("cloud_tiers"), CloudTiersSwitch);
+		Layer->SetNumberField(TEXT("side_bulge_cells"), SideBulge);
 		for (int32 F = 0; F < CloudFieldCount; ++F)
 		{
 			Layer->SetNumberField(ANSI_TO_TCHAR(CloudFieldName(F)), CloudRow[F]);
