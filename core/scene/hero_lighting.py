@@ -425,8 +425,12 @@ def neutral_ground_luminance(rgb: Sequence[float]) -> List[float]:
 #: sRGB B - R -50 (neutraliser off +34, fill off -20, aerial perspective off -61,
 #: fog off -48). A fill halfway to grey keeps some of the clear sky's blue in the
 #: shade, as a photograph's has. ``-stated-fill-share=<0..1>`` (FLIGHTSIM_RENDER_SWITCHES)
-#: sets it for the A/B. UNCALIBRATED.
-STATED_FILL_NEUTRAL_SHARE = 0.5
+#: sets it for the A/B. Rounds 75-76: share 0.5 still warm (#02 shade B-R -35, the
+#: forest grey-olive); share 0 the most natural (-18, rock grey-tan, forest
+#: grey-green, the A-4 white 244/243/242). So 0: the fill keeps the captured sky's
+#: colour, its luminance the preset's (the colour is white, intensity_scale 1).
+#: UNCALIBRATED.
+STATED_FILL_NEUTRAL_SHARE = 0.0
 STATED_FILL_SHARE_SWITCH = re.compile(r"(?:^|\s)-?stated-fill-share=(\S*)")
 
 

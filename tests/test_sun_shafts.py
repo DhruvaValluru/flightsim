@@ -202,7 +202,7 @@ def test_a_missing_sun_or_sky_light_is_skipped_not_refused():
 
 def test_the_hook_sits_after_the_tiles_inside_build():
     build = CLOUDS_CPP[CLOUDS_CPP.index("bool FFlightSimWorldBeauty::Build("):CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyAtmosphere(")]
-    tiles = build.index("ApplyTiles(World, Tiles, CardWetness);")
+    tiles = build.index("ApplyTiles(World, Tiles, CardWetness, SunElevationDeg);")
     hook = build.index("SunShafts.Apply(World, Scene, Preset, SunShafts.ResolveStillTier(Params), SunShaftsOut);")
     assert tiles < hook < tiles + 400
     assert 'Record->SetObjectField(TEXT("sun_shafts"), SunShaftsOut);' in build

@@ -154,7 +154,7 @@ private:
 	void ApplyClouds(UWorld* World, FFlightSimVisualScene& Scene, FFlightSimWeather& Weather,
 	                 const FString& Mode, double CardCover, double CardBaseM, double CardTopM,
 	                 int32 Seed);
-	void ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Tiles, double CardWetness);
+	void ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Tiles, double CardWetness, double SunElevationDeg);
 	// Visual round 2 (weather scenes): every redrawn deck, and the storm cell's
 	// deck and tower, kept clear of the aircraft (beauty only; recorded in
 	// world_beauty.aircraft_clearance).

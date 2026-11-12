@@ -265,7 +265,7 @@ def test_the_cpp_sheet_is_beauty_only_and_label_safe():
     # Build: after the clearance (the sheet follows the slab drawn), before the tiles; off by word
     build = _body(CLOUDS_CPP, "bool FFlightSimWorldBeauty::Build(", "// -- tiles-delight")
     assert build.index("KeepAircraftClearOfClouds(Card, Aircraft, Weather);") < build.index(
-        "ApplyDistantClouds(World, Scene, Weather, DistantMode, Seed);") < build.index("ApplyTiles(World, Tiles, CardWetness);")
+        "ApplyDistantClouds(World, Scene, Weather, DistantMode, Seed);") < build.index("ApplyTiles(World, Tiles, CardWetness, SunElevationDeg);")
     assert 'if (DistantMode != TEXT("on") && DistantMode != TEXT("off"))' in build
     assert 'if (Mode == TEXT("off"))' in APPLY_DISTANT
     # the storm deck continues when no layer was redrawn

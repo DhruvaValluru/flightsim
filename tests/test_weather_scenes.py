@@ -134,7 +134,7 @@ def test_the_world_lane_keeps_every_redrawn_deck_clear_and_records_it():
     build = _function(CLOUDS_CPP, "bool FFlightSimWorldBeauty::Build(")
     clouds_at = build.index("ApplyClouds(World, Scene, Weather")
     clear_at = build.index("KeepAircraftClearOfClouds(Card, Aircraft, Weather);")
-    assert clouds_at < clear_at < build.index("ApplyTiles(World, Tiles, CardWetness);")
+    assert clouds_at < clear_at < build.index("ApplyTiles(World, Tiles, CardWetness, SunElevationDeg);")
     body = _function(CLOUDS_CPP, "void FFlightSimWorldBeauty::KeepAircraftClearOfClouds(")
     # the aircraft's height above the datum, the frame of the decks and the cell
     assert 'WorldNumber(Card, TEXT("altitude_m"), 0.0)' in body

@@ -52,7 +52,7 @@ def _chroma(rgb):
 def test_super_bright_fill_is_near_neutral(tmp_path):
     bright = _plan(tmp_path, "02", preset="super_bright")
     fill = bright["hero"]["sky_light"]
-    assert fill["neutral_share"] == hl.STATED_FILL_NEUTRAL_SHARE == 0.5   # round 75 (was 1.0)
+    assert fill["neutral_share"] == hl.STATED_FILL_NEUTRAL_SHARE == 0.0   # round 76 (1.0, then 0.5)
     colour, sky, scale = fill["color_linear_rgb"], fill["model_sky_rgb"], fill["intensity_scale"]
     # The colour is what the light can hold (8-bit sRGB), so the host draws it as planned.
     assert all(hl.srgb8_stored(c) == pytest.approx(c, abs=1e-6) for c in colour)
@@ -60,9 +60,9 @@ def test_super_bright_fill_is_near_neutral(tmp_path):
     # The fill the shade gets: the captured noon sky (very blue: R/B ~0.25) times the colour.
     assert sky[0] / sky[2] < 0.3
     lit = [s * c * scale for s, c in zip(sky, colour)]
-    # Halfway to grey in log space: some of the clear sky's blue stays in the shade
-    # (round 75; share 1 turned #02 sepia once the tiles' neutraliser drew).
-    assert _chroma(lit) == pytest.approx(_chroma(sky) ** 0.5, rel=0.03)
+    # Share 0 (round 76): the sky's own colour; share 1 turned #02 sepia once the
+    # tiles' neutraliser drew, 0.5 left it warm.
+    assert _chroma(lit) == pytest.approx(_chroma(sky), rel=1e-6)
     # Its luminance is the sky's (the preset's "how bright the shadows are" kept).
     assert sum(w * v for w, v in zip(LUMA, lit)) == pytest.approx(
         sum(w * v for w, v in zip(LUMA, sky)), rel=1e-6)

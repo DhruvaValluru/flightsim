@@ -670,7 +670,7 @@ def test_apply_tiles_maps_the_python_parameters():
                        "GroundAltitudeM": "Tiles.GetOriginOrthometricHeightM()", "GroundAltitudeKnown": "1.0",
                        "TerrainDetailScale": 'Surface == TEXT("city") ? 0.0 : 1.0',
                        # #02 blue: the baked sky-shade neutraliser
-                       "ShadeNeutralAmount": "FlightSimTilesShade::AmountFor(Preset, Surface, TilesShadeSwitch)"}
+                       "ShadeNeutralAmount": "FlightSimTilesShade::AmountFor(Preset, Surface, TilesShadeSwitch, SunElevationDeg)"}
     assert set(mapping) == set(wb.WORLD_MPC_SCALARS)
     # the ground state is set only when the tiles really draw with the beauty material
     assert 'MaterialRoute == TEXT("ACesium3DTileset::SetMaterial (read back)")' in body

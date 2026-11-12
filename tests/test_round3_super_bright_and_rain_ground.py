@@ -123,12 +123,12 @@ def test_super_bright_lights_its_fill_as_a_fill_not_more_blue_sky(tmp_path):
     assert "sky_light" not in golden["hero"]                         # #01 untouched
     fill = bright["hero"]["sky_light"]
     sky, colour, scale = fill["model_sky_rgb"], fill["color_linear_rgb"], fill["intensity_scale"]
-    assert colour[0] >= colour[1] >= colour[2] and max(colour) == 1.0   # warm, 8-bit legal
+    assert colour[0] >= colour[1] >= colour[2] and max(colour) == 1.0   # 8-bit legal
     lit = [s * c * scale for s, c in zip(sky, colour)]
-    assert _ratio(lit) > 1.8 * _ratio(sky)                          # much less blue ...
-    # ... halfway to grey in log space since round 75 (neutral in round 4):
-    # the tiles' shade neutraliser removes the photograph's baked blue now.
-    assert _ratio(lit) == pytest.approx(_ratio(sky) ** 0.5, rel=0.03)
+    # Round 76 (share 0): the fill keeps the sky's own colour; the tiles' shade
+    # neutraliser removes the photograph's baked blue instead (round 4's neutral
+    # fill and round 75's half turned #02 sepia once it drew).
+    assert colour == [1.0, 1.0, 1.0] and _ratio(lit) == pytest.approx(_ratio(sky), rel=1e-6)
     luma = (0.2126, 0.7152, 0.0722)
     assert sum(w * v for w, v in zip(luma, lit)) == pytest.approx(
         sum(w * v for w, v in zip(luma, sky)), rel=1e-4)            # its brightness kept

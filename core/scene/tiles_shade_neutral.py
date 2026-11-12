@@ -81,6 +81,14 @@ SHADE_NEUTRAL_DEFAULTS: Dict[str, float] = {
     "rain": 0.0,
     "storm": 0.0,
 }
+#: Round 75-78 (2026-11-12): the amount x SUN_LOW_SCALE at or below SUN_LOW_DEG,
+#: x1 at or above SUN_HIGH_DEG, linear between (FlightSimClouds.cpp
+#: FlightSimTilesShade::SunScale). A low sun's frame is warm already, so the bake's
+#: blue is half the defect: #01 (6 deg) at amount 1 went amber (shade B-R -77),
+#: 0.5 read as golden hour (-42); #02 (72 deg) is right at 1. UNCALIBRATED.
+SUN_LOW_DEG = 10.0
+SUN_HIGH_DEG = 40.0
+SUN_LOW_SCALE = 0.5
 #: The card surface that never takes it (the collection's TerrainDetailScale
 #: uses the same word).
 CITY_SURFACE = "city"
@@ -100,7 +108,7 @@ BASIS = ("the photogrammetry's baked sky-shade (violet-blue, darker than the kne
 LEVEL_BASIS = ("the triangle's face normal from the world position's screen derivatives; the tiles' vertex "
                "normals are the ellipsoid's up (Cesium, KHR_materials_unlit)")
 
-UNCALIBRATED: Tuple[str, ...] = ("SHADE_NEUTRAL_DEFAULTS", "SHADE_LUMA_KNEE", "SHADE_BLUE_GATE",
+UNCALIBRATED: Tuple[str, ...] = ("SHADE_NEUTRAL_DEFAULTS", "SUN_LOW_DEG", "SUN_HIGH_DEG", "SUN_LOW_SCALE", "SHADE_LUMA_KNEE", "SHADE_BLUE_GATE",
                                  "SHADE_LEVEL_SLOPE")
 
 _SWITCH_RE = re.compile(r"(?:^|\s)-?" + re.escape(SWITCH_FLAG) + r"(\S*)")
@@ -117,7 +125,14 @@ def parse_switch(text: Optional[str]) -> str:
     return "on"
 
 
-def amount_for(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT) -> float:
+def sun_scale(sun_elevation_deg: float = 90.0) -> float:
+    """The sun's factor on the preset amount (FlightSimTilesShade::SunScale)."""
+    t = min(max((float(sun_elevation_deg) - SUN_LOW_DEG) / (SUN_HIGH_DEG - SUN_LOW_DEG), 0.0), 1.0)
+    return SUN_LOW_SCALE + (1.0 - SUN_LOW_SCALE) * t
+
+
+def amount_for(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT,
+               sun_elevation_deg: float = 90.0) -> float:
     """ShadeNeutralAmount the host sets: the preset's, 0 over a city card or
     with the switch off, 0 for an unknown preset."""
     if switch == "force":   # round 63 diagnostic: every texel to its grey
@@ -127,7 +142,7 @@ def amount_for(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT) -> 
     number = _number(switch)
     if number is not None:   # round 75 A/B: -tiles-shade-neutral=0.5 is the amount, 0..1
         return min(max(number, 0.0), 1.0)
-    return float(SHADE_NEUTRAL_DEFAULTS.get(preset, 0.0))
+    return float(SHADE_NEUTRAL_DEFAULTS.get(preset, 0.0)) * sun_scale(sun_elevation_deg)
 
 
 def _number(text: str) -> Optional[float]:
@@ -169,10 +184,13 @@ def shade_neutral(albedo: Any, face_up: Any = 0.0, amount: float = 1.0) -> np.nd
     return a + (luma - a) * w
 
 
-def shade_record(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT) -> Dict[str, Any]:
+def shade_record(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT,
+                 sun_elevation_deg: float = 90.0) -> Dict[str, Any]:
     """render.json ``world_beauty.tiles.shade_neutral`` as FlightSimClouds.cpp writes it."""
     return {
-        "amount": amount_for(preset, surface, switch),
+        "amount": amount_for(preset, surface, switch, sun_elevation_deg),
+        "sun_elevation_deg": float(sun_elevation_deg),
+        "sun_scale": sun_scale(sun_elevation_deg),
         "preset_amount": float(SHADE_NEUTRAL_DEFAULTS.get(preset, 0.0)),
         "switch": switch if switch == "off" or _number(switch) is not None else "on",
         "luma_knee": SHADE_LUMA_KNEE,

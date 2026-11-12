@@ -187,7 +187,7 @@ def test_the_host_reads_the_switch_and_records_it():
     assert sn.SWITCH_FLAG == "tiles-shade-neutral="
     tiles = CLOUDS_CPP[CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyTiles"):
                        CLOUDS_CPP.index("void FFlightSimWorldBeauty::Advance")]
-    assert ('{TEXT("ShadeNeutralAmount"), FlightSimTilesShade::AmountFor(Preset, Surface, TilesShadeSwitch)}'
+    assert ('{TEXT("ShadeNeutralAmount"), FlightSimTilesShade::AmountFor(Preset, Surface, TilesShadeSwitch, SunElevationDeg)}'
             in tiles)
     assert 'Out->SetObjectField(TEXT("shade_neutral"),' in tiles
 
@@ -219,3 +219,16 @@ def test_a_numeric_switch_is_the_amount():
     assert sn.amount_for("clear", "", "3") == 1.0
     assert sn.amount_for("clear", "city", "0.5") == 0.0
     assert sn.shade_record("clear", "", "0.5")["switch"] == "0.5"
+
+
+def test_a_low_sun_halves_the_amount():
+    assert sn.amount_for("clear", "", "on", 72.0) == 1.0
+    assert sn.amount_for("clear", "", "on", 6.0) == 0.5
+    assert sn.amount_for("clear", "", "on", 25.0) == pytest.approx(0.75)
+    assert sn.amount_for("clear", "", "0.8", 6.0) == 0.8          # a number is the amount itself
+    rec = sn.shade_record("clear", "", "on", 6.0)
+    assert rec["amount"] == 0.5 and rec["sun_scale"] == 0.5 and rec["sun_elevation_deg"] == 6.0
+    host = (REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp").read_text(encoding="utf-8")
+    for name, value in (("SunLowDeg", sn.SUN_LOW_DEG), ("SunHighDeg", sn.SUN_HIGH_DEG),
+                        ("SunLowScale", sn.SUN_LOW_SCALE)):
+        assert f"constexpr double {name} = {value};" in host

@@ -36,10 +36,10 @@ def test_hardware_rt_needs_rtx_and_vram():
 
 def test_refuses_by_name(tmp_path):
     p = tmp_path / "p.json"
-    p.write_text(json.dumps({"cpu": {}, "ram": {}, "gpus": []}))
+    p.write_text(json.dumps({"cpu": {}, "ram": {}, "gpus": []}), encoding="utf-8")
     with pytest.raises(HardwareProfileError, match="no_gpu"):
         load_profile(p)
-    p.write_text(json.dumps({"cpu": {}, "ram": {}}))
+    p.write_text(json.dumps({"cpu": {}, "ram": {}}), encoding="utf-8")
     with pytest.raises(HardwareProfileError, match="missing_gpus"):
         load_profile(p)
 

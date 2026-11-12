@@ -23,9 +23,13 @@ class HardwareProfileError(ValueError):
 
 def load_profile(path: str | Path) -> dict:
     data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-    for key in REQUIRED:
-        if key not in data:
-            raise HardwareProfileError(f"hardware_profile.missing_{key}")
+    # One literal name per key (REQUIRED), so the refusal catalogue can see each.
+    if "cpu" not in data:
+        raise HardwareProfileError("hardware_profile.missing_cpu")
+    if "ram" not in data:
+        raise HardwareProfileError("hardware_profile.missing_ram")
+    if "gpus" not in data:
+        raise HardwareProfileError("hardware_profile.missing_gpus")
     if not data["gpus"]:
         raise HardwareProfileError("hardware_profile.no_gpu")
     return data

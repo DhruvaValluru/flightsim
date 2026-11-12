@@ -346,6 +346,23 @@ render.sky_capture_switch:
 render.sky_fill_probe:
   sentence: "A diagnostic switch for the sky light's fill was given a value it does not take."
   hint: "Use -sky-fill-probe=as-planned, red or off, -sky-cloud-ao=auto, on or off, and a number of zero or more for -aerial-perspective-scale; or leave them out to render as planned."
+# hardware profile -> render budget (core/render/hardware_budget.py load_profile;
+# the profile is written by scripts/hw_probe.ps1 on the render machine).
+hardware_profile.missing_cpu:
+  sentence: "The hardware profile has no CPU section."
+  hint: "Run the hardware probe script again on the render machine to rewrite the profile."
+hardware_profile.missing_ram:
+  sentence: "The hardware profile has no memory section."
+  hint: "Run the hardware probe script again on the render machine to rewrite the profile."
+hardware_profile.missing_gpus:
+  sentence: "The hardware profile has no graphics card section."
+  hint: "Run the hardware probe script again on the render machine to rewrite the profile."
+hardware_profile.no_gpu:
+  sentence: "The hardware profile lists no graphics card."
+  hint: "Check that the render machine's graphics driver is installed, then run the hardware probe script again."
+hardware_profile.vram_unknown:
+  sentence: "The hardware profile does not say how much memory the graphics card has."
+  hint: "Run the hardware probe script again on the render machine; if it still cannot read it, the driver may be too old."
 # round 75 (core/scene/hero_lighting.py stated_fill_share): the stated fill's share of the way to grey.
 render.stated_fill_share:
   sentence: "The switch for how neutral a stated sky fill is was given a value it does not take."

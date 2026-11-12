@@ -136,8 +136,10 @@ def test_the_host_tints_the_fog_ambient_by_the_stated_fill():
 
 
 def test_the_stated_fill_colour_neutralises_the_model_sky():
-    # The fill colour the fog takes is the one round 4 gives the sky light:
-    # at #02's relit 72 deg sun, the model sky times it is grey.
-    fill = hl.stated_fill_tint(72.0, 1500.0)
+    # The fill colour the fog takes is the sky light's. Round 4's share 1 made it
+    # remove the model sky's blue (b < 0.5); still so at that share:
+    fill = hl.stated_fill_tint(72.0, 1500.0, share=1.0)
     r, g, b = fill["color_linear_rgb"]
-    assert r >= g >= b and b < 0.5            # it removes blue: the fog's ambient loses the sky's hue
+    assert r >= g >= b and b < 0.5
+    # Since round 76 the default share is 0: the fill (and the fog) keep the sky's hue.
+    assert hl.stated_fill_tint(72.0, 1500.0)["color_linear_rgb"] == [1.0, 1.0, 1.0]

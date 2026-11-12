@@ -1318,7 +1318,15 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	{
 		return false;
 	}
-	ApplyTiles(World, Tiles, CardWetness);
+	// The sun's elevation scales the tiles' shade neutraliser (FlightSimTilesShade::SunScale):
+	// the light travels along the light's forward vector, so the sun is up by -Forward.Z.
+	double SunElevationDeg = 90.0;
+	if (Scene.Sun != nullptr)
+	{
+		const FVector Forward = Scene.Sun->GetActorForwardVector();
+		SunElevationDeg = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(-Forward.Z, -1.0, 1.0)));
+	}
+	ApplyTiles(World, Tiles, CardWetness, SunElevationDeg);
 	// sun-shafts-sky-occlusion (FlightSimSunShafts.h): value-only, after the presets.
 	TSharedPtr<FJsonObject> SunShaftsOut;
 	SunShafts.Apply(World, Scene, Preset, SunShafts.ResolveStillTier(Params), SunShaftsOut);
@@ -2597,13 +2605,27 @@ namespace FlightSimTilesShade
 	constexpr double ShadeLumaKnee = 0.30;
 	constexpr double ShadeBlueGate = 4.0;
 
+	// Round 75-78 (2026-11-12): a low sun's frame is warm already, so the bake's
+	// blue is half the defect: x SunLowScale at or below SunLowDeg, x1 at or above
+	// SunHighDeg, linear between (#01 at 6 deg: amount 1 amber B-R -77, 0.5 -42;
+	// #02 at 72 deg: 1 is right). UNCALIBRATED.
+	constexpr double SunLowDeg = 10.0;
+	constexpr double SunHighDeg = 40.0;
+	constexpr double SunLowScale = 0.5;
+
+	inline double SunScale(double SunElevationDeg)
+	{
+		const double T = FMath::Clamp((SunElevationDeg - SunLowDeg) / (SunHighDeg - SunLowDeg), 0.0, 1.0);
+		return SunLowScale + (1.0 - SunLowScale) * T;
+	}
+
 	inline double PresetAmount(int32 Preset)
 	{
 		return Preset >= 0 && Preset < FlightSimWorldPure::PresetCount ? ShadeNeutralAmounts[Preset] : 0.0;
 	}
 
 	// 0 over a city card (blue glass and roofs are colour) or with the switch off.
-	inline double AmountFor(int32 Preset, const FString& Surface, const FString& Switch)
+	inline double AmountFor(int32 Preset, const FString& Surface, const FString& Switch, double SunElevationDeg)
 	{
 		// Round 63 diagnostic: force = 2, the shader greys every texel.
 		if (Switch == TEXT("force"))
@@ -2619,14 +2641,17 @@ namespace FlightSimTilesShade
 		{
 			return FMath::Clamp(FCString::Atod(*Switch), 0.0, 1.0);
 		}
-		return PresetAmount(Preset);
+		return PresetAmount(Preset) * SunScale(SunElevationDeg);
 	}
 
 	// render.json world_beauty.tiles.shade_neutral.
-	TSharedPtr<FJsonObject> ShadeRecord(int32 Preset, const FString& Surface, const FString& Switch)
+	TSharedPtr<FJsonObject> ShadeRecord(int32 Preset, const FString& Surface, const FString& Switch,
+	                                    double SunElevationDeg)
 	{
 		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
-		Out->SetNumberField(TEXT("amount"), AmountFor(Preset, Surface, Switch));
+		Out->SetNumberField(TEXT("amount"), AmountFor(Preset, Surface, Switch, SunElevationDeg));
+		Out->SetNumberField(TEXT("sun_elevation_deg"), SunElevationDeg);
+		Out->SetNumberField(TEXT("sun_scale"), SunScale(SunElevationDeg));
 		Out->SetNumberField(TEXT("preset_amount"), PresetAmount(Preset));
 		Out->SetStringField(TEXT("switch"), Switch == TEXT("off") ? FString(TEXT("off"))
 			: (!Switch.IsEmpty() && FCString::IsNumeric(*Switch)) ? Switch : FString(TEXT("on")));
@@ -2646,7 +2671,8 @@ namespace FlightSimTilesShade
 	}
 }
 
-void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Tiles, double CardWetness)
+void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Tiles, double CardWetness,
+                                       double SunElevationDeg)
 {
 	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
 	using namespace FlightSimWorldPure;
@@ -2702,7 +2728,7 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 			// lane B: no aerial rock / soil detail on a city's facades and roofs.
 			{TEXT("TerrainDetailScale"), Surface == TEXT("city") ? 0.0 : 1.0},
 			// #02 blue: the baked sky-shade neutraliser (FlightSimTilesShade above).
-			{TEXT("ShadeNeutralAmount"), FlightSimTilesShade::AmountFor(Preset, Surface, TilesShadeSwitch)},
+			{TEXT("ShadeNeutralAmount"), FlightSimTilesShade::AmountFor(Preset, Surface, TilesShadeSwitch, SunElevationDeg)},
 		};
 		for (const FWorldScalar& Scalar : Scalars)
 		{
@@ -2735,7 +2761,7 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 	Out->SetObjectField(TEXT("parameters"), Parameters);
 	Out->SetObjectField(TEXT("delight"), FlightSimTilesDelight::DelightRecord(Preset));   // tiles-delight hook
 	Out->SetObjectField(TEXT("shade_neutral"),                                            // #02 blue
-		FlightSimTilesShade::ShadeRecord(Preset, Surface, TilesShadeSwitch));
+		FlightSimTilesShade::ShadeRecord(Preset, Surface, TilesShadeSwitch, SunElevationDeg));
 	Out->SetStringField(TEXT("wetness_basis"), TEXT("max(the card's wetness, the preset's wetness_floor)"));
 	Out->SetStringField(TEXT("rule"),
 		TEXT("the tiles stay the ground of every terrain render (the owner's rule); this changes their shading only"));
