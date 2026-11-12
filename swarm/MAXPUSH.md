@@ -44,3 +44,16 @@ python swarm/shard.py --prefix x --wave 0 --wave-size 400 --shards 5 \
 The ceiling is your plan's rate limit, not the Mac. If you see 429s, drop
 shards. To make the run last until credits are gone, add a token target to
 your message (for example "+2M") and the `budget` hook lets loops keep going.
+
+## Discover new additions first
+
+`swarm/discover.workflow.js` goes looking for things you haven't thought of.
+Per domain it runs six researchers, each from a different angle (papers, code,
+asset libraries, datasets, niche communities, techniques from other fields),
+and repeats rounds (default 3) until a round finds nothing new. Each candidate
+is then checked by a skeptic (is it real, is the licence really not
+non-commercial, could its baked form run on the iGPU) and ranked into
+`swarm/discoveries.json`. Pass `args.domains` as the 11 visual domains with a
+one-line focus each. 11 domains x 6 angles = 66 researchers per round, and
+vetting is one agent per candidate. Feed the top of `discoveries.json` into
+the build wave as extra research input.
