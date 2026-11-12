@@ -1,0 +1,29 @@
+[
+ {
+  "number": 2,
+  "name": "same, super bright preset",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "e1431b5b2b8c",
+  "lighting": {
+   "preset": "super_bright"
+  },
+  "seconds": 197.5,
+  "spec_sha256": "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.262,
+   "offset_px": [
+    20,
+    -191
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ }
+]
