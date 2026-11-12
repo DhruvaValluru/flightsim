@@ -17,6 +17,7 @@
 #include "HAL/FileManager.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInstance.h"
 #include "Components/PrimitiveComponent.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -374,6 +375,36 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record() const
 		}
 		Out->SetNumberField(TEXT("drawn_primitives"), TilePrimitives.Num());
 		Out->SetObjectField(TEXT("drawn_base_materials"), Drawn);
+		// Round 65 (#02): the tileset's own material properties as they stand
+		// when the frame is recorded, and one drawn primitive's parent chain.
+		for (const TCHAR* PropertyName : {TEXT("Material"), TEXT("WaterMaterial"), TEXT("TranslucentMaterial")})
+		{
+			FString Value = TEXT("no such property");
+			if (FObjectProperty* ReadProperty = FindFProperty<FObjectProperty>(TilesActor->GetClass(), PropertyName))
+			{
+				UObject* const Held = ReadProperty->GetObjectPropertyValue_InContainer(TilesActor);
+				Value = Held != nullptr ? Held->GetPathName() : FString(TEXT("null"));
+			}
+			Out->SetStringField(FString(TEXT("readback_")) + PropertyName, Value);
+		}
+		for (UPrimitiveComponent* TilePrimitive : TilePrimitives)
+		{
+			if (TilePrimitive == nullptr || TilePrimitive->GetNumMaterials() == 0)
+			{
+				continue;
+			}
+			TArray<TSharedPtr<FJsonValue>> Chain;
+			UMaterialInterface* Link = TilePrimitive->GetMaterial(0);
+			for (int32 Depth = 0; Link != nullptr && Depth < 8; ++Depth)
+			{
+				Chain.Add(MakeShared<FJsonValueString>(Link->GetClass()->GetName() + TEXT(" ") + Link->GetPathName()));
+				UMaterialInstance* const AsInstance = Cast<UMaterialInstance>(Link);
+				Link = AsInstance != nullptr ? AsInstance->Parent.Get() : nullptr;
+			}
+			Out->SetStringField(TEXT("sample_primitive"), TilePrimitive->GetClass()->GetName() + TEXT(" ") + TilePrimitive->GetPathName());
+			Out->SetArrayField(TEXT("sample_material_chain"), Chain);
+			break;
+		}
 	}
 	Out->SetStringField(TEXT("attribution"),
 		TEXT("Imagery and 3D data: Google. Per-tile data-provider credits are shown by Cesium on ")
