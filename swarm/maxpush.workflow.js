@@ -18,6 +18,13 @@ const hw = args.budget
 const ROUNDS = args.rounds === undefined ? 2 : args.rounds
 const PRIORITY = new Set(args.priority || [])
 const DISC = args.discoveries || []
+// Cost controls: skipResearch reuses discoveries instead of a research agent; lenses overrides the skeptic set;
+// verifyModel runs skeptics on a cheaper model; coherence:false skips the scenario pass; reserve is the
+// output-token floor below which no new agent is started (needs a "+Nk" token target in the prompt).
+const SKIP = !!args.skipResearch
+const VMODEL = args.verifyModel
+const out = () => !!budget.total && budget.remaining() < (args.reserve || 60000)
+const vopt = (o) => (VMODEL ? { ...o, model: VMODEL } : o)
 
 const LAPTOP = `THE TARGET MACHINE (the Windows test laptop): Intel integrated GPU, Direct3D 11 / Shader Model 5 only (no D3D12, no Lumen, no hardware ray tracing, no Nanite assumptions), shared memory, display 1536x960, RAM unmeasured and tight (one UE render process used 3.8 GB and background jobs were OOM-killed), C: has about 60 GB free, and it hit 12 "device lost" crashes on scene 9. Starting budget: ${JSON.stringify(hw)}.
 GOAL: the most photorealistic result this machine can SUSTAIN for your component, judged on rendered frames. Not the prettiest idea: the best frame that renders without device loss.
@@ -83,9 +90,10 @@ const verifyPrompt = (it, b, lens) => {
 
 const results = await pipeline(
   items,
-  (it) => agent(researchPrompt(it), { label: `research:${it.id}`, phase: 'Research', schema: RESEARCH, effort: 'high' }),
+  (it) => (SKIP || out()) ? null : agent(researchPrompt(it), { label: `research:${it.id}`, phase: 'Research', schema: RESEARCH, effort: 'high' }),
   async (research, it) => {
-    const r = research || {}
+    if (out()) return null
+    const r = SKIP ? { candidates: discFor(it), note: 'from discoveries.json, UNVETTED: verify the licence before use' } : (research || {})
     if (!PRIORITY.has(it.id)) return agent(buildPrompt(it, r, null), { label: `build:${it.id}`, phase: 'Panel', schema: BUILD })
     const panel = (await parallel(ANGLES.map((a) => () =>
       agent(buildPrompt(it, r, a), { label: `panel:${a[0]}:${it.id}`, phase: 'Panel', schema: BUILD })))).filter(Boolean)
@@ -95,21 +103,21 @@ const results = await pipeline(
   },
   async (b, it) => {
     if (!b) return { it, b, ok: false, why: 'builder died' }
-    const lenses = PRIORITY.has(it.id) ? ['licence', 'honesty', 'budget'] : ['honesty', 'budget']
+    const lenses = args.lenses || (PRIORITY.has(it.id) ? ['licence', 'honesty', 'budget'] : ['honesty', 'budget'])
     const votes = (await parallel(lenses.map((lens) => () =>
-      agent(verifyPrompt(it, b, lens), { label: `verify:${lens}:${it.id}`, phase: 'Verify', schema: VERDICT, effort: 'low' })))).filter(Boolean)
+      agent(verifyPrompt(it, b, lens), vopt({ label: `verify:${lens}:${it.id}`, phase: 'Verify', schema: VERDICT, effort: 'low' }))))).filter(Boolean)
     const refutes = votes.filter((v) => v.refuted)
     return { it, b, ok: refutes.length === 0, why: refutes.map((v) => v.reason).join(' | ') }
   },
   async (r) => {
-    if (r.ok || !r.b) return r
+    if (r.ok || !r.b || out()) return r
     const fixed = await agent(`${LAPTOP}\n\n${RULES}\n\nRepair item ${r.it.id} in ${r.it.lane_dir}. Skeptics said: ${r.why}\nFix the files or delete the claim that cannot be supported. Same report shape.`,
       { label: `repair:${r.it.id}`, phase: 'Repair', schema: BUILD })
     return { ...r, b: fixed || r.b, repaired: !!fixed, ok: !!fixed }
   },
   async (r) => {
     let cur = r
-    for (let k = 1; k <= ROUNDS && cur.ok && cur.b; k++) {
+    for (let k = 1; k <= ROUNDS && cur.ok && cur.b && !out(); k++) {
       const next = await agent(`${LAPTOP}\n\n${RULES}\n\nDEEPEN round ${k}/${ROUNDS} for ${cur.it.id} in ${cur.it.lane_dir}. Current report: ${JSON.stringify(cur.b)}.\nAct as a trained observer (pilot, aerial photographer, VFX supervisor): list the 3 things in this component that would still read as fake in a frame, pick the one that matters most, and close it with a better bake, a sharper tier ladder, a missing scenario case, a niche repo you have not tried, or a stronger test. Do not weaken earlier tiers. Same report shape.`,
         { label: `deepen${k}:${cur.it.id}`, phase: 'Deepen', schema: BUILD })
       if (!next) break
@@ -128,7 +136,7 @@ const passed = done.filter((r) => r.ok)
 // Cross-item context is needed here, so this is a real barrier.
 const byScenario = {}
 for (const r of passed) (byScenario[r.it.scenario] = byScenario[r.it.scenario] || []).push(r)
-const coherence = await parallel(Object.entries(byScenario).map(([sc, rs]) => () => agent(
+const coherence = args.coherence === false || out() ? [] : await parallel(Object.entries(byScenario).map(([sc, rs]) => () => agent(
   `${RULES}\n\nCOHERENCE for scenario "${sc}". ${rs.length} verified components were built independently: ${JSON.stringify(rs.map((r) => ({ id: r.it.id, shared_params: r.b.shared_params, tiers: r.b.tiers })))}.\nFind where they disagree on the look (exposure, sun elevation, colour temperature, haze density, ground albedo, wetness, snow line, time of day) or where together they exceed the laptop budget at the same tier. Write swarm/coherence/${sc}.md with one authoritative parameter table and, per component, the exact change needed to match it. Do not edit the lanes.`,
   { label: `coherence:${sc}`, phase: 'Coherence', schema: { type: 'object', properties: { conflicts: { type: 'array', items: { type: 'string' } }, budget_overrun_tiers: { type: 'array', items: { type: 'integer' } } }, required: ['conflicts', 'budget_overrun_tiers'] } })))
 
