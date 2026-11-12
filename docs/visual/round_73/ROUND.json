@@ -1,0 +1,24 @@
+﻿{
+    "round":  73,
+    "commit":  "552c9ab5",
+    "full":  false,
+    "scenes":  [
+                   2
+               ],
+    "switches":  "-fog-density=0",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  201.1
+                },
+    "outcomes":  [
+                     {
+                         "number":  2,
+                         "outcome":  "done",
+                         "seconds":  198.5,
+                         "spec_sha256":  "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+                         "why":  "clip ready"
+                     }
+                 ]
+}
