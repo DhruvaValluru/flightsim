@@ -1,0 +1,48 @@
+﻿{
+    "round":  67,
+    "commit":  "552c9ab5",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   2,
+                   4,
+                   11
+               ],
+    "switches":  "",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  632.7
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "failed",
+                         "seconds":  291.5,
+                         "spec_sha256":  "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+                         "why":  "[camera.render] the render commandlet produced no render.json for camera \u0027camera0\u0027 (pass 1 of 1); see render.log\nlast words:\n[2026.11.12-14.59.31:551][  2]LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 62.3 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (1 of 4)\n[2026.11.12-15.00.27:758][  2]LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 96.2 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (2 of 4)\n[2026.11.12-15.00.58:640][  2]LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 0.0 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (3 of 4)\n[2026.11.12-15.01.28:651][  2]LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 0.0 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (4 of 4)\n[2026.11.12-15.02.01:028][  2]LogFlightSimRender: Error: terrain.google_tiles: the view was still 0.0 % loaded after 180 s (FLIGHTSIM_GOOGLE_TILES_TIMEOUT) and 4 reload(s); check the key, the Map Tiles API and the network, or raise the timeout\n[2026.11.12-15.02.01:731][  2]LogInit: Display: LogFlightSimRender: Error: terrain.google_tiles: the view was still 0.0 % loaded after 180 s (FLIGHTSIM_GOOGLE_TILES_TIMEOUT) and 4 reload(s); check the key, the Map Tiles API and the network, or raise the timeout\n[2026.11.12-15.02.01:731][  2]LogInit: Display: LogFlightSimRender: Warning: night lights: none in the sky plan\n[2026.11.12-15.02.01:739][  2]LogInit: Display: LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 62.3 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (1 of 4)\n[2026.11.12-15.02.01:739][  2]LogInit: Display: LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 96.2 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (2 of 4)\n[2026.11.12-15.02.01:739][  2]LogInit: Display: LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 0.0 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (3 of 4)\n[2026.11.12-15.02.01:741][  2]LogInit: Display: LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 0.0 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (4 of 4)\nExecution of commandlet took:  3m 31s (211.44 seconds)"
+                     },
+                     {
+                         "number":  2,
+                         "outcome":  "done",
+                         "seconds":  131.0,
+                         "spec_sha256":  "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  105.8,
+                         "spec_sha256":  "9386284b5b90c09edbf98f1694778c412d11d1689ac276cece868e72dd311e00",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  11,
+                         "outcome":  "done",
+                         "seconds":  101.0,
+                         "spec_sha256":  "41e2a71be3880757ab89daf67b276008aca3bc485a8fb6087e9e91462a4e1671",
+                         "why":  "clip ready"
+                     }
+                 ]
+}

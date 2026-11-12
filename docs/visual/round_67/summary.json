@@ -1,0 +1,94 @@
+[
+ {
+  "number": 1,
+  "name": "golden hour A-4, flying east",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "failed",
+  "why": "[camera.render] the render commandlet produced no render.json for camera 'camera0' (pass 1 of 1); see render.log\nlast words:\n[2026.11.12-14.59.31:551][  2]LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 62.3 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (1 of 4)\n[2026.11.12-15.00.27:758][  2]LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 96.2 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (2 of 4)\n[2026.11.12-15.00.58:640][  2]LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 0.0 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (3 of 4)\n[2026.11.12-15.01.28:651][  2]LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 0.0 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (4 of 4)\n[2026.11.12-15.02.01:028][  2]LogFlightSimRender: Error: terrain.google_tiles: the view was still 0.0 % loaded after 180 s (FLIGHTSIM_GOOGLE_TILES_TIMEOUT) and 4 reload(s); check the key, the Map Tiles API and the network, or raise the timeout\n[2026.11.12-15.02.01:731][  2]LogInit: Display: LogFlightSimRender: Error: terrain.google_tiles: the view was still 0.0 % loaded after 180 s (FLIGHTSIM_GOOGLE_TILES_TIMEOUT) and 4 reload(s); check the key, the Map Tiles API and the network, or raise the timeout\n[2026.11.12-15.02.01:731][  2]LogInit: Display: LogFlightSimRender: Warning: night lights: none in the sky plan\n[2026.11.12-15.02.01:739][  2]LogInit: Display: LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 62.3 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (1 of 4)\n[2026.11.12-15.02.01:739][  2]LogInit: Display: LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 96.2 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (2 of 4)\n[2026.11.12-15.02.01:739][  2]LogInit: Display: LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 0.0 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (3 of 4)\n[2026.11.12-15.02.01:741][  2]LogInit: Display: LogFlightSimGoogleTiles: Warning: google tiles: the view has been stuck at 0.0 % for 30 s (a failed request is never retried by Cesium); reloading the tileset (4 of 4)\nExecution of commandlet took:  3m 31s (211.44 seconds)",
+  "run_id": "5ae41d4f7507",
+  "lighting": {},
+  "seconds": 291.5,
+  "spec_sha256": "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+  "render_json": false
+ },
+ {
+  "number": 2,
+  "name": "same, super bright preset",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "49af3b9c52f4",
+  "lighting": {
+   "preset": "super_bright"
+  },
+  "seconds": 131.0,
+  "spec_sha256": "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.286,
+   "offset_px": [
+    24,
+    -191
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 4,
+  "name": "desert A-4, sun behind the camera",
+  "prompt": "chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "19f6a925645e",
+  "lighting": {
+   "sun_azimuth_deg": 45.0,
+   "sun_elevation_deg": 20.0
+  },
+  "seconds": 105.8,
+  "spec_sha256": "9386284b5b90c09edbf98f1694778c412d11d1689ac276cece868e72dd311e00",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.337,
+   "offset_px": [
+    -104,
+    232
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 11,
+  "name": "A-4 over the matterhorn, strong wind, severe turbulence",
+  "prompt": "chase view of the a4 over the matterhorn at 5000 m in strong wind and severe turbulence, flying north, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "efd17babd0ca",
+  "lighting": {},
+  "seconds": 101.0,
+  "spec_sha256": "41e2a71be3880757ab89daf67b276008aca3bc485a8fb6087e9e91462a4e1671",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.229,
+   "offset_px": [
+    148,
+    -136
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ }
+]
