@@ -97,7 +97,8 @@ const verifyPrompt = (it, b, lens) => {
 
 const results = await pipeline(
   items,
-  (it) => (SKIP || out()) ? null : agent(researchPrompt(it), { label: `research:${it.id}`, phase: 'Research', schema: RESEARCH, effort: 'high' }),
+  // A stage that returns null drops the item from the pipeline, so skipping research must return a non-null marker.
+  (it) => SKIP ? { skipped: true } : (out() ? null : agent(researchPrompt(it), { label: `research:${it.id}`, phase: 'Research', schema: RESEARCH, effort: 'high' })),
   async (research, it) => {
     if (out()) return null
     const r = SKIP ? { candidates: discFor(it), note: 'from discoveries.json, UNVETTED: verify the licence before use' } : (research || {})
