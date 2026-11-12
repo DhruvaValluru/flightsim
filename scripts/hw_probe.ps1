@@ -42,8 +42,14 @@ if ($gpus.Count -eq 0) {
   }
 }
 
+if ($gpus.Count -eq 0) {
+  Try-Cim Win32_VideoController | ForEach-Object {
+    $v = if ($_.Name -match "Intel") { "intel" } elseif ($_.Name -match "AMD|Radeon") { "amd" } else { "other" }
+    $gpus += [ordered]@{ vendor = $v; name = $_.Name; vram_mb = $null; driver = $_.DriverVersion; integrated = ($_.Name -match "Intel(?!.*Arc)") }
+  }
+}
+
 $disks = @()
-Try-Cim MSFT_PhysicalDisk | Out-Null
 try { Get-PhysicalDisk | ForEach-Object { $disks += [ordered]@{ name = $_.FriendlyName; media = "$($_.MediaType)"; bus = "$($_.BusType)"; size_gb = [math]::Round($_.Size / 1GB) } } } catch {}
 $cacheDrive = if ($env:FLIGHTSIM_CACHE) { (Split-Path -Qualifier $env:FLIGHTSIM_CACHE) } else { "C:" }
 $free = try { [math]::Round((Get-PSDrive ($cacheDrive.TrimEnd(":"))).Free / 1GB) } catch { $null }

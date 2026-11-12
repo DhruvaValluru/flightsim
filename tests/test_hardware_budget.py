@@ -42,3 +42,13 @@ def test_refuses_by_name(tmp_path):
     p.write_text(json.dumps({"cpu": {}, "ram": {}}))
     with pytest.raises(HardwareProfileError, match="missing_gpus"):
         load_profile(p)
+
+
+def test_intel_igpu_gets_the_conservative_budget():
+    p = {"cpu": {"logical_cores": None}, "ram": {"total_gb": None},
+         "gpus": [{"vendor": "intel", "name": "Intel integrated graphics", "vram_mb": None}]}
+    b = budget(p)
+    assert b["tier"] == "integrated" and b["rhi"] == "d3d11"
+    assert b["hardware_ray_tracing"] is False and b["max_capture_width"] == 1280
+    assert b["measured"] is False
+    assert set(b["unknown_inputs"]) == {"cpu.logical_cores", "ram.total_gb"}
