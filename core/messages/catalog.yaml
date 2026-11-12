@@ -346,6 +346,10 @@ render.sky_capture_switch:
 render.sky_fill_probe:
   sentence: "A diagnostic switch for the sky light's fill was given a value it does not take."
   hint: "Use -sky-fill-probe=as-planned, red or off, -sky-cloud-ao=auto, on or off, and a number of zero or more for -aerial-perspective-scale; or leave them out to render as planned."
+# round 75 (core/scene/hero_lighting.py stated_fill_share): the stated fill's share of the way to grey.
+render.stated_fill_share:
+  sentence: "The switch for how neutral a stated sky fill is was given a value it does not take."
+  hint: "Use -stated-fill-share= with a number from 0 (the sky's own colour) to 1 (grey), or leave it out to render as planned."
 # round-1b hang (FlightSimRenderCommandlet.cpp RenderDrainGpu): on a constrained
 # graphics card the beauty run waits for each capture's GPU work and checks the
 # device; a removed device ends the run by name instead of hanging.

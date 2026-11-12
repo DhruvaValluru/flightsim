@@ -80,7 +80,7 @@ def test_02_differs_from_01_only_in_the_sun_the_exposure_the_knobs_and_the_fill(
     # The command: the knob flags and the haze are the only new or changed tokens.
     added = sorted(set(bright["flags"]) - set(golden["flags"]))
     removed = sorted(set(golden["flags"]) - set(bright["flags"]))
-    assert added == ["-fog-density=0.0005", "-sky-light-scale=2.62028", "-sun-intensity-scale=1.6",
+    assert added == ["-fog-density=0.0005", "-sky-light-scale=1.90231", "-sun-intensity-scale=1.6",
                      "-sun-source-angle=0.45", "-sun-temperature=6300"]
     assert removed == ["-fog-density=0.0012"]
     # The sky: the sun relit to 72 deg, the meter 3.7 stops up; the atmosphere, clouds and fog untouched.
@@ -100,8 +100,8 @@ def test_02_differs_from_01_only_in_the_sun_the_exposure_the_knobs_and_the_fill(
     assert bright["beauty"]["tonemap"] == golden["beauty"]["tonemap"]
     # The hero sidecar: the fill (neutral, round 4) and the ground compensation are #02's only extras.
     assert "sky_light" not in golden["hero"] and "sky_light" in bright["hero"]
-    assert bright["hero"]["sky_light"]["color_linear_rgb"] == pytest.approx([1.0, 0.496933, 0.250158], abs=1e-6)
-    assert bright["hero"]["sky_light"]["intensity_scale"] == pytest.approx(1.940949, abs=1e-6)
+    assert bright["hero"]["sky_light"]["color_linear_rgb"] == pytest.approx([1.0, 0.708376, 0.502886], abs=1e-6)   # round 75: share 0.5
+    assert bright["hero"]["sky_light"]["intensity_scale"] == pytest.approx(1.409122, abs=1e-6)   # round 75: share 0.5
     assert set(bright["hero"]) - set(golden["hero"]) == {"sky_light"}
 
 

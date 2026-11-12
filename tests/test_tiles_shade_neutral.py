@@ -210,3 +210,12 @@ def test_the_level_test_is_the_face_normal_never_the_vertex_normal():
     # a wall's face normal lets the baked shade through; the sign of the cross is free
     assert sn.shade_weight(np.array([BAKED_SHADE]), -STEEP_Z)[0] == sn.shade_weight(np.array([BAKED_SHADE]), STEEP_Z)[0] > 0.7
     assert sn.shade_record("clear")["level_basis"] == sn.LEVEL_BASIS
+
+
+def test_a_numeric_switch_is_the_amount():
+    assert sn.parse_switch("-tiles-shade-neutral=0.5") == "0.5"
+    assert sn.amount_for("clear", "", "0.5") == 0.5
+    assert sn.amount_for("overcast", "", "0.6") == 0.6
+    assert sn.amount_for("clear", "", "3") == 1.0
+    assert sn.amount_for("clear", "city", "0.5") == 0.0
+    assert sn.shade_record("clear", "", "0.5")["switch"] == "0.5"

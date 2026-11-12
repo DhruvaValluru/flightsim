@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -415,7 +416,36 @@ def neutral_ground_luminance(rgb: Sequence[float]) -> List[float]:
 #: share 1 (tint 1.0/0.50/0.25) the hero ground (lower hemisphere) would turn
 #: orange-red; :func:`plan_sidecar` now divides the ground's luminance by the
 #: tint and its luminance factor, so the ground bounce keeps its albedo colour.
-STATED_FILL_NEUTRAL_SHARE = 1.0
+#:
+#: Round 75 (2026-11-12): 1.0 -> 0.5. Share 1 was set while the tiles still drew
+#: Cesium's own material, so the fill was cancelling the PHOTOGRAPH's baked blue
+#: shade. Since round 66 M_FlightSimTilesBeauty draws and its shade neutraliser
+#: (core/scene/tiles_shade_neutral.py) removes that bake in the material, and the
+#: fill's tint (1.0/0.50/0.25) turned the shade sepia: rounds 67-74, #02 shade
+#: sRGB B - R -50 (neutraliser off +34, fill off -20, aerial perspective off -61,
+#: fog off -48). A fill halfway to grey keeps some of the clear sky's blue in the
+#: shade, as a photograph's has. ``-stated-fill-share=<0..1>`` (FLIGHTSIM_RENDER_SWITCHES)
+#: sets it for the A/B. UNCALIBRATED.
+STATED_FILL_NEUTRAL_SHARE = 0.5
+STATED_FILL_SHARE_SWITCH = re.compile(r"(?:^|\s)-?stated-fill-share=(\S*)")
+
+
+def stated_fill_share(switches: Optional[str] = None) -> float:
+    """The share :func:`plan_sidecar` uses: ``-stated-fill-share=`` from
+    ``switches`` (default FLIGHTSIM_RENDER_SWITCHES), else
+    :data:`STATED_FILL_NEUTRAL_SHARE`. A value that is not a number in 0..1 is refused."""
+    text = os.environ.get("FLIGHTSIM_RENDER_SWITCHES", "") if switches is None else switches
+    m = STATED_FILL_SHARE_SWITCH.search(text)
+    if not m:
+        return STATED_FILL_NEUTRAL_SHARE
+    try:
+        value = float(m.group(1))
+    except ValueError:
+        value = float("nan")
+    if not 0.0 <= value <= 1.0:
+        raise HeroLightingError("render.stated_fill_share",
+                                f"render.stated_fill_share: -stated-fill-share={m.group(1)} is not a number in 0..1")
+    return value
 #: Rec. 709 luminance weights (linear RGB).
 _LUMA_709 = (0.2126, 0.7152, 0.0722)
 
@@ -506,7 +536,7 @@ def plan_sidecar(*, surface: str, sun_elevation_deg: float, horizontal_lux: Opti
     extra: Dict[str, Any] = {}
     ground_extra: Dict[str, Any] = {}
     if stated_fill and not raining and float(sun_elevation_deg) > 0.0:
-        fill = stated_fill_tint(float(sun_elevation_deg), float(altitude_m))
+        fill = stated_fill_tint(float(sun_elevation_deg), float(altitude_m), stated_fill_share())
         extra["sky_light"] = fill
         # Round 4: the light's colour and its luminance factor multiply the
         # whole capture, the ground's lower hemisphere included. Divided out

@@ -2610,7 +2610,16 @@ namespace FlightSimTilesShade
 		{
 			return 2.0;
 		}
-		return (Switch == TEXT("off") || Surface == TEXT("city")) ? 0.0 : PresetAmount(Preset);
+		if (Switch == TEXT("off") || Surface == TEXT("city"))
+		{
+			return 0.0;
+		}
+		// Round 75 A/B: a number (-tiles-shade-neutral=0.5) is the amount itself, 0..1.
+		if (!Switch.IsEmpty() && FCString::IsNumeric(*Switch))
+		{
+			return FMath::Clamp(FCString::Atod(*Switch), 0.0, 1.0);
+		}
+		return PresetAmount(Preset);
 	}
 
 	// render.json world_beauty.tiles.shade_neutral.
@@ -2619,7 +2628,8 @@ namespace FlightSimTilesShade
 		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 		Out->SetNumberField(TEXT("amount"), AmountFor(Preset, Surface, Switch));
 		Out->SetNumberField(TEXT("preset_amount"), PresetAmount(Preset));
-		Out->SetStringField(TEXT("switch"), Switch == TEXT("off") ? FString(TEXT("off")) : FString(TEXT("on")));
+		Out->SetStringField(TEXT("switch"), Switch == TEXT("off") ? FString(TEXT("off"))
+			: (!Switch.IsEmpty() && FCString::IsNumeric(*Switch)) ? Switch : FString(TEXT("on")));
 		Out->SetNumberField(TEXT("luma_knee"), ShadeLumaKnee);
 		Out->SetNumberField(TEXT("blue_gate"), ShadeBlueGate);
 		// Round 58/59: a vertex-normal level test never passed (Cesium's unlit

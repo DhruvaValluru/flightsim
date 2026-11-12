@@ -52,7 +52,7 @@ def _chroma(rgb):
 def test_super_bright_fill_is_near_neutral(tmp_path):
     bright = _plan(tmp_path, "02", preset="super_bright")
     fill = bright["hero"]["sky_light"]
-    assert fill["neutral_share"] == hl.STATED_FILL_NEUTRAL_SHARE == 1.0
+    assert fill["neutral_share"] == hl.STATED_FILL_NEUTRAL_SHARE == 0.5   # round 75 (was 1.0)
     colour, sky, scale = fill["color_linear_rgb"], fill["model_sky_rgb"], fill["intensity_scale"]
     # The colour is what the light can hold (8-bit sRGB), so the host draws it as planned.
     assert all(hl.srgb8_stored(c) == pytest.approx(c, abs=1e-6) for c in colour)
@@ -60,7 +60,9 @@ def test_super_bright_fill_is_near_neutral(tmp_path):
     # The fill the shade gets: the captured noon sky (very blue: R/B ~0.25) times the colour.
     assert sky[0] / sky[2] < 0.3
     lit = [s * c * scale for s, c in zip(sky, colour)]
-    assert _chroma(lit) <= 1.03                                      # grey within 3 %
+    # Halfway to grey in log space: some of the clear sky's blue stays in the shade
+    # (round 75; share 1 turned #02 sepia once the tiles' neutraliser drew).
+    assert _chroma(lit) == pytest.approx(_chroma(sky) ** 0.5, rel=0.03)
     # Its luminance is the sky's (the preset's "how bright the shadows are" kept).
     assert sum(w * v for w, v in zip(LUMA, lit)) == pytest.approx(
         sum(w * v for w, v in zip(LUMA, sky)), rel=1e-6)
@@ -112,3 +114,12 @@ def test_scenes_without_a_stated_fill_are_unchanged(tmp_path):
 def test_measure_never_gets_a_sidecar():
     assert hl.write_sidecar_beside(edited(YOSEMITE, preset="super_bright"), None) is None
     assert hl.with_stated_fill_scale({"sky_light_scale": 1.35}, None) == {"sky_light_scale": 1.35}
+
+
+def test_the_stated_fill_share_switch():
+    assert hl.stated_fill_share("") == hl.STATED_FILL_NEUTRAL_SHARE
+    assert hl.stated_fill_share("-gear=up -stated-fill-share=0.25") == 0.25
+    assert hl.stated_fill_share("stated-fill-share=1") == 1.0
+    for bad in ("-stated-fill-share=1.5", "-stated-fill-share=grey"):
+        with pytest.raises(hl.HeroLightingError):
+            hl.stated_fill_share(bad)

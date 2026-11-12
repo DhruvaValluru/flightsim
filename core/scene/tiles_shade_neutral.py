@@ -110,7 +110,11 @@ def parse_switch(text: Optional[str]) -> str:
     """The switch's value in ``text`` (a command line or the environment
     variable), the host's way: the first match, anything but ``off`` is ``on``."""
     m = _SWITCH_RE.search(text or "")
-    return "off" if m and m.group(1) == "off" else "on"
+    if m and m.group(1) == "off":
+        return "off"
+    if m and _number(m.group(1)) is not None:
+        return m.group(1)
+    return "on"
 
 
 def amount_for(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT) -> float:
@@ -120,7 +124,15 @@ def amount_for(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT) -> 
         return 2.0
     if switch == "off" or surface == CITY_SURFACE:
         return 0.0
+    number = _number(switch)
+    if number is not None:   # round 75 A/B: -tiles-shade-neutral=0.5 is the amount, 0..1
+        return min(max(number, 0.0), 1.0)
     return float(SHADE_NEUTRAL_DEFAULTS.get(preset, 0.0))
+
+
+def _number(text: str) -> Optional[float]:
+    """``text`` as a plain non-negative decimal (the host's FCString::IsNumeric test), else None."""
+    return float(text) if re.fullmatch(r"\d+(?:\.\d*)?|\.\d+", text or "") else None
 
 
 def shade_weight(albedo: Any, face_up: Any = 0.0) -> np.ndarray:
@@ -162,7 +174,7 @@ def shade_record(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT) -
     return {
         "amount": amount_for(preset, surface, switch),
         "preset_amount": float(SHADE_NEUTRAL_DEFAULTS.get(preset, 0.0)),
-        "switch": switch,
+        "switch": switch if switch == "off" or _number(switch) is not None else "on",
         "luma_knee": SHADE_LUMA_KNEE,
         "blue_gate": SHADE_BLUE_GATE,
         "level_basis": LEVEL_BASIS,
