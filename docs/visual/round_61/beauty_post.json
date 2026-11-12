@@ -1,0 +1,27 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "01_golden_hour_a_4_flying_east": {
+   "post": "01_golden_hour_a_4_flying_east_post.jpg",
+   "source": "01_golden_hour_a_4_flying_east_frame_beauty_post.png"
+  },
+  "02_same_super_bright_preset": {
+   "post": "02_same_super_bright_preset_post.jpg",
+   "source": "02_same_super_bright_preset_frame_beauty_post.png"
+  },
+  "04_desert_a_4_sun_behind_the_camera": {
+   "post": "04_desert_a_4_sun_behind_the_camera_post.jpg",
+   "source": "04_desert_a_4_sun_behind_the_camera_frame_beauty_post.png"
+  },
+  "12_c172_cockpit_over_the_grand_canyon": {
+   "post": "12_c172_cockpit_over_the_grand_canyon_post.jpg",
+   "source": "12_c172_cockpit_over_the_grand_canyon_frame_beauty_post.png"
+  },
+  "13_747_cruise_over_the_ocean": {
+   "post": "13_747_cruise_over_the_ocean_post.jpg",
+   "source": "13_747_cruise_over_the_ocean_frame_beauty_post.png"
+  }
+ }
+}

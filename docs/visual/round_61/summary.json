@@ -1,0 +1,132 @@
+[
+ {
+  "number": 1,
+  "name": "golden hour A-4, flying east",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "40e0bae3637e",
+  "lighting": {},
+  "seconds": 542.3,
+  "spec_sha256": "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.294,
+   "offset_px": [
+    284,
+    -27
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 2,
+  "name": "same, super bright preset",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "862e72f8f971",
+  "lighting": {
+   "preset": "super_bright"
+  },
+  "seconds": 111.1,
+  "spec_sha256": "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.279,
+   "offset_px": [
+    272,
+    -31
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 4,
+  "name": "desert A-4, sun behind the camera",
+  "prompt": "chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "123118d37da0",
+  "lighting": {
+   "sun_azimuth_deg": 45.0,
+   "sun_elevation_deg": 20.0
+  },
+  "seconds": 116.1,
+  "spec_sha256": "9386284b5b90c09edbf98f1694778c412d11d1689ac276cece868e72dd311e00",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.348,
+   "offset_px": [
+    -104,
+    232
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 12,
+  "name": "c172 cockpit over the grand canyon",
+  "prompt": "cockpit view of the c172p over the grand canyon at 2500 m flying east for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "0520b379934f",
+  "lighting": {},
+  "seconds": 226.8,
+  "spec_sha256": "e356e70f775363a026947c7eaeb4f821ef46c9d38052764d8bbc97f304c74d78",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.362,
+   "offset_px": [
+    -21,
+    -476
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 13,
+  "name": "747 cruise over the ocean",
+  "prompt": "chase view of the 747 over the ocean at 10000 m at noon for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "779bfb03e459",
+  "lighting": {},
+  "seconds": 117.3,
+  "spec_sha256": "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.103,
+   "offset_px": [
+    202,
+    218
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ }
+]

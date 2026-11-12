@@ -1,0 +1,59 @@
+﻿{
+    "round":  61,
+    "commit":  "1ef9bcae",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   2,
+                   4,
+                   12,
+                   13
+               ],
+    "switches":  "",
+    "prep":  [
+                 "build",
+                 "materials"
+             ],
+    "seconds":  {
+                    "build":  28.1,
+                    "materials":  12,
+                    "scenes":  1118.3
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  542.3,
+                         "spec_sha256":  "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  2,
+                         "outcome":  "done",
+                         "seconds":  111.1,
+                         "spec_sha256":  "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  116.1,
+                         "spec_sha256":  "9386284b5b90c09edbf98f1694778c412d11d1689ac276cece868e72dd311e00",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  12,
+                         "outcome":  "done",
+                         "seconds":  226.8,
+                         "spec_sha256":  "e356e70f775363a026947c7eaeb4f821ef46c9d38052764d8bbc97f304c74d78",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  13,
+                         "outcome":  "done",
+                         "seconds":  117.3,
+                         "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+                         "why":  "clip ready"
+                     }
+                 ]
+}
