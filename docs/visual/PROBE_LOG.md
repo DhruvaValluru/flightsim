@@ -3810,3 +3810,43 @@ grain at most; capture time not above round 51's (the march has fewer hashes). T
 check). Knobs (UNCALIBRATED): grain -> SHADOW_DITHER 1; clouds too grey -> SHADOW_DITHER 1
 and SHADOW_SOFTEN 0.5; walls still straight -> SideBulge 0.5 (world_beauty.CLOUD_SIDE_BULGE,
 C++ CloudSideBulge).
+
+## round 61: r58's grain and the distant block columns (2026-11-11)
+
+Mac, uncompiled, nothing rendered. Read from r58 (#04, #12, #13 on fa56ba4d) and r60
+(#13 `-look-cloud-tiers=off`: the tiers back, 98.6 % of pixels differ: round 52's cause holds).
+
+**Grain (#13 deck, #12 near cumulus).** Round 52 dithered each shadow sample by a WHITE hash of
+its position over a 2-footprint cube: independent per pixel, per capture and per sample, so 12
+TSR captures leave it as grain. Now (cloud_layers.hlsl, Python twin `cloud_shadow_ign` /
+`cloud_shadow_dither`): the seed is interleaved gradient noise (Jimenez 2014, the pattern TAA/TSR
+is built to resolve) of `Parameters.SvPosition`, advanced per capture by
+`View.StateFrameIndexMod8`; the ten samples of one shadow ray are stratified by the R3 sequence
+over the sample's index (floor(2 sqrt(d) / ShadowFootprintKm)); the cube is 1 footprint.
+Replica (tests/test_cloud_tiers.py, before TSR): the per-capture spread of the sun's light is
+under 0.6 x round 52's (0.039 against 0.087), the 10 m jump stays under half of round 51's
+(0.063 against 0.237: the tiers stay gone), and the mean light is round 51's (0.170 / 0.171;
+round 52's 2-footprint cube was 17 % darker). The spatial pattern TSR resolves is not in the
+replica: on the render, expect the remaining grain to resolve to near invisible.
+
+**Distant block columns (#13's horizon band, #12 over the rim).** Not the far LOD alone: the
+distant sheet (distant_clouds.hlsl) fades IN over 24-32 km (HandoverKm .. + FadeKm, by distance)
+while the volumetric march still drew its far walls up to its 32 km trace end under it. The
+sheet sits at the deck's base plane, IN FRONT of every far wall (from below a ray meets the base
+plane first), so its gaps showed the march's dark far walls as rectangles with vertical sides
+and flat tops cut by the sheet's cell edges and the hand-over line. Now the march fades out over
+the same range (FarFadeStartKm / FarFadeKm, set by ApplyDistantClouds to the sheet's own numbers;
+1 - the sheet's smoothstep: a cross-fade). No sheet drawn (off, no deck) or `-look-cloud-tiers=off`:
+FarFadeKm 0, no fade. Cost: none added (one smoothstep a sample); the march's work past the
+hand-over now adds nothing to the picture.
+
+Generations: `M_FlightSimCloudLayers` graph 6 / world 7 (the distant sheet unchanged, 4/4).
+Record: `distant_clouds.volumetric_trace.march_fade_start_km / march_fade_km / layers_faded`.
+
+**Windows.** Prep: `materials`, bridge rebuild. Render #13, #12, #04 (beauty, no switch).
+Expected: #13's deck soft, rounded and smooth (grain at most at the pixel level, gone at
+contact-sheet size); the horizon band a soft, flat-lying distant deck (the sheet: horizontal
+streaks of bases thinning into the haze), no rectangular columns or stepped blocks; #12 the
+same over the rim; #04 unchanged in shape (no steps). A/B: `-look-cloud-tiers=off` = round 51
+(tiers, no fade). Knobs (UNCALIBRATED): residual grain -> SHADOW_DITHER 0.5; tiers creeping back
+-> SHADOW_SOFTEN 1.5; far clouds vanishing too early -> nothing here (the sheet's DISTANT_* own it).

@@ -179,7 +179,7 @@ def test_the_shader_inputs_are_the_scripts_and_the_cpp_sets_them():
         assert re.search(rf"//\s+{name}\s", DISTANT_HLSL), name
         assert re.search(rf"\b{name}\b", DISTANT_HLSL.split("FWorldCloud C;")[1]), f"{name} unused in the body"
     # the C++ sets every scalar: the literal ones plus the look table by name
-    literal = set(re.findall(r'Material->SetScalarParameterValue\(TEXT\("([A-Za-z]+)"\)', APPLY_DISTANT))
+    literal = set(re.findall(r'(?<!Layer\.)Material->SetScalarParameterValue\(TEXT\("([A-Za-z]+)"\)', APPLY_DISTANT))
     names = re.search(r"static const char\* const Names\[DistantLookCount\] = \{([^}]*)\};",
                       CLOUDS_CPP, re.S).group(1)
     look_names = re.findall(r'"([A-Za-z]+)"', names)

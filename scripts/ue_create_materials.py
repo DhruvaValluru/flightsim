@@ -3301,12 +3301,15 @@ WORLD_CLOUD_SCALARS = {
     "ShadowFootprintKm": 0.0, "LayerThicknessKm": 1.2,
     # Round 52: the sides' bulge, cells (0 = round 51's vertical walls).
     "SideBulge": 0.0,
+    # Round 61: the march's fade-out over the distant sheet's fade-in (0 = none).
+    "FarFadeStartKm": 0.0, "FarFadeKm": 0.0,
 }
 WORLD_CLOUD_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 WORLD_CLOUD_INPUTS = ("WorldPos", "NormAlt", "CameraPos", "Coverage", "ExtinctionPerM", "ExtinctionScale",
                       "ShapeScaleKm", "DetailScaleKm", "DetailErosion", "BottomSoftness", "TopRounding",
                       "CoverageContrast", "SeedOffsetKm", "WindOffsetM",
-                      "ShadowDist", "ShadowFootprintKm", "LayerThicknessKm", "SideBulge")   # round 52
+                      "ShadowDist", "ShadowFootprintKm", "LayerThicknessKm", "SideBulge",   # round 52
+                      "FarFadeStartKm", "FarFadeKm")   # round 61
 #: The cloud's single-scattering albedo (water droplets scatter almost all they
 #: intercept; the storm cell's own 0.98). UNCALIBRATED: set by probe render.
 WORLD_CLOUD_ALBEDO = 0.98
@@ -3448,7 +3451,10 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: Round 52: clouds 5 / distant 4, the shadow samples' footprint and the sides'
 #: bulge (inputs ShadowDist, ShadowFootprintKm, LayerThicknessKm, SideBulge:
 #: round 51's tiers); the distant sheet's shared noise gains ShapeLodBulge.
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "5", "M_FlightSimDistantClouds": "4"}
+#: Round 61: clouds 6, the dither seeded by interleaved gradient noise and
+#: stratified (r58's grain), the march's fade-out under the sheet (FarFadeStartKm,
+#: FarFadeKm: r58's distant block columns).
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "6", "M_FlightSimDistantClouds": "4"}
 
 
 def world_graph_stale(name):
@@ -3496,7 +3502,7 @@ def world_stamp(material, name):
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "4",   # 3: lane B terrain detail; 4: #02 shade neutral
-                     "M_FlightSimCloudLayers": "6", "M_FlightSimScatter": "1",  # clouds 6: round-52 shadow footprint, side bulge
+                     "M_FlightSimCloudLayers": "7", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade
                      "M_FlightSimDistantClouds": "4",   # distant 4: round-52 shared noise (ShapeLodBulge)
                      "M_FlightSimOceanBeauty": "4"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
