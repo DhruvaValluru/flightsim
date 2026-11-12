@@ -116,17 +116,26 @@ def test_a_view_sample_and_the_switch_off_are_round_51():
         assert wb.cloud_density(km, h, 0.35, row, dist) == wb.cloud_density(km, h, 0.35, row, dist, 0.0, dither, 1.2)
 
 
-def _sun_transmittance(x, y, h, row, cover, base_km, thickness_km, sun, footprint_per, dither_rng):
-    """The engine's quadratic march (constrained row) from (x, y, h) towards the sun."""
+def _sun_transmittance(x, y, h, row, cover, base_km, thickness_km, sun, footprint_per, dither_rng, white=False):
+    """The engine's quadratic march (constrained row) from (x, y, h) towards the
+    sun. The dither is the shader's: one seed a ray (the pixel's interleaved
+    gradient noise in a capture; a uniform draw here), stratified by R3 over the
+    sample's index; ``white`` draws round 52's independent uniforms instead."""
     od = 0.0
     ext = row["extinction_per_m"]
+    u0 = dither_rng.random() if dither_rng is not None else 0.0
     for d, length in _engine_segments(wb.CLOUD_SHADOW_CONSTRAINED_KM, 10.0):
         p = (x + sun[0] * d, y + sun[1] * d, base_km + h * thickness_km + sun[2] * d)
         hp = (p[2] - base_km) / thickness_km
         if hp <= 0.0 or hp >= 1.0:
             break
         foot = footprint_per * math.sqrt(d)
-        dither = tuple(dither_rng.uniform(-0.5, 0.5) for _ in range(3)) if foot > 0.0 else (0.0, 0.0, 0.0)
+        if foot <= 0.0:
+            dither = (0.0, 0.0, 0.0)
+        elif white:
+            dither = tuple(dither_rng.uniform(-0.5, 0.5) for _ in range(3))
+        else:
+            dither = wb.cloud_shadow_dither(u0, wb.cloud_shadow_sample_index(d, footprint_per))
         od += wb.cloud_density(p, hp, cover, row, 25.0, foot, dither, thickness_km) * ext * length * 1000.0
     return math.exp(-od)
 
@@ -232,6 +241,102 @@ def test_the_bulge_leans_the_walls_and_keeps_the_cover():
     assert "float qx = p.x + (0.45 + bulge) * wx;" in HLSL
 
 
+def test_the_dither_is_stratified_and_less_grainy():
+    """Round 61 (r58's grain): one seed a ray, stratified by R3 over the shadow
+    samples, at 1 footprint: the per-capture spread of the sun's light (the
+    grain TSR must average away) is well under round 52's white 2-footprint
+    dither, the tiers stay gone (the 10 m jump stays under half of round 51's)
+    and the mean light is round 51's within 10 %."""
+    row = wb.CLOUDS["cumulus"]
+    el, az = math.radians(20.0), math.radians(20.0)
+    sun = (math.cos(el) * math.sin(az), -math.cos(el) * math.cos(az), math.sin(el))
+    per = wb.cloud_shadow_footprint_per_sqrt_km(wb.CLOUD_SHADOW_CONSTRAINED_KM, 10.0)
+    rng = random.Random(9)
+    points = []
+    while len(points) < 120:
+        x, y, h = rng.uniform(0, 200), rng.uniform(0, 200), rng.uniform(0.05, 0.9)
+        if wb.cloud_density((x, y, 3.0 + 2.0 * h), h, 0.35, row, 25.0) > 0.0:
+            points.append((x, y, h))
+
+    def stats(white, dither):
+        saved = wb.CLOUD_SHADOW_DITHER
+        wb.CLOUD_SHADOW_DITHER = dither
+        try:
+            spread, mean, jump = 0.0, 0.0, 0.0
+            for i, (x, y, h) in enumerate(points):
+                a = [_sun_transmittance(x, y, h, row, 0.35, 3.0, 2.0, sun, per, random.Random(i * 7 + k), white)
+                     for k in range(16)]
+                b = [_sun_transmittance(x, y, h + 0.005, row, 0.35, 3.0, 2.0, sun, per, random.Random(i * 7 + k), white)
+                     for k in range(16)]
+                m = sum(a) / 16.0
+                spread += (sum((v - m) ** 2 for v in a) / 16.0) ** 0.5 / len(points)
+                mean += m / len(points)
+                jump = max(jump, abs(sum(b) / 16.0 - m))
+            return spread, mean, jump
+        finally:
+            wb.CLOUD_SHADOW_DITHER = saved
+
+    old_mean = sum(_sun_transmittance(x, y, h, row, 0.35, 3.0, 2.0, sun, 0.0, None) for x, y, h in points) / len(points)
+    old_jump = max(abs(_sun_transmittance(x, y, h + 0.005, row, 0.35, 3.0, 2.0, sun, 0.0, None)
+                       - _sun_transmittance(x, y, h, row, 0.35, 3.0, 2.0, sun, 0.0, None)) for x, y, h in points)
+    r52_spread, _, _ = stats(True, 2.0)
+    spread, mean, jump = stats(False, wb.CLOUD_SHADOW_DITHER)
+    assert spread < 0.6 * r52_spread
+    assert jump < 0.5 * old_jump
+    assert mean == pytest.approx(old_mean, rel=0.10)
+
+
+def test_the_dither_seed_is_interleaved_gradient_noise():
+    """The seed TSR resolves: in [0, 1), every 4 x 4 block of pixels spans most
+    of the range (neighbours differ: no clumps of one value), and the same pixel
+    moves from capture to capture."""
+    for frame in range(8):
+        values = [[wb.cloud_shadow_ign(x + 0.5, y + 0.5, frame) for x in range(64)] for y in range(64)]
+        assert all(0.0 <= v < 1.0 for row in values for v in row)
+        for by in range(0, 64, 4):
+            for bx in range(0, 64, 4):
+                block = [values[by + j][bx + i] for j in range(4) for i in range(4)]
+                assert max(block) - min(block) > 0.6
+    seq = [wb.cloud_shadow_ign(100.5, 50.5, f) for f in range(8)]
+    assert len({round(v, 4) for v in seq}) == 8
+    # stratified: the ten samples of one ray spread over each axis
+    for u0 in (0.0, 0.37, 0.91):
+        d = [wb.cloud_shadow_dither(u0, float(i)) for i in range(10)]
+        for axis in range(3):
+            assert max(v[axis] for v in d) - min(v[axis] for v in d) > 0.6
+
+
+def test_the_march_fades_out_under_the_distant_sheet():
+    """Round 61 (r58's distant band of block columns): where the sheet is drawn
+    the march fades out over the sheet's own fade-in (a cross-fade, 1 - the
+    sheet's smoothstep), not under it; with the switch off, or no sheet, no fade."""
+    start = wb.distant_handover_km(wb.DISTANT_NEAR_FIELD_KM)
+    fade = wb.cloud_far_fade_km_for(True, wb.DISTANT_FADE_KM)
+    assert fade == wb.DISTANT_FADE_KM and wb.cloud_far_fade_km_for(False, wb.DISTANT_FADE_KM) == 0.0
+    assert wb.cloud_far_fade(start - 1.0, start, fade) == 1.0
+    assert wb.cloud_far_fade(start + fade, start, fade) == 0.0
+    for d in (start + 1.0, start + 4.0, start + 7.0):
+        sheet = wb._smoothstep(start, start + fade, d)
+        assert wb.cloud_far_fade(d, start, fade) + sheet == pytest.approx(1.0)
+    assert wb.cloud_far_fade(start + 4.0, start, 0.0) == 1.0
+    # the sheet's fade-in is by the same distance law (distant_clouds.hlsl)
+    distant = (REPO / "assets" / "shaders" / "world" / "distant_clouds.hlsl").read_text(encoding="utf-8")
+    assert "float fadeIn = smoothstep(HandoverKm, HandoverKm + max(FadeKm, 1e-3), distKm);" in distant
+    assert "length(WorldPos - CameraPos) / 100000.0" in HLSL
+    # the bridge: 0 on every layer until the sheet is drawn, then the sheet's numbers
+    apply = CLOUDS_CPP[CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyClouds("):
+                       CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyDistantClouds(")]
+    assert 'State.Material->SetScalarParameterValue(TEXT("FarFadeKm"), 0.0f);' in apply
+    distant_cpp = CLOUDS_CPP[CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyDistantClouds("):]
+    assert "const double FarFadeKm = CloudFarFadeKmFor(CloudTiersSwitch == TEXT(\"on\"), DistantFadeKm);" in distant_cpp
+    assert 'Layer.Material->SetScalarParameterValue(TEXT("FarFadeStartKm"), static_cast<float>(HandoverKm));' in distant_cpp
+    assert 'Layer.Material->SetScalarParameterValue(TEXT("FarFadeKm"), static_cast<float>(FarFadeKm));' in distant_cpp
+    scalars = _script_value("WORLD_CLOUD_SCALARS")
+    assert scalars["FarFadeStartKm"] == 0.0 and scalars["FarFadeKm"] == 0.0
+    assert int(_script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"]) >= 6
+    assert int(_script_value("WORLD_GENERATIONS")["M_FlightSimCloudLayers"]) >= 7
+
+
 # -- the shader is the twin ----------------------------------------------------------
 
 _SHIMS = r"""
@@ -259,11 +364,20 @@ static float lerp(float a, float b, float t) { return a + (b - a) * t; }
 static float smoothstep(float a, float b, float x) { float t = saturate((x - a) / (b - a)); return t * t * (3.0f - 2.0f * t); }
 static uint asuint(int v) { uint u; std::memcpy(&u, &v, 4); return u; }
 static int asint(float v) { int i; std::memcpy(&i, &v, 4); return i; }
+static float frac(float v) { return v - std::floor(v); }
+static float3 frac(float3 a) { return float3(frac(a.x), frac(a.y), frac(a.z)); }
+static float3 operator+(float s, float3 a) { return float3(s + a.x, s + a.y, s + a.z); }
+struct FShimPosition { float x, y, z, w; };
+struct FShimParameters { FShimPosition SvPosition; };
+struct FShimView { uint StateFrameIndexMod8; };
+static FShimParameters Parameters;
+static FShimView View;
 """
 
 _INPUTS = ("WorldPos", "NormAlt", "CameraPos", "Coverage", "ExtinctionPerM", "ExtinctionScale", "ShapeScaleKm",
            "DetailScaleKm", "DetailErosion", "BottomSoftness", "TopRounding", "CoverageContrast", "SeedOffsetKm",
-           "WindOffsetM", "ShadowDist", "ShadowFootprintKm", "LayerThicknessKm", "SideBulge")
+           "WindOffsetM", "ShadowDist", "ShadowFootprintKm", "LayerThicknessKm", "SideBulge",
+           "FarFadeStartKm", "FarFadeKm")
 _VECTORS = ("WorldPos", "CameraPos", "SeedOffsetKm", "WindOffsetM")
 
 
@@ -277,9 +391,11 @@ def _shader_as_cpp():
 @NEEDS_CXX
 def test_the_shader_body_is_the_python_twin(tmp_path):
     """cloud_layers.hlsl's whole body compiled as C++: view samples, shadow
-    samples with the filter on (the dither is the Python twin's hash of the same
-    float32 position) and off, against core/scene/world_beauty.cloud_density;
-    and a shadow sample with the filter off is a view sample, bit for bit."""
+    samples with the filter on (the dither is the Python twin's interleaved
+    gradient noise of the same pixel and capture, stratified by the sample's
+    index) and off, the far fade on and off, against
+    core/scene/world_beauty.cloud_density x cloud_far_fade; and a shadow sample
+    with the switch off is a view sample, bit for bit."""
     assert _script_value("WORLD_CLOUD_INPUTS") == _INPUTS
     row = wb.CLOUDS["cumulus"]
     rng = random.Random(17)
@@ -291,24 +407,28 @@ def test_the_shader_body_is_the_python_twin(tmp_path):
         shadow_cm = 0.0 if i % 3 == 0 else rng.uniform(1e3, 6e5)
         footprint = 0.0 if i % 3 == 1 else wb.cloud_shadow_footprint_per_sqrt_km(6.0, 10.0)
         bulge = 0.0 if i % 4 == 0 else wb.CLOUD_SIDE_BULGE
-        cases.append((pos, cam, h, shadow_cm, footprint, bulge))
+        fade = 0.0 if i % 5 == 0 else wb.DISTANT_FADE_KM
+        pixel = (rng.randrange(0, 1920) + 0.5, rng.randrange(0, 1080) + 0.5, rng.randrange(0, 8))
+        cases.append((pos, cam, h, shadow_cm, footprint, bulge, fade, pixel))
     seed = (123.4, 456.7, 7.0)
 
-    def call(pos, cam, h, shadow_cm, footprint, bulge):
+    def call(pos, cam, h, shadow_cm, footprint, bulge, fade, pixel):
         args = [f"float3({pos[0]!r}f, {pos[1]!r}f, {pos[2]!r}f)", f"{h!r}f",
                 f"float3({cam[0]!r}f, {cam[1]!r}f, {cam[2]!r}f)", "0.35f", f"{row['extinction_per_m']!r}f", "1.0f",
                 f"{row['shape_scale_km']!r}f", f"{row['detail_scale_km']!r}f", f"{row['detail_erosion']!r}f",
                 f"{row['bottom_softness']!r}f", f"{row['top_rounding']!r}f", f"{row['coverage_contrast']!r}f",
                 f"float3({seed[0]!r}f, {seed[1]!r}f, {seed[2]!r}f)", "float3(0.0f, 0.0f, 0.0f)",
-                f"{shadow_cm!r}f", f"{footprint!r}f", "2.0f", f"{bulge!r}f"]
-        return "Extinction(" + ", ".join(args) + ")"
+                f"{shadow_cm!r}f", f"{footprint!r}f", "2.0f", f"{bulge!r}f", "24.0f", f"{fade!r}f"]
+        return ("(Parameters.SvPosition.x = {0!r}f, Parameters.SvPosition.y = {1!r}f, "
+                "View.StateFrameIndexMod8 = {2}u, Extinction(".format(*pixel) + ", ".join(args) + "))")
 
     main = ["int main() {"]
     for c in cases:
         main.append(f'printf("%.9g\\n", (double){call(*c)});')
-        # the switch off (footprint 0, bulge 0) on a shadow sample == the view sample, bit for bit
-        pos, cam, h, shadow_cm, _, _ = c
-        main.append(f'printf("%d\\n", {call(pos, cam, h, shadow_cm, 0.0, 0.0)} == {call(pos, cam, h, 0.0, 0.0, 0.0)});')
+        # the switch off (footprint, bulge, fade 0) on a shadow sample == the view sample, bit for bit
+        pos, cam, h, shadow_cm, _, _, _, pixel = c
+        main.append(f'printf("%d\\n", {call(pos, cam, h, shadow_cm, 0.0, 0.0, 0.0, pixel)} == '
+                    f'{call(pos, cam, h, 0.0, 0.0, 0.0, 0.0, (0.5, 0.5, 0))});')
     main.append("return 0; }")
     (tmp_path / "body.cpp").write_text(_shader_as_cpp() + "\n".join(main), encoding="utf-8")
     subprocess.run(["g++", "-std=c++17", "-O0", "-o", str(tmp_path / "body"), str(tmp_path / "body.cpp")],
@@ -317,14 +437,17 @@ def test_the_shader_body_is_the_python_twin(tmp_path):
     import struct
     f32 = lambda v: struct.unpack("f", struct.pack("f", v))[0]
     exercised = 0
-    for i, (pos, cam, h, shadow_cm, footprint, bulge) in enumerate(cases):
+    for i, (pos, cam, h, shadow_cm, footprint, bulge, fade, pixel) in enumerate(cases):
         assert out[2 * i + 1] == "1", i
         p = tuple(f32(v) for v in pos)
         km = tuple(c / 100.0 / 1000.0 + s for c, s in zip(p, (f32(v) for v in seed)))
         dist_km = math.dist(p, tuple(f32(v) for v in cam)) / 100000.0
         foot = f32(footprint) * math.sqrt(max(f32(shadow_cm), 0.0) / 100000.0)
-        dither = wb.cloud_shadow_dither(p) if foot > 0.0 else (0.0, 0.0, 0.0)
-        want = wb.cloud_density(km, f32(h), 0.35, row, dist_km, foot, dither, 2.0, f32(bulge)) * row["extinction_per_m"]
+        dither = (wb.cloud_shadow_dither(wb.cloud_shadow_ign(*pixel),
+                                         wb.cloud_shadow_sample_index(f32(shadow_cm) / 100000.0, f32(footprint)))
+                  if foot > 0.0 else (0.0, 0.0, 0.0))
+        want = (wb.cloud_density(km, f32(h), 0.35, row, dist_km, foot, dither, 2.0, f32(bulge)) * row["extinction_per_m"]
+                * wb.cloud_far_fade(dist_km, 24.0, fade))
         got = float(out[2 * i])
         assert got == pytest.approx(want, abs=2e-3 * row["extinction_per_m"] + 1e-7), (i, pos, h, shadow_cm, footprint, bulge)
         exercised += foot > 0.0 and want > 0.0
@@ -334,14 +457,20 @@ def test_the_shader_body_is_the_python_twin(tmp_path):
 def test_the_shader_constants_are_the_pythons():
     assert f"const float SHADOW_DITHER = {wb.CLOUD_SHADOW_DITHER};" in HLSL
     assert f"const float SHADOW_SOFTEN = {wb.CLOUD_SHADOW_SOFTEN};" in HLSL
-    assert f"{wb.CLOUD_SHADOW_DITHER_SEED}u" in HLSL
+    for axis, value in zip("XYZ", wb.CLOUD_SHADOW_R3):
+        assert f"const float R3_{axis} = {value};" in HLSL
+    # the dither's seed is the engine's pixel and capture, not a hash of the position
+    assert "Parameters.SvPosition.x + 5.588238 * (float)View.StateFrameIndexMod8" in HLSL
+    assert "asint(WorldPos" not in HLSL
+    assert "if (FarFadeKm > 0.0)" in HLSL
+    assert "return density * base * ExtinctionPerM * ExtinctionScale * fadeOut;" in HLSL
     # a view sample (ShadowDist 0) and the switch off (footprint 0) take no new branch
     assert "float footKm = ShadowFootprintKm * sqrt(max(ShadowDist, 0.0) / 100000.0);" in HLSL
     assert "if (footKm > 0.0)" in HLSL
     assert "UNCALIBRATED (world_beauty.CLOUD_SHADOW_DITHER / CLOUD_SHADOW_SOFTEN)" in HLSL
     assert f"const float BULGE_TURN = {wb.CLOUD_BULGE_TURN};" in HLSL
     assert "float bulge = SideBulge * sin(BULGE_TURN * (h - 0.5));" in HLSL
-    for name in ("ShadowDist", "ShadowFootprintKm", "LayerThicknessKm", "SideBulge"):
+    for name in ("ShadowDist", "ShadowFootprintKm", "LayerThicknessKm", "SideBulge", "FarFadeStartKm", "FarFadeKm"):
         assert re.search(rf"//\s+{name}\s", HLSL), name
 
 
@@ -377,6 +506,9 @@ def test_the_bridges_footprint_law_is_the_pythons(tmp_path):
     main += [f'printf("%.17g\\n", CloudShadowFootprintPerSqrtKm({k!r}, {n!r}, {"true" if on else "false"}));'
              for k, n, on in cases]
     main += ['printf("%.17g\\n", CloudSideBulgeFor(true));', 'printf("%.17g\\n", CloudSideBulgeFor(false));']
+    main += ['printf("%.17g\\n", CloudFarFadeKmFor(true, DistantFadeKm));',
+             'printf("%.17g\\n", CloudFarFadeKmFor(false, DistantFadeKm));',
+             'printf("%.17g\\n", CloudFarFadeKmFor(true, 0.0));']
     main.append("return 0; }")
     source = tmp_path / "foot.cpp"
     source.write_text("#include <cmath>\n#include <cstdint>\n#include <cstdio>\n#include <cstring>\n"
@@ -386,7 +518,9 @@ def test_the_bridges_footprint_law_is_the_pythons(tmp_path):
                    check=True, capture_output=True, text=True)
     lines = subprocess.run([str(tmp_path / "foot")], check=True, capture_output=True, text=True).stdout.split()
     assert [float(v) for v in lines] == [wb.cloud_shadow_footprint_per_sqrt_km(k, n, bool(on)) for k, n, on in cases] + [
-        wb.cloud_side_bulge_for(True), wb.cloud_side_bulge_for(False)]
+        wb.cloud_side_bulge_for(True), wb.cloud_side_bulge_for(False),
+        wb.cloud_far_fade_km_for(True, wb.DISTANT_FADE_KM), wb.cloud_far_fade_km_for(False, wb.DISTANT_FADE_KM),
+        wb.cloud_far_fade_km_for(True, 0.0)]
 
 
 def test_the_bridge_sets_the_footprint_under_the_switch():

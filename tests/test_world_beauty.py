@@ -698,7 +698,8 @@ def test_the_drawn_cloud_cover_is_the_stated_cover():
     assert f"const float EROSION_CUT_SHARE = {wb.CLOUD_EROSION_CUT_SHARE};" in hlsl
     assert f"const float WISP_HEIGHT = {wb.CLOUD_WISP_HEIGHT};" in hlsl
     assert "4.91 * (pow(p, 0.14) - pow(1.0 - p, 0.14))" in hlsl
-    assert "return density * base * ExtinctionPerM * ExtinctionScale;" in hlsl
+    # round 61: x the far fade (1 unless the distant sheet is drawn)
+    assert "return density * base * ExtinctionPerM * ExtinctionScale * fadeOut;" in hlsl
     for shape, covers in (("cumulus", (0.2, 0.35, 0.5, 0.7)), ("stratocumulus", (0.5, 0.7)),
                           ("nimbostratus", (0.5, 0.7)), ("overcast", (0.95,))):
         row = wb.CLOUDS[shape]

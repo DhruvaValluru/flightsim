@@ -276,6 +276,12 @@ namespace FlightSimWorldPure
 	// SideBulge (cells) grows the field's warp with height (cloud_layers.hlsl: x
 	// sin(BULGE_TURN (h - 0.5)), 0 at mid-layer), so the sides lean and bulge; no hash
 	// added. 0 with -look-cloud-tiers=off. UNCALIBRATED (world_beauty.CLOUD_SIDE_BULGE).
+	// Round 61: the march fades out over the distant sheet's fade-in (a cross-fade,
+	// not the sheet over the march's far walls); 0 with -look-cloud-tiers=off.
+	inline double CloudFarFadeKmFor(bool bTiersOn, double SheetFadeKm)
+	{
+		return bTiersOn && SheetFadeKm > 0.0 ? SheetFadeKm : 0.0;
+	}
 	constexpr double CloudSideBulge = 0.35;
 	inline double CloudSideBulgeFor(bool bTiersOn)
 	{
@@ -2028,6 +2034,9 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		                                        static_cast<float>((State.TopM - State.BaseM) / 1000.0));
 		const double SideBulge = CloudSideBulgeFor(CloudTiersSwitch == TEXT("on"));
 		State.Material->SetScalarParameterValue(TEXT("SideBulge"), static_cast<float>(SideBulge));
+		// Round 61: no far fade until ApplyDistantClouds draws the sheet (it sets both).
+		State.Material->SetScalarParameterValue(TEXT("FarFadeStartKm"), 0.0f);
+		State.Material->SetScalarParameterValue(TEXT("FarFadeKm"), 0.0f);
 		Cloud->SetMaterial(State.Material);
 		Cloud->SetbUsePerSampleAtmosphericLightTransmittance(true);
 		Cloud->SetSkyLightCloudBottomOcclusion(static_cast<float>(AtmRow[AtmCloudBottomOcclusion]));
@@ -2412,6 +2421,24 @@ void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualSc
 		}
 	}
 	Trace->SetNumberField(TEXT("layers_set"), LayersSet);
+	// Round 61 (r58's distant band of block columns): the sheet's fade-in overlaid the
+	// march's far walls up to the trace's end; the march now fades out over the same
+	// range (cloud_layers.hlsl FarFadeStartKm / FarFadeKm), a cross-fade.
+	// -look-cloud-tiers=off keeps round 52's overlay (FarFadeKm 0).
+	const double FarFadeKm = CloudFarFadeKmFor(CloudTiersSwitch == TEXT("on"), DistantFadeKm);
+	int32 LayersFaded = 0;
+	for (FCloudLayerState& Layer : CloudLayers)
+	{
+		if (Layer.Material != nullptr)
+		{
+			Layer.Material->SetScalarParameterValue(TEXT("FarFadeStartKm"), static_cast<float>(HandoverKm));
+			Layer.Material->SetScalarParameterValue(TEXT("FarFadeKm"), static_cast<float>(FarFadeKm));
+			++LayersFaded;
+		}
+	}
+	Trace->SetNumberField(TEXT("march_fade_start_km"), HandoverKm);
+	Trace->SetNumberField(TEXT("march_fade_km"), FarFadeKm);
+	Trace->SetNumberField(TEXT("layers_faded"), LayersFaded);
 	Trace->SetStringField(TEXT("basis"),
 		TEXT("the distant tracing (world_beauty.distant_tracing_max_km), constrained and the sheet drawn -> min(row, DISTANT_NEAR_FIELD_KM). "
 		     "VolumetricCloud.usf: StepCount = SampleCountMax x saturate(path x InvDistanceToSampleCountMax) "

@@ -566,6 +566,10 @@ rp_check "round 52: the sample carries its shadow distance" "../../Shaders/Priva
 rp_check "round 52: a shadow sample passes its distance" "../../Shaders/Private/VolumetricCloud.usf" "ResolvedView, CloudLayerParams, ShadowSampleDistance, SPACE_SKIPPING_SLICE_DEPTH_OFF);"
 rp_check "round 52: the shadow march is quadratic" "../../Shaders/Private/VolumetricCloud.usf" "float CurrentNormT = ShadowT * ShadowT;"
 rp_check "round 52: the shadow march stops leaving the layer" "../../Shaders/Private/VolumetricCloud.usf" "break; // Ignore remaining samples since we have just traveled out of the cloud layer."
+# Round 61: the dither's seed reads the view's frame index and the pixel's SvPosition.
+rp_check "round 61: view uniform StateFrameIndexMod8" "Engine/Public/SceneView.h" "VIEW_UNIFORM_BUFFER_MEMBER(uint32, StateFrameIndexMod8)"
+rp_check "round 61: material parameters carry SvPosition" "../../Shaders/Private/MaterialTemplate.ush" "Parameters.SvPosition = SvPosition;"
+rp_check "round 61: the cloud pass sets the material's SvPosition" "../../Shaders/Private/VolumetricCloud.usf" "CalcMaterialParameters(MaterialParameters, PixelMaterialInputs, SvPosition, true);"
 # -- clouds-sky round 2 -- end -------------------------------------------------
 # -- visual round 5, lane L3 (2026-11-10): the distant cloud sheet, the sky HDRI probe --
 # FlightSimClouds.cpp ApplyDistantClouds / ApplySkyHdri and the material the

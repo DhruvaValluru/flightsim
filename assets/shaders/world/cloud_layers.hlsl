@@ -53,9 +53,9 @@
 // the average over its segment's footprint (ShadowFootprintKm x sqrt of its
 // distance, the quadratic march's segment length; FlightSimClouds.cpp sets it
 // from the march, 0 = round 51): the sample point is dithered over the
-// footprint by a hash of its position (which moves with the view ray's
-// blue-noise start, so it changes per pixel and per capture and TSR averages
-// it), the soft edge widens by the footprint, and a sample whose footprint is
+// footprint (round 61: by interleaved gradient noise of the pixel and the
+// capture, stratified along the ray: see below; round 52 hashed the position
+// and white noise drew r58's grain), the soft edge widens by the footprint, and a sample whose footprint is
 // wider than the erosion noise reads the noise at its mean (cheaper: it would
 // average away).
 // A view sample (ShadowDist 0) is unchanged. The second half: the plane field
@@ -82,6 +82,9 @@
 //   ShadowFootprintKm float  a shadow sample's footprint per sqrt(km) of distance; 0 = the round-51 march (round 52)
 //   LayerThicknessKm float   the layer's thickness, km (the footprint's share of NormAlt)
 //   SideBulge        float   the sides' bulge, cells (round 52; 0 = round 51's vertical walls)
+//   FarFadeStartKm   float   the distant sheet's hand-over: the march fades out from here (round 61)
+//   FarFadeKm        float   over this; 0 = no fade (no sheet drawn, or the switch off)
+// and the engine's Parameters.SvPosition and View.StateFrameIndexMod8 (the dither's pixel and capture).
 const float FBM_MEAN = 0.55;
 const float FBM_SIGMA = 0.069;
 const float TOP_CUT_SIGMAS = 3.5;
@@ -95,10 +98,15 @@ const float LOD_NEAR_KM = 6.0;
 const float LOD_FAR_KM = 20.0;
 const float FAR_SOFTEN = 1.0;
 // Round 52: a shadow sample's dither, in footprints (a cube that many footprints
-// wide: the replica's tiers went at 2), and its soft edge's widening per cell of footprint.
+// wide; round 61: 1, stratified, after 2 white drew r58's grain), and its soft
+// edge's widening per cell of footprint.
 // UNCALIBRATED (world_beauty.CLOUD_SHADOW_DITHER / CLOUD_SHADOW_SOFTEN).
-const float SHADOW_DITHER = 2.0;
+const float SHADOW_DITHER = 1.0;
 const float SHADOW_SOFTEN = 1.0;
+// Round 61: the R3 low-discrepancy sequence's steps (Roberts 2018: 1 / phi3^k).
+const float R3_X = 0.8191725134;
+const float R3_Y = 0.6710436067;
+const float R3_Z = 0.5497004779;
 // The erosion noise's own mean (world_beauty.CLOUD_DETAIL_MEAN, measured on
 // its Python replica cloud_detail; tests/test_cloud_tiers.py re-measures it).
 const float DETAIL_MEAN = 0.479;
@@ -271,13 +279,23 @@ FWorldCloud C;
 float3 km = (WorldPos / 100.0 - WindOffsetM) / 1000.0 + SeedOffsetKm;
 float h = saturate(NormAlt);
 // Round 52: a shadow sample's footprint (0 for a view sample, and with the
-// filter off); dithered over it by a hash of the sample's own position.
+// filter off), dithered over it.
+// Round 61 (r58's grain): the dither was a white hash of the sample's position,
+// independent per pixel and per capture, which 12 TSR captures leave as grain.
+// It is now interleaved gradient noise (Jimenez 2014: the pattern TAA/TSR is
+// built to resolve) of the pixel, advanced per capture (View.StateFrameIndexMod8),
+// stratified along the shadow ray by the R3 sequence over the sample's index
+// (2 sqrt(d) / ShadowFootprintKm: 0, 1, 2 ... for the quadratic march), so the
+// ten samples of one ray cover the cube evenly instead of at random.
 float footKm = ShadowFootprintKm * sqrt(max(ShadowDist, 0.0) / 100000.0);
 [branch]
 if (footKm > 0.0)
 {
-	uint hs = C.Hash3(asint(WorldPos.x), asint(WorldPos.y), asint(WorldPos.z), 977u);
-	float3 u = float3((float)(hs & 1023u), (float)((hs >> 10u) & 1023u), (float)((hs >> 20u) & 1023u)) / 1023.0 - 0.5;
+	float ignX = Parameters.SvPosition.x + 5.588238 * (float)View.StateFrameIndexMod8;
+	float ignY = Parameters.SvPosition.y + 5.588238 * (float)View.StateFrameIndexMod8;
+	float u0 = frac(52.9829189 * frac(0.06711056 * ignX + 0.00583715 * ignY));
+	float idx = floor(2.0 * sqrt(max(ShadowDist, 0.0) / 100000.0) / ShadowFootprintKm);
+	float3 u = frac(u0 + float3(R3_X, R3_Y, R3_Z) * (idx + 1.0)) - 0.5;
 	float3 dKm = u * (SHADOW_DITHER * footKm);
 	km += dKm;
 	h = saturate(NormAlt + dKm.z / max(LayerThicknessKm, 1e-3));
@@ -325,4 +343,16 @@ if (density > 0.0 && far < 1.0)
 	float wisp = lerp(detail, 1.0 - detail, saturate(h / WISP_HEIGHT));
 	density = C.Remap(density, DetailErosion * (1.0 - far) * wisp, 1.0);
 }
-return density * base * ExtinctionPerM * ExtinctionScale;
+// Round 61 (r58's distant band of block columns): where the distant sheet is
+// drawn its fade-in (distant_clouds.hlsl: HandoverKm .. + FadeKm by the
+// distance) overlaid this march's far walls up to the trace's end, so the
+// sheet's gaps showed the volumetric walls as dark rectangles cut by the
+// sheet's edges. The march now fades out over the same range (FarFadeKm > 0
+// only when the sheet is drawn; 0 = round 52, unchanged): a cross-fade.
+float fadeOut = 1.0;
+[branch]
+if (FarFadeKm > 0.0)
+{
+	fadeOut = 1.0 - smoothstep(FarFadeStartKm, FarFadeStartKm + FarFadeKm, length(WorldPos - CameraPos) / 100000.0);
+}
+return density * base * ExtinctionPerM * ExtinctionScale * fadeOut;

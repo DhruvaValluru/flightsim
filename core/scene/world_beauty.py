@@ -612,7 +612,7 @@ CLOUD_SHADOW_CONSTRAINED_KM = 6.0
 #: steps are iso-altitude lines, identical in every capture (nothing for TSR to
 #: average). cloud_layers.hlsl now treats a SHADOW sample (the engine's
 #: ShadowSampleDistance > 0) as its segment's footprint: dithered over it by a
-#: hash of its position (which moves with the view ray's blue-noise start), its
+#: pixel's interleaved gradient noise per capture, stratified along the ray (round 61; round 52 hashed the position), its
 #: soft edge widened by it (after the cut: the drawn cover is unchanged), the
 #: erosion noise read at its mean once the footprint is wider than the noise.
 #: No sample is added (cheaper, if anything). The footprint is the quadratic
@@ -624,7 +624,9 @@ CLOUD_SHADOW_CONSTRAINED_KM = 6.0
 #: refuses world_beauty.clouds.
 #: UNCALIBRATED: probe #04, #12, #13 (the dither and the widening).
 CLOUD_TIERS_SWITCH = "-look-cloud-tiers"
-CLOUD_SHADOW_DITHER = 2.0
+#: Round 61: 1 footprint, stratified (R3) and seeded by interleaved gradient
+#: noise; round 52's 2 footprints of a white hash drew r58's grain.
+CLOUD_SHADOW_DITHER = 1.0
 CLOUD_SHADOW_SOFTEN = 1.0
 #: The erosion noise's mean (cloud_detail over the lattice; tests re-measure it):
 #: a shadow sample whose footprint is wider than the noise reads this instead.
@@ -1147,19 +1149,59 @@ def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float,
     return density * base
 
 
-#: cloud_layers.hlsl's seed for a shadow sample's dither hash (round 52).
-CLOUD_SHADOW_DITHER_SEED = 977
+#: Round 61: the R3 low-discrepancy sequence's steps (Roberts 2018), the
+#: dither's stratification along a shadow ray (cloud_layers.hlsl R3_X/Y/Z).
+CLOUD_SHADOW_R3 = (0.8191725134, 0.6710436067, 0.5497004779)
 
 
-def cloud_shadow_dither(world_pos_cm: Tuple[float, float, float]) -> Tuple[float, float, float]:
-    """cloud_layers.hlsl's round-52 dither of a shadow sample, each in -0.5..0.5:
-    Hash3 of the sample's absolute position's float32 bit patterns (asint), ten
-    bits a component. The position moves with the view ray's blue-noise start,
-    so the dither changes per pixel and per capture."""
+def _f32(v: float) -> float:
     import struct
-    bits = [struct.unpack("<i", struct.pack("<f", float(c)))[0] for c in world_pos_cm]
-    h = _hash3(bits[0], bits[1], bits[2], CLOUD_SHADOW_DITHER_SEED)
-    return tuple(float((h >> shift) & 1023) / 1023.0 - 0.5 for shift in (0, 10, 20))
+    return struct.unpack("<f", struct.pack("<f", float(v)))[0]
+
+
+def _frac32(v: float) -> float:
+    v = _f32(v)
+    return _f32(v - math.floor(v))
+
+
+def cloud_shadow_ign(px: float, py: float, frame_mod8: int) -> float:
+    """cloud_layers.hlsl's round-61 dither seed: interleaved gradient noise
+    (Jimenez 2014, the pattern TAA/TSR resolves) of the pixel, advanced per
+    capture by 5.588238 pixels a frame index (View.StateFrameIndexMod8); in
+    float32 like the shader."""
+    x = _f32(px + _f32(5.588238 * float(frame_mod8)))
+    y = _f32(py + _f32(5.588238 * float(frame_mod8)))
+    inner = _frac32(_f32(_f32(0.06711056 * x) + _f32(0.00583715 * y)))
+    return _frac32(52.9829189 * inner)
+
+
+def cloud_shadow_sample_index(shadow_dist_km: float, footprint_per_sqrt_km: float) -> float:
+    """The shadow sample's index the stratification steps by: floor(2 sqrt(d) /
+    ShadowFootprintKm), i.e. 0, 1, 2 ... along the engine's quadratic march."""
+    if footprint_per_sqrt_km <= 0.0:
+        return 0.0
+    return float(math.floor(2.0 * math.sqrt(max(shadow_dist_km, 0.0)) / footprint_per_sqrt_km))
+
+
+def cloud_shadow_dither(u0: float, index: float) -> Tuple[float, float, float]:
+    """cloud_layers.hlsl's round-61 dither of a shadow sample, each in
+    -0.5..0.5: frac(u0 + R3 x (index + 1)) - 0.5."""
+    return tuple(_frac32(u0 + g * (index + 1.0)) - 0.5 for g in CLOUD_SHADOW_R3)
+
+
+def cloud_far_fade_km_for(tiers_on: bool, sheet_fade_km: float) -> float:
+    """The material's FarFadeKm (C++ CloudFarFadeKmFor): the sheet's fade
+    length when it is drawn and the switch is on, else 0."""
+    return sheet_fade_km if tiers_on and sheet_fade_km > 0.0 else 0.0
+
+
+def cloud_far_fade(distance_km: float, start_km: float, fade_km: float) -> float:
+    """Round 61: the march's fade-out over the distant sheet's fade-in
+    (1 - smoothstep(start, start + fade, d)); 1 with fade_km 0 (no sheet, or
+    the switch off)."""
+    if fade_km <= 0.0:
+        return 1.0
+    return 1.0 - _smoothstep(start_km, start_km + fade_km, distance_km)
 
 
 def cloud_seed_offset_km(seed: int) -> Tuple[float, float, float]:
