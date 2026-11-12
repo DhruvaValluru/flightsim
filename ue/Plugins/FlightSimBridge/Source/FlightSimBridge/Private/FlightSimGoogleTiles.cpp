@@ -16,6 +16,8 @@
 #include "Dom/JsonValue.h"
 #include "HAL/FileManager.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/Material.h"
+#include "Components/PrimitiveComponent.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -344,6 +346,35 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record() const
 	Out->SetNumberField(TEXT("longest_wait_s"), LongestWaitSeconds);
 	Out->SetNumberField(TEXT("total_wait_s"), TotalWaitSeconds);
 	Out->SetNumberField(TEXT("tileset_reloads"), TileRefreshes);
+	// Round 63 (#02): a material that greyed every texel changed no pixel, so
+	// record what the loaded tiles really draw with: each primitive's
+	// material slots, counted by their base material.
+	if (AActor* const TilesActor = Tileset.Get())
+	{
+		TArray<UPrimitiveComponent*> TilePrimitives;
+		TilesActor->GetComponents<UPrimitiveComponent>(TilePrimitives, true);
+		TMap<FString, int32> DrawnBase;
+		for (UPrimitiveComponent* TilePrimitive : TilePrimitives)
+		{
+			if (TilePrimitive == nullptr)
+			{
+				continue;
+			}
+			for (int32 Slot = 0; Slot < TilePrimitive->GetNumMaterials(); ++Slot)
+			{
+				UMaterialInterface* const SlotMaterial = TilePrimitive->GetMaterial(Slot);
+				UMaterial* const SlotBase = SlotMaterial != nullptr ? SlotMaterial->GetBaseMaterial() : nullptr;
+				DrawnBase.FindOrAdd(SlotBase != nullptr ? SlotBase->GetPathName() : FString(TEXT("none")))++;
+			}
+		}
+		TSharedPtr<FJsonObject> Drawn = MakeShared<FJsonObject>();
+		for (const TPair<FString, int32>& Pair : DrawnBase)
+		{
+			Drawn->SetNumberField(Pair.Key, Pair.Value);
+		}
+		Out->SetNumberField(TEXT("drawn_primitives"), TilePrimitives.Num());
+		Out->SetObjectField(TEXT("drawn_base_materials"), Drawn);
+	}
 	Out->SetStringField(TEXT("attribution"),
 		TEXT("Imagery and 3D data: Google. Per-tile data-provider credits are shown by Cesium on ")
 		TEXT("screen and are not drawn into these frames; the Google Maps Platform terms govern ")
@@ -425,6 +456,21 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyLook(UMaterialInterfac
 		TEXT("absent: M_FlightSimTilesBeauty did not load (run scripts/ue_create_materials.py)");
 	if (Material != nullptr)
 	{
+		// Round 63 (#02): Cesium picks BaseMaterialWithWater for any tile not
+		// flagged land-only, which may be every Google tile; give that slot the
+		// beauty material too (set before SetMaterial, whose refresh covers it).
+		if (FObjectProperty* WaterProperty = FindFProperty<FObjectProperty>(Class, TEXT("WaterMaterial")))
+		{
+			if (Material->IsA(WaterProperty->PropertyClass))
+			{
+				WaterProperty->SetObjectPropertyValue_InContainer(Tiles, Material);
+				Out->SetStringField(TEXT("water_material_route"), TEXT("UPROPERTY WaterMaterial"));
+			}
+		}
+		else
+		{
+			Out->SetStringField(TEXT("water_material_route"), TEXT("not found: no WaterMaterial property"));
+		}
 		MaterialRoute = FString::Printf(TEXT("not found: no SetMaterial function or Material property on %s"),
 		                                *Class->GetName());
 		UFunction* Setter = Tiles->FindFunction(FName(TEXT("SetMaterial")));
