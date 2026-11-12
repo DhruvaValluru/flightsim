@@ -2590,6 +2590,11 @@ namespace FlightSimTilesShade
 		Out->SetStringField(TEXT("switch"), Switch == TEXT("off") ? FString(TEXT("off")) : FString(TEXT("on")));
 		Out->SetNumberField(TEXT("luma_knee"), ShadeLumaKnee);
 		Out->SetNumberField(TEXT("blue_gate"), ShadeBlueGate);
+		// Round 58/59: a vertex-normal level test never passed (Cesium's unlit
+		// tiles carry the ellipsoid's up on every vertex); the shader takes the face's.
+		Out->SetStringField(TEXT("level_basis"),
+			TEXT("the triangle's face normal from the world position's screen derivatives; the tiles' vertex "
+			     "normals are the ellipsoid's up (Cesium, KHR_materials_unlit)"));
 		Out->SetStringField(TEXT("basis"),
 			TEXT("the photogrammetry's baked sky-shade (violet-blue, darker than the knee, not level) moved toward "
 			     "the grey of its own luma under a drawn sun; shader per frame, nothing stored (Google tile policy)"));

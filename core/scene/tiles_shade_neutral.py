@@ -28,9 +28,13 @@ is than its larger of R and G (``SHADE_BLUE_GATE`` on B / max(R, G) - 1),
 times how dark it is in absolute terms (1 - luma / ``SHADE_LUMA_KNEE``),
 times ``ShadeNeutralAmount`` (the collection's, per world preset); the texel
 moves that share of the way to the grey of its own luma (Rec. 709, so its
-brightness stays). Open water is spared: a level surface (vertex normal
-within about 6-11 deg of up, ``SHADE_LEVEL_SLOPE``) keeps its colour, the
-flatness tiles_detail_surface.hlsl's water test uses. A sunlit texel (luma
+brightness stays). Open water is spared: a level surface (its FACE normal,
+cross(ddx, ddy) of the world position, within about 6-11 deg of up,
+``SHADE_LEVEL_SLOPE``) keeps its colour. Not the vertex normal: Cesium draws
+the Google tiles (KHR_materials_unlit) with every vertex normal the
+ellipsoid's up, so the first version's vertex-normal test called every texel
+water and moved no pixel (rounds 58/59: the A/B pixel-identical, amount 1
+recorded). A sunlit texel (luma
 above the knee) and a warm or green one (B not above R and G) are untouched.
 
 Amount 0 is an exact pass-through (the shader returns its input under a
@@ -50,7 +54,7 @@ import numpy as np
 
 #: The Custom node's inputs, in order (scripts/ue_create_materials.py
 #: WORLD_TILES_INPUTS["tiles_shade_neutral"] and the .hlsl's comment block).
-SHADE_INPUTS: Tuple[str, ...] = ("Albedo", "NormalWS", "ShadeNeutralAmount")
+SHADE_INPUTS: Tuple[str, ...] = ("Albedo", "WorldPos", "ShadeNeutralAmount")
 #: Rec. 709 luma weights (the .hlsl's SHADE_LUMA; tiles_delight's too).
 SHADE_LUMA: Tuple[float, float, float] = (0.2126, 0.7152, 0.0722)
 #: The divide guard (the .hlsl's SHADE_EPS).
@@ -61,7 +65,7 @@ SHADE_LUMA_KNEE = 0.30
 #: Gain on B / max(R, G) - 1: a texel whose blue is 25 % above its larger
 #: other channel counts fully. UNCALIBRATED.
 SHADE_BLUE_GATE = 4.0
-#: The level test, on slope = 1 - normal.z: below the first a texel counts as
+#: The level test, on slope = 1 - |face normal z|: below the first a texel counts as
 #: open water (kept), above the second as ground. UNCALIBRATED.
 SHADE_LEVEL_SLOPE: Tuple[float, float] = (0.005, 0.02)
 
@@ -92,6 +96,10 @@ SWITCH_DEFAULT = "on"
 BASIS = ("the photogrammetry's baked sky-shade (violet-blue, darker than the knee, not level) moved toward "
          "the grey of its own luma under a drawn sun; shader per frame, nothing stored (Google tile policy)")
 
+#: How the level test finds the surface (the record's level_basis).
+LEVEL_BASIS = ("the triangle's face normal from the world position's screen derivatives; the tiles' vertex "
+               "normals are the ellipsoid's up (Cesium, KHR_materials_unlit)")
+
 UNCALIBRATED: Tuple[str, ...] = ("SHADE_NEUTRAL_DEFAULTS", "SHADE_LUMA_KNEE", "SHADE_BLUE_GATE",
                                  "SHADE_LEVEL_SLOPE")
 
@@ -113,8 +121,9 @@ def amount_for(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT) -> 
     return float(SHADE_NEUTRAL_DEFAULTS.get(preset, 0.0))
 
 
-def shade_weight(albedo: Any, normal_z: Any = 0.0) -> np.ndarray:
-    """How much each texel reads as baked sky-shade, 0..1 (before the amount)."""
+def shade_weight(albedo: Any, face_up: Any = 0.0) -> np.ndarray:
+    """How much each texel reads as baked sky-shade, 0..1 (before the amount).
+    ``face_up`` is |z| of the unit face normal (1 level, 0 a vertical wall)."""
     a = np.maximum(np.asarray(albedo, dtype=np.float64), 0.0)
     if a.ndim < 1 or a.shape[-1] != 3:
         raise ValueError(f"albedo {a.shape} must end in 3 (RGB)")
@@ -122,16 +131,16 @@ def shade_weight(albedo: Any, normal_z: Any = 0.0) -> np.ndarray:
     rg = np.maximum(np.maximum(a[..., 0], a[..., 1]), SHADE_EPS)
     violet = np.clip((a[..., 2] / rg - 1.0) * SHADE_BLUE_GATE, 0.0, 1.0)
     dark = np.clip(1.0 - luma / SHADE_LUMA_KNEE, 0.0, 1.0)
-    slope = 1.0 - np.clip(np.asarray(normal_z, dtype=np.float64), 0.0, 1.0)
+    slope = 1.0 - np.clip(np.abs(np.asarray(face_up, dtype=np.float64)), 0.0, 1.0)
     lo, hi = SHADE_LEVEL_SLOPE
     t = np.clip((slope - lo) / (hi - lo), 0.0, 1.0)
     water = 1.0 - t * t * (3.0 - 2.0 * t)   # HLSL smoothstep
     return violet * dark * (1.0 - water)
 
 
-def shade_neutral(albedo: Any, normal_z: Any = 0.0, amount: float = 1.0) -> np.ndarray:
+def shade_neutral(albedo: Any, face_up: Any = 0.0, amount: float = 1.0) -> np.ndarray:
     """tiles_shade_neutral.hlsl on arrays of shape (..., 3), linear 0..1.
-    ``normal_z`` is the world normal's up component (broadcast). Amount 0
+    ``face_up`` is the face normal's |z| (broadcast). Amount 0
     (or below) returns ``albedo`` unchanged."""
     if not np.isfinite(float(amount)):
         raise ValueError(f"amount {amount!r} is not a finite number")
@@ -141,7 +150,7 @@ def shade_neutral(albedo: Any, normal_z: Any = 0.0, amount: float = 1.0) -> np.n
         return a0
     a = np.maximum(a0, 0.0)
     luma = (a @ np.asarray(SHADE_LUMA))[..., None]
-    w = (shade_weight(a, normal_z) * amount)[..., None]
+    w = (shade_weight(a, face_up) * amount)[..., None]
     return a + (luma - a) * w
 
 
@@ -153,6 +162,7 @@ def shade_record(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT) -
         "switch": switch,
         "luma_knee": SHADE_LUMA_KNEE,
         "blue_gate": SHADE_BLUE_GATE,
+        "level_basis": LEVEL_BASIS,
         "basis": BASIS,
         "pixel_moving": False,
         "calibration": "UNCALIBRATED",

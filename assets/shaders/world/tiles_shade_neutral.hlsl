@@ -11,7 +11,13 @@
 //   violet = saturate((B / max(R, G) - 1) x SHADE_BLUE_GATE),
 //   dark   = saturate(1 - luma / SHADE_LUMA_KNEE)  (absolute: a wall wholly in
 //            shade is its own neighbourhood, which tiles_delight cannot see),
-//   level  = open water's flatness (slope = 1 - normal.z under SHADE_LEVEL_LO..HI).
+//   level  = open water's flatness: slope = 1 - |face.z| under SHADE_LEVEL_LO..HI,
+//            face = cross(ddx(WorldPos), ddy(WorldPos)), the triangle's own normal.
+//            NOT the vertex normal: Cesium draws the Google tiles (KHR_materials_unlit)
+//            with every vertex normal the ellipsoid's up, so a vertex-normal level test
+//            called every texel water and the term never moved a pixel (round 58/59,
+//            the A/B pixel-identical).
+// Derivatives are taken first, outside any branch.
 // ShadeNeutralAmount 0 returns the input exactly (the -tiles-shade-neutral=off A/B).
 // The Python twin is core/scene/tiles_shade_neutral.py shade_neutral();
 // tests/test_tiles_shade_neutral.py pins the constants and the input order to it.
@@ -19,7 +25,7 @@
 //
 // Inputs (the script's WORLD_TILES_INPUTS["tiles_shade_neutral"]):
 //   Albedo              float3  the de-lit tile colour (tiles_delight.hlsl's output), linear
-//   NormalWS            float3  the vertex normal, world space (Z up)
+//   WorldPos            float3  absolute world position, cm (Z up)
 //   ShadeNeutralAmount  float   0..1, 0 = exact pass-through (MPC_FlightSimWorld, per preset)
 const float3 SHADE_LUMA = float3(0.2126, 0.7152, 0.0722);
 const float SHADE_EPS = 1e-4;
@@ -56,6 +62,10 @@ struct FWorldTilesShade
 	}
 	// end shared (kept identical in every tiles shader; tests/test_world_beauty.py pins it; unused here)
 };
+// Derivatives first: nothing below may take one inside a branch.
+float3 p = WorldPos / 100.0;
+float3 face = cross(ddx_fine(p), ddy_fine(p));
+float faceUp = abs(face.z) / max(length(face), 1e-8);
 float amount = saturate(ShadeNeutralAmount);
 [branch] if (amount <= 0.0)
 {
@@ -66,7 +76,7 @@ float L = dot(a, SHADE_LUMA);
 float rg = max(max(a.r, a.g), SHADE_EPS);
 float violet = saturate((a.b / rg - 1.0) * SHADE_BLUE_GATE);
 float dark = saturate(1.0 - L / SHADE_LUMA_KNEE);
-float slope = 1.0 - saturate(normalize(NormalWS).z);
+float slope = 1.0 - saturate(faceUp);
 float water = 1.0 - smoothstep(SHADE_LEVEL_LO, SHADE_LEVEL_HI, slope);
 float w = violet * dark * (1.0 - water) * amount;
 return lerp(a, float3(L, L, L), w);
