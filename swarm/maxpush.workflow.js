@@ -23,7 +23,14 @@ const DISC = args.discoveries || []
 // output-token floor below which no new agent is started (needs a "+Nk" token target in the prompt).
 const SKIP = !!args.skipResearch
 const VMODEL = args.verifyModel
-const out = () => !!budget.total && budget.remaining() < (args.reserve || 60000)
+// The token pool is shared with the main session, so it may already be partly spent at launch.
+// The floor therefore scales with what was available at the start (never more than 15% of it),
+// and the numbers are logged so a stopped run says why.
+const R0 = budget.total ? budget.remaining() : Infinity
+const FLOOR = Math.min(args.reserve || 60000, Math.floor(R0 * 0.15))
+log(`token target ${budget.total}, remaining at start ${R0}, floor ${FLOOR}`)
+if (budget.total && R0 < 150000) log(`WARNING: only ${R0} tokens left under the target; raise it (e.g. +1M) or this wave will be cut short`)
+const out = () => !!budget.total && budget.remaining() < FLOOR
 const vopt = (o) => (VMODEL ? { ...o, model: VMODEL } : o)
 
 const LAPTOP = `THE TARGET MACHINE (the Windows test laptop): Intel integrated GPU, Direct3D 11 / Shader Model 5 only (no D3D12, no Lumen, no hardware ray tracing, no Nanite assumptions), shared memory, display 1536x960, RAM unmeasured and tight (one UE render process used 3.8 GB and background jobs were OOM-killed), C: has about 60 GB free, and it hit 12 "device lost" crashes on scene 9. Starting budget: ${JSON.stringify(hw)}.
@@ -143,6 +150,7 @@ const coherence = args.coherence === false || out() ? [] : await parallel(Object
 log(`${args.wave}: ${passed.length} verified, ${done.length - passed.length} rejected, ${items.length - done.length} dropped`)
 return {
   wave: args.wave,
+  token_target: budget.total, remaining_at_start: R0, floor: FLOOR, remaining_at_end: budget.remaining(),
   verified: passed.map((r) => ({ id: r.it.id, domain: r.it.domain, lane: r.it.lane_dir, tiers: r.b.tiers.length, gate: r.b.pixel_gate })),
   rejected: done.filter((r) => !r.ok).map((r) => ({ id: r.it.id, why: r.why })),
   coherence: coherence.filter(Boolean),
