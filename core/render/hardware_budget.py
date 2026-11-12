@@ -32,7 +32,43 @@ def load_profile(path: str | Path) -> dict:
 
 
 def _primary_gpu(profile: dict) -> dict:
-    return max(profile["gpus"], key=lambda g: g.get("vram_mb", 0))
+    return max(profile["gpus"], key=lambda g: g.get("vram_mb") or 0)
+
+
+def _integrated(gpu: dict) -> bool:
+    if gpu.get("integrated") is not None:
+        return bool(gpu["integrated"])
+    name = gpu.get("name", "").upper()
+    return gpu.get("vendor") == "intel" and "ARC A" not in name and "ARC B" not in name
+
+
+def _integrated_budget(profile: dict, gpu: dict) -> dict:
+    """Shared-memory GPU on D3D11: the measured case on the owner's laptop
+    (12 device-lost crashes on scene 9). Conservative until a stress run."""
+    ram_gb = profile["ram"].get("total_gb") or 8
+    pool = min(1024, int(ram_gb * 1024 * 0.06))
+    unknown = [k for k in ("cpu.logical_cores", "ram.total_gb")
+               if (profile["cpu"].get("logical_cores") if k.startswith("cpu") else profile["ram"].get("total_gb")) is None]
+    return {
+        "tier": "integrated",
+        "gpu": gpu.get("name"),
+        "rhi": "d3d11",
+        "usable_vram_mb": pool,
+        "hardware_ray_tracing": False,
+        "max_capture_width": 1280,
+        "cpu_workers": max(1, (profile["cpu"].get("logical_cores") or 4) - 2),
+        "gpu_render_jobs": 1,
+        "ram_cache_gb": 1,
+        "cvars": {
+            "r.Streaming.PoolSize": pool,
+            "r.ScreenPercentage": 100,
+            "sg.TextureQuality": 1, "sg.ShadowQuality": 1,
+            "sg.GlobalIlluminationQuality": 1, "sg.PostProcessQuality": 2,
+            "r.DynamicGlobalIlluminationMethod": 0,
+        },
+        "unknown_inputs": unknown,
+        "measured": False,
+    }
 
 
 def _hardware_rt(gpu: dict) -> bool:
@@ -46,7 +82,9 @@ def _hardware_rt(gpu: dict) -> bool:
 
 def budget(profile: dict) -> dict:
     gpu = _primary_gpu(profile)
-    vram = int(gpu.get("vram_mb", 0))
+    if _integrated(gpu):
+        return _integrated_budget(profile, gpu)
+    vram = int(gpu.get("vram_mb") or 0)
     if vram <= 0:
         raise HardwareProfileError("hardware_profile.vram_unknown")
     tier = next(name for floor, name in TIERS if vram >= floor)

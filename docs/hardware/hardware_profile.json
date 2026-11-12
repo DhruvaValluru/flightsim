@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "source": "owner-reported from the Windows session, NOT probed. Replace by running scripts/hw_probe.ps1.",
+  "cpu": {"name": null, "physical_cores": null, "logical_cores": null},
+  "ram": {"total_gb": null, "note": "background jobs OOM-killed several times; one UE render used ~3.8 GB"},
+  "gpus": [{"vendor": "intel", "name": "Intel integrated graphics (model unrecorded)", "vram_mb": null, "integrated": true, "rhi": "d3d11", "note": "12 device-lost crashes on scene 9 until reboot"}],
+  "display": {"width": 1536, "height": 960, "note": "likely 1920x1200 panel at 125%"},
+  "disks": [{"name": "C:", "size_gb": 475, "free_gb": 60}],
+  "os": {"caption": "Windows 11 Home", "build": "26200"},
+  "software": {"unreal": "5.7", "cesium_for_unreal": "2.30.0", "python": "3.12"}
+}
