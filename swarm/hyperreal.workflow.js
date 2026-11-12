@@ -12,7 +12,7 @@ export const meta = {
 // Run the manifest in waves of <=200 items (about 500 agents per wave, under the 1000-agent cap).
 const items = args.items
 const hw = args.budget
-const RULES = `Project rules you must obey (CLAUDE.md, docs/VALIDITY.md): named sources only, sha256 and licence on every fetched asset, no non-commercial licences, no placeholder airframes, visual-only work labelled visual-only. Google tiles are the ground of every terrain render. You are in a Linux container: you cannot render or run UE. Anything that needs the Windows GPU is written, source-tested where possible, and marked UNMEASURED with the exact Windows command that would measure it. Never claim a visual result you did not measure. Write ONLY inside your lane directory (plus a test file tests/test_swarm_<id with dots as underscores>.py). Never touch another lane.`
+const RULES = `Project rules you must obey (CLAUDE.md, docs/VALIDITY.md): named sources only, sha256 and licence on every fetched asset, no non-commercial licences, no placeholder airframes, visual-only work labelled visual-only. Google tiles are the ground of every terrain render. You run on a MacBook: you cannot run the pinned Windows UE build or the PC GPU. Anything that needs the Windows GPU is written, source-tested where possible, and marked UNMEASURED with the exact Windows command that would measure it. Never claim a visual result you did not measure. Write ONLY inside your lane directory (plus a test file tests/test_swarm_<id with dots as underscores>.py). Never touch another lane.`
 
 const BUILD = {
   type: 'object',
