@@ -36,8 +36,13 @@ the hardware probe and the measurements, never agents.
 * Mac agents write and source-test code. They cannot run the pinned UE 5.7
   Windows build or load the PC's GPU, so "pushed to the max" is only real
   after the stress-ladder items run on the PC.
-* About 16 agents run at once (fewer on a laptop with few cores); 500 agents
-  is hours, not minutes. Keep the Mac awake and plugged in.
+* One workflow runs min(16, cores - 2) agents at once: 8 on an M1 Max
+  (10 cores). To go wider, split a wave into shards and launch one workflow
+  per shard in the same turn (`python swarm/shard.py --shards 4 --wave 0`),
+  so about 8 x shards agents run together: 32 with 4 shards. The agents wait
+  on the API, not the CPU, so 64 GB is not the limit; Anthropic rate limits
+  on your plan are, and the first 429s tell you the ceiling. Each item is
+  already one agent doing one task. Keep the Mac awake and plugged in.
 * Rules from `CLAUDE.md` still apply (Google tiles, no scheduled check-ins).
 * ruflo (`npx ruflo`) is not wired in. The Workflow tool already does the
   fan-out and verification; ruflo can be layered on for persistent memory
