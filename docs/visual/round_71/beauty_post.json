@@ -1,0 +1,11 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "02_same_super_bright_preset": {
+   "post": "02_same_super_bright_preset_post.jpg",
+   "source": "02_same_super_bright_preset_frame_beauty_post.png"
+  }
+ }
+}
