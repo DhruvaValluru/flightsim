@@ -116,6 +116,8 @@ def parse_switch(text: Optional[str]) -> str:
 def amount_for(preset: str, surface: str = "", switch: str = SWITCH_DEFAULT) -> float:
     """ShadeNeutralAmount the host sets: the preset's, 0 over a city card or
     with the switch off, 0 for an unknown preset."""
+    if switch == "force":   # round 63 diagnostic: every texel to its grey
+        return 2.0
     if switch == "off" or surface == CITY_SURFACE:
         return 0.0
     return float(SHADE_NEUTRAL_DEFAULTS.get(preset, 0.0))
@@ -145,12 +147,13 @@ def shade_neutral(albedo: Any, face_up: Any = 0.0, amount: float = 1.0) -> np.nd
     if not np.isfinite(float(amount)):
         raise ValueError(f"amount {amount!r} is not a finite number")
     a0 = np.asarray(albedo, dtype=np.float64)
+    force = float(amount) > 1.5   # round 63 diagnostic (-tiles-shade-neutral=force)
     amount = min(max(float(amount), 0.0), 1.0)
     if amount <= 0.0:
         return a0
     a = np.maximum(a0, 0.0)
     luma = (a @ np.asarray(SHADE_LUMA))[..., None]
-    w = (shade_weight(a, face_up) * amount)[..., None]
+    w = (np.ones(a.shape[:-1]) if force else shade_weight(a, face_up) * amount)[..., None]
     return a + (luma - a) * w
 
 

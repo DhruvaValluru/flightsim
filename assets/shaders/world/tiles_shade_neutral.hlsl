@@ -79,4 +79,7 @@ float dark = saturate(1.0 - L / SHADE_LUMA_KNEE);
 float slope = 1.0 - saturate(faceUp);
 float water = 1.0 - smoothstep(SHADE_LEVEL_LO, SHADE_LEVEL_HI, slope);
 float w = violet * dark * (1.0 - water) * amount;
+// Round 63 diagnostic: ShadeNeutralAmount 2 (-tiles-shade-neutral=force) greys
+// every texel, gate or not -- does this material reach the #02 shade at all?
+w = ShadeNeutralAmount > 1.5 ? 1.0 : w;
 return lerp(a, float3(L, L, L), w);

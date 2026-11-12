@@ -2605,6 +2605,11 @@ namespace FlightSimTilesShade
 	// 0 over a city card (blue glass and roofs are colour) or with the switch off.
 	inline double AmountFor(int32 Preset, const FString& Surface, const FString& Switch)
 	{
+		// Round 63 diagnostic: force = 2, the shader greys every texel.
+		if (Switch == TEXT("force"))
+		{
+			return 2.0;
+		}
 		return (Switch == TEXT("off") || Surface == TEXT("city")) ? 0.0 : PresetAmount(Preset);
 	}
 
