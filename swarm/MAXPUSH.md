@@ -57,3 +57,21 @@ non-commercial, could its baked form run on the iGPU) and ranked into
 one-line focus each. 11 domains x 6 angles = 66 researchers per round, and
 vetting is one agent per candidate. Feed the top of `discoveries.json` into
 the build wave as extra research input.
+
+## v2 changes
+
+* **Competing builders.** Priority items (`args.priority`: ids for the known
+  defects) get three builders from different angles (physical, real-data,
+  cheapest-bake-or-adopt-a-repo) and a judge who keeps the winner and grafts
+  in the best ideas from the others. Other items get one builder.
+* **Adopt before writing.** Builders are told a small niche repo that already
+  does the job beats writing it; `args.discoveries` (the ranked list from the
+  discovery run) is passed to every researcher.
+* **Reference truth and a pixel gate.** Each item names the real-world
+  measurement it is compared against and ships the exact Windows command, the
+  metric and the threshold that would show it improved the frame.
+* **Trained-eye deepen.** Deepen rounds ask what a pilot or VFX supervisor
+  would still call fake, and fix the biggest one.
+* **Scenario coherence.** One agent per scenario reconciles all its components
+  (exposure, sun, haze, albedo, time of day, combined budget) into one
+  parameter table in `swarm/coherence/`.
