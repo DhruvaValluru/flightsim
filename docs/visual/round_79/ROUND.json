@@ -1,0 +1,32 @@
+﻿{
+    "round":  79,
+    "commit":  "f82f95d7",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   2
+               ],
+    "switches":  "-tiles-shade-neutral=0.6 -stated-fill-share=0",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  407.1
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  202.3,
+                         "spec_sha256":  "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  2,
+                         "outcome":  "done",
+                         "seconds":  202.0,
+                         "spec_sha256":  "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+                         "why":  "clip ready"
+                     }
+                 ]
+}
