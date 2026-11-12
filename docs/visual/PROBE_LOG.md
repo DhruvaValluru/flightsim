@@ -3810,3 +3810,23 @@ grain at most; capture time not above round 51's (the march has fewer hashes). T
 check). Knobs (UNCALIBRATED): grain -> SHADOW_DITHER 1; clouds too grey -> SHADOW_DITHER 1
 and SHADOW_SOFTEN 0.5; walls still straight -> SideBulge 0.5 (world_beauty.CLOUD_SIDE_BULGE,
 C++ CloudSideBulge).
+
+**Rounds 58/59 (fa56ba4d): the term moved no pixel.** r58 #02 shade B - R +57, r59 with
+`-tiles-shade-neutral=off` pixel-identical (max diff 0) while render.json recorded amount 1 and 0,
+no NOT SET, the material and collection rebuilt at 4. The material is on the tiles
+(`material_route`), the node is in the Albedo path, and the scalar is set on the world's own
+collection instance: the weight was 0. The level test read the VERTEX normal, and Cesium draws
+the Google tiles (KHR_materials_unlit) with every vertex normal the ellipsoid's up (the
+commandlet's normal pass says so: "unlit, the ellipsoid's up vector, no surface normal"), so
+slope = 0 everywhere: every texel was "open water". (The same up normals are why #01 and #02
+share one shading pattern: the frame is the texture times the sun, whatever its direction.)
+Fix: the level test takes the triangle's face normal, cross(ddx, ddy) of the world position,
+computed before any branch; input `WorldPos` replaces `NormalWS`; M_FlightSimTilesBeauty 5;
+record `level_basis`. The +71 -> +57 between r51 and r58 is not this term (r59 = r58): the
+whole frame is about 0.6x darker in linear light in every channel, ratios unchanged (a level
+change, not a hue change), from the commits between 7966f0d1 and fa56ba4d (41bfb115 storm-look
+gate, 1e4dae5c cloud tiers, 434ba7e6 the A-4 paint: a brighter airframe moves the p90 meter).
+- Probe s02b: `ue_create_materials.py` (stamp 5) and the build, then #02 default and
+  `-tiles-shade-neutral=off`. Pass: the two frames differ; default shade B - R under +30
+  (a display-linear estimate on r58 gives about +5 to +10; the filmic toe may add some), the
+  A/B at r58's +57; the trees and the A-4 within a few levels.

@@ -3350,7 +3350,7 @@ WORLD_TILES_INPUTS = {
     # tiles-delight: runs first; its output is the other nodes' Albedo.
     "tiles_delight": ("Albedo", "AlbedoLow", "DelightAmount", "DelightRatioKnee", "DelightBlueGate"),
     # #02 blue (2026-11-11): runs right after the de-light; its output is Albedo.
-    "tiles_shade_neutral": ("Albedo", "NormalWS", "ShadeNeutralAmount"),
+    "tiles_shade_neutral": ("Albedo", "WorldPos", "ShadeNeutralAmount"),
 }
 #: tiles-delight: the material's own scalar parameters (not the collection's:
 #: the render does not set them), at tiles_delight.DELIGHT_MIP_BIAS and
@@ -3495,7 +3495,7 @@ def world_stamp(material, name):
 #: so no reference breaks and no redirect is registered (the storm lane's
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
-WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "4",   # 3: lane B terrain detail; 4: #02 shade neutral
+WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "5",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test
                      "M_FlightSimCloudLayers": "6", "M_FlightSimScatter": "1",  # clouds 6: round-52 shadow footprint, side bulge
                      "M_FlightSimDistantClouds": "4",   # distant 4: round-52 shared noise (ShapeLodBulge)
                      "M_FlightSimOceanBeauty": "4"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull)

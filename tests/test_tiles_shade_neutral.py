@@ -35,7 +35,7 @@ BAKED_SHADE = (0.045, 0.060, 0.127)
 GRANITE_SUNLIT = (0.42, 0.40, 0.38)
 FOREST = (0.05, 0.07, 0.03)
 WATER = (0.02, 0.04, 0.07)
-STEEP_Z = 0.3   # a cliff's normal.z
+STEEP_Z = 0.3   # a cliff's face normal |z|
 LEVEL_Z = 1.0
 
 
@@ -137,12 +137,15 @@ def test_the_hlsl_constants_and_input_order_are_the_twin():
                  "return Albedo;",
                  "float violet = saturate((a.b / rg - 1.0) * SHADE_BLUE_GATE);",
                  "float dark = saturate(1.0 - L / SHADE_LUMA_KNEE);",
+                 "float slope = 1.0 - saturate(faceUp);",
                  "float water = 1.0 - smoothstep(SHADE_LEVEL_LO, SHADE_LEVEL_HI, slope);",
                  "float w = violet * dark * (1.0 - water) * amount;",
                  "return lerp(a, float3(L, L, L), w);"):
         assert line in HLSL, line
     # the pass-through comes before any arithmetic on the input
     assert HLSL.index("return Albedo;") < HLSL.index("float3 a = max(Albedo, 0.0);")
+    # the derivatives come before the branch (no gradient inside flow control)
+    assert HLSL.index("ddx_fine(p)") < HLSL.index("[branch]")
     assert "static const" not in HLSL
 
 
@@ -153,7 +156,7 @@ def test_the_material_runs_it_between_the_delight_and_the_detail_and_restamps():
             < create.index("world_tiles_detail(material, lib, common, uv, factor)")
             < create.index("for row, (shader"))
     generations = _script_literal("WORLD_GENERATIONS")
-    assert int(generations["M_FlightSimTilesBeauty"]) >= 4 and int(generations["MPC_FlightSimWorld"]) >= 4
+    assert int(generations["M_FlightSimTilesBeauty"]) >= 5 and int(generations["MPC_FlightSimWorld"]) >= 4
 
 
 # -- the host ---------------------------------------------------------------------------
@@ -192,3 +195,18 @@ def test_the_host_reads_the_switch_and_records_it():
 def test_the_probe_is_written_down():
     section = PROBE_LOG[PROBE_LOG.index("## #02 blue: the tiles' baked sky-shade"):]
     assert "-tiles-shade-neutral=off" in section and "world_beauty.tiles.shade_neutral" in section
+
+
+def test_the_level_test_is_the_face_normal_never_the_vertex_normal():
+    """Rounds 58/59: Cesium draws the Google tiles (KHR_materials_unlit) with every
+    vertex normal the ellipsoid's up, so a vertex-normal level test called every
+    texel open water and the term moved no pixel (the A/B pixel-identical)."""
+    code = HLSL[HLSL.index("float3 p = WorldPos / 100.0;"):]
+    assert "NormalWS" not in code and "NormalWS" not in sn.SHADE_INPUTS
+    assert "float3 face = cross(ddx_fine(p), ddy_fine(p));" in code
+    assert "float faceUp = abs(face.z) / max(length(face), 1e-8);" in code
+    # what the old test did with Cesium's up normals: no weight anywhere
+    assert sn.shade_weight(np.array([BAKED_SHADE]), 1.0)[0] == 0.0
+    # a wall's face normal lets the baked shade through; the sign of the cross is free
+    assert sn.shade_weight(np.array([BAKED_SHADE]), -STEEP_Z)[0] == sn.shade_weight(np.array([BAKED_SHADE]), STEEP_Z)[0] > 0.7
+    assert sn.shade_record("clear")["level_basis"] == sn.LEVEL_BASIS
