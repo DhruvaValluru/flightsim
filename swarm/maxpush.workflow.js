@@ -2,9 +2,11 @@ export const meta = {
   name: 'max-push',
   description: 'Maximise visual hyper-realism per component for the Windows laptop (Intel iGPU, D3D11) on branch max-push',
   phases: [
+    { title: 'Research', detail: 'one researcher per item: sources, prior art, failure risks' },
     { title: 'Build', detail: 'one agent per component x scenario: best visuals the laptop can sustain' },
     { title: 'Verify', detail: 'three skeptics: licence, honesty, laptop budget' },
     { title: 'Repair', detail: 'one repair per rejected item' },
+    { title: 'Deepen', detail: 'args.rounds improve-then-verify rounds per verified item' },
     { title: 'Integrate', detail: 'one integrator per domain wires verified lanes into shared files, serially' },
   ],
 }
@@ -13,6 +15,7 @@ export const meta = {
 // Shards run as separate Workflow calls in the same turn; integration is done after all shards, see swarm/MAXPUSH.md.
 const items = args.items
 const hw = args.budget
+const ROUNDS = args.rounds === undefined ? 2 : args.rounds
 
 const LAPTOP = `THE TARGET MACHINE (the Windows test laptop): Intel integrated GPU, Direct3D 11 / Shader Model 5 only (no D3D12, no Lumen, no hardware ray tracing, no Nanite assumptions), shared memory, display 1536x960, RAM unmeasured and tight (one UE render process used 3.8 GB and background jobs were OOM-killed), C: has about 60 GB free, and it hit 12 "device lost" crashes on scene 9. Starting budget: ${JSON.stringify(hw)}.
 YOUR GOAL: the most photorealistic result this machine can SUSTAIN for your component, focused on what is seen in the rendered frames. Not the prettiest idea: the best frame that renders without device loss.
@@ -36,7 +39,27 @@ const BUILD = {
 }
 const VERDICT = { type: 'object', properties: { refuted: { type: 'boolean' }, reason: { type: 'string' } }, required: ['refuted', 'reason'] }
 
-const buildPrompt = (it) => `${LAPTOP}
+const RESEARCH = {
+  type: 'object',
+  properties: {
+    candidates: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, url: { type: 'string' }, licence: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'licence', 'why'] } },
+    existing_defects: { type: 'array', items: { type: 'string' } },
+    risks_on_igpu: { type: 'array', items: { type: 'string' } },
+    plan: { type: 'string' },
+  },
+  required: ['candidates', 'existing_defects', 'risks_on_igpu', 'plan'],
+}
+
+const researchPrompt = (it) => `${LAPTOP}
+
+${RULES}
+
+RESEARCH ONLY, write no code. Work item ${it.id}: ${it.component} for ${it.domain}, scenario "${it.scenario}" (${it.scenario_note}). Gate: ${it.gate}.
+Search the repo (core/, ue/Source, docs/, docs/visual, git log) for the real current defects, then the web for the best open techniques, papers, datasets and CC0/CC-BY assets. Rank candidates by realism gain per unit of iGPU cost. Name what will crash a D3D11 Intel iGPU.`
+
+const buildPrompt = (it, research) => `${LAPTOP}
+
+RESEARCH FROM THE PREVIOUS AGENT (use it, do not trust it blindly): ${JSON.stringify(research)}
 
 ${RULES}
 
@@ -62,7 +85,8 @@ Item ${it.id}, lane ${it.lane_dir}. Builder report: ${JSON.stringify(b)}. Read t
 
 const results = await pipeline(
   items,
-  (it) => agent(buildPrompt(it), { label: `build:${it.id}`, phase: 'Build', schema: BUILD }),
+  (it) => agent(researchPrompt(it), { label: `research:${it.id}`, phase: 'Research', schema: RESEARCH, effort: 'high' }),
+  (research, it) => agent(buildPrompt(it, research || {}), { label: `build:${it.id}`, phase: 'Build', schema: BUILD }),
   async (b, it) => {
     if (!b) return { it, b, ok: false, why: 'builder died' }
     const votes = (await parallel(['licence', 'honesty', 'budget'].map((lens) => () =>
@@ -78,7 +102,24 @@ const results = await pipeline(
   },
 )
 
-const done = results.filter(Boolean)
+const deepened = await pipeline(
+  results.filter(Boolean),
+  async (r) => {
+    let cur = r
+    for (let k = 1; k <= ROUNDS && cur.ok && cur.b; k++) {
+      const next = await agent(`${LAPTOP}\n\n${RULES}\n\nDEEPEN round ${k} of ${ROUNDS} for ${cur.it.id} in ${cur.it.lane_dir}. Current report: ${JSON.stringify(cur.b)}.\nRead the lane. Critique it against the gate and the laptop budget, find the single biggest remaining realism gap, and close it: a better bake, a sharper tier ladder, a missing scenario case, a stronger test. Do not weaken earlier tiers. Report in the same shape.`,
+        { label: `deepen${k}:${cur.it.id}`, phase: 'Deepen', schema: BUILD })
+      if (!next) break
+      const checks = (await parallel(['honesty', 'budget'].map((lens) => () =>
+        agent(verifyPrompt(cur.it, next, lens), { label: `deepen-verify${k}:${lens}:${cur.it.id}`, phase: 'Deepen', schema: VERDICT, effort: 'low' })))).filter(Boolean)
+      if (checks.every((c) => !c.refuted)) cur = { ...cur, b: next, deepened: k }
+      else break
+    }
+    return cur
+  },
+)
+
+const done = deepened.filter(Boolean)
 const passed = done.filter((r) => r.ok)
 log(`${args.wave}: ${passed.length} verified, ${done.length - passed.length} rejected or failed, ${items.length - done.length} dropped`)
 return {

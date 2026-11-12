@@ -23,3 +23,19 @@ a domain integrator then wires verified lanes into the shared files, one
 domain at a time, and commits.
 
 Visual domains only: flight dynamics and audio are left out on purpose.
+
+## Maximum load
+
+Agents per item: 1 research + 1 build + 3 verify + (0-1 repair) + 2 rounds x
+(1 improve + 2 verify) = 11 to 12. 395 items is about 4,400 agents in total.
+`args.rounds` sets the deepen rounds (default 2; use 4 for roughly 6,200).
+
+Concurrency is 8 per workflow on this Mac, so 8 shards run about 64 at once
+and 16 shards about 128. A run is capped at 1,000 agents, so keep each shard
+at 80 items or fewer (80 x 12 = 960 at rounds=2): 395 items = 5 shards per
+wave of 400... use `--wave-size 400 --shards 5` for one wave, or 10 shards of
+40 for a wider, shorter run.
+
+The ceiling is your plan's rate limit, not the Mac. If you see 429s, drop
+shards. To make the run last until credits are gone, add a token target to
+your message (for example "+2M") and the `budget` hook lets loops keep going.
