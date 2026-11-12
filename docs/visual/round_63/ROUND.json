@@ -1,0 +1,27 @@
+﻿{
+    "round":  63,
+    "commit":  "a9af8144",
+    "full":  false,
+    "scenes":  [
+                   2
+               ],
+    "switches":  "-tiles-shade-neutral=force",
+    "prep":  [
+                 "build",
+                 "materials"
+             ],
+    "seconds":  {
+                    "build":  35.1,
+                    "materials":  28.2,
+                    "scenes":  245.7
+                },
+    "outcomes":  [
+                     {
+                         "number":  2,
+                         "outcome":  "done",
+                         "seconds":  242.9,
+                         "spec_sha256":  "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+                         "why":  "clip ready"
+                     }
+                 ]
+}
