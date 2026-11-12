@@ -179,12 +179,15 @@ struct FWorldCloud
 	// billow fade to their means (0.5985, 0.5) and are skipped at 1, so the far
 	// field is smoother and cheaper and keeps the same mean and nearly the same
 	// spread (the cut, hence the cover, stays the stated one).
-	float ShapeLod(float3 p, float far, uint seed)
+	// Round 52: bulge (cells) adds to the warp's 0.45, so a height-varying
+	// bulge moves the cells' outlines with altitude along the same warp vectors
+	// (no hash added); 0 is round 51's ShapeLod exactly.
+	float ShapeLodBulge(float3 p, float far, float bulge, uint seed)
 	{
 		float wx = Perlin2(p.x * 0.6 + 1.7, p.y * 0.6 + 9.2, seed + 601u);
 		float wy = Perlin2(p.x * 0.6 + 13.1, p.y * 0.6 + 2.3, seed + 613u);
-		float qx = p.x + 0.45 * wx;
-		float qy = p.y + 0.45 * wy;
+		float qx = p.x + (0.45 + bulge) * wx;
+		float qy = p.y + (0.45 + bulge) * wy;
 		float cluster = 0.5 + 0.5 * (0.667 * Perlin2(p.x * 0.17 + 3.1, p.y * 0.17 + 7.9, seed + 503u)
 			+ 0.333 * Perlin2(p.x * 0.35 + 11.3, p.y * 0.35 + 5.1, seed + 557u));
 		float big = SmoothWorley2(qx * 0.42 + 2.9, qy * 0.42 + 8.3, seed + 401u);
@@ -200,6 +203,10 @@ struct FWorldCloud
 		}
 		float cells = 0.55 * big + 0.3 * mid + 0.15 * small;
 		return 0.42 * cluster + 0.5 * cells + 0.08 * billow;
+	}
+	float ShapeLod(float3 p, float far, uint seed)
+	{
+		return ShapeLodBulge(p, far, 0.0, seed);
 	}
 	float Shape(float3 p, uint seed)
 	{

@@ -398,7 +398,8 @@ def test_the_cloud_material_parameters_are_the_ones_the_cpp_sets():
                                  CLOUDS_CPP))
     assert set_scalars == set(scalars)
     assert set_vectors == set(vectors)
-    assert set(inputs) == set(scalars) | set(vectors) | {"WorldPos", "NormAlt", "CameraPos"}   # CameraPos: round 10 far LOD
+    # CameraPos: round 10 far LOD; ShadowDist: round 52 (the engine's shadow-sample distance)
+    assert set(inputs) == set(scalars) | set(vectors) | {"WorldPos", "NormAlt", "CameraPos", "ShadowDist"}
     hlsl = (SHADERS / "cloud_layers.hlsl").read_text(encoding="utf-8")
     for name in inputs:
         assert re.search(rf"//\s+{name}\s", hlsl), name

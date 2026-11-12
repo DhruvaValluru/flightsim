@@ -602,6 +602,47 @@ CLOUD_SHADOW_MAX_KM = 4.0
 #: ef361bd6's (a8c964fc's rise in SAMPLES deadlocked the Intel iGPU).
 #: UNCALIBRATED: probe #13 / #03 (capture time against round 6's).
 CLOUD_SHADOW_CONSTRAINED_KM = 6.0
+#: Round 52 (2026-11-11, round 51's #04, #12, #13: cumulus bases and sides
+#: sliced into flat horizontal tiers). The engine's shadow march is NOT
+#: jittered (VolumetricCloud.usf ShadowJitterNorm = 0.5, "Disabled jittering"):
+#: 10 quadratic samples over 6 km on the constrained row are segments of 60 m to
+#: 1.1 km, each opaque at cloud extinction (optical depth 3 to 57), so the sun's
+#: transmittance is a product of on/off steps at FIXED offsets towards the sun;
+#: on the weather field (a plane pattern cut by a height-only threshold) those
+#: steps are iso-altitude lines, identical in every capture (nothing for TSR to
+#: average). cloud_layers.hlsl now treats a SHADOW sample (the engine's
+#: ShadowSampleDistance > 0) as its segment's footprint: dithered over it by a
+#: hash of its position (which moves with the view ray's blue-noise start), its
+#: soft edge widened by it (after the cut: the drawn cover is unchanged), the
+#: erosion noise read at its mean once the footprint is wider than the noise.
+#: No sample is added (cheaper, if anything). The footprint is the quadratic
+#: march's segment length, 2 sqrt(L d) / N for a sample d along a march of N
+#: samples over L: the material's ShadowFootprintKm is 2 sqrt(L) / N
+#: (cloud_shadow_footprint_per_sqrt_km); 0 is round 51's march exactly.
+#: ``-look-cloud-tiers=off`` (command line or FLIGHTSIM_RENDER_SWITCHES) is the
+#: A/B for both halves (this and CLOUD_SIDE_BULGE); any other word than on/off
+#: refuses world_beauty.clouds.
+#: UNCALIBRATED: probe #04, #12, #13 (the dither and the widening).
+CLOUD_TIERS_SWITCH = "-look-cloud-tiers"
+CLOUD_SHADOW_DITHER = 2.0
+CLOUD_SHADOW_SOFTEN = 1.0
+#: The erosion noise's mean (cloud_detail over the lattice; tests re-measure it):
+#: a shadow sample whose footprint is wider than the noise reads this instead.
+CLOUD_DETAIL_MEAN = 0.479
+#: The second half of the tiers: the weather field is a plane pattern, so a
+#: cell's outline was the same at every height (vertical walls). The warp grows
+#: by CLOUD_SIDE_BULGE x sin(CLOUD_BULGE_TURN (h - 0.5)) cells with height (0 at
+#: mid-layer, the distant sheet's slice), so the sides lean and bulge; no hash
+#: added. 0 with the switch off. UNCALIBRATED.
+CLOUD_SIDE_BULGE = 0.35
+CLOUD_BULGE_TURN = 3.0
+
+
+def cloud_side_bulge_for(tiers_on: bool) -> float:
+    """The material's SideBulge (C++ CloudSideBulgeFor): 0 with the switch off."""
+    return CLOUD_SIDE_BULGE if tiers_on else 0.0
+
+
 #: The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 #: stated layer) is thinned to the shape's depth; 0 keeps the layer as built.
 CLOUD_MAX_THICKNESS_M: Dict[str, float] = {"cumulus": 2000.0, "stratocumulus": 0.0,
@@ -626,6 +667,15 @@ def cloud_march(integrated: bool) -> Dict[str, float]:
 def cloud_shadow_tracing_km_for(constrained: bool, thickness_m: float) -> float:
     """The shadow march for the GPU class (constrained: a fixed CLOUD_SHADOW_CONSTRAINED_KM)."""
     return CLOUD_SHADOW_CONSTRAINED_KM if constrained else cloud_shadow_tracing_km(thickness_m)
+
+
+def cloud_shadow_footprint_per_sqrt_km(shadow_km: float, shadow_samples: float, filter_on: bool = True) -> float:
+    """The material's ShadowFootprintKm: a quadratic shadow march of N samples
+    over L km has a segment of about 2 sqrt(L d) / N at distance d, i.e.
+    (2 sqrt(L) / N) x sqrt(d); 0 with the filter off (round 51's march)."""
+    if not filter_on or shadow_samples <= 0.0 or shadow_km <= 0.0:
+        return 0.0
+    return 2.0 * math.sqrt(shadow_km) / shadow_samples
 
 
 def cloud_shadow_tracing_km(thickness_m: float) -> float:
@@ -1007,7 +1057,7 @@ CLOUD_SMALL_CELL_MEAN = 0.5985
 CLOUD_BILLOW_MEAN = 0.5
 
 
-def cloud_shape(x: float, y: float, z: float, seed: int, far: float = 0.0) -> float:
+def cloud_shape(x: float, y: float, z: float, seed: int, far: float = 0.0, bulge: float = 0.0) -> float:
     """cloud_layers.hlsl FWorldCloud::ShapeLod (Shape at far = 0), number for
     number (double here). Round 7's Nubis-style 2D weather field, reworked in
     round 10 after #13's cubist rows: the plane is domain-warped (0.45 cell);
@@ -1016,10 +1066,13 @@ def cloud_shape(x: float, y: float, z: float, seed: int, far: float = 0.0) -> fl
     and 0.46x the cell size, the two smaller lattices rotated so no rows line
     up, weighted to the large cells; one 3D billow octave. ``far`` (0..1) fades
     the small cells and the billow to their means: the far field is smoother,
-    cheaper and keeps the mean."""
+    cheaper and keeps the mean. Round 52: ``bulge`` (cells) adds to the warp's
+    0.45, so a height-varying bulge (cloud_side_bulge) moves the cells' outlines
+    with altitude along the same warp vectors (FWorldCloud::ShapeLodBulge; 0 is
+    round 51's ShapeLod exactly)."""
     wx = _perlin2(x * 0.6 + 1.7, y * 0.6 + 9.2, (seed + 601) & _M32)
     wy = _perlin2(x * 0.6 + 13.1, y * 0.6 + 2.3, (seed + 613) & _M32)
-    qx, qy = x + 0.45 * wx, y + 0.45 * wy
+    qx, qy = x + (0.45 + bulge) * wx, y + (0.45 + bulge) * wy
     cluster = 0.5 + 0.5 * (0.667 * _perlin2(x * 0.17 + 3.1, y * 0.17 + 7.9, (seed + 503) & _M32)
                            + 0.333 * _perlin2(x * 0.35 + 11.3, y * 0.35 + 5.1, (seed + 557) & _M32))
     big = _smooth_worley2(qx * 0.42 + 2.9, qy * 0.42 + 8.3, (seed + 401) & _M32)
@@ -1049,28 +1102,64 @@ CLOUD_LOD_FAR_KM = 20.0
 CLOUD_FAR_SOFTEN = 1.0
 
 
+def cloud_side_bulge(side_bulge: float, norm_alt: float) -> float:
+    """cloud_layers.hlsl's round-52 bulge (cells) at a height: SideBulge x
+    sin(CLOUD_BULGE_TURN x (h - 0.5)); 0 at mid-layer (the distant sheet's
+    slice) and with SideBulge 0 (round 51)."""
+    return side_bulge * math.sin(CLOUD_BULGE_TURN * (norm_alt - 0.5))
+
+
 def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float, row: Dict[str, float],
-                  distance_km: float = 0.0) -> float:
+                  distance_km: float = 0.0, footprint_km: float = 0.0,
+                  dither: Tuple[float, float, float] = (0.0, 0.0, 0.0), thickness_km: float = 1.0,
+                  side_bulge: float = 0.0) -> float:
     """cloud_layers.hlsl's density (before x extinction), the Python replica
     the coverage test samples: the quantile cut on the shape (started early by
     the erosion's share, raised over the top's rounding), the soft edge, the
-    erosion (only inside the cloud, as the shader's branch), the base fade."""
+    erosion (only inside the cloud, as the shader's branch), the base fade.
+    Round 52: a shadow sample's footprint_km (0 for a view sample) dithers
+    the point by ``dither`` (each in -0.5..0.5, the shader's hash) times
+    CLOUD_SHADOW_DITHER x footprint, widens the soft edge (after the cut) and
+    reads the erosion noise at its mean once wider than the noise."""
     h = min(max(norm_alt, 0.0), 1.0)
+    if footprint_km > 0.0:
+        d = [u * CLOUD_SHADOW_DITHER * footprint_km for u in dither]
+        km = (km[0] + d[0], km[1] + d[1], km[2] + d[2])
+        h = min(max(norm_alt + d[2] / max(thickness_km, 1e-3), 0.0), 1.0)
     base = _smoothstep(0.0, max(row["bottom_softness"], 1e-3), h)
     top = 1.0 - _smoothstep(1.0 - max(row["top_rounding"], 1e-3), 1.0, h)
     scale = max(row["shape_scale_km"], 1e-3)
     far = _smoothstep(CLOUD_LOD_NEAR_KM, CLOUD_LOD_FAR_KM, distance_km)
-    shape = cloud_shape(km[0] / scale, km[1] / scale, km[2] * 2.0 / scale, 7, far)
+    shape = cloud_shape(km[0] / scale, km[1] / scale, km[2] * 2.0 / scale, 7, far,
+                        cloud_side_bulge(side_bulge, h))
     soft = CLOUD_FBM_SIGMA / max(row["coverage_contrast"], 1e-3) * (1.0 + CLOUD_FAR_SOFTEN * far)
     thr = coverage_threshold(cover) - CLOUD_EROSION_CUT_SHARE * row["detail_erosion"] * soft
     cut = _lerp(CLOUD_FBM_MEAN + CLOUD_TOP_CUT_SIGMAS * CLOUD_FBM_SIGMA, thr, top)
+    soft += CLOUD_SHADOW_SOFTEN * max(footprint_km, 0.0) / scale
     density = _remap(shape, cut, cut + soft)
     if density > 0.0 and far < 1.0:
         dscale = max(row["detail_scale_km"], 1e-3)
-        detail = cloud_detail(km[0] / dscale, km[1] / dscale, km[2] / dscale, 13)
+        detail = CLOUD_DETAIL_MEAN
+        if max(footprint_km, 0.0) < dscale:
+            detail = cloud_detail(km[0] / dscale, km[1] / dscale, km[2] / dscale, 13)
         wisp = _lerp(detail, 1.0 - detail, min(max(h / CLOUD_WISP_HEIGHT, 0.0), 1.0))
         density = _remap(density, row["detail_erosion"] * (1.0 - far) * wisp, 1.0)
     return density * base
+
+
+#: cloud_layers.hlsl's seed for a shadow sample's dither hash (round 52).
+CLOUD_SHADOW_DITHER_SEED = 977
+
+
+def cloud_shadow_dither(world_pos_cm: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    """cloud_layers.hlsl's round-52 dither of a shadow sample, each in -0.5..0.5:
+    Hash3 of the sample's absolute position's float32 bit patterns (asint), ten
+    bits a component. The position moves with the view ray's blue-noise start,
+    so the dither changes per pixel and per capture."""
+    import struct
+    bits = [struct.unpack("<i", struct.pack("<f", float(c)))[0] for c in world_pos_cm]
+    h = _hash3(bits[0], bits[1], bits[2], CLOUD_SHADOW_DITHER_SEED)
+    return tuple(float((h >> shift) & 1023) / 1023.0 - 0.5 for shift in (0, 10, 20))
 
 
 def cloud_seed_offset_km(seed: int) -> Tuple[float, float, float]:

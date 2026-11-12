@@ -558,6 +558,14 @@ rp_check "clouds-sky: view sample cap 768" "Renderer/Private/VolumetricCloudRend
 rp_check "clouds-sky: shadow sample cap 80" "Renderer/Private/VolumetricCloudRendering.cpp" "TEXT(\"r.VolumetricCloud.Shadow.ViewRaySampleMaxCount\"), 80,"
 rp_check "clouds-sky: view march blue-noise jitter" "../../Shaders/Private/VolumetricCloud.usf" "t = TMin + BlueNoiseScalar(FullResPixelCoord, View.StateFrameIndexMod8) * StepT;"
 rp_check "clouds-sky: shadow march unjittered" "../../Shaders/Private/VolumetricCloud.usf" "const float ShadowJitterNorm = 0.5f; // InterleavedGradientNoise"
+# Round 52 (round 51's cloud tiers): M_FlightSimCloudLayers reads the engine's
+# shadow-sample distance (Cloud Sample Attributes) and filters a shadow sample
+# over its quadratic segment. Read in the 5.7 source on 2026-11-11.
+rp_check "round 52: Cloud Sample Attributes ShadowSampleDistance pin" "Engine/Private/Materials/MaterialExpressions.cpp" "Outputs.Add(FExpressionOutput(TEXT(\"ShadowSampleDistance\")));"
+rp_check "round 52: the sample carries its shadow distance" "../../Shaders/Private/VolumetricCloudMaterialPixelCommon.ush" "MaterialParameters.ShadowSampleDistance = ShadowSampleDistance;"
+rp_check "round 52: a shadow sample passes its distance" "../../Shaders/Private/VolumetricCloud.usf" "ResolvedView, CloudLayerParams, ShadowSampleDistance, SPACE_SKIPPING_SLICE_DEPTH_OFF);"
+rp_check "round 52: the shadow march is quadratic" "../../Shaders/Private/VolumetricCloud.usf" "float CurrentNormT = ShadowT * ShadowT;"
+rp_check "round 52: the shadow march stops leaving the layer" "../../Shaders/Private/VolumetricCloud.usf" "break; // Ignore remaining samples since we have just traveled out of the cloud layer."
 # -- clouds-sky round 2 -- end -------------------------------------------------
 # -- visual round 5, lane L3 (2026-11-10): the distant cloud sheet, the sky HDRI probe --
 # FlightSimClouds.cpp ApplyDistantClouds / ApplySkyHdri and the material the
