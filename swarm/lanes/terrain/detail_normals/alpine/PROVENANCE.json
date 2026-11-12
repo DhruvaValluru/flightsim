@@ -1,0 +1,76 @@
+{
+ "lane": "terrain.detail_normals.alpine",
+ "label": "visual-only",
+ "vendored": [],
+ "vendored_note": "Nothing was downloaded, vendored or executed. The maps are seeded Fourier synthesis written in this lane; no third-party code or asset ships.",
+ "generated": [
+  {
+   "file": "out/alpine_detail_rock_t0.dds",
+   "sha256": "78622b0da7ff52b91c6129379a2cf467d0ed94ad99b8d1ab4b7ee3f507a96b5c",
+   "generator": "bake_alpine_detail_normals.py (seed 20261112, tier 0)",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "out/alpine_detail_snow_t0.dds",
+   "sha256": "b4fd8644388812dd06d3a79275063ae5cdb59733b27117bc3f0ace9c530a93b7",
+   "generator": "bake_alpine_detail_normals.py (seed 20261112, tier 0)",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "out/alpine_detail_t0.json",
+   "sha256": "19bbb89240bc4aa625bf0d6afe347b0a74893c4c70e27bf18438ea6dea6bedc8",
+   "generator": "bake_alpine_detail_normals.py (seed 20261112, tier 0)",
+   "licence": "project (generated numbers)"
+  }
+ ],
+ "sources": [
+  {
+   "name": "Microsoft Direct3D 11 block compression (BC4/BC5) and the DDS / DDS_HEADER_DXT10 file layout",
+   "licence": "published file-format specification (facts)",
+   "used_for": "bc5_encode, bc5_decode and dds_bc5 in bake_alpine_detail_normals.py",
+   "note": "typed from memory of the specification, not fetched in this session; the encoder is checked against the lane's own decoder only. Whether the pinned UE build imports a DX10-header BC5 DDS unchanged is UNMEASURED (INTEGRATION.md step 1 has the PNG fallback)."
+  },
+  {
+   "name": "Toksvig 2005, Mipmapping Normal Maps (journal of graphics tools 10(3))",
+   "licence": "published formula (facts)",
+   "used_for": "mip_normal_length in the JSON, which tier 3 turns into roughness",
+   "note": "typed from memory, not fetched"
+  },
+  {
+   "name": "core/scenario/camera.py (this repository)",
+   "licence": "project",
+   "used_for": "the 54.4 deg horizontal field of view behind every fade distance"
+  }
+ ],
+ "considered_not_adopted": [
+  {
+   "name": "runevision Advanced Terrain Erosion Filter",
+   "url": "https://blog.runevision.com/2026/03/fast-and-gorgeous-erosion-filter.html",
+   "reason": "licence (MPL-2.0) is stated only in research notes and was not read; not fetched to save budget. Would replace synth_height for the rock layer with gullies."
+  },
+  {
+   "name": "GEDTM30 v1.2",
+   "url": "https://codeberg.org/openlandmap/GEDTM30",
+   "reason": "30 m posts are coarser than the tiles' own mesh; useful for a macro slope/cavity mask (tier 2 snow mask), not for detail normals. LICENSE not read; not fetched."
+  },
+  {
+   "name": "MultiScaleErosion",
+   "url": "https://github.com/H-Schott/MultiScaleErosion",
+   "reason": "needs OpenGL 4.3 compute, which macOS does not have."
+  },
+  {
+   "name": "USGS 3DEP lidar",
+   "url": "https://registry.opendata.aws/usgs-lidar/",
+   "reason": "US only; the scenario is in Switzerland."
+  },
+  {
+   "name": "Olbedo",
+   "url": "https://github.com/GDAOSU/Olbedo",
+   "reason": "de-lighting, a different item; model weights' licences unverified or rejected."
+  }
+ ],
+ "unverified": [
+  "snowline_m 3000 in INTEGRATION.md (tier 2 mask) is a round figure for the Zermatt area typed from memory; no dataset was read",
+  "Google's Map Tiles terms on shading their tiles with an added normal were not checked; owner check"
+ ]
+}

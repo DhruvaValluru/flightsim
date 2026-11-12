@@ -1,0 +1,164 @@
+{
+ "current_opaque_canopy_srgb_luma_no_reflection": 40.2,
+ "env_note": "Analytic gradient sky + Fresnel sea, visual-only. Replace with the sky lane's baked LUT when one exists; the integrator must keep SHARED in step with that lane or the canopy reflects a different sky than the one drawn behind it.",
+ "files": {
+  "T_GlassEnv_128.png": {
+   "bytes": 2517,
+   "compression": "TC_EditorIcon/UserInterface2D (BGRA8), clamp V, wrap U",
+   "sha256": "5e3fca4dd9fa2d292d015c5f105f549218452430f08af46ab8aa91d93c71dcbf",
+   "srgb": true
+  },
+  "T_GlassEnv_256.png": {
+   "bytes": 6373,
+   "compression": "TC_EditorIcon/UserInterface2D (BGRA8), clamp V, wrap U",
+   "sha256": "49224f65f2cdb41c99227e8a08c82b8d01d042875bbc7a99eb792476c48f443e",
+   "srgb": true
+  },
+  "T_GlassEnv_64.png": {
+   "bytes": 1065,
+   "compression": "TC_EditorIcon/UserInterface2D (BGRA8), clamp V, wrap U",
+   "sha256": "0f50b3a6763b7e9dc8ec7426842a5253810d83587a89926530ffc04f77a105a4",
+   "srgb": true
+  },
+  "T_GlassFilm_M_1024.png": {
+   "bytes": 719477,
+   "compression": "TC_Masks (BC1 linear)",
+   "sha256": "4c0dc9dbcb2e21712193b258affd5dc539c9c2975e558a3cc8fcd5f57aa07835",
+   "srgb": false
+  },
+  "T_GlassFilm_M_256.png": {
+   "bytes": 94322,
+   "compression": "TC_Masks (BC1 linear)",
+   "sha256": "c5f30f3260433dccf45a5752978df6b9020701360f0be1ee314c7462fcd20b15",
+   "srgb": false
+  },
+  "T_GlassFilm_M_512.png": {
+   "bytes": 262407,
+   "compression": "TC_Masks (BC1 linear)",
+   "sha256": "9e9a595fca8beabd4c426c979a2826dec2137f26d559b097b0c1b50a33f4d30b",
+   "srgb": false
+  },
+  "T_GlassFresnel_LUT.png": {
+   "bytes": 174,
+   "compression": "TC_VectorDisplacementmap (BGRA8, no mips)",
+   "sha256": "f071cb3eb389e4a74c91e73d72c37bacd766d2eb20b03399952ef2d95ea7ef69",
+   "srgb": false
+  },
+  "T_GlassMicro_N_1024.png": {
+   "bytes": 692744,
+   "compression": "TC_Normalmap (BC5), flip green OFF",
+   "sha256": "2de42dfb9151ad01276276b4dcc4a2f7bfcc181ed0c339a9aec161b40a301ac8",
+   "srgb": false
+  },
+  "T_GlassMicro_N_256.png": {
+   "bytes": 85442,
+   "compression": "TC_Normalmap (BC5), flip green OFF",
+   "sha256": "b96b46e5ba8f4b6279bba2932ae0112cf1bcb5c578eb2fd097c099452214d0a1",
+   "srgb": false
+  },
+  "T_GlassMicro_N_512.png": {
+   "bytes": 254195,
+   "compression": "TC_Normalmap (BC5), flip green OFF",
+   "sha256": "b4bb3f85bc77f2204bb921b71d2dd30988353740e3bcb5ae0eafa21f3da15488",
+   "srgb": false
+  }
+ },
+ "glass": {
+  "albedo_range": [
+   0.015,
+   0.9
+  ],
+  "ior": 1.49,
+  "micro_normal_strength": {
+   "1": 0.35,
+   "2": 0.5,
+   "3": 0.5
+  },
+  "micro_tile_m": 0.35,
+  "roughness_add_max": 0.1,
+  "roughness_base": 0.02,
+  "salt_film_albedo": 0.75,
+  "salt_film_max_coverage": 0.12,
+  "thin_transmittance": [
+   0.8,
+   0.84,
+   0.82
+  ],
+  "tint_linear": [
+   0.018,
+   0.022,
+   0.026
+  ]
+ },
+ "measured": false,
+ "predicted_opaque_canopy_srgb_luma_by_cos": {
+  "0.10": 125.6,
+  "0.20": 105.6,
+  "0.40": 76.8,
+  "0.70": 58.9,
+  "1.00": 56.2
+ },
+ "seed": 20261112,
+ "shared_params": {
+  "colour_temperature_k": 4300,
+  "env_encode_scale": 1.5,
+  "haze_horizon_linear_rgb": [
+   0.74,
+   0.7,
+   0.62
+  ],
+  "haze_scale_height_rad": 0.22,
+  "scenario": "coastal",
+  "sea_albedo": 0.06,
+  "sea_tint_linear_rgb": [
+   0.035,
+   0.065,
+   0.075
+  ],
+  "sky_zenith_linear_rgb": [
+   0.1,
+   0.19,
+   0.42
+  ],
+  "sun_azimuth_rel_deg": 0.0,
+  "sun_elevation_deg": 12.0,
+  "sun_glow_linear_rgb": [
+   0.55,
+   0.38,
+   0.2
+  ],
+  "sun_glow_width_rad": 0.38,
+  "water_ior": 1.333
+ },
+ "tiers": {
+  "0": {
+   "blend": "opaque",
+   "env_w": 64,
+   "est_vram_mb": 0.011,
+   "micro": 0,
+   "summary": "Opaque M_AircraftGlass + Fresnel LUT + 64x32 baked env strip; no translucency, no SSR, no micro normal"
+  },
+  "1": {
+   "blend": "opaque",
+   "env_w": 128,
+   "est_vram_mb": 0.167,
+   "micro": 256,
+   "summary": "Tier 0 + 256 tiled micro-scratch normal and salt-film mask, 128x64 env"
+  },
+  "2": {
+   "blend": "thin_translucent",
+   "env_w": 128,
+   "est_vram_mb": 0.542,
+   "micro": 512,
+   "summary": "Thin Translucent MI_<slot>_thin (unlabelled frames) + LUT + env + 512 micro; SSR off"
+  },
+  "3": {
+   "blend": "thin_translucent",
+   "env_w": 256,
+   "est_vram_mb": 2.167,
+   "micro": 1024,
+   "summary": "Tier 2 at 1024 micro and 256x128 env, SSR on for the canopy"
+  }
+ },
+ "visual_only": true
+}

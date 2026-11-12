@@ -1,0 +1,25 @@
+{
+ "lane": "hardware_perf.stress_ladder.alpine",
+ "label": "measurement harness; every VRAM figure is an ESTIMATE and no tier is measured",
+ "vendored": [],
+ "vendored_note": "Nothing was downloaded or vendored. None of the researched candidates measures frame time, VRAM or thermals; the sampler is typeperf, which ships with Windows. The ICBC BC1 encoder (MIT) is the candidate that would shrink the tile-cache term and is left to its own lane.",
+ "generated": [
+  {
+   "file": "alpine_ladder.json",
+   "sha256": "981e6a30242e200556877a53f99d9fe993e55facf6eb1cedeb4a01d6bd2df2c6",
+   "generator": "build_ladder.py",
+   "licence": "project (generated numbers)"
+  }
+ ],
+ "references": [
+  {
+   "name": "Microsoft: TDR registry keys (TdrDelay default 2 s)",
+   "url": "https://learn.microsoft.com/en-us/windows-hardware/drivers/display/tdr-registry-keys",
+   "use": "the 1000 ms p95 frame limit is half the default GPU timeout; cited from memory, not fetched"
+  },
+  {
+   "name": "core/render/hardware_budget.py _integrated_budget",
+   "use": "the unmeasured starting budget (491 MB, 1280 px) tier 0 is sized under"
+  }
+ ]
+}

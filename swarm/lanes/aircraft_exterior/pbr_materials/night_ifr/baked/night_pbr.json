@@ -1,0 +1,67 @@
+{
+  "schema": "flightsim-swarm-night-pbr/1",
+  "scenario": "night_ifr",
+  "item": "aircraft_exterior.pbr_materials.night_ifr",
+  "label": "visual-only: no label, FDM or sensing record reads these textures",
+  "calibration": "UNCALIBRATED: set by the pixel gate on the Windows laptop",
+  "seed": 20261112,
+  "numpy": "2.0.2",
+  "period_cm": 360.0,
+  "panel_pitch_cm": [
+    120.0,
+    90.0
+  ],
+  "channels": {
+    "orm": {
+      "R": "ambient occlusion (AO pin only, never base colour)",
+      "G": "roughness, baked about 0.5",
+      "B": "albedo gain in [0.65, 1]"
+    },
+    "normal": "tangent space, +Z out, X along the airflow"
+  },
+  "material": {
+    "albedo_min_linear": 0.023,
+    "albedo_max_linear": 0.9,
+    "albedo_min_srgb8": 42,
+    "albedo_max_srgb8": 243,
+    "min_albedo_gain": 0.65,
+    "ao_min": 0.55,
+    "baked_base_roughness": 0.5,
+    "roughness_expression": "saturate(G + (Roughness - baked_base_roughness))",
+    "base_colour_expression": "clamp(Base * lerp(1, B, GrimeScale), albedo_min, albedo_max)",
+    "specular": 0.5,
+    "metallic_paint": 0.0
+  },
+  "tiers": [
+    {
+      "tier": 0,
+      "size": 512,
+      "texel_cm": 0.703125,
+      "rivets_baked": false,
+      "mips": 10,
+      "est_vram_mb": 0.17,
+      "vram_is": "ESTIMATE, not measured",
+      "normal_map": false,
+      "projections": 2,
+      "clear_coat": false,
+      "procedural_wear": false,
+      "summary": "512 ORM only (BC1), two planar projections picked by the vertex normal, Default Lit, no clear coat, no per-pixel procedural wear/panel maths",
+      "textures": {
+        "orm": {
+          "file": "T_AcNight_ORM_512.dds",
+          "sha256": "840b6c7ec43f745f81a59ebf88892f2be5d1eb776128010fe53945d5f99049e5",
+          "bytes": 1398228,
+          "import_compression": "BC1 (DXT1), sRGB OFF, Masks",
+          "mip_gen": "LeaveExistingMips"
+        }
+      },
+      "stats": {
+        "ao_min": 0.55,
+        "roughness_mip0_mean": 0.5312231948750996,
+        "roughness_last_mip": 0.5403352534406873,
+        "gain_min": 0.65,
+        "normal_z_min": 0.9895014537755898
+      }
+    }
+  ]
+}

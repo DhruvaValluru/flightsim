@@ -1,0 +1,56 @@
+{
+ "lane": "lighting_exposure.physical_light_units.alpine",
+ "label": "visual-only",
+ "vendored": [],
+ "vendored_note": "Nothing was downloaded or vendored. The bake imports the repo's own Bird & Hulstrom model and uses published constants; no third-party code or asset ships.",
+ "generated": [
+  {
+   "file": "alpine_plu.json",
+   "sha256": "4838f8096507a24038be91f51278305187e9d86655ce006bc57fee2ce9bacf73",
+   "generator": "bake_alpine_plu.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_plu_curve.csv",
+   "sha256": "100200b54a95c3e3f82a88748bbb57e79d2873159f0b64edd105841ac3bf6186",
+   "generator": "bake_alpine_plu.py",
+   "licence": "project (generated numbers)"
+  }
+ ],
+ "sources": [
+  {
+   "name": "Bird & Hulstrom 1981, A Simplified Clear Sky Model for Direct and Diffuse Insolation on Horizontal Surfaces (SERI/TR-642-761), as implemented in core/scenario/solar.py",
+   "licence": "US government technical report (public domain); repo code",
+   "used_for": "sun direct normal illuminance at altitude"
+  },
+  {
+   "name": "IES RP-21 clear-sky horizontal diffuse illuminance, constants as stated in core/scene/beauty_look.py IES_CLEAR_DIFFUSE_KLX",
+   "licence": "published constants (facts); repo code",
+   "used_for": "sky diffuse illuminance, scaled by p/p0 (this lane's MODEL step, UNCALIBRATED)"
+  },
+  {
+   "name": "ISO 2720:1974 incident-light exposure meter calibration, C = 250",
+   "licence": "published constant (fact)",
+   "used_for": "EV100 from horizontal illuminance"
+  },
+  {
+   "name": "Lagarde & de Rousiers 2014, Moving Frostbite to Physically Based Rendering (SIGGRAPH course notes), saturation-based exposure Lmax = 1.2 * 2^EV100",
+   "licence": "published formula (fact)",
+   "used_for": "scene-linear value of a luminance at a manual EV100"
+  },
+  {
+   "name": "Wiscombe & Warren 1980, A Model for the Spectral Albedo of Snow. I: Pure Snow, J. Atmos. Sci. 37, 2712-2733",
+   "licence": "published range (fact); the 0.90 pick inside it is UNCALIBRATED",
+   "used_for": "snow visible albedo"
+  }
+ ],
+ "research_candidates_not_adopted": [
+  {"name": "sosfuse2", "reason": "twilight only (sun +6 to -18 deg); the alpine shot is daylight. Unvetted, not fetched."},
+  {"name": "Poly Haven pure-sky HDRIs", "reason": "CC0 and suitable as a cross-check of the sun:sky ratio, but a 100+ MB fetch that changes no shipped number today; left for the calibration pass."},
+  {"name": "MoonShineR", "reason": "GPL-3 offline tool; night/twilight focus. Not needed for a daylight table."},
+  {"name": "skylight (bluegreen-labs)", "reason": "AGPL-3.0; the repo already has a daylight direct model. Not fetched."},
+  {"name": "Filament scotopicAdaptation", "reason": "low-light colour shift; belongs to a colour-grading lane."},
+  {"name": "Prague Sky Model dataset", "reason": "best reference for the thin-air sky diffuse term, but multi-GB and its licence is only 'as stated on record', unverified. Named in INTEGRATION.md as the calibration follow-up."},
+  {"name": "PerezSky", "reason": "overcast/storm states; the alpine scenario here is clear sky with wind."}
+ ]
+}

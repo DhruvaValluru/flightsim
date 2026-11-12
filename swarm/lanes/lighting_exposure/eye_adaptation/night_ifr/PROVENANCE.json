@@ -1,0 +1,90 @@
+{
+  "item": "lighting_exposure.eye_adaptation.night_ifr",
+  "status": "UNMEASURED: generated on the Mac; no frame rendered, nothing downloaded, nothing vendored",
+  "generated": [
+    {
+      "path": "baked/night_ifr_eye.json",
+      "sha256": "c12c9d33e5212fec20e0b78a24fe6fa463bdc47d86997528aaf1b92be9d71ca5",
+      "by": "generate.py",
+      "licence": "project's own (generated numbers)"
+    },
+    {
+      "path": "baked/night_ifr_eye_curve.csv",
+      "sha256": "7ec6ea626bedc64e655a30f4571309fef2c49008a5fe4e20023d0b7f9520e629",
+      "by": "generate.py",
+      "licence": "project's own (generated numbers)"
+    }
+  ],
+  "fetched_assets": [],
+  "sources": [
+    {
+      "name": "this repository: core/sky/plan.py (ev100_for, DAYLIGHT_LUX, NIGHT_SKY_LUX, CAMERA_EV100, 0.27 lx full-moon ground value)",
+      "used_for": "the calibrated night look: one EV100 for the clip, half-rate below 400 lx; copied as constants and checked by the test against ev100_for and against plan_sky() for three real nights",
+      "licence": "project's own"
+    },
+    {
+      "name": "Allard's law (Allard 1876), E = I exp(-sigma d) / d^2",
+      "used_for": "the formula for illuminance at the eye from a list of lights; no intensities are shipped, so the baked curve has no light term",
+      "licence": "published formula (no asset copied)"
+    },
+    {
+      "name": "Koschmieder 1924 with the 5 % contrast threshold of the meteorological optical range (WMO-No. 8 / ICAO Annex 3 definition)",
+      "used_for": "extinction sigma = ln(20) / MOR",
+      "licence": "published formula (no asset copied)",
+      "note": "document numbers recalled, unverified here"
+    },
+    {
+      "name": "Lagarde & de Rousiers 2014, Moving Frostbite to Physically Based Rendering, sec. 5.1.2",
+      "used_for": "saturation luminance 1.2 * 2^EV100, as core/capture/radiometry.py",
+      "licence": "published formula (no asset copied)"
+    },
+    {
+      "name": "this repository: core/scene/runway.py PHOTOMETRY (candela: None, 'named as missing, never invented')",
+      "used_for": "the reason this lane ships no runway-light intensity and claims no closing distance",
+      "licence": "project's own"
+    },
+    {
+      "name": "this repository: core/scene/lighting.py brightness_ev, scripts/run_test_scenarios.py --spec-dir",
+      "used_for": "gate_tool.py: the exposure brackets and the stand-in candidate for the gate that is runnable today",
+      "licence": "project's own"
+    }
+  ],
+  "visual_only": [
+    "moon state (full, 40 deg), deck top/base, deck transmittance 0.25, visibility 2400 m, 3 deg / 72 m/s approach",
+    "eye time constants (0.5 s close, 4 s open) and the 0.25 EV excursion",
+    "the half-rate mapping from eye illuminance to exposure offset (the look's own slope, reused)"
+  ],
+  "research_candidates_not_adopted": [
+    {
+      "name": "MoonShineR (GPL-3), skylight (AGPL-3.0)",
+      "why": "moon ground lux; the gate is defined against the project's own moon rule, so a second lux model could only disagree with the look. Copyleft, offline only. Worth running once to check the 0.27 lx constant."
+    },
+    {
+      "name": "Filament scotopicAdaptation (Apache-2.0)",
+      "why": "a colour effect (Purkinje shift), not an exposure level: it belongs to the colour-grading item. This lane publishes the EV100 that would drive it. Not fetched."
+    },
+    {
+      "name": "sosfuse2",
+      "why": "twilight sky radiance; this scenario is full night under a deck"
+    },
+    {
+      "name": "Poly Haven Qwantani / pure-sky HDRIs",
+      "why": "CC0 and a real night frame exists in the series, but a single site's moon sky would not move a look fixed by rule; large download, not fetched"
+    },
+    {
+      "name": "Prague Sky Model dataset",
+      "why": "sky reference, licence on the record not verified, not needed for a scalar exposure"
+    },
+    {
+      "name": "perezsky (WildSolar)",
+      "why": "daylight overcast from DNI/DHI; not a night model"
+    }
+  ],
+  "withdrawn": [
+    "runway and approach light peak intensities and five-step fractions (recalled from memory, never read from a source), and the distance at which the eye finished closing that was derived from them",
+    "the two-frame display-referred ev_offset as the gate (a tone curve stretches it); replaced by rendered +/-0.3 EV brackets"
+  ],
+  "test_only_stand_ins": [
+    "Narkowicz 2015 ACES fit and a second S-curve, written out in the test to put an unknown tone curve between scene and code value; not the engine's tonemapper, not shipped"
+  ]
+}

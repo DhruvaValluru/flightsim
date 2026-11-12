@@ -1,0 +1,55 @@
+{
+ "item": "atmosphere_clouds.sun_moon_ephemeris.coastal",
+ "status": "UNMEASURED: generated on the Mac; no frame rendered, nothing downloaded, nothing vendored",
+ "visual_only": false,
+ "generated": [
+  {
+   "path": "out/ephemeris_coastal.json",
+   "sha256": "3be9ead625ac30f2c056bc9687234f0a016f6a571e9ffc12a7a68ebd2aab24c5",
+   "by": "bake_ephemeris.py",
+   "licence": "project's own (computed numbers)"
+  },
+  {
+   "path": "out/T_SunMoonTransmittance_64x16.png",
+   "sha256": "7854eb4befe23f6dafd22ac1508226770bb5186adad2b092627ae77e9445b17f",
+   "by": "bake_ephemeris.py",
+   "licence": "project's own (computed numbers)",
+   "encoding": "8-bit, value = sqrt(T); u -> elevation = -3 + 93 u^2 deg, v -> altitude = 15 v km; import linear (sRGB off), no mips, clamp"
+  }
+ ],
+ "fetched_assets": [],
+ "sources": [
+  {
+   "name": "this repository: core/sky/astro.py, core/sky/plan.py, core/scenario/solar.py",
+   "licence": "project's own",
+   "used_for": "sun and moon positions (Meeus ch. 25 / 47), phase law, FULL_MOON_LUX, the 133 100 lx ASTM G173 extraterrestrial sun, Bird & Hulstrom ground lux for comparison"
+  },
+  {
+   "name": "Hillaire 2020, A Scalable and Production Ready Sky and Atmosphere Rendering Technique (EGSR); Bruneton & Neyret 2008, Precomputed Atmospheric Scattering",
+   "url": "https://sebh.github.io/publications/egsr2020.pdf",
+   "licence": "published coefficients (no asset copied)",
+   "used_for": "the Rayleigh, Mie and ozone coefficients and profiles of UE's SkyAtmosphere defaults",
+   "note": "Rayleigh and ozone values recalled, unverified against the UE 5.7 source here; Mie and radii match FlightSimVisualScene.cpp"
+  },
+  {
+   "name": "McCamy 1992, Correlated color temperature as an explicit function of chromaticity coordinates, Color Res. Appl. 17(2)",
+   "licence": "published formula (no asset copied)",
+   "used_for": "the indicative CCT of the tint",
+   "note": "formula recalled, unverified here"
+  }
+ ],
+ "research_candidates_not_adopted": [
+  {
+   "name": "PetrVevoda/pragueskymodel, Scroga/Altitude-Responsive-Sky-Model",
+   "why": "sky radiance, not ephemeris; the dataset licence is unverified and the dataset is large. Not fetched."
+  },
+  {
+   "name": "fgarlin/skytracer",
+   "why": "its marine-aerosol cross-sections would give a coastal RGB Mie; unvetted and not fetched. The haze rides on the fog row today, so the engine-default Mie is the honest reference. Worth vetting for the aerial-perspective lane."
+  },
+  {
+   "name": "AT3D, NVIDIA approximate Mie, Wrenninge 2013, Poly Haven pure skies",
+   "why": "cloud and phase-function material, outside an ephemeris."
+  }
+ ]
+}

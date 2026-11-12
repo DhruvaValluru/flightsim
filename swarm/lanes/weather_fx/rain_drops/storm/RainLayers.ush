@@ -1,0 +1,74 @@
+// weather_fx.rain_drops.storm -- tier 0 rain: baked layers, no particles.
+// VISUAL-ONLY. UNMEASURED: written on the Mac, never compiled or rendered.
+// Compile and measure on the Windows laptop (INTEGRATION.md).
+//
+// D3D11 / Shader Model 5. No loops, no derivatives (SampleLevel with an
+// analytic LOD, so the atan2 seam draws no line), three texture taps.
+// The body of a Custom node in a post-process material (Before Tonemapping),
+// or an #include from /Plugin/FlightSimBridge. Geometry: generate.py's docstring.
+//
+// Inputs (the names are the contract; numbers from baked/rain_layers.json):
+//   float3 SceneColor      linear scene colour at the pixel
+//   float3 ViewDir         unit, camera to pixel, world space
+//   float  SceneDistCm     distance to the opaque scene along ViewDir (cm)
+//   float3 Axis            unit, (v_drop(D0) - v_camera) / |..|, world space
+//   float3 AxisRight       unit, perpendicular to Axis (any stable choice)
+//   float  SweepM          |v_drop(D0) - v_camera| x shutter (m)
+//   float  TravelM         the drops' travel along Axis, integrated by the host (m)
+//   float  PixelAngle      one pixel's angle (rad), as User.PixelAngle
+//   float  Opacity         weight x rain gain x Active (the ambient fraction)
+//   float3 RainRadiance    pre-exposed drop radiance: (E_h + FlashLux) / pi
+//   float4 BinSweeps       bins[].sweep_m
+//   float3 RhoK, TileH     layers[].rho_k_m, layers[].tile_height_m
+//   float4 Scale0..2       layers[k].bins[].alpha_scale
+//   Texture2D Layer0..2    baked/rain_layer{k}_512x1024.tga, sRGB off, wrap
+//   SamplerState LayerSampler (trilinear, wrap)
+
+static const float RL_NU = 512.0;
+static const float RL_NV = 1024.0;
+static const float RL_NREP = 12.0;
+static const float RL_TWO_PI = 6.28318530718;
+
+float RainLayerAlpha(Texture2D Tex, SamplerState Samp, float4 Scale, float4 Sel, float Stretch,
+                     float Rho, float TileH, float Phi, float CosT, float SinT, float TravelM,
+                     float PixelAngle, float SceneDistCm)
+{
+    // The cylinder of radius Rho about the axis is Rho / sin(theta) away.
+    float Visible = step(Rho / SinT * 100.0, SceneDistCm);
+    float2 UV;
+    UV.x = Phi * RL_NREP / RL_TWO_PI;
+    UV.y = (CosT / SinT * Rho + TravelM) / (TileH * Stretch);
+    // Texels per pixel on each axis; the LOD is the larger.
+    float Du = PixelAngle / SinT * RL_NREP / RL_TWO_PI * RL_NU;
+    float Dv = PixelAngle * Rho / (SinT * SinT) / (TileH * Stretch) * RL_NV;
+    float Lod = max(0.0, log2(max(Du, Dv)));
+    float4 Bins = Tex.SampleLevel(Samp, UV, Lod);
+    return Visible * dot(Bins * Scale, Sel);
+}
+
+float3 RainLayers(float3 SceneColor, float3 ViewDir, float SceneDistCm, float3 Axis, float3 AxisRight,
+                  float SweepM, float TravelM, float PixelAngle, float Opacity, float3 RainRadiance,
+                  float4 BinSweeps, float3 RhoK, float3 TileH,
+                  float4 Scale0, float4 Scale1, float4 Scale2,
+                  Texture2D Layer0, Texture2D Layer1, Texture2D Layer2, SamplerState LayerSampler)
+{
+    // The nearest bin in log sweep, and the residual stretch of v.
+    float4 Dist = abs(log2(max(SweepM, 1e-5) / BinSweeps));
+    float Nearest = min(min(Dist.x, Dist.y), min(Dist.z, Dist.w));
+    float4 Sel = step(Dist, Nearest);
+    Sel /= dot(Sel, 1.0);
+    float Stretch = max(SweepM, 1e-5) / dot(Sel, BinSweeps);
+
+    float CosT = dot(ViewDir, Axis);
+    float SinT = max(sqrt(saturate(1.0 - CosT * CosT)), 1e-3);
+    float3 AxisUp = cross(Axis, AxisRight);
+    float Phi = atan2(dot(ViewDir, AxisUp), dot(ViewDir, AxisRight));
+    // The layers vanish toward the axis, where cot(theta) diverges (generate.POLE_FADE).
+    float Fade = smoothstep(0.15, 0.35, SinT) * Opacity;
+
+    float A0 = RainLayerAlpha(Layer0, LayerSampler, Scale0, Sel, Stretch, RhoK.x, TileH.x, Phi, CosT, SinT, TravelM, PixelAngle, SceneDistCm);
+    float A1 = RainLayerAlpha(Layer1, LayerSampler, Scale1, Sel, Stretch, RhoK.y, TileH.y, Phi + 1.7, CosT, SinT, TravelM, PixelAngle, SceneDistCm);
+    float A2 = RainLayerAlpha(Layer2, LayerSampler, Scale2, Sel, Stretch, RhoK.z, TileH.z, Phi + 3.1, CosT, SinT, TravelM, PixelAngle, SceneDistCm);
+    float Alpha = 1.0 - (1.0 - saturate(A0 * Fade)) * (1.0 - saturate(A1 * Fade)) * (1.0 - saturate(A2 * Fade));
+    return lerp(SceneColor, RainRadiance, Alpha);
+}

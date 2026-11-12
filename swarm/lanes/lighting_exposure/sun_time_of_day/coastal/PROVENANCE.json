@@ -1,0 +1,88 @@
+{
+ "lane": "lighting_exposure.sun_time_of_day.coastal",
+ "label": "visual-only",
+ "vendored": [],
+ "vendored_note": "Nothing was downloaded or vendored. The bake imports the repo's own sun-position and Bird & Hulstrom models and uses published formulas and constants; no third-party code or asset ships.",
+ "generated": [
+  {
+   "file": "coastal_sun_tod.json",
+   "sha256": "45651664690a250b078b833d2e527aa02fbfdec0d854684ce62117e1631a19f1",
+   "generator": "bake_coastal_sun_tod.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "coastal_sun_tod_curve.csv",
+   "sha256": "a28e5d36e06402fe865c75d105efd72a482b117f9b4ed676a0db46d8a9909264",
+   "generator": "bake_coastal_sun_tod.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "coastal_day_curve.csv",
+   "sha256": "37c34813a6520deb9d5fedbf2234f16e5073ff98a4ef3e14c45c6d95b6c9abdd",
+   "generator": "bake_coastal_sun_tod.py",
+   "licence": "project (generated numbers)"
+  }
+ ],
+ "sources": [
+  {
+   "name": "Meeus, Astronomical Algorithms, 2nd ed. (1998), ch. 25, as implemented in core/scenario/solar.py solar_position",
+   "licence": "published algorithm (fact); repo code",
+   "used_for": "sun elevation and azimuth from place, date and clock time"
+  },
+  {
+   "name": "Bird & Hulstrom 1981, A Simplified Clear Sky Model for Direct and Diffuse Insolation on Horizontal Surfaces (SERI/TR-642-761), as implemented in core/scenario/solar.py",
+   "licence": "US government technical report (public domain); repo code",
+   "used_for": "direct normal illuminance under the stated marine aerosol and water column"
+  },
+  {
+   "name": "IES RP-21 clear-sky horizontal diffuse illuminance, constants as stated in core/scene/beauty_look.py IES_CLEAR_DIFFUSE_KLX",
+   "licence": "published constants (facts); repo code",
+   "used_for": "sky diffuse illuminance; the added haze forward-scatter share is this lane's MODEL step, UNCALIBRATED"
+  },
+  {
+   "name": "Koschmieder 1924 visibility relation, V = 3.912 / extinction",
+   "licence": "published formula (fact)",
+   "used_for": "tying the aerosol optical depth to the sea-haze visibility other lanes use"
+  },
+  {
+   "name": "Hansen & Travis 1974, Light scattering in planetary atmospheres, Space Sci. Rev. 16 (Rayleigh optical depth fit)",
+   "licence": "published formula (fact)",
+   "used_for": "spectral Rayleigh extinction for the sun colour"
+  },
+  {
+   "name": "Wyman, Sloan & Shirley 2013, Simple Analytic Approximations to the CIE XYZ Color Matching Functions, JCGT 2(2)",
+   "licence": "published formula (fact)",
+   "used_for": "CIE 1931 xy of the attenuated sun spectrum"
+  },
+  {
+   "name": "McCamy 1992, Correlated color temperature as an explicit function of chromaticity coordinates, Color Res. Appl. 17",
+   "licence": "published formula (fact)",
+   "used_for": "correlated colour temperature from xy"
+  },
+  {
+   "name": "Cox & Munk 1954, Measurement of the roughness of the sea surface from photographs of the sun's glitter, JOSA 44",
+   "licence": "published formula (fact)",
+   "used_for": "sea-glitter peak luminance (recorded, not exposed for)"
+  },
+  {
+   "name": "ISO 2720:1974 incident-light exposure meter calibration, C = 250",
+   "licence": "published constant (fact)",
+   "used_for": "EV100 from horizontal illuminance"
+  },
+  {
+   "name": "Lagarde & de Rousiers 2014, Moving Frostbite to Physically Based Rendering (SIGGRAPH course notes), Lmax = 1.2 * 2^EV100",
+   "licence": "published formula (fact)",
+   "used_for": "scene-linear value of a luminance at a manual EV100"
+  }
+ ],
+ "research_candidates_not_adopted": [
+  {"name": "sosfuse2", "reason": "twilight only (sun +6 to -18 deg). It is the right source for extending this table below 2 deg, but it is unvetted and bundles CC BY-SA inputs; not fetched. Named as the follow-up."},
+  {"name": "Poly Haven Qwantani time-of-day pure-sky series", "reason": "CC0 and the best check of this lane's sun:sky ratio and colour against time of day, but 13 multi-hundred-MB HDRIs that would change no shipped number until someone fits them; not fetched. Named as the calibration follow-up."},
+  {"name": "Poly Haven kloofendal pure-sky HDRI", "reason": "same as above: a cross-check, not a dependency."},
+  {"name": "MoonShineR", "reason": "GPL-3 offline tool with a night and twilight focus; the repo already has a daylight model. Not fetched."},
+  {"name": "skylight (bluegreen-labs)", "reason": "AGPL-3.0; not needed for daylight. Not fetched."},
+  {"name": "Filament scotopicAdaptation", "reason": "low-light colour shift; belongs to a colour-grading lane and to light levels this table does not reach."},
+  {"name": "Prague Sky Model dataset", "reason": "multi-GB, and its licence is only 'as stated on record', unverified. Not fetched."},
+  {"name": "PerezSky", "reason": "MIT and relevant to a hazy or overcast sky luminance distribution, but tier 0 needs only the horizontal illuminance, which the IES term plus the haze share gives. Not fetched."}
+ ]
+}

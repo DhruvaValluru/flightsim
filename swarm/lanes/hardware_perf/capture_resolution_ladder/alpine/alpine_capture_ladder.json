@@ -1,0 +1,909 @@
+{
+ "lane": "hardware_perf.capture_resolution_ladder.alpine",
+ "label": "visual-only",
+ "measured": false,
+ "scenario": {
+  "name": "alpine",
+  "test_scenario": 11
+ },
+ "target": {
+  "rhi": "d3d11",
+  "display_px": [
+   1536,
+   960
+  ],
+  "start_max_capture_width": 1280,
+  "start_usable_vram_mb": 491
+ },
+ "estimate_inputs": {
+  "bytes_per_pixel": 73,
+  "tdr_delay_ms": 2000
+ },
+ "gate": {
+  "frame_ms_ceiling": 1000,
+  "gpu_mb_above_idle_ceiling": 491,
+  "temp_c_ceiling": 90.0,
+  "seam_excess_levels_ceiling": 1.0,
+  "alias_ratio_ceiling": 0.75,
+  "ground_sharpness_floor": {
+   "2": 1.0,
+   "3": 1.0
+  },
+  "sample_spread_levels_ceiling": 1.0,
+  "box_coordinates": "pixels of the 1280x800 tier 0 frame"
+ },
+ "resolve": {
+  "accumulate_in": "linear light (sRGB decoded)",
+  "dither": "blue_noise_64.r8",
+  "display_fit_filter": "lanczos",
+  "step_down_filter": "lanczos",
+  "dither_sha256": "fd588e37af63774bc87e35ac18a3634458af3a10646ec3fc88532e40b58dd7b0"
+ },
+ "tier0_step_down": [
+  {
+   "scale": 0.8,
+   "pass_render_px": [
+    1024,
+    640
+   ]
+  },
+  {
+   "scale": 0.75,
+   "pass_render_px": [
+    960,
+    600
+   ]
+  }
+ ],
+ "tiers": [
+  {
+   "tier": 0,
+   "delivered_px": [
+    1280,
+    800
+   ],
+   "grid": [
+    1,
+    1
+   ],
+   "gutter_px": 0,
+   "pass_render_px": [
+    1280,
+    800
+   ],
+   "payload_px": [
+    1280,
+    800
+   ],
+   "samples_per_pixel": 1,
+   "pass_count": 1,
+   "display_supersample_linear": 0.8333,
+   "est_render_target_mb": 71.3,
+   "est_gpu_frames": 17,
+   "requires": [],
+   "passes": [
+    {
+     "index": 0,
+     "file": "pass_000.png",
+     "tile": [
+      0,
+      0
+     ],
+     "sample": 0,
+     "paste_px": [
+      0,
+      0
+     ],
+     "window_px": [
+      0.0,
+      0.0,
+      1280.0,
+      800.0
+     ],
+     "ndc_scale": [
+      1.0,
+      1.0
+     ],
+     "ndc_offset": [
+      -0.0,
+      0.0
+     ],
+     "weight": 1.0,
+     "warmup_frames": 16
+    }
+   ]
+  },
+  {
+   "tier": 1,
+   "delivered_px": [
+    1280,
+    800
+   ],
+   "grid": [
+    1,
+    1
+   ],
+   "gutter_px": 0,
+   "pass_render_px": [
+    1280,
+    800
+   ],
+   "payload_px": [
+    1280,
+    800
+   ],
+   "samples_per_pixel": 4,
+   "pass_count": 4,
+   "display_supersample_linear": 0.8333,
+   "est_render_target_mb": 71.3,
+   "est_gpu_frames": 32,
+   "requires": [
+    "paused sim between passes"
+   ],
+   "passes": [
+    {
+     "index": 0,
+     "file": "pass_000.png",
+     "tile": [
+      0,
+      0
+     ],
+     "sample": 0,
+     "paste_px": [
+      0,
+      0
+     ],
+     "window_px": [
+      0.125,
+      0.375,
+      1280.125,
+      800.375
+     ],
+     "ndc_scale": [
+      1.0,
+      1.0
+     ],
+     "ndc_offset": [
+      -0.0001953125,
+      0.0009375
+     ],
+     "weight": 0.25,
+     "warmup_frames": 16
+    },
+    {
+     "index": 1,
+     "file": "pass_001.png",
+     "tile": [
+      0,
+      0
+     ],
+     "sample": 1,
+     "paste_px": [
+      0,
+      0
+     ],
+     "window_px": [
+      -0.375,
+      0.125,
+      1279.625,
+      800.125
+     ],
+     "ndc_scale": [
+      1.0,
+      1.0
+     ],
+     "ndc_offset": [
+      0.0005859375,
+      0.0003125
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 2,
+     "file": "pass_002.png",
+     "tile": [
+      0,
+      0
+     ],
+     "sample": 2,
+     "paste_px": [
+      0,
+      0
+     ],
+     "window_px": [
+      0.375,
+      -0.125,
+      1280.375,
+      799.875
+     ],
+     "ndc_scale": [
+      1.0,
+      1.0
+     ],
+     "ndc_offset": [
+      -0.0005859375,
+      -0.0003125
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 3,
+     "file": "pass_003.png",
+     "tile": [
+      0,
+      0
+     ],
+     "sample": 3,
+     "paste_px": [
+      0,
+      0
+     ],
+     "window_px": [
+      -0.125,
+      -0.375,
+      1279.875,
+      799.625
+     ],
+     "ndc_scale": [
+      1.0,
+      1.0
+     ],
+     "ndc_offset": [
+      0.0001953125,
+      -0.0009375
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    }
+   ]
+  },
+  {
+   "tier": 2,
+   "delivered_px": [
+    2560,
+    1600
+   ],
+   "grid": [
+    2,
+    2
+   ],
+   "gutter_px": 32,
+   "pass_render_px": [
+    1344,
+    864
+   ],
+   "payload_px": [
+    1280,
+    800
+   ],
+   "samples_per_pixel": 1,
+   "pass_count": 4,
+   "display_supersample_linear": 1.6667,
+   "est_render_target_mb": 80.8,
+   "est_gpu_frames": 68,
+   "requires": [
+    "fixed exposure",
+    "bloom, vignette and lens drops off in tile passes",
+    "per-tile Cesium camera so tile detail follows the delivered size",
+    "paused sim between passes"
+   ],
+   "passes": [
+    {
+     "index": 0,
+     "file": "pass_000.png",
+     "tile": [
+      0,
+      0
+     ],
+     "sample": 0,
+     "paste_px": [
+      0,
+      0
+     ],
+     "window_px": [
+      -32.0,
+      -32.0,
+      1312.0,
+      832.0
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      0.9523809523809523,
+      -0.9259259259259259
+     ],
+     "weight": 1.0,
+     "warmup_frames": 16
+    },
+    {
+     "index": 1,
+     "file": "pass_001.png",
+     "tile": [
+      1,
+      0
+     ],
+     "sample": 0,
+     "paste_px": [
+      1280,
+      0
+     ],
+     "window_px": [
+      1248.0,
+      -32.0,
+      2592.0,
+      832.0
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      -0.9523809523809523,
+      -0.9259259259259259
+     ],
+     "weight": 1.0,
+     "warmup_frames": 16
+    },
+    {
+     "index": 2,
+     "file": "pass_002.png",
+     "tile": [
+      0,
+      1
+     ],
+     "sample": 0,
+     "paste_px": [
+      0,
+      800
+     ],
+     "window_px": [
+      -32.0,
+      768.0,
+      1312.0,
+      1632.0
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      0.9523809523809523,
+      0.9259259259259259
+     ],
+     "weight": 1.0,
+     "warmup_frames": 16
+    },
+    {
+     "index": 3,
+     "file": "pass_003.png",
+     "tile": [
+      1,
+      1
+     ],
+     "sample": 0,
+     "paste_px": [
+      1280,
+      800
+     ],
+     "window_px": [
+      1248.0,
+      768.0,
+      2592.0,
+      1632.0
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      -0.9523809523809523,
+      0.9259259259259259
+     ],
+     "weight": 1.0,
+     "warmup_frames": 16
+    }
+   ]
+  },
+  {
+   "tier": 3,
+   "delivered_px": [
+    2560,
+    1600
+   ],
+   "grid": [
+    2,
+    2
+   ],
+   "gutter_px": 32,
+   "pass_render_px": [
+    1344,
+    864
+   ],
+   "payload_px": [
+    1280,
+    800
+   ],
+   "samples_per_pixel": 4,
+   "pass_count": 16,
+   "display_supersample_linear": 1.6667,
+   "est_render_target_mb": 80.8,
+   "est_gpu_frames": 128,
+   "requires": [
+    "fixed exposure",
+    "bloom, vignette and lens drops off in tile passes",
+    "per-tile Cesium camera so tile detail follows the delivered size",
+    "paused sim between passes"
+   ],
+   "passes": [
+    {
+     "index": 0,
+     "file": "pass_000.png",
+     "tile": [
+      0,
+      0
+     ],
+     "sample": 0,
+     "paste_px": [
+      0,
+      0
+     ],
+     "window_px": [
+      -31.875,
+      -31.625,
+      1312.125,
+      832.375
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      0.9521949404761905,
+      -0.9250578703703703
+     ],
+     "weight": 0.25,
+     "warmup_frames": 16
+    },
+    {
+     "index": 1,
+     "file": "pass_001.png",
+     "tile": [
+      0,
+      0
+     ],
+     "sample": 1,
+     "paste_px": [
+      0,
+      0
+     ],
+     "window_px": [
+      -32.375,
+      -31.875,
+      1311.625,
+      832.125
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      0.9529389880952381,
+      -0.9256365740740741
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 2,
+     "file": "pass_002.png",
+     "tile": [
+      0,
+      0
+     ],
+     "sample": 2,
+     "paste_px": [
+      0,
+      0
+     ],
+     "window_px": [
+      -31.625,
+      -32.125,
+      1312.375,
+      831.875
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      0.9518229166666666,
+      -0.9262152777777778
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 3,
+     "file": "pass_003.png",
+     "tile": [
+      0,
+      0
+     ],
+     "sample": 3,
+     "paste_px": [
+      0,
+      0
+     ],
+     "window_px": [
+      -32.125,
+      -32.375,
+      1311.875,
+      831.625
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      0.9525669642857143,
+      -0.9267939814814815
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 4,
+     "file": "pass_004.png",
+     "tile": [
+      1,
+      0
+     ],
+     "sample": 0,
+     "paste_px": [
+      1280,
+      0
+     ],
+     "window_px": [
+      1248.125,
+      -31.625,
+      2592.125,
+      832.375
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      -0.9525669642857143,
+      -0.9250578703703703
+     ],
+     "weight": 0.25,
+     "warmup_frames": 16
+    },
+    {
+     "index": 5,
+     "file": "pass_005.png",
+     "tile": [
+      1,
+      0
+     ],
+     "sample": 1,
+     "paste_px": [
+      1280,
+      0
+     ],
+     "window_px": [
+      1247.625,
+      -31.875,
+      2591.625,
+      832.125
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      -0.9518229166666666,
+      -0.9256365740740741
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 6,
+     "file": "pass_006.png",
+     "tile": [
+      1,
+      0
+     ],
+     "sample": 2,
+     "paste_px": [
+      1280,
+      0
+     ],
+     "window_px": [
+      1248.375,
+      -32.125,
+      2592.375,
+      831.875
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      -0.9529389880952381,
+      -0.9262152777777778
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 7,
+     "file": "pass_007.png",
+     "tile": [
+      1,
+      0
+     ],
+     "sample": 3,
+     "paste_px": [
+      1280,
+      0
+     ],
+     "window_px": [
+      1247.875,
+      -32.375,
+      2591.875,
+      831.625
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      -0.9521949404761905,
+      -0.9267939814814815
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 8,
+     "file": "pass_008.png",
+     "tile": [
+      0,
+      1
+     ],
+     "sample": 0,
+     "paste_px": [
+      0,
+      800
+     ],
+     "window_px": [
+      -31.875,
+      768.375,
+      1312.125,
+      1632.375
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      0.9521949404761905,
+      0.9267939814814815
+     ],
+     "weight": 0.25,
+     "warmup_frames": 16
+    },
+    {
+     "index": 9,
+     "file": "pass_009.png",
+     "tile": [
+      0,
+      1
+     ],
+     "sample": 1,
+     "paste_px": [
+      0,
+      800
+     ],
+     "window_px": [
+      -32.375,
+      768.125,
+      1311.625,
+      1632.125
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      0.9529389880952381,
+      0.9262152777777778
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 10,
+     "file": "pass_010.png",
+     "tile": [
+      0,
+      1
+     ],
+     "sample": 2,
+     "paste_px": [
+      0,
+      800
+     ],
+     "window_px": [
+      -31.625,
+      767.875,
+      1312.375,
+      1631.875
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      0.9518229166666666,
+      0.9256365740740741
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 11,
+     "file": "pass_011.png",
+     "tile": [
+      0,
+      1
+     ],
+     "sample": 3,
+     "paste_px": [
+      0,
+      800
+     ],
+     "window_px": [
+      -32.125,
+      767.625,
+      1311.875,
+      1631.625
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      0.9525669642857143,
+      0.9250578703703703
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 12,
+     "file": "pass_012.png",
+     "tile": [
+      1,
+      1
+     ],
+     "sample": 0,
+     "paste_px": [
+      1280,
+      800
+     ],
+     "window_px": [
+      1248.125,
+      768.375,
+      2592.125,
+      1632.375
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      -0.9525669642857143,
+      0.9267939814814815
+     ],
+     "weight": 0.25,
+     "warmup_frames": 16
+    },
+    {
+     "index": 13,
+     "file": "pass_013.png",
+     "tile": [
+      1,
+      1
+     ],
+     "sample": 1,
+     "paste_px": [
+      1280,
+      800
+     ],
+     "window_px": [
+      1247.625,
+      768.125,
+      2591.625,
+      1632.125
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      -0.9518229166666666,
+      0.9262152777777778
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 14,
+     "file": "pass_014.png",
+     "tile": [
+      1,
+      1
+     ],
+     "sample": 2,
+     "paste_px": [
+      1280,
+      800
+     ],
+     "window_px": [
+      1248.375,
+      767.875,
+      2592.375,
+      1631.875
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      -0.9529389880952381,
+      0.9256365740740741
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    },
+    {
+     "index": 15,
+     "file": "pass_015.png",
+     "tile": [
+      1,
+      1
+     ],
+     "sample": 3,
+     "paste_px": [
+      1280,
+      800
+     ],
+     "window_px": [
+      1247.875,
+      767.625,
+      2591.875,
+      1631.625
+     ],
+     "ndc_scale": [
+      1.9047619047619047,
+      1.8518518518518519
+     ],
+     "ndc_offset": [
+      -0.9521949404761905,
+      0.9250578703703703
+     ],
+     "weight": 0.25,
+     "warmup_frames": 4
+    }
+   ]
+  }
+ ]
+}

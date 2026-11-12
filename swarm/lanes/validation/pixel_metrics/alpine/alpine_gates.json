@@ -1,0 +1,199 @@
+{
+ "lane": "validation.pixel_metrics.alpine",
+ "label": "visual-only",
+ "generator": "build_gate_manifest.py",
+ "exit_codes": "0 pass, 1 fail, anything else = the gate could not measure",
+ "gates": [
+  {
+   "lane": "aircraft_exterior.decals_wear.alpine",
+   "script": "swarm/lanes/aircraft_exterior/decals_wear/alpine/pixel_gate.py",
+   "sha256": "20542388477a9618d0c1181f1ac5fc71e30911cb1a06c80101daab531e814c78",
+   "required": [
+    "reference",
+    "candidate"
+   ],
+   "optional": [
+    "beauty-suffix",
+    "expect"
+   ],
+   "flags": [],
+   "dynamic": false
+  },
+  {
+   "lane": "aircraft_exterior.pbr_materials.alpine",
+   "script": "swarm/lanes/aircraft_exterior/pbr_materials/alpine/measure_gate.py",
+   "sha256": "6aba279392961ba5a165569018cb56f9ffc27f1e901819901f0b901d1943d284",
+   "required": [
+    "reference",
+    "candidate"
+   ],
+   "optional": [
+    "out"
+   ],
+   "flags": [],
+   "dynamic": false
+  },
+  {
+   "lane": "atmosphere_clouds.aerial_perspective.alpine",
+   "script": "swarm/lanes/atmosphere_clouds/aerial_perspective/alpine/measure_aerial_perspective.py",
+   "sha256": "06177910f5c5a5020f2fad6d7b7e6a1318947253c82fec5e534241235bcd254d",
+   "required": [
+    "as",
+    "near-km",
+    "far-km"
+   ],
+   "optional": [
+    "scenario",
+    "altitude-m",
+    "near-elevation-deg",
+    "far-elevation-deg"
+   ],
+   "flags": [],
+   "dynamic": true
+  },
+  {
+   "lane": "hardware_perf.capture_resolution_ladder.alpine",
+   "script": "swarm/lanes/hardware_perf/capture_resolution_ladder/alpine/measure_capture_gate.py",
+   "sha256": "d47b32d8506d290fda5e22a4eb4cbaa2b5c1681202c3a4621ae89163c5f3a96f",
+   "required": [
+    "tier"
+   ],
+   "optional": [
+    "ridge-box",
+    "ground-box"
+   ],
+   "flags": [],
+   "dynamic": true
+  },
+  {
+   "lane": "hardware_perf.stress_ladder.alpine",
+   "script": "swarm/lanes/hardware_perf/stress_ladder/alpine/measure_ladder.py",
+   "sha256": "9f6b8a1e7ce86138db32e5a1d2b17878222530e5eb98376046fd7888bb590fea",
+   "required": [
+    "results"
+   ],
+   "optional": [
+    "ladder",
+    "out"
+   ],
+   "flags": [],
+   "dynamic": false
+  },
+  {
+   "lane": "hardware_perf.vram_budgeting.alpine",
+   "script": "swarm/lanes/hardware_perf/vram_budgeting/alpine/measure_vram_gate.py",
+   "sha256": "3992821eb6e5f6f9d36a52177307a53547a803ed5b0952824fa5538650b9015a",
+   "required": [],
+   "optional": [
+    "budget",
+    "tier",
+    "ground-box"
+   ],
+   "flags": [],
+   "dynamic": true
+  },
+  {
+   "lane": "lighting_exposure.physical_light_units.alpine",
+   "script": "swarm/lanes/lighting_exposure/physical_light_units/alpine/measure_exposure.py",
+   "sha256": "07e1b8626fc34cad9289d38862c8467b27c730dbcd5fd4d5825434f0d625e71b",
+   "required": [
+    "baseline",
+    "candidate",
+    "baseline-ev100",
+    "target-ev100"
+   ],
+   "optional": [],
+   "flags": [],
+   "dynamic": false
+  },
+  {
+   "lane": "terrain.dem_posting.alpine",
+   "script": "swarm/lanes/terrain/dem_posting/alpine/measure_dem_posting.py",
+   "sha256": "acbc9bf02e1a5a30e21eed561f7f79a57b2a3c7c16c08a2a3d0d22f476ccbf5d",
+   "required": [
+    "baseline",
+    "candidate",
+    "camera-lat",
+    "camera-lon",
+    "camera-alt-m",
+    "heading-deg",
+    "pitch-deg"
+   ],
+   "optional": [
+    "baseline-sky-mask",
+    "candidate-sky-mask",
+    "hfov-deg",
+    "exclude-cols",
+    "roi",
+    "roi-range-m",
+    "max-detail-px"
+   ],
+   "flags": [],
+   "dynamic": false
+  },
+  {
+   "lane": "terrain.detail_normals.alpine",
+   "script": "swarm/lanes/terrain/detail_normals/alpine/measure_detail_gsd.py",
+   "sha256": "aa731cfea056928f5cfbe4de1e48528d2d4140ce510c434bfb9ac60038553b88",
+   "required": [
+    "baseline",
+    "repeat",
+    "candidate",
+    "depth"
+   ],
+   "optional": [
+    "tier-json",
+    "near-max-m",
+    "far-min-m",
+    "hfov-deg",
+    "crops"
+   ],
+   "flags": [],
+   "dynamic": false
+  },
+  {
+   "lane": "terrain.detail_normals.alpine",
+   "script": "swarm/lanes/terrain/detail_normals/alpine/run_gate.py",
+   "sha256": "20b7ef3aa440d8c479952c2f838aa7ac76fae7003eac0e3db719e75361f4cf4c",
+   "required": [],
+   "optional": [
+    "tier",
+    "scenario",
+    "port"
+   ],
+   "flags": [
+    "dry-run"
+   ],
+   "dynamic": false
+  },
+  {
+   "lane": "terrain.horizon_lod.alpine",
+   "script": "swarm/lanes/terrain/horizon_lod/alpine/measure_horizon_lod.py",
+   "sha256": "84e46a0d7207fb3d001098bfb321b12f6eeb6627c6e42ebdc951b3070715f72e",
+   "required": [
+    "baseline",
+    "candidate",
+    "tier",
+    "gsd-box",
+    "pitch-deg"
+   ],
+   "optional": [
+    "gsd-distance-m",
+    "hfov-deg",
+    "height-above-ground-m",
+    "columns"
+   ],
+   "flags": [],
+   "dynamic": false
+  },
+  {
+   "lane": "weather_fx.fog.alpine",
+   "script": "swarm/lanes/weather_fx/fog/alpine/measure_fog.py",
+   "sha256": "90e92adb21d87fa6b1447c5ac58c98b21f35b2c4bab100226392c3986a36f750",
+   "required": [],
+   "optional": [],
+   "flags": [],
+   "dynamic": true
+  }
+ ]
+}

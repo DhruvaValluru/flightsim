@@ -1,0 +1,28 @@
+{
+  "lane": "aircraft_exterior.decals_wear.alpine",
+  "visual_only": true,
+  "fetched_assets": [],
+  "vendored_code": [],
+  "generated": {
+    "generator": "bake_decals_wear.py",
+    "author": "written in this lane; numpy + Python stdlib only",
+    "licence": "repository licence",
+    "inputs": "none (seed 20261112)",
+    "sha256": "written per bake to out/tier<N>/bake_manifest.json; FFT output is not guaranteed bit-identical across numpy builds, so no digest is pinned here",
+    "glyphs": "5x7 stencil glyphs for 12 letters drawn in bake_decals_wear.py; no font file"
+  },
+  "techniques": [
+    {"name": "Wet-surface/porosity and layered base-colour arithmetic", "source": "repo: scripts/aircraft_wet_layer.py conventions (object -X aft, look-manifest group, UNCALIBRATED stamp)"},
+    {"name": "Uniform-flow line integral convolution as an anisotropic spectral low-pass", "source": "Cabral and Leedom 1993, 'Imaging vector fields using line integral convolution' (from memory; technique only)"},
+    {"name": "Cone exhaust deposition", "source": "idea listed under KSP-BurnMarks in swarm/discoveries.json; re-derived, no code read or copied"}
+  ],
+  "candidates_not_adopted": [
+    {"name": "PB-22 Trident skin painter (tex_feat.py)", "url": "https://github.com/NicksSoftwareFun/Nuclear-Option-PB-22-Trident-Aircraft-Mod", "stated_licence": "MIT (unverified)", "reason": "features are positioned on that airframe's geometry; re-basing needs our mesh in hand. Not fetched."},
+    {"name": "rLIC", "url": "https://github.com/neutrinoceros/rlic", "stated_licence": "MIT (unverified)", "reason": "compiled extension; installing it executes downloaded code. Uniform aft flow needs only an FFT filter. Not fetched."},
+    {"name": "KSP-BurnMarks", "url": "https://github.com/CritZitGaming/KSP-BurnMarks", "stated_licence": "MIT (unverified)", "reason": "Unity C#; a 20-line analytic cone covers the bake. Not fetched."},
+    {"name": "aitios-cli", "url": "https://github.com/tapirbug/aitios-cli", "stated_licence": "Unlicense (unverified)", "reason": "needs a Rust build repair and the airframe mesh. Not fetched."},
+    {"name": "MiG29-NuclearOption tools", "url": "https://github.com/IornMan1213/MiG29-NuclearOption", "stated_licence": "MIT code, CC BY-NC-SA assets", "reason": "non-commercial assets in the same repo. Rejected."},
+    {"name": "Open Painter", "url": "https://github.com/caspianmoon/open_painter", "stated_licence": "GPL-3.0-or-later", "reason": "needs Blender and UV'd meshes; bundled-material notice unread. Not fetched."},
+    {"name": "80.lv hard surface texturing article", "url": "https://80.lv/articles/vehicular-hard-surface-texturing-using-quixel-mixer-part-2", "stated_licence": "article", "reason": "not read in this session; nothing taken from it."}
+  ]
+}

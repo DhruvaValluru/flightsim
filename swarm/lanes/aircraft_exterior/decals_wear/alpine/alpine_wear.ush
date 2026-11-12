@@ -1,0 +1,103 @@
+// Alpine airframe wear and stencils. VISUAL ONLY, shading only: no World
+// Position Offset, no opacity, so silhouette, class, mask and depth are
+// unchanged. Shader Model 5 / Direct3D 11: texture samples and arithmetic
+// only, no loops, no derivatives beyond the sampler's own.
+//
+// UNMEASURED: written on the Mac, never compiled or rendered. The base-colour
+// arithmetic is mirrored by bake_decals_wear.py apply_wear and tested there.
+//
+// Object space: +X forward, -X aft (the wet layer's convention), +Z up, cm.
+// ALPINE_WEAR_TIER is a static switch on the master (0..3).
+
+#ifndef ALPINE_WEAR_TIER
+#define ALPINE_WEAR_TIER 0
+#endif
+
+struct FAlpineWearParams
+{
+	float WearTileCm;
+	float GrimeAmount;
+	float3 GrimeTint;
+	float ChipAmount;
+	float3 PrimerAlbedo;
+	float FrostAmount;
+	float FrostAlbedo;
+	float FrostExponent;
+	float SootAmount;
+	float SootAlbedo;
+	float WearFloorRatio;
+	float SootFloorRatio;
+	float AlbedoMin;
+	float AlbedoMax;
+	float GrimeRoughness;
+	float ChipRoughness;
+	float FrostRoughness;
+	float WearNormalStrength;
+	float DecalAlbedo;
+	float DecalWear;
+};
+
+// Mask = (grime, chips, frost breakup). Tier 0-1: two planar projections
+// (side XZ, top XY) blended by the normal: 2 samples. Tier 2-3: triplanar, 3.
+float3 AlpineWearMask(Texture2D Mask, SamplerState S, float3 P, float3 N, float TileCm)
+{
+	float3 W = N * N;
+	float3 Side = Mask.Sample(S, float2(-P.x, P.z) / TileCm).rgb;
+	float3 Top = Mask.Sample(S, float2(-P.x, P.y) / TileCm).rgb;
+#if ALPINE_WEAR_TIER >= 2
+	float3 Front = Mask.Sample(S, float2(P.y, P.z) / TileCm).rgb;
+	return (Side * W.y + Top * W.z + Front * W.x) / (W.x + W.y + W.z);
+#else
+	return lerp(Side, Top, smoothstep(0.35, 0.65, abs(N.z)));
+#endif
+}
+
+// Placement: grime heavier on the belly, frost on forward-facing surfaces.
+float3 AlpineWearPlace(float3 M, float3 N, FAlpineWearParams W)
+{
+	float Grime = M.r * lerp(0.6, 1.0, saturate(0.5 - 0.5 * N.z));
+	float Lead = pow(saturate(N.x), W.FrostExponent) * W.FrostAmount;
+	float Frost = saturate(Lead * (0.4 + 1.2 * M.b));
+	return float3(Grime, M.g, Frost);
+}
+
+// Soot: U = distance aft of the exhaust exit / plume length, V = lateral.
+// Tier >= 1 only; ExitCm and LateralAxis come from the airframe's anchors.
+float AlpineWearSoot(Texture2D Lut, SamplerState S, float3 P, float3 ExitCm, float3 LateralAxis, float PlumeCm)
+{
+	float3 D = P - ExitCm;
+	float2 UV = float2(-D.x, dot(D, LateralAxis)) / PlumeCm + float2(0.0, 0.5);
+	float In = step(0.0, UV.x) * step(UV.x, 1.0) * step(0.0, UV.y) * step(UV.y, 1.0);
+	return Lut.SampleLevel(S, UV, 0).r * In;
+}
+
+// Base colour. Soot and Decal are 0 at tier 0. The floor is the dark-aircraft
+// guard: outside soot and stencil ink the result is never below
+// WearFloorRatio x the incoming base colour.
+float3 AlpineWearBaseColor(float3 Albedo, float3 Placed, float Soot, float Decal, FAlpineWearParams W)
+{
+	float3 A = Albedo * lerp(1.0, W.GrimeTint, Placed.r * W.GrimeAmount);
+	A = lerp(A, W.PrimerAlbedo, Placed.g * W.ChipAmount);
+	float Ink = Decal * (1.0 - W.DecalWear * Placed.g);
+	A = lerp(A, W.DecalAlbedo, Ink);
+	A = lerp(A, W.FrostAlbedo, Placed.b);
+	float Dark = saturate(Soot * W.SootAmount + Ink);
+	A = lerp(A, W.SootAlbedo, Soot * W.SootAmount);
+	A = max(A, Albedo * lerp(W.WearFloorRatio, W.SootFloorRatio, Dark));
+	return clamp(A, min(Albedo, W.AlbedoMin), max(Albedo, W.AlbedoMax));
+}
+
+float AlpineWearRoughness(float Roughness, float3 Placed, FAlpineWearParams W)
+{
+	return saturate(Roughness + Placed.r * W.GrimeAmount * W.GrimeRoughness
+		+ Placed.g * W.ChipAmount * W.ChipRoughness + Placed.b * W.FrostRoughness);
+}
+
+// Tier >= 1: tangent-space oil-canning, same two projections as the mask.
+// Returned as a perturbation to blend onto the master's normal (xy only).
+float2 AlpineWearNormalXY(Texture2D Nrm, SamplerState S, float3 P, float3 N, FAlpineWearParams W)
+{
+	float2 Side = Nrm.Sample(S, float2(-P.x, P.z) / W.WearTileCm).rg * 2.0 - 1.0;
+	float2 Top = Nrm.Sample(S, float2(-P.x, P.y) / W.WearTileCm).rg * 2.0 - 1.0;
+	return lerp(Side, Top, smoothstep(0.35, 0.65, abs(N.z))) * W.WearNormalStrength;
+}

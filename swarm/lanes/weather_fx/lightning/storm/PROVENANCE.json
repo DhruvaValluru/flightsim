@@ -1,0 +1,88 @@
+{
+  "item": "weather_fx.lightning.storm",
+  "status": "UNMEASURED: generated on the Mac; no frame rendered, nothing downloaded, nothing vendored",
+  "visual_only": true,
+  "generated": [
+    {
+      "path": "baked/lightning_apsf.hlsl",
+      "sha256": "38dd83280726a31f73abe6aeb72c5a2f0d46171ed6825fa9169996d7c235441d",
+      "by": "generate.py",
+      "licence": "project's own (generated constants and a sampling function)"
+    },
+    {
+      "path": "baked/lightning_apsf_line_64x32.png",
+      "sha256": "11ccddf46f0c4e19f99649d900c47d842e6fd1bb578ed2aa0eb82ea80e2dfa34",
+      "by": "generate.py",
+      "licence": "project's own (numbers summed from a published series; no third-party pixels)"
+    },
+    {
+      "path": "baked/lightning_apsf_point_64x32.png",
+      "sha256": "6669e817c32440ab074181f538e9772764c4ab83e9fac6126d1c0235fc793bc8",
+      "by": "generate.py",
+      "licence": "project's own (numbers summed from a published series; no third-party pixels)"
+    },
+    {
+      "path": "baked/lightning_glow.json",
+      "sha256": "4ceca4d0cba8de6a448cdea6a7712fa3a3cf37b7605be3ad85f7721809c39e9c",
+      "by": "generate.py",
+      "licence": "project's own (generated numbers)"
+    }
+  ],
+  "fetched_assets": [],
+  "vendored": [],
+  "sources": [
+    {
+      "name": "Narasimhan, S. G. & Nayar, S. K. 2003, Shedding Light on the Weather, CVPR 2003",
+      "url": "https://www.cs.columbia.edu/CAVE/publications/pdfs/Narasimhan_CVPR03.pdf",
+      "used_for": "the APSF Legendre series and rain's forward-scattering range (q 0.9 .. 1.0)",
+      "licence": "published formula (reimplemented; no code or asset copied)",
+      "note": "written from the published series, not re-read against the PDF in this session; the PDF was not downloaded. The series' sphere integral 4 pi / T^2 is checked numerically in the test"
+    },
+    {
+      "name": "Koschmieder 1924 visibility law, sigma = 3.912 / V",
+      "used_for": "rain extinction from the storm look's assumed 3000 m visibility",
+      "licence": "published formula (no asset copied)"
+    },
+    {
+      "name": "core/scene/lightning.py (this repository)",
+      "used_for": "first-stroke energy, luminous efficacy, line luminance and point intensity",
+      "licence": "project's own"
+    },
+    {
+      "name": "swarm/lanes/lighting_exposure/physical_light_units/storm/baked/storm_plu.json (this repository)",
+      "used_for": "EV100 12.5, sky horizon and saturation luminance, ambient lux, visibility, lightning colour temperature",
+      "licence": "project's own"
+    }
+  ],
+  "considered_not_adopted": [
+    {
+      "name": "chromia/lichtenberg",
+      "url": "https://github.com/chromia/lichtenberg",
+      "licence_claimed_by_research": "MIT (unverified here)",
+      "why_not": "the project already generates the channel (Hill tortuosity, branches, strike point) in core/scene/lightning.py and its thunder is tied to that geometry; a second bolt shape would break WX.6's pairing. Not downloaded"
+    },
+    {
+      "name": "efealtiparmakoglu/lightning-cinema",
+      "url": "https://github.com/efealtiparmakoglu/lightning-cinema",
+      "licence_claimed_by_research": "MIT (unverified here)",
+      "why_not": "same: stepped leader and stroke curve already exist in the project. Not downloaded"
+    },
+    {
+      "name": "deeplycloudy/xlma-python + LMA data",
+      "url": "https://github.com/deeplycloudy/xlma-python",
+      "why_not": "the data licence is unverified; in-cloud channels are drawn as glow only, so real 3D paths would not reach a pixel. Not downloaded"
+    },
+    {
+      "name": "scottprahl/miepython",
+      "url": "https://github.com/scottprahl/miepython",
+      "licence_claimed_by_research": "MIT (unverified here)",
+      "why_not": "would replace the stated q = 0.9 with a computed asymmetry for a drop-size distribution; a follow-up, not needed for the series. Not downloaded"
+    }
+  ],
+  "not_claimed": [
+    "any rendered result",
+    "that the engine's fog does or does not already dim the channel",
+    "that tier 0 is sustained on the laptop",
+    "q = 0.9 as a measurement (it is the wide end of the paper's stated range for rain)"
+  ]
+}

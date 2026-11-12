@@ -1,0 +1,190 @@
+{
+  "calibrated_look": {
+    "camera_ev100": 9.9069,
+    "ev100": 1.7388,
+    "gate_ev": 0.3,
+    "horizontal_lux": 0.174053,
+    "rule": "core/sky/plan.py ev100_for(moon + night sky horizontal lux), constant over the clip",
+    "saturation_luminance_cd_m2": 4.005,
+    "ue_exposure_bias": 8.1681
+  },
+  "curve_summary": {
+    "light_term": "none",
+    "offset_max_ev": 0.0,
+    "offset_min_ev": -0.25,
+    "rows": 334
+  },
+  "eye": {
+    "ev100_max": 1.9888,
+    "ev100_min": 1.4888,
+    "max_excursion_ev": 0.25,
+    "step": "offset = target + (offset - target) * exp(-dt / tau); tau = close if target > offset else open",
+    "target": "clamp(0.5 * log2(eye_lux / look_lux), -0.25, +0.25); eye_lux = ambient (x deck transmittance in or under the deck) + Allard sum of lights (zero in this bake)",
+    "tau_close_s": 0.5,
+    "tau_open_s": 4.0,
+    "timing_basis": "VISUAL-ONLY"
+  },
+  "item": "lighting_exposure.eye_adaptation.night_ifr",
+  "look_table": [
+    {
+      "ev100": -2.4829,
+      "horizontal_lux": 0.0005,
+      "moon_elevation_deg": 10.0,
+      "moon_relative_brightness": 0.0
+    },
+    {
+      "ev100": -2.4829,
+      "horizontal_lux": 0.0005,
+      "moon_elevation_deg": 20.0,
+      "moon_relative_brightness": 0.0
+    },
+    {
+      "ev100": -2.4829,
+      "horizontal_lux": 0.0005,
+      "moon_elevation_deg": 40.0,
+      "moon_relative_brightness": 0.0
+    },
+    {
+      "ev100": -2.4829,
+      "horizontal_lux": 0.0005,
+      "moon_elevation_deg": 60.0,
+      "moon_relative_brightness": 0.0
+    },
+    {
+      "ev100": -0.7952,
+      "horizontal_lux": 0.0051885,
+      "moon_elevation_deg": 10.0,
+      "moon_relative_brightness": 0.1
+    },
+    {
+      "ev100": -0.3413,
+      "horizontal_lux": 0.00973454,
+      "moon_elevation_deg": 20.0,
+      "moon_relative_brightness": 0.1
+    },
+    {
+      "ev100": 0.0962,
+      "horizontal_lux": 0.0178553,
+      "moon_elevation_deg": 40.0,
+      "moon_relative_brightness": 0.1
+    },
+    {
+      "ev100": 0.3061,
+      "horizontal_lux": 0.0238827,
+      "moon_elevation_deg": 60.0,
+      "moon_relative_brightness": 0.1
+    },
+    {
+      "ev100": 0.3079,
+      "horizontal_lux": 0.0239425,
+      "moon_elevation_deg": 10.0,
+      "moon_relative_brightness": 0.5
+    },
+    {
+      "ev100": 0.7894,
+      "horizontal_lux": 0.0466727,
+      "moon_elevation_deg": 20.0,
+      "moon_relative_brightness": 0.5
+    },
+    {
+      "ev100": 1.2409,
+      "horizontal_lux": 0.0872763,
+      "moon_elevation_deg": 40.0,
+      "moon_relative_brightness": 0.5
+    },
+    {
+      "ev100": 1.4548,
+      "horizontal_lux": 0.117413,
+      "moon_elevation_deg": 60.0,
+      "moon_relative_brightness": 0.5
+    },
+    {
+      "ev100": 0.8003,
+      "horizontal_lux": 0.047385,
+      "moon_elevation_deg": 10.0,
+      "moon_relative_brightness": 1.0
+    },
+    {
+      "ev100": 1.2855,
+      "horizontal_lux": 0.0928454,
+      "moon_elevation_deg": 20.0,
+      "moon_relative_brightness": 1.0
+    },
+    {
+      "ev100": 1.7388,
+      "horizontal_lux": 0.174053,
+      "moon_elevation_deg": 40.0,
+      "moon_relative_brightness": 1.0
+    },
+    {
+      "ev100": 1.9533,
+      "horizontal_lux": 0.234327,
+      "moon_elevation_deg": 60.0,
+      "moon_relative_brightness": 1.0
+    }
+  ],
+  "runway_lights": {
+    "eye_lux_from_lights_to_reach_the_close_clamp": 0.202634,
+    "eye_lux_from_lights_to_return_to_the_look": 0.130539,
+    "formula": "eye_lux = sum over lights ahead of cd * exp(-sigma * d) / d^2 (Allard)",
+    "status": "NO INTENSITIES: core/scene/runway.py PHOTOMETRY candela is None; the baked curve has no light term and no closing distance is claimed"
+  },
+  "scenario": {
+    "basis": "VISUAL-ONLY choices, not weather or airport data",
+    "deck_base_m_agl": 90.0,
+    "deck_top_m_agl": 600.0,
+    "deck_transmittance": 0.25,
+    "extinction_per_m": 0.00124822,
+    "glideslope_deg": 3.0,
+    "ground_speed_m_s": 72.0,
+    "moon_elevation_deg": 40.0,
+    "moon_relative_brightness": 1.0,
+    "start_distance_m": 12000.0,
+    "visibility_mor_m": 2400.0
+  },
+  "status": "UNMEASURED: computed on the Mac, no frame rendered",
+  "tiers": [
+    {
+      "est_vram_mb": 0.0,
+      "summary": "manual exposure; the host steps the eye on the CPU and sets the bias each frame",
+      "tier": 0,
+      "ue": {
+        "AutoExposureMethod": "AEM_Manual",
+        "bias": "camera_ev100 - (look ev100 + offset_ev)"
+      }
+    },
+    {
+      "est_vram_mb": 0.1,
+      "summary": "engine basic auto exposure, clamped to the excursion band, engine speeds from the taus",
+      "tier": 1,
+      "ue": {
+        "AutoExposureMaxBrightness": 1.9888,
+        "AutoExposureMethod": "AEM_Basic",
+        "AutoExposureMinBrightness": 1.4888,
+        "AutoExposureSpeedDown": 0.25,
+        "AutoExposureSpeedUp": 2.0
+      }
+    },
+    {
+      "est_vram_mb": 0.5,
+      "summary": "engine histogram auto exposure (compute shader), same clamp, 10-90 % window",
+      "tier": 2,
+      "ue": {
+        "AutoExposureHighPercent": 90.0,
+        "AutoExposureLowPercent": 10.0,
+        "AutoExposureMaxBrightness": 1.9888,
+        "AutoExposureMethod": "AEM_Histogram",
+        "AutoExposureMinBrightness": 1.4888
+      }
+    },
+    {
+      "est_vram_mb": 3.0,
+      "summary": "tier 2 plus local exposure to hold the lit runway and the dark field together",
+      "tier": 3,
+      "ue": {
+        "LocalExposureHighlightContrastScale": 0.8,
+        "LocalExposureShadowContrastScale": 0.8
+      }
+    }
+  ]
+}

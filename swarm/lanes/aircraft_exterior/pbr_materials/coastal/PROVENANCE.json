@@ -1,0 +1,32 @@
+{
+ "item": "aircraft_exterior.pbr_materials.coastal",
+ "visual_only": true,
+ "status": "UNMEASURED: written and source-tested on the Mac; no frame has been rendered. The pixel gate (run_gate.ps1) has never been executed and refuses until the CoastalWeathering switch of INTEGRATION.md change 6 is merged",
+ "sources": [
+  {
+   "name": "Physically Based API -- materials database (rows used: Salt, Tire)",
+   "url": "https://github.com/AntonPalmqvist/physically-based-api",
+   "licence": "CC0-1.0",
+   "licence_file": "assets/looks/physically_based/LICENSE",
+   "commit": "bed520ab9800de4fc9800304f6557f85ce788e69",
+   "path": "assets/looks/physically_based/materials.json",
+   "sha256": "9f9b55460e01c69a24ca5021642e2980a33d852e0f77c5c5826f7d6c64e32692",
+   "how_used": "Already vendored and pinned in this repo (assets/looks/physically_based/PIN.json); read through scripts/physically_based.py, which refuses a file whose sha256 is not the pin. Nothing was fetched by this lane."
+  }
+ ],
+ "third_party_code_vendored": [],
+ "candidates_not_adopted": [
+  {"name": "rLIC (neutrinoceros/rlic)", "reason": "A tiling detail map can only carry a uniform flow direction, where line integral convolution reduces to a one-axis blur; that is 1 line of numpy here (band_noise stretch_u). rLIC is a compiled extension; not fetched, licence not verified by this lane."},
+  {"name": "PB-22 Trident skin painter (tex_feat.py)", "reason": "Paints panel features in the 3D frame of one specific airframe; needs re-basing per aircraft (7 airframes here). Worth a per-airframe lane; not fetched, licence not verified by this lane."},
+  {"name": "KSP-BurnMarks", "reason": "Exhaust soot; the master material already has a nozzle soot term (SootAmount, Nozzle0-3). Not fetched."},
+  {"name": "aitios-cli", "reason": "Needs per-airframe geometry and a repaired Rust build; out of proportion for a tiling map. Not fetched."},
+  {"name": "MiG29-NuclearOption tools", "reason": "Bundled assets are CC BY-NC-SA (rejected by project rule); scripts not needed. Not fetched."},
+  {"name": "Open Painter", "reason": "GPL-3.0 Blender add-on with an unread materials NOTICE; not needed. Not fetched."},
+  {"name": "80.lv hard-surface texturing article", "reason": "Technique reference only (oil-canning as shallow pillowing between frames); no asset or code taken, article not fetched by this lane."}
+ ],
+ "generated": [
+  {"path": "baked/T_AcCoastal_DetailN_512.png", "sha256": "3d9e9448bec3cfb990753e912d85956ebcf9058d598d47988ae66064f2898d7b", "by": "bake_coastal_pbr.py --tiers 0", "licence": "project's own (procedural, seeded; no third-party pixels)"},
+  {"path": "baked/T_AcCoastal_Mask_512.png", "sha256": "2deedb5fee975ffb56d7b366fa9a1585429e40a518fbacf02a5a672a32693765", "by": "bake_coastal_pbr.py --tiers 0", "licence": "project's own (procedural, seeded; no third-party pixels)"}
+ ],
+ "numbers_without_a_measured_source": "Every COASTAL_SCALARS value, CLASS_OVERRIDES, the oil-canning bay grid and slope, the gate thresholds in measure_gate.py and the proposed scenario look parameters in INTEGRATION.md are look choices: UNCALIBRATED until a probe render on the Windows laptop. Only the salt albedo and the tyre albedo floor come from the database."
+}

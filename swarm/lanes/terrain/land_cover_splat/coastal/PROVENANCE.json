@@ -1,0 +1,70 @@
+{
+ "lane": "terrain.land_cover_splat.coastal",
+ "label": "visual-only; look values UNMEASURED on the render machine",
+ "vendored": [],
+ "vendored_note": "Nothing was downloaded, vendored or executed. The bake consumes the class map the repo's own core/terrain/landcover.py already produces from ESA WorldCover; no third-party code or asset ships in this lane, and no baked texture is committed (outputs are per scene and carry their own sha256 in land_cover_splat.json).",
+ "lane_code": [
+  {
+   "file": "bake_coastal_splat.py",
+   "sha256": "6b8f230e94bbff808945fcf9dc24ebe4c26eab61a866c396bc88b237073ecbea",
+   "licence": "project"
+  },
+  {
+   "file": "measure_ground.py",
+   "sha256": "5081e0527b2038a1bd4f2d6d68119f2f598d2908c131e2cb8e52f06729e3a3a0",
+   "licence": "project"
+  },
+  {
+   "file": "run_gate.py",
+   "sha256": "73b947ea2c2e5fe5c80273bde3d3290dfed5c2f76df083e63516d13560d26888",
+   "licence": "project"
+  }
+ ],
+ "sources": [
+  {
+   "name": "ESA WorldCover 10 m 2021 v200 (via core/terrain/landcover.py; not fetched by this lane)",
+   "url": "https://esa-worldcover.org/",
+   "licence": "CC BY 4.0",
+   "used_for": "the class map the splat is derived from; each bake embeds the scene's landcover.json (crop sha256 and attribution) in its sidecar. Attribution must travel with any distributed splat."
+  },
+  {
+   "name": "ESA WorldCover Product User Manual v2.0, table 3 (map codes), as carried by core/terrain/landcover.py LEGEND",
+   "licence": "CC BY 4.0 (product documentation); repo code",
+   "used_for": "legend codes in CODE_TO_GROUPS"
+  },
+  {
+   "name": "Lekner & Dorf, Why some things are darker when wet, Applied Optics 27(7), 1988",
+   "licence": "published paper (phenomenon only; the 0.6 multiplier and 12 m band are look choices)",
+   "used_for": "wet-sand band"
+  },
+  {
+   "name": "Koschmieder 1924 visibility relation (2 % threshold contrast, 3.912 / V)",
+   "licence": "published formula (fact)",
+   "used_for": "contrast threshold in measure_ground.py"
+  },
+  {
+   "name": "IUGG mean Earth radius 6 371 008.8 m (GRS 80)",
+   "licence": "published constant (fact)",
+   "used_for": "row-to-range geometry in measure_ground.py"
+  }
+ ],
+ "research_candidates_not_adopted": [
+  {
+   "name": "Olbedo",
+   "why": "needs to cache and modify Google tile imagery (terms need the owner's check) and its weights carry RAIL / Adobe licences; out of this lane's scope"
+  },
+  {
+   "name": "SWORD v17b",
+   "why": "good follow-up for a river channel in the water mask at tier 2+; not fetched, licence CC BY 4.0 unverified here"
+  },
+  {
+   "name": "HORAYZON, GEDTM30, MultiScaleErosion, runevision erosion filter, USGS 3DEP lidar, ESA CCI snow",
+   "why": "relief, AO or snow work, not land-cover classification; left to their own lanes"
+  }
+ ],
+ "authored_uncited": [
+  "per-group albedo picks in bake_coastal_splat.py MATERIAL (no source read; an earlier Oke 1987 citation was from memory and has been removed)",
+  "roughness, specular, wet-sand and foam look values",
+  "gate thresholds in measure_ground.py; the 15.7 km haze visibility is the sun_time_of_day lane's figure, taken over unchecked"
+ ]
+}

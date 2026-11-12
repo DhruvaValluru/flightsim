@@ -1,0 +1,90 @@
+{
+ "tier": 0,
+ "summary": "rock 512 + snow 256, one projection, near layer only",
+ "texture_taps_per_pixel": 2,
+ "projection": "dominant-axis",
+ "rock_px": 512,
+ "snow_px": 256,
+ "est_vram_mb": 0.417,
+ "layers": {
+  "rock_near": {
+   "tile_m": 48.0,
+   "wavelength_m": [
+    0.75,
+    6.0
+   ],
+   "fade_start_m": 934.0,
+   "fade_end_m": 3735.9
+  },
+  "snow": {
+   "tile_m": 96.0,
+   "wavelength_m": [
+    1.5,
+    12.0
+   ],
+   "fade_start_m": 1868.0,
+   "fade_end_m": 7471.8
+  }
+ },
+ "rock": {
+  "file": "alpine_detail_rock_t0.dds",
+  "format": "BC5_UNORM (DXGI 83), xy; z = sqrt(1 - x^2 - y^2)",
+  "mips": 10,
+  "rms_slope": 0.25,
+  "mean_nz": 0.97314,
+  "mip_normal_length": [
+   1.0,
+   0.99656,
+   0.99264,
+   0.99118,
+   0.99482,
+   0.99812,
+   0.99953,
+   0.99994,
+   0.99999,
+   1.0
+  ]
+ },
+ "snow": {
+  "file": "alpine_detail_snow_t0.dds",
+  "format": "BC5_UNORM (DXGI 83), xy; z = sqrt(1 - x^2 - y^2)",
+  "mips": 9,
+  "rms_slope": 0.1,
+  "mean_nz": 0.9951,
+  "mip_normal_length": [
+   1.0,
+   0.99967,
+   0.9991,
+   0.99871,
+   0.99858,
+   0.99916,
+   0.9999,
+   0.99997,
+   1.0
+  ]
+ },
+ "label": "visual-only",
+ "seed": 20261112,
+ "capture": {
+  "width_px": 1280,
+  "height_px": 800,
+  "hfov_deg": 54.4,
+  "footprint_m_per_px_at_1km": 0.803
+ },
+ "snow_mask": {
+  "lum_lo": 0.55,
+  "lum_hi": 0.75,
+  "sat_lo": 0.12,
+  "sat_hi": 0.25
+ },
+ "sastrugi_long_axis": "+U of the snow map; the material rotates it onto the wind bearing",
+ "diffuse_energy_shift": {
+  "rock": -0.02686,
+  "snow": -0.0049,
+  "note": "mean N.z - 1 at full strength: how much flat sunlit ground darkens"
+ },
+ "files_sha256": {
+  "alpine_detail_rock_t0.dds": "78622b0da7ff52b91c6129379a2cf467d0ed94ad99b8d1ab4b7ee3f507a96b5c",
+  "alpine_detail_snow_t0.dds": "b4fd8644388812dd06d3a79275063ae5cdb59733b27117bc3f0ace9c530a93b7"
+ }
+}

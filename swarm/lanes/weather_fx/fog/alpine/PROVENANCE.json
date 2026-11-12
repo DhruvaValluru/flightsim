@@ -1,0 +1,65 @@
+{
+ "lane": "weather_fx.fog.alpine",
+ "label": "visual-only",
+ "vendored": [],
+ "vendored_note": "Nothing was downloaded, vendored or executed. The research candidates were considered and not adopted (see considered_not_adopted); the bake uses published formulas, constants already in this repository and its own deterministic noise.",
+ "generated": [
+  {
+   "file": "alpine_fog.json",
+   "sha256": "b78c84090e727d2435138b2a10b12d558ba1d671c4fafb18f108ed22647cf15b",
+   "generator": "bake_alpine_fog.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_fog_top.png",
+   "sha256": "1298b8ba74865cf75d56c3de42b84d0b3e61891d52d8f34e77d9e916dabfb16a",
+   "generator": "bake_alpine_fog.py",
+   "licence": "project (generated pixels, integer-hash value noise)",
+   "note": "the PNG's bytes depend on the zlib build; the pixels' own hash is top_relief.rgba_sha256 in alpine_fog.json and is what the test rebuilds"
+  }
+ ],
+ "sources": [
+  {
+   "name": "Koschmieder 1924, Theorie der horizontalen Sichtweite: visibility = 3.912 / extinction (2 % contrast threshold)",
+   "licence": "published formula (fact)",
+   "used_for": "visibility column of alpine_fog.json; the same constant as core/scene/weather_visuals.py fog_extinction_per_m",
+   "note": "typed from memory, not fetched"
+  },
+  {
+   "name": "Bohren 1987, Multiple scattering of light and some of its observable consequences, Am. J. Phys. 55, 524: two-stream reflectance of a non-absorbing layer, (1-g) tau / (2 + (1-g) tau)",
+   "licence": "published formula (fact)",
+   "used_for": "fog_albedo",
+   "note": "typed from memory, not fetched; the result is flagged UNCALIBRATED"
+  },
+  {
+   "name": "Hillaire 2020, A Scalable and Production Ready Sky and Atmosphere Rendering Technique (EGSR 2020), table 1: Rayleigh scattering coefficients and scale height",
+   "licence": "published constants (facts)",
+   "used_for": "sun_tint_rgb; the same numbers as swarm/lanes/atmosphere_clouds/aerial_perspective/alpine",
+   "note": "copied from that lane, not fetched"
+  },
+  {
+   "name": "This repository: core/scene/weather_visuals.py ENGINE_FOG_DENSITY_PER_EXTINCTION and FlightSimGoogleTiles.cpp FogColumnM (both read on the UE 5.7.4 sources by their authors)",
+   "licence": "project",
+   "used_for": "FogDensity and FogHeightFalloff from extinction and scale height"
+  },
+  {
+   "name": "This repository: swarm/lanes/lighting_exposure/physical_light_units/alpine/alpine_plu.json, rows at 1600 m and 3000 m, sun 30 deg",
+   "licence": "project (model values)",
+   "used_for": "nominal sun and sky illuminance at the fog top"
+  }
+ ],
+ "considered_not_adopted": [
+  {
+   "name": "miepython (scottprahl), MIT",
+   "reason": "A droplet phase LUT has nowhere to be sampled in tiers 0-2: ExponentialHeightFog exposes one cosine-power lobe. Worth adopting if a later tier writes its own fog shader (fogbow, glory)."
+  },
+  {
+   "name": "Narasimhan and Nayar 2003, atmospheric point spread function (paper)",
+   "reason": "Glow around lights in fog; the alpine frame is a daylight frame with no light sources in the fog. Belongs to the night scenario."
+  },
+  {
+   "name": "astra-vision/weather-particle-simulator, MIT / Apache-2.0",
+   "reason": "Rain and snow particle statistics, not fog; its Columbia streak database is unlicensed and stays rejected."
+  }
+ ]
+}

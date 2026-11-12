@@ -1,0 +1,58 @@
+{
+ "lane": "hardware_perf.vram_budgeting.alpine",
+ "label": "visual-only / performance budgeting; every number is an ESTIMATE, UNMEASURED on the render machine",
+ "vendored": [],
+ "vendored_note": "Nothing was downloaded, vendored or executed. Candidates from discoveries.json were considered and not adopted in this lane: ICBC (MIT) would cut tile texture bytes about 8x but needs a patch to the Cesium plugin, which is outside this lane; it is proposed in INTEGRATION.md with its licence still to be confirmed from the repository at a pinned commit.",
+ "generated": [
+  {
+   "file": "alpine_vram_budget.json",
+   "sha256": "5834335cd9b6d7f7e4aa1f91f50d8a90de490875c98dd71b8831fd2f5a12f02c",
+   "generator": "bake_vram_budget.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_vram_tier0.ini",
+   "sha256": "70b74b765cb1e1f7a71ed9ef9f780312eb5f54d0ff3e383b92d3abdf00941166",
+   "generator": "bake_vram_budget.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_vram_tier1.ini",
+   "sha256": "e14c5f988d4efe02e8ff302a63c1aa59f0b8c08b67af186f6d863ef52afaae7a",
+   "generator": "bake_vram_budget.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_vram_tier2.ini",
+   "sha256": "a4c0b3118a96017371789cc8d3d8dbbb524b3661825621ce410ea392fb5aed37",
+   "generator": "bake_vram_budget.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_vram_tier3.ini",
+   "sha256": "0085d84366730d6723a58754c1b8ac6ffd7f4803b554cdce30abe1ab47843d86",
+   "generator": "bake_vram_budget.py",
+   "licence": "project (generated numbers)"
+  }
+ ],
+ "sources": [
+  {
+   "name": "core/render/hardware_budget.py (integrated-GPU starting budget, usable_vram_mb 491, measured=false)",
+   "licence": "project"
+  },
+  {
+   "name": "Direct3D 11 texture format sizes (DXGI_FORMAT byte widths; BC1/BC4 8-byte and BC3/BC5/BC7 16-byte 4x4 blocks), Microsoft Learn",
+   "url": "https://learn.microsoft.com/en-us/windows/win32/direct3d11/texture-block-compression-in-direct3d-11",
+   "licence": "documentation reference; facts only, no text or code copied"
+  },
+  {
+   "name": "Unreal Engine console variables r.Streaming.PoolSize, r.Streaming.LimitPoolSizeToVRAM, r.RenderTargetPoolMin, r.Shadow.MaxCSMResolution, r.Shadow.CSM.MaxCascades, r.ScreenPercentage (names from memory of the engine; integrator confirms each exists in the pinned build)",
+   "licence": "reference to engine setting names only"
+  },
+  {
+   "name": "Cesium for Unreal ACesium3DTileset properties MaximumCachedBytes, MaximumScreenSpaceError, MaximumSimultaneousTileLoads, EnableFrustumCulling, EnableFogCulling (names from memory; integrator confirms against the vendored plugin version)",
+   "url": "https://github.com/CesiumGS/cesium-unreal",
+   "licence": "Apache-2.0 (plugin); property names only, no code copied"
+  }
+ ]
+}

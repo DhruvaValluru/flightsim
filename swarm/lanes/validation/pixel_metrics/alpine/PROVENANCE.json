@@ -1,0 +1,41 @@
+{
+ "lane": "validation.pixel_metrics.alpine",
+ "visual_only": true,
+ "fetched_assets": [],
+ "vendored_code": [],
+ "generated": {
+  "generator": "build_gate_manifest.py",
+  "author": "written in this lane; numpy + Pillow + Python stdlib only",
+  "licence": "repository licence",
+  "inputs": "sibling alpine lane gate scripts read as text (AST only); calibration frames from numpy default_rng(20261112)",
+  "sha256": {
+   "calib/black.png": "88ecdfaf82804bd8a96b204c94fece88b49f6b475b6e67c9826d645845ab51b2",
+   "calib/blue_snow.png": "c194e866c0d96647c2898adc8cd46df663e90cb8cb90b16c4c6c83d258d44ac3",
+   "calib/clipped.png": "4916ebe83e2faccbcf8abab962c7a9c2a0c919c3515e028ee953dce00b7f8083",
+   "calib/crushed.png": "7178a2d69fcbd47cdc4588acd97b7b2d34cccf6385d02620ec7e27fa18c8a8a8",
+   "calib/expected.json": "2bef6394a668a8c15b5a5093970d504080340c14c8a061954a760006fc1b73b0",
+   "calib/neutral.png": "4d381148f92754bf9f7d2e0c927cd3a5441aa7dba14e902994f1bdf4e5033d83"
+  },
+  "not_pinned": "alpine_gates.json and shot.template.json change whenever a sibling lane edits its gate; the Mac test compares them with a fresh scan instead"
+ },
+ "techniques": [
+  {
+   "name": "SSIM (block form, C1=0.01^2, C2=0.03^2)",
+   "source": "Wang, Bovik, Sheikh, Simoncelli 2004, 'Image quality assessment: from error visibility to structural similarity' (from memory; formula only, no code copied)"
+  },
+  {
+   "name": "sRGB transfer function and Rec. 709 luminance weights",
+   "source": "IEC 61966-2-1 / ITU-R BT.709 constants"
+  },
+  {
+   "name": "Laplacian detail energy, exit-code convention 0/1/other",
+   "source": "repo: sibling alpine lane gates (e.g. aircraft_exterior/decals_wear/alpine/pixel_gate.py)"
+  }
+ ],
+ "candidates_not_adopted": [
+  {
+   "name": "third-party image-metric packages (scikit-image, piq, FLIP)",
+   "reason": "research returned no candidates; none fetched. The laptop would need extra installs for a 20-line block SSIM, and every sibling gate already depends on numpy + Pillow only."
+  }
+ ]
+}

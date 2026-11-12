@@ -1,0 +1,53 @@
+{
+ "lane": "terrain.horizon_lod.alpine",
+ "label": "visual-only",
+ "vendored": [],
+ "vendored_note": "Nothing was downloaded, vendored or executed. The plan is closed-form geometry; the ground stays the Google Photorealistic 3D Tiles Cesium already draws.",
+ "generated": [
+  {
+   "file": "alpine_horizon_lod.json",
+   "sha256": "d1a29cb1dac9f47be56ffa4981d1690281239a0d0023896791d84bcaa5e6e1fd",
+   "generator": "bake_alpine_horizon_lod.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_horizon_lod_curve.csv",
+   "sha256": "b10892f2f74157a3d86037481fd1cc3439be868e1672cfadfbd281e797d1aa41",
+   "generator": "bake_alpine_horizon_lod.py",
+   "licence": "project (generated numbers)"
+  }
+ ],
+ "sources": [
+  {
+   "name": "Geometric horizon of a sphere, d = sqrt(2 R h + h^2), dip = acos(R / (R + h)); IUGG mean Earth radius 6371008.8 m",
+   "licence": "published constants and formulas (facts)",
+   "used_for": "horizon range, dip, the depression-to-range inversion in the pixel gate",
+   "note": "the atmosphere lane (atmosphere_clouds.aerial_perspective.alpine) uses a 6360 km planet radius; the two differ by 0.09 % in horizon range"
+  },
+  {
+   "name": "Terrestrial refraction coefficient k = 0.13 (Gauss; standard surveying value)",
+   "licence": "published constant (fact)",
+   "used_for": "recorded only: how much farther the real horizon is than the rendered, unrefracted one. Not used by the gate.",
+   "note": "typed from memory, not fetched in this session"
+  },
+  {
+   "name": "OGC 3D Tiles 1.0 specification, screen-space error: sse = geometricError * screenHeight / (distance * 2 tan(fovy / 2))",
+   "url": "https://docs.ogc.org/cs/18-053r2/18-053r2.html",
+   "licence": "OGC document licence (formula only; no text or code copied)",
+   "used_for": "the geometric-error bound per distance and the 1/SSE^2 tile-count model",
+   "note": "typed from memory, not fetched in this session; the tile-count constants (tile span per geometric error, bytes per tile) are ASSUMED and UNCALIBRATED"
+  },
+  {
+   "name": "Cesium for Unreal 2.x ACesium3DTileset property names (MaximumScreenSpaceError, MaximumCachedBytes, MaximumSimultaneousTileLoads, LoadingDescendantLimit, PreloadAncestors, PreloadSiblings, EnableFogCulling, EnableFrustumCulling, EnforceCulledScreenSpaceError, CulledScreenSpaceError, UseLodTransitions, LodTransitionLength, ForbidHoles, LogSelectionStats)",
+   "url": "https://github.com/CesiumGS/cesium-unreal",
+   "licence": "Apache-2.0 (names only; no code copied; the plugin is already a project dependency)",
+   "used_for": "the per-tier tileset settings in alpine_horizon_lod.json",
+   "note": "typed from memory, NOT read from the installed plugin. Set them by reflection by name and record which were found, as FFlightSimGoogleTiles::ApplyBeautyLook already does."
+  }
+ ],
+ "considered_not_used": [
+  {"name": "HORAYZON (ChristianSteger/HORAYZON, MIT, unvetted)", "reason": "bakes horizon and sky-view maps from a DEM; useful for terrain AO and long shadows, which are other items. The far terrain itself is already in the Google tileset, so no DEM silhouette is needed for horizon range. Not fetched."},
+  {"name": "GEDTM30 v1.2 (data CC BY 4.0, code licence unread)", "reason": "a DEM-baked far-ridge backdrop would put non-Google ground in a terrain render, against the project rule, and Cesium already supplies coarse far tiles. Not fetched."},
+  {"name": "MultiScaleErosion, runevision erosion filter, USGS 3DEP, SWORD, ESA snow cover, Olbedo", "reason": "detail, water, snow and de-lighting: not level of detail or horizon range. Not fetched."}
+ ]
+}

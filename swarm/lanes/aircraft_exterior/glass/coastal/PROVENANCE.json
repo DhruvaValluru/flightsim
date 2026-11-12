@@ -1,0 +1,83 @@
+{
+ "adoption_note": "None of the eight research candidates addresses glass (they are paint weathering, soot and panel tools); nothing was downloaded or vendored. The bake is closed-form optics plus seeded procedural noise.",
+ "fetched_assets": [],
+ "generator": "bake_glass.py bake (numpy 2.0.2, Pillow 11.3.0, seed 20261112)",
+ "lane": "aircraft_exterior.glass.coastal",
+ "measured": false,
+ "outputs": {
+  "T_GlassEnv_128.png": {
+   "bytes": 2517,
+   "licence": "generated in this repository",
+   "sha256": "5e3fca4dd9fa2d292d015c5f105f549218452430f08af46ab8aa91d93c71dcbf"
+  },
+  "T_GlassEnv_256.png": {
+   "bytes": 6373,
+   "licence": "generated in this repository",
+   "sha256": "49224f65f2cdb41c99227e8a08c82b8d01d042875bbc7a99eb792476c48f443e"
+  },
+  "T_GlassEnv_64.png": {
+   "bytes": 1065,
+   "licence": "generated in this repository",
+   "sha256": "0f50b3a6763b7e9dc8ec7426842a5253810d83587a89926530ffc04f77a105a4"
+  },
+  "T_GlassFilm_M_1024.png": {
+   "bytes": 719477,
+   "licence": "generated in this repository",
+   "sha256": "4c0dc9dbcb2e21712193b258affd5dc539c9c2975e558a3cc8fcd5f57aa07835"
+  },
+  "T_GlassFilm_M_256.png": {
+   "bytes": 94322,
+   "licence": "generated in this repository",
+   "sha256": "c5f30f3260433dccf45a5752978df6b9020701360f0be1ee314c7462fcd20b15"
+  },
+  "T_GlassFilm_M_512.png": {
+   "bytes": 262407,
+   "licence": "generated in this repository",
+   "sha256": "9e9a595fca8beabd4c426c979a2826dec2137f26d559b097b0c1b50a33f4d30b"
+  },
+  "T_GlassFresnel_LUT.png": {
+   "bytes": 174,
+   "licence": "generated in this repository",
+   "sha256": "f071cb3eb389e4a74c91e73d72c37bacd766d2eb20b03399952ef2d95ea7ef69"
+  },
+  "T_GlassMicro_N_1024.png": {
+   "bytes": 692744,
+   "licence": "generated in this repository",
+   "sha256": "2de42dfb9151ad01276276b4dcc4a2f7bfcc181ed0c339a9aec161b40a301ac8"
+  },
+  "T_GlassMicro_N_256.png": {
+   "bytes": 85442,
+   "licence": "generated in this repository",
+   "sha256": "b96b46e5ba8f4b6279bba2932ae0112cf1bcb5c578eb2fd097c099452214d0a1"
+  },
+  "T_GlassMicro_N_512.png": {
+   "bytes": 254195,
+   "licence": "generated in this repository",
+   "sha256": "b4bb3f85bc77f2204bb921b71d2dd30988353740e3bcb5ae0eafa21f3da15488"
+  }
+ },
+ "sources": [
+  {
+   "licence": "textbook physics, no asset",
+   "name": "Fresnel equations and incoherent two-face slab sum (Born & Wolf, Principles of Optics, ch. 1.5)",
+   "used_for": "T_GlassFresnel_LUT"
+  },
+  {
+   "licence": "repository value, no asset",
+   "name": "PMMA refractive index n = 1.49, as scripts/aircraft_look.py GLASS_IOR",
+   "used_for": "T_GlassFresnel_LUT"
+  },
+  {
+   "licence": "repository values",
+   "name": "scripts/aircraft_look.py GlassTint and THIN_VECTORS",
+   "used_for": "tint, transmittance"
+  },
+  {
+   "licence": "repository code",
+   "name": "Analytic coastal sky/sea model written for this lane (stated parameters in shared_params)",
+   "used_for": "T_GlassEnv_*"
+  }
+ ],
+ "vendored_code": [],
+ "visual_only": true
+}

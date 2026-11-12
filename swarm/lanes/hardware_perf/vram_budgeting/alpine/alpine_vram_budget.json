@@ -1,0 +1,205 @@
+{
+ "device_loss_margin": 0.1,
+ "label": "ESTIMATE: arithmetic on assumed formats; UNMEASURED on the render machine",
+ "lane": "hardware_perf.vram_budgeting.alpine",
+ "measured": false,
+ "render_target_model": {
+  "internal": [
+   [
+    "SceneColor FloatRGBA",
+    8.0
+   ],
+   [
+    "SceneDepthZ D32S8 (R32G8X24)",
+    8.0
+   ],
+   [
+    "GBufferA-D 4x 32bpp",
+    16.0
+   ],
+   [
+    "Velocity RG16",
+    4.0
+   ],
+   [
+    "TAA history FloatRGBA",
+    8.0
+   ],
+   [
+    "post chain scratch",
+    12.0
+   ],
+   [
+    "bloom/downsample chain (1/3 of FloatRGBA)",
+    2.667
+   ],
+   [
+    "HZB R16F mips",
+    0.667
+   ],
+   [
+    "SSAO R8",
+    1.0
+   ],
+   [
+    "light attenuation",
+    4.0
+   ]
+  ],
+  "internal_bytes_per_px": 64.333,
+  "output": [
+   [
+    "swap chain 2x RGBA8",
+    8.0
+   ]
+  ],
+  "output_bytes_per_px": 8.0
+ },
+ "scenario": "alpine",
+ "tier0_cap_mb": 441.9,
+ "tiers": [
+  {
+   "capture": {
+    "height": 800,
+    "width": 1280
+   },
+   "cesium_tileset": {
+    "EnableFogCulling": true,
+    "EnableFrustumCulling": true,
+    "MaximumCachedBytes": 167772160,
+    "MaximumScreenSpaceError": 24.0,
+    "MaximumSimultaneousTileLoads": 4
+   },
+   "cvars": {
+    "r.DynamicGlobalIlluminationMethod": 0,
+    "r.RenderTargetPoolMin": 71,
+    "r.ScreenPercentage": 100,
+    "r.Shadow.CSM.MaxCascades": 1,
+    "r.Shadow.MaxCSMResolution": 1024,
+    "r.Streaming.LimitPoolSizeToVRAM": 1,
+    "r.Streaming.PoolSize": 128
+   },
+   "est_bytes": {
+    "baked_luts": 16777216,
+    "cesium_tile_cache": 167772160,
+    "fixed_overhead": 50331648,
+    "render_targets": 74069333,
+    "shadow_maps": 2097152,
+    "ue_streaming_pool": 134217728
+   },
+   "est_vram_mb": 424.6,
+   "fits_cap_estimate": true,
+   "sustained": null,
+   "tier": 0
+  },
+  {
+   "capture": {
+    "height": 800,
+    "width": 1280
+   },
+   "cesium_tileset": {
+    "EnableFogCulling": true,
+    "EnableFrustumCulling": true,
+    "MaximumCachedBytes": 234881024,
+    "MaximumScreenSpaceError": 16.0,
+    "MaximumSimultaneousTileLoads": 6
+   },
+   "cvars": {
+    "r.DynamicGlobalIlluminationMethod": 0,
+    "r.RenderTargetPoolMin": 71,
+    "r.ScreenPercentage": 100,
+    "r.Shadow.CSM.MaxCascades": 2,
+    "r.Shadow.MaxCSMResolution": 1024,
+    "r.Streaming.LimitPoolSizeToVRAM": 1,
+    "r.Streaming.PoolSize": 160
+   },
+   "est_bytes": {
+    "baked_luts": 16777216,
+    "cesium_tile_cache": 234881024,
+    "fixed_overhead": 50331648,
+    "render_targets": 74069333,
+    "shadow_maps": 4194304,
+    "ue_streaming_pool": 167772160
+   },
+   "est_vram_mb": 522.6,
+   "fits_cap_estimate": false,
+   "sustained": null,
+   "tier": 1
+  },
+  {
+   "capture": {
+    "height": 960,
+    "width": 1536
+   },
+   "cesium_tileset": {
+    "EnableFogCulling": true,
+    "EnableFrustumCulling": true,
+    "MaximumCachedBytes": 335544320,
+    "MaximumScreenSpaceError": 12.0,
+    "MaximumSimultaneousTileLoads": 8
+   },
+   "cvars": {
+    "r.DynamicGlobalIlluminationMethod": 0,
+    "r.RenderTargetPoolMin": 102,
+    "r.ScreenPercentage": 100,
+    "r.Shadow.CSM.MaxCascades": 2,
+    "r.Shadow.MaxCSMResolution": 2048,
+    "r.Streaming.LimitPoolSizeToVRAM": 1,
+    "r.Streaming.PoolSize": 256
+   },
+   "est_bytes": {
+    "baked_luts": 16777216,
+    "cesium_tile_cache": 335544320,
+    "fixed_overhead": 50331648,
+    "render_targets": 106659840,
+    "shadow_maps": 16777216,
+    "ue_streaming_pool": 268435456
+   },
+   "est_vram_mb": 757.7,
+   "fits_cap_estimate": false,
+   "sustained": null,
+   "tier": 2
+  },
+  {
+   "capture": {
+    "height": 960,
+    "width": 1536
+   },
+   "cesium_tileset": {
+    "EnableFogCulling": true,
+    "EnableFrustumCulling": true,
+    "MaximumCachedBytes": 536870912,
+    "MaximumScreenSpaceError": 8.0,
+    "MaximumSimultaneousTileLoads": 12
+   },
+   "cvars": {
+    "r.DynamicGlobalIlluminationMethod": 0,
+    "r.RenderTargetPoolMin": 102,
+    "r.ScreenPercentage": 100,
+    "r.Shadow.CSM.MaxCascades": 3,
+    "r.Shadow.MaxCSMResolution": 2048,
+    "r.Streaming.LimitPoolSizeToVRAM": 1,
+    "r.Streaming.PoolSize": 384
+   },
+   "est_bytes": {
+    "baked_luts": 16777216,
+    "cesium_tile_cache": 536870912,
+    "fixed_overhead": 50331648,
+    "render_targets": 106659840,
+    "shadow_maps": 25165824,
+    "ue_streaming_pool": 402653184
+   },
+   "est_vram_mb": 1085.7,
+   "fits_cap_estimate": false,
+   "sustained": null,
+   "tier": 3
+  }
+ ],
+ "tile_texture_bytes_512": {
+  "BC1_mipped": 174776,
+  "RGBA8_mipped": 1398100,
+  "ratio": 8.0
+ },
+ "usable_vram_mb": 491,
+ "version": 1
+}
