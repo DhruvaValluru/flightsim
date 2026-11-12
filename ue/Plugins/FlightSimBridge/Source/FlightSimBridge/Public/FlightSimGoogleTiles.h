@@ -156,6 +156,11 @@ private:
 	FString DeclinedReason;
 	int32 FramesWaited = 0;
 	int32 TileRefreshes = 0;
+	// Round 66 (#02): the beauty tiles material ApplyBeautyLook set, re-asserted
+	// before each view wait (round 65 read the tileset's Material back null),
+	// and how many times it had to be.
+	TWeakObjectPtr<class UMaterialInterface> BeautyTilesMaterial;
+	int32 BeautyMaterialReasserts = 0;
 	double LongestWaitSeconds = 0.0;
 	double TotalWaitSeconds = 0.0;
 	// round-2b terrain-ocean: ApplyBeautyGround's record (null: not run).

@@ -241,6 +241,19 @@ bool FFlightSimGoogleTiles::WaitForView(const FVector& Location, const FRotator&
 		Error = TEXT("terrain.google_tiles: the tileset is gone");
 		return false;
 	}
+	if (UMaterialInterface* const Wanted = BeautyTilesMaterial.Get())
+	{
+		if (Tiles->GetMaterial() != Wanted)
+		{
+			// SetMaterial destroys the tileset, so the tiles below reload with it.
+			Tiles->SetMaterial(Wanted);
+			++BeautyMaterialReasserts;
+			UE_LOG(LogFlightSimGoogleTiles, Warning,
+			       TEXT("google tiles: the tileset's Material was %s, not the beauty material; set again (%d)"),
+			       Tiles->GetMaterial() != nullptr ? *Tiles->GetMaterial()->GetPathName() : TEXT("null"),
+			       BeautyMaterialReasserts);
+		}
+	}
 	FCesiumCamera Camera;
 	Camera.ViewportSize = FVector2D(static_cast<double>(Width), static_cast<double>(Height));
 	Camera.Location = Location;
@@ -373,6 +386,7 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record() const
 		{
 			Drawn->SetNumberField(Pair.Key, Pair.Value);
 		}
+		Out->SetNumberField(TEXT("beauty_material_reasserts"), BeautyMaterialReasserts);
 		Out->SetNumberField(TEXT("drawn_primitives"), TilePrimitives.Num());
 		Out->SetObjectField(TEXT("drawn_base_materials"), Drawn);
 		// Round 65 (#02): the tileset's own material properties as they stand
@@ -504,34 +518,15 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyLook(UMaterialInterfac
 		}
 		MaterialRoute = FString::Printf(TEXT("not found: no SetMaterial function or Material property on %s"),
 		                                *Class->GetName());
-		UFunction* Setter = Tiles->FindFunction(FName(TEXT("SetMaterial")));
-		FObjectProperty* SetterParam = nullptr;
-		if (Setter != nullptr && Setter->NumParms == 1)
-		{
-			for (TFieldIterator<FProperty> It(Setter); It; ++It)
-			{
-				SetterParam = CastField<FObjectProperty>(*It);
-				break;
-			}
-		}
-		if (SetterParam != nullptr && Material->IsA(SetterParam->PropertyClass))
-		{
-			TArray<uint8> Parms;
-			Parms.SetNumZeroed(Setter->ParmsSize);
-			SetterParam->SetObjectPropertyValue_InContainer(Parms.GetData(), Material);
-			Tiles->ProcessEvent(Setter, Parms.GetData());
-			MaterialRoute = TEXT("UFunction SetMaterial");
-			bChanged = true;
-		}
-		else if (FObjectProperty* Property = FindFProperty<FObjectProperty>(Class, TEXT("Material")))
-		{
-			if (Material->IsA(Property->PropertyClass))
-			{
-				Property->SetObjectPropertyValue_InContainer(Tiles, Material);
-				MaterialRoute = TEXT("UPROPERTY Material");
-				bChanged = true;
-			}
-		}
+		// Round 66 (#02): the direct call (Cesium3DTileset.h is included). The
+		// reflected ProcessEvent route reported success yet round 65 read the
+		// Material back null, so every tile drew MI_CesiumThreeOverlaysAndClipping.
+		Tiles->SetMaterial(Material);
+		BeautyTilesMaterial = Material;
+		MaterialRoute = Tiles->GetMaterial() == Material
+			? TEXT("ACesium3DTileset::SetMaterial (read back)")
+			: TEXT("ACesium3DTileset::SetMaterial did not hold (read back differs)");
+		bChanged = true;
 		Out->SetStringField(TEXT("material"), Material->GetPathName());
 	}
 	Out->SetStringField(TEXT("material_route"), MaterialRoute);

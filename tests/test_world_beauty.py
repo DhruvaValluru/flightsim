@@ -360,12 +360,15 @@ def test_cesium_is_reached_only_by_reflection():
     beauty = TILES_CPP[TILES_CPP.index("FFlightSimGoogleTiles::ApplyBeautyLook"):]
     includes = set(re.findall(r'#include "(Cesium[A-Za-z0-9]+\.h)"', TILES_CPP))
     assert includes == {"Cesium3DTileset.h", "CesiumCamera.h", "CesiumCameraManager.h", "CesiumGeoreference.h"}
-    assert 'FindFunction(FName(TEXT("SetMaterial")))' in beauty
-    assert 'FindFProperty<FObjectProperty>(Class, TEXT("Material"))' in beauty
+    # Round 66: the material by the direct call, read back (the reflected
+    # ProcessEvent route left Material null in round 65; Cesium for Unreal
+    # 2.30.0's Cesium3DTileset.cpp:563 SetMaterial destroys the tileset so the
+    # tiles reload with it), re-asserted before each view wait.
+    assert "Tiles->SetMaterial(Material);" in beauty and "Tiles->GetMaterial() == Material" in beauty
+    assert "Tiles->SetMaterial(Wanted);" in TILES_CPP
     assert 'FindFProperty<FBoolProperty>(Class, TEXT("GenerateSmoothNormals"))' in beauty
     assert "UNVERIFIED" in beauty
-    # no Cesium member is called by name beyond the ones the existing code uses
-    assert not re.search(r"Tiles->(SetMaterial|GenerateSmoothNormals|SetGenerateSmoothNormals)\(", beauty)
+    assert not re.search(r"Tiles->(GenerateSmoothNormals|SetGenerateSmoothNormals)\(", beauty)
     assert "#if WITH_FLIGHTSIM_CESIUM" in beauty
     # the tiles are never turned off from here
     assert "SetActorHiddenInGame" not in beauty and "Requested()" not in beauty
@@ -670,7 +673,7 @@ def test_apply_tiles_maps_the_python_parameters():
                        "ShadeNeutralAmount": "FlightSimTilesShade::AmountFor(Preset, Surface, TilesShadeSwitch)"}
     assert set(mapping) == set(wb.WORLD_MPC_SCALARS)
     # the ground state is set only when the tiles really draw with the beauty material
-    assert 'MaterialRoute == TEXT("UFunction SetMaterial") || MaterialRoute == TEXT("UPROPERTY Material")' in body
+    assert 'MaterialRoute == TEXT("ACesium3DTileset::SetMaterial (read back)")' in body
     assert "bTilesMaterial ? LoadObject<UMaterialParameterCollection>" in body
     # the tileset's grade is one value for every weather
     for preset in wb.PRESETS:

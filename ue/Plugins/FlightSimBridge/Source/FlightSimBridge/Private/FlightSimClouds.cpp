@@ -2660,7 +2660,8 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 	// own dry material.
 	FString MaterialRoute;
 	Out->TryGetStringField(TEXT("material_route"), MaterialRoute);
-	const bool bTilesMaterial = MaterialRoute == TEXT("UFunction SetMaterial") || MaterialRoute == TEXT("UPROPERTY Material");
+	const bool bTilesMaterial = MaterialRoute == TEXT("ACesium3DTileset::SetMaterial (read back)")
+		|| MaterialRoute == TEXT("UFunction SetMaterial") || MaterialRoute == TEXT("UPROPERTY Material");
 	UMaterialParameterCollection* Collection =
 		bTilesMaterial ? LoadObject<UMaterialParameterCollection>(nullptr, WorldCollectionPath) : nullptr;
 	UMaterialParameterCollectionInstance* Instance =
