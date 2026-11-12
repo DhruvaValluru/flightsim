@@ -1,0 +1,49 @@
+﻿{
+    "round":  80,
+    "commit":  "af3ac2a3",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   2,
+                   4,
+                   5
+               ],
+    "switches":  "",
+    "prep":  [
+                 "build"
+             ],
+    "seconds":  {
+                    "build":  17.4,
+                    "scenes":  396.4
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  121.1,
+                         "spec_sha256":  "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  2,
+                         "outcome":  "done",
+                         "seconds":  80.8,
+                         "spec_sha256":  "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  115.9,
+                         "spec_sha256":  "9386284b5b90c09edbf98f1694778c412d11d1689ac276cece868e72dd311e00",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  5,
+                         "outcome":  "done",
+                         "seconds":  75.8,
+                         "spec_sha256":  "ece4b425be33e75255a7639b68d58a51c63cffc7d9fed908d51dd2b6ab08fe0a",
+                         "why":  "clip ready"
+                     }
+                 ]
+}

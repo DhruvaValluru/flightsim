@@ -1,0 +1,23 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "01_golden_hour_a_4_flying_east": {
+   "post": "01_golden_hour_a_4_flying_east_post.jpg",
+   "source": "01_golden_hour_a_4_flying_east_frame_beauty_post.png"
+  },
+  "02_same_super_bright_preset": {
+   "post": "02_same_super_bright_preset_post.jpg",
+   "source": "02_same_super_bright_preset_frame_beauty_post.png"
+  },
+  "04_desert_a_4_sun_behind_the_camera": {
+   "post": "04_desert_a_4_sun_behind_the_camera_post.jpg",
+   "source": "04_desert_a_4_sun_behind_the_camera_frame_beauty_post.png"
+  },
+  "05_desert_a_4_backlit": {
+   "post": "05_desert_a_4_backlit_post.jpg",
+   "source": "05_desert_a_4_backlit_frame_beauty_post.png"
+  }
+ }
+}
