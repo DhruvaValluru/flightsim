@@ -787,6 +787,22 @@ aircraft_check "round5: dual-source blending asked by the model" "Runtime/Engine
 aircraft_check "round5: MaterialExpressionMin" "$RE/Public/Materials/MaterialExpressionMin.h" "class UMaterialExpressionMin : public UMaterialExpression"
 aircraft_check "round5: MaterialExpressionMax" "$RE/Public/Materials/MaterialExpressionMax.h" "class UMaterialExpressionMax : public UMaterialExpression"
 aircraft_check "round5: FParse Param (the -labels gate)" "Runtime/Core/Public/Misc/Parse.h" "static CORE_API bool Param( const TCHAR* Stream, const TCHAR* Param );"
+# canopy reflection (scripts/aircraft_glass_reflect.py, -canopy-reflect=on; LOOK_GENERATION 11)
+aircraft_check "canopy reflect: TextureSampleParameter2D" "$RE/Public/Materials/MaterialExpressionTextureSampleParameter2D.h" "class UMaterialExpressionTextureSampleParameter2D"
+aircraft_check "canopy reflect: TextureSample Coordinates pin" "$RE/Public/Materials/MaterialExpressionTextureSample.h" "FExpressionInput Coordinates;"
+aircraft_check "canopy reflect: VertexNormalWS" "$RE/Public/Materials/MaterialExpressionVertexNormalWS.h" "class UMaterialExpressionVertexNormalWS"
+aircraft_check "canopy reflect: Custom CMOT_Float2" "$RE/Public/Materials/MaterialExpressionCustom.h" "CMOT_Float2,"
+aircraft_check "canopy reflect: Custom CMOT_Float3" "$RE/Public/Materials/MaterialExpressionCustom.h" "CMOT_Float3,"
+aircraft_check "canopy reflect: TC_EditorIcon (uncompressed RGBA8 strip)" "$RE/Classes/Engine/TextureDefines.h" "TC_EditorIcon"
+aircraft_check "canopy reflect: TC_Masks" "$RE/Classes/Engine/TextureDefines.h" "TC_Masks"
+aircraft_check "canopy reflect: TMGS_NoMipmaps" "$RE/Classes/Engine/TextureDefines.h" "TMGS_NoMipmaps"
+aircraft_check "canopy reflect: Texture2D AddressX" "$RE/Classes/Engine/Texture2D.h" "TEnumAsByte<enum TextureAddress> AddressX;"
+aircraft_check "canopy reflect: Texture2D AddressY" "$RE/Classes/Engine/Texture2D.h" "TEnumAsByte<enum TextureAddress> AddressY;"
+aircraft_check "canopy reflect: SAMPLERTYPE_Masks" "$RE/Classes/Engine/EngineTypes.h" "SAMPLERTYPE_Masks"
+aircraft_check "canopy reflect: BreakMaterialAttributes Tangent output" "$RE/Private/Materials/MaterialExpressions.cpp" "Outputs.Add(FExpressionOutput(TEXT(\"Tangent\"), 1, 1, 1, 1, 0));"
+aircraft_check "canopy reflect: Light GetLightComponent" "$RE/Classes/Engine/Light.h" "class ULightComponent* GetLightComponent() const { return LightComponent; }"
+aircraft_check "canopy reflect: LightComponentBase Intensity" "$RE/Classes/Components/LightComponentBase.h" "float Intensity;"
+aircraft_check "canopy reflect: FMath SmoothStep" "Runtime/Core/Public/Math/UnrealMathUtility.h" "static constexpr T SmoothStep(T A, T B, T X)"
 # -- CONDENSATION (condensation-solver) --------------------------------------
 # FlightSimCondensation.cpp (the humidity-gated vapour sites: mesh vertices
 # read from LOD 0, the attached and world-space ribbons) and

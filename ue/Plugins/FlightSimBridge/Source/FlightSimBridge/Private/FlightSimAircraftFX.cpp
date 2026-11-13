@@ -11,11 +11,13 @@
 
 #include "FlightSimAircraftFX.h"
 
+#include "Components/LightComponent.h"       // canopy reflection: the sun's Intensity
 #include "Components/PointLightComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Engine/DirectionalLight.h"         // canopy reflection: the scene's sun
 #include "Engine/Scene.h"
 #include "Engine/StaticMesh.h"  // cockpit-airframe: the beauty body swap
 #include "Engine/World.h"
@@ -87,6 +89,25 @@ namespace
 		TEXT("/Game/FlightSim/Aircraft/M_AircraftPaintCoat.M_AircraftPaintCoat");
 	// Round 25: scripts/ue_aircraft_master_materials.py LOOK_GENERATION_PARAMETER.
 	const TCHAR* const AircraftFxLookGenerationParam = TEXT("LookGeneration");
+	// The canopy reflection (scripts/aircraft_glass_reflect.py MASTERS, by
+	// tier; LOOK_GENERATION 11), drawn only under -canopy-reflect=on.
+	const TCHAR* const AircraftFxGlassReflectMaterialPath =
+		TEXT("/Game/FlightSim/Aircraft/M_AircraftGlassReflect.M_AircraftGlassReflect");
+	const TCHAR* const AircraftFxGlassReflectFineMaterialPath =
+		TEXT("/Game/FlightSim/Aircraft/M_AircraftGlassReflectFine.M_AircraftGlassReflectFine");
+	// aircraft_glass_reflect.OPAQUE_GLASS_MASTER: the slots a reflect master may take.
+	const TCHAR* const AircraftFxOpaqueGlassMaster = TEXT("M_AircraftGlass");
+	// aircraft_glass_reflect.py SKY_HORIZON_SHARE, NIGHT_FADE_DEG, OVERCAST_DIM,
+	// STRIP_HORIZON_LUMINANCE (Rec. 709 of glass_coastal.json
+	// haze_horizon_linear_rgb 0.74, 0.70, 0.62), STRIP_HORIZON_LINEAR, TINT_BOUNDS.
+	constexpr double AircraftFxReflectSkyShare = 0.10;
+	constexpr double AircraftFxReflectNightFadeLoDeg = -2.0;
+	constexpr double AircraftFxReflectNightFadeHiDeg = 8.0;
+	constexpr double AircraftFxReflectOvercastDim = 0.75;
+	constexpr double AircraftFxReflectStripHorizonLuminance = 0.702728;
+	constexpr double AircraftFxReflectStripHorizon[3] = {0.74, 0.70, 0.62};
+	constexpr double AircraftFxReflectTintMin = 0.25;
+	constexpr double AircraftFxReflectTintMax = 4.0;
 
 	// Round 25: why a material would draw the engine's default material on
 	// this render (it failed to compile for the world's shader platform, or
@@ -329,12 +350,55 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	// Pixel-moving: off unless asked for by name.
 	const bool bHeatHazeSwitch = AircraftFxSwitch(Params, TEXT("heat-haze="), false, SwitchError);
 	const bool bFormationRampSwitch = AircraftFxSwitch(Params, TEXT("contrail-formation-ramp="), true, SwitchError);
+	// The canopy reflection: off unless asked for by name (the A/B).
+	const bool bCanopyReflectSwitch = AircraftFxSwitch(Params, TEXT("canopy-reflect="), false, SwitchError);
 	bMaterials = bAll && bMaterialsSwitch;
 	bLights = bAll && bLightsSwitch;
 	bContrails = bAll && bContrailsSwitch;
 	bAfterburner = bAll && bAfterburnerSwitch;
 	bHeatHaze = bAll && bHeatHazeSwitch;
 	bContrailFormationRamp = bAll && bFormationRampSwitch;
+	bCanopyReflect = bAll && bCanopyReflectSwitch;
+	// Tiers 0-1 only (both opaque); 2-3 are translucent and not built. A bad
+	// word is refused even with the switch off (aircraft_glass_reflect.parse_canopy_reflect).
+	CanopyReflectTier = 0;
+	{
+		FString TierWord;
+		if (FParse::Value(*Params, TEXT("canopy-reflect-tier="), TierWord))
+		{
+			if (TierWord == TEXT("0") || TierWord == TEXT("1"))
+			{
+				CanopyReflectTier = TierWord == TEXT("1") ? 1 : 0;
+			}
+			else if (SwitchError.IsEmpty())
+			{
+				SwitchError = FString::Printf(TEXT("aircraft_look.switch: -canopy-reflect-tier=%s is not 0 or 1 ")
+					TEXT("(tiers 2-3 are translucent and not built)"), *TierWord);
+			}
+		}
+	}
+	// The look's X-Plane horizon (webapp.runs.xplane_lighting_flags: R:G:B,
+	// sRGB8) and sky condition, when the render carries them: the strip's hue.
+	bHorizonKnown = false;
+	{
+		FString HorizonWord;
+		TArray<FString> Channels;
+		if (FParse::Value(*Params, TEXT("xplane-horizon="), HorizonWord) &&
+		    HorizonWord.ParseIntoArray(Channels, TEXT(":"), false) == 3 &&
+		    Channels[0].IsNumeric() && Channels[1].IsNumeric() && Channels[2].IsNumeric())
+		{
+			const int32 R = FCString::Atoi(*Channels[0]);
+			const int32 G = FCString::Atoi(*Channels[1]);
+			const int32 B = FCString::Atoi(*Channels[2]);
+			if (R >= 0 && R <= 255 && G >= 0 && G <= 255 && B >= 0 && B <= 255)
+			{
+				Horizon = FColor(static_cast<uint8>(R), static_cast<uint8>(G), static_cast<uint8>(B));
+				bHorizonKnown = true;
+			}
+		}
+		SkyCondition.Reset();
+		FParse::Value(*Params, TEXT("xplane-condition="), SkyCondition);
+	}
 	// round 5 (L4): the same -labels word the commandlet reads (aircraft_look.labels_requested).
 	bLabels = FParse::Param(*Params, TEXT("labels"));
 	// Round 23: the master bisect probes (aircraft_look.parse_aircraft_probes).
@@ -838,6 +902,65 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 				TEXT("fallback, the flat master is the only one"), AircraftFxProbeCoatMaterialPath));
 		}
 	}
+	// The canopy reflection (-canopy-reflect=on; aircraft_glass_reflect.py):
+	// the tier's OPAQUE master, compile-checked on this shader platform like
+	// the class masters. Absent or failed: every glass slot keeps its look
+	// instance (recorded). Off: nothing is loaded and nothing changes.
+	UMaterialInterface* GlassReflect = nullptr;
+	FString GlassReflectProblem;
+	int32 ReflectSlots = 0;
+	int32 ReflectThinKept = 0;
+	TArray<FString> ReflectNames;
+	FLinearColor ReflectTint = FLinearColor::White;
+	FString ReflectTintSource = TEXT("baked (no -xplane-horizon on this render)");
+	ReflectRow = MakeShared<FJsonObject>();
+	ReflectMids.Reset();
+	ReflectSun = Options.Sun;
+	ReflectCover = 0.0;
+	if (Options.bCanopyReflect)
+	{
+		const TCHAR* const ReflectPath = Options.CanopyReflectTier == 1
+			? AircraftFxGlassReflectFineMaterialPath : AircraftFxGlassReflectMaterialPath;
+		GlassReflect = LoadObject<UMaterialInterface>(nullptr, ReflectPath);
+		GlassReflectProblem = CompileProblemOf(GlassReflect);
+		if (!GlassReflectProblem.IsEmpty())
+		{
+			GlassReflect = nullptr;
+		}
+		ReflectRow->SetStringField(TEXT("master"), ReflectPath);
+		// Hue only (aircraft_glass_reflect.horizon_tint): the gain sets the level.
+		if (Options.bHorizonKnown)
+		{
+			const FLinearColor Lin(Options.Horizon);  // sRGB8 -> linear
+			const double Lum = 0.2126 * Lin.R + 0.7152 * Lin.G + 0.0722 * Lin.B;
+			if (Lum > 1.0e-4)
+			{
+				const double Channel[3] = {Lin.R, Lin.G, Lin.B};
+				double Tint[3];
+				for (int32 C = 0; C < 3; ++C)
+				{
+					Tint[C] = FMath::Clamp((Channel[C] / Lum) /
+						(AircraftFxReflectStripHorizon[C] / AircraftFxReflectStripHorizonLuminance),
+						AircraftFxReflectTintMin, AircraftFxReflectTintMax);
+				}
+				ReflectTint = FLinearColor(static_cast<float>(Tint[0]), static_cast<float>(Tint[1]),
+				                           static_cast<float>(Tint[2]), 1.0f);
+				ReflectTintSource = TEXT("-xplane-horizon (the look's X-Plane horizon colour, hue only)");
+			}
+			else
+			{
+				ReflectTintSource = TEXT("baked (the -xplane-horizon colour is black)");
+			}
+		}
+		for (const FFlightSimCloudLayer& Layer : Options.CloudLayers)
+		{
+			ReflectCover = FMath::Max(ReflectCover, FMath::Clamp(Layer.CoverFraction, 0.0, 1.0));
+		}
+		if (Options.SkyCondition.Contains(TEXT("ocast")))
+		{
+			ReflectCover = 1.0;
+		}
+	}
 	// Slot names without a look instance, once each (AddUnique on the JSON
 	// values would compare pointers and never deduplicate a slot that several
 	// parts share).
@@ -977,6 +1100,28 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 				if (LookMid != nullptr)
 				{
 					LookMid->CopyParameterOverrides(LookMic);
+				}
+			}
+			// The canopy reflection: a glass slot on its OPAQUE look instance
+			// (a -labels render, or no MI_<slot>_thin) draws the reflect master
+			// with the instance's overrides; a slot on its thin instance keeps
+			// it (round 46's C172 canopy), and the -labels rule above is untouched.
+			if (Options.bCanopyReflect && bThin)
+			{
+				++ReflectThinKept;
+			}
+			else if (Options.bCanopyReflect && GlassReflect != nullptr && LookMic != nullptr &&
+			         ProbeBaseName == AircraftFxOpaqueGlassMaster)
+			{
+				LookMid = UMaterialInstanceDynamic::Create(GlassReflect, Part);
+				if (LookMid != nullptr)
+				{
+					LookMid->CopyParameterOverrides(LookMic);
+					LookMid->SetVectorParameterValue(TEXT("GlassEnvTint"), ReflectTint);
+					LookMid->SetScalarParameterValue(TEXT("GlassEnvGain"), 0.0f);  // UpdateCanopyReflect sets it
+					ReflectMids.Add(LookMid);
+					++ReflectSlots;
+					ReflectNames.AddUnique(SlotName);
 				}
 			}
 			if (LookMid == nullptr)
@@ -1152,9 +1297,106 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 		Absent.Add(MakeShared<FJsonValueString>(Name));
 	}
 	Row->SetArrayField(TEXT("slots_absent"), Absent);
+	// The canopy reflection's record (aircraft_glass_reflect.py; the gain, sun
+	// and camera fields are written by UpdateCanopyReflect / SetCanopyReflectCamera).
+	ReflectRow->SetStringField(TEXT("switch"), Options.bCanopyReflect
+		? TEXT("on (-canopy-reflect=on)") : TEXT("off (the default; -canopy-reflect=on is the A/B)"));
+	ReflectRow->SetStringField(TEXT("lane"), TEXT("swarm/lanes/aircraft_exterior/glass/coastal (tiers 0-1 only: ")
+		TEXT("opaque, no translucency, no SSR)"));
+	if (Options.bCanopyReflect)
+	{
+		ReflectRow->SetNumberField(TEXT("tier"), Options.CanopyReflectTier);
+		ReflectRow->SetStringField(TEXT("compile"), GlassReflectProblem.IsEmpty()
+			? FString(TEXT("compiled")) : GlassReflectProblem);
+		ReflectRow->SetNumberField(TEXT("slots"), ReflectSlots);
+		ReflectRow->SetNumberField(TEXT("slots_thin_kept"), ReflectThinKept);
+		TArray<TSharedPtr<FJsonValue>> Names;
+		for (const FString& Name : ReflectNames)
+		{
+			Names.Add(MakeShared<FJsonValueString>(Name));
+		}
+		ReflectRow->SetArrayField(TEXT("slot_names"), Names);
+		TArray<TSharedPtr<FJsonValue>> TintValues;
+		TintValues.Add(MakeShared<FJsonValueNumber>(ReflectTint.R));
+		TintValues.Add(MakeShared<FJsonValueNumber>(ReflectTint.G));
+		TintValues.Add(MakeShared<FJsonValueNumber>(ReflectTint.B));
+		ReflectRow->SetArrayField(TEXT("tint"), TintValues);
+		ReflectRow->SetStringField(TEXT("tint_source"), ReflectTintSource);
+		ReflectRow->SetNumberField(TEXT("cloud_cover"), ReflectCover);
+		ReflectRow->SetStringField(TEXT("sky_condition"), Options.SkyCondition);
+		ReflectRow->SetStringField(TEXT("gain_rule"), TEXT("GlassEnvGain = 0.10 x sun Intensity / pi x ")
+			TEXT("smoothstep(-2, 8, sun elevation deg) x (1 - 0.75 x cloud cover) / 0.702728; 0 for an interior ")
+			TEXT("camera (aircraft_glass_reflect.canopy_reflect_gain; UNCALIBRATED)"));
+		ReflectRow->SetStringField(TEXT("labels"), TEXT("unchanged: the reflect masters are opaque and write ")
+			TEXT("depth; the reflection is Emissive only, which no label pass reads"));
+	}
+	Row->SetObjectField(TEXT("canopy_reflect"), ReflectRow);
+	UpdateCanopyReflect();
 	Record->SetObjectField(TEXT("materials"), Row);
 	UE_LOG(LogFlightSimAircraftFX, Display, TEXT("aircraft look: %d slot(s) on look instances, %d absent"),
 	       Applied, Absent.Num());
+}
+
+double FFlightSimAircraftFX::CanopyReflectGain(double SunIntensity, double SunElevationDeg, double Cover,
+                                               bool bInterior)
+{
+	if (bInterior)
+	{
+		return 0.0;
+	}
+	const double Day = FMath::SmoothStep(AircraftFxReflectNightFadeLoDeg, AircraftFxReflectNightFadeHiDeg,
+	                                     SunElevationDeg);
+	const double Sky = 1.0 - AircraftFxReflectOvercastDim * FMath::Clamp(Cover, 0.0, 1.0);
+	return AircraftFxReflectSkyShare * FMath::Max(SunIntensity, 0.0) / UE_DOUBLE_PI * Day * Sky /
+		AircraftFxReflectStripHorizonLuminance;
+}
+
+void FFlightSimAircraftFX::UpdateCanopyReflect()
+{
+	if (ReflectMids.Num() == 0)
+	{
+		return;
+	}
+	FVector ToSun(1.0, 0.0, 0.0);
+	double Intensity = 0.0;
+	const bool bSun = ReflectSun != nullptr && ReflectSun->GetLightComponent() != nullptr;
+	if (bSun)
+	{
+		// A directional light shines along its forward vector: the sun is behind it.
+		ToSun = -ReflectSun->GetActorForwardVector();
+		Intensity = ReflectSun->GetLightComponent()->Intensity;
+	}
+	const double ElevationDeg = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(ToSun.Z, -1.0, 1.0)));
+	const double Gain = bSun ? CanopyReflectGain(Intensity, ElevationDeg, ReflectCover, bReflectInterior) : 0.0;
+	for (UMaterialInstanceDynamic* Mid : ReflectMids)
+	{
+		if (Mid != nullptr)
+		{
+			Mid->SetScalarParameterValue(TEXT("GlassEnvGain"), static_cast<float>(Gain));
+			Mid->SetVectorParameterValue(TEXT("GlassSunAzimuthDir"),
+			                             FLinearColor(static_cast<float>(ToSun.X), static_cast<float>(ToSun.Y), 0.0f, 0.0f));
+		}
+	}
+	if (ReflectRow.IsValid())
+	{
+		// The values of the latest step (the sun may be animated).
+		ReflectRow->SetNumberField(TEXT("gain"), Gain);
+		ReflectRow->SetStringField(TEXT("sun"), bSun ? TEXT("the scene's sun (its Intensity and direction, each step)")
+			: TEXT("absent: no scene sun, GlassEnvGain 0"));
+		ReflectRow->SetNumberField(TEXT("sun_intensity"), Intensity);
+		ReflectRow->SetNumberField(TEXT("sun_elevation_deg"), ElevationDeg);
+	}
+}
+
+void FFlightSimAircraftFX::SetCanopyReflectCamera(bool bInterior, const FString& Preset)
+{
+	bReflectInterior = bInterior;
+	if (ReflectRow.IsValid())
+	{
+		ReflectRow->SetStringField(TEXT("camera_preset"), Preset);
+		ReflectRow->SetBoolField(TEXT("interior_camera"), bInterior);
+	}
+	UpdateCanopyReflect();
 }
 
 void FFlightSimAircraftFX::BuildLamp(UWorld* World, const TSharedPtr<FJsonObject>& Row)
@@ -1545,5 +1787,6 @@ void FFlightSimAircraftFX::Advance(TFunctionRef<double(const TCHAR*)> ReadProper
 	Record->SetNumberField(TEXT("strobe_on_frames"), StrobeOnFrames);
 	Record->SetNumberField(TEXT("landing_light_on_frames"), LandingOnFrames);
 	// wet-airframe-canopy: the weather's wetness on the look MIDs (shading only).
+	UpdateCanopyReflect();  // the canopy reflection: the sun as it is this step
 	if (Weather != nullptr) { Wet.Advance(LookMids, *Weather, ReadProperty(TEXT("velocities/vtrue-kts")), ReadProperty(TEXT("simulation/sim-time-sec")), Record); }
 }

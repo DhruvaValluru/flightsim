@@ -3220,6 +3220,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		AircraftFXOptions.Livery = MeshAirframe.Livery;
 		AircraftFXOptions.Weather = Weather.IsBuilt() ? &Weather : nullptr;  // wet-airframe-canopy
 		AircraftFXOptions.CloudLayers = AircraftCloudLayers;
+		AircraftFXOptions.Sun = VisualScene.Sun;  // canopy reflection: the strip's azimuth and gain
 
 		// condensation-solver: the card's dew point makes atmosphere/RH the stated day's.
 		AircraftFXOptions.Humidity.bCardStated = Card.AtmosphereProperties.Contains(TEXT("atmosphere/dew-point-R"));
@@ -4265,6 +4266,27 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 	}
 	Capture->RegisterComponent();
+	// The canopy reflection (-canopy-reflect=on, FlightSimAircraftFX.h): a
+	// camera that looks out through the pane from inside (the card camera's
+	// "cockpit" preset, the legacy "shoulder" view: the storm glass's rule
+	// below) gets no sky in the pane (the inside of a canopy mirrors the cabin).
+	if (AircraftFX.IsBuilt())
+	{
+		FString ReflectPreset = bConsumePoses ? FString() : CameraPreset;
+		const TArray<TSharedPtr<FJsonValue>>* ReflectCameras = nullptr;
+		if (bConsumePoses && WorldCardRoot.IsValid() &&
+		    WorldCardRoot->TryGetArrayField(TEXT("cameras"), ReflectCameras) && ReflectCameras != nullptr &&
+		    ReflectCameras->IsValidIndex(ConsumedCameraIndex))
+		{
+			const TSharedPtr<FJsonObject> ReflectCamera = (*ReflectCameras)[ConsumedCameraIndex]->AsObject();
+			if (ReflectCamera.IsValid())
+			{
+				ReflectCamera->TryGetStringField(TEXT("preset"), ReflectPreset);
+			}
+		}
+		AircraftFX.SetCanopyReflectCamera(
+			ReflectPreset == TEXT("cockpit") || ReflectPreset == TEXT("shoulder"), ReflectPreset);
+	}
 	// W5: the rain streaks, on the BEAUTY capture only (the label captures
 	// below never receive a look blendable), for this camera's streak on the
 	// card (cameras[N].camera_id under consume-poses; the card's only streak

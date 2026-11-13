@@ -46,6 +46,9 @@ import xml.etree.ElementTree as ET
 # wet-airframe-canopy module: its shader inputs and constants (stdlib only).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from aircraft_wet_layer import WET_SHADER_INPUTS, constants_group as _wet_constants  # noqa: E402
+# canopy reflection (swarm lane aircraft_exterior.glass.coastal, tiers 0-1;
+# beauty only, -canopy-reflect=on): its shader inputs and masters (stdlib only).
+from aircraft_glass_reflect import GLASS_REFLECT_SHADER_INPUTS, MASTERS as _reflect_masters  # noqa: E402
 # round 5 (L4): the vendored Physically Based API database (CC0, pinned by
 # sha256 in assets/looks/physically_based/PIN.json), the measured constants.
 import physically_based as _pb  # noqa: E402
@@ -253,7 +256,12 @@ SHADER_INPUTS = {
     "heat_haze": ("UV", "LocalPos", "TimeS", "Strength"),
     # wet-airframe-canopy: "aircraft_wet" and "canopy_scratch".
     **WET_SHADER_INPUTS,
+    # canopy reflection: "glass_reflect_uv", "glass_reflect", "glass_micro_uv".
+    **GLASS_REFLECT_SHADER_INPUTS,
 }
+#: The opaque canopy-reflect masters by tier (scripts/aircraft_glass_reflect.py):
+#: drawn only under -canopy-reflect=on, on a glass slot's opaque instance.
+CANOPY_REFLECT_MASTERS = dict(_reflect_masters)
 
 #: Automatic slot rules, applied after a config's own ``slot_rules``:
 #: an MTL ``d`` below this is glass (the converters write ``d`` only for a
@@ -978,7 +986,10 @@ FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", True), ("aircra
                ("contrails=", True), ("afterburner=", True), ("heat-haze=", False),
                # Round 47 (#13): the contrail's formation ramp in seconds (on) or
                # generation 6's 0.04 of the lifetime (off, the A/B).
-               ("contrail-formation-ramp=", True))
+               ("contrail-formation-ramp=", True),
+               # The canopy reflection (aircraft_glass_reflect.py): OFF unless
+               # -canopy-reflect=on, so Windows can A/B it (tier: -canopy-reflect-tier=0|1).
+               ("canopy-reflect=", False))
 SWITCH_ON = ("on", "1", "true")
 SWITCH_OFF = ("off", "0", "false")
 
