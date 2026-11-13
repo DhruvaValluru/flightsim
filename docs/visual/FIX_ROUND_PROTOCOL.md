@@ -41,6 +41,16 @@ There are no A/B pairs, probes or `flightsim.verify` runs in a fix round
 unless the request names them. The label check (`flightsim.verify`) runs once,
 at the final sweep, as the request will say.
 
+## The pixel report in ROUND.json
+
+Every round ends with `scripts/frame_metrics.py` over its folder; ROUND.json
+carries the result as `pixel_metrics`, per scene: blank frame, clipped
+highlights, crushed blacks, mean luma. `-CompareWith 11` (or `round_11`) adds
+SSIM and flicker against round 11's frame of the same scene
+(`docs\visual\round_11`, else the vis-windows worktree's copy). A head name
+(`head12`) still means the `-Full` head comparison. The thresholds are
+UNCALIBRATED: the report names what crossed one and never fails a round.
+
 ## The loop (Windows session)
 
 1. A message from flightsim-83 names the round number and the command line.
