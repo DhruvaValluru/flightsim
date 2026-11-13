@@ -490,7 +490,8 @@ LINEAR_DEFAULT_TEXTURE = "T_LinearDefault"
 
 #: Every storm-weather material, by name (one /Game/FlightSim path each).
 STORM_MATERIALS = ("M_RainDrops", "M_RainSplash", "M_LightningChannel", "M_StormCell",
-                     "M_WindshieldRain", "M_RainCurtain", "M_ScudCard")
+                     "M_WindshieldRain", "M_RainCurtain", "M_ScudCard",
+                     "M_RainLayers", "M_WindshieldRainBaked")   # maxpick/rain: the baked tier 0
 #: The Custom node bodies, committed as HLSL beside the Python twins they
 #: mirror (tests/test_weather.py pins their constants to core/scene/*.py).
 WEATHER_SHADER_DIR = "assets/shaders/weather"
@@ -614,7 +615,9 @@ STORM_SCATTERING_PROPERTIES = {
 #: lane D 2026-11-11, round 4's "scratches on the lens"; default 0 = generation 5).
 STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChannel": "2",
                      "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "6",
-                     "M_ScudCard": "3"}
+                     "M_ScudCard": "3",
+                     # maxpick/rain (2026-11-13): the baked rain layers and windscreen (tier 0).
+                     "M_RainLayers": "1", "M_WindshieldRainBaked": "1"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -2300,6 +2303,176 @@ def create_windshield_rain():
                a_out="Color")
     lib.connect_material_property(out, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     finish_storm(material, "M_WindshieldRain")
+
+
+# -- maxpick/rain (2026-11-13): the baked rain layers and the baked windscreen ---------
+#: M_RainLayers (-rain-layers=on) and M_WindshieldRainBaked (-windscreen-baked=on): tier 0
+#: of the swarm lanes weather_fx.rain_drops.storm and weather_fx.windscreen_water.storm.
+#: Both are post-process blendables after the tonemapper on the BEAUTY capture only
+#: (FlightSimWeatherBaked.cpp; no label capture receives a look blendable). Their textures
+#: are the Mac bakes committed under assets/looks/ (scripts/make_rain_layers.py,
+#: scripts/make_windscreen_water.py), each hashed against its PIN.json row before import
+#: (pinned_texture). Default off: neither material is loaded unless its switch is on, and
+#: M_RainDrops / M_WindshieldRain are not touched. VISUAL-ONLY, UNCOMPILED here.
+RAIN_LAYERS_PIN = "assets/looks/rain_layers/PIN.json"
+RAIN_LAYERS_PLAN = "rain_layers.json"
+RAIN_LAYERS_FILES = ("rain_layer0_512x1024.tga", "rain_layer1_512x1024.tga", "rain_layer2_512x1024.tga")
+RAIN_LAYERS_TEXTURES = ("T_RainLayer0", "T_RainLayer1", "T_RainLayer2")
+#: What FlightSimWeatherBaked.cpp sets per frame on M_RainLayers.
+RAIN_LAYERS_PARAMETERS = ("Axis", "AxisRight", "Sel", "Stretch", "Phase", "PixelAngle", "Opacity", "Lift")
+#: The bake's constants, parameters whose defaults are read from rain_layers.json.
+RAIN_LAYERS_BAKE_PARAMETERS = ("RhoK", "TileH", "Scale0", "Scale1", "Scale2")
+#: The streak's luminance lifted toward white by this share (rain_layers.hlsl; stated,
+#: UNCALIBRATED: the lane's absolute radiance needs an exposure an after-tonemapper pass lacks).
+RAIN_LAYERS_LIFT = 0.35
+WINDSHIELD_BAKED_PIN = "assets/looks/windscreen_water/PIN.json"
+#: Tier 0: the 256 maps (0.7 MB with mips), never streamed.
+WINDSHIELD_BAKED_FILES = {"T_WSDrops": "T_WSDrops_256.png", "T_WSRivulets": "T_WSRivulets_256.png"}
+#: What FlightSimWeatherBaked.cpp sets on M_WindshieldRainBaked.
+WINDSHIELD_BAKED_PARAMETERS = ("Time", "Wet", "LensH", "Tiles")
+#: Tiles per screen height (make_windscreen_water.TILES) and the horizontal lens scale
+#: TAN_MAX / (2 tan(hfov / 2)) at 90 degrees, until the host sets the camera's.
+WINDSHIELD_BAKED_TILES = 3.0
+WINDSHIELD_BAKED_LENS_H = 0.440707
+
+
+def baked_pin(relative):
+    """A bake's PIN.json, parsed (a RuntimeError when the checkout lacks it)."""
+    import json
+    source = _repo_file(relative)
+    if source is None:
+        raise RuntimeError(f"{relative} is not in this checkout")
+    return json.loads(source.read_text(encoding="utf-8"))
+
+
+def baked_texture(pin, file_name, name):
+    """/Game/FlightSim/<name> from one pinned bake (pinned_texture: sha-checked, linear,
+    VectorDisplacementmap = RGBA8 uncompressed, wrap, mips), never streamed: a few MB on a
+    491 MB pool is cheaper than a streaming pop."""
+    texture = pinned_texture(pin["files"][file_name], name, False, False)
+    if not texture.get_editor_property("never_stream"):
+        texture.set_editor_property("never_stream", True)
+        unreal.EditorAssetLibrary.save_asset(f"{PATH}/{name}")
+    return texture
+
+
+def baked_float4(material, lib, name, default, x, y):
+    """A float4 vector parameter as a shader input: its RGB appended with its A."""
+    param = vector(material, lib, name, tuple(default), x, y)
+    return binary(material, lib, unreal.MaterialExpressionAppendVector, param, param, x + 200, y,
+                  b_out="A"), ""
+
+
+def create_rain_layers():
+    """M_RainLayers (-rain-layers=on): the storm's falling rain as three baked layers in one
+    post-process pass, no particles (rain_layers.hlsl; three SampleLevel taps and the pixel's
+    reconstructed position). After the tonemapper (the M_WindshieldRain rule)."""
+    import json
+    material = _storm_material("M_RainLayers")
+    if material is None:
+        return
+    material.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
+    material.set_editor_property("blendable_location", after_tonemapping())
+    lib = unreal.MaterialEditingLibrary
+    pin = baked_pin(RAIN_LAYERS_PIN)
+    plan_row = pin["files"][RAIN_LAYERS_PLAN]
+    plan_file = _repo_file(plan_row["path"])
+    if plan_file is None:
+        raise RuntimeError(f"{plan_row['path']} is not in this checkout")
+    plan = json.loads(plan_file.read_text(encoding="utf-8"))
+    layers = plan["layers"]
+    textures = [texture_object(material, lib, baked_texture(pin, RAIN_LAYERS_FILES[k], RAIN_LAYERS_TEXTURES[k]),
+                               unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR, -1800, 1600 + 200 * k)
+                for k in range(3)]
+    scene = lib.create_material_expression(material, unreal.MaterialExpressionSceneTexture, -1800, -300)
+    scene.set_editor_property("scene_texture_id", unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0)
+    colour = mask(material, lib, scene, "rgb", -1600, -300, source_out="Color")
+    rel = relative_position(material, lib, -1800, -150, False, "camera")
+    p = {"Axis": (vector(material, lib, "Axis", (0.0, 0.0, -1.0, 0.0), -1800, 0), ""),
+         "AxisRight": (vector(material, lib, "AxisRight", (1.0, 0.0, 0.0, 0.0), -1800, 110), ""),
+         "Sel": baked_float4(material, lib, "Sel", (0.0, 0.0, 1.0, 0.0), -1800, 220),
+         "Stretch": (scalar(material, lib, "Stretch", 1.0, -1800, 330), ""),
+         "Phase": (vector(material, lib, "Phase", (0.0, 0.0, 0.0, 0.0), -1800, 440), ""),
+         "PixelAngle": (scalar(material, lib, "PixelAngle", 0.0008, -1800, 550), ""),
+         "Opacity": (scalar(material, lib, "Opacity", 0.0, -1800, 660), ""),
+         "Lift": (scalar(material, lib, "Lift", RAIN_LAYERS_LIFT, -1800, 770), ""),
+         "RhoK": (vector(material, lib, "RhoK", tuple(l["rho_k_m"] for l in layers) + (0.0,), -1800, 880), ""),
+         "TileH": (vector(material, lib, "TileH", tuple(l["tile_height_m"] for l in layers) + (0.0,),
+                          -1800, 990), "")}
+    for k in range(3):
+        p[f"Scale{k}"] = baked_float4(material, lib, f"Scale{k}",
+                                      [b["alpha_scale"] for b in layers[k]["bins"]], -1800, 1100 + 110 * k)
+    rain = custom(material, lib, "rain_layers", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
+        "SceneColor": (colour, ""), "Rel": rel, "Axis": p["Axis"], "AxisRight": p["AxisRight"],
+        "Sel": p["Sel"], "Stretch": p["Stretch"], "Phase": p["Phase"], "PixelAngle": p["PixelAngle"],
+        "Opacity": p["Opacity"], "Lift": p["Lift"], "RhoK": p["RhoK"], "TileH": p["TileH"],
+        "Scale0": p["Scale0"], "Scale1": p["Scale1"], "Scale2": p["Scale2"],
+        "Layer0": (textures[0], ""), "Layer1": (textures[1], ""), "Layer2": (textures[2], "")}, -900, 0)
+    lib.connect_material_property(rain, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    finish_storm(material, "M_RainLayers")
+
+
+def create_windshield_rain_baked():
+    """M_WindshieldRainBaked (-windscreen-baked=on): M_WindshieldRain's place on a cockpit
+    camera's beauty capture with the drops' optics baked (windshield_baked.hlsl: two texture
+    taps, no loop): lerp(Scene(UV), Scene(saturate(UV + shift)) x shade, mask). After the
+    tonemapper. No water film at tier 0 (the lane's Film = 0)."""
+    material = _storm_material("M_WindshieldRainBaked")
+    if material is None:
+        return
+    material.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
+    material.set_editor_property("blendable_location", after_tonemapping())
+    lib = unreal.MaterialEditingLibrary
+    pin = baked_pin(WINDSHIELD_BAKED_PIN)
+    drops_texture = baked_texture(pin, WINDSHIELD_BAKED_FILES["T_WSDrops"], "T_WSDrops")
+    tracks_texture = baked_texture(pin, WINDSHIELD_BAKED_FILES["T_WSRivulets"], "T_WSRivulets")
+    screen = lib.create_material_expression(material, unreal.MaterialExpressionScreenPosition, -2000, 0)
+    size = lib.create_material_expression(material, unreal.MaterialExpressionViewSize, -2000, 200)
+    aspect = binary(material, lib, unreal.MaterialExpressionDivide,
+                    mask(material, lib, size, "r", -1800, 200),
+                    mask(material, lib, size, "g", -1800, 300), -1600, 200)
+    time = scalar(material, lib, "Time", 0.0, -2000, 400)
+    wet = baked_float4(material, lib, "Wet", (0.0, 0.0, 0.0, 0.25), -2000, 500)
+    lens_h = scalar(material, lib, "LensH", WINDSHIELD_BAKED_LENS_H, -2000, 600)
+    tiles = scalar(material, lib, "Tiles", WINDSHIELD_BAKED_TILES, -2000, 700)
+    v = mask(material, lib, screen, "g", -1800, 0, source_out="ViewportUV")
+    tiled = binary(material, lib, unreal.MaterialExpressionMultiply,
+                   binary(material, lib, unreal.MaterialExpressionAppendVector,
+                          binary(material, lib, unreal.MaterialExpressionMultiply,
+                                 mask(material, lib, screen, "r", -1800, -100, source_out="ViewportUV"),
+                                 aspect, -1600, -100),
+                          v, -1450, -50),
+                   tiles, -1300, -50)
+    drop = _sample(material, lib, drops_texture, tiled, unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR,
+                   -1150, -200)
+    track = _sample(material, lib, tracks_texture, tiled, unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR,
+                    -1150, 50)
+    drop4 = binary(material, lib, unreal.MaterialExpressionAppendVector, drop, drop, -950, -200,
+                   a_out="RGB", b_out="A")
+    track4 = binary(material, lib, unreal.MaterialExpressionAppendVector, track, track, -950, 50,
+                    a_out="RGB", b_out="A")
+    track_v = binary(material, lib, unreal.MaterialExpressionMultiply, v, tiles, -1150, 300)
+    lens = binary(material, lib, unreal.MaterialExpressionMultiply, lens_h, aspect, -1150, 450)
+    water = custom(material, lib, "windshield_baked", unreal.CustomMaterialOutputType.CMOT_FLOAT4, {
+        "Drop": (drop4, ""), "Riv": (track4, ""), "RivV": (track_v, ""), "Aspect": (aspect, ""),
+        "Time": (time, ""), "Wet": wet, "Lens": (lens, "")}, -750, 0)
+    shifted = unary(material, lib, unreal.MaterialExpressionSaturate,
+                    binary(material, lib, unreal.MaterialExpressionAdd,
+                           mask(material, lib, screen, "rg", -700, -300, source_out="ViewportUV"),
+                           mask(material, lib, water, "rg", -700, -150), -550, -200), -400, -200)
+    behind = lib.create_material_expression(material, unreal.MaterialExpressionSceneTexture, -250, -200)
+    behind.set_editor_property("scene_texture_id", unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0)
+    lib.connect_material_expressions(shifted, "", behind, "UVs")
+    scene = lib.create_material_expression(material, unreal.MaterialExpressionSceneTexture, -250, 150)
+    scene.set_editor_property("scene_texture_id", unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0)
+    seen = binary(material, lib, unreal.MaterialExpressionMultiply,
+                  mask(material, lib, behind, "rgb", -100, -200, source_out="Color"),
+                  mask(material, lib, water, "a", -100, -50), 50, -150)
+    out = lerp(material, lib, mask(material, lib, scene, "rgb", -100, 150, source_out="Color"), seen,
+               mask(material, lib, water, "b", -100, 300), 200, 0)
+    lib.connect_material_property(out, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    finish_storm(material, "M_WindshieldRainBaked")
+# -- maxpick/rain -- end -----------------------------------------------------------------
 
 
 def create_airframe_paint():
@@ -4191,6 +4364,8 @@ create_rain_splash()
 create_lightning_channel()
 create_storm_cell()
 create_windshield_rain()
+create_windshield_rain_baked()   # maxpick/rain: -windscreen-baked=on
+create_rain_layers()             # maxpick/rain: -rain-layers=on
 create_rain_curtain()   # lane D: the beauty rain veil
 create_scud_card()
 # World lane (visual overhaul): the collection first, the tiles material reads it.

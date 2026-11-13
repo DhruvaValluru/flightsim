@@ -1420,6 +1420,16 @@ weather.lightning_material:
 weather.windshield:
   sentence: "The windshield's rain material is not in the project, so a cockpit camera gets no drops on its glass."
   hint: "Run the material script once (the weather guide says how) to build the storm materials."
+# maxpick/rain (2026-11-13): the baked tier 0 render switches (FlightSimWeatherBaked.cpp).
+weather.baked_switch:
+  sentence: "A baked-weather switch (-rain-layers= or -windscreen-baked=) was given a value it does not take."
+  hint: "Use on or off; or leave it out to draw the particle rain and the procedural glass as before."
+weather.rain_layers:
+  sentence: "The baked rain layers' material is not in the project, so -rain-layers=on cannot draw the rain."
+  hint: "Run the material script once (the weather guide says how), or render with -rain-layers=off."
+weather.windscreen_baked:
+  sentence: "The baked windscreen's material is not in the project, so -windscreen-baked=on cannot draw the glass."
+  hint: "Run the material script once (the weather guide says how), or render with -windscreen-baked=off."
 weather.niagara_asset:
   sentence: "The Niagara rain system is not in the project; it is built by hand from the recipe in docs/WEATHER.md."
   hint: "Build NS_FlightSimRain from the recipe, or use -weather-backend=procedural."
