@@ -1,0 +1,62 @@
+{
+ "asset": "windscreen_water",
+ "title": "FlightSim storm windscreen water (baked drops and run-off tracks)",
+ "source": "scripts/make_windscreen_water.py (this repository)",
+ "licence": "project's own (generated from closed-form optics, no third-party pixels)",
+ "visual_only": true,
+ "status": "UNMEASURED: baked on the Mac, no frame rendered",
+ "provenance": {
+  "lane": "weather_fx.windscreen_water.storm",
+  "branch": "origin/max-push",
+  "commit": "e6cd546fdba69e433e72206b4c5f719ff3f9da4b",
+  "path": "swarm/lanes/weather_fx/windscreen_water/storm/PROVENANCE.json",
+  "note": "the sha256 of every file below is the lane's PROVENANCE.json sha256"
+ },
+ "files": {
+  "T_WSDrops_1024.png": {
+   "path": "assets/looks/windscreen_water/T_WSDrops_1024.png",
+   "size": 1007009,
+   "sha256": "449c81b32eeeb265190bb755f6190b17390c54ce374825ba33ff1ca294fa46ab"
+  },
+  "T_WSDrops_2048.png": {
+   "path": "assets/looks/windscreen_water/T_WSDrops_2048.png",
+   "size": 2286102,
+   "sha256": "37ef9f7769c6c1b8145acb5352f191ef224c1b6678478c5cfb3d2e034cac522c"
+  },
+  "T_WSDrops_256.png": {
+   "path": "assets/looks/windscreen_water/T_WSDrops_256.png",
+   "size": 152871,
+   "sha256": "d2bda979c3a4963bcd6115a6e970b6d459ece999068c934cf2190d7e54813f6e"
+  },
+  "T_WSDrops_512.png": {
+   "path": "assets/looks/windscreen_water/T_WSDrops_512.png",
+   "size": 401452,
+   "sha256": "ebd5f0d3ab29e6cf9f00dd78d37b423e013e57a6a2055e6e649f2b206372d1dc"
+  },
+  "T_WSRivulets_1024.png": {
+   "path": "assets/looks/windscreen_water/T_WSRivulets_1024.png",
+   "size": 266623,
+   "sha256": "29b7638d55a1db921ba878c53bad0d84ba3d3b4fc879f62d59675523ac58aeaf"
+  },
+  "T_WSRivulets_2048.png": {
+   "path": "assets/looks/windscreen_water/T_WSRivulets_2048.png",
+   "size": 654308,
+   "sha256": "ce5b1559d0f27fb8da90fc296efe698edf61dcf1feb67618a8e2561f2d4de02f"
+  },
+  "T_WSRivulets_256.png": {
+   "path": "assets/looks/windscreen_water/T_WSRivulets_256.png",
+   "size": 55567,
+   "sha256": "9ef28451c7b4b0fd83d31a5feec06eca6f3be7f9d6b9e3a838a1dd1b79d63c3d"
+  },
+  "T_WSRivulets_512.png": {
+   "path": "assets/looks/windscreen_water/T_WSRivulets_512.png",
+   "size": 122381,
+   "sha256": "d7731ca36b704f5dab5aa9fa588c0a6af827794131a707d479186a27438307e8"
+  },
+  "windscreen_water_storm.json": {
+   "path": "assets/looks/windscreen_water/windscreen_water_storm.json",
+   "size": 3304,
+   "sha256": "23152465b6d840de267260cdc2a90901f068c7d872024f45bc3184db902d7893"
+  }
+ }
+}

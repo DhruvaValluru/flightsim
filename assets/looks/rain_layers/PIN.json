@@ -1,0 +1,37 @@
+{
+ "asset": "rain_layers",
+ "title": "FlightSim storm rain layers (tier 0 baked falling rain)",
+ "source": "scripts/make_rain_layers.py (this repository)",
+ "licence": "project's own (generated from published formulas; no third-party pixels)",
+ "visual_only": true,
+ "status": "UNMEASURED: baked on the Mac, no frame rendered",
+ "provenance": {
+  "lane": "weather_fx.rain_drops.storm",
+  "branch": "origin/max-push",
+  "commit": "e6cd546fdba69e433e72206b4c5f719ff3f9da4b",
+  "path": "swarm/lanes/weather_fx/rain_drops/storm/PROVENANCE.json",
+  "note": "the sha256 of every file below is the lane's PROVENANCE.json sha256"
+ },
+ "files": {
+  "rain_layer0_512x1024.tga": {
+   "path": "assets/looks/rain_layers/rain_layer0_512x1024.tga",
+   "size": 2097170,
+   "sha256": "6986266b06ed62157cf85cd1cc770c1978a5aa3c1a4a0aa679bcf2df0d3fbd1d"
+  },
+  "rain_layer1_512x1024.tga": {
+   "path": "assets/looks/rain_layers/rain_layer1_512x1024.tga",
+   "size": 2097170,
+   "sha256": "7a0a649ecbb1d507ec8c2739b56c2ff40b24af3348cf17ceef1930cc20d29ec0"
+  },
+  "rain_layer2_512x1024.tga": {
+   "path": "assets/looks/rain_layers/rain_layer2_512x1024.tga",
+   "size": 2097170,
+   "sha256": "49e3d02c2e18f75ef6672465157d44493a42edcf0dad9422b1737d988475e362"
+  },
+  "rain_layers.json": {
+   "path": "assets/looks/rain_layers/rain_layers.json",
+   "size": 7374,
+   "sha256": "a8e676fabc2c80aaf6b45c2ccc73a58fbe77e8316d2891b5b96edf097b46b7f4"
+  }
+ }
+}
