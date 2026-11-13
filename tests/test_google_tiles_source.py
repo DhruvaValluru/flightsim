@@ -143,3 +143,44 @@ def test_every_terrain_render_draws_the_tiles_unless_switched_off(monkeypatch):
     assert "FLIGHTSIM_GOOGLE_TILES=off" in TILES_CPP   # the refusals name the way off
     debug = (REPO / "scripts" / "debug_storm_render.py").read_text(encoding="utf-8")
     assert '"--no-google-tiles"' in debug and 'extra = [f"-seconds={args.seconds}"] + (["-NoGoogleTiles"]' in debug
+
+
+def _enable_body():
+    start = TILES_CPP.index("bool FFlightSimGoogleTiles::Enable(")
+    return TILES_CPP[start:TILES_CPP.index("bool FFlightSimGoogleTiles::", start + 10)]
+
+
+def test_the_tile_cache_is_capped_on_a_constrained_gpu_and_switchable():
+    # Scene #09 stability (2026-11-13): Cesium's cache was the plugin default
+    # on a ~491 MB iGPU. 160 MB on a constrained GPU, -tiles-cache-mb= anywhere.
+    enable = _enable_body()
+    assert "constexpr int64 GoogleTilesConstrainedCacheMb = 160;" in TILES_CPP
+    assert 'FParse::Value(*Switches, TEXT("tiles-cache-mb="), CacheWord)' in enable
+    assert "else if (FFlightSimWorldBeauty::ConstrainedGpu())" in enable
+    assert "TileCacheMb = GoogleTilesConstrainedCacheMb;" in enable
+    assert "terrain.google_tiles_cache: -tiles-cache-mb=%s is not a positive whole number of MB" in enable
+    # the same reflection-by-name route as GenerateSmoothNormals, set before the first tick
+    assert 'FindFProperty<FNumericProperty>(Tiles->GetClass(), TEXT("MaximumCachedBytes"))' in enable
+    assert "SetIntPropertyValue(Cache->ContainerPtrToValuePtr<void>(Tiles), TileCacheMb * 1024 * 1024)" in enable
+    assert enable.index("MaximumCachedBytes") < enable.index("Tileset = Tiles;")
+    # the switches: command line, then the switch channel
+    assert 'FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"))' in TILES_CPP
+    assert "FString(FCommandLine::Get())" in TILES_CPP
+    # recorded
+    assert 'Out->SetObjectField(TEXT("tile_cache"), Cache);' in TILES_CPP
+
+
+def test_tiles_sse_switch_overrides_the_environment_and_states_the_error():
+    enable = _enable_body()
+    assert 'FParse::Value(*Switches, TEXT("tiles-sse="), SseWord)' in enable
+    assert enable.index('TEXT("tiles-sse=")') < enable.index('EnvNumber(TEXT("FLIGHTSIM_GOOGLE_TILES_SSE"), 8.0)')
+    assert "terrain.google_tiles_sse: -tiles-sse=%s is not a positive number" in enable
+    # the beauty's finer SSE stands down for a stated one, either way
+    assert "const bool bStated = bSseStated;" in TILES_CPP
+
+
+def test_no_switch_turns_the_tiles_off():
+    # the owner's rule (2026-10-09): the switches only bound the tiles.
+    for word in ("tiles=off", "google-tiles=off", "tiles-off"):
+        assert word not in TILES_CPP
+    assert "return !(Value == TEXT(\"0\") || Value == TEXT(\"off\")" in TILES_CPP

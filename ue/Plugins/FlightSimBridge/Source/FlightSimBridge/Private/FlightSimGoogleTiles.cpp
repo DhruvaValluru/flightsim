@@ -19,8 +19,12 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInstance.h"
 #include "Components/PrimitiveComponent.h"
+#include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Parse.h"
 #include "Misc/Paths.h"
+// Scene #09 stability: the constrained-GPU predicate (FFlightSimWorldBeauty::ConstrainedGpu).
+#include "FlightSimClouds.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/UnrealType.h"
@@ -64,6 +68,23 @@ namespace
 	// but live download of one large tile is not thrown away.
 	constexpr double StallRefreshSeconds = 30.0;
 	constexpr int32 MaxTileRefreshes = 4;
+	// Scene #09 stability (2026-11-13): Cesium's tile cache on a constrained
+	// GPU (FFlightSimWorldBeauty::ConstrainedGpu: integrated, or below SM6).
+	// The render box's iGPU has ~491 MB usable (core/render/hardware_budget.py,
+	// UNMEASURED); the streaming pool takes a third, so the tiles get 160 MB
+	// (swarm lane hardware_perf/vram_budgeting/alpine, tier 0). Another GPU
+	// keeps the plugin's own default. -tiles-cache-mb=<MB> states it anywhere.
+	constexpr int64 GoogleTilesConstrainedCacheMb = 160;
+	constexpr int64 GoogleTilesCacheMinMb = 16;
+	constexpr int64 GoogleTilesCacheMaxMb = 8192;
+
+	// The render switches: the command line, then FLIGHTSIM_RENDER_SWITCHES
+	// (what visual_fix_round.ps1 -Switches sets), as -deck-shadow= is read.
+	FString TilesSwitches()
+	{
+		return FString(FCommandLine::Get()) + TEXT(" ")
+			+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+	}
 
 	double EnvNumber(const TCHAR* Name, double Default)
 	{
@@ -140,7 +161,53 @@ bool FFlightSimGoogleTiles::Enable(UWorld* World, AGeoReferencingSystem* GeoRefe
 		return false;
 	}
 
-	MaximumScreenSpaceError = FMath::Clamp(EnvNumber(TEXT("FLIGHTSIM_GOOGLE_TILES_SSE"), 8.0), 1.0, 64.0);
+	// Scene #09 stability: -tiles-sse=N wins over FLIGHTSIM_GOOGLE_TILES_SSE,
+	// and -tiles-cache-mb=N caps Cesium's tile cache. These only bound the
+	// tiles: they are drawn either way (the owner's rule, 2026-10-09).
+	const FString Switches = TilesSwitches();
+	FString SseWord;
+	if (FParse::Value(*Switches, TEXT("tiles-sse="), SseWord))
+	{
+		if (!SseWord.IsNumeric() || FCString::Atod(*SseWord) <= 0.0)
+		{
+			Error = FString::Printf(TEXT("terrain.google_tiles_sse: -tiles-sse=%s is not a positive number"),
+			                        *SseWord);
+			return false;
+		}
+		MaximumScreenSpaceError = FMath::Clamp(FCString::Atod(*SseWord), 1.0, 64.0);
+		bSseStated = true;
+		SseSource = TEXT("-tiles-sse=");
+	}
+	else
+	{
+		MaximumScreenSpaceError = FMath::Clamp(EnvNumber(TEXT("FLIGHTSIM_GOOGLE_TILES_SSE"), 8.0), 1.0, 64.0);
+		bSseStated = !FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_GOOGLE_TILES_SSE"))
+			.TrimStartAndEnd().IsEmpty();
+		SseSource = bSseStated ? TEXT("FLIGHTSIM_GOOGLE_TILES_SSE") : TEXT("default");
+	}
+	FString CacheWord;
+	if (FParse::Value(*Switches, TEXT("tiles-cache-mb="), CacheWord))
+	{
+		if (!CacheWord.IsNumeric() || FCString::Atoi64(*CacheWord) <= 0)
+		{
+			Error = FString::Printf(
+				TEXT("terrain.google_tiles_cache: -tiles-cache-mb=%s is not a positive whole number of MB"),
+				*CacheWord);
+			return false;
+		}
+		TileCacheMb = FMath::Clamp(FCString::Atoi64(*CacheWord), GoogleTilesCacheMinMb, GoogleTilesCacheMaxMb);
+		TileCacheSource = TEXT("-tiles-cache-mb=");
+	}
+	else if (FFlightSimWorldBeauty::ConstrainedGpu())
+	{
+		TileCacheMb = GoogleTilesConstrainedCacheMb;
+		TileCacheSource = TEXT("constrained GPU default");
+	}
+	else
+	{
+		TileCacheMb = 0;
+		TileCacheSource = TEXT("the plugin's default");
+	}
 	TimeoutSeconds = FMath::Max(10.0, EnvNumber(TEXT("FLIGHTSIM_GOOGLE_TILES_TIMEOUT"), 180.0));
 	OriginLatitudeDeg = LatitudeDeg;
 	OriginLongitudeDeg = LongitudeDeg;
@@ -178,6 +245,25 @@ bool FFlightSimGoogleTiles::Enable(UWorld* World, AGeoReferencingSystem* GeoRefe
 		Tiles->SetUrl(FString::Printf(TEXT("%s?key=%s"), GoogleTilesRootUrl, *Key));
 	}
 	Tiles->SetMaximumScreenSpaceError(MaximumScreenSpaceError);
+	// Scene #09 stability: the cache cap, set before the tileset's first tick
+	// loads it. Reached by reflection by NAME, as GenerateSmoothNormals is
+	// (ApplyBeautyLook): no Cesium headers on the authoring machine, so the
+	// property's name and integer type are UNVERIFIED; the record says
+	// whether the render machine's plugin had it.
+	TileCacheRoute = TEXT("not set: the plugin's default");
+	if (TileCacheMb > 0)
+	{
+		FNumericProperty* Cache = FindFProperty<FNumericProperty>(Tiles->GetClass(), TEXT("MaximumCachedBytes"));
+		if (Cache != nullptr && Cache->IsInteger())
+		{
+			Cache->SetIntPropertyValue(Cache->ContainerPtrToValuePtr<void>(Tiles), TileCacheMb * 1024 * 1024);
+			TileCacheRoute = TEXT("UPROPERTY MaximumCachedBytes");
+		}
+		else
+		{
+			TileCacheRoute = TEXT("not found: no integer MaximumCachedBytes property (the plugin's default stands)");
+		}
+	}
 	Tileset = Tiles;
 
 	ACesiumCameraManager* Cameras = ACesiumCameraManager::GetDefaultCameraManager(World);
@@ -197,9 +283,10 @@ bool FFlightSimGoogleTiles::Enable(UWorld* World, AGeoReferencingSystem* GeoRefe
 	bEnabled = true;
 	UE_LOG(LogFlightSimGoogleTiles, Display,
 	       TEXT("google tiles: origin %.6f, %.6f at %.1f m ellipsoidal (%.1f m orthometric + %.1f m ")
-	       TEXT("undulation), maximum screen-space error %.1f"),
+	       TEXT("undulation), maximum screen-space error %.1f (%s), tile cache %lld MB (%s; %s)"),
 	       LatitudeDeg, LongitudeDeg, OriginEllipsoidHeightM, OrthometricHeightM, InUndulationM,
-	       MaximumScreenSpaceError);
+	       MaximumScreenSpaceError, *SseSource, static_cast<long long>(TileCacheMb), *TileCacheSource,
+	       *TileCacheRoute);
 	return true;
 #else
 	Error = TEXT("terrain.google_tiles: every terrain render draws Google's tiles, but this build has no Cesium ")
@@ -351,6 +438,14 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record() const
 		Out->SetStringField(TEXT("url"), GoogleTilesRootUrl);
 	}
 	Out->SetNumberField(TEXT("maximum_screen_space_error"), MaximumScreenSpaceError);
+	Out->SetStringField(TEXT("maximum_screen_space_error_source"), SseSource);
+	{
+		TSharedPtr<FJsonObject> Cache = MakeShared<FJsonObject>();
+		Cache->SetNumberField(TEXT("mb"), static_cast<double>(TileCacheMb));
+		Cache->SetStringField(TEXT("source"), TileCacheSource);
+		Cache->SetStringField(TEXT("route"), TileCacheRoute);
+		Out->SetObjectField(TEXT("tile_cache"), Cache);
+	}
 	Out->SetNumberField(TEXT("origin_lat_deg"), OriginLatitudeDeg);
 	Out->SetNumberField(TEXT("origin_lon_deg"), OriginLongitudeDeg);
 	Out->SetNumberField(TEXT("origin_ellipsoidal_height_m"), OriginEllipsoidHeightM);
@@ -549,8 +644,8 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyLook(UMaterialInterfac
 	// load wait and the frame's memory are in render.json). A stated
 	// FLIGHTSIM_GOOGLE_TILES_SSE wins (the measure's setting, unchanged).
 	{
-		const bool bStated = !FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_GOOGLE_TILES_SSE"))
-			.TrimStartAndEnd().IsEmpty();
+		// Scene #09 stability: -tiles-sse= states it too (Enable).
+		const bool bStated = bSseStated;
 		const double BeautySse = FMath::Clamp(EnvNumber(TEXT("FLIGHTSIM_GOOGLE_TILES_BEAUTY_SSE"), 6.0), 1.0, 64.0);
 		TSharedPtr<FJsonObject> Sse = MakeShared<FJsonObject>();
 		Sse->SetNumberField(TEXT("before"), MaximumScreenSpaceError);
@@ -564,7 +659,7 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyLook(UMaterialInterfac
 		else
 		{
 			Sse->SetStringField(TEXT("applied"), bStated
-				? TEXT("nothing: FLIGHTSIM_GOOGLE_TILES_SSE states the error")
+				? TEXT("nothing: -tiles-sse= or FLIGHTSIM_GOOGLE_TILES_SSE states the error")
 				: TEXT("nothing: the beauty's is not finer"));
 		}
 		Sse->SetNumberField(TEXT("after"), MaximumScreenSpaceError);
