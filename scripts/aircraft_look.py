@@ -1085,6 +1085,28 @@ def parse_aircraft_probes(params):
     return tuple(out)
 
 
+WET_POROSITY_KEY = "wet-porosity="
+
+
+def parse_wet_porosity(params):
+    """Twin of the host's -wet-porosity= parse (FFlightSimAircraftFXOptions::
+    ParseParams): {"word", "paint", "bare_metal"} -- ``default`` (absent: the
+    masters' own WetPorosity, aircraft_wet_layer.WET_DEFAULTS) or ``low``
+    (aircraft_wet_layer.WET_POROSITY_LOW on the paint and bare-metal look
+    MIDs); LookError("aircraft_look.switch: ...") for any other word.
+    Shading only: the slots, silhouettes and labels are unchanged."""
+    from aircraft_wet_layer import WET_DEFAULTS, WET_POROSITY_LOW, WET_POROSITY_WORDS
+
+    match = re.search(r"(?:^|\s)-?" + re.escape(WET_POROSITY_KEY) + r'"?([^\s"]*)', params)
+    word = "default" if match is None else match.group(1)
+    if word not in WET_POROSITY_WORDS:
+        raise LookError(f"aircraft_look.switch: -{WET_POROSITY_KEY}{word} is not one of "
+                        f"{', '.join(WET_POROSITY_WORDS)}")
+    source = WET_POROSITY_LOW if word == "low" else WET_DEFAULTS
+    return {"word": word, "paint": float(source["PorosityPaint"]),
+            "bare_metal": float(source["PorosityBareMetal"])}
+
+
 def heat_haze_max_material_offset(strength):
     """The largest |component| heat_haze.hlsl returns (refraction units)."""
     return float(strength) * 0.01 * HEAT_HAZE_FADE_PEAK

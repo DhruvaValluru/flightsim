@@ -100,6 +100,16 @@ WET_DEFAULTS = {
     "CanopyCentreZCm": 0.0,
 }
 
+#: Storm wet paint A/B (2026-11-13): ``-wet-porosity=low`` (aircraft_look.
+#: parse_wet_porosity; FFlightSimAircraftFXOptions::ParseParams) sets the
+#: look MIDs' ``WetPorosity`` to these instead of the masters' defaults. A
+#: clear-coated panel is not porous: at 40 mm/h wetness is 1 (10x
+#: WetSaturationMmh) and 0.3 darkens a dark livery to about half its dry
+#: albedo (swarm lane aircraft_exterior/pbr_materials/storm, computed, not
+#: rendered). The default is unchanged until Windows measures the A/B.
+WET_POROSITY_WORDS = ("default", "low")
+WET_POROSITY_LOW = {"PorosityPaint": 0.05, "PorosityBareMetal": 0.0}
+
 #: Literals inside aircraft_wet.hlsl (a Custom node cannot read a parameter it
 #: is not given and the WetParams/WetShape packs are full); pinned to the
 #: HLSL text by the tests. UNCALIBRATED like the rest.

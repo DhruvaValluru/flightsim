@@ -349,3 +349,39 @@ def test_every_wet_default_reaches_a_master_or_the_cpp():
     cpp = WET_CPP.read_text(encoding="utf-8")
     used |= {key for key in ("WetSaturationMmh", "WetDryTauS") if f'TEXT("{key}")' in cpp}
     assert set(wet.WET_DEFAULTS) - used == set()
+
+
+# -- storm wet paint A/B (2026-11-13): -wet-porosity=low ----------------------
+
+
+def test_wet_porosity_switch_twin_defaults_to_the_masters_and_refuses_other_words():
+    assert look.parse_wet_porosity("") == {"word": "default", "paint": 0.3, "bare_metal": 0.12}
+    assert look.parse_wet_porosity("-aircraft-materials=on") == look.parse_wet_porosity("")
+    assert look.parse_wet_porosity("-wet-porosity=default")["paint"] == wet.WET_DEFAULTS["PorosityPaint"]
+    assert look.parse_wet_porosity("-quality=beauty -wet-porosity=low") == {
+        "word": "low", "paint": 0.05, "bare_metal": 0.0}
+    with pytest.raises(look.LookError, match="aircraft_look.switch: -wet-porosity=none"):
+        look.parse_wet_porosity("-wet-porosity=none")
+    # the default is unchanged until Windows measures the A/B
+    assert wet.WET_DEFAULTS["PorosityPaint"] == 0.3 and wet.WET_DEFAULTS["PorosityBareMetal"] == 0.12
+    assert wet.WET_POROSITY_LOW == {"PorosityPaint": 0.05, "PorosityBareMetal": 0.0}
+
+
+def test_wet_porosity_switch_host_twin_sets_the_mid_scalar_on_paint_and_bare_metal():
+    text = FX_CPP.read_text(encoding="utf-8")
+    header = (BRIDGE / "Public" / "FlightSimAircraftFX.h").read_text(encoding="utf-8")
+    assert 'FString WetPorosity = TEXT("default");' in header
+    parse = text[text.index("void FFlightSimAircraftFXOptions::ParseParams("):]
+    parse = parse[:parse.index("\n}\n")]
+    assert 'FParse::Value(*Params, TEXT("wet-porosity="), WetPorosity);' in parse
+    assert "aircraft_look.switch: -wet-porosity=%s is not one of default, low" in parse
+    # the switch channel: ParseParams reads the command line and FLIGHTSIM_RENDER_SWITCHES
+    assert 'GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"))' in parse
+    low = wet.WET_POROSITY_LOW
+    assert f"constexpr float AircraftFxWetPorosityLowPaint = {low['PorosityPaint']}f;" in text
+    assert f"constexpr float AircraftFxWetPorosityLowBareMetal = {low['PorosityBareMetal']}f;" in text
+    assert 'LookMid->SetScalarParameterValue(TEXT("WetPorosity"),' in text
+    assert 'ProbeBaseName == TEXT("M_AircraftPaint") ? AircraftFxWetPorosityLowPaint' in text
+    # the master scalar it overrides is the wet layer's own
+    assert "WetPorosity" in wet.WET_MASTER_SCALARS
+    assert 'Row->SetObjectField(TEXT("wet_porosity"), Porosity);' in text

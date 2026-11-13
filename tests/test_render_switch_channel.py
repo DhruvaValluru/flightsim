@@ -35,3 +35,5 @@ def test_the_scene09_stability_switches_reach_the_argv():
     run = out.index("-run=FlightSimBridge.FlightSimRender")
     assert out[run + 1:run + 4] == ["-lightning-shadows=on", "-tiles-cache-mb=160", "-tiles-sse=16"]
     assert out[run + 4:] == PLANNED[3:]
+    out = with_render_switches(PLANNED, "-wet-porosity=low")
+    assert out[out.index("-run=FlightSimBridge.FlightSimRender") + 1] == "-wet-porosity=low"

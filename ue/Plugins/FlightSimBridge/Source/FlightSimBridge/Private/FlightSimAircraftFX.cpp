@@ -162,6 +162,9 @@ namespace
 	// round 5 (L4): the Thin Translucent canopy instance beside a glass slot's
 	// opaque one (aircraft_look.THIN_INSTANCE_SUFFIX), applied without -labels only.
 	const TCHAR* const AircraftFxThinSuffix = TEXT("_thin");
+	// Storm wet paint A/B: -wet-porosity=low (aircraft_wet_layer.WET_POROSITY_LOW).
+	constexpr float AircraftFxWetPorosityLowPaint = 0.05f;
+	constexpr float AircraftFxWetPorosityLowBareMetal = 0.0f;
 
 	// on/1/true or off/0/false; any other word is refused by name (it was
 	// read as "on", so -heat-haze=no turned the pixel-moving haze ON). Twin of
@@ -375,6 +378,18 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	// aircraft_look.MASTER_FALLBACK_ORDER). The final sweep's default
 	// (round 44, 1e5ba438: every paint slot on the flat master) is
 	// -aircraft-probe=flat; -aircraft-probe=coat forces the coat master.
+	// Storm wet paint A/B: -wet-porosity=default|low (aircraft_look.parse_wet_porosity).
+	WetPorosity = TEXT("default");
+	FParse::Value(*Params, TEXT("wet-porosity="), WetPorosity);
+	if (WetPorosity != TEXT("default") && WetPorosity != TEXT("low"))
+	{
+		if (SwitchError.IsEmpty())
+		{
+			SwitchError = FString::Printf(TEXT("aircraft_look.switch: -wet-porosity=%s is not one of default, low"),
+			                              *WetPorosity);
+		}
+		WetPorosity = TEXT("default");
+	}
 	Humidity.ParseParams(Params);  // condensation-solver: -humidity-pct=
 }
 
@@ -754,6 +769,7 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	int32 ThinApplied = 0;
 	// Round 23: the probes in force (recorded below) and the flat master.
 	int32 ProbedSlots = 0;
+	int32 WetPorositySlots = 0;
 	// Round 25: the flat and coat masters are loaded on every beauty render:
 	// they are the compile fallback of a class master (below).
 	UMaterialInterface* ProbeFlat = LoadObject<UMaterialInterface>(nullptr, AircraftFxProbeFlatMaterialPath);
@@ -979,6 +995,16 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 						FHashedMaterialParameterInfo(FName(AircraftFxLookGenerationParam)), Generation)
 						? static_cast<double>(Generation) : -1.0);
 				}
+				// Storm wet paint A/B: the low porosity on the paint and bare-metal
+				// MIDs (aircraft_wet_layer.WET_POROSITY_LOW); a master without the
+				// wet layer has no WetPorosity and this is a no-op.
+				if (Options.WetPorosity == TEXT("low"))
+				{
+					LookMid->SetScalarParameterValue(TEXT("WetPorosity"),
+						ProbeBaseName == TEXT("M_AircraftPaint") ? AircraftFxWetPorosityLowPaint
+						                                         : AircraftFxWetPorosityLowBareMetal);
+					++WetPorositySlots;
+				}
 				// Round 24 (aircraft_wet_layer.PROBE_SCALARS on the gen-6 masters).
 				if (Options.Probes.Contains(TEXT("nowet")))
 				{
@@ -1055,6 +1081,21 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	Row->SetNumberField(TEXT("slots_without_material"), Unbound);
 	Row->SetNumberField(TEXT("slots_thin_translucent"), ThinApplied);
 	Row->SetNumberField(TEXT("slots_probed"), ProbedSlots);
+	{
+		TSharedPtr<FJsonObject> Porosity = MakeShared<FJsonObject>();
+		Porosity->SetStringField(TEXT("switch"), Options.WetPorosity);
+		Porosity->SetNumberField(TEXT("slots"), WetPorositySlots);
+		if (Options.WetPorosity == TEXT("low"))
+		{
+			Porosity->SetNumberField(TEXT("paint"), AircraftFxWetPorosityLowPaint);
+			Porosity->SetNumberField(TEXT("bare_metal"), AircraftFxWetPorosityLowBareMetal);
+		}
+		else
+		{
+			Porosity->SetStringField(TEXT("applied"), TEXT("the masters' own WetPorosity (WET_DEFAULTS)"));
+		}
+		Row->SetObjectField(TEXT("wet_porosity"), Porosity);
+	}
 	// Round 25: the class masters' compile results on this shader platform,
 	// the slots that fell back to a plain master, the graph generations drawn
 	// and any probe parameter the drawn master lacks.
