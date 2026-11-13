@@ -96,7 +96,7 @@ def test_render_json_names_the_compile_result_the_fallback_and_the_generation():
 
 
 def test_the_masters_rebuild_in_place_at_generation_7():
-    assert re.search(r'^LOOK_GENERATION = "10"$', MASTERS, re.M)
+    assert re.search(r'^LOOK_GENERATION = "11"$', MASTERS, re.M)
     new = _def("_new", "_finish")
     assert "delete_all_material_expressions(material)" in new
     assert "delete_asset" not in new                       # never deleted: the look instances reference it

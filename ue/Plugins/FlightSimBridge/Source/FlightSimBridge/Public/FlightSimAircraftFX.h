@@ -55,6 +55,7 @@
 #include "Templates/Function.h"
 
 class AActor;
+class ADirectionalLight;
 class FFlightSimWeather;
 class UMaterialInstanceDynamic;
 class UPointLightComponent;
@@ -82,6 +83,22 @@ struct FFlightSimAircraftFXOptions
 	// Round 47 (#13's four light lines): the contrail forms over contrail.FormationRampS
 	// (on) or over generation 6's 0.04 of its lifetime (off, -contrail-formation-ramp=off).
 	bool bContrailFormationRamp = true;
+	// The canopy reflection (scripts/aircraft_glass_reflect.py; swarm lane
+	// aircraft_exterior.glass.coastal, its opaque tiers 0-1 only): OFF unless
+	// -canopy-reflect=on, so a round can A/B it. On, a glass slot that draws
+	// its OPAQUE look instance draws the tier's opaque reflect master instead
+	// (-canopy-reflect-tier=0, the default: LUT + 64x32 strip; 1: + micro
+	// scratches, 128x64 strip). A slot on its thin instance keeps it.
+	bool bCanopyReflect = false;
+	int32 CanopyReflectTier = 0;
+	// The look's X-Plane horizon colour (-xplane-horizon=R:G:B, sRGB8) when the
+	// render carries it: the strip's hue follows it. And -xplane-condition=.
+	bool bHorizonKnown = false;
+	FColor Horizon = FColor::White;
+	FString SkyCondition;
+	// The scene's sun (FFlightSimVisualScene::Sun; the commandlet sets it):
+	// the strip's azimuth and the reflection's gain, read each step.
+	ADirectionalLight* Sun = nullptr;
 	// round 5 (L4): the render carries -labels. The Thin Translucent canopy
 	// instance (Look/MI_<slot>_thin) is applied only when it does not: a
 	// translucent pane writes no depth and the ID / depth label captures draw
@@ -131,6 +148,18 @@ public:
 	// 1/tan(hFOV/2), the same pixel count per unit on both axes. Twin of
 	// scripts/aircraft_look.py heat_haze_max_displacement_px.
 	static double HeatHazeMaxDisplacementPx(double MaterialOffset, double WidthPx, double HeightPx, double HFovDeg);
+
+	// The canopy reflection's GlassEnvGain (scene luminance per unit of strip
+	// radiance): the strip's anti-sun horizon at 0.10 x SunIntensity / pi,
+	// faded out as the sun sets and dimmed by cloud cover; 0 for an interior
+	// camera. Twin of scripts/aircraft_glass_reflect.py canopy_reflect_gain.
+	static double CanopyReflectGain(double SunIntensity, double SunElevationDeg, double Cover, bool bInterior);
+
+	// The camera of this run looks out through the pane from inside (the
+	// card camera's "cockpit" preset, the legacy "shoulder"): the reflect
+	// MIDs' gain goes to 0 (the inside of a pane mirrors the cabin, not the
+	// sky). Recorded in render.json aircraft_look.materials.canopy_reflect.
+	void SetCanopyReflectCamera(bool bInterior, const FString& Preset);
 
 	// Every actor drawn only in the beauty capture (the commandlet appends them
 	// to FFlightSimVisualScene::BeautyOnlyActors before any label capture).
@@ -190,6 +219,8 @@ private:
 	void RebuildTrail(FTrail& Trail, double NowS, double LifetimeS, double StartWidthM,
 	                  double SpreadMPerS, double FormationS);
 	double Constant(const TCHAR* Group, const TCHAR* Name, double Fallback) const;
+	// The reflect MIDs' sun direction and gain from the sun as it is now.
+	void UpdateCanopyReflect();
 
 	bool bBuilt = false;
 	bool bFirstAdvance = true;
@@ -209,6 +240,13 @@ private:
 	int32 LandingOnFrames = 0;
 	// wet-airframe-canopy: one MID per look slot (the wet scalars), the weather, the wetness.
 	TArray<UMaterialInstanceDynamic*> LookMids;
+	// The canopy reflection: the reflect MIDs (also in LookMids), what drives
+	// their gain, and render.json's aircraft_look.materials.canopy_reflect.
+	TArray<UMaterialInstanceDynamic*> ReflectMids;
+	ADirectionalLight* ReflectSun = nullptr;
+	double ReflectCover = 0.0;
+	bool bReflectInterior = false;
+	TSharedPtr<FJsonObject> ReflectRow;
 	// cockpit-airframe (round 2): mesh manifest beauty_parts, measured part name
 	// -> its beauty-only copy's asset name (body -> body_beauty: the same
 	// triangles with the .ac crease normals and two-sided back faces).

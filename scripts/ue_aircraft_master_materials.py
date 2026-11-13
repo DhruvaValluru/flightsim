@@ -30,6 +30,11 @@ model:
   SetTranslucency(false)) and a translucent canopy writes no depth, so a
   translucent glass would put sky in the labels where the beauty shows the
   canopy. This is the LABEL-SAFE canopy: every -labels render keeps it.
+* M_AircraftGlassReflect / M_AircraftGlassReflectFine -- generation 11:
+  M_AircraftGlass's graph exactly plus the canopy reflection on Emissive
+  (swarm lane aircraft_exterior.glass.coastal, tiers 0-1: a Fresnel LUT and a
+  baked sky/sea strip, 2 / 4 taps). OPAQUE, so label-safe for the same
+  reason; drawn only under -canopy-reflect=on (scripts/aircraft_glass_reflect.py).
 * M_AircraftGlassThin -- round 5 (L4): Thin Translucent (blend Translucent,
   lighting mode Surface ForwardShading, the ThinTranslucentMaterialOutput
   node's Transmittance, screen-space reflections on, no refraction), n 1.5
@@ -75,6 +80,7 @@ if _HERE not in sys.path:
 
 import aircraft_look as look  # noqa: E402
 import aircraft_wet_layer  # noqa: E402  (wet-airframe-canopy)
+import aircraft_glass_reflect  # noqa: E402  (canopy reflection, tiers 0-1)
 
 REPO = os.path.dirname(_HERE)
 #: 2: wet-airframe-canopy wet layer and canopy scratches; 3: fix pass (acrylic
@@ -87,7 +93,11 @@ REPO = os.path.dirname(_HERE)
 #: compile-checked fallback and -aircraft-probe=coat).
 #: 8: both round-47 lanes -- M_AircraftContrail FormationRamp (#13) and the
 #: round-25 in-place rebuild, sentinel and coat master.
-LOOK_GENERATION = "10"
+#: 11: the canopy reflection masters M_AircraftGlassReflect (tier 0) and
+#: M_AircraftGlassReflectFine (tier 1) beside M_AircraftGlass, and their lane
+#: textures under MASTER_ROOT/Glass (scripts/aircraft_glass_reflect.py; drawn
+#: only under -canopy-reflect=on). Every other graph is unchanged.
+LOOK_GENERATION = "11"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.
@@ -581,8 +591,24 @@ def create_aircraft_bare_metal():
 
 
 def create_aircraft_glass():
+    _glass("M_AircraftGlass")
+
+
+def create_aircraft_glass_reflect():
+    """Generation 11: tier 0 of the canopy reflection (aircraft_glass_reflect.py)."""
+    _glass(aircraft_glass_reflect.MASTERS[0], reflect_tier=0)
+
+
+def create_aircraft_glass_reflect_fine():
+    """Generation 11: tier 1 of the canopy reflection (aircraft_glass_reflect.py)."""
+    _glass(aircraft_glass_reflect.MASTERS[1], reflect_tier=1)
+
+
+def _glass(name, reflect_tier=None):
+    """The opaque glass graph; ``reflect_tier`` (0 / 1) grafts the canopy
+    reflection after the canopy scratches. None is M_AircraftGlass exactly."""
     unreal = _u()
-    material = _new("M_AircraftGlass")
+    material = _new(name)
     if material is None:
         return
     material.set_editor_property("shading_model", _enum(unreal.MaterialShadingModel, "MSM_DEFAULT_LIT"))
@@ -611,7 +637,9 @@ def create_aircraft_glass():
     # micro-scratches; the glass stays opaque.
     aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], "glass")
     aircraft_wet_layer.add_canopy_scratch(material, sys.modules[__name__])
-    _finish(material, "M_AircraftGlass")
+    if reflect_tier is not None:
+        aircraft_glass_reflect.add_reflection(material, sys.modules[__name__], reflect_tier, aircraft_wet_layer)
+    _finish(material, name)
 
 
 def create_aircraft_rubber():
@@ -810,6 +838,7 @@ CREATORS = (create_aircraft_paint, create_aircraft_bare_metal, create_aircraft_g
             create_aircraft_rubber, create_aircraft_glass_thin, create_aircraft_probe_flat,
             create_aircraft_paint_default_lit, create_aircraft_paint_tangent_normal,
             create_aircraft_paint_coat,
+            create_aircraft_glass_reflect, create_aircraft_glass_reflect_fine,
             create_nav_light_emissive,
             create_aircraft_contrail, create_aircraft_afterburner, create_aircraft_heat_haze)
 #: The asset each creator makes (pinned to look.CLASS_MASTERS / THIN_GLASS_MASTER /
@@ -817,6 +846,7 @@ CREATORS = (create_aircraft_paint, create_aircraft_bare_metal, create_aircraft_g
 CREATED = ("M_AircraftPaint", "M_AircraftBareMetal", "M_AircraftGlass", "M_AircraftRubber",
            "M_AircraftGlassThin", "M_AircraftProbeFlat", "M_AircraftPaintDefaultLit",
            "M_AircraftPaintTangentNormal", "M_AircraftPaintCoat",
+           "M_AircraftGlassReflect", "M_AircraftGlassReflectFine",
            "M_NavLightEmissive", "M_AircraftContrail", "M_AircraftAfterburner",
            "M_AircraftHeatHaze",
            # condensation-solver: built by scripts/aircraft_condensation_material.py.
