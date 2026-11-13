@@ -980,6 +980,14 @@ def place_on_scene(spec: ScenarioSpec) -> None:
 #: AGL the planner AIMS for when it may move a defaulted altitude:
 #: comfortably above the validator's bare margin, in showcase territory.
 PLANNED_CLEARANCE_M = 300.0
+#: Height above the ground a DEFAULTED altitude is lifted to (owner,
+#: 2026-11-13: frames looked too close to the ground). A flat 3000 m MSL
+#: is only ~500 m over the Matterhorn's valleys; 1500 m AGL is the guide's
+#: "small-plane cruise" checkpoint. Capped below the airframe's typical
+#: ceiling (altitude_guide), never below datum + PLANNED_CLEARANCE_M.
+DEFAULT_AGL_M = 1500.0
+#: The fraction of the typical ceiling a lifted default may reach.
+DEFAULT_CEILING_FRACTION = 0.85
 #: The planned cruise floor over the measured stall speed. Vref is 1.3 x Vs
 #: by the same envelope code; 1.25 x sits between the validator's refusal
 #: line (1.05 x) and Vref, and the definitive trim probe still runs after.
@@ -2158,12 +2166,28 @@ def plan_flyable_defaults(spec: ScenarioSpec) -> None:
 
     plannable = PLANNABLE_SOURCES
     terrain = float(spec.terrain_elevation.value)
+    # Only an altitude nobody chose (source default) is lifted to cruise
+    # height; a model's reading of "low" or "treetop" keeps its intent.
+    altitude_unstated = str(spec.altitude.source) == "default"
     if (str(spec.altitude.source) in plannable
             and float(spec.altitude.value) < terrain + MIN_CLEARANCE_M):
         spec.plan("altitude", float(round(terrain + PLANNED_CLEARANCE_M)),
                   frm=f"raised for the location's terrain datum "
                       f"({terrain:.0f} m + {PLANNED_CLEARANCE_M:.0f} m "
                       f"planned clearance)")
+    if altitude_unstated:
+        from core.scenario.altitude_guide import AIRCRAFT_TYPICAL
+
+        target = terrain + DEFAULT_AGL_M
+        typical = AIRCRAFT_TYPICAL.get(str(spec.aircraft.value))
+        if typical:
+            target = min(target, DEFAULT_CEILING_FRACTION * typical["ceiling_m"])
+        target = float(round(max(target, terrain + PLANNED_CLEARANCE_M)))
+        if target > float(spec.altitude.value):
+            spec.plan("altitude", target,
+                      frm=f"default lifted to {target - terrain:.0f} m above the "
+                          f"location's terrain datum ({terrain:.0f} m; "
+                          f"{DEFAULT_AGL_M:.0f} m AGL aimed, below the airframe's ceiling)")
     if str(spec.airspeed.source) not in plannable:
         return
     # The defaulted cruise is filled BEFORE the model decides the

@@ -359,6 +359,41 @@ def _altitude(text: str) -> Quantity:
     return Quantity.default(3000.0, "m", frm="mid-altitude cruise")
 
 
+#: An altitude stated above the GROUND, not sea level: "1500 m above the
+#: ground", "2000 ft AGL", "800 m above the terrain". The spec's altitude
+#: is MSL, so the number is added to the place's terrain datum once the
+#: place is known (:func:`apply_agl_altitude`).
+AGL_PHRASE = (rf"{NUMBER}\s*(m|metres?|meters?|ft|feet|foot)\s+"
+              rf"(?:agl\b|above\s+(?:the\s+)?(?:ground|terrain)(?:\s+level)?\b)")
+
+
+def stated_agl(text: str) -> Optional[Tuple[float, str]]:
+    """(metres above the ground, the phrase) when the prompt states one."""
+    m = _search(AGL_PHRASE, strip_thousands(" ".join(text.lower().split())))
+    if not m:
+        return None
+    value = float(m.group(1))
+    if m.group(2).startswith(("ft", "fe", "fo")):
+        value = u.ft_to_m(value)
+    return value, m.group(0).strip()
+
+
+def apply_agl_altitude(spec: ScenarioSpec, prompt: str) -> bool:
+    """A height stated above the ground becomes the MSL altitude over the
+    spec's terrain datum (user-stated: the prompt said it). Returns whether
+    it applied. Over the sea, or with no place, the datum is 0 and AGL is MSL;
+    the run's terrain planner still checks the real track's peaks."""
+    agl = stated_agl(prompt)
+    if agl is None:
+        return False
+    metres, phrase = agl
+    ground = float(spec.terrain_elevation.value)
+    spec.altitude = Quantity.user(
+        float(round(ground + metres, 1)), "m",
+        frm=f"{phrase!r}: {metres:.0f} m above the ground + {ground:.0f} m terrain datum")
+    return True
+
+
 def _airspeed(text: str) -> Tuple[Quantity, Quantity]:
     kind = "cas"
     m = _search(rf"{NUMBER}\s*(?:kt|kts|knot|knots)\b", text)
@@ -1549,6 +1584,8 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
     # A place outside the curated bakes ("over New York"): looked up, then
     # baked on demand on the first run like stated coordinates.
     apply_named_place(spec, named)
+    # "1500 m above the ground": the terrain datum is known only now.
+    apply_agl_altitude(spec, prompt)
 
     if traffic:
         spec.traffic = traffic

@@ -1711,6 +1711,10 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
         # it, and a location question the model asked anyway is dropped -- the
         # prompt already answered it. Stated coordinates are never moved.
         applied = apply_named_place(spec, looked_up)
+        # A height stated above the ground is resolved over the final datum,
+        # whatever MSL number the model wrote for it.
+        from .compiler import apply_agl_altitude
+        apply_agl_altitude(spec, prompt)
         if looked_up is not None and (applied or (
                 abs(float(spec.latitude.value) - looked_up.latitude) < 1e-4
                 and abs(float(spec.longitude.value) - looked_up.longitude) < 1e-4)):

@@ -670,7 +670,9 @@ def test_flyable_defaults_are_planned_not_refused():
     spec = compile_prompt("fly the 747")
     spec.set("terrain_elevation", 4750.0, frm="test: everest datum")
     plan_flyable_defaults(spec)
-    assert float(spec.altitude.value) == 5050.0     # datum + 300 m planned
+    # an unstated altitude is lifted to cruise height over the ground
+    # (owner 2026-11-13): datum + DEFAULT_AGL_M, under the 747's ceiling
+    assert float(spec.altitude.value) == 6250.0     # datum + 1500 m
     assert str(spec.altitude.source) == "derived"   # still system-chosen
 
     # Airspeed floor: the model's own measured Vs at the final altitude.
