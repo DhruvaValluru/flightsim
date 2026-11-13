@@ -199,6 +199,8 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                "M_RainDrops", "M_RainSplash", "M_LightningChannel", "M_StormCell",
                "M_WindshieldRain",
                "M_RainCurtain", "M_ScudCard",   # lane D: the beauty rain veil
+               # maxpick/rain: the baked tier 0 (-rain-layers=on, -windscreen-baked=on).
+               "M_RainLayers", "M_WindshieldRainBaked",
                # World lane, visual overhaul (FlightSimClouds.cpp, beauty only).
                "M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter",
                # Visual round 5, L3: the distant 2D cloud sheet (FlightSimClouds.cpp, beauty only).

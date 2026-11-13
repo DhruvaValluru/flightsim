@@ -246,8 +246,6 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		                                      static_cast<float>(Shape.NearThinM * WeatherCmPerMetre));
 		// The streak cap is set per frame in Advance, scaled by the lens (round 9's #07).
 		BeautyMaxStreakRad = Shape.MaxStreakRad;
-		// Round 12's #15: the cinematic streaks keep a share of the camera's motion.
-		BeautyCameraShare = FlightSimRainVeil::BeautyCameraMotionShare;
 		RainMaterial->SetScalarParameterValue(TEXT("MaxCoverage"), static_cast<float>(Shape.MaxCoverage));
 		RainMaterial->SetScalarParameterValue(TEXT("DepthFade"),
 		                                      static_cast<float>(Shape.DepthFadeM * WeatherCmPerMetre));
@@ -255,6 +253,12 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		RainMaterial->SetScalarParameterValue(TEXT("Soft"), static_cast<float>(Shape.Softness));
 		RainMaterial->SetScalarParameterValue(TEXT("Vary"), static_cast<float>(Shape.Variation));
 		RainMaterial->SetScalarParameterValue(TEXT("SkyRadianceScale"), static_cast<float>(Shape.Radiance));
+	}
+	if (RainMaterial != nullptr || bRainLayers)
+	{
+		// Round 12's #15: the cinematic streaks keep a share of the camera's motion
+		// (maxpick/rain: the baked layers, -rain-layers=on, keep the same share).
+		BeautyCameraShare = FlightSimRainVeil::BeautyCameraMotionShare;
 	}
 	const TSharedPtr<FJsonObject>* Row = nullptr;
 	if (Record.IsValid() && Record->TryGetObjectField(TEXT("rain"), Row) && Row != nullptr && Row->IsValid())
@@ -277,6 +281,7 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		ShapeRow->SetNumberField(TEXT("radiance"), Shape.Radiance);
 		ShapeRow->SetStringField(TEXT("applied_to"), RainMaterial != nullptr
 			? TEXT("M_RainDrops (the procedural backend's drops)")
+			: bRainLayers ? TEXT("nothing: -rain-layers=on draws no drops (the camera share only)")
 			: TEXT("nothing: the Niagara backend's system exposes no shape parameters"));
 		ShapeRow->SetStringField(TEXT("basis"),
 			TEXT("core/scene/weather_look.py beauty_rain_shape: the drawn count follows the rate, the streak's "
@@ -1413,6 +1418,9 @@ bool FFlightSimWeather::Build(UWorld* World, const FFlightSimWeatherOptions& Opt
 	Backend = Options.Backend;
 	bAudio = Options.bAudio;
 	bManualNiagaraTick = Options.bManualNiagaraTick;
+	// maxpick/rain: the baked tier 0 (beauty only, default off; the host sets these).
+	bRainLayers = Options.bRainLayers;
+	bWindscreenBaked = Options.bWindscreenBaked;
 	const TSharedPtr<FJsonObject>* WeatherJson = nullptr;
 	if (!Options.Card.IsValid() || !Options.Card->TryGetObjectField(TEXT("weather"), WeatherJson) ||
 	    WeatherJson == nullptr || !WeatherJson->IsValid())
@@ -1614,7 +1622,15 @@ bool FFlightSimWeather::BuildRain(UWorld* World, const TSharedPtr<FJsonObject>& 
 	RainActor = World->SpawnActor<AActor>();
 	RainActor->Tags.Add(FName(TEXT("FlightSim.weather")));
 	BeautyOnlyActors.Add(RainActor);
-	if (Backend == EFlightSimWeatherBackend::Niagara)
+	if (bRainLayers)
+	{
+		// maxpick/rain: -rain-layers=on draws no particles (262,144 drops lose the
+		// integrated GPU); ApplyRainLayers puts the baked layers on the beauty capture.
+		Row->SetStringField(TEXT("drops"), TEXT("none: -rain-layers=on (M_RainLayers, three baked layers)"));
+		Row->SetStringField(TEXT("determinism"),
+			TEXT("the layers' phase integrated from the sim clock: deterministic in the step"));
+	}
+	else if (Backend == EFlightSimWeatherBackend::Niagara)
 	{
 		if (!BuildNiagaraRain(World, Options, Error))
 		{
@@ -1641,6 +1657,7 @@ bool FFlightSimWeather::BuildRain(UWorld* World, const TSharedPtr<FJsonObject>& 
 	Row->SetNumberField(TEXT("splash_slots"), SplashSlots);
 	Row->SetBoolField(TEXT("drawn"), true);
 	Row->SetStringField(TEXT("label_captures"), TEXT("hidden (BeautyOnlyActors)"));
+	Row->SetStringField(TEXT("drawn_as"), bRainLayers ? TEXT("baked_layers") : TEXT("particles"));
 	Record->SetObjectField(TEXT("rain"), Row);
 	bRain = true;
 	return true;
@@ -2532,6 +2549,8 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 				BeautyMaxStreakRad * FMath::Min(1.0, PixelAngle / FlightSimRainVeil::BeautyReferencePixelRad)));
 		}
 	}
+	// maxpick/rain: the baked rain layers (nothing unless -rain-layers=on put them on).
+	StepRainLayers(Wind, CameraVelocity, Share, Shutter, Dt, PixelAngle);
 	// Lane D: the beauty rain veil (nothing unless FFlightSimWorldBeauty built it).
 	StepBeautyRainVeil(View, Wind, CameraVelocity, Share, PixelAngle);
 	if (NiagaraRain != nullptr)
@@ -2570,6 +2589,8 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 		WindshieldMaterial->SetScalarParameterValue(TEXT("FilmV"),
 			static_cast<float>(BeautyFilm > 0.0 ? WindshieldRunoffMps / WeatherGlassViewHeightM * T * 1.5 : 0.0));
 	}
+	// maxpick/rain: the baked glass (nothing unless -windscreen-baked=on put it on).
+	StepWindscreenBaked(T, View.ShutterSeconds, View.HorizontalFovDeg);
 	if (RainNoise.IsValid())
 	{
 		// The hiss at the rain falling HERE (the shaft's share of the drops).
@@ -2586,6 +2607,11 @@ bool FFlightSimWeather::ApplyWindshield(USceneCaptureComponent2D* Beauty, double
 	if (!bRain || Beauty == nullptr)
 	{
 		return true;
+	}
+	if (bWindscreenBaked)
+	{
+		// maxpick/rain: -windscreen-baked=on, the baked glass in M_WindshieldRain's place.
+		return ApplyWindscreenBaked(Beauty, AirspeedMps, Error);
 	}
 	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, WeatherWindshieldMaterialPath);
 	if (Material == nullptr)

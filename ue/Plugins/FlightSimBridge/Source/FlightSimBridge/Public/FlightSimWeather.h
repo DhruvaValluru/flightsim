@@ -100,6 +100,14 @@ struct FFlightSimWeatherOptions
 	// motion left out, as film shows rain). Recorded in
 	// look_applied.weather.rain.style; cinematic is a stated stylisation.
 	FString RainStyle = TEXT("physical");
+	// maxpick/rain (2026-11-13), BEAUTY ONLY, default off (Windows A/Bs them):
+	// -rain-layers=on draws the rain as three baked layers in one post-process
+	// pass on the beauty capture (M_RainLayers) instead of the particle drops;
+	// -windscreen-baked=on draws a cockpit camera's glass with the baked optics
+	// (M_WindshieldRainBaked) instead of M_WindshieldRain's hashed loop. The host
+	// sets them only on a beauty run (FlightSimWeatherBaked.cpp ParseBakedSwitch).
+	bool bRainLayers = false;
+	bool bWindscreenBaked = false;
 	// The interactive window plays thunder and rain; the render does not.
 	bool bAudio = false;
 	// The render commandlet drives no world tick: the Niagara system is
@@ -227,6 +235,17 @@ public:
 	bool ApplyWindshield(USceneCaptureComponent2D* Beauty, double AirspeedMps, FString& Error);
 
 	bool DrawsRain() const { return bRain; }
+
+	// -- maxpick/rain (2026-11-13): the baked tier 0, BEAUTY ONLY (FlightSimWeatherBaked.cpp)
+	// "-<Key>on|off" (Key such as TEXT("rain-layers=")) read from Switches (the command
+	// line plus FLIGHTSIM_RENDER_SWITCHES); absent = off; any other word refused by name.
+	static bool ParseBakedSwitch(const FString& Switches, const TCHAR* Key, bool& bOut, FString& Error);
+	// -rain-layers=on: M_RainLayers as a post-process blendable on the beauty capture
+	// (the label captures never see a look blendable). A no-op (true) unless the rain
+	// is drawn and the switch is on; refused weather.rain_layers when the material is
+	// absent. Recorded in Record.rain.drawn_as / Record.rain_layers.
+	bool ApplyRainLayers(USceneCaptureComponent2D* Beauty, FString& Error);
+	bool DrawsRainLayers() const { return RainLayersMaterial != nullptr; }
 	// The cumulonimbus is drawn: the sun is shadowed out under it and its
 	// base is lit by its own multiple scattering alone, stops below the
 	// look's light -- the hosts meter the exposure again (the commandlet
@@ -358,6 +377,12 @@ private:
 	FVector WindEngineCmPerS(const FVector& CameraEnu) const;
 	double ShaftShare(const FVector& CameraEnu) const;
 	void StartRainNoise();
+	// maxpick/rain: the baked glass (ApplyWindshield under -windscreen-baked=on) and the
+	// per-frame parameters of both baked effects (Advance).
+	bool ApplyWindscreenBaked(USceneCaptureComponent2D* Beauty, double AirspeedMps, FString& Error);
+	void StepRainLayers(const FVector& Wind, const FVector& CamVel, double Share, double Shutter,
+	                    double Dt, double PixelAngle);
+	void StepWindscreenBaked(double TimeS, double Shutter, double HorizontalFovDeg);
 	void StepBeautyRainVeil(const FFlightSimWeatherView& View, const FVector& Wind, const FVector& CamVel,
 	                        double Share, double PixelAngle);
 	void PlayThunder(UWorld* World, const FFlightSimFlash& Flash, const FVector& ListenerEnu,
@@ -410,6 +435,13 @@ private:
 	UMaterialInstanceDynamic* RainMaterial = nullptr;
 	UMaterialInstanceDynamic* SplashMaterial = nullptr;
 	UMaterialInstanceDynamic* WindshieldMaterial = nullptr;
+	// maxpick/rain: the baked tier 0 (both null unless its switch is on).
+	bool bRainLayers = false;
+	bool bWindscreenBaked = false;
+	UMaterialInstanceDynamic* RainLayersMaterial = nullptr;
+	UMaterialInstanceDynamic* WindscreenBakedMaterial = nullptr;
+	FVector RainLayersPhase = FVector::ZeroVector;   // each layer's travel, in its tiles, wrapped
+	FVector WindscreenWet = FVector::ZeroVector;     // drop density, rivulet density, head rate (tiles/s)
 	UNiagaraComponent* NiagaraRain = nullptr;
 	bool bManualNiagaraTick = false;
 	AActor* RainActor = nullptr;

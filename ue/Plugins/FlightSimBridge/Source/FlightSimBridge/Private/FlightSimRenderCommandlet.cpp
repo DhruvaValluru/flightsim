@@ -2051,7 +2051,8 @@ namespace
 			{
 				LensDrops = Instance;
 			}
-			else if (Base->GetFName() == FName(TEXT("M_WindshieldRain")))
+			else if (Base->GetFName() == FName(TEXT("M_WindshieldRain")) ||
+			         Base->GetFName() == FName(TEXT("M_WindshieldRainBaked")))   // maxpick/rain
 			{
 				Windshield = Instance;
 			}
@@ -2070,7 +2071,13 @@ namespace
 		// is normal * radius * 2 with |normal| <= 0.5 and radius <= 0.4 cells
 		// of the height, so at most 0.4 / cells of the height in pixels.
 		double WindshieldBoundPx = -1.0;
-		if (Windshield != nullptr)
+		if (Windshield != nullptr && Windshield->GetBaseMaterial()->GetFName() == FName(TEXT("M_WindshieldRainBaked")))
+		{
+			// maxpick/rain: windshield_baked.hlsl shifts by at most Lens = LensH x aspect screen
+			// heights on each axis (du / aspect, dv): sqrt(2) LensH x the width bounds both.
+			WindshieldBoundPx = 1.41421356 * double(Windshield->K2_GetScalarParameterValue(TEXT("LensH"))) * In.Width;
+		}
+		else if (Windshield != nullptr)
 		{
 			const double Cells = FMath::Max(1.0, double(Windshield->K2_GetVectorParameterValue(TEXT("Glass")).A));
 			WindshieldBoundPx = 0.4 / Cells * In.Height;
@@ -3011,6 +3018,22 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			// -rain-gain=N: the drops' opacity times N (1 = the physics).
 			FParse::Value(*Params, TEXT("rain-gain="), WeatherOptions.RainGain);
 			FParse::Value(*Params, TEXT("rain-style="), WeatherOptions.RainStyle);
+			// maxpick/rain (2026-11-13): -rain-layers=on|off and -windscreen-baked=on|off, the
+			// baked tier 0 of the rain and of a cockpit's glass (FlightSimWeatherBaked.cpp).
+			// Beauty only, off by default; the command line or FLIGHTSIM_RENDER_SWITCHES like
+			// -deck-shadow=; another word refuses by name.
+			if (bBeauty)
+			{
+				const FString BakedSwitches = Params + TEXT(" ")
+					+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+				if (!FFlightSimWeather::ParseBakedSwitch(BakedSwitches, TEXT("rain-layers="),
+				                                         WeatherOptions.bRainLayers, Error) ||
+				    !FFlightSimWeather::ParseBakedSwitch(BakedSwitches, TEXT("windscreen-baked="),
+				                                         WeatherOptions.bWindscreenBaked, Error))
+				{
+					return Fail(Error);
+				}
+			}
 			if (!Weather.Build(World, WeatherOptions, Error)) { return Fail(Error); }
 			VisualScene.BeautyOnlyActors.Append(Weather.BeautyOnlyActors);
 			if (VisualScene.LookApplied.IsValid() && Weather.Record.IsValid())
@@ -4310,6 +4333,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				return Fail(Error);
 			}
+		}
+		// maxpick/rain: -rain-layers=on, the baked rain layers on the BEAUTY capture only
+		// (a no-op unless the switch is on and the weather draws rain).
+		if (!Weather.ApplyRainLayers(Capture, Error))
+		{
+			return Fail(Error);
 		}
 	}
 
