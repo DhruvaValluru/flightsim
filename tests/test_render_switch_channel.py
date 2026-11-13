@@ -26,3 +26,14 @@ def test_no_switches_leaves_the_command_unchanged(monkeypatch):
     monkeypatch.delenv("FLIGHTSIM_RENDER_SWITCHES", raising=False)
     assert with_render_switches(PLANNED) == PLANNED
     assert with_render_switches(PLANNED, "  ") == PLANNED
+
+
+def test_the_scene09_stability_switches_reach_the_argv():
+    # 2026-11-13: -lightning-shadows= (FlightSimWeather.cpp), -tiles-cache-mb=
+    # and -tiles-sse= (FlightSimGoogleTiles.cpp) ride the same channel.
+    out = with_render_switches(PLANNED, "-lightning-shadows=on -tiles-cache-mb=160 -tiles-sse=16")
+    run = out.index("-run=FlightSimBridge.FlightSimRender")
+    assert out[run + 1:run + 4] == ["-lightning-shadows=on", "-tiles-cache-mb=160", "-tiles-sse=16"]
+    assert out[run + 4:] == PLANNED[3:]
+    out = with_render_switches(PLANNED, "-wet-porosity=low")
+    assert out[out.index("-run=FlightSimBridge.FlightSimRender") + 1] == "-wet-porosity=low"

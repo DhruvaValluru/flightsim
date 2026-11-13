@@ -16,6 +16,24 @@ VRAM_RESERVE = 0.15  # leave headroom for the OS compositor and the editor
 
 TIERS = ((20_000, "extreme"), (12_000, "high"), (6_000, "mid"), (0, "floor"))
 
+#: Scene #09 stability (2026-11-13): the texture streaming pool on a
+#: shared-memory GPU is one consumer of the usable VRAM, not all of it.
+#: Render targets, shadow maps and Cesium's Google tile textures (created at
+#: runtime, not streamed, so not bounded by the pool) sit on top of it; a pool
+#: allowed to fill the whole cap leaves them nothing (swarm lane
+#: hardware_perf/vram_budgeting/alpine; a hypothesis for the DXGI device
+#: hangs, not a diagnosis). The pool is this share of the usable VRAM, never
+#: below the floor and never above the usable VRAM itself: 491 MB usable ->
+#: 163 MB. UNMEASURED: the stress ladder replaces it.
+INTEGRATED_POOL_SHARE = 1 / 3
+INTEGRATED_POOL_FLOOR_MB = 128
+
+
+def integrated_streaming_pool_mb(usable_vram_mb: int) -> int:
+    """r.Streaming.PoolSize (MB) for a shared-memory GPU with this usable VRAM."""
+    return min(int(usable_vram_mb),
+               max(INTEGRATED_POOL_FLOOR_MB, int(usable_vram_mb * INTEGRATED_POOL_SHARE)))
+
 
 class HardwareProfileError(ValueError):
     """Raised with a name, like the rest of the project's refusals."""
@@ -64,7 +82,7 @@ def _integrated_budget(profile: dict, gpu: dict) -> dict:
         "gpu_render_jobs": 1,
         "ram_cache_gb": 1,
         "cvars": {
-            "r.Streaming.PoolSize": pool,
+            "r.Streaming.PoolSize": integrated_streaming_pool_mb(pool),
             "r.ScreenPercentage": 100,
             "sg.TextureQuality": 1, "sg.ShadowQuality": 1,
             "sg.GlobalIlluminationQuality": 1, "sg.PostProcessQuality": 2,

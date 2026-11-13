@@ -102,6 +102,14 @@ struct FFlightSimWeatherOptions
 	FString RainStyle = TEXT("physical");
 	// The interactive window plays thunder and rain; the render does not.
 	bool bAudio = false;
+	// Scene #09 stability (2026-11-13): the stroke's point light casts no
+	// shadows by default. On the iGPU (D3D11 SM5, ~491 MB) a shadowed movable
+	// point light with a 30 km radius is a cube shadow pass over the whole
+	// scene on every stroke frame, for under 1 % of the scene's light
+	// (swarm lane weather_fx/lightning/storm). -lightning-shadows=on is the
+	// old shadowed light (ParseLightningShadows; the command line, then
+	// FLIGHTSIM_RENDER_SWITCHES). Beauty only: the light is a beauty-only actor.
+	bool bLightningShadows = false;
 	// The render commandlet drives no world tick: the Niagara system is
 	// advanced by hand, one frame per Advance.
 	bool bManualNiagaraTick = false;
@@ -208,6 +216,10 @@ public:
 	// storm weather is opt-in beside the weather look); anything else
 	// refused by name.
 	static bool ParseBackend(const FString& Name, EFlightSimWeatherBackend& Out, FString& Error);
+	// -lightning-shadows=on|off (off by default) from Params, then
+	// FLIGHTSIM_RENDER_SWITCHES; another word refused by name
+	// (weather.lightning_shadows).
+	static bool ParseLightningShadows(const FString& Params, bool& bOut, FString& Error);
 
 	// Reads the card's weather block, runs the selftests, spawns what it
 	// draws. A card without the block builds nothing and records so. A
@@ -232,6 +244,9 @@ public:
 	// look's light -- the hosts meter the exposure again (the commandlet
 	// from a frame read back, the window by the engine's histogram).
 	bool DrawsCell() const { return bCell; }
+	// The storm weather draws its own lightning (channels and flash light):
+	// the hosts stand the weather look's bolt down (one flash path).
+	bool DrawsLightning() const { return bLightning; }
 	bool IsBuilt() const { return bBuilt; }
 
 	// -- visual overhaul, world lane (2026-11-09): BEAUTY ONLY ---------------
@@ -469,6 +484,8 @@ private:
 	TArray<UProceduralMeshComponent*> FlashMeshes;
 	TArray<UMaterialInstanceDynamic*> FlashMaterials;
 	UPointLightComponent* FlashLight = nullptr;
+	// FFlightSimWeatherOptions::bLightningShadows, kept for BuildLightning.
+	bool bFlashShadows = false;
 	AActor* LightningActor = nullptr;
 	double LastFlashLuxValue = 0.0;
 	double BeautyRainGain = 1.0;

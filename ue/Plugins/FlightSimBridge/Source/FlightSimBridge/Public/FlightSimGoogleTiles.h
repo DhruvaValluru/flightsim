@@ -147,6 +147,15 @@ private:
 	TWeakObjectPtr<AActor> CameraManager;
 	int32 CameraId = -1;
 	double MaximumScreenSpaceError = 8.0;
+	// -tiles-sse= or FLIGHTSIM_GOOGLE_TILES_SSE stated the error (the beauty's
+	// finer default then stands down).
+	bool bSseStated = false;
+	FString SseSource;
+	// Scene #09 stability: the tile cache cap (MB; 0 = the plugin's default),
+	// where it came from and how it reached the tileset.
+	int64 TileCacheMb = 0;
+	FString TileCacheSource;
+	FString TileCacheRoute;
 	double TimeoutSeconds = 180.0;
 	double OriginLatitudeDeg = 0.0;
 	double OriginLongitudeDeg = 0.0;

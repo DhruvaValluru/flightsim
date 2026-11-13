@@ -461,6 +461,12 @@ public:
 	// The lightning schedule and the ice ramp at the FDM's time (from
 	// AdvanceWorld): deterministic in TimeSeconds and the block's seed.
 	void AdvanceWeather(double TimeSeconds);
+	// Scene #09 stability (2026-11-13): one flash path. When the storm
+	// weather draws its own lightning (FFlightSimWeather::DrawsLightning),
+	// the look's bolt and its point light are hidden and no longer advanced;
+	// recorded in look_applied.weather_look.storm.lightning_stood_down.
+	// A no-op when the look drew no bolt (bSkipStormLook already did it).
+	void StandDownLookLightning();
 	// The flash on/off law, pure (pinned by test): 0..1 at TimeSeconds for
 	// a storm seeded with Seed.
 	static double LightningFlash(double TimeSeconds, int32 Seed);

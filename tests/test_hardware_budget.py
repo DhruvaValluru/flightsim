@@ -52,3 +52,25 @@ def test_intel_igpu_gets_the_conservative_budget():
     assert b["hardware_ray_tracing"] is False and b["max_capture_width"] == 1280
     assert b["measured"] is False
     assert set(b["unknown_inputs"]) == {"cpu.logical_cores", "ram.total_gb"}
+
+
+def test_igpu_streaming_pool_is_a_share_of_the_usable_vram_not_all_of_it():
+    # Scene #09 (2026-11-13): the pool was the whole usable VRAM (491 = 491),
+    # leaving nothing for render targets, shadows and the tile textures.
+    from core.render.hardware_budget import (INTEGRATED_POOL_FLOOR_MB, INTEGRATED_POOL_SHARE,
+                                             integrated_streaming_pool_mb)
+    p = {"cpu": {"logical_cores": None}, "ram": {"total_gb": None},
+         "gpus": [{"vendor": "intel", "name": "Intel integrated graphics", "vram_mb": None, "integrated": True}]}
+    b = budget(p)
+    assert b["usable_vram_mb"] == 491
+    pool = b["cvars"]["r.Streaming.PoolSize"]
+    assert pool == 163 and pool < b["usable_vram_mb"]
+    assert INTEGRATED_POOL_SHARE == 1 / 3 and INTEGRATED_POOL_FLOOR_MB == 128
+    # the floor, and never above the usable VRAM
+    assert integrated_streaming_pool_mb(200) == 128
+    assert integrated_streaming_pool_mb(100) == 100
+    assert integrated_streaming_pool_mb(1024) == 341
+
+
+def test_discrete_gpu_pool_is_unchanged():
+    assert budget(_profile(12_000))["cvars"]["r.Streaming.PoolSize"] == int(10_200 * 0.6)
