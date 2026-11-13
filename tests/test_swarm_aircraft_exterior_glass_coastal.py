@@ -19,8 +19,8 @@ _spec = importlib.util.spec_from_file_location("swarm_glass_coastal_bake", LANE 
 bake = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bake)
 
-DOC = json.loads((OUT / "glass_coastal.json").read_text())
-PROV = json.loads((LANE / "PROVENANCE.json").read_text())
+DOC = json.loads((OUT / "glass_coastal.json").read_text(encoding="utf-8"))
+PROV = json.loads((LANE / "PROVENANCE.json").read_text(encoding="utf-8"))
 
 
 def _img(name):
@@ -91,7 +91,7 @@ def test_albedo_stays_in_range_and_tint_is_the_repository_value():
     lo, hi = bake.ALBEDO_RANGE
     for cov in (0.0, 0.5, 1.0):
         assert all(lo <= a <= hi for a in bake.effective_albedo(cov))
-    look = (LANE.parents[3].parent / "scripts/aircraft_look.py").read_text()
+    look = (LANE.parents[3].parent / "scripts/aircraft_look.py").read_text(encoding="utf-8")
     assert "GLASS_IOR = 1.49" in look
     assert '"glass": {"GlassTint": (0.018, 0.022, 0.026, 1.0)}' in look
     assert 'THIN_VECTORS = {"Transmittance": (0.80, 0.84, 0.82, 1.0)}' in look
@@ -132,7 +132,7 @@ def test_provenance_hashes_and_licences():
 def test_nothing_is_claimed_measured():
     assert DOC["measured"] is False and DOC["visual_only"] is True
     assert PROV["measured"] is False
-    notes = (LANE / "INTEGRATION.md").read_text()
+    notes = (LANE / "INTEGRATION.md").read_text(encoding="utf-8")
     assert "UNMEASURED" in notes and "render_ue_scenario.ps1" in notes
 
 

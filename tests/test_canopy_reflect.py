@@ -268,5 +268,5 @@ def test_the_bake_reproduces_provenance(tmp_path):
         assert hashlib.sha256(data).hexdigest() == row["sha256"], name
         assert len(data) == row["bytes"], name
         assert (Path(reflect.LANE_OUT) / name).read_bytes() == data, name   # the committed file is the bake
-    assert (tmp_path / "glass_coastal.json").read_text() == \
-        (Path(reflect.LANE_OUT) / "glass_coastal.json").read_text()
+    assert (tmp_path / "glass_coastal.json").read_text(encoding="utf-8") == \
+        (Path(reflect.LANE_OUT) / "glass_coastal.json").read_text(encoding="utf-8")

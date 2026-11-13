@@ -329,7 +329,7 @@ def build(write: bool = False, out_dir: Path = OUT_DIR) -> Dict[str, Any]:
     }
     if write:
         text = json.dumps(plan, indent=1, sort_keys=True) + "\n"
-        (out_dir / "rain_layers.json").write_text(text)
+        (out_dir / "rain_layers.json").write_bytes(text.encode("utf-8"))  # same bytes on Windows (the PIN sha)
         files.append({"path": "rain_layers.json", "sha256": hashlib.sha256(text.encode()).hexdigest()})
         plan["_files"] = files
     return plan
