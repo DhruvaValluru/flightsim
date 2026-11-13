@@ -223,10 +223,19 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		WeatherOptions.bAudio = false;
 		FParse::Value(CommandLine, TEXT("rain-gain="), WeatherOptions.RainGain);
 		FParse::Value(CommandLine, TEXT("rain-style="), WeatherOptions.RainStyle);
+		if (!FFlightSimWeather::ParseLightningShadows(CommandLine, WeatherOptions.bLightningShadows, Error))
+		{
+			return false;
+		}
 		WeatherOptions.bManualNiagaraTick = false;
 		if (!Weather.Build(GetWorld(), WeatherOptions, Error))
 		{
 			return false;
+		}
+		// One flash path: the storm weather's lightning stands the look's bolt down.
+		if (Weather.DrawsLightning())
+		{
+			Visual.StandDownLookLightning();
 		}
 		// Every cloud's material, checked before the window draws a frame
 		// (the engine asserts on a bad one; this refuses by name).

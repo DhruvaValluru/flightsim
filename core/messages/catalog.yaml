@@ -1386,6 +1386,9 @@ weather.backend:
 weather.card:
   sentence: "The run card's weather block is missing a number the renderer needs, so the weather cannot be built from it."
   hint: "Write the card again from the spec; a card edited by hand must keep every weather field."
+weather.lightning_shadows:
+  sentence: "The lightning-shadows switch was given a value it does not take."
+  hint: "Use -lightning-shadows=on (the old shadowed flash light) or off; or leave it out for the unshadowed flash."
 weather.cell:
   sentence: "The storm cell cannot be shaped here: the tropopause sits too close to the ground datum for a cloud tower to stand between them."
   hint: "Lower the terrain datum or move the scene away from the poles."

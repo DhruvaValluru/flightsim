@@ -574,6 +574,37 @@ void FFlightSimVisualScene::ApplyIceOverlay(AActor* Airframe)
 	}
 }
 
+void FFlightSimVisualScene::StandDownLookLightning()
+{
+	if (LightningLight == nullptr && LightningInstance == nullptr)
+	{
+		return;
+	}
+	if (LightningLight != nullptr)
+	{
+		LightningLight->SetIntensity(0.0f);
+		if (AActor* Bolt = LightningLight->GetOwner())
+		{
+			if (USceneComponent* Root = Bolt->GetRootComponent())
+			{
+				Root->SetVisibility(false, true);
+			}
+		}
+		LightningLight->SetVisibility(false);
+	}
+	LightningInstance = nullptr;
+	LightningLight = nullptr;
+	const TSharedPtr<FJsonObject>* Record = nullptr;
+	const TSharedPtr<FJsonObject>* Storm = nullptr;
+	if (LookApplied.IsValid() && LookApplied->TryGetObjectField(TEXT("weather_look"), Record) &&
+	    Record != nullptr && Record->IsValid() &&
+	    (*Record)->TryGetObjectField(TEXT("storm"), Storm) && Storm != nullptr && Storm->IsValid())
+	{
+		(*Storm)->SetStringField(TEXT("lightning_stood_down"),
+			TEXT("the storm weather draws the lightning (FlightSimWeather.cpp): one flash path"));
+	}
+}
+
 void FFlightSimVisualScene::AdvanceWeather(double TimeSeconds)
 {
 	if (LightningInstance != nullptr)

@@ -3011,8 +3011,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			// -rain-gain=N: the drops' opacity times N (1 = the physics).
 			FParse::Value(*Params, TEXT("rain-gain="), WeatherOptions.RainGain);
 			FParse::Value(*Params, TEXT("rain-style="), WeatherOptions.RainStyle);
+			// Scene #09 stability: -lightning-shadows=on|off (off by default).
+			if (!FFlightSimWeather::ParseLightningShadows(Params, WeatherOptions.bLightningShadows, Error))
+			{
+				return Fail(Error);
+			}
 			if (!Weather.Build(World, WeatherOptions, Error)) { return Fail(Error); }
 			VisualScene.BeautyOnlyActors.Append(Weather.BeautyOnlyActors);
+			// One flash path: the storm weather's lightning, when it draws
+			// it, is the only one (the look's bolt and its light stand down;
+			// bSkipStormLook already keeps them out on a card with a cell).
+			if (Weather.DrawsLightning())
+			{
+				VisualScene.StandDownLookLightning();
+			}
 			if (VisualScene.LookApplied.IsValid() && Weather.Record.IsValid())
 			{
 				VisualScene.LookApplied->SetObjectField(TEXT("weather"), Weather.Record);

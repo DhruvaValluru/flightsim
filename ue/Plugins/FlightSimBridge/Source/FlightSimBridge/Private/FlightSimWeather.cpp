@@ -11,6 +11,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GeoReferencingSystem.h"
+#include "HAL/PlatformMisc.h"
 #include "Kismet/GameplayStatics.h"
 #include "MaterialDomain.h"
 #include "MaterialShared.h"
@@ -18,6 +19,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "Math/RandomStream.h"
+#include "Misc/Parse.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
@@ -1206,6 +1208,30 @@ bool FFlightSimWeather::ParseBackend(const FString& Name, EFlightSimWeatherBacke
 	return true;
 }
 
+bool FFlightSimWeather::ParseLightningShadows(const FString& Params, bool& bOut, FString& Error)
+{
+	// The command line first, then FLIGHTSIM_RENDER_SWITCHES (what
+	// visual_fix_round.ps1 -Switches sets), as -deck-shadow= is read.
+	const FString Switches = Params + TEXT(" ")
+		+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+	FString Word = TEXT("off");
+	FParse::Value(*Switches, TEXT("lightning-shadows="), Word);
+	if (Word == TEXT("on"))
+	{
+		bOut = true;
+	}
+	else if (Word == TEXT("off"))
+	{
+		bOut = false;
+	}
+	else
+	{
+		Error = FString::Printf(TEXT("weather.lightning_shadows: -lightning-shadows=%s is not on or off"), *Word);
+		return false;
+	}
+	return true;
+}
+
 // -- every cloud in the world, before the first frame --------------------------------
 
 bool FFlightSimWeather::VerifyCloudMaterials(UWorld* World, FString& Error,
@@ -1413,6 +1439,7 @@ bool FFlightSimWeather::Build(UWorld* World, const FFlightSimWeatherOptions& Opt
 	Backend = Options.Backend;
 	bAudio = Options.bAudio;
 	bManualNiagaraTick = Options.bManualNiagaraTick;
+	bFlashShadows = Options.bLightningShadows;
 	const TSharedPtr<FJsonObject>* WeatherJson = nullptr;
 	if (!Options.Card.IsValid() || !Options.Card->TryGetObjectField(TEXT("weather"), WeatherJson) ||
 	    WeatherJson == nullptr || !WeatherJson->IsValid())
@@ -2205,7 +2232,9 @@ bool FFlightSimWeather::BuildLightning(UWorld* World, const TSharedPtr<FJsonObje
 	FlashLight->SetIntensity(0.0f);
 	FlashLight->SetAttenuationRadius(static_cast<float>(WeatherFlashLightRadiusCm));
 	FlashLight->SetLightColor(FLinearColor(0.86f / 0.913f, 0.92f / 0.913f, 1.0f / 0.913f));
-	FlashLight->SetCastShadows(true);
+	// Scene #09 stability: unshadowed unless -lightning-shadows=on (the
+	// cube shadow pass lost the iGPU; the light is under 1 % of the scene's).
+	FlashLight->SetCastShadows(bFlashShadows);
 	FlashLight->SetVisibility(false);
 	FlashLight->RegisterComponent();
 
@@ -2215,6 +2244,9 @@ bool FFlightSimWeather::BuildLightning(UWorld* World, const TSharedPtr<FJsonObje
 	Row->SetNumberField(TEXT("channel_meshes"), Drawn);
 	Row->SetStringField(TEXT("material"), WeatherLightningMaterialPath);
 	Row->SetNumberField(TEXT("selftest_windows"), Selftest != nullptr ? Selftest->Num() : 0);
+	Row->SetStringField(TEXT("flash_light"), bFlashShadows
+		? TEXT("shadowed (-lightning-shadows=on)")
+		: TEXT("unshadowed (the default; -lightning-shadows=on is the shadowed light)"));
 	Row->SetStringField(TEXT("exposure"),
 		TEXT("each frame draws the flash's mean power over its own exposure (window_power): a ")
 		TEXT("shutter that misses a stroke shows no bolt"));
