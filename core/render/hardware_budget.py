@@ -120,5 +120,37 @@ def budget(profile: dict) -> dict:
     }
 
 
-def budget_from_file(path: str | Path = "docs/hardware/hardware_profile.json") -> dict:
-    return budget(load_profile(path))
+MEASURED_FILE = "docs/hardware/hardware_budget_measured.json"
+
+
+def apply_measurement(start: dict, measured: dict) -> dict:
+    """The starting budget with the stress ladder's result laid over it
+    (scripts/stress_ladder.py summarise writes ``measured``). ``measured``
+    flips to True only when the ladder sustained tier 0 on the SAME GPU the
+    budget is for; the starting numbers stay beside the measurement (the
+    ladder observes GPU memory, it does not choose a pool), so nothing here
+    is replaced by a guess."""
+    out = dict(start)
+    if not measured.get("measured"):
+        out["measurement"] = {"refused": measured.get("refused", "stress_ladder.not_measured")}
+        return out
+    if measured.get("gpu") and start.get("gpu") and measured["gpu"] != start["gpu"]:
+        out["measurement"] = {"refused": "stress_ladder.other_gpu",
+                              "gpu": measured["gpu"]}
+        return out
+    out["measured"] = True
+    out["measurement"] = {k: measured.get(k) for k in (
+        "sustained_tier", "switches", "gpu_memory_mb_peak", "gpu_dedicated_mb_peak",
+        "gpu_shared_mb_peak", "available_ram_mb_min", "gpu_drain_s_max",
+        "scene_seconds_max", "runs", "commit", "written")}
+    return out
+
+
+def budget_from_file(path: str | Path = "docs/hardware/hardware_profile.json",
+                     measured_path: str | Path | None = MEASURED_FILE) -> dict:
+    """The profile's budget, with the stress ladder's measurement applied
+    when ``measured_path`` exists (None: the starting budget only)."""
+    start = budget(load_profile(path))
+    if measured_path is not None and Path(measured_path).is_file():
+        return apply_measurement(start, json.loads(Path(measured_path).read_text(encoding="utf-8-sig")))
+    return start

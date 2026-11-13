@@ -51,6 +51,17 @@ SSIM and flicker against round 11's frame of the same scene
 (`head12`) still means the `-Full` head comparison. The thresholds are
 UNCALIBRATED: the report names what crossed one and never fails a round.
 
+## The stress ladder (only when a request names it)
+
+`.\scripts\stress_ladder.ps1` renders scene 11 (the Matterhorn) three times
+at tier 0, each run an ordinary `visual_fix_round.ps1 -NoPush` round
+(numbers 9001-9003) with the tier's `-Switches`, `-Compiler regex` and its own
+pinned specs (`runs\stress_ladder\specs`). typeperf samples GPU memory and
+free RAM; `scripts\stress_ladder.py` judges each run (device lost, the capture
+watchdog's exit 4, a stall, the round's exit code) and writes
+`docs\hardware\hardware_budget_measured.json`. Tiers above 0 only with
+`-MaxTier N`. It does not commit or push; report the budget.json it prints.
+
 ## The loop (Windows session)
 
 1. A message from flightsim-83 names the round number and the command line.
