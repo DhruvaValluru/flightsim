@@ -84,6 +84,8 @@
 //   SideBulge        float   the sides' bulge, cells (round 52; 0 = round 51's vertical walls)
 //   FarFadeStartKm   float   the distant sheet's hand-over: the march fades out from here (round 61)
 //   FarFadeKm        float   over this; 0 = no fade (no sheet drawn, or the switch off)
+//   HeightDensity    float   round 82: the base's density deficit, 0..1 (density x lerp(1 - it, 1,
+//                            smoothstep(0, HEIGHT_DENSITY_RISE, h))); 0 = round 81
 // and the engine's Parameters.SvPosition and View.StateFrameIndexMod8 (the dither's pixel and capture).
 const float FBM_MEAN = 0.55;
 const float FBM_SIGMA = 0.069;
@@ -112,6 +114,14 @@ const float R3_Z = 0.5497004779;
 const float DETAIL_MEAN = 0.479;
 // The bulge's turn over the layer (world_beauty.CLOUD_BULGE_TURN). UNCALIBRATED.
 const float BULGE_TURN = 3.0;
+// Round 82 (the owner, 2026-11-13: "the clouds dont look that realistic"; r69's
+// #03/#13 flat, smeared cumulus, soft blobby edges, no lit tops or dark bases):
+// a cumulus is thin and ragged at its base and dense in its upper body (Nubis's
+// density-height gradient), so the sun's light dies in the body above and the
+// base reads darker and the top brighter. The density rises over this share of
+// the layer from (1 - HeightDensity) to 1 (world_beauty.CLOUD_HEIGHT_DENSITY_RISE).
+// UNCALIBRATED.
+const float HEIGHT_DENSITY_RISE = 0.7;
 const float WISP_HEIGHT = 0.25;
 struct FWorldCloud
 {
@@ -355,4 +365,6 @@ if (FarFadeKm > 0.0)
 {
 	fadeOut = 1.0 - smoothstep(FarFadeStartKm, FarFadeStartKm + FarFadeKm, length(WorldPos - CameraPos) / 100000.0);
 }
-return density * base * ExtinctionPerM * ExtinctionScale * fadeOut;
+// Round 82: thin, ragged base, dense upper body (1 everywhere with HeightDensity 0).
+float body = lerp(1.0 - saturate(HeightDensity), 1.0, smoothstep(0.0, HEIGHT_DENSITY_RISE, h));
+return density * base * body * ExtinctionPerM * ExtinctionScale * fadeOut;

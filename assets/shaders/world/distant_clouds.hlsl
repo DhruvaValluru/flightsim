@@ -51,11 +51,22 @@
 //   RimPower         float   the forward lobe's exponent
 //   NormalStrength   float   the relief's slope per unit shape per km of thickness
 //   SheetFade        float   per frame: 0 with the camera inside the layer, 1 clear of it
+//   GrazingSoften    float   round 82: 1 flattens and softens the sheet at grazing views, 0 = round 81
 //   SeedOffsetKm     float3  the card's seeded noise offset (world_beauty.cloud_seed_offset_km)
 //   WindOffsetM      float3  the drift since t = 0, engine metres (the scene's drift law)
 const float FBM_MEAN = 0.55;
 const float FBM_SIGMA = 0.069;
 const float PI_DC = 3.14159265;
+// Round 82 (r69's #11, #12, #13: the distant sheet a stack of hard horizontal bands).
+// Near the horizon the km frame's screen Jacobian vanishes vertically, so the
+// derivative normal swings between clamped extremes row by row (light and dark
+// stripes) and the slant boost makes every cell opaque with a hard edge. Seen at
+// less than GRAZE_HI of vertical (|V.z|), the relief fades out (flat-lit, as distant
+// cloud reads through the haze) and the edge widens up to (1 + GRAZE_SOFTEN) x,
+// fully below GRAZE_LO. world_beauty.DISTANT_GRAZE_*. UNCALIBRATED.
+const float GRAZE_LO = 0.05;
+const float GRAZE_HI = 0.3;
+const float GRAZE_SOFTEN = 3.0;
 // shared: world cloud noise (cloud_layers.hlsl FWorldCloud, text-equal)
 struct FWorldCloud
 {
@@ -230,6 +241,9 @@ float shape = C.ShapeLod(float3(kmxy.x, kmxy.y, SliceKm * 2.0) / max(ShapeScaleK
 // The quantile cut (cloud_layers.hlsl's law): the drawn share of sky is the cover.
 float cover = saturate(Coverage);
 float soft = FBM_SIGMA / max(CoverageContrast, 1e-3) * 2.0;   // the volumetric far edge (1 + FAR_SOFTEN)
+// Round 82: 0 seen from overhead, 1 at the horizon (x GrazingSoften: 0 = round 81).
+float graze = saturate(GrazingSoften) * (1.0 - smoothstep(GRAZE_LO, GRAZE_HI, abs(normalize(CameraPos - WorldPos).z)));
+soft *= 1.0 + GRAZE_SOFTEN * graze;
 float thr = FBM_MEAN + FBM_SIGMA * C.Probit(1.0 - cover);
 float density = C.Remap(shape, thr, thr + soft);
 // A thickness proxy: 0 at the edge, 1 a few soft widths inside (the relief
@@ -248,6 +262,7 @@ float2 grad = abs(det) > 1e-12 ? float2(gy.y * dX - gx.y * dY, -gy.x * dX + gx.x
 float slopeScale = NormalStrength * max(ThicknessKm, 0.05);
 float2 slope = -grad * slopeScale;
 slope /= max(1.0, length(slope) / 4.0);
+slope *= 1.0 - graze;   // round 82: no derivative relief at grazing views
 float3 V = normalize(CameraPos - WorldPos);
 bool fromAbove = CameraPos.z > WorldPos.z;
 // Tops bulge up (seen from above), bases hang down (seen from below).

@@ -191,6 +191,9 @@ private:
 	// Round 52: -look-cloud-tiers=on|off (Build reads it; ApplyClouds sets
 	// the cloud material's ShadowFootprintKm and SideBulge under it, 0 when off).
 	FString CloudTiersSwitch = TEXT("on");
+	// Round 82: -look-cloud-billow=on|off (Build reads it; ApplyClouds applies it to
+	// cumulus layers: FlightSimWorldPure::CloudBillowRow).
+	FString CloudBillowSwitch = TEXT("on");
 	bool StormNeutralAlbedo() const;
 	// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default; off
 	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)

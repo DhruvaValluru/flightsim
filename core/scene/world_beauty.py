@@ -645,6 +645,70 @@ def cloud_side_bulge_for(tiers_on: bool) -> float:
     return CLOUD_SIDE_BULGE if tiers_on else 0.0
 
 
+#: Round 82 (the owner, 2026-11-13: "the clouds dont look that realistic"; r69's
+#: #03/#13 cumulus flat and smeared, soft blobby edges, no lit tops or dark
+#: bases). ``-look-cloud-billow=on|off`` (on by default; off is round 81
+#: exactly), the CUMULUS shape only: the coverage contrast x
+#: CLOUD_BILLOW_CONTRAST_GAIN (a sharper edge), the erosion noise at
+#: CLOUD_BILLOW_DETAIL_SCALE_KM eroding CLOUD_BILLOW_EROSION (finer billows), a
+#: thin ragged base under a dense body (the material's HeightDensity: density x
+#: lerp(1 - it, 1, smoothstep(0, CLOUD_HEIGHT_DENSITY_RISE, h))) and the sky
+#: light's cloud-bottom occlusion at least CLOUD_BILLOW_BOTTOM_OCCLUSION. No
+#: sample or hash added. C++ CloudBillowRow / CloudHeightDensityFor /
+#: CloudBottomOcclusionFor are the twins. UNCALIBRATED: probe #03, #04, #13.
+CLOUD_BILLOW_SWITCH = "-look-cloud-billow"
+CLOUD_BILLOW_CONTRAST_GAIN = 2.5
+CLOUD_BILLOW_DETAIL_SCALE_KM = 0.15
+CLOUD_BILLOW_EROSION = 0.5
+CLOUD_BILLOW_HEIGHT_DENSITY = 0.6
+CLOUD_BILLOW_BOTTOM_OCCLUSION = 0.8
+CLOUD_HEIGHT_DENSITY_RISE = 0.7
+#: Round 82, the distant sheet (r69's #11/#12/#13 banded horizon): seen at less than
+#: DISTANT_GRAZE_HI of vertical the sheet's derivative relief fades out and its edge
+#: widens up to (1 + DISTANT_GRAZE_SOFTEN) x, fully below DISTANT_GRAZE_LO
+#: (distant_clouds.hlsl GRAZE_*; the material's GrazingSoften, 1 with the billow on).
+DISTANT_GRAZE_LO = 0.05
+DISTANT_GRAZE_HI = 0.3
+DISTANT_GRAZE_SOFTEN = 3.0
+
+
+def cloud_billow_applies(billow_on: bool, shape: str) -> bool:
+    """Round 82's billow applies to a cumulus layer with the switch on."""
+    return bool(billow_on) and shape == "cumulus"
+
+
+def cloud_billow_row(row: Dict[str, float], applies: bool) -> Dict[str, float]:
+    """The cloud row in force (C++ CloudBillowRow): ``row`` as given, or with the
+    contrast x CLOUD_BILLOW_CONTRAST_GAIN and the detail size and erosion replaced."""
+    out = dict(row)
+    if applies:
+        out["coverage_contrast"] = row["coverage_contrast"] * CLOUD_BILLOW_CONTRAST_GAIN
+        out["detail_scale_km"] = CLOUD_BILLOW_DETAIL_SCALE_KM
+        out["detail_erosion"] = CLOUD_BILLOW_EROSION
+    return out
+
+
+def cloud_height_density_for(applies: bool) -> float:
+    """The material's HeightDensity (C++ CloudHeightDensityFor): 0 = round 81."""
+    return CLOUD_BILLOW_HEIGHT_DENSITY if applies else 0.0
+
+
+def cloud_bottom_occlusion_for(applies: bool, row_occlusion: float) -> float:
+    """SkyLightCloudBottomOcclusion (C++ CloudBottomOcclusionFor): the preset's
+    row, raised to CLOUD_BILLOW_BOTTOM_OCCLUSION where the billow applies."""
+    if applies and row_occlusion < CLOUD_BILLOW_BOTTOM_OCCLUSION:
+        return CLOUD_BILLOW_BOTTOM_OCCLUSION
+    return row_occlusion
+
+
+def cloud_height_density(height_density: float, norm_alt: float) -> float:
+    """cloud_layers.hlsl's round-82 body factor at a height: 1 - HeightDensity at
+    the base rising to 1 over CLOUD_HEIGHT_DENSITY_RISE; 1 everywhere at 0."""
+    amount = min(max(height_density, 0.0), 1.0)
+    h = min(max(norm_alt, 0.0), 1.0)
+    return _lerp(1.0 - amount, 1.0, _smoothstep(0.0, CLOUD_HEIGHT_DENSITY_RISE, h))
+
+
 #: The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 #: stated layer) is thinned to the shape's depth; 0 keeps the layer as built.
 CLOUD_MAX_THICKNESS_M: Dict[str, float] = {"cumulus": 2000.0, "stratocumulus": 0.0,
@@ -1114,7 +1178,7 @@ def cloud_side_bulge(side_bulge: float, norm_alt: float) -> float:
 def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float, row: Dict[str, float],
                   distance_km: float = 0.0, footprint_km: float = 0.0,
                   dither: Tuple[float, float, float] = (0.0, 0.0, 0.0), thickness_km: float = 1.0,
-                  side_bulge: float = 0.0) -> float:
+                  side_bulge: float = 0.0, height_density: float = 0.0) -> float:
     """cloud_layers.hlsl's density (before x extinction), the Python replica
     the coverage test samples: the quantile cut on the shape (started early by
     the erosion's share, raised over the top's rounding), the soft edge, the
@@ -1146,7 +1210,7 @@ def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float,
             detail = cloud_detail(km[0] / dscale, km[1] / dscale, km[2] / dscale, 13)
         wisp = _lerp(detail, 1.0 - detail, min(max(h / CLOUD_WISP_HEIGHT, 0.0), 1.0))
         density = _remap(density, row["detail_erosion"] * (1.0 - far) * wisp, 1.0)
-    return density * base
+    return density * base * cloud_height_density(height_density, h)
 
 
 #: Round 61: the R3 low-discrepancy sequence's steps (Roberts 2018), the

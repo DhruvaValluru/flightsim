@@ -18,6 +18,13 @@ the loop is `docs/visual/FIX_ROUND_PROTOCOL.md`. Each scene's compile is pinned 
 - #12 cockpit (round 46): canopy clear, but no instrument panel is drawn (cowl, glareshield and frame only);
   its mask_vs_geometry and depth_vs_geometry clauses fail because the camera sits inside the hull.
 
+- Tiles material (round 66, `552c9ab5`): Cesium's `SetMaterial` must be called directly; a reflected
+  property set leaves every tile on `M_CesiumBaseMaterial`. render.json `tiles.readback_Material` and
+  `drawn_base_materials` say which material drew.
+- #01/#02 colour (`af3ac2a3`): stated fill share 0; shade neutraliser x0.5..x1 by sun elevation
+  (10..40 deg). A/B: `-stated-fill-share=<0..1>`, `-tiles-shade-neutral=<0..1>|off`. Rounds 47-81 are in plan §8,
+  "Update 2026-11-12".
+
 **The drawn flight path (2026-10-09, `phase-2-testing`; docs/ROUTE.md is
 the record).** LANDED: the `route` spec block (core/scenario/blocks.py
 RouteSpec, absent-canonical, no version bump), the route module

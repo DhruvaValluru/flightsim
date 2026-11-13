@@ -287,6 +287,50 @@ namespace FlightSimWorldPure
 	{
 		return bTiersOn ? CloudSideBulge : 0.0;
 	}
+	// Round 82 (the owner, 2026-11-13: "the clouds dont look that realistic"; r69's
+	// #03/#13 cumulus flat and smeared, soft blobby edges, no lit tops or dark bases).
+	// -look-cloud-billow=on|off (on by default; off is round 81 exactly), the CUMULUS
+	// shape only: a sharper edge (the coverage contrast x CloudBillowContrastGain: the
+	// soft edge FBM_SIGMA / contrast wide was over one sigma of the field, a blur at
+	// every outline), finer billows that eat more of the edge (the erosion noise at
+	// CloudBillowDetailScaleKm, eroding CloudBillowErosion), a thin ragged base under a
+	// dense body (the material's HeightDensity, cloud_layers.hlsl) and the sky light
+	// occluded harder at the base (SkyLightCloudBottomOcclusion at least
+	// CloudBillowBottomOcclusion). No sample and no hash added: the erosion is the same
+	// two Worley octaves at a smaller size. world_beauty.cloud_billow_row is the twin.
+	// UNCALIBRATED: probe #03, #04, #13.
+	constexpr double CloudBillowContrastGain = 2.5;
+	constexpr double CloudBillowDetailScaleKm = 0.15;
+	constexpr double CloudBillowErosion = 0.5;
+	constexpr double CloudBillowHeightDensity = 0.6;
+	constexpr double CloudBillowBottomOcclusion = 0.8;
+	inline bool CloudBillowApplies(bool bBillowOn, int Shape)
+	{
+		return bBillowOn && Shape == CloudCumulus;
+	}
+	// The row in force for a layer: Row as given, or (billow on, cumulus) with the
+	// contrast, detail size and erosion replaced. Out is CloudFieldCount long.
+	inline void CloudBillowRow(const double* Row, bool bApplies, double* Out)
+	{
+		for (int F = 0; F < CloudFieldCount; ++F)
+		{
+			Out[F] = Row[F];
+		}
+		if (bApplies)
+		{
+			Out[CldCoverageContrast] = Row[CldCoverageContrast] * CloudBillowContrastGain;
+			Out[CldDetailScaleKm] = CloudBillowDetailScaleKm;
+			Out[CldDetailErosion] = CloudBillowErosion;
+		}
+	}
+	inline double CloudHeightDensityFor(bool bApplies)
+	{
+		return bApplies ? CloudBillowHeightDensity : 0.0;
+	}
+	inline double CloudBottomOcclusionFor(bool bApplies, double RowOcclusion)
+	{
+		return bApplies && RowOcclusion < CloudBillowBottomOcclusion ? CloudBillowBottomOcclusion : RowOcclusion;
+	}
 	// The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 	// stated layer) is thinned to the shape's depth: fair cumulus and a stratus
 	// deck are 1-2 km deep; 0 keeps the layer as built.
@@ -1072,11 +1116,22 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// Another word refuses by name.
 		CloudTiersSwitch = TEXT("on");
 		FParse::Value(*Switches, TEXT("look-cloud-tiers="), CloudTiersSwitch);
+		// Round 82: -look-cloud-billow=on|off (on by default): the cumulus edge,
+		// billows, base (CloudBillowRow, CloudHeightDensityFor, CloudBottomOcclusionFor);
+		// off is round 81's clouds exactly. Another word refuses by name.
+		CloudBillowSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("look-cloud-billow="), CloudBillowSwitch);
 	}
 	if (CloudTiersSwitch != TEXT("on") && CloudTiersSwitch != TEXT("off"))
 	{
 		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-tiers=%s is not on or off"),
 		                        *CloudTiersSwitch);
+		return false;
+	}
+	if (CloudBillowSwitch != TEXT("on") && CloudBillowSwitch != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-billow=%s is not on or off"),
+		                        *CloudBillowSwitch);
 		return false;
 	}
 
@@ -2016,7 +2071,11 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		}
 		const float ShadowTracingKm =
 			static_cast<float>(CloudShadowTracingKmFor(bIntegratedGpu, State.TopM - State.BaseM));
-		const double* CloudRow = &CloudValues[State.Shape * CloudFieldCount];
+		// Round 82: the cumulus row under -look-cloud-billow (CloudBillowRow).
+		const bool bBillow = CloudBillowApplies(CloudBillowSwitch == TEXT("on"), State.Shape);
+		double BillowRow[CloudFieldCount];
+		CloudBillowRow(&CloudValues[State.Shape * CloudFieldCount], bBillow, BillowRow);
+		const double* CloudRow = BillowRow;
 		State.Material = UMaterialInstanceDynamic::Create(Base, Cloud);
 		State.Material->SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(State.Cover));
 		State.Material->SetScalarParameterValue(TEXT("ExtinctionPerM"), static_cast<float>(CloudRow[CldExtinctionPerM]));
@@ -2045,9 +2104,12 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		// Round 61: no far fade until ApplyDistantClouds draws the sheet (it sets both).
 		State.Material->SetScalarParameterValue(TEXT("FarFadeStartKm"), 0.0f);
 		State.Material->SetScalarParameterValue(TEXT("FarFadeKm"), 0.0f);
+		const double HeightDensity = CloudHeightDensityFor(bBillow);
+		State.Material->SetScalarParameterValue(TEXT("HeightDensity"), static_cast<float>(HeightDensity));
 		Cloud->SetMaterial(State.Material);
 		Cloud->SetbUsePerSampleAtmosphericLightTransmittance(true);
-		Cloud->SetSkyLightCloudBottomOcclusion(static_cast<float>(AtmRow[AtmCloudBottomOcclusion]));
+		const double BottomOcclusion = CloudBottomOcclusionFor(bBillow, AtmRow[AtmCloudBottomOcclusion]);
+		Cloud->SetSkyLightCloudBottomOcclusion(static_cast<float>(BottomOcclusion));
 		Cloud->SetViewSampleCountScale(ViewScale);
 		Cloud->SetShadowViewSampleCountScale(ShadowScale);
 		Cloud->SetShadowTracingDistance(ShadowTracingKm);
@@ -2074,6 +2136,10 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Layer->SetNumberField(TEXT("shadow_footprint_km_per_sqrt_km"), ShadowFootprint);
 		Layer->SetStringField(TEXT("cloud_tiers"), CloudTiersSwitch);
 		Layer->SetNumberField(TEXT("side_bulge_cells"), SideBulge);
+		Layer->SetStringField(TEXT("cloud_billow"), CloudBillowSwitch);
+		Layer->SetBoolField(TEXT("cloud_billow_applied"), bBillow);
+		Layer->SetNumberField(TEXT("height_density"), HeightDensity);
+		Layer->SetNumberField(TEXT("sky_light_cloud_bottom_occlusion"), BottomOcclusion);
 		for (int32 F = 0; F < CloudFieldCount; ++F)
 		{
 			Layer->SetNumberField(ANSI_TO_TCHAR(CloudFieldName(F)), CloudRow[F]);
@@ -2391,6 +2457,10 @@ void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualSc
 	Material->SetScalarParameterValue(TEXT("FadeKm"), static_cast<float>(DistantFadeKm));
 	Material->SetScalarParameterValue(TEXT("RadiusKm"), static_cast<float>(DistantRadiusKm));
 	Material->SetScalarParameterValue(TEXT("SheetFade"), 1.0f);
+	// Round 82: -look-cloud-billow flattens and softens the sheet at grazing views
+	// (distant_clouds.hlsl GRAZE_*: r69's banded horizon); 0 = round 81.
+	const float GrazingSoften = CloudBillowSwitch == TEXT("on") ? 1.0f : 0.0f;
+	Material->SetScalarParameterValue(TEXT("GrazingSoften"), GrazingSoften);
 	TSharedPtr<FJsonObject> Look = MakeShared<FJsonObject>();
 	for (int32 F = 0; F < DistantLookCount; ++F)
 	{
@@ -2416,6 +2486,7 @@ void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualSc
 	Trace->SetNumberField(TEXT("row_tracing_max_distance_km"), RowKm);
 	Trace->SetNumberField(TEXT("tracing_max_distance_km"), TraceKm);
 	Trace->SetBoolField(TEXT("shrunk"), TraceKm < RowKm);
+	Trace->SetNumberField(TEXT("grazing_soften"), GrazingSoften);   // round 82
 	int32 LayersSet = 0;
 	if (TraceKm < RowKm)
 	{

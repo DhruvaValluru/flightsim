@@ -563,6 +563,58 @@ A320 trim thrust 11943 -> 6541.6 lbf, the engine-out altitude effect 3.1 -> 1.72
 trimming 300 kt at 10 km.
 
 
+### Update 2026-11-12: rounds 47 to 81 on the Windows laptop
+
+Same machine and protocol as above; frames on `vis-windows` under `docs/visual/round_N/`.
+Shade = the frame's lower-right quadrant, sRGB means; B-R is its blue minus red.
+
+**Settled by measurement**
+
+| Problem | Cause (proved by) | Fix |
+|---|---|---|
+| `look.beauty_not_label_aligned` failed every beauty run (0/14) | the beauty-only actors' cover was modelled, never measured | measured cover (`CoverCapture`, half-size shown/hidden captures inside the label mask; `3680856c`); gone from every run from round 47 |
+| #09 DXGI_ERROR_DEVICE_HUNG, 12 of 12 attempts, also on round-44 code | the laptop's GPU state, not the code | a reboot; #09 renders and passes verify from round 68 |
+| The tiles drew Cesium's own material, so every tiles shader (de-light, detail, grade, shade neutraliser) never ran (r63-r65: all 5260 primitives `M_CesiumBaseMaterial`, `Material` read back null) | Cesium 2.30 `SetMaterial` destroys the tileset and the tile load copies `GetMaterial()`; the reflected property set was not it | `ACesium3DTileset::SetMaterial` directly, read back, re-asserted before each view wait (`552c9ab5`); from round 66 every primitive draws `M_FlightSimTilesBeauty` |
+| #01/#02 sepia once the tiles material drew (r69: #02 shade B-R -50, #01 -77; r66's every-texel-grey probe still orange-brown) | two corrections stacked: round 4's neutral stated fill (sky light 1/0.50/0.25, set to cancel the photograph's blue while the material never ran) and the now-working shade neutraliser. #02 A/B r70-r74: neutraliser off +34, fill off -20, aerial perspective off -61, fog off -48 | the stated fill keeps the sky's colour (share 0; r76 #02 -18, grey-tan rock, grey-green forest) and the neutraliser is scaled by the sun, x0.5 at <= 10 deg to x1 at >= 40 deg (r77 #01 at 0.5: -42, golden hour; a global 0.6, r79, fits neither) (`af3ac2a3`; round 80 confirmed it on #01, #02, #04 and #05: #01 golden, #02 neutral, the desert pair unchanged) |
+| #10 green under the storm deck | the storm deck look keyed on world_preset only | a storm weather event takes the deck look (`41bfb115`); r57 neutral grey 39/37/42 |
+| #13 four sea lines | the contrails (r54: gone with `-contrails=off`) | a look question, not a defect; contrails kept (`FormationRamp`, `-contrail-formation-ramp=`) |
+| #12 no instrument panel | the c172p interior was never converted | the interior `.ac` as a beauty-only part (r51: panel drawn) |
+| Gear down at cruise | (owner decision 2026-11-11) | `MeshGear` hidden while gear-pos-norm < 0.01; verifier excludes the gear when retracted (`2df64b35`; r51 #13 steps_hidden 359) |
+| Paint masters fell back (`float4 nozzles[4]` 12 of 16 elements) | the soot Custom node's array literal | `_rgba` Append(RGB, A) (`434ba7e6`); r53 M_AircraftPaint compiles, A-4 white 169/156/145 |
+| Cloud-layer blocks and grain at the horizon | footprint shadow samples on a fixed grid | stratified IGN dither and a march fade under the distant sheet (`fa56ba4d`, `1ef9bcae`); r58-r62 blocks gone, faint steps on #13's upper-right bases |
+
+**Final sweep (round 81, `af3ac2a3`):** not reported yet (asked 2026-11-12 15:35; round 80 confirmed #01, #02, #04, #05).
+
+**Labels (`flightsim.verify`, round 69 at `552c9ab5`): 8 of 14 pass** (#03, #04, #05, #06, #07, #09,
+#11, #15). Still failing: `component_boxes` on #01 and #02 (`store_sta2`), `mask_vs_geometry` on #08
+(14.6 %), `tight_box_present` on #10 and #13, `depth_vs_geometry` and `mask_vs_geometry` on #12 (the
+cockpit camera inside the hull, a limit of those checks for an interior camera). Round 81: not reported yet.
+
+**Cloud realism (round 82, the owner 2026-11-13: "the clouds dont look that realistic").** r69's
+#03/#13 cumulus were flat, smeared, soft-edged blobs without lit tops or dark bases; #11/#12/#13's
+distant sheet a stack of hard horizontal bands; #15's scud black blotches on the deck. Within the
+iGPU budget (no sample, no hash added), behind `-look-cloud-billow=on|off` (off = round 81):
+- cumulus only: coverage contrast x2.5 (the soft edge was over one sigma of the field wide), the
+  erosion noise at 0.15 km eroding 0.5 (was 0.35 km, 0.35), a thin base under a dense body
+  (`HeightDensity` 0.6: density x 0.4 at the base rising to 1 at 0.7 of the layer), sky-light
+  cloud-bottom occlusion at least 0.8 (was 0.5 in clear and hazy);
+- the distant sheet: below 0.3 of vertical its derivative relief fades out and its edge widens
+  up to 4x (`GrazingSoften`);
+- scud tone 0.75 under a deck, 0.85 in the open (was 0.5, 0.7; not switched).
+Material generations: clouds 8 (graph 7), distant 5, so Windows rebuilds both. Measure: #03, #11,
+#12, #13, #15 with the switch on and off. Next in this lane: M_StormCell's weather map and noise
+(the storm tiers), only after round 82 reads.
+
+**Open (not fixed):**
+- `store_sta2`'s component box on #01/#02, 3.4 px off its hull (manifest, CG and pose ruled out).
+- #08's mask 14.6 % off its geometry; #10 and #13 tight boxes.
+- #12's two geometry clauses need an interior-camera form.
+- #07 shows rain streaks rather than bands; #13's contrails read harsh; faint steps on #13's cloud bases.
+- #06's ocean shade reads blue (+49), probably the water itself.
+- Every tiles amount stays UNCALIBRATED (`SUN_LOW_DEG`, `SUN_HIGH_DEG`, `SUN_LOW_SCALE`,
+  `STATED_FILL_NEUTRAL_SHARE` among them); `-stated-fill-share=` and a numeric `-tiles-shade-neutral=`
+  are the A/B switches.
+
 **Updated 2026-11-09, after the visual-overhaul session.** Mac session
 flightsim-83, swarm `swarm-1794241474984-rmywk3`, branch
 `claude/vibrant-gauss-olema4`, base commit `355dae64`, five look lanes

@@ -2087,7 +2087,7 @@ def create_scud_card():
     is the darkest cloud in the frame: the card is now MODULATE, unlit -- the scene
     behind it times lerp(1, Shade, rag) -- so a rag is always darker than what is
     behind it (a dark torn shape, never a white puff), at any exposure and any sun.
-    Shade is the host's rain_veil.SCUD_TONE (0.5: half the light behind)."""
+    Shade is the host's rain_veil.SCUD_TONE_* (round 82: 0.75 under a deck, 0.85 open)."""
     material = _storm_material("M_ScudCard")
     if material is None:
         return
@@ -3303,13 +3303,16 @@ WORLD_CLOUD_SCALARS = {
     "SideBulge": 0.0,
     # Round 61: the march's fade-out over the distant sheet's fade-in (0 = none).
     "FarFadeStartKm": 0.0, "FarFadeKm": 0.0,
+    # Round 82: the base's density deficit (0 = round 81; -look-cloud-billow).
+    "HeightDensity": 0.0,
 }
 WORLD_CLOUD_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 WORLD_CLOUD_INPUTS = ("WorldPos", "NormAlt", "CameraPos", "Coverage", "ExtinctionPerM", "ExtinctionScale",
                       "ShapeScaleKm", "DetailScaleKm", "DetailErosion", "BottomSoftness", "TopRounding",
                       "CoverageContrast", "SeedOffsetKm", "WindOffsetM",
                       "ShadowDist", "ShadowFootprintKm", "LayerThicknessKm", "SideBulge",   # round 52
-                      "FarFadeStartKm", "FarFadeKm")   # round 61
+                      "FarFadeStartKm", "FarFadeKm",   # round 61
+                      "HeightDensity")   # round 82
 #: The cloud's single-scattering albedo (water droplets scatter almost all they
 #: intercept; the storm cell's own 0.98). UNCALIBRATED: set by probe render.
 WORLD_CLOUD_ALBEDO = 0.98
@@ -3324,6 +3327,7 @@ WORLD_CLOUD_ALBEDO = 0.98
 WORLD_DISTANT_SCALARS = {
     "Coverage": 0.35, "CoverageContrast": 0.9, "ShapeScaleKm": 2.5, "SliceKm": 2.0, "ThicknessKm": 1.2,
     "HandoverKm": 24.0, "FadeKm": 8.0, "RadiusKm": 300.0, "SheetFade": 1.0,
+    "GrazingSoften": 0.0,   # round 82: -look-cloud-billow (0 = round 81)
     "RimFadeShare": 0.2, "Albedo": 0.9, "AmbientGain": 1.0, "SunWrap": 0.3, "BaseDarkening": 0.55,
     "BaseSunShare": 0.15, "SilverLining": 0.6, "RimPower": 8.0, "NormalStrength": 1.5,
 }
@@ -3454,7 +3458,9 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: Round 61: clouds 6, the dither seeded by interleaved gradient noise and
 #: stratified (r58's grain), the march's fade-out under the sheet (FarFadeStartKm,
 #: FarFadeKm: r58's distant block columns).
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "6", "M_FlightSimDistantClouds": "4"}
+#: Round 82: clouds 7, the base's density deficit (HeightDensity: the owner's
+#: "the clouds dont look that realistic").
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "7", "M_FlightSimDistantClouds": "5"}
 
 
 def world_graph_stale(name):
@@ -3502,8 +3508,8 @@ def world_stamp(material, name):
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "6",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic
-                     "M_FlightSimCloudLayers": "7", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade
-                     "M_FlightSimDistantClouds": "4",   # distant 4: round-52 shared noise (ShapeLodBulge)
+                     "M_FlightSimCloudLayers": "8", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity
+                     "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
                      "M_FlightSimOceanBeauty": "4"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
