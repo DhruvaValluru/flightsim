@@ -41,6 +41,27 @@ There are no A/B pairs, probes or `flightsim.verify` runs in a fix round
 unless the request names them. The label check (`flightsim.verify`) runs once,
 at the final sweep, as the request will say.
 
+## The pixel report in ROUND.json
+
+Every round ends with `scripts/frame_metrics.py` over its folder; ROUND.json
+carries the result as `pixel_metrics`, per scene: blank frame, clipped
+highlights, crushed blacks, mean luma. `-CompareWith 11` (or `round_11`) adds
+SSIM and flicker against round 11's frame of the same scene
+(`docs\visual\round_11`, else the vis-windows worktree's copy). A head name
+(`head12`) still means the `-Full` head comparison. The thresholds are
+UNCALIBRATED: the report names what crossed one and never fails a round.
+
+## The stress ladder (only when a request names it)
+
+`.\scripts\stress_ladder.ps1` renders scene 11 (the Matterhorn) three times
+at tier 0, each run an ordinary `visual_fix_round.ps1 -NoPush` round
+(numbers 9001-9003) with the tier's `-Switches`, `-Compiler regex` and its own
+pinned specs (`runs\stress_ladder\specs`). typeperf samples GPU memory and
+free RAM; `scripts\stress_ladder.py` judges each run (device lost, the capture
+watchdog's exit 4, a stall, the round's exit code) and writes
+`docs\hardware\hardware_budget_measured.json`. Tiers above 0 only with
+`-MaxTier N`. It does not commit or push; report the budget.json it prints.
+
 ## The loop (Windows session)
 
 1. A message from flightsim-83 names the round number and the command line.

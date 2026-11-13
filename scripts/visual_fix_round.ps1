@@ -4,6 +4,7 @@
 #     .\scripts\visual_fix_round.ps1 -Round 9 -Full                # all scenes + head shots vs the last head
 #     .\scripts\visual_fix_round.ps1 -Round 6 -Scenes 1 -NoPush    # look locally, push nothing
 #     .\scripts\visual_fix_round.ps1 -Round 8 -Scenes 6 -Switches "-look-ssgi=off"   # an A/B pass
+#     .\scripts\visual_fix_round.ps1 -Round 12 -Scenes 11 -CompareWith 11   # pixel metrics vs round 11
 #
 # Owner, 2026-11-11: a fix round renders only the scenes the fix touches,
 # one still each, and does the expensive prep only when its inputs changed.
@@ -24,9 +25,15 @@
 #     memory stop, once), stops the app.
 #  4. scripts\visual_round.py <Round> -> docs\visual\round_<Round>\ (each row
 #     carries its wall seconds), plus ROUND.json: commit, scenes, prep steps
-#     run and their seconds, outcomes.
+#     run and their seconds, outcomes, and pixel_metrics.
+#  4b. The pixel report: scripts\frame_metrics.py over the round folder
+#     (blank frame, clipped highlights, crushed blacks; with -CompareWith N
+#     or round_N, SSIM and flicker against round N's same-scene frame) ->
+#     metrics.json, copied into ROUND.json as pixel_metrics. A report only:
+#     its thresholds are UNCALIBRATED and it never fails or refuses a round.
 #  5. -Full only: render_visual_sheet.ps1 -Step head<Round> and -Compare vs
-#     -CompareWith (default: the newest runs\visual\head* before this one).
+#     -CompareWith when it names a head (head<N>; default: the newest
+#     runs\visual\head* before this one).
 #  6. Commits docs\visual\round_<Round>\ to branch vis-windows through a
 #     separate worktree (runs\vis-windows-wt), so the main checkout never
 #     switches branch, and pushes it.
@@ -50,6 +57,12 @@ param(
     # compile every scene afresh (and re-pin it); by default a round replays the
     # spec pinned in runs\visual\specs\<NN>.json on that scene's first compile
     [switch]$Recompile,
+    # the compiler for a scene's FIRST compile (run_test_scenarios.py --compiler);
+    # a pinned spec replays whichever compiled it. The stress ladder uses regex.
+    [ValidateSet("llm", "regex")][string]$Compiler = "llm",
+    # where the compiled specs are pinned (default runs\visual\specs); the
+    # stress ladder keeps its own so it never re-pins a visual round's spec
+    [string]$SpecDir = "",
     [int]$Port = 8008
 )
 
@@ -159,7 +172,8 @@ try {
     }
     if (-not $up) { Refuse "webapp.not_up" "no answer on port $Port in 120 s; see $serverLog.err" }
     $batch = @("scripts\run_test_scenarios.py", "--still", "--server", "http://127.0.0.1:$Port")
-    $batch += @("--spec-dir", (Join-Path $repo "runs\visual\specs"))
+    $pinDir = if ($SpecDir) { $SpecDir } else { Join-Path $repo "runs\visual\specs" }
+    $batch += @("--spec-dir", $pinDir, "--compiler", $Compiler)
     if ($Recompile) { $batch += "--recompile" }
     if (-not $Full) { $batch += @("--only") + ($sceneList | ForEach-Object { "$_" }) }
     Run-Step "scenes" {
@@ -178,8 +192,33 @@ try {
 if ($LASTEXITCODE -ne 0) { Refuse "round.copy" "visual_round.py exit $LASTEXITCODE" }
 $out = Join-Path $repo "docs\visual\round_$Round"
 
+# 4b. the pixel report: never fails the round, whatever happens in it
+$pixel = $null
+$prevRound = $null
+if ($CompareWith -match '^(round_)?(\d+)$') {
+    $prevName = "round_$($Matches[2])"
+    foreach ($cand in @((Join-Path $repo "docs\visual\$prevName"), (Join-Path $repo "runs\vis-windows-wt\docs\visual\$prevName"))) {
+        if (-not $prevRound -and (Test-Path $cand)) { $prevRound = $cand }
+    }
+    if (-not $prevRound) { Write-Host "pixel metrics: no $prevName folder here; no comparison" }
+}
+try {
+    $metricsArgs = @("scripts\frame_metrics.py", $out)
+    if ($prevRound) { $metricsArgs += @("--compare-with", $prevRound) }
+    & $py @metricsArgs | Out-Null
+    $metricsFile = Join-Path $out "metrics.json"
+    if (Test-Path $metricsFile) {
+        $pixel = Get-Content $metricsFile -Raw | ConvertFrom-Json
+    } else {
+        $pixel = [ordered]@{ error = "frame_metrics.py wrote no metrics.json (exit $LASTEXITCODE)" }
+    }
+} catch {
+    $pixel = [ordered]@{ error = "frame_metrics.py: $($_.Exception.Message)" }
+}
+
 # 5. -Full: head shots against the last head
 if ($Full) {
+    if ($CompareWith -and $CompareWith -notmatch '^head') { $CompareWith = "" }   # a round number is the pixel report's
     if (-not $CompareWith) {
         $prev = Get-ChildItem (Join-Path $repo "runs\visual") -Directory -Filter "head*" |
             Where-Object { $_.Name -ne "head$Round" -and $_.Name -match '^head\d+$' } |
@@ -200,8 +239,10 @@ $record = [ordered]@{
     round = $Round; commit = $head; full = [bool]$Full; scenes = $sceneList; switches = $Switches
     prep = $steps; seconds = $timings
     outcomes = @($summary | ForEach-Object { [ordered]@{ number = $_.number; outcome = $_.outcome; seconds = $_.seconds; spec_sha256 = $_.spec_sha256; why = $_.why } })
+    compiler = $Compiler
+    pixel_metrics = $pixel
 }
-$record | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $out "ROUND.json") -Encoding utf8
+$record | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $out "ROUND.json") -Encoding utf8
 
 # 6. vis-windows, through its own worktree
 if ($NoPush) { Write-Host "`n-NoPush: $out"; exit 0 }
