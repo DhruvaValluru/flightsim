@@ -403,6 +403,11 @@ namespace
 	// The lamps' volumetric scattering at ef361bd6: the engine's default
 	// (ULightComponentBase), before 4a409844 stated 0.3 landing / 0.5 nav.
 	constexpr float RenderLampScatteringEf361bd6 = 1.0f;
+	// r87: the constrained GPU's sky capture cloud march (-sky-capture-cloud-samples=);
+	// the engine's r.VolumetricCloud.ReflectionRaySampleMaxCount 80 and
+	// r.VolumetricCloud.Shadow.ReflectionRaySampleMaxCount 24 (5.7). UNCALIBRATED.
+	constexpr int32 SkyCaptureCloudViewSamples = 32;
+	constexpr int32 SkyCaptureCloudShadowSamples = 8;
 	// UNCALIBRATED: set by probe render on the render machine. TSR history
 	// samples per pixel (engine default 16, 32 is the most its metadata
 	// encodes, TemporalSuperResolution.cpp help text); probe: sheet shot (a)
@@ -3698,6 +3703,30 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	};
 	const bool bSkyCaptureRestore = SwitchOn(SkyCaptureRestoreMode);
 	const bool bGpuDrain = SwitchOn(GpuDrainMode);
+	// r87 (2026-11-14): the Windows iGPU's device was removed (DXGI 887a0006, hung)
+	// INSIDE USkyLightComponent::UpdateSkyCaptureContents on a cockpit storm at
+	// beauty; the same prompt's baked run took 15.9 s there in one submission (the
+	// clear-weather pass 2.4 s), far past the Windows TDR. The storm adds the
+	// weather's actors (262,144 rain drops, the veil, scud, lightning) and the
+	// storm cloud's reflection march, each drawn six times. For the ONE sky
+	// capture only, on a constrained GPU:
+	//  -sky-capture-weather=auto|on|off        the FlightSim.weather actors hidden
+	//      (rain is a few per-mille of the sky's radiance; the clouds stay)
+	//  -sky-capture-cloud-samples=auto|on|off  the cloud's reflection march capped at
+	//      SkyCaptureCloudViewSamples / SkyCaptureCloudShadowSamples (engine 80 / 24)
+	// both put back after the capture; the beauty view and every label untouched.
+	FString SkyCaptureWeatherMode = TEXT("auto");
+	FParse::Value(*RenderSwitches, TEXT("sky-capture-weather="), SkyCaptureWeatherMode);
+	FString SkyCaptureCloudSamplesMode = TEXT("auto");
+	FParse::Value(*RenderSwitches, TEXT("sky-capture-cloud-samples="), SkyCaptureCloudSamplesMode);
+	if (!AutoOnOff(SkyCaptureWeatherMode) || !AutoOnOff(SkyCaptureCloudSamplesMode))
+	{
+		return Fail(FString::Printf(TEXT("render.sky_capture_switch: -sky-capture-weather=%s, ")
+		                            TEXT("-sky-capture-cloud-samples=%s: each takes auto, on or off"),
+		                            *SkyCaptureWeatherMode, *SkyCaptureCloudSamplesMode));
+	}
+	const bool bSkyCaptureHideWeather = SwitchOn(SkyCaptureWeatherMode);
+	const bool bSkyCaptureCapCloudSamples = SwitchOn(SkyCaptureCloudSamplesMode);
 	FString SupersampleParams = Params;
 	int32 StatedFactor = 1;
 	int32 ConstrainedFactor = 1;
@@ -5817,6 +5846,70 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				}
 			}
 		}
+		// r87: the weather's actors out of the constrained GPU's one sky capture.
+		int32 SkyHiddenWeather = 0;
+		if (bSkyCaptureHideWeather)
+		{
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				if (!It->Tags.Contains(FName(TEXT("FlightSim.weather"))))
+				{
+					continue;
+				}
+				TInlineComponentArray<USceneComponent*> Components(*It);
+				for (USceneComponent* Component : Components)
+				{
+					if (Component != nullptr && Component->IsVisible() && !SkyHidden.Contains(Component))
+					{
+						SkyHidden.Add(Component);
+						++SkyHiddenWeather;
+					}
+				}
+			}
+		}
+		// r87: the cloud's reflection march capped for the capture (restored below).
+		TArray<TPair<IConsoleVariable*, FString>> SkyCvarsHeld;
+		if (bSkyCaptureCapCloudSamples)
+		{
+			const TPair<const TCHAR*, int32> Caps[2] = {
+				{TEXT("r.VolumetricCloud.ReflectionRaySampleMaxCount"), SkyCaptureCloudViewSamples},
+				{TEXT("r.VolumetricCloud.Shadow.ReflectionRaySampleMaxCount"), SkyCaptureCloudShadowSamples}};
+			for (const TPair<const TCHAR*, int32>& Cap : Caps)
+			{
+				if (IConsoleVariable* Cvar = IConsoleManager::Get().FindConsoleVariable(Cap.Key))
+				{
+					SkyCvarsHeld.Emplace(Cvar, Cvar->GetString());
+					if (Cvar->GetFloat() > Cap.Value)
+					{
+						Cvar->Set(Cap.Value, ECVF_SetByCode);
+					}
+				}
+			}
+		}
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("sky capture cost (constrained gpu): weather actors %s (%d components), cloud reflection march %s"),
+		       bSkyCaptureHideWeather ? TEXT("hidden") : TEXT("shown"), SkyHiddenWeather,
+		       bSkyCaptureCapCloudSamples
+		           ? *FString::Printf(TEXT("capped at %d / %d samples"), SkyCaptureCloudViewSamples,
+		                              SkyCaptureCloudShadowSamples)
+		           : TEXT("the engine's"));
+		if (VisualScene.LookApplied.IsValid())
+		{
+			TSharedPtr<FJsonObject> CostRow = MakeShared<FJsonObject>();
+			CostRow->SetStringField(TEXT("weather_mode"), SkyCaptureWeatherMode);
+			CostRow->SetBoolField(TEXT("weather_hidden"), bSkyCaptureHideWeather);
+			CostRow->SetNumberField(TEXT("weather_components_hidden"), SkyHiddenWeather);
+			CostRow->SetStringField(TEXT("cloud_samples_mode"), SkyCaptureCloudSamplesMode);
+			CostRow->SetBoolField(TEXT("cloud_samples_capped"), bSkyCaptureCapCloudSamples);
+			CostRow->SetNumberField(TEXT("cloud_reflection_view_samples_max"), SkyCaptureCloudViewSamples);
+			CostRow->SetNumberField(TEXT("cloud_reflection_shadow_samples_max"), SkyCaptureCloudShadowSamples);
+			CostRow->SetStringField(TEXT("basis"),
+				TEXT("r87: the Windows iGPU hung (887a0006) inside the storm's sky capture (15.9 s in one submission "
+				     "on the run that survived); for that capture only, on a constrained GPU, the weather actors are "
+				     "hidden and the cloud reflection march capped; put back after it. UNMEASURED effect on the "
+				     "sky light's colour"));
+			VisualScene.LookApplied->SetObjectField(TEXT("sky_capture_cost"), CostRow);
+		}
 		for (USceneComponent* Component : SkyHidden)
 		{
 			Component->SetVisibility(false);
@@ -5933,6 +6026,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			VisualScene.LookApplied->SetObjectField(TEXT("sky_light_capture_result"), CaptureResult);
 		}
 		BeatWatchdog(TEXT("restoring the scene after the sky light capture"));
+		for (const TPair<IConsoleVariable*, FString>& Held : SkyCvarsHeld)
+		{
+			Held.Key->Set(*Held.Value, ECVF_SetByCode);
+		}
 		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: restoring the scene (%d components to show)"),
 		       SkyHidden.Num());
 		if (bSkyCaptureRestore)

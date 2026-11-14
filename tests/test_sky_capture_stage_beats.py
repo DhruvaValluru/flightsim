@@ -25,3 +25,20 @@ def test_restore_and_post_sky_captures_beat_before_blocking():
            'TEXT("%s (end-of-frame updates and flush)")',
            'TEXT("%s (CaptureScene and flush)")',
            'BeatWatchdog(TEXT("a capture after the sky light capture"));')
+
+
+def test_constrained_sky_capture_sheds_weather_and_cloud_march():
+    """r87: the iGPU hung (887a0006) inside the storm's sky capture. On a
+    constrained GPU (auto) the weather actors are hidden for that capture and
+    the cloud reflection march is capped, then both are put back."""
+    assert 'TEXT("sky-capture-weather=")' in SRC and 'TEXT("sky-capture-cloud-samples=")' in SRC
+    assert "const bool bSkyCaptureHideWeather = SwitchOn(SkyCaptureWeatherMode);" in SRC
+    assert "constexpr int32 SkyCaptureCloudViewSamples = 32;" in SRC
+    assert "constexpr int32 SkyCaptureCloudShadowSamples = 8;" in SRC
+    _order('It->Tags.Contains(FName(TEXT("FlightSim.weather")))',
+           'TEXT("r.VolumetricCloud.ReflectionRaySampleMaxCount")',
+           'SetObjectField(TEXT("sky_capture_cost"), CostRow);',
+           "USkyLightComponent::UpdateSkyCaptureContents(World);",
+           'BeatWatchdog(TEXT("restoring the scene after the sky light capture"));',
+           "Held.Key->Set(*Held.Value, ECVF_SetByCode);",
+           "Component->SetVisibility(true);")
