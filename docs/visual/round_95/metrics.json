@@ -1,0 +1,47 @@
+{
+ "calibration": "uncalibrated: report only, no threshold has been judged against real rounds",
+ "limits": {
+  "blank_std_min": 0.002,
+  "blank_mean_min": 0.003,
+  "clipped_max": 0.02,
+  "crushed_max": 0.05,
+  "mean_luma_min": 0.02,
+  "mean_luma_max": 0.8,
+  "ssim_min": 0.35,
+  "flicker_max": 0.02
+ },
+ "gate": "report only; never fails the round",
+ "compare_with": "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_93",
+ "compare_with_found": true,
+ "scenes": {
+  "3": {
+   "frame": "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+   "health": {
+    "mean_luma": 0.1063,
+    "std_luma": 0.12954,
+    "clipped": 0.0,
+    "crushed": 0.00096
+   },
+   "flags": [],
+   "vs_previous": null
+  },
+  "13": {
+   "frame": "13_747_cruise_over_the_ocean.jpg",
+   "health": {
+    "mean_luma": 0.08363,
+    "std_luma": 0.11395,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "13_747_cruise_over_the_ocean.jpg",
+    "flicker": 0.0434,
+    "ssim": 0.5075,
+    "flags": [
+     "flicker"
+    ]
+   }
+  }
+ }
+}
