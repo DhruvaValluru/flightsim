@@ -354,15 +354,16 @@ def test_every_wet_default_reaches_a_master_or_the_cpp():
 # -- storm wet paint A/B (2026-11-13): -wet-porosity=low ----------------------
 
 
-def test_wet_porosity_switch_twin_defaults_to_the_masters_and_refuses_other_words():
-    assert look.parse_wet_porosity("") == {"word": "default", "paint": 0.3, "bare_metal": 0.12}
+def test_wet_porosity_switch_twin_defaults_to_low_and_refuses_other_words():
+    # round 85 (r84 A/B): aircraft luma +10 % / +14 % in rain, no clipping -> low is the default
+    assert look.parse_wet_porosity("") == {"word": "low", "paint": 0.05, "bare_metal": 0.0}
     assert look.parse_wet_porosity("-aircraft-materials=on") == look.parse_wet_porosity("")
     assert look.parse_wet_porosity("-wet-porosity=default")["paint"] == wet.WET_DEFAULTS["PorosityPaint"]
     assert look.parse_wet_porosity("-quality=beauty -wet-porosity=low") == {
         "word": "low", "paint": 0.05, "bare_metal": 0.0}
     with pytest.raises(look.LookError, match="aircraft_look.switch: -wet-porosity=none"):
         look.parse_wet_porosity("-wet-porosity=none")
-    # the default is unchanged until Windows measures the A/B
+    # the masters keep their values; the switch's default sets the MIDs
     assert wet.WET_DEFAULTS["PorosityPaint"] == 0.3 and wet.WET_DEFAULTS["PorosityBareMetal"] == 0.12
     assert wet.WET_POROSITY_LOW == {"PorosityPaint": 0.05, "PorosityBareMetal": 0.0}
 
@@ -370,7 +371,8 @@ def test_wet_porosity_switch_twin_defaults_to_the_masters_and_refuses_other_word
 def test_wet_porosity_switch_host_twin_sets_the_mid_scalar_on_paint_and_bare_metal():
     text = FX_CPP.read_text(encoding="utf-8")
     header = (BRIDGE / "Public" / "FlightSimAircraftFX.h").read_text(encoding="utf-8")
-    assert 'FString WetPorosity = TEXT("default");' in header
+    assert 'FString WetPorosity = TEXT("low");' in header
+    assert 'WetPorosity = TEXT("low");     // round 85: low is the default' in text
     parse = text[text.index("void FFlightSimAircraftFXOptions::ParseParams("):]
     parse = parse[:parse.index("\n}\n")]
     assert 'FParse::Value(*Params, TEXT("wet-porosity="), WetPorosity);' in parse

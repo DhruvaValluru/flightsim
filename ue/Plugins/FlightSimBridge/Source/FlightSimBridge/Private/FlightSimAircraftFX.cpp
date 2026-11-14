@@ -443,7 +443,7 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	// (round 44, 1e5ba438: every paint slot on the flat master) is
 	// -aircraft-probe=flat; -aircraft-probe=coat forces the coat master.
 	// Storm wet paint A/B: -wet-porosity=default|low (aircraft_look.parse_wet_porosity).
-	WetPorosity = TEXT("default");
+	WetPorosity = TEXT("low");     // round 85: low is the default
 	FParse::Value(*Params, TEXT("wet-porosity="), WetPorosity);
 	if (WetPorosity != TEXT("default") && WetPorosity != TEXT("low"))
 	{
@@ -452,7 +452,7 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 			SwitchError = FString::Printf(TEXT("aircraft_look.switch: -wet-porosity=%s is not one of default, low"),
 			                              *WetPorosity);
 		}
-		WetPorosity = TEXT("default");
+		WetPorosity = TEXT("low");
 	}
 	Humidity.ParseParams(Params);  // condensation-solver: -humidity-pct=
 }

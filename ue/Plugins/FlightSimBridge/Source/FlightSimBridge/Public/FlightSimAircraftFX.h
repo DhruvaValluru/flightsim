@@ -113,8 +113,11 @@ struct FFlightSimAircraftFXOptions
 	// Storm wet paint A/B (2026-11-13): -wet-porosity=default|low. low sets
 	// WetPorosity on the paint (0.05) and bare-metal (0.0) look MIDs instead
 	// of the masters' 0.3 / 0.12 (scripts/aircraft_look.py parse_wet_porosity,
-	// aircraft_wet_layer.WET_POROSITY_LOW). Default unchanged; shading only.
-	FString WetPorosity = TEXT("default");
+	// aircraft_wet_layer.WET_POROSITY_LOW). Shading only. Round 85 (r84 A/B,
+	// 2026-11-13: aircraft mean luma +10 % / +14 % in rain, nothing clipped,
+	// SSIM 0.997) made low the default; -wet-porosity=default draws the
+	// masters' own values.
+	FString WetPorosity = TEXT("low");
 	// wet-airframe-canopy: the built weather (its rain wets the airframe), or null.
 	const FFlightSimWeather* Weather = nullptr;
 	// fix pass: the scene's cloud layers (heights above the ground datum,
