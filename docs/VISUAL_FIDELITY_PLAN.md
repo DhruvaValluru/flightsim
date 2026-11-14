@@ -607,11 +607,18 @@ records read as stated (#15 is not cumulus: billow false both ways). On is sligh
 finer edges; darker bases, brighter tops on #03/#12/#13; 9-37 % of pixels differ, SSIM 0.97), so it
 stays on. NOT fixed: the #11/#13 slabs with vertical walls, the soft step on #12's far band and
 #15's dark patches (the scud tone is not switched, so the A/B cannot show it).
-Round 92 (`c7f9686a`, queued): with the billow on the cut also rises over the whole layer
-(`HeightDensity` x `DOME_TAPER` 1.0 x h^1.5 of the way to the top cut), so a cell slopes into a heap
-(clouds generation 9); scud tone 0.9 / 0.95. The yellow-green contour lines on #03's and #11's
-clouds are absent from the raw frame and are not reproduced by the film LUTs offline: a
-`scripts/beauty_post.py` step (ffmpeg lut3d/halation or the denoiser), which Windows is isolating.
+Round 92 (`c7f9686a`, vis-windows `e24bbce5`): with the billow on the cut also rises over the
+whole layer (`HeightDensity` x `DOME_TAPER` 1.0 x h^1.5 of the way to the top cut; clouds
+generation 9). #03 and #13 now read as heaped cumulus (Windows and p3-mac agree), though #13's
+flat-bottomed steps at the horizon remain and #11's horizon is still a streaky sheet. The scud tone
+went to 0.9 / 0.95, but #15 came out pixel-identical to r82, so the scud cards are not what draws its
+dark patches (round 93 tests `-rain-veil=off`).
+Post pipeline: the yellow-green contours (r82 #03/#11) and r83's purple/green sky rings (#05) and
+fringes (#04/#06/#08) all came from the halation step. ffmpeg n8.1.3's `blend=all_mode=screen` on
+gbrp16le is not the identity over an all-black layer (51/67/90 went to 74/90/110); halation off or
+an 8-bit blend gives the raw frame's 0.00 %. Fixed in `5a4d0173` (beauty_post v2: `format=gbrp`
+before the split). The same commit fades #13's contrails in with camera distance
+(`CameraDepthFade` 30 m + 120 m; LOOK_GENERATION 12). Round 93 measures both.
 Next in this lane: M_StormCell's weather map and noise (the storm tiers).
 
 **Open (not fixed):**
@@ -619,7 +626,8 @@ Next in this lane: M_StormCell's weather map and noise (the storm tiers).
 - #08's mask 14.6 % off its geometry; #10 and #13 tight boxes.
 - #12's two geometry clauses need an interior-camera form.
 - #07 shows rain streaks rather than bands; #13's contrails read harsh; faint steps on #13's cloud bases.
-- Post-pipeline yellow-green contours on bright cloud edges (#03, #11); #12's instrument faces show terrain through them.
+- #11's horizon streaks; #13's flat-bottomed steps at the horizon; #15's dark patches (source unknown, not the scud tone).
+- #12's see-through instrument faces: p3-mac's `955a4694`, rendering in p3-mac's round 84.
 - #06's ocean shade reads blue (+49), probably the water itself.
 - Every tiles amount stays UNCALIBRATED (`SUN_LOW_DEG`, `SUN_HIGH_DEG`, `SUN_LOW_SCALE`,
   `STATED_FILL_NEUTRAL_SHARE` among them); `-stated-fill-share=` and a numeric `-tiles-shade-neutral=`
