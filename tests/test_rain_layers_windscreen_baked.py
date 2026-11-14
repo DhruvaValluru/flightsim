@@ -223,7 +223,7 @@ def test_the_baked_materials_are_post_process_after_the_tonemapper():
         assert f'_storm_material("{name}")' in body and f'finish_storm(material, "{name}")' in body
         assert "MD_POST_PROCESS" in body and "after_tonemapping()" in body
         # M_WindshieldRainBaked generation 2 (r87): the second drops tap and the dry-inside-the-glass mask.
-        want = {"M_RainLayers": "1", "M_WindshieldRainBaked": "2"}[name]
+        want = {"M_RainLayers": "1", "M_WindshieldRainBaked": "3"}[name]
         assert name in _assigned("STORM_MATERIALS") and _assigned("STORM_GENERATIONS")[name] == want
         assert re.search(rf"^{creator[4:-1]}\(\)", SCRIPT, re.M), "called by the script"
     # The existing materials are untouched: the default-off path draws exactly what it drew.
@@ -369,4 +369,8 @@ def test_the_baked_glass_breaks_its_tile_and_stays_dry_inside_the_cockpit():
     shader = _strip_comments((SHADERS / "windshield_baked.hlsl").read_text(encoding="utf-8"))
     c, s = math.cos(math.radians(30.0)), math.sin(math.radians(30.0))
     assert f"float2({c:.6f} * t2.x + {s:.1f} * t2.y, -{s:.1f} * t2.x + {c:.6f} * t2.y)" in shader
-    assert "Wet.x * 0.5" in shader
+    # Generation 3: both taps at one density; the host splits the cover so the union is the card's.
+    assert "Wet.x * 0.5" not in shader and "float on2 = saturate((Drop2.a - (1.0 - Wet.x)) * 16.0);" in shader
+    code = _function(BAKED_CPP, "bool FFlightSimWeather::ApplyWindscreenBaked(")
+    assert "const double LayerCover = 1.0 - FMath::Sqrt(FMath::Max(0.0, 1.0 - Cover));" in code
+    assert "const double DropDensity = WeatherBakedDensityForCover(LayerCover);" in code

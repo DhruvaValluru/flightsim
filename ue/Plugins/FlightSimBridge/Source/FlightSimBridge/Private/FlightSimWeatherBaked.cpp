@@ -225,7 +225,11 @@ bool FFlightSimWeather::ApplyWindscreenBaked(USceneCaptureComponent2D* Beauty, d
 	const double Hold = V <= WeatherBakedVShedMps ? 1.0 : WeatherBakedVShedMps / V;
 	const double Wetted = 1.0 - FMath::Exp(-WindshieldImpinge * WeatherBakedMeanCapAreaM2 * WeatherBakedGlassLifeS);
 	const double Cover = FMath::Min(WeatherBakedMaxCover, Wetted) * Hold;
-	const double DropDensity = WeatherBakedDensityForCover(Cover);
+	// r87 generation 3: the drops come from TWO independent taps (windshield_baked.hlsl), each
+	// at the density whose cover c' makes their union the card's: 1 - (1 - c')^2 = Cover. Cover
+	// is a share of the tile's area, so the 1.37x tap covers the same share at that density.
+	const double LayerCover = 1.0 - FMath::Sqrt(FMath::Max(0.0, 1.0 - Cover));
+	const double DropDensity = WeatherBakedDensityForCover(LayerCover);
 	const double TrackDensity = WeatherBakedASpan * (1.0 - Hold) * FMath::Min(1.0, Wetted / WeatherBakedMaxCover);
 	const double HeadRate = WindshieldRunoffMps / WeatherBakedTileM;
 	WindscreenWet = FVector(DropDensity, TrackDensity, HeadRate);
@@ -244,6 +248,8 @@ bool FFlightSimWeather::ApplyWindscreenBaked(USceneCaptureComponent2D* Beauty, d
 	Row->SetNumberField(TEXT("airspeed_mps"), AirspeedMps);
 	Row->SetNumberField(TEXT("standing_cover"), Cover);
 	Row->SetNumberField(TEXT("drop_density"), DropDensity);
+	Row->SetNumberField(TEXT("drop_layer_cover"), LayerCover);
+	Row->SetNumberField(TEXT("drop_layers"), 2);
 	Row->SetNumberField(TEXT("rivulet_density"), TrackDensity);
 	Row->SetNumberField(TEXT("head_rate_tiles_per_s"), HeadRate);
 	Row->SetStringField(TEXT("basis"),

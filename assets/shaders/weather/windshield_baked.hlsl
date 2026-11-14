@@ -25,12 +25,13 @@
 // Returns (du, dv, mask, shade). The material draws
 //   lerp(Scene(UV), Scene(saturate(UV + (du, dv))) * shade, mask).
 // EDGE_GAIN = 16.0
-// Layer 2 (r87): the same bake at 1.37x the tiles, turned 30 degrees and shifted, at half
-// the drop density (smaller, sparser drops); a pixel takes the layer whose drop covers it
-// more. Its encoded shift is turned back by -30 degrees (it was sampled turned by +30).
-// UNCALIBRATED: the union covers a little more glass than Wet.x alone.
+// Layer 2 (r87): the same bake at 1.37x the tiles, turned 30 degrees and shifted, at the
+// SAME density (generation 3: the host splits the card's cover so the union of the two is
+// it; at half density, generation 2, layer 2 covered ~3 % and the 240 px repeat stayed); a
+// pixel takes the layer whose drop covers it more. Its encoded shift is turned back by -30
+// degrees (it was sampled turned by +30).
 float on1 = saturate((Drop.a - (1.0 - Wet.x)) * 16.0);
-float on2 = saturate((Drop2.a - (1.0 - Wet.x * 0.5)) * 16.0);
+float on2 = saturate((Drop2.a - (1.0 - Wet.x)) * 16.0);
 float rivOn = saturate((Riv.a - (1.0 - Wet.y)) * 16.0);
 float s = frac(RivV + Riv.b + Time * Wet.z);
 rivOn *= saturate(1.0 - s / max(Wet.w, 1.0e-3));

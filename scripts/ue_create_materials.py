@@ -617,7 +617,7 @@ STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChanne
                      "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "6",
                      "M_ScudCard": "3",
                      # maxpick/rain (2026-11-13): the baked rain layers and windscreen (tier 0).
-                     "M_RainLayers": "1", "M_WindshieldRainBaked": "2"}
+                     "M_RainLayers": "1", "M_WindshieldRainBaked": "3"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -2334,7 +2334,7 @@ WINDSHIELD_BAKED_PARAMETERS = ("Time", "Wet", "LensH", "Tiles")
 #: TAN_MAX / (2 tan(hfov / 2)) at 90 degrees, until the host sets the camera's.
 WINDSHIELD_BAKED_TILES = 3.0
 WINDSHIELD_BAKED_LENS_H = 0.440707
-#: r87 (2026-11-14), generation 2: a second tap of T_WSDrops at the screen UV turned by
+#: r87 (2026-11-14), generation 2 (3: both taps at one density, the host splits the cover): a second tap of T_WSDrops at the screen UV turned by
 #: WINDSHIELD_BAKED_TURN2_DEG, times WINDSHIELD_BAKED_SCALE2 and shifted by
 #: WINDSHIELD_BAKED_SHIFT2 tiles, so the 3-per-height tile no longer repeats on a 240 px grid
 #: (windshield_baked.hlsl turns its shift back by the same angle); and the glass dry where

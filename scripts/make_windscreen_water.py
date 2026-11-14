@@ -256,10 +256,10 @@ def shade_texels(drop, riv, riv_v, time_s, wet, lens, aspect, drop2=None):
     """drop, riv: float RGBA 0..1 (..., 4). wet = (drop density, rivulet density,
     head rate in tiles/s, trail length in tiles). Returns (du, dv, mask, shade).
     drop2 (r87, material generation 2): the second tap, sampled turned +30 degrees at
-    half the drop density; its shift is turned back and the stronger drop wins."""
+    the same drop density (generation 3); its shift is turned back and the stronger drop wins."""
     drop_on = np.clip((drop[..., 3] - (1.0 - wet[0])) * EDGE_GAIN, 0.0, 1.0)
     if drop2 is not None:
-        on2 = np.clip((drop2[..., 3] - (1.0 - wet[0] * 0.5)) * EDGE_GAIN, 0.0, 1.0)
+        on2 = np.clip((drop2[..., 3] - (1.0 - wet[0])) * EDGE_GAIN, 0.0, 1.0)
         c, s_ = math.cos(math.radians(30.0)), math.sin(math.radians(30.0))
         t2x, t2y = drop2[..., 0] * 2.0 - 1.0, drop2[..., 1] * 2.0 - 1.0
         r2 = np.stack([(c * t2x + s_ * t2y + 1.0) / 2.0, (-s_ * t2x + c * t2y + 1.0) / 2.0,
