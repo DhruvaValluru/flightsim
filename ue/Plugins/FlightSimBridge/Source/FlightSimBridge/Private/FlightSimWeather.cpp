@@ -2667,6 +2667,7 @@ bool FFlightSimWeather::ApplyWindshield(USceneCaptureComponent2D* Beauty, double
 	Beauty->PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0f, WindshieldMaterial));
 	TSharedPtr<FJsonObject> Row = WeatherRecord();
 	Row->SetBoolField(TEXT("drawn"), true);
+	Row->SetStringField(TEXT("drawn_as"), TEXT("material"));   // M_WindshieldRain; "baked" under -windscreen-baked=on
 	Row->SetStringField(TEXT("applied_to"), TEXT("beauty"));
 	Row->SetNumberField(TEXT("impinge_per_m2_s"), WindshieldImpinge);
 	Row->SetNumberField(TEXT("runoff_mps"), WindshieldRunoffMps);

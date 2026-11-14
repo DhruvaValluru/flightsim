@@ -233,6 +233,7 @@ bool FFlightSimWeather::ApplyWindscreenBaked(USceneCaptureComponent2D* Beauty, d
 	TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 	Row->SetBoolField(TEXT("drawn"), true);
 	Row->SetStringField(TEXT("drawn_as"), TEXT("baked"));
+	Row->SetStringField(TEXT("drawn_as"), TEXT("baked"));   // the A/B key (MAXPICK r87); "material" otherwise
 	Row->SetStringField(TEXT("material"), WeatherBakedWindscreenPath);
 	Row->SetStringField(TEXT("applied_to"), TEXT("beauty"));
 	Row->SetNumberField(TEXT("impinge_per_m2_s"), WindshieldImpinge);

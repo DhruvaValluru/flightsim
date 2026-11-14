@@ -111,6 +111,9 @@ def main(argv=None) -> int:
                              "draws the tiles; its throw-away solve pass does not)")
     # 1280 x 720: at 640 x 360 a drop a metre from the camera is under a
     # pixel and the rain cannot be judged.
+    parser.add_argument("--quality", choices=("visual", "beauty"), default="visual",
+                        help="beauty adds -quality=beauty, which the beauty-only switches "
+                             "(-rain-layers=, -windscreen-baked=) need to be parsed at all")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     args = parser.parse_args(argv)
@@ -210,7 +213,8 @@ def main(argv=None) -> int:
         command = [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
                    "-run=FlightSimBridge.FlightSimRender"] + render_flags(
             card, frames, scene=scene, mesh=mesh, look=look, camera_flags=camera_flags,
-            labels=False, width=args.width, height=args.height, fps=5.0, extra=extra)
+            labels=False, width=args.width, height=args.height, fps=5.0, extra=extra,
+            quality=None if args.quality == "visual" else args.quality)
         # FLIGHTSIM_RENDER_SWITCHES on the argv, as the web app passes them
         # (r87: -windscreen-baked=on never reached the commandlet).
         command = with_render_switches(command)
