@@ -125,9 +125,10 @@ def main(argv=None) -> int:
     from core.render.headless import HEADLESS_FLAGS, run_headless
     from core.scenario.card import write_run_card
     from core.util.platform import ue_editor_path
-    from webapp.runs import (CLIP_SECONDS, TERRAIN_DIR, _projected_origin, baked, pick_scene,
-                             plan_scene_setting, project_for_ue_host, render_look_for,
-                             severe_event_centre, webapp_chase_flag)
+    from webapp.runs import (CLIP_SECONDS, TERRAIN_DIR, _projected_origin, baked,
+                             camera_render_flags, pick_scene, plan_scene_setting,
+                             project_for_ue_host, render_look_for, severe_event_centre,
+                             webapp_chase_flag, with_render_switches)
 
     args.out.mkdir(parents=True, exist_ok=True)
     spec = compile_prompt(args.prompt)
@@ -177,7 +178,14 @@ def main(argv=None) -> int:
           f"({scene.get('kind') if scene else 'flat slab'}); imagery="
           f"{scene.get('imagery') if scene else None} (none: the land-cover material colours "
           f"the ground); Google tiles {'off (-NoGoogleTiles)' if args.no_google_tiles else 'on'}")
-    camera_flags = ([f"-chase={webapp_chase_flag(aircraft)}", "-camera=chase"], [])
+    # The prompt's own camera, as the web app maps it (r87: "cockpit camera"
+    # rendered -camera=chase, so the windscreen layer could not show).
+    try:
+        camera_flags = camera_render_flags(spec)
+    except ValueError as error:
+        print(f"  camera: {error}; falling back to the chase camera")
+        camera_flags = ([f"-chase={webapp_chase_flag(aircraft)}", "-camera=chase"], [])
+    print(f"  camera: {' '.join(camera_flags[0] + camera_flags[1])}")
 
     editor = ue_editor_path()
     if editor is None or not editor.is_file():
@@ -203,6 +211,9 @@ def main(argv=None) -> int:
                    "-run=FlightSimBridge.FlightSimRender"] + render_flags(
             card, frames, scene=scene, mesh=mesh, look=look, camera_flags=camera_flags,
             labels=False, width=args.width, height=args.height, fps=5.0, extra=extra)
+        # FLIGHTSIM_RENDER_SWITCHES on the argv, as the web app passes them
+        # (r87: -windscreen-baked=on never reached the commandlet).
+        command = with_render_switches(command)
         log = args.out / backend / "render.log"
         print(f"\n=== {backend}: {log}")
         result = run_headless(list(command) + list(HEADLESS_FLAGS), log, watch=[frames])
