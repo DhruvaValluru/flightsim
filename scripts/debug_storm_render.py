@@ -114,6 +114,10 @@ def main(argv=None) -> int:
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     args = parser.parse_args(argv)
+    # UnrealEditor runs from its own directory: a relative --out (r87's
+    # runs\wsw_baked) reached it as a path it could not open (card.json,
+    # REFUSED / NO FRAMES). Every path handed on is absolute.
+    args.out = args.out.resolve()
     backends = args.backend or ["off", "procedural"]
 
     from core.nl.compiler import compile_prompt
