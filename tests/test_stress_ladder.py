@@ -214,3 +214,10 @@ def test_the_device_loss_rules_name_the_commandlets_own_lines():
 
 def test_the_ps1_is_ascii_for_windows_powershell_5_1():
     LADDER_PS1.encode("ascii")
+
+
+def test_the_gpu_crash_debugging_cvar_echo_is_not_a_device_loss():
+    # r90: this config line on a clean run read as device_lost:2
+    assert not sl.DEVICE_LOST.search("[2026.11.13-22.47.36:001][  0]LogConfig: Set CVar [[r.GPUCrashDebugging:0]]")
+    assert not sl.DEVICE_LOST.search("LogInit: r.GPUCrashDebugging = 0")
+    assert sl.DEVICE_LOST.search("LogD3D11RHI: Error: GPU crash detected: DXGI_ERROR_DEVICE_HUNG")

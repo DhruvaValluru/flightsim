@@ -48,7 +48,9 @@ REPO = Path(__file__).resolve().parents[1]
 
 DEVICE_LOST = re.compile(
     r"DXGI_ERROR_DEVICE_(?:REMOVED|HUNG|RESET)|DXGI_ERROR_DRIVER_INTERNAL_ERROR"
-    r"|render\.gpu_lost|device being lost|D3D11 device REMOVED|GPU ?crash", re.I)
+    r"|render\.gpu_lost|device being lost|D3D11 device REMOVED|GPU crash (?:detected|dump)", re.I)
+# r90 (2026-11-13): a bare "GPU ?crash" matched the config echo
+# "LogConfig: Set CVar [[r.GPUCrashDebugging:0]]" and failed a clean tier 0.
 #: the capture watchdog's line; the commandlet then ends with exit code 4
 WATCHDOG = re.compile(r"render\.capture_timeout")
 STALLED = re.compile(r"render\.stalled|render\.timeout")
