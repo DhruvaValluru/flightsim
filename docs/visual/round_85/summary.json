@@ -1,0 +1,52 @@
+[
+ {
+  "number": 9,
+  "name": "747 through a thunderstorm",
+  "prompt": "chase view of the 747 flying west through a thunderstorm at 2000 m for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "58f82afb094f",
+  "lighting": {},
+  "seconds": 307.0,
+  "spec_sha256": "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.141,
+   "offset_px": [
+    65,
+    212
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 15,
+  "name": "747 in hurricane-like weather (the refusal's suggestion)",
+  "prompt": "chase view of the 747 at 2000 m in strong wind, severe turbulence and heavy rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "4dead5ba04b8",
+  "lighting": {},
+  "seconds": 101.2,
+  "spec_sha256": "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.311,
+   "offset_px": [
+    21,
+    212
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ }
+]
