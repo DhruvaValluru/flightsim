@@ -583,12 +583,12 @@ Shade = the frame's lower-right quadrant, sRGB means; B-R is its blue minus red.
 | Paint masters fell back (`float4 nozzles[4]` 12 of 16 elements) | the soot Custom node's array literal | `_rgba` Append(RGB, A) (`434ba7e6`); r53 M_AircraftPaint compiles, A-4 white 169/156/145 |
 | Cloud-layer blocks and grain at the horizon | footprint shadow samples on a fixed grid | stratified IGN dither and a march fade under the distant sheet (`fa56ba4d`, `1ef9bcae`); r58-r62 blocks gone, faint steps on #13's upper-right bases |
 
-**Final sweep (round 81, `af3ac2a3`):** not reported yet (asked 2026-11-12 15:35; round 80 confirmed #01, #02, #04, #05).
+**Final sweep:** round 81 (`af3ac2a3`) was abandoned (the laptop slept during #9; a hung #10 then locked the plugin DLLs until a reboot). Round 83 (`b915b591`, 2026-11-13, vis-windows `d2863b3d`/`f379bb12`): 14 of 15 rendered, #14 refused as designed (`prompt.unsupported`, hurricane), 0 failed, no device loss, no tiles timeouts, capture 71-276 s per scene.
 
 **Labels (`flightsim.verify`, round 69 at `552c9ab5`): 8 of 14 pass** (#03, #04, #05, #06, #07, #09,
 #11, #15). Still failing: `component_boxes` on #01 and #02 (`store_sta2`), `mask_vs_geometry` on #08
 (14.6 %), `tight_box_present` on #10 and #13, `depth_vs_geometry` and `mask_vs_geometry` on #12 (the
-cockpit camera inside the hull, a limit of those checks for an interior camera). Round 81: not reported yet.
+cockpit camera inside the hull, a limit of those checks for an interior camera). Round 83 at `b915b591`: the same 8 of 14 pass, with the same failures.
 
 **Cloud realism (round 82, the owner 2026-11-13: "the clouds dont look that realistic").** r69's
 #03/#13 cumulus were flat, smeared, soft-edged blobs without lit tops or dark bases; #11/#12/#13's
@@ -601,15 +601,25 @@ iGPU budget (no sample, no hash added), behind `-look-cloud-billow=on|off` (off 
 - the distant sheet: below 0.3 of vertical its derivative relief fades out and its edge widens
   up to 4x (`GrazingSoften`);
 - scud tone 0.75 under a deck, 0.85 in the open (was 0.5, 0.7; not switched).
-Material generations: clouds 8 (graph 7), distant 5, so Windows rebuilds both. Measure: #03, #11,
-#12, #13, #15 with the switch on and off. Next in this lane: M_StormCell's weather map and noise
-(the storm tiers), only after round 82 reads.
+Material generations: clouds 8 (graph 7), distant 5, so Windows rebuilds both.
+Round 82 (on) vs 182 (off) at `b915b591` (vis-windows `92a4e643`/`da14bdc4`), 5/5 each: the
+records read as stated (#15 is not cumulus: billow false both ways). On is slightly better (crisper,
+finer edges; darker bases, brighter tops on #03/#12/#13; 9-37 % of pixels differ, SSIM 0.97), so it
+stays on. NOT fixed: the #11/#13 slabs with vertical walls, the soft step on #12's far band and
+#15's dark patches (the scud tone is not switched, so the A/B cannot show it).
+Round 92 (`c7f9686a`, queued): with the billow on the cut also rises over the whole layer
+(`HeightDensity` x `DOME_TAPER` 1.0 x h^1.5 of the way to the top cut), so a cell slopes into a heap
+(clouds generation 9); scud tone 0.9 / 0.95. The yellow-green contour lines on #03's and #11's
+clouds are absent from the raw frame and are not reproduced by the film LUTs offline: a
+`scripts/beauty_post.py` step (ffmpeg lut3d/halation or the denoiser), which Windows is isolating.
+Next in this lane: M_StormCell's weather map and noise (the storm tiers).
 
 **Open (not fixed):**
 - `store_sta2`'s component box on #01/#02, 3.4 px off its hull (manifest, CG and pose ruled out).
 - #08's mask 14.6 % off its geometry; #10 and #13 tight boxes.
 - #12's two geometry clauses need an interior-camera form.
 - #07 shows rain streaks rather than bands; #13's contrails read harsh; faint steps on #13's cloud bases.
+- Post-pipeline yellow-green contours on bright cloud edges (#03, #11); #12's instrument faces show terrain through them.
 - #06's ocean shade reads blue (+49), probably the water itself.
 - Every tiles amount stays UNCALIBRATED (`SUN_LOW_DEG`, `SUN_HIGH_DEG`, `SUN_LOW_SCALE`,
   `STATED_FILL_NEUTRAL_SHARE` among them); `-stated-fill-share=` and a numeric `-tiles-shade-neutral=`
