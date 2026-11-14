@@ -1,0 +1,40 @@
+{
+ "available_ram_mb_min": 719.0,
+ "commit": "b2a09c40",
+ "device_lost_total": 0,
+ "gpu": "Intel integrated graphics (model unrecorded)",
+ "gpu_dedicated_mb_peak": 0.0,
+ "gpu_drain_s_max": 0.9,
+ "gpu_memory_mb_peak": 4159.3,
+ "gpu_shared_mb_peak": 4159.3,
+ "label": "measured on the render laptop by scripts/stress_ladder.ps1; survival only, frame time and memory are reported, not judged (uncalibrated)",
+ "measured": true,
+ "runs": [
+  {
+   "reasons": [],
+   "round": 9001,
+   "run": 1,
+   "survived": true,
+   "tier": 0
+  },
+  {
+   "reasons": [],
+   "round": 9002,
+   "run": 2,
+   "survived": true,
+   "tier": 0
+  },
+  {
+   "reasons": [],
+   "round": 9003,
+   "run": 3,
+   "survived": true,
+   "tier": 0
+  }
+ ],
+ "runs_per_tier": 3,
+ "scene_seconds_max": 86.4,
+ "sustained_tier": 0,
+ "switches": "-FlightSimStressTier=0 -DPCVars=r.DynamicGlobalIlluminationMethod=0,r.ReflectionMethod=0,r.Shadow.Virtual.Enable=0,r.AntiAliasingMethod=1,r.ScreenPercentage=100,r.Shadow.MaxResolution=1024,r.Shadow.CSM.MaxCascades=2,r.AmbientOcclusionLevels=0,r.VolumetricCloud=0,r.VolumetricFog=0,r.MaxAnisotropy=4,r.Streaming.PoolSize=192,r.Streaming.LimitPoolSizeToVRAM=0",
+ "written": "2026-11-13T23:03:11-0500"
+}

@@ -1,0 +1,37 @@
+{
+ "tier": 0,
+ "run": 3,
+ "survived": true,
+ "reasons": [],
+ "switches": "-FlightSimStressTier=0 -DPCVars=r.DynamicGlobalIlluminationMethod=0,r.ReflectionMethod=0,r.Shadow.Virtual.Enable=0,r.AntiAliasingMethod=1,r.ScreenPercentage=100,r.Shadow.MaxResolution=1024,r.Shadow.CSM.MaxCascades=2,r.AmbientOcclusionLevels=0,r.VolumetricCloud=0,r.VolumetricFog=0,r.MaxAnisotropy=4,r.Streaming.PoolSize=192,r.Streaming.LimitPoolSizeToVRAM=0",
+ "commit": "b2a09c40",
+ "round": 9003,
+ "metrics": {
+  "device_lost_lines": 0,
+  "watchdog_lines": 0,
+  "stalled_lines": 0,
+  "out_of_memory_lines": 0,
+  "first_device_lost": null,
+  "first_watchdog": null,
+  "tier_markers": [
+   0
+  ],
+  "gpu_drains": 24,
+  "gpu_drain_s_max": 0.9,
+  "gpu_drain_s_median": 0.67,
+  "samples": 85,
+  "gpu_memory_mb_peak": 4149.7,
+  "gpu_dedicated_mb_peak": 0.0,
+  "gpu_shared_mb_peak": 4149.7,
+  "available_ram_mb_min": 841.0,
+  "gpu_3d_utilization_max": 59.7,
+  "scene_seconds": 81.1,
+  "round_seconds": {
+   "scenes": 82.3
+  },
+  "logs": [
+   "C:\\Users\\kanth\\flightsim\\runs\\webapp\\72dc9d9ee0b8\\frames\\render.log",
+   "C:\\Users\\kanth\\flightsim\\runs\\webapp\\72dc9d9ee0b8\\host_flight\\host_telemetry.log"
+  ]
+ }
+}
