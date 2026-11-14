@@ -617,7 +617,7 @@ STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChanne
                      "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "6",
                      "M_ScudCard": "3",
                      # maxpick/rain (2026-11-13): the baked rain layers and windscreen (tier 0).
-                     "M_RainLayers": "1", "M_WindshieldRainBaked": "1"}
+                     "M_RainLayers": "1", "M_WindshieldRainBaked": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -2334,6 +2334,18 @@ WINDSHIELD_BAKED_PARAMETERS = ("Time", "Wet", "LensH", "Tiles")
 #: TAN_MAX / (2 tan(hfov / 2)) at 90 degrees, until the host sets the camera's.
 WINDSHIELD_BAKED_TILES = 3.0
 WINDSHIELD_BAKED_LENS_H = 0.440707
+#: r87 (2026-11-14), generation 2: a second tap of T_WSDrops at the screen UV turned by
+#: WINDSHIELD_BAKED_TURN2_DEG, times WINDSHIELD_BAKED_SCALE2 and shifted by
+#: WINDSHIELD_BAKED_SHIFT2 tiles, so the 3-per-height tile no longer repeats on a 240 px grid
+#: (windshield_baked.hlsl turns its shift back by the same angle); and the glass dry where
+#: the scene is nearer than WINDSHIELD_BAKED_DRY_NEAR_CM (+ the fade): the cockpit's own
+#: panel, frame and compass are inside the glass (round 87 drew drops over the panel).
+#: UNCALIBRATED, stated.
+WINDSHIELD_BAKED_TURN2_DEG = 30.0
+WINDSHIELD_BAKED_SCALE2 = 1.37
+WINDSHIELD_BAKED_SHIFT2 = (0.37, 0.61)
+WINDSHIELD_BAKED_DRY_NEAR_CM = 120.0
+WINDSHIELD_BAKED_DRY_FADE_CM = 30.0
 
 
 def baked_pin(relative):
@@ -2445,6 +2457,37 @@ def create_windshield_rain_baked():
                    tiles, -1300, -50)
     drop = _sample(material, lib, drops_texture, tiled, unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR,
                    -1150, -200)
+    # r87 generation 2: the second drops tap, (c X - s Y, s X + c Y) x Tiles x Scale2 + Shift2,
+    # where (X, Y) = (u x aspect, v).
+    import math
+    c2 = math.cos(math.radians(WINDSHIELD_BAKED_TURN2_DEG))
+    s2 = math.sin(math.radians(WINDSHIELD_BAKED_TURN2_DEG))
+
+    def constant2(rg, x, y):
+        node = lib.create_material_expression(material, unreal.MaterialExpressionConstant2Vector, x, y)
+        node.set_editor_property("r", rg[0])
+        node.set_editor_property("g", rg[1])
+        return node
+
+    iso = binary(material, lib, unreal.MaterialExpressionAppendVector,
+                 binary(material, lib, unreal.MaterialExpressionMultiply,
+                        mask(material, lib, screen, "r", -1800, -500, source_out="ViewportUV"),
+                        aspect, -1600, -500),
+                 mask(material, lib, screen, "g", -1800, -400, source_out="ViewportUV"), -1450, -450)
+    turned = binary(material, lib, unreal.MaterialExpressionAppendVector,
+                    binary(material, lib, unreal.MaterialExpressionDotProduct, iso,
+                           constant2((c2, -s2), -1450, -650), -1300, -600),
+                    binary(material, lib, unreal.MaterialExpressionDotProduct, iso,
+                           constant2((s2, c2), -1450, -350), -1300, -400), -1150, -500)
+    tiled2 = binary(material, lib, unreal.MaterialExpressionAdd,
+                    binary(material, lib, unreal.MaterialExpressionMultiply,
+                           binary(material, lib, unreal.MaterialExpressionMultiply, turned, tiles, -1000, -550),
+                           constant(material, lib, WINDSHIELD_BAKED_SCALE2, -1000, -450), -850, -500),
+                    constant2(WINDSHIELD_BAKED_SHIFT2, -850, -400), -700, -500)
+    drop2 = _sample(material, lib, drops_texture, tiled2, unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR,
+                    -550, -500)
+    drop2_4 = binary(material, lib, unreal.MaterialExpressionAppendVector, drop2, drop2, -400, -500,
+                     a_out="RGB", b_out="A")
     track = _sample(material, lib, tracks_texture, tiled, unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR,
                     -1150, 50)
     drop4 = binary(material, lib, unreal.MaterialExpressionAppendVector, drop, drop, -950, -200,
@@ -2454,7 +2497,7 @@ def create_windshield_rain_baked():
     track_v = binary(material, lib, unreal.MaterialExpressionMultiply, v, tiles, -1150, 300)
     lens = binary(material, lib, unreal.MaterialExpressionMultiply, lens_h, aspect, -1150, 450)
     water = custom(material, lib, "windshield_baked", unreal.CustomMaterialOutputType.CMOT_FLOAT4, {
-        "Drop": (drop4, ""), "Riv": (track4, ""), "RivV": (track_v, ""), "Aspect": (aspect, ""),
+        "Drop": (drop4, ""), "Drop2": (drop2_4, ""), "Riv": (track4, ""), "RivV": (track_v, ""), "Aspect": (aspect, ""),
         "Time": (time, ""), "Wet": wet, "Lens": (lens, "")}, -750, 0)
     shifted = unary(material, lib, unreal.MaterialExpressionSaturate,
                     binary(material, lib, unreal.MaterialExpressionAdd,
@@ -2468,8 +2511,21 @@ def create_windshield_rain_baked():
     seen = binary(material, lib, unreal.MaterialExpressionMultiply,
                   mask(material, lib, behind, "rgb", -100, -200, source_out="Color"),
                   mask(material, lib, water, "a", -100, -50), 50, -150)
+    # r87 generation 2: dry inside the glass, saturate((depth - near) / fade) on the scene depth.
+    depth = lib.create_material_expression(material, unreal.MaterialExpressionSceneTexture, -400, 450)
+    depth.set_editor_property("scene_texture_id", unreal.SceneTextureId.PPI_SCENE_DEPTH)
+    outside = unary(material, lib, unreal.MaterialExpressionSaturate,
+                    binary(material, lib, unreal.MaterialExpressionDivide,
+                           binary(material, lib, unreal.MaterialExpressionSubtract,
+                                  mask(material, lib, depth, "r", -250, 450, source_out="Color"),
+                                  constant(material, lib, WINDSHIELD_BAKED_DRY_NEAR_CM, -250, 550),
+                                  -100, 450),
+                           constant(material, lib, WINDSHIELD_BAKED_DRY_FADE_CM, -100, 550), 50, 450),
+                    200, 450)
+    wet_mask = binary(material, lib, unreal.MaterialExpressionMultiply,
+                      mask(material, lib, water, "b", -100, 300), outside, 50, 300)
     out = lerp(material, lib, mask(material, lib, scene, "rgb", -100, 150, source_out="Color"), seen,
-               mask(material, lib, water, "b", -100, 300), 200, 0)
+               wet_mask, 200, 0)
     lib.connect_material_property(out, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     finish_storm(material, "M_WindshieldRainBaked")
 # -- maxpick/rain -- end -----------------------------------------------------------------

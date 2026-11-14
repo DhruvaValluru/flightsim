@@ -92,7 +92,7 @@ def test_the_environment_channel_carries_them_too(monkeypatch):
     assert "-rain-layers=on" in out and "-windscreen-baked=on" in out
 
 
-def test_the_bridge_reads_both_switches_off_by_default_on_a_beauty_run_only():
+def test_the_bridge_reads_rain_layers_off_and_windscreen_baked_on_by_default_on_a_beauty_run_only():
     code = _strip_comments(RENDER_CPP)
     build = code.index("if (!Weather.Build(World, WeatherOptions, Error))")
     block = code[code.rindex("if (bBeauty)", 0, build):build]
@@ -101,12 +101,14 @@ def test_the_bridge_reads_both_switches_off_by_default_on_a_beauty_run_only():
     assert 'ParseBakedSwitch(BakedSwitches, TEXT("rain-layers="),\n' in block
     assert "WeatherOptions.bRainLayers, Error)" in block
     assert 'ParseBakedSwitch(BakedSwitches, TEXT("windscreen-baked="),\n' in block
-    assert "WeatherOptions.bWindscreenBaked, Error)" in block
+    # r87 (2026-11-14): the baked glass is the default; -windscreen-baked=off brings M_WindshieldRain back.
+    assert "WeatherOptions.bWindscreenBaked, Error,\n" in block and 'TEXT("on")))' in block
     assert "return Fail(Error);" in block
     # Off unless asked: the options' defaults, the parser's default word, a refusal for any other.
     assert "bool bRainLayers = false;" in WEATHER_H and "bool bWindscreenBaked = false;" in WEATHER_H
     parse = _function(BAKED_CPP, "bool FFlightSimWeather::ParseBakedSwitch(")
-    assert 'FString Value = TEXT("off");' in parse
+    assert "FString Value = Default;" in parse
+    assert 'FString& Error,\n\t                             const TCHAR* Default = TEXT("off"));' in WEATHER_H
     assert 'Value != TEXT("on") && Value != TEXT("off")' in parse and "weather.baked_switch" in parse
     build_fn = _function(WEATHER_CPP, "bool FFlightSimWeather::Build(")
     assert "bRainLayers = Options.bRainLayers;" in build_fn
@@ -220,7 +222,9 @@ def test_the_baked_materials_are_post_process_after_the_tonemapper():
         body = body[:body.index("\ndef ")]
         assert f'_storm_material("{name}")' in body and f'finish_storm(material, "{name}")' in body
         assert "MD_POST_PROCESS" in body and "after_tonemapping()" in body
-        assert name in _assigned("STORM_MATERIALS") and _assigned("STORM_GENERATIONS")[name] == "1"
+        # M_WindshieldRainBaked generation 2 (r87): the second drops tap and the dry-inside-the-glass mask.
+        want = {"M_RainLayers": "1", "M_WindshieldRainBaked": "2"}[name]
+        assert name in _assigned("STORM_MATERIALS") and _assigned("STORM_GENERATIONS")[name] == want
         assert re.search(rf"^{creator[4:-1]}\(\)", SCRIPT, re.M), "called by the script"
     # The existing materials are untouched: the default-off path draws exactly what it drew.
     assert _assigned("STORM_GENERATIONS")["M_RainDrops"] == "6"
@@ -349,3 +353,20 @@ def test_the_rain_layers_take_three_taps_with_an_explicit_lod():
         assert f"R.Alpha(Layer{k}, Layer{k}Sampler, Scale{k}," in code
     assert "atan2(py, (abs(px) + abs(py)) > 1.0e-6 ? px : 1.0)" in code, "no atan2(0, 0)"
     assert "CotT * Rho / span - Ph" in code, "the travel is subtracted: the rain falls along its axis"
+
+
+def test_the_baked_glass_breaks_its_tile_and_stays_dry_inside_the_cockpit():
+    """r87 (2026-11-14): the 3-per-height tile repeated every 240 px and drops were drawn on
+    the panel. Generation 2 adds a second drops tap turned 30 degrees at 1.37x (the shader
+    turns its shift back by -30 degrees) and dries the glass where the scene is nearer than
+    WINDSHIELD_BAKED_DRY_NEAR_CM."""
+    import math
+    body = SCRIPT[SCRIPT.index("def create_windshield_rain_baked("):]
+    body = body[:body.index("\ndef ")]
+    assert '"Drop2": (drop2_4, "")' in body and "PPI_SCENE_DEPTH" in body
+    assert "WINDSHIELD_BAKED_DRY_NEAR_CM" in body and "WINDSHIELD_BAKED_SCALE2" in body
+    assert _assigned("WINDSHIELD_BAKED_TURN2_DEG") == 30.0
+    shader = _strip_comments((SHADERS / "windshield_baked.hlsl").read_text(encoding="utf-8"))
+    c, s = math.cos(math.radians(30.0)), math.sin(math.radians(30.0))
+    assert f"float2({c:.6f} * t2.x + {s:.1f} * t2.y, -{s:.1f} * t2.x + {c:.6f} * t2.y)" in shader
+    assert "Wet.x * 0.5" in shader

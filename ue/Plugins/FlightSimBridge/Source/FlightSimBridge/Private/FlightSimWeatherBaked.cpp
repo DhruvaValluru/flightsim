@@ -9,7 +9,9 @@
 //    instead of M_WindshieldRain's hashed loop. Swarm lane
 //    weather_fx.windscreen_water.storm, tier 0; textures assets/looks/windscreen_water/.
 //
-// Both default OFF, read only on a beauty run (the command line or
+// -rain-layers defaults OFF; -windscreen-baked defaults ON since r87 (2026-11-14: the
+// first M_WindshieldRain beauty frame drew flat grey ovals cut at their cells, the baked
+// glass real drops; -windscreen-baked=off brings M_WindshieldRain back). Read only on a beauty run (the command line or
 // FLIGHTSIM_RENDER_SWITCHES, FlightSimRenderCommandlet.cpp). Both are post-process
 // blendables on the BEAUTY capture only: no label capture receives a look blendable
 // (ConfigureLabelCapture copies nothing from the beauty; tests/test_beauty_label_isolation.py),
@@ -92,9 +94,10 @@ namespace
 	}
 }
 
-bool FFlightSimWeather::ParseBakedSwitch(const FString& Switches, const TCHAR* Key, bool& bOut, FString& Error)
+bool FFlightSimWeather::ParseBakedSwitch(const FString& Switches, const TCHAR* Key, bool& bOut, FString& Error,
+                                         const TCHAR* Default)
 {
-	FString Value = TEXT("off");
+	FString Value = Default;
 	FParse::Value(*Switches, Key, Value);
 	if (Value != TEXT("on") && Value != TEXT("off"))
 	{

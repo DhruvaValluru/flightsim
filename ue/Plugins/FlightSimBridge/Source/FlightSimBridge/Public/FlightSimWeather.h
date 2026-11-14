@@ -251,7 +251,8 @@ public:
 	// -- maxpick/rain (2026-11-13): the baked tier 0, BEAUTY ONLY (FlightSimWeatherBaked.cpp)
 	// "-<Key>on|off" (Key such as TEXT("rain-layers=")) read from Switches (the command
 	// line plus FLIGHTSIM_RENDER_SWITCHES); absent = off; any other word refused by name.
-	static bool ParseBakedSwitch(const FString& Switches, const TCHAR* Key, bool& bOut, FString& Error);
+	static bool ParseBakedSwitch(const FString& Switches, const TCHAR* Key, bool& bOut, FString& Error,
+	                             const TCHAR* Default = TEXT("off"));
 	// -rain-layers=on: M_RainLayers as a post-process blendable on the beauty capture
 	// (the label captures never see a look blendable). A no-op (true) unless the rain
 	// is drawn and the switch is on; refused weather.rain_layers when the material is

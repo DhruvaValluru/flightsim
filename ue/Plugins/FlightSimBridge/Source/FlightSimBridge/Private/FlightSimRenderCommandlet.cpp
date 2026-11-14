@@ -3030,7 +3030,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			// maxpick/rain (2026-11-13): -rain-layers=on|off and -windscreen-baked=on|off, the
 			// baked tier 0 of the rain and of a cockpit's glass (FlightSimWeatherBaked.cpp).
-			// Beauty only, off by default; the command line or FLIGHTSIM_RENDER_SWITCHES like
+			// Beauty only; rain-layers off and windscreen-baked on (r87) by default; the command line or FLIGHTSIM_RENDER_SWITCHES like
 			// -deck-shadow=; another word refuses by name.
 			if (bBeauty)
 			{
@@ -3039,7 +3039,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				if (!FFlightSimWeather::ParseBakedSwitch(BakedSwitches, TEXT("rain-layers="),
 				                                         WeatherOptions.bRainLayers, Error) ||
 				    !FFlightSimWeather::ParseBakedSwitch(BakedSwitches, TEXT("windscreen-baked="),
-				                                         WeatherOptions.bWindscreenBaked, Error))
+				                                         WeatherOptions.bWindscreenBaked, Error,
+				                                         TEXT("on")))   // r87: on unless =off
 				{
 					return Fail(Error);
 				}
