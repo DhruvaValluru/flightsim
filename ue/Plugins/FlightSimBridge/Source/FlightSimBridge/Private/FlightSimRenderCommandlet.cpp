@@ -5898,6 +5898,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// here, not assumed: look_applied.sky_light_capture_result.
 		const bool bShadersCompilingAtSkyCapture =
 			GShaderCompilingManager != nullptr && GShaderCompilingManager->IsCompiling();
+		// r87 (2026-11-14): a cockpit storm at beauty stalled "after the sky light
+		// capture" with no finer name. Each blocking call below beats BEFORE it
+		// runs, so a stall names the call it is in (the watchdog reports the
+		// last beat), and logs a line so the log shows how far it got.
+		BeatWatchdog(TEXT("the sky light capture (UpdateSkyCaptureContents running)"));
 		VisualScene.SkyLightComponent->SetCaptureIsDirty();
 		USkyLightComponent::UpdateSkyCaptureContents(World);
 		FlushRenderingCommands();
@@ -5927,6 +5932,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				TEXT("atmosphere's in-scatter alone (round 5, docs/visual/PROBE_LOG.md)"));
 			VisualScene.LookApplied->SetObjectField(TEXT("sky_light_capture_result"), CaptureResult);
 		}
+		BeatWatchdog(TEXT("restoring the scene after the sky light capture"));
+		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: restoring the scene (%d components to show)"),
+		       SkyHidden.Num());
 		if (bSkyCaptureRestore)
 		{
 			FFlightSimBeautyFallback::ResumeAfterSkyCapture(VisualScene);
@@ -5951,8 +5959,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		for (int32 i = 0; i < 2; ++i)
 		{
+			const FString PostSkyStage = FString::Printf(TEXT("post-sky capture %d/2"), i + 1);
+			BeatWatchdog(*FString::Printf(TEXT("%s (end-of-frame updates and flush)"), *PostSkyStage));
 			World->SendAllEndOfFrameUpdates();
 			FlushRenderingCommands();
+			BeatWatchdog(*FString::Printf(TEXT("%s (CaptureScene and flush)"), *PostSkyStage));
+			UE_LOG(LogFlightSimRender, Display, TEXT("%s: capturing"), *PostSkyStage);
 			Capture->CaptureScene();
 			FlushRenderingCommands();
 			BeatWatchdog(TEXT("a capture after the sky light capture"));
