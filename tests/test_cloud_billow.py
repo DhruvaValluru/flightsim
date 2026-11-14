@@ -158,3 +158,17 @@ def test_the_dome_shrinks_the_footprint_with_height():
     def drawn(h, hd):
         return sum(wb.cloud_density(p, h, 0.5, row, height_density=hd) > 0.0 for p in pts)
     assert drawn(0.3, amount) < drawn(0.3, 0.0)
+
+
+def test_a_default_cumulus_layer_above_cruise_is_drawn_below():
+    text = _read(CPP)
+    assert f"constexpr double CumulusMaxBaseM = {wb.CUMULUS_MAX_BASE_M};" in text
+    assert "return bCumulus && !bStated && BaseM > CumulusMaxBaseM;" in text
+    assert "CumulusLayerLowered(State.Shape == CloudCumulus, bStatedLayer, State.BaseM)" in text
+    assert 'TEXT("lowered_below_cruise")' in text
+    # #13: the plan's 11 km layer over a 10 km cruise.
+    assert wb.cumulus_layer_lowered(True, False, 11000.0)
+    assert not wb.cumulus_layer_lowered(True, True, 11000.0)      # a card's heights stand
+    assert not wb.cumulus_layer_lowered(False, False, 11000.0)    # other shapes
+    assert not wb.cumulus_layer_lowered(True, False, 2000.0)      # the plan's usual 2 km
+    assert wb.FAIR_LAYER["top_m"] < 10000.0 - 1000.0

@@ -516,6 +516,18 @@ CLOUDS: Dict[str, Dict[str, float]] = {
 #: cloud (a stated stylisation, recorded; never the default). UNCALIBRATED.
 FAIR_LAYER = {"cover": 0.35, "base_m": 1500.0, "top_m": 2700.0}
 
+#: Round 95 (r93/r94 #13 at 10 km): the sky plan's default layer sits >= 1 km
+#: above the flight, so a cruise drew cumulus at 11-14 km and the sky light's
+#: cloud AO under it darkened the whole sea. A DEFAULT cumulus layer whose base
+#: is above this is drawn as FAIR_LAYER's slab (below the flight); stated
+#: heights are kept. BEAUTY ONLY. Twin of FlightSimClouds.cpp
+#: CumulusLayerLowered. UNCALIBRATED.
+CUMULUS_MAX_BASE_M = 4000.0
+
+
+def cumulus_layer_lowered(cumulus: bool, stated: bool, base_m: float) -> bool:
+    return bool(cumulus) and not stated and float(base_m) > CUMULUS_MAX_BASE_M
+
 #: Round 3 (2026-11-10): the cover a RAIN world's layer gets when the card states
 #: none. The rain preset draws nimbostratus, whose default cover (0.98) is a solid
 #: sheet: round 1's #06 (A320 over SFO at 3000 m, moderate rain, no cloud on the

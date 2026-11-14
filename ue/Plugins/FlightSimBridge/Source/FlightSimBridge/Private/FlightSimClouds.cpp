@@ -177,6 +177,19 @@ namespace FlightSimWorldPure
 	constexpr double FairCover = 0.35;
 	constexpr double FairBaseM = 1500.0;
 	constexpr double FairTopM = 2700.0;
+	// Round 95 (r93/r94 #13, a 747 at 10 km over the ocean at noon): the sky plan puts
+	// its default layer >= 1 km above the flight (core/sky/plan.py, so the camera stays
+	// clear), which drew cumulus at 11-14 km, above the airliner; the sky light's cloud
+	// AO under that slab darkened the whole sea (raw blue 131 -> 95 once the tiers
+	// thickened it). Cumulus do not form there: a DEFAULT (unstated) cumulus layer
+	// whose base is above CumulusMaxBaseM is drawn as the fair-weather slab instead,
+	// below the flight. A card's or the fair layer's stated heights are kept. BEAUTY
+	// ONLY. world_beauty.cumulus_layer_lowered is the twin. UNCALIBRATED.
+	constexpr double CumulusMaxBaseM = 4000.0;
+	inline bool CumulusLayerLowered(bool bCumulus, bool bStated, double BaseM)
+	{
+		return bCumulus && !bStated && BaseM > CumulusMaxBaseM;
+	}
 	// Round 3: a rain world's layer when the card states no cover (broken, not
 	// nimbostratus's 0.98 sheet: round 1's #06 showed no ground).
 	constexpr double RainDefaultCover = 0.72;
@@ -2069,6 +2082,16 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		{
 			Cloud->SetLayerHeight(static_cast<float>((State.TopM - State.BaseM) / 1000.0));
 		}
+		// Round 95: a default cumulus layer the sky plan lifted above where cumulus form.
+		const double PlanBaseM = State.BaseM;
+		const bool bLowered = CumulusLayerLowered(State.Shape == CloudCumulus, bStatedLayer, State.BaseM);
+		if (bLowered)
+		{
+			State.BaseM = FairBaseM;
+			State.TopM = FairTopM;
+			Cloud->SetLayerBottomAltitude(static_cast<float>(FairBaseM / 1000.0));
+			Cloud->SetLayerHeight(static_cast<float>((FairTopM - FairBaseM) / 1000.0));
+		}
 		const float ShadowTracingKm =
 			static_cast<float>(CloudShadowTracingKmFor(bIntegratedGpu, State.TopM - State.BaseM));
 		// Round 82: the cumulus row under -look-cloud-billow (CloudBillowRow).
@@ -2129,6 +2152,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Layer->SetNumberField(TEXT("base_m"), State.BaseM);
 		Layer->SetNumberField(TEXT("top_m"), State.TopM);
 		Layer->SetNumberField(TEXT("built_top_m"), BuiltTopM);
+		Layer->SetBoolField(TEXT("lowered_below_cruise"), bLowered);
+		Layer->SetNumberField(TEXT("plan_base_m"), PlanBaseM);
 		Layer->SetStringField(TEXT("top_basis"), State.TopM != BuiltTopM
 			? TEXT("the default layer thinned to the shape's depth (world_beauty.CLOUD_MAX_THICKNESS_M)")
 			: (bStatedLayer ? TEXT("the stated layer, as built") : TEXT("as built (within the shape's depth)")));
