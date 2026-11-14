@@ -618,15 +618,28 @@ fringes (#04/#06/#08) all came from the halation step. ffmpeg n8.1.3's `blend=al
 gbrp16le is not the identity over an all-black layer (51/67/90 went to 74/90/110); halation off or
 an 8-bit blend gives the raw frame's 0.00 %. Fixed in `5a4d0173` (beauty_post v2: `format=gbrp`
 before the split). The same commit fades #13's contrails in with camera distance
-(`CameraDepthFade` 30 m + 120 m; LOOK_GENERATION 12). Round 93 measures both.
+(camera fade 30 m + 120 m; LOOK_GENERATION 12). Round 93 measures both.
+Round 93/193 (vis-windows `f709fa45`/`c33c1328`, on `6fe12218`, after a reboot cleared a stuck
+editor; the camera fade is PixelDepth math because UE 5.7 Python has no CameraDepthFade class):
+prep built with 0 MATERIAL-FAILED. #13's contrails now fade in and are softer, though still
+straight; they stay as they are. #15 with `-rain-veil=off` changes every pixel: the grey murk and the
+"patches" are the rain veil in front of the far fog band, and veil-off's bright blue sea under a
+storm deck is the less real frame, so the veil stays on and the patches item is closed.
+**#13 reads as night at noon.** The raw sea (lower 55 %, mean RGB) was [20,66,131] through r60
+(`fa56ba4d` with `-look-cloud-tiers=off`), [15,47,111] in r58 (tiers on) and [12,34,95] from r61
+(`1ef9bcae`) on. The v1 halation bug's lift hid this; with v2 the Ektachrome cube, which darkens
+saturated blue (as slide film does; its grey axis is neutral, so a luma tie changes nothing),
+takes the post to [11,19,60]. Round 94/194 A/B (`-look-cloud-tiers=off`, `-sky-capture-clouds=0`)
+isolates the raw drop. Note that from 10 km the near cumulus are not drawn over the sea, only at
+the horizon.
 Next in this lane: M_StormCell's weather map and noise (the storm tiers).
 
 **Open (not fixed):**
 - `store_sta2`'s component box on #01/#02, 3.4 px off its hull (manifest, CG and pose ruled out).
 - #08's mask 14.6 % off its geometry; #10 and #13 tight boxes.
 - #12's two geometry clauses need an interior-camera form.
-- #07 shows rain streaks rather than bands; #13's contrails read harsh; faint steps on #13's cloud bases.
-- #11's horizon streaks; #13's flat-bottomed steps at the horizon; #15's dark patches (source unknown, not the scud tone).
+- #07 shows rain streaks rather than bands; faint steps on #13's cloud bases.
+- #11's horizon streaks; #13's flat-bottomed steps at the horizon; #13's dark sea (rounds 94/194).
 - #12's see-through instrument faces: p3-mac's `955a4694`, rendering in p3-mac's round 84.
 - #06's ocean shade reads blue (+49), probably the water itself.
 - Every tiles amount stays UNCALIBRATED (`SUN_LOW_DEG`, `SUN_HIGH_DEG`, `SUN_LOW_SCALE`,
