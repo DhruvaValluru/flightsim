@@ -1,0 +1,55 @@
+{
+    "round":  194,
+    "commit":  "b2a09c40",
+    "full":  false,
+    "scenes":  [
+                   13
+               ],
+    "switches":  "-sky-capture-clouds=0",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  72.1
+                },
+    "outcomes":  [
+                     {
+                         "number":  13,
+                         "outcome":  "done",
+                         "seconds":  70.9,
+                         "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  null,
+                          "compare_with_found":  false,
+                          "scenes":  {
+                                         "13":  {
+                                                    "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.03877,
+                                                                   "std_luma":  0.06907,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  3E-05
+                                                               },
+                                                    "flags":  [
+
+                                                              ]
+                                                }
+                                     }
+                      }
+}
