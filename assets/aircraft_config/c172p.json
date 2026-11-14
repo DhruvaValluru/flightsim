@@ -27,6 +27,167 @@
         "glass_panel"
       ],
       "source": "round 25 scene 12 (2026-11-11, C172 cockpit over the Grand Canyon): the cockpit view drew the cowl, the glareshield and the canopy frame but no instrument panel, because the config converted only c172-common.ac (the exterior). c172p.xml (pinned commit a15d83d1) <model> c172p (Interior/Panel/c172p-panel/c172p.xml, no <offsets>, drawn unless /params/glass) loads c172p-interior.ac at the model origin with <texture-path>../../../../Models</texture-path>: the panel board and gauge faces (panel_1_gauges 1624 faces, panel_1_1_right, panel_1_1.inf, InstrumentCover, all panel.png), pedestal, seats, door cards, firewall, carpet and the controls (111 objects, 26683 triangles; measured here from the pinned file: every vertex inside c172-common.ac's extents, the gauge faces at model x -0.375..-0.359 m, 0.72 m ahead of views.pilot_eye, 95 % of their faces facing that eye). glass_panel (25 faces, trans 0.85, untextured) is left out: the beauty path draws glass with the opaque M_AircraftGlass, which would cover every gauge. The gauge needles (Instruments/*/*.xml, each its own .ac with animations) are not converted. beauty_only: in body_beauty only, so body.obj and every measure frame are unchanged"
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/asi/asi.ac",
+      "interior": true,
+      "beauty_only": true,
+      "source": "round 92 scene 12 (r82, 2026-11-13): the cockpit view showed terrain through every gauge hole, because c172p-interior.ac carries only the panel board and bezels (panel_1_gauges); the dial faces, needles and radio faces are separate models that c172p-panel/c172p.xml (pinned a15d83d1, lines 742-900) loads with no <offsets>, each .ac already in the panel's model frame (asi.ac x -0.402..-0.370 m, matching the asi light offset x -0.364). Converted static (needles at their modelled rest pose; the .xml animations are not converted). Left out: the transparent objects (instrument glass would draw opaque and cover the dial; kma20/kap140/magneto click boxes); gear-ctl (retractable variant only) and the *-fg1000 variants. Textures read beside each .ac; no basename collides."
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/AI/AI.ac",
+      "interior": true,
+      "beauty_only": true,
+      "exclude": [
+        "RollRefGlass"
+      ]
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/alt/alt.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/BatteryGauge/BatteryGauge.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/kap140/kap140.ac",
+      "interior": true,
+      "beauty_only": true,
+      "exclude": [
+        "base-sensor"
+      ]
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/dme/ki266.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/tc/tc.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/VSI/VSI.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/RPM/RPM.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/EGT/EGT.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/hi/hi.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/vor/vor1.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/vor/vor2.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/kr87-adf/ki227_228.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/kx165/kx165-1.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/kx165/kx165-2.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/kma20/kma20.ac",
+      "interior": true,
+      "beauty_only": true,
+      "exclude": [
+        "(ADF|AUTO|COM1|COM2|DME|MKR|NAV1|NAV2|SENS)(Up|Down)",
+        "MIC(Left|Right)"
+      ]
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/kr87-adf/kr87.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/kt76a/kt76a.ac",
+      "interior": true,
+      "beauty_only": true,
+      "exclude": [
+        "glass_panel"
+      ]
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/clock/clock.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/digital-clock/digital-clock.ac",
+      "interior": true,
+      "beauty_only": true,
+      "exclude": [
+        "glass_panel"
+      ]
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/vac/vac.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/FuelOilAmps/c172fuel.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/FuelOilAmps/c172oil.ac",
+      "interior": true,
+      "beauty_only": true
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/magneto-switch/magneto-switch.ac",
+      "interior": true,
+      "beauty_only": true,
+      "exclude": [
+        "click-S"
+      ]
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/hobbs/hobbs.ac",
+      "interior": true,
+      "beauty_only": true,
+      "exclude": [
+        "glass_panel"
+      ]
+    },
+    {
+      "file": "Models/Interior/Panel/Instruments/mag-compass/mag-compass.ac",
+      "interior": true,
+      "beauty_only": true,
+      "exclude": [
+        "Glass"
+      ]
     }
   ],
   "exclude": [
