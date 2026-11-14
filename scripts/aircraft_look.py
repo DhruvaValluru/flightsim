@@ -861,8 +861,8 @@ CONTRAIL_DEFAULTS = {
     # cruise). About one wingspan of a 747 at 250 m/s. UNCALIBRATED.
     "FormationRampS": 0.25,
     # Round 93 (r92's #13: four hard straight rulers from the engines to the frame
-    # edge): a trail fades in with distance from the CAMERA (a CameraDepthFade on
-    # the opacity), invisible nearer than CameraFadeOffsetM and full beyond
+    # edge): a trail fades in with distance from the CAMERA (saturate((depth - offset) /
+    # length) on the opacity), invisible nearer than CameraFadeOffsetM and full beyond
     # + CameraFadeLengthM, so the stretch passing beside a chase camera no longer
     # runs to the frame edge at full strength. M_AircraftContrail's
     # CameraFadeOffset / CameraFadeLength defaults (cm). UNCALIBRATED.

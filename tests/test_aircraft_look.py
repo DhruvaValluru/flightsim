@@ -798,7 +798,8 @@ def test_the_contrail_fades_in_with_the_camera_distance():
     masters = (REPO / "scripts" / "ue_aircraft_master_materials.py").read_text(encoding="utf-8")
     start = masters.index("def create_aircraft_contrail")
     body = masters[start:masters.index("def ", start + 10)]
-    assert "MaterialExpressionCameraDepthFade" in body
+    assert "MaterialExpressionCameraDepthFade" not in body   # absent from UE 5.7's Python (round 93)
+    assert "MaterialExpressionPixelDepth" in body and "_saturate(material, ramp" in body
     assert 'connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)' in body
     assert look.CONTRAIL_DEFAULTS["CameraFadeOffsetM"] == 30.0
     assert look.CONTRAIL_DEFAULTS["CameraFadeLengthM"] == 120.0

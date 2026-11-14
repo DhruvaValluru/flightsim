@@ -98,7 +98,7 @@ REPO = os.path.dirname(_HERE)
 #: textures under MASTER_ROOT/Glass (scripts/aircraft_glass_reflect.py; drawn
 #: only under -canopy-reflect=on). Every other graph is unchanged.
 #: 12 (round 93): M_AircraftContrail's opacity fades in with the camera's
-#: distance (CameraDepthFade; #13's four rulers). Every other graph is unchanged.
+#: distance (saturate((PixelDepth - offset) / length); #13's four rulers). Every other graph is unchanged.
 LOOK_GENERATION = "12"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
@@ -767,12 +767,16 @@ def create_aircraft_contrail():
     lib.connect_material_property(_const(material, 0.9, -400, 0), "", unreal.MaterialProperty.MP_ROUGHNESS)
     # LOOK_GENERATION 12 (round 93, #13's rulers): the opacity fades in with the
     # camera's distance (aircraft_look CONTRAIL_DEFAULTS CameraFade*).
-    fade = _node(material, unreal.MaterialExpressionCameraDepthFade, -150, 100)
-    _link(opacity, "", fade, ("InOpacity", "Opacity"))
-    _link(_scalar(material, "CameraFadeLength", 100.0 * look.CONTRAIL_DEFAULTS["CameraFadeLengthM"], -400, 250),
-          "", fade, ("FadeLength", "Fade Length"))
-    _link(_scalar(material, "CameraFadeOffset", 100.0 * look.CONTRAIL_DEFAULTS["CameraFadeOffsetM"], -400, 350),
-          "", fade, ("FadeOffset", "Fade Offset"))
+    # saturate((PixelDepth - offset) / length) x opacity (UE 5.7's Python has no
+    # camera-depth-fade expression class: round 93's prep failed on it).
+    depth = _node(material, unreal.MaterialExpressionPixelDepth, -700, 500)
+    near = _binary(material, unreal.MaterialExpressionSubtract, depth,
+                   _scalar(material, "CameraFadeOffset", 100.0 * look.CONTRAIL_DEFAULTS["CameraFadeOffsetM"], -700, 600),
+                   -550, 500)
+    ramp = _binary(material, unreal.MaterialExpressionDivide, near,
+                   _scalar(material, "CameraFadeLength", 100.0 * look.CONTRAIL_DEFAULTS["CameraFadeLengthM"], -700, 700),
+                   -400, 500)
+    fade = _mul(material, opacity, _saturate(material, ramp, -250, 500), -150, 100)
     lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
     _finish(material, "M_AircraftContrail")
 
