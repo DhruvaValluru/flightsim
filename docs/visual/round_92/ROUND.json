@@ -1,0 +1,118 @@
+{
+    "round":  92,
+    "commit":  "76f924bd",
+    "full":  false,
+    "scenes":  [
+                   3,
+                   11,
+                   13,
+                   15
+               ],
+    "switches":  "",
+    "prep":  [
+                 "build",
+                 "materials"
+             ],
+    "seconds":  {
+                    "build":  19.2,
+                    "materials":  8.1,
+                    "scenes":  631.3
+                },
+    "outcomes":  [
+                     {
+                         "number":  3,
+                         "outcome":  "done",
+                         "seconds":  376.4,
+                         "spec_sha256":  "b4869e1ee290161061731531d167eaca7708f9565dee91ad052197cc520167b2",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  11,
+                         "outcome":  "done",
+                         "seconds":  80.9,
+                         "spec_sha256":  "41e2a71be3880757ab89daf67b276008aca3bc485a8fb6087e9e91462a4e1671",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  13,
+                         "outcome":  "done",
+                         "seconds":  70.9,
+                         "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  15,
+                         "outcome":  "done",
+                         "seconds":  100.8,
+                         "spec_sha256":  "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  null,
+                          "compare_with_found":  false,
+                          "scenes":  {
+                                         "3":  {
+                                                   "frame":  "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.1063,
+                                                                  "std_luma":  0.12954,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.00096
+                                                              },
+                                                   "flags":  [
+
+                                                             ]
+                                               },
+                                         "11":  {
+                                                    "frame":  "11_a_4_over_the_matterhorn_strong_wind_severe_turbu.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.23037,
+                                                                   "std_luma":  0.19843,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  4E-05
+                                                               },
+                                                    "flags":  [
+
+                                                              ]
+                                                },
+                                         "13":  {
+                                                    "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.04212,
+                                                                   "std_luma":  0.07545,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  2E-05
+                                                               },
+                                                    "flags":  [
+
+                                                              ]
+                                                },
+                                         "15":  {
+                                                    "frame":  "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.03612,
+                                                                   "std_luma":  0.04139,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  0.00022
+                                                               },
+                                                    "flags":  [
+
+                                                              ]
+                                                }
+                                     }
+                      }
+}
