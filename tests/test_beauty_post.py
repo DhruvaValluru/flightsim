@@ -156,9 +156,9 @@ def test_the_filter_graph_has_every_step_in_order():
     graph = bp.filter_graph(cube=Path("C:/tools/x.cube"), halation=True, grain=True,
                             vignette=True, seed=1234)
     assert graph.startswith("[0:v]format=gbrp16le,lut3d=file='C\\:/tools/x.cube':interp=tetrahedral,")
-    order = [graph.index(w) for w in ("lut3d", "split[a][b]", "colorlevels", "gblur=sigma=14",
+    order = [graph.index(w) for w in ("lut3d", "format=gbrp,split[a][b]", "colorlevels", "gblur=sigma=14",
                                       "colorchannelmixer=rr=1:gg=0.35:bb=0.12", "blend=all_mode=screen",
-                                      "format=gbrp,", "noise=all_seed=1234:all_strength=6:all_flags=t+u",
+                                      "noise=all_seed=1234:all_strength=6:all_flags=t+u",
                                       "vignette=angle=PI/8", "format=rgb24[out]")]
     assert order == sorted(order)
     assert graph.endswith("[out]")
@@ -170,6 +170,15 @@ def test_the_filter_graph_leaves_out_what_is_off():
     graph = bp.filter_graph(cube=Path("a.cube"), halation=False, grain=True, vignette=False, seed=7)
     assert "lut3d" in graph and "noise=all_seed=7" in graph
     assert "blend" not in graph and "vignette" not in graph
+    assert "format=gbrp,noise" in graph
+
+
+def test_the_halation_blends_in_8_bit():
+    """ffmpeg n8.1.3's screen blend on gbrp16le drew contours and rings (r82, r83)."""
+    graph = bp.filter_graph(cube=Path("a.cube"), halation=True, grain=False, vignette=True, seed=1)
+    assert "format=gbrp,split[a][b]" in graph
+    assert "gbrp16le" not in graph[graph.index("split"):]
+    assert graph.count("format=gbrp,") == 1
 
 
 def test_the_tool_argument_lists():

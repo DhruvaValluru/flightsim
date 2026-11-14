@@ -114,7 +114,7 @@ def test_the_reflect_masters_are_the_opaque_glass_graph_plus_emissive():
     for name in reflect.MASTERS.values():
         assert f'"{name}"' in created
     assert look.CANOPY_REFLECT_MASTERS == reflect.MASTERS
-    assert re.search(r'^LOOK_GENERATION = "11"$', MASTERS, re.M)
+    assert re.search(r'^LOOK_GENERATION = "12"$', MASTERS, re.M)
 
 
 def test_the_graft_changes_only_emissive_and_roughness():

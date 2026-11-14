@@ -97,7 +97,9 @@ REPO = os.path.dirname(_HERE)
 #: M_AircraftGlassReflectFine (tier 1) beside M_AircraftGlass, and their lane
 #: textures under MASTER_ROOT/Glass (scripts/aircraft_glass_reflect.py; drawn
 #: only under -canopy-reflect=on). Every other graph is unchanged.
-LOOK_GENERATION = "11"
+#: 12 (round 93): M_AircraftContrail's opacity fades in with the camera's
+#: distance (CameraDepthFade; #13's four rulers). Every other graph is unchanged.
+LOOK_GENERATION = "12"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.
@@ -763,7 +765,15 @@ def create_aircraft_contrail():
     lib.connect_material_property(_const3(material, (0.92, 0.94, 0.97), -400, -100), "",
                                   unreal.MaterialProperty.MP_BASE_COLOR)
     lib.connect_material_property(_const(material, 0.9, -400, 0), "", unreal.MaterialProperty.MP_ROUGHNESS)
-    lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
+    # LOOK_GENERATION 12 (round 93, #13's rulers): the opacity fades in with the
+    # camera's distance (aircraft_look CONTRAIL_DEFAULTS CameraFade*).
+    fade = _node(material, unreal.MaterialExpressionCameraDepthFade, -150, 100)
+    _link(opacity, "", fade, ("InOpacity", "Opacity"))
+    _link(_scalar(material, "CameraFadeLength", 100.0 * look.CONTRAIL_DEFAULTS["CameraFadeLengthM"], -400, 250),
+          "", fade, ("FadeLength", "Fade Length"))
+    _link(_scalar(material, "CameraFadeOffset", 100.0 * look.CONTRAIL_DEFAULTS["CameraFadeOffsetM"], -400, 350),
+          "", fade, ("FadeOffset", "Fade Offset"))
+    lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
     _finish(material, "M_AircraftContrail")
 
 

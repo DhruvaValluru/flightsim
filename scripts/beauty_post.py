@@ -72,7 +72,11 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
 
-BEAUTY_POST_VERSION = 1
+BEAUTY_POST_VERSION = 2
+#: 2 (2026-11-13): the halation blends in 8-bit gbrp. ffmpeg n8.1.3's blend
+#: all_mode=screen on gbrp16le is not the identity over a black layer (it drew
+#: r82's yellow-green cloud contours and r83's purple/green sky rings; Windows
+#: isolated it, halation off and an 8-bit blend both clean).
 #: The environment switch (core/config_surface.py): ``on`` runs every step
 #: but the opt-in ones, ``on,-halation`` (or ``no-halation``) leaves steps
 #: out, ``on,+upscale`` adds an opt-in step, ``off`` or unset runs nothing.
@@ -382,9 +386,10 @@ def filter_graph(*, cube: Optional[Path], halation: bool, grain: bool, vignette:
         chain.append(f"lut3d=file='{_filter_path(cube)}':interp={params['lut']['interp']}")
     graph = ",".join(chain)
     if halation:
-        graph += "," + halation_graph(params["halation"])
+        # 8-bit before the split: the 16-bit screen blend is broken (BEAUTY_POST_VERSION 2).
+        graph += ",format=gbrp," + halation_graph(params["halation"])
     tail = []
-    if grain or vignette:
+    if (grain or vignette) and not halation:
         tail.append("format=gbrp")
     if grain:
         g = params["grain"]

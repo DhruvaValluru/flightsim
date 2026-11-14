@@ -775,7 +775,7 @@ def test_round47_the_contrail_forms_over_seconds_not_a_share_of_its_lifetime():
     assert look.SHADER_INPUTS["contrail_opacity"][-1] == "FormationRamp"
     assert look.FX_PARAMETERS["M_AircraftContrail"] == ("Opacity", "Formation", "FormationRamp")
     masters = MASTERS.read_text(encoding="utf-8")
-    assert re.search(r'^LOOK_GENERATION = "11"$', masters, re.M)
+    assert re.search(r'^LOOK_GENERATION = "12"$', masters, re.M)
     assert '"FormationRamp": (_scalar(material, ramp_name, 0.04,' in masters
     # 747 cruise: the ramp is under a wingspan of flight, not generation 6's 250 m
     ramp_s = look.CONTRAIL_DEFAULTS["FormationRampS"]
@@ -791,3 +791,14 @@ def test_round47_the_contrail_forms_over_seconds_not_a_share_of_its_lifetime():
     assert look.parse_fx_switches("-contrail-formation-ramp=off")["contrail-formation-ramp"] is False
     assert look.parse_fx_switches("-contrails=off")["contrail-formation-ramp"] is True
     assert "bContrailFormationRamp = bAll && bFormationRampSwitch;" in text
+
+
+def test_the_contrail_fades_in_with_the_camera_distance():
+    """Round 93: r92's #13 drew four hard rulers from the engines to the frame edge."""
+    masters = (REPO / "scripts" / "ue_aircraft_master_materials.py").read_text(encoding="utf-8")
+    start = masters.index("def create_aircraft_contrail")
+    body = masters[start:masters.index("def ", start + 10)]
+    assert "MaterialExpressionCameraDepthFade" in body
+    assert 'connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)' in body
+    assert look.CONTRAIL_DEFAULTS["CameraFadeOffsetM"] == 30.0
+    assert look.CONTRAIL_DEFAULTS["CameraFadeLengthM"] == 120.0

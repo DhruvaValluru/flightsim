@@ -860,6 +860,13 @@ CONTRAIL_DEFAULTS = {
     # after FormationDelayS (the material ramp was 0.04 of LifetimeS: 1 s, 250 m at
     # cruise). About one wingspan of a 747 at 250 m/s. UNCALIBRATED.
     "FormationRampS": 0.25,
+    # Round 93 (r92's #13: four hard straight rulers from the engines to the frame
+    # edge): a trail fades in with distance from the CAMERA (a CameraDepthFade on
+    # the opacity), invisible nearer than CameraFadeOffsetM and full beyond
+    # + CameraFadeLengthM, so the stretch passing beside a chase camera no longer
+    # runs to the frame edge at full strength. M_AircraftContrail's
+    # CameraFadeOffset / CameraFadeLength defaults (cm). UNCALIBRATED.
+    "CameraFadeOffsetM": 30.0, "CameraFadeLengthM": 120.0,
 }
 #: Wingtip vapour: short trails from the wingtip anchors above a load factor.
 VAPOUR_DEFAULTS = {"MinNz": 4.0, "LifetimeS": 0.8, "StartWidthM": 0.25,
