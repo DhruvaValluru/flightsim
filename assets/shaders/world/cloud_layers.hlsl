@@ -122,6 +122,11 @@ const float BULGE_TURN = 3.0;
 // the layer from (1 - HeightDensity) to 1 (world_beauty.CLOUD_HEIGHT_DENSITY_RISE).
 // UNCALIBRATED.
 const float HEIGHT_DENSITY_RISE = 0.7;
+// Round 92 (r82's #11/#13 slabs with vertical walls): with HeightDensity > 0 the cut
+// also rises towards the top cut over the whole layer, HeightDensity x DOME_TAPER x
+// h^DOME_POWER of the way, so the sides slope in (world_beauty.CLOUD_DOME_*). UNCALIBRATED.
+const float DOME_TAPER = 1.0;
+const float DOME_POWER = 1.5;
 const float WISP_HEIGHT = 0.25;
 struct FWorldCloud
 {
@@ -333,6 +338,8 @@ float cover = saturate(Coverage);
 float soft = FBM_SIGMA / max(CoverageContrast, 1e-3) * (1.0 + FAR_SOFTEN * far);
 float thr = FBM_MEAN + FBM_SIGMA * C.Probit(1.0 - cover) - EROSION_CUT_SHARE * DetailErosion * soft;
 float cut = lerp(FBM_MEAN + TOP_CUT_SIGMAS * FBM_SIGMA, thr, top);
+// Round 92: heaps, not extrusions (0 with HeightDensity 0: round 81).
+cut = lerp(cut, FBM_MEAN + TOP_CUT_SIGMAS * FBM_SIGMA, saturate(HeightDensity) * DOME_TAPER * pow(h, DOME_POWER));
 // Round 52: a shadow sample's edge widens by its footprint (after the cut, so
 // the cut and the drawn cover stay the stated ones); + 0 for a view sample.
 soft += SHADOW_SOFTEN * footKm / max(ShapeScaleKm, 1e-3);

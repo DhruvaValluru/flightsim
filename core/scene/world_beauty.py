@@ -663,6 +663,14 @@ CLOUD_BILLOW_EROSION = 0.5
 CLOUD_BILLOW_HEIGHT_DENSITY = 0.6
 CLOUD_BILLOW_BOTTOM_OCCLUSION = 0.8
 CLOUD_HEIGHT_DENSITY_RISE = 0.7
+#: Round 92 (r82's #11/#13: the cumulus still stood as slabs with vertical walls;
+#: the weather field is a plane pattern, so a cell's outline is the same at every
+#: height): with the billow on the cut also rises towards the top cut over the
+#: WHOLE layer, by HeightDensity x CLOUD_DOME_TAPER x h^CLOUD_DOME_POWER of the
+#: way, so the sides slope in and a cell is a heap, not an extrusion (0 with
+#: HeightDensity 0: round 81). cloud_layers.hlsl DOME_TAPER / DOME_POWER. UNCALIBRATED.
+CLOUD_DOME_TAPER = 1.0
+CLOUD_DOME_POWER = 1.5
 #: Round 82, the distant sheet (r69's #11/#12/#13 banded horizon): seen at less than
 #: DISTANT_GRAZE_HI of vertical the sheet's derivative relief fades out and its edge
 #: widens up to (1 + DISTANT_GRAZE_SOFTEN) x, fully below DISTANT_GRAZE_LO
@@ -1175,6 +1183,13 @@ def cloud_side_bulge(side_bulge: float, norm_alt: float) -> float:
     return side_bulge * math.sin(CLOUD_BULGE_TURN * (norm_alt - 0.5))
 
 
+def cloud_dome_taper(height_density: float, h: float) -> float:
+    """Round 92: the share of the way the cut rises to the top cut at height h
+    (0 with height_density 0, i.e. the billow off)."""
+    amount = min(max(height_density, 0.0), 1.0) * CLOUD_DOME_TAPER
+    return amount * min(max(h, 0.0), 1.0) ** CLOUD_DOME_POWER
+
+
 def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float, row: Dict[str, float],
                   distance_km: float = 0.0, footprint_km: float = 0.0,
                   dither: Tuple[float, float, float] = (0.0, 0.0, 0.0), thickness_km: float = 1.0,
@@ -1201,6 +1216,8 @@ def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float,
     soft = CLOUD_FBM_SIGMA / max(row["coverage_contrast"], 1e-3) * (1.0 + CLOUD_FAR_SOFTEN * far)
     thr = coverage_threshold(cover) - CLOUD_EROSION_CUT_SHARE * row["detail_erosion"] * soft
     cut = _lerp(CLOUD_FBM_MEAN + CLOUD_TOP_CUT_SIGMAS * CLOUD_FBM_SIGMA, thr, top)
+    cut = _lerp(cut, CLOUD_FBM_MEAN + CLOUD_TOP_CUT_SIGMAS * CLOUD_FBM_SIGMA,
+                cloud_dome_taper(height_density, h))
     soft += CLOUD_SHADOW_SOFTEN * max(footprint_km, 0.0) / scale
     density = _remap(shape, cut, cut + soft)
     if density > 0.0 and far < 1.0:

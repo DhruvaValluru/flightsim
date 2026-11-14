@@ -99,7 +99,7 @@ def test_the_material_gains_the_input_and_a_new_generation():
     start = text.index("WORLD_CLOUD_INPUTS = (")
     assert '"HeightDensity")   # round 82' in text[start:text.index("WORLD_CLOUD_ALBEDO", start)]
     assert 'WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "7"' in text
-    assert '"M_FlightSimCloudLayers": "8"' in text
+    assert '"M_FlightSimCloudLayers": "9"' in text
 
 
 def test_the_bridge_reads_refuses_and_records_the_switch():
@@ -133,6 +133,28 @@ def test_the_scud_is_grey_not_a_hole():
     from core.scene import rain_veil
     weather = (ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimWeather.cpp").read_text(
         encoding="utf-8")
-    assert rain_veil.SCUD_TONE_UNDER_DECK == 0.75 and rain_veil.SCUD_TONE_OPEN == 0.85
-    assert "constexpr double ScudToneUnderDeck = 0.75;" in weather
-    assert "constexpr double ScudToneOpen = 0.85;" in weather
+    assert rain_veil.SCUD_TONE_UNDER_DECK == 0.9 and rain_veil.SCUD_TONE_OPEN == 0.95
+    assert "constexpr double ScudToneUnderDeck = 0.9;" in weather
+    assert "constexpr double ScudToneOpen = 0.95;" in weather
+
+
+def test_the_dome_taper_matches_the_shader_and_is_off_at_zero():
+    text = _read(HLSL)
+    assert f"const float DOME_TAPER = {wb.CLOUD_DOME_TAPER};" in text
+    assert f"const float DOME_POWER = {wb.CLOUD_DOME_POWER};" in text
+    assert ("cut = lerp(cut, FBM_MEAN + TOP_CUT_SIGMAS * FBM_SIGMA, "
+            "saturate(HeightDensity) * DOME_TAPER * pow(h, DOME_POWER));") in text
+    for h in (0.0, 0.3, 1.0):
+        assert wb.cloud_dome_taper(0.0, h) == 0.0
+    amount = wb.cloud_height_density_for(True)
+    values = [wb.cloud_dome_taper(amount, h / 10.0) for h in range(11)]
+    assert values == sorted(values) and values[0] == 0.0 and values[-1] == pytest.approx(amount)
+
+
+def test_the_dome_shrinks_the_footprint_with_height():
+    row = wb.cloud_billow_row(wb.CLOUDS["cumulus"], True)
+    amount = wb.cloud_height_density_for(True)
+    pts = [(x * 0.23, y * 0.29, 0.0) for x in range(40) for y in range(40)]
+    def drawn(h, hd):
+        return sum(wb.cloud_density(p, h, 0.5, row, height_density=hd) > 0.0 for p in pts)
+    assert drawn(0.3, amount) < drawn(0.3, 0.0)

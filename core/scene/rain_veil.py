@@ -114,8 +114,8 @@ VEIL_VARY_SCALE_MAX = 1.0
 #: Round 82 (r69's #15: black ink blotches over the deck; the owner, 2026-11-13: "the
 #: clouds dont look that realistic"): scud is grey, a little darker than the haze
 #: behind it, not a hole in it: 0.75 under a deck, 0.85 in the open. UNCALIBRATED.
-SCUD_TONE_UNDER_DECK = 0.75
-SCUD_TONE_OPEN = 0.85
+SCUD_TONE_UNDER_DECK = 0.9
+SCUD_TONE_OPEN = 0.95
 #: The beauty's cinematic rain keeps this share of the camera's own motion: round 12's
 #: #15 flew INTO the wind, so the wind lay along the view and the cinematic streaks
 #: (the camera's motion left out) fell straight down. A little of the aircraft's

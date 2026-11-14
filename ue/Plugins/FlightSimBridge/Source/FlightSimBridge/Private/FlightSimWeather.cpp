@@ -356,8 +356,9 @@ namespace FlightSimRainVeil
 	// Round 47: the curtain cells' scale is never above this (the wide-lens cells).
 	constexpr double VeilVaryScaleMax = 1.0;
 	// Round 82 (r69's #15 black blotches; rain_veil.SCUD_TONE_*): grey rags, not holes.
-	constexpr double ScudToneUnderDeck = 0.75;
-	constexpr double ScudToneOpen = 0.85;
+	// Round 92: r82's #15 still drew dark ink stains at 0.75, so 0.9 / 0.95.
+	constexpr double ScudToneUnderDeck = 0.9;
+	constexpr double ScudToneOpen = 0.95;
 	constexpr double VeilStreakDensityA = 0.08;
 	constexpr double VeilStreakDensityMax = 0.6;
 	constexpr double VeilStreakAlpha = 0.25;

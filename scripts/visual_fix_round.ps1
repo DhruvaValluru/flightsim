@@ -242,7 +242,8 @@ $record = [ordered]@{
     compiler = $Compiler
     pixel_metrics = $pixel
 }
-$record | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $out "ROUND.json") -Encoding utf8
+# BOM-less UTF-8: Windows PowerShell 5.1's -Encoding utf8 writes a BOM, which plain json.load refuses.
+[IO.File]::WriteAllText((Join-Path $out "ROUND.json"), ($record | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
 
 # 6. vis-windows, through its own worktree
 if ($NoPush) { Write-Host "`n-NoPush: $out"; exit 0 }
