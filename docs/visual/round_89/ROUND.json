@@ -1,0 +1,147 @@
+{
+    "round":  89,
+    "commit":  "40e95cc5",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   4,
+                   8,
+                   12
+               ],
+    "switches":  "-canopy-reflect=on",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  376.3
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  86.0,
+                         "spec_sha256":  "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  4,
+                         "outcome":  "done",
+                         "seconds":  80.9,
+                         "spec_sha256":  "9386284b5b90c09edbf98f1694778c412d11d1689ac276cece868e72dd311e00",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  8,
+                         "outcome":  "done",
+                         "seconds":  90.8,
+                         "spec_sha256":  "12d9f6f108c853765e86017db7ab96c95eb4e1fa4180a1b0299492c3d55a7345",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  12,
+                         "outcome":  "done",
+                         "seconds":  116.0,
+                         "spec_sha256":  "e356e70f775363a026947c7eaeb4f821ef46c9d38052764d8bbc97f304c74d78",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_88",
+                          "compare_with_found":  true,
+                          "scenes":  {
+                                         "1":  {
+                                                   "frame":  "01_golden_hour_a_4_flying_east.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.09066,
+                                                                  "std_luma":  0.10877,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  9E-05
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "01_golden_hour_a_4_flying_east.jpg",
+                                                                       "flicker":  0.0,
+                                                                       "ssim":  1.0,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "4":  {
+                                                   "frame":  "04_desert_a_4_sun_behind_the_camera.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.14124,
+                                                                  "std_luma":  0.08946,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.0
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "04_desert_a_4_sun_behind_the_camera.jpg",
+                                                                       "flicker":  0.0,
+                                                                       "ssim":  1.0,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "8":  {
+                                                   "frame":  "08_c172_over_fuji_sunrise_light_rain.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.59504,
+                                                                  "std_luma":  0.31552,
+                                                                  "clipped":  4E-05,
+                                                                  "crushed":  0.00017
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "08_c172_over_fuji_sunrise_light_rain.jpg",
+                                                                       "flicker":  1E-05,
+                                                                       "ssim":  0.9999,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "12":  {
+                                                    "frame":  "12_c172_cockpit_over_the_grand_canyon.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.07601,
+                                                                   "std_luma":  0.08339,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  0.01759
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "12_c172_cockpit_over_the_grand_canyon.jpg",
+                                                                        "flicker":  0.0,
+                                                                        "ssim":  1.0,
+                                                                        "flags":  [
+
+                                                                                  ]
+                                                                    }
+                                                }
+                                     }
+                      }
+}
