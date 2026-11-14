@@ -1,0 +1,119 @@
+{
+    "round":  86,
+    "commit":  "6fe12218",
+    "full":  false,
+    "scenes":  [
+                   9,
+                   15,
+                   7
+               ],
+    "switches":  "-rain-layers=on",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  595.9
+                },
+    "outcomes":  [
+                     {
+                         "number":  7,
+                         "outcome":  "done",
+                         "seconds":  216.4,
+                         "spec_sha256":  "cf3697a5b8c94e5a54c30f373f30fae193d9e68ed10878f721f27d32361af7a4",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  9,
+                         "outcome":  "done",
+                         "seconds":  276.3,
+                         "spec_sha256":  "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  15,
+                         "outcome":  "done",
+                         "seconds":  101.0,
+                         "spec_sha256":  "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_84",
+                          "compare_with_found":  true,
+                          "scenes":  {
+                                         "7":  {
+                                                   "frame":  "07_tower_view_heavy_rain.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.19581,
+                                                                  "std_luma":  0.01817,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.0
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "07_tower_view_heavy_rain.jpg",
+                                                                       "flicker":  0.00914,
+                                                                       "ssim":  0.9931,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "9":  {
+                                                   "frame":  "09_747_through_a_thunderstorm.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.046,
+                                                                  "std_luma":  0.03816,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.0
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "09_747_through_a_thunderstorm.jpg",
+                                                                       "flicker":  0.01048,
+                                                                       "ssim":  0.8752,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "15":  {
+                                                    "frame":  "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.0477,
+                                                                   "std_luma":  0.0424,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  0.0
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+                                                                        "flicker":  0.01158,
+                                                                        "ssim":  0.7965,
+                                                                        "flags":  [
+
+                                                                                  ]
+                                                                    }
+                                                }
+                                     }
+                      }
+}

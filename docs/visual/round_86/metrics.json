@@ -1,0 +1,66 @@
+{
+ "calibration": "uncalibrated: report only, no threshold has been judged against real rounds",
+ "limits": {
+  "blank_std_min": 0.002,
+  "blank_mean_min": 0.003,
+  "clipped_max": 0.02,
+  "crushed_max": 0.05,
+  "mean_luma_min": 0.02,
+  "mean_luma_max": 0.8,
+  "ssim_min": 0.35,
+  "flicker_max": 0.02
+ },
+ "gate": "report only; never fails the round",
+ "compare_with": "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_84",
+ "compare_with_found": true,
+ "scenes": {
+  "7": {
+   "frame": "07_tower_view_heavy_rain.jpg",
+   "health": {
+    "mean_luma": 0.19581,
+    "std_luma": 0.01817,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "07_tower_view_heavy_rain.jpg",
+    "flicker": 0.00914,
+    "ssim": 0.9931,
+    "flags": []
+   }
+  },
+  "9": {
+   "frame": "09_747_through_a_thunderstorm.jpg",
+   "health": {
+    "mean_luma": 0.046,
+    "std_luma": 0.03816,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "09_747_through_a_thunderstorm.jpg",
+    "flicker": 0.01048,
+    "ssim": 0.8752,
+    "flags": []
+   }
+  },
+  "15": {
+   "frame": "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+   "health": {
+    "mean_luma": 0.0477,
+    "std_luma": 0.0424,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+    "flicker": 0.01158,
+    "ssim": 0.7965,
+    "flags": []
+   }
+  }
+ }
+}
