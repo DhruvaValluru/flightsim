@@ -632,6 +632,16 @@ saturated blue (as slide film does; its grey axis is neutral, so a luma tie chan
 takes the post to [11,19,60]. Round 94/194 A/B (`-look-cloud-tiers=off`, `-sky-capture-clouds=0`)
 isolates the raw drop. Note that from 10 km the near cumulus are not drawn over the sea, only at
 the horizon.
+Rounds 94/194 (`5ff76626`/`333f1554`): `-look-cloud-tiers=off` brings #13's sea back to 17/59/122
+and `-sky-capture-clouds=0` changes nothing. The render record shows why: the only layer was the
+sky plan's default at 11-14 km (core/sky/plan.py lifts it >= 1 km above the flight), ABOVE the 747,
+and the sky light's cloud AO under it darkened the whole sea. Cumulus never form there.
+`c641a8c4` (beauty only): a default cumulus layer whose base is above 4000 m is drawn as the fair
+slab (1500-2700 m); stated heights are kept (record: `lowered_below_cruise`, `plan_base_m`).
+Round 95 (`e4a78e2f`): #13's raw sea is 50/84/136 (post 48/68/104), with scattered cumulus below
+the 747 to the horizon; the night-at-noon look is gone. The #03 control is unchanged (max diff 9).
+Left on #13: from 8 km above, the cumulus read flat (white tops, little side shading, no shadows on
+the sea), and the horizon lacks the pale haze band a real cruise view has.
 Next in this lane: M_StormCell's weather map and noise (the storm tiers).
 
 **Open (not fixed):**
@@ -639,7 +649,7 @@ Next in this lane: M_StormCell's weather map and noise (the storm tiers).
 - #08's mask 14.6 % off its geometry; #10 and #13 tight boxes.
 - #12's two geometry clauses need an interior-camera form.
 - #07 shows rain streaks rather than bands; faint steps on #13's cloud bases.
-- #11's horizon streaks; #13's flat-bottomed steps at the horizon; #13's dark sea (rounds 94/194).
+- #11's horizon streaks; #13's flat-bottomed steps at the horizon; #13's cumulus read flat from above; #13's horizon has no haze band.
 - #12's see-through instrument faces: p3-mac's `955a4694`, rendering in p3-mac's round 84.
 - #06's ocean shade reads blue (+49), probably the water itself.
 - Every tiles amount stays UNCALIBRATED (`SUN_LOW_DEG`, `SUN_HIGH_DEG`, `SUN_LOW_SCALE`,
