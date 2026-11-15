@@ -264,8 +264,9 @@ def hyper_waves(pm: np.ndarray, wind_dir: np.ndarray, time_s: float, footprint_m
     kas = [k["HYPER_SWELL_KA"], k["HYPER_SEA_KA_1"], k["HYPER_SEA_KA_2"], k["HYPER_SEA_KA_3"]]
     turns = [0.6, 0.0, 0.4, -0.35]
     q = k["HYPER_GERSTNER_Q"]
-    warp = 12.566 * macro(pm + np.array([-211.0, 587.0]), 2200.0)
-    groups = (macro(pm + np.array([613.0, -347.0]), 1400.0), macro(pm + np.array([-929.0, 151.0]), 900.0))
+    warp = 12.566 * value2(pm / 2200.0 + np.array([-0.0959, 0.2668]))
+    group = value2(pm / 1400.0 + np.array([0.4379, -0.2479]))
+    groups = (group, 1.0 - group)
     slope = np.zeros_like(pm)
     lift = np.zeros(pm.shape[0])
     h = np.zeros(pm.shape[0])

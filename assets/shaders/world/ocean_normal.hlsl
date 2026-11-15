@@ -260,9 +260,8 @@ struct FOceanSurface
 		float lengths[4] = {spec.z, peakM, 0.7 * peakM, 0.5 * peakM};
 		float kas[4] = {spec.w, seaKa.x, seaKa.y, seaKa.z};
 		float turns[4] = {0.6, 0.0, 0.4, -0.35};
-		float warp = 12.566 * Macro(pm + float2(-211.0, 587.0), 2200.0);
-		float groupA = Macro(pm + float2(613.0, -347.0), 1400.0);
-		float groupB = Macro(pm + float2(-929.0, 151.0), 900.0);
+		float warp = 12.566 * Value2(pm / 2200.0 + float2(-0.0959, 0.2668));   // one octave: cheap
+		float groupA = Value2(pm / 1400.0 + float2(0.4379, -0.2479));
 		float2 slope = float2(0.0, 0.0);
 		float lift = 0.0;
 		float h = 0.0;
@@ -276,7 +275,7 @@ struct FOceanSurface
 			float2 d = float2(c * windDir.x - s * windDir.y, s * windDir.x + c * windDir.y);
 			float k = 6.2831853 / lengths[i];
 			float phase = k * dot(d, pm) - sqrt(9.81 * k) * timeS + warp * (0.5 + 0.25 * i);
-			float envelope = lerp(0.5, 1.5, (i & 1) == 0 ? groupA : groupB);
+			float envelope = lerp(0.5, 1.5, (i & 1) == 0 ? groupA : 1.0 - groupA);
 			float ka = seen * envelope * kas[i];
 			float sp, cp;
 			sincos(phase, sp, cp);
@@ -418,7 +417,8 @@ float waveHeight = 0.0;
 float hyperVar = 0.0;
 float2 swellTilt = float2(0.0, 0.0);
 [branch] if (hyper < 1.0) { swellTilt = S.Swell(p.xy, windDir, TimeS, footprintM); }
-[branch] if (hyper > 0.0)
+// at altitude no wave is resolved: skip the waves (the cost stays flat)
+[branch] if (hyper > 0.0 && footprintM < 0.25 * max(HYPER_SWELL_M, HYPER_PEAK_PER_U2 * WindSpeedMS * WindSpeedMS))
 {
 	swellTilt = lerp(swellTilt, S.HyperWaves(p.xy, windDir, TimeS, footprintM, WindSpeedMS,
 	                                         float4(HYPER_PEAK_PER_U2, HYPER_GERSTNER_Q, HYPER_SWELL_M, HYPER_SWELL_KA),
