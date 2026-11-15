@@ -28,16 +28,19 @@ render-commandlet run. Windows still renders the frames that count.
    This runs `scripts/ue_create_materials.py` and `scripts/ue_import_aircraft.py`
    in the editor (the round's "materials" and "aircraft" prep).
 
-3. Per scene:
+3. Per scene, from the host:
 
-       exec(open("<W>/scripts/lookdev/lookdev.py").read())
-       build(1); capture(1, "base")      # -> $S/lookdev/base/1.png
+       MCP=$S/tools/mcp.sh $W/scripts/lookdev/shoot.sh base 1 3 7   # -> $S/lookdev/base/<scene>.png
+
+   or in run_python: `build(1); capture(1, "base")`. `capture` returns at once
+   and the PNG plus `<png>.status.json` appear when the tiles have loaded.
 
    `build` opens a blank unsaved map, then runs `FlightSim.LookDev.Build`
    (ue/Plugins/FlightSimBridge/.../FlightSimLookDev.cpp). The beauty camera is
    the actor `LookDev_BeautyCamera`, and the level viewport is moved to it.
-   `capture` waits for the tiles to stream (FFlightSimGoogleTiles::WaitForView),
-   runs 8 warm-up captures, then writes the PNG. `FLIGHTSIM_LOOKDEV_DIR`
+   `capture` adds the beauty camera to Cesium's camera manager, lets the
+   editor tick until the tileset reports 100 % for 2 s (at most 300 s), then
+   runs 8 warm-up captures and writes the PNG. `FLIGHTSIM_LOOKDEV_DIR`
    changes the output root.
 
 ## What it builds

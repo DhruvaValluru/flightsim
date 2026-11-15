@@ -40,6 +40,12 @@
 #include "GeoReferencingSystem.h"
 #include "ImageUtils.h"
 #include "RenderingThread.h"
+#include "Containers/Ticker.h"
+#if WITH_FLIGHTSIM_CESIUM
+#include "Cesium3DTileset.h"
+#include "CesiumCamera.h"
+#include "CesiumCameraManager.h"
+#endif
 
 #include "FlightSimBeautyFallback.h"
 #include "FlightSimBeautyLook.h"
@@ -672,14 +678,10 @@ namespace
 		return true;
 	}
 
-	bool Capture(const FString& PngPath, int32 Width, int32 Height, FString& Error)
+	// The warm-up captures and the PNG, once the tiles report fully loaded.
+	bool WriteStill(const FString& PngPath, int32 Width, int32 Height, FString& Error)
 	{
 		FLookDevState& S = State();
-		if (!S.Camera.IsValid() || !S.World.IsValid())
-		{
-			Error = TEXT("no look-dev scene (FlightSim.LookDev.Build first)");
-			return false;
-		}
 		FScopedCommandLine CommandLine(S.Params);
 		USceneCaptureComponent2D* Capture = S.Camera->GetCaptureComponent2D();
 		UTextureRenderTarget2D* Target = NewObject<UTextureRenderTarget2D>(GetTransientPackage());
@@ -688,11 +690,6 @@ namespace
 		Target->InitAutoFormat(Width, Height);
 		Target->UpdateResourceImmediate(true);
 		Capture->TextureTarget = Target;
-		if (S.Tiles->IsEnabled() &&
-		    !S.Tiles->WaitForView(S.CameraLocation, S.CameraRotation, S.FovDeg, Width, Height, Error))
-		{
-			return false;
-		}
 		// Warm-up captures (temporal history, exposure), as the commandlet's -warmup.
 		int32 Warmup = 8;
 		FParse::Value(*S.Params, TEXT("warmup="), Warmup);
@@ -715,7 +712,9 @@ namespace
 		}
 		TArray<FColor> Pixels;
 		FTextureRenderTargetResource* Resource = Target->GameThread_GetRenderTargetResource();
-		if (Resource == nullptr || !Resource->ReadPixels(Pixels) || Pixels.Num() != Width * Height)
+		const bool bRead = Resource != nullptr && Resource->ReadPixels(Pixels) && Pixels.Num() == Width * Height;
+		Capture->TextureTarget = nullptr;
+		if (!bRead)
 		{
 			Error = TEXT("could not read the render target back");
 			return false;
@@ -729,7 +728,64 @@ namespace
 			Error = FString::Printf(TEXT("could not write %s"), *PngPath);
 			return false;
 		}
-		Capture->TextureTarget = nullptr;
+		return true;
+	}
+
+	// Asynchronous: the editor keeps ticking (Cesium streams in its own tick,
+	// pointed at this camera through the Cesium camera manager) until the
+	// tileset reports 100 % for 2 s, or 300 s pass; then the still is written
+	// and <png>.status.json appears. FFlightSimGoogleTiles::WaitForView pumps the
+	// tileset by hand, which is a commandlet's way and asserts in the editor.
+	bool StartCapture(const FString& PngPath, int32 Width, int32 Height, FString& Error)
+	{
+		FLookDevState& S = State();
+		if (!S.Camera.IsValid() || !S.World.IsValid())
+		{
+			Error = TEXT("no look-dev scene (FlightSim.LookDev.Build first)");
+			return false;
+		}
+		IFileManager::Get().Delete(*(PngPath + TEXT(".status.json")));
+		TWeakObjectPtr<AActor> Tileset = S.Tiles->IsEnabled() ? S.Tiles->GetTilesetActor() : nullptr;
+#if WITH_FLIGHTSIM_CESIUM
+		if (Tileset.IsValid())
+		{
+			if (ACesiumCameraManager* Cameras = ACesiumCameraManager::GetDefaultCameraManager(S.World.Get()))
+			{
+				FCesiumCamera Camera;
+				Camera.ViewportSize = FVector2D(Width, Height);
+				Camera.Location = S.CameraLocation;
+				Camera.Rotation = S.CameraRotation;
+				Camera.FieldOfViewDegrees = S.FovDeg;
+				Cameras->AddCamera(Camera);
+			}
+		}
+#endif
+		const double Start = FPlatformTime::Seconds();
+		TSharedRef<double> SettledSince = MakeShared<double>(-1.0);
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+			[PngPath, Width, Height, Tileset, Start, SettledSince](float) -> bool
+			{
+				const double Now = FPlatformTime::Seconds();
+				float Progress = 100.0f;
+#if WITH_FLIGHTSIM_CESIUM
+				if (ACesium3DTileset* Tiles = Cast<ACesium3DTileset>(Tileset.Get()))
+				{
+					Progress = Tiles->GetLoadProgress();
+				}
+#endif
+				*SettledSince = Progress >= 99.99f ? (*SettledSince < 0.0 ? Now : *SettledSince) : -1.0;
+				const bool bSettled = *SettledSince >= 0.0 && Now - *SettledSince >= 2.0;
+				if (!bSettled && Now - Start < 300.0) { return true; }
+				FString CaptureError;
+				bool bOk = State().Camera.IsValid() && WriteStill(PngPath, Width, Height, CaptureError);
+				if (!State().Camera.IsValid()) { CaptureError = TEXT("the look-dev scene went away"); }
+				TSharedPtr<FJsonObject> Extra = MakeShared<FJsonObject>();
+				Extra->SetNumberField(TEXT("tiles_load_progress"), Progress);
+				Extra->SetNumberField(TEXT("seconds"), Now - Start);
+				Extra->SetBoolField(TEXT("tiles_settled"), bSettled);
+				WriteStatus(PngPath, bOk, CaptureError, Extra);
+				return false;
+			}), 0.25f);
 		return true;
 	}
 
@@ -754,8 +810,7 @@ namespace
 			const int32 Width = Args.Num() > 2 ? FCString::Atoi(*Args[1]) : 1280;
 			const int32 Height = Args.Num() > 2 ? FCString::Atoi(*Args[2]) : 720;
 			FString Error;
-			const bool bOk = Capture(Args[0], Width, Height, Error);
-			WriteStatus(Args[0], bOk, Error);
+			if (!StartCapture(Args[0], Width, Height, Error)) { WriteStatus(Args[0], false, Error); }
 		}));
 
 	FAutoConsoleCommandWithWorldAndArgs ClearCommand(

@@ -4,7 +4,9 @@ editor_query run_python), never in a commandlet:
     exec(open("<repo>/scripts/lookdev/lookdev.py").read())
     setup()                 # once per editor: materials + the scenes' aircraft
     build(1)                # the scene's beauty set-up in a blank editor map
-    capture(1, "base")      # <OUT>/base/1.png, 1280x720, after the tiles stream
+    capture(1, "base")      # starts <OUT>/base/1.png (1280x720); written once the
+                            # tiles stream, then <png>.status.json appears
+                            # (scripts/lookdev/shoot.sh waits for it)
 
 build() reads <OUT>/prep/<NN>/lookdev.json from scripts/lookdev/prepare.py and
 calls the bridge's FlightSim.LookDev.Build (FlightSimLookDev.cpp), which runs
@@ -99,11 +101,16 @@ def build(scene):
 
 
 def capture(scene, tag, width=1280, height=720):
-    """<OUT>/<tag>/<scene>.png from the beauty camera of the scene last built
-    (build(scene) first); waits for the Google tiles to stream."""
+    """Start <OUT>/<tag>/<scene>.png from the beauty camera of the scene last
+    built (build(scene) first). Returns at once: the editor has to keep
+    ticking for Cesium to stream, so the still is written by an editor ticker
+    and <png>.status.json appears when it is (read it with status(png))."""
     png = os.path.join(OUT, tag, f"{int(scene)}.png")
     os.makedirs(os.path.dirname(png), exist_ok=True)
     _console(f"FlightSim.LookDev.Capture {png} {int(width)} {int(height)}")
-    status = _status(png)
-    status["png"] = png
-    return status
+    return {"pending": png}
+
+
+def status(png):
+    """The finished capture's status (raises if it failed or is not done)."""
+    return _status(png)
