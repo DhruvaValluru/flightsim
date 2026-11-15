@@ -10172,3 +10172,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Scenario.Teardown();
 	return 0;
 }
+
+// Look-dev harness (FlightSimLookDev.cpp, scripts/lookdev/): this file's own
+// airframe builder for the editor world, without the surface animator. The
+// commandlet never calls it.
+bool FlightSimLookDevBuildMeshAirframe(AActor* Aircraft, const FString& ManifestPath,
+                                       const FString& CardAircraft, const FString& Livery,
+                                       int32 StartGearUp, FString& Error)
+{
+	FMeshAirframe Out;
+	return BuildMeshAirframe(Aircraft, nullptr, ManifestPath, CardAircraft, Livery, Out, Error,
+	                         nullptr, StartGearUp);
+}
