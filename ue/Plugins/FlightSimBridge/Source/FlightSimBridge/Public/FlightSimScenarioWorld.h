@@ -691,6 +691,10 @@ private:
 	double TornadoDustOmegaDegPerSec = 0.0;
 	AActor* TornadoScud = nullptr;
 	double TornadoScudOmegaDegPerSec = 0.0;
+	// 2026-11-15 (hyperreal tornado-shape): the beauty-only debris ring at the ground,
+	// spun at the Rankine exterior rate at its own radius (slower than the dust).
+	AActor* TornadoDebrisRing = nullptr;
+	double TornadoDebrisRingOmegaDegPerSec = 0.0;
 	// The flipbook card's material (-tornado-look=vdb): its Time set per step from
 	// SIM time, so the loop is replay-identical (nullptr on measure and on mesh).
 	UMaterialInstanceDynamic* TornadoFlipbookMaterial = nullptr;

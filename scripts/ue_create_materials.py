@@ -633,7 +633,10 @@ STORM_GENERATIONS = {"M_RainDrops": "8", "M_RainSplash": "3", "M_LightningChanne
                      # maxpick/rain (2026-11-13): the baked rain layers and windscreen (tier 0).
                      "M_RainLayers": "1", "M_WindshieldRainBaked": "3",
                      # 2026-11-14: the tornado flipbook (JangaFX CC0 VDB, bake_tornado_flipbook.py).
-                     "M_TornadoFlipbook": "1"}
+                     # 2 (2026-11-15, tornado-shape): the card cropped to the plume, its lower
+                     # part squeezed narrow, its cap faded into the wall cloud, a ground-dust tint
+                     # (tornado_flipbook_shape.hlsl); CardAspect read back by the C++.
+                     "M_TornadoFlipbook": "2"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -2868,11 +2871,36 @@ TORNADO_FLIPBOOK_PLAN = "tornado_flipbook.json"
 TORNADO_FLIPBOOK_TEXTURE = "T_TornadoFlipbook"
 #: What FlightSimTornadoBeauty.cpp / FlightSimScenarioWorld.cpp set on it.
 TORNADO_FLIPBOOK_PARAMETERS = ("Time", "Tint", "Opacity")
-#: Read back by the C++ (the card's width = its height x FrameAspect); from the JSON.
-TORNADO_FLIPBOOK_BAKE_PARAMETERS = ("Cols", "Rows", "Frames", "LoopSeconds", "FrameAspect")
+#: Read back by the C++ (the card's width = its height x CardAspect; FrameAspect is the
+#: bake's own, the generation-1 fallback); from the JSON.
+TORNADO_FLIPBOOK_BAKE_PARAMETERS = ("Cols", "Rows", "Frames", "LoopSeconds", "FrameAspect",
+                                    "CardAspect")
+#: The default tint (the C++ sets its own, FlightSimTornadoBeauty.cpp BeautyFlipbookColour).
 TORNADO_FLIPBOOK_TINT = (0.24, 0.245, 0.26, 1.0)
 TORNADO_FLIPBOOK_SHADE_FLOOR = 0.35
 TORNADO_FLIPBOOK_OPACITY = 1.0
+#: Generation 2 (2026-11-15, tornado-shape; tornado_flipbook_shape.hlsl). The bake is a
+#: top-heavy plume floating in its frame: over all 64 frames its smoke (alpha > 0.02)
+#: spans atlas v 0.193..0.799 and its width by height band (v down, tenths) is
+#: 0, 0, 0.64, 0.69, 0.52, 0.37, 0.30, 0.22, 0, 0 of the frame. The card is cropped to
+#: TORNADO_FLIPBOOK_CROP_V (the foot on the ground contact, the cap up in the wall
+#: cloud; CardAspect = frame_aspect / the crop's height), its width squeezed from
+#: top_width at the top to bottom_width at the foot (pow(v, power): the lower funnel a
+#: narrow rope, the cap as baked), its top TORNADO_FLIPBOOK_TOP_FADE of the card faded
+#: to nothing inside the wall cloud, and its lowest TORNADO_FLIPBOOK_DUST_SHARE tinted
+#: toward TORNADO_FLIPBOOK_DUST_TINT (the ground's dust drawn up the funnel's foot).
+#: UNCALIBRATED.
+TORNADO_FLIPBOOK_CROP_V = (0.19, 0.80)
+TORNADO_FLIPBOOK_TAPER = {"top_width": 1.0, "bottom_width": 0.5, "power": 1.2}
+TORNADO_FLIPBOOK_TOP_FADE = 0.28
+TORNADO_FLIPBOOK_DUST_SHARE = 0.35
+TORNADO_FLIPBOOK_DUST_TINT = (0.19, 0.16, 0.13)
+
+
+def tornado_flipbook_card_aspect(frame_aspect, crop_v=TORNADO_FLIPBOOK_CROP_V):
+    """The cropped card's width / height: the bake's frame aspect over the crop's share
+    of the frame's height (the texels keep their aspect; the C++ reads it back)."""
+    return float(frame_aspect) / max(float(crop_v[1]) - float(crop_v[0]), 1.0e-3)
 
 
 def weather_look_stale(name):
@@ -3492,7 +3520,8 @@ def tornado_flipbook_pin():
 
 def create_tornado_flipbook():
     """M_TornadoFlipbook (2026-11-14): the JangaFX CC0 tornado's flipbook on one
-    camera-facing card (TORNADO_FLIPBOOK_* above; tornado_flipbook_uv.hlsl and
+    camera-facing card (TORNADO_FLIPBOOK_* above; tornado_flipbook_shape.hlsl the card's
+    crop, taper, top fade and dust share, then tornado_flipbook_uv.hlsl and
     tornado_flipbook_blend.hlsl: frame A, frame B and the crossfade). Translucent, lit per
     pixel, roughness 1, no depth write: the label captures never see it (its actor is in
     BeautyOnlyActors). Not built while the checkout has no bake (the C++ draws the mesh)."""
@@ -3527,10 +3556,21 @@ def create_tornado_flipbook():
     loop = scalar(material, lib, "LoopSeconds", float(plan["loop_seconds"]), -1700, 340)
     # Not wired: read back by the C++ (the card's width), stated on the material.
     scalar(material, lib, "FrameAspect", float(plan["frame_aspect"]), -1700, 600)
-    uv = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -1700, -100)
+    scalar(material, lib, "CardAspect", tornado_flipbook_card_aspect(plan["frame_aspect"]), -1700, 680)
+    uv = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -2000, -100)
+    # Generation 2: the card's crop, taper, top fade and dust share before the frame lookup.
+    shape = custom(material, lib, "tornado_flipbook_shape", unreal.CustomMaterialOutputType.CMOT_FLOAT4, {
+        "UV": (uv, ""),
+        "CropTop": (constant(material, lib, TORNADO_FLIPBOOK_CROP_V[0], -2000, -20), ""),
+        "CropBottom": (constant(material, lib, TORNADO_FLIPBOOK_CROP_V[1], -2000, 40), ""),
+        "TopWidth": (constant(material, lib, TORNADO_FLIPBOOK_TAPER["top_width"], -2000, 100), ""),
+        "BottomWidth": (constant(material, lib, TORNADO_FLIPBOOK_TAPER["bottom_width"], -2000, 160), ""),
+        "TaperPower": (constant(material, lib, TORNADO_FLIPBOOK_TAPER["power"], -2000, 220), ""),
+        "TopFade": (constant(material, lib, TORNADO_FLIPBOOK_TOP_FADE, -2000, 280), ""),
+        "DustShare": (constant(material, lib, TORNADO_FLIPBOOK_DUST_SHARE, -2000, 340), "")}, -1850, 0)
     lookup = custom(material, lib, "tornado_flipbook_uv", unreal.CustomMaterialOutputType.CMOT_FLOAT4, {
-        "UV": (uv, ""), "Time": (time, ""), "Cols": (cols, ""), "Rows": (rows, ""),
-        "Frames": (frames, ""), "LoopSeconds": (loop, "")}, -1450, 100)
+        "UV": (mask(material, lib, shape, "rg", -1700, -100), ""), "Time": (time, ""), "Cols": (cols, ""),
+        "Rows": (rows, ""), "Frames": (frames, ""), "LoopSeconds": (loop, "")}, -1450, 100)
     blend = custom(material, lib, "tornado_flipbook_blend", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
         "Time": (time, ""), "Frames": (frames, ""), "LoopSeconds": (loop, "")}, -1450, 350)
     frame_a = _sample(material, lib, atlas, mask(material, lib, lookup, "rg", -1250, 50),
@@ -3541,10 +3581,17 @@ def create_tornado_flipbook():
     shade = lerp(material, lib, constant(material, lib, TORNADO_FLIPBOOK_SHADE_FLOOR, -750, 0),
                  constant(material, lib, 1.0, -750, 60), mask(material, lib, texel, "r", -750, 120),
                  -600, 0)
-    base = binary(material, lib, unreal.MaterialExpressionMultiply,
-                  mask(material, lib, tint, "rgb", -750, -200), shade, -450, -100)
+    # The tint lerped toward the ground-dust tint over the card's foot (shape's dust).
+    colour = lerp(material, lib, mask(material, lib, tint, "rgb", -900, -200),
+                  constant3(material, lib, TORNADO_FLIPBOOK_DUST_TINT, -900, -120),
+                  mask(material, lib, shape, "a", -900, -60), -750, -200)
+    base = binary(material, lib, unreal.MaterialExpressionMultiply, colour, shade, -450, -100)
+    # The texel's alpha x the shape's weight (the taper's edge, the top fade) x Opacity.
     alpha = binary(material, lib, unreal.MaterialExpressionMultiply,
-                   mask(material, lib, texel, "a", -750, 300), opacity, -600, 350)
+                   binary(material, lib, unreal.MaterialExpressionMultiply,
+                          mask(material, lib, texel, "a", -750, 300),
+                          mask(material, lib, shape, "b", -750, 380), -680, 320),
+                   opacity, -600, 350)
     fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -400, 350)
     fade.set_editor_property("fade_distance_default", PUFF_DEPTH_FADE_CM)
     lib.connect_material_expressions(alpha, "", fade, "Opacity")

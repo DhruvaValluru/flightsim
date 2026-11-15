@@ -18,11 +18,12 @@
 //    core where coverage x the grazing fade, moved by an erosion noise, falls below
 //    0.5 (a torn edge, no dither: round 7 rendered generation 3's dither as a
 //    stipple), and the sheath takes M_TornadoFunnelSoft (translucent: the soft edge);
-//  * adds two beauty-only actors of camera-facing smoke puffs (Kenney's CC0 puffs,
+//  * adds three beauty-only actors of camera-facing smoke puffs (Kenney's CC0 puffs,
 //    assets/looks/tornado/, through M_TornadoPuff): the low swirling dust cloud at
 //    the ground contact (replacing the solid cone, which the refined funnel mesh no
-//    longer carries) and dark scud under the wall cloud's base, each spun at the
-//    Rankine rate at its own radius.
+//    longer carries), the wide flattened DEBRIS RING outside it (2026-11-15,
+//    hyperreal tornado-shape: the ground torn up about the funnel's foot) and dark
+//    scud under the wall cloud's base, each spun at the Rankine rate at its own radius.
 //
 // Labels: the funnel and the wall cloud stay DEPTH-WRITING (BLEND_MASKED): a pixel
 // the beauty shows as funnel is funnel in the label depth captures too, so the
@@ -145,6 +146,24 @@ namespace FlightSimTornadoBeautyLocal
 	constexpr float BeautyScudColourR = 0.09f;
 	constexpr float BeautyScudColourG = 0.09f;
 	constexpr float BeautyScudColourB = 0.10f;
+	// 2026-11-15 (hyperreal tornado-shape): the debris ring. Flattened puffs
+	// (BeautyRingAspect wide for their height) from BeautyRingRadiiMin to Max core
+	// radii, their centres 0.3 x their height plus up to BeautyRingTopM above the
+	// ground, darker and browner than the whirl; on their own actor spun at the
+	// Rankine exterior rate at BeautyRingSpinRadii (slower than the whirl).
+	constexpr int32 BeautyRingPuffs = 40;
+	constexpr double BeautyRingRadiiMin = 1.0;
+	constexpr double BeautyRingRadiiMax = 2.6;
+	constexpr double BeautyRingSizeMinM = 80.0;
+	constexpr double BeautyRingSizeMaxM = 170.0;
+	constexpr double BeautyRingAspect = 1.8;
+	constexpr double BeautyRingTopM = 30.0;
+	constexpr double BeautyRingOpacityMin = 0.30;
+	constexpr double BeautyRingOpacityMax = 0.55;
+	constexpr float BeautyRingColourR = 0.13f;
+	constexpr float BeautyRingColourG = 0.11f;
+	constexpr float BeautyRingColourB = 0.09f;
+	constexpr double BeautyRingSpinRadii = 1.8;
 	constexpr int32 BeautyPuffSeedSalt = 0x70A2D0;
 
 	const TCHAR* const TornadoPuffPath = TEXT("/Game/FlightSim/M_TornadoPuff.M_TornadoPuff");
@@ -152,12 +171,22 @@ namespace FlightSimTornadoBeautyLocal
 	// 2026-11-14, the owner's JangaFX tornado (-tornado-look=vdb): the flipbook baked
 	// from JangaFX's CC0 Tornado Looping VDB (scripts/bake_tornado_flipbook.py) on one
 	// camera-facing card standing on the funnel's ground contact, TornadoFlipbookHeightShare
-	// x the funnel's height tall (its top reaches into the wall cloud's base), as wide as the
-	// bake's frame aspect says (M_TornadoFlipbook's FrameAspect). Tinted the sheath's grey;
-	// lit by the scene per pixel. UNCALIBRATED.
+	// x the funnel's height tall, as wide as the cropped card's aspect says
+	// (M_TornadoFlipbook generation 2's CardAspect; FrameAspect, the bake's own, when a
+	// generation-1 material has no CardAspect). Lit by the scene per pixel. UNCALIBRATED.
+	// 2026-11-15 (hyperreal tornado-shape): the bake is a top-heavy plume floating in its
+	// frame. M_TornadoFlipbook 2 crops the card to the plume, squeezes its lower part
+	// narrow and fades its cap out over the top TORNADO_FLIPBOOK_TOP_FADE of the card;
+	// the card's top now stands well up inside the wall cloud (1.40 x the funnel's height:
+	// the fade completes about the wall cloud's base, weather_look.flipbook_top_fade_end_share)
+	// so the funnel hangs DOWN from the deck, and the card is tinted BeautyFlipbookColour,
+	// darker than the sheath's grey (condensation in the storm's light).
 	const TCHAR* const TornadoFlipbookPath = TEXT("/Game/FlightSim/M_TornadoFlipbook.M_TornadoFlipbook");
-	constexpr double TornadoFlipbookHeightShare = 1.12;
+	constexpr double TornadoFlipbookHeightShare = 1.40;
 	constexpr float TornadoFlipbookOpacity = 1.0f;
+	constexpr float BeautyFlipbookColourR = 0.15f;
+	constexpr float BeautyFlipbookColourG = 0.155f;
+	constexpr float BeautyFlipbookColourB = 0.17f;
 
 	double TornadoBeautySmooth01(double X)
 	{
@@ -394,8 +423,11 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		BeautyOnlyActors.Add(Actor);
 		return Actor;
 	};
+	// A puff SizeM tall and WidthScale x SizeM wide (the billboard's BaseSizeX runs
+	// along the view's up, BaseSizeY along its right, half extents each).
 	auto AddPuff = [&](AActor* Actor, const FString& Name, double RadiusM, double ElevationM,
-	                   double SizeM, double Opacity, const FLinearColor& Colour, double Angle = -1.0)
+	                   double SizeM, double Opacity, const FLinearColor& Colour, double Angle = -1.0,
+	                   double WidthScale = 1.0)
 	{
 		const double A = Angle >= 0.0 ? Angle : Stream.FRandRange(0.0, 2.0 * PI);
 		UMaterialBillboardComponent* Puff = NewObject<UMaterialBillboardComponent>(Actor, *Name);
@@ -413,7 +445,7 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		Instance->SetScalarParameterValue(FName(TEXT("PuffSpin")),
 		                                  static_cast<float>(Stream.FRandRange(0.0, 2.0 * PI)));
 		const float SizeCm = static_cast<float>(SizeM * 100.0);
-		Puff->AddElement(Instance, nullptr, false, SizeCm, SizeCm, nullptr);
+		Puff->AddElement(Instance, nullptr, false, SizeCm, static_cast<float>(WidthScale) * SizeCm, nullptr);
 		Puff->RegisterComponent();
 		++PuffCount;
 	};
@@ -454,6 +486,21 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 			        Stream.FRandRange(BeautyDebrisSizeMinM, BeautyDebrisSizeMaxM),
 			        0.7 * FMath::Lerp(BeautyDustOpacityMin, BeautyDustOpacityMax, Stream.FRand()), Dust);
 		}
+		// The debris ring: evenly about the axis (one puff per sector, jittered within
+		// it), low and flattened, darker and browner than the whirl.
+		TornadoDebrisRing = SpawnPuffActor(TEXT("TornadoDebrisRing"));
+		TornadoDebrisRingOmegaDegPerSec = TornadoOmegaDegPerSec / (BeautyRingSpinRadii * BeautyRingSpinRadii);
+		const FLinearColor Ring(BeautyRingColourR, BeautyRingColourG, BeautyRingColourB, 1.0f);
+		for (int32 I = 0; I < BeautyRingPuffs; ++I)
+		{
+			const double Angle = 2.0 * PI * (static_cast<double>(I) + Stream.FRand()) / BeautyRingPuffs;
+			const double RadiusM = RCore * Stream.FRandRange(BeautyRingRadiiMin, BeautyRingRadiiMax);
+			const double SizeM = Stream.FRandRange(BeautyRingSizeMinM, BeautyRingSizeMaxM);
+			const double ElevationM = 0.3 * SizeM + Stream.FRand() * BeautyRingTopM;
+			AddPuff(TornadoDebrisRing, FString::Printf(TEXT("TornadoRingPuff_%d"), I), RadiusM, ElevationM,
+			        SizeM, FMath::Lerp(BeautyRingOpacityMin, BeautyRingOpacityMax, Stream.FRand()), Ring,
+			        Angle, BeautyRingAspect);
+		}
 		TornadoScud = SpawnPuffActor(TEXT("TornadoScud"));
 		TornadoScudOmegaDegPerSec = TornadoWallOmegaDegPerSec;
 		const FLinearColor Scud(BeautyScudColourR, BeautyScudColourG, BeautyScudColourB, 1.0f);
@@ -491,13 +538,19 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 			AActor* FlipbookActor = SpawnPuffActor(TEXT("TornadoFlipbook"));
 			UMaterialInstanceDynamic* Flipbook = UMaterialInstanceDynamic::Create(FlipbookBase, FlipbookActor);
 			Flipbook->SetVectorParameterValue(FName(TEXT("Tint")),
-				FLinearColor(BeautySheathColourR, BeautySheathColourG, BeautySheathColourB, 1.0f));
+				FLinearColor(BeautyFlipbookColourR, BeautyFlipbookColourG, BeautyFlipbookColourB, 1.0f));
 			Flipbook->SetScalarParameterValue(FName(TEXT("Opacity")), TornadoFlipbookOpacity);
 			Flipbook->SetScalarParameterValue(FName(TEXT("Time")), 0.0f);
-			const double FrameAspect = FMath::Clamp(
-				static_cast<double>(Flipbook->K2_GetScalarParameterValue(FName(TEXT("FrameAspect")))), 0.05, 20.0);
+			// Generation 2's cropped card aspect; a generation-1 material (no CardAspect:
+			// the engine answers 0) keeps the bake's frame aspect.
+			double CardAspect = static_cast<double>(Flipbook->K2_GetScalarParameterValue(FName(TEXT("CardAspect"))));
+			if (CardAspect <= 1.0e-3)
+			{
+				CardAspect = static_cast<double>(Flipbook->K2_GetScalarParameterValue(FName(TEXT("FrameAspect"))));
+			}
+			CardAspect = FMath::Clamp(CardAspect, 0.05, 20.0);
 			FlipbookHeightM = TornadoFlipbookHeightShare * FunnelTopMetres;
-			FlipbookWidthM = FlipbookHeightM * FrameAspect;
+			FlipbookWidthM = FlipbookHeightM * CardAspect;
 			UMaterialBillboardComponent* Board =
 				NewObject<UMaterialBillboardComponent>(FlipbookActor, TEXT("TornadoFlipbookCard"));
 			Board->SetupAttachment(FlipbookActor->GetRootComponent());
@@ -515,6 +568,7 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 			TornadoBeautyHiddenFunnel = FunnelMesh;
 			DrawnAs = TEXT("vdb_flipbook");
 			LookNote = TEXT("vdb_flipbook: JangaFX CC0 Tornado Looping, baked by scripts/bake_tornado_flipbook.py; "
+			                "the card cropped, tapered and faded into the wall cloud (M_TornadoFlipbook 2); "
 			                "the funnel mesh hidden from the beauty capture only");
 		}
 	}
@@ -533,6 +587,7 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		Row->SetStringField(TEXT("puffs"), PuffNote);
 		Row->SetNumberField(TEXT("puff_count"), PuffCount);
 		Row->SetNumberField(TEXT("dust_spin_deg_s"), TornadoDustOmegaDegPerSec);
+		Row->SetNumberField(TEXT("debris_ring_spin_deg_s"), TornadoDebrisRingOmegaDegPerSec);
 		Row->SetNumberField(TEXT("scud_spin_deg_s"), TornadoScudOmegaDegPerSec);
 		Row->SetStringField(TEXT("labels"),
 			TEXT("funnel core and wall cloud depth-writing (BLEND_MASKED, plain clip: the labels see the "
