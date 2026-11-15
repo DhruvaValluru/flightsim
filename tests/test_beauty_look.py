@@ -137,12 +137,114 @@ def test_the_plan_never_colours_the_sun(e):
 
 
 def test_one_warmth_owner_per_grade():
-    """ColorGain is neutral on every grade: WhiteTemp is each grade's only
-    colour-temperature knob, and no grade carries a sun temperature."""
+    """ColorGain is neutral on every grade and no grade carries a sun
+    temperature; the plan's WhiteTemp is white_balance_for's (the illuminant
+    model), never the grade's own number (hyperreal-grade)."""
     for name, row in bl.GRADES.items():
         assert row["ColorGain"] == [1.0, 1.0, 1.0, 1.0], name
         assert "sun_temperature_k" not in row, name
-        assert 6000.0 <= row["WhiteTemp"] <= 6800.0, name
+        assert 6000.0 <= row["WhiteTemp"] <= 6800.0, name   # mode "grade" only
+        assert row["WhiteTint"] == 0.0
+    assert bl.WHITE_BALANCE["mode"] == "illuminant"
+    for e, preset in ((10.0, None), (40.0, None), (10.0, "storm"), (30.0, "overcast")):
+        p = plan(e, world_preset=preset)
+        wb = p["white_balance"]
+        assert p["color_grade"]["WhiteTemp"] == wb["WhiteTemp"] and p["color_grade"]["WhiteTint"] == 0.0
+        assert wb["mode"] == "illuminant" and "white_balance_for" in wb["owner"]
+        assert wb["WhiteTemp"] != bl.GRADES[p["grade"]]["WhiteTemp"] or p["grade"] == "desert_noon"
+
+
+# -- white balance and the camera (hyperreal-grade) ------------------------------------
+
+
+def test_the_white_balance_follows_the_sun_and_keeps_part_of_its_warmth():
+    """A lower sun is a warmer illuminant; the camera's white point follows
+    it awb_share of the way in mired, so the frame keeps the rest of the
+    warmth: monotone in the sun, daylight at share 0, the illuminant at 1."""
+    temps = [bl.white_balance_for(e, "desert_noon")["WhiteTemp"] for e in (0.5, 2, 5, 10, 20, 40, 70, 90)]
+    assert temps == sorted(temps), temps                        # lower sun, lower WhiteTemp (warmer white)
+    assert 4500.0 <= temps[0] < 5000.0 and 6200.0 < temps[-1] < 6500.0
+    low = bl.white_balance_for(5.0, "golden_hour")
+    scene, daylight = low["scene_illuminant_k"], low["daylight_k"]
+    assert scene < low["WhiteTemp"] < daylight                   # between the two whites
+    expect = 1.0e6 / (1.0e6 / daylight + low["awb_share"] * (1.0e6 / scene - 1.0e6 / daylight))
+    assert low["WhiteTemp"] == pytest.approx(expect, abs=0.1)
+    assert bl.white_balance_for(5.0, "golden_hour", settings={"awb_share": 0.0})["WhiteTemp"] == daylight
+    full = bl.white_balance_for(10.0, "golden_hour", settings={"awb_share": 1.0})
+    assert full["WhiteTemp"] == pytest.approx(full["scene_illuminant_k"], abs=0.1)
+    assert full["scene_illuminant_k"] > bl.WHITE_BALANCE["clamp_k"][0]
+    clamped = bl.white_balance_for(0.5, "golden_hour", settings={"awb_share": 1.0})
+    assert clamped["WhiteTemp"] == bl.WHITE_BALANCE["clamp_k"][0]
+    assert low["illuminant"]["sun_k"] < low["illuminant"]["sky_k"] and 0.5 < low["illuminant"]["direct_share"] < 1.0
+    assert bl.sun_cct_k(90.0) == pytest.approx(bl.ILLUMINANT_MODEL["sun_zenith_k"], abs=1.0)
+    assert bl.sun_cct_k(0.0) == bl.ILLUMINANT_MODEL["sun_floor_k"]
+    assert bl.air_mass(90.0) == pytest.approx(1.0, abs=1e-3) and 36.0 < bl.air_mass(0.0) < 40.0
+
+
+def test_a_deck_is_lit_by_the_overcast_sky_and_mode_grade_keeps_the_round_2_numbers():
+    deck = bl.white_balance_for(10.0, "storm", "storm")
+    assert deck["scene_illuminant_k"] == bl.ILLUMINANT_MODEL["overcast_sky_k"]
+    assert deck["illuminant"]["direct_share"] == 0.0 and deck["illuminant"]["sun_k"] is None
+    assert 6500.0 < deck["WhiteTemp"] < 6700.0                 # near neutral, a touch warm: no blue gel
+    # A rain preset with no deck drawn is lit by the open sky.
+    open_sky = bl.white_balance_for(10.0, "storm", "rain", deck_drawn=False)
+    assert open_sky["WhiteTemp"] == bl.white_balance_for(10.0, "desert_noon")["WhiteTemp"]
+    grade_mode = bl.white_balance_for(10.0, "storm", "storm", settings={"mode": "grade"})
+    assert grade_mode["WhiteTemp"] == bl.GRADES["storm"]["WhiteTemp"] and grade_mode["mode"] == "grade"
+    for bad in ({"mode": "auto"}, {"awb_share": 1.5}, {"awb_share": float("nan")}):
+        with pytest.raises(BeautyLookError):
+            bl.white_balance_for(10.0, "storm", settings=bad)
+    # The sidecar carries the row, and stays ASCII and deterministic with it.
+    p = plan(10.0, world_preset="storm")
+    json.dumps(p["white_balance"]).encode("ascii")
+    assert p["white_balance"] == plan(10.0, world_preset="storm")["white_balance"]
+
+
+def test_one_contrast_owner_the_stock_and_a_mild_grade():
+    """The film stock's S-curve is the one contrast after the tonemapper:
+    every grade's ColorContrast and ColorGamma are 1, and the grade's
+    saturation stays within a mild band (the camera response holds the
+    most chromatic pixels)."""
+    for name, row in bl.GRADES.items():
+        assert row["ColorContrast"] == [1.0, 1.0, 1.0, 1.0], name
+        assert row["ColorGamma"] == [1.0, 1.0, 1.0, 1.0], name
+        assert row["ColorOffset"] == [0.0, 0.0, 0.0, 0.0], name
+        assert row["ColorSaturation"][:3] == [1.0, 1.0, 1.0] and 0.85 <= row["ColorSaturation"][3] <= 1.0, name
+    assert set(bl.GRADE_KEYS) == {k for k in bl.GRADES["storm"] if k[0].isupper()}
+
+
+def test_the_camera_shoulder_rolls_into_white_and_moves_nothing_below_it():
+    """The plan's tonemap row is the engine's defaults under the camera's
+    shoulder: mid-grey and the toe are the engine's, the shoulder softer,
+    the asymptote at white (no clip)."""
+    p = plan()
+    assert p["tonemap"]["FilmSlope"] == bl.TONEMAP["FilmSlope"] and p["tonemap"]["FilmToe"] == bl.TONEMAP["FilmToe"]
+    assert p["tonemap"]["FilmShoulder"] == bl.TONEMAP_CAMERA["FilmShoulder"]
+    assert p["tonemap"]["FilmWhiteClip"] == bl.TONEMAP_CAMERA["FilmWhiteClip"] < bl.TONEMAP["FilmWhiteClip"]
+    assert p["tonemap"]["BlueCorrection"] == bl.TONEMAP_HUE["BlueCorrection"]
+    camera = [bl.film_tone_curve(x) for x in (0.001, 0.01, 0.05, 0.18, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 64.0)]
+    engine = [bl.film_tone_curve(x, bl.TONEMAP) for x in (0.001, 0.01, 0.05, 0.18, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 64.0)]
+    assert camera == sorted(camera) and 0.0 <= camera[0] and camera[-1] <= 1.0   # monotone, in range
+    assert bl.film_tone_curve(0.18) == pytest.approx(0.18, abs=1e-6)             # the engine's anchor
+    assert bl.film_tone_curve(0.18, bl.TONEMAP) == pytest.approx(0.18, abs=1e-6)
+    for c, e in zip(camera[:4], engine[:4]):
+        assert c == pytest.approx(e, abs=2e-3)                                     # the toe and mids stand
+    assert camera[7] < engine[7] and camera[8] < engine[8]                        # the shoulder rolls earlier
+    assert engine[9] == 1.0 and camera[9] < 1.0 and camera[10] > 0.99              # no clip, white reached
+    assert bl.film_tone_curve(1.0) == pytest.approx(0.727, abs=0.01)
+
+
+def test_the_plan_carries_the_camera_response_the_host_never_reads():
+    p = plan()
+    row = p["camera_response"]
+    assert {k: row[k] for k in bl.CAMERA_RESPONSE} == bl.CAMERA_RESPONSE
+    assert "beauty_post.py" in row["applied_by"] and row["grey_axis"] == "identity"
+    assert "camera_response" not in LOOK_CPP and "TONEMAP_CAMERA" not in LOOK_CPP
+    for bad in ({"chroma_knee": 1.0}, {"chroma_limit": 1.2}, {"highlight_from": 1.0}, {"size": 16},
+                {"highlight_desaturation": -0.1}):
+        with pytest.raises(BeautyLookError):
+            bl.camera_response_for(bad)
+    assert bl.camera_response_for({"size": 17})["size"] == 17
 
 
 # -- exposure ---------------------------------------------------------------------

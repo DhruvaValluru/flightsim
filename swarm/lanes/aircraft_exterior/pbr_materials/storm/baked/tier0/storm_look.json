@@ -85,8 +85,8 @@
     "dynamic_gi": "none (r.DynamicGlobalIlluminationMethod 0, D3D11 SM5)",
     "ev100_offset": 0.0,
     "exposure_meter_target_p90": 0.4,
-    "grade_contrast": 1.1,
-    "grade_saturation": 0.75,
+    "grade_contrast": 1.0,
+    "grade_saturation": 0.9,
     "rain_rate_mmh": 40.0,
     "wet_saturation_mmh": 4.0
   },

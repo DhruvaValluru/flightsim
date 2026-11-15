@@ -23,6 +23,14 @@ The steps, in order (each has an off word, see :func:`parse_switch`):
 2. ``lut``      ffmpeg ``lut3d`` with the film stock the look chose
    (core/scene/beauty_look.py FILM_STOCKS, assets/looks/film/*.cube,
    tetrahedral), on 16-bit planar RGB.
+2b. ``camera``  the camera response (core/scene/beauty_look.py
+   CAMERA_RESPONSE, the look's ``camera_response`` row): a 3-D LUT this
+   script builds from the row at run time (:func:`camera_response_table`)
+   and applies with ``lut3d`` in 16-bit, after the stock and before the
+   8-bit halation. A hue- and luma-keeping saturation roll-off (the navy
+   sky), and the highlights' desaturation into white (a sensor's clip).
+   The grey axis is the identity. Recorded with the row and the written
+   cube's sha256.
 3. ``halation`` the highlights (``colorlevels`` threshold), blurred
    (``gblur``), tinted warm (``colorchannelmixer``), screened back at a low
    opacity (``blend``): the red bloom of film around bright edges.
@@ -72,7 +80,10 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
 
-BEAUTY_POST_VERSION = 2
+BEAUTY_POST_VERSION = 3
+#: 3 (2026-11-14, hyperreal-grade): the ``camera`` step (the camera
+#: response LUT built from the look's camera_response row) between the
+#: film stock and the halation, 16-bit, so the roll-off draws no rings.
 #: 2 (2026-11-13): the halation blends in 8-bit gbrp. ffmpeg n8.1.3's blend
 #: all_mode=screen on gbrp16le is not the identity over a black layer (it drew
 #: r82's yellow-green cloud contours and r83's purple/green sky rings; Windows
@@ -81,7 +92,7 @@ BEAUTY_POST_VERSION = 2
 #: but the opt-in ones, ``on,-halation`` (or ``no-halation``) leaves steps
 #: out, ``on,+upscale`` adds an opt-in step, ``off`` or unset runs nothing.
 ENV_SWITCH = "FLIGHTSIM_BEAUTY_POST"
-STEPS = ("denoise", "lut", "halation", "grain", "vignette", "upscale")
+STEPS = ("denoise", "lut", "camera", "halation", "grain", "vignette", "upscale")
 #: Steps that run only when a ``+<step>`` word asks for them. The upscale
 #: invents detail (Real-ESRGAN hallucinates texture) and changes the pixel
 #: grid the labels are measured on, so ``on`` alone never runs it.
@@ -91,6 +102,7 @@ OPT_IN_STEPS = ("upscale",)
 #: rain, storm. A clear or overcast frame keeps its pixels.
 NOISY_PRESETS = ("storm", "rain", "hazy")
 OUTPUT_SUFFIX = "_beauty_post.png"
+CAMERA_CUBE_NAME = "camera_response.cube"
 UPSCALE_SUFFIX = "_beauty_4k.png"
 _FRAME_RE = re.compile(r"frame_\d{4}\.png")
 
@@ -142,6 +154,9 @@ TOOLS: Dict[str, Dict[str, Any]] = {
 PARAMS: Dict[str, Dict[str, Any]] = {
     "denoise": {"devices": ["sycl", "cpu"], "quality": "high", "mode": "ldr"},
     "lut": {"interp": "tetrahedral"},
+    # The camera response's numbers are the look's (beauty_look CAMERA_RESPONSE,
+    # the plan's camera_response row); only the interpolation is this script's.
+    "camera": {"interp": "tetrahedral"},
     # Keep pixels above the threshold (sRGB code), blur them 14 px, tint
     # them to film's red halo, screen them back at 12 %.
     "halation": {"threshold": 0.72, "sigma": 14.0, "tint": [1.0, 0.35, 0.12], "opacity": 0.12},
@@ -347,6 +362,93 @@ def write_ppm16(rgb01: np.ndarray, path: Path) -> None:
         out.write(np.ascontiguousarray(data).tobytes())
 
 
+# -- the camera response (pure) ----------------------------------------------------------
+
+#: Rec. 709 luma weights, on the ENCODED values (video luma Y'): the scale a
+#: photographer reads brightness and saturation on, and the one HSV is defined on.
+_LUMA = np.array([0.2126, 0.7152, 0.0722])
+
+
+def camera_response_rgb(rgb: np.ndarray, params: Mapping[str, Any]) -> np.ndarray:
+    """The camera response on display-referred sRGB (..., 3) in [0, 1] ->
+    the same encoding (core/scene/beauty_look.py CAMERA_RESPONSE says why).
+
+    On the encoded values (the display's own, perceptual scale), around each
+    pixel's luma Y' = 0.2126 R + 0.7152 G + 0.0722 B: (1) the HSV saturation
+    s = (max - min) / max above ``chroma_knee`` k is compressed toward
+    ``chroma_limit`` L with the soft knee s' = k + (L - k) u / (1 + u),
+    u = (s - k) / (L - k) (continuous, slope 1 at the knee), and the chroma
+    vector rgb - Y' is scaled by the factor f that lands s' exactly, so the
+    HSV hue (a ratio of the chroma deltas) and Y' are kept; (2) above
+    ``highlight_from`` the chroma fades by a smoothstep to
+    ``highlight_desaturation`` at Y' = 1. A grey (chroma 0) is returned
+    unchanged, so the grey axis is the identity; every output is inside
+    [0, 1] because f is within [0, 1] and Y' lies between min and max."""
+    knee, limit = float(params["chroma_knee"]), float(params["chroma_limit"])
+    start, desat = float(params["highlight_from"]), float(params["highlight_desaturation"])
+    enc = np.clip(np.asarray(rgb, dtype=np.float64), 0.0, 1.0)
+    y = enc @ _LUMA
+    top, bottom = enc.max(axis=-1), enc.min(axis=-1)
+    chroma = top - bottom
+    safe_top = np.where(top > 1e-9, top, 1.0)
+    sat = np.where(top > 1e-9, chroma / safe_top, 0.0)
+    over = sat > knee
+    u = np.where(over, (sat - knee) / (limit - knee), 0.0)
+    target = np.where(over, knee + (limit - knee) * u / (1.0 + u), sat)
+    # f such that the scaled colour Y' + f (rgb - Y') has HSV saturation `target`:
+    # f (top - bottom) = target (Y' + f (top - Y'))  ->  f = target Y' / (chroma - target (top - Y')).
+    denominator = chroma - target * (top - y)
+    safe = np.where(denominator > 1e-9, denominator, 1.0)
+    f = np.where(over & (denominator > 1e-9), target * y / safe, 1.0)
+    f = np.clip(f, 0.0, 1.0)
+    # The highlights' desaturation: a smoothstep from `start` to white.
+    t = np.clip((y - start) / max(1.0 - start, 1e-9), 0.0, 1.0)
+    t = (3.0 - 2.0 * t) * t * t
+    f = f * (1.0 - desat * t)
+    return np.clip(y[..., None] + f[..., None] * (enc - y[..., None]), 0.0, 1.0)
+
+
+def camera_response_table(params: Mapping[str, Any]) -> np.ndarray:
+    """The 3-D LUT of :func:`camera_response_rgb`: (size, size, size, 3)
+    indexed [b, g, r] the way a .cube lists its nodes (red fastest)."""
+    size = int(params["size"])
+    axis = np.linspace(0.0, 1.0, size)
+    b, g, r = np.meshgrid(axis, axis, axis, indexing="ij")
+    grid = np.stack([r, g, b], axis=-1)
+    return camera_response_rgb(grid, params)
+
+
+def write_cube(table: np.ndarray, path: Path, title: str, comments: Sequence[str] = ()) -> str:
+    """``table`` (size, size, size, 3), red fastest -> an Adobe .cube at
+    ``path`` (UTF-8, 6 decimals); returns its sha256."""
+    size = table.shape[0]
+    lines = [f'TITLE "{title}"']
+    lines += [f"# {c}" for c in comments]
+    lines += [f"LUT_3D_SIZE {size}", "DOMAIN_MIN 0.0 0.0 0.0", "DOMAIN_MAX 1.0 1.0 1.0"]
+    flat = np.clip(table, 0.0, 1.0).reshape(-1, 3)
+    lines += [f"{r:.6f} {g:.6f} {b:.6f}" for r, g, b in flat]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return sha256_of(path)
+
+
+def camera_response_cube(params: Mapping[str, Any], path: Path) -> Dict[str, Any]:
+    """Build the camera response LUT from the look's row and write it as a
+    .cube at ``path``; the record (the row, the size, the sha256)."""
+    table = camera_response_table(params)
+    digest = write_cube(table, path, "flightsim camera response", (
+        "scripts/beauty_post.py camera_response_table from the beauty look's camera_response row "
+        "(core/scene/beauty_look.py CAMERA_RESPONSE, UNCALIBRATED); built at run time, not an asset.",
+        "Input and output: sRGB (display-referred), after the film stock. Grey axis: identity.",
+        "chroma_knee {chroma_knee:g} chroma_limit {chroma_limit:g} highlight_from {highlight_from:g} "
+        "highlight_desaturation {highlight_desaturation:g}".format(**{
+            k: float(params[k]) for k in ("chroma_knee", "chroma_limit", "highlight_from",
+                                           "highlight_desaturation")}),
+    ))
+    return {"cube": str(path), "sha256": digest, "size": int(params["size"]),
+            **{k: float(params[k]) for k in ("chroma_knee", "chroma_limit", "highlight_from",
+                                              "highlight_desaturation")}}
+
+
 # -- argument builders (pure) ----------------------------------------------------------
 
 def denoise_args(exe: str, src: Path, dst: Path, device: str, *, mode: str = "ldr",
@@ -377,13 +479,18 @@ def halation_graph(params: Mapping[str, Any]) -> str:
 
 
 def filter_graph(*, cube: Optional[Path], halation: bool, grain: bool, vignette: bool,
-                 seed: int, params: Mapping[str, Mapping[str, Any]] = PARAMS) -> str:
+                 seed: int, params: Mapping[str, Mapping[str, Any]] = PARAMS,
+                 camera: Optional[Path] = None) -> str:
     """The one ffmpeg -filter_complex of steps 2-5, 16-bit planar through the
-    LUT and the halation, 8-bit for ffmpeg's noise and vignette (their only
-    depth), rgb24 PNG out."""
+    film LUT and the camera response LUT, 8-bit for the halation's blend
+    (BEAUTY_POST_VERSION 2) and ffmpeg's noise and vignette (their only
+    depth), rgb24 PNG out. ``camera``: the camera response .cube
+    (:func:`camera_response_cube`), None for none."""
     chain = ["[0:v]format=gbrp16le"]
     if cube is not None:
         chain.append(f"lut3d=file='{_filter_path(cube)}':interp={params['lut']['interp']}")
+    if camera is not None:
+        chain.append(f"lut3d=file='{_filter_path(camera)}':interp={params['camera']['interp']}")
     graph = ",".join(chain)
     if halation:
         # 8-bit before the split: the 16-bit screen blend is broken (BEAUTY_POST_VERSION 2).
@@ -474,12 +581,14 @@ def _step_record(step: str, tool: Mapping[str, Any], args: List[str], params: Ma
 def post_frame(frame: Path, *, cube: Optional[Path], noisy: bool, grain: bool, upscale: bool,
                off: FrozenSet[str] = frozenset(), tools_dir: Optional[Path] = None,
                fetch: bool = True, override: Optional[Mapping[str, Path]] = None,
-               runner: Runner = _run, params: Mapping[str, Mapping[str, Any]] = PARAMS) -> Dict[str, Any]:
+               runner: Runner = _run, params: Mapping[str, Mapping[str, Any]] = PARAMS,
+               camera: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """One ``frame_NNNN.png`` -> ``frame_NNNN_beauty_post.png`` (and ``_beauty_4k.png``).
 
     ``cube``: the stock's .cube (None: no grade). ``noisy``: the look flags
     the frame for the denoiser. ``grain``: the pipeline's grain (False when
-    the engine's is on). ``off``: steps switched off by the environment.
+    the engine's is on). ``camera``: the look's camera_response row (None:
+    no camera response). ``off``: steps switched off by the environment.
     Returns the frame's record; the steps that did not run say why."""
     frame = Path(frame)
     if not frame.is_file() or frame.suffix.lower() != ".png":
@@ -530,6 +639,7 @@ def post_frame(frame: Path, *, cube: Optional[Path], noisy: bool, grain: bool, u
                                       intermediate="16-bit PPM"))
         # 2-5. one ffmpeg pass
         use_lut = cube is not None and "lut" not in off
+        use_camera = camera is not None and "camera" not in off
         use_halation = "halation" not in off
         use_grain = grain and "grain" not in off
         use_vignette = "vignette" not in off
@@ -537,6 +647,13 @@ def post_frame(frame: Path, *, cube: Optional[Path], noisy: bool, grain: bool, u
             steps.append({"step": "lut", "ran": False, "why": "the look names no film stock"})
         elif "lut" in off:
             steps.append({"step": "lut", "ran": False, "why": "switched off"})
+        camera_record: Optional[Dict[str, Any]] = None
+        if camera is None:
+            steps.append({"step": "camera", "ran": False, "why": "the look names no camera response"})
+        elif "camera" in off:
+            steps.append({"step": "camera", "ran": False, "why": "switched off"})
+        else:
+            camera_record = camera_response_cube(camera, work / CAMERA_CUBE_NAME)
         for step, used in (("halation", use_halation), ("vignette", use_vignette)):
             if not used:
                 steps.append({"step": step, "ran": False, "why": "switched off"})
@@ -547,7 +664,8 @@ def post_frame(frame: Path, *, cube: Optional[Path], noisy: bool, grain: bool, u
         ffmpeg = ensure_tool("ffmpeg", tools_dir, fetch=fetch, override=override)
         seed = frame_seed(frame)
         graph = filter_graph(cube=cube if use_lut else None, halation=use_halation,
-                             grain=use_grain, vignette=use_vignette, seed=seed, params=params)
+                             grain=use_grain, vignette=use_vignette, seed=seed, params=params,
+                             camera=Path(camera_record["cube"]) if camera_record else None)
         args = ffmpeg_args(ffmpeg["exe"], source, graph, out)
         started = time.monotonic()
         result = runner(args)
@@ -560,6 +678,11 @@ def post_frame(frame: Path, *, cube: Optional[Path], noisy: bool, grain: bool, u
                                     **params["lut"]}
             steps.append(_step_record("lut", ffmpeg, args, ffmpeg_params["lut"], started,
                                       shared_pass=True))
+        if camera_record is not None:
+            ffmpeg_params["camera"] = {**camera_record, **params["camera"]}
+            steps.append(_step_record("camera", ffmpeg, args, ffmpeg_params["camera"], started,
+                                      shared_pass=True, built_at_run_time=True,
+                                      grey_axis="identity", hue="kept"))
         if use_halation:
             steps.append(_step_record("halation", ffmpeg, args, params["halation"], started,
                                       shared_pass=True))
@@ -618,7 +741,8 @@ def apply_to_bundle(bundle_dir, *, cube: Optional[Path], noisy: bool, grain: boo
                     upscale: bool, off: FrozenSet[str] = frozenset(),
                     tools_dir: Optional[Path] = None, fetch: bool = True,
                     override: Optional[Mapping[str, Path]] = None, runner: Runner = _run,
-                    look: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+                    look: Optional[Mapping[str, Any]] = None,
+                    camera: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """Every ``frame_NNNN.png`` in a render directory through :func:`post_frame`,
     recorded in its render.json as ``beauty_post``. A refusal is recorded
     there too (``{"refused": name, "reason": ...}``) and raised: the frames
@@ -631,6 +755,7 @@ def apply_to_bundle(bundle_dir, *, cube: Optional[Path], noisy: bool, grain: boo
         "steps_off": sorted(off),
         "look": {"film_stock": str(cube) if cube else None, "noisy": bool(noisy),
                  "grain_in_pipeline": bool(grain), "upscale": bool(upscale),
+                 "camera_response": dict(camera) if camera else None,
                  **({"world_preset": look.get("world_preset"), "grade": look.get("grade")}
                     if look else {})},
         "note": ("VISUAL ONLY: the original beauty frame and every label pass are untouched; "
@@ -644,7 +769,8 @@ def apply_to_bundle(bundle_dir, *, cube: Optional[Path], noisy: bool, grain: boo
         if not frames:
             raise BeautyPostError("beauty_post.input", f"{bundle} holds no frame_NNNN.png")
         results = [post_frame(frame, cube=cube, noisy=noisy, grain=grain, upscale=upscale, off=off,
-                              tools_dir=tools_dir, fetch=fetch, override=override, runner=runner)
+                              tools_dir=tools_dir, fetch=fetch, override=override, runner=runner,
+                              camera=camera)
                    for frame in frames]
         record["frames"] = [r["output"] for r in results]
         record["steps"] = results[0]["steps"]
@@ -672,11 +798,20 @@ def apply_to_bundle(bundle_dir, *, cube: Optional[Path], noisy: bool, grain: boo
 
 def look_choices(plan: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     """What the beauty look sidecar (core/scene/beauty_look.py plan) decides
-    for this pipeline: the stock's cube, whether the frame is noisy and
-    whether the grain is ours."""
-    from core.scene.beauty_look import FILM_GRAIN_IN_ENGINE, film_stock_for
+    for this pipeline: the stock's cube, the camera response row, whether
+    the frame is noisy and whether the grain is ours. A plan without a
+    ``camera_response`` row (a sidecar older than hyperreal-grade) gets the
+    row for its own version only when it is a beauty plan (it has a grade),
+    so a measure run (no plan) gets none."""
+    from core.scene.beauty_look import FILM_GRAIN_IN_ENGINE, camera_response_for, film_stock_for
 
     plan = plan or {}
+    camera = plan.get("camera_response")
+    if camera is None and plan.get("grade"):
+        camera = camera_response_for()
+    camera = ({k: camera[k] for k in ("chroma_knee", "chroma_limit", "highlight_from",
+                                      "highlight_desaturation", "size")}
+              if camera else None)
     stock = plan.get("film_stock") or (film_stock_for(plan["grade"]) if plan.get("grade") else None)
     cube = REPO / stock["cube"] if stock and stock.get("cube") else None
     # The engine's grain lives in the engine look (round 5 L1: engine_look.film_grain.values);
@@ -687,6 +822,7 @@ def look_choices(plan: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     return {
         "cube": cube,
         "stock": stock["stock"] if stock else None,
+        "camera": camera,
         "noisy": plan.get("world_preset") in NOISY_PRESETS,
         "grain": not (FILM_GRAIN_IN_ENGINE and engine_grain),
     }
@@ -722,7 +858,7 @@ def apply_to_run(run_dir, plan: Optional[Mapping[str, Any]] = None, *, off: Froz
         records.append(apply_to_bundle(
             bundle, cube=choice["cube"], noisy=choice["noisy"], grain=choice["grain"],
             upscale=upscale, off=off, tools_dir=tools_dir, fetch=fetch, override=override,
-            runner=runner, look=plan))
+            runner=runner, look=plan, camera=choice["camera"]))
     if not records:
         raise BeautyPostError("beauty_post.input", f"{run_dir} holds no render bundle with frames")
     return records
