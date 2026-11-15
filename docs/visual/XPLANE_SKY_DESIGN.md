@@ -965,6 +965,108 @@ Commit: `Sky step 8: sky_compare_round.ps1, sky_compare.py, docs`.
   (Round 99 is the cumulus frame of the 98 set.) Wall seconds per row in
   ROUND.json are the only cost measurement there is.
 
+**Built (sky step 8, 2026-11-15): where the code proved this section wrong, or the
+step narrowed it.** Commit `Sky step 8: sky_compare_round.ps1, sky_contact_sheet.py, docs`.
+
+- **The Python is `scripts/sky_contact_sheet.py`, not `sky_compare.py`** (the step's
+  assignment named it; D15's A2 column had the same name). One script, as designed:
+  numpy + PIL, the frame law `docs/visual/round_<R>/NN_<slug>.jpg` (the plain copy, never
+  the `_post` twin, the same one frame_metrics reads), `summary.json` run id ->
+  `runs/webapp/<id>/frames/*/render.json`, `sheet.jpg` (row 1 the old frame, row 2 the
+  four with the REQUESTED word, the APPLIED shape and its `cloud_type_source`,
+  `MISMATCH`, `march.tier`, `multi_scattering_factor`) and `compare.json`
+  (visual_compare's three numbers vs the old frame, frame_metrics' health and flags, the
+  round's commit and switches from ROUND.json, `FLIGHTSIM_SKY` as the ps1 saw it). The
+  applied shape of a `clear` word is read off `clouds.hidden_layers` (the host hides the
+  layer, step 2) and reported as "no layer", which `world_beauty.PLAN_CLOUD_SHAPES` says
+  is what clear asks for, so clear is a match, not a mismatch. A missing frame or record
+  is a row with `found` / `record` false and a `MISSING` tile; nothing is dropped and
+  nothing is judged for it. Output deterministic for the same inputs (no clock).
+- **The ps1 is as designed**, `scripts/sky_compare_round.ps1 -Round N -Scene S -CompareWith M
+  [-Switches ".."] [-NoPush] [-Words ".."]`: sets `$env:FLIGHTSIM_SKY = "physical"` when
+  unset and passes it to the sheet (recorded in compare.json rather than written into each
+  ROUND.json: visual_fix_round.ps1 owns ROUND.json and was not changed); calls
+  `visual_fix_round.ps1` in process (`& $fixRound @fixArgs`, so a `-Switches` value starting
+  with `-cloud-type=` is bound as a value, never re-tokenised) once per word with the same
+  `-Scenes` and `-CompareWith`; stops by name (`compare.round_failed`, naming the word and
+  the rounds done) on a failed round; then the sheet into `docs/visual/sky_compare/round_<N>/`,
+  pushed to vis-windows through the same worktree. `-Scene` defaults to 3 (D14). The
+  default `-CompareWith` the design left open is refused by name when missing
+  (`compare.no_old`): the old look is the owner's choice, not a guess. Windows PowerShell
+  5.1 drops an empty-string argument to a native command, so `--switches` and
+  `--flightsim-sky` are added only when they have a value.
+- **The design assumed visual_fix_round.ps1 renders the branch you stand on; the code proved
+  it wrong.** Its step 1 hard-coded `$branch = "claude/vibrant-gauss-olema4"` and ran
+  `git checkout -q $branch; git merge --ff-only origin/$branch` before every round, so the
+  documented command would have rendered origin's fbcbaa5d, where `-cloud-type=` is not parsed
+  and is silently ignored (no switch-name allow-list): four frames of one look, and the
+  sheet of the first build would have captioned them "applied None" in plain ink with
+  `mismatches` empty. Repaired (review round 1): visual_fix_round.ps1 takes `-Branch` with the
+  old value as its default (every existing call byte-identical); sky_compare_round.ps1 passes
+  the branch of the current checkout (or its own `-Branch`) and refuses `compare.wrong_branch`
+  before round 1 unless `origin/<branch>` carries `scripts/sky_contact_sheet.py` and
+  `PLAN_CLOUD_SHAPES` in `core/scene/world_beauty.py`. Precondition, stated in every doc that
+  gives the command: claude/xplane-sky must be pushed, or merged into
+  `claude/vibrant-gauss-olema4` and pushed, before the command measures anything. The sheet
+  now reads `clouds.plan.cloud_type_switch` (the word the host PARSED) and says
+  `applied unknown` / `-cloud-type= not parsed` in the alarm colour, lists `unknown`,
+  `switch_not_seen` and `no_record` beside `mismatches` and `missing`, and counts every one of
+  them as a mismatch.
+- **The design's record key `atmosphere.multi_scattering_applied` does not exist.** The C++
+  writes `multi_scattering_factor` (FlightSimClouds.cpp, ApplyAtmosphere's record); the sheet
+  reads that. The design's key name was wrong, not the host's.
+- **Where the old frame is.** Round folders are committed to branch vis-windows, not the code
+  branch; visual_fix_round.ps1 step 4b looks in `docs\visual\round_M` and then
+  `runs\vis-windows-wt\docs\visual\round_M`. The first build looked only under docs/visual
+  and would have said MISSING for an old look the fix round found. Repaired: the sheet takes a
+  root list in that order (`--root`, `--fallback-root`), the ps1 passes the worktree, and
+  compare.json records `old_root` and each tile's `root`. render_record() also reads the flat
+  `frames/render.json` a run without a clip camera writes (webapp/runs.py), between
+  `<run>/render.json` and `frames/<camera>/render.json`.
+- **The Windows sequence above names switches that are not on the branch.** Steps 1, 4 and
+  6 (`-look-cloud-wisp=`, `-sky-multi-scatter=`, `-cirrus=`) have not merged into
+  claude/xplane-sky; FlightSimClouds.cpp parses `-cloud-type=` and `-cloud-march=` only. A
+  known switch with an unknown word refuses by name, but no allow-list of switch NAMES exists
+  in the commandlet or the web app (read in source, 2026-11-15), so a switch nothing parses,
+  such as `-sky-multi-scatter=on` today, is silently ignored and the frame would be
+  mislabelled as a probe. **The round numbers above collide with steps 2, 3 and 5's own §8
+  commands on this branch** (98-99, 100-102, 104-105; VISUAL_FIDELITY_PLAN.md §8), which the
+  design did not reconcile; the compare's two sets moved to 110-113 (scene 3) and 115-118
+  (scene 13), and the ps1 refuses a round number whose folder already exists under either
+  root (`compare.round_exists`). Until steps 1/4/6 merge: skip 97, 102 and 104; run 103
+  (`-cloud-march=probe`) as written; and run
+  `.\scripts\sky_compare_round.ps1 -Round 110 -Scene 3 -CompareWith 95` and
+  `-Round 115 -Scene 13 -CompareWith 95` ONLY once claude/xplane-sky is pushed, or merged into
+  claude/vibrant-gauss-olema4 and pushed (the precondition above; `-Branch` names the branch).
+  Under that condition the four frames compare the step 2/3/5 host against round 95; before
+  it the script refuses rather than render fbcbaa5d. When steps 1/4/6 land, the same command
+  renders them.
+- **Docs**: docs/visual/sky_compare/README.md (location, commands, how to read the sheet,
+  UNMEASURED), VISUAL_FIDELITY_PLAN.md §8 "Sky step 8" and a V6 pointer. README.md's
+  "Physical sky" clouds-block schema and docs/WEATHER.md were not touched in this step:
+  the schema is step 5's record (VISUAL_FIDELITY_PLAN.md §8 "Sky step 5") and nothing in
+  step 8 changes the plan.
+- **Tests**: tests/test_sky_contact_sheet.py (synthetic frames and render.json stubs: the
+  sheet's size, every row including the missing one, the clear-is-a-match law, the
+  MISMATCH, the pixel and health numbers, byte-identical re-runs, the CLI and its refusals;
+  pins: the four words against `PLAN_CLOUD_TYPES`, the render.json keys against the C++
+  `TEXT(...)` writers and the `cloud-type=` parse, the ps1's calls and refusals, the docs).
+  tests/test_powershell_scripts.py lints the ps1's 5.1 syntax; tests/test_platform.py's
+  engine-pin sweep covers it (it names no engine).
+- **UNMEASURED**: both ps1s end to end (that `& script.ps1` sets `$LASTEXITCODE` from the
+  callee's `exit`, read in the PowerShell docs, not witnessed here; the `-Branch`
+  passthrough), every frame, every caption's applied word against a real render.json, and
+  whether round 95's #03 and #13 frames exist in the laptop's `docs\visual\round_95` or
+  `runs\vis-windows-wt\docs\visual\round_95`. The command that measures it is the one
+  above, under its branch precondition; VISUAL_FIDELITY_PLAN.md §8 "Sky step 8".
+- **Repair (review round 1, 2026-11-15)**: three refutations, all on the verify path's
+  truth rather than the look: the documented command rendered origin's
+  claude/vibrant-gauss-olema4 (fbcbaa5d) instead of the branch under review; the sheet
+  could not tell "switch honoured" from "switch never seen" (applied None passed the
+  `mismatches` rule); the old frame was looked up in one of visual_fix_round.ps1's two
+  places; and the round numbers reused steps 2/3/5's. Each is fixed above and pinned in
+  tests/test_sky_contact_sheet.py. One commit for the step, amended.
+
 ## 11. UNMEASURED, in one place
 
 Every look number: `CLOUD_SCATTERING`, the five wisp values, the belly occlusion

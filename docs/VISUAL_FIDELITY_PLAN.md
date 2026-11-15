@@ -302,6 +302,10 @@ test).
 **Measure:** rendered sky cloud fraction (thresholded sky band) vs input
 total cloud cover within ±15%; Gate 6 extinction clause still passes
 under overcast.
+**Verify path (sky step 8):** `.\scripts\sky_compare_round.ps1 -Round N -Scene 3 -CompareWith M`
+renders clear / cumulus / stratocumulus / overcast at one camera and lays them out
+against round M in `docs/visual/sky_compare/round_N/` (§8 "Sky step 8"; UNMEASURED
+until the Windows laptop runs it).
 
 ### V7: Aircraft
 **Where:** `scripts/ue_import_aircraft.py`, `scripts/import_aircraft.py`,
@@ -1122,3 +1126,103 @@ then, in that round's output, read `sky.json` `clouds` (it must equal the golden
 the same keys in the same order), `look_applied.world_beauty.clouds.plan` (the nineteen
 keys above) and `look_applied.cloud_materials` (one line per cloud component, each ending
 `compiled`). If round 104 has already run for step 5, read these from its existing output.
+
+### Sky step 8 (2026-11-15): the owner's four-frame verify path
+
+Step 8 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
+docs/visual/XPLANE_SKY_DESIGN.md §10, with the "Built" note there). Scripts and docs
+only: no shader, material, C++ or plan change, so nothing here draws, no render.json field
+is added (the sheet READS step 2's and step 3's records), and nothing here was rendered.
+
+**What it does.** `scripts/sky_compare_round.ps1 -Round N -Scene S -CompareWith M
+[-Switches "<extra>"] [-NoPush]` (Windows PowerShell 5.1, run from C:\Users\kanth\flightsim
+like visual_fix_round.ps1) first checks the branch (below), sets `FLIGHTSIM_SKY=physical` when
+the shell has not, then runs
+`.\scripts\visual_fix_round.ps1 -Round N+k -Scenes S -Switches "-cloud-type=<word> <extra>"
+-CompareWith M -Branch B` for k = 0..3 over the words clear, cumulus, stratocumulus, overcast: four
+fixed frames of ONE scene at the SAME camera (the pinned spec in runs\visual\specs\NN.json
+replays), each its own round folder `docs/visual/round_<N+k>/` with ROUND.json and the pixel
+report against round M, pushed to vis-windows as every round is. Then
+`scripts/sky_contact_sheet.py --rounds N,N+1,N+2,N+3 --scene S --old M` (numpy + PIL) writes
+`docs/visual/sky_compare/round_<N>/sheet.jpg` (row 1: round M's frame of the scene, the
+"old look"; row 2: the four, each captioned with the word REQUESTED, the shape the host says
+it APPLIED from `look_applied.world_beauty.clouds.layers[0].cloud_type_applied` /
+`cloud_type_source` (`clear` leaves the layer in `hidden_layers`: "no layer", a match),
+`MISMATCH` when they disagree, `applied unknown` when the record names no shape at all (a host
+before sky step 2, `-beauty-clouds=engine`, a cloud material that did not load: FlightSimClouds.cpp's
+early returns write only `clouds.drawn`), `-cloud-type= not parsed` when the record does not
+carry the word asked in `clouds.plan.cloud_type_switch` (the switch string the host parsed),
+`clouds.march.tier` and `atmosphere.multi_scattering_factor`) and `compare.json` (per tile:
+those fields plus `switch_seen` and the `root` the frame came from, visual_compare's
+mean_abs_change / moved_share / mean luma against the old frame, frame_metrics' blank / clipped /
+crushed health with its UNCALIBRATED thresholds, the round's commit and switches,
+`FLIGHTSIM_SKY`, round M's `old_commit` / `old_switches` / `old_root`; the lists `mismatches`,
+`unknown`, `switch_not_seen`, `no_record`, `missing` and the `reading_rule`). Round folders live
+on branch vis-windows, so every one (round M included) is looked up under `docs/visual` and then
+`runs/vis-windows-wt/docs/visual`, the two places visual_fix_round.ps1 step 4b reads, in its
+order. A missing frame is a `MISSING` tile and a row with `found: false`, never a gap. A report,
+never a gate. docs/visual/sky_compare/README.md has the location and how to read it.
+
+**Which code the frames render (the precondition).** visual_fix_round.ps1 step 1 checks out a
+branch and fast-forwards it FROM ORIGIN before every round; the branch was hard-coded
+`claude/vibrant-gauss-olema4` and is now its `-Branch` parameter with that default (every
+existing call unchanged). sky_compare_round.ps1 passes `-Branch` (default: the branch of the
+current checkout) and refuses by name, `compare.wrong_branch`, before round 1 unless
+`origin/<branch>` carries `scripts/sky_contact_sheet.py` and `PLAN_CLOUD_SHAPES` in
+`core/scene/world_beauty.py`. So the four frames render the sky steps ONLY after
+claude/xplane-sky has been pushed (run from that checkout), or merged into
+`claude/vibrant-gauss-olema4` and pushed; until then the laptop would have rendered fbcbaa5d,
+where `-cloud-type=` is not parsed and silently ignored, and the four frames would be one look.
+Nothing was pushed when this was written. The ps1 also refuses a round number whose folder
+already exists under either root (`compare.round_exists`: visual_fix_round.ps1 would overwrite it
+in vis-windows) and a `-Switches` value carrying `-cloud-type=` (`compare.switch_dup`:
+FParse::Value takes the first).
+
+**The switch.** None new to the host: `-cloud-type=` (step 2) does the work; `-Switches` passes
+any extra switch to all four rounds (an A/B set is its own `-Round`); `-Branch` (new on both
+scripts) names the branch rendered. `-Scene` defaults to 3 (the A320
+over New York, 600 m, 18 mm: the design's primary camera, bellies and rims against the sky);
+13 (the 747 at 10 km over the ocean) is the secondary. `-CompareWith` is required and refused
+by name when missing (`compare.no_old`).
+
+**Tested on the Mac (code only).** tests/test_sky_contact_sheet.py: synthetic frames and
+render.json stubs (sheet size, every row including a missing round, clear as a match, a
+MISMATCH, an fbcbaa5d-shaped record and an engine-mode record as `unknown` / `switch_not_seen`
+and never a match, a parsed-but-different word, a frame without a record, the old frame only in
+the fallback root, the flat frames/render.json, a taller old frame, the pixel and health
+numbers, byte-identical re-runs, the CLI and its refusals); pins of the four words against
+`world_beauty.PLAN_CLOUD_TYPES`, of the layout constants by value, of the render.json keys the
+sheet reads against the C++ `TEXT(...)` writers and the `cloud-type=` parse, of both ps1s'
+branch handling, calls, refusals and 5.1 guards, of the round numbers against steps 2/3/5's, and
+of these docs. tests/test_powershell_scripts.py lints both ps1s' syntax. The PowerShell itself
+was not run (no PowerShell here). Targeted set (test_sky_contact_sheet, test_powershell_scripts,
+test_platform, test_frame_metrics, test_visual_compare, test_stress_ladder): 197 passed, 0 failed, exit 0.
+Full suite on the committed tree, `-o addopts="" -m "not gate" -n auto`: 5859 passed, 14 skipped, 0 failed (7 min 01 s, exit 0; the repaired step's new tests on top of step 7's).
+`bash scripts/check_bridge_api.sh`: API surface matches (not a compile). No existing test was
+weakened, skipped or deleted.
+
+**UNMEASURED.** Every frame; both ps1s end to end (the `-Branch` passthrough included);
+whether round 95's #03 and #13 frames are in the laptop's `docs\visual\round_95` or
+`runs\vis-windows-wt\docs\visual\round_95` (the old look, the two places the sheet reads;
+`-CompareWith` another round if neither has it). Steps 1, 4 and 6 of the brief are not on
+claude/xplane-sky yet, so the design's rounds 97, 102 and 104 (their switches) do not apply until
+they merge; the compare itself does. The round numbers are 110-113 (scene 3) and 115-118 (scene
+13) because steps 2, 3 and 5 above reserved 98-105. The exact Windows commands, from
+C:\Users\kanth\flightsim, AFTER claude/xplane-sky is pushed (run from its checkout) or merged
+into claude/vibrant-gauss-olema4 and pushed (run from that checkout, or add `-Branch
+claude/vibrant-gauss-olema4`); run before that, the script refuses `compare.wrong_branch` and
+renders nothing:
+
+    $env:FLIGHTSIM_SKY = "physical"
+    .\scripts\sky_compare_round.ps1 -Round 110 -Scene 3 -CompareWith 95
+    .\scripts\sky_compare_round.ps1 -Round 115 -Scene 13 -CompareWith 95
+
+then open `docs\visual\sky_compare\round_110\sheet.jpg` and `round_115\sheet.jpg`, read
+`compare.json`: `mismatches`, `unknown`, `switch_not_seen`, `no_record` and `missing` must ALL
+be empty and every tile's `applied` must be a shape word or "no layer" (each word drew its own
+shape on a host that saw the switch; `unknown` or `switch_not_seen` non-empty means the host
+never parsed `-cloud-type=` and the four frames are one look), and judge the four against row 1
+and the reference photo. Frames: `docs/visual/round_110..113/03_*.jpg` and
+`docs/visual/round_115..118/13_*.jpg`. On scene 13 the stratocumulus and overcast tiles show a
+deck above the 747 (the plan layer keeps bottom = AGL + 1 km; only an unstated cumulus layer is
+lowered, c641a8c4): the rule, not a defect.
