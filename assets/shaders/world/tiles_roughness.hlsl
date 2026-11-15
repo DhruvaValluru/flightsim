@@ -7,6 +7,22 @@
 // that picks up the sky). MICRO_VARIATION and ROUGHNESS_PUDDLE are UNCALIBRATED:
 // set by probe render on the render machine.
 //
+// Wet ground, generation 7 (2026-11-14, #15 / #09 / #10 heavy rain over Kansas farmland):
+// the frames drew near-black ground scratched with fine white streaks. Read from the code
+// at Wetness 1: PuddleAmount was 0.5 x Wetness, so the shared Puddles() threshold
+// smoothstep(0.5, 0.58, n) on a value noise centred on 0.5 marked about half of all flat
+// ground (normal z > 0.96: nearly all prairie) as standing water at roughness 0.05, a
+// mirror. A mirror under the tiles' detail normal picks up the bright sky in sub-pixel
+// glints at kilometres of range on D3D11 / SM5 (no specular anti-aliasing), the white
+// streaks along field and road edges; and the colour took 0.70 x 0.45 = 0.32 of the
+// albedo there, the black. Now: puddles at PUDDLE_AMOUNT_SCALE of PuddleAmount (~4 % of
+// flat ground at Wetness 1), faded out by PUDDLE_FADE_M of range; standing water at a
+// wet-asphalt sheen (ROUGHNESS_PUDDLE 0.15, not a mirror); and the wet specular widened
+// with range toward ROUGHNESS_WET_FAR over WET_SPEC_FADE_M, so a far pixel's sub-pixel
+// slopes read as a broad sheen, not glints. Every change rides on Wetness / PuddleAmount:
+// at Wetness 0 (PuddleAmount 0) the output is the dry roughness, unchanged.
+// ROUGHNESS_WET_FAR, WET_SPEC_FADE_M and PUDDLE_FADE_M are UNCALIBRATED.
+//
 // Inputs (the script's WORLD_TILES_INPUTS["tiles_roughness"]):
 //   WorldPos      float3  absolute world position, cm
 //   CameraPos     float3  absolute camera position, cm
@@ -16,7 +32,11 @@
 //   DetailFadeM   float   the micro variation is gone at this range
 const float ROUGHNESS_DRY = 0.92;
 const float ROUGHNESS_WET = 0.25;
-const float ROUGHNESS_PUDDLE = 0.05;
+const float ROUGHNESS_PUDDLE = 0.15;
+const float ROUGHNESS_WET_FAR = 0.55;
+const float WET_SPEC_FADE_M = 2500.0;
+const float PUDDLE_FADE_M = 3000.0;
+const float PUDDLE_AMOUNT_SCALE = 0.5;
 const float MICRO_VARIATION = 0.06;
 struct FWorldTilesRoughness
 {
@@ -51,6 +71,10 @@ FWorldTilesRoughness T;
 float rangeM = length(WorldPos - CameraPos) / 100.0;
 float fade = saturate(1.0 - rangeM / max(DetailFadeM, 1.0));
 float micro = (T.Value2(WorldPos.xy / 80.0) - 0.5) * 2.0 * MICRO_VARIATION * fade;
-float r = lerp(ROUGHNESS_DRY + micro, ROUGHNESS_WET, saturate(Wetness));
-float puddle = T.Puddles(WorldPos, normalize(NormalWS), saturate(PuddleAmount));
-return saturate(lerp(r, ROUGHNESS_PUDDLE, puddle));
+float farSpec = saturate(rangeM / WET_SPEC_FADE_M);
+float rWet = lerp(ROUGHNESS_WET, ROUGHNESS_WET_FAR, farSpec);
+float r = lerp(ROUGHNESS_DRY + micro, rWet, saturate(Wetness));
+float puddle = T.Puddles(WorldPos, normalize(NormalWS), saturate(PuddleAmount) * PUDDLE_AMOUNT_SCALE)
+               * saturate(1.0 - rangeM / PUDDLE_FADE_M);
+float rPuddle = lerp(ROUGHNESS_PUDDLE, rWet, farSpec);
+return saturate(lerp(r, rPuddle, puddle));

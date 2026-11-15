@@ -1376,7 +1376,14 @@ WORLD_MPC_SCALARS: Dict[str, float] = {
     "ShadeNeutralAmount": 0.0,
 }
 #: How much of the wetness becomes standing water on flat ground. UNCALIBRATED.
+#: (FlightSimClouds.cpp PuddleShareDefault pins the same 0.5.)
 PUDDLE_SHARE_OF_WETNESS = 0.5
+#: Tiles generation 7 (2026-11-14): the tiles' colour and roughness shaders take the
+#: puddles at this share of PuddleAmount. At the full amount the shared Puddles()
+#: threshold marked ~41 % of all flat ground as water at Wetness 1 (#15 / #09 / #10
+#: black, glint-scratched farmland); at half, ~4 % (tests/test_tiles_wet_ground.py).
+#: UNCALIBRATED.
+PUDDLE_AMOUNT_SCALE = 0.5
 
 #: The tileset's imagery correction: properties of the photogrammetry (the haze
 #: and the colour loss baked in when it was captured), not of today's weather,
@@ -1402,10 +1409,15 @@ TILES_DEHAZE_TOE = 0.5
 #: order (a wet porous surface's albedo falls by about a third); the rest are
 #: UNCALIBRATED: set by probe render on the render machine.
 WET_DARKENING = 0.30
-PUDDLE_DARKENING = 0.55
+PUDDLE_DARKENING = 0.30
 ROUGHNESS_DRY = 0.92
 ROUGHNESS_WET = 0.25
-ROUGHNESS_PUDDLE = 0.05
+ROUGHNESS_PUDDLE = 0.15
+#: Tiles generation 7 (tiles_roughness.hlsl): the wet specular widened with range, and the
+#: puddles faded out with range. UNCALIBRATED.
+ROUGHNESS_WET_FAR = 0.55
+WET_SPEC_FADE_M = 2500.0
+PUDDLE_FADE_M = 3000.0
 
 
 def tiles_dehaze(albedo: Sequence[float], dehaze: float = TILES_DEHAZE) -> Tuple[float, ...]:

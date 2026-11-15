@@ -20,6 +20,7 @@
 // Inputs (the script's WORLD_TILES_INPUTS["tiles_base_colour"]):
 //   Albedo        float3  the Cesium base-colour texture times its factor (linear)
 //   WorldPos      float3  absolute world position, cm
+//   CameraPos     float3  absolute camera position, cm (the puddles' range fade)
 //   NormalWS      float3  the vertex normal, world space
 //   Wetness       float   0..1
 //   PuddleAmount  float   0..1
@@ -28,7 +29,10 @@
 const float3 HAZE_RGB = float3(0.010, 0.015, 0.022);
 const float DEHAZE_TOE = 0.5;
 const float WET_DARKENING = 0.30;
-const float PUDDLE_DARKENING = 0.55;
+const float PUDDLE_DARKENING = 0.30;
+// Generation 7 (tiles_roughness.hlsl's header): the puddles fade out by this range.
+const float PUDDLE_FADE_M = 3000.0;
+const float PUDDLE_AMOUNT_SCALE = 0.5;
 struct FWorldTilesColour
 {
 	// shared: world noise (tiles_base_colour.hlsl, tiles_normal.hlsl, tiles_roughness.hlsl)
@@ -66,6 +70,8 @@ float3 c = (a - h * a / max(a + k, 1e-6)) / (1.0 - h / (1.0 + k));
 float luma = dot(c, float3(0.2126, 0.7152, 0.0722));
 c = max(lerp(float3(luma, luma, luma), c, Saturation), 0.0);
 c *= 1.0 - WET_DARKENING * saturate(Wetness);
-float puddle = T.Puddles(WorldPos, normalize(NormalWS), saturate(PuddleAmount));
+float rangeM = length(WorldPos - CameraPos) / 100.0;
+float puddle = T.Puddles(WorldPos, normalize(NormalWS), saturate(PuddleAmount) * PUDDLE_AMOUNT_SCALE)
+               * saturate(1.0 - rangeM / PUDDLE_FADE_M);
 c *= 1.0 - PUDDLE_DARKENING * puddle;
 return saturate(c);
