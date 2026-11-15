@@ -3686,7 +3686,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		double SeaRadiusM = 0.0;
 		FParse::Value(*Params, TEXT("beauty-sea-radius-m="), SeaRadiusM);
+		// Hyperreal stormsea: the card's steady surface wind (knots, the bearing it blows FROM) is the
+		// beauty sea's state; the physics read it long before this and are untouched.
 		GoogleTiles.ApplyBeautyGround(World, Director->GetActorLocation().Z / 100.0, SeaRadiusM,
+		                              Card.WindSpeedKnots * (1852.0 / 3600.0), Card.WindFromDegrees,
 		                              VisualScene.BeautyOnlyActors);
 	}
 
