@@ -73,21 +73,37 @@ def test_the_contrail_material_reads_world_position_vertex_life_and_is_lit_direc
 
 # -- the shader ----------------------------------------------------------------------
 
-def test_the_shader_is_a_tube_with_world_space_puffs_that_age():
+def test_the_shader_is_a_tube_with_fixed_cell_world_space_puffs_blended_by_age():
     shader = _read(SHADER)
     documented = re.findall(r"^//\s{2,}(\w+)\s+float", shader, re.M)
     assert tuple(documented) == look.SHADER_INPUTS["contrail_opacity"]
     # round 47's formation ramp is untouched
     assert "float ramp = FormationRamp > 0.0 ? FormationRamp : 0.04;" in shader
     assert "float formed = smoothstep(Formation, Formation + ramp, UV.x);" in shader
-    # the chord of a cylinder across, softening with the sample's own life
+    # the chord of a cylinder across, raised to a power with a rim softening on top;
+    # never a smoothstep OF the chord (the review's flat-topped box)
     assert "float chord = sqrt(saturate(1.0 - x * x));" in shader
-    assert "float soft = lerp(0.45, 1.0, life);" in shader
-    assert "float across = smoothstep(0.0, soft, chord);" in shader
-    # world-space value noise, the cell coarsening with age, wrapped for an iGPU's sin
-    assert "float3 p = WorldPos / cellCm;" in shader
-    assert "float cellCm = max(PuffCellCm, 50.0) * (1.0 + 4.0 * life);" in shader
-    assert "cell = fmod(cell + 4096.0, 512.0);" in shader
+    assert "float acrossPower = lerp(1.0, 2.0, life);" in shader
+    assert "float rim = lerp(0.25, 0.6, life);" in shader
+    assert "float across = pow(max(chord, 1.0e-4), acrossPower) * smoothstep(0.0, rim, chord);" in shader
+    assert "smoothstep(0.0, soft, chord)" not in shader
+    # world-space value noise with FIXED cells per octave: nothing scales the lattice
+    # about the world origin by Life (the review's shimmer)
+    assert "float cell0 = max(PuffCellCm, 50.0);" in shader
+    assert "float3 p = WorldPos / cell0;" in shader
+    assert "float3 p2 = WorldPos / (cell0 * 0.37) + float3(17.0, 29.0, 43.0);" in shader
+    assert "float3 p3 = WorldPos / (cell0 * 5.0) + float3(5.0, 11.0, 23.0);" in shader
+    assert "(1.0 + 4.0 * life)" not in shader and "cellCm" not in shader
+    assert "float wDetail = lerp(0.35, 0.15, life);" in shader
+    assert "float wBody = lerp(0.65, 0.35, life);" in shader
+    assert "float wCoarse = lerp(0.0, 0.5, life);" in shader
+    assert "float n = wBody * n1 + wDetail * n2 + wCoarse * n3;" in shader
+    # every corner wrapped AFTER its +1 offset (cA low, cB high), never the base cell alone
+    for lo, hi, c in (("cA", "cB", "cell"), ("dA", "dB", "cell2"), ("eA", "eB", "cell3")):
+        assert f"float3 {lo} = {c} - 512.0 * floor({c} / 512.0);" in shader
+        assert f"float3 {hi} = ({c} + 1.0) - 512.0 * floor(({c} + 1.0) / 512.0);" in shader
+    assert "fmod(" not in shader
+    assert not re.search(r"float3\(\s*[01]\s*,\s*[01]\s*,\s*[01]\s*\)", shader)   # no post-wrap +1 corners
     assert "LocalPos" not in shader
     # the break-up: the cut rises with life; Puff 0 is generation 12's even lumpiness
     assert "float cut = saturate(Puff) * smoothstep(0.1, 1.0, life) * 0.75;" in shader
@@ -95,6 +111,10 @@ def test_the_shader_is_a_tube_with_world_space_puffs_that_age():
     assert "return saturate(Opacity * formed * fade * across * lumpy);" in shader
     # bounded: no loops
     assert not re.search(r"\b(for|while)\s*\(", shader)
+    # the twin's constants are the shader's
+    assert look.CONTRAIL_NOISE_OCTAVES == ((1.0, (0.0, 0.0, 0.0)), (0.37, (17.0, 29.0, 43.0)), (5.0, (5.0, 11.0, 23.0)))
+    assert look.CONTRAIL_NOISE_WRAP == 512.0 and look.CONTRAIL_NOISE_MIN_CELL_CM == 50.0
+    assert look.CONTRAIL_ACROSS_POWER == (1.0, 2.0) and look.CONTRAIL_ACROSS_RIM == (0.25, 0.6)
 
 
 def test_the_tip_vortex_ribbon_takes_the_chord_profile_and_keeps_its_inputs():
@@ -103,7 +123,138 @@ def test_the_tip_vortex_ribbon_takes_the_chord_profile_and_keeps_its_inputs():
     assert tuple(re.findall(r"^//\s{2,}(\w+)\s+float", shader, re.M)) == m.SHADER_INPUTS
     ribbon = shader[shader.index("if (Shape < 0.5)"):shader.index("else if (Shape < 1.5)")]
     assert "float chord = sqrt(saturate(1.0 - x * x));" in ribbon
-    assert "smoothstep(0.0, lerp(0.5, 1.0, saturate(UV.x)), chord)" in ribbon
+    assert ("float across = pow(max(chord, 1.0e-4), lerp(1.0, 2.0, age)) * smoothstep(0.0, lerp(0.25, 0.6, age), chord);"
+            in ribbon)
+    assert "float age = saturate(UV.x);" in ribbon
+    assert "smoothstep(0.0, lerp(0.5, 1.0, saturate(UV.x)), chord)" not in ribbon   # the flat-topped box
+    # the ribbon's profile is the contrail twin's (UV.x the age), so the same numbers hold
+    for age in (0.02, 0.5, 1.0):
+        for v in (0.1, 0.3, 0.5, 0.75, 0.9):
+            x = abs(v * 2.0 - 1.0)
+            chord = math.sqrt(max(1.0 - x * x, 0.0))
+            t = min(max(chord / (0.25 + 0.35 * age), 0.0), 1.0)
+            expected = max(chord, 1.0e-4) ** (1.0 + age) * t * t * (3.0 - 2.0 * t)
+            assert look.contrail_across(v, age) == pytest.approx(expected)
+
+
+# -- the shader's numbers (the twin) ---------------------------------------------------
+
+CRUISE_CM = (7.2e5, -3.1e5, 1.1e6)      # 7 km out, 11 km up: a 747's cruise in world cm
+CELL_CM = 100.0 * look.CONTRAIL_DEFAULTS["PuffCellM"]
+
+
+def _old_sweeping_noise(world_cm, life, cell_cm):
+    """The review's defect for reference: the lattice scaled about the WORLD
+    ORIGIN by (1 + 4 Life). Not the shader; here to show the test discriminates."""
+    scale = max(cell_cm, 50.0) * (1.0 + 4.0 * life)
+    return (0.65 * look.contrail_value_noise([v / scale for v in world_cm])
+            + 0.35 * look.contrail_value_noise([v / (scale * 0.37) + o for v, o in zip(world_cm, (17.0, 29.0, 43.0))]))
+
+
+def test_a_fixed_world_point_keeps_its_noise_over_a_tenth_of_a_second():
+    # a 25 s trail ages 0.004 of Life in 0.1 s; a 240 s persistent one 0.0004
+    for lifetime in (look.CONTRAIL_DEFAULTS["LifetimeS"], look.CONTRAIL_DEFAULTS["PersistentLifetimeS"]):
+        step = 0.1 / lifetime
+        for life in (0.02, 0.3, 0.6, 0.95):
+            for point in (CRUISE_CM, (1.0e4, 2.0e4, 3.0e5), (-4.9e6, 2.2e6, 9.5e5)):
+                before = look.contrail_puff_noise(point, life, CELL_CM)
+                after = look.contrail_puff_noise(point, life + step, CELL_CM)
+                # only the blend weights move: |dn| <= |dweights| x |n_a - n_b| < 0.5 step
+                assert abs(after - before) <= 0.5 * step + 1e-9, (lifetime, life, point)
+                assert abs(after - before) < 0.003
+    # the full opacity at a fixed point moves only by the slow fade and blend
+    uv = (0.5, 0.5)
+    for life in (0.1, 0.5):
+        a = look.contrail_opacity(uv, CRUISE_CM, life, 1.0, 0.0, 0.04, 0.6, CELL_CM)
+        b = look.contrail_opacity(uv, CRUISE_CM, life + 0.004, 1.0, 0.0, 0.04, 0.6, CELL_CM)
+        assert a > 0.0 and abs(a - b) < 0.02
+    # and the review's origin-scaled lattice re-rolled the lump in that same 0.1 s
+    swept = max(abs(_old_sweeping_noise(CRUISE_CM, life, CELL_CM) - _old_sweeping_noise(CRUISE_CM, life + 0.004, CELL_CM))
+                for life in (0.1, 0.3, 0.6))
+    assert swept > 0.05
+
+
+def _old_base_wrapped_noise(p):
+    """The review's seam for reference: the base cell wrapped, the +1 corners
+    added after. Not the shader; here to show the test discriminates."""
+    cell = [math.floor(v) for v in p]
+    f = [v - c for v, c in zip(p, cell)]
+    f = [t * t * (3.0 - 2.0 * t) for t in f]
+    base = [(c + 4096.0) % 512.0 for c in cell]
+    h = {(ix, iy, iz): look._contrail_hash(base[0] + ix, base[1] + iy, base[2] + iz)
+         for ix in (0, 1) for iy in (0, 1) for iz in (0, 1)}
+    x0 = look._lerp(look._lerp(h[0, 0, 0], h[1, 0, 0], f[0]), look._lerp(h[0, 1, 0], h[1, 1, 0], f[0]), f[1])
+    x1 = look._lerp(look._lerp(h[0, 0, 1], h[1, 0, 1], f[0]), look._lerp(h[0, 1, 1], h[1, 1, 1], f[0]), f[1])
+    return look._lerp(x0, x1, f[2])
+
+
+def test_the_value_noise_has_no_seam_at_the_wrap_boundary():
+    wrap = look.CONTRAIL_NOISE_WRAP
+    # a trilinear octave's steepest slope is 1.5 per cell (the smoothstep's), so a
+    # 0.002 cell step moves it under 0.003 anywhere, boundary or not
+    h = 0.002
+    for axis in range(3):
+        for boundary in (wrap, 2.0 * wrap, -wrap, 7.0 * wrap):
+            for other in (0.3, 511.7, 1023.45):
+                p = [other, other * 0.7 + 3.0, other * 1.3 + 1.0]
+                p[axis] = boundary - h
+                before = look.contrail_value_noise(p)
+                p[axis] = boundary + h
+                after = look.contrail_value_noise(p)
+                assert abs(after - before) < 0.003 * 2.0, (axis, boundary, other)
+                # the shared corner hashes agree from both sides: the limit values match
+                p[axis] = boundary - 1e-7
+                p_lo = look.contrail_value_noise(p)
+                p[axis] = boundary
+                assert look.contrail_value_noise(p) == pytest.approx(p_lo, abs=1e-5)
+    # the three octaves' world-space wrap positions, in cm, are seam-free too
+    cell0 = CELL_CM
+    for scale, offset in look.CONTRAIL_NOISE_OCTAVES:
+        for axis in range(3):
+            world = [1234.5, 876.0, 5432.1]
+            world[axis] = (wrap - offset[axis]) * cell0 * scale
+            lo, hi = list(world), list(world)
+            lo[axis] -= 0.5
+            hi[axis] += 0.5
+            assert abs(look.contrail_puff_noise(hi, 0.4, cell0) - look.contrail_puff_noise(lo, 0.4, cell0)) < 0.005
+    # the review's base-only wrap jumps at the boundary (the test discriminates)
+    jumps = []
+    for other in (0.3, 511.7, 1023.45, 200.2, 77.7):
+        p = [other, other * 0.7 + 3.0, other * 1.3 + 1.0]
+        p[0] = wrap - h
+        a = _old_base_wrapped_noise(p)
+        p[0] = wrap + h
+        jumps.append(abs(_old_base_wrapped_noise(p) - a))
+    assert max(jumps) > 0.05
+
+
+def test_the_young_trail_profile_is_not_flat_and_the_old_one_is_softer():
+    ys = [i / 200.0 for i in range(1, 200)]
+    young = [look.contrail_across(y, 0.02) for y in ys]
+    peak = max(young)
+    assert young[99] == pytest.approx(peak)                      # thickest through the axis
+    # it varies over the WHOLE width: strictly decreasing from the axis outwards
+    outward = young[99:]
+    assert all(b < a for a, b in zip(outward, outward[1:]))
+    # the review's smoothstep(0, 0.46, chord) sat within 1 % of its peak over 89 % of
+    # the width; the chord profile is that flat over well under a quarter of it
+    near_peak = sum(1 for v in young if v > 0.99 * peak) / len(young)
+    assert near_peak < 0.25
+    # and it has come well down by a quarter of the way out (the flat top had not)
+    assert young[149] < 0.9 * peak and young[179] < 0.65 * peak
+    # the body is a chord at youth: half a radius out it is sqrt(0.75)^1.02
+    assert look.contrail_across(0.75, 0.02) == pytest.approx(math.sqrt(0.75) ** 1.02, rel=1e-6)
+    # nothing at the rim, at every age
+    for life in (0.0, 0.5, 1.0):
+        assert look.contrail_across(0.0, life) == 0.0 and look.contrail_across(1.0, life) == 0.0
+        assert look.contrail_across(0.5, life) == pytest.approx(1.0)
+    # an old trail is softer still everywhere off the axis (a parabola with a wide rim)
+    old = [look.contrail_across(y, 1.0) for y in ys]
+    assert all(o <= y_ + 1e-12 for o, y_ in zip(old, young))
+    assert old[149] < young[149] and old[189] < 0.5 * young[189]
+    # the across profile is the whole-opacity's shape too
+    o = [look.contrail_opacity((0.5, y), CRUISE_CM, 0.02, 1.0, 0.0, 0.04, 0.0, CELL_CM) for y in (0.5, 0.75, 0.9)]
+    assert o[0] > o[1] > o[2] > 0.0
 
 
 # -- the C++ -------------------------------------------------------------------------

@@ -892,8 +892,11 @@ CONTRAIL_DEFAULTS = {
     # wake descends 1-2 m/s, from memory).
     "VortexRollupS": 12.0, "VortexSpanFraction": 0.785, "WakeSinkMPerS": 1.5,
     # The puffs (contrail_opacity.hlsl): the break-up strength (0 = generation
-    # 12's even lumpiness; -contrail-puffs=off is the A/B) and a young trail's
-    # puff cell in metres (it grows x5 over the trail's life).
+    # 12's even lumpiness; -contrail-puffs=off is the A/B) and the body puff
+    # cell in metres. The three noise octaves have FIXED cells (0.37x, 1x, 5x of
+    # it; CONTRAIL_NOISE_OCTAVES) and Life only moves the blend weights towards
+    # the coarse one (contrail_noise_weights): a fixed point in the air keeps
+    # its lump from frame to frame.
     "PuffBreakup": 0.6, "PuffCellM": 6.0,
     # Persistence (the stated physics, where the humidity exists): a contrail
     # persists only in ice-supersaturated air. RHi = RH x e_sat,water / e_sat,ice
@@ -955,6 +958,110 @@ def contrail_persistence(rh_pct, temperature_k, constants=None):
     rhi = float(rh_pct) * ice_over_water_saturation_ratio(temperature_k)
     factor = min(max((rhi - c["PersistenceRhiOnsetPct"]) / max(c["PersistenceRhiSpanPct"], 1e-3), 0.0), 1.0)
     return rhi, factor, c["LifetimeS"] + factor * (c["PersistentLifetimeS"] - c["LifetimeS"])
+
+
+#: contrail_opacity.hlsl's three value-noise octaves: (cell as a multiple of
+#: PuffCellCm, the lattice offset in cells), in the shader's order body, detail,
+#: coarse. FIXED cells: the shader never scales the lattice about the world
+#: origin (the review's WorldPos / (PuffCellCm x (1 + 4 Life)) swept ~270 cells/s
+#: through a fixed point at cruise, so the lumps re-rolled every frame).
+CONTRAIL_NOISE_OCTAVES = ((1.0, (0.0, 0.0, 0.0)), (0.37, (17.0, 29.0, 43.0)), (5.0, (5.0, 11.0, 23.0)))
+#: The hash's cell wrap (cells), applied to EACH corner after its +1 offset.
+CONTRAIL_NOISE_WRAP = 512.0
+#: The smallest body cell the shader accepts, cm (max(PuffCellCm, 50)).
+CONTRAIL_NOISE_MIN_CELL_CM = 50.0
+#: The across profile chord^k x smoothstep(0, rim, chord): (k, rim) at Life 0 and 1.
+CONTRAIL_ACROSS_POWER = (1.0, 2.0)
+CONTRAIL_ACROSS_RIM = (0.25, 0.6)
+
+
+def _lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def _saturate(v):
+    return min(max(float(v), 0.0), 1.0)
+
+
+def _smoothstep(a, b, v):
+    t = _saturate((v - a) / (b - a)) if b != a else (1.0 if v >= b else 0.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _contrail_hash(cx, cy, cz):
+    """frac(sin(dot(c, k)) * 43758.5453), the shader's corner hash."""
+    v = math.sin(12.9898 * cx + 78.233 * cy + 37.719 * cz) * 43758.5453
+    return v - math.floor(v)
+
+
+def _wrap_cell(c, wrap=CONTRAIL_NOISE_WRAP):
+    """c - wrap x floor(c / wrap): the true modulo, always in [0, wrap)."""
+    return c - wrap * math.floor(c / wrap)
+
+
+def contrail_value_noise(p):
+    """The twin of one octave of contrail_opacity.hlsl: trilinear value noise
+    of ``p`` (in cells), with each of the eight corners wrapped AFTER its +1
+    offset (so the hash at a corner two cells share agrees from both sides:
+    no seam at the wrap boundary)."""
+    cell = [math.floor(v) for v in p]
+    f = [v - c for v, c in zip(p, cell)]
+    f = [t * t * (3.0 - 2.0 * t) for t in f]
+    lo = [_wrap_cell(c) for c in cell]
+    hi = [_wrap_cell(c + 1.0) for c in cell]
+    h = {}
+    for ix in (0, 1):
+        for iy in (0, 1):
+            for iz in (0, 1):
+                h[ix, iy, iz] = _contrail_hash((lo, hi)[ix][0], (lo, hi)[iy][1], (lo, hi)[iz][2])
+    x0 = _lerp(_lerp(h[0, 0, 0], h[1, 0, 0], f[0]), _lerp(h[0, 1, 0], h[1, 1, 0], f[0]), f[1])
+    x1 = _lerp(_lerp(h[0, 0, 1], h[1, 0, 1], f[0]), _lerp(h[0, 1, 1], h[1, 1, 1], f[0]), f[1])
+    return _lerp(x0, x1, f[2])
+
+
+def contrail_noise_weights(life):
+    """(body, detail, coarse) blend weights at this Life; they sum to 1 and only
+    they move with age (never the cells)."""
+    life = _saturate(life)
+    return _lerp(0.65, 0.35, life), _lerp(0.35, 0.15, life), _lerp(0.0, 0.5, life)
+
+
+def contrail_puff_noise(world_pos_cm, life, puff_cell_cm):
+    """The twin of the shader's ``n``: the three fixed-cell octaves of world-space
+    value noise, blended by Life."""
+    cell0 = max(float(puff_cell_cm), CONTRAIL_NOISE_MIN_CELL_CM)
+    n = 0.0
+    for weight, (scale, offset) in zip(contrail_noise_weights(life), CONTRAIL_NOISE_OCTAVES):
+        p = [float(v) / (cell0 * scale) + o for v, o in zip(world_pos_cm, offset)]
+        n += weight * contrail_value_noise(p)
+    return n
+
+
+def contrail_across(uv_y, life):
+    """The twin of the across profile: chord^k x smoothstep(0, rim, chord), the
+    chord sqrt(1 - x^2) of a cylinder, k and rim rising with Life. It varies
+    over the whole width at every age (no flat top)."""
+    life = _saturate(life)
+    x = abs(float(uv_y) * 2.0 - 1.0)
+    chord = math.sqrt(_saturate(1.0 - x * x))
+    power = _lerp(*CONTRAIL_ACROSS_POWER, life)
+    rim = _lerp(*CONTRAIL_ACROSS_RIM, life)
+    return math.pow(max(chord, 1.0e-4), power) * _smoothstep(0.0, rim, chord)
+
+
+def contrail_opacity(uv, world_pos_cm, life, opacity, formation, formation_ramp, puff, puff_cell_cm):
+    """The twin of contrail_opacity.hlsl, input for input."""
+    ramp = formation_ramp if formation_ramp > 0.0 else 0.04
+    formed = _smoothstep(formation, formation + ramp, uv[0])
+    life = _saturate(life)
+    fade = 1.0 - _smoothstep(0.2, 1.0, life)
+    fade = fade * (0.6 + 0.4 * fade)
+    across = contrail_across(uv[1], life)
+    n = contrail_puff_noise(world_pos_cm, life, puff_cell_cm)
+    cut = _saturate(puff) * _smoothstep(0.1, 1.0, life) * 0.75
+    puffs = _saturate((n - cut) / max(1.0 - cut, 0.05))
+    lumpy = _lerp(0.7 + 0.3 * n, 0.25 + 0.75 * puffs, _saturate(puff))
+    return _saturate(opacity * formed * fade * across * lumpy)
 
 
 #: Wingtip vapour: short trails from the wingtip anchors above a load factor.

@@ -24,11 +24,15 @@ if (Shape < 0.5)
 {
     // LOOK_GENERATION 13 (hyperreal contrails): a vortex core is a tube, so the
     // across profile is a cylinder's chord sqrt(1 - x^2) (thickest through the
-    // axis, soft at the rim), the rim softening further as the core ages; the
-    // old tent profile was one brightness edge to edge. UNCALIBRATED.
+    // axis, soft at the rim) raised to a power that rises as the core ages, with
+    // a rim softening on top (contrail_opacity.hlsl's profile, UV.x the age);
+    // the old tent profile was one brightness edge to edge, and the review's
+    // smoothstep(0, soft, chord) was a flat-topped box over most of the width
+    // (never a smoothstep OF the chord). UNCALIBRATED.
+    float age = saturate(UV.x);
     float x = abs(UV.y * 2.0 - 1.0);
     float chord = sqrt(saturate(1.0 - x * x));
-    float across = smoothstep(0.0, lerp(0.5, 1.0, saturate(UV.x)), chord);
+    float across = pow(max(chord, 1.0e-4), lerp(1.0, 2.0, age)) * smoothstep(0.0, lerp(0.25, 0.6, age), chord);
     a = across * (1.0 - smoothstep(0.25, 1.0, UV.x));
 }
 else if (Shape < 1.5)
