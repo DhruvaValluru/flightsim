@@ -40,7 +40,7 @@ FROZEN_NAMES = frozenset({
     "FLIGHTSIM_XPLANE_SKY", "FLIGHTSIM_XPLANE_TERRAIN",
     # visual round 5 lane L3 (2026-11-10): the distant sheet's switch, the sky HDRI probe and its cache
     "FLIGHTSIM_DISTANT_CLOUDS", "FLIGHTSIM_SKY_HDRI", "FLIGHTSIM_HDRI_CACHE",
-    "FLIGHTSIM_ASSETS_DIR",  # 2026-11-14, the JangaFX tornado VDB's cache root (scripts/fetch_tornado_vdb.py)
+    "FLIGHTSIM_ASSETS_DIR",  # 2026-11-14, the JangaFX VDB cache root (fetch_tornado_vdb.py, fetch_cloud_vdbs.py)
 })
 
 

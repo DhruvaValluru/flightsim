@@ -10,6 +10,7 @@
 #include "FlightSimSky.h"
 #include "FlightSimVisualScene.h"
 #include "FlightSimWeather.h"
+#include "FlightSimImpostorClouds.h"
 #include "FlightSimScenarioWorld.h"
 #include "FlightSimTelemetryRecorder.h"
 #include "FlightSimSurfaceAnimator.h"
@@ -2585,6 +2586,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// is the §6.6 scene, behind -Visual.
 	FFlightSimVisualScene VisualScene;
 	FFlightSimWeather Weather;
+	// 2026-11-14: the pre-rendered impostor clouds (FlightSimImpostorClouds.h), beauty only.
+	FFlightSimImpostorClouds ImpostorClouds;
 	// Google Photorealistic 3D Tiles as the visible ground of every terrain
 	// render (FLIGHTSIM_GOOGLE_TILES=off is the only way off; FlightSimGoogleTiles.h).
 	FFlightSimGoogleTiles GoogleTiles;
@@ -3057,6 +3060,31 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			if (VisualScene.LookApplied.IsValid() && Weather.Record.IsValid())
 			{
 				VisualScene.LookApplied->SetObjectField(TEXT("weather"), Weather.Record);
+			}
+		}
+		// 2026-11-14: the pre-rendered impostor clouds, -cloud-impostors=off|pilot|on (off by
+		// default; the command line or FLIGHTSIM_RENDER_SWITCHES). BEAUTY ONLY: built only on a
+		// beauty run, and every quad joins BeautyOnlyActors here, before any label capture is
+		// configured, so the label passes and measure stay byte-identical. Recorded in
+		// render.json look_applied.cloud_impostors.
+		if (bBeauty)
+		{
+			const FString ImpostorSwitches = Params + TEXT(" ")
+				+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+			FFlightSimImpostorCloudOptions ImpostorOptions;
+			if (!FFlightSimImpostorClouds::ParseMode(ImpostorSwitches, ImpostorOptions.Mode, Error))
+			{
+				return Fail(Error);
+			}
+			ImpostorOptions.Layers = SceneOptions.CloudLayers;
+			ImpostorOptions.AircraftCm = Scenario.Aircraft != nullptr ? Scenario.Aircraft->GetActorLocation()
+			                                                          : FVector::ZeroVector;
+			ImpostorOptions.Seed = static_cast<int32>(Card.TurbulenceSeed & 0x7FFFFFFF);
+			if (!ImpostorClouds.Build(World, ImpostorOptions, Error)) { return Fail(Error); }
+			VisualScene.BeautyOnlyActors.Append(ImpostorClouds.BeautyOnlyActors);
+			if (VisualScene.LookApplied.IsValid() && ImpostorClouds.Record.IsValid())
+			{
+				VisualScene.LookApplied->SetObjectField(TEXT("cloud_impostors"), ImpostorClouds.Record);
 			}
 		}
 		if (FFlightSimGoogleTiles::Requested() && !bNoGoogleTiles)
@@ -7208,6 +7236,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// World lane hook (visual overhaul): built only under -quality=beauty.
 		if (WorldBeauty.IsBuilt()) { WorldBeauty.Advance(Scenario.ReadProperty(TEXT("simulation/sim-time-sec")),
 			Capture->GetComponentLocation(), Scenario.Aircraft->GetActorLocation(), Captured); }
+		// The impostor clouds face this capture and stand clear of the aircraft (keep-out).
+		if (ImpostorClouds.IsBuilt() && Scenario.Aircraft != nullptr)
+		{
+			FVector ImpostorAircraftOrigin;
+			FVector ImpostorAircraftExtent;
+			Scenario.Aircraft->GetActorBounds(true, ImpostorAircraftOrigin, ImpostorAircraftExtent);
+			ImpostorClouds.Advance(Capture->GetComponentLocation(), Scenario.Aircraft->GetActorLocation(),
+			                       ImpostorAircraftExtent.Size());
+		}
 		World->SendAllEndOfFrameUpdates();
 		FlushRenderingCommands();
 		// I6: the velocity pass renders FIRST after the step, before the

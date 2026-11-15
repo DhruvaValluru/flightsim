@@ -188,3 +188,20 @@ CC0 needs no attribution; JangaFX is credited as a courtesy (`assets/looks/torna
 | --- | --- | --- | --- | --- |
 | Monolith (Unreal Editor MCP plugin) | MIT (beta, `IsBetaVersion` true) | https://github.com/tumourlove/monolith | tag v0.24.0, commit 2ee04696194ee13d79290b6ac1c4733a26e05386 | cloned into `ue/Plugins/Monolith/` (gitignored) on the Windows laptop for editor inspection (docs/visual/HYPERREAL_12H.md); it enables Niagara, SQLiteCore, EnhancedInput, EditorScriptingUtilities, PoseSearch, IKRig, ControlRig, RigVM. The owner chose not to block port 9316 inbound. |
 | Blender 5.2.3 LTS (portable) | GPL-2.0-or-later (the tool; its renders carry no licence of its own) | Berkeley OCF mirror of download.blender.org (the main site returned 403 to the laptop) | zip sha256 723f08a4…5dc2fb, matched on two mirrors | the one-off VDB bakes (tornado flipbook, cloud impostors) |
+
+## Impostor clouds (2026-11-14; VDBs cached, never committed: `<repo>/../flightsim_assets/jangafx_clouds`; atlases committed: `assets/looks/clouds/impostors/`)
+
+- What: JangaFX's free **Cloud Pack** (static cloud VDB simulations made in
+  EmberGen, ~104 MB, 10 variations), baked ONCE on the render machine by
+  `scripts/bake_cloud_impostors.py` (Blender Cycles) into octahedral six-way
+  impostor atlases that `-cloud-impostors=pilot|on` draws (beauty only).
+- Source: https://jangafx.com/software/embergen/download/free-vdb-animations
+  (fetched by `scripts/fetch_cloud_vdbs.py`, or a hand-downloaded zip via `--zip`).
+- Licence: CC0 1.0 (the page: "These free VDB simulations are licensed as CC0
+  (Public Domain)"). No attribution is required; this entry is the pin.
+- sha256: `CloudPackVDB.zip` (109,761,538 bytes, downloaded on the render machine
+  2026-11-14) `3676ba4c7ac431446731f956f98e925ad3db31354b8b4adcb137dc0250595f73`
+  (`scripts/fetch_cloud_vdbs.py` PIN; ten `cloud_NN_variant_0000.vdb`, one
+  half-float `density` grid each, EmberGen 0.7.5.7). Every committed atlas is
+  pinned in `assets/looks/clouds/impostors/PIN.json`, and each cloud's JSON records
+  its source VDB's sha256.

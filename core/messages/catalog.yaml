@@ -1445,6 +1445,13 @@ weather.rain_layers:
 weather.windscreen_baked:
   sentence: "The baked windscreen's material is not in the project, so -windscreen-baked=on cannot draw the glass."
   hint: "Run the material script once (the weather guide says how), or render with -windscreen-baked=off."
+# 2026-11-14: the pre-rendered impostor clouds (FlightSimImpostorClouds.cpp).
+cloud.impostor_switch:
+  sentence: "The impostor-cloud switch (-cloud-impostors=) was given a value it does not take."
+  hint: "Use off, pilot or on; or leave it out to render the clouds as before."
+cloud.impostor_assets:
+  sentence: "No baked impostor cloud is in the project, so -cloud-impostors=pilot or on cannot draw any."
+  hint: "Bake them once with the impostor bake script (the weather guide says how), run the material script, or render with -cloud-impostors=off."
 weather.niagara_asset:
   sentence: "The Niagara rain system is not in the project; it is built by hand from the recipe in docs/WEATHER.md."
   hint: "Build NS_FlightSimRain from the recipe, or use -weather-backend=procedural."

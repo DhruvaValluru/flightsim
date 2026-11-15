@@ -4465,6 +4465,156 @@ def create_aircraft_masters():
 # ==== AIRCRAFT LANE -- end ===================================================
 
 
+# -- the pre-rendered impostor clouds (2026-11-14; its own block: the world/cloud
+# sections above are the cloud lane's, so this block keeps its own list, stamp and
+# creator and touches none of theirs) -------------------------------------------------
+#: M_FlightSimCloudImpostor (-cloud-impostors=pilot|on, FlightSimImpostorClouds.cpp):
+#: a translucent, unlit, two-sided quad running cloud_impostor.hlsl over a cloud's
+#: octahedral six-way atlases (scripts/bake_cloud_impostors.py, baked ONCE in Blender
+#: from JangaFX's CC0 Cloud Pack). One MaterialInstanceConstant per baked cloud,
+#: MI_FlightSimCloudImpostor_<id>, carries its two atlases and its bake numbers; the
+#: C++ loads the instances and makes one dynamic instance per placed cloud. Beauty
+#: only (the quads are beauty-only actors). A checkout without the bake builds the
+#: master alone and says so (the switch then refuses by name: cloud.impostor_assets).
+CLOUD_IMPOSTOR_DIR = "assets/looks/clouds/impostors"
+CLOUD_IMPOSTOR_INDEX = f"{CLOUD_IMPOSTOR_DIR}/impostors.json"
+CLOUD_IMPOSTOR_PIN = f"{CLOUD_IMPOSTOR_DIR}/PIN.json"
+CLOUD_IMPOSTOR_INSTANCE_PREFIX = "MI_FlightSimCloudImpostor_"
+#: Its own generation stamp (bump with every graph or parameter change).
+CLOUD_IMPOSTOR_GENERATION = "1"
+CLOUD_IMPOSTOR_GENERATION_TAG = "FlightSimCloudImpostorGeneration"
+#: The scalar parameters (defaults stated; the C++ sets the per-instance ones:
+#: Yaw, SphereRadiusCm, Opacity; the instance constants carry Views, FramePx,
+#: LightScale, SphereOverHeight). Gains and fades UNCALIBRATED.
+CLOUD_IMPOSTOR_SCALARS = {"Yaw": 0.0, "Views": 8.0, "FramePx": 128.0, "SphereRadiusCm": 100000.0,
+                          "LightScale": 1.0, "SunGain": 1.0, "AmbientGain": 1.0, "Opacity": 1.0,
+                          "SoftCm": 5000.0, "FadeStartCm": 2500000.0, "FadeEndCm": 3000000.0,
+                          "SphereOverHeight": 2.0}
+#: The Custom node body (WORLD_SHADER_DIR/<name>.hlsl) and its inputs, in its header's order.
+CLOUD_IMPOSTOR_SHADER = "cloud_impostor"
+#: cloud_impostor.hlsl's inputs, in its header's order.
+CLOUD_IMPOSTOR_INPUTS = ("UV", "CamPos", "ObjPos", "Yaw", "Views", "FramePx", "SphereRadiusCm", "LightScale",
+                         "SunDir", "SunIlluminance", "SkyLum", "SunGain", "AmbientGain", "Opacity",
+                         "SceneDepth", "PixelDepth", "SoftCm", "FadeStartCm", "FadeEndCm", "PosTex", "NegTex")
+
+
+def _cloud_impostor_bake():
+    """(index, pin) of the committed bake, or (None, None) when the checkout has none."""
+    import json
+    index, pin = _repo_file(CLOUD_IMPOSTOR_INDEX), _repo_file(CLOUD_IMPOSTOR_PIN)
+    if index is None or pin is None:
+        return None, None
+    return (json.loads(index.read_text(encoding="utf-8")), json.loads(pin.read_text(encoding="utf-8")))
+
+
+def create_cloud_impostor():
+    """M_FlightSimCloudImpostor and one MI_FlightSimCloudImpostor_<id> per baked cloud."""
+    material = _cloud_impostor_material()
+    lib = unreal.MaterialEditingLibrary
+    if material is not None:
+        _translucent_unlit(material, unreal.BlendMode.BLEND_TRANSLUCENT)
+        default = linear_default_texture()
+        pins = {"UV": (lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate,
+                                                      -1800, -900), ""),
+                "CamPos": (lib.create_material_expression(material, unreal.MaterialExpressionCameraPositionWS,
+                                                          -1800, -800), ""),
+                "ObjPos": (lib.create_material_expression(material, unreal.MaterialExpressionObjectPositionWS,
+                                                          -1800, -700), "")}
+        sun_dir = lib.create_material_expression(material, unreal.MaterialExpressionSkyAtmosphereLightDirection,
+                                                 -1800, -600)
+        sun_dir.set_editor_property("light_index", 0)
+        pins["SunDir"] = (sun_dir, "")
+        illuminance = lib.create_material_expression(material,
+                                                     unreal.MaterialExpressionSkyAtmosphereLightIlluminance,
+                                                     -1800, -500)
+        illuminance.set_editor_property("light_index", 0)
+        pins["SunIlluminance"] = (illuminance, "")
+        pins["SkyLum"] = (lib.create_material_expression(
+            material, unreal.MaterialExpressionSkyAtmosphereDistantLightScatteredLuminance, -1800, -400), "")
+        scene_depth = lib.create_material_expression(material, unreal.MaterialExpressionSceneDepth, -1800, -300)
+        pins["SceneDepth"] = (mask(material, lib, scene_depth, "r", -1600, -300), "")
+        pins["PixelDepth"] = (lib.create_material_expression(material, unreal.MaterialExpressionPixelDepth,
+                                                             -1800, -200), "")
+        for i, (name, value) in enumerate(CLOUD_IMPOSTOR_SCALARS.items()):
+            pins[name] = (scalar(material, lib, name, value, -1800, -100 + 100 * i), "")
+        for i, name in enumerate(("PosTex", "NegTex")):
+            node = lib.create_material_expression(material, unreal.MaterialExpressionTextureObjectParameter,
+                                                  -1800, 1200 + 150 * i)
+            node.set_editor_property("parameter_name", name)
+            node.set_editor_property("texture", default)
+            node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR)
+            pins[name] = (node, "")
+        wired = {name: pins[name] for name in CLOUD_IMPOSTOR_INPUTS}
+        body = world_custom(material, lib, CLOUD_IMPOSTOR_SHADER, unreal.CustomMaterialOutputType.CMOT_FLOAT4,
+                            wired, -900, 0)
+        lib.connect_material_property(mask(material, lib, body, "rgb", -600, -100), "",
+                                      unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+        lib.connect_material_property(mask(material, lib, body, "a", -600, 100), "",
+                                      unreal.MaterialProperty.MP_OPACITY)
+        unreal.EditorAssetLibrary.set_metadata_tag(material, CLOUD_IMPOSTOR_GENERATION_TAG,
+                                                   CLOUD_IMPOSTOR_GENERATION)
+        finish(material, "M_FlightSimCloudImpostor")
+    index, pin = _cloud_impostor_bake()
+    if index is None:
+        print(f"MATERIAL-NOTE: {CLOUD_IMPOSTOR_INDEX} is not in this checkout: no impostor cloud is baked "
+              f"(scripts/bake_cloud_impostors.py on the render machine); -cloud-impostors=pilot|on refuses")
+        return
+    import json
+    master = unreal.EditorAssetLibrary.load_asset(f"{PATH}/M_FlightSimCloudImpostor")
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    for cloud in index["clouds"]:
+        record = json.loads(_repo_file(f"{CLOUD_IMPOSTOR_DIR}/{cloud['json']}").read_text(encoding="utf-8"))
+        textures = {}
+        for key in ("pos", "neg"):
+            fname = record["atlases"][key]
+            texture = pinned_texture(pin["files"][fname], f"T_CloudImp_{cloud['id']}_{key}", False, False)
+            texture.set_editor_property("compression_settings",
+                                        unreal.TextureCompressionSettings.TC_VECTOR_DISPLACEMENTMAP)
+            unreal.EditorAssetLibrary.save_asset(texture.get_path_name())
+            textures[key] = texture
+        name = f"{CLOUD_IMPOSTOR_INSTANCE_PREFIX}{cloud['id']}"
+        path = f"{PATH}/{name}"
+        instance = (unreal.EditorAssetLibrary.load_asset(path) if unreal.EditorAssetLibrary.does_asset_exist(path)
+                    else tools.create_asset(name, PATH, unreal.MaterialInstanceConstant,
+                                            unreal.MaterialInstanceConstantFactoryNew()))
+        lib.set_material_instance_parent(instance, master)
+        lib.set_material_instance_texture_parameter_value(instance, "PosTex", textures["pos"])
+        lib.set_material_instance_texture_parameter_value(instance, "NegTex", textures["neg"])
+        for key, value in (("Views", record["views"]), ("FramePx", record["px"]),
+                           ("LightScale", record["light_scale"]),
+                           ("SphereOverHeight", record["sphere_over_height"] or 2.0)):
+            lib.set_material_instance_scalar_parameter_value(instance, key, float(value))
+        lib.update_material_instance(instance)
+        unreal.EditorAssetLibrary.save_loaded_asset(instance, only_if_is_dirty=False)
+        print(f"MATERIAL-CREATED: {path} ({record['source_vdb']}, light_scale {record['light_scale']:.4g})")
+
+
+
+def _cloud_impostor_material():
+    """/Game/FlightSim/M_FlightSimCloudImpostor once; None when it exists at
+    CLOUD_IMPOSTOR_GENERATION (and FLIGHTSIM_REBUILD_MATERIALS does not name it).
+    A stale one is updated IN PLACE (graph cleared, same asset), as the world
+    lane's materials are, so the instance constants keep their parent."""
+    name = "M_FlightSimCloudImpostor"
+    full = f"{PATH}/{name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(full):
+        material = unreal.EditorAssetLibrary.load_asset(full)
+        stamped = str(unreal.EditorAssetLibrary.get_metadata_tag(material, CLOUD_IMPOSTOR_GENERATION_TAG))
+        if stamped == CLOUD_IMPOSTOR_GENERATION and not rebuild_requested(name):
+            print(f"MATERIAL-EXISTS: {full}")
+            return None
+        if material is None or not isinstance(material, unreal.Material):
+            raise RuntimeError(f"{full} exists but is not a Material: move it aside by hand and run again")
+        unreal.MaterialEditingLibrary.delete_all_material_expressions(material)
+        print(f"MATERIAL-UPDATED: {full} (generation {CLOUD_IMPOSTOR_GENERATION}, rebuilt in place)")
+        return material
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    material = tools.create_asset(name, PATH, unreal.Material, unreal.MaterialFactoryNew())
+    if material is None:
+        raise SystemExit(f"could not create material asset {full}")
+    return material
+
+
 _FAILED = []
 
 
@@ -4539,5 +4689,6 @@ create_world_distant_clouds()   # visual round 5, L3: the distant sheet
 create_sky_hdri()               # visual round 5, L3: the sky HDRI probe (FLIGHTSIM_SKY_HDRI only)
 
 create_aircraft_masters()  # AIRCRAFT LANE (V7)
+create_cloud_impostor()    # 2026-11-14: the pre-rendered impostor clouds (-cloud-impostors=)
 if _FAILED:
     raise SystemExit(f"materials not created: {', '.join(_FAILED)}")

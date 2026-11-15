@@ -217,10 +217,11 @@ SETTINGS: Tuple[Setting, ...] = (
             "shared sampler fails to compile on the render machine); read only when the material "
             "script runs. Beauty only."),
     Setting("assets_dir", "FLIGHTSIM_ASSETS_DIR", "dev-only", None,
-            ("scripts/fetch_tornado_vdb.py:40",),
+            ("scripts/fetch_tornado_vdb.py:40", "scripts/fetch_cloud_vdbs.py:64"),
             "The root of the asset cache outside git (default <repo>/../flightsim_assets): "
             "scripts/fetch_tornado_vdb.py puts JangaFX's CC0 Tornado Looping VDB in its jangafx_tornado "
-            "folder for the offline flipbook bake (scripts/bake_tornado_flipbook.py). Render-machine "
+            "folder for the offline flipbook bake (scripts/bake_tornado_flipbook.py), and scripts/fetch_cloud_vdbs.py "
+            "the CC0 Cloud Pack in jangafx_clouds for the impostor bake. Render-machine "
             "bakes only; the committed atlas needs no cache."),
     Setting("batch_min_free_mb", "FLIGHTSIM_BATCH_MIN_FREE_MB", "dev-only", "4096",
             ("scripts/run_test_scenarios.py:642",),
