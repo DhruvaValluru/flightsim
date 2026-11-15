@@ -74,6 +74,11 @@ public:
 	// The humidity this step's Advance used was available (else the caller
 	// falls back to its Nz rule).
 	bool HasHumidity() const { return bHumidityNow; }
+	// The relative humidity over water, percent, this step's Advance used
+	// (-humidity-pct= or atmosphere/RH); meaningful only while HasHumidity().
+	// LOOK_GENERATION 13: the contrail persistence gate (FlightSimAircraftFX.cpp)
+	// turns it into RHi; it reads nothing of its own.
+	double RelativeHumidityPct() const { return RhNow; }
 
 private:
 	struct FSample
@@ -99,6 +104,7 @@ private:
 
 	bool bBuilt = false;
 	bool bHumidityNow = false;
+	double RhNow = 0.0;
 	bool bDraw = true;
 	bool bTipsDrawn = false;
 	AActor* Aircraft = nullptr;

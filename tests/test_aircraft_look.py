@@ -773,8 +773,10 @@ def test_round47_the_contrail_forms_over_seconds_not_a_share_of_its_lifetime():
     assert "float ramp = FormationRamp > 0.0 ? FormationRamp : 0.04;" in shader
     assert "float formed = smoothstep(Formation, Formation + ramp, UV.x);" in shader
     assert "Formation + 0.04" not in shader
-    assert look.SHADER_INPUTS["contrail_opacity"][-1] == "FormationRamp"
-    assert look.FX_PARAMETERS["M_AircraftContrail"] == ("Opacity", "Formation", "FormationRamp")
+    # LOOK_GENERATION 13 (hyperreal contrails) appended Life / Puff / PuffCellCm after it
+    # (tests/test_hyperreal_contrails.py pins the whole tuple).
+    assert "FormationRamp" in look.SHADER_INPUTS["contrail_opacity"]
+    assert look.FX_PARAMETERS["M_AircraftContrail"][:3] == ("Opacity", "Formation", "FormationRamp")
     masters = MASTERS.read_text(encoding="utf-8")
     assert re.search(r'^LOOK_GENERATION = "13"$', masters, re.M)
     assert '"FormationRamp": (_scalar(material, ramp_name, 0.04,' in masters
