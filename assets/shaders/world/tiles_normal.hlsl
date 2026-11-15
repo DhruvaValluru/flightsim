@@ -10,6 +10,16 @@
 // amounts come from MPC_FlightSimWorld (UNCALIBRATED: set by probe render on the
 // render machine).
 //
+// Generation 8 (2026-11-15, the follow-up to generation 7's wet ground, f628f74c):
+// tiles_base_colour / tiles_roughness moved their puddles to PUDDLE_AMOUNT_SCALE of
+// PuddleAmount (~4 % of flat ground at Wetness 1, not ~41 %) and faded them out by
+// PUDDLE_FADE_M of range, but this node still flattened the detail normal across the
+// OLD mask, so about four tenths of the wet prairie lost its relief where the colour
+// and roughness no longer drew any water. Now the three nodes share the same amount
+// scale, threshold and range fade (tests/test_tiles_normal_puddles.py's twin shows the
+// three masks equal), so the ground is flat only where it is wet-dark and sheened. At
+// PuddleAmount 0 the output is the detailed normal, unchanged. Both UNCALIBRATED.
+//
 // Inputs (the script's WORLD_TILES_INPUTS["tiles_normal"]):
 //   WorldPos        float3  absolute world position, cm
 //   CameraPos       float3  absolute camera position, cm
@@ -18,6 +28,8 @@
 //   DetailFadeM     float   the detail is gone at this range
 //   DetailScaleM    float   the detail's wavelength
 //   PuddleAmount    float   0..1
+const float PUDDLE_FADE_M = 3000.0;
+const float PUDDLE_AMOUNT_SCALE = 0.5;
 struct FWorldTilesNormal
 {
 	// shared: world noise (tiles_base_colour.hlsl, tiles_normal.hlsl, tiles_roughness.hlsl)
@@ -62,5 +74,6 @@ float dx = (T.Height(m + float2(e, 0.0), scale) - T.Height(m - float2(e, 0.0), s
 float dy = (T.Height(m + float2(0.0, e), scale) - T.Height(m - float2(0.0, e), scale)) / (2.0 * e);
 float k = DetailStrength * fade * scale;
 float3 detailed = normalize(n - k * float3(dx, dy, 0.0));
-float puddle = T.Puddles(WorldPos, n, saturate(PuddleAmount));
+float puddle = T.Puddles(WorldPos, n, saturate(PuddleAmount) * PUDDLE_AMOUNT_SCALE)
+               * saturate(1.0 - rangeM / PUDDLE_FADE_M);
 return normalize(lerp(detailed, float3(0.0, 0.0, 1.0), puddle));

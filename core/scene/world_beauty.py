@@ -1421,7 +1421,9 @@ PUDDLE_SHARE_OF_WETNESS = 0.5
 #: puddles at this share of PuddleAmount. At the full amount the shared Puddles()
 #: threshold marked ~41 % of all flat ground as water at Wetness 1 (#15 / #09 / #10
 #: black, glint-scratched farmland); at half, ~4 % (tests/test_tiles_wet_ground.py).
-#: UNCALIBRATED.
+#: Generation 8 (2026-11-15): the normal shader flattens on the same scaled, range-faded
+#: mask (tests/test_tiles_normal_puddles.py), so the ground keeps its relief wherever
+#: the colour and roughness draw no water. UNCALIBRATED.
 PUDDLE_AMOUNT_SCALE = 0.5
 
 #: The tileset's imagery correction: properties of the photogrammetry (the haze
