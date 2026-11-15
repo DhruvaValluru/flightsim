@@ -1,6 +1,7 @@
 # Hyper-realism push: Monolith MCP + a 12-hour Opus/Fable run (Windows)
 
-Owner request, 2026-11-14: every frame should look photographic. Today the clouds look
+Owner request, 2026-11-14: every frame should look photographic. **All building happens on the Mac; the
+Windows laptop only tests** (renders, verify, frames, and Monolith for inspecting the editor). Today the clouds look
 rubbery, the tornado has no structure, the rain is not convincing, and the rest of the
 project lags behind. Opus leads the visual build; Fable agents do the engineering; every
 change is tested on this laptop, using the Monolith MCP for the editor.
@@ -35,24 +36,29 @@ The repo is `C:\Users\kanth\flightsim`, and the UE project folder is `C:\Users\k
    Output Log > `LogMonolith` says it is listening on 9316. **Never render while the editor is open:**
    7.2 GB is free, and the harness has killed rounds for low memory. Close the editor before each round.
 
-## Part B: the owner starts the lead session (Monolith needs a fresh Claude Code in `<UEPROJ>`)
+## Part B: the owner starts the lead session ON THE MAC
 
 ```
-cd C:\Users\kanth\flightsim\ue
+cd ~/flightsim-old
+git pull
 claude --model claude-opus-5-5
-/mcp                      (monolith must show connected)
 /remote-control           (then /rename p3-hyperreal)
 ```
-Then paste the prompt below.
+Then paste the prompt below. The Windows tester stays p3-windows. To use Monolith there, it needs a Claude Code
+session started in `<UEPROJ>` (`cd C:\Users\kanth\flightsim\ue; claude`, `/mcp` shows monolith, `/remote-control`).
+The Mac lead sends it render and inspection requests over the bridge.
 
 ## Part C: the prompt
 
 ```
 You are the visual lead for FlightSim's hyper-realism push (12 hours, owner-authorised for this run only;
-not a standing exception). Repo C:\Users\kanth\flightsim, branch claude/vibrant-gauss-olema4 (pull first).
-First run monolith_guide() and monolith_discover(), and list the namespaces. The owner has also installed
-the "Unreal Engine Skills - control Unreal Editor directly from Claude Code via MCP" skill on this machine:
-load it and use it alongside Monolith for editor work (materials, Niagara, actors, viewport checks). Take
+not a standing exception). You run ON THE MAC (repo ~/flightsim-old, branch claude/vibrant-gauss-olema4,
+pull first). ALL BUILDING IS ON THE MAC: code, shaders, material scripts, bake scripts, tests. NEVER build or
+run Unreal on the Mac. The Windows laptop (session p3-windows over the bridge) ONLY TESTS: it pulls, builds
+the plugin, runs the materials prep and Blender bakes, renders rounds, runs verify, pushes frames to
+vis-windows, and inspects the editor through the Monolith MCP and the owner's "Unreal Engine Skills" MCP
+skill (installed there) when you ask: material compile errors, Niagara/actor state, viewport checks. Give
+p3-windows exact commands and wait for its report; you can't call those MCPs yourself. Take
 inspiration from X-Plane 12 / MSFS for sky, clouds, weather and lighting, using techniques and published
 talks, never their assets. Then read
 docs/visual/HYPERREAL_12H.md, docs/visual/MAXPICK_ROUNDS.md and the latest round frames on vis-windows.
@@ -66,8 +72,8 @@ fake.
 TEAM: you (Opus) decide what to build and judge every frame. Use the Workflow tool for the engineering, with
 agents on model "fable" (the owner asked for this): one builder per item in its own worktree, then 2
 adversarial Fable reviewers (labels/measure safety; realism and iGPU fit). You make the final call. Batches
-of <= 6 items. After each batch: build, materials prep, ONE Windows round of only the touched scenes, look
-at every frame, keep or revert by name, record it in docs/visual/HYPERREAL_ROUNDS.md, push frames to
+of <= 6 items. After each batch: push, then ask p3-windows for build + materials prep + ONE round of only the touched
+scenes, pull its frames from vis-windows, look at every frame, keep or revert by name, record it in docs/visual/HYPERREAL_ROUNDS.md, push frames to
 vis-windows.
 
 ALREADY ON THE BRANCH, untested: b79c6433 tornado flipbook (needs the JangaFX Tornado Looping VDB fetched
@@ -88,9 +94,9 @@ HARD RULES:
 - iGPU: D3D11 SM5, no Lumen/Nanite/VSM/HW RT/path tracer. Never one long GPU submission (TDR, 887a0006);
   split work into accumulated captures. RAM is the limit: editor closed during renders, one render at a
   time, never kill Unreal mid-render (it has rebooted the laptop twice).
-- Monolith: commit before any editor mutation, never delete assets, no mutations outside /Game/FlightSim
-  and the plugin's own content; prefer scripted, reproducible changes (scripts/ue_create_materials.py) over
-  one-off editor edits, so a fresh checkout rebuilds the same result.
+- Monolith / UE Skills (Windows side): inspection first. Any editor change must also be written on the Mac
+  as a scripted, reproducible change (scripts/ue_create_materials.py etc.), so a fresh checkout rebuilds the
+  same result. Commit before any editor mutation, never delete assets, nothing outside /Game/FlightSim.
 - Git: work on claude/vibrant-gauss-olema4 (or claude/hyperreal-* branches merged after tests); no force push,
   no history rewrite, no deleting owner data; tag commits [skip ci]; trailers:
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>; do not run CI.
