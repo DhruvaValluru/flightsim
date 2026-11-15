@@ -47,3 +47,7 @@ data/scatter/
 
 # the tornado bake's per-frame renders (scripts/bake_tornado_flipbook.py); only the atlas is committed
 assets/looks/tornado_vdb/_frames/
+
+# Monolith MCP editor plugin (third-party, MIT; cloned on the render machine, never committed)
+ue/Plugins/Monolith/
+ue/.mcp.json
