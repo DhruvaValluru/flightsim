@@ -53,6 +53,34 @@
 // the body colour, set by probe render on the render machine
 // (docs/visual/PROBE_LOG.md ## lane-B terrain detail, round-10 ocean).
 //
+// Generation 5 (hyperreal stormsea, 2026-11-14): the storm sea. Until now
+// WindSpeedMS stayed at the material's 7 m/s default on every render (nothing
+// set it: FlightSimGoogleTiles.cpp ApplyBeautyGround set only Wetness), so a
+// storm over the ocean drew a trade-wind sea; and had the wind simply been
+// wired, the Monahan crest foam would have become texel speckle near the
+// camera and nothing from altitude (it keys on the resolved wave texels, which
+// a high camera never resolves). Now the card's surface wind reaches
+// WindSpeedMS / WindDirX / WindDirY (the C++ sets them on the cap's material
+// instance; still air keeps the 7 m/s default), and a storm ramp
+// storm = smoothstep(STORM_WIND_LOW_MS, STORM_WIND_HIGH_MS, WindSpeedMS) gates
+// four things, each exactly zero at 7 m/s (the calm sea, #13, is generation 4
+// to the bit: every storm term is multiplied by storm, and the twin
+// core/scene/ocean_storm_sea.py proves it within 1e-9):
+//   * the storm foam (StormFoam): wind-aligned streaks (STREAK_* m) and broken
+//     patches (PATCH_* m, keyed to the storm swell's crests), each drawn only
+//     where the pixel footprint and the distance resolve it and otherwise
+//     replaced by its MEAN cover (STREAK_MEAN, PATCH_MEAN: the far sea greys
+//     evenly; nothing sub-pixel is ever drawn, nothing speckles, nothing
+//     vanishes); the crest foam fades out with storm;
+//   * the storm swell (StormSwell), in the normal: two long, steep waves near
+//     the wind, resolved like Swell, their slopes ramped by storm;
+//   * the body colour pulled toward STORM_RGB (grey-green: whipped water full
+//     of bubbles under an overcast) by storm;
+//   * the glint's width and the Smith shadowing already widen with the Cox-Munk
+//     variance at the higher wind (no new term).
+// UNCALIBRATED: every generation-5 amount (no frame rendered yet); set by probe
+// render on the render machine.
+//
 // Inputs (the script's WORLD_OCEAN_INPUTS["ocean_normal"], every node alike):
 //   WorldPos        float3     absolute world position, cm
 //   CameraPos       float3     absolute camera position, cm
@@ -61,10 +89,12 @@
 //   SunDir          float3     the atmosphere light's direction (toward the sun)
 //   SunIlluminance  float3     its illuminance at the sea (after the atmosphere)
 //   SkyLum          float3     the sky's distant scattered luminance
-//   WindSpeedMS     float      the sea state's wind, m/s (Cox-Munk; Monahan's whitecaps)
+//   WindSpeedMS     float      the sea state's wind, m/s (Cox-Munk; Monahan's whitecaps; generation 5: the card's surface wind)
 //   WindDirX        float      the downwind direction, world x ...
 //   WindDirY        float      ... and y (normalised here)
 //   OceanN          Texture2D  assets/terrain_detail/ocean/ocean_normal_512.png (OpenGL)
+// The deep ocean's body colour (linear; the water-leaving colour of open
+// oligotrophic sea: dark and only a little blue) and the whitecaps' albedo.
 // The deep ocean's body colour (linear; the water-leaving colour of open
 // oligotrophic sea: dark and only a little blue) and the whitecaps' albedo.
 const float3 WATER_RGB = float3(0.003, 0.010, 0.020);
@@ -77,6 +107,37 @@ const float3 ZENITH_TINT = float3(0.35, 0.55, 0.95);
 // The glint's broad sheen: its share of the sun's specular and its width.
 const float SHEEN_SHARE = 0.3;
 const float SHEEN_WIDTH = 3.5;
+// Generation 5: the storm sea (UNCALIBRATED). The wind ramp: below
+// STORM_WIND_LOW_MS (Beaufort 5: many white horses) the sea is generation 4's
+// exactly; full storm at STORM_WIND_HIGH_MS (Beaufort 8, a gale: the foam is
+// blown in well-marked streaks along the wind).
+const float STORM_WIND_LOW_MS = 8.0;
+const float STORM_WIND_HIGH_MS = 18.0;
+// The storm's body colour: grey-green (bubble-whitened water under an overcast).
+const float3 STORM_RGB = float3(0.016, 0.028, 0.025);
+// The storm foam's two layers, metres: fine streaks along the wind (the dense
+// foam lines of Beaufort 8-9) and broad broken patches (the breaking crests'
+// torn sheets). THRESHOLD: the Macro field value a layer's foam begins at;
+// MEAN: the layer's mean cover at full storm, what an unresolving pixel is
+// given instead (measured by the twin's fine sampling: tests/test_ocean_storm_sea.py);
+// SHARE: the layer's weight in the total.
+const float STREAK_ALONG_M = 120.0;
+const float STREAK_ACROSS_M = 6.0;
+const float STREAK_THRESHOLD = 0.60;
+const float STREAK_MEAN = 0.17;
+const float STREAK_SHARE = 0.55;
+const float PATCH_ALONG_M = 600.0;
+const float PATCH_ACROSS_M = 60.0;
+const float PATCH_THRESHOLD = 0.62;
+const float PATCH_MEAN = 0.09;
+const float PATCH_SHARE = 0.45;
+// The distance each layer is drawn to (beyond, its mean), metres.
+const float STREAK_FADE_START_M = 1500.0;
+const float STREAK_FADE_END_M = 4000.0;
+const float PATCH_FADE_START_M = 10000.0;
+const float PATCH_FADE_END_M = 25000.0;
+// The foam's surface drift as a share of the wind.
+const float FOAM_DRIFT_SHARE = 0.03;
 struct FOceanSurface
 {
 	// shared: ocean (ocean_normal.hlsl, ocean_emissive.hlsl, ocean_colour.hlsl)
@@ -152,6 +213,64 @@ struct FOceanSurface
 	{
 		return 0.003 + 0.00512 * max(windMs, 0.0);
 	}
+	// Generation 5: the storm's swell, in the normal: two long, steep waves
+	// near the wind, their phases warped and amplitudes enveloped like Swell's,
+	// each drawn only where the pixel resolves it, their slopes ramped by
+	// storm. Out: crestKey 0..1, where their crests are (height a sin(phase):
+	// the slope is a k cos(phase) along d, the crest sin(phase) -> 1), the
+	// broken foam patches' key.
+	float2 StormSwell(float2 pm, float2 windDir, float timeS, float footprintM, float storm, out float crestKey)
+	{
+		float lengths[2] = {420.0, 260.0};
+		float slopes[2] = {0.08, 0.06};
+		float turns[2] = {0.18, -0.28};
+		float warp = 9.42 * Macro(pm + float2(451.0, -173.0), 2600.0);
+		float2 tilt = float2(0.0, 0.0);
+		float crest = 0.0;
+		[unroll] for (int i = 0; i < 2; ++i)
+		{
+			float seen = 1.0 - smoothstep(lengths[i] / 10.0, lengths[i] / 4.0, footprintM);
+			float s, c;
+			sincos(turns[i], s, c);
+			float2 d = float2(c * windDir.x - s * windDir.y, s * windDir.x + c * windDir.y);
+			float k = 6.2831853 / lengths[i];
+			float phase = k * dot(d, pm) - sqrt(9.81 * k) * timeS + warp * (0.7 + 0.4 * i);
+			float envelope = lerp(0.5, 1.3, Macro(pm + float2(-389.0 * (i + 1), 617.0 * (i + 1)), 1500.0));
+			tilt -= seen * storm * envelope * slopes[i] * cos(phase) * d;
+			float sp = saturate(sin(phase));
+			crest += 0.5 * seen * envelope * sp * sp * sp;
+		}
+		crestKey = saturate(crest);
+		return tilt;
+	}
+	// Generation 5: the storm foam, 0..1 cover. Two layers stretched along the
+	// wind, drifting downwind at FOAM_DRIFT_SHARE of it: fine streaks
+	// (STREAK_ACROSS_M x STREAK_ALONG_M) and broad broken patches
+	// (PATCH_ACROSS_M x PATCH_ALONG_M, denser on the storm swell's crests).
+	// A layer is drawn only where the pixel footprint is finer than a quarter
+	// of its width and the distance is inside its fade; elsewhere it is its
+	// mean cover (STREAK_MEAN, PATCH_MEAN), so a far or grazing pixel greys
+	// evenly: no texel speckle, no vanishing foam. Everything times storm.
+	// The amounts come in as arguments (a Custom node's body is a function
+	// body, so its const floats are locals this struct's methods cannot see):
+	// streak / patch = (along m, across m, threshold, mean), fade = (streak
+	// start, streak end, patch start, patch end) m, share = (streak, patch).
+	float StormFoam(float2 pm, float2 windDir, float footprintM, float distM, float timeS, float windMs,
+	                float crestKey, float storm, float4 streak, float4 patch, float4 fade, float2 share, float drift)
+	{
+		float along = dot(pm, windDir) - drift * max(windMs, 0.0) * timeS;
+		float across = dot(pm, float2(-windDir.y, windDir.x));
+		float fine = Macro(float2(along / streak.x, across / streak.y), 1.0);
+		fine = smoothstep(streak.z, streak.z + 0.08, fine);
+		float fineSeen = (1.0 - smoothstep(streak.y / 4.0, streak.y, footprintM))
+		               * (1.0 - smoothstep(fade.x, fade.y, distM));
+		float broken = Macro(float2(along / patch.x + 7.3, across / patch.y + 2.1), 1.0);
+		broken = smoothstep(patch.z, patch.z + 0.1, broken) * lerp(0.6, 1.2, crestKey);
+		float brokenSeen = (1.0 - smoothstep(patch.y / 4.0, patch.y, footprintM))
+		                 * (1.0 - smoothstep(fade.z, fade.w, distM));
+		float cover = share.x * lerp(streak.w, fine, fineSeen) + share.y * lerp(patch.w, broken, brokenSeen);
+		return storm * saturate(cover);
+	}
 	// The sea state at p (metres). The Cox-Munk variance, varied +-45 % by
 	// the wind streaks (slicks are smoother, so they reflect a sharper, brighter
 	// sky; the glint lobe is patchy, never a flat disc). Only the wave octaves whose texels
@@ -205,15 +324,29 @@ float3 p = WorldPos / 100.0;
 float3 dpx = ddx_fine(p);
 float3 dpy = ddy_fine(p);
 float footprintM = max(max(length(dpx), length(dpy)), 1e-3);
+float distM = length(CameraPos - WorldPos) / 100.0;
 float2 windDir = normalize(float2(WindDirX, WindDirY) + float2(1e-4, 0.0));
+// Generation 5: the sea state's storm share: 0 at and below STORM_WIND_LOW_MS
+// (the calm 7 m/s sea is generation 4 exactly), 1 from STORM_WIND_HIGH_MS.
+float storm = smoothstep(STORM_WIND_LOW_MS, STORM_WIND_HIGH_MS, WindSpeedMS);
 float2 tilt;
 float variance, crest;
 S.Waves(OceanN, OceanNSampler, p, dpx, dpy, footprintM, TimeS, WindSpeedMS, windDir, tilt, variance, crest);
 float3 up = S.Up(p);   // the sphere's, not the cap's interpolated normal
 tilt += S.Swell(p.xy, windDir, TimeS, footprintM);
+float crestKey;
+tilt += S.StormSwell(p.xy, windDir, TimeS, footprintM, storm, crestKey);
 float3 n = normalize(up + float3(tilt, 0.0));
 // Monahan & O'Muircheartaigh 1980: whitecap share W = 3.84e-6 U^3.41; the
 // resolved crest measure is Rayleigh-like, so |s| > sqrt(-ln W) covers W.
 float cover = clamp(3.84e-6 * pow(max(WindSpeedMS, 0.0), 3.41), 1e-5, 0.2);
-float foam = smoothstep(sqrt(-log(cover)), sqrt(-log(cover)) + 0.5, crest);
+float crestFoam = smoothstep(sqrt(-log(cover)), sqrt(-log(cover)) + 0.5, crest);
+// Generation 5: the crest foam is the calm sea's (at storm it is texel speckle
+// near and nothing far); it fades out with storm and the storm foam comes in.
+float foam = saturate(crestFoam * (1.0 - storm)
+                      + S.StormFoam(p.xy, windDir, footprintM, distM, TimeS, WindSpeedMS, crestKey, storm,
+                                    float4(STREAK_ALONG_M, STREAK_ACROSS_M, STREAK_THRESHOLD, STREAK_MEAN),
+                                    float4(PATCH_ALONG_M, PATCH_ACROSS_M, PATCH_THRESHOLD, PATCH_MEAN),
+                                    float4(STREAK_FADE_START_M, STREAK_FADE_END_M, PATCH_FADE_START_M, PATCH_FADE_END_M),
+                                    float2(STREAK_SHARE, PATCH_SHARE), FOAM_DRIFT_SHARE));
 return n;

@@ -128,17 +128,33 @@ def test_a_brighter_realtime_frame_raises_the_ev100():
     assert row["to"] < row["from"]
 
 
-def test_a_colour_cast_moves_color_gain_toward_the_reference():
+def test_a_colour_cast_moves_the_white_balance_not_color_gain():
+    """hyperreal-grade: the white balance is the one warmth owner. A warm
+    realtime frame takes a lower WhiteTemp (UE renders light of WhiteTemp as
+    white), a cool one a higher; ColorGain stays neutral; the step is in
+    mired, damped and clamped."""
     lin, ids, depth = _scene()
     warm = lin * np.array([1.25, 1.0, 0.75])
     _, result = _suggest(lin, warm, ids, depth)
-    row = _constants(result)["beauty_look.color_grade.ColorGain"]
+    constants = _constants(result)
+    assert "beauty_look.color_grade.ColorGain" not in constants
+    row = constants["beauty_look.color_grade.WhiteTemp"]
     before, after = row["from"], row["to"]
-    assert after[0] < before[0] and after[2] > before[2]   # cool the warm frame
-    assert after[3] == before[3]
-    assert result["color_grade"]["ColorGain"] == after
-    for b, a in zip(before[:3], after[:3]):
-        assert lm.GAIN_STEP_CLAMP[0] - 1e-9 <= a / b <= lm.GAIN_STEP_CLAMP[1] + 1e-9
+    assert after < before                                     # cool the warm frame
+    stops = row["metric"]["lit_red_over_blue_stops"]
+    assert 0.5 < stops < 0.8                                  # log2(1.25 / 0.75) = 0.737, before the clip
+    mired_step = 1.0e6 / after - 1.0e6 / before
+    assert 0.0 < mired_step <= lm.WB_STEP_CLAMP_MIRED + 1e-6
+    assert mired_step == pytest.approx(min(lm.WB_MIRED_PER_STOP_RB * lm.WB_DAMP * stops,
+                                           lm.WB_STEP_CLAMP_MIRED), abs=0.05)
+    assert result["color_grade"]["WhiteTemp"] == after
+    assert result["color_grade"]["ColorGain"] == [1.0, 1.0, 1.0, 1.0]
+    assert result["beauty_look"]["color_grade"]["WhiteTemp"] == after
+    cool = lin * np.array([0.8, 1.0, 1.25])
+    _, result = _suggest(lin, cool, ids, depth)
+    row = _constants(result)["beauty_look.color_grade.WhiteTemp"]
+    assert row["to"] > row["from"]
+    assert lm.WB_CLAMP_K[0] <= row["to"] <= lm.WB_CLAMP_K[1]
 
 
 def test_a_desaturated_frame_raises_color_saturation():

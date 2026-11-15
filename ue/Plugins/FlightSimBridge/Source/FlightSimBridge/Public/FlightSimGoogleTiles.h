@@ -128,8 +128,18 @@ public:
 	//   the sky's reflection (screen-space and sky-light; no Lumen needed).
 	//   The tiles stay drawn under it (the owner's rule: never off). The cap
 	//   is added to BeautyOnlyActors, so no label pass ever sees it.
+	// * the sea state (hyperreal stormsea, M_FlightSimOceanBeauty generation
+	//   5). WindSpeedMps / WindFromDeg are the card's steady surface wind
+	//   (wind_speed_kt x 1852 / 3600; wind_direction_deg, the bearing it blows
+	//   FROM). They set the sea material instance's WindSpeedMS and its
+	//   downwind WindDirX / WindDirY (engine X east, Y north); before this
+	//   nothing set them and every sea was the material's 7 m/s default.
+	//   Still air (speed <= 0) keeps that default, so a card that states no
+	//   wind draws the sea it drew. Beauty only: the parameters live on the
+	//   cap's own material instance and nowhere else.
 	// Returns the record (also written into Record() as beauty_ground).
 	TSharedPtr<FJsonObject> ApplyBeautyGround(UWorld* World, double CameraAglM, double SeaRadiusM,
+	                                          double WindSpeedMps, double WindFromDeg,
 	                                          TArray<AActor*>& BeautyOnlyActors);
 
 	// Round 1 hang (2026-11-09), the constrained GPU only (the commandlet's

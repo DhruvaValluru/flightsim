@@ -1907,7 +1907,7 @@ source and is grepped by the check script's block.
 | `NNEDenoiser.Asset` (commandlet, pathtrace) | 3 (High Quality) | shot (a) at 256 spp, Asset 2 vs 3: residual noise in the sky band against frame time |
 | reference spp (runbook `-Spp`) | 1024 | shot (a) at 256, 1024, 4096 denoised: stop when the sky band's L* std changes < 0.5 |
 | `look_match.EXPOSURE_GAIN` / `_TOLERANCE_STOPS` / `_STEP_MAX_STOPS` | 0.8 / 0.10 / 2.0 | iterations to converge on shot (a); lower the gain if it overshoots |
-| `GAIN_DAMP`, `GAIN_STEP_CLAMP`, `COLOUR_TOLERANCE_DE00` | 0.7, (0.85, 1.15), 2.0 | shot (a) golden hour: the cast after two passes |
+| `WB_MIRED_PER_STOP_RB`, `WB_DAMP`, `WB_STEP_CLAMP_MIRED`, `WB_CLAMP_K`, `COLOUR_TOLERANCE_DE00` (hyperreal-grade: the cast moves WhiteTemp, not ColorGain) | 90, 0.7, 40, (4000, 9000), 2.0 | shot (a) golden hour: the cast after two passes |
 | `SATURATION_*`, `CONTRAST_*` | 0.05 / 0.7 / (0.8, 1.25); 0.05 / 0.6 / (0.8, 1.25) | shot (b) desert low pass |
 | `SHADOW_TOLERANCE_STOPS`, `SKY_LIGHT_GAIN`, `SKY_LIGHT_STEP_CLAMP` | 0.15, 0.6, (0.5, 2.0) | shot (b), the aircraft's shadow side |
 | `HAZE_*`, `FAR_GROUND_PERCENTILE` | 0.08 / 0.7 / (0.7, 1.4); 75 | shot (c) forest in rain, far ridges |
@@ -3870,3 +3870,99 @@ streaks of bases thinning into the haze), no rectangular columns or stepped bloc
 same over the rim; #04 unchanged in shape (no steps). A/B: `-look-cloud-tiers=off` = round 51
 (tiers, no fade). Knobs (UNCALIBRATED): residual grain -> SHADOW_DITHER 0.5; tiers creeping back
 -> SHADOW_SOFTEN 1.5; far clouds vanishing too early -> nothing here (the sheet's DISTANT_* own it).
+
+## item "aircraft": the airframe's sky reflection and the rain sheen (2026-11-14)
+
+Mac, uncompiled and unrendered; branch claude/hyperreal-aircraft. Chase views #06, #09, #13, #15:
+the airframe reads as flat grey plastic, no believable specular, weak sky reflection, no rain sheen.
+
+**Cause, read in code.** A glossy or wet panel needs a MIRROR image of its surroundings, and the
+render laptop's path gives it none: Intel iGPU, D3D11 SM5 (no Lumen, no HW RT); the beauty look's
+`ssr` effect is OFF on the constrained GPU (FlightSimBeautyLook.cpp: ReflectionMethod None,
+ScreenSpaceReflectionIntensity 0); no file of the bridge spawns a reflection capture. The only
+specular IBL is the sky light's one low-resolution cubemap (lower hemisphere black). Paint is a
+4 % dielectric (F0 0.04, Metallic 0 since round 5): under that cubemap it shows no sky at all,
+and the wet layer's work (roughness to 0.08, coat to 1 at 0.03) has nothing to reflect, so a wet
+airframe looks like a dry one. The canopy lane hit the same wall and answered with a baked strip
+on Emissive (-canopy-reflect, OFF by default, A/B pending).
+
+**Fix (LOOK_GENERATION 13; scripts/aircraft_paint_reflect.py).** The paint and bare-metal
+masters (and the paint graph's probe twins) take one more graft after the wet layer, Emissive
+only: `Fresnel(N.V) x gloss x strip(reflect(V, N)) x PaintEnvGain x PaintEnvTint x PaintEnvAmount`
+(paint_env_uv.hlsl, paint_env_reflect.hlsl). F0 is UE's own `lerp(0.08 Specular, BaseColor,
+Metallic)` from the surface as the wet layer left it; the clear coat is a second n 1.5 layer on
+top by CoatAmount; each layer's mirror fades as `(1 - roughness / 0.5)^2`. Consequences, computed
+(tests/test_paint_reflect.py): the J-11's matte grey (coat 0, roughness 0.5) adds NOTHING dry;
+the same panel wet mirrors the sky (the rain sheen, no new switch); a coated livery mirrors it
+dry; bare metal takes half (the engine already mirrors it at F0 0.92). The rivulets lean the
+LOOKUP normal (aircraft_wet.hlsl's new `WetLean` additional output x PaintStreakLean), never the
+material's Normal, so a streak reads as a thin line of a different sky. The host sets
+PaintEnvGain each step by the canopy's rule (0.10 x sun / pi, night fade, overcast dim; the same
+tint) on every paint / bare-metal MID whose master carries the parameter; a pre-gen-13 master is
+counted `slots_stale_master`. `-paint-reflect=on` is the DEFAULT; `off` is the A/B (the masters'
+PaintEnvGain 0: byte-identical to gen 12 in effect). Strip: the canopy lane's T_GlassEnv_64 (no
+new asset). Labels: Emissive only; every master stays opaque, no WPO; BaseColor, Roughness,
+Normal, AO and the coat pass through, so ID / depth / stencil / SCS_Normal / SCS_BaseColor are
+unchanged. Exposure: the gain is scene nits per unit of strip radiance, proportional to the sun,
+so the mirrored sky sits in the sunlit paint's own exposure.
+
+Every number UNCALIBRATED: PaintEnvAmount 1.0 / 0.5, PaintStreakLean 0.6, RoughCutoff 0.5, the
+0.10 share. Probe: #06 (SFO rain, A320), #09, #13, #15 at shot c, each beside -paint-reflect=off;
+read render.json `aircraft_look.materials.paint_reflect` (slots, gain, slots_stale_master: a
+stale master means the render machine has not rebuilt gen 13 yet -- run ue_create_materials.py).
+Risk: the strip is a coastal daytime sky; under a storm deck the overcast dim (x 0.25) may still
+read too bright or too blue, and the double count with the engine's IBL on bare metal is a guess.
+
+## hyperreal-grade (2026-11-14, Mac, not rendered)
+
+**Item "grade".** Round 83's frames read as flat saturated navy skies (#01, #13) and dull
+grey-brown ground (#11): the beauty grade lacked a camera's tonal response. Cause, from the
+code, not a frame: the same quality was applied three times along the beauty path.
+CONTRAST: the grade's `ColorContrast` (1.04 / 1.08 / 1.1) under UE's per-channel filmic curve
+(which already adds contrast and saturation to a chromatic sky: the blue channel rides the
+straight section while red and green sit in the toe), and the film stock's own S-curve
+(normalised to full range) on top in post. SATURATION: the Ektachrome slide after that curve
+pushes a sky already at HSV 0.9 further (r93: "the Ektachrome cube darkens saturated blue");
+the storm's `ColorSaturation 0.75 x ColorGamma 0.96` under the 2383 print was desaturation
+twice (the grey-brown). WARMTH: four fixed `WhiteTemp`s (6700 / 6500 / 6100 / 6500), none read
+from the light; the storm's 6100 was a blue gel over a deck whose light is already cool.
+HIGHLIGHTS: the engine curve's shoulder asymptotes at 1 + FilmWhiteClip = 1.04 and is clipped,
+so bright cloud crosses white with a hard edge (`film_tone_curve`: scene 8 x grey -> 0.99,
+16 x -> clipped).
+
+**Owners now (one each).** `core/scene/beauty_look.py`:
+- Contrast: the film stock's curve. Every grade's `ColorContrast` and `ColorGamma` are 1.
+- Saturation: the stock's, with the camera response's roll-off (below). The grade keeps a mild
+  overall term only (storm 0.9, overcast 0.95, the sunny grades 1).
+- Warmth: `white_balance_for` (`WHITE_BALANCE`, `ILLUMINANT_MODEL`). The scene illuminant is
+  modelled (the transmitted sun's CCT from the Kasten-Young air mass, 5800 K at the zenith,
+  ~4500 K at 10 deg, floored at 2500 K; the clear sky's fill 11000 K; the overcast sky 6800 K),
+  mixed in mired on a sun-facing surface by the direct normal beam's share, and the camera's
+  daylight white (6500 K) follows it `awb_share` (0.35) of the way in mired: a low sun keeps
+  65 % of its warmth, a deck is near neutral (6600 K), noon ~6390 K. Mode `grade` keeps the
+  round-2 numbers. `plan.white_balance` records the illuminant and the basis;
+  `color_grade.WhiteTemp` is the owner's.
+- Highlights: `TONEMAP_CAMERA` over the engine's stated defaults: FilmShoulder 0.30,
+  FilmWhiteClip 0.01 (asymptote at white, no clip; scene 4 x grey 0.935 against 0.944; the toe
+  and mid-grey unchanged, EV100 untouched). `film_tone_curve` is the 1-D reference of the
+  engine's curve (TonemapCommon.ush FilmToneMap), test-held.
+- Camera response: `CAMERA_RESPONSE` -> `scripts/beauty_post.py` step `camera`
+  (BEAUTY_POST_VERSION 3), a 33^3 LUT built from the row at run time, applied with `lut3d` in
+  16-bit after the stock and BEFORE the 8-bit halation (the v2 fix stands; the LUT is smooth
+  and C1 at its knee, so no rings of its own). On the encoded values around video luma Y':
+  HSV saturation above 0.6 compressed toward 1 with a soft knee (0.87 -> 0.76 on r83's navy),
+  hue kept exactly, Y' kept; from Y' 0.85 the chroma fades 50 % into white (a sensor's clip).
+  Grey axis = identity. Recorded with the row and the written cube's sha256.
+- `core/scene/look_match.py`: a colour cast now moves `WhiteTemp` (mired, damped, clamped),
+  never `ColorGain` (`WB_*` constants).
+
+**Labels.** Untouched: the engine rows reach the beauty capture only (tests/test_beauty_label_isolation.py);
+the post step writes `frame_NNNN_beauty_post.png` beside the frame as before.
+
+**Windows.** Render #01, #11, #13 (beauty, `FLIGHTSIM_BEAUTY_POST=on`), one still each; A/B
+`on,-camera` for the roll-off alone. Expected: the sky a photograph's blue (HSV saturation
+0.6-0.8, hue within 3 deg of the raw frame), the storm ground neutral grey rather than brown,
+the brightest cloud's sRGB histogram with no pile-up at 255, a sunlit wing white, not yellow.
+Knobs (UNCALIBRATED): sky still navy -> `chroma_knee` 0.5; too pastel -> 0.7; golden hour too
+cool -> `awb_share` 0.2; a cast under the deck -> `overcast_sky_k`; clouds grey -> `highlight_from`
+0.9; flat mids -> nothing here (the stock's curve owns the contrast: FILM_STOCKS).

@@ -30,8 +30,12 @@ and writes them in the formats their loaders already read:
 
 * ``beauty_look.json`` -- the ``-beauty-look=`` sidecar
   (core/scene/beauty_look.py, FlightSimBeautyLook.cpp): ``exposure.ev100``
-  and ``color_grade`` (ColorGain, ColorSaturation, ColorContrast). The
-  host recomputes AutoExposureBias from the EV100 it reads;
+  and ``color_grade`` (WhiteTemp, ColorSaturation, ColorContrast). The
+  host recomputes AutoExposureBias from the EV100 it reads. A colour cast
+  moves ``WhiteTemp`` (in mired, along the daylight locus), never
+  ColorGain: hyperreal-grade made the white balance the one warmth owner
+  (beauty_look.white_balance_for) and ColorGain stays neutral on every
+  grade;
 * ``world_beauty_overrides.json`` -- the ``-world-beauty-overrides=`` /
   ``FLIGHTSIM_WORLD_BEAUTY_OVERRIDES`` file (core/scene/world_beauty.py
   validate_overrides, FlightSimClouds.cpp): ``atmosphere.<preset>.
@@ -99,12 +103,19 @@ MIN_REGION_PIXELS = 64
 EXPOSURE_TOLERANCE_STOPS = 0.10
 EXPOSURE_GAIN = 0.8
 EXPOSURE_STEP_MAX_STOPS = 2.0
-#: Colour cast: no ColorGain change while the region means are within this
-#: CIEDE2000; else move each channel by its chromaticity ratio ^ GAIN_DAMP,
-#: clamped to GAIN_STEP_CLAMP a pass.
+#: Colour cast: no WhiteTemp change while the region means are within this
+#: CIEDE2000; else the white balance moves in mired by the red/blue
+#: chromaticity ratio of the two means: WB_MIRED_PER_STOP_RB mired per log2
+#: of (R/B realtime over R/B reference) (D65 -> D55 raises linear sRGB R/B
+#: by about 0.3 stops over 28 mired), times WB_DAMP, at most
+#: WB_STEP_CLAMP_MIRED a pass, the result held inside WB_CLAMP_K. UE renders
+#: light of WhiteTemp as white, so a warm realtime frame takes a LOWER
+#: WhiteTemp (hyperreal-grade: the one warmth owner; ColorGain stays neutral).
 COLOUR_TOLERANCE_DE00 = 2.0
-GAIN_DAMP = 0.7
-GAIN_STEP_CLAMP = (0.85, 1.15)
+WB_MIRED_PER_STOP_RB = 90.0
+WB_DAMP = 0.7
+WB_STEP_CLAMP_MIRED = 40.0
+WB_CLAMP_K = (4000.0, 9000.0)
 #: Saturation: mean CIELAB chroma ratio outside 1 +- this moves ColorSaturation.
 SATURATION_TOLERANCE = 0.05
 SATURATION_DAMP = 0.7
@@ -136,7 +147,8 @@ CLOUD_STEP_CLAMP = (0.5, 2.0)
 
 UNCALIBRATED: Tuple[str, ...] = (
     "MIN_REGION_PIXELS", "EXPOSURE_TOLERANCE_STOPS", "EXPOSURE_GAIN",
-    "EXPOSURE_STEP_MAX_STOPS", "COLOUR_TOLERANCE_DE00", "GAIN_DAMP", "GAIN_STEP_CLAMP",
+    "EXPOSURE_STEP_MAX_STOPS", "COLOUR_TOLERANCE_DE00",
+    "WB_MIRED_PER_STOP_RB", "WB_DAMP", "WB_STEP_CLAMP_MIRED", "WB_CLAMP_K",
     "SATURATION_TOLERANCE", "SATURATION_DAMP", "SATURATION_STEP_CLAMP",
     "CONTRAST_TOLERANCE", "CONTRAST_DAMP", "CONTRAST_STEP_CLAMP",
     "SHADOW_TOLERANCE_STOPS", "SKY_LIGHT_GAIN", "SKY_LIGHT_STEP_CLAMP",
@@ -427,10 +439,11 @@ def current_look(render: Optional[Mapping[str, Any]], beauty_plan: Optional[Mapp
     grade = plan.get("color_grade")
     if not isinstance(grade, dict):
         name = plan.get("grade") if plan.get("grade") in beauty_look.GRADES else "desert_noon"
-        grade = {k: copy.deepcopy(beauty_look.GRADES[name][k]) for k in
-                 ("ColorSaturation", "ColorContrast", "ColorGamma", "ColorGain", "ColorOffset",
-                  "WhiteTemp", "WhiteTint")}
-        sources["color_grade"] = f"beauty_look.GRADES[{name!r}] (the plan carries none)"
+        grade = {k: copy.deepcopy(beauty_look.GRADES[name][k]) for k in beauty_look.GRADE_KEYS}
+        # The white point is the white balance owner's, not the grade's own.
+        grade["WhiteTemp"] = float(beauty_look.WHITE_BALANCE["daylight_k"])
+        sources["color_grade"] = (f"beauty_look.GRADES[{name!r}] (the plan carries none); WhiteTemp "
+                                  f"the daylight white (WHITE_BALANCE.daylight_k)")
     else:
         sources["color_grade"] = "beauty_look plan"
     world = find_key(render, "world_beauty")
@@ -527,7 +540,8 @@ def suggest(comparison: Mapping[str, Any], current: Mapping[str, Any]) -> Dict[s
                 f"EV100 darkens (damped by EXPOSURE_GAIN {EXPOSURE_GAIN:g})")
             plan.setdefault("exposure", {})["ev100"] = after
 
-    # 2. colour cast: chromaticity ratios of the lit pool's mean linear RGB.
+    # 2. colour cast: the red/blue chromaticity ratio of the lit pool's means
+    #    -> the white balance (mired), the one warmth owner.
     if lit is not None:
         de = lit["diff"]["delta_e00_of_means"]
         if de <= COLOUR_TOLERANCE_DE00:
@@ -535,19 +549,23 @@ def suggest(comparison: Mapping[str, Any], current: Mapping[str, Any]) -> Dict[s
         else:
             ref_rgb = lit["reference"]["mean_linear_rgb"]
             rt_rgb = lit["realtime"]["mean_linear_rgb"]
-            ref_y = sum(w * c for w, c in zip(_LUMA, ref_rgb))
-            rt_y = sum(w * c for w, c in zip(_LUMA, rt_rgb))
-            ratios = [((r / ref_y) / (t / rt_y)) if t > 1e-9 and ref_y > 1e-9 and rt_y > 1e-9 else 1.0
-                      for r, t in zip(ref_rgb, rt_rgb)]
-            norm = sum(w * k for w, k in zip(_LUMA, ratios)) or 1.0
-            steps = [_clamp((k / norm) ** GAIN_DAMP, GAIN_STEP_CLAMP) for k in ratios]
-            before = list(grade["ColorGain"])
-            after = [_r4(before[i] * steps[i]) for i in range(3)] + [before[3]]
-            add("beauty_look.color_grade.ColorGain", before, after,
-                {"lit_delta_e00_of_means": _r4(de)},
-                "the realtime lit regions carry a colour cast against the reference; each channel "
-                "moves by its chromaticity ratio (luminance kept) ^ GAIN_DAMP")
-            grade["ColorGain"] = after
+            if min(ref_rgb[0], ref_rgb[2], rt_rgb[0], rt_rgb[2]) <= 1e-9:
+                not_judged.append("colour cast: a lit mean has no red or no blue to compare")
+            else:
+                stops_rb = math.log2((rt_rgb[0] / rt_rgb[2]) / (ref_rgb[0] / ref_rgb[2]))
+                step = _clamp(WB_MIRED_PER_STOP_RB * WB_DAMP * stops_rb,
+                              (-WB_STEP_CLAMP_MIRED, WB_STEP_CLAMP_MIRED))
+                before = float(grade["WhiteTemp"])
+                # Warmer than the reference (R/B up): the white point goes to a warmer
+                # light (more mired, fewer kelvin), which cools the frame.
+                after = _r4(_clamp(1.0e6 / (1.0e6 / before + step), WB_CLAMP_K))
+                add("beauty_look.color_grade.WhiteTemp", before, after,
+                    {"lit_delta_e00_of_means": _r4(de), "lit_red_over_blue_stops": _r4(stops_rb)},
+                    f"the realtime lit regions are {stops_rb:+.2f} stops redder over blue than the "
+                    f"reference; the white balance moves {step:+.1f} mired (WB_MIRED_PER_STOP_RB x "
+                    f"WB_DAMP, clamped) along the daylight locus; ColorGain stays neutral (one "
+                    f"warmth owner)")
+                grade["WhiteTemp"] = after
         # 3. saturation.
         ratio = lit["diff"]["chroma_ratio"]
         if ratio is None:

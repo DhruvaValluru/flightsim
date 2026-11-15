@@ -53,8 +53,8 @@ SHARED = {
     "airframe_wetness": 1.0,             # saturate(40 / 4)
     "exposure_meter_target_p90": 0.40,   # core/scene/beauty_look.py EXPOSURE_METER_TARGET_P90["storm"]
     "colour_temperature_k": 6100.0,      # beauty_look.py GRADES["storm"]["WhiteTemp"]
-    "grade_saturation": 0.75,            # GRADES["storm"]["ColorSaturation"][3]
-    "grade_contrast": 1.1,               # GRADES["storm"]["ColorContrast"][3]
+    "grade_saturation": 0.9,             # GRADES["storm"]["ColorSaturation"][3] (hyperreal-grade)
+    "grade_contrast": 1.0,               # GRADES["storm"]["ColorContrast"][3] (the stock owns contrast)
     "ev100_offset": 0.0,                 # GRADES["storm"]["ev100_offset"]
     "dynamic_gi": "none (r.DynamicGlobalIlluminationMethod 0, D3D11 SM5)",
 }

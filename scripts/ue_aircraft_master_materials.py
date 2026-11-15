@@ -18,7 +18,11 @@ model:
   (tangent_space_normal off): the FlightGear meshes are imported with
   legacy tangents because MikkTSpace corrupts them (gotcha 5), so nothing
   here depends on a tangent basis. A matte fighter (PLAAF grey) is this
-  master with ClearCoat 0 in its look config.
+  master with ClearCoat 0 in its look config. Generation 13: after the wet
+  layer, the baked sky strip mirrored on Emissive by Fresnel x gloss
+  (scripts/aircraft_paint_reflect.py; PaintEnvGain set by the host under
+  -paint-reflect=on): the dry gloss of a coated livery and the rain sheen of
+  a wet matte one, with the rivulets leaning the lookup. Emissive only.
 * M_AircraftBareMetal -- Default Lit, the same graph without the coat:
   Metallic 1, colour lerped toward the measured metal F0 (MetalF0:
   aluminium, or the metal a slot rule names: titanium, stainless steel),
@@ -81,6 +85,7 @@ if _HERE not in sys.path:
 import aircraft_look as look  # noqa: E402
 import aircraft_wet_layer  # noqa: E402  (wet-airframe-canopy)
 import aircraft_glass_reflect  # noqa: E402  (canopy reflection, tiers 0-1)
+import aircraft_paint_reflect  # noqa: E402  (the airframe's sky reflection)
 
 REPO = os.path.dirname(_HERE)
 #: 2: wet-airframe-canopy wet layer and canopy scratches; 3: fix pass (acrylic
@@ -99,7 +104,14 @@ REPO = os.path.dirname(_HERE)
 #: only under -canopy-reflect=on). Every other graph is unchanged.
 #: 12 (round 93): M_AircraftContrail's opacity fades in with the camera's
 #: distance (saturate((PixelDepth - offset) / length); #13's four rulers). Every other graph is unchanged.
-LOOK_GENERATION = "12"
+#: 13 (item "aircraft", 2026-11-14): the paint and bare-metal masters (and the
+#: paint graph's probe twins) mirror the canopy lane's baked sky strip on
+#: Emissive after the wet layer (scripts/aircraft_paint_reflect.py:
+#: Fresnel x gloss x strip x PaintEnvGain, the host's gain under
+#: -paint-reflect=on), the lookup leaned by the wet layer's new WetLean output
+#: (a rivulet's flank). PaintEnvGain 0 in the master: nothing added until the
+#: host sets it. Every other graph is unchanged.
+LOOK_GENERATION = "13"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.
@@ -496,7 +508,11 @@ def _surface(name, cls, coat, shading_model=None, tangent_normal=False):
         _link(s["ClearCoatRoughness"], "", out, ("ClearCoatRoughness", "Clear Coat Roughness"))
     _use_attributes(material, out)
     # wet-airframe-canopy: the weather's wetness (shading only, opaque, no WPO).
-    aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], cls, raw_base=raw_base)
+    wet = aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], cls, raw_base=raw_base)
+    # generation 13: the sky mirrored on the panel (Emissive only; the wet
+    # layer's roughness, coat and rivulet lean shape it, so the same graft is
+    # the dry gloss and the rain sheen).
+    aircraft_paint_reflect.add_reflection(material, sys.modules[__name__], cls, aircraft_wet_layer, wet)
     _finish(material, name)
 
 
