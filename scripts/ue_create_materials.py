@@ -3803,7 +3803,8 @@ WORLD_TILES_DETAIL_INPUTS = {
                              "CanopyAmount",
                              "SnowlineM", "FarFadeStartM", "FarFadeEndM",
                              "RockD", "ScreeD", "SnowD", "GrassD", "SandD", "SoilD"),
-    "tiles_detail_normal": ("Albedo", "AlbedoLow", "WorldPos", "CameraPos", "NormalWS", "GroundAltitudeM",
+    # generation 8: AlbedoMid (the footprint-filtered tile) is the relief's source.
+    "tiles_detail_normal": ("Albedo", "AlbedoLow", "AlbedoMid", "WorldPos", "CameraPos", "NormalWS", "GroundAltitudeM",
                             "GroundAltitudeKnown", "TerrainDetailScale", "DetailAmount", "NormalAmount",
                             "BumpAmount",
                             "CanopyAmount", "SnowlineM", "FarFadeStartM", "FarFadeEndM",
@@ -3932,7 +3933,7 @@ def world_stamp(material, name):
 #: so no reference breaks and no redirect is registered (the storm lane's
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
-WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "8",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: tiles_normal on the same puddle mask
+WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "10",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail)
                      "M_FlightSimCloudLayers": "9", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
                      "M_FlightSimOceanBeauty": "5"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind)

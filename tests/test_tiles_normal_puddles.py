@@ -113,7 +113,7 @@ def test_the_three_shaders_carry_the_same_scale_and_fade():
 
 
 def test_the_material_generation_is_bumped():
-    assert '"M_FlightSimTilesBeauty": "8"' in SCRIPT
+    assert int(re.search(r'"M_FlightSimTilesBeauty": "(\d+)"', SCRIPT).group(1)) >= 8
 
 
 # -- the numbers ------------------------------------------------------------------------
