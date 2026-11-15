@@ -1,8 +1,28 @@
 {
  "asset": "tornado_vdb",
- "title": "Tornado flipbook baked from JangaFX's CC0 Tornado Looping VDB",
+ "baker": "scripts/bake_tornado_flipbook.py (Blender, offline)",
+ "files": {
+  "T_TornadoFlipbook.png": {
+   "bytes": 8379457,
+   "path": "assets/looks/tornado_vdb/T_TornadoFlipbook.png",
+   "sha256": "ad1572ab704a1dcc13f643f2a7e00a7dc1a0d97646f71993dd713af37e84831a"
+  },
+  "tornado_flipbook.json": {
+   "bytes": 1679,
+   "path": "assets/looks/tornado_vdb/tornado_flipbook.json",
+   "sha256": "755aeabc29365161189924d7126f44c424af855201291af93bc5dd0a8085588c"
+  }
+ },
  "licence": "CC0-1.0",
  "licence_file": "LICENSE",
- "status": "PLACEHOLDER: not baked yet (scripts/bake_tornado_flipbook.py on the render machine writes the files below)",
- "files": {}
+ "source": {
+  "author": "JangaFX",
+  "licence": "CC0-1.0",
+  "name": "JangaFX EmberGen free VDB: Tornado Looping",
+  "url": "https://jangafx.com/software/embergen/download/free-vdb-animations"
+ },
+ "source_zip_sha256": "492c99321ae911d0ad6c6ff3df6eb53c83e443ba91b6aab7b97ba86e536ac57c",
+ "status": "UNMEASURED: no engine frame rendered yet",
+ "title": "Tornado flipbook baked from JangaFX's CC0 Tornado Looping VDB",
+ "visual_only": true
 }

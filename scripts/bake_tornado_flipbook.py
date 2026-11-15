@@ -37,6 +37,7 @@ Decisions, stated:
 from __future__ import annotations
 
 import argparse
+import os
 import hashlib
 import json
 import math
@@ -371,7 +372,9 @@ def bake_with_blender(ns: argparse.Namespace) -> int:   # pragma: no cover (need
     r.image_settings.color_mode = "RGBA"
     r.image_settings.color_depth = "8"
     scene.view_settings.view_transform = "Standard"
-    frames_dir = Path(ns.out) / "_frames"
+    # Absolute: Blender resolves a relative render.filepath against the drive root, not the cwd.
+    ns.out = Path(ns.out).resolve()
+    frames_dir = ns.out / "_frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     pngs = []
     for n, i in enumerate(used):
@@ -397,4 +400,12 @@ def main(argv: Sequence[str]) -> int:   # pragma: no cover (needs Blender)
 
 
 if __name__ == "__main__":   # pragma: no cover
-    sys.exit(main(sys.argv))
+    # blender -b exits 0 after an uncaught exception: fail the process by name instead.
+    try:
+        code = main(sys.argv)
+    except BaseException as exc:   # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        print(f"BAKE-FAILED: {exc!r}", flush=True)
+        os._exit(1)
+    os._exit(int(code or 0))

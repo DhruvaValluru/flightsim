@@ -30,6 +30,7 @@ C++ share them). Every amount is UNCALIBRATED until a render is judged.
 from __future__ import annotations
 
 import argparse
+import os
 import math
 import sys
 from pathlib import Path
@@ -79,7 +80,9 @@ def main(argv):
     vdbs = sorted(Path(vdb_dir).rglob("*.vdb"))[: args.clouds]
     if not vdbs:
         raise SystemExit(f"no .vdb under {vdb_dir}")
-    out = args.out
+    # Absolute: Blender resolves a relative render.filepath against the drive root, not the cwd
+    # (the render machine's first bake wrote its atlases to C:\assets\...).
+    out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     index = []
     atlas_names = []
@@ -273,4 +276,12 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    # blender -b exits 0 after an uncaught exception: fail the process by name instead.
+    try:
+        main(sys.argv)
+    except BaseException as exc:   # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        print(f"BAKE-FAILED: {exc!r}", flush=True)
+        os._exit(1)
+    os._exit(0)

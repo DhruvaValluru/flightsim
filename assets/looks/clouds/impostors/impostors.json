@@ -1,0 +1,33 @@
+{
+  "clouds": [
+    {
+      "id": "cloud00",
+      "json": "cloud00.json",
+      "light_scale": 1.0947524309158325,
+      "sphere_over_height": 3.519720124110171
+    },
+    {
+      "id": "cloud01",
+      "json": "cloud01.json",
+      "light_scale": 1.0330994129180908,
+      "sphere_over_height": 3.511786529403399
+    },
+    {
+      "id": "cloud02",
+      "json": "cloud02.json",
+      "light_scale": 1.2251523733139038,
+      "sphere_over_height": 3.511786529403399
+    },
+    {
+      "id": "cloud03",
+      "json": "cloud03.json",
+      "light_scale": 1.1122465133666992,
+      "sphere_over_height": 3.882626977159577
+    }
+  ],
+  "licence": "CC0-1.0 (JangaFX EmberGen free VDB simulations: 'licensed as CC0 (Public Domain)')",
+  "magic": "flightsim-cloud-impostors",
+  "px": 128,
+  "version": 1,
+  "views": 8
+}
