@@ -153,8 +153,9 @@ def test_light_encoding_round_trip_and_budget():
         assert cim.decode_light(cim.encode_light(v, 1.0), 1.0) == pytest.approx(v, abs=1e-9)
     assert cim.encode_light(5.0, 1.0) == 1.0
     assert cim.atlas_px(8, 128) == 1024
+    assert cim.atlas_px(cim.DEFAULT_VIEWS, cim.DEFAULT_PX) == 2048 == cim.ATLAS_MAX_PX
     with pytest.raises(ValueError):
-        cim.atlas_px(16, 128)
+        cim.atlas_px(16, 256)
     assert cim.straighten((0.2, 0.4, 0.1), 0.5) == pytest.approx((0.4, 0.8, 0.2))
     assert cim.straighten((0.2, 0.4, 0.1), 0.0) == (0.0, 0.0, 0.0)
     assert cim.encode_depth_offset(None, 1.0) == 0.5
@@ -168,6 +169,14 @@ def test_cloud_record_and_pin(tmp_path):
     assert rec["sphere_over_height"] == pytest.approx(2 * 0.5 * math.sqrt(12) / 2)
     assert rec["channels"]["pos"]["a"] == "opacity" and rec["channels"]["neg"]["a"] == "depth_offset"
     assert "CC0" in rec["licence"] and rec["atlas_px"] == 1024
+    assert rec["framing"] == {"method": "box half-diagonal"}
+    # The fitted bake: the frame's half-side is tight_fit's radius, the height the density's.
+    framing = {"method": "test", "threshold": 0.01}
+    tight = cim.cloud_record("cloud00", "a.vdb", "ab" * 32, (-1, -1, 0), (1, 1, 2), 8, 256, 0.7,
+                             {"pos": "p.png", "neg": "n.png"}, {}, sphere_radius=1.5, framing=framing)
+    assert tight["sphere_radius_vdb_units"] == 1.5 and tight["atlas_px"] == 2048
+    assert tight["sphere_over_height"] == pytest.approx(2 * 1.5 / 2)      # the C++: RadiusCm = 0.5 x this x HeightM
+    assert tight["framing"] is framing and tight["bounds_vdb_units"]["size"] == [2.0, 2.0, 2.0]
     for name in ("cloud00_pos.png", "cloud00_neg.png"):
         (tmp_path / name).write_bytes(name.encode("utf-8"))
     pin = cim.pin_json(tmp_path, ["cloud00_pos.png", "cloud00_neg.png"])
@@ -178,8 +187,68 @@ def test_cloud_record_and_pin(tmp_path):
 def test_the_bake_script_imports_without_blender_and_parses():
     import bake_cloud_impostors as bake
     args = bake.parse(["blender", "--", "--out", "x", "--clouds", "4"])
-    assert args.clouds == 4 and args.views == cim.DEFAULT_VIEWS and args.px == cim.DEFAULT_PX
+    assert args.clouds == 4 and args.views == cim.DEFAULT_VIEWS and args.px == cim.DEFAULT_PX == 256
     assert bake.ANISOTROPY >= 0.6 and bake.ALBEDO >= 0.98 and bake.VOLUME_BOUNCES >= 16
+    # The frame is fitted to the density through the Volume to Mesh shell, not to the grid,
+    # and the record carries the fit (sphere_radius) and how it was found (framing).
+    source = (REPO / "scripts/bake_cloud_impostors.py").read_text(encoding="utf-8")
+    assert "cim.bisect_peak(lambda t: shell_vertex_count(t) > 0)" in source
+    assert "cim.tight_fit(co.reshape(-1, 3).tolist(), extra=voxel)" in source
+    assert "sphere_radius=radius, framing=framing" in source
+    assert "cam_data.ortho_scale = 2.0 * radius" in source
+    assert 'print(f"BAKE-FAILED: {exc!r}", flush=True)' in source and "out = Path(args.out).resolve()" in source
+
+
+# -- the tight frame (pure Python; the bake's Blender side only feeds it points) -----------
+
+def test_density_threshold_is_a_share_of_the_peak_with_a_floor():
+    assert cim.density_threshold(1.0) == pytest.approx(0.01)
+    assert cim.density_threshold(0.3) == pytest.approx(0.003)
+    assert cim.density_threshold(0.0) == 1e-6
+
+
+@pytest.mark.parametrize("peak", [0.37, 1.0, 2.9, 0.004])
+def test_bisect_peak_finds_a_lower_bound_within_the_step(peak):
+    calls = []
+
+    def nonempty(t):
+        calls.append(t)
+        return t < peak
+    found = cim.bisect_peak(nonempty)
+    assert found <= peak
+    assert peak - found <= max(1.0, peak) * 2.0 / 2 ** 10 + 1e-12
+    assert len(calls) <= 24                     # a few shell evaluations, not a scan
+
+
+def test_bisect_peak_of_nothing_is_zero_and_the_cap_holds():
+    assert cim.bisect_peak(lambda t: False) == 0.0
+    assert cim.bisect_peak(lambda t: True, cap=64.0) == 64.0
+
+
+def test_dense_points_and_tight_fit():
+    samples = [(0, 0, 0, 0.0), (1, 2, 3, 0.5), (-1, 0, 1, 0.02), (10, 10, 10, 0.009), (3, 2, 1, 1.0)]
+    pts = cim.dense_points(samples, cim.density_threshold(1.0))
+    assert pts == [(1.0, 2.0, 3.0), (-1.0, 0.0, 1.0), (3.0, 2.0, 1.0)]     # the padding voxel at 10 is out
+    fit = cim.tight_fit(pts, margin=0.0)
+    assert fit["min"] == [-1.0, 0.0, 1.0] and fit["max"] == [3.0, 2.0, 3.0]
+    assert fit["size"] == [4.0, 2.0, 2.0] and fit["centre"] == [1.0, 1.0, 2.0]
+    # the farthest point from the centre ((-1, 0, 1) and (3, 2, 1): sqrt(4 + 1 + 1)), not the half-diagonal
+    assert fit["radius"] == pytest.approx(math.sqrt(6.0))
+    assert fit["radius"] <= 0.5 * math.sqrt(4 ** 2 + 2 ** 2 + 2 ** 2)      # never above the half-diagonal
+    padded = cim.tight_fit(pts, margin=0.04, extra=0.5)
+    assert padded["radius"] == pytest.approx(math.sqrt(6.0) * 1.04 + 0.5)
+    assert padded["min"] == fit["min"]                                 # the margin widens the frame, not the box
+    assert cim.tight_fit([]) is None
+    assert cim.frame_fill(fit["size"], fit["radius"]) == pytest.approx(4.0 / (2 * math.sqrt(6.0)))
+    assert cim.frame_fill([1, 1, 1], 0.0) == 0.0
+
+
+def test_the_first_bakes_grid_fit_was_the_blur():
+    # cloud00's grid (272 x 528 x 176 VDB units): a sphere on the grid's half-diagonal gives
+    # a frame the cloud's shortest side spans by less than a third.
+    grid = cim.tight_fit([(-160, -232, -104), (112, 296, 72)], margin=0.0)
+    assert grid["radius"] == pytest.approx(309.735, abs=0.01)
+    assert 176.0 / (2 * grid["radius"]) < 1 / 3
 
 
 # -- the fetch (no network) ---------------------------------------------------------------

@@ -111,7 +111,7 @@ does not look real and why (hardware vs software).
 **Impostor clouds (0deddc6d), the Cloud Pack is already downloaded (sha 3676ba4c…):**
 1. `.venv\Scripts\python.exe scripts\fetch_cloud_vdbs.py --zip <path>\CloudPackVDB.zip`
 2. `$env:BLENDER="C:\Users\kanth\flightsim_assets\blender-5.2.3-windows-x64\blender.exe"`, then
-   `& $env:BLENDER -b -P scripts\bake_cloud_impostors.py -- --vdb-dir C:\Users\kanth\flightsim_assets\jangafx_clouds\CloudPack\CloudPackVDB --out assets\looks\clouds\impostors --clouds 4 --views 8 --px 128`
+   `& $env:BLENDER -b -P scripts\bake_cloud_impostors.py -- --vdb-dir C:\Users\kanth\flightsim_assets\jangafx_clouds\CloudPack\CloudPackVDB --out assets\looks\clouds\impostors --clouds 4 --views 8 --px 256`
    This is CPU work, roughly 1 to a few hours. Run it while the editor is closed. It is not Unreal.
 3. Commit and push `assets/looks/clouds/impostors`. Build the plugin, then the materials prep (expect M_FlightSimCloudImpostor and MI_..._cloud00-03).
 4. Pilot: scenes 13, 3 and 11 with `$env:FLIGHTSIM_RENDER_SWITCHES="-cloud-impostors=pilot"`, plus the same scenes unset as the comparison.

@@ -25,8 +25,14 @@ Frames and conventions (stated once, here):
     VIEWS x VIEWS frames on the grid's VERTICES, frame (i, j) at
     oct_decode(i / (VIEWS - 1), j / (VIEWS - 1)).
   * A frame's camera looks along -d, up from world z (y near the poles); its
-    image is an orthographic square of side 2 x the bounding sphere's radius,
-    u to the right, v DOWN (texture convention).
+    image is an orthographic square of side 2 x the FRAME SPHERE's radius,
+    u to the right, v DOWN (texture convention). The frame sphere is fitted to
+    the DENSITY (voxels above FRAME_DENSITY_FRACTION of the cloud's peak, plus
+    FRAME_MARGIN), not to the VDB grid: the grid pads the cloud with empty
+    voxels and a grid fit left the first bake's clouds in a third of each frame.
+    The JSON's bounds are that density's box (its height is what the engine
+    scales to the layer), sphere_radius is the frame's half-side, and
+    sphere_over_height = 2 x sphere_radius / height sizes the quad.
   * SIX-WAY LIGHTING: six renders per frame, a white sun from each object-space
     axis direction (+x, +y, +z, -x, -y, -z: the direction the light COMES FROM),
     packed as POS.rgb = (+x, +y, +z), NEG.rgb = (-x, -y, -z); POS.a = opacity
@@ -50,10 +56,17 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 Vec = Tuple[float, float, float]
 
-#: The pilot bake (tier 0): 8 x 8 octahedral views of 128 px -> 1024 px atlases.
+#: The pilot bake (tier 0): 8 x 8 octahedral views of 256 px -> 2048 px atlases
+#: (two 8-bit RGBA PNGs per cloud, ~16 MB each uncompressed in the GPU; 128 px was
+#: too soft once the frame was fitted to the density).
 DEFAULT_VIEWS = 8
-DEFAULT_PX = 128
-ATLAS_MAX_PX = 1024
+DEFAULT_PX = 256
+ATLAS_MAX_PX = 2048
+#: Framing: voxels above this share of the cloud's peak density count as cloud, and
+#: the frame's half-side is their enclosing sphere's radius x (1 + FRAME_MARGIN) plus
+#: one voxel (so the surface's own softness is not clipped).
+FRAME_DENSITY_FRACTION = 0.01
+FRAME_MARGIN = 0.04
 PILOT_CLOUDS = 4
 GAMMA = 2.2
 LIGHT_PERCENTILE = 99.5
@@ -248,6 +261,69 @@ def atlas_px(views: int, px: int) -> int:
     return size
 
 
+def density_threshold(peak_density: float, fraction: float = FRAME_DENSITY_FRACTION,
+                      floor: float = 1e-6) -> float:
+    """The framing threshold: a share of the peak, never below floor."""
+    return max(floor, fraction * float(peak_density))
+
+
+def bisect_peak(nonempty, start: float = 1.0, steps: int = 10, cap: float = 4096.0) -> float:
+    """The peak of a field known only through nonempty(threshold) -> bool ("some value
+    exceeds threshold"; in the bake, "the Volume to Mesh iso-surface has vertices").
+    Doubles from start until empty (or cap), then bisects: the result is a lower bound of
+    the peak within (hi - lo) / 2 ** steps, 0.0 when nothing exceeds 0."""
+    lo, hi = 0.0, float(start)
+    while nonempty(hi):
+        lo, hi = hi, hi * 2.0
+        if hi > cap:
+            return lo
+    for _ in range(steps):
+        mid = 0.5 * (lo + hi)
+        if nonempty(mid):
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+def dense_points(samples: Iterable[Sequence[float]], threshold: float) -> List[Vec]:
+    """(x, y, z, density) samples -> the positions whose density exceeds threshold."""
+    return [(float(s[0]), float(s[1]), float(s[2])) for s in samples if s[3] > threshold]
+
+
+def tight_fit(points: Sequence[Sequence[float]], margin: float = FRAME_MARGIN,
+              extra: float = 0.0) -> Optional[Dict[str, object]]:
+    """The frame fitted to the cloud's points (voxel centres above the threshold, or
+    the iso-surface's vertices): their box (min, max, size, centre) and the frame
+    sphere about the box's centre, radius = the farthest point x (1 + margin) + extra.
+    None when there are no points."""
+    lo = [math.inf] * 3
+    hi = [-math.inf] * 3
+    for p in points:
+        for i in range(3):
+            v = float(p[i])
+            if v < lo[i]:
+                lo[i] = v
+            if v > hi[i]:
+                hi[i] = v
+    if lo[0] == math.inf:
+        return None
+    centre = [0.5 * (lo[i] + hi[i]) for i in range(3)]
+    far2 = 0.0
+    for p in points:
+        d2 = sum((float(p[i]) - centre[i]) ** 2 for i in range(3))
+        if d2 > far2:
+            far2 = d2
+    radius = math.sqrt(far2) * (1.0 + margin) + extra
+    return {"min": lo, "max": hi, "size": [hi[i] - lo[i] for i in range(3)], "centre": centre,
+            "radius": radius}
+
+
+def frame_fill(size: Sequence[float], sphere_radius: float) -> float:
+    """The share of a frame's side the cloud's longest extent spans (1 = edge to edge)."""
+    return max(float(v) for v in size) / (2.0 * sphere_radius) if sphere_radius > 0 else 0.0
+
+
 def frame_origin(i: int, j: int, px: int) -> Tuple[int, int]:
     """The atlas pixel (column, row from the top) of frame (i, j)'s top-left: column i,
     row j (the shader's frame -> atlas map: (i + u, j + v) / views)."""
@@ -292,10 +368,14 @@ def sha256_file(path: Path) -> str:
 
 def cloud_record(cloud_id: str, source_vdb: str, source_sha256: str, bounds_min: Sequence[float],
                  bounds_max: Sequence[float], views: int, px: int, light_scale: float,
-                 atlases: Dict[str, str], render: Dict[str, object]) -> Dict[str, object]:
-    """One cloud's JSON (assets/looks/clouds/impostors/<id>.json)."""
+                 atlases: Dict[str, str], render: Dict[str, object],
+                 sphere_radius: Optional[float] = None,
+                 framing: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    """One cloud's JSON (assets/looks/clouds/impostors/<id>.json). The bounds are the
+    density's box; sphere_radius is the frame's half-side (tight_fit's radius; the box's
+    half-diagonal when None); framing says how the fit was found."""
     size = [float(bounds_max[i]) - float(bounds_min[i]) for i in range(3)]
-    radius = 0.5 * math.sqrt(sum(s * s for s in size))
+    radius = float(sphere_radius) if sphere_radius is not None else 0.5 * math.sqrt(sum(s * s for s in size))
     return {
         "magic": "flightsim-cloud-impostor", "version": 1, "id": cloud_id,
         "source_vdb": source_vdb, "source_sha256": source_sha256, "licence": LICENCE,
@@ -303,8 +383,11 @@ def cloud_record(cloud_id: str, source_vdb: str, source_sha256: str, bounds_min:
                              "size": size},
         "sphere_radius_vdb_units": radius,
         "sphere_over_height": (2.0 * radius / size[2]) if size[2] > 0 else None,
-        "scale_basis": ("VDB units are EmberGen's; the engine scales each instance so the cloud's "
-                        "height is its layer's share (sphere_over_height sizes the quad)"),
+        "scale_basis": ("VDB units are EmberGen's; bounds are the density's box (above the framing "
+                        "threshold), sphere_radius the frame's half-side; the engine scales each "
+                        "instance so the cloud's height is its layer's share (sphere_over_height "
+                        "sizes the quad)"),
+        "framing": framing if framing is not None else {"method": "box half-diagonal"},
         "views": views, "px": px, "atlas_px": atlas_px(views, px), "octahedral": "full sphere, grid vertices",
         "light_scale": light_scale, "channels": CHANNEL_LAYOUT, "atlases": atlases, "render": render,
         "calibration": "UNCALIBRATED until a Windows render is judged",

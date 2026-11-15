@@ -7,22 +7,34 @@ not Unreal), once, after scripts/fetch_cloud_vdbs.py. Blender is portable there
     $env:BLENDER = "C:\Users\kanth\flightsim_assets\blender-5.2.3-windows-x64\blender.exe"
     & $env:BLENDER -b -P scripts\bake_cloud_impostors.py -- `
         --vdb-dir C:\Users\kanth\flightsim_assets\jangafx_clouds\CloudPack\CloudPackVDB `
-        --out assets\looks\clouds\impostors --clouds 4 --views 8 --px 128
+        --out assets\looks\clouds\impostors --clouds 4 --views 8 --px 256
 
 Written for Blender 4.x and 5.x: the VDB is loaded as a Volume datablock directly
 (no operator), the Principled Volume's inputs are found by name with fallbacks, and
-the depth shell (Volume to Mesh) is optional (depth offset 0.5 when it cannot be made,
-said in the JSON).
+the shells (Volume to Mesh) are optional (grid-bounds framing and depth offset 0.5
+when they cannot be made, said in the JSON).
+
+FRAMING. The camera is fitted to the DENSITY, not to the VDB grid: the grid pads the
+cloud with empty voxels, and the first bake (grid fit, 128 px) left each cloud in about
+a third of its frame, so the atlas was mostly empty texels and the clouds blurred.
+Blender's Python exposes no voxel values (bpy.types.VolumeGrid has a name, type and
+transform only), so the density is SAMPLED through a Volume to Mesh modifier: its
+iso-surface at a threshold has vertices exactly where voxels exceed it (to within a
+voxel). That gives the peak density by bisection on "is the surface empty"
+(cloud_impostor_math.bisect_peak), then the box and enclosing sphere of the surface at
+FRAME_DENSITY_FRACTION of the peak (tight_fit), plus FRAME_MARGIN and one voxel. The
+JSON's bounds are that box, sphere_radius the frame's half-side, and "framing" says
+which method and numbers were used.
 
 Per cloud: the VDB imported and centred, a cloud volume shader (Principled Volume,
 albedo ~0.99, forward-scattering anisotropy, many volume bounces for the multiple
 scattering that gives clouds their glow), then for each of VIEWS x VIEWS
-octahedral views an orthographic camera fitted to the bounding sphere and TWO
+octahedral views an orthographic camera fitted to the density's frame sphere and TWO
 renders: the suns from +x, +y, +z coloured red, green, blue (pass "pos"), then
 from -x, -y, -z (pass "neg"). Volume scattering is linear in the light and the
 cloud is grey, so each colour channel is exactly that axis's render. The front
 surface's depth offset is ray-cast against a Volume-to-Mesh shell of the density.
-Atlases (<= 1024 px), one JSON per cloud, impostors.json and PIN.json land in
+Atlases (<= 2048 px), one JSON per cloud, impostors.json and PIN.json land in
 --out. The conventions are scripts/cloud_impostor_math.py's (the shader and the
 C++ share them). Every amount is UNCALIBRATED until a render is judged.
 """
@@ -123,12 +135,68 @@ def main(argv):
         bpy.context.view_layer.update()
         evaluated = vol.evaluated_get(bpy.context.evaluated_depsgraph_get())
         corners = [vol.matrix_world @ Vector(c) for c in evaluated.bound_box]
-        lo = [min(c[i] for c in corners) for i in range(3)]
-        hi = [max(c[i] for c in corners) for i in range(3)]
-        centre = Vector([(lo[i] + hi[i]) / 2 for i in range(3)])
+        grid_lo = [min(c[i] for c in corners) for i in range(3)]
+        grid_hi = [max(c[i] for c in corners) for i in range(3)]
+        voxel = 0.0
+        try:
+            # The grid's index -> object transform: its columns' lengths are the voxel size.
+            m = vol_data.grids["density"].matrix_object
+            voxel = max(Vector((m[0][k], m[1][k], m[2][k])).length for k in range(3))
+        except Exception:               # noqa: BLE001 (no matrix_object on this Blender)
+            pass
+
+        # One Volume to Mesh shell (never rendered) serves the framing (its iso-surface
+        # samples the density, see the module docstring) and the depth offset's ray-casts.
+        shell = None
+        mod = None
+        shell_error = ""
+        try:
+            mesh = bpy.data.meshes.new(f"{cloud_id}_shell")
+            shell = bpy.data.objects.new(f"{cloud_id}_shell", mesh)
+            scene.collection.objects.link(shell)
+            mod = shell.modifiers.new("shell", "VOLUME_TO_MESH")
+            mod.object = vol
+            shell.hide_render = True
+        except Exception as error:      # noqa: BLE001 (a missing modifier type on this Blender)
+            shell = None
+            shell_error = f"{error}"
+
+        def shell_vertex_count(threshold):
+            mod.threshold = threshold
+            bpy.context.view_layer.update()
+            return len(shell.evaluated_get(bpy.context.evaluated_depsgraph_get()).data.vertices)
+
+        fit = None
+        framing = {"fraction_of_peak": cim.FRAME_DENSITY_FRACTION, "margin": cim.FRAME_MARGIN,
+                   "voxel_size": voxel, "grid_bounds": {"min": grid_lo, "max": grid_hi}}
+        if shell is not None:
+            peak = cim.bisect_peak(lambda t: shell_vertex_count(t) > 0)
+            threshold = cim.density_threshold(peak)
+            mod.threshold = threshold
+            bpy.context.view_layer.update()
+            ev = shell.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            co = np.empty(len(ev.data.vertices) * 3, np.float32)
+            ev.data.vertices.foreach_get("co", co)
+            fit = cim.tight_fit(co.reshape(-1, 3).tolist(), extra=voxel)
+            framing.update({"peak_density": peak, "threshold": threshold,
+                            "method": ("Volume to Mesh iso-surface sampled at the threshold (Blender's Python "
+                                       "exposes no voxel values); peak by bisection on the surface being empty"),
+                            "surface_vertices": int(len(ev.data.vertices))})
+            if fit is None:
+                framing["method"] += "; the surface was EMPTY, so the grid bounds frame the cloud"
+        else:
+            framing["method"] = f"grid bounds (no Volume to Mesh shell: {shell_error})"
+        if fit is None:
+            fit = cim.tight_fit([c[:] for c in corners], margin=0.0)
+        lo, hi = fit["min"], fit["max"]
+        centre = Vector(fit["centre"])
+        radius = float(fit["radius"])
+        framing["frame_fill"] = cim.frame_fill(fit["size"], radius)
+        print(f"FRAMING: {cloud_id} {framing['method'].split(' (')[0]}: size {[round(v, 1) for v in fit['size']]}"
+              f" of grid {[round(grid_hi[i] - grid_lo[i], 1) for i in range(3)]}, frame half-side {radius:.4g},"
+              f" fill {framing['frame_fill']:.2f}")
         vol.location -= centre
         bpy.context.view_layer.update()
-        radius = 0.5 * math.sqrt(sum((hi[i] - lo[i]) ** 2 for i in range(3)))
 
         mat = bpy.data.materials.new(f"{cloud_id}_cloud")
         mat.use_nodes = True
@@ -155,20 +223,17 @@ def main(argv):
         vol.data.materials.clear()
         vol.data.materials.append(mat)
 
-        # The front-surface shell for the depth offset (not rendered).
+        # The front-surface shell for the depth offset (not rendered): the same shell at
+        # SHELL_THRESHOLD, evaluated after the cloud was centred.
         bvh = None
         shell_note = "Volume to Mesh shell at the threshold below"
         try:
-            mesh = bpy.data.meshes.new(f"{cloud_id}_shell")
-            shell = bpy.data.objects.new(f"{cloud_id}_shell", mesh)
-            scene.collection.objects.link(shell)
-            mod = shell.modifiers.new("shell", "VOLUME_TO_MESH")
-            mod.object = vol
+            if shell is None:
+                raise RuntimeError(shell_error)
             mod.threshold = SHELL_THRESHOLD
-            shell.hide_render = True
             bpy.context.view_layer.update()
             bvh = BVHTree.FromObject(shell, bpy.context.evaluated_depsgraph_get())
-        except Exception as error:      # noqa: BLE001 (a missing modifier type on this Blender)
+        except Exception as error:      # noqa: BLE001
             shell_note = f"no depth shell ({error}); depth offset 0.5 everywhere"
             print(f"NOTE: {cloud_id}: {shell_note}")
 
@@ -261,11 +326,13 @@ def main(argv):
              "albedo": ALBEDO, "anisotropy": ANISOTROPY, "density_scale": DENSITY_SCALE,
              "sun_angle_deg": SUN_ANGLE_DEG, "shell_threshold": SHELL_THRESHOLD, "depth_shell": shell_note,
              "grids": grid_names,
-             "blender": bpy.app.version_string})
+             "blender": bpy.app.version_string},
+            sphere_radius=radius, framing=framing)
         cim.write_json(out / f"{cloud_id}.json", record)
         index.append({"id": cloud_id, "json": f"{cloud_id}.json", "sphere_over_height": record["sphere_over_height"],
                       "light_scale": light_scale})
-        print(f"BAKED: {cloud_id} from {vdb.name} (light_scale {light_scale:.4g}, radius {radius:.4g})")
+        print(f"BAKED: {cloud_id} from {vdb.name} (light_scale {light_scale:.4g}, frame half-side {radius:.4g},"
+              f" fill {framing['frame_fill']:.2f})")
 
     cim.write_json(out / "impostors.json", {"magic": "flightsim-cloud-impostors", "version": 1,
                                             "views": args.views, "px": args.px, "clouds": index,
