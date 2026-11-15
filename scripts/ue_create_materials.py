@@ -3885,7 +3885,7 @@ def world_stamp(material, name):
 #: so no reference breaks and no redirect is registered (the storm lane's
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
-WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "7",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular)
+WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "8",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: tiles_normal on the same puddle mask
                      "M_FlightSimCloudLayers": "9", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
                      "M_FlightSimOceanBeauty": "5"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind)
