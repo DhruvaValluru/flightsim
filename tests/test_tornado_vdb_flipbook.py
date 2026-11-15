@@ -174,7 +174,7 @@ def _assigned(name):
 
 def test_the_flipbook_material_is_a_storm_material_built_only_from_a_bake():
     assert "M_TornadoFlipbook" in _assigned("STORM_MATERIALS")
-    assert _assigned("STORM_GENERATIONS")["M_TornadoFlipbook"] == "1"
+    assert _assigned("STORM_GENERATIONS")["M_TornadoFlipbook"] == "2"   # 2: the card's shape (2026-11-15)
     body = SCRIPT[SCRIPT.index("def create_tornado_flipbook"):SCRIPT.index("def create_rain_drop():")]
     assert 'finish_storm(material, "M_TornadoFlipbook")' in body and "BLEND_TRANSLUCENT" in body
     assert "tornado_flipbook_pin()" in body and "MATERIAL-NOTE" in body   # no bake: not built, said so
@@ -187,6 +187,66 @@ def test_the_flipbook_material_is_a_storm_material_built_only_from_a_bake():
     set_on |= set(re.findall(r'TornadoFlipbookMaterial->SetScalarParameterValue\(FName\(TEXT\("(\w+)"\)\)', WORLD_CPP))
     assert set_on == set(_assigned("TORNADO_FLIPBOOK_PARAMETERS"))
     assert 'K2_GetScalarParameterValue(FName(TEXT("FrameAspect")))' in BEAUTY_CPP
+    # Generation 2: the cropped card's aspect read back first, the bake's as the fallback.
+    assert BEAUTY_CPP.index('K2_GetScalarParameterValue(FName(TEXT("CardAspect")))') \
+        < BEAUTY_CPP.index('K2_GetScalarParameterValue(FName(TEXT("FrameAspect")))')
+    assert "FlipbookWidthM = FlipbookHeightM * CardAspect;" in BEAUTY_CPP
+
+
+def test_the_card_is_cropped_tapered_and_faded_into_the_wall_cloud():
+    """2026-11-15 (hyperreal tornado-shape): the bake is a top-heavy plume floating in
+    its frame. M_TornadoFlipbook 2 crops the card to the plume, squeezes its foot narrow,
+    fades its cap out inside the wall cloud and tints its foot with ground dust, all in
+    tornado_flipbook_shape.hlsl before the frame lookup; the C++ stands the card's top
+    up in the wall cloud and tints it darker than the sheath."""
+    from core.scene import weather_look
+    body = SCRIPT[SCRIPT.index("def create_tornado_flipbook"):SCRIPT.index("def create_rain_drop():")]
+    hlsl = (REPO / "assets/shaders/weather/tornado_flipbook_shape.hlsl").read_text(encoding="utf-8")
+    for pin in ("UV", "CropTop", "CropBottom", "TopWidth", "BottomWidth", "TaperPower", "TopFade", "DustShare"):
+        assert f'"{pin}":' in body and pin in hlsl, pin
+    assert body.index('"tornado_flipbook_shape"') < body.index('"tornado_flipbook_uv"')
+    assert '"UV": (mask(material, lib, shape, "rg"' in body                # the lookup reads the shaped UV
+    assert 'mask(material, lib, shape, "b"' in body                        # the weight gates the alpha
+    assert 'mask(material, lib, shape, "a"' in body                        # the dust share lerps the tint
+    assert 'constant3(material, lib, TORNADO_FLIPBOOK_DUST_TINT' in body
+    assert 'scalar(material, lib, "CardAspect", tornado_flipbook_card_aspect(plan["frame_aspect"])' in body
+    crop = _assigned("TORNADO_FLIPBOOK_CROP_V")
+    taper = _assigned("TORNADO_FLIPBOOK_TAPER")
+    top_fade = _assigned("TORNADO_FLIPBOOK_TOP_FADE")
+    assert 0.0 <= crop[0] < crop[1] <= 1.0
+    assert 0.0 < taper["bottom_width"] < taper["top_width"] <= 1.0 and taper["power"] > 0.0
+    assert 0.0 < top_fade < 0.5 and 0.0 < _assigned("TORNADO_FLIPBOOK_DUST_SHARE") < 0.5
+    # The cropped card keeps the texels' aspect: the bake's 0.5 over the crop's height.
+    source = SCRIPT[SCRIPT.index("TORNADO_FLIPBOOK_CROP_V = "):SCRIPT.index("def weather_look_stale")]
+    namespace = {}
+    exec(compile(source, "shape", "exec"), namespace)
+    assert namespace["tornado_flipbook_card_aspect"](0.5) == pytest.approx(0.5 / (crop[1] - crop[0]))
+    # The card's top is in the wall cloud and the fade completes at or above its base, so
+    # the funnel below the wall cloud is drawn whole and the cap dissolves into the deck.
+    share = weather_look.BEAUTY_TORNADO_FLIPBOOK_HEIGHT_SHARE
+    assert share * weather_look.FUNNEL_TOP_SHARE < weather_look.WALL_TOP_SHARE
+    assert weather_look.flipbook_top_fade_end_share(top_fade) >= weather_look.FUNNEL_TOP_SHARE
+    match = re.search(r"constexpr double TornadoFlipbookHeightShare = ([0-9.]+);", BEAUTY_CPP)
+    assert match and float(match.group(1)) == share
+    colour = tuple(float(re.search(rf"constexpr float BeautyFlipbookColour{c} = ([0-9.]+)f;", BEAUTY_CPP).group(1))
+                   for c in "RGB")
+    assert colour == weather_look.BEAUTY_TORNADO_FLIPBOOK_COLOUR
+    assert max(colour) < min(weather_look.BEAUTY_TORNADO_SHEATH_COLOUR)      # darker than the sheath
+    assert min(colour) > max(weather_look.BEAUTY_WALL_CLOUD_COLOUR)          # reads against the deck
+    assert "FLinearColor(BeautyFlipbookColourR, BeautyFlipbookColourG, BeautyFlipbookColourB, 1.0f)" in BEAUTY_CPP
+    # The crop brackets the plume in every frame of the committed atlas (needs Pillow).
+    pin = json.loads((REPO / "assets/looks/tornado_vdb/PIN.json").read_text(encoding="utf-8"))
+    if not pin["files"]:
+        pytest.skip("no bake on this checkout")
+    PIL = pytest.importorskip("PIL.Image")
+    plan = json.loads((REPO / "assets/looks/tornado_vdb/tornado_flipbook.json").read_text(encoding="utf-8"))
+    atlas = np.asarray(PIL.open(REPO / "assets/looks/tornado_vdb/T_TornadoFlipbook.png").convert("RGBA"))
+    fw, fh = plan["frame_px"]
+    for idx in range(0, plan["frames"], 9):
+        c, r = idx % plan["cols"], idx // plan["cols"]
+        alpha = atlas[r * fh:(r + 1) * fh, c * fw:(c + 1) * fw, 3] / 255.0
+        rows = np.where(alpha.mean(axis=1) > 0.02)[0]
+        assert crop[0] <= rows.min() / fh and (rows.max() + 1) / fh <= crop[1], idx
 
 
 def test_the_placeholder_pin_names_no_files_until_the_bake():
@@ -233,7 +293,7 @@ def test_the_card_is_beauty_only_and_the_funnel_hidden_from_the_beauty_capture_a
 
 
 def test_the_flipbook_shaders_are_sm5_straight_line_code():
-    for name in ("tornado_flipbook_uv", "tornado_flipbook_blend"):
+    for name in ("tornado_flipbook_uv", "tornado_flipbook_blend", "tornado_flipbook_shape"):
         code = (REPO / "assets/shaders/weather" / f"{name}.hlsl").read_text(encoding="utf-8")
         body = "\n".join(l for l in code.splitlines() if not l.strip().startswith("//"))
         for forbidden in (r"\bfor\s*\(", r"\bwhile\s*\(", r"\.Sample\(", r"\bWave\w+\("):

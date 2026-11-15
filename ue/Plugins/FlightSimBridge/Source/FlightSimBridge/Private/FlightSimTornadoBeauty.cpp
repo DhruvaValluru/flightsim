@@ -152,12 +152,22 @@ namespace FlightSimTornadoBeautyLocal
 	// 2026-11-14, the owner's JangaFX tornado (-tornado-look=vdb): the flipbook baked
 	// from JangaFX's CC0 Tornado Looping VDB (scripts/bake_tornado_flipbook.py) on one
 	// camera-facing card standing on the funnel's ground contact, TornadoFlipbookHeightShare
-	// x the funnel's height tall (its top reaches into the wall cloud's base), as wide as the
-	// bake's frame aspect says (M_TornadoFlipbook's FrameAspect). Tinted the sheath's grey;
-	// lit by the scene per pixel. UNCALIBRATED.
+	// x the funnel's height tall, as wide as the cropped card's aspect says
+	// (M_TornadoFlipbook generation 2's CardAspect; FrameAspect, the bake's own, when a
+	// generation-1 material has no CardAspect). Lit by the scene per pixel. UNCALIBRATED.
+	// 2026-11-15 (hyperreal tornado-shape): the bake is a top-heavy plume floating in its
+	// frame. M_TornadoFlipbook 2 crops the card to the plume, squeezes its lower part
+	// narrow and fades its cap out over the top TORNADO_FLIPBOOK_TOP_FADE of the card;
+	// the card's top now stands well up inside the wall cloud (1.40 x the funnel's height:
+	// the fade completes about the wall cloud's base, weather_look.flipbook_top_fade_end_share)
+	// so the funnel hangs DOWN from the deck, and the card is tinted BeautyFlipbookColour,
+	// darker than the sheath's grey (condensation in the storm's light).
 	const TCHAR* const TornadoFlipbookPath = TEXT("/Game/FlightSim/M_TornadoFlipbook.M_TornadoFlipbook");
-	constexpr double TornadoFlipbookHeightShare = 1.12;
+	constexpr double TornadoFlipbookHeightShare = 1.40;
 	constexpr float TornadoFlipbookOpacity = 1.0f;
+	constexpr float BeautyFlipbookColourR = 0.15f;
+	constexpr float BeautyFlipbookColourG = 0.155f;
+	constexpr float BeautyFlipbookColourB = 0.17f;
 
 	double TornadoBeautySmooth01(double X)
 	{
@@ -491,13 +501,19 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 			AActor* FlipbookActor = SpawnPuffActor(TEXT("TornadoFlipbook"));
 			UMaterialInstanceDynamic* Flipbook = UMaterialInstanceDynamic::Create(FlipbookBase, FlipbookActor);
 			Flipbook->SetVectorParameterValue(FName(TEXT("Tint")),
-				FLinearColor(BeautySheathColourR, BeautySheathColourG, BeautySheathColourB, 1.0f));
+				FLinearColor(BeautyFlipbookColourR, BeautyFlipbookColourG, BeautyFlipbookColourB, 1.0f));
 			Flipbook->SetScalarParameterValue(FName(TEXT("Opacity")), TornadoFlipbookOpacity);
 			Flipbook->SetScalarParameterValue(FName(TEXT("Time")), 0.0f);
-			const double FrameAspect = FMath::Clamp(
-				static_cast<double>(Flipbook->K2_GetScalarParameterValue(FName(TEXT("FrameAspect")))), 0.05, 20.0);
+			// Generation 2's cropped card aspect; a generation-1 material (no CardAspect:
+			// the engine answers 0) keeps the bake's frame aspect.
+			double CardAspect = static_cast<double>(Flipbook->K2_GetScalarParameterValue(FName(TEXT("CardAspect"))));
+			if (CardAspect <= 1.0e-3)
+			{
+				CardAspect = static_cast<double>(Flipbook->K2_GetScalarParameterValue(FName(TEXT("FrameAspect"))));
+			}
+			CardAspect = FMath::Clamp(CardAspect, 0.05, 20.0);
 			FlipbookHeightM = TornadoFlipbookHeightShare * FunnelTopMetres;
-			FlipbookWidthM = FlipbookHeightM * FrameAspect;
+			FlipbookWidthM = FlipbookHeightM * CardAspect;
 			UMaterialBillboardComponent* Board =
 				NewObject<UMaterialBillboardComponent>(FlipbookActor, TEXT("TornadoFlipbookCard"));
 			Board->SetupAttachment(FlipbookActor->GetRootComponent());
@@ -515,6 +531,7 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 			TornadoBeautyHiddenFunnel = FunnelMesh;
 			DrawnAs = TEXT("vdb_flipbook");
 			LookNote = TEXT("vdb_flipbook: JangaFX CC0 Tornado Looping, baked by scripts/bake_tornado_flipbook.py; "
+			                "the card cropped, tapered and faded into the wall cloud (M_TornadoFlipbook 2); "
 			                "the funnel mesh hidden from the beauty capture only");
 		}
 	}

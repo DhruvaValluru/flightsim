@@ -218,6 +218,34 @@ def test_the_puff_constants_are_the_pythons():
     assert max(weather_look.BEAUTY_WALL_CLOUD_COLOUR) < min(weather_look.BEAUTY_FUNNEL_COLOUR)
 
 
+def test_no_puff_set_at_the_ground_reaches_past_the_round_7_bound():
+    """2026-11-15 (hyperreal tornado-shape, repaired): the lane's first cut added a
+    40-puff "debris ring" (80-170 m puffs, 1.8 wide for their height, out to 2.6 core
+    radii) under a key of its own, a 1.09 km near-opaque brown band around a 750 m
+    funnel: round 7's blob again, sidestepping the whirl's pin above. The ring is gone;
+    this pins that EVERY ground-level puff set (anything whose centres sit under the
+    funnel's height, i.e. not the scud) stays under the round-7 bound, whatever its key,
+    and that the puff sets are exactly the three the C++ draws."""
+    p = weather_look.BEAUTY_TORNADO_PUFFS
+    assert tuple(p) == weather_look.BEAUTY_TORNADO_PUFF_SETS == ("dust", "debris", "scud")
+    funnel_height_m = weather_look.FUNNEL_TOP_SHARE * 1500.0
+    for key, puffs in p.items():
+        if key == "scud":
+            continue
+        reach_m = (puffs["radii"][1] + puffs.get("jitter_radii", 0.0)) * 150.0
+        assert 2.0 * reach_m < 0.6 * funnel_height_m, key
+        assert puffs["size_m"][1] * puffs.get("aspect", 1.0) < 0.2 * funnel_height_m, key
+    # The C++ spawns three beauty-only actors and no other: dust (with the debris column
+    # on it), scud and the flipbook card, nothing between; no ring constants, no width
+    # scale, no ring in the record.
+    assert BEAUTY_CPP.count("SpawnPuffActor(TEXT(") == 3
+    assert 'SpawnPuffActor(TEXT("TornadoFlipbook"))' in BEAUTY_CPP
+    assert BEAUTY_CPP.count('FString::Printf(TEXT("Tornado') == 3
+    for gone in ("BeautyRingPuffs", "BeautyRingRadiiMax", "BeautyRingAspect", "BeautyRingSpinRadii",
+                 "TornadoDebrisRing", "TornadoRingPuff", "WidthScale", "debris_ring_spin"):
+        assert gone not in BEAUTY_CPP and gone not in SCENARIO_CPP and gone not in SCENARIO_H, gone
+
+
 # -- the third-party asset -----------------------------------------------------------
 
 

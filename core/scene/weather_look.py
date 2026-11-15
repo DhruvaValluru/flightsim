@@ -387,6 +387,23 @@ BEAUTY_TORNADO_PUFFS = {
 BEAUTY_TORNADO_DUST_SPIN_RADII = 1.0
 #: The funnel's translucent sheath (M_TornadoFunnelSoft's FunnelColour): the funnel's grey.
 BEAUTY_TORNADO_SHEATH_COLOUR = BEAUTY_FUNNEL_COLOUR
+#: 2026-11-15 (hyperreal tornado-shape, repaired): the lane's first cut added a fourth puff
+#: set, a 40-puff "debris ring" of 80-170 m puffs 1.8 wide for their height from 1.0 to 2.6
+#: core radii, under its own key. At RCore 150 m that is a band about 1.09 km across and up
+#: to 170 m tall around a 750 m funnel, about 5 puffs deep per line of sight at 0.30-0.55:
+#: a near-opaque brown band hiding the whirl and the flipbook's rope foot, i.e. round 7's
+#: "one blob wider than the funnel is tall" again at a larger scale. A ring OUTSIDE the
+#: whirl cannot sit under the round-7 pin (the whirl already reaches 1.48 radii, 444 m
+#: across, against the pin's 450 m), and one inside it is just more whirl, so the ring was
+#: dropped: the puff sets are exactly these three, pinned by tests/test_tornado_look.py.
+BEAUTY_TORNADO_PUFF_SETS = ("dust", "debris", "scud")
+#: The flipbook card (-tornado-look=vdb): its tint (darker than the sheath grey: condensation
+#: lit from inside the storm, between the sheath's grey and the wall cloud's near-black) and
+#: its height as a share of the funnel's, the card's top up inside the wall cloud so that
+#: M_TornadoFlipbook's top fade (scripts/ue_create_materials.py TORNADO_FLIPBOOK_TOP_FADE)
+#: completes about the wall cloud's base: the funnel hangs DOWN from the deck.
+BEAUTY_TORNADO_FLIPBOOK_COLOUR = (0.15, 0.155, 0.17)
+BEAUTY_TORNADO_FLIPBOOK_HEIGHT_SHARE = 1.40
 
 
 def beauty_funnel_radius_radii(height_share: float) -> float:
@@ -415,4 +432,13 @@ def dust_whirl_extent_radii() -> float:
 def dust_omega_scale() -> float:
     """The dust cloud's spin as a share of the core's omega."""
     return wall_cloud_omega_scale(BEAUTY_TORNADO_DUST_SPIN_RADII)
+
+
+def flipbook_top_fade_end_share(top_fade: float, height_share: float = BEAUTY_TORNADO_FLIPBOOK_HEIGHT_SHARE,
+                                funnel_top_share: float = FUNNEL_TOP_SHARE) -> float:
+    """Where the flipbook card's top fade reaches full opacity, as a share of the
+    tornado's top height: the card's top (height_share x the funnel's top) less the fade's
+    span. At or above the funnel's top (the wall cloud's base) the cap dissolves inside the
+    wall cloud and the funnel below it is drawn whole."""
+    return height_share * funnel_top_share * (1.0 - float(top_fade))
 # -- visual push lane C -- end ------------------------------------------------------------
