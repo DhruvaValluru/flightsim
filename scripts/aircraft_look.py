@@ -49,6 +49,10 @@ from aircraft_wet_layer import WET_SHADER_INPUTS, constants_group as _wet_consta
 # canopy reflection (swarm lane aircraft_exterior.glass.coastal, tiers 0-1;
 # beauty only, -canopy-reflect=on): its shader inputs and masters (stdlib only).
 from aircraft_glass_reflect import GLASS_REFLECT_SHADER_INPUTS, MASTERS as _reflect_masters  # noqa: E402
+# the airframe's sky reflection (item "aircraft", 2026-11-14; beauty only,
+# Emissive only, -paint-reflect=on by default): its shader inputs and constants.
+from aircraft_paint_reflect import (  # noqa: E402
+    PAINT_REFLECT_SHADER_INPUTS, constants_group as _paint_reflect_constants)
 # round 5 (L4): the vendored Physically Based API database (CC0, pinned by
 # sha256 in assets/looks/physically_based/PIN.json), the measured constants.
 import physically_based as _pb  # noqa: E402
@@ -258,6 +262,8 @@ SHADER_INPUTS = {
     **WET_SHADER_INPUTS,
     # canopy reflection: "glass_reflect_uv", "glass_reflect", "glass_micro_uv".
     **GLASS_REFLECT_SHADER_INPUTS,
+    # the airframe's sky reflection: "paint_env_uv", "paint_env_reflect".
+    **PAINT_REFLECT_SHADER_INPUTS,
 }
 #: The opaque canopy-reflect masters by tier (scripts/aircraft_glass_reflect.py):
 #: drawn only under -canopy-reflect=on, on a glass slot's opaque instance.
@@ -996,7 +1002,11 @@ FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", True), ("aircra
                ("contrail-formation-ramp=", True),
                # The canopy reflection (aircraft_glass_reflect.py): OFF unless
                # -canopy-reflect=on, so Windows can A/B it (tier: -canopy-reflect-tier=0|1).
-               ("canopy-reflect=", False))
+               ("canopy-reflect=", False),
+               # The airframe's sky reflection on the paint and bare-metal MIDs
+               # (aircraft_paint_reflect.py): ON; -paint-reflect=off is the A/B
+               # (the masters' PaintEnvGain stays 0 and they add nothing).
+               ("paint-reflect=", True))
 SWITCH_ON = ("on", "1", "true")
 SWITCH_OFF = ("off", "0", "false")
 
@@ -1300,6 +1310,8 @@ def build_manifest(name, config, generated_dir, fdm_xml, materials=None, config_
                                     "a -heat-haze=on beauty probe at idle, rear view"),
             # wet-airframe-canopy (scripts/aircraft_wet_layer.py WET_DEFAULTS).
             "wet": _wet_constants(),
+            # the airframe's sky reflection (scripts/aircraft_paint_reflect.py DEFAULTS).
+            "paint_reflect": _paint_reflect_constants(),
         },
     }
 

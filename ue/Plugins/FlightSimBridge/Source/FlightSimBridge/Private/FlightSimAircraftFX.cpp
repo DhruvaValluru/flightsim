@@ -108,6 +108,11 @@ namespace
 	constexpr double AircraftFxReflectStripHorizon[3] = {0.74, 0.70, 0.62};
 	constexpr double AircraftFxReflectTintMin = 0.25;
 	constexpr double AircraftFxReflectTintMax = 4.0;
+	// The airframe's sky reflection (scripts/aircraft_paint_reflect.py
+	// GAIN_PARAMETER / TINT_PARAMETER / SUN_PARAMETER; LOOK_GENERATION 13).
+	const TCHAR* const AircraftFxPaintEnvGainParam = TEXT("PaintEnvGain");
+	const TCHAR* const AircraftFxPaintEnvTintParam = TEXT("PaintEnvTint");
+	const TCHAR* const AircraftFxPaintSunParam = TEXT("PaintSunAzimuthDir");
 
 	// Round 25: why a material would draw the engine's default material on
 	// this render (it failed to compile for the world's shader platform, or
@@ -352,6 +357,8 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	const bool bFormationRampSwitch = AircraftFxSwitch(Params, TEXT("contrail-formation-ramp="), true, SwitchError);
 	// The canopy reflection: off unless asked for by name (the A/B).
 	const bool bCanopyReflectSwitch = AircraftFxSwitch(Params, TEXT("canopy-reflect="), false, SwitchError);
+	// The airframe's sky reflection: on unless asked off by name (the A/B).
+	const bool bPaintReflectSwitch = AircraftFxSwitch(Params, TEXT("paint-reflect="), true, SwitchError);
 	bMaterials = bAll && bMaterialsSwitch;
 	bLights = bAll && bLightsSwitch;
 	bContrails = bAll && bContrailsSwitch;
@@ -359,6 +366,7 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	bHeatHaze = bAll && bHeatHazeSwitch;
 	bContrailFormationRamp = bAll && bFormationRampSwitch;
 	bCanopyReflect = bAll && bCanopyReflectSwitch;
+	bPaintReflect = bAll && bPaintReflectSwitch;
 	// Tiers 0-1 only (both opaque); 2-3 are translucent and not built. A bad
 	// word is refused even with the switch off (aircraft_glass_reflect.parse_canopy_reflect).
 	CanopyReflectTier = 0;
@@ -834,6 +842,10 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	// Round 23: the probes in force (recorded below) and the flat master.
 	int32 ProbedSlots = 0;
 	int32 WetPorositySlots = 0;
+	// The airframe's sky reflection: the paint / bare-metal MIDs given a gain,
+	// and the slots whose drawn master predates PaintEnvGain (generation 13).
+	int32 PaintReflectSlots = 0;
+	int32 PaintReflectStale = 0;
 	// Round 25: the flat and coat masters are loaded on every beauty render:
 	// they are the compile fallback of a class master (below).
 	UMaterialInterface* ProbeFlat = LoadObject<UMaterialInterface>(nullptr, AircraftFxProbeFlatMaterialPath);
@@ -915,19 +927,26 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	FString ReflectTintSource = TEXT("baked (no -xplane-horizon on this render)");
 	ReflectRow = MakeShared<FJsonObject>();
 	ReflectMids.Reset();
+	PaintReflectRow = MakeShared<FJsonObject>();
+	PaintReflectMids.Reset();
 	ReflectSun = Options.Sun;
 	ReflectCover = 0.0;
-	if (Options.bCanopyReflect)
+	// The horizon tint and the cloud cover serve both the canopy and the
+	// airframe reflection (the same strip, the same gain rule).
+	if (Options.bCanopyReflect || Options.bPaintReflect)
 	{
-		const TCHAR* const ReflectPath = Options.CanopyReflectTier == 1
-			? AircraftFxGlassReflectFineMaterialPath : AircraftFxGlassReflectMaterialPath;
-		GlassReflect = LoadObject<UMaterialInterface>(nullptr, ReflectPath);
-		GlassReflectProblem = CompileProblemOf(GlassReflect);
-		if (!GlassReflectProblem.IsEmpty())
+		if (Options.bCanopyReflect)
 		{
-			GlassReflect = nullptr;
+			const TCHAR* const ReflectPath = Options.CanopyReflectTier == 1
+				? AircraftFxGlassReflectFineMaterialPath : AircraftFxGlassReflectMaterialPath;
+			GlassReflect = LoadObject<UMaterialInterface>(nullptr, ReflectPath);
+			GlassReflectProblem = CompileProblemOf(GlassReflect);
+			if (!GlassReflectProblem.IsEmpty())
+			{
+				GlassReflect = nullptr;
+			}
+			ReflectRow->SetStringField(TEXT("master"), ReflectPath);
 		}
-		ReflectRow->SetStringField(TEXT("master"), ReflectPath);
 		// Hue only (aircraft_glass_reflect.horizon_tint): the gain sets the level.
 		if (Options.bHorizonKnown)
 		{
@@ -1150,6 +1169,28 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 						                                         : AircraftFxWetPorosityLowBareMetal);
 					++WetPorositySlots;
 				}
+				// The airframe's sky reflection (aircraft_paint_reflect.py): a
+				// generation-13 paint / bare-metal MID takes the horizon tint and
+				// a gain UpdateCanopyReflect sets from the sun each step; a master
+				// built before generation 13 has no PaintEnvGain and is counted
+				// stale (the switch is then inert on it, recorded). Off: the
+				// master's own 0 stands and nothing is added.
+				if (Options.bPaintReflect)
+				{
+					float PaintGain = 0.0f;
+					if (LookMid->GetScalarParameterValue(
+						FHashedMaterialParameterInfo(FName(AircraftFxPaintEnvGainParam)), PaintGain))
+					{
+						LookMid->SetVectorParameterValue(FName(AircraftFxPaintEnvTintParam), ReflectTint);
+						LookMid->SetScalarParameterValue(FName(AircraftFxPaintEnvGainParam), 0.0f);
+						PaintReflectMids.Add(LookMid);
+						++PaintReflectSlots;
+					}
+					else
+					{
+						++PaintReflectStale;
+					}
+				}
 				// Round 24 (aircraft_wet_layer.PROBE_SCALARS on the gen-6 masters).
 				if (Options.Probes.Contains(TEXT("nowet")))
 				{
@@ -1241,6 +1282,21 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 		}
 		Row->SetObjectField(TEXT("wet_porosity"), Porosity);
 	}
+	// The airframe's sky reflection's record (aircraft_paint_reflect.py; the
+	// gain and sun fields are written by UpdateCanopyReflect each step).
+	PaintReflectRow->SetStringField(TEXT("switch"), Options.bPaintReflect
+		? TEXT("on (the default; -paint-reflect=off is the A/B)") : TEXT("off (-paint-reflect=off)"));
+	PaintReflectRow->SetNumberField(TEXT("slots"), PaintReflectSlots);
+	PaintReflectRow->SetNumberField(TEXT("slots_stale_master"), PaintReflectStale);
+	PaintReflectRow->SetStringField(TEXT("rule"), TEXT("Emissive += Fresnel(N.V; F0 = lerp(0.08 Specular, BaseColor, ")
+		TEXT("Metallic), coat F0 0.04) x (1 - roughness / 0.5)^2 x baked sky strip(reflect(V, N leaned by the ")
+		TEXT("rivulets)) x PaintEnvGain x PaintEnvTint x PaintEnvAmount; the gain is the canopy's (canopy_reflect, ")
+		TEXT("gain_rule), never 0 for an exterior panel seen from inside; UNCALIBRATED"));
+	PaintReflectRow->SetStringField(TEXT("tint_source"), ReflectTintSource);
+	PaintReflectRow->SetNumberField(TEXT("cloud_cover"), ReflectCover);
+	PaintReflectRow->SetStringField(TEXT("labels"), TEXT("unchanged: the paint and bare-metal masters stay opaque ")
+		TEXT("with no world position offset; the reflection is Emissive only, which no label pass reads"));
+	Row->SetObjectField(TEXT("paint_reflect"), PaintReflectRow);
 	// Round 25: the class masters' compile results on this shader platform,
 	// the slots that fell back to a plain master, the graph generations drawn
 	// and any probe parameter the drawn master lacks.
@@ -1353,7 +1409,7 @@ double FFlightSimAircraftFX::CanopyReflectGain(double SunIntensity, double SunEl
 
 void FFlightSimAircraftFX::UpdateCanopyReflect()
 {
-	if (ReflectMids.Num() == 0)
+	if (ReflectMids.Num() == 0 && PaintReflectMids.Num() == 0)
 	{
 		return;
 	}
@@ -1376,6 +1432,25 @@ void FFlightSimAircraftFX::UpdateCanopyReflect()
 			Mid->SetVectorParameterValue(TEXT("GlassSunAzimuthDir"),
 			                             FLinearColor(static_cast<float>(ToSun.X), static_cast<float>(ToSun.Y), 0.0f, 0.0f));
 		}
+	}
+	// The airframe's sky reflection: the same sun, the same gain rule, but an
+	// exterior panel mirrors the sky from any camera (no interior zero).
+	const double PaintGain = bSun ? CanopyReflectGain(Intensity, ElevationDeg, ReflectCover, false) : 0.0;
+	for (UMaterialInstanceDynamic* Mid : PaintReflectMids)
+	{
+		if (Mid != nullptr)
+		{
+			Mid->SetScalarParameterValue(FName(AircraftFxPaintEnvGainParam), static_cast<float>(PaintGain));
+			Mid->SetVectorParameterValue(FName(AircraftFxPaintSunParam),
+			                             FLinearColor(static_cast<float>(ToSun.X), static_cast<float>(ToSun.Y), 0.0f, 0.0f));
+		}
+	}
+	if (PaintReflectRow.IsValid())
+	{
+		PaintReflectRow->SetNumberField(TEXT("gain"), PaintGain);
+		PaintReflectRow->SetStringField(TEXT("sun"), bSun ? TEXT("the scene's sun (its Intensity and direction, each step)")
+			: TEXT("absent: no scene sun, PaintEnvGain 0"));
+		PaintReflectRow->SetNumberField(TEXT("sun_elevation_deg"), ElevationDeg);
 	}
 	if (ReflectRow.IsValid())
 	{

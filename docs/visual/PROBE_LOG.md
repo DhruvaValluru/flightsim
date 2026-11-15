@@ -3870,3 +3870,45 @@ streaks of bases thinning into the haze), no rectangular columns or stepped bloc
 same over the rim; #04 unchanged in shape (no steps). A/B: `-look-cloud-tiers=off` = round 51
 (tiers, no fade). Knobs (UNCALIBRATED): residual grain -> SHADOW_DITHER 0.5; tiers creeping back
 -> SHADOW_SOFTEN 1.5; far clouds vanishing too early -> nothing here (the sheet's DISTANT_* own it).
+
+## item "aircraft": the airframe's sky reflection and the rain sheen (2026-11-14)
+
+Mac, uncompiled and unrendered; branch claude/hyperreal-aircraft. Chase views #06, #09, #13, #15:
+the airframe reads as flat grey plastic, no believable specular, weak sky reflection, no rain sheen.
+
+**Cause, read in code.** A glossy or wet panel needs a MIRROR image of its surroundings, and the
+render laptop's path gives it none: Intel iGPU, D3D11 SM5 (no Lumen, no HW RT); the beauty look's
+`ssr` effect is OFF on the constrained GPU (FlightSimBeautyLook.cpp: ReflectionMethod None,
+ScreenSpaceReflectionIntensity 0); no file of the bridge spawns a reflection capture. The only
+specular IBL is the sky light's one low-resolution cubemap (lower hemisphere black). Paint is a
+4 % dielectric (F0 0.04, Metallic 0 since round 5): under that cubemap it shows no sky at all,
+and the wet layer's work (roughness to 0.08, coat to 1 at 0.03) has nothing to reflect, so a wet
+airframe looks like a dry one. The canopy lane hit the same wall and answered with a baked strip
+on Emissive (-canopy-reflect, OFF by default, A/B pending).
+
+**Fix (LOOK_GENERATION 13; scripts/aircraft_paint_reflect.py).** The paint and bare-metal
+masters (and the paint graph's probe twins) take one more graft after the wet layer, Emissive
+only: `Fresnel(N.V) x gloss x strip(reflect(V, N)) x PaintEnvGain x PaintEnvTint x PaintEnvAmount`
+(paint_env_uv.hlsl, paint_env_reflect.hlsl). F0 is UE's own `lerp(0.08 Specular, BaseColor,
+Metallic)` from the surface as the wet layer left it; the clear coat is a second n 1.5 layer on
+top by CoatAmount; each layer's mirror fades as `(1 - roughness / 0.5)^2`. Consequences, computed
+(tests/test_paint_reflect.py): the J-11's matte grey (coat 0, roughness 0.5) adds NOTHING dry;
+the same panel wet mirrors the sky (the rain sheen, no new switch); a coated livery mirrors it
+dry; bare metal takes half (the engine already mirrors it at F0 0.92). The rivulets lean the
+LOOKUP normal (aircraft_wet.hlsl's new `WetLean` additional output x PaintStreakLean), never the
+material's Normal, so a streak reads as a thin line of a different sky. The host sets
+PaintEnvGain each step by the canopy's rule (0.10 x sun / pi, night fade, overcast dim; the same
+tint) on every paint / bare-metal MID whose master carries the parameter; a pre-gen-13 master is
+counted `slots_stale_master`. `-paint-reflect=on` is the DEFAULT; `off` is the A/B (the masters'
+PaintEnvGain 0: byte-identical to gen 12 in effect). Strip: the canopy lane's T_GlassEnv_64 (no
+new asset). Labels: Emissive only; every master stays opaque, no WPO; BaseColor, Roughness,
+Normal, AO and the coat pass through, so ID / depth / stencil / SCS_Normal / SCS_BaseColor are
+unchanged. Exposure: the gain is scene nits per unit of strip radiance, proportional to the sun,
+so the mirrored sky sits in the sunlit paint's own exposure.
+
+Every number UNCALIBRATED: PaintEnvAmount 1.0 / 0.5, PaintStreakLean 0.6, RoughCutoff 0.5, the
+0.10 share. Probe: #06 (SFO rain, A320), #09, #13, #15 at shot c, each beside -paint-reflect=off;
+read render.json `aircraft_look.materials.paint_reflect` (slots, gain, slots_stale_master: a
+stale master means the render machine has not rebuilt gen 13 yet -- run ue_create_materials.py).
+Risk: the strip is a coastal daytime sky; under a storm deck the overcast dim (x 0.25) may still
+read too bright or too blue, and the double count with the engine's IBL on bare metal is a guess.

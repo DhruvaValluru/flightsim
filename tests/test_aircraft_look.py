@@ -205,8 +205,9 @@ def test_every_look_constant_says_it_is_uncalibrated_and_names_its_probe(tmp_pat
     groups = manifest["constants"]
     # "wet": the wet-airframe-canopy module (scripts/aircraft_wet_layer.py WET_DEFAULTS);
     # "condensation": the condensation-solver module.
+    # "paint_reflect": the airframe's sky reflection (scripts/aircraft_paint_reflect.py DEFAULTS).
     assert set(groups) == {"lights", "contrail", "vapour", "afterburner", "heat_haze", "wet",
-                           "condensation"}
+                           "condensation", "paint_reflect"}
     for group in groups.values():
         for entry in group.values():
             assert entry["calibration"] == look.UNCALIBRATED
@@ -775,7 +776,7 @@ def test_round47_the_contrail_forms_over_seconds_not_a_share_of_its_lifetime():
     assert look.SHADER_INPUTS["contrail_opacity"][-1] == "FormationRamp"
     assert look.FX_PARAMETERS["M_AircraftContrail"] == ("Opacity", "Formation", "FormationRamp")
     masters = MASTERS.read_text(encoding="utf-8")
-    assert re.search(r'^LOOK_GENERATION = "12"$', masters, re.M)
+    assert re.search(r'^LOOK_GENERATION = "13"$', masters, re.M)
     assert '"FormationRamp": (_scalar(material, ramp_name, 0.04,' in masters
     # 747 cruise: the ramp is under a wingspan of flight, not generation 6's 250 m
     ramp_s = look.CONTRAIL_DEFAULTS["FormationRampS"]

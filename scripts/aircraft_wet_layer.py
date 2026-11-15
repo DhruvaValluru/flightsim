@@ -11,6 +11,9 @@ The airframe takes the weather's wetness:
 * the paint's clear coat goes toward 1 with a low clear-coat roughness;
 * rain rivulets: a tiled hash noise of thin lines stretched along the
   object's -X axis and panned aft at ``StreakSpeedPerKt * airspeed`` (cm/s);
+  each line's flank also leans the surface across the flow (the ``WetLean``
+  output, object frame), which only the paint reflection's lookup reads
+  (scripts/aircraft_paint_reflect.py), never the material's Normal;
   below ``BeadingMaxKts`` the airflow no longer drives the water, the lines
   turn into slow gravity runs along world -Z (expressed in the object's own
   frame, so the pattern stays on the airframe) and the glass (and, less, the
@@ -148,8 +151,12 @@ WET_SHADER_INPUTS = {
     "canopy_scratch": ("LocalPos", "NormalWS", "AxisX", "AxisY", "AxisZ", "CanopyCentre",
                        "ScratchDensity", "ScratchAnisotropy"),
 }
-#: aircraft_wet.hlsl's one additional output (the clear-coat mask).
+#: aircraft_wet.hlsl's additional outputs: the clear-coat mask, and (item
+#: "aircraft", 2026-11-14) the rivulet bulge's lean of the surface in the
+#: object frame, read ONLY by the paint reflection's lookup
+#: (scripts/aircraft_paint_reflect.py): the material's Normal is untouched.
 WET_COAT_OUTPUT = "WetCoat"
+WET_LEAN_OUTPUT = "WetLean"
 
 #: The classes that take the wet layer, and the WET_DEFAULTS suffix of each.
 CLASS_KEYS = {"paint": "Paint", "bare_metal": "BareMetal", "glass": "Glass"}
@@ -267,9 +274,13 @@ def add_wet_layer(material, lib, slot_class, raw_base=None):
     coat_out = unreal.CustomOutput()
     coat_out.set_editor_property("output_name", WET_COAT_OUTPUT)
     coat_out.set_editor_property("output_type", lib._enum(unreal.CustomMaterialOutputType, "CMOT_FLOAT1"))
+    lean_out = unreal.CustomOutput()
+    lean_out.set_editor_property("output_name", WET_LEAN_OUTPUT)
+    lean_out.set_editor_property("output_type", lib._enum(unreal.CustomMaterialOutputType, "CMOT_FLOAT3"))
     # Setting the property runs PostEditChangeProperty -> RebuildOutputs:
-    # output 0 becomes "return", output 1 "WetCoat" (MaterialExpressions.cpp, 5.7.4).
-    wet.set_editor_property("additional_outputs", [coat_out])
+    # output 0 becomes "return", output 1 "WetCoat", output 2 "WetLean"
+    # (MaterialExpressions.cpp, 5.7.4).
+    wet.set_editor_property("additional_outputs", [coat_out, lean_out])
     for name in PASS_THROUGH:
         lib._link(brk, name, make, _pin(name))
     wet_albedo = lib._mask(material, wet, "rgb", x + 650, y - 100)
@@ -388,6 +399,15 @@ def wet_surface(albedo, roughness, wetness, porosity, wet_roughness=None,
     r = r + (np.maximum(r, HLSL_BEAD_ROUGHNESS) - r) * bead
     coat = np.clip(np.maximum(wet, rivulet), 0.0, 1.0)
     return albedo_out, r, coat
+
+
+def rivulet_lean(across, width):
+    """Twin of aircraft_wet.hlsl's per-line lean (before the facing and the
+    lattice weights): clamp(a / w, -1, 1) x saturate(1 - |a| / w) x 2 -- zero on
+    the crest and off the line, largest at mid-flank, odd in ``across``."""
+    w = max(float(width), 1.0e-6)
+    profile = min(max(1.0 - abs(across) / w, 0.0), 1.0)
+    return min(max(across / w, -1.0), 1.0) * profile * 2.0
 
 
 def scratch_tangent(local_pos, normal_ws, centre=(0.0, 0.0, 0.0), axes=None):
