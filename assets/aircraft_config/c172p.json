@@ -367,7 +367,9 @@
         "fdm_contact": "NOSE_SKID"
       },
       "tail": {
-        "fdm_contact": "TAIL_SKID"
+        "structural_in": [286.15, 0.0, 77.58],
+        "basis": "measured",
+        "source": "measured 2026-11-14 from the converted visual model's vertices (assets_pipeline/convert.py, mesh manifest version 3, the c172p-team model): the aftmost vertex, the rudder's trailing tip, at x -608.519 cm, z 99.621 cm about the mesh origin, which the converter anchors at (-118.309, 0, 97.422) cm in the actor frame (x on the nose keypoint, z on the main-gear contact); actor (-726.83, 0, 197.04) cm = structural (286.15, 0, 77.58) in. Replaces the TAIL_SKID contact, which sits under the tailcone 2.5 m forward of the tail: the box from it was 5.7 m long against the type's 8.28 m (round 83 #10: the drawn aircraft ran 10 px past bbox_2d)"
       },
       "left_wingtip": {
         "fdm_contact": "LEFT_TIP"

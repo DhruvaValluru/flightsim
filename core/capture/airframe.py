@@ -157,6 +157,13 @@ class Airframe:
     loadout: Dict = field(default_factory=dict)
     #: Where cg_structural_in came from, in words.
     cg_source: str = ""
+    #: r87/r96 (2026-11-14): the drawn mesh's measured highest point, body z (m, DOWN)
+    #: about the CG, when the config states one (labels.dimensions_m.
+    #: measured_top_structural_in). The cited height is gear-compressed on the ramp;
+    #: from the FDM's extended gear contact it can fall short of the fin (B747: 19.41 m
+    #: cited, 19.98 m drawn). The box's top is the higher of the two.
+    measured_top_body_m: Optional[float] = None
+    measured_top_source: str = ""
 
     # -- the box ----------------------------------------------------------
 
@@ -178,7 +185,10 @@ class Airframe:
         gear = [k.body_m[2] for n, k in self.keypoints.items()
                 if n.endswith("_gear")]
         bottom = max(gear) if gear else self.height_m / 2.0
-        z = (bottom - self.height_m, bottom)
+        top = bottom - self.height_m
+        if self.measured_top_body_m is not None:
+            top = min(top, self.measured_top_body_m)
+        z = (top, bottom)
         return {"forward": x, "right": y, "down": z}
 
     def box_corners_body_m(self) -> List[Tuple[float, float, float]]:
@@ -198,6 +208,8 @@ class Airframe:
             "span_source": self.span_source,
             "cg_structural_in": list(self.cg_structural_in),
             "cg_source": self.cg_source,
+            "measured_top_body_m": self.measured_top_body_m,
+            "measured_top_source": self.measured_top_source,
             "body_frame": "metres about the CG: x forward, y right, z down",
             "box_body_m": {k: list(v) for k, v in box.items()},
             "keypoints": [self.keypoints[n].to_dict() for n in KEYPOINT_NAMES
@@ -475,4 +487,8 @@ def load_airframe(aircraft: str, config_dir: Optional[Path] = None
         components=components,
         loadout=loadout,
         cg_source=f"{xml_path.name}: {cg_words}",
+        measured_top_body_m=(None if dims.get("measured_top_structural_in") is None else
+                             structural_to_body((0.0, 0.0, float(dims["measured_top_structural_in"])),
+                                                cg)[2]),
+        measured_top_source=str(dims.get("measured_top_source", "")),
     )

@@ -2952,6 +2952,21 @@ def _extent_floor_px(geometry: Dict) -> float:
     return MASK_TOL_PX_MESH if geometry.get("points") is not None else MASK_TOL_PX
 
 
+def _camera_inside_hull(geometry: Dict) -> bool:
+    """Whether the camera (the camera-frame origin) is inside the object's
+    oriented hull box: a cockpit view. Its silhouette then has no projected
+    box (part of the hull is behind the lens) and no keypoint is a bound on
+    the nearest surface, so those comparisons have no reference here."""
+    centre, axes, half = geometry.get("centre"), geometry.get("axes"), geometry.get("half")
+    if centre is None or axes is None or half is None:
+        return False
+    for k in range(3):
+        local = -sum(float(centre[i]) * float(axes[k][i]) for i in range(3))
+        if abs(local) > float(half[k]):
+            return False
+    return True
+
+
 def _projected_hull(record: Dict, geometry: Dict):
     """(unclipped box, clipped box, cg pixel) of the object's hull, or
     ``None`` when a point of it is behind the camera. The hull is the
@@ -3250,6 +3265,14 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
                 return Check("mask_vs_geometry", FAIL, f"{where}: {source}",
                              failure=FAIL_MASK_OFFSET)
             pixels = int(np.count_nonzero(hit))
+            if hull is None and _camera_inside_hull(geometry):
+                # r83 #12 (2026-11-14): a cockpit camera sits inside its own
+                # aircraft; the interior it sees has no projected silhouette to
+                # grade. Not graded (NOT a pass), said by name.
+                skipped[str(entry.get("id"))] = (
+                    "the camera is inside this aircraft's hull (a cockpit view), so "
+                    "its silhouette has no projected box to compare")
+                continue
             if hull is None:
                 if pixels:
                     return Check("mask_vs_geometry", FAIL,
@@ -4067,9 +4090,12 @@ def verify_depth_vs_geometry(manifest: Dict, run_dir=None) -> Check:
                              f"beyond the hull's farthest corner {z_far:.1f} m by more "
                              f"than {tol(z_far):.1f} m; basis: {geometry['basis']}",
                              failure=FAIL_DEPTH_RANGE)
-            if geometry["keypoints"]:
-                nearest_name, nearest = min(geometry["keypoints"].items(),
-                                            key=lambda kv: kv[1][2])
+            # A keypoint behind the camera bounds nothing in front of it (r83
+            # #12, the cockpit camera: the tail at -3.2 m); only keypoints in
+            # front of the lens are compared.
+            ahead = {k: v for k, v in geometry["keypoints"].items() if float(v[2]) > 0.0}
+            if ahead:
+                nearest_name, nearest = min(ahead.items(), key=lambda kv: kv[1][2])
                 z_kp = nearest[2]
                 gap = d_min - z_kp
                 if gap > worst_near[0]:

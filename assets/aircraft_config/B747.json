@@ -218,6 +218,8 @@
     "dimensions_m": {
       "length": 70.66,
       "height": 19.41,
+      "measured_top_structural_in": 570.57,
+      "measured_top_source": "measured 2026-11-14 from the converted visual model (assets\\generated\\B747\\mesh_manifest.json, version 3, on the render machine): the fin top at z 14.3538 m about the mesh origin, which sits at z 13.86 cm in the actor frame; 1449.24 cm = 570.57 structural in. The drawn model stands 19.98 m from its gear contact, the cited 19.41 m is the ramp figure on compressed gear; round 83 #13's fin ran 7.7 px above bbox_2d",
       "source": "Boeing 747-400 Airplane Characteristics for Airport Planning, D6-58326-1, section 2.2 (overall length 70.66 m, tail height 19.41 m); span is taken from the flown FDM's own <wingspan>"
     },
     "keypoints": {

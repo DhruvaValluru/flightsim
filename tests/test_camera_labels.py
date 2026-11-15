@@ -75,8 +75,10 @@ def test_every_keypoint_carries_a_source_and_a_basis():
         airframe = load_airframe(aircraft)
         assert set(airframe.keypoints) == set(KEYPOINT_NAMES), aircraft
         for keypoint in airframe.keypoints.values():
+            # "measured": from the converted mesh's vertices (the A-4's nose and
+            # tail; the C172's tail since 2026-11-14, its TAIL_SKID was 2.5 m short).
             assert keypoint.source and keypoint.basis in (
-                "fdm", "fdm-approximation", "estimate")
+                "fdm", "fdm-approximation", "estimate", "measured")
         assert airframe.dimensions_source
         assert airframe.config_sha256 and airframe.fdm_xml_sha256
 
@@ -187,8 +189,12 @@ def test_labels_match_hand_arithmetic():
     assert axes[0] == pytest.approx([0.0, 0.0, 1.0], abs=1e-9)
     assert axes[1] == pytest.approx([1.0, 0.0, 0.0], abs=1e-9)
     assert axes[2] == pytest.approx([0.0, 1.0, 0.0], abs=1e-9)
+    # The B747's height is its measured fin top over the gear contact (19.98 m;
+    # the cited 19.41 m is the ramp figure on compressed gear), 2026-11-14.
+    top, bottom = airframe.box_body_m()["down"]
+    assert bottom - top == pytest.approx(19.98, abs=0.02) and bottom - top >= airframe.height_m
     assert labels["bbox_3d_camera"]["extents_m"] == pytest.approx(
-        [airframe.length_m, airframe.span_m, airframe.height_m])
+        [airframe.length_m, airframe.span_m, bottom - top])
 
 
 def test_the_horizon_is_the_datum_plane_s_tangent_horizon():
