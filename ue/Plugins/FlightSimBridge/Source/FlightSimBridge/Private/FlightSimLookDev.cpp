@@ -411,6 +411,10 @@ namespace
 		S.Params = Params + TEXT(" ") + Switches;
 		const FString& P = S.Params;
 		FScopedCommandLine CommandLine(P);
+		// A fresh card: ReadCard leaves fields the JSON omits untouched, so an
+		// ocean card kept the previous scene's terrain path and its CRS (#13
+		// after #3 kept EPSG:32618, camera 2600 km off, tiles at 0 %).
+		S.Card = FFlightSimScenarioCard();
 		if (!FFlightSimScenarioWorld::ReadCard(CardPath, S.Card, Error)) { return false; }
 		S.CardRoot = ReadJson(CardPath);
 
@@ -435,13 +439,6 @@ namespace
 			else if (!S.Card.SceneCrs.IsEmpty() || !S.Card.ThermalsCrs.IsEmpty())
 			{
 				Geo->ProjectedCRS = S.Card.SceneCrs.IsEmpty() ? S.Card.ThermalsCrs : S.Card.SceneCrs;
-			}
-			else
-			{
-				// No terrain CRS (an ocean card): the commandlet's fresh world
-				// keeps the class default; the editor world kept the previous
-				// scene's (hl-sun: #13 after #3 put the camera 2600 km off).
-				Geo->ProjectedCRS = GetDefault<AGeoReferencingSystem>()->ProjectedCRS;
 			}
 			Error.Reset();
 		}
