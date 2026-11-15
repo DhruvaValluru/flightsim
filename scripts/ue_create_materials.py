@@ -3782,6 +3782,18 @@ WORLD_TILES_INPUTS = {
 #: the render does not set them), at tiles_delight.DELIGHT_MIP_BIAS and
 #: DELIGHT_RATIO_KNEE. UNCALIBRATED.
 WORLD_TILES_DELIGHT_SCALARS = {"DelightMipBias": 5.0, "DelightRatioKnee": 0.6}
+#: Tiles generation 11 (wet ground): the shaders' WET_GROUND_MODEL const, 1 =
+#: Lekner & Dorf's film + specular AA (world_beauty.WET_GROUND_MODEL), 0 = the
+#: generation 10 law (pasted as 0.0, so the compiler folds the old path). FLIGHTSIM_WET_GROUND=legacy builds it at 0 (the A/B switch;
+#: stamped apart, so the next run without it builds the material again).
+WET_GROUND_ENV = "FLIGHTSIM_WET_GROUND"
+WET_GROUND_CONST = "const float WET_GROUND_MODEL = 1.0;"
+
+
+def wet_ground_model():
+    """1.0, or 0.0 when FLIGHTSIM_WET_GROUND=legacy."""
+    import os
+    return 0.0 if os.environ.get(WET_GROUND_ENV, "").strip().lower() == "legacy" else 1.0
 # -- lane B (2026-11-11): non-urban terrain detail and the beauty ocean -- begin --
 #: The CC0 detail maps (assets/terrain_detail/PIN.json: Poly Haven aerial
 #: textures, THIRD_PARTY_VISUAL.md). Each role's albedo ("<Role>D", sRGB) and
@@ -4173,6 +4185,7 @@ def create_world_tiles_beauty():
     # lane B: the terrain detail between the de-light and the grade (the
     # detailed albedo replaces Albedo; the detailed normal feeds tiles_normal).
     detail_normal = world_tiles_detail(material, lib, common, uv, factor)
+    wet_model = wet_ground_model()
     outputs = {"tiles_base_colour": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                                      unreal.MaterialProperty.MP_BASE_COLOR),
                "tiles_normal": (unreal.CustomMaterialOutputType.CMOT_FLOAT3,
@@ -4184,12 +4197,17 @@ def create_world_tiles_beauty():
         if shader == "tiles_normal" and detail_normal is not None:
             pins["NormalWS"] = (detail_normal, "")
         node = world_custom(material, lib, shader, output_type, pins, -900, -300 + 400 * row)
+        if wet_model < 0.5 and shader in ("tiles_base_colour", "tiles_roughness"):
+            node.set_editor_property("code", str(node.get_editor_property("code")).replace(
+                WET_GROUND_CONST, "const float WET_GROUND_MODEL = 0.0;"))
         lib.connect_material_property(node, "", prop)
     finish(material, "M_FlightSimTilesBeauty")
-    if detail_normal is None:
-        # Stamped apart, so the next run with the detail on builds it again.
-        unreal.EditorAssetLibrary.set_metadata_tag(
-            material, WORLD_GENERATION_TAG, f"{WORLD_GENERATIONS['M_FlightSimTilesBeauty']}-no-detail")
+    stamp = WORLD_GENERATIONS['M_FlightSimTilesBeauty'] + ("" if detail_normal is not None else "-no-detail") \
+        + ("" if wet_model > 0.5 else "-legacy-wet")
+    if stamp != WORLD_GENERATIONS['M_FlightSimTilesBeauty']:
+        # Stamped apart, so the next run with the detail on / the new wet model builds it again.
+        print(f"MATERIAL-NOTE: M_FlightSimTilesBeauty stamped {stamp}")
+        unreal.EditorAssetLibrary.set_metadata_tag(material, WORLD_GENERATION_TAG, stamp)
         unreal.EditorAssetLibrary.save_asset(f"{PATH}/M_FlightSimTilesBeauty")
 
 

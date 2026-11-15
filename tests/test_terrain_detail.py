@@ -91,7 +91,8 @@ def test_the_detail_shaders_read_what_the_script_wires():
         block = _block(hlsl, "// shared: terrain detail", "// end terrain detail")
         shared = block if shared is None else shared
         assert block == shared, f"{name}: the shared terrain detail differs"
-        assert "static const" not in hlsl and "UNCALIBRATED" in hlsl and "BEAUTY ONLY" in hlsl
+        # static const: Metal rejects a struct method reading the Custom function's local const
+        assert not re.search(r"^const ", hlsl, re.M) and "UNCALIBRATED" in hlsl and "BEAUTY ONLY" in hlsl
         # the tile sizes are the pins'
         for role, row in PIN["roles"].items():
             assert f"const float {role.upper()}_TILE_M = {row['tile_m']};" in hlsl, (name, role)
