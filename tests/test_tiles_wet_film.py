@@ -57,7 +57,7 @@ def test_far_wet_ground_keeps_the_sky_lobe():
     # Sub-pixel facets (normal varying pixel to pixel) widen it, bounded by the clamp.
     worst = _roughness(1, 1.0, 5000.0, kernel=10.0)
     assert abs(worst - (wb.ROUGHNESS_WET ** 4 + wb.WET_SPEC_AA_MAX) ** 0.25) < 1e-12
-    assert 0.6 < worst < 0.7
+    assert 0.35 < worst < 0.42   # a sheen, never generation 7's 0.55
 
 
 def test_dry_and_legacy_are_unchanged():

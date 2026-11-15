@@ -1478,7 +1478,10 @@ WET_GROUND_MODEL = 1.0
 WET_FILM_N = 1.333
 WET_FILM_RE = 0.066
 WET_FILM_RI = round(1.0 - (1.0 - WET_FILM_RE) / WET_FILM_N ** 2, 3)
-WET_SPEC_AA_MAX = 0.18
+#: Tuned live (2026-11-15, #10): their recommended 0.18 lets photogrammetry facet noise
+#: widen the far lobe to roughness 0.65 (far ground 13 -> 16 only, legacy-like); 0.02
+#: caps it at 0.39, still a sheen. UNCALIBRATED: confirm on the Windows A/B.
+WET_SPEC_AA_MAX = 0.02
 
 
 def wet_film_albedo(albedo):

@@ -38,7 +38,7 @@ const float WET_SPEC_FADE_M = 2500.0;
 const float PUDDLE_FADE_M = 3000.0;
 const float PUDDLE_AMOUNT_SCALE = 0.5;
 // Generation 11 (core/scene/world_beauty.py, WET_GROUND_MODEL): the specular AA clamp.
-const float WET_SPEC_AA_MAX = 0.18;
+const float WET_SPEC_AA_MAX = 0.02;
 // 1 = generation 11; 0 = generation 7 (the script pastes 0.0 under FLIGHTSIM_WET_GROUND=legacy).
 const float WET_GROUND_MODEL = 1.0;
 const float MICRO_VARIATION = 0.06;
