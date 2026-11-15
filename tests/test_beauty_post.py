@@ -106,6 +106,9 @@ def _digests(directory: Path):
 
 
 CUBE = REPO / "assets/looks/film/kodak_portra_160.cube"
+#: The camera response row a beauty plan carries (hyperreal-grade).
+CAMERA = {"chroma_knee": 0.6, "chroma_limit": 1.0, "highlight_from": 0.85,
+          "highlight_desaturation": 0.5, "size": 17}
 
 
 # -- the switch ----------------------------------------------------------------------
@@ -154,9 +157,11 @@ def test_the_upscale_is_the_only_opt_in_step():
 
 def test_the_filter_graph_has_every_step_in_order():
     graph = bp.filter_graph(cube=Path("C:/tools/x.cube"), halation=True, grain=True,
-                            vignette=True, seed=1234)
-    assert graph.startswith("[0:v]format=gbrp16le,lut3d=file='C\\:/tools/x.cube':interp=tetrahedral,")
-    order = [graph.index(w) for w in ("lut3d", "format=gbrp,split[a][b]", "colorlevels", "gblur=sigma=14",
+                            vignette=True, seed=1234, camera=Path("C:/work/camera_response.cube"))
+    assert graph.startswith("[0:v]format=gbrp16le,lut3d=file='C\\:/tools/x.cube':interp=tetrahedral,"
+                            "lut3d=file='C\\:/work/camera_response.cube':interp=tetrahedral,")
+    order = [graph.index(w) for w in ("lut3d=file='C\\:/tools", "lut3d=file='C\\:/work",
+                                      "format=gbrp,split[a][b]", "colorlevels", "gblur=sigma=14",
                                       "colorchannelmixer=rr=1:gg=0.35:bb=0.12", "blend=all_mode=screen",
                                       "noise=all_seed=1234:all_strength=6:all_flags=t+u",
                                       "vignette=angle=PI/8", "format=rgb24[out]")]
@@ -175,10 +180,81 @@ def test_the_filter_graph_leaves_out_what_is_off():
 
 def test_the_halation_blends_in_8_bit():
     """ffmpeg n8.1.3's screen blend on gbrp16le drew contours and rings (r82, r83)."""
-    graph = bp.filter_graph(cube=Path("a.cube"), halation=True, grain=False, vignette=True, seed=1)
+    graph = bp.filter_graph(cube=Path("a.cube"), halation=True, grain=False, vignette=True, seed=1,
+                            camera=Path("c.cube"))
     assert "format=gbrp,split[a][b]" in graph
     assert "gbrp16le" not in graph[graph.index("split"):]
     assert graph.count("format=gbrp,") == 1
+    # The camera response LUT runs in 16-bit, before the 8-bit halation: no rings of its own.
+    assert graph.index("lut3d=file='c.cube'") < graph.index("format=gbrp,split")
+    assert graph.count("lut3d") == 2
+    assert bp.STEPS.index("camera") == bp.STEPS.index("lut") + 1 < bp.STEPS.index("halation")
+
+
+# -- the camera response (hyperreal-grade) --------------------------------------------------
+
+def _hsv(rgb):
+    import colorsys
+    return colorsys.rgb_to_hsv(*(float(v) for v in rgb))
+
+
+def test_the_camera_response_keeps_the_grey_axis_hue_and_luma():
+    greys = np.linspace(0.0, 1.0, 41)[:, None] * np.ones(3)
+    assert np.allclose(bp.camera_response_rgb(greys, CAMERA), greys, atol=1e-12)
+    colours = np.array([[0.08, 0.20, 0.62], [0.9, 0.1, 0.1], [0.2, 0.7, 0.3], [0.55, 0.45, 0.30]])
+    out = bp.camera_response_rgb(colours, CAMERA)
+    for before, after in zip(colours, out):
+        h0, s0, _ = _hsv(before)
+        h1, s1, _ = _hsv(after)
+        assert abs(h0 - h1) < 1e-9, (before, after)                     # the hue is kept exactly
+        assert abs(float(before @ bp._LUMA) - float(after @ bp._LUMA)) < 1e-9   # and the luma
+        assert s1 <= s0 + 1e-12
+    assert out.min() >= 0.0 and out.max() <= 1.0
+
+
+def test_the_camera_response_rolls_saturation_off_above_the_knee_only():
+    navy = np.array([0.08, 0.20, 0.62])                                   # the r83 sky: HSV sat 0.87
+    sky = np.array([0.35, 0.55, 0.85])                                    # a photograph's: 0.59
+    s_navy = _hsv(bp.camera_response_rgb(navy, CAMERA))[1]
+    k, lim = CAMERA["chroma_knee"], CAMERA["chroma_limit"]
+    s0 = _hsv(navy)[1]
+    u = (s0 - k) / (lim - k)
+    assert s_navy == pytest.approx(k + (lim - k) * u / (1.0 + u), abs=1e-6)   # the soft knee, exactly
+    assert 0.7 < s_navy < 0.8 < s0
+    assert np.allclose(bp.camera_response_rgb(sky, CAMERA), sky, atol=1e-12)  # below the knee: untouched
+    # Continuous at the knee (no ring): a colour just over it moves by a hair.
+    at = np.array([1.0, 1.0 - k + 1e-4, 1.0 - k + 1e-4]) * 0.5
+    assert np.abs(bp.camera_response_rgb(at, CAMERA) - at).max() < 1e-3
+
+
+def test_the_camera_response_desaturates_the_highlights_into_white():
+    cloud = np.array([1.0, 0.93, 0.80])
+    out = bp.camera_response_rgb(cloud, CAMERA)
+    assert _hsv(out)[1] < _hsv(cloud)[1] and abs(float(out @ bp._LUMA) - float(cloud @ bp._LUMA)) < 1e-9
+    dark = np.array([0.5, 0.465, 0.40])                                   # the same chroma ratio, mid-tone
+    assert np.allclose(bp.camera_response_rgb(dark, CAMERA), dark, atol=1e-12)
+    white = bp.camera_response_rgb(np.array([1.0, 1.0, 0.9]), dict(CAMERA, highlight_desaturation=1.0))
+    assert np.allclose(white, white[0], atol=0.005)                       # at Y' ~ 1 the chroma is gone
+
+
+def test_the_camera_cube_is_written_deterministically_and_recorded(tmp_path):
+    table = bp.camera_response_table(CAMERA)
+    assert table.shape == (17, 17, 17, 3)
+    i = np.arange(17)
+    assert np.allclose(table[i, i, i], np.linspace(0.0, 1.0, 17)[:, None])   # the grey axis
+    # .cube order: red fastest. Node (r=1, g=0, b=0) is pure red; (r=0, g=0, b=1) pure blue.
+    assert table[0, 0, 16].argmax() == 0 and table[16, 0, 0].argmax() == 2
+    a = bp.camera_response_cube(CAMERA, tmp_path / "a.cube")
+    b = bp.camera_response_cube(CAMERA, tmp_path / "b.cube")
+    assert a["sha256"] == b["sha256"] == hashlib.sha256((tmp_path / "a.cube").read_bytes()).hexdigest()
+    assert a["size"] == 17 and a["chroma_knee"] == 0.6 and a["cube"].endswith("a.cube")
+    text = (tmp_path / "a.cube").read_text(encoding="utf-8")
+    head = text.split("\n", 8)
+    assert head[0] == 'TITLE "flightsim camera response"' and "LUT_3D_SIZE 17" in text
+    assert "CAMERA_RESPONSE" in text and "built at run time" in text
+    assert "DOMAIN_MIN 0.0 0.0 0.0" in text and len(text.strip().split("\n")) == 17 ** 3 + 7
+    other = bp.camera_response_cube(dict(CAMERA, chroma_knee=0.5), tmp_path / "c.cube")
+    assert other["sha256"] != a["sha256"]
 
 
 def test_the_tool_argument_lists():
@@ -225,7 +301,7 @@ def test_the_image_files_round_trip(tmp_path):
 def test_a_frame_runs_every_step_and_leaves_the_originals_alone(bundle, tools):
     before = _digests(bundle)
     record = bp.post_frame(bundle / "frame_0000.png", cube=CUBE, noisy=True, grain=True,
-                           upscale=True, override=tools)
+                           upscale=True, override=tools, camera=CAMERA)
     assert record["output"] == "frame_0000_beauty_post.png"
     assert (bundle / "frame_0000_beauty_post.png").is_file()
     assert (bundle / "frame_0000_beauty_4k.png").is_file()
@@ -234,13 +310,18 @@ def test_a_frame_runs_every_step_and_leaves_the_originals_alone(bundle, tools):
     after = _digests(bundle)
     assert {k: after[k] for k in before} == before, "an original changed"
     ran = [s["step"] for s in record["steps"] if s.get("ran")]
-    assert ran == ["denoise", "lut", "halation", "grain", "vignette", "ffmpeg_pass", "upscale"]
+    assert ran == ["denoise", "lut", "camera", "halation", "grain", "vignette", "ffmpeg_pass", "upscale"]
     denoise = record["steps"][0]
     assert denoise["device_ran"] == "sycl" and denoise["intermediate"] == "16-bit PPM"
     assert denoise["args"][0] == str(tools["oidn"])
     lut = next(s for s in record["steps"] if s["step"] == "lut")
     assert lut["params"]["cube"] == str(CUBE)
     assert lut["params"]["sha256"] == hashlib.sha256(CUBE.read_bytes()).hexdigest()
+    camera = next(s for s in record["steps"] if s["step"] == "camera")
+    assert camera["built_at_run_time"] is True and camera["grey_axis"] == "identity"
+    assert camera["params"]["cube"].endswith(bp.CAMERA_CUBE_NAME) and len(camera["params"]["sha256"]) == 64
+    assert camera["params"]["size"] == 17 and camera["params"]["interp"] == "tetrahedral"
+    assert camera["args"] == lut["args"], "one ffmpeg pass carries both LUTs"
     grain = next(s for s in record["steps"] if s["step"] == "grain")
     assert grain["params"]["seed"] == bp.frame_seed(bundle / "frame_0000.png")
     for step in record["steps"]:
@@ -249,6 +330,7 @@ def test_a_frame_runs_every_step_and_leaves_the_originals_alone(bundle, tools):
     ffmpeg_args = json.loads((bundle / "frame_0000_beauty_post.png.args.json").read_text(encoding="utf-8"))
     graph = ffmpeg_args[ffmpeg_args.index("-filter_complex") + 1]
     assert "lut3d" in graph and "noise=" in graph and "vignette" in graph
+    assert graph.count("lut3d") == 2 and bp.CAMERA_CUBE_NAME in graph
     assert ffmpeg_args[ffmpeg_args.index("-i") + 1].endswith("denoised.ppm")
     assert not list(bundle.glob("*_beauty_post_*")), "the scratch folder was removed"
 
@@ -303,11 +385,12 @@ def test_a_quiet_frame_is_not_denoised_and_engine_grain_is_respected(bundle, too
 
 def test_steps_switched_off_are_recorded_as_such(bundle, tools):
     record = bp.post_frame(bundle / "frame_0000.png", cube=CUBE, noisy=True, grain=True,
-                           upscale=True, off=frozenset({"denoise", "halation", "upscale", "lut"}),
-                           override=tools)
+                           upscale=True, off=frozenset({"denoise", "halation", "upscale", "lut", "camera"}),
+                           override=tools, camera=CAMERA)
     by = {s["step"]: s for s in record["steps"]}
-    for step in ("denoise", "halation", "upscale", "lut"):
+    for step in ("denoise", "halation", "upscale", "lut", "camera"):
         assert by[step]["ran"] is False and by[step]["why"] == "switched off", step
+    assert not (bundle / "frame_0000_beauty_post.png").with_name("camera_response.cube").exists()
     assert "+upscale" in by["upscale"]["opt_in"]
     assert by["grain"]["ran"] and by["vignette"]["ran"]
     assert not (bundle / "frame_0000_beauty_4k.png").exists()
@@ -397,10 +480,16 @@ def test_apply_to_run_reads_the_sidecar_and_every_camera(tmp_path, tools):
 def test_look_choices_follow_the_beauty_look():
     from core.scene import beauty_look as bl
 
-    assert bp.look_choices(None) == {"cube": None, "stock": None, "noisy": False, "grain": True}
+    assert bp.look_choices(None) == {"cube": None, "stock": None, "camera": None, "noisy": False,
+                                     "grain": True}
     storm = bl.plan_beauty_look(10.0, fps=30, width_px=1920, world_preset="storm")
     choice = bp.look_choices(storm)
     assert choice["noisy"] and choice["stock"] == bl.FILM_STOCKS["storm"]
+    # The camera response row is the plan's; an older beauty sidecar without one gets today's.
+    assert choice["camera"] == {k: storm["camera_response"][k] for k in CAMERA}
+    older = {k: v for k, v in storm.items() if k != "camera_response"}
+    assert bp.look_choices(older)["camera"] == {k: bl.CAMERA_RESPONSE[k] for k in CAMERA}
+    assert bp.look_choices({"world_preset": "storm"})["camera"] is None   # no grade: not a beauty plan
     assert choice["cube"] == REPO / storm["film_stock"]["cube"] and choice["cube"].is_file()
     assert choice["grain"] is (not bl.FILM_GRAIN_IN_ENGINE)
     quiet = dict(storm, world_preset="clear",
@@ -687,12 +776,13 @@ def test_no_step_reads_or_writes_a_label_file(tmp_path, tools, monkeypatch):
         return bp._run(args)
 
     record = bp.apply_to_bundle(frames, cube=CUBE, noisy=True, grain=True, upscale=True,
-                                override=tools, runner=runner)
+                                override=tools, runner=runner, camera=CAMERA)
     monkeypatch.setattr(builtins, "open", real_open)
     monkeypatch.setattr(io, "open", real_io_open)
 
     ran = [s["step"] for s in record["steps"] if s.get("ran")]
-    assert ran == ["denoise", "lut", "halation", "grain", "vignette", "ffmpeg_pass", "upscale"]
+    assert ran == ["denoise", "lut", "camera", "halation", "grain", "vignette", "ffmpeg_pass", "upscale"]
+    assert record["look"]["camera_response"] == CAMERA
     assert record["steps"][0]["aovs"] == ["albedo", "normal"]
     labels = set(LABEL_FILES)
     assert not [o for o in opened if o[0] in labels], "a label file was opened"

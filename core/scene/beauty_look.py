@@ -68,7 +68,9 @@ What is decided here, and on what basis
   every number is in the record. Chosen automatically from the world
   preset (the world lane's own selector), then the sun (:func:`grade_for`),
   or forced by ``grade=``. Each grade's only colour-temperature knob is its
-  ``WhiteTemp``; ColorGain is neutral on every grade. No environment switch: the
+  ``WhiteTemp`` (hyperreal-grade: :func:`white_balance_for`'s, from the
+  modelled sun and sky illuminant, not the grade's); ColorGain is neutral on
+  every grade. No environment switch: the
   FLIGHTSIM_* surface is frozen (core/config_surface.py, E1).
 * **Lens.** :data:`LENSES` (standard, cinematic). The field of view is the
   pose solver's and is NEVER changed: the host derives the focal length
@@ -246,37 +248,107 @@ TONEMAP_HUE: Dict[str, float] = {
     "BlueCorrection": 1.0,
 }
 
+#: hyperreal-grade (2026-11-14): the camera's shoulder, laid over the engine's
+#: stated defaults (:data:`TONEMAP`) in the plan's ``tonemap`` row. The engine
+#: curve's shoulder asymptotes at 1 + FilmWhiteClip = 1.04 and is then
+#: clipped, so a bright cloud or a sunlit wing crosses display white with a
+#: hard edge (:func:`film_tone_curve`: scene 8 x grey -> 0.99, 16 x -> clipped).
+#: A real camera's response rolls into white and never clips the curve
+#: itself: a white clip near 0 puts the asymptote at white, and a longer
+#: shoulder starts the roll-off a little earlier (scene 4 x grey 0.935
+#: against 0.944, mid-grey and the toe unchanged by construction). Only the
+#: highlights move; the mids keep the engine's slope and the exposure owner's
+#: EV100 stands. UNCALIBRATED: set by probe render on the render machine
+#: (probe hr-shoulder: #01 and #11, the brightest cloud's sRGB histogram
+#: with and without this row, no pile-up at 255).
+TONEMAP_CAMERA: Dict[str, float] = {
+    "FilmShoulder": 0.30,
+    "FilmWhiteClip": 0.01,
+}
+
+
+def film_tone_curve(scene_linear: float, params: Optional[Mapping[str, float]] = None) -> float:
+    """UE 5.7's filmic tone curve (TonemapCommon.ush FilmToneMap, the 1-D
+    part, per channel in AP1): display-linear out for a scene-linear in,
+    with the ``Film*`` parameters of ``params`` (default: :data:`TONEMAP`
+    under :data:`TONEMAP_CAMERA`, the plan's row). The engine's own
+    anchors are built in: scene 0.18 lands at display-linear 0.18
+    (InMatch / OutMatch), and the result is clamped to the display [0, 1]
+    as the shader's saturate does. A pure reference: the tests hold the
+    camera shoulder to a soft roll-off, and a probe compares a frame's
+    greys to it. Never applied here (the engine applies it per pixel)."""
+    row = {**TONEMAP, **TONEMAP_CAMERA, **(params or {})}
+    slope, toe, shoulder = float(row["FilmSlope"]), float(row["FilmToe"]), float(row["FilmShoulder"])
+    black, white = float(row["FilmBlackClip"]), float(row["FilmWhiteClip"])
+    toe_scale = 1.0 + black - toe
+    shoulder_scale = 1.0 + white - shoulder
+    in_match, out_match = 0.18, 0.18
+    if toe > 0.8:
+        toe_match = (1.0 - toe - out_match) / slope + math.log10(in_match)
+    else:
+        bt = (out_match + black) / toe_scale - 1.0
+        toe_match = math.log10(in_match) - 0.5 * math.log((1.0 + bt) / (1.0 - bt)) * (toe_scale / slope)
+    straight_match = (1.0 - toe) / slope - toe_match
+    shoulder_match = shoulder / slope - straight_match
+    log_x = math.log10(max(float(scene_linear), 1e-9))
+    straight = slope * (log_x + straight_match)
+    toe_colour = -black + (2.0 * toe_scale) / (1.0 + math.exp((-2.0 * slope / toe_scale) * (log_x - toe_match)))
+    shoulder_colour = (1.0 + white) - (2.0 * shoulder_scale) / (
+        1.0 + math.exp((2.0 * slope / shoulder_scale) * (log_x - shoulder_match)))
+    toe_colour = toe_colour if log_x < toe_match else straight
+    shoulder_colour = shoulder_colour if log_x > shoulder_match else straight
+    t = min(max((log_x - toe_match) / (shoulder_match - toe_match), 0.0), 1.0)
+    if shoulder_match < toe_match:
+        t = 1.0 - t
+    t = (3.0 - 2.0 * t) * t * t
+    return min(max(toe_colour * (1.0 - t) + shoulder_colour * t, 0.0), 1.0)
+
 # -- grades --------------------------------------------------------------------
 
 #: The four named grades, as UE post-process colour grading. Vectors are
-#: (R, G, B, overall) like FVector4 in FPostProcessSettings. WhiteTemp is
-#: the white-balance temperature: light at that temperature renders white,
-#: so ABOVE 6500 warms the image and below cools it. ONE warmth owner per
-#: grade: WhiteTemp is the grade's only colour-temperature knob, ColorGain
-#: is neutral on every grade, and the sun's own colour is the atmosphere's
-#: (no temperature band; the module docstring says why). ``ev100_offset``
+#: (R, G, B, overall) like FVector4 in FPostProcessSettings. ``ev100_offset``
 #: adds to the band's EV100 (negative opens the exposure); the deck and the
 #: lighting look's scales are metered separately (:func:`scene_light`), so
 #: no grade stands in for dim light.
+#:
+#: hyperreal-grade (2026-11-14): ONE owner per quality of the picture.
+#: Round 5's frames read as flat saturated navy skies (#01, #13) and dull
+#: grey-brown ground (#11) because the same quality was applied three
+#: times: the grade's ColorContrast (1.04 / 1.08 / 1.1) sat under the
+#: engine's per-channel filmic curve (which already adds contrast AND
+#: saturation to a chromatic sky: the blue channel rides the straight
+#: section while red and green sit in the toe), and the film stock's own
+#: S-curve (assets/looks/film, normalised to full range) came on top in
+#: post. Likewise the storm's ColorSaturation 0.75 x ColorGamma 0.96 under
+#: the Vision 2383 print (itself the muted stock) was desaturation twice.
+#: Now: CONTRAST is the film stock's (ColorContrast 1 on every grade: the
+#: stock's curve is the one S-curve after the tonemapper); SATURATION is
+#: the stock's with the camera response's roll-off (:data:`CAMERA_RESPONSE`)
+#: holding the most chromatic pixels; the grade keeps only a mild overall
+#: saturation; WARMTH is :func:`white_balance_for`'s (the illuminant model),
+#: so ``WhiteTemp`` here is each grade's white point ONLY when
+#: :data:`WHITE_BALANCE` ``mode`` is ``grade`` (the round-2 numbers, kept
+#: for that mode and for the lanes that read them); ColorGain is neutral on
+#: every grade, and the sun's own colour is the atmosphere's (no
+#: temperature band; the module docstring says why).
 #: UNCALIBRATED: set by probe render on the render machine (the grade
 #: probes: one clip per grade, the same frame graded four ways for the
 #: contact sheet, a white quad in frame read for hue).
 GRADES: Dict[str, Dict[str, Any]] = {
     "golden_hour": {
-        "ColorSaturation": [1.0, 1.0, 1.0, 1.04],
-        "ColorContrast": [1.0, 1.0, 1.0, 1.04],
+        "ColorSaturation": [1.0, 1.0, 1.0, 1.0],
+        "ColorContrast": [1.0, 1.0, 1.0, 1.0],
         "ColorGamma": [1.0, 1.0, 1.0, 1.0],
         "ColorGain": [1.0, 1.0, 1.0, 1.0],
         "ColorOffset": [0.0, 0.0, 0.0, 0.0],
-        # A light artistic warmth on top of the atmosphere's reddening: the
-        # one knob, until the 10/15/20-degree probe series is read.
+        # mode "grade" only: a light artistic warmth over the atmosphere's.
         "WhiteTemp": 6700.0,
         "WhiteTint": 0.0,
         "ev100_offset": 0.0,
     },
     "desert_noon": {
-        "ColorSaturation": [1.0, 1.0, 1.0, 0.96],
-        "ColorContrast": [1.0, 1.0, 1.0, 1.08],
+        "ColorSaturation": [1.0, 1.0, 1.0, 1.0],
+        "ColorContrast": [1.0, 1.0, 1.0, 1.0],
         "ColorGamma": [1.0, 1.0, 1.0, 1.0],
         "ColorGain": [1.0, 1.0, 1.0, 1.0],
         "ColorOffset": [0.0, 0.0, 0.0, 0.0],
@@ -285,12 +357,13 @@ GRADES: Dict[str, Dict[str, Any]] = {
         "ev100_offset": 0.0,
     },
     "storm": {
-        "ColorSaturation": [1.0, 1.0, 1.0, 0.75],
-        "ColorContrast": [1.0, 1.0, 1.0, 1.1],
-        "ColorGamma": [1.0, 1.0, 1.0, 0.96],
+        # The 2383 print mutes the palette; the grade takes only a little more.
+        "ColorSaturation": [1.0, 1.0, 1.0, 0.9],
+        "ColorContrast": [1.0, 1.0, 1.0, 1.0],
+        "ColorGamma": [1.0, 1.0, 1.0, 1.0],
         "ColorGain": [1.0, 1.0, 1.0, 1.0],
         "ColorOffset": [0.0, 0.0, 0.0, 0.0],
-        # The storm's cool cast: its one temperature knob.
+        # mode "grade" only: the storm's cool cast.
         "WhiteTemp": 6100.0,
         "WhiteTint": 0.0,
         # The deck's dim light is metered (scene_light); the commandlet's
@@ -298,8 +371,8 @@ GRADES: Dict[str, Dict[str, Any]] = {
         "ev100_offset": 0.0,
     },
     "overcast": {
-        # An overcast or hazy world with no rain: neutral white, a little
-        # flatter, no mood stops.
+        # An overcast or hazy world with no rain: a little flatter in colour,
+        # no mood stops.
         "ColorSaturation": [1.0, 1.0, 1.0, 0.95],
         "ColorContrast": [1.0, 1.0, 1.0, 1.0],
         "ColorGamma": [1.0, 1.0, 1.0, 1.0],
@@ -310,6 +383,205 @@ GRADES: Dict[str, Dict[str, Any]] = {
         "ev100_offset": 0.0,
     },
 }
+#: The grade keys the plan's ``color_grade`` row carries to the host.
+GRADE_KEYS: Tuple[str, ...] = ("ColorSaturation", "ColorContrast", "ColorGamma", "ColorGain",
+                               "ColorOffset", "WhiteTemp", "WhiteTint")
+
+# -- white balance (hyperreal-grade, 2026-11-14) ---------------------------------------
+
+#: The camera's white balance, from the light the scene is lit by. UE's
+#: ``WhiteTemp`` is the temperature of the light that renders white
+#: (FPostProcessSettings: 6500 leaves D65 alone, below cools the frame,
+#: above warms it), so a camera on its daylight preset is ``daylight_k`` and
+#: a perfect auto white balance sets it to the scene's own illuminant. Real
+#: aerial photographs sit between the two: cameras' AWB keeps part of a low
+#: sun's warmth on purpose, and a fixed daylight preset keeps all of it.
+#: ``awb_share`` is that fraction (0: daylight, 1: the illuminant renders
+#: neutral), applied in mired (1e6 / K, the near-linear scale of the
+#: daylight locus). ``mode`` ``grade`` keeps each grade's own WhiteTemp
+#: (:data:`GRADES`) instead, the round-2 numbers.
+#: UNCALIBRATED: set by probe render on the render machine (probe hr-wb:
+#: #01 (low sun) and #13 (storm) with awb_share 0, 0.35 and 1, a white quad
+#: in frame read for hue; the share that reads as a photograph, not a gel).
+WHITE_BALANCE: Dict[str, Any] = {
+    "mode": "illuminant",
+    "daylight_k": 6500.0,
+    "awb_share": 0.35,
+    "clamp_k": (4500.0, 7500.0),
+}
+
+#: The illuminant model behind :func:`white_balance_for`, stated, not
+#: measured: the direct sun reddens with the air mass it crosses (Kasten &
+#: Young 1989 air mass; the sun's CCT falls by ``sun_mired_per_air_mass``
+#: mired per unit of air mass over 1, from ``sun_zenith_k`` at the zenith:
+#: about 4500 K at 10 deg, 3600 K at 5 deg, floored at ``sun_floor_k``); a
+#: clear sky's diffuse fill is blue (``clear_sky_k``); an overcast deck's
+#: light is a little bluer than D65 (``overcast_sky_k``). A sunlit surface
+#: facing the sun (the airframe a beauty frame is about) sees the two mixed
+#: by their shares of ITS illuminance: the direct NORMAL beam plus the IES
+#: diffuse (:func:`clear_sky_horizontal_lux`'s terms, the beam not
+#: projected), in mired; so a low sun stays the warm light it is, where a
+#: horizontal meter would read the blue sky instead. Under a deck it sees
+#: the overcast sky alone.
+#: UNCALIBRATED: set by probe render on the render machine (probe hr-wb: a
+#: white quad's hue against the engine's own per-pixel transmittance at 5,
+#: 10, 20 and 40 deg).
+ILLUMINANT_MODEL: Dict[str, float] = {
+    "sun_zenith_k": 5800.0,
+    "sun_mired_per_air_mass": 11.0,
+    "sun_floor_k": 2500.0,
+    "clear_sky_k": 11000.0,
+    "overcast_sky_k": 6800.0,
+}
+
+
+def mired(kelvin: float) -> float:
+    """1e6 / K: the reciprocal scale white balance moves on."""
+    return 1.0e6 / float(kelvin)
+
+
+def air_mass(elevation_deg: float) -> float:
+    """Kasten & Young (1989) relative optical air mass for a sun at
+    ``elevation_deg`` (1 at the zenith, about 5.6 at 10 deg, 38 at the
+    horizon); the horizon's value below it."""
+    zenith = 90.0 - max(float(elevation_deg), 0.0)
+    return 1.0 / (math.cos(math.radians(zenith)) + 0.50572 * (96.07995 - zenith) ** -1.6364)
+
+
+def sun_cct_k(elevation_deg: float) -> float:
+    """The transmitted sun's colour temperature (K) at ``elevation_deg``
+    (:data:`ILLUMINANT_MODEL`): the zenith sun reddened by the air mass,
+    floored at the horizon."""
+    m = ILLUMINANT_MODEL
+    reddened = mired(m["sun_zenith_k"]) + float(m["sun_mired_per_air_mass"]) * (air_mass(elevation_deg) - 1.0)
+    return max(1.0e6 / reddened, float(m["sun_floor_k"]))
+
+
+def scene_illuminant_k(elevation_deg: float, world_preset: Optional[str] = None,
+                       deck_drawn: Optional[bool] = None, altitude_m: float = 0.0) -> Dict[str, Any]:
+    """The colour temperature (K) of the light on a sunlit surface facing
+    the sun, and how it was mixed: under a drawn deck the overcast sky;
+    under an open sky the direct normal beam and the blue diffuse mixed in
+    mired by their shares of that surface's illuminance; the sky alone with
+    the sun down."""
+    m = ILLUMINANT_MODEL
+    if under_deck(world_preset, deck_drawn):
+        return {"kelvin": float(m["overcast_sky_k"]), "sun_k": None, "sky_k": float(m["overcast_sky_k"]),
+                "direct_share": 0.0, "basis": f"world preset {world_preset}: the deck's light is the "
+                                              f"overcast sky, {m['overcast_sky_k']:g} K"}
+    clear = clear_sky_horizontal_lux(elevation_deg, altitude_m)
+    sky_k = float(m["clear_sky_k"])
+    if clear <= 0.0:
+        return {"kelvin": sky_k, "sun_k": None, "sky_k": sky_k, "direct_share": 0.0,
+                "basis": f"the sun is down: the clear sky's fill alone, {sky_k:g} K"}
+    from core.scenario.solar import illuminance_lux
+
+    normal = illuminance_lux(elevation_deg, altitude_m=altitude_m).illuminance_lux
+    diffuse = max(clear - normal * math.sin(math.radians(elevation_deg)), 0.0)
+    share = min(max(normal / max(normal + diffuse, 1e-6), 0.0), 1.0)
+    sun_k = sun_cct_k(elevation_deg)
+    mixed = 1.0e6 / (share * mired(sun_k) + (1.0 - share) * mired(sky_k))
+    return {"kelvin": round(mixed, 1), "sun_k": round(sun_k, 1), "sky_k": sky_k,
+            "direct_share": round(share, 4),
+            "basis": (f"sun at {float(elevation_deg):.2f} deg: the transmitted sun {sun_k:.0f} K "
+                      f"({share:.0%} of a sun-facing surface's illuminance) and the clear sky's fill "
+                      f"{sky_k:g} K, mixed in mired")}
+
+
+def white_balance_for(elevation_deg: float, grade: str, world_preset: Optional[str] = None,
+                      deck_drawn: Optional[bool] = None, altitude_m: float = 0.0,
+                      settings: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """THE white-balance owner: the plan's ``color_grade.WhiteTemp`` and
+    the row that says why. Mode ``illuminant`` (:data:`WHITE_BALANCE`):
+    the daylight preset moved ``awb_share`` of the way, in mired, to the
+    modelled scene illuminant (:func:`scene_illuminant_k`), clamped. Mode
+    ``grade``: the grade's own WhiteTemp (:data:`GRADES`). WhiteTint is 0
+    in both: no owner tints off the daylight locus."""
+    wb = {**WHITE_BALANCE, **(settings or {})}
+    name = validate_grade(grade)
+    mode = str(wb.get("mode", "illuminant"))
+    if mode not in ("illuminant", "grade"):
+        raise BeautyLookError(CONSTRAINT, f"white balance mode {mode!r} is not illuminant or grade")
+    if mode == "grade":
+        return {"WhiteTemp": float(GRADES[name]["WhiteTemp"]), "WhiteTint": 0.0, "mode": mode,
+                "owner": "white_balance_for (mode grade: the grade's own white point)",
+                "basis": f"GRADES[{name!r}].WhiteTemp, the round-2 number; the illuminant is not read"}
+    share = float(wb["awb_share"])
+    if not math.isfinite(share) or not 0.0 <= share <= 1.0:
+        raise BeautyLookError(CONSTRAINT, f"white balance awb_share {wb['awb_share']!r} is not 0..1")
+    low, high = (float(v) for v in wb["clamp_k"])
+    daylight = float(wb["daylight_k"])
+    scene = scene_illuminant_k(elevation_deg, world_preset, deck_drawn, altitude_m)
+    target_mired = mired(daylight) + share * (mired(scene["kelvin"]) - mired(daylight))
+    temp = min(max(1.0e6 / target_mired, low), high)
+    return {
+        "WhiteTemp": round(temp, 1), "WhiteTint": 0.0, "mode": mode,
+        "owner": "white_balance_for (the illuminant model; the grade's WhiteTemp is not read)",
+        "daylight_k": daylight, "awb_share": share, "scene_illuminant_k": scene["kelvin"],
+        "clamp_k": [low, high], "illuminant": scene,
+        "basis": (f"the camera's daylight white ({daylight:g} K) moved {share:g} of the way in mired "
+                  f"to the scene's illuminant ({scene['kelvin']:g} K: {scene['basis']}), clamped to "
+                  f"{low:g}..{high:g} K; UE renders light of WhiteTemp as white, so a low sun keeps "
+                  f"{1.0 - share:.0%} of its warmth in mired, as a photograph does"),
+    }
+
+
+# -- camera response (hyperreal-grade, 2026-11-14) -------------------------------------
+
+#: The post pipeline's camera response (scripts/beauty_post.py step
+#: ``camera``: a 3-D LUT built from these numbers at run time, applied in
+#: 16-bit after the film stock and before the 8-bit halation). It does what
+#: a camera's colour pipeline does after the tone curve and the engine's
+#: tonemapper does not: (1) a SATURATION ROLL-OFF, hue and luma kept: HSV
+#: saturation above ``chroma_knee`` is compressed toward ``chroma_limit``
+#: with a continuous soft knee (s' = k + (L - k) u / (1 + u), u = (s - k) /
+#: (L - k)), so a mid-saturation colour is untouched and the navy sky
+#: (saturation 0.9+ after the per-channel curve and the slide stock) comes
+#: back toward a photograph's 0.6-0.8 without a hue turn; (2) HIGHLIGHT
+#: DESATURATION: from display-linear luma ``highlight_from`` a smoothstep to
+#: ``highlight_desaturation`` of the chroma at white, the way a sensor's
+#: channels clip together, so a sunlit cloud edge rolls to white rather
+#: than yellow. The grey axis is the identity by construction. ``size`` is
+#: the LUT's nodes per axis.
+#: UNCALIBRATED: set by probe render on the render machine (probe
+#: hr-camera: #01, #11, #13 with the step on and off, the sky's HSV
+#: saturation and hue read in the post frame; 0.9+ before, 0.6-0.8 after,
+#: hue within 3 deg).
+CAMERA_RESPONSE: Dict[str, Any] = {
+    "chroma_knee": 0.6,
+    "chroma_limit": 1.0,
+    "highlight_from": 0.85,
+    "highlight_desaturation": 0.5,
+    "size": 33,
+}
+
+
+def camera_response_for(settings: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """The plan's ``camera_response`` row: :data:`CAMERA_RESPONSE` under
+    ``settings``, validated (knee below limit, limit at most 1, the
+    highlight band inside the display range, an odd LUT size of 17 or
+    more), with where it is applied."""
+    row = {**CAMERA_RESPONSE, **(settings or {})}
+    knee, limit = float(row["chroma_knee"]), float(row["chroma_limit"])
+    start, desat = float(row["highlight_from"]), float(row["highlight_desaturation"])
+    size = int(row["size"])
+    if not (0.0 < knee < limit <= 1.0):
+        raise BeautyLookError(CONSTRAINT, f"camera response chroma_knee {knee!r} must lie below "
+                                          f"chroma_limit {limit!r}, which is at most 1")
+    if not (0.0 < start < 1.0 and 0.0 <= desat <= 1.0):
+        raise BeautyLookError(CONSTRAINT, f"camera response highlight_from {start!r} must be inside "
+                                          f"0..1 and highlight_desaturation {desat!r} within 0..1")
+    if size < 17 or size % 2 == 0:
+        raise BeautyLookError(CONSTRAINT, f"camera response LUT size {size!r} must be odd and 17 or more")
+    return {
+        "chroma_knee": knee, "chroma_limit": limit, "highlight_from": start,
+        "highlight_desaturation": desat, "size": size,
+        "space": "display-referred sRGB in and out, after the film stock",
+        "applied_by": ("scripts/beauty_post.py step camera (a 3-D LUT built from this row, ffmpeg "
+                       "lut3d tetrahedral, 16-bit, before the 8-bit halation) when "
+                       "FLIGHTSIM_BEAUTY_POST=on; the host reads no such key"),
+        "grey_axis": "identity", "hue": "kept", "luma": "kept below highlight_from",
+    }
 GRADE_NAMES: Tuple[str, ...] = tuple(GRADES)
 #: Below this sun elevation (deg) a clear-weather beauty frame takes the
 #: golden_hour grade; above it desert_noon. UNCALIBRATED: set by probe
@@ -1005,6 +1277,7 @@ UNCALIBRATED: Tuple[str, ...] = (
     "REFLECTIONS", "EXPOSURE_METER_TARGET_P90", "TONEMAP_HUE", "RELIT_SUN_CLOSE_SHARE",
     "ENGINE_LOOK", "GRAIN_STRENGTH",
     "FILM_STOCKS", "SUBJECT_METER", "AO_RADIUS_WS_CM",
+    "TONEMAP_CAMERA", "WHITE_BALANCE", "ILLUMINANT_MODEL", "CAMERA_RESPONSE",
 )
 
 
@@ -1582,6 +1855,7 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
 
     post = {key: value for key, value in lens_row.items()
             if key[0].isupper()}
+    white_balance = white_balance_for(elevation, grade_name, world_preset, deck_drawn, altitude_m)
     look_preset, look_preset_basis = look_preset_for(world_preset, grade_name)
     engine_look = engine_look_for(look_preset, stock_grain_scale)
     engine_look["preset_basis"] = look_preset_basis
@@ -1598,11 +1872,17 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
         "sun": sun,
         "exposure": exposure,
         "tonemap": {"tonemapper": ("UE filmic (ACES-fitted), engine 5.7 curve defaults "
-                                   "stated; BlueCorrection raised (TONEMAP_HUE)"),
-                    **TONEMAP, **TONEMAP_HUE},
-        "color_grade": {key: grade_row[key] for key in
-                        ("ColorSaturation", "ColorContrast", "ColorGamma", "ColorGain",
-                         "ColorOffset", "WhiteTemp", "WhiteTint")},
+                                   "stated; the camera's shoulder over them (TONEMAP_CAMERA); "
+                                   "BlueCorrection raised (TONEMAP_HUE)"),
+                    **TONEMAP, **TONEMAP_CAMERA, **TONEMAP_HUE},
+        # hyperreal-grade: the grade's colour rows, the white point the white
+        # balance owner's (white_balance_for), never the grade's own.
+        "color_grade": {**{key: grade_row[key] for key in GRADE_KEYS},
+                        "WhiteTemp": white_balance["WhiteTemp"], "WhiteTint": white_balance["WhiteTint"]},
+        "white_balance": white_balance,
+        # The post pipeline's camera response (scripts/beauty_post.py step
+        # camera); the host reads no such key.
+        "camera_response": camera_response_for(),
         # Round 5 (L2): the film LUT the post-render pipeline applies after
         # the tonemapper; the host reads no such key.
         "film_stock": film_stock_for(grade_name),

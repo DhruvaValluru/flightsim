@@ -95,7 +95,10 @@ def test_02_differs_from_01_only_in_the_sun_the_exposure_the_knobs_and_the_fill(
     assert ex["relit_sun_open_stops"] == pytest.approx(1.1022, abs=1e-3)
     grade = bright["beauty"]["color_grade"]
     assert bright["beauty"]["grade"] == "desert_noon" and golden["beauty"]["grade"] == "golden_hour"
-    assert grade["WhiteTemp"] == 6500.0 and grade["WhiteTint"] == 0.0        # the engine's neutral
+    # hyperreal-grade: the white point is the white balance owner's (the sun at 72 deg
+    # is near daylight), not the grade's own number.
+    assert grade["WhiteTemp"] == bright["beauty"]["white_balance"]["WhiteTemp"] and grade["WhiteTint"] == 0.0
+    assert 6200.0 < grade["WhiteTemp"] <= 6500.0
     assert grade["ColorGain"] == [1.0, 1.0, 1.0, 1.0] and grade["ColorOffset"] == [0.0, 0.0, 0.0, 0.0]
     assert bright["beauty"]["tonemap"] == golden["beauty"]["tonemap"]
     # The hero sidecar: the fill (neutral, round 4) and the ground compensation are #02's only extras.
