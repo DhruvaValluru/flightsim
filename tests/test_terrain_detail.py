@@ -119,7 +119,8 @@ def test_the_ocean_material_is_beauty_only_and_reads_what_the_script_wires():
     # 2: round 10's #13 (a tile grid and screen-space reflection streaks);
     # 3: round 19's #13 (the cap's radial edges as lines, no waves or glint)
     # 4: round 26's #13 (the tiles' ocean still over the cap): the depth pull
-    assert _literal("WORLD_GENERATIONS")["M_FlightSimOceanBeauty"] == "4"
+    # 5: hyperreal stormsea: the card's wind wired, the storm foam / swell / body
+    assert _literal("WORLD_GENERATIONS")["M_FlightSimOceanBeauty"] == "5"
     assert _literal("WORLD_OCEAN_DEPTH_PULL") == 0.01
     ocean = SCRIPT[SCRIPT.index("def create_world_ocean_beauty"):SCRIPT.index("def create_world_scatter")]
     # the only WPO: each vertex along its own line of sight (camera - vertex), so its pixel stays

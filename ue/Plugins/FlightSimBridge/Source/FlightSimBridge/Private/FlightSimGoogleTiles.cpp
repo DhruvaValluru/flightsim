@@ -747,6 +747,7 @@ namespace FlightSimBeautyGroundPure
 
 TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, double CameraAglM,
                                                                  double SeaRadiusM,
+                                                                 double WindSpeedMps, double WindFromDeg,
                                                                  TArray<AActor*>& BeautyOnlyActors)
 {
 	using namespace FlightSimBeautyGroundPure;
@@ -960,6 +961,26 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 		UMaterialInstanceDynamic* SeaMaterial = UMaterialInstanceDynamic::Create(OceanBase, SeaMesh);
 		// The calm sea: the ground material's wet-ground puddles off.
 		SeaMaterial->SetScalarParameterValue(FName(TEXT("Wetness")), 0.0f);
+		// Hyperreal stormsea (M_FlightSimOceanBeauty generation 5): the card's
+		// surface wind is the sea state. Before this nothing set WindSpeedMS, so
+		// the material's 7 m/s default drew every sea and a storm over the ocean
+		// looked calm. The meteorological bearing b (the wind blows FROM b) puts
+		// the downwind direction at -(sin b, cos b) in engine X east / Y north.
+		// Still air keeps the material's defaults (a card with no wind states
+		// nothing about the sea; #13's calm sea stays the 7 m/s one).
+		const bool bCardWind = bOceanBeauty && WindSpeedMps > 0.0 && FMath::IsFinite(WindSpeedMps)
+			&& FMath::IsFinite(WindFromDeg);
+		double DownwindX = 0.0;
+		double DownwindY = 0.0;
+		if (bCardWind)
+		{
+			const double FromRadians = FMath::DegreesToRadians(WindFromDeg);
+			DownwindX = -FMath::Sin(FromRadians);
+			DownwindY = -FMath::Cos(FromRadians);
+			SeaMaterial->SetScalarParameterValue(FName(TEXT("WindSpeedMS")), static_cast<float>(WindSpeedMps));
+			SeaMaterial->SetScalarParameterValue(FName(TEXT("WindDirX")), static_cast<float>(DownwindX));
+			SeaMaterial->SetScalarParameterValue(FName(TEXT("WindDirY")), static_cast<float>(DownwindY));
+		}
 		SeaMesh->SetMaterial(0, SeaMaterial);
 		SeaMesh->RegisterComponent();
 		SeaActor->SetActorLocation(FVector::ZeroVector);
@@ -1014,10 +1035,33 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 			TEXT("a spherical cap of the sea material at sea level over the tiles' ocean (beauty-only actor)"));
 		Sea->SetStringField(TEXT("material"), OceanBase->GetPathName());
 		Sea->SetStringField(TEXT("material_basis"), bOceanBeauty
-			? TEXT("M_FlightSimOceanBeauty (lane B, generation 2): its own sky reflection (Fresnel, horizon to "
+			? TEXT("M_FlightSimOceanBeauty (lane B, generation 5): its own sky reflection (Fresnel, horizon to "
 			       "zenith) and Cox-Munk sun glint as emissive from the atmosphere nodes, the Phillips wave normal only "
-			       "where resolved, deep-sea body colour, Monahan whitecaps at WindSpeedMS 7 (UNCALIBRATED)")
+			       "where resolved, deep-sea body colour, Monahan whitecaps at the card's WindSpeedMS; from 8 m/s a "
+			       "storm sea ramps in (streak and patch foam filtered by pixel footprint and distance, a resolved "
+			       "storm swell, a grey-green body), full at 18 m/s (UNCALIBRATED)")
 			: TEXT("M_Ground_Ocean: M_FlightSimOceanBeauty did not load (run scripts/ue_create_materials.py)"));
+		// The sea state the card gave (hyperreal stormsea).
+		{
+			TSharedPtr<FJsonObject> Wind = MakeShared<FJsonObject>();
+			Wind->SetNumberField(TEXT("card_speed_ms"), WindSpeedMps);
+			Wind->SetNumberField(TEXT("card_from_deg"), WindFromDeg);
+			Wind->SetBoolField(TEXT("set_on_material"), bCardWind);
+			Wind->SetNumberField(TEXT("WindSpeedMS"), bCardWind ? WindSpeedMps : 7.0);
+			Wind->SetNumberField(TEXT("WindDirX"), bCardWind ? DownwindX : 1.0);
+			Wind->SetNumberField(TEXT("WindDirY"), bCardWind ? DownwindY : 0.3);
+			Wind->SetStringField(TEXT("basis"), bCardWind
+				? TEXT("the card's steady surface wind (wind_speed_kt x 1852/3600, wind_direction_deg FROM): "
+				       "WindSpeedMS and the downwind WindDirX/Y = -(sin from, cos from), engine X east / Y north, "
+				       "set on the cap's material instance only")
+				: (bOceanBeauty
+					? TEXT("still air on the card (or no wind stated): the material's own 7 m/s trade-wind "
+					       "defaults kept, the sea drawn as before")
+					: TEXT("M_Ground_Ocean has no sea-state parameters")));
+			Wind->SetStringField(TEXT("storm_ramp"),
+				TEXT("storm = smoothstep(8, 18, WindSpeedMS) in the ocean shaders (Beaufort 5 to 8): 0 at 7 m/s (UNCALIBRATED)"));
+			Sea->SetObjectField(TEXT("wind"), Wind);
+		}
 		Sea->SetNumberField(TEXT("lift_m"), LiftM);
 		Sea->SetBoolField(TEXT("low_pass"), bLowPass);
 		Sea->SetNumberField(TEXT("low_pass_agl_m"), SeaLowPassAglM);
@@ -1039,7 +1083,8 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 			: TEXT("the material's own (roughness 0.04, specular 0.5): screen-space reflections and the sky "
 			       "light, both drawn on D3D11 / SM5 without Lumen"));
 		Sea->SetStringField(TEXT("not_claimed"),
-			TEXT("the sea state of the card (the waves are the material's stated 7 m/s sea), tides"));
+			TEXT("tides; the sea's fetch and duration (the card's wind alone sets the sea state, and only on the "
+			     "beauty cap: no label or measure pass draws it)"));
 	}
 	return Out;
 }

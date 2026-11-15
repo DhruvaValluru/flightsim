@@ -241,7 +241,10 @@ def test_the_plan_carries_blue_correction_and_the_host_applies_it():
     tonemap = bl.plan_beauty_look(8.0, fps=30, width_px=1920)["tonemap"]
     assert tonemap["BlueCorrection"] == bl.TONEMAP_HUE["BlueCorrection"] == 1.0
     assert "ExpandGamut" not in tonemap                 # the engine's 1.0 stays
-    assert {k: tonemap[k] for k in bl.TONEMAP} == bl.TONEMAP
+    # hyperreal-grade: the camera's shoulder (TONEMAP_CAMERA) lies over the engine's defaults.
+    assert {k: tonemap[k] for k in bl.TONEMAP} == {**bl.TONEMAP, **bl.TONEMAP_CAMERA}
+    assert {k: tonemap[k] for k in bl.TONEMAP if k not in bl.TONEMAP_CAMERA} == \
+        {k: v for k, v in bl.TONEMAP.items() if k not in bl.TONEMAP_CAMERA}
     assert "FLIGHTSIM_BEAUTY_FLOAT(Tonemap, BlueCorrection)" in LOOK_CPP
     assert "TONEMAP_HUE" in bl.UNCALIBRATED
 

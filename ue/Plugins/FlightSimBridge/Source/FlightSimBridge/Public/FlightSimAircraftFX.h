@@ -95,6 +95,15 @@ struct FFlightSimAircraftFXOptions
 	// scratches, 128x64 strip). A slot on its thin instance keeps it.
 	bool bCanopyReflect = false;
 	int32 CanopyReflectTier = 0;
+	// The airframe's sky reflection (scripts/aircraft_paint_reflect.py; item
+	// "aircraft", 2026-11-14): the paint and bare-metal masters (generation 13)
+	// mirror the canopy lane's baked sky strip on Emissive, Fresnel x gloss, so
+	// a coated livery and a WET matte panel read as metal under a sky instead
+	// of grey plastic (the laptop has no SSR, Lumen or reflection capture). ON
+	// by default; -paint-reflect=off is the A/B: the MIDs keep the masters'
+	// PaintEnvGain 0 and add exactly nothing. Emissive only: no label pass
+	// (ID, depth, stencil, SCS_Normal, SCS_BaseColor) reads it.
+	bool bPaintReflect = true;
 	// The look's X-Plane horizon colour (-xplane-horizon=R:G:B, sRGB8) when the
 	// render carries it: the strip's hue follows it. And -xplane-condition=.
 	bool bHorizonKnown = false;
@@ -293,6 +302,11 @@ private:
 	double ReflectCover = 0.0;
 	bool bReflectInterior = false;
 	TSharedPtr<FJsonObject> ReflectRow;
+	// The airframe's sky reflection: the paint / bare-metal MIDs whose master
+	// carries PaintEnvGain (also in LookMids), and render.json's
+	// aircraft_look.materials.paint_reflect. The same sun gain as the canopy.
+	TArray<UMaterialInstanceDynamic*> PaintReflectMids;
+	TSharedPtr<FJsonObject> PaintReflectRow;
 	// cockpit-airframe (round 2): mesh manifest beauty_parts, measured part name
 	// -> its beauty-only copy's asset name (body -> body_beauty: the same
 	// triangles with the .ac crease normals and two-sided back faces).

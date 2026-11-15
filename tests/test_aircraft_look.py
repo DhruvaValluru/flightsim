@@ -205,8 +205,9 @@ def test_every_look_constant_says_it_is_uncalibrated_and_names_its_probe(tmp_pat
     groups = manifest["constants"]
     # "wet": the wet-airframe-canopy module (scripts/aircraft_wet_layer.py WET_DEFAULTS);
     # "condensation": the condensation-solver module.
+    # "paint_reflect": the airframe's sky reflection (scripts/aircraft_paint_reflect.py DEFAULTS).
     assert set(groups) == {"lights", "contrail", "vapour", "afterburner", "heat_haze", "wet",
-                           "condensation"}
+                           "condensation", "paint_reflect"}
     for group in groups.values():
         for entry in group.values():
             assert entry["calibration"] == look.UNCALIBRATED
