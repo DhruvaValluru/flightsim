@@ -124,7 +124,7 @@ REPO = os.path.dirname(_HERE)
 #: and the host's ground (the sky light's lower hemisphere through the air below
 #: the aircraft) beneath it, instead of the coastal strip (scripts/aircraft_scene_sky.py,
 #: scene_sky_dir / scene_sky_env.hlsl). <Prefix>EnvSceneScale 0 in the master:
-#: the strip exactly as generation 13 until the host sets it (-reflect-scene-sky=on).
+#: the strip exactly as generation 13 until the host sets it (-scene-mirror=on).
 #: Emissive only. Every other graph is unchanged.
 LOOK_GENERATION = "14"
 #: Round 25: every paint / bare-metal master carries this scalar (default

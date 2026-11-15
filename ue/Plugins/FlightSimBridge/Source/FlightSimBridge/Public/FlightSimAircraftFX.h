@@ -111,7 +111,7 @@ struct FFlightSimAircraftFXOptions
 	// View LUT along the reflected ray) above the horizon and the scene's
 	// ground (the sky light's lower hemisphere x its colour and intensity,
 	// through the air under the aircraft) below it, instead of the coastal
-	// lane's baked noon-over-sea strip. ON by default; -reflect-scene-sky=off
+	// lane's baked noon-over-sea strip. ON by default; -scene-mirror=off
 	// leaves <Prefix>EnvSceneScale at the masters' 0 and draws generation 13's
 	// strip exactly. Emissive only: no label pass reads it.
 	bool bReflectSceneSky = true;

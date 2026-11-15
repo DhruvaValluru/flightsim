@@ -83,4 +83,13 @@ def test_hlsl_and_host_constants_match_the_twin():
     assert "6.2831853" in DIR
     assert re.search(r"AircraftFxSceneSkyShare = 0\.10 / 0\.2;", FX)
     assert re.search(r"AircraftFxSceneOvercastShare = 1\.0 - 0\.75;", FX)
-    assert 'TEXT("reflect-scene-sky="), true' in FX
+    assert 'TEXT("scene-mirror="), true' in FX
+
+
+def test_switch_key_is_not_read_as_another_switch():
+    # FParse::Value matches a key anywhere in the argument string: the first
+    # name, -reflect-scene-sky=off, was read as the sky plan (-sky=) "off".
+    keys = set(re.findall(r'TEXT\("-?([A-Za-z0-9_.-]+=)"\)', "".join(
+        p.read_text(errors="ignore") for p in (ROOT / "ue/Plugins/FlightSimBridge/Source").rglob("*.cpp"))))
+    assert ss.SWITCH_KEY == "scene-mirror="
+    assert not [k for k in keys if k != ss.SWITCH_KEY and ss.SWITCH_KEY.endswith(k)]

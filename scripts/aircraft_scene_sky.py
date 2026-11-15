@@ -12,7 +12,7 @@ colour is a constant, not the scene. A real airframe mirrors what is around
 it: an orange horizon at sunset, a grey deck under a storm, green-brown
 farmland under the belly.
 
-What this adds (switch ``-reflect-scene-sky=``, ON by default; ``off`` keeps
+What this adds (switch ``-scene-mirror=``, ON by default; ``off`` keeps
 generation 13's strip exactly, the A/B):
 
 * ABOVE the horizon the mirror reads the scene's own SkyAtmosphere along the
@@ -68,9 +68,9 @@ import math
 UNCALIBRATED = "UNCALIBRATED: set by probe render on the render machine"
 
 #: The host's switch (FFlightSimAircraftFXOptions::ParseParams; one of
-#: aircraft_look.FX_SWITCHES): on by default, -reflect-scene-sky=off draws
+#: aircraft_look.FX_SWITCHES): on by default, -scene-mirror=off draws
 #: generation 13's strip on the paint, bare metal and canopy.
-SWITCH_KEY = "reflect-scene-sky="
+SWITCH_KEY = "scene-mirror="
 SWITCH_DEFAULT = True
 
 #: The two Custom-node bodies (assets/shaders/aircraft/<name>.hlsl), merged
@@ -135,7 +135,7 @@ def parameters(prefix):
 
 
 def parse_scene_sky(params):
-    """Twin of the host's switch: True unless -reflect-scene-sky=off (or -aircraft-look=off)."""
+    """Twin of the host's switch: True unless -scene-mirror=off (or -aircraft-look=off)."""
     import aircraft_look as look
     return look.parse_fx_switches(params)[SWITCH_KEY[:-1]]
 
@@ -172,7 +172,7 @@ def scene_scale(enabled, interior=False):
     return SCENE_SHARE if enabled and not interior else 0.0
 
 
-# -- numpy-free twins of the shader bodies (tests/test_reflect_scene_sky.py) ---
+# -- numpy-free twins of the shader bodies (tests/test_aircraft_scene_sky.py) ---
 
 def sky_dir(env_uv, sun_dir):
     """Twin of scene_sky_dir.hlsl: the reflected ray back from the strip uv."""

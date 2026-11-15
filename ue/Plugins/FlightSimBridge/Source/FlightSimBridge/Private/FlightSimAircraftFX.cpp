@@ -403,7 +403,7 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	// The airframe's sky reflection: on unless asked off by name (the A/B).
 	const bool bPaintReflectSwitch = AircraftFxSwitch(Params, TEXT("paint-reflect="), true, SwitchError);
 	// LOOK_GENERATION 14: those mirrors read the scene's sky and ground; off is the A/B (the strip).
-	const bool bSceneSkySwitch = AircraftFxSwitch(Params, TEXT("reflect-scene-sky="), true, SwitchError);
+	const bool bSceneSkySwitch = AircraftFxSwitch(Params, TEXT("scene-mirror="), true, SwitchError);
 	bMaterials = bAll && bMaterialsSwitch;
 	bLights = bAll && bLightsSwitch;
 	bContrails = bAll && bContrailsSwitch;
@@ -1419,8 +1419,8 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	// LOOK_GENERATION 14's record (the ground, tau and scale fields are written
 	// by UpdateCanopyReflect each step).
 	SceneSkyRow->SetStringField(TEXT("switch"), Options.bReflectSceneSky
-		? TEXT("on (the default; -reflect-scene-sky=off draws generation 13's strip)")
-		: TEXT("off (-reflect-scene-sky=off: the coastal strip)"));
+		? TEXT("on (the default; -scene-mirror=off draws generation 13's strip)")
+		: TEXT("off (-scene-mirror=off: the coastal strip)"));
 	SceneSkyRow->SetBoolField(TEXT("active"), bSceneSky);
 	SceneSkyRow->SetNumberField(TEXT("slots_stale_master"), SceneSkyStale);
 	SceneSkyRow->SetStringField(TEXT("rule"), TEXT("above the horizon: SkyAtmosphereViewLuminance(reflect(V, N)) ")
