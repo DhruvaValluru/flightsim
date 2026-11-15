@@ -58,6 +58,7 @@
 #include "FlightSimScenarioWorld.h"
 #include "FlightSimSky.h"
 #include "FlightSimVisualScene.h"
+#include "FlightSimAircraftFX.h"  // lane aircraft-refl: the commandlet's airframe look
 #include "FlightSimWeather.h"
 
 // FlightSimRenderCommandlet.cpp: the commandlet's own BuildMeshAirframe.
@@ -82,6 +83,7 @@ namespace
 		TUniquePtr<FFlightSimImpostorClouds> Impostors;
 		TUniquePtr<FFlightSimGoogleTiles> Tiles;
 		TUniquePtr<FFlightSimWorldBeauty> WorldBeauty;
+		TUniquePtr<FFlightSimAircraftFX> AircraftFX;
 		TWeakObjectPtr<AGeoReferencingSystem> GeoReferencing;
 		TWeakObjectPtr<AActor> Aircraft;
 		TWeakObjectPtr<ASceneCapture2D> Camera;
@@ -150,6 +152,7 @@ namespace
 		(void)S.Weather.Release();
 		(void)S.Impostors.Release();
 		(void)S.Tiles.Release();
+		(void)S.AircraftFX.Release();
 		if (S.WorldBeauty.IsValid()) { S.WorldBeauty->RestoreCvars(); }
 		(void)S.WorldBeauty.Release();
 		S.WorldBeauty = MakeUnique<FFlightSimWorldBeauty>();
@@ -516,6 +519,30 @@ namespace
 		ImpostorOptions.AircraftCm = AircraftLocation;
 		ImpostorOptions.Seed = static_cast<int32>(S.Card.TurbulenceSeed & 0x7FFFFFFF);
 		if (!S.Impostors->Build(World, ImpostorOptions, Error)) { return false; }
+
+		// The airframe look (FFlightSimAircraftFX, as the commandlet builds it for
+		// a beauty render): the look masters on every slot and their reflections.
+		// No Advance (no FDM): lights, contrails and surfaces stay at rest.
+		// -lookdev-aircraft-fx=off keeps the import's own materials (the old harness).
+		FString LookDevFx = TEXT("on");
+		FParse::Value(*P, TEXT("lookdev-aircraft-fx="), LookDevFx);
+		if (LookDevFx != TEXT("off") && !MeshManifest.IsEmpty() && !FParse::Param(*P, TEXT("HideAircraft")))
+		{
+			S.AircraftFX = MakeUnique<FFlightSimAircraftFX>();
+			FFlightSimAircraftFXOptions FxOptions;
+			FxOptions.ParseParams(P);
+			FxOptions.Aircraft = Aircraft;
+			FxOptions.MeshManifestPath = MeshManifest;
+			FxOptions.Livery = S.Card.Livery.IsEmpty() ? TEXT("default") : S.Card.Livery;
+			FxOptions.Weather = S.Weather.Get();
+			FxOptions.CloudLayers = Options.CloudLayers;
+			FxOptions.Sun = S.Visual->Sun;
+			FxOptions.SkyLight = S.Visual->SkyLightComponent;
+			FxOptions.Atmosphere = S.Visual->Atmosphere;
+			if (!S.AircraftFX->Build(World, FxOptions, Error)) { return false; }
+			for (AActor* Actor : S.AircraftFX->BeautyOnlyActors) { Track(Actor); }
+			S.AircraftFX->SetCanopyReflectCamera(false, FString());
+		}
 
 		// The camera: the card's solved pose track (first pose), else the
 		// director preset's resting pose with the -chase= offset.

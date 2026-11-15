@@ -91,5 +91,10 @@ bias), `ApplyBeautyPostProcess` (and so `FFlightSimBeautyLook::Apply`),
   the status (`projected_crs`). A camera thousands of km off, with tiles stuck
   at 0 %, is that symptom.
 - Things it leaves out: the beauty tornado (`BuildBeautyTornado`, scene 10),
-  AircraftFX (contrails and wet airframe), traffic, the stress/probe overrides,
+  AircraftFX's per-step Advance (lights, contrails, surfaces stay at rest),
+  traffic, the stress/probe overrides,
   the shadow shot and `-cloud-cover/-cloud-base` flags.
+- AircraftFX itself is built (lane aircraft-refl): the look masters go on every
+  slot with their paint / canopy reflections, as on a beauty render.
+  `-lookdev-aircraft-fx=off` keeps the import's own materials (the old harness,
+  as in lookdev/base).
