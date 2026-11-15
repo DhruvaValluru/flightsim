@@ -849,6 +849,74 @@ then the full suite in the background with `-n auto`; `bash scripts/check_bridge
 (on the Mac it lints shape; `rp_check` needs the engine source and runs on Windows).
 Report real counts, including failures.
 
+**Built (sky step 7, 2026-11-15): where the code proved this section wrong, or the
+step narrowed it.** Commit `Sky step 7: tests and the suite`.
+- The branch carried steps 0, 2, 3 and 5 when this step was built; steps 1, 4 and 6
+  were being built on their own branches (claude/xplane-sky-step{1,4,6}-{a,b}) and
+  were NOT on claude/xplane-sky. So the step 1/4/6 entries of the "tests that
+  legitimately MOVE" list above did not apply (test_cloud_billow.py 96,
+  test_world_beauty.py 395 and 930, test_distant_clouds.py 115 stand unmoved). Of the
+  rest: test_world_beauty.py 784 (`test_the_cloud_march_and_the_sky_are_the_python_ones`)
+  WAS moved, by step 3 (f36f8ce6: the probe row and the cvar table) and again by step 5
+  (d93a6cec: the fifth row), each with the reason in that commit and the docstring; it
+  is the only pre-existing test whose assertions changed anywhere on the branch
+  (`git diff 560f8e88 HEAD --diff-filter=M --stat -- tests/` names two files: this one,
+  hunks at 784 and 806, and test_webapp.py, which only gained new tests: 98 insertions,
+  0 deletions). The
+  list's prediction for 170 / 629 / 640 was wrong, not fulfilled: those three tests were
+  never edited on the branch and did not need to move, because none of them pins a
+  `CloudCount` literal (170, `test_the_cpp_world_tables_and_laws_are_the_python_ones`,
+  loops `for (int c = 0; c < CloudCount; ++c)` over the FLIGHTSIM-WORLD-PURE block, whose
+  `CloudCount` is now 5, and its Python cases already ran `for p in range(5)` at step 0;
+  629 `test_the_selection_boundaries_are_pinned` and 640 `test_the_layer_cover_law` pin
+  selection thresholds and the layer-cover law, which step 5 left alone). The 4 -> 5
+  count is pinned by tests/test_sky_clouds.py 291 (`"CloudAltocumulus = 4,"` and
+  `"CloudCount = 5"`) and the fifth row by test_world_beauty.py 798
+  (`len(wb.CLOUD_PRESETS) == 5`) and
+  tests/test_sky_clouds.py::test_the_altocumulus_row_exists_on_both_sides, all landed with
+  step 5. The list's prediction for 454 (`test_the_bridge_check_lists_the_world_symbols`)
+  was also not how it went: step 2 (707a1840) added two `sky_check` lines
+  (scripts/check_bridge_api.sh 464-465) and step 3 (f36f8ce6) seventeen
+  `rp_check "sky step 3: ..."` lines (626-642, written with `rp_check` and a value-bearing
+  pattern such as `TEXT(\"r.VolumetricCloud.ViewRaySampleMaxCount\"), 768,` so each line
+  also pins the engine default, rather than the `rp_cvar` wrapper this list named; the
+  script defines both, `rp_check` at 229 and `rp_cvar` at 268, and `rp_cvar` is already used
+  in the same slice at 561 and 616), all inside the `# -- world lane` .. `# -- plugin
+  dependencies` slice (434..1462) that 454 reads. 454 did not move because it asserts only
+  that a fixed symbol list is PRESENT in that slice (additive), and the new lines are pinned
+  elsewhere: the step 2 lines in tests/test_cloud_type.py 383-384 (383 verbatim, 384 by its
+  label and header prefix), the step 3 lines by
+  tests/test_sky_step3_cvars.py::test_the_bridge_check_and_the_docs (every
+  `wb.CLOUD_CVAR_NAMES` value as `TEXT(\"name\")` plus the three Cinematic
+  BaseScalability lines). There is no gap and nothing for step 3's reviewer to chase.
+  Step 7 itself moved nothing, and nothing here pins the wisp, scattering, atmosphere or
+  cirrus code: those pins land with their steps, or in a later pass once they merge.
+- Of the five tests this section lists, four had already landed with their steps
+  (the SKY_VERSION pin and the byte-identity pins in test_sky_clouds.py, the webapp
+  stubs in test_webapp.py, the one-owner cvar test in test_sky_step3_cvars.py); the
+  sky_compare unit test is step 8's. What was missing is in
+  tests/test_sky_step7_suite.py: the "clouds" block as a byte-for-byte GOLDEN (key
+  order included: the web app writes it without sort_keys), the derived seed as a
+  CRC-32 literal and the seed=0 edge, the exposure's independence by source order and
+  by a cover grid, rounding/clamping/purity of the plan, the provider's percent clamp
+  and refusals, the render.json record's exact key set against what Load reads, the
+  web app's conditions line, and the VerifyCloudMaterials expectations (the material
+  is built to pass it, the swap runs before it, a missing material records and keeps
+  the stock one, the check order is the engine's, the report lands in
+  look_applied.cloud_materials).
+- The brief's step 1 asks for `ensure_volumetric_cloud_usage` on the cloud material;
+  on this branch only `M_StormCell` calls it (`create_world_cloud_layers` sets the
+  flag directly and `_world_beauty_material` rebuilds in place by generation stamp),
+  which already satisfies VerifyCloudMaterials for a freshly built asset. Noted here
+  for step 1's builder; not changed in this step (tests only).
+- No code under test changed in this step. The full suite's one failure
+  (tests/test_mutation_targets.py: mutation guard 318 had two targets because step 5's
+  `historical_cloud_cover` repeated the wind's `SYNTHESISED_SCENE_KEYS` line) was caused
+  by step 5 and fixed in step 5's commit (d93a6cec, amended: the new line spelled with a
+  local variable, behaviour unchanged; the test itself untouched). No failure was caused
+  by steps 2 or 3 (counts in VISUAL_FIDELITY_PLAN.md §8 "Sky step 7").
+- UNMEASURED: everything the pins describe; VISUAL_FIDELITY_PLAN.md §8 "Sky step 7".
+
 ## 10. Step 8: the owner's compare
 
 Commit: `Sky step 8: sky_compare_round.ps1, sky_compare.py, docs`.

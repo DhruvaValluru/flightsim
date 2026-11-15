@@ -1029,3 +1029,96 @@ archive records the default, undated and synthesised specs never fetch);
 `tests/test_cloud_type.py` and `tests/test_world_beauty.py` (the altocumulus pins and the
 fifth row, reasons in their docstrings). API: `scripts/check_bridge_api.sh` (no new engine
 symbol).
+
+### Sky step 7 (2026-11-15): tests and the suite
+
+Step 7 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
+docs/visual/XPLANE_SKY_DESIGN.md §9, with the "Built" note there). Tests only: no shader,
+material, C++ or Python-under-test change, so nothing here draws and nothing here was
+rendered.
+
+**What the branch carried.** Steps 0, 2, 3 and 5. Steps 1, 4 and 6 were on their own
+branches and not yet merged into claude/xplane-sky, so their shader / material / atmosphere
+/ cirrus pins are not in this step (they land with those steps), and the design's "tests
+that legitimately move" entries for them did not apply. Step 7 itself moved no test; the
+only existing test moved on the branch is test_world_beauty.py 784
+(`test_the_cloud_march_and_the_sky_are_the_python_ones`), by steps 3 and 5 with the reasons
+in their docstrings (design §9, Built note, which also records why the list's 170 / 629 /
+640 and 454 did not need to move). No test was weakened, skipped or deleted.
+
+**What `tests/test_sky_step7_suite.py` pins** (beyond test_sky_clouds.py, test_cloud_type.py
+and test_sky_step3_cvars.py, which landed with their steps):
+- the plan's "clouds" block as a GOLDEN, byte for byte and in key order (the web app
+  writes `json.dumps(plan, indent=1)` without `sort_keys`, so the order is part of
+  `sky.json`), for one covered dated input and for the undated default (round 95's frame
+  by construction); ASCII-clean;
+- the derived seed as a CRC-32 literal (864852549 for the pinned inputs), the 6-decimal /
+  0.1 m quantisation, `seed=0` recorded as the spec's seed, a float seed stored as int;
+- EV100 unchanged by every cloud input: by source order in `core/sky/plan.py` (the
+  exposure dict precedes the clouds block, `plan_cloud_block` takes exactly its nine
+  keywords, `core/sky/clouds.py` never names the exposure) and by value over a grid of
+  covers, notes and seeds; the host records `exposure_sees_plan_clouds: false`;
+- four-place rounding of the cover inputs, the coverage equal to the level that named the
+  type, `total` recorded but never deciding, the caller's dict untouched, a missing level
+  read as 0, NaN or a non-number refused;
+- the ERA5 provider: percent outside 0..100 clamped, a negative hour and a missing hourly
+  field refused by name (`WeatherUnavailableError`), the dict carrying every key the plan
+  reads plus `source` / `date` / `hour_utc`, the field order the archive is asked for;
+- render.json: every "clouds" key `FFlightSimSkyPlan::Load` reads is recorded by
+  `ApplyClouds` under `look_applied.world_beauty.clouds.plan`, whose key set is exactly
+  `fields_source, cloud_type, cloud_type_known, coverage, density, detail, cirrus_coverage,
+  coverage_source, seed, seed_stated, march_tier, card_seed, seed_matches_card,
+  cloud_type_switch, precedence, owner_parameters, exposure_sees_plan_clouds, measure_path,
+  calibration`; the web app's `run.conditions["sky"]` names the type, cover and source and
+  `write_sky_plan` passes the spec's seed and the fetched cover;
+- `FFlightSimWeather::VerifyCloudMaterials`: `M_FlightSimCloudLayers` is built to pass it
+  (MD_VOLUME, `used_with_volumetric_cloud`, additive, the multiple-scattering node) at the
+  path the host loads; the commandlet runs the check AFTER `WorldBeauty.Build` (it sees the
+  swapped material) and before the warm-up captures, records every line under
+  `look_applied.cloud_materials` and refuses by name (`clouds.material`) on a bad material;
+  the interactive host runs it before its first frame; a MISSING beauty material is not a
+  refusal: `ApplyClouds` keeps the stock material, records "did not load" and returns before
+  any `SetMaterial`; the check's order is the engine's (no material = draws nothing; Volume
+  domain; usage flag; compile errors; shader map).
+
+**Suite results on the Mac (code-level only; never a visual result).** Targeted set
+first (test_sky_clouds, test_cloud_type, test_sky_step3_cvars, test_world_beauty, test_sky,
+test_cloud_billow, test_cloud_tiers, test_distant_clouds, test_cloud_jitter_blue_noise,
+test_cpp_brace_balance, test_render_json_contract, test_ue_weather_source,
+test_check_bridge_api): 341 passed. Full suite, `-n auto`, first run: 1 failed
+(`tests/test_mutation_targets.py`: step 5's `historical_cloud_cover` repeated the wind's
+line `if pick_scene(spec)["key"] in SYNTHESISED_SCENE_KEYS:`, so mutation guard 318 had two
+targets; fixed in step 5's commit by spelling the new line with a local, behaviour
+unchanged). Full suite after the fix: 5831 passed, 14 skipped, 0 failed (7 min 03 s);
+re-run on the committed tree after the repair-2 amend: 5831 passed, 14 skipped, 0 failed
+(7 min 05 s, exit 0), with
+`python -m pytest -q -o addopts="" -m "not gate" -p no:cacheprovider -W ignore -n auto tests/`.
+That `-o addopts=""` matters: pytest.ini already carries `-q -m "not gate"`, so the plain
+`-q` command runs at `-qq` and prints only dots, no `N passed` line; two reviewers counting
+that dot stream on the same tree reported 5837 passed / 15 skipped. The passed figure is
+explained by the tree: `-m "not gate"` deselects exactly six tests
+(tests/test_phase3_gates.py::test_gate_A..F; `pytest --collect-only -q -o addopts="" -m "not
+gate" tests/` -> 5844/5850 collected, 6 deselected, and `-m gate` -> 6 passed), so 5837 is a
+run WITHOUT the gate filter: `-o addopts=""` drops pytest.ini's filter unless `-m "not gate"`
+is given again, and the full suite re-run that way on this tree prints `5837 passed, 14
+skipped in 429.79s`, exit 0. The skipped figure is not explained: the summary line says 14
+with and without the gate filter, and the one collection-time skip the gate run also reports
+(tests/test_sun_vs_spa.py:15, pvlib not installed) is already inside the 14 under either
+filter, so the reviewers' 15 is a dot-stream count this tree does not reproduce. Use the
+summary-line figure (5831 / 14 with the project's gate filter, 5837 / 14 without it).
+`bash scripts/check_bridge_api.sh`: API surface matches (it is not a
+compile). No existing test was weakened, skipped or deleted.
+
+**UNMEASURED.** Every pin above is a source or Python pin; none says what a frame looks
+like. The Windows commands that would measure the steps these tests guard are the ones in
+"Sky step 2", "Sky step 3" and "Sky step 5" above, with `FLIGHTSIM_SKY=physical` in the
+shell. Step 7 adds NO round of its own: the plan path end to end is read off step 5's
+round 104 (the same command as in "Sky step 5", repeated here so the reader does not have
+to scroll; render it once, not twice):
+
+    .\scripts\visual_fix_round.ps1 -Round 104 -Scenes 3 -Switches "-cloud-type=altocumulus" -CompareWith 98
+
+then, in that round's output, read `sky.json` `clouds` (it must equal the golden's shape:
+the same keys in the same order), `look_applied.world_beauty.clouds.plan` (the nineteen
+keys above) and `look_applied.cloud_materials` (one line per cloud component, each ending
+`compiled`). If round 104 has already run for step 5, read these from its existing output.
