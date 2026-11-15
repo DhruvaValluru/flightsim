@@ -52,6 +52,14 @@ def test_every_aircraft_config_has_a_look_config_and_each_validates():
     ({"surprise": 1}, "unknown keys"),
     ({"slot_rules": [{"match": "rgb_.*", "class": "paint"}]}, "no source"),
     ({"slot_rules": [{"match": "(", "class": "paint", "source": "s"}]}, "bad regex"),
+    ({"slot_rules": [{"match": "mat_x", "class": "paint", "source": "s",
+                      "scalars": {"Shininess": 1.0}}]}, "not a parameter"),
+    ({"slot_rules": [{"match": "mat_x", "class": "paint", "source": "s",
+                      "vectors": {"Nozzle0": [0, 0, 0, 0]}}]}, "nozzles"),
+    ({"slot_rules": [{"match": "mat_x", "class": "paint", "source": "s",
+                      "scalars": {"ClearCoat": "off"}}]}, "must be a number"),
+    ({"slot_rules": [{"match": "mat_x", "class": "paint", "source": "s",
+                      "vectors": {"PanelPitchCm": [1, 2]}}]}, "four numbers"),
     ({"class_scalars": {"paint": {"Shininess": 1.0}}}, "not a parameter"),
     ({"lights": [{"id": "a", "kind": "laser", "anchor": "mesh_extreme", "axis": "-y"}]}, "kind"),
     ({"lights": [{"id": "a", "kind": "strobe", "anchor": "mesh_extreme", "axis": "up"}]}, "axis"),
@@ -100,6 +108,51 @@ def test_slots_take_the_config_rule_then_glass_by_dissolve_then_rubber_then_defa
     assert plan["mat_BOE"]["class"] == "paint"
     assert plan["mat_BOE"]["master"] == "/Game/FlightSim/Aircraft/M_AircraftPaint"
     assert plan["mat_BOE"]["instance"] == "MI_mat_BOE"
+
+
+def test_a_slot_rules_own_scalars_and_vectors_reach_only_its_slots():
+    """Hyperreal cockpit (2026-11-15): a rule may carry parameters of its class
+    master, applied over the class-wide class_scalars to the slots it matches."""
+    config = {"default_class": "paint",
+              "class_scalars": {"paint": {"Roughness": 0.35, "ClearCoat": 1.0}},
+              "slot_rules": [{"match": "mat_BOE", "class": "paint", "source": "s",
+                              "scalars": {"ClearCoat": 0.0, "PanelDepth": 0.0},
+                              "vectors": {"PanelPitchCm": [1.0, 2.0, 3.0, 0.0]}}]}
+    look.validate({"schema": look.LOOK_SCHEMA, "name": "X", **config})
+    plan = look.plan_slots(look.parse_mtl(MTL), config)
+    assert plan["mat_BOE"]["scalars"]["ClearCoat"] == 0.0
+    assert plan["mat_BOE"]["scalars"]["PanelDepth"] == 0.0
+    assert plan["mat_BOE"]["scalars"]["Roughness"] == 0.35          # the class-wide choice stays
+    assert plan["mat_BOE"]["vectors"]["PanelPitchCm"] == (1.0, 2.0, 3.0, 0.0)
+    assert plan["rgb_c0c0c0"]["scalars"]["ClearCoat"] == 1.0        # an unmatched paint slot
+    assert plan["rgb_c0c0c0"]["vectors"]["PanelPitchCm"] == look.CLASS_VECTORS["paint"]["PanelPitchCm"]
+    assert plan["mat_BOE"]["master"] == plan["rgb_c0c0c0"]["master"]   # the same master, no new graph
+
+
+def test_the_c172p_cabin_is_matte_uncoated_paint_and_the_skin_is_not():
+    """Scene 12's dials read dark and flat under the livery's clear coat, panel
+    grooves, wear and grime (default_class paint). One rule names every cabin
+    texture the interior parts reference (convert.py's mat_<stem> slots) and
+    turns each of those off; the airframe's own textures keep the livery look."""
+    config = look.load_config("c172p")
+    rule = config["slot_rules"][0]
+    assert rule["class"] == "paint" and "UNCALIBRATED" in rule["source"]
+    cabin = ("mat_panel", "mat_panel_parts", "mat_interior", "mat_mag_compass",
+             "mat_compass_correction_card", "mat_asi", "mat_AI", "mat_alt", "mat_tc", "mat_hi",
+             "mat_VSI", "mat_kx165", "mat_fuel_oil", "mat_clock_display")
+    for slot in cabin:
+        assert re.fullmatch(rule["match"], slot), slot
+    for slot in ("mat_fuselage", "mat_wing", "mat_tail", "mat_glass_alpha", "rgb_000000"):
+        assert not re.fullmatch(rule["match"], slot), slot
+    for name in ("ClearCoat", "PanelDepth", "PanelDarkening", "PanelNormalAmount", "PanelAoAmount",
+                 "WearAmount", "GrimeAmount", "SootAmount", "RoughnessBreakup"):
+        assert rule["scalars"][name] == 0.0, name
+    # the instruments' Phong shi 12, through the fg_material formula
+    assert rule["scalars"]["Roughness"] == round(look.roughness_from_shininess(12), 2)
+    mtl = "newmtl mat_asi\nKd 0.8 0.8 0.8\nmap_Kd asi.png\n\nnewmtl mat_fuselage\nKd 0.8 0.8 0.8\nmap_Kd fuselage.png\n"
+    plan = look.plan_slots(look.parse_mtl(mtl), config)
+    assert plan["mat_asi"]["scalars"]["ClearCoat"] == 0.0 and plan["mat_asi"]["class"] == "paint"
+    assert plan["mat_fuselage"]["scalars"]["ClearCoat"] == 1.0   # the livery keeps its coat
 
 
 def test_the_look_instance_keeps_the_imported_materials_texture_wiring():

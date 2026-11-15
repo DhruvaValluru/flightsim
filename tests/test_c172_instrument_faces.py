@@ -48,3 +48,20 @@ def test_instrument_glass_is_left_out():
                        ("digital-clock/digital-clock.ac", "glass_panel")):
         assert any(re.fullmatch(p, name) for p in excluded[part]), (part, name)
     assert any(re.fullmatch(p, "COM1Up") for p in excluded["kma20/kma20.ac"])
+
+
+def test_the_compass_pop_up_card_is_left_out_and_the_compass_stays_on_its_mount():
+    """Hyperreal cockpit (2026-11-15, scene 12): a white card over the glareshield
+    with the compass 'floating' in front of it. mag-compass.ac's Deviation-Card is
+    the reading copy of the correction card (18 x 8.5 cm, upright, right of the
+    compass) that mag-compass.xml draws only under a <select> the pilot toggles by
+    clicking the Deviation tab; the converter has no select animation. The compass
+    casing itself rests on the glareshield at the windscreen base in the pinned
+    model (Panel_0's aft edge z 0.219, the casing's base z 0.211..0.219), so it is
+    not moved: no offset_m (the row test above) and the small Deviation tab stays."""
+    row = next(p for p in _instrument_rows() if p["file"].endswith("mag-compass/mag-compass.ac"))
+    excluded = row["exclude"]
+    assert any(re.fullmatch(p, "Deviation-Card") for p in excluded)
+    for kept in ("Deviation", "Casing", "Ring", "Needle", "Interior"):
+        assert not any(re.fullmatch(p, kept) for p in excluded), kept
+    assert "select" in row["source"] and "Panel_0" in row["source"]

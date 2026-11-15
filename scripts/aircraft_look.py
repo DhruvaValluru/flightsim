@@ -333,7 +333,9 @@ def classify_slot(name, material, config):
 def classify_slot_rule(name, material, config):
     """:func:`classify_slot` plus the matching slot rule itself (None when a
     built-in rule classified the slot): a rule may carry per-slot choices
-    such as ``metal``."""
+    such as ``metal``, or ``scalars`` / ``vectors`` of its class master
+    (hyperreal cockpit, 2026-11-15: the C172's cabin slots are paint with
+    no clear coat, grooves, wear, grime or soot)."""
     for rule in config.get("slot_rules", []):
         if re.fullmatch(rule["match"], name):
             return rule["class"], f"slot_rules {rule['match']!r}", rule
@@ -387,7 +389,8 @@ def texture_asset_name(file_name):
 #
 # Precedence, least to most specific: the master's default, the config's
 # class_scalars (a class-wide look choice), the derived per-slot value (a
-# fact about this slot's own source material). Every derived value is a
+# fact about this slot's own source material), then a matching slot rule's
+# own scalars / vectors (an explicit per-slot look choice). Every derived value is a
 # formula applied to an artist's Phong number: UNCALIBRATED as a look.
 
 FG_DERIVABLE = ("Roughness", "Specular")
@@ -465,6 +468,12 @@ def plan_slots(materials, config, sources=None):
         if metal:
             # a bare_metal rule naming its metal: the measured F0 of that metal
             vectors["MetalF0"] = (*METALS[metal], 1.0)
+        # A slot rule's own scalars / vectors (validate() holds them to the
+        # class master's parameters): the most specific look choice, over the
+        # class-wide one and the derived value -- a cockpit dial is paint, but
+        # not the livery's coated, grooved, grimed paint.
+        scalars.update({k: float(v) for k, v in (matched or {}).get("scalars", {}).items()})
+        vectors.update({k: tuple(v) for k, v in (matched or {}).get("vectors", {}).items()})
         if material.get("map_kd"):
             texture = texture_asset_name(material["map_kd"])
             base, weight = (1.0, 1.0, 1.0, 1.0), 1.0
@@ -608,6 +617,26 @@ def validate(config, path="look config"):
             if rule["metal"] not in METALS:
                 problems.append(f"slot rule {rule.get('match')!r}: metal {rule['metal']!r} not in "
                                 f"{sorted(METALS)}")
+        if rule.get("class") in CLASS_MASTERS:
+            cls = rule["class"]
+            allowed = set(CLASS_SCALARS[cls]) | set(CLASS_VECTORS[cls])
+            for kind, size in (("scalars", None), ("vectors", 4)):
+                values = rule.get(kind, {})
+                if not isinstance(values, dict):
+                    problems.append(f"slot rule {rule.get('match')!r}: {kind} must be a mapping")
+                    continue
+                for name, value in values.items():
+                    if name not in allowed:
+                        problems.append(f"slot rule {rule.get('match')!r}: {name} is not a parameter "
+                                        f"of {CLASS_MASTERS[cls]}")
+                    elif name in SOOT_NOZZLE_PARAMETERS:
+                        problems.append(f"slot rule {rule.get('match')!r}: {name} is set from the "
+                                        f"manifest's nozzles, not the config")
+                    elif size is None and not isinstance(value, (int, float)):
+                        problems.append(f"slot rule {rule.get('match')!r}: {name} must be a number")
+                    elif size is not None and not (isinstance(value, (list, tuple)) and len(value) == size
+                                                   and all(isinstance(c, (int, float)) for c in value)):
+                        problems.append(f"slot rule {rule.get('match')!r}: {name} must be four numbers")
     for cls, values in list(config.get("class_scalars", {}).items()) + list(
             config.get("class_vectors", {}).items()):
         if cls == THIN_CLASS:

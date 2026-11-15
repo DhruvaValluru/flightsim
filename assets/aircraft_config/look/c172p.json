@@ -3,7 +3,25 @@
   "name": "c172p",
   "default_class": "paint",
   "note": "Beauty-only look (scripts/aircraft_look.py). Lights sit on the body mesh's measured extremes (wingtips at -y/+y, tail at -x), nudged inward by offset_m (actor metres) so the bulb touches the skin; every class parameter not stated here is the master default; every number here is UNCALIBRATED: set by probe render on the render machine. Smaller panels (light aircraft). Round 5 L4 (2026-11-10, physically calibrated materials): paint Metallic is 0 (a dielectric under a clear coat; the master's default now), a polyurethane-finished light aircraft takes the full clear coat (1.0, coat roughness 0.08). UNCALIBRATED.",
-  "slot_rules": [],
+  "slot_rules": [
+    {
+      "match": "mat_(panel|panel_parts|interior|fuel_selector|mag_compass|compass_correction_card|AI|BatteryGauge|EGT|RPM|VSI|adf|alt|asi|clock|clock_display|clock_tex|dme|fuel_oil|hi|hobbs|kap140|kma20|kr87|kt76a|kx165|magneto_switch|tc|vac|vor)",
+      "class": "paint",
+      "scalars": {
+        "ClearCoat": 0.0,
+        "Roughness": 0.61,
+        "RoughnessBreakup": 0.0,
+        "PanelDepth": 0.0,
+        "PanelDarkening": 0.0,
+        "PanelNormalAmount": 0.0,
+        "PanelAoAmount": 0.0,
+        "WearAmount": 0.0,
+        "GrimeAmount": 0.0,
+        "SootAmount": 0.0
+      },
+      "source": "hyperreal cockpit (2026-11-15, scene 12): the cabin slots -- c172p-interior.ac and the 26 instrument faces (beauty_only parts of assets/aircraft_config/c172p.json), plus the glareshield, panel board, seat mounts and glovebox that c172-common.ac draws on the same panel / panel_parts / interior textures -- fell to default_class paint: the livery's clear coat (1.0, coat roughness 0.08), panel-line grooves at 60/50/30 cm, wear, grime and soot on the gauge faces, which read dark and flat. Every number is a slot-level look choice applied on top of the paint class (scripts/aircraft_look.py slot rule scalars): no clear coat (a printed dial, a crackle-painted board, vinyl and carpet have none), no grooves, no wear, no grime, no soot, no roughness breakup; Roughness 0.61 is roughness_from_shininess(12), the pinned .ac materials' shi 12 on every instrument (mag-compass.ac MATERIAL lines) -- the same formula fg_material would apply. The slot names are the converter's mat_<texture stem> (assets_pipeline/convert.py material_key) for every texture the interior parts reference at a15d83d1; an exterior texture (fuselage, wing, tail, glass-alpha) does not match. UNCALIBRATED: set by probe render on the render machine."
+    }
+  ],
   "class_scalars": {
     "paint": {
       "Roughness": 0.35,
