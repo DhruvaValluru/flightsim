@@ -78,6 +78,30 @@
 //     of bubbles under an overcast) by storm;
 //   * the glint's width and the Smith shadowing already widen with the Cox-Munk
 //     variance at the higher wind (no new term).
+// Generation 6 (hyperreal sea, 2026-11-15), behind HyperSea (1 = on; the render
+// switch -ocean-hyper=0 sets 0 on the cap's instance and draws generation 5 to the
+// bit: every term below is lerp(old, new, hyper) or hyper x new, and the old swell
+// is still evaluated when hyper < 1):
+//   * the swell becomes a spectrum (HyperWaves): the wind sea at the
+//     Pierson-Moskowitz (1964) peak, Lp = 2 pi g / wp^2 with wp = 0.877 g / U
+//     -> Lp = 0.8327 U^2 m (40.8 m at 7 m/s), with components at 0.7 and 0.5 Lp
+//     whose steepness ka = (0.038, 0.048, 0.051) is the PM spectrum's shape
+//     normalised to the fully developed Hs = 0.21 U^2 / g (so Hs / Lp = 0.0257 at
+//     any wind), plus one 12 s swell (L = g T^2 / 2 pi = 225 m, H 2 m -> ka 0.028)
+//     0.6 rad off the wind; drawn as Gerstner (trochoid, Q = 1) normals: the
+//     slope over 1 - Q sum(ka sin phase), so crests are sharp and troughs broad;
+//   * the glint (emissive) is anisotropic per Cox & Munk (1954), clean surface:
+//     upwind s_u^2 = 3.16e-3 U, crosswind s_c^2 = 0.003 + 1.92e-3 U, so the glint
+//     path stretches along the wind; the resolved waves' slope variance is taken
+//     out of the unresolved width (no double count);
+//   * no whitecaps below 3-4 m/s (Monahan & O'Muircheartaigh 1980 fit; the onset
+//     Callaghan et al. 2008 measured at 3.7 m/s): crestFoam x smoothstep(3, 4, U);
+//   * turquoise light through sun-lit, resolved crests (emissive): the sun x
+//     SSS_RGB = exp(-a x 1.5 m), a = (0.340, 0.0565, 0.0092) /m at 650 / 550 /
+//     450 nm (Pope & Fry 1997), x SSS_SHARE, forward-weighted toward the sun;
+//   * Fresnel reaches grazing: the n.v floor drops from 0.05 (Schlick 0.78) to
+//     0.01 (0.95), water F0 0.02 at normal incidence.
+// UNCALIBRATED: SSS_SHARE (set on the Mac look-dev, to be checked on Windows).
 // UNCALIBRATED: every generation-5 amount (no frame rendered yet); set by probe
 // render on the render machine.
 //
@@ -92,6 +116,7 @@
 //   WindSpeedMS     float      the sea state's wind, m/s (Cox-Munk; Monahan's whitecaps; generation 5: the card's surface wind)
 //   WindDirX        float      the downwind direction, world x ...
 //   WindDirY        float      ... and y (normalised here)
+//   HyperSea        float      1 = generation 6 (hyperreal sea), 0 = generation 5 exactly
 //   OceanN          Texture2D  assets/terrain_detail/ocean/ocean_normal_512.png (OpenGL)
 // The deep ocean's body colour (linear; the water-leaving colour of open
 // oligotrophic sea: dark and only a little blue) and the whitecaps' albedo.
@@ -138,6 +163,21 @@ const float PATCH_FADE_START_M = 10000.0;
 const float PATCH_FADE_END_M = 25000.0;
 // The foam's surface drift as a share of the wind.
 const float FOAM_DRIFT_SHARE = 0.03;
+const float HYPER_PEAK_PER_U2 = 0.8327;   // PM peak wavelength / U^2, m s^2 / m^2
+const float HYPER_GERSTNER_Q = 1.0;      // trochoid sharpness (1 = full Gerstner)
+const float HYPER_SWELL_M = 224.8;       // a 12 s swell
+const float HYPER_SWELL_KA = 0.028;      // H 2 m on 225 m
+const float HYPER_SEA_KA_1 = 0.0383;     // the PM components at 1.0, 0.7, 0.5 Lp
+const float HYPER_SEA_KA_2 = 0.0481;
+const float HYPER_SEA_KA_3 = 0.0514;
+const float HYPER_WHITECAP_ONSET_MS = 3.0;
+const float HYPER_WHITECAP_FULL_MS = 4.0;
+const float HYPER_NV_FLOOR = 0.01;
+const float CM_UPWIND_PER_MS = 0.00316;
+const float CM_CROSS_BASE = 0.003;
+const float CM_CROSS_PER_MS = 0.00192;
+const float3 SSS_RGB = float3(0.600, 0.919, 0.986);
+const float SSS_SHARE = 0.01;
 struct FOceanSurface
 {
 	// shared: ocean (ocean_normal.hlsl, ocean_emissive.hlsl, ocean_colour.hlsl)
@@ -209,6 +249,46 @@ struct FOceanSurface
 		return tilt;
 	}
 	// Cox & Munk (1954), clean sea: the total mean-square slope at wind U m/s.
+	// Generation 6: the PM wind sea and one swell as Gerstner normals (spec = (Lp/U^2,
+	// Q, swell m, swell ka), seaKa the three wind-sea steepnesses), each wave drawn
+	// only where the pixel resolves it; height is the resolved crest height in -1..1
+	// and resolvedVar the slope variance the resolved waves carry.
+	float2 HyperWaves(float2 pm, float2 windDir, float timeS, float footprintM, float windMs, float4 spec,
+	                  float3 seaKa, out float height, out float resolvedVar)
+	{
+		float peakM = spec.x * max(windMs, 1.0) * max(windMs, 1.0);
+		float lengths[4] = {spec.z, peakM, 0.7 * peakM, 0.5 * peakM};
+		float kas[4] = {spec.w, seaKa.x, seaKa.y, seaKa.z};
+		float turns[4] = {0.6, 0.0, 0.4, -0.35};
+		float warp = 12.566 * Macro(pm + float2(-211.0, 587.0), 2200.0);
+		float groupA = Macro(pm + float2(613.0, -347.0), 1400.0);
+		float groupB = Macro(pm + float2(-929.0, 151.0), 900.0);
+		float2 slope = float2(0.0, 0.0);
+		float lift = 0.0;
+		float h = 0.0;
+		float hs = 0.0;
+		resolvedVar = 0.0;
+		[unroll] for (int i = 0; i < 4; ++i)
+		{
+			float seen = 1.0 - smoothstep(lengths[i] / 10.0, lengths[i] / 4.0, footprintM);
+			float s, c;
+			sincos(turns[i], s, c);
+			float2 d = float2(c * windDir.x - s * windDir.y, s * windDir.x + c * windDir.y);
+			float k = 6.2831853 / lengths[i];
+			float phase = k * dot(d, pm) - sqrt(9.81 * k) * timeS + warp * (0.5 + 0.25 * i);
+			float envelope = lerp(0.5, 1.5, (i & 1) == 0 ? groupA : groupB);
+			float ka = seen * envelope * kas[i];
+			float sp, cp;
+			sincos(phase, sp, cp);
+			slope -= ka * cp * d;
+			lift += spec.y * ka * sp;
+			h += ka / k * sp;
+			hs += seen * envelope * kas[i] / k;
+			resolvedVar += 0.5 * ka * ka;
+		}
+		height = h / max(hs, 1e-4);
+		return slope / max(1.0 - lift, 0.3);
+	}
 	float SlopeVariance(float windMs)
 	{
 		return 0.003 + 0.00512 * max(windMs, 0.0);
@@ -333,7 +413,19 @@ float2 tilt;
 float variance, crest;
 S.Waves(OceanN, OceanNSampler, p, dpx, dpy, footprintM, TimeS, WindSpeedMS, windDir, tilt, variance, crest);
 float3 up = S.Up(p);   // the sphere's, not the cap's interpolated normal
-tilt += S.Swell(p.xy, windDir, TimeS, footprintM);
+float hyper = saturate(HyperSea);
+float waveHeight = 0.0;
+float hyperVar = 0.0;
+float2 swellTilt = float2(0.0, 0.0);
+[branch] if (hyper < 1.0) { swellTilt = S.Swell(p.xy, windDir, TimeS, footprintM); }
+[branch] if (hyper > 0.0)
+{
+	swellTilt = lerp(swellTilt, S.HyperWaves(p.xy, windDir, TimeS, footprintM, WindSpeedMS,
+	                                         float4(HYPER_PEAK_PER_U2, HYPER_GERSTNER_Q, HYPER_SWELL_M, HYPER_SWELL_KA),
+	                                         float3(HYPER_SEA_KA_1, HYPER_SEA_KA_2, HYPER_SEA_KA_3),
+	                                         waveHeight, hyperVar), hyper);
+}
+tilt += swellTilt;
 float crestKey;
 tilt += S.StormSwell(p.xy, windDir, TimeS, footprintM, storm, crestKey);
 float3 n = normalize(up + float3(tilt, 0.0));
@@ -341,6 +433,7 @@ float3 n = normalize(up + float3(tilt, 0.0));
 // resolved crest measure is Rayleigh-like, so |s| > sqrt(-ln W) covers W.
 float cover = clamp(3.84e-6 * pow(max(WindSpeedMS, 0.0), 3.41), 1e-5, 0.2);
 float crestFoam = smoothstep(sqrt(-log(cover)), sqrt(-log(cover)) + 0.5, crest);
+crestFoam *= lerp(1.0, smoothstep(HYPER_WHITECAP_ONSET_MS, HYPER_WHITECAP_FULL_MS, WindSpeedMS), hyper);
 // Generation 5: the crest foam is the calm sea's (at storm it is texel speckle
 // near and nothing far); it fades out with storm and the storm foam comes in.
 float foam = saturate(crestFoam * (1.0 - storm)
