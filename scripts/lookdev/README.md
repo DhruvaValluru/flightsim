@@ -83,6 +83,13 @@ bias), `ApplyBeautyPostProcess` (and so `FFlightSimBeautyLook::Apply`),
   renders 1920x1080. Supersampling, the TSR still accumulation, motion blur,
   the per-frame sun animation and lightning timing, the commandlet's
   sky-capture sequence and `scripts/beauty_post.py` are not run.
+- Scene 10 (tornado) and the unlocated prompts (7, 9, 15) fall back to the
+  regex compiler's default place (Flint Hills, 38.43 N, 96.60 W). r99's scene
+  10 shows a different place, which the LLM compiler chose.
+- The editor world once left the georeference at a previous scene's CRS.
+  Build now re-asserts the card's CRS before the camera pose and records it in
+  the status (`projected_crs`). A camera thousands of km off, with tiles stuck
+  at 0 %, is that symptom.
 - Things it leaves out: the beauty tornado (`BuildBeautyTornado`, scene 10),
   AircraftFX (contrails and wet airframe), traffic, the stress/probe overrides,
   the shadow shot and `-cloud-cover/-cloud-base` flags.
