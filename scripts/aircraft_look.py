@@ -242,7 +242,9 @@ FX_PARAMETERS = {
     "M_NavLightEmissive": ("LightColour", "Intensity", "Strobe", "BeamDirection", "BeamCos"),
     # LOOK_GENERATION 13 (hyperreal contrails): Puff is the break-up strength the C++
     # sets (contrail.PuffBreakup, 0 under -contrail-puffs=off).
-    "M_AircraftContrail": ("Opacity", "Formation", "FormationRamp", "Puff"),
+    # LOOK_GENERATION 14: ViewWeight, 1 under -contrail-view-weight=on (the default),
+    # 0 under off (generation 13's crossed ribbon at full strength on both strips).
+    "M_AircraftContrail": ("Opacity", "Formation", "FormationRamp", "Puff", "ViewWeight"),
     "M_AircraftAfterburner": ("Intensity", "CoreColour", "TipColour", "Shocks"),
     "M_AircraftHeatHaze": ("TimeS", "Strength"),
     # condensation-solver (scripts/aircraft_condensation_material.py PARAMETERS).
@@ -259,7 +261,10 @@ SHADER_INPUTS = {
     "nav_bulb": ("UV", "LightColour", "Intensity", "Strobe", "CameraDir", "BeamDir", "BeamCos"),
     # LOOK_GENERATION 13: absolute world position (the puffs stay in the air), the
     # per-sample Life (vertex colour R) and the puff break-up pair.
-    "contrail_opacity": ("UV", "WorldPos", "Life", "Opacity", "Formation", "FormationRamp", "Puff", "PuffCellCm"),
+    # LOOK_GENERATION 14: the view line and the ribbon's axis and strip (UV1, UV2)
+    # for the per-strip view weight (contrail_view_weight).
+    "contrail_opacity": ("UV", "WorldPos", "Life", "Opacity", "Formation", "FormationRamp", "Puff", "PuffCellCm",
+                         "CameraDir", "AlongXY", "AlongZStrip", "ViewWeight"),
     "afterburner_glow": ("UV", "Intensity", "CoreColour", "TipColour", "Shocks"),
     "heat_haze": ("UV", "LocalPos", "TimeS", "Strength"),
     # wet-airframe-canopy: "aircraft_wet" and "canopy_scratch".
@@ -1078,8 +1083,51 @@ def contrail_across(uv_y, life):
     return math.pow(max(chord, 1.0e-4), power) * _smoothstep(0.0, rim, chord)
 
 
-def contrail_opacity(uv, world_pos_cm, life, opacity, formation, formation_ramp, puff, puff_cell_cm):
-    """The twin of contrail_opacity.hlsl, input for input."""
+def _norm(v):
+    length = math.sqrt(sum(c * c for c in v))
+    return tuple(c / max(length, 1.0e-4) for c in v)
+
+
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def contrail_strip_normals(along):
+    """The crossed ribbon's two plane normals at a sample whose axis is ``along``,
+    built as FlightSimAircraftFX.cpp RebuildTrail builds them: Side = cross(along,
+    up) (RightVector (0, 1, 0) when the axis is vertical), Up = cross(Side, along).
+    Strip 0 lies across Side (normal Up), strip 1 across Up (normal Side)."""
+    axis = _norm(along)
+    side = _cross(axis, (0.0, 0.0, 1.0))
+    side = _norm(side) if math.sqrt(_dot(side, side)) > 1.0e-4 else (0.0, 1.0, 0.0)
+    return _cross(side, axis), side
+
+
+def contrail_view_weight(along, strip, camera_dir, view_weight=1.0):
+    """The twin of contrail_opacity.hlsl's ``view``: (n.v)^2 / (1 - (a.v)^2) for
+    the strip's plane normal n, the axis a and the view line v (0.5 each when the
+    view runs down the axis), lerped from 1 by ViewWeight. The two strips' weights
+    sum to 1 at every view (n0, n1, a orthonormal): a circular cylinder projects to
+    the same chord from every azimuth about its axis, so no view doubles the core."""
+    axis = _norm(along)
+    up_n, side = contrail_strip_normals(axis)
+    v = _norm(camera_dir)
+    plane = up_n if strip < 0.5 else side
+    nv = _dot(plane, v)
+    av = _dot(axis, v)
+    off_axis = 1.0 - av * av
+    face_on = _saturate(nv * nv / off_axis) if off_axis > 1.0e-3 else 0.5
+    return _lerp(1.0, face_on, _saturate(view_weight))
+
+
+def contrail_opacity(uv, world_pos_cm, life, opacity, formation, formation_ramp, puff, puff_cell_cm,
+                     camera_dir=(0.0, 0.0, 1.0), along=(1.0, 0.0, 0.0), strip=0.0, view_weight=0.0):
+    """The twin of contrail_opacity.hlsl, input for input (the defaults are
+    ViewWeight 0: generation 13's opacity, whatever the view)."""
     ramp = formation_ramp if formation_ramp > 0.0 else 0.04
     formed = _smoothstep(formation, formation + ramp, uv[0])
     life = _saturate(life)
@@ -1090,7 +1138,8 @@ def contrail_opacity(uv, world_pos_cm, life, opacity, formation, formation_ramp,
     cut = _saturate(puff) * _smoothstep(0.1, 1.0, life) * 0.75
     puffs = _saturate((n - cut) / max(1.0 - cut, 0.05))
     lumpy = _lerp(0.7 + 0.3 * n, 0.25 + 0.75 * puffs, _saturate(puff))
-    return _saturate(opacity * formed * fade * across * lumpy)
+    view = contrail_view_weight(along, strip, camera_dir, view_weight)
+    return _saturate(opacity * formed * fade * across * lumpy * view)
 
 
 #: Wingtip vapour: short trails from the wingtip anchors above a load factor.
@@ -1222,6 +1271,10 @@ FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", True), ("aircra
                # LOOK_GENERATION 13: the trail's break-up into puffs with age
                # (contrail_opacity.hlsl Puff = contrail.PuffBreakup; off sets 0).
                ("contrail-puffs=", True),
+               # LOOK_GENERATION 14 (#13's light-beam streaks): each strip of the
+               # crossed ribbon weighted by how face-on it is (contrail_view_weight);
+               # off sets ViewWeight 0, generation 13's both-strips-full (the A/B).
+               ("contrail-view-weight=", True),
                # The canopy reflection (aircraft_glass_reflect.py): OFF unless
                # -canopy-reflect=on, so Windows can A/B it (tier: -canopy-reflect-tier=0|1).
                ("canopy-reflect=", False),

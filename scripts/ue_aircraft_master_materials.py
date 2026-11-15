@@ -118,7 +118,14 @@ REPO = os.path.dirname(_HERE)
 #: PaintEnvGain, the host's gain under -paint-reflect=on), the lookup leaned by
 #: the wet layer's new WetLean output (a rivulet's flank). PaintEnvGain 0 in
 #: the master: nothing added until the host sets it. Every other graph is unchanged.
-LOOK_GENERATION = "13"
+#: 14 (#13's four bright diagonal streaks that read as light beams):
+#: M_AircraftContrail weights each strip of its crossed ribbon by how face-on it
+#: is ((n.v)^2 / (1 - (a.v)^2), the two summing to 1: contrail_opacity.hlsl), from
+#: CameraVectorWS and the ribbon's axis and strip index on UV1 / UV2
+#: (FlightSimAircraftFX.cpp RebuildTrail), behind the ViewWeight scalar (the C++
+#: sets 1 under -contrail-view-weight=on, the default; 0 is generation 13). Every
+#: other graph is unchanged.
+LOOK_GENERATION = "14"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.
@@ -708,6 +715,13 @@ def _uv(material, x, y):
     return node
 
 
+def _uv_channel(material, index, x, y):
+    unreal = _u()
+    node = _node(material, unreal.MaterialExpressionTextureCoordinate, x, y)
+    node.set_editor_property("coordinate_index", index)
+    return node
+
+
 def _emissive(material, node):
     unreal = _u()
     unreal.MaterialEditingLibrary.connect_material_property(
@@ -782,7 +796,7 @@ def create_aircraft_contrail():
         lighting = getattr(unreal.TranslucencyLightingMode, "TLM_VOLUMETRIC_NON_DIRECTIONAL", None)
     if lighting is not None:
         material.set_editor_property("translucency_lighting_mode", lighting)
-    opacity_name, formation_name, ramp_name, puff_name = look.FX_PARAMETERS["M_AircraftContrail"]
+    opacity_name, formation_name, ramp_name, puff_name, view_name = look.FX_PARAMETERS["M_AircraftContrail"]
     opacity = _custom(material, "contrail_opacity", "CMOT_FLOAT1", {
         "UV": (_uv(material, -700, 0), ""),
         # LOOK_GENERATION 13: absolute world position (generation 12's LocalPosition
@@ -798,7 +812,14 @@ def create_aircraft_contrail():
         # LOOK_GENERATION 13: the break-up (the C++ sets contrail.PuffBreakup, 0 under
         # -contrail-puffs=off) and a young trail's puff cell (contrail.PuffCellM, cm).
         "Puff": (_scalar(material, puff_name, look.CONTRAIL_DEFAULTS["PuffBreakup"], -700, 450), ""),
-        "PuffCellCm": (_scalar(material, "PuffCellCm", 100.0 * look.CONTRAIL_DEFAULTS["PuffCellM"], -700, 500), "")},
+        "PuffCellCm": (_scalar(material, "PuffCellCm", 100.0 * look.CONTRAIL_DEFAULTS["PuffCellM"], -700, 500), ""),
+        # LOOK_GENERATION 14: the per-strip view weight. The view line, the ribbon's
+        # axis (UV1 x, y; UV2 x its z) and strip index (UV2 y) as RebuildTrail writes
+        # them; ViewWeight 0 in the master is generation 13 until the C++ sets it.
+        "CameraDir": (_node(material, unreal.MaterialExpressionCameraVectorWS, -700, 800), ""),
+        "AlongXY": (_uv_channel(material, 1, -700, 900), ""),
+        "AlongZStrip": (_uv_channel(material, 2, -700, 1000), ""),
+        "ViewWeight": (_scalar(material, view_name, 0.0, -700, 1100), "")},
         -400, 100)
     lib = unreal.MaterialEditingLibrary
     lib.connect_material_property(_const3(material, (0.92, 0.94, 0.97), -400, -100), "",
