@@ -1,0 +1,78 @@
+{
+ "sky_version": 1,
+ "instant_utc": "2026-03-20T18:34:24+00:00",
+ "time_of_day": "noon",
+ "time_basis": "noon: the sun's highest point of the day",
+ "date_source": "default (March 2026 equinox)",
+ "observer": {
+  "latitude_deg": 38.43,
+  "longitude_deg": -96.6
+ },
+ "sun": {
+  "azimuth_deg": 180.2486,
+  "elevation_deg": 51.6481,
+  "angular_radius_deg": 0.26754,
+  "distance_km": 148987351.6,
+  "illuminance_lux": 120000.0,
+  "horizontal_illuminance_lux": 79533.980584,
+  "transmittance_min_elevation_deg": 90.0,
+  "per_pixel_transmittance": true
+ },
+ "moon": {
+  "azimuth_deg": 141.445,
+  "elevation_deg": 58.1378,
+  "angular_radius_deg": 0.27019,
+  "distance_km": 368423.3,
+  "phase_angle_deg": 157.054,
+  "illuminated_fraction": 0.0396,
+  "waxing": true,
+  "illuminance_lux": 0.000791,
+  "horizontal_illuminance_lux": 0.000567,
+  "albedo": 0.12,
+  "basis": "sphere lit by the sun light: phase and terminator are geometric; Meeus ch. 47 truncated series"
+ },
+ "stars": {
+  "drawn": false,
+  "catalogue": "Hipparcos (via HYG v4.1, CC BY-SA 4.0), V <= 6.5",
+  "angular_radius_deg": 0.02,
+  "count": 0,
+  "note": "sun at +51.6 deg: the sky out-shines the stars, none drawn",
+  "batches": []
+ },
+ "exposure": {
+  "ev100": 14.957,
+  "horizontal_illuminance_lux": 79533.981651,
+  "camera": {
+   "fstop": 4.0,
+   "shutter_per_s": 60.0,
+   "iso": 100.0,
+   "ev100": 9.9069
+  },
+  "bias": -5.0505,
+  "basis": "incident meter E = 2.5 * 2^EV100 above 400 lx; half-rate below (night renders dark, not metered to noon); constant over the clip"
+ },
+ "clouds": {
+  "enabled": true,
+  "bottom_km": 2.0,
+  "thickness_km": 3.0,
+  "basis": "VISUAL ONLY, not from weather data: UE volumetric cloud layer, base placed >= 1 km above the flight so the camera stays clear"
+ },
+ "fog": {
+  "inscattering": "sky-atmosphere ambient contribution (dims with the sun)"
+ },
+ "lighting": {
+  "global_illumination": "lumen",
+  "reflections": "lumen",
+  "shadows": "virtual_shadow_maps"
+ },
+ "post_process": {
+  "kind": "external",
+  "tonemapper": "filmic (UE default)",
+  "bloom_intensity": 0.5,
+  "lens_flare_intensity": 0.15,
+  "vignette_intensity": 0.0,
+  "film_grain_intensity": 0.03,
+  "chromatic_aberration": 0.0,
+  "motion_blur_amount": 0.0
+ }
+}
