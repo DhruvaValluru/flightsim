@@ -105,3 +105,23 @@ HARD RULES:
 END: the full 15-scene sweep with verify, a before/after contact sheet per scene, and a list of what still
 does not look real and why (hardware vs software).
 ```
+
+## Part D: ready on the branch for the lead's first rounds (exact Windows commands)
+
+**Impostor clouds (0deddc6d), the Cloud Pack is already downloaded (sha 3676ba4c…):**
+1. `.venv\Scripts\python.exe scripts\fetch_cloud_vdbs.py --zip <path>\CloudPackVDB.zip`
+2. `$env:BLENDER="C:\Users\kanth\flightsim_assets\blender-5.2.3-windows-x64\blender.exe"`, then
+   `& $env:BLENDER -b -P scripts\bake_cloud_impostors.py -- --vdb-dir C:\Users\kanth\flightsim_assets\jangafx_clouds\CloudPack\CloudPackVDB --out assets\looks\clouds\impostors --clouds 4 --views 8 --px 128`
+   This is CPU work, roughly 1 to a few hours. Run it while the editor is closed. It is not Unreal.
+3. Commit and push `assets/looks/clouds/impostors`. Build the plugin, then the materials prep (expect M_FlightSimCloudImpostor and MI_..._cloud00-03).
+4. Pilot: scenes 13, 3 and 11 with `$env:FLIGHTSIM_RENDER_SWITCHES="-cloud-impostors=pilot"`, plus the same scenes unset as the comparison.
+   Risks: double clouds over flightsim-83's volumetric layer (ask it for a thinning hook), weak silver linings
+   (six-way lighting), and untested Blender 5.2 and C++ APIs.
+
+**Tornado flipbook (b79c6433, pin 8697095f), the zip is at C:\Users\kanth\Downloads\TornadoLoopingVDB.zip:**
+1. `.venv\Scripts\python.exe scripts\fetch_tornado_vdb.py --zip C:\Users\kanth\Downloads\TornadoLoopingVDB.zip`
+2. `& $env:BLENDER -b -P scripts\bake_tornado_flipbook.py -- --out assets\looks\tornado_vdb`
+   (128 source frames; the bake picks its own spread). Commit the atlas, JSON, PIN and LICENSE.
+3. Build, materials prep, then scene 10 with `-tornado-look=vdb` against `-tornado-look=mesh`.
+
+**Wet ground (f628f74c, tiles generation 7):** materials prep, then scenes 15, 9 and 10, plus 1 as the dry control.
