@@ -57,6 +57,15 @@ bias), `ApplyBeautyPostProcess` (and so `FFlightSimBeautyLook::Apply`),
 
 ## How it differs from a Windows render
 
+- **The Google tiles draw without their photo texture on the Mac (as of
+  d757ce12).** `M_FlightSimTilesBeauty` (and `M_TerrainImagery`) fail to compile
+  for SF_METAL_SM5, so the engine's default material is used. The error is
+  `reference to local variable 'DETAIL_TEXEL_PX' declared in enclosing function`,
+  from the `const float DETAIL_TEXEL_PX` in
+  assets/shaders/world/tiles_detail_{surface,normal}.hlsl. Geometry, camera,
+  aircraft, sky and exposure still match. Ground colour does not, until the
+  owning lane makes the constant `static const` or a literal and bumps the
+  generation.
 - The renderer is Metal SM5 with Lumen and VSM off. Windows is D3D11 SM5 on an
   Intel iGPU, so shader precision, the cloud march budget (`ConstrainedGpu`)
   and the shadows differ.

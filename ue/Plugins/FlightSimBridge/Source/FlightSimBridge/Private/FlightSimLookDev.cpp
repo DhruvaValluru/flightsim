@@ -439,6 +439,7 @@ namespace
 			Error.Reset();
 		}
 		Geo->ApplySettings();
+		const FString CardCrs = Geo->ProjectedCRS;
 
 		FString SkyPath;
 		S.bPhysicalSky = FParse::Value(*P, TEXT("sky="), SkyPath) && !SkyPath.IsEmpty();
@@ -522,6 +523,16 @@ namespace
 		FRotator CameraRotation;
 		double FovDeg = 55.0;
 		FString CameraSource = TEXT("cameras[].poses[0]");
+		// The card's frame again before the poses go through it (the editor
+		// world measured a frame left at a previous scene's CRS here).
+		const FString CrsBeforePose = Geo->ProjectedCRS;
+		if (CrsBeforePose != CardCrs)
+		{
+			UE_LOG(LogFlightSimLookDev, Warning, TEXT("lookdev: projected CRS was %s, set back to the card's %s"),
+			       *CrsBeforePose, *CardCrs);
+			Geo->ProjectedCRS = CardCrs;
+			Geo->ApplySettings();
+		}
 		if (!CardCameraPose(P, S, CameraLocation, CameraRotation, FovDeg))
 		{
 			AFlightSimCameraDirector* Director = Track(World->SpawnActor<AFlightSimCameraDirector>());
@@ -667,6 +678,8 @@ namespace
 		Report = MakeShared<FJsonObject>();
 		Report->SetStringField(TEXT("camera"), CameraSource);
 		Report->SetStringField(TEXT("exposure"), ExposureMode);
+		Report->SetStringField(TEXT("projected_crs"), Geo->ProjectedCRS);
+		Report->SetStringField(TEXT("projected_crs_before_pose"), CrsBeforePose);
 		Report->SetNumberField(TEXT("fov_deg"), FovDeg);
 		Report->SetBoolField(TEXT("google_tiles"), S.Tiles->IsEnabled());
 		Report->SetBoolField(TEXT("physical_sky"), S.bPhysicalSky);
@@ -815,8 +828,12 @@ namespace
 #endif
 		const double Start = FPlatformTime::Seconds();
 		TSharedRef<double> SettledSince = MakeShared<double>(-1.0);
+		// A view stuck for 30 s (a failed request Cesium never retries) is
+		// reloaded, as FFlightSimGoogleTiles::WaitForView does.
+		TSharedRef<TPair<float, double>> LastChange = MakeShared<TPair<float, double>>(-1.0f, Start);
+		TSharedRef<int32> Reloads = MakeShared<int32>(0);
 		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
-			[PngPath, Width, Height, Tileset, Start, SettledSince](float) -> bool
+			[PngPath, Width, Height, Tileset, Start, SettledSince, LastChange, Reloads](float) -> bool
 			{
 				const double Now = FPlatformTime::Seconds();
 				float Progress = 100.0f;
@@ -824,6 +841,13 @@ namespace
 				if (ACesium3DTileset* Tiles = Cast<ACesium3DTileset>(Tileset.Get()))
 				{
 					Progress = Tiles->GetLoadProgress();
+					if (!FMath::IsNearlyEqual(Progress, LastChange->Key)) { *LastChange = TPair<float, double>(Progress, Now); }
+					else if (Progress < 99.99f && Now - LastChange->Value > 30.0)
+					{
+						Tiles->RefreshTileset();
+						++*Reloads;
+						LastChange->Value = Now;
+					}
 				}
 #endif
 				*SettledSince = Progress >= 99.99f ? (*SettledSince < 0.0 ? Now : *SettledSince) : -1.0;
@@ -837,6 +861,7 @@ namespace
 				Extra->SetNumberField(TEXT("seconds"), Now - Start);
 				Extra->SetBoolField(TEXT("tiles_settled"), bSettled);
 				Extra->SetNumberField(TEXT("meter_stops"), State().LastMeterStops);
+				Extra->SetNumberField(TEXT("tiles_reloads"), *Reloads);
 				WriteStatus(PngPath, bOk, CaptureError, Extra);
 				return false;
 			}), 0.25f);
