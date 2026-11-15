@@ -598,6 +598,9 @@ namespace
 		USceneCaptureComponent2D* Capture = CameraActor->GetCaptureComponent2D();
 		Capture->bCaptureEveryFrame = false;
 		Capture->bCaptureOnMovement = false;
+		// As the commandlet's capture: without a persistent view state there is no
+		// pre-exposure / exposure history and every frame clips to white.
+		Capture->bAlwaysPersistRenderingState = true;
 		Capture->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
 		Capture->FOVAngle = static_cast<float>(FovDeg);
 		FString ExposureMode;
