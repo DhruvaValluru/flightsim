@@ -1,0 +1,269 @@
+{
+ "column": [
+  {
+   "altitude_m": 1600.0,
+   "vertical_tau": 4.48169,
+   "visibility_m": 174.577
+  },
+  {
+   "altitude_m": 1750.0,
+   "vertical_tau": 2.117,
+   "visibility_m": 369.58
+  },
+  {
+   "altitude_m": 1900.0,
+   "vertical_tau": 1.0,
+   "visibility_m": 782.4
+  },
+  {
+   "altitude_m": 2100.0,
+   "vertical_tau": 0.367879,
+   "visibility_m": 2126.78
+  },
+  {
+   "altitude_m": 2300.0,
+   "vertical_tau": 0.135335,
+   "visibility_m": 5781.2
+  },
+  {
+   "altitude_m": 2700.0,
+   "vertical_tau": 0.0183156,
+   "visibility_m": 42717.6
+  },
+  {
+   "altitude_m": 4478.0,
+   "vertical_tau": 2.52316e-06,
+   "visibility_m": 310088000.0
+  },
+  {
+   "altitude_m": 5000.0,
+   "vertical_tau": 1.85539e-07,
+   "visibility_m": 4216900000.0
+  }
+ ],
+ "engine": {
+  "FogDensity": 0.104068,
+  "FogDensity_per_extinction_per_m": 20.8136898,
+  "FogHeightFalloff": 0.0721348,
+  "directional_exponent": 16.0,
+  "directional_gain_of_inscatter": 0.5,
+  "fog_albedo": 0.46655,
+  "inscatter_formula": "FogInscatteringColor [cd/m2] = sun_tint_rgb * fog_albedo * sun_direct_normal_lux * sin(sun_elevation) / pi",
+  "reference_height_m_amsl": 1900.0,
+  "slot": "UExponentialHeightFogComponent::SecondFogData"
+ },
+ "from_5000_m": [
+  {
+   "depression_deg": 10.0,
+   "ground_m": 1600.0,
+   "transmittance": 0.08
+  },
+  {
+   "depression_deg": 20.0,
+   "ground_m": 1600.0,
+   "transmittance": 0.08
+  },
+  {
+   "depression_deg": 30.0,
+   "ground_m": 1600.0,
+   "transmittance": 0.08
+  },
+  {
+   "depression_deg": 45.0,
+   "ground_m": 1600.0,
+   "transmittance": 0.08
+  },
+  {
+   "depression_deg": 10.0,
+   "ground_m": 1900.0,
+   "transmittance": 0.08
+  },
+  {
+   "depression_deg": 20.0,
+   "ground_m": 1900.0,
+   "transmittance": 0.08
+  },
+  {
+   "depression_deg": 30.0,
+   "ground_m": 1900.0,
+   "transmittance": 0.135335
+  },
+  {
+   "depression_deg": 45.0,
+   "ground_m": 1900.0,
+   "transmittance": 0.243117
+  },
+  {
+   "depression_deg": 10.0,
+   "ground_m": 2300.0,
+   "transmittance": 0.458698
+  },
+  {
+   "depression_deg": 20.0,
+   "ground_m": 2300.0,
+   "transmittance": 0.673213
+  },
+  {
+   "depression_deg": 30.0,
+   "ground_m": 2300.0,
+   "transmittance": 0.762868
+  },
+  {
+   "depression_deg": 45.0,
+   "ground_m": 2300.0,
+   "transmittance": 0.825808
+  },
+  {
+   "depression_deg": 10.0,
+   "ground_m": 2700.0,
+   "transmittance": 0.899897
+  },
+  {
+   "depression_deg": 20.0,
+   "ground_m": 2700.0,
+   "transmittance": 0.947858
+  },
+  {
+   "depression_deg": 30.0,
+   "ground_m": 2700.0,
+   "transmittance": 0.964032
+  },
+  {
+   "depression_deg": 45.0,
+   "ground_m": 2700.0,
+   "transmittance": 0.974431
+  },
+  {
+   "depression_deg": 10.0,
+   "ground_m": 3500.0,
+   "transmittance": 0.998071
+  },
+  {
+   "depression_deg": 20.0,
+   "ground_m": 3500.0,
+   "transmittance": 0.99902
+  },
+  {
+   "depression_deg": 30.0,
+   "ground_m": 3500.0,
+   "transmittance": 0.99933
+  },
+  {
+   "depression_deg": 45.0,
+   "ground_m": 3500.0,
+   "transmittance": 0.999526
+  }
+ ],
+ "label": "visual-only; every value is a MODEL value, UNMEASURED on the render machine",
+ "lane": "weather_fx.fog.alpine",
+ "model": {
+  "asymmetry_g": 0.85,
+  "fog_top_m_amsl": 1900.0,
+  "ground_albedo_valley": 0.35,
+  "koschmieder_constant": 3.912,
+  "max_opacity": 0.92,
+  "profile": "sigma(z) = exp(-(z - fog_top_m) / scale_height_m) / scale_height_m  [1/m]",
+  "scale_height_m": 200.0,
+  "uncalibrated": [
+   "fog_top_m_amsl",
+   "scale_height_m",
+   "ground_albedo_valley",
+   "fog_albedo (two-stream)",
+   "directional glow"
+  ],
+  "valley_floor_m_amsl": 1600.0
+ },
+ "nominal": {
+  "flat_sunlit_snow_cd_m2": 15119.0,
+  "sky_diffuse_horizontal_lux": 9360.38,
+  "sun_direct_normal_lux": 86830.0,
+  "sun_elevation_deg": 30.0,
+  "sun_inscatter_cd_m2": 6447.45,
+  "sun_inscatter_over_flat_sunlit_snow": 0.426446
+ },
+ "sun_tint_rgb": [
+  {
+   "rgb": [
+    1.18805,
+    0.983397,
+    0.61074
+   ],
+   "sun_elevation_deg": 15.0
+  },
+  {
+   "rgb": [
+    1.09615,
+    0.993957,
+    0.776752
+   ],
+   "sun_elevation_deg": 30.0
+  },
+  {
+   "rgb": [
+    1.06246,
+    0.996721,
+    0.848553
+   ],
+   "sun_elevation_deg": 50.0
+  }
+ ],
+ "tiers": [
+  {
+   "cvars": {
+    "r.Fog": 1,
+    "r.VolumetricFog": 0
+   },
+   "directional_inscattering": false,
+   "est_vram_mb": 0.0,
+   "summary": "analytic only: the valley layer in ExponentialHeightFog's second fog slot, sun in-scatter as one constant colour; no texture, no new pass",
+   "tier": 0,
+   "top_card_shells": 0
+  },
+  {
+   "cvars": {
+    "r.Fog": 1,
+    "r.VolumetricFog": 0
+   },
+   "directional_inscattering": true,
+   "est_vram_mb": 0.1,
+   "summary": "tier 0 + one unlit translucent card at the fog top sampling alpine_fog_top.png (relief shading, depth-faded shoreline) and the broad sun-side glow",
+   "tier": 1,
+   "top_card_shells": 1
+  },
+  {
+   "cvars": {
+    "r.Fog": 1,
+    "r.VolumetricFog": 0
+   },
+   "directional_inscattering": true,
+   "est_vram_mb": 0.1,
+   "summary": "tier 1 with four stacked shells 30 m apart for parallax in the relief; same texture, up to four translucent layers over the valley pixels",
+   "tier": 2,
+   "top_card_shells": 4
+  },
+  {
+   "cvars": {
+    "r.Fog": 1,
+    "r.VolumetricFog": 1,
+    "r.VolumetricFog.GridPixelSize": 16,
+    "r.VolumetricFog.GridSizeZ": 32,
+    "r.VolumetricFog.HistoryMissSupersampleCount": 1
+   },
+   "directional_inscattering": true,
+   "est_vram_mb": 6.0,
+   "summary": "tier 1 + UE volumetric fog (froxels) for peak shadows in the fog; only pays off for a camera inside the valley, the 5000 m camera is beyond the froxel range",
+   "tier": 3,
+   "top_card_shells": 1
+  }
+ ],
+ "top_relief": {
+  "amplitude_m": 60.0,
+  "channels": "R,G tangent normal xy (0.5 = flat); B height 0..1; A ambient occlusion",
+  "file": "alpine_fog_top.png",
+  "import": "linear (sRGB off), mips on; BC7 estimated 0.09 MB with mips",
+  "rgba_sha256": "e74454201e4761e5735602df57c374742764364ee4bbfc58ef12b38a431cdf21",
+  "seed": 1911,
+  "size": 256,
+  "tile_m": 4000.0
+ }
+}

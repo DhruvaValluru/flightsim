@@ -1,0 +1,42 @@
+{
+  "lane": "hardware_perf.capture_resolution_ladder.alpine",
+  "label": "visual-only",
+  "measured": false,
+  "fetched_assets": [],
+  "vendored": [],
+  "generated": [
+    {"file": "alpine_capture_ladder.json", "generator": "bake_capture_ladder.py", "inputs": "none",
+     "sha256": "9b21911552213cfae8032fb471567617114b077df595144328eb636bebc79060"},
+    {"file": "blue_noise_64.r8", "generator": "bake_capture_ladder.py blue_noise(n=64, seed=20261112, sigma=1.5)",
+     "format": "64x64 R8, row-major, toroidal rank tile, each level 16 times",
+     "sha256": "fd588e37af63774bc87e35ac18a3634458af3a10646ec3fc88532e40b58dd7b0"}
+  ],
+  "sources": [
+    {"name": "Void-and-cluster dither arrays: R. Ulichney, 'The void-and-cluster method for dither array generation', SPIE 1913 (1993)",
+     "licence": "published method; implementation written in this lane (numpy), no code copied",
+     "used_for": "blue_noise_64.r8"},
+    {"name": "Rotated-grid 4x supersampling pattern (one sample per row and column of a 4x4 sub-pixel grid)",
+     "licence": "common graphics practice; offsets written in this lane",
+     "used_for": "tier 1 and tier 3 sub-pixel passes"},
+    {"name": "IEC 61966-2-1 sRGB transfer function",
+     "licence": "standard; formula written in this lane",
+     "used_for": "resolve_capture.py averages samples in linear light"},
+    {"name": "Windows TdrDelay default of 2 seconds (Microsoft WDDM timeout detection and recovery)",
+     "licence": "documented operating-system behaviour, recalled from memory and not re-read this session",
+     "used_for": "the 1000 ms frame-time ceiling; confirm the laptop's registry has no TdrDelay override"},
+    {"name": "swarm/lanes/hardware_perf/stress_ladder/alpine/build_ladder.py",
+     "licence": "repository licence",
+     "used_for": "the 73 bytes-per-pixel render-target ESTIMATE (52 base + 16 TAA + 5 cloud)"},
+    {"name": "core/render/hardware_budget.py _integrated_budget",
+     "licence": "repository licence",
+     "used_for": "the unmeasured start: 1280 px capture width, 491 MB pool"}
+  ],
+  "candidates_not_adopted": [
+    {"name": "MomentsInGraphics/BlueNoise", "url": "https://github.com/MomentsInGraphics/BlueNoise", "stated_licence": "CC0-1.0 (unverified)",
+     "reason": "a 64x64 void-and-cluster tile is 50 lines of numpy and bakes in 0.2 s; nothing fetched, so no licence or hash to carry."},
+    {"name": "matejlou/SimpleBlueNoise", "url": "https://github.com/matejlou/SimpleBlueNoise", "stated_licence": "MIT (unverified)",
+     "reason": "C header; using it means compiling and running downloaded code. Not fetched."},
+    {"name": "ICBC, CloudsGPUPro6, OutdoorLightScattering, TileableVolumeNoise, solshade, NASA Black Marble",
+     "reason": "texture compression, clouds, scattering, terrain masks and night lights: other lanes' subjects, not capture resolution. Not fetched."}
+  ]
+}

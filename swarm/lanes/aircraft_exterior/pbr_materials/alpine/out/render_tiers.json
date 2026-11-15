@@ -1,0 +1,137 @@
+{
+ "albedo_range": {
+  "bare_metal": [
+   0.3,
+   1.0
+  ],
+  "paint": [
+   0.03,
+   0.9
+  ],
+  "rubber": [
+   0.023,
+   0.9
+  ]
+ },
+ "alpine_scalars": {
+  "bare_metal": {
+   "AlbedoModAmount": 0.5,
+   "AlpineNormalAmount": 2.0,
+   "FrostAmount": 0.35,
+   "FrostOpacity": 0.8,
+   "GrimeAmount": 0.12,
+   "RoughnessBreakup": 0.2
+  },
+  "paint": {
+   "AlbedoModAmount": 1.0,
+   "AlpineNormalAmount": 1.5,
+   "FrostAmount": 0.35,
+   "FrostOpacity": 0.8,
+   "GrimeAmount": 0.1,
+   "RoughnessBreakup": 0.12
+  },
+  "rubber": {
+   "AlbedoModAmount": 0.0,
+   "AlpineNormalAmount": 0.0,
+   "FrostAmount": 0.0,
+   "FrostOpacity": 0.0,
+   "GrimeAmount": 0.0,
+   "RoughnessBreakup": 0.08
+  }
+ },
+ "lane": "aircraft_exterior.pbr_materials.alpine",
+ "max_darkening": 0.792,
+ "normal_store_gain": 6.0,
+ "schema": "flightsim-swarm-alpine-pbr/1",
+ "shared_params": {
+  "aircraft_albedo_range_paint": [
+   0.03,
+   0.9
+  ],
+  "aircraft_max_darkening": 0.792,
+  "colour_temperature_k": 6500,
+  "detail_tile_cm": 240.0,
+  "exposure_basis": "sunlit snow; assumption",
+  "exposure_ev100": 15.0,
+  "frost_albedo": 0.75,
+  "frost_amount": 0.35,
+  "ground_albedo": 0.8,
+  "ground_albedo_basis": "fresh/settled snow, broadband (Warren 1982 gives 0.8-0.9 for fresh snow; from memory, not fetched)",
+  "haze_basis": "thin, clean air at 3-4.5 km; UE ExponentialHeightFog density units; assumption",
+  "haze_density": 0.005,
+  "scenario": "alpine",
+  "skylight_lower_hemisphere": "must carry the snow bounce (ground_albedo x a neutral-cool tint), never black: the airframe underside is lit by it",
+  "status": "UNCALIBRATED: set by probe render on the render machine",
+  "sun_elevation_basis": "late-winter midday at 46 N; assumption, the scenario card decides",
+  "sun_elevation_deg": 35.0
+ },
+ "status": "UNCALIBRATED: set by probe render on the render machine",
+ "tiers": [
+  {
+   "clear_coat": false,
+   "cvars": {
+    "r.ClearCoatNormal": 0
+   },
+   "est_vram_basis": "8 bpp block compression x 4/3 mip chain; ESTIMATE, never measured",
+   "est_vram_mb": 0.083,
+   "frost": true,
+   "normal_map": false,
+   "projection": "select (1 sample)",
+   "size": 256,
+   "summary": "256 px detail pack only, one projected sample, mesh normal untouched, Default Lit (no clear coat lobe), frost by threshold",
+   "sustained": "UNMEASURED",
+   "texture_samples": 1,
+   "tier": 0
+  },
+  {
+   "clear_coat": true,
+   "cvars": {
+    "r.ClearCoatNormal": 0
+   },
+   "est_vram_basis": "8 bpp block compression x 4/3 mip chain; ESTIMATE, never measured",
+   "est_vram_mb": 0.667,
+   "frost": true,
+   "normal_map": true,
+   "projection": "select (1 sample each)",
+   "size": 512,
+   "summary": "512 px detail pack + oil-canning normal, two samples, clear coat on paint",
+   "sustained": "UNMEASURED",
+   "texture_samples": 2,
+   "tier": 1
+  },
+  {
+   "clear_coat": true,
+   "cvars": {
+    "r.ClearCoatNormal": 0
+   },
+   "est_vram_basis": "8 bpp block compression x 4/3 mip chain; ESTIMATE, never measured",
+   "est_vram_mb": 2.667,
+   "frost": true,
+   "normal_map": true,
+   "projection": "biplanar blend (2 samples each)",
+   "size": 1024,
+   "summary": "1024 px maps, side/top blended (no projection seam), four samples, clear coat",
+   "sustained": "UNMEASURED",
+   "texture_samples": 4,
+   "tier": 2
+  },
+  {
+   "clear_coat": true,
+   "cvars": {
+    "r.ClearCoatNormal": 1
+   },
+   "est_vram_basis": "8 bpp block compression x 4/3 mip chain; ESTIMATE, never measured",
+   "est_vram_mb": 10.667,
+   "frost": true,
+   "normal_map": true,
+   "projection": "biplanar blend (2 samples each)",
+   "size": 2048,
+   "summary": "2048 px maps, four samples, clear coat with its own bottom normal (r.ClearCoatNormal 1: the oil-canning under a smooth coat)",
+   "sustained": "UNMEASURED",
+   "texture_samples": 4,
+   "tier": 3
+  }
+ ],
+ "tile_cm": 240.0,
+ "visual_only": true
+}

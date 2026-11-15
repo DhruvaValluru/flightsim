@@ -1,0 +1,61 @@
+{
+  "item": "lighting_exposure.physical_light_units.storm",
+  "status": "UNMEASURED: generated on the Mac; no frame rendered, nothing downloaded, nothing vendored",
+  "generated": [
+    {
+      "path": "baked/storm_plu.json",
+      "sha256": "1fdfd072cf1638fdbacf045e654c5ab005b8da7cbb247003af2d391f17f552b0",
+      "by": "generate.py",
+      "licence": "project's own (generated numbers)"
+    },
+    {
+      "path": "baked/storm_overcast_sky_256x128.hdr",
+      "sha256": "e1282face8b2b632a5628c93f86c4d7fd345f92de78ad6328c51de7b8a9f3f2d",
+      "by": "generate.py",
+      "licence": "project's own (closed-form CIE overcast sky, no third-party pixels)"
+    }
+  ],
+  "fetched_assets": [],
+  "sources": [
+    {
+      "name": "CIE standard overcast sky (Moon & Spencer 1942; ISO 15469:2004 / CIE S 011 type 1)",
+      "used_for": "sky luminance distribution L = Lz (1 + 2 sin g) / 3 and E = 7 pi Lz / 9",
+      "licence": "published formula (no asset copied)"
+    },
+    {
+      "name": "ISO 2720 exposure-meter constants (incident C = 250, reflected K = 12.5)",
+      "used_for": "incident and grey-card EV100; C matches core/scene/beauty_look.py METER_CALIBRATION_C",
+      "licence": "published constants (no asset copied)"
+    },
+    {
+      "name": "Lagarde & de Rousiers 2014, Moving Frostbite to Physically Based Rendering, sec. 5.1.2",
+      "used_for": "saturation luminance L_max = 1.2 * 2^EV100",
+      "licence": "published formula (no asset copied)",
+      "note": "unverified against the UE 5.7 source here"
+    },
+    {
+      "name": "Bohren 1987, Multiple scattering of light and some of its observable consequences, Am. J. Phys. 55(6)",
+      "used_for": "two-stream cross-check T = 2 / (2 + tau (1 - g)) on the project's deck fraction; not an input to any light",
+      "licence": "published formula (no asset copied)",
+      "note": "formula recalled, unverified here"
+    },
+    {
+      "name": "Lekner & Dorf 1988, Why some things are darker when wet, Applied Optics 27(7)",
+      "used_for": "the direction of the wet-ground albedo factor; the 0.5 itself is visual-only",
+      "licence": "citation only"
+    },
+    {
+      "name": "this repository: core/scene/beauty_look.py, core/scene/hero_lighting.py, core/scene/lightning.py, core/sky/plan.py, core/scenario/solar.py",
+      "used_for": "the calibrated look (EV100 12.5, deck fraction 0.25, meter target 0.40), sun geometry, lightning power; copied as constants and cross-checked by the test",
+      "licence": "project's own"
+    }
+  ],
+  "research_candidates_not_adopted": [
+    {"name": "perezsky (WildSolar)", "why": "the closest fit (overcast luminance), but unvetted and not fetched; the CIE overcast closed form covers a full deck without a dependency. Worth vetting if a broken deck is wanted."},
+    {"name": "Poly Haven pure-sky / Qwantani HDRIs", "why": "CC0, but clear and partly cloudy skies, none a storm deck; large downloads"},
+    {"name": "sosfuse2", "why": "twilight (sun +6 to -18 deg); this scenario's sun is at 28 deg"},
+    {"name": "Filament scotopicAdaptation", "why": "low-light only; 12.5 klx is photopic"},
+    {"name": "Prague Sky Model dataset", "why": "clear-sky reference; licence on the record not verified"},
+    {"name": "MoonShineR (GPL-3), skylight (AGPL-3.0)", "why": "clear-sky sun and moon lux; the project already has Bird & Hulstrom; copyleft tools not needed"}
+  ]
+}

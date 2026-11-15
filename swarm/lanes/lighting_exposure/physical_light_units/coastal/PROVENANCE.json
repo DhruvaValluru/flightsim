@@ -1,0 +1,66 @@
+{
+ "lane": "lighting_exposure.physical_light_units.coastal",
+ "label": "visual-only",
+ "vendored": [],
+ "vendored_note": "Nothing was downloaded or vendored. The bake imports the repo's own Bird & Hulstrom model and uses published constants; no third-party code or asset ships.",
+ "generated": [
+  {
+   "file": "coastal_plu.json",
+   "sha256": "21fddc63faace4db32e23507bd53ffe78e180ff4c077fb77b250f014107984bd",
+   "generator": "bake_coastal_plu.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "coastal_plu_curve.csv",
+   "sha256": "52c2671ecadd1634fa079feb6ae689b8a5e632d8386b069ab7599bee08c8521c",
+   "generator": "bake_coastal_plu.py",
+   "licence": "project (generated numbers)"
+  }
+ ],
+ "sources": [
+  {
+   "name": "Bird & Hulstrom 1981, A Simplified Clear Sky Model for Direct and Diffuse Insolation on Horizontal Surfaces (SERI/TR-642-761), as implemented in core/scenario/solar.py",
+   "licence": "US government technical report (public domain); repo code",
+   "used_for": "sun direct normal illuminance under a stated aerosol optical depth; forward-scatter share Ba = 0.84 and aerosol absorptance K1 = 0.1 for the haze-scattered sky term (this lane's MODEL step, UNCALIBRATED)"
+  },
+  {
+   "name": "IES RP-21 clear-sky horizontal diffuse illuminance, constants as stated in core/scene/beauty_look.py IES_CLEAR_DIFFUSE_KLX",
+   "licence": "published constants (facts); repo code",
+   "used_for": "clear part of the sky diffuse illuminance"
+  },
+  {
+   "name": "Koschmieder 1924, Theorie der horizontalen Sichtweite (Beitr. Phys. freien Atm. 12, 33-53): visibility = 3.912 / extinction at the 2 % contrast threshold",
+   "licence": "published formula (fact)",
+   "used_for": "haze extinction from sea-haze visibility"
+  },
+  {
+   "name": "Angstrom 1929, On the atmospheric transmission of sun radiation and on dust in the air (Geografiska Annaler 11, 156-166): aerosol optical depth proportional to wavelength^-alpha",
+   "licence": "published formula (fact); the exponent 0.7 and the 1.2 km scale height are UNCALIBRATED picks",
+   "used_for": "aerosol optical depth at 500 and 380 nm from 550 nm"
+  },
+  {
+   "name": "Cox & Munk 1954, Measurement of the roughness of the sea surface from photographs of the sun's glitter (J. Opt. Soc. Am. 44, 838-850): mean-square slope = 0.003 + 0.00512 U",
+   "licence": "published formula (fact); wind 5 m/s is an UNCALIBRATED pick",
+   "used_for": "sun glitter peak luminance on the sea (reference column only; it does not set exposure)"
+  },
+  {
+   "name": "ISO 2720:1974 incident-light exposure meter calibration, C = 250",
+   "licence": "published constant (fact)",
+   "used_for": "EV100 from horizontal illuminance"
+  },
+  {
+   "name": "Lagarde & de Rousiers 2014, Moving Frostbite to Physically Based Rendering (SIGGRAPH course notes), saturation-based exposure Lmax = 1.2 * 2^EV100",
+   "licence": "published formula (fact)",
+   "used_for": "scene-linear value of a luminance at a manual EV100"
+  }
+ ],
+ "research_candidates_not_adopted": [
+  {"name": "sosfuse2", "reason": "twilight only (sun +6 to -18 deg) and mixed-licence bundled inputs (CC BY-SA among them); the coastal table stops at 1 deg above the horizon. Unvetted, not fetched. The follow-up if the scenario extends into dusk."},
+  {"name": "Poly Haven pure-sky HDRIs / Qwantani series", "reason": "CC0 and the right cross-check for the low-sun sun:sky ratio, but a large fetch that changes no shipped number today; named in INTEGRATION.md as the calibration follow-up."},
+  {"name": "MoonShineR", "reason": "GPL-3 offline tool with a night and twilight focus. Not needed for a daylight table."},
+  {"name": "skylight (bluegreen-labs)", "reason": "AGPL-3.0; the repo already has a daylight direct model. Not fetched."},
+  {"name": "Filament scotopicAdaptation", "reason": "low-light colour shift; belongs to a colour-grading lane."},
+  {"name": "Prague Sky Model dataset", "reason": "it covers visibility and low sun, so it is the best reference for the haze-scattered sky term, but it is multi-GB and its licence is only 'as stated on record', unverified. Not fetched."},
+  {"name": "PerezSky", "reason": "MIT, but it needs DNI/DHI as inputs, which is what this table lacks a measured source for; overcast states go through exposure_target's existing overcast stops."}
+ ]
+}

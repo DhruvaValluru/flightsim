@@ -1,0 +1,208 @@
+{
+ "label": "every VRAM figure is an ESTIMATE; no tier is measured or sustained",
+ "lane": "hardware_perf.stress_ladder.alpine",
+ "protocol": {
+  "cooldown_seconds": 60,
+  "runs_per_tier": 3,
+  "stop_at_first_failure": true,
+  "thresholds": {
+   "available_ram_mb_min": 1024.0,
+   "black_fraction_max": 0.5,
+   "device_lost_max": 0,
+   "frame_wall_ms_p95_max": 1000.0,
+   "luma_stddev_min": 2.0,
+   "min_frames": 8,
+   "temperature_c_max": 95.0,
+   "throttle_ratio_min": 0.8
+  }
+ },
+ "scenario": {
+  "command": "python scripts\\run_test_scenarios.py --clip 3 --only 11",
+  "name": "alpine",
+  "test_scenario": 11
+ },
+ "target": {
+  "display": [
+   1536,
+   960
+  ],
+  "rhi": "d3d11",
+  "start_max_capture_width": 1280,
+  "start_usable_vram_mb": 491
+ },
+ "tiers": [
+  {
+   "cvars": {
+    "r.AmbientOcclusionLevels": 0,
+    "r.AntiAliasingMethod": 1,
+    "r.BloomQuality": 2,
+    "r.DynamicGlobalIlluminationMethod": 0,
+    "r.MaxAnisotropy": 4,
+    "r.MotionBlurQuality": 0,
+    "r.ReflectionMethod": 0,
+    "r.SSR.Quality": 0,
+    "r.ScreenPercentage": 100,
+    "r.Shadow.CSM.MaxCascades": 2,
+    "r.Shadow.MaxResolution": 1024,
+    "r.Shadow.Virtual.Enable": 0,
+    "r.Streaming.LimitPoolSizeToVRAM": 0,
+    "r.Streaming.PoolSize": 192,
+    "r.VolumetricCloud": 0,
+    "r.VolumetricFog": 0
+   },
+   "est_vram_mb": {
+    "baked_luts": 8,
+    "fixed": 120,
+    "render_targets": 28.6,
+    "shadow_atlas": 8.0,
+    "texture_pool": 192,
+    "tile_cache": 96,
+    "total": 452.6
+   },
+   "height": 600,
+   "launch_args": [
+    "-dx11",
+    "-FlightSimStressTier=0",
+    "-DPCVars=r.DynamicGlobalIlluminationMethod=0,r.ReflectionMethod=0,r.Shadow.Virtual.Enable=0,r.AntiAliasingMethod=1,r.ScreenPercentage=100,r.Shadow.MaxResolution=1024,r.Shadow.CSM.MaxCascades=2,r.AmbientOcclusionLevels=0,r.SSR.Quality=0,r.VolumetricCloud=0,r.VolumetricFog=0,r.MotionBlurQuality=0,r.BloomQuality=2,r.MaxAnisotropy=4,r.Streaming.PoolSize=192,r.Streaming.LimitPoolSizeToVRAM=0"
+   ],
+   "summary": "960x600, FXAA, 2x1024 cascades, no SSAO/SSR/volumetric clouds, 192 MB texture pool, 96 MB tile cache at screen-space error 32; sky, aerial perspective and AO come from the Mac-baked tables",
+   "sustained": null,
+   "tier": 0,
+   "tileset": {
+    "maximum_cached_mb": 96,
+    "maximum_screen_space_error": 32
+   },
+   "width": 960
+  },
+  {
+   "cvars": {
+    "r.AmbientOcclusionLevels": -1,
+    "r.AntiAliasingMethod": 2,
+    "r.BloomQuality": 4,
+    "r.DynamicGlobalIlluminationMethod": 0,
+    "r.MaxAnisotropy": 8,
+    "r.MotionBlurQuality": 0,
+    "r.ReflectionMethod": 0,
+    "r.SSR.Quality": 0,
+    "r.ScreenPercentage": 100,
+    "r.Shadow.CSM.MaxCascades": 3,
+    "r.Shadow.MaxResolution": 2048,
+    "r.Shadow.Virtual.Enable": 0,
+    "r.Streaming.LimitPoolSizeToVRAM": 0,
+    "r.Streaming.PoolSize": 320,
+    "r.VolumetricCloud": 0,
+    "r.VolumetricFog": 0
+   },
+   "est_vram_mb": {
+    "baked_luts": 8,
+    "fixed": 120,
+    "render_targets": 70.3,
+    "shadow_atlas": 48.0,
+    "texture_pool": 320,
+    "tile_cache": 160,
+    "total": 726.3
+   },
+   "height": 800,
+   "launch_args": [
+    "-dx11",
+    "-FlightSimStressTier=1",
+    "-DPCVars=r.DynamicGlobalIlluminationMethod=0,r.ReflectionMethod=0,r.Shadow.Virtual.Enable=0,r.AntiAliasingMethod=2,r.ScreenPercentage=100,r.Shadow.MaxResolution=2048,r.Shadow.CSM.MaxCascades=3,r.AmbientOcclusionLevels=-1,r.SSR.Quality=0,r.VolumetricCloud=0,r.VolumetricFog=0,r.MotionBlurQuality=0,r.BloomQuality=4,r.MaxAnisotropy=8,r.Streaming.PoolSize=320,r.Streaming.LimitPoolSizeToVRAM=0"
+   ],
+   "summary": "1280x800, TAA, 3x2048 cascades, SSAO, 320 MB pool, 160 MB tile cache at screen-space error 24",
+   "sustained": null,
+   "tier": 1,
+   "tileset": {
+    "maximum_cached_mb": 160,
+    "maximum_screen_space_error": 24
+   },
+   "width": 1280
+  },
+  {
+   "cvars": {
+    "r.AmbientOcclusionLevels": -1,
+    "r.AntiAliasingMethod": 2,
+    "r.BloomQuality": 4,
+    "r.DynamicGlobalIlluminationMethod": 0,
+    "r.MaxAnisotropy": 8,
+    "r.MotionBlurQuality": 0,
+    "r.ReflectionMethod": 0,
+    "r.SSR.Quality": 2,
+    "r.ScreenPercentage": 100,
+    "r.Shadow.CSM.MaxCascades": 3,
+    "r.Shadow.MaxResolution": 2048,
+    "r.Shadow.Virtual.Enable": 0,
+    "r.Streaming.LimitPoolSizeToVRAM": 0,
+    "r.Streaming.PoolSize": 491,
+    "r.VolumetricCloud": 1,
+    "r.VolumetricFog": 0
+   },
+   "est_vram_mb": {
+    "baked_luts": 8,
+    "fixed": 140,
+    "render_targets": 83.0,
+    "shadow_atlas": 48.0,
+    "texture_pool": 491,
+    "tile_cache": 256,
+    "total": 1026.0
+   },
+   "height": 800,
+   "launch_args": [
+    "-dx11",
+    "-FlightSimStressTier=2",
+    "-DPCVars=r.DynamicGlobalIlluminationMethod=0,r.ReflectionMethod=0,r.Shadow.Virtual.Enable=0,r.AntiAliasingMethod=2,r.ScreenPercentage=100,r.Shadow.MaxResolution=2048,r.Shadow.CSM.MaxCascades=3,r.AmbientOcclusionLevels=-1,r.SSR.Quality=2,r.VolumetricCloud=1,r.VolumetricFog=0,r.MotionBlurQuality=0,r.BloomQuality=4,r.MaxAnisotropy=8,r.Streaming.PoolSize=491,r.Streaming.LimitPoolSizeToVRAM=0"
+   ],
+   "summary": "tier 1 plus SSR and quarter-res volumetric clouds, 491 MB pool, 256 MB tile cache at screen-space error 16",
+   "sustained": null,
+   "tier": 2,
+   "tileset": {
+    "maximum_cached_mb": 256,
+    "maximum_screen_space_error": 16
+   },
+   "width": 1280
+  },
+  {
+   "cvars": {
+    "r.AmbientOcclusionLevels": -1,
+    "r.AntiAliasingMethod": 2,
+    "r.BloomQuality": 4,
+    "r.DynamicGlobalIlluminationMethod": 0,
+    "r.MaxAnisotropy": 16,
+    "r.MotionBlurQuality": 0,
+    "r.ReflectionMethod": 0,
+    "r.SSR.Quality": 2,
+    "r.ScreenPercentage": 100,
+    "r.Shadow.CSM.MaxCascades": 4,
+    "r.Shadow.MaxResolution": 2048,
+    "r.Shadow.Virtual.Enable": 0,
+    "r.Streaming.LimitPoolSizeToVRAM": 0,
+    "r.Streaming.PoolSize": 640,
+    "r.VolumetricCloud": 1,
+    "r.VolumetricFog": 0
+   },
+   "est_vram_mb": {
+    "baked_luts": 8,
+    "fixed": 140,
+    "render_targets": 119.5,
+    "shadow_atlas": 64.0,
+    "texture_pool": 640,
+    "tile_cache": 384,
+    "total": 1355.5
+   },
+   "height": 960,
+   "launch_args": [
+    "-dx11",
+    "-FlightSimStressTier=3",
+    "-DPCVars=r.DynamicGlobalIlluminationMethod=0,r.ReflectionMethod=0,r.Shadow.Virtual.Enable=0,r.AntiAliasingMethod=2,r.ScreenPercentage=100,r.Shadow.MaxResolution=2048,r.Shadow.CSM.MaxCascades=4,r.AmbientOcclusionLevels=-1,r.SSR.Quality=2,r.VolumetricCloud=1,r.VolumetricFog=0,r.MotionBlurQuality=0,r.BloomQuality=4,r.MaxAnisotropy=16,r.Streaming.PoolSize=640,r.Streaming.LimitPoolSizeToVRAM=0"
+   ],
+   "summary": "display-native 1536x960, 4x2048 cascades, 640 MB pool, 384 MB tile cache at screen-space error 12; expected to fail, it is there to find the ceiling",
+   "sustained": null,
+   "tier": 3,
+   "tileset": {
+    "maximum_cached_mb": 384,
+    "maximum_screen_space_error": 12
+   },
+   "width": 1536
+  }
+ ],
+ "version": 1
+}

@@ -1,0 +1,135 @@
+{
+  "lane": "aircraft_exterior.decals_wear.alpine",
+  "visual_only": true,
+  "status": "UNMEASURED: every cost below is an estimate from texture sizes and sample counts; no tier has been rendered",
+  "budget_usable_vram_mb": 491,
+  "tiers": [
+    {
+      "tier": 0,
+      "est_vram_mb": 0.18,
+      "mask_px": 512,
+      "samples_per_pixel": 2,
+      "textures": {
+        "T_AlpineWear_Mask": "512x512 BC1 linear, full mips"
+      },
+      "summary": "Grime streaks, paint chips and (icing only) leading-edge frost from one tiled mask, two object-space planar projections. Base colour and roughness only. No normal, soot or stencils."
+    },
+    {
+      "tier": 1,
+      "est_vram_mb": 0.63,
+      "mask_px": 512,
+      "samples_per_pixel": 7,
+      "textures": {
+        "T_AlpineWear_Mask": "512 BC1",
+        "T_AlpineWear_N": "512 BC5",
+        "T_AlpineWear_Soot": "256x64 BC4",
+        "T_AlpineWear_Decals": "512x256 BC4"
+      },
+      "summary": "Tier 0 plus oil-canning normal (2 samples), one exhaust soot plume (1) and up to 2 box-projected stencils (2)."
+    },
+    {
+      "tier": 2,
+      "est_vram_mb": 2.2,
+      "mask_px": 1024,
+      "samples_per_pixel": 10,
+      "textures": {
+        "T_AlpineWear_Mask": "1024 BC1",
+        "T_AlpineWear_N": "1024 BC5",
+        "T_AlpineWear_Soot": "256x64 BC4",
+        "T_AlpineWear_Decals": "512x256 BC4"
+      },
+      "summary": "1024 px maps, triplanar mask (3 samples), 2 soot plumes, 4 stencils."
+    },
+    {
+      "tier": 3,
+      "est_vram_mb": 8.5,
+      "mask_px": 2048,
+      "samples_per_pixel": 14,
+      "textures": {
+        "T_AlpineWear_Mask": "2048 BC1",
+        "T_AlpineWear_N": "2048 BC5",
+        "T_AlpineWear_Soot": "256x64 BC4",
+        "T_AlpineWear_Decals": "512x256 BC4"
+      },
+      "summary": "2048 px maps, triplanar mask, 2 soot plumes, 8 stencils. For the stress ladder only."
+    }
+  ],
+  "shared_params": {
+    "status": "UNCALIBRATED proposals; this lane depends only on the ones marked used_here",
+    "ground_albedo_snow": {
+      "value": 0.8,
+      "used_here": true,
+      "note": "FrostAlbedo is set equal to it so rime never reads brighter than the snowfield. core/scene/hero_lighting.py GROUND_ALBEDO_RGB has no snow row: its alpine default is rock/scree 0.18."
+    },
+    "airframe_albedo_min": {
+      "value": 0.04,
+      "used_here": true
+    },
+    "airframe_albedo_max": {
+      "value": 0.9,
+      "used_here": true
+    },
+    "wear_floor_ratio": {
+      "value": 0.72,
+      "used_here": true,
+      "note": "wear outside soot/ink never takes base colour below 72 % of the paint"
+    },
+    "airframe_mean_luminance_ratio_min": {
+      "value": 0.9,
+      "used_here": true
+    },
+    "frost_amount_default": {
+      "value": 0.0,
+      "used_here": true,
+      "note": "nonzero only when the card has an icing schedule"
+    },
+    "object_axes": {
+      "value": "+X forward, -X aft, +Z up, cm",
+      "used_here": true
+    },
+    "wear_tile_cm": {
+      "value": 180,
+      "used_here": true
+    },
+    "outside_air_temperature_c": {
+      "value": -10,
+      "used_here": false
+    },
+    "sun_elevation_deg": {
+      "value": 25,
+      "used_here": false
+    },
+    "exposure_ev100": {
+      "value": 15,
+      "used_here": false
+    },
+    "colour_temperature_k": {
+      "value": 6500,
+      "used_here": false
+    },
+    "haze_density": {
+      "value": "low (thin air)",
+      "used_here": false
+    }
+  },
+  "gate": {
+    "status": "BLOCKED and UNMEASURED: FLIGHTSIM_AIRCRAFT_WEAR is proposed in INTEGRATION.md item 4 and does not exist in the repo; the gate has never read a real capture",
+    "windows_command": "swarm\\lanes\\aircraft_exterior\\decals_wear\\alpine\\run_gate.cmd <alpine spec.yaml> tier0",
+    "switch_values": [
+      "off",
+      "tier0",
+      "tier1",
+      "tier2",
+      "tier3"
+    ],
+    "switch_default": "off",
+    "exit_codes": {
+      "0": "pass",
+      "1": "wear failed a threshold",
+      "2": "frames missing",
+      "3": "not measured",
+      "4": "blocked: switch not integrated",
+      "5": "capture failed"
+    }
+  }
+}

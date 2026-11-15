@@ -1,0 +1,173 @@
+{
+  "ambient": {
+    "clear_sky_horizontal_lux": 50193.6,
+    "deck_fraction": 0.25,
+    "horizontal_lux": 12548.4,
+    "implied_cloud_optical_depth": 40.0,
+    "implied_cloud_optical_depth_basis": "two-stream, g = 0.85: a deck, not a cumulonimbus core (tau 100+ would transmit ~0.12 or less); cross-check only"
+  },
+  "baked": {
+    "storm_overcast_sky_256x128.hdr": {
+      "encoding": "Radiance RGBE, flat scanlines, grey",
+      "height": 128,
+      "sha256": "e1282face8b2b632a5628c93f86c4d7fd345f92de78ad6328c51de7b8a9f3f2d",
+      "width": 256
+    }
+  },
+  "calibrated_look": {
+    "ev100": 12.5,
+    "ev100_basis": "elevation band 14.5 at 28 deg + log2(0.25) deck stops",
+    "frame_meter_target_p90_srgb_luma": 0.4,
+    "gate_ev": 0.3,
+    "owner": "core/scene/beauty_look.py (UNCALIBRATED there)"
+  },
+  "directional": {
+    "atmosphere_transmittance_model": 0.6882,
+    "cast_shadows": false,
+    "colour_temperature_basis": "visual-only (CIE D65)",
+    "colour_temperature_k": 6500.0,
+    "elevation_deg": 28.0,
+    "ground_horizontal_lux": 1882.3,
+    "ground_normal_lux": 4009.3,
+    "light_lux_outer_space": 5825.4,
+    "note": "light_lux_outer_space assumes the engine's per-pixel atmosphere transmittance is the ONLY dimming of this light. If the drawn deck also shadows it, the ground value is lower: read the -calibration quad (INTEGRATION.md).",
+    "relative_azimuth_deg": 20.0,
+    "role": "the deck's bright patch (storm_soft_sheen), not a sun disc",
+    "scale_of_project_sun": 0.04855,
+    "share_basis": "visual-only; exposure is independent of it",
+    "share_of_horizontal": 0.15
+  },
+  "exposure": {
+    "ev100": 12.5,
+    "fog_inscatter_ceiling_cd_m2": 1455.1,
+    "fog_note": "a fog or rain veil lit by this sky cannot be brighter than the horizon it hides; a brighter veil lifts the frame's p90 and the meter",
+    "grey_card_luminance_cd_m2": 719.0,
+    "incident_meter_ev100": 12.293,
+    "incident_minus_look_ev": -0.207,
+    "method": "manual EV100, constant over the clip",
+    "reflected_meter_grey_card_ev100": 12.49,
+    "reflected_minus_look_ev": -0.01,
+    "saturation_luminance_cd_m2": 6951.1,
+    "scene_linear_before_tonemap": {
+      "grey_card_18pct": 0.1034,
+      "note": "L / (1.2 * 2^EV100); what the tonemapper does to these is UNMEASURED",
+      "sky_horizon": 0.2093,
+      "sky_zenith": 0.628,
+      "wet_ground": 0.0488
+    }
+  },
+  "ground": {
+    "albedo_dry": 0.17,
+    "albedo_wet": 0.085,
+    "albedo_wet_basis": "visual-only factor on the project's dry albedo",
+    "luminance_wet_cd_m2": 339.5,
+    "wet_factor": 0.5
+  },
+  "item": "lighting_exposure.physical_light_units.storm",
+  "lightning": {
+    "basis": "point source of K * P' * L / (4 pi) cd (core/scene/lightning.py intensity_cd) with the project's first-stroke peak and luminous efficacy; inverse square, no rain extinction",
+    "by_distance": [
+      {
+        "distance_m": 1000.0,
+        "peak_lux_facing": 19098.6,
+        "peak_over_ambient": 1.522,
+        "peak_stops_over_ambient": 1.335
+      },
+      {
+        "distance_m": 2000.0,
+        "peak_lux_facing": 4774.6,
+        "peak_over_ambient": 0.3805,
+        "peak_stops_over_ambient": 0.465
+      },
+      {
+        "distance_m": 5000.0,
+        "peak_lux_facing": 763.9,
+        "peak_over_ambient": 0.0609,
+        "peak_stops_over_ambient": 0.085
+      },
+      {
+        "distance_m": 10000.0,
+        "peak_lux_facing": 191.0,
+        "peak_over_ambient": 0.0152,
+        "peak_stops_over_ambient": 0.022
+      }
+    ],
+    "channel_length_m_assumed": 5000.0,
+    "colour_temperature_basis": "visual-only",
+    "colour_temperature_k": 8000.0,
+    "exposure_rule": "the manual EV100 does NOT follow a flash (constant over the clip, the project's no-breathing rule): a stroke is allowed to clip. Peak values are instantaneous; the energy inside one shutter interval is core/scene/lightning.py stroke_energy's, far below peak x shutter.",
+    "peak_intensity_cd": 19098593171.0
+  },
+  "scenario": "storm",
+  "shared_params": {
+    "assumed_visibility_m": 3000.0,
+    "assumed_visibility_owner": "haze / rain lanes (an assumption here, not a setting)",
+    "colour_temperature_k": 6100.0,
+    "deck_illuminance_fraction": 0.25,
+    "directional_casts_shadows": false,
+    "directional_ground_normal_lux": 4009.3,
+    "exposure_ev": 12.5,
+    "exposure_mode": "manual",
+    "fog_inscatter_ceiling_cd_m2": 1455.1,
+    "frame_meter_target_p90_srgb_luma": 0.4,
+    "ground_albedo": 0.085,
+    "ground_albedo_dry": 0.17,
+    "horizontal_illuminance_lux": 12548.4,
+    "lightning_colour_temperature_k": 8000.0,
+    "lightning_peak_intensity_cd": 19098593171.0,
+    "sky_colour_temperature_k": 7000.0,
+    "sky_horizon_luminance_cd_m2": 1455.1,
+    "sky_zenith_luminance_cd_m2": 4365.2,
+    "skylight_intensity_cd_m2": 3395.1,
+    "sun_elevation_deg": 28.0,
+    "sun_relative_azimuth_deg": 20.0
+  },
+  "sky": {
+    "colour_temperature_basis": "visual-only (between CIE D65 and D75)",
+    "colour_temperature_k": 7000.0,
+    "cubemap": "storm_overcast_sky_256x128.hdr",
+    "cubemap_normalisation": "cosine-weighted upper-hemisphere integral = pi",
+    "horizon_luminance_cd_m2": 1455.1,
+    "horizontal_lux": 10666.1,
+    "lower_hemisphere_note": "wet-ground luminance over the sky mean; the project's -storm-lower-hemisphere owner wins where it draws",
+    "lower_hemisphere_relative": 0.1,
+    "model": "CIE standard overcast sky, L(g) = Lz (1 + 2 sin g) / 3",
+    "skylight_intensity_cd_m2": 3395.1,
+    "zenith_luminance_cd_m2": 4365.2
+  },
+  "status": "UNMEASURED: computed on the Mac from named formulae; no frame was rendered",
+  "tiers": [
+    {
+      "est_vram_mb": 0.062,
+      "lightning": "skylight_pulse",
+      "realtime_capture": false,
+      "skylight_cube_px": 32,
+      "summary": "constants only: manual EV100, directional light in lux (unshadowed fill of the deck's bright patch), static SkyLight from the baked overcast cube at 32 px (specified cubemap, no real-time sky capture), lightning as a one-frame SkyLight intensity pulse; no new render targets, no light actors",
+      "tier": 0
+    },
+    {
+      "est_vram_mb": 0.25,
+      "lightning": "point_light_unshadowed",
+      "realtime_capture": false,
+      "skylight_cube_px": 64,
+      "summary": "tier 0 with the 64 px cube and the lightning as ONE unshadowed, inverse-square point light in candela (no shadow maps)",
+      "tier": 1
+    },
+    {
+      "est_vram_mb": 1.0,
+      "lightning": "point_light_unshadowed",
+      "realtime_capture": false,
+      "skylight_cube_px": 128,
+      "summary": "tier 1 with the 128 px cube and the project's storm local-exposure block on (beauty_look.LOCAL_EXPOSURE storm), so the flash keeps cloud detail",
+      "tier": 2
+    },
+    {
+      "est_vram_mb": 4.0,
+      "lightning": "point_light_unshadowed_bloom",
+      "realtime_capture": false,
+      "skylight_cube_px": 256,
+      "summary": "tier 2 with the 256 px cube and bloom on the flash; still no real-time sky capture, no Lumen, no shadowed flash",
+      "tier": 3
+    }
+  ]
+}

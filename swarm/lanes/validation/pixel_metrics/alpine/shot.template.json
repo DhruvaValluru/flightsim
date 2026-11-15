@@ -1,0 +1,43 @@
+{
+ "_help": "Fill every null. 'health' feeds this lane's own frame check; 'common' feeds any gate that declares that argument; 'lanes' overrides or adds per lane (true = bare flag). A gate with a null left in it is reported UNMEASURED, never skipped silently. Check each lane's INTEGRATION.md: 'reference'/'candidate' are run DIRECTORIES for the aircraft lanes and PNG files for the others, so set them per lane where they differ.",
+ "health": {
+  "reference": null,
+  "candidate": null
+ },
+ "common": {
+  "baseline": null,
+  "candidate": null,
+  "pitch-deg": null,
+  "reference": null,
+  "tier": null
+ },
+ "lanes": {
+  "aircraft_exterior.decals_wear.alpine": {},
+  "aircraft_exterior.pbr_materials.alpine": {},
+  "atmosphere_clouds.aerial_perspective.alpine": {
+   "as": null,
+   "near-km": null,
+   "far-km": null
+  },
+  "hardware_perf.capture_resolution_ladder.alpine": {},
+  "hardware_perf.stress_ladder.alpine": {
+   "results": null
+  },
+  "hardware_perf.vram_budgeting.alpine": {},
+  "lighting_exposure.physical_light_units.alpine": {
+   "baseline-ev100": null,
+   "target-ev100": null
+  },
+  "terrain.dem_posting.alpine": {
+   "camera-lat": null,
+   "camera-lon": null,
+   "camera-alt-m": null,
+   "heading-deg": null
+  },
+  "terrain.detail_normals.alpine": {},
+  "terrain.horizon_lod.alpine": {
+   "gsd-box": null
+  },
+  "weather_fx.fog.alpine": {}
+ }
+}

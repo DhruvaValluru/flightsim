@@ -1,0 +1,221 @@
+{
+  "cloud_types": {
+    "cumulonimbus_core": {
+      "base_m": 600.0,
+      "basis": "sigma = 3 LWC / (2 rho r_eff); LWC and r_eff are visual-only picks inside the literature range",
+      "effective_radius_um": 10.0,
+      "extinction_per_m_physical": 0.15,
+      "extinction_per_m_render": 0.02998,
+      "liquid_water_content_g_m3": 1.0,
+      "optical_depth_physical": 1560.0,
+      "optical_depth_render": 311.8,
+      "top_m": 11000.0
+    },
+    "nimbostratus_deck": {
+      "base_m": 600.0,
+      "basis": "sigma = 3 LWC / (2 rho r_eff); LWC and r_eff are visual-only picks inside the literature range",
+      "effective_radius_um": 9.0,
+      "extinction_per_m_physical": 0.06667,
+      "extinction_per_m_render": 0.01332,
+      "liquid_water_content_g_m3": 0.4,
+      "optical_depth_physical": 160.0,
+      "optical_depth_render": 32.0,
+      "top_m": 3000.0
+    },
+    "scud_fractus": {
+      "base_m": 300.0,
+      "basis": "sigma = 3 LWC / (2 rho r_eff); LWC and r_eff are visual-only picks inside the literature range",
+      "effective_radius_um": 5.0,
+      "extinction_per_m_physical": 0.03,
+      "extinction_per_m_render": 0.006,
+      "liquid_water_content_g_m3": 0.1,
+      "optical_depth_physical": 6.0,
+      "optical_depth_render": 1.2,
+      "top_m": 500.0
+    }
+  },
+  "extinction_scale": {
+    "area_mean_transmittance": 0.25,
+    "basis": "area-mean two-stream transmittance of the domain = the look's deck fraction 0.25; the physical types alone would transmit less, the scale is the visual-only reconciliation with the exposure lane",
+    "column_optical_depth_render_max": 346.7,
+    "column_optical_depth_render_mean": 71.0,
+    "core_transmittance_min": 0.04561,
+    "edge_transmittance_max": 0.39665,
+    "value": 0.19987
+  },
+  "gate": {
+    "basis": "Lambert ground under the dome: L_ground = albedo x cosine-mean sky luminance; sky taken as the panorama's median over elevations 5 to 40 deg; display-referred on the frame, so the tone curve's compression is inside the 1-stop tolerance or it is not (UNMEASURED)",
+    "black_floor_relative_to_sky_median": 0.4267,
+    "expected_sky_contrast_stops": 0.264,
+    "expected_sky_over_ground_stops": 3.559,
+    "max_black_fraction": 0.02,
+    "sky_band_median_relative": 1.0016,
+    "tolerance_stops": 1.0
+  },
+  "item": "atmosphere_clouds.volumetric_cloud_types.storm",
+  "multiple_scattering": {
+    "a_extinction": 0.5,
+    "b_contribution": 0.5,
+    "basis": "Wrenninge 2013 octave sum; the three 0.5s are the paper's customary starting point, visual-only",
+    "c_eccentricity": 0.5,
+    "octave_transmission_at_tau_20": {
+      "1": 2.061e-09,
+      "2": 2.27e-05,
+      "3": 0.001707
+    },
+    "ue": {
+      "MultiScatteringContribution": 0.5,
+      "MultiScatteringEccentricity": 0.5,
+      "MultiScatteringOcclusion": 0.5
+    }
+  },
+  "noise": {
+    "kind": "inverted Worley, 0.625 x 4 cells + 0.375 x 8 cells, tileable",
+    "srgb": false,
+    "storm_noise_32_atlas.tga": {
+      "tiles": "8 x 4",
+      "volume": 32
+    },
+    "storm_noise_64_atlas.tga": {
+      "tiles": "8 x 8",
+      "volume": 64
+    }
+  },
+  "panorama": {
+    "encoding": "Radiance RGBE, flat scanlines, grey",
+    "file": "storm_underdeck_256x64.hdr",
+    "height": 64,
+    "layout": "upper hemisphere only; row 0 = zenith, last row = horizon; column 0 = azimuth toward the cell core, azimuth increasing counter-clockwise seen from above (x toward the core, y left)",
+    "normalisation": "cosine-weighted hemisphere mean = 1",
+    "observer_altitude_m": 300.0,
+    "observer_to_core_m": 6000.0,
+    "valid_for": "an observer below the cloud base; at or above 600 m tier 0 draws the in-cloud veil instead",
+    "width": 256
+  },
+  "phase": {
+    "alpha": 27.113694,
+    "basis": "Jendersie & d'Eon 2023 fit constants as transcribed; NOT re-read against the PDF in this session; checked here only by normalisation and by the mean cosine",
+    "droplet_diameter_um": 20.0,
+    "g_d": 0.593791,
+    "g_hg": 0.99461,
+    "mean_cosine": 0.87931,
+    "ue_two_lobe": {
+      "PhaseBlend": 0.4982,
+      "PhaseG": 0.9946,
+      "PhaseG2": 0.7632,
+      "note": "the Draine lobe replaced by an HG of the same mean cosine (the engine's advanced volumetric output takes two HG lobes)"
+    },
+    "w_d": 0.498159
+  },
+  "radiometry": {
+    "budget_residual_fraction": -1e-05,
+    "directional_patch_horizontal_lux": 1882.3,
+    "dome_horizontal_lux": 10666.0,
+    "lambert_ceiling_cd_m2": 15977.1,
+    "note": "the panorama is relative (cosine mean 1) and takes its absolute level from the exposure lane's SkyLight 3395.1 cd/m2; the observer sits 6 km from the core, where the deck above transmits the figure on the line above, against the domain's 0.25",
+    "observer_unveiled_cosine_mean_transmittance": 0.11256,
+    "panorama_horizon_cd_m2": 3425.0,
+    "panorama_max_cd_m2": 3989.7,
+    "panorama_min_cd_m2": 2887.4,
+    "panorama_zenith_cd_m2": 3392.1,
+    "skyatmosphere_reference_clear_horizontal_lux": 50193.6,
+    "under_deck_horizontal_lux": 12548.4
+  },
+  "scenario": "storm",
+  "shared_params": {
+    "assumed_visibility_m": 3000.0,
+    "cell_core_distance_m": 6000.0,
+    "cell_core_radius_m": 5000.0,
+    "cell_top_m": 11000.0,
+    "cloud_base_luminance_core_cd_m2": 2887.4,
+    "cloud_base_luminance_max_cd_m2": 3989.7,
+    "cloud_base_m": 600.0,
+    "cloud_droplet_diameter_um": 20.0,
+    "cloud_extinction_scale": 0.19987,
+    "cloud_phase_mean_cosine": 0.87931,
+    "deck_illuminance_fraction": 0.25,
+    "deck_top_m": 3000.0,
+    "exposure_ev": 12.5,
+    "ground_albedo": 0.085,
+    "haze_density_per_m": 0.001304,
+    "rain_shaft_mask": "storm_weather_128.tga B",
+    "scud_base_m": 300.0,
+    "sky_colour_temperature_k": 7000.0,
+    "skylight_intensity_cd_m2": 3395.1,
+    "sun_elevation_deg": 28.0
+  },
+  "status": "UNMEASURED: baked on the Mac from named formulae; no frame was rendered",
+  "tiers": [
+    {
+      "est_vram_mb": 0.2,
+      "summary": "no ray march: the baked under-deck panorama on an unlit sky dome (256x64 RGBA16F) times SkyLight 3395.1 cd/m2 and the 7000 K tint; exponential height fog as the in-cloud veil",
+      "tier": 0,
+      "volumetric_cloud_component": false
+    },
+    {
+      "cvars": {
+        "r.VolumetricCloud.ShadowMap": 0,
+        "r.VolumetricCloud.SkyAO": 0,
+        "r.VolumetricCloud.ViewRaySampleMaxCount": 96,
+        "r.VolumetricRenderTarget": 1,
+        "r.VolumetricRenderTarget.Mode": 0
+      },
+      "est_vram_mb": 8.0,
+      "ms_octaves": 1,
+      "noise": 32,
+      "shadow_view_sample_count_scale": 0.0,
+      "summary": "M_StormCell march at quarter resolution, weather map + 32^3 noise, no cloud shadow map, tier 0's panorama kept as the far field beyond 15 km",
+      "tier": 1,
+      "tracing_max_km": 15.0,
+      "view_sample_count_scale": 0.25,
+      "volumetric_cloud_component": true
+    },
+    {
+      "cvars": {
+        "r.VolumetricCloud.ShadowMap": 0,
+        "r.VolumetricCloud.SkyAO": 1,
+        "r.VolumetricCloud.ViewRaySampleMaxCount": 192,
+        "r.VolumetricRenderTarget": 1,
+        "r.VolumetricRenderTarget.Mode": 0
+      },
+      "est_vram_mb": 14.0,
+      "ms_octaves": 2,
+      "noise": 64,
+      "shadow_view_sample_count_scale": 0.25,
+      "summary": "64^3 noise, two scattering octaves, sky AO on",
+      "tier": 2,
+      "tracing_max_km": 25.0,
+      "view_sample_count_scale": 0.5,
+      "volumetric_cloud_component": true
+    },
+    {
+      "cvars": {
+        "r.VolumetricCloud.ShadowMap": 1,
+        "r.VolumetricCloud.SkyAO": 1,
+        "r.VolumetricCloud.ViewRaySampleMaxCount": 384,
+        "r.VolumetricRenderTarget": 1,
+        "r.VolumetricRenderTarget.Mode": 1
+      },
+      "est_vram_mb": 40.0,
+      "ms_octaves": 3,
+      "noise": 64,
+      "shadow_view_sample_count_scale": 0.5,
+      "summary": "half-resolution march, three octaves, cloud shadow map",
+      "tier": 3,
+      "tracing_max_km": 40.0,
+      "view_sample_count_scale": 1.0,
+      "volumetric_cloud_component": true
+    }
+  ],
+  "tiers_note": "VRAM figures are estimates (render targets at 1280 wide plus the baked textures); cvar names are from memory of UE 5.x and must be checked with `help` in the pinned build; no tier has been run, none is known to hold",
+  "visual_only": "the cell's shape (procedural noise) and every LWC / r_eff / octave pick",
+  "weather_map": {
+    "B": "rain-shaft mask",
+    "G": "(cloud top - base) / (11000 - 600)",
+    "R": "column optical depth (render) / column_optical_depth_render_max",
+    "domain_m": 32000.0,
+    "file": "storm_weather_128.tga",
+    "size": 128,
+    "srgb": false
+  }
+}

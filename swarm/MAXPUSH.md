@@ -1,0 +1,77 @@
+# max-push
+
+Branch `max-push` is a copy of `claude/vibrant-gauss-olema4` plus the swarm
+scaffold. Goal: the most photorealistic frames the Windows laptop (Intel iGPU,
+D3D11) can sustain, with visuals as the focus.
+
+**Idea.** The laptop can't render heavy techniques, but the Mac (M1 Max, 64 GB)
+can precompute them. Agents bake offline and ship tiers (0 = stable on the
+laptop, 1-3 heavier). The stress ladder run on the laptop picks the real tier.
+
+## Run on the Mac, in a Claude Code session in this repo, on `max-push`
+
+```bash
+python swarm/shard.py --prefix m --wave 0 --wave-size 150 --shards 8 \
+  --domains terrain,vegetation_autogen,aircraft_exterior,atmosphere_clouds,weather_fx,water,airports_lighting,lighting_exposure,camera_lens,hardware_perf,validation
+```
+
+Then tell Claude: "launch swarm/maxpush.workflow.js for all 8 shards in one
+turn", passing each `swarm/shards/m0_s<k>.json` as `items`, the output of
+`budget_from_file()` as `budget`, and `m0_s<k>` as `wave`. Repeat with
+`--wave 1`, `--wave 2` for the rest. Lanes write only under `swarm/lanes/`;
+a domain integrator then wires verified lanes into the shared files, one
+domain at a time, and commits.
+
+Visual domains only: flight dynamics and audio are left out on purpose.
+
+## Maximum load
+
+Agents per item: 1 research + 1 build + 3 verify + (0-1 repair) + 2 rounds x
+(1 improve + 2 verify) = 11 to 12. 395 items is about 4,400 agents in total.
+`args.rounds` sets the deepen rounds (default 2; use 4 for roughly 6,200).
+
+Concurrency is 8 per workflow on this Mac, and a run is capped at 1,000
+agents (about 80 items at rounds=2). Run everything at once with 5 shards of
+79 items (about 40 agents at a time), or split finer for more width:
+
+```bash
+python swarm/shard.py --prefix x --wave 0 --wave-size 400 --shards 5 \
+  --domains terrain,vegetation_autogen,aircraft_exterior,atmosphere_clouds,weather_fx,water,airports_lighting,lighting_exposure,camera_lens,hardware_perf,validation
+```
+
+16 shards of 25 items is about 128 agents at a time.
+
+The ceiling is your plan's rate limit, not the Mac. If you see 429s, drop
+shards. To make the run last until credits are gone, add a token target to
+your message (for example "+2M") and the `budget` hook lets loops keep going.
+
+## Discover new additions first
+
+`swarm/discover.workflow.js` goes looking for things you haven't thought of.
+Per domain it runs six researchers, each from a different angle (papers, code,
+asset libraries, datasets, niche communities, techniques from other fields),
+and repeats rounds (default 3) until a round finds nothing new. Each candidate
+is then checked by a skeptic (is it real, is the licence really not
+non-commercial, could its baked form run on the iGPU) and ranked into
+`swarm/discoveries.json`. Pass `args.domains` as the 11 visual domains with a
+one-line focus each. 11 domains x 6 angles = 66 researchers per round, and
+vetting is one agent per candidate. Feed the top of `discoveries.json` into
+the build wave as extra research input.
+
+## v2 changes
+
+* **Competing builders.** Priority items (`args.priority`: ids for the known
+  defects) get three builders from different angles (physical, real-data,
+  cheapest-bake-or-adopt-a-repo) and a judge who keeps the winner and grafts
+  in the best ideas from the others. Other items get one builder.
+* **Adopt before writing.** Builders are told a small niche repo that already
+  does the job beats writing it; `args.discoveries` (the ranked list from the
+  discovery run) is passed to every researcher.
+* **Reference truth and a pixel gate.** Each item names the real-world
+  measurement it is compared against and ships the exact Windows command, the
+  metric and the threshold that would show it improved the frame.
+* **Trained-eye deepen.** Deepen rounds ask what a pilot or VFX supervisor
+  would still call fake, and fix the biggest one.
+* **Scenario coherence.** One agent per scenario reconciles all its components
+  (exposure, sun, haze, albedo, time of day, combined budget) into one
+  parameter table in `swarm/coherence/`.

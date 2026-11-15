@@ -1,0 +1,469 @@
+{
+ "constants": {
+  "cox_munk_wind_m_s": 5.0,
+  "gate_ev": 0.3,
+  "haze_forward_share": 0.6,
+  "marine_angstrom_exponent": 0.5,
+  "marine_aod_380nm": 0.287,
+  "marine_aod_500nm": 0.25,
+  "marine_layer_km": 1.0,
+  "marine_water_cm": 3.0,
+  "meter_calibration_c": 250.0,
+  "sea_albedo": 0.06,
+  "sea_haze_visibility_km": 15.7,
+  "sensor_saturation_k": 1.2,
+  "sun_outer_space_lux": 120000.0,
+  "sun_transmittance_owner": "engine_per_pixel",
+  "uncalibrated": [
+   "marine_aod_500nm",
+   "marine_angstrom_exponent",
+   "marine_water_cm",
+   "marine_layer_km",
+   "haze_forward_share",
+   "white_albedo",
+   "white_sun_facing_ceiling_scene_linear",
+   "white_protect_max_ev",
+   "sea_albedo",
+   "cox_munk_wind_m_s"
+  ],
+  "water_ior": 1.34,
+  "white_albedo": 0.8,
+  "white_protect_max_ev": 0.7,
+  "white_sun_facing_ceiling_scene_linear": 2.0
+ },
+ "label": "visual-only; every value is a MODEL value, UNMEASURED on the render machine",
+ "nominal": {
+  "global_horizontal_lux": 17934.5,
+  "meter_ev100": 12.809,
+  "site_evening_local_hour": 18.25,
+  "site_evening_sun_azimuth_deg": 262.68,
+  "sky_diffuse_horizontal_lux": 10091.8,
+  "sun_colour_temperature_k": 3716.0,
+  "sun_direct_normal_lux": 37721.4,
+  "sun_elevation_deg": 12.0,
+  "sun_to_sky_ratio": 0.777,
+  "target_ev100": 12.809
+ },
+ "rows": [
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 122.45,
+    "white_sun_facing": 0.9994
+   },
+   "global_horizontal_lux": 4047.8,
+   "meter_ev100": 10.661,
+   "repo_model_meter_ev100": 10.713,
+   "sea_glitter_peak_cd_m2": 237904.0,
+   "sky_diffuse_horizontal_lux": 3918.4,
+   "sky_mean_luminance_cd_m2": 1247.3,
+   "sun_colour_temperature_k": 1929.0,
+   "sun_direct_normal_lux": 3706.9,
+   "sun_direct_normal_lux_repo_clear": 14345.8,
+   "sun_elevation_deg": 2.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.2481,
+    0.0
+   ],
+   "sun_to_sky_ratio": 0.033,
+   "sun_xy": [
+    0.5441,
+    0.4251
+   ],
+   "target_ev100": 10.661,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 84.46,
+    "white_sun_facing": 1.3018
+   },
+   "global_horizontal_lux": 6150.5,
+   "meter_ev100": 11.265,
+   "repo_model_meter_ev100": 11.353,
+   "sea_glitter_peak_cd_m2": 249345.0,
+   "sky_diffuse_horizontal_lux": 5480.0,
+   "sky_mean_luminance_cd_m2": 1744.4,
+   "sun_colour_temperature_k": 2489.0,
+   "sun_direct_normal_lux": 9611.9,
+   "sun_direct_normal_lux_repo_clear": 23619.4,
+   "sun_elevation_deg": 4.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.3869,
+    0.0242
+   ],
+   "sun_to_sky_ratio": 0.122,
+   "sun_xy": [
+    0.4893,
+    0.4328
+   ],
+   "target_ev100": 11.265,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 57.86,
+    "white_sun_facing": 1.4706
+   },
+   "global_horizontal_lux": 8614.2,
+   "meter_ev100": 11.751,
+   "repo_model_meter_ev100": 11.86,
+   "sea_glitter_peak_cd_m2": 239248.0,
+   "sky_diffuse_horizontal_lux": 6832.3,
+   "sky_mean_luminance_cd_m2": 2174.8,
+   "sun_colour_temperature_k": 2921.0,
+   "sun_direct_normal_lux": 17046.5,
+   "sun_direct_normal_lux_repo_clear": 33326.3,
+   "sun_elevation_deg": 6.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.4846,
+    0.0899
+   ],
+   "sun_to_sky_ratio": 0.261,
+   "sun_xy": [
+    0.4526,
+    0.4253
+   ],
+   "target_ev100": 11.751,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 38.29,
+    "white_sun_facing": 1.5094
+   },
+   "global_horizontal_lux": 11453.1,
+   "meter_ev100": 12.162,
+   "repo_model_meter_ev100": 12.279,
+   "sea_glitter_peak_cd_m2": 210521.0,
+   "sky_diffuse_horizontal_lux": 8036.6,
+   "sky_mean_luminance_cd_m2": 2558.1,
+   "sun_colour_temperature_k": 3250.0,
+   "sun_direct_normal_lux": 24548.8,
+   "sun_direct_normal_lux_repo_clear": 41963.5,
+   "sun_elevation_deg": 8.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.553,
+    0.1564
+   ],
+   "sun_to_sky_ratio": 0.425,
+   "sun_xy": [
+    0.428,
+    0.4152
+   ],
+   "target_ev100": 12.162,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 25.24,
+    "white_sun_facing": 1.4772
+   },
+   "global_horizontal_lux": 14586.1,
+   "meter_ev100": 12.51,
+   "repo_model_meter_ev100": 12.628,
+   "sea_glitter_peak_cd_m2": 176747.0,
+   "sky_diffuse_horizontal_lux": 9116.5,
+   "sky_mean_luminance_cd_m2": 2901.9,
+   "sun_colour_temperature_k": 3508.0,
+   "sun_direct_normal_lux": 31497.9,
+   "sun_direct_normal_lux_repo_clear": 49326.2,
+   "sun_elevation_deg": 10.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.6025,
+    0.2169
+   ],
+   "sun_to_sky_ratio": 0.6,
+   "sun_xy": [
+    0.4109,
+    0.406
+   ],
+   "target_ev100": 12.51,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 16.83,
+    "white_sun_facing": 1.4143
+   },
+   "global_horizontal_lux": 17934.5,
+   "meter_ev100": 12.809,
+   "repo_model_meter_ev100": 12.923,
+   "sea_glitter_peak_cd_m2": 144878.0,
+   "sky_diffuse_horizontal_lux": 10091.8,
+   "sky_mean_luminance_cd_m2": 3212.3,
+   "sun_colour_temperature_k": 3716.0,
+   "sun_direct_normal_lux": 37721.4,
+   "sun_direct_normal_lux_repo_clear": 55551.3,
+   "sun_elevation_deg": 12.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.6394,
+    0.2695
+   ],
+   "sun_to_sky_ratio": 0.777,
+   "sun_xy": [
+    0.3985,
+    0.3983
+   ],
+   "target_ev100": 12.809,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 9.46,
+    "white_sun_facing": 1.3046
+   },
+   "global_horizontal_lux": 23230.8,
+   "meter_ev100": 13.182,
+   "repo_model_meter_ev100": 13.29,
+   "sea_glitter_peak_cd_m2": 105486.0,
+   "sky_diffuse_horizontal_lux": 11394.4,
+   "sky_mean_luminance_cd_m2": 3627.0,
+   "sun_colour_temperature_k": 3963.0,
+   "sun_direct_normal_lux": 45732.3,
+   "sun_direct_normal_lux_repo_clear": 63176.5,
+   "sun_elevation_deg": 15.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.6796,
+    0.3351
+   ],
+   "sun_to_sky_ratio": 1.039,
+   "sun_xy": [
+    0.3854,
+    0.3891
+   ],
+   "target_ev100": 13.182,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 3.97,
+    "white_sun_facing": 1.1348
+   },
+   "global_horizontal_lux": 32453.8,
+   "meter_ev100": 13.664,
+   "repo_model_meter_ev100": 13.761,
+   "sea_glitter_peak_cd_m2": 61867.0,
+   "sky_diffuse_horizontal_lux": 13238.7,
+   "sky_mean_luminance_cd_m2": 4214.0,
+   "sun_colour_temperature_k": 4260.0,
+   "sun_direct_normal_lux": 56181.2,
+   "sun_direct_normal_lux_repo_clear": 72622.5,
+   "sun_elevation_deg": 20.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.7232,
+    0.4164
+   ],
+   "sun_to_sky_ratio": 1.451,
+   "sun_xy": [
+    0.3717,
+    0.3785
+   ],
+   "target_ev100": 13.664,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 1.86,
+    "white_sun_facing": 0.9991
+   },
+   "global_horizontal_lux": 41824.9,
+   "meter_ev100": 14.03,
+   "repo_model_meter_ev100": 14.117,
+   "sea_glitter_peak_cd_m2": 37365.0,
+   "sky_diffuse_horizontal_lux": 14782.9,
+   "sky_mean_luminance_cd_m2": 4705.5,
+   "sun_colour_temperature_k": 4468.0,
+   "sun_direct_normal_lux": 63986.8,
+   "sun_direct_normal_lux_repo_clear": 79392.7,
+   "sun_elevation_deg": 25.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.7507,
+    0.474
+   ],
+   "sun_to_sky_ratio": 1.829,
+   "sun_xy": [
+    0.3633,
+    0.3715
+   ],
+   "target_ev100": 14.03,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 0.97,
+    "white_sun_facing": 0.8938
+   },
+   "global_horizontal_lux": 51087.3,
+   "meter_ev100": 14.319,
+   "repo_model_meter_ev100": 14.398,
+   "sea_glitter_peak_cd_m2": 23752.0,
+   "sky_diffuse_horizontal_lux": 16104.0,
+   "sky_mean_luminance_cd_m2": 5126.1,
+   "sun_colour_temperature_k": 4620.0,
+   "sun_direct_normal_lux": 69966.4,
+   "sun_direct_normal_lux_repo_clear": 84446.1,
+   "sun_elevation_deg": 30.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.7694,
+    0.5161
+   ],
+   "sun_to_sky_ratio": 2.172,
+   "sun_xy": [
+    0.3577,
+    0.3666
+   ],
+   "target_ev100": 14.319,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 0.36,
+    "white_sun_facing": 0.7469
+   },
+   "global_horizontal_lux": 68624.2,
+   "meter_ev100": 14.745,
+   "repo_model_meter_ev100": 14.813,
+   "sea_glitter_peak_cd_m2": 11754.0,
+   "sky_diffuse_horizontal_lux": 18246.9,
+   "sky_mean_luminance_cd_m2": 5808.2,
+   "sun_colour_temperature_k": 4824.0,
+   "sun_direct_normal_lux": 78373.2,
+   "sun_direct_normal_lux_repo_clear": 91389.1,
+   "sun_elevation_deg": 40.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.7928,
+    0.5725
+   ],
+   "sun_to_sky_ratio": 2.761,
+   "sun_xy": [
+    0.3508,
+    0.3604
+   ],
+   "target_ev100": 14.745,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 0.19,
+    "white_sun_facing": 0.6542
+   },
+   "global_horizontal_lux": 84071.4,
+   "meter_ev100": 15.037,
+   "repo_model_meter_ev100": 15.099,
+   "sea_glitter_peak_cd_m2": 7709.0,
+   "sky_diffuse_horizontal_lux": 19875.6,
+   "sky_mean_luminance_cd_m2": 6326.6,
+   "sun_colour_temperature_k": 4951.0,
+   "sun_direct_normal_lux": 83801.6,
+   "sun_direct_normal_lux_repo_clear": 95788.3,
+   "sun_elevation_deg": 50.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.8063,
+    0.6069
+   ],
+   "sun_to_sky_ratio": 3.23,
+   "sun_xy": [
+    0.3469,
+    0.3567
+   ],
+   "target_ev100": 15.037,
+   "white_protect_ev": 0.0
+  },
+  {
+   "expected_scene_linear": {
+    "grey_18_flat": 0.1194,
+    "sea_diffuse": 0.0398,
+    "sea_glitter_peak": 0.13,
+    "white_sun_facing": 0.5947
+   },
+   "global_horizontal_lux": 96745.8,
+   "meter_ev100": 15.24,
+   "repo_model_meter_ev100": 15.297,
+   "sea_glitter_peak_cd_m2": 6231.0,
+   "sky_diffuse_horizontal_lux": 21086.0,
+   "sky_mean_luminance_cd_m2": 6711.9,
+   "sun_colour_temperature_k": 5031.0,
+   "sun_direct_normal_lux": 87364.4,
+   "sun_direct_normal_lux_repo_clear": 98645.2,
+   "sun_elevation_deg": 60.0,
+   "sun_linear_srgb_tint": [
+    1.0,
+    0.8145,
+    0.6286
+   ],
+   "sun_to_sky_ratio": 3.588,
+   "sun_xy": [
+    0.3446,
+    0.3544
+   ],
+   "target_ev100": 15.24,
+   "white_protect_ev": 0.0
+  }
+ ],
+ "scenario": "coastal",
+ "site": {
+  "day_of_year": 265,
+  "latitude_deg": 37.5,
+  "longitude_deg": -122.5,
+  "name": "Half Moon Bay, California (stated example site)",
+  "utc_offset_h": -7.0,
+  "year": 2026
+ },
+ "sun_elevations_deg": [
+  2.0,
+  4.0,
+  6.0,
+  8.0,
+  10.0,
+  12.0,
+  15.0,
+  20.0,
+  25.0,
+  30.0,
+  40.0,
+  50.0,
+  60.0
+ ],
+ "units": {
+  "exposure": "EV100 (ISO 100)",
+  "illuminance": "lux",
+  "luminance": "cd/m2"
+ },
+ "version": 1
+}

@@ -1,0 +1,75 @@
+{
+ "black": {
+  "failures": [
+   "blank"
+  ],
+  "health": {
+   "crushed": 1.0,
+   "laplacian": 0.0,
+   "mean_luma": 0.0,
+   "penalty": 20.0,
+   "snow_chroma": 0.0,
+   "snow_clip": 0.0,
+   "std_luma": 0.0
+  },
+  "pixels_sha256": "7e36bec0af80ff78cd2cba3643b862a6c0e3ec56e52acabe92b246dcd6ad4816"
+ },
+ "blue_snow": {
+  "failures": [
+   "snow_chroma"
+  ],
+  "health": {
+   "crushed": 0.0,
+   "laplacian": 0.05869757756590843,
+   "mean_luma": 0.2060791701078415,
+   "penalty": 4.6040912469228115,
+   "snow_chroma": 0.5524909496307373,
+   "snow_clip": 0.0,
+   "std_luma": 0.15687569975852966
+  },
+  "pixels_sha256": "d2494b3527641b4cb93d57eb94d8e15b5602554b6a6b1970813fd5d8419bdbc8"
+ },
+ "clipped": {
+  "failures": [
+   "snow_clip"
+  ],
+  "health": {
+   "crushed": 0.0,
+   "laplacian": 0.09833855926990509,
+   "mean_luma": 0.40639832615852356,
+   "penalty": 5.0,
+   "snow_chroma": 0.0,
+   "snow_clip": 0.1,
+   "std_luma": 0.2953214645385742
+  },
+  "pixels_sha256": "4843edbea79e532706f0c667dcb30d0b991d1dfdaa5635156499acd62072670a"
+ },
+ "crushed": {
+  "failures": [
+   "crushed"
+  ],
+  "health": {
+   "crushed": 0.25,
+   "laplacian": 0.07239584624767303,
+   "mean_luma": 0.2320408821105957,
+   "penalty": 5.0,
+   "snow_chroma": 0.0,
+   "snow_clip": 0.0,
+   "std_luma": 0.24585659801959991
+  },
+  "pixels_sha256": "8c906c914ece81e798c22b89d210e69f1e3df07dbdd5962788b3406364e25b69"
+ },
+ "neutral": {
+  "failures": [],
+  "health": {
+   "crushed": 0.0,
+   "laplacian": 0.08890348672866821,
+   "mean_luma": 0.30951276421546936,
+   "penalty": 0.0,
+   "snow_chroma": 0.0,
+   "snow_clip": 0.0,
+   "std_luma": 0.2380809187889099
+  },
+  "pixels_sha256": "b411b9649246391e92f3008d7d0cc5f5bbc7d79b65d2bd5a5c7fc973252ee9f4"
+ }
+}

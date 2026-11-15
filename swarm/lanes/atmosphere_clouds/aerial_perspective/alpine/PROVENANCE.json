@@ -1,0 +1,84 @@
+{
+ "lane": "atmosphere_clouds.aerial_perspective.alpine",
+ "label": "visual-only",
+ "vendored": [],
+ "vendored_note": "Nothing was downloaded or vendored. No third-party code or asset ships.",
+ "generated": [
+  {
+   "file": "alpine_ap_a.rgba16f",
+   "sha256": "24937e7f10a37e23577a7fc53c9d85c630184232d008c50dc911e3b1087512fb",
+   "generator": "bake_alpine_ap.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_ap_b.rgba16f",
+   "sha256": "2386d95349fb8dbbd14bf52d7f2e6eaf977cc1a16c4c7cabdbcbe9e189b10ecb",
+   "generator": "bake_alpine_ap.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_ap_c.rgba16f",
+   "sha256": "4ef4332609fa8b8fdbe20bc40685348e77199fd07d1ed79cb86ea1f5cc09b2ae",
+   "generator": "bake_alpine_ap.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_ap.json",
+   "sha256": "eb501e388f2ae31fbb9da7aa19b93fb74c802f2c0f655be829ef54557e42d1c1",
+   "generator": "bake_alpine_ap.py",
+   "licence": "project (generated numbers)"
+  }
+ ],
+ "sources": [
+  {
+   "name": "Hillaire 2020, A Scalable and Production Ready Sky and Atmosphere Rendering Technique (EGSR 2020)",
+   "licence": "published constants and formulas (facts)",
+   "status": "ASSUMED, NOT VERIFIED",
+   "used_for": "the Rayleigh, Mie and ozone constants in bake_alpine_ap.py",
+   "note": "typed from memory; the paper was not fetched and the values were not read from the pinned engine build. They must not be described as the engine's defaults or as this project's atmosphere: FFlightSimWorldBeauty::ApplyAtmosphere and FlightSimDustHaze.cpp set the Mie layer per preset and visibility. Only the Rayleigh green value 0.013558 /km has a second witness in the repo (FlightSimDustHaze.cpp DustRayleighGreenPerKm)."
+  },
+  {
+   "name": "Henyey & Greenstein 1941 phase function; Rayleigh phase function 3/(16 pi)(1 + cos^2)",
+   "licence": "published formulas (facts)",
+   "used_for": "the two phase terms of the proposed shader; both integrate to 1 in the Mac test"
+  },
+  {
+   "name": "Narkowicz 2016 ACES filmic fit, x(2.51x+0.03)/(x(2.43x+0.59)+0.14)",
+   "licence": "published formula (facts); typed from memory, not fetched",
+   "used_for": "test only: a stand-in filmic curve to size the measurement's tonemap bias on synthetic frames. It is not the engine's tonemapper."
+  }
+ ],
+ "candidates_not_adopted": [
+  {
+   "name": "PetrVevoda/pragueskymodel",
+   "why": "dataset licence unverified; it is a sky-dome radiance fit, not transmittance and in-scatter to a surface at a given distance"
+  },
+  {
+   "name": "Scroga/Altitude-Responsive-Sky-Model",
+   "why": "wraps the Prague dataset, same unverified licence"
+  },
+  {
+   "name": "fgarlin/skytracer",
+   "why": "per-aerosol Mie tables would change the atmosphere away from the SkyAtmosphere reference this lane's gate is defined against; not fetched or vetted"
+  },
+  {
+   "name": "AT3D",
+   "why": "GPL-3.0 and cloud volumes, not this item"
+  },
+  {
+   "name": "NVIDIA approximate-Mie (draine.hlsl) / Jendersie and d'Eon 2023",
+   "why": "cloud and fog droplets; the engine's aerosol phase is Henyey-Greenstein and the gate compares against the engine"
+  },
+  {
+   "name": "Poly Haven Pure Skies",
+   "why": "sky backdrop, not aerial perspective"
+  }
+ ],
+ "measured_on_mac": "arithmetic and source checks only (tests/test_swarm_atmosphere_clouds_aerial_perspective_alpine.py)",
+ "measured_on_windows": "nothing yet",
+ "repo_facts_checked_on_mac": [
+  "scripts/run_test_scenarios.py SCENARIOS entry 11 is 'A-4 over the matterhorn, strong wind, severe turbulence' at 5000 m (test asserts it)",
+  "webapp/runs.py with_render_switches puts every FLIGHTSIM_RENDER_SWITCHES token on the engine argv; scripts/visual_fix_round.ps1 -Switches sets that variable",
+  "FlightSimRenderCommandlet.cpp reads -NoAerialPerspective from the command line and records scene.aerial_perspective_off; FlightSimClouds.cpp ApplyAtmosphere records 'nothing: no visible sky atmosphere' when the atmosphere is hidden"
+ ]
+}

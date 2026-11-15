@@ -1,0 +1,111 @@
+{
+  "albedo_budget": {
+    "albedo_linear_range": [
+      0.0319,
+      0.8963
+    ],
+    "head_worst_ratio": 0.4804246177078882,
+    "limits": {
+      "mean_min": 0.9,
+      "vs_head_min": 1.0,
+      "worst_min": 0.7
+    },
+    "mask_means": {
+      "grime": 0.4777867376994332,
+      "groove": 0.023849210499503427
+    },
+    "mean_ratio": 0.9040045904793913,
+    "pass": true,
+    "vs_head_mean": 1.1103004807560723,
+    "vs_head_worst": 1.3307705280643374,
+    "worst_ratio": 0.770642312784923
+  },
+  "albedo_srgb_range": [
+    50,
+    243
+  ],
+  "est_vram_mb": 0.17,
+  "est_vram_note": "ESTIMATE: BC5 1 byte/texel x 4/3 mips; not measured",
+  "files": {
+    "T_AcStorm_PanelN.dds": {
+      "bytes": 87536,
+      "sha256": "7d6a08afcfbc5c4d29191812568b5581edf4727503feddcf0b6360b6985aec82"
+    },
+    "T_AcStorm_PanelN.png": {
+      "bytes": 41806,
+      "sha256": "22ca10ae2ccd779e8f75092851b052d7016cff0a84b3330441325815d388f86f"
+    },
+    "T_AcStorm_Wet.dds": {
+      "bytes": 87536,
+      "sha256": "bf115d6a4fb16002b4cae4ba86d56b8bd989979c8e74fddbabbdad35b93d1059"
+    },
+    "T_AcStorm_Wet.png": {
+      "bytes": 72625,
+      "sha256": "97fd8dfa1e722469b812425ee97af56687dc9e13e92bb432bb5ca1be8580b74d"
+    }
+  },
+  "head": {
+    "AlbedoMax": 0.9,
+    "GrimeAmount": 0.2,
+    "PanelDarkening": 0.15,
+    "PorosityBareMetal": 0.12,
+    "PorosityPaint": 0.3
+  },
+  "mask_means": {
+    "bead": 0.09391266019278678,
+    "grime": 0.4777867376994332,
+    "groove": 0.023849210499503427,
+    "rivulet": 0.20564036975459943
+  },
+  "overrides": {
+    "bare_metal": {
+      "GrimeAmount": 0.2,
+      "PanelDarkening": 0.1
+    },
+    "paint": {
+      "AlbedoMax": 0.9,
+      "AlbedoMin": 0.0319,
+      "ClearCoat": 1.0,
+      "GrimeAmount": 0.1,
+      "PanelDarkening": 0.1
+    },
+    "wet": {
+      "PorosityBareMetal": 0.0,
+      "PorosityPaint": 0.05,
+      "WetCoatRoughness": 0.03,
+      "WetRoughness": 0.08
+    }
+  },
+  "projection": "dominant-axis (1 tap per map)",
+  "schema": "flightsim-swarm-aircraft-storm-pbr/1",
+  "seed": 20261112,
+  "shared": {
+    "airframe_wetness": 1.0,
+    "colour_temperature_k": 6100.0,
+    "dynamic_gi": "none (r.DynamicGlobalIlluminationMethod 0, D3D11 SM5)",
+    "ev100_offset": 0.0,
+    "exposure_meter_target_p90": 0.4,
+    "grade_contrast": 1.1,
+    "grade_saturation": 0.75,
+    "rain_rate_mmh": 40.0,
+    "wet_saturation_mmh": 4.0
+  },
+  "size": 256,
+  "status": "UNCALIBRATED: set by probe render on the render machine",
+  "summary": "2 BC5 maps at 256, dominant-axis projection, 2 taps; replaces the procedural panel_lines and rivulet noise; beads and groove AO off; clear coat stays.",
+  "textures": {
+    "T_AcStorm_PanelN": {
+      "NormalEncodeGain": 8.0,
+      "channels": "RG = slope XY x NormalEncodeGain, DirectX (UE) green",
+      "format": "BC5 (ATI2), linear, TC_Masks or TC_BC5 (NOT TC_Normalmap: slopes are gain-encoded)",
+      "uv": "local / PanelPitchCm"
+    },
+    "T_AcStorm_Wet": {
+      "channels": "R = rivulet, G = grime / roughness break-up",
+      "format": "BC5 (ATI2), linear, TC_Masks",
+      "uv": "local / (StreakPitchCm x 24), V scrolled aft by TimeS x StreakSpeedPerKt x AirspeedKts"
+    }
+  },
+  "tier": 0,
+  "visual_only": true
+}

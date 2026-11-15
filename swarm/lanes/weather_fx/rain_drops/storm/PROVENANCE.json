@@ -1,0 +1,96 @@
+{
+ "item": "weather_fx.rain_drops.storm",
+ "status": "UNMEASURED: generated on the Mac; no frame rendered, nothing downloaded, nothing vendored",
+ "visual_only": true,
+ "generated": [
+  {
+   "path": "baked/rain_layer0_512x1024.tga",
+   "sha256": "6986266b06ed62157cf85cd1cc770c1978a5aa3c1a4a0aa679bcf2df0d3fbd1d",
+   "by": "generate.py",
+   "licence": "project's own (generated from published formulas; no third-party pixels)"
+  },
+  {
+   "path": "baked/rain_layer1_512x1024.tga",
+   "sha256": "7a0a649ecbb1d507ec8c2739b56c2ff40b24af3348cf17ceef1930cc20d29ec0",
+   "by": "generate.py",
+   "licence": "project's own (generated from published formulas; no third-party pixels)"
+  },
+  {
+   "path": "baked/rain_layer2_512x1024.tga",
+   "sha256": "49e3d02c2e18f75ef6672465157d44493a42edcf0dad9422b1737d988475e362",
+   "by": "generate.py",
+   "licence": "project's own (generated from published formulas; no third-party pixels)"
+  },
+  {
+   "path": "baked/rain_layers.json",
+   "sha256": "a8e676fabc2c80aaf6b45c2ccc73a58fbe77e8316d2891b5b96edf097b46b7f4",
+   "by": "generate.py",
+   "licence": "project's own (generated from published formulas; no third-party pixels)"
+  }
+ ],
+ "fetched_assets": [],
+ "vendored": [],
+ "adopted_from_project": [
+  {
+   "path": "core/scene/rain_field.py",
+   "used_for": "the drop hash (unit, splitmix64), the truncated Marshall & Palmer sample, Beard & Chuang width, Foote & du Toit factor, budgets; imported read-only"
+  },
+  {
+   "path": "core/scene/precipitation.py",
+   "used_for": "fitted Lambda, D0, Atlas fall speed and extinction at 50 mm/h; imported read-only"
+  }
+ ],
+ "sources": [
+  {
+   "name": "Marshall & Palmer 1948, The distribution of raindrops with size, J. Meteor. 5",
+   "used_for": "N(D) = N0 exp(-Lambda D), via core/scene/precipitation.py",
+   "licence": "published formula (no asset copied)"
+  },
+  {
+   "name": "Atlas, Srivastava & Sekhon 1973, Doppler radar characteristics of precipitation at vertical incidence, Rev. Geophys. 11",
+   "used_for": "v(D) = 9.65 - 10.3 exp(-0.6 D), via core/scene/precipitation.py",
+   "licence": "published formula (no asset copied)"
+  },
+  {
+   "name": "Garg & Nayar 2007, Vision and Rain, IJCV 75(1)",
+   "used_for": "streak coverage D / (|v| t), via core/scene/rain_field.py",
+   "licence": "published formula (no asset copied)"
+  },
+  {
+   "name": "Beard & Chuang 1987, A new model for the equilibrium shape of raindrops, J. Atmos. Sci. 44",
+   "used_for": "drop axis ratio, via core/scene/rain_field.py",
+   "licence": "published formula (no asset copied)"
+  },
+  {
+   "name": "Foote & du Toit 1969, Terminal velocity of raindrops aloft, J. Appl. Meteor. 8",
+   "used_for": "fall speed factor at 2000 m, via core/scene/rain_field.py",
+   "licence": "published formula (no asset copied)",
+   "note": "marked unverified in the project's own module"
+  },
+  {
+   "name": "Koschmieder 1924 meteorological range, 3.912 / sigma",
+   "used_for": "shared_params.rain_meteorological_range_m",
+   "licence": "published formula (no asset copied)"
+  },
+  {
+   "name": "Tatarchuk 2006, Artist-Directable Real-Time Rain Rendering in City Environments (SIGGRAPH course); Lagarde 2012, Water drop 2a - dynamic rain and its effects",
+   "used_for": "the idea of layered scrolling rain textures with a depth test; no code or texture copied, the mapping and the bake here are this lane's own",
+   "licence": "technique only (no asset copied)",
+   "note": "recalled, not re-read here"
+  }
+ ],
+ "considered_not_adopted": [
+  {
+   "name": "astra-vision/weather-particle-simulator + rain-rendering",
+   "reason": "the project already carries the same drop statistics (Marshall & Palmer, Atlas) with tests; its streak database (Columbia) has no licence and is rejected by the research note. Not fetched; licence not verified here."
+  },
+  {
+   "name": "skiselkov/librain",
+   "reason": "windshield drops, not falling rain (another item); CDDL-1.0. Not fetched."
+  },
+  {
+   "name": "lightning-cinema, chromia/lichtenberg, xlma-python, miepython, sketch3d-blender-materials, Narasimhan & Nayar APSF",
+   "reason": "lightning, optics, puddles and light halos: other items of this scenario. Not fetched."
+  }
+ ]
+}

@@ -1,0 +1,116 @@
+{
+  "lane": "aircraft_exterior.pbr_materials.night_ifr",
+  "label": "visual-only",
+  "written": "2026-11-12, on the Mac; nothing here was rendered",
+  "fetched": [],
+  "fetched_note": "This lane downloaded nothing. No third-party code or asset is vendored in it.",
+  "sources": [
+    {
+      "name": "Physically Based API materials database (already vendored: assets/looks/physically_based, read through scripts/physically_based.py and scripts/aircraft_look.py)",
+      "url": "https://github.com/AntonPalmqvist/physically-based-api",
+      "commit": "bed520ab9800de4fc9800304f6557f85ce788e69",
+      "licence": "CC0-1.0",
+      "sha256": "9f9b55460e01c69a24ca5021642e2980a33d852e0f77c5c5826f7d6c64e32692",
+      "used_for": "ALBEDO_MIN 0.023 (the Tire row, the darkest measured albedo the repo uses)"
+    },
+    {
+      "name": "scripts/aircraft_look.py CLASS_SCALARS / CLASS_VECTORS and assets/aircraft_config/look/J11.json (this repository)",
+      "licence": "repository's own",
+      "used_for": "AlbedoMax 0.9, PanelWidthCm 0.35, PanelPitchCm 120/90, RoughnessBreakup 0.12, J-11A paint Roughness 0.5"
+    },
+    {
+      "name": "Toksvig, 'Mipmapping Normal Maps', Journal of Graphics Tools 10(3), 2005",
+      "licence": "published method, no code or data taken",
+      "used_for": "normal variance from the shortened mean normal of a mip footprint"
+    },
+    {
+      "name": "Tokuyoshi and Kaplanyan, 'Improved Geometric Specular Antialiasing', I3D 2019",
+      "licence": "published method, no code or data taken",
+      "used_for": "alpha^2 += min(2 sigma^2, 0.18): the widening and its clamp"
+    },
+    {
+      "name": "experiments/gate6_visual.py (this repository)",
+      "licence": "repository's own",
+      "used_for": "night_min_mean_luminance 2.0 and albedo_max_changed_fraction 0.001, reused as the gate's floor and tolerance"
+    }
+  ],
+  "candidates_not_adopted": [
+    {
+      "name": "80.lv Vehicular Hard Surface Texturing, Part 2",
+      "decision": "idea only (oil-canning as a baked low-frequency pillow per panel); article not fetched, no text or asset taken"
+    },
+    {
+      "name": "rLIC (neutrinoceros/rlic)",
+      "decision": "not fetched: the streaks here follow one uniform direction, which an anisotropic spectral filter gives exactly and tileably; LIC is for a varying flow field over the real mesh, which needs the airframe's UVs"
+    },
+    {
+      "name": "PB-22 Trident skin painter, KSP-BurnMarks, aitios-cli, MiG29-NuclearOption tools, Open Painter",
+      "decision": "not fetched, licences NOT verified by this lane: all are object-space bakes onto one airframe's UV set; this lane's textures are UV-independent so one bake serves all seven types. Open for a later per-airframe lane; the MiG-29 repo's assets are CC BY-NC-SA and must not be used"
+    }
+  ],
+  "generated": [
+    {
+      "file": "baked/T_AcNight_ORM_512.dds",
+      "sha256": "840b6c7ec43f745f81a59ebf88892f2be5d1eb776128010fe53945d5f99049e5",
+      "bytes": 1398228,
+      "by": "bake_night_pbr.py --tiers 0",
+      "seed": 20261112,
+      "numpy": "2.0.2"
+    },
+    {
+      "file": "baked/night_pbr.json",
+      "sha256": "b4c5ed55b034ab8355a99d99334beb442a757998c4690a9cffbfdbaba49ae5bb",
+      "bytes": 2102,
+      "by": "bake_night_pbr.py --tiers 0",
+      "seed": 20261112,
+      "numpy": "2.0.2"
+    }
+  ],
+  "generated_on_demand": {
+    "command": ".venv/bin/python swarm/lanes/aircraft_exterior/pbr_materials/night_ifr/bake_night_pbr.py --out <dir> --tiers all",
+    "note": "not committed (tier 3 is 2 x 89 MB uncompressed). sha256 of the Mac bake with the numpy above; another numpy/FFT build may differ in the last bit, so re-record after a re-bake rather than treating a mismatch as tampering",
+    "files": [
+      {
+        "tier": 1,
+        "file": "T_AcNight_ORM_1024.dds",
+        "sha256": "f1307c39085efbdd46c075c636ca7deea46bb4b8558287de075accd485a06f5c",
+        "bytes": 5592532
+      },
+      {
+        "tier": 1,
+        "file": "T_AcNight_N_1024.dds",
+        "sha256": "25069b993d0ee9e721d4a4de74d592e0c8602a2a9a7d59a5f0dd1aa45de9d4cf",
+        "bytes": 5592532
+      },
+      {
+        "tier": 2,
+        "file": "T_AcNight_ORM_2048.dds",
+        "sha256": "8d93e4f25aec8aae887e5c44e2cccb883bdeefc2ac4c0576d57e8643081118c6",
+        "bytes": 22369748
+      },
+      {
+        "tier": 2,
+        "file": "T_AcNight_N_2048.dds",
+        "sha256": "15851b915cfcbb0d9273be3d78b683826f9021d5e330d3cbdf39e3f86f5c2e0a",
+        "bytes": 22369748
+      },
+      {
+        "tier": 3,
+        "file": "T_AcNight_ORM_4096.dds",
+        "sha256": "fd15b67a4dce7a4401a4ce069df694905f73cf68125ce1369b405f5150fd2563",
+        "bytes": 89478612
+      },
+      {
+        "tier": 3,
+        "file": "T_AcNight_N_4096.dds",
+        "sha256": "c44f168f089e799ec15c87c1fe2afcba7187ffc5268269ead384e1f7029f4624",
+        "bytes": 89478612
+      }
+    ]
+  },
+  "generator_sha256": {
+    "bake_night_pbr.py": "39b50ded24b1d422d30c5d98ca7f6aaa9212e4a4b3032e8c5be2387983648454",
+    "measure_gate.py": "a5f12ac4b20b220e99442f33b1bec343ca34dcec84d1341759276e9b419a6305"
+  },
+  "pixel_gate_status": "BLOCKED and UNMEASURED, 2026-11-12: the -aircraft-night-pbr switch and a night scene in scripts/run_test_scenarios.py SCENARIOS do not exist in the repository; both are proposals in INTEGRATION.md (changes 3 and 4). measure_gate.py has only seen synthetic arrays and a fake run folder."
+}

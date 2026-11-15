@@ -1,0 +1,301 @@
+{
+ "bins": [
+  {
+   "channel": "R",
+   "name": "rest_physical",
+   "regime": "fall",
+   "sweep_m": 0.007074202
+  },
+  {
+   "channel": "G",
+   "name": "chase_physical",
+   "regime": "advected",
+   "sweep_m": 0.052478989
+  },
+  {
+   "channel": "B",
+   "name": "rest_cinematic",
+   "regime": "fall",
+   "sweep_m": 0.471613455
+  },
+  {
+   "channel": "A",
+   "name": "long_cinematic",
+   "regime": "advected",
+   "sweep_m": 1.886453821
+  }
+ ],
+ "item": "weather_fx.rain_drops.storm",
+ "layers": [
+  {
+   "bins": [
+    {
+     "alpha_scale": 0.305499158,
+     "mean_alpha_analytic": 0.001857254,
+     "mean_alpha_splat": 0.001857254,
+     "mean_alpha_stored": 0.001782532,
+     "mean_streak_length_m": 0.005777731,
+     "name": "rest_physical"
+    },
+    {
+     "alpha_scale": 0.082077802,
+     "mean_alpha_analytic": 0.001857254,
+     "mean_alpha_splat": 0.001857254,
+     "mean_alpha_stored": 0.001852786,
+     "mean_streak_length_m": 0.052478989,
+     "name": "chase_physical"
+    },
+    {
+     "alpha_scale": 0.014026049,
+     "mean_alpha_analytic": 0.001857254,
+     "mean_alpha_splat": 0.001857254,
+     "mean_alpha_stored": 0.00185572,
+     "mean_streak_length_m": 0.3851821,
+     "name": "rest_cinematic"
+    },
+    {
+     "alpha_scale": 0.008071366,
+     "mean_alpha_analytic": 0.001857254,
+     "mean_alpha_splat": 0.001857254,
+     "mean_alpha_stored": 0.001856558,
+     "mean_streak_length_m": 1.886453821,
+     "name": "long_cinematic"
+    }
+   ],
+   "drops_drawn": 657,
+   "drops_expected": 656.698,
+   "file": "rain_layer0_512x1024.tga",
+   "layer": 0,
+   "pixels_sha256": "05ad43627e756da28970eb0ec21120088037f7acb47ae7df151a541a71480ab7",
+   "rho0_m": 0.5,
+   "rho1_m": 1.5,
+   "rho_k_m": 0.866025,
+   "seed": 5862864349269850,
+   "shell_volume_m3": 0.949703,
+   "tile_height_m": 1.813799,
+   "tile_width_m": 0.45345,
+   "weight": 1.0
+  },
+  {
+   "bins": [
+    {
+     "alpha_scale": 0.286155629,
+     "mean_alpha_analytic": 0.004490209,
+     "mean_alpha_splat": 0.004490209,
+     "mean_alpha_stored": 0.004438656,
+     "mean_streak_length_m": 0.005823332,
+     "name": "rest_physical"
+    },
+    {
+     "alpha_scale": 0.076119104,
+     "mean_alpha_analytic": 0.004490209,
+     "mean_alpha_splat": 0.004490209,
+     "mean_alpha_stored": 0.004478781,
+     "mean_streak_length_m": 0.052478989,
+     "name": "chase_physical"
+    },
+    {
+     "alpha_scale": 0.018224588,
+     "mean_alpha_analytic": 0.004490209,
+     "mean_alpha_splat": 0.004490209,
+     "mean_alpha_stored": 0.00448899,
+     "mean_streak_length_m": 0.3882221,
+     "name": "rest_cinematic"
+    },
+    {
+     "alpha_scale": 0.010408435,
+     "mean_alpha_analytic": 0.004490209,
+     "mean_alpha_splat": 0.004490209,
+     "mean_alpha_stored": 0.004489846,
+     "mean_streak_length_m": 1.886453821,
+     "name": "long_cinematic"
+    }
+   ],
+   "drops_drawn": 12770,
+   "drops_expected": 12769.776,
+   "file": "rain_layer1_512x1024.tga",
+   "layer": 1,
+   "pixels_sha256": "1aedf9983a914ab2fbbfaf7040b49a408a4c415375a0e3b42d2a08079e3e1c1c",
+   "rho0_m": 1.5,
+   "rho1_m": 4.0,
+   "rho_k_m": 2.44949,
+   "seed": 1706602401068595,
+   "shell_volume_m3": 18.467392,
+   "tile_height_m": 5.130199,
+   "tile_width_m": 1.28255,
+   "weight": 1.0
+  },
+  {
+   "bins": [
+    {
+     "alpha_scale": 0.374645277,
+     "mean_alpha_analytic": 0.010983058,
+     "mean_alpha_splat": 0.010983058,
+     "mean_alpha_stored": 0.01081663,
+     "mean_streak_length_m": 0.005821553,
+     "name": "rest_physical"
+    },
+    {
+     "alpha_scale": 0.168238385,
+     "mean_alpha_analytic": 0.010983058,
+     "mean_alpha_splat": 0.010983058,
+     "mean_alpha_stored": 0.010937781,
+     "mean_streak_length_m": 0.052478989,
+     "name": "chase_physical"
+    },
+    {
+     "alpha_scale": 0.039159746,
+     "mean_alpha_analytic": 0.010983058,
+     "mean_alpha_splat": 0.010983058,
+     "mean_alpha_stored": 0.010979991,
+     "mean_streak_length_m": 0.388103529,
+     "name": "rest_cinematic"
+    },
+    {
+     "alpha_scale": 0.023484637,
+     "mean_alpha_analytic": 0.010983058,
+     "mean_alpha_splat": 0.010983058,
+     "mean_alpha_stored": 0.010981517,
+     "mean_streak_length_m": 1.886453821,
+     "name": "long_cinematic"
+    }
+   ],
+   "drops_drawn": 60000,
+   "drops_expected": 201425.398,
+   "file": "rain_layer2_512x1024.tga",
+   "layer": 2,
+   "pixels_sha256": "672751ef3c3477c361023a37dc56228a9f1c5cd3dc3eda5006e9bf00f3f0f33b",
+   "rho0_m": 4.0,
+   "rho1_m": 10.0,
+   "rho_k_m": 6.324555,
+   "seed": 848941219842383,
+   "shell_volume_m3": 291.297342,
+   "tile_height_m": 13.246118,
+   "tile_width_m": 3.311529,
+   "weight": 3.35709
+  }
+ ],
+ "physics": {
+  "altitude_m": 2000.0,
+  "d0_mm": 1.995619217,
+  "density_drawn_per_m3": 691.476949423,
+  "extinction_per_m": 0.004040868,
+  "fall_speed_factor": 1.081759219,
+  "lambda_per_mm": 1.839028192,
+  "rate_mmh": 50.0,
+  "v_t_d0_mps": 7.074201828
+ },
+ "scenario": "storm",
+ "shared_params": {
+  "colour_temperature_k": 6100.0,
+  "exposure_ev": 12.5,
+  "ground_albedo": 0.085,
+  "horizontal_illuminance_lux": 12548.4,
+  "light_owner": "lighting_exposure.physical_light_units.storm",
+  "rain_altitude_m": 2000.0,
+  "rain_d0_mm": 1.995619,
+  "rain_drop_luminance_cd_m2": 3994.3,
+  "rain_extinction_per_m": 0.004040868,
+  "rain_fall_speed_d0_mps": 7.074202,
+  "rain_gain": 4.0,
+  "rain_lambda_per_mm": 1.839028192,
+  "rain_layer_far_m": 10.0,
+  "rain_meteorological_range_m": 968.1,
+  "rain_rate_mmh": 50.0,
+  "rain_shutter_cinematic_s": 0.066666667,
+  "rain_shutter_physical_s": 0.001,
+  "rain_style": "cinematic",
+  "sun_elevation_deg": 28.0,
+  "wet_ground": true
+ },
+ "status": "UNMEASURED: baked on the Mac; no frame rendered",
+ "texture": {
+  "format": "RGBA8 linear (sRGB off), channels = bins",
+  "nrep": 12,
+  "nu": 512,
+  "nv": 1024,
+  "pole_fade_sin": [
+   0.15,
+   0.35
+  ],
+  "u_texel_mrad": 1.022654
+ },
+ "tiers": [
+  {
+   "est_vram_mb": 8.0,
+   "layers": [
+    0,
+    1,
+    2
+   ],
+   "particles": null,
+   "splash_budget": 512,
+   "summary": "no particles: three baked 512x1024 RGBA8 layers (0.5-10 m), one full-screen pass, three SampleLevel taps and one scene-depth read per pixel",
+   "tier": 0
+  },
+  {
+   "est_vram_mb": 6.3,
+   "layers": [
+    1,
+    2
+   ],
+   "particles": {
+    "box_half_m": [
+     1.5,
+     1.5,
+     1.5
+    ],
+    "est_mb": 1.0,
+    "expected_in_box": 18669.9,
+    "particles": 8192,
+    "weight": 2.279
+   },
+   "splash_budget": 1024,
+   "summary": "the project's drops in a 3 m box (8,192) for true near-field parallax; baked layers 1-2 beyond 1.5 m",
+   "tier": 1
+  },
+  {
+   "est_vram_mb": 10.7,
+   "layers": [
+    2
+   ],
+   "particles": {
+    "box_half_m": [
+     4.0,
+     4.0,
+     4.0
+    ],
+    "est_mb": 8.0,
+    "expected_in_box": 354036.2,
+    "particles": 65536,
+    "weight": 5.4022
+   },
+   "splash_budget": 2048,
+   "summary": "the project's drops in an 8 m box (65,536); baked layer 2 from 4 to 10 m",
+   "tier": 2
+  },
+  {
+   "est_vram_mb": 32.0,
+   "layers": [],
+   "particles": {
+    "box_half_m": [
+     10.0,
+     10.0,
+     8.0
+    ],
+    "est_mb": 32.0,
+    "expected_in_box": 4425452.5,
+    "particles": 262144,
+    "weight": 16.8818
+   },
+   "splash_budget": 4096,
+   "summary": "the project's existing path unchanged: 262,144 drops in the 20 x 20 x 16 m box, no baked layers",
+   "tier": 3
+  }
+ ],
+ "visual_only": true,
+ "wx1_mean_length_ratio": {
+  "rest_cinematic": 0.816733,
+  "rest_physical": 0.816733
+ }
+}

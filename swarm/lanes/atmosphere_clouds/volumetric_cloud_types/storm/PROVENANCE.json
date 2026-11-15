@@ -1,0 +1,95 @@
+{
+  "item": "atmosphere_clouds.volumetric_cloud_types.storm",
+  "status": "UNMEASURED: generated on the Mac; no frame rendered, nothing downloaded, nothing vendored",
+  "generated": [
+    {
+      "path": "baked/storm_cloud_types.json",
+      "sha256": "f9c816c6b641fb31986ce9344e30f77cc9235036f305abe60569815854c54711",
+      "bytes": 8569,
+      "by": "generate.py",
+      "licence": "project's own (procedural, no third-party pixels)"
+    },
+    {
+      "path": "baked/storm_noise_32_atlas.tga",
+      "sha256": "a640de2e265fe53625abef0d8dda1f6948588a24cfdddef9408c1054645fcf3b",
+      "bytes": 32786,
+      "by": "generate.py",
+      "licence": "project's own (procedural, no third-party pixels)"
+    },
+    {
+      "path": "baked/storm_noise_64_atlas.tga",
+      "sha256": "f798283d178eabdc2880b87559ea197ea164fa3d38249291258f3abdb80dd916",
+      "bytes": 262162,
+      "by": "generate.py",
+      "licence": "project's own (procedural, no third-party pixels)"
+    },
+    {
+      "path": "baked/storm_underdeck_256x64.hdr",
+      "sha256": "023b7a4749990472d73faf6e02d8638ea5778c7331f5fd7a6153effc53104a57",
+      "bytes": 65584,
+      "by": "generate.py",
+      "licence": "project's own (procedural, no third-party pixels)"
+    },
+    {
+      "path": "baked/storm_weather_128.tga",
+      "sha256": "c62b2c1c59b5c9dc9df830214a5a3656a9cc3ee11233d3c32b44c4aff7be8d6d",
+      "bytes": 49170,
+      "by": "generate.py",
+      "licence": "project's own (procedural, no third-party pixels)"
+    }
+  ],
+  "fetched_assets": [],
+  "sources": [
+    {
+      "name": "Bohren 1987, Multiple scattering of light and some of its observable consequences, Am. J. Phys. 55",
+      "used_for": "two-stream diffuse transmittance of a conservative cloud, T = 2 / (2 + (1 - g) tau)",
+      "licence": "published formula (no asset copied)"
+    },
+    {
+      "name": "Stephens 1978, Radiation profiles in extended water clouds II, J. Atmos. Sci. 35",
+      "used_for": "extinction from liquid water content and effective radius, sigma = 3 LWC / (2 rho r_eff)",
+      "licence": "published formula (no asset copied)"
+    },
+    {
+      "name": "Jendersie & d'Eon 2023, An Approximate Mie Scattering Function for Fog and Cloud Rendering",
+      "url": "https://research.nvidia.com/labs/rtr/approximate-mie/",
+      "used_for": "HG + Draine blend and its fit constants for 5-50 um droplets",
+      "licence": "paper, formulas only; draine.hlsl (MIT) was NOT fetched or vendored",
+      "note": "constants transcribed, not re-read against the PDF in this session"
+    },
+    {
+      "name": "Wrenninge, Kulla & Lundqvist 2013, Oz: The Great and Volumetric (SIGGRAPH talk)",
+      "url": "https://fpsunflower.github.io/ckulla/data/oz_volumes.pdf",
+      "used_for": "octave multiple-scattering approximation",
+      "licence": "paper, formulas only"
+    },
+    {
+      "name": "Koschmieder 1924 visibility law (2 % contrast threshold)",
+      "used_for": "haze extinction = 3.912 / visibility",
+      "licence": "published formula (no asset copied)"
+    },
+    {
+      "name": "lighting_exposure.physical_light_units.storm (this repository, baked/storm_plu.json)",
+      "used_for": "SkyAtmosphere clear-sky reference 50193.6 lux, deck fraction 0.25, SkyLight 3395.1 cd/m2, EV100 12.5",
+      "licence": "project's own"
+    }
+  ],
+  "considered_not_adopted": [
+    {
+      "name": "PetrVevoda/pragueskymodel, Scroga/Altitude-Responsive-Sky-Model",
+      "why": "clear and twilight sky model, not an under-deck storm sky; dataset licence unverified"
+    },
+    {
+      "name": "CloudTomography/AT3D LES fields",
+      "why": "GPL-3.0; shallow cumulus fields, not a cumulonimbus"
+    },
+    {
+      "name": "fgarlin/skytracer aerosol tables",
+      "why": "aerosol cross-sections; this item is droplet cloud"
+    },
+    {
+      "name": "Poly Haven pure-sky HDRIs",
+      "why": "partly cloudy daylight, would contradict the 0.25 deck"
+    }
+  ]
+}

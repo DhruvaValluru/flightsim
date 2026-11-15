@@ -1,0 +1,97 @@
+{
+ "schema": "flightsim-swarm-aircraft-coastal-pbr/1",
+ "visual_only": true,
+ "status": "UNCALIBRATED: look choice, set by probe render on the Windows laptop",
+ "normal_convention": "DirectX (green down), tangent space, UE TC_Normalmap",
+ "mask_channels": {
+  "R": "salt film",
+  "G": "roughness breakup, 0.5 neutral",
+  "B": "grime streaks, flow along +U"
+ },
+ "albedo_range_linear": [
+  0.023,
+  0.9
+ ],
+ "salt_albedo_linear": [
+  1.0,
+  1.0,
+  1.0
+ ],
+ "coastal_scalars": {
+  "CoastalWeathering": 1.0,
+  "DetailTiling": 6.0,
+  "DetailNormalAmount": 0.6,
+  "SaltAmount": 0.5,
+  "SaltAlbedoWeight": 0.05,
+  "SaltRoughness": 0.25,
+  "SaltCoatRoughness": 0.12,
+  "GrimeDarkening": 0.5,
+  "GrimeRoughness": 0.15,
+  "RoughnessMin": 0.08,
+  "AlbedoMin": 0.023,
+  "DetailFadeStartCm": 3000.0,
+  "DetailFadeEndCm": 12000.0
+ },
+ "class_overrides": {
+  "paint": {
+   "GrimeAmount": 0.2,
+   "PanelDarkening": 0.12,
+   "ClearCoatRoughness": 0.1
+  },
+  "bare_metal": {
+   "GrimeAmount": 0.2,
+   "PanelDarkening": 0.12
+  }
+ },
+ "gate": {
+  "max_texel_darkening": 0.15,
+  "mean_albedo_band": [
+   0.97,
+   1.08
+  ]
+ },
+ "tiers": {
+  "0": {
+   "normal_px": 512,
+   "mask_px": 512,
+   "mask_format": "BC1",
+   "samples": 2,
+   "projection": "UV0 x tiling",
+   "aniso": 2,
+   "summary": "512 px BC5 detail normal + 512 px BC1 salt/roughness/grime mask, 2 texture reads on UV0, no extra passes",
+   "normal_format": "BC5",
+   "est_vram_mb": 0.5,
+   "est_vram_is": "ESTIMATE (block size x 4/3 mip chain), not measured",
+   "files": {
+    "T_AcCoastal_DetailN_512.png": {
+     "sha256": "3d9e9448bec3cfb990753e912d85956ebcf9058d598d47988ae66064f2898d7b",
+     "bytes": 327800
+    },
+    "T_AcCoastal_Mask_512.png": {
+     "sha256": "2deedb5fee975ffb56d7b366fa9a1585429e40a518fbacf02a5a672a32693765",
+     "bytes": 287518
+    }
+   },
+   "albedo": {
+    "grey_card_0.18": {
+     "mean_ratio": 1.0291,
+     "min_ratio": 0.9,
+     "min": 0.162,
+     "max": 0.2005
+    },
+    "dark_livery_0.05": {
+     "mean_ratio": 1.1523,
+     "min_ratio": 0.9,
+     "min": 0.045,
+     "max": 0.0738
+    },
+    "white_0.9": {
+     "mean_ratio": 0.9905,
+     "min_ratio": 0.9,
+     "min": 0.81,
+     "max": 0.9
+    }
+   }
+  }
+ }
+}

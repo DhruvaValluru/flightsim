@@ -1,0 +1,112 @@
+{
+ "lane": "terrain.dem_posting.alpine",
+ "label": "visual-only",
+ "vendored": [],
+ "vendored_note": "No third-party code is vendored. The only fetched asset is Copernicus DEM GLO-90 (54 tiles, 252 MB); the raw tiles are not committed, their URLs and sha256 are in glo90_tiles.json, and only the pooled polar grids derived from them ship.",
+ "generated": [
+  {
+   "file": "alpine_dem_posting.json",
+   "sha256": "deaefd0acb3b2eff2e1f6488f8b139c1985d5a38c8b9c9d9563b0c8e2b7196f1",
+   "bytes": 5279,
+   "generator": "bake_alpine_dem_posting.py",
+   "licence": "project (generated numbers)"
+  },
+  {
+   "file": "alpine_far_ring_t0.bin",
+   "sha256": "36f4d58b4a935d8333d2bc487f108ae64681372d234d3dabb5f6d1c4fa6ab904",
+   "bytes": 393216,
+   "generator": "bake_alpine_dem_posting.py",
+   "licence": "derived from Copernicus DEM GLO-90 (attribution required)"
+  },
+  {
+   "file": "alpine_far_ring_t1.bin",
+   "sha256": "7a646084e174c96d6269c1be82e9c937c4683f3c02da0a7d7dc866ee0a5492f1",
+   "bytes": 524288,
+   "generator": "bake_alpine_dem_posting.py",
+   "licence": "derived from Copernicus DEM GLO-90 (attribution required)"
+  },
+  {
+   "file": "alpine_far_ring_t2.bin",
+   "sha256": "ffe11aca3b7f48aa5a173fcc98038df0e562c7661b62237fa8f919e3711a6bd8",
+   "bytes": 1572864,
+   "generator": "bake_alpine_dem_posting.py",
+   "licence": "derived from Copernicus DEM GLO-90 (attribution required)"
+  },
+  {
+   "file": "alpine_far_ring_t3.bin",
+   "sha256": "74378c00bf948ee42f1c8d6ac36cb3a3b92b7fe089f745a0d0a10286d8f06a71",
+   "bytes": 3145728,
+   "generator": "bake_alpine_dem_posting.py",
+   "licence": "derived from Copernicus DEM GLO-90 (attribution required)"
+  },
+  {
+   "file": "alpine_skyline_ref.bin",
+   "sha256": "0e96e387e68a6cce76fc9f62c8e899bc2a1003a8fc9922c31b2e61ffe514bff2",
+   "bytes": 786432,
+   "generator": "bake_alpine_dem_posting.py",
+   "licence": "derived from Copernicus DEM GLO-90 (attribution required)"
+  },
+  {
+   "file": "glo90_tiles.json",
+   "sha256": "0f41187f159b6285d6cdffe2cf8f0ebd1041e9042e8f3a021408c2cc94873521",
+   "bytes": 16308,
+   "generator": "bake_alpine_dem_posting.py",
+   "licence": "project (generated numbers)"
+  }
+ ],
+ "sources": [
+  {
+   "name": "Copernicus DEM GLO-90 (COG, 3 arc-second), 54 tiles N43-N48 x E003-E011",
+   "url": "https://copernicus-dem-90m.s3.amazonaws.com",
+   "licence": "Copernicus DEM licence: free of charge, worldwide, commercial use and derived works permitted with attribution",
+   "attribution": "produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+   "sha256": "per tile in glo90_tiles.json",
+   "fetched": "2026-11-12",
+   "used_for": "far-ring heights and the skyline reference"
+  },
+  {
+   "name": "core/terrain/glo30.py LOCATIONS['matterhorn'] (this repo)",
+   "licence": "project",
+   "used_for": "summit coordinates (ring centre, identity check) and the 3100 m snowline, which that file records as approximated"
+  },
+  {
+   "name": "core/scenario/camera.py default intrinsics (this repo)",
+   "licence": "project",
+   "used_for": "35 mm lens, 36 mm sensor, 1280x720: the pixel footprint in the posting ladder"
+  },
+  {
+   "name": "Standard terrestrial refraction coefficient k = 0.13 (effective earth radius R/(1-k))",
+   "licence": "published constant (fact)",
+   "used_for": "horizon range and skyline elevation"
+  },
+  {
+   "name": "Mont Blanc 4806 m (45.83262 N, 6.86517 E), surveyed summit elevation",
+   "licence": "fact",
+   "used_for": "identity check of the baked grid in the test only"
+  }
+ ],
+ "rejected": [
+  {
+   "name": "HORAYZON",
+   "reason": "MIT and relevant (horizon from DEM), but needs Embree/C++ build; a polar max-pool in numpy does this lane's job in 30 lines. Not downloaded."
+  },
+  {
+   "name": "GEDTM30 v1.2",
+   "reason": "code LICENSE not read; GLO-90 is already the repo's DEM family and is enough beyond 30 km. Not downloaded."
+  },
+  {
+   "name": "MultiScaleErosion, runevision erosion filter, Olbedo, SWORD, snow-cover probability, USGS 3DEP",
+   "reason": "other terrain items' scope (detail normals, de-lighting, rivers, snow mask) or US-only; not this posting lane. Not downloaded."
+  }
+ ],
+ "uncalibrated": [
+  "far-ring vertex colours (height rule: vegetation/rock/snow)",
+  "gate tolerances TOL_DEG 0.15, 120 km, 0.80, detail_px 2.0/4.0",
+  "skyline edge detector on real hazy frames",
+  "tier VRAM estimates"
+ ],
+ "model_findings_not_render_results": [
+  "GLO-90 reads sharp summits low: Dufourspitze 106 m, Dom 82 m, Mont Blanc 13 m below the surveyed value in the baked reference grid",
+  "predicted skyline from 5000 m over the Matterhorn, north view: the skyline ridge lies beyond 30 km in every azimuth and beyond 160 km in 59% of them (east 91%, south 96%, west 37%)"
+ ]
+}

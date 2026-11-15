@@ -1,0 +1,62 @@
+// Coastal aircraft weathering block. VISUAL-ONLY. Shader Model 5 / D3D11.
+// Body of a Material "Custom" node (or an include from assets/shaders/aircraft).
+// Python twin: bake_coastal_pbr.py weather(); tests/test_swarm_aircraft_exterior_pbr_materials_coastal.py
+// pins the two to the same constants by name.
+//
+// Tier 0 cost: 2 texture reads, no loops, no derivatives, no extra pass.
+// UNMEASURED: nothing in this file has been compiled or rendered. The Mac
+// cannot run the pinned UE build.
+//
+// Inputs (material parameters, same names as COASTAL_SCALARS):
+//   float3 BaseColor, float Roughness, float RoughnessBreakup, float GrimeAmount,
+//   float ClearCoatRoughness, float2 UV (UV0), float CameraDistanceCm,
+//   Texture2D DetailN (BC5), Texture2D Mask (BC1/BC7, linear), SamplerState S,
+//   float CoastalWeathering, DetailTiling, DetailNormalAmount, SaltAmount,
+//   SaltAlbedoWeight, SaltRoughness, SaltCoatRoughness, GrimeDarkening,
+//   GrimeRoughness, RoughnessMin, AlbedoMin, AlbedoMax, DetailFadeStartCm,
+//   DetailFadeEndCm, float3 SaltAlbedo
+// Outputs: OutBaseColor, OutRoughness, OutCoatRoughness, OutNormalTS
+
+struct FCoastalWeathering
+{
+    float3 BaseColor;
+    float  Roughness;
+    float  CoatRoughness;
+    float3 NormalTS;
+};
+
+FCoastalWeathering CoastalWeathering_Eval(
+    float3 BaseColor, float Roughness, float RoughnessBreakup, float GrimeAmount,
+    float ClearCoatRoughness, float2 UV, float CameraDistanceCm,
+    Texture2D DetailN, Texture2D Mask, SamplerState S,
+    float CoastalWeathering, float DetailTiling, float DetailNormalAmount,
+    float SaltAmount, float SaltAlbedoWeight, float SaltRoughness, float SaltCoatRoughness,
+    float GrimeDarkening, float GrimeRoughness, float RoughnessMin,
+    float AlbedoMin, float AlbedoMax, float DetailFadeStartCm, float DetailFadeEndCm,
+    float3 SaltAlbedo)
+{
+    FCoastalWeathering Out;
+    float2 TUV = UV * DetailTiling;
+
+    float3 M = Mask.Sample(S, TUV).rgb;            // read 1
+    float Salt  = M.r * SaltAmount * CoastalWeathering;
+    float Grime = M.b * GrimeAmount * CoastalWeathering;
+
+    float3 Albedo = BaseColor * (1.0 - GrimeDarkening * Grime);
+    Albedo = lerp(Albedo, SaltAlbedo, SaltAlbedoWeight * Salt);
+    Out.BaseColor = clamp(Albedo, AlbedoMin, AlbedoMax);   // never below the calibrated floor
+
+    float R = Roughness + RoughnessBreakup * (M.g - 0.5) * 2.0 * CoastalWeathering
+            + SaltRoughness * Salt + GrimeRoughness * Grime;
+    Out.Roughness = clamp(R, RoughnessMin, 1.0);
+    Out.CoatRoughness = saturate(ClearCoatRoughness + SaltCoatRoughness * Salt);
+
+    float2 N = DetailN.Sample(S, TUV).rg * 2.0 - 1.0;  // read 2 (BC5: X, Y)
+    // Tier 0 passes DetailFadeEndCm <= DetailFadeStartCm to skip the fade.
+    float Fade = (DetailFadeEndCm > DetailFadeStartCm)
+        ? 1.0 - saturate((CameraDistanceCm - DetailFadeStartCm) / (DetailFadeEndCm - DetailFadeStartCm))
+        : 1.0;
+    N *= DetailNormalAmount * CoastalWeathering * Fade;
+    Out.NormalTS = float3(N, sqrt(saturate(1.0 - dot(N, N))));
+    return Out;
+}

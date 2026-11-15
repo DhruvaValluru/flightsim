@@ -1,0 +1,110 @@
+{
+  "item": "weather_fx.windscreen_water.storm",
+  "status": "UNMEASURED: generated on the Mac; no frame rendered, nothing downloaded, nothing vendored",
+  "visual_only": true,
+  "generated": [
+    {
+      "path": "baked/T_WSDrops_1024.png",
+      "sha256": "449c81b32eeeb265190bb755f6190b17390c54ce374825ba33ff1ca294fa46ab",
+      "by": "generate.py",
+      "licence": "project's own (generated from closed-form optics, no third-party pixels)"
+    },
+    {
+      "path": "baked/T_WSDrops_2048.png",
+      "sha256": "37ef9f7769c6c1b8145acb5352f191ef224c1b6678478c5cfb3d2e034cac522c",
+      "by": "generate.py",
+      "licence": "project's own (generated from closed-form optics, no third-party pixels)"
+    },
+    {
+      "path": "baked/T_WSDrops_256.png",
+      "sha256": "d2bda979c3a4963bcd6115a6e970b6d459ece999068c934cf2190d7e54813f6e",
+      "by": "generate.py",
+      "licence": "project's own (generated from closed-form optics, no third-party pixels)"
+    },
+    {
+      "path": "baked/T_WSDrops_512.png",
+      "sha256": "ebd5f0d3ab29e6cf9f00dd78d37b423e013e57a6a2055e6e649f2b206372d1dc",
+      "by": "generate.py",
+      "licence": "project's own (generated from closed-form optics, no third-party pixels)"
+    },
+    {
+      "path": "baked/T_WSRivulets_1024.png",
+      "sha256": "29b7638d55a1db921ba878c53bad0d84ba3d3b4fc879f62d59675523ac58aeaf",
+      "by": "generate.py",
+      "licence": "project's own (generated from closed-form optics, no third-party pixels)"
+    },
+    {
+      "path": "baked/T_WSRivulets_2048.png",
+      "sha256": "ce5b1559d0f27fb8da90fc296efe698edf61dcf1feb67618a8e2561f2d4de02f",
+      "by": "generate.py",
+      "licence": "project's own (generated from closed-form optics, no third-party pixels)"
+    },
+    {
+      "path": "baked/T_WSRivulets_256.png",
+      "sha256": "9ef28451c7b4b0fd83d31a5feec06eca6f3be7f9d6b9e3a838a1dd1b79d63c3d",
+      "by": "generate.py",
+      "licence": "project's own (generated from closed-form optics, no third-party pixels)"
+    },
+    {
+      "path": "baked/T_WSRivulets_512.png",
+      "sha256": "d7731ca36b704f5dab5aa9fa588c0a6af827794131a707d479186a27438307e8",
+      "by": "generate.py",
+      "licence": "project's own (generated from closed-form optics, no third-party pixels)"
+    },
+    {
+      "path": "baked/windscreen_water_storm.json",
+      "sha256": "23152465b6d840de267260cdc2a90901f068c7d872024f45bc3184db902d7893",
+      "by": "generate.py",
+      "licence": "project's own (generated from closed-form optics, no third-party pixels)"
+    }
+  ],
+  "fetched_assets": [],
+  "vendored": [],
+  "sources": [
+    {
+      "name": "Snell's law and the Fresnel equations, water n = 1.333 (visible, about 20 C)",
+      "used_for": "the deflection and the transmittance of a ray leaving a drop's curved face; the ring of total internal reflection past 48.6 degrees",
+      "licence": "published physics (no asset copied)"
+    },
+    {
+      "name": "Marshall & Palmer 1948, The distribution of raindrops with size, J. Meteor. 5",
+      "used_for": "Lambda = 4.1 R^-0.21 per mm for the 25 mm/h storm; N0 = 8000 /m3/mm in the worked example only",
+      "licence": "published formula (no asset copied)",
+      "note": "the project's cards carry their own fitted Lambda; the host's impingement comes from the card, not from this"
+    },
+    {
+      "name": "Spherical-cap volume of a sessile drop at a contact angle (Young's equation geometry)",
+      "used_for": "a drop's footprint on the glass from its volume",
+      "licence": "published geometry (no asset copied)",
+      "note": "the 70 degree contact angle is STATED, not measured for any aircraft glazing"
+    },
+    {
+      "name": "this repository: core/scene/rain_field.py (V_SHED_MPS, RUNOFF_GAIN, WINDSHIELD_COS, D_RENDER_MIN_MM, D_MAX_MM, splitmix64), assets/shaders/weather/windshield.hlsl",
+      "used_for": "the run-off law and the material contract the baked path keeps; copied as constants and cross-checked by the test",
+      "licence": "project's own"
+    }
+  ],
+  "research_candidates_not_adopted": [
+    {
+      "name": "librain (skiselkov)",
+      "why": "the closest fit, but CDDL-1.0 and GLSL 4.60 with its own simulation passes (render targets per frame), heavier than two texture taps on this GPU. Not fetched and not read: the baked path is written from the optics above, so no CDDL text is derived from."
+    },
+    {
+      "name": "sketch3d-blender-materials mat_water.py",
+      "why": "puddles from a heightmap; a windscreen has no heightmap to flood"
+    },
+    {
+      "name": "lightning-cinema, chromia/lichtenberg, xlma-python",
+      "why": "lightning geometry: another item's (weather_fx lightning)"
+    },
+    {
+      "name": "astra-vision weather-particle-simulator",
+      "why": "airborne rain statistics; the project already has Marshall-Palmer and Atlas in core/scene/rain_field.py. The Columbia streak database it uses has no licence."
+    },
+    {
+      "name": "Narasimhan & Nayar 2003 APSF, miepython",
+      "why": "glow around lights and phase functions: nothing on the glass in a daytime storm needs them"
+    }
+  ],
+  "regenerate": "python swarm/lanes/weather_fx/windscreen_water/storm/generate.py"
+}

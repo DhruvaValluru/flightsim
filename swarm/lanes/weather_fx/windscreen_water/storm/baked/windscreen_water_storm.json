@@ -1,0 +1,153 @@
+{
+  "item": "weather_fx.windscreen_water.storm",
+  "status": "UNMEASURED: baked on the Mac, no frame rendered",
+  "visual_only": true,
+  "optics": {
+    "n_water": 1.333,
+    "tir_incidence_deg": 48.6066,
+    "tan_max": 0.881413,
+    "contact_angle_deg": 70.0,
+    "rim_floor": 0.15,
+    "tir_ring_from_radius_fraction": 0.7983
+  },
+  "geometry": {
+    "glass_distance_m": 0.35,
+    "vfov_deg": 60.0,
+    "tiles": 3.0,
+    "tile_mm": 134.715,
+    "lens_scale": 0.763326
+  },
+  "rain": {
+    "rate_mmh": 25.0,
+    "lambda_per_mm": 2.08553,
+    "d_min_mm": 1.0,
+    "d_max_mm": 6.0
+  },
+  "drops": {
+    "count": 1600,
+    "mean_base_radius_mm": 1.0043,
+    "max_base_radius_mm": 3.3118,
+    "mean_cap_area_m2": 3.4038649146791016e-06,
+    "max_cover": 0.3,
+    "density_to_cover": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.05,
+        0.00445
+      ],
+      [
+        0.1,
+        0.0191
+      ],
+      [
+        0.15,
+        0.03615
+      ],
+      [
+        0.2,
+        0.05173
+      ],
+      [
+        0.25,
+        0.06797
+      ],
+      [
+        0.3,
+        0.0867
+      ],
+      [
+        0.35,
+        0.10664
+      ],
+      [
+        0.4,
+        0.12592
+      ],
+      [
+        0.45,
+        0.14579
+      ],
+      [
+        0.5,
+        0.1658
+      ],
+      [
+        0.55,
+        0.1873
+      ],
+      [
+        0.6,
+        0.21098
+      ],
+      [
+        0.65,
+        0.23486
+      ],
+      [
+        0.7,
+        0.26071
+      ],
+      [
+        0.75,
+        0.28931
+      ]
+    ]
+  },
+  "rivulets": {
+    "count": 14,
+    "half_width_mm": [
+      1.0,
+      2.2
+    ]
+  },
+  "shader": {
+    "edge_gain": 16.0,
+    "a_span": 0.75
+  },
+  "law": {
+    "v_shed_mps": 22.0,
+    "runoff_gain": 0.35,
+    "windshield_cos": 0.5
+  },
+  "example_impinge_per_m2_s_at_100kt": 12257.7,
+  "example_wet_at_100kt": {
+    "drop_density": 0.2835,
+    "rivulet_density": 0.2694,
+    "head_rate_tiles_per_s": 76.487,
+    "trail_tiles": 0.25,
+    "runoff_mps": 10.304,
+    "standing_cover": 0.0805
+  },
+  "example_wet_at_15mps_taxi": {
+    "drop_density": 0.2224,
+    "rivulet_density": 0.0,
+    "head_rate_tiles_per_s": 0.0,
+    "trail_tiles": 0.25,
+    "runoff_mps": 0.0,
+    "standing_cover": 0.059
+  },
+  "stated_not_measured": [
+    "contact_angle_deg",
+    "rim_floor",
+    "glass_distance_m",
+    "vfov_deg",
+    "tiles",
+    "max_cover",
+    "rivulet count and widths",
+    "host_wet's split between standing drops and tracks",
+    "v_shed_mps and runoff_gain (the project's, stated there)"
+  ],
+  "files": {
+    "T_WSDrops_256.png": "d2bda979c3a4963bcd6115a6e970b6d459ece999068c934cf2190d7e54813f6e",
+    "T_WSRivulets_256.png": "9ef28451c7b4b0fd83d31a5feec06eca6f3be7f9d6b9e3a838a1dd1b79d63c3d",
+    "T_WSDrops_512.png": "ebd5f0d3ab29e6cf9f00dd78d37b423e013e57a6a2055e6e649f2b206372d1dc",
+    "T_WSRivulets_512.png": "d7731ca36b704f5dab5aa9fa588c0a6af827794131a707d479186a27438307e8",
+    "T_WSDrops_1024.png": "449c81b32eeeb265190bb755f6190b17390c54ce374825ba33ff1ca294fa46ab",
+    "T_WSRivulets_1024.png": "29b7638d55a1db921ba878c53bad0d84ba3d3b4fc879f62d59675523ac58aeaf",
+    "T_WSDrops_2048.png": "37ef9f7769c6c1b8145acb5352f191ef224c1b6678478c5cfb3d2e034cac522c",
+    "T_WSRivulets_2048.png": "ce5b1559d0f27fb8da90fc296efe698edf61dcf1feb67618a8e2561f2d4de02f"
+  }
+}
