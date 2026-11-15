@@ -387,16 +387,16 @@ BEAUTY_TORNADO_PUFFS = {
 BEAUTY_TORNADO_DUST_SPIN_RADII = 1.0
 #: The funnel's translucent sheath (M_TornadoFunnelSoft's FunnelColour): the funnel's grey.
 BEAUTY_TORNADO_SHEATH_COLOUR = BEAUTY_FUNNEL_COLOUR
-#: 2026-11-15 (hyperreal tornado-shape): the wide swirling DEBRIS RING at the ground, outside
-#: the dust whirl: low, flattened puffs (aspect = width / height) from 1.0 to 2.6 core radii,
-#: their centres within top_m of 0.3 x their height, darker and browner than the whirl
-#: (ground torn up, not condensation), on their own beauty-only actor spun at the Rankine
-#: exterior rate at BEAUTY_TORNADO_RING_SPIN_RADII (slower than the whirl: the debris cloud
-#: turns about the funnel, it does not race it). Drawn in both tornado looks.
-BEAUTY_TORNADO_PUFFS["ring"] = {
-    "count": 40, "radii": (1.0, 2.6), "size_m": (80.0, 170.0), "aspect": 1.8, "top_m": 30.0,
-    "opacity": (0.30, 0.55), "colour": (0.13, 0.11, 0.09)}
-BEAUTY_TORNADO_RING_SPIN_RADII = 1.8
+#: 2026-11-15 (hyperreal tornado-shape, repaired): the lane's first cut added a fourth puff
+#: set, a 40-puff "debris ring" of 80-170 m puffs 1.8 wide for their height from 1.0 to 2.6
+#: core radii, under its own key. At RCore 150 m that is a band about 1.09 km across and up
+#: to 170 m tall around a 750 m funnel, about 5 puffs deep per line of sight at 0.30-0.55:
+#: a near-opaque brown band hiding the whirl and the flipbook's rope foot, i.e. round 7's
+#: "one blob wider than the funnel is tall" again at a larger scale. A ring OUTSIDE the
+#: whirl cannot sit under the round-7 pin (the whirl already reaches 1.48 radii, 444 m
+#: across, against the pin's 450 m), and one inside it is just more whirl, so the ring was
+#: dropped: the puff sets are exactly these three, pinned by tests/test_tornado_look.py.
+BEAUTY_TORNADO_PUFF_SETS = ("dust", "debris", "scud")
 #: The flipbook card (-tornado-look=vdb): its tint (darker than the sheath grey: condensation
 #: lit from inside the storm, between the sheath's grey and the wall cloud's near-black) and
 #: its height as a share of the funnel's, the card's top up inside the wall cloud so that
@@ -432,11 +432,6 @@ def dust_whirl_extent_radii() -> float:
 def dust_omega_scale() -> float:
     """The dust cloud's spin as a share of the core's omega."""
     return wall_cloud_omega_scale(BEAUTY_TORNADO_DUST_SPIN_RADII)
-
-
-def ring_omega_scale() -> float:
-    """The debris ring's spin as a share of the core's omega (slower than the whirl)."""
-    return wall_cloud_omega_scale(BEAUTY_TORNADO_RING_SPIN_RADII)
 
 
 def flipbook_top_fade_end_share(top_fade: float, height_share: float = BEAUTY_TORNADO_FLIPBOOK_HEIGHT_SHARE,

@@ -92,13 +92,6 @@ def test_the_markers_keep_their_actors_and_spin_and_the_puffs_spin_too():
     assert "TornadoScudOmegaDegPerSec = TornadoWallOmegaDegPerSec;" in BEAUTY_CPP
     assert _cpp("BeautyDustSpinRadii") == weather_look.BEAUTY_TORNADO_DUST_SPIN_RADII
     assert weather_look.dust_omega_scale() == pytest.approx(1.0)
-    # 2026-11-15: the debris ring on its own actor, slower than the whirl.
-    assert "TimeSeconds * TornadoDebrisRingOmegaDegPerSec" in step[:2500]
-    assert ("TornadoDebrisRingOmegaDegPerSec = TornadoOmegaDegPerSec / (BeautyRingSpinRadii * BeautyRingSpinRadii);"
-            in BEAUTY_CPP)
-    assert "AActor* TornadoDebrisRing = nullptr;" in SCENARIO_H
-    assert _cpp("BeautyRingSpinRadii") == weather_look.BEAUTY_TORNADO_RING_SPIN_RADII
-    assert weather_look.ring_omega_scale() < weather_look.dust_omega_scale()
 
 
 # -- labels --------------------------------------------------------------------------
@@ -107,7 +100,6 @@ def test_the_markers_keep_their_actors_and_spin_and_the_puffs_spin_too():
 def test_the_puffs_are_beauty_only_and_the_funnel_writes_depth():
     assert BEAUTY_CPP.count("BeautyOnlyActors.Add(Actor);") == 1      # every puff actor, via SpawnPuffActor
     assert 'SpawnPuffActor(TEXT("TornadoDust"))' in BEAUTY_CPP
-    assert 'SpawnPuffActor(TEXT("TornadoDebrisRing"))' in BEAUTY_CPP
     assert 'SpawnPuffActor(TEXT("TornadoScud"))' in BEAUTY_CPP
     funnel = _function(SCRIPT, "create_tornado_funnel", "create_lightning():")
     body = funnel.split('"""', 2)[2]
@@ -226,33 +218,32 @@ def test_the_puff_constants_are_the_pythons():
     assert max(weather_look.BEAUTY_WALL_CLOUD_COLOUR) < min(weather_look.BEAUTY_FUNNEL_COLOUR)
 
 
-def test_the_debris_ring_constants_are_the_pythons_and_it_is_wide_low_and_dark():
-    """2026-11-15 (hyperreal tornado-shape): the wide swirling debris cloud at the
-    ground, outside the dust whirl: flattened puffs, darker and browner than the whirl,
-    spun slower than it, drawn beauty-only in both tornado looks."""
-    r = weather_look.BEAUTY_TORNADO_PUFFS["ring"]
-    assert _cpp("BeautyRingPuffs") == r["count"]
-    assert (_cpp("BeautyRingRadiiMin"), _cpp("BeautyRingRadiiMax")) == r["radii"]
-    assert (_cpp("BeautyRingSizeMinM"), _cpp("BeautyRingSizeMaxM")) == r["size_m"]
-    assert _cpp("BeautyRingAspect") == r["aspect"]
-    assert _cpp("BeautyRingTopM") == r["top_m"]
-    assert (_cpp("BeautyRingOpacityMin"), _cpp("BeautyRingOpacityMax")) == r["opacity"]
-    assert (_cpp("BeautyRingColourR"), _cpp("BeautyRingColourG"), _cpp("BeautyRingColourB")) == r["colour"]
-    d = weather_look.BEAUTY_TORNADO_PUFFS["dust"]
-    assert r["radii"][1] > weather_look.dust_whirl_extent_radii()           # wider than the whirl
-    assert r["aspect"] > 1.0                                                # flattened
-    assert r["top_m"] + 0.3 * r["size_m"][1] + 0.5 * r["size_m"][1] < 0.3 * weather_look.FUNNEL_TOP_SHARE * 1500.0
-    assert max(r["colour"]) < min(weather_look.BEAUTY_FUNNEL_COLOUR)        # darker than the funnel
-    assert r["colour"][0] > r["colour"][2] and d["colour"][0] > d["colour"][2]   # brown, like the whirl
-    assert r["opacity"][1] < d["opacity"][1]                                # thinner than the whirl
-    # Flattened through AddPuff's width scale, on the ring's own actor, in the record.
-    assert "double WidthScale = 1.0)" in BEAUTY_CPP
-    assert "static_cast<float>(WidthScale) * SizeCm" in BEAUTY_CPP
-    assert "Angle, BeautyRingAspect);" in BEAUTY_CPP
-    assert 'TEXT("TornadoRingPuff_%d")' in BEAUTY_CPP
-    assert 'Row->SetNumberField(TEXT("debris_ring_spin_deg_s"), TornadoDebrisRingOmegaDegPerSec);' in BEAUTY_CPP
-    # Drawn before the look switch: both looks carry it.
-    assert BEAUTY_CPP.index('SpawnPuffActor(TEXT("TornadoDebrisRing"))') < BEAUTY_CPP.index('if (TornadoLook == TEXT("vdb"))')
+def test_no_puff_set_at_the_ground_reaches_past_the_round_7_bound():
+    """2026-11-15 (hyperreal tornado-shape, repaired): the lane's first cut added a
+    40-puff "debris ring" (80-170 m puffs, 1.8 wide for their height, out to 2.6 core
+    radii) under a key of its own, a 1.09 km near-opaque brown band around a 750 m
+    funnel: round 7's blob again, sidestepping the whirl's pin above. The ring is gone;
+    this pins that EVERY ground-level puff set (anything whose centres sit under the
+    funnel's height, i.e. not the scud) stays under the round-7 bound, whatever its key,
+    and that the puff sets are exactly the three the C++ draws."""
+    p = weather_look.BEAUTY_TORNADO_PUFFS
+    assert tuple(p) == weather_look.BEAUTY_TORNADO_PUFF_SETS == ("dust", "debris", "scud")
+    funnel_height_m = weather_look.FUNNEL_TOP_SHARE * 1500.0
+    for key, puffs in p.items():
+        if key == "scud":
+            continue
+        reach_m = (puffs["radii"][1] + puffs.get("jitter_radii", 0.0)) * 150.0
+        assert 2.0 * reach_m < 0.6 * funnel_height_m, key
+        assert puffs["size_m"][1] * puffs.get("aspect", 1.0) < 0.2 * funnel_height_m, key
+    # The C++ spawns three beauty-only actors and no other: dust (with the debris column
+    # on it), scud and the flipbook card, nothing between; no ring constants, no width
+    # scale, no ring in the record.
+    assert BEAUTY_CPP.count("SpawnPuffActor(TEXT(") == 3
+    assert 'SpawnPuffActor(TEXT("TornadoFlipbook"))' in BEAUTY_CPP
+    assert BEAUTY_CPP.count('FString::Printf(TEXT("Tornado') == 3
+    for gone in ("BeautyRingPuffs", "BeautyRingRadiiMax", "BeautyRingAspect", "BeautyRingSpinRadii",
+                 "TornadoDebrisRing", "TornadoRingPuff", "WidthScale", "debris_ring_spin"):
+        assert gone not in BEAUTY_CPP and gone not in SCENARIO_CPP and gone not in SCENARIO_H, gone
 
 
 # -- the third-party asset -----------------------------------------------------------

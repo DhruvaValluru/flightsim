@@ -2801,13 +2801,6 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 			0.0, FMath::Fmod(TimeSeconds * TornadoScudOmegaDegPerSec, 360.0),
 			0.0));
 	}
-	// The debris ring (2026-11-15), slower than the dust whirl.
-	if (TornadoDebrisRing != nullptr)
-	{
-		TornadoDebrisRing->SetActorRotation(FRotator(
-			0.0, FMath::Fmod(TimeSeconds * TornadoDebrisRingOmegaDegPerSec, 360.0),
-			0.0));
-	}
 	// The JangaFX tornado's flipbook plays on SIM time (FlightSimTornadoBeauty.cpp).
 	if (TornadoFlipbookMaterial != nullptr)
 	{

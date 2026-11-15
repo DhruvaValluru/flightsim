@@ -18,12 +18,11 @@
 //    core where coverage x the grazing fade, moved by an erosion noise, falls below
 //    0.5 (a torn edge, no dither: round 7 rendered generation 3's dither as a
 //    stipple), and the sheath takes M_TornadoFunnelSoft (translucent: the soft edge);
-//  * adds three beauty-only actors of camera-facing smoke puffs (Kenney's CC0 puffs,
+//  * adds two beauty-only actors of camera-facing smoke puffs (Kenney's CC0 puffs,
 //    assets/looks/tornado/, through M_TornadoPuff): the low swirling dust cloud at
 //    the ground contact (replacing the solid cone, which the refined funnel mesh no
-//    longer carries), the wide flattened DEBRIS RING outside it (2026-11-15,
-//    hyperreal tornado-shape: the ground torn up about the funnel's foot) and dark
-//    scud under the wall cloud's base, each spun at the Rankine rate at its own radius.
+//    longer carries) and dark scud under the wall cloud's base, each spun at the
+//    Rankine rate at its own radius.
 //
 // Labels: the funnel and the wall cloud stay DEPTH-WRITING (BLEND_MASKED): a pixel
 // the beauty shows as funnel is funnel in the label depth captures too, so the
@@ -146,24 +145,6 @@ namespace FlightSimTornadoBeautyLocal
 	constexpr float BeautyScudColourR = 0.09f;
 	constexpr float BeautyScudColourG = 0.09f;
 	constexpr float BeautyScudColourB = 0.10f;
-	// 2026-11-15 (hyperreal tornado-shape): the debris ring. Flattened puffs
-	// (BeautyRingAspect wide for their height) from BeautyRingRadiiMin to Max core
-	// radii, their centres 0.3 x their height plus up to BeautyRingTopM above the
-	// ground, darker and browner than the whirl; on their own actor spun at the
-	// Rankine exterior rate at BeautyRingSpinRadii (slower than the whirl).
-	constexpr int32 BeautyRingPuffs = 40;
-	constexpr double BeautyRingRadiiMin = 1.0;
-	constexpr double BeautyRingRadiiMax = 2.6;
-	constexpr double BeautyRingSizeMinM = 80.0;
-	constexpr double BeautyRingSizeMaxM = 170.0;
-	constexpr double BeautyRingAspect = 1.8;
-	constexpr double BeautyRingTopM = 30.0;
-	constexpr double BeautyRingOpacityMin = 0.30;
-	constexpr double BeautyRingOpacityMax = 0.55;
-	constexpr float BeautyRingColourR = 0.13f;
-	constexpr float BeautyRingColourG = 0.11f;
-	constexpr float BeautyRingColourB = 0.09f;
-	constexpr double BeautyRingSpinRadii = 1.8;
 	constexpr int32 BeautyPuffSeedSalt = 0x70A2D0;
 
 	const TCHAR* const TornadoPuffPath = TEXT("/Game/FlightSim/M_TornadoPuff.M_TornadoPuff");
@@ -423,11 +404,8 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		BeautyOnlyActors.Add(Actor);
 		return Actor;
 	};
-	// A puff SizeM tall and WidthScale x SizeM wide (the billboard's BaseSizeX runs
-	// along the view's up, BaseSizeY along its right, half extents each).
 	auto AddPuff = [&](AActor* Actor, const FString& Name, double RadiusM, double ElevationM,
-	                   double SizeM, double Opacity, const FLinearColor& Colour, double Angle = -1.0,
-	                   double WidthScale = 1.0)
+	                   double SizeM, double Opacity, const FLinearColor& Colour, double Angle = -1.0)
 	{
 		const double A = Angle >= 0.0 ? Angle : Stream.FRandRange(0.0, 2.0 * PI);
 		UMaterialBillboardComponent* Puff = NewObject<UMaterialBillboardComponent>(Actor, *Name);
@@ -445,7 +423,7 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		Instance->SetScalarParameterValue(FName(TEXT("PuffSpin")),
 		                                  static_cast<float>(Stream.FRandRange(0.0, 2.0 * PI)));
 		const float SizeCm = static_cast<float>(SizeM * 100.0);
-		Puff->AddElement(Instance, nullptr, false, SizeCm, static_cast<float>(WidthScale) * SizeCm, nullptr);
+		Puff->AddElement(Instance, nullptr, false, SizeCm, SizeCm, nullptr);
 		Puff->RegisterComponent();
 		++PuffCount;
 	};
@@ -485,21 +463,6 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 			AddPuff(TornadoDust, FString::Printf(TEXT("TornadoDebrisPuff_%d"), I), RadiusM, ElevationM,
 			        Stream.FRandRange(BeautyDebrisSizeMinM, BeautyDebrisSizeMaxM),
 			        0.7 * FMath::Lerp(BeautyDustOpacityMin, BeautyDustOpacityMax, Stream.FRand()), Dust);
-		}
-		// The debris ring: evenly about the axis (one puff per sector, jittered within
-		// it), low and flattened, darker and browner than the whirl.
-		TornadoDebrisRing = SpawnPuffActor(TEXT("TornadoDebrisRing"));
-		TornadoDebrisRingOmegaDegPerSec = TornadoOmegaDegPerSec / (BeautyRingSpinRadii * BeautyRingSpinRadii);
-		const FLinearColor Ring(BeautyRingColourR, BeautyRingColourG, BeautyRingColourB, 1.0f);
-		for (int32 I = 0; I < BeautyRingPuffs; ++I)
-		{
-			const double Angle = 2.0 * PI * (static_cast<double>(I) + Stream.FRand()) / BeautyRingPuffs;
-			const double RadiusM = RCore * Stream.FRandRange(BeautyRingRadiiMin, BeautyRingRadiiMax);
-			const double SizeM = Stream.FRandRange(BeautyRingSizeMinM, BeautyRingSizeMaxM);
-			const double ElevationM = 0.3 * SizeM + Stream.FRand() * BeautyRingTopM;
-			AddPuff(TornadoDebrisRing, FString::Printf(TEXT("TornadoRingPuff_%d"), I), RadiusM, ElevationM,
-			        SizeM, FMath::Lerp(BeautyRingOpacityMin, BeautyRingOpacityMax, Stream.FRand()), Ring,
-			        Angle, BeautyRingAspect);
 		}
 		TornadoScud = SpawnPuffActor(TEXT("TornadoScud"));
 		TornadoScudOmegaDegPerSec = TornadoWallOmegaDegPerSec;
@@ -587,7 +550,6 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		Row->SetStringField(TEXT("puffs"), PuffNote);
 		Row->SetNumberField(TEXT("puff_count"), PuffCount);
 		Row->SetNumberField(TEXT("dust_spin_deg_s"), TornadoDustOmegaDegPerSec);
-		Row->SetNumberField(TEXT("debris_ring_spin_deg_s"), TornadoDebrisRingOmegaDegPerSec);
 		Row->SetNumberField(TEXT("scud_spin_deg_s"), TornadoScudOmegaDegPerSec);
 		Row->SetStringField(TEXT("labels"),
 			TEXT("funnel core and wall cloud depth-writing (BLEND_MASKED, plain clip: the labels see the "
