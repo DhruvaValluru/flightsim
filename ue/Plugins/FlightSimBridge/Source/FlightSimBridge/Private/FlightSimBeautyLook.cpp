@@ -637,9 +637,38 @@ namespace
 				}
 				else if (!bLumenGi)
 				{
-					State.bMeter = true;
-					State.MeterTargetP90 = NoLumenTarget;
-					State.MeterTrigger = TEXT("no_lumen_gi");
+					// hl-exposure (2026-11-15): under a CLEAR sky the frame's p90 is
+					// its content (sunlit sky, sea, cloud tops), which missing Lumen
+					// GI does not dim; "incident" (the sidecar's default) keeps the
+					// incident meter's exposure, "frame" is the old meter. A sidecar
+					// without the key is an older plan: the old meter.
+					// core/scene/beauty_look.py EXPOSURE_ANCHORS.
+					FString Anchor = TEXT("frame");
+					(*MeterJson)->TryGetStringField(TEXT("clear_no_lumen_gi"), Anchor);
+					FString StatedAnchor;
+					if (FParse::Value(*State.SwitchText, TEXT("exposure-anchor="), StatedAnchor) &&
+					    !StatedAnchor.IsEmpty())
+					{
+						Anchor = StatedAnchor.ToLower();
+					}
+					if (Anchor != TEXT("incident") && Anchor != TEXT("frame"))
+					{
+						return BeautyLookFail(FString::Printf(
+							TEXT("-exposure-anchor=%s is not incident or frame"), *Anchor));
+					}
+					MeterEcho->SetStringField(TEXT("exposure_anchor"), Anchor);
+					if (Anchor == TEXT("frame"))
+					{
+						State.bMeter = true;
+						State.MeterTargetP90 = NoLumenTarget;
+						State.MeterTrigger = TEXT("no_lumen_gi");
+					}
+					else
+					{
+						MeterEcho->SetStringField(TEXT("runs"),
+							TEXT("no: a clear sky without Lumen GI keeps the incident meter's exposure ")
+							TEXT("(-exposure-anchor=incident; =frame meters the frame's p90 as before)"));
+					}
 				}
 				else
 				{
@@ -1183,6 +1212,35 @@ namespace
 			if (Effect.bOn)
 			{
 				FLIGHTSIM_BEAUTY_FLOAT(Effect.Values, FilmGrainIntensity)
+				// hl-exposure: the grain follows the ISO the light asks for
+				// (core/scene/beauty_look.py film_grain_for, grain_model "iso");
+				// -grain-model=preset applies the round-5 per-preset number.
+				{
+					FString GrainModel = TEXT("iso");
+					FParse::Value(*BeautyLookState().SwitchText, TEXT("grain-model="), GrainModel);
+					GrainModel = GrainModel.ToLower();
+					if (GrainModel != TEXT("iso") && GrainModel != TEXT("preset"))
+					{
+						return BeautyLookFail(FString::Printf(
+							TEXT("-grain-model=%s is not iso or preset"), *GrainModel));
+					}
+					FString PlannedModel = TEXT("preset");
+					Effect.Values->TryGetStringField(TEXT("grain_model"), PlannedModel);
+					double PresetGrain = 0.0, EquivalentIso = 0.0, IsoFactor = 0.0;
+					const bool bHasPreset = Effect.Values->TryGetNumberField(TEXT("FilmGrainIntensityPreset"), PresetGrain);
+					Effect.Values->TryGetNumberField(TEXT("equivalent_iso"), EquivalentIso);
+					Effect.Values->TryGetNumberField(TEXT("iso_grain_factor"), IsoFactor);
+					if (GrainModel == TEXT("preset") && bHasPreset)
+					{
+						Settings.FilmGrainIntensity = static_cast<float>(PresetGrain);
+						Echo->SetNumberField(TEXT("FilmGrainIntensity"), Settings.FilmGrainIntensity);
+						PlannedModel = TEXT("preset");
+					}
+					Echo->SetStringField(TEXT("grain_model"), PlannedModel);
+					Echo->SetNumberField(TEXT("FilmGrainIntensityPreset"), PresetGrain);
+					Echo->SetNumberField(TEXT("equivalent_iso"), EquivalentIso);
+					Echo->SetNumberField(TEXT("iso_grain_factor"), IsoFactor);
+				}
 				FLIGHTSIM_BEAUTY_FLOAT(Effect.Values, FilmGrainIntensityShadows)
 				FLIGHTSIM_BEAUTY_FLOAT(Effect.Values, FilmGrainIntensityMidtones)
 				FLIGHTSIM_BEAUTY_FLOAT(Effect.Values, FilmGrainIntensityHighlights)

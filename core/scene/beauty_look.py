@@ -625,6 +625,30 @@ EXPOSURE_METER_TARGET_P90: Dict[str, float] = {
     "no_lumen_gi": 0.45,
 }
 
+#: hl-exposure (2026-11-15): what the no-Lumen frame meter does under a CLEAR
+#: sky (no deck drawn). ``incident`` (the new default): it does not run; the
+#: exposure is the incident meter's (the band or the -sky= plan, moved by
+#: :func:`scene_light`), the one physical exposure a photographer sets from
+#: the light, and the subject meter keeps its highlight guard. ``frame``
+#: (the old behaviour, ``-exposure-anchor=frame``): the frame's p90 is opened
+#: to ``no_lumen_gi`` as before. Why: the p90 reads the frame's CONTENT, not
+#: its light. Missing Lumen GI removes bounce from the SHADOWS, while a clear
+#: frame's p90 is sunlit sky, sea or cloud top, which no GI changes; so the
+#: meter opened a clear frame only because its content was dark. Scene #13
+#: (747 at 10 km over the sea, round 199, 40c95c10): with the cumulus layer
+#: below, the frame's p90 is 0.48 (cloud tops), inside the target's
+#: tolerance, and the airframe's whites sit at sRGB 0.82-0.87 -- where
+#: :func:`film_tone_curve` puts a 0.9-albedo sunlit white at the incident
+#: exposure (scene-linear ~1.0 -> sRGB 0.87), i.e. that frame is exposed
+#: for the light. With the layer off the p90 is the dark sea and the meter
+#: opens it: the same light at a different exposure. A real camera at
+#: sunny-16 (ISO 2720 incident meter, C = 250) does not brighten the sky
+#: because the clouds below went away. Under a deck the meter still runs
+#: (a deck's darkness is light, not content).
+EXPOSURE_ANCHORS: Tuple[str, ...] = ("incident", "frame")
+DEFAULT_EXPOSURE_ANCHOR = "incident"
+EXPOSURE_ANCHOR_SWITCH = "-exposure-anchor="
+
 #: Lane A (2026-11-11): the SUBJECT meter, the host's last word on a beauty
 #: exposure this look owns (FlightSimRenderCommandlet.cpp, after the frame
 #: meter above; these are its constants' twins, pinned by test). A
@@ -823,6 +847,72 @@ LOOK_SWITCH_PREFIX = "-look-"
 #: render machine (probe el-grain: #01 at 0.03 and 0.06 against a scanned
 #: negative's grain at the same magnification).
 GRAIN_STRENGTH = 0.03
+
+# -- hl-exposure (2026-11-15): grain from the ISO the light asks for -----------
+#
+# A digital camera shows noise, not a constant grain: its visible amount
+# follows the ISO the light forces. Model: the brief's daylight camera
+# (core/capture/exposure.py DAYLIGHT_TRIPLE, f/8 1/500 s, EV100 14.97) keeps
+# its aperture and shutter and raises ISO to meet the exposure target, so
+# ISO_eq = 100 * 2^(14.97 - EV100), never below base ISO 100 (a brighter
+# scene takes a faster shutter, not a lower ISO). Shot noise is Poisson
+# (EMVA 1288 photon transfer): at a fixed output level the relative noise
+# goes as sqrt(ISO). At base ISO a mid-grey pixel holds full_well / 7.8
+# electrons: ISO 12232 puts the saturation-based speed at 78 / H_sat and
+# the mid-grey exposure at 10 / S, so saturation sits 7.8x (2.96 stops)
+# above mid-grey. With a ~50,000 e- full well (a 24 MP full-frame pixel,
+# ~6 um pitch; photonstophotos.net / sensorgen.info measurements of that
+# class) that is 6,410 e-, sigma/mu = 1.25 %, which the sRGB encoding's
+# slope at 0.18 (1.195; the filmic curve maps 0.18 to 0.18) turns into
+# 0.69 of an 8-bit code: below one code, i.e. invisible at base ISO. Grain
+# is drawn only for the noise ABOVE one code, sigma_excess = sqrt(sigma^2 -
+# 1) codes, so it is 0 up to ISO_GRAIN_VISIBLE (~213) and grows as sqrt(ISO)
+# past it. GRAIN_STRENGTH is the UE intensity of one code of excess noise
+# (its "fine ISO-200 negative" reading). ``-grain-model=preset`` keeps the
+# round-5 per-preset grain (the old behaviour).
+GRAIN_MODELS: Tuple[str, ...] = ("iso", "preset")
+DEFAULT_GRAIN_MODEL = "iso"
+GRAIN_MODEL_SWITCH = "-grain-model="
+BASE_ISO = 100.0
+SENSOR_FULL_WELL_E = 50000.0
+ISO12232_SATURATION_OVER_MID = 78.0 / 10.0
+
+#: A guard, not a match: the top of the auto-ISO range this model will
+#: reach (a night or deep-storm target past it is not more grain, it is the
+#: night lane's). UNCALIBRATED: set by probe render on the render machine
+#: (probe hl-grain: #09 storm at -grain-model=iso and =preset, the noise
+#: against a high-ISO photo of a storm at the same magnification).
+ISO_GRAIN_CAP = 12800.0
+
+
+def _srgb_slope(linear: float) -> float:
+    """d(sRGB)/d(linear) of the IEC 61966-2-1 encoding at ``linear`` (> 0.0031308)."""
+    return 1.055 / 2.4 * math.pow(linear, 1.0 / 2.4 - 1.0)
+
+
+def grain_sigma_codes(iso: float) -> float:
+    """Shot-noise sigma of a mid-grey pixel, in 8-bit sRGB codes, at ``iso``."""
+    electrons = SENSOR_FULL_WELL_E / ISO12232_SATURATION_OVER_MID * (BASE_ISO / float(iso))
+    return 0.18 / math.sqrt(electrons) * _srgb_slope(0.18) * 255.0
+
+
+#: The ISO at which the mid-grey shot noise reaches one 8-bit code (~213).
+ISO_GRAIN_VISIBLE = BASE_ISO / grain_sigma_codes(BASE_ISO) ** 2
+
+
+def equivalent_iso(ev100_target: float) -> float:
+    """The ISO the daylight camera (f/8, 1/500 s) needs for ``ev100_target``,
+    clamped to [BASE_ISO, ISO_GRAIN_CAP]."""
+    from core.capture.exposure import DAYLIGHT_TRIPLE, ev100 as _ev100
+
+    iso = BASE_ISO * math.pow(2.0, _ev100(*DAYLIGHT_TRIPLE) - float(ev100_target))
+    return min(max(iso, BASE_ISO), ISO_GRAIN_CAP)
+
+
+def iso_grain_factor(iso: float) -> float:
+    """The excess noise over one code, in codes: sqrt(max(0, sigma^2 - 1))."""
+    sigma = grain_sigma_codes(iso)
+    return math.sqrt(max(0.0, sigma * sigma - 1.0))
 
 #: Lane A (2026-11-11): the SSAO radius, WORLD space, cm. Airframe scale: the
 #: occlusion a real airframe has lives within a metre or two of the crease
@@ -1275,7 +1365,7 @@ def film_stock_for(grade: Any) -> Dict[str, Any]:
 UNCALIBRATED: Tuple[str, ...] = (
     "EV100_BANDS", "GRADES", "GOLDEN_HOUR_BELOW_DEG", "LENSES", "LOCAL_EXPOSURE",
     "REFLECTIONS", "EXPOSURE_METER_TARGET_P90", "TONEMAP_HUE", "RELIT_SUN_CLOSE_SHARE",
-    "ENGINE_LOOK", "GRAIN_STRENGTH",
+    "ENGINE_LOOK", "GRAIN_STRENGTH", "ISO_GRAIN_CAP",
     "FILM_STOCKS", "SUBJECT_METER", "AO_RADIUS_WS_CM",
     "TONEMAP_CAMERA", "WHITE_BALANCE", "ILLUMINANT_MODEL", "CAMERA_RESPONSE",
 )
@@ -1312,11 +1402,17 @@ def look_preset_for(world_preset: Optional[str], grade: str) -> Tuple[str, str]:
     return fallback, f"no world preset: the {grade} grade's ({fallback})"
 
 
-def film_grain_for(preset: str, stock_scale: float = 1.0) -> Dict[str, Any]:
-    """The film-grain row for ``preset`` with ``FilmGrainIntensity`` =
-    :data:`GRAIN_STRENGTH` x the preset's ``grain_scale`` x ``stock_scale``
-    (L2's per-stock number; 1 for no stock). ONE grain constant, two scales,
-    both recorded."""
+def film_grain_for(preset: str, stock_scale: float = 1.0, ev100: Optional[float] = None,
+                   model: str = DEFAULT_GRAIN_MODEL) -> Dict[str, Any]:
+    """The film-grain row for ``preset``. ``FilmGrainIntensityPreset`` is the
+    round-5 number, :data:`GRAIN_STRENGTH` x the preset's ``grain_scale`` x
+    ``stock_scale`` (L2's per-stock number; 1 for no stock). With ``ev100``
+    (the exposure target) and ``model`` ``iso`` (hl-exposure, the default),
+    ``FilmGrainIntensity`` is GRAIN_STRENGTH x :func:`iso_grain_factor` of
+    :func:`equivalent_iso` x ``stock_scale``: 0 at and below ISO ~213, so a
+    sunlit frame has none; the preset's ``grain_scale`` is then not used (the
+    ISO owns the dimness). Without an EV100 it is the preset number. The
+    host applies ``FilmGrainIntensityPreset`` under ``-grain-model=preset``."""
     if preset not in ENGINE_LOOK_PRESETS:
         raise BeautyLookError(CONSTRAINT, f"engine-look preset {preset!r} is not one of "
                                           f"{', '.join(ENGINE_LOOK_PRESETS)}")
@@ -1327,11 +1423,28 @@ def film_grain_for(preset: str, stock_scale: float = 1.0) -> Dict[str, Any]:
     row = dict(ENGINE_LOOK["film_grain"]["per_preset"][preset])
     row["GrainStrength"] = GRAIN_STRENGTH
     row["stock_scale"] = scale
-    row["FilmGrainIntensity"] = round(GRAIN_STRENGTH * float(row["grain_scale"]) * scale, 6)
+    preset_value = round(GRAIN_STRENGTH * float(row["grain_scale"]) * scale, 6)
+    row["FilmGrainIntensity"] = preset_value
+    if model not in GRAIN_MODELS:
+        raise BeautyLookError(CONSTRAINT, f"grain model {model!r} is not one of {', '.join(GRAIN_MODELS)}")
+    if model == "iso" and ev100 is not None:
+        target = float(ev100)
+        if not math.isfinite(target):
+            raise BeautyLookError(CONSTRAINT, f"an exposure target of {ev100!r} has no ISO")
+        iso = equivalent_iso(target)
+        factor = iso_grain_factor(iso)
+        row["FilmGrainIntensityPreset"] = preset_value
+        row["FilmGrainIntensity"] = round(GRAIN_STRENGTH * factor * scale, 6)
+        row["grain_model"] = "iso"
+        row["equivalent_iso"] = round(iso, 1)
+        row["iso_grain_factor"] = round(factor, 6)
+    else:
+        row["grain_model"] = "preset"
     return row
 
 
-def engine_look_for(preset: str, stock_scale: float = 1.0) -> Dict[str, Any]:
+def engine_look_for(preset: str, stock_scale: float = 1.0,
+                    ev100: Optional[float] = None) -> Dict[str, Any]:
     """The sidecar's ``engine_look`` block for one preset: per effect its
     switch, probe flag, ``off_means``, the values (``values``, and
     ``values_constrained`` where the constrained GPU takes different ones),
@@ -1344,7 +1457,7 @@ def engine_look_for(preset: str, stock_scale: float = 1.0) -> Dict[str, Any]:
     out: Dict[str, Any] = {"preset": preset, "switch_prefix": LOOK_SWITCH_PREFIX,
                            "switch_source": "the command line, then FLIGHTSIM_RENDER_SWITCHES"}
     for key, row in ENGINE_LOOK.items():
-        values = (film_grain_for(preset, stock_scale) if key == "film_grain"
+        values = (film_grain_for(preset, stock_scale, ev100) if key == "film_grain"
                   else dict(row["per_preset"][preset]))
         effect: Dict[str, Any] = {
             "switch": f"{LOOK_SWITCH_PREFIX}{row['switch']}",
@@ -1629,11 +1742,17 @@ def exposure_meter(world_preset: Optional[str], deck_drawn: Optional[bool] = Non
     deck = under_deck(world_preset, deck_drawn)
     row: Dict[str, Any] = {
         "deck": deck,
+        # hl-exposure: the no-Lumen meter under a clear sky (EXPOSURE_ANCHORS);
+        # the host reads it and -exposure-anchor= overrides it.
+        "clear_no_lumen_gi": DEFAULT_EXPOSURE_ANCHOR,
+        "clear_no_lumen_gi_switch": EXPOSURE_ANCHOR_SWITCH + "incident|frame",
         "target_p90_luma": (EXPOSURE_METER_TARGET_P90[str(world_preset)] if deck
                             else EXPOSURE_METER_TARGET_P90["no_lumen_gi"]),
         "no_lumen_gi_target_p90_luma": EXPOSURE_METER_TARGET_P90["no_lumen_gi"],
         "when": ("always: a cloud deck's own darkness is measured, not guessed" if deck
-                 else "only when the host finds Lumen GI unsupported on its shader platform"),
+                 else ("only when the host finds Lumen GI unsupported on its shader platform "
+                       "AND -exposure-anchor=frame; by default (incident) a clear frame keeps "
+                       "the incident meter's exposure")),
         "method": ("the beauty frame read back once before frame 0; the 90th percentile "
                    "of its sRGB luma opened to the target by AutoExposureBias, never "
                    "closed below this EV100 unless the frame clips (the host's highlight "
@@ -1857,7 +1976,7 @@ def plan_beauty_look(sun_elevation_deg: float, *, fps: float, width_px: int,
             if key[0].isupper()}
     white_balance = white_balance_for(elevation, grade_name, world_preset, deck_drawn, altitude_m)
     look_preset, look_preset_basis = look_preset_for(world_preset, grade_name)
-    engine_look = engine_look_for(look_preset, stock_grain_scale)
+    engine_look = engine_look_for(look_preset, stock_grain_scale, exposure.get("ev100"))
     engine_look["preset_basis"] = look_preset_basis
     plan = {
         "beauty_look_version": BEAUTY_LOOK_VERSION,

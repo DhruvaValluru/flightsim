@@ -111,9 +111,13 @@ def test_one_grain_constant_scaled_by_the_preset_and_the_stock():
     assert row["GrainStrength"] == bl.GRAIN_STRENGTH and row["stock_scale"] == 1.0
     stock = bl.film_grain_for("clear", stock_scale=1.5)
     assert stock["FilmGrainIntensity"] == pytest.approx(bl.GRAIN_STRENGTH * 1.5)
-    assert plan("clear", stock_grain_scale=1.5)["engine_look"]["film_grain"]["values"]["FilmGrainIntensity"] == \
-        pytest.approx(bl.GRAIN_STRENGTH * 1.5)
-    assert plan()["pixel_effects"]["film_grain"]["FilmGrainIntensity"] == pytest.approx(bl.GRAIN_STRENGTH)
+    # hl-exposure: the plan's grain follows the ISO (film_grain_for model iso);
+    # the round-5 number rides along as FilmGrainIntensityPreset.
+    planned = plan("clear", stock_grain_scale=1.5)["engine_look"]["film_grain"]["values"]
+    assert planned["FilmGrainIntensityPreset"] == pytest.approx(bl.GRAIN_STRENGTH * 1.5)
+    assert planned["grain_model"] == "iso"
+    assert plan()["pixel_effects"]["film_grain"]["FilmGrainIntensity"] == \
+        plan()["engine_look"]["film_grain"]["values"]["FilmGrainIntensity"]
     for bad in (-1.0, float("nan")):
         with pytest.raises(BeautyLookError) as err:
             bl.film_grain_for("clear", bad)
@@ -157,7 +161,8 @@ def test_the_plan_carries_the_presets_engine_look(preset):
     assert "world preset" in look["preset_basis"]
     for key in bl.ENGINE_LOOK:
         assert look[key]["switch"] == f"-look-{bl.ENGINE_LOOK[key]['switch']}"
-        assert look[key]["values"] == (bl.film_grain_for(preset) if key == "film_grain"
+        assert look[key]["values"] == (bl.film_grain_for(preset, ev100=p["exposure"]["ev100"])
+                                       if key == "film_grain"
                                        else bl.ENGINE_LOOK[key]["per_preset"][preset])
     assert p["beauty_look_version"] == 3
 
@@ -225,7 +230,8 @@ def test_every_post_process_value_the_python_writes_the_host_applies_with_its_ov
     macros = set(re.findall(r"FLIGHTSIM_BEAUTY_FLOAT\((?:Effect|Fft)\.Values, (\w+)\)", LOOK_CPP))
     explicit = {"AmbientOcclusionRadiusInWS", "BloomMethod"}
     informational = {"grain_scale", "GrainStrength", "stock_scale", "sun_in_frame_margin_deg",
-                     "sensor_width_mm", "sensor_height_mm"}
+                     "sensor_width_mm", "sensor_height_mm", "FilmGrainIntensityPreset", "grain_model",
+                     "equivalent_iso", "iso_grain_factor"}
     for key in values:
         if key in informational:
             assert f'TEXT("{key}")' in LOOK_CPP, key
