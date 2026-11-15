@@ -166,6 +166,8 @@ bool FFlightSimSkyPlan::Load(const FString& Path, FFlightSimSkyPlan& Out,
 	Out.bCloudPlanFields = CloudsJson->TryGetNumberField(TEXT("detail"), Out.CloudDetail) || Out.bCloudPlanFields;
 	Out.bCloudPlanFields = CloudsJson->TryGetNumberField(TEXT("cirrus_coverage"), Out.CloudCirrusCoverage) || Out.bCloudPlanFields;
 	Out.bCloudPlanFields = CloudsJson->TryGetStringField(TEXT("coverage_source"), Out.CloudCoverageSource) || Out.bCloudPlanFields;
+	// Sky step 5: the march tier the plan asks for (FFlightSimWorldBeauty::Build weighs it under -cloud-march=auto).
+	Out.bCloudPlanFields = CloudsJson->TryGetStringField(TEXT("march_tier"), Out.CloudMarchTier) || Out.bCloudPlanFields;
 	double CloudSeedValue = 0.0;
 	Out.bCloudSeedStated = CloudsJson->TryGetNumberField(TEXT("seed"), CloudSeedValue);
 	Out.CloudSeed = Out.bCloudSeedStated ? static_cast<int64>(CloudSeedValue) : 0;

@@ -211,6 +211,11 @@ private:
 	// = the GPU class, as before). ApplyClouds and ApplyDistantClouds resolve it
 	// through FlightSimWorldPure::CloudMarchFor; another word refuses by name.
 	FString CloudMarchSwitch = TEXT("auto");
+	// Sky step 5: the -cloud-march= word as parsed (CloudMarchSwitch above becomes the
+	// word in force once Build has weighed the plan's march_tier) and where the word
+	// in force came from (FlightSimWorldPure::MarchWordSourceName), recorded.
+	FString CloudMarchSwitchGiven = TEXT("auto");
+	FString CloudMarchWordSource = TEXT("default auto");
 	// Sky step 2: the -sky= plan Build was given (nullptr without one); ApplyClouds
 	// reads its cloud fields (FFlightSimSkyPlan::CloudType and the rest).
 	const FFlightSimSkyPlan* SkyPlanRef = nullptr;

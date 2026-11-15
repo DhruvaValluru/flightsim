@@ -91,6 +91,7 @@ struct FLIGHTSIMBRIDGE_API FFlightSimSkyPlan
 	double CloudDetail = 1.0;             // multiplier of the row's erosion (UNCALIBRATED)
 	double CloudCirrusCoverage = 0.0;     // step 6's high sheet; carried, not drawn here
 	FString CloudCoverageSource;          // the plan's provenance string, "" = not stated
+	FString CloudMarchTier;               // sky step 5: the step 3 cvar set the plan asks for ("" = not stated; the plan writes "auto")
 	bool bCloudSeedStated = false;
 	int64 CloudSeed = 0;                  // the plan's seed, compared with the card's
 

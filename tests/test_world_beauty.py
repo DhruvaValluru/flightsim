@@ -789,10 +789,15 @@ def test_the_cloud_march_and_the_sky_are_the_python_ones(tmp_path):
     constrained class's opt-in raise behind -cloud-march=probe), and the discrete
     row rose to the caps (8, 8, 50); the row list below is CLOUD_MARCH's keys in
     C++ order rather than the two literals, and the constrained row's pin
-    (192 / 10 / 80) is unchanged. tests/test_sky_step3_cvars.py pins the rest."""
+    (192 / 10 / 80) is unchanged. tests/test_sky_step3_cvars.py pins the rest.
+    Sky step 5 (2026-11-15): the cloud rows gained altocumulus (index 4, its
+    900 m thinning cap), so the capped-top cases run over every CLOUD_PRESETS
+    index rather than the first four."""
     block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
     thick = (0.0, 400.0, 1000.0, 2500.0, 3000.0, 6000.0)
-    tops = [(c, b, t, s) for c in range(4) for b, t in ((2940.0, 5940.0), (1500.0, 2700.0), (800.0, 2900.0))
+    assert len(wb.CLOUD_PRESETS) == 5
+    tops = [(c, b, t, s) for c in range(len(wb.CLOUD_PRESETS))
+            for b, t in ((2940.0, 5940.0), (1500.0, 2700.0), (800.0, 2900.0))
             for s in (0, 1)]
     main = ["using namespace FlightSimWorldPure;", "int main() {",
             "for (int m = 0; m < MarchCount; ++m) for (int f = 0; f < MarchFieldCount; ++f)"

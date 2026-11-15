@@ -66,7 +66,8 @@ namespace FlightSimWorldPure
 		CloudStratocumulus = 1,
 		CloudOvercast = 2,
 		CloudNimbostratus = 3,
-		CloudCount = 4
+		CloudAltocumulus = 4,   // sky step 5: appended, so every earlier index and overrides file stands
+		CloudCount = 5
 	};
 
 	inline const char* PresetName(int Preset)
@@ -77,7 +78,8 @@ namespace FlightSimWorldPure
 
 	inline const char* CloudName(int Cloud)
 	{
-		static const char* const Names[CloudCount] = {"cumulus", "stratocumulus", "overcast", "nimbostratus"};
+		static const char* const Names[CloudCount] = {"cumulus", "stratocumulus", "overcast", "nimbostratus",
+		                                              "altocumulus"};
 		return Cloud >= 0 && Cloud < CloudCount ? Names[Cloud] : "cumulus";
 	}
 
@@ -144,6 +146,7 @@ namespace FlightSimWorldPure
 			{0.04, 4.0, 0.5, 0.25, 0.15, 0.3, 1.3, 0.6},      // stratocumulus
 			{0.03, 8.0, 0.8, 0.15, 0.2, 0.15, 1.0, 0.95},     // overcast
 			{0.045, 9.0, 0.6, 0.3, 0.1, 0.4, 0.8, 0.98},      // nimbostratus
+			{0.03, 1.2, 0.12, 0.4, 0.15, 0.5, 1.1, 0.5},      // altocumulus (sky step 5: the plan's mid-level sheet; never rendered)
 		};
 		return Cloud >= 0 && Cloud < CloudCount && Field >= 0 && Field < CloudFieldCount
 			? Rows[Cloud][Field] : 0.0;
@@ -196,9 +199,9 @@ namespace FlightSimWorldPure
 	// The plan's type words (world_beauty.PLAN_CLOUD_TYPES, same order) and the
 	// volumetric shape each draws (world_beauty.PLAN_CLOUD_SHAPES): clear and cirrus
 	// draw NO volumetric layer (the layer is hidden; step 6 draws cirrus as a high
-	// sheet); altocumulus draws the stratocumulus row until step 5 adds its own
-	// (recorded as cloud_type_applied). UNCALIBRATED: which row a word draws is a
-	// look choice.
+	// sheet); altocumulus draws its own row since sky step 5 (it drew stratocumulus
+	// in step 2; recorded as cloud_type_applied). UNCALIBRATED: which row a word
+	// draws is a look choice.
 	constexpr int PlanCloudTypeCount = 7;
 	constexpr int PlanCloudNoLayer = -1;
 	constexpr int PlanCloudUnknown = -2;
@@ -228,7 +231,7 @@ namespace FlightSimWorldPure
 		case 0: return PlanCloudNoLayer;        // clear: nothing
 		case 1: return CloudCumulus;
 		case 2: return CloudStratocumulus;
-		case 3: return CloudStratocumulus;      // altocumulus: its own row arrives in step 5
+		case 3: return CloudAltocumulus;        // altocumulus: its own row (sky step 5)
 		case 4: return PlanCloudNoLayer;        // cirrus: step 6's sheet, no volumetric layer
 		case 5: return CloudOvercast;
 		case 6: return CloudNimbostratus;
@@ -396,6 +399,39 @@ namespace FlightSimWorldPure
 		if (std::strcmp(Word, "discrete") == 0) { return MarchDiscrete; }
 		if (std::strcmp(Word, "probe") == 0) { return MarchProbe; }
 		return -1;
+	}
+	// Sky step 5: the march word in force and where it came from
+	// (world_beauty.cloud_march_word / MARCH_WORD_SOURCES): a -cloud-march= word
+	// other than auto is the owner's measurement and wins; else the sky plan's
+	// "march_tier" when it is a known word (the plan writes "auto", so this is a
+	// no-op by construction today); else auto, the GPU class. An unknown plan word
+	// is ignored, never a refusal: clouds are VISUAL ONLY. Returns the source index
+	// and writes the word (one of MarchSwitchWord's) to *Word.
+	enum : int
+	{
+		MarchWordSwitch = 0, MarchWordPlan = 1, MarchWordDefault = 2, MarchWordSourceCount = 3
+	};
+	inline const char* MarchWordSourceName(int Source)
+	{
+		static const char* const Names[MarchWordSourceCount] = {"switch", "plan", "default auto"};
+		return Source >= 0 && Source < MarchWordSourceCount ? Names[Source] : "default auto";
+	}
+	inline int CloudMarchWordInForce(const char* Switch, const char* PlanTier, const char** Word)
+	{
+		const char* SwitchWord = (Switch == nullptr || Switch[0] == '\0') ? "auto" : Switch;
+		if (std::strcmp(SwitchWord, "auto") != 0)
+		{
+			*Word = SwitchWord;
+			return MarchWordSwitch;
+		}
+		if (PlanTier != nullptr && PlanTier[0] != '\0' && std::strcmp(PlanTier, "auto") != 0
+		    && CloudMarchFor(PlanTier, false) >= 0)
+		{
+			*Word = PlanTier;   // a plan "auto" chooses nothing: it is the default below
+			return MarchWordPlan;
+		}
+		*Word = "auto";
+		return MarchWordDefault;
 	}
 	// Sky step 3: the renderer cvars each tier sets (ApplyClouds SetWorldCvar, saved
 	// once and put back by RestoreCvars, every value recorded before and after in
@@ -580,7 +616,8 @@ namespace FlightSimWorldPure
 	// deck are 1-2 km deep; 0 keeps the layer as built.
 	inline double CloudMaxThicknessM(int Cloud)
 	{
-		static const double Rows[CloudCount] = {2000.0, 0.0, 2000.0, 0.0};
+		// sky step 5: altocumulus 900 m (a sheet a few hundred metres deep). UNCALIBRATED.
+		static const double Rows[CloudCount] = {2000.0, 0.0, 2000.0, 0.0, 900.0};
 		return Cloud >= 0 && Cloud < CloudCount ? Rows[Cloud] : 0.0;
 	}
 	inline double CloudCappedTopM(int Cloud, double BaseM, double TopM, bool bStated)
@@ -1418,6 +1455,28 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	}
 	// Sky step 2: the -sky= plan's cloud fields, read in ApplyClouds (nullptr without a plan).
 	SkyPlanRef = SkyPlan;
+	// Sky step 5: the plan's march_tier (the step 3 cvar set it asks for) stands in
+	// for an unstated -cloud-march= (FlightSimWorldPure::CloudMarchWordInForce):
+	// switch (not auto) > plan (a known word) > auto. The word parsed is kept as
+	// CloudMarchSwitchGiven; CloudMarchSwitch is the word in force from here on, so
+	// ApplyClouds and ApplyDistantClouds resolve the same tier as before this step.
+	CloudMarchSwitchGiven = CloudMarchSwitch;
+	{
+		const FString PlanTier = SkyPlan != nullptr ? SkyPlan->CloudMarchTier : FString();
+		// (the out pointer aliases a TCHAR_TO_ANSI temporary: the word is taken from
+		// the source index, never from the pointer)
+		const char* WordInForce = "auto";
+		const int32 WordSource = CloudMarchWordInForce(TCHAR_TO_ANSI(*CloudMarchSwitch),
+		                                               TCHAR_TO_ANSI(*PlanTier), &WordInForce);
+		CloudMarchSwitch = WordSource == MarchWordPlan ? PlanTier
+			: (WordSource == MarchWordSwitch ? CloudMarchSwitchGiven : FString(TEXT("auto")));
+		CloudMarchWordSource = ANSI_TO_TCHAR(MarchWordSourceName(WordSource));
+		if (WordSource != MarchWordPlan && !PlanTier.IsEmpty() && PlanTier != TEXT("auto")
+		    && CloudMarchFor(TCHAR_TO_ANSI(*PlanTier), false) < 0)
+		{
+			CloudMarchWordSource += TEXT(" (plan march_tier unknown, ignored)");
+		}
+	}
 
 	// The tables in force: the pure block's defaults, then any overrides.
 	AtmosphereValues.SetNumZeroed(PresetCount * AtmosphereFieldCount);
@@ -2331,6 +2390,11 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			TEXT("CloudConstrainedGpu (GRHIDeviceIsIntegrated, or a feature level below SM6): the constrained row is ef361bd6's march"));
 		MarchOut->SetStringField(TEXT("tier"), ANSI_TO_TCHAR(MarchName(March)));
 		MarchOut->SetStringField(TEXT("switch"), CloudMarchSwitch);
+		// Sky step 5: the word parsed from the command line, the plan's march_tier and
+		// which of them the word in force came from (CloudMarchWordInForce).
+		MarchOut->SetStringField(TEXT("switch_given"), CloudMarchSwitchGiven);
+		MarchOut->SetStringField(TEXT("plan_march_tier"), SkyPlanRef != nullptr ? SkyPlanRef->CloudMarchTier : FString());
+		MarchOut->SetStringField(TEXT("word_source"), CloudMarchWordSource);
 		MarchOut->SetStringField(TEXT("tier_basis"),
 			TEXT("sky step 3: -cloud-march=auto|constrained|discrete|probe; auto is the GPU class (constrained: "
 			     "ef361bd6's row, rounds 5-95; discrete: the engine's caps, 768 view / 80 shadow samples over 50 km, "
@@ -2447,7 +2511,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		PlanOut->SetStringField(TEXT("fields_source"), SkyPlanRef == nullptr
 			? TEXT("none: no -sky= plan (the defaults below)")
 			: (bPlanFields
-				? TEXT("sky.json clouds (cloud_type, coverage, density, detail, cirrus_coverage, coverage_source, seed; step 5 writes them)")
+				? TEXT("sky.json clouds (cloud_type, coverage, density, detail, cirrus_coverage, coverage_source, seed, march_tier; core/sky/clouds.py writes them)")
 				: TEXT("none: a v1 plan without the cloud fields (the defaults below, FlightSimSky.h)")));
 		PlanOut->SetStringField(TEXT("cloud_type"), SkyPlanRef != nullptr ? SkyPlanRef->CloudType : FString());
 		PlanOut->SetBoolField(TEXT("cloud_type_known"), PlanType != PlanCloudUnknown);
@@ -2459,6 +2523,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		                        SkyPlanRef != nullptr ? SkyPlanRef->CloudCoverageSource : FString());
 		PlanOut->SetNumberField(TEXT("seed"), SkyPlanRef != nullptr ? static_cast<double>(SkyPlanRef->CloudSeed) : 0.0);
 		PlanOut->SetBoolField(TEXT("seed_stated"), SkyPlanRef != nullptr && SkyPlanRef->bCloudSeedStated);
+		PlanOut->SetStringField(TEXT("march_tier"), SkyPlanRef != nullptr ? SkyPlanRef->CloudMarchTier : FString());
 		PlanOut->SetNumberField(TEXT("card_seed"), Seed);
 		PlanOut->SetBoolField(TEXT("seed_matches_card"), SkyPlanRef != nullptr && SkyPlanRef->bCloudSeedStated
 		                      && SkyPlanRef->CloudSeed == static_cast<int64>(Seed));

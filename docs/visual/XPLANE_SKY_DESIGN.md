@@ -725,6 +725,58 @@ core/scene/world_beauty.py (altocumulus row), FlightSimClouds.cpp (the 5th row).
 - UNMEASURED: nothing here draws by itself; that the Open-Meteo values for a spec
   reproduce a photo's sky is never claimed.
 
+**Built (sky step 5, 2026-11-15): where the code proved this section wrong, or the
+step narrowed it.** Commit `Sky step 5: sky plan cloud fields, altocumulus row, ERA5 cloud cover`.
+- The laws live in `core/sky/clouds.py` as written; `plan_sky` takes
+  `cloud_cover`, `cloud_cover_note` and `seed` keyword-only, so every positional caller
+  stands. The clouds block also carries `volumetric_row`, `march_tier`,
+  `march_tier_basis` and `fields_basis` (the brief asks for the step 3 cvar set's name
+  in the block); `quality_tier_requested` is spelled `march_tier` to match the
+  `-cloud-march=` words.
+- The seed: the spec's when the web app passes it (`seed_source: "spec.seed"`), else
+  DERIVED from the inputs plan_sky already has (CRC-32 of instant, place, altitude),
+  never a bare default, so a plan written outside the web app is still seeded.
+- The web app's `historical_cloud_cover(spec, hour_utc)` is called INSIDE
+  `write_sky_plan` (one caller, one place), not before it in the flow; it returns
+  `(cover, reason)` and the reason lands in `coverage_source` as
+  `default (<reason>): CLOUDS[<type>].default_cover`. The sampled-cover rule reads
+  `spec.randomization.cloud_cover.source == "sampled"` (there is no
+  `_sampled_policy_values`; the design named a helper that does not exist).
+- The provider's null guard: the archive serves nulls for dates it has not assimilated;
+  a null hour raises `WeatherUnavailableError` by name rather than returning a 0 % sky.
+- The altocumulus row is APPENDED (index 4), not inserted after stratocumulus, so every
+  existing row index, the override files and the step 3 pins stand; `CloudCount` 4 -> 5
+  on both sides as designed. test_world_beauty.py's capped-top test runs over all five
+  rows (docstring says why); test_cloud_type.py's two altocumulus pins moved to the new
+  row (docstrings say why).
+- The march tier reaches the host: `FFlightSimSkyPlan::CloudMarchTier` (TryGet),
+  `CloudMarchWordInForce` in the pure block, weighed in `Build` after the switch's
+  refusal and before the tables; `CloudMarchSwitch` becomes the word in force so the
+  step 3 lines test_sky_step3_cvars.py pins are untouched; `switch_given` and
+  `word_source` record the rest. The plan writes "auto": a no-op by construction.
+- Not done here: `scene.sky` in the commandlet is still not extended (step 2's rule: a
+  measure render.json gains no field); test_webapp.py's tests stub the fetch at
+  `core.environment.era5.fetch_reanalysis_cloud_cover` like the wind's.
+- Repair round 1 (two refutations, both reproduced): the first cut called
+  `historical_cloud_cover(spec, instant.utc.hour)` and fetched `weather_date` at that
+  hour. `weather_date` is the spec's LOCAL date; the plan's instant is UTC and crosses the
+  day boundary for every local evening west of Greenwich (20:00 at New York on 2024-01-15
+  = 2024-01-16T00:56Z: the fetch asked for 2024-01-15 00Z, 24 h early, and
+  `coverage_source` misstated the moment) and every local morning east of it (02:00 at
+  Tokyo = 2024-01-14T16:41Z). Now `write_sky_plan` passes the instant (`instant.utc`) and
+  the scene dict it already holds; `historical_cloud_cover(spec, instant_utc, scene=...)`
+  asks the archive for the instant's UTC date and hour, and the provider dict's `date`
+  (hence `coverage_source`'s `...T00Z` stamp) names the UTC day fetched. Pinned by three
+  day-rolling cases in test_webapp.py and a mirror in test_sky_clouds.py; the docstrings
+  (era5.py, runs.py, clouds.py) and §8 say "UTC date and hour". The second refutation:
+  rounds 104/105 use `-cloud-type=`, which stands above the plan, so they never exercised
+  this path; §8 now gives the web app's exact `/compile` + `/run` lines for a dated prompt
+  and the sky.json / render.json keys to read (no dated scene was added to
+  run_test_scenarios.py: it would move the pinned scene count and a swarm lane's
+  "scene 16" wording). Still UNMEASURED: nothing rendered.
+- UNMEASURED: everything; VISUAL_FIDELITY_PLAN.md §8 "Sky step 5" names rounds 104 and 105
+  for the row and the web-app lines for the plan path.
+
 ## 8. Step 6: the cirrus sheet (beauty only)
 
 Commit: `Sky step 6: beauty-only cirrus sheet`.

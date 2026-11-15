@@ -97,24 +97,33 @@ def test_the_measure_build_is_untouched():
 
 def test_plan_cloud_fields_defaults_and_parse():
     """The Python twin of Load: absent or mistyped fields keep the defaults and
-    ``stated`` says whether any was present; today's plan_sky writes none."""
+    ``stated`` says whether any was present. Sky step 5 moved two pins here: the
+    fields gained ``march_tier`` (the step 3 cvar set the plan asks for), and
+    plan_sky now WRITES the fields (step 2 pinned that it wrote none; step 5 is
+    the step that writes them), so a fresh plan reads back ``stated`` and the
+    four v1 keys are a subset of the block rather than the whole of it."""
     none = wb.plan_cloud_fields({})
     assert none == {**wb.PLAN_CLOUD_DEFAULTS, "stated": False}
     assert wb.plan_cloud_fields(None) == none
     full = wb.plan_cloud_fields({"cloud_type": "stratocumulus", "coverage": 0.6, "density": 1.2, "detail": 0.8,
-                                 "cirrus_coverage": 0.3, "coverage_source": "ERA5", "seed": 42.0})
+                                 "cirrus_coverage": 0.3, "coverage_source": "ERA5", "seed": 42.0,
+                                 "march_tier": "probe"})
     assert full == {"cloud_type": "stratocumulus", "coverage": 0.6, "density": 1.2, "detail": 0.8,
-                    "cirrus_coverage": 0.3, "coverage_source": "ERA5", "seed": 42, "stated": True}
+                    "cirrus_coverage": 0.3, "coverage_source": "ERA5", "seed": 42, "march_tier": "probe",
+                    "stated": True}
     assert isinstance(full["seed"], int)
-    typed = wb.plan_cloud_fields({"cloud_type": 3, "coverage": "high", "seed": True, "density": None})
+    typed = wb.plan_cloud_fields({"cloud_type": 3, "coverage": "high", "seed": True, "density": None,
+                                  "march_tier": 2})
     assert typed == none
     partial = wb.plan_cloud_fields({"cloud_type": "cumulus"})
     assert partial["stated"] and partial["coverage"] == -1.0 and partial["density"] == 1.0
+    assert partial["march_tier"] == ""
     # an unknown word is carried (forward-compatible with step 5), the host draws it as "not stated"
     assert wb.plan_cloud_fields({"cloud_type": "mammatus"})["cloud_type"] == "mammatus"
     plan = sky_plan.plan_sky("12:00", None, 37.6, -122.4, 1000.0, 0.0)
-    assert wb.plan_cloud_fields(plan["clouds"])["stated"] is False
-    assert set(plan["clouds"]) == {"enabled", "bottom_km", "thickness_km", "basis"}
+    read = wb.plan_cloud_fields(plan["clouds"])
+    assert read["stated"] is True and read["cloud_type"] == "cumulus" and read["march_tier"] == "auto"
+    assert {"enabled", "bottom_km", "thickness_km", "basis"} <= set(plan["clouds"])
 
 
 # -- the laws --------------------------------------------------------------------------
@@ -127,7 +136,8 @@ def test_the_type_words_and_their_shapes():
         assert wb.cloud_shape_for_plan_type(word) == shape
         assert shape is None or shape in wb.CLOUD_PRESETS
     assert wb.cloud_shape_for_plan_type("clear") is None and wb.cloud_shape_for_plan_type("cirrus") is None
-    assert wb.cloud_shape_for_plan_type("altocumulus") == "stratocumulus"   # its own row arrives in step 5
+    # sky step 5: altocumulus draws its own CLOUDS row (step 2 pinned stratocumulus until the row existed)
+    assert wb.cloud_shape_for_plan_type("altocumulus") == "altocumulus"
     with pytest.raises(ValueError):
         wb.cloud_shape_for_plan_type("mammatus")
     text = _read(CPP)
@@ -181,7 +191,8 @@ def test_the_precedence_law():
     assert ls(None, None, False, "mammatus", 0.5, "clear", 1200.0) == (0.35, "cumulus", "shape default")
     assert ls(None, None, False, "cumulus", 0.5, "clear", 1200.0) == (0.5, "cumulus", "plan")
     assert ls(None, None, False, "stratocumulus", None, "clear", 3000.0) == (0.6, "stratocumulus", "plan")
-    assert ls(None, None, False, "altocumulus", 0.45, "hazy", 3000.0) == (0.45, "stratocumulus", "plan")
+    # sky step 5: the altocumulus row (step 2 drew stratocumulus until it existed)
+    assert ls(None, None, False, "altocumulus", 0.45, "hazy", 3000.0) == (0.45, "altocumulus", "plan")
     assert ls(None, None, False, "cumulus", 1.7, "clear", 3000.0) == (1.0, "cumulus", "plan")
     assert ls(None, None, False, "clear", 0.0, "clear", 3000.0) == (0.0, None, "plan")
     assert ls(None, None, False, "cirrus", 0.3, "clear", 3000.0) == (0.0, None, "plan")

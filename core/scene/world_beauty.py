@@ -471,7 +471,10 @@ def world_ground_albedo_srgb(surface: Optional[str], wetness: float, preset: str
 
 # -- the cloud presets -------------------------------------------------------------
 
-CLOUD_PRESETS: Tuple[str, ...] = ("cumulus", "stratocumulus", "overcast", "nimbostratus")
+#: Sky step 5 (2026-11-15): "altocumulus" appended (index 4 on both sides, so
+#: every existing row index and overrides file stands): the plan's mid-level
+#: type gets its own row instead of drawing stratocumulus (design D3).
+CLOUD_PRESETS: Tuple[str, ...] = ("cumulus", "stratocumulus", "overcast", "nimbostratus", "altocumulus")
 
 #: Selection thresholds (select_cloud). UNCALIBRATED.
 CLOUD_OVERCAST_COVER = 0.85
@@ -510,6 +513,14 @@ CLOUDS: Dict[str, Dict[str, float]] = {
     "nimbostratus": dict(extinction_per_m=0.045, shape_scale_km=9.0, detail_scale_km=0.6,
                          detail_erosion=0.3, bottom_softness=0.1, top_rounding=0.4,
                          coverage_contrast=0.8, default_cover=0.98),
+    # Sky step 5: altocumulus, the plan's mid-level sheet (the reference photo's
+    # thin translucent cells): small cells (shape 1.2 km), fine erosion, a thin
+    # extinction so light bleeds through, a soft base and a half-rounded top.
+    # Chosen by the plan's mid-level law (core/sky/clouds.py), never by
+    # select_cloud. UNCALIBRATED: never rendered.
+    "altocumulus": dict(extinction_per_m=0.03, shape_scale_km=1.2, detail_scale_km=0.12,
+                        detail_erosion=0.4, bottom_softness=0.15, top_rounding=0.5,
+                        coverage_contrast=1.1, default_cover=0.5),
 }
 
 #: The fair-weather layer ``-beauty-clouds=fair`` adds when the card states no
@@ -835,13 +846,35 @@ def cloud_height_density(height_density: float, norm_alt: float) -> float:
 
 #: The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 #: stated layer) is thinned to the shape's depth; 0 keeps the layer as built.
+#: Sky step 5: an altocumulus sheet is a few hundred metres deep, so the plan's
+#: 3 km slab is thinned to 900 m (STRATOCUMULUS_MAX_THICKNESS_M's figure). UNCALIBRATED.
 CLOUD_MAX_THICKNESS_M: Dict[str, float] = {"cumulus": 2000.0, "stratocumulus": 0.0,
-                                           "overcast": 2000.0, "nimbostratus": 0.0}
+                                           "overcast": 2000.0, "nimbostratus": 0.0,
+                                           "altocumulus": 900.0}
 #: USkyAtmosphereComponent::MultiScatteringFactor per preset (engine 1): the
 #: clear and hazy skies take a little more multiple scattering (paler and
 #: brighter towards the horizon from altitude); the weather presets keep 1.
 SKY_MULTI_SCATTERING: Dict[str, float] = {"clear": 1.25, "hazy": 1.15, "overcast": 1.0, "rain": 1.0,
                                           "storm": 1.0}
+
+
+#: Sky step 5: where the march word in force came from (C++ CloudMarchWordSource order).
+MARCH_WORD_SOURCES: Tuple[str, ...] = ("switch", "plan", "default auto")
+
+
+def cloud_march_word(switch_word: Optional[str], plan_tier: Optional[str]) -> Tuple[str, str]:
+    """C++ CloudMarchWordInForce (sky step 5): the ``-cloud-march=`` word the host
+    resolves, and its source. A switch word other than "auto" is the owner's
+    measurement and wins ("switch"); else the sky plan's ``march_tier`` when it is
+    one of CLOUD_MARCH_SWITCH_WORDS ("plan"; the plan writes "auto", so today this
+    is a no-op by construction); else "auto" ("default auto": the GPU class). An
+    unknown plan word is ignored, never a refusal (clouds are VISUAL ONLY)."""
+    switch = switch_word or "auto"
+    if switch != "auto":
+        return switch, "switch"
+    if plan_tier and plan_tier != "auto" and plan_tier in CLOUD_MARCH_SWITCH_WORDS:
+        return plan_tier, "plan"
+    return "auto", "default auto"
 
 
 def cloud_march_tier(tier: str) -> Dict[str, float]:
@@ -1114,12 +1147,12 @@ def layer_cover_and_shape(card_cover: Optional[float], thickness_m: float, prese
 PLAN_CLOUD_TYPES: Tuple[str, ...] = ("clear", "cumulus", "stratocumulus", "altocumulus", "cirrus",
                                      "overcast", "nimbostratus")
 #: The volumetric shape each word draws (C++ CloudShapeForPlanType). None = no
-#: volumetric layer: clear draws nothing, cirrus is step 6's high sheet. Altocumulus
-#: draws the stratocumulus row until step 5 adds its own row (recorded as
-#: cloud_type_applied). UNCALIBRATED (which row a word draws is a look choice).
+#: volumetric layer: clear draws nothing, cirrus is step 6's high sheet. Sky step 5:
+#: altocumulus draws its own CLOUDS row (it drew stratocumulus in step 2).
+#: UNCALIBRATED (which row a word draws is a look choice).
 PLAN_CLOUD_SHAPES: Dict[str, Optional[str]] = {
     "clear": None, "cumulus": "cumulus", "stratocumulus": "stratocumulus",
-    "altocumulus": "stratocumulus", "cirrus": None, "overcast": "overcast",
+    "altocumulus": "altocumulus", "cirrus": None, "overcast": "overcast",
     "nimbostratus": "nimbostratus"}
 #: ``-cloud-type=<word>`` (FlightSimClouds.cpp Build): the owner's probe, above the
 #: card and the plan; another word refuses ``world_beauty.clouds: -cloud-type=...``.
@@ -1127,8 +1160,10 @@ CLOUD_TYPE_SWITCH = "-cloud-type"
 #: What FFlightSimSkyPlan::Load leaves when a field is absent (FlightSimSky.h): a
 #: v1 plan loads unchanged and the record says these. ``coverage`` below 0 and an
 #: empty ``cloud_type`` mean "not stated"; density and detail 1 are the row itself.
+#: Sky step 5: ``march_tier`` (the step 3 cvar set the plan asks for; "" = not stated).
 PLAN_CLOUD_DEFAULTS: Dict[str, Any] = {"cloud_type": "", "coverage": -1.0, "density": 1.0, "detail": 1.0,
-                                      "cirrus_coverage": 0.0, "coverage_source": "", "seed": 0}
+                                      "cirrus_coverage": 0.0, "coverage_source": "", "seed": 0,
+                                      "march_tier": ""}
 #: The plan's density is a multiplier of the row's extinction, clamped to this
 #: range (the design's D2: one source of truth per type, the CLOUDS row); its detail
 #: a multiplier of the row's erosion, the product saturated to 1. UNCALIBRATED.

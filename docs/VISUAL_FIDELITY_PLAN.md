@@ -908,3 +908,124 @@ Tests: `tests/test_sky_step3_cvars.py`; `tests/test_world_beauty.py` (the march 
 the probe row, its docstring says why). API: `scripts/check_bridge_api.sh` pins the
 thirteen registrations with their defaults, the three Cinematic lines and
 `ECVF_SetByCode` in ConsoleManager.cpp.
+
+### Sky step 5 (2026-11-15): the sky plan's cloud fields, the altocumulus row, ERA5 cloud cover
+
+Step 5 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
+docs/visual/XPLANE_SKY_DESIGN.md §7, with the "Built" note there for where the code
+narrowed it). Nothing here was rendered.
+
+**What it draws.** Nothing by itself. `core/sky/plan.py plan_sky` now writes the
+BEAUTY-ONLY cloud fields step 2's host reads (`FFlightSimSkyPlan::Load`, `FFlightSimWorldBeauty::ApplyClouds`
+under `-quality=beauty`) into `sky.json` "clouds", beside the unchanged `enabled` /
+`bottom_km` / `thickness_km` / `basis` (the measure host reads only those, so a measure
+render is byte-identical; pinned): `cloud_type` (clear | cumulus | stratocumulus |
+altocumulus | cirrus | overcast | nimbostratus), `coverage` 0..1, `density` 1.0 and
+`detail` 1.0 (multipliers of the type's `world_beauty.CLOUDS` row: one source of truth
+per type), `cirrus_coverage` (step 6 draws it), `coverage_source`, `cover_inputs`
+`{low, mid, high, total}` or null, `cloud_type_basis` (the threshold that fired),
+`volumetric_row`, `seed` and `seed_source` (the spec's seed, else CRC-32 of the instant,
+place and altitude), `march_tier` "auto" (the step 3 cvar set the plan asks for) and
+`march_tier_basis`, `fields_basis`. Pure: same inputs, same bytes (`core/sky/clouds.py`).
+
+**Where the type comes from.** With a `weather_date` over a real place and no SAMPLED
+cloud cover, the web app (`webapp/runs.py historical_cloud_cover`, called by
+`write_sky_plan`) fetches `core/environment/era5.py fetch_reanalysis_cloud_cover`: the
+ERA5 archive's hourly `cloud_cover_low/mid/high` (percent -> fractions) at the plan
+INSTANT's UTC date AND UTC hour (`instant_utc`; the wind keeps its noon convention), source
+string stated. Not `weather_date` at that hour: `weather_date` is the spec's LOCAL date, and
+the instant is the next UTC day for a local evening west of Greenwich (20:00 at New York on
+2024-01-15 is 2024-01-16T00:56Z, so the archive is asked for 2024-01-16 00Z) and the previous
+one for a local morning east of it (02:00 at Tokyo is 2024-01-14T16:41Z). The first cut
+passed the hour alone and fetched `weather_date` at it, 24 h off in every such case; repair
+round 1 passes the instant and `coverage_source` stamps the UTC day actually fetched
+(`..., 2024-01-16T00Z, ...`); pinned in `tests/test_webapp.py` (New York and San Francisco
+evenings, a Tokyo morning) and `tests/test_sky_clouds.py`. The type
+law (`core/sky/clouds.py cloud_type_from_cover`, thresholds UNCALIBRATED): storm spec ->
+nimbostratus 0.98; `max(low, mid) >= 0.85` -> overcast; `low >= 0.5` -> stratocumulus;
+`mid >= 0.3 and mid > low` -> altocumulus; `low >= 0.1` -> cumulus; `high >= 0.2` ->
+cirrus (no volumetric layer); else clear. Without a date, offline, over a synthesised
+ridge, or when the policy drew a cover (the card's layer stands above the plan in the
+host anyway): the stated default `cumulus` at the row's 0.35 (`nimbostratus` 0.98 for a
+storm), recorded under `coverage_source` as `default (<reason>): CLOUDS[<type>].default_cover`.
+The default plan therefore draws round 95's frame by construction. Clouds are VISUAL ONLY:
+an unreachable archive never refuses the run and never edits the spec (unlike the wind).
+The web app's weather stays ON by default; nothing became opt-in. `run.conditions["sky"]`
+names the type, cover and source.
+
+**The altocumulus row** (design D3): `CLOUDS["altocumulus"]` =
+{extinction 0.03 /m, shape 1.2 km, detail 0.12 km, erosion 0.4, bottom softness 0.15, top
+rounding 0.5, coverage contrast 1.1, default cover 0.5}, `CLOUD_MAX_THICKNESS_M` 900 m,
+appended at index 4 on both sides (`CloudAltocumulus = 4`, `CloudCount = 5`, `CloudName`,
+`CloudDefault`, `CloudMaxThicknessM`; every earlier index and overrides file stands;
+`-world-beauty-overrides=` may name the row). `CloudShapeForPlanType` case 3 now returns it
+(step 2 drew stratocumulus until the row existed). `select_cloud` never picks it: the
+plan's mid-level law does. UNCALIBRATED, never rendered.
+
+**The march tier, plan -> host.** `FFlightSimSkyPlan::Load` reads `march_tier` with
+`TryGetStringField`; `FFlightSimWorldBeauty::Build` resolves the word in force
+(`FlightSimWorldPure::CloudMarchWordInForce`, twin `world_beauty.cloud_march_word`):
+`-cloud-march=<word other than auto>` > the plan's `march_tier` when it is a known word >
+`auto` (the GPU class). The plan writes "auto", so the default render is unchanged by
+construction; a hand-edited `sky.json` may ask for `probe`. Recorded under
+`look_applied.world_beauty.clouds.march`: `switch` (the word in force), `switch_given`,
+`plan_march_tier`, `word_source`; `clouds.plan.march_tier`.
+
+**Unchanged.** `SKY_VERSION` 1 == `SkySupportedVersion` 1 (additive keys, TryGet*; pinned on
+both sides); `FFlightSimSky::Build` (measure); the exposure block (pinned byte-identical with
+and without a cover); `relight` (the clouds block survives it byte-identical); `enabled` /
+`bottom_km` (>= 1 km above the flight; 1.2 km floor in storms) / `thickness_km` for every
+positional caller (pinned literals); the c641a8c4 beauty exception that lowers a DEFAULT
+cumulus layer below a high cruise (the camera stays clear); labels, dataset formats, flight
+dynamics, materials (no rebuild: no shader or graph change); the step 2 and step 3 pins.
+
+**UNCALIBRATED.** Every type-law threshold (the two Open-Meteo endpoints disagree hour by
+hour on the level fractions), the altocumulus row and its 900 m cap, the default cover.
+
+**UNMEASURED.** Everything above: that a Windows build compiles the row and the march-word
+block; that an altocumulus plan draws a translucent mid-level sheet rather than a second
+stratocumulus; that the ERA5 fractions for a dated spec reproduce that day's sky (never
+claimed). The exact Windows measurements, with `FLIGHTSIM_SKY=physical` set in the shell:
+
+    .\scripts\visual_fix_round.ps1 -Round 104 -Scenes 3 -Switches "-cloud-type=altocumulus" -CompareWith 98
+    .\scripts\visual_fix_round.ps1 -Round 105 -Scenes 3 -Switches "-cloud-type=stratocumulus" -CompareWith 104
+
+Round 104 draws the new row under the switch (read `look_applied.world_beauty.clouds.layers[0].cloud_type_applied`
+== `altocumulus`, `shape` == `altocumulus`); round 105 is the A/B against the row it used
+to draw. Both rounds BYPASS this step's own path (`-cloud-type=` stands above the plan), so
+the plan path, ERA5 -> `sky.json` -> `FFlightSimSkyPlan::Load` -> `ApplyClouds`, has its
+own measurement. `scripts/run_test_scenarios.py` has no dated scene (adding one moves the
+pinned scene count and a swarm lane's "scene 16" wording, so none was added here); the
+exact command is the web app's own, the same `/compile` and `/run` calls
+`run_test_scenarios.py` makes, from `C:\Users\kanth\flightsim` in Windows PowerShell 5.1
+with the app started as `visual_fix_round.ps1` starts it:
+
+    $env:FLIGHTSIM_SKY = "physical"; $env:FLIGHTSIM_RENDER_QUALITY = "beauty"; $env:FLIGHTSIM_BEAUTY_POST = "on"
+    Start-Process .venv\Scripts\python.exe -ArgumentList "-m","uvicorn","webapp.server:app","--port","8008" -WindowStyle Hidden
+    $c = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8008/compile -ContentType "application/json" -Body (@{ prompt = "chase view of the 747 over new york at 9000 m at 14:00 on 2024-01-15 for 6 seconds"; compiler = "regex"; still = $true } | ConvertTo-Json)
+    $r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8008/run -ContentType "application/json" -Body (@{ spec = $c.spec.dict; provenance = @{ compiler = "regex" } } | ConvertTo-Json -Depth 32)
+    do { Start-Sleep 10; $s = Invoke-RestMethod http://127.0.0.1:8008/runs/$($r.run_id) } until ($s.status -in "done","failed")
+    Get-Content runs\webapp\$($r.run_id)\sky.json | ConvertFrom-Json | % { $_.instant_utc; $_.clouds.cloud_type; $_.clouds.coverage; $_.clouds.coverage_source }
+    (Get-Content runs\webapp\$($r.run_id)\frames\render.json | ConvertFrom-Json).look_applied.world_beauty.clouds | % { $_.plan.cloud_type; $_.layers[0].cloud_type_source; $_.march.word_source }
+
+(A 409 `terrain.unbaked` answer from `/run` means the New York bake is absent: `POST /bake`
+with the `latitude` / `longitude` it names, then `POST /run` again, as
+`run_test_scenarios.py run_spec` does. Rounds 1-95 rendered scene 3 over New York, so the
+bake is normally present.) Read: `sky.json` `instant_utc` `2024-01-15T18:56:...Z`,
+`clouds.coverage_source` starting `ERA5` (online) or `default (fetch failed: ...)`
+(offline; the frame is then round 95's cumulus by construction), `clouds.cloud_type` one
+of the seven words; `render.json` `look_applied.world_beauty.clouds.plan.cloud_type` ==
+`sky.json`'s, `layers[0].cloud_type_source` == `plan`, `march.word_source` == `default auto`.
+14:00 is daylight for the frame; to see the UTC-day rule itself no render is needed: the
+same lines with `at 20:00` write `instant_utc` `2024-01-16T00:56:...Z` and a
+`coverage_source` stamped `2024-01-16T00Z` (the old code stamped `2024-01-15T00Z`).
+What a correct frame looks like is UNMEASURED; this measures only that the fetched type
+reaches the host. Tests:
+`tests/test_sky_clouds.py` (determinism, ranges, defaults, the type-law table including
+every threshold boundary, measure byte-identity, SKY_VERSION, the provider with a stubbed
+archive, the row on both sides by regex and g++, the march word law by g++, these docs);
+`tests/test_webapp.py` (stubbed fetch: applied and sourced, sampled cover wins, unreachable
+archive records the default, undated and synthesised specs never fetch);
+`tests/test_cloud_type.py` and `tests/test_world_beauty.py` (the altocumulus pins and the
+fifth row, reasons in their docstrings). API: `scripts/check_bridge_api.sh` (no new engine
+symbol).
