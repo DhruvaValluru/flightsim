@@ -3978,7 +3978,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	//     fog's density share and volumetric fog, the sun's shadow-on-
 	//     atmosphere/cloud switches (never its lux or colour; never the
 	//     per-pixel transmittance a -sky= plan set), cloud materials, rain
-	//     readability, the SKY LIGHT's lightning pulse per frame. It never
+	//     readability, the SKY LIGHT's lightning pulse per frame; since sky
+	//     step 3 the cloud march's per-tier sample caps and distances and the
+	//     sky-atmosphere LUT sizes and sample counts (FlightSimClouds.cpp
+	//     CloudCvar: r.VolumetricCloud.*SampleMaxCount / SampleMinCount /
+	//     DistanceToSampleMaxCount / ShadowMap.* / SkyAO.TraceSampleCount,
+	//     r.SkyAtmosphere.AerialPerspectiveLUT.Depth/.DepthResolution/.Width,
+	//     TransmittanceLUT.SampleCount, MultiScatteringLUT.SampleCount,
+	//     DistanceToSampleCountMax), saved and restored by WorldBeauty.
+	//     RestoreCvars; the render path (5) keeps its on/off, LUT-format and
+	//     SampleCountMax / per-slice cvars. It never
 	//     touches the exposure: lightning is scene light the fixed exposure
 	//     sees, as a real camera would.
 	//  3. Exposure (above): the card's exposure triple, else look.ev100,

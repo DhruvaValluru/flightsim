@@ -797,3 +797,114 @@ none. Tests: `tests/test_cloud_type.py` (the C++ laws compiled and compared with
 Python, the header defaults, the parser, the precedence table, the record keys, the
 untouched measure `Build`, the single beauty call site). API: `scripts/check_bridge_api.sh`
 gains `SetVisibleInRealTimeSkyCaptures` and `SceneComponent::SetVisibility`.
+
+### Sky step 3 (2026-11-15): march and sky-LUT quality, tiered, recorded, restored
+
+Step 3 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
+docs/visual/XPLANE_SKY_DESIGN.md §5, with the "Built" note there for where the code
+proved it wrong). Nothing here was rendered.
+
+**What it draws.** Nothing new on the render laptop by default. Under `-quality=beauty`,
+`FFlightSimWorldBeauty::ApplyClouds` (FlightSimClouds.cpp) resolves a march TIER
+(`FlightSimWorldPure::CloudMarchFor`) and applies the tier's cloud component march
+(`CloudMarch`: `SetViewSampleCountScale`, `SetShadowViewSampleCountScale`,
+`SetTracingMaxDistance`; the per-layer `SetShadowTracingDistance` is unchanged) and the
+tier's thirteen renderer cvars (`CloudCvar` / `CloudCvarName`), each set at code priority
+through `SetWorldCvar`, saved once (`SaveWorldCvar`, `WorldCvarsBefore`, the fog-on-all-pixel
+cvar now saved the same way) and put back at the commandlet's teardown by `RestoreCvars`,
+which walks the array in reverse. The tiers (Python twins `world_beauty.CLOUD_MARCH`,
+`CLOUD_CVARS`, `CLOUD_CVAR_NAMES`, `ENGINE_CLOUD_CVAR_DEFAULTS`, `CINEMATIC_SKY_CVARS`;
+`tests/test_sky_step3_cvars.py` compiles the C++ and compares):
+
+| field (record key) | cvar | constrained (the laptop; in force today) | probe | discrete |
+|---|---|---|---|---|
+| march: view x96 / shadow x10 / trace | component setters | 2 / 1 / 80 km (192, 10) | 3 / 2 / 80 km (288, 20) | 8 / 8 / 50 km (768, 80: the caps) |
+| view_ray_sample_max | `r.VolumetricCloud.ViewRaySampleMaxCount` | 768 | 768 | 768 |
+| shadow_ray_sample_max | `r.VolumetricCloud.Shadow.ViewRaySampleMaxCount` | 80 | 80 | 80 |
+| distance_to_sample_max_km | `r.VolumetricCloud.DistanceToSampleMaxCount` | 15 | **8** | 8 |
+| sample_min_count | `r.VolumetricCloud.SampleMinCount` | 2 | 2 | 2 |
+| shadowmap_ray_sample_max | `r.VolumetricCloud.ShadowMap.RaySampleMaxCount` | 128 | 128 | 256 |
+| shadowmap_max_resolution | `r.VolumetricCloud.ShadowMap.MaxResolution` | 2048 | 2048 | 4096 |
+| skyao_trace_samples | `r.VolumetricCloud.SkyAO.TraceSampleCount` | 10 | 10 | 20 |
+| ap_lut_depth_km | `r.SkyAtmosphere.AerialPerspectiveLUT.Depth` | 96 | 96 | 160 |
+| ap_lut_depth_resolution | `r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution` | 32 (Cinematic) | 32 | 64 |
+| ap_lut_width | `r.SkyAtmosphere.AerialPerspectiveLUT.Width` | 32 | 32 | 64 |
+| transmittance_lut_samples | `r.SkyAtmosphere.TransmittanceLUT.SampleCount` | 30 (Cinematic) | 30 | 40 |
+| multiscatter_lut_samples | `r.SkyAtmosphere.MultiScatteringLUT.SampleCount` | 20 (Cinematic) | 20 | 30 |
+| sky_distance_to_sample_max_km | `r.SkyAtmosphere.DistanceToSampleCountMax` | 150 | 150 | 100 |
+
+The CONSTRAINED row (the Intel iGPU, D3D11 SM5: `CloudConstrainedGpu`) is exactly what
+every beauty render has drawn with since the beauty path existed: the engine's
+registration default (UE 5.7 VolumetricCloudRendering.cpp, SkyAtmosphereRendering.cpp;
+`scripts/check_bridge_api.sh` pins each line with its default) where the Cinematic
+scalability group is silent, and that group's value where it speaks
+(BaseScalability.ini `[EffectsQuality@Cine]`, applied by the render path AFTER this lane
+at scalability priority, which cannot lower a code-priority set). Setting it is a recorded
+no-op: the march row is still ef361bd6's (192 / 10 / 80, the r87 pin), and the sky-light
+capture's sample caps (`SetReflectionViewSampleCountScale`,
+`r.VolumetricCloud.ReflectionRaySampleMaxCount`) remain the commandlet's to set. The PROBE
+row is the constrained class's opt-in raise: 288 view / 20 shadow samples and
+`DistanceToSampleMaxCount` 8 km (the engine spreads the sample cap over that distance,
+samples = cap x saturate(in-layer path / distance), so a short in-layer path gets up to
+twice the samples). That cvar is NOT confined to the main view: UE 5.7
+VolumetricCloudRendering.cpp sets `CloudGlobalShaderParams.InvDistanceToSampleCountMax`
+once, from it, for every trace, and its `bIsReflectionRendering` block re-derives only
+`SampleCountMax` / `ShadowSampleCountMax` (the commandlet's reflection caps), so the probe
+also lengthens the sky-light capture's march (up to 15/8 x per short in-layer path, under
+those caps) in the submission that hung r87 (`887a0006`); the Windows TDR is the probe's
+pass or fail. Pinned: `tests/test_sky_step3_cvars.py` reads the engine's reflection block
+and `scripts/check_bridge_api.sh` the `InvDistanceToSampleCountMax` line (repair round 1:
+the first record said the capture was "not this table's", which was false for the probe
+and discrete tiers; no value changed). The DISCRETE row is the offline quality for a
+discrete GPU, of which the project has none: set for one, never rendered.
+
+**The switch.** `-cloud-march=auto|constrained|discrete|probe` (auto by default: the GPU
+class, as before this step); a named tier is the owner's measurement on any GPU; another
+word refuses `world_beauty.clouds: -cloud-march=...`. Registered in core/config_surface.py
+(`render_switches`) and the catalogue's `world_beauty.clouds` hint.
+
+**Record** (`look_applied.world_beauty.clouds.march`, beside the existing `path`,
+`view_samples_max`, `shadow_samples`, `banding_basis`): `tier`, `switch`, `tier_basis`,
+`cvars {name: [before, read_back]}`, `cvars_skipped[]` ("skipped: <name> is not
+registered"), `cvar_fields {field: name}`, `cvars_basis`, `render_path_owned[]` (the
+commandlet's nine sky and cloud cvars, named, never set here: their final values are
+`render_settings.beauty_path.read_back`), `render_path_owned_basis`. `before` is read when
+this lane runs, ahead of the Cinematic pass, so for the three Cinematic fields it is the
+registration default (16 / 10 / 15) and `read_back` the value the captures draw with.
+`distant_clouds.volumetric_trace` gains `march_tier` and `distance_to_sample_max_km`.
+One owner per cvar (the commandlet's ledger names the world lane's new set):
+`tests/test_sky_step3_cvars.py` reads the sun-shafts, hero-lighting and render-path tables.
+
+**Unchanged.** Measure renders (FlightSimSky.cpp, FlightSimVisualScene.cpp,
+FlightSimWeather.cpp name none of these cvars; pinned); labels (process-wide cvars, but no
+label capture draws cloud, fog or atmosphere); dataset formats; flight dynamics; exposure
+(plan.py untouched); the constrained march row and shadow march (`{2.0, 1.0, 80.0}`, 6 km:
+the r87 pins in tests/test_world_beauty.py and tests/test_cloud_jitter_blue_noise.py hold);
+the commandlet's `SetBeautyCvar` set (the jitter test's pin); `MultiScatteringFactor` still
+off on the constrained class (step 4's `-sky-multi-scatter=`); the materials (no rebuild).
+
+**UNCALIBRATED.** Every discrete and probe value, the probe march row, the 8 km distance:
+look and cost values, never from a frame.
+
+**UNMEASURED.** Everything above: that a Windows build compiles it; that the constrained
+row is the no-op it claims; whether the probe row renders on the iGPU or stalls it
+(887a0006); every discrete value (no discrete GPU). The exact Windows measurements, with
+`FLIGHTSIM_SKY=physical` set in the shell:
+
+    .\scripts\visual_fix_round.ps1 -Round 100 -Scenes 3 -CompareWith 95
+    .\scripts\visual_fix_round.ps1 -Round 101 -Scenes 3 -Switches "-cloud-march=probe" -CompareWith 100
+    .\scripts\visual_fix_round.ps1 -Round 102 -Scenes 3 -Switches "-cloud-type=cumulus -cloud-march=probe" -CompareWith 98
+
+Round 100 is the no-op check: the compare against round 95 must report no change beyond
+the still's own noise, and `march.tier` must read `integrated` with every `cvars` pair's
+`read_back` equal to the table above; a structured difference means the constrained row is
+not the laptop's own values. Round 101 is the probe: pass = the log has no `887a0006` and
+the frame completes; read ROUND.json's wall seconds against round 100's and
+`march.cvars["r.VolumetricCloud.DistanceToSampleMaxCount"]` (expect `["15", "8"]`).
+Round 102 is the design's probe-with-cumulus compare against step 2's round 98. If round
+101 renders clean, step 4's rounds may carry `-cloud-march=probe`; a one-line follow-up
+would then move the constrained row (both tests' pins updated with the measured reason).
+Tests: `tests/test_sky_step3_cvars.py`; `tests/test_world_beauty.py` (the march test gains
+the probe row, its docstring says why). API: `scripts/check_bridge_api.sh` pins the
+thirteen registrations with their defaults, the three Cinematic lines and
+`ECVF_SetByCode` in ConsoleManager.cpp.

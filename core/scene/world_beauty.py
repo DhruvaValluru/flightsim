@@ -588,12 +588,116 @@ OCCLUSION_FLAG_TRANSMITTANCE = 0.5
 #: render commandlet now loads and builds the two blue-noise textures before
 #: its first capture and records render_settings.beauty_path.blue_noise
 #: (cloud_march_jittered). No row here changes: the fix adds no march cost.
+#:
+#: Sky step 3 (the owner's X-Plane-12 brief, 2026-11-15): three tiers. "discrete"
+#: is the offline quality (the engine's caps: 768 view and 80 shadow samples over
+#: a 50 km trace; round 2 drew 6 x 96 = 576 and 60); "integrated" (the CONSTRAINED
+#: class) stays ef361bd6's row, the one rounds 5-95 rendered; "probe" is the
+#: constrained class's opt-in raise (288 view, 20 shadow samples), reached only
+#: by ``-cloud-march=probe``: one scene, one still, the Windows TDR (887a0006) is
+#: the pass or fail. UNCALIBRATED; no tier but "integrated" has rendered.
 CLOUD_MARCH_FIELDS: Tuple[str, ...] = ("view_sample_count_scale", "shadow_sample_count_scale",
                                        "tracing_max_distance_km")
 CLOUD_MARCH: Dict[str, Dict[str, float]] = {
-    "discrete": dict(view_sample_count_scale=6.0, shadow_sample_count_scale=6.0, tracing_max_distance_km=50.0),
+    "discrete": dict(view_sample_count_scale=8.0, shadow_sample_count_scale=8.0, tracing_max_distance_km=50.0),
     "integrated": dict(view_sample_count_scale=2.0, shadow_sample_count_scale=1.0, tracing_max_distance_km=80.0),
+    "probe": dict(view_sample_count_scale=3.0, shadow_sample_count_scale=2.0, tracing_max_distance_km=80.0),
 }
+#: ``-cloud-march=auto|constrained|discrete|probe`` (FlightSimClouds.cpp Build):
+#: auto is the GPU class (C++ CloudConstrainedGpu), as before sky step 3; a named
+#: word is the owner's measurement on any GPU; another word refuses
+#: ``world_beauty.clouds: -cloud-march=...``.
+CLOUD_MARCH_SWITCH = "-cloud-march"
+CLOUD_MARCH_SWITCH_WORDS: Tuple[str, ...] = ("auto", "constrained", "discrete", "probe")
+
+
+def cloud_march_for(word: Optional[str], constrained: bool) -> Optional[str]:
+    """The CLOUD_MARCH row a switch word picks on a GPU class (C++ CloudMarchFor):
+    None for a word Build refuses."""
+    if word is None or word == "auto":
+        return "integrated" if constrained else "discrete"
+    return {"constrained": "integrated", "discrete": "discrete", "probe": "probe"}.get(word)
+
+
+#: Sky step 3: the renderer cvars each march tier sets (C++ CloudCvar; ApplyClouds
+#: SetWorldCvar at code priority, saved once, put back by RestoreCvars, every value
+#: recorded [before, read back] under look_applied.world_beauty.clouds.march.cvars).
+#: Field order is the C++ CloudCvarFieldName order; CLOUD_CVAR_NAMES maps a field to
+#: its exact cvar name (C++ CloudCvarName).
+CLOUD_CVAR_FIELDS: Tuple[str, ...] = (
+    "view_ray_sample_max", "shadow_ray_sample_max", "distance_to_sample_max_km", "sample_min_count",
+    "shadowmap_ray_sample_max", "shadowmap_max_resolution", "skyao_trace_samples", "ap_lut_depth_km",
+    "ap_lut_depth_resolution", "ap_lut_width", "transmittance_lut_samples", "multiscatter_lut_samples",
+    "sky_distance_to_sample_max_km")
+CLOUD_CVAR_NAMES: Dict[str, str] = {
+    "view_ray_sample_max": "r.VolumetricCloud.ViewRaySampleMaxCount",
+    "shadow_ray_sample_max": "r.VolumetricCloud.Shadow.ViewRaySampleMaxCount",
+    "distance_to_sample_max_km": "r.VolumetricCloud.DistanceToSampleMaxCount",
+    "sample_min_count": "r.VolumetricCloud.SampleMinCount",
+    "shadowmap_ray_sample_max": "r.VolumetricCloud.ShadowMap.RaySampleMaxCount",
+    "shadowmap_max_resolution": "r.VolumetricCloud.ShadowMap.MaxResolution",
+    "skyao_trace_samples": "r.VolumetricCloud.SkyAO.TraceSampleCount",
+    "ap_lut_depth_km": "r.SkyAtmosphere.AerialPerspectiveLUT.Depth",
+    "ap_lut_depth_resolution": "r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution",
+    "ap_lut_width": "r.SkyAtmosphere.AerialPerspectiveLUT.Width",
+    "transmittance_lut_samples": "r.SkyAtmosphere.TransmittanceLUT.SampleCount",
+    "multiscatter_lut_samples": "r.SkyAtmosphere.MultiScatteringLUT.SampleCount",
+    "sky_distance_to_sample_max_km": "r.SkyAtmosphere.DistanceToSampleCountMax",
+}
+#: The engine's registration defaults (UE 5.7 VolumetricCloudRendering.cpp,
+#: SkyAtmosphereRendering.cpp; scripts/check_bridge_api.sh pins each line).
+ENGINE_CLOUD_CVAR_DEFAULTS: Dict[str, float] = {
+    "view_ray_sample_max": 768.0, "shadow_ray_sample_max": 80.0, "distance_to_sample_max_km": 15.0,
+    "sample_min_count": 2.0, "shadowmap_ray_sample_max": 128.0, "shadowmap_max_resolution": 2048.0,
+    "skyao_trace_samples": 10.0, "ap_lut_depth_km": 96.0, "ap_lut_depth_resolution": 16.0, "ap_lut_width": 32.0,
+    "transmittance_lut_samples": 10.0, "multiscatter_lut_samples": 15.0, "sky_distance_to_sample_max_km": 150.0,
+}
+#: What the Cinematic scalability group (BaseScalability.ini [EffectsQuality@Cine],
+#: applied by the render commandlet's beauty path AFTER this lane, at scalability
+#: priority) sets of these: the values the render laptop has drawn with since the
+#: beauty path existed. A code-priority set cannot be lowered by it, so the
+#: constrained row MUST repeat these, not the registration defaults, to stay a
+#: no-op (the design doc's "engine defaults" 16 / 10 / 15 would have lowered the sky).
+CINEMATIC_SKY_CVARS: Dict[str, float] = {
+    "ap_lut_depth_resolution": 32.0, "transmittance_lut_samples": 30.0, "multiscatter_lut_samples": 20.0,
+}
+
+
+def cloud_cvars_in_force() -> Dict[str, float]:
+    """The values in force on the render laptop before sky step 3: the Cinematic
+    group's where it speaks, the registration default elsewhere (= the constrained row)."""
+    return {f: CINEMATIC_SKY_CVARS.get(f, ENGINE_CLOUD_CVAR_DEFAULTS[f]) for f in CLOUD_CVAR_FIELDS}
+
+
+#: The rows (C++ CloudCvar). "discrete" is the offline quality for a discrete GPU
+#: (none in the project: set for one, never rendered); "integrated" is
+#: cloud_cvars_in_force() exactly (a recorded no-op on the laptop); "probe" is the
+#: integrated row with r.VolumetricCloud.DistanceToSampleMaxCount 8 km (the engine
+#: spreads the sample cap over that distance, so a short in-layer path gets up to
+#: twice the samples; opt-in with the probe march row). That distance also governs
+#: the sky-light capture's step count: UE 5.7 VolumetricCloudRendering.cpp sets
+#: InvDistanceToSampleCountMax once, from that cvar, for every trace, and its
+#: bIsReflectionRendering block re-derives only SampleCountMax / ShadowSampleCountMax
+#: (the commandlet's r.VolumetricCloud.ReflectionRaySampleMaxCount caps), so the
+#: probe lengthens that capture's march too (up to 15/8 x per short in-layer path,
+#: under those caps) in the submission that hung r87 (887a0006); the Windows TDR is
+#: its pass or fail (tests/test_sky_step3_cvars.py reads the engine block). UNCALIBRATED.
+CLOUD_CVARS: Dict[str, Dict[str, float]] = {
+    "discrete": dict(zip(CLOUD_CVAR_FIELDS,
+                         (768.0, 80.0, 8.0, 2.0, 256.0, 4096.0, 20.0, 160.0, 64.0, 64.0, 40.0, 30.0, 100.0))),
+    "integrated": cloud_cvars_in_force(),
+    "probe": dict(cloud_cvars_in_force(), distance_to_sample_max_km=8.0),
+}
+#: Fields where a LOWER value means more samples (the engine spreads a cap over
+#: the distance); every other field raises quality as it rises.
+CLOUD_CVAR_LOWER_IS_MORE: Tuple[str, ...] = ("distance_to_sample_max_km", "sky_distance_to_sample_max_km")
+#: The render commandlet's beauty-path cvars (SetBeautyCvar): one owner, named in
+#: the world record (march.render_path_owned), never set by the world lane.
+RENDER_PATH_CVARS: Tuple[str, ...] = (
+    "r.SkyAtmosphere.FastSkyLUT", "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque",
+    "r.SkyAtmosphere.MultiScatteringLUT.HighQuality", "r.SkyAtmosphere.LUT32", "r.SkyAtmosphere.SampleCountMax",
+    "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice", "r.VolumetricCloud",
+    "r.VolumetricCloud.HighQualityAerialPerspective", "r.VolumetricRenderTarget.Mode")
 #: The engine's base samples and caps (VolumetricCloudComponent.h, VolumetricCloudRendering.cpp).
 ENGINE_CLOUD_BASE_VIEW_SAMPLES = 96.0
 ENGINE_CLOUD_BASE_SHADOW_SAMPLES = 10.0
@@ -740,14 +844,20 @@ SKY_MULTI_SCATTERING: Dict[str, float] = {"clear": 1.25, "hazy": 1.15, "overcast
                                           "storm": 1.0}
 
 
-def cloud_march(integrated: bool) -> Dict[str, float]:
-    """The march row for the GPU class, with the engine's sample counts."""
-    row = dict(CLOUD_MARCH["integrated" if integrated else "discrete"])
+def cloud_march_tier(tier: str) -> Dict[str, float]:
+    """A march tier's row with the engine's sample counts (sky step 3: discrete,
+    integrated or probe)."""
+    row = dict(CLOUD_MARCH[tier])
     row["view_samples_max"] = min(ENGINE_CLOUD_BASE_VIEW_SAMPLES * row["view_sample_count_scale"],
                                   ENGINE_CLOUD_VIEW_SAMPLE_CAP)
     row["shadow_samples"] = min(ENGINE_CLOUD_BASE_SHADOW_SAMPLES * row["shadow_sample_count_scale"],
                                 ENGINE_CLOUD_SHADOW_SAMPLE_CAP)
     return row
+
+
+def cloud_march(integrated: bool) -> Dict[str, float]:
+    """The march row for the GPU class (``-cloud-march=auto``), with the engine's sample counts."""
+    return cloud_march_tier("integrated" if integrated else "discrete")
 
 
 def cloud_shadow_tracing_km_for(constrained: bool, thickness_m: float) -> float:

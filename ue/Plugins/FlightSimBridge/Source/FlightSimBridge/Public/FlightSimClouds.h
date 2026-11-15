@@ -83,6 +83,7 @@ class FFlightSimGoogleTiles;
 class FFlightSimVisualScene;
 class FFlightSimWeather;
 struct FFlightSimSkyPlan;
+class IConsoleVariable;
 class UMaterialInstanceDynamic;
 class UMaterialParameterCollection;
 class UProceduralMeshComponent;
@@ -206,6 +207,10 @@ private:
 	// overrides the plan's cloud_type and the card's shape (FlightSimWorldPure::
 	// LayerSource); another word refuses by name.
 	FString CloudTypeSwitch;
+	// Sky step 3: -cloud-march=auto|constrained|discrete|probe (Build reads it; auto
+	// = the GPU class, as before). ApplyClouds and ApplyDistantClouds resolve it
+	// through FlightSimWorldPure::CloudMarchFor; another word refuses by name.
+	FString CloudMarchSwitch = TEXT("auto");
 	// Sky step 2: the -sky= plan Build was given (nullptr without one); ApplyClouds
 	// reads its cloud fields (FFlightSimSkyPlan::CloudType and the rest).
 	const FFlightSimSkyPlan* SkyPlanRef = nullptr;
@@ -263,9 +268,19 @@ private:
 	// cloud sky AO, the still tier's fog grid (FlightSimSunShafts.h).
 	FFlightSimSunShafts SunShafts;
 
-	// clouds-sky round 2: the cloud cvar ApplyClouds wrote and its value
-	// before (empty: untouched), put back by RestoreCvars.
-	FString CloudFogAllPixelBefore;
+	// Sky step 3: every renderer cvar ApplyClouds wrote (the march tier's table,
+	// FlightSimWorldPure::CloudCvar, and clouds-sky round 2's fog-on-every-cloud-
+	// pixel cvar) with its value before, saved once each; RestoreCvars walks the
+	// array in reverse. SetWorldCvar records [before, read back] under its Row.
+	struct FSavedCvar
+	{
+		FString Name;
+		FString Before;
+	};
+	TArray<FSavedCvar> WorldCvarsBefore;
+	FString SaveWorldCvar(const TCHAR* Name, IConsoleVariable* Variable);
+	void SetWorldCvar(const TCHAR* Name, double Value, const TSharedPtr<FJsonObject>& Row,
+	                  TArray<TSharedPtr<FJsonValue>>& Skipped);
 
 	// dust-humidity-haze: the overlay after ApplyAtmosphere (FlightSimDustHaze.h).
 	FFlightSimDustHaze DustHaze;

@@ -549,6 +549,44 @@ Engine defaults (UE 5.7 source): `r.VolumetricCloud.ViewRaySampleMaxCount` 768,
   `.\scripts\visual_fix_round.ps1 -Round 102 -Scenes 3 -Switches "-cloud-type=cumulus -cloud-march=probe" -CompareWith 98`,
   then the log for `887a0006` and ROUND.json's wall seconds against round 98's.
 
+**Built (sky step 3, 2026-11-15): where the code proved this section wrong, or the
+step narrowed it.** Commit `Sky step 3: tiered march and sky-LUT cvars, recorded and restored; -cloud-march=`.
+- The constrained cvar row is NOT the engine's registration defaults. The render
+  commandlet applies the Cinematic scalability group (BaseScalability.ini
+  `[EffectsQuality@Cine]`) AFTER this lane, and that group sets
+  `r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution` 32,
+  `TransmittanceLUT.SampleCount` 30 and `MultiScatteringLUT.SampleCount` 20 on every
+  beauty render; a code-priority set (what `SetWorldCvar` does) cannot be lowered by a
+  scalability-priority one, so the design's 16 / 10 / 15 would have LOWERED the
+  laptop's sky. The constrained row repeats the Cinematic values where the group
+  speaks and the registration default elsewhere (`world_beauty.cloud_cvars_in_force`);
+  that, not "engine defaults", is the no-op. The probe row follows it (8 km).
+- The discrete row moved for the same reason: `{768, 80, 8, 2, 256, 4096, 20, 160, 64, 64, 40, 30, 100}`
+  (AP depth resolution 64 and width 64, transmittance 40, multi-scatter 30: each above
+  the Cinematic value; the design's transmittance 20 was below it).
+- `march.render_path_read_back` is `march.render_path_owned` (names only). The render
+  path runs after this lane, so a read-back here would show pre-Cinematic values;
+  `render_settings.beauty_path.read_back` already holds the finals.
+- `march.tier` and `march.switch` sit beside the existing `march.path` (kept: the
+  verifier-facing key).
+- The "iGPU raise" lands as the probe tier (D4): the default constrained render is a
+  recorded no-op, pinned; the raise reaches the laptop only by `-cloud-march=probe`.
+- test_world_beauty.py 784 gained the third row (its docstring says why); 930 and
+  jitter 100 are untouched and pass. The cvar table's own pins are in
+  tests/test_sky_step3_cvars.py (compiled with g++), with the engine-source check
+  skipped where no UE 5.7 source exists.
+- First Windows round is a NO-OP check, round 100 against 95 (identical beyond the
+  still's noise), before the probe (101) and the design's 102; VISUAL_FIDELITY_PLAN.md §8.
+- Repair round 1: the first record claimed the sky-light capture was "not this table's".
+  False for the probe (and discrete) tier: `r.VolumetricCloud.DistanceToSampleMaxCount`
+  sets `InvDistanceToSampleCountMax` once, for every trace (the engine's
+  `bIsReflectionRendering` block re-derives only the two sample caps), so the probe's
+  8 km lengthens the capture's march too (up to 15/8 x per short in-layer path, under
+  the commandlet's reflection caps) in r87's `887a0006` submission. No value changed:
+  the record strings, the C++ and Python comments and VISUAL_FIDELITY_PLAN now say so,
+  and `test_sky_step3_cvars.py` plus an `rp_check` pin the engine block. Round 101
+  remains the measurement.
+
 ## 6. Step 4: atmosphere and horizon
 
 Commit: `Sky step 4: horizon haze fields, -sky-multi-scatter=, per-preset sun bloom`.
