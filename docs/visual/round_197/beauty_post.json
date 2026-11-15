@@ -1,0 +1,11 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "04_desert_a_4_sun_behind_the_camera": {
+   "post": "04_desert_a_4_sun_behind_the_camera_post.jpg",
+   "source": "04_desert_a_4_sun_behind_the_camera_frame_beauty_post.png"
+  }
+ }
+}
