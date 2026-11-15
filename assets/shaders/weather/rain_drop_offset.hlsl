@@ -31,6 +31,14 @@
 //   MaxStreak float  the beauty streak's longest angular length, rad (0: no cap)
 //   Soft     float   lane D: the beauty streak drawn (1 + Soft) x wider (0: the hard quad)
 //   Vary     float   lane D: the beauty per-drop length spread, 0.45..1.55 at 1 (0: none)
+//   Aperture float   hyperreal rain: the beauty lens's entrance pupil, cm (0: a pinhole)
+//
+// Hyperreal rain (2026-11-14, M_RainDrops 7; weather_look.BEAUTY_RAIN_F_NUMBER): a drop a
+// few metres from a lens focused on the scene is OUT OF FOCUS; its image is the pupil's
+// disc (f / N: 9 mm on the 35 mm f/4 beauty lens, 62 mm on a 250 mm one) convolved with
+// the streak, so a near drop is a wide soft smear and a far one a thin line -- the depth
+// layering a photograph of rain shows. The quad grows by Aperture across and along; the
+// opacity (its twin) spreads the same light over it. Aperture 0: unchanged.
 //
 // Lane D (2026-11-11, weather_look.BEAUTY_RAIN_SOFTNESS / _VARIATION): the opacity
 // (rain_drop_opacity.hlsl) carries the matching profile and the same hash, so the
@@ -84,6 +92,12 @@ float width = max(Extra.x * 0.1, dist * PixelAngle);
 if (Soft > 0.0)
 {
 	width *= 1.0 + Soft;   // a soft streak is wider; its profile (opacity) keeps its light
+}
+if (Aperture > 0.0)
+{
+	// Defocus: the pupil's disc at the drop (the scene behind is in focus, the drop is not).
+	streak += Aperture;
+	width += Aperture;
 }
 float3 corner = along * (Corner.y - 0.5) * streak + side * (Corner.x - 0.5) * width;
 return rel + corner - P0;

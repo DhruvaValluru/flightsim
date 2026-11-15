@@ -255,9 +255,17 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		RainMaterial->SetScalarParameterValue(TEXT("Soft"), static_cast<float>(Shape.Softness));
 		RainMaterial->SetScalarParameterValue(TEXT("Vary"), static_cast<float>(Shape.Variation));
 		RainMaterial->SetScalarParameterValue(TEXT("SkyRadianceScale"), static_cast<float>(Shape.Radiance));
+		// Hyperreal rain (2026-11-14): the drop's radiance partly the scene behind it
+		// (drop_scene_tone.hlsl); the shutter and the lens's pupil are per frame (Advance).
+		RainMaterial->SetScalarParameterValue(TEXT("SceneLit"), static_cast<float>(Shape.SceneLit));
 	}
 	if (RainMaterial != nullptr || bRainLayers)
 	{
+		// Hyperreal rain: the streaks exposed over the beauty camera's shutter, not the card
+		// camera's daylight 1/500 s (dashes); the lens's pupil defocuses the near drops.
+		BeautyShutterS = Shape.ShutterS;
+		BeautyFNumber = Shape.FNumber;
+		BeautySensorMm = Shape.SensorMm;
 		// Round 12's #15: the cinematic streaks keep a share of the camera's motion
 		// (maxpick/rain: the baked layers, -rain-layers=on, keep the same share).
 		BeautyCameraShare = FlightSimRainVeil::BeautyCameraMotionShare;
@@ -281,6 +289,16 @@ void FFlightSimWeather::ApplyBeautyRainReadability(double Gain)
 		ShapeRow->SetNumberField(TEXT("softness"), Shape.Softness);
 		ShapeRow->SetNumberField(TEXT("variation"), Shape.Variation);
 		ShapeRow->SetNumberField(TEXT("radiance"), Shape.Radiance);
+		ShapeRow->SetNumberField(TEXT("shutter_s"), Shape.ShutterS);
+		ShapeRow->SetNumberField(TEXT("f_number"), Shape.FNumber);
+		ShapeRow->SetNumberField(TEXT("sensor_mm"), Shape.SensorMm);
+		ShapeRow->SetNumberField(TEXT("scene_lit"), Shape.SceneLit);
+		ShapeRow->SetStringField(TEXT("hyperreal_basis"),
+			TEXT("2026-11-14: the streak's length is fall speed x the beauty camera's 180-degree shutter over "
+			     "the range (the card camera's 1/500 s drew dashes); a near drop is defocused to the lens's "
+			     "pupil (f-number, sensor, the view's field), its light spread over the smear; the coverage "
+			     "cap is on the streak's mean under the soft profile; scene_lit of the drop's radiance is the "
+			     "scene behind it. UNCALIBRATED"));
 		ShapeRow->SetStringField(TEXT("applied_to"), RainMaterial != nullptr
 			? TEXT("M_RainDrops (the procedural backend's drops)")
 			: bRainLayers ? TEXT("nothing: -rain-layers=on draws no drops (the camera share only)")
@@ -305,11 +323,16 @@ FFlightSimBeautyRainShape FFlightSimWeather::BeautyRainShape(double RateMmh, int
 	constexpr double WeatherBeautyRainStreakRadHeavy = 0.045;
 	constexpr double WeatherBeautyRainLightMmh = 1.0;
 	constexpr double WeatherBeautyRainHeavyMmh = 50.0;
-	constexpr double WeatherBeautyRainMaxCoverage = 0.22;
+	constexpr double WeatherBeautyRainMaxCoverage = 0.15;   // hyperreal rain: the mean, under the profile
 	constexpr double WeatherBeautyRainDepthFadeM = 12.0;
 	constexpr double WeatherBeautyRainSoftness = 1.0;
 	constexpr double WeatherBeautyRainVariation = 0.8;
 	constexpr double WeatherBeautyRainRadiance = 0.7;
+	// Hyperreal rain (weather_look.BEAUTY_RAIN_SHUTTER_S / _F_NUMBER / _SENSOR_MM / _SCENE_LIT).
+	constexpr double WeatherBeautyRainShutterS = 0.020833333333333332;   // 1 / 48 s
+	constexpr double WeatherBeautyRainFNumber = 4.0;
+	constexpr double WeatherBeautyRainSensorMm = 36.0;
+	constexpr double WeatherBeautyRainSceneLit = 0.6;
 	const double Rate = FMath::Max(RateMmh, 0.0);
 	const double Count = static_cast<double>(FMath::Max(Particles, 1));
 	FFlightSimBeautyRainShape Shape;
@@ -333,7 +356,23 @@ FFlightSimBeautyRainShape FFlightSimWeather::BeautyRainShape(double RateMmh, int
 	Shape.Softness = WeatherBeautyRainSoftness;
 	Shape.Variation = WeatherBeautyRainVariation;
 	Shape.Radiance = WeatherBeautyRainRadiance;
+	Shape.ShutterS = WeatherBeautyRainShutterS;
+	Shape.FNumber = WeatherBeautyRainFNumber;
+	Shape.SensorMm = WeatherBeautyRainSensorMm;
+	Shape.SceneLit = WeatherBeautyRainSceneLit;
 	return Shape;
+}
+
+double FFlightSimWeather::BeautyApertureCm(double HorizontalFovDeg) const
+{
+	// weather_look.beauty_rain_aperture_cm: sensor / (2 tan(fov / 2)) / N, mm to cm.
+	if (!(BeautyFNumber > 0.0) || !(BeautySensorMm > 0.0) || !(HorizontalFovDeg > 0.0) ||
+	    !(HorizontalFovDeg < 180.0))
+	{
+		return 0.0;
+	}
+	const double FocalMm = BeautySensorMm / (2.0 * FMath::Tan(FMath::DegreesToRadians(HorizontalFovDeg) * 0.5));
+	return FocalMm / BeautyFNumber / 10.0;
 }
 
 // -- lane D (2026-11-11): the beauty rain veil ------------------------------------------
@@ -362,6 +401,8 @@ namespace FlightSimRainVeil
 	constexpr double VeilStreakDensityA = 0.08;
 	constexpr double VeilStreakDensityMax = 0.6;
 	constexpr double VeilStreakAlpha = 0.25;
+	// Hyperreal rain (rain_veil.VEIL_STREAK_PROFILE_MEAN): the drawn streak's mean width share.
+	constexpr double VeilStreakProfileMean = 0.441;
 	constexpr int32 ScudCards = 40;
 	constexpr double ScudBoxHalfM = 2500.0;
 	constexpr double ScudBandBelowM = 300.0;
@@ -603,6 +644,19 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 	return true;
 }
 
+double FFlightSimWeather::CurtainStreakAlpha(double ShellRadiusM, double PixelAngle) const
+{
+	// rain_veil.curtain_streak_alpha: alpha x min(1, the drop's presented width / the width
+	// the streak is drawn at the shell), so a 2 px streak carries a 0.1 px drop's light.
+	using namespace FlightSimRainVeil;
+	const double DrawnCm = ShellRadiusM * WeatherCmPerMetre * VeilStreakPixels * VeilStreakProfileMean * PixelAngle;
+	if (!(DrawnCm > 0.0))
+	{
+		return VeilStreakAlpha;
+	}
+	return VeilStreakAlpha * FMath::Min(1.0, PresentedWidthMm(FMath::Max(D0Mm, 0.5)) * 0.1 / DrawnCm);
+}
+
 double FFlightSimWeather::VeilVaryScale(double PixelAngle, bool bLensCells)
 {
 	// rain_veil.veil_vary_scale: the streak cap's rule (streak_cap_rad) for the curtains.
@@ -629,6 +683,10 @@ void FFlightSimWeather::StepBeautyRainVeil(const FFlightSimWeatherView& View, co
 			// The drops' path as the beauty's streaks draw it (the cinematic share of the camera's motion).
 			Material->SetVectorParameterValue(TEXT("WindVel"), WeatherColour(Wind - CamVel));
 			Material->SetScalarParameterValue(TEXT("StreakRad"), static_cast<float>(VeilStreakPixels * PixelAngle));
+			// Hyperreal rain: the streak drawn pixels wide keeps the light of the drop's true width
+			// (#07's veil drew 2 px lines at full alpha at 25, 80 and 250 m: "film scratches").
+			Material->SetScalarParameterValue(TEXT("StreakAlpha"),
+				static_cast<float>(CurtainStreakAlpha(VeilShellRadiiM[Shell], PixelAngle)));
 			Material->SetScalarParameterValue(TEXT("VaryScale"),
 				static_cast<float>(VeilVaryScale(PixelAngle, bBeautyVeilLensCells)));
 			Material->SetScalarParameterValue(TEXT("GroundRelZ"), static_cast<float>(View.GroundZCm - View.CameraCm.Z));
@@ -2475,6 +2533,10 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 	// rain with (stated); the physical style's is the view's.
 	constexpr double WeatherCinematicShutterS = 1.0 / 15.0;
 	const double Shutter = bCinematicRain ? WeatherCinematicShutterS : FMath::Max(View.ShutterSeconds, 1.0e-5);
+	// Hyperreal rain (2026-11-14): the beauty's streaks are exposed over the beauty camera's
+	// shutter (BeautyShutterS, 0 off the beauty path: the view's, as above). The card camera's
+	// documented daylight 1/500 s drew 2-6 px dashes; the lightning's window keeps Shutter.
+	const double StreakShutter = BeautyShutterS > 0.0 && !bCinematicRain ? BeautyShutterS : Shutter;
 
 	// -- lightning: the flashes this exposure integrates ----------------------
 	double FlashLux = 0.0;
@@ -2571,7 +2633,7 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 		RainMaterial->SetScalarParameterValue(TEXT("FallTime"), static_cast<float>(T));
 		RainMaterial->SetVectorParameterValue(TEXT("WindVel"), WeatherColour(Wind));
 		RainMaterial->SetVectorParameterValue(TEXT("CamVel"), WeatherColour(CameraVelocity));
-		RainMaterial->SetScalarParameterValue(TEXT("Shutter"), static_cast<float>(Shutter));
+		RainMaterial->SetScalarParameterValue(TEXT("Shutter"), static_cast<float>(StreakShutter));
 		RainMaterial->SetScalarParameterValue(TEXT("PixelAngle"), static_cast<float>(PixelAngle));
 		RainMaterial->SetScalarParameterValue(TEXT("Active"), static_cast<float>(Share));
 		RainMaterial->SetScalarParameterValue(TEXT("GroundRelZ"), static_cast<float>(GroundRelZ));
@@ -2582,9 +2644,15 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 			RainMaterial->SetScalarParameterValue(TEXT("MaxStreak"), static_cast<float>(
 				BeautyMaxStreakRad * FMath::Min(1.0, PixelAngle / FlightSimRainVeil::BeautyReferencePixelRad)));
 		}
+		if (BeautyFNumber > 0.0)
+		{
+			// Hyperreal rain: the near drops defocused to the lens's pupil (this view's focal length).
+			RainMaterial->SetScalarParameterValue(TEXT("Aperture"),
+			                                      static_cast<float>(BeautyApertureCm(View.HorizontalFovDeg)));
+		}
 	}
 	// maxpick/rain: the baked rain layers (nothing unless -rain-layers=on put them on).
-	StepRainLayers(Wind, CameraVelocity, Share, Shutter, Dt, PixelAngle);
+	StepRainLayers(Wind, CameraVelocity, Share, StreakShutter, Dt, PixelAngle);
 	// Lane D: the beauty rain veil (nothing unless FFlightSimWorldBeauty built it).
 	StepBeautyRainVeil(View, Wind, CameraVelocity, Share, PixelAngle);
 	if (NiagaraRain != nullptr)
@@ -2592,7 +2660,7 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 		NiagaraRain->SetWorldLocation(View.CameraCm);
 		NiagaraRain->SetVariableVec3(TEXT("User.WindVelCm"), Wind);
 		NiagaraRain->SetVariableVec3(TEXT("User.CamVelCm"), CameraVelocity);
-		NiagaraRain->SetVariableFloat(TEXT("User.Shutter"), static_cast<float>(Shutter));
+		NiagaraRain->SetVariableFloat(TEXT("User.Shutter"), static_cast<float>(StreakShutter));
 		NiagaraRain->SetVariableFloat(TEXT("User.Active"), static_cast<float>(Share));
 		NiagaraRain->SetVariableFloat(TEXT("User.GroundZCm"), static_cast<float>(View.GroundZCm));
 		NiagaraRain->SetVariableFloat(TEXT("User.FlashLux"), static_cast<float>(FlashLux));

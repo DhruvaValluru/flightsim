@@ -68,6 +68,14 @@ VEIL_STREAK_DENSITY_A = 0.08
 VEIL_STREAK_DENSITY_MAX = 0.6
 #: One curtain streak's most coverage (fainter than a box streak: it is far).
 VEIL_STREAK_ALPHA = 0.25
+#: Hyperreal rain (2026-11-14): the curtain drew every streak VEIL_STREAK_PIXELS wide at
+#: the full VEIL_STREAK_ALPHA on every shell, but a 2 mm drop at 25 m is 0.1 px wide (at
+#: 250 m, 0.01 px): a streak widened 20x that keeps its coverage is 20x too bright -- the
+#: "film scratches" of #07's veil. The drops' own shader conserves the light of a
+#: widened streak (x true width / drawn width, Garg & Nayar); the curtain now does the
+#: same per shell per frame (:func:`curtain_streak_alpha`). The drawn width is the
+#: Gaussian's mean over the cell (exp(-16 x^2) over |x| <= 0.5 averages this).
+VEIL_STREAK_PROFILE_MEAN = 0.441
 
 #: The scud cards.
 SCUD_CARDS = 40
@@ -183,6 +191,20 @@ def shell_veil_alpha(rate_mmh: float, shell: int,
 def streak_density(rate_mmh: float) -> float:
     """The share of the curtain's streak cells that hold a streak."""
     return min(VEIL_STREAK_DENSITY_MAX, VEIL_STREAK_DENSITY_A * math.sqrt(max(float(rate_mmh), 0.0)))
+
+
+def curtain_streak_alpha(shell_radius_m: float, pixel_angle_rad: float, drop_width_mm: float,
+                         alpha: float = VEIL_STREAK_ALPHA) -> float:
+    """One curtain streak's most coverage on a shell, for a view: ``alpha`` x
+    min(1, the drop's presented width / the width the streak is drawn at that
+    shell), the drawn width VEIL_STREAK_PIXELS x VEIL_STREAK_PROFILE_MEAN pixels at
+    the shell's range. A long lens, which nearly resolves a drop at 25 m, keeps
+    most of it; a wide one keeps a few per cent (the far rain is the veil)."""
+    drawn_cm = (float(shell_radius_m) * 100.0 * VEIL_STREAK_PIXELS * VEIL_STREAK_PROFILE_MEAN
+                * float(pixel_angle_rad))
+    if not (drawn_cm > 0.0):
+        return float(alpha)
+    return float(alpha) * min(1.0, float(drop_width_mm) / 10.0 / drawn_cm)
 
 
 def scud_drawn(rate_mmh: float, storm: bool) -> bool:

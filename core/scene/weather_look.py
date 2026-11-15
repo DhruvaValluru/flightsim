@@ -125,8 +125,10 @@ BEAUTY_RAIN_STREAK_RAD_LIGHT = 0.012
 BEAUTY_RAIN_STREAK_RAD_HEAVY = 0.045
 BEAUTY_RAIN_LIGHT_MMH = 1.0
 BEAUTY_RAIN_HEAVY_MMH = 50.0
-#: The most one streak covers (never an opaque sheet).
-BEAUTY_RAIN_MAX_COVERAGE = 0.22
+#: The most one streak covers (never an opaque sheet). Hyperreal rain: this now caps
+#: the streak's MEAN coverage under the soft profile (peak 2.27 x 1.31 x this at the
+#: Gaussian's centre: 0.45), so a capped streak is see-through, not a flat bar.
+BEAUTY_RAIN_MAX_COVERAGE = 0.15
 #: Coverage x exp(-range / this): the far drops of the box fade into the rain's veil.
 BEAUTY_RAIN_DEPTH_FADE_M = 12.0
 # Lane D (2026-11-11, the round-4 review: "sparse, thin, straight white lines that
@@ -151,8 +153,40 @@ BEAUTY_RAIN_SOFTNESS = 1.0
 BEAUTY_RAIN_VARIATION = 0.8
 #: The drops' radiance scale (SkyRadianceScale; 1: the measure path's).
 BEAUTY_RAIN_RADIANCE = 0.7
+# Hyperreal rain (2026-11-14; the still-"fake" rain of #06, #07, #09: "a flat grey screen
+# with sparse, short, opaque streaks" / "scratches"). The causes, in the code:
+# * the streak's length was the card camera's exposure (core/scenario/camera.py: the
+#   documented daylight default 1/500 s -- 1.8 cm of streak for a 9 m/s drop, 2-6 px:
+#   dashes, not streaks), while the beauty look's own camera is the 180-degree shutter at
+#   the clip's frame rate (core/scene/beauty_look.py shutter_seconds: 1/48 s at 24 fps).
+#   The beauty streak is now exposed over BEAUTY_RAIN_SHUTTER_S (the same number), so its
+#   length is fall speed x shutter / range: 13 cm for the median drop, 85 px at 2 m and
+#   8 px at 20 m through the 54 deg lens -- near long, far short, and the coverage
+#   D / (v t) falls with it (a longer exposure is a fainter streak). The lightning's
+#   window keeps the view's shutter;
+# * nothing defocused a near drop: a lens focused on the scene images a drop 3 m away as
+#   the pupil's disc (f / N: BEAUTY_RAIN_SENSOR_MM / (2 tan(fov / 2)) / BEAUTY_RAIN_F_NUMBER,
+#   the standard beauty lens's f/4 on the documented 36 mm sensor, beauty_look.LENSES).
+#   M_RainDrops's Aperture grows the streak across and along by it, the same light spread
+#   over the smear: near drops large and soft, far ones thin -- the depth layering;
+# * the coverage cap was applied after the soft profile, flattening every near streak to
+#   a bar (rain_drop_opacity.hlsl: the cap is now on the mean, the profile over it);
+# * the drop was a lit white surface, and under a storm deck the translucency lighting
+#   volume carries the unshadowed sun: white lines over a dark scene. BEAUTY_RAIN_SCENE_LIT
+#   of the drop's radiance is now the scene's luminance behind it (SceneLit,
+#   drop_scene_tone.hlsl), the rest the lit sky term (Garg & Nayar: a drop is the mean of
+#   its surroundings).
+# Each is a no-op at its material default. Every number UNCALIBRATED (no frame rendered).
+#: The beauty streaks' exposure (s): the 180-degree shutter at 24 fps.
+BEAUTY_RAIN_SHUTTER_S = 1.0 / 48.0
+#: The beauty lens for the drops' defocus: f-number and sensor width (mm).
+BEAUTY_RAIN_F_NUMBER = 4.0
+BEAUTY_RAIN_SENSOR_MM = 36.0
+#: The share of a drop's radiance taken from the scene behind it (0: the lit surface only).
+BEAUTY_RAIN_SCENE_LIT = 0.6
 BEAUTY_RAIN_KEYS = ("density_share", "near_thin_m", "max_streak_rad", "max_coverage",
-                    "depth_fade_m", "softness", "variation", "radiance")
+                    "depth_fade_m", "softness", "variation", "radiance",
+                    "shutter_s", "f_number", "sensor_mm", "scene_lit")
 
 
 def beauty_rain_shape(rate_mmh: float, particles: int) -> Dict[str, float]:
@@ -175,7 +209,24 @@ def beauty_rain_shape(rate_mmh: float, particles: int) -> Dict[str, float]:
     return {"density_share": share, "near_thin_m": BEAUTY_RAIN_NEAR_THIN_M,
             "max_streak_rad": streak, "max_coverage": BEAUTY_RAIN_MAX_COVERAGE,
             "depth_fade_m": BEAUTY_RAIN_DEPTH_FADE_M, "softness": BEAUTY_RAIN_SOFTNESS,
-            "variation": BEAUTY_RAIN_VARIATION, "radiance": BEAUTY_RAIN_RADIANCE}
+            "variation": BEAUTY_RAIN_VARIATION, "radiance": BEAUTY_RAIN_RADIANCE,
+            "shutter_s": BEAUTY_RAIN_SHUTTER_S, "f_number": BEAUTY_RAIN_F_NUMBER,
+            "sensor_mm": BEAUTY_RAIN_SENSOR_MM, "scene_lit": BEAUTY_RAIN_SCENE_LIT}
+
+
+def beauty_rain_aperture_cm(horizontal_fov_deg: float, f_number: float = BEAUTY_RAIN_F_NUMBER,
+                            sensor_mm: float = BEAUTY_RAIN_SENSOR_MM) -> float:
+    """The beauty lens's entrance pupil (cm) for a view: the focal length the
+    sensor and the horizontal field give (sensor / (2 tan(fov / 2))) over the
+    f-number. M_RainDrops's Aperture, set per frame (the C++ twin:
+    FFlightSimWeather::BeautyApertureCm). 0 for a pinhole (f_number 0) or no field."""
+    import math
+
+    fov = float(horizontal_fov_deg)
+    if not (f_number > 0.0) or not (sensor_mm > 0.0) or not (0.0 < fov < 180.0):
+        return 0.0
+    focal_mm = float(sensor_mm) / (2.0 * math.tan(math.radians(fov) * 0.5))
+    return focal_mm / float(f_number) / 10.0
 
 
 #: The weather look's rain shafts in beauty (M_RainShaft's ShaftSoftEdge and

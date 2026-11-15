@@ -198,6 +198,12 @@ struct FFlightSimBeautyRainShape
 	// Lane D (2026-11-11): soft, varied, background-lit streaks (M_RainDrops 6).
 	double Softness = 0.0;       // the streak (1 + this) wider, Gaussian across, tapered (0: hard)
 	double Variation = 0.0;      // per-drop length and brightness spread (0: none)
+	// Hyperreal rain (2026-11-14, M_RainDrops 7): the streak exposed over the beauty
+	// camera's shutter, defocused by its lens, its radiance partly the scene behind it.
+	double ShutterS = 0.0;       // the streaks' exposure, s (0: the view's)
+	double FNumber = 0.0;        // the beauty lens's f-number (0: a pinhole, no defocus)
+	double SensorMm = 0.0;       // its sensor width, mm (the focal length from the view's FOV)
+	double SceneLit = 0.0;       // the share of a drop's radiance taken from the scene behind it
 	double Radiance = 1.0;       // the drops' SkyRadianceScale (1: the measure path's)
 };
 
@@ -310,6 +316,14 @@ public:
 	static double BeautyVantageShiftM(double StartEastM, double StartNorthM, double HeadingDeg, double TrackM,
 	                                  double AircraftUpM, double CloudBaseM, double CloudTopM,
 	                                  double CloudOvershootM, double CloudTowerRadiusM, double ClearanceM);
+
+	// Hyperreal rain (2026-11-14): the beauty lens's entrance pupil (cm) for a view, the
+	// drops' defocus (weather_look.beauty_rain_aperture_cm is the Python twin): the focal
+	// length the sensor and the field give over the f-number; 0 off the beauty path.
+	double BeautyApertureCm(double HorizontalFovDeg) const;
+	// The curtain streak's most coverage on a shell for a view (rain_veil.curtain_streak_alpha):
+	// a streak drawn pixels wide keeps the light of the drop's true width.
+	double CurtainStreakAlpha(double ShellRadiusM, double PixelAngle) const;
 
 	// -- lane D (2026-11-11): the beauty rain veil, BEAUTY ONLY ----------------
 	// core/scene/rain_veil.py is the Python twin (tests/test_lane_d_storm.py pins
@@ -509,6 +523,10 @@ private:
 	// and the veil's shade.
 	double BeautyCameraShare = 0.0;
 	double BeautyMaxStreakRad = 0.0;
+	// Hyperreal rain: 0 off the beauty path (ApplyBeautyRainReadability sets them).
+	double BeautyShutterS = 0.0;
+	double BeautyFNumber = 0.0;
+	double BeautySensorMm = 0.0;
 	double VeilShade = 1.0;
 
 	// -- lightning -----------------------------------------------------------
