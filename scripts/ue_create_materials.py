@@ -502,8 +502,9 @@ DROPS_PARAMETERS = ("Shift", "FallTime", "BoxHalf", "WindVel", "CamVel", "Shutte
                         "PixelAngle", "Active", "Weight", "GroundRelZ", "SkyRadianceScale",
                         "FlashLux", "Density", "NearThin", "MaxStreak", "MaxCoverage",
                         "DepthFade", "Soft", "Vary",
-                        # Hyperreal rain (2026-11-14): the lens's pupil (defocus) and the
-                        # scene-lit share (drop_scene_tone.hlsl); both 0 = generation 6.
+                        # Hyperreal rain (2026-11-14): the defocus smear (the lens's pupil x
+                        # the beauty's share) and the scene-lit share (drop_scene_tone.hlsl);
+                        # both 0 = generation 6.
                         "Aperture", "SceneLit")
 #: round-2b weather-fx: the beauty rain shape's parameters (beauty_rain_shape in
 #: core/scene/weather_look.py) and the defaults that are the measure path's shader.
@@ -623,7 +624,10 @@ STORM_SCATTERING_PROPERTIES = {
 #: coverage cap moved under the soft profile (rain_drop_opacity.hlsl), and the drop's
 #: radiance taken from the scene behind it (SceneLit, drop_scene_tone.hlsl: one SceneColor
 #: tap at offset 0, as M_RainCurtain 5). Defaults (0, 1, 0) = generation 6.
-STORM_GENERATIONS = {"M_RainDrops": "7", "M_RainSplash": "3", "M_LightningChannel": "2",
+#: M_RainDrops 8: the defocus calibrated (the smear at most RainDefocusMaxPx pixels, the
+#: across blur the greater of the soft width and the sharp width plus the smear, not their
+#: sum: core/scene/rain_drop_twin.py against generation 6). Defaults unchanged.
+STORM_GENERATIONS = {"M_RainDrops": "8", "M_RainSplash": "3", "M_LightningChannel": "2",
                      "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "6",
                      "M_ScudCard": "3",
                      # maxpick/rain (2026-11-13): the baked rain layers and windscreen (tier 0).

@@ -7226,12 +7226,34 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			WeatherView.ShutterSeconds = ExposureShutterSeconds > 0.0
 				? ExposureShutterSeconds
 				: FMath::Min(static_cast<double>(StepsPerFrame) * DeltaSeconds, WeatherDefaultShutterS);
+			// Hyperreal rain (2026-11-14): a beauty CLIP's frame is blurred over the camera's
+			// motion-blur shutter (the beauty look's 180-degree shutter: MotionBlurAmount over
+			// MotionBlurTargetFPS, else the clip's rate), and its drops streak over the same.
+			// A beauty STILL has motion blur off (ApplyShutterPolicy above): 0 here, and its
+			// drops keep the view's shutter like everything else in the sharp frame. Measure
+			// and card renders: 0 (never on the beauty path). The weather records which it used.
+			WeatherView.MotionBlurShutterSeconds = 0.0;
+			if (bBeautyRaster && !bBeautyStill && Capture->ShowFlags.MotionBlur != 0 &&
+			    Capture->PostProcessSettings.MotionBlurAmount > 0.0f)
+			{
+				const double BlurFps = Capture->PostProcessSettings.MotionBlurTargetFPS > 0
+					? static_cast<double>(Capture->PostProcessSettings.MotionBlurTargetFPS) : FramesPerSecond;
+				if (BlurFps > 0.0)
+				{
+					WeatherView.MotionBlurShutterSeconds =
+						static_cast<double>(Capture->PostProcessSettings.MotionBlurAmount) / BlurFps;
+				}
+			}
 			if (!bWeatherShutterRecorded && Weather.Record.IsValid())
 			{
 				Weather.Record->SetNumberField(TEXT("shutter_s"), WeatherView.ShutterSeconds);
 				Weather.Record->SetStringField(TEXT("shutter_basis"), ExposureShutterSeconds > 0.0
-					? TEXT("the card camera's exposure triple")
-					: TEXT("a daylight camera's shutter (stated), or the frame interval when shorter"));
+					? TEXT("the view's exposure (the lightning's window, the windscreen, the drops on a still or "
+					       "a measure render): the card camera's exposure triple; the drops' own is streak_shutter_s")
+					: TEXT("the view's exposure (the lightning's window, the windscreen, the drops on a still or "
+					       "a measure render): a daylight camera's shutter (stated), or the frame interval when "
+					       "shorter; the drops' own is streak_shutter_s"));
+				Weather.Record->SetNumberField(TEXT("motion_blur_shutter_s"), WeatherView.MotionBlurShutterSeconds);
 				bWeatherShutterRecorded = true;
 			}
 			Weather.Advance(WeatherView);

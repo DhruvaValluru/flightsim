@@ -30,9 +30,9 @@
 //   Corner   float2  lane D: UV0 (0|1 across, 0|1 along)
 //   Soft     float   lane D: the beauty streak's softness (0: the hard quad)
 //   Vary     float   lane D: the beauty per-drop length and brightness spread (0: none)
-//   Aperture float   hyperreal rain: the beauty lens's entrance pupil, cm (0: a pinhole)
+//   Aperture float   hyperreal rain: the beauty's defocus smear of a drop, cm (0: a pinhole)
 //
-// Hyperreal rain (2026-11-14, M_RainDrops 7). Two causes of "sparse, short, opaque
+// Hyperreal rain (2026-11-14, M_RainDrops 8). Two causes of "sparse, short, opaque
 // streaks that read as scratches" were in this file and its offset twin:
 //  * the cap MaxCoverage was applied AFTER the soft profile, so a streak whose mean
 //    coverage reached the cap (every near drop at the storm's weight x gains) was clipped
@@ -41,10 +41,15 @@
 //    coverage and the profile (mean 1, peak 2.27 x 1.31) is drawn over it, so a capped
 //    streak is still a soft, see-through smear with a brighter core;
 //  * nothing defocused a near drop: a 2 mm drop 3 m from a lens focused on the scene is
-//    a smear the width of the pupil (Aperture, the offset's twin). The smear's light is
-//    the drop's: coverage x (sharp width / blurred width) x (sharp length / blurred
-//    length), which the Garg & Nayar form below gives once streak and width include it.
+//    a smear (Aperture, the offset's twin: the pupil x the beauty's share, at most
+//    RainDefocusMaxPx pixels; across, the greater of the soft width and the sharp width
+//    plus the smear). The smear's light is the drop's: coverage x (sharp width / blurred
+//    width) x (sharp length / blurred length), which the Garg & Nayar form below gives
+//    once streak and width include it.
 // Both are no-ops at the defaults (MaxCoverage 1, Aperture 0): the measure path's shader.
+// core/scene/rain_drop_twin.py evaluates this arithmetic in Python (generation 6 and this
+// one); tests/test_hyperreal_rain.py evaluates THIS text against it and pins the near
+// drops' coverage on a still within 0.5x..1.5x of generation 6.
 //
 // Lane D (2026-11-11, the round-4 review's "thin straight white lines that read as
 // scratches"): Soft widens the streak (the offset's twin) and draws a Gaussian
@@ -91,15 +96,19 @@ if (MaxStreak > 0.0)
 	streak = max(min(streak, MaxStreak * dist), diameterCm);
 }
 float widthCm = Extra.x * 0.1;
-float width = max(widthCm, dist * PixelAngle);
+float sharp = max(widthCm, dist * PixelAngle);
+float width = sharp;
 if (Soft > 0.0)
 {
 	width *= 1.0 + Soft;
 }
 if (Aperture > 0.0)
 {
-	streak += Aperture;   // the defocused smear (the offset's twin): the same light, spread
-	width += Aperture;
+	// The defocus smear (the offset's twin, the same numbers): the same light, spread.
+	const float RainDefocusMaxPx = 2.0;
+	float blur = min(Aperture, RainDefocusMaxPx * dist * PixelAngle);
+	streak += blur;
+	width = max(width, sharp + blur);
 }
 float coverage = (diameterCm / streak) * (widthCm / width) * Weight;
 float3 a = abs(Rel) / BoxHalf;

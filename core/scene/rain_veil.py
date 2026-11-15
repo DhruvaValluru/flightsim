@@ -76,6 +76,12 @@ VEIL_STREAK_ALPHA = 0.25
 #: same per shell per frame (:func:`curtain_streak_alpha`). The drawn width is the
 #: Gaussian's mean over the cell (exp(-16 x^2) over |x| <= 0.5 averages this).
 VEIL_STREAK_PROFILE_MEAN = 0.441
+#: The least of VEIL_STREAK_ALPHA a shell's streak keeps under that conservation: a curtain
+#: cell stands for the drops of its column (as the box's Weight does), not for one drop,
+#: so the far shell is not taken to a 2 mm drop at 250 m (0.011 of the alpha; 0.11 at
+#: 25 m: no streak texture on the veil at all). At the reference lens every shell draws at this floor
+#: (0.0625 coverage, 4x quieter than the "film scratches"); a long lens keeps more.
+VEIL_STREAK_KEEP_MIN = 0.25
 
 #: The scud cards.
 SCUD_CARDS = 40
@@ -196,15 +202,18 @@ def streak_density(rate_mmh: float) -> float:
 def curtain_streak_alpha(shell_radius_m: float, pixel_angle_rad: float, drop_width_mm: float,
                          alpha: float = VEIL_STREAK_ALPHA) -> float:
     """One curtain streak's most coverage on a shell, for a view: ``alpha`` x
-    min(1, the drop's presented width / the width the streak is drawn at that
-    shell), the drawn width VEIL_STREAK_PIXELS x VEIL_STREAK_PROFILE_MEAN pixels at
-    the shell's range. A long lens, which nearly resolves a drop at 25 m, keeps
-    most of it; a wide one keeps a few per cent (the far rain is the veil)."""
+    max(VEIL_STREAK_KEEP_MIN, min(1, the drop's presented width / the width the
+    streak is drawn at that shell)), the drawn width VEIL_STREAK_PIXELS x
+    VEIL_STREAK_PROFILE_MEAN pixels at the shell's range. A long lens, which
+    nearly resolves a drop at 25 m, keeps most of it; a wide one keeps the floor
+    (the far rain is the veil). The C++ twin (FFlightSimWeather::CurtainStreakAlpha)
+    passes the median drop's presented width, rain_field.presented_width_mm(max(D0, 0.5))."""
     drawn_cm = (float(shell_radius_m) * 100.0 * VEIL_STREAK_PIXELS * VEIL_STREAK_PROFILE_MEAN
                 * float(pixel_angle_rad))
     if not (drawn_cm > 0.0):
         return float(alpha)
-    return float(alpha) * min(1.0, float(drop_width_mm) / 10.0 / drawn_cm)
+    keep = min(1.0, float(drop_width_mm) / 10.0 / drawn_cm)
+    return float(alpha) * max(VEIL_STREAK_KEEP_MIN, keep)
 
 
 def scud_drawn(rate_mmh: float, storm: bool) -> bool:

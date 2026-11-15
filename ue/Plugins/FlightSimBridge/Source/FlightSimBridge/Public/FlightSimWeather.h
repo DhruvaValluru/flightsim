@@ -130,8 +130,16 @@ struct FFlightSimWeatherView
 	FVector CameraCm = FVector::ZeroVector;
 	double HorizontalFovDeg = 90.0;
 	int32 WidthPx = 1920;
-	// The exposure: the drops' streak length and the lightning's window.
+	// The exposure: the lightning's window, the windscreen, and the drops' streak length
+	// (the card's shutter, else a daylight camera's: FlightSimRenderCommandlet.cpp).
 	double ShutterSeconds = 1.0 / 60.0;
+	// Hyperreal rain (2026-11-14): the beauty camera's motion-blur exposure this frame
+	// (MotionBlurAmount over MotionBlurTargetFPS: the plan's 180-degree shutter) when the
+	// capture blurs -- a beauty CLIP. 0 on a beauty STILL (motion blur off,
+	// beauty_look.SHUTTER_POLICY: the still is tack sharp and so are its drops) and off the
+	// beauty path. The beauty streaks are exposed over it when set (Advance's StreakShutter;
+	// weather_look.beauty_rain_streak_shutter_s is the twin); the lightning's window never is.
+	double MotionBlurShutterSeconds = 0.0;
 	// The ground under the camera, engine Z (cm); the scene datum by default.
 	double GroundZCm = 0.0;
 };
@@ -198,11 +206,12 @@ struct FFlightSimBeautyRainShape
 	// Lane D (2026-11-11): soft, varied, background-lit streaks (M_RainDrops 6).
 	double Softness = 0.0;       // the streak (1 + this) wider, Gaussian across, tapered (0: hard)
 	double Variation = 0.0;      // per-drop length and brightness spread (0: none)
-	// Hyperreal rain (2026-11-14, M_RainDrops 7): the streak exposed over the beauty
-	// camera's shutter, defocused by its lens, its radiance partly the scene behind it.
-	double ShutterS = 0.0;       // the streaks' exposure, s (0: the view's)
+	// Hyperreal rain (2026-11-14, M_RainDrops 8): the near drop defocused by the beauty
+	// lens, its radiance partly the scene behind it. (The streak's exposure is the view's:
+	// FFlightSimWeatherView::MotionBlurShutterSeconds on a clip, ShutterSeconds otherwise.)
 	double FNumber = 0.0;        // the beauty lens's f-number (0: a pinhole, no defocus)
 	double SensorMm = 0.0;       // its sensor width, mm (the focal length from the view's FOV)
+	double DefocusShare = 0.0;   // the share of the pupil a near drop is smeared over (0: none)
 	double SceneLit = 0.0;       // the share of a drop's radiance taken from the scene behind it
 	double Radiance = 1.0;       // the drops' SkyRadianceScale (1: the measure path's)
 };
@@ -317,12 +326,17 @@ public:
 	                                  double AircraftUpM, double CloudBaseM, double CloudTopM,
 	                                  double CloudOvershootM, double CloudTowerRadiusM, double ClearanceM);
 
-	// Hyperreal rain (2026-11-14): the beauty lens's entrance pupil (cm) for a view, the
-	// drops' defocus (weather_look.beauty_rain_aperture_cm is the Python twin): the focal
-	// length the sensor and the field give over the f-number; 0 off the beauty path.
+	// Hyperreal rain (2026-11-14): the beauty lens's entrance pupil (cm) for a view
+	// (weather_look.beauty_rain_aperture_cm is the Python twin): the focal length the
+	// sensor and the field give over the f-number; 0 off the beauty path.
 	double BeautyApertureCm(double HorizontalFovDeg) const;
+	// M_RainDrops's Aperture for a view: the smear the beauty draws a near drop over, the
+	// pupil x the defocus share (weather_look.beauty_rain_defocus_cm); the shader holds it
+	// to RainDefocusMaxPx pixels at the drop's range. 0 off the beauty path.
+	double BeautyDefocusCm(double HorizontalFovDeg) const;
 	// The curtain streak's most coverage on a shell for a view (rain_veil.curtain_streak_alpha):
-	// a streak drawn pixels wide keeps the light of the drop's true width.
+	// a streak drawn pixels wide keeps the light of the drop's true width, floored at
+	// VeilStreakKeepMin of the alpha (a cell stands for its column's drops, not one).
 	double CurtainStreakAlpha(double ShellRadiusM, double PixelAngle) const;
 
 	// -- lane D (2026-11-11): the beauty rain veil, BEAUTY ONLY ----------------
@@ -524,9 +538,11 @@ private:
 	double BeautyCameraShare = 0.0;
 	double BeautyMaxStreakRad = 0.0;
 	// Hyperreal rain: 0 off the beauty path (ApplyBeautyRainReadability sets them).
-	double BeautyShutterS = 0.0;
 	double BeautyFNumber = 0.0;
 	double BeautySensorMm = 0.0;
+	double BeautyDefocusShare = 0.0;
+	// The streak exposure Advance last recorded (weather.streak_shutter_s), -1 before any.
+	double RecordedStreakShutterS = -1.0;
 	double VeilShade = 1.0;
 
 	// -- lightning -----------------------------------------------------------
