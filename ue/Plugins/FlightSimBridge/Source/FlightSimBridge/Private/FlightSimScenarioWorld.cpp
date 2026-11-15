@@ -17,6 +17,7 @@
 #include "HAL/ThreadManager.h"
 #include "MaterialDomain.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/FileHelper.h"
 #include "ProceduralMeshComponent.h"
 #include "Serialization/JsonReader.h"
@@ -2799,6 +2800,11 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 		TornadoScud->SetActorRotation(FRotator(
 			0.0, FMath::Fmod(TimeSeconds * TornadoScudOmegaDegPerSec, 360.0),
 			0.0));
+	}
+	// The JangaFX tornado's flipbook plays on SIM time (FlightSimTornadoBeauty.cpp).
+	if (TornadoFlipbookMaterial != nullptr)
+	{
+		TornadoFlipbookMaterial->SetScalarParameterValue(FName(TEXT("Time")), static_cast<float>(TimeSeconds));
 	}
 
 	// Scripted control input. Held until the next entry, so the aircraft is

@@ -124,6 +124,12 @@ ALLOWED_FUTURE: Dict[str, str] = {
     "beauty_post.input": "scripts/beauty_post.py",
     "beauty_post.step": "scripts/beauty_post.py",
     "beauty_post.upscale_vulkan": "scripts/beauty_post.py",
+    # 2026-11-14, the JangaFX tornado: scripts/fetch_tornado_vdb.py raises each as a
+    # FetchRefused whose message starts with the name (outside the scanned packages).
+    "tornado_vdb.pin_missing": "scripts/fetch_tornado_vdb.py",
+    "tornado_vdb.sha_mismatch": "scripts/fetch_tornado_vdb.py",
+    "tornado_vdb.zip_path": "scripts/fetch_tornado_vdb.py",
+    "tornado_vdb.no_vdb": "scripts/fetch_tornado_vdb.py",
 }
 
 #: Catalogue sentences the guided page carries as static text rather

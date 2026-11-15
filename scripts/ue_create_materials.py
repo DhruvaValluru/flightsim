@@ -491,7 +491,8 @@ LINEAR_DEFAULT_TEXTURE = "T_LinearDefault"
 #: Every storm-weather material, by name (one /Game/FlightSim path each).
 STORM_MATERIALS = ("M_RainDrops", "M_RainSplash", "M_LightningChannel", "M_StormCell",
                      "M_WindshieldRain", "M_RainCurtain", "M_ScudCard",
-                     "M_RainLayers", "M_WindshieldRainBaked")   # maxpick/rain: the baked tier 0
+                     "M_RainLayers", "M_WindshieldRainBaked",   # maxpick/rain: the baked tier 0
+                     "M_TornadoFlipbook")   # 2026-11-14: the JangaFX CC0 tornado, baked
 #: The Custom node bodies, committed as HLSL beside the Python twins they
 #: mirror (tests/test_weather.py pins their constants to core/scene/*.py).
 WEATHER_SHADER_DIR = "assets/shaders/weather"
@@ -617,7 +618,9 @@ STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChanne
                      "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "6",
                      "M_ScudCard": "3",
                      # maxpick/rain (2026-11-13): the baked rain layers and windscreen (tier 0).
-                     "M_RainLayers": "1", "M_WindshieldRainBaked": "3"}
+                     "M_RainLayers": "1", "M_WindshieldRainBaked": "3",
+                     # 2026-11-14: the tornado flipbook (JangaFX CC0 VDB, bake_tornado_flipbook.py).
+                     "M_TornadoFlipbook": "1"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -2809,6 +2812,28 @@ PUFF_TEXTURE = "T_TornadoPuffs"
 PUFF_TURN_RAD_PER_S = 0.05
 PUFF_SHADE_FLOOR = 0.55
 PUFF_DEPTH_FADE_CM = 3000.0
+#: M_TornadoFlipbook (2026-11-14, the owner's JangaFX tornado): the flipbook baked from
+#: JangaFX's CC0 "Tornado Looping" VDB by scripts/bake_tornado_flipbook.py (Blender,
+#: offline), played on one camera-facing card in the funnel's place (FlightSimTornadoBeauty.cpp,
+#: -tornado-look=vdb). The PIN names the atlas and its JSON (cols, rows, frames,
+#: loop_seconds, frame_aspect); with no bake on the checkout the material is not built and
+#: the C++ keeps the mesh funnel, said so by name. Lit translucent per pixel like the puffs
+#: (the bake's light is neutral; the storm's sun and sky light the card), the texel's grey
+#: shading TORNADO_FLIPBOOK_TINT (the funnel's sheath grey) above TORNADO_FLIPBOOK_SHADE_FLOOR,
+#: its straight alpha x Opacity the opacity, faded into the ground over the puffs' DepthFade.
+#: Time is set per step from SIM time (FFlightSimScenarioWorld::Step): replay-identical.
+#: UNCALIBRATED.
+TORNADO_FLIPBOOK_PIN = "assets/looks/tornado_vdb/PIN.json"
+TORNADO_FLIPBOOK_ATLAS = "T_TornadoFlipbook.png"
+TORNADO_FLIPBOOK_PLAN = "tornado_flipbook.json"
+TORNADO_FLIPBOOK_TEXTURE = "T_TornadoFlipbook"
+#: What FlightSimTornadoBeauty.cpp / FlightSimScenarioWorld.cpp set on it.
+TORNADO_FLIPBOOK_PARAMETERS = ("Time", "Tint", "Opacity")
+#: Read back by the C++ (the card's width = its height x FrameAspect); from the JSON.
+TORNADO_FLIPBOOK_BAKE_PARAMETERS = ("Cols", "Rows", "Frames", "LoopSeconds", "FrameAspect")
+TORNADO_FLIPBOOK_TINT = (0.24, 0.245, 0.26, 1.0)
+TORNADO_FLIPBOOK_SHADE_FLOOR = 0.35
+TORNADO_FLIPBOOK_OPACITY = 1.0
 
 
 def weather_look_stale(name):
@@ -3410,6 +3435,85 @@ def create_tornado_puff():
                                   unreal.MaterialProperty.MP_ROUGHNESS)
     lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
     finish(material, "M_TornadoPuff")
+
+
+def tornado_flipbook_pin():
+    """The tornado bake's PIN.json, parsed, or None when the checkout holds no bake yet
+    (the placeholder PIN names no files): the material is then not built, said so."""
+    import json
+    source = _repo_file(TORNADO_FLIPBOOK_PIN)
+    if source is None:
+        return None
+    pin = json.loads(source.read_text(encoding="utf-8"))
+    files = pin.get("files") or {}
+    if TORNADO_FLIPBOOK_ATLAS not in files or TORNADO_FLIPBOOK_PLAN not in files:
+        return None
+    return pin
+
+
+def create_tornado_flipbook():
+    """M_TornadoFlipbook (2026-11-14): the JangaFX CC0 tornado's flipbook on one
+    camera-facing card (TORNADO_FLIPBOOK_* above; tornado_flipbook_uv.hlsl and
+    tornado_flipbook_blend.hlsl: frame A, frame B and the crossfade). Translucent, lit per
+    pixel, roughness 1, no depth write: the label captures never see it (its actor is in
+    BeautyOnlyActors). Not built while the checkout has no bake (the C++ draws the mesh)."""
+    import json
+    pin = tornado_flipbook_pin()
+    if pin is None:
+        print(f"MATERIAL-NOTE: {TORNADO_FLIPBOOK_PIN} names no baked atlas yet "
+              f"(scripts/bake_tornado_flipbook.py); M_TornadoFlipbook not built, the tornado keeps its mesh")
+        return
+    plan_row = pin["files"][TORNADO_FLIPBOOK_PLAN]
+    plan_source = _repo_file(plan_row["path"])
+    if plan_source is None:
+        raise RuntimeError(f"{plan_row['path']} is not in this checkout")
+    import hashlib
+    if hashlib.sha256(plan_source.read_bytes()).hexdigest() != plan_row["sha256"]:
+        raise RuntimeError(f"{plan_row['path']} does not hash to its pin")
+    plan = json.loads(plan_source.read_text(encoding="utf-8"))
+    material = _storm_material("M_TornadoFlipbook")
+    if material is None:
+        return
+    atlas = pinned_texture(pin["files"][TORNADO_FLIPBOOK_ATLAS], TORNADO_FLIPBOOK_TEXTURE, True, False)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    material.set_editor_property("translucency_lighting_mode",
+                                 unreal.TranslucencyLightingMode.TLM_SURFACE_PER_PIXEL_LIGHTING)
+    lib = unreal.MaterialEditingLibrary
+    time = scalar(material, lib, "Time", 0.0, -1700, 0)
+    tint = vector(material, lib, "Tint", TORNADO_FLIPBOOK_TINT, -900, -200)
+    opacity = scalar(material, lib, "Opacity", TORNADO_FLIPBOOK_OPACITY, -900, 500)
+    cols = scalar(material, lib, "Cols", float(plan["cols"]), -1700, 100)
+    rows = scalar(material, lib, "Rows", float(plan["rows"]), -1700, 180)
+    frames = scalar(material, lib, "Frames", float(plan["frames"]), -1700, 260)
+    loop = scalar(material, lib, "LoopSeconds", float(plan["loop_seconds"]), -1700, 340)
+    # Not wired: read back by the C++ (the card's width), stated on the material.
+    scalar(material, lib, "FrameAspect", float(plan["frame_aspect"]), -1700, 600)
+    uv = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -1700, -100)
+    lookup = custom(material, lib, "tornado_flipbook_uv", unreal.CustomMaterialOutputType.CMOT_FLOAT4, {
+        "UV": (uv, ""), "Time": (time, ""), "Cols": (cols, ""), "Rows": (rows, ""),
+        "Frames": (frames, ""), "LoopSeconds": (loop, "")}, -1450, 100)
+    blend = custom(material, lib, "tornado_flipbook_blend", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
+        "Time": (time, ""), "Frames": (frames, ""), "LoopSeconds": (loop, "")}, -1450, 350)
+    frame_a = _sample(material, lib, atlas, mask(material, lib, lookup, "rg", -1250, 50),
+                      unreal.MaterialSamplerType.SAMPLERTYPE_COLOR, -1100, 0)
+    frame_b = _sample(material, lib, atlas, mask(material, lib, lookup, "ba", -1250, 200),
+                      unreal.MaterialSamplerType.SAMPLERTYPE_COLOR, -1100, 200)
+    texel = lerp(material, lib, frame_a, frame_b, blend, -900, 100, a_out="RGBA", b_out="RGBA")
+    shade = lerp(material, lib, constant(material, lib, TORNADO_FLIPBOOK_SHADE_FLOOR, -750, 0),
+                 constant(material, lib, 1.0, -750, 60), mask(material, lib, texel, "r", -750, 120),
+                 -600, 0)
+    base = binary(material, lib, unreal.MaterialExpressionMultiply,
+                  mask(material, lib, tint, "rgb", -750, -200), shade, -450, -100)
+    alpha = binary(material, lib, unreal.MaterialExpressionMultiply,
+                   mask(material, lib, texel, "a", -750, 300), opacity, -600, 350)
+    fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -400, 350)
+    fade.set_editor_property("fade_distance_default", PUFF_DEPTH_FADE_CM)
+    lib.connect_material_expressions(alpha, "", fade, "Opacity")
+    lib.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(constant(material, lib, 1.0, -450, 200), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
+    lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
+    finish_storm(material, "M_TornadoFlipbook")
 
 
 def create_rain_drop():
@@ -4422,6 +4526,7 @@ create_storm_cell()
 create_windshield_rain()
 create_windshield_rain_baked()   # maxpick/rain: -windscreen-baked=on
 create_rain_layers()             # maxpick/rain: -rain-layers=on
+create_tornado_flipbook()        # 2026-11-14: -tornado-look=vdb (the JangaFX CC0 tornado)
 create_rain_curtain()   # lane D: the beauty rain veil
 create_scud_card()
 # World lane (visual overhaul): the collection first, the tiles material reads it.

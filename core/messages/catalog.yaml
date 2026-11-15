@@ -436,6 +436,21 @@ rain_veil.scud_card:
 render.look_switch:
   sentence: "A look switch for one of the renderer's effects was given a value it does not take, or names no effect."
   hint: "Use -look-<effect>=on or off (a probe such as bloom-fft, df-shadows or fog-grid also takes auto), with an effect from the engine look's list; or leave the switch out to render as planned."
+render.tornado_look:
+  sentence: "The tornado look switch (-tornado-look=) was given a value it does not take."
+  hint: "Use vdb (the baked JangaFX tornado, the default) or mesh (the procedural funnel); or leave it out."
+tornado_vdb.pin_missing:
+  sentence: "The tornado volume's download is not pinned yet, so the fetch step will not download it."
+  hint: "Record the download's URL, size and sha256 in the tornado fetch script's pin (from the render machine's download), or point the bake at a folder that already holds the volume."
+tornado_vdb.sha_mismatch:
+  sentence: "The downloaded tornado volume does not hash to its pin, so it was deleted and nothing was extracted."
+  hint: "Check the pinned URL against JangaFX's download page; re-pin only after confirming the new file and its CC0 licence."
+tornado_vdb.zip_path:
+  sentence: "A member of the tornado volume's zip would extract outside the asset cache, so the zip was refused."
+  hint: "Download the zip again from JangaFX's page and check its sha256 against the pin."
+tornado_vdb.no_vdb:
+  sentence: "The tornado volume's zip held no .vdb file."
+  hint: "Check the pinned URL names the VDB download (Tornado Looping), not another file."
 
 # -- the post-render beauty pipeline (scripts/beauty_post.py, round 5 L5) ------
 beauty_post.switch:

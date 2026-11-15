@@ -23,6 +23,8 @@ class AActor;
 class AGeoReferencingSystem;
 class FJsonObject;
 class UJSBSimMovementComponent;
+class UMaterialInstanceDynamic;
+class UPrimitiveComponent;
 class UWorld;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogFlightSimScenario, Log, All);
@@ -523,6 +525,15 @@ public:
 	bool BuildBeautyTornado(const FFlightSimScenarioCard& Card,
 	                        TArray<AActor*>& BeautyOnlyActors,
 	                        const TSharedPtr<FJsonObject>& Record);
+	// 2026-11-14 (the owner's JangaFX tornado): -tornado-look=vdb|mesh, set by the
+	// render commandlet before BuildBeautyTornado. vdb (the default) draws the
+	// flipbook baked from JangaFX's CC0 Tornado Looping VDB (M_TornadoFlipbook) on a
+	// camera-facing card in the funnel's place and hands back the funnel's mesh in
+	// TornadoBeautyHiddenFunnel, which the commandlet hides from the BEAUTY capture
+	// only (the label captures keep it, byte for byte); with no baked material it
+	// falls back to mesh and says why in look_applied.tornado_beauty.
+	FString TornadoLook = TEXT("vdb");
+	UPrimitiveComponent* TornadoBeautyHiddenFunnel = nullptr;
 
 	double ReadProperty(const TCHAR* Name) const;
 
@@ -680,6 +691,9 @@ private:
 	double TornadoDustOmegaDegPerSec = 0.0;
 	AActor* TornadoScud = nullptr;
 	double TornadoScudOmegaDegPerSec = 0.0;
+	// The flipbook card's material (-tornado-look=vdb): its Time set per step from
+	// SIM time, so the loop is replay-identical (nullptr on measure and on mesh).
+	UMaterialInstanceDynamic* TornadoFlipbookMaterial = nullptr;
 
 	// Phase 2: the traffic tracks, copied from the card at Populate so
 	// Step() needs no card reference for them; parallel to TrafficActors.

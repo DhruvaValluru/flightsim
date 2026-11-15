@@ -161,3 +161,23 @@ Why a generated ocean normal: Poly Haven and ambientCG were both searched on
 2026-11-11 and carry no water normal maps; other "water normal" files in
 circulation (for example three.js's `waternormals.jpg`) have no stated
 licence for the image itself, so none was taken.
+
+## Tornado volume (cache only: `<repo>/../flightsim_assets/jangafx_tornado/`; baked atlas committed: `assets/looks/tornado_vdb/`)
+
+The owner's tornado (2026-11-14): JangaFX's free EmberGen VDB simulation "Tornado
+Looping" (about 1.7 GB, 200 frames), rendered OFFLINE by Blender into the flipbook
+that `M_TornadoFlipbook` plays in the funnel's place under `-tornado-look=vdb`
+(`FlightSimTornadoBeauty.cpp`). The raw VDB never enters git:
+`scripts/fetch_tornado_vdb.py` puts it in the asset cache beside the checkout
+(`FLIGHTSIM_ASSETS_DIR` overrides the root), checks the zip against its pinned
+sha256 before extracting (a mismatch is refused, `tornado_vdb.sha_mismatch`) and
+does nothing when the cache is complete. `scripts/bake_tornado_flipbook.py` (Blender,
+`-b -P`) bakes the committed atlas `T_TornadoFlipbook.png` and `tornado_flipbook.json`;
+`assets/looks/tornado_vdb/PIN.json` pins both and records the source zip's sha256, so
+every checkout renders the new tornado with no download.
+
+| name | title | licence | source | file | sha256 |
+| --- | --- | --- | --- | --- | --- |
+| `jangafx_tornado` (zip) | Tornado Looping, JangaFX EmberGen free VDB animations | CC0-1.0 (the download page: the free VDB simulations are licensed CC0, Public Domain; confirmed on the page by the render machine before the bake) | https://jangafx.com/software/embergen/download/free-vdb-animations | PLACEHOLDER: the render machine's download URL and size (`scripts/fetch_tornado_vdb.py` PIN) | PLACEHOLDER (`PIN["zip_sha256"]`) |
+
+CC0 needs no attribution; JangaFX is credited as a courtesy (`assets/looks/tornado_vdb/LICENSE`).

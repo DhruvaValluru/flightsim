@@ -40,6 +40,7 @@ FROZEN_NAMES = frozenset({
     "FLIGHTSIM_XPLANE_SKY", "FLIGHTSIM_XPLANE_TERRAIN",
     # visual round 5 lane L3 (2026-11-10): the distant sheet's switch, the sky HDRI probe and its cache
     "FLIGHTSIM_DISTANT_CLOUDS", "FLIGHTSIM_SKY_HDRI", "FLIGHTSIM_HDRI_CACHE",
+    "FLIGHTSIM_ASSETS_DIR",  # 2026-11-14, the JangaFX tornado VDB's cache root (scripts/fetch_tornado_vdb.py)
 })
 
 
@@ -71,9 +72,9 @@ def test_the_scan_detects_an_unlisted_name(tmp_path):
     assert scan_source_env_names([fake / "*.py"]) == {"FLIGHTSIM_ZZZ_TEST"}
     # The module's own table never counts as a read.
     assert scan_source_env_names([REPO / "core" / "config_surface.py"]) == set()
-    # The real scan is exactly the 32 frozen names: a 33rd fails here by name.
+    # The real scan is exactly the 33 frozen names: a 34th fails here by name.
     real = _real_scan()
-    assert len(FROZEN_NAMES) == 32
+    assert len(FROZEN_NAMES) == 33
     assert real == FROZEN_NAMES, (
         f"new: {sorted(real - FROZEN_NAMES)}; gone: {sorted(FROZEN_NAMES - real)}")
     assert flightsim_env_names() == FROZEN_NAMES

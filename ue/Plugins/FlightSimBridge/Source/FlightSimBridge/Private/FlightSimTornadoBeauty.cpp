@@ -149,6 +149,15 @@ namespace FlightSimTornadoBeautyLocal
 
 	const TCHAR* const TornadoPuffPath = TEXT("/Game/FlightSim/M_TornadoPuff.M_TornadoPuff");
 	const TCHAR* const TornadoFunnelSoftPath = TEXT("/Game/FlightSim/M_TornadoFunnelSoft.M_TornadoFunnelSoft");
+	// 2026-11-14, the owner's JangaFX tornado (-tornado-look=vdb): the flipbook baked
+	// from JangaFX's CC0 Tornado Looping VDB (scripts/bake_tornado_flipbook.py) on one
+	// camera-facing card standing on the funnel's ground contact, TornadoFlipbookHeightShare
+	// x the funnel's height tall (its top reaches into the wall cloud's base), as wide as the
+	// bake's frame aspect says (M_TornadoFlipbook's FrameAspect). Tinted the sheath's grey;
+	// lit by the scene per pixel. UNCALIBRATED.
+	const TCHAR* const TornadoFlipbookPath = TEXT("/Game/FlightSim/M_TornadoFlipbook.M_TornadoFlipbook");
+	constexpr double TornadoFlipbookHeightShare = 1.12;
+	constexpr float TornadoFlipbookOpacity = 1.0f;
 
 	double TornadoBeautySmooth01(double X)
 	{
@@ -458,9 +467,66 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		}
 	}
 
+	// -- the JangaFX tornado (-tornado-look=vdb, the default): the flipbook card in the
+	// funnel's place. The funnel's mesh stays in the world (the label captures keep it
+	// byte for byte: it is the occluder they were graded with); the commandlet hides it
+	// from the BEAUTY capture only (TornadoBeautyHiddenFunnel). The card is translucent
+	// and in BeautyOnlyActors, so no label capture ever sees it.
+	TornadoBeautyHiddenFunnel = nullptr;
+	TornadoFlipbookMaterial = nullptr;
+	FString DrawnAs = TEXT("mesh");
+	FString LookNote = TEXT("mesh: -tornado-look=mesh");
+	double FlipbookHeightM = 0.0;
+	double FlipbookWidthM = 0.0;
+	if (TornadoLook == TEXT("vdb"))
+	{
+		UMaterialInterface* FlipbookBase = LoadObject<UMaterialInterface>(nullptr, TornadoFlipbookPath);
+		if (FlipbookBase == nullptr)
+		{
+			LookNote = TEXT("mesh: M_TornadoFlipbook did not load (no baked atlas on this checkout: run "
+			                "scripts/bake_tornado_flipbook.py, then scripts/ue_create_materials.py)");
+		}
+		else
+		{
+			AActor* FlipbookActor = SpawnPuffActor(TEXT("TornadoFlipbook"));
+			UMaterialInstanceDynamic* Flipbook = UMaterialInstanceDynamic::Create(FlipbookBase, FlipbookActor);
+			Flipbook->SetVectorParameterValue(FName(TEXT("Tint")),
+				FLinearColor(BeautySheathColourR, BeautySheathColourG, BeautySheathColourB, 1.0f));
+			Flipbook->SetScalarParameterValue(FName(TEXT("Opacity")), TornadoFlipbookOpacity);
+			Flipbook->SetScalarParameterValue(FName(TEXT("Time")), 0.0f);
+			const double FrameAspect = FMath::Clamp(
+				static_cast<double>(Flipbook->K2_GetScalarParameterValue(FName(TEXT("FrameAspect")))), 0.05, 20.0);
+			FlipbookHeightM = TornadoFlipbookHeightShare * FunnelTopMetres;
+			FlipbookWidthM = FlipbookHeightM * FrameAspect;
+			UMaterialBillboardComponent* Board =
+				NewObject<UMaterialBillboardComponent>(FlipbookActor, TEXT("TornadoFlipbookCard"));
+			Board->SetupAttachment(FlipbookActor->GetRootComponent());
+			Board->SetMobility(EComponentMobility::Movable);
+			Board->SetRelativeLocation(ToEngine(0.0, 0.0, 0.5 * FlipbookHeightM));
+			Board->SetCastShadow(false);
+			Board->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			// UMaterialBillboardComponent's sizes are HALF extents, BaseSizeX along the
+			// view's up and BaseSizeY along its right (MaterialBillboardComponent.cpp:
+			// the quad is +-SizeX x up, +-SizeY x right; UV0 u runs right, v down).
+			Board->AddElement(Flipbook, nullptr, false, static_cast<float>(50.0 * FlipbookHeightM),
+			                  static_cast<float>(50.0 * FlipbookWidthM), nullptr);
+			Board->RegisterComponent();
+			TornadoFlipbookMaterial = Flipbook;
+			TornadoBeautyHiddenFunnel = FunnelMesh;
+			DrawnAs = TEXT("vdb_flipbook");
+			LookNote = TEXT("vdb_flipbook: JangaFX CC0 Tornado Looping, baked by scripts/bake_tornado_flipbook.py; "
+			                "the funnel mesh hidden from the beauty capture only");
+		}
+	}
+
 	if (Record.IsValid())
 	{
 		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		Row->SetStringField(TEXT("drawn_as"), DrawnAs);   // vdb_flipbook | mesh (-tornado-look=)
+		Row->SetStringField(TEXT("tornado_look"), TornadoLook);
+		Row->SetStringField(TEXT("tornado_look_note"), LookNote);
+		Row->SetNumberField(TEXT("flipbook_height_m"), FlipbookHeightM);
+		Row->SetNumberField(TEXT("flipbook_width_m"), FlipbookWidthM);
 		Row->SetNumberField(TEXT("funnel_triangles"), FunnelTriangles);
 		Row->SetStringField(TEXT("funnel_sheath"), SheathNote);
 		Row->SetNumberField(TEXT("wall_cloud_triangles"), WallTriangles);
@@ -476,7 +542,7 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		Record->SetObjectField(TEXT("tornado_beauty"), Row);
 	}
 	UE_LOG(LogTemp, Display,
-	       TEXT("tornado beauty: funnel %d and wall cloud %d triangles rebuilt; %d puffs (%s)"),
-	       FunnelTriangles, WallTriangles, PuffCount, *PuffNote);
+	       TEXT("tornado beauty: funnel %d and wall cloud %d triangles rebuilt; %d puffs (%s); look %s"),
+	       FunnelTriangles, WallTriangles, PuffCount, *PuffNote, *LookNote);
 	return true;
 }

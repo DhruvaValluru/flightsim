@@ -3128,6 +3128,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// Visual push lane C (FlightSimTornadoBeauty.cpp): the tornado's smooth funnel, wall cloud and
 		// puffs, BEAUTY ONLY and before the world lane dresses the markers (ApplyBeautyWeatherLook) and
 		// before any label capture reads BeautyOnlyActors. Measure keeps Build's meshes byte for byte.
+		// 2026-11-14, the owner's JangaFX tornado: -tornado-look=vdb|mesh (the command line
+		// or FLIGHTSIM_RENDER_SWITCHES; vdb, the default, falls back to mesh by name when the
+		// baked material is absent). Another word refuses by name, on any beauty run.
+		FString TornadoLook = TEXT("vdb");
+		FParse::Value(*(Params + TEXT(" ") + FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"))),
+		              TEXT("tornado-look="), TornadoLook);
+		const bool bTornadoLookKnown = TornadoLook == TEXT("vdb") || TornadoLook == TEXT("mesh");
+		if (bBeauty && !bTornadoLookKnown)
+		{
+			return Fail(FString::Printf(TEXT("render.tornado_look: -tornado-look=%s is not vdb or mesh"),
+			                            *TornadoLook));
+		}
+		Scenario.TornadoLook = TornadoLook;
 		if (bBeauty && Card.bTornado)
 		{
 			Scenario.BuildBeautyTornado(Card, VisualScene.BeautyOnlyActors, VisualScene.LookApplied);
@@ -4282,6 +4295,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		Capture->HiddenActors.Add(Scenario.Aircraft);
 	}
+	// -tornado-look=vdb (FlightSimTornadoBeauty.cpp): the funnel's mesh out of the BEAUTY
+	// capture only (the flipbook card draws the funnel there); every label capture keeps it.
+	if (bBeauty && Scenario.TornadoBeautyHiddenFunnel != nullptr)
+	{
+		Capture->HiddenComponents.AddUnique(Scenario.TornadoBeautyHiddenFunnel);
+	}
 	// Integration: on beauty and pathtrace every show flag set above (the
 	// -sky= plan's, -NoShadows, the look-dev lens, TSR, the path tracer)
 	// would be reset to the class default by registration
@@ -5255,6 +5274,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		LinearCapture->PostProcessSettings = Capture->PostProcessSettings;
 		LinearCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
 		LinearCapture->HiddenActors = Capture->HiddenActors;
+		LinearCapture->HiddenComponents = Capture->HiddenComponents;   // the vdb tornado's hidden funnel
 		if (bBeauty)
 		{
 			// Integration: lens-free (RenderMakeLensFree says why), pinned so
@@ -5306,6 +5326,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		AccumulateCapture->PostProcessSettings = Capture->PostProcessSettings;
 		AccumulateCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
 		AccumulateCapture->HiddenActors = Capture->HiddenActors;
+		AccumulateCapture->HiddenComponents = Capture->HiddenComponents;   // the vdb tornado's hidden funnel
 		if (bBeauty)
 		{
 			// Integration: lens-free like the linear capture, its AA-off flags

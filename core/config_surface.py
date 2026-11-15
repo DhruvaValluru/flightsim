@@ -216,6 +216,12 @@ SETTINGS: Tuple[Setting, ...] = (
             "off builds M_FlightSimTilesBeauty without lane B's CC0 terrain detail (the fallback if the "
             "shared sampler fails to compile on the render machine); read only when the material "
             "script runs. Beauty only."),
+    Setting("assets_dir", "FLIGHTSIM_ASSETS_DIR", "dev-only", None,
+            ("scripts/fetch_tornado_vdb.py:40",),
+            "The root of the asset cache outside git (default <repo>/../flightsim_assets): "
+            "scripts/fetch_tornado_vdb.py puts JangaFX's CC0 Tornado Looping VDB in its jangafx_tornado "
+            "folder for the offline flipbook bake (scripts/bake_tornado_flipbook.py). Render-machine "
+            "bakes only; the committed atlas needs no cache."),
     Setting("batch_min_free_mb", "FLIGHTSIM_BATCH_MIN_FREE_MB", "dev-only", "4096",
             ("scripts/run_test_scenarios.py:642",),
             "The free memory (MB) the scenario batch waits for before each scene (default 4096; "

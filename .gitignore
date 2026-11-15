@@ -44,3 +44,6 @@ data/scatter/
 .claude-flow/metrics/
 .claude-flow/mods/install.json
 .claude-flow/security/
+
+# the tornado bake's per-frame renders (scripts/bake_tornado_flipbook.py); only the atlas is committed
+assets/looks/tornado_vdb/_frames/

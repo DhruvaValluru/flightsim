@@ -1,0 +1,8 @@
+{
+ "asset": "tornado_vdb",
+ "title": "Tornado flipbook baked from JangaFX's CC0 Tornado Looping VDB",
+ "licence": "CC0-1.0",
+ "licence_file": "LICENSE",
+ "status": "PLACEHOLDER: not baked yet (scripts/bake_tornado_flipbook.py on the render machine writes the files below)",
+ "files": {}
+}
