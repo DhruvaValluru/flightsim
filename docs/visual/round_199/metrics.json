@@ -1,0 +1,191 @@
+{
+ "calibration": "uncalibrated: report only, no threshold has been judged against real rounds",
+ "limits": {
+  "blank_std_min": 0.002,
+  "blank_mean_min": 0.003,
+  "clipped_max": 0.02,
+  "crushed_max": 0.05,
+  "mean_luma_min": 0.02,
+  "mean_luma_max": 0.8,
+  "ssim_min": 0.35,
+  "flicker_max": 0.02
+ },
+ "gate": "report only; never fails the round",
+ "compare_with": "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_99",
+ "compare_with_found": true,
+ "scenes": {
+  "1": {
+   "frame": "01_golden_hour_a_4_flying_east.jpg",
+   "health": {
+    "mean_luma": 0.11204,
+    "std_luma": 0.12685,
+    "clipped": 0.0,
+    "crushed": 2e-05
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "01_golden_hour_a_4_flying_east.jpg",
+    "flicker": 0.02534,
+    "ssim": 0.9367,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "3": {
+   "frame": "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+   "health": {
+    "mean_luma": 0.11957,
+    "std_luma": 0.13852,
+    "clipped": 0.0,
+    "crushed": 0.00025
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+    "flicker": 0.01423,
+    "ssim": 0.8804,
+    "flags": []
+   }
+  },
+  "6": {
+   "frame": "06_a320_over_sfo_heading_south_moderate_rain.jpg",
+   "health": {
+    "mean_luma": 0.07305,
+    "std_luma": 0.06404,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "06_a320_over_sfo_heading_south_moderate_rain.jpg",
+    "flicker": 0.06138,
+    "ssim": 0.7007,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "7": {
+   "frame": "07_tower_view_heavy_rain.jpg",
+   "health": {
+    "mean_luma": 0.12928,
+    "std_luma": 0.01397,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "07_tower_view_heavy_rain.jpg",
+    "flicker": 0.2622,
+    "ssim": 0.5904,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "9": {
+   "frame": "09_747_through_a_thunderstorm.jpg",
+   "health": {
+    "mean_luma": 0.04719,
+    "std_luma": 0.04281,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": null
+  },
+  "10": {
+   "frame": "10_c172_near_a_tornado.jpg",
+   "health": {
+    "mean_luma": 0.04945,
+    "std_luma": 0.06133,
+    "clipped": 0.0,
+    "crushed": 0.00534
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "10_c172_near_a_tornado.jpg",
+    "flicker": 0.02742,
+    "ssim": 0.6249,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "11": {
+   "frame": "11_a_4_over_the_matterhorn_strong_wind_severe_turbu.jpg",
+   "health": {
+    "mean_luma": 0.27731,
+    "std_luma": 0.22292,
+    "clipped": 0.0,
+    "crushed": 4e-05
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "11_a_4_over_the_matterhorn_strong_wind_severe_turbu.jpg",
+    "flicker": 0.02191,
+    "ssim": 0.4617,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "12": {
+   "frame": "12_c172_cockpit_over_the_grand_canyon.jpg",
+   "health": {
+    "mean_luma": 0.07081,
+    "std_luma": 0.08512,
+    "clipped": 0.0,
+    "crushed": 0.06159
+   },
+   "flags": [
+    "crushed"
+   ],
+   "vs_previous": {
+    "frame": "12_c172_cockpit_over_the_grand_canyon.jpg",
+    "flicker": 0.06876,
+    "ssim": 0.6836,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "13": {
+   "frame": "13_747_cruise_over_the_ocean.jpg",
+   "health": {
+    "mean_luma": 0.0806,
+    "std_luma": 0.10534,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "13_747_cruise_over_the_ocean.jpg",
+    "flicker": 0.13502,
+    "ssim": 0.5054,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "15": {
+   "frame": "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+   "health": {
+    "mean_luma": 0.04667,
+    "std_luma": 0.04921,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+    "flicker": 0.10329,
+    "ssim": 0.412,
+    "flags": [
+     "flicker"
+    ]
+   }
+  }
+ }
+}

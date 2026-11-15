@@ -1,0 +1,252 @@
+[
+ {
+  "number": 1,
+  "name": "golden hour A-4, flying east",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "c23608d57692",
+  "lighting": {},
+  "seconds": 86.2,
+  "spec_sha256": "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.264,
+   "offset_px": [
+    284,
+    -27
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 3,
+  "name": "a320 over new york, wide lens (terrain download)",
+  "prompt": "chase view of the a320 over new york city at 600 m in the morning with a 18 mm lens for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "828ca1cd3f0a",
+  "lighting": {},
+  "seconds": 96.2,
+  "spec_sha256": "b4869e1ee290161061731531d167eaca7708f9565dee91ad052197cc520167b2",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.403,
+   "offset_px": [
+    89,
+    -188
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 6,
+  "name": "a320 over sfo heading south, moderate rain",
+  "prompt": "wingman view of the a320 over sfo south at 3000 m in moderate rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "78f6b32a5b5e",
+  "lighting": {},
+  "seconds": 166.3,
+  "spec_sha256": "c7aa2900755f69f27f63b19009a9c5f434c373cff10e038710fdd79a3f8f7251",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.47,
+   "offset_px": [
+    424,
+    15
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 7,
+  "name": "tower view, heavy rain",
+  "prompt": "tower view of the a320 at 1000 m in heavy rain with a 250 mm lens for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "09b24324bd6b",
+  "lighting": {},
+  "seconds": 176.2,
+  "spec_sha256": "cf3697a5b8c94e5a54c30f373f30fae193d9e68ed10878f721f27d32361af7a4",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.161,
+   "offset_px": [
+    -325,
+    -24
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 9,
+  "name": "747 through a thunderstorm",
+  "prompt": "chase view of the 747 flying west through a thunderstorm at 2000 m for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "fbf1513c0a0b",
+  "lighting": {},
+  "seconds": 266.1,
+  "spec_sha256": "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.156,
+   "offset_px": [
+    25,
+    216
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 10,
+  "name": "c172 near a tornado",
+  "prompt": "chase view of the c172p near a tornado over the flint hills at 600 m for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "c19ed4073609",
+  "lighting": {},
+  "seconds": 96.2,
+  "spec_sha256": "f16db732eb9f2d0529845a94365064e6846b1c81b0351ab82d5c2bdbc28b442e",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.494,
+   "offset_px": [
+    12,
+    -182
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 11,
+  "name": "A-4 over the matterhorn, strong wind, severe turbulence",
+  "prompt": "chase view of the a4 over the matterhorn at 5000 m in strong wind and severe turbulence, flying north, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "234e8dfd1f12",
+  "lighting": {},
+  "seconds": 101.0,
+  "spec_sha256": "41e2a71be3880757ab89daf67b276008aca3bc485a8fb6087e9e91462a4e1671",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.422,
+   "offset_px": [
+    -128,
+    -116
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 12,
+  "name": "c172 cockpit over the grand canyon",
+  "prompt": "cockpit view of the c172p over the grand canyon at 2500 m flying east for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "983612c9c88a",
+  "lighting": {},
+  "seconds": 121.1,
+  "spec_sha256": "e356e70f775363a026947c7eaeb4f821ef46c9d38052764d8bbc97f304c74d78",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.439,
+   "offset_px": [
+    -41,
+    -276
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 13,
+  "name": "747 cruise over the ocean",
+  "prompt": "chase view of the 747 over the ocean at 10000 m at noon for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "6b453c8dd13b",
+  "lighting": {},
+  "seconds": 55.8,
+  "spec_sha256": "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.171,
+   "offset_px": [
+    -202,
+    314
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 15,
+  "name": "747 in hurricane-like weather (the refusal's suggestion)",
+  "prompt": "chase view of the 747 at 2000 m in strong wind, severe turbulence and heavy rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "4a12dfc8c0d4",
+  "lighting": {},
+  "seconds": 96.0,
+  "spec_sha256": "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.337,
+   "offset_px": [
+    81,
+    204
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ }
+]
