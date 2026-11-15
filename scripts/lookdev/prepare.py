@@ -51,6 +51,24 @@ def compile_spec(prompt: str, compiler: str, clip_seconds: float) -> dict:
     return payload["spec"]["dict"]
 
 
+def provision(spec) -> None:
+    """What POST /run does to the spec before starting the run
+    (webapp.server provision_flight), baking the place on a terrain.unbaked
+    refusal the way scripts/run_test_scenarios.py does (POST /bake)."""
+    from webapp.runs import PREFETCH, bake_on_demand, provision_flight
+    provisioned = provision_flight(spec)
+    if provisioned["refusal"] is not None:
+        refusal = provisioned["refusal"]
+        print(f"  baking terrain at {refusal['latitude']:.3f}, {refusal['longitude']:.3f}")
+        PREFETCH.bake(refusal["latitude"], refusal["longitude"], bake_on_demand)
+        provisioned = provision_flight(spec)
+    for key in ("refusal", "weather_refusal"):
+        if provisioned.get(key) is not None:
+            raise SystemExit(f"/run would refuse: {json.dumps(provisioned[key])[:300]}")
+    if provisioned.get("violations"):
+        raise SystemExit(f"/run would refuse: {json.dumps(provisioned['violations'])[:300]}")
+
+
 def prepare(number: int, out_root: Path, compiler: str, switches: str,
             clip_seconds: float, spec_dir) -> Path:
     from run_test_scenarios import apply_lighting
@@ -68,6 +86,7 @@ def prepare(number: int, out_root: Path, compiler: str, switches: str,
     spec_dict = json.loads(json.dumps(spec_dict))
     apply_lighting(spec_dict, edits)
     spec = ScenarioSpec.from_dict(spec_dict)
+    provision(spec)
 
     os.environ.setdefault("FLIGHTSIM_RENDER_QUALITY", "beauty")
     os.environ["FLIGHTSIM_RENDER_SWITCHES"] = switches

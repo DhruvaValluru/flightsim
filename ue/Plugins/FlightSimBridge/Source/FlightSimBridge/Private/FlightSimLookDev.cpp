@@ -75,6 +75,7 @@ namespace
 		TUniquePtr<FFlightSimWeather> Weather;
 		TUniquePtr<FFlightSimImpostorClouds> Impostors;
 		TUniquePtr<FFlightSimGoogleTiles> Tiles;
+		TUniquePtr<FFlightSimWorldBeauty> WorldBeauty;
 		TWeakObjectPtr<AGeoReferencingSystem> GeoReferencing;
 		TWeakObjectPtr<AActor> Aircraft;
 		TWeakObjectPtr<ASceneCapture2D> Camera;
@@ -142,6 +143,9 @@ namespace
 		(void)S.Weather.Release();
 		(void)S.Impostors.Release();
 		(void)S.Tiles.Release();
+		if (S.WorldBeauty.IsValid()) { S.WorldBeauty->RestoreCvars(); }
+		(void)S.WorldBeauty.Release();
+		S.WorldBeauty = MakeUnique<FFlightSimWorldBeauty>();
 		S.Visual = MakeUnique<FFlightSimVisualScene>();
 		S.Weather = MakeUnique<FFlightSimWeather>();
 		S.Impostors = MakeUnique<FFlightSimImpostorClouds>();
@@ -564,6 +568,11 @@ namespace
 			S.Tiles->HideOwnTerrain(World);
 		}
 		if (!FFlightSimBeautyFallback::ApplyScene(*S.Visual, *P)) { Error = FFlightSimBeautyFallback::LastError(); return false; }
+		// The world lane's beauty-only look (atmosphere, sun transmittance, ...), as the commandlet builds it.
+		if (!S.WorldBeauty->Build(World, *P, S.CardRoot, Aircraft, Geo, *S.Visual, *S.Weather, *S.Tiles, Error))
+		{
+			return false;
+		}
 		if (S.Tiles->IsEnabled())
 		{
 			double SeaRadiusM = 0.0;
@@ -689,7 +698,18 @@ namespace
 		FParse::Value(*S.Params, TEXT("warmup="), Warmup);
 		for (int32 Index = 0; Index <= Warmup; ++Index)
 		{
+			if (S.WorldBeauty->IsBuilt() && S.Aircraft.IsValid())
+			{
+				S.WorldBeauty->Advance(0.0, S.CameraLocation, S.Aircraft->GetActorLocation(), Index);
+			}
+			if (S.Impostors->IsBuilt() && S.Aircraft.IsValid())
+			{
+				FVector Origin, Extent;
+				S.Aircraft->GetActorBounds(true, Origin, Extent);
+				S.Impostors->Advance(S.CameraLocation, S.Aircraft->GetActorLocation(), Extent.Size());
+			}
 			FFlightSimBeautyLook::UpdatePerFrame(Capture, S.Aircraft.Get());
+			S.World->SendAllEndOfFrameUpdates();
 			Capture->CaptureScene();
 			FlushRenderingCommands();
 		}
