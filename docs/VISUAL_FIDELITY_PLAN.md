@@ -656,6 +656,32 @@ Next in this lane: M_StormCell's weather map and noise (the storm tiers).
   `STATED_FILL_NEUTRAL_SHARE` among them); `-stated-fill-share=` and a numeric `-tiles-shade-neutral=`
   are the A/B switches.
 
+### Update 2026-11-14: `-cloud-volumetric-scale`, the impostor A/B hook
+
+A beauty-only render switch for judging p3-mac's impostor cloud cards (`0deddc6d`,
+`-cloud-impostors=off|pilot|on`) against the volumetric layers without doubled
+clouds. `-cloud-volumetric-scale=<0..1>` (1 by default; read from the command line
+and `FLIGHTSIM_RENDER_SWITCHES` like `-look-cloud-billow=`) multiplies every
+volumetric layer's drawn cover (the material's `Coverage`, so also the deck
+shadow, the occlusion rows and the distant sheet's continuation). At 0 the
+layer's component is hidden (`SetVisibility(false)`), not left at `Coverage 0`: an
+invisible cloud component has no render state, so the frame has no per-pixel
+cloud march, no cloud shadow map and no cloud-on-fog pass, the cheapest form for
+the iGPU; `Coverage 0` would keep all three and march the slab to find nothing.
+Not a number, or outside 0..1, refuses by name
+(`world_beauty.clouds: -cloud-volumetric-scale=... is not a number in 0..1`).
+`render.json look_applied.clouds.layers[]` records `volumetric_scale`,
+`volumetric_scale_applied`, `cover_before_volumetric_scale` and
+`volumetric_hidden`. Measure renders are untouched (the code is in `ApplyClouds`,
+reached only under `-quality=beauty`). `core/scene/world_beauty.py`
+`cloud_volumetric_coverage` is the twin; `tests/test_cloud_volumetric_scale.py`
+pins the two. **UNMEASURED**: written on the Mac, never compiled or rendered.
+The Windows A/B (impostors on, volumetric hidden, against a reference round):
+
+```
+.\scripts\visual_fix_round.ps1 -Round N -Scenes "13,3" -Switches "-cloud-volumetric-scale=0" -CompareWith <ref>
+```
+
 **Updated 2026-11-09, after the visual-overhaul session.** Mac session
 flightsim-83, swarm `swarm-1794241474984-rmywk3`, branch
 `claude/vibrant-gauss-olema4`, base commit `355dae64`, five look lanes

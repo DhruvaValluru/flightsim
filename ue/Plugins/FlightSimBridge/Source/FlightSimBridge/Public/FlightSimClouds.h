@@ -194,6 +194,12 @@ private:
 	// Round 82: -look-cloud-billow=on|off (Build reads it; ApplyClouds applies it to
 	// cumulus layers: FlightSimWorldPure::CloudBillowRow).
 	FString CloudBillowSwitch = TEXT("on");
+	// Impostor A/B (0deddc6d): -cloud-volumetric-scale=<0..1> (Build reads it;
+	// ApplyClouds multiplies every volumetric layer's drawn cover by it and hides
+	// the layer at 0: FlightSimWorldPure::CloudVolumetricCoverage). The text as
+	// given is kept for the refusal message.
+	double CloudVolumetricScale = 1.0;
+	FString CloudVolumetricScaleText;
 	bool StormNeutralAlbedo() const;
 	// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default; off
 	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)

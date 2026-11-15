@@ -690,6 +690,35 @@ CLOUD_DOME_POWER = 1.5
 DISTANT_GRAZE_LO = 0.05
 DISTANT_GRAZE_HI = 0.3
 DISTANT_GRAZE_SOFTEN = 3.0
+#: Impostor A/B (0deddc6d's cloud cards, 2026-11-14): ``-cloud-volumetric-scale=<0..1>``
+#: (CLOUD_VOLUMETRIC_SCALE_DEFAULT by default) multiplies every volumetric layer's
+#: drawn cover (the material's Coverage, and so the deck shadow, the occlusion rows
+#: and the distant sheet's continuation) so a frame can carry the impostor cards
+#: without doubled clouds; at 0 the layer's component is hidden (no march, no
+#: shadow map). Not a number, or outside 0..1, refuses by name. Beauty only (the
+#: measure path never reaches ApplyClouds). C++ CloudVolumetricCoverage /
+#: CloudVolumetricHidden are the twins; render.json look_applied.clouds.layers[]
+#: records volumetric_scale, volumetric_scale_applied, cover_before_volumetric_scale
+#: and volumetric_hidden. UNMEASURED.
+CLOUD_VOLUMETRIC_SCALE_SWITCH = "-cloud-volumetric-scale"
+CLOUD_VOLUMETRIC_SCALE_DEFAULT = 1.0
+
+
+def cloud_volumetric_coverage(cover: float, scale: float) -> float:
+    """A volumetric layer's drawn cover under ``-cloud-volumetric-scale`` (C++
+    CloudVolumetricCoverage): ``cover`` x ``scale``. Refuses, as the bridge does,
+    a scale that is not a real number in 0..1, and a cover outside 0..1."""
+    for name, value in (("scale", scale), ("cover", cover)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or math.isnan(value):
+            raise ValueError(f"{CLOUD_VOLUMETRIC_SCALE_SWITCH}: {name}={value!r} is not a number in 0..1")
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"{CLOUD_VOLUMETRIC_SCALE_SWITCH}: {name}={value!r} is not a number in 0..1")
+    return float(cover) * float(scale)
+
+
+def cloud_volumetric_hidden(scale: float) -> bool:
+    """Whether the layer's component is hidden (C++ CloudVolumetricHidden): scale 0."""
+    return cloud_volumetric_coverage(1.0, scale) <= 0.0
 
 
 def cloud_billow_applies(billow_on: bool, shape: str) -> bool:
