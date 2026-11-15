@@ -236,7 +236,9 @@ BASE_PARAMETERS = ("BaseColorMap", "BaseColor", "BaseColorMapWeight")
 #: (pinned to its text by tests/test_aircraft_look.py).
 FX_PARAMETERS = {
     "M_NavLightEmissive": ("LightColour", "Intensity", "Strobe", "BeamDirection", "BeamCos"),
-    "M_AircraftContrail": ("Opacity", "Formation", "FormationRamp"),
+    # LOOK_GENERATION 13 (hyperreal contrails): Puff is the break-up strength the C++
+    # sets (contrail.PuffBreakup, 0 under -contrail-puffs=off).
+    "M_AircraftContrail": ("Opacity", "Formation", "FormationRamp", "Puff"),
     "M_AircraftAfterburner": ("Intensity", "CoreColour", "TipColour", "Shocks"),
     "M_AircraftHeatHaze": ("TimeS", "Strength"),
     # condensation-solver (scripts/aircraft_condensation_material.py PARAMETERS).
@@ -251,7 +253,9 @@ SHADER_INPUTS = {
     # round 5 (L4): exhaust soot aft of the nozzles (twin: soot_mask).
     "exhaust_soot": ("LocalPos", *SOOT_NOZZLE_PARAMETERS, "LengthRadii", "Noise"),
     "nav_bulb": ("UV", "LightColour", "Intensity", "Strobe", "CameraDir", "BeamDir", "BeamCos"),
-    "contrail_opacity": ("UV", "LocalPos", "Opacity", "Formation", "FormationRamp"),
+    # LOOK_GENERATION 13: absolute world position (the puffs stay in the air), the
+    # per-sample Life (vertex colour R) and the puff break-up pair.
+    "contrail_opacity": ("UV", "WorldPos", "Life", "Opacity", "Formation", "FormationRamp", "Puff", "PuffCellCm"),
     "afterburner_glow": ("UV", "Intensity", "CoreColour", "TipColour", "Shocks"),
     "heat_haze": ("UV", "LocalPos", "TimeS", "Strength"),
     # wet-airframe-canopy: "aircraft_wet" and "canopy_scratch".
@@ -867,7 +871,86 @@ CONTRAIL_DEFAULTS = {
     # runs to the frame edge at full strength. M_AircraftContrail's
     # CameraFadeOffset / CameraFadeLength defaults (cm). UNCALIBRATED.
     "CameraFadeOffsetM": 30.0, "CameraFadeLengthM": 120.0,
+    # LOOK_GENERATION 13 (hyperreal contrails; #13's "four bright runway stripes":
+    # solid, one width, one brightness, no spreading). Everything UNCALIBRATED.
+    # Width: StartWidthM + JetSpreadM (1 - exp(-age / JetMixS)) + SpreadMPerS age.
+    # The jet regime: the exhaust plume mixes with the ambient air at a
+    # turbulent jet's rate and is ~10 m across within a few hundred metres
+    # (chase photographs of a 747 at cruise, from memory); the old 0.9 m/s
+    # alone grew 1.2 m to 1.6 m over the 110 m a chase frame shows.
+    "JetSpreadM": 10.0, "JetMixS": 1.5,
+    # The wake vortex roll-up: each engine plume is drawn to its side's
+    # wingtip vortex core over VortexRollupS (the four plumes become two), the
+    # cores at +/- VortexSpanFraction x the semi-span (pi/4 of the span for an
+    # elliptical load: 0.785), and the pair sinks at WakeSinkMPerS (a 747's
+    # wake descends 1-2 m/s, from memory).
+    "VortexRollupS": 12.0, "VortexSpanFraction": 0.785, "WakeSinkMPerS": 1.5,
+    # The puffs (contrail_opacity.hlsl): the break-up strength (0 = generation
+    # 12's even lumpiness; -contrail-puffs=off is the A/B) and a young trail's
+    # puff cell in metres (it grows x5 over the trail's life).
+    "PuffBreakup": 0.6, "PuffCellM": 6.0,
+    # Persistence (the stated physics, where the humidity exists): a contrail
+    # persists only in ice-supersaturated air. RHi = RH x e_sat,water / e_sat,ice
+    # (Sonntag 1990's Magnus forms: water b 17.62 c 243.12, ice b 22.46
+    # c 272.62 degC, the water pair being core/environment/atmosphere.py's);
+    # the persistence factor is saturate((RHi - PersistenceRhiOnsetPct) /
+    # PersistenceRhiSpanPct) and a sample's lifetime is LifetimeS + factor x
+    # (PersistentLifetimeS - LifetimeS). No humidity (no dew point on the card,
+    # no -humidity-pct=): factor 0, LifetimeS, as before.
+    "PersistentLifetimeS": 240.0, "PersistenceRhiOnsetPct": 100.0, "PersistenceRhiSpanPct": 20.0,
 }
+#: Sonntag (1990) Magnus-form constants over ICE (b, c in degC); the water pair
+#: is core/environment/atmosphere.py MAGNUS_B / MAGNUS_C. The ``a`` cancels in
+#: the ratio. From memory, UNCALIBRATED (the ratio is 1.62 at -50 degC).
+MAGNUS_ICE_B = 22.46
+MAGNUS_ICE_C = 272.62
+
+
+def contrail_width_m(age_s, constants=None):
+    """The twin of FlightSimAircraftFX.cpp RebuildTrail's width: the jet
+    regime's saturating spread plus the slow linear diffusion."""
+    c = constants or CONTRAIL_DEFAULTS
+    age = max(float(age_s), 0.0)
+    return (c["StartWidthM"] + c["JetSpreadM"] * (1.0 - math.exp(-age / max(c["JetMixS"], 1e-3)))
+            + c["SpreadMPerS"] * age)
+
+
+def contrail_wake_offset_m(age_s, nozzle_y_m, semi_span_m, constants=None):
+    """The twin of the roll-up: (lateral, sink) in metres of a sample this old
+    from an engine at ``nozzle_y_m`` (actor +Y right). Lateral is towards its
+    side's vortex core, a smoothstep over VortexRollupS; sink is linear. A
+    semi-span of 0 (no wingtip lamps measured) rolls nothing up."""
+    c = constants or CONTRAIL_DEFAULTS
+    age = max(float(age_s), 0.0)
+    t = min(age / max(c["VortexRollupS"], 1e-3), 1.0)
+    s = t * t * (3.0 - 2.0 * t)
+    if semi_span_m <= 0.0:
+        target = nozzle_y_m
+    else:
+        target = math.copysign(c["VortexSpanFraction"] * semi_span_m, nozzle_y_m if nozzle_y_m != 0.0 else 1.0)
+    return (target - nozzle_y_m) * s, c["WakeSinkMPerS"] * age
+
+
+def ice_over_water_saturation_ratio(temperature_k):
+    """e_sat,water / e_sat,ice at this temperature (Sonntag 1990 Magnus forms;
+    the twin of FlightSimAircraftFX.cpp AircraftFxIceOverWaterSaturation)."""
+    from core.environment.atmosphere import MAGNUS_B, MAGNUS_C
+    t = float(temperature_k) - 273.15
+    return math.exp(MAGNUS_B * t / (MAGNUS_C + t) - MAGNUS_ICE_B * t / (MAGNUS_ICE_C + t))
+
+
+def contrail_persistence(rh_pct, temperature_k, constants=None):
+    """(RHi percent, persistence factor 0..1, a sample's lifetime in s) from
+    the relative humidity over water; ``rh_pct`` None is "no humidity": the
+    factor is 0 and the lifetime LifetimeS."""
+    c = constants or CONTRAIL_DEFAULTS
+    if rh_pct is None or not math.isfinite(rh_pct) or rh_pct < 0.0:
+        return 0.0, 0.0, c["LifetimeS"]
+    rhi = float(rh_pct) * ice_over_water_saturation_ratio(temperature_k)
+    factor = min(max((rhi - c["PersistenceRhiOnsetPct"]) / max(c["PersistenceRhiSpanPct"], 1e-3), 0.0), 1.0)
+    return rhi, factor, c["LifetimeS"] + factor * (c["PersistentLifetimeS"] - c["LifetimeS"])
+
+
 #: Wingtip vapour: short trails from the wingtip anchors above a load factor.
 VAPOUR_DEFAULTS = {"MinNz": 4.0, "LifetimeS": 0.8, "StartWidthM": 0.25,
                    "SpreadMPerS": 1.5, "Opacity": 0.35}
@@ -994,6 +1077,9 @@ FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", True), ("aircra
                # Round 47 (#13): the contrail's formation ramp in seconds (on) or
                # generation 6's 0.04 of the lifetime (off, the A/B).
                ("contrail-formation-ramp=", True),
+               # LOOK_GENERATION 13: the trail's break-up into puffs with age
+               # (contrail_opacity.hlsl Puff = contrail.PuffBreakup; off sets 0).
+               ("contrail-puffs=", True),
                # The canopy reflection (aircraft_glass_reflect.py): OFF unless
                # -canopy-reflect=on, so Windows can A/B it (tier: -canopy-reflect-tier=0|1).
                ("canopy-reflect=", False))

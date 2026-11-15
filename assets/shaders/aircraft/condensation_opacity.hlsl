@@ -22,8 +22,13 @@ float lumpy = lerp(0.55, 1.0, saturate(Noise));
 float a = 0.0;
 if (Shape < 0.5)
 {
-    float across = 1.0 - abs(UV.y * 2.0 - 1.0);
-    across = across * across * (3.0 - 2.0 * across);
+    // LOOK_GENERATION 13 (hyperreal contrails): a vortex core is a tube, so the
+    // across profile is a cylinder's chord sqrt(1 - x^2) (thickest through the
+    // axis, soft at the rim), the rim softening further as the core ages; the
+    // old tent profile was one brightness edge to edge. UNCALIBRATED.
+    float x = abs(UV.y * 2.0 - 1.0);
+    float chord = sqrt(saturate(1.0 - x * x));
+    float across = smoothstep(0.0, lerp(0.5, 1.0, saturate(UV.x)), chord);
     a = across * (1.0 - smoothstep(0.25, 1.0, UV.x));
 }
 else if (Shape < 1.5)

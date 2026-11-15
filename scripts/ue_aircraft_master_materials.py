@@ -99,7 +99,14 @@ REPO = os.path.dirname(_HERE)
 #: only under -canopy-reflect=on). Every other graph is unchanged.
 #: 12 (round 93): M_AircraftContrail's opacity fades in with the camera's
 #: distance (saturate((PixelDepth - offset) / length); #13's four rulers). Every other graph is unchanged.
-LOOK_GENERATION = "12"
+#: 13 (hyperreal contrails; #13's four bright runway stripes): M_AircraftContrail
+#: reads absolute WorldPosition (the puffs stay in the air), the vertex colour's
+#: per-sample Life, and the Puff / PuffCellCm pair (contrail_opacity.hlsl's
+#: chord profile, world-space puffs, age break-up); lit Volumetric Directional
+#: (a sun side and a shadow side; the C++ gives the ribbon a half-cylinder's
+#: normals). M_AircraftCondensation's ribbon shape takes the chord profile
+#: (condensation_opacity.hlsl; the stamp rebuilds it). Every other graph is unchanged.
+LOOK_GENERATION = "13"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.
@@ -749,18 +756,34 @@ def create_aircraft_contrail():
     material = _fx("M_AircraftContrail", "BLEND_TRANSLUCENT", unlit=False)
     if material is None:
         return
-    lighting = getattr(unreal.TranslucencyLightingMode, "TLM_VOLUMETRIC_NON_DIRECTIONAL", None)
+    # LOOK_GENERATION 13: Volumetric Directional (ETranslucencyLightingMode
+    # TLM_VolumetricDirectional, D3D11 SM5's translucency lighting volume: the
+    # ribbon's half-cylinder normals give a sun side and a shadow side); the
+    # non-directional mode of generations 6-12 is the fallback when a Python
+    # build lacks the name, and render.json's material row says which.
+    lighting = getattr(unreal.TranslucencyLightingMode, "TLM_VOLUMETRIC_DIRECTIONAL", None)
+    if lighting is None:
+        lighting = getattr(unreal.TranslucencyLightingMode, "TLM_VOLUMETRIC_NON_DIRECTIONAL", None)
     if lighting is not None:
         material.set_editor_property("translucency_lighting_mode", lighting)
-    opacity_name, formation_name, ramp_name = look.FX_PARAMETERS["M_AircraftContrail"]
+    opacity_name, formation_name, ramp_name, puff_name = look.FX_PARAMETERS["M_AircraftContrail"]
     opacity = _custom(material, "contrail_opacity", "CMOT_FLOAT1", {
         "UV": (_uv(material, -700, 0), ""),
-        "LocalPos": (_node(material, unreal.MaterialExpressionLocalPosition, -700, 100), ""),
+        # LOOK_GENERATION 13: absolute world position (generation 12's LocalPosition
+        # was relative to the newest sample, so the lumps slid along with the aircraft).
+        "WorldPos": (_node(material, unreal.MaterialExpressionWorldPosition, -700, 100), ""),
+        # Vertex colour R: age / this sample's own lifetime (the persistence gate).
+        "Life": (_mask(material, _node(material, unreal.MaterialExpressionVertexColor, -900, 150), "r", -700, 150), ""),
         "Opacity": (_scalar(material, opacity_name, 0.55, -700, 200), ""),
         "Formation": (_scalar(material, formation_name, 0.01, -700, 300), ""),
         # LOOK_GENERATION 7 (round 47, #13): the formation ramp as an age fraction;
         # 0.04 is generation 6's fixed ramp (the C++ sets FormationRampS / LifetimeS).
-        "FormationRamp": (_scalar(material, ramp_name, 0.04, -700, 400), "")}, -400, 100)
+        "FormationRamp": (_scalar(material, ramp_name, 0.04, -700, 400), ""),
+        # LOOK_GENERATION 13: the break-up (the C++ sets contrail.PuffBreakup, 0 under
+        # -contrail-puffs=off) and a young trail's puff cell (contrail.PuffCellM, cm).
+        "Puff": (_scalar(material, puff_name, look.CONTRAIL_DEFAULTS["PuffBreakup"], -700, 450), ""),
+        "PuffCellCm": (_scalar(material, "PuffCellCm", 100.0 * look.CONTRAIL_DEFAULTS["PuffCellM"], -700, 500), "")},
+        -400, 100)
     lib = unreal.MaterialEditingLibrary
     lib.connect_material_property(_const3(material, (0.92, 0.94, 0.97), -400, -100), "",
                                   unreal.MaterialProperty.MP_BASE_COLOR)

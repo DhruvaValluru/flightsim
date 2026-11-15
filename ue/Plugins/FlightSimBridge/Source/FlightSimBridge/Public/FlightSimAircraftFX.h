@@ -83,6 +83,10 @@ struct FFlightSimAircraftFXOptions
 	// Round 47 (#13's four light lines): the contrail forms over contrail.FormationRampS
 	// (on) or over generation 6's 0.04 of its lifetime (off, -contrail-formation-ramp=off).
 	bool bContrailFormationRamp = true;
+	// LOOK_GENERATION 13 (hyperreal contrails): an aged trail breaks into puffs
+	// (contrail_opacity.hlsl Puff = contrail.PuffBreakup); -contrail-puffs=off sets
+	// Puff 0 (generation 12's even lumpiness), the A/B.
+	bool bContrailPuffs = true;
 	// The canopy reflection (scripts/aircraft_glass_reflect.py; swarm lane
 	// aircraft_exterior.glass.coastal, its opaque tiers 0-1 only): OFF unless
 	// -canopy-reflect=on, so a round can A/B it. On, a glass slot that draws
@@ -205,8 +209,17 @@ private:
 	};
 	struct FTrailSample
 	{
+		// Where the air was when the sample was emitted (the ribbon's vertex is
+		// this point displaced by the wake roll-up and sink of its age).
 		FVector WorldCm = FVector::ZeroVector;
 		double TimeS = 0.0;
+		// LOOK_GENERATION 13 (hyperreal contrails): the aircraft's unit right axis
+		// (world) at emission, the roll-up's direction; and this sample's own
+		// lifetime, s: contrail.LifetimeS stretched towards PersistentLifetimeS by
+		// the ice-supersaturation of the air it was emitted into (the persistence
+		// gate; the FDM's humidity, where the card states one).
+		FVector RightWorld = FVector::RightVector;
+		double LifetimeS = 25.0;
 	};
 	struct FTrail
 	{
@@ -218,14 +231,31 @@ private:
 		TArray<FTrailSample> Samples;
 		bool bVapour = false;
 		bool bEverDrawn = false;
+		// LOOK_GENERATION 13: the lateral distance, m (actor +Y right), from this
+		// engine to its side's wingtip vortex core: where the plume is drawn to
+		// over contrail.VortexRollupS. 0 for a vapour trail or with no measured span.
+		double VortexOffsetM = 0.0;
+	};
+	// LOOK_GENERATION 13: what RebuildTrail shapes a ribbon with (the look
+	// manifest's contrail / vapour constants, read each step).
+	struct FTrailShape
+	{
+		double StartWidthM = 1.2;
+		double SpreadMPerS = 0.9;
+		double JetSpreadM = 0.0;      // the jet regime's extra width, saturating over JetMixS
+		double JetMixS = 1.5;
+		double VortexRollupS = 0.0;   // 0: no roll-up (the vapour trails)
+		double WakeSinkMPerS = 0.0;
 	};
 
 	void ApplyMaterials(const FString& AssetRoot, const FFlightSimAircraftFXOptions& Options);
 	void BuildLamp(UWorld* World, const TSharedPtr<FJsonObject>& Row);
 	void BuildNozzle(UWorld* World, const TSharedPtr<FJsonObject>& Row, const FFlightSimAircraftFXOptions& Options);
 	AActor* SpawnAttached(UWorld* World, const FVector& ActorCm, const TCHAR* Name);
-	void RebuildTrail(FTrail& Trail, double NowS, double LifetimeS, double StartWidthM,
-	                  double SpreadMPerS, double FormationS);
+	// A crossed ribbon through the samples: width by the jet-plus-diffusion model,
+	// each sample displaced by its wake roll-up and sink, half-cylinder normals,
+	// vertex colour R = age / the sample's own lifetime (contrail_opacity.hlsl Life).
+	void RebuildTrail(FTrail& Trail, double NowS, double LifetimeS, const FTrailShape& Shape);
 	double Constant(const TCHAR* Group, const TCHAR* Name, double Fallback) const;
 	// The reflect MIDs' sun direction and gain from the sun as it is now.
 	void UpdateCanopyReflect();
@@ -241,6 +271,14 @@ private:
 	FFlightSimCondensation Condensation;
 	int32 ContrailFrames = 0;
 	int32 ContrailInCloudFrames = 0;
+	// LOOK_GENERATION 13: the semi-span, cm, from the wingtip nav lamps' |Y| (0: no
+	// lamps, no roll-up); the persistence gate's last reading (render.json
+	// aircraft_look.contrail.persistence) and how many steps it held the trail.
+	double SemiSpanCm = 0.0;
+	double ContrailRhiPct = 0.0;
+	double ContrailPersistence = 0.0;
+	double ContrailLifetimeNowS = 0.0;
+	int32 PersistentFrames = 0;
 	TArray<FFlightSimCloudLayer> CloudLayers;
 	int32 VapourFrames = 0;
 	double PeakAfterburner = 0.0;

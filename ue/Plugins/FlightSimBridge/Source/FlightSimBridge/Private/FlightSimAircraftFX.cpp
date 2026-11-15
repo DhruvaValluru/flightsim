@@ -157,6 +157,23 @@ namespace
 	const TCHAR* const AircraftFxParamFormationRamp = TEXT("FormationRamp");
 	// contrail_opacity.hlsl generation 6's fixed ramp (an age fraction).
 	constexpr double AircraftFxLegacyFormationRamp = 0.04;
+	// LOOK_GENERATION 13 (hyperreal contrails): the break-up strength the C++ sets.
+	const TCHAR* const AircraftFxParamPuff = TEXT("Puff");
+	// The persistence gate: e_sat,water / e_sat,ice by Sonntag (1990)'s Magnus
+	// forms (water b 17.62 c 243.12: core/environment/atmosphere.py MAGNUS_B/C;
+	// ice b 22.46 c 272.62: aircraft_look.MAGNUS_ICE_B/C). The a cancels. From
+	// memory, UNCALIBRATED; 1.62 at -50 degC. The twin is
+	// aircraft_look.ice_over_water_saturation_ratio.
+	constexpr double AircraftFxMagnusWaterB = 17.62;
+	constexpr double AircraftFxMagnusWaterC = 243.12;
+	constexpr double AircraftFxMagnusIceB = 22.46;
+	constexpr double AircraftFxMagnusIceC = 272.62;
+	double AircraftFxIceOverWaterSaturation(double TemperatureK)
+	{
+		const double T = TemperatureK - 273.15;
+		return FMath::Exp(AircraftFxMagnusWaterB * T / (AircraftFxMagnusWaterC + T)
+		                  - AircraftFxMagnusIceB * T / (AircraftFxMagnusIceC + T));
+	}
 	const TCHAR* const AircraftFxParamTime = TEXT("TimeS");
 	const TCHAR* const AircraftFxParamStrength = TEXT("Strength");
 	const TCHAR* const AircraftFxParamBeamDirection = TEXT("BeamDirection");
@@ -350,6 +367,8 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	// Pixel-moving: off unless asked for by name.
 	const bool bHeatHazeSwitch = AircraftFxSwitch(Params, TEXT("heat-haze="), false, SwitchError);
 	const bool bFormationRampSwitch = AircraftFxSwitch(Params, TEXT("contrail-formation-ramp="), true, SwitchError);
+	// LOOK_GENERATION 13: the trail's break-up into puffs with age (the A/B).
+	const bool bPuffsSwitch = AircraftFxSwitch(Params, TEXT("contrail-puffs="), true, SwitchError);
 	// The canopy reflection: off unless asked for by name (the A/B).
 	const bool bCanopyReflectSwitch = AircraftFxSwitch(Params, TEXT("canopy-reflect="), false, SwitchError);
 	bMaterials = bAll && bMaterialsSwitch;
@@ -358,6 +377,7 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	bAfterburner = bAll && bAfterburnerSwitch;
 	bHeatHaze = bAll && bHeatHazeSwitch;
 	bContrailFormationRamp = bAll && bFormationRampSwitch;
+	bContrailPuffs = bAll && bPuffsSwitch;
 	bCanopyReflect = bAll && bCanopyReflectSwitch;
 	// Tiers 0-1 only (both opaque); 2-3 are translucent and not built. A bad
 	// word is refused even with the switch off (aircraft_glass_reflect.parse_canopy_reflect).
@@ -647,11 +667,31 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 	// per wingtip nav lamp. World-space, NOT attached (a trail stays where the
 	// air was), each its own beauty-only actor.
 	UMaterialInterface* ContrailMaterial = LoadObject<UMaterialInterface>(nullptr, AircraftFxContrailMaterialPath);
+	// LOOK_GENERATION 13: the semi-span from the wingtip nav lamps (the look
+	// config anchors them at the mesh's +/-Y extremes); 0 with none, and then
+	// no roll-up (VortexOffsetM 0: the plumes stay behind their engines).
+	SemiSpanCm = 0.0;
+	for (const FLamp& Lamp : Lamps)
+	{
+		if (Lamp.Kind == TEXT("nav_red") || Lamp.Kind == TEXT("nav_green"))
+		{
+			SemiSpanCm = FMath::Max(SemiSpanCm, FMath::Abs(Lamp.ActorCm.Y));
+		}
+	}
 	auto AddTrail = [&](const FVector& SourceActorCm, bool bVapour, const TCHAR* Name)
 	{
 		FTrail Trail;
 		Trail.SourceActorCm = SourceActorCm;
 		Trail.bVapour = bVapour;
+		if (!bVapour && SemiSpanCm > 0.0)
+		{
+			// Towards this side's vortex core at VortexSpanFraction x the semi-span
+			// (an engine on the centreline goes right). Twin: aircraft_look.contrail_wake_offset_m.
+			const double NozzleYM = SourceActorCm.Y / AircraftFxCmPerMetre;
+			const double CoreYM = (NozzleYM < 0.0 ? -1.0 : 1.0)
+				* Constant(TEXT("contrail"), TEXT("VortexSpanFraction"), 0.785) * SemiSpanCm / AircraftFxCmPerMetre;
+			Trail.VortexOffsetM = CoreYM - NozzleYM;
+		}
 		Trail.Owner = World->SpawnActor<AActor>();
 		Trail.Mesh = AircraftFxMesh(Trail.Owner, Name);
 		UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(ContrailMaterial, Trail.Mesh);
@@ -669,6 +709,11 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 			? Constant(TEXT("contrail"), TEXT("FormationRampS"), 0.25) / FMath::Max(Lifetime, 0.01)
 			: AircraftFxLegacyFormationRamp;
 		Instance->SetScalarParameterValue(FName(AircraftFxParamFormationRamp), static_cast<float>(Ramp));
+		// LOOK_GENERATION 13: the break-up into puffs with age (a wingtip vapour
+		// trail lives 0.8 s and never ages into puffs: 0).
+		const double Puff = !bVapour && Options.bContrailPuffs
+			? Constant(TEXT("contrail"), TEXT("PuffBreakup"), 0.6) : 0.0;
+		Instance->SetScalarParameterValue(FName(AircraftFxParamPuff), static_cast<float>(Puff));
 		Trail.Mesh->SetMaterial(0, Instance);
 		Trail.Mesh->RegisterComponent();
 		BeautyOnlyActors.Add(Trail.Owner);
@@ -712,6 +757,33 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 	ContrailRow->SetStringField(TEXT("label_convention"), TEXT("a trail is a translucent medium like the clouds ")
 		TEXT("and rain the label captures already omit: where it crosses in front of the aircraft the mask ")
 		TEXT("still says aircraft"));
+	// LOOK_GENERATION 13 (hyperreal contrails; #13's four bright runway stripes).
+	ContrailRow->SetStringField(TEXT("width_model"), TEXT("width(age) = StartWidthM + JetSpreadM x (1 - exp(-age / ")
+		TEXT("JetMixS)) + SpreadMPerS x age (the jet regime's saturating spread, then slow diffusion; twin ")
+		TEXT("aircraft_look.contrail_width_m); UNCALIBRATED"));
+	ContrailRow->SetStringField(TEXT("wake_rollup"), SemiSpanCm > 0.0
+		? FString::Printf(TEXT("each engine plume is drawn to its side's wingtip vortex core (+/- VortexSpanFraction x ")
+		                       TEXT("the %.1f m semi-span from the nav lamps) over VortexRollupS and the pair sinks at ")
+		                       TEXT("WakeSinkMPerS (twin aircraft_look.contrail_wake_offset_m); UNCALIBRATED"),
+		                  SemiSpanCm / AircraftFxCmPerMetre)
+		: FString(TEXT("none: no wingtip nav lamp measured a semi-span, the plumes stay behind their engines")));
+	ContrailRow->SetBoolField(TEXT("puffs_on"), Options.bContrailPuffs);
+	ContrailRow->SetStringField(TEXT("puffs"), TEXT("contrail_opacity.hlsl: a cylinder's chord across, two octaves of ")
+		TEXT("world-space value noise whose cell coarsens with age, the cut rising with the sample's Life (vertex ")
+		TEXT("colour R = age / its own lifetime); Puff = PuffBreakup, 0 under -contrail-puffs=off (the A/B)"));
+	ContrailRow->SetStringField(TEXT("lighting"), TEXT("lit translucent, Volumetric Directional, half-cylinder normals: ")
+		TEXT("a sun side and a shadow side (the material build falls back to NonDirectional when the Python lacks ")
+		TEXT("the name; the master's property says which)"));
+	TSharedPtr<FJsonObject> PersistenceRow = MakeShared<FJsonObject>();
+	PersistenceRow->SetStringField(TEXT("rule"), TEXT("RHi = RH x e_sat,water / e_sat,ice (Sonntag 1990 Magnus forms); ")
+		TEXT("factor = saturate((RHi - PersistenceRhiOnsetPct) / PersistenceRhiSpanPct); a sample's lifetime = ")
+		TEXT("LifetimeS + factor x (PersistentLifetimeS - LifetimeS), fixed at emission (the air it is in); no ")
+		TEXT("humidity (no dew point on the card, no -humidity-pct=): factor 0, LifetimeS. Twin ")
+		TEXT("aircraft_look.contrail_persistence; UNCALIBRATED"));
+	PersistenceRow->SetStringField(TEXT("humidity"), Options.Humidity.bParamStated
+		? TEXT("-humidity-pct=") : Options.Humidity.bCardStated
+		? TEXT("atmosphere/RH (the card states a dew point)") : TEXT("none: the persistence factor is 0"));
+	ContrailRow->SetObjectField(TEXT("persistence"), PersistenceRow);
 	Record->SetObjectField(TEXT("contrail"), ContrailRow);
 
 	TSharedPtr<FJsonObject> HazeRow = MakeShared<FJsonObject>();
@@ -1574,33 +1646,56 @@ void FFlightSimAircraftFX::BuildNozzle(UWorld* World, const TSharedPtr<FJsonObje
 	Nozzles.Add(Nozzle);
 }
 
-void FFlightSimAircraftFX::RebuildTrail(FTrail& Trail, double NowS, double LifetimeS, double StartWidthM,
-                                        double SpreadMPerS, double FormationS)
+void FFlightSimAircraftFX::RebuildTrail(FTrail& Trail, double NowS, double LifetimeS, const FTrailShape& Shape)
 {
-	// Expire what has faded, then a crossed ribbon (two strips at right
-	// angles) through every sample: no camera needed, seen from any side.
-	Trail.Samples.RemoveAll([&](const FTrailSample& S) { return NowS - S.TimeS > LifetimeS; });
+	// Expire what has faded (each sample by its OWN lifetime: the persistence
+	// gate stretched it where the air was ice-supersaturated), then a crossed
+	// ribbon (two strips at right angles) through every sample: no camera
+	// needed, seen from any side.
+	Trail.Samples.RemoveAll([&](const FTrailSample& S) { return NowS - S.TimeS > FMath::Max(S.LifetimeS, 0.01); });
 	if (Trail.Samples.Num() < 2)
 	{
 		Trail.Mesh->ClearMeshSection(0);
 		return;
 	}
+	const int32 Count = Trail.Samples.Num();
+	// LOOK_GENERATION 13 (hyperreal contrails): where each sample's air is NOW.
+	// The wake vortex roll-up draws the plume sideways to its side's vortex
+	// core (a smoothstep over VortexRollupS) and the pair sinks at
+	// WakeSinkMPerS; a vapour trail has neither (VortexOffsetM 0, VortexRollupS 0).
+	// Twin: aircraft_look.contrail_wake_offset_m.
+	TArray<FVector> Displaced;
+	Displaced.Reserve(Count);
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const FTrailSample& S = Trail.Samples[i];
+		const double Age = FMath::Max(NowS - S.TimeS, 0.0);
+		double Lateral = 0.0;
+		if (Shape.VortexRollupS > 0.0)
+		{
+			const double T = FMath::Min(Age / Shape.VortexRollupS, 1.0);
+			Lateral = Trail.VortexOffsetM * T * T * (3.0 - 2.0 * T);
+		}
+		const double Sink = Shape.WakeSinkMPerS * Age;
+		Displaced.Add(S.WorldCm + S.RightWorld * (Lateral * AircraftFxCmPerMetre)
+		              - FVector::UpVector * (Sink * AircraftFxCmPerMetre));
+	}
 	// Vertices relative to the newest sample (small numbers in a large world).
-	const FVector Anchor = Trail.Samples.Last().WorldCm;
+	const FVector Anchor = Displaced.Last();
 	Trail.Owner->SetActorLocation(Anchor);
 	TArray<FVector> Vertices;
 	TArray<int32> Triangles;
 	TArray<FVector> Normals;
 	TArray<FVector2D> UV0;
-	const int32 Count = Trail.Samples.Num();
+	TArray<FLinearColor> Colours;
 	for (int32 Strip = 0; Strip < 2; ++Strip)
 	{
 		const int32 Base = Vertices.Num();
 		for (int32 i = 0; i < Count; ++i)
 		{
 			const FTrailSample& S = Trail.Samples[i];
-			const FVector Prev = Trail.Samples[FMath::Max(i - 1, 0)].WorldCm;
-			const FVector Next = Trail.Samples[FMath::Min(i + 1, Count - 1)].WorldCm;
+			const FVector Prev = Displaced[FMath::Max(i - 1, 0)];
+			const FVector Next = Displaced[FMath::Min(i + 1, Count - 1)];
 			const FVector Along = (Next - Prev).GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
 			FVector Side = FVector::CrossProduct(Along, FVector::UpVector).GetSafeNormal(UE_SMALL_NUMBER,
 			                                                                           FVector::RightVector);
@@ -1608,15 +1703,31 @@ void FFlightSimAircraftFX::RebuildTrail(FTrail& Trail, double NowS, double Lifet
 			const FVector Across = Strip == 0 ? Side : Up;
 			const FVector Normal = Strip == 0 ? Up : Side;
 			const double Age = FMath::Max(NowS - S.TimeS, 0.0);
-			const double HalfCm = 0.5 * (StartWidthM + SpreadMPerS * Age) * AircraftFxCmPerMetre;
-			const FVector P = S.WorldCm - Anchor;
+			// Width: the jet regime's saturating spread plus the slow diffusion
+			// (twin aircraft_look.contrail_width_m). Generation 12's StartWidthM +
+			// SpreadMPerS x age alone grew 1.2 m to 1.6 m over a chase frame's 110 m.
+			const double WidthM = Shape.StartWidthM
+				+ Shape.JetSpreadM * (1.0 - FMath::Exp(-Age / FMath::Max(Shape.JetMixS, 0.001)))
+				+ Shape.SpreadMPerS * Age;
+			const double HalfCm = 0.5 * WidthM * AircraftFxCmPerMetre;
+			const FVector P = Displaced[i] - Anchor;
 			Vertices.Add(P - Across * HalfCm);
 			Vertices.Add(P + Across * HalfCm);
-			Normals.Add(Normal);
-			Normals.Add(Normal);
+			// Half-cylinder normals: the rim leans outward, so under directional
+			// translucency lighting the tube has a sun side and a shadow side.
+			Normals.Add((Normal - Across).GetSafeNormal(UE_SMALL_NUMBER, Normal));
+			Normals.Add((Normal + Across).GetSafeNormal(UE_SMALL_NUMBER, Normal));
+			// UV.x: the formation clock, age / the trail's base lifetime (the
+			// material's Formation / FormationRamp are fractions of it).
 			const double U = Age / FMath::Max(LifetimeS, 0.01);
 			UV0.Add(FVector2D(U, 0.0));
 			UV0.Add(FVector2D(U, 1.0));
+			// Vertex colour R: Life, age / this sample's own lifetime (the fade,
+			// the rim softening and the puff cut run on it; contrail_opacity.hlsl).
+			const float Life = static_cast<float>(FMath::Clamp(Age / FMath::Max(S.LifetimeS, 0.01), 0.0, 1.0));
+			const FLinearColor Colour(Life, 1.0f, 1.0f, 1.0f);
+			Colours.Add(Colour);
+			Colours.Add(Colour);
 		}
 		for (int32 i = 0; i + 1 < Count; ++i)
 		{
@@ -1624,7 +1735,7 @@ void FFlightSimAircraftFX::RebuildTrail(FTrail& Trail, double NowS, double Lifet
 			Triangles.Append({A, A + 2, A + 1, A + 1, A + 2, A + 3});
 		}
 	}
-	Trail.Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, {}, {}, false);
+	Trail.Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, Colours, {}, false);
 	Trail.bEverDrawn = true;
 }
 
@@ -1725,6 +1836,25 @@ void FFlightSimAircraftFX::Advance(TFunctionRef<double(const TCHAR*)> ReadProper
 	}
 	ContrailInCloudFrames += (bContrail && CloudClear < 1.0) ? 1 : 0;
 	VapourFrames += bVapour ? 1 : 0;
+	// LOOK_GENERATION 13: the persistence gate (the stated physics, where the
+	// humidity exists). A contrail persists only in ice-supersaturated air:
+	// RHi = RH x e_sat,water / e_sat,ice; the factor lifts a NEW sample's
+	// lifetime from LifetimeS towards PersistentLifetimeS. No humidity: 0, as
+	// before. Twin: aircraft_look.contrail_persistence.
+	const double ContrailLifetimeS = Constant(TEXT("contrail"), TEXT("LifetimeS"), 25.0);
+	ContrailRhiPct = 0.0;
+	ContrailPersistence = 0.0;
+	if (Condensation.HasHumidity())
+	{
+		ContrailRhiPct = Condensation.RelativeHumidityPct() * AircraftFxIceOverWaterSaturation(TemperatureK);
+		ContrailPersistence = FMath::Clamp(
+			(ContrailRhiPct - Constant(TEXT("contrail"), TEXT("PersistenceRhiOnsetPct"), 100.0))
+			/ FMath::Max(Constant(TEXT("contrail"), TEXT("PersistenceRhiSpanPct"), 20.0), 0.001), 0.0, 1.0);
+	}
+	ContrailLifetimeNowS = ContrailLifetimeS + ContrailPersistence
+		* (Constant(TEXT("contrail"), TEXT("PersistentLifetimeS"), 240.0) - ContrailLifetimeS);
+	PersistentFrames += (bContrail && ContrailPersistence > 0.0) ? 1 : 0;
+	const FVector RightWorld = Frame.GetUnitAxis(EAxis::Y).GetSafeNormal(UE_SMALL_NUMBER, FVector::RightVector);
 	for (FTrail& Trail : Trails)
 	{
 		const TCHAR* Group = Trail.bVapour ? TEXT("vapour") : TEXT("contrail");
@@ -1735,6 +1865,8 @@ void FFlightSimAircraftFX::Advance(TFunctionRef<double(const TCHAR*)> ReadProper
 				static_cast<float>(Trail.BaseOpacity * CloudClear));
 		}
 		const FVector Source = Frame.TransformPosition(Trail.SourceActorCm);
+		const double BaseLifetime = Constant(Group, TEXT("LifetimeS"), Trail.bVapour ? 0.8 : 25.0);
+		const double SampleLifetime = Trail.bVapour ? BaseLifetime : ContrailLifetimeNowS;
 		if (bActive)
 		{
 			// First frame in the regime: a trail as long as PreseedS of the
@@ -1750,18 +1882,29 @@ void FFlightSimAircraftFX::Advance(TFunctionRef<double(const TCHAR*)> ReadProper
 					FTrailSample Seed;
 					Seed.WorldCm = Source + Back * Ago;
 					Seed.TimeS = Now - Ago;
+					Seed.RightWorld = RightWorld;
+					Seed.LifetimeS = SampleLifetime;
 					Trail.Samples.Add(Seed);
 				}
 			}
 			FTrailSample Sample;
 			Sample.WorldCm = Source;
 			Sample.TimeS = Now;
+			Sample.RightWorld = RightWorld;
+			Sample.LifetimeS = SampleLifetime;
 			Trail.Samples.Add(Sample);
 		}
-		RebuildTrail(Trail, Now, Constant(Group, TEXT("LifetimeS"), Trail.bVapour ? 0.8 : 25.0),
-		             Constant(Group, TEXT("StartWidthM"), Trail.bVapour ? 0.25 : 1.2),
-		             Constant(Group, TEXT("SpreadMPerS"), Trail.bVapour ? 1.5 : 0.9),
-		             Trail.bVapour ? 0.0 : Constant(TEXT("contrail"), TEXT("FormationDelayS"), 0.15));
+		FTrailShape Shape;
+		Shape.StartWidthM = Constant(Group, TEXT("StartWidthM"), Trail.bVapour ? 0.25 : 1.2);
+		Shape.SpreadMPerS = Constant(Group, TEXT("SpreadMPerS"), Trail.bVapour ? 1.5 : 0.9);
+		if (!Trail.bVapour)
+		{
+			Shape.JetSpreadM = Constant(TEXT("contrail"), TEXT("JetSpreadM"), 10.0);
+			Shape.JetMixS = Constant(TEXT("contrail"), TEXT("JetMixS"), 1.5);
+			Shape.VortexRollupS = Constant(TEXT("contrail"), TEXT("VortexRollupS"), 12.0);
+			Shape.WakeSinkMPerS = Constant(TEXT("contrail"), TEXT("WakeSinkMPerS"), 1.5);
+		}
+		RebuildTrail(Trail, Now, BaseLifetime, Shape);
 	}
 	bFirstAdvance = false;
 
@@ -1772,6 +1915,14 @@ void FFlightSimAircraftFX::Advance(TFunctionRef<double(const TCHAR*)> ReadProper
 		(*ContrailRow)->SetNumberField(TEXT("contrail_frames"), ContrailFrames);
 		(*ContrailRow)->SetNumberField(TEXT("vapour_frames"), VapourFrames);
 		(*ContrailRow)->SetNumberField(TEXT("contrail_in_cloud_frames"), ContrailInCloudFrames);
+		const TSharedPtr<FJsonObject>* PersistenceRow = nullptr;
+		if ((*ContrailRow)->TryGetObjectField(TEXT("persistence"), PersistenceRow) && PersistenceRow != nullptr)
+		{
+			(*PersistenceRow)->SetNumberField(TEXT("rhi_pct"), ContrailRhiPct);
+			(*PersistenceRow)->SetNumberField(TEXT("factor"), ContrailPersistence);
+			(*PersistenceRow)->SetNumberField(TEXT("lifetime_now_s"), ContrailLifetimeNowS);
+			(*PersistenceRow)->SetNumberField(TEXT("persistent_frames"), PersistentFrames);
+		}
 	}
 	TSharedPtr<FJsonObject> Afterburner = MakeShared<FJsonObject>();
 	Afterburner->SetNumberField(TEXT("peak_glow"), PeakAfterburner);

@@ -628,6 +628,7 @@ bool FFlightSimCondensation::Advance(TFunctionRef<double(const TCHAR*)> ReadProp
 		Rh = ReadProperty(TEXT("atmosphere/RH"));
 	}
 	bHumidityNow = (Humidity.bParamStated || Humidity.bCardStated) && FMath::IsFinite(Rh) && Rh >= 0.0;
+	RhNow = bHumidityNow ? Rh : 0.0;  // RelativeHumidityPct(): the contrail persistence gate reads it
 
 	TSharedPtr<FJsonObject> Frame = MakeShared<FJsonObject>();
 	Frame->SetNumberField(TEXT("t"), Now);

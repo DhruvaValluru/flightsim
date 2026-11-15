@@ -767,6 +767,14 @@ aircraft_check "MaterialExpressionLocalPosition" "$RE/Public/Materials/MaterialE
 aircraft_check "MaterialExpressionTransform" "$RE/Public/Materials/MaterialExpressionTransform.h" "TransformSourceType"
 aircraft_check "ProcMesh CreateMeshSection_LinearColor" "Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h" "void CreateMeshSection_LinearColor(int32 SectionIndex, const TArray<FVector>& Vertices, const TArray<int32>& Triangles, const TArray<FVector>& Normals, const TArray<FVector2D>& UV0, const TArray<FLinearColor>& VertexColors"
 aircraft_check "ProcMesh ClearMeshSection" "Plugins/Runtime/ProceduralMeshComponent/Source/ProceduralMeshComponent/Public/ProceduralMeshComponent.h" "void ClearMeshSection(int32 SectionIndex)"
+# hyperreal contrails (LOOK_GENERATION 13): the contrail ribbon's directional
+# translucency lighting, the material's absolute world position and vertex
+# colour, and the exp the width model uses (FlightSimAircraftFX.cpp RebuildTrail).
+aircraft_check "contrail: TLM_VolumetricDirectional" "$RE/Classes/Engine/EngineTypes.h" "TLM_VolumetricDirectional"
+aircraft_check "contrail: UMaterialExpressionWorldPosition" "$RE/Public/Materials/MaterialExpressionWorldPosition.h" "class UMaterialExpressionWorldPosition"
+aircraft_check "contrail: UMaterialExpressionVertexColor" "$RE/Public/Materials/MaterialExpressionVertexColor.h" "class UMaterialExpressionVertexColor"
+aircraft_check "contrail: FMath Exp double" "Runtime/Core/Public/GenericPlatform/GenericPlatformMath.h" "static UE_FORCEINLINE_HINT double Exp(double Value)"
+aircraft_check "contrail: FLinearColor(float, float, float, float)" "Runtime/Core/Public/Math/Color.h" "constexpr UE_FORCEINLINE_HINT FLinearColor(float InR,float InG,float InB,float InA = 1.0f)"
 aircraft_check "RotationMatrix MakeFromX" "Runtime/Core/Public/Math/RotationMatrix.h" "MakeFromX(TVector<T> const& XAxis)"
 aircraft_check "Math UE_DOUBLE_PI" "Runtime/Core/Public/Math/UnrealMathUtility.h" "#define UE_DOUBLE_PI"
 # round 5 (L4, 2026-11-10): the Thin Translucent canopy master
