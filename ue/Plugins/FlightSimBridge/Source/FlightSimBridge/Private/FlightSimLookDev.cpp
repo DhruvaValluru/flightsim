@@ -47,6 +47,7 @@
 #include "CesiumCameraManager.h"
 #endif
 
+#include "FlightSimAircraftFX.h"
 #include "FlightSimBeautyFallback.h"
 #include "FlightSimBeautyLook.h"
 #include "FlightSimCameraDirector.h"
@@ -82,6 +83,7 @@ namespace
 		TUniquePtr<FFlightSimImpostorClouds> Impostors;
 		TUniquePtr<FFlightSimGoogleTiles> Tiles;
 		TUniquePtr<FFlightSimWorldBeauty> WorldBeauty;
+		TUniquePtr<FFlightSimAircraftFX> AircraftFX;  // contrails, strobes, ... (beauty only)
 		TWeakObjectPtr<AGeoReferencingSystem> GeoReferencing;
 		TWeakObjectPtr<AActor> Aircraft;
 		TWeakObjectPtr<ASceneCapture2D> Camera;
@@ -150,6 +152,7 @@ namespace
 		(void)S.Weather.Release();
 		(void)S.Impostors.Release();
 		(void)S.Tiles.Release();
+		(void)S.AircraftFX.Release();
 		if (S.WorldBeauty.IsValid()) { S.WorldBeauty->RestoreCvars(); }
 		(void)S.WorldBeauty.Release();
 		S.WorldBeauty = MakeUnique<FFlightSimWorldBeauty>();
@@ -157,6 +160,7 @@ namespace
 		S.Weather = MakeUnique<FFlightSimWeather>();
 		S.Impostors = MakeUnique<FFlightSimImpostorClouds>();
 		S.Tiles = MakeUnique<FFlightSimGoogleTiles>();
+		S.AircraftFX = MakeUnique<FFlightSimAircraftFX>();
 	}
 
 	template <typename T>
@@ -467,6 +471,7 @@ namespace
 #endif
 		S.Aircraft = Aircraft;
 		FString MeshManifest;
+		bool bMeshAirframe = false;
 		if (FParse::Value(*P, TEXT("mesh="), MeshManifest) && !MeshManifest.IsEmpty() &&
 		    !FParse::Param(*P, TEXT("HideAircraft")))
 		{
@@ -475,6 +480,7 @@ namespace
 			{
 				return false;
 			}
+			bMeshAirframe = true;
 		}
 
 		FFlightSimVisualSceneOptions Options;
@@ -509,6 +515,42 @@ namespace
 		}
 		if (!S.Weather->Build(World, WeatherOptions, Error)) { return false; }
 		if (S.Weather->DrawsLightning()) { S.Visual->StandDownLookLightning(); }
+		// The aircraft lane's beauty-only look (FlightSimAircraftFX.h), as the
+		// commandlet builds it, then ONE Advance at the card's initial condition:
+		// the first advance in the contrail regime preseeds contrail.PreseedS of
+		// trail behind the engines, so the still shows the trail a frame of the
+		// run shows. The FDM is not run: T is the card's ISA temperature at its
+		// altitude, TAS its airspeed over the ISA density ratio (CAS ~ EAS).
+		if (bMeshAirframe && S.AircraftFX.IsValid())
+		{
+			FFlightSimAircraftFXOptions FxOptions;
+			FxOptions.ParseParams(*P);
+			FxOptions.Aircraft = Aircraft;
+			FxOptions.MeshManifestPath = MeshManifest;
+			FxOptions.Livery = S.Card.Livery.IsEmpty() ? FString(TEXT("default")) : S.Card.Livery;
+			FxOptions.Weather = S.Weather->IsBuilt() ? S.Weather.Get() : nullptr;
+			FxOptions.CloudLayers = Options.CloudLayers;
+			FxOptions.Sun = S.Visual->Sun;
+			FxOptions.Humidity.bCardStated = S.Card.AtmosphereProperties.Contains(TEXT("atmosphere/dew-point-R"));
+			if (!S.AircraftFX->Build(World, FxOptions, Error)) { return false; }
+			for (AActor* Fx : S.AircraftFX->BeautyOnlyActors) { Track(Fx); }
+			S.Visual->BeautyOnlyActors.Append(S.AircraftFX->BeautyOnlyActors);
+			const double AltM = S.Card.AltitudeMetres;
+			const double IsaK = FMath::Max(288.15 - 0.0065 * AltM, 216.65);
+			const double Sigma = FMath::Pow(IsaK / 288.15, 4.2559) * (AltM > 11000.0 ? FMath::Exp(-(AltM - 11000.0) / 6341.6) : 1.0);
+			const double TasKts = S.Card.AirspeedKnots / FMath::Sqrt(FMath::Max(Sigma, 0.05));
+			const double AglFt = (AltM - S.Card.TerrainElevationMetres) / 0.3048;
+			S.AircraftFX->Advance([&](const TCHAR* Name) -> double
+			{
+				const FString N(Name);
+				if (N == TEXT("atmosphere/T-R")) { return IsaK * 1.8; }
+				if (N == TEXT("velocities/vtrue-kts")) { return TasKts; }
+				if (N == TEXT("position/h-agl-ft")) { return AglFt; }
+				if (N == TEXT("position/h-sl-meters")) { return AltM; }
+				if (N == TEXT("accelerations/Nz")) { return 1.0; }
+				return 0.0;
+			});
+		}
 
 		FFlightSimImpostorCloudOptions ImpostorOptions;
 		if (!FFlightSimImpostorClouds::ParseMode(P, ImpostorOptions.Mode, Error)) { return false; }
