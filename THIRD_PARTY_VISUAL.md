@@ -181,3 +181,10 @@ every checkout renders the new tornado with no download.
 | `jangafx_tornado` (zip) | Tornado Looping, JangaFX EmberGen free VDB animations | CC0-1.0 (the download page: the free VDB simulations are licensed CC0, Public Domain; confirmed on the page by the render machine before the bake) | https://jangafx.com/software/embergen/download/free-vdb-animations | PLACEHOLDER: the render machine's download URL and size (`scripts/fetch_tornado_vdb.py` PIN) | PLACEHOLDER (`PIN["zip_sha256"]`) |
 
 CC0 needs no attribution; JangaFX is credited as a courtesy (`assets/looks/tornado_vdb/LICENSE`).
+
+## Tools on the render machine (not shipped, not committed)
+
+| name | licence | source | pinned | note |
+| --- | --- | --- | --- | --- |
+| Monolith (Unreal Editor MCP plugin) | MIT (beta, `IsBetaVersion` true) | https://github.com/tumourlove/monolith | tag v0.24.0, commit 2ee04696194ee13d79290b6ac1c4733a26e05386 | cloned into `ue/Plugins/Monolith/` (gitignored) on the Windows laptop for editor inspection (docs/visual/HYPERREAL_12H.md); it enables Niagara, SQLiteCore, EnhancedInput, EditorScriptingUtilities, PoseSearch, IKRig, ControlRig, RigVM. The owner chose not to block port 9316 inbound. |
+| Blender 5.2.3 LTS (portable) | GPL-2.0-or-later (the tool; its renders carry no licence of its own) | Berkeley OCF mirror of download.blender.org (the main site returned 403 to the laptop) | zip sha256 723f08a4…5dc2fb, matched on two mirrors | the one-off VDB bakes (tornado flipbook, cloud impostors) |

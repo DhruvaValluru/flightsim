@@ -40,7 +40,6 @@ The repo is `C:\Users\kanth\flightsim`, and the UE project folder is `C:\Users\k
 
 ```
 cd ~/flightsim-old
-git pull
 claude --model claude-opus-5-5
 /remote-control           (then /rename p3-hyperreal)
 ```
@@ -52,8 +51,8 @@ The Mac lead sends it render and inspection requests over the bridge.
 
 ```
 You are the visual lead for FlightSim's hyper-realism push (12 hours, owner-authorised for this run only;
-not a standing exception). You run ON THE MAC (repo ~/flightsim-old, branch claude/vibrant-gauss-olema4,
-pull first). ALL BUILDING IS ON THE MAC: code, shaders, material scripts, bake scripts, tests. NEVER build or
+not a standing exception). You run ON THE MAC. Work only in git worktrees of origin/claude/vibrant-gauss-olema4 (in your scratchpad); do
+NOT touch ~/flightsim-old's own working tree (it is on max-push with someone's uncommitted local changes). ALL BUILDING IS ON THE MAC: code, shaders, material scripts, bake scripts, tests. NEVER build or
 run Unreal on the Mac. The Windows laptop (session p3-windows over the bridge) ONLY TESTS: it pulls, builds
 the plugin, runs the materials prep and Blender bakes, renders rounds, runs verify, pushes frames to
 vis-windows, and inspects the editor through the Monolith MCP and the owner's "Unreal Engine Skills" MCP
