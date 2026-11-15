@@ -1,0 +1,16 @@
+Tornado flipbook (T_TornadoFlipbook.png, tornado_flipbook.json)
+
+Baked by scripts/bake_tornado_flipbook.py (Blender, offline) from:
+
+  JangaFX EmberGen free VDB animations: "Tornado Looping"
+  https://jangafx.com/software/embergen/download/free-vdb-animations
+  Author: JangaFX
+
+  Licence: CC0 1.0 Universal (Public Domain Dedication), as stated on the page above.
+  https://creativecommons.org/publicdomain/zero/1.0/
+
+  The render machine confirms the licence on the download page before the bake and
+  records the downloaded zip's sha256 in PIN.json (source_zip_sha256). The raw VDB is
+  not in this repository; only the baked atlas and its JSON are.
+
+Credit to JangaFX is courtesy, not a requirement of CC0.

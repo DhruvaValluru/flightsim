@@ -1,0 +1,38 @@
+{
+  "files": {
+    "cloud00_neg.png": {
+      "path": "assets/looks/clouds/impostors/cloud00_neg.png",
+      "sha256": "a963c3f86ef171cee7580658687a56aa858263003d530d1b7a4832a506cd0d04"
+    },
+    "cloud00_pos.png": {
+      "path": "assets/looks/clouds/impostors/cloud00_pos.png",
+      "sha256": "4be6b929ffb0999c99f2079319e7a84ef56071b9f5d6544792e5abc9ae0be273"
+    },
+    "cloud01_neg.png": {
+      "path": "assets/looks/clouds/impostors/cloud01_neg.png",
+      "sha256": "bade73e72fa173f23894089069f319830040d888eac892de0196da11f17884a0"
+    },
+    "cloud01_pos.png": {
+      "path": "assets/looks/clouds/impostors/cloud01_pos.png",
+      "sha256": "5687cb1715bb9ba2ab671f81d884f38a68443791934a0eddca880468ae586f52"
+    },
+    "cloud02_neg.png": {
+      "path": "assets/looks/clouds/impostors/cloud02_neg.png",
+      "sha256": "784a6f87df1cfc3b15274b6b8321d1a358554144db04aae0c7c4f135f83022a7"
+    },
+    "cloud02_pos.png": {
+      "path": "assets/looks/clouds/impostors/cloud02_pos.png",
+      "sha256": "0f546a42930e3c50242258f6306aceae0baadb992e3040fd0ecb2584f5d27a48"
+    },
+    "cloud03_neg.png": {
+      "path": "assets/looks/clouds/impostors/cloud03_neg.png",
+      "sha256": "110c67cdf526b83811524b9c9680e576ce711cdb403302bbb763679881e2dee4"
+    },
+    "cloud03_pos.png": {
+      "path": "assets/looks/clouds/impostors/cloud03_pos.png",
+      "sha256": "18fbb3def68d6e0535c293ce519a95e2ca0d931c3aa9f0869142532a048497ab"
+    }
+  },
+  "licence": "CC0-1.0 (JangaFX EmberGen free VDB simulations: 'licensed as CC0 (Public Domain)')",
+  "magic": "flightsim-pin"
+}

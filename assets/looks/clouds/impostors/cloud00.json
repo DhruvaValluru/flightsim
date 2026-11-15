@@ -1,0 +1,69 @@
+{
+  "atlas_px": 1024,
+  "atlases": {
+    "neg": "cloud00_neg.png",
+    "pos": "cloud00_pos.png"
+  },
+  "bounds_vdb_units": {
+    "max": [
+      112.0,
+      296.0,
+      72.0
+    ],
+    "min": [
+      -160.0,
+      -232.0,
+      -104.0
+    ],
+    "size": [
+      272.0,
+      528.0,
+      176.0
+    ]
+  },
+  "calibration": "UNCALIBRATED until a Windows render is judged",
+  "channels": {
+    "depth_offset_encoding": "0.5 + 0.5 * clamp(offset / sphere_radius, -1, 1); 0.5 where empty",
+    "light_encoding": "straight, pow(value / light_scale, 1/2.2); decode pow(c, 2.2) * light_scale",
+    "neg": {
+      "a": "depth_offset",
+      "b": "-z",
+      "g": "-y",
+      "r": "-x"
+    },
+    "pos": {
+      "a": "opacity",
+      "b": "+z",
+      "g": "+y",
+      "r": "+x"
+    }
+  },
+  "id": "cloud00",
+  "licence": "CC0-1.0 (JangaFX EmberGen free VDB simulations: 'licensed as CC0 (Public Domain)')",
+  "light_scale": 1.0947524309158325,
+  "magic": "flightsim-cloud-impostor",
+  "octahedral": "full sphere, grid vertices",
+  "px": 128,
+  "render": {
+    "albedo": 0.99,
+    "anisotropy": 0.7,
+    "blender": "5.2.3 LTS",
+    "density_scale": 1.0,
+    "depth_shell": "Volume to Mesh shell at the threshold below",
+    "engine": "Cycles CPU",
+    "grids": [
+      "density"
+    ],
+    "samples": 128,
+    "shell_threshold": 0.05,
+    "sun_angle_deg": 0.53,
+    "volume_bounces": 24
+  },
+  "scale_basis": "VDB units are EmberGen's; the engine scales each instance so the cloud's height is its layer's share (sphere_over_height sizes the quad)",
+  "source_sha256": "c91381781adc353f26a25d6cb6c9e254f47b89db04d2e99d289ae0e7d545945c",
+  "source_vdb": "cloud_01_variant_0000.vdb",
+  "sphere_over_height": 3.519720124110171,
+  "sphere_radius_vdb_units": 309.73537092169505,
+  "version": 1,
+  "views": 8
+}
