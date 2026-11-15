@@ -31,6 +31,12 @@
 //   WetShape    float4  (BeadAmount, StreakPitchCm, StreakLengthCm, RivuletFullMmh)
 // Returns float4: rgb the wet albedo, a the wet roughness.
 // Additional output WetCoat (float1): the clear-coat mask, 0..1 (paint only).
+// Additional output WetLean (float3): how a rivulet's bulge leans the surface,
+//   in the object's LOCAL frame (0 = flat; |lean| <= about 0.5 on a rivulet's
+//   flank, 0 on its crest and off it). It is NOT the material's Normal (the
+//   normal label pass reads the same surface wet or dry): it leans only the
+//   paint reflection's lookup (paint_env_uv.hlsl, scripts/aircraft_paint_reflect.py),
+//   so a streak catches the mirrored sky as a thin bright line. Wetness 0: zero.
 #define FSWET_HASH(OUT, P) { float3 fswh_ = frac((P) * 0.1031); fswh_ += dot(fswh_, fswh_.zyx + 31.32); OUT = frac((fswh_.x + fswh_.y) * fswh_.z); }
 const float GravityRunCmS = 3.0;
 const float BeadRoughness = 0.3;
@@ -60,6 +66,7 @@ float along = dot(LocalPos, flowDir) - speed * TimeS;
 float coverage = wet * saturate(RainRateMmh / rivFull);
 
 float riv = 0.0;
+float3 lean = float3(0.0, 0.0, 0.0);
 float wsum = 0.0;
 for (int k = 0; k < 2; ++k)
 {
@@ -85,11 +92,18 @@ for (int k = 0; k < 2; ++k)
     float present = h2 < coverage ? 1.0 : 0.0;
     float shape = smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.55, 1.0, t));
     riv += w * profile * shape * present;
+    // the rivulet is a bulge: its flank leans away from the crest, across the
+    // flow, most at mid-flank (slope x profile), zero on the crest and off it
+    float slope = clamp((f - offset) / width, -1.0, 1.0) * profile * 2.0;
+    lean += w * slope * shape * present * acrossDir;
     wsum += w;
 }
 riv = wsum > 1.0e-4 ? riv / wsum : 0.0;
+lean = wsum > 1.0e-4 ? lean / wsum : float3(0.0, 0.0, 0.0);
 // a surface facing straight into the flow carries impacts, not streaks
-riv *= saturate(1.2 - abs(dot(nL, flowDir)));
+float streakFacing = saturate(1.2 - abs(dot(nL, flowDir)));
+riv *= streakFacing;
+lean *= streakFacing;
 
 float bead = 0.0;
 if (!airflow && beadAmount > 0.0 && wet > 0.0)
@@ -128,5 +142,6 @@ float roughOut = lerp(Roughness, min(Roughness, wetRough), wet);
 roughOut = lerp(roughOut, lerp(0.5 * wetRough, BeadRoughness, beadAmount), riv);
 roughOut = lerp(roughOut, max(roughOut, BeadRoughness), bead);
 WetCoat = saturate(max(wet, riv));
+WetLean = lean;
 #undef FSWET_HASH
 return float4(albedoOut, roughOut);
