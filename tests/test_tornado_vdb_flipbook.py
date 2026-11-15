@@ -238,3 +238,30 @@ def test_the_flipbook_shaders_are_sm5_straight_line_code():
         body = "\n".join(l for l in code.splitlines() if not l.strip().startswith("//"))
         for forbidden in (r"\bfor\s*\(", r"\bwhile\s*\(", r"\.Sample\(", r"\bWave\w+\("):
             assert not re.search(forbidden, body), (name, forbidden)
+
+
+def test_the_pin_is_the_render_machines_download_and_a_hand_zip_installs(tmp_path):
+    """2026-11-14: p3-windows downloaded the zip in a browser (MediaFire challenges scripts)."""
+    import hashlib
+    import importlib.util
+    import zipfile
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / "scripts" / "fetch_tornado_vdb.py"
+    spec = importlib.util.spec_from_file_location("fetch_tornado_vdb_pin", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.PIN["zip_sha256"] == "492c99321ae911d0ad6c6ff3df6eb53c83e443ba91b6aab7b97ba86e536ac57c"
+    assert mod.PIN["zip_bytes"] == 1797795595 and mod.PIN["frames"] == 128
+    z = tmp_path / "hand.zip"
+    with zipfile.ZipFile(z, "w") as archive:
+        archive.writestr("TornadoLooping/TornadoVDB/tornado_0000.vdb", b"vdb")
+    pin = dict(mod.PIN, zip_sha256=hashlib.sha256(z.read_bytes()).hexdigest())
+    found = mod.install_zip(z, tmp_path / "cache", pin)
+    assert found.name == "TornadoVDB" and mod.is_present(tmp_path / "cache", pin)
+    bad = dict(mod.PIN, zip_sha256="0" * 64)
+    try:
+        mod.install_zip(z, tmp_path / "cache2", bad)
+    except mod.FetchRefused as refusal:
+        assert str(refusal).startswith("tornado_vdb.sha_mismatch")
+    else:
+        raise AssertionError("a wrong zip installed")

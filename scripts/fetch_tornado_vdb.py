@@ -49,10 +49,15 @@ PIN: Dict[str, Any] = {
     "page": "https://jangafx.com/software/embergen/download/free-vdb-animations",
     "licence": "CC0-1.0",
     "licence_basis": "the download page states the free VDB simulations are licensed CC0 (Public Domain)",
-    "zip_url": None,
-    "zip_bytes": None,
-    "zip_sha256": None,
-    "zip_name": "tornado_looping.zip",
+    # MediaFire (the page's link) serves a Cloudflare challenge to scripts, so the render machine
+    # downloads it in a browser and installs it with --zip; the URL is kept as the source of record.
+    "zip_url": "https://www.mediafire.com/file/fynwmhozanxv821/TornadoLoopingVDB.zip/file",
+    "zip_bytes": 1797795595,
+    "zip_sha256": "492c99321ae911d0ad6c6ff3df6eb53c83e443ba91b6aab7b97ba86e536ac57c",
+    "zip_name": "TornadoLoopingVDB.zip",
+    # What the zip holds (p3-windows, 2026-11-14): TornadoLooping/TornadoVDB/tornado_0000..0127.vdb,
+    # 128 frames (the page says 200), one "density" grid each (half-float, blosc), EmberGen 0.7.5.7.
+    "frames": 128,
 }
 
 
@@ -128,6 +133,33 @@ def fetch(folder: Optional[Path] = None, pin: Dict[str, Any] = PIN,
                            f"its pin is {pin['zip_sha256']}; nothing was extracted")
     zip_path = folder / pin["zip_name"]
     part.replace(zip_path)
+    return _install(zip_path, folder, pin, got, size)
+
+
+def install_zip(zip_path: Path, folder: Optional[Path] = None, pin: Dict[str, Any] = PIN) -> Path:
+    """Install a zip downloaded by hand (the page's host challenges scripts): checked against the
+    pin's sha256 and size, then unzipped into the cache exactly as a fetch would."""
+    folder = cache_dir() if folder is None else Path(folder)
+    if is_present(folder, pin):
+        found = vdb_dir(folder)
+        assert found is not None
+        return found
+    _require_pin(pin)
+    digest = hashlib.sha256()
+    size = 0
+    with Path(zip_path).open("rb") as src:
+        for block in iter(lambda: src.read(1 << 20), b""):
+            digest.update(block)
+            size += len(block)
+    got = digest.hexdigest()
+    if got != pin["zip_sha256"]:
+        raise FetchRefused(f"tornado_vdb.sha_mismatch: {zip_path} hashed {got} ({size} bytes), "
+                           f"its pin is {pin['zip_sha256']}; nothing was extracted")
+    folder.mkdir(parents=True, exist_ok=True)
+    return _install(Path(zip_path), folder, pin, got, size)
+
+
+def _install(zip_path: Path, folder: Path, pin: Dict[str, Any], got: str, size: int) -> Path:
     with zipfile.ZipFile(zip_path) as archive:
         for member in archive.namelist():
             target = (folder / member).resolve()
@@ -147,6 +179,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--dest", type=Path, default=None, help=f"default {cache_dir()}")
     ap.add_argument("--check", action="store_true", help="say whether the cache is complete; fetch nothing")
+    ap.add_argument("--zip", type=Path, default=None,
+                    help="a zip downloaded by hand in a browser (the host challenges scripts); checked and unzipped")
     ns = ap.parse_args(argv)
     folder = ns.dest or cache_dir()
     if ns.check:
@@ -154,7 +188,7 @@ def main(argv=None) -> int:
         print(f"{'present' if ok else 'absent'}: {folder}")
         return 0 if ok else 1
     try:
-        found = fetch(folder)
+        found = install_zip(ns.zip, folder) if ns.zip else fetch(folder)
     except FetchRefused as refusal:
         print(f"REFUSED {refusal}")
         return 3

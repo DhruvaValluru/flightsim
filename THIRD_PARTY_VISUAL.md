@@ -178,7 +178,7 @@ every checkout renders the new tornado with no download.
 
 | name | title | licence | source | file | sha256 |
 | --- | --- | --- | --- | --- | --- |
-| `jangafx_tornado` (zip) | Tornado Looping, JangaFX EmberGen free VDB animations | CC0-1.0 (the download page: the free VDB simulations are licensed CC0, Public Domain; confirmed on the page by the render machine before the bake) | https://jangafx.com/software/embergen/download/free-vdb-animations | PLACEHOLDER: the render machine's download URL and size (`scripts/fetch_tornado_vdb.py` PIN) | PLACEHOLDER (`PIN["zip_sha256"]`) |
+| `jangafx_tornado` (zip) | Tornado Looping, JangaFX EmberGen free VDB animations | CC0-1.0 (the download page: the free VDB simulations are licensed CC0, Public Domain; confirmed on the page by the render machine before the bake) | https://jangafx.com/software/embergen/download/free-vdb-animations | https://www.mediafire.com/file/fynwmhozanxv821/TornadoLoopingVDB.zip/file (TornadoLoopingVDB.zip, 1,797,795,595 B; 128 frames, `density` only; browser download, `--zip`) | 492c99321ae911d0ad6c6ff3df6eb53c83e443ba91b6aab7b97ba86e536ac57c |
 
 CC0 needs no attribution; JangaFX is credited as a courtesy (`assets/looks/tornado_vdb/LICENSE`).
 
