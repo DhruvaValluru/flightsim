@@ -3734,8 +3734,14 @@ WORLD_TILES_DETAIL_SCALARS = {"DetailAmount": 0.45, "SharpenAmount": 0.6, "Sharp
                               "SnowlineM": 2700.0, "FarFadeStartM": 25000.0, "FarFadeEndM": 60000.0}
 #: M_FlightSimOceanBeauty (the beauty sea cap, FlightSimGoogleTiles.cpp
 #: ApplyBeautyGround): each ocean shader's Custom inputs, in order, the
-#: material's scalars (a 7 m/s trade-wind sea, UNCALIBRATED) and the
+#: material's scalars (the defaults: a 7 m/s trade-wind sea, UNCALIBRATED) and the
 #: generated wave normal (assets/terrain_detail/PIN.json "ocean").
+#: Generation 5 (hyperreal stormsea): WindSpeedMS / WindDirX / WindDirY are set
+#: per render on the cap's material instance from the card's surface wind
+#: (FlightSimGoogleTiles.cpp ApplyBeautyGround; still air keeps these defaults),
+#: and the shaders ramp a storm sea (streak and patch foam filtered by pixel
+#: footprint and distance, a resolved storm swell, a grey-green body) from
+#: STORM_WIND_LOW_MS, exactly zero at 7 m/s (core/scene/ocean_storm_sea.py).
 #: Generation 2 (round 10's #13: a tile grid and SSR streaks): the sea draws
 #: its own sky reflection and sun glint as emissive (ocean_emissive.hlsl) from
 #: the atmosphere nodes the distant clouds already use on the render machine.
@@ -3843,7 +3849,7 @@ def world_stamp(material, name):
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "7",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular)
                      "M_FlightSimCloudLayers": "9", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
-                     "M_FlightSimOceanBeauty": "4"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull)
+                     "M_FlightSimOceanBeauty": "5"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
 
@@ -4214,7 +4220,10 @@ def create_world_ocean_beauty():
     tangent-space switch is off); the deep sea's body colour and Monahan's
     whitecaps (ocean_colour.hlsl). Generation 4: the depth pull (WORLD_OCEAN_DEPTH_PULL),
     a world position offset along each vertex's line of sight: the same pixels, nearer
-    depth, so the sea wins over the tiles' ocean; the cap is in no label pass."""
+    depth, so the sea wins over the tiles' ocean; the cap is in no label pass.
+    Generation 5 (hyperreal stormsea): the shaders' storm sea, driven by the card's
+    wind through the WindSpeedMS / WindDirX / WindDirY scalars the C++ sets on the
+    cap's material instance (the graph is unchanged; the Custom bodies are)."""
     material = _world_beauty_material("M_FlightSimOceanBeauty")
     if material is None:
         return
