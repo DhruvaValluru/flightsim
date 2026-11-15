@@ -19,6 +19,8 @@ import sys
 import zlib
 from pathlib import Path
 
+import numpy as np
+
 REPO = Path(__file__).resolve().parents[1]
 PIN = json.loads((REPO / "assets" / "terrain_detail" / "PIN.json").read_text(encoding="utf-8"))
 SHADERS = REPO / "assets" / "shaders" / "world"
@@ -234,7 +236,8 @@ def test_generation_8_filters_the_detail_to_the_footprint_and_keeps_the_colour()
     is exact), the grass map is mostly cut on forest, the tile relief comes from
     the footprint-filtered AlbedoMid with a bounded step, and the crowns are
     parabolic domes shown only where one spans several pixels."""
-    assert _literal("WORLD_GENERATIONS")["M_FlightSimTilesBeauty"] == "8"
+    # 9: the relief step's bound made true (test_generation_9_... below computes it)
+    assert _literal("WORLD_GENERATIONS")["M_FlightSimTilesBeauty"] == "9"
     surface = _shader("tiles_detail_surface")
     normal = _shader("tiles_detail_normal")
     for hlsl in (surface, normal):
@@ -266,3 +269,193 @@ def test_generation_8_filters_the_detail_to_the_footprint_and_keeps_the_colour()
     for hlsl in (surface, normal):
         body = hlsl[hlsl.rindex("\n};\n"):]
         assert body.rindex("ddy_fine(") < body.index("[branch]")
+
+
+# -- generation 8 / 9 arithmetic, in numbers (the string checks above pin the
+#    text; these run the laws, like tests/test_tiles_wet_ground.py) ------------
+
+
+def _consts(name):
+    return {k: float(v) for k, v in re.findall(r"const float (\w+) = ([0-9.]+);", _shader(name))}
+
+
+def _hash2(ix, iy):
+    """The shaders' shared Hash2 on integer cells (uint wrap, Murmur-style mix)."""
+    m = np.uint64(0xFFFFFFFF)
+    qx = (ix.astype(np.int64) & 0xFFFFFFFF).astype(np.uint64)
+    qy = (iy.astype(np.int64) & 0xFFFFFFFF).astype(np.uint64)
+    h = ((qx * np.uint64(1597334677)) & m) ^ ((qy * np.uint64(3812015801)) & m)
+    h = ((h ^ (h >> np.uint64(16))) * np.uint64(2246822519)) & m
+    return ((h ^ (h >> np.uint64(13))) & m).astype(np.float64) / 4294967296.0
+
+
+def _crowns(px, py, crown_m, tilt):
+    """Crowns() (the dome height) and CrownTilt() (its horizontal normal) of the
+    two shaders over the same jittered cells; also the winning cell's index and
+    radius so a finite difference can stay inside one dome."""
+    cx, cy = np.floor(px / crown_m), np.floor(py / crown_m)
+    best = np.zeros_like(px)
+    out = np.zeros(px.shape + (2,))
+    win = np.full(px.shape, -1)
+    radius_w = np.zeros_like(px)
+    for k, (dy, dx) in enumerate([(y, x) for y in (-1, 0, 1) for x in (-1, 0, 1)]):
+        ix, iy = cx + dx, cy + dy
+        centre_x = (ix + _hash2(ix, iy)) * crown_m
+        centre_y = (iy + _hash2(ix + 37.0, iy + 11.0)) * crown_m
+        radius = crown_m * (0.45 + 0.25 * _hash2(ix + 71.0, iy + 53.0))
+        dxn, dyn = (px - centre_x) / radius, (py - centre_y) / radius
+        h = np.clip(1.0 - (dxn * dxn + dyn * dyn), 0.0, 1.0)
+        better = h > best
+        best = np.where(better, h, best)
+        out[..., 0] = np.where(better, dxn * tilt, out[..., 0])
+        out[..., 1] = np.where(better, dyn * tilt, out[..., 1])
+        win = np.where(better, k, win)
+        radius_w = np.where(better, radius, radius_w)
+    return best, out, win, radius_w
+
+
+def test_generation_8_contrast_law_in_numbers():
+    """exp2(DETAIL_CONTRAST x log2(x)) then clamp(DETAIL_RATIO_MIN, DETAIL_RATIO_MAX)
+    is x^0.6 held to 0.6..1.5: a quarter maps to the floor, one to one, four to
+    the ceiling; the law is monotone and never widens the old 0.4..1.8 span."""
+    c = _consts("tiles_detail_surface")
+    assert c["DETAIL_CONTRAST"] == 0.6 and (c["DETAIL_RATIO_MIN"], c["DETAIL_RATIO_MAX"]) == (0.6, 1.5)
+
+    def law(x):
+        r = np.exp2(c["DETAIL_CONTRAST"] * np.log2(np.clip(x, 0.25, 4.0)))
+        return np.clip(r, c["DETAIL_RATIO_MIN"], c["DETAIL_RATIO_MAX"])
+
+    assert law(0.25) == c["DETAIL_RATIO_MIN"] and law(1.0) == 1.0 and law(4.0) == c["DETAIL_RATIO_MAX"]
+    for x in (0.5, 1.5, 1.9):                                  # inside the band the law is the power
+        assert abs(float(law(x)) - x ** c["DETAIL_CONTRAST"]) < 1e-12, x
+    assert float(law(2.0)) == 1.5 and 2.0 ** 0.6 > 1.5       # 2^0.6 = 1.516 already meets the ceiling
+    xs = np.linspace(0.05, 8.0, 2001)
+    ys = law(xs)
+    assert np.all(np.diff(ys) >= 0) and ys.min() == 0.6 and ys.max() == 1.5
+    # the compression: the old span's ends come in (0.4 -> 0.6, 1.8 -> 1.42)
+    assert float(law(0.4)) == 0.6 and 1.4 < float(law(1.8)) < 1.5
+
+
+def test_generation_8_luma_sharpen_keeps_the_chromaticity_and_is_bounded():
+    """a x (Ls / La) with Ls = max(La + S x fade x (La - Lmid), 0.5 La): the
+    output's a / Lum(a) is the input's exactly, and the gain is within
+    [0.5, 1 + SharpenAmount] for every tile, blur and fade."""
+    scalars = _literal("WORLD_TILES_DETAIL_SCALARS")
+    s_amount = scalars["SharpenAmount"]
+    assert s_amount == 0.6
+    lum_w = np.array([0.2126, 0.7152, 0.0722])
+    assert "dot(c, float3(0.2126, 0.7152, 0.0722))" in _shader("tiles_detail_surface")
+    rng = np.random.default_rng(20261115)
+    a = rng.uniform(0.0, 1.5, size=(4000, 3))
+    a[:50] *= 1e-3                                             # near-black texels too
+    mid = rng.uniform(0.0, 1.5, size=(4000, 3))
+    for fade in (0.0, 0.37, 1.0):
+        la = a @ lum_w
+        lmid = mid @ lum_w
+        ls = np.maximum(la + s_amount * fade * (la - lmid), 0.5 * la)
+        gain = ls / np.maximum(la, 1e-4)
+        sharp = a * gain[:, None]
+        # the gain band
+        assert np.all(gain >= 0.5 - 1e-12) and np.all(gain <= 1.0 + s_amount * fade + 1e-12)
+        # chromaticity exact: a / Lum(a) is unchanged wherever the luma is not degenerate
+        keep = la > 1e-4
+        chroma_in = a[keep] / la[keep, None]
+        chroma_out = sharp[keep] / (sharp[keep] @ lum_w)[:, None]
+        assert np.allclose(chroma_in, chroma_out, rtol=0, atol=1e-9)
+        # and the luma itself is Ls
+        assert np.allclose(sharp @ lum_w, ls * np.minimum(la / np.maximum(la, 1e-4), 1.0), atol=1e-9)
+    # the bound is reached: a texel twice its blur gains the full 1 + S, one far below it the floor
+    assert float(np.maximum(1.0 + s_amount * (1.0 - 0.0), 0.5)) == 1.0 + s_amount
+    assert float(np.maximum(1.0 + s_amount * (1.0 - 3.0), 0.5)) == 0.5
+
+
+def test_generation_8_crown_tilt_is_the_domes_gradient():
+    """CROWN_TILT is 2 x 0.8: the dome is 0.8 crown radii high as a parabola
+    1 - |d|^2, so its horizontal normal is 1.6 d. A finite difference of
+    0.8 x Crowns() against CrownTilt() / radius agrees inside every dome."""
+    c = _consts("tiles_detail_normal")
+    assert c["CROWN_TILT"] == 2.0 * 0.8
+    assert c["CROWN_M"] == _consts("tiles_detail_surface")["CROWN_M"] == 7.0
+    crown_m, tilt = c["CROWN_M"], c["CROWN_TILT"]
+    rng = np.random.default_rng(7)
+    px = rng.uniform(-400.0, 400.0, 20000)
+    py = rng.uniform(-400.0, 400.0, 20000)
+    eps = 1e-3
+    h0, t0, w0, r0 = _crowns(px, py, crown_m, tilt)
+    hx, _, wx, _ = _crowns(px + eps, py, crown_m, tilt)
+    hy, _, wy, _ = _crowns(px, py + eps, crown_m, tilt)
+    inside = (h0 > 0.05) & (w0 == wx) & (w0 == wy)             # one dome, away from its rim
+    assert inside.sum() > 5000
+    grad_x = 0.8 * (hx[inside] - h0[inside]) / eps
+    grad_y = 0.8 * (hy[inside] - h0[inside]) / eps
+    # the normal's horizontal part is -grad(height), in crown-radius units x 1/radius
+    assert np.allclose(grad_x, -t0[inside, 0] / r0[inside], atol=2e-3)
+    assert np.allclose(grad_y, -t0[inside, 1] / r0[inside], atol=2e-3)
+    # finite at the rim: |d| <= 1 inside the dome, so |tilt| <= CROWN_TILT
+    assert np.all(np.hypot(t0[h0 > 0, 0], t0[h0 > 0, 1]) <= tilt + 1e-9)
+    # the shader writes the same law
+    assert "tilt = d * CROWN_TILT;" in _shader("tiles_detail_normal")
+    assert "best = max(best, saturate(1.0 - d * d));" in _shader("tiles_detail_surface")
+
+
+def _relief_slope(dBs, dBt, bump_amount, scale, forest_gain, forest, footprint_m):
+    """tiles_detail_normal.hlsl's surface gradient on a flat quad: dpx, dpy of
+    the footprint along x and y, n = z. Returns the tilt from n in degrees."""
+    n = np.array([0.0, 0.0, 1.0])
+    dpx = np.array([footprint_m, 0.0, 0.0])
+    dpy = np.array([0.0, footprint_m, 0.0])
+    bump = bump_amount * scale * footprint_m * 1.0 * 1.0 * (1.0 + forest_gain * forest)   # fade 1, land 1
+    r1, r2 = np.cross(dpy, n), np.cross(n, dpx)
+    det = float(dpx @ r1)
+    surf_grad = np.sign(det) * (bump * dBs * r1 + bump * dBt * r2)
+    nb = abs(det) * n - surf_grad
+    nb /= np.linalg.norm(nb)
+    return float(np.degrees(np.arccos(np.clip(nb @ n, -1.0, 1.0))))
+
+
+def test_generation_9_relief_step_bounds_the_tilt_to_a_few_degrees():
+    """The footprint cancels in the surface gradient, so the relief's slope per
+    screen axis is BumpAmount x TerrainDetailScale x (1 + FOREST_BUMP_GAIN x
+    forest) x RELIEF_STEP_MAX, at every range alike. TerrainDetailScale is 1 off
+    a city (0.12 is DetailStrength, tiles_normal.hlsl's older micro relief, not
+    this node's): with that 1 the bound must still be a few degrees. Generation
+    8's 0.5 gave 24 deg per axis, 32 on the diagonal; generation 9's 0.08 gives
+    at most ~6 deg."""
+    from core.scene import world_beauty as wb
+
+    c = _consts("tiles_detail_normal")
+    scalars = _literal("WORLD_TILES_DETAIL_SCALARS")
+    bump_amount, step, forest_gain = scalars["BumpAmount"], c["RELIEF_STEP_MAX"], c["FOREST_BUMP_GAIN"]
+    assert bump_amount == 0.6 and forest_gain == 0.5 and step == 0.08
+    # the scale this node reads is 1 off a city, 0 over one; 0.12 is another scalar
+    rural = wb.tiles_parameters("clear", 0.0, surface="farmland")
+    assert rural["TerrainDetailScale"] == 1.0 and wb.tiles_parameters("clear", 0.0, surface="city")["TerrainDetailScale"] == 0.0
+    assert rural["DetailStrength"] == 0.12
+    scale = rural["TerrainDetailScale"]
+    # the slope law and its bound, in numbers
+    per_axis = bump_amount * scale * (1.0 + forest_gain) * step
+    assert abs(per_axis - 0.072) < 1e-12
+    worst = np.degrees(np.arctan(np.sqrt(2.0) * per_axis))          # both axes at the clamp, on forest
+    assert 4.0 < worst <= 6.0, worst
+    assert np.degrees(np.arctan(per_axis)) < 4.5                  # one axis, forest
+    assert np.degrees(np.arctan(bump_amount * scale * step)) < 3.0   # one axis, open ground
+    # the shader's own gradient agrees with the law at every footprint (the range cancels)
+    for footprint_m in (0.05, 0.5, 5.0, 50.0):
+        for forest in (0.0, 1.0):
+            for dBs, dBt in ((step, 0.0), (0.0, -step), (step, step), (-step, step)):
+                tilt = _relief_slope(dBs, dBt, bump_amount, scale, forest_gain, forest, footprint_m)
+                law = np.degrees(np.arctan(bump_amount * scale * (1.0 + forest_gain * forest) * np.hypot(dBs, dBt)))
+                assert abs(tilt - law) < 1e-9, (footprint_m, forest, dBs, dBt)
+                assert tilt <= worst + 1e-9
+    # an unbounded step (a texel edge of x2 across one pixel) would have tilted far past that
+    assert _relief_slope(1.0, 1.0, bump_amount, scale, forest_gain, 1.0, 1.0) > 45.0
+    # and generation 8's constant did not keep the comment's promise
+    assert np.degrees(np.arctan(bump_amount * scale * (1.0 + forest_gain) * 0.5)) > 20.0
+    # the relief is not zeroed: the bound stays above 2 degrees on open ground
+    assert np.degrees(np.arctan(bump_amount * scale * step)) > 2.0
+    # the shader applies the clamp to both derivatives and states the law
+    normal = _shader("tiles_detail_normal")
+    assert "clamp(ddx_fine(relief), -RELIEF_STEP_MAX, RELIEF_STEP_MAX)" in normal
+    assert "clamp(ddy_fine(relief), -RELIEF_STEP_MAX, RELIEF_STEP_MAX)" in normal
+    assert "BumpAmount * TerrainDetailScale * footprintM * fade * land * (1.0 + FOREST_BUMP_GAIN * forest)" in normal
+    assert "~6 degrees" in normal

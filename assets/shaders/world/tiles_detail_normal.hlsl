@@ -7,8 +7,8 @@
 //   * the tile's own relief: the tile luminance against its local mean
 //     (AlbedoLow) as a height scaled by the pixel footprint (Mikkelsen 2010's
 //     surface gradient from the screen derivatives): the photogrammetry's ridges,
-//     gullies and crowns catch today's sun instead of only the baked one; doubled
-//     (1 + FOREST_BUMP_GAIN) on forest so the canopy reads with depth;
+//     gullies and crowns catch today's sun instead of only the baked one;
+//     x (1 + FOREST_BUMP_GAIN) on forest so the canopy reads with depth;
 //   * the CC0 aerial normals (assets/terrain_detail, OpenGL convention) of the
 //     same roles, octaves and projections as tiles_detail_surface.hlsl (the
 //     shared block below is pinned equal to its copy there);
@@ -72,9 +72,14 @@ const float DETAIL_TEXEL_PX = 2.5;
 const float FOREST_TEXTURE_CUT = 0.75;
 const float CANOPY_VISIBLE_PX_LO = 4.0;
 const float CANOPY_VISIBLE_PX_HI = 10.0;
-// The tile relief's largest per-pixel luminance-ratio step (the slope is
-// BumpAmount x the step, so no single pixel edge tilts past a few degrees).
-const float RELIEF_STEP_MAX = 0.5;
+// The tile relief's largest per-pixel luminance-ratio step. The footprint
+// cancels in the surface gradient below, so the slope per screen axis is
+// BumpAmount x TerrainDetailScale x (1 + FOREST_BUMP_GAIN x forest) x the step:
+// 0.6 x 1 x 1.5 x 0.08 = 0.072 on forest, 0.10 on the diagonal, so no single
+// pixel edge tilts past ~6 degrees (generation 9: was 0.5, a 24..32 degree
+// bound, the facets the step was meant to stop). tests/test_terrain_detail.py
+// pins the bound against scripts/ue_create_materials.py's BumpAmount.
+const float RELIEF_STEP_MAX = 0.08;
 // The crown dome's tilt per unit of normalised radius (a parabola 0.8 crown
 // radii high: 2 x 0.8), bounded since |d| <= 1.
 const float CROWN_TILT = 1.6;

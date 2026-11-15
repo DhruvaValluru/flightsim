@@ -3457,6 +3457,21 @@ no grey cast on the tree-covered slopes that the shade neutraliser does not expl
 `-tiles-shade-neutral=off` splits the two). Too soft -> DETAIL_TEXEL_PX 1.8; too flat ->
 DETAIL_CONTRAST 0.75.
 
+### lane-B generation 9: the relief step's bound made true (2026-11-15)
+
+Repair of generation 8 (tests/test_terrain_detail.py now computes the arithmetic instead of
+matching strings). The relief comment claimed "no single pixel edge tilts past a few degrees",
+but the footprint cancels in Mikkelsen's surface gradient, so the slope per screen axis is
+BumpAmount x TerrainDetailScale x (1 + FOREST_BUMP_GAIN x forest) x step, and TerrainDetailScale
+is 1 off a city (0.12 is the collection's DetailStrength, tiles_normal.hlsl's older micro relief,
+not this node's). With RELIEF_STEP_MAX 0.5 the bound was 0.6 x 1 x 1.5 x 0.5 = 0.45 -> 24 deg per
+axis, 32 deg on the diagonal: the facets the step was meant to stop. RELIEF_STEP_MAX 0.08: 0.072
+(4.1 deg) per axis on forest, 0.10 (5.8 deg) on the diagonal; 0.048 (2.7 deg) / 3.9 deg off it,
+the repo's 4-6 degree micro-relief target. No other amount changed. UNCALIBRATED.
+**Probe:** #01 and #02 at 1500 m against generation 8: the same frames with the relief's
+strongest edges softer. Too flat -> RELIEF_STEP_MAX 0.15 (a 10 deg bound); never above 0.12
+without changing the comment and the test's bound.
+
 ### lane-B round-10 ocean (M_FlightSimOceanBeauty generation 2)
 
 Round 10 (vis-windows f3561163, `docs/visual/round_10/13_747_cruise_over_the_ocean.jpg`) drew
