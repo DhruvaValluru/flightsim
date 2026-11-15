@@ -1402,6 +1402,40 @@ def look_preset_for(world_preset: Optional[str], grade: str) -> Tuple[str, str]:
     return fallback, f"no world preset: the {grade} grade's ({fallback})"
 
 
+#: hl-sun (2026-11-15): ``-bloom-mode=sun|full``. UE's BloomThreshold -1
+#: blooms every pixel by its share of BloomIntensity (a glow over the whole
+#: frame, cloud tops and white paint included), which a real lens does not
+#: show: its veiling glare is ~1-3 % (ISO 9358 veiling glare index of a coated
+#: photographic lens) and is visible only around sources far above diffuse
+#: white. ``sun`` (default) sets the threshold to BLOOM_SUN_THRESHOLD in
+#: post-exposure luminance (PostProcessBloom.usf: Luminance x ExposureScale -
+#: BloomThreshold, ramped over 2 units), 3.2 stops above a 0.8-albedo white at
+#: mid grey 0.18 x 4.4 = 0.8; the solar disc (1.6e9 cd/m^2, Minnaert; ~7e4
+#: after an EV15 exposure) and its water / metal glints (>= 2 % of the disc)
+#: are 10+ stops over it, so the halo is the sun's, sized by the haze preset's
+#: BloomIntensity / BloomSizeScale. Same number as the sun-shaft bloom
+#: (core/scene/sun_shafts.py). ``full`` is the earlier -1.
+BLOOM_MODES: Tuple[str, ...] = ("sun", "full")
+DEFAULT_BLOOM_MODE = "sun"
+BLOOM_MODE_SWITCH = "-bloom-mode="
+BLOOM_SUN_THRESHOLD = 8.0
+BLOOM_FULL_THRESHOLD = -1.0
+
+
+def bloom_for(values: Dict[str, Any], mode: str = DEFAULT_BLOOM_MODE) -> Dict[str, Any]:
+    """The bloom row with ``BloomThreshold`` for ``mode`` and both thresholds
+    recorded so the host can take ``-bloom-mode=full`` without a recompile."""
+    if mode not in BLOOM_MODES:
+        raise BeautyLookError(CONSTRAINT, f"bloom mode {mode!r} is not one of {', '.join(BLOOM_MODES)}")
+    row = dict(values)
+    row["BloomThresholdFull"] = BLOOM_FULL_THRESHOLD
+    row["BloomThresholdSun"] = BLOOM_SUN_THRESHOLD
+    row["BloomThreshold"] = BLOOM_SUN_THRESHOLD if mode == "sun" else BLOOM_FULL_THRESHOLD
+    row["bloom_mode"] = mode
+    row["bloom_mode_switch"] = BLOOM_MODE_SWITCH + "|".join(BLOOM_MODES)
+    return row
+
+
 def film_grain_for(preset: str, stock_scale: float = 1.0, ev100: Optional[float] = None,
                    model: str = DEFAULT_GRAIN_MODEL) -> Dict[str, Any]:
     """The film-grain row for ``preset``. ``FilmGrainIntensityPreset`` is the
@@ -1459,6 +1493,8 @@ def engine_look_for(preset: str, stock_scale: float = 1.0,
     for key, row in ENGINE_LOOK.items():
         values = (film_grain_for(preset, stock_scale, ev100) if key == "film_grain"
                   else dict(row["per_preset"][preset]))
+        if key == "bloom":
+            values = bloom_for(values)
         effect: Dict[str, Any] = {
             "switch": f"{LOOK_SWITCH_PREFIX}{row['switch']}",
             "switch_words": list(PROBE_SWITCH_WORDS if row["probe"] else EFFECT_SWITCH_WORDS),

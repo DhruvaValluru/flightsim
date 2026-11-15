@@ -163,6 +163,8 @@ def test_the_plan_carries_the_presets_engine_look(preset):
         assert look[key]["switch"] == f"-look-{bl.ENGINE_LOOK[key]['switch']}"
         assert look[key]["values"] == (bl.film_grain_for(preset, ev100=p["exposure"]["ev100"])
                                        if key == "film_grain"
+                                       else bl.bloom_for(bl.ENGINE_LOOK[key]["per_preset"][preset])
+                                       if key == "bloom"
                                        else bl.ENGINE_LOOK[key]["per_preset"][preset])
     assert p["beauty_look_version"] == 3
 
@@ -231,7 +233,8 @@ def test_every_post_process_value_the_python_writes_the_host_applies_with_its_ov
     explicit = {"AmbientOcclusionRadiusInWS", "BloomMethod"}
     informational = {"grain_scale", "GrainStrength", "stock_scale", "sun_in_frame_margin_deg",
                      "sensor_width_mm", "sensor_height_mm", "FilmGrainIntensityPreset", "grain_model",
-                     "equivalent_iso", "iso_grain_factor"}
+                     "equivalent_iso", "iso_grain_factor",
+                     "BloomThresholdFull", "BloomThresholdSun", "bloom_mode", "bloom_mode_switch"}
     for key in values:
         if key in informational:
             assert f'TEXT("{key}")' in LOOK_CPP, key

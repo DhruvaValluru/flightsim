@@ -1137,6 +1137,42 @@ namespace
 			{
 				FLIGHTSIM_BEAUTY_FLOAT(Effect.Values, BloomIntensity)
 				FLIGHTSIM_BEAUTY_FLOAT(Effect.Values, BloomThreshold)
+				// hl-sun: -bloom-mode=sun|full (core/scene/beauty_look.py
+				// bloom_for). The sidecar's threshold is the planned mode's;
+				// the switch takes the other recorded threshold. A sidecar
+				// without BloomThresholdFull is an older plan: as planned.
+				{
+					FString BloomMode;
+					if (FParse::Value(*BeautyLookState().SwitchText, TEXT("bloom-mode="), BloomMode) &&
+					    !BloomMode.IsEmpty())
+					{
+						BloomMode = BloomMode.ToLower();
+						if (BloomMode != TEXT("sun") && BloomMode != TEXT("full"))
+						{
+							return BeautyLookFail(FString::Printf(
+								TEXT("-bloom-mode=%s is not sun or full"), *BloomMode));
+						}
+						double Stated = 0.0;
+						if (Effect.Values->TryGetNumberField(
+							BloomMode == TEXT("full") ? TEXT("BloomThresholdFull") : TEXT("BloomThresholdSun"), Stated))
+						{
+							Settings.BloomThreshold = static_cast<float>(Stated);
+							Echo->SetNumberField(TEXT("BloomThreshold"), Settings.BloomThreshold);
+						}
+						Echo->SetStringField(TEXT("bloom_mode"), BloomMode);
+					}
+					else
+					{
+						FString Planned = TEXT("full");
+						Effect.Values->TryGetStringField(TEXT("bloom_mode"), Planned);
+						Echo->SetStringField(TEXT("bloom_mode"), Planned);
+					}
+					FString ModeSwitch;
+					if (Effect.Values->TryGetStringField(TEXT("bloom_mode_switch"), ModeSwitch))
+					{
+						Echo->SetStringField(TEXT("bloom_mode_switch"), ModeSwitch);
+					}
+				}
 				FLIGHTSIM_BEAUTY_FLOAT(Effect.Values, BloomSizeScale)
 				Capture->ShowFlags.SetBloom(true);
 				if (Fft.bOn)
