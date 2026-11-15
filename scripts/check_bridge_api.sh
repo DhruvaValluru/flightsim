@@ -922,6 +922,13 @@ hl_check "hero: SetEnableLightShaftBloom" "$HLL" "ENGINE_API void SetEnableLight
 hl_check "hero: SetBloomScale" "$HLL" "ENGINE_API void SetBloomScale(float NewValue);"
 hl_check "hero: SetBloomThreshold" "$HLL" "ENGINE_API void SetBloomThreshold(float NewValue);"
 hl_check "hero: SetBloomMaxBrightness" "$HLL" "ENGINE_API void SetBloomMaxBrightness(float NewValue);"
+# lane hl-sun (2026-11-15): -sun-physical= drops the lighting block's temperature on a clear atmosphere sun
+hl_check "hero: SetUseTemperature" "$HLL" "ENGINE_API void SetUseTemperature(bool bNewValue);"
+hl_check "hero: bUseTemperature" "$HLL" "uint32 bUseTemperature : 1;"
+hl_check "hero: Temperature" "$HLL" "float Temperature;"
+hl_check "hero: IsUsedAsAtmosphereSunLight" "$HLD" "virtual bool IsUsedAsAtmosphereSunLight() const override"
+hl_check "hero: SkyAtmosphere GetAtmosphereTransmitanceOnGroundAtPlanetTop" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API FLinearColor GetAtmosphereTransmitanceOnGroundAtPlanetTop(UDirectionalLightComponent* DirectionalLight);"
+hl_check "hero: PCSS penumbra from the source angle" "Renderer/Private/ShadowRendering.h" "float TanLightSourceAngle = FMath::Tan(0.5 * FMath::DegreesToRadians(ShadowInfo->GetLightSceneInfo().Proxy->GetLightSourceAngle()));"
 # round 5 shade probes (FlightSimHeroLighting.cpp sky-light block; the commandlet's sky_light_capture_result)
 hl_check "hero: SkyLight GetProcessedSkyTexture" "$HLS" "const FTexture* GetProcessedSkyTexture() const"
 hl_check "hero: SkyLight bCloudAmbientOcclusion" "$HLS" "uint32 bCloudAmbientOcclusion : 1;"

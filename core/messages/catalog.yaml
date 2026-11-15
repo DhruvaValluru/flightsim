@@ -373,6 +373,10 @@ hardware_profile.vram_unknown:
 stress_ladder.other_gpu:
   sentence: "The stress ladder's measurement was taken on a different graphics card from the one this budget is for, so it is not applied."
   hint: "Run the hardware probe script, then the stress ladder again, on the render machine."
+# lane hl-sun (core/scene/hero_lighting.py physical_sun, FlightSimHeroLighting.cpp):
+render.sun_physical:
+  sentence: "The switch for the physical sun (true disc size, colour from the atmosphere only) was given a value it does not take."
+  hint: "Use -sun-physical=on or -sun-physical=off, or leave it out to render the physical sun."
 # round 75 (core/scene/hero_lighting.py stated_fill_share): the stated fill's share of the way to grey.
 render.stated_fill_share:
   sentence: "The switch for how neutral a stated sky fill is was given a value it does not take."
