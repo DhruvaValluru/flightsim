@@ -436,6 +436,13 @@ namespace
 			{
 				Geo->ProjectedCRS = S.Card.SceneCrs.IsEmpty() ? S.Card.ThermalsCrs : S.Card.SceneCrs;
 			}
+			else
+			{
+				// No terrain CRS (an ocean card): the commandlet's fresh world
+				// keeps the class default; the editor world kept the previous
+				// scene's (hl-sun: #13 after #3 put the camera 2600 km off).
+				Geo->ProjectedCRS = GetDefault<AGeoReferencingSystem>()->ProjectedCRS;
+			}
 			Error.Reset();
 		}
 		Geo->ApplySettings();
