@@ -237,7 +237,7 @@ def test_generation_8_filters_the_detail_to_the_footprint_and_keeps_the_colour()
     the footprint-filtered AlbedoMid with a bounded step, and the crowns are
     parabolic domes shown only where one spans several pixels."""
     # 9: the relief step's bound made true (test_generation_9_... below computes it)
-    assert _literal("WORLD_GENERATIONS")["M_FlightSimTilesBeauty"] == "9"
+    assert int(_literal("WORLD_GENERATIONS")["M_FlightSimTilesBeauty"]) >= 9
     surface = _shader("tiles_detail_surface")
     normal = _shader("tiles_detail_normal")
     for hlsl in (surface, normal):
