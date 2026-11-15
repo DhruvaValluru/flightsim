@@ -49,7 +49,7 @@ def _contrail_body():
 # -- the material and its stamp ---------------------------------------------------
 
 def test_generation_13_rebuilds_the_contrail_master():
-    assert re.search(r'^LOOK_GENERATION = "13"$', _read(MASTERS), re.M)
+    assert re.search(r'^LOOK_GENERATION = "14"$', _read(MASTERS), re.M)
     assert look.FX_PARAMETERS["M_AircraftContrail"] == ("Opacity", "Formation", "FormationRamp", "Puff")
     assert look.SHADER_INPUTS["contrail_opacity"] == (
         "UV", "WorldPos", "Life", "Opacity", "Formation", "FormationRamp", "Puff", "PuffCellCm")

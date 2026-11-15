@@ -13,6 +13,8 @@
 
 #include "Components/LightComponent.h"       // canopy reflection: the sun's Intensity
 #include "Components/PointLightComponent.h"
+#include "Components/SkyAtmosphereComponent.h"  // generation 14: the scene's atmosphere column
+#include "Components/SkyLightComponent.h"       // generation 14: the scene's ground (lower hemisphere)
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Dom/JsonObject.h"
@@ -113,6 +115,28 @@ namespace
 	const TCHAR* const AircraftFxPaintEnvGainParam = TEXT("PaintEnvGain");
 	const TCHAR* const AircraftFxPaintEnvTintParam = TEXT("PaintEnvTint");
 	const TCHAR* const AircraftFxPaintSunParam = TEXT("PaintSunAzimuthDir");
+	// LOOK_GENERATION 14 (scripts/aircraft_scene_sky.py parameters(): the
+	// "Paint" / "Glass" prefix + these suffixes; SCENE_SHARE, OVERCAST_SHARE and
+	// the UE 5.7 default atmosphere's columns for a scene without one).
+	const TCHAR* const AircraftFxSceneScaleSuffix = TEXT("EnvSceneScale");
+	const TCHAR* const AircraftFxSceneGroundSuffix = TEXT("SkyGround");
+	const TCHAR* const AircraftFxSceneTauSuffix = TEXT("GroundTau");
+	const TCHAR* const AircraftFxSceneCoverSuffix = TEXT("SkyCover");
+	const TCHAR* const AircraftFxSceneOvercastSuffix = TEXT("OvercastShare");
+	// SKY_HORIZON_SHARE 0.10 over the clear sky's horizon share of E / pi, 0.2:
+	// the scene path at the strip path's level (half physical: the engine's own
+	// specular IBL already mirrors the captured sky, the canopy lane's double count).
+	constexpr double AircraftFxSceneSkyShare = 0.10 / 0.2;
+	// CIE overcast (Moon & Spencer 1942) zenith over the clear one: 1 - OVERCAST_DIM.
+	constexpr double AircraftFxSceneOvercastShare = 1.0 - 0.75;
+	// USkyAtmosphereComponent's constructor defaults (UE 5.7): Rayleigh
+	// (0.005802, 0.013558, 0.0331) /km over 8 km; Mie extinction 0.003996 +
+	// 0.000444 /km over 1.2 km. The green column, 0.108, is near Bucholtz
+	// 1995's 0.0973 (Rayleigh optical depth, 550 nm, sea level).
+	constexpr double AircraftFxDefaultRayleighPerKm[3] = {0.005802, 0.013558, 0.0331};
+	constexpr double AircraftFxDefaultRayleighHKm = 8.0;
+	constexpr double AircraftFxDefaultMiePerKm = 0.003996 + 0.000444;
+	constexpr double AircraftFxDefaultMieHKm = 1.2;
 
 	// Round 25: why a material would draw the engine's default material on
 	// this render (it failed to compile for the world's shader platform, or
@@ -378,6 +402,8 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	const bool bCanopyReflectSwitch = AircraftFxSwitch(Params, TEXT("canopy-reflect="), false, SwitchError);
 	// The airframe's sky reflection: on unless asked off by name (the A/B).
 	const bool bPaintReflectSwitch = AircraftFxSwitch(Params, TEXT("paint-reflect="), true, SwitchError);
+	// LOOK_GENERATION 14: those mirrors read the scene's sky and ground; off is the A/B (the strip).
+	const bool bSceneSkySwitch = AircraftFxSwitch(Params, TEXT("reflect-scene-sky="), true, SwitchError);
 	bMaterials = bAll && bMaterialsSwitch;
 	bLights = bAll && bLightsSwitch;
 	bContrails = bAll && bContrailsSwitch;
@@ -387,6 +413,7 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	bContrailPuffs = bAll && bPuffsSwitch;
 	bCanopyReflect = bAll && bCanopyReflectSwitch;
 	bPaintReflect = bAll && bPaintReflectSwitch;
+	bReflectSceneSky = bAll && bSceneSkySwitch;
 	// Tiers 0-1 only (both opaque); 2-3 are translucent and not built. A bad
 	// word is refused even with the switch off (aircraft_glass_reflect.parse_canopy_reflect).
 	CanopyReflectTier = 0;
@@ -1003,6 +1030,12 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	PaintReflectMids.Reset();
 	ReflectSun = Options.Sun;
 	ReflectCover = 0.0;
+	// LOOK_GENERATION 14: the scene's own sky and ground in both mirrors.
+	bSceneSky = Options.bReflectSceneSky && (Options.bPaintReflect || Options.bCanopyReflect);
+	SceneSkyLight = Options.SkyLight;
+	SceneAtmosphere = Options.Atmosphere;
+	SceneSkyStale = 0;
+	SceneSkyRow = MakeShared<FJsonObject>();
 	// The horizon tint and the cloud cover serve both the canopy and the
 	// airframe reflection (the same strip, the same gain rule).
 	if (Options.bCanopyReflect || Options.bPaintReflect)
@@ -1211,6 +1244,12 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 					LookMid->SetVectorParameterValue(TEXT("GlassEnvTint"), ReflectTint);
 					LookMid->SetScalarParameterValue(TEXT("GlassEnvGain"), 0.0f);  // UpdateCanopyReflect sets it
 					ReflectMids.Add(LookMid);
+					float SceneScale = 0.0f;
+					if (bSceneSky && !LookMid->GetScalarParameterValue(FHashedMaterialParameterInfo(
+						FName(FString(TEXT("Glass")) + AircraftFxSceneScaleSuffix)), SceneScale))
+					{
+						++SceneSkyStale;
+					}
 					++ReflectSlots;
 					ReflectNames.AddUnique(SlotName);
 				}
@@ -1257,6 +1296,14 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 						LookMid->SetScalarParameterValue(FName(AircraftFxPaintEnvGainParam), 0.0f);
 						PaintReflectMids.Add(LookMid);
 						++PaintReflectSlots;
+						// A master built before generation 14 has no scene-sky
+						// scalar: it keeps the strip (counted, recorded).
+						float SceneScale = 0.0f;
+						if (bSceneSky && !LookMid->GetScalarParameterValue(FHashedMaterialParameterInfo(
+							FName(FString(TEXT("Paint")) + AircraftFxSceneScaleSuffix)), SceneScale))
+						{
+							++SceneSkyStale;
+						}
 					}
 					else
 					{
@@ -1369,6 +1416,26 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	PaintReflectRow->SetStringField(TEXT("labels"), TEXT("unchanged: the paint and bare-metal masters stay opaque ")
 		TEXT("with no world position offset; the reflection is Emissive only, which no label pass reads"));
 	Row->SetObjectField(TEXT("paint_reflect"), PaintReflectRow);
+	// LOOK_GENERATION 14's record (the ground, tau and scale fields are written
+	// by UpdateCanopyReflect each step).
+	SceneSkyRow->SetStringField(TEXT("switch"), Options.bReflectSceneSky
+		? TEXT("on (the default; -reflect-scene-sky=off draws generation 13's strip)")
+		: TEXT("off (-reflect-scene-sky=off: the coastal strip)"));
+	SceneSkyRow->SetBoolField(TEXT("active"), bSceneSky);
+	SceneSkyRow->SetNumberField(TEXT("slots_stale_master"), SceneSkyStale);
+	SceneSkyRow->SetStringField(TEXT("rule"), TEXT("above the horizon: SkyAtmosphereViewLuminance(reflect(V, N)) ")
+		TEXT("toward the CIE overcast sky Lz (1 + 2 sin e) / 3 by cloud cover; below: ground x exp(-tau / |r.z|) + ")
+		TEXT("the Sky View LUT's in-scatter; horizon blur smoothstep(-2 alpha, 2 alpha, r.z); x 0.5 (0.10 / 0.2, the ")
+		TEXT("strip path's level); the strip per pixel where the LUT is not drawn (aircraft_scene_sky.py; UNCALIBRATED)"));
+	SceneSkyRow->SetStringField(TEXT("ground_source"), SceneSkyLight != nullptr
+		? TEXT("the sky light's lower hemisphere x its colour x intensity (hero lighting: albedo x E / pi)")
+		: TEXT("absent: no sky light, ground black (the LUT's in-scatter only)"));
+	SceneSkyRow->SetStringField(TEXT("tau_source"), SceneAtmosphere != nullptr
+		? TEXT("the scene's SkyAtmosphere (Rayleigh + Mie exponential columns below the aircraft)")
+		: TEXT("UE 5.7's default atmosphere's columns (no SkyAtmosphere in the scene)"));
+	SceneSkyRow->SetStringField(TEXT("labels"), TEXT("unchanged: Emissive only on opaque masters with no world ")
+		TEXT("position offset"));
+	Row->SetObjectField(TEXT("scene_sky"), SceneSkyRow);
 	// Round 25: the class masters' compile results on this shader platform,
 	// the slots that fell back to a plain master, the graph generations drawn
 	// and any probe parameter the drawn master lacks.
@@ -1465,6 +1532,12 @@ void FFlightSimAircraftFX::ApplyMaterials(const FString& AssetRoot, const FFligh
 	       Applied, Absent.Num());
 }
 
+double FFlightSimAircraftFX::SceneSkyColumn(double SigmaPerKm, double ScaleHeightKm, double AltitudeKm)
+{
+	const double H = FMath::Max(ScaleHeightKm, 1.0e-3);
+	return FMath::Max(SigmaPerKm, 0.0) * H * (1.0 - FMath::Exp(-FMath::Max(AltitudeKm, 0.0) / H));
+}
+
 double FFlightSimAircraftFX::CanopyReflectGain(double SunIntensity, double SunElevationDeg, double Cover,
                                                bool bInterior)
 {
@@ -1515,6 +1588,88 @@ void FFlightSimAircraftFX::UpdateCanopyReflect()
 			Mid->SetScalarParameterValue(FName(AircraftFxPaintEnvGainParam), static_cast<float>(PaintGain));
 			Mid->SetVectorParameterValue(FName(AircraftFxPaintSunParam),
 			                             FLinearColor(static_cast<float>(ToSun.X), static_cast<float>(ToSun.Y), 0.0f, 0.0f));
+		}
+	}
+	// LOOK_GENERATION 14: the scene's ground and the air it is seen through,
+	// this step (the sky light's intensity and the aircraft's height may move).
+	if (bSceneSky)
+	{
+		FLinearColor Ground = FLinearColor::Black;
+		if (SceneSkyLight != nullptr && SceneSkyLight->bLowerHemisphereIsBlack)
+		{
+			const FLinearColor Lower = SceneSkyLight->LowerHemisphereColor;
+			const FLinearColor Light = SceneSkyLight->GetLightColor();
+			const float SkyIntensity = FMath::Max(SceneSkyLight->Intensity, 0.0f);
+			Ground = FLinearColor(FMath::Max(Lower.R, 0.0f) * Light.R * SkyIntensity,
+			                      FMath::Max(Lower.G, 0.0f) * Light.G * SkyIntensity,
+			                      FMath::Max(Lower.B, 0.0f) * Light.B * SkyIntensity, 0.0f);
+		}
+		// Engine Z = 0 is the ground datum (FFlightSimCloudLayer's convention); cm -> km.
+		const double AltitudeKm = Aircraft != nullptr ? FMath::Max(Aircraft->GetActorLocation().Z, 0.0) / 1.0e5 : 0.0;
+		double Rayleigh[3] = {AircraftFxDefaultRayleighPerKm[0], AircraftFxDefaultRayleighPerKm[1],
+		                      AircraftFxDefaultRayleighPerKm[2]};
+		double Mie[3] = {AircraftFxDefaultMiePerKm, AircraftFxDefaultMiePerKm, AircraftFxDefaultMiePerKm};
+		double RayleighH = AircraftFxDefaultRayleighHKm;
+		double MieH = AircraftFxDefaultMieHKm;
+		if (SceneAtmosphere != nullptr)
+		{
+			const FLinearColor R = SceneAtmosphere->RayleighScattering * SceneAtmosphere->RayleighScatteringScale;
+			const FLinearColor M = SceneAtmosphere->MieScattering * SceneAtmosphere->MieScatteringScale +
+				SceneAtmosphere->MieAbsorption * SceneAtmosphere->MieAbsorptionScale;
+			Rayleigh[0] = R.R; Rayleigh[1] = R.G; Rayleigh[2] = R.B;
+			Mie[0] = M.R; Mie[1] = M.G; Mie[2] = M.B;
+			RayleighH = SceneAtmosphere->RayleighExponentialDistribution;
+			MieH = SceneAtmosphere->MieExponentialDistribution;
+		}
+		double Tau[3];
+		for (int32 C = 0; C < 3; ++C)
+		{
+			Tau[C] = SceneSkyColumn(Rayleigh[C], RayleighH, AltitudeKm) + SceneSkyColumn(Mie[C], MieH, AltitudeKm);
+		}
+		const FLinearColor TauColor(static_cast<float>(Tau[0]), static_cast<float>(Tau[1]),
+		                            static_cast<float>(Tau[2]), 0.0f);
+		auto ApplyScene = [&](UMaterialInstanceDynamic* Mid, const TCHAR* Prefix, double Scale)
+		{
+			const FString P(Prefix);
+			Mid->SetScalarParameterValue(FName(P + AircraftFxSceneScaleSuffix), static_cast<float>(Scale));
+			Mid->SetVectorParameterValue(FName(P + AircraftFxSceneGroundSuffix), Ground);
+			Mid->SetVectorParameterValue(FName(P + AircraftFxSceneTauSuffix), TauColor);
+			Mid->SetScalarParameterValue(FName(P + AircraftFxSceneCoverSuffix), static_cast<float>(ReflectCover));
+			Mid->SetScalarParameterValue(FName(P + AircraftFxSceneOvercastSuffix),
+			                             static_cast<float>(AircraftFxSceneOvercastShare));
+		};
+		// An exterior panel mirrors the scene from any camera; the canopy seen
+		// from inside takes 0 (the strip, whose gain is 0 there too).
+		const double GlassScale = bReflectInterior ? 0.0 : AircraftFxSceneSkyShare;
+		for (UMaterialInstanceDynamic* Mid : PaintReflectMids)
+		{
+			if (Mid != nullptr)
+			{
+				ApplyScene(Mid, TEXT("Paint"), AircraftFxSceneSkyShare);
+			}
+		}
+		for (UMaterialInstanceDynamic* Mid : ReflectMids)
+		{
+			if (Mid != nullptr)
+			{
+				ApplyScene(Mid, TEXT("Glass"), GlassScale);
+			}
+		}
+		if (SceneSkyRow.IsValid())
+		{
+			TArray<TSharedPtr<FJsonValue>> GroundValues;
+			TArray<TSharedPtr<FJsonValue>> TauValues;
+			for (int32 C = 0; C < 3; ++C)
+			{
+				GroundValues.Add(MakeShared<FJsonValueNumber>(C == 0 ? Ground.R : (C == 1 ? Ground.G : Ground.B)));
+				TauValues.Add(MakeShared<FJsonValueNumber>(Tau[C]));
+			}
+			SceneSkyRow->SetArrayField(TEXT("ground_radiance_rgb"), GroundValues);
+			SceneSkyRow->SetArrayField(TEXT("ground_tau_rgb"), TauValues);
+			SceneSkyRow->SetNumberField(TEXT("altitude_km"), AltitudeKm);
+			SceneSkyRow->SetNumberField(TEXT("scene_scale_paint"), AircraftFxSceneSkyShare);
+			SceneSkyRow->SetNumberField(TEXT("scene_scale_glass"), GlassScale);
+			SceneSkyRow->SetNumberField(TEXT("cloud_cover"), ReflectCover);
 		}
 	}
 	if (PaintReflectRow.IsValid())

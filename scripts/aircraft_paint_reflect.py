@@ -66,6 +66,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import aircraft_glass_reflect as _glass  # noqa: E402
+import aircraft_scene_sky as _scene  # noqa: E402  (generation 14: the scene's sky and ground)
 
 UNCALIBRATED = "UNCALIBRATED: set by probe render on the render machine"
 
@@ -82,6 +83,8 @@ COATED_CLASSES = ("paint",)
 GAIN_PARAMETER = "PaintEnvGain"
 TINT_PARAMETER = "PaintEnvTint"
 SUN_PARAMETER = "PaintSunAzimuthDir"
+#: Generation 14: the scene-sky parameters' prefix (aircraft_scene_sky.parameters).
+SCENE_PREFIX = "Paint"
 #: The strip texture parameter (the canopy lane's tier-0 strip).
 ENV_TEXTURE_PARAMETER = "PaintEnv"
 ENV_TEXTURE_NAME = _glass.TIER_TEXTURES[0]["GlassEnv"]
@@ -117,7 +120,7 @@ CLASS_KEYS = {"paint": "Paint", "bare_metal": "BareMetal"}
 PAINT_REFLECT_SHADER_INPUTS = {
     "paint_env_uv": ("NormalWS", "CameraVec", "SunDir", "Lean", "LeanStrength",
                      "AxisX", "AxisY", "AxisZ"),
-    "paint_env_reflect": ("Env", "EnvScale", "Gain", "Tint", "NdotV", "F0", "Roughness",
+    "paint_env_reflect": ("Env", "EnvScale", "Gain", "Tint", "Scene", "NdotV", "F0", "Roughness",
                           "CoatAmount", "CoatRoughness", "Amount"),
 }
 
@@ -201,14 +204,14 @@ def mirror(ndv, f0, roughness, coat=0.0, coat_roughness=1.0):
 
 
 def reflect_emissive(env_rgb, env_scale, gain, tint, ndv, f0_rgb, roughness,
-                     coat=0.0, coat_roughness=1.0, amount=1.0):
-    """Twin of paint_env_reflect.hlsl."""
+                     coat=0.0, coat_roughness=1.0, amount=1.0, scene=(0.0, 0.0, 0.0, 0.0)):
+    """Twin of paint_env_reflect.hlsl (``scene``: scene_sky_env's float4;
+    the default a = 0 is generation 13's strip)."""
     a = min(max(amount, 0.0), 1.0)
-    out = []
-    for e, t, f0 in zip(env_rgb, tint, f0_rgb):
-        env = max(e * env_scale, 0.0) * max(gain, 0.0) * max(t, 0.0)
-        out.append(env * mirror(ndv, f0, roughness, coat, coat_roughness) * a)
-    return tuple(out)
+    strip = [max(e * env_scale, 0.0) * max(gain, 0.0) * max(t, 0.0) for e, t in zip(env_rgb, tint)]
+    envs = _scene.mix(strip, (max(scene[0], 0.0), max(scene[1], 0.0), max(scene[2], 0.0), scene[3]))
+    return tuple(env * mirror(ndv, f0, roughness, coat, coat_roughness) * a
+                 for env, f0 in zip(envs, f0_rgb))
 
 
 def ue_f0(base_rgb, specular, metallic):
@@ -276,12 +279,18 @@ def add_reflection(material, lib, slot_class, wet_layer, wet_node):
     if slot_class in COATED_CLASSES:
         coat, coat_out = brk, "ClearCoat"
         coat_rough, coat_rough_out = brk, "ClearCoatRoughness"
+        # the horizon blur follows the glossier (mirroring) layer: the coat
+        blur, blur_out = lib._min(material, brk, brk, x + 1200, y + 1100,
+                                  a_out="Roughness", b_out="ClearCoatRoughness"), ""
     else:
         coat, coat_out = lib._const(material, 0.0, x + 1000, y + 600), ""
         coat_rough, coat_rough_out = lib._const(material, 1.0, x + 1000, y + 700), ""
+        blur, blur_out = brk, "Roughness"
+    # Generation 14: the scene's own sky and ground (aircraft_scene_sky.py).
+    scene = _scene.add_scene_sky(material, lib, SCENE_PREFIX, uv, sun, blur, blur_out, x, y)
     reflection = lib._custom(material, "paint_env_reflect", "CMOT_FLOAT3", {
         "Env": (env, ""), "EnvScale": (s["PaintEnvEncodeScale"], ""),
-        "Gain": (s[GAIN_PARAMETER], ""), "Tint": (tint, ""),
+        "Gain": (s[GAIN_PARAMETER], ""), "Tint": (tint, ""), "Scene": (scene, ""),
         "NdotV": (lib._mask(material, uv, "r", x + 1200, y - 100), ""),
         "F0": (f0, ""), "Roughness": (brk, "Roughness"),
         "CoatAmount": (coat, coat_out), "CoatRoughness": (coat_rough, coat_rough_out),

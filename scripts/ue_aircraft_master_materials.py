@@ -118,7 +118,15 @@ REPO = os.path.dirname(_HERE)
 #: PaintEnvGain, the host's gain under -paint-reflect=on), the lookup leaned by
 #: the wet layer's new WetLean output (a rivulet's flank). PaintEnvGain 0 in
 #: the master: nothing added until the host sets it. Every other graph is unchanged.
-LOOK_GENERATION = "13"
+#: 14 (lane aircraft-refl, 2026-11-15): the paint / bare-metal masters (and their
+#: probe twins) and both canopy reflect masters read the scene's own sky along the
+#: reflected ray (SkyAtmosphereViewLuminance: the Sky View LUT) above the horizon
+#: and the host's ground (the sky light's lower hemisphere through the air below
+#: the aircraft) beneath it, instead of the coastal strip (scripts/aircraft_scene_sky.py,
+#: scene_sky_dir / scene_sky_env.hlsl). <Prefix>EnvSceneScale 0 in the master:
+#: the strip exactly as generation 13 until the host sets it (-reflect-scene-sky=on).
+#: Emissive only. Every other graph is unchanged.
+LOOK_GENERATION = "14"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.

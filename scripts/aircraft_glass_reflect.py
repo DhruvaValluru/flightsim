@@ -108,7 +108,7 @@ def texture_import(name):
 GLASS_REFLECT_SHADER_INPUTS = {
     "glass_reflect_uv": ("NormalWS", "CameraVec", "SunDir", "MicroN", "MicroStrength",
                          "AxisX", "AxisY", "AxisZ"),
-    "glass_reflect": ("Lut", "Env", "EnvScale", "Gain", "Tint"),
+    "glass_reflect": ("Lut", "Env", "EnvScale", "Gain", "Tint", "Scene"),
     "glass_micro_uv": ("LocalPos", "NormalWS", "AxisX", "AxisY", "AxisZ", "TileCm"),
 }
 
@@ -116,6 +116,8 @@ GLASS_REFLECT_SHADER_INPUTS = {
 GAIN_PARAMETER = "GlassEnvGain"
 TINT_PARAMETER = "GlassEnvTint"
 SUN_PARAMETER = "GlassSunAzimuthDir"
+#: Generation 14: the scene-sky parameters' prefix (aircraft_scene_sky.parameters).
+SCENE_PREFIX = "Glass"
 
 
 def load_bake(path=BAKE_JSON):
@@ -288,10 +290,14 @@ def micro_uv(local_pos_cm, normal, tile_cm,
     return local_pos_cm[i] / scale, local_pos_cm[j] / scale
 
 
-def reflect_emissive(lut_rgb, env_rgb, env_scale, gain, tint=(1.0, 1.0, 1.0)):
-    """Twin of glass_reflect.hlsl."""
+def reflect_emissive(lut_rgb, env_rgb, env_scale, gain, tint=(1.0, 1.0, 1.0), scene=(0.0, 0.0, 0.0, 0.0)):
+    """Twin of glass_reflect.hlsl (``scene``: generation 14's scene_sky_env
+    float4; the default a = 0 is the strip, generation 11-13)."""
+    import aircraft_scene_sky as scene_sky
     rs = lut_rgb[0] * lut_rgb[0]
-    return tuple(max(e * env_scale * rs * max(gain, 0.0) * max(t, 0.0), 0.0) for e, t in zip(env_rgb, tint))
+    strip = [max(e * env_scale * max(gain, 0.0) * max(t, 0.0), 0.0) for e, t in zip(env_rgb, tint)]
+    envs = scene_sky.mix(strip, (max(scene[0], 0.0), max(scene[1], 0.0), max(scene[2], 0.0), scene[3]))
+    return tuple(e * rs for e in envs)
 
 
 # -- the master-graph builders (only these touch unreal) ----------------------
@@ -408,9 +414,12 @@ def add_reflection(material, lib, tier, wet_layer):
     tex, sampler = textures["GlassEnv"]
     env = _texture_parameter(material, lib, "GlassEnv", tex, sampler,
                              lib._mask(material, uv, "ba", x + 1200, y + 100), x + 1350, y + 100)
+    # Generation 14: the scene's own sky and ground (aircraft_scene_sky.py).
+    import aircraft_scene_sky as scene_sky
+    scene = scene_sky.add_scene_sky(material, lib, SCENE_PREFIX, uv, sun, roughness, roughness_out, x, y)
     reflection = lib._custom(material, "glass_reflect", "CMOT_FLOAT3", {
         "Lut": (lut, ""), "Env": (env, ""), "EnvScale": (s["GlassEnvEncodeScale"], ""),
-        "Gain": (s[GAIN_PARAMETER], ""), "Tint": (tint, "")}, x + 1600, y)
+        "Gain": (s[GAIN_PARAMETER], ""), "Tint": (tint, ""), "Scene": (scene, "")}, x + 1600, y)
     emissive = lib._add(material, brk, reflection, x + 1800, y - 100, a_out="EmissiveColor")
     for name in PASS_THROUGH:
         lib._link(brk, name, make, wet_layer._pin(name))

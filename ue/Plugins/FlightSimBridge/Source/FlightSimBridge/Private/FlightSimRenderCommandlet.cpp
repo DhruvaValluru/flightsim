@@ -3268,6 +3268,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		AircraftFXOptions.Weather = Weather.IsBuilt() ? &Weather : nullptr;  // wet-airframe-canopy
 		AircraftFXOptions.CloudLayers = AircraftCloudLayers;
 		AircraftFXOptions.Sun = VisualScene.Sun;  // canopy reflection: the strip's azimuth and gain
+		// LOOK_GENERATION 14: the mirrors' ground (the sky light's lower hemisphere)
+		// and the air it is seen through (the scene's atmosphere); read, never set.
+		AircraftFXOptions.SkyLight = VisualScene.SkyLightComponent;
+		AircraftFXOptions.Atmosphere = VisualScene.Atmosphere;
 
 		// condensation-solver: the card's dew point makes atmosphere/RH the stated day's.
 		AircraftFXOptions.Humidity.bCardStated = Card.AtmosphereProperties.Contains(TEXT("atmosphere/dew-point-R"));
