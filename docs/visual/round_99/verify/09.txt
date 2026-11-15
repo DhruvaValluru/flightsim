@@ -1,0 +1,29 @@
+﻿python.exe : Traceback (most recent call last):
+At C:\Users\kanth\flightsim\runs\visual\queue.ps1:19 char:71
++ ... ]$s.number; & .venv\Scripts\python.exe -m flightsim.verify "runs\weba ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\kanth\flightsim\flightsim\verify.py", line 213, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\kanth\flightsim\flightsim\verify.py", line 197, in main
+    bind_verification(args.run_dir)
+  File "C:\Users\kanth\flightsim\core\dataset\export.py", line 358, in bind_verification
+    verification[MANIFEST_DIGEST_KEY] = manifest_digest(directory)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanth\flightsim\core\dataset\export.py", line 346, in manifest_digest
+    return hashlib.sha256((Path(directory) / "capture_manifest.json").read_bytes()).hexdigest()
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanth\AppData\Local\Programs\Python\Python312\Lib\pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanth\AppData\Local\Programs\Python\Python312\Lib\pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'runs\\webapp\\c09d24e03286\\capture_manifest.json'
+  [FAIL] manifest_present: runs\webapp\c09d24e03286\capture_manifest.json does not exist; nothing to verify
+verification FAILED (0 passed, 1 failed, 0 not run)
