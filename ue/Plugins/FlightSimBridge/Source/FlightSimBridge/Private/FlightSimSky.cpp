@@ -157,6 +157,19 @@ bool FFlightSimSkyPlan::Load(const FString& Path, FFlightSimSkyPlan& Out,
 	SunJson->TryGetBoolField(TEXT("per_pixel_transmittance"), Out.bSunPerPixelTransmittance);
 	StarsJson->TryGetBoolField(TEXT("drawn"), Out.bStarsDrawn);
 	CloudsJson->TryGetBoolField(TEXT("enabled"), Out.bClouds);
+	// Sky step 2: the beauty-only cloud fields (FlightSimSky.h), each optional and
+	// typed by TryGet* (a missing or mistyped field keeps the header's default; the
+	// record says which). Nothing below reaches Build: measure renders are byte-identical.
+	Out.bCloudPlanFields = CloudsJson->TryGetStringField(TEXT("cloud_type"), Out.CloudType);
+	Out.bCloudPlanFields = CloudsJson->TryGetNumberField(TEXT("coverage"), Out.CloudCoverage) || Out.bCloudPlanFields;
+	Out.bCloudPlanFields = CloudsJson->TryGetNumberField(TEXT("density"), Out.CloudDensity) || Out.bCloudPlanFields;
+	Out.bCloudPlanFields = CloudsJson->TryGetNumberField(TEXT("detail"), Out.CloudDetail) || Out.bCloudPlanFields;
+	Out.bCloudPlanFields = CloudsJson->TryGetNumberField(TEXT("cirrus_coverage"), Out.CloudCirrusCoverage) || Out.bCloudPlanFields;
+	Out.bCloudPlanFields = CloudsJson->TryGetStringField(TEXT("coverage_source"), Out.CloudCoverageSource) || Out.bCloudPlanFields;
+	double CloudSeedValue = 0.0;
+	Out.bCloudSeedStated = CloudsJson->TryGetNumberField(TEXT("seed"), CloudSeedValue);
+	Out.CloudSeed = Out.bCloudSeedStated ? static_cast<int64>(CloudSeedValue) : 0;
+	Out.bCloudPlanFields = Out.bCloudSeedStated || Out.bCloudPlanFields;
 	PostJson->TryGetStringField(TEXT("kind"), Out.PostKind);
 
 	const TArray<TSharedPtr<FJsonValue>>* Batches = nullptr;

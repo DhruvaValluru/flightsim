@@ -444,6 +444,42 @@ Commit: `Sky step 2: beauty host reads the plan's cloud fields; -cloud-type=; sh
   stack rule is read in source); that the host applies the plan's type. Windows:
   the step 8 rounds; read `look_applied.world_beauty.clouds.layers[0].cloud_type_source`.
 
+**Built (sky step 2, 2026-11-14): where the code proved this section wrong, or the
+step narrowed it.** Commit `Sky step 2: beauty host reads the plan's cloud fields; -cloud-type=; shadowed plan layer recorded`.
+- `bStatedLayer` stays `CardCover >= 0.0 || bFair`. The plan's bottom_km/thickness_km
+  are its placement law (>= 1 km above the flight), not weather heights; keying the
+  round-95 lowering on the plan's type would put a plan cumulus back at 11-14 km over
+  a cruise. The lowering and the thinning apply to a plan-typed layer as to the default
+  one; `lowered_below_cruise` records it. The sentence "becomes true for a plan-stated
+  cover or the switch" is withdrawn; the sentence after it stands.
+- The commandlet's `scene.sky` was NOT extended: it is written for every physical-sky
+  render, and VISUAL_FIDELITY_PLAN.md §8's "a measure render.json gains no field"
+  wins. Everything is under `look_applied.world_beauty.clouds.plan` (beauty only).
+- The rain and storm presets stand above the plan's type (`LayerSource`): a plan
+  `cumulus` never thins a rain world's deck to fair cumulus; the switch still can.
+  This section was silent.
+- `-cloud-type=` with a card layer keeps the card's cover under the switch's shape
+  (as written); with a plan coverage and no card the switch uses its row's default
+  cover (the switch overrides the plan whole: a clean A/B).
+- `ApplyClouds`'s signature is unchanged; it reads the plan through the member
+  `SkyPlanRef` that `Build` sets from its new `const FFlightSimSkyPlan* SkyPlan`
+  parameter (before `Error`). The LayerCoverAndShape pin (test_world_beauty.py 640)
+  stands; `LayerSource` runs right after it on the same cover and shape.
+- Altocumulus draws the stratocumulus row until step 5's row exists
+  (`CloudShapeForPlanType` case 3), recorded `cloud_type_applied: stratocumulus`.
+  `PlanCloudTypeName` already carries all seven words; step 5 changes case 3 only.
+- `cirrus_coverage` is parsed and recorded, not drawn (step 6).
+- test_world_beauty.py 170's generated main was not extended; the new laws are
+  compiled and compared in tests/test_cloud_type.py's own g++ test (same harness),
+  so this step's diff stays out of that test.
+- Verified in the 5.7 source, not witnessed (UNMEASURED): `SetVisibleInRealTimeSkyCaptures`
+  exists on UVolumetricCloudComponent (header line 205; `sky_check` added);
+  `SetVisibility(false)` hides a layer because `GetVisibleFlag()` gates the proxy in
+  `CreateRenderState_Concurrent`; FScene keeps the LAST pushed proxy (`AddVolumetricCloud`).
+- The switch is registered in core/config_surface.py's `render_switches` description
+  and the `world_beauty.clouds` catalogue hint names the seven words (one refusal key,
+  as for -look-cloud-tiers / -look-cloud-billow, which have no entries of their own).
+
 ## 5. Step 3: march and sky-LUT quality, tiered, recorded, restored
 
 Commit: `Sky step 3: tiered march and sky-LUT cvars, recorded and restored; -cloud-march=`.

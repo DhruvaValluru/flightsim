@@ -989,6 +989,116 @@ def layer_cover_and_shape(card_cover: Optional[float], thickness_m: float, prese
     return cover, select_cloud(cover, thickness_m, preset)
 
 
+# -- sky step 2 (the owner's X-Plane-12 brief, 2026-11-14): the plan's cloud fields ------
+# The sky plan (sky.json "clouds") gains cloud_type, coverage, density, detail,
+# cirrus_coverage, coverage_source and seed (step 5 writes them from ERA5 or as
+# recorded defaults). BEAUTY ONLY: FFlightSimWorldBeauty::ApplyClouds reads them
+# through FFlightSimSkyPlan (FlightSimSky.h / .cpp Load, TryGet*); the measure
+# host (FlightSimSky.cpp Build) reads bottom_km / thickness_km only, so a measure
+# render is byte-identical with or without them. Twins of the C++ pure block
+# (PlanCloudTypeName, CloudShapeForPlanType, LayerSource, PlanDensityScale,
+# PlanDetailErosion), pinned by tests/test_cloud_type.py. Every amount here is a
+# look value: UNCALIBRATED.
+
+#: The plan's type words, in the C++ PlanCloudTypeName order.
+PLAN_CLOUD_TYPES: Tuple[str, ...] = ("clear", "cumulus", "stratocumulus", "altocumulus", "cirrus",
+                                     "overcast", "nimbostratus")
+#: The volumetric shape each word draws (C++ CloudShapeForPlanType). None = no
+#: volumetric layer: clear draws nothing, cirrus is step 6's high sheet. Altocumulus
+#: draws the stratocumulus row until step 5 adds its own row (recorded as
+#: cloud_type_applied). UNCALIBRATED (which row a word draws is a look choice).
+PLAN_CLOUD_SHAPES: Dict[str, Optional[str]] = {
+    "clear": None, "cumulus": "cumulus", "stratocumulus": "stratocumulus",
+    "altocumulus": "stratocumulus", "cirrus": None, "overcast": "overcast",
+    "nimbostratus": "nimbostratus"}
+#: ``-cloud-type=<word>`` (FlightSimClouds.cpp Build): the owner's probe, above the
+#: card and the plan; another word refuses ``world_beauty.clouds: -cloud-type=...``.
+CLOUD_TYPE_SWITCH = "-cloud-type"
+#: What FFlightSimSkyPlan::Load leaves when a field is absent (FlightSimSky.h): a
+#: v1 plan loads unchanged and the record says these. ``coverage`` below 0 and an
+#: empty ``cloud_type`` mean "not stated"; density and detail 1 are the row itself.
+PLAN_CLOUD_DEFAULTS: Dict[str, Any] = {"cloud_type": "", "coverage": -1.0, "density": 1.0, "detail": 1.0,
+                                      "cirrus_coverage": 0.0, "coverage_source": "", "seed": 0}
+#: The plan's density is a multiplier of the row's extinction, clamped to this
+#: range (the design's D2: one source of truth per type, the CLOUDS row); its detail
+#: a multiplier of the row's erosion, the product saturated to 1. UNCALIBRATED.
+PLAN_DENSITY_MIN = 0.5
+PLAN_DENSITY_MAX = 1.5
+#: Where a layer's cover and shape came from (C++ LayerSourceName order).
+LAYER_SOURCES: Tuple[str, ...] = ("switch", "card", "plan", "shape default")
+
+
+def plan_cloud_fields(clouds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The cloud fields the host reads from a sky.json ``clouds`` block (FlightSimSky.cpp
+    Load): each key of PLAN_CLOUD_DEFAULTS, the default when absent or of another
+    type (TryGetStringField / TryGetNumberField), plus ``stated``: whether any was
+    present. The seed is an integer (the C++ int64 cast of the JSON number)."""
+    out: Dict[str, Any] = dict(PLAN_CLOUD_DEFAULTS)
+    block = clouds if isinstance(clouds, dict) else {}
+    stated = False
+    for key, default in PLAN_CLOUD_DEFAULTS.items():
+        value = block.get(key)
+        if isinstance(default, str):
+            if isinstance(value, str):
+                out[key] = value
+                stated = True
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[key] = int(value) if key == "seed" else float(value)
+            stated = True
+    out["stated"] = stated
+    return out
+
+
+def cloud_shape_for_plan_type(word: str) -> Optional[str]:
+    """C++ CloudShapeForPlanType: the shape a plan type word draws, None for no
+    volumetric layer. An unknown word raises (the C++ returns PlanCloudUnknown and
+    the host draws it as "not stated", recording the word)."""
+    if word not in PLAN_CLOUD_SHAPES:
+        raise ValueError(f"unknown plan cloud type {word!r}; one of {PLAN_CLOUD_TYPES}")
+    return PLAN_CLOUD_SHAPES[word]
+
+
+def plan_density_scale(density: float) -> float:
+    """C++ PlanDensityScale: the plan's density clamped to PLAN_DENSITY_MIN..MAX."""
+    return min(max(float(density), PLAN_DENSITY_MIN), PLAN_DENSITY_MAX)
+
+
+def plan_detail_erosion(row_erosion: float, detail: float) -> float:
+    """C++ PlanDetailErosion: the row's erosion x the plan's detail (floored at 0),
+    saturated to 1."""
+    return min(float(row_erosion) * max(float(detail), 0.0), 1.0)
+
+
+def layer_source(switch_word: Optional[str], card_cover: Optional[float], fair: bool,
+                 plan_type: Optional[str], plan_cover: Optional[float], preset: str,
+                 thickness_m: float) -> Tuple[float, Optional[str], str]:
+    """C++ LayerSource: ``(cover, shape or None, source)`` for a redrawn layer, by
+    precedence: the ``-cloud-type=`` switch (the owner's probe) > the card's
+    look.clouds[0] or the stated fair layer (dataset truth, never overridden by
+    data) > the sky plan's clouds block (ERA5 or a recorded default) > the shape's
+    default (layer_cover_and_shape). Under the rain and storm presets the deck
+    stands: the plan's type never thins a rain world to fair cumulus (the switch
+    still can). A None shape is a hidden layer (cover 0). A plan type this
+    version does not know, or an unstated one, falls through to the default."""
+    cover, shape = layer_cover_and_shape(card_cover, thickness_m, preset, fair)
+    card_stated = bool(fair) or (card_cover is not None and card_cover >= 0.0)
+    if switch_word:
+        chosen = cloud_shape_for_plan_type(switch_word)
+        if chosen is None:
+            return 0.0, None, "switch"
+        return (cover if card_stated else CLOUDS[chosen]["default_cover"]), chosen, "switch"
+    if card_stated:
+        return cover, shape, "card"
+    if plan_type in PLAN_CLOUD_SHAPES and preset not in ("rain", "storm"):
+        chosen = PLAN_CLOUD_SHAPES[plan_type]
+        if chosen is None:
+            return 0.0, None, "plan"
+        if plan_cover is not None and plan_cover >= 0.0:
+            return min(float(plan_cover), 1.0), chosen, "plan"
+        return CLOUDS[chosen]["default_cover"], chosen, "plan"
+    return cover, shape, "shape default"
+
+
 # -- the drawn coverage (cloud_layers.hlsl) ---------------------------------------------
 
 #: Round 2 (clouds-sky, 2026-11-09): the shape noise is a Perlin-Worley field

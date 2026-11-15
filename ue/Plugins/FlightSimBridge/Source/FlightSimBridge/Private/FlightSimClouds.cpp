@@ -190,6 +190,129 @@ namespace FlightSimWorldPure
 	{
 		return bCumulus && !bStated && BaseM > CumulusMaxBaseM;
 	}
+	// Sky step 2 (the owner's X-Plane-12 brief, 2026-11-14): the sky plan's cloud
+	// fields (sky.json "clouds": cloud_type, coverage, density, detail, seed; step 5
+	// writes them, FFlightSimSkyPlan::Load reads them) reach the BEAUTY host only.
+	// The plan's type words (world_beauty.PLAN_CLOUD_TYPES, same order) and the
+	// volumetric shape each draws (world_beauty.PLAN_CLOUD_SHAPES): clear and cirrus
+	// draw NO volumetric layer (the layer is hidden; step 6 draws cirrus as a high
+	// sheet); altocumulus draws the stratocumulus row until step 5 adds its own
+	// (recorded as cloud_type_applied). UNCALIBRATED: which row a word draws is a
+	// look choice.
+	constexpr int PlanCloudTypeCount = 7;
+	constexpr int PlanCloudNoLayer = -1;
+	constexpr int PlanCloudUnknown = -2;
+	inline const char* PlanCloudTypeName(int Type)
+	{
+		static const char* const Names[PlanCloudTypeCount] = {
+			"clear", "cumulus", "stratocumulus", "altocumulus", "cirrus", "overcast", "nimbostratus"};
+		return Type >= 0 && Type < PlanCloudTypeCount ? Names[Type] : "";
+	}
+	// The index of a plan type word; PlanCloudUnknown for anything else (an
+	// empty or unknown word is drawn as "not stated" and recorded).
+	inline int PlanCloudTypeIndex(const char* Word)
+	{
+		for (int I = 0; Word != nullptr && I < PlanCloudTypeCount; ++I)
+		{
+			if (std::strcmp(Word, PlanCloudTypeName(I)) == 0)
+			{
+				return I;
+			}
+		}
+		return PlanCloudUnknown;
+	}
+	inline int CloudShapeForPlanType(int Type)
+	{
+		switch (Type)
+		{
+		case 0: return PlanCloudNoLayer;        // clear: nothing
+		case 1: return CloudCumulus;
+		case 2: return CloudStratocumulus;
+		case 3: return CloudStratocumulus;      // altocumulus: its own row arrives in step 5
+		case 4: return PlanCloudNoLayer;        // cirrus: step 6's sheet, no volumetric layer
+		case 5: return CloudOvercast;
+		case 6: return CloudNimbostratus;
+		default: return PlanCloudUnknown;
+		}
+	}
+	// Where a layer's cover and shape came from, by precedence (world_beauty.layer_source):
+	// the -cloud-type= switch (the owner's probe) > the card's look.clouds[0] or the
+	// stated fair layer (dataset truth, never overridden by data) > the sky plan's
+	// clouds block (ERA5 or a recorded default) > the shape's default. Under the rain
+	// and storm presets the deck stands (SelectCloud's nimbostratus): the plan's type
+	// never thins a rain world to fair cumulus; the switch still can.
+	enum : int
+	{
+		LayerSourceSwitch = 0, LayerSourceCard = 1, LayerSourcePlan = 2, LayerSourceDefault = 3,
+		LayerSourceCount = 4
+	};
+	inline const char* LayerSourceName(int Source)
+	{
+		static const char* const Names[LayerSourceCount] = {"switch", "card", "plan", "shape default"};
+		return Source >= 0 && Source < LayerSourceCount ? Names[Source] : "shape default";
+	}
+	// SwitchShape / PlanShape: CloudShapeForPlanType of the switch word / the plan's
+	// type, PlanCloudUnknown when not given. Cover and Shape hold LayerCoverAndShape's
+	// result on entry and are replaced where the switch or the plan decides; a
+	// PlanCloudNoLayer shape is a hidden layer (Cover 0).
+	inline int LayerSource(int SwitchShape, double CardCover, bool bFair, int PlanShape, double PlanCover,
+	                       int Preset, const double* CloudTable, double* Cover, int* Shape)
+	{
+		const bool bCardStated = CardCover >= 0.0 || bFair;
+		if (SwitchShape != PlanCloudUnknown)
+		{
+			*Shape = SwitchShape;
+			if (SwitchShape == PlanCloudNoLayer)
+			{
+				*Cover = 0.0;
+			}
+			else if (!bCardStated)
+			{
+				*Cover = CloudTable != nullptr ? CloudTable[SwitchShape * CloudFieldCount + CldDefaultCover]
+				                               : CloudDefault(SwitchShape, CldDefaultCover);
+			}
+			return LayerSourceSwitch;
+		}
+		if (bCardStated)
+		{
+			return LayerSourceCard;
+		}
+		if (PlanShape != PlanCloudUnknown && Preset != PresetRain && Preset != PresetStorm)
+		{
+			*Shape = PlanShape;
+			if (PlanShape == PlanCloudNoLayer)
+			{
+				*Cover = 0.0;
+			}
+			else if (PlanCover >= 0.0)
+			{
+				*Cover = PlanCover > 1.0 ? 1.0 : PlanCover;
+			}
+			else
+			{
+				*Cover = CloudTable != nullptr ? CloudTable[PlanShape * CloudFieldCount + CldDefaultCover]
+				                               : CloudDefault(PlanShape, CldDefaultCover);
+			}
+			return LayerSourcePlan;
+		}
+		return LayerSourceDefault;
+	}
+	// The plan's density and detail are multipliers of the row (1 = the row; one
+	// source of truth per type, the CLOUDS row): density clamped to
+	// PlanDensityMin..Max on the row's extinction, detail on the row's erosion with
+	// the product saturated (world_beauty.plan_density_scale / plan_detail_erosion).
+	// UNCALIBRATED.
+	constexpr double PlanDensityMin = 0.5;
+	constexpr double PlanDensityMax = 1.5;
+	inline double PlanDensityScale(double Density)
+	{
+		return Density < PlanDensityMin ? PlanDensityMin : (Density > PlanDensityMax ? PlanDensityMax : Density);
+	}
+	inline double PlanDetailErosion(double RowErosion, double Detail)
+	{
+		const double Scaled = RowErosion * (Detail < 0.0 ? 0.0 : Detail);
+		return Scaled > 1.0 ? 1.0 : Scaled;
+	}
 	// Round 3: a rain world's layer when the card states no cover (broken, not
 	// nimbostratus's 0.98 sheet: round 1's #06 showed no ground).
 	constexpr double RainDefaultCover = 0.72;
@@ -1087,7 +1210,7 @@ bool FFlightSimWorldBeauty::StormNeutralAlbedo() const
 bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSharedPtr<FJsonObject>& Card,
                                   AActor* Aircraft, AGeoReferencingSystem* GeoReferencing,
                                   FFlightSimVisualScene& Scene, FFlightSimWeather& Weather,
-                                  FFlightSimGoogleTiles& Tiles, FString& Error)
+                                  FFlightSimGoogleTiles& Tiles, const FFlightSimSkyPlan* SkyPlan, FString& Error)
 {
 	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
 	using namespace FlightSimWorldPure;
@@ -1134,6 +1257,12 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// off is round 81's clouds exactly. Another word refuses by name.
 		CloudBillowSwitch = TEXT("on");
 		FParse::Value(*Switches, TEXT("look-cloud-billow="), CloudBillowSwitch);
+		// Sky step 2: -cloud-type=<word> (empty = not given): the owner's probe over
+		// the plan's and the card's type (FlightSimWorldPure::LayerSource; the
+		// existing -cloud-cover= probe builds a CARD layer, the wrong component for
+		// this). Another word refuses by name.
+		CloudTypeSwitch.Reset();
+		FParse::Value(*Switches, TEXT("cloud-type="), CloudTypeSwitch);
 	}
 	if (CloudTiersSwitch != TEXT("on") && CloudTiersSwitch != TEXT("off"))
 	{
@@ -1147,6 +1276,14 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		                        *CloudBillowSwitch);
 		return false;
 	}
+	if (!CloudTypeSwitch.IsEmpty() && PlanCloudTypeIndex(TCHAR_TO_ANSI(*CloudTypeSwitch)) == PlanCloudUnknown)
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-type=%s is not one of clear, cumulus, stratocumulus, "
+		                             "altocumulus, cirrus, overcast, nimbostratus"), *CloudTypeSwitch);
+		return false;
+	}
+	// Sky step 2: the -sky= plan's cloud fields, read in ApplyClouds (nullptr without a plan).
+	SkyPlanRef = SkyPlan;
 
 	// The tables in force: the pure block's defaults, then any overrides.
 	AtmosphereValues.SetNumZeroed(PresetCount * AtmosphereFieldCount);
@@ -2063,6 +2200,83 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			FogAll != nullptr ? FogAll->GetString() : FString(TEXT("absent")));
 		Out->SetObjectField(TEXT("march"), MarchOut);
 	}
+	// Sky step 2 (the owner's X-Plane-12 brief): the sky plan's cloud fields
+	// (FFlightSimSkyPlan, read by FlightSimSky.cpp Load with the header's defaults)
+	// and the -cloud-type= switch. LayerSource decides per layer (switch > card >
+	// plan > the shape's default); the plan's density and detail scale the row
+	// (PlanDensityScale, PlanDetailErosion). The exposure never sees any of this:
+	// plan.py's ev100 is computed before its clouds block and never reads it.
+	const bool bPlanFields = SkyPlanRef != nullptr && SkyPlanRef->bCloudPlanFields;
+	const int32 PlanType = bPlanFields && !SkyPlanRef->CloudType.IsEmpty()
+		? PlanCloudTypeIndex(TCHAR_TO_ANSI(*SkyPlanRef->CloudType)) : PlanCloudUnknown;
+	const int32 PlanShape = PlanType == PlanCloudUnknown ? PlanCloudUnknown : CloudShapeForPlanType(PlanType);
+	const double PlanCover = bPlanFields ? SkyPlanRef->CloudCoverage : -1.0;
+	const double PlanDensity = bPlanFields ? SkyPlanRef->CloudDensity : 1.0;
+	const double PlanDetail = bPlanFields ? SkyPlanRef->CloudDetail : 1.0;
+	const int32 SwitchType = CloudTypeSwitch.IsEmpty()
+		? PlanCloudUnknown : PlanCloudTypeIndex(TCHAR_TO_ANSI(*CloudTypeSwitch));
+	const int32 SwitchShape = SwitchType == PlanCloudUnknown ? PlanCloudUnknown : CloudShapeForPlanType(SwitchType);
+	{
+		TSharedPtr<FJsonObject> PlanOut = MakeShared<FJsonObject>();
+		PlanOut->SetStringField(TEXT("fields_source"), SkyPlanRef == nullptr
+			? TEXT("none: no -sky= plan (the defaults below)")
+			: (bPlanFields
+				? TEXT("sky.json clouds (cloud_type, coverage, density, detail, cirrus_coverage, coverage_source, seed; step 5 writes them)")
+				: TEXT("none: a v1 plan without the cloud fields (the defaults below, FlightSimSky.h)")));
+		PlanOut->SetStringField(TEXT("cloud_type"), SkyPlanRef != nullptr ? SkyPlanRef->CloudType : FString());
+		PlanOut->SetBoolField(TEXT("cloud_type_known"), PlanType != PlanCloudUnknown);
+		PlanOut->SetNumberField(TEXT("coverage"), PlanCover);
+		PlanOut->SetNumberField(TEXT("density"), PlanDensity);
+		PlanOut->SetNumberField(TEXT("detail"), PlanDetail);
+		PlanOut->SetNumberField(TEXT("cirrus_coverage"), SkyPlanRef != nullptr ? SkyPlanRef->CloudCirrusCoverage : 0.0);
+		PlanOut->SetStringField(TEXT("coverage_source"),
+		                        SkyPlanRef != nullptr ? SkyPlanRef->CloudCoverageSource : FString());
+		PlanOut->SetNumberField(TEXT("seed"), SkyPlanRef != nullptr ? static_cast<double>(SkyPlanRef->CloudSeed) : 0.0);
+		PlanOut->SetBoolField(TEXT("seed_stated"), SkyPlanRef != nullptr && SkyPlanRef->bCloudSeedStated);
+		PlanOut->SetNumberField(TEXT("card_seed"), Seed);
+		PlanOut->SetBoolField(TEXT("seed_matches_card"), SkyPlanRef != nullptr && SkyPlanRef->bCloudSeedStated
+		                      && SkyPlanRef->CloudSeed == static_cast<int64>(Seed));
+		PlanOut->SetStringField(TEXT("cloud_type_switch"), CloudTypeSwitch);
+		PlanOut->SetStringField(TEXT("precedence"),
+			TEXT("-cloud-type= > card look.clouds[0] / the fair layer > sky.json clouds (not under rain or storm: "
+			     "the deck stands) > the shape's default (FlightSimWorldPure::LayerSource; per layer cloud_type_source)"));
+		PlanOut->SetStringField(TEXT("owner_parameters"),
+			TEXT("Coverage -> Coverage; Density -> ExtinctionPerM x plan density (0.5..1.5); DetailStrength -> "
+			     "DetailErosion x plan detail (saturated); NoiseScale -> ShapeScaleKm (the row's); Wind -> "
+			     "WindOffsetM (Advance, the card's drift)"));
+		PlanOut->SetBoolField(TEXT("exposure_sees_plan_clouds"), false);
+		PlanOut->SetStringField(TEXT("measure_path"),
+			TEXT("FlightSimSky.cpp Build reads bottom_km/thickness_km only: byte-identical with or without these fields"));
+		PlanOut->SetStringField(TEXT("calibration"),
+			TEXT("UNCALIBRATED: which row a type word draws and the density/detail clamps are look values; "
+			     "UNMEASURED until a Windows render"));
+		Out->SetObjectField(TEXT("plan"), PlanOut);
+	}
+	// Sky step 2 (design §0.14 / D16): under a plan WITH a card layer two components
+	// exist: FFlightSimSky::Build's AVolumetricCloud (registered first) and
+	// BuildClouds' "VolumetricCloud" on a plain actor (registered later). FScene keeps
+	// the LAST registered proxy (UE 5.7 VolumetricCloudRendering.cpp AddVolumetricCloud),
+	// so the plan's draws nothing: it is re-materialled all the same (a wrong reading
+	// would still show the beauty material), left out of the sky capture and of the
+	// layer bookkeeping (the occlusion rows, the clearance and the distant sheet read
+	// only the drawn slab) and recorded engine_stack_shadowed. UNMEASURED: the stack
+	// rule is read in source, not witnessed.
+	auto ComponentSource = [](const UVolumetricCloudComponent* Cloud) -> const TCHAR*
+	{
+		if (Cloud->GetOwner() != nullptr && Cloud->GetOwner()->IsA<AVolumetricCloud>())
+		{
+			return TEXT("sky plan");
+		}
+		return Cloud->GetName() == TEXT("FairCumulus") ? TEXT("fair") : TEXT("card look.clouds");
+	};
+	bool bPlanComponent = false, bCardComponent = false;
+	for (const UVolumetricCloudComponent* Cloud : Components)
+	{
+		const FString Src = ComponentSource(Cloud);
+		bPlanComponent = bPlanComponent || Src == TEXT("sky plan");
+		bCardComponent = bCardComponent || Src == TEXT("card look.clouds");
+	}
+	TArray<TSharedPtr<FJsonValue>> HiddenLayers;
 	TArray<TSharedPtr<FJsonValue>> Layers;
 	for (UVolumetricCloudComponent* Cloud : Components)
 	{
@@ -2072,6 +2286,30 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		State.TopM = (Cloud->LayerBottomAltitude + Cloud->LayerHeight) * 1000.0;
 		State.Shape = LayerCoverAndShape(CardCover, State.TopM - State.BaseM, Preset, bFair, CloudValues.GetData(),
 		                                 &State.Cover);
+		// Sky step 2: the -cloud-type= switch and the plan's type and cover, by
+		// LayerSource's precedence (the card's layer stands above the plan).
+		const int32 Source = LayerSource(SwitchShape, CardCover, bFair, PlanShape, PlanCover, Preset,
+		                                 CloudValues.GetData(), &State.Cover, &State.Shape);
+		const FString ComponentSrc = ComponentSource(Cloud);
+		const bool bShadowed = bPlanComponent && bCardComponent && ComponentSrc == TEXT("sky plan");
+		if (State.Shape == PlanCloudNoLayer)
+		{
+			// clear / cirrus: no volumetric layer. Hidden (the visible flag gates the
+			// cloud proxy at render-state creation, VolumetricCloudComponent.cpp), not
+			// destroyed; beauty only: the measure path never reaches ApplyClouds. Step 6
+			// draws the cirrus sheet.
+			Cloud->SetVisibility(false);
+			TSharedPtr<FJsonObject> Hidden = MakeShared<FJsonObject>();
+			Hidden->SetStringField(TEXT("component"), Cloud->GetName());
+			Hidden->SetStringField(TEXT("component_source"), ComponentSrc);
+			Hidden->SetStringField(TEXT("cloud_type_source"), ANSI_TO_TCHAR(LayerSourceName(Source)));
+			Hidden->SetStringField(TEXT("reason"), FString::Printf(
+				TEXT("%s cloud_type %s: no volumetric layer (beauty only; SetVisibility(false))"),
+				ANSI_TO_TCHAR(LayerSourceName(Source)),
+				Source == LayerSourceSwitch ? *CloudTypeSwitch : *SkyPlanRef->CloudType));
+			HiddenLayers.Add(MakeShared<FJsonValueObject>(Hidden));
+			continue;
+		}
 		// clouds-sky round 2: the default layer (no card layer, not the stated
 		// fair one) thinned to the shape's depth; the occlusion row reads the
 		// thinned slab, the one drawn.
@@ -2099,13 +2337,20 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		double BillowRow[CloudFieldCount];
 		CloudBillowRow(&CloudValues[State.Shape * CloudFieldCount], bBillow, BillowRow);
 		const double* CloudRow = BillowRow;
+		// Sky step 2: the plan's density and detail scale the row (1 = the row); the
+		// owner's Density and DetailStrength land here, Coverage above, NoiseScale is
+		// the row's ShapeScaleKm and Wind is WindOffsetM (Advance).
+		const double DensityScale = PlanDensityScale(PlanDensity);
+		const double DetailErosion = PlanDetailErosion(CloudRow[CldDetailErosion], PlanDetail);
+		State.DensityScale = DensityScale;
 		State.Material = UMaterialInstanceDynamic::Create(Base, Cloud);
 		State.Material->SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(State.Cover));
-		State.Material->SetScalarParameterValue(TEXT("ExtinctionPerM"), static_cast<float>(CloudRow[CldExtinctionPerM]));
+		State.Material->SetScalarParameterValue(TEXT("ExtinctionPerM"),
+		                                        static_cast<float>(CloudRow[CldExtinctionPerM] * DensityScale));
 		State.Material->SetScalarParameterValue(TEXT("ExtinctionScale"), static_cast<float>(CloudExtinctionScale));
 		State.Material->SetScalarParameterValue(TEXT("ShapeScaleKm"), static_cast<float>(CloudRow[CldShapeScaleKm]));
 		State.Material->SetScalarParameterValue(TEXT("DetailScaleKm"), static_cast<float>(CloudRow[CldDetailScaleKm]));
-		State.Material->SetScalarParameterValue(TEXT("DetailErosion"), static_cast<float>(CloudRow[CldDetailErosion]));
+		State.Material->SetScalarParameterValue(TEXT("DetailErosion"), static_cast<float>(DetailErosion));
 		State.Material->SetScalarParameterValue(TEXT("BottomSoftness"), static_cast<float>(CloudRow[CldBottomSoftness]));
 		State.Material->SetScalarParameterValue(TEXT("TopRounding"), static_cast<float>(CloudRow[CldTopRounding]));
 		State.Material->SetScalarParameterValue(TEXT("CoverageContrast"),
@@ -2139,16 +2384,45 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Cloud->SetTracingMaxDistance(TracingMaxKm);
 		Cloud->SetStopTracingTransmittanceThreshold(WorldCloudStopTransmittance);
 		Cloud->SetGroundAlbedo(WorldAlbedo(Surface, GroundWetness, StormNeutralAlbedo()));
-		CloudLayers.Add(State);
+		if (bShadowed)
+		{
+			// Sky step 2: the plan's component under a card layer draws nothing
+			// (engine stack); keep it out of the sky light's capture and the bookkeeping.
+			Cloud->SetVisibleInRealTimeSkyCaptures(false);
+		}
+		else
+		{
+			CloudLayers.Add(State);
+		}
 
 		TSharedPtr<FJsonObject> Layer = MakeShared<FJsonObject>();
 		Layer->SetStringField(TEXT("component"), Cloud->GetName());
 		Layer->SetStringField(TEXT("shape"), ANSI_TO_TCHAR(CloudName(State.Shape)));
 		Layer->SetNumberField(TEXT("cover"), State.Cover);
-		Layer->SetStringField(TEXT("cover_basis"), bFair ? TEXT("the fair-weather layer (stated)")
+		Layer->SetStringField(TEXT("cover_basis"), Source == LayerSourceSwitch
+			? (CardCover >= 0.0 || bFair
+				? TEXT("-cloud-type=: the switch's shape with the card's (or the fair layer's) cover")
+				: TEXT("-cloud-type=: the switch's shape with its row's default cover (the card states none)"))
+			: Source == LayerSourcePlan
+			? (PlanCover >= 0.0
+				? TEXT("the sky plan's clouds.coverage (clouds.plan.coverage_source says where it came from)")
+				: TEXT("the sky plan's cloud_type with the shape's default cover (the plan states no coverage)"))
+			: bFair ? TEXT("the fair-weather layer (stated)")
 			: (CardCover >= 0.0 ? TEXT("the card's look.clouds[0].cover")
 			   : (Preset == PresetRain ? TEXT("RainDefaultCover: a rain world, the card states none (broken, round 3)")
 			                           : TEXT("the shape's default (the card states none)"))));
+		// Sky step 2: where the type came from, what it drew, and the plan's scales.
+		Layer->SetStringField(TEXT("component_source"), ComponentSrc);
+		Layer->SetBoolField(TEXT("engine_stack_shadowed"), bShadowed);
+		Layer->SetStringField(TEXT("cloud_type_source"), ANSI_TO_TCHAR(LayerSourceName(Source)));
+		Layer->SetStringField(TEXT("cloud_type_applied"), ANSI_TO_TCHAR(CloudName(State.Shape)));
+		Layer->SetStringField(TEXT("cloud_type_requested"), Source == LayerSourceSwitch ? CloudTypeSwitch
+			: (Source == LayerSourcePlan ? SkyPlanRef->CloudType : FString()));
+		Layer->SetNumberField(TEXT("plan_density"), PlanDensity);
+		Layer->SetNumberField(TEXT("plan_density_scale"), DensityScale);
+		Layer->SetNumberField(TEXT("plan_detail"), PlanDetail);
+		Layer->SetNumberField(TEXT("extinction_per_m_applied"), CloudRow[CldExtinctionPerM] * DensityScale);
+		Layer->SetNumberField(TEXT("detail_erosion_applied"), DetailErosion);
 		Layer->SetNumberField(TEXT("base_m"), State.BaseM);
 		Layer->SetNumberField(TEXT("top_m"), State.TopM);
 		Layer->SetNumberField(TEXT("built_top_m"), BuiltTopM);
@@ -2176,6 +2450,14 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Layers.Add(MakeShared<FJsonValueObject>(Layer));
 	}
 	Out->SetArrayField(TEXT("layers"), Layers);
+	// Sky step 2: the layers a clear/cirrus type hid, and the engine-stack note.
+	Out->SetArrayField(TEXT("hidden_layers"), HiddenLayers);
+	Out->SetBoolField(TEXT("plan_component_shadowed_by_card"), bPlanComponent && bCardComponent);
+	Out->SetStringField(TEXT("engine_stack_basis"),
+		TEXT("FScene keeps the LAST registered volumetric cloud proxy (UE 5.7 VolumetricCloudRendering.cpp "
+		     "AddVolumetricCloud); the card's component (FlightSimVisualScene.cpp BuildClouds) registers after the "
+		     "plan's (FFlightSimSky::Build), so with both the plan's draws nothing: re-materialled all the same, out "
+		     "of the sky capture and the layer bookkeeping. UNMEASURED: read in source, not witnessed"));
 	// Visual round 6: the deck SHADOWS the beam. Round 4's #10 drew the Flint
 	// Hills red: the storm look's 10 deg sun, reddened by the per-pixel
 	// transmittance, lit the prairie at grazing incidence under a nimbostratus
@@ -2932,7 +3214,8 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 	{
 		const FOcclusion Occ = Occlusion(CameraCm.Z / WorldCmPerMetre, AircraftCm.Z / WorldCmPerMetre, LengthM,
 		                                 Layer.BaseM, Layer.TopM, Layer.Cover,
-		                                 CloudValues[Layer.Shape * CloudFieldCount + CldExtinctionPerM],
+		                                 // Sky step 2: the extinction drawn (the plan's density scale, 1 = the row)
+		                                 CloudValues[Layer.Shape * CloudFieldCount + CldExtinctionPerM] * Layer.DensityScale,
 		                                 CloudExtinctionScale, OcclusionFlagTransmittance);
 		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 		Row->SetNumberField(TEXT("path_m"), Occ.PathM);

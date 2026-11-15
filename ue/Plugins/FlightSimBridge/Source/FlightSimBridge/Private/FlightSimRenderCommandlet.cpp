@@ -3134,8 +3134,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		// World lane hook (visual overhaul): atmosphere depth, clouds, tiles look, rain, scatter.
 		// -quality=measure never reaches it (Gate 6's renders stay byte-identical).
+		// Sky step 2: the beauty host reads the -sky= plan's cloud fields (nullptr without a plan).
 		if (bBeauty && !WorldBeauty.Build(World, *Params, WorldCardRoot, Scenario.Aircraft, Scenario.GeoReferencing,
-		                                  VisualScene, Weather, GoogleTiles, Error)) { return Fail(Error); }
+		                                  VisualScene, Weather, GoogleTiles, bPhysicalSky ? &SkyPlan : nullptr,
+		                                  Error)) { return Fail(Error); }
 	}
 	else
 	{

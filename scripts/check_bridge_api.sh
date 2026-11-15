@@ -458,6 +458,11 @@ sky_check "world: LightComponentBase Intensity" "Classes/Components/LightCompone
 sky_check "world: SkyLight SetIntensity" "Classes/Components/SkyLightComponent.h" "void SetIntensity(float NewIntensity)"
 sky_check "world: VolumetricCloud Material soft pointer" "$VC" "TSoftObjectPtr<UMaterialInterface> Material;"
 sky_check "world: VolumetricCloud LayerBottomAltitude" "$VC" "float LayerBottomAltitude;"
+# sky step 2 (2026-11-14): the plan's shadowed cloud component leaves the sky capture;
+# a clear/cirrus plan hides the volumetric layer (SceneComponent visibility gates the
+# cloud proxy at render-state creation, VolumetricCloudComponent.cpp CreateRenderState_Concurrent).
+sky_check "world: VolumetricCloud SetVisibleInRealTimeSkyCaptures" "$VC" "void SetVisibleInRealTimeSkyCaptures(bool bValue)"
+sky_check "world: SceneComponent SetVisibility" "Classes/Components/SceneComponent.h" "void SetVisibility(bool bNewVisibility, bool bPropagateToChildren=false)"
 sky_check "world: VolumetricCloud per-sample transmittance" "$VC" "void SetbUsePerSampleAtmosphericLightTransmittance(bool NewValue)"
 sky_check "world: VolumetricCloud SetSkyLightCloudBottomOcclusion" "$VC" "void SetSkyLightCloudBottomOcclusion(float NewValue)"
 sky_check "world: VolumetricCloud SetViewSampleCountScale" "$VC" "void SetViewSampleCountScale(float NewValue)"

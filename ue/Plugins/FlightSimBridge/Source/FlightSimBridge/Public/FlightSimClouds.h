@@ -82,6 +82,7 @@ class AGeoReferencingSystem;
 class FFlightSimGoogleTiles;
 class FFlightSimVisualScene;
 class FFlightSimWeather;
+struct FFlightSimSkyPlan;
 class UMaterialInstanceDynamic;
 class UMaterialParameterCollection;
 class UProceduralMeshComponent;
@@ -97,10 +98,13 @@ public:
 	// for explicitly and cannot be honoured (an unreadable overrides file or
 	// scatter sidecar, an unknown -beauty-clouds word); a missing material is
 	// recorded, never refused: the look is visual only.
+	// Sky step 2: SkyPlan is the -sky= plan the commandlet loaded (nullptr without
+	// one); ApplyClouds reads its beauty-only cloud fields. The measure path never
+	// calls this.
 	bool Build(UWorld* World, const TCHAR* Params, const TSharedPtr<FJsonObject>& Card,
 	           AActor* Aircraft, AGeoReferencingSystem* GeoReferencing,
 	           FFlightSimVisualScene& Scene, FFlightSimWeather& Weather,
-	           FFlightSimGoogleTiles& Tiles, FString& Error);
+	           FFlightSimGoogleTiles& Tiles, const FFlightSimSkyPlan* SkyPlan, FString& Error);
 
 	// Per captured frame, after the weather's Advance and before the captures:
 	// the clouds' drift, the lightning's sky pulse, the scatter's re-snap near
@@ -147,6 +151,9 @@ private:
 		double TopM = 0.0;
 		double Cover = 0.0;
 		int32 Shape = 0;
+		// Sky step 2: the plan's density multiplier on the row's extinction (1 = the
+		// row); the occlusion row reads the extinction drawn.
+		double DensityScale = 1.0;
 	};
 
 	bool LoadOverrides(const FString& Path, FString& Error);
@@ -194,6 +201,14 @@ private:
 	// Round 82: -look-cloud-billow=on|off (Build reads it; ApplyClouds applies it to
 	// cumulus layers: FlightSimWorldPure::CloudBillowRow).
 	FString CloudBillowSwitch = TEXT("on");
+	// Sky step 2: -cloud-type=clear|cumulus|stratocumulus|altocumulus|cirrus|overcast|
+	// nimbostratus (Build reads it; empty = not given). The owner's probe: it
+	// overrides the plan's cloud_type and the card's shape (FlightSimWorldPure::
+	// LayerSource); another word refuses by name.
+	FString CloudTypeSwitch;
+	// Sky step 2: the -sky= plan Build was given (nullptr without one); ApplyClouds
+	// reads its cloud fields (FFlightSimSkyPlan::CloudType and the rest).
+	const FFlightSimSkyPlan* SkyPlanRef = nullptr;
 	bool StormNeutralAlbedo() const;
 	// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default; off
 	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)

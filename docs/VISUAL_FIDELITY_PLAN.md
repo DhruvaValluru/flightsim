@@ -718,3 +718,82 @@ frames with the base commit's Gate 6 frames.
 
 **Next step on the render machine:** follow
 `docs/visual/RENDER_RUNBOOK.md` in order.
+
+### Sky step 2 (2026-11-14): the beauty host reads the sky plan's cloud fields
+
+The owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md, design
+docs/visual/XPLANE_SKY_DESIGN.md §4). Nothing here was rendered.
+
+**What it draws.** Nothing new by itself. Under `-quality=beauty`,
+`FFlightSimWorldBeauty::ApplyClouds` (FlightSimClouds.cpp) now receives the `-sky=`
+plan (`FFlightSimSkyPlan`, passed by the commandlet at the one beauty `Build` site,
+nullptr without a plan) and reads the `clouds` block's new, optional fields
+`cloud_type`, `coverage`, `density`, `detail`, `cirrus_coverage`, `coverage_source`,
+`seed` (FlightSimSky.cpp `Load`, `TryGet*` after the mandatory reads; a v1 plan
+without them loads and the header's defaults are recorded: type "" and coverage -1
+= not stated, density 1 and detail 1 = the row; `SKY_VERSION` stays 1). Step 5
+writes them; today's `plan.py` writes none, so every current render records
+`clouds.plan.fields_source: none ...` and draws round 95 exactly. Per layer one law,
+`FlightSimWorldPure::LayerSource` (Python `world_beauty.layer_source`), picks the
+cover and the shape: `-cloud-type=` (the owner's probe) > the card's `look.clouds[0]`
+or the stated fair layer (dataset truth) > the plan (not under the rain and storm
+presets: the deck stands) > the shape's default. The owner's parameter names land
+on M_FlightSimCloudLayers as: Coverage -> `Coverage` (the cover decided); Density ->
+`ExtinctionPerM` x the plan's density (clamped 0.5..1.5); DetailStrength ->
+`DetailErosion` x the plan's detail (saturated); NoiseScale -> the row's
+`ShapeScaleKm`; Wind -> `WindOffsetM` (Advance, unchanged). `clear` and `cirrus`
+hide the volumetric layer (`SetVisibility(false)`; step 6 draws the cirrus sheet);
+altocumulus draws the stratocumulus row until step 5 adds its own. With a plan AND a
+card layer, two components exist and FScene draws the last registered (the card's):
+the plan's is recorded `engine_stack_shadowed`, left out of the sky capture
+(`SetVisibleInRealTimeSkyCaptures(false)`) and the layer bookkeeping, and
+re-materialled all the same. The occlusion row reads the extinction drawn.
+
+**The switch.** `-cloud-type=clear|cumulus|stratocumulus|altocumulus|cirrus|overcast|nimbostratus`
+(empty = not given); another word refuses `world_beauty.clouds: -cloud-type=...`.
+The existing `-cloud-cover=` probe builds a CARD layer, the wrong component for this.
+
+**Record** (`look_applied.world_beauty.clouds`): `plan` {fields_source, cloud_type,
+cloud_type_known, coverage, density, detail, cirrus_coverage, coverage_source, seed,
+seed_stated, card_seed, seed_matches_card, cloud_type_switch, precedence,
+owner_parameters, exposure_sees_plan_clouds: false, measure_path, calibration}; per
+layer `cloud_type_source` (switch | card | plan | shape default), `cloud_type_applied`,
+`cloud_type_requested`, `component_source` (sky plan | card look.clouds | fair),
+`engine_stack_shadowed`, `plan_density`, `plan_density_scale`, `plan_detail`,
+`extinction_per_m_applied`, `detail_erosion_applied`, the extended `cover_basis`;
+`hidden_layers[]` {component, component_source, cloud_type_source, reason};
+`plan_component_shadowed_by_card`, `engine_stack_basis`. A measure render.json
+gains no field: the commandlet's `scene.sky` was NOT extended (the design's §4 said
+to; this section's "a measure render.json gains no field" wins).
+
+**Unchanged.** FlightSimSky.cpp `Build` (the measure host: the stock
+`m_SimpleVolumetricCloud_Inst`, its missing-material note) byte for byte, pinned;
+`FFlightSimWeather::VerifyCloudMaterials` (no material changed in this step: Volume
+domain and the usage flag stand); labels (volumetric clouds write no depth or
+stencil; no new actor); exposure (`plan.py` untouched, the fields are never read into
+`ev100`); flight dynamics; the round-95 lowering, which keys on stated HEIGHTS (card
+or fair layer), not on the plan's type: a plan cumulus over a 10 km cruise is still
+drawn as the 1.5-2.7 km fair slab (c641a8c4), the camera stays clear.
+
+**UNCALIBRATED.** Which row a type word draws (`world_beauty.PLAN_CLOUD_SHAPES`), the
+density clamp 0.5..1.5, the detail saturation: look values, never from a frame.
+
+**UNMEASURED.** Everything above: that a Windows build compiles it, that the host
+applies the switch's and the plan's type, that the card's component and not the
+plan's is the one drawn (read in UE 5.7 VolumetricCloudRendering.cpp
+`AddVolumetricCloud`, not witnessed), that `SetVisibility(false)` empties the sky
+(read in VolumetricCloudComponent.cpp `CreateRenderState_Concurrent`). The exact
+Windows measurement, after `scripts/ue_create_materials.py` has rebuilt the materials
+and with `FLIGHTSIM_SKY=physical` set in the shell:
+
+    .\scripts\visual_fix_round.ps1 -Round 98 -Scenes 3 -Switches "-cloud-type=stratocumulus" -CompareWith 95
+    .\scripts\visual_fix_round.ps1 -Round 99 -Scenes 3 -Switches "-cloud-type=clear" -CompareWith 98
+
+Read `look_applied.world_beauty.clouds.layers[0].cloud_type_source` (expect
+`switch`), `cloud_type_applied`, `cover_basis` and `plan.fields_source` in round 98's
+render.json; round 99 must record `hidden_layers[0]` and draw no cloud. A plan-fed
+render (`cloud_type_source: plan`) needs step 5; until then `plan.fields_source` says
+none. Tests: `tests/test_cloud_type.py` (the C++ laws compiled and compared with the
+Python, the header defaults, the parser, the precedence table, the record keys, the
+untouched measure `Build`, the single beauty call site). API: `scripts/check_bridge_api.sh`
+gains `SetVisibleInRealTimeSkyCaptures` and `SceneComponent::SetVisibility`.
