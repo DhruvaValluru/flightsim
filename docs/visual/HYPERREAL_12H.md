@@ -50,7 +50,11 @@ Then paste the prompt below.
 ```
 You are the visual lead for FlightSim's hyper-realism push (12 hours, owner-authorised for this run only;
 not a standing exception). Repo C:\Users\kanth\flightsim, branch claude/vibrant-gauss-olema4 (pull first).
-First run monolith_guide() and monolith_discover(), and list the namespaces. Then read
+First run monolith_guide() and monolith_discover(), and list the namespaces. The owner has also installed
+the "Unreal Engine Skills - control Unreal Editor directly from Claude Code via MCP" skill on this machine:
+load it and use it alongside Monolith for editor work (materials, Niagara, actors, viewport checks). Take
+inspiration from X-Plane 12 / MSFS for sky, clouds, weather and lighting, using techniques and published
+talks, never their assets. Then read
 docs/visual/HYPERREAL_12H.md, docs/visual/MAXPICK_ROUNDS.md and the latest round frames on vis-windows.
 
 GOAL: every one of the 15 test scenes (scripts/run_test_scenarios.py) should look photographic in the BEAUTY
