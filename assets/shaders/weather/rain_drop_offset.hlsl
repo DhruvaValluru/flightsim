@@ -31,6 +31,21 @@
 //   MaxStreak float  the beauty streak's longest angular length, rad (0: no cap)
 //   Soft     float   lane D: the beauty streak drawn (1 + Soft) x wider (0: the hard quad)
 //   Vary     float   lane D: the beauty per-drop length spread, 0.45..1.55 at 1 (0: none)
+//   Aperture float   hyperreal rain: the beauty's defocus smear of a drop, cm (0: a pinhole)
+//
+// Hyperreal rain (2026-11-14, M_RainDrops 8; weather_look.beauty_rain_defocus_cm): a drop a
+// few metres from a lens focused on the scene is OUT OF FOCUS; its image is the pupil's
+// disc (f / N: 9 mm on the 35 mm f/4 beauty lens, 62 mm on a 250 mm one) convolved with
+// the streak, so a near drop is a wide soft smear and a far one a thin line -- the depth
+// layering a photograph of rain shows. Aperture is the smear the beauty draws (the pupil
+// x BEAUTY_RAIN_DEFOCUS_SHARE: the standard lens draws the scene with no depth of field,
+// so a full-pupil disc would make the rain the one defocused thing in a sharp frame),
+// held to RainDefocusMaxPx pixels at the drop's range (a long lens's 6 cm pupil would
+// otherwise smear a near drop over 60 px into nothing). The quad grows by it ALONG the
+// streak; ACROSS, the blur is the greater of the soft profile's width and the sharp width
+// plus the smear, not their sum (the soft widening is the same blur drawn once). The
+// opacity (its twin) spreads the same light over it. Aperture 0: unchanged. Calibrated
+// numerically against generation 6 by core/scene/rain_drop_twin.py (tests/test_hyperreal_rain.py).
 //
 // Lane D (2026-11-11, weather_look.BEAUTY_RAIN_SOFTNESS / _VARIATION): the opacity
 // (rain_drop_opacity.hlsl) carries the matching profile and the same hash, so the
@@ -80,10 +95,20 @@ if (MaxStreak > 0.0)
 }
 float3 side = cross(along, rel / dist);
 side = dot(side, side) > 1.0e-8 ? normalize(side) : normalize(cross(along, float3(1.0, 0.0, 0.0)));
-float width = max(Extra.x * 0.1, dist * PixelAngle);
+float sharp = max(Extra.x * 0.1, dist * PixelAngle);
+float width = sharp;
 if (Soft > 0.0)
 {
 	width *= 1.0 + Soft;   // a soft streak is wider; its profile (opacity) keeps its light
+}
+if (Aperture > 0.0)
+{
+	// Defocus: the smear at the drop (the scene behind is in focus, the drop is not), at
+	// most RainDefocusMaxPx pixels (weather_look.BEAUTY_RAIN_DEFOCUS_MAX_PX) at its range.
+	const float RainDefocusMaxPx = 2.0;
+	float blur = min(Aperture, RainDefocusMaxPx * dist * PixelAngle);
+	streak += blur;
+	width = max(width, sharp + blur);
 }
 float3 corner = along * (Corner.y - 0.5) * streak + side * (Corner.x - 0.5) * width;
 return rel + corner - P0;

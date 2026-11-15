@@ -501,11 +501,16 @@ WEATHER_SHADER_DIR = "assets/shaders/weather"
 DROPS_PARAMETERS = ("Shift", "FallTime", "BoxHalf", "WindVel", "CamVel", "Shutter",
                         "PixelAngle", "Active", "Weight", "GroundRelZ", "SkyRadianceScale",
                         "FlashLux", "Density", "NearThin", "MaxStreak", "MaxCoverage",
-                        "DepthFade", "Soft", "Vary")
+                        "DepthFade", "Soft", "Vary",
+                        # Hyperreal rain (2026-11-14): the defocus smear (the lens's pupil x
+                        # the beauty's share) and the scene-lit share (drop_scene_tone.hlsl);
+                        # both 0 = generation 6.
+                        "Aperture", "SceneLit")
 #: round-2b weather-fx: the beauty rain shape's parameters (beauty_rain_shape in
 #: core/scene/weather_look.py) and the defaults that are the measure path's shader.
 DROPS_BEAUTY_DEFAULTS = {"Density": 1.0, "NearThin": 0.0, "MaxStreak": 0.0,
-                         "MaxCoverage": 1.0, "DepthFade": 0.0, "Soft": 0.0, "Vary": 0.0}
+                         "MaxCoverage": 1.0, "DepthFade": 0.0, "Soft": 0.0, "Vary": 0.0,
+                         "Aperture": 0.0, "SceneLit": 0.0}
 SPLASH_PARAMETERS = ("Time", "Splash", "GroundShift", "GroundRelZ", "DropMm", "Active",
                      "Weight", "SkyRadianceScale", "FlashLux")
 LIGHTNING_PARAMETERS = ("PixelAngle", "RadiusCm", "Power")
@@ -614,7 +619,15 @@ STORM_SCATTERING_PROPERTIES = {
 #: lane D 2026-11-11, round 4's #09 ring and cylinder; default 0 = generation 5).
 #: M_RainDrops 6: the beauty streak's softness and per-drop variation (Soft, Vary;
 #: lane D 2026-11-11, round 4's "scratches on the lens"; default 0 = generation 5).
-STORM_GENERATIONS = {"M_RainDrops": "6", "M_RainSplash": "3", "M_LightningChannel": "2",
+#: M_RainDrops 7: hyperreal rain (2026-11-14; the still-"fake" rain of #06, #07, #09):
+#: the lens's defocus of near drops (Aperture, rain_drop_offset/opacity.hlsl), the
+#: coverage cap moved under the soft profile (rain_drop_opacity.hlsl), and the drop's
+#: radiance taken from the scene behind it (SceneLit, drop_scene_tone.hlsl: one SceneColor
+#: tap at offset 0, as M_RainCurtain 5). Defaults (0, 1, 0) = generation 6.
+#: M_RainDrops 8: the defocus calibrated (the smear at most RainDefocusMaxPx pixels, the
+#: across blur the greater of the soft width and the sharp width plus the smear, not their
+#: sum: core/scene/rain_drop_twin.py against generation 6). Defaults unchanged.
+STORM_GENERATIONS = {"M_RainDrops": "8", "M_RainSplash": "3", "M_LightningChannel": "2",
                      "M_StormCell": "6", "M_WindshieldRain": "3", "M_RainCurtain": "6",
                      "M_ScudCard": "3",
                      # maxpick/rain (2026-11-13): the baked rain layers and windscreen (tier 0).
@@ -1934,7 +1947,7 @@ def relative_position(material, lib, x, y, exclude_offsets, minus):
 DROP_ALBEDO = 0.9
 
 
-def drop_lit(material, lib, x, y):
+def drop_lit(material, lib, x, y, scene_lit=False):
     """A drop's radiance as the engine lights it (Garg & Nayar: the mean of
     its surroundings): the material is a lit translucent surface, base
     colour DROP_ALBEDO x "SkyRadianceScale", lit per vertex from the
@@ -1944,7 +1957,15 @@ def drop_lit(material, lib, x, y):
     version, its emissive a sample of the sky light's environment map,
     drew every streak BLACK -- that node reads nothing from a real-time-
     captured sky light -- so the rain darkened the sky instead of catching
-    its light."""
+    its light.
+
+    ``scene_lit`` (hyperreal rain, 2026-11-14; M_RainDrops only): a "SceneLit"
+    scalar (default 0) moves that share of the drop's radiance from the lit
+    white surface to the luminance of the scene behind the pixel (one
+    SceneColor tap at offset 0, drop_scene_tone.hlsl, as M_RainCurtain's
+    veil_tone): under a storm deck the lighting volume still carries the
+    unshadowed sun, so a fully lit drop is a white line over a dark scene.
+    At 0 the graph's output is generation 6's, value for value."""
     material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
     lighting = getattr(unreal.TranslucencyLightingMode, "TLM_VOLUMETRIC_PER_VERTEX_NON_DIRECTIONAL",
                        None)
@@ -1953,12 +1974,28 @@ def drop_lit(material, lib, x, y):
     scale = scalar(material, lib, "SkyRadianceScale", 1.0, x, y + 150)
     base = binary(material, lib, unreal.MaterialExpressionMultiply,
                   constant(material, lib, DROP_ALBEDO, x, y), scale, x + 200, y)
-    lib.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    lib.connect_material_property(constant(material, lib, 1.0, x, y + 80), "",
-                                  unreal.MaterialProperty.MP_ROUGHNESS)
     flash = scalar(material, lib, "FlashLux", 0.0, x, y + 250)
     glow = binary(material, lib, unreal.MaterialExpressionMultiply, flash,
                   constant(material, lib, 1.0 / 3.14159265, x, y + 350), x + 200, y + 250)
+    if scene_lit:
+        lit_share = scalar(material, lib, "SceneLit", 0.0, x, y + 450)
+        # The lit surface keeps 1 - SceneLit of the albedo.
+        base = binary(material, lib, unreal.MaterialExpressionMultiply, base,
+                      unary(material, lib, unreal.MaterialExpressionOneMinus, lit_share, x + 200, y + 450),
+                      x + 400, y)
+        tap = lib.create_material_expression(material, unreal.MaterialExpressionSceneColor, x, y + 550)
+        mode = getattr(unreal, "MaterialSceneAttributeInputMode", None)
+        if mode is not None and hasattr(mode, "OFFSET_FRACTION"):
+            tap.set_editor_property("input_mode", mode.OFFSET_FRACTION)
+        tap.set_editor_property("const_input", unreal.Vector2D(0.0, 0.0))
+        # Literal node coordinates: tests/test_ue_weather_source.py scans every custom() call.
+        tone = custom(material, lib, "drop_scene_tone", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
+            "A": (mask(material, lib, tap, "rgb", x + 200, y + 550), ""),
+            "SceneLit": (lit_share, "")}, -500, 1350)
+        glow = binary(material, lib, unreal.MaterialExpressionAdd, glow, tone, x + 600, y + 250)
+    lib.connect_material_property(base, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(constant(material, lib, 1.0, x, y + 80), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
     lib.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
@@ -1988,7 +2025,7 @@ def create_rain_drops():
                                       default=DROPS_BEAUTY_DEFAULTS.get(
                                           name, 1.0 if name in ("Weight", "SkyRadianceScale") else 0.0))
               for i, name in enumerate(DROPS_PARAMETERS) if name not in ("SkyRadianceScale",
-                                                                             "FlashLux")}
+                                                                             "FlashLux", "SceneLit")}
     p0 = relative_position(material, lib, -1800, 900, True, "object")
     offset = custom(material, lib, "rain_drop_offset", unreal.CustomMaterialOutputType.CMOT_FLOAT3, {
         "P0": p0, "Corner": uv_channel(material, lib, 0, "rg", -1800, 1100),
@@ -1999,7 +2036,8 @@ def create_rain_drops():
         "WindVel": params["WindVel"], "CamVel": params["CamVel"], "Shutter": params["Shutter"],
         "PixelAngle": params["PixelAngle"], "Active": params["Active"],
         "Density": params["Density"], "NearThin": params["NearThin"],
-        "MaxStreak": params["MaxStreak"], "Soft": params["Soft"], "Vary": params["Vary"]}, -900, 0)
+        "MaxStreak": params["MaxStreak"], "Soft": params["Soft"], "Vary": params["Vary"],
+        "Aperture": params["Aperture"]}, -900, 0)
     lib.connect_material_property(offset, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
     rel = relative_position(material, lib, -1800, 1700, False, "object")
     opacity = custom(material, lib, "rain_drop_opacity", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
@@ -2011,9 +2049,10 @@ def create_rain_drops():
         "BoxHalf": params["BoxHalf"], "GroundRelZ": params["GroundRelZ"],
         "MaxStreak": params["MaxStreak"], "MaxCoverage": params["MaxCoverage"],
         "DepthFade": params["DepthFade"], "Corner": uv_channel(material, lib, 0, "rg", -1500, 1100),
-        "Soft": params["Soft"], "Vary": params["Vary"]}, -900, 400)
+        "Soft": params["Soft"], "Vary": params["Vary"], "Aperture": params["Aperture"]}, -900, 400)
     lib.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
-    drop_lit(material, lib, -900, 800)
+    # Hyperreal rain (generation 7): the scene-lit share (SceneLit, default 0: generation 6).
+    drop_lit(material, lib, -900, 800, scene_lit=True)
     finish_storm(material, "M_RainDrops")
 
 

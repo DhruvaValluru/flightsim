@@ -113,7 +113,9 @@ def test_the_shape_is_set_on_the_beauty_path_only_and_recorded():
 def test_the_material_defaults_are_the_measure_paths_shader():
     defaults = _assigned("DROPS_BEAUTY_DEFAULTS")
     assert defaults == {"Density": 1.0, "NearThin": 0.0, "MaxStreak": 0.0, "MaxCoverage": 1.0,
-                        "DepthFade": 0.0, "Soft": 0.0, "Vary": 0.0}
+                        "DepthFade": 0.0, "Soft": 0.0, "Vary": 0.0,
+                        # Hyperreal rain (2026-11-14): the lens's pupil and the scene-lit share.
+                        "Aperture": 0.0, "SceneLit": 0.0}
     assert set(defaults) <= set(_assigned("DROPS_PARAMETERS"))
     assert _assigned("STORM_GENERATIONS")["M_RainDrops"] >= "5"   # the shader body changed
     offset = (SHADERS / "rain_drop_offset.hlsl").read_text(encoding="utf-8")
@@ -158,7 +160,7 @@ def test_lane_d_the_beauty_streaks_are_soft_varied_and_background_lit():
     ts = [i / 2000.0 for i in range(2001)]
     assert abs(sum(math.sqrt(math.sin(math.pi * t)) for t in ts) / len(ts) - 0.763) < 0.003
     assert "exp(-4.0 * x * x) / 0.441" in opacity and "/ 0.763" in opacity
-    assert _assigned("STORM_GENERATIONS")["M_RainDrops"] == "6"
+    assert _assigned("STORM_GENERATIONS")["M_RainDrops"] >= "6"   # 7: hyperreal rain (tests/test_hyperreal_rain.py)
     creator = SCRIPT[SCRIPT.index("def create_rain_drops"):SCRIPT.index("def create_rain_splash")]
     before, after = creator.split("lib, \"rain_drop_opacity\"")
     for name in ("Soft", "Vary"):
