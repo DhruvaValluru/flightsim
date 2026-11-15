@@ -89,6 +89,7 @@ namespace
 		FVector CameraLocation = FVector::ZeroVector;
 		FRotator CameraRotation = FRotator::ZeroRotator;
 		double FovDeg = 54.43;
+		double LastMeterStops = 0.0;
 	};
 
 	FLookDevState& State()
@@ -710,6 +711,55 @@ namespace
 			Capture->CaptureScene();
 			FlushRenderingCommands();
 		}
+		// The beauty exposure meter (FlightSimRenderCommandlet.cpp, "BeautyMeter"):
+		// open or close AutoExposureBias until the 90th-percentile luma meets
+		// the look's target, or close a blown frame toward 0.80.
+		double MeterTarget = 0.0;
+		FString MeterTrigger;
+		const bool bMeter = !S.Weather->DrawsCell() && FFlightSimBeautyLook::ExposureMeter(MeterTarget, MeterTrigger);
+		if (bMeter || S.Weather->DrawsCell())
+		{
+			double MeterP90 = bMeter ? FMath::Clamp(MeterTarget, 0.05, 0.8) : 0.40;
+			FParse::Value(*S.Params, TEXT("storm-meter-target="), MeterP90);
+			FPostProcessSettings& Settings = Capture->PostProcessSettings;
+			Settings.bOverride_AutoExposureBias = true;
+			const double BiasBefore = Settings.AutoExposureBias;
+			double Opened = 0.0;
+			for (int32 Round = 0; Round < 5; ++Round)
+			{
+				TArray<FColor> MeterPixels;
+				FTextureRenderTargetResource* MeterResource = Capture->TextureTarget->GameThread_GetRenderTargetResource();
+				if (MeterResource == nullptr || !MeterResource->ReadPixels(MeterPixels) || MeterPixels.Num() == 0) { break; }
+				uint32 Histogram[256] = {};
+				for (const FColor& Pixel : MeterPixels)
+				{
+					const double Luma = 0.2126 * Pixel.R + 0.7152 * Pixel.G + 0.0722 * Pixel.B;
+					++Histogram[FMath::Clamp(static_cast<int32>(Luma + 0.5), 0, 255)];
+				}
+				const uint32 Wanted = static_cast<uint32>(0.90 * MeterPixels.Num());
+				uint32 Seen = 0;
+				int32 Bin = 0;
+				for (; Bin < 255 && Seen + Histogram[Bin] < Wanted; ++Bin) { Seen += Histogram[Bin]; }
+				const double Bright = Bin / 255.0;
+				const bool bBlown = Bright > 0.92;
+				if ((!bBlown && FMath::Abs(Bright - MeterP90) <= 0.05) || Round == 4) { break; }
+				const double Want = bBlown ? 0.80 : MeterP90;
+				double Step = 2.2 * 0.8 * FMath::Log2(Want / FMath::Max(Bright, 1.0 / 255.0));
+				if (bBlown && Bright >= 254.0 / 255.0) { Step = FMath::Min(Step, -2.0); }
+				const double Lowest = bBlown ? -6.0 : FMath::Min(0.0, Opened);
+				const double Next = FMath::Clamp(Opened + Step, Lowest, 8.0);
+				if (FMath::IsNearlyEqual(Next, Opened, 0.01)) { break; }
+				Opened = Next;
+				Settings.AutoExposureBias = static_cast<float>(BiasBefore + Opened);
+				for (int32 Settle = 0; Settle < 4; ++Settle)
+				{
+					S.World->SendAllEndOfFrameUpdates();
+					Capture->CaptureScene();
+					FlushRenderingCommands();
+				}
+			}
+			S.LastMeterStops = Opened;
+		}
 		TArray<FColor> Pixels;
 		FTextureRenderTargetResource* Resource = Target->GameThread_GetRenderTargetResource();
 		const bool bRead = Resource != nullptr && Resource->ReadPixels(Pixels) && Pixels.Num() == Width * Height;
@@ -783,6 +833,7 @@ namespace
 				Extra->SetNumberField(TEXT("tiles_load_progress"), Progress);
 				Extra->SetNumberField(TEXT("seconds"), Now - Start);
 				Extra->SetBoolField(TEXT("tiles_settled"), bSettled);
+				Extra->SetNumberField(TEXT("meter_stops"), State().LastMeterStops);
 				WriteStatus(PngPath, bOk, CaptureError, Extra);
 				return false;
 			}), 0.25f);
