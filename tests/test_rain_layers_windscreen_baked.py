@@ -279,8 +279,9 @@ def test_the_windscreen_constants_are_the_bakes():
 
 
 def test_the_host_wet_port_matches_the_lanes_law():
-    """FlightSimWeatherBaked.cpp ApplyWindscreenBaked is make_windscreen_water.host_wet on the
-    card's numbers: replay it in Python, line for line, against the lane's two worked examples."""
+    """FlightSimWeatherBaked.cpp ApplyWindscreenBaked is make_windscreen_water.host_wet(layers=2) on
+    the card's numbers (generation 3's two taps; layers=1, the card's worked examples, is the lane's
+    single-tap law): replay both in Python, line for line, and pin the host's lines."""
     make = _load("make_windscreen_water")
     table = GLASS_PLAN["drops"]["density_to_cover"]
     area = GLASS_PLAN["drops"]["mean_cap_area_m2"]
@@ -299,6 +300,12 @@ def test_the_host_wet_port_matches_the_lanes_law():
         riv = 0.75 * (1.0 - hold) * min(1.0, wetted / 0.3)
         ref = make.host_wet(v, imp, 5.0, area, table)
         assert round(dens, 4) == ref["drop_density"] and round(riv, 4) == ref["rivulet_density"], key
+        # The host (generation 3) splits the cover over two taps: replay that split too.
+        layer = 1.0 - math.sqrt(max(0.0, 1.0 - cover))
+        dens2 = float(np.interp(layer, [c for _, c in table], [d for d, _ in table]))
+        host = make.host_wet(v, imp, 5.0, area, table, layers=2)
+        assert round(dens2, 4) == host["drop_density"], key
+        assert host["drop_density"] < ref["drop_density"], key   # each tap is sparser than one
     code = _function(BAKED_CPP, "bool FFlightSimWeather::ApplyWindscreenBaked(")
     for line in ("const double Hold = V <= WeatherBakedVShedMps ? 1.0 : WeatherBakedVShedMps / V;",
                  "const double Wetted = 1.0 - FMath::Exp(-WindshieldImpinge * WeatherBakedMeanCapAreaM2 * "
@@ -306,7 +313,9 @@ def test_the_host_wet_port_matches_the_lanes_law():
                  "const double Cover = FMath::Min(WeatherBakedMaxCover, Wetted) * Hold;",
                  "const double TrackDensity = WeatherBakedASpan * (1.0 - Hold) * FMath::Min(1.0, Wetted / "
                  "WeatherBakedMaxCover);",
-                 "const double HeadRate = WindshieldRunoffMps / WeatherBakedTileM;"):
+                 "const double HeadRate = WindshieldRunoffMps / WeatherBakedTileM;",
+                 "const double LayerCover = 1.0 - FMath::Sqrt(FMath::Max(0.0, 1.0 - Cover));",
+                 "const double DropDensity = WeatherBakedDensityForCover(LayerCover);"):
         assert line in code, line
 
 

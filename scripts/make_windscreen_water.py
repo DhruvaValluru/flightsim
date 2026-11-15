@@ -281,7 +281,7 @@ def shade_texels(drop, riv, riv_v, time_s, wet, lens, aspect, drop2=None):
 
 
 def host_wet(airspeed_mps: float, impinge_per_m2_s: float, lifetime_s: float,
-             mean_cap_area_m2: float, drop_table, shutter_s: float = 1.0e-3):
+             mean_cap_area_m2: float, drop_table, shutter_s: float = 1.0e-3, layers: int = 1):
     """What the host puts in ``Wet`` (visual-only mapping onto the project's
     stated run-off law). Standing drops: a Poisson cover 1 - exp(-n A tau),
     capped, thinned above the shedding speed as V_SHED / V; the share shed feeds
@@ -290,7 +290,11 @@ def host_wet(airspeed_mps: float, impinge_per_m2_s: float, lifetime_s: float,
     hold = 1.0 if v <= V_SHED_MPS else V_SHED_MPS / v
     cover = min(MAX_DROP_COVER, 1.0 - math.exp(-impinge_per_m2_s * mean_cap_area_m2 * lifetime_s))
     cover *= hold
-    dens = float(np.interp(cover, [c for _, c in drop_table], [d for d, _ in drop_table]))
+    # layers=2: M_WindshieldRainBaked generation 3 (r87, 2026-11-14) draws two independent
+    # taps, each at the cover c' whose union is the card's: 1 - (1 - c')^2 = cover. The
+    # card's worked examples (layers=1) stay the lane's single-tap law.
+    layer = cover if layers == 1 else 1.0 - math.sqrt(max(0.0, 1.0 - cover))
+    dens = float(np.interp(layer, [c for _, c in drop_table], [d for d, _ in drop_table]))
     wetted = 1.0 - math.exp(-impinge_per_m2_s * mean_cap_area_m2 * lifetime_s)
     riv = A_SPAN * (1.0 - hold) * min(1.0, wetted / MAX_DROP_COVER)
     runoff = RUNOFF_GAIN * (v - V_SHED_MPS) if v > V_SHED_MPS else 0.0
