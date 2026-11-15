@@ -146,6 +146,9 @@ private:
 		double BaseM = 0.0;
 		double TopM = 0.0;
 		double Cover = 0.0;
+		// The cover the distant sheet continues: unscaled by -cloud-volumetric-scale
+		// (FlightSimWorldPure::CloudDistantCover), so the horizon stays under impostors.
+		double DistantCover = 0.0;
 		int32 Shape = 0;
 	};
 

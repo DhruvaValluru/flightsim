@@ -663,7 +663,9 @@ A beauty-only render switch for judging p3-mac's impostor cloud cards (`0deddc6d
 clouds. `-cloud-volumetric-scale=<0..1>` (1 by default; read from the command line
 and `FLIGHTSIM_RENDER_SWITCHES` like `-look-cloud-billow=`) multiplies every
 volumetric layer's drawn cover (the material's `Coverage`, so also the deck
-shadow, the occlusion rows and the distant sheet's continuation). At 0 the
+shadow and the occlusion rows). The distant sheet ignores the scale: it continues
+the layer's unscaled cover (`distant_sheet_cover`), so the horizon stays under an
+impostor-only frame. At 0 the
 layer's component is hidden (`SetVisibility(false)`), not left at `Coverage 0`: an
 invisible cloud component has no render state, so the frame has no per-pixel
 cloud march, no cloud shadow map and no cloud-on-fog pass, the cheapest form for
