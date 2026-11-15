@@ -101,6 +101,33 @@ def test_the_python_twin_scales_and_refuses():
         wb.cloud_volumetric_coverage(1.2, 0.5)
 
 
+def test_the_distant_sheet_reads_the_unscaled_cover():
+    cpp = _read(CPP)
+    header = _read(HEADER)
+    assert "double DistantCover = 0.0;" in header
+    assert "State.DistantCover = CloudDistantCover(CoverBeforeScale, CloudVolumetricScale);" in cpp
+    # The pure helper hands the cover back untouched.
+    helper = cpp.index("inline double CloudDistantCover(double Cover, double Scale)")
+    assert "return Cover;" in cpp[helper:helper + 120]
+    # ApplyDistantClouds continues the UNSCALED cover, never Layer.Cover.
+    assert "Cover = Layer.DistantCover;" in cpp
+    assert "Cover = Layer.Cover;" not in cpp
+    assert "the sheet ignores -cloud-volumetric-scale (the unscaled cover, distant_sheet_cover)" in cpp
+    # The material's Coverage, the deck shadow and the occlusion rows keep the scaled one.
+    assert 'SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(State.Cover));' in cpp
+    assert "TopCover = FMath::Max(TopCover, State.Cover);" in cpp
+    assert "Layer.BaseM, Layer.TopM, Layer.Cover," in cpp
+    # The record.
+    assert 'SetNumberField(TEXT("distant_sheet_cover"), State.DistantCover);' in cpp
+    assert 'TEXT("distant_sheet_cover_basis")' in cpp
+    assert "the layer's unscaled cover: the distant sheet ignores -cloud-volumetric-scale" in cpp
+    # The Python twin: unchanged cover, the scale validated and ignored.
+    for scale in (0.0, 0.5, 1.0):
+        assert wb.cloud_distant_cover(0.6, scale) == 0.6
+    with pytest.raises(ValueError, match=re.escape(SWITCH)):
+        wb.cloud_distant_cover(0.6, 1.5)
+
+
 def test_only_zero_hides():
     assert wb.cloud_volumetric_hidden(0.0)
     for scale in (0.01, 0.5, 1.0):

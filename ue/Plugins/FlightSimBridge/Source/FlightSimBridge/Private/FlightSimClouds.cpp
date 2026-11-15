@@ -361,6 +361,14 @@ namespace FlightSimWorldPure
 	{
 		return Scale < CloudVolumetricScaleDefault;
 	}
+	// The cover the distant sheet continues: the layer's UNSCALED cover, whatever
+	// the volumetric scale, so an impostor-only frame keeps its horizon
+	// (world_beauty.cloud_distant_cover is the twin).
+	inline double CloudDistantCover(double Cover, double Scale)
+	{
+		(void)Scale;
+		return Cover;
+	}
 	// The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 	// stated layer) is thinned to the shape's depth: fair cumulus and a stratus
 	// deck are 1-2 km deep; 0 keeps the layer as built.
@@ -2109,10 +2117,13 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		State.Shape = LayerCoverAndShape(CardCover, State.TopM - State.BaseM, Preset, bFair, CloudValues.GetData(),
 		                                 &State.Cover);
 		// Impostor A/B: the drawn cover under -cloud-volumetric-scale (1 leaves it;
-		// State.Cover is the value every later row reads: the material's Coverage,
-		// the deck shadow, the occlusion rows, the distant sheet's continuation).
+		// State.Cover is the value the material's Coverage, the deck shadow and the
+		// occlusion rows read; the distant sheet reads DistantCover below).
 		const double CoverBeforeScale = State.Cover;
 		State.Cover = CloudVolumetricCoverage(CoverBeforeScale, CloudVolumetricScale);
+		// The distant sheet ignores the scale (ApplyDistantClouds reads DistantCover):
+		// the horizon stays under an impostor-only frame.
+		State.DistantCover = CloudDistantCover(CoverBeforeScale, CloudVolumetricScale);
 		const bool bVolumetricHidden = CloudVolumetricHidden(CloudVolumetricScale);
 		// clouds-sky round 2: the default layer (no card layer, not the stated
 		// fair one) thinned to the shape's depth; the occlusion row reads the
@@ -2219,6 +2230,9 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Layer->SetBoolField(TEXT("volumetric_scale_applied"), CloudVolumetricScaleApplied(CloudVolumetricScale));
 		Layer->SetNumberField(TEXT("cover_before_volumetric_scale"), CoverBeforeScale);
 		Layer->SetBoolField(TEXT("volumetric_hidden"), bVolumetricHidden);
+		Layer->SetNumberField(TEXT("distant_sheet_cover"), State.DistantCover);
+		Layer->SetStringField(TEXT("distant_sheet_cover_basis"),
+			TEXT("the layer's unscaled cover: the distant sheet ignores -cloud-volumetric-scale"));
 		Layer->SetNumberField(TEXT("height_density"), HeightDensity);
 		Layer->SetNumberField(TEXT("sky_light_cloud_bottom_occlusion"), BottomOcclusion);
 		for (int32 F = 0; F < CloudFieldCount; ++F)
@@ -2433,9 +2447,10 @@ void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualSc
 		const FCloudLayerState& Layer = CloudLayers[0];
 		BaseM = Layer.BaseM;
 		TopM = Layer.TopM;
-		Cover = Layer.Cover;
+		Cover = Layer.DistantCover;
 		Shape = Layer.Shape;
-		CoverBasis = TEXT("the first redrawn layer (its slab after the aircraft clearance, its cover and shape row)");
+		CoverBasis = TEXT("the first redrawn layer (its slab after the aircraft clearance, its cover and shape row); "
+		                  "the sheet ignores -cloud-volumetric-scale (the unscaled cover, distant_sheet_cover)");
 	}
 	else if (Weather.DrawsCell() && Weather.BeautyStormLayer(BaseM, TopM))
 	{
