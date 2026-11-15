@@ -98,4 +98,4 @@ def test_shaders_carry_world_beauty_constants():
     assert "* saturate(1.0 - rangeM / PUDDLE_FADE_M);" in ROUGH and "* saturate(1.0 - rangeM / PUDDLE_FADE_M);" in BASE
     assert "//   CameraPos     float3" in BASE
     assert '"tiles_base_colour": ("Albedo", "WorldPos", "CameraPos", "NormalWS"' in SCRIPT
-    assert '"M_FlightSimTilesBeauty": "7"' in SCRIPT
+    assert int(re.search(r'"M_FlightSimTilesBeauty": "(\d+)"', SCRIPT).group(1)) >= 7

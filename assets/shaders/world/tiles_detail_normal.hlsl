@@ -18,9 +18,22 @@
 // (docs/visual/PROBE_LOG.md ## lane-B terrain detail). The sampler note in
 // tiles_detail_surface.hlsl applies here too.
 //
+// Generation 8 (hyperreal terrain detail, 2026-11-15; tiles_detail_surface.hlsl's
+// header has the causes): the tile relief was the screen derivative of the tile
+// at the DRAWN mip, so where the Google texture sat near a texel per pixel the
+// bump was pixel noise, doubled on forest and lit by #02's high x1.6 sun into
+// grey, salt-and-pepper trees. The relief is now taken from AlbedoMid (the same
+// texture SharpenMipBias mips coarser: a texel of a few pixels, so the gradient
+// is footprint-filtered) against AlbedoLow, its per-pixel step bounded
+// (RELIEF_STEP_MAX), the forest gain halved (the crowns carry the canopy's depth);
+// the role normals' gradients are scaled by DETAIL_TEXEL_PX like the albedo's,
+// the grass normal mostly cut on forest, and the crowns fade in over the same
+// pixel span as the surface node's, as parabolic domes.
+//
 // Inputs (the script's WORLD_TILES_DETAIL_INPUTS["tiles_detail_normal"]):
 //   Albedo              float3  the de-lit tile colour (tiles_delight.hlsl's output)
 //   AlbedoLow           float3  the tile texture at DelightMipBias (the local mean)
+//   AlbedoMid           float3  the tile texture at SharpenMipBias (the relief's footprint-filtered source)
 //   WorldPos            float3  absolute world position, cm
 //   CameraPos           float3  absolute camera position, cm
 //   NormalWS            float3  the vertex normal, world space
@@ -49,8 +62,22 @@ const float SNOW_TILE_M = 80.0;
 const float GRASS_TILE_M = 15.0;
 const float SAND_TILE_M = 15.0;
 const float SOIL_TILE_M = 20.0;
-// The forest's extra tile relief (the canopy's depth).
-const float FOREST_BUMP_GAIN = 1.0;
+// The forest's extra tile relief (the canopy's depth; generation 8: halved, the
+// crowns carry the depth).
+const float FOREST_BUMP_GAIN = 0.5;
+// Generation 8 (tiles_detail_surface.hlsl's constants of the same names): the
+// role maps' texel on screen, pixels; the grass map's cut on forest; the crowns'
+// fade-in span in pixels per crown.
+const float DETAIL_TEXEL_PX = 2.5;
+const float FOREST_TEXTURE_CUT = 0.75;
+const float CANOPY_VISIBLE_PX_LO = 4.0;
+const float CANOPY_VISIBLE_PX_HI = 10.0;
+// The tile relief's largest per-pixel luminance-ratio step (the slope is
+// BumpAmount x the step, so no single pixel edge tilts past a few degrees).
+const float RELIEF_STEP_MAX = 0.5;
+// The crown dome's tilt per unit of normalised radius (a parabola 0.8 crown
+// radii high: 2 x 0.8), bounded since |d| <= 1.
+const float CROWN_TILT = 1.6;
 struct FTerrainDetailNormal
 {
 	// shared: world noise (tiles_base_colour.hlsl, tiles_normal.hlsl, tiles_roughness.hlsl)
@@ -142,6 +169,8 @@ struct FTerrainDetailNormal
 	// tiles_detail_surface.hlsl's Role.
 	float3 Role(Texture2D tex, float tileM, float3 p, float3 dpx, float3 dpy, float footprintM, float3 n, bool sides)
 	{
+		dpx *= DETAIL_TEXEL_PX;
+		dpy *= DETAIL_TEXEL_PX;
 		float level = Level(footprintM, tileM);
 		float i0 = floor(level);
 		float f = level - i0;
@@ -174,8 +203,8 @@ struct FTerrainDetailNormal
 		return r;
 	}
 	// The crown domes' tilt (tiles_detail_surface.hlsl's Crowns, the same cells):
-	// a dome of height crownM x 0.8 over the nearest crown, its normal's
-	// horizontal part 0.8 d / h, capped at the rim.
+	// generation 8, a parabolic dome 0.8 crown radii high over the nearest crown,
+	// its normal's horizontal part CROWN_TILT x d (finite at the rim).
 	float2 CrownTilt(float2 pm, float crownM)
 	{
 		float2 cell = floor(pm / crownM);
@@ -189,11 +218,11 @@ struct FTerrainDetailNormal
 				float2 centre = (c + float2(Hash2(c), Hash2(c + float2(37.0, 11.0)))) * crownM;
 				float radius = crownM * (0.45 + 0.25 * Hash2(c + float2(71.0, 53.0)));
 				float2 d = (pm - centre) / radius;
-				float h = sqrt(saturate(1.0 - dot(d, d)));
+				float h = saturate(1.0 - dot(d, d));
 				if (h > best)
 				{
 					best = h;
-					tilt = d * min(0.8 / max(h, 0.1), 1.5);
+					tilt = d * CROWN_TILT;
 				}
 			}
 		}
@@ -207,12 +236,13 @@ float3 dpx = ddx_fine(p);
 float3 dpy = ddy_fine(p);
 float footprintM = max(max(length(dpx), length(dpy)), 1e-3);
 float3 a = max(Albedo, 0.0);
-// The tile's own relief: its luminance against the local mean (AlbedoLow) as a
-// height of BumpAmount x footprint x ratio, so the bump is the same few degrees
-// at every range; Mikkelsen 2010's surface gradient from the screen derivatives.
-float relief = T.Lum(a) / max(T.Lum(max(AlbedoLow, 0.0)), 0.01);
-float dBs = ddx_fine(relief);
-float dBt = ddy_fine(relief);
+// The tile's own relief: the footprint-filtered tile (AlbedoMid, generation 8)
+// against the local mean (AlbedoLow) as a height of BumpAmount x footprint x
+// ratio, so the bump is the same few degrees at every range; Mikkelsen 2010's
+// surface gradient from the screen derivatives, each step bounded.
+float relief = T.Lum(max(AlbedoMid, 0.0)) / max(T.Lum(max(AlbedoLow, 0.0)), 0.01);
+float dBs = clamp(ddx_fine(relief), -RELIEF_STEP_MAX, RELIEF_STEP_MAX);
+float dBt = clamp(ddy_fine(relief), -RELIEF_STEP_MAX, RELIEF_STEP_MAX);
 float3 n = normalize(NormalWS);
 float rangeM = length(WorldPos - CameraPos) / 100.0;
 float fade = 1.0 - smoothstep(FarFadeStartM, max(FarFadeEndM, FarFadeStartM + 1.0), rangeM);
@@ -240,10 +270,11 @@ float3 tilt = float3(0.0, 0.0, 0.0);
 [branch] if (w1.y > 0.02) { tilt += w1.y * T.Role(SandN, SAND_TILE_M, p, dpx, dpy, footprintM, n, false); }
 [branch] if (w1.z > 0.02) { tilt += w1.z * T.Role(SoilN, SOIL_TILE_M, p, dpx, dpy, footprintM, n, false); }
 float macro = lerp(0.6, 1.25, T.Value2(p.xy / 1500.0));
-float3 detailed = nb + tilt * saturate(amount * macro * land) * NormalAmount;
+float textured = amount * macro * land * (1.0 - FOREST_TEXTURE_CUT * forest);
+float3 detailed = nb + tilt * saturate(textured) * NormalAmount;
 [branch] if (forest * CanopyAmount * TerrainDetailScale > 0.02)
 {
-	float visible = 1.0 - smoothstep(CROWN_M / 4.0, CROWN_M / 2.0, footprintM);
+	float visible = 1.0 - smoothstep(CROWN_M / CANOPY_VISIBLE_PX_HI, CROWN_M / CANOPY_VISIBLE_PX_LO, footprintM);
 	float2 crown = T.CrownTilt(p.xy, CROWN_M);
 	detailed += float3(crown, 0.0) * saturate(forest * CanopyAmount * TerrainDetailScale * visible * fade);
 }

@@ -3429,6 +3429,34 @@ delete M_FlightSimOceanBeauty.
 - Cost: compare the beauty frame times of #01 with FLIGHTSIM_TERRAIN_DETAIL=off; tile memory
   at SSE 6 vs 8 (`google_tiles` load stats). If the iGPU runs out, FLIGHTSIM_GOOGLE_TILES_BEAUTY_SSE=8.
 
+### lane-B generation 8: hyperreal terrain detail (2026-11-15)
+
+Item "terrain-detail": #02 (super bright Yosemite) drew grey, harsh, salt-and-pepper trees and
+#01 a flat brown. Read in the code, four causes, all in `tiles_detail_surface.hlsl` /
+`tiles_detail_normal.hlsl` (M_FlightSimTilesBeauty generation 8; a `scripts/ue_create_materials.py`
+run rebuilds it in place; no C++ change):
+- the role maps were sampled at one texel per pixel (Level picks the octave for it, SampleGrad
+  got the exact gradients, so the hardware took mip 0): the display's Nyquist limit, i.e. pixel
+  noise. The gradients are now x DETAIL_TEXEL_PX (2.5), so the sampler filters each map to a
+  texel that many pixels wide at every range (an aerial camera's resolution, not the frame's);
+- the luminance ratio reached 0.4..1.8 (two stops of albedo contrast under a sun already x1.6):
+  compressed in log space (DETAIL_CONTRAST 0.6) and held to 0.6..1.5;
+- the unsharp mask added (a - mid) per channel, a near-neutral offset that greyed highlights and
+  crushed shadows: it now moves the luma only, the texel's chromaticity exact (the green stays
+  green, the valley floor's ochre stays ochre, under every preset);
+- forest took the grass map (aerial_grass_rock, whose grey rocks speckled the canopy), and the
+  tile relief was the screen derivative of the DRAWN mip (pixel noise, x2 on forest, lit by the
+  72 deg sun into bright/dark facets per pixel): FOREST_TEXTURE_CUT 0.75 of the map on forest,
+  the relief from AlbedoMid (SharpenMipBias coarser, so footprint-filtered) with its per-pixel
+  step bounded, FOREST_BUMP_GAIN 1 -> 0.5, the crowns parabolic domes (finite rim slope) shown
+  only from 4..10 px per crown (was 2..4), gap x0.70 (was 0.55).
+The fog is untouched (the haze's depth is the frame's own). Every amount UNCALIBRATED.
+**Probe:** #01 and #02 at 1500 m, one still each, against generation 7: no pixel-frequency
+speckle on the forest at 100 %, canopy crowns soft and green, granite with filtered rock grain,
+no grey cast on the tree-covered slopes that the shade neutraliser does not explain (A/B
+`-tiles-shade-neutral=off` splits the two). Too soft -> DETAIL_TEXEL_PX 1.8; too flat ->
+DETAIL_CONTRAST 0.75.
+
 ### lane-B round-10 ocean (M_FlightSimOceanBeauty generation 2)
 
 Round 10 (vis-windows f3561163, `docs/visual/round_10/13_747_cruise_over_the_ocean.jpg`) drew

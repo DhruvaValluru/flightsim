@@ -224,3 +224,45 @@ def test_the_snowline_altitude_is_set_from_the_tiles_origin():
     assert '{TEXT("GroundAltitudeM"), Tiles.GetOriginOrthometricHeightM()}' in clouds
     header = (BRIDGE / "Public" / "FlightSimGoogleTiles.h").read_text(encoding="utf-8")
     assert "double GetOriginOrthometricHeightM() const { return OriginEllipsoidHeightM - UndulationM; }" in header
+
+
+def test_generation_8_filters_the_detail_to_the_footprint_and_keeps_the_colour():
+    """Hyperreal terrain detail (2026-11-15): #02's grey, salt-and-pepper trees
+    and #01's flat brown. The role maps are filtered to a texel of a few pixels
+    (never the display's one texel per pixel), the luminance ratio is compressed
+    and bounded, the unsharp mask moves the luma only (the texel's chromaticity
+    is exact), the grass map is mostly cut on forest, the tile relief comes from
+    the footprint-filtered AlbedoMid with a bounded step, and the crowns are
+    parabolic domes shown only where one spans several pixels."""
+    assert _literal("WORLD_GENERATIONS")["M_FlightSimTilesBeauty"] == "8"
+    surface = _shader("tiles_detail_surface")
+    normal = _shader("tiles_detail_normal")
+    for hlsl in (surface, normal):
+        # the sampler's gradients are the pixel's x DETAIL_TEXEL_PX, before any sample
+        assert "const float DETAIL_TEXEL_PX = 2.5;" in hlsl
+        assert "dpx *= DETAIL_TEXEL_PX;" in hlsl and "dpy *= DETAIL_TEXEL_PX;" in hlsl
+        role = hlsl[hlsl.index("Role(Texture2D tex"):hlsl.index("Crown", hlsl.index("Role(Texture2D tex"))]
+        assert role.index("dpx *= DETAIL_TEXEL_PX;") < role.index("[unroll]")   # before any sample
+        assert "const float FOREST_TEXTURE_CUT = 0.75;" in hlsl
+        assert "(1.0 - FOREST_TEXTURE_CUT * forest)" in hlsl
+        # the crowns fade in over the same pixel span, as parabolic domes (no vertical rim)
+        assert "smoothstep(CROWN_M / CANOPY_VISIBLE_PX_HI, CROWN_M / CANOPY_VISIBLE_PX_LO, footprintM)" in hlsl
+        assert "const float CANOPY_VISIBLE_PX_LO = 4.0;" in hlsl and "const float CANOPY_VISIBLE_PX_HI = 10.0;" in hlsl
+        assert "sqrt(saturate(1.0 - d" not in hlsl and "sqrt(saturate(1.0 - dot(d, d)))" not in hlsl
+    # the ratio: log-space contrast, bounded
+    assert "ratio = exp2(DETAIL_CONTRAST * log2(clamp(ratio, 0.25, 4.0)));" in surface
+    assert "ratio = clamp(ratio, DETAIL_RATIO_MIN, DETAIL_RATIO_MAX);" in surface
+    assert "clamp(ratio, 0.4, 1.8)" not in surface
+    # the luma-only unsharp mask: the colour is the input's times one scalar
+    assert "float Ls = max(La + SharpenAmount * fade * (La - Lmid), 0.5 * La);" in surface
+    assert "float3 sharp = a * (Ls / max(La, 1e-4));" in surface
+    assert "(a - max(AlbedoMid, 0.0))" not in surface
+    # the relief from the footprint-filtered tile, its step bounded, the forest gain halved
+    assert "AlbedoMid" in _literal("WORLD_TILES_DETAIL_INPUTS")["tiles_detail_normal"]
+    assert "float relief = T.Lum(max(AlbedoMid, 0.0)) / max(T.Lum(max(AlbedoLow, 0.0)), 0.01);" in normal
+    assert "clamp(ddx_fine(relief), -RELIEF_STEP_MAX, RELIEF_STEP_MAX)" in normal
+    assert "const float FOREST_BUMP_GAIN = 0.5;" in normal
+    # the node body still takes its derivatives before its first branch
+    for hlsl in (surface, normal):
+        body = hlsl[hlsl.rindex("\n};\n"):]
+        assert body.rindex("ddy_fine(") < body.index("[branch]")

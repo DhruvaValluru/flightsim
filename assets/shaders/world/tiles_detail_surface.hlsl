@@ -32,6 +32,31 @@
 // Every amount is UNCALIBRATED: set by probe render on the render machine
 // (docs/visual/PROBE_LOG.md ## lane-B terrain detail).
 //
+// Generation 8 (hyperreal terrain detail, 2026-11-15): the detail reads like an
+// aerial photograph instead of noise. #02 (super bright Yosemite) drew grey,
+// harsh, salt-and-pepper trees and #01 a flat brown; four causes, all here:
+//   * the role maps were sampled at ONE texel per pixel (Level picks the octave
+//     for it and SampleGrad got the exact gradients, so the hardware took mip 0):
+//     the display's Nyquist limit, i.e. pixel noise. An aerial camera resolves
+//     coarser than the frame it is shown on, so the gradients are scaled by
+//     DETAIL_TEXEL_PX: the sampler filters each map to a texel of that many
+//     pixels at every range (footprint-filtered; no sub-pixel content left);
+//   * the luminance ratio reached 0.4..1.8 (over two stops of albedo contrast
+//     multiplied under a sun already x1.6): it is compressed in log space by
+//     DETAIL_CONTRAST and held to DETAIL_RATIO_MIN..MAX;
+//   * the unsharp mask added (a - mid) per CHANNEL: an almost neutral offset on
+//     a coloured texel, so highlights went grey and shadows crushed to black.
+//     It now sharpens the LUMA only and keeps the texel's chromaticity exactly
+//     (vegetation keeps its green, the valley floor its ochre);
+//   * forest (dark green) took the grass map, aerial_grass_rock, whose grey
+//     rocks' ratio speckled the canopy with bright grey: FOREST_TEXTURE_CUT of
+//     the map is cut on forest, which the canopy owns instead, and the crowns
+//     are shown only where one spans CROWN_M / CANOPY_VISIBLE_PX_LO.. pixels,
+//     with a parabolic dome (no vertical rim: a pixel step is bounded) and a
+//     milder gap (CANOPY_GAP).
+// The haze's depth is the frame's own fog (untouched here; the far fade keeps
+// the horizon clean).
+//
 // Inputs (the script's WORLD_TILES_DETAIL_INPUTS["tiles_detail_surface"]):
 //   Albedo              float3  the de-lit tile colour (tiles_delight.hlsl's output)
 //   AlbedoMid           float3  the tile texture at SharpenMipBias (the unsharp mask's blur)
@@ -62,9 +87,22 @@ const float SNOW_TILE_M = 80.0;
 const float GRASS_TILE_M = 15.0;
 const float SAND_TILE_M = 15.0;
 const float SOIL_TILE_M = 20.0;
-// The canopy's gap darkening (a crown's top keeps CANOPY_TOP of the tile).
-const float CANOPY_GAP = 0.55;
-const float CANOPY_TOP = 1.08;
+// Generation 8: the role maps' texel on screen, pixels (the gradients are scaled
+// by it, so the sampler's mip holds no finer frequency: an aerial camera's
+// resolution, not the display's); the luminance ratio's log-space contrast and
+// its bounds; the share of the grass map cut on forest.
+const float DETAIL_TEXEL_PX = 2.5;
+const float DETAIL_CONTRAST = 0.6;
+const float DETAIL_RATIO_MIN = 0.6;
+const float DETAIL_RATIO_MAX = 1.5;
+const float FOREST_TEXTURE_CUT = 0.75;
+// The canopy's gap darkening (a crown's top keeps CANOPY_TOP of the tile), and
+// the crown span, pixels, over which the crowns fade in (fully shown at the
+// first, absent at the second: a 7 m crown is drawn only from about 0.7 m/px).
+const float CANOPY_GAP = 0.70;
+const float CANOPY_TOP = 1.06;
+const float CANOPY_VISIBLE_PX_LO = 4.0;
+const float CANOPY_VISIBLE_PX_HI = 10.0;
 struct FTerrainDetailSurface
 {
 	// shared: world noise (tiles_base_colour.hlsl, tiles_normal.hlsl, tiles_roughness.hlsl)
@@ -149,9 +187,13 @@ struct FTerrainDetailSurface
 	}
 	// One role's luminance ratio: two range octaves, top projection, and for the
 	// cliff roles (sides = true) a side projection blended in on steep faces.
+	// Generation 8: the gradients handed to the sampler are DETAIL_TEXEL_PX times
+	// the pixel's, so the mip it filters from has a texel that many pixels wide.
 	float Role(Texture2D tex, float tileM, float3 p, float3 dpx, float3 dpy, float footprintM, float3 n, bool sides)
 	{
 		float meanLum = max(Lum(tex.SampleLevel(View.MaterialTextureBilinearWrapedSampler, float2(0.5, 0.5), 10.0).rgb), 1e-3);
+		dpx *= DETAIL_TEXEL_PX;
+		dpy *= DETAIL_TEXEL_PX;
 		float level = Level(footprintM, tileM);
 		float i0 = floor(level);
 		float f = level - i0;
@@ -181,6 +223,8 @@ struct FTerrainDetailSurface
 		return r;
 	}
 	// Crown domes crownM apart (jittered Worley F1): 1 at a crown's top, 0 in a gap.
+	// Generation 8: a parabolic dome (1 - d^2), whose rim slope is finite, so one
+	// pixel's step across it is bounded (the hemisphere's vertical rim aliased).
 	float Crowns(float2 pm, float crownM)
 	{
 		float2 cell = floor(pm / crownM);
@@ -193,7 +237,7 @@ struct FTerrainDetailSurface
 				float2 centre = (c + float2(Hash2(c), Hash2(c + float2(37.0, 11.0)))) * crownM;
 				float radius = crownM * (0.45 + 0.25 * Hash2(c + float2(71.0, 53.0)));
 				float d = length(pm - centre) / radius;
-				best = max(best, sqrt(saturate(1.0 - d * d)));
+				best = max(best, saturate(1.0 - d * d));
 			}
 		}
 		return best;
@@ -208,7 +252,12 @@ float footprintM = max(max(length(dpx), length(dpy)), 1e-3);
 float3 a = max(Albedo, 0.0);
 float rangeM = length(WorldPos - CameraPos) / 100.0;
 float fade = 1.0 - smoothstep(FarFadeStartM, max(FarFadeEndM, FarFadeStartM + 1.0), rangeM);
-float3 sharp = max(a + SharpenAmount * fade * (a - max(AlbedoMid, 0.0)), 0.5 * a);
+// Generation 8: the unsharp mask on the LUMA only; the texel's chromaticity is
+// kept exactly (a per-channel mask greyed the highlights and crushed the shadows).
+float La = T.Lum(a);
+float Lmid = T.Lum(max(AlbedoMid, 0.0));
+float Ls = max(La + SharpenAmount * fade * (La - Lmid), 0.5 * La);
+float3 sharp = a * (Ls / max(La, 1e-4));
 float amount = DetailAmount * TerrainDetailScale * fade;
 [branch] if (amount <= 0.001)
 {
@@ -227,11 +276,16 @@ float shown = 0.0;
 [branch] if (w1.y > 0.02) { ratio += w1.y * T.Role(SandD, SAND_TILE_M, p, dpx, dpy, footprintM, n, false); shown += w1.y; }
 [branch] if (w1.z > 0.02) { ratio += w1.z * T.Role(SoilD, SOIL_TILE_M, p, dpx, dpy, footprintM, n, false); shown += w1.z; }
 ratio += 1.0 - shown;   // a role under the branch threshold is neutral
+// Generation 8: the ratio's contrast compressed in log space and bounded; the
+// grass map mostly cut on forest (the canopy below is the forest's texture).
+ratio = exp2(DETAIL_CONTRAST * log2(clamp(ratio, 0.25, 4.0)));
+ratio = clamp(ratio, DETAIL_RATIO_MIN, DETAIL_RATIO_MAX);
 float macro = lerp(0.6, 1.25, T.Value2(p.xy / 1500.0));
-float3 c = sharp * lerp(1.0, clamp(ratio, 0.4, 1.8), saturate(amount * macro * (1.0 - water)));
+float textured = amount * macro * (1.0 - water) * (1.0 - FOREST_TEXTURE_CUT * forest);
+float3 c = sharp * lerp(1.0, ratio, saturate(textured));
 [branch] if (forest * CanopyAmount * TerrainDetailScale > 0.02)
 {
-	float visible = 1.0 - smoothstep(CROWN_M / 4.0, CROWN_M / 2.0, footprintM);
+	float visible = 1.0 - smoothstep(CROWN_M / CANOPY_VISIBLE_PX_HI, CROWN_M / CANOPY_VISIBLE_PX_LO, footprintM);
 	float h = T.Crowns(p.xy, CROWN_M);
 	c *= lerp(1.0, lerp(CANOPY_GAP, CANOPY_TOP, h), saturate(forest * CanopyAmount * TerrainDetailScale * visible * fade));
 }
