@@ -1,0 +1,77 @@
+[
+ {
+  "number": 1,
+  "name": "golden hour A-4, flying east",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "b1ab760a9fdf",
+  "lighting": {},
+  "seconds": 96.1,
+  "spec_sha256": "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.254,
+   "offset_px": [
+    284,
+    -27
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 3,
+  "name": "a320 over new york, wide lens (terrain download)",
+  "prompt": "chase view of the a320 over new york city at 600 m in the morning with a 18 mm lens for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "cd038fa15f33",
+  "lighting": {},
+  "seconds": 90.8,
+  "spec_sha256": "b4869e1ee290161061731531d167eaca7708f9565dee91ad052197cc520167b2",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.398,
+   "offset_px": [
+    93,
+    -188
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 15,
+  "name": "747 in hurricane-like weather (the refusal's suggestion)",
+  "prompt": "chase view of the 747 at 2000 m in strong wind, severe turbulence and heavy rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "4fe4efd2d1d9",
+  "lighting": {},
+  "seconds": 101.0,
+  "spec_sha256": "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.308,
+   "offset_px": [
+    61,
+    204
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ }
+]
