@@ -84,7 +84,7 @@ def test_super_bright_moves_the_physical_skys_sun_and_sends_its_knobs(tmp_path):
     assert look["lighting"]["over_physical_sky"] is True
     assert "applied over the physical sky" in look["note"]
     assert lighting_flags(look) == ["-sun-intensity-scale=1.6", "-sky-light-scale=1.35",
-                                    "-sun-temperature=6300", "-sun-source-angle=0.45"]
+                                    "-sun-temperature=6000", "-sun-source-angle=0.45"]
     assert look["fog_density"] == preset["haze"]
 
 

@@ -48,7 +48,7 @@ PRESETS: Dict[str, Dict[str, float]] = {
               "color_temperature_k": 5900.0, "shadow_softness_deg": 0.53,
               "sky_fill": 1.0, "haze": 0.0009},
     "super_bright": {"sun_elevation_deg": 72.0, "brightness_ev": 0.6, "sun_intensity": 1.6,
-                     "color_temperature_k": 6300.0, "shadow_softness_deg": 0.45,
+                     "color_temperature_k": 6000.0, "shadow_softness_deg": 0.45,
                      "sky_fill": 1.35, "haze": 0.0005},
     "soft": {"sun_elevation_deg": 38.0, "brightness_ev": 0.3, "sun_intensity": 0.75,
              "color_temperature_k": 6100.0, "shadow_softness_deg": 6.0,

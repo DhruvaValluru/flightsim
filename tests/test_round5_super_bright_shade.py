@@ -81,7 +81,7 @@ def test_02_differs_from_01_only_in_the_sun_the_exposure_the_knobs_and_the_fill(
     added = sorted(set(bright["flags"]) - set(golden["flags"]))
     removed = sorted(set(golden["flags"]) - set(bright["flags"]))
     assert added == ["-fog-density=0.0005", "-sky-light-scale=1.35", "-sun-intensity-scale=1.6",
-                     "-sun-source-angle=0.45", "-sun-temperature=6300"]
+                     "-sun-source-angle=0.45", "-sun-temperature=6000"]
     assert removed == ["-fog-density=0.0012"]
     # The sky: the sun relit to 72 deg, the meter 3.7 stops up; the atmosphere, clouds and fog untouched.
     assert (golden["sky"]["sun"]["elevation_deg"], bright["sky"]["sun"]["elevation_deg"]) == (6.0, 72.0)

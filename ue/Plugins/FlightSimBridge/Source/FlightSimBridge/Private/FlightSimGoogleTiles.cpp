@@ -638,6 +638,38 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyLook(UMaterialInterfac
 	{
 		Out->SetStringField(TEXT("generate_smooth_normals"), TEXT("not found: no bool GenerateSmoothNormals"));
 	}
+	// r147 golden hour (#01 / #02, 2026-11-16): the tiles LIT by today's sun.
+	// Google's photogrammetry carries KHR_materials_unlit, and Cesium for Unreal
+	// (CesiumGltfComponent.cpp) then gives every vertex the ELLIPSOID's up as its
+	// normal (setUnlitNormals; GenerateSmoothNormals above never runs) and turns
+	// the tile's bCastDynamicShadow off. So the drawn sun's N.L was sin(elevation)
+	// on every cliff alike (0.10 at #01's 6 deg: the sky light lit the frame grey
+	// and violet) and no tile cast a shadow: no golden-hour key, no long shadows,
+	// whatever the sun's colour. IgnoreKhrMaterialsUnlit draws the tiles with the
+	// smooth normals Cesium generates and lets them cast. BEAUTY ONLY (this
+	// function's one caller is -quality=beauty); geometry, IDs and depth are the
+	// same triangles. -tiles-lit=off (command line or FLIGHTSIM_RENDER_SWITCHES)
+	// is the A/B: the round-146 frame. tiles_lit.py is the twin.
+	{
+		FString TilesLitSwitch = TEXT("on");
+		const FString Switches = FString(FCommandLine::Get()) + TEXT(" ")
+			+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+		FParse::Value(*Switches, TEXT("tiles-lit="), TilesLitSwitch);
+		const bool bTilesLit = TilesLitSwitch != TEXT("off");
+		TSharedPtr<FJsonObject> Lit = MakeShared<FJsonObject>();
+		Lit->SetStringField(TEXT("switch"), bTilesLit ? TEXT("on") : TEXT("off"));
+		Lit->SetBoolField(TEXT("before"), Tiles->GetIgnoreKhrMaterialsUnlit());
+		if (bTilesLit && !Tiles->GetIgnoreKhrMaterialsUnlit())
+		{
+			Tiles->SetIgnoreKhrMaterialsUnlit(true);
+			bChanged = true;
+		}
+		Lit->SetBoolField(TEXT("ignore_khr_materials_unlit"), Tiles->GetIgnoreKhrMaterialsUnlit());
+		Lit->SetStringField(TEXT("basis"), bTilesLit
+			? TEXT("KHR_materials_unlit ignored: Cesium's generated smooth normals and tile shadows, so the sun's angle shades the terrain")
+			: TEXT("-tiles-lit=off: the unlit tiles (the ellipsoid's up as every normal, no tile shadow)"));
+		Out->SetObjectField(TEXT("tiles_lit"), Lit);
+	}
 	// Lane B (2026-11-11): the beauty's finer tile selection. The non-urban
 	// photogrammetry is the coarse LODs smeared over a slope; one step finer
 	// is about 1.8x the tiles (UNCALIBRATED on the iGPU's shared memory: the
