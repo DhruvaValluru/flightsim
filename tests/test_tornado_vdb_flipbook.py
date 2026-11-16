@@ -174,7 +174,8 @@ def _assigned(name):
 
 def test_the_flipbook_material_is_a_storm_material_built_only_from_a_bake():
     assert "M_TornadoFlipbook" in _assigned("STORM_MATERIALS")
-    assert _assigned("STORM_GENERATIONS")["M_TornadoFlipbook"] == "2"   # 2: the card's shape (2026-11-15)
+    # 2: the card's shape; 3: -tornado-shade=funnel (both 2026-11-15, test_tornado_funnel_shade.py)
+    assert _assigned("STORM_GENERATIONS")["M_TornadoFlipbook"] == "3"
     body = SCRIPT[SCRIPT.index("def create_tornado_flipbook"):SCRIPT.index("def create_rain_drop():")]
     assert 'finish_storm(material, "M_TornadoFlipbook")' in body and "BLEND_TRANSLUCENT" in body
     assert "tornado_flipbook_pin()" in body and "MATERIAL-NOTE" in body   # no bake: not built, said so
@@ -205,7 +206,8 @@ def test_the_card_is_cropped_tapered_and_faded_into_the_wall_cloud():
     for pin in ("UV", "CropTop", "CropBottom", "TopWidth", "BottomWidth", "TaperPower", "TopFade", "DustShare"):
         assert f'"{pin}":' in body and pin in hlsl, pin
     assert body.index('"tornado_flipbook_shape"') < body.index('"tornado_flipbook_uv"')
-    assert '"UV": (mask(material, lib, shape, "rg"' in body                # the lookup reads the shaped UV
+    # The lookup reads the shaped UV (through generation 3's spin, identity at its defaults).
+    assert '"Shape": (shape, "")' in body and '"UV": (mask(material, lib, spin, "rg"' in body
     assert 'mask(material, lib, shape, "b"' in body                        # the weight gates the alpha
     assert 'mask(material, lib, shape, "a"' in body                        # the dust share lerps the tint
     assert 'constant3(material, lib, TORNADO_FLIPBOOK_DUST_TINT' in body
@@ -293,7 +295,8 @@ def test_the_card_is_beauty_only_and_the_funnel_hidden_from_the_beauty_capture_a
 
 
 def test_the_flipbook_shaders_are_sm5_straight_line_code():
-    for name in ("tornado_flipbook_uv", "tornado_flipbook_blend", "tornado_flipbook_shape"):
+    for name in ("tornado_flipbook_uv", "tornado_flipbook_blend", "tornado_flipbook_shape",
+                 "tornado_flipbook_spin", "tornado_flipbook_tone"):
         code = (REPO / "assets/shaders/weather" / f"{name}.hlsl").read_text(encoding="utf-8")
         body = "\n".join(l for l in code.splitlines() if not l.strip().startswith("//"))
         for forbidden in (r"\bfor\s*\(", r"\bwhile\s*\(", r"\.Sample\(", r"\bWave\w+\("):

@@ -636,7 +636,10 @@ STORM_GENERATIONS = {"M_RainDrops": "8", "M_RainSplash": "3", "M_LightningChanne
                      # 2 (2026-11-15, tornado-shape): the card cropped to the plume, its lower
                      # part squeezed narrow, its cap faded into the wall cloud, a ground-dust tint
                      # (tornado_flipbook_shape.hlsl); CardAspect read back by the C++.
-                     "M_TornadoFlipbook": "2"}
+                     # 3 (2026-11-15, hyperreal light lane tornado): striations turning at the
+                     # core's rate, the alpha remap and sheath lift, BottomWidth and DustShare
+                     # as parameters (tornado_flipbook_spin/tone.hlsl); defaults = generation 2.
+                     "M_TornadoFlipbook": "3"}
 STORM_GENERATION_TAG = "FlightSimStormGeneration"
 
 
@@ -2869,8 +2872,12 @@ TORNADO_FLIPBOOK_PIN = "assets/looks/tornado_vdb/PIN.json"
 TORNADO_FLIPBOOK_ATLAS = "T_TornadoFlipbook.png"
 TORNADO_FLIPBOOK_PLAN = "tornado_flipbook.json"
 TORNADO_FLIPBOOK_TEXTURE = "T_TornadoFlipbook"
-#: What FlightSimTornadoBeauty.cpp / FlightSimScenarioWorld.cpp set on it.
-TORNADO_FLIPBOOK_PARAMETERS = ("Time", "Tint", "Opacity")
+#: What FlightSimTornadoBeauty.cpp / FlightSimScenarioWorld.cpp set on it. Generation 3
+#: (2026-11-15, hyperreal light lane tornado) adds the -tornado-shade=funnel parameters
+#: (TORNADO_FLIPBOOK_GEN2_DEFAULTS: each one's default is generation 2's behaviour).
+TORNADO_FLIPBOOK_PARAMETERS = ("Time", "Tint", "Opacity", "ShadeFloor", "AlphaLo", "AlphaHi",
+                               "SheathLift", "Spin", "Bands", "Contrast", "Corrugate",
+                               "BottomWidth", "DustShare")
 #: Read back by the C++ (the card's width = its height x CardAspect; FrameAspect is the
 #: bake's own, the generation-1 fallback); from the JSON.
 TORNADO_FLIPBOOK_BAKE_PARAMETERS = ("Cols", "Rows", "Frames", "LoopSeconds", "FrameAspect",
@@ -2895,6 +2902,20 @@ TORNADO_FLIPBOOK_TAPER = {"top_width": 1.0, "bottom_width": 0.5, "power": 1.2}
 TORNADO_FLIPBOOK_TOP_FADE = 0.28
 TORNADO_FLIPBOOK_DUST_SHARE = 0.35
 TORNADO_FLIPBOOK_DUST_TINT = (0.19, 0.16, 0.13)
+#: Generation 3 (2026-11-15, hyperreal light lane tornado; tornado_flipbook_spin.hlsl and
+#: tornado_flipbook_tone.hlsl): the striations, the alpha remap, the sheath's lift, and the
+#: taper's foot width and dust share as parameters. Every default here is generation 2's
+#: behaviour bit for bit (the old constants; Contrast = Corrugate = SheathLift = 0, the
+#: alpha remap 0..1), so a card the C++ leaves alone (-tornado-shade=smoke) is generation 2;
+#: -tornado-shade=funnel (the default) sets core/scene/weather_look.py
+#: BEAUTY_TORNADO_FLIPBOOK_FUNNEL on the instance.
+#: (ShadeFloor, BottomWidth and DustShare are the generation-2 constants above, restated:
+#: tests/test_tornado_funnel_shade.py pins them equal.)
+TORNADO_FLIPBOOK_GEN2_DEFAULTS = {
+    "ShadeFloor": 0.35, "AlphaLo": 0.0, "AlphaHi": 1.0, "SheathLift": 0.0,
+    "Spin": 0.0, "Bands": 0.0, "Contrast": 0.0, "Corrugate": 0.0,
+    "BottomWidth": 0.5, "DustShare": 0.35,
+}
 
 
 def tornado_flipbook_card_aspect(frame_aspect, crop_v=TORNADO_FLIPBOOK_CROP_V):
@@ -3558,18 +3579,30 @@ def create_tornado_flipbook():
     scalar(material, lib, "FrameAspect", float(plan["frame_aspect"]), -1700, 600)
     scalar(material, lib, "CardAspect", tornado_flipbook_card_aspect(plan["frame_aspect"]), -1700, 680)
     uv = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -2000, -100)
+    # Generation 3: the -tornado-shade=funnel parameters, each defaulting to generation 2.
+    g2 = TORNADO_FLIPBOOK_GEN2_DEFAULTS
+    gen3 = {name: scalar(material, lib, name, float(g2[name]), -2300, -200 + 70 * i)
+            for i, name in enumerate(("ShadeFloor", "AlphaLo", "AlphaHi", "SheathLift", "Spin", "Bands",
+                                      "Contrast", "Corrugate", "BottomWidth", "DustShare"))}
+    crop_top = constant(material, lib, TORNADO_FLIPBOOK_CROP_V[0], -2000, -20)
+    crop_bottom = constant(material, lib, TORNADO_FLIPBOOK_CROP_V[1], -2000, 40)
     # Generation 2: the card's crop, taper, top fade and dust share before the frame lookup.
     shape = custom(material, lib, "tornado_flipbook_shape", unreal.CustomMaterialOutputType.CMOT_FLOAT4, {
         "UV": (uv, ""),
-        "CropTop": (constant(material, lib, TORNADO_FLIPBOOK_CROP_V[0], -2000, -20), ""),
-        "CropBottom": (constant(material, lib, TORNADO_FLIPBOOK_CROP_V[1], -2000, 40), ""),
+        "CropTop": (crop_top, ""),
+        "CropBottom": (crop_bottom, ""),
         "TopWidth": (constant(material, lib, TORNADO_FLIPBOOK_TAPER["top_width"], -2000, 100), ""),
-        "BottomWidth": (constant(material, lib, TORNADO_FLIPBOOK_TAPER["bottom_width"], -2000, 160), ""),
+        "BottomWidth": (gen3["BottomWidth"], ""),
         "TaperPower": (constant(material, lib, TORNADO_FLIPBOOK_TAPER["power"], -2000, 220), ""),
         "TopFade": (constant(material, lib, TORNADO_FLIPBOOK_TOP_FADE, -2000, 280), ""),
-        "DustShare": (constant(material, lib, TORNADO_FLIPBOOK_DUST_SHARE, -2000, 340), "")}, -1850, 0)
+        "DustShare": (gen3["DustShare"], "")}, -1850, 0)
+    # Generation 3: the striations (helical bands turning at Spin) and the edge's ripple.
+    spin = custom(material, lib, "tornado_flipbook_spin", unreal.CustomMaterialOutputType.CMOT_FLOAT4, {
+        "Shape": (shape, ""), "Time": (time, ""), "Spin": (gen3["Spin"], ""), "Bands": (gen3["Bands"], ""),
+        "CropTop": (crop_top, ""), "CropBottom": (crop_bottom, ""), "Contrast": (gen3["Contrast"], ""),
+        "Corrugate": (gen3["Corrugate"], "")}, -1750, -150)
     lookup = custom(material, lib, "tornado_flipbook_uv", unreal.CustomMaterialOutputType.CMOT_FLOAT4, {
-        "UV": (mask(material, lib, shape, "rg", -1700, -100), ""), "Time": (time, ""), "Cols": (cols, ""),
+        "UV": (mask(material, lib, spin, "rg", -1700, -100), ""), "Time": (time, ""), "Cols": (cols, ""),
         "Rows": (rows, ""), "Frames": (frames, ""), "LoopSeconds": (loop, "")}, -1450, 100)
     blend = custom(material, lib, "tornado_flipbook_blend", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {
         "Time": (time, ""), "Frames": (frames, ""), "LoopSeconds": (loop, "")}, -1450, 350)
@@ -3578,20 +3611,23 @@ def create_tornado_flipbook():
     frame_b = _sample(material, lib, atlas, mask(material, lib, lookup, "ba", -1250, 200),
                       unreal.MaterialSamplerType.SAMPLERTYPE_COLOR, -1100, 200)
     texel = lerp(material, lib, frame_a, frame_b, blend, -900, 100, a_out="RGBA", b_out="RGBA")
-    shade = lerp(material, lib, constant(material, lib, TORNADO_FLIPBOOK_SHADE_FLOOR, -750, 0),
-                 constant(material, lib, 1.0, -750, 60), mask(material, lib, texel, "r", -750, 120),
-                 -600, 0)
+    # Generation 3: the shade (floor, striations, sheath lift) and the remapped alpha.
+    tone = custom(material, lib, "tornado_flipbook_tone", unreal.CustomMaterialOutputType.CMOT_FLOAT2, {
+        "TexelA": (mask(material, lib, texel, "a", -750, 300), ""),
+        "TexelR": (mask(material, lib, texel, "r", -750, 120), ""),
+        "Weight": (mask(material, lib, shape, "b", -750, 380), ""),
+        "Striation": (mask(material, lib, spin, "b", -750, 440), ""),
+        "ShadeFloor": (gen3["ShadeFloor"], ""), "AlphaLo": (gen3["AlphaLo"], ""),
+        "AlphaHi": (gen3["AlphaHi"], ""), "SheathLift": (gen3["SheathLift"], ""),
+        "Opacity": (opacity, "")}, -650, 150)
+    shade = mask(material, lib, tone, "r", -550, 0)
     # The tint lerped toward the ground-dust tint over the card's foot (shape's dust).
     colour = lerp(material, lib, mask(material, lib, tint, "rgb", -900, -200),
                   constant3(material, lib, TORNADO_FLIPBOOK_DUST_TINT, -900, -120),
                   mask(material, lib, shape, "a", -900, -60), -750, -200)
     base = binary(material, lib, unreal.MaterialExpressionMultiply, colour, shade, -450, -100)
-    # The texel's alpha x the shape's weight (the taper's edge, the top fade) x Opacity.
-    alpha = binary(material, lib, unreal.MaterialExpressionMultiply,
-                   binary(material, lib, unreal.MaterialExpressionMultiply,
-                          mask(material, lib, texel, "a", -750, 300),
-                          mask(material, lib, shape, "b", -750, 380), -680, 320),
-                   opacity, -600, 350)
+    # The remapped alpha x the shape's weight (the taper's edge, the top fade) x Opacity.
+    alpha = mask(material, lib, tone, "g", -550, 350)
     fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -400, 350)
     fade.set_editor_property("fade_distance_default", PUFF_DEPTH_FADE_CM)
     lib.connect_material_expressions(alpha, "", fade, "Opacity")

@@ -439,6 +439,9 @@ render.look_switch:
 render.tornado_look:
   sentence: "The tornado look switch (-tornado-look=) was given a value it does not take."
   hint: "Use vdb (the baked JangaFX tornado, the default) or mesh (the procedural funnel); or leave it out."
+render.tornado_shade:
+  sentence: "The tornado shading switch (-tornado-shade=) was given a value it does not take."
+  hint: "Use funnel (a condensation funnel, the default) or smoke (the earlier dark smoke card); or leave it out."
 tornado_vdb.pin_missing:
   sentence: "The tornado volume's download is not pinned yet, so the fetch step will not download it."
   hint: "Record the download's URL, size and sha256 in the tornado fetch script's pin (from the render machine's download), or point the bake at a folder that already holds the volume."

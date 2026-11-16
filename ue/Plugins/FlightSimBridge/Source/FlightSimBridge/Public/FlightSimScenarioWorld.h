@@ -533,6 +533,12 @@ public:
 	// only (the label captures keep it, byte for byte); with no baked material it
 	// falls back to mesh and says why in look_applied.tornado_beauty.
 	FString TornadoLook = TEXT("vdb");
+	// 2026-11-15 (hyperreal light lane tornado): -tornado-shade=funnel|smoke, the vdb card's
+	// shading. funnel (the default) shades it as a condensation funnel (M_TornadoFlipbook 3:
+	// a cloud albedo, a crisp edge, striations turning at the core's rate, a rope foot, the
+	// dust tint only as high as the dust whirl, the whirl composited over the card); smoke
+	// is generation 2's card exactly (the material's defaults, the old dark tint).
+	FString TornadoShade = TEXT("funnel");
 	UPrimitiveComponent* TornadoBeautyHiddenFunnel = nullptr;
 
 	double ReadProperty(const TCHAR* Name) const;
