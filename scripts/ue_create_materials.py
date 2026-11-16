@@ -4001,7 +4001,21 @@ def world_stale(name):
         return False
     stamped = unreal.EditorAssetLibrary.get_metadata_tag(
         unreal.EditorAssetLibrary.load_asset(full), WORLD_GENERATION_TAG)
-    return str(stamped) != WORLD_GENERATIONS[name]
+    return str(stamped) != expected_world_stamp(name)
+
+
+#: The tiles build stamps the film wet model apart ("12-film-wet"); a run expects it.
+WET_FILM_STAMP_SUFFIX = "-film-wet"
+
+
+def expected_world_stamp(name):
+    """The stamp this run would write on <name>: its WORLD_GENERATIONS number, plus
+    WET_FILM_STAMP_SUFFIX on M_FlightSimTilesBeauty under FLIGHTSIM_WET_GROUND=film,
+    so a film run over a default-built asset (or the reverse) builds it again."""
+    stamp = WORLD_GENERATIONS[name]
+    if name == "M_FlightSimTilesBeauty" and wet_ground_model() > 0.5:
+        stamp += WET_FILM_STAMP_SUFFIX
+    return stamp
 
 
 def world_update_wanted(name):
@@ -4244,7 +4258,7 @@ def create_world_tiles_beauty():
         lib.connect_material_property(node, "", prop)
     finish(material, "M_FlightSimTilesBeauty")
     stamp = WORLD_GENERATIONS['M_FlightSimTilesBeauty'] + ("" if detail_normal is not None else "-no-detail") \
-        + ("-film-wet" if wet_model > 0.5 else "")
+        + (WET_FILM_STAMP_SUFFIX if wet_model > 0.5 else "")
     if stamp != WORLD_GENERATIONS['M_FlightSimTilesBeauty']:
         # Stamped apart, so the next run with the detail on / the new wet model builds it again.
         print(f"MATERIAL-NOTE: M_FlightSimTilesBeauty stamped {stamp}")
