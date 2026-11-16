@@ -1,0 +1,91 @@
+{
+    "round":  1403,
+    "commit":  "197e944b",
+    "full":  false,
+    "scenes":  [
+                   13,
+                   9
+               ],
+    "switches":  "-contrail-facing=off",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  319
+                },
+    "outcomes":  [
+                     {
+                         "number":  9,
+                         "outcome":  "done",
+                         "seconds":  266.5,
+                         "spec_sha256":  "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  13,
+                         "outcome":  "done",
+                         "seconds":  50.8,
+                         "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_140",
+                          "compare_with_found":  true,
+                          "scenes":  {
+                                         "9":  {
+                                                   "frame":  "09_747_through_a_thunderstorm.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.04345,
+                                                                  "std_luma":  0.04169,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  1E-05
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "09_747_through_a_thunderstorm.jpg",
+                                                                       "flicker":  0.0,
+                                                                       "ssim":  1.0,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "13":  {
+                                                    "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.04074,
+                                                                   "std_luma":  0.07493,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  0.0
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                                        "flicker":  0.00017,
+                                                                        "ssim":  0.9992,
+                                                                        "flags":  [
+
+                                                                                  ]
+                                                                    }
+                                                }
+                                     }
+                      }
+}
