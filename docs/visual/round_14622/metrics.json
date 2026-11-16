@@ -1,0 +1,50 @@
+{
+ "calibration": "uncalibrated: report only, no threshold has been judged against real rounds",
+ "limits": {
+  "blank_std_min": 0.002,
+  "blank_mean_min": 0.003,
+  "clipped_max": 0.02,
+  "crushed_max": 0.05,
+  "mean_luma_min": 0.02,
+  "mean_luma_max": 0.8,
+  "ssim_min": 0.35,
+  "flicker_max": 0.02
+ },
+ "gate": "report only; never fails the round",
+ "compare_with": "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_144",
+ "compare_with_found": true,
+ "scenes": {
+  "6": {
+   "frame": "06_a320_over_sfo_heading_south_moderate_rain.jpg",
+   "health": {
+    "mean_luma": 0.13274,
+    "std_luma": 0.07196,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "06_a320_over_sfo_heading_south_moderate_rain.jpg",
+    "flicker": 1e-05,
+    "ssim": 0.9926,
+    "flags": []
+   }
+  },
+  "7": {
+   "frame": "07_tower_view_heavy_rain.jpg",
+   "health": {
+    "mean_luma": 0.22659,
+    "std_luma": 0.01426,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "07_tower_view_heavy_rain.jpg",
+    "flicker": 3e-05,
+    "ssim": 0.9979,
+    "flags": []
+   }
+  }
+ }
+}
