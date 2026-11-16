@@ -63,6 +63,20 @@ namespace FlightSimSkyFxPure
 		return 1.0 - std::exp(-RainOpticalDepth(RateMmh));
 	}
 
+	// Reviewer fix: the bow is lit by direct sun only; the clear share of the
+	// sun's line of sight is prod(1 - N_i) over the card's layers (relative
+	// sunshine ~ 1 - N, Kasten & Czeplak 1980; sky_fx.rainbow_sun_transmittance).
+	inline double RainbowSunTransmittance(const double* Covers, int Count)
+	{
+		double T = 1.0;
+		for (int I = 0; I < Count; ++I)
+		{
+			const double C = Covers[I] < 0.0 ? 0.0 : Covers[I] > 1.0 ? 1.0 : Covers[I];
+			T *= 1.0 - C;
+		}
+		return T;
+	}
+
 	inline double CloudFlashCd(double ShutterS)
 	{
 		const double Window = ShutterS > CloudFlashMinWindowS ? ShutterS : CloudFlashMinWindowS;
@@ -133,5 +147,7 @@ namespace FlightSimSkyFx
 	// The switches: the command line, then FLIGHTSIM_RENDER_SWITCHES. A word
 	// the switch does not take returns false with Error naming it.
 	bool ParseRainbow(bool& bOutOn, FString& Error);
+	// -look-rainbow-shade=cover|off (cover): the direct-sun cloud gate.
+	bool ParseRainbowShade(bool& bOutCover, FString& Error);
 	bool ParseCloudFlash(int& OutMode, FString& Error);
 }

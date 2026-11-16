@@ -254,6 +254,12 @@ bool FFlightSimVisualScene::ApplyWeatherLook(UWorld* World,
 	// base the storm's shafts reach, ApplyBeautySkyFx).
 	SkyFxRainTopM = Options.CloudLayers.Num() > 0 && Options.CloudLayers[0].BaseMetres > 0.0
 		? Options.CloudLayers[0].BaseMetres : DefaultCloudBaseM;
+	// ... and the layers' cover, for the bow's direct-sun gate.
+	SkyFxCloudCovers.Reset();
+	for (const FFlightSimCloudLayer& Layer : Options.CloudLayers)
+	{
+		SkyFxCloudCovers.Add(Layer.CoverFraction);
+	}
 	const FString Surface = StringOr(WeatherLook, TEXT("surface"));
 	const FString Storm = StringOr(WeatherLook, TEXT("storm"));
 	const double RainRate = NumberOr(WeatherLook, TEXT("rain_rate_mmh"), 0.0);

@@ -564,9 +564,11 @@ private:
 	// The weather look's state (FlightSimWeatherLook.cpp).
 	TSharedPtr<FJsonObject> WeatherLook;
 	// High-sky effects lane: the rain's top (ApplyWeatherLook) and the rainbow
-	// sphere (ApplyBeautySkyFx).
+	// sphere (ApplyBeautySkyFx). Weak: the world may destroy it first; reset
+	// with BeautyOnlyActors on every Build.
 	double SkyFxRainTopM = 0.0;
-	AActor* RainbowActor = nullptr;
+	TArray<double> SkyFxCloudCovers;
+	TWeakObjectPtr<AActor> RainbowActor;
 	// A procedural quad since B4 round 2 (the scaled engine Plane read a
 	// zero GBuffer normal on UE 5.7); the weather look sets its material.
 	UMeshComponent* FlatGround = nullptr;

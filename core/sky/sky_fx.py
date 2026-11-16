@@ -152,6 +152,31 @@ def rainbow_strength(mode_on: bool, rate_mmh: float, sun_elevation_deg: float) -
     return 1.0 - math.exp(-rain_optical_depth(rate_mmh))
 
 
+#: Reviewer fix (2026-11-15): the bow is lit by DIRECT sun only. The share of
+#: time a line of sight to the sun is clear under a layer of cover N is 1 - N
+#: (Angstrom-Prescott: relative sunshine duration ~ 1 - N, Kasten & Czeplak
+#: 1980); independent layers multiply. -look-rainbow-shade=off drops the gate
+#: (a look-dev probe of the bow's geometry under the storm deck).
+RAINBOW_SHADE_SWITCH = "-look-rainbow-shade"
+RAINBOW_SHADE_MODES = ("cover", "off")
+
+
+def rainbow_shade_mode(word: Optional[str]) -> str:
+    chosen = "cover" if word is None or word == "" else word
+    if chosen not in RAINBOW_SHADE_MODES:
+        raise ValueError(f"sky_fx.rainbow_shade: {RAINBOW_SHADE_SWITCH}={chosen} is not cover or off")
+    return chosen
+
+
+def rainbow_sun_transmittance(covers: Sequence[float]) -> float:
+    """The direct sun's clear share through the card's cloud layers: prod(1 - N_i),
+    each cover clamped to 0..1."""
+    t = 1.0
+    for c in covers:
+        t *= 1.0 - min(max(c, 0.0), 1.0)
+    return t
+
+
 def rainbow_ring(theta_deg: float) -> Tuple[float, float, float]:
     """rainbow.hlsl's spectral ring at angle theta from the antisolar point, before
     the sun's radiance and the strength: primary + ratio * secondary + the inner

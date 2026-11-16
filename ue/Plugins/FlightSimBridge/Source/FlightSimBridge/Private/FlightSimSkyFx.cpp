@@ -44,6 +44,19 @@ bool FlightSimSkyFx::ParseRainbow(bool& bOutOn, FString& Error)
 	return false;
 }
 
+bool FlightSimSkyFx::ParseRainbowShade(bool& bOutCover, FString& Error)
+{
+	FString Word = TEXT("cover");
+	FParse::Value(*SkyFxSwitches(), TEXT("look-rainbow-shade="), Word);
+	if (Word == TEXT("cover") || Word == TEXT("off"))
+	{
+		bOutCover = Word == TEXT("cover");
+		return true;
+	}
+	Error = FString::Printf(TEXT("sky_fx.rainbow_shade: -look-rainbow-shade=%s is not cover or off"), *Word);
+	return false;
+}
+
 bool FlightSimSkyFx::ParseCloudFlash(int& OutMode, FString& Error)
 {
 	FString Word = TEXT("schedule");
@@ -76,11 +89,12 @@ void FFlightSimVisualScene::ApplyBeautySkyFx(UWorld* World, const TSharedPtr<FJs
 	{
 		Beauty->SetObjectField(TEXT("sky_fx"), Row);
 	}
-	if (RainbowActor != nullptr)
+	if (AActor* Old = RainbowActor.Get(); IsValid(Old))
 	{
-		RainbowActor->Destroy();
-		RainbowActor = nullptr;
+		BeautyOnlyActors.Remove(Old);
+		Old->Destroy();
 	}
+	RainbowActor.Reset();
 	// The beauty look is visual only: a bad word is recorded, never refused
 	// (the label passes cannot depend on it).
 	bool bOn = true;
@@ -99,7 +113,20 @@ void FFlightSimVisualScene::ApplyBeautySkyFx(UWorld* World, const TSharedPtr<FJs
 	const double SunElevationDeg = Sun != nullptr
 		? FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(-Sun->GetActorForwardVector().Z, -1.0, 1.0)))
 		: -90.0;
-	const double Strength = RainbowStrength(bOn, RateMmh, SunElevationDeg);
+	// The bow is lit by direct sun only (SkyAtmosphereLightIlluminance is the
+	// clear-sky beam): dim it by the clear share of the sun's line of sight
+	// through the card's layers (the storm's 0.95 deck leaves 5 %).
+	bool bShade = true;
+	FString ShadeError;
+	if (!FlightSimSkyFx::ParseRainbowShade(bShade, ShadeError))
+	{
+		Row->SetStringField(TEXT("rainbow_shade"), ShadeError);
+	}
+	const double SunTransmittance = bShade
+		? RainbowSunTransmittance(SkyFxCloudCovers.GetData(), SkyFxCloudCovers.Num()) : 1.0;
+	const double Strength = RainbowStrength(bOn, RateMmh, SunElevationDeg) * SunTransmittance;
+	Row->SetBoolField(TEXT("rainbow_shade_cover"), bShade);
+	Row->SetNumberField(TEXT("rainbow_sun_transmittance"), SunTransmittance);
 	Row->SetBoolField(TEXT("rainbow_switch_on"), bOn);
 	Row->SetNumberField(TEXT("rainbow_rain_rate_mmh"), RateMmh);
 	Row->SetNumberField(TEXT("rainbow_sun_elevation_deg"), SunElevationDeg);
@@ -107,7 +134,8 @@ void FFlightSimVisualScene::ApplyBeautySkyFx(UWorld* World, const TSharedPtr<FJs
 	if (Strength <= 0.0 || World == nullptr)
 	{
 		Row->SetStringField(TEXT("rainbow"), !bOn ? TEXT("off") : RateMmh <= 0.0 ? TEXT("no rain on the weather look")
-		                                     : TEXT("the sun is at or below the horizon"));
+		                                     : SunElevationDeg <= 0.0 ? TEXT("the sun is at or below the horizon")
+		                                     : TEXT("no direct sun through the cloud cover"));
 		return;
 	}
 	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, SkyFxRainbowMaterialPath);
@@ -119,15 +147,16 @@ void FFlightSimVisualScene::ApplyBeautySkyFx(UWorld* World, const TSharedPtr<FJs
 		return;
 	}
 	const double RainTopM = SkyFxRainTopM > 0.0 ? SkyFxRainTopM : RainbowDefaultRainTopM;
-	RainbowActor = World->SpawnActor<AActor>();
-	UStaticMeshComponent* Sphere = NewObject<UStaticMeshComponent>(RainbowActor, TEXT("Rainbow"));
-	RainbowActor->SetRootComponent(Sphere);
+	AActor* Bow = World->SpawnActor<AActor>();
+	RainbowActor = Bow;
+	UStaticMeshComponent* Sphere = NewObject<UStaticMeshComponent>(Bow, TEXT("Rainbow"));
+	Bow->SetRootComponent(Sphere);
 	Sphere->SetMobility(EComponentMobility::Movable);
 	Sphere->SetStaticMesh(SphereMesh);
 	Sphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Sphere->SetCastShadow(false);
 	Sphere->SetRenderCustomDepth(false);
-	UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(Material, RainbowActor);
+	UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(Material, Bow);
 	Instance->SetScalarParameterValue(TEXT("Strength"), static_cast<float>(Strength));
 	Instance->SetScalarParameterValue(TEXT("PrimaryPeak"), static_cast<float>(RainbowPrimaryPeak));
 	Instance->SetScalarParameterValue(TEXT("InnerGlow"), static_cast<float>(RainbowInnerGlow));
@@ -138,9 +167,9 @@ void FFlightSimVisualScene::ApplyBeautySkyFx(UWorld* World, const TSharedPtr<FJs
 	Sphere->RegisterComponent();
 	// The engine sphere is 1 m across: scale S draws an S m sphere, about the
 	// scene origin (the aircraft's start, where the weather look's shafts stand).
-	RainbowActor->SetActorLocation(FVector::ZeroVector);
-	RainbowActor->SetActorScale3D(FVector(2.0 * RainbowRadiusKm * 1000.0));
-	BeautyOnlyActors.Add(RainbowActor);
+	Bow->SetActorLocation(FVector::ZeroVector);
+	Bow->SetActorScale3D(FVector(2.0 * RainbowRadiusKm * 1000.0));
+	BeautyOnlyActors.Add(Bow);
 	Row->SetStringField(TEXT("rainbow"), TEXT("drawn"));
 	Row->SetNumberField(TEXT("rainbow_rain_top_m"), RainTopM);
 	Row->SetNumberField(TEXT("rainbow_radius_km"), RainbowRadiusKm);

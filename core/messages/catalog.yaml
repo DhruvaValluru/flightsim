@@ -495,6 +495,9 @@ world_beauty.cirrus:
 sky_fx.rainbow:
   sentence: "The beauty rainbow was asked for in a mode the sky effects do not know."
   hint: "Ask for -look-rainbow=on or off, or leave the choice out (on)."
+sky_fx.rainbow_shade:
+  sentence: "The beauty rainbow's cloud gate was asked for in a mode the sky effects do not know."
+  hint: "Ask for -look-rainbow-shade=cover or off, or leave the choice out (cover)."
 sky_fx.cloud_flash:
   sentence: "The beauty in-cloud lightning flash was asked for in a mode the sky effects do not know."
   hint: "Ask for -look-cloud-flash=off, schedule or on, or leave the choice out (schedule)."

@@ -99,6 +99,23 @@ def test_rain_gain_and_gates():
     assert fx.rainbow_top_fade(0.0, 1200.0) == 1.0 and fx.rainbow_top_fade(1600.0, 1200.0) == 0.0
 
 
+def test_bow_needs_direct_sun_through_the_cover():
+    # Reviewer fix: relative sunshine ~ 1 - N (Kasten & Czeplak 1980), layers multiply.
+    assert fx.rainbow_sun_transmittance([]) == 1.0
+    assert fx.rainbow_sun_transmittance([0.95]) == pytest.approx(0.05)
+    assert fx.rainbow_sun_transmittance([0.5, 0.4]) == pytest.approx(0.3)
+    assert fx.rainbow_sun_transmittance([1.2, -0.3]) == 0.0
+    assert fx.rainbow_shade_mode(None) == "cover" and fx.rainbow_shade_mode("off") == "off"
+    with pytest.raises(ValueError, match="-look-rainbow-shade=maybe"):
+        fx.rainbow_shade_mode("maybe")
+    body = FX_CPP[FX_CPP.index("void FFlightSimVisualScene::ApplyBeautySkyFx"):]
+    assert "RainbowStrength(bOn, RateMmh, SunElevationDeg) * SunTransmittance" in body
+    assert "RainbowSunTransmittance(SkyFxCloudCovers.GetData(), SkyFxCloudCovers.Num())" in body
+    assert 'FString Word = TEXT("cover");' in FX_CPP and 'TEXT("look-rainbow-shade=")' in FX_CPP
+    assert "-look-rainbow-shade=%s is not cover or off" in FX_CPP and "sky_fx.rainbow_shade:" in CATALOG
+    assert "SkyFxCloudCovers.Add(Layer.CoverFraction);" in LOOK_CPP
+
+
 def test_modes_refuse_by_name():
     assert fx.rainbow_mode(None) == "on" and fx.rainbow_mode("off") == "off"
     assert fx.cloud_flash_mode(None) == fx.CLOUD_FLASH_SCHEDULE
@@ -177,6 +194,10 @@ def test_the_cpp_pure_laws_are_the_python_ones(tmp_path):
     main = ["using namespace FlightSimSkyFxPure;", "int main() {"]
     for on, r, e in cases:
         main.append(f'printf("s %.17g\\n", RainbowStrength({"true" if on else "false"}, {r!r}, {e!r}));')
+    covers = [[], [0.95], [0.5, 0.4], [1.2, -0.3]]
+    for i, cv in enumerate(covers):
+        arr = ", ".join(repr(c) for c in cv) or "0.0"
+        main.append(f'{{ const double C{i}[] = {{{arr}}}; printf("t %.17g\\n", RainbowSunTransmittance(C{i}, {len(cv)})); }}')
     for sh in (1e-6, 1.0 / 60.0, 0.25):
         main.append(f'printf("cd %.17g\\n", CloudFlashCd({sh!r}));')
     for mode in (0, 1, 2):
@@ -194,6 +215,8 @@ def test_the_cpp_pure_laws_are_the_python_ones(tmp_path):
     lines = subprocess.run([str(tmp_path / "fx")], check=True, capture_output=True, text=True).stdout.splitlines()
     s = [float(l.split()[1]) for l in lines if l.startswith("s ")]
     assert s == pytest.approx([fx.rainbow_strength(bool(on), r, e) for on, r, e in cases], rel=1e-12, abs=1e-15)
+    t = [float(l.split()[1]) for l in lines if l.startswith("t ")]
+    assert t == pytest.approx([fx.rainbow_sun_transmittance(cv) for cv in covers], rel=1e-12, abs=1e-15)
     cd = [float(l.split()[1]) for l in lines if l.startswith("cd ")]
     assert cd == pytest.approx([fx.cloud_flash_cd(sh) for sh in (1e-6, 1.0 / 60.0, 0.25)], rel=1e-12)
     lit = [int(l.split()[1]) for l in lines if l.startswith("lit ")]
@@ -207,7 +230,13 @@ def test_the_cpp_pure_laws_are_the_python_ones(tmp_path):
 
 def test_rainbow_is_beauty_only_and_label_safe():
     body = FX_CPP[FX_CPP.index("void FFlightSimVisualScene::ApplyBeautySkyFx"):]
-    assert "BeautyOnlyActors.Add(RainbowActor);" in body
+    assert "BeautyOnlyActors.Add(Bow);" in body and "RainbowActor = Bow;" in body
+    # Reviewer fix: a weak pointer, checked before Destroy, forgotten on every Build.
+    assert "TWeakObjectPtr<AActor> RainbowActor;" in SCENE_H
+    assert "if (AActor* Old = RainbowActor.Get(); IsValid(Old))" in body
+    scene_cpp = (SOURCE / "Private" / "FlightSimVisualScene.cpp").read_text(encoding="utf-8")
+    reset = scene_cpp.index("BeautyOnlyActors.Reset();")
+    assert "RainbowActor.Reset();" in scene_cpp[reset:reset + 200]
     assert "SetCastShadow(false)" in body and "SetRenderCustomDepth(false)" in body
     assert "ECollisionEnabled::NoCollision" in body
     # The only caller is the beauty weather look (itself only FFlightSimWorldBeauty::Build's).
