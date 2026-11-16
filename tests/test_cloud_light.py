@@ -18,11 +18,11 @@ import pytest
 from core.scene import world_beauty as wb
 
 REPO = Path(__file__).resolve().parents[1]
-CPP = (REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp").read_text()
-HDR = (REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimClouds.h").read_text()
+CPP = (REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp").read_text(encoding="utf-8")
+HDR = (REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimClouds.h").read_text(encoding="utf-8")
 PURE = CPP[CPP.index("// FLIGHTSIM-WORLD-PURE-BEGIN"):CPP.index("// FLIGHTSIM-WORLD-PURE-END")]
-SCRIPT = (REPO / "scripts/ue_create_materials.py").read_text()
-HLSL = (REPO / "assets/shaders/world/cloud_albedo.hlsl").read_text()
+SCRIPT = (REPO / "scripts/ue_create_materials.py").read_text(encoding="utf-8")
+HLSL = (REPO / "assets/shaders/world/cloud_albedo.hlsl").read_text(encoding="utf-8")
 SHAPES = ("cumulus", "stratocumulus", "overcast", "nimbostratus", "altocumulus")   # C++ enum order
 
 
@@ -152,9 +152,9 @@ def test_the_bridge_reads_refuses_gates_sets_and_records():
 
 
 def test_the_volumetrics_plugin_stays_opt_in_for_the_epic_ab():
-    plugins = json.loads((REPO / "ue/FlightSim.uproject").read_text())["Plugins"]
+    plugins = json.loads((REPO / "ue/FlightSim.uproject").read_text(encoding="utf-8"))["Plugins"]
     assert all(p["Name"] != "Volumetrics" for p in plugins)   # review: opt-in, documented
-    assert '"Name": "Volumetrics", "Enabled": true' in (REPO / "core/scene/world_beauty.py").read_text()
+    assert '"Name": "Volumetrics", "Enabled": true' in (REPO / "core/scene/world_beauty.py").read_text(encoding="utf-8")
     assert "did not load; ours drawn" in CPP
     assert wb.CLOUD_MATERIAL_EPIC.startswith("/Volumetrics/Sky/Materials/")
 
@@ -166,7 +166,7 @@ def test_the_pure_light_row_compiles_and_matches(tmp_path):
                    + "\nint main(){using namespace FlightSimWorldPure; double r[LgtFieldCount];"
                      "for(int s=0;s<CloudCount;++s){CloudLightRow(true,s,r);for(int f=0;f<LgtFieldCount;++f)"
                      "std::printf(\"%g \",r[f]);std::printf(\"\\n\");}CloudLightRow(false,0,r);"
-                     "for(int f=0;f<LgtFieldCount;++f)std::printf(\"%g \",r[f]);std::printf(\"\\n\");}\n")
+                     "for(int f=0;f<LgtFieldCount;++f)std::printf(\"%g \",r[f]);std::printf(\"\\n\");}\n", encoding="utf-8")
     exe = tmp_path / "t"
     built = subprocess.run(["c++", "-std=c++17", "-o", str(exe), str(src)], capture_output=True, text=True)
     if built.returncode != 0:
