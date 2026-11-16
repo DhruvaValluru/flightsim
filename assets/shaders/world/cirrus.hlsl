@@ -10,16 +10,21 @@
 // sky is thin cirrus / cirrostratus: long translucent wisps and streaks with
 // feathered ends, brighter white where thicker, the blue reading through
 // everywhere (veils, not blobs). This sheet draws that with no march: one field
-// evaluation per covered pixel (about 32 lattice hashes), no texture.
+// evaluation per covered pixel (24 lattice hashes), no texture.
 //
-// The field: the seeded kilometre frame is turned onto the streak axis (the
-// card's drift bearing, or a seeded one) and stretched StreakAspect x along it;
-// a slow flow warp curves the streaks (cirrus uncinus hooks); three gradient
-// noise octaves make the field; it is cut at the cover's quantile with a soft
-// edge EdgeSigmas wide (a veil, never a hard cut-out); fine filaments along the
-// stream (Fibres) modulate the thickness and never add cover; a slow
-// along-stream noise's zero crossings thin each streak to nothing (its
-// feathered ends). Opacity is Beer's law on the slant path through a veil of
+// The field (generation 2, 2026-11-15, lane sky-cirrus2; round 1's 6 x 48 km
+// streak grid drew hard, evenly spaced tape on #13 and white smears on #3):
+// a low-frequency patch field cut at the cover's quantile with a soft edge
+// EdgeSigmas wide makes the sheet a few patches with the blue between them
+// (the plan's cirrus_coverage is the share of the sky inside a patch); the
+// kilometre frame is turned onto the streak axis, its across coordinate warped
+// slowly (the streak direction turns across the sky) and finely (the hooks of
+// cirrus uncinus); on that frame, stretched StreakAspect x along the stream,
+// two ridged octaves raised to FibreSharpness draw thin bright filaments over
+// a faint veil (1 - FibreStrength). Fibres finer than DetailFade x
+// StreakScaleKm in the pixel's footprint (fwidth) draw their mean instead, so
+// the grazing far sheet becomes a soft veil, never aliased stripes. Opacity is
+// Beer's law on the slant path (at most 4x, SLANT_FLOOR) through a veil of
 // vertical optical depth OpticalDepth x thickness, capped at MaxOpacity.
 //
 // The light: ice crystals scatter strongly forward, so the veil is brightest
@@ -47,11 +52,17 @@
 //   StreakDirDeg     float   the streaks' compass bearing (engine X east, Y north: a bearing b points along (sin b, cos b))
 //   RadiusKm         float   the disc's radius
 //   SheetFade        float   per frame: 1 with the full clearance below the sheet, 0 with the camera at the cap
-//   StreakScaleKm    float   the cross-stream feature size, km
+//   StreakScaleKm    float   the fibres' cross-stream size, km
 //   StreakAspect     float   the along-stream stretch
-//   EdgeSigmas       float   the cut's soft edge in sigmas of the field
-//   FibreStrength    float   how deeply the fine filaments modulate the thickness
-//   FeatherWidth     float   the ends noise width over which a streak thins to nothing
+//   EdgeSigmas       float   the patch edge in sigmas of the patch field
+//   FibreStrength    float   the share of the thickness the fibres carry (the rest is a faint veil)
+//   FibreSharpness   float   the ridge exponent (thinner fibres as it grows)
+//   PatchScaleKm     float   the patch field's scale, km
+//   FlowWarpKm       float   the slow across-stream warp's amplitude, km
+//   FlowLenKm        float   its length scale, km
+//   HookWarpKm       float   the fine (hook) warp's amplitude, km
+//   HookLenKm        float   its length scale, km
+//   DetailFade       float   fibres finer than DetailFade x StreakScaleKm per pixel draw their mean
 //   OpticalDepth     float   the veil's vertical optical depth at full thickness
 //   MaxOpacity       float   the opacity cap
 //   Albedo           float   the ice's albedo
@@ -64,7 +75,9 @@
 //   SeedOffsetKm     float3  the card's seeded noise offset (world_beauty.cloud_seed_offset_km)
 //   WindOffsetM      float3  the drift since t = 0, engine metres (the scene's drift law x CIRRUS_WIND_GAIN)
 const float FBM_MEAN = 0.5;
-const float FBM_SIGMA = 0.077;
+const float FBM_SIGMA = 0.09;
+const float FIBRE_MEAN = 0.29;
+const float SLANT_FLOOR = 0.25;
 const float PI_CI = 3.14159265;
 // The hashed field's fixed lattice seed (the material is seeded through SeedOffsetKm).
 const uint NOISE_SEED = 17u;
@@ -111,32 +124,30 @@ struct FCirrusNoise
 		return lerp(lerp(g00, g10, u), lerp(g01, g11, u), v);
 	}
 	// end shared
-	// The streak field, 0..1 about FBM_MEAN (core/scene/cirrus.py cirrus_streaks):
-	// on the stretched frame (qa along the stream, qc across), a slow flow warp
-	// (0.35 of a unit) curves the streaks, then three octaves. 20 hashes.
-	float Streaks(float qa, float qc, uint seed)
+	// The coverage field, 0..1 about FBM_MEAN, on the patch frame (core/scene/
+	// cirrus.py cirrus_patch): two octaves. 8 hashes.
+	float Patch(float px, float py, uint seed)
 	{
-		float wa = Perlin2(qa * 0.7 + 3.3, qc * 0.7 + 1.1, seed + 701u);
-		float wc = Perlin2(qa * 0.7 + 8.9, qc * 0.7 + 6.2, seed + 719u);
-		float a = qa + 0.35 * wa;
-		float c = qc + 0.35 * wc;
-		float f = 0.5 * Perlin2(a + 1.3, c + 7.1, seed + 101u)
-			+ 0.3 * Perlin2(a * 2.1 + 5.7, c * 2.1 + 2.9, seed + 113u)
-			+ 0.2 * Perlin2(a * 4.3 + 9.1, c * 4.3 + 4.4, seed + 127u);
-		return 0.5 + 0.5 * f;
+		return 0.5 + 0.5 * (0.65 * Perlin2(px + 1.3, py + 7.1, seed + 101u)
+			+ 0.35 * Perlin2(px * 2.03 + 5.7, py * 2.03 + 2.9, seed + 113u));
 	}
-	// The fine filaments along the stream, 0..1 about 0.5: two octaves, 4x and 8x
-	// finer across the stream than along it (cirrus_fibres). 8 hashes.
-	float Fibres(float qa, float qc, uint seed)
+	// The warped across-stream coordinate, km (cirrus_flow): a slow warp turns
+	// the streak direction across the sky, a fine one bends the fibres into
+	// hooks. 8 hashes.
+	float Flow(float along, float across, float flowKm, float flowLen, float hookKm, float hookLen, uint seed)
 	{
-		return 0.5 + 0.5 * (0.6 * Perlin2(qa * 1.5 + 2.2, qc * 6.0 + 3.7, seed + 211u)
-			+ 0.4 * Perlin2(qa * 3.0 + 7.5, qc * 12.0 + 1.9, seed + 223u));
+		float fl = max(flowLen, 1e-3);
+		float hl = max(hookLen, 1e-3);
+		float c = across + flowKm * Perlin2(along / fl + 3.3, across / fl + 1.1, seed + 701u);
+		return c + hookKm * Perlin2(along / hl + 8.9, c / hl + 6.2, seed + 719u);
 	}
-	// A slow along-stream noise whose zero crossings thin a streak to nothing:
-	// the feathered ends (cirrus_ends). 4 hashes.
-	float Ends(float qa, float qc, uint seed)
+	// Thin bright filaments, 0..1, on the stretched frame (cirrus_fibres): two
+	// ridged octaves raised to the sharpness. 8 hashes.
+	float Fibres(float qa, float qc, float sharpness, uint seed)
 	{
-		return Perlin2(qa * 0.3 + 4.1, qc * 1.0 + 2.6, seed + 307u);
+		float r1 = 1.0 - abs(Perlin2(qa + 2.2, qc + 3.7, seed + 211u));
+		float r2 = 1.0 - abs(Perlin2(qa * 2.1 + 7.5, qc * 2.7 + 1.9, seed + 223u));
+		return pow(saturate(0.65 * r1 + 0.35 * r2), max(sharpness, 1.0));
 	}
 	float Remap(float v, float lo, float hi)
 	{
@@ -145,30 +156,32 @@ struct FCirrusNoise
 };
 FCirrusNoise N;
 // The seeded kilometre frame (the volumetric layer's: the seed's offset, the
-// wind's drift), turned onto the streak axis and stretched along it.
+// wind's drift); the pixel's footprint on it (fwidth) for the detail fade.
 float2 kmxy = (WorldPos.xy / 100.0 - WindOffsetM.xy) / 1000.0 + SeedOffsetKm.xy;
+float footKm = length(fwidth(WorldPos.xy)) / 100000.0;
+// The patches: the share of the sky inside one is the cover; the edge fades
+// into the blue, EdgeSigmas wide.
+float pscale = max(PatchScaleKm, 1e-3);
+float cover = saturate(Coverage);
+float thr = FBM_MEAN + FBM_SIGMA * N.Probit(1.0 - cover);
+float soft = FBM_SIGMA * max(EdgeSigmas, 0.1);
+float cpatch = N.Remap(N.Patch(kmxy.x / pscale, kmxy.y / pscale, NOISE_SEED), thr, thr + soft);
+// The fibres: on the streak axis, the across coordinate warped (turning
+// streaks, hooks), stretched along the stream; finer than the footprint -> their mean.
 float ang = radians(StreakDirDeg);
 float2 dir = float2(sin(ang), cos(ang));
 float along = dot(kmxy, dir);
 float across = kmxy.x * dir.y - kmxy.y * dir.x;
 float scale = max(StreakScaleKm, 1e-3);
-float qa = along / (scale * max(StreakAspect, 1.0));
-float qc = across / scale;
-// The quantile cut: the drawn share of the sheet is the cover; the edge is a
-// veil's, EdgeSigmas wide.
-float field = N.Streaks(qa, qc, NOISE_SEED);
-float cover = saturate(Coverage);
-float thr = FBM_MEAN + FBM_SIGMA * N.Probit(1.0 - cover);
-float soft = FBM_SIGMA * max(EdgeSigmas, 0.1);
-float thick = N.Remap(field, thr, thr + soft);
-// The filaments modulate the thickness (never add cover); the ends thin it to nothing.
-thick *= lerp(1.0 - saturate(FibreStrength), 1.0, N.Fibres(qa, qc, NOISE_SEED));
-thick *= smoothstep(0.0, max(FeatherWidth, 1e-3), abs(N.Ends(qa, qc, NOISE_SEED)));
+float cw = N.Flow(along, across, FlowWarpKm, FlowLenKm, HookWarpKm, HookLenKm, NOISE_SEED);
+float fib = N.Fibres(along / (scale * max(StreakAspect, 1.0)), cw / scale, FibreSharpness, NOISE_SEED);
+fib = lerp(FIBRE_MEAN, fib, saturate(1.0 - footKm / (scale * max(DetailFade, 1e-3))));
+float thick = cpatch * lerp(1.0 - saturate(FibreStrength), 1.0, fib);
 // Opacity: Beer's law on the slant path through the veil, capped so the blue
 // reads through everywhere; out at the disc's rim; off as the camera reaches the cap.
 float3 toPix = WorldPos - CameraPos;
 float3 D = normalize(toPix);                      // camera -> pixel
-float slant = 1.0 / max(abs(D.z), 0.15);
+float slant = 1.0 / max(abs(D.z), SLANT_FLOOR);
 float tau = thick * max(OpticalDepth, 0.0) * slant;
 float opacity = min(saturate(MaxOpacity), 1.0 - exp(-tau));
 float horizKm = length(toPix.xy) / 100000.0;

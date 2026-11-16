@@ -191,7 +191,7 @@ private:
 	// M_FlightSimCirrus; no depth, no custom depth, BeautyOnlyActors), drawn from
 	// the plan's cirrus_coverage (data) or the stated default; streaks along the
 	// card's drift bearing; drifts at CirrusWindGain x the drift. Recorded in
-	// world_beauty.cirrus. -look-cirrus=on|off (on by default). VISUAL ONLY.
+	// world_beauty.cirrus. -look-cirrus=on|off (off by default). VISUAL ONLY.
 	void ApplyCirrus(UWorld* World, FFlightSimVisualScene& Scene, int32 Seed);
 
 	bool bBuilt = false;
@@ -255,9 +255,9 @@ private:
 		double Falloff = 0.0;
 	};
 	TArray<FBeautyFogProfile> FogProfiles;
-	// Sky step 6: -look-cirrus=on|off (Build reads it; on by default; off builds no
+	// Sky step 6: -look-cirrus=on|off (Build reads it; off by default; off builds no
 	// cirrus sheet: the round-95 upper sky). Another word refuses by name.
-	FString CirrusSwitch = TEXT("on");
+	FString CirrusSwitch = TEXT("off");
 	// Sky step 2: the -sky= plan Build was given (nullptr without one); ApplyClouds
 	// reads its cloud fields (FFlightSimSkyPlan::CloudType and the rest).
 	const FFlightSimSkyPlan* SkyPlanRef = nullptr;

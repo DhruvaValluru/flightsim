@@ -1429,6 +1429,17 @@ the fog setters, the /1000 conversions, the 65536 cm clamp, the sky-then-fog ord
 multiply and the moved component's re-registration.
 ### Sky step 6 (2026-11-15): the beauty-only cirrus sheet
 
+**Generation 2 (2026-11-15, lane sky-cirrus2, branch claude/hl-sky-cirrus2).**
+The round-1 field (6 x 48 km streaks, opacity to 0.6, slant to 6.7x) drew hard,
+evenly spaced tape on #13 and white smears on #3 (Mac look-dev stills). cirrus.hlsl
+now draws patches (a 40 km field cut at the plan's cirrus_coverage quantile) of
+thin ridged fibres (1.5 km across, ~9 km along) on a slowly turning, hooked
+stream, fibres finer than the pixel footprint drawn as their mean (no aliasing
+at grazing), opacity capped 0.35 (thin cirrus optical depth 0.03-0.3, Sassen &
+Cho 1992) and slant at 4x; 24 hashes against 32. `-look-cirrus` is now OFF by
+default (on to draw it) until the sheet reads as a photograph by eye on the
+render machine. Still UNCALIBRATED on Windows.
+
 Step 6 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
 docs/visual/XPLANE_SKY_DESIGN.md §8, with the "Built" note there for where the code
 narrowed it). VISUAL ONLY. Nothing here was rendered.
