@@ -42,19 +42,21 @@ BASIS_ON = ("KHR_materials_unlit ignored: Cesium's generated smooth normals and 
             "so the sun's angle shades the terrain")
 BASIS_OFF = "-tiles-lit=off: the unlit tiles (the ellipsoid's up as every normal, no tile shadow)"
 
-_SWITCH_RE = re.compile(r"(?:^|\s)-?" + re.escape(SWITCH_FLAG) + r"(\S*)")
+# FParse::Value: a case-insensitive find, the value stopping at a space or a comma.
+_SWITCH_RE = re.compile(r"(?:^|\s)-?" + re.escape(SWITCH_FLAG) + r"([^\s,]*)", re.IGNORECASE)
 
 
 def parse_switch(*texts: Optional[str]) -> str:
     """The switch from the command line then the environment variable joined,
-    as the host reads it (FParse::Value: the first match); only ``off`` is off."""
+    as the host reads it (FParse::Value: the first match); only ``off`` is off,
+    in any case (FString's != ignores case)."""
     m = _SWITCH_RE.search(" ".join(t or "" for t in texts))
-    return "off" if m and m.group(1) == "off" else "on"
+    return "off" if m and m.group(1).lower() == "off" else "on"
 
 
 def ignore_unlit(switch: str = SWITCH_DEFAULT) -> bool:
     """IgnoreKhrMaterialsUnlit as the host sets it."""
-    return switch != "off"
+    return switch.lower() != "off"
 
 
 def lit_fraction(sun_elevation_deg: float, face_normal: Any = (0.0, 0.0, 1.0),

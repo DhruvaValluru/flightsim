@@ -31,7 +31,8 @@ def _apply_beauty_look_body() -> str:
 
 @pytest.mark.parametrize("text,value", [
     ("", "on"), ("-tiles-lit=on", "on"), ("-tiles-lit=off", "off"), ("tiles-lit=off", "off"),
-    ("-quality=beauty -tiles-lit=off -x", "off"), ("-tiles-lit=OFF", "on"), ("-tiles-lit=", "on"),
+    ("-quality=beauty -tiles-lit=off -x", "off"), ("-tiles-lit=OFF", "off"), ("-tiles-lit=", "on"),
+    ("-tiles-lit=off,x", "off"), ("-TILES-LIT=off", "off"),
 ])
 def test_the_switch_reads_like_the_host(text, value):
     assert tl.parse_switch(text) == value
