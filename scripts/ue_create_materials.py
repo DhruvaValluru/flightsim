@@ -248,6 +248,7 @@ help from the scene script.
 """
 
 import math
+import re
 
 import unreal
 
@@ -3744,6 +3745,23 @@ WORLD_CLOUD_SCALARS = {
     # defaults are the OFF values, so an unset material draws round 95 exactly).
     "WispAmount": 0.0, "CurlStrength": 0.0, "EdgeThinPower": 1.0, "TopDetailGain": 0.0, "BoundaryErosion": 0.0,
 }
+#: Sky-clouds lane (graph generation 9, -look-cloud-light): the scattering node's six
+#: inputs as parameters (defaults = CLOUD_SCATTERING, so an unset material is
+#: generation 8's light) and cloud_albedo.hlsl's four (defaults: no powder, no base
+#: darkening). world_beauty.CLOUD_LIGHT_OFF is the twin; the bridge sets every one.
+WORLD_CLOUD_LIGHT_SCALARS = {
+    "PhaseG": 0.85, "PhaseG2": -0.3, "PhaseBlend": 0.3, "MsContribution": 0.7, "MsOcclusion": 0.25,
+    "MsEccentricity": 0.4, "PowderAmount": 0.0, "PowderDepthM": 40.0, "BaseDarkening": 0.0, "BaseRise": 0.3,
+}
+#: Each scattering parameter and the VolumetricAdvancedMaterialOutput input it drives
+#: (UE 5.7 FExpressionInput names; the display spelling is tried second).
+WORLD_CLOUD_LIGHT_PINS = {
+    "PhaseG": "PhaseG", "PhaseG2": "PhaseG2", "PhaseBlend": "PhaseBlend",
+    "MsContribution": "MultiScatteringContribution", "MsOcclusion": "MultiScatteringOcclusion",
+    "MsEccentricity": "MultiScatteringEccentricity",
+}
+WORLD_CLOUD_ALBEDO_INPUTS = ("Albedo", "Extinction", "NormAlt", "WorldPos", "CameraPos", "SunDirWS",
+                             "PowderAmount", "PowderDepthM", "BaseDarkening", "BaseRise")
 WORLD_CLOUD_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 WORLD_CLOUD_INPUTS = ("WorldPos", "NormAlt", "CameraPos", "Coverage", "ExtinctionPerM", "ExtinctionScale",
                       "ShapeScaleKm", "DetailScaleKm", "DetailErosion", "BottomSoftness", "TopRounding",
@@ -3934,7 +3952,9 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: own scattering constants (CLOUD_SCATTERING). The distant sheet's shared noise
 #: text is unchanged (everything new sits after it): distant stays 5.
 #: Sky step 6 (2026-11-15): cirrus 1, the first cirrus.hlsl (M_FlightSimCirrus).
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "8", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "1"}
+#: Sky-clouds lane (2026-11-15): cloud layers 9, the scattering node's six inputs as
+#: parameters and cloud_albedo.hlsl on Base Color (-look-cloud-light; defaults = 8).
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "9", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "1"}
 
 
 def world_graph_stale(name):
@@ -3982,7 +4002,7 @@ def world_stamp(material, name):
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "10",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail)
-                     "M_FlightSimCloudLayers": "10", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING
+                     "M_FlightSimCloudLayers": "11", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING; 11: sky-clouds light inputs + cloud_albedo
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
                      "M_FlightSimCirrus": "1",          # sky step 6: the high cirrus sheet
                      "M_FlightSimOceanBeauty": "5"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind)
@@ -4162,8 +4182,23 @@ def create_world_cloud_layers():
                               ordered, -900, 0)
     lib.connect_material_property(extinction, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
     albedo = scalar(material, lib, "Albedo", WORLD_CLOUD_ALBEDO, -600, 200)
-    lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    storm_scattering(material, lib, -600, 700, constants=CLOUD_SCATTERING)
+    # Generation 9 (sky-clouds lane): the albedo is cloud_albedo.hlsl (powder, flat
+    # darker base); its defaults return "Albedo" exactly.
+    light = {name: (scalar(material, lib, name, default, -1200, 1500 + 110 * i), "")
+             for i, (name, default) in enumerate(WORLD_CLOUD_LIGHT_SCALARS.items())}
+    sun_dir = vector(material, lib, "SunDirWS", (0.0, 0.0, 1.0, 0.0), -1200, 2700)
+    albedo_inputs = {"Albedo": (albedo, ""), "Extinction": (extinction, ""), "NormAlt": inputs["NormAlt"],
+                     "WorldPos": inputs["WorldPos"], "CameraPos": inputs["CameraPos"], "SunDirWS": (sun_dir, "")}
+    albedo_inputs.update({name: light[name] for name in ("PowderAmount", "PowderDepthM", "BaseDarkening", "BaseRise")})
+    lit_albedo = world_custom(material, lib, "cloud_albedo", unreal.CustomMaterialOutputType.CMOT_FLOAT1,
+                              {name: albedo_inputs[name] for name in WORLD_CLOUD_ALBEDO_INPUTS}, -400, 200)
+    lib.connect_material_property(lit_albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    node = storm_scattering(material, lib, -600, 700, constants=CLOUD_SCATTERING)
+    for name, pin in WORLD_CLOUD_LIGHT_PINS.items():
+        spelled = (pin, re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", pin))
+        if not any(lib.connect_material_expressions(light[name][0], "", node, p) for p in spelled):
+            raise RuntimeError(f"M_FlightSimCloudLayers: {name} did not connect to the scattering node's "
+                               f"{' / '.join(spelled)}")
     world_stamp(material, "M_FlightSimCloudLayers")
     finish(material, "M_FlightSimCloudLayers")
 

@@ -18,6 +18,7 @@
 		{ "Name": "PCG", "Enabled": true },
 		{ "Name": "GeometryScripting", "Enabled": true },
 		{ "Name": "NNEDenoiser", "Enabled": true },
+		{ "Name": "Volumetrics", "Enabled": true },
 		{ "Name": "CesiumForUnreal", "Enabled": true, "Optional": true }
 	]
 }

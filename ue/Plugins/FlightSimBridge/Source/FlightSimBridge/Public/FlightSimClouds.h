@@ -266,6 +266,11 @@ private:
 	// sky light's cloud-bottom occlusion: FlightSimWorldPure::CloudWispRow /
 	// CloudBellyOcclusion). Off is round 95 exactly.
 	FString CloudWispSwitch = TEXT("on");
+	// Sky-clouds lane: -look-cloud-light=on|off (the scattering inputs, powder and
+	// flat-base albedo: FlightSimWorldPure::CloudLightRow; off is c9e13c53) and
+	// -cloud-material=ours|epic (the Volumetrics plugin's cloud material, an A/B).
+	FString CloudLightSwitch = TEXT("off");   // off by default until the Windows A/B (not seen in a Mac capture)
+	FString CloudMaterialSwitch = TEXT("ours");
 	bool StormNeutralAlbedo() const;
 	// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default; off
 	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)
