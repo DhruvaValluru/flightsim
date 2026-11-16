@@ -1,0 +1,27 @@
+[
+ {
+  "number": 8,
+  "name": "c172 over fuji, sunrise, light rain",
+  "prompt": "chase view of the c172p over mount fuji at sunrise in light rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "6d8952613567",
+  "lighting": {},
+  "seconds": 86.0,
+  "spec_sha256": "12d9f6f108c853765e86017db7ab96c95eb4e1fa4180a1b0299492c3d55a7345",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.41,
+   "offset_px": [
+    -148,
+    -273
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ }
+]
