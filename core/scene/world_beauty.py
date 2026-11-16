@@ -1459,6 +1459,35 @@ ROUGHNESS_PUDDLE = 0.15
 ROUGHNESS_WET_FAR = 0.55
 WET_SPEC_FADE_M = 2500.0
 PUDDLE_FADE_M = 3000.0
+#: Tiles generation 11 (2026-11-15, wet ground near black in #09 / #10): the wet model
+#: behind the shaders' WET_GROUND_MODEL const (1 = this, 0 = generation 10's law, the
+#: default until the Windows A/B on #09 / #10 / #15; FLIGHTSIM_WET_GROUND=film builds
+#: the material with 1). Lekner & Dorf 1988 (Appl. Opt. 27,
+#: 1278): a water film of index n over a Lambertian albedo A returns
+#: A_wet = (1 - r_e)(1 - r_i) A / (1 - r_i A), r_e the film's diffuse external
+#: reflectance (0.066 at n = 1.333), r_i = 1 - (1 - r_e) / n^2 its internal one
+#: (0.474): wet asphalt (A 0.08) keeps 0.51 of its albedo, soil (A 0.20) 0.54, a pale
+#: road (A 0.35) 0.59 -- the measured order (Twomey et al. 1986; Lobell & Asner 2002:
+#: 0.5-0.7 at saturation). The film's specular is the engine's: wet roughness
+#: ROUGHNESS_WET at every range (generation 7 widened it to ROUGHNESS_WET_FAR, which
+#: is what blacked the far ground: no sky at grazing angles), with a specular
+#: anti-aliasing term instead (Kaplanyan et al. 2016 / Tokuyoshi & Kaplanyan 2019:
+#: alpha^2 += min(2 sigma^2, WET_SPEC_AA_MAX), sigma^2 from the screen derivatives of
+#: the normal), so sub-pixel facets read as a broad sheen and flat fields mirror the
+#: sky -- Fresnel for water at 80 degrees is 0.35.
+WET_GROUND_MODEL = 0.0
+WET_FILM_N = 1.333
+WET_FILM_RE = 0.066
+WET_FILM_RI = round(1.0 - (1.0 - WET_FILM_RE) / WET_FILM_N ** 2, 3)
+#: Tuned live (2026-11-15, #10): their recommended 0.18 lets photogrammetry facet noise
+#: widen the far lobe to roughness 0.65 (far ground 13 -> 16 only, legacy-like); 0.02
+#: caps it at 0.39, still a sheen. UNCALIBRATED: confirm on the Windows A/B.
+WET_SPEC_AA_MAX = 0.02
+
+
+def wet_film_albedo(albedo):
+    """Lekner & Dorf 1988: a dry albedo under a saturating water film."""
+    return (1.0 - WET_FILM_RE) * (1.0 - WET_FILM_RI) * albedo / (1.0 - WET_FILM_RI * albedo)
 
 
 def tiles_dehaze(albedo: Sequence[float], dehaze: float = TILES_DEHAZE) -> Tuple[float, ...]:

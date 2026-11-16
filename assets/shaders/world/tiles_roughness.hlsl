@@ -37,6 +37,11 @@ const float ROUGHNESS_WET_FAR = 0.55;
 const float WET_SPEC_FADE_M = 2500.0;
 const float PUDDLE_FADE_M = 3000.0;
 const float PUDDLE_AMOUNT_SCALE = 0.5;
+// Generation 11 (core/scene/world_beauty.py, WET_GROUND_MODEL): the specular AA clamp.
+const float WET_SPEC_AA_MAX = 0.02;
+// 1 = generation 11; 0 = generation 7. Opt-in until the Windows A/B: the script pastes
+// 1.0 under FLIGHTSIM_WET_GROUND=film.
+const float WET_GROUND_MODEL = 0.0;
 const float MICRO_VARIATION = 0.06;
 struct FWorldTilesRoughness
 {
@@ -71,10 +76,19 @@ FWorldTilesRoughness T;
 float rangeM = length(WorldPos - CameraPos) / 100.0;
 float fade = saturate(1.0 - rangeM / max(DetailFadeM, 1.0));
 float micro = (T.Value2(WorldPos.xy / 80.0) - 0.5) * 2.0 * MICRO_VARIATION * fade;
-float farSpec = saturate(rangeM / WET_SPEC_FADE_M);
+bool film = WET_GROUND_MODEL > 0.5;
+// Generation 7 widened the wet lobe with range; generation 11 keeps ROUGHNESS_WET and
+// widens it only by the normal's own screen-space variance (sub-pixel facets).
+float farSpec = film ? 0.0 : saturate(rangeM / WET_SPEC_FADE_M);
+float3 nW = normalize(NormalWS);
+float3 dnx = ddx(nW);
+float3 dny = ddy(nW);
+float kernel = film ? min(0.5 * (dot(dnx, dnx) + dot(dny, dny)), WET_SPEC_AA_MAX) : 0.0;
 float rWet = lerp(ROUGHNESS_WET, ROUGHNESS_WET_FAR, farSpec);
+rWet = sqrt(sqrt(rWet * rWet * rWet * rWet + kernel));
 float r = lerp(ROUGHNESS_DRY + micro, rWet, saturate(Wetness));
 float puddle = T.Puddles(WorldPos, normalize(NormalWS), saturate(PuddleAmount) * PUDDLE_AMOUNT_SCALE)
                * saturate(1.0 - rangeM / PUDDLE_FADE_M);
 float rPuddle = lerp(ROUGHNESS_PUDDLE, rWet, farSpec);
+rPuddle = film ? sqrt(sqrt(ROUGHNESS_PUDDLE * ROUGHNESS_PUDDLE * ROUGHNESS_PUDDLE * ROUGHNESS_PUDDLE + kernel)) : rPuddle;
 return saturate(lerp(r, rPuddle, puddle));

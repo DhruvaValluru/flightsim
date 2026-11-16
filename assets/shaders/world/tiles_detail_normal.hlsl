@@ -53,25 +53,25 @@
 //   GrassN              Texture2D  aerial_grass_rock normal (OpenGL)
 //   SandN               Texture2D  aerial_sand normal (OpenGL)
 //   SoilN               Texture2D  dirt_aerial_02 normal (OpenGL)
-const float SNOW_RAMP_M = 300.0;
-const float CROWN_M = 7.0;
+static const float SNOW_RAMP_M = 300.0;
+static const float CROWN_M = 7.0;
 // The roles' real tile sizes (assets/terrain_detail/PIN.json tile_m).
-const float ROCK_TILE_M = 90.0;
-const float SCREE_TILE_M = 80.0;
-const float SNOW_TILE_M = 80.0;
-const float GRASS_TILE_M = 15.0;
-const float SAND_TILE_M = 15.0;
-const float SOIL_TILE_M = 20.0;
+static const float ROCK_TILE_M = 90.0;
+static const float SCREE_TILE_M = 80.0;
+static const float SNOW_TILE_M = 80.0;
+static const float GRASS_TILE_M = 15.0;
+static const float SAND_TILE_M = 15.0;
+static const float SOIL_TILE_M = 20.0;
 // The forest's extra tile relief (the canopy's depth; generation 8: halved, the
 // crowns carry the depth).
-const float FOREST_BUMP_GAIN = 0.5;
+static const float FOREST_BUMP_GAIN = 0.5;
 // Generation 8 (tiles_detail_surface.hlsl's constants of the same names): the
 // role maps' texel on screen, pixels; the grass map's cut on forest; the crowns'
 // fade-in span in pixels per crown.
-const float DETAIL_TEXEL_PX = 2.5;
-const float FOREST_TEXTURE_CUT = 0.75;
-const float CANOPY_VISIBLE_PX_LO = 4.0;
-const float CANOPY_VISIBLE_PX_HI = 10.0;
+static const float DETAIL_TEXEL_PX = 2.5;
+static const float FOREST_TEXTURE_CUT = 0.75;
+static const float CANOPY_VISIBLE_PX_LO = 4.0;
+static const float CANOPY_VISIBLE_PX_HI = 10.0;
 // The tile relief's largest per-pixel luminance-ratio step. The footprint
 // cancels in the surface gradient below, so the slope per screen axis is
 // BumpAmount x TerrainDetailScale x (1 + FOREST_BUMP_GAIN x forest) x the step:
@@ -79,10 +79,10 @@ const float CANOPY_VISIBLE_PX_HI = 10.0;
 // pixel edge tilts past ~6 degrees (generation 9: was 0.5, a 24..32 degree
 // bound, the facets the step was meant to stop). tests/test_terrain_detail.py
 // pins the bound against scripts/ue_create_materials.py's BumpAmount.
-const float RELIEF_STEP_MAX = 0.08;
+static const float RELIEF_STEP_MAX = 0.08;
 // The crown dome's tilt per unit of normalised radius (a parabola 0.8 crown
 // radii high: 2 x 0.8), bounded since |d| <= 1.
-const float CROWN_TILT = 1.6;
+static const float CROWN_TILT = 1.6;
 struct FTerrainDetailNormal
 {
 	// shared: world noise (tiles_base_colour.hlsl, tiles_normal.hlsl, tiles_roughness.hlsl)

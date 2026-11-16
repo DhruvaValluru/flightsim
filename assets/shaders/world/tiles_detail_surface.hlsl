@@ -78,31 +78,31 @@
 //   GrassD              Texture2D  aerial_grass_rock albedo
 //   SandD               Texture2D  aerial_sand albedo
 //   SoilD               Texture2D  dirt_aerial_02 albedo
-const float SNOW_RAMP_M = 300.0;
-const float CROWN_M = 7.0;
+static const float SNOW_RAMP_M = 300.0;
+static const float CROWN_M = 7.0;
 // The roles' real tile sizes (assets/terrain_detail/PIN.json tile_m).
-const float ROCK_TILE_M = 90.0;
-const float SCREE_TILE_M = 80.0;
-const float SNOW_TILE_M = 80.0;
-const float GRASS_TILE_M = 15.0;
-const float SAND_TILE_M = 15.0;
-const float SOIL_TILE_M = 20.0;
+static const float ROCK_TILE_M = 90.0;
+static const float SCREE_TILE_M = 80.0;
+static const float SNOW_TILE_M = 80.0;
+static const float GRASS_TILE_M = 15.0;
+static const float SAND_TILE_M = 15.0;
+static const float SOIL_TILE_M = 20.0;
 // Generation 8: the role maps' texel on screen, pixels (the gradients are scaled
 // by it, so the sampler's mip holds no finer frequency: an aerial camera's
 // resolution, not the display's); the luminance ratio's log-space contrast and
 // its bounds; the share of the grass map cut on forest.
-const float DETAIL_TEXEL_PX = 2.5;
-const float DETAIL_CONTRAST = 0.6;
-const float DETAIL_RATIO_MIN = 0.6;
-const float DETAIL_RATIO_MAX = 1.5;
-const float FOREST_TEXTURE_CUT = 0.75;
+static const float DETAIL_TEXEL_PX = 2.5;
+static const float DETAIL_CONTRAST = 0.6;
+static const float DETAIL_RATIO_MIN = 0.6;
+static const float DETAIL_RATIO_MAX = 1.5;
+static const float FOREST_TEXTURE_CUT = 0.75;
 // The canopy's gap darkening (a crown's top keeps CANOPY_TOP of the tile), and
 // the crown span, pixels, over which the crowns fade in (fully shown at the
 // first, absent at the second: a 7 m crown is drawn only from about 0.7 m/px).
-const float CANOPY_GAP = 0.70;
-const float CANOPY_TOP = 1.06;
-const float CANOPY_VISIBLE_PX_LO = 4.0;
-const float CANOPY_VISIBLE_PX_HI = 10.0;
+static const float CANOPY_GAP = 0.70;
+static const float CANOPY_TOP = 1.06;
+static const float CANOPY_VISIBLE_PX_LO = 4.0;
+static const float CANOPY_VISIBLE_PX_HI = 10.0;
 struct FTerrainDetailSurface
 {
 	// shared: world noise (tiles_base_colour.hlsl, tiles_normal.hlsl, tiles_roughness.hlsl)

@@ -30,6 +30,13 @@ const float3 HAZE_RGB = float3(0.010, 0.015, 0.022);
 const float DEHAZE_TOE = 0.5;
 const float WET_DARKENING = 0.30;
 const float PUDDLE_DARKENING = 0.30;
+// Generation 11 (core/scene/world_beauty.py, WET_GROUND_MODEL): Lekner & Dorf 1988's
+// water film, A_wet = (1 - r_e)(1 - r_i) A / (1 - r_i A), per channel.
+const float WET_FILM_RE = 0.066;
+const float WET_FILM_RI = 0.474;
+// 1 = the film; 0 = WET_DARKENING. Opt-in until the Windows A/B (#09/#10/#15): the
+// script pastes 1.0 under FLIGHTSIM_WET_GROUND=film.
+const float WET_GROUND_MODEL = 0.0;
 // Generation 7 (tiles_roughness.hlsl's header): the puddles fade out by this range.
 const float PUDDLE_FADE_M = 3000.0;
 const float PUDDLE_AMOUNT_SCALE = 0.5;
@@ -69,7 +76,9 @@ float3 k = h / (1.0 - DEHAZE_TOE);
 float3 c = (a - h * a / max(a + k, 1e-6)) / (1.0 - h / (1.0 + k));
 float luma = dot(c, float3(0.2126, 0.7152, 0.0722));
 c = max(lerp(float3(luma, luma, luma), c, Saturation), 0.0);
-c *= 1.0 - WET_DARKENING * saturate(Wetness);
+float3 film = (1.0 - WET_FILM_RE) * (1.0 - WET_FILM_RI) * c / (1.0 - WET_FILM_RI * saturate(c));
+float3 wetLegacy = c * (1.0 - WET_DARKENING * saturate(Wetness));
+c = WET_GROUND_MODEL > 0.5 ? lerp(c, film, saturate(Wetness)) : wetLegacy;
 float rangeM = length(WorldPos - CameraPos) / 100.0;
 float puddle = T.Puddles(WorldPos, normalize(NormalWS), saturate(PuddleAmount) * PUDDLE_AMOUNT_SCALE)
                * saturate(1.0 - rangeM / PUDDLE_FADE_M);
