@@ -587,7 +587,8 @@ namespace
 		}
 		if (!FFlightSimBeautyFallback::ApplyScene(*S.Visual, *P)) { Error = FFlightSimBeautyFallback::LastError(); return false; }
 		// The world lane's beauty-only look (atmosphere, sun transmittance, ...), as the commandlet builds it.
-		if (!S.WorldBeauty->Build(World, *P, S.CardRoot, Aircraft, Geo, *S.Visual, *S.Weather, *S.Tiles, Error))
+		if (!S.WorldBeauty->Build(World, *P, S.CardRoot, Aircraft, Geo, *S.Visual, *S.Weather, *S.Tiles,
+		                         S.bPhysicalSky ? &S.SkyPlan : nullptr, Error))   // sky step 2: the plan, as the commandlet
 		{
 			return false;
 		}
