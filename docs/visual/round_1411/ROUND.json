@@ -1,0 +1,64 @@
+{
+    "round":  1411,
+    "commit":  "197e944b",
+    "full":  false,
+    "scenes":  [
+                   10
+               ],
+    "switches":  "-tornado-look=vdb -tornado-shade=smoke",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  92.8
+                },
+    "outcomes":  [
+                     {
+                         "number":  10,
+                         "outcome":  "done",
+                         "seconds":  91.3,
+                         "spec_sha256":  "f16db732eb9f2d0529845a94365064e6846b1c81b0351ab82d5c2bdbc28b442e",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_1410",
+                          "compare_with_found":  true,
+                          "scenes":  {
+                                         "10":  {
+                                                    "frame":  "10_c172_near_a_tornado.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.01001,
+                                                                   "std_luma":  0.01489,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  0.13542
+                                                               },
+                                                    "flags":  [
+                                                                  "crushed",
+                                                                  "mean_luma"
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "10_c172_near_a_tornado.jpg",
+                                                                        "flicker":  0.00046,
+                                                                        "ssim":  0.9854,
+                                                                        "flags":  [
+
+                                                                                  ]
+                                                                    }
+                                                }
+                                     }
+                      }
+}
