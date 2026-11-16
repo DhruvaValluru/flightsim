@@ -1109,7 +1109,11 @@ def cloud_belly_occlusion(applies: bool, occlusion: float) -> float:
 #: OFF by default (2026-11-15): the Mac look-dev scenes 13/1/9 draw no beauty cumulus
 #: layer (no -sky plan on the Mac prep), so the look was not seen; Windows A/B decides.
 CLOUD_LIGHT_SWITCH = "-look-cloud-light"
-CLOUD_LIGHT_DEFAULT = "off"
+#: Round 147 #12 (round 144's flat grey cumulus over the grand canyon): ``auto`` by
+#: default: the lit material on a CUMULUS layer only, keeping round 82's billow row
+#: there; every other shape as ``off``. ``on`` / ``off`` unchanged.
+CLOUD_LIGHT_DEFAULT = "auto"
+CLOUD_LIGHT_WORDS: Tuple[str, ...] = ("off", "on", "auto")
 CLOUD_LIGHT_FIELDS: Tuple[str, ...] = ("PhaseG", "PhaseG2", "PhaseBlend", "MsContribution", "MsOcclusion",
                                        "MsEccentricity", "BaseDarkening", "BaseRise")
 #: OFF: the material's defaults (CLOUD_SCATTERING's six, no base darkening).
@@ -1187,6 +1191,22 @@ def cloud_scatter_row(light_on: bool, shape: str, word: Optional[str] = CLOUD_DE
 def cloud_light_billow(billow_on: bool, light_on: bool) -> bool:
     """-look-cloud-billow's row applies only with -look-cloud-light=off."""
     return bool(billow_on) and not light_on
+
+
+def cloud_light_for(word: Optional[str], shape: str) -> Optional[bool]:
+    """Whether a layer draws the lit material (C++ CloudLightFor): ``on`` every
+    shape, ``auto`` (the default) cumulus only, ``off`` none; None for an unknown word."""
+    word = word or CLOUD_LIGHT_DEFAULT
+    if word not in CLOUD_LIGHT_WORDS:
+        return None
+    return word == "on" or (word == "auto" and shape == "cumulus")
+
+
+def cloud_light_billow_for(billow_on: bool, word: Optional[str], light_on: bool) -> bool:
+    """C++ CloudLightBillowFor: ``auto`` keeps the billow row under the light."""
+    if (word or CLOUD_LIGHT_DEFAULT) == "auto":
+        return bool(billow_on)
+    return cloud_light_billow(billow_on, light_on)
 
 
 def cloud_sky_ao(norm_alt: float, bottom_occlusion: float, row: Dict[str, float]) -> float:

@@ -781,6 +781,30 @@ namespace FlightSimWorldPure
 	{
 		return bBillowOn && !bLightOn;
 	}
+	// Round 147 #12 (c172 cockpit over the grand canyon, round 144: flat, evenly grey
+	// cumulus with no lit tops or shaded bellies): -look-cloud-light=auto|on|off, AUTO
+	// BY DEFAULT. auto draws the lit material (CloudLightRow: dual-lobe phase, energy-
+	// conserving octaves, the flat base on the sky light) on a CUMULUS layer only and
+	// KEEPS round 82's billow row there (sharp outline, fine erosion: Windows round 1464
+	// showed the light on without the billow as soft smeared lumps). Every other shape
+	// (the decks round 95 / rain-grey tuned) is drawn as with off. on and off are
+	// exactly as before (on: every shape lit, billow dropped). world_beauty.
+	// cloud_light_for / cloud_light_billow_for are the twins.
+	inline int CloudLightWord(const char* Word)
+	{
+		if (Word == nullptr || std::strcmp(Word, "auto") == 0) { return 2; }
+		if (std::strcmp(Word, "on") == 0) { return 1; }
+		if (std::strcmp(Word, "off") == 0) { return 0; }
+		return -1;
+	}
+	inline bool CloudLightFor(int Word, int Shape)
+	{
+		return Word == 1 || (Word == 2 && Shape == CloudCumulus);
+	}
+	inline bool CloudLightBillowFor(bool bBillowOn, int Word, bool bLightOn)
+	{
+		return Word == 2 ? bBillowOn : CloudLightBillow(bBillowOn, bLightOn);
+	}
 	// Lane rain-grey (2026-11-16): -cloud-deck-scatter=round95|beauty (round95 by
 	// default). Sky step 1 baked CloudScattering (contribution 0.7, occlusion 0.25,
 	// eccentricity 0.4, g 0.85 / -0.3 / 0.3) into M_FlightSimCloudLayers for EVERY
@@ -2057,7 +2081,7 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// Sky-clouds lane: -look-cloud-light=on|off (OFF by default until Windows shows it; CloudLightRow,
 		// CloudLightBillow; off is c9e13c53's clouds) and -cloud-material=ours|epic
 		// (ours by default; epic is the Volumetrics plugin's cloud material for the A/B).
-		CloudLightSwitch = TEXT("off");
+		CloudLightSwitch = TEXT("auto");   // round 147 #12: lit cumulus by default (CloudLightFor)
 		FParse::Value(*Switches, TEXT("look-cloud-light="), CloudLightSwitch);
 		// Lane rain-grey: -cloud-deck-scatter=round95|beauty (CloudDeckScatterFor).
 		CloudDeckScatterSwitch = TEXT("round95");
@@ -2161,9 +2185,9 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		                        *CloudWispSwitch);
 		return false;
 	}
-	if (CloudLightSwitch != TEXT("on") && CloudLightSwitch != TEXT("off"))
+	if (CloudLightWord(TCHAR_TO_ANSI(*CloudLightSwitch)) < 0)
 	{
-		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-light=%s is not on or off"),
+		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-light=%s is not auto, on or off"),
 		                        *CloudLightSwitch);
 		return false;
 	}
@@ -3643,8 +3667,10 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		const float ShadowTracingKm =
 			static_cast<float>(CloudShadowTracingKmFor(bIntegratedGpu, State.TopM - State.BaseM));
 		// Round 82: the cumulus row under -look-cloud-billow (CloudBillowRow).
-		const bool bLight = CloudLightSwitch == TEXT("on");
-		const bool bBillow = CloudBillowApplies(CloudLightBillow(CloudBillowSwitch == TEXT("on"), bLight), State.Shape);
+		const int32 LightWord = CloudLightWord(TCHAR_TO_ANSI(*CloudLightSwitch));
+		const bool bLight = CloudLightFor(LightWord, State.Shape);
+		const bool bBillow = CloudBillowApplies(
+			CloudLightBillowFor(CloudBillowSwitch == TEXT("on"), LightWord, bLight), State.Shape);
 		double BillowRow[CloudFieldCount];
 		CloudBillowRow(&CloudValues[State.Shape * CloudFieldCount], bBillow, BillowRow);
 		const double* CloudRow = BillowRow;
@@ -3831,6 +3857,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		// scalars by their material names, and the belly cap (the occlusion before it).
 		Layer->SetStringField(TEXT("cloud_wisp"), CloudWispSwitch);
 		Layer->SetStringField(TEXT("cloud_light"), CloudLightSwitch);
+		Layer->SetBoolField(TEXT("cloud_light_drawn"), bLight);
 		Layer->SetStringField(TEXT("cloud_light_material"), LightMaterialDrawn);
 		Layer->SetStringField(TEXT("cloud_deck_scatter"), CloudDeckScatterSwitch);
 		Layer->SetBoolField(TEXT("cloud_deck_scatter_applied"), bDeckScatter);

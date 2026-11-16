@@ -201,15 +201,24 @@ def test_the_material_wires_the_six_pins_and_bumps_its_generation():
 def test_the_bridge_reads_refuses_gates_sets_and_records():
     assert 'FParse::Value(*Switches, TEXT("look-cloud-light="), CloudLightSwitch);' in CPP
     assert 'FParse::Value(*Switches, TEXT("cloud-material="), CloudMaterialSwitch);' in CPP
-    assert "-look-cloud-light=%s is not on or off" in CPP
+    assert "-look-cloud-light=%s is not auto, on or off" in CPP
     assert "-cloud-material=%s is not ours or epic" in CPP
-    assert 'FString CloudLightSwitch = TEXT("off");' in HDR   # off until the Windows A/B
-    assert '		CloudLightSwitch = TEXT("off");' in CPP and wb.CLOUD_LIGHT_DEFAULT == "off"
+    assert 'FString CloudLightSwitch = TEXT("auto");' in HDR   # round 147 #12
+    assert '		CloudLightSwitch = TEXT("auto");' in CPP and wb.CLOUD_LIGHT_DEFAULT == "auto"
     assert 'FString CloudMaterialSwitch = TEXT("ours");' in HDR
-    assert "CloudBillowApplies(CloudLightBillow(CloudBillowSwitch == TEXT(\"on\"), bLight), State.Shape)" in CPP
+    assert "CloudLightFor(LightWord, State.Shape)" in CPP
+    assert "CloudLightBillowFor(CloudBillowSwitch == TEXT(\"on\"), LightWord, bLight), State.Shape)" in CPP
     assert "return bBillowOn && !bLightOn;" in PURE
     assert wb.cloud_light_billow(True, False) and not wb.cloud_light_billow(True, True)
     assert not wb.cloud_light_billow(False, False)
+    # Round 147 #12: auto (the default) lights cumulus only and keeps its billow row.
+    assert "return Word == 1 || (Word == 2 && Shape == CloudCumulus);" in PURE
+    assert "return Word == 2 ? bBillowOn : CloudLightBillow(bBillowOn, bLightOn);" in PURE
+    assert wb.cloud_light_for(None, "cumulus") is True and wb.cloud_light_for("auto", "overcast") is False
+    assert wb.cloud_light_for("on", "nimbostratus") is True and wb.cloud_light_for("off", "cumulus") is False
+    assert wb.cloud_light_for("bogus", "cumulus") is None
+    assert wb.cloud_light_billow_for(True, "auto", True) and not wb.cloud_light_billow_for(True, "on", True)
+    assert wb.cloud_light_billow_for(True, "off", False)
     assert "CloudLightRow(bLight, State.Shape, LightRow);" in CPP
     assert "SunDirWS" not in CPP   # lit 2: no powder, no view weighting
     assert 'SetScalarParameterValue(FName(TEXT("SkyBottomOcclusion")), static_cast<float>(BottomOcclusion));' in CPP
