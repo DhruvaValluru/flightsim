@@ -168,6 +168,59 @@ namespace FlightSimTornadoBeautyLocal
 	constexpr float BeautyFlipbookColourR = 0.15f;
 	constexpr float BeautyFlipbookColourG = 0.155f;
 	constexpr float BeautyFlipbookColourB = 0.17f;
+	// 2026-11-15 (hyperreal light lane tornado): -tornado-shade=funnel (the default) shades
+	// the card as a CONDENSATION FUNNEL (M_TornadoFlipbook 3; -tornado-shade=smoke leaves the
+	// material's generation-2 defaults and the dark tint above). p3-windows drew #10's card as
+	// a near-black sooty plume with a wispy outline: the tint above x the texel's grey (median
+	// 0.49 on the committed atlas, so shade 0.67) is an albedo about 0.10, the wall cloud's own
+	// (weather_look.BEAUTY_WALL_CLOUD_COLOUR), so the funnel could not read lighter than the
+	// storm base behind it.
+	//  * Tint: a cloud's two-stream albedo, R = (1 - g) tau / (2 + (1 - g) tau) (Bohren 1987,
+	//    Am. J. Phys. 55, 524), g = 0.85 for cloud droplets (Hansen & Travis 1974), tau =
+	//    3 LWC L / (2 rho_w r_e) (Stephens 1978) for LWC 0.5 g/m^3, r_e 10 um across a rope
+	//    funnel's chord L = 100 m: tau = 7.5, R = 1.125 / 3.125 = 0.36 (tuned 2026-11-15 on the Mac
+	//    look-dev still of #10 from L 133 m, R 0.43, which read paper-white); neutral grey (water cloud is spectrally
+	//    flat in the visible): the storm's own sun and sky light give it its colour.
+	//  * ShadeFloor 0.45 (generation 2: 0.35; 0.55 read flat white on the look-dev still): the bake's own sun shading is kept as the
+	//    funnel's relief but no longer darkens a lit funnel to soot (texel grey 0.36..0.64,
+	//    the 5th..95th percentile, now shades 0.65..0.80).
+	//  * AlphaLo..AlphaHi 0.15..0.55: a condensation funnel's edge is the isobar on which the
+	//    pressure deficit reaches the lifting condensation level (Davies-Jones, Trapp &
+	//    Bluestein 2001, Meteor. Monogr. 28 ch. 5), crisp, not the bake's smoke wisps (a
+	//    quarter of the plume's texels sit below alpha 0.21; the median is 0.63, so about half
+	//    the plume is solid after the remap; the card's lit body averages albedo 0.26, about
+	//    2.2x the wall cloud's 0.115, generation 2's 0.10). SheathLift 0.10 (0.25 read white-rimmed): the partial-alpha edge lifted,
+	//    the lighter outer condensation. UNCALIBRATED.
+	//  * Striations: Bands helix turns over the card (6: one band per ~175 m of a 1.05 km card,
+	//    about the funnel's diameter at mid-height, a reading of rope and cone tornado photos,
+	//    UNCALIBRATED), Contrast 0.30 (0.15 was invisible on the look-dev still), the edge rippled 6 % (Corrugate), turning at the
+	//    Rankine core's solid-body rate Vmax / Rcore (the dust whirl's own spin, same sense).
+	//  * BottomWidth 0.35 (generation 2: 0.50): with the alpha remap, the card's visible outline
+	//    (alpha > 0.02, the committed atlas through the shaders at the default card: 1.05 km x
+	//    861 m) is 45 m wide over its lowest 3 % and 72 m at 10 % of its height, the mesh look's
+	//    rope (BeautyFunnelBaseRadii 0.16 x Rcore 150 m x 2 = 48 m); generation 2's was 83 m and
+	//    120 m, a hazy foot twice the rope (tests/test_tornado_funnel_shade.py measures both).
+	//  * DustShare: the dust tint only as high as the dust whirl reaches (its highest puff
+	//    centre BeautyDustTopM + 0.25 x the largest size, plus half that size: 87.5 m) over the
+	//    card's height, not generation 2's 35 % of it (a brown 370 m lower funnel, the
+	//    red-brown wash p3-windows saw over the desert).
+	//  * The dust whirl composited OVER the card: every dust and debris puff's translucency
+	//    sort distance is pulled nearer by FlipbookDustSortOffsetM (the card's half height + the
+	//    whirl's reach + its top), more than any puff can be behind the card's centre from any
+	//    camera (triangle inequality), so the whirl is never drawn under the card -- generation
+	//    2's card, sorted by its centre 525 m up, could draw over the whirl and hide the tan skirt.
+	constexpr float BeautyFlipbookFunnelColourR = 0.36f;
+	constexpr float BeautyFlipbookFunnelColourG = 0.36f;
+	constexpr float BeautyFlipbookFunnelColourB = 0.36f;
+	constexpr float BeautyFlipbookFunnelShadeFloor = 0.45f;
+	constexpr float BeautyFlipbookFunnelAlphaLo = 0.15f;
+	constexpr float BeautyFlipbookFunnelAlphaHi = 0.55f;
+	constexpr float BeautyFlipbookFunnelSheathLift = 0.10f;
+	constexpr float BeautyFlipbookFunnelBands = 6.0f;
+	constexpr float BeautyFlipbookFunnelContrast = 0.30f;
+	constexpr float BeautyFlipbookFunnelCorrugate = 0.06f;
+	constexpr float BeautyFlipbookFunnelBottomWidth = 0.35f;
+	constexpr double BeautyFlipbookFunnelDustShareMax = 0.35;
 
 	double TornadoBeautySmooth01(double X)
 	{
@@ -488,6 +541,7 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 	FString LookNote = TEXT("mesh: -tornado-look=mesh");
 	double FlipbookHeightM = 0.0;
 	double FlipbookWidthM = 0.0;
+	double FlipbookDustSortOffsetM = 0.0;
 	if (TornadoLook == TEXT("vdb"))
 	{
 		UMaterialInterface* FlipbookBase = LoadObject<UMaterialInterface>(nullptr, TornadoFlipbookPath);
@@ -504,6 +558,7 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 				FLinearColor(BeautyFlipbookColourR, BeautyFlipbookColourG, BeautyFlipbookColourB, 1.0f));
 			Flipbook->SetScalarParameterValue(FName(TEXT("Opacity")), TornadoFlipbookOpacity);
 			Flipbook->SetScalarParameterValue(FName(TEXT("Time")), 0.0f);
+			const bool bFunnelShade = TornadoShade != TEXT("smoke");
 			// Generation 2's cropped card aspect; a generation-1 material (no CardAspect:
 			// the engine answers 0) keeps the bake's frame aspect.
 			double CardAspect = static_cast<double>(Flipbook->K2_GetScalarParameterValue(FName(TEXT("CardAspect"))));
@@ -514,6 +569,34 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 			CardAspect = FMath::Clamp(CardAspect, 0.05, 20.0);
 			FlipbookHeightM = TornadoFlipbookHeightShare * FunnelTopMetres;
 			FlipbookWidthM = FlipbookHeightM * CardAspect;
+			// The dust whirl's top: its highest puff centre (0.25 x size + DustTopM, as placed
+			// above) plus half the largest puff.
+			const double DustWhirlTopM = BeautyDustTopM + 0.75 * BeautyDustSizeMaxM;
+			if (bFunnelShade)
+			{
+				// -tornado-shade=funnel (the default): M_TornadoFlipbook 3's condensation funnel
+				// (the numbers and their sources at BeautyFlipbookFunnel* above). A generation-2
+				// material has none of these parameters but Tint: the engine ignores the rest.
+				Flipbook->SetVectorParameterValue(FName(TEXT("Tint")),
+					FLinearColor(BeautyFlipbookFunnelColourR, BeautyFlipbookFunnelColourG,
+					             BeautyFlipbookFunnelColourB, 1.0f));
+				Flipbook->SetScalarParameterValue(FName(TEXT("ShadeFloor")), BeautyFlipbookFunnelShadeFloor);
+				Flipbook->SetScalarParameterValue(FName(TEXT("AlphaLo")), BeautyFlipbookFunnelAlphaLo);
+				Flipbook->SetScalarParameterValue(FName(TEXT("AlphaHi")), BeautyFlipbookFunnelAlphaHi);
+				Flipbook->SetScalarParameterValue(FName(TEXT("SheathLift")), BeautyFlipbookFunnelSheathLift);
+				Flipbook->SetScalarParameterValue(FName(TEXT("Bands")), BeautyFlipbookFunnelBands);
+				Flipbook->SetScalarParameterValue(FName(TEXT("Contrast")), BeautyFlipbookFunnelContrast);
+				Flipbook->SetScalarParameterValue(FName(TEXT("Corrugate")), BeautyFlipbookFunnelCorrugate);
+				Flipbook->SetScalarParameterValue(FName(TEXT("BottomWidth")), BeautyFlipbookFunnelBottomWidth);
+				// The core's solid-body rate, in the dust actor's sense: UE yaw + (the dust's
+				// spin) is clockwise seen from above, which moves a funnel's near surface LEFT
+				// on the card; the material's Spin + moves it right.
+				Flipbook->SetScalarParameterValue(FName(TEXT("Spin")),
+					static_cast<float>(-FMath::DegreesToRadians(TornadoOmegaDegPerSec)));
+				Flipbook->SetScalarParameterValue(FName(TEXT("DustShare")), static_cast<float>(
+					FMath::Clamp(DustWhirlTopM / FMath::Max(FlipbookHeightM, 1.0), 0.0,
+					             BeautyFlipbookFunnelDustShareMax)));
+			}
 			UMaterialBillboardComponent* Board =
 				NewObject<UMaterialBillboardComponent>(FlipbookActor, TEXT("TornadoFlipbookCard"));
 			Board->SetupAttachment(FlipbookActor->GetRootComponent());
@@ -527,6 +610,21 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 			Board->AddElement(Flipbook, nullptr, false, static_cast<float>(50.0 * FlipbookHeightM),
 			                  static_cast<float>(50.0 * FlipbookWidthM), nullptr);
 			Board->RegisterComponent();
+			if (bFunnelShade && TornadoDust != nullptr)
+			{
+				// The whirl over the card (see BeautyFlipbookFunnel* above): each puff sorts at
+				// most (whirl reach + whirl top) beyond the axis's ground point, the card at least
+				// its half height short of it, so pulling the puffs nearer by their sum keeps
+				// every puff after the card. Beauty-only actors: no label capture draws either.
+				FlipbookDustSortOffsetM = 0.5 * FlipbookHeightM
+					+ RCore * (BeautyDustRadiiMax + BeautyDustJitterRadii) + DustWhirlTopM;
+				TArray<UPrimitiveComponent*> DustPuffs;
+				TornadoDust->GetComponents<UPrimitiveComponent>(DustPuffs);
+				for (UPrimitiveComponent* Puff : DustPuffs)
+				{
+					Puff->SetTranslucencySortDistanceOffset(static_cast<float>(-100.0 * FlipbookDustSortOffsetM));
+				}
+			}
 			TornadoFlipbookMaterial = Flipbook;
 			TornadoBeautyHiddenFunnel = FunnelMesh;
 			DrawnAs = TEXT("vdb_flipbook");
@@ -541,6 +639,8 @@ bool FFlightSimScenarioWorld::BuildBeautyTornado(const FFlightSimScenarioCard& C
 		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 		Row->SetStringField(TEXT("drawn_as"), DrawnAs);   // vdb_flipbook | mesh (-tornado-look=)
 		Row->SetStringField(TEXT("tornado_look"), TornadoLook);
+		Row->SetStringField(TEXT("tornado_shade"), TornadoShade);   // funnel | smoke (-tornado-shade=)
+		Row->SetNumberField(TEXT("flipbook_dust_sort_offset_m"), FlipbookDustSortOffsetM);
 		Row->SetStringField(TEXT("tornado_look_note"), LookNote);
 		Row->SetNumberField(TEXT("flipbook_height_m"), FlipbookHeightM);
 		Row->SetNumberField(TEXT("flipbook_width_m"), FlipbookWidthM);

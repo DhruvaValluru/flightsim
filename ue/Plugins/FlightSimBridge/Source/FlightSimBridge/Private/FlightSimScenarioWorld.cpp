@@ -1518,204 +1518,12 @@ bool FFlightSimScenarioWorld::BuildInto(UWorld* LiveWorld,
 	return Populate(Card, Error, /*bLiveWorld=*/true);
 }
 
-bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
-                                       FString& Error, bool bLiveWorld)
+// The tornado's schematic markers (funnel + wall cloud), moved verbatim out of Populate
+// (2026-11-15, hyperreal light lane tornado) so the editor look-dev harness
+// (FlightSimLookDev.cpp) can spawn the same markers BuildBeautyTornado refines.
+// Populate calls it at the same point as before: behaviour unchanged.
+void FFlightSimScenarioWorld::SpawnTornadoMarkers(const FFlightSimScenarioCard& Card)
 {
-	// -- georeferencing ----------------------------------------------------
-	// Round planet with the UE origin pinned at the spec's ground point, so
-	// engine Z=0 is the spec's terrain elevation and the engine frame is the
-	// local tangent frame. The plugin derives every initial condition from the
-	// actor's transform through this actor, so it has to exist first.
-	GeoReferencing = World->SpawnActor<AGeoReferencingSystem>();
-	if (GeoReferencing == nullptr)
-	{
-		Error = TEXT("could not spawn AGeoReferencingSystem");
-		return false;
-	}
-	GeoReferencing->PlanetShape = EPlanetShape::RoundPlanet;
-	GeoReferencing->bOriginAtPlanetCenter = false;
-	GeoReferencing->bOriginLocationInProjectedCRS = false;
-	GeoReferencing->OriginLatitude = Card.LatitudeDegrees;
-	GeoReferencing->OriginLongitude = Card.LongitudeDegrees;
-	GeoReferencing->OriginAltitude = Card.TerrainElevationMetres;
-
-	// Real-terrain cards work in the raster's own projected CRS: the
-	// orographic wind queries it per step and the visual pass places terrain
-	// through ProjectedToEngine. Both go through this one PROJ context, so
-	// the mountain the wind comes off and the mountain on screen cannot be
-	// two different projections of the data.
-	if (Card.bOrographic)
-	{
-		if (!OrographicTerrain.Load(Card.OrographicTerrainPath, Error))
-		{
-			return false;
-		}
-		if (OrographicTerrain.Crs.IsEmpty() || !OrographicTerrain.bProjected)
-		{
-			Error = FString::Printf(
-				TEXT("orographic terrain '%s' carries no projected CRS; the ")
-				TEXT("aircraft's position cannot be mapped onto it honestly."),
-				*Card.OrographicTerrainPath);
-			return false;
-		}
-		GeoReferencing->ProjectedCRS = OrographicTerrain.Crs;
-	}
-	if (!Card.CollisionTerrainPath.IsEmpty())
-	{
-		if (!CollisionTerrain.Load(Card.CollisionTerrainPath, Error))
-		{
-			return false;
-		}
-		if (CollisionTerrain.Crs.IsEmpty() || !CollisionTerrain.bProjected)
-		{
-			Error = FString::Printf(
-				TEXT("collision terrain '%s' carries no projected CRS; the ")
-				TEXT("ground cannot be placed honestly."),
-				*Card.CollisionTerrainPath);
-			return false;
-		}
-		if (Card.bOrographic && CollisionTerrain.Crs != OrographicTerrain.Crs)
-		{
-			Error = TEXT("collision and orographic terrain disagree about the "
-			             "CRS; refusing two different grounds");
-			return false;
-		}
-		GeoReferencing->ProjectedCRS = CollisionTerrain.Crs;
-	}
-	if ((!Card.SceneCrs.IsEmpty() || !Card.ThermalsCrs.IsEmpty())
-	    && !Card.bOrographic && Card.CollisionTerrainPath.IsEmpty())
-	{
-		// Phase 9: a flat-scene run has no terrain to anchor the
-		// projection, so the card declares it (the spec origin's UTM zone,
-		// chosen in Python; card-level scene_crs, with the thermals
-		// block's own crs honoured for older cards) -- one frame for both
-		// hosts rather than a reliance on the plugin's default.
-		GeoReferencing->ProjectedCRS = Card.SceneCrs.IsEmpty()
-			? Card.ThermalsCrs : Card.SceneCrs;
-	}
-	GeoReferencing->ApplySettings();
-
-	if (Card.bOrographic)
-	{
-		Orographic.Init(&OrographicTerrain,
-		                Card.OrographicWindSpeedMps, Card.OrographicWindFromDeg,
-		                Card.OrographicDecayHeightMetres,
-		                Card.OrographicWavelengthMetres, Card.bOrographicLee,
-		                Card.OrographicOriginXMetres, Card.OrographicOriginYMetres);
-		bOrographicReady = true;
-		UE_LOG(LogFlightSimScenario, Display,
-		       TEXT("orographic wind over '%s' (%s): %.1f m/s from %.0f deg, ")
-		       TEXT("decay %.0f m, wavelength %.0f m, lee %s"),
-		       *OrographicTerrain.Name, *OrographicTerrain.Crs,
-		       Card.OrographicWindSpeedMps, Card.OrographicWindFromDeg,
-		       Card.OrographicDecayHeightMetres, Card.OrographicWavelengthMetres,
-		       Card.bOrographicLee ? TEXT("on") : TEXT("off"));
-	}
-
-	// Phase 7 environment couplings. Each one needs only the parameters the
-	// card carries; the projection context is the one that placed the terrain.
-	if (Card.bDownburst)
-	{
-		Downburst.Init(Card.DownburstCentreNorthMetres,
-		               Card.DownburstCentreEastMetres,
-		               Card.DownburstCoreRadiusMetres,
-		               Card.DownburstOutflowMaxMps,
-		               Card.DownburstOutflowHeightMetres);
-		bDownburstReady = true;
-		UE_LOG(LogFlightSimScenario, Display,
-		       TEXT("downburst at local (%.0f, %.0f) m: core %.0f m, outflow ")
-		       TEXT("%.1f m/s peaking at %.0f m AGL -- POSITION-COUPLED"),
-		       Card.DownburstCentreNorthMetres, Card.DownburstCentreEastMetres,
-		       Card.DownburstCoreRadiusMetres, Card.DownburstOutflowMaxMps,
-		       Card.DownburstOutflowHeightMetres);
-	}
-	if (Card.bRotor)
-	{
-		RotorCard.SigmaGain = Card.RotorSigmaGain;
-		RotorCard.SigmaPerW20 = Card.RotorSigmaPerW20;
-		RotorCard.W20CapFps = Card.RotorW20CapFps;
-		RotorCard.BackgroundW20Fps = Card.RotorBackgroundW20Fps;
-		bRotorReady = true;
-		UE_LOG(LogFlightSimScenario, Display,
-		       TEXT("lee-rotor turbulence: W20 = clamp(gain %.2f x lee sink / ")
-		       TEXT("%.3f, background %.1f fps, cap %.1f fps), written per step ")
-		       TEXT("-- W20 only, seed and severity stay configure-time (§13)"),
-		       Card.RotorSigmaGain, Card.RotorSigmaPerW20,
-		       Card.RotorBackgroundW20Fps, Card.RotorW20CapFps);
-	}
-	if (Card.bLogProfile)
-	{
-		LogProfileCard.ReferenceSpeedMps = Card.LogProfileReferenceSpeedMps;
-		LogProfileCard.ReferenceHeightMetres = Card.LogProfileReferenceHeightMetres;
-		LogProfileCard.Z0Metres = Card.LogProfileZ0Metres;
-		LogProfileCard.SurfaceLayerTopMetres = Card.LogProfileSurfaceLayerTopMetres;
-		const double Radians = FMath::DegreesToRadians(Card.LogProfileFromDegrees);
-		LogProfileCard.NorthUnit = -FMath::Cos(Radians);
-		LogProfileCard.EastUnit = -FMath::Sin(Radians);
-		bLogProfileReady = true;
-		UE_LOG(LogFlightSimScenario, Display,
-		       TEXT("log-profile surface layer: %.1f m/s at %.0f m ref, z0 %.4f m, ")
-		       TEXT("held above %.0f m AGL"),
-		       Card.LogProfileReferenceSpeedMps,
-		       Card.LogProfileReferenceHeightMetres, Card.LogProfileZ0Metres,
-		       Card.LogProfileSurfaceLayerTopMetres);
-	}
-	if (Card.bThermals)
-	{
-		ThermalsCard.WstarMps = Card.ThermalsWstarMps;
-		ThermalsCard.ZiMetres = Card.ThermalsZiMetres;
-		ThermalsCard.AreaNorthMetres = Card.ThermalsAreaNorthMetres;
-		ThermalsCard.AreaEastMetres = Card.ThermalsAreaEastMetres;
-		ThermalsCard.OriginXMetres = Card.ThermalsOriginXMetres;
-		ThermalsCard.OriginYMetres = Card.ThermalsOriginYMetres;
-		ThermalsCard.NorthMetres = Card.ThermalNorthMetres;
-		ThermalsCard.EastMetres = Card.ThermalEastMetres;
-		bThermalsReady = true;
-		UE_LOG(LogFlightSimScenario, Display,
-		       TEXT("thermals (Allen TM-2006-214019): %d updrafts, w* %.2f m/s, ")
-		       TEXT("zi %.0f m over %.0f x %.0f m"),
-		       Card.ThermalNorthMetres.Num(), Card.ThermalsWstarMps,
-		       Card.ThermalsZiMetres, Card.ThermalsAreaNorthMetres,
-		       Card.ThermalsAreaEastMetres);
-	}
-
-	// -- ground ------------------------------------------------------------
-	// The plugin answers JSBSim's ground queries with a line trace against
-	// world geometry (UEGroundCallback). With nothing to hit it reports height
-	// above terrain 0.0 everywhere, which puts a cruising aircraft's landing
-	// gear in permanent ground contact.
-	if (!Card.CollisionTerrainPath.IsEmpty())
-	{
-		// Phase 7 1.2: real heightfield collision, built from the SAME baked
-		// raster the visuals draw and the orographic field samples -- one
-		// raster, one sha, all three uses. Replaces the flat slab entirely
-		// for this card; VerifyTrimmedCondition checks against the raster.
-		if (!BuildTerrainCollision(Card, Error))
-		{
-			return false;
-		}
-	}
-	else
-	{
-		// A query-only slab is the smallest thing that makes the ground
-		// model tell the truth over abstract terrain.
-		const double TrackMetres = Card.AirspeedKnots * KnotsToMetresPerSecond * Card.DurationSeconds;
-		const double HalfExtentCm = (5000.0 + 2.0 * TrackMetres) * MetresToCentimetres;
-		const double HalfThicknessCm = 500.0 * MetresToCentimetres;
-
-		AActor* Ground = World->SpawnActor<AActor>();
-		UBoxComponent* Slab = NewObject<UBoxComponent>(Ground, TEXT("GroundSlab"));
-		Ground->SetRootComponent(Slab);
-		Slab->SetBoxExtent(FVector(HalfExtentCm, HalfExtentCm, HalfThicknessCm), false);
-		Slab->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-		Slab->SetCollisionObjectType(ECC_WorldStatic);
-		Slab->SetCollisionResponseToAllChannels(ECR_Block);
-		Slab->RegisterComponent();
-		// Top face at engine Z = 0, which the georeferencing origin puts at
-		// the spec's terrain elevation.
-		Ground->SetActorLocation(FVector(0.0, 0.0, -HalfThicknessCm));
-	}
-
 	// -- tornado funnel marker (Phase 9.3, VISUAL) -------------------------
 	// A dark tapered tube at the vortex axis, ground to the wall cloud's
 	// base, under a ragged wall cloud (visual round 6): a SCHEMATIC MARKER
@@ -1927,6 +1735,208 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 		       FunnelTopMetres, TornadoOmegaDegPerSec, WallTopMetres,
 		       2.0 * TornadoWallRadii * RCore, TornadoWallOmegaDegPerSec);
 	}
+}
+
+bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
+                                       FString& Error, bool bLiveWorld)
+{
+	// -- georeferencing ----------------------------------------------------
+	// Round planet with the UE origin pinned at the spec's ground point, so
+	// engine Z=0 is the spec's terrain elevation and the engine frame is the
+	// local tangent frame. The plugin derives every initial condition from the
+	// actor's transform through this actor, so it has to exist first.
+	GeoReferencing = World->SpawnActor<AGeoReferencingSystem>();
+	if (GeoReferencing == nullptr)
+	{
+		Error = TEXT("could not spawn AGeoReferencingSystem");
+		return false;
+	}
+	GeoReferencing->PlanetShape = EPlanetShape::RoundPlanet;
+	GeoReferencing->bOriginAtPlanetCenter = false;
+	GeoReferencing->bOriginLocationInProjectedCRS = false;
+	GeoReferencing->OriginLatitude = Card.LatitudeDegrees;
+	GeoReferencing->OriginLongitude = Card.LongitudeDegrees;
+	GeoReferencing->OriginAltitude = Card.TerrainElevationMetres;
+
+	// Real-terrain cards work in the raster's own projected CRS: the
+	// orographic wind queries it per step and the visual pass places terrain
+	// through ProjectedToEngine. Both go through this one PROJ context, so
+	// the mountain the wind comes off and the mountain on screen cannot be
+	// two different projections of the data.
+	if (Card.bOrographic)
+	{
+		if (!OrographicTerrain.Load(Card.OrographicTerrainPath, Error))
+		{
+			return false;
+		}
+		if (OrographicTerrain.Crs.IsEmpty() || !OrographicTerrain.bProjected)
+		{
+			Error = FString::Printf(
+				TEXT("orographic terrain '%s' carries no projected CRS; the ")
+				TEXT("aircraft's position cannot be mapped onto it honestly."),
+				*Card.OrographicTerrainPath);
+			return false;
+		}
+		GeoReferencing->ProjectedCRS = OrographicTerrain.Crs;
+	}
+	if (!Card.CollisionTerrainPath.IsEmpty())
+	{
+		if (!CollisionTerrain.Load(Card.CollisionTerrainPath, Error))
+		{
+			return false;
+		}
+		if (CollisionTerrain.Crs.IsEmpty() || !CollisionTerrain.bProjected)
+		{
+			Error = FString::Printf(
+				TEXT("collision terrain '%s' carries no projected CRS; the ")
+				TEXT("ground cannot be placed honestly."),
+				*Card.CollisionTerrainPath);
+			return false;
+		}
+		if (Card.bOrographic && CollisionTerrain.Crs != OrographicTerrain.Crs)
+		{
+			Error = TEXT("collision and orographic terrain disagree about the "
+			             "CRS; refusing two different grounds");
+			return false;
+		}
+		GeoReferencing->ProjectedCRS = CollisionTerrain.Crs;
+	}
+	if ((!Card.SceneCrs.IsEmpty() || !Card.ThermalsCrs.IsEmpty())
+	    && !Card.bOrographic && Card.CollisionTerrainPath.IsEmpty())
+	{
+		// Phase 9: a flat-scene run has no terrain to anchor the
+		// projection, so the card declares it (the spec origin's UTM zone,
+		// chosen in Python; card-level scene_crs, with the thermals
+		// block's own crs honoured for older cards) -- one frame for both
+		// hosts rather than a reliance on the plugin's default.
+		GeoReferencing->ProjectedCRS = Card.SceneCrs.IsEmpty()
+			? Card.ThermalsCrs : Card.SceneCrs;
+	}
+	GeoReferencing->ApplySettings();
+
+	if (Card.bOrographic)
+	{
+		Orographic.Init(&OrographicTerrain,
+		                Card.OrographicWindSpeedMps, Card.OrographicWindFromDeg,
+		                Card.OrographicDecayHeightMetres,
+		                Card.OrographicWavelengthMetres, Card.bOrographicLee,
+		                Card.OrographicOriginXMetres, Card.OrographicOriginYMetres);
+		bOrographicReady = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("orographic wind over '%s' (%s): %.1f m/s from %.0f deg, ")
+		       TEXT("decay %.0f m, wavelength %.0f m, lee %s"),
+		       *OrographicTerrain.Name, *OrographicTerrain.Crs,
+		       Card.OrographicWindSpeedMps, Card.OrographicWindFromDeg,
+		       Card.OrographicDecayHeightMetres, Card.OrographicWavelengthMetres,
+		       Card.bOrographicLee ? TEXT("on") : TEXT("off"));
+	}
+
+	// Phase 7 environment couplings. Each one needs only the parameters the
+	// card carries; the projection context is the one that placed the terrain.
+	if (Card.bDownburst)
+	{
+		Downburst.Init(Card.DownburstCentreNorthMetres,
+		               Card.DownburstCentreEastMetres,
+		               Card.DownburstCoreRadiusMetres,
+		               Card.DownburstOutflowMaxMps,
+		               Card.DownburstOutflowHeightMetres);
+		bDownburstReady = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("downburst at local (%.0f, %.0f) m: core %.0f m, outflow ")
+		       TEXT("%.1f m/s peaking at %.0f m AGL -- POSITION-COUPLED"),
+		       Card.DownburstCentreNorthMetres, Card.DownburstCentreEastMetres,
+		       Card.DownburstCoreRadiusMetres, Card.DownburstOutflowMaxMps,
+		       Card.DownburstOutflowHeightMetres);
+	}
+	if (Card.bRotor)
+	{
+		RotorCard.SigmaGain = Card.RotorSigmaGain;
+		RotorCard.SigmaPerW20 = Card.RotorSigmaPerW20;
+		RotorCard.W20CapFps = Card.RotorW20CapFps;
+		RotorCard.BackgroundW20Fps = Card.RotorBackgroundW20Fps;
+		bRotorReady = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("lee-rotor turbulence: W20 = clamp(gain %.2f x lee sink / ")
+		       TEXT("%.3f, background %.1f fps, cap %.1f fps), written per step ")
+		       TEXT("-- W20 only, seed and severity stay configure-time (§13)"),
+		       Card.RotorSigmaGain, Card.RotorSigmaPerW20,
+		       Card.RotorBackgroundW20Fps, Card.RotorW20CapFps);
+	}
+	if (Card.bLogProfile)
+	{
+		LogProfileCard.ReferenceSpeedMps = Card.LogProfileReferenceSpeedMps;
+		LogProfileCard.ReferenceHeightMetres = Card.LogProfileReferenceHeightMetres;
+		LogProfileCard.Z0Metres = Card.LogProfileZ0Metres;
+		LogProfileCard.SurfaceLayerTopMetres = Card.LogProfileSurfaceLayerTopMetres;
+		const double Radians = FMath::DegreesToRadians(Card.LogProfileFromDegrees);
+		LogProfileCard.NorthUnit = -FMath::Cos(Radians);
+		LogProfileCard.EastUnit = -FMath::Sin(Radians);
+		bLogProfileReady = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("log-profile surface layer: %.1f m/s at %.0f m ref, z0 %.4f m, ")
+		       TEXT("held above %.0f m AGL"),
+		       Card.LogProfileReferenceSpeedMps,
+		       Card.LogProfileReferenceHeightMetres, Card.LogProfileZ0Metres,
+		       Card.LogProfileSurfaceLayerTopMetres);
+	}
+	if (Card.bThermals)
+	{
+		ThermalsCard.WstarMps = Card.ThermalsWstarMps;
+		ThermalsCard.ZiMetres = Card.ThermalsZiMetres;
+		ThermalsCard.AreaNorthMetres = Card.ThermalsAreaNorthMetres;
+		ThermalsCard.AreaEastMetres = Card.ThermalsAreaEastMetres;
+		ThermalsCard.OriginXMetres = Card.ThermalsOriginXMetres;
+		ThermalsCard.OriginYMetres = Card.ThermalsOriginYMetres;
+		ThermalsCard.NorthMetres = Card.ThermalNorthMetres;
+		ThermalsCard.EastMetres = Card.ThermalEastMetres;
+		bThermalsReady = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("thermals (Allen TM-2006-214019): %d updrafts, w* %.2f m/s, ")
+		       TEXT("zi %.0f m over %.0f x %.0f m"),
+		       Card.ThermalNorthMetres.Num(), Card.ThermalsWstarMps,
+		       Card.ThermalsZiMetres, Card.ThermalsAreaNorthMetres,
+		       Card.ThermalsAreaEastMetres);
+	}
+
+	// -- ground ------------------------------------------------------------
+	// The plugin answers JSBSim's ground queries with a line trace against
+	// world geometry (UEGroundCallback). With nothing to hit it reports height
+	// above terrain 0.0 everywhere, which puts a cruising aircraft's landing
+	// gear in permanent ground contact.
+	if (!Card.CollisionTerrainPath.IsEmpty())
+	{
+		// Phase 7 1.2: real heightfield collision, built from the SAME baked
+		// raster the visuals draw and the orographic field samples -- one
+		// raster, one sha, all three uses. Replaces the flat slab entirely
+		// for this card; VerifyTrimmedCondition checks against the raster.
+		if (!BuildTerrainCollision(Card, Error))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		// A query-only slab is the smallest thing that makes the ground
+		// model tell the truth over abstract terrain.
+		const double TrackMetres = Card.AirspeedKnots * KnotsToMetresPerSecond * Card.DurationSeconds;
+		const double HalfExtentCm = (5000.0 + 2.0 * TrackMetres) * MetresToCentimetres;
+		const double HalfThicknessCm = 500.0 * MetresToCentimetres;
+
+		AActor* Ground = World->SpawnActor<AActor>();
+		UBoxComponent* Slab = NewObject<UBoxComponent>(Ground, TEXT("GroundSlab"));
+		Ground->SetRootComponent(Slab);
+		Slab->SetBoxExtent(FVector(HalfExtentCm, HalfExtentCm, HalfThicknessCm), false);
+		Slab->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Slab->SetCollisionObjectType(ECC_WorldStatic);
+		Slab->SetCollisionResponseToAllChannels(ECR_Block);
+		Slab->RegisterComponent();
+		// Top face at engine Z = 0, which the georeferencing origin puts at
+		// the spec's terrain elevation.
+		Ground->SetActorLocation(FVector(0.0, 0.0, -HalfThicknessCm));
+	}
+
+	// -- tornado funnel marker: SpawnTornadoMarkers (above Populate) ----------
+	SpawnTornadoMarkers(Card);
 
 	// -- the aircraft ------------------------------------------------------
 	// In a live world SpawnActor dispatches BeginPlay inside the call, and

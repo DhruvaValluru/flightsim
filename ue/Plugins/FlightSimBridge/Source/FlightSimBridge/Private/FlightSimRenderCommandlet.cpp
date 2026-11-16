@@ -3169,6 +3169,18 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			                            *TornadoLook));
 		}
 		Scenario.TornadoLook = TornadoLook;
+		// 2026-11-15 (hyperreal light lane tornado): -tornado-shade=funnel|smoke, the vdb card's
+		// shading (FlightSimTornadoBeauty.cpp); funnel, the default, is the condensation funnel,
+		// smoke generation 2's card. Another word refuses by name, on any beauty run.
+		FString TornadoShade = TEXT("funnel");
+		FParse::Value(*(Params + TEXT(" ") + FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"))),
+		              TEXT("tornado-shade="), TornadoShade);
+		if (bBeauty && TornadoShade != TEXT("funnel") && TornadoShade != TEXT("smoke"))
+		{
+			return Fail(FString::Printf(TEXT("render.tornado_shade: -tornado-shade=%s is not funnel or smoke"),
+			                            *TornadoShade));
+		}
+		Scenario.TornadoShade = TornadoShade;
 		if (bBeauty && Card.bTornado)
 		{
 			Scenario.BuildBeautyTornado(Card, VisualScene.BeautyOnlyActors, VisualScene.LookApplied);

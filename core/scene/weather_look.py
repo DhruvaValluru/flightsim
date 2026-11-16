@@ -404,6 +404,48 @@ BEAUTY_TORNADO_PUFF_SETS = ("dust", "debris", "scud")
 #: completes about the wall cloud's base: the funnel hangs DOWN from the deck.
 BEAUTY_TORNADO_FLIPBOOK_COLOUR = (0.15, 0.155, 0.17)
 BEAUTY_TORNADO_FLIPBOOK_HEIGHT_SHARE = 1.40
+#: 2026-11-15 (hyperreal light lane tornado): -tornado-shade=funnel (the default), the
+#: card shaded as a condensation funnel (M_TornadoFlipbook 3; FlightSimTornadoBeauty.cpp
+#: BeautyFlipbookFunnel*, where each number's source is stated). colour: a cloud's two-stream
+#: albedo (1 - g) tau / (2 + (1 - g) tau) at g 0.85, tau 7.5 (tornado_flipbook_albedo);
+#: shade_floor, sheath_lift, contrast and the 100 m chord tuned by eye on the Mac look-dev
+#: still of #10 (2026-11-15: 0.43 / 0.55 / 0.25 read paper-white against the storm base);
+#: -tornado-shade=smoke keeps BEAUTY_TORNADO_FLIPBOOK_COLOUR and the material's generation-2
+#: defaults. UNCALIBRATED.
+BEAUTY_TORNADO_FLIPBOOK_FUNNEL = {
+    "colour": (0.36, 0.36, 0.36), "shade_floor": 0.45, "alpha_lo": 0.15, "alpha_hi": 0.55,
+    "sheath_lift": 0.10, "bands": 6.0, "contrast": 0.30, "corrugate": 0.06, "bottom_width": 0.35,
+    "dust_share_max": 0.35,
+}
+BEAUTY_TORNADO_FLIPBOOK_SHADES = ("funnel", "smoke")
+
+
+def tornado_flipbook_albedo(lwc_g_m3: float = 0.5, r_e_um: float = 10.0, path_m: float = 100.0,
+                            g: float = 0.85) -> float:
+    """A cloud's two-stream albedo (Bohren 1987): tau = 3 LWC L / (2 rho_w r_e) (Stephens
+    1978), R = (1 - g) tau / (2 + (1 - g) tau)."""
+    tau = 3.0 * (lwc_g_m3 * 1.0e-3) * path_m / (2.0 * 1000.0 * r_e_um * 1.0e-6)
+    return (1.0 - g) * tau / (2.0 + (1.0 - g) * tau)
+
+
+def dust_whirl_top_m() -> float:
+    """The dust whirl's highest reach above the ground: its highest puff centre
+    (0.25 x size + top_m) plus half the largest puff."""
+    d = BEAUTY_TORNADO_PUFFS["dust"]
+    return d["top_m"] + 0.75 * d["size_m"][1]
+
+
+def flipbook_dust_share(card_height_m: float) -> float:
+    """M_TornadoFlipbook 3's DustShare under -tornado-shade=funnel: the dust whirl's top
+    over the card's height, at most dust_share_max (generation 2's fixed share)."""
+    top = dust_whirl_top_m() / max(float(card_height_m), 1.0)
+    return min(max(top, 0.0), BEAUTY_TORNADO_FLIPBOOK_FUNNEL["dust_share_max"])
+
+
+def flipbook_dust_sort_offset_m(card_height_m: float, r_core_m: float) -> float:
+    """How far nearer every dust puff sorts under -tornado-shade=funnel: the card's half
+    height + the whirl's reach + its top, so no puff can sort behind the card's centre."""
+    return 0.5 * float(card_height_m) + float(r_core_m) * dust_whirl_extent_radii() + dust_whirl_top_m()
 
 
 def beauty_funnel_radius_radii(height_share: float) -> float:
