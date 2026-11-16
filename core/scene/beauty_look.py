@@ -1631,7 +1631,7 @@ def world_preset_for_card(card: Optional[Mapping[str, Any]],
     the exposure follow the world the frame is drawn in.
     ``weather_draws_cell``: the storm weather draws a cell (a thunderstorm
     event; the host also counts that as a storm)."""
-    from core.scene.world_beauty import card_wind_mps, select_preset
+    from core.scene.world_beauty import card_wind_mps, is_storm_word, select_preset
 
     def obj(parent: Any, key: str) -> Dict[str, Any]:
         value = parent.get(key) if isinstance(parent, Mapping) else None
@@ -1649,7 +1649,12 @@ def world_preset_for_card(card: Optional[Mapping[str, Any]],
     weather = obj(card, "weather_look")
     rain = max(num(look, "precipitation_rate_mmh"), num(weather, "rain_rate_mmh"))
     rain_word = str(look.get("precipitation", "")) == "rain"
-    storm = str(weather.get("storm", "")) == "thunderstorm" or bool(weather_draws_cell)
+    # hl-fixes (2026-11-16): ANY storm word, as the host's FlightSimClouds Build
+    # and world_beauty.card_inputs read it. "== thunderstorm" made a tornado card
+    # (#10, round 1410) a "clear" preset: under_deck False although its deck is
+    # drawn, so the exposure took the clear-sky incident anchor (no frame meter,
+    # no overcast fraction) and the frame rendered crushed (luma 0.018).
+    storm = is_storm_word(str(weather.get("storm", ""))) or bool(weather_draws_cell)
     cover = 0.0
     layers = look.get("clouds")
     if isinstance(layers, list) and layers and isinstance(layers[0], Mapping):
