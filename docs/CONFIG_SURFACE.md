@@ -35,6 +35,7 @@ Every switch the program reads, each with one decision. **ui**: stays exposed, i
 | `FLIGHTSIM_HDRI_CACHE` | `hdri_cache` | dev-only | unset | `core/scene/sky_hdri.py:81` |
 | `FLIGHTSIM_RAIN_VEIL` | `rain_veil` | dev-only | unset | `ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp:1104`, `core/scene/rain_veil.py:34` |
 | `FLIGHTSIM_TERRAIN_DETAIL` | `terrain_detail` | dev-only | unset | `scripts/ue_create_materials.py:3323` |
+| `FLIGHTSIM_WET_GROUND` | `wet_ground` | dev-only | unset | `scripts/ue_create_materials.py:3832` |
 | `FLIGHTSIM_ASSETS_DIR` | `assets_dir` | dev-only | unset | `scripts/fetch_tornado_vdb.py:40`, `scripts/fetch_cloud_vdbs.py:64` |
 | `FLIGHTSIM_BATCH_MIN_FREE_MB` | `batch_min_free_mb` | dev-only | 4096 | `scripts/run_test_scenarios.py:642` |
 | `FLIGHTSIM_BEAUTY_POST` | `beauty_post` | dev-only | unset | `scripts/beauty_post.py:79`, `webapp/runs.py:3616`, `scripts/visual_round.py:150` |

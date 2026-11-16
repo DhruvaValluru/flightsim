@@ -216,6 +216,11 @@ SETTINGS: Tuple[Setting, ...] = (
             "off builds M_FlightSimTilesBeauty without lane B's CC0 terrain detail (the fallback if the "
             "shared sampler fails to compile on the render machine); read only when the material "
             "script runs. Beauty only."),
+    Setting("wet_ground", "FLIGHTSIM_WET_GROUND", "dev-only", None,
+            ("scripts/ue_create_materials.py:3832",),
+            "film builds M_FlightSimTilesBeauty (generation 12) with Lekner & Dorf's wet-film model and "
+            "the wet specular AA (stamp 12-film-wet); unset is generation 10's wet law, the default until "
+            "the Windows A/B on #09 / #10 / #15. Read only when the material script runs. Beauty only."),
     Setting("assets_dir", "FLIGHTSIM_ASSETS_DIR", "dev-only", None,
             ("scripts/fetch_tornado_vdb.py:40", "scripts/fetch_cloud_vdbs.py:64"),
             "The root of the asset cache outside git (default <repo>/../flightsim_assets): "

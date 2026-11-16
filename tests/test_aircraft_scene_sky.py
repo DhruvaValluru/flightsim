@@ -11,9 +11,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import aircraft_scene_sky as ss  # noqa: E402
 
-ENV = (ROOT / "assets/shaders/aircraft/scene_sky_env.hlsl").read_text()
-DIR = (ROOT / "assets/shaders/aircraft/scene_sky_dir.hlsl").read_text()
-FX = (ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimAircraftFX.cpp").read_text()
+ENV = (ROOT / "assets/shaders/aircraft/scene_sky_env.hlsl").read_text(encoding="utf-8")
+DIR = (ROOT / "assets/shaders/aircraft/scene_sky_dir.hlsl").read_text(encoding="utf-8")
+FX = (ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimAircraftFX.cpp").read_text(encoding="utf-8")
 
 
 def test_rayleigh_column_matches_bucholtz_550nm():
@@ -103,6 +103,6 @@ def test_switch_key_is_not_read_as_another_switch():
     # FParse::Value matches a key anywhere in the argument string: the first
     # name, -reflect-scene-sky=off, was read as the sky plan (-sky=) "off".
     keys = set(re.findall(r'TEXT\("-?([A-Za-z0-9_.-]+=)"\)', "".join(
-        p.read_text(errors="ignore") for p in (ROOT / "ue/Plugins/FlightSimBridge/Source").rglob("*.cpp"))))
+        p.read_text(encoding="utf-8", errors="ignore") for p in (ROOT / "ue/Plugins/FlightSimBridge/Source").rglob("*.cpp"))))
     assert ss.SWITCH_KEY == "scene-mirror="
     assert not [k for k in keys if k != ss.SWITCH_KEY and ss.SWITCH_KEY.endswith(k)]

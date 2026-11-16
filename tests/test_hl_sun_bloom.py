@@ -45,6 +45,6 @@ def test_threshold_sits_between_white_and_the_sun():
 
 
 def test_host_reads_the_switch():
-    src = CPP.read_text()
+    src = CPP.read_text(encoding="utf-8")
     assert 'TEXT("bloom-mode=")' in src
     assert re.search(r'BloomThresholdFull"\) : TEXT\("BloomThresholdSun"', src)

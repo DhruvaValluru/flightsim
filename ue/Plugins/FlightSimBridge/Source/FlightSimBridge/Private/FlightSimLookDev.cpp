@@ -68,9 +68,8 @@
 #include "FlightSimWeather.h"
 
 // FlightSimRenderCommandlet.cpp: the commandlet's own BuildMeshAirframe.
-bool FlightSimLookDevBuildMeshAirframe(AActor* Aircraft, const FString& ManifestPath,
-                                       const FString& CardAircraft, const FString& Livery,
-                                       int32 StartGearUp, FString& Error);
+// (One line: tests/test_unity_names.py reads a multi-line declaration as a definition.)
+bool FlightSimLookDevBuildMeshAirframe(AActor* Aircraft, const FString& ManifestPath, const FString& CardAircraft, const FString& Livery, int32 StartGearUp, FString& Error);
 
 DEFINE_LOG_CATEGORY_STATIC(LogFlightSimLookDev, Log, All);
 
