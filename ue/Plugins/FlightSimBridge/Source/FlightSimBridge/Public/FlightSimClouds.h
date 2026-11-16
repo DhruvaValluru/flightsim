@@ -186,6 +186,13 @@ private:
 	// /Game/FlightSim/Sky/T_SkyHdri_<name>) on the sky light as its specified
 	// cubemap, clear and hazy presets only. Recorded in world_beauty.sky_hdri.
 	bool ApplySkyHdri(FFlightSimVisualScene& Scene, const FString& Name, const TCHAR* Params, FString& Error);
+	// Sky step 6 (the owner's X-Plane-12 brief): the high cirrus sheet (one
+	// earth-curved translucent disc at 10-13 km, above the flight,
+	// M_FlightSimCirrus; no depth, no custom depth, BeautyOnlyActors), drawn from
+	// the plan's cirrus_coverage (data) or the stated default; streaks along the
+	// card's drift bearing; drifts at CirrusWindGain x the drift. Recorded in
+	// world_beauty.cirrus. -look-cirrus=on|off (on by default). VISUAL ONLY.
+	void ApplyCirrus(UWorld* World, FFlightSimVisualScene& Scene, int32 Seed);
 
 	bool bBuilt = false;
 	// A -sky= plan lights the scene (FFlightSimSky): it owns the sun's
@@ -244,6 +251,9 @@ private:
 		double Falloff = 0.0;
 	};
 	TArray<FBeautyFogProfile> FogProfiles;
+	// Sky step 6: -look-cirrus=on|off (Build reads it; on by default; off builds no
+	// cirrus sheet: the round-95 upper sky). Another word refuses by name.
+	FString CirrusSwitch = TEXT("on");
 	// Sky step 2: the -sky= plan Build was given (nullptr without one); ApplyClouds
 	// reads its cloud fields (FFlightSimSkyPlan::CloudType and the rest).
 	const FFlightSimSkyPlan* SkyPlanRef = nullptr;
@@ -289,6 +299,18 @@ private:
 		bool bDrawn = false;
 	};
 	FDistantSheetState DistantSheet;
+	// Sky step 6: the cirrus sheet (ApplyCirrus; Advance re-centres it on the
+	// camera, sets its altitude and fade by FlightSimWorldPure::CirrusSheetAltitudeM
+	// and drifts it at CirrusWindGain x the card's drift).
+	struct FCirrusSheetState
+	{
+		AActor* Actor = nullptr;
+		UProceduralMeshComponent* Mesh = nullptr;
+		UMaterialInstanceDynamic* Material = nullptr;
+		double Cover = 0.0;
+		bool bDrawn = false;
+	};
+	FCirrusSheetState CirrusSheet;
 	// Drawn clouds the per-frame occlusion row does not model (ApplyClouds).
 	int32 UnmodelledClouds = 0;
 	double DriftMps = 0.0;

@@ -298,7 +298,10 @@ def test_the_host_records_every_clouds_key_load_reads_and_only_the_pinned_set():
     load = _between(_read(SKY_CPP), "bool FFlightSimSkyPlan::Load(", "void FFlightSimSky::EnableRendererFeatures()")
     read_keys = set(re.findall(r'CloudsJson->TryGet\w+Field\(TEXT\("(\w+)"\)', load))
     assert read_keys == {"enabled", "cloud_type", "coverage", "density", "detail", "cirrus_coverage",
-                         "coverage_source", "march_tier", "seed"}
+                         "coverage_source", "march_tier", "seed", "cover_inputs"}
+    # sky step 6: cover_inputs only says whether the cover came from data
+    # (bCloudCoverFromData); the cirrus record carries it, not the plan record
+    read_keys -= {"cover_inputs"}
     apply = _between(_read(CPP), "void FFlightSimWorldBeauty::ApplyClouds(",
                      "void FFlightSimWorldBeauty::KeepAircraftClearOfClouds(")
     plan_out = _between(apply, "TSharedPtr<FJsonObject> PlanOut = MakeShared<FJsonObject>();",

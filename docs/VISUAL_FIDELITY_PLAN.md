@@ -684,8 +684,8 @@ name, `sky_light_cloud_bottom_occlusion_before_belly_cap`, `belly_occlusion_cap`
 `tests/test_cloud_wisp.py` (C++ == Python == HLSL == material script), `test_cloud_tiers.py` (the
 shader body compiled as C++ against the Python twin with the wisp on and off), `test_cloud_billow.py`,
 `test_distant_clouds.py`. Measure it on the Windows laptop with
-`.\scripts\visual_fix_round.ps1 -Round 100 -Scenes "3,13" -CompareWith 95` (on) and
-`.\scripts\visual_fix_round.ps1 -Round 101 -Scenes "3,13" -Switches "-look-cloud-wisp=off" -CompareWith 100`
+`.\scripts\visual_fix_round.ps1 -Round 125 -Scenes "3,13" -CompareWith 95` (on) and
+`.\scripts\visual_fix_round.ps1 -Round 126 -Scenes "3,13" -Switches "-look-cloud-wisp=off" -CompareWith 125`
 (the A/B; 101 must be r95 pixel for pixel but for the scattering constants and the sheet's three
 numbers, which are not switched). Kill criterion: `887a0006` (TDR) in the log -> render with
 `-look-cloud-wisp=off` and file it. Unknown until rendered: whether 0.6 cells of flow reads as
@@ -1297,7 +1297,14 @@ and the reference photo. Frames: `docs/visual/round_110..113/03_*.jpg` and
 `docs/visual/round_115..118/13_*.jpg`. On scene 13 the stratocumulus and overcast tiles show a
 deck above the 747 (the plan layer keeps bottom = AGL + 1 km; only an unstated cumulus layer is
 lowered, c641a8c4): the rule, not a defect.
-### Sky step 4 (2026-11-15): atmosphere and horizon haze, the sky's multiple scattering on every GPU, the sun bloom per preset
+### Sky step 4 (2026-11-15): atmosphere and horizon haze, the sky's multiple scattering (-sky-multi-scatter=auto|on|off)
+
+**claude/hl-sky merge note (2026-11-15).** Two parts of variant b changed on the sky
+base branch: `-sky-multi-scatter=auto` keeps ef361bd6's class gate (the iGPU keeps the
+engine's 1.0; `-sky-multi-scatter=on` applies the row's 1.25 on every class and is round
+121's A/B; `-sky-multi-scatter=off` is 1.0 everywhere), and the per-preset sun bloom
+(`light_shaft_bloom` rows in FlightSimHeroLighting.cpp) is NOT merged: that file belongs
+to the hero-lighting lane. The text below describes variant b as written.
 
 Step 4 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
 docs/visual/XPLANE_SKY_DESIGN.md §6, with the "Built (sky step 4" note there for where the
@@ -1399,24 +1406,121 @@ scene 13's 10 km zenith is physically darker). The exact Windows measurements, w
 `FLIGHTSIM_SKY=physical` set in the shell (one switch set per round, FIX_ROUND_PROTOCOL;
 round numbers are placeholders after the wave's 97-108, the owner assigns the real ones):
 
-    .\scripts\visual_fix_round.ps1 -Round 110 -Scenes 3 -CompareWith 95
-    .\scripts\visual_fix_round.ps1 -Round 111 -Scenes 3 -Switches "-sky-multi-scatter=off" -CompareWith 110
-    .\scripts\visual_fix_round.ps1 -Round 112 -Scenes 13,15 -CompareWith 95
-    .\scripts\visual_fix_round.ps1 -Round 113 -Scenes 1,11 -CompareWith 95
+    .\scripts\visual_fix_round.ps1 -Round 120 -Scenes 3 -CompareWith 95
+    .\scripts\visual_fix_round.ps1 -Round 121 -Scenes 3 -Switches "-sky-multi-scatter=on" -CompareWith 120
+    .\scripts\visual_fix_round.ps1 -Round 122 -Scenes 13,15 -CompareWith 95
+    .\scripts\visual_fix_round.ps1 -Round 123 -Scenes 1,11 -CompareWith 95
 
-Round 110 is the step at its defaults on the low camera: pass = the log has no `887a0006`
+Round 120 is the step at its defaults on the low camera: pass = the log has no `887a0006`
 and the frame completes; read `atmosphere.horizon_haze.profile_applied` true,
 `fog_height_falloff` 0.01202 and `fog_height_z_m` at the aircraft's altitude in render.json,
 and compare the sky's top-to-bottom gradient against round 95's flat frame (visual_compare's
-mean luma per band). Round 111 is the multi-scatter A/B (expect `multi_scattering_applied`
-false and `multi_scattering_factor` 1); the fog profile's own A/B is the overrides file
+mean luma per band). Round 121 is the multi-scatter A/B (expect `multi_scattering_applied`
+true and `multi_scattering_factor` the row's 1.25 on the iGPU; auto keeps the class gate on claude/hl-sky); the fog profile's own A/B is the overrides file
 `{"atmosphere": {"clear": {"fog_scale_height_km": 0}}}` passed as
-`-Switches "-world-beauty-overrides=<path>"` against 110. Round 112 is the cruise camera
+`-Switches "-world-beauty-overrides=<path>"` against 120. Round 122 is the cruise camera
 (#13's dark sea, #15's veil): expect the sea and the ground to read through, and
-`frames[].fog_reference_z_m` near 10 km. Round 113 is the ridge layering (Matterhorn, golden
+`frames[].fog_reference_z_m` near 10 km. Round 123 is the ridge layering (Matterhorn, golden
 hour). Tests: `tests/test_sky_step4_atmosphere.py` (the pure laws compiled with g++ and
 compared, the host's set / move / rebase / record, the switch, the hero rows, the untouched
 measure path, the API check and these docs); `tests/test_world_beauty.py` (the r87 pin's
 docstring says why one setting moved). API: `scripts/check_bridge_api.sh` "Sky step 4" pins
 the fog setters, the /1000 conversions, the 65536 cm clamp, the sky-then-fog order, the LUT
 multiply and the moved component's re-registration.
+### Sky step 6 (2026-11-15): the beauty-only cirrus sheet
+
+Step 6 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
+docs/visual/XPLANE_SKY_DESIGN.md §8, with the "Built" note there for where the code
+narrowed it). VISUAL ONLY. Nothing here was rendered.
+
+**What it draws.** UE draws one volumetric cloud layer, and the reference photograph's
+upper sky is thin cirrus: long translucent wisps and streaks with feathered ends, brighter
+white where thicker, the blue reading through everywhere. `FFlightSimWorldBeauty::ApplyCirrus`
+(FlightSimClouds.cpp, under `-quality=beauty` only, after `ApplyDistantClouds`) spawns one
+earth-curved `UProceduralMeshComponent` disc (48 rings x 96 segments, radius 400 km, each
+ring dropped by the earth's curvature; `BuildCurvedDisc`) on `M_FlightSimCirrus`
+(`scripts/ue_create_materials.py create_world_cirrus`: unlit, translucent, two-sided, fog
+and aerial perspective per pixel, cloud fogging, no custom depth, no velocity; graph
+generation 1, world generation 1). The Custom node body is `assets/shaders/world/cirrus.hlsl`:
+the seeded kilometre frame turned onto the streak bearing and stretched 8x along it, a flow
+warp (the hooks of cirrus uncinus), three gradient-noise octaves cut at the cover's quantile
+with a soft edge 2.5 sigma wide (a veil, never a cut-out), fine along-stream filaments
+modulating the thickness, a slow along-stream noise whose zero crossings thin each streak
+to nothing (the feathered ends); about 32 lattice hashes per covered pixel, no texture, no
+march. Opacity is Beer's law on the slant path through a veil of optical depth 0.6 x
+thickness, capped at 0.6. Light: a normalised Henyey-Greenstein forward lobe (g 0.7, capped
+8, blended 0.6 with an isotropic term) x the sun's illuminance through the atmosphere x
+albedo 0.95 / pi, plus the sky's distant scattered luminance (SkyAtmosphere material nodes,
+light 0): brightest near the sun, sun-tinted at a low sun. Python twin `core/scene/cirrus.py`.
+
+**Where it sits.** `min(max(10 000 m, camera + 1 500 m), 13 000 m)` per frame
+(`FlightSimWorldPure::CirrusSheetAltitudeM`, twin `cirrus.cirrus_sheet`): ABOVE the camera by
+construction (the owner's >= 1 km clearance holds with margin; scene 13's 747 at 10 km gets
+cirrus at 11.5 km), faded out over the clearance as the camera climbs into the cap. The
+c641a8c4 beauty exception (a DEFAULT cumulus layer drawn BELOW a high cruise) is kept and
+untouched: the cumulus stays under the aircraft, the cirrus above it, the camera clear of both.
+The sheet follows the camera (its noise is in world space), drifts with the scene's drift law at
+2 x the card's cloud-base drift (jet-level winds; the plan carries no wind at altitude), and
+its streaks run along the card's drift bearing (else a seeded bearing: `WorldUnit(seed, 1, 0)`).
+
+**The cover** (`cirrus.cirrus_cover`, C++ `CirrusCover`), in order: `-look-cirrus=off` ->
+none; a rain or storm preset -> none (the deck covers the sky); `-cloud-type=cirrus` with no
+data cover above 0 -> the default; a plan whose cover came from DATA (`sky.json` clouds
+`cover_inputs` present: the ERA5 fractions; `FFlightSimSkyPlan::bCloudCoverFromData`) -> its
+`cirrus_coverage` (`cloud_cover_high`), 0 included, so a day with a clear upper sky stays
+clear; else `CIRRUS_DEFAULT_COVER` 0.35, recorded `coverage_source: default` (a stated
+stylisation: the photograph's upper half is roughly a third veiled). Below 0.02 nothing is
+built. The default beauty frame therefore gains a veiled upper sky at this step, by design;
+`-look-cirrus=off` is round 95's upper sky exactly.
+
+**The switch.** `-look-cirrus=on|off` (on by default; command line or `FLIGHTSIM_RENDER_SWITCHES`);
+another word refuses `world_beauty.cirrus: -look-cirrus=...` (catalogued). Registered in
+core/config_surface.py `render_switches`.
+
+**Labels.** The actor is in `Scene.BeautyOnlyActors` (hidden on every label capture:
+`HiddenActors.Append(BeautyOnlyActors)`); the material writes no depth, no custom depth, no
+velocity; no shadow, no collision; translucent sort priority -101 (behind the distant sheet's
+-100). The measure quality never calls `FFlightSimWorldBeauty`; `FFlightSimSky::Build`
+(measure) is untouched (the only new line in FlightSimSky.cpp is `Load` reading
+`cover_inputs`, which `Build` never uses: byte-identical; pinned). Dataset formats, flight
+dynamics and the exposure (plan.py's ev100 is computed before the clouds block) unchanged.
+
+**Recorded** under `look_applied.world_beauty.cirrus`: `switch`, `drawn`, `coverage`,
+`coverage_source` (off | preset | switch | plan | default), `plan_cirrus_coverage`,
+`plan_cover_from_data`, `plan_coverage_source`, `default_cover`, `cover_law`, `preset`,
+`base_m` / `clearance_m` / `max_m` / `altitude_law`, `radius_km`, `rings`, `segments`,
+`vertices`, `triangles`, `droop_at_rim_m`, `sort_priority`, `streak_dir_deg`,
+`streak_dir_source`, `drift_mps`, `wind_gain`, `look` (every material scalar), `seed_offset_km`,
+`material`, `lighting`, `labels`, `visual_only`, `calibration`, `measured`; per frame
+`frames[].cirrus_altitude_m`, `cirrus_fade`.
+
+**UNCALIBRATED.** Every look value (`cirrus.CIRRUS_LOOK`: StreakScaleKm 6, StreakAspect 8,
+EdgeSigmas 2.5, FibreStrength 0.6, FeatherWidth 0.15, OpticalDepth 0.6, MaxOpacity 0.6, Albedo
+0.95, AmbientGain 1, ForwardG 0.7, ForwardShare 0.6, ForwardCap 8, RimFadeShare 0.2, SunDirSign
+1), the altitude law's three heights, the radius, the default cover 0.35, the wind gain 2.
+`SunDirSign` is the A/B for the SkyAtmosphereLightDirection convention (read in the 5.7 source
+as "towards the sun"; UNVERIFIED on the laptop: if the veil glows opposite the sun, flip it).
+
+**UNMEASURED.** Everything above: that a Windows build compiles `ApplyCirrus` and that the
+editor compiles `M_FlightSimCirrus`; that the streaks read as veils rather than a smear; the
+forward lobe near the sun; the sheet's cost in the still and in the sky-light capture (one
+translucent disc; `-sky-capture-beauty-only=0` hides it there if the capture stalls, r87's
+switch); whether the drift reads. The exact Windows measurements, with `FLIGHTSIM_SKY=physical`
+set in the shell (scene 3: a low camera, the cirrus across the upper sky as in the photograph;
+scene 13: the 747 at 10 km, cirrus 1.5 km overhead):
+
+    .\scripts\visual_fix_round.ps1 -Round 106 -Scenes 3,13 -CompareWith 95
+    .\scripts\visual_fix_round.ps1 -Round 107 -Scenes 3,13 -Switches "-look-cirrus=off" -CompareWith 106
+    .\scripts\visual_fix_round.ps1 -Round 108 -Scenes 3 -Switches "-cloud-type=cirrus" -CompareWith 106
+
+Round 106 draws the sheet at the default cover (read `look_applied.world_beauty.cirrus.drawn`,
+`coverage` 0.35, `coverage_source` == `default`, `frames[0].cirrus_altitude_m` 10000 on scene 3
+and 11500 on scene 13); round 107 is the A/B (`drawn` == `nothing: ...(off)`; every other
+pixel class should match 106 except the upper sky); round 108 hides the volumetric layer
+(`clouds.layers_hidden`) and shows the sheet alone (`coverage_source` == `switch`). Tests:
+`tests/test_cirrus.py` (the laws and the look pinned Python == C++ by g++, the HLSL noise
+members text-equal to FWorldCloud and its field == the replica by g++, the quantile cut's
+drawn share, determinism, label safety by source, the switch's parse / refusal / registration /
+catalogue, the material script's flags, inputs, stamps and call order, the plan loader's
+`cover_inputs`, the measure path untouched, these docs). API: `scripts/check_bridge_api.sh`
+(no new engine symbol; noted in the L3 block).

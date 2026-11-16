@@ -3696,6 +3696,7 @@ def create_ice_overlay():
 #: Created through _world_beauty_material (tests/test_ue_materials.py pins it).
 WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter",
                           "M_FlightSimDistantClouds",   # visual round 5, L3: the distant sheet
+                          "M_FlightSimCirrus",          # sky step 6 (2026-11-15): the high cirrus sheet
                           "M_FlightSimOceanBeauty")     # lane B (2026-11-11): the beauty sea cap
 WORLD_SHADER_DIR = "assets/shaders/world"
 #: The collection the tiles' material reads and the render sets
@@ -3780,6 +3781,23 @@ WORLD_DISTANT_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 #: luminance), then the scalars, then the vectors (distant_clouds.hlsl's header).
 WORLD_DISTANT_ENGINE_INPUTS = ("WorldPos", "CameraPos", "SunDir", "SunIlluminance", "SkyLum")
 WORLD_DISTANT_INPUTS = WORLD_DISTANT_ENGINE_INPUTS + tuple(WORLD_DISTANT_SCALARS) + WORLD_DISTANT_VECTORS
+# -- sky step 6 (2026-11-15): the high cirrus sheet -- begin -----------------------------
+#: M_FlightSimCirrus' scalar parameters (FlightSimClouds.cpp ApplyCirrus sets each
+#: by name) with the default a material has before the render sets them: the
+#: stated default cover (core/scene/cirrus.py CIRRUS_DEFAULT_COVER), a north
+#: streak bearing, the radius, the per-frame fade, then the look (cirrus.CIRRUS_LOOK,
+#: pinned equal by tests/test_cirrus.py). UNCALIBRATED: set by probe render.
+WORLD_CIRRUS_SCALARS = {
+    "Coverage": 0.35, "StreakDirDeg": 0.0, "RadiusKm": 400.0, "SheetFade": 1.0,
+    "StreakScaleKm": 6.0, "StreakAspect": 8.0, "EdgeSigmas": 2.5, "FibreStrength": 0.6, "FeatherWidth": 0.15,
+    "OpticalDepth": 0.6, "MaxOpacity": 0.6, "Albedo": 0.95, "AmbientGain": 1.0, "ForwardG": 0.7,
+    "ForwardShare": 0.6, "ForwardCap": 8.0, "RimFadeShare": 0.2, "SunDirSign": 1.0,
+}
+WORLD_CIRRUS_VECTORS = ("SeedOffsetKm", "WindOffsetM")
+#: The Custom node's inputs, in order: the distant sheet's five engine inputs,
+#: then the scalars, then the vectors (cirrus.hlsl's header).
+WORLD_CIRRUS_INPUTS = WORLD_DISTANT_ENGINE_INPUTS + tuple(WORLD_CIRRUS_SCALARS) + WORLD_CIRRUS_VECTORS
+# -- sky step 6 -- end -------------------------------------------------------------------
 #: The sky-light HDRI probe's import root (core/scene/sky_hdri.py HDRI_ASSET_DIR).
 SKY_HDRI_PATH = "/Game/FlightSim/Sky"
 SKY_HDRI_SHA_TAG = "FlightSimSkyHdriSha256"
@@ -3915,7 +3933,8 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: top octave, boundary erosion, thin-edge transmittance) and the beauty cloud's
 #: own scattering constants (CLOUD_SCATTERING). The distant sheet's shared noise
 #: text is unchanged (everything new sits after it): distant stays 5.
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "8", "M_FlightSimDistantClouds": "5"}
+#: Sky step 6 (2026-11-15): cirrus 1, the first cirrus.hlsl (M_FlightSimCirrus).
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "8", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "1"}
 
 
 def world_graph_stale(name):
@@ -3965,6 +3984,7 @@ def world_stamp(material, name):
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "10",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail)
                      "M_FlightSimCloudLayers": "10", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
+                     "M_FlightSimCirrus": "1",          # sky step 6: the high cirrus sheet
                      "M_FlightSimOceanBeauty": "5"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
@@ -4505,6 +4525,60 @@ def create_world_distant_clouds():
     finish(material, "M_FlightSimDistantClouds")
 
 
+# -- sky step 6 (2026-11-15): the high cirrus sheet --
+def create_world_cirrus():
+    """M_FlightSimCirrus: the high cirrus sheet (FlightSimClouds.cpp ApplyCirrus
+    puts it on one earth-curved disc 10-13 km up, above the flight, beauty
+    only). UNLIT, TRANSLUCENT, two-sided; Apply Fogging per pixel (the height
+    fog and the aerial perspective fade it into the horizon haze) and cloud
+    fogging (the volumetric layer below attenuates it); it never writes custom
+    depth or velocity, so the labels and the depth pass never see it.
+    cirrus.hlsl returns float4(emissive, opacity): seeded streaks along the
+    wind with feathered ends, cut at the cover's quantile, lit by a forward lobe
+    of the sun and the sky's distant luminance from the SkyAtmosphere nodes
+    (light 0). VISUAL ONLY; UNMEASURED until a Windows render."""
+    material = _world_beauty_material("M_FlightSimCirrus")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    material.set_editor_property("two_sided", True)
+    material.set_editor_property("use_translucency_vertex_fog", True)   # Apply Fogging
+    material.set_editor_property("compute_fog_per_pixel", True)
+    material.set_editor_property("apply_cloud_fogging", True)
+    material.set_editor_property("allow_translucent_custom_depth_writes", False)
+    material.set_editor_property("output_translucent_velocity", False)
+    inputs = {}
+    inputs["WorldPos"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionWorldPosition, -1800, -500), "")
+    inputs["CameraPos"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionCameraPositionWS, -1800, -400), "")
+    sun_dir = lib.create_material_expression(material, unreal.MaterialExpressionSkyAtmosphereLightDirection,
+                                             -1800, -300)
+    sun_dir.set_editor_property("light_index", 0)
+    inputs["SunDir"] = (sun_dir, "")
+    illuminance = lib.create_material_expression(material, unreal.MaterialExpressionSkyAtmosphereLightIlluminance,
+                                                 -1800, -200)
+    illuminance.set_editor_property("light_index", 0)
+    inputs["SunIlluminance"] = (illuminance, "")
+    inputs["SkyLum"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionSkyAtmosphereDistantLightScatteredLuminance, -1800, -100), "")
+    for i, (name, default) in enumerate(WORLD_CIRRUS_SCALARS.items()):
+        inputs[name] = (scalar(material, lib, name, default, -1800, 50 + 90 * i), "")
+    for i, name in enumerate(WORLD_CIRRUS_VECTORS):
+        inputs[name] = (vector(material, lib, name, (0.0, 0.0, 0.0, 0.0), -1800, 1800 + 110 * i), "")
+    ordered = {name: inputs[name] for name in WORLD_CIRRUS_INPUTS}
+    sheet = world_custom(material, lib, "cirrus", unreal.CustomMaterialOutputType.CMOT_FLOAT4,
+                         ordered, -900, 0)
+    lib.connect_material_property(mask(material, lib, sheet, "rgb", -600, -50), "",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    lib.connect_material_property(mask(material, lib, sheet, "a", -600, 150), "",
+                                  unreal.MaterialProperty.MP_OPACITY)
+    world_stamp(material, "M_FlightSimCirrus")
+    finish(material, "M_FlightSimCirrus")
+
+
 def create_sky_hdri():
     """T_SkyHdri_<name> under SKY_HDRI_PATH: the sky-light HDRI probe's cubemap
     (FlightSimClouds.cpp ApplySkyHdri, -sky-hdri=<name>). Only when
@@ -4813,6 +4887,7 @@ create_world_tiles_beauty()
 create_world_ocean_beauty()     # lane B: the beauty sea cap's water
 create_world_scatter()
 create_world_distant_clouds()   # visual round 5, L3: the distant sheet
+create_world_cirrus()           # sky step 6: the high cirrus sheet (beauty only)
 create_sky_hdri()               # visual round 5, L3: the sky HDRI probe (FLIGHTSIM_SKY_HDRI only)
 
 create_aircraft_masters()  # AIRCRAFT LANE (V7)

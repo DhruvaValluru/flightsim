@@ -1291,6 +1291,133 @@ namespace FlightSimWorldPure
 		return TraceKm - DistantFadeKm > 0.0 ? TraceKm - DistantFadeKm : 0.0;
 	}
 
+	// Sky step 6 (the owner's X-Plane-12 brief, 2026-11-15): the high cirrus sheet
+	// (core/scene/cirrus.py is the twin). UE draws one volumetric layer; the
+	// reference photograph's upper sky is thin cirrus (long translucent wisps with
+	// feathered ends, the blue reading through), so a second earth-curved
+	// translucent disc (M_FlightSimCirrus, cirrus.hlsl) sits ABOVE the flight at
+	// max(CirrusBaseM, camera + CirrusClearanceM), capped at CirrusMaxM: never
+	// below the camera, so the owner's clearance rule holds by construction; it
+	// fades out over the clearance as the camera climbs into the cap. BEAUTY ONLY,
+	// VISUAL ONLY. UNCALIBRATED: set by probe render on the render machine.
+	constexpr double CirrusBaseM = 10000.0;
+	constexpr double CirrusClearanceM = 1500.0;
+	constexpr double CirrusMaxM = 13000.0;
+	// The disc: the distant sheet's rings and segments at a larger radius (the
+	// sheet is higher, so farther to its horizon); it draws before the distant
+	// sheet (-100): farther from every camera it can overlap (design D13).
+	constexpr double CirrusRadiusKm = 400.0;
+	constexpr int CirrusSortPriority = -101;
+	// The cover drawn with no data cover in the plan, or under -cloud-type=cirrus
+	// when the data gives none: a stated stylisation (the photograph's upper half
+	// is roughly a third veiled), recorded as such. Below CirrusMinDrawnCover
+	// nothing is built. The sheet drifts at CirrusWindGain x the card's drift
+	// (jet-level winds run faster than the boundary layer's; the plan carries no
+	// wind at altitude). UNCALIBRATED.
+	constexpr double CirrusDefaultCover = 0.35;
+	constexpr double CirrusMinDrawnCover = 0.02;
+	constexpr double CirrusWindGain = 2.0;
+	// The invariants the host relies on: the higher sheet reaches farther than the
+	// distant one and draws before it; the drawn floor is below the default cover.
+	static_assert(CirrusRadiusKm > DistantRadiusKm, "the cirrus sheet is higher, so farther to its horizon");
+	static_assert(CirrusSortPriority < -100, "the cirrus draws before the distant sheet (-100)");
+	static_assert(CirrusMinDrawnCover < CirrusDefaultCover, "the default cover is drawn");
+	// The look: the material's scalar parameters (cirrus.CIRRUS_LOOK, in order).
+	// UNCALIBRATED: set by probe render on the render machine.
+	constexpr int CirrusLookCount = 14;
+	inline const char* CirrusLookName(int Field)
+	{
+		static const char* const Names[CirrusLookCount] = {
+			"StreakScaleKm", "StreakAspect", "EdgeSigmas", "FibreStrength", "FeatherWidth", "OpticalDepth",
+			"MaxOpacity", "Albedo", "AmbientGain", "ForwardG", "ForwardShare", "ForwardCap", "RimFadeShare",
+			"SunDirSign"};
+		return Field >= 0 && Field < CirrusLookCount ? Names[Field] : "";
+	}
+	inline double CirrusLook(int Field)
+	{
+		static const double Values[CirrusLookCount] = {6.0, 8.0, 2.5, 0.6, 0.15, 0.6, 0.6, 0.95, 1.0, 0.7, 0.6,
+		                                               8.0, 0.2, 1.0};
+		return Field >= 0 && Field < CirrusLookCount ? Values[Field] : 0.0;
+	}
+	struct FCirrusSheet
+	{
+		double AltitudeM;
+		double Fade;
+	};
+	// Where the sheet sits for a camera at CameraM (cirrus.cirrus_sheet): never
+	// below the camera; fade 1 with the full clearance below it, 0 at the cap.
+	inline FCirrusSheet CirrusSheetAltitudeM(double CameraM)
+	{
+		FCirrusSheet Out;
+		const double Lifted = CameraM + CirrusClearanceM > CirrusBaseM ? CameraM + CirrusClearanceM : CirrusBaseM;
+		Out.AltitudeM = Lifted < CirrusMaxM ? Lifted : CirrusMaxM;
+		const double Fade = (Out.AltitudeM - CameraM) / CirrusClearanceM;
+		Out.Fade = Fade < 0.0 ? 0.0 : (Fade > 1.0 ? 1.0 : Fade);
+		return Out;
+	}
+	// Where the drawn cover came from (cirrus.CIRRUS_COVER_SOURCES, in this order).
+	enum ECirrusSource
+	{
+		CirrusSourceOff = 0,
+		CirrusSourcePreset = 1,
+		CirrusSourceSwitch = 2,
+		CirrusSourcePlan = 3,
+		CirrusSourceDefault = 4,
+	};
+	inline const char* CirrusCoverSourceName(int Source)
+	{
+		static const char* const Names[5] = {"off", "preset", "switch", "plan", "default"};
+		return Source >= 0 && Source < 5 ? Names[Source] : "";
+	}
+	// The cover the host draws (cirrus.cirrus_cover), in order: -look-cirrus=off ->
+	// none; a rain or storm preset -> none (the deck covers the sky); -cloud-type=
+	// cirrus with no data cover above 0 -> the default; a plan whose cover came
+	// from data (cover_inputs present) -> its cirrus_coverage, 0 included (a clear
+	// upper sky stays clear); else the default. Clamped 0..1.
+	inline double CirrusCover(bool bOff, bool bSwitchCirrus, bool bCoverFromData, double PlanCirrus, int Preset,
+	                          int* Source)
+	{
+		if (bOff)
+		{
+			*Source = CirrusSourceOff;
+			return 0.0;
+		}
+		if (Preset == PresetRain || Preset == PresetStorm)
+		{
+			*Source = CirrusSourcePreset;
+			return 0.0;
+		}
+		const double Plan = PlanCirrus < 0.0 ? 0.0 : (PlanCirrus > 1.0 ? 1.0 : PlanCirrus);
+		if (bSwitchCirrus && !(bCoverFromData && Plan > 0.0))
+		{
+			*Source = CirrusSourceSwitch;
+			return CirrusDefaultCover;
+		}
+		if (bCoverFromData)
+		{
+			*Source = CirrusSourcePlan;
+			return Plan;
+		}
+		*Source = CirrusSourceDefault;
+		return CirrusDefaultCover;
+	}
+	// The streaks' compass bearing (cirrus.cirrus_streak_dir_deg): the card's drift
+	// bearing when it drifts (streaks run along the wind), else a seeded one
+	// (WorldUnit index 1, channel 0: index 0 is the noise offset's). 0 <= b < 360.
+	inline double CirrusStreakDirDeg(uint64_t Seed, double DriftMps, double DriftFromDeg)
+	{
+		if (DriftMps > 0.0)
+		{
+			const double Wrapped = std::fmod(DriftFromDeg, 360.0);
+			return Wrapped < 0.0 ? Wrapped + 360.0 : Wrapped;
+		}
+		return WorldUnit(Seed, 1ull, 0ull) * 360.0;
+	}
+	inline double CirrusDriftMps(double DriftMps)
+	{
+		return (DriftMps > 0.0 ? DriftMps : 0.0) * CirrusWindGain;
+	}
+
 	// Visual round 2 (weather scenes, 2026-11-10), world_beauty.aircraft_clear_layer:
 	// BEAUTY ONLY, the aircraft is never drawn INSIDE a deck. Round 1's tower view
 	// in heavy rain (an A320 at 1000 m in the 800-3000 m rain deck) and its 747 in
@@ -1354,6 +1481,9 @@ namespace
 	// probe's asset root (core/scene/sky_hdri.py HDRI_ASSET_DIR / HDRI_ASSET_PREFIX).
 	const TCHAR* const WorldDistantMaterialPath =
 		TEXT("/Game/FlightSim/M_FlightSimDistantClouds.M_FlightSimDistantClouds");
+	// Sky step 6: the cirrus sheet's material (scripts/ue_create_materials.py create_world_cirrus).
+	const TCHAR* const WorldCirrusMaterialPath =
+		TEXT("/Game/FlightSim/M_FlightSimCirrus.M_FlightSimCirrus");
 	// The HDRI asset is /Game/FlightSim/Sky/T_SkyHdri_<name> (ApplySkyHdri's Printf
 	// literal: FString::Printf takes a literal format).
 	// The HDRI fill as a share of the sun's illuminance (sky_hdri.HDRI_FILL_SHARE).
@@ -1391,6 +1521,57 @@ namespace
 	// world_beauty.STORM_DECK_CLEARANCE_M (lane D, round 26): a storm preset's deck
 	// above the aircraft hangs this low over it, so a level chase frame's top is deck.
 	constexpr double StormDeckClearanceM = 150.0;
+
+	// Sky step 6: the distant sheet's earth-curved disc (ApplyDistantClouds builds
+	// its own inline, pinned by tests/test_distant_clouds.py) as a helper for the
+	// cirrus sheet: a fan about the centre, then ring quads, rings densifying
+	// towards the centre (FlightSimWorldPure::DistantRingRadiusKm), each dropped by
+	// the earth's curvature (DistantDroopM); two-sided material, so the winding is
+	// not load-bearing. Section 0, no collision.
+	void BuildCurvedDisc(UProceduralMeshComponent* Mesh, double RadiusKm)
+	{
+		// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
+		using namespace FlightSimWorldPure;
+		TArray<FVector> Vertices;
+		TArray<int32> Triangles;
+		TArray<FVector> Normals;
+		TArray<FVector2D> UV0;
+		Vertices.Add(FVector::ZeroVector);
+		Normals.Add(FVector::UpVector);
+		UV0.Add(FVector2D(0.0, 0.0));
+		for (int32 Ring = 1; Ring <= DistantRings; ++Ring)
+		{
+			const double RingKm = DistantRingRadiusKm(Ring, DistantRings, RadiusKm);
+			const double RingCm = RingKm * 1000.0 * WorldCmPerMetre;
+			const double ZCm = DistantDroopM(RingKm) * WorldCmPerMetre;
+			for (int32 Seg = 0; Seg < DistantSegments; ++Seg)
+			{
+				const double Angle = 2.0 * PI * Seg / DistantSegments;
+				Vertices.Add(FVector(FMath::Cos(Angle) * RingCm, FMath::Sin(Angle) * RingCm, ZCm));
+				Normals.Add(FVector::UpVector);
+				UV0.Add(FVector2D(static_cast<double>(Ring) / DistantRings, static_cast<double>(Seg) / DistantSegments));
+			}
+		}
+		auto VertexIndex = [](int32 Ring, int32 Seg)
+		{
+			return Ring <= 0 ? 0 : 1 + (Ring - 1) * DistantSegments + (Seg % DistantSegments);
+		};
+		for (int32 Seg = 0; Seg < DistantSegments; ++Seg)
+		{
+			Triangles.Append({VertexIndex(0, 0), VertexIndex(1, Seg), VertexIndex(1, Seg + 1)});
+		}
+		for (int32 Ring = 1; Ring < DistantRings; ++Ring)
+		{
+			for (int32 Seg = 0; Seg < DistantSegments; ++Seg)
+			{
+				const int32 A = VertexIndex(Ring, Seg), B = VertexIndex(Ring, Seg + 1);
+				const int32 C = VertexIndex(Ring + 1, Seg), D = VertexIndex(Ring + 1, Seg + 1);
+				Triangles.Append({A, C, B, B, C, D});
+			}
+		}
+		check(Vertices.Num() == DistantDiscVertexCount() && Triangles.Num() == 3 * DistantDiscTriangleCount());
+		Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, {}, {}, false);
+	}
 
 	double WorldNumber(const TSharedPtr<FJsonObject>& Object, const TCHAR* Key, double Default)
 	{
@@ -1659,6 +1840,11 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// word refuses by name.
 		CloudMarchSwitch = TEXT("auto");
 		FParse::Value(*Switches, TEXT("cloud-march="), CloudMarchSwitch);
+		// Sky step 6: -look-cirrus=on|off (on by default): the high cirrus sheet
+		// (ApplyCirrus); off builds none (the round-95 upper sky). Another word
+		// refuses by name.
+		CirrusSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("look-cirrus="), CirrusSwitch);
 		// Sky step 4: -sky-multi-scatter=auto|on|off (auto by default: the row's
 		// MultiScatteringFactor on a discrete GPU, the class gate kept; on = every class; off is ef361bd6's sky for the
 		// A/B). FlightSimWorldPure::SkyMultiScatterFor; another word refuses by name.
@@ -1717,6 +1903,11 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	{
 		Error = FString::Printf(TEXT("world_beauty.clouds: -sky-multi-scatter=%s is not auto, on or off"),
 		                        *SkyMultiScatterSwitch);
+		return false;
+	}
+	if (CirrusSwitch != TEXT("on") && CirrusSwitch != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.cirrus: -look-cirrus=%s is not on or off"), *CirrusSwitch);
 		return false;
 	}
 	// Sky step 2: the -sky= plan's cloud fields, read in ApplyClouds (nullptr without a plan).
@@ -1984,6 +2175,9 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	// Visual round 5, lane L3: the far deck and the horizon (after the clearance:
 	// the sheet follows the slab that is drawn), then the sky HDRI probe.
 	ApplyDistantClouds(World, Scene, Weather, DistantMode, Seed);
+	// Sky step 6: the high cirrus sheet, above everything the layers drew (its
+	// cover is the plan's data or the stated default; -look-cirrus=off builds none).
+	ApplyCirrus(World, Scene, Seed);
 	if (!ApplySkyHdri(Scene, SkyHdriName, Params, Error))
 	{
 		return false;
@@ -3731,6 +3925,140 @@ bool FFlightSimWorldBeauty::ApplySkyHdri(FFlightSimVisualScene& Scene, const FSt
 	return true;
 }
 
+// Sky step 6 (the owner's X-Plane-12 brief, 2026-11-15): the high cirrus sheet.
+// BEAUTY ONLY, VISUAL ONLY. UE draws one volumetric cloud layer; the reference
+// photograph's upper sky is thin cirrus. One UProceduralMeshComponent disc
+// (BuildCurvedDisc at FlightSimWorldPure::CirrusRadiusKm) on M_FlightSimCirrus
+// (unlit, translucent, two-sided; no depth write, no custom depth, no velocity,
+// fog and aerial perspective per pixel), centred on the camera and put at
+// CirrusSheetAltitudeM (above the camera by construction) by Advance. The
+// shader (cirrus.hlsl) draws seeded streaks along the card's drift bearing with
+// feathered ends, cut at the cover's quantile, lit by a forward lobe of the sun
+// and the sky's distant luminance. Labels: the actor is in BeautyOnlyActors, so
+// every label capture hides it; the material writes no depth and no custom
+// depth. Cover: core/scene/cirrus.py cirrus_cover (the plan's data, the stated
+// default, or none). UNMEASURED: nothing here has been rendered.
+void FFlightSimWorldBeauty::ApplyCirrus(UWorld* World, FFlightSimVisualScene& Scene, int32 Seed)
+{
+	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
+	using namespace FlightSimWorldPure;
+	CirrusSheet = FCirrusSheetState();
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetStringField(TEXT("switch"), CirrusSwitch);
+	Out->SetStringField(TEXT("labels"),
+		TEXT("BeautyOnlyActors; unlit translucent, no depth write, no custom depth, no velocity, no shadow; "
+		     "the measure quality never builds it"));
+	Out->SetBoolField(TEXT("visual_only"), true);
+	Out->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED: set by probe render on the render machine"));
+	Out->SetStringField(TEXT("measured"),
+		TEXT("UNMEASURED: never rendered; docs/VISUAL_FIDELITY_PLAN.md section 8 'Sky step 6' names the Windows command"));
+	// The cover and where it came from (the plan's data, the switch, the default, or none).
+	const bool bPlanFields = SkyPlanRef != nullptr && SkyPlanRef->bCloudPlanFields;
+	const bool bFromData = bPlanFields && SkyPlanRef->bCloudCoverFromData;
+	const double PlanCirrus = bPlanFields ? SkyPlanRef->CloudCirrusCoverage : 0.0;
+	const bool bSwitchCirrus = CloudTypeSwitch == TEXT("cirrus");
+	int32 Source = CirrusSourceDefault;
+	const double Cover = CirrusCover(CirrusSwitch == TEXT("off"), bSwitchCirrus, bFromData, PlanCirrus, Preset, &Source);
+	Out->SetNumberField(TEXT("coverage"), Cover);
+	Out->SetStringField(TEXT("coverage_source"), ANSI_TO_TCHAR(CirrusCoverSourceName(Source)));
+	Out->SetNumberField(TEXT("plan_cirrus_coverage"), PlanCirrus);
+	Out->SetBoolField(TEXT("plan_cover_from_data"), bFromData);
+	Out->SetStringField(TEXT("plan_coverage_source"), SkyPlanRef != nullptr ? SkyPlanRef->CloudCoverageSource : FString());
+	Out->SetNumberField(TEXT("default_cover"), CirrusDefaultCover);
+	Out->SetStringField(TEXT("cover_law"),
+		TEXT("core/scene/cirrus.py cirrus_cover: -look-cirrus=off -> none; a rain or storm preset -> none (the deck "
+		     "covers the sky); -cloud-type=cirrus with no data cover above 0 -> the default; a plan whose cover came "
+		     "from data (cover_inputs) -> its cirrus_coverage, 0 included; else the default (a stated stylisation: "
+		     "the reference photograph's upper sky)"));
+	Out->SetStringField(TEXT("preset"), ANSI_TO_TCHAR(PresetName(Preset)));
+	if (Cover < CirrusMinDrawnCover)
+	{
+		Out->SetStringField(TEXT("drawn"), FString::Printf(TEXT("nothing: cover %.3f below %.2f (%s)"), Cover,
+		                                                   CirrusMinDrawnCover, ANSI_TO_TCHAR(CirrusCoverSourceName(Source))));
+		Record->SetObjectField(TEXT("cirrus"), Out);
+		return;
+	}
+	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, WorldCirrusMaterialPath);
+	if (Base == nullptr)
+	{
+		Out->SetStringField(TEXT("drawn"),
+			TEXT("nothing: M_FlightSimCirrus did not load (run scripts/ue_create_materials.py)"));
+		Record->SetObjectField(TEXT("cirrus"), Out);
+		return;
+	}
+
+	AActor* Actor = World->SpawnActor<AActor>();
+	UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(Actor, TEXT("CirrusSheet"));
+	Actor->SetRootComponent(Mesh);
+	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetCastShadow(false);
+	Mesh->SetRenderCustomDepth(false);
+	Mesh->SetReceivesDecals(false);
+	// Behind the distant sheet (-100) and every other translucent: lower sorts first.
+	Mesh->SetTranslucentSortPriority(CirrusSortPriority);
+	BuildCurvedDisc(Mesh, CirrusRadiusKm);
+	Mesh->RegisterComponent();
+	Actor->SetActorLocation(FVector::ZeroVector);   // Advance centres it on the camera
+
+	// The material: the cover, the streak bearing, the look; seeded like the layers.
+	double SeedKm[3] = {0.0, 0.0, 0.0};
+	CloudSeedOffsetKm(static_cast<uint64_t>(static_cast<int64_t>(Seed)), SeedKm);
+	const double StreakDirDeg = CirrusStreakDirDeg(static_cast<uint64_t>(static_cast<int64_t>(Seed)), DriftMps, DriftFromDeg);
+	UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(Base, Actor);
+	Material->SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(Cover));
+	Material->SetScalarParameterValue(TEXT("StreakDirDeg"), static_cast<float>(StreakDirDeg));
+	Material->SetScalarParameterValue(TEXT("RadiusKm"), static_cast<float>(CirrusRadiusKm));
+	Material->SetScalarParameterValue(TEXT("SheetFade"), 1.0f);
+	TSharedPtr<FJsonObject> Look = MakeShared<FJsonObject>();
+	for (int32 F = 0; F < CirrusLookCount; ++F)
+	{
+		Material->SetScalarParameterValue(ANSI_TO_TCHAR(CirrusLookName(F)), static_cast<float>(CirrusLook(F)));
+		Look->SetNumberField(ANSI_TO_TCHAR(CirrusLookName(F)), CirrusLook(F));
+	}
+	Material->SetVectorParameterValue(TEXT("SeedOffsetKm"),
+		FLinearColor(static_cast<float>(SeedKm[0]), static_cast<float>(SeedKm[1]), static_cast<float>(SeedKm[2]), 0.0f));
+	Material->SetVectorParameterValue(TEXT("WindOffsetM"), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+	Mesh->SetMaterial(0, Material);
+	Scene.BeautyOnlyActors.Add(Actor);
+	CirrusSheet.Actor = Actor;
+	CirrusSheet.Mesh = Mesh;
+	CirrusSheet.Material = Material;
+	CirrusSheet.Cover = Cover;
+	CirrusSheet.bDrawn = true;
+
+	Out->SetNumberField(TEXT("base_m"), CirrusBaseM);
+	Out->SetNumberField(TEXT("clearance_m"), CirrusClearanceM);
+	Out->SetNumberField(TEXT("max_m"), CirrusMaxM);
+	Out->SetStringField(TEXT("altitude_law"),
+		TEXT("per frame (frames[].cirrus_altitude_m, cirrus_fade): min(max(base_m, camera + clearance_m), max_m), "
+		     "never below the camera; faded out over the clearance as the camera reaches max_m (cirrus.cirrus_sheet)"));
+	Out->SetNumberField(TEXT("radius_km"), CirrusRadiusKm);
+	Out->SetNumberField(TEXT("rings"), DistantRings);
+	Out->SetNumberField(TEXT("segments"), DistantSegments);
+	Out->SetNumberField(TEXT("vertices"), DistantDiscVertexCount());
+	Out->SetNumberField(TEXT("triangles"), DistantDiscTriangleCount());
+	Out->SetNumberField(TEXT("droop_at_rim_m"), DistantDroopM(CirrusRadiusKm));
+	Out->SetNumberField(TEXT("sort_priority"), CirrusSortPriority);
+	Out->SetNumberField(TEXT("streak_dir_deg"), StreakDirDeg);
+	Out->SetStringField(TEXT("streak_dir_source"),
+		DriftMps > 0.0 ? TEXT("the card's cloud drift bearing (streaks run along the wind)") : TEXT("seeded (the card does not drift)"));
+	Out->SetNumberField(TEXT("drift_mps"), CirrusDriftMps(DriftMps));
+	Out->SetNumberField(TEXT("wind_gain"), CirrusWindGain);
+	Out->SetObjectField(TEXT("look"), Look);
+	Out->SetStringField(TEXT("seed_offset_km"),
+		FString::Printf(TEXT("%.6f,%.6f,%.6f"), SeedKm[0], SeedKm[1], SeedKm[2]));
+	Out->SetStringField(TEXT("material"), WorldCirrusMaterialPath);
+	Out->SetStringField(TEXT("lighting"),
+		TEXT("the cirrus shader draws a normalised Henyey-Greenstein forward lobe (ForwardG, capped) blended with an isotropic term "
+		     "x the sun's illuminance through the atmosphere x albedo / pi, plus the sky's distant scattered luminance x "
+		     "AmbientGain (SkyAtmosphere material nodes, light 0); opacity Beer's law on the slant path, capped at "
+		     "MaxOpacity; height fog and aerial perspective per pixel"));
+	Out->SetStringField(TEXT("drawn"),
+		TEXT("M_FlightSimCirrus on one earth-curved disc centred on the camera above the flight, re-centred and re-levelled per frame"));
+	Record->SetObjectField(TEXT("cirrus"), Out);
+}
+
 // #02 blue (2026-11-11): the tiles' baked sky-shade toward grey under a drawn sun
 // (assets/shaders/world/tiles_shade_neutral.hlsl; Python twin
 // core/scene/tiles_shade_neutral.py, whose SHADE_NEUTRAL_DEFAULTS and constants
@@ -3951,6 +4279,24 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 		Frame->SetNumberField(TEXT("distant_sheet_altitude_m"), Sheet.AltitudeM);
 		Frame->SetBoolField(TEXT("distant_sheet_from_above"), Sheet.bFromAbove);
 		Frame->SetNumberField(TEXT("distant_sheet_fade"), Sheet.Fade);
+	}
+	// Sky step 6: the cirrus sheet follows the camera (its noise is in world space,
+	// so the streaks stay put), sits at the altitude law's height above it, fades
+	// as the camera reaches the cap, and drifts at CirrusWindGain x the card's drift.
+	if (CirrusSheet.bDrawn && CirrusSheet.Actor != nullptr && CirrusSheet.Material != nullptr)
+	{
+		const FCirrusSheet Sheet = CirrusSheetAltitudeM(CameraCm.Z / WorldCmPerMetre);
+		CirrusSheet.Actor->SetActorLocation(FVector(CameraCm.X, CameraCm.Y, Sheet.AltitudeM * WorldCmPerMetre));
+		CirrusSheet.Material->SetScalarParameterValue(TEXT("SheetFade"), static_cast<float>(Sheet.Fade));
+		if (DriftMps > 0.0)
+		{
+			const FVector CirrusDrift = FFlightSimVisualScene::CloudDriftOffsetMetres(
+				CirrusDriftMps(DriftMps), DriftFromDeg, TimeSeconds);
+			CirrusSheet.Material->SetVectorParameterValue(TEXT("WindOffsetM"),
+				FLinearColor(static_cast<float>(CirrusDrift.X), static_cast<float>(CirrusDrift.Y), 0.0f, 0.0f));
+		}
+		Frame->SetNumberField(TEXT("cirrus_altitude_m"), Sheet.AltitudeM);
+		Frame->SetNumberField(TEXT("cirrus_fade"), Sheet.Fade);
 	}
 
 	// Sky step 4: the height fog's reference height follows the aircraft (the

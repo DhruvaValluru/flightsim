@@ -89,7 +89,11 @@ struct FLIGHTSIMBRIDGE_API FFlightSimSkyPlan
 	double CloudCoverage = -1.0;          // 0..1; below 0 = not stated
 	double CloudDensity = 1.0;            // multiplier of the row's extinction (UNCALIBRATED)
 	double CloudDetail = 1.0;             // multiplier of the row's erosion (UNCALIBRATED)
-	double CloudCirrusCoverage = 0.0;     // step 6's high sheet; carried, not drawn here
+	double CloudCirrusCoverage = 0.0;     // step 6's high sheet (FFlightSimWorldBeauty::ApplyCirrus); carried, not drawn here
+	// Sky step 6: true when the plan's cover came from data (its cover_inputs is an
+	// object: the ERA5 fractions), false for a stated default; the cirrus sheet
+	// draws the plan's cirrus_coverage only in the first case (core/scene/cirrus.py).
+	bool bCloudCoverFromData = false;
 	FString CloudCoverageSource;          // the plan's provenance string, "" = not stated
 	FString CloudMarchTier;               // sky step 5: the step 3 cvar set the plan asks for ("" = not stated; the plan writes "auto")
 	bool bCloudSeedStated = false;

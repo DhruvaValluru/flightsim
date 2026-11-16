@@ -910,6 +910,44 @@ Commit: `Sky step 6: beauty-only cirrus sheet`.
 - UNMEASURED: whether the streaks read as veils; the capture cost. Windows:
   `.\scripts\visual_fix_round.ps1 -Round 104 -Scenes 3,13 -Switches "-cloud-type=cumulus -cirrus=off" -CompareWith 98`.
 
+**Built (sky step 6, 2026-11-15): where the code proved this section wrong, or the
+step narrowed it.** Commit `Sky step 6: beauty-only cirrus sheet`.
+- The switch is `-look-cirrus=on|off` (the brief's name and the `-look-cloud-billow`
+  pattern), on by default, not `-cirrus=on|off|auto`. The "auto" behaviour lives in
+  the cover law instead (`core/scene/cirrus.py cirrus_cover`, C++ `CirrusCover`):
+  a plan whose cover came from DATA (`cover_inputs` present; `FFlightSimSkyPlan::
+  bCloudCoverFromData`, a new TryGetObjectField in `Load`) draws its
+  `cirrus_coverage`, 0 included, so an ERA5 day with a clear upper sky stays clear;
+  a plan without data, or no plan, draws `CIRRUS_DEFAULT_COVER` 0.35 (recorded
+  "default": the photograph's upper half is roughly a third veiled); `-cloud-type=cirrus`
+  with no data cover above 0 draws the default ("switch"); a rain or storm preset
+  draws none ("preset": the deck covers the sky). The default beauty frame therefore
+  CHANGES at this step (a veiled upper sky), by design: the brief's goal is the
+  photograph, and `-look-cirrus=off` is round 95's upper sky exactly.
+- Altitude law as designed (D12), with the fade: `fade = clamp((altitude - camera) /
+  clearance)`, so the sheet is never seen from inside or above (camera at the 13 km
+  cap -> 0). Applied per frame in `Advance` from the camera (`frames[].cirrus_altitude_m`,
+  `cirrus_fade`), not at build time.
+- The disc builder became `BuildCurvedDisc(Mesh, RadiusKm)` in the file's anonymous
+  namespace for the cirrus only; `ApplyDistantClouds` keeps its inline copy because
+  tests/test_distant_clouds.py pins that body's literals (not weakened). Rings and
+  segments are the distant sheet's (48 x 96); radius 400 km.
+- Lighting is NOT the distant sheet's N.L: a normalised Henyey-Greenstein lobe
+  (g 0.7, capped 8, share 0.6) on the scattering angle between the view ray and the
+  sun's light, x albedo / pi, plus the sky's distant luminance; opacity is Beer's law
+  on the slant path (optical depth 0.6 x thickness), capped 0.6, not `min(0.55, thick)`.
+  `SunDirSign` (1) is the A/B for the SkyAtmosphereLightDirection convention (read as
+  "towards the sun" in the 5.7 source; UNVERIFIED on the laptop).
+- The field: the three octaves as designed plus a flow warp (hooks), a fibre term
+  (fine along-stream filaments, 8 hashes) and the feather term; 32 hashes per covered
+  pixel; moments measured on the replica (0.5 / 0.077), pinned.
+- Streak direction: the card's drift bearing (the plan carries no wind at altitude),
+  else `WorldUnit(seed, 1, 0) x 360`; drift at `CIRRUS_WIND_GAIN` 2 x the card's.
+- The pure-block laws are pinned by g++ against the Python twins and the HLSL noise
+  members against `FWorldCloud` text for text (tests/test_cirrus.py). No new engine
+  symbol (check_bridge_api.sh notes it). THIRD_PARTY_VISUAL.md untouched.
+- UNMEASURED: everything; VISUAL_FIDELITY_PLAN.md §8 "Sky step 6" names rounds 106-108.
+
 ## 9. Step 7: tests
 
 Commit: `Sky step 7: tests` (only the tests not already landed with their step:

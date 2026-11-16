@@ -689,6 +689,13 @@ rp_check "sky-hdri: SkyLight SetRealTimeCapture" "Engine/Classes/Components/SkyL
 rp_check "sky-hdri: SkyLight SetCaptureIsDirty" "Engine/Classes/Components/SkyLightComponent.h" "ENGINE_API void SetCaptureIsDirty();"
 rp_check "sky-hdri: SkyLight IsRealTimeCaptureEnabled" "Engine/Classes/Components/SkyLightComponent.h" "IsRealTimeCaptureEnabled()"
 rp_check "sky-hdri: UTextureCube header" "Engine/Classes/Engine/TextureCube.h" "class UTextureCube"
+# Sky step 6 (the owner's X-Plane-12 brief, 2026-11-15): the high cirrus sheet
+# (FlightSimClouds.cpp ApplyCirrus / BuildCurvedDisc, M_FlightSimCirrus from
+# create_world_cirrus). No engine symbol beyond the distant sheet's above: the
+# same UProceduralMeshComponent section, primitive setters, material flags and
+# SkyAtmosphere material nodes (every rp_check above covers it); the HLSL
+# intrinsics the shader adds (radians, sign, exp, pow, smoothstep) are the
+# language's. The first Windows build verifies the material compiles.
 # -- visual round 5, lane L3 -- end --------------------------------------------
 
 # -- sun-shafts-sky-occlusion (visual overhaul, 2026-11-09) -----------------
