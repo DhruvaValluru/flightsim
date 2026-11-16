@@ -114,6 +114,79 @@ def sky_cloud_ao_applies(switch: str = SKY_CLOUD_AO_DEFAULT, capture_clouds: int
     return not (int(capture_clouds) != 0 and capture_at == "aircraft")
 
 
+#: Lane hl-sun (2026-11-15): ``-sun-physical=on|off`` (command line or
+#: FLIGHTSIM_RENDER_SWITCHES), beauty only, default ``on``; ``off`` is every
+#: earlier render's sun. The host's rule is :func:`physical_sun`.
+SUN_PHYSICAL_SWITCHES: Tuple[str, ...] = ("on", "off")
+SUN_PHYSICAL_DEFAULT = "on"
+#: PHYSICS: the sun's mean angular diameter, 2 atan(696,000 km / 1 AU) =
+#: 0.533 deg; the host's HeroLightingSunDiscAngleDeg (UE's own 0.5357).
+SUN_DISC_ANGLE_DEG = 0.5357
+#: The host's HeroLightingSunSoftAngleDeg (UNCALIBRATED, probe hl-penumbra).
+SUN_SOFT_ANGLE_DEG = 0.5
+#: The host's HeroLightingOvercastAngleDeg: a stated source angle above it is
+#: the overcast / rain softening, and the disc is hidden.
+OVERCAST_SOURCE_ANGLE_DEG = 2.0
+#: Kasten & Young (1989), Appl. Opt. 28(22) 4735: m(h) = 1 / (sin h + a (h + b)^-c).
+KASTEN_YOUNG = (0.50572, 6.07995, 1.6364)
+
+
+def kasten_young_air_mass(elevation_deg: float) -> float:
+    """Relative optical air mass toward a sun ``elevation_deg`` above the
+    horizon (Kasten & Young 1989; 1 at the zenith, ~38 at the horizon), the
+    formula the host records beside the engine's transmittance read-back."""
+    a, b, c = KASTEN_YOUNG
+    h = max(float(elevation_deg), 0.0)
+    return 1.0 / (math.sin(math.radians(h)) + a * (h + b) ** -c)
+
+
+def physical_sun(stated_angle_deg: Optional[float] = None,
+                 stated_temperature_k: Optional[float] = None,
+                 switch: str = SUN_PHYSICAL_DEFAULT,
+                 atmosphere_sun: bool = True) -> Dict[str, Any]:
+    """The sun the host lights a beauty frame with (twin of the
+    -sun-physical= block in FlightSimHeroLighting.cpp).
+
+    ``on``: a clear-sky stated source angle (at or below
+    :data:`OVERCAST_SOURCE_ANGLE_DEG`) becomes the true disc, because UE draws
+    the sun disc AND sizes the PCSS penumbra from that one angle; and a
+    stated colour temperature is dropped on a clear atmosphere sun, because
+    the engine's transmittance already reddens it along the air mass. Above
+    the overcast angle both stand. ``off``: both stand as stated. Returns the
+    source angle, soft angle (None: the host leaves it as the scene set it),
+    the temperature applied (None: none) and whether the disc is drawn."""
+    if switch not in SUN_PHYSICAL_SWITCHES:
+        raise HeroLightingError("render.sun_physical",
+                                f"render.sun_physical: -sun-physical={switch} is not on or off")
+    physical = switch == "on"
+    if stated_angle_deg is None or float(stated_angle_deg) < 0.0:
+        angle, soft = SUN_DISC_ANGLE_DEG, SUN_SOFT_ANGLE_DEG
+    elif physical and float(stated_angle_deg) <= OVERCAST_SOURCE_ANGLE_DEG:
+        angle, soft = SUN_DISC_ANGLE_DEG, SUN_SOFT_ANGLE_DEG
+    else:
+        angle, soft = float(stated_angle_deg), None
+    overcast = angle > OVERCAST_SOURCE_ANGLE_DEG
+    temperature = None if stated_temperature_k is None else float(stated_temperature_k)
+    if temperature is not None and physical and not overcast and atmosphere_sun:
+        temperature = None
+    return {"source_angle_deg": angle, "source_soft_angle_deg": soft,
+            "temperature_k": temperature, "overcast": overcast, "disc_drawn": not overcast}
+
+
+def sun_physical_switch(text: Optional[str] = None) -> str:
+    """``-sun-physical=`` from ``text`` (default FLIGHTSIM_RENDER_SWITCHES),
+    else :data:`SUN_PHYSICAL_DEFAULT`; HeroLightingError names a bad word."""
+    text = os.environ.get("FLIGHTSIM_RENDER_SWITCHES", "") if text is None else text
+    match = re.search(r"(?:^|\s)-?sun-physical=(\S*)", text or "")
+    if match is None:
+        return SUN_PHYSICAL_DEFAULT
+    value = match.group(1)
+    if value not in SUN_PHYSICAL_SWITCHES:
+        raise HeroLightingError("render.sun_physical",
+                                f"render.sun_physical: -sun-physical={value} is not on or off")
+    return value
+
+
 class HeroLightingError(ValueError):
     """A lighting intent that cannot be realised as asked, refused by name."""
 

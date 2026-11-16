@@ -22,6 +22,12 @@
 // scripts/lookdev/README.md.
 
 #include "CoreMinimal.h"
+
+// Editor-only: the label-isolation guard (tests/test_beauty_label_isolation.py)
+// exempts this file's ApplyEngineLook call only because it never compiles into a
+// non-editor build and nothing in the render path calls into it.
+#if WITH_EDITOR
+
 #include "HAL/IConsoleManager.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
@@ -418,6 +424,10 @@ namespace
 		S.Params = Params + TEXT(" ") + Switches;
 		const FString& P = S.Params;
 		FScopedCommandLine CommandLine(P);
+		// A fresh card: ReadCard leaves fields the JSON omits untouched, so an
+		// ocean card kept the previous scene's terrain path and its CRS (#13
+		// after #3 kept EPSG:32618, camera 2600 km off, tiles at 0 %).
+		S.Card = FFlightSimScenarioCard();
 		if (!FFlightSimScenarioWorld::ReadCard(CardPath, S.Card, Error)) { return false; }
 		S.CardRoot = ReadJson(CardPath);
 
@@ -970,3 +980,5 @@ namespace
 			if (!IsRunningCommandlet()) { Clear(); }
 		}));
 }
+
+#endif // WITH_EDITOR

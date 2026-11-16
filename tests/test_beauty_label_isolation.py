@@ -86,8 +86,25 @@ def test_the_engine_look_is_called_once_inside_the_beauty_raster_gate():
         "FFlightSimBeautyLook::ApplyEngineLook(VisualScene, Capture, bConstrainedGpu, *RenderSwitches)")
     # The other files never call it.
     for path in [*PRIVATE.glob("*.cpp"), *PUBLIC.glob("*.h")]:
-        if path.name not in ("FlightSimRenderCommandlet.cpp", "FlightSimBeautyLook.cpp"):
+        if path.name not in ("FlightSimRenderCommandlet.cpp", "FlightSimBeautyLook.cpp",
+                             "FlightSimLookDev.cpp"):
             assert "ApplyEngineLook(" not in _strip_comments(path.read_text(encoding="utf-8")), path.name
+
+
+def test_the_lookdev_exemption_stays_editor_only():
+    """FlightSimLookDev.cpp (the editor look-dev harness) may call ApplyEngineLook only
+    because its whole body is WITH_EDITOR and no other file reaches into it."""
+    text = (PRIVATE / "FlightSimLookDev.cpp").read_text(encoding="utf-8")
+    body = text[text.index('#include "CoreMinimal.h"') + len('#include "CoreMinimal.h"'):]
+    first_directive = re.search(r"^#\s*(?:if|ifdef|ifndef|include)\b.*$", body, re.M).group(0)
+    assert first_directive.strip() == "#if WITH_EDITOR", first_directive
+    assert body.rstrip().endswith("#endif // WITH_EDITOR")
+    for path in [*PRIVATE.glob("*.cpp"), *PRIVATE.glob("*.h"), *PUBLIC.glob("*.h")]:
+        if path.name == "FlightSimLookDev.cpp":
+            continue
+        code = _strip_comments(path.read_text(encoding="utf-8"))
+        assert '#include "FlightSimLookDev' not in code, path.name
+        assert "FlightSim.LookDev." not in code, path.name
 
 
 def test_the_beauty_capture_is_the_one_named_capture():

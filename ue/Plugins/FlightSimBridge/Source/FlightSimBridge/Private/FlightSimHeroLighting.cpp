@@ -49,6 +49,14 @@ namespace
 	// UNCALIBRATED (probe hl-overcast: shot c, sun disc visible through the
 	// storm deck or not).
 	constexpr double HeroLightingOvercastAngleDeg = 2.0;
+	// PHYSICS: Kasten & Young (1989), Appl. Opt. 28(22) 4735, relative optical
+	// air mass m(h) = 1 / (sin h + a (h + b)^-c), h the solar elevation in deg
+	// (the same formula as core/scene/beauty_look.py air_mass). Recorded beside
+	// the engine's own transmittance read-back so a frame's sun colour can be
+	// checked against the air mass it crossed; it colours nothing itself.
+	constexpr double HeroLightingKastenYoungA = 0.50572;
+	constexpr double HeroLightingKastenYoungB = 6.07995;
+	constexpr double HeroLightingKastenYoungC = 1.6364;
 
 	// VSM. UNCALIBRATED (probe hl-vsm: shot b at 1080p, canyon-rim shadow
 	// edge aliasing vs the page-pool overflow warning in the log).
@@ -236,6 +244,40 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 	TSharedPtr<FJsonObject> SunRecord = MakeShared<FJsonObject>();
 	if (SunLight != nullptr)
 	{
+		// -sun-physical=on|off (command line or FLIGHTSIM_RENDER_SWITCHES; twin:
+		// core/scene/hero_lighting.py physical_sun). Default ON since lane hl-sun
+		// (2026-11-15); off is every earlier render's sun, byte for byte.
+		//  on: (1) a clear-sky sun is the true disc. The lighting block's
+		//      shadow_softness_deg (0.3 dramatic, 0.45 super bright, 0.9 golden
+		//      hour, 1.5 hazy) is also the drawn disc's diameter (UE draws the
+		//      sky-atmosphere sun disc from LightSourceAngle:
+		//      SkyAtmosphereRendering.cpp), so a stated 1.5 drew a sun 2.8x too
+		//      wide and 0.3 a sun no camera on Earth sees. Below the overcast
+		//      angle the disc and the PCSS penumbra (r.Shadow.FilterMethod 1,
+		//      ShadowRendering.h: tan(angle/2) x receiver-blocker distance) are
+		//      the 0.533 deg sun's. Above it (the overcast / rain softening, the
+		//      disc hidden) the stated angle stands.
+		//      (2) the sun's colour is the atmosphere's extinction only. The
+		//      block's colour_temperature_k (3300 K golden hour, 4800 K
+		//      dramatic) tinted a light whose transmittance the engine already
+		//      applies along the air mass (bAtmosphereSunLight: Bruneton &
+		//      Neyret 2008 / Hillaire 2020 LUT, Earth Rayleigh, Mie and ozone
+		//      defaults), so a 7 deg sun was reddened twice. Under an overcast
+		//      angle the temperature stands: a deck's diffuse light is not
+		//      reddened by air mass and the engine does not model its colour.
+		//  off: the stated angle and temperature stand, as before.
+		const FString SunSwitches = FString(CommandLine != nullptr ? CommandLine : TEXT("")) + TEXT(" ")
+			+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+		FString SunPhysical = TEXT("on");
+		FParse::Value(*SunSwitches, TEXT("sun-physical="), SunPhysical);
+		if (SunPhysical != TEXT("on") && SunPhysical != TEXT("off"))
+		{
+			return HeroLightingFail(FString::Printf(
+				TEXT("render.sun_physical: -sun-physical=%s is not on or off"), *SunPhysical));
+		}
+		const bool bSunPhysical = SunPhysical == TEXT("on");
+		SunRecord->SetStringField(TEXT("sun_physical"), SunPhysical);
+
 		double StatedAngle = -1.0;
 		const bool bStatedAngle = CommandLine != nullptr &&
 			FParse::Value(CommandLine, TEXT("sun-source-angle="), StatedAngle) && StatedAngle >= 0.0;
@@ -246,12 +288,57 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 			SunRecord->SetStringField(TEXT("source_angle_basis"),
 				TEXT("the true solar disc (physics) plus an UNCALIBRATED soft angle"));
 		}
+		else if (bSunPhysical && !IsOvercastSourceAngle(StatedAngle))
+		{
+			SunLight->SetLightSourceAngle(HeroLightingSunDiscAngleDeg);
+			SunLight->SetLightSourceSoftAngle(HeroLightingSunSoftAngleDeg);
+			SunRecord->SetNumberField(TEXT("source_angle_stated_deg"), StatedAngle);
+			SunRecord->SetStringField(TEXT("source_angle_basis"),
+				TEXT("-sun-physical=on: a clear-sky -sun-source-angle= is replaced by the true solar disc ")
+				TEXT("(physics; the drawn disc and the PCSS penumbra share it); above the overcast angle it stands"));
+		}
 		else
 		{
 			SunRecord->SetStringField(TEXT("source_angle_basis"),
 				TEXT("kept: the run stated -sun-source-angle= (the lighting block / rain look)"));
 		}
 		const bool bOvercast = IsOvercastSourceAngle(SunLight->LightSourceAngle);
+
+		// The colour: extinction, not a tint (see -sun-physical above).
+		const bool bAtmosphereColours = Scene.Atmosphere != nullptr && SunLight->IsUsedAsAtmosphereSunLight();
+		if (SunLight->bUseTemperature)
+		{
+			SunRecord->SetNumberField(TEXT("temperature_stated_k"), SunLight->Temperature);
+			if (bSunPhysical && !bOvercast && bAtmosphereColours)
+			{
+				SunLight->SetUseTemperature(false);
+				SunRecord->SetStringField(TEXT("temperature_basis"),
+					TEXT("-sun-physical=on: not applied; the atmosphere's transmittance along the air mass ")
+					TEXT("is the clear sun's only colour (it would redden a low sun twice)"));
+			}
+			else
+			{
+				SunRecord->SetStringField(TEXT("temperature_basis"),
+					bOvercast ? TEXT("kept: an overcast sun's colour is the deck's, not the air mass's")
+					          : TEXT("kept: -sun-physical=off, or no atmosphere colours this sun"));
+			}
+		}
+		SunRecord->SetBoolField(TEXT("use_temperature"), SunLight->bUseTemperature != 0);
+		if (bAtmosphereColours)
+		{
+			// Read back as data: the engine's transmittance toward the sun at
+			// the planet's top (the CPU twin of the per-pixel LUT), and the
+			// Kasten & Young air mass of the same elevation.
+			const FLinearColor Transmittance = Scene.Atmosphere->GetAtmosphereTransmitanceOnGroundAtPlanetTop(SunLight);
+			const double ElevationDeg = FMath::RadiansToDegrees(FMath::Asin(
+				FMath::Clamp(-SunLight->GetDirection().Z, -1.0, 1.0)));
+			const double H = FMath::Max(ElevationDeg, 0.0);
+			const double AirMass = 1.0 / (FMath::Sin(FMath::DegreesToRadians(H)) +
+				HeroLightingKastenYoungA * FMath::Pow(H + HeroLightingKastenYoungB, -HeroLightingKastenYoungC));
+			SunRecord->SetObjectField(TEXT("atmosphere_transmittance_read_back"), HeroLightingColorJson(Transmittance));
+			SunRecord->SetNumberField(TEXT("sun_elevation_deg"), ElevationDeg);
+			SunRecord->SetNumberField(TEXT("air_mass_kasten_young"), AirMass);
+		}
 		SunRecord->SetNumberField(TEXT("source_angle_deg"), SunLight->LightSourceAngle);
 		SunRecord->SetNumberField(TEXT("source_soft_angle_deg"), SunLight->LightSourceSoftAngle);
 		SunRecord->SetBoolField(TEXT("overcast"), bOvercast);
