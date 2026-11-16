@@ -489,7 +489,7 @@ world_beauty.distant_clouds:
   hint: "Ask for -distant-clouds=on or off, or leave the choice out (on)."
 world_beauty.cirrus:
   sentence: "The beauty cirrus sheet was asked for in a mode the world look does not know."
-  hint: "Ask for -look-cirrus=on or off, or leave the choice out (on)."
+  hint: "Ask for -look-cirrus=on or off, or leave the choice out (off)."
 # high-sky fx (2026-11-15; FlightSimSkyFx.cpp, core/sky/sky_fx.py): recorded in
 # look_applied, never refused (the beauty look is visual only).
 sky_fx.rainbow:

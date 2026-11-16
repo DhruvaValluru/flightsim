@@ -109,7 +109,8 @@ def test_the_cover_law_in_order():
     assert ci.cirrus_cover("on", False, True, 1.7, "clear") == (1.0, "plan")
     # no data (a default plan, or no plan): the stated default
     assert ci.cirrus_cover("on", False, False, 0.0, "clear") == (d, "default")
-    assert ci.cirrus_cover("", False, False, 0.0, "hazy") == (d, "default")
+    assert ci.cirrus_cover("on", False, False, 0.0, "hazy") == (d, "default")
+    assert ci.cirrus_cover("", False, False, 0.0, "hazy") == (0.0, "off")   # an empty word is the default: off (generation 2)
     assert set(s for s in ci.CIRRUS_COVER_SOURCES) == {"off", "preset", "switch", "plan", "default"}
     with pytest.raises(ValueError, match="world_beauty.cirrus"):
         ci.cirrus_cover("auto", False, False, 0.0, "clear")
@@ -120,7 +121,8 @@ def test_the_cover_law_in_order():
 
 def test_the_switch_words_and_the_refusal():
     assert ci.CIRRUS_SWITCH == "-look-cirrus" and ci.CIRRUS_SWITCH_WORDS == ("on", "off")
-    assert ci.cirrus_mode(None) == "on" and ci.cirrus_mode("") == "on" and ci.cirrus_mode("off") == "off"
+    assert ci.CIRRUS_SWITCH_DEFAULT == "off"   # generation 2: off until it reads as a photograph by eye
+    assert ci.cirrus_mode(None) == "off" and ci.cirrus_mode("") == "off" and ci.cirrus_mode("on") == "on"
     with pytest.raises(ValueError, match=r"world_beauty.cirrus: -look-cirrus=auto is not on or off"):
         ci.cirrus_mode("auto")
 
@@ -148,19 +150,43 @@ def _grid(n=120, span=60.0):
 
 
 def test_the_field_moments_are_the_pinned_ones_and_the_cut_draws_the_cover():
-    values = [ci.cirrus_streaks(qa, qc) for qa, qc in _grid()]
+    values = [ci.cirrus_patch(px, py) for px, py in _grid()]
     assert statistics.fmean(values) == pytest.approx(ci.CIRRUS_FBM_MEAN, abs=0.01)
     assert statistics.pstdev(values) == pytest.approx(ci.CIRRUS_FBM_SIGMA, abs=0.006)
     assert 0.0 <= min(values) and max(values) <= 1.0
     for cover in (0.2, 0.35, 0.5, 0.7, 0.9):
         thr = ci.cirrus_threshold(cover)
         share = sum(v > thr for v in values) / len(values)
-        assert share == pytest.approx(cover, abs=0.03), cover
+        assert share == pytest.approx(cover, abs=0.04), cover
     assert ci.cirrus_threshold(0.0) > ci.cirrus_threshold(0.5) > ci.cirrus_threshold(1.0)
-    fibres = [ci.cirrus_fibres(qa, qc) for qa, qc in _grid(40)]
-    assert 0.0 <= min(fibres) and max(fibres) <= 1.0 and statistics.fmean(fibres) == pytest.approx(0.5, abs=0.03)
-    ends = [ci.cirrus_ends(qa, qc) for qa, qc in _grid(40)]
-    assert statistics.fmean(ends) == pytest.approx(0.0, abs=0.03) and ci.CIRRUS_LOOK["FeatherWidth"] < statistics.pstdev(ends)
+    # the fibres: thin (about a sixth of a patch inside a bright filament), mean pinned for the detail fade
+    fibres = [ci.cirrus_fibres(qa, qc, ci.CIRRUS_LOOK["FibreSharpness"]) for qa, qc in _grid()]
+    assert 0.0 <= min(fibres) and max(fibres) <= 1.0
+    assert statistics.fmean(fibres) == pytest.approx(ci.CIRRUS_FIBRE_MEAN, abs=0.01)
+    assert 0.08 < sum(f > 0.5 for f in fibres) / len(fibres) < 0.25
+
+
+def test_the_sheet_is_sparse_patchy_and_thin_like_real_cirrus():
+    """Generation 2 (lane sky-cirrus2): real cirrus is patches of thin fibres,
+    mostly 0.05-0.35 opaque, never a regular stripe grid. Over a 120 x 120 km
+    field at the default cover: the drawn share tracks the cover, the drawn
+    opacity overhead stays under the cap with most of it thin, and no
+    across-stream period dominates (the round-1 tape)."""
+    pts = [(x * 1.0 + 0.37, y * 1.0 + 0.11) for x in range(-60, 60, 2) for y in range(-60, 60, 2)]
+    thick = [ci.cirrus_thickness(x, y, 0.35, 20.0) for x, y in pts]
+    drawn = [t for t in thick if t > 0.02]
+    assert 0.2 < len(drawn) / len(thick) < 0.5
+    ops = [ci.cirrus_opacity(t, 1.0) for t in drawn]
+    assert max(ops) <= ci.CIRRUS_LOOK["MaxOpacity"] + 1e-12
+    assert statistics.median(ops) < 0.2
+    # at grazing the slant path is capped at 4x and the opacity at the cap
+    assert ci.cirrus_opacity(1.0, 0.0) == ci.cirrus_opacity(1.0, ci.CIRRUS_SLANT_FLOOR) <= ci.CIRRUS_LOOK["MaxOpacity"]
+    # a footprint coarser than the fibres draws their mean: the far sheet is a smooth veil
+    far = [ci.cirrus_thickness(x, y, 1.0, 20.0, footprint_km=10.0) for x, y in pts[:200]]
+    fs = ci.CIRRUS_LOOK["FibreStrength"]
+    assert max(far) <= (1.0 - fs) + fs * ci.CIRRUS_FIBRE_MEAN + 1e-9
+    # cover 0 draws nothing
+    assert all(ci.cirrus_thickness(x, y, 0.0, 20.0) == 0.0 for x, y in pts[::50])
 
 
 def test_the_thickness_is_bounded_deterministic_and_seeded():
@@ -177,10 +203,9 @@ def test_the_thickness_is_bounded_deterministic_and_seeded():
         a, b = ci.cirrus_thickness(x, y, 0.3, 250.0), ci.cirrus_thickness(x, y, 0.8, 250.0)
         assert b >= a - 1e-12
     # the frame: a bearing and its opposite are one axis up to sign; along is stretched by the aspect
-    qa, qc = ci.cirrus_frame(10.0, 0.0, 90.0, 5.0, 8.0)
-    assert (qa, qc) == pytest.approx((10.0 / 40.0, 0.0), abs=1e-9)
-    qa2, qc2 = ci.cirrus_frame(0.0, 10.0, 0.0, 5.0, 8.0)
-    assert (qa2, qc2) == pytest.approx((0.25, 0.0), abs=1e-9)
+    assert ci.cirrus_frame(10.0, 0.0, 90.0) == pytest.approx((10.0, 0.0), abs=1e-9)
+    assert ci.cirrus_frame(0.0, 10.0, 0.0) == pytest.approx((10.0, 0.0), abs=1e-9)
+    assert ci.cirrus_frame(0.0, 10.0, 90.0) == pytest.approx((0.0, -10.0), abs=1e-9)
     # opacity: capped, rising with thickness and with the slant; the phase peaks forward and is capped
     assert ci.cirrus_opacity(0.0, 1.0) == 0.0
     assert ci.cirrus_opacity(1.0, 1.0) < ci.cirrus_opacity(1.0, 0.2) <= ci.CIRRUS_LOOK["MaxOpacity"]
@@ -284,28 +309,33 @@ def test_the_shader_noise_members_are_fworldclouds_text_for_text():
 def test_the_shader_constants_and_cut_are_the_replicas():
     assert f"const float FBM_MEAN = {ci.CIRRUS_FBM_MEAN};" in CIRRUS_HLSL
     assert f"const float FBM_SIGMA = {ci.CIRRUS_FBM_SIGMA};" in CIRRUS_HLSL
+    assert f"const float FIBRE_MEAN = {ci.CIRRUS_FIBRE_MEAN};" in CIRRUS_HLSL
+    assert f"const float SLANT_FLOOR = {ci.CIRRUS_SLANT_FLOOR};" in CIRRUS_HLSL
     assert f"const uint NOISE_SEED = {ci.CIRRUS_NOISE_SEED}u;" in CIRRUS_HLSL
     assert "float thr = FBM_MEAN + FBM_SIGMA * N.Probit(1.0 - cover);" in CIRRUS_HLSL
     assert "float soft = FBM_SIGMA * max(EdgeSigmas, 0.1);" in CIRRUS_HLSL
-    assert "thick *= lerp(1.0 - saturate(FibreStrength), 1.0, N.Fibres(qa, qc, NOISE_SEED));" in CIRRUS_HLSL
-    assert "thick *= smoothstep(0.0, max(FeatherWidth, 1e-3), abs(N.Ends(qa, qc, NOISE_SEED)));" in CIRRUS_HLSL
+    assert "float cpatch = N.Remap(N.Patch(kmxy.x / pscale, kmxy.y / pscale, NOISE_SEED), thr, thr + soft);" in CIRRUS_HLSL
+    assert "float footKm = length(fwidth(WorldPos.xy)) / 100000.0;" in CIRRUS_HLSL
+    assert "fib = lerp(FIBRE_MEAN, fib, saturate(1.0 - footKm / (scale * max(DetailFade, 1e-3))));" in CIRRUS_HLSL
+    assert "float thick = cpatch * lerp(1.0 - saturate(FibreStrength), 1.0, fib);" in CIRRUS_HLSL
+    assert "float slant = 1.0 / max(abs(D.z), SLANT_FLOOR);" in CIRRUS_HLSL
     assert "float opacity = min(saturate(MaxOpacity), 1.0 - exp(-tau));" in CIRRUS_HLSL
     assert "float2 dir = float2(sin(ang), cos(ang));" in CIRRUS_HLSL   # a compass bearing, engine X east / Y north
     assert "return float4(L, a);" in CIRRUS_HLSL
     # the field's constants, HLSL and Python (one place each)
-    for literal in ("qa * 0.7 + 3.3, qc * 0.7 + 1.1, seed + 701u", "qa * 0.7 + 8.9, qc * 0.7 + 6.2, seed + 719u",
-                    "0.35 * wa", "a + 1.3, c + 7.1, seed + 101u", "a * 2.1 + 5.7, c * 2.1 + 2.9, seed + 113u",
-                    "a * 4.3 + 9.1, c * 4.3 + 4.4, seed + 127u", "qa * 1.5 + 2.2, qc * 6.0 + 3.7, seed + 211u",
-                    "qa * 3.0 + 7.5, qc * 12.0 + 1.9, seed + 223u", "qa * 0.3 + 4.1, qc * 1.0 + 2.6, seed + 307u"):
+    for literal in ("px + 1.3, py + 7.1, seed + 101u", "px * 2.03 + 5.7, py * 2.03 + 2.9, seed + 113u",
+                    "along / fl + 3.3, across / fl + 1.1, seed + 701u", "along / hl + 8.9, c / hl + 6.2, seed + 719u",
+                    "qa + 2.2, qc + 3.7, seed + 211u", "qa * 2.1 + 7.5, qc * 2.7 + 1.9, seed + 223u"):
         assert literal in CIRRUS_HLSL, literal
-    assert CIRRUS_HLSL.count("Perlin2(") == 1 + 5 + 2 + 1   # the definition, Streaks, Fibres, Ends: 32 hashes
+    assert CIRRUS_HLSL.count("Perlin2(") == 1 + 2 + 2 + 2   # the definition, Patch, Flow, Fibres: 24 hashes (round 1: 32)
+    assert "Streaks(" not in CIRRUS_HLSL and "Ends(" not in CIRRUS_HLSL
 
 
 @NEEDS_CXX
 def test_the_shader_field_is_the_pythons(tmp_path):
     """FCirrusNoise (cirrus.hlsl) compiled as C++ with HLSL's uint, asuint and
-    intrinsics: Streaks, Fibres and Ends are cirrus_streaks, cirrus_fibres and
-    cirrus_ends to single precision."""
+    intrinsics: Patch, Flow and Fibres are cirrus_patch, cirrus_flow and
+    cirrus_fibres to single precision."""
     struct = CIRRUS_HLSL[CIRRUS_HLSL.index("struct FCirrusNoise"):CIRRUS_HLSL.index("\n};\n") + 4]
     shims = r"""
 #include <cmath>
@@ -321,9 +351,11 @@ static float lerp(float a, float b, float t) { return a + (b - a) * t; }
 static uint asuint(int v) { uint u; std::memcpy(&u, &v, 4); return u; }
 """
     points = [(0.3, 0.7), (12.25, -3.5), (-41.3, 18.9), (517.6, 902.1), (-0.01, 59.99)]
+    L = ci.CIRRUS_LOOK
     main = "int main() { FCirrusNoise N;\n" + "".join(
-        f"printf(\"%.9g %.9g %.9g\\n\", (double)N.Streaks({a}f, {c}f, 17u), (double)N.Fibres({a}f, {c}f, 17u), "
-        f"(double)N.Ends({a}f, {c}f, 17u));\n" for a, c in points) + "return 0; }\n"
+        f"printf(\"%.9g %.9g %.9g\\n\", (double)N.Patch({a}f, {c}f, 17u), "
+        f"(double)N.Flow({a}f, {c}f, {L['FlowWarpKm']}f, {L['FlowLenKm']}f, {L['HookWarpKm']}f, {L['HookLenKm']}f, 17u), "
+        f"(double)N.Fibres({a}f, {c}f, {L['FibreSharpness']}f, 17u));\n" for a, c in points) + "return 0; }\n"
     (tmp_path / "cirrus.cpp").write_text(shims + struct + "\n" + main, encoding="utf-8")
     subprocess.run(["g++", "-std=c++17", "-o", str(tmp_path / "cirrus"), str(tmp_path / "cirrus.cpp")],
                    check=True, capture_output=True, text=True)
@@ -331,9 +363,9 @@ static uint asuint(int v) { uint u; std::memcpy(&u, &v, 4); return u; }
     import struct as st
     for i, (a, c) in enumerate(points):
         fa, fc = (st.unpack("f", st.pack("f", v))[0] for v in (a, c))
-        assert float(out[3 * i]) == pytest.approx(ci.cirrus_streaks(fa, fc), abs=2e-4), (a, c)
-        assert float(out[3 * i + 1]) == pytest.approx(ci.cirrus_fibres(fa, fc), abs=2e-4), (a, c)
-        assert float(out[3 * i + 2]) == pytest.approx(ci.cirrus_ends(fa, fc), abs=2e-4), (a, c)
+        assert float(out[3 * i]) == pytest.approx(ci.cirrus_patch(fa, fc), abs=2e-4), (a, c)
+        assert float(out[3 * i + 1]) == pytest.approx(ci.cirrus_flow(fa, fc), abs=2e-3), (a, c)
+        assert float(out[3 * i + 2]) == pytest.approx(ci.cirrus_fibres(fa, fc, L["FibreSharpness"]), abs=2e-4), (a, c)
 
 
 # -- the material, the shader and the C++ agree ---------------------------------------------------
@@ -380,8 +412,8 @@ def test_the_material_is_unlit_translucent_and_label_safe():
     assert "MP_BASE_COLOR" not in CREATE and "MD_VOLUME" not in CREATE
     assert CREATE.index('world_stamp(material, "M_FlightSimCirrus")') < CREATE.index("finish(material")
     assert "M_FlightSimCirrus" in _script_value("WORLD_BEAUTY_MATERIALS")
-    assert _script_value("WORLD_GENERATIONS")["M_FlightSimCirrus"] == "1"
-    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCirrus"] == "1"
+    assert _script_value("WORLD_GENERATIONS")["M_FlightSimCirrus"] == "2"         # 2: sky-cirrus2 patches + hooked fibres
+    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCirrus"] == "2"
     # the distant sheet's stamps did not move: no shader of theirs changed
     assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimDistantClouds"] == "5"
     assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"] == "10"   # sky-clouds2: graph 8 again, the light in M_FlightSimCloudLayersLit
@@ -426,7 +458,8 @@ def test_the_cpp_sheet_is_beauty_only_label_safe_and_above_the_flight():
         "ApplyCirrus(World, Scene, Seed);") < BUILD.index("if (!ApplySkyHdri(Scene, SkyHdriName, Params, Error))")
     # the header declares the state, the switch and the method
     assert "struct FCirrusSheetState" in CLOUDS_H and "void ApplyCirrus(" in CLOUDS_H
-    assert 'FString CirrusSwitch = TEXT("on");' in CLOUDS_H
+    assert 'FString CirrusSwitch = TEXT("off");' in CLOUDS_H   # off by default since generation 2 (sky-cirrus2)
+    assert 'CirrusSwitch = TEXT("off");' in BUILD
 
 
 def test_the_plan_loader_says_whether_the_cover_came_from_data_and_the_measure_path_is_untouched():

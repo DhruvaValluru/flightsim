@@ -3808,9 +3808,10 @@ WORLD_DISTANT_INPUTS = WORLD_DISTANT_ENGINE_INPUTS + tuple(WORLD_DISTANT_SCALARS
 #: pinned equal by tests/test_cirrus.py). UNCALIBRATED: set by probe render.
 WORLD_CIRRUS_SCALARS = {
     "Coverage": 0.35, "StreakDirDeg": 0.0, "RadiusKm": 400.0, "SheetFade": 1.0,
-    "StreakScaleKm": 6.0, "StreakAspect": 8.0, "EdgeSigmas": 2.5, "FibreStrength": 0.6, "FeatherWidth": 0.15,
-    "OpticalDepth": 0.6, "MaxOpacity": 0.6, "Albedo": 0.95, "AmbientGain": 1.0, "ForwardG": 0.7,
-    "ForwardShare": 0.6, "ForwardCap": 8.0, "RimFadeShare": 0.2, "SunDirSign": 1.0,
+    "StreakScaleKm": 1.5, "StreakAspect": 6.0, "EdgeSigmas": 2.0, "FibreStrength": 0.85, "FibreSharpness": 6.0,
+    "PatchScaleKm": 40.0, "FlowWarpKm": 10.0, "FlowLenKm": 30.0, "HookWarpKm": 1.0, "HookLenKm": 4.0,
+    "DetailFade": 0.5, "OpticalDepth": 0.3, "MaxOpacity": 0.35, "Albedo": 0.95, "AmbientGain": 1.0,
+    "ForwardG": 0.7, "ForwardShare": 0.6, "ForwardCap": 8.0, "RimFadeShare": 0.2, "SunDirSign": 1.0,
 }
 WORLD_CIRRUS_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 #: The Custom node's inputs, in order: the distant sheet's five engine inputs,
@@ -3963,13 +3964,16 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: own scattering constants (CLOUD_SCATTERING). The distant sheet's shared noise
 #: text is unchanged (everything new sits after it): distant stays 5.
 #: Sky step 6 (2026-11-15): cirrus 1, the first cirrus.hlsl (M_FlightSimCirrus).
+#: Lane sky-cirrus2 (2026-11-15): cirrus 2, the patch / flow / ridged-fibre field
+#: and its new inputs (FibreSharpness, PatchScaleKm, FlowWarpKm, FlowLenKm,
+#: HookWarpKm, HookLenKm, DetailFade; FeatherWidth gone).
 #: Sky-clouds lane (2026-11-15): cloud layers 9, the scattering node's six inputs as
 #: parameters and cloud_albedo.hlsl on Base Color (-look-cloud-light; defaults = 8).
 #: Sky-clouds2 (2026-11-15, review of 42974c46): the light moved to its OWN material,
 #: M_FlightSimCloudLayersLit 1 (graph 9 had raised the default PS 161 -> 847
 #: instructions and 0 -> 8 samplers with the switch off); cloud layers 10 = graph 8 again.
 #: High-sky fx (2026-11-15): rainbow 1, the first rainbow.hlsl (M_FlightSimRainbow).
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "10", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "1",
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "10", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "2",
                            "M_FlightSimCloudLayersLit": "1",
                            "M_FlightSimRainbow": "1"}
 
@@ -4022,7 +4026,7 @@ WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "10", 
                      "M_FlightSimCloudLayers": "12", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING; 11: sky-clouds light inputs + cloud_albedo; 12: sky-clouds2 the light moved to M_FlightSimCloudLayersLit (graph 8 again)
                      "M_FlightSimCloudLayersLit": "1",  # sky-clouds2: -look-cloud-light=on's own material
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
-                     "M_FlightSimCirrus": "1",          # sky step 6: the high cirrus sheet
+                     "M_FlightSimCirrus": "2",          # sky step 6: the high cirrus sheet; 2: sky-cirrus2 patches + hooked fibres
                      "M_FlightSimRainbow": "1",         # high-sky fx: the beauty rainbow
                      "M_FlightSimOceanBeauty": "5"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
@@ -4597,8 +4601,8 @@ def create_world_cirrus():
     fog and the aerial perspective fade it into the horizon haze) and cloud
     fogging (the volumetric layer below attenuates it); it never writes custom
     depth or velocity, so the labels and the depth pass never see it.
-    cirrus.hlsl returns float4(emissive, opacity): seeded streaks along the
-    wind with feathered ends, cut at the cover's quantile, lit by a forward lobe
+    cirrus.hlsl returns float4(emissive, opacity): seeded patches (the cover's
+    quantile) of thin hooked fibres along a slowly turning stream, lit by a forward lobe
     of the sun and the sky's distant luminance from the SkyAtmosphere nodes
     (light 0). VISUAL ONLY; UNMEASURED until a Windows render."""
     material = _world_beauty_material("M_FlightSimCirrus")

@@ -36,19 +36,22 @@ from .world_beauty import PRESETS, _perlin2, probit_approx
 
 __all__ = [
     "CIRRUS_BASE_M", "CIRRUS_CLEARANCE_M", "CIRRUS_COVER_SOURCES", "CIRRUS_DEFAULT_COVER",
-    "CIRRUS_FBM_MEAN", "CIRRUS_FBM_SIGMA", "CIRRUS_LOOK", "CIRRUS_MAX_M",
-    "CIRRUS_MIN_DRAWN_COVER", "CIRRUS_RADIUS_KM", "CIRRUS_SORT_PRIORITY", "CIRRUS_SWITCH",
-    "CIRRUS_SWITCH_WORDS", "CIRRUS_WIND_GAIN", "cirrus_cover", "cirrus_drift_mps",
-    "cirrus_ends", "cirrus_fibres", "cirrus_frame", "cirrus_mode", "cirrus_opacity",
-    "cirrus_phase", "cirrus_sheet", "cirrus_streak_dir_deg", "cirrus_streaks",
+    "CIRRUS_FBM_MEAN", "CIRRUS_FBM_SIGMA", "CIRRUS_FIBRE_MEAN", "CIRRUS_LOOK", "CIRRUS_MAX_M",
+    "CIRRUS_MIN_DRAWN_COVER", "CIRRUS_RADIUS_KM", "CIRRUS_SLANT_FLOOR", "CIRRUS_SORT_PRIORITY",
+    "CIRRUS_SWITCH", "CIRRUS_SWITCH_DEFAULT", "CIRRUS_SWITCH_WORDS", "CIRRUS_WIND_GAIN", "cirrus_cover",
+    "cirrus_drift_mps", "cirrus_fibres", "cirrus_flow", "cirrus_frame", "cirrus_mode", "cirrus_opacity",
+    "cirrus_patch", "cirrus_phase", "cirrus_sheet", "cirrus_streak_dir_deg",
     "cirrus_threshold", "cirrus_thickness", "material_scalars",
 ]
 
 #: ``-look-cirrus=on|off`` (FlightSimClouds.cpp Build; FLIGHTSIM_RENDER_SWITCHES
-#: too): on by default in beauty; off builds nothing (the round-95 upper sky);
-#: another word refuses ``world_beauty.cirrus: -look-cirrus=...``.
+#: too): OFF by default since generation 2 (2026-11-15, lane sky-cirrus2: off
+#: until the sheet reads as a photograph by eye on the render machine); off
+#: builds nothing (the round-95 upper sky); another word refuses
+#: ``world_beauty.cirrus: -look-cirrus=...``.
 CIRRUS_SWITCH = "-look-cirrus"
 CIRRUS_SWITCH_WORDS: Tuple[str, ...] = ("on", "off")
+CIRRUS_SWITCH_DEFAULT = "off"
 
 #: The altitude law (C++ CirrusSheetAltitudeM): the sheet sits at
 #: max(CIRRUS_BASE_M, camera + CIRRUS_CLEARANCE_M), capped at CIRRUS_MAX_M, so it
@@ -80,40 +83,67 @@ CIRRUS_WIND_GAIN = 2.0
 #: Where the drawn cover came from (C++ CirrusCoverSourceName, in this order).
 CIRRUS_COVER_SOURCES: Tuple[str, ...] = ("off", "preset", "switch", "plan", "default")
 
-#: The streak field's moments (cirrus_streaks over a 240 x 240 grid of the
-#: stretched frame, -60..60, at seed 17: mean 0.5003, sigma 0.0774; re-measured
-#: by tests/test_cirrus.py). Properties of the noise, not look values: the shader
-#: cuts at the quantile threshold = MEAN + SIGMA x probit(1 - cover), so the drawn
-#: share of the sheet is the cover (within 1 % at 0.2..0.9 on the replica).
+#: The patch field's moments (cirrus_patch over a 120 x 120 grid of the patch
+#: frame, -60..60, at seed 17: mean 0.4997, sigma 0.0901; re-measured by
+#: tests/test_cirrus.py). Properties of the noise, not look values: the shader
+#: cuts at the quantile threshold = MEAN + SIGMA x probit(1 - cover), so the share
+#: of the sky inside a cirrus patch is the cover (the plan's cirrus_coverage, a
+#: fraction of the sky, ERA5's high cloud cover; 0 = none).
 CIRRUS_FBM_MEAN = 0.5
-CIRRUS_FBM_SIGMA = 0.077
+CIRRUS_FBM_SIGMA = 0.09
+#: The fibre field's mean at the default FibreSharpness (6): 0.294 on the same
+#: grid. Where a fibre is finer than the pixel's footprint the shader draws this
+#: mean instead (a veil), so the far sheet never aliases into the round-1 tape.
+CIRRUS_FIBRE_MEAN = 0.29
+#: The slant path's floor: 1 / max(|V.z|, 0.25), at most 4x the vertical path, so
+#: the grazing sheet near the horizon thickens by perspective without turning
+#: opaque white (round 1's 0.15 let it reach 6.7x).
+CIRRUS_SLANT_FLOOR = 0.25
 
 #: The look (the material's scalar parameters, cirrus.hlsl's inputs; C++
-#: CirrusLook / CirrusLookName). UNCALIBRATED: set by probe render on the render
-#: machine. Each one:
-#:   StreakScaleKm  the cross-stream feature size (km); along the stream it is x StreakAspect
-#:   StreakAspect   how much longer than wide a streak is (cirrus fibratus runs tens of km)
-#:   EdgeSigmas     the cut's soft edge in sigmas of the field: a veil, not a cut-out
-#:   FibreStrength  how deeply the fine along-stream filaments modulate the thickness
-#:   FeatherWidth   the width (in the ends noise's units) over which a streak thins to nothing
-#:   OpticalDepth   the veil's vertical optical depth at full thickness (cirrus: 0.1..1)
-#:   MaxOpacity     the opacity cap: the blue reads through everywhere
+#: CirrusLook / CirrusLookName). Generation 2 (2026-11-15, lane sky-cirrus2):
+#: the round-1 look (6 km x 48 km streaks, opacity to 0.6) drew hard, evenly
+#: spaced tape on #13 and white smears on #3; this one draws sparse patches of
+#: thin hooked fibres. The real-world number each value matches:
+#:   StreakScaleKm  the fibres' cross-stream spacing: cirrus fibratus filaments and
+#:                  uncinus fallstreak heads are ~0.5-2 km wide (Heymsfield 1975)
+#:   StreakAspect   along / across: fibratus filaments run 5-20 km (x6 -> ~9 km)
+#:   EdgeSigmas     the patch edge in sigmas of the patch field: patches fade into the blue
+#:   FibreStrength  the share of the thickness carried by the fibres (the rest is a faint
+#:                  veil between them, cirrostratus-like)
+#:   FibreSharpness the ridge exponent: ~16 % of a patch is inside a bright fibre
+#:   PatchScaleKm   the patch size: cirrus fields come in patches tens of km across
+#:                  (mesoscale bands 20-100 km)
+#:   FlowWarpKm     the slow across-stream warp: the streak direction turns by up to
+#:   FlowLenKm        ~30 degrees over ~30 km (jet-level flow curvature)
+#:   HookWarpKm     the fine warp: the uncinus hooks, ~1 km over ~4 km
+#:   HookLenKm
+#:   DetailFade     fibres finer than DetailFade x StreakScaleKm per pixel draw their mean
+#:   OpticalDepth   vertical optical depth at full thickness: thin cirrus is 0.03-0.3
+#:                  (Sassen & Cho 1992); 0.3 is its top
+#:   MaxOpacity     the cap: 1 - exp(-0.3 x 1.4) ~ 0.35, so the blue reads through
 #:   Albedo         ice scatters nearly all it intercepts
 #:   AmbientGain    x the sky's distant scattered luminance
-#:   ForwardG       the Henyey-Greenstein asymmetry of the ice (strongly forward)
+#:   ForwardG       Henyey-Greenstein asymmetry of ice crystals (0.7-0.8, Baran 2009)
 #:   ForwardShare   the blend of that lobe with an isotropic term (multiple scattering stand-in)
 #:   ForwardCap     the lobe's cap (its peak would be (1+g)/(1-g)^2 = 19 at g 0.7)
 #:   RimFadeShare   the sheet fades out over this share of the radius at the rim
-#:   SunDirSign     1: SkyAtmosphereLightDirection points TOWARDS the sun (read in the 5.7
-#:                  source, UNVERIFIED on the laptop); -1 flips it for the A/B
+#:   SunDirSign     1: SkyAtmosphereLightDirection points TOWARDS the sun; -1 flips it
+#: UNCALIBRATED beyond the Mac look-dev stills.
 CIRRUS_LOOK: Dict[str, float] = {
-    "StreakScaleKm": 6.0,
-    "StreakAspect": 8.0,
-    "EdgeSigmas": 2.5,
-    "FibreStrength": 0.6,
-    "FeatherWidth": 0.15,
-    "OpticalDepth": 0.6,
-    "MaxOpacity": 0.6,
+    "StreakScaleKm": 1.5,
+    "StreakAspect": 6.0,
+    "EdgeSigmas": 2.0,
+    "FibreStrength": 0.85,
+    "FibreSharpness": 6.0,
+    "PatchScaleKm": 40.0,
+    "FlowWarpKm": 10.0,
+    "FlowLenKm": 30.0,
+    "HookWarpKm": 1.0,
+    "HookLenKm": 4.0,
+    "DetailFade": 0.5,
+    "OpticalDepth": 0.3,
+    "MaxOpacity": 0.35,
     "Albedo": 0.95,
     "AmbientGain": 1.0,
     "ForwardG": 0.7,
@@ -123,10 +153,9 @@ CIRRUS_LOOK: Dict[str, float] = {
     "SunDirSign": 1.0,
 }
 #: The field's fixed seed offsets (cirrus.hlsl FCirrusNoise; one uint each).
-_SEED_WARP_A, _SEED_WARP_C = 701, 719
-_SEED_OCTAVES = (101, 113, 127)
+_SEED_PATCH = (101, 113)
+_SEED_FLOW, _SEED_HOOK = 701, 719
 _SEED_FIBRES = (211, 223)
-_SEED_ENDS = 307
 #: The hashed field's own seed (the material's noise is seeded through
 #: SeedOffsetKm, the frame offset; the lattice seed is fixed, like the layers' 7u).
 CIRRUS_NOISE_SEED = 17
@@ -144,9 +173,9 @@ def material_scalars() -> Dict[str, float]:
 
 
 def cirrus_mode(word: Optional[str]) -> str:
-    """The switch word as the host reads it: ``on`` (the default, an empty word)
-    or ``off``; any other word is the host's refusal ``world_beauty.cirrus``."""
-    chosen = (word or "").strip() or "on"
+    """The switch word as the host reads it: ``on`` or ``off`` (the default, an
+    empty word); any other word is the host's refusal ``world_beauty.cirrus``."""
+    chosen = (word or "").strip() or CIRRUS_SWITCH_DEFAULT
     if chosen not in CIRRUS_SWITCH_WORDS:
         raise ValueError(f"world_beauty.cirrus: -look-cirrus={chosen} is not on or off")
     return chosen
@@ -203,81 +232,78 @@ def cirrus_drift_mps(drift_mps: float) -> float:
 
 # -- the shader's field, replicated (cirrus.hlsl FCirrusNoise) ---------------------------
 
-def cirrus_frame(x_km: float, y_km: float, streak_dir_deg: float, scale_km: float,
-                 aspect: float) -> Tuple[float, float]:
-    """The seeded kilometre frame turned onto the streak axis and stretched along
-    it: ``(qa, qc)`` = (along / (scale x aspect), across / scale). A compass
-    bearing b points along (sin b, cos b) in engine X east / Y north (the scene's
-    drift law)."""
+def cirrus_frame(x_km: float, y_km: float, streak_dir_deg: float) -> Tuple[float, float]:
+    """The seeded kilometre frame turned onto the streak axis: ``(along, across)``
+    in km. A compass bearing b points along (sin b, cos b) in engine X east /
+    Y north (the scene's drift law)."""
     ang = math.radians(float(streak_dir_deg))
     dx, dy = math.sin(ang), math.cos(ang)
-    along = float(x_km) * dx + float(y_km) * dy
-    across = float(x_km) * dy - float(y_km) * dx
-    scale = max(float(scale_km), 1e-3)
-    return along / (scale * max(float(aspect), 1.0)), across / scale
+    return float(x_km) * dx + float(y_km) * dy, float(x_km) * dy - float(y_km) * dx
 
 
-def cirrus_streaks(qa: float, qc: float, seed: int = CIRRUS_NOISE_SEED) -> float:
-    """FCirrusNoise::Streaks: the streak field in 0..1 (mean CIRRUS_FBM_MEAN).
-    A slow flow warp curves the streaks (the hooks of cirrus uncinus), then
-    three gradient-noise octaves (0.5 / 0.3 / 0.2 at 1 / 2.1 / 4.3) on the
-    stretched frame. 20 hashes."""
-    wa = _perlin2(qa * 0.7 + 3.3, qc * 0.7 + 1.1, seed + _SEED_WARP_A)
-    wc = _perlin2(qa * 0.7 + 8.9, qc * 0.7 + 6.2, seed + _SEED_WARP_C)
-    a = qa + 0.35 * wa
-    c = qc + 0.35 * wc
-    f = (0.5 * _perlin2(a + 1.3, c + 7.1, seed + _SEED_OCTAVES[0])
-         + 0.3 * _perlin2(a * 2.1 + 5.7, c * 2.1 + 2.9, seed + _SEED_OCTAVES[1])
-         + 0.2 * _perlin2(a * 4.3 + 9.1, c * 4.3 + 4.4, seed + _SEED_OCTAVES[2]))
-    return 0.5 + 0.5 * f
+def cirrus_patch(px: float, py: float, seed: int = CIRRUS_NOISE_SEED) -> float:
+    """FCirrusNoise::Patch: the coverage field in 0..1 (mean CIRRUS_FBM_MEAN) on
+    the patch frame (km / PatchScaleKm): two gradient octaves. 8 hashes."""
+    return 0.5 + 0.5 * (0.65 * _perlin2(px + 1.3, py + 7.1, seed + _SEED_PATCH[0])
+                        + 0.35 * _perlin2(px * 2.03 + 5.7, py * 2.03 + 2.9, seed + _SEED_PATCH[1]))
 
 
-def cirrus_fibres(qa: float, qc: float, seed: int = CIRRUS_NOISE_SEED) -> float:
-    """FCirrusNoise::Fibres: the fine filaments along the stream, 0..1 about 0.5
-    (two octaves, 4x and 8x finer ACROSS the stream than along it). 8 hashes."""
-    return 0.5 + 0.5 * (0.6 * _perlin2(qa * 1.5 + 2.2, qc * 6.0 + 3.7, seed + _SEED_FIBRES[0])
-                        + 0.4 * _perlin2(qa * 3.0 + 7.5, qc * 12.0 + 1.9, seed + _SEED_FIBRES[1]))
+def cirrus_flow(along: float, across: float, look: Optional[Dict[str, float]] = None,
+                seed: int = CIRRUS_NOISE_SEED) -> float:
+    """FCirrusNoise::Flow: the warped across-stream coordinate (km). A slow warp
+    (FlowWarpKm over FlowLenKm) turns the streak direction across the sky; a
+    fine one (HookWarpKm over HookLenKm) bends the fibres into hooks. 8 hashes."""
+    L = CIRRUS_LOOK if look is None else look
+    fl, hl = max(L["FlowLenKm"], 1e-3), max(L["HookLenKm"], 1e-3)
+    c = across + L["FlowWarpKm"] * _perlin2(along / fl + 3.3, across / fl + 1.1, seed + _SEED_FLOW)
+    return c + L["HookWarpKm"] * _perlin2(along / hl + 8.9, c / hl + 6.2, seed + _SEED_HOOK)
 
 
-def cirrus_ends(qa: float, qc: float, seed: int = CIRRUS_NOISE_SEED) -> float:
-    """FCirrusNoise::Ends: a slow along-stream gradient noise whose zero
-    crossings thin a streak to nothing (its feathered ends). 4 hashes."""
-    return _perlin2(qa * 0.3 + 4.1, qc * 1.0 + 2.6, seed + _SEED_ENDS)
+def cirrus_fibres(qa: float, qc: float, sharpness: float = 6.0, seed: int = CIRRUS_NOISE_SEED) -> float:
+    """FCirrusNoise::Fibres: thin bright filaments in 0..1 on the stretched frame
+    (qa along / (scale x aspect), qc across / scale): two ridged octaves
+    (1 - |noise|) raised to ``sharpness``. 8 hashes."""
+    r1 = 1.0 - abs(_perlin2(qa + 2.2, qc + 3.7, seed + _SEED_FIBRES[0]))
+    r2 = 1.0 - abs(_perlin2(qa * 2.1 + 7.5, qc * 2.7 + 1.9, seed + _SEED_FIBRES[1]))
+    return min(max(0.65 * r1 + 0.35 * r2, 0.0), 1.0) ** max(float(sharpness), 1.0)
 
 
 def cirrus_threshold(cover: float) -> float:
-    """The field value at the (1 - cover) quantile: the shader's cut."""
+    """The patch field value at the (1 - cover) quantile: the shader's cut."""
     c = min(max(float(cover), 0.0), 1.0)
     return CIRRUS_FBM_MEAN + CIRRUS_FBM_SIGMA * probit_approx(1.0 - c)
 
 
-def _smoothstep(a: float, b: float, x: float) -> float:
-    t = min(max((x - a) / max(b - a, 1e-9), 0.0), 1.0)
-    return t * t * (3.0 - 2.0 * t)
-
-
 def cirrus_thickness(x_km: float, y_km: float, cover: float, streak_dir_deg: float,
-                     look: Optional[Dict[str, float]] = None, seed: int = CIRRUS_NOISE_SEED) -> float:
+                     look: Optional[Dict[str, float]] = None, seed: int = CIRRUS_NOISE_SEED,
+                     footprint_km: float = 0.0) -> float:
     """The veil's thickness 0..1 at a point of the frame (cirrus.hlsl before the
-    opacity): the field cut at the cover's quantile with a soft edge EdgeSigmas
-    wide, modulated by the fibres (1 - FibreStrength .. 1) and thinned to nothing
-    at the ends noise's zero crossings (smoothstep(0, FeatherWidth, |ends|))."""
+    opacity): the patch field cut at the cover's quantile with a soft edge
+    EdgeSigmas wide, times the fibres (a faint veil 1 - FibreStrength between
+    them) on the flow-warped stretched frame. ``footprint_km`` is the pixel's
+    footprint (the shader's fwidth): fibres finer than DetailFade x StreakScaleKm
+    draw CIRRUS_FIBRE_MEAN."""
     L = CIRRUS_LOOK if look is None else look
-    qa, qc = cirrus_frame(x_km, y_km, streak_dir_deg, L["StreakScaleKm"], L["StreakAspect"])
+    ps = max(L["PatchScaleKm"], 1e-3)
     thr = cirrus_threshold(cover)
-    soft = CIRRUS_FBM_SIGMA * L["EdgeSigmas"]
-    thick = min(max((cirrus_streaks(qa, qc, seed) - thr) / max(soft, 1e-4), 0.0), 1.0)
-    thick *= (1.0 - L["FibreStrength"]) + L["FibreStrength"] * cirrus_fibres(qa, qc, seed)
-    thick *= _smoothstep(0.0, max(L["FeatherWidth"], 1e-3), abs(cirrus_ends(qa, qc, seed)))
-    return thick
+    soft = CIRRUS_FBM_SIGMA * max(L["EdgeSigmas"], 0.1)
+    patch = min(max((cirrus_patch(x_km / ps, y_km / ps, seed) - thr) / max(soft, 1e-4), 0.0), 1.0)
+    along, across = cirrus_frame(x_km, y_km, streak_dir_deg)
+    c = cirrus_flow(along, across, L, seed)
+    scale = max(L["StreakScaleKm"], 1e-3)
+    fib = cirrus_fibres(along / (scale * max(L["StreakAspect"], 1.0)), c / scale, L["FibreSharpness"], seed)
+    w = min(max(1.0 - float(footprint_km) / (scale * max(L["DetailFade"], 1e-3)), 0.0), 1.0)
+    fib = CIRRUS_FIBRE_MEAN + (fib - CIRRUS_FIBRE_MEAN) * w
+    fs = min(max(L["FibreStrength"], 0.0), 1.0)
+    return patch * ((1.0 - fs) + fs * fib)
 
 
 def cirrus_opacity(thick: float, view_z_abs: float, look: Optional[Dict[str, float]] = None) -> float:
-    """The pixel's opacity: Beer's law on the slant path (1 / max(|V.z|, 0.15))
+    """The pixel's opacity: Beer's law on the slant path (1 / max(|V.z|, CIRRUS_SLANT_FLOOR))
     through a veil of vertical optical depth OpticalDepth x thick, capped at
     MaxOpacity so the sky reads through everywhere."""
     L = CIRRUS_LOOK if look is None else look
-    slant = 1.0 / max(abs(float(view_z_abs)), 0.15)
+    slant = 1.0 / max(abs(float(view_z_abs)), CIRRUS_SLANT_FLOOR)
     tau = max(float(thick), 0.0) * L["OpticalDepth"] * slant
     return min(L["MaxOpacity"], 1.0 - math.exp(-tau))
 

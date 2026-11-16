@@ -1459,19 +1459,19 @@ namespace FlightSimWorldPure
 	static_assert(CirrusMinDrawnCover < CirrusDefaultCover, "the default cover is drawn");
 	// The look: the material's scalar parameters (cirrus.CIRRUS_LOOK, in order).
 	// UNCALIBRATED: set by probe render on the render machine.
-	constexpr int CirrusLookCount = 14;
+	constexpr int CirrusLookCount = 20;
 	inline const char* CirrusLookName(int Field)
 	{
 		static const char* const Names[CirrusLookCount] = {
-			"StreakScaleKm", "StreakAspect", "EdgeSigmas", "FibreStrength", "FeatherWidth", "OpticalDepth",
-			"MaxOpacity", "Albedo", "AmbientGain", "ForwardG", "ForwardShare", "ForwardCap", "RimFadeShare",
-			"SunDirSign"};
+			"StreakScaleKm", "StreakAspect", "EdgeSigmas", "FibreStrength", "FibreSharpness", "PatchScaleKm",
+			"FlowWarpKm", "FlowLenKm", "HookWarpKm", "HookLenKm", "DetailFade", "OpticalDepth", "MaxOpacity",
+			"Albedo", "AmbientGain", "ForwardG", "ForwardShare", "ForwardCap", "RimFadeShare", "SunDirSign"};
 		return Field >= 0 && Field < CirrusLookCount ? Names[Field] : "";
 	}
 	inline double CirrusLook(int Field)
 	{
-		static const double Values[CirrusLookCount] = {6.0, 8.0, 2.5, 0.6, 0.15, 0.6, 0.6, 0.95, 1.0, 0.7, 0.6,
-		                                               8.0, 0.2, 1.0};
+		static const double Values[CirrusLookCount] = {1.5, 6.0, 2.0, 0.85, 6.0, 40.0, 10.0, 30.0, 1.0, 4.0,
+		                                               0.5, 0.3, 0.35, 0.95, 1.0, 0.7, 0.6, 8.0, 0.2, 1.0};
 		return Field >= 0 && Field < CirrusLookCount ? Values[Field] : 0.0;
 	}
 	struct FCirrusSheet
@@ -1981,10 +1981,11 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// word refuses by name.
 		CloudMarchSwitch = TEXT("auto");
 		FParse::Value(*Switches, TEXT("cloud-march="), CloudMarchSwitch);
-		// Sky step 6: -look-cirrus=on|off (on by default): the high cirrus sheet
-		// (ApplyCirrus); off builds none (the round-95 upper sky). Another word
-		// refuses by name.
-		CirrusSwitch = TEXT("on");
+		// Sky step 6: -look-cirrus=on|off (off by default since cirrus generation 2,
+		// lane sky-cirrus2: off until it reads as a photograph by eye): the high
+		// cirrus sheet (ApplyCirrus); off builds none (the round-95 upper sky).
+		// Another word refuses by name.
+		CirrusSwitch = TEXT("off");
 		FParse::Value(*Switches, TEXT("look-cirrus="), CirrusSwitch);
 		// Sky step 4: -sky-multi-scatter=auto|on|off (auto by default: the row's
 		// MultiScatteringFactor on a discrete GPU, the class gate kept; on = every class; off is ef361bd6's sky for the
