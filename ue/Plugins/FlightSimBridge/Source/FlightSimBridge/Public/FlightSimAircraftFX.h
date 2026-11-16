@@ -87,6 +87,19 @@ struct FFlightSimAircraftFXOptions
 	// (contrail_opacity.hlsl Puff = contrail.PuffBreakup); -contrail-puffs=off sets
 	// Puff 0 (generation 12's even lumpiness), the A/B.
 	bool bContrailPuffs = true;
+	// LOOK_GENERATION 14 (#13's four streaks that read as light beams): each strip
+	// of a trail's crossed ribbon is weighted by how face-on it is (the two sum to
+	// 1; contrail_opacity.hlsl ViewWeight 1), so the edge-on strip no longer draws a
+	// hard full-opacity core line; -contrail-view-weight=off sets ViewWeight 0
+	// (generation 13: both strips at full strength), the A/B. Contrails and the
+	// wingtip vapour trails (same master).
+	bool bContrailViewWeight = true;
+	// LOOK_GENERATION 15 (#13's light beams, still there under the view weight:
+	// looking along a trail both strips keep a weight and the edge-on one draws a
+	// thin core line): ONE camera-facing ribbon with the tube's normal
+	// (contrail_facing.hlsl, contrail_normal.hlsl; Facing 1); -contrail-facing=off
+	// sets Facing 0 (generation 14), the A/B.
+	bool bContrailFacing = true;
 	// The canopy reflection (scripts/aircraft_glass_reflect.py; swarm lane
 	// aircraft_exterior.glass.coastal, its opaque tiers 0-1 only): OFF unless
 	// -canopy-reflect=on, so a round can A/B it. On, a glass slot that draws

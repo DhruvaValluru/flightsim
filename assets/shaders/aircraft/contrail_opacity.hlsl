@@ -23,6 +23,19 @@
 //   PuffCellCm float  the body puff cell, cm (contrail.PuffCellM x 100); the three
 //                     noise octaves have FIXED cells (0.37x, 1x, 5x of it) and
 //                     Life only moves the blend weights towards the coarse one
+//   CameraDir float3  CameraVectorWS (pixel to camera; only its line matters)
+//   AlongXY   float2  UV1: the ribbon's unit axis at this sample, world x, y
+//                     (the actor has no rotation, so local is world)
+//   AlongZStrip float2 UV2: x the axis's world z, y the strip (0 the strip whose
+//                     plane normal is Up, 1 the one whose normal is Side;
+//                     FlightSimAircraftFX.cpp RebuildTrail)
+//   ViewWeight float  1: weight each strip by how face-on it is (LOOK_GENERATION
+//                     14, -contrail-view-weight=on, the default); 0: generation
+//                     13's crossed ribbon, both strips at full strength
+//   Facing    float   1: LOOK_GENERATION 15's camera-facing ribbon (-contrail-facing=on,
+//                     the default; contrail_facing.hlsl turns strip 0 to face the
+//                     camera and folds strip 1 away): strip 0 carries the whole
+//                     profile (view 1), strip 1 none; 0: generation 14's view weight
 // Returns float opacity.
 //
 // Round 47 (#13's "four straight light lines on the sea", rounds 5-44): the ramp was
@@ -40,6 +53,7 @@
 // WORLD space; a young trail is a dense lumpy tube, an old one breaks into
 // separate puffs (the cut rises with Life) and thins out. Every number
 // UNCALIBRATED (no frame rendered yet). Bounded: 24 hashes, no loops, SM5-safe.
+// LOOK_GENERATION 14: the per-strip view weight (below the noise).
 //
 // Review fixes (same generation, before any frame was rendered):
 //   * The noise was sampled at WorldPos / (PuffCellCm x (1 + 4 Life)): a scale about
@@ -138,9 +152,39 @@ float q111 = frac(sin(dot(float3(eB.x, eB.y, eB.z), k)) * 43758.5453);
 float n3 = lerp(lerp(lerp(q000, q100, f3.x), lerp(q010, q110, f3.x), f3.y),
                 lerp(lerp(q001, q101, f3.x), lerp(q011, q111, f3.x), f3.y), f3.z);
 float n = wBody * n1 + wDetail * n2 + wCoarse * n3;
+// LOOK_GENERATION 14 (#13's "four bright diagonal streaks that read as light
+// beams"): the trail is a CROSSED ribbon, two strips at right angles. From a
+// chase camera looking along the trail one strip is nearly edge-on: its whole
+// across profile collapses into a hard, full-opacity line down the middle of the
+// face-on strip, and the two overlap there - a bright beam core no real trail has.
+// A tube of ice projects to the same chord profile from every azimuth about its
+// axis (geometry of a circular cylinder), so each strip is weighted by
+// (n.v)^2 / (1 - (a.v)^2), n its plane normal, a the axis, v the view line. With
+// n0, n1, a orthonormal, (n0.v)^2 + (n1.v)^2 = 1 - (a.v)^2 exactly, so the two
+// weights sum to 1 at every view (cos^2 + sin^2): the face-on strip carries the
+// profile, the edge-on one fades out, and no view adds a core. The plane
+// normals are rebuilt from the axis exactly as the C++ builds them (Side =
+// cross(a, up), Up = cross(Side, a)). Looking straight down the axis (a.v ~ 1)
+// the split is undefined and both take 0.5. Two dot products: no texture, no loop.
+float3 axis = float3(AlongXY, AlongZStrip.x);
+axis = axis / max(length(axis), 1.0e-4);
+float3 side = cross(axis, float3(0.0, 0.0, 1.0));
+side = length(side) > 1.0e-4 ? side / length(side) : float3(0.0, 1.0, 0.0);
+float3 upN = cross(side, axis);
+float3 viewLine = CameraDir / max(length(CameraDir), 1.0e-4);
+float3 plane = AlongZStrip.y < 0.5 ? upN : side;
+float nv = dot(plane, viewLine);
+float av = dot(axis, viewLine);
+float offAxis = 1.0 - av * av;
+float faceOn = offAxis > 1.0e-3 ? saturate(nv * nv / offAxis) : 0.5;
+float view = lerp(1.0, faceOn, saturate(ViewWeight));
+// LOOK_GENERATION 15: the camera-facing ribbon. Strip 0 faces the camera by
+// construction (a tube's projection, the chord across, from any azimuth); strip 1
+// is folded onto the axis and also drawn at 0, in case a vertex escapes the fold.
+view = Facing > 0.5 ? (AlongZStrip.y < 0.5 ? 1.0 : 0.0) : view;
 // A young trail is one lumpy body (0.7..1); an aged one is cut into puffs:
 // the cut rises with Life, so the gaps open as the trail thins.
 float cut = saturate(Puff) * smoothstep(0.1, 1.0, life) * 0.75;
 float puffs = saturate((n - cut) / max(1.0 - cut, 0.05));
 float lumpy = lerp(0.7 + 0.3 * n, 0.25 + 0.75 * puffs, saturate(Puff));
-return saturate(Opacity * formed * fade * across * lumpy);
+return saturate(Opacity * formed * fade * across * lumpy * view);
