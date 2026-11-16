@@ -801,7 +801,7 @@ namespace FlightSimWorldPure
 	// graph generation CloudGraphGeneration (world_beauty.CLOUD_SCATTERING is the
 	// twin; tests pin all three). Recorded here so render.json says what lit the
 	// cloud; nothing here sets them. UNCALIBRATED.
-	constexpr int CloudGraphGeneration = 9;   // sky-clouds lane: light inputs + cloud_albedo
+	constexpr int CloudGraphGeneration = 10;   // sky-clouds2: graph 8 again (the light moved to M_FlightSimCloudLayersLit)
 	constexpr double CloudAlbedo = 0.98;
 	// True when the asset's stamped generation is the one this bridge was written for.
 	inline bool CloudGraphGenerationCurrent(int Stamped)
@@ -1609,6 +1609,12 @@ namespace
 
 	const TCHAR* const WorldCloudMaterialPath =
 		TEXT("/Game/FlightSim/M_FlightSimCloudLayers.M_FlightSimCloudLayers");
+	// Sky-clouds2 lane: -look-cloud-light=on draws this SEPARATE material (graph 8
+	// plus the scattering inputs and cloud_albedo.hlsl), so the default
+	// M_FlightSimCloudLayers keeps graph 8's shader cost (the light's parameters
+	// raised its PS 161 -> 847 instructions, 0 -> 8 samplers, review of 42974c46).
+	const TCHAR* const WorldCloudLitMaterialPath =
+		TEXT("/Game/FlightSim/M_FlightSimCloudLayersLit.M_FlightSimCloudLayersLit");
 	const TCHAR* const WorldTilesMaterialPath =
 		TEXT("/Game/FlightSim/M_FlightSimTilesBeauty.M_FlightSimTilesBeauty");
 	const TCHAR* const WorldCollectionPath = TEXT("/Game/FlightSim/MPC_FlightSimWorld.MPC_FlightSimWorld");
@@ -3473,7 +3479,18 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		const double DensityScale = PlanDensityScale(PlanDensity);
 		const double DetailErosion = PlanDetailErosion(CloudRow[CldDetailErosion], PlanDetail);
 		State.DensityScale = DensityScale;
-		State.Material = UMaterialInstanceDynamic::Create(Base, Cloud);
+		// Sky-clouds2: the light ON parents the MID on M_FlightSimCloudLayersLit (same
+		// parameters plus the light's); not loadable (material script not run) = ours.
+		UMaterialInterface* Parent = Base;
+		if (bLight)
+		{
+			if (UMaterialInterface* Lit = LoadObject<UMaterialInterface>(nullptr, WorldCloudLitMaterialPath))
+			{
+				Parent = Lit;
+			}
+		}
+		const FString LightMaterialDrawn = Parent->GetPathName();
+		State.Material = UMaterialInstanceDynamic::Create(Parent, Cloud);
 		State.Material->SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(State.Cover));
 		State.Material->SetScalarParameterValue(TEXT("ExtinctionPerM"),
 		                                        static_cast<float>(CloudRow[CldExtinctionPerM] * DensityScale));
@@ -3637,6 +3654,7 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		// scalars by their material names, and the belly cap (the occlusion before it).
 		Layer->SetStringField(TEXT("cloud_wisp"), CloudWispSwitch);
 		Layer->SetStringField(TEXT("cloud_light"), CloudLightSwitch);
+		Layer->SetStringField(TEXT("cloud_light_material"), LightMaterialDrawn);
 		{
 			TSharedPtr<FJsonObject> LightOut = MakeShared<FJsonObject>();
 			for (int F = 0; F < LgtFieldCount; ++F)

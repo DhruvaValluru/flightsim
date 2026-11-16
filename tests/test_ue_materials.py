@@ -204,6 +204,8 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                "M_TornadoFlipbook",   # 2026-11-14: the JangaFX CC0 tornado flipbook (-tornado-look=vdb)
                # World lane, visual overhaul (FlightSimClouds.cpp, beauty only).
                "M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter",
+               # Sky-clouds2: -look-cloud-light=on's own material (the default keeps graph 8's cost).
+               "M_FlightSimCloudLayersLit",
                # Visual round 5, L3: the distant 2D cloud sheet (FlightSimClouds.cpp, beauty only).
                "M_FlightSimDistantClouds",
                # Sky step 6: the high cirrus sheet (FlightSimClouds.cpp ApplyCirrus, beauty only).

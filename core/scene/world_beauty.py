@@ -1139,11 +1139,19 @@ def cloud_albedo(albedo: float, extinction_per_m: float, norm_alt: float, cos_su
 
 
 #: -cloud-material=ours|epic (A/B, default ours): epic draws the beauty layer with Epic's
-#: own Volumetrics plugin cloud material (engine content, free; the plugin is enabled in
-#: the .uproject) in place of M_FlightSimCloudLayers. Our coverage, wisp and light
-#: scalars do not exist on it; the layer's altitude, march tier and shadows stay ours.
+#: own Volumetrics plugin cloud material (engine content, free) in place of
+#: M_FlightSimCloudLayers. The plugin is OPT-IN (sky-clouds2 review: not in the
+#: committed .uproject): for the A/B add { "Name": "Volumetrics", "Enabled": true } to
+#: ue/FlightSim.uproject's Plugins locally (or Edit > Plugins > Volumetrics) and restart
+#: the editor; without it epic falls back to ours and look_applied says so. Our coverage,
+#: wisp and light scalars do not exist on it; the layer's altitude, march tier and
+#: shadows stay ours.
 CLOUD_MATERIAL_SWITCH = "-cloud-material"
 CLOUD_MATERIAL_WORDS: Tuple[str, ...] = ("ours", "epic")
+#: ON draws a SEPARATE material (sky-clouds2 review: the light's parameters on the
+#: default graph raised its PS 161 -> 847 instructions and 0 -> 8 samplers with the
+#: switch off), so the default M_FlightSimCloudLayers stays at graph 8's cost.
+CLOUD_LIGHT_MATERIAL = "/Game/FlightSim/M_FlightSimCloudLayersLit.M_FlightSimCloudLayersLit"
 CLOUD_MATERIAL_EPIC = "/Volumetrics/Sky/Materials/M_VolumetricCloud_02_Profiles_Soft.M_VolumetricCloud_02_Profiles_Soft"
 
 

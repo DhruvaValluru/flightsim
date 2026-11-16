@@ -115,9 +115,18 @@ def test_the_material_wires_the_six_pins_and_bumps_its_generation():
     assert set(pins) == {"PhaseG", "PhaseG2", "PhaseBlend", "MsContribution", "MsOcclusion", "MsEccentricity"}
     assert set(pins.values()) == {"PhaseG", "PhaseG2", "PhaseBlend", "MultiScatteringContribution",
                                   "MultiScatteringOcclusion", "MultiScatteringEccentricity"}
-    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"] == "9"
-    assert _cpp("CloudGraphGeneration") == 9
-    assert '"M_FlightSimCloudLayers": "11"' in SCRIPT
+    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"] == "10"
+    assert _cpp("CloudGraphGeneration") == 10
+    # sky-clouds2 review: the light is its own material; the default graph is 8's again
+    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayersLit"] == "1"
+    assert '"M_FlightSimCloudLayersLit": "1",' in SCRIPT
+    assert 'create_world_cloud_layers(lit=True)' in SCRIPT
+    create = SCRIPT[SCRIPT.index("def create_world_cloud_layers"):SCRIPT.index("def create_world_tiles_beauty")]
+    off = create[:create.index("    if not lit:")]
+    assert "WORLD_CLOUD_LIGHT_SCALARS" not in off and "world_custom(material, lib, \"cloud_albedo\"" not in off and "SunDirWS" not in off
+    assert wb.CLOUD_LIGHT_MATERIAL in CPP
+    assert "UMaterialInstanceDynamic::Create(Parent, Cloud)" in CPP
+    assert '"M_FlightSimCloudLayers": "12"' in SCRIPT
     assert 'world_custom(material, lib, "cloud_albedo"' in SCRIPT
     assert "lib.connect_material_property(lit_albedo, \"\", unreal.MaterialProperty.MP_BASE_COLOR)" in SCRIPT
 
@@ -142,9 +151,11 @@ def test_the_bridge_reads_refuses_gates_sets_and_records():
     assert wb.CLOUD_LIGHT_SWITCH == "-look-cloud-light" and wb.CLOUD_MATERIAL_SWITCH == "-cloud-material"
 
 
-def test_the_volumetrics_plugin_is_enabled_for_the_epic_ab():
+def test_the_volumetrics_plugin_stays_opt_in_for_the_epic_ab():
     plugins = json.loads((REPO / "ue/FlightSim.uproject").read_text())["Plugins"]
-    assert {"Name": "Volumetrics", "Enabled": True} in plugins
+    assert all(p["Name"] != "Volumetrics" for p in plugins)   # review: opt-in, documented
+    assert '"Name": "Volumetrics", "Enabled": true' in (REPO / "core/scene/world_beauty.py").read_text()
+    assert "did not load; ours drawn" in CPP
     assert wb.CLOUD_MATERIAL_EPIC.startswith("/Volumetrics/Sky/Materials/")
 
 

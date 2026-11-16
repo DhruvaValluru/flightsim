@@ -426,7 +426,7 @@ def test_the_cloud_material_parameters_are_the_ones_the_cpp_sets():
     assert '"NormAltitudeInLayer"' in create
     # round 2: the new shader reaches a machine that built round 1 (stamped, stale rebuilt)
     assert int(_script_dict("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"]) >= 2
-    assert create.index('world_stamp(material, "M_FlightSimCloudLayers")') < create.index("finish(material")
+    assert create.index('world_stamp(material, name)') < create.index("finish(material")
     beauty = SCRIPT[SCRIPT.index("def _world_beauty_material"):SCRIPT.index("def world_shader")]
     # The no-lumen-and-machine lane's update-in-place path decides (a stale
     # WORLD_GENERATIONS stamp or FLIGHTSIM_REBUILD_MATERIALS), never a delete.

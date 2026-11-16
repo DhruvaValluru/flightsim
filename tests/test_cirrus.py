@@ -384,7 +384,7 @@ def test_the_material_is_unlit_translucent_and_label_safe():
     assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCirrus"] == "1"
     # the distant sheet's stamps did not move: no shader of theirs changed
     assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimDistantClouds"] == "5"
-    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"] == "9"   # sky-clouds lane light inputs (claude/hl-sky-clouds)
+    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"] == "10"   # sky-clouds2: graph 8 again, the light in M_FlightSimCloudLayersLit
     calls = re.findall(r"^(create_world_distant_clouds|create_world_cirrus|create_sky_hdri)\(\)", SCRIPT, re.M)
     assert calls == ["create_world_distant_clouds", "create_world_cirrus", "create_sky_hdri"]
     assert (REPO / "assets" / "shaders" / "world" / "cirrus.hlsl").is_file()

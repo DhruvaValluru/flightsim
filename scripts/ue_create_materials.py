@@ -3695,7 +3695,7 @@ def create_ice_overlay():
 # Kept in this one block so the aircraft lane's block merges beside it.
 
 #: Created through _world_beauty_material (tests/test_ue_materials.py pins it).
-WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimTilesBeauty", "M_FlightSimScatter",
+WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimCloudLayersLit", "M_FlightSimTilesBeauty", "M_FlightSimScatter",
                           "M_FlightSimDistantClouds",   # visual round 5, L3: the distant sheet
                           "M_FlightSimCirrus",          # sky step 6 (2026-11-15): the high cirrus sheet
                           "M_FlightSimOceanBeauty")     # lane B (2026-11-11): the beauty sea cap
@@ -3954,7 +3954,11 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: Sky step 6 (2026-11-15): cirrus 1, the first cirrus.hlsl (M_FlightSimCirrus).
 #: Sky-clouds lane (2026-11-15): cloud layers 9, the scattering node's six inputs as
 #: parameters and cloud_albedo.hlsl on Base Color (-look-cloud-light; defaults = 8).
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "9", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "1"}
+#: Sky-clouds2 (2026-11-15, review of 42974c46): the light moved to its OWN material,
+#: M_FlightSimCloudLayersLit 1 (graph 9 had raised the default PS 161 -> 847
+#: instructions and 0 -> 8 samplers with the switch off); cloud layers 10 = graph 8 again.
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "10", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "1",
+                           "M_FlightSimCloudLayersLit": "1"}
 
 
 def world_graph_stale(name):
@@ -4002,7 +4006,8 @@ def world_stamp(material, name):
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "10",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail)
-                     "M_FlightSimCloudLayers": "11", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING; 11: sky-clouds light inputs + cloud_albedo
+                     "M_FlightSimCloudLayers": "12", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING; 11: sky-clouds light inputs + cloud_albedo; 12: sky-clouds2 the light moved to M_FlightSimCloudLayersLit (graph 8 again)
+                     "M_FlightSimCloudLayersLit": "1",  # sky-clouds2: -look-cloud-light=on's own material
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
                      "M_FlightSimCirrus": "1",          # sky step 6: the high cirrus sheet
                      "M_FlightSimOceanBeauty": "5"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind)
@@ -4148,7 +4153,7 @@ def world_collection_parameter(material, lib, name, x, y):
     return node
 
 
-def create_world_cloud_layers():
+def create_world_cloud_layers(lit=False):
     """M_FlightSimCloudLayers: the beauty volumetric cloud (Volume domain,
     additive, flagged for the volumetric cloud: STORM_USAGE_PROPERTY, without
     which the engine's cloud shadow pass asserts, docs/WEATHER.md): albedo
@@ -4156,7 +4161,12 @@ def create_world_cloud_layers():
     multiple-scattering node (storm_scattering: without it a cloud's base is
     black) with the beauty cloud's own constants (CLOUD_SCATTERING, sky step 1:
     undersides that glow, light through thin edges; M_StormCell is untouched)."""
-    material = _world_beauty_material("M_FlightSimCloudLayers")
+    # Sky-clouds2: lit=True builds M_FlightSimCloudLayersLit (-look-cloud-light=on):
+    # the same graph plus the scattering parameters and cloud_albedo.hlsl. The
+    # default material stays graph 8 so its shader cost is unchanged.
+    name = "M_FlightSimCloudLayersLit" if lit else "M_FlightSimCloudLayers"
+    material = (_world_beauty_material("M_FlightSimCloudLayersLit") if lit
+                else _world_beauty_material("M_FlightSimCloudLayers"))
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary
@@ -4182,6 +4192,12 @@ def create_world_cloud_layers():
                               ordered, -900, 0)
     lib.connect_material_property(extinction, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
     albedo = scalar(material, lib, "Albedo", WORLD_CLOUD_ALBEDO, -600, 200)
+    node = storm_scattering(material, lib, -600, 700, constants=CLOUD_SCATTERING)
+    if not lit:
+        lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
+        world_stamp(material, name)
+        finish(material, name)
+        return
     # Generation 9 (sky-clouds lane): the albedo is cloud_albedo.hlsl (powder, flat
     # darker base); its defaults return "Albedo" exactly.
     light = {name: (scalar(material, lib, name, default, -1200, 1500 + 110 * i), "")
@@ -4193,14 +4209,13 @@ def create_world_cloud_layers():
     lit_albedo = world_custom(material, lib, "cloud_albedo", unreal.CustomMaterialOutputType.CMOT_FLOAT1,
                               {name: albedo_inputs[name] for name in WORLD_CLOUD_ALBEDO_INPUTS}, -400, 200)
     lib.connect_material_property(lit_albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    node = storm_scattering(material, lib, -600, 700, constants=CLOUD_SCATTERING)
-    for name, pin in WORLD_CLOUD_LIGHT_PINS.items():
+    for field, pin in WORLD_CLOUD_LIGHT_PINS.items():
         spelled = (pin, re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", pin))
-        if not any(lib.connect_material_expressions(light[name][0], "", node, p) for p in spelled):
-            raise RuntimeError(f"M_FlightSimCloudLayers: {name} did not connect to the scattering node's "
+        if not any(lib.connect_material_expressions(light[field][0], "", node, p) for p in spelled):
+            raise RuntimeError(f"{name}: {field} did not connect to the scattering node's "
                                f"{' / '.join(spelled)}")
-    world_stamp(material, "M_FlightSimCloudLayers")
-    finish(material, "M_FlightSimCloudLayers")
+    world_stamp(material, name)
+    finish(material, name)
 
 
 def create_world_tiles_beauty():
@@ -4918,6 +4933,7 @@ create_scud_card()
 # World lane (visual overhaul): the collection first, the tiles material reads it.
 create_world_collection()
 create_world_cloud_layers()
+create_world_cloud_layers(lit=True)   # sky-clouds2: -look-cloud-light=on
 create_world_tiles_beauty()
 create_world_ocean_beauty()     # lane B: the beauty sea cap's water
 create_world_scatter()
