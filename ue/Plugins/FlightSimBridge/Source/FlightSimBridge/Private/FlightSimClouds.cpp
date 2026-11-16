@@ -706,12 +706,102 @@ namespace FlightSimWorldPure
 	{
 		return bApplies && Occlusion > CloudWispBottomOcclusion ? CloudWispBottomOcclusion : Occlusion;
 	}
+	// Sky-clouds lane (2026-11-15): -look-cloud-light=on|off (on by default; off is
+	// c9e13c53's clouds exactly). world_beauty.CLOUD_LIGHT_* is the twin (the why and
+	// the real-world numbers are there): the scattering node's six inputs (dual-lobe
+	// HG g 0.8 / -0.3, back share 0.2; Wrenninge 2013 octave a = b = c = 0.5), the
+	// powder term (Schneider 2015) and the flat-base darkening of cloud_albedo.hlsl.
+	// ON also stops round 82's billow row overriding the cumulus row
+	// (CloudLightBillow). No sample and no march step: per-sample ALU only.
+	// UNCALIBRATED (every look number).
+	enum : int
+	{
+		LgtPhaseG = 0,
+		LgtPhaseG2 = 1,
+		LgtPhaseBlend = 2,
+		LgtMsContribution = 3,
+		LgtMsOcclusion = 4,
+		LgtMsEccentricity = 5,
+		LgtPowderAmount = 6,
+		LgtPowderDepthM = 7,
+		LgtBaseDarkening = 8,
+		LgtBaseRise = 9,
+		LgtFieldCount = 10
+	};
+	inline const char* CloudLightFieldName(int Field)
+	{
+		static const char* const Names[LgtFieldCount] = {
+			"PhaseG", "PhaseG2", "PhaseBlend", "MsContribution", "MsOcclusion",
+			"MsEccentricity", "PowderAmount", "PowderDepthM", "BaseDarkening", "BaseRise"};
+		return Field >= 0 && Field < LgtFieldCount ? Names[Field] : "";
+	}
+	constexpr double CloudLightPhaseG = 0.8;
+	constexpr double CloudLightPhaseG2 = -0.3;
+	constexpr double CloudLightPhaseBlend = 0.2;
+	constexpr double CloudLightOctave = 0.5;
+	constexpr double CloudLightPowder = 0.6;
+	constexpr double CloudLightPowderDepthM = 40.0;
+	// The OFF row: the material's defaults (CloudScattering's six, no powder, no base).
+	inline double CloudLightOff(int Field)
+	{
+		static const double Values[LgtFieldCount] = {0.85, -0.3, 0.3, 0.7, 0.25, 0.4, 0.0, 40.0, 0.0, 0.3};
+		return Field >= 0 && Field < LgtFieldCount ? Values[Field] : 0.0;
+	}
+	// Per shape (cumulus, stratocumulus, overcast, nimbostratus, altocumulus).
+	inline double CloudLightBaseDarkening(int Cloud)
+	{
+		static const double Rows[CloudCount] = {0.45, 0.35, 0.55, 0.7, 0.25};
+		return Cloud >= 0 && Cloud < CloudCount ? Rows[Cloud] : 0.0;
+	}
+	inline double CloudLightBaseRise(int Cloud)
+	{
+		static const double Rows[CloudCount] = {0.25, 0.4, 0.5, 0.5, 0.4};
+		return Cloud >= 0 && Cloud < CloudCount ? Rows[Cloud] : 0.3;
+	}
+	inline void CloudLightRow(bool bLightOn, int Cloud, double* Out)
+	{
+		for (int F = 0; F < LgtFieldCount; ++F)
+		{
+			Out[F] = CloudLightOff(F);
+		}
+		if (!bLightOn)
+		{
+			return;
+		}
+		Out[LgtPhaseG] = CloudLightPhaseG;
+		Out[LgtPhaseG2] = CloudLightPhaseG2;
+		Out[LgtPhaseBlend] = CloudLightPhaseBlend;
+		Out[LgtMsContribution] = CloudLightOctave;
+		Out[LgtMsOcclusion] = CloudLightOctave;
+		Out[LgtMsEccentricity] = CloudLightOctave;
+		Out[LgtPowderAmount] = CloudLightPowder;
+		Out[LgtPowderDepthM] = CloudLightPowderDepthM;
+		Out[LgtBaseDarkening] = CloudLightBaseDarkening(Cloud);
+		Out[LgtBaseRise] = CloudLightBaseRise(Cloud);
+	}
+	// -look-cloud-billow's row applies only with -look-cloud-light=off.
+	inline bool CloudLightBillow(bool bBillowOn, bool bLightOn)
+	{
+		return bBillowOn && !bLightOn;
+	}
+	// -cloud-material=ours|epic (A/B; world_beauty.CLOUD_MATERIAL_*): epic puts Epic's
+	// Volumetrics plugin cloud material on the beauty layer instead of ours.
+	constexpr int CloudMaterialWordCount = 2;
+	inline const char* CloudMaterialWord(int I)
+	{
+		static const char* const Words[CloudMaterialWordCount] = {"ours", "epic"};
+		return I >= 0 && I < CloudMaterialWordCount ? Words[I] : "";
+	}
+	inline const char* CloudMaterialEpicPath()
+	{
+		return "/Volumetrics/Sky/Materials/M_VolumetricCloud_02_Profiles_Soft.M_VolumetricCloud_02_Profiles_Soft";
+	}
 	// The beauty cloud's VolumetricAdvancedMaterialOutput constants, BAKED into
 	// M_FlightSimCloudLayers by scripts/ue_create_materials.py CLOUD_SCATTERING at
 	// graph generation CloudGraphGeneration (world_beauty.CLOUD_SCATTERING is the
 	// twin; tests pin all three). Recorded here so render.json says what lit the
 	// cloud; nothing here sets them. UNCALIBRATED.
-	constexpr int CloudGraphGeneration = 8;
+	constexpr int CloudGraphGeneration = 9;   // sky-clouds lane: light inputs + cloud_albedo
 	constexpr double CloudAlbedo = 0.98;
 	// True when the asset's stamped generation is the one this bridge was written for.
 	inline bool CloudGraphGenerationCurrent(int Stamped)
@@ -1855,6 +1945,13 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// clouds exactly. Another word refuses by name.
 		CloudWispSwitch = TEXT("on");
 		FParse::Value(*Switches, TEXT("look-cloud-wisp="), CloudWispSwitch);
+		// Sky-clouds lane: -look-cloud-light=on|off (on by default; CloudLightRow,
+		// CloudLightBillow; off is c9e13c53's clouds) and -cloud-material=ours|epic
+		// (ours by default; epic is the Volumetrics plugin's cloud material for the A/B).
+		CloudLightSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("look-cloud-light="), CloudLightSwitch);
+		CloudMaterialSwitch = TEXT("ours");
+		FParse::Value(*Switches, TEXT("cloud-material="), CloudMaterialSwitch);
 		// Impostor A/B (0deddc6d): -cloud-volumetric-scale=<0..1> (1 by default)
 		// thins every volumetric layer's drawn cover; 0 hides the layer
 		// (ApplyClouds, CloudVolumetricCoverage). Not a number, or outside
@@ -1938,6 +2035,18 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	{
 		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-wisp=%s is not on or off"),
 		                        *CloudWispSwitch);
+		return false;
+	}
+	if (CloudLightSwitch != TEXT("on") && CloudLightSwitch != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-light=%s is not on or off"),
+		                        *CloudLightSwitch);
+		return false;
+	}
+	if (CloudMaterialSwitch != TEXT("ours") && CloudMaterialSwitch != TEXT("epic"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-material=%s is not ours or epic"),
+		                        *CloudMaterialSwitch);
 		return false;
 	}
 
@@ -3239,7 +3348,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		const float ShadowTracingKm =
 			static_cast<float>(CloudShadowTracingKmFor(bIntegratedGpu, State.TopM - State.BaseM));
 		// Round 82: the cumulus row under -look-cloud-billow (CloudBillowRow).
-		const bool bBillow = CloudBillowApplies(CloudBillowSwitch == TEXT("on"), State.Shape);
+		const bool bLight = CloudLightSwitch == TEXT("on");
+		const bool bBillow = CloudBillowApplies(CloudLightBillow(CloudBillowSwitch == TEXT("on"), bLight), State.Shape);
 		double BillowRow[CloudFieldCount];
 		CloudBillowRow(&CloudValues[State.Shape * CloudFieldCount], bBillow, BillowRow);
 		const double* CloudRow = BillowRow;
@@ -3290,7 +3400,42 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		State.Material->SetScalarParameterValue(TEXT("EdgeThinPower"), static_cast<float>(WispRow[WspEdgePower]));
 		State.Material->SetScalarParameterValue(TEXT("TopDetailGain"), static_cast<float>(WispRow[WspTopDetail]));
 		State.Material->SetScalarParameterValue(TEXT("BoundaryErosion"), static_cast<float>(WispRow[WspBoundaryErosion]));
+		// Sky-clouds lane: the light row (CloudLightRow; OFF = the material's defaults)
+		// and the direction to the sun for the powder's view weighting.
+		double LightRow[LgtFieldCount];
+		CloudLightRow(bLight, State.Shape, LightRow);
+		for (int F = 0; F < LgtFieldCount; ++F)
+		{
+			State.Material->SetScalarParameterValue(FName(ANSI_TO_TCHAR(CloudLightFieldName(F))),
+			                                        static_cast<float>(LightRow[F]));
+		}
+		{
+			const UDirectionalLightComponent* LightSun = Scene.Sun != nullptr
+				? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
+			const FVector ToSun = LightSun != nullptr ? -LightSun->GetDirection() : FVector::UpVector;
+			State.Material->SetVectorParameterValue(TEXT("SunDirWS"),
+				FLinearColor(static_cast<float>(ToSun.X), static_cast<float>(ToSun.Y), static_cast<float>(ToSun.Z), 0.0f));
+		}
 		Cloud->SetMaterial(State.Material);
+		// -cloud-material=epic: the Volumetrics plugin's cloud material in place of
+		// ours (the MID above stays as the bookkeeping's; it draws nothing). Not
+		// loadable (plugin off): ours stays and the record says so.
+		FString EpicMaterialDrawn = TEXT("not asked");
+		if (CloudMaterialSwitch == TEXT("epic"))
+		{
+			UMaterialInterface* Epic = LoadObject<UMaterialInterface>(nullptr, ANSI_TO_TCHAR(CloudMaterialEpicPath()));
+			if (Epic != nullptr)
+			{
+				Cloud->SetMaterial(Epic);
+				EpicMaterialDrawn = Epic->GetPathName();
+			}
+			else
+			{
+				EpicMaterialDrawn = TEXT("unloadable (Volumetrics plugin not enabled?): ours drawn");
+				UE_LOG(LogFlightSimWorldBeauty, Warning, TEXT("-cloud-material=epic: %s did not load; ours drawn"),
+				       ANSI_TO_TCHAR(CloudMaterialEpicPath()));
+			}
+		}
 		Cloud->SetbUsePerSampleAtmosphericLightTransmittance(true);
 		// Round 82 raises the belly's occlusion; sky step 1 caps it where the wisp applies.
 		const double BillowOcclusion = CloudBottomOcclusionFor(bBillow, AtmRow[AtmCloudBottomOcclusion]);
@@ -3377,6 +3522,17 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		// Sky step 1: the switch word, whether it applied to this shape, the five
 		// scalars by their material names, and the belly cap (the occlusion before it).
 		Layer->SetStringField(TEXT("cloud_wisp"), CloudWispSwitch);
+		Layer->SetStringField(TEXT("cloud_light"), CloudLightSwitch);
+		{
+			TSharedPtr<FJsonObject> LightOut = MakeShared<FJsonObject>();
+			for (int F = 0; F < LgtFieldCount; ++F)
+			{
+				LightOut->SetNumberField(ANSI_TO_TCHAR(CloudLightFieldName(F)), LightRow[F]);
+			}
+			Layer->SetObjectField(TEXT("cloud_light_row"), LightOut);
+		}
+		Layer->SetStringField(TEXT("cloud_material"), CloudMaterialSwitch);
+		Layer->SetStringField(TEXT("cloud_material_drawn"), EpicMaterialDrawn);
 		Layer->SetBoolField(TEXT("cloud_wisp_applied"), bWisp);
 		for (int32 F = 0; F < WspFieldCount; ++F)
 		{

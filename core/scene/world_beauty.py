@@ -1062,6 +1062,88 @@ def cloud_belly_occlusion(applies: bool, occlusion: float) -> float:
     return occlusion
 
 
+# -- sky-clouds lane (2026-11-15): -look-cloud-light=on|off ------------------------------
+# The owner's reference videos (Ultra Dynamic Sky tour, Epic's Volumetrics clouds) and
+# HYPERREAL_LIGHT_BRIEF item 7: cumulus with flat darker bases, bright silver-lined
+# sun-facing edges, real self-shadowed depth. Windows r99/r199 #13 drew flat white blobs:
+# step 1's multiple-scattering occlusion 0.25 lets the second octave see the sun through
+# a quarter of the optical depth, so a shadowed flank is nearly as bright as a lit top,
+# and round 82's billow row (coverage contrast x 2.5) cut every cumulus into a
+# flat-topped column. ON: the scattering node's six inputs become material parameters
+# (the defaults ARE CLOUD_SCATTERING, so an unset material and OFF draw c9e13c53), set to
+# the dual-lobe Henyey-Greenstein phase of cloud droplets (g 0.8 forward, -0.3 back,
+# a 0.2 back share: effective asymmetry 0.8 x 0.8 - 0.3 x 0.2 = 0.58, between the
+# 0.5 a multiply scattered cloud body shows and the 0.85 of single droplet Mie,
+# Hillaire 2016 / Schneider 2015) and Wrenninge et al. 2013's octave constants
+# a = b = c = 0.5 (the engine's own default); the billow row no longer overrides the
+# cumulus row (the wisp of step 1 carries the edge); a powder term (Schneider 2015:
+# 1 - exp(-2 sigma L), on the side facing away from the sun only, so a backlit rim
+# keeps its silver lining) and a flat-base darkening (photometry of fair cumulus: a
+# base reads 0.4-0.6 of its sunlit flank; a nimbostratus base 0.2-0.3, a storm's dark
+# grey) set the cloud's albedo (cloud_albedo.hlsl). No sample, no march step: ALU
+# per sample only. UNCALIBRATED (every look number): set by the Windows A/B.
+CLOUD_LIGHT_SWITCH = "-look-cloud-light"
+CLOUD_LIGHT_FIELDS: Tuple[str, ...] = ("PhaseG", "PhaseG2", "PhaseBlend", "MsContribution", "MsOcclusion",
+                                       "MsEccentricity", "PowderAmount", "PowderDepthM", "BaseDarkening",
+                                       "BaseRise")
+#: OFF: the material's defaults (CLOUD_SCATTERING's six, no powder, no base darkening).
+CLOUD_LIGHT_OFF: Dict[str, float] = {"PhaseG": 0.85, "PhaseG2": -0.3, "PhaseBlend": 0.3, "MsContribution": 0.7,
+                                     "MsOcclusion": 0.25, "MsEccentricity": 0.4, "PowderAmount": 0.0,
+                                     "PowderDepthM": 40.0, "BaseDarkening": 0.0, "BaseRise": 0.3}
+CLOUD_LIGHT_PHASE: Tuple[float, float, float] = (0.8, -0.3, 0.2)
+CLOUD_LIGHT_OCTAVE: Tuple[float, float, float] = (0.5, 0.5, 0.5)
+CLOUD_LIGHT_POWDER = 0.6
+CLOUD_LIGHT_POWDER_DEPTH_M = 40.0
+#: Per shape (cumulus, stratocumulus, overcast, nimbostratus, altocumulus): the base's
+#: albedo deficit and the share of the layer it fades over (a cumulus base is flat: a
+#: quarter of the layer; a deck's is diffuse).
+CLOUD_LIGHT_BASE_DARKENING: Dict[str, float] = {"cumulus": 0.45, "stratocumulus": 0.35, "overcast": 0.55,
+                                                "nimbostratus": 0.7, "altocumulus": 0.25}
+CLOUD_LIGHT_BASE_RISE: Dict[str, float] = {"cumulus": 0.25, "stratocumulus": 0.4, "overcast": 0.5,
+                                           "nimbostratus": 0.5, "altocumulus": 0.4}
+
+
+def cloud_light_row(light_on: bool, shape: str) -> Dict[str, float]:
+    """The material's ten light scalars (C++ CloudLightRow): CLOUD_LIGHT_OFF when
+    the switch is off, else the phase, octave, powder and the shape's base."""
+    if not light_on:
+        return dict(CLOUD_LIGHT_OFF)
+    g, g2, blend = CLOUD_LIGHT_PHASE
+    c, o, e = CLOUD_LIGHT_OCTAVE
+    return {"PhaseG": g, "PhaseG2": g2, "PhaseBlend": blend, "MsContribution": c, "MsOcclusion": o,
+            "MsEccentricity": e, "PowderAmount": CLOUD_LIGHT_POWDER, "PowderDepthM": CLOUD_LIGHT_POWDER_DEPTH_M,
+            "BaseDarkening": CLOUD_LIGHT_BASE_DARKENING.get(shape, 0.0),
+            "BaseRise": CLOUD_LIGHT_BASE_RISE.get(shape, CLOUD_LIGHT_OFF["BaseRise"])}
+
+
+def cloud_light_billow(billow_on: bool, light_on: bool) -> bool:
+    """-look-cloud-billow's row applies only with -look-cloud-light=off."""
+    return bool(billow_on) and not light_on
+
+
+def cloud_albedo(albedo: float, extinction_per_m: float, norm_alt: float, cos_sun_view: float,
+                 row: Dict[str, float]) -> float:
+    """cloud_albedo.hlsl in Python: albedo x powder x base. cos_sun_view is the
+    cosine between the view ray (camera to sample) and the direction to the sun."""
+    powder = 1.0 - math.exp(-2.0 * max(extinction_per_m, 0.0) * max(row["PowderDepthM"], 0.0))
+    away = min(max(0.5 - 0.5 * cos_sun_view, 0.0), 1.0)
+    w = min(max(row["PowderAmount"], 0.0), 1.0) * away
+    rise = max(row["BaseRise"], 1e-3)
+    t = min(max(norm_alt / rise, 0.0), 1.0)
+    s = t * t * (3.0 - 2.0 * t)
+    base = (1.0 - min(max(row["BaseDarkening"], 0.0), 1.0)) * (1.0 - s) + s
+    return albedo * ((1.0 - w) + w * powder) * base
+
+
+#: -cloud-material=ours|epic (A/B, default ours): epic draws the beauty layer with Epic's
+#: own Volumetrics plugin cloud material (engine content, free; the plugin is enabled in
+#: the .uproject) in place of M_FlightSimCloudLayers. Our coverage, wisp and light
+#: scalars do not exist on it; the layer's altitude, march tier and shadows stay ours.
+CLOUD_MATERIAL_SWITCH = "-cloud-material"
+CLOUD_MATERIAL_WORDS: Tuple[str, ...] = ("ours", "epic")
+CLOUD_MATERIAL_EPIC = "/Volumetrics/Sky/Materials/M_VolumetricCloud_02_Profiles_Soft.M_VolumetricCloud_02_Profiles_Soft"
+
+
 #: The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 #: stated layer) is thinned to the shape's depth; 0 keeps the layer as built.
 #: Sky step 5: an altocumulus sheet is a few hundred metres deep, so the plan's

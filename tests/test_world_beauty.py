@@ -407,7 +407,8 @@ def test_the_cloud_material_parameters_are_the_ones_the_cpp_sets():
     set_vectors = set(re.findall(r'(?:State\.|Layer\.)Material->SetVectorParameterValue\(TEXT\("([A-Za-z]+)"\)',
                                  CLOUDS_CPP))
     assert set_scalars == set(scalars)
-    assert set_vectors == set(vectors)
+    # SunDirWS: the sky-clouds lane's cloud_albedo.hlsl input (not a cloud_layers input)
+    assert set_vectors == set(vectors) | {"SunDirWS"}
     # CameraPos: round 10 far LOD; ShadowDist: round 52 (the engine's shadow-sample distance)
     assert set(inputs) == set(scalars) | set(vectors) | {"WorldPos", "NormAlt", "CameraPos", "ShadowDist"}
     hlsl = (SHADERS / "cloud_layers.hlsl").read_text(encoding="utf-8")
