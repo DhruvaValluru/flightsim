@@ -260,8 +260,8 @@ def test_the_material_gains_the_five_inputs_and_a_new_generation():
         assert re.search(rf"//\s+{name}\s", HLSL), name
     assert int(_script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"]) >= 8
     assert int(_script_value("WORLD_GENERATIONS")["M_FlightSimCloudLayers"]) >= 10
-    # the distant sheet's shared noise text is untouched: no rebuild asked of it
-    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimDistantClouds"] == "5"
+    # the distant sheet: round 147 (r147 #13) moved its graph to 6; the shared noise text is untouched
+    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimDistantClouds"] == "6"   # 6: round-147 tops relief + sea shadow
     # the bridge expects the generation the script stamps
     assert int(_cpp_constant("CloudGraphGeneration")) == int(_script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"])
 

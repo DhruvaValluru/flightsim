@@ -414,8 +414,8 @@ def test_the_material_is_unlit_translucent_and_label_safe():
     assert "M_FlightSimCirrus" in _script_value("WORLD_BEAUTY_MATERIALS")
     assert _script_value("WORLD_GENERATIONS")["M_FlightSimCirrus"] == "3"         # 2: sky-cirrus2 patches + hooked fibres; 3: look check
     assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCirrus"] == "3"
-    # the distant sheet's stamps did not move: no shader of theirs changed
-    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimDistantClouds"] == "5"
+    # the distant sheet: round 147 (r147 #13) moved its graph to 6 (tops relief + sea shadow)
+    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimDistantClouds"] == "6"   # 6: round-147 tops relief + sea shadow
     assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"] == "11"   # rain-grey: the scattering pins from parameters
     calls = re.findall(r"^(create_world_distant_clouds|create_world_cirrus|create_sky_hdri)\(\)", SCRIPT, re.M)
     assert calls == ["create_world_distant_clouds", "create_world_cirrus", "create_sky_hdri"]
