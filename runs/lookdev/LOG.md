@@ -123,3 +123,14 @@ render.json look_applied.sun (12 deg / intensity 8 unitless) is a STALE record, 
 Fix (record only, not a look change): after PhysicalSky.Build succeeds, overwrite the SunRecord fields
 (sun_elevation_deg, engine_sun_yaw_deg, intensity, light_units=lux, lux_source=sky_plan) or add
 "superseded_by": "scene.sky (FFlightSimSky::Build)". Check tests/test_render_json_contract.py first.
+
+## Port interaction: the Google-tiles haze clamp (FlightSimGoogleTiles.cpp ~760-830)
+Scene 13 render.json google_tiles.beauty_ground.haze: at 10 km AGL the beauty ground scales the height
+fog AND the Mie layer by ONE factor so the optical depth along a 10-deg read ray is <= 1.5.
+Before: fog depth 3.10 + Mie depth 0.35 -> scale 0.434 -> fog 0.0012 -> 0.00052, Mie 0.0455 -> 0.0198.
+So the shipped frame rendered Mie at ~0.02, not 0.0455: the clamp, driven by the fog, thinned the
+aerosol. The editor level had no clamp, so the batch-1 values are relative to an unclamped scene.
+With the recipe (fog 0 at >= 4 km, Mie 0.09): Mie depth ~0.35 x 0.09/0.0455 ~= 0.69 < 1.5 -> scale 1,
+the clamp stops biting and Mie 0.09 survives. At 600 m read_min_agl_m 1000 keeps it off.
+Port rule: apply haze_for_agl() BEFORE the clamp, keep the clamp; check render.json
+haze.scale == 1 at cruise on the first Windows round. UNMEASURED.
