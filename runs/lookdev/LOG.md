@@ -111,3 +111,15 @@ Wet ground (scenes 9, 10):
 Scene 11, A-4 over the Matterhorn at 5000 m:
 - Render: excellent terrain; the clouds above are smeared horizontal streaks with YELLOW-fringed edges (artefact); dark blue horizon band again.
 - The horizon is covered by the batch 1/2 altitude rule (5 km: fog ~0, Mie ~0.08, AP ~1.8). The yellow fringes look like the distant sheet (M_FlightSimDistantClouds) handover or the tonemapper's hue shift on bright edges; needs the editor.
+
+## Sun-block check (2026-11-15, code read, no Unreal)
+render.json look_applied.sun (12 deg / intensity 8 unitless) is a STALE record, not what lit the frame.
+- FlightSimVisualScene.cpp:627-655 writes SunRecord from the legacy Options (12 deg, unitless 8).
+- Then FlightSimVisualScene.cpp:758 calls PhysicalSky.Build -> FlightSimSky.cpp:235-239 re-aims the
+  same ADirectionalLight to the sky plan (az 109.7, el 89.88) and SetIntensity(120000 lux),
+  atmosphere sun light on, per-pixel transmittance per plan. Nothing updates look_applied.sun after.
+- render.json scene.sky (89.88 deg / 120000 lux) and beauty_look.plan.sun.source=physical_sky agree:
+  the physical sky lit scene 13.
+Fix (record only, not a look change): after PhysicalSky.Build succeeds, overwrite the SunRecord fields
+(sun_elevation_deg, engine_sun_yaw_deg, intensity, light_units=lux, lux_source=sky_plan) or add
+"superseded_by": "scene.sky (FFlightSimSky::Build)". Check tests/test_render_json_contract.py first.

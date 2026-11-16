@@ -83,8 +83,8 @@ SUN_CAST_CLOUD_SHADOWS_CLEAR = True   # was False (sun_shafts.sun.cast_cloud_sha
 #   UNJITTERED fixed-slice march (world_beauty clouds round 6: the render
 #   jitters it, cloud_march_jittered). Check them on the Windows frame first;
 #   only if they show there, look at cloud_layers.hlsl body/wisp transition.
-# Sun block: render.json look_applied.sun says 12 deg / 8 unitless while the
-#   sky plan says 89.88 deg / 120000 lux (scene 13). Check which one lights.
+# Sun block: RESOLVED (LOG.md "Sun-block check"): look_applied.sun is a stale record;
+#   the sky plan (89.88 deg / 120000 lux) lights scene 13 (FlightSimSky.cpp:235-239).
 
 
 if __name__ == "__main__":
