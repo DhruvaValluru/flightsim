@@ -162,8 +162,9 @@ def test_the_material_runs_it_between_the_delight_and_the_detail_and_restamps():
 # -- the host ---------------------------------------------------------------------------
 
 def test_the_cpp_numbers_and_record_are_the_twin():
+    # round 147: FlightSimTilesWater sits between this namespace and ApplyTiles.
     block = CLOUDS_CPP[CLOUDS_CPP.index("namespace FlightSimTilesShade"):
-                       CLOUDS_CPP.index("void FFlightSimWorldBeauty::ApplyTiles(")]
+                       CLOUDS_CPP.index("namespace FlightSimTilesWater")]
     amounts = re.search(r"ShadeNeutralAmounts\[FlightSimWorldPure::PresetCount\] = \{([^}]*)\};", block)
     assert tuple(float(x) for x in amounts.group(1).split(",")) == tuple(
         sn.SHADE_NEUTRAL_DEFAULTS[p] for p in wb.PRESETS)

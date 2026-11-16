@@ -96,6 +96,11 @@ def test_amounts_and_switch():
     assert wb.tiles_parameters("clear", 0.0)["WaterUnifyAmount"] == 0.0
     rec = wu.water_record("rain", "off")
     assert rec["amount"] == 0.0 and rec["switch"] == "off" and rec["pixel_moving"] is False
+    # review: the twins agree on a signed number (FCString::IsNumeric takes a sign) and the record
+    assert wu.parse_switch("-tiles-water-unify=-0.5") == "-0.5" and wu.amount_for("rain", "-0.5") == 0.0
+    assert rec["calibration"] == "UNCALIBRATED" and rec["water_mean"] == list(wu.WATER_MEAN)
+    assert "constexpr double WaterMean[3] = {%s};" % ", ".join("%.3f" % v for v in wu.WATER_MEAN) in CLOUDS_CPP
+    assert 'Out->SetArrayField(TEXT("water_mean"), Mean);' in CLOUDS_CPP
 
 
 def test_two_water_tiles_meet_without_a_step():

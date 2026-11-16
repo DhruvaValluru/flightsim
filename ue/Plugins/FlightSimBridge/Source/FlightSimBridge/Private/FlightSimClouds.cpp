@@ -4638,6 +4638,8 @@ namespace FlightSimTilesWater
 {
 	// WaterUnifyAmount per FlightSimWorldPure preset: clear, hazy, overcast, rain, storm.
 	constexpr double WaterUnifyAmounts[FlightSimWorldPure::PresetCount] = {0.0, 0.0, 1.0, 1.0, 1.0};
+	// tiles_water_unify.hlsl WATER_MEAN (linear), for the record only.
+	constexpr double WaterMean[3] = {0.020, 0.040, 0.055};
 
 	inline double PresetAmount(int32 Preset)
 	{
@@ -4670,6 +4672,12 @@ namespace FlightSimTilesWater
 			TEXT("open water (a level face, dark blue-or-teal local mean, little texture contrast) moved from its "
 			     "tile's own mean colour to one WATER_MEAN, keeping its luma ratio to that mean; shader per frame, "
 			     "nothing stored (Google tile policy)"));
+		TArray<TSharedPtr<FJsonValue>> Mean;
+		for (const double V : WaterMean)
+		{
+			Mean.Add(MakeShared<FJsonValueNumber>(V));
+		}
+		Out->SetArrayField(TEXT("water_mean"), Mean);
 		Out->SetBoolField(TEXT("pixel_moving"), false);
 		Out->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED"));
 		return Out;

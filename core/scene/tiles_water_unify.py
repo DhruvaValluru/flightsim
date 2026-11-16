@@ -73,7 +73,9 @@ _SWITCH_RE = re.compile(r"(?:^|\s)-?" + re.escape(SWITCH_FLAG) + r"(\S*)")
 
 
 def _number(text: str) -> Optional[float]:
-    return float(text) if re.fullmatch(r"\d+(?:\.\d*)?|\.\d+", text or "") else None
+    # FCString::IsNumeric's shape (a sign, digits, one point): "-0.5" is the number 0.5
+    # below zero, clamped to 0 by amount_for, as FlightSimTilesWater::AmountFor does.
+    return float(text) if re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", text or "") else None
 
 
 def parse_switch(text: Optional[str]) -> str:
@@ -142,4 +144,5 @@ def water_record(preset: str, switch: str = SWITCH_DEFAULT) -> Dict[str, Any]:
         "water_mean": list(WATER_MEAN),
         "basis": BASIS,
         "pixel_moving": False,
+        "calibration": "UNCALIBRATED",
     }
