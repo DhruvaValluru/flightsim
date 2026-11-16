@@ -141,7 +141,7 @@ def test_the_parameters_the_cpp_sets_are_the_ones_the_script_exposes():
 
 
 def test_every_custom_node_input_is_a_shader_input():
-    for call in re.finditer(r'custom\(material, lib, "(\w+)", [^{]+\{(.*?)\}, -?\d+, -?\d+\)', SCRIPT, re.S):
+    for call in re.finditer(r'\bcustom\(material, lib, "(\w+)", [^{]+\{(.*?)\}, -?\d+, -?\d+\)', SCRIPT, re.S):
         shader, inputs = call.group(1), call.group(2)
         text = (SHADERS / f"{shader}.hlsl").read_text(encoding="utf-8")
         names = re.findall(r'"(\w+)":', inputs)

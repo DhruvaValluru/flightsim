@@ -11,9 +11,9 @@ from core.scene import world_beauty as wb
 from core.sky import gradient as g
 
 ROOT = Path(__file__).resolve().parents[1]
-CLOUDS = (ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp").read_text()
-HEADER = (ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimClouds.h").read_text()
-API = (ROOT / "scripts/check_bridge_api.sh").read_text()
+CLOUDS = (ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimClouds.cpp").read_text(encoding="utf-8")
+HEADER = (ROOT / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimClouds.h").read_text(encoding="utf-8")
+API = (ROOT / "scripts/check_bridge_api.sh").read_text(encoding="utf-8")
 
 
 def _cpp_array(name: str):

@@ -1,7 +1,7 @@
 """Editor side of the look-dev harness. Run inside the ONE Mac editor (Monolith
 editor_query run_python), never in a commandlet:
 
-    exec(open("<repo>/scripts/lookdev/lookdev.py").read())
+    exec(open("<repo>/scripts/lookdev/lookdev.py", encoding="utf-8").read())
     setup()                 # once per editor: materials + the scenes' aircraft
     build(1)                # the scene's beauty set-up in a blank editor map
     capture(1, "base")      # starts <OUT>/base/1.png (1280x720); written once the
