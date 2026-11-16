@@ -1,6 +1,6 @@
 {
     "round":  1462,
-    "commit":  "da82dc78",
+    "commit":  "9ef62483",
     "full":  false,
     "scenes":  [
                    9
@@ -12,16 +12,16 @@
                  "aircraft"
              ],
     "seconds":  {
-                    "build":  31.8,
-                    "materials":  14.8,
-                    "aircraft":  33,
-                    "scenes":  272.7
+                    "build":  2.7,
+                    "materials":  15.9,
+                    "aircraft":  34.3,
+                    "scenes":  273.3
                 },
     "outcomes":  [
                      {
                          "number":  9,
                          "outcome":  "done",
-                         "seconds":  271.5,
+                         "seconds":  271.8,
                          "spec_sha256":  "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
                          "why":  "clip ready"
                      }
