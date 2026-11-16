@@ -153,7 +153,7 @@ def test_the_rivulet_lean_is_zero_on_the_crest_and_off_the_line_and_odd():
 # -- the masters builder --------------------------------------------------------------
 
 def test_the_paint_and_bare_metal_masters_take_the_graft_after_the_wet_layer():
-    assert re.search(r'^LOOK_GENERATION = "14"$', MASTERS, re.M)
+    assert re.search(r'^LOOK_GENERATION = "15"$', MASTERS, re.M)
     surface = MASTERS[MASTERS.index("def _surface("):MASTERS.index("def create_aircraft_paint")]
     assert surface.count("wet = aircraft_wet_layer.add_wet_layer(material, sys.modules[__name__], cls, raw_base=raw_base)") == 1
     assert surface.count("aircraft_paint_reflect.add_reflection(material, sys.modules[__name__], cls, aircraft_wet_layer, wet)") == 1

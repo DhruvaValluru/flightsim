@@ -273,7 +273,7 @@ def test_the_soot_hlsl_matches_its_twin_line_for_line():
 # -- the masters module -----------------------------------------------------------
 
 def test_the_masters_rebuild_at_generation_10_with_the_measured_graph():
-    assert re.search(r'^LOOK_GENERATION = "14"$', MASTERS, re.M)   # round 25: in place, sentinel, coat
+    assert re.search(r'^LOOK_GENERATION = "15"$', MASTERS, re.M)   # round 25: in place, sentinel, coat
     surface = _body(MASTERS, "_surface")
     assert '_custom(material, "exhaust_soot", "CMOT_FLOAT1"' in surface
     assert '_min(material, base, s["AlbedoMax"]' in surface
@@ -282,7 +282,9 @@ def test_the_masters_rebuild_at_generation_10_with_the_measured_graph():
     assert 's["SootAmount"]' in surface and 's["SootLengthRadii"]' in surface
     rubber = _body(MASTERS, "create_aircraft_rubber")
     assert '"RubberFloor"' in rubber and "_max(material, _base_colour" in rubber
-    assert "WORLD_POSITION_OFFSET" not in MASTERS and "WorldPositionOffset" not in MASTERS
+    # LOOK_GENERATION 15: only the translucent, beauty-only contrail moves a vertex.
+    others = MASTERS.replace(_body(MASTERS, "create_aircraft_contrail"), "")
+    assert "WORLD_POSITION_OFFSET" not in others and "WorldPositionOffset" not in others
 
 
 def test_the_thin_canopy_master_is_thin_translucent_forward_lit_with_ssr_and_no_refraction():

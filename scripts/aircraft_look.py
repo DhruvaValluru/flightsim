@@ -244,7 +244,9 @@ FX_PARAMETERS = {
     # sets (contrail.PuffBreakup, 0 under -contrail-puffs=off).
     # LOOK_GENERATION 14: ViewWeight, 1 under -contrail-view-weight=on (the default),
     # 0 under off (generation 13's crossed ribbon at full strength on both strips).
-    "M_AircraftContrail": ("Opacity", "Formation", "FormationRamp", "Puff", "ViewWeight"),
+    # LOOK_GENERATION 15: Facing, 1 under -contrail-facing=on (the default): one
+    # camera-facing ribbon with a tube's normal; 0 is generation 14's crossed ribbon.
+    "M_AircraftContrail": ("Opacity", "Formation", "FormationRamp", "Puff", "ViewWeight", "Facing"),
     "M_AircraftAfterburner": ("Intensity", "CoreColour", "TipColour", "Shocks"),
     "M_AircraftHeatHaze": ("TimeS", "Strength"),
     # condensation-solver (scripts/aircraft_condensation_material.py PARAMETERS).
@@ -264,7 +266,12 @@ SHADER_INPUTS = {
     # LOOK_GENERATION 14: the view line and the ribbon's axis and strip (UV1, UV2)
     # for the per-strip view weight (contrail_view_weight).
     "contrail_opacity": ("UV", "WorldPos", "Life", "Opacity", "Formation", "FormationRamp", "Puff", "PuffCellCm",
-                         "CameraDir", "AlongXY", "AlongZStrip", "ViewWeight"),
+                         "CameraDir", "AlongXY", "AlongZStrip", "ViewWeight", "Facing"),
+    # LOOK_GENERATION 15: the camera-facing ribbon's offset (World Position Offset,
+    # HalfCm on UV3) and its tube normal (world space); twins contrail_facing_offset,
+    # contrail_tube_normal.
+    "contrail_facing": ("UV", "ToCamera", "AlongXY", "AlongZStrip", "HalfCm", "Facing"),
+    "contrail_normal": ("UV", "CameraDir", "AlongXY", "AlongZStrip", "VertexNormal", "Facing"),
     "afterburner_glow": ("UV", "Intensity", "CoreColour", "TipColour", "Shocks"),
     "heat_haze": ("UV", "LocalPos", "TimeS", "Strength"),
     # wet-airframe-canopy: "aircraft_wet" and "canopy_scratch".
@@ -1124,8 +1131,56 @@ def contrail_view_weight(along, strip, camera_dir, view_weight=1.0):
     return _lerp(1.0, face_on, _saturate(view_weight))
 
 
+def _cross3(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def contrail_facing_offset(uv_y, to_camera_cm, along, strip, half_cm, facing=1.0):
+    """The twin of contrail_facing.hlsl: the World Position Offset (cm) that turns
+    strip 0 of the crossed ribbon about its axis until its across direction is
+    cross(a, v), v the line from the strip's centre to the camera, and folds strip
+    1 onto the axis. A circular tube projects to the same chord from every azimuth,
+    so one camera-facing strip with the chord profile is that tube from any view."""
+    s = uv_y * 2.0 - 1.0
+    axis = _norm(along)
+    up_n, side = contrail_strip_normals(axis)
+    across = side if strip < 0.5 else up_n
+    own = tuple(c * half_cm * s for c in across)
+    to_centre = tuple(t + o for t, o in zip(to_camera_cm, own))
+    f = _cross3(axis, to_centre)
+    fl = math.sqrt(_dot(f, f))
+    f = tuple(c / fl for c in f) if fl > 1.0e-3 else side
+    target = tuple(c * half_cm * s for c in f) if strip < 0.5 else (0.0, 0.0, 0.0)
+    k = _saturate(facing)
+    return tuple((t - o) * k for t, o in zip(target, own))
+
+
+def contrail_tube_normal(uv_y, camera_dir, along, vertex_normal=(0.0, 0.0, 1.0), facing=1.0):
+    """The twin of contrail_normal.hlsl: the near half of the tube's surface normal
+    at s = 2 uv_y - 1, across x s + n x sqrt(1 - s^2) (across = cross(a, v), n the
+    view line less its axial part), lerped from the vertex normal by Facing."""
+    s = min(max(uv_y * 2.0 - 1.0, -1.0), 1.0)
+    axis = _norm(along)
+    v = _norm(camera_dir)
+    av = _dot(axis, v)
+    n = tuple(vc - ac * av for vc, ac in zip(v, axis))
+    nl = math.sqrt(_dot(n, n))
+    a = _cross3(axis, v)
+    al = math.sqrt(_dot(a, a))
+    if nl > 1.0e-3 and al > 1.0e-3:
+        root = math.sqrt(_saturate(1.0 - s * s))
+        tube = tuple(ac / al * s + nc / nl * root for ac, nc in zip(a, n))
+    else:
+        tube = v
+    vn = _norm(vertex_normal)
+    k = _saturate(facing)
+    mixed = tuple(_lerp(x, y, k) for x, y in zip(vn, tube))
+    return _norm((mixed[0], mixed[1], mixed[2] + 1.0e-5))
+
+
 def contrail_opacity(uv, world_pos_cm, life, opacity, formation, formation_ramp, puff, puff_cell_cm,
-                     camera_dir=(0.0, 0.0, 1.0), along=(1.0, 0.0, 0.0), strip=0.0, view_weight=0.0):
+                     camera_dir=(0.0, 0.0, 1.0), along=(1.0, 0.0, 0.0), strip=0.0, view_weight=0.0,
+                     facing=0.0):
     """The twin of contrail_opacity.hlsl, input for input (the defaults are
     ViewWeight 0: generation 13's opacity, whatever the view)."""
     ramp = formation_ramp if formation_ramp > 0.0 else 0.04
@@ -1139,6 +1194,8 @@ def contrail_opacity(uv, world_pos_cm, life, opacity, formation, formation_ramp,
     puffs = _saturate((n - cut) / max(1.0 - cut, 0.05))
     lumpy = _lerp(0.7 + 0.3 * n, 0.25 + 0.75 * puffs, _saturate(puff))
     view = contrail_view_weight(along, strip, camera_dir, view_weight)
+    if facing > 0.5:  # LOOK_GENERATION 15: strip 0 faces the camera, strip 1 folded away
+        view = 1.0 if strip < 0.5 else 0.0
     return _saturate(opacity * formed * fade * across * lumpy * view)
 
 

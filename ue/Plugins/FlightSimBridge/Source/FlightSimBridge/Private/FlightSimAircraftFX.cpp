@@ -166,6 +166,8 @@ namespace
 	const TCHAR* const AircraftFxParamPuff = TEXT("Puff");
 	// LOOK_GENERATION 14: the per-strip view weight's switch (1 on, 0 off).
 	const TCHAR* const AircraftFxParamViewWeight = TEXT("ViewWeight");
+	// LOOK_GENERATION 15: the camera-facing ribbon's switch (1 on, 0 off).
+	const TCHAR* const AircraftFxParamFacing = TEXT("Facing");
 	// The persistence gate: e_sat,water / e_sat,ice by Sonntag (1990)'s Magnus
 	// forms (water b 17.62 c 243.12: core/environment/atmosphere.py MAGNUS_B/C;
 	// ice b 22.46 c 272.62: aircraft_look.MAGNUS_ICE_B/C). The a cancels. From
@@ -378,6 +380,8 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	const bool bPuffsSwitch = AircraftFxSwitch(Params, TEXT("contrail-puffs="), true, SwitchError);
 	// LOOK_GENERATION 14: the crossed ribbon's per-strip view weight (the A/B).
 	const bool bViewWeightSwitch = AircraftFxSwitch(Params, TEXT("contrail-view-weight="), true, SwitchError);
+	// LOOK_GENERATION 15: one camera-facing ribbon with a tube's normal (the A/B).
+	const bool bFacingSwitch = AircraftFxSwitch(Params, TEXT("contrail-facing="), true, SwitchError);
 	// The canopy reflection: off unless asked for by name (the A/B).
 	const bool bCanopyReflectSwitch = AircraftFxSwitch(Params, TEXT("canopy-reflect="), false, SwitchError);
 	// The airframe's sky reflection: on unless asked off by name (the A/B).
@@ -390,6 +394,7 @@ void FFlightSimAircraftFXOptions::ParseParams(const FString& CommandLine)
 	bContrailFormationRamp = bAll && bFormationRampSwitch;
 	bContrailPuffs = bAll && bPuffsSwitch;
 	bContrailViewWeight = bAll && bViewWeightSwitch;
+	bContrailFacing = bAll && bFacingSwitch;
 	bCanopyReflect = bAll && bCanopyReflectSwitch;
 	bPaintReflect = bAll && bPaintReflectSwitch;
 	// Tiers 0-1 only (both opaque); 2-3 are translucent and not built. A bad
@@ -731,6 +736,10 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 		// writes the axis and strip on UV1 / UV2); 0 is generation 13's both-full.
 		Instance->SetScalarParameterValue(FName(AircraftFxParamViewWeight),
 			Options.bContrailViewWeight ? 1.0f : 0.0f);
+		// LOOK_GENERATION 15: strip 0 turned to face the camera, strip 1 folded away
+		// (contrail_facing.hlsl; RebuildTrail writes the half width on UV3).
+		Instance->SetScalarParameterValue(FName(AircraftFxParamFacing),
+			Options.bContrailFacing ? 1.0f : 0.0f);
 		Trail.Mesh->SetMaterial(0, Instance);
 		Trail.Mesh->RegisterComponent();
 		BeautyOnlyActors.Add(Trail.Owner);
@@ -786,6 +795,14 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 		: FString(TEXT("none: no wingtip nav lamp measured a semi-span, the plumes stay behind their engines")));
 	ContrailRow->SetBoolField(TEXT("puffs_on"), Options.bContrailPuffs);
 	ContrailRow->SetBoolField(TEXT("view_weight_on"), Options.bContrailViewWeight);
+	ContrailRow->SetBoolField(TEXT("facing_on"), Options.bContrailFacing);
+	ContrailRow->SetStringField(TEXT("facing"), Options.bContrailFacing
+		? TEXT("LOOK_GENERATION 15: one camera-facing ribbon (contrail_facing.hlsl World Position Offset turns strip 0 "
+		       "about the axis to across = cross(a, v), strip 1 folds onto the axis), the chord profile across and "
+		       "the tube's world normal (contrail_normal.hlsl): a circular tube from any azimuth, sun side lit, far "
+		       "side sky-lit; -contrail-facing=off is the A/B. Twins aircraft_look.contrail_facing_offset, "
+		       "contrail_tube_normal")
+		: TEXT("-contrail-facing=off: generation 14's crossed ribbon with the per-strip view weight"));
 	ContrailRow->SetStringField(TEXT("view_weight"), Options.bContrailViewWeight
 		? TEXT("LOOK_GENERATION 14: each strip of the crossed ribbon x (n.v)^2 / (1 - (a.v)^2) (n its plane normal, "
 		       "a the axis on UV1/UV2, v CameraVectorWS); the two sum to 1 at every view, as a cylinder's projection "
@@ -1784,6 +1801,8 @@ void FFlightSimAircraftFX::RebuildTrail(FTrail& Trail, double NowS, double Lifet
 	// never rotated, so the local axis is the world axis).
 	TArray<FVector2D> UV1;
 	TArray<FVector2D> UV2;
+	// LOOK_GENERATION 15: UV3 x the half width, cm (contrail_facing.hlsl).
+	TArray<FVector2D> UV3;
 	TArray<FLinearColor> Colours;
 	for (int32 Strip = 0; Strip < 2; ++Strip)
 	{
@@ -1823,6 +1842,8 @@ void FFlightSimAircraftFX::RebuildTrail(FTrail& Trail, double NowS, double Lifet
 			UV1.Add(FVector2D(Along.X, Along.Y));
 			UV2.Add(FVector2D(Along.Z, static_cast<double>(Strip)));
 			UV2.Add(FVector2D(Along.Z, static_cast<double>(Strip)));
+			UV3.Add(FVector2D(HalfCm, 0.0));
+			UV3.Add(FVector2D(HalfCm, 0.0));
 			// Vertex colour R: Life, age / this sample's own lifetime (the fade,
 			// the rim softening and the puff cut run on it; contrail_opacity.hlsl).
 			const float Life = static_cast<float>(FMath::Clamp(Age / FMath::Max(S.LifetimeS, 0.01), 0.0, 1.0));
@@ -1836,7 +1857,7 @@ void FFlightSimAircraftFX::RebuildTrail(FTrail& Trail, double NowS, double Lifet
 			Triangles.Append({A, A + 2, A + 1, A + 1, A + 2, A + 3});
 		}
 	}
-	Trail.Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, UV1, UV2, TArray<FVector2D>(),
+	Trail.Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, UV1, UV2, UV3,
 	                                          Colours, TArray<FProcMeshTangent>(), false);
 	Trail.bEverDrawn = true;
 }

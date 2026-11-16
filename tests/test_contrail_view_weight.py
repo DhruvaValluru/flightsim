@@ -142,7 +142,8 @@ def test_the_shader_weights_each_strip_and_rebuilds_the_cpp_normals():
     shader = _read(SHADER)
     documented = re.findall(r"^//\s{2,}(\w+)\s+float", shader, re.M)
     assert tuple(documented) == look.SHADER_INPUTS["contrail_opacity"]
-    assert look.SHADER_INPUTS["contrail_opacity"][-4:] == ("CameraDir", "AlongXY", "AlongZStrip", "ViewWeight")
+    assert look.SHADER_INPUTS["contrail_opacity"][-5:] == ("CameraDir", "AlongXY", "AlongZStrip", "ViewWeight",
+                                                           "Facing")
     for line in ("float3 axis = float3(AlongXY, AlongZStrip.x);",
                  "float3 side = cross(axis, float3(0.0, 0.0, 1.0));",
                  "side = length(side) > 1.0e-4 ? side / length(side) : float3(0.0, 1.0, 0.0);",
@@ -160,14 +161,17 @@ def test_the_shader_weights_each_strip_and_rebuilds_the_cpp_normals():
 
 def test_the_master_reads_the_view_line_and_uv1_uv2_and_defaults_to_generation_13():
     masters = _read(MASTERS)
-    assert re.search(r'^LOOK_GENERATION = "14"$', masters, re.M)
+    assert re.search(r'^LOOK_GENERATION = "15"$', masters, re.M)
     body = masters[masters.index("def create_aircraft_contrail"):]
     body = body[:body.index("\ndef ", 10)]
-    assert '"CameraDir": (_node(material, unreal.MaterialExpressionCameraVectorWS' in body
-    assert '"AlongXY": (_uv_channel(material, 1,' in body
-    assert '"AlongZStrip": (_uv_channel(material, 2,' in body
+    # LOOK_GENERATION 15 shares the view line and UV1/UV2 nodes with the facing pair.
+    assert "camera_dir = _node(material, unreal.MaterialExpressionCameraVectorWS" in body
+    assert "along_xy = _uv_channel(material, 1," in body
+    assert "along_z_strip = _uv_channel(material, 2," in body
+    assert '"CameraDir": (camera_dir, "")' in body and '"AlongXY": (along_xy, "")' in body
+    assert '"AlongZStrip": (along_z_strip, "")' in body
     assert '"ViewWeight": (_scalar(material, view_name, 0.0,' in body
-    assert look.FX_PARAMETERS["M_AircraftContrail"][-1] == "ViewWeight"
+    assert look.FX_PARAMETERS["M_AircraftContrail"][-2] == "ViewWeight"
 
 
 def test_the_cpp_writes_the_axis_and_strip_and_sets_the_switch():

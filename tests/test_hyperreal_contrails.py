@@ -49,12 +49,13 @@ def _contrail_body():
 # -- the material and its stamp ---------------------------------------------------
 
 def test_generation_13_rebuilds_the_contrail_master():
-    assert re.search(r'^LOOK_GENERATION = "14"$', _read(MASTERS), re.M)
+    assert re.search(r'^LOOK_GENERATION = "15"$', _read(MASTERS), re.M)
     # LOOK_GENERATION 14 appends the view weight (tests/test_contrail_view_weight.py)
-    assert look.FX_PARAMETERS["M_AircraftContrail"] == ("Opacity", "Formation", "FormationRamp", "Puff", "ViewWeight")
+    assert look.FX_PARAMETERS["M_AircraftContrail"] == ("Opacity", "Formation", "FormationRamp", "Puff", "ViewWeight",
+                                                        "Facing")
     assert look.SHADER_INPUTS["contrail_opacity"] == (
         "UV", "WorldPos", "Life", "Opacity", "Formation", "FormationRamp", "Puff", "PuffCellCm",
-        "CameraDir", "AlongXY", "AlongZStrip", "ViewWeight")
+        "CameraDir", "AlongXY", "AlongZStrip", "ViewWeight", "Facing")
 
 
 def test_the_contrail_material_reads_world_position_vertex_life_and_is_lit_directionally():
@@ -279,7 +280,7 @@ def test_the_ribbon_widens_by_the_jet_model_rolls_up_sinks_and_carries_life():
     assert "const FLinearColor Colour(Life, 1.0f, 1.0f, 1.0f);" in body
     assert "const double U = Age / FMath::Max(LifetimeS, 0.01);" in body
     # LOOK_GENERATION 14 adds UV1 / UV2 (the axis and strip: tests/test_contrail_view_weight.py)
-    assert ("CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, UV1, UV2, TArray<FVector2D>(),"
+    assert ("CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, UV1, UV2, UV3,"
             in body)
     header = _read(FX_H)
     assert "FVector RightWorld = FVector::RightVector;" in header

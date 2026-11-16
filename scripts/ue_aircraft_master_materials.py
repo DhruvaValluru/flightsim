@@ -125,7 +125,15 @@ REPO = os.path.dirname(_HERE)
 #: (FlightSimAircraftFX.cpp RebuildTrail), behind the ViewWeight scalar (the C++
 #: sets 1 under -contrail-view-weight=on, the default; 0 is generation 13). Every
 #: other graph is unchanged.
-LOOK_GENERATION = "14"
+#: 15 (#13's four contrails still read as light beams from the chase view: the
+#: view weight left the edge-on strip a thin bright core line whenever the camera
+#: looks along the trail): M_AircraftContrail becomes ONE camera-facing ribbon
+#: (contrail_facing.hlsl on World Position Offset, the half width on UV3; strip 1
+#: folded onto the axis) shaded by the tube's world normal (contrail_normal.hlsl,
+#: tangent_space_normal off), so the sun side is lit and the far side gets only the
+#: sky; Facing 0 in the master is generation 14 (the C++ sets 1 under
+#: -contrail-facing=on, the default).
+LOOK_GENERATION = "15"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.
@@ -796,9 +804,38 @@ def create_aircraft_contrail():
         lighting = getattr(unreal.TranslucencyLightingMode, "TLM_VOLUMETRIC_NON_DIRECTIONAL", None)
     if lighting is not None:
         material.set_editor_property("translucency_lighting_mode", lighting)
-    opacity_name, formation_name, ramp_name, puff_name, view_name = look.FX_PARAMETERS["M_AircraftContrail"]
+    opacity_name, formation_name, ramp_name, puff_name, view_name, facing_name = \
+        look.FX_PARAMETERS["M_AircraftContrail"]
+    # LOOK_GENERATION 15: one camera-facing ribbon (contrail_facing.hlsl on World
+    # Position Offset) shaded by the tube's own WORLD normal (contrail_normal.hlsl);
+    # Facing 0 in the master is generation 14 until the C++ sets it.
+    material.set_editor_property("tangent_space_normal", False)
+    facing = _scalar(material, facing_name, 0.0, -700, 1200)
+    along_xy = _uv_channel(material, 1, -700, 900)
+    along_z_strip = _uv_channel(material, 2, -700, 1000)
+    uv0 = _uv(material, -700, 0)
+    to_camera = _binary(material, unreal.MaterialExpressionSubtract,
+                        _node(material, unreal.MaterialExpressionCameraPositionWS, -900, 1300),
+                        _node(material, unreal.MaterialExpressionWorldPosition, -900, 1400), -700, 1300)
+    offset = _custom(material, "contrail_facing", "CMOT_FLOAT3", {
+        "UV": (uv0, ""),
+        "ToCamera": (to_camera, ""),
+        "AlongXY": (along_xy, ""),
+        "AlongZStrip": (along_z_strip, ""),
+        "HalfCm": (_mask(material, _uv_channel(material, 3, -900, 1500), "r", -700, 1500), ""),
+        "Facing": (facing, "")},
+        -400, 1300)
+    camera_dir = _node(material, unreal.MaterialExpressionCameraVectorWS, -700, 800)
+    tube_normal = _custom(material, "contrail_normal", "CMOT_FLOAT3", {
+        "UV": (uv0, ""),
+        "CameraDir": (camera_dir, ""),
+        "AlongXY": (along_xy, ""),
+        "AlongZStrip": (along_z_strip, ""),
+        "VertexNormal": (_node(material, unreal.MaterialExpressionVertexNormalWS, -900, 1600), ""),
+        "Facing": (facing, "")},
+        -400, 1500)
     opacity = _custom(material, "contrail_opacity", "CMOT_FLOAT1", {
-        "UV": (_uv(material, -700, 0), ""),
+        "UV": (uv0, ""),
         # LOOK_GENERATION 13: absolute world position (generation 12's LocalPosition
         # was relative to the newest sample, so the lumps slid along with the aircraft).
         "WorldPos": (_node(material, unreal.MaterialExpressionWorldPosition, -700, 100), ""),
@@ -816,12 +853,15 @@ def create_aircraft_contrail():
         # LOOK_GENERATION 14: the per-strip view weight. The view line, the ribbon's
         # axis (UV1 x, y; UV2 x its z) and strip index (UV2 y) as RebuildTrail writes
         # them; ViewWeight 0 in the master is generation 13 until the C++ sets it.
-        "CameraDir": (_node(material, unreal.MaterialExpressionCameraVectorWS, -700, 800), ""),
-        "AlongXY": (_uv_channel(material, 1, -700, 900), ""),
-        "AlongZStrip": (_uv_channel(material, 2, -700, 1000), ""),
-        "ViewWeight": (_scalar(material, view_name, 0.0, -700, 1100), "")},
+        "CameraDir": (camera_dir, ""),
+        "AlongXY": (along_xy, ""),
+        "AlongZStrip": (along_z_strip, ""),
+        "ViewWeight": (_scalar(material, view_name, 0.0, -700, 1100), ""),
+        "Facing": (facing, "")},
         -400, 100)
     lib = unreal.MaterialEditingLibrary
+    lib.connect_material_property(offset, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
+    lib.connect_material_property(tube_normal, "", unreal.MaterialProperty.MP_NORMAL)
     lib.connect_material_property(_const3(material, (0.92, 0.94, 0.97), -400, -100), "",
                                   unreal.MaterialProperty.MP_BASE_COLOR)
     lib.connect_material_property(_const(material, 0.9, -400, 0), "", unreal.MaterialProperty.MP_ROUGHNESS)

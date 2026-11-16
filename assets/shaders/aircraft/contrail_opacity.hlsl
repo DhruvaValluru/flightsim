@@ -32,6 +32,10 @@
 //   ViewWeight float  1: weight each strip by how face-on it is (LOOK_GENERATION
 //                     14, -contrail-view-weight=on, the default); 0: generation
 //                     13's crossed ribbon, both strips at full strength
+//   Facing    float   1: LOOK_GENERATION 15's camera-facing ribbon (-contrail-facing=on,
+//                     the default; contrail_facing.hlsl turns strip 0 to face the
+//                     camera and folds strip 1 away): strip 0 carries the whole
+//                     profile (view 1), strip 1 none; 0: generation 14's view weight
 // Returns float opacity.
 //
 // Round 47 (#13's "four straight light lines on the sea", rounds 5-44): the ramp was
@@ -174,6 +178,10 @@ float av = dot(axis, viewLine);
 float offAxis = 1.0 - av * av;
 float faceOn = offAxis > 1.0e-3 ? saturate(nv * nv / offAxis) : 0.5;
 float view = lerp(1.0, faceOn, saturate(ViewWeight));
+// LOOK_GENERATION 15: the camera-facing ribbon. Strip 0 faces the camera by
+// construction (a tube's projection, the chord across, from any azimuth); strip 1
+// is folded onto the axis and also drawn at 0, in case a vertex escapes the fold.
+view = Facing > 0.5 ? (AlongZStrip.y < 0.5 ? 1.0 : 0.0) : view;
 // A young trail is one lumpy body (0.7..1); an aged one is cut into puffs:
 // the cut rises with Life, so the gaps open as the trail thins.
 float cut = saturate(Puff) * smoothstep(0.1, 1.0, life) * 0.75;
