@@ -192,8 +192,8 @@ def test_the_cpp_numbers_are_the_python_twins_and_the_albedo_is_two_stream():
                      ("SheathLift", "sheath_lift"), ("Bands", "bands"), ("Contrast", "contrast"),
                      ("Corrugate", "corrugate"), ("BottomWidth", "bottom_width"), ("DustShareMax", "dust_share_max")):
         assert _cpp_float(f"BeautyFlipbookFunnel{cpp}") == FUNNEL[key], cpp
-    # tau = 3 LWC L / (2 rho_w r_e) = 7.5 for 0.5 g/m^3, 10 um, 100 m; R = 1.125 / 3.125 = 0.36.
-    assert weather_look.tornado_flipbook_albedo() == pytest.approx(0.36, abs=0.005)
+    # tau = 3 LWC L / (2 rho_w r_e) = 15 for 0.5 g/m^3, 10 um, 200 m; R = 2.25 / 4.25 = 0.53.
+    assert weather_look.tornado_flipbook_albedo() == pytest.approx(0.53, abs=0.005)
     assert FUNNEL["colour"][0] == pytest.approx(weather_look.tornado_flipbook_albedo(), abs=0.005)
     assert len(set(FUNNEL["colour"])) == 1                                     # water cloud is grey
     assert min(FUNNEL["colour"]) > 3.0 * max(weather_look.BEAUTY_WALL_CLOUD_COLOUR)
@@ -255,7 +255,8 @@ def test_funnel_is_lighter_than_the_storm_base_and_has_a_crisp_edge(frame0):
     assert stats["smoke"][0] < 1.2 * wall
     # Funnel: grey, at least 2x the storm base's albedo (the look-dev tune of 2026-11-15 took it
     # from ~3x, which read paper-white on #10, to ~2.2x) and never white.
-    assert 2.0 * wall < stats["funnel"][0] < 0.45
+    # Round 147: ~4x (the r144 near-black cap), still below 0.6, never white.
+    assert 2.0 * wall < stats["funnel"][0] < 0.6
     # The wispy outline: the share of the visible card that is faint (opacity < 0.3) smoke,
     # 0.38 in generation 2, cut by at least 40 % (what remains is the taper and top fade's edge).
     assert stats["smoke"][1] > 0.3 and stats["funnel"][1] < 0.6 * stats["smoke"][1]
