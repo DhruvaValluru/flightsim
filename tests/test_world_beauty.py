@@ -228,9 +228,16 @@ def test_the_cpp_world_tables_and_laws_are_the_python_ones(tmp_path):
     main.append("printf(\"puddle %.17g\\n\", PuddleShareDefault);")
     # visual round 2: the deck clearance (its law: tests/test_weather_scenes.py)
     main.append("printf(\"aclear %.17g\\n\", AircraftLayerClearanceM);")
+    # sky step 4: the scene fog's restated constants and the observer clamp (the laws
+    # themselves are tests/test_sky_step4_atmosphere.py's)
+    main.append("printf(\"fog %.17g %.17g %.17g %.17g %.17g\\n\", SceneFogHeightFalloff, SceneFogStartDistanceM,"
+                " SceneFogMaxOpacity, FogObserverClampM, FogRebaseStepM);")
     main.append("return 0; }")
     lines = _compile_and_run(tmp_path, block, "\n".join(main))
 
+    fog = [float(v) for v in next(l for l in lines if l.startswith("fog ")).split()[1:]]
+    assert fog == [wb.SCENE_FOG_HEIGHT_FALLOFF, wb.SCENE_FOG_START_DISTANCE_M, wb.SCENE_FOG_MAX_OPACITY,
+                   wb.FOG_OBSERVER_CLAMP_M, wb.FOG_REBASE_STEP_M]
     atm = [line.split() for line in lines if line.startswith("atm ")]
     assert [(p, f) for _, p, f, _ in atm] == [(p, f) for p in wb.PRESETS for f in wb.ATMOSPHERE_FIELDS]
     for _, preset, field, value in atm:
@@ -944,13 +951,32 @@ def test_a_constrained_gpu_gets_ef361bd6_cloud_and_sky_settings():
     ef361bd6..1e3e0f0a named a8c964fc (this lane's round-2 march, shadow span,
     layer thinning, multiple scattering and fog-on-all-pixel), and ef361bd6's
     code rendered with the same materials. On a constrained GPU (integrated, or
-    a feature level below SM6) every one of those settings is ef361bd6's."""
+    a feature level below SM6) the march, the shadow span, the thinning and the
+    fog-on-all-pixel cvar are still ef361bd6's.
+
+    Sky step 4 (2026-11-15) moved ONE pin: the multiple-scattering factor is now
+    set on every GPU class under -sky-multi-scatter=auto (the default) and on,
+    and left at the scene's 1.0 under off. Why the class gate went: read in the
+    UE 5.7 source, USkyAtmosphereComponent::MultiScatteringFactor is one multiply
+    in the 32x32 multi-scattering LUT compute pass (SkyAtmosphere.usf
+    MultiScatteredLuminanceLutUAV) that the atmosphere runs every frame at the
+    same sample count whatever the factor (the render path already sets
+    r.SkyAtmosphere.MultiScatteringLUT.HighQuality 1 on every GPU); it is in no
+    per-pixel sky, aerial-perspective or cloud shader and adds no submission, so
+    it cannot be what hung the iGPU (r87 located that stall in the sky light's
+    cloud reflection march and capped it; the bisect only ever named a8c964fc as
+    a unit). The outcome on the iGPU is UNMEASURED until the Windows A/B
+    (docs/VISUAL_FIDELITY_PLAN.md "Sky step 4"); -sky-multi-scatter=off is
+    ef361bd6's sky in one word. tests/test_sky_step4_atmosphere.py pins the law."""
     assert "return GRHIDeviceIsIntegrated || GMaxRHIFeatureLevel < ERHIFeatureLevel::SM6;" in CLOUDS_CPP
     assert "const bool bIntegratedGpu = CloudConstrainedGpu();" in CLOUDS_CPP
-    # multiple scattering: never set on the constrained class
-    guard = CLOUDS_CPP.index("if (!CloudConstrainedGpu())")
-    assert CLOUDS_CPP.index("Atmosphere->SetMultiScatteringFactor(", guard) - guard < 200
+    # multiple scattering: the switch's law, set once, through the pure block
+    assert "if (!CloudConstrainedGpu())" not in CLOUDS_CPP   # sky step 4: the gate lives in SkyMultiScatterFor
+    guard = CLOUDS_CPP.index("const int32 MultiScatter = SkyMultiScatterFor(TCHAR_TO_ANSI(*SkyMultiScatterSwitch), CloudConstrainedGpu());")
+    assert CLOUDS_CPP.index("if (MultiScatter == 1)", guard) - guard < 200
+    assert CLOUDS_CPP.index("Atmosphere->SetMultiScatteringFactor(", guard) - guard < 400
     assert CLOUDS_CPP.count("Atmosphere->SetMultiScatteringFactor(") == 1
+    assert wb.sky_multi_scatter_applies("auto", True) is False and wb.sky_multi_scatter_applies("on", True) is True and wb.sky_multi_scatter_applies("off", True) is False
     # fog on every pixel: discrete only
     fog = CLOUDS_CPP.index("if (!bIntegratedGpu)")
     assert CLOUDS_CPP.index("FogAll->Set(1, ECVF_SetByCode);", fog) - fog < 200

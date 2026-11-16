@@ -654,6 +654,31 @@ rp_check "sky step 3: ... from r.VolumetricCloud.DistanceToSampleMaxCount" "$VCR
 rp_check "sky step 3: the reflection pass re-derives SampleCountMax" "$VCR" "UVolumetricCloudComponent::BaseViewRaySampleCount * CloudInfo.GetVolumetricCloudSceneProxy().ReflectionViewSampleCountScale,"
 rp_check "sky step 3: the reflection pass re-derives ShadowSampleCountMax" "$VCR" "UVolumetricCloudComponent::BaseShadowRaySampleCount * CloudInfo.GetVolumetricCloudSceneProxy().ShadowReflectionViewSampleCountScale,"
 rp_check "sky step 3: the reflection pass is the sky-light capture" "$VCR" "CloudRC.bIsReflectionRendering = ViewInfo.bIsReflectionCapture;"
+# Sky step 4 (the owner's X-Plane-12 brief): the height fog's vertical profile
+# (FlightSimClouds.cpp ApplyAtmosphere / Advance, FlightSimWorldPure::
+# FogHeightFalloffFor, FogDensityRebased, FogReferenceZM) and the sky's multiple
+# scattering on every GPU class (SkyMultiScatterFor). Each pattern is the
+# engine reading the laws rest on, read in the 5.7 source on 2026-11-15.
+EHF="Engine/Classes/Components/ExponentialHeightFogComponent.h"
+rp_check "sky step 4: Fog SetFogHeightFalloff" "$EHF" "ENGINE_API void SetFogHeightFalloff(float Value);"
+rp_check "sky step 4: Fog SetStartDistance" "$EHF" "ENGINE_API void SetStartDistance(float Value);"
+rp_check "sky step 4: Fog SetFogMaxOpacity" "$EHF" "ENGINE_API void SetFogMaxOpacity(float Value);"
+rp_check "sky step 4: Fog FogHeightFalloff" "$EHF" "float FogHeightFalloff;"
+rp_check "sky step 4: Fog StartDistance" "$EHF" "float StartDistance;"
+rp_check "sky step 4: Fog FogMaxOpacity" "$EHF" "float FogMaxOpacity;"
+rp_check "sky step 4: SceneComponent SetWorldLocation" "Engine/Classes/Components/SceneComponent.h" "ENGINE_API void SetWorldLocation(FVector NewLocation, bool bSweep=false, FHitResult* OutSweepHitResult=nullptr, ETeleportType Teleport = ETeleportType::None);"
+rp_check "sky step 4: a moved fog re-registers" "Engine/Private/Components/ExponentialHeightFogComponent.cpp" "void UExponentialHeightFogComponent::SendRenderTransform_Concurrent()"
+rp_check "sky step 4: fog density per 1000 (per cm)" "Renderer/Private/SceneCore.cpp" "FogData[0].Density = State.FogDensity / 1000.0f;"
+rp_check "sky step 4: fog falloff per 1000 (per cm)" "Renderer/Private/SceneCore.cpp" "FogData[0].HeightFalloff = State.FogHeightFalloff / 1000.0f;"
+rp_check "sky step 4: the fog's density law" "../../Shaders/Private/HeightFogCommon.ush" "// The exponential fog density function is d = GlobalDensity * exp(-HeightFalloff * z)"
+rp_check "sky step 4: the fog's line integral" "../../Shaders/Private/HeightFogCommon.ush" "float LineIntegral = ( 1.0f - exp2(-Falloff) ) / Falloff;"
+rp_check "sky step 4: the observer height clamp (65536 cm)" "Renderer/Private/FogRendering.cpp" "float MaxObserverHeightDifference = 65536.0f;"
+rp_check "sky step 4: the clamped ray is shifted" "../../Shaders/Private/HeightFogCommon.ush" "CameraToReceiver.z += WorldCameraOrigin.z - WorldObserverOrigin.z; // Compensate this vector for clamping the observer height"
+rp_check "sky step 4: the sky is drawn before the fog" "Renderer/Private/DeferredShadingRenderer.cpp" "RenderSkyAtmosphere(GraphBuilder, SceneTextures);"
+rp_check "sky step 4: the fog is drawn over the sky" "Renderer/Private/DeferredShadingRenderer.cpp" "RenderFog(GraphBuilder, SceneTextures, LightShaftOcclusionTexture, bFogComposeLocalFogVolumes);"
+rp_check "sky step 4: the volumetric fog shares the profile" "../../Shaders/Private/VolumetricFog.usf" "float GlobalDensityFirst = FogStruct.ExponentialFogParameters3.x * exp2(-FogStruct.ExponentialFogParameters.y * (WorldPosition.z - FogStruct.ExponentialFogParameters3.y));"
+rp_check "sky step 4: the multi-scatter factor is a LUT multiply" "../../Shaders/Private/SkyAtmosphere.usf" "MultiScatteredLuminanceLutUAV[int2(PixPos)] = L * Atmosphere.MultiScatteringFactor;"
+rp_check "sky step 4: the factor reaches the shader as a uniform" "Renderer/Private/SkyAtmosphereRendering.cpp" "COPYMACRO(MultiScatteringFactor);"
 # The sky HDRI probe (ApplySkyHdri).
 rp_check "sky-hdri: SLS_SpecifiedCubemap" "Engine/Classes/Components/SkyLightComponent.h" "SLS_SpecifiedCubemap,"
 rp_check "sky-hdri: SkyLight SourceType" "Engine/Classes/Components/SkyLightComponent.h" "TEnumAsByte<enum ESkyLightSourceType> SourceType;"

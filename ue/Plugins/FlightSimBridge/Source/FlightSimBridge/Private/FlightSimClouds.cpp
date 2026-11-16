@@ -89,37 +89,50 @@ namespace FlightSimWorldPure
 	// Fix pass 2026-11-09: the ground albedo (GroundAlbedoSrgb: the card's
 	// surface and wetness) and the tiles' dehaze and saturation (tileset
 	// constants) left the per-weather rows.
-	constexpr int AtmosphereFieldCount = 13;
+	// Sky step 4 (the owner's X-Plane-12 brief, 2026-11-15): three horizon-haze
+	// fields appended (13 -> 16, the existing indices hold): the height fog's
+	// vertical profile (fog_scale_height_km: the 1/e scale height the fog's haze
+	// decays with above the scene's fog height; 0 keeps the scene's near-uniform
+	// profile), its start distance and its max opacity (the scene's own values
+	// unless a row or the overrides file says otherwise). FogHeightFalloffFor and
+	// the rebase laws below are the profile's arithmetic.
+	constexpr int AtmosphereFieldCount = 16;
 	inline const char* AtmosphereFieldName(int Field)
 	{
 		static const char* const Names[AtmosphereFieldCount] = {
 			"mie_scale_height_km", "mie_anisotropy", "mie_share", "mie_cap_per_km",
 			"aerial_perspective_scale", "vfog_distance_m", "vfog_scattering_distribution",
 			"vfog_extinction_scale", "cloud_bottom_occlusion", "rain_readability_gain", "wetness_floor",
-			"tiles_detail_strength", "lightning_sky_gain"};
+			"tiles_detail_strength", "lightning_sky_gain",
+			"fog_scale_height_km", "fog_start_distance_m", "fog_max_opacity"};
 		return Field >= 0 && Field < AtmosphereFieldCount ? Names[Field] : "";
 	}
 	enum : int
 	{
 		AtmMieScaleHeightKm = 0, AtmMieAnisotropy, AtmMieShare, AtmMieCapPerKm, AtmAerialPerspectiveScale,
 		AtmVFogDistanceM, AtmVFogScatteringDistribution, AtmVFogExtinctionScale, AtmCloudBottomOcclusion,
-		AtmRainReadabilityGain, AtmWetnessFloor, AtmTilesDetailStrength, AtmLightningSkyGain
+		AtmRainReadabilityGain, AtmWetnessFloor, AtmTilesDetailStrength, AtmLightningSkyGain,
+		AtmFogScaleHeightKm, AtmFogStartDistanceM, AtmFogMaxOpacity
 	};
 
 	// UNCALIBRATED: set by probe render on the render machine (every number).
+	// Sky step 4: the clear and hazy rows give the fog the Mie layer's own scale
+	// height (the Koschmieder split put one aerosol in two renderers; this gives
+	// both the same vertical profile); the weather rows keep the scene's uniform
+	// fog (their haze is the column under a deck, which RainHazeFog shapes).
 	inline double AtmosphereDefault(int Preset, int Field)
 	{
 		static const double Rows[PresetCount][AtmosphereFieldCount] = {
 			// clear
-			{1.2, 0.80, 0.6, 0.25, 1.0, 8000.0, 0.75, 1.0, 0.5, 1.0, 0.0, 0.12, 0.0},
+			{1.2, 0.80, 0.6, 0.25, 1.0, 8000.0, 0.75, 1.0, 0.5, 1.0, 0.0, 0.12, 0.0, 1.2, 1500.0, 0.92},
 			// hazy
-			{1.6, 0.76, 0.7, 0.6, 1.0, 8000.0, 0.7, 1.0, 0.5, 1.0, 0.0, 0.12, 0.0},
+			{1.6, 0.76, 0.7, 0.6, 1.0, 8000.0, 0.7, 1.0, 0.5, 1.0, 0.0, 0.12, 0.0, 1.6, 1500.0, 0.92},
 			// overcast
-			{1.4, 0.70, 0.4, 0.6, 1.0, 6000.0, 0.4, 1.0, 0.75, 1.0, 0.0, 0.12, 0.0},
+			{1.4, 0.70, 0.4, 0.6, 1.0, 6000.0, 0.4, 1.0, 0.75, 1.0, 0.0, 0.12, 0.0, 0.0, 1500.0, 0.92},
 			// rain (vfog_extinction_scale: world_beauty.WET_VFOG_EXTINCTION_SCALE, visual round 3)
-			{1.0, 0.65, 0.3, 0.8, 1.0, 4000.0, 0.3, 0.48, 0.85, 1.5, 0.6, 0.12, 0.0},
+			{1.0, 0.65, 0.3, 0.8, 1.0, 4000.0, 0.3, 0.48, 0.85, 1.5, 0.6, 0.12, 0.0, 0.0, 1500.0, 0.92},
 			// storm
-			{1.8, 0.65, 0.3, 0.8, 1.0, 4000.0, 0.3, 0.48, 0.9, 1.5, 0.85, 0.12, 3.0},
+			{1.8, 0.65, 0.3, 0.8, 1.0, 4000.0, 0.3, 0.48, 0.9, 1.5, 0.85, 0.12, 3.0, 0.0, 1500.0, 0.92},
 		};
 		return Preset >= 0 && Preset < PresetCount && Field >= 0 && Field < AtmosphereFieldCount
 			? Rows[Preset][Field] : 0.0;
@@ -934,6 +947,100 @@ namespace FlightSimWorldPure
 		return VisibilityKm > 0.0 ? VisibilityKm : (Preset == PresetClear ? ClearDefaultVisibilityKm : 0.0);
 	}
 
+	// Sky step 4 (2026-11-15): THE HEIGHT FOG'S VERTICAL PROFILE. Read in the UE 5.7
+	// source (SceneCore.cpp 403-404, FogRendering.cpp 237-271, HeightFogCommon.ush
+	// 192-232, DeferredShadingRenderer.cpp 3455/3466): the engine draws the fog's
+	// density as FogDensity/1000 per cm x 2^(-FogHeightFalloff/1000 x (z - FogHeight)
+	// in cm), i.e. a 1/e scale height of 10 / (ln 2 x falloff) metres; it draws the
+	// fog OVER the sky atmosphere (RenderSkyAtmosphere, then RenderFog), and a sky
+	// pixel sits at the far plane, so its fog is the ray's whole line integral capped
+	// at FogMaxOpacity. The scene's fog (FlightSimVisualScene.cpp: falloff 0.0002) has
+	// a 72 km scale height: uniform to the top of the atmosphere, so EVERY sky pixel
+	// from every camera takes the fog at its max opacity, 0.92 of the fog's one
+	// in-scatter colour (under a -sky= plan: the sky light's average, FlightSimSky.cpp
+	// 265-266), with 0.08 of the atmosphere under it. That is the owner's "flat navy
+	// frame" and "no horizon haze" (round 95 #13, round 83 #03): the atmosphere's own
+	// gradient never reaches the frame. A real boundary-layer haze decays with a
+	// 1-2 km scale height; the clear and hazy rows give the fog the Mie layer's
+	// (fog_scale_height_km), so the zenith ray carries ~D x H of fog, the horizon ray
+	// saturates to the band, and far ridges take the atmosphere's aerial perspective
+	// through a thinning haze. The density at the SCENE's fog height is kept
+	// (FogDensityRebased), so the Koschmieder count at the ground (MieSplit, the fog
+	// keeps the haze the Mie layer did not take) is unchanged: a redistribution in
+	// height, not more extinction.
+	//
+	// The engine clamps the fog's observer to FogHeight + 65536 cm (FogRendering.cpp
+	// MaxObserverHeightDifference, for precision) and shifts the whole ray down by the
+	// excess (HeightFogCommon.ush 233/242): under a short scale height a cruise camera
+	// 10 km up would be treated as 655 m up with the ground 9 km BELOW the fog's
+	// reference height, where the exponential is 2^11 denser, and every surface would
+	// saturate. So the fog's reference height follows the aircraft (FogReferenceZM:
+	// the fog component is moved up to it, its density rebased so the profile in world
+	// space is identical, and Advance re-bases it when the aircraft has climbed or
+	// descended FogRebaseStepM). The dust haze's inversion and the storm's rain haze
+	// read the fog's height live and compose on top. world_beauty.py
+	// fog_height_falloff / fog_density_rebased / fog_reference_z_m are the twins.
+	// UNCALIBRATED: the scale height is the row's Mie one by construction; the
+	// outcome (a pale band, a blue zenith, layered ridges) is UNMEASURED until the
+	// Windows round named in docs/VISUAL_FIDELITY_PLAN.md "Sky step 4".
+	constexpr double SceneFogHeightFalloff = 0.0002;    // FlightSimVisualScene.cpp SetFogHeightFalloff
+	constexpr double SceneFogStartDistanceM = 1500.0;   // FlightSimVisualScene.cpp SetStartDistance
+	constexpr double SceneFogMaxOpacity = 0.92;         // FlightSimVisualScene.cpp SetFogMaxOpacity
+	constexpr double FogObserverClampM = 655.36;        // FogRendering.cpp MaxObserverHeightDifference 65536 cm
+	constexpr double FogRebaseStepM = 100.0;            // Advance re-bases past this climb or descent
+	constexpr double FogFalloffPerScaleHeightKm = 0.01 / 0.69314718055994531;   // falloff x scale height (km)
+	inline double FogHeightFalloffFor(double ScaleHeightKm)
+	{
+		return ScaleHeightKm > 0.0 ? FogFalloffPerScaleHeightKm / ScaleHeightKm : SceneFogHeightFalloff;
+	}
+	// FogDensity at a new reference height ToZM (metres) that draws the same density
+	// everywhere as Density did at FromZM under Falloff: D x 2^(-falloff x dz / 10)
+	// (falloff/1000 per cm x 100 cm per metre).
+	inline double FogDensityRebased(double Density, double Falloff, double FromZM, double ToZM)
+	{
+		return Density * std::pow(2.0, -Falloff * (ToZM - FromZM) / 10.0);
+	}
+	// The fog's reference height: the aircraft's when the row states a profile and
+	// the aircraft is above the scene's fog height (a camera at or under the
+	// reference, or up to FogObserverClampM above it, is never clamped); else the
+	// scene's.
+	inline double FogReferenceZM(double SceneZM, double AircraftZM, bool bProfile)
+	{
+		return bProfile && AircraftZM > SceneZM ? AircraftZM : SceneZM;
+	}
+
+	// Sky step 4: -sky-multi-scatter=auto|on|off (world_beauty.SKY_MULTI_SCATTER_SWITCH).
+	// Why ef361bd6's class gate is lifted: USkyAtmosphereComponent::MultiScatteringFactor
+	// is one multiply in the multi-scattering LUT pass (SkyAtmosphere.usf 1309/1311,
+	// a 32 x 32 compute dispatch the atmosphere runs every frame at the same sample
+	// count whatever the factor; r.SkyAtmosphere.MultiScatteringLUT.HighQuality is
+	// already 1 on every GPU from the render path); it is in no per-pixel sky, aerial
+	// perspective or cloud shader and adds no submission. Round 1's bisect named
+	// a8c964fc as a unit (march, shadow span, thinning, fog-on-all-pixel and this
+	// factor together) and r87 then located the stall in the sky light's cloud
+	// reflection march and capped it; nothing isolated the factor. claude/hl-sky keeps
+	// ef361bd6's class gate under auto (the constrained class keeps the engine's 1.0
+	// until a Windows round measures it); on applies the row on every GPU, which is
+	// that round's A/B; off is ef361bd6's sky (1.0) everywhere. An
+	// unknown word is -1 (Build refuses it by name). Whether 1.25 reads right on the
+	// iGPU is UNMEASURED (round 97 is the A/B).
+	constexpr int SkyMultiScatterWordCount = 3;
+	inline const char* SkyMultiScatterWord(int I)
+	{
+		static const char* const Words[SkyMultiScatterWordCount] = {"auto", "on", "off"};
+		return I >= 0 && I < SkyMultiScatterWordCount ? Words[I] : "";
+	}
+	inline int SkyMultiScatterFor(const char* Word, bool Constrained)
+	{
+		if (Word == nullptr || std::strcmp(Word, "auto") == 0)
+		{
+			return Constrained ? 0 : 1;   // ef361bd6's class gate (see above)
+		}
+		if (std::strcmp(Word, "on") == 0) { return 1; }
+		if (std::strcmp(Word, "off") == 0) { return 0; }
+		return -1;
+	}
+
 	inline int SelectCloud(double Cover, double ThicknessM, int Preset)
 	{
 		if (Preset == PresetStorm || Preset == PresetRain)
@@ -1552,6 +1659,11 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// word refuses by name.
 		CloudMarchSwitch = TEXT("auto");
 		FParse::Value(*Switches, TEXT("cloud-march="), CloudMarchSwitch);
+		// Sky step 4: -sky-multi-scatter=auto|on|off (auto by default: the row's
+		// MultiScatteringFactor on a discrete GPU, the class gate kept; on = every class; off is ef361bd6's sky for the
+		// A/B). FlightSimWorldPure::SkyMultiScatterFor; another word refuses by name.
+		SkyMultiScatterSwitch = TEXT("auto");
+		FParse::Value(*Switches, TEXT("sky-multi-scatter="), SkyMultiScatterSwitch);
 		// Sky step 1: -look-cloud-wisp=on|off (on by default): the cumulus and
 		// stratocumulus wisp (CloudWispRow, CloudBellyOcclusion); off is round 95's
 		// clouds exactly. Another word refuses by name.
@@ -1599,6 +1711,12 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	{
 		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-march=%s is not auto, constrained, discrete or probe"),
 		                        *CloudMarchSwitch);
+		return false;
+	}
+	if (SkyMultiScatterFor(TCHAR_TO_ANSI(*SkyMultiScatterSwitch), false) < 0)
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -sky-multi-scatter=%s is not auto, on or off"),
+		                        *SkyMultiScatterSwitch);
 		return false;
 	}
 	// Sky step 2: the -sky= plan's cloud fields, read in ApplyClouds (nullptr without a plan).
@@ -1855,7 +1973,7 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	Record->SetStringField(TEXT("visual_only"),
 		TEXT("nothing here reaches the flight model; the measure quality never builds it"));
 
-	ApplyAtmosphere(World, Scene, VisibilityKm);
+	ApplyAtmosphere(World, Scene, VisibilityKm, Aircraft);
 	// dust-humidity-haze (FlightSimDustHaze.h): RH growth, dust tint, the boundary-layer cap.
 	TSharedPtr<FJsonObject> DustOut;
 	DustHaze.Apply(World, Scene, Params, Card, VisibilityKm, WorldObject(Record, TEXT("atmosphere")), DustOut);
@@ -2229,13 +2347,15 @@ bool FFlightSimWorldBeauty::ConstrainedGpu()
 	return CloudConstrainedGpu();
 }
 
-void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm)
+void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm,
+                                            AActor* Aircraft)
 {
 	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
 	using namespace FlightSimWorldPure;
 	const double* Row = &AtmosphereValues[Preset * AtmosphereFieldCount];
 	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 	double FogFactor = 1.0;
+	FogProfiles.Reset();
 	USkyAtmosphereComponent* Atmosphere = Scene.Atmosphere;
 	// -NoAerialPerspective (Gate 6's extinction control) hides the atmosphere
 	// and the fog: a hidden one is left exactly as the scene built it.
@@ -2261,15 +2381,29 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	// clouds-sky round 2: the sky's multiple scattering (paler towards the
 	// horizon from altitude; FlightSimWorldPure::SkyMultiScattering).
 	Out->SetNumberField(TEXT("multi_scattering_factor_before"), Atmosphere->MultiScatteringFactor);
-	// Not on a constrained GPU (CloudConstrainedGpu): ef361bd6 never set it.
-	if (!CloudConstrainedGpu())
+	// Sky step 4: the row under -sky-multi-scatter=on, or auto on a discrete GPU (ef361bd6's
+	// class gate kept under auto: FlightSimWorldPure::SkyMultiScatterFor); off
+	// keeps the scene's 1.0 for the A/B.
+	const int32 MultiScatter = SkyMultiScatterFor(TCHAR_TO_ANSI(*SkyMultiScatterSwitch), CloudConstrainedGpu());
+	if (MultiScatter == 1)
 	{
 		Atmosphere->SetMultiScatteringFactor(static_cast<float>(SkyMultiScattering(Preset)));
 	}
 	Out->SetNumberField(TEXT("multi_scattering_factor"), Atmosphere->MultiScatteringFactor);
+	Out->SetStringField(TEXT("multi_scattering_switch"), SkyMultiScatterSwitch);
+	Out->SetBoolField(TEXT("multi_scattering_applied"), MultiScatter == 1);
+	Out->SetBoolField(TEXT("multi_scattering_constrained_gpu"), CloudConstrainedGpu());
 	Out->SetStringField(TEXT("multi_scattering_basis"),
 		TEXT("world_beauty.SKY_MULTI_SCATTERING (UNCALIBRATED): shot d's sky at 3.8 km rendered near-black navy; "
 		     "more multiple scattering pales and lifts the clear sky towards the horizon"));
+	Out->SetStringField(TEXT("multi_scattering_gate_basis"),
+		TEXT("sky step 4: -sky-multi-scatter=auto|on|off, auto = on for a discrete GPU, the engine's 1.0 on the constrained class (ef361bd6's gate, kept); on = every class. The factor is one multiply "
+		     "in the 32x32 multi-scattering LUT pass the atmosphere runs every frame at the same sample count "
+		     "(SkyAtmosphere.usf MultiScatteredLuminanceLutUAV; the render path already sets "
+		     "r.SkyAtmosphere.MultiScatteringLUT.HighQuality 1 on every GPU), in no per-pixel shader, so it adds "
+		     "no submission on the iGPU. Round 1's bisect named a8c964fc as a unit and r87 located the stall in the "
+		     "sky light's cloud reflection march; nothing isolated this factor. UNMEASURED on the iGPU until the "
+		     "Windows A/B (docs/VISUAL_FIDELITY_PLAN.md Sky step 4); off is ef361bd6's sky."));
 	Out->SetNumberField(TEXT("mie_scale_height_km"), Row[AtmMieScaleHeightKm]);
 	Out->SetNumberField(TEXT("mie_anisotropy"), Row[AtmMieAnisotropy]);
 	Out->SetNumberField(TEXT("aerial_perspective_view_distance_scale"), Row[AtmAerialPerspectiveScale]);
@@ -2324,8 +2458,53 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	}
 	Out->SetBoolField(TEXT("applied"), true);
 
+	// Sky step 4: the aerial perspective's record (the scale stays 1.0: world_beauty.py
+	// says why; the LUT's depth and resolution are the march tier's cvars, recorded
+	// under clouds.march.cvars by ApplyClouds).
+	{
+		TSharedPtr<FJsonObject> Aerial = MakeShared<FJsonObject>();
+		Aerial->SetNumberField(TEXT("view_distance_scale"), Row[AtmAerialPerspectiveScale]);
+		Aerial->SetStringField(TEXT("basis"),
+			TEXT("SetAerialPespectiveViewDistanceScale 1.0 (fix pass 2026-11-09: a scale multiplies only the opaque "
+			     "surfaces' haze and breaks the Koschmieder single count); the ridges' layering comes from the Mie "
+			     "layer, the multiple scattering and the fog's vertical profile (horizon_haze); the AP LUT's depth, "
+			     "resolution and sample counts are the march tier's cvars (clouds.march.cvars)"));
+		Out->SetObjectField(TEXT("aerial_perspective"), Aerial);
+	}
+
 	// The height fog: the rest of the haze, and volumetric fog for the sun's
-	// shafts through it.
+	// shafts through it. Sky step 4: its vertical profile, start distance and
+	// max opacity (FlightSimWorldPure::FogHeightFalloffFor and the rebase laws:
+	// the comment there is the physics and the engine reading).
+	const double FogScaleHeightKm = Row[AtmFogScaleHeightKm];
+	const bool bFogProfile = FogScaleHeightKm > 0.0;
+	const double FogFalloff = FogHeightFalloffFor(FogScaleHeightKm);
+	const bool bAircraftKnown = Aircraft != nullptr;
+	const double AircraftZM = bAircraftKnown ? Aircraft->GetActorLocation().Z / WorldCmPerMetre : 0.0;
+	TSharedPtr<FJsonObject> Haze = MakeShared<FJsonObject>();
+	Haze->SetBoolField(TEXT("profile_applied"), bFogProfile);
+	Haze->SetNumberField(TEXT("fog_scale_height_km"), FogScaleHeightKm);
+	Haze->SetNumberField(TEXT("fog_height_falloff"), FogFalloff);
+	Haze->SetNumberField(TEXT("fog_height_falloff_scene"), SceneFogHeightFalloff);
+	Haze->SetNumberField(TEXT("fog_start_distance_m"), Row[AtmFogStartDistanceM]);
+	Haze->SetNumberField(TEXT("fog_max_opacity"), Row[AtmFogMaxOpacity]);
+	Haze->SetNumberField(TEXT("observer_clamp_m"), FogObserverClampM);
+	Haze->SetNumberField(TEXT("rebase_step_m"), FogRebaseStepM);
+	Haze->SetBoolField(TEXT("aircraft_known"), bAircraftKnown);
+	Haze->SetNumberField(TEXT("aircraft_z_m"), AircraftZM);
+	Haze->SetStringField(TEXT("basis"),
+		TEXT("sky step 4 (world_beauty.fog_height_falloff / fog_density_rebased / fog_reference_z_m): the engine "
+		     "draws FogDensity x 2^(-falloff/1000 x cm above the fog's height) OVER the sky atmosphere, with a sky "
+		     "pixel's fog capped at the max opacity; the scene's falloff 0.0002 (a 72 km scale height) gave every "
+		     "sky pixel 0.92 of one flat in-scatter colour. The clear and hazy rows give the fog the Mie layer's "
+		     "scale height, so the zenith clears, the horizon saturates to a pale band and ridges layer through a "
+		     "thinning haze; the density at the scene's fog height is kept (the Koschmieder count at the ground "
+		     "is unchanged). The fog's reference height follows the aircraft because the engine clamps the fog's "
+		     "observer to 655.36 m above the fog height (FogRendering.cpp MaxObserverHeightDifference) and shifts "
+		     "the ray by the excess; Advance re-bases it per 100 m of climb or descent. The weather rows keep the "
+		     "scene's uniform fog (their haze is the column under a deck). UNCALIBRATED; UNMEASURED until the "
+		     "Windows round in docs/VISUAL_FIDELITY_PLAN.md Sky step 4"));
+	Haze->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED"));
 	TArray<TSharedPtr<FJsonValue>> FogRows;
 	for (TObjectIterator<UExponentialHeightFogComponent> It; It; ++It)
 	{
@@ -2337,6 +2516,39 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 		TSharedPtr<FJsonObject> FogRow = MakeShared<FJsonObject>();
 		FogRow->SetNumberField(TEXT("fog_density_before"), Fog->FogDensity);
 		Fog->SetFogDensity(static_cast<float>(Fog->FogDensity * FogFactor));
+		// Sky step 4: the vertical profile, re-based at the aircraft's height.
+		{
+			const FVector FogLocation = Fog->GetComponentLocation();
+			const double SceneZM = FogLocation.Z / WorldCmPerMetre;
+			const double ReferenceZM = FogReferenceZM(SceneZM, AircraftZM, bFogProfile && bAircraftKnown);
+			FogRow->SetNumberField(TEXT("fog_height_falloff_before"), Fog->FogHeightFalloff);
+			FogRow->SetNumberField(TEXT("fog_height_z_m_scene"), SceneZM);
+			FogRow->SetNumberField(TEXT("fog_density_at_scene_height"), Fog->FogDensity);
+			if (bFogProfile)
+			{
+				const double Rebased = FogDensityRebased(Fog->FogDensity, FogFalloff, SceneZM, ReferenceZM);
+				Fog->SetFogHeightFalloff(static_cast<float>(FogFalloff));
+				Fog->SetFogDensity(static_cast<float>(Rebased));
+				if (ReferenceZM != SceneZM)
+				{
+					Fog->SetWorldLocation(FVector(FogLocation.X, FogLocation.Y, ReferenceZM * WorldCmPerMetre));
+					Fog->MarkRenderStateDirty();
+				}
+				FBeautyFogProfile Profile;
+				Profile.Fog = Fog;
+				Profile.SceneZM = SceneZM;
+				Profile.Falloff = FogFalloff;
+				FogProfiles.Add(Profile);
+			}
+			FogRow->SetNumberField(TEXT("fog_height_falloff"), Fog->FogHeightFalloff);
+			FogRow->SetNumberField(TEXT("fog_height_z_m"), Fog->GetComponentLocation().Z / WorldCmPerMetre);
+			FogRow->SetNumberField(TEXT("fog_start_distance_m_before"), Fog->StartDistance / WorldCmPerMetre);
+			FogRow->SetNumberField(TEXT("fog_max_opacity_before"), Fog->FogMaxOpacity);
+			Fog->SetStartDistance(static_cast<float>(Row[AtmFogStartDistanceM] * WorldCmPerMetre));
+			Fog->SetFogMaxOpacity(static_cast<float>(Row[AtmFogMaxOpacity]));
+			FogRow->SetNumberField(TEXT("fog_start_distance_m"), Fog->StartDistance / WorldCmPerMetre);
+			FogRow->SetNumberField(TEXT("fog_max_opacity"), Fog->FogMaxOpacity);
+		}
 		Fog->SetVolumetricFog(true);
 		Fog->SetVolumetricFogDistance(static_cast<float>(Row[AtmVFogDistanceM] * WorldCmPerMetre));
 		Fog->SetVolumetricFogScatteringDistribution(static_cast<float>(Row[AtmVFogScatteringDistribution]));
@@ -2359,6 +2571,8 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 		FogRows.Add(MakeShared<FJsonValueObject>(FogRow));
 	}
 	Out->SetArrayField(TEXT("height_fog"), FogRows);
+	Haze->SetNumberField(TEXT("fog_components"), FogRows.Num());
+	Out->SetObjectField(TEXT("horizon_haze"), Haze);
 	// Round 4: only the extinction is scaled. The volumetric fog's in-scatter is
 	// Albedo x Extinction (the albedo already white, an 8-bit colour), so the
 	// wet rows' extinction scale is undone on the lights' volumetric scattering:
@@ -3737,6 +3951,38 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 		Frame->SetNumberField(TEXT("distant_sheet_altitude_m"), Sheet.AltitudeM);
 		Frame->SetBoolField(TEXT("distant_sheet_from_above"), Sheet.bFromAbove);
 		Frame->SetNumberField(TEXT("distant_sheet_fade"), Sheet.Fade);
+	}
+
+	// Sky step 4: the height fog's reference height follows the aircraft (the
+	// engine's 655 m observer clamp: FlightSimWorldPure::FogReferenceZM), re-based
+	// from the fog's CURRENT density (translation-invariant, so the dust haze's
+	// later ratio on it is kept) once the aircraft has moved FogRebaseStepM.
+	{
+		const double AircraftZM = AircraftCm.Z / WorldCmPerMetre;
+		int32 Rebased = 0;
+		for (FBeautyFogProfile& Profile : FogProfiles)
+		{
+			UExponentialHeightFogComponent* Fog = Profile.Fog.Get();
+			if (Fog == nullptr)
+			{
+				continue;
+			}
+			const FVector FogLocation = Fog->GetComponentLocation();
+			const double CurrentZM = FogLocation.Z / WorldCmPerMetre;
+			const double WantZM = FogReferenceZM(Profile.SceneZM, AircraftZM, true);
+			if (FMath::Abs(WantZM - CurrentZM) >= FogRebaseStepM)
+			{
+				Fog->SetFogDensity(static_cast<float>(FogDensityRebased(Fog->FogDensity, Profile.Falloff, CurrentZM, WantZM)));
+				Fog->SetWorldLocation(FVector(FogLocation.X, FogLocation.Y, WantZM * WorldCmPerMetre));
+				Fog->MarkRenderStateDirty();
+				++Rebased;
+			}
+			Frame->SetNumberField(TEXT("fog_reference_z_m"), Fog->GetComponentLocation().Z / WorldCmPerMetre);
+		}
+		if (FogProfiles.Num() > 0)
+		{
+			Frame->SetNumberField(TEXT("fog_rebased"), Rebased);
+		}
 	}
 
 	// The lightning: both schedules, and the sky light's pulse.

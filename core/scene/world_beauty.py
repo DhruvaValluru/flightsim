@@ -77,6 +77,10 @@ ATMOSPHERE_FIELDS: Tuple[str, ...] = (
     "wetness_floor",                # the tiles' wetness at least this under the preset
     "tiles_detail_strength",        # near-field detail normal strength
     "lightning_sky_gain",           # sky light x (1 + gain x flash) at a flash
+    # Sky step 4 (2026-11-15), appended so the indices above hold:
+    "fog_scale_height_km",          # the height fog's 1/e scale height; 0 = the scene's profile
+    "fog_start_distance_m",         # SetStartDistance (the scene's 1500)
+    "fog_max_opacity",              # SetFogMaxOpacity (the scene's 0.92)
 )
 
 #: Visual round 3 (round 2's #07, a tower view of an A320 at 1000 m in 10 mm/h
@@ -118,27 +122,52 @@ WET_VFOG_EXTINCTION_SCALE = 0.48
 #: perspective scale (which multiplied only the opaque surfaces' haze, so the
 #: Koschmieder beta stopped being the one total). The detail normal is a
 #: 4-6 degree micro relief (0.12), not a 23 degree one.
+#: Sky step 4 (the owner's X-Plane-12 brief, 2026-11-15): the height fog's
+#: vertical profile. The scene builds its fog with FogHeightFalloff 0.0002
+#: (FlightSimVisualScene.cpp), a 72 km scale height in the engine's units
+#: (:func:`fog_height_falloff`): uniform to the top of the atmosphere. The engine
+#: draws the fog OVER the sky atmosphere (DeferredShadingRenderer.cpp:
+#: RenderSkyAtmosphere, then RenderFog) and a sky pixel sits at the far plane, so
+#: under a uniform fog EVERY sky pixel from every camera takes the fog at its max
+#: opacity: 0.92 of one flat in-scatter colour (under a -sky= plan the sky light's
+#: average) over 0.08 of the atmosphere. That is the owner's "flat navy frame" and
+#: "no horizon haze". The clear and hazy rows give the fog the Mie layer's own
+#: scale height (``fog_scale_height_km`` = ``mie_scale_height_km``: the Koschmieder
+#: split put one aerosol in two renderers, so both get one vertical profile), so
+#: the zenith ray carries ~density x scale height of fog, the horizon ray
+#: saturates to a pale band, and ridges layer paler and bluer through a thinning
+#: haze. The density at the SCENE's fog height is kept (:func:`fog_density_rebased`):
+#: the Koschmieder count at the ground is unchanged. The weather rows keep the
+#: scene's uniform fog (0: their haze is the column under a deck, which the
+#: storm's rain haze shapes). Start distance and max opacity are the scene's.
+#: UNCALIBRATED; UNMEASURED until the Windows round in docs/VISUAL_FIDELITY_PLAN.md
+#: "Sky step 4".
 ATMOSPHERE: Dict[str, Dict[str, float]] = {
     "clear": dict(mie_scale_height_km=1.2, mie_anisotropy=0.80, mie_share=0.6, mie_cap_per_km=0.25,
                   aerial_perspective_scale=1.0, vfog_distance_m=8000.0, vfog_scattering_distribution=0.75,
                   vfog_extinction_scale=1.0, cloud_bottom_occlusion=0.5, rain_readability_gain=1.0,
-                  wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0),
+                  wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0,
+                  fog_scale_height_km=1.2, fog_start_distance_m=1500.0, fog_max_opacity=0.92),
     "hazy": dict(mie_scale_height_km=1.6, mie_anisotropy=0.76, mie_share=0.7, mie_cap_per_km=0.6,
                  aerial_perspective_scale=1.0, vfog_distance_m=8000.0, vfog_scattering_distribution=0.7,
                  vfog_extinction_scale=1.0, cloud_bottom_occlusion=0.5, rain_readability_gain=1.0,
-                 wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0),
+                 wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0,
+                 fog_scale_height_km=1.6, fog_start_distance_m=1500.0, fog_max_opacity=0.92),
     "overcast": dict(mie_scale_height_km=1.4, mie_anisotropy=0.70, mie_share=0.4, mie_cap_per_km=0.6,
                      aerial_perspective_scale=1.0, vfog_distance_m=6000.0, vfog_scattering_distribution=0.4,
                      vfog_extinction_scale=1.0, cloud_bottom_occlusion=0.75, rain_readability_gain=1.0,
-                     wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0),
+                     wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0,
+                     fog_scale_height_km=0.0, fog_start_distance_m=1500.0, fog_max_opacity=0.92),
     "rain": dict(mie_scale_height_km=1.0, mie_anisotropy=0.65, mie_share=0.3, mie_cap_per_km=0.8,
                  aerial_perspective_scale=1.0, vfog_distance_m=4000.0, vfog_scattering_distribution=0.3,
                  vfog_extinction_scale=WET_VFOG_EXTINCTION_SCALE, cloud_bottom_occlusion=0.85, rain_readability_gain=1.5,
-                 wetness_floor=0.6, tiles_detail_strength=0.12, lightning_sky_gain=0.0),
+                 wetness_floor=0.6, tiles_detail_strength=0.12, lightning_sky_gain=0.0,
+                 fog_scale_height_km=0.0, fog_start_distance_m=1500.0, fog_max_opacity=0.92),
     "storm": dict(mie_scale_height_km=1.8, mie_anisotropy=0.65, mie_share=0.3, mie_cap_per_km=0.8,
                   aerial_perspective_scale=1.0, vfog_distance_m=4000.0, vfog_scattering_distribution=0.3,
                   vfog_extinction_scale=WET_VFOG_EXTINCTION_SCALE, cloud_bottom_occlusion=0.9, rain_readability_gain=1.5,
-                  wetness_floor=0.85, tiles_detail_strength=0.12, lightning_sky_gain=3.0),
+                  wetness_floor=0.85, tiles_detail_strength=0.12, lightning_sky_gain=3.0,
+                  fog_scale_height_km=0.0, fog_start_distance_m=1500.0, fog_max_opacity=0.92),
 }
 
 
@@ -361,6 +390,72 @@ def aerosol_visibility_km(preset: str, visibility_km: float) -> float:
     if visibility_km > 0.0:
         return float(visibility_km)
     return CLEAR_DEFAULT_VISIBILITY_KM if preset == "clear" else 0.0
+
+
+# -- sky step 4: the height fog's vertical profile ------------------------------------
+
+#: The scene's fog as FlightSimVisualScene.cpp builds it (the measure path's,
+#: untouched): FogHeightFalloff, StartDistance (m) and FogMaxOpacity.
+SCENE_FOG_HEIGHT_FALLOFF = 0.0002
+SCENE_FOG_START_DISTANCE_M = 1500.0
+SCENE_FOG_MAX_OPACITY = 0.92
+#: The engine clamps the fog's observer to this far above the fog's height
+#: (FogRendering.cpp MaxObserverHeightDifference, 65536 cm) and shifts the ray
+#: by the excess, so the fog's reference height follows the aircraft.
+FOG_OBSERVER_CLAMP_M = 655.36
+#: Advance re-bases the fog once the aircraft has climbed or descended this far.
+FOG_REBASE_STEP_M = 100.0
+#: FogHeightFalloff x the 1/e scale height in km. The engine draws
+#: FogDensity/1000 per cm x 2^(-FogHeightFalloff/1000 x (z - FogHeight) in cm)
+#: (SceneCore.cpp 403-404, HeightFogCommon.ush CalculateLineIntegralShared), so
+#: the 1/e scale height is 10 / (ln 2 x falloff) metres.
+FOG_FALLOFF_PER_SCALE_HEIGHT_KM = 0.01 / math.log(2.0)
+
+
+def fog_height_falloff(scale_height_km: float) -> float:
+    """The FogHeightFalloff whose 1/e scale height is ``scale_height_km``;
+    0 (or less) keeps the scene's SCENE_FOG_HEIGHT_FALLOFF. The C++ twin is
+    FlightSimWorldPure::FogHeightFalloffFor."""
+    if scale_height_km > 0.0:
+        return FOG_FALLOFF_PER_SCALE_HEIGHT_KM / float(scale_height_km)
+    return SCENE_FOG_HEIGHT_FALLOFF
+
+
+def fog_scale_height_km(falloff: float) -> float:
+    """The 1/e scale height (km) a FogHeightFalloff draws (the inverse law)."""
+    return FOG_FALLOFF_PER_SCALE_HEIGHT_KM / float(falloff)
+
+
+def fog_density_rebased(density: float, falloff: float, from_z_m: float, to_z_m: float) -> float:
+    """The FogDensity at a new reference height ``to_z_m`` that draws the same
+    density everywhere as ``density`` did at ``from_z_m`` under ``falloff``:
+    density x 2^(-falloff x dz / 10) (falloff/1000 per cm x 100 cm per metre).
+    The C++ twin is FlightSimWorldPure::FogDensityRebased."""
+    return float(density) * 2.0 ** (-float(falloff) * (float(to_z_m) - float(from_z_m)) / 10.0)
+
+
+def fog_reference_z_m(scene_z_m: float, aircraft_z_m: float, profile: bool) -> float:
+    """The fog's reference height: the aircraft's when the row states a profile
+    and the aircraft is above the scene's fog height, else the scene's. The C++
+    twin is FlightSimWorldPure::FogReferenceZM."""
+    if profile and aircraft_z_m > scene_z_m:
+        return float(aircraft_z_m)
+    return float(scene_z_m)
+
+
+def fog_zenith_optical_depth(density_at_z: float, falloff: float, camera_above_reference_m: float = 0.0) -> float:
+    """The straight-up line integral of the engine's fog from a camera
+    ``camera_above_reference_m`` above the fog's reference height, in the
+    shader's own base-2 exponent (2^-tau is the fog's transmittance;
+    HeightFogCommon.ush CalculateLineIntegralShared: origin density x
+    (1 - 2^(-f dz)) / (f dz) x length, which for an unbounded vertical ray is
+    density / falloff at the camera). A uniform fog (falloff 0) is unbounded,
+    which is why the scene's sky took the max opacity everywhere. A pure-Python
+    reading of the shader for the tests, not a render."""
+    if falloff <= 0.0:
+        return math.inf
+    at_camera = float(density_at_z) * 2.0 ** (-float(falloff) * float(camera_above_reference_m) / 10.0)
+    return at_camera / float(falloff)
 
 
 #: The analytic height fog's sun lobe is pow(cos, n) / 4 pi beyond the
@@ -979,6 +1074,36 @@ CLOUD_MAX_THICKNESS_M: Dict[str, float] = {"cumulus": 2000.0, "stratocumulus": 0
 #: brighter towards the horizon from altitude); the weather presets keep 1.
 SKY_MULTI_SCATTERING: Dict[str, float] = {"clear": 1.25, "hazy": 1.15, "overcast": 1.0, "rain": 1.0,
                                           "storm": 1.0}
+#: Sky step 4 (2026-11-15): ``-sky-multi-scatter=auto|on|off``. Rounds 1-95 never
+#: set the factor on the constrained GPU class (ef361bd6's sky): round 1's bisect
+#: named a8c964fc as a unit (march, shadow span, thinning, fog-on-all-pixel and
+#: this factor together) and r87 then located the stall in the sky light's cloud
+#: reflection march and capped it; nothing isolated the factor. Read in the UE 5.7
+#: source: MultiScatteringFactor is one multiply in the 32 x 32 multi-scattering
+#: LUT pass (SkyAtmosphere.usf MultiScatteredLuminanceLutUAV) the atmosphere runs
+#: every frame at the same sample count whatever the factor (the render path
+#: already sets r.SkyAtmosphere.MultiScatteringLUT.HighQuality 1 on every GPU); it
+#: is in no per-pixel sky, aerial-perspective or cloud shader and adds no
+#: submission. So ``auto`` applies the row on every GPU class; ``off`` is
+#: ef361bd6's sky (1.0) for the A/B. Whether 1.25 reads right on the iGPU is
+#: UNMEASURED (the Windows A/B in docs/VISUAL_FIDELITY_PLAN.md "Sky step 4").
+SKY_MULTI_SCATTER_SWITCH = "-sky-multi-scatter"
+SKY_MULTI_SCATTER_SWITCH_WORDS: Tuple[str, ...] = ("auto", "on", "off")
+
+
+def sky_multi_scatter_applies(word: Optional[str], constrained: bool) -> Optional[bool]:
+    """Whether the row's MultiScatteringFactor is set: ``auto`` keeps ef361bd6's
+    class gate (True on a discrete GPU, False when ``constrained``), ``on`` is True
+    on every class, ``off`` False, None for a word the switch does not know (the
+    host refuses it by name). The C++ twin is FlightSimWorldPure::SkyMultiScatterFor
+    (1 / 0 / -1)."""
+    if word is None or word == "auto":
+        return not constrained
+    if word == "on":
+        return True
+    if word == "off":
+        return False
+    return None
 
 
 #: Sky step 5: where the march word in force came from (C++ CloudMarchWordSource order).

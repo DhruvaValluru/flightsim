@@ -86,6 +86,7 @@ struct FFlightSimSkyPlan;
 class IConsoleVariable;
 class UMaterialInstanceDynamic;
 class UMaterialParameterCollection;
+class UExponentialHeightFogComponent;
 class UProceduralMeshComponent;
 class USkyLightComponent;
 class UVolumetricCloudComponent;
@@ -161,7 +162,9 @@ private:
 	};
 
 	bool LoadOverrides(const FString& Path, FString& Error);
-	void ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm);
+	// Sky step 4: Aircraft (nullptr when the scene has none) places the height
+	// fog's reference height (FlightSimWorldPure::FogReferenceZM).
+	void ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm, AActor* Aircraft);
 	void ApplyClouds(UWorld* World, FFlightSimVisualScene& Scene, FFlightSimWeather& Weather,
 	                 const FString& Mode, double CardCover, double CardBaseM, double CardTopM,
 	                 int32 Seed);
@@ -225,6 +228,22 @@ private:
 	// in force came from (FlightSimWorldPure::MarchWordSourceName), recorded.
 	FString CloudMarchSwitchGiven = TEXT("auto");
 	FString CloudMarchWordSource = TEXT("default auto");
+	// Sky step 4: -sky-multi-scatter=auto|on|off (Build reads it; auto = the row's
+	// MultiScatteringFactor on a discrete GPU, the class gate kept; on = every class; off = ef361bd6's sky). ApplyAtmosphere
+	// resolves it through FlightSimWorldPure::SkyMultiScatterFor; another word
+	// refuses by name.
+	FString SkyMultiScatterSwitch = TEXT("auto");
+	// Sky step 4: the height fogs ApplyAtmosphere gave a vertical profile (the clear
+	// and hazy rows' fog_scale_height_km), with the scene's fog height and the
+	// falloff in force; Advance re-bases each at the aircraft's height
+	// (FlightSimWorldPure::FogReferenceZM, FogDensityRebased).
+	struct FBeautyFogProfile
+	{
+		TWeakObjectPtr<UExponentialHeightFogComponent> Fog;
+		double SceneZM = 0.0;
+		double Falloff = 0.0;
+	};
+	TArray<FBeautyFogProfile> FogProfiles;
 	// Sky step 2: the -sky= plan Build was given (nullptr without one); ApplyClouds
 	// reads its cloud fields (FFlightSimSkyPlan::CloudType and the rest).
 	const FFlightSimSkyPlan* SkyPlanRef = nullptr;

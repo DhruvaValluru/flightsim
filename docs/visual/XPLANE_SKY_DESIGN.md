@@ -678,6 +678,56 @@ core/scene/hero_lighting.py.
   multi-scatter renders on the iGPU. Windows: round 97 below (the probe), then
   `.\scripts\visual_fix_round.ps1 -Round 103 -Scenes 1,3,11 -Switches "-cloud-type=cumulus -sky-multi-scatter=off" -CompareWith 98`.
 
+**Built (sky step 4, 2026-11-15): where the code proved this section wrong, or the
+step narrowed it.** Commit `Sky step 4: fog vertical profile at the aircraft, multi-scatter on every GPU, sun bloom per preset`
+(the realism-first builder; docs/VISUAL_FIDELITY_PLAN.md §8 "Sky step 4" has the record
+and the Windows rounds). Nothing was rendered.
+- **D9's `fog_height_falloff_scale` (x2 the scene's 0.0002) could not make a band.** Read
+  in the UE 5.7 source: the engine draws FogDensity/1000 per cm x 2^(-FogHeightFalloff/1000
+  x cm above the fog's height) (SceneCore.cpp 403-404, HeightFogCommon.ush), so the
+  scene's 0.0002 is a 72 km 1/e scale height (uniform to the top of the atmosphere) and
+  the design's 0.0004 a 36 km one. A boundary-layer haze needs ~0.012, 60x. The field is
+  `fog_scale_height_km` instead (clear 1.2, hazy 1.6 = the rows' Mie scale height, one
+  aerosol with one vertical profile in both renderers; 0 = the scene's fog), through
+  `FlightSimWorldPure::FogHeightFalloffFor` (0.01 / (ln 2 x km)).
+- **Why the band was missing at all (not in the design):** the fog is drawn OVER the sky
+  atmosphere (DeferredShadingRenderer.cpp `RenderSkyAtmosphere` then `RenderFog`) and a
+  sky pixel's fog is the ray's whole line integral capped at `FogMaxOpacity`; under the
+  uniform fog every sky pixel from every camera took 0.92 of one flat in-scatter colour
+  (the sky light's average under a plan). The "flat navy frame", "no horizon haze", #13's
+  dark sea and #15's veil have this one source-level account. UNMEASURED until round 110.
+- **The engine's observer clamp (not in the design) forces the fog to follow the
+  aircraft.** FogRendering.cpp clamps the fog's observer to `FogHeight + 65536 cm`
+  (`MaxObserverHeightDifference`) and HeightFogCommon.ush shifts the whole ray down by the
+  excess; under a 1.2 km scale height a 10 km camera's ground would sit 9 km below the
+  reference, 2^11 denser, and every surface would saturate. ApplyAtmosphere moves the fog
+  component to the aircraft's height and re-bases its density so the world-space profile
+  (and the Koschmieder count at the scene's fog height) is identical
+  (`FogDensityRebased`, `FogReferenceZM`); `Advance` re-bases from the CURRENT density
+  (translation-invariant, so the dust haze's ratio survives) per 100 m of climb or
+  descent. The dust haze's inversion and the storm's rain haze read the fog's height live.
+- **D5 overturned: `-sky-multi-scatter=auto` is ON for every GPU class.** The factor is
+  one multiply in the 32x32 multi-scattering LUT compute pass (SkyAtmosphere.usf 1309/1311)
+  the atmosphere runs every frame at the same sample count whatever the factor, in no
+  per-pixel shader: it adds no submission, so "affordable" is answered by the source, not
+  by a probe. The switch stays (`off` = ef361bd6's 1.0 for the A/B, round 111);
+  test_world_beauty.py 930's multi-scatter literal moved with the reason in its docstring
+  (the march, shadow span, thinning and fog-on-all-pixel pins stand). §0.9's three facts
+  were right; the design's "auto = today's gate" was the cautious reading of them.
+- **`fog_start_distance_m` 1500 and `fog_max_opacity` 0.92 are fields but keep the
+  scene's values on every row** (the design's clear 800 / 0.96 were untested moves on
+  top of a profile change; one change per round). `ap_rayleigh_fade_km` is not built (an
+  art-direction UPROPERTY without a setter; the clouds' aerial perspective comes through
+  the LUT) and neither is `sky_pale_gain` (`SkyLuminanceFactor` is non-physical; the
+  profile is the paling). Both stay follow-ups.
+- The sun-bloom rows are as designed (D10), read from `look_applied.world_beauty.preset`,
+  recorded with `light_shaft_bloom_max_brightness`, `_preset`, `_preset_source`, `_basis`.
+- The record is `atmosphere.horizon_haze {profile_applied, fog_scale_height_km,
+  fog_height_falloff, fog_height_falloff_scene, fog_start_distance_m, fog_max_opacity,
+  observer_clamp_m, rebase_step_m, aircraft_known, aircraft_z_m, fog_components, basis,
+  calibration}` plus per-fog before/after rows and `frames[].fog_reference_z_m`, not the
+  design's four-field block.
+
 ## 7. Step 5: the plan's cloud fields and the ERA5 cover
 
 Commit: `Sky step 5: sky plan cloud fields, altocumulus row, ERA5 cloud cover`.

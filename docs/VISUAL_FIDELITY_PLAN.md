@@ -1297,3 +1297,126 @@ and the reference photo. Frames: `docs/visual/round_110..113/03_*.jpg` and
 `docs/visual/round_115..118/13_*.jpg`. On scene 13 the stratocumulus and overcast tiles show a
 deck above the 747 (the plan layer keeps bottom = AGL + 1 km; only an unstated cumulus layer is
 lowered, c641a8c4): the rule, not a defect.
+### Sky step 4 (2026-11-15): atmosphere and horizon haze, the sky's multiple scattering on every GPU, the sun bloom per preset
+
+Step 4 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
+docs/visual/XPLANE_SKY_DESIGN.md §6, with the "Built (sky step 4" note there for where the
+code proved it wrong). Nothing here was rendered. BEAUTY ONLY: `FFlightSimWorldBeauty::
+ApplyAtmosphere` / `Advance` (FlightSimClouds.cpp) and `FFlightSimHeroLighting::Apply`; the
+measure path's scene fog, sky and sun (FlightSimVisualScene.cpp, FlightSimSky.cpp) are
+untouched and pinned. EV100 (core/sky/plan.py) and beauty_look's meters are untouched.
+
+**What the code found (read in the UE 5.7 source, not rendered).** The scene builds its
+height fog with `FogHeightFalloff` 0.0002. The engine draws the fog as FogDensity/1000 per cm
+x 2^(-FogHeightFalloff/1000 x cm above the fog's height) (SceneCore.cpp 403-404,
+HeightFogCommon.ush `CalculateLineIntegralShared`), so 0.0002 is a 72 km 1/e scale height:
+the fog is uniform to the top of the atmosphere. It draws the fog OVER the sky atmosphere
+(DeferredShadingRenderer.cpp: `RenderSkyAtmosphere`, then `RenderFog`), and a sky pixel sits
+at the far plane, so its fog is the ray's whole line integral capped at `FogMaxOpacity`.
+Under a uniform fog that is EVERY sky pixel, from every camera, in every direction: 0.92 of
+one flat in-scatter colour (under a -sky= plan the sky light's average, FlightSimSky.cpp
+265-266) over 0.08 of the atmosphere, plus the sun's pow(cos, n) lobe. That is a coherent
+source-level account of the owner's "flat navy frame", "no horizon haze", the #13 dark sea
+and the #15 veil (round 95 #13, round 83 #03): the atmosphere's own zenith-to-horizon
+gradient, its Mie haze and its multiple scattering never reached the frame through the fog.
+It is a reading, not a measurement: round 110 below is the test.
+
+**What it draws (UNCALIBRATED, UNMEASURED).**
+
+1. *The height fog's vertical profile* (three `ATMOSPHERE` fields appended, 13 -> 16, the
+   existing indices hold): `fog_scale_height_km` (clear 1.2, hazy 1.6 = each row's
+   `mie_scale_height_km`: the Koschmieder split put one aerosol in two renderers, so both
+   now share one vertical profile; overcast / rain / storm 0 = the scene's uniform fog,
+   their haze being the column under a deck that `RainHazeFog` shapes),
+   `fog_start_distance_m` 1500 and `fog_max_opacity` 0.92 (the scene's own values on every
+   row: recorded knobs for `-world-beauty-overrides=`, no move). `FlightSimWorldPure::
+   FogHeightFalloffFor` turns the scale height into the engine's falloff
+   (0.01 / (ln 2 x km): 1.2 km -> 0.01202), the density at the SCENE's fog height is kept
+   (`FogDensityRebased`: the Koschmieder count at the ground, `MieSplit`, is unchanged; a
+   redistribution in height, not more extinction), and the fog's reference height follows the
+   aircraft (`FogReferenceZM`: the component is moved up to it) because the engine clamps the
+   fog's observer to `FogHeight + 65536 cm` (FogRendering.cpp `MaxObserverHeightDifference`)
+   and shifts the whole ray down by the excess, under which a short scale height would put a
+   cruise camera's ground 9 km below the reference, 2^11 denser, and saturate every surface.
+   `Advance` re-bases the fog from its CURRENT density (so the dust haze's later ratio is
+   kept) once the aircraft has climbed or descended 100 m. The dust haze's inversion and the
+   storm's rain haze read the fog's height live and compose. Expected by the shader's closed
+   form (a reading): a 600 m camera under the clear row keeps ~13 % fog at the zenith instead
+   of 92 %, a cruise camera < 0.1 %, and the horizon ray still saturates to the band.
+2. *Multiple scattering on every GPU*: `-sky-multi-scatter=auto|on|off` (auto by default =
+   the row on every class: clear 1.25, hazy 1.15, weather 1.0; off = ef361bd6's 1.0). Why the
+   ef361bd6 class gate is lifted: `MultiScatteringFactor` is one multiply in the 32x32
+   multi-scattering LUT compute pass (SkyAtmosphere.usf `MultiScatteredLuminanceLutUAV`) the
+   atmosphere runs every frame at the same sample count whatever the factor (the render path
+   already sets `r.SkyAtmosphere.MultiScatteringLUT.HighQuality` 1 on every GPU); it is in no
+   per-pixel sky, aerial-perspective or cloud shader and adds no submission, so it cannot be
+   what hung the iGPU (round 1's bisect named a8c964fc as a unit; r87 located the stall in the
+   sky light's cloud reflection march and capped it; nothing isolated the factor). Whether
+   1.25 reads right on the iGPU is UNMEASURED: round 111 is the A/B. The r87 pin in
+   tests/test_world_beauty.py moved for this one setting, with the reason in its docstring;
+   the march, shadow span, thinning and fog-on-all-pixel pins are untouched.
+3. *The sun bloom per preset* (FlightSimHeroLighting.cpp, the lane that owns the
+   light-shaft bloom; `hero_lighting.SHAFT_BLOOM` is the twin): {scale, threshold, max}
+   clear {0.25, 4, 60}, hazy {0.3, 4, 60}, overcast / rain / storm {0 (off), 6, 50}; one row
+   0.12 / 6 / 50 served every preset before. Read from `look_applied.world_beauty.preset`
+   (the clear row without it); off at an overcast source angle whatever the row. The lens
+   bloom (beauty_look) is unchanged. Label captures have Bloom and LightShafts off.
+4. *Aerial perspective*: `aerial_perspective_scale` stays 1.0 (the fix-pass note in
+   world_beauty.py: a scale multiplies only the opaque surfaces' haze and breaks the single
+   count); the ridges' layering is expected from the Mie layer, the multiple scattering and
+   the fog's profile; the AP LUT's depth and resolution are step 3's cvars. Not built: the
+   cloud component's `AerialPespectiveRayleighScatteringFadeDistance` (an art-direction
+   UPROPERTY without a setter) and a `SkyLuminanceFactor` paling gain (non-physical).
+
+**Record** (`look_applied.world_beauty.atmosphere`): `multi_scattering_factor_before`,
+`multi_scattering_factor`, `multi_scattering_switch`, `multi_scattering_applied`,
+`multi_scattering_constrained_gpu`, `multi_scattering_gate_basis`; `aerial_perspective
+{view_distance_scale, basis}`; `horizon_haze {profile_applied, fog_scale_height_km,
+fog_height_falloff, fog_height_falloff_scene, fog_start_distance_m, fog_max_opacity,
+observer_clamp_m, rebase_step_m, aircraft_known, aircraft_z_m, fog_components, basis,
+calibration}`; per fog row in `height_fog[]`: `fog_height_falloff_before`,
+`fog_height_z_m_scene`, `fog_density_at_scene_height`, `fog_height_falloff`, `fog_height_z_m`,
+`fog_start_distance_m_before`, `fog_max_opacity_before`, `fog_start_distance_m`,
+`fog_max_opacity`, `fog_density_after`. Per frame (`frames[]`): `fog_reference_z_m`,
+`fog_rebased`. `hero_lighting.sun`: `light_shaft_bloom`, `_scale`, `_threshold`,
+`_max_brightness`, `_preset`, `_preset_source`, `_basis`.
+
+**Unchanged.** Measure renders (no new symbol in FlightSimVisualScene.cpp, FlightSimSky.cpp,
+FlightSimWeather.cpp; pinned); labels (Cloud, Fog, Bloom, LightShafts off on every label
+capture); dataset formats; flight dynamics; exposure (plan.py, beauty_look's meters); the
+Koschmieder count at the ground; the Mie rows, `vfog_*`, the cloud rows, the march and its
+cvars; the materials (no rebuild); the constrained march row.
+
+**UNCALIBRATED.** The scale heights (the Mie rows' by construction), the bloom rows, the
+multi-scattering rows: look values, never from a frame.
+
+**UNMEASURED.** Everything above: that a Windows build compiles it; that the sky's zenith
+clears and the horizon pales (the reading of the shader is a reading); that the moved fog
+component composes with the dust haze and the sun shafts' fog grid as read; that 1.25 renders
+on the iGPU; whether the result approaches the reference photograph's ~70/150/220 zenith
+paling to ~170/205/235 near the horizon (scene 3's camera is 600 m, the photo's 1-3 km;
+scene 13's 10 km zenith is physically darker). The exact Windows measurements, with
+`FLIGHTSIM_SKY=physical` set in the shell (one switch set per round, FIX_ROUND_PROTOCOL;
+round numbers are placeholders after the wave's 97-108, the owner assigns the real ones):
+
+    .\scripts\visual_fix_round.ps1 -Round 110 -Scenes 3 -CompareWith 95
+    .\scripts\visual_fix_round.ps1 -Round 111 -Scenes 3 -Switches "-sky-multi-scatter=off" -CompareWith 110
+    .\scripts\visual_fix_round.ps1 -Round 112 -Scenes 13,15 -CompareWith 95
+    .\scripts\visual_fix_round.ps1 -Round 113 -Scenes 1,11 -CompareWith 95
+
+Round 110 is the step at its defaults on the low camera: pass = the log has no `887a0006`
+and the frame completes; read `atmosphere.horizon_haze.profile_applied` true,
+`fog_height_falloff` 0.01202 and `fog_height_z_m` at the aircraft's altitude in render.json,
+and compare the sky's top-to-bottom gradient against round 95's flat frame (visual_compare's
+mean luma per band). Round 111 is the multi-scatter A/B (expect `multi_scattering_applied`
+false and `multi_scattering_factor` 1); the fog profile's own A/B is the overrides file
+`{"atmosphere": {"clear": {"fog_scale_height_km": 0}}}` passed as
+`-Switches "-world-beauty-overrides=<path>"` against 110. Round 112 is the cruise camera
+(#13's dark sea, #15's veil): expect the sea and the ground to read through, and
+`frames[].fog_reference_z_m` near 10 km. Round 113 is the ridge layering (Matterhorn, golden
+hour). Tests: `tests/test_sky_step4_atmosphere.py` (the pure laws compiled with g++ and
+compared, the host's set / move / rebase / record, the switch, the hero rows, the untouched
+measure path, the API check and these docs); `tests/test_world_beauty.py` (the r87 pin's
+docstring says why one setting moved). API: `scripts/check_bridge_api.sh` "Sky step 4" pins
+the fog setters, the /1000 conversions, the 65536 cm clamp, the sky-then-fog order, the LUT
+multiply and the moved component's re-registration.
