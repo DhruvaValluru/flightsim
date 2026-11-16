@@ -1,0 +1,15 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "01_golden_hour_a_4_flying_east": {
+   "post": "01_golden_hour_a_4_flying_east_post.jpg",
+   "source": "01_golden_hour_a_4_flying_east_frame_beauty_post.png"
+  },
+  "02_same_super_bright_preset": {
+   "post": "02_same_super_bright_preset_post.jpg",
+   "source": "02_same_super_bright_preset_frame_beauty_post.png"
+  }
+ }
+}
