@@ -1,0 +1,91 @@
+{
+    "round":  1408,
+    "commit":  "197e944b",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   3
+               ],
+    "switches":  "-scene-mirror=off",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  158.6
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  70.8,
+                         "spec_sha256":  "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  3,
+                         "outcome":  "done",
+                         "seconds":  86.0,
+                         "spec_sha256":  "b4869e1ee290161061731531d167eaca7708f9565dee91ad052197cc520167b2",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_1406",
+                          "compare_with_found":  true,
+                          "scenes":  {
+                                         "1":  {
+                                                   "frame":  "01_golden_hour_a_4_flying_east.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.10678,
+                                                                  "std_luma":  0.12563,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  3E-05
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "01_golden_hour_a_4_flying_east.jpg",
+                                                                       "flicker":  6E-05,
+                                                                       "ssim":  0.9997,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "3":  {
+                                                   "frame":  "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.1143,
+                                                                  "std_luma":  0.13735,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.00044
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+                                                                       "flicker":  0.0,
+                                                                       "ssim":  0.9999,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               }
+                                     }
+                      }
+}
