@@ -1,0 +1,220 @@
+{
+    "round":  147,
+    "commit":  "536f7d33",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   2,
+                   6,
+                   7,
+                   10,
+                   13,
+                   15
+               ],
+    "switches":  "",
+    "prep":  [
+                 "build",
+                 "materials"
+             ],
+    "seconds":  {
+                    "build":  34.8,
+                    "materials":  12,
+                    "scenes":  1102.8
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  141.2,
+                         "spec_sha256":  "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  2,
+                         "outcome":  "done",
+                         "seconds":  116.0,
+                         "spec_sha256":  "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  6,
+                         "outcome":  "done",
+                         "seconds":  196.1,
+                         "spec_sha256":  "c7aa2900755f69f27f63b19009a9c5f434c373cff10e038710fdd79a3f8f7251",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  7,
+                         "outcome":  "done",
+                         "seconds":  226.5,
+                         "spec_sha256":  "cf3697a5b8c94e5a54c30f373f30fae193d9e68ed10878f721f27d32361af7a4",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  10,
+                         "outcome":  "done",
+                         "seconds":  141.8,
+                         "spec_sha256":  "f16db732eb9f2d0529845a94365064e6846b1c81b0351ab82d5c2bdbc28b442e",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  13,
+                         "outcome":  "done",
+                         "seconds":  90.9,
+                         "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  15,
+                         "outcome":  "done",
+                         "seconds":  186.4,
+                         "spec_sha256":  "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_146",
+                          "compare_with_found":  true,
+                          "scenes":  {
+                                         "1":  {
+                                                   "frame":  "01_golden_hour_a_4_flying_east.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.17213,
+                                                                  "std_luma":  0.1606,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  8E-05
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "01_golden_hour_a_4_flying_east.jpg",
+                                                                       "flicker":  0.00574,
+                                                                       "ssim":  0.9704,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "2":  {
+                                                   "frame":  "02_same_super_bright_preset.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.20451,
+                                                                  "std_luma":  0.17142,
+                                                                  "clipped":  2E-05,
+                                                                  "crushed":  0.0
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "02_same_super_bright_preset.jpg",
+                                                                       "flicker":  8E-05,
+                                                                       "ssim":  0.9992,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "6":  {
+                                                   "frame":  "06_a320_over_sfo_heading_south_moderate_rain.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.12955,
+                                                                  "std_luma":  0.0719,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.0
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "06_a320_over_sfo_heading_south_moderate_rain.jpg",
+                                                                       "flicker":  0.06154,
+                                                                       "ssim":  0.66,
+                                                                       "flags":  [
+                                                                                     "flicker"
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "7":  {
+                                                   "frame":  "07_tower_view_heavy_rain.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.22009,
+                                                                  "std_luma":  0.01508,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.0
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "07_tower_view_heavy_rain.jpg",
+                                                                       "flicker":  0.09887,
+                                                                       "ssim":  0.8389,
+                                                                       "flags":  [
+                                                                                     "flicker"
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "10":  {
+                                                    "frame":  "10_c172_near_a_tornado.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.05422,
+                                                                   "std_luma":  0.06202,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  0.00543
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  null
+                                                },
+                                         "13":  {
+                                                    "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.101,
+                                                                   "std_luma":  0.10452,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  2E-05
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                                        "flicker":  0.01011,
+                                                                        "ssim":  0.9627,
+                                                                        "flags":  [
+
+                                                                                  ]
+                                                                    }
+                                                },
+                                         "15":  {
+                                                    "frame":  "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.05829,
+                                                                   "std_luma":  0.0506,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  0.0
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  null
+                                                }
+                                     }
+                      }
+}
