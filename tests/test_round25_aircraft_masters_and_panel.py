@@ -96,9 +96,9 @@ def test_render_json_names_the_compile_result_the_fallback_and_the_generation():
 
 
 def test_the_masters_rebuild_in_place_at_generation_7():
-    assert re.search(r'^LOOK_GENERATION = "16"$', MASTERS, re.M)
+    assert re.search(r'^LOOK_GENERATION = "17"$', MASTERS, re.M)
     new = _def("_new", "_finish")
-    assert "delete_all_material_expressions(material)" in new
+    assert "_clear_material_graph(material)" in new        # round 1456: the leak-proof clear
     assert "delete_asset" not in new                       # never deleted: the look instances reference it
     assert "MATERIAL-UPDATED" in new and "MATERIAL-EXISTS" in new
 

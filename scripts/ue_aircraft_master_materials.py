@@ -141,7 +141,10 @@ REPO = os.path.dirname(_HERE)
 #: scene_sky_dir / scene_sky_env.hlsl). <Prefix>EnvSceneScale 0 in the master:
 #: the strip exactly as generation 13 until the host sets it (-scene-mirror=on).
 #: Emissive only. Every other graph is unchanged.
-LOOK_GENERATION = "16"
+#: 17 (2026-11-16): no graph change; an in-place rebuild now clears through
+#: _clear_material_graph (UE 5.7's delete_all_material_expressions leaks about
+#: every other node, round 1456), so the masters are rebuilt once from clean graphs.
+LOOK_GENERATION = "17"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.
@@ -173,6 +176,40 @@ def panel_groove(coord_cm, pitch_cm, width_cm, footprint_cm=0.0):
 def _u():
     import unreal
     return unreal
+
+
+def _material_expressions(material):
+    """The live expressions of ``material``: every non-garbage UMaterialExpression
+    whose outer is the material (a copy of ue_create_materials.material_expressions:
+    that script builds every material on import, so it cannot be imported here)."""
+    unreal = _u()
+    found = []
+    for node in unreal.ObjectIterator(unreal.MaterialExpression):
+        try:
+            if node.get_outer() == material and unreal.SystemLibrary.is_valid(node):
+                found.append(node)
+        except Exception:   # a node being collected
+            continue
+    return found
+
+
+def _clear_material_graph(material):
+    """Clear ``material``'s graph for an in-place rebuild, and prove it empty (a
+    copy of ue_create_materials.clear_material_graph). UE 5.7's
+    DeleteAllMaterialExpressions range-fors over the array DeleteMaterialExpression
+    removes from, so about every other node survives (round 1456): the library
+    call, then every node still there deleted one by one, then the count must be 0."""
+    lib = _u().MaterialEditingLibrary
+    lib.delete_all_material_expressions(material)
+    for _ in range(64):     # each library pass halves what is left
+        if lib.get_num_material_expressions(material) == 0:
+            break
+        lib.delete_all_material_expressions(material)
+    for node in _material_expressions(material):
+        lib.delete_material_expression(material, node)
+    left = lib.get_num_material_expressions(material)
+    if left:
+        raise RuntimeError(f"{material.get_path_name()}: {left} expressions survived the graph clear")
 
 
 def _enum(owner, *names):
@@ -225,7 +262,7 @@ def _new(name):
         if material is None or not isinstance(material, unreal.Material):
             raise RuntimeError(f"{full} exists but is not a Material: move it aside by hand "
                                f"(no editor open) and run again")
-        unreal.MaterialEditingLibrary.delete_all_material_expressions(material)
+        _clear_material_graph(material)
         # The graph is gone; the flags the builders set are reset to the
         # factory's, so a builder that does not set one gets the default.
         material.set_editor_property("use_material_attributes", False)

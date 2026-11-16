@@ -161,7 +161,7 @@ def test_the_shader_weights_each_strip_and_rebuilds_the_cpp_normals():
 
 def test_the_master_reads_the_view_line_and_uv1_uv2_and_defaults_to_generation_13():
     masters = _read(MASTERS)
-    assert re.search(r'^LOOK_GENERATION = "16"$', masters, re.M)
+    assert re.search(r'^LOOK_GENERATION = "17"$', masters, re.M)
     body = masters[masters.index("def create_aircraft_contrail"):]
     body = body[:body.index("\ndef ", 10)]
     # LOOK_GENERATION 15 shares the view line and UV1/UV2 nodes with the facing pair.

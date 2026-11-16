@@ -49,7 +49,7 @@ def _contrail_body():
 # -- the material and its stamp ---------------------------------------------------
 
 def test_generation_13_rebuilds_the_contrail_master():
-    assert re.search(r'^LOOK_GENERATION = "16"$', _read(MASTERS), re.M)
+    assert re.search(r'^LOOK_GENERATION = "17"$', _read(MASTERS), re.M)
     # LOOK_GENERATION 14 appends the view weight (tests/test_contrail_view_weight.py)
     assert look.FX_PARAMETERS["M_AircraftContrail"] == ("Opacity", "Formation", "FormationRamp", "Puff", "ViewWeight",
                                                         "Facing")
