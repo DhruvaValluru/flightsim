@@ -3783,6 +3783,38 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                            *CaptureDrainMode));
 	}
 	const bool bCaptureDrain = SwitchOn(CaptureDrainMode);
+	// #9 TDR, part 2 (2026-11-16): drained, every #9 capture (747, storm cell)
+	// still took 3.3-3.75 s of GPU at 1280 x 720 and run 1431 hung 4.0 s into
+	// the subject meter's SECOND capture, after its first drained in 3.74 s: one
+	// capture at the TDR edge. The two dearest are the subject meter's HIDDEN
+	// captures (3.75 / 3.73 s, each alike, so content, not a shader compile: with
+	// the 747 hidden, the pixels it covered march the storm cloud and fog to the
+	// far plane instead of stopping at its depth). -meter-res=auto|full|half|
+	// quarter (auto: half on the constrained GPU, full elsewhere) renders the
+	// storm/beauty meter's rounds and the subject meter's hidden/shown/round
+	// captures into the beauty target at 1/2 or 1/4 the size per axis (1/4 or
+	// 1/16 the pixels the cloud and fog march); at reduced size the hidden pair
+	// is one capture from a camera cut (the cut lets the history go of the
+	// aircraft at once). The target is put back to full size BEFORE the meters'
+	// settle captures and the subject meter's full re-warm, which converge the
+	// history at full size and the metered exposure (the settle's first capture
+	// is a camera cut): frame 0 and the sub-frames are full size and quality,
+	// labels are separate captures. Percentiles over the reduced frame stay
+	// inside the meters' tolerance (tests/test_meter_res.py, the twin
+	// beauty_look.meter_percentile). Measure never reduces.
+	FString MeterResMode = TEXT("auto");
+	FParse::Value(*RenderSwitches, TEXT("meter-res="), MeterResMode);
+	if (MeterResMode != TEXT("auto") && MeterResMode != TEXT("full") && MeterResMode != TEXT("half")
+	    && MeterResMode != TEXT("quarter"))
+	{
+		return Fail(FString::Printf(TEXT("render.sky_capture_switch: -meter-res=%s takes auto, full, half or quarter"),
+		                            *MeterResMode));
+	}
+	const int32 MeterResDivisor = !bBeautyRasterRun ? 1
+		: MeterResMode == TEXT("half") ? 2
+		: MeterResMode == TEXT("quarter") ? 4
+		: (MeterResMode == TEXT("auto") && bConstrainedGpu) ? 2
+		: 1;
 	// r87 (2026-11-14): the Windows iGPU's device was removed (DXGI 887a0006, hung)
 	// INSIDE USkyLightComponent::UpdateSkyCaptureContents on a cockpit storm at
 	// beauty; the same prompt's baked run took 15.9 s there in one submission (the
@@ -3830,14 +3862,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		UE_LOG(LogFlightSimRender, Display,
 		       TEXT("constrained gpu: %s (integrated %s, SM6 %s); sky-capture-restore %s (%s), gpu-drain %s (%s), ")
-		       TEXT("constrained-supersample %s (stated %d, rendered %d, budget %lld px), capture-drain %s (%s)"),
+		       TEXT("constrained-supersample %s (stated %d, rendered %d, budget %lld px), capture-drain %s (%s), ")
+		       TEXT("meter-res %s (1/%d)"),
 		       bConstrainedGpu ? TEXT("yes") : TEXT("no"), GRHIDeviceIsIntegrated ? TEXT("yes") : TEXT("no"),
 		       GMaxRHIFeatureLevel >= ERHIFeatureLevel::SM6 ? TEXT("yes") : TEXT("no"),
 		       *SkyCaptureRestoreMode, bSkyCaptureRestore ? TEXT("on") : TEXT("off"),
 		       *GpuDrainMode, bGpuDrain ? TEXT("on") : TEXT("off"), *ConstrainedSupersampleMode,
 		       StatedFactor, bSupersampleCapped ? ConstrainedFactor : StatedFactor,
 		       static_cast<long long>(RenderConstrainedInternalPixelsMax), *CaptureDrainMode,
-		       bCaptureDrain ? TEXT("on") : TEXT("off"));
+		       bCaptureDrain ? TEXT("on") : TEXT("off"), *MeterResMode, MeterResDivisor);
 	}
 	TSharedPtr<FJsonObject> ConstrainedRecord;
 	if (bBeautyRasterRun && VisualScene.LookApplied.IsValid())
@@ -3856,6 +3889,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		ConstrainedRecord->SetBoolField(TEXT("gpu_drain"), bGpuDrain);
 		ConstrainedRecord->SetStringField(TEXT("capture_drain_switch"), CaptureDrainMode);
 		ConstrainedRecord->SetBoolField(TEXT("capture_drain"), bCaptureDrain);
+		ConstrainedRecord->SetStringField(TEXT("meter_res_switch"), MeterResMode);
+		ConstrainedRecord->SetNumberField(TEXT("meter_res_divisor"), MeterResDivisor);
 		TSharedPtr<FJsonObject> Ss = MakeShared<FJsonObject>();
 		Ss->SetStringField(TEXT("switch"), ConstrainedSupersampleMode);
 		Ss->SetNumberField(TEXT("stated"), StatedFactor);
@@ -5799,6 +5834,32 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			DrainGpuNow(FString(Stage), bQuiet);
 		}
 	};
+	// -meter-res (#9 TDR): the beauty target at 1/MeterResDivisor per axis for a
+	// meter's metering captures, then back at full size before any settle,
+	// re-warm or frame capture. The field of view is the capture's, so the
+	// reduced frame is the full frame resampled; nothing else is touched.
+	const int32 BeautyTargetW = RenderTarget->SizeX;
+	const int32 BeautyTargetH = RenderTarget->SizeY;
+	int32 MeterResizes = 0;
+	auto SetMeterRes = [&](bool bReduced, const TCHAR* Stage)
+	{
+		if (MeterResDivisor <= 1)
+		{
+			return;
+		}
+		const int32 MeterW = bReduced ? FMath::Max(16, BeautyTargetW / MeterResDivisor) : BeautyTargetW;
+		const int32 MeterH = bReduced ? FMath::Max(16, BeautyTargetH / MeterResDivisor) : BeautyTargetH;
+		if (RenderTarget->SizeX == MeterW && RenderTarget->SizeY == MeterH)
+		{
+			return;
+		}
+		FlushRenderingCommands();
+		RenderTarget->ResizeTarget(MeterW, MeterH);
+		FlushRenderingCommands();
+		++MeterResizes;
+		UE_LOG(LogFlightSimRender, Display, TEXT("meter-res: %s at %d x %d (%s)"), Stage, MeterW, MeterH,
+		       bReduced ? TEXT("reduced") : TEXT("full size restored"));
+	};
 	// Round 5 L1: the beauty look's tsr row (ENGINE_LOOK) asks for more
 	// warm-up so TSR's history converges before frame 0; raised, never
 	// lowered, and a stated -warmup= wins.
@@ -6249,6 +6310,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// constants above); measure keeps the open-only meter, byte for byte.
 		const bool bMeterMayClose = bVisual && bBeauty;
 		bool bMeterClosed = false;
+		SetMeterRes(true, TEXT("the exposure meter's rounds"));
 		for (; Rounds < StormMeterRounds; ++Rounds)
 		{
 			World->SendAllEndOfFrameUpdates();
@@ -6344,6 +6406,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			MeterSettings.AutoExposureBias = static_cast<float>(BiasBefore + Opened);
 		}
 		StormMeterOpened = Opened;
+		const bool bStormMeterReduced = MeterResDivisor > 1;
+		SetMeterRes(false, TEXT("the exposure meter's settle captures"));
 		// The sibling captures copied the beauty's settings before the meter
 		// ran: the linear (EXR) and accumulation captures render the clip at
 		// the metered exposure too, or their frames would be the black one.
@@ -6361,6 +6425,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			World->SendAllEndOfFrameUpdates();
 			FlushRenderingCommands();
+			// -meter-res: the reduced rounds' history is not this size; start over.
+			if (bStormMeterReduced && i == 0)
+			{
+				Capture->bCameraCutThisFrame = true;
+			}
 			Capture->CaptureScene();
 			FlushRenderingCommands();
 			BeatWatchdog(TEXT("an exposure settle capture"));
@@ -6384,6 +6453,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		MeterRow->SetNumberField(TEXT("bias_before"), BiasBefore);
 		MeterRow->SetNumberField(TEXT("bias_after"), MeterSettings.AutoExposureBias);
 		MeterRow->SetNumberField(TEXT("rounds"), Rounds);
+		if (bStormMeterReduced)
+		{
+			MeterRow->SetNumberField(TEXT("meter_res_divisor"), MeterResDivisor);
+		}
 		MeterRow->SetStringField(TEXT("note"), MeterNote);
 		if (bMeterMayClose)
 		{
@@ -6440,6 +6513,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		FPostProcessSettings& SubjectSettings = Capture->PostProcessSettings;
 		SubjectSettings.bOverride_AutoExposureBias = true;
 		const double SubjectBiasBefore = SubjectSettings.AutoExposureBias;
+		// -meter-res: the mask and the rounds at the reduced size (the projected
+		// bounds below are taken at that size); full size again before the settle.
+		const bool bSubjectReduced = MeterResDivisor > 1;
+		SetMeterRes(true, TEXT("the subject meter's captures"));
+		const int32 SubjMinPixels = bSubjectReduced
+			? FMath::Max(16, SubjectMeterMinPixels / (MeterResDivisor * MeterResDivisor))
+			: SubjectMeterMinPixels;
 		const int32 SubjW = RenderTarget->SizeX;
 		const int32 SubjH = RenderTarget->SizeY;
 		// The aircraft's projected bounds (its static meshes: body, hinges,
@@ -6467,12 +6547,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		double SubjP50Before = -1.0, SubjP97Before = -1.0, SubjP50 = -1.0, SubjP97 = -1.0, SubjFrameP90 = -1.0;
 		int32 SubjMaskPixels = 0;
 		int32 SubjectRounds = 0;
-		auto SubjCaptureRead = [&](TArray<FColor>& SubjOut, int32 SubjCaptures) -> bool
+		auto SubjCaptureRead = [&](TArray<FColor>& SubjOut, int32 SubjCaptures, bool bSubjCut) -> bool
 		{
 			for (int32 SubjI = 0; SubjI < SubjCaptures; ++SubjI)
 			{
 				World->SendAllEndOfFrameUpdates();
 				FlushRenderingCommands();
+				if (bSubjCut && SubjI == 0)
+				{
+					Capture->bCameraCutThisFrame = true;
+				}
 				Capture->CaptureScene();
 				FlushRenderingCommands();
 				BeatWatchdog(TEXT("a subject meter capture"));
@@ -6502,10 +6586,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			// The mask: the aircraft hidden for two captures (the temporal history
 			// lets go of it), then shown for three, read back at the same bias.
+			// -meter-res reduced: the hidden frame is ONE capture from a camera cut
+			// (no history to let go of; the hidden pair was the dearest, 3.75 s),
+			// and the shown three start from a cut too.
 			Capture->HiddenActors.AddUnique(Scenario.Aircraft);
-			const bool bSubjHiddenRead = SubjCaptureRead(SubjHidden, 2);
+			const bool bSubjHiddenRead = SubjCaptureRead(SubjHidden, bSubjectReduced ? 1 : 2, bSubjectReduced);
 			Capture->HiddenActors.Remove(Scenario.Aircraft);
-			const bool bSubjShownRead = bSubjHiddenRead && SubjCaptureRead(SubjShown, 3);
+			const bool bSubjShownRead = bSubjHiddenRead && SubjCaptureRead(SubjShown, 3, bSubjectReduced);
 			if (bSubjShownRead)
 			{
 				for (int32 SubjY = SubjY0; SubjY < SubjY1; ++SubjY)
@@ -6525,17 +6612,17 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				SubjectNote = TEXT("a meter frame could not be read back: the frame meter's exposure stands");
 			}
-			else if (SubjMaskPixels < SubjectMeterMinPixels)
+			else if (SubjMaskPixels < SubjMinPixels)
 			{
 				SubjectNote = TEXT("the aircraft covers too few pixels to meter: the frame meter's exposure stands");
 			}
 		}
-		if (SubjMaskPixels >= SubjectMeterMinPixels)
+		if (SubjMaskPixels >= SubjMinPixels)
 		{
 			TArray<FColor>& SubjFrame = SubjShown;
 			for (; SubjectRounds < SubjectMeterRounds; ++SubjectRounds)
 			{
-				if (SubjectRounds > 0 && !SubjCaptureRead(SubjFrame, 1))
+				if (SubjectRounds > 0 && !SubjCaptureRead(SubjFrame, 1, false))
 				{
 					SubjectNote = TEXT("a meter frame could not be read back: the last measured exposure stands");
 					break;
@@ -6596,12 +6683,17 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		// The temporal history converges on the kept exposure (and the shown
 		// aircraft) before frame 0.
+		SetMeterRes(false, TEXT("the subject meter's settle and re-warm captures"));
 		if (SubjMaskPixels > 0 || SubjX1 - SubjX0 >= 4)
 		{
 			for (int32 SubjI = 0; SubjI < StormMeterSettleCaptures; ++SubjI)
 			{
 				World->SendAllEndOfFrameUpdates();
 				FlushRenderingCommands();
+				if (bSubjectReduced && SubjI == 0)
+				{
+					Capture->bCameraCutThisFrame = true;   // the reduced history is not this size
+				}
 				Capture->CaptureScene();
 				FlushRenderingCommands();
 				BeatWatchdog(TEXT("a subject meter settle capture"));
@@ -6609,6 +6701,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 		}
 		SubjectRow->SetNumberField(TEXT("mask_pixels"), SubjMaskPixels);
+		if (bSubjectReduced)
+		{
+			SubjectRow->SetNumberField(TEXT("meter_res_divisor"), MeterResDivisor);
+			SubjectRow->SetNumberField(TEXT("meter_width"), SubjW);
+			SubjectRow->SetNumberField(TEXT("meter_height"), SubjH);
+			SubjectRow->SetNumberField(TEXT("min_pixels"), SubjMinPixels);
+		}
 		SubjectRow->SetNumberField(TEXT("p50_luma_before"), SubjP50Before);
 		SubjectRow->SetNumberField(TEXT("p97_luma_before"), SubjP97Before);
 		SubjectRow->SetNumberField(TEXT("p50_luma_after"), SubjP50);
@@ -6666,6 +6765,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			ConstrainedRecord->SetNumberField(TEXT("gpu_drain_longest_s"), GpuDrainLongestS);
 			ConstrainedRecord->SetStringField(TEXT("gpu_drain_longest_at"), GpuDrainLongestAt);
 		}
+	}
+	// -meter-res: whatever path ran, the beauty target is full size from here on.
+	SetMeterRes(false, TEXT("the frames"));
+	if (ConstrainedRecord.IsValid())
+	{
+		ConstrainedRecord->SetNumberField(TEXT("meter_resizes"), MeterResizes);
 	}
 
 	// -- Phase 8B.0: the real-time probe loop ------------------------------

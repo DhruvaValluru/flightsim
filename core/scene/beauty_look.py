@@ -701,6 +701,36 @@ def subject_meter_step(p50: float, p97: float, frame_p90: float, stops: float) -
     return 0.0 if abs(nxt - stops) < 0.05 else nxt - stops
 
 
+def meter_luma_code(r: int, g: int, b: int) -> int:
+    """The sRGB luma code (0..255) the host's meters bin a pixel by."""
+    return min(max(int(0.2126 * r + 0.7152 * g + 0.0722 * b + 0.5), 0), 255)
+
+
+def meter_percentile(codes, q: float) -> float:
+    """The twin of the host's meter percentile (the storm/beauty meter's p90,
+    the subject meter's SubjPercentile): a 256-bin histogram of luma codes,
+    the first bin whose cumulative count reaches ``int(q * total)``, as 0..1.
+    ``codes`` is any iterable of ints 0..255."""
+    hist = [0] * 256
+    total = 0
+    for c in codes:
+        hist[c] += 1
+        total += 1
+    wanted = int(q * total)
+    seen = 0
+    b = 0
+    while b < 255 and seen + hist[b] < wanted:
+        seen += hist[b]
+        b += 1
+    return b / 255.0
+
+
+#: #9 TDR (2026-11-16): -meter-res=auto|full|half|quarter, the per-axis
+#: divisor of the beauty target for the meters' metering captures (auto: half
+#: on the constrained GPU, full elsewhere; measure never reduces).
+METER_RES_DIVISORS: Dict[str, int] = {"full": 1, "half": 2, "quarter": 4}
+
+
 #: Round 3 (2026-11-10): the share of a RELIT sun's meter gain the beauty
 #: exposure takes. A lighting block that moves the physical sky's sun
 #: (webapp.runs relight_sky_plan, core.sky.plan.relight) re-meters the plan's
