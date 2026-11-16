@@ -3698,6 +3698,7 @@ def create_ice_overlay():
 WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimCloudLayersLit", "M_FlightSimTilesBeauty", "M_FlightSimScatter",
                           "M_FlightSimDistantClouds",   # visual round 5, L3: the distant sheet
                           "M_FlightSimCirrus",          # sky step 6 (2026-11-15): the high cirrus sheet
+                          "M_FlightSimRainbow",         # high-sky fx (2026-11-15): the beauty rainbow
                           "M_FlightSimOceanBeauty")     # lane B (2026-11-11): the beauty sea cap
 WORLD_SHADER_DIR = "assets/shaders/world"
 #: The collection the tiles' material reads and the render sets
@@ -3815,6 +3816,16 @@ WORLD_CIRRUS_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 #: The Custom node's inputs, in order: the distant sheet's five engine inputs,
 #: then the scalars, then the vectors (cirrus.hlsl's header).
 WORLD_CIRRUS_INPUTS = WORLD_DISTANT_ENGINE_INPUTS + tuple(WORLD_CIRRUS_SCALARS) + WORLD_CIRRUS_VECTORS
+# -- high-sky fx (2026-11-15): the beauty rainbow --
+#: M_FlightSimRainbow's scalars and defaults (core/sky/sky_fx.py RAINBOW_LOOK and
+#: the strength/top FlightSimSkyFx.cpp sets per render; pinned by tests/test_sky_fx.py).
+WORLD_RAINBOW_SCALARS = {
+    "Strength": 0.0, "PrimaryPeak": 0.05, "InnerGlow": 0.25, "InnerFoldDeg": 6.0,
+    "RainTopCm": 120000.0, "TopFadeCm": 30000.0,
+}
+#: rainbow.hlsl's inputs in order (its header): the engine nodes without the sky's
+#: distant luminance, then the scalars.
+WORLD_RAINBOW_INPUTS = ("WorldPos", "CameraPos", "SunDir", "SunIlluminance") + tuple(WORLD_RAINBOW_SCALARS)
 # -- sky step 6 -- end -------------------------------------------------------------------
 #: The sky-light HDRI probe's import root (core/scene/sky_hdri.py HDRI_ASSET_DIR).
 SKY_HDRI_PATH = "/Game/FlightSim/Sky"
@@ -3957,8 +3968,10 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: Sky-clouds2 (2026-11-15, review of 42974c46): the light moved to its OWN material,
 #: M_FlightSimCloudLayersLit 1 (graph 9 had raised the default PS 161 -> 847
 #: instructions and 0 -> 8 samplers with the switch off); cloud layers 10 = graph 8 again.
+#: High-sky fx (2026-11-15): rainbow 1, the first rainbow.hlsl (M_FlightSimRainbow).
 WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "10", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "1",
-                           "M_FlightSimCloudLayersLit": "1"}
+                           "M_FlightSimCloudLayersLit": "1",
+                           "M_FlightSimRainbow": "1"}
 
 
 def world_graph_stale(name):
@@ -4010,6 +4023,7 @@ WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "10", 
                      "M_FlightSimCloudLayersLit": "1",  # sky-clouds2: -look-cloud-light=on's own material
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
                      "M_FlightSimCirrus": "1",          # sky step 6: the high cirrus sheet
+                     "M_FlightSimRainbow": "1",         # high-sky fx: the beauty rainbow
                      "M_FlightSimOceanBeauty": "5"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
@@ -4629,6 +4643,50 @@ def create_world_cirrus():
     finish(material, "M_FlightSimCirrus")
 
 
+# -- high-sky fx (2026-11-15): the beauty rainbow --
+def create_world_rainbow():
+    """M_FlightSimRainbow: the beauty rainbow (FlightSimSkyFx.cpp ApplyBeautySkyFx
+    puts it on one engine sphere about the scene origin, only with rain and the
+    sun up; BeautyOnlyActors). UNLIT, ADDITIVE, two-sided; Apply Fogging per pixel
+    (the haze fades it); no custom depth, no velocity, so no label or depth pass
+    sees it. rainbow.hlsl returns the emissive: nine-band Descartes primary and
+    secondary rings about the antisolar point, lit by the sun's illuminance
+    through the atmosphere (light 0). VISUAL ONLY; UNMEASURED until a Windows
+    render."""
+    material = _world_beauty_material("M_FlightSimRainbow")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
+    material.set_editor_property("two_sided", True)
+    material.set_editor_property("use_translucency_vertex_fog", True)   # Apply Fogging
+    material.set_editor_property("compute_fog_per_pixel", True)
+    material.set_editor_property("allow_translucent_custom_depth_writes", False)
+    material.set_editor_property("output_translucent_velocity", False)
+    inputs = {}
+    inputs["WorldPos"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionWorldPosition, -1800, -500), "")
+    inputs["CameraPos"] = (lib.create_material_expression(
+        material, unreal.MaterialExpressionCameraPositionWS, -1800, -400), "")
+    sun_dir = lib.create_material_expression(material, unreal.MaterialExpressionSkyAtmosphereLightDirection,
+                                             -1800, -300)
+    sun_dir.set_editor_property("light_index", 0)
+    inputs["SunDir"] = (sun_dir, "")
+    illuminance = lib.create_material_expression(material, unreal.MaterialExpressionSkyAtmosphereLightIlluminance,
+                                                 -1800, -200)
+    illuminance.set_editor_property("light_index", 0)
+    inputs["SunIlluminance"] = (illuminance, "")
+    for i, (name, default) in enumerate(WORLD_RAINBOW_SCALARS.items()):
+        inputs[name] = (scalar(material, lib, name, default, -1800, 50 + 90 * i), "")
+    ordered = {name: inputs[name] for name in WORLD_RAINBOW_INPUTS}
+    bow = world_custom(material, lib, "rainbow", unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                       ordered, -900, 0)
+    lib.connect_material_property(bow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    world_stamp(material, "M_FlightSimRainbow")
+    finish(material, "M_FlightSimRainbow")
+
+
 def create_sky_hdri():
     """T_SkyHdri_<name> under SKY_HDRI_PATH: the sky-light HDRI probe's cubemap
     (FlightSimClouds.cpp ApplySkyHdri, -sky-hdri=<name>). Only when
@@ -4939,6 +4997,7 @@ create_world_ocean_beauty()     # lane B: the beauty sea cap's water
 create_world_scatter()
 create_world_distant_clouds()   # visual round 5, L3: the distant sheet
 create_world_cirrus()           # sky step 6: the high cirrus sheet (beauty only)
+create_world_rainbow()          # high-sky fx: the beauty rainbow (beauty only)
 create_sky_hdri()               # visual round 5, L3: the sky HDRI probe (FLIGHTSIM_SKY_HDRI only)
 
 create_aircraft_masters()  # AIRCRAFT LANE (V7)

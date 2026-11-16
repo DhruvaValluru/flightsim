@@ -250,6 +250,16 @@ bool FFlightSimVisualScene::ApplyWeatherLook(UWorld* World,
 		return true;   // no weather_look on the card: nothing is drawn or recorded
 	}
 	WeatherLook = *Block;
+	// High-sky effects lane: the rain's top for the beauty rainbow (the cloud
+	// base the storm's shafts reach, ApplyBeautySkyFx).
+	SkyFxRainTopM = Options.CloudLayers.Num() > 0 && Options.CloudLayers[0].BaseMetres > 0.0
+		? Options.CloudLayers[0].BaseMetres : DefaultCloudBaseM;
+	// ... and the layers' cover, for the bow's direct-sun gate.
+	SkyFxCloudCovers.Reset();
+	for (const FFlightSimCloudLayer& Layer : Options.CloudLayers)
+	{
+		SkyFxCloudCovers.Add(Layer.CoverFraction);
+	}
 	const FString Surface = StringOr(WeatherLook, TEXT("surface"));
 	const FString Storm = StringOr(WeatherLook, TEXT("storm"));
 	const double RainRate = NumberOr(WeatherLook, TEXT("rain_rate_mmh"), 0.0);
@@ -500,6 +510,9 @@ void FFlightSimVisualScene::ApplyBeautyWeatherLook(UWorld* World)
 	Beauty->SetStringField(TEXT("basis"),
 		TEXT("core/scene/weather_look.py BEAUTY_SHAFT_*, BEAUTY_FUNNEL_COLOUR (UNCALIBRATED); shading only, "
 		     "the labels' silhouettes unchanged"));
+	// High-sky effects lane (2026-11-15): the rainbow (FlightSimSkyFx.cpp;
+	// -look-rainbow=on|off), recorded under beauty.sky_fx. Beauty only.
+	ApplyBeautySkyFx(World, Beauty);
 	const TSharedPtr<FJsonObject>* Record = nullptr;
 	if (LookApplied->TryGetObjectField(TEXT("weather_look"), Record) && Record != nullptr && Record->IsValid())
 	{
