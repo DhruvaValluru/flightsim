@@ -1,0 +1,48 @@
+{
+ "calibration": "uncalibrated: report only, no threshold has been judged against real rounds",
+ "limits": {
+  "blank_std_min": 0.002,
+  "blank_mean_min": 0.003,
+  "clipped_max": 0.02,
+  "crushed_max": 0.05,
+  "mean_luma_min": 0.02,
+  "mean_luma_max": 0.8,
+  "ssim_min": 0.35,
+  "flicker_max": 0.02
+ },
+ "gate": "report only; never fails the round",
+ "compare_with": null,
+ "compare_with_found": false,
+ "scenes": {
+  "1": {
+   "frame": "01_golden_hour_a_4_flying_east.jpg",
+   "health": {
+    "mean_luma": 0.11849,
+    "std_luma": 0.13158,
+    "clipped": 0.0,
+    "crushed": 1e-05
+   },
+   "flags": []
+  },
+  "3": {
+   "frame": "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+   "health": {
+    "mean_luma": 0.17409,
+    "std_luma": 0.15501,
+    "clipped": 0.0,
+    "crushed": 0.00018
+   },
+   "flags": []
+  },
+  "13": {
+   "frame": "13_747_cruise_over_the_ocean.jpg",
+   "health": {
+    "mean_luma": 0.11162,
+    "std_luma": 0.12389,
+    "clipped": 0.0,
+    "crushed": 4e-05
+   },
+   "flags": []
+  }
+ }
+}

@@ -1,0 +1,100 @@
+{
+    "round":  142,
+    "commit":  "96984fe4",
+    "full":  false,
+    "scenes":  [
+                   13,
+                   3,
+                   1
+               ],
+    "switches":  "",
+    "prep":  [
+                 "build",
+                 "materials",
+                 "aircraft"
+             ],
+    "seconds":  {
+                    "build":  27.8,
+                    "materials":  11.2,
+                    "aircraft":  33,
+                    "scenes":  300
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  126.0,
+                         "spec_sha256":  "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  3,
+                         "outcome":  "done",
+                         "seconds":  100.8,
+                         "spec_sha256":  "b4869e1ee290161061731531d167eaca7708f9565dee91ad052197cc520167b2",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  13,
+                         "outcome":  "done",
+                         "seconds":  70.9,
+                         "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  null,
+                          "compare_with_found":  false,
+                          "scenes":  {
+                                         "1":  {
+                                                   "frame":  "01_golden_hour_a_4_flying_east.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.11849,
+                                                                  "std_luma":  0.13158,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  1E-05
+                                                              },
+                                                   "flags":  [
+
+                                                             ]
+                                               },
+                                         "3":  {
+                                                   "frame":  "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.17409,
+                                                                  "std_luma":  0.15501,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.00018
+                                                              },
+                                                   "flags":  [
+
+                                                             ]
+                                               },
+                                         "13":  {
+                                                    "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.11162,
+                                                                   "std_luma":  0.12389,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  4E-05
+                                                               },
+                                                    "flags":  [
+
+                                                              ]
+                                                }
+                                     }
+                      }
+}
