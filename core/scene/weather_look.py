@@ -412,15 +412,21 @@ BEAUTY_TORNADO_FLIPBOOK_HEIGHT_SHARE = 1.40
 #: still of #10 (2026-11-15: 0.43 / 0.55 / 0.25 read paper-white against the storm base);
 #: -tornado-shade=smoke keeps BEAUTY_TORNADO_FLIPBOOK_COLOUR and the material's generation-2
 #: defaults. UNCALIBRATED.
+#: Round 147 (#10 on p3-windows, round 144: the funnel's upper half a near-black plume
+#: against the storm base): the bake's self-shadowed core (texel grey ~0.2) times floor 0.45
+#: times albedo 0.36 left the dense cap at ~0.2 albedo under the deck's dim sky light. The
+#: albedo is now the funnel's full chord (200 m, the cap's diameter, not 100 m: R 0.53) and the
+#: floor 0.80, so the bake's shading only modulates the cloud instead of blackening it;
+#: contrast 0.22 and sheath 0.20 keep the striations and the lit edge. UNCALIBRATED.
 BEAUTY_TORNADO_FLIPBOOK_FUNNEL = {
-    "colour": (0.36, 0.36, 0.36), "shade_floor": 0.45, "alpha_lo": 0.15, "alpha_hi": 0.55,
-    "sheath_lift": 0.10, "bands": 6.0, "contrast": 0.30, "corrugate": 0.06, "bottom_width": 0.35,
+    "colour": (0.53, 0.53, 0.53), "shade_floor": 0.80, "alpha_lo": 0.15, "alpha_hi": 0.55,
+    "sheath_lift": 0.20, "bands": 6.0, "contrast": 0.22, "corrugate": 0.06, "bottom_width": 0.35,
     "dust_share_max": 0.35,
 }
 BEAUTY_TORNADO_FLIPBOOK_SHADES = ("funnel", "smoke")
 
 
-def tornado_flipbook_albedo(lwc_g_m3: float = 0.5, r_e_um: float = 10.0, path_m: float = 100.0,
+def tornado_flipbook_albedo(lwc_g_m3: float = 0.5, r_e_um: float = 10.0, path_m: float = 200.0,
                             g: float = 0.85) -> float:
     """A cloud's two-stream albedo (Bohren 1987): tau = 3 LWC L / (2 rho_w r_e) (Stephens
     1978), R = (1 - g) tau / (2 + (1 - g) tau)."""

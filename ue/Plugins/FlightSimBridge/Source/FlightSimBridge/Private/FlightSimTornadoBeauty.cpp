@@ -209,15 +209,19 @@ namespace FlightSimTornadoBeautyLocal
 	//    whirl's reach + its top), more than any puff can be behind the card's centre from any
 	//    camera (triangle inequality), so the whirl is never drawn under the card -- generation
 	//    2's card, sorted by its centre 525 m up, could draw over the whirl and hide the tan skirt.
-	constexpr float BeautyFlipbookFunnelColourR = 0.36f;
-	constexpr float BeautyFlipbookFunnelColourG = 0.36f;
-	constexpr float BeautyFlipbookFunnelColourB = 0.36f;
-	constexpr float BeautyFlipbookFunnelShadeFloor = 0.45f;
+	// Round 147 (#10, round 144 on p3-windows: the upper funnel a near-black plume): albedo
+	// 0.53 (the two-stream albedo over the cap's 200 m chord), ShadeFloor 0.80, SheathLift 0.20,
+	// Contrast 0.22 -- the bake's self-shadowed core no longer blackens the cloud. Python twin:
+	// core/scene/weather_look.py BEAUTY_TORNADO_FLIPBOOK_FUNNEL. UNCALIBRATED.
+	constexpr float BeautyFlipbookFunnelColourR = 0.53f;
+	constexpr float BeautyFlipbookFunnelColourG = 0.53f;
+	constexpr float BeautyFlipbookFunnelColourB = 0.53f;
+	constexpr float BeautyFlipbookFunnelShadeFloor = 0.80f;
 	constexpr float BeautyFlipbookFunnelAlphaLo = 0.15f;
 	constexpr float BeautyFlipbookFunnelAlphaHi = 0.55f;
-	constexpr float BeautyFlipbookFunnelSheathLift = 0.10f;
+	constexpr float BeautyFlipbookFunnelSheathLift = 0.20f;
 	constexpr float BeautyFlipbookFunnelBands = 6.0f;
-	constexpr float BeautyFlipbookFunnelContrast = 0.30f;
+	constexpr float BeautyFlipbookFunnelContrast = 0.22f;
 	constexpr float BeautyFlipbookFunnelCorrugate = 0.06f;
 	constexpr float BeautyFlipbookFunnelBottomWidth = 0.35f;
 	constexpr double BeautyFlipbookFunnelDustShareMax = 0.35;
