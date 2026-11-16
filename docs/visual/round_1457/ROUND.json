@@ -1,0 +1,119 @@
+{
+    "round":  1457,
+    "commit":  "da82dc78",
+    "full":  false,
+    "scenes":  [
+                   3,
+                   13,
+                   15
+               ],
+    "switches":  "",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  250.8
+                },
+    "outcomes":  [
+                     {
+                         "number":  3,
+                         "outcome":  "done",
+                         "seconds":  91.2,
+                         "spec_sha256":  "b4869e1ee290161061731531d167eaca7708f9565dee91ad052197cc520167b2",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  13,
+                         "outcome":  "done",
+                         "seconds":  55.9,
+                         "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  15,
+                         "outcome":  "done",
+                         "seconds":  101.0,
+                         "spec_sha256":  "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_1435",
+                          "compare_with_found":  true,
+                          "scenes":  {
+                                         "3":  {
+                                                   "frame":  "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.22673,
+                                                                  "std_luma":  0.18715,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.00018
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+                                                                       "flicker":  0.0,
+                                                                       "ssim":  0.9917,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "13":  {
+                                                    "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.10997,
+                                                                   "std_luma":  0.12587,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  5E-05
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                                        "flicker":  0.0,
+                                                                        "ssim":  0.9942,
+                                                                        "flags":  [
+
+                                                                                  ]
+                                                                    }
+                                                },
+                                         "15":  {
+                                                    "frame":  "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.05989,
+                                                                   "std_luma":  0.0508,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  0.0
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+                                                                        "flicker":  0.0,
+                                                                        "ssim":  0.9951,
+                                                                        "flags":  [
+
+                                                                                  ]
+                                                                    }
+                                                }
+                                     }
+                      }
+}
