@@ -127,7 +127,8 @@ def test_the_bridge_reads_refuses_gates_sets_and_records():
     assert 'FParse::Value(*Switches, TEXT("cloud-material="), CloudMaterialSwitch);' in CPP
     assert "-look-cloud-light=%s is not on or off" in CPP
     assert "-cloud-material=%s is not ours or epic" in CPP
-    assert 'FString CloudLightSwitch = TEXT("on");' in HDR
+    assert 'FString CloudLightSwitch = TEXT("off");' in HDR   # off until the Windows A/B
+    assert '		CloudLightSwitch = TEXT("off");' in CPP and wb.CLOUD_LIGHT_DEFAULT == "off"
     assert 'FString CloudMaterialSwitch = TEXT("ours");' in HDR
     assert "CloudBillowApplies(CloudLightBillow(CloudBillowSwitch == TEXT(\"on\"), bLight), State.Shape)" in CPP
     assert "return bBillowOn && !bLightOn;" in PURE

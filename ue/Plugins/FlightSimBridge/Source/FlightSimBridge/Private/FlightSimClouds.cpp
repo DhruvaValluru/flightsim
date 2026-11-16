@@ -706,7 +706,7 @@ namespace FlightSimWorldPure
 	{
 		return bApplies && Occlusion > CloudWispBottomOcclusion ? CloudWispBottomOcclusion : Occlusion;
 	}
-	// Sky-clouds lane (2026-11-15): -look-cloud-light=on|off (on by default; off is
+	// Sky-clouds lane (2026-11-15): -look-cloud-light=on|off (OFF by default; off is
 	// c9e13c53's clouds exactly). world_beauty.CLOUD_LIGHT_* is the twin (the why and
 	// the real-world numbers are there): the scattering node's six inputs (dual-lobe
 	// HG g 0.8 / -0.3, back share 0.2; Wrenninge 2013 octave a = b = c = 0.5), the
@@ -1945,10 +1945,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// clouds exactly. Another word refuses by name.
 		CloudWispSwitch = TEXT("on");
 		FParse::Value(*Switches, TEXT("look-cloud-wisp="), CloudWispSwitch);
-		// Sky-clouds lane: -look-cloud-light=on|off (on by default; CloudLightRow,
+		// Sky-clouds lane: -look-cloud-light=on|off (OFF by default until Windows shows it; CloudLightRow,
 		// CloudLightBillow; off is c9e13c53's clouds) and -cloud-material=ours|epic
 		// (ours by default; epic is the Volumetrics plugin's cloud material for the A/B).
-		CloudLightSwitch = TEXT("on");
+		CloudLightSwitch = TEXT("off");
 		FParse::Value(*Switches, TEXT("look-cloud-light="), CloudLightSwitch);
 		CloudMaterialSwitch = TEXT("ours");
 		FParse::Value(*Switches, TEXT("cloud-material="), CloudMaterialSwitch);

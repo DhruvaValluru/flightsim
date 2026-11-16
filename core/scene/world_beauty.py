@@ -1082,7 +1082,10 @@ def cloud_belly_occlusion(applies: bool, occlusion: float) -> float:
 # base reads 0.4-0.6 of its sunlit flank; a nimbostratus base 0.2-0.3, a storm's dark
 # grey) set the cloud's albedo (cloud_albedo.hlsl). No sample, no march step: ALU
 # per sample only. UNCALIBRATED (every look number): set by the Windows A/B.
+#: OFF by default (2026-11-15): the Mac look-dev scenes 13/1/9 draw no beauty cumulus
+#: layer (no -sky plan on the Mac prep), so the look was not seen; Windows A/B decides.
 CLOUD_LIGHT_SWITCH = "-look-cloud-light"
+CLOUD_LIGHT_DEFAULT = "off"
 CLOUD_LIGHT_FIELDS: Tuple[str, ...] = ("PhaseG", "PhaseG2", "PhaseBlend", "MsContribution", "MsOcclusion",
                                        "MsEccentricity", "PowderAmount", "PowderDepthM", "BaseDarkening",
                                        "BaseRise")
