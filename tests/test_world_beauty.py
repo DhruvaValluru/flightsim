@@ -228,9 +228,16 @@ def test_the_cpp_world_tables_and_laws_are_the_python_ones(tmp_path):
     main.append("printf(\"puddle %.17g\\n\", PuddleShareDefault);")
     # visual round 2: the deck clearance (its law: tests/test_weather_scenes.py)
     main.append("printf(\"aclear %.17g\\n\", AircraftLayerClearanceM);")
+    # sky step 4: the scene fog's restated constants and the observer clamp (the laws
+    # themselves are tests/test_sky_step4_atmosphere.py's)
+    main.append("printf(\"fog %.17g %.17g %.17g %.17g %.17g\\n\", SceneFogHeightFalloff, SceneFogStartDistanceM,"
+                " SceneFogMaxOpacity, FogObserverClampM, FogRebaseStepM);")
     main.append("return 0; }")
     lines = _compile_and_run(tmp_path, block, "\n".join(main))
 
+    fog = [float(v) for v in next(l for l in lines if l.startswith("fog ")).split()[1:]]
+    assert fog == [wb.SCENE_FOG_HEIGHT_FALLOFF, wb.SCENE_FOG_START_DISTANCE_M, wb.SCENE_FOG_MAX_OPACITY,
+                   wb.FOG_OBSERVER_CLAMP_M, wb.FOG_REBASE_STEP_M]
     atm = [line.split() for line in lines if line.startswith("atm ")]
     assert [(p, f) for _, p, f, _ in atm] == [(p, f) for p in wb.PRESETS for f in wb.ATMOSPHERE_FIELDS]
     for _, preset, field, value in atm:
@@ -400,7 +407,8 @@ def test_the_cloud_material_parameters_are_the_ones_the_cpp_sets():
     set_vectors = set(re.findall(r'(?:State\.|Layer\.)Material->SetVectorParameterValue\(TEXT\("([A-Za-z]+)"\)',
                                  CLOUDS_CPP))
     assert set_scalars == set(scalars)
-    assert set_vectors == set(vectors)
+    # SunDirWS: the sky-clouds lane's cloud_albedo.hlsl input (not a cloud_layers input)
+    assert set_vectors == set(vectors) | {"SunDirWS"}
     # CameraPos: round 10 far LOD; ShadowDist: round 52 (the engine's shadow-sample distance)
     assert set(inputs) == set(scalars) | set(vectors) | {"WorldPos", "NormAlt", "CameraPos", "ShadowDist"}
     hlsl = (SHADERS / "cloud_layers.hlsl").read_text(encoding="utf-8")
@@ -418,7 +426,7 @@ def test_the_cloud_material_parameters_are_the_ones_the_cpp_sets():
     assert '"NormAltitudeInLayer"' in create
     # round 2: the new shader reaches a machine that built round 1 (stamped, stale rebuilt)
     assert int(_script_dict("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"]) >= 2
-    assert create.index('world_stamp(material, "M_FlightSimCloudLayers")') < create.index("finish(material")
+    assert create.index('world_stamp(material, name)') < create.index("finish(material")
     beauty = SCRIPT[SCRIPT.index("def _world_beauty_material"):SCRIPT.index("def world_shader")]
     # The no-lumen-and-machine lane's update-in-place path decides (a stale
     # WORLD_GENERATIONS stamp or FLIGHTSIM_REBUILD_MATERIALS), never a delete.
@@ -784,10 +792,20 @@ static uint asuint(int v) { uint u; std::memcpy(&u, &v, 4); return u; }
 def test_the_cloud_march_and_the_sky_are_the_python_ones(tmp_path):
     """Round 2 (clouds-sky): the march by GPU class, the shadow length, the
     default layer's thinning and the sky's multiple scattering, C++ == Python;
-    the march stays under the engine's caps and steps finer than round 1."""
+    the march stays under the engine's caps and steps finer than round 1.
+    Sky step 3 (2026-11-15): the table gained a third row, "probe" (the
+    constrained class's opt-in raise behind -cloud-march=probe), and the discrete
+    row rose to the caps (8, 8, 50); the row list below is CLOUD_MARCH's keys in
+    C++ order rather than the two literals, and the constrained row's pin
+    (192 / 10 / 80) is unchanged. tests/test_sky_step3_cvars.py pins the rest.
+    Sky step 5 (2026-11-15): the cloud rows gained altocumulus (index 4, its
+    900 m thinning cap), so the capped-top cases run over every CLOUD_PRESETS
+    index rather than the first four."""
     block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
     thick = (0.0, 400.0, 1000.0, 2500.0, 3000.0, 6000.0)
-    tops = [(c, b, t, s) for c in range(4) for b, t in ((2940.0, 5940.0), (1500.0, 2700.0), (800.0, 2900.0))
+    assert len(wb.CLOUD_PRESETS) == 5
+    tops = [(c, b, t, s) for c in range(len(wb.CLOUD_PRESETS))
+            for b, t in ((2940.0, 5940.0), (1500.0, 2700.0), (800.0, 2900.0))
             for s in (0, 1)]
     main = ["using namespace FlightSimWorldPure;", "int main() {",
             "for (int m = 0; m < MarchCount; ++m) for (int f = 0; f < MarchFieldCount; ++f)"
@@ -806,7 +824,8 @@ def test_the_cloud_march_and_the_sky_are_the_python_ones(tmp_path):
                    check=True, capture_output=True, text=True)
     lines = subprocess.run([str(tmp_path / "march")], check=True, capture_output=True, text=True).stdout.splitlines()
     march = [line.split() for line in lines if line.startswith("march ")]
-    assert [(m, f) for _, m, f, _ in march] == [(m, f) for m in ("discrete", "integrated") for f in wb.CLOUD_MARCH_FIELDS]
+    assert tuple(wb.CLOUD_MARCH) == ("discrete", "integrated", "probe")   # sky step 3: the probe row
+    assert [(m, f) for _, m, f, _ in march] == [(m, f) for m in wb.CLOUD_MARCH for f in wb.CLOUD_MARCH_FIELDS]
     for _, m, f, value in march:
         assert float(value) == wb.CLOUD_MARCH[m][f], (m, f)
     assert [float(l.split()[1]) for l in lines if l.startswith("shadow ")] == [wb.cloud_shadow_tracing_km(t) for t in thick]
@@ -933,13 +952,32 @@ def test_a_constrained_gpu_gets_ef361bd6_cloud_and_sky_settings():
     ef361bd6..1e3e0f0a named a8c964fc (this lane's round-2 march, shadow span,
     layer thinning, multiple scattering and fog-on-all-pixel), and ef361bd6's
     code rendered with the same materials. On a constrained GPU (integrated, or
-    a feature level below SM6) every one of those settings is ef361bd6's."""
+    a feature level below SM6) the march, the shadow span, the thinning and the
+    fog-on-all-pixel cvar are still ef361bd6's.
+
+    Sky step 4 (2026-11-15) moved ONE pin: the multiple-scattering factor is now
+    set on every GPU class under -sky-multi-scatter=auto (the default) and on,
+    and left at the scene's 1.0 under off. Why the class gate went: read in the
+    UE 5.7 source, USkyAtmosphereComponent::MultiScatteringFactor is one multiply
+    in the 32x32 multi-scattering LUT compute pass (SkyAtmosphere.usf
+    MultiScatteredLuminanceLutUAV) that the atmosphere runs every frame at the
+    same sample count whatever the factor (the render path already sets
+    r.SkyAtmosphere.MultiScatteringLUT.HighQuality 1 on every GPU); it is in no
+    per-pixel sky, aerial-perspective or cloud shader and adds no submission, so
+    it cannot be what hung the iGPU (r87 located that stall in the sky light's
+    cloud reflection march and capped it; the bisect only ever named a8c964fc as
+    a unit). The outcome on the iGPU is UNMEASURED until the Windows A/B
+    (docs/VISUAL_FIDELITY_PLAN.md "Sky step 4"); -sky-multi-scatter=off is
+    ef361bd6's sky in one word. tests/test_sky_step4_atmosphere.py pins the law."""
     assert "return GRHIDeviceIsIntegrated || GMaxRHIFeatureLevel < ERHIFeatureLevel::SM6;" in CLOUDS_CPP
     assert "const bool bIntegratedGpu = CloudConstrainedGpu();" in CLOUDS_CPP
-    # multiple scattering: never set on the constrained class
-    guard = CLOUDS_CPP.index("if (!CloudConstrainedGpu())")
-    assert CLOUDS_CPP.index("Atmosphere->SetMultiScatteringFactor(", guard) - guard < 200
+    # multiple scattering: the switch's law, set once, through the pure block
+    assert "if (!CloudConstrainedGpu())" not in CLOUDS_CPP   # sky step 4: the gate lives in SkyMultiScatterFor
+    guard = CLOUDS_CPP.index("const int32 MultiScatter = SkyMultiScatterFor(TCHAR_TO_ANSI(*SkyMultiScatterSwitch), CloudConstrainedGpu());")
+    assert CLOUDS_CPP.index("if (MultiScatter == 1)", guard) - guard < 200
+    assert CLOUDS_CPP.index("Atmosphere->SetMultiScatteringFactor(", guard) - guard < 400
     assert CLOUDS_CPP.count("Atmosphere->SetMultiScatteringFactor(") == 1
+    assert wb.sky_multi_scatter_applies("auto", True) is False and wb.sky_multi_scatter_applies("on", True) is True and wb.sky_multi_scatter_applies("off", True) is False
     # fog on every pixel: discrete only
     fog = CLOUDS_CPP.index("if (!bIntegratedGpu)")
     assert CLOUDS_CPP.index("FogAll->Set(1, ECVF_SetByCode);", fog) - fog < 200

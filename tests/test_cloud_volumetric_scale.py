@@ -42,10 +42,11 @@ def test_the_bridge_reads_the_switch_the_way_the_billow_is_read():
     assert 'FParse::Value(*Switches, TEXT("cloud-volumetric-scale="), CloudVolumetricScaleText);' in cpp
     assert 'FParse::Value(*Switches, TEXT("look-cloud-billow="), CloudBillowSwitch);' in cpp
     # Read from the same Switches string (command line + FLIGHTSIM_RENDER_SWITCHES),
-    # inside the same block, right after the billow switch.
+    # inside the same block after the billow switch (sky steps 1, 2, 3, 4 and 6
+    # parse theirs in between on claude/hl-sky).
     billow = cpp.index('TEXT("look-cloud-billow="), CloudBillowSwitch);')
     scale = cpp.index('TEXT("cloud-volumetric-scale="), CloudVolumetricScaleText);')
-    assert billow < scale < billow + 800
+    assert billow < scale < billow + 4000
     assert "CloudVolumetricScale = CloudVolumetricScaleDefault;" in cpp
 
 

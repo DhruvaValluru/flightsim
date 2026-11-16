@@ -458,6 +458,11 @@ sky_check "world: LightComponentBase Intensity" "Classes/Components/LightCompone
 sky_check "world: SkyLight SetIntensity" "Classes/Components/SkyLightComponent.h" "void SetIntensity(float NewIntensity)"
 sky_check "world: VolumetricCloud Material soft pointer" "$VC" "TSoftObjectPtr<UMaterialInterface> Material;"
 sky_check "world: VolumetricCloud LayerBottomAltitude" "$VC" "float LayerBottomAltitude;"
+# sky step 2 (2026-11-14): the plan's shadowed cloud component leaves the sky capture;
+# a clear/cirrus plan hides the volumetric layer (SceneComponent visibility gates the
+# cloud proxy at render-state creation, VolumetricCloudComponent.cpp CreateRenderState_Concurrent).
+sky_check "world: VolumetricCloud SetVisibleInRealTimeSkyCaptures" "$VC" "void SetVisibleInRealTimeSkyCaptures(bool bValue)"
+sky_check "world: SceneComponent SetVisibility" "Classes/Components/SceneComponent.h" "void SetVisibility(bool bNewVisibility, bool bPropagateToChildren=false)"
 sky_check "world: VolumetricCloud per-sample transmittance" "$VC" "void SetbUsePerSampleAtmosphericLightTransmittance(bool NewValue)"
 sky_check "world: VolumetricCloud SetSkyLightCloudBottomOcclusion" "$VC" "void SetSkyLightCloudBottomOcclusion(float NewValue)"
 sky_check "world: VolumetricCloud SetViewSampleCountScale" "$VC" "void SetViewSampleCountScale(float NewValue)"
@@ -490,6 +495,10 @@ core_check "world: FObjectProperty SetObjectPropertyValue_InContainer" "UnrealTy
 core_check "world: FBoolProperty SetPropertyValue_InContainer" "UnrealType.h" "void SetPropertyValue_InContainer(void* A, bool Value, int32 ArrayIndex = 0) const"
 core_check "world: UFunction ParmsSize" "Class.h" "uint16 ParmsSize;"
 core_check "world: UObject ProcessEvent" "Object.h" "virtual void ProcessEvent( UFunction* Function, void* Parms );"
+# Sky step 1: the cloud material's FlightSimGraphGeneration tag is read back into
+# render.json (FlightSimClouds.cpp ApplyClouds, under WITH_METADATA).
+core_check "world: UPackage GetMetaData (FMetaData&)" "Package.h" "COREUOBJECT_API FMetaData& GetMetaData();"
+core_check "world: FMetaData GetValue by TCHAR key" "MetaData.h" "COREUOBJECT_API const FString& GetValue(const UObject* Object, const TCHAR* Key);"
 if [ -f "$UE_ROOT/Engine/Content/EngineResources/WhiteSquareTexture.uasset" ]; then
     ok "world: engine WhiteSquareTexture" "present (the tiles material's texture default)"
 else
@@ -610,6 +619,84 @@ rp_check "distant: translucency applies cloud fogging" "../../Shaders/Private/Ba
 rp_check "distant: cloud sample count law" "../../Shaders/Private/VolumetricCloud.usf" "RenderVolumetricCloudParameters.SampleCountMax * saturate((TMax - TMin) * RenderVolumetricCloudParameters.InvDistanceToSampleCountMax)"
 rp_cvar r.VolumetricCloud.DistanceToSampleMaxCount "Renderer/Private/VolumetricCloudRendering.cpp"
 rp_check "distant: trace clamps TMax" "../../Shaders/Private/VolumetricCloud.usf" "const float MarchingDistance = min(RenderVolumetricCloudParameters.TracingMaxDistance, TMax - TMin);"
+# Sky step 3 (the owner's X-Plane-12 brief): the march tier's cvar table
+# (FlightSimClouds.cpp FlightSimWorldPure::CloudCvarName), each name at its
+# registration WITH the default the constrained row repeats
+# (world_beauty.ENGINE_CLOUD_CVAR_DEFAULTS), and the Cinematic scalability
+# group's three sky LUT values that override those defaults on every beauty
+# render (world_beauty.CINEMATIC_SKY_CVARS; BaseScalability.ini [EffectsQuality@Cine]).
+VCR="Renderer/Private/VolumetricCloudRendering.cpp"
+SAR="Renderer/Private/SkyAtmosphereRendering.cpp"
+rp_check "sky step 3: cvar r.VolumetricCloud.ViewRaySampleMaxCount 768" "$VCR" "TEXT(\"r.VolumetricCloud.ViewRaySampleMaxCount\"), 768,"
+rp_check "sky step 3: cvar r.VolumetricCloud.Shadow.ViewRaySampleMaxCount 80" "$VCR" "TEXT(\"r.VolumetricCloud.Shadow.ViewRaySampleMaxCount\"), 80,"
+rp_check "sky step 3: cvar r.VolumetricCloud.DistanceToSampleMaxCount 15" "$VCR" "TEXT(\"r.VolumetricCloud.DistanceToSampleMaxCount\"), 15.0f,"
+rp_check "sky step 3: cvar r.VolumetricCloud.SampleMinCount 2" "$VCR" "TEXT(\"r.VolumetricCloud.SampleMinCount\"), 2,"
+rp_check "sky step 3: cvar r.VolumetricCloud.ShadowMap.RaySampleMaxCount 128" "$VCR" "TEXT(\"r.VolumetricCloud.ShadowMap.RaySampleMaxCount\"), 128.0f,"
+rp_check "sky step 3: cvar r.VolumetricCloud.ShadowMap.MaxResolution 2048" "$VCR" "TEXT(\"r.VolumetricCloud.ShadowMap.MaxResolution\"), 2048,"
+rp_check "sky step 3: cvar r.VolumetricCloud.SkyAO.TraceSampleCount 10" "$VCR" "TEXT(\"r.VolumetricCloud.SkyAO.TraceSampleCount\"), 10,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.AerialPerspectiveLUT.Depth 96" "$SAR" "TEXT(\"r.SkyAtmosphere.AerialPerspectiveLUT.Depth\"), 96.0f,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution 16" "$SAR" "TEXT(\"r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution\"), 16.0f,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.AerialPerspectiveLUT.Width 32" "$SAR" "TEXT(\"r.SkyAtmosphere.AerialPerspectiveLUT.Width\"), 32,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.TransmittanceLUT.SampleCount 10" "$SAR" "TEXT(\"r.SkyAtmosphere.TransmittanceLUT.SampleCount\"), 10.0f,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.MultiScatteringLUT.SampleCount 15" "$SAR" "TEXT(\"r.SkyAtmosphere.MultiScatteringLUT.SampleCount\"), 15.0f,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.DistanceToSampleCountMax 150" "$SAR" "TEXT(\"r.SkyAtmosphere.DistanceToSampleCountMax\"), 150.0f,"
+rp_check "sky step 3: Cinematic AP DepthResolution 32" "../../Config/BaseScalability.ini" "r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution=32.0"
+rp_check "sky step 3: Cinematic TransmittanceLUT.SampleCount 30" "../../Config/BaseScalability.ini" "r.SkyAtmosphere.TransmittanceLUT.SampleCount=30.0"
+rp_check "sky step 3: Cinematic MultiScatteringLUT.SampleCount 20" "../../Config/BaseScalability.ini" "r.SkyAtmosphere.MultiScatteringLUT.SampleCount=20.0"
+rp_check "sky step 3: a scalability set cannot lower a code set" "Core/Private/HAL/ConsoleManager.cpp" "ECVF_SetByCode"
+# Repair round 1: r.VolumetricCloud.DistanceToSampleMaxCount also governs the
+# sky-light capture's step count. The engine sets InvDistanceToSampleCountMax
+# once, from that cvar, for every trace; its bIsReflectionRendering block
+# re-derives only SampleCountMax / ShadowSampleCountMax (the commandlet's
+# reflection caps), so the probe tier lengthens that capture's march too.
+rp_check "sky step 3: InvDistanceToSampleCountMax is set once, for every trace" "$VCR" "CloudGlobalShaderParams.InvDistanceToSampleCountMax"
+rp_check "sky step 3: ... from r.VolumetricCloud.DistanceToSampleMaxCount" "$VCR" "KilometersToCentimeters * CVarVolumetricCloudDistanceToSampleMaxCount.GetValueOnAnyThread());"
+rp_check "sky step 3: the reflection pass re-derives SampleCountMax" "$VCR" "UVolumetricCloudComponent::BaseViewRaySampleCount * CloudInfo.GetVolumetricCloudSceneProxy().ReflectionViewSampleCountScale,"
+rp_check "sky step 3: the reflection pass re-derives ShadowSampleCountMax" "$VCR" "UVolumetricCloudComponent::BaseShadowRaySampleCount * CloudInfo.GetVolumetricCloudSceneProxy().ShadowReflectionViewSampleCountScale,"
+rp_check "sky step 3: the reflection pass is the sky-light capture" "$VCR" "CloudRC.bIsReflectionRendering = ViewInfo.bIsReflectionCapture;"
+# Sky step 4 (the owner's X-Plane-12 brief): the height fog's vertical profile
+# (FlightSimClouds.cpp ApplyAtmosphere / Advance, FlightSimWorldPure::
+# FogHeightFalloffFor, FogDensityRebased, FogReferenceZM) and the sky's multiple
+# scattering on every GPU class (SkyMultiScatterFor). Each pattern is the
+# engine reading the laws rest on, read in the 5.7 source on 2026-11-15.
+EHF="Engine/Classes/Components/ExponentialHeightFogComponent.h"
+rp_check "sky step 4: Fog SetFogHeightFalloff" "$EHF" "ENGINE_API void SetFogHeightFalloff(float Value);"
+rp_check "sky step 4: Fog SetStartDistance" "$EHF" "ENGINE_API void SetStartDistance(float Value);"
+rp_check "sky step 4: Fog SetFogMaxOpacity" "$EHF" "ENGINE_API void SetFogMaxOpacity(float Value);"
+rp_check "sky step 4: Fog FogHeightFalloff" "$EHF" "float FogHeightFalloff;"
+rp_check "sky step 4: Fog StartDistance" "$EHF" "float StartDistance;"
+rp_check "sky step 4: Fog FogMaxOpacity" "$EHF" "float FogMaxOpacity;"
+rp_check "sky step 4: SceneComponent SetWorldLocation" "Engine/Classes/Components/SceneComponent.h" "ENGINE_API void SetWorldLocation(FVector NewLocation, bool bSweep=false, FHitResult* OutSweepHitResult=nullptr, ETeleportType Teleport = ETeleportType::None);"
+rp_check "sky step 4: a moved fog re-registers" "Engine/Private/Components/ExponentialHeightFogComponent.cpp" "void UExponentialHeightFogComponent::SendRenderTransform_Concurrent()"
+rp_check "sky step 4: fog density per 1000 (per cm)" "Renderer/Private/SceneCore.cpp" "FogData[0].Density = State.FogDensity / 1000.0f;"
+rp_check "sky step 4: fog falloff per 1000 (per cm)" "Renderer/Private/SceneCore.cpp" "FogData[0].HeightFalloff = State.FogHeightFalloff / 1000.0f;"
+rp_check "sky step 4: the fog's density law" "../../Shaders/Private/HeightFogCommon.ush" "// The exponential fog density function is d = GlobalDensity * exp(-HeightFalloff * z)"
+rp_check "sky step 4: the fog's line integral" "../../Shaders/Private/HeightFogCommon.ush" "float LineIntegral = ( 1.0f - exp2(-Falloff) ) / Falloff;"
+rp_check "sky step 4: the observer height clamp (65536 cm)" "Renderer/Private/FogRendering.cpp" "float MaxObserverHeightDifference = 65536.0f;"
+rp_check "sky step 4: the clamped ray is shifted" "../../Shaders/Private/HeightFogCommon.ush" "CameraToReceiver.z += WorldCameraOrigin.z - WorldObserverOrigin.z; // Compensate this vector for clamping the observer height"
+rp_check "sky step 4: the sky is drawn before the fog" "Renderer/Private/DeferredShadingRenderer.cpp" "RenderSkyAtmosphere(GraphBuilder, SceneTextures);"
+rp_check "sky step 4: the fog is drawn over the sky" "Renderer/Private/DeferredShadingRenderer.cpp" "RenderFog(GraphBuilder, SceneTextures, LightShaftOcclusionTexture, bFogComposeLocalFogVolumes);"
+rp_check "sky step 4: the volumetric fog shares the profile" "../../Shaders/Private/VolumetricFog.usf" "float GlobalDensityFirst = FogStruct.ExponentialFogParameters3.x * exp2(-FogStruct.ExponentialFogParameters.y * (WorldPosition.z - FogStruct.ExponentialFogParameters3.y));"
+rp_check "sky step 4: the multi-scatter factor is a LUT multiply" "../../Shaders/Private/SkyAtmosphere.usf" "MultiScatteredLuminanceLutUAV[int2(PixPos)] = L * Atmosphere.MultiScatteringFactor;"
+rp_check "sky step 4: the factor reaches the shader as a uniform" "Renderer/Private/SkyAtmosphereRendering.cpp" "COPYMACRO(MultiScatteringFactor);"
+# Lane sky-atmosphere: -look-sky-gradient (core/sky/gradient.py; FlightSimClouds.cpp
+# ApplyAtmosphere, FlightSimWorldPure::SkyGradientFor / HorizonAirlightGain). Read in
+# the 5.7 source on 2026-11-15.
+rp_check "sky-gradient: Fog SetFogCutoffDistance" "$EHF" "ENGINE_API void SetFogCutoffDistance(float Value);"
+rp_check "sky-gradient: Fog FogCutoffDistance" "$EHF" "float FogCutoffDistance;"
+rp_check "sky-gradient: Fog SetSkyAtmosphereAmbientContributionColorScale" "$EHF" "ENGINE_API void SetSkyAtmosphereAmbientContributionColorScale(FLinearColor NewValue);"
+rp_check "sky-gradient: Fog FogInscatteringLuminance" "$EHF" "FLinearColor FogInscatteringLuminance;"
+rp_check "sky-gradient: past the cutoff a pixel takes no fog" "../../Shaders/Private/HeightFogCommon.ush" "if (FogData.ExponentialFogParameters3.w > 0 && CameraToReceiverLength > FogData.ExponentialFogParameters3.w)"
+rp_check "sky-gradient: the cutoff reaches the shader" "Renderer/Private/FogRendering.cpp" "FogInfo.InscatteringColorCubemap ? 1.0f : 0.0f, FogInfo.FogCutoffDistance);"
+rp_check "sky-gradient: a sky pixel decodes to 1/1e-8 cm" "Engine/Private/SceneView.cpp" "SubtractValue -= 0.00000001f;"
+rp_check "sky-gradient: the fog ambient is the distant sky light" "../../Shaders/Private/HeightFogCommon.ush" "float3 SkyAmbient = FogData.SkyAtmosphereAmbientContributionColorScale.rgb * View.SkyAtmosphereHeightFogContribution.xxx * GetViewDistanceSkyLightColor();"
+rp_check "sky-gradient: the distant sky light is a sphere mean" "../../Shaders/Private/SkyAtmosphere.usf" "const float SamplerSolidAngle = 4.0f * PI / float(THREADGROUP_SIZE * THREADGROUP_SIZE);"
+rp_check "sky-gradient: Atmosphere SetRayleighScattering" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetRayleighScattering(FLinearColor NewValue);"
+rp_check "sky-gradient: Atmosphere SetRayleighScatteringScale" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetRayleighScatteringScale(float NewValue);"
+rp_check "sky-gradient: Atmosphere SetRayleighExponentialDistribution" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetRayleighExponentialDistribution(float NewValue);"
+rp_check "sky-gradient: Atmosphere SetOtherAbsorption" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetOtherAbsorption(FLinearColor NewValue);"
+rp_check "sky-gradient: Atmosphere SetOtherAbsorptionScale" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetOtherAbsorptionScale(float NewValue);"
+rp_check "sky-gradient: the Earth Rayleigh scale height" "Engine/Private/Components/SkyAtmosphereComponent.cpp" "const float EarthRayleighScaleHeight = 8.0f;"
 # The sky HDRI probe (ApplySkyHdri).
 rp_check "sky-hdri: SLS_SpecifiedCubemap" "Engine/Classes/Components/SkyLightComponent.h" "SLS_SpecifiedCubemap,"
 rp_check "sky-hdri: SkyLight SourceType" "Engine/Classes/Components/SkyLightComponent.h" "TEnumAsByte<enum ESkyLightSourceType> SourceType;"
@@ -620,6 +707,19 @@ rp_check "sky-hdri: SkyLight SetRealTimeCapture" "Engine/Classes/Components/SkyL
 rp_check "sky-hdri: SkyLight SetCaptureIsDirty" "Engine/Classes/Components/SkyLightComponent.h" "ENGINE_API void SetCaptureIsDirty();"
 rp_check "sky-hdri: SkyLight IsRealTimeCaptureEnabled" "Engine/Classes/Components/SkyLightComponent.h" "IsRealTimeCaptureEnabled()"
 rp_check "sky-hdri: UTextureCube header" "Engine/Classes/Engine/TextureCube.h" "class UTextureCube"
+# Sky step 6 (the owner's X-Plane-12 brief, 2026-11-15): the high cirrus sheet
+# (FlightSimClouds.cpp ApplyCirrus / BuildCurvedDisc, M_FlightSimCirrus from
+# create_world_cirrus). No engine symbol beyond the distant sheet's above: the
+# same UProceduralMeshComponent section, primitive setters, material flags and
+# SkyAtmosphere material nodes (every rp_check above covers it); the HLSL
+# intrinsics the shader adds (radians, sign, exp, pow, smoothstep) are the
+# language's. The first Windows build verifies the material compiles.
+# High-sky fx (2026-11-15): the beauty rainbow (FlightSimSkyFx.cpp, M_FlightSimRainbow
+# from create_world_rainbow) and the in-cloud flash (FlightSimWeather.cpp Advance).
+# No engine symbol beyond those checked above: the starfield's engine sphere on a
+# UStaticMeshComponent, SetRenderCustomDepth (rp_check above), FCommandLine::Get
+# (beauty_check above), the SkyAtmosphere material nodes, and the storm cell's
+# existing Flash / FlashRelCm parameters. The first Windows build verifies it.
 # -- visual round 5, lane L3 -- end --------------------------------------------
 
 # -- sun-shafts-sky-occlusion (visual overhaul, 2026-11-09) -----------------

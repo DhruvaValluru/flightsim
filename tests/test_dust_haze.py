@@ -305,7 +305,9 @@ int main() {
 # -- the hooks and the engine surface ---------------------------------------------
 
 def test_the_hooks_are_in_the_world_beauty_only():
-    after = CLOUDS_CPP.index("ApplyAtmosphere(World, Scene, VisibilityKm);")
+    """Sky step 4 (2026-11-15): ApplyAtmosphere gained the Aircraft argument (the
+    height fog's reference height follows it); the hook still comes right after."""
+    after = CLOUDS_CPP.index("ApplyAtmosphere(World, Scene, VisibilityKm, Aircraft);")
     hook = CLOUDS_CPP.index("DustHaze.Apply(World, Scene, Params, Card, VisibilityKm,")
     assert 0 < hook - after < 300
     assert 'Record->SetObjectField(TEXT("dust_haze"), DustOut);' in CLOUDS_CPP

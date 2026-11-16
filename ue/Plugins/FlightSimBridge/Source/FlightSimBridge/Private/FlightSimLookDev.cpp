@@ -667,7 +667,8 @@ namespace
 			S.Tornado->TornadoShade = TornadoShade;
 			S.Tornado->BuildBeautyTornado(S.Card, S.Visual->BeautyOnlyActors, S.Visual->LookApplied);
 		}
-		if (!S.WorldBeauty->Build(World, *P, S.CardRoot, Aircraft, Geo, *S.Visual, *S.Weather, *S.Tiles, Error))
+		if (!S.WorldBeauty->Build(World, *P, S.CardRoot, Aircraft, Geo, *S.Visual, *S.Weather, *S.Tiles,
+		                         S.bPhysicalSky ? &S.SkyPlan : nullptr, Error))   // sky step 2: the plan, as the commandlet
 		{
 			return false;
 		}

@@ -77,6 +77,10 @@ ATMOSPHERE_FIELDS: Tuple[str, ...] = (
     "wetness_floor",                # the tiles' wetness at least this under the preset
     "tiles_detail_strength",        # near-field detail normal strength
     "lightning_sky_gain",           # sky light x (1 + gain x flash) at a flash
+    # Sky step 4 (2026-11-15), appended so the indices above hold:
+    "fog_scale_height_km",          # the height fog's 1/e scale height; 0 = the scene's profile
+    "fog_start_distance_m",         # SetStartDistance (the scene's 1500)
+    "fog_max_opacity",              # SetFogMaxOpacity (the scene's 0.92)
 )
 
 #: Visual round 3 (round 2's #07, a tower view of an A320 at 1000 m in 10 mm/h
@@ -118,27 +122,52 @@ WET_VFOG_EXTINCTION_SCALE = 0.48
 #: perspective scale (which multiplied only the opaque surfaces' haze, so the
 #: Koschmieder beta stopped being the one total). The detail normal is a
 #: 4-6 degree micro relief (0.12), not a 23 degree one.
+#: Sky step 4 (the owner's X-Plane-12 brief, 2026-11-15): the height fog's
+#: vertical profile. The scene builds its fog with FogHeightFalloff 0.0002
+#: (FlightSimVisualScene.cpp), a 72 km scale height in the engine's units
+#: (:func:`fog_height_falloff`): uniform to the top of the atmosphere. The engine
+#: draws the fog OVER the sky atmosphere (DeferredShadingRenderer.cpp:
+#: RenderSkyAtmosphere, then RenderFog) and a sky pixel sits at the far plane, so
+#: under a uniform fog EVERY sky pixel from every camera takes the fog at its max
+#: opacity: 0.92 of one flat in-scatter colour (under a -sky= plan the sky light's
+#: average) over 0.08 of the atmosphere. That is the owner's "flat navy frame" and
+#: "no horizon haze". The clear and hazy rows give the fog the Mie layer's own
+#: scale height (``fog_scale_height_km`` = ``mie_scale_height_km``: the Koschmieder
+#: split put one aerosol in two renderers, so both get one vertical profile), so
+#: the zenith ray carries ~density x scale height of fog, the horizon ray
+#: saturates to a pale band, and ridges layer paler and bluer through a thinning
+#: haze. The density at the SCENE's fog height is kept (:func:`fog_density_rebased`):
+#: the Koschmieder count at the ground is unchanged. The weather rows keep the
+#: scene's uniform fog (0: their haze is the column under a deck, which the
+#: storm's rain haze shapes). Start distance and max opacity are the scene's.
+#: UNCALIBRATED; UNMEASURED until the Windows round in docs/VISUAL_FIDELITY_PLAN.md
+#: "Sky step 4".
 ATMOSPHERE: Dict[str, Dict[str, float]] = {
     "clear": dict(mie_scale_height_km=1.2, mie_anisotropy=0.80, mie_share=0.6, mie_cap_per_km=0.25,
                   aerial_perspective_scale=1.0, vfog_distance_m=8000.0, vfog_scattering_distribution=0.75,
                   vfog_extinction_scale=1.0, cloud_bottom_occlusion=0.5, rain_readability_gain=1.0,
-                  wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0),
+                  wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0,
+                  fog_scale_height_km=1.2, fog_start_distance_m=1500.0, fog_max_opacity=0.92),
     "hazy": dict(mie_scale_height_km=1.6, mie_anisotropy=0.76, mie_share=0.7, mie_cap_per_km=0.6,
                  aerial_perspective_scale=1.0, vfog_distance_m=8000.0, vfog_scattering_distribution=0.7,
                  vfog_extinction_scale=1.0, cloud_bottom_occlusion=0.5, rain_readability_gain=1.0,
-                 wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0),
+                 wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0,
+                 fog_scale_height_km=1.6, fog_start_distance_m=1500.0, fog_max_opacity=0.92),
     "overcast": dict(mie_scale_height_km=1.4, mie_anisotropy=0.70, mie_share=0.4, mie_cap_per_km=0.6,
                      aerial_perspective_scale=1.0, vfog_distance_m=6000.0, vfog_scattering_distribution=0.4,
                      vfog_extinction_scale=1.0, cloud_bottom_occlusion=0.75, rain_readability_gain=1.0,
-                     wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0),
+                     wetness_floor=0.0, tiles_detail_strength=0.12, lightning_sky_gain=0.0,
+                     fog_scale_height_km=0.0, fog_start_distance_m=1500.0, fog_max_opacity=0.92),
     "rain": dict(mie_scale_height_km=1.0, mie_anisotropy=0.65, mie_share=0.3, mie_cap_per_km=0.8,
                  aerial_perspective_scale=1.0, vfog_distance_m=4000.0, vfog_scattering_distribution=0.3,
                  vfog_extinction_scale=WET_VFOG_EXTINCTION_SCALE, cloud_bottom_occlusion=0.85, rain_readability_gain=1.5,
-                 wetness_floor=0.6, tiles_detail_strength=0.12, lightning_sky_gain=0.0),
+                 wetness_floor=0.6, tiles_detail_strength=0.12, lightning_sky_gain=0.0,
+                 fog_scale_height_km=0.0, fog_start_distance_m=1500.0, fog_max_opacity=0.92),
     "storm": dict(mie_scale_height_km=1.8, mie_anisotropy=0.65, mie_share=0.3, mie_cap_per_km=0.8,
                   aerial_perspective_scale=1.0, vfog_distance_m=4000.0, vfog_scattering_distribution=0.3,
                   vfog_extinction_scale=WET_VFOG_EXTINCTION_SCALE, cloud_bottom_occlusion=0.9, rain_readability_gain=1.5,
-                  wetness_floor=0.85, tiles_detail_strength=0.12, lightning_sky_gain=3.0),
+                  wetness_floor=0.85, tiles_detail_strength=0.12, lightning_sky_gain=3.0,
+                  fog_scale_height_km=0.0, fog_start_distance_m=1500.0, fog_max_opacity=0.92),
 }
 
 
@@ -363,6 +392,72 @@ def aerosol_visibility_km(preset: str, visibility_km: float) -> float:
     return CLEAR_DEFAULT_VISIBILITY_KM if preset == "clear" else 0.0
 
 
+# -- sky step 4: the height fog's vertical profile ------------------------------------
+
+#: The scene's fog as FlightSimVisualScene.cpp builds it (the measure path's,
+#: untouched): FogHeightFalloff, StartDistance (m) and FogMaxOpacity.
+SCENE_FOG_HEIGHT_FALLOFF = 0.0002
+SCENE_FOG_START_DISTANCE_M = 1500.0
+SCENE_FOG_MAX_OPACITY = 0.92
+#: The engine clamps the fog's observer to this far above the fog's height
+#: (FogRendering.cpp MaxObserverHeightDifference, 65536 cm) and shifts the ray
+#: by the excess, so the fog's reference height follows the aircraft.
+FOG_OBSERVER_CLAMP_M = 655.36
+#: Advance re-bases the fog once the aircraft has climbed or descended this far.
+FOG_REBASE_STEP_M = 100.0
+#: FogHeightFalloff x the 1/e scale height in km. The engine draws
+#: FogDensity/1000 per cm x 2^(-FogHeightFalloff/1000 x (z - FogHeight) in cm)
+#: (SceneCore.cpp 403-404, HeightFogCommon.ush CalculateLineIntegralShared), so
+#: the 1/e scale height is 10 / (ln 2 x falloff) metres.
+FOG_FALLOFF_PER_SCALE_HEIGHT_KM = 0.01 / math.log(2.0)
+
+
+def fog_height_falloff(scale_height_km: float) -> float:
+    """The FogHeightFalloff whose 1/e scale height is ``scale_height_km``;
+    0 (or less) keeps the scene's SCENE_FOG_HEIGHT_FALLOFF. The C++ twin is
+    FlightSimWorldPure::FogHeightFalloffFor."""
+    if scale_height_km > 0.0:
+        return FOG_FALLOFF_PER_SCALE_HEIGHT_KM / float(scale_height_km)
+    return SCENE_FOG_HEIGHT_FALLOFF
+
+
+def fog_scale_height_km(falloff: float) -> float:
+    """The 1/e scale height (km) a FogHeightFalloff draws (the inverse law)."""
+    return FOG_FALLOFF_PER_SCALE_HEIGHT_KM / float(falloff)
+
+
+def fog_density_rebased(density: float, falloff: float, from_z_m: float, to_z_m: float) -> float:
+    """The FogDensity at a new reference height ``to_z_m`` that draws the same
+    density everywhere as ``density`` did at ``from_z_m`` under ``falloff``:
+    density x 2^(-falloff x dz / 10) (falloff/1000 per cm x 100 cm per metre).
+    The C++ twin is FlightSimWorldPure::FogDensityRebased."""
+    return float(density) * 2.0 ** (-float(falloff) * (float(to_z_m) - float(from_z_m)) / 10.0)
+
+
+def fog_reference_z_m(scene_z_m: float, aircraft_z_m: float, profile: bool) -> float:
+    """The fog's reference height: the aircraft's when the row states a profile
+    and the aircraft is above the scene's fog height, else the scene's. The C++
+    twin is FlightSimWorldPure::FogReferenceZM."""
+    if profile and aircraft_z_m > scene_z_m:
+        return float(aircraft_z_m)
+    return float(scene_z_m)
+
+
+def fog_zenith_optical_depth(density_at_z: float, falloff: float, camera_above_reference_m: float = 0.0) -> float:
+    """The straight-up line integral of the engine's fog from a camera
+    ``camera_above_reference_m`` above the fog's reference height, in the
+    shader's own base-2 exponent (2^-tau is the fog's transmittance;
+    HeightFogCommon.ush CalculateLineIntegralShared: origin density x
+    (1 - 2^(-f dz)) / (f dz) x length, which for an unbounded vertical ray is
+    density / falloff at the camera). A uniform fog (falloff 0) is unbounded,
+    which is why the scene's sky took the max opacity everywhere. A pure-Python
+    reading of the shader for the tests, not a render."""
+    if falloff <= 0.0:
+        return math.inf
+    at_camera = float(density_at_z) * 2.0 ** (-float(falloff) * float(camera_above_reference_m) / 10.0)
+    return at_camera / float(falloff)
+
+
 #: The analytic height fog's sun lobe is pow(cos, n) / 4 pi beyond the
 #: volumetric fog's distance (the project keeps r.SupportExpFogMatchesVolumetricFog
 #: at 0, so the measure renders' fog is untouched); its exponent is fitted so the
@@ -471,7 +566,10 @@ def world_ground_albedo_srgb(surface: Optional[str], wetness: float, preset: str
 
 # -- the cloud presets -------------------------------------------------------------
 
-CLOUD_PRESETS: Tuple[str, ...] = ("cumulus", "stratocumulus", "overcast", "nimbostratus")
+#: Sky step 5 (2026-11-15): "altocumulus" appended (index 4 on both sides, so
+#: every existing row index and overrides file stands): the plan's mid-level
+#: type gets its own row instead of drawing stratocumulus (design D3).
+CLOUD_PRESETS: Tuple[str, ...] = ("cumulus", "stratocumulus", "overcast", "nimbostratus", "altocumulus")
 
 #: Selection thresholds (select_cloud). UNCALIBRATED.
 CLOUD_OVERCAST_COVER = 0.85
@@ -510,6 +608,14 @@ CLOUDS: Dict[str, Dict[str, float]] = {
     "nimbostratus": dict(extinction_per_m=0.045, shape_scale_km=9.0, detail_scale_km=0.6,
                          detail_erosion=0.3, bottom_softness=0.1, top_rounding=0.4,
                          coverage_contrast=0.8, default_cover=0.98),
+    # Sky step 5: altocumulus, the plan's mid-level sheet (the reference photo's
+    # thin translucent cells): small cells (shape 1.2 km), fine erosion, a thin
+    # extinction so light bleeds through, a soft base and a half-rounded top.
+    # Chosen by the plan's mid-level law (core/sky/clouds.py), never by
+    # select_cloud. UNCALIBRATED: never rendered.
+    "altocumulus": dict(extinction_per_m=0.03, shape_scale_km=1.2, detail_scale_km=0.12,
+                        detail_erosion=0.4, bottom_softness=0.15, top_rounding=0.5,
+                        coverage_contrast=1.1, default_cover=0.5),
 }
 
 #: The fair-weather layer ``-beauty-clouds=fair`` adds when the card states no
@@ -588,12 +694,116 @@ OCCLUSION_FLAG_TRANSMITTANCE = 0.5
 #: render commandlet now loads and builds the two blue-noise textures before
 #: its first capture and records render_settings.beauty_path.blue_noise
 #: (cloud_march_jittered). No row here changes: the fix adds no march cost.
+#:
+#: Sky step 3 (the owner's X-Plane-12 brief, 2026-11-15): three tiers. "discrete"
+#: is the offline quality (the engine's caps: 768 view and 80 shadow samples over
+#: a 50 km trace; round 2 drew 6 x 96 = 576 and 60); "integrated" (the CONSTRAINED
+#: class) stays ef361bd6's row, the one rounds 5-95 rendered; "probe" is the
+#: constrained class's opt-in raise (288 view, 20 shadow samples), reached only
+#: by ``-cloud-march=probe``: one scene, one still, the Windows TDR (887a0006) is
+#: the pass or fail. UNCALIBRATED; no tier but "integrated" has rendered.
 CLOUD_MARCH_FIELDS: Tuple[str, ...] = ("view_sample_count_scale", "shadow_sample_count_scale",
                                        "tracing_max_distance_km")
 CLOUD_MARCH: Dict[str, Dict[str, float]] = {
-    "discrete": dict(view_sample_count_scale=6.0, shadow_sample_count_scale=6.0, tracing_max_distance_km=50.0),
+    "discrete": dict(view_sample_count_scale=8.0, shadow_sample_count_scale=8.0, tracing_max_distance_km=50.0),
     "integrated": dict(view_sample_count_scale=2.0, shadow_sample_count_scale=1.0, tracing_max_distance_km=80.0),
+    "probe": dict(view_sample_count_scale=3.0, shadow_sample_count_scale=2.0, tracing_max_distance_km=80.0),
 }
+#: ``-cloud-march=auto|constrained|discrete|probe`` (FlightSimClouds.cpp Build):
+#: auto is the GPU class (C++ CloudConstrainedGpu), as before sky step 3; a named
+#: word is the owner's measurement on any GPU; another word refuses
+#: ``world_beauty.clouds: -cloud-march=...``.
+CLOUD_MARCH_SWITCH = "-cloud-march"
+CLOUD_MARCH_SWITCH_WORDS: Tuple[str, ...] = ("auto", "constrained", "discrete", "probe")
+
+
+def cloud_march_for(word: Optional[str], constrained: bool) -> Optional[str]:
+    """The CLOUD_MARCH row a switch word picks on a GPU class (C++ CloudMarchFor):
+    None for a word Build refuses."""
+    if word is None or word == "auto":
+        return "integrated" if constrained else "discrete"
+    return {"constrained": "integrated", "discrete": "discrete", "probe": "probe"}.get(word)
+
+
+#: Sky step 3: the renderer cvars each march tier sets (C++ CloudCvar; ApplyClouds
+#: SetWorldCvar at code priority, saved once, put back by RestoreCvars, every value
+#: recorded [before, read back] under look_applied.world_beauty.clouds.march.cvars).
+#: Field order is the C++ CloudCvarFieldName order; CLOUD_CVAR_NAMES maps a field to
+#: its exact cvar name (C++ CloudCvarName).
+CLOUD_CVAR_FIELDS: Tuple[str, ...] = (
+    "view_ray_sample_max", "shadow_ray_sample_max", "distance_to_sample_max_km", "sample_min_count",
+    "shadowmap_ray_sample_max", "shadowmap_max_resolution", "skyao_trace_samples", "ap_lut_depth_km",
+    "ap_lut_depth_resolution", "ap_lut_width", "transmittance_lut_samples", "multiscatter_lut_samples",
+    "sky_distance_to_sample_max_km")
+CLOUD_CVAR_NAMES: Dict[str, str] = {
+    "view_ray_sample_max": "r.VolumetricCloud.ViewRaySampleMaxCount",
+    "shadow_ray_sample_max": "r.VolumetricCloud.Shadow.ViewRaySampleMaxCount",
+    "distance_to_sample_max_km": "r.VolumetricCloud.DistanceToSampleMaxCount",
+    "sample_min_count": "r.VolumetricCloud.SampleMinCount",
+    "shadowmap_ray_sample_max": "r.VolumetricCloud.ShadowMap.RaySampleMaxCount",
+    "shadowmap_max_resolution": "r.VolumetricCloud.ShadowMap.MaxResolution",
+    "skyao_trace_samples": "r.VolumetricCloud.SkyAO.TraceSampleCount",
+    "ap_lut_depth_km": "r.SkyAtmosphere.AerialPerspectiveLUT.Depth",
+    "ap_lut_depth_resolution": "r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution",
+    "ap_lut_width": "r.SkyAtmosphere.AerialPerspectiveLUT.Width",
+    "transmittance_lut_samples": "r.SkyAtmosphere.TransmittanceLUT.SampleCount",
+    "multiscatter_lut_samples": "r.SkyAtmosphere.MultiScatteringLUT.SampleCount",
+    "sky_distance_to_sample_max_km": "r.SkyAtmosphere.DistanceToSampleCountMax",
+}
+#: The engine's registration defaults (UE 5.7 VolumetricCloudRendering.cpp,
+#: SkyAtmosphereRendering.cpp; scripts/check_bridge_api.sh pins each line).
+ENGINE_CLOUD_CVAR_DEFAULTS: Dict[str, float] = {
+    "view_ray_sample_max": 768.0, "shadow_ray_sample_max": 80.0, "distance_to_sample_max_km": 15.0,
+    "sample_min_count": 2.0, "shadowmap_ray_sample_max": 128.0, "shadowmap_max_resolution": 2048.0,
+    "skyao_trace_samples": 10.0, "ap_lut_depth_km": 96.0, "ap_lut_depth_resolution": 16.0, "ap_lut_width": 32.0,
+    "transmittance_lut_samples": 10.0, "multiscatter_lut_samples": 15.0, "sky_distance_to_sample_max_km": 150.0,
+}
+#: What the Cinematic scalability group (BaseScalability.ini [EffectsQuality@Cine],
+#: applied by the render commandlet's beauty path AFTER this lane, at scalability
+#: priority) sets of these: the values the render laptop has drawn with since the
+#: beauty path existed. A code-priority set cannot be lowered by it, so the
+#: constrained row MUST repeat these, not the registration defaults, to stay a
+#: no-op (the design doc's "engine defaults" 16 / 10 / 15 would have lowered the sky).
+CINEMATIC_SKY_CVARS: Dict[str, float] = {
+    "ap_lut_depth_resolution": 32.0, "transmittance_lut_samples": 30.0, "multiscatter_lut_samples": 20.0,
+}
+
+
+def cloud_cvars_in_force() -> Dict[str, float]:
+    """The values in force on the render laptop before sky step 3: the Cinematic
+    group's where it speaks, the registration default elsewhere (= the constrained row)."""
+    return {f: CINEMATIC_SKY_CVARS.get(f, ENGINE_CLOUD_CVAR_DEFAULTS[f]) for f in CLOUD_CVAR_FIELDS}
+
+
+#: The rows (C++ CloudCvar). "discrete" is the offline quality for a discrete GPU
+#: (none in the project: set for one, never rendered); "integrated" is
+#: cloud_cvars_in_force() exactly (a recorded no-op on the laptop); "probe" is the
+#: integrated row with r.VolumetricCloud.DistanceToSampleMaxCount 8 km (the engine
+#: spreads the sample cap over that distance, so a short in-layer path gets up to
+#: twice the samples; opt-in with the probe march row). That distance also governs
+#: the sky-light capture's step count: UE 5.7 VolumetricCloudRendering.cpp sets
+#: InvDistanceToSampleCountMax once, from that cvar, for every trace, and its
+#: bIsReflectionRendering block re-derives only SampleCountMax / ShadowSampleCountMax
+#: (the commandlet's r.VolumetricCloud.ReflectionRaySampleMaxCount caps), so the
+#: probe lengthens that capture's march too (up to 15/8 x per short in-layer path,
+#: under those caps) in the submission that hung r87 (887a0006); the Windows TDR is
+#: its pass or fail (tests/test_sky_step3_cvars.py reads the engine block). UNCALIBRATED.
+CLOUD_CVARS: Dict[str, Dict[str, float]] = {
+    "discrete": dict(zip(CLOUD_CVAR_FIELDS,
+                         (768.0, 80.0, 8.0, 2.0, 256.0, 4096.0, 20.0, 160.0, 64.0, 64.0, 40.0, 30.0, 100.0))),
+    "integrated": cloud_cvars_in_force(),
+    "probe": dict(cloud_cvars_in_force(), distance_to_sample_max_km=8.0),
+}
+#: Fields where a LOWER value means more samples (the engine spreads a cap over
+#: the distance); every other field raises quality as it rises.
+CLOUD_CVAR_LOWER_IS_MORE: Tuple[str, ...] = ("distance_to_sample_max_km", "sky_distance_to_sample_max_km")
+#: The render commandlet's beauty-path cvars (SetBeautyCvar): one owner, named in
+#: the world record (march.render_path_owned), never set by the world lane.
+RENDER_PATH_CVARS: Tuple[str, ...] = (
+    "r.SkyAtmosphere.FastSkyLUT", "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque",
+    "r.SkyAtmosphere.MultiScatteringLUT.HighQuality", "r.SkyAtmosphere.LUT32", "r.SkyAtmosphere.SampleCountMax",
+    "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice", "r.VolumetricCloud",
+    "r.VolumetricCloud.HighQualityAerialPerspective", "r.VolumetricRenderTarget.Mode")
 #: The engine's base samples and caps (VolumetricCloudComponent.h, VolumetricCloudRendering.cpp).
 ENGINE_CLOUD_BASE_VIEW_SAMPLES = 96.0
 ENGINE_CLOUD_BASE_SHADOW_SAMPLES = 10.0
@@ -768,25 +978,260 @@ def cloud_height_density(height_density: float, norm_alt: float) -> float:
     return _lerp(1.0 - amount, 1.0, _smoothstep(0.0, CLOUD_HEIGHT_DENSITY_RISE, h))
 
 
+#: Sky step 1 (the owner's X-Plane-12 brief, 2026-11-14: "thin translucent
+#: stratocumulus/altocumulus with ragged, wispy edges and fine cauliflower
+#: detail; bright white tops, soft grey-blue bellies, light bleeding through
+#: thin edges"; r95's #03/#13 drew smooth rounded blobs with dark undersides).
+#: ``-look-cloud-wisp=on|off`` (on by default; off is round 95 exactly), the
+#: CUMULUS and STRATOCUMULUS shapes (overcast and nimbostratus keep their flat
+#: veils; altocumulus joins when its row exists): the material's five wisp
+#: scalars (cloud_layers.hlsl: WispAmount gates it all; CurlStrength cells of
+#: flow warp on a view sample's detail point, so lobes stretch into wisps; a
+#: finer top Worley octave weighted CLOUD_WISP_TOP_DETAIL, cauliflower lobes;
+#: the erosion x (1 + CLOUD_WISP_BOUNDARY_EROSION x (1 - density)), ragged
+#: outlines, intact cores; density^CLOUD_WISP_EDGE_POWER after the erosion, so
+#: a thin edge is optically thin and the sun comes through it) and the sky
+#: light's cloud-bottom occlusion CAPPED at CLOUD_WISP_BOTTOM_OCCLUSION (round
+#: 82 raised it to 0.8, a belly got a fifth of the sky: the dark undersides).
+#: No march sample added; a view sample inside a cloud costs up to 43 more
+#: lattice hashes, a shadow sample none. C++ CloudWispApplies / CloudWispRow /
+#: CloudBellyOcclusion are the twins. UNCALIBRATED: every amount; UNMEASURED
+#: until the Windows laptop renders scene 3 with and without the switch.
+CLOUD_WISP_SWITCH = "-look-cloud-wisp"
+CLOUD_WISP_SHAPES: Tuple[str, ...] = ("cumulus", "stratocumulus")
+CLOUD_WISP_AMOUNT = 1.0
+CLOUD_WISP_CURL = 0.6
+CLOUD_WISP_EDGE_POWER = 1.6
+CLOUD_WISP_TOP_DETAIL = 0.6
+CLOUD_WISP_BOUNDARY_EROSION = 0.5
+CLOUD_WISP_BOTTOM_OCCLUSION = 0.45
+#: The material's wisp scalars, in the order the C++ sets and records them
+#: (CloudWispFieldName), and their OFF values (the defaults a material has
+#: before the bridge sets them: an unset material draws round 95).
+CLOUD_WISP_FIELDS: Tuple[str, ...] = ("WispAmount", "CurlStrength", "EdgeThinPower", "TopDetailGain",
+                                      "BoundaryErosion")
+CLOUD_WISP_OFF: Dict[str, float] = {"WispAmount": 0.0, "CurlStrength": 0.0, "EdgeThinPower": 1.0,
+                                    "TopDetailGain": 0.0, "BoundaryErosion": 0.0}
+#: cloud_layers.hlsl's wisp constants: the flow's scale relative to the detail
+#: cells (coarser: lobes stretch, not jitter), the top octave's lacunarity and
+#: the far share it fades out over (UNCALIBRATED), and the top octave's own
+#: mean (measured on cloud_top_detail, re-measured by tests/test_cloud_wisp.py;
+#: a property of the noise, not a look value).
+CLOUD_CURL_OCTAVE_SCALE = 0.5
+CLOUD_TOP_DETAIL_LACUNARITY = 4.1
+CLOUD_TOP_DETAIL_MEAN = 0.479
+CLOUD_TOP_DETAIL_LOD = 0.5
+#: The beauty cloud's VolumetricAdvancedMaterialOutput constants, the twin of
+#: scripts/ue_create_materials.py CLOUD_SCATTERING (baked into the material at
+#: build, recorded by the bridge; the storm's STORM_SCATTERING is untouched).
+#: Against the storm's 0.5/0.5/0.5: a higher multi-scatter contribution and a
+#: lower occlusion light the body and the UNDERSIDE (the engine's octave ms
+#: scatters S0 x c^(2^ms - 1) through exp(-tau x o^ms)); a lower eccentricity
+#: makes the second octave near-isotropic (light wraps to the belly); g 0.85
+#: sharpens the forward lobe that lights a backlit rim. UNCALIBRATED.
+CLOUD_SCATTERING: Dict[str, float] = {"phase_g": 0.85, "phase_g2": -0.3, "phase_blend": 0.3, "octaves": 2,
+                                      "contribution": 0.7, "occlusion": 0.25, "eccentricity": 0.4}
+#: The owner's five parameter names (the brief's "Coverage, Density,
+#: DetailStrength, NoiseScale, Wind") and the material parameter each one IS:
+#: documented aliases, recorded in render.json, never a second input.
+CLOUD_OWNER_ALIASES: Dict[str, str] = {"Coverage": "Coverage", "Density": "ExtinctionPerM",
+                                       "DetailStrength": "DetailErosion", "NoiseScale": "ShapeScaleKm",
+                                       "Wind": "WindOffsetM"}
+
+
+def cloud_wisp_applies(wisp_on: bool, shape: str) -> bool:
+    """Sky step 1's wisp applies to a cumulus or stratocumulus layer with the switch on."""
+    return bool(wisp_on) and shape in CLOUD_WISP_SHAPES
+
+
+def cloud_wisp_row(applies: bool) -> Dict[str, float]:
+    """The material's five wisp scalars (C++ CloudWispRow): the amounts where the
+    wisp applies, CLOUD_WISP_OFF (round 95 exactly) where it does not."""
+    if not applies:
+        return dict(CLOUD_WISP_OFF)
+    return {"WispAmount": CLOUD_WISP_AMOUNT, "CurlStrength": CLOUD_WISP_CURL, "EdgeThinPower": CLOUD_WISP_EDGE_POWER,
+            "TopDetailGain": CLOUD_WISP_TOP_DETAIL, "BoundaryErosion": CLOUD_WISP_BOUNDARY_EROSION}
+
+
+def cloud_belly_occlusion(applies: bool, occlusion: float) -> float:
+    """SkyLightCloudBottomOcclusion after cloud_bottom_occlusion_for (C++
+    CloudBellyOcclusion): capped at CLOUD_WISP_BOTTOM_OCCLUSION where the wisp
+    applies, so a belly keeps more than half the sky; never raised."""
+    if applies and occlusion > CLOUD_WISP_BOTTOM_OCCLUSION:
+        return CLOUD_WISP_BOTTOM_OCCLUSION
+    return occlusion
+
+
+# -- sky-clouds lane (2026-11-15): -look-cloud-light=on|off ------------------------------
+# The owner's reference videos (Ultra Dynamic Sky tour, Epic's Volumetrics clouds) and
+# HYPERREAL_LIGHT_BRIEF item 7: cumulus with flat darker bases, bright silver-lined
+# sun-facing edges, real self-shadowed depth. Windows r99/r199 #13 drew flat white blobs:
+# step 1's multiple-scattering occlusion 0.25 lets the second octave see the sun through
+# a quarter of the optical depth, so a shadowed flank is nearly as bright as a lit top,
+# and round 82's billow row (coverage contrast x 2.5) cut every cumulus into a
+# flat-topped column. ON: the scattering node's six inputs become material parameters
+# (the defaults ARE CLOUD_SCATTERING, so an unset material and OFF draw c9e13c53), set to
+# the dual-lobe Henyey-Greenstein phase of cloud droplets (g 0.8 forward, -0.3 back,
+# a 0.2 back share: effective asymmetry 0.8 x 0.8 - 0.3 x 0.2 = 0.58, between the
+# 0.5 a multiply scattered cloud body shows and the 0.85 of single droplet Mie,
+# Hillaire 2016 / Schneider 2015) and Wrenninge et al. 2013's octave constants
+# a = b = c = 0.5 (the engine's own default); the billow row no longer overrides the
+# cumulus row (the wisp of step 1 carries the edge); a powder term (Schneider 2015:
+# 1 - exp(-2 sigma L), on the side facing away from the sun only, so a backlit rim
+# keeps its silver lining) and a flat-base darkening (photometry of fair cumulus: a
+# base reads 0.4-0.6 of its sunlit flank; a nimbostratus base 0.2-0.3, a storm's dark
+# grey) set the cloud's albedo (cloud_albedo.hlsl). No sample, no march step: ALU
+# per sample only. UNCALIBRATED (every look number): set by the Windows A/B.
+#: OFF by default (2026-11-15): the Mac look-dev scenes 13/1/9 draw no beauty cumulus
+#: layer (no -sky plan on the Mac prep), so the look was not seen; Windows A/B decides.
+CLOUD_LIGHT_SWITCH = "-look-cloud-light"
+CLOUD_LIGHT_DEFAULT = "off"
+CLOUD_LIGHT_FIELDS: Tuple[str, ...] = ("PhaseG", "PhaseG2", "PhaseBlend", "MsContribution", "MsOcclusion",
+                                       "MsEccentricity", "PowderAmount", "PowderDepthM", "BaseDarkening",
+                                       "BaseRise")
+#: OFF: the material's defaults (CLOUD_SCATTERING's six, no powder, no base darkening).
+CLOUD_LIGHT_OFF: Dict[str, float] = {"PhaseG": 0.85, "PhaseG2": -0.3, "PhaseBlend": 0.3, "MsContribution": 0.7,
+                                     "MsOcclusion": 0.25, "MsEccentricity": 0.4, "PowderAmount": 0.0,
+                                     "PowderDepthM": 40.0, "BaseDarkening": 0.0, "BaseRise": 0.3}
+CLOUD_LIGHT_PHASE: Tuple[float, float, float] = (0.8, -0.3, 0.2)
+CLOUD_LIGHT_OCTAVE: Tuple[float, float, float] = (0.5, 0.5, 0.5)
+CLOUD_LIGHT_POWDER = 0.6
+CLOUD_LIGHT_POWDER_DEPTH_M = 40.0
+#: Per shape (cumulus, stratocumulus, overcast, nimbostratus, altocumulus): the base's
+#: albedo deficit and the share of the layer it fades over (a cumulus base is flat: a
+#: quarter of the layer; a deck's is diffuse).
+CLOUD_LIGHT_BASE_DARKENING: Dict[str, float] = {"cumulus": 0.45, "stratocumulus": 0.35, "overcast": 0.55,
+                                                "nimbostratus": 0.7, "altocumulus": 0.25}
+CLOUD_LIGHT_BASE_RISE: Dict[str, float] = {"cumulus": 0.25, "stratocumulus": 0.4, "overcast": 0.5,
+                                           "nimbostratus": 0.5, "altocumulus": 0.4}
+
+
+def cloud_light_row(light_on: bool, shape: str) -> Dict[str, float]:
+    """The material's ten light scalars (C++ CloudLightRow): CLOUD_LIGHT_OFF when
+    the switch is off, else the phase, octave, powder and the shape's base."""
+    if not light_on:
+        return dict(CLOUD_LIGHT_OFF)
+    g, g2, blend = CLOUD_LIGHT_PHASE
+    c, o, e = CLOUD_LIGHT_OCTAVE
+    return {"PhaseG": g, "PhaseG2": g2, "PhaseBlend": blend, "MsContribution": c, "MsOcclusion": o,
+            "MsEccentricity": e, "PowderAmount": CLOUD_LIGHT_POWDER, "PowderDepthM": CLOUD_LIGHT_POWDER_DEPTH_M,
+            "BaseDarkening": CLOUD_LIGHT_BASE_DARKENING.get(shape, 0.0),
+            "BaseRise": CLOUD_LIGHT_BASE_RISE.get(shape, CLOUD_LIGHT_OFF["BaseRise"])}
+
+
+def cloud_light_billow(billow_on: bool, light_on: bool) -> bool:
+    """-look-cloud-billow's row applies only with -look-cloud-light=off."""
+    return bool(billow_on) and not light_on
+
+
+def cloud_albedo(albedo: float, extinction_per_m: float, norm_alt: float, cos_sun_view: float,
+                 row: Dict[str, float]) -> float:
+    """cloud_albedo.hlsl in Python: albedo x powder x base. cos_sun_view is the
+    cosine between the view ray (camera to sample) and the direction to the sun."""
+    powder = 1.0 - math.exp(-2.0 * max(extinction_per_m, 0.0) * max(row["PowderDepthM"], 0.0))
+    away = min(max(0.5 - 0.5 * cos_sun_view, 0.0), 1.0)
+    w = min(max(row["PowderAmount"], 0.0), 1.0) * away
+    rise = max(row["BaseRise"], 1e-3)
+    t = min(max(norm_alt / rise, 0.0), 1.0)
+    s = t * t * (3.0 - 2.0 * t)
+    base = (1.0 - min(max(row["BaseDarkening"], 0.0), 1.0)) * (1.0 - s) + s
+    return albedo * ((1.0 - w) + w * powder) * base
+
+
+#: -cloud-material=ours|epic (A/B, default ours): epic draws the beauty layer with Epic's
+#: own Volumetrics plugin cloud material (engine content, free) in place of
+#: M_FlightSimCloudLayers. The plugin is OPT-IN (sky-clouds2 review: not in the
+#: committed .uproject): for the A/B add { "Name": "Volumetrics", "Enabled": true } to
+#: ue/FlightSim.uproject's Plugins locally (or Edit > Plugins > Volumetrics) and restart
+#: the editor; without it epic falls back to ours and look_applied says so. Our coverage,
+#: wisp and light scalars do not exist on it; the layer's altitude, march tier and
+#: shadows stay ours.
+CLOUD_MATERIAL_SWITCH = "-cloud-material"
+CLOUD_MATERIAL_WORDS: Tuple[str, ...] = ("ours", "epic")
+#: ON draws a SEPARATE material (sky-clouds2 review: the light's parameters on the
+#: default graph raised its PS 161 -> 847 instructions and 0 -> 8 samplers with the
+#: switch off), so the default M_FlightSimCloudLayers stays at graph 8's cost.
+CLOUD_LIGHT_MATERIAL = "/Game/FlightSim/M_FlightSimCloudLayersLit.M_FlightSimCloudLayersLit"
+CLOUD_MATERIAL_EPIC = "/Volumetrics/Sky/Materials/M_VolumetricCloud_02_Profiles_Soft.M_VolumetricCloud_02_Profiles_Soft"
+
+
 #: The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 #: stated layer) is thinned to the shape's depth; 0 keeps the layer as built.
+#: Sky step 5: an altocumulus sheet is a few hundred metres deep, so the plan's
+#: 3 km slab is thinned to 900 m (STRATOCUMULUS_MAX_THICKNESS_M's figure). UNCALIBRATED.
 CLOUD_MAX_THICKNESS_M: Dict[str, float] = {"cumulus": 2000.0, "stratocumulus": 0.0,
-                                           "overcast": 2000.0, "nimbostratus": 0.0}
+                                           "overcast": 2000.0, "nimbostratus": 0.0,
+                                           "altocumulus": 900.0}
 #: USkyAtmosphereComponent::MultiScatteringFactor per preset (engine 1): the
 #: clear and hazy skies take a little more multiple scattering (paler and
 #: brighter towards the horizon from altitude); the weather presets keep 1.
 SKY_MULTI_SCATTERING: Dict[str, float] = {"clear": 1.25, "hazy": 1.15, "overcast": 1.0, "rain": 1.0,
                                           "storm": 1.0}
+#: Sky step 4 (2026-11-15): ``-sky-multi-scatter=auto|on|off``. Rounds 1-95 never
+#: set the factor on the constrained GPU class (ef361bd6's sky): round 1's bisect
+#: named a8c964fc as a unit (march, shadow span, thinning, fog-on-all-pixel and
+#: this factor together) and r87 then located the stall in the sky light's cloud
+#: reflection march and capped it; nothing isolated the factor. Read in the UE 5.7
+#: source: MultiScatteringFactor is one multiply in the 32 x 32 multi-scattering
+#: LUT pass (SkyAtmosphere.usf MultiScatteredLuminanceLutUAV) the atmosphere runs
+#: every frame at the same sample count whatever the factor (the render path
+#: already sets r.SkyAtmosphere.MultiScatteringLUT.HighQuality 1 on every GPU); it
+#: is in no per-pixel sky, aerial-perspective or cloud shader and adds no
+#: submission. So ``auto`` applies the row on every GPU class; ``off`` is
+#: ef361bd6's sky (1.0) for the A/B. Whether 1.25 reads right on the iGPU is
+#: UNMEASURED (the Windows A/B in docs/VISUAL_FIDELITY_PLAN.md "Sky step 4").
+SKY_MULTI_SCATTER_SWITCH = "-sky-multi-scatter"
+SKY_MULTI_SCATTER_SWITCH_WORDS: Tuple[str, ...] = ("auto", "on", "off")
 
 
-def cloud_march(integrated: bool) -> Dict[str, float]:
-    """The march row for the GPU class, with the engine's sample counts."""
-    row = dict(CLOUD_MARCH["integrated" if integrated else "discrete"])
+def sky_multi_scatter_applies(word: Optional[str], constrained: bool) -> Optional[bool]:
+    """Whether the row's MultiScatteringFactor is set: ``auto`` keeps ef361bd6's
+    class gate (True on a discrete GPU, False when ``constrained``), ``on`` is True
+    on every class, ``off`` False, None for a word the switch does not know (the
+    host refuses it by name). The C++ twin is FlightSimWorldPure::SkyMultiScatterFor
+    (1 / 0 / -1)."""
+    if word is None or word == "auto":
+        return not constrained
+    if word == "on":
+        return True
+    if word == "off":
+        return False
+    return None
+
+
+#: Sky step 5: where the march word in force came from (C++ CloudMarchWordSource order).
+MARCH_WORD_SOURCES: Tuple[str, ...] = ("switch", "plan", "default auto")
+
+
+def cloud_march_word(switch_word: Optional[str], plan_tier: Optional[str]) -> Tuple[str, str]:
+    """C++ CloudMarchWordInForce (sky step 5): the ``-cloud-march=`` word the host
+    resolves, and its source. A switch word other than "auto" is the owner's
+    measurement and wins ("switch"); else the sky plan's ``march_tier`` when it is
+    one of CLOUD_MARCH_SWITCH_WORDS ("plan"; the plan writes "auto", so today this
+    is a no-op by construction); else "auto" ("default auto": the GPU class). An
+    unknown plan word is ignored, never a refusal (clouds are VISUAL ONLY)."""
+    switch = switch_word or "auto"
+    if switch != "auto":
+        return switch, "switch"
+    if plan_tier and plan_tier != "auto" and plan_tier in CLOUD_MARCH_SWITCH_WORDS:
+        return plan_tier, "plan"
+    return "auto", "default auto"
+
+
+def cloud_march_tier(tier: str) -> Dict[str, float]:
+    """A march tier's row with the engine's sample counts (sky step 3: discrete,
+    integrated or probe)."""
+    row = dict(CLOUD_MARCH[tier])
     row["view_samples_max"] = min(ENGINE_CLOUD_BASE_VIEW_SAMPLES * row["view_sample_count_scale"],
                                   ENGINE_CLOUD_VIEW_SAMPLE_CAP)
     row["shadow_samples"] = min(ENGINE_CLOUD_BASE_SHADOW_SAMPLES * row["shadow_sample_count_scale"],
                                 ENGINE_CLOUD_SHADOW_SAMPLE_CAP)
     return row
+
+
+def cloud_march(integrated: bool) -> Dict[str, float]:
+    """The march row for the GPU class (``-cloud-march=auto``), with the engine's sample counts."""
+    return cloud_march_tier("integrated" if integrated else "discrete")
 
 
 def cloud_shadow_tracing_km_for(constrained: bool, thickness_m: float) -> float:
@@ -857,9 +1302,11 @@ DISTANT_LOOK: Dict[str, float] = {
     "Albedo": 0.9,
     "AmbientGain": 1.0,       # x the sky's distant scattered luminance
     "SunWrap": 0.3,           # the N.L wrap
-    "BaseDarkening": 0.55,    # a base's ambient as a share of a top's
-    "BaseSunShare": 0.15,     # the sun's share through a base's thin parts
-    "SilverLining": 0.6,      # the thin edge's forward-scattered sun gain
+    # Sky step 1 (the brief: "soft grey-blue bellies, not dark grey"; the far
+    # cumulus "smaller, paler"): 0.55 / 0.15 / 0.6 -> 0.70 / 0.25 / 0.8. UNCALIBRATED.
+    "BaseDarkening": 0.70,    # a base's ambient as a share of a top's
+    "BaseSunShare": 0.25,     # the sun's share through a base's thin parts
+    "SilverLining": 0.8,      # the thin edge's forward-scattered sun gain
     "RimPower": 8.0,          # the forward lobe's exponent
     "NormalStrength": 1.5,    # the relief's slope per unit thickness per km
 }
@@ -1026,6 +1473,118 @@ def layer_cover_and_shape(card_cover: Optional[float], thickness_m: float, prese
     else:
         cover = CLOUDS[guess]["default_cover"]
     return cover, select_cloud(cover, thickness_m, preset)
+
+
+# -- sky step 2 (the owner's X-Plane-12 brief, 2026-11-14): the plan's cloud fields ------
+# The sky plan (sky.json "clouds") gains cloud_type, coverage, density, detail,
+# cirrus_coverage, coverage_source and seed (step 5 writes them from ERA5 or as
+# recorded defaults). BEAUTY ONLY: FFlightSimWorldBeauty::ApplyClouds reads them
+# through FFlightSimSkyPlan (FlightSimSky.h / .cpp Load, TryGet*); the measure
+# host (FlightSimSky.cpp Build) reads bottom_km / thickness_km only, so a measure
+# render is byte-identical with or without them. Twins of the C++ pure block
+# (PlanCloudTypeName, CloudShapeForPlanType, LayerSource, PlanDensityScale,
+# PlanDetailErosion), pinned by tests/test_cloud_type.py. Every amount here is a
+# look value: UNCALIBRATED.
+
+#: The plan's type words, in the C++ PlanCloudTypeName order.
+PLAN_CLOUD_TYPES: Tuple[str, ...] = ("clear", "cumulus", "stratocumulus", "altocumulus", "cirrus",
+                                     "overcast", "nimbostratus")
+#: The volumetric shape each word draws (C++ CloudShapeForPlanType). None = no
+#: volumetric layer: clear draws nothing, cirrus is step 6's high sheet. Sky step 5:
+#: altocumulus draws its own CLOUDS row (it drew stratocumulus in step 2).
+#: UNCALIBRATED (which row a word draws is a look choice).
+PLAN_CLOUD_SHAPES: Dict[str, Optional[str]] = {
+    "clear": None, "cumulus": "cumulus", "stratocumulus": "stratocumulus",
+    "altocumulus": "altocumulus", "cirrus": None, "overcast": "overcast",
+    "nimbostratus": "nimbostratus"}
+#: ``-cloud-type=<word>`` (FlightSimClouds.cpp Build): the owner's probe, above the
+#: card and the plan; another word refuses ``world_beauty.clouds: -cloud-type=...``.
+CLOUD_TYPE_SWITCH = "-cloud-type"
+#: What FFlightSimSkyPlan::Load leaves when a field is absent (FlightSimSky.h): a
+#: v1 plan loads unchanged and the record says these. ``coverage`` below 0 and an
+#: empty ``cloud_type`` mean "not stated"; density and detail 1 are the row itself.
+#: Sky step 5: ``march_tier`` (the step 3 cvar set the plan asks for; "" = not stated).
+PLAN_CLOUD_DEFAULTS: Dict[str, Any] = {"cloud_type": "", "coverage": -1.0, "density": 1.0, "detail": 1.0,
+                                      "cirrus_coverage": 0.0, "coverage_source": "", "seed": 0,
+                                      "march_tier": ""}
+#: The plan's density is a multiplier of the row's extinction, clamped to this
+#: range (the design's D2: one source of truth per type, the CLOUDS row); its detail
+#: a multiplier of the row's erosion, the product saturated to 1. UNCALIBRATED.
+PLAN_DENSITY_MIN = 0.5
+PLAN_DENSITY_MAX = 1.5
+#: Where a layer's cover and shape came from (C++ LayerSourceName order).
+LAYER_SOURCES: Tuple[str, ...] = ("switch", "card", "plan", "shape default")
+
+
+def plan_cloud_fields(clouds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The cloud fields the host reads from a sky.json ``clouds`` block (FlightSimSky.cpp
+    Load): each key of PLAN_CLOUD_DEFAULTS, the default when absent or of another
+    type (TryGetStringField / TryGetNumberField), plus ``stated``: whether any was
+    present. The seed is an integer (the C++ int64 cast of the JSON number)."""
+    out: Dict[str, Any] = dict(PLAN_CLOUD_DEFAULTS)
+    block = clouds if isinstance(clouds, dict) else {}
+    stated = False
+    for key, default in PLAN_CLOUD_DEFAULTS.items():
+        value = block.get(key)
+        if isinstance(default, str):
+            if isinstance(value, str):
+                out[key] = value
+                stated = True
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[key] = int(value) if key == "seed" else float(value)
+            stated = True
+    out["stated"] = stated
+    return out
+
+
+def cloud_shape_for_plan_type(word: str) -> Optional[str]:
+    """C++ CloudShapeForPlanType: the shape a plan type word draws, None for no
+    volumetric layer. An unknown word raises (the C++ returns PlanCloudUnknown and
+    the host draws it as "not stated", recording the word)."""
+    if word not in PLAN_CLOUD_SHAPES:
+        raise ValueError(f"unknown plan cloud type {word!r}; one of {PLAN_CLOUD_TYPES}")
+    return PLAN_CLOUD_SHAPES[word]
+
+
+def plan_density_scale(density: float) -> float:
+    """C++ PlanDensityScale: the plan's density clamped to PLAN_DENSITY_MIN..MAX."""
+    return min(max(float(density), PLAN_DENSITY_MIN), PLAN_DENSITY_MAX)
+
+
+def plan_detail_erosion(row_erosion: float, detail: float) -> float:
+    """C++ PlanDetailErosion: the row's erosion x the plan's detail (floored at 0),
+    saturated to 1."""
+    return min(float(row_erosion) * max(float(detail), 0.0), 1.0)
+
+
+def layer_source(switch_word: Optional[str], card_cover: Optional[float], fair: bool,
+                 plan_type: Optional[str], plan_cover: Optional[float], preset: str,
+                 thickness_m: float) -> Tuple[float, Optional[str], str]:
+    """C++ LayerSource: ``(cover, shape or None, source)`` for a redrawn layer, by
+    precedence: the ``-cloud-type=`` switch (the owner's probe) > the card's
+    look.clouds[0] or the stated fair layer (dataset truth, never overridden by
+    data) > the sky plan's clouds block (ERA5 or a recorded default) > the shape's
+    default (layer_cover_and_shape). Under the rain and storm presets the deck
+    stands: the plan's type never thins a rain world to fair cumulus (the switch
+    still can). A None shape is a hidden layer (cover 0). A plan type this
+    version does not know, or an unstated one, falls through to the default."""
+    cover, shape = layer_cover_and_shape(card_cover, thickness_m, preset, fair)
+    card_stated = bool(fair) or (card_cover is not None and card_cover >= 0.0)
+    if switch_word:
+        chosen = cloud_shape_for_plan_type(switch_word)
+        if chosen is None:
+            return 0.0, None, "switch"
+        return (cover if card_stated else CLOUDS[chosen]["default_cover"]), chosen, "switch"
+    if card_stated:
+        return cover, shape, "card"
+    if plan_type in PLAN_CLOUD_SHAPES and preset not in ("rain", "storm"):
+        chosen = PLAN_CLOUD_SHAPES[plan_type]
+        if chosen is None:
+            return 0.0, None, "plan"
+        if plan_cover is not None and plan_cover >= 0.0:
+            return min(float(plan_cover), 1.0), chosen, "plan"
+        return CLOUDS[chosen]["default_cover"], chosen, "plan"
+    return cover, shape, "shape default"
 
 
 # -- the drawn coverage (cloud_layers.hlsl) ---------------------------------------------
@@ -1217,6 +1776,21 @@ def cloud_detail(x: float, y: float, z: float, seed: int) -> float:
     return 0.7 * _worley(x, y, z, seed) + 0.3 * _worley(x * 2.03, y * 2.03, z * 2.03, (seed + 97) & _M32)
 
 
+def cloud_flow(x: float, y: float, z: float, seed: int) -> Tuple[float, float, float]:
+    """cloud_layers.hlsl FWorldWisp::Flow: two 3D gradient noises for the plane
+    and, at half amplitude, their difference for the vertical. Zero-mean, each
+    component within -1..1; not a divergence-free curl (stated in the shader)."""
+    a = _perlin3(x, y, z, (seed + 701) & _M32)
+    b = _perlin3(x, y, z, (seed + 733) & _M32)
+    return a, b, 0.5 * (b - a)
+
+
+def cloud_top_detail(x: float, y: float, z: float, seed: int) -> float:
+    """cloud_layers.hlsl FWorldWisp::TopDetail: the finer top Worley octave."""
+    k = CLOUD_TOP_DETAIL_LACUNARITY
+    return _worley(x * k, y * k, z * k, (seed + 193) & _M32)
+
+
 #: Round 10: the far field's level of detail (cloud_layers.hlsl LOD_NEAR_KM,
 #: LOD_FAR_KM, FAR_SOFTEN): far = smoothstep(near, far, camera distance in km)
 #: drops the small cells, the billow and the erosion, and widens the soft edge
@@ -1244,7 +1818,8 @@ def cloud_dome_taper(height_density: float, h: float) -> float:
 def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float, row: Dict[str, float],
                   distance_km: float = 0.0, footprint_km: float = 0.0,
                   dither: Tuple[float, float, float] = (0.0, 0.0, 0.0), thickness_km: float = 1.0,
-                  side_bulge: float = 0.0, height_density: float = 0.0) -> float:
+                  side_bulge: float = 0.0, height_density: float = 0.0,
+                  wisp: Optional[Dict[str, float]] = None) -> float:
     """cloud_layers.hlsl's density (before x extinction), the Python replica
     the coverage test samples: the quantile cut on the shape (started early by
     the erosion's share, raised over the top's rounding), the soft edge, the
@@ -1252,7 +1827,13 @@ def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float,
     Round 52: a shadow sample's footprint_km (0 for a view sample) dithers
     the point by ``dither`` (each in -0.5..0.5, the shader's hash) times
     CLOUD_SHADOW_DITHER x footprint, widens the soft edge (after the cut) and
-    reads the erosion noise at its mean once wider than the noise."""
+    reads the erosion noise at its mean once wider than the noise.
+    Sky step 1: ``wisp`` is the material's wisp row (cloud_wisp_row); None or
+    CLOUD_WISP_OFF is round 95 exactly. A view sample's detail point is
+    flow-warped and its top gains the finer octave; the erosion bites harder at
+    the outline; the density is raised to EdgeThinPower after the erosion."""
+    w = wisp if wisp is not None else CLOUD_WISP_OFF
+    amount = w["WispAmount"]
     h = min(max(norm_alt, 0.0), 1.0)
     if footprint_km > 0.0:
         d = [u * CLOUD_SHADOW_DITHER * footprint_km for u in dither]
@@ -1275,9 +1856,24 @@ def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float,
         dscale = max(row["detail_scale_km"], 1e-3)
         detail = CLOUD_DETAIL_MEAN
         if max(footprint_km, 0.0) < dscale:
-            detail = cloud_detail(km[0] / dscale, km[1] / dscale, km[2] / dscale, 13)
-        wisp = _lerp(detail, 1.0 - detail, min(max(h / CLOUD_WISP_HEIGHT, 0.0), 1.0))
-        density = _remap(density, row["detail_erosion"] * (1.0 - far) * wisp, 1.0)
+            q = [km[0] / dscale, km[1] / dscale, km[2] / dscale]
+            if amount > 0.0 and footprint_km == 0.0:
+                flow = cloud_flow(q[0] * CLOUD_CURL_OCTAVE_SCALE, q[1] * CLOUD_CURL_OCTAVE_SCALE,
+                                  q[2] * CLOUD_CURL_OCTAVE_SCALE, 23)
+                q = [c + f * (amount * w["CurlStrength"]) for c, f in zip(q, flow)]
+                detail = cloud_detail(q[0], q[1], q[2], 13)
+                top_w = (amount * w["TopDetailGain"] * _smoothstep(CLOUD_WISP_HEIGHT, 1.0, h)
+                         * (1.0 - _smoothstep(0.0, CLOUD_TOP_DETAIL_LOD, far)))
+                if top_w > 0.0:
+                    detail = min(max(detail + top_w * (cloud_top_detail(q[0], q[1], q[2], 13)
+                                                       - CLOUD_TOP_DETAIL_MEAN), 0.0), 1.0)
+            else:
+                detail = cloud_detail(q[0], q[1], q[2], 13)
+        ragged = _lerp(detail, 1.0 - detail, min(max(h / CLOUD_WISP_HEIGHT, 0.0), 1.0))
+        ero = row["detail_erosion"] * (1.0 - far) * ragged * (1.0 + amount * w["BoundaryErosion"] * (1.0 - density))
+        density = _remap(density, ero, 1.0)
+    if amount > 0.0 and density > 0.0:
+        density = _lerp(density, density ** w["EdgeThinPower"], amount)
     return density * base * cloud_height_density(height_density, h)
 
 

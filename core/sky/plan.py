@@ -21,8 +21,13 @@ by eye is computed here, deterministically, and recorded:
   a meter would render a moonlit field as noon, which is not what night
   looks like. Realised as UE's physical camera (f/4, 1/60 s, ISO 100)
   plus exposure compensation, constant over the clip (Gate 6's rule).
-* **Clouds**: a volumetric layer, VISUAL ONLY, not from data; its base is
-  placed above the flight so the camera stays clear of it.
+* **Clouds**: a volumetric layer, VISUAL ONLY; its base is placed above
+  the flight so the camera stays clear of it. Sky step 5: the block also
+  carries ``cloud_type``, ``coverage``, ``density``, ``detail``,
+  ``cirrus_coverage``, ``seed`` and the march tier (:mod:`core.sky.clouds`),
+  from ERA5 ``cloud_cover_low/mid/high`` when the caller fetched them for
+  a ``weather_date``, else stated defaults recorded as defaults. These
+  reach the BEAUTY host only; the measure host reads the placement.
 * **Post-processing** per camera preset: filmic tonemapping (UE's
   default), bloom, lens flare, vignette, grain, fringe.
 """
@@ -374,9 +379,24 @@ def plan_sky(time_value: str, weather_date: Optional[str], lat: float,
              lon: float, altitude_msl_m: float, ground_elevation_m: float,
              camera_preset: str = "chase", weather_event: str = "none",
              fov_deg: float = 55.0, width_px: int = 1280,
-             night_lights: Optional[Dict] = None) -> Dict:
+             night_lights: Optional[Dict] = None, *,
+             cloud_cover: Optional[Dict] = None,
+             cloud_cover_note: Optional[str] = None,
+             seed: Optional[int] = None) -> Dict:
     """The complete ``sky.json`` for one render. Pure: same inputs, same
-    bytes."""
+    bytes.
+
+    Sky step 5 (keyword-only, so every positional caller is unchanged):
+    ``cloud_cover`` is the ERA5 level-cover dict the web app fetched for a
+    ``weather_date`` (:func:`core.environment.era5.fetch_reanalysis_cloud_cover`)
+    or None for the stated default; ``cloud_cover_note`` says why there is
+    none when a date was given; ``seed`` is the spec's seed (else one is
+    derived from the inputs). They shape only the BEAUTY-ONLY keys of the
+    "clouds" block (:func:`core.sky.clouds.plan_cloud_block`); ``enabled``,
+    ``bottom_km``, ``thickness_km`` and the exposure are computed exactly as
+    before, so a measure render is byte-identical with or without them.
+    """
+    from .clouds import plan_cloud_block
     instant = resolve_instant(time_value, weather_date, lat, lon)
     sun = astro.sun_position(instant.utc, lat, lon)
     moon = astro.moon_position(instant.utc, lat, lon)
@@ -461,7 +481,18 @@ def plan_sky(time_value: str, weather_date: Optional[str], lat: float,
             "thickness_km": 6.0 if storm else 3.0,
             "basis": "VISUAL ONLY, not from weather data: UE volumetric "
                      "cloud layer, base placed >= 1 km above the flight so "
-                     "the camera stays clear",
+                     "the camera stays clear"
+                     + ("; cloud_type/coverage from ERA5 cloud_cover_low/mid/high "
+                        "(the place and hour), BEAUTY ONLY" if cloud_cover is not None
+                        else "; cloud_type/coverage are stated defaults, BEAUTY ONLY"),
+            # Sky step 5: the beauty host's fields (core/sky/clouds.py); the
+            # measure host (FlightSimSky.cpp Build) never reads them.
+            **plan_cloud_block(
+                storm=storm, weather_date=weather_date,
+                instant_utc=instant.utc.isoformat(timespec="seconds"),
+                lat=lat, lon=lon, altitude_msl_m=altitude_msl_m,
+                cloud_cover=cloud_cover, cloud_cover_note=cloud_cover_note,
+                seed=seed),
         },
         "fog": {"inscattering": "sky-atmosphere ambient contribution "
                                 "(dims with the sun)"},

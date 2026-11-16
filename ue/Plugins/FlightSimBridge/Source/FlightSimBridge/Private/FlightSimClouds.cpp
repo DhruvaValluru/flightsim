@@ -36,6 +36,8 @@
 #include "RHI.h"   // GMaxRHIFeatureLevel (CloudConstrainedGpu)
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "UObject/MetaData.h"   // sky step 1: the cloud material's FlightSimGraphGeneration tag, recorded
+#include "UObject/Package.h"
 #include "UObject/UObjectIterator.h"
 
 #include <cmath>
@@ -66,7 +68,8 @@ namespace FlightSimWorldPure
 		CloudStratocumulus = 1,
 		CloudOvercast = 2,
 		CloudNimbostratus = 3,
-		CloudCount = 4
+		CloudAltocumulus = 4,   // sky step 5: appended, so every earlier index and overrides file stands
+		CloudCount = 5
 	};
 
 	inline const char* PresetName(int Preset)
@@ -77,7 +80,8 @@ namespace FlightSimWorldPure
 
 	inline const char* CloudName(int Cloud)
 	{
-		static const char* const Names[CloudCount] = {"cumulus", "stratocumulus", "overcast", "nimbostratus"};
+		static const char* const Names[CloudCount] = {"cumulus", "stratocumulus", "overcast", "nimbostratus",
+		                                              "altocumulus"};
 		return Cloud >= 0 && Cloud < CloudCount ? Names[Cloud] : "cumulus";
 	}
 
@@ -85,37 +89,50 @@ namespace FlightSimWorldPure
 	// Fix pass 2026-11-09: the ground albedo (GroundAlbedoSrgb: the card's
 	// surface and wetness) and the tiles' dehaze and saturation (tileset
 	// constants) left the per-weather rows.
-	constexpr int AtmosphereFieldCount = 13;
+	// Sky step 4 (the owner's X-Plane-12 brief, 2026-11-15): three horizon-haze
+	// fields appended (13 -> 16, the existing indices hold): the height fog's
+	// vertical profile (fog_scale_height_km: the 1/e scale height the fog's haze
+	// decays with above the scene's fog height; 0 keeps the scene's near-uniform
+	// profile), its start distance and its max opacity (the scene's own values
+	// unless a row or the overrides file says otherwise). FogHeightFalloffFor and
+	// the rebase laws below are the profile's arithmetic.
+	constexpr int AtmosphereFieldCount = 16;
 	inline const char* AtmosphereFieldName(int Field)
 	{
 		static const char* const Names[AtmosphereFieldCount] = {
 			"mie_scale_height_km", "mie_anisotropy", "mie_share", "mie_cap_per_km",
 			"aerial_perspective_scale", "vfog_distance_m", "vfog_scattering_distribution",
 			"vfog_extinction_scale", "cloud_bottom_occlusion", "rain_readability_gain", "wetness_floor",
-			"tiles_detail_strength", "lightning_sky_gain"};
+			"tiles_detail_strength", "lightning_sky_gain",
+			"fog_scale_height_km", "fog_start_distance_m", "fog_max_opacity"};
 		return Field >= 0 && Field < AtmosphereFieldCount ? Names[Field] : "";
 	}
 	enum : int
 	{
 		AtmMieScaleHeightKm = 0, AtmMieAnisotropy, AtmMieShare, AtmMieCapPerKm, AtmAerialPerspectiveScale,
 		AtmVFogDistanceM, AtmVFogScatteringDistribution, AtmVFogExtinctionScale, AtmCloudBottomOcclusion,
-		AtmRainReadabilityGain, AtmWetnessFloor, AtmTilesDetailStrength, AtmLightningSkyGain
+		AtmRainReadabilityGain, AtmWetnessFloor, AtmTilesDetailStrength, AtmLightningSkyGain,
+		AtmFogScaleHeightKm, AtmFogStartDistanceM, AtmFogMaxOpacity
 	};
 
 	// UNCALIBRATED: set by probe render on the render machine (every number).
+	// Sky step 4: the clear and hazy rows give the fog the Mie layer's own scale
+	// height (the Koschmieder split put one aerosol in two renderers; this gives
+	// both the same vertical profile); the weather rows keep the scene's uniform
+	// fog (their haze is the column under a deck, which RainHazeFog shapes).
 	inline double AtmosphereDefault(int Preset, int Field)
 	{
 		static const double Rows[PresetCount][AtmosphereFieldCount] = {
 			// clear
-			{1.2, 0.80, 0.6, 0.25, 1.0, 8000.0, 0.75, 1.0, 0.5, 1.0, 0.0, 0.12, 0.0},
+			{1.2, 0.80, 0.6, 0.25, 1.0, 8000.0, 0.75, 1.0, 0.5, 1.0, 0.0, 0.12, 0.0, 1.2, 1500.0, 0.92},
 			// hazy
-			{1.6, 0.76, 0.7, 0.6, 1.0, 8000.0, 0.7, 1.0, 0.5, 1.0, 0.0, 0.12, 0.0},
+			{1.6, 0.76, 0.7, 0.6, 1.0, 8000.0, 0.7, 1.0, 0.5, 1.0, 0.0, 0.12, 0.0, 1.6, 1500.0, 0.92},
 			// overcast
-			{1.4, 0.70, 0.4, 0.6, 1.0, 6000.0, 0.4, 1.0, 0.75, 1.0, 0.0, 0.12, 0.0},
+			{1.4, 0.70, 0.4, 0.6, 1.0, 6000.0, 0.4, 1.0, 0.75, 1.0, 0.0, 0.12, 0.0, 0.0, 1500.0, 0.92},
 			// rain (vfog_extinction_scale: world_beauty.WET_VFOG_EXTINCTION_SCALE, visual round 3)
-			{1.0, 0.65, 0.3, 0.8, 1.0, 4000.0, 0.3, 0.48, 0.85, 1.5, 0.6, 0.12, 0.0},
+			{1.0, 0.65, 0.3, 0.8, 1.0, 4000.0, 0.3, 0.48, 0.85, 1.5, 0.6, 0.12, 0.0, 0.0, 1500.0, 0.92},
 			// storm
-			{1.8, 0.65, 0.3, 0.8, 1.0, 4000.0, 0.3, 0.48, 0.9, 1.5, 0.85, 0.12, 3.0},
+			{1.8, 0.65, 0.3, 0.8, 1.0, 4000.0, 0.3, 0.48, 0.9, 1.5, 0.85, 0.12, 3.0, 0.0, 1500.0, 0.92},
 		};
 		return Preset >= 0 && Preset < PresetCount && Field >= 0 && Field < AtmosphereFieldCount
 			? Rows[Preset][Field] : 0.0;
@@ -144,6 +161,7 @@ namespace FlightSimWorldPure
 			{0.04, 4.0, 0.5, 0.25, 0.15, 0.3, 1.3, 0.6},      // stratocumulus
 			{0.03, 8.0, 0.8, 0.15, 0.2, 0.15, 1.0, 0.95},     // overcast
 			{0.045, 9.0, 0.6, 0.3, 0.1, 0.4, 0.8, 0.98},      // nimbostratus
+			{0.03, 1.2, 0.12, 0.4, 0.15, 0.5, 1.1, 0.5},      // altocumulus (sky step 5: the plan's mid-level sheet; never rendered)
 		};
 		return Cloud >= 0 && Cloud < CloudCount && Field >= 0 && Field < CloudFieldCount
 			? Rows[Cloud][Field] : 0.0;
@@ -190,6 +208,129 @@ namespace FlightSimWorldPure
 	{
 		return bCumulus && !bStated && BaseM > CumulusMaxBaseM;
 	}
+	// Sky step 2 (the owner's X-Plane-12 brief, 2026-11-14): the sky plan's cloud
+	// fields (sky.json "clouds": cloud_type, coverage, density, detail, seed; step 5
+	// writes them, FFlightSimSkyPlan::Load reads them) reach the BEAUTY host only.
+	// The plan's type words (world_beauty.PLAN_CLOUD_TYPES, same order) and the
+	// volumetric shape each draws (world_beauty.PLAN_CLOUD_SHAPES): clear and cirrus
+	// draw NO volumetric layer (the layer is hidden; step 6 draws cirrus as a high
+	// sheet); altocumulus draws its own row since sky step 5 (it drew stratocumulus
+	// in step 2; recorded as cloud_type_applied). UNCALIBRATED: which row a word
+	// draws is a look choice.
+	constexpr int PlanCloudTypeCount = 7;
+	constexpr int PlanCloudNoLayer = -1;
+	constexpr int PlanCloudUnknown = -2;
+	inline const char* PlanCloudTypeName(int Type)
+	{
+		static const char* const Names[PlanCloudTypeCount] = {
+			"clear", "cumulus", "stratocumulus", "altocumulus", "cirrus", "overcast", "nimbostratus"};
+		return Type >= 0 && Type < PlanCloudTypeCount ? Names[Type] : "";
+	}
+	// The index of a plan type word; PlanCloudUnknown for anything else (an
+	// empty or unknown word is drawn as "not stated" and recorded).
+	inline int PlanCloudTypeIndex(const char* Word)
+	{
+		for (int I = 0; Word != nullptr && I < PlanCloudTypeCount; ++I)
+		{
+			if (std::strcmp(Word, PlanCloudTypeName(I)) == 0)
+			{
+				return I;
+			}
+		}
+		return PlanCloudUnknown;
+	}
+	inline int CloudShapeForPlanType(int Type)
+	{
+		switch (Type)
+		{
+		case 0: return PlanCloudNoLayer;        // clear: nothing
+		case 1: return CloudCumulus;
+		case 2: return CloudStratocumulus;
+		case 3: return CloudAltocumulus;        // altocumulus: its own row (sky step 5)
+		case 4: return PlanCloudNoLayer;        // cirrus: step 6's sheet, no volumetric layer
+		case 5: return CloudOvercast;
+		case 6: return CloudNimbostratus;
+		default: return PlanCloudUnknown;
+		}
+	}
+	// Where a layer's cover and shape came from, by precedence (world_beauty.layer_source):
+	// the -cloud-type= switch (the owner's probe) > the card's look.clouds[0] or the
+	// stated fair layer (dataset truth, never overridden by data) > the sky plan's
+	// clouds block (ERA5 or a recorded default) > the shape's default. Under the rain
+	// and storm presets the deck stands (SelectCloud's nimbostratus): the plan's type
+	// never thins a rain world to fair cumulus; the switch still can.
+	enum : int
+	{
+		LayerSourceSwitch = 0, LayerSourceCard = 1, LayerSourcePlan = 2, LayerSourceDefault = 3,
+		LayerSourceCount = 4
+	};
+	inline const char* LayerSourceName(int Source)
+	{
+		static const char* const Names[LayerSourceCount] = {"switch", "card", "plan", "shape default"};
+		return Source >= 0 && Source < LayerSourceCount ? Names[Source] : "shape default";
+	}
+	// SwitchShape / PlanShape: CloudShapeForPlanType of the switch word / the plan's
+	// type, PlanCloudUnknown when not given. Cover and Shape hold LayerCoverAndShape's
+	// result on entry and are replaced where the switch or the plan decides; a
+	// PlanCloudNoLayer shape is a hidden layer (Cover 0).
+	inline int LayerSource(int SwitchShape, double CardCover, bool bFair, int PlanShape, double PlanCover,
+	                       int Preset, const double* CloudTable, double* Cover, int* Shape)
+	{
+		const bool bCardStated = CardCover >= 0.0 || bFair;
+		if (SwitchShape != PlanCloudUnknown)
+		{
+			*Shape = SwitchShape;
+			if (SwitchShape == PlanCloudNoLayer)
+			{
+				*Cover = 0.0;
+			}
+			else if (!bCardStated)
+			{
+				*Cover = CloudTable != nullptr ? CloudTable[SwitchShape * CloudFieldCount + CldDefaultCover]
+				                               : CloudDefault(SwitchShape, CldDefaultCover);
+			}
+			return LayerSourceSwitch;
+		}
+		if (bCardStated)
+		{
+			return LayerSourceCard;
+		}
+		if (PlanShape != PlanCloudUnknown && Preset != PresetRain && Preset != PresetStorm)
+		{
+			*Shape = PlanShape;
+			if (PlanShape == PlanCloudNoLayer)
+			{
+				*Cover = 0.0;
+			}
+			else if (PlanCover >= 0.0)
+			{
+				*Cover = PlanCover > 1.0 ? 1.0 : PlanCover;
+			}
+			else
+			{
+				*Cover = CloudTable != nullptr ? CloudTable[PlanShape * CloudFieldCount + CldDefaultCover]
+				                               : CloudDefault(PlanShape, CldDefaultCover);
+			}
+			return LayerSourcePlan;
+		}
+		return LayerSourceDefault;
+	}
+	// The plan's density and detail are multipliers of the row (1 = the row; one
+	// source of truth per type, the CLOUDS row): density clamped to
+	// PlanDensityMin..Max on the row's extinction, detail on the row's erosion with
+	// the product saturated (world_beauty.plan_density_scale / plan_detail_erosion).
+	// UNCALIBRATED.
+	constexpr double PlanDensityMin = 0.5;
+	constexpr double PlanDensityMax = 1.5;
+	inline double PlanDensityScale(double Density)
+	{
+		return Density < PlanDensityMin ? PlanDensityMin : (Density > PlanDensityMax ? PlanDensityMax : Density);
+	}
+	inline double PlanDetailErosion(double RowErosion, double Detail)
+	{
+		const double Scaled = RowErosion * (Detail < 0.0 ? 0.0 : Detail);
+		return Scaled > 1.0 ? 1.0 : Scaled;
+	}
 	// Round 3: a rain world's layer when the card states no cover (broken, not
 	// nimbostratus's 0.98 sheet: round 1's #06 showed no ground).
 	constexpr double RainDefaultCover = 0.72;
@@ -204,15 +345,24 @@ namespace FlightSimWorldPure
 	// the shadow jitter), so a cloud's light came in contours and most of it
 	// went unlit. world_beauty.py CLOUD_MARCH and the laws below are the twin.
 	// UNCALIBRATED: set by probe render on the render machine (every number).
+	// Sky step 3 (the owner's X-Plane-12 brief, 2026-11-15): three tiers. The
+	// discrete row is the offline quality (the engine's caps: 768 view and 80
+	// shadow samples over a 50 km trace); the constrained row stays ef361bd6's
+	// (rounds 5-95 rendered it); the PROBE row is the constrained class's opt-in
+	// raise (288 view, 20 shadow samples; UNCALIBRATED), reached only by
+	// -cloud-march=probe: one scene, one still, the Windows TDR (887a0006) is the
+	// pass or fail. CloudMarchFor picks the row from the switch word; CloudCvar
+	// below is each tier's renderer cvar table.
 	enum : int
 	{
 		MarchDiscrete = 0,
 		MarchIntegrated = 1,
-		MarchCount = 2
+		MarchProbe = 2,
+		MarchCount = 3
 	};
 	inline const char* MarchName(int March)
 	{
-		static const char* const Names[MarchCount] = {"discrete", "integrated"};
+		static const char* const Names[MarchCount] = {"discrete", "integrated", "probe"};
 		return March >= 0 && March < MarchCount ? Names[March] : "discrete";
 	}
 	constexpr int MarchFieldCount = 3;
@@ -228,7 +378,7 @@ namespace FlightSimWorldPure
 	};
 	// The engine's samples are 96 x view scale (cap r.VolumetricCloud.ViewRaySampleMaxCount,
 	// 768) and 10 x shadow scale (cap r.VolumetricCloud.Shadow.ViewRaySampleMaxCount, 80);
-	// both rows stay under the caps. The CONSTRAINED row (an integrated GPU, or any
+	// every row stays under the caps. The CONSTRAINED row (an integrated GPU, or any
 	// adapter below SM6, e.g. D3D11 SM5) is ef361bd6's march exactly: 192 view and 10
 	// shadow samples, an 80 km trace and a 15 km shadow march, with no thinning of the
 	// default layer, no multiple-scattering change and no fog on every pixel. Round 1
@@ -238,10 +388,142 @@ namespace FlightSimWorldPure
 	inline double CloudMarch(int March, int Field)
 	{
 		static const double Rows[MarchCount][MarchFieldCount] = {
-			{6.0, 6.0, 50.0},   // discrete: 576 view, 60 shadow samples
+			{8.0, 8.0, 50.0},   // discrete: 768 view, 80 shadow samples, the caps (sky step 3; round 2 drew 6, 6)
 			{2.0, 1.0, 80.0},   // constrained: 192 view, 10 shadow samples (ef361bd6)
+			{3.0, 2.0, 80.0},   // probe: 288 view, 20 shadow samples (sky step 3, -cloud-march=probe only)
 		};
 		return March >= 0 && March < MarchCount && Field >= 0 && Field < MarchFieldCount
+			? Rows[March][Field] : 0.0;
+	}
+	// Sky step 3: -cloud-march=auto|constrained|discrete|probe. auto is the GPU class
+	// (CloudConstrainedGpu, as before this step); a named word is the owner's
+	// measurement on any GPU. An unknown word is -1 (Build refuses it by name).
+	constexpr int MarchSwitchWordCount = 4;
+	inline const char* MarchSwitchWord(int I)
+	{
+		static const char* const Words[MarchSwitchWordCount] = {"auto", "constrained", "discrete", "probe"};
+		return I >= 0 && I < MarchSwitchWordCount ? Words[I] : "";
+	}
+	inline int CloudMarchFor(const char* Word, bool Constrained)
+	{
+		if (Word == nullptr || std::strcmp(Word, "auto") == 0)
+		{
+			return Constrained ? MarchIntegrated : MarchDiscrete;
+		}
+		if (std::strcmp(Word, "constrained") == 0) { return MarchIntegrated; }
+		if (std::strcmp(Word, "discrete") == 0) { return MarchDiscrete; }
+		if (std::strcmp(Word, "probe") == 0) { return MarchProbe; }
+		return -1;
+	}
+	// Sky step 5: the march word in force and where it came from
+	// (world_beauty.cloud_march_word / MARCH_WORD_SOURCES): a -cloud-march= word
+	// other than auto is the owner's measurement and wins; else the sky plan's
+	// "march_tier" when it is a known word (the plan writes "auto", so this is a
+	// no-op by construction today); else auto, the GPU class. An unknown plan word
+	// is ignored, never a refusal: clouds are VISUAL ONLY. Returns the source index
+	// and writes the word (one of MarchSwitchWord's) to *Word.
+	enum : int
+	{
+		MarchWordSwitch = 0, MarchWordPlan = 1, MarchWordDefault = 2, MarchWordSourceCount = 3
+	};
+	inline const char* MarchWordSourceName(int Source)
+	{
+		static const char* const Names[MarchWordSourceCount] = {"switch", "plan", "default auto"};
+		return Source >= 0 && Source < MarchWordSourceCount ? Names[Source] : "default auto";
+	}
+	inline int CloudMarchWordInForce(const char* Switch, const char* PlanTier, const char** Word)
+	{
+		const char* SwitchWord = (Switch == nullptr || Switch[0] == '\0') ? "auto" : Switch;
+		if (std::strcmp(SwitchWord, "auto") != 0)
+		{
+			*Word = SwitchWord;
+			return MarchWordSwitch;
+		}
+		if (PlanTier != nullptr && PlanTier[0] != '\0' && std::strcmp(PlanTier, "auto") != 0
+		    && CloudMarchFor(PlanTier, false) >= 0)
+		{
+			*Word = PlanTier;   // a plan "auto" chooses nothing: it is the default below
+			return MarchWordPlan;
+		}
+		*Word = "auto";
+		return MarchWordDefault;
+	}
+	// Sky step 3: the renderer cvars each tier sets (ApplyClouds SetWorldCvar, saved
+	// once and put back by RestoreCvars, every value recorded before and after in
+	// look_applied.world_beauty.clouds.march.cvars). world_beauty.py CLOUD_CVARS,
+	// CLOUD_CVAR_NAMES and ENGINE_CLOUD_CVAR_DEFAULTS are the twin.
+	// The CONSTRAINED row is exactly what the render laptop draws with today, so
+	// setting it changes nothing there (the pinned r87 history stands): the
+	// engine's registration default (UE 5.7 VolumetricCloudRendering.cpp,
+	// SkyAtmosphereRendering.cpp) where the Cinematic scalability group is silent,
+	// and the group's value where it speaks (BaseScalability.ini
+	// [EffectsQuality@Cine], applied by the render path after this lane at
+	// scalability priority, which cannot lower a code-priority set: AP
+	// DepthResolution 32, TransmittanceLUT.SampleCount 30, MultiScatteringLUT.
+	// SampleCount 20; the design doc's "engine defaults" 16/10/15 would have
+	// LOWERED the laptop's sky). The DISCRETE row is the offline quality (no
+	// discrete GPU in the project: set for one, never rendered). The PROBE row is
+	// the constrained row with r.VolumetricCloud.DistanceToSampleMaxCount 8 km:
+	// the engine spreads SampleCountMax over that distance (samples = max x
+	// saturate(in-layer path / distance)), so a short in-layer path gets up to
+	// twice the samples. That distance ALSO governs the sky-light capture's step
+	// count: UE 5.7 VolumetricCloudRendering.cpp sets
+	// CloudGlobalShaderParams.InvDistanceToSampleCountMax once, from this cvar,
+	// for every trace, and its bIsReflectionRendering block re-derives only
+	// SampleCountMax and ShadowSampleCountMax (from ReflectionViewSampleCountScale
+	// and the commandlet's r.VolumetricCloud.ReflectionRaySampleMaxCount caps), so
+	// the probe lengthens that capture's march too (up to 15/8 x per short
+	// in-layer path, under those caps) in the submission that hung r87
+	// (887a0006); the Windows TDR is its pass or fail (pinned by
+	// test_sky_step3_cvars.py and check_bridge_api.sh against the engine source).
+	// Cost per submission rises with the probe's march row as well, which is why
+	// it is opt-in. The sky's SampleCountMax, the AP per-slice count,
+	// FastSkyLUT, FastApplyOnOpaque, MultiScatteringLUT.HighQuality, LUT32,
+	// r.VolumetricCloud, HighQualityAerialPerspective and VolumetricRenderTarget.
+	// Mode are the render path's (one owner; never set here). UNCALIBRATED.
+	constexpr int CloudCvarFieldCount = 13;
+	enum : int
+	{
+		CvarViewRayMax = 0, CvarShadowRayMax, CvarDistanceToSampleMaxKm, CvarSampleMinCount,
+		CvarShadowMapRayMax, CvarShadowMapMaxRes, CvarSkyAoTraceSamples, CvarApLutDepthKm,
+		CvarApLutDepthRes, CvarApLutWidth, CvarTransmittanceLutSamples, CvarMultiScatterLutSamples,
+		CvarSkyDistanceToSampleMaxKm
+	};
+	inline const char* CloudCvarFieldName(int Field)
+	{
+		static const char* const Names[CloudCvarFieldCount] = {
+			"view_ray_sample_max", "shadow_ray_sample_max", "distance_to_sample_max_km", "sample_min_count",
+			"shadowmap_ray_sample_max", "shadowmap_max_resolution", "skyao_trace_samples", "ap_lut_depth_km",
+			"ap_lut_depth_resolution", "ap_lut_width", "transmittance_lut_samples", "multiscatter_lut_samples",
+			"sky_distance_to_sample_max_km"};
+		return Field >= 0 && Field < CloudCvarFieldCount ? Names[Field] : "";
+	}
+	inline const char* CloudCvarName(int Field)
+	{
+		static const char* const Names[CloudCvarFieldCount] = {
+			"r.VolumetricCloud.ViewRaySampleMaxCount",
+			"r.VolumetricCloud.Shadow.ViewRaySampleMaxCount",
+			"r.VolumetricCloud.DistanceToSampleMaxCount",
+			"r.VolumetricCloud.SampleMinCount",
+			"r.VolumetricCloud.ShadowMap.RaySampleMaxCount",
+			"r.VolumetricCloud.ShadowMap.MaxResolution",
+			"r.VolumetricCloud.SkyAO.TraceSampleCount",
+			"r.SkyAtmosphere.AerialPerspectiveLUT.Depth",
+			"r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution",
+			"r.SkyAtmosphere.AerialPerspectiveLUT.Width",
+			"r.SkyAtmosphere.TransmittanceLUT.SampleCount",
+			"r.SkyAtmosphere.MultiScatteringLUT.SampleCount",
+			"r.SkyAtmosphere.DistanceToSampleCountMax"};
+		return Field >= 0 && Field < CloudCvarFieldCount ? Names[Field] : "";
+	}
+	inline double CloudCvar(int March, int Field)
+	{
+		static const double Rows[MarchCount][CloudCvarFieldCount] = {
+			{768.0, 80.0, 8.0, 2.0, 256.0, 4096.0, 20.0, 160.0, 64.0, 64.0, 40.0, 30.0, 100.0},   // discrete: offline
+			{768.0, 80.0, 15.0, 2.0, 128.0, 2048.0, 10.0, 96.0, 32.0, 32.0, 30.0, 20.0, 150.0},   // constrained: in force today
+			{768.0, 80.0, 8.0, 2.0, 128.0, 2048.0, 10.0, 96.0, 32.0, 32.0, 30.0, 20.0, 150.0},    // probe: constrained, 8 km
+		};
+		return March >= 0 && March < MarchCount && Field >= 0 && Field < CloudCvarFieldCount
 			? Rows[March][Field] : 0.0;
 	}
 	// The shadow march spans the layer it lights (a cell's self-shadow and its
@@ -369,12 +651,198 @@ namespace FlightSimWorldPure
 		(void)Scale;
 		return Cover;
 	}
+	// Sky step 1 (the owner's X-Plane-12 brief, 2026-11-14: "ragged, wispy edges and
+	// fine cauliflower detail ... soft grey-blue bellies ... light bleeding through
+	// thin edges"; r95's #03/#13 smooth rounded blobs with dark undersides).
+	// -look-cloud-wisp=on|off (on by default; off is round 95 exactly), the CUMULUS
+	// and STRATOCUMULUS shapes: the material's five wisp scalars (cloud_layers.hlsl:
+	// WispAmount gates it all; CloudWispCurl cells of flow warp on a view sample's
+	// detail point; a finer top octave weighted CloudWispTopDetail; the erosion x
+	// (1 + CloudWispBoundaryErosion x (1 - density)); density^CloudWispEdgePower
+	// after the erosion, so a thin edge is optically thin) and the sky light's
+	// cloud-bottom occlusion CAPPED at CloudWispBottomOcclusion after
+	// CloudBottomOcclusionFor (round 82's 0.8 left a belly a fifth of the sky). No
+	// march sample added; shadow samples add no hash. world_beauty.cloud_wisp_row /
+	// cloud_belly_occlusion are the twins. UNCALIBRATED: set by probe render on the
+	// render machine (scene 3 with and without the switch).
+	constexpr double CloudWispAmount = 1.0;
+	constexpr double CloudWispCurl = 0.6;
+	constexpr double CloudWispEdgePower = 1.6;
+	constexpr double CloudWispTopDetail = 0.6;
+	constexpr double CloudWispBoundaryErosion = 0.5;
+	constexpr double CloudWispBottomOcclusion = 0.45;
+	enum EWispField
+	{
+		WspAmount = 0,
+		WspCurl = 1,
+		WspEdgePower = 2,
+		WspTopDetail = 3,
+		WspBoundaryErosion = 4,
+		WspFieldCount = 5
+	};
+	// The material's scalar names, in order (world_beauty.CLOUD_WISP_FIELDS).
+	inline const char* CloudWispFieldName(int Field)
+	{
+		static const char* const Names[WspFieldCount] = {
+			"WispAmount", "CurlStrength", "EdgeThinPower", "TopDetailGain", "BoundaryErosion"};
+		return Field >= 0 && Field < WspFieldCount ? Names[Field] : "";
+	}
+	inline bool CloudWispApplies(bool bWispOn, int Shape)
+	{
+		return bWispOn && (Shape == CloudCumulus || Shape == CloudStratocumulus);
+	}
+	// The five scalars for a layer: the amounts where the wisp applies, the OFF
+	// values (0, 0, 1, 0, 0: the material's defaults, round 95) where it does not.
+	inline void CloudWispRow(bool bApplies, double* Out)
+	{
+		Out[WspAmount] = bApplies ? CloudWispAmount : 0.0;
+		Out[WspCurl] = bApplies ? CloudWispCurl : 0.0;
+		Out[WspEdgePower] = bApplies ? CloudWispEdgePower : 1.0;
+		Out[WspTopDetail] = bApplies ? CloudWispTopDetail : 0.0;
+		Out[WspBoundaryErosion] = bApplies ? CloudWispBoundaryErosion : 0.0;
+	}
+	// Applied AFTER CloudBottomOcclusionFor: capped, never raised.
+	inline double CloudBellyOcclusion(bool bApplies, double Occlusion)
+	{
+		return bApplies && Occlusion > CloudWispBottomOcclusion ? CloudWispBottomOcclusion : Occlusion;
+	}
+	// Sky-clouds lane (2026-11-15): -look-cloud-light=on|off (OFF by default; off is
+	// c9e13c53's clouds exactly). world_beauty.CLOUD_LIGHT_* is the twin (the why and
+	// the real-world numbers are there): the scattering node's six inputs (dual-lobe
+	// HG g 0.8 / -0.3, back share 0.2; Wrenninge 2013 octave a = b = c = 0.5), the
+	// powder term (Schneider 2015) and the flat-base darkening of cloud_albedo.hlsl.
+	// ON also stops round 82's billow row overriding the cumulus row
+	// (CloudLightBillow). No sample and no march step: per-sample ALU only.
+	// UNCALIBRATED (every look number).
+	enum : int
+	{
+		LgtPhaseG = 0,
+		LgtPhaseG2 = 1,
+		LgtPhaseBlend = 2,
+		LgtMsContribution = 3,
+		LgtMsOcclusion = 4,
+		LgtMsEccentricity = 5,
+		LgtPowderAmount = 6,
+		LgtPowderDepthM = 7,
+		LgtBaseDarkening = 8,
+		LgtBaseRise = 9,
+		LgtFieldCount = 10
+	};
+	inline const char* CloudLightFieldName(int Field)
+	{
+		static const char* const Names[LgtFieldCount] = {
+			"PhaseG", "PhaseG2", "PhaseBlend", "MsContribution", "MsOcclusion",
+			"MsEccentricity", "PowderAmount", "PowderDepthM", "BaseDarkening", "BaseRise"};
+		return Field >= 0 && Field < LgtFieldCount ? Names[Field] : "";
+	}
+	constexpr double CloudLightPhaseG = 0.8;
+	constexpr double CloudLightPhaseG2 = -0.3;
+	constexpr double CloudLightPhaseBlend = 0.2;
+	constexpr double CloudLightOctave = 0.5;
+	constexpr double CloudLightPowder = 0.6;
+	constexpr double CloudLightPowderDepthM = 40.0;
+	// The OFF row: the material's defaults (CloudScattering's six, no powder, no base).
+	inline double CloudLightOff(int Field)
+	{
+		static const double Values[LgtFieldCount] = {0.85, -0.3, 0.3, 0.7, 0.25, 0.4, 0.0, 40.0, 0.0, 0.3};
+		return Field >= 0 && Field < LgtFieldCount ? Values[Field] : 0.0;
+	}
+	// Per shape (cumulus, stratocumulus, overcast, nimbostratus, altocumulus).
+	inline double CloudLightBaseDarkening(int Cloud)
+	{
+		static const double Rows[CloudCount] = {0.45, 0.35, 0.55, 0.7, 0.25};
+		return Cloud >= 0 && Cloud < CloudCount ? Rows[Cloud] : 0.0;
+	}
+	inline double CloudLightBaseRise(int Cloud)
+	{
+		static const double Rows[CloudCount] = {0.25, 0.4, 0.5, 0.5, 0.4};
+		return Cloud >= 0 && Cloud < CloudCount ? Rows[Cloud] : 0.3;
+	}
+	inline void CloudLightRow(bool bLightOn, int Cloud, double* Out)
+	{
+		for (int F = 0; F < LgtFieldCount; ++F)
+		{
+			Out[F] = CloudLightOff(F);
+		}
+		if (!bLightOn)
+		{
+			return;
+		}
+		Out[LgtPhaseG] = CloudLightPhaseG;
+		Out[LgtPhaseG2] = CloudLightPhaseG2;
+		Out[LgtPhaseBlend] = CloudLightPhaseBlend;
+		Out[LgtMsContribution] = CloudLightOctave;
+		Out[LgtMsOcclusion] = CloudLightOctave;
+		Out[LgtMsEccentricity] = CloudLightOctave;
+		Out[LgtPowderAmount] = CloudLightPowder;
+		Out[LgtPowderDepthM] = CloudLightPowderDepthM;
+		Out[LgtBaseDarkening] = CloudLightBaseDarkening(Cloud);
+		Out[LgtBaseRise] = CloudLightBaseRise(Cloud);
+	}
+	// -look-cloud-billow's row applies only with -look-cloud-light=off.
+	inline bool CloudLightBillow(bool bBillowOn, bool bLightOn)
+	{
+		return bBillowOn && !bLightOn;
+	}
+	// -cloud-material=ours|epic (A/B; world_beauty.CLOUD_MATERIAL_*): epic puts Epic's
+	// Volumetrics plugin cloud material on the beauty layer instead of ours.
+	constexpr int CloudMaterialWordCount = 2;
+	inline const char* CloudMaterialWord(int I)
+	{
+		static const char* const Words[CloudMaterialWordCount] = {"ours", "epic"};
+		return I >= 0 && I < CloudMaterialWordCount ? Words[I] : "";
+	}
+	inline const char* CloudMaterialEpicPath()
+	{
+		return "/Volumetrics/Sky/Materials/M_VolumetricCloud_02_Profiles_Soft.M_VolumetricCloud_02_Profiles_Soft";
+	}
+	// The beauty cloud's VolumetricAdvancedMaterialOutput constants, BAKED into
+	// M_FlightSimCloudLayers by scripts/ue_create_materials.py CLOUD_SCATTERING at
+	// graph generation CloudGraphGeneration (world_beauty.CLOUD_SCATTERING is the
+	// twin; tests pin all three). Recorded here so render.json says what lit the
+	// cloud; nothing here sets them. UNCALIBRATED.
+	constexpr int CloudGraphGeneration = 10;   // sky-clouds2: graph 8 again (the light moved to M_FlightSimCloudLayersLit)
+	constexpr double CloudAlbedo = 0.98;
+	// True when the asset's stamped generation is the one this bridge was written for.
+	inline bool CloudGraphGenerationCurrent(int Stamped)
+	{
+		return Stamped == CloudGraphGeneration;
+	}
+	inline double CloudAlbedoBaked()
+	{
+		return CloudAlbedo;
+	}
+	constexpr int CloudScatteringCount = 7;
+	inline const char* CloudScatteringName(int Field)
+	{
+		static const char* const Names[CloudScatteringCount] = {
+			"phase_g", "phase_g2", "phase_blend", "octaves", "contribution", "occlusion", "eccentricity"};
+		return Field >= 0 && Field < CloudScatteringCount ? Names[Field] : "";
+	}
+	inline double CloudScattering(int Field)
+	{
+		static const double Values[CloudScatteringCount] = {0.85, -0.3, 0.3, 2.0, 0.7, 0.25, 0.4};
+		return Field >= 0 && Field < CloudScatteringCount ? Values[Field] : 0.0;
+	}
+	// The owner's parameter names and the material parameter each one IS
+	// (world_beauty.CLOUD_OWNER_ALIASES): documented aliases, recorded, never a
+	// second input.
+	constexpr int CloudOwnerAliasCount = 5;
+	inline const char* CloudOwnerAlias(int Field, bool bTarget)
+	{
+		static const char* const Owner[CloudOwnerAliasCount] = {
+			"Coverage", "Density", "DetailStrength", "NoiseScale", "Wind"};
+		static const char* const Target[CloudOwnerAliasCount] = {
+			"Coverage", "ExtinctionPerM", "DetailErosion", "ShapeScaleKm", "WindOffsetM"};
+		return Field >= 0 && Field < CloudOwnerAliasCount ? (bTarget ? Target[Field] : Owner[Field]) : "";
+	}
 	// The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 	// stated layer) is thinned to the shape's depth: fair cumulus and a stratus
 	// deck are 1-2 km deep; 0 keeps the layer as built.
 	inline double CloudMaxThicknessM(int Cloud)
 	{
-		static const double Rows[CloudCount] = {2000.0, 0.0, 2000.0, 0.0};
+		// sky step 5: altocumulus 900 m (a sheet a few hundred metres deep). UNCALIBRATED.
+		static const double Rows[CloudCount] = {2000.0, 0.0, 2000.0, 0.0, 900.0};
 		return Cloud >= 0 && Cloud < CloudCount ? Rows[Cloud] : 0.0;
 	}
 	inline double CloudCappedTopM(int Cloud, double BaseM, double TopM, bool bStated)
@@ -569,6 +1037,145 @@ namespace FlightSimWorldPure
 		return VisibilityKm > 0.0 ? VisibilityKm : (Preset == PresetClear ? ClearDefaultVisibilityKm : 0.0);
 	}
 
+	// Sky step 4 (2026-11-15): THE HEIGHT FOG'S VERTICAL PROFILE. Read in the UE 5.7
+	// source (SceneCore.cpp 403-404, FogRendering.cpp 237-271, HeightFogCommon.ush
+	// 192-232, DeferredShadingRenderer.cpp 3455/3466): the engine draws the fog's
+	// density as FogDensity/1000 per cm x 2^(-FogHeightFalloff/1000 x (z - FogHeight)
+	// in cm), i.e. a 1/e scale height of 10 / (ln 2 x falloff) metres; it draws the
+	// fog OVER the sky atmosphere (RenderSkyAtmosphere, then RenderFog), and a sky
+	// pixel sits at the far plane, so its fog is the ray's whole line integral capped
+	// at FogMaxOpacity. The scene's fog (FlightSimVisualScene.cpp: falloff 0.0002) has
+	// a 72 km scale height: uniform to the top of the atmosphere, so EVERY sky pixel
+	// from every camera takes the fog at its max opacity, 0.92 of the fog's one
+	// in-scatter colour (under a -sky= plan: the sky light's average, FlightSimSky.cpp
+	// 265-266), with 0.08 of the atmosphere under it. That is the owner's "flat navy
+	// frame" and "no horizon haze" (round 95 #13, round 83 #03): the atmosphere's own
+	// gradient never reaches the frame. A real boundary-layer haze decays with a
+	// 1-2 km scale height; the clear and hazy rows give the fog the Mie layer's
+	// (fog_scale_height_km), so the zenith ray carries ~D x H of fog, the horizon ray
+	// saturates to the band, and far ridges take the atmosphere's aerial perspective
+	// through a thinning haze. The density at the SCENE's fog height is kept
+	// (FogDensityRebased), so the Koschmieder count at the ground (MieSplit, the fog
+	// keeps the haze the Mie layer did not take) is unchanged: a redistribution in
+	// height, not more extinction.
+	//
+	// The engine clamps the fog's observer to FogHeight + 65536 cm (FogRendering.cpp
+	// MaxObserverHeightDifference, for precision) and shifts the whole ray down by the
+	// excess (HeightFogCommon.ush 233/242): under a short scale height a cruise camera
+	// 10 km up would be treated as 655 m up with the ground 9 km BELOW the fog's
+	// reference height, where the exponential is 2^11 denser, and every surface would
+	// saturate. So the fog's reference height follows the aircraft (FogReferenceZM:
+	// the fog component is moved up to it, its density rebased so the profile in world
+	// space is identical, and Advance re-bases it when the aircraft has climbed or
+	// descended FogRebaseStepM). The dust haze's inversion and the storm's rain haze
+	// read the fog's height live and compose on top. world_beauty.py
+	// fog_height_falloff / fog_density_rebased / fog_reference_z_m are the twins.
+	// UNCALIBRATED: the scale height is the row's Mie one by construction; the
+	// outcome (a pale band, a blue zenith, layered ridges) is UNMEASURED until the
+	// Windows round named in docs/VISUAL_FIDELITY_PLAN.md "Sky step 4".
+	constexpr double SceneFogHeightFalloff = 0.0002;    // FlightSimVisualScene.cpp SetFogHeightFalloff
+	constexpr double SceneFogStartDistanceM = 1500.0;   // FlightSimVisualScene.cpp SetStartDistance
+	constexpr double SceneFogMaxOpacity = 0.92;         // FlightSimVisualScene.cpp SetFogMaxOpacity
+	constexpr double FogObserverClampM = 655.36;        // FogRendering.cpp MaxObserverHeightDifference 65536 cm
+	constexpr double FogRebaseStepM = 100.0;            // Advance re-bases past this climb or descent
+	constexpr double FogFalloffPerScaleHeightKm = 0.01 / 0.69314718055994531;   // falloff x scale height (km)
+	inline double FogHeightFalloffFor(double ScaleHeightKm)
+	{
+		return ScaleHeightKm > 0.0 ? FogFalloffPerScaleHeightKm / ScaleHeightKm : SceneFogHeightFalloff;
+	}
+	// FogDensity at a new reference height ToZM (metres) that draws the same density
+	// everywhere as Density did at FromZM under Falloff: D x 2^(-falloff x dz / 10)
+	// (falloff/1000 per cm x 100 cm per metre).
+	inline double FogDensityRebased(double Density, double Falloff, double FromZM, double ToZM)
+	{
+		return Density * std::pow(2.0, -Falloff * (ToZM - FromZM) / 10.0);
+	}
+	// The fog's reference height: the aircraft's when the row states a profile and
+	// the aircraft is above the scene's fog height (a camera at or under the
+	// reference, or up to FogObserverClampM above it, is never clamped); else the
+	// scene's.
+	inline double FogReferenceZM(double SceneZM, double AircraftZM, bool bProfile)
+	{
+		return bProfile && AircraftZM > SceneZM ? AircraftZM : SceneZM;
+	}
+
+	// Sky step 4: -sky-multi-scatter=auto|on|off (world_beauty.SKY_MULTI_SCATTER_SWITCH).
+	// Why ef361bd6's class gate is lifted: USkyAtmosphereComponent::MultiScatteringFactor
+	// is one multiply in the multi-scattering LUT pass (SkyAtmosphere.usf 1309/1311,
+	// a 32 x 32 compute dispatch the atmosphere runs every frame at the same sample
+	// count whatever the factor; r.SkyAtmosphere.MultiScatteringLUT.HighQuality is
+	// already 1 on every GPU from the render path); it is in no per-pixel sky, aerial
+	// perspective or cloud shader and adds no submission. Round 1's bisect named
+	// a8c964fc as a unit (march, shadow span, thinning, fog-on-all-pixel and this
+	// factor together) and r87 then located the stall in the sky light's cloud
+	// reflection march and capped it; nothing isolated the factor. claude/hl-sky keeps
+	// ef361bd6's class gate under auto (the constrained class keeps the engine's 1.0
+	// until a Windows round measures it); on applies the row on every GPU, which is
+	// that round's A/B; off is ef361bd6's sky (1.0) everywhere. An
+	// unknown word is -1 (Build refuses it by name). Whether 1.25 reads right on the
+	// iGPU is UNMEASURED (round 97 is the A/B).
+	constexpr int SkyMultiScatterWordCount = 3;
+	inline const char* SkyMultiScatterWord(int I)
+	{
+		static const char* const Words[SkyMultiScatterWordCount] = {"auto", "on", "off"};
+		return I >= 0 && I < SkyMultiScatterWordCount ? Words[I] : "";
+	}
+	inline int SkyMultiScatterFor(const char* Word, bool Constrained)
+	{
+		if (Word == nullptr || std::strcmp(Word, "auto") == 0)
+		{
+			return Constrained ? 0 : 1;   // ef361bd6's class gate (see above)
+		}
+		if (std::strcmp(Word, "on") == 0) { return 1; }
+		if (std::strcmp(Word, "off") == 0) { return 0; }
+		return -1;
+	}
+
+	// Lane sky-atmosphere: -look-sky-gradient=on|off (core/sky/gradient.py, the
+	// physics and the engine reading). On (the default) the clear and hazy rows'
+	// height fogs stop at FogCutoffDistance SkyGradientFogCutoffKm, so the sky
+	// pixels (decoded at 1 / 1e-8 cm = 1000 km: SceneView.cpp
+	// CreateInvDeviceZToWorldZTransform) show the physical atmosphere alone, and
+	// the fog's sky-atmosphere ambient is scaled by HorizonAirlightGain (the CIE
+	// clear sky's horizon over its upper-hemisphere mean) so a far surface fades
+	// to the horizon's luminance, not to the dimmer sphere-mean distant sky light.
+	// 1 = on, 0 = off, -1 = an unknown word (Build refuses it by name).
+	inline int SkyGradientFor(const char* Word)
+	{
+		if (Word == nullptr || Word[0] == '\0' || std::strcmp(Word, "on") == 0) { return 1; }
+		if (std::strcmp(Word, "off") == 0) { return 0; }
+		return -1;
+	}
+	[[maybe_unused]] constexpr double SkyGradientSkyPixelDepthKm = 1000.0;
+	[[maybe_unused]] constexpr double SkyGradientFogCutoffKm = 950.0;
+	constexpr int AirlightGainCount = 10;
+	// CIE S 011 type 12 (a -1, b -0.32, c 10, d -3, e 0.45): horizon (2 deg up,
+	// azimuth mean) / upper-hemisphere mean at sun elevation 0, 10, ... 90 deg.
+	constexpr double AirlightGainTable[AirlightGainCount] = {
+		2.313, 2.016, 1.717, 1.511, 1.371, 1.273, 1.204, 1.158, 1.131, 1.123};
+	constexpr double AirlightGainMax = 2.0;
+	constexpr double AirlightTwilightDeg = -6.0;
+	inline double HorizonAirlightGain(double SunElevationDeg)
+	{
+		if (SunElevationDeg < 0.0)
+		{
+			const double Top = AirlightGainTable[0] < AirlightGainMax ? AirlightGainTable[0] : AirlightGainMax;
+			double T = SunElevationDeg / AirlightTwilightDeg;
+			T = T < 0.0 ? 0.0 : (T > 1.0 ? 1.0 : T);
+			return Top + (1.0 - Top) * T;
+		}
+		const double X = (SunElevationDeg > 90.0 ? 90.0 : SunElevationDeg) / 10.0;
+		int I = static_cast<int>(X);
+		I = I > AirlightGainCount - 2 ? AirlightGainCount - 2 : I;
+		const double F = X - I;
+		const double G = AirlightGainTable[I] + (AirlightGainTable[I + 1] - AirlightGainTable[I]) * F;
+		return G < AirlightGainMax ? G : AirlightGainMax;
+	}
+	// The engine's Earth atmosphere (SkyAtmosphereComponent.cpp defaults), per km.
+	[[maybe_unused]] constexpr double EarthRayleighPerKm[3] = {0.005802, 0.013558, 0.033100};
+	[[maybe_unused]] constexpr double EarthRayleighScaleHeightKm = 8.0;
+	[[maybe_unused]] constexpr double EarthOzonePerKm[3] = {0.000650, 0.001881, 0.000085};
+
 	inline int SelectCloud(double Cover, double ThicknessM, int Preset)
 	{
 		if (Preset == PresetStorm || Preset == PresetRain)
@@ -740,7 +1347,9 @@ namespace FlightSimWorldPure
 	}
 	inline double DistantLook(int Field)
 	{
-		static const double Values[DistantLookCount] = {0.2, 0.9, 1.0, 0.3, 0.55, 0.15, 0.6, 8.0, 1.5};
+		// Sky step 1: BaseDarkening 0.55 -> 0.70, BaseSunShare 0.15 -> 0.25, SilverLining
+		// 0.6 -> 0.8 (the brief's grey-blue bellies and paler far cumulus). UNCALIBRATED.
+		static const double Values[DistantLookCount] = {0.2, 0.9, 1.0, 0.3, 0.70, 0.25, 0.8, 8.0, 1.5};
 		return Field >= 0 && Field < DistantLookCount ? Values[Field] : 0.0;
 	}
 	// The cover the sheet takes under a drawn storm cell with no redrawn layer:
@@ -817,6 +1426,133 @@ namespace FlightSimWorldPure
 		return TraceKm - DistantFadeKm > 0.0 ? TraceKm - DistantFadeKm : 0.0;
 	}
 
+	// Sky step 6 (the owner's X-Plane-12 brief, 2026-11-15): the high cirrus sheet
+	// (core/scene/cirrus.py is the twin). UE draws one volumetric layer; the
+	// reference photograph's upper sky is thin cirrus (long translucent wisps with
+	// feathered ends, the blue reading through), so a second earth-curved
+	// translucent disc (M_FlightSimCirrus, cirrus.hlsl) sits ABOVE the flight at
+	// max(CirrusBaseM, camera + CirrusClearanceM), capped at CirrusMaxM: never
+	// below the camera, so the owner's clearance rule holds by construction; it
+	// fades out over the clearance as the camera climbs into the cap. BEAUTY ONLY,
+	// VISUAL ONLY. UNCALIBRATED: set by probe render on the render machine.
+	constexpr double CirrusBaseM = 10000.0;
+	constexpr double CirrusClearanceM = 1500.0;
+	constexpr double CirrusMaxM = 13000.0;
+	// The disc: the distant sheet's rings and segments at a larger radius (the
+	// sheet is higher, so farther to its horizon); it draws before the distant
+	// sheet (-100): farther from every camera it can overlap (design D13).
+	constexpr double CirrusRadiusKm = 400.0;
+	constexpr int CirrusSortPriority = -101;
+	// The cover drawn with no data cover in the plan, or under -cloud-type=cirrus
+	// when the data gives none: a stated stylisation (the photograph's upper half
+	// is roughly a third veiled), recorded as such. Below CirrusMinDrawnCover
+	// nothing is built. The sheet drifts at CirrusWindGain x the card's drift
+	// (jet-level winds run faster than the boundary layer's; the plan carries no
+	// wind at altitude). UNCALIBRATED.
+	constexpr double CirrusDefaultCover = 0.35;
+	constexpr double CirrusMinDrawnCover = 0.02;
+	constexpr double CirrusWindGain = 2.0;
+	// The invariants the host relies on: the higher sheet reaches farther than the
+	// distant one and draws before it; the drawn floor is below the default cover.
+	static_assert(CirrusRadiusKm > DistantRadiusKm, "the cirrus sheet is higher, so farther to its horizon");
+	static_assert(CirrusSortPriority < -100, "the cirrus draws before the distant sheet (-100)");
+	static_assert(CirrusMinDrawnCover < CirrusDefaultCover, "the default cover is drawn");
+	// The look: the material's scalar parameters (cirrus.CIRRUS_LOOK, in order).
+	// UNCALIBRATED: set by probe render on the render machine.
+	constexpr int CirrusLookCount = 20;
+	inline const char* CirrusLookName(int Field)
+	{
+		static const char* const Names[CirrusLookCount] = {
+			"StreakScaleKm", "StreakAspect", "EdgeSigmas", "FibreStrength", "FibreSharpness", "PatchScaleKm",
+			"FlowWarpKm", "FlowLenKm", "HookWarpKm", "HookLenKm", "DetailFade", "OpticalDepth", "MaxOpacity",
+			"Albedo", "AmbientGain", "ForwardG", "ForwardShare", "ForwardCap", "RimFadeShare", "SunDirSign"};
+		return Field >= 0 && Field < CirrusLookCount ? Names[Field] : "";
+	}
+	inline double CirrusLook(int Field)
+	{
+		static const double Values[CirrusLookCount] = {1.5, 6.0, 2.0, 0.92, 6.0, 25.0, 10.0, 30.0, 1.0, 4.0,
+		                                               0.5, 0.4, 0.42, 0.95, 1.0, 0.7, 0.6, 8.0, 0.2, 1.0};
+		return Field >= 0 && Field < CirrusLookCount ? Values[Field] : 0.0;
+	}
+	struct FCirrusSheet
+	{
+		double AltitudeM;
+		double Fade;
+	};
+	// Where the sheet sits for a camera at CameraM (cirrus.cirrus_sheet): never
+	// below the camera; fade 1 with the full clearance below it, 0 at the cap.
+	inline FCirrusSheet CirrusSheetAltitudeM(double CameraM)
+	{
+		FCirrusSheet Out;
+		const double Lifted = CameraM + CirrusClearanceM > CirrusBaseM ? CameraM + CirrusClearanceM : CirrusBaseM;
+		Out.AltitudeM = Lifted < CirrusMaxM ? Lifted : CirrusMaxM;
+		const double Fade = (Out.AltitudeM - CameraM) / CirrusClearanceM;
+		Out.Fade = Fade < 0.0 ? 0.0 : (Fade > 1.0 ? 1.0 : Fade);
+		return Out;
+	}
+	// Where the drawn cover came from (cirrus.CIRRUS_COVER_SOURCES, in this order).
+	enum ECirrusSource
+	{
+		CirrusSourceOff = 0,
+		CirrusSourcePreset = 1,
+		CirrusSourceSwitch = 2,
+		CirrusSourcePlan = 3,
+		CirrusSourceDefault = 4,
+	};
+	inline const char* CirrusCoverSourceName(int Source)
+	{
+		static const char* const Names[5] = {"off", "preset", "switch", "plan", "default"};
+		return Source >= 0 && Source < 5 ? Names[Source] : "";
+	}
+	// The cover the host draws (cirrus.cirrus_cover), in order: -look-cirrus=off ->
+	// none; a rain or storm preset -> none (the deck covers the sky); -cloud-type=
+	// cirrus with no data cover above 0 -> the default; a plan whose cover came
+	// from data (cover_inputs present) -> its cirrus_coverage, 0 included (a clear
+	// upper sky stays clear); else the default. Clamped 0..1.
+	inline double CirrusCover(bool bOff, bool bSwitchCirrus, bool bCoverFromData, double PlanCirrus, int Preset,
+	                          int* Source)
+	{
+		if (bOff)
+		{
+			*Source = CirrusSourceOff;
+			return 0.0;
+		}
+		if (Preset == PresetRain || Preset == PresetStorm)
+		{
+			*Source = CirrusSourcePreset;
+			return 0.0;
+		}
+		const double Plan = PlanCirrus < 0.0 ? 0.0 : (PlanCirrus > 1.0 ? 1.0 : PlanCirrus);
+		if (bSwitchCirrus && !(bCoverFromData && Plan > 0.0))
+		{
+			*Source = CirrusSourceSwitch;
+			return CirrusDefaultCover;
+		}
+		if (bCoverFromData)
+		{
+			*Source = CirrusSourcePlan;
+			return Plan;
+		}
+		*Source = CirrusSourceDefault;
+		return CirrusDefaultCover;
+	}
+	// The streaks' compass bearing (cirrus.cirrus_streak_dir_deg): the card's drift
+	// bearing when it drifts (streaks run along the wind), else a seeded one
+	// (WorldUnit index 1, channel 0: index 0 is the noise offset's). 0 <= b < 360.
+	inline double CirrusStreakDirDeg(uint64_t Seed, double DriftMps, double DriftFromDeg)
+	{
+		if (DriftMps > 0.0)
+		{
+			const double Wrapped = std::fmod(DriftFromDeg, 360.0);
+			return Wrapped < 0.0 ? Wrapped + 360.0 : Wrapped;
+		}
+		return WorldUnit(Seed, 1ull, 0ull) * 360.0;
+	}
+	inline double CirrusDriftMps(double DriftMps)
+	{
+		return (DriftMps > 0.0 ? DriftMps : 0.0) * CirrusWindGain;
+	}
+
 	// Visual round 2 (weather scenes, 2026-11-10), world_beauty.aircraft_clear_layer:
 	// BEAUTY ONLY, the aircraft is never drawn INSIDE a deck. Round 1's tower view
 	// in heavy rain (an A320 at 1000 m in the 800-3000 m rain deck) and its 747 in
@@ -873,6 +1609,12 @@ namespace
 
 	const TCHAR* const WorldCloudMaterialPath =
 		TEXT("/Game/FlightSim/M_FlightSimCloudLayers.M_FlightSimCloudLayers");
+	// Sky-clouds2 lane: -look-cloud-light=on draws this SEPARATE material (graph 8
+	// plus the scattering inputs and cloud_albedo.hlsl), so the default
+	// M_FlightSimCloudLayers keeps graph 8's shader cost (the light's parameters
+	// raised its PS 161 -> 847 instructions, 0 -> 8 samplers, review of 42974c46).
+	const TCHAR* const WorldCloudLitMaterialPath =
+		TEXT("/Game/FlightSim/M_FlightSimCloudLayersLit.M_FlightSimCloudLayersLit");
 	const TCHAR* const WorldTilesMaterialPath =
 		TEXT("/Game/FlightSim/M_FlightSimTilesBeauty.M_FlightSimTilesBeauty");
 	const TCHAR* const WorldCollectionPath = TEXT("/Game/FlightSim/MPC_FlightSimWorld.MPC_FlightSimWorld");
@@ -880,6 +1622,9 @@ namespace
 	// probe's asset root (core/scene/sky_hdri.py HDRI_ASSET_DIR / HDRI_ASSET_PREFIX).
 	const TCHAR* const WorldDistantMaterialPath =
 		TEXT("/Game/FlightSim/M_FlightSimDistantClouds.M_FlightSimDistantClouds");
+	// Sky step 6: the cirrus sheet's material (scripts/ue_create_materials.py create_world_cirrus).
+	const TCHAR* const WorldCirrusMaterialPath =
+		TEXT("/Game/FlightSim/M_FlightSimCirrus.M_FlightSimCirrus");
 	// The HDRI asset is /Game/FlightSim/Sky/T_SkyHdri_<name> (ApplySkyHdri's Printf
 	// literal: FString::Printf takes a literal format).
 	// The HDRI fill as a share of the sun's illuminance (sky_hdri.HDRI_FILL_SHARE).
@@ -899,10 +1644,75 @@ namespace
 	// thin far cloud at the horizon fogs like the sky behind it.
 	// UNCALIBRATED: set by probe render on the render machine.
 	const TCHAR* const WorldCloudFogAllPixelCvar = TEXT("r.VolumetricCloud.ApplyFogOnAllPixel");
+	// Sky step 3: the render commandlet's beauty-path cvars (FlightSimRenderCommandlet.cpp
+	// SetBeautyCvar): one owner, so this lane names them in its record and never sets
+	// them (world_beauty.RENDER_PATH_CVARS is the twin).
+	const TCHAR* const WorldRenderPathCvars[] = {
+		TEXT("r.SkyAtmosphere.FastSkyLUT"),
+		TEXT("r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque"),
+		TEXT("r.SkyAtmosphere.MultiScatteringLUT.HighQuality"),
+		TEXT("r.SkyAtmosphere.LUT32"),
+		TEXT("r.SkyAtmosphere.SampleCountMax"),
+		TEXT("r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice"),
+		TEXT("r.VolumetricCloud"),
+		TEXT("r.VolumetricCloud.HighQualityAerialPerspective"),
+		TEXT("r.VolumetricRenderTarget.Mode"),
+	};
 	constexpr double WorldCmPerMetre = 100.0;
 	// world_beauty.STORM_DECK_CLEARANCE_M (lane D, round 26): a storm preset's deck
 	// above the aircraft hangs this low over it, so a level chase frame's top is deck.
 	constexpr double StormDeckClearanceM = 150.0;
+
+	// Sky step 6: the distant sheet's earth-curved disc (ApplyDistantClouds builds
+	// its own inline, pinned by tests/test_distant_clouds.py) as a helper for the
+	// cirrus sheet: a fan about the centre, then ring quads, rings densifying
+	// towards the centre (FlightSimWorldPure::DistantRingRadiusKm), each dropped by
+	// the earth's curvature (DistantDroopM); two-sided material, so the winding is
+	// not load-bearing. Section 0, no collision.
+	void BuildCurvedDisc(UProceduralMeshComponent* Mesh, double RadiusKm)
+	{
+		// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
+		using namespace FlightSimWorldPure;
+		TArray<FVector> Vertices;
+		TArray<int32> Triangles;
+		TArray<FVector> Normals;
+		TArray<FVector2D> UV0;
+		Vertices.Add(FVector::ZeroVector);
+		Normals.Add(FVector::UpVector);
+		UV0.Add(FVector2D(0.0, 0.0));
+		for (int32 Ring = 1; Ring <= DistantRings; ++Ring)
+		{
+			const double RingKm = DistantRingRadiusKm(Ring, DistantRings, RadiusKm);
+			const double RingCm = RingKm * 1000.0 * WorldCmPerMetre;
+			const double ZCm = DistantDroopM(RingKm) * WorldCmPerMetre;
+			for (int32 Seg = 0; Seg < DistantSegments; ++Seg)
+			{
+				const double Angle = 2.0 * PI * Seg / DistantSegments;
+				Vertices.Add(FVector(FMath::Cos(Angle) * RingCm, FMath::Sin(Angle) * RingCm, ZCm));
+				Normals.Add(FVector::UpVector);
+				UV0.Add(FVector2D(static_cast<double>(Ring) / DistantRings, static_cast<double>(Seg) / DistantSegments));
+			}
+		}
+		auto VertexIndex = [](int32 Ring, int32 Seg)
+		{
+			return Ring <= 0 ? 0 : 1 + (Ring - 1) * DistantSegments + (Seg % DistantSegments);
+		};
+		for (int32 Seg = 0; Seg < DistantSegments; ++Seg)
+		{
+			Triangles.Append({VertexIndex(0, 0), VertexIndex(1, Seg), VertexIndex(1, Seg + 1)});
+		}
+		for (int32 Ring = 1; Ring < DistantRings; ++Ring)
+		{
+			for (int32 Seg = 0; Seg < DistantSegments; ++Seg)
+			{
+				const int32 A = VertexIndex(Ring, Seg), B = VertexIndex(Ring, Seg + 1);
+				const int32 C = VertexIndex(Ring + 1, Seg), D = VertexIndex(Ring + 1, Seg + 1);
+				Triangles.Append({A, C, B, B, C, D});
+			}
+		}
+		check(Vertices.Num() == DistantDiscVertexCount() && Triangles.Num() == 3 * DistantDiscTriangleCount());
+		Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0, {}, {}, false);
+	}
 
 	double WorldNumber(const TSharedPtr<FJsonObject>& Object, const TCHAR* Key, double Default)
 	{
@@ -1112,7 +1922,7 @@ bool FFlightSimWorldBeauty::StormNeutralAlbedo() const
 bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSharedPtr<FJsonObject>& Card,
                                   AActor* Aircraft, AGeoReferencingSystem* GeoReferencing,
                                   FFlightSimVisualScene& Scene, FFlightSimWeather& Weather,
-                                  FFlightSimGoogleTiles& Tiles, FString& Error)
+                                  FFlightSimGoogleTiles& Tiles, const FFlightSimSkyPlan* SkyPlan, FString& Error)
 {
 	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
 	using namespace FlightSimWorldPure;
@@ -1159,6 +1969,45 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// off is round 81's clouds exactly. Another word refuses by name.
 		CloudBillowSwitch = TEXT("on");
 		FParse::Value(*Switches, TEXT("look-cloud-billow="), CloudBillowSwitch);
+		// Sky step 2: -cloud-type=<word> (empty = not given): the owner's probe over
+		// the plan's and the card's type (FlightSimWorldPure::LayerSource; the
+		// existing -cloud-cover= probe builds a CARD layer, the wrong component for
+		// this). Another word refuses by name.
+		CloudTypeSwitch.Reset();
+		FParse::Value(*Switches, TEXT("cloud-type="), CloudTypeSwitch);
+		// Sky step 3: -cloud-march=auto|constrained|discrete|probe (auto by default:
+		// the GPU class, as before). A named tier is the owner's measurement on any
+		// GPU (FlightSimWorldPure::CloudMarchFor, CloudMarch, CloudCvar); another
+		// word refuses by name.
+		CloudMarchSwitch = TEXT("auto");
+		FParse::Value(*Switches, TEXT("cloud-march="), CloudMarchSwitch);
+		// Sky step 6: -look-cirrus=on|off (off by default since cirrus generation 2,
+		// lane sky-cirrus2: off until it reads as a photograph by eye): the high
+		// cirrus sheet (ApplyCirrus); off builds none (the round-95 upper sky).
+		// Another word refuses by name.
+		CirrusSwitch = TEXT("off");
+		FParse::Value(*Switches, TEXT("look-cirrus="), CirrusSwitch);
+		// Sky step 4: -sky-multi-scatter=auto|on|off (auto by default: the row's
+		// MultiScatteringFactor on a discrete GPU, the class gate kept; on = every class; off is ef361bd6's sky for the
+		// A/B). FlightSimWorldPure::SkyMultiScatterFor; another word refuses by name.
+		SkyMultiScatterSwitch = TEXT("auto");
+		FParse::Value(*Switches, TEXT("sky-multi-scatter="), SkyMultiScatterSwitch);
+		// Lane sky-atmosphere: -look-sky-gradient=on|off (on by default; off is
+		// claude/hl-sky's sky). FlightSimWorldPure::SkyGradientFor.
+		SkyGradientSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("look-sky-gradient="), SkyGradientSwitch);
+		// Sky step 1: -look-cloud-wisp=on|off (on by default): the cumulus and
+		// stratocumulus wisp (CloudWispRow, CloudBellyOcclusion); off is round 95's
+		// clouds exactly. Another word refuses by name.
+		CloudWispSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("look-cloud-wisp="), CloudWispSwitch);
+		// Sky-clouds lane: -look-cloud-light=on|off (OFF by default until Windows shows it; CloudLightRow,
+		// CloudLightBillow; off is c9e13c53's clouds) and -cloud-material=ours|epic
+		// (ours by default; epic is the Volumetrics plugin's cloud material for the A/B).
+		CloudLightSwitch = TEXT("off");
+		FParse::Value(*Switches, TEXT("look-cloud-light="), CloudLightSwitch);
+		CloudMaterialSwitch = TEXT("ours");
+		FParse::Value(*Switches, TEXT("cloud-material="), CloudMaterialSwitch);
 		// Impostor A/B (0deddc6d): -cloud-volumetric-scale=<0..1> (1 by default)
 		// thins every volumetric layer's drawn cover; 0 hides the layer
 		// (ApplyClouds, CloudVolumetricCoverage). Not a number, or outside
@@ -1189,6 +2038,77 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	{
 		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-billow=%s is not on or off"),
 		                        *CloudBillowSwitch);
+		return false;
+	}
+	if (!CloudTypeSwitch.IsEmpty() && PlanCloudTypeIndex(TCHAR_TO_ANSI(*CloudTypeSwitch)) == PlanCloudUnknown)
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-type=%s is not one of clear, cumulus, stratocumulus, "
+		                             "altocumulus, cirrus, overcast, nimbostratus"), *CloudTypeSwitch);
+		return false;
+	}
+	if (CloudMarchFor(TCHAR_TO_ANSI(*CloudMarchSwitch), false) < 0)
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-march=%s is not auto, constrained, discrete or probe"),
+		                        *CloudMarchSwitch);
+		return false;
+	}
+	if (SkyMultiScatterFor(TCHAR_TO_ANSI(*SkyMultiScatterSwitch), false) < 0)
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -sky-multi-scatter=%s is not auto, on or off"),
+		                        *SkyMultiScatterSwitch);
+		return false;
+	}
+	if (SkyGradientFor(TCHAR_TO_ANSI(*SkyGradientSwitch)) < 0)
+	{
+		Error = FString::Printf(TEXT("world_beauty.sky_gradient: -look-sky-gradient=%s is not on or off"),
+		                        *SkyGradientSwitch);
+		return false;
+	}
+	if (CirrusSwitch != TEXT("on") && CirrusSwitch != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.cirrus: -look-cirrus=%s is not on or off"), *CirrusSwitch);
+		return false;
+	}
+	// Sky step 2: the -sky= plan's cloud fields, read in ApplyClouds (nullptr without a plan).
+	SkyPlanRef = SkyPlan;
+	// Sky step 5: the plan's march_tier (the step 3 cvar set it asks for) stands in
+	// for an unstated -cloud-march= (FlightSimWorldPure::CloudMarchWordInForce):
+	// switch (not auto) > plan (a known word) > auto. The word parsed is kept as
+	// CloudMarchSwitchGiven; CloudMarchSwitch is the word in force from here on, so
+	// ApplyClouds and ApplyDistantClouds resolve the same tier as before this step.
+	CloudMarchSwitchGiven = CloudMarchSwitch;
+	{
+		const FString PlanTier = SkyPlan != nullptr ? SkyPlan->CloudMarchTier : FString();
+		// (the out pointer aliases a TCHAR_TO_ANSI temporary: the word is taken from
+		// the source index, never from the pointer)
+		const char* WordInForce = "auto";
+		const int32 WordSource = CloudMarchWordInForce(TCHAR_TO_ANSI(*CloudMarchSwitch),
+		                                               TCHAR_TO_ANSI(*PlanTier), &WordInForce);
+		CloudMarchSwitch = WordSource == MarchWordPlan ? PlanTier
+			: (WordSource == MarchWordSwitch ? CloudMarchSwitchGiven : FString(TEXT("auto")));
+		CloudMarchWordSource = ANSI_TO_TCHAR(MarchWordSourceName(WordSource));
+		if (WordSource != MarchWordPlan && !PlanTier.IsEmpty() && PlanTier != TEXT("auto")
+		    && CloudMarchFor(TCHAR_TO_ANSI(*PlanTier), false) < 0)
+		{
+			CloudMarchWordSource += TEXT(" (plan march_tier unknown, ignored)");
+		}
+	}
+	if (CloudWispSwitch != TEXT("on") && CloudWispSwitch != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-wisp=%s is not on or off"),
+		                        *CloudWispSwitch);
+		return false;
+	}
+	if (CloudLightSwitch != TEXT("on") && CloudLightSwitch != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-light=%s is not on or off"),
+		                        *CloudLightSwitch);
+		return false;
+	}
+	if (CloudMaterialSwitch != TEXT("ours") && CloudMaterialSwitch != TEXT("epic"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-material=%s is not ours or epic"),
+		                        *CloudMaterialSwitch);
 		return false;
 	}
 
@@ -1415,7 +2335,7 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	Record->SetStringField(TEXT("visual_only"),
 		TEXT("nothing here reaches the flight model; the measure quality never builds it"));
 
-	ApplyAtmosphere(World, Scene, VisibilityKm);
+	ApplyAtmosphere(World, Scene, VisibilityKm, Aircraft);
 	// dust-humidity-haze (FlightSimDustHaze.h): RH growth, dust tint, the boundary-layer cap.
 	TSharedPtr<FJsonObject> DustOut;
 	DustHaze.Apply(World, Scene, Params, Card, VisibilityKm, WorldObject(Record, TEXT("atmosphere")), DustOut);
@@ -1426,6 +2346,9 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	// Visual round 5, lane L3: the far deck and the horizon (after the clearance:
 	// the sheet follows the slab that is drawn), then the sky HDRI probe.
 	ApplyDistantClouds(World, Scene, Weather, DistantMode, Seed);
+	// Sky step 6: the high cirrus sheet, above everything the layers drew (its
+	// cover is the plan's data or the stated default; -look-cirrus=off builds none).
+	ApplyCirrus(World, Scene, Seed);
 	if (!ApplySkyHdri(Scene, SkyHdriName, Params, Error))
 	{
 		return false;
@@ -1733,15 +2656,53 @@ namespace FlightSimTilesDelight
 void FFlightSimWorldBeauty::RestoreCvars()
 {
 	SunShafts.Restore();
-	// clouds-sky round 2: the fog-on-every-cloud-pixel cvar, as it was.
-	if (!CloudFogAllPixelBefore.IsEmpty())
+	// Sky step 3: every cvar ApplyClouds wrote (the march tier's table and, since
+	// clouds-sky round 2, the fog-on-every-cloud-pixel cvar), back to the value it
+	// had before, in reverse order. Idempotent.
+	for (int32 I = WorldCvarsBefore.Num() - 1; I >= 0; --I)
 	{
-		if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(WorldCloudFogAllPixelCvar))
+		if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(*WorldCvarsBefore[I].Name))
 		{
-			Variable->Set(*CloudFogAllPixelBefore, ECVF_SetByCode);
+			Variable->Set(*WorldCvarsBefore[I].Before, ECVF_SetByCode);
 		}
-		CloudFogAllPixelBefore.Empty();
 	}
+	WorldCvarsBefore.Reset();
+}
+
+// Sky step 3: a cvar's value before this lane touched it, saved once (the first
+// save wins: a second call for the same name returns what was saved).
+FString FFlightSimWorldBeauty::SaveWorldCvar(const TCHAR* Name, IConsoleVariable* Variable)
+{
+	for (const FSavedCvar& Entry : WorldCvarsBefore)
+	{
+		if (Entry.Name == Name)
+		{
+			return Entry.Before;
+		}
+	}
+	WorldCvarsBefore.Add({FString(Name), Variable->GetString()});
+	return WorldCvarsBefore.Last().Before;
+}
+
+// Sky step 3: set one renderer cvar at code priority, its value before saved for
+// RestoreCvars, and record [before, read back] under Row (modelled on
+// FFlightSimSunShafts::SetSunShaftsCvar). An unregistered name is listed in
+// Skipped and nothing is set.
+void FFlightSimWorldBeauty::SetWorldCvar(const TCHAR* Name, double Value, const TSharedPtr<FJsonObject>& Row,
+                                         TArray<TSharedPtr<FJsonValue>>& Skipped)
+{
+	IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name);
+	if (Variable == nullptr)
+	{
+		Skipped.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("skipped: %s is not registered"), Name)));
+		return;
+	}
+	const FString Before = SaveWorldCvar(Name, Variable);
+	Variable->Set(*FString::SanitizeFloat(Value, 0), ECVF_SetByCode);
+	TArray<TSharedPtr<FJsonValue>> Pair;
+	Pair.Add(MakeShared<FJsonValueString>(Before));
+	Pair.Add(MakeShared<FJsonValueString>(Variable->GetString()));
+	Row->SetArrayField(Name, Pair);
 }
 
 // Round 1 hang: the public face of CloudConstrainedGpu (the commandlet's
@@ -1751,13 +2712,15 @@ bool FFlightSimWorldBeauty::ConstrainedGpu()
 	return CloudConstrainedGpu();
 }
 
-void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm)
+void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm,
+                                            AActor* Aircraft)
 {
 	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
 	using namespace FlightSimWorldPure;
 	const double* Row = &AtmosphereValues[Preset * AtmosphereFieldCount];
 	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 	double FogFactor = 1.0;
+	FogProfiles.Reset();
 	USkyAtmosphereComponent* Atmosphere = Scene.Atmosphere;
 	// -NoAerialPerspective (Gate 6's extinction control) hides the atmosphere
 	// and the fog: a hidden one is left exactly as the scene built it.
@@ -1783,15 +2746,29 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	// clouds-sky round 2: the sky's multiple scattering (paler towards the
 	// horizon from altitude; FlightSimWorldPure::SkyMultiScattering).
 	Out->SetNumberField(TEXT("multi_scattering_factor_before"), Atmosphere->MultiScatteringFactor);
-	// Not on a constrained GPU (CloudConstrainedGpu): ef361bd6 never set it.
-	if (!CloudConstrainedGpu())
+	// Sky step 4: the row under -sky-multi-scatter=on, or auto on a discrete GPU (ef361bd6's
+	// class gate kept under auto: FlightSimWorldPure::SkyMultiScatterFor); off
+	// keeps the scene's 1.0 for the A/B.
+	const int32 MultiScatter = SkyMultiScatterFor(TCHAR_TO_ANSI(*SkyMultiScatterSwitch), CloudConstrainedGpu());
+	if (MultiScatter == 1)
 	{
 		Atmosphere->SetMultiScatteringFactor(static_cast<float>(SkyMultiScattering(Preset)));
 	}
 	Out->SetNumberField(TEXT("multi_scattering_factor"), Atmosphere->MultiScatteringFactor);
+	Out->SetStringField(TEXT("multi_scattering_switch"), SkyMultiScatterSwitch);
+	Out->SetBoolField(TEXT("multi_scattering_applied"), MultiScatter == 1);
+	Out->SetBoolField(TEXT("multi_scattering_constrained_gpu"), CloudConstrainedGpu());
 	Out->SetStringField(TEXT("multi_scattering_basis"),
 		TEXT("world_beauty.SKY_MULTI_SCATTERING (UNCALIBRATED): shot d's sky at 3.8 km rendered near-black navy; "
 		     "more multiple scattering pales and lifts the clear sky towards the horizon"));
+	Out->SetStringField(TEXT("multi_scattering_gate_basis"),
+		TEXT("sky step 4: -sky-multi-scatter=auto|on|off, auto = on for a discrete GPU, the engine's 1.0 on the constrained class (ef361bd6's gate, kept); on = every class. The factor is one multiply "
+		     "in the 32x32 multi-scattering LUT pass the atmosphere runs every frame at the same sample count "
+		     "(SkyAtmosphere.usf MultiScatteredLuminanceLutUAV; the render path already sets "
+		     "r.SkyAtmosphere.MultiScatteringLUT.HighQuality 1 on every GPU), in no per-pixel shader, so it adds "
+		     "no submission on the iGPU. Round 1's bisect named a8c964fc as a unit and r87 located the stall in the "
+		     "sky light's cloud reflection march; nothing isolated this factor. UNMEASURED on the iGPU until the "
+		     "Windows A/B (docs/VISUAL_FIDELITY_PLAN.md Sky step 4); off is ef361bd6's sky."));
 	Out->SetNumberField(TEXT("mie_scale_height_km"), Row[AtmMieScaleHeightKm]);
 	Out->SetNumberField(TEXT("mie_anisotropy"), Row[AtmMieAnisotropy]);
 	Out->SetNumberField(TEXT("aerial_perspective_view_distance_scale"), Row[AtmAerialPerspectiveScale]);
@@ -1846,8 +2823,96 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	}
 	Out->SetBoolField(TEXT("applied"), true);
 
+	// Sky step 4: the aerial perspective's record (the scale stays 1.0: world_beauty.py
+	// says why; the LUT's depth and resolution are the march tier's cvars, recorded
+	// under clouds.march.cvars by ApplyClouds).
+	{
+		TSharedPtr<FJsonObject> Aerial = MakeShared<FJsonObject>();
+		Aerial->SetNumberField(TEXT("view_distance_scale"), Row[AtmAerialPerspectiveScale]);
+		Aerial->SetStringField(TEXT("basis"),
+			TEXT("SetAerialPespectiveViewDistanceScale 1.0 (fix pass 2026-11-09: a scale multiplies only the opaque "
+			     "surfaces' haze and breaks the Koschmieder single count); the ridges' layering comes from the Mie "
+			     "layer, the multiple scattering and the fog's vertical profile (horizon_haze); the AP LUT's depth, "
+			     "resolution and sample counts are the march tier's cvars (clouds.march.cvars)"));
+		Out->SetObjectField(TEXT("aerial_perspective"), Aerial);
+	}
+
 	// The height fog: the rest of the haze, and volumetric fog for the sun's
-	// shafts through it.
+	// shafts through it. Sky step 4: its vertical profile, start distance and
+	// max opacity (FlightSimWorldPure::FogHeightFalloffFor and the rebase laws:
+	// the comment there is the physics and the engine reading).
+	const double FogScaleHeightKm = Row[AtmFogScaleHeightKm];
+	const bool bFogProfile = FogScaleHeightKm > 0.0;
+	const double FogFalloff = FogHeightFalloffFor(FogScaleHeightKm);
+	const bool bAircraftKnown = Aircraft != nullptr;
+	const double AircraftZM = bAircraftKnown ? Aircraft->GetActorLocation().Z / WorldCmPerMetre : 0.0;
+	TSharedPtr<FJsonObject> Haze = MakeShared<FJsonObject>();
+	Haze->SetBoolField(TEXT("profile_applied"), bFogProfile);
+	// Lane sky-atmosphere: -look-sky-gradient (core/sky/gradient.py). The clear and
+	// hazy rows only (the fog's vertical profile): the sky pixels leave the fog (its
+	// cutoff), the fog's atmosphere ambient takes the horizon's luminance, and the
+	// atmosphere's Earth coefficients are stated rather than inherited.
+	const bool bSkyGradient = SkyGradientFor(TCHAR_TO_ANSI(*SkyGradientSwitch)) == 1 && bFogProfile;
+	double SunElevationDeg = 90.0;
+	if (Scene.Sun != nullptr)
+	{
+		const FVector LightDir = Scene.Sun->GetActorForwardVector();
+		SunElevationDeg = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(-LightDir.Z, -1.0, 1.0)));
+	}
+	const double AirlightGain = HorizonAirlightGain(SunElevationDeg);
+	{
+		TSharedPtr<FJsonObject> Gradient = MakeShared<FJsonObject>();
+		Gradient->SetStringField(TEXT("switch"), SkyGradientSwitch);
+		Gradient->SetBoolField(TEXT("applied"), bSkyGradient);
+		Gradient->SetNumberField(TEXT("sun_elevation_deg"), SunElevationDeg);
+		Gradient->SetNumberField(TEXT("fog_cutoff_km"), bSkyGradient ? SkyGradientFogCutoffKm : 0.0);
+		Gradient->SetNumberField(TEXT("sky_pixel_depth_km"), SkyGradientSkyPixelDepthKm);
+		Gradient->SetNumberField(TEXT("horizon_airlight_gain"), bSkyGradient ? AirlightGain : 1.0);
+		Gradient->SetStringField(TEXT("basis"),
+			TEXT("core/sky/gradient.py: a sky pixel decodes to 1000 km (SceneView.cpp DeviceZ 0 -> 1/1e-8 cm), so the "
+			     "height fog drawn over the sky took every sky pixel to 0.92 of the distant sky light's sphere mean "
+			     "(the flat navy sky); FogCutoffDistance 950 km (past the 754 km farthest tile, short of the sky) shows "
+			     "the atmosphere alone there. The fog's ambient x the CIE clear sky's horizon / upper-hemisphere mean "
+			     "(ISO 15469 type 12) at the sun's elevation, so far ground fades to the horizon's luminance. "
+			     "UNMEASURED on the iGPU until the Windows A/B"));
+		if (bSkyGradient)
+		{
+			Atmosphere->SetRayleighScattering(FLinearColor(
+				static_cast<float>(EarthRayleighPerKm[0] / EarthRayleighPerKm[2]),
+				static_cast<float>(EarthRayleighPerKm[1] / EarthRayleighPerKm[2]), 1.0f));
+			Atmosphere->SetRayleighScatteringScale(static_cast<float>(EarthRayleighPerKm[2]));
+			Atmosphere->SetRayleighExponentialDistribution(static_cast<float>(EarthRayleighScaleHeightKm));
+			Atmosphere->SetOtherAbsorption(FLinearColor(
+				static_cast<float>(EarthOzonePerKm[0] / EarthOzonePerKm[1]), 1.0f,
+				static_cast<float>(EarthOzonePerKm[2] / EarthOzonePerKm[1])));
+			Atmosphere->SetOtherAbsorptionScale(static_cast<float>(EarthOzonePerKm[1]));
+			Gradient->SetStringField(TEXT("rayleigh_per_mm"), TEXT("5.802,13.558,33.1 (scale height 8 km)"));
+			Gradient->SetStringField(TEXT("ozone_per_mm"), TEXT("0.650,1.881,0.085 (tent 25 km, 15 km wide)"));
+		}
+		Out->SetObjectField(TEXT("sky_gradient"), Gradient);
+	}
+	Haze->SetNumberField(TEXT("fog_scale_height_km"), FogScaleHeightKm);
+	Haze->SetNumberField(TEXT("fog_height_falloff"), FogFalloff);
+	Haze->SetNumberField(TEXT("fog_height_falloff_scene"), SceneFogHeightFalloff);
+	Haze->SetNumberField(TEXT("fog_start_distance_m"), Row[AtmFogStartDistanceM]);
+	Haze->SetNumberField(TEXT("fog_max_opacity"), Row[AtmFogMaxOpacity]);
+	Haze->SetNumberField(TEXT("observer_clamp_m"), FogObserverClampM);
+	Haze->SetNumberField(TEXT("rebase_step_m"), FogRebaseStepM);
+	Haze->SetBoolField(TEXT("aircraft_known"), bAircraftKnown);
+	Haze->SetNumberField(TEXT("aircraft_z_m"), AircraftZM);
+	Haze->SetStringField(TEXT("basis"),
+		TEXT("sky step 4 (world_beauty.fog_height_falloff / fog_density_rebased / fog_reference_z_m): the engine "
+		     "draws FogDensity x 2^(-falloff/1000 x cm above the fog's height) OVER the sky atmosphere, with a sky "
+		     "pixel's fog capped at the max opacity; the scene's falloff 0.0002 (a 72 km scale height) gave every "
+		     "sky pixel 0.92 of one flat in-scatter colour. The clear and hazy rows give the fog the Mie layer's "
+		     "scale height, so the zenith clears, the horizon saturates to a pale band and ridges layer through a "
+		     "thinning haze; the density at the scene's fog height is kept (the Koschmieder count at the ground "
+		     "is unchanged). The fog's reference height follows the aircraft because the engine clamps the fog's "
+		     "observer to 655.36 m above the fog height (FogRendering.cpp MaxObserverHeightDifference) and shifts "
+		     "the ray by the excess; Advance re-bases it per 100 m of climb or descent. The weather rows keep the "
+		     "scene's uniform fog (their haze is the column under a deck). UNCALIBRATED; UNMEASURED until the "
+		     "Windows round in docs/VISUAL_FIDELITY_PLAN.md Sky step 4"));
+	Haze->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED"));
 	TArray<TSharedPtr<FJsonValue>> FogRows;
 	for (TObjectIterator<UExponentialHeightFogComponent> It; It; ++It)
 	{
@@ -1859,6 +2924,55 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 		TSharedPtr<FJsonObject> FogRow = MakeShared<FJsonObject>();
 		FogRow->SetNumberField(TEXT("fog_density_before"), Fog->FogDensity);
 		Fog->SetFogDensity(static_cast<float>(Fog->FogDensity * FogFactor));
+		// Sky step 4: the vertical profile, re-based at the aircraft's height.
+		{
+			const FVector FogLocation = Fog->GetComponentLocation();
+			const double SceneZM = FogLocation.Z / WorldCmPerMetre;
+			const double ReferenceZM = FogReferenceZM(SceneZM, AircraftZM, bFogProfile && bAircraftKnown);
+			FogRow->SetNumberField(TEXT("fog_height_falloff_before"), Fog->FogHeightFalloff);
+			FogRow->SetNumberField(TEXT("fog_height_z_m_scene"), SceneZM);
+			FogRow->SetNumberField(TEXT("fog_density_at_scene_height"), Fog->FogDensity);
+			if (bFogProfile)
+			{
+				const double Rebased = FogDensityRebased(Fog->FogDensity, FogFalloff, SceneZM, ReferenceZM);
+				Fog->SetFogHeightFalloff(static_cast<float>(FogFalloff));
+				Fog->SetFogDensity(static_cast<float>(Rebased));
+				if (ReferenceZM != SceneZM)
+				{
+					Fog->SetWorldLocation(FVector(FogLocation.X, FogLocation.Y, ReferenceZM * WorldCmPerMetre));
+					Fog->MarkRenderStateDirty();
+				}
+				FBeautyFogProfile Profile;
+				Profile.Fog = Fog;
+				Profile.SceneZM = SceneZM;
+				Profile.Falloff = FogFalloff;
+				FogProfiles.Add(Profile);
+			}
+			FogRow->SetNumberField(TEXT("fog_height_falloff"), Fog->FogHeightFalloff);
+			FogRow->SetNumberField(TEXT("fog_height_z_m"), Fog->GetComponentLocation().Z / WorldCmPerMetre);
+			FogRow->SetNumberField(TEXT("fog_start_distance_m_before"), Fog->StartDistance / WorldCmPerMetre);
+			FogRow->SetNumberField(TEXT("fog_max_opacity_before"), Fog->FogMaxOpacity);
+			Fog->SetStartDistance(static_cast<float>(Row[AtmFogStartDistanceM] * WorldCmPerMetre));
+			Fog->SetFogMaxOpacity(static_cast<float>(Row[AtmFogMaxOpacity]));
+			FogRow->SetNumberField(TEXT("fog_start_distance_m"), Fog->StartDistance / WorldCmPerMetre);
+			FogRow->SetNumberField(TEXT("fog_max_opacity"), Fog->FogMaxOpacity);
+			if (bSkyGradient)
+			{
+				FogRow->SetNumberField(TEXT("fog_cutoff_distance_km_before"), Fog->FogCutoffDistance / WorldCmPerMetre / 1000.0);
+				Fog->SetFogCutoffDistance(static_cast<float>(SkyGradientFogCutoffKm * 1000.0 * WorldCmPerMetre));
+				FogRow->SetNumberField(TEXT("fog_cutoff_distance_km"), Fog->FogCutoffDistance / WorldCmPerMetre / 1000.0);
+				// Only an atmosphere-lit fog (a -sky= plan sets the inscattering black):
+				// a legacy constant colour is not the sky's and is left alone.
+				if (Fog->FogInscatteringLuminance.Equals(FLinearColor::Black))
+				{
+					const FLinearColor Before = Fog->SkyAtmosphereAmbientContributionColorScale;
+					const float G = static_cast<float>(AirlightGain);
+					Fog->SetSkyAtmosphereAmbientContributionColorScale(
+						FLinearColor(Before.R * G, Before.G * G, Before.B * G, Before.A));
+					FogRow->SetNumberField(TEXT("horizon_airlight_gain"), AirlightGain);
+				}
+			}
+		}
 		Fog->SetVolumetricFog(true);
 		Fog->SetVolumetricFogDistance(static_cast<float>(Row[AtmVFogDistanceM] * WorldCmPerMetre));
 		Fog->SetVolumetricFogScatteringDistribution(static_cast<float>(Row[AtmVFogScatteringDistribution]));
@@ -1881,6 +2995,8 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 		FogRows.Add(MakeShared<FJsonValueObject>(FogRow));
 	}
 	Out->SetArrayField(TEXT("height_fog"), FogRows);
+	Haze->SetNumberField(TEXT("fog_components"), FogRows.Num());
+	Out->SetObjectField(TEXT("horizon_haze"), Haze);
 	// Round 4: only the extinction is scaled. The volumetric fog's in-scatter is
 	// Albedo x Extinction (the albedo already white, an 8-bit colour), so the
 	// wet rows' extinction scale is undone on the lights' volumetric scattering:
@@ -1995,6 +3111,50 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Record->SetObjectField(TEXT("clouds"), Out);
 		return;
 	}
+	// Sky step 1: what the loaded material was BUILT with (its lighting constants
+	// are baked by scripts/ue_create_materials.py, not set here): the graph
+	// generation this bridge expects, the one stamped on the asset (its
+	// FlightSimGraphGeneration tag; an older number means Windows must run the
+	// material script before the wisp inputs exist), the scattering constants,
+	// the albedo and the owner's parameter aliases.
+	{
+		TSharedPtr<FJsonObject> MaterialOut = MakeShared<FJsonObject>();
+		MaterialOut->SetStringField(TEXT("path"), WorldCloudMaterialPath);
+		MaterialOut->SetNumberField(TEXT("graph_generation_expected"), CloudGraphGeneration);
+		FString GraphGeneration = TEXT("unread: no metadata in this build");
+#if WITH_METADATA
+		if (UPackage* Package = Base->GetOutermost())
+		{
+			const FString& Tag = Package->GetMetaData().GetValue(Base, TEXT("FlightSimGraphGeneration"));
+			GraphGeneration = Tag.IsEmpty() ? FString(TEXT("untagged")) : Tag;
+		}
+#endif
+		MaterialOut->SetStringField(TEXT("graph_generation"), GraphGeneration);
+		MaterialOut->SetBoolField(TEXT("graph_generation_current"),
+			GraphGeneration.IsNumeric() && CloudGraphGenerationCurrent(FCString::Atoi(*GraphGeneration)));
+		MaterialOut->SetNumberField(TEXT("albedo"), CloudAlbedoBaked());
+		TSharedPtr<FJsonObject> Scattering = MakeShared<FJsonObject>();
+		for (int32 F = 0; F < CloudScatteringCount; ++F)
+		{
+			Scattering->SetNumberField(ANSI_TO_TCHAR(CloudScatteringName(F)), CloudScattering(F));
+		}
+		Scattering->SetStringField(TEXT("source"),
+			FString::Printf(TEXT("scripts/ue_create_materials.py CLOUD_SCATTERING, baked into the material at "
+			                     "build (graph generation %d); the storm's M_StormCell keeps STORM_SCATTERING"),
+			                CloudGraphGeneration));
+		MaterialOut->SetObjectField(TEXT("scattering"), Scattering);
+		TSharedPtr<FJsonObject> Aliases = MakeShared<FJsonObject>();
+		for (int32 F = 0; F < CloudOwnerAliasCount; ++F)
+		{
+			Aliases->SetStringField(ANSI_TO_TCHAR(CloudOwnerAlias(F, false)), ANSI_TO_TCHAR(CloudOwnerAlias(F, true)));
+		}
+		MaterialOut->SetObjectField(TEXT("owner_aliases"), Aliases);
+		MaterialOut->SetStringField(TEXT("owner_aliases_basis"),
+			TEXT("the X-Plane-12 brief's Coverage, Density, DetailStrength, NoiseScale, Wind are these "
+			     "material parameters (set per layer below; WindOffsetM advances in Advance from the scene's drift law)"));
+		MaterialOut->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED: set by probe render on the render machine"));
+		Out->SetObjectField(TEXT("material"), MaterialOut);
+	}
 	TArray<UVolumetricCloudComponent*> Components;
 	TArray<TSharedPtr<FJsonValue>> Kept;
 	for (TObjectIterator<UVolumetricCloudComponent> It; It; ++It)
@@ -2052,7 +3212,10 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 	// clouds-sky round 2: the march budget by GPU class (the render machine's
 	// Intel iGPU under D3D11 must not time out; a discrete GPU takes more).
 	const bool bIntegratedGpu = CloudConstrainedGpu();
-	const int32 March = bIntegratedGpu ? MarchIntegrated : MarchDiscrete;
+	// Sky step 3: the tier is the -cloud-march= word, auto = the GPU class (as before;
+	// Build refused an unknown word, so the fallback below is never taken).
+	const int32 MarchChosen = CloudMarchFor(TCHAR_TO_ANSI(*CloudMarchSwitch), bIntegratedGpu);
+	const int32 March = MarchChosen >= 0 ? MarchChosen : (bIntegratedGpu ? MarchIntegrated : MarchDiscrete);
 	const float ViewScale = static_cast<float>(CloudMarch(March, MarchViewScale));
 	const float ShadowScale = static_cast<float>(CloudMarch(March, MarchShadowScale));
 	const float TracingMaxKm = static_cast<float>(CloudMarch(March, MarchTracingMaxKm));
@@ -2061,6 +3224,19 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		MarchOut->SetStringField(TEXT("path"), ANSI_TO_TCHAR(MarchName(March)));
 		MarchOut->SetStringField(TEXT("path_basis"),
 			TEXT("CloudConstrainedGpu (GRHIDeviceIsIntegrated, or a feature level below SM6): the constrained row is ef361bd6's march"));
+		MarchOut->SetStringField(TEXT("tier"), ANSI_TO_TCHAR(MarchName(March)));
+		MarchOut->SetStringField(TEXT("switch"), CloudMarchSwitch);
+		// Sky step 5: the word parsed from the command line, the plan's march_tier and
+		// which of them the word in force came from (CloudMarchWordInForce).
+		MarchOut->SetStringField(TEXT("switch_given"), CloudMarchSwitchGiven);
+		MarchOut->SetStringField(TEXT("plan_march_tier"), SkyPlanRef != nullptr ? SkyPlanRef->CloudMarchTier : FString());
+		MarchOut->SetStringField(TEXT("word_source"), CloudMarchWordSource);
+		MarchOut->SetStringField(TEXT("tier_basis"),
+			TEXT("sky step 3: -cloud-march=auto|constrained|discrete|probe; auto is the GPU class (constrained: "
+			     "ef361bd6's row, rounds 5-95; discrete: the engine's caps, 768 view / 80 shadow samples over 50 km, "
+			     "set for a discrete GPU, never rendered); probe is the constrained class's opt-in raise (288 view / "
+			     "20 shadow samples, DistanceToSampleMaxCount 8 km), one scene, one still, the Windows TDR 887a0006 "
+			     "the pass or fail. UNMEASURED: no tier but constrained has rendered"));
 		MarchOut->SetBoolField(TEXT("rhi_device_is_integrated"), GRHIDeviceIsIntegrated);
 		MarchOut->SetBoolField(TEXT("feature_level_sm6"), GMaxRHIFeatureLevel >= ERHIFeatureLevel::SM6);
 		MarchOut->SetStringField(TEXT("adapter"), GRHIAdapterName);
@@ -2092,10 +3268,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		IConsoleVariable* FogAll = IConsoleManager::Get().FindConsoleVariable(WorldCloudFogAllPixelCvar);
 		if (FogAll != nullptr)
 		{
-			if (CloudFogAllPixelBefore.IsEmpty())
-			{
-				CloudFogAllPixelBefore = FogAll->GetString();
-			}
+			// Sky step 3: saved once beside the tier's cvars (RestoreCvars puts it back).
+			SaveWorldCvar(WorldCloudFogAllPixelCvar, FogAll);
 			// Fog on every cloud pixel costs a full-screen pass per capture:
 			// discrete GPUs only (the round-1 hang on the Intel iGPU).
 			if (!bIntegratedGpu)
@@ -2105,8 +3279,131 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		}
 		MarchOut->SetStringField(WorldCloudFogAllPixelCvar,
 			FogAll != nullptr ? FogAll->GetString() : FString(TEXT("absent")));
+		// Sky step 3: the tier's renderer cvars (FlightSimWorldPure::CloudCvar), each
+		// set at code priority, saved once for RestoreCvars and recorded
+		// [before, read back] by name. The render path's own cvars are named, never set.
+		TSharedPtr<FJsonObject> CvarRow = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> CvarsSkipped;
+		for (int32 F = 0; F < CloudCvarFieldCount; ++F)
+		{
+			const FString Name(ANSI_TO_TCHAR(CloudCvarName(F)));
+			SetWorldCvar(*Name, CloudCvar(March, F), CvarRow, CvarsSkipped);
+		}
+		MarchOut->SetObjectField(TEXT("cvars"), CvarRow);
+		MarchOut->SetArrayField(TEXT("cvars_skipped"), CvarsSkipped);
+		TSharedPtr<FJsonObject> CvarFields = MakeShared<FJsonObject>();
+		for (int32 F = 0; F < CloudCvarFieldCount; ++F)
+		{
+			CvarFields->SetStringField(ANSI_TO_TCHAR(CloudCvarFieldName(F)), ANSI_TO_TCHAR(CloudCvarName(F)));
+		}
+		MarchOut->SetObjectField(TEXT("cvar_fields"), CvarFields);
+		MarchOut->SetStringField(TEXT("cvars_basis"),
+			TEXT("sky step 3: each value is [before, read back]; before is read when this lane runs, ahead of the "
+			     "render path's Cinematic scalability pass, which sets at scalability priority and cannot lower a "
+			     "code-priority value, so what is read back here is what the captures draw with. The constrained "
+			     "row repeats what the render laptop drew with before this step (the engine's registration default, "
+			     "or the Cinematic group's value for AP DepthResolution 32, TransmittanceLUT.SampleCount 30, "
+			     "MultiScatteringLUT.SampleCount 20): a recorded no-op. Every cvar is put back by RestoreCvars at "
+			     "teardown. r.VolumetricCloud.DistanceToSampleMaxCount also governs the sky-light capture's step "
+			     "count: the engine sets InvDistanceToSampleCountMax once, for every trace, and its reflection pass "
+			     "re-derives only the two sample caps, so the probe's 8 km lengthens that capture's march too (up to "
+			     "15/8 x per short in-layer path) in the submission that hung r87 (887a0006); the Windows TDR is its "
+			     "pass or fail. UNCALIBRATED; the discrete and probe rows are UNMEASURED"));
+		TArray<TSharedPtr<FJsonValue>> RenderPathOwned;
+		for (const TCHAR* Name : WorldRenderPathCvars)
+		{
+			RenderPathOwned.Add(MakeShared<FJsonValueString>(Name));
+		}
+		MarchOut->SetArrayField(TEXT("render_path_owned"), RenderPathOwned);
+		MarchOut->SetStringField(TEXT("render_path_owned_basis"),
+			TEXT("one owner per cvar: these are the render commandlet's (render_settings.beauty_path.read_back "
+			     "holds their final values); this lane never sets them. The sky-light capture's "
+			     "SetReflectionViewSampleCountScale and r.VolumetricCloud.ReflectionRaySampleMaxCount / "
+			     "Shadow.ReflectionRaySampleMaxCount are the commandlet's caps on that capture's SampleCountMax / "
+			     "ShadowSampleCountMax; they do NOT isolate the capture from this table: "
+			     "r.VolumetricCloud.DistanceToSampleMaxCount sets InvDistanceToSampleCountMax for every trace, the "
+			     "capture's included, so the probe tier's 8 km raises the capture's per-ray step count (up to 15/8 x) "
+			     "under those caps"));
 		Out->SetObjectField(TEXT("march"), MarchOut);
 	}
+	// Sky step 2 (the owner's X-Plane-12 brief): the sky plan's cloud fields
+	// (FFlightSimSkyPlan, read by FlightSimSky.cpp Load with the header's defaults)
+	// and the -cloud-type= switch. LayerSource decides per layer (switch > card >
+	// plan > the shape's default); the plan's density and detail scale the row
+	// (PlanDensityScale, PlanDetailErosion). The exposure never sees any of this:
+	// plan.py's ev100 is computed before its clouds block and never reads it.
+	const bool bPlanFields = SkyPlanRef != nullptr && SkyPlanRef->bCloudPlanFields;
+	const int32 PlanType = bPlanFields && !SkyPlanRef->CloudType.IsEmpty()
+		? PlanCloudTypeIndex(TCHAR_TO_ANSI(*SkyPlanRef->CloudType)) : PlanCloudUnknown;
+	const int32 PlanShape = PlanType == PlanCloudUnknown ? PlanCloudUnknown : CloudShapeForPlanType(PlanType);
+	const double PlanCover = bPlanFields ? SkyPlanRef->CloudCoverage : -1.0;
+	const double PlanDensity = bPlanFields ? SkyPlanRef->CloudDensity : 1.0;
+	const double PlanDetail = bPlanFields ? SkyPlanRef->CloudDetail : 1.0;
+	const int32 SwitchType = CloudTypeSwitch.IsEmpty()
+		? PlanCloudUnknown : PlanCloudTypeIndex(TCHAR_TO_ANSI(*CloudTypeSwitch));
+	const int32 SwitchShape = SwitchType == PlanCloudUnknown ? PlanCloudUnknown : CloudShapeForPlanType(SwitchType);
+	{
+		TSharedPtr<FJsonObject> PlanOut = MakeShared<FJsonObject>();
+		PlanOut->SetStringField(TEXT("fields_source"), SkyPlanRef == nullptr
+			? TEXT("none: no -sky= plan (the defaults below)")
+			: (bPlanFields
+				? TEXT("sky.json clouds (cloud_type, coverage, density, detail, cirrus_coverage, coverage_source, seed, march_tier; core/sky/clouds.py writes them)")
+				: TEXT("none: a v1 plan without the cloud fields (the defaults below, FlightSimSky.h)")));
+		PlanOut->SetStringField(TEXT("cloud_type"), SkyPlanRef != nullptr ? SkyPlanRef->CloudType : FString());
+		PlanOut->SetBoolField(TEXT("cloud_type_known"), PlanType != PlanCloudUnknown);
+		PlanOut->SetNumberField(TEXT("coverage"), PlanCover);
+		PlanOut->SetNumberField(TEXT("density"), PlanDensity);
+		PlanOut->SetNumberField(TEXT("detail"), PlanDetail);
+		PlanOut->SetNumberField(TEXT("cirrus_coverage"), SkyPlanRef != nullptr ? SkyPlanRef->CloudCirrusCoverage : 0.0);
+		PlanOut->SetStringField(TEXT("coverage_source"),
+		                        SkyPlanRef != nullptr ? SkyPlanRef->CloudCoverageSource : FString());
+		PlanOut->SetNumberField(TEXT("seed"), SkyPlanRef != nullptr ? static_cast<double>(SkyPlanRef->CloudSeed) : 0.0);
+		PlanOut->SetBoolField(TEXT("seed_stated"), SkyPlanRef != nullptr && SkyPlanRef->bCloudSeedStated);
+		PlanOut->SetStringField(TEXT("march_tier"), SkyPlanRef != nullptr ? SkyPlanRef->CloudMarchTier : FString());
+		PlanOut->SetNumberField(TEXT("card_seed"), Seed);
+		PlanOut->SetBoolField(TEXT("seed_matches_card"), SkyPlanRef != nullptr && SkyPlanRef->bCloudSeedStated
+		                      && SkyPlanRef->CloudSeed == static_cast<int64>(Seed));
+		PlanOut->SetStringField(TEXT("cloud_type_switch"), CloudTypeSwitch);
+		PlanOut->SetStringField(TEXT("precedence"),
+			TEXT("-cloud-type= > card look.clouds[0] / the fair layer > sky.json clouds (not under rain or storm: "
+			     "the deck stands) > the shape's default (FlightSimWorldPure::LayerSource; per layer cloud_type_source)"));
+		PlanOut->SetStringField(TEXT("owner_parameters"),
+			TEXT("Coverage -> Coverage; Density -> ExtinctionPerM x plan density (0.5..1.5); DetailStrength -> "
+			     "DetailErosion x plan detail (saturated); NoiseScale -> ShapeScaleKm (the row's); Wind -> "
+			     "WindOffsetM (Advance, the card's drift)"));
+		PlanOut->SetBoolField(TEXT("exposure_sees_plan_clouds"), false);
+		PlanOut->SetStringField(TEXT("measure_path"),
+			TEXT("FlightSimSky.cpp Build reads bottom_km/thickness_km only: byte-identical with or without these fields"));
+		PlanOut->SetStringField(TEXT("calibration"),
+			TEXT("UNCALIBRATED: which row a type word draws and the density/detail clamps are look values; "
+			     "UNMEASURED until a Windows render"));
+		Out->SetObjectField(TEXT("plan"), PlanOut);
+	}
+	// Sky step 2 (design §0.14 / D16): under a plan WITH a card layer two components
+	// exist: FFlightSimSky::Build's AVolumetricCloud (registered first) and
+	// BuildClouds' "VolumetricCloud" on a plain actor (registered later). FScene keeps
+	// the LAST registered proxy (UE 5.7 VolumetricCloudRendering.cpp AddVolumetricCloud),
+	// so the plan's draws nothing: it is re-materialled all the same (a wrong reading
+	// would still show the beauty material), left out of the sky capture and of the
+	// layer bookkeeping (the occlusion rows, the clearance and the distant sheet read
+	// only the drawn slab) and recorded engine_stack_shadowed. UNMEASURED: the stack
+	// rule is read in source, not witnessed.
+	auto ComponentSource = [](const UVolumetricCloudComponent* Cloud) -> const TCHAR*
+	{
+		if (Cloud->GetOwner() != nullptr && Cloud->GetOwner()->IsA<AVolumetricCloud>())
+		{
+			return TEXT("sky plan");
+		}
+		return Cloud->GetName() == TEXT("FairCumulus") ? TEXT("fair") : TEXT("card look.clouds");
+	};
+	bool bPlanComponent = false, bCardComponent = false;
+	for (const UVolumetricCloudComponent* Cloud : Components)
+	{
+		const FString Src = ComponentSource(Cloud);
+		bPlanComponent = bPlanComponent || Src == TEXT("sky plan");
+		bCardComponent = bCardComponent || Src == TEXT("card look.clouds");
+	}
+	TArray<TSharedPtr<FJsonValue>> HiddenLayers;
 	TArray<TSharedPtr<FJsonValue>> Layers;
 	for (UVolumetricCloudComponent* Cloud : Components)
 	{
@@ -2116,6 +3413,30 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		State.TopM = (Cloud->LayerBottomAltitude + Cloud->LayerHeight) * 1000.0;
 		State.Shape = LayerCoverAndShape(CardCover, State.TopM - State.BaseM, Preset, bFair, CloudValues.GetData(),
 		                                 &State.Cover);
+		// Sky step 2: the -cloud-type= switch and the plan's type and cover, by
+		// LayerSource's precedence (the card's layer stands above the plan).
+		const int32 Source = LayerSource(SwitchShape, CardCover, bFair, PlanShape, PlanCover, Preset,
+		                                 CloudValues.GetData(), &State.Cover, &State.Shape);
+		const FString ComponentSrc = ComponentSource(Cloud);
+		const bool bShadowed = bPlanComponent && bCardComponent && ComponentSrc == TEXT("sky plan");
+		if (State.Shape == PlanCloudNoLayer)
+		{
+			// clear / cirrus: no volumetric layer. Hidden (the visible flag gates the
+			// cloud proxy at render-state creation, VolumetricCloudComponent.cpp), not
+			// destroyed; beauty only: the measure path never reaches ApplyClouds. Step 6
+			// draws the cirrus sheet.
+			Cloud->SetVisibility(false);
+			TSharedPtr<FJsonObject> Hidden = MakeShared<FJsonObject>();
+			Hidden->SetStringField(TEXT("component"), Cloud->GetName());
+			Hidden->SetStringField(TEXT("component_source"), ComponentSrc);
+			Hidden->SetStringField(TEXT("cloud_type_source"), ANSI_TO_TCHAR(LayerSourceName(Source)));
+			Hidden->SetStringField(TEXT("reason"), FString::Printf(
+				TEXT("%s cloud_type %s: no volumetric layer (beauty only; SetVisibility(false))"),
+				ANSI_TO_TCHAR(LayerSourceName(Source)),
+				Source == LayerSourceSwitch ? *CloudTypeSwitch : *SkyPlanRef->CloudType));
+			HiddenLayers.Add(MakeShared<FJsonValueObject>(Hidden));
+			continue;
+		}
 		// Impostor A/B: the drawn cover under -cloud-volumetric-scale (1 leaves it;
 		// State.Cover is the value the material's Coverage, the deck shadow and the
 		// occlusion rows read; the distant sheet reads DistantCover below).
@@ -2148,17 +3469,36 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		const float ShadowTracingKm =
 			static_cast<float>(CloudShadowTracingKmFor(bIntegratedGpu, State.TopM - State.BaseM));
 		// Round 82: the cumulus row under -look-cloud-billow (CloudBillowRow).
-		const bool bBillow = CloudBillowApplies(CloudBillowSwitch == TEXT("on"), State.Shape);
+		const bool bLight = CloudLightSwitch == TEXT("on");
+		const bool bBillow = CloudBillowApplies(CloudLightBillow(CloudBillowSwitch == TEXT("on"), bLight), State.Shape);
 		double BillowRow[CloudFieldCount];
 		CloudBillowRow(&CloudValues[State.Shape * CloudFieldCount], bBillow, BillowRow);
 		const double* CloudRow = BillowRow;
-		State.Material = UMaterialInstanceDynamic::Create(Base, Cloud);
+		// Sky step 2: the plan's density and detail scale the row (1 = the row); the
+		// owner's Density and DetailStrength land here, Coverage above, NoiseScale is
+		// the row's ShapeScaleKm and Wind is WindOffsetM (Advance).
+		const double DensityScale = PlanDensityScale(PlanDensity);
+		const double DetailErosion = PlanDetailErosion(CloudRow[CldDetailErosion], PlanDetail);
+		State.DensityScale = DensityScale;
+		// Sky-clouds2: the light ON parents the MID on M_FlightSimCloudLayersLit (same
+		// parameters plus the light's); not loadable (material script not run) = ours.
+		UMaterialInterface* Parent = Base;
+		if (bLight)
+		{
+			if (UMaterialInterface* Lit = LoadObject<UMaterialInterface>(nullptr, WorldCloudLitMaterialPath))
+			{
+				Parent = Lit;
+			}
+		}
+		const FString LightMaterialDrawn = Parent->GetPathName();
+		State.Material = UMaterialInstanceDynamic::Create(Parent, Cloud);
 		State.Material->SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(State.Cover));
-		State.Material->SetScalarParameterValue(TEXT("ExtinctionPerM"), static_cast<float>(CloudRow[CldExtinctionPerM]));
+		State.Material->SetScalarParameterValue(TEXT("ExtinctionPerM"),
+		                                        static_cast<float>(CloudRow[CldExtinctionPerM] * DensityScale));
 		State.Material->SetScalarParameterValue(TEXT("ExtinctionScale"), static_cast<float>(CloudExtinctionScale));
 		State.Material->SetScalarParameterValue(TEXT("ShapeScaleKm"), static_cast<float>(CloudRow[CldShapeScaleKm]));
 		State.Material->SetScalarParameterValue(TEXT("DetailScaleKm"), static_cast<float>(CloudRow[CldDetailScaleKm]));
-		State.Material->SetScalarParameterValue(TEXT("DetailErosion"), static_cast<float>(CloudRow[CldDetailErosion]));
+		State.Material->SetScalarParameterValue(TEXT("DetailErosion"), static_cast<float>(DetailErosion));
 		State.Material->SetScalarParameterValue(TEXT("BottomSoftness"), static_cast<float>(CloudRow[CldBottomSoftness]));
 		State.Material->SetScalarParameterValue(TEXT("TopRounding"), static_cast<float>(CloudRow[CldTopRounding]));
 		State.Material->SetScalarParameterValue(TEXT("CoverageContrast"),
@@ -2182,9 +3522,56 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		State.Material->SetScalarParameterValue(TEXT("FarFadeKm"), 0.0f);
 		const double HeightDensity = CloudHeightDensityFor(bBillow);
 		State.Material->SetScalarParameterValue(TEXT("HeightDensity"), static_cast<float>(HeightDensity));
+		// Sky step 1: the wisp under -look-cloud-wisp (CloudWispRow; the OFF row is
+		// the material's defaults, round 95 exactly).
+		const bool bWisp = CloudWispApplies(CloudWispSwitch == TEXT("on"), State.Shape);
+		double WispRow[WspFieldCount];
+		CloudWispRow(bWisp, WispRow);
+		State.Material->SetScalarParameterValue(TEXT("WispAmount"), static_cast<float>(WispRow[WspAmount]));
+		State.Material->SetScalarParameterValue(TEXT("CurlStrength"), static_cast<float>(WispRow[WspCurl]));
+		State.Material->SetScalarParameterValue(TEXT("EdgeThinPower"), static_cast<float>(WispRow[WspEdgePower]));
+		State.Material->SetScalarParameterValue(TEXT("TopDetailGain"), static_cast<float>(WispRow[WspTopDetail]));
+		State.Material->SetScalarParameterValue(TEXT("BoundaryErosion"), static_cast<float>(WispRow[WspBoundaryErosion]));
+		// Sky-clouds lane: the light row (CloudLightRow; OFF = the material's defaults)
+		// and the direction to the sun for the powder's view weighting.
+		double LightRow[LgtFieldCount];
+		CloudLightRow(bLight, State.Shape, LightRow);
+		for (int F = 0; F < LgtFieldCount; ++F)
+		{
+			State.Material->SetScalarParameterValue(FName(ANSI_TO_TCHAR(CloudLightFieldName(F))),
+			                                        static_cast<float>(LightRow[F]));
+		}
+		{
+			const UDirectionalLightComponent* LightSun = Scene.Sun != nullptr
+				? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
+			const FVector ToSun = LightSun != nullptr ? -LightSun->GetDirection() : FVector::UpVector;
+			State.Material->SetVectorParameterValue(TEXT("SunDirWS"),
+				FLinearColor(static_cast<float>(ToSun.X), static_cast<float>(ToSun.Y), static_cast<float>(ToSun.Z), 0.0f));
+		}
 		Cloud->SetMaterial(State.Material);
+		// -cloud-material=epic: the Volumetrics plugin's cloud material in place of
+		// ours (the MID above stays as the bookkeeping's; it draws nothing). Not
+		// loadable (plugin off): ours stays and the record says so.
+		FString EpicMaterialDrawn = TEXT("not asked");
+		if (CloudMaterialSwitch == TEXT("epic"))
+		{
+			UMaterialInterface* Epic = LoadObject<UMaterialInterface>(nullptr, ANSI_TO_TCHAR(CloudMaterialEpicPath()));
+			if (Epic != nullptr)
+			{
+				Cloud->SetMaterial(Epic);
+				EpicMaterialDrawn = Epic->GetPathName();
+			}
+			else
+			{
+				EpicMaterialDrawn = TEXT("unloadable (Volumetrics plugin not enabled?): ours drawn");
+				UE_LOG(LogFlightSimWorldBeauty, Warning, TEXT("-cloud-material=epic: %s did not load; ours drawn"),
+				       ANSI_TO_TCHAR(CloudMaterialEpicPath()));
+			}
+		}
 		Cloud->SetbUsePerSampleAtmosphericLightTransmittance(true);
-		const double BottomOcclusion = CloudBottomOcclusionFor(bBillow, AtmRow[AtmCloudBottomOcclusion]);
+		// Round 82 raises the belly's occlusion; sky step 1 caps it where the wisp applies.
+		const double BillowOcclusion = CloudBottomOcclusionFor(bBillow, AtmRow[AtmCloudBottomOcclusion]);
+		const double BottomOcclusion = CloudBellyOcclusion(bWisp, BillowOcclusion);
 		Cloud->SetSkyLightCloudBottomOcclusion(static_cast<float>(BottomOcclusion));
 		Cloud->SetViewSampleCountScale(ViewScale);
 		Cloud->SetShadowViewSampleCountScale(ShadowScale);
@@ -2202,16 +3589,45 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		{
 			Cloud->SetVisibility(false);
 		}
-		CloudLayers.Add(State);
+		if (bShadowed)
+		{
+			// Sky step 2: the plan's component under a card layer draws nothing
+			// (engine stack); keep it out of the sky light's capture and the bookkeeping.
+			Cloud->SetVisibleInRealTimeSkyCaptures(false);
+		}
+		else
+		{
+			CloudLayers.Add(State);
+		}
 
 		TSharedPtr<FJsonObject> Layer = MakeShared<FJsonObject>();
 		Layer->SetStringField(TEXT("component"), Cloud->GetName());
 		Layer->SetStringField(TEXT("shape"), ANSI_TO_TCHAR(CloudName(State.Shape)));
 		Layer->SetNumberField(TEXT("cover"), State.Cover);
-		Layer->SetStringField(TEXT("cover_basis"), bFair ? TEXT("the fair-weather layer (stated)")
+		Layer->SetStringField(TEXT("cover_basis"), Source == LayerSourceSwitch
+			? (CardCover >= 0.0 || bFair
+				? TEXT("-cloud-type=: the switch's shape with the card's (or the fair layer's) cover")
+				: TEXT("-cloud-type=: the switch's shape with its row's default cover (the card states none)"))
+			: Source == LayerSourcePlan
+			? (PlanCover >= 0.0
+				? TEXT("the sky plan's clouds.coverage (clouds.plan.coverage_source says where it came from)")
+				: TEXT("the sky plan's cloud_type with the shape's default cover (the plan states no coverage)"))
+			: bFair ? TEXT("the fair-weather layer (stated)")
 			: (CardCover >= 0.0 ? TEXT("the card's look.clouds[0].cover")
 			   : (Preset == PresetRain ? TEXT("RainDefaultCover: a rain world, the card states none (broken, round 3)")
 			                           : TEXT("the shape's default (the card states none)"))));
+		// Sky step 2: where the type came from, what it drew, and the plan's scales.
+		Layer->SetStringField(TEXT("component_source"), ComponentSrc);
+		Layer->SetBoolField(TEXT("engine_stack_shadowed"), bShadowed);
+		Layer->SetStringField(TEXT("cloud_type_source"), ANSI_TO_TCHAR(LayerSourceName(Source)));
+		Layer->SetStringField(TEXT("cloud_type_applied"), ANSI_TO_TCHAR(CloudName(State.Shape)));
+		Layer->SetStringField(TEXT("cloud_type_requested"), Source == LayerSourceSwitch ? CloudTypeSwitch
+			: (Source == LayerSourcePlan ? SkyPlanRef->CloudType : FString()));
+		Layer->SetNumberField(TEXT("plan_density"), PlanDensity);
+		Layer->SetNumberField(TEXT("plan_density_scale"), DensityScale);
+		Layer->SetNumberField(TEXT("plan_detail"), PlanDetail);
+		Layer->SetNumberField(TEXT("extinction_per_m_applied"), CloudRow[CldExtinctionPerM] * DensityScale);
+		Layer->SetNumberField(TEXT("detail_erosion_applied"), DetailErosion);
 		Layer->SetNumberField(TEXT("base_m"), State.BaseM);
 		Layer->SetNumberField(TEXT("top_m"), State.TopM);
 		Layer->SetNumberField(TEXT("built_top_m"), BuiltTopM);
@@ -2235,6 +3651,31 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			TEXT("the layer's unscaled cover: the distant sheet ignores -cloud-volumetric-scale"));
 		Layer->SetNumberField(TEXT("height_density"), HeightDensity);
 		Layer->SetNumberField(TEXT("sky_light_cloud_bottom_occlusion"), BottomOcclusion);
+		// Sky step 1: the switch word, whether it applied to this shape, the five
+		// scalars by their material names, and the belly cap (the occlusion before it).
+		Layer->SetStringField(TEXT("cloud_wisp"), CloudWispSwitch);
+		Layer->SetStringField(TEXT("cloud_light"), CloudLightSwitch);
+		Layer->SetStringField(TEXT("cloud_light_material"), LightMaterialDrawn);
+		{
+			TSharedPtr<FJsonObject> LightOut = MakeShared<FJsonObject>();
+			for (int F = 0; F < LgtFieldCount; ++F)
+			{
+				LightOut->SetNumberField(ANSI_TO_TCHAR(CloudLightFieldName(F)), LightRow[F]);
+			}
+			Layer->SetObjectField(TEXT("cloud_light_row"), LightOut);
+		}
+		Layer->SetStringField(TEXT("cloud_material"), CloudMaterialSwitch);
+		Layer->SetStringField(TEXT("cloud_material_drawn"), EpicMaterialDrawn);
+		Layer->SetBoolField(TEXT("cloud_wisp_applied"), bWisp);
+		for (int32 F = 0; F < WspFieldCount; ++F)
+		{
+			Layer->SetNumberField(ANSI_TO_TCHAR(CloudWispFieldName(F)), WispRow[F]);
+		}
+		Layer->SetNumberField(TEXT("sky_light_cloud_bottom_occlusion_before_belly_cap"), BillowOcclusion);
+		Layer->SetNumberField(TEXT("belly_occlusion_cap"), CloudWispBottomOcclusion);
+		Layer->SetStringField(TEXT("cloud_wisp_basis"),
+			TEXT("sky step 1: flow-warped erosion, a finer top octave, boundary erosion and density^EdgeThinPower "
+			     "(cloud_layers.hlsl); -look-cloud-wisp=off is round 95 exactly. UNCALIBRATED"));
 		for (int32 F = 0; F < CloudFieldCount; ++F)
 		{
 			Layer->SetNumberField(ANSI_TO_TCHAR(CloudFieldName(F)), CloudRow[F]);
@@ -2246,6 +3687,14 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Layers.Add(MakeShared<FJsonValueObject>(Layer));
 	}
 	Out->SetArrayField(TEXT("layers"), Layers);
+	// Sky step 2: the layers a clear/cirrus type hid, and the engine-stack note.
+	Out->SetArrayField(TEXT("hidden_layers"), HiddenLayers);
+	Out->SetBoolField(TEXT("plan_component_shadowed_by_card"), bPlanComponent && bCardComponent);
+	Out->SetStringField(TEXT("engine_stack_basis"),
+		TEXT("FScene keeps the LAST registered volumetric cloud proxy (UE 5.7 VolumetricCloudRendering.cpp "
+		     "AddVolumetricCloud); the card's component (FlightSimVisualScene.cpp BuildClouds) registers after the "
+		     "plan's (FFlightSimSky::Build), so with both the plan's draws nothing: re-materialled all the same, out "
+		     "of the sky capture and the layer bookkeeping. UNMEASURED: read in source, not witnessed"));
 	// Visual round 6: the deck SHADOWS the beam. Round 4's #10 drew the Flint
 	// Hills red: the storm look's 10 deg sun, reddened by the per-pixel
 	// transmittance, lit the prairie at grazing incidence under a nimbostratus
@@ -2538,7 +3987,10 @@ void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualSc
 	CloudSeedOffsetKm(static_cast<uint64_t>(static_cast<int64_t>(Seed)), SeedKm);
 	const double* CloudRow = &CloudValues[Shape * CloudFieldCount];
 	const bool bConstrained = CloudConstrainedGpu();
-	const int32 March = bConstrained ? MarchIntegrated : MarchDiscrete;
+	// Sky step 3: the same tier ApplyClouds resolved (-cloud-march=, auto = the GPU
+	// class); the near-field shrink below still keys on the GPU class itself.
+	const int32 MarchChosen = CloudMarchFor(TCHAR_TO_ANSI(*CloudMarchSwitch), bConstrained);
+	const int32 March = MarchChosen >= 0 ? MarchChosen : (bConstrained ? MarchIntegrated : MarchDiscrete);
 	const double RowKm = CloudMarch(March, MarchTracingMaxKm);
 	const double TraceKm = DistantTracingMaxKm(bConstrained, true, RowKm);
 	const double HandoverKm = DistantHandoverKm(TraceKm);
@@ -2614,10 +4066,13 @@ void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualSc
 	Trace->SetNumberField(TEXT("march_fade_start_km"), HandoverKm);
 	Trace->SetNumberField(TEXT("march_fade_km"), FarFadeKm);
 	Trace->SetNumberField(TEXT("layers_faded"), LayersFaded);
+	Trace->SetStringField(TEXT("march_tier"), ANSI_TO_TCHAR(MarchName(March)));
+	Trace->SetNumberField(TEXT("distance_to_sample_max_km"), CloudCvar(March, CvarDistanceToSampleMaxKm));
 	Trace->SetStringField(TEXT("basis"),
 		TEXT("the distant tracing (world_beauty.distant_tracing_max_km), constrained and the sheet drawn -> min(row, DISTANT_NEAR_FIELD_KM). "
 		     "VolumetricCloud.usf: StepCount = SampleCountMax x saturate(path x InvDistanceToSampleCountMax) "
-		     "(r.VolumetricCloud.DistanceToSampleMaxCount, 15 km), non-decreasing in the path: a shorter trace never "
+		     "(r.VolumetricCloud.DistanceToSampleMaxCount: the march tier's distance_to_sample_max_km, 15 km on the "
+		     "constrained tier, sky step 3), non-decreasing in the path: a shorter trace never "
 		     "adds a sample, only shortens the step; the sheet fades in over FadeKm up to the trace's end"));
 	Out->SetObjectField(TEXT("volumetric_trace"), Trace);
 
@@ -2757,6 +4212,140 @@ bool FFlightSimWorldBeauty::ApplySkyHdri(FFlightSimVisualScene& Scene, const FSt
 	Out->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED: set by probe render on the render machine"));
 	Record->SetObjectField(TEXT("sky_hdri"), Out);
 	return true;
+}
+
+// Sky step 6 (the owner's X-Plane-12 brief, 2026-11-15): the high cirrus sheet.
+// BEAUTY ONLY, VISUAL ONLY. UE draws one volumetric cloud layer; the reference
+// photograph's upper sky is thin cirrus. One UProceduralMeshComponent disc
+// (BuildCurvedDisc at FlightSimWorldPure::CirrusRadiusKm) on M_FlightSimCirrus
+// (unlit, translucent, two-sided; no depth write, no custom depth, no velocity,
+// fog and aerial perspective per pixel), centred on the camera and put at
+// CirrusSheetAltitudeM (above the camera by construction) by Advance. The
+// shader (cirrus.hlsl) draws seeded streaks along the card's drift bearing with
+// feathered ends, cut at the cover's quantile, lit by a forward lobe of the sun
+// and the sky's distant luminance. Labels: the actor is in BeautyOnlyActors, so
+// every label capture hides it; the material writes no depth and no custom
+// depth. Cover: core/scene/cirrus.py cirrus_cover (the plan's data, the stated
+// default, or none). UNMEASURED: nothing here has been rendered.
+void FFlightSimWorldBeauty::ApplyCirrus(UWorld* World, FFlightSimVisualScene& Scene, int32 Seed)
+{
+	// Function-local: unity builds merge anonymous namespaces (NEXT.md gotcha 3).
+	using namespace FlightSimWorldPure;
+	CirrusSheet = FCirrusSheetState();
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetStringField(TEXT("switch"), CirrusSwitch);
+	Out->SetStringField(TEXT("labels"),
+		TEXT("BeautyOnlyActors; unlit translucent, no depth write, no custom depth, no velocity, no shadow; "
+		     "the measure quality never builds it"));
+	Out->SetBoolField(TEXT("visual_only"), true);
+	Out->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED: set by probe render on the render machine"));
+	Out->SetStringField(TEXT("measured"),
+		TEXT("UNMEASURED: never rendered; docs/VISUAL_FIDELITY_PLAN.md section 8 'Sky step 6' names the Windows command"));
+	// The cover and where it came from (the plan's data, the switch, the default, or none).
+	const bool bPlanFields = SkyPlanRef != nullptr && SkyPlanRef->bCloudPlanFields;
+	const bool bFromData = bPlanFields && SkyPlanRef->bCloudCoverFromData;
+	const double PlanCirrus = bPlanFields ? SkyPlanRef->CloudCirrusCoverage : 0.0;
+	const bool bSwitchCirrus = CloudTypeSwitch == TEXT("cirrus");
+	int32 Source = CirrusSourceDefault;
+	const double Cover = CirrusCover(CirrusSwitch == TEXT("off"), bSwitchCirrus, bFromData, PlanCirrus, Preset, &Source);
+	Out->SetNumberField(TEXT("coverage"), Cover);
+	Out->SetStringField(TEXT("coverage_source"), ANSI_TO_TCHAR(CirrusCoverSourceName(Source)));
+	Out->SetNumberField(TEXT("plan_cirrus_coverage"), PlanCirrus);
+	Out->SetBoolField(TEXT("plan_cover_from_data"), bFromData);
+	Out->SetStringField(TEXT("plan_coverage_source"), SkyPlanRef != nullptr ? SkyPlanRef->CloudCoverageSource : FString());
+	Out->SetNumberField(TEXT("default_cover"), CirrusDefaultCover);
+	Out->SetStringField(TEXT("cover_law"),
+		TEXT("core/scene/cirrus.py cirrus_cover: -look-cirrus=off -> none; a rain or storm preset -> none (the deck "
+		     "covers the sky); -cloud-type=cirrus with no data cover above 0 -> the default; a plan whose cover came "
+		     "from data (cover_inputs) -> its cirrus_coverage, 0 included; else the default (a stated stylisation: "
+		     "the reference photograph's upper sky)"));
+	Out->SetStringField(TEXT("preset"), ANSI_TO_TCHAR(PresetName(Preset)));
+	if (Cover < CirrusMinDrawnCover)
+	{
+		Out->SetStringField(TEXT("drawn"), FString::Printf(TEXT("nothing: cover %.3f below %.2f (%s)"), Cover,
+		                                                   CirrusMinDrawnCover, ANSI_TO_TCHAR(CirrusCoverSourceName(Source))));
+		Record->SetObjectField(TEXT("cirrus"), Out);
+		return;
+	}
+	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, WorldCirrusMaterialPath);
+	if (Base == nullptr)
+	{
+		Out->SetStringField(TEXT("drawn"),
+			TEXT("nothing: M_FlightSimCirrus did not load (run scripts/ue_create_materials.py)"));
+		Record->SetObjectField(TEXT("cirrus"), Out);
+		return;
+	}
+
+	AActor* Actor = World->SpawnActor<AActor>();
+	UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(Actor, TEXT("CirrusSheet"));
+	Actor->SetRootComponent(Mesh);
+	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetCastShadow(false);
+	Mesh->SetRenderCustomDepth(false);
+	Mesh->SetReceivesDecals(false);
+	// Behind the distant sheet (-100) and every other translucent: lower sorts first.
+	Mesh->SetTranslucentSortPriority(CirrusSortPriority);
+	BuildCurvedDisc(Mesh, CirrusRadiusKm);
+	Mesh->RegisterComponent();
+	Actor->SetActorLocation(FVector::ZeroVector);   // Advance centres it on the camera
+
+	// The material: the cover, the streak bearing, the look; seeded like the layers.
+	double SeedKm[3] = {0.0, 0.0, 0.0};
+	CloudSeedOffsetKm(static_cast<uint64_t>(static_cast<int64_t>(Seed)), SeedKm);
+	const double StreakDirDeg = CirrusStreakDirDeg(static_cast<uint64_t>(static_cast<int64_t>(Seed)), DriftMps, DriftFromDeg);
+	UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(Base, Actor);
+	Material->SetScalarParameterValue(TEXT("Coverage"), static_cast<float>(Cover));
+	Material->SetScalarParameterValue(TEXT("StreakDirDeg"), static_cast<float>(StreakDirDeg));
+	Material->SetScalarParameterValue(TEXT("RadiusKm"), static_cast<float>(CirrusRadiusKm));
+	Material->SetScalarParameterValue(TEXT("SheetFade"), 1.0f);
+	TSharedPtr<FJsonObject> Look = MakeShared<FJsonObject>();
+	for (int32 F = 0; F < CirrusLookCount; ++F)
+	{
+		Material->SetScalarParameterValue(ANSI_TO_TCHAR(CirrusLookName(F)), static_cast<float>(CirrusLook(F)));
+		Look->SetNumberField(ANSI_TO_TCHAR(CirrusLookName(F)), CirrusLook(F));
+	}
+	Material->SetVectorParameterValue(TEXT("SeedOffsetKm"),
+		FLinearColor(static_cast<float>(SeedKm[0]), static_cast<float>(SeedKm[1]), static_cast<float>(SeedKm[2]), 0.0f));
+	Material->SetVectorParameterValue(TEXT("WindOffsetM"), FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+	Mesh->SetMaterial(0, Material);
+	Scene.BeautyOnlyActors.Add(Actor);
+	CirrusSheet.Actor = Actor;
+	CirrusSheet.Mesh = Mesh;
+	CirrusSheet.Material = Material;
+	CirrusSheet.Cover = Cover;
+	CirrusSheet.bDrawn = true;
+
+	Out->SetNumberField(TEXT("base_m"), CirrusBaseM);
+	Out->SetNumberField(TEXT("clearance_m"), CirrusClearanceM);
+	Out->SetNumberField(TEXT("max_m"), CirrusMaxM);
+	Out->SetStringField(TEXT("altitude_law"),
+		TEXT("per frame (frames[].cirrus_altitude_m, cirrus_fade): min(max(base_m, camera + clearance_m), max_m), "
+		     "never below the camera; faded out over the clearance as the camera reaches max_m (cirrus.cirrus_sheet)"));
+	Out->SetNumberField(TEXT("radius_km"), CirrusRadiusKm);
+	Out->SetNumberField(TEXT("rings"), DistantRings);
+	Out->SetNumberField(TEXT("segments"), DistantSegments);
+	Out->SetNumberField(TEXT("vertices"), DistantDiscVertexCount());
+	Out->SetNumberField(TEXT("triangles"), DistantDiscTriangleCount());
+	Out->SetNumberField(TEXT("droop_at_rim_m"), DistantDroopM(CirrusRadiusKm));
+	Out->SetNumberField(TEXT("sort_priority"), CirrusSortPriority);
+	Out->SetNumberField(TEXT("streak_dir_deg"), StreakDirDeg);
+	Out->SetStringField(TEXT("streak_dir_source"),
+		DriftMps > 0.0 ? TEXT("the card's cloud drift bearing (streaks run along the wind)") : TEXT("seeded (the card does not drift)"));
+	Out->SetNumberField(TEXT("drift_mps"), CirrusDriftMps(DriftMps));
+	Out->SetNumberField(TEXT("wind_gain"), CirrusWindGain);
+	Out->SetObjectField(TEXT("look"), Look);
+	Out->SetStringField(TEXT("seed_offset_km"),
+		FString::Printf(TEXT("%.6f,%.6f,%.6f"), SeedKm[0], SeedKm[1], SeedKm[2]));
+	Out->SetStringField(TEXT("material"), WorldCirrusMaterialPath);
+	Out->SetStringField(TEXT("lighting"),
+		TEXT("the cirrus shader draws a normalised Henyey-Greenstein forward lobe (ForwardG, capped) blended with an isotropic term "
+		     "x the sun's illuminance through the atmosphere x albedo / pi, plus the sky's distant scattered luminance x "
+		     "AmbientGain (SkyAtmosphere material nodes, light 0); opacity Beer's law on the slant path, capped at "
+		     "MaxOpacity; height fog and aerial perspective per pixel"));
+	Out->SetStringField(TEXT("drawn"),
+		TEXT("M_FlightSimCirrus on one earth-curved disc centred on the camera above the flight, re-centred and re-levelled per frame"));
+	Record->SetObjectField(TEXT("cirrus"), Out);
 }
 
 // #02 blue (2026-11-11): the tiles' baked sky-shade toward grey under a drawn sun
@@ -2980,6 +4569,56 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 		Frame->SetBoolField(TEXT("distant_sheet_from_above"), Sheet.bFromAbove);
 		Frame->SetNumberField(TEXT("distant_sheet_fade"), Sheet.Fade);
 	}
+	// Sky step 6: the cirrus sheet follows the camera (its noise is in world space,
+	// so the streaks stay put), sits at the altitude law's height above it, fades
+	// as the camera reaches the cap, and drifts at CirrusWindGain x the card's drift.
+	if (CirrusSheet.bDrawn && CirrusSheet.Actor != nullptr && CirrusSheet.Material != nullptr)
+	{
+		const FCirrusSheet Sheet = CirrusSheetAltitudeM(CameraCm.Z / WorldCmPerMetre);
+		CirrusSheet.Actor->SetActorLocation(FVector(CameraCm.X, CameraCm.Y, Sheet.AltitudeM * WorldCmPerMetre));
+		CirrusSheet.Material->SetScalarParameterValue(TEXT("SheetFade"), static_cast<float>(Sheet.Fade));
+		if (DriftMps > 0.0)
+		{
+			const FVector CirrusDrift = FFlightSimVisualScene::CloudDriftOffsetMetres(
+				CirrusDriftMps(DriftMps), DriftFromDeg, TimeSeconds);
+			CirrusSheet.Material->SetVectorParameterValue(TEXT("WindOffsetM"),
+				FLinearColor(static_cast<float>(CirrusDrift.X), static_cast<float>(CirrusDrift.Y), 0.0f, 0.0f));
+		}
+		Frame->SetNumberField(TEXT("cirrus_altitude_m"), Sheet.AltitudeM);
+		Frame->SetNumberField(TEXT("cirrus_fade"), Sheet.Fade);
+	}
+
+	// Sky step 4: the height fog's reference height follows the aircraft (the
+	// engine's 655 m observer clamp: FlightSimWorldPure::FogReferenceZM), re-based
+	// from the fog's CURRENT density (translation-invariant, so the dust haze's
+	// later ratio on it is kept) once the aircraft has moved FogRebaseStepM.
+	{
+		const double AircraftZM = AircraftCm.Z / WorldCmPerMetre;
+		int32 Rebased = 0;
+		for (FBeautyFogProfile& Profile : FogProfiles)
+		{
+			UExponentialHeightFogComponent* Fog = Profile.Fog.Get();
+			if (Fog == nullptr)
+			{
+				continue;
+			}
+			const FVector FogLocation = Fog->GetComponentLocation();
+			const double CurrentZM = FogLocation.Z / WorldCmPerMetre;
+			const double WantZM = FogReferenceZM(Profile.SceneZM, AircraftZM, true);
+			if (FMath::Abs(WantZM - CurrentZM) >= FogRebaseStepM)
+			{
+				Fog->SetFogDensity(static_cast<float>(FogDensityRebased(Fog->FogDensity, Profile.Falloff, CurrentZM, WantZM)));
+				Fog->SetWorldLocation(FVector(FogLocation.X, FogLocation.Y, WantZM * WorldCmPerMetre));
+				Fog->MarkRenderStateDirty();
+				++Rebased;
+			}
+			Frame->SetNumberField(TEXT("fog_reference_z_m"), Fog->GetComponentLocation().Z / WorldCmPerMetre);
+		}
+		if (FogProfiles.Num() > 0)
+		{
+			Frame->SetNumberField(TEXT("fog_rebased"), Rebased);
+		}
+	}
 
 	// The lightning: both schedules, and the sky light's pulse.
 	const double LookFlash = bLookLightning ? FFlightSimVisualScene::LightningFlash(TimeSeconds, LookSeed) : 0.0;
@@ -3003,7 +4642,8 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 	{
 		const FOcclusion Occ = Occlusion(CameraCm.Z / WorldCmPerMetre, AircraftCm.Z / WorldCmPerMetre, LengthM,
 		                                 Layer.BaseM, Layer.TopM, Layer.Cover,
-		                                 CloudValues[Layer.Shape * CloudFieldCount + CldExtinctionPerM],
+		                                 // Sky step 2: the extinction drawn (the plan's density scale, 1 = the row)
+		                                 CloudValues[Layer.Shape * CloudFieldCount + CldExtinctionPerM] * Layer.DensityScale,
 		                                 CloudExtinctionScale, OcclusionFlagTransmittance);
 		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
 		Row->SetNumberField(TEXT("path_m"), Occ.PathM);

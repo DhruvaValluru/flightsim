@@ -82,8 +82,11 @@ class AGeoReferencingSystem;
 class FFlightSimGoogleTiles;
 class FFlightSimVisualScene;
 class FFlightSimWeather;
+struct FFlightSimSkyPlan;
+class IConsoleVariable;
 class UMaterialInstanceDynamic;
 class UMaterialParameterCollection;
+class UExponentialHeightFogComponent;
 class UProceduralMeshComponent;
 class USkyLightComponent;
 class UVolumetricCloudComponent;
@@ -97,10 +100,13 @@ public:
 	// for explicitly and cannot be honoured (an unreadable overrides file or
 	// scatter sidecar, an unknown -beauty-clouds word); a missing material is
 	// recorded, never refused: the look is visual only.
+	// Sky step 2: SkyPlan is the -sky= plan the commandlet loaded (nullptr without
+	// one); ApplyClouds reads its beauty-only cloud fields. The measure path never
+	// calls this.
 	bool Build(UWorld* World, const TCHAR* Params, const TSharedPtr<FJsonObject>& Card,
 	           AActor* Aircraft, AGeoReferencingSystem* GeoReferencing,
 	           FFlightSimVisualScene& Scene, FFlightSimWeather& Weather,
-	           FFlightSimGoogleTiles& Tiles, FString& Error);
+	           FFlightSimGoogleTiles& Tiles, const FFlightSimSkyPlan* SkyPlan, FString& Error);
 
 	// Per captured frame, after the weather's Advance and before the captures:
 	// the clouds' drift, the lightning's sky pulse, the scatter's re-snap near
@@ -150,10 +156,15 @@ private:
 		// (FlightSimWorldPure::CloudDistantCover), so the horizon stays under impostors.
 		double DistantCover = 0.0;
 		int32 Shape = 0;
+		// Sky step 2: the plan's density multiplier on the row's extinction (1 = the
+		// row); the occlusion row reads the extinction drawn.
+		double DensityScale = 1.0;
 	};
 
 	bool LoadOverrides(const FString& Path, FString& Error);
-	void ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm);
+	// Sky step 4: Aircraft (nullptr when the scene has none) places the height
+	// fog's reference height (FlightSimWorldPure::FogReferenceZM).
+	void ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm, AActor* Aircraft);
 	void ApplyClouds(UWorld* World, FFlightSimVisualScene& Scene, FFlightSimWeather& Weather,
 	                 const FString& Mode, double CardCover, double CardBaseM, double CardTopM,
 	                 int32 Seed);
@@ -175,6 +186,13 @@ private:
 	// /Game/FlightSim/Sky/T_SkyHdri_<name>) on the sky light as its specified
 	// cubemap, clear and hazy presets only. Recorded in world_beauty.sky_hdri.
 	bool ApplySkyHdri(FFlightSimVisualScene& Scene, const FString& Name, const TCHAR* Params, FString& Error);
+	// Sky step 6 (the owner's X-Plane-12 brief): the high cirrus sheet (one
+	// earth-curved translucent disc at 10-13 km, above the flight,
+	// M_FlightSimCirrus; no depth, no custom depth, BeautyOnlyActors), drawn from
+	// the plan's cirrus_coverage (data) or the stated default; streaks along the
+	// card's drift bearing; drifts at CirrusWindGain x the drift. Recorded in
+	// world_beauty.cirrus. -look-cirrus=on|off (off by default). VISUAL ONLY.
+	void ApplyCirrus(UWorld* World, FFlightSimVisualScene& Scene, int32 Seed);
 
 	bool bBuilt = false;
 	// A -sky= plan lights the scene (FFlightSimSky): it owns the sun's
@@ -203,6 +221,56 @@ private:
 	// given is kept for the refusal message.
 	double CloudVolumetricScale = 1.0;
 	FString CloudVolumetricScaleText;
+	// Sky step 2: -cloud-type=clear|cumulus|stratocumulus|altocumulus|cirrus|overcast|
+	// nimbostratus (Build reads it; empty = not given). The owner's probe: it
+	// overrides the plan's cloud_type and the card's shape (FlightSimWorldPure::
+	// LayerSource); another word refuses by name.
+	FString CloudTypeSwitch;
+	// Sky step 3: -cloud-march=auto|constrained|discrete|probe (Build reads it; auto
+	// = the GPU class, as before). ApplyClouds and ApplyDistantClouds resolve it
+	// through FlightSimWorldPure::CloudMarchFor; another word refuses by name.
+	FString CloudMarchSwitch = TEXT("auto");
+	// Sky step 5: the -cloud-march= word as parsed (CloudMarchSwitch above becomes the
+	// word in force once Build has weighed the plan's march_tier) and where the word
+	// in force came from (FlightSimWorldPure::MarchWordSourceName), recorded.
+	FString CloudMarchSwitchGiven = TEXT("auto");
+	FString CloudMarchWordSource = TEXT("default auto");
+	// Sky step 4: -sky-multi-scatter=auto|on|off (Build reads it; auto = the row's
+	// MultiScatteringFactor on a discrete GPU, the class gate kept; on = every class; off = ef361bd6's sky). ApplyAtmosphere
+	// resolves it through FlightSimWorldPure::SkyMultiScatterFor; another word
+	// refuses by name.
+	FString SkyMultiScatterSwitch = TEXT("auto");
+	// Lane sky-atmosphere: -look-sky-gradient=on|off (on by default; core/sky/gradient.py).
+	// ApplyAtmosphere: the clear and hazy fogs' FogCutoffDistance and horizon airlight
+	// gain; off is claude/hl-sky's sky. Another word refuses by name.
+	FString SkyGradientSwitch = TEXT("on");
+	// Sky step 4: the height fogs ApplyAtmosphere gave a vertical profile (the clear
+	// and hazy rows' fog_scale_height_km), with the scene's fog height and the
+	// falloff in force; Advance re-bases each at the aircraft's height
+	// (FlightSimWorldPure::FogReferenceZM, FogDensityRebased).
+	struct FBeautyFogProfile
+	{
+		TWeakObjectPtr<UExponentialHeightFogComponent> Fog;
+		double SceneZM = 0.0;
+		double Falloff = 0.0;
+	};
+	TArray<FBeautyFogProfile> FogProfiles;
+	// Sky step 6: -look-cirrus=on|off (Build reads it; off by default; off builds no
+	// cirrus sheet: the round-95 upper sky). Another word refuses by name.
+	FString CirrusSwitch = TEXT("off");
+	// Sky step 2: the -sky= plan Build was given (nullptr without one); ApplyClouds
+	// reads its cloud fields (FFlightSimSkyPlan::CloudType and the rest).
+	const FFlightSimSkyPlan* SkyPlanRef = nullptr;
+	// Sky step 1: -look-cloud-wisp=on|off (Build reads it; ApplyClouds sets the cloud
+	// material's five wisp scalars on cumulus and stratocumulus layers and caps the
+	// sky light's cloud-bottom occlusion: FlightSimWorldPure::CloudWispRow /
+	// CloudBellyOcclusion). Off is round 95 exactly.
+	FString CloudWispSwitch = TEXT("on");
+	// Sky-clouds lane: -look-cloud-light=on|off (the scattering inputs, powder and
+	// flat-base albedo: FlightSimWorldPure::CloudLightRow; off is c9e13c53) and
+	// -cloud-material=ours|epic (the Volumetrics plugin's cloud material, an A/B).
+	FString CloudLightSwitch = TEXT("off");   // off by default until the Windows A/B (not seen in a Mac capture)
+	FString CloudMaterialSwitch = TEXT("ours");
 	bool StormNeutralAlbedo() const;
 	// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default; off
 	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)
@@ -240,6 +308,18 @@ private:
 		bool bDrawn = false;
 	};
 	FDistantSheetState DistantSheet;
+	// Sky step 6: the cirrus sheet (ApplyCirrus; Advance re-centres it on the
+	// camera, sets its altitude and fade by FlightSimWorldPure::CirrusSheetAltitudeM
+	// and drifts it at CirrusWindGain x the card's drift).
+	struct FCirrusSheetState
+	{
+		AActor* Actor = nullptr;
+		UProceduralMeshComponent* Mesh = nullptr;
+		UMaterialInstanceDynamic* Material = nullptr;
+		double Cover = 0.0;
+		bool bDrawn = false;
+	};
+	FCirrusSheetState CirrusSheet;
 	// Drawn clouds the per-frame occlusion row does not model (ApplyClouds).
 	int32 UnmodelledClouds = 0;
 	double DriftMps = 0.0;
@@ -257,9 +337,19 @@ private:
 	// cloud sky AO, the still tier's fog grid (FlightSimSunShafts.h).
 	FFlightSimSunShafts SunShafts;
 
-	// clouds-sky round 2: the cloud cvar ApplyClouds wrote and its value
-	// before (empty: untouched), put back by RestoreCvars.
-	FString CloudFogAllPixelBefore;
+	// Sky step 3: every renderer cvar ApplyClouds wrote (the march tier's table,
+	// FlightSimWorldPure::CloudCvar, and clouds-sky round 2's fog-on-every-cloud-
+	// pixel cvar) with its value before, saved once each; RestoreCvars walks the
+	// array in reverse. SetWorldCvar records [before, read back] under its Row.
+	struct FSavedCvar
+	{
+		FString Name;
+		FString Before;
+	};
+	TArray<FSavedCvar> WorldCvarsBefore;
+	FString SaveWorldCvar(const TCHAR* Name, IConsoleVariable* Variable);
+	void SetWorldCvar(const TCHAR* Name, double Value, const TSharedPtr<FJsonObject>& Row,
+	                  TArray<TSharedPtr<FJsonValue>>& Skipped);
 
 	// dust-humidity-haze: the overlay after ApplyAtmosphere (FlightSimDustHaze.h).
 	FFlightSimDustHaze DustHaze;

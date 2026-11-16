@@ -576,6 +576,8 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	// the scene and the world look actually drew.
 	WorldApplied = NewRecord();
 	BeautyOnlyActors.Reset();
+	// The rainbow is one of the beauty-only actors: forget it with them.
+	RainbowActor.Reset();
 	{
 		for (const TCHAR* Key : {TEXT("landscape"), TEXT("imagery"), TEXT("land_cover"),
 		                         TEXT("vegetation"), TEXT("buildings"), TEXT("runway"),

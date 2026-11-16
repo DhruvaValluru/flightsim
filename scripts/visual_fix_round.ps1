@@ -11,8 +11,10 @@
 # The full 14+ scene sweep (and the head comparison) runs once, at the end,
 # with -Full. What it does, in order:
 #
-#  1. Fast-forwards claude/vibrant-gauss-olema4 (refuses git.not_fast_forward
-#     rather than discarding local work).
+#  1. Checks out and fast-forwards claude/vibrant-gauss-olema4 from origin
+#     (-Branch names another; refuses git.not_fast_forward rather than
+#     discarding local work). The round renders ORIGIN's copy of that branch,
+#     never the checkout you happen to stand on.
 #  2. Prep only what changed since the last prepared commit (runs\visual\prep_stamp.txt;
 #     no stamp = all three):
 #       build      ue\Plugins\*\Source, ue\Config, ue\FlightSim.uproject
@@ -63,6 +65,10 @@ param(
     # where the compiled specs are pinned (default runs\visual\specs); the
     # stress ladder keeps its own so it never re-pins a visual round's spec
     [string]$SpecDir = "",
+    # the branch step 1 checks out and fast-forwards from origin: the visual rounds'
+    # branch by default (every existing call unchanged); sky_compare_round.ps1 passes
+    # the branch it stands on so the four sky frames render the code under review
+    [string]$Branch = "claude/vibrant-gauss-olema4",
     [int]$Port = 8008
 )
 
@@ -73,7 +79,8 @@ $ErrorActionPreference = "Continue"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $repo
 $py = Join-Path $repo ".venv\Scripts\python.exe"
-$branch = "claude/vibrant-gauss-olema4"
+# $branch below IS the -Branch parameter (PowerShell names are case-insensitive):
+# "claude/vibrant-gauss-olema4" unless the caller names another.
 $ue = if ($env:UE_ROOT) { $env:UE_ROOT } else { "C:\Program Files\Epic Games\UE_5.7" }
 $ed = Join-Path $ue "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
 $proj = Join-Path $repo "ue\FlightSim.uproject"

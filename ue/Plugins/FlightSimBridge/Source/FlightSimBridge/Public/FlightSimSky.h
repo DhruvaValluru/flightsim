@@ -76,6 +76,28 @@ struct FLIGHTSIMBRIDGE_API FFlightSimSkyPlan
 	bool bClouds = false;
 	double CloudBottomKm = 2.0;
 	double CloudThicknessKm = 3.0;
+	// Sky step 2 (the owner's X-Plane-12 brief, 2026-11-14): the plan's BEAUTY-ONLY
+	// cloud fields, optional in sky.json "clouds" (Load reads them with TryGet*: a
+	// v1 plan without them loads, and these defaults are what the record then says;
+	// core/scene/world_beauty.py PLAN_CLOUD_DEFAULTS is the pinned twin). Step 5
+	// writes them; words this build does not know are carried and drawn as "not
+	// stated". FFlightSimSky::Build never reads them: the measure path draws the
+	// stock layer from bottom_km/thickness_km only, byte-identical with or without
+	// them. FFlightSimWorldBeauty::ApplyClouds reads them under -quality=beauty.
+	bool bCloudPlanFields = false;        // any of the fields below was present
+	FString CloudType;                    // "" = not stated (the shape's default draws)
+	double CloudCoverage = -1.0;          // 0..1; below 0 = not stated
+	double CloudDensity = 1.0;            // multiplier of the row's extinction (UNCALIBRATED)
+	double CloudDetail = 1.0;             // multiplier of the row's erosion (UNCALIBRATED)
+	double CloudCirrusCoverage = 0.0;     // step 6's high sheet (FFlightSimWorldBeauty::ApplyCirrus); carried, not drawn here
+	// Sky step 6: true when the plan's cover came from data (its cover_inputs is an
+	// object: the ERA5 fractions), false for a stated default; the cirrus sheet
+	// draws the plan's cirrus_coverage only in the first case (core/scene/cirrus.py).
+	bool bCloudCoverFromData = false;
+	FString CloudCoverageSource;          // the plan's provenance string, "" = not stated
+	FString CloudMarchTier;               // sky step 5: the step 3 cvar set the plan asks for ("" = not stated; the plan writes "auto")
+	bool bCloudSeedStated = false;
+	int64 CloudSeed = 0;                  // the plan's seed, compared with the card's
 
 	FString PostKind = TEXT("external");
 	double BloomIntensity = 0.5;

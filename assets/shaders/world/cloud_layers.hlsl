@@ -63,6 +63,30 @@
 // tiers; its warp now grows with height (SideBulge, ShapeLodBulge: no hash
 // added), so the walls lean and bulge. -look-cloud-tiers=off sets both to 0.
 //
+// Sky step 1 (the owner's X-Plane-12 brief, 2026-11-14: "ragged, wispy edges
+// and fine cauliflower detail ... light bleeding through thin edges"; r95's
+// #03/#13 were smooth rounded blobs). Behind -look-cloud-wisp=on|off (on by
+// default; off, i.e. WispAmount 0, is round 95 bit for bit), cumulus and
+// stratocumulus layers only; the five inputs below are 0/0/1/0/0 when off:
+//   flow:     a VIEW sample reads the erosion noise at a point displaced by a
+//             coarser flow noise (two 3D gradient noises, CURL_OCTAVE_SCALE x the
+//             detail cells; CurlStrength cells of warp), so lobes stretch into
+//             wisps. NOT a divergence-free curl (that is six partials, 48 hashes;
+//             Nubis reads a curl texture and this material has no textures).
+//   top:      a third, finer Worley octave (TOP_DETAIL_LACUNARITY x) is added,
+//             zero-mean (minus TOP_DETAIL_MEAN, so DETAIL_MEAN still holds), weighted
+//             TopDetailGain towards the top of the layer and faded out by TOP_DETAIL_LOD
+//             of the far LOD (a 40 m lobe is ~2 px at 13 km): cauliflower lobes.
+//   boundary: the erosion is x (1 + BoundaryErosion x (1 - density)): strongest
+//             at the outline, none in a full core (ragged edges, intact bodies).
+//   thin:     density -> density^EdgeThinPower after the erosion (pow(0, p) = 0:
+//             the support, hence the drawn cover, is unchanged), so the soft band
+//             is optically thin and the sun comes through a rim.
+// Shadow samples (footKm > 0) read the undistorted detail or its mean as before
+// (no hash added to the shadow march; a finer octave on a dithered footprint
+// would be r58's grain) and DO get the edge thinning: that is what lets the sun
+// through a thin edge. UNCALIBRATED: every amount (world_beauty.CLOUD_WISP_*).
+//
 // Inputs (the Custom node's, named exactly so; the script's WORLD_CLOUD_INPUTS):
 //   WorldPos         float3  the sample's absolute world position, cm
 //   NormAlt          float   0 at the layer's base, 1 at its top (Cloud Sample Attributes)
@@ -86,6 +110,11 @@
 //   FarFadeKm        float   over this; 0 = no fade (no sheet drawn, or the switch off)
 //   HeightDensity    float   round 82: the base's density deficit, 0..1 (density x lerp(1 - it, 1,
 //                            smoothstep(0, HEIGHT_DENSITY_RISE, h))); 0 = round 81
+//   WispAmount       float   Sky step 1: the wisp's master gate, 0..1; 0 = round 95 exactly (-look-cloud-wisp)
+//   CurlStrength     float   the flow warp of a view sample's detail point, in detail cells (x WispAmount)
+//   EdgeThinPower    float   density^this after the erosion; 1 = round 95's linear extinction
+//   TopDetailGain    float   the finer top octave's weight at the top of the layer (x WispAmount)
+//   BoundaryErosion  float   extra erosion at the outline, x (1 - density) (x WispAmount)
 // and the engine's Parameters.SvPosition and View.StateFrameIndexMod8 (the dither's pixel and capture).
 const float FBM_MEAN = 0.55;
 const float FBM_SIGMA = 0.069;
@@ -290,6 +319,36 @@ struct FWorldCloud
 	}
 };
 FWorldCloud C;
+// Sky step 1: the wisp's constants (world_beauty.CLOUD_CURL_OCTAVE_SCALE,
+// CLOUD_TOP_DETAIL_LACUNARITY, CLOUD_TOP_DETAIL_MEAN, CLOUD_TOP_DETAIL_LOD; the
+// mean is measured on the Python replica cloud_top_detail, the rest UNCALIBRATED).
+// The flow is coarser than the lobes it moves (lobes stretch, not jitter).
+const float CURL_OCTAVE_SCALE = 0.5;
+const float TOP_DETAIL_LACUNARITY = 4.1;
+const float TOP_DETAIL_MEAN = 0.479;
+const float TOP_DETAIL_LOD = 0.5;
+// The wisp's own noises (world_beauty.cloud_flow / cloud_top_detail). A struct
+// method cannot read the enclosing body's C, so it carries its own FWorldCloud.
+struct FWorldWisp
+{
+	FWorldCloud N;
+	// A flow-noise warp: two 3D gradient noises for the plane and, at half
+	// amplitude, their difference for the vertical (wisps stretch more along
+	// the layer than up); 16 lattice hashes, zero-mean.
+	float3 Flow(float3 p, uint seed)
+	{
+		float a = N.Perlin(p, seed + 701u);
+		float b = N.Perlin(p, seed + 733u);
+		return float3(a, b, 0.5 * (b - a));
+	}
+	// The finer top octave (27 hashes), 0..1, mean TOP_DETAIL_MEAN; the caller
+	// scales q by TOP_DETAIL_LACUNARITY (a method cannot read the body's consts).
+	float TopDetail(float3 q, uint seed)
+	{
+		return N.Worley(q, seed + 193u);
+	}
+};
+FWorldWisp W;
 // Kilometres, offset by the seed and carried by the wind (horizontal only).
 float3 km = (WorldPos / 100.0 - WindOffsetM) / 1000.0 + SeedOffsetKm;
 float h = saturate(NormAlt);
@@ -355,10 +414,41 @@ if (density > 0.0 && far < 1.0)
 	[branch]
 	if (footKm < max(DetailScaleKm, 1e-3))
 	{
-		detail = C.Detail(km / max(DetailScaleKm, 1e-3), 13u);
+		float3 q = km / max(DetailScaleKm, 1e-3);
+		// Sky step 1: a view sample's detail point is flow-warped and its top
+		// gains the finer octave; a shadow sample, or WispAmount 0, is round 95.
+		[branch]
+		if (WispAmount > 0.0 && footKm == 0.0)
+		{
+			q += W.Flow(q * CURL_OCTAVE_SCALE, 23u) * (WispAmount * CurlStrength);
+			detail = C.Detail(q, 13u);
+			float topW = WispAmount * TopDetailGain * smoothstep(WISP_HEIGHT, 1.0, h)
+				* (1.0 - smoothstep(0.0, TOP_DETAIL_LOD, far));
+			[branch]
+			if (topW > 0.0)
+			{
+				detail = saturate(detail + topW * (W.TopDetail(q * TOP_DETAIL_LACUNARITY, 13u) - TOP_DETAIL_MEAN));
+			}
+		}
+		else
+		{
+			detail = C.Detail(q, 13u);
+		}
 	}
 	float wisp = lerp(detail, 1.0 - detail, saturate(h / WISP_HEIGHT));
-	density = C.Remap(density, DetailErosion * (1.0 - far) * wisp, 1.0);
+	// Sky step 1: the erosion bites hardest at the outline (x 1 with WispAmount 0).
+	float ero = DetailErosion * (1.0 - far) * wisp * (1.0 + WispAmount * BoundaryErosion * (1.0 - density));
+	density = C.Remap(density, ero, 1.0);
+}
+// Sky step 1: thin edges let light through. The soft band's extinction was
+// linear in density, so 100 m of it at 0.05/m is already opaque (tau 5);
+// density^EdgeThinPower keeps the core and thins the rim (pow(0, p) = 0, so
+// where there was no cloud there is none: the drawn cover is unchanged). View
+// and shadow samples alike: the sun comes through a rim, the sky through a veil.
+[branch]
+if (WispAmount > 0.0 && density > 0.0)
+{
+	density = lerp(density, pow(density, EdgeThinPower), WispAmount);
 }
 // Round 61 (r58's distant band of block columns): where the distant sheet is
 // drawn its fade-in (distant_clouds.hlsl: HandoverKm .. + FadeKm by the

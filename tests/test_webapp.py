@@ -1403,6 +1403,152 @@ def test_era5_level_selection_is_nearest_standard_level():
     assert nearest_pressure_level(200.0) == 1000
 
 
+# -- sky step 5: the plan's cloud cover from ERA5 (the web app's wiring) ---------
+
+
+def _dated_747():
+    return compile_prompt("fly the 747 at 9000 m and 250 kt on 2024-01-15")
+
+
+def _sky_plan_for(spec, tmp_path, monkeypatch, fetch):
+    """write_sky_plan with the cloud-cover fetch stubbed (no network in the suite)."""
+    from core.scenario.camera import default_cameras
+
+    monkeypatch.setattr("core.environment.era5.fetch_reanalysis_cloud_cover", fetch)
+    scene = {"key": "flat", "terrain": None, "imagery": None}
+    path = runs_module.write_sky_plan(spec, scene, default_cameras(spec)[0], tmp_path)
+    return json.loads(path.read_text(encoding="ascii"))
+
+
+def _recording_fetch(seen):
+    """A stubbed archive that records what it was asked and answers a thin low cover."""
+    def fake_fetch(lat, lon, date, hour_utc):
+        seen.update(lat=lat, lon=lon, date=date, hour_utc=hour_utc)
+        return {"low": 0.1, "mid": 0.0, "high": 0.0, "total": 0.9, "hour_utc": hour_utc, "date": date,
+                "source": "test stub"}
+    return fake_fetch
+
+
+def test_a_dated_spec_plans_its_clouds_from_era5_cover(tmp_path, monkeypatch):
+    """Sky step 5: a weather_date pulls the ERA5 level cloud cover at the plan's
+    INSTANT (its UTC date and hour, not the wind's noon) and the plan's
+    cloud_type / coverage come from it, sourced; the seed is the spec's. Clouds
+    are VISUAL ONLY: no spec edit, no digest change, no refusal. The default 747
+    sits at 0 N 0 E at noon, so here the instant's UTC date IS weather_date; the
+    day-rolling cases are the next test."""
+    seen = {}
+    spec = _dated_747()
+    digest = spec.digest()
+    plan = _sky_plan_for(spec, tmp_path, monkeypatch, _recording_fetch(seen))
+    assert plan["instant_utc"][:10] == "2024-01-15"
+    assert seen["date"] == plan["instant_utc"][:10] == "2024-01-15"
+    assert seen["hour_utc"] == int(plan["instant_utc"][11:13])
+    assert seen["lat"] == float(spec.latitude.value)
+    block = plan["clouds"]
+    assert block["cloud_type"] == "cumulus" and block["coverage"] == 0.1
+    assert block["coverage_source"].startswith("test stub, 2024-01-15T")
+    assert block["cover_inputs"]["total"] == 0.9
+    assert block["seed"] == int(spec.seed.value) and block["seed_source"] == "spec.seed"
+    assert spec.digest() == digest
+
+
+@pytest.mark.parametrize("time_value, lat, lon, utc_date, utc_hour", [
+    # an evening in the Americas: the NEXT UTC day
+    ("20:00", 40.7, -74.0, "2024-01-16", 0),        # New York, 00:56Z
+    ("20:00", 37.6, -122.4, "2024-01-16", 4),       # San Francisco, 04:09Z
+    # a morning in Asia: the PREVIOUS UTC day
+    ("02:00", 35.7, 139.7, "2024-01-14", 16),       # Tokyo, 16:41Z
+], ids=["new-york-evening", "west-coast-evening", "tokyo-morning"])
+def test_the_cover_is_fetched_for_the_instants_utc_day_not_weather_date(tmp_path, monkeypatch, time_value,
+                                                                         lat, lon, utc_date, utc_hour):
+    """Sky step 5, repair round 1. ``weather_date`` is the spec's LOCAL date; the
+    plan's instant is UTC and crosses the day boundary for every late-local
+    time west of Greenwich and every early-local time east of it. The first cut
+    passed ``instant.utc.hour`` alone and fetched ``weather_date`` at that hour:
+    24 h early for an evening at New York (plan 2024-01-16T00:56Z, fetch asked
+    for 2024-01-15 00Z) and 24 h late for a Tokyo morning. The archive must be
+    asked for the instant's UTC date AND hour, and ``coverage_source`` must
+    stamp the day actually fetched. (The fetch is stubbed; nothing is rendered.)"""
+    seen = {}
+    spec = compile_prompt(f"fly the 747 at 9000 m and 250 kt at {time_value} on 2024-01-15")
+    spec.set("latitude", lat, frm="test")
+    spec.set("longitude", lon, frm="test")
+    assert str(spec.weather_date.value) == "2024-01-15"
+    plan = _sky_plan_for(spec, tmp_path, monkeypatch, _recording_fetch(seen))
+    assert plan["instant_utc"][:10] == utc_date != "2024-01-15"
+    assert seen["date"] == plan["instant_utc"][:10] == utc_date
+    assert seen["hour_utc"] == int(plan["instant_utc"][11:13]) == utc_hour
+    assert seen["lat"] == lat and seen["lon"] == lon
+    block = plan["clouds"]
+    assert block["coverage_source"] == f"test stub, {utc_date}T{utc_hour:02d}Z, cloud_cover_low/mid/high"
+    assert "2024-01-15" not in block["coverage_source"]
+    assert block["cloud_type"] == "cumulus" and block["coverage"] == 0.1
+
+
+def test_a_sampled_cloud_cover_wins_and_era5_clouds_are_not_fetched(tmp_path, monkeypatch):
+    """A cover the policy DREW is the card's layer, which stands above the plan
+    in the host (world_beauty.layer_source): the archive is not even asked and
+    the plan records its default with that reason."""
+    from core.scenario.fields import Quantity, Source
+
+    def must_not_fetch(lat, lon, date, hour_utc):
+        raise AssertionError("ERA5 was consulted for a sampled cloud cover")
+
+    spec = _dated_747()
+    current = spec.randomization.cloud_cover
+    spec.randomization.cloud_cover = Quantity(value=0.6, unit=current.unit, source=Source.SAMPLED,
+                                              frm="drawn by the policy")
+    plan = _sky_plan_for(spec, tmp_path, monkeypatch, must_not_fetch)
+    assert plan["clouds"]["cloud_type"] == "cumulus"
+    assert plan["clouds"]["coverage_source"] == (
+        "default (sampled cloud cover wins; ERA5 clouds not applied (the card's layer stands above the "
+        "plan)): CLOUDS[cumulus].default_cover")
+
+
+def test_an_unreachable_archive_leaves_the_default_recorded_and_never_refuses(tmp_path, monkeypatch):
+    from core.environment.era5 import WeatherUnavailableError
+
+    def offline(lat, lon, date, hour_utc):
+        raise WeatherUnavailableError("offline (test)")
+
+    plan = _sky_plan_for(_dated_747(), tmp_path, monkeypatch, offline)
+    assert plan["clouds"]["cloud_type"] == "cumulus" and plan["clouds"]["coverage"] == 0.35
+    assert plan["clouds"]["coverage_source"] == "default (fetch failed: offline (test)): CLOUDS[cumulus].default_cover"
+    assert plan["clouds"]["cover_inputs"] is None
+
+
+def test_an_undated_spec_never_fetches_cloud_cover(tmp_path, monkeypatch):
+    def must_not_fetch(lat, lon, date, hour_utc):
+        raise AssertionError("ERA5 was consulted without a weather_date")
+
+    plan = _sky_plan_for(compile_prompt("fly the 747 at 9000 m and 250 kt at noon"), tmp_path, monkeypatch,
+                         must_not_fetch)
+    assert plan["clouds"]["coverage_source"] == "default (no weather_date): CLOUDS[cumulus].default_cover"
+
+
+def test_a_synthesised_ridge_never_fetches_cloud_cover(tmp_path, monkeypatch, small_synthesis):
+    """Called as write_sky_plan calls it (the plan's instant, an aware UTC
+    datetime, since repair round 1; the first cut took the bare hour). With no
+    scene dict the picker is asked; with one, THAT scene decides (write_sky_plan
+    passes the scene it already holds: one decision, one source)."""
+    from datetime import datetime, timezone
+
+    def must_not_fetch(lat, lon, date, hour_utc):
+        raise AssertionError("ERA5 was consulted for a synthesised ridge")
+
+    monkeypatch.setattr("core.environment.era5.fetch_reanalysis_cloud_cover", must_not_fetch)
+    monkeypatch.setattr(runs_module, "TERRAIN_DIR", tmp_path / "terrain")
+    spec = compile_prompt("fly the 747 at 4000 m and 250 kt on 2024-01-15")
+    spec.set("latitude", 46.5, frm="test")
+    spec.set("longitude", 8.5, frm="test")
+    spec.set("scene.terrain_source", "synthesised", frm="test")
+    instant = datetime(2024, 1, 15, 12, tzinfo=timezone.utc)
+    cover, note = runs_module.historical_cloud_cover(spec, instant)
+    assert cover is None and note == "a synthesised ridge is not a place; ERA5 clouds not fetched"
+    cover, note = runs_module.historical_cloud_cover(spec, instant, scene={"key": "synthesised"})
+    assert cover is None and note == "a synthesised ridge is not a place; ERA5 clouds not fetched"
+
+
 def test_a_half_written_bake_is_not_a_bake(control_ridge, monkeypatch):
     """A .r16 with no .json sidecar cannot be read, so it must not be
     SELECTED: until 2026-09-11 the scene picker tested the .r16 alone

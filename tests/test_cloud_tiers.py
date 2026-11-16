@@ -377,7 +377,8 @@ static FShimView View;
 _INPUTS = ("WorldPos", "NormAlt", "CameraPos", "Coverage", "ExtinctionPerM", "ExtinctionScale", "ShapeScaleKm",
            "DetailScaleKm", "DetailErosion", "BottomSoftness", "TopRounding", "CoverageContrast", "SeedOffsetKm",
            "WindOffsetM", "ShadowDist", "ShadowFootprintKm", "LayerThicknessKm", "SideBulge",
-           "FarFadeStartKm", "FarFadeKm", "HeightDensity")
+           "FarFadeStartKm", "FarFadeKm", "HeightDensity",
+           "WispAmount", "CurlStrength", "EdgeThinPower", "TopDetailGain", "BoundaryErosion")   # sky step 1
 _VECTORS = ("WorldPos", "CameraPos", "SeedOffsetKm", "WindOffsetM")
 
 
@@ -395,7 +396,10 @@ def test_the_shader_body_is_the_python_twin(tmp_path):
     gradient noise of the same pixel and capture, stratified by the sample's
     index) and off, the far fade on and off, against
     core/scene/world_beauty.cloud_density x cloud_far_fade; and a shadow sample
-    with the switch off is a view sample, bit for bit."""
+    with the switch off is a view sample, bit for bit. Sky step 1: every third
+    case runs with the wisp row ON (cloud_wisp_row(True): the flow warp, the top
+    octave, the boundary erosion and the edge thinning), the rest with it OFF
+    (the material's defaults); the switch-off identity holds with either."""
     assert _script_value("WORLD_CLOUD_INPUTS") == _INPUTS
     row = wb.CLOUDS["cumulus"]
     rng = random.Random(17)
@@ -410,16 +414,18 @@ def test_the_shader_body_is_the_python_twin(tmp_path):
         fade = 0.0 if i % 5 == 0 else wb.DISTANT_FADE_KM
         pixel = (rng.randrange(0, 1920) + 0.5, rng.randrange(0, 1080) + 0.5, rng.randrange(0, 8))
         hd = 0.0 if i % 2 == 0 else wb.CLOUD_BILLOW_HEIGHT_DENSITY   # round 82
-        cases.append((pos, cam, h, shadow_cm, footprint, bulge, fade, pixel, hd))
+        wisp = wb.cloud_wisp_row(i % 3 == 2)   # sky step 1
+        cases.append((pos, cam, h, shadow_cm, footprint, bulge, fade, pixel, hd, wisp))
     seed = (123.4, 456.7, 7.0)
 
-    def call(pos, cam, h, shadow_cm, footprint, bulge, fade, pixel, hd=0.0):
+    def call(pos, cam, h, shadow_cm, footprint, bulge, fade, pixel, hd=0.0, wisp=wb.CLOUD_WISP_OFF):
         args = [f"float3({pos[0]!r}f, {pos[1]!r}f, {pos[2]!r}f)", f"{h!r}f",
                 f"float3({cam[0]!r}f, {cam[1]!r}f, {cam[2]!r}f)", "0.35f", f"{row['extinction_per_m']!r}f", "1.0f",
                 f"{row['shape_scale_km']!r}f", f"{row['detail_scale_km']!r}f", f"{row['detail_erosion']!r}f",
                 f"{row['bottom_softness']!r}f", f"{row['top_rounding']!r}f", f"{row['coverage_contrast']!r}f",
                 f"float3({seed[0]!r}f, {seed[1]!r}f, {seed[2]!r}f)", "float3(0.0f, 0.0f, 0.0f)",
                 f"{shadow_cm!r}f", f"{footprint!r}f", "2.0f", f"{bulge!r}f", "24.0f", f"{fade!r}f", f"{hd!r}f"]
+        args += [f"{wisp[name]!r}f" for name in wb.CLOUD_WISP_FIELDS]
         return ("(Parameters.SvPosition.x = {0!r}f, Parameters.SvPosition.y = {1!r}f, "
                 "View.StateFrameIndexMod8 = {2}u, Extinction(".format(*pixel) + ", ".join(args) + "))")
 
@@ -427,9 +433,9 @@ def test_the_shader_body_is_the_python_twin(tmp_path):
     for c in cases:
         main.append(f'printf("%.9g\\n", (double){call(*c)});')
         # the switch off (footprint, bulge, fade 0) on a shadow sample == the view sample, bit for bit
-        pos, cam, h, shadow_cm, _, _, _, pixel, hd = c
-        main.append(f'printf("%d\\n", {call(pos, cam, h, shadow_cm, 0.0, 0.0, 0.0, pixel, hd)} == '
-                    f'{call(pos, cam, h, 0.0, 0.0, 0.0, 0.0, (0.5, 0.5, 0), hd)});')
+        pos, cam, h, shadow_cm, _, _, _, pixel, hd, wisp = c
+        main.append(f'printf("%d\\n", {call(pos, cam, h, shadow_cm, 0.0, 0.0, 0.0, pixel, hd, wisp)} == '
+                    f'{call(pos, cam, h, 0.0, 0.0, 0.0, 0.0, (0.5, 0.5, 0), hd, wisp)});')
     main.append("return 0; }")
     (tmp_path / "body.cpp").write_text(_shader_as_cpp() + "\n".join(main), encoding="utf-8")
     subprocess.run(["g++", "-std=c++17", "-O0", "-o", str(tmp_path / "body"), str(tmp_path / "body.cpp")],
@@ -438,7 +444,8 @@ def test_the_shader_body_is_the_python_twin(tmp_path):
     import struct
     f32 = lambda v: struct.unpack("f", struct.pack("f", v))[0]
     exercised = 0
-    for i, (pos, cam, h, shadow_cm, footprint, bulge, fade, pixel, hd) in enumerate(cases):
+    wisped = 0
+    for i, (pos, cam, h, shadow_cm, footprint, bulge, fade, pixel, hd, wisp) in enumerate(cases):
         assert out[2 * i + 1] == "1", i
         p = tuple(f32(v) for v in pos)
         km = tuple(c / 100.0 / 1000.0 + s for c, s in zip(p, (f32(v) for v in seed)))
@@ -447,12 +454,15 @@ def test_the_shader_body_is_the_python_twin(tmp_path):
         dither = (wb.cloud_shadow_dither(wb.cloud_shadow_ign(*pixel),
                                          wb.cloud_shadow_sample_index(f32(shadow_cm) / 100000.0, f32(footprint)))
                   if foot > 0.0 else (0.0, 0.0, 0.0))
-        want = (wb.cloud_density(km, f32(h), 0.35, row, dist_km, foot, dither, 2.0, f32(bulge), f32(hd)) * row["extinction_per_m"]
+        want = (wb.cloud_density(km, f32(h), 0.35, row, dist_km, foot, dither, 2.0, f32(bulge), f32(hd),
+                                 {k: f32(v) for k, v in wisp.items()}) * row["extinction_per_m"]
                 * wb.cloud_far_fade(dist_km, 24.0, fade))
         got = float(out[2 * i])
         assert got == pytest.approx(want, abs=2e-3 * row["extinction_per_m"] + 1e-7), (i, pos, h, shadow_cm, footprint, bulge)
         exercised += foot > 0.0 and want > 0.0
+        wisped += wisp["WispAmount"] > 0.0 and want > 0.0
     assert exercised >= 5   # filtered shadow samples inside cloud were compared
+    assert wisped >= 5      # sky step 1: wisped samples inside cloud were compared
 
 
 def test_the_shader_constants_are_the_pythons():

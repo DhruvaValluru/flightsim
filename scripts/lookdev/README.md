@@ -98,3 +98,25 @@ bias), `ApplyBeautyPostProcess` (and so `FFlightSimBeautyLook::Apply`),
   slot with their paint / canopy reflections, as on a beauty render.
   `-lookdev-aircraft-fx=off` keeps the import's own materials (the old harness,
   as in lookdev/base).
+
+## Clouds in the harness (sky-clouds2, 2026-11-15)
+
+No beauty cumulus drew in earlier Mac captures because none of the test cards
+(1, 3, 9, 13) states a cloud layer and prepare.py ran without a sky plan, so
+`FFlightSimVisualScene::BuildClouds` made no cloud component and
+`FFlightSimWorldBeauty::ApplyClouds` had nothing to redraw. `-cloud-type=`
+only picks the shape of a layer that already exists. To get one:
+
+- Sky plan (what Windows renders with `FLIGHTSIM_SKY=physical`): run
+  `FLIGHTSIM_SKY=physical $PY scripts/lookdev/prepare.py 13 ...`. The plan's
+  layer sits 1 km or more above the flight. Round 95 lowers a default cumulus
+  layer to the fair slab (1500-2700 m), so at 10 km you look down on it.
+- No plan: `--switches="-beauty-clouds=fair -cloud-type=cumulus"` adds the fair
+  layer (cover 0.35, 1500-2700 m), unless the card states clouds or a storm
+  cell draws.
+- Add `-look-cloud-light=on` to draw M_FlightSimCloudLayersLit (the separate
+  lit material). Write `--switches=` with an `=`, because a value that starts
+  with `-` is read as a flag.
+- Compilation stats (Mac, 2026-11-15): M_FlightSimCloudLayers PS 161,
+  0 samplers, VS 242 (graph 8). M_FlightSimCloudLayersLit PS 847, 0 samplers,
+  VS 242.

@@ -3,6 +3,7 @@
 #include "Components/AudioComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/PointLightComponent.h"
+#include "FlightSimSkyFx.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/VolumetricCloudComponent.h"
 #include "Dom/JsonObject.h"
@@ -976,6 +977,21 @@ void FFlightSimWeather::ApplyBeautyStormVantage(const FVector& AircraftCm, const
 		     "stays clearance_m outside the tower (storm_cell.beauty_vantage_shift_m); the look's deck at the "
 		     "world lane's slab (world_beauty.aircraft_clear_layer); the drawn rain at least rain_share_floor of "
 		     "the shaft's. VISUAL ONLY: the downburst, the wind and every physics number stand; UNCALIBRATED"));
+	// High-sky effects lane (2026-11-15): arm the beauty in-cloud flash
+	// (-look-cloud-flash=off|schedule|on, schedule by default; Advance). Only
+	// here, on the beauty vantage, so a measure render's cell never glows
+	// outside the weather's own flashes. A bad word is recorded and the flash
+	// stays off: the look is visual only.
+	FString CloudFlashError;
+	if (!FlightSimSkyFx::ParseCloudFlash(BeautyCloudFlashMode, CloudFlashError))
+	{
+		Row->SetStringField(TEXT("cloud_flash_error"), CloudFlashError);
+		BeautyCloudFlashMode = FlightSimSkyFxPure::CloudFlashOff;
+	}
+	Row->SetStringField(TEXT("cloud_flash"), BeautyCloudFlashMode == FlightSimSkyFxPure::CloudFlashOn ? TEXT("on")
+		: BeautyCloudFlashMode == FlightSimSkyFxPure::CloudFlashSchedule ? TEXT("schedule") : TEXT("off"));
+	Row->SetNumberField(TEXT("cloud_flash_share"),
+		FlightSimSkyFxPure::CloudFlashShare(CloudFlashRatePerMin, CloudFlashIcCg));
 	(*CellRow)->SetObjectField(TEXT("beauty_vantage"), Row);
 }
 
@@ -2159,6 +2175,15 @@ bool FFlightSimWeather::BuildCell(UWorld* World, const TSharedPtr<FJsonObject>& 
 bool FFlightSimWeather::BuildLightning(UWorld* World, const TSharedPtr<FJsonObject>& Lightning,
                                        FString& Error)
 {
+	// High-sky effects lane: the card's flash rate, IC:CG ratio and seed for the
+	// beauty in-cloud flash's schedule (optional: the defaults are the storm's).
+	CloudFlashRatePerMin = 0.0;
+	CloudFlashIcCg = -1.0;
+	double CloudFlashSeedValue = 0.0;
+	Lightning->TryGetNumberField(TEXT("rate_per_min"), CloudFlashRatePerMin);
+	Lightning->TryGetNumberField(TEXT("ic_cg_ratio"), CloudFlashIcCg);
+	Lightning->TryGetNumberField(TEXT("seed"), CloudFlashSeedValue);
+	CloudFlashSeed = static_cast<uint64>(FMath::Max(CloudFlashSeedValue, 0.0));
 	const TSharedPtr<FJsonObject>* CurveJson = nullptr;
 	if (!Lightning->TryGetObjectField(TEXT("light_curve"), CurveJson) || CurveJson == nullptr ||
 	    !WeatherNumber(*CurveJson, TEXT("rise_s"), Curve.RiseS, TEXT("light_curve"), Error) ||
@@ -2627,7 +2652,41 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 				PlayThunder(WorldRef, Flash, CameraEnu, T);
 			}
 		}
-		if (FlashLight != nullptr)
+		// High-sky effects lane (2026-11-15): with no flash of the weather's own
+		// in this exposure, the beauty vantage's intracloud flash (armed only by
+		// ApplyBeautyStormVantage): storm_glow.hlsl's law at the stroke's mean
+		// intensity over the shutter, on the camera's side of the tower.
+		FVector BeautyFlashEngineCm = FVector::ZeroVector;
+		const bool bBeautyFlash = Best == nullptr && StormMaterial != nullptr &&
+			FlightSimSkyFxPure::CloudFlashLit(BeautyCloudFlashMode, CloudFlashSeed, T, CloudFlashRatePerMin,
+			                                  CloudFlashIcCg);
+		if (bBeautyFlash)
+		{
+			const FVector DrawnCentre = CentreEngineCm + BeautyCellOffsetCm;
+			const FVector CamRel = View.CameraCm - DrawnCentre;
+			double EastM = 0.0, NorthM = 0.0, UpM = 0.0;
+			FlightSimSkyFxPure::CloudFlashRelM(FVector::DotProduct(CamRel, EastAxis) / WeatherCmPerMetre,
+			                                   FVector::DotProduct(CamRel, NorthAxis) / WeatherCmPerMetre,
+			                                   CellTowerRadiusM, BaseM, CellTopM, EastM, NorthM, UpM);
+			const FVector FlashRelCm = (EastAxis * EastM + NorthAxis * NorthM) * WeatherCmPerMetre
+				+ FVector(0.0, 0.0, UpM * WeatherCmPerMetre);
+			BestCd = FlightSimSkyFxPure::CloudFlashCd(View.ShutterSeconds);   // the still's own shutter, not the cinematic streak one
+			BeautyFlashEngineCm = DrawnCentre + FlashRelCm;
+			const double DistanceM = FMath::Max(1.0, FVector::Distance(View.CameraCm, BeautyFlashEngineCm)
+				/ WeatherCmPerMetre);
+			FlashLux += BestCd / (DistanceM * DistanceM);
+			StormMaterial->SetVectorParameterValue(TEXT("FlashRelCm"), WeatherColour(FlashRelCm));
+			StormMaterial->SetVectorParameterValue(TEXT("Flash"), FLinearColor(
+				static_cast<float>(BestCd), static_cast<float>(GlowDiffusionM),
+				static_cast<float>(CellAlbedo), 0.0f));
+		}
+		if (FlashLight != nullptr && bBeautyFlash)
+		{
+			FlashLight->SetVisibility(true);
+			FlashLight->SetIntensity(static_cast<float>(BestCd));
+			FlashLight->SetWorldLocation(BeautyFlashEngineCm);
+		}
+		else if (FlashLight != nullptr)
 		{
 			FlashLight->SetVisibility(Best != nullptr);
 			FlashLight->SetIntensity(static_cast<float>(BestCd));
@@ -2636,7 +2695,7 @@ void FFlightSimWeather::Advance(const FFlightSimWeatherView& View)
 				FlashLight->SetWorldLocation(EnuToEngineCm(Best->CentroidEnu) + BeautyCellOffsetCm);
 			}
 		}
-		if (StormMaterial != nullptr)
+		if (StormMaterial != nullptr && !bBeautyFlash)
 		{
 			const FVector FlashRel = Best != nullptr ? EnuToEngineCm(Best->CentroidEnu) - CentreEngineCm
 			                                         : FVector::ZeroVector;

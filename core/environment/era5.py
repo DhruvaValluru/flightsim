@@ -12,6 +12,13 @@ scales below the grid (turbulence stays the spec's own word); a forecast;
 a measurement at the aircraft (reanalysis blends model and observations).
 The wind is applied as a recorded spec edit BEFORE the digest is answered,
 and never overrides a USER-stated wind.
+
+Sky step 5 (the owner's X-Plane-12 brief): :func:`fetch_reanalysis_cloud_cover`
+reads the same archive's hourly ``cloud_cover_low/mid/high`` for the sky
+plan's cloud type and coverage. Clouds are VISUAL ONLY (the beauty render),
+so unlike the wind this never edits the spec, never touches the digest and
+never refuses a run: an unreachable archive leaves the plan's stated default,
+recorded as a default with the error text.
 """
 
 from __future__ import annotations
@@ -40,9 +47,18 @@ PRESSURE_LEVEL_ALTITUDE_M: Dict[int, float] = {
     500: 5600.0, 400: 7200.0, 300: 9200.0, 250: 10400.0, 200: 11800.0,
 }
 
-#: The reanalysis hour applied (UTC). Noon is the documented convention --
-#: a single stated choice rather than a hidden average.
+#: The reanalysis hour applied to the WIND (UTC). Noon is the documented
+#: convention -- a single stated choice rather than a hidden average. The
+#: cloud cover (fetch_reanalysis_cloud_cover) takes the sky plan's own instant
+#: hour instead: the clouds are drawn for the moment the sun is planned at.
 HOUR_UTC = 12
+
+#: The hourly cloud fields the ERA5 archive serves (percent), in the order
+#: the cover dict's ``total``, ``low``, ``mid``, ``high`` are read.
+CLOUD_COVER_FIELDS = ("cloud_cover", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high")
+#: What the archive's fraction is, stated on every cover dict.
+CLOUD_COVER_SOURCE = ("ERA5 reanalysis via Open-Meteo archive API, hourly cloud fraction "
+                      "of a ~25 km grid cell; ERA5T values for recent months may be revised")
 
 
 class WeatherUnavailableError(RuntimeError):
@@ -114,4 +130,64 @@ def fetch_reanalysis_wind(lat: float, lon: float, date_iso: str,
         "level_altitude_m": level_altitude,
         "hour_utc": HOUR_UTC,
         "source": source,
+    }
+
+
+def fetch_reanalysis_cloud_cover(lat: float, lon: float, date_iso: str,
+                                 hour_utc: int, timeout_s: float = 15.0) -> Dict:
+    """Historical cloud cover by level for (place, date, UTC hour), as fractions.
+
+    Sky step 5. The ERA5 archive (``ARCHIVE_URL``, any date since 1940)
+    serves ``cloud_cover`` and ``cloud_cover_low/mid/high`` hourly in
+    percent; this returns them as 0..1 fractions under ``total``, ``low``,
+    ``mid`` and ``high`` with the hour, the date and a ``source`` string.
+    ``date_iso`` and ``hour_utc`` are the sky plan INSTANT's UTC date and
+    UTC hour (``core.sky.plan.resolve_instant(...).utc``), not the wind's
+    noon convention and NOT the spec's ``weather_date``: that is a LOCAL
+    date, and a local evening west of Greenwich or a local morning east of
+    it falls on the next or the previous UTC day (20:00 at New York on
+    2024-01-15 is 2024-01-16T00:56Z). The clouds are planned for the moment
+    the sun is, and the returned ``date`` is the UTC day the hour index
+    belongs to. A null hour (the archive serves nulls for dates it has not
+    assimilated) raises :class:`WeatherUnavailableError` by name, like any
+    network failure, rather than guessing a sky. The caller (the web app)
+    records the default instead and never refuses the run: clouds are VISUAL
+    ONLY. Pure on its answer: the values are copied into sky.json, so a plan
+    is deterministic once written.
+    """
+    hour = int(hour_utc)
+    if not 0 <= hour <= 23:
+        raise WeatherUnavailableError(
+            f"historical cloud cover: hour_utc {hour_utc!r} is not 0..23")
+    params = urllib.parse.urlencode({
+        "latitude": f"{float(lat):.4f}", "longitude": f"{float(lon):.4f}",
+        "start_date": date_iso, "end_date": date_iso,
+        "hourly": ",".join(CLOUD_COVER_FIELDS),
+    })
+    try:
+        with urllib.request.urlopen(f"{ARCHIVE_URL}?{params}",
+                                    timeout=timeout_s) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        hourly = payload["hourly"]
+        percents = [hourly[field][hour] for field in CLOUD_COVER_FIELDS]
+        if any(value is None for value in percents):
+            raise ValueError(
+                f"the archive returned null cloud cover at {hour:02d}Z "
+                f"(not yet assimilated for {date_iso})")
+        fractions = [min(max(float(value), 0.0), 100.0) / 100.0
+                     for value in percents]
+    except Exception as exc:
+        raise WeatherUnavailableError(
+            f"historical cloud cover (Open-Meteo ERA5 archive) could not "
+            f"answer for ({lat:.3f}, {lon:.3f}) on {date_iso} at {hour:02d}Z: "
+            f"{type(exc).__name__}: {exc}") from exc
+    total, low, mid, high = fractions
+    return {
+        "low": round(low, 4),
+        "mid": round(mid, 4),
+        "high": round(high, 4),
+        "total": round(total, 4),
+        "hour_utc": hour,
+        "date": date_iso,
+        "source": CLOUD_COVER_SOURCE,
     }
