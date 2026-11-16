@@ -845,6 +845,8 @@ namespace
 				const double Bright = Bin / 255.0;
 				const bool bBlown = Bright > 0.92;
 				if ((!bBlown && FMath::Abs(Bright - MeterP90) <= 0.05) || Round == 4) { break; }
+				// fix-scene8: the clear-sky highlight guard only closes a clipping frame.
+				if (!bBlown && bMeter && MeterTrigger == TEXT("clear_highlight_guard")) { break; }
 				const double Want = bBlown ? 0.80 : MeterP90;
 				double Step = 2.2 * 0.8 * FMath::Log2(Want / FMath::Max(Bright, 1.0 / 255.0));
 				if (bBlown && Bright >= 254.0 / 255.0) { Step = FMath::Min(Step, -2.0); }

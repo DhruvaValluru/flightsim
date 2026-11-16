@@ -6309,6 +6309,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// Visual round 2: a beauty meter may also close a clipping frame (the
 		// constants above); measure keeps the open-only meter, byte for byte.
 		const bool bMeterMayClose = bVisual && bBeauty;
+		// fix-scene8: the clear-sky highlight guard under -exposure-anchor=
+		// incident (FlightSimBeautyLook.cpp, trigger "clear_highlight_guard")
+		// only ever CLOSES a clipping frame; it never opens one.
+		const bool bMeterCloseOnly = bBeautyMeter && bMeterMayClose &&
+			BeautyMeterTrigger == TEXT("clear_highlight_guard");
 		bool bMeterClosed = false;
 		SetMeterRes(true, TEXT("the exposure meter's rounds"));
 		for (; Rounds < StormMeterRounds; ++Rounds)
@@ -6365,6 +6370,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const bool bBlown = bMeterMayClose && Bright > BeautyMeterHighlightP90;
 			if (!bBlown && FMath::Abs(Bright - StormMeterTarget) <= StormMeterTolerance)
 			{
+				break;
+			}
+			if (bMeterCloseOnly && !bBlown)
+			{
+				MeterNote = Opened < 0.0
+					? TEXT("closed off the clipping highlights; the bright end now sits under the highlight bound")
+					: TEXT("not clipping: the incident exposure stands (the clear-sky guard only closes)");
 				break;
 			}
 			if (Rounds + 1 == StormMeterRounds)
@@ -6467,6 +6479,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Guard->SetNumberField(TEXT("max_close_stops"), BeautyMeterMaxCloseStops);
 			Guard->SetNumberField(TEXT("saturated_step_stops"), BeautyMeterSaturatedStepStops);
 			Guard->SetBoolField(TEXT("closed"), bMeterClosed);
+			Guard->SetBoolField(TEXT("close_only"), bMeterCloseOnly);
 			Guard->SetStringField(TEXT("basis"),
 				TEXT("visual round 2: a beauty frame whose p90 luma is over highlight_p90 is clipping and is "
 				     "closed towards highlight_target_p90 (never more than max_close_stops); a frame between "
