@@ -356,3 +356,16 @@ def test_generation_3_wires_spin_and_tone_into_the_graph():
             assert not re.search(forbidden, stripped), (name, forbidden)   # no march, no extra read
     for name in _gen2_parameters():
         assert name in _literal("TORNADO_FLIPBOOK_PARAMETERS"), name
+
+
+def test_the_markers_are_one_method_populate_and_the_lookdev_harness_share():
+    world = (PRIVATE / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
+    populate = world[world.index("bool FFlightSimScenarioWorld::Populate"):world.index("// -- the aircraft ---")]
+    assert "SpawnTornadoMarkers(Card);" in populate and "SpawnMarker(TEXT(\"TornadoFunnel\"))" not in populate
+    body = world[world.index("void FFlightSimScenarioWorld::SpawnTornadoMarkers"):]
+    assert body.index("if (Card.bTornado)") < body.index('SpawnMarker(TEXT("TornadoWallCloud"))')
+    lookdev = (PRIVATE / "FlightSimLookDev.cpp").read_text(encoding="utf-8")
+    # markers before the visual scene dresses them; the beauty tornado before the world lane
+    assert lookdev.index("SpawnTornadoMarkers(S.Card)") < lookdev.index("S.Visual->Build(World, Options, Error)")
+    assert lookdev.index("BuildBeautyTornado(") < lookdev.index("S.WorldBeauty->Build(World, *P,")
+    assert 'TEXT("tornado-shade="), TornadoShade' in lookdev

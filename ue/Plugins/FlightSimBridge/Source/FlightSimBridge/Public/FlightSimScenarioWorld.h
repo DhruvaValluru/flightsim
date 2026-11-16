@@ -522,6 +522,10 @@ public:
 	// never calls it, so its renders keep the Build meshes byte for byte. The
 	// markers keep their actors, names and spin; the wind is untouched. False
 	// (Record says why) when the card has no tornado or the markers are absent.
+	// The tornado's schematic funnel and wall-cloud markers (Populate's block, moved
+	// verbatim 2026-11-15 so the editor look-dev harness can spawn them too). Needs
+	// World and GeoReferencing; a card without a tornado spawns nothing.
+	void SpawnTornadoMarkers(const FFlightSimScenarioCard& Card);
 	bool BuildBeautyTornado(const FFlightSimScenarioCard& Card,
 	                        TArray<AActor*>& BeautyOnlyActors,
 	                        const TSharedPtr<FJsonObject>& Record);

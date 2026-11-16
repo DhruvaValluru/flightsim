@@ -82,6 +82,8 @@ namespace
 		TUniquePtr<FFlightSimImpostorClouds> Impostors;
 		TUniquePtr<FFlightSimGoogleTiles> Tiles;
 		TUniquePtr<FFlightSimWorldBeauty> WorldBeauty;
+		// The tornado's markers + beauty refinement (hyperreal light lane tornado, 2026-11-15).
+		TUniquePtr<FFlightSimScenarioWorld> Tornado;
 		TWeakObjectPtr<AGeoReferencingSystem> GeoReferencing;
 		TWeakObjectPtr<AActor> Aircraft;
 		TWeakObjectPtr<ASceneCapture2D> Camera;
@@ -150,6 +152,7 @@ namespace
 		(void)S.Weather.Release();
 		(void)S.Impostors.Release();
 		(void)S.Tiles.Release();
+		(void)S.Tornado.Release();
 		if (S.WorldBeauty.IsValid()) { S.WorldBeauty->RestoreCvars(); }
 		(void)S.WorldBeauty.Release();
 		S.WorldBeauty = MakeUnique<FFlightSimWorldBeauty>();
@@ -479,6 +482,15 @@ namespace
 
 		FFlightSimVisualSceneOptions Options;
 		if (!SceneOptionsFor(P, S, Options, Error)) { return false; }
+		// The tornado's markers, as Populate spawns them before the visual scene dresses them
+		// (hyperreal light lane tornado, 2026-11-15); the ground is the card's datum (engine z 0).
+		if (S.Card.bTornado)
+		{
+			S.Tornado = MakeUnique<FFlightSimScenarioWorld>();
+			S.Tornado->World = World;
+			S.Tornado->GeoReferencing = Geo;
+			S.Tornado->SpawnTornadoMarkers(S.Card);
+		}
 		if (!S.Visual->Build(World, Options, Error)) { return false; }
 		S.Visual->ApplyIceOverlay(Aircraft);
 
@@ -587,6 +599,17 @@ namespace
 		}
 		if (!FFlightSimBeautyFallback::ApplyScene(*S.Visual, *P)) { Error = FFlightSimBeautyFallback::LastError(); return false; }
 		// The world lane's beauty-only look (atmosphere, sun transmittance, ...), as the commandlet builds it.
+		// The beauty tornado (FlightSimTornadoBeauty.cpp) with the commandlet's switches,
+		// before the world lane, as the commandlet orders it.
+		if (S.Tornado.IsValid())
+		{
+			FString TornadoLook = TEXT("vdb"), TornadoShade = TEXT("funnel");
+			FParse::Value(*P, TEXT("tornado-look="), TornadoLook);
+			FParse::Value(*P, TEXT("tornado-shade="), TornadoShade);
+			S.Tornado->TornadoLook = TornadoLook;
+			S.Tornado->TornadoShade = TornadoShade;
+			S.Tornado->BuildBeautyTornado(S.Card, S.Visual->BeautyOnlyActors, S.Visual->LookApplied);
+		}
 		if (!S.WorldBeauty->Build(World, *P, S.CardRoot, Aircraft, Geo, *S.Visual, *S.Weather, *S.Tiles, Error))
 		{
 			return false;
