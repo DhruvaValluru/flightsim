@@ -12,56 +12,51 @@
                ],
     "switches":  "",
     "prep":  [
-                 "build",
-                 "materials",
-                 "aircraft"
+
              ],
     "seconds":  {
-                    "build":  21.6,
-                    "materials":  11.7,
-                    "aircraft":  32.6,
-                    "scenes":  1322.3
+                    "scenes":  749.3
                 },
     "outcomes":  [
                      {
                          "number":  1,
                          "outcome":  "done",
-                         "seconds":  693.0,
+                         "seconds":  100.8,
                          "spec_sha256":  "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
                          "why":  "clip ready"
                      },
                      {
                          "number":  2,
                          "outcome":  "done",
-                         "seconds":  85.8,
+                         "seconds":  90.9,
                          "spec_sha256":  "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
                          "why":  "clip ready"
                      },
                      {
                          "number":  6,
                          "outcome":  "done",
-                         "seconds":  166.1,
+                         "seconds":  181.1,
                          "spec_sha256":  "c7aa2900755f69f27f63b19009a9c5f434c373cff10e038710fdd79a3f8f7251",
                          "why":  "clip ready"
                      },
                      {
                          "number":  7,
                          "outcome":  "done",
-                         "seconds":  191.7,
+                         "seconds":  191.2,
                          "spec_sha256":  "cf3697a5b8c94e5a54c30f373f30fae193d9e68ed10878f721f27d32361af7a4",
                          "why":  "clip ready"
                      },
                      {
                          "number":  8,
                          "outcome":  "done",
-                         "seconds":  106.0,
+                         "seconds":  110.8,
                          "spec_sha256":  "12d9f6f108c853765e86017db7ab96c95eb4e1fa4180a1b0299492c3d55a7345",
                          "why":  "clip ready"
                      },
                      {
                          "number":  13,
                          "outcome":  "done",
-                         "seconds":  75.9,
+                         "seconds":  70.9,
                          "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
                          "why":  "clip ready"
                      }
