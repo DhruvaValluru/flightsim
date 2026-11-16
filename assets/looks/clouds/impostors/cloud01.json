@@ -1,24 +1,24 @@
 {
-  "atlas_px": 1024,
+  "atlas_px": 2048,
   "atlases": {
     "neg": "cloud01_neg.png",
     "pos": "cloud01_pos.png"
   },
   "bounds_vdb_units": {
     "max": [
-      144.0,
-      264.0,
-      72.0
+      137.39553833007812,
+      256.4286193847656,
+      69.6609115600586
     ],
     "min": [
-      -192.0,
-      -224.0,
-      -104.0
+      -189.71597290039062,
+      -216.7827911376953,
+      -97.9414291381836
     ],
     "size": [
-      336.0,
-      488.0,
-      176.0
+      327.11151123046875,
+      473.21141052246094,
+      167.6023406982422
     ]
   },
   "calibration": "UNCALIBRATED until a Windows render is judged",
@@ -38,12 +38,34 @@
       "r": "+x"
     }
   },
+  "framing": {
+    "fraction_of_peak": 0.01,
+    "frame_fill": 0.8683146260603521,
+    "grid_bounds": {
+      "max": [
+        144.0,
+        264.0,
+        72.0
+      ],
+      "min": [
+        -192.0,
+        -224.0,
+        -104.0
+      ]
+    },
+    "margin": 0.04,
+    "method": "Volume to Mesh iso-surface sampled at the threshold (Blender's Python exposes no voxel values); peak by bisection on the surface being empty",
+    "peak_density": 0.728515625,
+    "surface_vertices": 2143116,
+    "threshold": 0.00728515625,
+    "voxel_size": 1.0
+  },
   "id": "cloud01",
   "licence": "CC0-1.0 (JangaFX EmberGen free VDB simulations: 'licensed as CC0 (Public Domain)')",
-  "light_scale": 1.0330994129180908,
+  "light_scale": 1.0307185649871826,
   "magic": "flightsim-cloud-impostor",
   "octahedral": "full sphere, grid vertices",
-  "px": 128,
+  "px": 256,
   "render": {
     "albedo": 0.99,
     "anisotropy": 0.7,
@@ -59,11 +81,11 @@
     "sun_angle_deg": 0.53,
     "volume_bounces": 24
   },
-  "scale_basis": "VDB units are EmberGen's; the engine scales each instance so the cloud's height is its layer's share (sphere_over_height sizes the quad)",
+  "scale_basis": "VDB units are EmberGen's; bounds are the density's box (above the framing threshold), sphere_radius the frame's half-side; the engine scales each instance so the cloud's height is its layer's share (sphere_over_height sizes the quad)",
   "source_sha256": "219e9afa0396388da334bf47f25f323ba21b06cfa98d2d5490a483a1a140318e",
   "source_vdb": "cloud_02_variant_0000.vdb",
-  "sphere_over_height": 3.511786529403399,
-  "sphere_radius_vdb_units": 309.03721458749914,
+  "sphere_over_height": 3.251606718144923,
+  "sphere_radius_vdb_units": 272.48844849560925,
   "version": 1,
   "views": 8
 }
