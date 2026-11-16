@@ -3809,6 +3809,9 @@ WORLD_COLLECTION_SCALARS = {
     # #02 blue (2026-11-11): the baked sky-shade neutraliser
     # (core/scene/tiles_shade_neutral.py): 0 is a pass-through.
     "ShadeNeutralAmount": 0.0,
+    # Round 147 (#06's quilted bay): open water to one mean across tile edges
+    # (core/scene/tiles_water_unify.py): 0 is a pass-through.
+    "WaterUnifyAmount": 0.0,
 }
 #: M_FlightSimCloudLayers' scalar parameters (FlightSimClouds.cpp sets each by
 #: name) with the default a material has before the render sets them, and its
@@ -3942,6 +3945,8 @@ WORLD_TILES_INPUTS = {
     "tiles_delight": ("Albedo", "AlbedoLow", "DelightAmount", "DelightRatioKnee", "DelightBlueGate"),
     # #02 blue (2026-11-11): runs right after the de-light; its output is Albedo.
     "tiles_shade_neutral": ("Albedo", "WorldPos", "ShadeNeutralAmount"),
+    # Round 147: runs right after the shade neutraliser; its output is Albedo.
+    "tiles_water_unify": ("Albedo", "AlbedoLow", "WorldPos", "WaterUnifyAmount"),
 }
 #: tiles-delight: the material's own scalar parameters (not the collection's:
 #: the render does not set them), at tiles_delight.DELIGHT_MIP_BIAS and
@@ -4143,7 +4148,7 @@ def world_stamp(material, name):
 #: so no reference breaks and no redirect is registered (the storm lane's
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
-WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "12",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail); 11: wet ground (Lekner & Dorf darkening, grazing sky mirror; detail consts static for Metal); 12: its specular AA clamp tuned to 0.02
+WORLD_GENERATIONS = {"MPC_FlightSimWorld": "5", "M_FlightSimTilesBeauty": "13",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail); 11: wet ground (Lekner & Dorf darkening, grazing sky mirror; detail consts static for Metal); 12: its specular AA clamp tuned to 0.02; 13 (MPC 5): round 147 open-water unifier (tiles_water_unify, WaterUnifyAmount)
                      "M_FlightSimCloudLayers": "13", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING; 11: sky-clouds light inputs + cloud_albedo; 12: sky-clouds2 the light moved to M_FlightSimCloudLayersLit (graph 8 again); 13: rain-grey the scattering pins from parameters (graph 11)
                      "M_FlightSimCloudLayersLit": "3",  # sky-clouds2: -look-cloud-light=on's own material; 2: no powder, the base on the AO pin (round 1426); 3: rebuilt after clear_material_graph (round 1456 two advanced outputs)
                      "M_FlightSimDistantClouds": "6",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften; 6: round-147 tops relief + sea shadow
@@ -4441,6 +4446,12 @@ def create_world_tiles_beauty():
                                      unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                                      {name: common[name] for name in WORLD_TILES_INPUTS["tiles_shade_neutral"]},
                                      -1050, -400), "")
+    # Round 147 (#06's quilted bay): open water to one mean across the tiles' edges
+    # (tiles_water_unify.hlsl; WaterUnifyAmount 0 is an exact pass-through).
+    common["Albedo"] = (world_custom(material, lib, "tiles_water_unify",
+                                     unreal.CustomMaterialOutputType.CMOT_FLOAT3,
+                                     {name: common[name] for name in WORLD_TILES_INPUTS["tiles_water_unify"]},
+                                     -1000, -500), "")
     # lane B: the terrain detail between the de-light and the grade (the
     # detailed albedo replaces Albedo; the detailed normal feeds tiles_normal).
     detail_normal = world_tiles_detail(material, lib, common, uv, factor)

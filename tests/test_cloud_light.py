@@ -259,25 +259,30 @@ def test_deck_scatter_restores_round95_on_decks_only():
     assert wb.CLOUD_DECK_SCATTER["MsContribution"] <= wb.CLOUD_DECK_SCATTER["MsOcclusion"]
     assert wb.CLOUD_LIGHT_OFF["MsContribution"] > wb.CLOUD_LIGHT_OFF["MsOcclusion"]
     for shape in SHAPES:
-        row = wb.cloud_scatter_row(False, shape)
+        row = wb.cloud_scatter_row(False, shape, "round95")
         if shape in ("overcast", "nimbostratus"):
             assert {k: row[k] for k in round95} == round95
         else:
             assert row == wb.CLOUD_LIGHT_OFF
         assert wb.cloud_scatter_row(False, shape, "beauty") == wb.CLOUD_LIGHT_OFF
+        # Round 147: the default (no word) is beauty, step 1's node on every shape.
+        assert wb.cloud_scatter_row(False, shape) == wb.CLOUD_LIGHT_OFF
+        assert wb.cloud_scatter_row(False, shape, "") == wb.CLOUD_LIGHT_OFF
         assert wb.cloud_scatter_row(True, shape) == wb.cloud_light_row(True, shape)
     assert wb.cloud_deck_scatter_applies("bogus", False, "nimbostratus") is None
-    assert wb.CLOUD_DECK_SCATTER_DEFAULT == "round95"
+    assert wb.cloud_deck_scatter_applies(None, False, "nimbostratus") is False
+    assert wb.CLOUD_DECK_SCATTER_DEFAULT == "beauty"
 
 
 def test_deck_scatter_twins_match_cpp():
     vals = _cpp_array(r"static const double Values\[LgtMsEccentricity \+ 1\] = \{([^}]*)\};")
     assert vals == [wb.CLOUD_DECK_SCATTER[f] for f in wb.CLOUD_LIGHT_FIELDS[:6]]
     assert 'std::strcmp(Word, "round95") == 0) { return 1; }' in PURE
-    assert 'std::strcmp(Word, "beauty") == 0) { return 0; }' in PURE
+    # Round 147: no word is beauty (0), the Python default.
+    assert "Word[0] == '\\0' || std::strcmp(Word, \"beauty\") == 0) { return 0; }" in PURE
     assert "(Cloud == CloudOvercast || Cloud == CloudNimbostratus)" in PURE
-    assert 'FString CloudDeckScatterSwitch = TEXT("round95");' in HDR
-    assert 'TEXT("cloud-deck-scatter="), CloudDeckScatterSwitch' in CPP
+    assert 'FString CloudDeckScatterSwitch = TEXT("beauty");' in HDR
+    assert 'CloudDeckScatterSwitch = TEXT("beauty");\n\t\tFParse::Value(*Switches, TEXT("cloud-deck-scatter="), CloudDeckScatterSwitch' in CPP
     body = CPP[CPP.index("CloudLightRow(bLight, State.Shape, LightRow);"):]
     assert body.index("CloudDeckScatterRow(bDeckScatter, LightRow);") < body.index("SetScalarParameterValue(FName(ANSI_TO_TCHAR(CloudLightFieldName(F)))")
 

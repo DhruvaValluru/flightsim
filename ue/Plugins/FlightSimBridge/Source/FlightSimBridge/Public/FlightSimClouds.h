@@ -308,7 +308,7 @@ private:
 	FString CloudMaterialSwitch = TEXT("ours");
 	// Lane rain-grey: -cloud-deck-scatter=round95|beauty (a deck's scattering node:
 	// FlightSimWorldPure::CloudDeckScatterRow; beauty is sky step 1's on every shape).
-	FString CloudDeckScatterSwitch = TEXT("round95");
+	FString CloudDeckScatterSwitch = TEXT("beauty");   // round 147: beauty by default
 	// Round 147 (r146 #13): -look-sheet-tops=on|off (the distant sheet's tops seen from
 	// above and their shadows on the sea) and -look-high-ap=on|off; on by default.
 	FString SheetTopsSwitch = TEXT("on");
@@ -318,6 +318,9 @@ private:
 	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)
 	// for the A/B. Anything but "off" draws as "on".
 	FString TilesShadeSwitch = TEXT("on");
+	// Round 147: -tiles-water-unify=on|off|<0..1>, on by default; off sets
+	// WaterUnifyAmount 0 (tiles_water_unify.hlsl's exact pass-through) for the A/B.
+	FString TilesWaterSwitch = TEXT("on");
 	int32 Preset = 0;
 	// The tables in force (the pure block's defaults, then the overrides).
 	TArray<double> AtmosphereValues;   // PresetCount x AtmosphereFieldCount

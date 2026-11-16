@@ -116,6 +116,24 @@ VEIL_SHADE_OPEN = 1.0
 #: Round 26 (#07's flat grey field): the veil varied by falling curtains, x (1 +
 #: VEIL_VARY x (2n - 1)) over a smooth noise a fifth of the shell's radius across.
 VEIL_VARY = 0.6
+#: Round 147 (2026-11-16; Windows r146 / r14622 #07 "tower view, heavy rain, 250 mm": still
+#: a flat uniform grey wall, mean luma 0.121 / 0.227, std 0.014). Why the curtains never
+#: showed: the veil's colour is the luminance of the scene behind it x Shade, so over a
+#: uniform deck a denser or thinner curtain of the SAME grey changes nothing; only
+#: Shade != 1 makes curtain structure or a streak visible. Each shell now has its own
+#: tone and curtain contrast (x VEIL_DEPTH_SHADE on veil_shade, VEIL_DEPTH_VARY for
+#: VEIL_VARY): the NEAR shell lighter (a drop images nearly the whole sky; under an
+#: overcast the CIE law L ~ 1 + 2 sin(elevation) makes that hemisphere brighter than
+#: the deck at the view's 20-30 deg, so near streaks read light on grey), the FAR shell
+#: darker with more contrast (dense distant curtains hang as grey shafts against the
+#: deck base), the middle as before. Three depths, three tones: layered rain. Beauty
+#: only (the veil is a BeautyOnlyActor). ``-rain-depth=off`` is the A/B (every shell
+#: veil_shade and VEIL_VARY: generation 6 exactly). UNCALIBRATED.
+VEIL_DEPTH_SHADE: Tuple[float, float, float] = (1.3, 1.0, 0.85)
+VEIL_DEPTH_VARY: Tuple[float, float, float] = (0.6, 0.6, 0.9)
+RAIN_DEPTH_SWITCH = "-rain-depth"
+RAIN_DEPTH_WORDS: Tuple[str, ...] = ("on", "off")
+RAIN_DEPTH_DEFAULT = "on"
 #: Round 47 (round 44's #07 still a flat grey field): the curtain cells are an ANGLE
 #: (a fifth of the radius across, 0.8 tall: 11.3 x 38.7 deg at every shell), so through
 #: #07's 250 mm lens (8.2 x 4.6 deg) one cell covered the frame and the veil was one
@@ -300,6 +318,17 @@ def veil_shade(deck_above: bool) -> float:
     """The veil's and the scud's base-colour scale: VEIL_SHADE_UNDER_DECK under a drawn
     deck, VEIL_SHADE_OPEN otherwise."""
     return VEIL_SHADE_UNDER_DECK if deck_above else VEIL_SHADE_OPEN
+
+
+def shell_shade(shell: int, deck_above: bool, depth: bool = True) -> float:
+    """One curtain shell's Shade (FlightSimWeather.cpp ApplyBeautyRainVeil's ShellShade):
+    veil_shade x VEIL_DEPTH_SHADE[shell] with -rain-depth on, veil_shade with it off."""
+    return veil_shade(deck_above) * (VEIL_DEPTH_SHADE[shell] if depth else 1.0)
+
+
+def shell_vary(shell: int, depth: bool = True) -> float:
+    """One curtain shell's VeilVary: VEIL_DEPTH_VARY[shell] with -rain-depth on, else VEIL_VARY."""
+    return VEIL_DEPTH_VARY[shell] if depth else VEIL_VARY
 
 
 def streak_cap_rad(max_streak_rad: float, pixel_angle_rad: float) -> float:

@@ -413,6 +413,11 @@ namespace FlightSimRainVeil
 	constexpr double VeilShadeUnderDeck = 0.85;
 	constexpr double VeilShadeOpen = 1.0;
 	constexpr double VeilVary = 0.6;
+	// Round 147 (#07, r146 / r14622: a flat grey wall at 250 mm): each shell its own tone
+	// and curtain contrast (rain_veil.VEIL_DEPTH_SHADE / VEIL_DEPTH_VARY), -rain-depth=off
+	// the A/B (every shell VeilShade and VeilVary, generation 6 exactly).
+	constexpr double VeilDepthShade[3] = {1.3, 1.0, 0.85};
+	constexpr double VeilDepthVary[3] = {0.6, 0.6, 0.9};
 	// Round 47: the curtain cells' scale is never above this (the wide-lens cells).
 	constexpr double VeilVaryScaleMax = 1.0;
 	// Round 82 (r69's #15 black blotches; rain_veil.SCUD_TONE_*): grey rags, not holes.
@@ -572,8 +577,11 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 		const double Inner = Shell > 0 ? Radii[Shell - 1] : 0.0;
 		const double Veil = ShellVeilAlpha(RainRateMmh, Inner, Radii[Shell]);
 		Material->SetScalarParameterValue(TEXT("Radius"), static_cast<float>(R));
-		Material->SetScalarParameterValue(TEXT("Shade"), static_cast<float>(VeilShade));
-		Material->SetScalarParameterValue(TEXT("VeilVary"), static_cast<float>(VeilVary));
+		// Round 147: the shell's own tone and curtain contrast (VeilDepthShade / VeilDepthVary).
+		const double ShellShade = VeilShade * (bBeautyRainDepth ? VeilDepthShade[Shell] : 1.0);
+		const double ShellVary = bBeautyRainDepth ? VeilDepthVary[Shell] : VeilVary;
+		Material->SetScalarParameterValue(TEXT("Shade"), static_cast<float>(ShellShade));
+		Material->SetScalarParameterValue(TEXT("VeilVary"), static_cast<float>(ShellVary));
 		Material->SetScalarParameterValue(TEXT("StreakDensity"), static_cast<float>(StreakDensity(RainRateMmh)));
 		Material->SetScalarParameterValue(TEXT("StreakAlpha"), static_cast<float>(VeilStreakAlpha));
 		Material->SetScalarParameterValue(TEXT("Veil"), static_cast<float>(Veil));
@@ -586,6 +594,8 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 		TSharedPtr<FJsonObject> ShellRow = WeatherRecord();
 		ShellRow->SetNumberField(TEXT("radius_m"), Radii[Shell]);
 		ShellRow->SetNumberField(TEXT("veil"), Veil);
+		ShellRow->SetNumberField(TEXT("shade"), ShellShade);
+		ShellRow->SetNumberField(TEXT("vary"), ShellVary);
 		Shells.Add(MakeShared<FJsonValueObject>(ShellRow));
 	}
 	Row->SetArrayField(TEXT("curtain_shells"), Shells);
@@ -593,6 +603,12 @@ bool FFlightSimWeather::ApplyBeautyRainVeil(UWorld* World, const FVector& Aircra
 	Row->SetNumberField(TEXT("extinction_per_km"), RainExtinctionPerKm(RainRateMmh));
 	Row->SetNumberField(TEXT("streak_density"), StreakDensity(RainRateMmh));
 	Row->SetBoolField(TEXT("vary_lens_cells"), bBeautyVeilLensCells);
+	Row->SetBoolField(TEXT("rain_depth"), bBeautyRainDepth);
+	Row->SetStringField(TEXT("rain_depth_basis"), bBeautyRainDepth
+		? TEXT("round 147: near shell lighter (x1.3: a drop images the whole overcast hemisphere, brighter than the "
+		       "sky at the view's elevation), far shell darker shafts (x0.85, curtain contrast 0.9) against the deck; "
+		       "-rain-depth=off is the A/B")
+		: TEXT("-rain-depth=off: every shell VeilShade and VeilVary (generation 6)"));
 	Row->SetStringField(TEXT("vary_lens_cells_basis"), bBeautyVeilLensCells
 		? TEXT("round 47: the falling-curtain cells x min(1, pixel angle / 2 tan(27 deg) / 1280) per frame "
 		       "(VaryScale; #07's 250 mm lens drew one cell wider than the frame); -veil-lens-cells=off is the A/B")
