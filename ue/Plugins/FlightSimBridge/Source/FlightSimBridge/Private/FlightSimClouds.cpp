@@ -781,8 +781,9 @@ namespace FlightSimWorldPure
 	{
 		return bBillowOn && !bLightOn;
 	}
-	// Lane rain-grey (2026-11-16): -cloud-deck-scatter=round95|beauty (round95 by
-	// default). Sky step 1 baked CloudScattering (contribution 0.7, occlusion 0.25,
+	// Lane rain-grey (2026-11-16): -cloud-deck-scatter=round95|beauty (beauty by
+	// default since round 147: Windows r146's #06 drew round95's deck near black,
+	// luma 0.068 against beauty's 0.133 in r14622). Sky step 1 baked CloudScattering (contribution 0.7, occlusion 0.25,
 	// eccentricity 0.4, g 0.85 / -0.3 / 0.3) into M_FlightSimCloudLayers for EVERY
 	// shape. Those octave constants break Wrenninge 2013's energy condition
 	// (contribution <= occlusion): octave 1 sees the sun through exp(-0.25 tau) and
@@ -800,8 +801,9 @@ namespace FlightSimWorldPure
 	// Only with -look-cloud-light=off (on has its own row). Beauty only.
 	inline int CloudDeckScatterFor(const char* Word)
 	{
-		if (Word == nullptr || Word[0] == '\0' || std::strcmp(Word, "round95") == 0) { return 1; }
-		if (std::strcmp(Word, "beauty") == 0) { return 0; }
+		// Round 147: no word is the default, beauty (r146 #06: round95's deck drew near black).
+		if (Word == nullptr || Word[0] == '\0' || std::strcmp(Word, "beauty") == 0) { return 0; }
+		if (std::strcmp(Word, "round95") == 0) { return 1; }
 		return -1;
 	}
 	inline bool CloudDeckScatterApplies(bool bRound95, bool bLightOn, int Cloud)
@@ -2007,6 +2009,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// (FlightSimTilesShade; ApplyTiles sets ShadeNeutralAmount from it).
 		TilesShadeSwitch = TEXT("on");
 		FParse::Value(*Switches, TEXT("tiles-shade-neutral="), TilesShadeSwitch);
+		// Round 147 (#06's quilted bay): -tiles-water-unify=on|off|<0..1>, on by default
+		// (FlightSimTilesWater; ApplyTiles sets WaterUnifyAmount from it).
+		TilesWaterSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("tiles-water-unify="), TilesWaterSwitch);
 		// Round 52: -look-cloud-tiers=on|off (on by default): the cloud
 		// material's shadow-sample footprint (CloudShadowFootprintPerSqrtKm) and
 		// side bulge (CloudSideBulgeFor); off is round 51's clouds exactly.
@@ -2060,7 +2066,7 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		CloudLightSwitch = TEXT("off");
 		FParse::Value(*Switches, TEXT("look-cloud-light="), CloudLightSwitch);
 		// Lane rain-grey: -cloud-deck-scatter=round95|beauty (CloudDeckScatterFor).
-		CloudDeckScatterSwitch = TEXT("round95");
+		CloudDeckScatterSwitch = TEXT("beauty");
 		FParse::Value(*Switches, TEXT("cloud-deck-scatter="), CloudDeckScatterSwitch);
 		CloudMaterialSwitch = TEXT("ours");
 		FParse::Value(*Switches, TEXT("cloud-material="), CloudMaterialSwitch);
@@ -2282,6 +2288,20 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		return false;
 	}
 	Weather.SetBeautyVeilLensCells(VeilLensCellsSwitch == TEXT("on"));
+	// Round 147 (#07's flat grey wall): -rain-depth=on|off, on by default: each curtain
+	// shell its own tone and contrast (FlightSimRainVeil::VeilDepthShade / VeilDepthVary).
+	FString RainDepthSwitch = TEXT("on");
+	{
+		const FString Switches = FString(Params != nullptr ? Params : TEXT("")) + TEXT(" ")
+			+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+		FParse::Value(*Switches, TEXT("rain-depth="), RainDepthSwitch);
+	}
+	if (RainDepthSwitch != TEXT("on") && RainDepthSwitch != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.rain_veil: -rain-depth=%s is not on or off"), *RainDepthSwitch);
+		return false;
+	}
+	Weather.SetBeautyRainDepth(RainDepthSwitch == TEXT("on"));
 
 	// -- what the card says --------------------------------------------------
 	// Key by key (WorldLookValue; world_beauty.card_inputs is the Python twin):
@@ -3314,8 +3334,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			                     "build (graph generation %d); the storm's M_StormCell keeps STORM_SCATTERING"),
 			                CloudGraphGeneration));
 		Scattering->SetStringField(TEXT("deck_shapes"),
-			TEXT("graph 11: these are the six pins' parameter defaults; -cloud-deck-scatter=round95 (the default) "
-			     "sets overcast and nimbostratus layers to round 95's STORM_SCATTERING (layers[].cloud_light_row)"));
+			TEXT("graph 11: these are the six pins' parameter defaults; -cloud-deck-scatter=round95 (the A/B; beauty is "
+			     "the default since round 147) sets overcast and nimbostratus layers to round 95's STORM_SCATTERING (layers[].cloud_light_row)"));
 		MaterialOut->SetObjectField(TEXT("scattering"), Scattering);
 		TSharedPtr<FJsonObject> Aliases = MakeShared<FJsonObject>();
 		for (int32 F = 0; F < CloudOwnerAliasCount; ++F)
@@ -4609,6 +4629,53 @@ namespace FlightSimTilesShade
 	}
 }
 
+// Round 147 (2026-11-16, #06's quilted bay): open water on the tiles moved from each
+// tile's own mean colour to one WaterMean (assets/shaders/world/tiles_water_unify.hlsl;
+// Python twin core/scene/tiles_water_unify.py, whose WATER_UNIFY_DEFAULTS
+// tests/test_tiles_water_unify.py pins to the numbers below). BEAUTY ONLY: only
+// FFlightSimWorldBeauty::ApplyTiles sets WaterUnifyAmount. UNCALIBRATED.
+namespace FlightSimTilesWater
+{
+	// WaterUnifyAmount per FlightSimWorldPure preset: clear, hazy, overcast, rain, storm.
+	constexpr double WaterUnifyAmounts[FlightSimWorldPure::PresetCount] = {0.0, 0.0, 1.0, 1.0, 1.0};
+
+	inline double PresetAmount(int32 Preset)
+	{
+		return Preset >= 0 && Preset < FlightSimWorldPure::PresetCount ? WaterUnifyAmounts[Preset] : 0.0;
+	}
+
+	// -tiles-water-unify=off is 0; a number is the amount itself (0..1); else the preset's.
+	inline double AmountFor(int32 Preset, const FString& Switch)
+	{
+		if (Switch == TEXT("off"))
+		{
+			return 0.0;
+		}
+		if (!Switch.IsEmpty() && FCString::IsNumeric(*Switch))
+		{
+			return FMath::Clamp(FCString::Atod(*Switch), 0.0, 1.0);
+		}
+		return PresetAmount(Preset);
+	}
+
+	// render.json world_beauty.tiles.water_unify.
+	TSharedPtr<FJsonObject> WaterRecord(int32 Preset, const FString& Switch)
+	{
+		TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+		Out->SetNumberField(TEXT("amount"), AmountFor(Preset, Switch));
+		Out->SetNumberField(TEXT("preset_amount"), PresetAmount(Preset));
+		Out->SetStringField(TEXT("switch"), Switch == TEXT("off") ? FString(TEXT("off"))
+			: (!Switch.IsEmpty() && FCString::IsNumeric(*Switch)) ? Switch : FString(TEXT("on")));
+		Out->SetStringField(TEXT("basis"),
+			TEXT("open water (a level face, dark blue-or-teal local mean, little texture contrast) moved from its "
+			     "tile's own mean colour to one WATER_MEAN, keeping its luma ratio to that mean; shader per frame, "
+			     "nothing stored (Google tile policy)"));
+		Out->SetBoolField(TEXT("pixel_moving"), false);
+		Out->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED"));
+		return Out;
+	}
+}
+
 void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Tiles, double CardWetness,
                                        double SunElevationDeg)
 {
@@ -4667,6 +4734,8 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 			{TEXT("TerrainDetailScale"), Surface == TEXT("city") ? 0.0 : 1.0},
 			// #02 blue: the baked sky-shade neutraliser (FlightSimTilesShade above).
 			{TEXT("ShadeNeutralAmount"), FlightSimTilesShade::AmountFor(Preset, Surface, TilesShadeSwitch, SunElevationDeg)},
+			// Round 147: open water to one mean across tile edges (FlightSimTilesWater above).
+			{TEXT("WaterUnifyAmount"), FlightSimTilesWater::AmountFor(Preset, TilesWaterSwitch)},
 		};
 		for (const FWorldScalar& Scalar : Scalars)
 		{
@@ -4700,6 +4769,7 @@ void FFlightSimWorldBeauty::ApplyTiles(UWorld* World, FFlightSimGoogleTiles& Til
 	Out->SetObjectField(TEXT("delight"), FlightSimTilesDelight::DelightRecord(Preset));   // tiles-delight hook
 	Out->SetObjectField(TEXT("shade_neutral"),                                            // #02 blue
 		FlightSimTilesShade::ShadeRecord(Preset, Surface, TilesShadeSwitch, SunElevationDeg));
+	Out->SetObjectField(TEXT("water_unify"), FlightSimTilesWater::WaterRecord(Preset, TilesWaterSwitch));   // round 147
 	Out->SetStringField(TEXT("wetness_basis"), TEXT("max(the card's wetness, the preset's wetness_floor)"));
 	Out->SetStringField(TEXT("rule"),
 		TEXT("the tiles stay the ground of every terrain render (the owner's rule); this changes their shading only"));

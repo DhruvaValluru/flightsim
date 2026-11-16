@@ -34,7 +34,7 @@ import math
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from . import tiles_delight, tiles_shade_neutral
+from . import tiles_delight, tiles_shade_neutral, tiles_water_unify
 from .rain_field import MASK64, splitmix64, unit
 from .weather_look import STORMS
 
@@ -1142,8 +1142,8 @@ def cloud_light_row(light_on: bool, shape: str) -> Dict[str, float]:
             "BaseRise": CLOUD_LIGHT_BASE_RISE.get(shape, CLOUD_LIGHT_OFF["BaseRise"])}
 
 
-#: Lane rain-grey (2026-11-16): ``-cloud-deck-scatter=round95|beauty`` (round95 by
-#: default). Sky step 1 baked CLOUD_SCATTERING (octaves 0.7 / 0.25 / 0.4) into the
+#: Lane rain-grey (2026-11-16): ``-cloud-deck-scatter=round95|beauty`` (beauty by
+#: default since round 147; round95 was the default at 9ef62483). Sky step 1 baked CLOUD_SCATTERING (octaves 0.7 / 0.25 / 0.4) into the
 #: beauty cloud for EVERY shape. Wrenninge et al. 2013's multiple-scattering octaves
 #: conserve energy only with contribution <= occlusion; 0.7 > 0.25 adds light, and
 #: the excess grows with the optical depth: octave 1 sees the sun through
@@ -1157,18 +1157,28 @@ def cloud_light_row(light_on: bool, shape: str) -> Dict[str, float]:
 #: at 40c95c10); cumulus, stratocumulus and altocumulus keep step 1's. ``beauty``
 #: is step 1's on every shape. Only with -look-cloud-light=off. C++ twin:
 #: FlightSimWorldPure::CloudDeckScatterFor / CloudDeckScatterApplies / CloudDeckScatterRow.
+#: Round 147 (2026-11-16, Windows r146 at 9ef62483 against r14622 with
+#: -cloud-deck-scatter=beauty): round95 drew #06's nimbostratus underside near black
+#: (sRGB ~20/22/40, frame luma 0.068: "a too dark band across the top"); beauty drew it
+#: an overcast mid grey (luma 0.133) with the far sheet's edge softer, and #07's heavy
+#: rain went 0.121 -> 0.227, the bright grey of a rain sky seen from the ground (its
+#: streaks and depth are now the rain veil's per-shell tone, rain_veil.VEIL_DEPTH_*).
+#: The default is now ``beauty``; ``round95`` stays the A/B word.
 CLOUD_DECK_SCATTER_SWITCH = "-cloud-deck-scatter"
 CLOUD_DECK_SCATTER_WORDS: Tuple[str, ...] = ("round95", "beauty")
-CLOUD_DECK_SCATTER_DEFAULT = "round95"
+CLOUD_DECK_SCATTER_DEFAULT = "beauty"
 CLOUD_DECK_SCATTER_SHAPES: Tuple[str, ...] = ("overcast", "nimbostratus")
 CLOUD_DECK_SCATTER: Dict[str, float] = {"PhaseG": 0.8, "PhaseG2": -0.5, "PhaseBlend": 0.5, "MsContribution": 0.5,
                                         "MsOcclusion": 0.5, "MsEccentricity": 0.5}
 
 
 def cloud_deck_scatter_applies(word: Optional[str], light_on: bool, shape: str) -> Optional[bool]:
-    """Whether a layer takes CLOUD_DECK_SCATTER: ``round95`` (or no word) on a deck
-    shape with the light off; None for a word the switch does not know."""
-    if word is None or word == "" or word == "round95":
+    """Whether a layer takes CLOUD_DECK_SCATTER: ``round95`` on a deck shape with the
+    light off; no word is CLOUD_DECK_SCATTER_DEFAULT (``beauty``: never); None for a
+    word the switch does not know."""
+    if word is None or word == "":
+        word = CLOUD_DECK_SCATTER_DEFAULT
+    if word == "round95":
         return (not light_on) and shape in CLOUD_DECK_SCATTER_SHAPES
     if word == "beauty":
         return False
@@ -2075,6 +2085,9 @@ WORLD_MPC_SCALARS: Dict[str, float] = {
     # #02 blue (2026-11-11): the baked sky-shade neutraliser
     # (core/scene/tiles_shade_neutral.py): 0 is a pass-through.
     "ShadeNeutralAmount": 0.0,
+    # Round 147 (#06's quilted bay): open water to one mean across tile edges
+    # (core/scene/tiles_water_unify.py): 0 is a pass-through.
+    "WaterUnifyAmount": 0.0,
 }
 #: How much of the wetness becomes standing water on flat ground. UNCALIBRATED.
 #: (FlightSimClouds.cpp PuddleShareDefault pins the same 0.5.)
@@ -2164,7 +2177,8 @@ def tiles_dehaze(albedo: Sequence[float], dehaze: float = TILES_DEHAZE) -> Tuple
 
 
 def tiles_parameters(preset: str, card_wetness: float, surface: str = "",
-                     shade_switch: str = tiles_shade_neutral.SWITCH_DEFAULT) -> Dict[str, float]:
+                     shade_switch: str = tiles_shade_neutral.SWITCH_DEFAULT,
+                     water_switch: str = tiles_water_unify.SWITCH_DEFAULT) -> Dict[str, float]:
     """The collection's values for a preset and the card's wetness (the larger
     of the card's and the preset's floor). ``surface`` is the card's surface
     word and ``shade_switch`` the -tiles-shade-neutral= switch (the baked
@@ -2180,7 +2194,9 @@ def tiles_parameters(preset: str, card_wetness: float, surface: str = "",
                 "DelightBlueGate": tiles_delight.DELIGHT_BLUE_GATE,
                 "TerrainDetailScale": 0.0 if surface == "city" else 1.0,
                 # #02 blue: the preset's amount, 0 over a city or with the switch off.
-                "ShadeNeutralAmount": tiles_shade_neutral.amount_for(preset, surface, shade_switch)})
+                "ShadeNeutralAmount": tiles_shade_neutral.amount_for(preset, surface, shade_switch),
+                # round 147: open water unified across tile edges (-tiles-water-unify=).
+                "WaterUnifyAmount": tiles_water_unify.amount_for(preset, water_switch)})
     return out
 
 

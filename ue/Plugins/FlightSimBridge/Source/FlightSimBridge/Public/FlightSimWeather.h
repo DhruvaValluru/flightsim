@@ -366,6 +366,9 @@ public:
 	// angle (off). -veil-lens-cells=on|off / FLIGHTSIM_RENDER_SWITCHES; set before
 	// ApplyBeautyRainVeil (rain_veil.veil_vary_scale is the Python twin).
 	void SetBeautyVeilLensCells(bool bOn) { bBeautyVeilLensCells = bOn; }
+	// Round 147: the curtain shells' own tone and contrast (on) or one VeilShade /
+	// VeilVary for all three (off). -rain-depth=on|off / FLIGHTSIM_RENDER_SWITCHES.
+	void SetBeautyRainDepth(bool bOn) { bBeautyRainDepth = bOn; }
 	static double VeilVaryScale(double PixelAngle, bool bLensCells);
 
 	// Every registered volumetric cloud in the world checked the way the
@@ -524,6 +527,7 @@ private:
 	TArray<UMaterialInstanceDynamic*> VeilShellMaterials;
 	TArray<double> VeilShellRadiiM;
 	bool bBeautyVeilLensCells = true;
+	bool bBeautyRainDepth = true;   // round 147: -rain-depth=on by default
 	AActor* ScudActor = nullptr;
 	UProceduralMeshComponent* ScudMesh = nullptr;
 	UMaterialInstanceDynamic* ScudMaterial = nullptr;

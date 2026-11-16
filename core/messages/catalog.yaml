@@ -424,7 +424,7 @@ render.measure_cover:
 # -- lane D (visual round 7): the beauty rain veil and the storm selection ----
 world_beauty.rain_veil:
   sentence: "The rain-veil switch was given a value it does not take."
-  hint: "Use -rain-veil=on or off (or FLIGHTSIM_RAIN_VEIL); or leave it out to draw the rain veil as planned."
+  hint: "Use -rain-veil=on or off (or FLIGHTSIM_RAIN_VEIL), -veil-lens-cells=on or off, -rain-depth=on or off; or leave them out to draw the rain veil as planned."
 weather.rain_veil:
   sentence: "A material the beauty rain veil needs is not built on this machine."
   hint: "Run the material script in the editor (it builds the rain curtain and scud materials), or render with -rain-veil=off."
