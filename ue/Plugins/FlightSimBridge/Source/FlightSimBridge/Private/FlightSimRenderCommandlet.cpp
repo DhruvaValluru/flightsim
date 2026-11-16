@@ -6452,9 +6452,34 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				Sibling->PostProcessSettings.AutoExposureBias = MeterSettings.AutoExposureBias;
 			}
 		}
+		// fix-scene8 cost (2026-11-16): the clear-sky guard runs on every clear
+		// beauty render; when it is close-only and changed nothing (Opened 0,
+		// no stop applied) the warm-up's history already sits at the kept
+		// exposure, so the settle captures are skipped (the iGPU is at the TDR
+		// edge). A REDUCED meter (-meter-res) left that history at the reduced
+		// size: the skip then needs a still ahead (frame 0 is a camera cut and
+		// its sub-frames accumulate that pose only, below), and the next capture
+		// is flagged a cut anyway; a reduced clip keeps the settle. Full size is
+		// restored above either way. MeterDeliveredFrames is DeliveredFrames'
+		// count (below), from the same inputs.
+		const int32 MeterDeliveredFrames = bConsumePoses
+			? CaptureTimes.Num()
+			: (FMath::RoundToInt((SecondsOverride > 0.0 ? FMath::Min(SecondsOverride, Card.DurationSeconds)
+			                                             : Card.DurationSeconds) * Card.RateHz)
+			   + FMath::Max(1, FMath::RoundToInt(Card.RateHz / FramesPerSecond)) - 1)
+			  / FMath::Max(1, FMath::RoundToInt(Card.RateHz / FramesPerSecond));
+		const bool bMeterUnchanged = bMeterCloseOnly && !bMeterClosed && FMath::IsNearlyZero(Opened);
+		const bool bSkipMeterSettle = bMeterUnchanged &&
+			(!bStormMeterReduced || MeterDeliveredFrames <= RenderBeautyStillMaxFrames);
+		if (bSkipMeterSettle && bStormMeterReduced)
+		{
+			Capture->bCameraCutThisFrame = true;   // the reduced history is not this size
+		}
+		UE_LOG(LogFlightSimRender, Display, TEXT("exposure meter: settle %s"),
+		       bSkipMeterSettle ? TEXT("skipped (close-only guard, nothing changed)") : TEXT("runs"));
 		// The temporal history converges on the exposure the clip keeps
 		// before frame 0, as the warm-up did for the look's.
-		for (int32 i = 0; i < StormMeterSettleCaptures; ++i)
+		for (int32 i = 0; i < (bSkipMeterSettle ? 0 : StormMeterSettleCaptures); ++i)
 		{
 			World->SendAllEndOfFrameUpdates();
 			FlushRenderingCommands();
@@ -6486,6 +6511,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		MeterRow->SetNumberField(TEXT("bias_before"), BiasBefore);
 		MeterRow->SetNumberField(TEXT("bias_after"), MeterSettings.AutoExposureBias);
 		MeterRow->SetNumberField(TEXT("rounds"), Rounds);
+		MeterRow->SetNumberField(TEXT("settle_captures"), bSkipMeterSettle ? 0 : StormMeterSettleCaptures);
 		if (bStormMeterReduced)
 		{
 			MeterRow->SetNumberField(TEXT("meter_res_divisor"), MeterResDivisor);

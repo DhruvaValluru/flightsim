@@ -727,6 +727,24 @@ def frame_meter_step(p90: float, opened: float, target_p90: float,
     return 0.0 if abs(nxt - opened) < 0.01 else nxt - opened
 
 
+#: The host's StormMeterSettleCaptures and RenderBeautyStillMaxFrames, twins pinned by test.
+FRAME_METER_SETTLE_CAPTURES = 4
+BEAUTY_STILL_MAX_FRAMES = 1
+
+
+def frame_meter_settle_captures(close_only: bool, opened: float, closed: bool,
+                                reduced: bool, delivered_frames: int) -> int:
+    """The settle captures the host runs after the frame meter (the twin of
+    bSkipMeterSettle, FlightSimRenderCommandlet.cpp). The clear-sky guard that
+    changed nothing (close-only, ``opened`` 0, never ``closed``) skips them: the
+    warm-up's history already sits at the kept exposure. A ``reduced``
+    (-meter-res) meter left that history at the reduced size, so the skip there
+    needs a still ahead (frame 0 is a camera cut); a reduced clip settles."""
+    unchanged = close_only and not closed and abs(opened) < 1e-8
+    skip = unchanged and (not reduced or delivered_frames <= BEAUTY_STILL_MAX_FRAMES)
+    return 0 if skip else FRAME_METER_SETTLE_CAPTURES
+
+
 def subject_meter_step(p50: float, p97: float, frame_p90: float, stops: float) -> float:
     """One subject-meter step in stops (0 = settled): the twin of the host's
     SubjectMeterStep. ``p50``/``p97`` are the aircraft's sRGB luma

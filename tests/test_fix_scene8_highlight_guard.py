@@ -91,3 +91,58 @@ def test_the_commandlet_meter_only_closes_for_the_guard():
     assert loop[loop.index("if (bMeterCloseOnly && !bBlown)"):].index("break;") < 400
     assert 'Guard->SetBoolField(TEXT("close_only"), bMeterCloseOnly);' in CMD_CPP
     assert 'MeterTrigger == TEXT("clear_highlight_guard")) { break; }' in LOOKDEV_CPP
+
+
+# -- the settle captures: skipped when the close-only guard changed nothing ----
+
+@pytest.mark.parametrize("close_only,opened,closed,reduced,frames,want", [
+    (True, 0.0, False, False, 1, 0),      # clear sky, nothing clips: no settle
+    (True, 0.0, False, False, 120, 0),    # a full-size clip: the history is the warm-up's
+    (True, 0.0, False, True, 1, 0),       # reduced still: frame 0 is a camera cut
+    (True, 0.0, False, True, 120, 4),     # reduced clip: the history must regrow at full size
+    (True, -1.5, True, False, 1, 4),      # the guard closed a clipping frame
+    (False, 0.0, False, False, 1, 4),     # any other meter keeps its settle
+])
+def test_the_settle_is_skipped_only_when_the_guard_changed_nothing(close_only, opened, closed,
+                                                                  reduced, frames, want):
+    assert bl.frame_meter_settle_captures(close_only, opened, closed, reduced, frames) == want
+
+
+def test_the_settle_skip_host_matches_the_twin():
+    assert f"constexpr int32 StormMeterSettleCaptures = {bl.FRAME_METER_SETTLE_CAPTURES};" in CMD_CPP
+    assert f"constexpr int32 RenderBeautyStillMaxFrames = {bl.BEAUTY_STILL_MAX_FRAMES};" in CMD_CPP
+    block = CMD_CPP[CMD_CPP.index("StormMeterOpened = Opened;"):]
+    block = block[:block.index('UE_LOG(LogFlightSimRender, Display, TEXT("exposure meter: settled"));')]
+    assert ("const bool bMeterUnchanged = bMeterCloseOnly && !bMeterClosed && "
+            "FMath::IsNearlyZero(Opened);") in block
+    assert "(!bStormMeterReduced || MeterDeliveredFrames <= RenderBeautyStillMaxFrames)" in block
+    assert "i < (bSkipMeterSettle ? 0 : StormMeterSettleCaptures)" in block
+    # full size is restored before the settle decision, whatever it is
+    assert block.index('SetMeterRes(false, TEXT("the exposure meter\'s settle captures"));') < \
+        block.index("bSkipMeterSettle")
+    # a skipped reduced meter still flags the next capture a camera cut
+    skip = block[block.index("if (bSkipMeterSettle && bStormMeterReduced)"):]
+    assert skip.index("Capture->bCameraCutThisFrame = true;") < 120
+    # the settle loop's own cut stays for a reduced meter that settles
+    assert "if (bStormMeterReduced && i == 0)" in block
+    # the frames path still restores full size and a still starts from a cut
+    assert 'SetMeterRes(false, TEXT("the frames"));' in CMD_CPP
+    assert "const bool bBeautyStill = bBeautyRaster && DeliveredFrames <= RenderBeautyStillMaxFrames;" in CMD_CPP
+    assert 'MeterRow->SetNumberField(TEXT("settle_captures"), bSkipMeterSettle ? 0 : StormMeterSettleCaptures);' \
+        in CMD_CPP
+
+
+def test_the_settle_frame_count_is_delivered_frames():
+    """MeterDeliveredFrames is DeliveredFrames' count, from the same inputs."""
+    later = CMD_CPP[CMD_CPP.index("const int32 DeliveredFrames = bConsumePoses"):][:200]
+    assert "? CaptureTimes.Num()" in later
+    assert "(Steps + StepsPerFrame - 1) / StepsPerFrame" in later
+    assert "const double Duration = SecondsOverride > 0.0" in CMD_CPP
+    assert "? FMath::Min(SecondsOverride, Card.DurationSeconds)" in CMD_CPP
+    assert "const int32 Steps = FMath::RoundToInt(Duration * Card.RateHz);" in CMD_CPP
+    assert ("const int32 StepsPerFrame = FMath::Max(1, FMath::RoundToInt(Card.RateHz / FramesPerSecond));"
+            in CMD_CPP)
+    early = CMD_CPP[CMD_CPP.index("const int32 MeterDeliveredFrames = bConsumePoses"):][:500]
+    assert "SecondsOverride > 0.0 ? FMath::Min(SecondsOverride, Card.DurationSeconds)" in early
+    assert "* Card.RateHz)" in early
+    assert early.count("FMath::Max(1, FMath::RoundToInt(Card.RateHz / FramesPerSecond))") == 2
