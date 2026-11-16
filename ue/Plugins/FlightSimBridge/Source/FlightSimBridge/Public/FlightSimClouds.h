@@ -240,6 +240,10 @@ private:
 	// resolves it through FlightSimWorldPure::SkyMultiScatterFor; another word
 	// refuses by name.
 	FString SkyMultiScatterSwitch = TEXT("auto");
+	// Lane sky-atmosphere: -look-sky-gradient=on|off (on by default; core/sky/gradient.py).
+	// ApplyAtmosphere: the clear and hazy fogs' FogCutoffDistance and horizon airlight
+	// gain; off is claude/hl-sky's sky. Another word refuses by name.
+	FString SkyGradientSwitch = TEXT("on");
 	// Sky step 4: the height fogs ApplyAtmosphere gave a vertical profile (the clear
 	// and hazy rows' fog_scale_height_km), with the scene's fog height and the
 	// falloff in force; Advance re-bases each at the aircraft's height

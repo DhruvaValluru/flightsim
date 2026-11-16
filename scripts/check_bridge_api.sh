@@ -679,6 +679,24 @@ rp_check "sky step 4: the fog is drawn over the sky" "Renderer/Private/DeferredS
 rp_check "sky step 4: the volumetric fog shares the profile" "../../Shaders/Private/VolumetricFog.usf" "float GlobalDensityFirst = FogStruct.ExponentialFogParameters3.x * exp2(-FogStruct.ExponentialFogParameters.y * (WorldPosition.z - FogStruct.ExponentialFogParameters3.y));"
 rp_check "sky step 4: the multi-scatter factor is a LUT multiply" "../../Shaders/Private/SkyAtmosphere.usf" "MultiScatteredLuminanceLutUAV[int2(PixPos)] = L * Atmosphere.MultiScatteringFactor;"
 rp_check "sky step 4: the factor reaches the shader as a uniform" "Renderer/Private/SkyAtmosphereRendering.cpp" "COPYMACRO(MultiScatteringFactor);"
+# Lane sky-atmosphere: -look-sky-gradient (core/sky/gradient.py; FlightSimClouds.cpp
+# ApplyAtmosphere, FlightSimWorldPure::SkyGradientFor / HorizonAirlightGain). Read in
+# the 5.7 source on 2026-11-15.
+rp_check "sky-gradient: Fog SetFogCutoffDistance" "$EHF" "ENGINE_API void SetFogCutoffDistance(float Value);"
+rp_check "sky-gradient: Fog FogCutoffDistance" "$EHF" "float FogCutoffDistance;"
+rp_check "sky-gradient: Fog SetSkyAtmosphereAmbientContributionColorScale" "$EHF" "ENGINE_API void SetSkyAtmosphereAmbientContributionColorScale(FLinearColor NewValue);"
+rp_check "sky-gradient: Fog FogInscatteringLuminance" "$EHF" "FLinearColor FogInscatteringLuminance;"
+rp_check "sky-gradient: past the cutoff a pixel takes no fog" "../../Shaders/Private/HeightFogCommon.ush" "if (FogData.ExponentialFogParameters3.w > 0 && CameraToReceiverLength > FogData.ExponentialFogParameters3.w)"
+rp_check "sky-gradient: the cutoff reaches the shader" "Renderer/Private/FogRendering.cpp" "FogInfo.InscatteringColorCubemap ? 1.0f : 0.0f, FogInfo.FogCutoffDistance);"
+rp_check "sky-gradient: a sky pixel decodes to 1/1e-8 cm" "Engine/Private/SceneView.cpp" "SubtractValue -= 0.00000001f;"
+rp_check "sky-gradient: the fog ambient is the distant sky light" "../../Shaders/Private/HeightFogCommon.ush" "float3 SkyAmbient = FogData.SkyAtmosphereAmbientContributionColorScale.rgb * View.SkyAtmosphereHeightFogContribution.xxx * GetViewDistanceSkyLightColor();"
+rp_check "sky-gradient: the distant sky light is a sphere mean" "../../Shaders/Private/SkyAtmosphere.usf" "const float SamplerSolidAngle = 4.0f * PI / float(THREADGROUP_SIZE * THREADGROUP_SIZE);"
+rp_check "sky-gradient: Atmosphere SetRayleighScattering" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetRayleighScattering(FLinearColor NewValue);"
+rp_check "sky-gradient: Atmosphere SetRayleighScatteringScale" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetRayleighScatteringScale(float NewValue);"
+rp_check "sky-gradient: Atmosphere SetRayleighExponentialDistribution" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetRayleighExponentialDistribution(float NewValue);"
+rp_check "sky-gradient: Atmosphere SetOtherAbsorption" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetOtherAbsorption(FLinearColor NewValue);"
+rp_check "sky-gradient: Atmosphere SetOtherAbsorptionScale" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetOtherAbsorptionScale(float NewValue);"
+rp_check "sky-gradient: the Earth Rayleigh scale height" "Engine/Private/Components/SkyAtmosphereComponent.cpp" "const float EarthRayleighScaleHeight = 8.0f;"
 # The sky HDRI probe (ApplySkyHdri).
 rp_check "sky-hdri: SLS_SpecifiedCubemap" "Engine/Classes/Components/SkyLightComponent.h" "SLS_SpecifiedCubemap,"
 rp_check "sky-hdri: SkyLight SourceType" "Engine/Classes/Components/SkyLightComponent.h" "TEnumAsByte<enum ESkyLightSourceType> SourceType;"

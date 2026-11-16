@@ -1041,6 +1041,51 @@ namespace FlightSimWorldPure
 		return -1;
 	}
 
+	// Lane sky-atmosphere: -look-sky-gradient=on|off (core/sky/gradient.py, the
+	// physics and the engine reading). On (the default) the clear and hazy rows'
+	// height fogs stop at FogCutoffDistance SkyGradientFogCutoffKm, so the sky
+	// pixels (decoded at 1 / 1e-8 cm = 1000 km: SceneView.cpp
+	// CreateInvDeviceZToWorldZTransform) show the physical atmosphere alone, and
+	// the fog's sky-atmosphere ambient is scaled by HorizonAirlightGain (the CIE
+	// clear sky's horizon over its upper-hemisphere mean) so a far surface fades
+	// to the horizon's luminance, not to the dimmer sphere-mean distant sky light.
+	// 1 = on, 0 = off, -1 = an unknown word (Build refuses it by name).
+	inline int SkyGradientFor(const char* Word)
+	{
+		if (Word == nullptr || Word[0] == '\0' || std::strcmp(Word, "on") == 0) { return 1; }
+		if (std::strcmp(Word, "off") == 0) { return 0; }
+		return -1;
+	}
+	[[maybe_unused]] constexpr double SkyGradientSkyPixelDepthKm = 1000.0;
+	[[maybe_unused]] constexpr double SkyGradientFogCutoffKm = 950.0;
+	constexpr int AirlightGainCount = 10;
+	// CIE S 011 type 12 (a -1, b -0.32, c 10, d -3, e 0.45): horizon (2 deg up,
+	// azimuth mean) / upper-hemisphere mean at sun elevation 0, 10, ... 90 deg.
+	constexpr double AirlightGainTable[AirlightGainCount] = {
+		2.313, 2.016, 1.717, 1.511, 1.371, 1.273, 1.204, 1.158, 1.131, 1.123};
+	constexpr double AirlightGainMax = 2.0;
+	constexpr double AirlightTwilightDeg = -6.0;
+	inline double HorizonAirlightGain(double SunElevationDeg)
+	{
+		if (SunElevationDeg < 0.0)
+		{
+			const double Top = AirlightGainTable[0] < AirlightGainMax ? AirlightGainTable[0] : AirlightGainMax;
+			double T = SunElevationDeg / AirlightTwilightDeg;
+			T = T < 0.0 ? 0.0 : (T > 1.0 ? 1.0 : T);
+			return Top + (1.0 - Top) * T;
+		}
+		const double X = (SunElevationDeg > 90.0 ? 90.0 : SunElevationDeg) / 10.0;
+		int I = static_cast<int>(X);
+		I = I > AirlightGainCount - 2 ? AirlightGainCount - 2 : I;
+		const double F = X - I;
+		const double G = AirlightGainTable[I] + (AirlightGainTable[I + 1] - AirlightGainTable[I]) * F;
+		return G < AirlightGainMax ? G : AirlightGainMax;
+	}
+	// The engine's Earth atmosphere (SkyAtmosphereComponent.cpp defaults), per km.
+	[[maybe_unused]] constexpr double EarthRayleighPerKm[3] = {0.005802, 0.013558, 0.033100};
+	[[maybe_unused]] constexpr double EarthRayleighScaleHeightKm = 8.0;
+	[[maybe_unused]] constexpr double EarthOzonePerKm[3] = {0.000650, 0.001881, 0.000085};
+
 	inline int SelectCloud(double Cover, double ThicknessM, int Preset)
 	{
 		if (Preset == PresetStorm || Preset == PresetRain)
@@ -1850,6 +1895,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// A/B). FlightSimWorldPure::SkyMultiScatterFor; another word refuses by name.
 		SkyMultiScatterSwitch = TEXT("auto");
 		FParse::Value(*Switches, TEXT("sky-multi-scatter="), SkyMultiScatterSwitch);
+		// Lane sky-atmosphere: -look-sky-gradient=on|off (on by default; off is
+		// claude/hl-sky's sky). FlightSimWorldPure::SkyGradientFor.
+		SkyGradientSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("look-sky-gradient="), SkyGradientSwitch);
 		// Sky step 1: -look-cloud-wisp=on|off (on by default): the cumulus and
 		// stratocumulus wisp (CloudWispRow, CloudBellyOcclusion); off is round 95's
 		// clouds exactly. Another word refuses by name.
@@ -1903,6 +1952,12 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	{
 		Error = FString::Printf(TEXT("world_beauty.clouds: -sky-multi-scatter=%s is not auto, on or off"),
 		                        *SkyMultiScatterSwitch);
+		return false;
+	}
+	if (SkyGradientFor(TCHAR_TO_ANSI(*SkyGradientSwitch)) < 0)
+	{
+		Error = FString::Printf(TEXT("world_beauty.sky_gradient: -look-sky-gradient=%s is not on or off"),
+		                        *SkyGradientSwitch);
 		return false;
 	}
 	if (CirrusSwitch != TEXT("on") && CirrusSwitch != TEXT("off"))
@@ -2677,6 +2732,49 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	const double AircraftZM = bAircraftKnown ? Aircraft->GetActorLocation().Z / WorldCmPerMetre : 0.0;
 	TSharedPtr<FJsonObject> Haze = MakeShared<FJsonObject>();
 	Haze->SetBoolField(TEXT("profile_applied"), bFogProfile);
+	// Lane sky-atmosphere: -look-sky-gradient (core/sky/gradient.py). The clear and
+	// hazy rows only (the fog's vertical profile): the sky pixels leave the fog (its
+	// cutoff), the fog's atmosphere ambient takes the horizon's luminance, and the
+	// atmosphere's Earth coefficients are stated rather than inherited.
+	const bool bSkyGradient = SkyGradientFor(TCHAR_TO_ANSI(*SkyGradientSwitch)) == 1 && bFogProfile;
+	double SunElevationDeg = 90.0;
+	if (Scene.Sun != nullptr)
+	{
+		const FVector LightDir = Scene.Sun->GetActorForwardVector();
+		SunElevationDeg = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(-LightDir.Z, -1.0, 1.0)));
+	}
+	const double AirlightGain = HorizonAirlightGain(SunElevationDeg);
+	{
+		TSharedPtr<FJsonObject> Gradient = MakeShared<FJsonObject>();
+		Gradient->SetStringField(TEXT("switch"), SkyGradientSwitch);
+		Gradient->SetBoolField(TEXT("applied"), bSkyGradient);
+		Gradient->SetNumberField(TEXT("sun_elevation_deg"), SunElevationDeg);
+		Gradient->SetNumberField(TEXT("fog_cutoff_km"), bSkyGradient ? SkyGradientFogCutoffKm : 0.0);
+		Gradient->SetNumberField(TEXT("sky_pixel_depth_km"), SkyGradientSkyPixelDepthKm);
+		Gradient->SetNumberField(TEXT("horizon_airlight_gain"), bSkyGradient ? AirlightGain : 1.0);
+		Gradient->SetStringField(TEXT("basis"),
+			TEXT("core/sky/gradient.py: a sky pixel decodes to 1000 km (SceneView.cpp DeviceZ 0 -> 1/1e-8 cm), so the "
+			     "height fog drawn over the sky took every sky pixel to 0.92 of the distant sky light's sphere mean "
+			     "(the flat navy sky); FogCutoffDistance 950 km (past the 754 km farthest tile, short of the sky) shows "
+			     "the atmosphere alone there. The fog's ambient x the CIE clear sky's horizon / upper-hemisphere mean "
+			     "(ISO 15469 type 12) at the sun's elevation, so far ground fades to the horizon's luminance. "
+			     "UNMEASURED on the iGPU until the Windows A/B"));
+		if (bSkyGradient)
+		{
+			Atmosphere->SetRayleighScattering(FLinearColor(
+				static_cast<float>(EarthRayleighPerKm[0] / EarthRayleighPerKm[2]),
+				static_cast<float>(EarthRayleighPerKm[1] / EarthRayleighPerKm[2]), 1.0f));
+			Atmosphere->SetRayleighScatteringScale(static_cast<float>(EarthRayleighPerKm[2]));
+			Atmosphere->SetRayleighExponentialDistribution(static_cast<float>(EarthRayleighScaleHeightKm));
+			Atmosphere->SetOtherAbsorption(FLinearColor(
+				static_cast<float>(EarthOzonePerKm[0] / EarthOzonePerKm[1]), 1.0f,
+				static_cast<float>(EarthOzonePerKm[2] / EarthOzonePerKm[1])));
+			Atmosphere->SetOtherAbsorptionScale(static_cast<float>(EarthOzonePerKm[1]));
+			Gradient->SetStringField(TEXT("rayleigh_per_mm"), TEXT("5.802,13.558,33.1 (scale height 8 km)"));
+			Gradient->SetStringField(TEXT("ozone_per_mm"), TEXT("0.650,1.881,0.085 (tent 25 km, 15 km wide)"));
+		}
+		Out->SetObjectField(TEXT("sky_gradient"), Gradient);
+	}
 	Haze->SetNumberField(TEXT("fog_scale_height_km"), FogScaleHeightKm);
 	Haze->SetNumberField(TEXT("fog_height_falloff"), FogFalloff);
 	Haze->SetNumberField(TEXT("fog_height_falloff_scene"), SceneFogHeightFalloff);
@@ -2742,6 +2840,22 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 			Fog->SetFogMaxOpacity(static_cast<float>(Row[AtmFogMaxOpacity]));
 			FogRow->SetNumberField(TEXT("fog_start_distance_m"), Fog->StartDistance / WorldCmPerMetre);
 			FogRow->SetNumberField(TEXT("fog_max_opacity"), Fog->FogMaxOpacity);
+			if (bSkyGradient)
+			{
+				FogRow->SetNumberField(TEXT("fog_cutoff_distance_km_before"), Fog->FogCutoffDistance / WorldCmPerMetre / 1000.0);
+				Fog->SetFogCutoffDistance(static_cast<float>(SkyGradientFogCutoffKm * 1000.0 * WorldCmPerMetre));
+				FogRow->SetNumberField(TEXT("fog_cutoff_distance_km"), Fog->FogCutoffDistance / WorldCmPerMetre / 1000.0);
+				// Only an atmosphere-lit fog (a -sky= plan sets the inscattering black):
+				// a legacy constant colour is not the sky's and is left alone.
+				if (Fog->FogInscatteringLuminance.Equals(FLinearColor::Black))
+				{
+					const FLinearColor Before = Fog->SkyAtmosphereAmbientContributionColorScale;
+					const float G = static_cast<float>(AirlightGain);
+					Fog->SetSkyAtmosphereAmbientContributionColorScale(
+						FLinearColor(Before.R * G, Before.G * G, Before.B * G, Before.A));
+					FogRow->SetNumberField(TEXT("horizon_airlight_gain"), AirlightGain);
+				}
+			}
 		}
 		Fog->SetVolumetricFog(true);
 		Fog->SetVolumetricFogDistance(static_cast<float>(Row[AtmVFogDistanceM] * WorldCmPerMetre));
