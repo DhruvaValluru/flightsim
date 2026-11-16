@@ -710,7 +710,10 @@ namespace FlightSimWorldPure
 	// c9e13c53's clouds exactly). world_beauty.CLOUD_LIGHT_* is the twin (the why and
 	// the real-world numbers are there): the scattering node's six inputs (dual-lobe
 	// HG g 0.8 / -0.3, back share 0.2; Wrenninge 2013 octave a = b = c = 0.5), the
-	// powder term (Schneider 2015) and the flat-base darkening of cloud_albedo.hlsl.
+	// flat-base darkening of the SKY light (cloud_sky_ao.hlsl on the AO pin; lit 2,
+	// 2026-11-16: round 1426's powder and base scaled the ALBEDO, so every light, and
+	// darkened #3 0.227 -> 0.139; the why is at world_beauty.CLOUD_LIGHT_*). The bridge
+	// also sets SkyBottomOcclusion (the AO pin replaces the engine's bottom gradient).
 	// ON also stops round 82's billow row overriding the cumulus row
 	// (CloudLightBillow). No sample and no march step: per-sample ALU only.
 	// UNCALIBRATED (every look number).
@@ -722,29 +725,25 @@ namespace FlightSimWorldPure
 		LgtMsContribution = 3,
 		LgtMsOcclusion = 4,
 		LgtMsEccentricity = 5,
-		LgtPowderAmount = 6,
-		LgtPowderDepthM = 7,
-		LgtBaseDarkening = 8,
-		LgtBaseRise = 9,
-		LgtFieldCount = 10
+		LgtBaseDarkening = 6,
+		LgtBaseRise = 7,
+		LgtFieldCount = 8
 	};
 	inline const char* CloudLightFieldName(int Field)
 	{
 		static const char* const Names[LgtFieldCount] = {
 			"PhaseG", "PhaseG2", "PhaseBlend", "MsContribution", "MsOcclusion",
-			"MsEccentricity", "PowderAmount", "PowderDepthM", "BaseDarkening", "BaseRise"};
+			"MsEccentricity", "BaseDarkening", "BaseRise"};
 		return Field >= 0 && Field < LgtFieldCount ? Names[Field] : "";
 	}
 	constexpr double CloudLightPhaseG = 0.8;
 	constexpr double CloudLightPhaseG2 = -0.3;
 	constexpr double CloudLightPhaseBlend = 0.2;
 	constexpr double CloudLightOctave = 0.5;
-	constexpr double CloudLightPowder = 0.6;
-	constexpr double CloudLightPowderDepthM = 40.0;
-	// The OFF row: the material's defaults (CloudScattering's six, no powder, no base).
+	// The OFF row: the material's defaults (CloudScattering's six, no base).
 	inline double CloudLightOff(int Field)
 	{
-		static const double Values[LgtFieldCount] = {0.85, -0.3, 0.3, 0.7, 0.25, 0.4, 0.0, 40.0, 0.0, 0.3};
+		static const double Values[LgtFieldCount] = {0.85, -0.3, 0.3, 0.7, 0.25, 0.4, 0.0, 0.3};
 		return Field >= 0 && Field < LgtFieldCount ? Values[Field] : 0.0;
 	}
 	// Per shape (cumulus, stratocumulus, overcast, nimbostratus, altocumulus).
@@ -774,8 +773,6 @@ namespace FlightSimWorldPure
 		Out[LgtMsContribution] = CloudLightOctave;
 		Out[LgtMsOcclusion] = CloudLightOctave;
 		Out[LgtMsEccentricity] = CloudLightOctave;
-		Out[LgtPowderAmount] = CloudLightPowder;
-		Out[LgtPowderDepthM] = CloudLightPowderDepthM;
 		Out[LgtBaseDarkening] = CloudLightBaseDarkening(Cloud);
 		Out[LgtBaseRise] = CloudLightBaseRise(Cloud);
 	}
@@ -1610,7 +1607,7 @@ namespace
 	const TCHAR* const WorldCloudMaterialPath =
 		TEXT("/Game/FlightSim/M_FlightSimCloudLayers.M_FlightSimCloudLayers");
 	// Sky-clouds2 lane: -look-cloud-light=on draws this SEPARATE material (graph 8
-	// plus the scattering inputs and cloud_albedo.hlsl), so the default
+	// plus the scattering inputs and cloud_sky_ao.hlsl), so the default
 	// M_FlightSimCloudLayers keeps graph 8's shader cost (the light's parameters
 	// raised its PS 161 -> 847 instructions, 0 -> 8 samplers, review of 42974c46).
 	const TCHAR* const WorldCloudLitMaterialPath =
@@ -3532,21 +3529,13 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		State.Material->SetScalarParameterValue(TEXT("EdgeThinPower"), static_cast<float>(WispRow[WspEdgePower]));
 		State.Material->SetScalarParameterValue(TEXT("TopDetailGain"), static_cast<float>(WispRow[WspTopDetail]));
 		State.Material->SetScalarParameterValue(TEXT("BoundaryErosion"), static_cast<float>(WispRow[WspBoundaryErosion]));
-		// Sky-clouds lane: the light row (CloudLightRow; OFF = the material's defaults)
-		// and the direction to the sun for the powder's view weighting.
+		// Sky-clouds lane: the light row (CloudLightRow; OFF = the material's defaults).
 		double LightRow[LgtFieldCount];
 		CloudLightRow(bLight, State.Shape, LightRow);
 		for (int F = 0; F < LgtFieldCount; ++F)
 		{
 			State.Material->SetScalarParameterValue(FName(ANSI_TO_TCHAR(CloudLightFieldName(F))),
 			                                        static_cast<float>(LightRow[F]));
-		}
-		{
-			const UDirectionalLightComponent* LightSun = Scene.Sun != nullptr
-				? Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()) : nullptr;
-			const FVector ToSun = LightSun != nullptr ? -LightSun->GetDirection() : FVector::UpVector;
-			State.Material->SetVectorParameterValue(TEXT("SunDirWS"),
-				FLinearColor(static_cast<float>(ToSun.X), static_cast<float>(ToSun.Y), static_cast<float>(ToSun.Z), 0.0f));
 		}
 		Cloud->SetMaterial(State.Material);
 		// -cloud-material=epic: the Volumetrics plugin's cloud material in place of
@@ -3573,6 +3562,12 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		const double BillowOcclusion = CloudBottomOcclusionFor(bBillow, AtmRow[AtmCloudBottomOcclusion]);
 		const double BottomOcclusion = CloudBellyOcclusion(bWisp, BillowOcclusion);
 		Cloud->SetSkyLightCloudBottomOcclusion(static_cast<float>(BottomOcclusion));
+		if (bLight)
+		{
+			// Lit 2: the lit material's AO pin replaces the engine's bottom gradient,
+			// so cloud_sky_ao.hlsl rebuilds it from this layer's occlusion.
+			State.Material->SetScalarParameterValue(FName(TEXT("SkyBottomOcclusion")), static_cast<float>(BottomOcclusion));
+		}
 		Cloud->SetViewSampleCountScale(ViewScale);
 		Cloud->SetShadowViewSampleCountScale(ShadowScale);
 		Cloud->SetShadowTracingDistance(ShadowTracingKm);
@@ -3661,6 +3656,10 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			for (int F = 0; F < LgtFieldCount; ++F)
 			{
 				LightOut->SetNumberField(ANSI_TO_TCHAR(CloudLightFieldName(F)), LightRow[F]);
+			}
+			if (bLight)
+			{
+				LightOut->SetNumberField(TEXT("SkyBottomOcclusion"), BottomOcclusion);
 			}
 			Layer->SetObjectField(TEXT("cloud_light_row"), LightOut);
 		}

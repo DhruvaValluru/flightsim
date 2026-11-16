@@ -3784,12 +3784,19 @@ WORLD_CLOUD_SCALARS = {
 }
 #: Sky-clouds lane (graph generation 9, -look-cloud-light): the scattering node's six
 #: inputs as parameters (defaults = CLOUD_SCATTERING, so an unset material is
-#: generation 8's light) and cloud_albedo.hlsl's four (defaults: no powder, no base
-#: darkening). world_beauty.CLOUD_LIGHT_OFF is the twin; the bridge sets every one.
+#: generation 8's light) and cloud_sky_ao.hlsl's base (defaults: no base darkening).
+#: world_beauty.CLOUD_LIGHT_OFF is the twin; the bridge sets every one. Lit 2
+#: (2026-11-16, Windows round 1426): the powder is gone (it scaled the albedo, so ALL
+#: light, and fed on Extinction, which compiled cloud_layers.hlsl a second time into
+#: Base Color) and the base darkens the sky light only, through the AO pin.
 WORLD_CLOUD_LIGHT_SCALARS = {
     "PhaseG": 0.85, "PhaseG2": -0.3, "PhaseBlend": 0.3, "MsContribution": 0.7, "MsOcclusion": 0.25,
-    "MsEccentricity": 0.4, "PowderAmount": 0.0, "PowderDepthM": 40.0, "BaseDarkening": 0.0, "BaseRise": 0.3,
+    "MsEccentricity": 0.4, "BaseDarkening": 0.0, "BaseRise": 0.3,
 }
+#: Lit 2: the layer's SkyLightCloudBottomOcclusion as a parameter (the bridge sets it;
+#: 0.5 = the engine's default): a connected AO pin replaces the engine's bottom
+#: gradient, so cloud_sky_ao.hlsl rebuilds it.
+WORLD_CLOUD_SKY_AO_SCALARS = {"SkyBottomOcclusion": 0.5}
 #: Each scattering parameter and the VolumetricAdvancedMaterialOutput input it drives
 #: (UE 5.7 FExpressionInput names; the display spelling is tried second).
 WORLD_CLOUD_LIGHT_PINS = {
@@ -3797,8 +3804,7 @@ WORLD_CLOUD_LIGHT_PINS = {
     "MsContribution": "MultiScatteringContribution", "MsOcclusion": "MultiScatteringOcclusion",
     "MsEccentricity": "MultiScatteringEccentricity",
 }
-WORLD_CLOUD_ALBEDO_INPUTS = ("Albedo", "Extinction", "NormAlt", "WorldPos", "CameraPos", "SunDirWS",
-                             "PowderAmount", "PowderDepthM", "BaseDarkening", "BaseRise")
+WORLD_CLOUD_SKY_AO_INPUTS = ("NormAlt", "SkyBottomOcclusion", "BaseDarkening", "BaseRise")
 WORLD_CLOUD_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 WORLD_CLOUD_INPUTS = ("WorldPos", "NormAlt", "CameraPos", "Coverage", "ExtinctionPerM", "ExtinctionScale",
                       "ShapeScaleKm", "DetailScaleKm", "DetailErosion", "BottomSoftness", "TopRounding",
@@ -4023,11 +4029,15 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: Sky-clouds2 (2026-11-15, review of 42974c46): the light moved to its OWN material,
 #: M_FlightSimCloudLayersLit 1 (graph 9 had raised the default PS 161 -> 847
 #: instructions and 0 -> 8 samplers with the switch off); cloud layers 10 = graph 8 again.
+#: Lit 2 (2026-11-16, Windows round 1426: #3 luma 0.227 -> 0.139, GPU +27%): Base Color
+#: is Albedo exactly (cloud_albedo.hlsl's powder and base scaled every light and read
+#: Extinction, so cloud_layers.hlsl ran twice per sample); the flat base is
+#: cloud_sky_ao.hlsl on Ambient Occlusion (the sky light only).
 #: Cirrus 3 (2026-11-16): the look check's denser, brighter defaults (FibreStrength,
 #: PatchScaleKm, OpticalDepth, MaxOpacity); the graph is rebuilt so its defaults move.
 #: High-sky fx (2026-11-15): rainbow 1, the first rainbow.hlsl (M_FlightSimRainbow).
 WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "10", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "3",
-                           "M_FlightSimCloudLayersLit": "1",
+                           "M_FlightSimCloudLayersLit": "2",
                            "M_FlightSimRainbow": "1"}
 
 
@@ -4077,7 +4087,7 @@ def world_stamp(material, name):
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "12",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail); 11: wet ground (Lekner & Dorf darkening, grazing sky mirror; detail consts static for Metal); 12: its specular AA clamp tuned to 0.02
                      "M_FlightSimCloudLayers": "12", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING; 11: sky-clouds light inputs + cloud_albedo; 12: sky-clouds2 the light moved to M_FlightSimCloudLayersLit (graph 8 again)
-                     "M_FlightSimCloudLayersLit": "1",  # sky-clouds2: -look-cloud-light=on's own material
+                     "M_FlightSimCloudLayersLit": "2",  # sky-clouds2: -look-cloud-light=on's own material; 2: no powder, the base on the AO pin (round 1426)
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
                      "M_FlightSimCirrus": "3",          # sky step 6: the high cirrus sheet; 2: sky-cirrus2 patches + hooked fibres; 3: look check denser/brighter defaults
                      "M_FlightSimRainbow": "1",         # high-sky fx: the beauty rainbow
@@ -4247,7 +4257,7 @@ def create_world_cloud_layers(lit=False):
     black) with the beauty cloud's own constants (CLOUD_SCATTERING, sky step 1:
     undersides that glow, light through thin edges; M_StormCell is untouched)."""
     # Sky-clouds2: lit=True builds M_FlightSimCloudLayersLit (-look-cloud-light=on):
-    # the same graph plus the scattering parameters and cloud_albedo.hlsl. The
+    # the same graph plus the scattering parameters and cloud_sky_ao.hlsl. The
     # default material stays graph 8 so its shader cost is unchanged.
     asset = "M_FlightSimCloudLayersLit" if lit else "M_FlightSimCloudLayers"
     material = (_world_beauty_material("M_FlightSimCloudLayersLit") if lit
@@ -4283,17 +4293,21 @@ def create_world_cloud_layers(lit=False):
         world_stamp(material, asset)
         finish(material, asset)
         return
-    # Generation 9 (sky-clouds lane): the albedo is cloud_albedo.hlsl (powder, flat
-    # darker base); its defaults return "Albedo" exactly.
+    # Lit 2 (round 1426): Base Color is Albedo exactly, as unlit: a cloud droplet's
+    # single-scattering albedo is ~1 and every light (sun, both octaves, sky) scales
+    # with it, so nothing may darken it; nothing on Base Color reads Extinction either
+    # (that compiled cloud_layers.hlsl a second time). The flat base darkens the SKY
+    # light only: cloud_sky_ao.hlsl on Ambient Occlusion.
+    lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
     light = {name: (scalar(material, lib, name, default, -1200, 1500 + 110 * i), "")
              for i, (name, default) in enumerate(WORLD_CLOUD_LIGHT_SCALARS.items())}
-    sun_dir = vector(material, lib, "SunDirWS", (0.0, 0.0, 1.0, 0.0), -1200, 2700)
-    albedo_inputs = {"Albedo": (albedo, ""), "Extinction": (extinction, ""), "NormAlt": inputs["NormAlt"],
-                     "WorldPos": inputs["WorldPos"], "CameraPos": inputs["CameraPos"], "SunDirWS": (sun_dir, "")}
-    albedo_inputs.update({name: light[name] for name in ("PowderAmount", "PowderDepthM", "BaseDarkening", "BaseRise")})
-    lit_albedo = world_custom(material, lib, "cloud_albedo", unreal.CustomMaterialOutputType.CMOT_FLOAT1,
-                              {name: albedo_inputs[name] for name in WORLD_CLOUD_ALBEDO_INPUTS}, -400, 200)
-    lib.connect_material_property(lit_albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    ao_inputs = {"NormAlt": inputs["NormAlt"], "BaseDarkening": light["BaseDarkening"],
+                 "BaseRise": light["BaseRise"]}
+    for i, (name, default) in enumerate(WORLD_CLOUD_SKY_AO_SCALARS.items()):
+        ao_inputs[name] = (scalar(material, lib, name, default, -1200, 2700 + 110 * i), "")
+    sky_ao = world_custom(material, lib, "cloud_sky_ao", unreal.CustomMaterialOutputType.CMOT_FLOAT1,
+                          {name: ao_inputs[name] for name in WORLD_CLOUD_SKY_AO_INPUTS}, -400, 400)
+    lib.connect_material_property(sky_ao, "", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
     for field, pin in WORLD_CLOUD_LIGHT_PINS.items():
         spelled = (pin, re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", pin))
         if not any(lib.connect_material_expressions(light[field][0], "", node, p) for p in spelled):

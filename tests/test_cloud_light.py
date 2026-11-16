@@ -1,9 +1,10 @@
 """Sky-clouds lane (2026-11-15): -look-cloud-light=on|off and -cloud-material=ours|epic.
 
-The Python twin (core/scene/world_beauty.py CLOUD_LIGHT_*, cloud_albedo), the C++
+The Python twin (core/scene/world_beauty.py CLOUD_LIGHT_*, cloud_sky_ao), the C++
 pure block (FlightSimClouds.cpp CloudLightRow), the material script
-(WORLD_CLOUD_LIGHT_SCALARS, graph generation 9) and cloud_albedo.hlsl agree, and OFF
-is c9e13c53's cloud exactly. Beauty only: nothing here touches a label pass.
+(WORLD_CLOUD_LIGHT_SCALARS, M_FlightSimCloudLayersLit 2) and cloud_sky_ao.hlsl agree,
+and OFF is c9e13c53's cloud exactly. Lit 2 (round 1426): the light conserves energy
+(albedo untouched, the base on the sky light only). Beauty only: no label pass.
 """
 import ast
 import json
@@ -22,7 +23,7 @@ CPP = (REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightS
 HDR = (REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimClouds.h").read_text(encoding="utf-8")
 PURE = CPP[CPP.index("// FLIGHTSIM-WORLD-PURE-BEGIN"):CPP.index("// FLIGHTSIM-WORLD-PURE-END")]
 SCRIPT = (REPO / "scripts/ue_create_materials.py").read_text(encoding="utf-8")
-HLSL = (REPO / "assets/shaders/world/cloud_albedo.hlsl").read_text(encoding="utf-8")
+HLSL = (REPO / "assets/shaders/world/cloud_sky_ao.hlsl").read_text(encoding="utf-8")
 SHAPES = ("cumulus", "stratocumulus", "overcast", "nimbostratus", "altocumulus")   # C++ enum order
 
 
@@ -61,8 +62,7 @@ def test_on_row_matches_cpp_and_the_stated_physics():
     g, g2, b = wb.CLOUD_LIGHT_PHASE
     assert (1 - b) * g + b * g2 == pytest.approx(0.58)   # effective asymmetry, between 0.5 and 0.85
     assert wb.CLOUD_LIGHT_OCTAVE == (_cpp("CloudLightOctave"),) * 3 == (0.5, 0.5, 0.5)   # Wrenninge 2013
-    assert _cpp("CloudLightPowder") == wb.CLOUD_LIGHT_POWDER
-    assert _cpp("CloudLightPowderDepthM") == wb.CLOUD_LIGHT_POWDER_DEPTH_M
+    assert "Powder" not in PURE   # lit 2: the powder scaled the albedo (round 1426)
     dark = _cpp_array(r"CloudLightBaseDarkening\(int Cloud\)\s*\{\s*static const double Rows\[CloudCount\] = \{([^}]*)\}")
     rise = _cpp_array(r"CloudLightBaseRise\(int Cloud\)\s*\{\s*static const double Rows\[CloudCount\] = \{([^}]*)\}")
     assert dark == [wb.CLOUD_LIGHT_BASE_DARKENING[s] for s in SHAPES]
@@ -75,39 +75,105 @@ def test_on_row_matches_cpp_and_the_stated_physics():
     assert row["MsContribution"] < wb.CLOUD_LIGHT_OFF["MsContribution"]
 
 
-def test_cloud_albedo_off_is_exact_and_on_is_bounded():
-    off = wb.CLOUD_LIGHT_OFF
-    for sigma, h, c in ((0.0, 0.0, -1.0), (0.05, 0.1, 0.3), (0.002, 0.9, 1.0)):
-        assert wb.cloud_albedo(0.98, sigma, h, c, off) == 0.98
-    on = wb.cloud_light_row(True, "cumulus")
-    # facing the sun (silver lining): no powder; the top of the layer: no base darkening
-    assert wb.cloud_albedo(0.98, 0.001, 1.0, 1.0, on) == pytest.approx(0.98)
-    # away from the sun, a thin edge darkens by the powder, a dense core barely
-    edge = wb.cloud_albedo(0.98, 0.002, 1.0, -1.0, on)
-    core = wb.cloud_albedo(0.98, 0.05, 1.0, -1.0, on)
-    p_edge = 1 - math.exp(-2 * 0.002 * 40.0)
-    assert edge == pytest.approx(0.98 * (0.4 + 0.6 * p_edge))
-    assert edge < core < 0.98 and core > 0.96
-    # the base: (1 - 0.45) at the bottom, 1 from a quarter of the layer up, monotone between
-    assert wb.cloud_albedo(1.0, 1.0, 0.0, 1.0, on) == pytest.approx(0.55)
-    assert wb.cloud_albedo(1.0, 1.0, 0.25, 1.0, on) == pytest.approx(1.0)
-    seq = [wb.cloud_albedo(1.0, 1.0, h / 20, 1.0, on) for h in range(21)]
-    assert all(b >= a for a, b in zip(seq, seq[1:]))
+def _phase(cos_t, g, g2, blend):
+    """VolumetricCloud.usf SamplePhaseFunction: lerp of two normalised HG lobes."""
+    def hg(g, c):
+        return (1 - g * g) / (4 * math.pi * (1 + g * g - 2 * g * c) ** 1.5)
+    return hg(g, cos_t) + blend * (hg(g2, cos_t) - hg(g, cos_t))
+
+
+def test_energy_the_phase_is_normalised_and_the_octaves_meet_wrenninge():
+    """Energy: the dual-lobe phase integrates to 1 over the sphere (each HG lobe is
+    normalised and the blend is convex), and the octave constants meet Wrenninge et
+    al. 2013's condition a <= b (Hillaire 2016 s. 5): each octave scatters no more
+    than the one before, (c / o)^i <= 1."""
+    for row in (wb.cloud_light_row(True, s) for s in SHAPES):
+        n = 4000
+        total = sum(_phase(-1 + (k + 0.5) * 2 / n, row["PhaseG"], row["PhaseG2"], row["PhaseBlend"])
+                    for k in range(n)) * 2 * math.pi * 2 / n
+        assert total == pytest.approx(1.0, abs=2e-3)
+        c, o = row["MsContribution"], row["MsOcclusion"]
+        assert c <= o
+        assert all((c / o) ** i <= 1.0 for i in range(1, 4))
+
+
+def test_energy_the_albedo_is_untouched_and_the_sun_loses_nothing():
+    """Lit 2: Base Color is the material's Albedo exactly (>= the 0.9 floor), so
+    the sun's single and multiple scattering are the OFF material's; the base
+    acts on the sky light only (the AO pin)."""
+    albedo = _script_value("WORLD_CLOUD_ALBEDO")
+    assert albedo >= wb.CLOUD_LIGHT_ALBEDO_FLOOR == 0.9
+    create = SCRIPT[SCRIPT.index("def create_world_cloud_layers"):SCRIPT.index("def create_world_tiles_beauty")]
+    lit = create[create.index("    if not lit:"):]
+    lit = lit[lit.index("return\n") :]
+    assert 'lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)' in lit
+    assert lit.count("MP_BASE_COLOR") == 1
+    assert 'lib.connect_material_property(sky_ao, "", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)' in lit
+    # nothing on the lit material's extra nodes reads the extinction (cloud_layers.hlsl
+    # compiled twice: round 1426's +27 %), the camera or the sun
+    assert "(extinction, " not in lit and "SunDirWS" not in lit and "CameraPos" not in lit
+    assert _script_value("WORLD_CLOUD_SKY_AO_INPUTS") == ("NormAlt", "SkyBottomOcclusion", "BaseDarkening",
+                                                         "BaseRise")
+    for name in ("Extinction", "SunDirWS", "Powder", "CameraPos", "Albedo"):
+        assert name not in re.sub(r"//.*", "", HLSL), name
+
+
+def test_energy_the_sky_ao_counts_the_base_once():
+    """The AO pin REPLACES the engine's bottom gradient: OFF (no pin) is
+    saturate(1 - occ + h); ON is the darker of that and the flat base, never a
+    product, bounded below by both and equal to the engine where the base is
+    not darker (a cumulus under a 0.45 belly cap: OFF within 0.01)."""
+    def engine(h, occ):
+        return min(max(1 - occ + h, 0.0), 1.0)
     for shape in SHAPES:
         row = wb.cloud_light_row(True, shape)
-        for h in (0.0, 0.5, 1.0):
-            for c in (-1.0, 0.0, 1.0):
-                assert 0.0 < wb.cloud_albedo(0.98, 0.03, h, c, row) <= 0.98
+        for occ in (0.0, 0.3, 0.45, 0.5, 0.8):
+            for k in range(21):
+                h = k / 20
+                ao = wb.cloud_sky_ao(h, occ, row)
+                flat = wb.cloud_sky_ao(h, 0.0, row)
+                assert ao == pytest.approx(min(engine(h, occ), flat))
+                assert ao >= engine(h, occ) * flat - 1e-12   # never darker than a product
+                assert ao >= 1 - max(occ, row["BaseDarkening"]) - 1e-12
+            assert wb.cloud_sky_ao(1.0, occ, row) == 1.0   # a top: the whole sky
+    cum = wb.cloud_light_row(True, "cumulus")
+    for k in range(21):
+        assert abs(wb.cloud_sky_ao(k / 20, 0.45, cum) - engine(k / 20, 0.45)) <= 0.01
+    off = wb.CLOUD_LIGHT_OFF
+    for k in range(21):
+        assert wb.cloud_sky_ao(k / 20, 0.5, off) == pytest.approx(engine(k / 20, 0.5))
+
+
+def test_energy_a_frame_seen_from_below_keeps_its_brightness():
+    """Round 1426's #3 / #15 (under the layer): the old albedo factor (base 0.55 /
+    0.3 times powder) scaled the sun and the sky light alike. Lit 2 at the bottom
+    band (h 0..0.25): the sun term is OFF's; the sky term is never under the
+    engine's own gradient or the stated base, whichever is darker."""
+    for shape in ("cumulus", "nimbostratus"):
+        row = wb.cloud_light_row(True, shape)
+        band = [k / 100 for k in range(26)]
+        old = sum(1 - row["BaseDarkening"] * (1 - _smooth(h / row["BaseRise"])) for h in band) / len(band)
+        sky = sum(wb.cloud_sky_ao(h, 0.5, row) for h in band) / len(band)
+        engine = sum(min(1.0, 0.5 + h) for h in band) / len(band)
+        # sun 50 / sky 50 under the layer: lit 2 keeps more than the old albedo did
+        assert 0.5 * 1.0 + 0.5 * sky > 0.5 * old + 0.5 * old * engine
+        assert sky <= engine + 1e-12
+
+
+def _smooth(t):
+    t = min(max(t, 0.0), 1.0)
+    return t * t * (3 - 2 * t)
 
 
 def test_the_shader_is_the_python_formula():
-    assert "1.0 - exp(-2.0 * sigma * max(PowderDepthM, 0.0))" in HLSL
-    assert "saturate(PowderAmount) * saturate(0.5 - 0.5 * cosSun)" in HLSL
-    assert "lerp(1.0 - saturate(BaseDarkening), 1.0, smoothstep(0.0, max(BaseRise, 1e-3), saturate(NormAlt)))" in HLSL
-    assert "return Albedo * lerp(1.0, powder, w) * base;" in HLSL
-    names = set(re.findall(r"\b([A-Z][A-Za-z]+)\b", HLSL))
-    for pin in _script_value("WORLD_CLOUD_ALBEDO_INPUTS"):
+    assert "float engineVis = saturate(1.0 - saturate(SkyBottomOcclusion) + h);" in HLSL
+    assert ("float flatBase = lerp(1.0 - saturate(BaseDarkening), 1.0, smoothstep(0.0, max(BaseRise, 1e-3), h));"
+            in HLSL)
+    assert "return min(engineVis, flatBase);" in HLSL
+    names = set(re.findall(r"\b([A-Z][A-Za-z]+)\b", re.sub(r"//.*", "", HLSL)))
+    for pin in _script_value("WORLD_CLOUD_SKY_AO_INPUTS"):
         assert pin in names, pin
+    assert not (REPO / "assets/shaders/world/cloud_albedo.hlsl").exists()
 
 
 def test_the_material_wires_the_six_pins_and_bumps_its_generation():
@@ -118,17 +184,18 @@ def test_the_material_wires_the_six_pins_and_bumps_its_generation():
     assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"] == "10"
     assert _cpp("CloudGraphGeneration") == 10
     # sky-clouds2 review: the light is its own material; the default graph is 8's again
-    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayersLit"] == "1"
-    assert '"M_FlightSimCloudLayersLit": "1",' in SCRIPT
+    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayersLit"] == "2"   # lit 2: round 1426
+    assert '"M_FlightSimCloudLayersLit": "2",' in SCRIPT
     assert 'create_world_cloud_layers(lit=True)' in SCRIPT
     create = SCRIPT[SCRIPT.index("def create_world_cloud_layers"):SCRIPT.index("def create_world_tiles_beauty")]
     off = create[:create.index("    if not lit:")]
-    assert "WORLD_CLOUD_LIGHT_SCALARS" not in off and "world_custom(material, lib, \"cloud_albedo\"" not in off and "SunDirWS" not in off
+    assert ("WORLD_CLOUD_LIGHT_SCALARS" not in off and 'world_custom(material, lib, "cloud_sky_ao"' not in off
+            and "MP_AMBIENT_OCCLUSION" not in off)
     assert wb.CLOUD_LIGHT_MATERIAL in CPP
     assert "UMaterialInstanceDynamic::Create(Parent, Cloud)" in CPP
     assert '"M_FlightSimCloudLayers": "12"' in SCRIPT
-    assert 'world_custom(material, lib, "cloud_albedo"' in SCRIPT
-    assert "lib.connect_material_property(lit_albedo, \"\", unreal.MaterialProperty.MP_BASE_COLOR)" in SCRIPT
+    assert 'world_custom(material, lib, "cloud_sky_ao"' in SCRIPT
+    assert "cloud_albedo" not in create
 
 
 def test_the_bridge_reads_refuses_gates_sets_and_records():
@@ -144,7 +211,9 @@ def test_the_bridge_reads_refuses_gates_sets_and_records():
     assert wb.cloud_light_billow(True, False) and not wb.cloud_light_billow(True, True)
     assert not wb.cloud_light_billow(False, False)
     assert "CloudLightRow(bLight, State.Shape, LightRow);" in CPP
-    assert 'SetVectorParameterValue(TEXT("SunDirWS")' in CPP
+    assert "SunDirWS" not in CPP   # lit 2: no powder, no view weighting
+    assert 'SetScalarParameterValue(FName(TEXT("SkyBottomOcclusion")), static_cast<float>(BottomOcclusion));' in CPP
+    assert 'LightOut->SetNumberField(TEXT("SkyBottomOcclusion"), BottomOcclusion);' in CPP
     assert 'Layer->SetObjectField(TEXT("cloud_light_row"), LightOut);' in CPP
     assert wb.CLOUD_MATERIAL_EPIC in CPP
     assert wb.CLOUD_MATERIAL_WORDS == ("ours", "epic")

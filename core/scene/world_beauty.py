@@ -1082,21 +1082,45 @@ def cloud_belly_occlusion(applies: bool, occlusion: float) -> float:
 # base reads 0.4-0.6 of its sunlit flank; a nimbostratus base 0.2-0.3, a storm's dark
 # grey) set the cloud's albedo (cloud_albedo.hlsl). No sample, no march step: ALU
 # per sample only. UNCALIBRATED (every look number): set by the Windows A/B.
+#
+# Lit 2 (2026-11-16, Windows round 1426: #3 A320 under cumulus luma 0.227 -> 0.139,
+# #15 hurricane 0.060 -> 0.042 with 3.9 % crushed, #13 0.110 -> 0.102; GPU +27 %).
+# Why it darkened: cloud_albedo.hlsl multiplied the volumetric ALBEDO, and the engine
+# scales every light by it (VolumetricCloud.usf: the sun's octaves AND the sky light).
+# (1) The base factor (0.55 at a cumulus bottom, 0.3 nimbostratus) is the photometric
+# RATIO of a base to its flank, a result; as an albedo it is an absorption of 45-70 %,
+# counted on top of the march's own self-shadowing and the engine's bottom gradient
+# (SkyLightCloudBottomOcclusion): from below (#3, #15) the frame is mostly base. (2) The
+# powder (Schneider 2015, 1 - exp(-2 sigma L)) is Nubis' correction to a SINGLE-scatter
+# march for the in-scatter it misses; the engine's octave multiple scattering
+# (Wrenninge et al. 2013, Hillaire 2016 "Physically based sky, atmosphere and cloud
+# rendering in Frostbite" s. 5) already carries that light, and Nubis normalises
+# Beer x powder by 2 so it does not lose energy; an albedo cannot exceed 1, so as an
+# albedo the powder can only remove light (up to 60 % on a thin edge). It also read
+# Extinction, which compiled cloud_layers.hlsl (8 samplers) a second time into Base
+# Color: the +27 %. The phase is not the cause: each HG lobe is normalised and the
+# blend is convex (VolumetricCloud.usf SamplePhaseFunction). The octave constants
+# a = b = c = 0.5 meet Wrenninge's energy condition a <= b (OFF's 0.7 / 0.25 does
+# not: it adds light; OFF stays c9e13c53 exactly).
+# Fix: Base Color is Albedo exactly (0.98: a cloud's albedo ~0.9+); no powder; the flat
+# base darkens only the SKY light, through the AO pin (cloud_sky_ao.hlsl), as the
+# DARKER of the engine's own bottom gradient (which a connected AO pin replaces) and
+# the flat base: one hemisphere occlusion counted once, never a product.
 #: OFF by default (2026-11-15): the Mac look-dev scenes 13/1/9 draw no beauty cumulus
 #: layer (no -sky plan on the Mac prep), so the look was not seen; Windows A/B decides.
 CLOUD_LIGHT_SWITCH = "-look-cloud-light"
 CLOUD_LIGHT_DEFAULT = "off"
 CLOUD_LIGHT_FIELDS: Tuple[str, ...] = ("PhaseG", "PhaseG2", "PhaseBlend", "MsContribution", "MsOcclusion",
-                                       "MsEccentricity", "PowderAmount", "PowderDepthM", "BaseDarkening",
-                                       "BaseRise")
-#: OFF: the material's defaults (CLOUD_SCATTERING's six, no powder, no base darkening).
+                                       "MsEccentricity", "BaseDarkening", "BaseRise")
+#: OFF: the material's defaults (CLOUD_SCATTERING's six, no base darkening).
 CLOUD_LIGHT_OFF: Dict[str, float] = {"PhaseG": 0.85, "PhaseG2": -0.3, "PhaseBlend": 0.3, "MsContribution": 0.7,
-                                     "MsOcclusion": 0.25, "MsEccentricity": 0.4, "PowderAmount": 0.0,
-                                     "PowderDepthM": 40.0, "BaseDarkening": 0.0, "BaseRise": 0.3}
+                                     "MsOcclusion": 0.25, "MsEccentricity": 0.4, "BaseDarkening": 0.0,
+                                     "BaseRise": 0.3}
 CLOUD_LIGHT_PHASE: Tuple[float, float, float] = (0.8, -0.3, 0.2)
 CLOUD_LIGHT_OCTAVE: Tuple[float, float, float] = (0.5, 0.5, 0.5)
-CLOUD_LIGHT_POWDER = 0.6
-CLOUD_LIGHT_POWDER_DEPTH_M = 40.0
+#: Lit 2: the material's albedo with the light on is the material's Albedo (scripts/
+#: ue_create_materials.py WORLD_CLOUD_ALBEDO) exactly; never under this floor.
+CLOUD_LIGHT_ALBEDO_FLOOR = 0.9
 #: Per shape (cumulus, stratocumulus, overcast, nimbostratus, altocumulus): the base's
 #: albedo deficit and the share of the layer it fades over (a cumulus base is flat: a
 #: quarter of the layer; a deck's is diffuse).
@@ -1114,8 +1138,7 @@ def cloud_light_row(light_on: bool, shape: str) -> Dict[str, float]:
     g, g2, blend = CLOUD_LIGHT_PHASE
     c, o, e = CLOUD_LIGHT_OCTAVE
     return {"PhaseG": g, "PhaseG2": g2, "PhaseBlend": blend, "MsContribution": c, "MsOcclusion": o,
-            "MsEccentricity": e, "PowderAmount": CLOUD_LIGHT_POWDER, "PowderDepthM": CLOUD_LIGHT_POWDER_DEPTH_M,
-            "BaseDarkening": CLOUD_LIGHT_BASE_DARKENING.get(shape, 0.0),
+            "MsEccentricity": e, "BaseDarkening": CLOUD_LIGHT_BASE_DARKENING.get(shape, 0.0),
             "BaseRise": CLOUD_LIGHT_BASE_RISE.get(shape, CLOUD_LIGHT_OFF["BaseRise"])}
 
 
@@ -1124,18 +1147,19 @@ def cloud_light_billow(billow_on: bool, light_on: bool) -> bool:
     return bool(billow_on) and not light_on
 
 
-def cloud_albedo(albedo: float, extinction_per_m: float, norm_alt: float, cos_sun_view: float,
-                 row: Dict[str, float]) -> float:
-    """cloud_albedo.hlsl in Python: albedo x powder x base. cos_sun_view is the
-    cosine between the view ray (camera to sample) and the direction to the sun."""
-    powder = 1.0 - math.exp(-2.0 * max(extinction_per_m, 0.0) * max(row["PowderDepthM"], 0.0))
-    away = min(max(0.5 - 0.5 * cos_sun_view, 0.0), 1.0)
-    w = min(max(row["PowderAmount"], 0.0), 1.0) * away
-    rise = max(row["BaseRise"], 1e-3)
-    t = min(max(norm_alt / rise, 0.0), 1.0)
+def cloud_sky_ao(norm_alt: float, bottom_occlusion: float, row: Dict[str, float]) -> float:
+    """cloud_sky_ao.hlsl in Python: the lit material's Ambient Occlusion, which scales
+    the SKY light only. The darker of the engine's bottom gradient
+    saturate(1 - bottom_occlusion + h) (the pin replaces it) and the flat base
+    lerp(1 - BaseDarkening, 1, smoothstep(0, BaseRise, h))."""
+    def sat(v):
+        return min(max(v, 0.0), 1.0)
+    h = sat(norm_alt)
+    engine = sat(1.0 - sat(bottom_occlusion) + h)
+    t = sat(h / max(row["BaseRise"], 1e-3))
     s = t * t * (3.0 - 2.0 * t)
-    base = (1.0 - min(max(row["BaseDarkening"], 0.0), 1.0)) * (1.0 - s) + s
-    return albedo * ((1.0 - w) + w * powder) * base
+    flat = (1.0 - sat(row["BaseDarkening"])) * (1.0 - s) + s
+    return min(engine, flat)
 
 
 #: -cloud-material=ours|epic (A/B, default ours): epic draws the beauty layer with Epic's
