@@ -714,6 +714,12 @@ rp_check "sky-hdri: UTextureCube header" "Engine/Classes/Engine/TextureCube.h" "
 # SkyAtmosphere material nodes (every rp_check above covers it); the HLSL
 # intrinsics the shader adds (radians, sign, exp, pow, smoothstep) are the
 # language's. The first Windows build verifies the material compiles.
+# High-sky fx (2026-11-15): the beauty rainbow (FlightSimSkyFx.cpp, M_FlightSimRainbow
+# from create_world_rainbow) and the in-cloud flash (FlightSimWeather.cpp Advance).
+# No engine symbol beyond those checked above: the starfield's engine sphere on a
+# UStaticMeshComponent, SetRenderCustomDepth (rp_check above), FCommandLine::Get
+# (beauty_check above), the SkyAtmosphere material nodes, and the storm cell's
+# existing Flash / FlashRelCm parameters. The first Windows build verifies it.
 # -- visual round 5, lane L3 -- end --------------------------------------------
 
 # -- sun-shafts-sky-occlusion (visual overhaul, 2026-11-09) -----------------
