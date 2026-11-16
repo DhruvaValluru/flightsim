@@ -141,7 +141,7 @@ def test_shaders_material_and_switch_are_wired():
         body = (SHADERS / f"{name}.hlsl").read_text(encoding="utf-8")
         assert not re.search(r"\b(for|while)\s*\(", body)
         assert "Texture" not in body and "Emissive" not in body
-    assert re.search(r'^LOOK_GENERATION = "15"$', MASTERS, re.M)
+    assert re.search(r'^LOOK_GENERATION = "16"$', MASTERS, re.M)
     assert "MP_WORLD_POSITION_OFFSET" in MASTERS and "MP_NORMAL" in MASTERS
     assert 'set_editor_property("tangent_space_normal", False)' in MASTERS
     assert 'TEXT("contrail-facing="), true' in FX_CPP

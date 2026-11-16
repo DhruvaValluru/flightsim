@@ -543,7 +543,10 @@ namespace
 		// trail behind the engines, so the still shows the trail a frame of the
 		// run shows. The FDM is not run: T is the card's ISA temperature at its
 		// altitude, TAS its airspeed over the ISA density ratio (CAS ~ EAS).
-		if (bMeshAirframe && S.AircraftFX.IsValid())
+		// -lookdev-aircraft-fx=off keeps the import's own materials (the old harness).
+		FString LookDevFx = TEXT("on");
+		FParse::Value(*P, TEXT("lookdev-aircraft-fx="), LookDevFx);
+		if (bMeshAirframe && S.AircraftFX.IsValid() && LookDevFx != TEXT("off"))
 		{
 			FFlightSimAircraftFXOptions FxOptions;
 			FxOptions.ParseParams(*P);
@@ -553,9 +556,12 @@ namespace
 			FxOptions.Weather = S.Weather->IsBuilt() ? S.Weather.Get() : nullptr;
 			FxOptions.CloudLayers = Options.CloudLayers;
 			FxOptions.Sun = S.Visual->Sun;
+			FxOptions.SkyLight = S.Visual->SkyLightComponent;   // lane aircraft-refl: the scene mirror
+			FxOptions.Atmosphere = S.Visual->Atmosphere;
 			FxOptions.Humidity.bCardStated = S.Card.AtmosphereProperties.Contains(TEXT("atmosphere/dew-point-R"));
 			if (!S.AircraftFX->Build(World, FxOptions, Error)) { return false; }
 			for (AActor* Fx : S.AircraftFX->BeautyOnlyActors) { Track(Fx); }
+			S.AircraftFX->SetCanopyReflectCamera(false, FString());
 			S.Visual->BeautyOnlyActors.Append(S.AircraftFX->BeautyOnlyActors);
 			const double AltM = S.Card.AltitudeMetres;
 			const double IsaK = FMath::Max(288.15 - 0.0065 * AltM, 216.65);

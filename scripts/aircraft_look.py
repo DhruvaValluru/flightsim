@@ -53,6 +53,9 @@ from aircraft_glass_reflect import GLASS_REFLECT_SHADER_INPUTS, MASTERS as _refl
 # Emissive only, -paint-reflect=on by default): its shader inputs and constants.
 from aircraft_paint_reflect import (  # noqa: E402
     PAINT_REFLECT_SHADER_INPUTS, constants_group as _paint_reflect_constants)
+# LOOK_GENERATION 16 (lane aircraft-refl): the scene's own sky and ground in the
+# paint, bare-metal and canopy mirrors (-scene-mirror=on by default).
+from aircraft_scene_sky import SCENE_SKY_SHADER_INPUTS  # noqa: E402
 # round 5 (L4): the vendored Physically Based API database (CC0, pinned by
 # sha256 in assets/looks/physically_based/PIN.json), the measured constants.
 import physically_based as _pb  # noqa: E402
@@ -280,6 +283,7 @@ SHADER_INPUTS = {
     **GLASS_REFLECT_SHADER_INPUTS,
     # the airframe's sky reflection: "paint_env_uv", "paint_env_reflect".
     **PAINT_REFLECT_SHADER_INPUTS,
+    **SCENE_SKY_SHADER_INPUTS,
 }
 #: The opaque canopy-reflect masters by tier (scripts/aircraft_glass_reflect.py):
 #: drawn only under -canopy-reflect=on, on a glass slot's opaque instance.
@@ -1338,7 +1342,11 @@ FX_SWITCHES = (("aircraft-look=", True), ("aircraft-materials=", True), ("aircra
                # The airframe's sky reflection on the paint and bare-metal MIDs
                # (aircraft_paint_reflect.py): ON; -paint-reflect=off is the A/B
                # (the masters' PaintEnvGain stays 0 and they add nothing).
-               ("paint-reflect=", True))
+               ("paint-reflect=", True),
+               # LOOK_GENERATION 16: those mirrors read the scene's own sky (Sky View
+               # LUT) and ground (the sky light's lower hemisphere) instead of the
+               # coastal strip (aircraft_scene_sky.py): ON; off is generation 13's strip.
+               ("scene-mirror=", True))
 SWITCH_ON = ("on", "1", "true")
 SWITCH_OFF = ("off", "0", "false")
 

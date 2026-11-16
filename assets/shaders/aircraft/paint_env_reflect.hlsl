@@ -21,12 +21,18 @@
 // layer takes the coat to 1 at WetCoatRoughness and the roughness to
 // WetRoughness, and the same panel mirrors the sky: the rain sheen.
 // Amount is the class's double-count hedge (UNCALIBRATED).
+// Generation 16: the strip's radiance is replaced, per pixel, by the scene's
+// own sky above and ground below (Scene, scripts/aircraft_scene_sky.py) when
+// the host sets PaintEnvSceneScale and the Sky View LUT is drawn; the Fresnel
+// and gloss below are unchanged.
 //
 // Inputs:
 //   Env           float3  T_GlassEnv_64 sample (the sRGB sampler decodes it)
 //   EnvScale      float   linear radiance = decoded strip x EnvScale (glass_coastal.json env_encode_scale)
 //   Gain          float   scene luminance (nits) per unit of strip radiance
 //   Tint          float3  the scene's horizon hue over the strip's (white = as baked)
+//   Scene         float4  generation 16 (scene_sky_env.hlsl): rgb the scene's own sky / ground
+//                         radiance along the ray, a 1 to draw it instead of the strip (0 = generation 13)
 //   NdotV         float   the leaned lookup normal . view, 0..1 (paint_env_uv.hlsl x)
 //   F0            float3  the surface's normal-incidence reflectance (lerp(0.08 Specular, BaseColor, Metallic))
 //   Roughness     float   the surface's roughness after the wet layer
@@ -37,6 +43,7 @@
 const float RoughCutoff = 0.5;
 const float CoatF0 = 0.04;
 float3 env = max(Env * EnvScale, 0.0) * max(Gain, 0.0) * max(Tint, 0.0);
+env = lerp(env, max(Scene.rgb, 0.0), saturate(Scene.a));
 float ndv = saturate(NdotV);
 float fw = pow(1.0 - ndv, 5.0);
 float rough = saturate(Roughness);

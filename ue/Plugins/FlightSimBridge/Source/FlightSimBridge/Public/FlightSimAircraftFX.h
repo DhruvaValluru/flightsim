@@ -56,6 +56,8 @@
 
 class AActor;
 class ADirectionalLight;
+class USkyAtmosphereComponent;
+class USkyLightComponent;
 class FFlightSimWeather;
 class UMaterialInstanceDynamic;
 class UPointLightComponent;
@@ -117,6 +119,21 @@ struct FFlightSimAircraftFXOptions
 	// PaintEnvGain 0 and add exactly nothing. Emissive only: no label pass
 	// (ID, depth, stencil, SCS_Normal, SCS_BaseColor) reads it.
 	bool bPaintReflect = true;
+	// LOOK_GENERATION 16 (lane aircraft-refl; scripts/aircraft_scene_sky.py):
+	// the paint, bare-metal and canopy mirrors read the SCENE's sky (the Sky
+	// View LUT along the reflected ray) above the horizon and the scene's
+	// ground (the sky light's lower hemisphere x its colour and intensity,
+	// through the air under the aircraft) below it, instead of the coastal
+	// lane's baked noon-over-sea strip. ON by default; -scene-mirror=off
+	// leaves <Prefix>EnvSceneScale at the masters' 0 and draws generation 13's
+	// strip exactly. Emissive only: no label pass reads it.
+	bool bReflectSceneSky = true;
+	// The scene's sky light and atmosphere (FFlightSimVisualScene; the
+	// commandlet sets them): the ground below the mirror's horizon and the
+	// optical depth it is seen through. Null: no ground (black) and UE's
+	// default atmosphere's column (aircraft_scene_sky.ground_tau).
+	USkyLightComponent* SkyLight = nullptr;
+	USkyAtmosphereComponent* Atmosphere = nullptr;
 	// The look's X-Plane horizon colour (-xplane-horizon=R:G:B, sRGB8) when the
 	// render carries it: the strip's hue follows it. And -xplane-condition=.
 	bool bHorizonKnown = false;
@@ -188,6 +205,11 @@ public:
 	// faded out as the sun sets and dimmed by cloud cover; 0 for an interior
 	// camera. Twin of scripts/aircraft_glass_reflect.py canopy_reflect_gain.
 	static double CanopyReflectGain(double SunIntensity, double SunElevationDeg, double Cover, bool bInterior);
+
+	// LOOK_GENERATION 16: the vertical optical depth of one exponential layer
+	// between the ground and AltitudeKm, Sigma x H x (1 - exp(-h / H)) (Sigma
+	// per km, H km). Twin of scripts/aircraft_scene_sky.py column.
+	static double SceneSkyColumn(double SigmaPerKm, double ScaleHeightKm, double AltitudeKm);
 
 	// The camera of this run looks out through the pane from inside (the
 	// card camera's "cockpit" preset, the legacy "shoulder"): the reflect
@@ -320,6 +342,14 @@ private:
 	// aircraft_look.materials.paint_reflect. The same sun gain as the canopy.
 	TArray<UMaterialInstanceDynamic*> PaintReflectMids;
 	TSharedPtr<FJsonObject> PaintReflectRow;
+	// LOOK_GENERATION 16: the scene-sky switch and its sources (read each step
+	// by UpdateCanopyReflect), the slots whose master predates it, and
+	// render.json's aircraft_look.materials.scene_sky.
+	bool bSceneSky = false;
+	USkyLightComponent* SceneSkyLight = nullptr;
+	USkyAtmosphereComponent* SceneAtmosphere = nullptr;
+	int32 SceneSkyStale = 0;
+	TSharedPtr<FJsonObject> SceneSkyRow;
 	// cockpit-airframe (round 2): mesh manifest beauty_parts, measured part name
 	// -> its beauty-only copy's asset name (body -> body_beauty: the same
 	// triangles with the .ac crease normals and two-sided back faces).

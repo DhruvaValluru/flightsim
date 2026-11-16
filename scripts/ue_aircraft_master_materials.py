@@ -133,7 +133,15 @@ REPO = os.path.dirname(_HERE)
 #: tangent_space_normal off), so the sun side is lit and the far side gets only the
 #: sky; Facing 0 in the master is generation 14 (the C++ sets 1 under
 #: -contrail-facing=on, the default).
-LOOK_GENERATION = "15"
+#: 16 (lane aircraft-refl, 2026-11-15): the paint / bare-metal masters (and their
+#: probe twins) and both canopy reflect masters read the scene's own sky along the
+#: reflected ray (SkyAtmosphereViewLuminance: the Sky View LUT) above the horizon
+#: and the host's ground (the sky light's lower hemisphere through the air below
+#: the aircraft) beneath it, instead of the coastal strip (scripts/aircraft_scene_sky.py,
+#: scene_sky_dir / scene_sky_env.hlsl). <Prefix>EnvSceneScale 0 in the master:
+#: the strip exactly as generation 13 until the host sets it (-scene-mirror=on).
+#: Emissive only. Every other graph is unchanged.
+LOOK_GENERATION = "16"
 #: Round 25: every paint / bare-metal master carries this scalar (default
 #: LOOK_GENERATION), wired into its AO as x0, so FlightSimAircraftFX.cpp can
 #: read which graph a render drew (render.json aircraft_look.materials.
