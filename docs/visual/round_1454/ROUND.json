@@ -1,0 +1,38 @@
+{
+    "round":  1454,
+    "commit":  "da82dc78",
+    "full":  false,
+    "scenes":  [
+                   9
+               ],
+    "switches":  "-meter-res=quarter",
+    "prep":  [
+
+             ],
+    "seconds":  {
+                    "scenes":  27.5
+                },
+    "outcomes":  [
+
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_140",
+                          "compare_with_found":  true,
+                          "scenes":  {
+
+                                     }
+                      }
+}
