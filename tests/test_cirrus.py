@@ -412,8 +412,8 @@ def test_the_material_is_unlit_translucent_and_label_safe():
     assert "MP_BASE_COLOR" not in CREATE and "MD_VOLUME" not in CREATE
     assert CREATE.index('world_stamp(material, "M_FlightSimCirrus")') < CREATE.index("finish(material")
     assert "M_FlightSimCirrus" in _script_value("WORLD_BEAUTY_MATERIALS")
-    assert _script_value("WORLD_GENERATIONS")["M_FlightSimCirrus"] == "2"         # 2: sky-cirrus2 patches + hooked fibres
-    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCirrus"] == "2"
+    assert _script_value("WORLD_GENERATIONS")["M_FlightSimCirrus"] == "3"         # 2: sky-cirrus2 patches + hooked fibres; 3: look check
+    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCirrus"] == "3"
     # the distant sheet's stamps did not move: no shader of theirs changed
     assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimDistantClouds"] == "5"
     assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"] == "10"   # sky-clouds2: graph 8 again, the light in M_FlightSimCloudLayersLit

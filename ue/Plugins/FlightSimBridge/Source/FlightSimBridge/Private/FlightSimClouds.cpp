@@ -1470,8 +1470,8 @@ namespace FlightSimWorldPure
 	}
 	inline double CirrusLook(int Field)
 	{
-		static const double Values[CirrusLookCount] = {1.5, 6.0, 2.0, 0.85, 6.0, 40.0, 10.0, 30.0, 1.0, 4.0,
-		                                               0.5, 0.3, 0.35, 0.95, 1.0, 0.7, 0.6, 8.0, 0.2, 1.0};
+		static const double Values[CirrusLookCount] = {1.5, 6.0, 2.0, 0.92, 6.0, 25.0, 10.0, 30.0, 1.0, 4.0,
+		                                               0.5, 0.4, 0.42, 0.95, 1.0, 0.7, 0.6, 8.0, 0.2, 1.0};
 		return Field >= 0 && Field < CirrusLookCount ? Values[Field] : 0.0;
 	}
 	struct FCirrusSheet

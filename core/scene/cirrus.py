@@ -120,8 +120,8 @@ CIRRUS_SLANT_FLOOR = 0.25
 #:   HookLenKm
 #:   DetailFade     fibres finer than DetailFade x StreakScaleKm per pixel draw their mean
 #:   OpticalDepth   vertical optical depth at full thickness: thin cirrus is 0.03-0.3
-#:                  (Sassen & Cho 1992); 0.3 is its top
-#:   MaxOpacity     the cap: 1 - exp(-0.3 x 1.4) ~ 0.35, so the blue reads through
+#:                  (Sassen & Cho 1992); 0.4 sits just above its top (generation 3)
+#:   MaxOpacity     the cap: 1 - exp(-0.4 x 1.4) ~ 0.43 -> 0.42, so the blue reads through
 #:   Albedo         ice scatters nearly all it intercepts
 #:   AmbientGain    x the sky's distant scattered luminance
 #:   ForwardG       Henyey-Greenstein asymmetry of ice crystals (0.7-0.8, Baran 2009)
@@ -129,21 +129,26 @@ CIRRUS_SLANT_FLOOR = 0.25
 #:   ForwardCap     the lobe's cap (its peak would be (1+g)/(1-g)^2 = 19 at g 0.7)
 #:   RimFadeShare   the sheet fades out over this share of the radius at the rim
 #:   SunDirSign     1: SkyAtmosphereLightDirection points TOWARDS the sun; -1 flips it
+#: Generation 3 (2026-11-16, Mac editor look check, scene 3; review: the preview was
+#: too sparse and faint): FibreStrength 0.85 -> 0.92 (brighter fibres, less veil),
+#: PatchScaleKm 40 -> 25 (more, smaller patches: two to four in a wide view),
+#: OpticalDepth 0.3 -> 0.4 and MaxOpacity 0.35 -> 0.42 (the top of thin cirrus;
+#: the blue still reads through). Stills: scratchpad lookdev/sky3-cirrus/{c1,c2,c3,final}.
 #: UNCALIBRATED beyond the Mac look-dev stills.
 CIRRUS_LOOK: Dict[str, float] = {
     "StreakScaleKm": 1.5,
     "StreakAspect": 6.0,
     "EdgeSigmas": 2.0,
-    "FibreStrength": 0.85,
+    "FibreStrength": 0.92,
     "FibreSharpness": 6.0,
-    "PatchScaleKm": 40.0,
+    "PatchScaleKm": 25.0,
     "FlowWarpKm": 10.0,
     "FlowLenKm": 30.0,
     "HookWarpKm": 1.0,
     "HookLenKm": 4.0,
     "DetailFade": 0.5,
-    "OpticalDepth": 0.3,
-    "MaxOpacity": 0.35,
+    "OpticalDepth": 0.4,
+    "MaxOpacity": 0.42,
     "Albedo": 0.95,
     "AmbientGain": 1.0,
     "ForwardG": 0.7,
