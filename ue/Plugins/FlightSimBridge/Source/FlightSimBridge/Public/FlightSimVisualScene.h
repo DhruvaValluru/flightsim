@@ -454,6 +454,12 @@ public:
 	// ShaftLight) and the scenario world's tornado funnel on M_TornadoFunnel;
 	// shading only, recorded in look_applied.weather_look.beauty.
 	void ApplyBeautyWeatherLook(UWorld* World);
+	// High-sky effects lane (2026-11-15; FlightSimSkyFx.cpp): BEAUTY ONLY, from
+	// ApplyBeautyWeatherLook. The rainbow: one additive sphere on
+	// M_FlightSimRainbow in BeautyOnlyActors, only with rain on the weather look
+	// and the sun above the horizon; -look-rainbow=off builds none. Recorded in
+	// Beauty.sky_fx.
+	void ApplyBeautySkyFx(UWorld* World, const TSharedPtr<FJsonObject>& Beauty);
 	// M_IceOverlay as the overlay material of every static mesh part of the
 	// airframe; its IceAmount follows the card's icing_schedule eta(t)
 	// (AdvanceWorld). Nothing without ice on the block.
@@ -557,6 +563,10 @@ private:
 	UMaterialInstanceDynamic* RainInstance = nullptr;
 	// The weather look's state (FlightSimWeatherLook.cpp).
 	TSharedPtr<FJsonObject> WeatherLook;
+	// High-sky effects lane: the rain's top (ApplyWeatherLook) and the rainbow
+	// sphere (ApplyBeautySkyFx).
+	double SkyFxRainTopM = 0.0;
+	AActor* RainbowActor = nullptr;
 	// A procedural quad since B4 round 2 (the scaled engine Plane read a
 	// zero GBuffer normal on UE 5.7); the weather look sets its material.
 	UMeshComponent* FlatGround = nullptr;

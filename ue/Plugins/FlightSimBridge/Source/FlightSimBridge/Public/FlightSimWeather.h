@@ -555,6 +555,13 @@ private:
 	bool bFlashShadows = false;
 	AActor* LightningActor = nullptr;
 	double LastFlashLuxValue = 0.0;
+	// High-sky effects lane (2026-11-15): the beauty in-cloud flash. Off until
+	// ApplyBeautyStormVantage (beauty only) reads -look-cloud-flash=; the card's
+	// rate, IC:CG ratio and seed (BuildLightning) set its schedule.
+	int BeautyCloudFlashMode = 0;
+	double CloudFlashRatePerMin = 0.0;
+	double CloudFlashIcCg = -1.0;
+	uint64 CloudFlashSeed = 0;
 	double BeautyRainGain = 1.0;
 
 	// -- thunder -------------------------------------------------------------
