@@ -407,18 +407,20 @@ BEAUTY_TORNADO_FLIPBOOK_HEIGHT_SHARE = 1.40
 #: 2026-11-15 (hyperreal light lane tornado): -tornado-shade=funnel (the default), the
 #: card shaded as a condensation funnel (M_TornadoFlipbook 3; FlightSimTornadoBeauty.cpp
 #: BeautyFlipbookFunnel*, where each number's source is stated). colour: a cloud's two-stream
-#: albedo (1 - g) tau / (2 + (1 - g) tau) at g 0.85, tau 10 (tornado_flipbook_albedo);
+#: albedo (1 - g) tau / (2 + (1 - g) tau) at g 0.85, tau 7.5 (tornado_flipbook_albedo);
+#: shade_floor, sheath_lift, contrast and the 100 m chord tuned by eye on the Mac look-dev
+#: still of #10 (2026-11-15: 0.43 / 0.55 / 0.25 read paper-white against the storm base);
 #: -tornado-shade=smoke keeps BEAUTY_TORNADO_FLIPBOOK_COLOUR and the material's generation-2
 #: defaults. UNCALIBRATED.
 BEAUTY_TORNADO_FLIPBOOK_FUNNEL = {
-    "colour": (0.43, 0.43, 0.43), "shade_floor": 0.55, "alpha_lo": 0.15, "alpha_hi": 0.55,
-    "sheath_lift": 0.25, "bands": 6.0, "contrast": 0.15, "corrugate": 0.06, "bottom_width": 0.35,
+    "colour": (0.36, 0.36, 0.36), "shade_floor": 0.45, "alpha_lo": 0.15, "alpha_hi": 0.55,
+    "sheath_lift": 0.10, "bands": 6.0, "contrast": 0.30, "corrugate": 0.06, "bottom_width": 0.35,
     "dust_share_max": 0.35,
 }
 BEAUTY_TORNADO_FLIPBOOK_SHADES = ("funnel", "smoke")
 
 
-def tornado_flipbook_albedo(lwc_g_m3: float = 0.5, r_e_um: float = 10.0, path_m: float = 133.0,
+def tornado_flipbook_albedo(lwc_g_m3: float = 0.5, r_e_um: float = 10.0, path_m: float = 100.0,
                             g: float = 0.85) -> float:
     """A cloud's two-stream albedo (Bohren 1987): tau = 3 LWC L / (2 rho_w r_e) (Stephens
     1978), R = (1 - g) tau / (2 + (1 - g) tau)."""

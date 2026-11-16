@@ -178,21 +178,22 @@ namespace FlightSimTornadoBeautyLocal
 	//  * Tint: a cloud's two-stream albedo, R = (1 - g) tau / (2 + (1 - g) tau) (Bohren 1987,
 	//    Am. J. Phys. 55, 524), g = 0.85 for cloud droplets (Hansen & Travis 1974), tau =
 	//    3 LWC L / (2 rho_w r_e) (Stephens 1978) for LWC 0.5 g/m^3, r_e 10 um across L = 133 m
-	//    of a rope-to-cone funnel: tau = 10, R = 0.43; neutral grey (water cloud is spectrally
+	//    of a rope funnel's chord L = 100 m: tau = 7.5, R = 0.36 (tuned 2026-11-15 on the Mac
+	//    look-dev still of #10 from L 133 m, R 0.43, which read paper-white); neutral grey (water cloud is spectrally
 	//    flat in the visible): the storm's own sun and sky light give it its colour.
-	//  * ShadeFloor 0.55 (generation 2: 0.35): the bake's own sun shading is kept as the
+	//  * ShadeFloor 0.45 (generation 2: 0.35; 0.55 read flat white on the look-dev still): the bake's own sun shading is kept as the
 	//    funnel's relief but no longer darkens a lit funnel to soot (texel grey 0.36..0.64,
 	//    the 5th..95th percentile, now shades 0.71..0.84).
 	//  * AlphaLo..AlphaHi 0.15..0.55: a condensation funnel's edge is the isobar on which the
 	//    pressure deficit reaches the lifting condensation level (Davies-Jones, Trapp &
 	//    Bluestein 2001, Meteor. Monogr. 28 ch. 5), crisp, not the bake's smoke wisps (a
 	//    quarter of the plume's texels sit below alpha 0.21; the median is 0.63, so about half
-	//    the plume is solid after the remap; the card's lit body averages albedo 0.33, about
-	//    3x the wall cloud's 0.115, generation 2's 0.10). SheathLift 0.25: the partial-alpha edge lifted,
+	//    the plume is solid after the remap; the card's lit body averages albedo 0.26, about
+	//    2.2x the wall cloud's 0.115, generation 2's 0.10). SheathLift 0.10 (0.25 read white-rimmed): the partial-alpha edge lifted,
 	//    the lighter outer condensation. UNCALIBRATED.
 	//  * Striations: Bands helix turns over the card (6: one band per ~175 m of a 1.05 km card,
 	//    about the funnel's diameter at mid-height, a reading of rope and cone tornado photos,
-	//    UNCALIBRATED), Contrast 0.15, the edge rippled 6 % (Corrugate), turning at the
+	//    UNCALIBRATED), Contrast 0.30 (0.15 was invisible on the look-dev still), the edge rippled 6 % (Corrugate), turning at the
 	//    Rankine core's solid-body rate Vmax / Rcore (the dust whirl's own spin, same sense).
 	//  * BottomWidth 0.35 (generation 2: 0.50): with the alpha remap, the card's visible outline
 	//    (alpha > 0.02, the committed atlas through the shaders at the default card: 1.05 km x
@@ -208,15 +209,15 @@ namespace FlightSimTornadoBeautyLocal
 	//    whirl's reach + its top), more than any puff can be behind the card's centre from any
 	//    camera (triangle inequality), so the whirl is never drawn under the card -- generation
 	//    2's card, sorted by its centre 525 m up, could draw over the whirl and hide the tan skirt.
-	constexpr float BeautyFlipbookFunnelColourR = 0.43f;
-	constexpr float BeautyFlipbookFunnelColourG = 0.43f;
-	constexpr float BeautyFlipbookFunnelColourB = 0.43f;
-	constexpr float BeautyFlipbookFunnelShadeFloor = 0.55f;
+	constexpr float BeautyFlipbookFunnelColourR = 0.36f;
+	constexpr float BeautyFlipbookFunnelColourG = 0.36f;
+	constexpr float BeautyFlipbookFunnelColourB = 0.36f;
+	constexpr float BeautyFlipbookFunnelShadeFloor = 0.45f;
 	constexpr float BeautyFlipbookFunnelAlphaLo = 0.15f;
 	constexpr float BeautyFlipbookFunnelAlphaHi = 0.55f;
-	constexpr float BeautyFlipbookFunnelSheathLift = 0.25f;
+	constexpr float BeautyFlipbookFunnelSheathLift = 0.10f;
 	constexpr float BeautyFlipbookFunnelBands = 6.0f;
-	constexpr float BeautyFlipbookFunnelContrast = 0.15f;
+	constexpr float BeautyFlipbookFunnelContrast = 0.30f;
 	constexpr float BeautyFlipbookFunnelCorrugate = 0.06f;
 	constexpr float BeautyFlipbookFunnelBottomWidth = 0.35f;
 	constexpr double BeautyFlipbookFunnelDustShareMax = 0.35;

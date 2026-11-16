@@ -630,6 +630,11 @@ namespace
 #endif
 		S.Camera = CameraActor;
 		USceneCaptureComponent2D* Capture = CameraActor->GetCaptureComponent2D();
+		// As the commandlet: the vdb card replaces the measure funnel in the beauty only.
+		if (S.Tornado.IsValid() && S.Tornado->TornadoBeautyHiddenFunnel != nullptr)
+		{
+			Capture->HiddenComponents.AddUnique(S.Tornado->TornadoBeautyHiddenFunnel);
+		}
 		Capture->bCaptureEveryFrame = false;
 		Capture->bCaptureOnMovement = false;
 		// As the commandlet's capture: without a persistent view state there is no
