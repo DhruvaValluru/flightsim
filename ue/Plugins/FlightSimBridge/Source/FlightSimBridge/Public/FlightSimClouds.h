@@ -82,6 +82,8 @@ class AGeoReferencingSystem;
 class FFlightSimGoogleTiles;
 class FFlightSimVisualScene;
 class FFlightSimWeather;
+struct FFlightSimSkyPlan;
+class IConsoleVariable;
 class UMaterialInstanceDynamic;
 class UMaterialParameterCollection;
 class UProceduralMeshComponent;
@@ -97,10 +99,13 @@ public:
 	// for explicitly and cannot be honoured (an unreadable overrides file or
 	// scatter sidecar, an unknown -beauty-clouds word); a missing material is
 	// recorded, never refused: the look is visual only.
+	// Sky step 2: SkyPlan is the -sky= plan the commandlet loaded (nullptr without
+	// one); ApplyClouds reads its beauty-only cloud fields. The measure path never
+	// calls this.
 	bool Build(UWorld* World, const TCHAR* Params, const TSharedPtr<FJsonObject>& Card,
 	           AActor* Aircraft, AGeoReferencingSystem* GeoReferencing,
 	           FFlightSimVisualScene& Scene, FFlightSimWeather& Weather,
-	           FFlightSimGoogleTiles& Tiles, FString& Error);
+	           FFlightSimGoogleTiles& Tiles, const FFlightSimSkyPlan* SkyPlan, FString& Error);
 
 	// Per captured frame, after the weather's Advance and before the captures:
 	// the clouds' drift, the lightning's sky pulse, the scatter's re-snap near
@@ -150,6 +155,9 @@ private:
 		// (FlightSimWorldPure::CloudDistantCover), so the horizon stays under impostors.
 		double DistantCover = 0.0;
 		int32 Shape = 0;
+		// Sky step 2: the plan's density multiplier on the row's extinction (1 = the
+		// row); the occlusion row reads the extinction drawn.
+		double DensityScale = 1.0;
 	};
 
 	bool LoadOverrides(const FString& Path, FString& Error);
@@ -203,6 +211,23 @@ private:
 	// given is kept for the refusal message.
 	double CloudVolumetricScale = 1.0;
 	FString CloudVolumetricScaleText;
+	// Sky step 2: -cloud-type=clear|cumulus|stratocumulus|altocumulus|cirrus|overcast|
+	// nimbostratus (Build reads it; empty = not given). The owner's probe: it
+	// overrides the plan's cloud_type and the card's shape (FlightSimWorldPure::
+	// LayerSource); another word refuses by name.
+	FString CloudTypeSwitch;
+	// Sky step 3: -cloud-march=auto|constrained|discrete|probe (Build reads it; auto
+	// = the GPU class, as before). ApplyClouds and ApplyDistantClouds resolve it
+	// through FlightSimWorldPure::CloudMarchFor; another word refuses by name.
+	FString CloudMarchSwitch = TEXT("auto");
+	// Sky step 5: the -cloud-march= word as parsed (CloudMarchSwitch above becomes the
+	// word in force once Build has weighed the plan's march_tier) and where the word
+	// in force came from (FlightSimWorldPure::MarchWordSourceName), recorded.
+	FString CloudMarchSwitchGiven = TEXT("auto");
+	FString CloudMarchWordSource = TEXT("default auto");
+	// Sky step 2: the -sky= plan Build was given (nullptr without one); ApplyClouds
+	// reads its cloud fields (FFlightSimSkyPlan::CloudType and the rest).
+	const FFlightSimSkyPlan* SkyPlanRef = nullptr;
 	bool StormNeutralAlbedo() const;
 	// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default; off
 	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)
@@ -257,9 +282,19 @@ private:
 	// cloud sky AO, the still tier's fog grid (FlightSimSunShafts.h).
 	FFlightSimSunShafts SunShafts;
 
-	// clouds-sky round 2: the cloud cvar ApplyClouds wrote and its value
-	// before (empty: untouched), put back by RestoreCvars.
-	FString CloudFogAllPixelBefore;
+	// Sky step 3: every renderer cvar ApplyClouds wrote (the march tier's table,
+	// FlightSimWorldPure::CloudCvar, and clouds-sky round 2's fog-on-every-cloud-
+	// pixel cvar) with its value before, saved once each; RestoreCvars walks the
+	// array in reverse. SetWorldCvar records [before, read back] under its Row.
+	struct FSavedCvar
+	{
+		FString Name;
+		FString Before;
+	};
+	TArray<FSavedCvar> WorldCvarsBefore;
+	FString SaveWorldCvar(const TCHAR* Name, IConsoleVariable* Variable);
+	void SetWorldCvar(const TCHAR* Name, double Value, const TSharedPtr<FJsonObject>& Row,
+	                  TArray<TSharedPtr<FJsonValue>>& Skipped);
 
 	// dust-humidity-haze: the overlay after ApplyAtmosphere (FlightSimDustHaze.h).
 	FFlightSimDustHaze DustHaze;

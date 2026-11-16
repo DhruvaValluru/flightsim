@@ -458,6 +458,11 @@ sky_check "world: LightComponentBase Intensity" "Classes/Components/LightCompone
 sky_check "world: SkyLight SetIntensity" "Classes/Components/SkyLightComponent.h" "void SetIntensity(float NewIntensity)"
 sky_check "world: VolumetricCloud Material soft pointer" "$VC" "TSoftObjectPtr<UMaterialInterface> Material;"
 sky_check "world: VolumetricCloud LayerBottomAltitude" "$VC" "float LayerBottomAltitude;"
+# sky step 2 (2026-11-14): the plan's shadowed cloud component leaves the sky capture;
+# a clear/cirrus plan hides the volumetric layer (SceneComponent visibility gates the
+# cloud proxy at render-state creation, VolumetricCloudComponent.cpp CreateRenderState_Concurrent).
+sky_check "world: VolumetricCloud SetVisibleInRealTimeSkyCaptures" "$VC" "void SetVisibleInRealTimeSkyCaptures(bool bValue)"
+sky_check "world: SceneComponent SetVisibility" "Classes/Components/SceneComponent.h" "void SetVisibility(bool bNewVisibility, bool bPropagateToChildren=false)"
 sky_check "world: VolumetricCloud per-sample transmittance" "$VC" "void SetbUsePerSampleAtmosphericLightTransmittance(bool NewValue)"
 sky_check "world: VolumetricCloud SetSkyLightCloudBottomOcclusion" "$VC" "void SetSkyLightCloudBottomOcclusion(float NewValue)"
 sky_check "world: VolumetricCloud SetViewSampleCountScale" "$VC" "void SetViewSampleCountScale(float NewValue)"
@@ -610,6 +615,41 @@ rp_check "distant: translucency applies cloud fogging" "../../Shaders/Private/Ba
 rp_check "distant: cloud sample count law" "../../Shaders/Private/VolumetricCloud.usf" "RenderVolumetricCloudParameters.SampleCountMax * saturate((TMax - TMin) * RenderVolumetricCloudParameters.InvDistanceToSampleCountMax)"
 rp_cvar r.VolumetricCloud.DistanceToSampleMaxCount "Renderer/Private/VolumetricCloudRendering.cpp"
 rp_check "distant: trace clamps TMax" "../../Shaders/Private/VolumetricCloud.usf" "const float MarchingDistance = min(RenderVolumetricCloudParameters.TracingMaxDistance, TMax - TMin);"
+# Sky step 3 (the owner's X-Plane-12 brief): the march tier's cvar table
+# (FlightSimClouds.cpp FlightSimWorldPure::CloudCvarName), each name at its
+# registration WITH the default the constrained row repeats
+# (world_beauty.ENGINE_CLOUD_CVAR_DEFAULTS), and the Cinematic scalability
+# group's three sky LUT values that override those defaults on every beauty
+# render (world_beauty.CINEMATIC_SKY_CVARS; BaseScalability.ini [EffectsQuality@Cine]).
+VCR="Renderer/Private/VolumetricCloudRendering.cpp"
+SAR="Renderer/Private/SkyAtmosphereRendering.cpp"
+rp_check "sky step 3: cvar r.VolumetricCloud.ViewRaySampleMaxCount 768" "$VCR" "TEXT(\"r.VolumetricCloud.ViewRaySampleMaxCount\"), 768,"
+rp_check "sky step 3: cvar r.VolumetricCloud.Shadow.ViewRaySampleMaxCount 80" "$VCR" "TEXT(\"r.VolumetricCloud.Shadow.ViewRaySampleMaxCount\"), 80,"
+rp_check "sky step 3: cvar r.VolumetricCloud.DistanceToSampleMaxCount 15" "$VCR" "TEXT(\"r.VolumetricCloud.DistanceToSampleMaxCount\"), 15.0f,"
+rp_check "sky step 3: cvar r.VolumetricCloud.SampleMinCount 2" "$VCR" "TEXT(\"r.VolumetricCloud.SampleMinCount\"), 2,"
+rp_check "sky step 3: cvar r.VolumetricCloud.ShadowMap.RaySampleMaxCount 128" "$VCR" "TEXT(\"r.VolumetricCloud.ShadowMap.RaySampleMaxCount\"), 128.0f,"
+rp_check "sky step 3: cvar r.VolumetricCloud.ShadowMap.MaxResolution 2048" "$VCR" "TEXT(\"r.VolumetricCloud.ShadowMap.MaxResolution\"), 2048,"
+rp_check "sky step 3: cvar r.VolumetricCloud.SkyAO.TraceSampleCount 10" "$VCR" "TEXT(\"r.VolumetricCloud.SkyAO.TraceSampleCount\"), 10,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.AerialPerspectiveLUT.Depth 96" "$SAR" "TEXT(\"r.SkyAtmosphere.AerialPerspectiveLUT.Depth\"), 96.0f,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution 16" "$SAR" "TEXT(\"r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution\"), 16.0f,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.AerialPerspectiveLUT.Width 32" "$SAR" "TEXT(\"r.SkyAtmosphere.AerialPerspectiveLUT.Width\"), 32,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.TransmittanceLUT.SampleCount 10" "$SAR" "TEXT(\"r.SkyAtmosphere.TransmittanceLUT.SampleCount\"), 10.0f,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.MultiScatteringLUT.SampleCount 15" "$SAR" "TEXT(\"r.SkyAtmosphere.MultiScatteringLUT.SampleCount\"), 15.0f,"
+rp_check "sky step 3: cvar r.SkyAtmosphere.DistanceToSampleCountMax 150" "$SAR" "TEXT(\"r.SkyAtmosphere.DistanceToSampleCountMax\"), 150.0f,"
+rp_check "sky step 3: Cinematic AP DepthResolution 32" "../../Config/BaseScalability.ini" "r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution=32.0"
+rp_check "sky step 3: Cinematic TransmittanceLUT.SampleCount 30" "../../Config/BaseScalability.ini" "r.SkyAtmosphere.TransmittanceLUT.SampleCount=30.0"
+rp_check "sky step 3: Cinematic MultiScatteringLUT.SampleCount 20" "../../Config/BaseScalability.ini" "r.SkyAtmosphere.MultiScatteringLUT.SampleCount=20.0"
+rp_check "sky step 3: a scalability set cannot lower a code set" "Core/Private/HAL/ConsoleManager.cpp" "ECVF_SetByCode"
+# Repair round 1: r.VolumetricCloud.DistanceToSampleMaxCount also governs the
+# sky-light capture's step count. The engine sets InvDistanceToSampleCountMax
+# once, from that cvar, for every trace; its bIsReflectionRendering block
+# re-derives only SampleCountMax / ShadowSampleCountMax (the commandlet's
+# reflection caps), so the probe tier lengthens that capture's march too.
+rp_check "sky step 3: InvDistanceToSampleCountMax is set once, for every trace" "$VCR" "CloudGlobalShaderParams.InvDistanceToSampleCountMax"
+rp_check "sky step 3: ... from r.VolumetricCloud.DistanceToSampleMaxCount" "$VCR" "KilometersToCentimeters * CVarVolumetricCloudDistanceToSampleMaxCount.GetValueOnAnyThread());"
+rp_check "sky step 3: the reflection pass re-derives SampleCountMax" "$VCR" "UVolumetricCloudComponent::BaseViewRaySampleCount * CloudInfo.GetVolumetricCloudSceneProxy().ReflectionViewSampleCountScale,"
+rp_check "sky step 3: the reflection pass re-derives ShadowSampleCountMax" "$VCR" "UVolumetricCloudComponent::BaseShadowRaySampleCount * CloudInfo.GetVolumetricCloudSceneProxy().ShadowReflectionViewSampleCountScale,"
+rp_check "sky step 3: the reflection pass is the sky-light capture" "$VCR" "CloudRC.bIsReflectionRendering = ViewInfo.bIsReflectionCapture;"
 # The sky HDRI probe (ApplySkyHdri).
 rp_check "sky-hdri: SLS_SpecifiedCubemap" "Engine/Classes/Components/SkyLightComponent.h" "SLS_SpecifiedCubemap,"
 rp_check "sky-hdri: SkyLight SourceType" "Engine/Classes/Components/SkyLightComponent.h" "TEnumAsByte<enum ESkyLightSourceType> SourceType;"

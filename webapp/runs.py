@@ -2985,15 +2985,89 @@ def write_sky_plan(spec: ScenarioSpec, scene: Dict, camera, out: Path,
                  {"sidecar": None,
                   "note": "no night lights: the scene has no imagery drape "
                           "to carry them, or the NASA GIBS fetch failed"})
+    # Sky step 5: the plan's BEAUTY-ONLY cloud type and coverage from the
+    # ERA5 level cover at the plan's INSTANT (a dated spec over a real place),
+    # else the stated default, recorded as a default with the reason. The
+    # instant's UTC date AND hour go to the archive, not weather_date: that
+    # is a LOCAL date, and a 20:00 local evening west of Greenwich or a 02:00
+    # morning east of it is the next or the previous UTC day (repair round 1;
+    # the first cut fetched weather_date at the instant's hour, 24 h off).
+    cover, cover_note = historical_cloud_cover(spec, instant.utc, scene=scene, push=push)
     plan = plan_sky(time_value, weather_date, lat, lon,
                     float(spec.altitude.value),
                     float(spec.terrain_elevation.value),
                     camera_preset=preset,
                     weather_event=str(spec.weather_event.value),
-                    fov_deg=fov, width_px=width, night_lights=night)
+                    fov_deg=fov, width_px=width, night_lights=night,
+                    cloud_cover=cover, cloud_cover_note=cover_note,
+                    seed=int(spec.seed.value))
     path = out / "sky.json"
     path.write_text(json.dumps(plan, indent=1), encoding="ascii")
     return path
+
+
+def historical_cloud_cover(spec: ScenarioSpec, instant_utc,
+                           scene: Optional[Dict] = None,
+                           push=None) -> Tuple[Optional[Dict], Optional[str]]:
+    """The ERA5 level cloud cover for the sky plan, or why there is none.
+
+    Sky step 5. ``(cover, None)`` with the provider's dict
+    (:func:`core.environment.era5.fetch_reanalysis_cloud_cover`) when the
+    spec has a ``weather_date``, names a real place and the policy drew no
+    cloud cover; else ``(None, reason)`` and the plan records its stated
+    default with the reason. Rules, in order: no date -> no fetch (the plan
+    says "no weather_date"); a SAMPLED cover (the randomization block's
+    ``cloud_cover``, contracts §5.1) is the card's layer and stands above
+    the plan in the host anyway, so the archive is not asked; a synthesised
+    ridge is not a place; an unreachable archive is recorded, never a
+    refusal: clouds are VISUAL ONLY, so unlike the wind this never refuses
+    the run or edits the spec. The web app's weather stays on by default.
+
+    ``instant_utc`` is the sky plan's instant (``resolve_instant(...).utc``,
+    an aware UTC datetime): the archive is asked for ITS UTC date and hour,
+    never for ``weather_date`` at that hour. ``weather_date`` is the spec's
+    LOCAL date, and the instant crosses the UTC day boundary whenever the
+    local time is late in the day west of Greenwich (20:00 at New York on
+    2024-01-15 is 2024-01-16T00:56Z) or early in the day east of it (02:00
+    at Tokyo is 2024-01-14T16:41Z); the first cut passed the hour alone and
+    fetched the wrong calendar day in every such case (repair round 1). The
+    returned dict's ``date`` is therefore the UTC day fetched, and
+    ``coverage_source`` stamps that day. ``scene`` is the scene dict
+    :func:`write_sky_plan` already holds (one decision, one source); a
+    direct caller may leave it None and :func:`pick_scene` is asked.
+    """
+    date = str(spec.weather_date.value)
+    if date == "none":
+        return None, None
+    block = getattr(spec, "randomization", None)
+    drawn = getattr(block, "cloud_cover", None) if block is not None else None
+    if drawn is not None and str(drawn.source) == "sampled":
+        return None, ("sampled cloud cover wins; ERA5 clouds not applied "
+                      "(the card's layer stands above the plan)")
+    # (spelled with a local so mutation guard 318, aimed at the wind's line
+    # below, keeps one target: tests/test_mutation_targets.py)
+    scene_key = (scene if scene is not None else pick_scene(spec))["key"]
+    if scene_key in SYNTHESISED_SCENE_KEYS:
+        return None, "a synthesised ridge is not a place; ERA5 clouds not fetched"
+    from core.environment.era5 import (
+        WeatherUnavailableError, fetch_reanalysis_cloud_cover,
+    )
+
+    from datetime import timezone
+
+    when = instant_utc
+    if getattr(when, "tzinfo", None) is not None:
+        when = when.astimezone(timezone.utc)
+    fetch_date, hour = when.date().isoformat(), int(when.hour)
+    if push is not None:
+        push("sky", f"fetching ERA5 cloud cover for {fetch_date} {hour:02d}Z "
+                    f"(the plan's instant; weather_date {date})")
+    try:
+        return fetch_reanalysis_cloud_cover(
+            float(spec.latitude.value), float(spec.longitude.value),
+            fetch_date, hour), None
+    except WeatherUnavailableError as exc:
+        return None, f"fetch failed: {exc}"
 
 
 def _projected_origin(spec: ScenarioSpec, scene: Dict):
@@ -4324,6 +4398,9 @@ class RunManager:
                 f"{plan['sun']['elevation_deg']:+.1f} deg, moon "
                 f"{plan['moon']['illuminated_fraction']:.0%} lit, EV100 "
                 f"{plan['exposure']['ev100']:+.1f}; clouds VISUAL ONLY"
+                + (f": {plan['clouds']['cloud_type']} {plan['clouds']['coverage']:.2f} "
+                   f"({plan['clouds']['coverage_source']})"
+                   if "cloud_type" in plan.get("clouds", {}) else "")
                 + ("; sun relit by the lighting block" if "relit" in plan["sun"] else ""))
         # The beauty look (beauty quality only; None under measure).
         # A look switch (the page's option or a prompt word) renders THIS

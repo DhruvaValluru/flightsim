@@ -302,6 +302,10 @@ test).
 **Measure:** rendered sky cloud fraction (thresholded sky band) vs input
 total cloud cover within ±15%; Gate 6 extinction clause still passes
 under overcast.
+**Verify path (sky step 8):** `.\scripts\sky_compare_round.ps1 -Round N -Scene 3 -CompareWith M`
+renders clear / cumulus / stratocumulus / overcast at one camera and lays them out
+against round M in `docs/visual/sky_compare/round_N/` (§8 "Sky step 8"; UNMEASURED
+until the Windows laptop runs it).
 
 ### V7: Aircraft
 **Where:** `scripts/ue_import_aircraft.py`, `scripts/import_aircraft.py`,
@@ -746,3 +750,507 @@ frames with the base commit's Gate 6 frames.
 
 **Next step on the render machine:** follow
 `docs/visual/RENDER_RUNBOOK.md` in order.
+
+### Sky step 2 (2026-11-14): the beauty host reads the sky plan's cloud fields
+
+The owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md, design
+docs/visual/XPLANE_SKY_DESIGN.md §4). Nothing here was rendered.
+
+**What it draws.** Nothing new by itself. Under `-quality=beauty`,
+`FFlightSimWorldBeauty::ApplyClouds` (FlightSimClouds.cpp) now receives the `-sky=`
+plan (`FFlightSimSkyPlan`, passed by the commandlet at the one beauty `Build` site,
+nullptr without a plan) and reads the `clouds` block's new, optional fields
+`cloud_type`, `coverage`, `density`, `detail`, `cirrus_coverage`, `coverage_source`,
+`seed` (FlightSimSky.cpp `Load`, `TryGet*` after the mandatory reads; a v1 plan
+without them loads and the header's defaults are recorded: type "" and coverage -1
+= not stated, density 1 and detail 1 = the row; `SKY_VERSION` stays 1). Step 5
+writes them; today's `plan.py` writes none, so every current render records
+`clouds.plan.fields_source: none ...` and draws round 95 exactly. Per layer one law,
+`FlightSimWorldPure::LayerSource` (Python `world_beauty.layer_source`), picks the
+cover and the shape: `-cloud-type=` (the owner's probe) > the card's `look.clouds[0]`
+or the stated fair layer (dataset truth) > the plan (not under the rain and storm
+presets: the deck stands) > the shape's default. The owner's parameter names land
+on M_FlightSimCloudLayers as: Coverage -> `Coverage` (the cover decided); Density ->
+`ExtinctionPerM` x the plan's density (clamped 0.5..1.5); DetailStrength ->
+`DetailErosion` x the plan's detail (saturated); NoiseScale -> the row's
+`ShapeScaleKm`; Wind -> `WindOffsetM` (Advance, unchanged). `clear` and `cirrus`
+hide the volumetric layer (`SetVisibility(false)`; step 6 draws the cirrus sheet);
+altocumulus draws the stratocumulus row until step 5 adds its own. With a plan AND a
+card layer, two components exist and FScene draws the last registered (the card's):
+the plan's is recorded `engine_stack_shadowed`, left out of the sky capture
+(`SetVisibleInRealTimeSkyCaptures(false)`) and the layer bookkeeping, and
+re-materialled all the same. The occlusion row reads the extinction drawn.
+
+**The switch.** `-cloud-type=clear|cumulus|stratocumulus|altocumulus|cirrus|overcast|nimbostratus`
+(empty = not given); another word refuses `world_beauty.clouds: -cloud-type=...`.
+The existing `-cloud-cover=` probe builds a CARD layer, the wrong component for this.
+
+**Record** (`look_applied.world_beauty.clouds`): `plan` {fields_source, cloud_type,
+cloud_type_known, coverage, density, detail, cirrus_coverage, coverage_source, seed,
+seed_stated, card_seed, seed_matches_card, cloud_type_switch, precedence,
+owner_parameters, exposure_sees_plan_clouds: false, measure_path, calibration}; per
+layer `cloud_type_source` (switch | card | plan | shape default), `cloud_type_applied`,
+`cloud_type_requested`, `component_source` (sky plan | card look.clouds | fair),
+`engine_stack_shadowed`, `plan_density`, `plan_density_scale`, `plan_detail`,
+`extinction_per_m_applied`, `detail_erosion_applied`, the extended `cover_basis`;
+`hidden_layers[]` {component, component_source, cloud_type_source, reason};
+`plan_component_shadowed_by_card`, `engine_stack_basis`. A measure render.json
+gains no field: the commandlet's `scene.sky` was NOT extended (the design's §4 said
+to; this section's "a measure render.json gains no field" wins).
+
+**Unchanged.** FlightSimSky.cpp `Build` (the measure host: the stock
+`m_SimpleVolumetricCloud_Inst`, its missing-material note) byte for byte, pinned;
+`FFlightSimWeather::VerifyCloudMaterials` (no material changed in this step: Volume
+domain and the usage flag stand); labels (volumetric clouds write no depth or
+stencil; no new actor); exposure (`plan.py` untouched, the fields are never read into
+`ev100`); flight dynamics; the round-95 lowering, which keys on stated HEIGHTS (card
+or fair layer), not on the plan's type: a plan cumulus over a 10 km cruise is still
+drawn as the 1.5-2.7 km fair slab (c641a8c4), the camera stays clear.
+
+**UNCALIBRATED.** Which row a type word draws (`world_beauty.PLAN_CLOUD_SHAPES`), the
+density clamp 0.5..1.5, the detail saturation: look values, never from a frame.
+
+**UNMEASURED.** Everything above: that a Windows build compiles it, that the host
+applies the switch's and the plan's type, that the card's component and not the
+plan's is the one drawn (read in UE 5.7 VolumetricCloudRendering.cpp
+`AddVolumetricCloud`, not witnessed), that `SetVisibility(false)` empties the sky
+(read in VolumetricCloudComponent.cpp `CreateRenderState_Concurrent`). The exact
+Windows measurement, after `scripts/ue_create_materials.py` has rebuilt the materials
+and with `FLIGHTSIM_SKY=physical` set in the shell:
+
+    .\scripts\visual_fix_round.ps1 -Round 98 -Scenes 3 -Switches "-cloud-type=stratocumulus" -CompareWith 95
+    .\scripts\visual_fix_round.ps1 -Round 99 -Scenes 3 -Switches "-cloud-type=clear" -CompareWith 98
+
+Read `look_applied.world_beauty.clouds.layers[0].cloud_type_source` (expect
+`switch`), `cloud_type_applied`, `cover_basis` and `plan.fields_source` in round 98's
+render.json; round 99 must record `hidden_layers[0]` and draw no cloud. A plan-fed
+render (`cloud_type_source: plan`) needs step 5; until then `plan.fields_source` says
+none. Tests: `tests/test_cloud_type.py` (the C++ laws compiled and compared with the
+Python, the header defaults, the parser, the precedence table, the record keys, the
+untouched measure `Build`, the single beauty call site). API: `scripts/check_bridge_api.sh`
+gains `SetVisibleInRealTimeSkyCaptures` and `SceneComponent::SetVisibility`.
+
+### Sky step 3 (2026-11-15): march and sky-LUT quality, tiered, recorded, restored
+
+Step 3 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
+docs/visual/XPLANE_SKY_DESIGN.md §5, with the "Built" note there for where the code
+proved it wrong). Nothing here was rendered.
+
+**What it draws.** Nothing new on the render laptop by default. Under `-quality=beauty`,
+`FFlightSimWorldBeauty::ApplyClouds` (FlightSimClouds.cpp) resolves a march TIER
+(`FlightSimWorldPure::CloudMarchFor`) and applies the tier's cloud component march
+(`CloudMarch`: `SetViewSampleCountScale`, `SetShadowViewSampleCountScale`,
+`SetTracingMaxDistance`; the per-layer `SetShadowTracingDistance` is unchanged) and the
+tier's thirteen renderer cvars (`CloudCvar` / `CloudCvarName`), each set at code priority
+through `SetWorldCvar`, saved once (`SaveWorldCvar`, `WorldCvarsBefore`, the fog-on-all-pixel
+cvar now saved the same way) and put back at the commandlet's teardown by `RestoreCvars`,
+which walks the array in reverse. The tiers (Python twins `world_beauty.CLOUD_MARCH`,
+`CLOUD_CVARS`, `CLOUD_CVAR_NAMES`, `ENGINE_CLOUD_CVAR_DEFAULTS`, `CINEMATIC_SKY_CVARS`;
+`tests/test_sky_step3_cvars.py` compiles the C++ and compares):
+
+| field (record key) | cvar | constrained (the laptop; in force today) | probe | discrete |
+|---|---|---|---|---|
+| march: view x96 / shadow x10 / trace | component setters | 2 / 1 / 80 km (192, 10) | 3 / 2 / 80 km (288, 20) | 8 / 8 / 50 km (768, 80: the caps) |
+| view_ray_sample_max | `r.VolumetricCloud.ViewRaySampleMaxCount` | 768 | 768 | 768 |
+| shadow_ray_sample_max | `r.VolumetricCloud.Shadow.ViewRaySampleMaxCount` | 80 | 80 | 80 |
+| distance_to_sample_max_km | `r.VolumetricCloud.DistanceToSampleMaxCount` | 15 | **8** | 8 |
+| sample_min_count | `r.VolumetricCloud.SampleMinCount` | 2 | 2 | 2 |
+| shadowmap_ray_sample_max | `r.VolumetricCloud.ShadowMap.RaySampleMaxCount` | 128 | 128 | 256 |
+| shadowmap_max_resolution | `r.VolumetricCloud.ShadowMap.MaxResolution` | 2048 | 2048 | 4096 |
+| skyao_trace_samples | `r.VolumetricCloud.SkyAO.TraceSampleCount` | 10 | 10 | 20 |
+| ap_lut_depth_km | `r.SkyAtmosphere.AerialPerspectiveLUT.Depth` | 96 | 96 | 160 |
+| ap_lut_depth_resolution | `r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution` | 32 (Cinematic) | 32 | 64 |
+| ap_lut_width | `r.SkyAtmosphere.AerialPerspectiveLUT.Width` | 32 | 32 | 64 |
+| transmittance_lut_samples | `r.SkyAtmosphere.TransmittanceLUT.SampleCount` | 30 (Cinematic) | 30 | 40 |
+| multiscatter_lut_samples | `r.SkyAtmosphere.MultiScatteringLUT.SampleCount` | 20 (Cinematic) | 20 | 30 |
+| sky_distance_to_sample_max_km | `r.SkyAtmosphere.DistanceToSampleCountMax` | 150 | 150 | 100 |
+
+The CONSTRAINED row (the Intel iGPU, D3D11 SM5: `CloudConstrainedGpu`) is exactly what
+every beauty render has drawn with since the beauty path existed: the engine's
+registration default (UE 5.7 VolumetricCloudRendering.cpp, SkyAtmosphereRendering.cpp;
+`scripts/check_bridge_api.sh` pins each line with its default) where the Cinematic
+scalability group is silent, and that group's value where it speaks
+(BaseScalability.ini `[EffectsQuality@Cine]`, applied by the render path AFTER this lane
+at scalability priority, which cannot lower a code-priority set). Setting it is a recorded
+no-op: the march row is still ef361bd6's (192 / 10 / 80, the r87 pin), and the sky-light
+capture's sample caps (`SetReflectionViewSampleCountScale`,
+`r.VolumetricCloud.ReflectionRaySampleMaxCount`) remain the commandlet's to set. The PROBE
+row is the constrained class's opt-in raise: 288 view / 20 shadow samples and
+`DistanceToSampleMaxCount` 8 km (the engine spreads the sample cap over that distance,
+samples = cap x saturate(in-layer path / distance), so a short in-layer path gets up to
+twice the samples). That cvar is NOT confined to the main view: UE 5.7
+VolumetricCloudRendering.cpp sets `CloudGlobalShaderParams.InvDistanceToSampleCountMax`
+once, from it, for every trace, and its `bIsReflectionRendering` block re-derives only
+`SampleCountMax` / `ShadowSampleCountMax` (the commandlet's reflection caps), so the probe
+also lengthens the sky-light capture's march (up to 15/8 x per short in-layer path, under
+those caps) in the submission that hung r87 (`887a0006`); the Windows TDR is the probe's
+pass or fail. Pinned: `tests/test_sky_step3_cvars.py` reads the engine's reflection block
+and `scripts/check_bridge_api.sh` the `InvDistanceToSampleCountMax` line (repair round 1:
+the first record said the capture was "not this table's", which was false for the probe
+and discrete tiers; no value changed). The DISCRETE row is the offline quality for a
+discrete GPU, of which the project has none: set for one, never rendered.
+
+**The switch.** `-cloud-march=auto|constrained|discrete|probe` (auto by default: the GPU
+class, as before this step); a named tier is the owner's measurement on any GPU; another
+word refuses `world_beauty.clouds: -cloud-march=...`. Registered in core/config_surface.py
+(`render_switches`) and the catalogue's `world_beauty.clouds` hint.
+
+**Record** (`look_applied.world_beauty.clouds.march`, beside the existing `path`,
+`view_samples_max`, `shadow_samples`, `banding_basis`): `tier`, `switch`, `tier_basis`,
+`cvars {name: [before, read_back]}`, `cvars_skipped[]` ("skipped: <name> is not
+registered"), `cvar_fields {field: name}`, `cvars_basis`, `render_path_owned[]` (the
+commandlet's nine sky and cloud cvars, named, never set here: their final values are
+`render_settings.beauty_path.read_back`), `render_path_owned_basis`. `before` is read when
+this lane runs, ahead of the Cinematic pass, so for the three Cinematic fields it is the
+registration default (16 / 10 / 15) and `read_back` the value the captures draw with.
+`distant_clouds.volumetric_trace` gains `march_tier` and `distance_to_sample_max_km`.
+One owner per cvar (the commandlet's ledger names the world lane's new set):
+`tests/test_sky_step3_cvars.py` reads the sun-shafts, hero-lighting and render-path tables.
+
+**Unchanged.** Measure renders (FlightSimSky.cpp, FlightSimVisualScene.cpp,
+FlightSimWeather.cpp name none of these cvars; pinned); labels (process-wide cvars, but no
+label capture draws cloud, fog or atmosphere); dataset formats; flight dynamics; exposure
+(plan.py untouched); the constrained march row and shadow march (`{2.0, 1.0, 80.0}`, 6 km:
+the r87 pins in tests/test_world_beauty.py and tests/test_cloud_jitter_blue_noise.py hold);
+the commandlet's `SetBeautyCvar` set (the jitter test's pin); `MultiScatteringFactor` still
+off on the constrained class (step 4's `-sky-multi-scatter=`); the materials (no rebuild).
+
+**UNCALIBRATED.** Every discrete and probe value, the probe march row, the 8 km distance:
+look and cost values, never from a frame.
+
+**UNMEASURED.** Everything above: that a Windows build compiles it; that the constrained
+row is the no-op it claims; whether the probe row renders on the iGPU or stalls it
+(887a0006); every discrete value (no discrete GPU). The exact Windows measurements, with
+`FLIGHTSIM_SKY=physical` set in the shell:
+
+    .\scripts\visual_fix_round.ps1 -Round 100 -Scenes 3 -CompareWith 95
+    .\scripts\visual_fix_round.ps1 -Round 101 -Scenes 3 -Switches "-cloud-march=probe" -CompareWith 100
+    .\scripts\visual_fix_round.ps1 -Round 102 -Scenes 3 -Switches "-cloud-type=cumulus -cloud-march=probe" -CompareWith 98
+
+Round 100 is the no-op check: the compare against round 95 must report no change beyond
+the still's own noise, and `march.tier` must read `integrated` with every `cvars` pair's
+`read_back` equal to the table above; a structured difference means the constrained row is
+not the laptop's own values. Round 101 is the probe: pass = the log has no `887a0006` and
+the frame completes; read ROUND.json's wall seconds against round 100's and
+`march.cvars["r.VolumetricCloud.DistanceToSampleMaxCount"]` (expect `["15", "8"]`).
+Round 102 is the design's probe-with-cumulus compare against step 2's round 98. If round
+101 renders clean, step 4's rounds may carry `-cloud-march=probe`; a one-line follow-up
+would then move the constrained row (both tests' pins updated with the measured reason).
+Tests: `tests/test_sky_step3_cvars.py`; `tests/test_world_beauty.py` (the march test gains
+the probe row, its docstring says why). API: `scripts/check_bridge_api.sh` pins the
+thirteen registrations with their defaults, the three Cinematic lines and
+`ECVF_SetByCode` in ConsoleManager.cpp.
+
+### Sky step 5 (2026-11-15): the sky plan's cloud fields, the altocumulus row, ERA5 cloud cover
+
+Step 5 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
+docs/visual/XPLANE_SKY_DESIGN.md §7, with the "Built" note there for where the code
+narrowed it). Nothing here was rendered.
+
+**What it draws.** Nothing by itself. `core/sky/plan.py plan_sky` now writes the
+BEAUTY-ONLY cloud fields step 2's host reads (`FFlightSimSkyPlan::Load`, `FFlightSimWorldBeauty::ApplyClouds`
+under `-quality=beauty`) into `sky.json` "clouds", beside the unchanged `enabled` /
+`bottom_km` / `thickness_km` / `basis` (the measure host reads only those, so a measure
+render is byte-identical; pinned): `cloud_type` (clear | cumulus | stratocumulus |
+altocumulus | cirrus | overcast | nimbostratus), `coverage` 0..1, `density` 1.0 and
+`detail` 1.0 (multipliers of the type's `world_beauty.CLOUDS` row: one source of truth
+per type), `cirrus_coverage` (step 6 draws it), `coverage_source`, `cover_inputs`
+`{low, mid, high, total}` or null, `cloud_type_basis` (the threshold that fired),
+`volumetric_row`, `seed` and `seed_source` (the spec's seed, else CRC-32 of the instant,
+place and altitude), `march_tier` "auto" (the step 3 cvar set the plan asks for) and
+`march_tier_basis`, `fields_basis`. Pure: same inputs, same bytes (`core/sky/clouds.py`).
+
+**Where the type comes from.** With a `weather_date` over a real place and no SAMPLED
+cloud cover, the web app (`webapp/runs.py historical_cloud_cover`, called by
+`write_sky_plan`) fetches `core/environment/era5.py fetch_reanalysis_cloud_cover`: the
+ERA5 archive's hourly `cloud_cover_low/mid/high` (percent -> fractions) at the plan
+INSTANT's UTC date AND UTC hour (`instant_utc`; the wind keeps its noon convention), source
+string stated. Not `weather_date` at that hour: `weather_date` is the spec's LOCAL date, and
+the instant is the next UTC day for a local evening west of Greenwich (20:00 at New York on
+2024-01-15 is 2024-01-16T00:56Z, so the archive is asked for 2024-01-16 00Z) and the previous
+one for a local morning east of it (02:00 at Tokyo is 2024-01-14T16:41Z). The first cut
+passed the hour alone and fetched `weather_date` at it, 24 h off in every such case; repair
+round 1 passes the instant and `coverage_source` stamps the UTC day actually fetched
+(`..., 2024-01-16T00Z, ...`); pinned in `tests/test_webapp.py` (New York and San Francisco
+evenings, a Tokyo morning) and `tests/test_sky_clouds.py`. The type
+law (`core/sky/clouds.py cloud_type_from_cover`, thresholds UNCALIBRATED): storm spec ->
+nimbostratus 0.98; `max(low, mid) >= 0.85` -> overcast; `low >= 0.5` -> stratocumulus;
+`mid >= 0.3 and mid > low` -> altocumulus; `low >= 0.1` -> cumulus; `high >= 0.2` ->
+cirrus (no volumetric layer); else clear. Without a date, offline, over a synthesised
+ridge, or when the policy drew a cover (the card's layer stands above the plan in the
+host anyway): the stated default `cumulus` at the row's 0.35 (`nimbostratus` 0.98 for a
+storm), recorded under `coverage_source` as `default (<reason>): CLOUDS[<type>].default_cover`.
+The default plan therefore draws round 95's frame by construction. Clouds are VISUAL ONLY:
+an unreachable archive never refuses the run and never edits the spec (unlike the wind).
+The web app's weather stays ON by default; nothing became opt-in. `run.conditions["sky"]`
+names the type, cover and source.
+
+**The altocumulus row** (design D3): `CLOUDS["altocumulus"]` =
+{extinction 0.03 /m, shape 1.2 km, detail 0.12 km, erosion 0.4, bottom softness 0.15, top
+rounding 0.5, coverage contrast 1.1, default cover 0.5}, `CLOUD_MAX_THICKNESS_M` 900 m,
+appended at index 4 on both sides (`CloudAltocumulus = 4`, `CloudCount = 5`, `CloudName`,
+`CloudDefault`, `CloudMaxThicknessM`; every earlier index and overrides file stands;
+`-world-beauty-overrides=` may name the row). `CloudShapeForPlanType` case 3 now returns it
+(step 2 drew stratocumulus until the row existed). `select_cloud` never picks it: the
+plan's mid-level law does. UNCALIBRATED, never rendered.
+
+**The march tier, plan -> host.** `FFlightSimSkyPlan::Load` reads `march_tier` with
+`TryGetStringField`; `FFlightSimWorldBeauty::Build` resolves the word in force
+(`FlightSimWorldPure::CloudMarchWordInForce`, twin `world_beauty.cloud_march_word`):
+`-cloud-march=<word other than auto>` > the plan's `march_tier` when it is a known word >
+`auto` (the GPU class). The plan writes "auto", so the default render is unchanged by
+construction; a hand-edited `sky.json` may ask for `probe`. Recorded under
+`look_applied.world_beauty.clouds.march`: `switch` (the word in force), `switch_given`,
+`plan_march_tier`, `word_source`; `clouds.plan.march_tier`.
+
+**Unchanged.** `SKY_VERSION` 1 == `SkySupportedVersion` 1 (additive keys, TryGet*; pinned on
+both sides); `FFlightSimSky::Build` (measure); the exposure block (pinned byte-identical with
+and without a cover); `relight` (the clouds block survives it byte-identical); `enabled` /
+`bottom_km` (>= 1 km above the flight; 1.2 km floor in storms) / `thickness_km` for every
+positional caller (pinned literals); the c641a8c4 beauty exception that lowers a DEFAULT
+cumulus layer below a high cruise (the camera stays clear); labels, dataset formats, flight
+dynamics, materials (no rebuild: no shader or graph change); the step 2 and step 3 pins.
+
+**UNCALIBRATED.** Every type-law threshold (the two Open-Meteo endpoints disagree hour by
+hour on the level fractions), the altocumulus row and its 900 m cap, the default cover.
+
+**UNMEASURED.** Everything above: that a Windows build compiles the row and the march-word
+block; that an altocumulus plan draws a translucent mid-level sheet rather than a second
+stratocumulus; that the ERA5 fractions for a dated spec reproduce that day's sky (never
+claimed). The exact Windows measurements, with `FLIGHTSIM_SKY=physical` set in the shell:
+
+    .\scripts\visual_fix_round.ps1 -Round 104 -Scenes 3 -Switches "-cloud-type=altocumulus" -CompareWith 98
+    .\scripts\visual_fix_round.ps1 -Round 105 -Scenes 3 -Switches "-cloud-type=stratocumulus" -CompareWith 104
+
+Round 104 draws the new row under the switch (read `look_applied.world_beauty.clouds.layers[0].cloud_type_applied`
+== `altocumulus`, `shape` == `altocumulus`); round 105 is the A/B against the row it used
+to draw. Both rounds BYPASS this step's own path (`-cloud-type=` stands above the plan), so
+the plan path, ERA5 -> `sky.json` -> `FFlightSimSkyPlan::Load` -> `ApplyClouds`, has its
+own measurement. `scripts/run_test_scenarios.py` has no dated scene (adding one moves the
+pinned scene count and a swarm lane's "scene 16" wording, so none was added here); the
+exact command is the web app's own, the same `/compile` and `/run` calls
+`run_test_scenarios.py` makes, from `C:\Users\kanth\flightsim` in Windows PowerShell 5.1
+with the app started as `visual_fix_round.ps1` starts it:
+
+    $env:FLIGHTSIM_SKY = "physical"; $env:FLIGHTSIM_RENDER_QUALITY = "beauty"; $env:FLIGHTSIM_BEAUTY_POST = "on"
+    Start-Process .venv\Scripts\python.exe -ArgumentList "-m","uvicorn","webapp.server:app","--port","8008" -WindowStyle Hidden
+    $c = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8008/compile -ContentType "application/json" -Body (@{ prompt = "chase view of the 747 over new york at 9000 m at 14:00 on 2024-01-15 for 6 seconds"; compiler = "regex"; still = $true } | ConvertTo-Json)
+    $r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8008/run -ContentType "application/json" -Body (@{ spec = $c.spec.dict; provenance = @{ compiler = "regex" } } | ConvertTo-Json -Depth 32)
+    do { Start-Sleep 10; $s = Invoke-RestMethod http://127.0.0.1:8008/runs/$($r.run_id) } until ($s.status -in "done","failed")
+    Get-Content runs\webapp\$($r.run_id)\sky.json | ConvertFrom-Json | % { $_.instant_utc; $_.clouds.cloud_type; $_.clouds.coverage; $_.clouds.coverage_source }
+    (Get-Content runs\webapp\$($r.run_id)\frames\render.json | ConvertFrom-Json).look_applied.world_beauty.clouds | % { $_.plan.cloud_type; $_.layers[0].cloud_type_source; $_.march.word_source }
+
+(A 409 `terrain.unbaked` answer from `/run` means the New York bake is absent: `POST /bake`
+with the `latitude` / `longitude` it names, then `POST /run` again, as
+`run_test_scenarios.py run_spec` does. Rounds 1-95 rendered scene 3 over New York, so the
+bake is normally present.) Read: `sky.json` `instant_utc` `2024-01-15T18:56:...Z`,
+`clouds.coverage_source` starting `ERA5` (online) or `default (fetch failed: ...)`
+(offline; the frame is then round 95's cumulus by construction), `clouds.cloud_type` one
+of the seven words; `render.json` `look_applied.world_beauty.clouds.plan.cloud_type` ==
+`sky.json`'s, `layers[0].cloud_type_source` == `plan`, `march.word_source` == `default auto`.
+14:00 is daylight for the frame; to see the UTC-day rule itself no render is needed: the
+same lines with `at 20:00` write `instant_utc` `2024-01-16T00:56:...Z` and a
+`coverage_source` stamped `2024-01-16T00Z` (the old code stamped `2024-01-15T00Z`).
+What a correct frame looks like is UNMEASURED; this measures only that the fetched type
+reaches the host. Tests:
+`tests/test_sky_clouds.py` (determinism, ranges, defaults, the type-law table including
+every threshold boundary, measure byte-identity, SKY_VERSION, the provider with a stubbed
+archive, the row on both sides by regex and g++, the march word law by g++, these docs);
+`tests/test_webapp.py` (stubbed fetch: applied and sourced, sampled cover wins, unreachable
+archive records the default, undated and synthesised specs never fetch);
+`tests/test_cloud_type.py` and `tests/test_world_beauty.py` (the altocumulus pins and the
+fifth row, reasons in their docstrings). API: `scripts/check_bridge_api.sh` (no new engine
+symbol).
+
+### Sky step 7 (2026-11-15): tests and the suite
+
+Step 7 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
+docs/visual/XPLANE_SKY_DESIGN.md §9, with the "Built" note there). Tests only: no shader,
+material, C++ or Python-under-test change, so nothing here draws and nothing here was
+rendered.
+
+**What the branch carried.** Steps 0, 2, 3 and 5. Steps 1, 4 and 6 were on their own
+branches and not yet merged into claude/xplane-sky, so their shader / material / atmosphere
+/ cirrus pins are not in this step (they land with those steps), and the design's "tests
+that legitimately move" entries for them did not apply. Step 7 itself moved no test; the
+only existing test moved on the branch is test_world_beauty.py 784
+(`test_the_cloud_march_and_the_sky_are_the_python_ones`), by steps 3 and 5 with the reasons
+in their docstrings (design §9, Built note, which also records why the list's 170 / 629 /
+640 and 454 did not need to move). No test was weakened, skipped or deleted.
+
+**What `tests/test_sky_step7_suite.py` pins** (beyond test_sky_clouds.py, test_cloud_type.py
+and test_sky_step3_cvars.py, which landed with their steps):
+- the plan's "clouds" block as a GOLDEN, byte for byte and in key order (the web app
+  writes `json.dumps(plan, indent=1)` without `sort_keys`, so the order is part of
+  `sky.json`), for one covered dated input and for the undated default (round 95's frame
+  by construction); ASCII-clean;
+- the derived seed as a CRC-32 literal (864852549 for the pinned inputs), the 6-decimal /
+  0.1 m quantisation, `seed=0` recorded as the spec's seed, a float seed stored as int;
+- EV100 unchanged by every cloud input: by source order in `core/sky/plan.py` (the
+  exposure dict precedes the clouds block, `plan_cloud_block` takes exactly its nine
+  keywords, `core/sky/clouds.py` never names the exposure) and by value over a grid of
+  covers, notes and seeds; the host records `exposure_sees_plan_clouds: false`;
+- four-place rounding of the cover inputs, the coverage equal to the level that named the
+  type, `total` recorded but never deciding, the caller's dict untouched, a missing level
+  read as 0, NaN or a non-number refused;
+- the ERA5 provider: percent outside 0..100 clamped, a negative hour and a missing hourly
+  field refused by name (`WeatherUnavailableError`), the dict carrying every key the plan
+  reads plus `source` / `date` / `hour_utc`, the field order the archive is asked for;
+- render.json: every "clouds" key `FFlightSimSkyPlan::Load` reads is recorded by
+  `ApplyClouds` under `look_applied.world_beauty.clouds.plan`, whose key set is exactly
+  `fields_source, cloud_type, cloud_type_known, coverage, density, detail, cirrus_coverage,
+  coverage_source, seed, seed_stated, march_tier, card_seed, seed_matches_card,
+  cloud_type_switch, precedence, owner_parameters, exposure_sees_plan_clouds, measure_path,
+  calibration`; the web app's `run.conditions["sky"]` names the type, cover and source and
+  `write_sky_plan` passes the spec's seed and the fetched cover;
+- `FFlightSimWeather::VerifyCloudMaterials`: `M_FlightSimCloudLayers` is built to pass it
+  (MD_VOLUME, `used_with_volumetric_cloud`, additive, the multiple-scattering node) at the
+  path the host loads; the commandlet runs the check AFTER `WorldBeauty.Build` (it sees the
+  swapped material) and before the warm-up captures, records every line under
+  `look_applied.cloud_materials` and refuses by name (`clouds.material`) on a bad material;
+  the interactive host runs it before its first frame; a MISSING beauty material is not a
+  refusal: `ApplyClouds` keeps the stock material, records "did not load" and returns before
+  any `SetMaterial`; the check's order is the engine's (no material = draws nothing; Volume
+  domain; usage flag; compile errors; shader map).
+
+**Suite results on the Mac (code-level only; never a visual result).** Targeted set
+first (test_sky_clouds, test_cloud_type, test_sky_step3_cvars, test_world_beauty, test_sky,
+test_cloud_billow, test_cloud_tiers, test_distant_clouds, test_cloud_jitter_blue_noise,
+test_cpp_brace_balance, test_render_json_contract, test_ue_weather_source,
+test_check_bridge_api): 341 passed. Full suite, `-n auto`, first run: 1 failed
+(`tests/test_mutation_targets.py`: step 5's `historical_cloud_cover` repeated the wind's
+line `if pick_scene(spec)["key"] in SYNTHESISED_SCENE_KEYS:`, so mutation guard 318 had two
+targets; fixed in step 5's commit by spelling the new line with a local, behaviour
+unchanged). Full suite after the fix: 5831 passed, 14 skipped, 0 failed (7 min 03 s);
+re-run on the committed tree after the repair-2 amend: 5831 passed, 14 skipped, 0 failed
+(7 min 05 s, exit 0), with
+`python -m pytest -q -o addopts="" -m "not gate" -p no:cacheprovider -W ignore -n auto tests/`.
+That `-o addopts=""` matters: pytest.ini already carries `-q -m "not gate"`, so the plain
+`-q` command runs at `-qq` and prints only dots, no `N passed` line; two reviewers counting
+that dot stream on the same tree reported 5837 passed / 15 skipped. The passed figure is
+explained by the tree: `-m "not gate"` deselects exactly six tests
+(tests/test_phase3_gates.py::test_gate_A..F; `pytest --collect-only -q -o addopts="" -m "not
+gate" tests/` -> 5844/5850 collected, 6 deselected, and `-m gate` -> 6 passed), so 5837 is a
+run WITHOUT the gate filter: `-o addopts=""` drops pytest.ini's filter unless `-m "not gate"`
+is given again, and the full suite re-run that way on this tree prints `5837 passed, 14
+skipped in 429.79s`, exit 0. The skipped figure is not explained: the summary line says 14
+with and without the gate filter, and the one collection-time skip the gate run also reports
+(tests/test_sun_vs_spa.py:15, pvlib not installed) is already inside the 14 under either
+filter, so the reviewers' 15 is a dot-stream count this tree does not reproduce. Use the
+summary-line figure (5831 / 14 with the project's gate filter, 5837 / 14 without it).
+`bash scripts/check_bridge_api.sh`: API surface matches (it is not a
+compile). No existing test was weakened, skipped or deleted.
+
+**UNMEASURED.** Every pin above is a source or Python pin; none says what a frame looks
+like. The Windows commands that would measure the steps these tests guard are the ones in
+"Sky step 2", "Sky step 3" and "Sky step 5" above, with `FLIGHTSIM_SKY=physical` in the
+shell. Step 7 adds NO round of its own: the plan path end to end is read off step 5's
+round 104 (the same command as in "Sky step 5", repeated here so the reader does not have
+to scroll; render it once, not twice):
+
+    .\scripts\visual_fix_round.ps1 -Round 104 -Scenes 3 -Switches "-cloud-type=altocumulus" -CompareWith 98
+
+then, in that round's output, read `sky.json` `clouds` (it must equal the golden's shape:
+the same keys in the same order), `look_applied.world_beauty.clouds.plan` (the nineteen
+keys above) and `look_applied.cloud_materials` (one line per cloud component, each ending
+`compiled`). If round 104 has already run for step 5, read these from its existing output.
+
+### Sky step 8 (2026-11-15): the owner's four-frame verify path
+
+Step 8 of the owner's X-Plane-12 brief (docs/visual/XPLANE_SKY_BRIEF.md; design
+docs/visual/XPLANE_SKY_DESIGN.md §10, with the "Built" note there). Scripts and docs
+only: no shader, material, C++ or plan change, so nothing here draws, no render.json field
+is added (the sheet READS step 2's and step 3's records), and nothing here was rendered.
+
+**What it does.** `scripts/sky_compare_round.ps1 -Round N -Scene S -CompareWith M
+[-Switches "<extra>"] [-NoPush]` (Windows PowerShell 5.1, run from C:\Users\kanth\flightsim
+like visual_fix_round.ps1) first checks the branch (below), sets `FLIGHTSIM_SKY=physical` when
+the shell has not, then runs
+`.\scripts\visual_fix_round.ps1 -Round N+k -Scenes S -Switches "-cloud-type=<word> <extra>"
+-CompareWith M -Branch B` for k = 0..3 over the words clear, cumulus, stratocumulus, overcast: four
+fixed frames of ONE scene at the SAME camera (the pinned spec in runs\visual\specs\NN.json
+replays), each its own round folder `docs/visual/round_<N+k>/` with ROUND.json and the pixel
+report against round M, pushed to vis-windows as every round is. Then
+`scripts/sky_contact_sheet.py --rounds N,N+1,N+2,N+3 --scene S --old M` (numpy + PIL) writes
+`docs/visual/sky_compare/round_<N>/sheet.jpg` (row 1: round M's frame of the scene, the
+"old look"; row 2: the four, each captioned with the word REQUESTED, the shape the host says
+it APPLIED from `look_applied.world_beauty.clouds.layers[0].cloud_type_applied` /
+`cloud_type_source` (`clear` leaves the layer in `hidden_layers`: "no layer", a match),
+`MISMATCH` when they disagree, `applied unknown` when the record names no shape at all (a host
+before sky step 2, `-beauty-clouds=engine`, a cloud material that did not load: FlightSimClouds.cpp's
+early returns write only `clouds.drawn`), `-cloud-type= not parsed` when the record does not
+carry the word asked in `clouds.plan.cloud_type_switch` (the switch string the host parsed),
+`clouds.march.tier` and `atmosphere.multi_scattering_factor`) and `compare.json` (per tile:
+those fields plus `switch_seen` and the `root` the frame came from, visual_compare's
+mean_abs_change / moved_share / mean luma against the old frame, frame_metrics' blank / clipped /
+crushed health with its UNCALIBRATED thresholds, the round's commit and switches,
+`FLIGHTSIM_SKY`, round M's `old_commit` / `old_switches` / `old_root`; the lists `mismatches`,
+`unknown`, `switch_not_seen`, `no_record`, `missing` and the `reading_rule`). Round folders live
+on branch vis-windows, so every one (round M included) is looked up under `docs/visual` and then
+`runs/vis-windows-wt/docs/visual`, the two places visual_fix_round.ps1 step 4b reads, in its
+order. A missing frame is a `MISSING` tile and a row with `found: false`, never a gap. A report,
+never a gate. docs/visual/sky_compare/README.md has the location and how to read it.
+
+**Which code the frames render (the precondition).** visual_fix_round.ps1 step 1 checks out a
+branch and fast-forwards it FROM ORIGIN before every round; the branch was hard-coded
+`claude/vibrant-gauss-olema4` and is now its `-Branch` parameter with that default (every
+existing call unchanged). sky_compare_round.ps1 passes `-Branch` (default: the branch of the
+current checkout) and refuses by name, `compare.wrong_branch`, before round 1 unless
+`origin/<branch>` carries `scripts/sky_contact_sheet.py` and `PLAN_CLOUD_SHAPES` in
+`core/scene/world_beauty.py`. So the four frames render the sky steps ONLY after
+claude/xplane-sky has been pushed (run from that checkout), or merged into
+`claude/vibrant-gauss-olema4` and pushed; until then the laptop would have rendered fbcbaa5d,
+where `-cloud-type=` is not parsed and silently ignored, and the four frames would be one look.
+Nothing was pushed when this was written. The ps1 also refuses a round number whose folder
+already exists under either root (`compare.round_exists`: visual_fix_round.ps1 would overwrite it
+in vis-windows) and a `-Switches` value carrying `-cloud-type=` (`compare.switch_dup`:
+FParse::Value takes the first).
+
+**The switch.** None new to the host: `-cloud-type=` (step 2) does the work; `-Switches` passes
+any extra switch to all four rounds (an A/B set is its own `-Round`); `-Branch` (new on both
+scripts) names the branch rendered. `-Scene` defaults to 3 (the A320
+over New York, 600 m, 18 mm: the design's primary camera, bellies and rims against the sky);
+13 (the 747 at 10 km over the ocean) is the secondary. `-CompareWith` is required and refused
+by name when missing (`compare.no_old`).
+
+**Tested on the Mac (code only).** tests/test_sky_contact_sheet.py: synthetic frames and
+render.json stubs (sheet size, every row including a missing round, clear as a match, a
+MISMATCH, an fbcbaa5d-shaped record and an engine-mode record as `unknown` / `switch_not_seen`
+and never a match, a parsed-but-different word, a frame without a record, the old frame only in
+the fallback root, the flat frames/render.json, a taller old frame, the pixel and health
+numbers, byte-identical re-runs, the CLI and its refusals); pins of the four words against
+`world_beauty.PLAN_CLOUD_TYPES`, of the layout constants by value, of the render.json keys the
+sheet reads against the C++ `TEXT(...)` writers and the `cloud-type=` parse, of both ps1s'
+branch handling, calls, refusals and 5.1 guards, of the round numbers against steps 2/3/5's, and
+of these docs. tests/test_powershell_scripts.py lints both ps1s' syntax. The PowerShell itself
+was not run (no PowerShell here). Targeted set (test_sky_contact_sheet, test_powershell_scripts,
+test_platform, test_frame_metrics, test_visual_compare, test_stress_ladder): 197 passed, 0 failed, exit 0.
+Full suite on the committed tree, `-o addopts="" -m "not gate" -n auto`: 5859 passed, 14 skipped, 0 failed (7 min 01 s, exit 0; the repaired step's new tests on top of step 7's).
+`bash scripts/check_bridge_api.sh`: API surface matches (not a compile). No existing test was
+weakened, skipped or deleted.
+
+**UNMEASURED.** Every frame; both ps1s end to end (the `-Branch` passthrough included);
+whether round 95's #03 and #13 frames are in the laptop's `docs\visual\round_95` or
+`runs\vis-windows-wt\docs\visual\round_95` (the old look, the two places the sheet reads;
+`-CompareWith` another round if neither has it). Steps 1, 4 and 6 of the brief are not on
+claude/xplane-sky yet, so the design's rounds 97, 102 and 104 (their switches) do not apply until
+they merge; the compare itself does. The round numbers are 110-113 (scene 3) and 115-118 (scene
+13) because steps 2, 3 and 5 above reserved 98-105. The exact Windows commands, from
+C:\Users\kanth\flightsim, AFTER claude/xplane-sky is pushed (run from its checkout) or merged
+into claude/vibrant-gauss-olema4 and pushed (run from that checkout, or add `-Branch
+claude/vibrant-gauss-olema4`); run before that, the script refuses `compare.wrong_branch` and
+renders nothing:
+
+    $env:FLIGHTSIM_SKY = "physical"
+    .\scripts\sky_compare_round.ps1 -Round 110 -Scene 3 -CompareWith 95
+    .\scripts\sky_compare_round.ps1 -Round 115 -Scene 13 -CompareWith 95
+
+then open `docs\visual\sky_compare\round_110\sheet.jpg` and `round_115\sheet.jpg`, read
+`compare.json`: `mismatches`, `unknown`, `switch_not_seen`, `no_record` and `missing` must ALL
+be empty and every tile's `applied` must be a shape word or "no layer" (each word drew its own
+shape on a host that saw the switch; `unknown` or `switch_not_seen` non-empty means the host
+never parsed `-cloud-type=` and the four frames are one look), and judge the four against row 1
+and the reference photo. Frames: `docs/visual/round_110..113/03_*.jpg` and
+`docs/visual/round_115..118/13_*.jpg`. On scene 13 the stratocumulus and overcast tiles show a
+deck above the 747 (the plan layer keeps bottom = AGL + 1 km; only an unstated cumulus layer is
+lowered, c641a8c4): the rule, not a defect.

@@ -784,10 +784,20 @@ static uint asuint(int v) { uint u; std::memcpy(&u, &v, 4); return u; }
 def test_the_cloud_march_and_the_sky_are_the_python_ones(tmp_path):
     """Round 2 (clouds-sky): the march by GPU class, the shadow length, the
     default layer's thinning and the sky's multiple scattering, C++ == Python;
-    the march stays under the engine's caps and steps finer than round 1."""
+    the march stays under the engine's caps and steps finer than round 1.
+    Sky step 3 (2026-11-15): the table gained a third row, "probe" (the
+    constrained class's opt-in raise behind -cloud-march=probe), and the discrete
+    row rose to the caps (8, 8, 50); the row list below is CLOUD_MARCH's keys in
+    C++ order rather than the two literals, and the constrained row's pin
+    (192 / 10 / 80) is unchanged. tests/test_sky_step3_cvars.py pins the rest.
+    Sky step 5 (2026-11-15): the cloud rows gained altocumulus (index 4, its
+    900 m thinning cap), so the capped-top cases run over every CLOUD_PRESETS
+    index rather than the first four."""
     block = _block(CLOUDS_CPP, "// FLIGHTSIM-WORLD-PURE-BEGIN", "// FLIGHTSIM-WORLD-PURE-END")
     thick = (0.0, 400.0, 1000.0, 2500.0, 3000.0, 6000.0)
-    tops = [(c, b, t, s) for c in range(4) for b, t in ((2940.0, 5940.0), (1500.0, 2700.0), (800.0, 2900.0))
+    assert len(wb.CLOUD_PRESETS) == 5
+    tops = [(c, b, t, s) for c in range(len(wb.CLOUD_PRESETS))
+            for b, t in ((2940.0, 5940.0), (1500.0, 2700.0), (800.0, 2900.0))
             for s in (0, 1)]
     main = ["using namespace FlightSimWorldPure;", "int main() {",
             "for (int m = 0; m < MarchCount; ++m) for (int f = 0; f < MarchFieldCount; ++f)"
@@ -806,7 +816,8 @@ def test_the_cloud_march_and_the_sky_are_the_python_ones(tmp_path):
                    check=True, capture_output=True, text=True)
     lines = subprocess.run([str(tmp_path / "march")], check=True, capture_output=True, text=True).stdout.splitlines()
     march = [line.split() for line in lines if line.startswith("march ")]
-    assert [(m, f) for _, m, f, _ in march] == [(m, f) for m in ("discrete", "integrated") for f in wb.CLOUD_MARCH_FIELDS]
+    assert tuple(wb.CLOUD_MARCH) == ("discrete", "integrated", "probe")   # sky step 3: the probe row
+    assert [(m, f) for _, m, f, _ in march] == [(m, f) for m in wb.CLOUD_MARCH for f in wb.CLOUD_MARCH_FIELDS]
     for _, m, f, value in march:
         assert float(value) == wb.CLOUD_MARCH[m][f], (m, f)
     assert [float(l.split()[1]) for l in lines if l.startswith("shadow ")] == [wb.cloud_shadow_tracing_km(t) for t in thick]
