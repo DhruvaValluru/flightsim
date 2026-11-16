@@ -4184,7 +4184,7 @@ def create_world_cloud_layers(lit=False):
     # Sky-clouds2: lit=True builds M_FlightSimCloudLayersLit (-look-cloud-light=on):
     # the same graph plus the scattering parameters and cloud_albedo.hlsl. The
     # default material stays graph 8 so its shader cost is unchanged.
-    name = "M_FlightSimCloudLayersLit" if lit else "M_FlightSimCloudLayers"
+    asset = "M_FlightSimCloudLayersLit" if lit else "M_FlightSimCloudLayers"
     material = (_world_beauty_material("M_FlightSimCloudLayersLit") if lit
                 else _world_beauty_material("M_FlightSimCloudLayers"))
     if material is None:
@@ -4215,8 +4215,8 @@ def create_world_cloud_layers(lit=False):
     node = storm_scattering(material, lib, -600, 700, constants=CLOUD_SCATTERING)
     if not lit:
         lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
-        world_stamp(material, name)
-        finish(material, name)
+        world_stamp(material, asset)
+        finish(material, asset)
         return
     # Generation 9 (sky-clouds lane): the albedo is cloud_albedo.hlsl (powder, flat
     # darker base); its defaults return "Albedo" exactly.
@@ -4232,10 +4232,10 @@ def create_world_cloud_layers(lit=False):
     for field, pin in WORLD_CLOUD_LIGHT_PINS.items():
         spelled = (pin, re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", pin))
         if not any(lib.connect_material_expressions(light[field][0], "", node, p) for p in spelled):
-            raise RuntimeError(f"{name}: {field} did not connect to the scattering node's "
+            raise RuntimeError(f"{asset}: {field} did not connect to the scattering node's "
                                f"{' / '.join(spelled)}")
-    world_stamp(material, name)
-    finish(material, name)
+    world_stamp(material, asset)
+    finish(material, asset)
 
 
 def create_world_tiles_beauty():
