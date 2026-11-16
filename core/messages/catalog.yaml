@@ -490,6 +490,10 @@ world_beauty.distant_clouds:
 world_beauty.cirrus:
   sentence: "The beauty cirrus sheet was asked for in a mode the world look does not know."
   hint: "Ask for -look-cirrus=on or off, or leave the choice out (off)."
+# sky gradient (core/sky/gradient.py, FlightSimClouds.cpp FFlightSimWorldBeauty::Build):
+world_beauty.sky_gradient:
+  sentence: "The beauty sky gradient was asked for in a mode the world look does not know."
+  hint: "Ask for -look-sky-gradient=on or off, or leave the choice out (on)."
 # high-sky fx (2026-11-15; FlightSimSkyFx.cpp, core/sky/sky_fx.py): recorded in
 # look_applied, never refused (the beauty look is visual only).
 sky_fx.rainbow:

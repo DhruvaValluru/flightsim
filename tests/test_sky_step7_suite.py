@@ -360,7 +360,7 @@ def test_the_beauty_cloud_material_is_built_to_pass_verify_cloud_materials():
     (without it the engine's cloud shadow pass asserts, docs/WEATHER.md), and the
     host's path must be the script's asset."""
     script = _read(SCRIPT)
-    builder = _between(script, "def create_world_cloud_layers():", "\ndef ")
+    builder = _between(script, "def create_world_cloud_layers(lit=False):", "\ndef ")
     assert 'material.set_editor_property("material_domain", unreal.MaterialDomain.MD_VOLUME)' in builder
     assert "material.set_editor_property(STORM_USAGE_PROPERTY, True)" in builder
     assert 'material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)' in builder

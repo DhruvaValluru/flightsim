@@ -314,7 +314,8 @@ def test_the_altocumulus_row_exists_on_both_sides():
     assert names and tuple(re.findall(r'"([a-z]+)"', names.group(1))) == wb.CLOUD_PRESETS
     row_text = re.search(r"\{([0-9., ]+)\},\s*// altocumulus", text).group(1)
     assert [float(v) for v in row_text.split(",")] == [row[f] for f in wb.CLOUD_FIELDS]
-    caps = re.search(r"static const double Rows\[CloudCount\] = \{([0-9., ]+)\};", text).group(1)
+    caps = re.search(r"CloudMaxThicknessM\(int Cloud\)\s*\{[^{]*static const double Rows\[CloudCount\] = \{([0-9., ]+)\};",
+                     text).group(1)
     assert [float(v) for v in caps.split(",")] == [wb.CLOUD_MAX_THICKNESS_M[s] for s in wb.CLOUD_PRESETS]
     assert "case 3: return CloudAltocumulus;" in text
     assert "case 3: return CloudStratocumulus;" not in text
