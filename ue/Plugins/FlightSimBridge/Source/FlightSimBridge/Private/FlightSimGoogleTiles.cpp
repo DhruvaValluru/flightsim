@@ -981,6 +981,15 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 			SeaMaterial->SetScalarParameterValue(FName(TEXT("WindDirX")), static_cast<float>(DownwindX));
 			SeaMaterial->SetScalarParameterValue(FName(TEXT("WindDirY")), static_cast<float>(DownwindY));
 		}
+		// Hyperreal sea (M_FlightSimOceanBeauty generation 6): on by the material's
+		// HyperSea default of 1; -ocean-hyper=0 in the render switches draws generation 5.
+		int32 OceanHyperWord = 1;
+		const bool bOceanHyperOff = bOceanBeauty
+			&& FParse::Value(*TilesSwitches(), TEXT("ocean-hyper="), OceanHyperWord) && OceanHyperWord == 0;
+		if (bOceanHyperOff)
+		{
+			SeaMaterial->SetScalarParameterValue(FName(TEXT("HyperSea")), 0.0f);
+		}
 		SeaMesh->SetMaterial(0, SeaMaterial);
 		SeaMesh->RegisterComponent();
 		SeaActor->SetActorLocation(FVector::ZeroVector);
@@ -1035,7 +1044,7 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 			TEXT("a spherical cap of the sea material at sea level over the tiles' ocean (beauty-only actor)"));
 		Sea->SetStringField(TEXT("material"), OceanBase->GetPathName());
 		Sea->SetStringField(TEXT("material_basis"), bOceanBeauty
-			? TEXT("M_FlightSimOceanBeauty (lane B, generation 5): its own sky reflection (Fresnel, horizon to "
+			? TEXT("M_FlightSimOceanBeauty (lane B, generation 6): its own sky reflection (Fresnel, horizon to "
 			       "zenith) and Cox-Munk sun glint as emissive from the atmosphere nodes, the Phillips wave normal only "
 			       "where resolved, deep-sea body colour, Monahan whitecaps at the card's WindSpeedMS; from 8 m/s a "
 			       "storm sea ramps in (streak and patch foam filtered by pixel footprint and distance, a resolved "
@@ -1062,6 +1071,7 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 				TEXT("storm = smoothstep(8, 18, WindSpeedMS) in the ocean shaders (Beaufort 5 to 8): 0 at 7 m/s (UNCALIBRATED)"));
 			Sea->SetObjectField(TEXT("wind"), Wind);
 		}
+		Sea->SetNumberField(TEXT("HyperSea"), bOceanHyperOff ? 0.0 : (bOceanBeauty ? 1.0 : 0.0));
 		Sea->SetNumberField(TEXT("lift_m"), LiftM);
 		Sea->SetBoolField(TEXT("low_pass"), bLowPass);
 		Sea->SetNumberField(TEXT("low_pass_agl_m"), SeaLowPassAglM);

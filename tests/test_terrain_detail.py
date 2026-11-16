@@ -122,7 +122,7 @@ def test_the_ocean_material_is_beauty_only_and_reads_what_the_script_wires():
     # 3: round 19's #13 (the cap's radial edges as lines, no waves or glint)
     # 4: round 26's #13 (the tiles' ocean still over the cap): the depth pull
     # 5: hyperreal stormsea: the card's wind wired, the storm foam / swell / body
-    assert _literal("WORLD_GENERATIONS")["M_FlightSimOceanBeauty"] == "5"
+    assert _literal("WORLD_GENERATIONS")["M_FlightSimOceanBeauty"] == "6"
     assert _literal("WORLD_OCEAN_DEPTH_PULL") == 0.01
     ocean = SCRIPT[SCRIPT.index("def create_world_ocean_beauty"):SCRIPT.index("def create_world_scatter")]
     # the only WPO: each vertex along its own line of sight (camera - vertex), so its pixel stays
@@ -134,7 +134,7 @@ def test_the_ocean_material_is_beauty_only_and_reads_what_the_script_wires():
         hlsl = _shader(name)
         # shaded from the sphere's up, never the cap's interpolated vertex normals
         assert "float3 up = S.Up(p);" in hlsl and "normalize(NormalWS)" not in hlsl, name
-        assert "tilt += S.Swell(p.xy, windDir, TimeS, footprintM);" in hlsl, name
+        assert "swellTilt = S.Swell(p.xy, windDir, TimeS, footprintM);" in hlsl, name
     assert "SHEEN_SHARE" in _shader("ocean_emissive")
     inputs = _literal("WORLD_OCEAN_INPUTS")
     assert set(inputs) == {"ocean_normal", "ocean_emissive", "ocean_colour"}

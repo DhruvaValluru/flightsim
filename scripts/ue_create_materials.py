@@ -3833,9 +3833,12 @@ WORLD_TILES_DETAIL_SCALARS = {"DetailAmount": 0.45, "SharpenAmount": 0.6, "Sharp
 #: its own sky reflection and sun glint as emissive (ocean_emissive.hlsl) from
 #: the atmosphere nodes the distant clouds already use on the render machine.
 WORLD_OCEAN_INPUTS = {name: ("WorldPos", "CameraPos", "NormalWS", "TimeS", "SunDir", "SunIlluminance", "SkyLum",
-                             "WindSpeedMS", "WindDirX", "WindDirY", "OceanN")
+                             "WindSpeedMS", "WindDirX", "WindDirY", "HyperSea", "OceanN")
                       for name in ("ocean_normal", "ocean_emissive", "ocean_colour")}
-WORLD_OCEAN_SCALARS = {"WindSpeedMS": 7.0, "WindDirX": 1.0, "WindDirY": 0.3}
+#: HyperSea (generation 6, hyperreal sea): 1 draws the PM spectrum sea, the anisotropic
+#: Cox-Munk glint, the whitecap onset and the crest light; the render switch
+#: -ocean-hyper=0 sets 0 on the cap's instance (FlightSimGoogleTiles.cpp): generation 5.
+WORLD_OCEAN_SCALARS = {"WindSpeedMS": 7.0, "WindDirX": 1.0, "WindDirY": 0.3, "HyperSea": 1.0}
 #: The engine's specular is OFF (and the surface fully rough): its screen-space
 #: reflections drew round 10's blocky streaks on the D3D11 path; the water's
 #: F0 0.02 reflection is ocean_emissive.hlsl's own.
@@ -3936,7 +3939,7 @@ def world_stamp(material, name):
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "10",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail)
                      "M_FlightSimCloudLayers": "9", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
-                     "M_FlightSimOceanBeauty": "5"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind)
+                     "M_FlightSimOceanBeauty": "6"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind; 6: hyperreal sea, HyperSea)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
 
@@ -4310,7 +4313,10 @@ def create_world_ocean_beauty():
     depth, so the sea wins over the tiles' ocean; the cap is in no label pass.
     Generation 5 (hyperreal stormsea): the shaders' storm sea, driven by the card's
     wind through the WindSpeedMS / WindDirX / WindDirY scalars the C++ sets on the
-    cap's material instance (the graph is unchanged; the Custom bodies are)."""
+    cap's material instance (the graph is unchanged; the Custom bodies are).
+    Generation 6 (hyperreal sea): the HyperSea scalar (default 1; -ocean-hyper=0 -> 0,
+    generation 5 exactly) gates the PM-spectrum Gerstner sea, the anisotropic Cox-Munk
+    glint, the 3-4 m/s whitecap onset and the turquoise crest light."""
     material = _world_beauty_material("M_FlightSimOceanBeauty")
     if material is None:
         return

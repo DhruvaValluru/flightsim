@@ -229,3 +229,71 @@ def downwind_engine_xy(wind_from_deg: float) -> Tuple[float, float]:
 def card_wind_ms(wind_speed_kt: float) -> float:
     """The commandlet's knots to m/s (1852 m per nautical mile, 3600 s)."""
     return wind_speed_kt * (1852.0 / 3600.0)
+
+
+# -- generation 6: the hyperreal sea (HyperSea = 1) --------------------------------
+
+G = 9.81
+
+
+def pm_peak_wavelength_m(wind_ms: float) -> float:
+    """Pierson-Moskowitz (1964) peak: wp = 0.877 g / U, deep water L = 2 pi g / wp^2."""
+    wp = 0.877 * G / max(wind_ms, 1.0)
+    return 2.0 * np.pi * G / wp ** 2
+
+
+def pm_component_steepness(ratios=(1.0, 0.7, 0.5), wind_ms: float = 7.0) -> np.ndarray:
+    """ka of wind-sea components at ratios x Lp: amplitudes ~ sqrt(S_PM(w)), scaled
+    so 4 sqrt(sum a^2 / 2) = Hs = 0.21 U^2 / g (fully developed)."""
+    lp = pm_peak_wavelength_m(wind_ms)
+    wp = 2.0 * np.pi / np.sqrt(2.0 * np.pi * lp / G)
+    r = np.asarray(ratios, dtype=float)
+    w = wp / np.sqrt(r)
+    spec = w ** -5 * np.exp(-1.25 * (wp / w) ** 4)
+    hs = 0.21 * max(wind_ms, 1.0) ** 2 / G
+    a = np.sqrt(spec)
+    a *= np.sqrt(2.0 * (hs / 4.0) ** 2 / np.sum(a ** 2))
+    return 2.0 * np.pi / (lp * r) * a
+
+
+def hyper_waves(pm: np.ndarray, wind_dir: np.ndarray, time_s: float, footprint_m, wind_ms: float, k=None):
+    """FOceanSurface::HyperWaves in float64: (tilt, height, resolved variance)."""
+    k = shader_constants() if k is None else k
+    peak = k["HYPER_PEAK_PER_U2"] * max(wind_ms, 1.0) ** 2
+    lengths = [k["HYPER_SWELL_M"], peak, 0.7 * peak, 0.5 * peak]
+    kas = [k["HYPER_SWELL_KA"], k["HYPER_SEA_KA_1"], k["HYPER_SEA_KA_2"], k["HYPER_SEA_KA_3"]]
+    turns = [0.6, 0.0, 0.4, -0.35]
+    q = k["HYPER_GERSTNER_Q"]
+    warp = 12.566 * value2(pm / 2200.0 + np.array([-0.0959, 0.2668]))
+    group = value2(pm / 1400.0 + np.array([0.4379, -0.2479]))
+    groups = (group, 1.0 - group)
+    slope = np.zeros_like(pm)
+    lift = np.zeros(pm.shape[0])
+    h = np.zeros(pm.shape[0])
+    hs = np.zeros(pm.shape[0])
+    var = np.zeros(pm.shape[0])
+    for i in range(4):
+        seen = 1.0 - smoothstep(lengths[i] / 10.0, lengths[i] / 4.0, footprint_m)
+        d = _turned(wind_dir, turns[i])
+        kk = 2.0 * np.pi / lengths[i]
+        phase = kk * (pm @ d) - np.sqrt(G * kk) * time_s + warp * (0.5 + 0.25 * i)
+        env = 0.5 + groups[i & 1]
+        ka = seen * env * kas[i]
+        slope -= (ka * np.cos(phase))[:, None] * d[None, :]
+        lift += q * ka * np.sin(phase)
+        h += ka / kk * np.sin(phase)
+        hs += seen * env * kas[i] / kk
+        var += 0.5 * ka * ka
+    return slope / np.maximum(1.0 - lift, 0.3)[:, None], h / np.maximum(hs, 1e-4), var
+
+
+def cox_munk_upwind_share(wind_ms: float, k=None) -> float:
+    """Cox & Munk (1954) clean surface: s_u^2 / (s_u^2 + s_c^2)."""
+    k = shader_constants() if k is None else k
+    u = k["CM_UPWIND_PER_MS"] * max(wind_ms, 0.0)
+    return u / (k["CM_CROSS_BASE"] + (k["CM_UPWIND_PER_MS"] + k["CM_CROSS_PER_MS"]) * max(wind_ms, 0.0))
+
+
+def whitecap_onset(wind_ms, k=None) -> np.ndarray:
+    k = shader_constants() if k is None else k
+    return smoothstep(k["HYPER_WHITECAP_ONSET_MS"], k["HYPER_WHITECAP_FULL_MS"], wind_ms)
