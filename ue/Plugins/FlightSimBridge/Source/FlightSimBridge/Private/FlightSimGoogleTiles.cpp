@@ -990,6 +990,18 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 		{
 			SeaMaterial->SetScalarParameterValue(FName(TEXT("HyperSea")), 0.0f);
 		}
+		// Round 147 (r146 #13: a uniform navy sea from 10 km, darker than the sky just
+		// below the horizon): M_FlightSimOceanBeauty generation 7's HorizonLift, x the
+		// reflected horizon sky (ocean_emissive.hlsl). -look-sea-horizon=on (the default)
+		// sets SeaHorizonLift (world_beauty.SEA_HORIZON_LIFT, the twin); off keeps the material's 1, generation 6 exactly. UNCALIBRATED.
+		constexpr double SeaHorizonLift = 2.0;
+		FString SeaHorizonWord = TEXT("on");
+		FParse::Value(*TilesSwitches(), TEXT("look-sea-horizon="), SeaHorizonWord);
+		const bool bSeaHorizon = bOceanBeauty && SeaHorizonWord != TEXT("off");
+		if (bSeaHorizon)
+		{
+			SeaMaterial->SetScalarParameterValue(FName(TEXT("HorizonLift")), static_cast<float>(SeaHorizonLift));
+		}
 		SeaMesh->SetMaterial(0, SeaMaterial);
 		SeaMesh->RegisterComponent();
 		SeaActor->SetActorLocation(FVector::ZeroVector);
@@ -1072,6 +1084,7 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround(UWorld* World, 
 			Sea->SetObjectField(TEXT("wind"), Wind);
 		}
 		Sea->SetNumberField(TEXT("HyperSea"), bOceanHyperOff ? 0.0 : (bOceanBeauty ? 1.0 : 0.0));
+		Sea->SetNumberField(TEXT("HorizonLift"), bSeaHorizon ? SeaHorizonLift : 1.0);   // round 147
 		Sea->SetNumberField(TEXT("lift_m"), LiftM);
 		Sea->SetBoolField(TEXT("low_pass"), bLowPass);
 		Sea->SetNumberField(TEXT("low_pass_agl_m"), SeaLowPassAglM);

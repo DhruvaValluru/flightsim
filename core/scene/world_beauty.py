@@ -1456,6 +1456,62 @@ def distant_handover_km(trace_km: float) -> float:
     return max(float(trace_km) - DISTANT_FADE_KM, 0.0)
 
 
+# -- round 147 (r146 #13, the 747 at 10 km over the ocean) ------------------------------
+#: The far deck seen from far above drew flat white cut-outs on a uniform navy sea
+#: (the distant sheet's screen-derivative normal is a few pixels of a smooth field;
+#: nothing shaded the sea). distant_clouds.hlsl TOPS_*: tops as domes with a km-frame
+#: normal, a self-shadow toward the sun, sky occlusion in thin margins, softer
+#: margins; SeaShadow darkens the sea seen through the gaps where the deck shades it.
+#: The bridge (FlightSimClouds.cpp SheetTopsRow / SeaShadowFor) is the twin.
+#: UNCALIBRATED: set by probe render on the render machine.
+SHEET_TOPS_STEP_SHARE = 0.08
+SHEET_TOPS_SHADOW_SHARE = 0.15
+SHEET_TOPS_SHADOW_DEPTH = 0.65
+SHEET_TOPS_AO_FLOOR = 0.55
+SHEET_TOPS_EDGE_SOFTEN = 2.0
+#: TopRelief under -look-sheet-tops=on (off: 0, round 146's sheet exactly).
+SHEET_TOPS_RELIEF = 1.0
+#: SeaShadow over the ocean surface only (the ground's height is the sea's, 0 km).
+SHEET_SEA_SHADOW = 0.35
+SHEET_SEA_SHADOW_SURFACES = ("ocean",)
+
+
+def sheet_tops_row(switch: str, surface: str, base_m: float, top_m: float) -> Dict[str, float]:
+    """The sheet's round-147 scalars: TopRelief, SeaShadow, GroundZKm, MidZKm."""
+    on = (switch or "on").strip().lower() != "off"
+    sea = on and (surface or "").strip().lower() in SHEET_SEA_SHADOW_SURFACES
+    return {"TopRelief": SHEET_TOPS_RELIEF if on else 0.0,
+            "SeaShadow": SHEET_SEA_SHADOW if sea else 0.0,
+            "GroundZKm": 0.0,
+            "MidZKm": 0.5 * (float(base_m) + float(top_m)) / 1000.0}
+
+
+#: M_FlightSimOceanBeauty generation 7: HorizonLift under -look-sea-horizon=on (off: 1,
+#: generation 6 exactly). UNCALIBRATED.
+SEA_HORIZON_LIFT = 2.0
+
+
+def sea_horizon_lift(switch: str) -> float:
+    return 1.0 if (switch or "on").strip().lower() == "off" else SEA_HORIZON_LIFT
+
+
+#: -look-high-ap=on (default): a camera above HIGH_AP_MIN_ALTITUDE_M sees the far deck
+#: and the sea out to its horizon, but the aerial-perspective LUT (which every
+#: translucent surface, the distant sheet among them, reads) ends at the march row's
+#: depth (96 km on the constrained GPU) and clamps beyond it: the far sheet stayed
+#: crisp white to the horizon. The LUT's depth becomes the camera's horizon distance
+#: sqrt(2 R h), at most HIGH_AP_MAX_KM, never below the row. Same LUT size, same cost.
+HIGH_AP_MIN_ALTITUDE_M = 5000.0
+HIGH_AP_MAX_KM = 360.0
+
+
+def high_ap_lut_depth_km(switch: str, camera_m: float, row_km: float) -> float:
+    if (switch or "on").strip().lower() == "off" or not camera_m > HIGH_AP_MIN_ALTITUDE_M:
+        return float(row_km)
+    horizon = math.sqrt(2.0 * DISTANT_EARTH_RADIUS_KM * camera_m / 1000.0)
+    return max(float(row_km), min(horizon, HIGH_AP_MAX_KM))
+
+
 #: Visual round 2 (weather scenes, 2026-11-10): BEAUTY ONLY, the aircraft is
 #: never drawn INSIDE a cloud deck. Round 1's tower view in heavy rain (an A320
 #: at 1000 m in the 800-3000 m rain deck) and its 747 in a thunderstorm (2000 m

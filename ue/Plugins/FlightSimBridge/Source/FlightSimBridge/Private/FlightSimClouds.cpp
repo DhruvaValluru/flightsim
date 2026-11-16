@@ -1475,6 +1475,45 @@ namespace FlightSimWorldPure
 		return TraceKm - DistantFadeKm > 0.0 ? TraceKm - DistantFadeKm : 0.0;
 	}
 
+	// Round 147 (r146 #13, the 747 at 10 km over the ocean: the far deck flat white
+	// cut-outs on a uniform navy sea). world_beauty.SHEET_TOPS_* / SEA_HORIZON_LIFT /
+	// HIGH_AP_* are the twins. UNCALIBRATED: set by probe render on the render machine.
+	// The sheet's tops seen from above (distant_clouds.hlsl TOPS_*): TopRelief under
+	// -look-sheet-tops=on (0: round 146's sheet exactly); SeaShadow over the ocean only
+	// (the shaded ground is the sea at world z 0); MidZKm the deck's mid height.
+	constexpr double SheetTopsRelief = 1.0;
+	constexpr double SheetSeaShadow = 0.35;
+	inline double SheetTopRelief(bool bOn)
+	{
+		return bOn ? SheetTopsRelief : 0.0;
+	}
+	inline double SheetSeaShadowFor(bool bOn, bool bOcean)
+	{
+		return bOn && bOcean ? SheetSeaShadow : 0.0;
+	}
+	inline double SheetMidZKm(double BaseM, double TopM)
+	{
+		return 0.5 * (BaseM + TopM) / 1000.0;
+	}
+	// (M_FlightSimOceanBeauty generation 7's HorizonLift is FlightSimGoogleTiles.cpp's
+	// SeaHorizonLift, set on the sea cap's instance under -look-sea-horizon=on.)
+	// -look-high-ap=on: above HighApMinAltitudeM the aerial-perspective LUT (which the
+	// translucent distant sheet reads; it clamps past its depth) reaches the camera's
+	// horizon sqrt(2 R h), at most HighApMaxKm, never below the march row's depth.
+	// The LUT's size is unchanged, so is its cost.
+	constexpr double HighApMinAltitudeM = 5000.0;
+	constexpr double HighApMaxKm = 360.0;
+	inline double HighApLutDepthKm(bool bOn, double CameraM, double RowKm)
+	{
+		if (!bOn || !(CameraM > HighApMinAltitudeM))
+		{
+			return RowKm;
+		}
+		const double HorizonKm = std::sqrt(2.0 * DistantEarthRadiusKm * CameraM / 1000.0);
+		const double Capped = HorizonKm < HighApMaxKm ? HorizonKm : HighApMaxKm;
+		return Capped > RowKm ? Capped : RowKm;
+	}
+
 	// Sky step 6 (the owner's X-Plane-12 brief, 2026-11-15): the high cirrus sheet
 	// (core/scene/cirrus.py is the twin). UE draws one volumetric layer; the
 	// reference photograph's upper sky is thin cirrus (long translucent wisps with
@@ -2059,6 +2098,14 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// (ours by default; epic is the Volumetrics plugin's cloud material for the A/B).
 		CloudLightSwitch = TEXT("off");
 		FParse::Value(*Switches, TEXT("look-cloud-light="), CloudLightSwitch);
+		// Round 147 (r146 #13): -look-sheet-tops=on|off (the distant sheet's tops seen from
+		// above, and their shadows on the sea) and -look-high-ap=on|off (the aerial-
+		// perspective LUT to the horizon for a high camera). On by default; anything
+		// but "off" draws as on.
+		SheetTopsSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("look-sheet-tops="), SheetTopsSwitch);
+		HighApSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("look-high-ap="), HighApSwitch);
 		// Lane rain-grey: -cloud-deck-scatter=round95|beauty (CloudDeckScatterFor).
 		CloudDeckScatterSwitch = TEXT("round95");
 		FParse::Value(*Switches, TEXT("cloud-deck-scatter="), CloudDeckScatterSwitch);
@@ -2414,6 +2461,8 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	// Visual round 5, lane L3: the far deck and the horizon (after the clearance:
 	// the sheet follows the slab that is drawn), then the sky HDRI probe.
 	ApplyDistantClouds(World, Scene, Weather, DistantMode, Seed);
+	// Round 147 (r146 #13): the aerial-perspective LUT to the horizon for a high camera.
+	ApplyHighAltitudeAerialPerspective(Aircraft);
 	// Sky step 6: the high cirrus sheet, above everything the layers drew (its
 	// cover is the plan's data or the stated default; -look-cirrus=off builds none).
 	ApplyCirrus(World, Scene, Seed);
@@ -4191,6 +4240,30 @@ void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualSc
 	// (distant_clouds.hlsl GRAZE_*: r69's banded horizon); 0 = round 81.
 	const float GrazingSoften = CloudBillowSwitch == TEXT("on") ? 1.0f : 0.0f;
 	Material->SetScalarParameterValue(TEXT("GrazingSoften"), GrazingSoften);
+	// Round 147 (r146 #13): the tops seen from above and their shadows on the sea.
+	const bool bSheetTops = SheetTopsSwitch != TEXT("off");
+	const double TopRelief = SheetTopRelief(bSheetTops);
+	const double SeaShadow = SheetSeaShadowFor(bSheetTops, Surface == TEXT("ocean"));
+	const double MidZKm = SheetMidZKm(BaseM, TopM);
+	Material->SetScalarParameterValue(TEXT("TopRelief"), static_cast<float>(TopRelief));
+	Material->SetScalarParameterValue(TEXT("SeaShadow"), static_cast<float>(SeaShadow));
+	Material->SetScalarParameterValue(TEXT("GroundZKm"), 0.0f);
+	Material->SetScalarParameterValue(TEXT("MidZKm"), static_cast<float>(MidZKm));
+	{
+		TSharedPtr<FJsonObject> Tops = MakeShared<FJsonObject>();
+		Tops->SetStringField(TEXT("switch"), bSheetTops ? TEXT("on") : TEXT("off"));
+		Tops->SetNumberField(TEXT("top_relief"), TopRelief);
+		Tops->SetNumberField(TEXT("sea_shadow"), SeaShadow);
+		Tops->SetNumberField(TEXT("ground_z_km"), 0.0);
+		Tops->SetNumberField(TEXT("mid_z_km"), MidZKm);
+		Tops->SetStringField(TEXT("surface"), Surface);
+		Tops->SetStringField(TEXT("basis"),
+			TEXT("round 147 (r146 #13): seen from above, past the hand-over, the top is a dome (km-frame normal, "
+			     "self-shadow toward the sun, sky occlusion in thin margins, softer margins: distant_clouds.hlsl TOPS_*); "
+			     "over the ocean the sea seen through a gap darkens where the deck at MidZKm shades it from the sun. "
+			     "-look-sheet-tops=off is round 146's sheet exactly. UNCALIBRATED"));
+		Out->SetObjectField(TEXT("tops"), Tops);
+	}
 	TSharedPtr<FJsonObject> Look = MakeShared<FJsonObject>();
 	for (int32 F = 0; F < DistantLookCount; ++F)
 	{
@@ -4290,6 +4363,46 @@ void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualSc
 	Out->SetStringField(TEXT("drawn"),
 		TEXT("M_FlightSimDistantClouds on one earth-curved disc centred on the camera, re-centred and re-levelled per frame"));
 	Record->SetObjectField(TEXT("distant_clouds"), Out);
+}
+
+// Round 147 (r146 #13, 2026-11-16): -look-high-ap=on|off (on by default). A camera
+// above HighApMinAltitudeM sees the far deck out to its horizon, but the aerial-
+// perspective LUT every translucent surface reads (the distant sheet among them) ends at
+// the march row's depth (96 km constrained) and clamps beyond it, so the far cumulus
+// stayed crisp white to the horizon. The LUT's depth becomes the camera's horizon
+// (FlightSimWorldPure::HighApLutDepthKm); same LUT size and cost; RestoreCvars puts it back.
+void FFlightSimWorldBeauty::ApplyHighAltitudeAerialPerspective(AActor* Aircraft)
+{
+	using namespace FlightSimWorldPure;
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	const bool bOn = HighApSwitch != TEXT("off");
+	Out->SetStringField(TEXT("switch"), bOn ? TEXT("on") : TEXT("off"));
+	const bool bKnown = Aircraft != nullptr;
+	const double CameraM = bKnown ? Aircraft->GetActorLocation().Z / WorldCmPerMetre : 0.0;
+	const bool bConstrained = CloudConstrainedGpu();
+	const int32 MarchChosen = CloudMarchFor(TCHAR_TO_ANSI(*CloudMarchSwitch), bConstrained);
+	const int32 March = MarchChosen >= 0 ? MarchChosen : (bConstrained ? MarchIntegrated : MarchDiscrete);
+	const double RowKm = CloudCvar(March, CvarApLutDepthKm);
+	const double DepthKm = HighApLutDepthKm(bOn && bKnown, CameraM, RowKm);
+	Out->SetBoolField(TEXT("aircraft_known"), bKnown);
+	Out->SetNumberField(TEXT("aircraft_z_m"), CameraM);
+	Out->SetNumberField(TEXT("min_altitude_m"), HighApMinAltitudeM);
+	Out->SetNumberField(TEXT("row_depth_km"), RowKm);
+	Out->SetNumberField(TEXT("depth_km"), DepthKm);
+	if (DepthKm > RowKm)
+	{
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> Skipped;
+		const FString Name(ANSI_TO_TCHAR(CloudCvarName(CvarApLutDepthKm)));
+		SetWorldCvar(*Name, DepthKm, Row, Skipped);
+		Out->SetObjectField(TEXT("cvars"), Row);
+		Out->SetArrayField(TEXT("cvars_skipped"), Skipped);
+	}
+	Out->SetStringField(TEXT("basis"),
+		TEXT("the translucent sheet reads the AP LUT, which clamps past its depth: above min_altitude_m the depth is "
+		     "the camera's horizon sqrt(2 R h), at most HighApMaxKm, never below the row (world_beauty.high_ap_lut_depth_km). "
+		     "Opaque surfaces take the per-pixel AP (FastApplyOnOpaque 0) and are unchanged. UNCALIBRATED"));
+	Record->SetObjectField(TEXT("high_altitude_ap"), Out);
 }
 
 // Visual round 5, lane L3 (2026-11-10, optional probe): the pinned, sun-clamped

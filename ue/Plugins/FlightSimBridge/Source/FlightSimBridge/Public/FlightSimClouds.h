@@ -197,6 +197,10 @@ private:
 	// /Game/FlightSim/Sky/T_SkyHdri_<name>) on the sky light as its specified
 	// cubemap, clear and hazy presets only. Recorded in world_beauty.sky_hdri.
 	bool ApplySkyHdri(FFlightSimVisualScene& Scene, const FString& Name, const TCHAR* Params, FString& Error);
+	// Round 147 (r146 #13): -look-high-ap=on|off: the aerial-perspective LUT's depth to
+	// the camera's horizon above 5 km (FlightSimWorldPure::HighApLutDepthKm). Recorded in
+	// world_beauty.high_altitude_ap.
+	void ApplyHighAltitudeAerialPerspective(AActor* Aircraft);
 	// Sky step 6 (the owner's X-Plane-12 brief): the high cirrus sheet (one
 	// earth-curved translucent disc at 10-13 km, above the flight,
 	// M_FlightSimCirrus; no depth, no custom depth, BeautyOnlyActors), drawn from
@@ -305,6 +309,10 @@ private:
 	// Lane rain-grey: -cloud-deck-scatter=round95|beauty (a deck's scattering node:
 	// FlightSimWorldPure::CloudDeckScatterRow; beauty is sky step 1's on every shape).
 	FString CloudDeckScatterSwitch = TEXT("round95");
+	// Round 147 (r146 #13): -look-sheet-tops=on|off (the distant sheet's tops seen from
+	// above and their shadows on the sea) and -look-high-ap=on|off; on by default.
+	FString SheetTopsSwitch = TEXT("on");
+	FString HighApSwitch = TEXT("on");
 	bool StormNeutralAlbedo() const;
 	// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default; off
 	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)

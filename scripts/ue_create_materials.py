@@ -3883,6 +3883,9 @@ WORLD_DISTANT_SCALARS = {
     # (world_beauty.DISTANT_LOOK; the bridge sets every one each render, so no stamp moves).
     "RimFadeShare": 0.2, "Albedo": 0.9, "AmbientGain": 1.0, "SunWrap": 0.3, "BaseDarkening": 0.70,
     "BaseSunShare": 0.25, "SilverLining": 0.8, "RimPower": 8.0, "NormalStrength": 1.5,
+    # Round 147 (r146 #13's flat far cumulus): 0 = round 146 exactly; the bridge sets
+    # TopRelief under -look-sheet-tops=on and SeaShadow over the ocean (world_beauty.SHEET_TOPS_*).
+    "TopRelief": 0.0, "SeaShadow": 0.0, "GroundZKm": 0.0, "MidZKm": 2.0,
 }
 WORLD_DISTANT_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 #: The Custom node's inputs, in order: the engine's five (world position, camera,
@@ -4009,10 +4012,14 @@ WORLD_TILES_DETAIL_SCALARS = {"DetailAmount": 0.45, "SharpenAmount": 0.6, "Sharp
 WORLD_OCEAN_INPUTS = {name: ("WorldPos", "CameraPos", "NormalWS", "TimeS", "SunDir", "SunIlluminance", "SkyLum",
                              "WindSpeedMS", "WindDirX", "WindDirY", "HyperSea", "OceanN")
                       for name in ("ocean_normal", "ocean_emissive", "ocean_colour")}
+#: Generation 7 (round 147, r146 #13's uniform navy sea): the emissive alone also takes
+#: HorizonLift (x the reflected horizon sky; the default 1 is generation 6 exactly, the
+#: bridge's -look-sea-horizon=on sets world_beauty.SEA_HORIZON_LIFT on the cap's instance).
+WORLD_OCEAN_INPUTS["ocean_emissive"] = WORLD_OCEAN_INPUTS["ocean_emissive"] + ("HorizonLift",)
 #: HyperSea (generation 6, hyperreal sea): 1 draws the PM spectrum sea, the anisotropic
 #: Cox-Munk glint, the whitecap onset and the crest light; the render switch
 #: -ocean-hyper=0 sets 0 on the cap's instance (FlightSimGoogleTiles.cpp): generation 5.
-WORLD_OCEAN_SCALARS = {"WindSpeedMS": 7.0, "WindDirX": 1.0, "WindDirY": 0.3, "HyperSea": 1.0}
+WORLD_OCEAN_SCALARS = {"WindSpeedMS": 7.0, "WindDirX": 1.0, "WindDirY": 0.3, "HyperSea": 1.0, "HorizonLift": 1.0}
 #: The engine's specular is OFF (and the surface fully rough): its screen-space
 #: reflections drew round 10's blocky streaks on the D3D11 path; the water's
 #: F0 0.02 reflection is ocean_emissive.hlsl's own.
@@ -4087,7 +4094,7 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: Lane rain-grey (2026-11-16): cloud layers 11, the scattering node's six pins from
 #: parameters (defaults CLOUD_SCATTERING = graph 10's light), so a deck shape takes
 #: round 95's node (-cloud-deck-scatter=round95, the default).
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "11", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "3",
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "11", "M_FlightSimDistantClouds": "6", "M_FlightSimCirrus": "3",
                            "M_FlightSimCloudLayersLit": "2",
                            "M_FlightSimRainbow": "1"}
 
@@ -4139,10 +4146,10 @@ def world_stamp(material, name):
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "12",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail); 11: wet ground (Lekner & Dorf darkening, grazing sky mirror; detail consts static for Metal); 12: its specular AA clamp tuned to 0.02
                      "M_FlightSimCloudLayers": "13", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING; 11: sky-clouds light inputs + cloud_albedo; 12: sky-clouds2 the light moved to M_FlightSimCloudLayersLit (graph 8 again); 13: rain-grey the scattering pins from parameters (graph 11)
                      "M_FlightSimCloudLayersLit": "3",  # sky-clouds2: -look-cloud-light=on's own material; 2: no powder, the base on the AO pin (round 1426); 3: rebuilt after clear_material_graph (round 1456 two advanced outputs)
-                     "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
+                     "M_FlightSimDistantClouds": "6",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften; 6: round-147 tops relief + sea shadow
                      "M_FlightSimCirrus": "3",          # sky step 6: the high cirrus sheet; 2: sky-cirrus2 patches + hooked fibres; 3: look check denser/brighter defaults
                      "M_FlightSimRainbow": "1",         # high-sky fx: the beauty rainbow
-                     "M_FlightSimOceanBeauty": "6"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind; 6: hyperreal sea, HyperSea)
+                     "M_FlightSimOceanBeauty": "7"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind; 6: hyperreal sea, HyperSea; 7: round-147 HorizonLift)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
 

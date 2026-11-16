@@ -52,6 +52,12 @@
 //   NormalStrength   float   the relief's slope per unit shape per km of thickness
 //   SheetFade        float   per frame: 0 with the camera inside the layer, 1 clear of it
 //   GrazingSoften    float   round 82: 1 flattens and softens the sheet at grazing views, 0 = round 81
+//   TopRelief        float   round 147: 1 shades tops seen from above as domes (a km-frame normal,
+//                            self-shadow, sky occlusion, softer margins); 0 = round 146 exactly
+//   SeaShadow        float   round 147: the darkening of the ground seen through the sheet's gaps
+//                            where the deck shades it from the sun (0 = none; the ocean only)
+//   GroundZKm        float   round 147: the shaded ground's world height, km (the sea: 0)
+//   MidZKm           float   round 147: the deck's mid height, km (the shadow caster's slice)
 //   SeedOffsetKm     float3  the card's seeded noise offset (world_beauty.cloud_seed_offset_km)
 //   WindOffsetM      float3  the drift since t = 0, engine metres (the scene's drift law)
 const float FBM_MEAN = 0.55;
@@ -67,6 +73,22 @@ const float PI_DC = 3.14159265;
 const float GRAZE_LO = 0.05;
 const float GRAZE_HI = 0.3;
 const float GRAZE_SOFTEN = 3.0;
+// Round 147 (r146 #13, the 747 at 10 km: the far cumulus deck flat white cut-outs on
+// the sea). Seen from far above, the screen-derivative normal is a few pixels of a
+// smooth field, so every top drew at one flat N.L with a hard rim and nothing on the
+// sea. With TopRelief the top is a dome of height ThicknessKm x sqrt(thickness)
+// (a cumulus top rounds over, its margin steep), its normal from two km-frame taps
+// TOPS_STEP_SHARE x the shape scale apart; a dome TOPS_SHADOW_SHARE x the shape scale
+// toward the sun that stands above the sun's ray shades it (TOPS_SHADOW_DEPTH);
+// thin margins and the creases between domes see less sky (TOPS_AO_FLOOR); the
+// margin is TOPS_EDGE_SOFTEN x wider. SeaShadow follows the view ray through a gap
+// down to GroundZKm and the sun's ray from there up to MidZKm: a cloud there shades
+// that ground. world_beauty.SHEET_TOPS_* is the twin. UNCALIBRATED.
+const float TOPS_STEP_SHARE = 0.08;
+const float TOPS_SHADOW_SHARE = 0.15;
+const float TOPS_SHADOW_DEPTH = 0.65;
+const float TOPS_AO_FLOOR = 0.55;
+const float TOPS_EDGE_SOFTEN = 2.0;
 // shared: world cloud noise (cloud_layers.hlsl FWorldCloud, text-equal)
 struct FWorldCloud
 {
@@ -299,4 +321,48 @@ float opacity = 1.0 - pow(saturate(1.0 - density), slant);
 float fadeIn = smoothstep(HandoverKm, HandoverKm + max(FadeKm, 1e-3), distKm);
 float rim = 1.0 - smoothstep(RadiusKm * (1.0 - saturate(RimFadeShare)), RadiusKm, horizKm);
 float a = opacity * fadeIn * rim * saturate(SheetFade);
+// Round 147: the tops seen from above, and their shadows on the sea (TopRelief,
+// SeaShadow 0: round 146 exactly). Only where the sheet draws (past the hand-over).
+float sheetWeight = fadeIn * rim * saturate(SheetFade);
+[branch] if (fromAbove && sheetWeight > 0.0 && (TopRelief > 0.0 || SeaShadow > 0.0))
+{
+	float scale = max(ShapeScaleKm, 1e-3);
+	float softT = soft * TOPS_EDGE_SOFTEN;
+	float relief = saturate(TopRelief);
+	[branch] if (relief > 0.0)
+	{
+		float e = TOPS_STEP_SHARE * scale;
+		float tC = C.Remap(shape, thr, thr + 4.0 * softT);
+		float tX = C.Remap(C.ShapeLod(float3(kmxy.x + e, kmxy.y, SliceKm * 2.0) / scale, 1.0, 7u), thr, thr + 4.0 * softT);
+		float tY = C.Remap(C.ShapeLod(float3(kmxy.x, kmxy.y + e, SliceKm * 2.0) / scale, 1.0, 7u), thr, thr + 4.0 * softT);
+		float hC = ThicknessKm * sqrt(tC);
+		float3 nTop = normalize(float3(-(ThicknessKm * sqrt(tX) - hC) / e, -(ThicknessKm * sqrt(tY) - hC) / e, 1.0));
+		float sunLen = max(length(SunDir.xy), 1e-3);
+		float d = TOPS_SHADOW_SHARE * scale;
+		float2 toSun = SunDir.xy / sunLen * d;
+		float tS = C.Remap(C.ShapeLod(float3(kmxy.x + toSun.x, kmxy.y + toSun.y, SliceKm * 2.0) / scale, 1.0, 7u), thr, thr + 4.0 * softT);
+		float rise = ThicknessKm * sqrt(tS) - hC - d * max(SunDir.z, 0.0) / sunLen;
+		float shadowed = saturate(rise / max(0.25 * ThicknessKm, 1e-3));
+		float wrapTop = saturate((dot(nTop, SunDir) + SunWrap) / (1.0 + SunWrap));
+		float3 Ltop = sunLambert * wrapTop * (1.0 - TOPS_SHADOW_DEPTH * shadowed)
+		            + ambient * lerp(TOPS_AO_FLOOR, 1.0, tC) + 0.5 * lining;
+		L = lerp(L, Ltop, relief);
+		float densityTop = C.Remap(shape, thr, thr + softT);
+		float opacityTop = 1.0 - pow(saturate(1.0 - densityTop), slant);
+		a = lerp(opacity, opacityTop, relief) * sheetWeight;
+	}
+	float shadowA = 0.0;
+	[branch] if (SeaShadow > 0.0 && V.z > 0.02 && SunDir.z > 0.05)
+	{
+		float dropKm = max(WorldPos.z / 100000.0 - GroundZKm, 0.0);
+		float2 groundKm = kmxy - V.xy / V.z * dropKm;
+		float2 casterKm = groundKm + SunDir.xy / SunDir.z * max(MidZKm - GroundZKm, 0.0);
+		float caster = C.ShapeLod(float3(casterKm.x, casterKm.y, SliceKm * 2.0) / scale, 1.0, 7u);
+		shadowA = saturate(SeaShadow) * C.Remap(caster, thr, thr + 2.0 * softT) * sheetWeight;
+	}
+	// The shadow is a black layer under the cloud: out = L a + dst (1 - a)(1 - shadowA).
+	float total = a + shadowA * (1.0 - a);
+	L = total > 1e-4 ? L * (a / total) : L;
+	a = total;
+}
 return float4(L, a);

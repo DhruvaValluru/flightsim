@@ -117,6 +117,7 @@
 //   WindDirX        float      the downwind direction, world x ...
 //   WindDirY        float      ... and y (normalised here)
 //   HyperSea        float      1 = generation 6 (hyperreal sea), 0 = generation 5 exactly
+//   HorizonLift     float      generation 7 (round 147): x the reflected horizon sky; 1 = generation 6 exactly
 //   OceanN          Texture2D  assets/terrain_detail/ocean/ocean_normal_512.png (OpenGL)
 // The deep ocean's body colour (linear; the water-leaving colour of open
 // oligotrophic sea: dark and only a little blue) and the whitecaps' albedo.
@@ -452,7 +453,14 @@ float g1v = 2.0 * nv / (nv + sqrt(a2 + (1.0 - a2) * nv * nv));
 float3 r = reflect(-v, n);
 float elevation = saturate(dot(r, up));
 float3 pale = lerp(SkyLum, dot(SkyLum, float3(0.2126, 0.7152, 0.0722)).xxx, HORIZON_PALE);
-float3 sky = lerp(pale * HORIZON_GAIN, SkyLum * ZENITH_TINT, sqrt(elevation));
+// Generation 7 (round 147, r146 #13: a uniform navy sea from 10 km, darker than the
+// sky just below the horizon). SkyLum is the sky's DISTANT luminance (a hemisphere
+// mean), dimmer than the bright horizon band the grazing mirror ray actually sees;
+// HorizonLift scales the reflected horizon term (the bridge's -look-sea-horizon=on
+// sets world_beauty.SEA_HORIZON_LIFT; 1 = generation 6). It fades with the mirror
+// ray's elevation like the term itself, so the dark-blue water below the camera
+// keeps generation 6's colour and the sea pales toward the horizon. UNCALIBRATED.
+float3 sky = lerp(pale * HORIZON_GAIN * max(HorizonLift, 0.0), SkyLum * ZENITH_TINT, sqrt(elevation));
 float fresnel = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
 float3 reflected = fresnel * g1v * sky;
 // The sun glint: GGX (Cox-Munk width), Schlick at the half vector, Smith both

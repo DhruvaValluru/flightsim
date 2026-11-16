@@ -219,8 +219,8 @@ def test_the_three_shaders_share_one_storm_block_and_the_same_tail():
 
 def test_the_material_generation_is_bumped_and_the_defaults_are_the_calm_sea():
     gens = re.search(r'"M_FlightSimOceanBeauty": "(\d+)"\}', SCRIPT)
-    assert gens and gens.group(1) == "6"   # generation 6: hyperreal sea (test_ocean_hyper_sea.py)
-    assert 'WORLD_OCEAN_SCALARS = {"WindSpeedMS": 7.0, "WindDirX": 1.0, "WindDirY": 0.3, "HyperSea": 1.0}' in SCRIPT
+    assert gens and gens.group(1) == "7"   # generation 6: hyperreal sea (test_ocean_hyper_sea.py); 7: round-147 HorizonLift
+    assert 'WORLD_OCEAN_SCALARS = {"WindSpeedMS": 7.0, "WindDirX": 1.0, "WindDirY": 0.3, "HyperSea": 1.0, "HorizonLift": 1.0}' in SCRIPT
     # the ocean section only: the cloud sections are flightsim-83's
     assert "ocean_storm_sea" in SCRIPT[SCRIPT.index("#: M_FlightSimOceanBeauty (the beauty sea cap"):
                                        SCRIPT.index("WORLD_OCEAN_SCALARS")]

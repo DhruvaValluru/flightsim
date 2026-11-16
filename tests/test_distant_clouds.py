@@ -212,7 +212,11 @@ def test_the_sheet_shares_the_volumetric_noise_and_its_cut():
     # the same cut, the same z stretch, one shape evaluation, derivatives for the normal
     assert "float thr = FBM_MEAN + FBM_SIGMA * C.Probit(1.0 - cover);" in DISTANT_HLSL
     assert "SliceKm * 2.0" in DISTANT_HLSL
-    assert DISTANT_HLSL.count("C.ShapeLod(") == 1 and "C.Shape(" not in DISTANT_HLSL.split("// end shared")[1] and "C.Detail(" not in DISTANT_HLSL.split("// end shared")[1]
+    # one evaluation on the round-146 path; round 147's tops (three) and sea shadow (one) live
+    # in the TopRelief / SeaShadow branch, past the hand-over only
+    base_path, tops = DISTANT_HLSL.split("// Round 147: the tops seen from above")
+    assert base_path.split("FWorldCloud C;")[1].count("C.ShapeLod(") == 1 and tops.count("C.ShapeLod(") == 4
+    assert "C.Shape(" not in DISTANT_HLSL.split("// end shared")[1] and "C.Shape(" not in DISTANT_HLSL.split("// end shared")[1] and "C.Detail(" not in DISTANT_HLSL.split("// end shared")[1]
     assert "ddx(thick)" in DISTANT_HLSL and "ddy(thick)" in DISTANT_HLSL
     assert "return float4(L, a);" in DISTANT_HLSL
     assert "UNCALIBRATED" in DISTANT_HLSL

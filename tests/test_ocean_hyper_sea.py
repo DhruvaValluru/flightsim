@@ -104,7 +104,7 @@ def test_every_generation_6_term_is_gated_by_hyper():
 
 
 def test_the_switch_and_the_default():
-    assert '"HyperSea": 1.0}' in SCRIPT and '"HyperSea", "OceanN")' in SCRIPT
+    assert '"HyperSea": 1.0, "HorizonLift": 1.0}' in SCRIPT and '"HyperSea", "OceanN")' in SCRIPT
     body = TILES_CPP[TILES_CPP.index("TSharedPtr<FJsonObject> FFlightSimGoogleTiles::ApplyBeautyGround("):]
     assert 'TEXT("ocean-hyper="), OceanHyperWord) && OceanHyperWord == 0' in body
     assert 'SeaMaterial->SetScalarParameterValue(FName(TEXT("HyperSea")), 0.0f);' in body

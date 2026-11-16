@@ -130,7 +130,7 @@ def test_the_distant_sheet_softens_at_grazing_views_under_the_switch():
     assert "slope *= 1.0 - graze;" in text
     materials = _read(MATERIALS)
     assert '"GrazingSoften": 0.0,' in materials
-    assert '"M_FlightSimDistantClouds": "5"' in materials
+    assert '"M_FlightSimDistantClouds": "6"' in materials   # 6: round-147 tops relief
     cpp = _read(CPP)
     assert 'const float GrazingSoften = CloudBillowSwitch == TEXT("on") ? 1.0f : 0.0f;' in cpp
     assert 'Material->SetScalarParameterValue(TEXT("GrazingSoften"), GrazingSoften);' in cpp
