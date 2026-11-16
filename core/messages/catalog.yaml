@@ -501,6 +501,10 @@ world_beauty.cirrus:
 world_beauty.sky_gradient:
   sentence: "The beauty sky gradient was asked for in a mode the world look does not know."
   hint: "Ask for -look-sky-gradient=on or off, or leave the choice out (on)."
+# sky light capture veil (fix lane sun-color; core/sky/gradient.py sky_capture_veil_mode):
+world_beauty.sky_capture_veil:
+  sentence: "The sky light capture's fog veil was asked for in a mode the world look does not know."
+  hint: "Ask for -sky-capture-veil=on or off, or leave the choice out (on)."
 # high-sky fx (2026-11-15; FlightSimSkyFx.cpp, core/sky/sky_fx.py): recorded in
 # look_applied, never refused (the beauty look is visual only).
 sky_fx.rainbow:

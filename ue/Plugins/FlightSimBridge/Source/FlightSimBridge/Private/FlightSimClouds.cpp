@@ -1143,6 +1143,14 @@ namespace FlightSimWorldPure
 		if (std::strcmp(Word, "off") == 0) { return 0; }
 		return -1;
 	}
+	// Fix lane sun-color: -sky-capture-veil=on|off (core/sky/gradient.py
+	// sky_capture_veil_mode). 1 = on, 0 = off, -1 = an unknown word.
+	inline int SkyCaptureVeilFor(const char* Word)
+	{
+		if (Word == nullptr || Word[0] == '\0' || std::strcmp(Word, "on") == 0) { return 1; }
+		if (std::strcmp(Word, "off") == 0) { return 0; }
+		return -1;
+	}
 	[[maybe_unused]] constexpr double SkyGradientSkyPixelDepthKm = 1000.0;
 	[[maybe_unused]] constexpr double SkyGradientFogCutoffKm = 950.0;
 	constexpr int AirlightGainCount = 10;
@@ -1993,6 +2001,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// claude/hl-sky's sky). FlightSimWorldPure::SkyGradientFor.
 		SkyGradientSwitch = TEXT("on");
 		FParse::Value(*Switches, TEXT("look-sky-gradient="), SkyGradientSwitch);
+		// Fix lane sun-color: -sky-capture-veil=on|off (on by default; off is round
+		// 144's sky light capture). FlightSimWorldPure::SkyCaptureVeilFor.
+		SkyCaptureVeilSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("sky-capture-veil="), SkyCaptureVeilSwitch);
 		// Sky step 1: -look-cloud-wisp=on|off (on by default): the cumulus and
 		// stratocumulus wisp (CloudWispRow, CloudBellyOcclusion); off is round 95's
 		// clouds exactly. Another word refuses by name.
@@ -2059,6 +2071,12 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	{
 		Error = FString::Printf(TEXT("world_beauty.sky_gradient: -look-sky-gradient=%s is not on or off"),
 		                        *SkyGradientSwitch);
+		return false;
+	}
+	if (SkyCaptureVeilFor(TCHAR_TO_ANSI(*SkyCaptureVeilSwitch)) < 0)
+	{
+		Error = FString::Printf(TEXT("world_beauty.sky_capture_veil: -sky-capture-veil=%s is not on or off"),
+		                        *SkyCaptureVeilSwitch);
 		return false;
 	}
 	if (CirrusSwitch != TEXT("on") && CirrusSwitch != TEXT("off"))
@@ -2709,6 +2727,97 @@ bool FFlightSimWorldBeauty::ConstrainedGpu()
 	return CloudConstrainedGpu();
 }
 
+// Fix lane sun-color (2026-11-16): -sky-capture-veil (core/sky/gradient.py
+// sky_capture_veil_fog, the twin). The sky light is captured once
+// (USkyLightComponent::UpdateSkyCaptureContents, SLS_CapturedScene) and its cube
+// faces draw the height fog over the sky with the view's FogCutoffDistance test,
+// so the gradient's cutoff and step 4's profile took the fog veil out of the
+// FILL: round 144 #01's shade is 3-5x round 199's in linear light, uniform with
+// range (the fill, not the view's fog), the golden hour's warm key / cool fill
+// ratio gone, and #02's stated x1.35 fill blue-white. For that capture only, each
+// profiled fog is put back to its pre-gradient state: the profile's density at
+// the scene's fog height (rebased from the CURRENT density, so the dust haze's
+// later ratio is kept), the scene's falloff and height, the cutoff it had, the
+// ambient over the airlight gain (the stated fill's later tint kept). Resume puts
+// the view's fog back exactly.
+TSharedPtr<FJsonObject> FFlightSimWorldBeauty::SuspendSkyGradientForCapture()
+{
+	using namespace FlightSimWorldPure;
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetStringField(TEXT("switch"), SkyCaptureVeilSwitch);
+	const bool bOn = bBuilt && SkyCaptureVeilFor(TCHAR_TO_ANSI(*SkyCaptureVeilSwitch)) == 1;
+	int32 Held = 0;
+	TArray<TSharedPtr<FJsonValue>> Rows;
+	for (FSkyCaptureVeil& Veil : SkyCaptureVeils)
+	{
+		Veil.bHeld = false;
+		UExponentialHeightFogComponent* Fog = Veil.Fog.Get();
+		if (!bOn || Fog == nullptr)
+		{
+			continue;
+		}
+		Veil.HeldDensity = Fog->FogDensity;
+		Veil.HeldFalloff = Fog->FogHeightFalloff;
+		Veil.HeldCutoffCm = Fog->FogCutoffDistance;
+		Veil.HeldLocation = Fog->GetComponentLocation();
+		Veil.HeldAmbient = Fog->SkyAtmosphereAmbientContributionColorScale;
+		Veil.bHeld = true;
+		const double CurrentZM = Veil.HeldLocation.Z / WorldCmPerMetre;
+		const double Density = FogDensityRebased(Fog->FogDensity, Fog->FogHeightFalloff, CurrentZM, Veil.SceneZM);
+		const float G = static_cast<float>(Veil.AirlightGain > 0.0 ? Veil.AirlightGain : 1.0);
+		Fog->SetFogDensity(static_cast<float>(Density));
+		Fog->SetFogHeightFalloff(static_cast<float>(Veil.SceneFalloff));
+		Fog->SetFogCutoffDistance(Veil.CutoffBeforeCm);
+		Fog->SetSkyAtmosphereAmbientContributionColorScale(FLinearColor(
+			Veil.HeldAmbient.R / G, Veil.HeldAmbient.G / G, Veil.HeldAmbient.B / G, Veil.HeldAmbient.A));
+		Fog->SetWorldLocation(FVector(Veil.HeldLocation.X, Veil.HeldLocation.Y, Veil.SceneZM * WorldCmPerMetre));
+		Fog->MarkRenderStateDirty();
+		++Held;
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		Row->SetStringField(TEXT("component"), Fog->GetName());
+		Row->SetNumberField(TEXT("view_density"), Veil.HeldDensity);
+		Row->SetNumberField(TEXT("view_falloff"), Veil.HeldFalloff);
+		Row->SetNumberField(TEXT("view_z_m"), CurrentZM);
+		Row->SetNumberField(TEXT("view_cutoff_km"), Veil.HeldCutoffCm / WorldCmPerMetre / 1000.0);
+		Row->SetNumberField(TEXT("capture_density"), Fog->FogDensity);
+		Row->SetNumberField(TEXT("capture_falloff"), Fog->FogHeightFalloff);
+		Row->SetNumberField(TEXT("capture_z_m"), Veil.SceneZM);
+		Row->SetNumberField(TEXT("capture_cutoff_km"), Fog->FogCutoffDistance / WorldCmPerMetre / 1000.0);
+		Row->SetNumberField(TEXT("airlight_gain_undone"), G);
+		Rows.Add(MakeShared<FJsonValueObject>(Row));
+	}
+	Out->SetBoolField(TEXT("applied"), Held > 0);
+	Out->SetNumberField(TEXT("fogs_held"), Held);
+	Out->SetArrayField(TEXT("fogs"), Rows);
+	Out->SetStringField(TEXT("basis"),
+		TEXT("fix lane sun-color (core/sky/gradient.py sky_capture_veil_fog): the sky light's one capture draws the "
+		     "height fog over its sky with the view's cutoff test, so the gradient's FogCutoffDistance and step 4's "
+		     "profile made the fill the bare physical sky (round 144 #01 shade 3-5x round 199's, #02 blue-white); for "
+		     "that capture only the fog is the pre-gradient one, the view's put back after. -sky-capture-veil=off is "
+		     "round 144's capture"));
+	return Out;
+}
+
+void FFlightSimWorldBeauty::ResumeSkyGradientAfterCapture()
+{
+	for (FSkyCaptureVeil& Veil : SkyCaptureVeils)
+	{
+		UExponentialHeightFogComponent* Fog = Veil.Fog.Get();
+		if (!Veil.bHeld || Fog == nullptr)
+		{
+			Veil.bHeld = false;
+			continue;
+		}
+		Fog->SetFogDensity(Veil.HeldDensity);
+		Fog->SetFogHeightFalloff(Veil.HeldFalloff);
+		Fog->SetFogCutoffDistance(Veil.HeldCutoffCm);
+		Fog->SetSkyAtmosphereAmbientContributionColorScale(Veil.HeldAmbient);
+		Fog->SetWorldLocation(Veil.HeldLocation);
+		Fog->MarkRenderStateDirty();
+		Veil.bHeld = false;
+	}
+}
+
 void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene& Scene, double VisibilityKm,
                                             AActor* Aircraft)
 {
@@ -2718,6 +2827,7 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 	double FogFactor = 1.0;
 	FogProfiles.Reset();
+	SkyCaptureVeils.Reset();
 	USkyAtmosphereComponent* Atmosphere = Scene.Atmosphere;
 	// -NoAerialPerspective (Gate 6's extinction control) hides the atmosphere
 	// and the fog: a hidden one is left exactly as the scene built it.
@@ -2929,6 +3039,12 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 			FogRow->SetNumberField(TEXT("fog_height_falloff_before"), Fog->FogHeightFalloff);
 			FogRow->SetNumberField(TEXT("fog_height_z_m_scene"), SceneZM);
 			FogRow->SetNumberField(TEXT("fog_density_at_scene_height"), Fog->FogDensity);
+			FSkyCaptureVeil Veil;
+			Veil.Fog = Fog;
+			Veil.SceneZM = SceneZM;
+			Veil.SceneFalloff = Fog->FogHeightFalloff;
+			Veil.ProfileFalloff = FogFalloff;
+			Veil.CutoffBeforeCm = Fog->FogCutoffDistance;
 			if (bFogProfile)
 			{
 				const double Rebased = FogDensityRebased(Fog->FogDensity, FogFalloff, SceneZM, ReferenceZM);
@@ -2967,7 +3083,12 @@ void FFlightSimWorldBeauty::ApplyAtmosphere(UWorld* World, FFlightSimVisualScene
 					Fog->SetSkyAtmosphereAmbientContributionColorScale(
 						FLinearColor(Before.R * G, Before.G * G, Before.B * G, Before.A));
 					FogRow->SetNumberField(TEXT("horizon_airlight_gain"), AirlightGain);
+					Veil.AirlightGain = AirlightGain;
 				}
+			}
+			if (bFogProfile)
+			{
+				SkyCaptureVeils.Add(Veil);
 			}
 		}
 		Fog->SetVolumetricFog(true);

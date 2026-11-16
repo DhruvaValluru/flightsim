@@ -6170,10 +6170,31 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// capture" with no finer name. Each blocking call below beats BEFORE it
 		// runs, so a stall names the call it is in (the watchdog reports the
 		// last beat), and logs a line so the log shows how far it got.
+		// Fix lane sun-color (-sky-capture-veil=on|off, FFlightSimWorldBeauty::
+		// SuspendSkyGradientForCapture): the capture's fog is the pre-gradient
+		// one, so the fill is the one the looks were set against; the view's fog
+		// is put back right after. Beauty only (measure never builds the world lane).
+		TSharedPtr<FJsonObject> SkyVeilRecord;
+		if (WorldBeauty.IsBuilt())
+		{
+			SkyVeilRecord = WorldBeauty.SuspendSkyGradientForCapture();
+			World->SendAllEndOfFrameUpdates();
+			FlushRenderingCommands();
+		}
 		BeatWatchdog(TEXT("the sky light capture (UpdateSkyCaptureContents running)"));
 		VisualScene.SkyLightComponent->SetCaptureIsDirty();
 		USkyLightComponent::UpdateSkyCaptureContents(World);
 		FlushRenderingCommands();
+		if (WorldBeauty.IsBuilt())
+		{
+			WorldBeauty.ResumeSkyGradientAfterCapture();
+			World->SendAllEndOfFrameUpdates();
+			FlushRenderingCommands();
+			if (VisualScene.LookApplied.IsValid() && SkyVeilRecord.IsValid())
+			{
+				VisualScene.LookApplied->SetObjectField(TEXT("sky_capture_veil"), SkyVeilRecord);
+			}
+		}
 		BeatWatchdog(TEXT("the sky light capture"));
 		UE_LOG(LogFlightSimRender, Display, TEXT("sky light capture: done"));
 		DrainGpu(TEXT("the sky light capture"));
@@ -7504,9 +7525,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		if (bSunAnimated && VisualScene.SkyLightComponent != nullptr)
 		{
+			// Fix lane sun-color: the per-frame recapture keeps the veil too.
+			const bool bVeil = WorldBeauty.IsBuilt();
+			if (bVeil)
+			{
+				WorldBeauty.SuspendSkyGradientForCapture();
+				World->SendAllEndOfFrameUpdates();
+				FlushRenderingCommands();
+			}
 			VisualScene.SkyLightComponent->SetCaptureIsDirty();
 			USkyLightComponent::UpdateSkyCaptureContents(World);
 			FlushRenderingCommands();
+			if (bVeil)
+			{
+				WorldBeauty.ResumeSkyGradientAfterCapture();
+				World->SendAllEndOfFrameUpdates();
+				FlushRenderingCommands();
+			}
 		}
 		// Render-path lane: the beauty sub-frames of this pose (none on
 		// measure: BeautySubFrames is 1 there and this loop is empty). The

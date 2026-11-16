@@ -64,6 +64,8 @@ __all__ = [
     "CIE_CLEAR_SKY", "cie_clear_sky_relative", "cie_horizon_to_mean",
     "AIRLIGHT_GAIN_TABLE", "AIRLIGHT_GAIN_MAX", "AIRLIGHT_TWILIGHT_DEG", "horizon_airlight_gain",
     "EARTH_ATMOSPHERE", "GRADIENT_PRESETS",
+    "SKY_CAPTURE_VEIL_SWITCH", "SKY_CAPTURE_VEIL_SWITCH_WORDS", "sky_capture_veil_mode",
+    "sky_capture_veil_fog",
 ]
 
 SKY_GRADIENT_SWITCH = "-look-sky-gradient"
@@ -161,3 +163,63 @@ def horizon_airlight_gain(sun_elevation_deg: float) -> float:
     i = min(int(x), len(table) - 2)
     f = x - i
     return min(table[i] + (table[i + 1] - table[i]) * f, AIRLIGHT_GAIN_MAX)
+
+
+# -- fix lane sun-color (2026-11-16): the sky light's capture keeps the veil ----------
+#
+# The regression (Windows round 144 vs round 199, #01 golden hour and #02 super
+# bright over Yosemite): the beauty sky light is captured ONCE by the commandlet
+# (USkyLightComponent::UpdateSkyCaptureContents, SLS_CapturedScene; never real
+# time, FlightSimHeroLighting.cpp), and that capture renders the height fog over
+# its sky exactly as the view does, with the same FogCutoffDistance test
+# (HeightFogCommon.ush). Before this lane's cutoff and sky step 4's 1.2 / 1.6 km
+# profile, the captured sky was 0.92 of the fog's in-scatter (the distant sky
+# light) over 0.08 of the atmosphere: the fill every lighting preset, the stated
+# fill's neutral tint (hero_lighting.stated_fill_tint) and the exposure were tuned
+# against. With both, the capture is the bare physical sky -- the deep blue zenith
+# and the bright Mie aureole -- so the fill rose against the unchanged sun: round
+# 144's #01 shade is 3-5x brighter in linear light (pixel-aligned with round 199,
+# uniform with range, so a fill and not the fog veil), the warm key / cool fill
+# ratio that reads as golden hour is gone, and #02's x1.35 stated fill turns the
+# frame blue-white. ``-sky-capture-veil=on`` (the default) puts the fog back to
+# its pre-gradient state for that one capture (:func:`sky_capture_veil_fog`) and
+# restores the view's fog after it, so the drawn sky keeps the gradient and the
+# fill is the one the looks were set against. ``off`` is round 144's capture.
+# VISUAL ONLY: the capture is a beauty sky light; no label, mask, depth or
+# measure pass reads it (measure never builds the world lane).
+
+SKY_CAPTURE_VEIL_SWITCH = "-sky-capture-veil"
+SKY_CAPTURE_VEIL_SWITCH_WORDS: Tuple[str, ...] = ("on", "off")
+
+
+def sky_capture_veil_mode(word: Optional[str]) -> str:
+    """``on`` (the default, an empty word) or ``off``; any other word is the host's
+    refusal ``world_beauty.sky_capture_veil``."""
+    chosen = (word or "").strip() or "on"
+    if chosen not in SKY_CAPTURE_VEIL_SWITCH_WORDS:
+        raise ValueError(f"world_beauty.sky_capture_veil: -sky-capture-veil={chosen} is not on or off")
+    return chosen
+
+
+def sky_capture_veil_fog(density: float, falloff: float, current_z_m: float, scene_z_m: float,
+                         scene_falloff: float, cutoff_before_cm: float,
+                         ambient_rgb: Tuple[float, float, float], airlight_gain: float) -> Dict[str, object]:
+    """The fog the sky light's capture sees under ``-sky-capture-veil=on``: the
+    pre-gradient fog rebuilt from the view's CURRENT one (the C++ twin is
+    FFlightSimWorldBeauty::SuspendSkyGradientForCapture). The density is the
+    profile's own at the scene's fog height (translation-invariant, so a later
+    ratio on it, the dust haze's, is kept), drawn there under the scene's
+    falloff; the cutoff is the one the fog had before the gradient; the ambient
+    is the current one over the horizon airlight gain (a later tint, the stated
+    fill's, is kept)."""
+    gain = float(airlight_gain)
+    if not math.isfinite(gain) or gain <= 0.0:
+        raise ValueError(f"sky capture veil: an airlight gain of {airlight_gain!r} cannot be undone")
+    d = float(density) * 2.0 ** (-float(falloff) * (float(scene_z_m) - float(current_z_m)) / 10.0)
+    return {
+        "density": d,
+        "falloff": float(scene_falloff),
+        "z_m": float(scene_z_m),
+        "cutoff_cm": float(cutoff_before_cm),
+        "ambient_rgb": tuple(float(c) / gain for c in ambient_rgb),
+    }

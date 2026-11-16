@@ -122,6 +122,17 @@ public:
 	// (the render commandlet's teardown).
 	void RestoreCvars();
 
+	// Fix lane sun-color (2026-11-16): -sky-capture-veil=on|off (on by default;
+	// core/sky/gradient.py sky_capture_veil_fog). The commandlet's sky light is
+	// captured once with the height fog drawn over its sky; the gradient's cutoff
+	// and step 4's profile cleared that veil, so the fill became the bare physical
+	// sky (round 144 #01 lost its golden hour, #02 went blue-white). Around that
+	// capture only, Suspend puts each profiled fog back to its pre-gradient state
+	// and Resume restores the view's fog. Off, or no profiled fog: both do nothing
+	// (Suspend returns a record saying so). Beauty only.
+	TSharedPtr<FJsonObject> SuspendSkyGradientForCapture();
+	void ResumeSkyGradientAfterCapture();
+
 	// Round 1 hang (2026-11-09): the constrained GPU class, the one predicate
 	// (FlightSimClouds.cpp CloudConstrainedGpu): an integrated adapter
 	// (GRHIDeviceIsIntegrated) or any adapter below SM6 (D3D11 SM5). It keeps
@@ -255,6 +266,26 @@ private:
 		double Falloff = 0.0;
 	};
 	TArray<FBeautyFogProfile> FogProfiles;
+	// Fix lane sun-color: -sky-capture-veil=on|off and, per profiled fog, what its
+	// pre-gradient state was (the scene's falloff, the cutoff before, the airlight
+	// gain applied) and what the view had when Suspend replaced it.
+	FString SkyCaptureVeilSwitch = TEXT("on");
+	struct FSkyCaptureVeil
+	{
+		TWeakObjectPtr<UExponentialHeightFogComponent> Fog;
+		double SceneZM = 0.0;
+		double SceneFalloff = 0.0;
+		double ProfileFalloff = 0.0;
+		float CutoffBeforeCm = 0.0f;
+		double AirlightGain = 1.0;
+		bool bHeld = false;
+		float HeldDensity = 0.0f;
+		float HeldFalloff = 0.0f;
+		float HeldCutoffCm = 0.0f;
+		FVector HeldLocation = FVector::ZeroVector;
+		FLinearColor HeldAmbient = FLinearColor::White;
+	};
+	TArray<FSkyCaptureVeil> SkyCaptureVeils;
 	// Sky step 6: -look-cirrus=on|off (Build reads it; off by default; off builds no
 	// cirrus sheet: the round-95 upper sky). Another word refuses by name.
 	FString CirrusSwitch = TEXT("off");

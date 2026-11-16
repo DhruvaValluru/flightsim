@@ -697,6 +697,13 @@ rp_check "sky-gradient: Atmosphere SetRayleighExponentialDistribution" "Engine/C
 rp_check "sky-gradient: Atmosphere SetOtherAbsorption" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetOtherAbsorption(FLinearColor NewValue);"
 rp_check "sky-gradient: Atmosphere SetOtherAbsorptionScale" "Engine/Classes/Components/SkyAtmosphereComponent.h" "ENGINE_API void SetOtherAbsorptionScale(float NewValue);"
 rp_check "sky-gradient: the Earth Rayleigh scale height" "Engine/Private/Components/SkyAtmosphereComponent.cpp" "const float EarthRayleighScaleHeight = 8.0f;"
+# Fix lane sun-color: -sky-capture-veil (FFlightSimWorldBeauty::SuspendSkyGradientForCapture).
+# The captured sky light's fog takes the same cutoff test as the view (HeightFogCommon above);
+# the veil puts back the pre-gradient falloff and density for that capture only.
+rp_check "sky-capture-veil: Fog SetFogHeightFalloff" "$EHF" "ENGINE_API void SetFogHeightFalloff(float Value);"
+rp_check "sky-capture-veil: Fog SetFogDensity" "$EHF" "ENGINE_API void SetFogDensity(float Value);"
+rp_check "sky-capture-veil: the capture is one static call" "Engine/Classes/Components/SkyLightComponent.h" "static ENGINE_API void UpdateSkyCaptureContents(UWorld* WorldToUpdate);"
+rp_check "sky-capture-veil: the sky light capture is a game-flag scene render (fog drawn)" "Renderer/Private/ReflectionEnvironmentCapture.cpp" "ViewFamily.EngineShowFlags.SkyLighting = !bCapturingForSkyLight;"
 # The sky HDRI probe (ApplySkyHdri).
 rp_check "sky-hdri: SLS_SpecifiedCubemap" "Engine/Classes/Components/SkyLightComponent.h" "SLS_SpecifiedCubemap,"
 rp_check "sky-hdri: SkyLight SourceType" "Engine/Classes/Components/SkyLightComponent.h" "TEnumAsByte<enum ESkyLightSourceType> SourceType;"
