@@ -200,7 +200,7 @@ def test_the_shafts_soften_on_the_beauty_path_only():
 def test_a_stale_weather_look_material_is_updated_in_place():
     maker = SCRIPT[SCRIPT.index("def _weather_material"):SCRIPT.index("def _world_xy_metres")]
     assert "weather_look_stale(name)" in maker
-    assert "delete_all_material_expressions(material)" in maker
+    assert "clear_material_graph(material)" in maker
     stamp = SCRIPT[SCRIPT.index("def finish(material, name)"):SCRIPT.index("def linear_default_texture")]
     assert "WEATHER_LOOK_GENERATION_TAG" in stamp
     assert set(_assigned("WEATHER_LOOK_GENERATIONS")) == {"M_RainShaft", "M_TornadoFunnel", "M_TornadoPuff",

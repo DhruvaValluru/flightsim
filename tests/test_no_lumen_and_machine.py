@@ -169,7 +169,7 @@ def test_a_stale_world_asset_is_updated_in_place_never_deleted():
     for body in (material, collection):
         assert ".delete_asset(" not in body
         assert "world_update_wanted(" in body
-    assert "delete_all_material_expressions(material)" in material
+    assert "clear_material_graph(material)" in material
     assert "set_metadata_tag(collection, WORLD_GENERATION_TAG" in collection
     assert "if graph_stale(name):" not in _function("world_stale")
 

@@ -1870,13 +1870,61 @@ def finish_storm(material, name):
         unreal.EditorAssetLibrary.delete_asset(aside)
 
 
+def material_expressions(material, expression_class=None):
+    """The live expressions of ``material`` (optionally only ``expression_class``):
+    every non-garbage UMaterialExpression whose outer is the material. Python has
+    no view of the material's expression collection, so the object list is walked;
+    the HLSL translator counts custom outputs the same way, connected or not. A
+    deleted node keeps its outer until garbage collection and ObjectIterator
+    still yields it (measured on the Mac editor, 2026-11-16: 27 live, 83
+    iterated), so only SystemLibrary.is_valid nodes count."""
+    expression_class = expression_class or unreal.MaterialExpression
+    found = []
+    for node in unreal.ObjectIterator(expression_class):
+        try:
+            if node.get_outer() == material and unreal.SystemLibrary.is_valid(node):
+                found.append(node)
+        except Exception:   # a node being collected
+            continue
+    return found
+
+
+def clear_material_graph(material):
+    """Clear ``material``'s graph for an in-place rebuild, and prove it empty.
+    UE 5.7's MaterialEditingLibrary.DeleteAllMaterialExpressions range-fors over
+    Material->GetExpressions() (a TArrayView) while DeleteMaterialExpression
+    removes each node from that same array, so the array shifts under the loop
+    and about every other node survives. A surviving VolumetricAdvanced-
+    MaterialOutput plus the rebuilt one fails the compile "The material can
+    contain only one Volumetric Advanced Output node" (Windows round 1456,
+    M_FlightSimCloudLayersLit generation 1 -> 2). So: the library call, then
+    every node still there deleted one by one, then the count must be zero."""
+    lib = unreal.MaterialEditingLibrary
+    lib.delete_all_material_expressions(material)
+    for _ in range(64):     # each library pass halves what is left
+        if lib.get_num_material_expressions(material) == 0:
+            break
+        lib.delete_all_material_expressions(material)
+    for node in material_expressions(material):
+        lib.delete_material_expression(material, node)
+    left = lib.get_num_material_expressions(material)
+    if left:
+        raise RuntimeError(f"{material.get_path_name()}: {left} expressions survived the graph clear")
+
+
 def storm_scattering(material, lib, x, y, constants=STORM_SCATTERING):
     """The VolumetricAdvancedMaterialOutput node (``constants``:
     STORM_SCATTERING by default, CLOUD_SCATTERING for the beauty cloud): the
     phase function and the multiple-scattering approximation the cloud is
     lit with, the ground's albedo lighting its bottoms. A property name the
     engine refuses is reported with the node's own list, never skipped: a
-    cloud lit by single scattering is the black frame this node is for."""
+    cloud lit by single scattering is the black frame this node is for.
+    A material may hold only one: one already there (a graph clear that left
+    it) is refused here, not left to fail the render-time compile."""
+    existing = material_expressions(material, unreal.MaterialExpressionVolumetricAdvancedMaterialOutput)
+    if existing:
+        raise RuntimeError(f"{material.get_path_name()} already has {len(existing)} "
+                           f"VolumetricAdvancedMaterialOutput node(s); the material can hold only one")
     node = lib.create_material_expression(
         material, unreal.MaterialExpressionVolumetricAdvancedMaterialOutput, x, y)
     settings = [(STORM_SCATTERING_PROPERTIES[key], value) for key, value in constants.items()]
@@ -2964,7 +3012,7 @@ def _weather_material(name):
         if material is None or not isinstance(material, unreal.Material):
             raise RuntimeError(f"{full} exists but is not a Material: move it aside by hand "
                                f"(no editor open) and run again")
-        unreal.MaterialEditingLibrary.delete_all_material_expressions(material)
+        clear_material_graph(material)
         print(f"MATERIAL-UPDATED: {full} (graph cleared; built again in place, "
               f"weather look generation {WEATHER_LOOK_GENERATIONS[name]})")
         return material
@@ -4087,7 +4135,7 @@ def world_stamp(material, name):
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "12",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail); 11: wet ground (Lekner & Dorf darkening, grazing sky mirror; detail consts static for Metal); 12: its specular AA clamp tuned to 0.02
                      "M_FlightSimCloudLayers": "12", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING; 11: sky-clouds light inputs + cloud_albedo; 12: sky-clouds2 the light moved to M_FlightSimCloudLayersLit (graph 8 again)
-                     "M_FlightSimCloudLayersLit": "2",  # sky-clouds2: -look-cloud-light=on's own material; 2: no powder, the base on the AO pin (round 1426)
+                     "M_FlightSimCloudLayersLit": "3",  # sky-clouds2: -look-cloud-light=on's own material; 2: no powder, the base on the AO pin (round 1426); 3: rebuilt after clear_material_graph (round 1456 two advanced outputs)
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
                      "M_FlightSimCirrus": "3",          # sky step 6: the high cirrus sheet; 2: sky-cirrus2 patches + hooked fibres; 3: look check denser/brighter defaults
                      "M_FlightSimRainbow": "1",         # high-sky fx: the beauty rainbow
@@ -4148,7 +4196,7 @@ def _world_beauty_material(name):
         if material is None or not isinstance(material, unreal.Material):
             raise RuntimeError(f"{full} exists but is not a Material: move it aside by hand "
                                f"(no editor open) and run again")
-        unreal.MaterialEditingLibrary.delete_all_material_expressions(material)
+        clear_material_graph(material)
         print(f"MATERIAL-UPDATED: {full} (graph cleared; built again in place, "
               f"world generation {WORLD_GENERATIONS[name]})")
         return material
@@ -5010,7 +5058,7 @@ def _cloud_impostor_material():
             return None
         if material is None or not isinstance(material, unreal.Material):
             raise RuntimeError(f"{full} exists but is not a Material: move it aside by hand and run again")
-        unreal.MaterialEditingLibrary.delete_all_material_expressions(material)
+        clear_material_graph(material)
         print(f"MATERIAL-UPDATED: {full} (generation {CLOUD_IMPOSTOR_GENERATION}, rebuilt in place)")
         return material
     tools = unreal.AssetToolsHelpers.get_asset_tools()
