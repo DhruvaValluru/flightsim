@@ -1,0 +1,135 @@
+{
+    "round":  1413,
+    "commit":  "197e944b",
+    "full":  false,
+    "scenes":  [
+                   9,
+                   3,
+                   15,
+                   10
+               ],
+    "switches":  "",
+    "prep":  [
+                 "materials"
+             ],
+    "seconds":  {
+                    "materials":  8.1,
+                    "scenes":  557.4
+                },
+    "outcomes":  [
+                     {
+                         "number":  3,
+                         "outcome":  "done",
+                         "seconds":  101.2,
+                         "spec_sha256":  "b4869e1ee290161061731531d167eaca7708f9565dee91ad052197cc520167b2",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  9,
+                         "outcome":  "done",
+                         "seconds":  266.3,
+                         "spec_sha256":  "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  10,
+                         "outcome":  "done",
+                         "seconds":  91.3,
+                         "spec_sha256":  "f16db732eb9f2d0529845a94365064e6846b1c81b0351ab82d5c2bdbc28b442e",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  15,
+                         "outcome":  "done",
+                         "seconds":  95.9,
+                         "spec_sha256":  "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_1406",
+                          "compare_with_found":  true,
+                          "scenes":  {
+                                         "3":  {
+                                                   "frame":  "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.1143,
+                                                                  "std_luma":  0.13734,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.00044
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+                                                                       "flicker":  0.0,
+                                                                       "ssim":  1.0,
+                                                                       "flags":  [
+
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "9":  {
+                                                   "frame":  "09_747_through_a_thunderstorm.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.04431,
+                                                                  "std_luma":  0.04184,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  1E-05
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  null
+                                               },
+                                         "10":  {
+                                                    "frame":  "10_c172_near_a_tornado.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.01064,
+                                                                   "std_luma":  0.01486,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  0.13843
+                                                               },
+                                                    "flags":  [
+                                                                  "crushed",
+                                                                  "mean_luma"
+                                                              ],
+                                                    "vs_previous":  null
+                                                },
+                                         "15":  {
+                                                    "frame":  "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.04405,
+                                                                   "std_luma":  0.04771,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  0.0
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+                                                                        "flicker":  0.00064,
+                                                                        "ssim":  0.9931,
+                                                                        "flags":  [
+
+                                                                                  ]
+                                                                    }
+                                                }
+                                     }
+                      }
+}

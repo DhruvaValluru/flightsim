@@ -1,0 +1,102 @@
+[
+ {
+  "number": 3,
+  "name": "a320 over new york, wide lens (terrain download)",
+  "prompt": "chase view of the a320 over new york city at 600 m in the morning with a 18 mm lens for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "13c3e17c57bc",
+  "lighting": {},
+  "seconds": 101.2,
+  "spec_sha256": "b4869e1ee290161061731531d167eaca7708f9565dee91ad052197cc520167b2",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.398,
+   "offset_px": [
+    93,
+    -188
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 9,
+  "name": "747 through a thunderstorm",
+  "prompt": "chase view of the 747 flying west through a thunderstorm at 2000 m for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "6abb0f185da7",
+  "lighting": {},
+  "seconds": 266.3,
+  "spec_sha256": "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.17,
+   "offset_px": [
+    37,
+    220
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 10,
+  "name": "c172 near a tornado",
+  "prompt": "chase view of the c172p near a tornado over the flint hills at 600 m for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "d05cc6d1fd94",
+  "lighting": {},
+  "seconds": 91.3,
+  "spec_sha256": "f16db732eb9f2d0529845a94365064e6846b1c81b0351ab82d5c2bdbc28b442e",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.503,
+   "offset_px": [
+    -148,
+    -318
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 15,
+  "name": "747 in hurricane-like weather (the refusal's suggestion)",
+  "prompt": "chase view of the 747 at 2000 m in strong wind, severe turbulence and heavy rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "113878154da9",
+  "lighting": {},
+  "seconds": 95.9,
+  "spec_sha256": "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.304,
+   "offset_px": [
+    61,
+    220
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ }
+]
