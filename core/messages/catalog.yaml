@@ -489,7 +489,7 @@ world_beauty.overrides:
   hint: "Fix the overrides file so it names only the world look's own sections and fields, or render without it."
 world_beauty.clouds:
   sentence: "The beauty clouds were asked for in a mode the world look does not know."
-  hint: "Ask for the card's clouds, fair-weather clouds or the engine's clouds, or leave the choice out; -cloud-type= takes clear, cumulus, stratocumulus, altocumulus, cirrus, overcast or nimbostratus; -cloud-march= takes auto, constrained, discrete or probe; -sky-multi-scatter= takes auto, on or off."
+  hint: "Ask for the card's clouds, fair-weather clouds or the engine's clouds, or leave the choice out; -cloud-type= takes clear, cumulus, stratocumulus, altocumulus, cirrus, overcast or nimbostratus; -cloud-march= takes auto, constrained, discrete or probe; -sky-multi-scatter= takes auto, on or off; -cloud-deck-scatter= takes round95 or beauty."
 # visual round 5, lane L3 (FlightSimClouds.cpp ApplyDistantClouds / ApplySkyHdri):
 world_beauty.distant_clouds:
   sentence: "The distant cloud sheet was asked for in a mode the world look does not know."

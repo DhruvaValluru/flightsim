@@ -1142,6 +1142,48 @@ def cloud_light_row(light_on: bool, shape: str) -> Dict[str, float]:
             "BaseRise": CLOUD_LIGHT_BASE_RISE.get(shape, CLOUD_LIGHT_OFF["BaseRise"])}
 
 
+#: Lane rain-grey (2026-11-16): ``-cloud-deck-scatter=round95|beauty`` (round95 by
+#: default). Sky step 1 baked CLOUD_SCATTERING (octaves 0.7 / 0.25 / 0.4) into the
+#: beauty cloud for EVERY shape. Wrenninge et al. 2013's multiple-scattering octaves
+#: conserve energy only with contribution <= occlusion; 0.7 > 0.25 adds light, and
+#: the excess grows with the optical depth: octave 1 sees the sun through
+#: exp(-0.25 tau). A cumulus edge (tau ~ 1) gains the wanted glow; a 1-3 km rain or
+#: overcast deck (tau 20-100) is lit underneath as if a quarter as thick. Windows
+#: round 144 (2c25f57d) against round 199 (40c95c10): #06's nimbostratus base sRGB
+#: 0.11-0.17 -> 0.36-0.44 and a hard dark band where it met the distant sheet; #07's
+#: heavy rain a flat bright grey (mean luma 0.129 -> 0.227) with the rain streaks
+#: lost against it. ``round95`` gives the DECK shapes (overcast, nimbostratus) round
+#: 95's energy-conserving node (STORM_SCATTERING, what M_FlightSimCloudLayers drew
+#: at 40c95c10); cumulus, stratocumulus and altocumulus keep step 1's. ``beauty``
+#: is step 1's on every shape. Only with -look-cloud-light=off. C++ twin:
+#: FlightSimWorldPure::CloudDeckScatterFor / CloudDeckScatterApplies / CloudDeckScatterRow.
+CLOUD_DECK_SCATTER_SWITCH = "-cloud-deck-scatter"
+CLOUD_DECK_SCATTER_WORDS: Tuple[str, ...] = ("round95", "beauty")
+CLOUD_DECK_SCATTER_DEFAULT = "round95"
+CLOUD_DECK_SCATTER_SHAPES: Tuple[str, ...] = ("overcast", "nimbostratus")
+CLOUD_DECK_SCATTER: Dict[str, float] = {"PhaseG": 0.8, "PhaseG2": -0.5, "PhaseBlend": 0.5, "MsContribution": 0.5,
+                                        "MsOcclusion": 0.5, "MsEccentricity": 0.5}
+
+
+def cloud_deck_scatter_applies(word: Optional[str], light_on: bool, shape: str) -> Optional[bool]:
+    """Whether a layer takes CLOUD_DECK_SCATTER: ``round95`` (or no word) on a deck
+    shape with the light off; None for a word the switch does not know."""
+    if word is None or word == "" or word == "round95":
+        return (not light_on) and shape in CLOUD_DECK_SCATTER_SHAPES
+    if word == "beauty":
+        return False
+    return None
+
+
+def cloud_scatter_row(light_on: bool, shape: str, word: Optional[str] = CLOUD_DECK_SCATTER_DEFAULT) -> Dict[str, float]:
+    """The light row the bridge sets on a layer's MID: cloud_light_row, with the six
+    scattering fields CLOUD_DECK_SCATTER where cloud_deck_scatter_applies."""
+    row = cloud_light_row(light_on, shape)
+    if cloud_deck_scatter_applies(word, light_on, shape):
+        row.update(CLOUD_DECK_SCATTER)
+    return row
+
+
 def cloud_light_billow(billow_on: bool, light_on: bool) -> bool:
     """-look-cloud-billow's row applies only with -look-cloud-light=off."""
     return bool(billow_on) and not light_on

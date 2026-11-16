@@ -271,6 +271,9 @@ private:
 	// -cloud-material=ours|epic (the Volumetrics plugin's cloud material, an A/B).
 	FString CloudLightSwitch = TEXT("off");   // off by default until the Windows A/B (not seen in a Mac capture)
 	FString CloudMaterialSwitch = TEXT("ours");
+	// Lane rain-grey: -cloud-deck-scatter=round95|beauty (a deck's scattering node:
+	// FlightSimWorldPure::CloudDeckScatterRow; beauty is sky step 1's on every shape).
+	FString CloudDeckScatterSwitch = TEXT("round95");
 	bool StormNeutralAlbedo() const;
 	// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default; off
 	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)
