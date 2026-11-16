@@ -346,7 +346,7 @@ camera.scene_frame_mismatch:
 # round-1 hang (FlightSimRenderCommandlet.cpp FRenderCaptureWatchdog): and the sky-capture bisection switches
 render.sky_capture_switch:
   sentence: "A diagnostic switch for the sky-light capture was given a value it does not take."
-  hint: "Use -sky-capture-at=aircraft or -sky-capture-at=origin; -sky-capture-restore and -gpu-drain take auto, on or off; -constrained-supersample takes cap or keep."
+  hint: "Use -sky-capture-at=aircraft or -sky-capture-at=origin; -sky-capture-restore, -gpu-drain and -capture-drain take auto, on or off; -constrained-supersample takes cap or keep."
 # round 5 shade probes (core/scene/hero_lighting.py DIAGNOSTIC_SWITCHES,
 # FlightSimHeroLighting.cpp): beauty-only A/B switches on the sky light.
 render.sky_fill_probe:

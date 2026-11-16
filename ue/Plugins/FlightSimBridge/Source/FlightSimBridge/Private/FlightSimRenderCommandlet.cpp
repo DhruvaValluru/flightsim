@@ -3766,6 +3766,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	};
 	const bool bSkyCaptureRestore = SwitchOn(SkyCaptureRestoreMode);
 	const bool bGpuDrain = SwitchOn(GpuDrainMode);
+	// #9 TDR (2026-11-16): 3 in 14 Windows iGPU runs lost the device (887a0006,
+	// hung) on Map(TempTexture2D, D3D11_MAP_READ), the first readback 17-21 s
+	// after "exposure meter: settled": the subject meter's captures (aircraft
+	// hidden x2, then shown x3) queued with no drain since the post-sky captures,
+	// the storm meter's settle captures before them too. -capture-drain=
+	// auto|on|off (auto: the constrained GPU only) drains the GPU after EACH
+	// meter, settle and re-warm capture and after each frame's beauty capture,
+	// so no readback waits on several heavy beauty captures in one submission.
+	// A drain only waits: pixels and labels are untouched.
+	FString CaptureDrainMode = TEXT("auto");
+	FParse::Value(*RenderSwitches, TEXT("capture-drain="), CaptureDrainMode);
+	if (!AutoOnOff(CaptureDrainMode))
+	{
+		return Fail(FString::Printf(TEXT("render.sky_capture_switch: -capture-drain=%s takes auto, on or off"),
+		                            *CaptureDrainMode));
+	}
+	const bool bCaptureDrain = SwitchOn(CaptureDrainMode);
 	// r87 (2026-11-14): the Windows iGPU's device was removed (DXGI 887a0006, hung)
 	// INSIDE USkyLightComponent::UpdateSkyCaptureContents on a cockpit storm at
 	// beauty; the same prompt's baked run took 15.9 s there in one submission (the
@@ -3813,13 +3830,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		UE_LOG(LogFlightSimRender, Display,
 		       TEXT("constrained gpu: %s (integrated %s, SM6 %s); sky-capture-restore %s (%s), gpu-drain %s (%s), ")
-		       TEXT("constrained-supersample %s (stated %d, rendered %d, budget %lld px)"),
+		       TEXT("constrained-supersample %s (stated %d, rendered %d, budget %lld px), capture-drain %s (%s)"),
 		       bConstrainedGpu ? TEXT("yes") : TEXT("no"), GRHIDeviceIsIntegrated ? TEXT("yes") : TEXT("no"),
 		       GMaxRHIFeatureLevel >= ERHIFeatureLevel::SM6 ? TEXT("yes") : TEXT("no"),
 		       *SkyCaptureRestoreMode, bSkyCaptureRestore ? TEXT("on") : TEXT("off"),
 		       *GpuDrainMode, bGpuDrain ? TEXT("on") : TEXT("off"), *ConstrainedSupersampleMode,
 		       StatedFactor, bSupersampleCapped ? ConstrainedFactor : StatedFactor,
-		       static_cast<long long>(RenderConstrainedInternalPixelsMax));
+		       static_cast<long long>(RenderConstrainedInternalPixelsMax), *CaptureDrainMode,
+		       bCaptureDrain ? TEXT("on") : TEXT("off"));
 	}
 	TSharedPtr<FJsonObject> ConstrainedRecord;
 	if (bBeautyRasterRun && VisualScene.LookApplied.IsValid())
@@ -3836,6 +3854,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		ConstrainedRecord->SetBoolField(TEXT("sky_capture_restore"), bSkyCaptureRestore);
 		ConstrainedRecord->SetStringField(TEXT("gpu_drain_switch"), GpuDrainMode);
 		ConstrainedRecord->SetBoolField(TEXT("gpu_drain"), bGpuDrain);
+		ConstrainedRecord->SetStringField(TEXT("capture_drain_switch"), CaptureDrainMode);
+		ConstrainedRecord->SetBoolField(TEXT("capture_drain"), bCaptureDrain);
 		TSharedPtr<FJsonObject> Ss = MakeShared<FJsonObject>();
 		Ss->SetStringField(TEXT("switch"), ConstrainedSupersampleMode);
 		Ss->SetNumberField(TEXT("stated"), StatedFactor);
@@ -5712,12 +5732,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	double GpuDrainLongestS = 0.0;
 	FString GpuDrainLongestAt;
 	bool bGpuDrainSkipNoted = false;
-	auto DrainGpu = [&](const FString& Stage)
+	auto DrainGpuNow = [&](const FString& Stage, bool bQuiet)
 	{
-		if (!bGpuDrain)
-		{
-			return;
-		}
 		const FRenderGpuDrain Drain = RenderDrainGpu(GpuDrainTimeoutS);
 		if (!Drain.bRan)
 		{
@@ -5762,8 +5778,26 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 #endif
 			std::_Exit(4);
 		}
-		UE_LOG(LogFlightSimRender, Display, TEXT("gpu drain: %s finished on the GPU in %.2f s"), *Stage, Drain.Seconds);
+		if (!bQuiet)
+		{
+			UE_LOG(LogFlightSimRender, Display, TEXT("gpu drain: %s finished on the GPU in %.2f s"), *Stage, Drain.Seconds);
+		}
 		BeatWatchdog(*FString::Printf(TEXT("%s (GPU drained)"), *Stage));
+	};
+	auto DrainGpu = [&](const FString& Stage)
+	{
+		if (bGpuDrain)
+		{
+			DrainGpuNow(Stage, false);
+		}
+	};
+	// -capture-drain (#9 TDR): one GPU submission per capture before any readback.
+	auto DrainCapture = [&](const TCHAR* Stage, bool bQuiet)
+	{
+		if (bCaptureDrain)
+		{
+			DrainGpuNow(FString(Stage), bQuiet);
+		}
 	};
 	// Round 5 L1: the beauty look's tsr row (ENGINE_LOOK) asks for more
 	// warm-up so TSR's history converges before frame 0; raised, never
@@ -6222,6 +6256,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Capture->CaptureScene();
 			FlushRenderingCommands();
 			BeatWatchdog(TEXT("an exposure meter capture"));
+			DrainCapture(TEXT("an exposure meter capture"), false);
 			UE_LOG(LogFlightSimRender, Display, TEXT("exposure meter round %d: captured, reading back"), Rounds + 1);
 			FTextureRenderTargetResource* MeterResource =
 				RenderTarget->GameThread_GetRenderTargetResource();
@@ -6329,6 +6364,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Capture->CaptureScene();
 			FlushRenderingCommands();
 			BeatWatchdog(TEXT("an exposure settle capture"));
+			DrainCapture(TEXT("an exposure settle capture"), false);
 		}
 		UE_LOG(LogFlightSimRender, Display, TEXT("exposure meter: settled"));
 		TSharedPtr<FJsonObject> MeterRow = MakeShared<FJsonObject>();
@@ -6440,6 +6476,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				Capture->CaptureScene();
 				FlushRenderingCommands();
 				BeatWatchdog(TEXT("a subject meter capture"));
+				DrainCapture(TEXT("a subject meter capture"), false);
 			}
 			FTextureRenderTargetResource* SubjResource = RenderTarget->GameThread_GetRenderTargetResource();
 			SubjOut.Reset();
@@ -6568,6 +6605,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				Capture->CaptureScene();
 				FlushRenderingCommands();
 				BeatWatchdog(TEXT("a subject meter settle capture"));
+				DrainCapture(TEXT("a subject meter settle capture"), false);
 			}
 		}
 		SubjectRow->SetNumberField(TEXT("mask_pixels"), SubjMaskPixels);
@@ -6615,12 +6653,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Capture->CaptureScene();
 			FlushRenderingCommands();
 			BeatWatchdog(TEXT("a subject meter re-warm capture"));
+			DrainCapture(TEXT("a subject meter re-warm capture"), false);
 		}
 		SubjectRow->SetNumberField(TEXT("rewarm_captures"), WarmupCaptures);
 		UE_LOG(LogFlightSimRender, Display,
 		       TEXT("subject exposure: %d aircraft pixels, p50 %.3f -> %.3f, p97 %.3f -> %.3f, %+.2f stops, ")
 		       TEXT("%d rounds: %s"), SubjMaskPixels, SubjP50Before, SubjP50, SubjP97Before, SubjP97, SubjectMeterStops,
 		       SubjectRounds, *SubjectNote);
+		if (ConstrainedRecord.IsValid())
+		{
+			ConstrainedRecord->SetNumberField(TEXT("gpu_drains"), GpuDrains);
+			ConstrainedRecord->SetNumberField(TEXT("gpu_drain_longest_s"), GpuDrainLongestS);
+			ConstrainedRecord->SetStringField(TEXT("gpu_drain_longest_at"), GpuDrainLongestAt);
+		}
 	}
 
 	// -- Phase 8B.0: the real-time probe loop ------------------------------
@@ -7378,10 +7423,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Capture->CaptureScene();
 			FlushRenderingCommands();
 			BeatWatchdog(TEXT("a beauty sub-frame capture"));
+			DrainCapture(TEXT("a beauty sub-frame capture"), true);
 		}
 		Capture->CaptureScene();
 		FlushRenderingCommands();
 		BeatWatchdog(TEXT("a frame capture"));
+		DrainCapture(TEXT("a frame capture"), true);
 		// aircraft-sharp: the next delivered frame's motion vectors start at
 		// THIS frame's transforms (clips: one frame of motion, the shutter rule).
 		if (bBeautyRaster)

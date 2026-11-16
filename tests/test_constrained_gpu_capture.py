@@ -147,9 +147,10 @@ def test_the_drain_checks_the_hresult_and_the_device():
 
 
 def test_a_lost_device_refuses_by_name_and_ends_the_process():
-    lam = COMMANDLET[COMMANDLET.index("auto DrainGpu = [&](const FString& Stage)"):]
+    gate = COMMANDLET[COMMANDLET.index("auto DrainGpu = [&](const FString& Stage)"):]
+    assert "if (bGpuDrain)" in gate[:gate.index("\n\t};\n")]
+    lam = COMMANDLET[COMMANDLET.index("auto DrainGpuNow = [&](const FString& Stage, bool bQuiet)"):]
     lam = lam[:lam.index("\n\t};\n")]
-    assert "if (!bGpuDrain)" in lam
     assert 'TEXT("render.gpu_lost: the D3D11 device was removed while the GPU ran %s' in lam
     assert 'TEXT("render.capture_timeout: the GPU did not finish %s within %.0f s' in lam
     assert "::TerminateProcess(::GetCurrentProcess(), 4);" in lam and "std::_Exit(4);" in lam
