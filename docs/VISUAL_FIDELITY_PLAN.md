@@ -648,6 +648,49 @@ Left on #13: from 8 km above, the cumulus read flat (white tops, little side sha
 the sea), and the horizon lacks the pale haze band a real cruise view has.
 Next in this lane: M_StormCell's weather map and noise (the storm tiers).
 
+**Sky step 1 (the owner's X-Plane-12 brief, 2026-11-14; docs/visual/XPLANE_SKY_DESIGN.md §3): wispy
+edges, cauliflower tops, thin-edge light, beauty scattering.** The brief's reference photo has
+ragged, partly transparent cloud edges, fine cauliflower lobes on the tops, soft grey-blue bellies
+and light coming through thin edges; r95's #03/#13 have smooth rounded blobs with dark flat
+undersides. Written on the Mac, NOT built or rendered: everything below is UNMEASURED and every
+amount UNCALIBRATED. Behind `-look-cloud-wisp=on|off` (on by default; off = round 95 bit for bit),
+cumulus and stratocumulus layers only (overcast and nimbostratus keep their veils), beauty only:
+- `M_FlightSimCloudLayers` / `cloud_layers.hlsl` gains five Custom inputs with OFF defaults
+  (`WispAmount` 1, `CurlStrength` 0.6, `EdgeThinPower` 1.6, `TopDetailGain` 0.6, `BoundaryErosion`
+  0.5 when on): a view sample reads the erosion noise at a flow-warped point (two gradient noises
+  at half the detail cell: lobes stretch into wisps; not a divergence-free curl, stated in the
+  shader), a third finer Worley octave (4.1x, zero-mean) is added towards the top of the layer and
+  faded out by half the far LOD (cauliflower), the erosion is x (1 + 0.5 x (1 - density)) so it
+  bites the outline and spares the core, and the density is raised to the 1.6 after the erosion so
+  the soft band is optically thin (pow(0, p) = 0: the drawn cover is unchanged). Shadow samples add
+  no hash (they read the undistorted detail or its mean, as round 52) and do get the thinning,
+  which is what lets the sun through a rim. Cost: up to +43 lattice hashes on an in-cloud view
+  sample within 13 km, none in clear air, none on the shadow march; no march sample added.
+- the material is now built with its own `VolumetricAdvancedMaterialOutput` constants
+  (`CLOUD_SCATTERING`: g 0.85 / -0.3 blend 0.3, 2 octaves, contribution 0.7, occlusion 0.25,
+  eccentricity 0.4, ground contribution on; the storm's `M_StormCell` keeps `STORM_SCATTERING`
+  0.5/0.5/0.5 and is not rebuilt), so bodies and undersides are lit by more wrapped multi-scatter;
+  albedo stays 0.98. The sky light's cloud-bottom occlusion is CAPPED at 0.45 where the wisp
+  applies (round 82 raised it to 0.8: a belly got a fifth of the sky).
+- the distant sheet's `BaseDarkening` 0.55 -> 0.70, `BaseSunShare` 0.15 -> 0.25, `SilverLining`
+  0.6 -> 0.8 (parameters only; its shader and generation are unchanged).
+- the owner's `Coverage, Density, DetailStrength, NoiseScale, Wind` are documented aliases of
+  `Coverage, ExtinctionPerM, DetailErosion, ShapeScaleKm, WindOffsetM` (recorded; no second input).
+Material generations: clouds graph 7 -> 8, world 9 -> 10 (Windows rebuilds it at the round's prep
+step; distant unchanged). render.json: `look_applied.world_beauty.clouds.material` (path,
+`graph_generation_expected` 8, the asset's stamped `graph_generation` read back, `scattering`,
+`albedo`, `owner_aliases`) and per layer `cloud_wisp`, `cloud_wisp_applied`, the five scalars by
+name, `sky_light_cloud_bottom_occlusion_before_belly_cap`, `belly_occlusion_cap`. Pinned by
+`tests/test_cloud_wisp.py` (C++ == Python == HLSL == material script), `test_cloud_tiers.py` (the
+shader body compiled as C++ against the Python twin with the wisp on and off), `test_cloud_billow.py`,
+`test_distant_clouds.py`. Measure it on the Windows laptop with
+`.\scripts\visual_fix_round.ps1 -Round 100 -Scenes "3,13" -CompareWith 95` (on) and
+`.\scripts\visual_fix_round.ps1 -Round 101 -Scenes "3,13" -Switches "-look-cloud-wisp=off" -CompareWith 100`
+(the A/B; 101 must be r95 pixel for pixel but for the scattering constants and the sheet's three
+numbers, which are not switched). Kill criterion: `887a0006` (TDR) in the log -> render with
+`-look-cloud-wisp=off` and file it. Unknown until rendered: whether 0.6 cells of flow reads as
+wisps or smear, whether 1.6 lets the rim glow or hollows the cloud, the in-cloud cost on the iGPU.
+
 **Open (not fixed):**
 - `store_sta2`'s component box on #01/#02, 3.4 px off its hull (manifest, CG and pose ruled out).
 - #08's mask 14.6 % off its geometry; #10 and #13 tight boxes.

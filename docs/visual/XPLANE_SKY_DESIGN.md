@@ -368,6 +368,37 @@ comment "Sky step 1: ..."); `WORLD_GENERATIONS["M_FlightSimCloudLayers"]` "9" ->
 - Windows: `.\scripts\visual_fix_round.ps1 -Round 101 -Scenes 3 -Switches "-cloud-type=cumulus -look-cloud-wisp=off" -CompareWith 98`
   (after the step 8 rounds), wall seconds per row in ROUND.json.
 
+### 3.11 Step 1 as built (2026-11-14, builder A; `Sky step 1:` commit), where it differs from §3.2-3.9 and why
+Nothing rendered; every claim below is a code-read. UNMEASURED.
+- `FWorldWisp` carries its own `FWorldCloud N;` member and calls `N.Perlin` / `N.Worley`: the Custom
+  node body is pasted inside the generated `CustomExpression` function, so `C` is a local of that
+  function and a struct method cannot read it (the g++ harness, which puts the struct in the same
+  local scope, would refuse it too). The same rule keeps `TOP_DETAIL_LACUNARITY` out of
+  `TopDetail`: the caller scales `q`. `Flow` returns `(a, b, 0.5 (b - a))`: half-amplitude vertical.
+  The pure block's two record-only constants (`CloudGraphGeneration`, `CloudAlbedo`) are read
+  through inline functions because test_world_beauty.py compiles the block alone with `-Werror`.
+- The finer top octave is VIEW-sample only (inside the `footKm == 0.0` branch with the flow), not
+  "regardless of footKm" as §3.3's sketch: a 37 m octave sampled on a dithered shadow footprint of
+  hundreds of metres would alias into r58's grain. §3.3's cost claim (shadow samples +0 hashes)
+  then holds exactly. The thinning applies to every sample with `density > 0` (shadow included).
+- `CLOUD_WISP_SHAPES = ("cumulus", "stratocumulus")`: altocumulus has no row until step 2/5 (D3);
+  it joins the tuple and `CloudWispApplies` in the step that adds the row.
+- The material record sits once at `look_applied.world_beauty.clouds.material` (path,
+  `graph_generation_expected` = the pure block's `CloudGraphGeneration` pinned to the script's
+  stamp, `graph_generation` read from the asset's `FlightSimGraphGeneration` tag under
+  `WITH_METADATA` via `UPackage::GetMetaData().GetValue`, `graph_generation_current`, `albedo`,
+  `scattering` with its `source`, `owner_aliases`), not repeated per layer; the per-layer record
+  carries the switch word, `cloud_wisp_applied`, the five scalars by material name, the occlusion
+  before the belly cap and the cap. Two `core_check` lines in scripts/check_bridge_api.sh pin the
+  two engine signatures (verified in the 5.7 headers on the Mac).
+- No change to core/messages/catalog.yaml or core/config_surface.py: `-look-cloud-billow` (round
+  82) registered neither, and this switch follows that pattern exactly (`world_beauty.clouds`
+  already catalogues the refusal class).
+- test_cloud_billow.py's two exact stamp strings and its "HeightDensity is the last input" pin
+  moved (`>= 7` / `>= 9` by regex; `"HeightDensity",   # round 82`), reasons in the docstring.
+  test_cloud_tiers.py's body harness gains the five inputs and runs every third case with the
+  wisp row on; `test_no_march_sample_is_added` passes unchanged.
+
 ## 4. Step 2: the beauty host reads the plan's cloud fields
 
 Commit: `Sky step 2: beauty host reads the plan's cloud fields; -cloud-type=; shadowed plan layer recorded`.

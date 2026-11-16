@@ -495,6 +495,10 @@ core_check "world: FObjectProperty SetObjectPropertyValue_InContainer" "UnrealTy
 core_check "world: FBoolProperty SetPropertyValue_InContainer" "UnrealType.h" "void SetPropertyValue_InContainer(void* A, bool Value, int32 ArrayIndex = 0) const"
 core_check "world: UFunction ParmsSize" "Class.h" "uint16 ParmsSize;"
 core_check "world: UObject ProcessEvent" "Object.h" "virtual void ProcessEvent( UFunction* Function, void* Parms );"
+# Sky step 1: the cloud material's FlightSimGraphGeneration tag is read back into
+# render.json (FlightSimClouds.cpp ApplyClouds, under WITH_METADATA).
+core_check "world: UPackage GetMetaData (FMetaData&)" "Package.h" "COREUOBJECT_API FMetaData& GetMetaData();"
+core_check "world: FMetaData GetValue by TCHAR key" "MetaData.h" "COREUOBJECT_API const FString& GetValue(const UObject* Object, const TCHAR* Key);"
 if [ -f "$UE_ROOT/Engine/Content/EngineResources/WhiteSquareTexture.uasset" ]; then
     ok "world: engine WhiteSquareTexture" "present (the tiles material's texture default)"
 else

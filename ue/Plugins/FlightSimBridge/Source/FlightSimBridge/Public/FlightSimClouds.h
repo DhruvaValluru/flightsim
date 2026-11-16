@@ -228,6 +228,11 @@ private:
 	// Sky step 2: the -sky= plan Build was given (nullptr without one); ApplyClouds
 	// reads its cloud fields (FFlightSimSkyPlan::CloudType and the rest).
 	const FFlightSimSkyPlan* SkyPlanRef = nullptr;
+	// Sky step 1: -look-cloud-wisp=on|off (Build reads it; ApplyClouds sets the cloud
+	// material's five wisp scalars on cumulus and stratocumulus layers and caps the
+	// sky light's cloud-bottom occlusion: FlightSimWorldPure::CloudWispRow /
+	// CloudBellyOcclusion). Off is round 95 exactly.
+	FString CloudWispSwitch = TEXT("on");
 	bool StormNeutralAlbedo() const;
 	// #02 blue (2026-11-11): -tiles-shade-neutral=on|off, on by default; off
 	// sets ShadeNeutralAmount 0 (tiles_shade_neutral.hlsl's exact pass-through)

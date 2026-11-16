@@ -342,7 +342,10 @@ def test_hidden_only_for_no_layer_and_the_sky_capture_only_on_the_shadowed_compo
     assert text.count("SetVisibleInRealTimeSkyCaptures(false)") == 1
     shadowed = _between(apply, "if (bShadowed)\n\t\t{", "}\n\t\telse\n\t\t{\n\t\t\tCloudLayers.Add(State);")
     assert "Cloud->SetVisibleInRealTimeSkyCaptures(false);" in shadowed
-    assert text.count("Cloud->SetVisibility(false);") == 1
+    # two hides: the no-layer type here, and -cloud-volumetric-scale=0 (the
+    # impostor A/B merged into claude/hl-sky), gated on bVolumetricHidden
+    assert text.count("Cloud->SetVisibility(false);") == 2
+    assert "if (bVolumetricHidden)\n\t\t{\n\t\t\tCloud->SetVisibility(false);" in apply
     hidden = _between(apply, "if (State.Shape == PlanCloudNoLayer)\n\t\t{", "continue;\n\t\t}")
     assert "Cloud->SetVisibility(false);" in hidden and 'TEXT("hidden_layers")' in apply
     # the plan's component is told apart by its owner; the fair one by name

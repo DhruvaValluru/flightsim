@@ -36,6 +36,8 @@
 #include "RHI.h"   // GMaxRHIFeatureLevel (CloudConstrainedGpu)
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "UObject/MetaData.h"   // sky step 1: the cloud material's FlightSimGraphGeneration tag, recorded
+#include "UObject/Package.h"
 #include "UObject/UObjectIterator.h"
 
 #include <cmath>
@@ -636,6 +638,101 @@ namespace FlightSimWorldPure
 		(void)Scale;
 		return Cover;
 	}
+	// Sky step 1 (the owner's X-Plane-12 brief, 2026-11-14: "ragged, wispy edges and
+	// fine cauliflower detail ... soft grey-blue bellies ... light bleeding through
+	// thin edges"; r95's #03/#13 smooth rounded blobs with dark undersides).
+	// -look-cloud-wisp=on|off (on by default; off is round 95 exactly), the CUMULUS
+	// and STRATOCUMULUS shapes: the material's five wisp scalars (cloud_layers.hlsl:
+	// WispAmount gates it all; CloudWispCurl cells of flow warp on a view sample's
+	// detail point; a finer top octave weighted CloudWispTopDetail; the erosion x
+	// (1 + CloudWispBoundaryErosion x (1 - density)); density^CloudWispEdgePower
+	// after the erosion, so a thin edge is optically thin) and the sky light's
+	// cloud-bottom occlusion CAPPED at CloudWispBottomOcclusion after
+	// CloudBottomOcclusionFor (round 82's 0.8 left a belly a fifth of the sky). No
+	// march sample added; shadow samples add no hash. world_beauty.cloud_wisp_row /
+	// cloud_belly_occlusion are the twins. UNCALIBRATED: set by probe render on the
+	// render machine (scene 3 with and without the switch).
+	constexpr double CloudWispAmount = 1.0;
+	constexpr double CloudWispCurl = 0.6;
+	constexpr double CloudWispEdgePower = 1.6;
+	constexpr double CloudWispTopDetail = 0.6;
+	constexpr double CloudWispBoundaryErosion = 0.5;
+	constexpr double CloudWispBottomOcclusion = 0.45;
+	enum EWispField
+	{
+		WspAmount = 0,
+		WspCurl = 1,
+		WspEdgePower = 2,
+		WspTopDetail = 3,
+		WspBoundaryErosion = 4,
+		WspFieldCount = 5
+	};
+	// The material's scalar names, in order (world_beauty.CLOUD_WISP_FIELDS).
+	inline const char* CloudWispFieldName(int Field)
+	{
+		static const char* const Names[WspFieldCount] = {
+			"WispAmount", "CurlStrength", "EdgeThinPower", "TopDetailGain", "BoundaryErosion"};
+		return Field >= 0 && Field < WspFieldCount ? Names[Field] : "";
+	}
+	inline bool CloudWispApplies(bool bWispOn, int Shape)
+	{
+		return bWispOn && (Shape == CloudCumulus || Shape == CloudStratocumulus);
+	}
+	// The five scalars for a layer: the amounts where the wisp applies, the OFF
+	// values (0, 0, 1, 0, 0: the material's defaults, round 95) where it does not.
+	inline void CloudWispRow(bool bApplies, double* Out)
+	{
+		Out[WspAmount] = bApplies ? CloudWispAmount : 0.0;
+		Out[WspCurl] = bApplies ? CloudWispCurl : 0.0;
+		Out[WspEdgePower] = bApplies ? CloudWispEdgePower : 1.0;
+		Out[WspTopDetail] = bApplies ? CloudWispTopDetail : 0.0;
+		Out[WspBoundaryErosion] = bApplies ? CloudWispBoundaryErosion : 0.0;
+	}
+	// Applied AFTER CloudBottomOcclusionFor: capped, never raised.
+	inline double CloudBellyOcclusion(bool bApplies, double Occlusion)
+	{
+		return bApplies && Occlusion > CloudWispBottomOcclusion ? CloudWispBottomOcclusion : Occlusion;
+	}
+	// The beauty cloud's VolumetricAdvancedMaterialOutput constants, BAKED into
+	// M_FlightSimCloudLayers by scripts/ue_create_materials.py CLOUD_SCATTERING at
+	// graph generation CloudGraphGeneration (world_beauty.CLOUD_SCATTERING is the
+	// twin; tests pin all three). Recorded here so render.json says what lit the
+	// cloud; nothing here sets them. UNCALIBRATED.
+	constexpr int CloudGraphGeneration = 8;
+	constexpr double CloudAlbedo = 0.98;
+	// True when the asset's stamped generation is the one this bridge was written for.
+	inline bool CloudGraphGenerationCurrent(int Stamped)
+	{
+		return Stamped == CloudGraphGeneration;
+	}
+	inline double CloudAlbedoBaked()
+	{
+		return CloudAlbedo;
+	}
+	constexpr int CloudScatteringCount = 7;
+	inline const char* CloudScatteringName(int Field)
+	{
+		static const char* const Names[CloudScatteringCount] = {
+			"phase_g", "phase_g2", "phase_blend", "octaves", "contribution", "occlusion", "eccentricity"};
+		return Field >= 0 && Field < CloudScatteringCount ? Names[Field] : "";
+	}
+	inline double CloudScattering(int Field)
+	{
+		static const double Values[CloudScatteringCount] = {0.85, -0.3, 0.3, 2.0, 0.7, 0.25, 0.4};
+		return Field >= 0 && Field < CloudScatteringCount ? Values[Field] : 0.0;
+	}
+	// The owner's parameter names and the material parameter each one IS
+	// (world_beauty.CLOUD_OWNER_ALIASES): documented aliases, recorded, never a
+	// second input.
+	constexpr int CloudOwnerAliasCount = 5;
+	inline const char* CloudOwnerAlias(int Field, bool bTarget)
+	{
+		static const char* const Owner[CloudOwnerAliasCount] = {
+			"Coverage", "Density", "DetailStrength", "NoiseScale", "Wind"};
+		static const char* const Target[CloudOwnerAliasCount] = {
+			"Coverage", "ExtinctionPerM", "DetailErosion", "ShapeScaleKm", "WindOffsetM"};
+		return Field >= 0 && Field < CloudOwnerAliasCount ? (bTarget ? Target[Field] : Owner[Field]) : "";
+	}
 	// The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 	// stated layer) is thinned to the shape's depth: fair cumulus and a stratus
 	// deck are 1-2 km deep; 0 keeps the layer as built.
@@ -1008,7 +1105,9 @@ namespace FlightSimWorldPure
 	}
 	inline double DistantLook(int Field)
 	{
-		static const double Values[DistantLookCount] = {0.2, 0.9, 1.0, 0.3, 0.55, 0.15, 0.6, 8.0, 1.5};
+		// Sky step 1: BaseDarkening 0.55 -> 0.70, BaseSunShare 0.15 -> 0.25, SilverLining
+		// 0.6 -> 0.8 (the brief's grey-blue bellies and paler far cumulus). UNCALIBRATED.
+		static const double Values[DistantLookCount] = {0.2, 0.9, 1.0, 0.3, 0.70, 0.25, 0.8, 8.0, 1.5};
 		return Field >= 0 && Field < DistantLookCount ? Values[Field] : 0.0;
 	}
 	// The cover the sheet takes under a drawn storm cell with no redrawn layer:
@@ -1453,6 +1552,11 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// word refuses by name.
 		CloudMarchSwitch = TEXT("auto");
 		FParse::Value(*Switches, TEXT("cloud-march="), CloudMarchSwitch);
+		// Sky step 1: -look-cloud-wisp=on|off (on by default): the cumulus and
+		// stratocumulus wisp (CloudWispRow, CloudBellyOcclusion); off is round 95's
+		// clouds exactly. Another word refuses by name.
+		CloudWispSwitch = TEXT("on");
+		FParse::Value(*Switches, TEXT("look-cloud-wisp="), CloudWispSwitch);
 		// Impostor A/B (0deddc6d): -cloud-volumetric-scale=<0..1> (1 by default)
 		// thins every volumetric layer's drawn cover; 0 hides the layer
 		// (ApplyClouds, CloudVolumetricCoverage). Not a number, or outside
@@ -1520,6 +1624,12 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		{
 			CloudMarchWordSource += TEXT(" (plan march_tier unknown, ignored)");
 		}
+	}
+	if (CloudWispSwitch != TEXT("on") && CloudWispSwitch != TEXT("off"))
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-wisp=%s is not on or off"),
+		                        *CloudWispSwitch);
+		return false;
 	}
 
 	// The tables in force: the pure block's defaults, then any overrides.
@@ -2363,6 +2473,50 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Record->SetObjectField(TEXT("clouds"), Out);
 		return;
 	}
+	// Sky step 1: what the loaded material was BUILT with (its lighting constants
+	// are baked by scripts/ue_create_materials.py, not set here): the graph
+	// generation this bridge expects, the one stamped on the asset (its
+	// FlightSimGraphGeneration tag; an older number means Windows must run the
+	// material script before the wisp inputs exist), the scattering constants,
+	// the albedo and the owner's parameter aliases.
+	{
+		TSharedPtr<FJsonObject> MaterialOut = MakeShared<FJsonObject>();
+		MaterialOut->SetStringField(TEXT("path"), WorldCloudMaterialPath);
+		MaterialOut->SetNumberField(TEXT("graph_generation_expected"), CloudGraphGeneration);
+		FString GraphGeneration = TEXT("unread: no metadata in this build");
+#if WITH_METADATA
+		if (UPackage* Package = Base->GetOutermost())
+		{
+			const FString& Tag = Package->GetMetaData().GetValue(Base, TEXT("FlightSimGraphGeneration"));
+			GraphGeneration = Tag.IsEmpty() ? FString(TEXT("untagged")) : Tag;
+		}
+#endif
+		MaterialOut->SetStringField(TEXT("graph_generation"), GraphGeneration);
+		MaterialOut->SetBoolField(TEXT("graph_generation_current"),
+			GraphGeneration.IsNumeric() && CloudGraphGenerationCurrent(FCString::Atoi(*GraphGeneration)));
+		MaterialOut->SetNumberField(TEXT("albedo"), CloudAlbedoBaked());
+		TSharedPtr<FJsonObject> Scattering = MakeShared<FJsonObject>();
+		for (int32 F = 0; F < CloudScatteringCount; ++F)
+		{
+			Scattering->SetNumberField(ANSI_TO_TCHAR(CloudScatteringName(F)), CloudScattering(F));
+		}
+		Scattering->SetStringField(TEXT("source"),
+			FString::Printf(TEXT("scripts/ue_create_materials.py CLOUD_SCATTERING, baked into the material at "
+			                     "build (graph generation %d); the storm's M_StormCell keeps STORM_SCATTERING"),
+			                CloudGraphGeneration));
+		MaterialOut->SetObjectField(TEXT("scattering"), Scattering);
+		TSharedPtr<FJsonObject> Aliases = MakeShared<FJsonObject>();
+		for (int32 F = 0; F < CloudOwnerAliasCount; ++F)
+		{
+			Aliases->SetStringField(ANSI_TO_TCHAR(CloudOwnerAlias(F, false)), ANSI_TO_TCHAR(CloudOwnerAlias(F, true)));
+		}
+		MaterialOut->SetObjectField(TEXT("owner_aliases"), Aliases);
+		MaterialOut->SetStringField(TEXT("owner_aliases_basis"),
+			TEXT("the X-Plane-12 brief's Coverage, Density, DetailStrength, NoiseScale, Wind are these "
+			     "material parameters (set per layer below; WindOffsetM advances in Advance from the scene's drift law)"));
+		MaterialOut->SetStringField(TEXT("calibration"), TEXT("UNCALIBRATED: set by probe render on the render machine"));
+		Out->SetObjectField(TEXT("material"), MaterialOut);
+	}
 	TArray<UVolumetricCloudComponent*> Components;
 	TArray<TSharedPtr<FJsonValue>> Kept;
 	for (TObjectIterator<UVolumetricCloudComponent> It; It; ++It)
@@ -2718,9 +2872,21 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		State.Material->SetScalarParameterValue(TEXT("FarFadeKm"), 0.0f);
 		const double HeightDensity = CloudHeightDensityFor(bBillow);
 		State.Material->SetScalarParameterValue(TEXT("HeightDensity"), static_cast<float>(HeightDensity));
+		// Sky step 1: the wisp under -look-cloud-wisp (CloudWispRow; the OFF row is
+		// the material's defaults, round 95 exactly).
+		const bool bWisp = CloudWispApplies(CloudWispSwitch == TEXT("on"), State.Shape);
+		double WispRow[WspFieldCount];
+		CloudWispRow(bWisp, WispRow);
+		State.Material->SetScalarParameterValue(TEXT("WispAmount"), static_cast<float>(WispRow[WspAmount]));
+		State.Material->SetScalarParameterValue(TEXT("CurlStrength"), static_cast<float>(WispRow[WspCurl]));
+		State.Material->SetScalarParameterValue(TEXT("EdgeThinPower"), static_cast<float>(WispRow[WspEdgePower]));
+		State.Material->SetScalarParameterValue(TEXT("TopDetailGain"), static_cast<float>(WispRow[WspTopDetail]));
+		State.Material->SetScalarParameterValue(TEXT("BoundaryErosion"), static_cast<float>(WispRow[WspBoundaryErosion]));
 		Cloud->SetMaterial(State.Material);
 		Cloud->SetbUsePerSampleAtmosphericLightTransmittance(true);
-		const double BottomOcclusion = CloudBottomOcclusionFor(bBillow, AtmRow[AtmCloudBottomOcclusion]);
+		// Round 82 raises the belly's occlusion; sky step 1 caps it where the wisp applies.
+		const double BillowOcclusion = CloudBottomOcclusionFor(bBillow, AtmRow[AtmCloudBottomOcclusion]);
+		const double BottomOcclusion = CloudBellyOcclusion(bWisp, BillowOcclusion);
 		Cloud->SetSkyLightCloudBottomOcclusion(static_cast<float>(BottomOcclusion));
 		Cloud->SetViewSampleCountScale(ViewScale);
 		Cloud->SetShadowViewSampleCountScale(ShadowScale);
@@ -2800,6 +2966,19 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			TEXT("the layer's unscaled cover: the distant sheet ignores -cloud-volumetric-scale"));
 		Layer->SetNumberField(TEXT("height_density"), HeightDensity);
 		Layer->SetNumberField(TEXT("sky_light_cloud_bottom_occlusion"), BottomOcclusion);
+		// Sky step 1: the switch word, whether it applied to this shape, the five
+		// scalars by their material names, and the belly cap (the occlusion before it).
+		Layer->SetStringField(TEXT("cloud_wisp"), CloudWispSwitch);
+		Layer->SetBoolField(TEXT("cloud_wisp_applied"), bWisp);
+		for (int32 F = 0; F < WspFieldCount; ++F)
+		{
+			Layer->SetNumberField(ANSI_TO_TCHAR(CloudWispFieldName(F)), WispRow[F]);
+		}
+		Layer->SetNumberField(TEXT("sky_light_cloud_bottom_occlusion_before_belly_cap"), BillowOcclusion);
+		Layer->SetNumberField(TEXT("belly_occlusion_cap"), CloudWispBottomOcclusion);
+		Layer->SetStringField(TEXT("cloud_wisp_basis"),
+			TEXT("sky step 1: flow-warped erosion, a finer top octave, boundary erosion and density^EdgeThinPower "
+			     "(cloud_layers.hlsl); -look-cloud-wisp=off is round 95 exactly. UNCALIBRATED"));
 		for (int32 F = 0; F < CloudFieldCount; ++F)
 		{
 			Layer->SetNumberField(ANSI_TO_TCHAR(CloudFieldName(F)), CloudRow[F]);

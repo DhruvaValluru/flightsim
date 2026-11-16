@@ -883,6 +883,90 @@ def cloud_height_density(height_density: float, norm_alt: float) -> float:
     return _lerp(1.0 - amount, 1.0, _smoothstep(0.0, CLOUD_HEIGHT_DENSITY_RISE, h))
 
 
+#: Sky step 1 (the owner's X-Plane-12 brief, 2026-11-14: "thin translucent
+#: stratocumulus/altocumulus with ragged, wispy edges and fine cauliflower
+#: detail; bright white tops, soft grey-blue bellies, light bleeding through
+#: thin edges"; r95's #03/#13 drew smooth rounded blobs with dark undersides).
+#: ``-look-cloud-wisp=on|off`` (on by default; off is round 95 exactly), the
+#: CUMULUS and STRATOCUMULUS shapes (overcast and nimbostratus keep their flat
+#: veils; altocumulus joins when its row exists): the material's five wisp
+#: scalars (cloud_layers.hlsl: WispAmount gates it all; CurlStrength cells of
+#: flow warp on a view sample's detail point, so lobes stretch into wisps; a
+#: finer top Worley octave weighted CLOUD_WISP_TOP_DETAIL, cauliflower lobes;
+#: the erosion x (1 + CLOUD_WISP_BOUNDARY_EROSION x (1 - density)), ragged
+#: outlines, intact cores; density^CLOUD_WISP_EDGE_POWER after the erosion, so
+#: a thin edge is optically thin and the sun comes through it) and the sky
+#: light's cloud-bottom occlusion CAPPED at CLOUD_WISP_BOTTOM_OCCLUSION (round
+#: 82 raised it to 0.8, a belly got a fifth of the sky: the dark undersides).
+#: No march sample added; a view sample inside a cloud costs up to 43 more
+#: lattice hashes, a shadow sample none. C++ CloudWispApplies / CloudWispRow /
+#: CloudBellyOcclusion are the twins. UNCALIBRATED: every amount; UNMEASURED
+#: until the Windows laptop renders scene 3 with and without the switch.
+CLOUD_WISP_SWITCH = "-look-cloud-wisp"
+CLOUD_WISP_SHAPES: Tuple[str, ...] = ("cumulus", "stratocumulus")
+CLOUD_WISP_AMOUNT = 1.0
+CLOUD_WISP_CURL = 0.6
+CLOUD_WISP_EDGE_POWER = 1.6
+CLOUD_WISP_TOP_DETAIL = 0.6
+CLOUD_WISP_BOUNDARY_EROSION = 0.5
+CLOUD_WISP_BOTTOM_OCCLUSION = 0.45
+#: The material's wisp scalars, in the order the C++ sets and records them
+#: (CloudWispFieldName), and their OFF values (the defaults a material has
+#: before the bridge sets them: an unset material draws round 95).
+CLOUD_WISP_FIELDS: Tuple[str, ...] = ("WispAmount", "CurlStrength", "EdgeThinPower", "TopDetailGain",
+                                      "BoundaryErosion")
+CLOUD_WISP_OFF: Dict[str, float] = {"WispAmount": 0.0, "CurlStrength": 0.0, "EdgeThinPower": 1.0,
+                                    "TopDetailGain": 0.0, "BoundaryErosion": 0.0}
+#: cloud_layers.hlsl's wisp constants: the flow's scale relative to the detail
+#: cells (coarser: lobes stretch, not jitter), the top octave's lacunarity and
+#: the far share it fades out over (UNCALIBRATED), and the top octave's own
+#: mean (measured on cloud_top_detail, re-measured by tests/test_cloud_wisp.py;
+#: a property of the noise, not a look value).
+CLOUD_CURL_OCTAVE_SCALE = 0.5
+CLOUD_TOP_DETAIL_LACUNARITY = 4.1
+CLOUD_TOP_DETAIL_MEAN = 0.479
+CLOUD_TOP_DETAIL_LOD = 0.5
+#: The beauty cloud's VolumetricAdvancedMaterialOutput constants, the twin of
+#: scripts/ue_create_materials.py CLOUD_SCATTERING (baked into the material at
+#: build, recorded by the bridge; the storm's STORM_SCATTERING is untouched).
+#: Against the storm's 0.5/0.5/0.5: a higher multi-scatter contribution and a
+#: lower occlusion light the body and the UNDERSIDE (the engine's octave ms
+#: scatters S0 x c^(2^ms - 1) through exp(-tau x o^ms)); a lower eccentricity
+#: makes the second octave near-isotropic (light wraps to the belly); g 0.85
+#: sharpens the forward lobe that lights a backlit rim. UNCALIBRATED.
+CLOUD_SCATTERING: Dict[str, float] = {"phase_g": 0.85, "phase_g2": -0.3, "phase_blend": 0.3, "octaves": 2,
+                                      "contribution": 0.7, "occlusion": 0.25, "eccentricity": 0.4}
+#: The owner's five parameter names (the brief's "Coverage, Density,
+#: DetailStrength, NoiseScale, Wind") and the material parameter each one IS:
+#: documented aliases, recorded in render.json, never a second input.
+CLOUD_OWNER_ALIASES: Dict[str, str] = {"Coverage": "Coverage", "Density": "ExtinctionPerM",
+                                       "DetailStrength": "DetailErosion", "NoiseScale": "ShapeScaleKm",
+                                       "Wind": "WindOffsetM"}
+
+
+def cloud_wisp_applies(wisp_on: bool, shape: str) -> bool:
+    """Sky step 1's wisp applies to a cumulus or stratocumulus layer with the switch on."""
+    return bool(wisp_on) and shape in CLOUD_WISP_SHAPES
+
+
+def cloud_wisp_row(applies: bool) -> Dict[str, float]:
+    """The material's five wisp scalars (C++ CloudWispRow): the amounts where the
+    wisp applies, CLOUD_WISP_OFF (round 95 exactly) where it does not."""
+    if not applies:
+        return dict(CLOUD_WISP_OFF)
+    return {"WispAmount": CLOUD_WISP_AMOUNT, "CurlStrength": CLOUD_WISP_CURL, "EdgeThinPower": CLOUD_WISP_EDGE_POWER,
+            "TopDetailGain": CLOUD_WISP_TOP_DETAIL, "BoundaryErosion": CLOUD_WISP_BOUNDARY_EROSION}
+
+
+def cloud_belly_occlusion(applies: bool, occlusion: float) -> float:
+    """SkyLightCloudBottomOcclusion after cloud_bottom_occlusion_for (C++
+    CloudBellyOcclusion): capped at CLOUD_WISP_BOTTOM_OCCLUSION where the wisp
+    applies, so a belly keeps more than half the sky; never raised."""
+    if applies and occlusion > CLOUD_WISP_BOTTOM_OCCLUSION:
+        return CLOUD_WISP_BOTTOM_OCCLUSION
+    return occlusion
+
+
 #: The default layer (the -sky= plan's VISUAL ONLY 3 km slab, never a card's
 #: stated layer) is thinned to the shape's depth; 0 keeps the layer as built.
 #: Sky step 5: an altocumulus sheet is a few hundred metres deep, so the plan's
@@ -1000,9 +1084,11 @@ DISTANT_LOOK: Dict[str, float] = {
     "Albedo": 0.9,
     "AmbientGain": 1.0,       # x the sky's distant scattered luminance
     "SunWrap": 0.3,           # the N.L wrap
-    "BaseDarkening": 0.55,    # a base's ambient as a share of a top's
-    "BaseSunShare": 0.15,     # the sun's share through a base's thin parts
-    "SilverLining": 0.6,      # the thin edge's forward-scattered sun gain
+    # Sky step 1 (the brief: "soft grey-blue bellies, not dark grey"; the far
+    # cumulus "smaller, paler"): 0.55 / 0.15 / 0.6 -> 0.70 / 0.25 / 0.8. UNCALIBRATED.
+    "BaseDarkening": 0.70,    # a base's ambient as a share of a top's
+    "BaseSunShare": 0.25,     # the sun's share through a base's thin parts
+    "SilverLining": 0.8,      # the thin edge's forward-scattered sun gain
     "RimPower": 8.0,          # the forward lobe's exponent
     "NormalStrength": 1.5,    # the relief's slope per unit thickness per km
 }
@@ -1472,6 +1558,21 @@ def cloud_detail(x: float, y: float, z: float, seed: int) -> float:
     return 0.7 * _worley(x, y, z, seed) + 0.3 * _worley(x * 2.03, y * 2.03, z * 2.03, (seed + 97) & _M32)
 
 
+def cloud_flow(x: float, y: float, z: float, seed: int) -> Tuple[float, float, float]:
+    """cloud_layers.hlsl FWorldWisp::Flow: two 3D gradient noises for the plane
+    and, at half amplitude, their difference for the vertical. Zero-mean, each
+    component within -1..1; not a divergence-free curl (stated in the shader)."""
+    a = _perlin3(x, y, z, (seed + 701) & _M32)
+    b = _perlin3(x, y, z, (seed + 733) & _M32)
+    return a, b, 0.5 * (b - a)
+
+
+def cloud_top_detail(x: float, y: float, z: float, seed: int) -> float:
+    """cloud_layers.hlsl FWorldWisp::TopDetail: the finer top Worley octave."""
+    k = CLOUD_TOP_DETAIL_LACUNARITY
+    return _worley(x * k, y * k, z * k, (seed + 193) & _M32)
+
+
 #: Round 10: the far field's level of detail (cloud_layers.hlsl LOD_NEAR_KM,
 #: LOD_FAR_KM, FAR_SOFTEN): far = smoothstep(near, far, camera distance in km)
 #: drops the small cells, the billow and the erosion, and widens the soft edge
@@ -1499,7 +1600,8 @@ def cloud_dome_taper(height_density: float, h: float) -> float:
 def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float, row: Dict[str, float],
                   distance_km: float = 0.0, footprint_km: float = 0.0,
                   dither: Tuple[float, float, float] = (0.0, 0.0, 0.0), thickness_km: float = 1.0,
-                  side_bulge: float = 0.0, height_density: float = 0.0) -> float:
+                  side_bulge: float = 0.0, height_density: float = 0.0,
+                  wisp: Optional[Dict[str, float]] = None) -> float:
     """cloud_layers.hlsl's density (before x extinction), the Python replica
     the coverage test samples: the quantile cut on the shape (started early by
     the erosion's share, raised over the top's rounding), the soft edge, the
@@ -1507,7 +1609,13 @@ def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float,
     Round 52: a shadow sample's footprint_km (0 for a view sample) dithers
     the point by ``dither`` (each in -0.5..0.5, the shader's hash) times
     CLOUD_SHADOW_DITHER x footprint, widens the soft edge (after the cut) and
-    reads the erosion noise at its mean once wider than the noise."""
+    reads the erosion noise at its mean once wider than the noise.
+    Sky step 1: ``wisp`` is the material's wisp row (cloud_wisp_row); None or
+    CLOUD_WISP_OFF is round 95 exactly. A view sample's detail point is
+    flow-warped and its top gains the finer octave; the erosion bites harder at
+    the outline; the density is raised to EdgeThinPower after the erosion."""
+    w = wisp if wisp is not None else CLOUD_WISP_OFF
+    amount = w["WispAmount"]
     h = min(max(norm_alt, 0.0), 1.0)
     if footprint_km > 0.0:
         d = [u * CLOUD_SHADOW_DITHER * footprint_km for u in dither]
@@ -1530,9 +1638,24 @@ def cloud_density(km: Tuple[float, float, float], norm_alt: float, cover: float,
         dscale = max(row["detail_scale_km"], 1e-3)
         detail = CLOUD_DETAIL_MEAN
         if max(footprint_km, 0.0) < dscale:
-            detail = cloud_detail(km[0] / dscale, km[1] / dscale, km[2] / dscale, 13)
-        wisp = _lerp(detail, 1.0 - detail, min(max(h / CLOUD_WISP_HEIGHT, 0.0), 1.0))
-        density = _remap(density, row["detail_erosion"] * (1.0 - far) * wisp, 1.0)
+            q = [km[0] / dscale, km[1] / dscale, km[2] / dscale]
+            if amount > 0.0 and footprint_km == 0.0:
+                flow = cloud_flow(q[0] * CLOUD_CURL_OCTAVE_SCALE, q[1] * CLOUD_CURL_OCTAVE_SCALE,
+                                  q[2] * CLOUD_CURL_OCTAVE_SCALE, 23)
+                q = [c + f * (amount * w["CurlStrength"]) for c, f in zip(q, flow)]
+                detail = cloud_detail(q[0], q[1], q[2], 13)
+                top_w = (amount * w["TopDetailGain"] * _smoothstep(CLOUD_WISP_HEIGHT, 1.0, h)
+                         * (1.0 - _smoothstep(0.0, CLOUD_TOP_DETAIL_LOD, far)))
+                if top_w > 0.0:
+                    detail = min(max(detail + top_w * (cloud_top_detail(q[0], q[1], q[2], 13)
+                                                       - CLOUD_TOP_DETAIL_MEAN), 0.0), 1.0)
+            else:
+                detail = cloud_detail(q[0], q[1], q[2], 13)
+        ragged = _lerp(detail, 1.0 - detail, min(max(h / CLOUD_WISP_HEIGHT, 0.0), 1.0))
+        ero = row["detail_erosion"] * (1.0 - far) * ragged * (1.0 + amount * w["BoundaryErosion"] * (1.0 - density))
+        density = _remap(density, ero, 1.0)
+    if amount > 0.0 and density > 0.0:
+        density = _lerp(density, density ** w["EdgeThinPower"], amount)
     return density * base * cloud_height_density(height_density, h)
 
 

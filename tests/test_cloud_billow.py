@@ -94,12 +94,19 @@ def test_the_shader_multiplies_the_body_into_the_extinction():
 
 
 def test_the_material_gains_the_input_and_a_new_generation():
+    """Round 82 added HeightDensity as the last Custom input at graph generation 7 /
+    world generation 9. Sky step 1 (2026-11-14) appends five wisp inputs after it
+    and bumps both stamps (graph 8, world 10), so the pins became "HeightDensity is
+    still an input" and "the stamps are at least round 82's" (the form every other
+    generation test uses); the round-82 input and defaults are unchanged."""
     text = _read(MATERIALS)
     assert '"HeightDensity": 0.0,' in text
     start = text.index("WORLD_CLOUD_INPUTS = (")
-    assert '"HeightDensity")   # round 82' in text[start:text.index("WORLD_CLOUD_ALBEDO", start)]
-    assert 'WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "7"' in text
-    assert '"M_FlightSimCloudLayers": "9"' in text
+    assert '"HeightDensity",   # round 82' in text[start:text.index("WORLD_CLOUD_ALBEDO", start)]
+    graph = re.search(r'WORLD_GRAPH_GENERATIONS = \{"M_FlightSimCloudLayers": "(\d+)"', text)
+    assert graph and int(graph.group(1)) >= 7
+    world = re.search(r'"M_FlightSimCloudLayers": "(\d+)", "M_FlightSimScatter"', text)
+    assert world and int(world.group(1)) >= 9
 
 
 def test_the_bridge_reads_refuses_and_records_the_switch():

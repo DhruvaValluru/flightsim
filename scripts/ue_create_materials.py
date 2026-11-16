@@ -585,6 +585,20 @@ STORM_SCATTERING_PROPERTIES = {
     "contribution": "const_multi_scattering_contribution",
     "occlusion": "const_multi_scattering_occlusion",
     "eccentricity": "const_multi_scattering_eccentricity"}
+#: Sky step 1 (the owner's X-Plane-12 brief, 2026-11-14): the BEAUTY cloud's
+#: own constants for the same node (M_FlightSimCloudLayers only; M_StormCell
+#: keeps STORM_SCATTERING, so the storm's look and its quarter-hour recompile
+#: are untouched). The brief wants undersides that glow, not dark flat bellies,
+#: and light through thin edges: against the storm's 0.5/0.5/0.5 a higher
+#: multi-scattering contribution and a lower occlusion light the body and the
+#: underside (VolumetricCloud.usf: octave ms scatters S0 x c^(2^ms - 1) and sees
+#: the sun through exp(-tau x o^ms)); a lower eccentricity makes the second
+#: octave near-isotropic (light wraps to the belly); g 0.85 sharpens the forward
+#: lobe that lights a backlit rim. The twin is core/scene/world_beauty.py
+#: CLOUD_SCATTERING (the bridge records it in render.json). Baked at build:
+#: a change here is a WORLD_GRAPH_GENERATIONS bump. UNCALIBRATED.
+CLOUD_SCATTERING = {"phase_g": 0.85, "phase_g2": -0.3, "phase_blend": 0.3, "octaves": 2,
+                    "contribution": 0.7, "occlusion": 0.25, "eccentricity": 0.4}
 #: The generation of each storm material this script builds, stamped on
 #: the asset as metadata: an existing asset stamped with an older one (or
 #: none) is set aside and built again, so a change to a storm material's
@@ -1852,15 +1866,16 @@ def finish_storm(material, name):
         unreal.EditorAssetLibrary.delete_asset(aside)
 
 
-def storm_scattering(material, lib, x, y):
-    """The VolumetricAdvancedMaterialOutput node (STORM_SCATTERING): the
+def storm_scattering(material, lib, x, y, constants=STORM_SCATTERING):
+    """The VolumetricAdvancedMaterialOutput node (``constants``:
+    STORM_SCATTERING by default, CLOUD_SCATTERING for the beauty cloud): the
     phase function and the multiple-scattering approximation the cloud is
     lit with, the ground's albedo lighting its bottoms. A property name the
     engine refuses is reported with the node's own list, never skipped: a
     cloud lit by single scattering is the black frame this node is for."""
     node = lib.create_material_expression(
         material, unreal.MaterialExpressionVolumetricAdvancedMaterialOutput, x, y)
-    settings = [(STORM_SCATTERING_PROPERTIES[key], value) for key, value in STORM_SCATTERING.items()]
+    settings = [(STORM_SCATTERING_PROPERTIES[key], value) for key, value in constants.items()]
     # The node's own options (per-sample atmospheric light transmittance is
     # the cloud COMPONENT's switch, not the node's: measured on the owner's
     # machine, 2026-10-09, the name was refused and M_StormCell lost).
@@ -3724,6 +3739,9 @@ WORLD_CLOUD_SCALARS = {
     "FarFadeStartKm": 0.0, "FarFadeKm": 0.0,
     # Round 82: the base's density deficit (0 = round 81; -look-cloud-billow).
     "HeightDensity": 0.0,
+    # Sky step 1: the wisp (-look-cloud-wisp; world_beauty.CLOUD_WISP_OFF: these
+    # defaults are the OFF values, so an unset material draws round 95 exactly).
+    "WispAmount": 0.0, "CurlStrength": 0.0, "EdgeThinPower": 1.0, "TopDetailGain": 0.0, "BoundaryErosion": 0.0,
 }
 WORLD_CLOUD_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 WORLD_CLOUD_INPUTS = ("WorldPos", "NormAlt", "CameraPos", "Coverage", "ExtinctionPerM", "ExtinctionScale",
@@ -3731,7 +3749,11 @@ WORLD_CLOUD_INPUTS = ("WorldPos", "NormAlt", "CameraPos", "Coverage", "Extinctio
                       "CoverageContrast", "SeedOffsetKm", "WindOffsetM",
                       "ShadowDist", "ShadowFootprintKm", "LayerThicknessKm", "SideBulge",   # round 52
                       "FarFadeStartKm", "FarFadeKm",   # round 61
-                      "HeightDensity")   # round 82
+                      "HeightDensity",   # round 82
+                      "WispAmount", "CurlStrength", "EdgeThinPower", "TopDetailGain", "BoundaryErosion")   # Sky step 1
+#: The owner's parameter names (the X-Plane-12 brief: Coverage, Density,
+#: DetailStrength, NoiseScale, Wind) are documented ALIASES of these inputs, not
+#: a second set (world_beauty.CLOUD_OWNER_ALIASES; the bridge records them).
 #: The cloud's single-scattering albedo (water droplets scatter almost all they
 #: intercept; the storm cell's own 0.98). UNCALIBRATED: set by probe render.
 WORLD_CLOUD_ALBEDO = 0.98
@@ -3747,8 +3769,10 @@ WORLD_DISTANT_SCALARS = {
     "Coverage": 0.35, "CoverageContrast": 0.9, "ShapeScaleKm": 2.5, "SliceKm": 2.0, "ThicknessKm": 1.2,
     "HandoverKm": 24.0, "FadeKm": 8.0, "RadiusKm": 300.0, "SheetFade": 1.0,
     "GrazingSoften": 0.0,   # round 82: -look-cloud-billow (0 = round 81)
-    "RimFadeShare": 0.2, "Albedo": 0.9, "AmbientGain": 1.0, "SunWrap": 0.3, "BaseDarkening": 0.55,
-    "BaseSunShare": 0.15, "SilverLining": 0.6, "RimPower": 8.0, "NormalStrength": 1.5,
+    # Sky step 1: BaseDarkening 0.55 -> 0.70, BaseSunShare 0.15 -> 0.25, SilverLining 0.6 -> 0.8
+    # (world_beauty.DISTANT_LOOK; the bridge sets every one each render, so no stamp moves).
+    "RimFadeShare": 0.2, "Albedo": 0.9, "AmbientGain": 1.0, "SunWrap": 0.3, "BaseDarkening": 0.70,
+    "BaseSunShare": 0.25, "SilverLining": 0.8, "RimPower": 8.0, "NormalStrength": 1.5,
 }
 WORLD_DISTANT_VECTORS = ("SeedOffsetKm", "WindOffsetM")
 #: The Custom node's inputs, in order: the engine's five (world position, camera,
@@ -3886,7 +3910,12 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: FarFadeKm: r58's distant block columns).
 #: Round 82: clouds 7, the base's density deficit (HeightDensity: the owner's
 #: "the clouds dont look that realistic").
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "7", "M_FlightSimDistantClouds": "5"}
+#: Sky step 1 (2026-11-14): clouds 8, the wisp (inputs WispAmount, CurlStrength,
+#: EdgeThinPower, TopDetailGain, BoundaryErosion: flow-warped detail, a finer
+#: top octave, boundary erosion, thin-edge transmittance) and the beauty cloud's
+#: own scattering constants (CLOUD_SCATTERING). The distant sheet's shared noise
+#: text is unchanged (everything new sits after it): distant stays 5.
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "8", "M_FlightSimDistantClouds": "5"}
 
 
 def world_graph_stale(name):
@@ -3934,7 +3963,7 @@ def world_stamp(material, name):
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "10",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail)
-                     "M_FlightSimCloudLayers": "9", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper
+                     "M_FlightSimCloudLayers": "10", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
                      "M_FlightSimOceanBeauty": "5"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
@@ -4084,7 +4113,9 @@ def create_world_cloud_layers():
     additive, flagged for the volumetric cloud: STORM_USAGE_PROPERTY, without
     which the engine's cloud shadow pass asserts, docs/WEATHER.md): albedo
     WORLD_CLOUD_ALBEDO, extinction cloud_layers.hlsl, lit by the storm's
-    multiple-scattering node (storm_scattering: without it a cloud's base is black)."""
+    multiple-scattering node (storm_scattering: without it a cloud's base is
+    black) with the beauty cloud's own constants (CLOUD_SCATTERING, sky step 1:
+    undersides that glow, light through thin edges; M_StormCell is untouched)."""
     material = _world_beauty_material("M_FlightSimCloudLayers")
     if material is None:
         return
@@ -4112,7 +4143,7 @@ def create_world_cloud_layers():
     lib.connect_material_property(extinction, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
     albedo = scalar(material, lib, "Albedo", WORLD_CLOUD_ALBEDO, -600, 200)
     lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    storm_scattering(material, lib, -600, 700)
+    storm_scattering(material, lib, -600, 700, constants=CLOUD_SCATTERING)
     world_stamp(material, "M_FlightSimCloudLayers")
     finish(material, "M_FlightSimCloudLayers")
 
