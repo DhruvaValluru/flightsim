@@ -1,0 +1,31 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "01_golden_hour_a_4_flying_east": {
+   "post": "01_golden_hour_a_4_flying_east_post.jpg",
+   "source": "01_golden_hour_a_4_flying_east_frame_beauty_post.png"
+  },
+  "02_same_super_bright_preset": {
+   "post": "02_same_super_bright_preset_post.jpg",
+   "source": "02_same_super_bright_preset_frame_beauty_post.png"
+  },
+  "06_a320_over_sfo_heading_south_moderate_rain": {
+   "post": "06_a320_over_sfo_heading_south_moderate_rain_post.jpg",
+   "source": "06_a320_over_sfo_heading_south_moderate_rain_frame_beauty_post.png"
+  },
+  "07_tower_view_heavy_rain": {
+   "post": "07_tower_view_heavy_rain_post.jpg",
+   "source": "07_tower_view_heavy_rain_frame_beauty_post.png"
+  },
+  "08_c172_over_fuji_sunrise_light_rain": {
+   "post": "08_c172_over_fuji_sunrise_light_rain_post.jpg",
+   "source": "08_c172_over_fuji_sunrise_light_rain_frame_beauty_post.png"
+  },
+  "13_747_cruise_over_the_ocean": {
+   "post": "13_747_cruise_over_the_ocean_post.jpg",
+   "source": "13_747_cruise_over_the_ocean_frame_beauty_post.png"
+  }
+ }
+}

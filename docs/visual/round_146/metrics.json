@@ -1,0 +1,120 @@
+{
+ "calibration": "uncalibrated: report only, no threshold has been judged against real rounds",
+ "limits": {
+  "blank_std_min": 0.002,
+  "blank_mean_min": 0.003,
+  "clipped_max": 0.02,
+  "crushed_max": 0.05,
+  "mean_luma_min": 0.02,
+  "mean_luma_max": 0.8,
+  "ssim_min": 0.35,
+  "flicker_max": 0.02
+ },
+ "gate": "report only; never fails the round",
+ "compare_with": "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_144",
+ "compare_with_found": true,
+ "scenes": {
+  "1": {
+   "frame": "01_golden_hour_a_4_flying_east.jpg",
+   "health": {
+    "mean_luma": 0.17787,
+    "std_luma": 0.16125,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "01_golden_hour_a_4_flying_east.jpg",
+    "flicker": 0.00744,
+    "ssim": 0.9917,
+    "flags": []
+   }
+  },
+  "2": {
+   "frame": "02_same_super_bright_preset.jpg",
+   "health": {
+    "mean_luma": 0.20459,
+    "std_luma": 0.17141,
+    "clipped": 2e-05,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "02_same_super_bright_preset.jpg",
+    "flicker": 0.00549,
+    "ssim": 0.9917,
+    "flags": []
+   }
+  },
+  "6": {
+   "frame": "06_a320_over_sfo_heading_south_moderate_rain.jpg",
+   "health": {
+    "mean_luma": 0.06801,
+    "std_luma": 0.06167,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "06_a320_over_sfo_heading_south_moderate_rain.jpg",
+    "flicker": 0.06474,
+    "ssim": 0.6507,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "7": {
+   "frame": "07_tower_view_heavy_rain.jpg",
+   "health": {
+    "mean_luma": 0.12122,
+    "std_luma": 0.01421,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "07_tower_view_heavy_rain.jpg",
+    "flicker": 0.10534,
+    "ssim": 0.8264,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "8": {
+   "frame": "08_c172_over_fuji_sunrise_light_rain.jpg",
+   "health": {
+    "mean_luma": 0.52865,
+    "std_luma": 0.30288,
+    "clipped": 0.0,
+    "crushed": 9e-05
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "08_c172_over_fuji_sunrise_light_rain.jpg",
+    "flicker": 0.20226,
+    "ssim": 0.7937,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "13": {
+   "frame": "13_747_cruise_over_the_ocean.jpg",
+   "health": {
+    "mean_luma": 0.11111,
+    "std_luma": 0.12724,
+    "clipped": 0.0,
+    "crushed": 2e-05
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "13_747_cruise_over_the_ocean.jpg",
+    "flicker": 0.00114,
+    "ssim": 0.9963,
+    "flags": []
+   }
+  }
+ }
+}

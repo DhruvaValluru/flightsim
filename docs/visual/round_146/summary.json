@@ -1,0 +1,154 @@
+[
+ {
+  "number": 1,
+  "name": "golden hour A-4, flying east",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "058b122c5f93",
+  "lighting": {},
+  "seconds": 693.0,
+  "spec_sha256": "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.273,
+   "offset_px": [
+    296,
+    -39
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 2,
+  "name": "same, super bright preset",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "6c402694e51d",
+  "lighting": {
+   "preset": "super_bright"
+  },
+  "seconds": 85.8,
+  "spec_sha256": "07bbee13c285ce2b7127c8ae2a44554a54537d908d20817aa576ef814bd6ffb6",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.233,
+   "offset_px": [
+    24,
+    -191
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 6,
+  "name": "a320 over sfo heading south, moderate rain",
+  "prompt": "wingman view of the a320 over sfo south at 3000 m in moderate rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "e84478152e2e",
+  "lighting": {},
+  "seconds": 166.1,
+  "spec_sha256": "c7aa2900755f69f27f63b19009a9c5f434c373cff10e038710fdd79a3f8f7251",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.516,
+   "offset_px": [
+    408,
+    11
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 7,
+  "name": "tower view, heavy rain",
+  "prompt": "tower view of the a320 at 1000 m in heavy rain with a 250 mm lens for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "afb220cd7aeb",
+  "lighting": {},
+  "seconds": 191.7,
+  "spec_sha256": "cf3697a5b8c94e5a54c30f373f30fae193d9e68ed10878f721f27d32361af7a4",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.139,
+   "offset_px": [
+    -325,
+    -32
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 8,
+  "name": "c172 over fuji, sunrise, light rain",
+  "prompt": "chase view of the c172p over mount fuji at sunrise in light rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "f084da677ac5",
+  "lighting": {},
+  "seconds": 106.0,
+  "spec_sha256": "12d9f6f108c853765e86017db7ab96c95eb4e1fa4180a1b0299492c3d55a7345",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.453,
+   "offset_px": [
+    -136,
+    -273
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 13,
+  "name": "747 cruise over the ocean",
+  "prompt": "chase view of the 747 over the ocean at 10000 m at noon for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "0399a711c8da",
+  "lighting": {},
+  "seconds": 75.9,
+  "spec_sha256": "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.104,
+   "offset_px": [
+    -18,
+    314
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ }
+]
