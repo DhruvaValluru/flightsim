@@ -181,8 +181,8 @@ def test_the_material_wires_the_six_pins_and_bumps_its_generation():
     assert set(pins) == {"PhaseG", "PhaseG2", "PhaseBlend", "MsContribution", "MsOcclusion", "MsEccentricity"}
     assert set(pins.values()) == {"PhaseG", "PhaseG2", "PhaseBlend", "MultiScatteringContribution",
                                   "MultiScatteringOcclusion", "MultiScatteringEccentricity"}
-    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"] == "10"
-    assert _cpp("CloudGraphGeneration") == 10
+    assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayers"] == "11"   # rain-grey: pins from parameters
+    assert _cpp("CloudGraphGeneration") == 11
     # sky-clouds2 review: the light is its own material; the default graph is 8's again
     assert _script_value("WORLD_GRAPH_GENERATIONS")["M_FlightSimCloudLayersLit"] == "2"   # lit 2: round 1426
     assert '"M_FlightSimCloudLayersLit": "2",' in SCRIPT
@@ -193,7 +193,7 @@ def test_the_material_wires_the_six_pins_and_bumps_its_generation():
             and "MP_AMBIENT_OCCLUSION" not in off)
     assert wb.CLOUD_LIGHT_MATERIAL in CPP
     assert "UMaterialInstanceDynamic::Create(Parent, Cloud)" in CPP
-    assert '"M_FlightSimCloudLayers": "12"' in SCRIPT
+    assert '"M_FlightSimCloudLayers": "13"' in SCRIPT
     assert 'world_custom(material, lib, "cloud_sky_ao"' in SCRIPT
     assert "cloud_albedo" not in create
 
@@ -245,3 +245,48 @@ def test_the_pure_light_row_compiles_and_matches(tmp_path):
         expect = wb.cloud_light_row(True, shape)
         assert rows[s] == pytest.approx([expect[f] for f in wb.CLOUD_LIGHT_FIELDS])
     assert rows[-1] == pytest.approx([wb.CLOUD_LIGHT_OFF[f] for f in wb.CLOUD_LIGHT_FIELDS])
+
+
+# -- lane rain-grey (2026-11-16): a deck keeps round 95's energy-conserving node ------
+
+def test_deck_scatter_restores_round95_on_decks_only():
+    storm = _script_value("STORM_SCATTERING")
+    round95 = {"PhaseG": storm["phase_g"], "PhaseG2": storm["phase_g2"], "PhaseBlend": storm["phase_blend"],
+               "MsContribution": storm["contribution"], "MsOcclusion": storm["occlusion"],
+               "MsEccentricity": storm["eccentricity"]}
+    assert wb.CLOUD_DECK_SCATTER == round95
+    # Wrenninge's energy condition (contribution <= occlusion): the deck row meets it, step 1's does not.
+    assert wb.CLOUD_DECK_SCATTER["MsContribution"] <= wb.CLOUD_DECK_SCATTER["MsOcclusion"]
+    assert wb.CLOUD_LIGHT_OFF["MsContribution"] > wb.CLOUD_LIGHT_OFF["MsOcclusion"]
+    for shape in SHAPES:
+        row = wb.cloud_scatter_row(False, shape)
+        if shape in ("overcast", "nimbostratus"):
+            assert {k: row[k] for k in round95} == round95
+        else:
+            assert row == wb.CLOUD_LIGHT_OFF
+        assert wb.cloud_scatter_row(False, shape, "beauty") == wb.CLOUD_LIGHT_OFF
+        assert wb.cloud_scatter_row(True, shape) == wb.cloud_light_row(True, shape)
+    assert wb.cloud_deck_scatter_applies("bogus", False, "nimbostratus") is None
+    assert wb.CLOUD_DECK_SCATTER_DEFAULT == "round95"
+
+
+def test_deck_scatter_twins_match_cpp():
+    vals = _cpp_array(r"static const double Values\[LgtMsEccentricity \+ 1\] = \{([^}]*)\};")
+    assert vals == [wb.CLOUD_DECK_SCATTER[f] for f in wb.CLOUD_LIGHT_FIELDS[:6]]
+    assert 'std::strcmp(Word, "round95") == 0) { return 1; }' in PURE
+    assert 'std::strcmp(Word, "beauty") == 0) { return 0; }' in PURE
+    assert "(Cloud == CloudOvercast || Cloud == CloudNimbostratus)" in PURE
+    assert 'FString CloudDeckScatterSwitch = TEXT("round95");' in HDR
+    assert 'TEXT("cloud-deck-scatter="), CloudDeckScatterSwitch' in CPP
+    body = CPP[CPP.index("CloudLightRow(bLight, State.Shape, LightRow);"):]
+    assert body.index("CloudDeckScatterRow(bDeckScatter, LightRow);") < body.index("SetScalarParameterValue(FName(ANSI_TO_TCHAR(CloudLightFieldName(F)))")
+
+
+def test_default_material_drives_the_six_pins_from_parameters():
+    create = SCRIPT[SCRIPT.index("def create_world_cloud_layers"):SCRIPT.index("def create_world_tiles_beauty")]
+    start = create.index("    if not lit:")
+    unlit = create[start:create.index("        return\n", start)]
+    assert "connect_cloud_scatter_pins(lib, asset, node, scatter)" in unlit
+    assert "WORLD_CLOUD_LIGHT_PINS" in unlit and "cloud_sky_ao" not in unlit
+    defaults = _script_value("WORLD_CLOUD_LIGHT_SCALARS")
+    assert {k: defaults[k] for k in wb.CLOUD_DECK_SCATTER} == {k: wb.CLOUD_LIGHT_OFF[k] for k in wb.CLOUD_DECK_SCATTER}

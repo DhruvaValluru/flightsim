@@ -4036,7 +4036,10 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: Cirrus 3 (2026-11-16): the look check's denser, brighter defaults (FibreStrength,
 #: PatchScaleKm, OpticalDepth, MaxOpacity); the graph is rebuilt so its defaults move.
 #: High-sky fx (2026-11-15): rainbow 1, the first rainbow.hlsl (M_FlightSimRainbow).
-WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "10", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "3",
+#: Lane rain-grey (2026-11-16): cloud layers 11, the scattering node's six pins from
+#: parameters (defaults CLOUD_SCATTERING = graph 10's light), so a deck shape takes
+#: round 95's node (-cloud-deck-scatter=round95, the default).
+WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "11", "M_FlightSimDistantClouds": "5", "M_FlightSimCirrus": "3",
                            "M_FlightSimCloudLayersLit": "2",
                            "M_FlightSimRainbow": "1"}
 
@@ -4086,7 +4089,7 @@ def world_stamp(material, name):
 #: lesson: a renamed asset's metadata follows the redirect). Bump a number
 #: with every change to that asset's graph or parameter list.
 WORLD_GENERATIONS = {"MPC_FlightSimWorld": "4", "M_FlightSimTilesBeauty": "12",   # 3: lane B terrain detail; 4: #02 shade neutral; 5: its face-normal level test; 6: force diagnostic; 7: wet ground (puddle fade, sheen, far wet specular); 8: hyperreal terrain detail (footprint-filtered maps, luma sharpen, relief from AlbedoMid); 9: the relief step bounded to ~6 degrees (RELIEF_STEP_MAX 0.08); 10: both lanes merged (tiles_normal on the puddle mask + terrain detail); 11: wet ground (Lekner & Dorf darkening, grazing sky mirror; detail consts static for Metal); 12: its specular AA clamp tuned to 0.02
-                     "M_FlightSimCloudLayers": "12", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING; 11: sky-clouds light inputs + cloud_albedo; 12: sky-clouds2 the light moved to M_FlightSimCloudLayersLit (graph 8 again)
+                     "M_FlightSimCloudLayers": "13", "M_FlightSimScatter": "1",  # clouds 7: round-61 IGN dither, far fade; 8: round-82 HeightDensity; 9: round-92 dome taper; 10: sky step 1 wisp inputs + CLOUD_SCATTERING; 11: sky-clouds light inputs + cloud_albedo; 12: sky-clouds2 the light moved to M_FlightSimCloudLayersLit (graph 8 again); 13: rain-grey the scattering pins from parameters (graph 11)
                      "M_FlightSimCloudLayersLit": "2",  # sky-clouds2: -look-cloud-light=on's own material; 2: no powder, the base on the AO pin (round 1426)
                      "M_FlightSimDistantClouds": "5",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften
                      "M_FlightSimCirrus": "3",          # sky step 6: the high cirrus sheet; 2: sky-cirrus2 patches + hooked fibres; 3: look check denser/brighter defaults
@@ -4290,6 +4293,13 @@ def create_world_cloud_layers(lit=False):
     node = storm_scattering(material, lib, -600, 700, constants=CLOUD_SCATTERING)
     if not lit:
         lib.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
+        # Lane rain-grey (graph 11): the node's six pins from parameters (defaults =
+        # CLOUD_SCATTERING, so an unset MID draws graph 10), so the bridge gives a deck
+        # shape round 95's node (-cloud-deck-scatter, FlightSimWorldPure::CloudDeckScatterRow).
+        # Uniform loads only: no custom node, sampler or march step is added.
+        scatter = {name: (scalar(material, lib, name, WORLD_CLOUD_LIGHT_SCALARS[name], -1200, 1500 + 110 * i), "")
+                   for i, name in enumerate(WORLD_CLOUD_LIGHT_PINS)}
+        connect_cloud_scatter_pins(lib, asset, node, scatter)
         world_stamp(material, asset)
         finish(material, asset)
         return
@@ -4308,13 +4318,19 @@ def create_world_cloud_layers(lit=False):
     sky_ao = world_custom(material, lib, "cloud_sky_ao", unreal.CustomMaterialOutputType.CMOT_FLOAT1,
                           {name: ao_inputs[name] for name in WORLD_CLOUD_SKY_AO_INPUTS}, -400, 400)
     lib.connect_material_property(sky_ao, "", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
-    for field, pin in WORLD_CLOUD_LIGHT_PINS.items():
-        spelled = (pin, re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", pin))
-        if not any(lib.connect_material_expressions(light[field][0], "", node, p) for p in spelled):
-            raise RuntimeError(f"{asset}: {field} did not connect to the scattering node's "
-                               f"{' / '.join(spelled)}")
+    connect_cloud_scatter_pins(lib, asset, node, light)
     world_stamp(material, asset)
     finish(material, asset)
+
+
+def connect_cloud_scatter_pins(lib, asset, node, params):
+    """Each WORLD_CLOUD_LIGHT_PINS parameter in ``params`` (name -> (node, pin)) onto
+    the VolumetricAdvancedMaterialOutput input it drives; a refused pin is an error."""
+    for field, pin in WORLD_CLOUD_LIGHT_PINS.items():
+        spelled = (pin, re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", pin))
+        if not any(lib.connect_material_expressions(params[field][0], "", node, p) for p in spelled):
+            raise RuntimeError(f"{asset}: {field} did not connect to the scattering node's "
+                               f"{' / '.join(spelled)}")
 
 
 def create_world_tiles_beauty():

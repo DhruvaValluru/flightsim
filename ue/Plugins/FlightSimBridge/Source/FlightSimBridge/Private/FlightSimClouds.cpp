@@ -781,6 +781,50 @@ namespace FlightSimWorldPure
 	{
 		return bBillowOn && !bLightOn;
 	}
+	// Lane rain-grey (2026-11-16): -cloud-deck-scatter=round95|beauty (round95 by
+	// default). Sky step 1 baked CloudScattering (contribution 0.7, occlusion 0.25,
+	// eccentricity 0.4, g 0.85 / -0.3 / 0.3) into M_FlightSimCloudLayers for EVERY
+	// shape. Those octave constants break Wrenninge 2013's energy condition
+	// (contribution <= occlusion): octave 1 sees the sun through exp(-0.25 tau) and
+	// scatters 0.7 x the single-scattered light. For a cumulus edge (tau ~ 1) that
+	// is the wanted glow; under a 1-3 km rain or overcast DECK (tau 20-100) it
+	// lights the underside as if the deck were a quarter as thick: Windows round
+	// 144 drew #06's nimbostratus base at sRGB 0.36-0.44 (round 199: 0.11-0.17),
+	// #07's heavy rain as a flat bright grey with the streaks lost against it, and
+	// the brightened base stood off the distant sheet as a hard dark band. round95
+	// gives the DECK shapes (overcast, nimbostratus) round 95's energy-conserving
+	// node (the storm's STORM_SCATTERING: g 0.8 / -0.5 / 0.5, octaves 0.5 / 0.5 /
+	// 0.5, as M_FlightSimCloudLayers drew at 40c95c10); cumulus, stratocumulus and
+	// altocumulus keep step 1's. Graph 11 drives the node's six pins from these
+	// parameters (defaults = CloudScattering). beauty = step 1's on every shape.
+	// Only with -look-cloud-light=off (on has its own row). Beauty only.
+	inline int CloudDeckScatterFor(const char* Word)
+	{
+		if (Word == nullptr || Word[0] == '\0' || std::strcmp(Word, "round95") == 0) { return 1; }
+		if (std::strcmp(Word, "beauty") == 0) { return 0; }
+		return -1;
+	}
+	inline bool CloudDeckScatterApplies(bool bRound95, bool bLightOn, int Cloud)
+	{
+		return bRound95 && !bLightOn && (Cloud == CloudOvercast || Cloud == CloudNimbostratus);
+	}
+	inline double CloudDeckScatter(int Field)
+	{
+		static const double Values[LgtMsEccentricity + 1] = {0.8, -0.5, 0.5, 0.5, 0.5, 0.5};
+		return Field >= 0 && Field <= LgtMsEccentricity ? Values[Field] : 0.0;
+	}
+	// Overwrites the six scattering fields of a CloudLightRow where it applies.
+	inline void CloudDeckScatterRow(bool bApplies, double* Out)
+	{
+		if (!bApplies)
+		{
+			return;
+		}
+		for (int F = LgtPhaseG; F <= LgtMsEccentricity; ++F)
+		{
+			Out[F] = CloudDeckScatter(F);
+		}
+	}
 	// -cloud-material=ours|epic (A/B; world_beauty.CLOUD_MATERIAL_*): epic puts Epic's
 	// Volumetrics plugin cloud material on the beauty layer instead of ours.
 	constexpr int CloudMaterialWordCount = 2;
@@ -798,7 +842,7 @@ namespace FlightSimWorldPure
 	// graph generation CloudGraphGeneration (world_beauty.CLOUD_SCATTERING is the
 	// twin; tests pin all three). Recorded here so render.json says what lit the
 	// cloud; nothing here sets them. UNCALIBRATED.
-	constexpr int CloudGraphGeneration = 10;   // sky-clouds2: graph 8 again (the light moved to M_FlightSimCloudLayersLit)
+	constexpr int CloudGraphGeneration = 11;   // rain-grey: the scattering pins from parameters (CloudDeckScatterRow)
 	constexpr double CloudAlbedo = 0.98;
 	// True when the asset's stamped generation is the one this bridge was written for.
 	inline bool CloudGraphGenerationCurrent(int Stamped)
@@ -2003,6 +2047,9 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// (ours by default; epic is the Volumetrics plugin's cloud material for the A/B).
 		CloudLightSwitch = TEXT("off");
 		FParse::Value(*Switches, TEXT("look-cloud-light="), CloudLightSwitch);
+		// Lane rain-grey: -cloud-deck-scatter=round95|beauty (CloudDeckScatterFor).
+		CloudDeckScatterSwitch = TEXT("round95");
+		FParse::Value(*Switches, TEXT("cloud-deck-scatter="), CloudDeckScatterSwitch);
 		CloudMaterialSwitch = TEXT("ours");
 		FParse::Value(*Switches, TEXT("cloud-material="), CloudMaterialSwitch);
 		// Impostor A/B (0deddc6d): -cloud-volumetric-scale=<0..1> (1 by default)
@@ -2100,6 +2147,12 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	{
 		Error = FString::Printf(TEXT("world_beauty.clouds: -look-cloud-light=%s is not on or off"),
 		                        *CloudLightSwitch);
+		return false;
+	}
+	if (CloudDeckScatterFor(TCHAR_TO_ANSI(*CloudDeckScatterSwitch)) < 0)
+	{
+		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-deck-scatter=%s is not round95 or beauty"),
+		                        *CloudDeckScatterSwitch);
 		return false;
 	}
 	if (CloudMaterialSwitch != TEXT("ours") && CloudMaterialSwitch != TEXT("epic"))
@@ -3139,6 +3192,9 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			FString::Printf(TEXT("scripts/ue_create_materials.py CLOUD_SCATTERING, baked into the material at "
 			                     "build (graph generation %d); the storm's M_StormCell keeps STORM_SCATTERING"),
 			                CloudGraphGeneration));
+		Scattering->SetStringField(TEXT("deck_shapes"),
+			TEXT("graph 11: these are the six pins' parameter defaults; -cloud-deck-scatter=round95 (the default) "
+			     "sets overcast and nimbostratus layers to round 95's STORM_SCATTERING (layers[].cloud_light_row)"));
 		MaterialOut->SetObjectField(TEXT("scattering"), Scattering);
 		TSharedPtr<FJsonObject> Aliases = MakeShared<FJsonObject>();
 		for (int32 F = 0; F < CloudOwnerAliasCount; ++F)
@@ -3532,6 +3588,10 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		// Sky-clouds lane: the light row (CloudLightRow; OFF = the material's defaults).
 		double LightRow[LgtFieldCount];
 		CloudLightRow(bLight, State.Shape, LightRow);
+		// Lane rain-grey: a deck keeps round 95's energy-conserving node (CloudDeckScatterRow).
+		const bool bDeckScatter = CloudDeckScatterApplies(
+			CloudDeckScatterFor(TCHAR_TO_ANSI(*CloudDeckScatterSwitch)) == 1, bLight, State.Shape);
+		CloudDeckScatterRow(bDeckScatter, LightRow);
 		for (int F = 0; F < LgtFieldCount; ++F)
 		{
 			State.Material->SetScalarParameterValue(FName(ANSI_TO_TCHAR(CloudLightFieldName(F))),
@@ -3651,6 +3711,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		Layer->SetStringField(TEXT("cloud_wisp"), CloudWispSwitch);
 		Layer->SetStringField(TEXT("cloud_light"), CloudLightSwitch);
 		Layer->SetStringField(TEXT("cloud_light_material"), LightMaterialDrawn);
+		Layer->SetStringField(TEXT("cloud_deck_scatter"), CloudDeckScatterSwitch);
+		Layer->SetBoolField(TEXT("cloud_deck_scatter_applied"), bDeckScatter);
 		{
 			TSharedPtr<FJsonObject> LightOut = MakeShared<FJsonObject>();
 			for (int F = 0; F < LgtFieldCount; ++F)
