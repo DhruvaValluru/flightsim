@@ -648,6 +648,21 @@ EXPOSURE_METER_TARGET_P90: Dict[str, float] = {
 EXPOSURE_ANCHORS: Tuple[str, ...] = ("incident", "frame")
 DEFAULT_EXPOSURE_ANCHOR = "incident"
 EXPOSURE_ANCHOR_SWITCH = "-exposure-anchor="
+#: fix-scene8 (2026-11-16): ``incident`` skipped the frame meter outright, and
+#: with it the meter's HIGHLIGHT GUARD (visual round 2: a beauty frame whose
+#: p90 is over :data:`FRAME_HIGHLIGHT_P90` is closed toward 0.80). Scene #8
+#: (C172 over Fuji, sunrise, light rain: no deck drawn) is the frame that
+#: guard was written for: round 83/89 (guard on) mean luma 0.595, round 144
+#: (da82dc78, incident, no meter) 0.731 and washed out. Under ``incident``
+#: the meter now runs CLOSE-ONLY (:func:`frame_meter_step` ``close_only``):
+#: a clipping frame closes as before, any other frame keeps the incident
+#: exposure, so #13's dark sea is still not opened. ``off`` is da82dc78's
+#: pure incident anchor. Host: FlightSimBeautyLook.cpp trigger
+#: ``clear_highlight_guard``; FlightSimRenderCommandlet.cpp bMeterCloseOnly.
+CLEAR_HIGHLIGHT_GUARDS: Tuple[str, ...] = ("on", "off")
+DEFAULT_CLEAR_HIGHLIGHT_GUARD = "on"
+CLEAR_HIGHLIGHT_GUARD_SWITCH = "-clear-highlight-guard="
+CLEAR_HIGHLIGHT_GUARD_TRIGGER = "clear_highlight_guard"
 
 #: Lane A (2026-11-11): the SUBJECT meter, the host's last word on a beauty
 #: exposure this look owns (FlightSimRenderCommandlet.cpp, after the frame
@@ -680,6 +695,36 @@ SUBJECT_METER: Dict[str, float] = {
 #: The frame meter's highlight bound (the host's BeautyMeterHighlightP90): a
 #: frame clipping past it is never opened further by the subject meter.
 FRAME_HIGHLIGHT_P90 = 0.92
+#: The frame meter's other constants (the host's BeautyMeterHighlightTarget,
+#: BeautyMeterMaxCloseStops, BeautyMeterSaturatedStepStops, StormMeterTolerance,
+#: StormMeterMaxStops), twins pinned by test.
+FRAME_HIGHLIGHT_TARGET_P90 = 0.80
+FRAME_MAX_CLOSE_STOPS = 6.0
+FRAME_SATURATED_STEP_STOPS = 2.0
+FRAME_METER_TOLERANCE = 0.05
+FRAME_METER_MAX_STOPS = 8.0
+
+
+def frame_meter_step(p90: float, opened: float, target_p90: float,
+                     close_only: bool = False) -> float:
+    """One beauty frame-meter step in stops (0 = settled): the twin of the
+    host's meter loop (FlightSimRenderCommandlet.cpp, beauty, may close).
+    ``p90`` the frame's sRGB luma p90 (0..1), ``opened`` the stops moved so
+    far, ``target_p90`` the look's target. ``close_only`` is the clear-sky
+    highlight guard under ``-exposure-anchor=incident`` (fix-scene8): a frame
+    that is not clipping is left where it stands."""
+    blown = p90 > FRAME_HIGHLIGHT_P90
+    if not blown and abs(p90 - target_p90) <= FRAME_METER_TOLERANCE:
+        return 0.0
+    if close_only and not blown:
+        return 0.0
+    want = FRAME_HIGHLIGHT_TARGET_P90 if blown else target_p90
+    step = 2.2 * 0.8 * math.log2(want / max(p90, 1.0 / 255.0))
+    if blown and p90 >= 254.0 / 255.0:
+        step = min(step, -FRAME_SATURATED_STEP_STOPS)
+    lowest = -FRAME_MAX_CLOSE_STOPS if blown else min(0.0, opened)
+    nxt = min(max(opened + step, lowest), FRAME_METER_MAX_STOPS)
+    return 0.0 if abs(nxt - opened) < 0.01 else nxt - opened
 
 
 def subject_meter_step(p50: float, p97: float, frame_p90: float, stops: float) -> float:
@@ -1817,13 +1862,17 @@ def exposure_meter(world_preset: Optional[str], deck_drawn: Optional[bool] = Non
         # the host reads it and -exposure-anchor= overrides it.
         "clear_no_lumen_gi": DEFAULT_EXPOSURE_ANCHOR,
         "clear_no_lumen_gi_switch": EXPOSURE_ANCHOR_SWITCH + "incident|frame",
+        # fix-scene8: under incident the meter still closes a CLIPPING frame.
+        "clear_highlight_guard": DEFAULT_CLEAR_HIGHLIGHT_GUARD,
+        "clear_highlight_guard_switch": CLEAR_HIGHLIGHT_GUARD_SWITCH + "on|off",
         "target_p90_luma": (EXPOSURE_METER_TARGET_P90[str(world_preset)] if deck
                             else EXPOSURE_METER_TARGET_P90["no_lumen_gi"]),
         "no_lumen_gi_target_p90_luma": EXPOSURE_METER_TARGET_P90["no_lumen_gi"],
         "when": ("always: a cloud deck's own darkness is measured, not guessed" if deck
                  else ("only when the host finds Lumen GI unsupported on its shader platform "
                        "AND -exposure-anchor=frame; by default (incident) a clear frame keeps "
-                       "the incident meter's exposure")),
+                       "the incident meter's exposure, closed only if it clips "
+                       "(-clear-highlight-guard=on)")),
         "method": ("the beauty frame read back once before frame 0; the 90th percentile "
                    "of its sRGB luma opened to the target by AutoExposureBias, never "
                    "closed below this EV100 unless the frame clips (the host's highlight "

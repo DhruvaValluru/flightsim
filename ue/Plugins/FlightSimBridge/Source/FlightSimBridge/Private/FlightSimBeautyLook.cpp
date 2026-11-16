@@ -665,9 +665,41 @@ namespace
 					}
 					else
 					{
-						MeterEcho->SetStringField(TEXT("runs"),
-							TEXT("no: a clear sky without Lumen GI keeps the incident meter's exposure ")
-							TEXT("(-exposure-anchor=incident; =frame meters the frame's p90 as before)"));
+						// fix-scene8 (2026-11-16): "incident" keeps the incident
+						// exposure, but NOT by skipping the frame meter outright:
+						// that also dropped its highlight guard (visual round 2),
+						// the one thing that closes a CLIPPING frame. #8 (C172 over
+						// Fuji, sunrise, light rain: no deck drawn) is such a frame:
+						// at 40c95c10 the guard closed its white haze (round 83/89
+						// mean luma 0.595); at da82dc78 it rendered washed out
+						// (round 144, 0.731). The meter now runs CLOSE-ONLY here:
+						// a frame whose p90 is over the highlight bound is closed
+						// as before, any other frame keeps the incident exposure
+						// (#13's dark sea is not opened). -clear-highlight-guard=off
+						// is the pure incident anchor of da82dc78.
+						// core/scene/beauty_look.py CLEAR_HIGHLIGHT_GUARD.
+						FString Guard = TEXT("on");
+						FParse::Value(*State.SwitchText, TEXT("clear-highlight-guard="), Guard);
+						Guard = Guard.ToLower();
+						if (Guard != TEXT("on") && Guard != TEXT("off"))
+						{
+							return BeautyLookFail(FString::Printf(
+								TEXT("-clear-highlight-guard=%s is not on or off"), *Guard));
+						}
+						MeterEcho->SetStringField(TEXT("clear_highlight_guard"), Guard);
+						if (Guard == TEXT("on"))
+						{
+							State.bMeter = true;
+							State.MeterTargetP90 = NoLumenTarget;
+							State.MeterTrigger = TEXT("clear_highlight_guard");
+						}
+						else
+						{
+							MeterEcho->SetStringField(TEXT("runs"),
+								TEXT("no: a clear sky without Lumen GI keeps the incident meter's exposure ")
+								TEXT("(-exposure-anchor=incident -clear-highlight-guard=off; =frame meters the ")
+								TEXT("frame's p90 as before)"));
+						}
 					}
 				}
 				else
