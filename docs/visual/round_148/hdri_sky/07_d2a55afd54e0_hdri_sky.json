@@ -1,0 +1,77 @@
+{
+ "switch": "auto",
+ "calibration": "UNCALIBRATED: set by probe render on the render machine",
+ "measured": "UNMEASURED until a Windows render",
+ "labels": "the sky light lights the beauty only; the backdrop sphere is in BeautyOnlyActors (every label capture hides it), unlit translucent, no depth, custom depth or velocity, no shadow",
+ "sun_elevation_deg": 51.64809999999999,
+ "preset_index": 3,
+ "slot": "storm",
+ "hdri": "overcast_soil_puresky",
+ "licence": "CC0-1.0 (Poly Haven; assets/hdri/README.md)",
+ "light_asset": "/Game/FlightSim/Sky/T_HdriLight_overcast_soil_puresky.T_HdriLight_overcast_soil_puresky",
+ "sky": "the HDRI (specified cubemap)",
+ "backdrop": {
+  "asset": "/Game/FlightSim/Sky/T_HdriBackdrop_overcast_soil_puresky.T_HdriBackdrop_overcast_soil_puresky",
+  "material": "/Game/FlightSim/M_FlightSimHdriBackdrop.M_FlightSimHdriBackdrop",
+  "radius_km": 8,
+  "sky_depth_cm": 100000000,
+  "placement": "a sphere at radius_km (a photographed sky's cloud distance), so the height fog and aerial perspective veil it as they would those clouds; drawn over sky pixels only (opaque scene depth beyond sky_depth_cm)",
+  "sort_priority": -110,
+  "full_below_agl_m": 600,
+  "none_above_agl_m": 1000,
+  "horizon_low_deg": 1,
+  "horizon_high_deg": 12,
+  "clamp_luminance": 47.624351501464844,
+  "sun_hole_deg": 0,
+  "sun_span_deg": 0,
+  "law": "per frame (frames[].hdri_backdrop_opacity): full below full_below_agl_m of camera height over the card's ground (world Z), none above none_above_agl_m, smoothstep between (hdri_sky.backdrop_weight); hidden until the sky light's switch"
+ },
+ "switch_result": {
+  "captured_upward_irradiance": {
+   "r": 10086.4765625,
+   "g": 9043.609375,
+   "b": 8963.890625
+  },
+  "intensity_before": 2.56000018119812,
+  "cubemap_yaw_deg": 167.88619999999995,
+  "hdri_sun_longitude_deg": -11.8652,
+  "hdri_sun_elevation_deg": 34.7168,
+  "scene_sun_azimuth_xy_deg": 90.24860000000005,
+  "hdri_upward_irradiance_per_unit": {
+   "r": 15.167335510253906,
+   "g": 14.292736053466797,
+   "b": 11.592788696289062
+  },
+  "ratio": 648.2593102768401,
+  "lower_hemisphere_cap": 0.5999231013621368,
+  "ground_albedo_implied_before": 0.41672008817070655,
+  "intensity": 1659.5439453125,
+  "fill_gain": 1,
+  "lower_hemisphere_scale": 0.0015425925769935313,
+  "lower_hemisphere_before": {
+   "r": 1295.2989501953125,
+   "g": 1223.3380126953125,
+   "b": 1079.4150390625
+  },
+  "lower_hemisphere": {
+   "r": 1.1987173557281494,
+   "g": 1.1321221590042114,
+   "b": 0.9989304542541504
+  },
+  "final_upward_irradiance_x_intensity": {
+   "r": 5398.986328125,
+   "g": 5347.275390625,
+   "b": 5366.73974609375
+  },
+  "captured_upward_irradiance_x_intensity": {
+   "r": 25821.380859375,
+   "g": 23151.642578125,
+   "b": 22947.5625
+  },
+  "processed_texture": true,
+  "basis": "intensity = intensity_before x (captured upward irradiance / the HDRI's, luminance, both the sky light's SH at +Z) x fill_gain; the lower hemisphere divided by the intensity change (baked into the cube before the intensity), and under an overcast or storm photograph capped at LowerCapAlbedo x the sky's upward irradiance / pi (no sun reaches that ground: hdri_sky.lower_hemisphere_cap); yaw puts the photograph's sun at the directional light's azimuth (hdri_sky.cubemap_yaw_deg)",
+  "backdrop_scale": 452.4004153189712,
+  "backdrop_normalise": 0.6978695224998357
+ },
+ "lightning_base_intensity": 1659.5439453125
+}

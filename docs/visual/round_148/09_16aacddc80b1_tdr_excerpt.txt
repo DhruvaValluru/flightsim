@@ -1,0 +1,21 @@
+[2026.11.17-01.58.09:144][  0]LogFlightSimScenario: Display: turbulence 'lee-rotor' configured once after trim (seed 151633); the seed is never re-written inside the step loop
+[2026.11.17-01.58.09:144][  0]LogFlightSimRender: Display: waiting for shader compilation
+[2026.11.17-01.58.09:178][  0]LogFlightSimRender: Display: beauty: blue noise ready (scalar /Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64, vec2 /Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64): the cloud march's start jitter is per pixel and per capture
+[2026.11.17-01.58.09:179][  0]LogFlightSimWeather: Display: cloud VolumetricCloudComponent (VolumetricCloud_0): /Temp/Untitled_1.Untitled:PersistentLevel.VolumetricCloud_0.VolumetricCloudComponent.MID_M_FlightSimCloudLayers_0, domain 3, used_with_volumetric_cloud yes, compiled
+[2026.11.17-01.58.09:180][  0]LogFlightSimWeather: Display: cloud VolumetricCloud (Actor_4): /Temp/Untitled_1.Untitled:PersistentLevel.Actor_4.VolumetricCloud.MID_M_StormCell_0, domain 3, used_with_volumetric_cloud yes, compiled
+[2026.11.17-01.58.09:181][  0]LogFlightSimRender: Display: warm-up: 20 captures (capture watchdog 300 s, gpu drain on)
+[2026.11.17-01.58.09:183][  0]LogRenderer: Warning: The film grain texture is not streamed in.
+[2026.11.17-01.58.13:308][  0]LogD3D11RHI: Error: Result failed with error DXGI_ERROR_DEVICE_REMOVED DXGI_ERROR_DEVICE_HUNG
+ at D:\build\++UE5\Sync\Engine\Source\Runtime\Windows\D3D11RHI\Private\D3D11Query.cpp:396
+[2026.11.17-01.58.15:295][  0]LogWindows: FPlatformMisc::RequestExit(0, WindowsPlatformCrashContext.ReportGPUCrash)
+[2026.11.17-01.58.15:296][  0]LogWindows: FPlatformMisc::RequestExitWithStatus(0, 0, WindowsPlatformCrashContext.ReportGPUCrash)
+[2026.11.17-01.58.15:296][  0]LogCore: Engine exit requested (reason: Win RequestExit)
+[2026.11.17-01.58.15:297][  0]LogWindows: Error: appError called: Fatal error: [File:D:\build\++UE5\Sync\Engine\Source\Runtime\Windows\D3D11RHI\Private\D3D11Util.cpp] [Line: 166] 
+Unreal Engine is exiting due to D3D device being lost. (Error: 0x887A0006 - 'HUNG')
+
+
+
+[2026.11.17-01.58.15:297][  0]LogWindows: Windows GetLastError: The operation completed successfully. (0)
+[2026.11.17-01.58.15:302][  0]LogWindows: FPlatformMisc::RequestExit(0, WindowsPlatformCrashContext.ReportGPUCrash)
+[2026.11.17-01.58.15:302][  0]LogWindows: FPlatformMisc::RequestExitWithStatus(0, 0, WindowsPlatformCrashContext.ReportGPUCrash)
+[2026.11.17-01.58.15:302][  0]LogCore: Engine exit requested (reason: Win RequestExit; note: exit was already requested)
