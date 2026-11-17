@@ -2527,24 +2527,6 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	TSharedPtr<FJsonObject> SunShaftsOut;
 	SunShafts.Apply(World, Scene, Preset, SunShafts.ResolveStillTier(Params), SunShaftsOut);
 	Record->SetObjectField(TEXT("sun_shafts"), SunShaftsOut);
-	// r151 (#13 at 10 km above cumulus, sun near overhead): the clouds' shadow volumes
-	// through the air below the deck read as long pale-and-dark streaks running down the
-	// frame (Windows r150/r1502). Seen from above a deck, the shadowed air is a thin
-	// slab under each cloud, not a shaft: the atmosphere's cloud shadow is cut to
-	// CloudShadowOnAtmosphereFromAbove. UNCALIBRATED.
-	if (bStockCloudsFromAbove && Scene.Sun != nullptr)
-	{
-		if (UDirectionalLightComponent* SunLight = Cast<UDirectionalLightComponent>(Scene.Sun->GetLightComponent()))
-		{
-			constexpr float CloudShadowOnAtmosphereFromAbove = 0.15f;
-			SunLight->CloudShadowOnAtmosphereStrength = CloudShadowOnAtmosphereFromAbove;
-			SunLight->MarkRenderStateDirty();
-			if (SunShaftsOut.IsValid())
-			{
-				SunShaftsOut->SetNumberField(TEXT("cloud_shadow_on_atmosphere_from_above"), CloudShadowOnAtmosphereFromAbove);
-			}
-		}
-	}
 
 	// -- rain readability and the lightning's pulse --------------------------
 	const double* Row = &AtmosphereValues[Preset * AtmosphereFieldCount];

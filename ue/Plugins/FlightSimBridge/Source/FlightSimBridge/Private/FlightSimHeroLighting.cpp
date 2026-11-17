@@ -84,6 +84,11 @@ namespace
 	constexpr float HeroLightingShaftBloomScale = 0.12f;
 	constexpr float HeroLightingShaftBloomThreshold = 6.0f;
 	constexpr float HeroLightingShaftBloomMaxBrightness = 50.0f;
+	// Light-shaft bloom blurs bright pixels radially toward the sun's projected
+	// point. A sun this high projects far above any aircraft view, so every
+	// bright cloud is smeared into a long band down the frame (Windows r151/r152
+	// #13, sun at 89.9 deg). Above this elevation the bloom is off. UNCALIBRATED.
+	constexpr double HeroLightingShaftBloomMaxSunElevationDeg = 60.0;
 	// PHYSICS default: the sun's in-scattering into volumetric fog at 1.
 	constexpr float HeroLightingFogScattering = 1.0f;
 	// UNCALIBRATED (probe hl-fog: shot c, shaft banding in the rain fog).
@@ -367,7 +372,10 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 		// owner of record for occlusion; that row's darkness is inert.
 		SunLight->SetEnableLightShaftOcclusion(false);
 		SunLight->SetOcclusionMaskDarkness(HeroLightingShaftOcclusionDarkness);
-		SunLight->SetEnableLightShaftBloom(!bOvercast);
+		const double ShaftSunElevationDeg = FMath::RadiansToDegrees(FMath::Asin(
+			FMath::Clamp(-SunLight->GetDirection().Z, -1.0, 1.0)));
+		const bool bShaftBloom = !bOvercast && ShaftSunElevationDeg <= HeroLightingShaftBloomMaxSunElevationDeg;
+		SunLight->SetEnableLightShaftBloom(bShaftBloom);
 		SunLight->SetBloomScale(HeroLightingShaftBloomScale);
 		SunLight->SetBloomThreshold(HeroLightingShaftBloomThreshold);
 		SunLight->SetBloomMaxBrightness(HeroLightingShaftBloomMaxBrightness);
@@ -376,7 +384,12 @@ bool FFlightSimHeroLighting::Apply(FFlightSimVisualScene& Scene, USceneCaptureCo
 			TEXT("off: screen-space, so it re-tones the horizon sky as the bank moves the terrain on ")
 			TEXT("screen (Gate 6 beauty breathing); overrides the world lane's sun-shafts row; shafts ")
 			TEXT("come from the volumetric fog's and the atmosphere's world-space shadows"));
-		SunRecord->SetBoolField(TEXT("light_shaft_bloom"), !bOvercast);
+		SunRecord->SetBoolField(TEXT("light_shaft_bloom"), bShaftBloom);
+		SunRecord->SetStringField(TEXT("light_shaft_bloom_basis"),
+			bOvercast ? TEXT("off: overcast sun")
+			: bShaftBloom ? TEXT("on: clear sun at or below the shaft-bloom elevation limit")
+			: TEXT("off: the sun is above the shaft-bloom elevation limit, so its projected point is far off-frame and the radial blur streaks every bright cloud (r152 #13)"));
+		SunRecord->SetNumberField(TEXT("light_shaft_bloom_max_sun_elevation_deg"), HeroLightingShaftBloomMaxSunElevationDeg);
 		SunRecord->SetNumberField(TEXT("light_shaft_bloom_scale"), HeroLightingShaftBloomScale);
 		SunRecord->SetNumberField(TEXT("light_shaft_bloom_threshold"), HeroLightingShaftBloomThreshold);
 
