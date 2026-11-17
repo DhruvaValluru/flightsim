@@ -1,0 +1,1294 @@
+{
+ "spec_digest": "f919d044684c5b5b69c6a967c25cbef59b4870b4e8c6ef51a4a16a228f1c39cb",
+ "aircraft": "B747",
+ "altitude_m": 2000.0,
+ "airspeed_kt": 250.0,
+ "airspeed_kind": "cas",
+ "heading_deg": 270.0,
+ "latitude_deg": 38.43,
+ "longitude_deg": -96.6,
+ "terrain_elevation_m": 413.0,
+ "duration_s": 3.0,
+ "rate_hz": 120.0,
+ "sample_interval_s": 0.1,
+ "wind_speed_kt": 25.0,
+ "wind_direction_deg": 99.0,
+ "turbulence": "lee-rotor",
+ "mass_held": true,
+ "hold_state": false,
+ "control_inputs": [],
+ "engine_mixture": 1.0,
+ "start_gear_up": true,
+ "turbulence_properties": {
+  "atmosphere/turb-type": 4.0,
+  "atmosphere/randomseed": 151633.0,
+  "atmosphere/turbulence/milspec/severity": 1.0,
+  "atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps": 50.63429571303587
+ },
+ "weather_look": {
+  "surface": "bare",
+  "storm": "thunderstorm",
+  "rain_rate_mmh": 40.0,
+  "rain_source": "thunderstorm visual default",
+  "wetness": 1.0,
+  "ice_eta_max": 0.0,
+  "seed": 151633
+ },
+ "rain_particles": {
+  "rate_mmh": 40.0,
+  "lambda_per_mm": 1.931931,
+  "d_min_mm": 0.5,
+  "d_max_mm": 6.0,
+  "fall_speed_law": [
+   9.65,
+   10.3,
+   0.6
+  ],
+  "visible_density_per_m3": 1576.065,
+  "count": 20000,
+  "box_m": 12.0,
+  "near_m": 0.5,
+  "streak_exposure_s": 0.016667,
+  "min_width_px": 1.0,
+  "opacity": 0.55,
+  "seed": 151633
+ },
+ "weather": {
+  "version": 1,
+  "rain": {
+   "rate_mmh": 50.0,
+   "rate_source": "storm_default",
+   "lambda": 1.839028192,
+   "n0": 8000.0,
+   "d_render_min_mm": 1.0,
+   "d_max_mm": 6.0,
+   "box_half_m": [
+    10.0,
+    10.0,
+    8.0
+   ],
+   "density_drawn_per_m3": 691.476949,
+   "expected_in_box": 4425452.476,
+   "particles": 262144,
+   "weight": 16.881761,
+   "ambient_rate_mmh": null,
+   "ambient_fraction": 0.0,
+   "fall_speed_factor": 1.081759219,
+   "wind_enu_mps": [
+    -12.702769,
+    2.011921,
+    0.0
+   ],
+   "seed": 151633,
+   "splash": {
+    "flux_per_m2_s": 3725.2668,
+    "radius_m": 10.0,
+    "per_s": 1490106.7329,
+    "lifetime_s": 0.06,
+    "slots": 4096,
+    "period_s": 0.06,
+    "weight": 21.827735,
+    "max_agl_m": 8.0,
+    "hash": "pcg32(slot * 65536 + cycle)"
+   },
+   "windshield": {
+    "impinge_per_m2_s": 229071.113,
+    "runoff_mps": 37.3139,
+    "v_shed_mps": 22.0,
+    "runoff_gain": 0.35,
+    "glass_cos": 0.5,
+    "airspeed_mps": 128.6111,
+    "basis": "impingement n_r |V| cos(theta); run-off RUNOFF_GAIN (V - V_SHED) above V_SHED -- the two constants STATED, not measured"
+   },
+   "selftest": [
+    {
+     "index": 0,
+     "p0_m": [
+      -2.052681378657,
+      8.804633030382,
+      3.580819638381
+     ],
+     "d_mm": 1.511833438944,
+     "width_mm": 1.533909572284,
+     "v_t_mps": 5.94097825931,
+     "phase": 0.281225837463
+    },
+    {
+     "index": 1,
+     "p0_m": [
+      1.723055153474,
+      -7.109027347888,
+      -7.632153686433
+     ],
+     "d_mm": 1.543476251632,
+     "width_mm": 1.566987551661,
+     "v_t_mps": 6.025570288214,
+     "phase": 0.584647950579
+    },
+    {
+     "index": 2,
+     "p0_m": [
+      -6.336718920645,
+      2.023746133963,
+      -5.910062118996
+     ],
+     "d_mm": 1.027144421894,
+     "width_mm": 1.033570804381,
+     "v_t_mps": 4.422836422233,
+     "phase": 0.218729866066
+    },
+    {
+     "index": 3,
+     "p0_m": [
+      -7.97341471309,
+      2.105365989194,
+      -1.07438367327
+     ],
+     "d_mm": 1.563915649301,
+     "width_mm": 1.588383381193,
+     "v_t_mps": 6.079364177935,
+     "phase": 0.76840828147
+    }
+   ]
+  },
+  "cell": {
+   "centre": "downburst",
+   "base_m": 1000.0,
+   "top_m": 12479.21,
+   "overshoot_m": 1000.0,
+   "tower_radius_m": 2500.0,
+   "anvil_radius_m": 10000.0,
+   "anvil_bottom_m": 9979.21,
+   "anvil_offset_enu_m": [
+    -4938.442,
+    782.172,
+    0.0
+   ],
+   "anvil_drift_enu_mps": [
+    -12.702769,
+    2.011921
+   ],
+   "updraft_mps": 15.0,
+   "extinction_core_per_m": 0.18750000000000003,
+   "extinction_anvil_per_m": 0.006543075245365323,
+   "albedo": 0.98,
+   "shaft": {
+    "radius_m": 1000.0,
+    "rate_mmh": 50.0,
+    "rate_source": "storm_default",
+    "extinction_per_m": 0.004040868324086979
+   },
+   "noise": {
+    "seed": 151633,
+    "billow_m": 600.0,
+    "octaves": 4,
+    "gain": 0.5,
+    "lacunarity": 2.03,
+    "erosion": 0.45
+   },
+   "glow_diffusion_m": 1500.0,
+   "basis": "tower 2.5 downburst core radii (min 2500 m), base 1000 m AGL (stated), top the latitude's tropopause (stated 16000..11000 m), anvil 4 tower radii offset 0.5 anvil radii downwind of the stated wind"
+  },
+  "lightning": {
+   "rate_per_min": 6.0,
+   "ic_cg_ratio": 3.0,
+   "seed": 151633,
+   "light_curve": {
+    "rise_s": 2e-06,
+    "fall_s": 6e-05,
+    "peak_norm": 1.1632109250720026,
+    "glow_fraction": 0.02,
+    "glow_s": 0.001,
+    "leader_w_per_m": 600.0,
+    "branch_stroke_share": 0.25,
+    "luminous_efficacy_lm_per_w": 80.0
+   },
+   "flashes": [],
+   "selftest": []
+  },
+  "thunder": {
+   "sound_speed_mps": 338.68631430473755,
+   "temperature_k": 285.46549999999996,
+   "sample_rate_hz": 48000,
+   "energy_per_m": 1000000.0,
+   "relaxation_radius_m": 1.7724204712779328,
+   "t0_s": 0.004153350325360248,
+   "lengthening": 0.5,
+   "directivity_floor": 0.15,
+   "pressure_ref_pa_m": 400.0,
+   "absorption_f0_hz": 3000.0,
+   "absorption_r_m": 800.0,
+   "audible_full_m": 15000.0,
+   "audible_max_m": 25000.0,
+   "full_scale_pa": 100.0,
+   "selftest": {
+    "flash": {
+     "index": 0,
+     "t_s": 0.0,
+     "kind": "cg",
+     "strokes": [
+      {
+       "t_s": 0.02,
+       "peak_w_per_m": 600000.0
+      },
+      {
+       "t_s": 0.08,
+       "peak_w_per_m": 300000.0
+      }
+     ],
+     "channels": [
+      {
+       "kind": "main",
+       "length_m": 0.0,
+       "points": [
+        [
+         0.0,
+         0.0,
+         1200.0
+        ],
+        [
+         30.0,
+         10.0,
+         1150.0
+        ],
+        [
+         20.0,
+         -15.0,
+         1100.0
+        ]
+       ]
+      },
+      {
+       "kind": "branch",
+       "length_m": 0.0,
+       "points": [
+        [
+         30.0,
+         10.0,
+         1150.0
+        ],
+        [
+         60.0,
+         30.0,
+         1120.0
+        ]
+       ]
+      }
+     ]
+    },
+    "listener_enu_m": [
+     1500.0,
+     -400.0,
+     2.0
+    ],
+    "sample_rate_hz": 8000,
+    "length": 46501,
+    "first_arrival_s": 5.604300014494909,
+    "samples": [
+     [
+      44834,
+      1.6070565340941294
+     ],
+     [
+      44906,
+      -0.02886758717383963
+     ],
+     [
+      44978,
+      2.5053345129899984
+     ],
+     [
+      45051,
+      -2.568090697451394
+     ],
+     [
+      45123,
+      0.0
+     ],
+     [
+      45196,
+      0.0
+     ],
+     [
+      45268,
+      0.0
+     ],
+     [
+      45341,
+      0.0
+     ],
+     [
+      45413,
+      0.0
+     ],
+     [
+      45485,
+      0.5288694599260367
+     ],
+     [
+      45558,
+      -3.192200494337193
+     ],
+     [
+      45630,
+      0.0
+     ],
+     [
+      45703,
+      0.0
+     ],
+     [
+      45775,
+      0.0
+     ],
+     [
+      45848,
+      0.0
+     ],
+     [
+      45920,
+      1.1045150199128237
+     ],
+     [
+      45992,
+      -2.283033249129896
+     ],
+     [
+      46065,
+      0.0
+     ],
+     [
+      46137,
+      0.0
+     ],
+     [
+      46210,
+      0.0
+     ],
+     [
+      46282,
+      0.0
+     ],
+     [
+      46355,
+      2.124972297219212
+     ],
+     [
+      46427,
+      -0.11724932173606625
+     ],
+     [
+      46500,
+      -0.0091956080791496
+     ]
+    ]
+   }
+  }
+ },
+ "reference_speeds": {
+  "vs_kt": 167.2,
+  "cl_max": 1.192,
+  "alpha_stall_deg": 13.4,
+  "basis": "B747 model, CLmax 1.192, 237599 kg"
+ },
+ "orographic": {
+  "terrain": "C:\\Users\\kanth\\flightsim\\runs\\terrain\\flint_hills",
+  "wind_speed_mps": 12.861111111111112,
+  "wind_from_deg": 99.0,
+  "decay_height_m": 506.7095500688218,
+  "wavelength_m": 3183.75,
+  "origin_x_m": 709491.3467514922,
+  "origin_y_m": 4256254.193489813,
+  "lee": true
+ },
+ "datum": {
+  "vertical_datum_of_heights": "EGM2008 orthometric (GLO-30)",
+  "geoid_model": "EGM96 15-minute grid (GeographicLib egm96-15)",
+  "origin_lat_deg": 38.43,
+  "origin_lon_deg": -96.6,
+  "undulation_m": -30.536159999999967,
+  "undulation_source": {
+   "file": "assets/geoid/egm96-15.pgm",
+   "sha256": "2a12f13b6df65cdea52432c7fa1b43f34b007148eb817bf032af5af710905caa",
+   "tarball_sha256": "8b1ebad1ebae0a045502d0edb9cc51553da1d3914f01e07470c11b3bed75048e",
+   "tarball_url": "https://sourceforge.net/projects/geographiclib/files/geoids-distrib/egm96-15.tar.bz2/download",
+   "description": "WGS84 EGM96, 15-minute grid",
+   "interpolation": "bilinear",
+   "grid": [
+    1440,
+    721
+   ],
+   "model": "EGM96",
+   "posting_deg": 0.25,
+   "max_bilinear_error_m": 1.152,
+   "max_cubic_error_m": 0.169
+  },
+  "bilinear_error_bound_m": 1.152,
+  "model_difference_bound_m": 13.7,
+  "model_difference_basis": "measured 2026-09-28: max |EGM2008-5 - EGM96-15| over all 1,038,240 EGM96 grid nodes is 11.985 m (28.5 N, 94.5 E), RMS 0.722 m; the bound adds both grids' bilinear error bounds (1.152 + 0.478 m). Pavlis et al. 2012 (J. Geophys. Res. 117, B04406) is the EGM2008 reference, unverified here",
+  "model_difference_at_origin_m": 0.232,
+  "orthometric_height_of_origin_m": 413.50753619518736,
+  "ellipsoidal_height_of_origin_m": 382.9713761951874,
+  "note": "JSBSim h-sl is ellipsoidal; heights fed to the FDM are orthometric, so JSBSim altitude equals orthometric height here; ellipsoidal = altitude + undulation_m",
+  "geoid_model_key": "EGM96",
+  "grid_sha256": "2a12f13b6df65cdea52432c7fa1b43f34b007148eb817bf032af5af710905caa",
+  "interpolation": "bilinear",
+  "interpolation_error_bound_m": 1.152,
+  "cubic_error_bound_m": 0.169,
+  "undulation_bilinear_m": -30.536159999999967,
+  "egm2008_minus_egm96_at_origin_m": null,
+  "bounds": {
+   "scene_bbox_deg": [
+    38.3,
+    38.55,
+    -96.75,
+    -96.45
+   ],
+   "lattice_step_deg": 0.0625,
+   "samples": 35,
+   "undulation_min_m": -30.8061,
+   "undulation_max_m": -30.272999999999996,
+   "undulation_range_m": 0.5331000000000046,
+   "note": "N is taken at the scene origin for the whole flight; the range bounds the error of that choice anywhere in the bbox"
+  },
+  "gtx": {
+   "file": "flint_hills_geoid.gtx",
+   "sha256": "e0432d194c47076088ff59e1bb6229b0bc67c1e23228f9e12a9f4769637d6da7",
+   "bytes": 140,
+   "format": "NOAA .gtx: big-endian header of four float64 (south latitude, west longitude, latitude step, longitude step) and two int32 (rows, columns), then float32 undulations row-major from the SOUTH row northward, west to east",
+   "sign": "the grid holds +N (ellipsoidal = orthometric + N); PROJ's forward vgridshift SUBTRACTS the grid from a height, so an evaluator uses '+inv +proj=vgridshift' to read +N",
+   "grid_sha256": "2a12f13b6df65cdea52432c7fa1b43f34b007148eb817bf032af5af710905caa",
+   "model": "EGM96",
+   "posting_deg": 0.25,
+   "rows": 5,
+   "cols": 5,
+   "lat_south": 38.0,
+   "lat_north": 39.0,
+   "lon_west": -97.0,
+   "lon_east": -96.0,
+   "alignment": {
+    "south_node": 152,
+    "west_node": -388,
+    "north_node": 156,
+    "east_node": -384,
+    "node_aligned": true,
+    "rule": "floor / ceil of the scene bbox in whole nodes of posting_deg, plus margin_nodes on every side"
+   },
+   "margin_nodes": 1,
+   "scene_bbox_deg": [
+    38.3,
+    38.55,
+    -96.75,
+    -96.45
+   ],
+   "node_value_min_m": -31.601999282836914,
+   "node_value_max_m": -29.589000701904297,
+   "evaluator": "+inv +proj=vgridshift +grids=<file> (PROJ; bilinear on the nodes)",
+   "samples_file": "flint_hills_geoid.json",
+   "samples_sha256": "556f053a69ea0314fe344e16dc98941530945c4309d9201a6f3c871400977700",
+   "samples_count": 100
+  },
+  "u_model_m": 13.7,
+  "u_model_basis": "declared: EGM96 is not the bakes' datum model; the binding term is the EGM2008-EGM96 difference bound (13.7 m stated), not the model's own accuracy",
+  "tide_system": "not verified here",
+  "physics_frame": {
+   "frame": "orthometric",
+   "jsbsim_h_sl": "orthometric height in the ellipsoidal slot (unchanged)",
+   "jsbsim_ecef": "radially low by undulation_m (JSBSim's own position/ecef-*)",
+   "export": "hae_m = altitude_m + undulation_m (the runner's appended channel; DIS reads it)",
+   "atmosphere": "evaluated at the orthometric number (on the geoid), as before",
+   "ellipsoid_frame": "refused by name (datum.physics_frame_unsupported): flying at HAE with the atmosphere kept on the geoid needs the uniform delta-T / P-sl recipe measured in the blueprint, not applied here",
+   "note": "orthometric heights are passed to JSBSim h-sl (its ellipsoidal slot) unchanged, so JSBSim altitude equals orthometric height and JSBSim's own ECEF is radially low by the undulation; the geoid is applied where a coordinate leaves the system (hae_m = altitude_m + undulation_m at export); the ellipsoid frame (flying at HAE with the atmosphere kept on the geoid) is refused by name until the physics frame handles it"
+  }
+ },
+ "downburst": {
+  "origin_x_m": 709491.3467514922,
+  "origin_y_m": 4256254.193489813,
+  "centre_north_m": -4.765580109320581,
+  "centre_east_m": -183.4968153955415,
+  "core_radius_m": 1000.0,
+  "outflow_max_mps": 12.0,
+  "outflow_height_m": 150.0
+ },
+ "rotor": {
+  "sigma_gain": 1.0,
+  "sigma_per_w20": 0.107,
+  "w20_cap_fps": 75.9514435695538,
+  "background_w20_fps": 50.63429571303587
+ },
+ "cameras": [
+  {
+   "camera_id": "camera0",
+   "preset": "chase",
+   "horizon_stable": true,
+   "origin_x_m": 709491.3467514922,
+   "origin_y_m": 4256254.193489813,
+   "width_px": 1280,
+   "height_px": 720,
+   "sensor_width_mm": 36.0,
+   "sensor_height_mm": 20.25,
+   "near_m": 0.1,
+   "far_m": 100000.0,
+   "spec": {
+    "camera_id": {
+     "value": "camera0",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "preset": {
+     "value": "chase",
+     "source": "user",
+     "from": "Chase view"
+    },
+    "position_mode": {
+     "value": "offset",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "offset_forward_m": {
+     "value": -110.0,
+     "unit": "m",
+     "source": "default",
+     "from": "per-airframe chase offset table"
+    },
+    "offset_right_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "per-airframe chase offset table"
+    },
+    "offset_up_m": {
+     "value": 12.0,
+     "unit": "m",
+     "source": "default",
+     "from": "per-airframe chase offset table"
+    },
+    "position_north_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "position_east_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "position_lat_deg": {
+     "value": 0.0,
+     "unit": "deg",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "position_lon_deg": {
+     "value": 0.0,
+     "unit": "deg",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "position_alt_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_mode": {
+     "value": "aircraft",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_north_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_east_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_alt_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_bearing_deg": {
+     "value": 0.0,
+     "unit": "deg",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_elevation_deg": {
+     "value": 0.0,
+     "unit": "deg",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "focal_length_mm": {
+     "value": 35.0,
+     "unit": "mm",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "sensor_width_mm": {
+     "value": 36.0,
+     "unit": "mm",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "sensor_height_mm": {
+     "value": 20.25,
+     "unit": "mm",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "width_px": {
+     "value": 1280,
+     "unit": "px",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "height_px": {
+     "value": 720,
+     "unit": "px",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "near_m": {
+     "value": 0.1,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "far_m": {
+     "value": 100000.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "trigger": {
+     "value": "interval",
+     "source": "user",
+     "from": "1-frame preview (web UI)"
+    },
+    "capture_count": {
+     "value": 1,
+     "unit": "dimensionless",
+     "source": "user",
+     "from": "1-frame preview (web UI)"
+    },
+    "period_s": {
+     "value": 1.0,
+     "unit": "s",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "distance_m": {
+     "value": 500.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "event_channel": {
+     "value": "roll_deg",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "event_threshold": {
+     "value": 30.0,
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "event_direction": {
+     "value": "above",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "refractory_s": {
+     "value": 2.0,
+     "unit": "s",
+     "source": "default",
+     "from": "one event is one capture"
+    },
+    "profile": {
+     "value": "ideal_pinhole",
+     "source": "default",
+     "from": "the documented ideal pinhole; the engine's frames are the sensor frames"
+    },
+    "moves": []
+   },
+   "poses": {
+    "t_s": [
+     0.008333333333,
+     0.1083333333,
+     0.2083333333,
+     0.3083333333,
+     0.4083333333,
+     0.5083333333,
+     0.6083333333,
+     0.7083333333,
+     0.8083333333,
+     0.9083333333,
+     1.008333333,
+     1.108333333,
+     1.208333333,
+     1.308333333,
+     1.408333333,
+     1.508333333,
+     1.608333333,
+     1.708333333,
+     1.808333333,
+     1.908333333,
+     2.008333333,
+     2.108333333,
+     2.208333333,
+     2.308333333,
+     2.408333333,
+     2.508333333,
+     2.608333333,
+     2.708333333,
+     2.808333333,
+     2.908333333
+    ],
+    "north_m": [
+     -0.03061804852450334,
+     -0.39501556233964363,
+     -0.7562555496144235,
+     -1.1105527053913968,
+     -1.4589346830386867,
+     -1.799444422990333,
+     -2.131561408308751,
+     -2.456135203978926,
+     -2.773119358729447,
+     -3.083758390653391,
+     -3.3859974594217026,
+     -3.681222600609294,
+     -3.969739657693674,
+     -4.252854183487729,
+     -4.529739318238616,
+     -4.800665476218726,
+     -5.067158474039314,
+     -5.327432073192021,
+     -5.585308521193468,
+     -5.837832496184895,
+     -6.087624960173544,
+     -6.335067537156322,
+     -6.579503169380821,
+     -6.821306292371752,
+     -7.0632396467596195,
+     -7.303584303587343,
+     -7.54395922099169,
+     -7.786057016120778,
+     -8.028100339153236,
+     -8.272709464591422
+    ],
+    "east_m": [
+     108.82407202967325,
+     94.68753290626003,
+     80.51077827886043,
+     66.29374964604943,
+     52.03824927394359,
+     37.74686466734627,
+     23.423957287185374,
+     9.076535798408372,
+     -5.288420497285543,
+     -19.666522685753662,
+     -34.05172263530342,
+     -48.43963137090226,
+     -62.8267616643128,
+     -77.20697836425234,
+     -91.57769579474717,
+     -105.93367961300339,
+     -120.27228438024751,
+     -134.58920388666922,
+     -148.88260547935016,
+     -163.14908327884808,
+     -177.38683208885698,
+     -191.5923570899862,
+     -205.76568339355416,
+     -219.90331394369247,
+     -234.00605708476152,
+     -248.07221608891422,
+     -262.10000632268407,
+     -276.09113429861526,
+     -290.044774254849,
+     -303.9608582628157
+    ],
+    "alt_m": [
+     2012.0,
+     2011.9868444791937,
+     2011.926579516363,
+     2011.781772734495,
+     2011.5226384488126,
+     2011.125600614794,
+     2010.5737725668923,
+     2009.8577429995437,
+     2008.9747225334484,
+     2007.927161535507,
+     2006.721579202961,
+     2005.3675830209859,
+     2003.8770500880328,
+     2002.2634030391243,
+     2000.5409595938866,
+     1998.7244500052398,
+     1996.8286345696,
+     1994.8679602368943,
+     1992.8562959997178,
+     1990.8067413929846,
+     1988.731527129821,
+     1986.6419419892013,
+     1984.5482386478081,
+     1982.45958099087,
+     1980.3840107943265,
+     1978.3284433099802,
+     1976.2987316201645,
+     1974.2997345982626,
+     1972.3353749574724,
+     1970.4086796302877
+    ],
+    "yaw_deg": [
+     269.9999916127751,
+     269.9997161393827,
+     269.9984202806911,
+     269.9952886439016,
+     269.9897241482152,
+     269.98132112589343,
+     269.9698677584176,
+     269.9553232876641,
+     269.9377582976994,
+     269.91730218115435,
+     269.8941236735493,
+     269.868425835256,
+     269.84041530943875,
+     269.81027687322756,
+     269.7781933788087,
+     269.7443766316866,
+     269.7090787462789,
+     269.67258456664047,
+     269.6351743486359,
+     269.59709021782993,
+     269.5585647762754,
+     269.5198440277803,
+     269.48116371245476,
+     269.4427660850466,
+     269.4049221112482,
+     269.36791617937854,
+     269.33203705953633,
+     269.297564596436,
+     269.2647409350645,
+     269.23377469285094
+    ],
+    "pitch_deg": [
+     -6.225829064425769,
+     -6.230579657647887,
+     -6.250224012220178,
+     -6.2924535536708035,
+     -6.359841880709704,
+     -6.452006037335127,
+     -6.566387699333224,
+     -6.6987293898915885,
+     -6.8439443538997695,
+     -6.996861788149023,
+     -7.152653821711109,
+     -7.307056335988012,
+     -7.456460916999783,
+     -7.597944353548367,
+     -7.729261525128328,
+     -7.848781616137546,
+     -7.955413684453524,
+     -8.048541982207764,
+     -8.127956141769856,
+     -8.19377962236517,
+     -8.246390546052037,
+     -8.286361695647184,
+     -8.314427057678346,
+     -8.331444812602976,
+     -8.338367483184829,
+     -8.336211055469464,
+     -8.32601174128233,
+     -8.308796937379922,
+     -8.285568530019855,
+     -8.257298469054119
+    ],
+    "roll_deg": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "focal_length_mm": [
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0
+    ]
+   },
+   "capture_times_s": [
+    0.008333333333
+   ]
+  }
+ ],
+ "landmarks": [
+  {
+   "name": "air_0_40_l",
+   "north_m": -40.01731313520308,
+   "east_m": -0.143695534522847,
+   "alt_m": 2000.0
+  },
+  {
+   "name": "air_0_40_r",
+   "north_m": 39.9560448335224,
+   "east_m": -2.2081604061283016,
+   "alt_m": 2000.0
+  },
+  {
+   "name": "air_0_40_u",
+   "north_m": -0.030634150840342045,
+   "east_m": -1.1759279703255743,
+   "alt_m": 2040.0
+  },
+  {
+   "name": "air_0_40_d",
+   "north_m": -0.030634150840342045,
+   "east_m": -1.1759279703255743,
+   "alt_m": 1960.0
+  },
+  {
+   "name": "air_0_400_l",
+   "north_m": -399.8974239944678,
+   "east_m": 9.1463963877017,
+   "alt_m": 2000.0
+  },
+  {
+   "name": "air_0_400_r",
+   "north_m": 399.8361556927871,
+   "east_m": -11.498252328352848,
+   "alt_m": 2000.0
+  },
+  {
+   "name": "air_0_400_u",
+   "north_m": -0.030634150840342045,
+   "east_m": -1.1759279703255743,
+   "alt_m": 2400.0
+  },
+  {
+   "name": "air_0_400_d",
+   "north_m": -0.030634150840342045,
+   "east_m": -1.1759279703255743,
+   "alt_m": 1600.0
+  },
+  {
+   "name": "ground_0",
+   "north_m": -0.030634150840342045,
+   "east_m": -1.1759279703255743,
+   "alt_m": 413.50957771020995
+  },
+  {
+   "name": "air_1_40_l",
+   "north_m": -43.577725074596195,
+   "east_m": -143.09068030304655,
+   "alt_m": 1988.962655
+  },
+  {
+   "name": "air_1_40_r",
+   "north_m": 36.399194804362445,
+   "east_m": -145.01221267972693,
+   "alt_m": 1988.962655
+  },
+  {
+   "name": "air_1_40_u",
+   "north_m": -3.589265135116875,
+   "east_m": -144.05144649138674,
+   "alt_m": 2028.962655
+  },
+  {
+   "name": "air_1_40_d",
+   "north_m": -3.589265135116875,
+   "east_m": -144.05144649138674,
+   "alt_m": 1948.962655
+  },
+  {
+   "name": "air_1_400_l",
+   "north_m": -403.47386452991003,
+   "east_m": -134.44378460798495,
+   "alt_m": 1988.962655
+  },
+  {
+   "name": "air_1_400_r",
+   "north_m": 396.2953342596763,
+   "east_m": -153.65910837478853,
+   "alt_m": 1988.962655
+  },
+  {
+   "name": "air_1_400_u",
+   "north_m": -3.589265135116875,
+   "east_m": -144.05144649138674,
+   "alt_m": 2388.9626550000003
+  },
+  {
+   "name": "air_1_400_d",
+   "north_m": -3.589265135116875,
+   "east_m": -144.05144649138674,
+   "alt_m": 1588.962655
+  },
+  {
+   "name": "ground_1",
+   "north_m": -3.589265135116875,
+   "east_m": -144.05144649138674,
+   "alt_m": 411.804726390262
+  },
+  {
+   "name": "air_2_40_l",
+   "north_m": -46.60097728124733,
+   "east_m": -272.2348924973658,
+   "alt_m": 1969.51489
+  },
+  {
+   "name": "air_2_40_r",
+   "north_m": 33.37826789184387,
+   "east_m": -274.0570729337023,
+   "alt_m": 1969.51489
+  },
+  {
+   "name": "air_2_40_u",
+   "north_m": -6.611354694701731,
+   "east_m": -273.14598271553405,
+   "alt_m": 2009.51489
+  },
+  {
+   "name": "air_2_40_d",
+   "north_m": -6.611354694701731,
+   "east_m": -273.14598271553405,
+   "alt_m": 1929.51489
+  },
+  {
+   "name": "air_2_400_l",
+   "north_m": -406.50758056015775,
+   "east_m": -264.03508053385156,
+   "alt_m": 1969.51489
+  },
+  {
+   "name": "air_2_400_r",
+   "north_m": 393.2848711707543,
+   "east_m": -282.25688489721654,
+   "alt_m": 1969.51489
+  },
+  {
+   "name": "air_2_400_u",
+   "north_m": -6.611354694701731,
+   "east_m": -273.14598271553405,
+   "alt_m": 2369.51489
+  },
+  {
+   "name": "air_2_400_d",
+   "north_m": -6.611354694701731,
+   "east_m": -273.14598271553405,
+   "alt_m": 1569.51489
+  },
+  {
+   "name": "ground_2",
+   "north_m": -6.611354694701731,
+   "east_m": -273.14598271553405,
+   "alt_m": 397.5419278460583
+  },
+  {
+   "name": "air_3_40_l",
+   "north_m": -49.73416175977537,
+   "east_m": -413.07680543456104,
+   "alt_m": 1949.822871
+  },
+  {
+   "name": "air_3_40_r",
+   "north_m": 30.246747533839432,
+   "east_m": -414.82441768176045,
+   "alt_m": 1949.822871
+  },
+  {
+   "name": "air_3_40_u",
+   "north_m": -9.743707112967968,
+   "east_m": -413.95061155816074,
+   "alt_m": 1989.822871
+  },
+  {
+   "name": "air_3_40_d",
+   "north_m": -9.743707112967968,
+   "east_m": -413.95061155816074,
+   "alt_m": 1909.822871
+  },
+  {
+   "name": "air_3_400_l",
+   "north_m": -409.648253581042,
+   "east_m": -405.2125503221638,
+   "alt_m": 1949.822871
+  },
+  {
+   "name": "air_3_400_r",
+   "north_m": 390.1608393551061,
+   "east_m": -422.6886727941577,
+   "alt_m": 1949.822871
+  },
+  {
+   "name": "air_3_400_u",
+   "north_m": -9.743707112967968,
+   "east_m": -413.95061155816074,
+   "alt_m": 2349.8228710000003
+  },
+  {
+   "name": "air_3_400_d",
+   "north_m": -9.743707112967968,
+   "east_m": -413.95061155816074,
+   "alt_m": 1549.822871
+  },
+  {
+   "name": "ground_3",
+   "north_m": -9.743707112967968,
+   "east_m": -413.95061155816074,
+   "alt_m": 383.3904236697259
+  },
+  {
+   "name": "terrain_nw",
+   "north_m": 13010.180403058417,
+   "east_m": -12760.468080680585,
+   "alt_m": 400.2997024327746
+  },
+  {
+   "name": "terrain_ne",
+   "north_m": 13010.180403058417,
+   "east_m": 12709.531919319415,
+   "alt_m": 414.40857404198226
+  },
+  {
+   "name": "terrain_sw",
+   "north_m": -14079.819596941583,
+   "east_m": -12760.468080680585,
+   "alt_m": 399.1949455719332
+  },
+  {
+   "name": "terrain_se",
+   "north_m": -14079.819596941583,
+   "east_m": 12709.531919319415,
+   "alt_m": 406.0468096802289
+  },
+  {
+   "name": "terrain_peak",
+   "north_m": 12260.180403058417,
+   "east_m": -3280.4680806805845,
+   "alt_m": 473.04962158203125
+  }
+ ],
+ "log_profile": {
+  "reference_speed_mps": 12.861111111111112,
+  "from_deg": 99.0,
+  "reference_height_m": 300.0,
+  "z0_m": 0.005,
+  "surface_layer_top_m": 300.0,
+  "carries_base": true
+ },
+ "collision_terrain": "C:\\Users\\kanth\\flightsim\\runs\\terrain\\flint_hills",
+ "objects": [
+  {
+   "id": "aircraft:B747:0",
+   "int_id": 1,
+   "class": "aircraft",
+   "class_id": 1,
+   "instance": 0,
+   "role": "primary",
+   "mesh_sha256": "b70a9f612eb9fb25b408da40ec0a24ca749aa14b03d52bbdc84bae8389a53bde",
+   "licence": "GPL-2.0",
+   "in_scene": true,
+   "labelled": true
+  },
+  {
+   "id": "terrain",
+   "int_id": 2,
+   "class": "terrain",
+   "class_id": 2,
+   "instance": 0,
+   "role": "scene",
+   "mesh_sha256": null,
+   "licence": null,
+   "in_scene": true,
+   "labelled": true
+  }
+ ],
+ "taxonomy": [
+  "aircraft",
+  "terrain",
+  "building",
+  "vegetation",
+  "water",
+  "cloud",
+  "payload",
+  "landing_gear"
+ ],
+ "georeference": {
+  "projected_crs": "EPSG:32614",
+  "origin": {
+   "lat_deg": 38.43,
+   "lon_deg": -96.6,
+   "x_m": 709491.3467514922,
+   "y_m": 4256254.193489813
+  },
+  "undulation_origin_m": -30.536159999999967
+ },
+ "google_tiles": {
+  "geoid_undulation_m": -30.536159999999967,
+  "geoid_model": "EGM96"
+ }
+}

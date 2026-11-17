@@ -1,0 +1,26 @@
+{
+  "hero_lighting_version": 1,
+  "ground": {
+    "surface": "unspecified",
+    "albedo_rgb": [
+      0.18,
+      0.17,
+      0.15
+    ],
+    "horizontal_lux": 56308.1,
+    "horizontal_lux_basis": "the beauty look's meter reference (beauty_look.json)",
+    "lower_hemisphere_luminance_rgb": [
+      3226.216,
+      3046.982,
+      2688.514
+    ],
+    "model": "Lambertian ground: L = albedo x E_horizontal / pi (cd/m2)"
+  },
+  "sun_elevation_deg": 31.2373,
+  "time_of_day_basis": "in the morning",
+  "uncalibrated": [
+    "GROUND_ALBEDO_RGB",
+    "OVERCAST_ILLUMINANCE_FRACTION"
+  ],
+  "note": "VISUAL ONLY, beauty quality only (docs/visual/PROBE_LOG.md hero-lighting)"
+}

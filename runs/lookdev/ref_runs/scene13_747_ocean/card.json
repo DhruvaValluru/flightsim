@@ -1,0 +1,782 @@
+{
+ "spec_digest": "b0bd1227e4c725b69aeaac0b62db728483002b8da081f78125f3155e7a502207",
+ "aircraft": "B747",
+ "altitude_m": 10000.0,
+ "airspeed_kt": 330.0,
+ "airspeed_kind": "cas",
+ "heading_deg": 90.0,
+ "latitude_deg": 0.0,
+ "longitude_deg": 0.0,
+ "terrain_elevation_m": 0.0,
+ "duration_s": 3.0,
+ "rate_hz": 120.0,
+ "sample_interval_s": 0.1,
+ "wind_speed_kt": 8.0,
+ "wind_direction_deg": 270.0,
+ "turbulence": "none",
+ "mass_held": true,
+ "hold_state": false,
+ "control_inputs": [],
+ "engine_mixture": 1.0,
+ "start_gear_up": true,
+ "weather_look": {
+  "surface": "ocean",
+  "storm": null,
+  "rain_rate_mmh": null,
+  "rain_source": null,
+  "wetness": 0.0,
+  "ice_eta_max": 0.0,
+  "seed": 0
+ },
+ "reference_speeds": {
+  "vs_kt": 261.0,
+  "cl_max": 1.192,
+  "alpha_stall_deg": 13.5,
+  "basis": "B747 model, CLmax 1.192, 237599 kg"
+ },
+ "scene_crs": "EPSG:32631",
+ "cameras": [
+  {
+   "camera_id": "camera0",
+   "preset": "chase",
+   "horizon_stable": true,
+   "origin_x_m": 166021.44308054057,
+   "origin_y_m": 0.0,
+   "width_px": 1280,
+   "height_px": 720,
+   "sensor_width_mm": 36.0,
+   "sensor_height_mm": 20.25,
+   "near_m": 0.1,
+   "far_m": 100000.0,
+   "spec": {
+    "camera_id": {
+     "value": "camera0",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "preset": {
+     "value": "chase",
+     "source": "user",
+     "from": "chase view"
+    },
+    "position_mode": {
+     "value": "offset",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "offset_forward_m": {
+     "value": -110.0,
+     "unit": "m",
+     "source": "default",
+     "from": "per-airframe chase offset table"
+    },
+    "offset_right_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "per-airframe chase offset table"
+    },
+    "offset_up_m": {
+     "value": 12.0,
+     "unit": "m",
+     "source": "default",
+     "from": "per-airframe chase offset table"
+    },
+    "position_north_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "position_east_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "position_lat_deg": {
+     "value": 0.0,
+     "unit": "deg",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "position_lon_deg": {
+     "value": 0.0,
+     "unit": "deg",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "position_alt_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_mode": {
+     "value": "aircraft",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_north_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_east_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_alt_m": {
+     "value": 0.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_bearing_deg": {
+     "value": 0.0,
+     "unit": "deg",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "aim_elevation_deg": {
+     "value": 0.0,
+     "unit": "deg",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "focal_length_mm": {
+     "value": 35.0,
+     "unit": "mm",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "sensor_width_mm": {
+     "value": 36.0,
+     "unit": "mm",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "sensor_height_mm": {
+     "value": 20.25,
+     "unit": "mm",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "width_px": {
+     "value": 1280,
+     "unit": "px",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "height_px": {
+     "value": 720,
+     "unit": "px",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "near_m": {
+     "value": 0.1,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "far_m": {
+     "value": 100000.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "trigger": {
+     "value": "interval",
+     "source": "user",
+     "from": "1-frame preview (web UI)"
+    },
+    "capture_count": {
+     "value": 1,
+     "unit": "dimensionless",
+     "source": "user",
+     "from": "1-frame preview (web UI)"
+    },
+    "period_s": {
+     "value": 1.0,
+     "unit": "s",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "distance_m": {
+     "value": 500.0,
+     "unit": "m",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "event_channel": {
+     "value": "roll_deg",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "event_threshold": {
+     "value": 30.0,
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "event_direction": {
+     "value": "above",
+     "source": "default",
+     "from": "camera language in the prompt; documented camera default"
+    },
+    "refractory_s": {
+     "value": 2.0,
+     "unit": "s",
+     "source": "default",
+     "from": "one event is one capture"
+    },
+    "profile": {
+     "value": "ideal_pinhole",
+     "source": "default",
+     "from": "the documented ideal pinhole; the engine's frames are the sensor frames"
+    },
+    "moves": []
+   },
+   "poses": {
+    "t_s": [
+     0.008333333333,
+     0.1083333333,
+     0.2083333333,
+     0.3083333333,
+     0.4083333333,
+     0.5083333333,
+     0.6083333333,
+     0.7083333333,
+     0.8083333333,
+     0.9083333333,
+     1.008333333,
+     1.108333333,
+     1.208333333,
+     1.308333333,
+     1.408333333,
+     1.508333333,
+     1.608333333,
+     1.708333333,
+     1.808333333,
+     1.908333333,
+     2.008333333,
+     2.108333333,
+     2.208333333,
+     2.308333333,
+     2.408333333,
+     2.508333333,
+     2.608333333,
+     2.708333333,
+     2.808333333,
+     2.908333333
+    ],
+    "north_m": [
+     2.2561378377618727e-08,
+     2.2561393248570943e-08,
+     2.2561408082333145e-08,
+     2.256142287921076e-08,
+     2.2561437641836833e-08,
+     2.2561452369764575e-08,
+     2.2561467070226025e-08,
+     2.2561481762467064e-08,
+     2.256149644739238e-08,
+     2.2561511125653764e-08,
+     2.2561525797136666e-08,
+     2.256154046133737e-08,
+     2.256155511837121e-08,
+     2.256156976825303e-08,
+     2.256158441080441e-08,
+     2.2561599043872358e-08,
+     2.2561613669196484e-08,
+     2.2561628288487164e-08,
+     2.2561642899689365e-08,
+     2.25616575022509e-08,
+     2.2561672097903173e-08,
+     2.2561686686129195e-08,
+     2.2561701266541037e-08,
+     2.2561715840303402e-08,
+     2.2561730409307086e-08,
+     2.2561744988912003e-08,
+     2.2561759586219846e-08,
+     2.2561774198191377e-08,
+     2.2561788825355653e-08,
+     2.2561803487060327e-08
+    ],
+    "east_m": [
+     -107.73146591038676,
+     -80.50871017284226,
+     -53.28529690246796,
+     -26.06122565228725,
+     1.163505048607476,
+     28.38889634795487,
+     55.61494929320179,
+     82.84166468674084,
+     110.06904353143182,
+     137.29708660737379,
+     164.52579525171313,
+     191.75517080171267,
+     218.98521515156608,
+     246.2159301956999,
+     273.4473187199328,
+     300.67938339849934,
+     327.9121276855585,
+     355.1455551472609,
+     382.37967024039244,
+     409.6144771993859,
+     436.8499811501242,
+     464.08618721790845,
+     491.32310086337384,
+     518.5607279916876,
+     545.7990745088318,
+     573.0381467660773,
+     600.2779507806408,
+     627.518493238138,
+     654.759780378663,
+     682.0018188876566
+    ],
+    "alt_m": [
+     10012.0,
+     10011.99984812208,
+     10011.999161451295,
+     10011.997538431744,
+     10011.994688873277,
+     10011.990410483691,
+     10011.984569936996,
+     10011.97708765499,
+     10011.967924964534,
+     10011.957073481713,
+     10011.944546353143,
+     10011.93037130874,
+     10011.914585032791,
+     10011.89722841273,
+     10011.878342897215,
+     10011.857967712693,
+     10011.836137907667,
+     10011.812882698121,
+     10011.788224651837,
+     10011.762179109079,
+     10011.734754050794,
+     10011.705950155454,
+     10011.675761287355,
+     10011.64417503525,
+     10011.611173394544,
+     10011.576733667824,
+     10011.54082911213,
+     10011.503430158358,
+     10011.46450515154,
+     10011.424021194503
+    ],
+    "yaw_deg": [
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157,
+     90.00000001175157
+    ],
+    "pitch_deg": [
+     -6.225829064425769,
+     -6.2258839095804515,
+     -6.226107434547431,
+     -6.226578907383822,
+     -6.227313965410255,
+     -6.228293486703722,
+     -6.229481442854901,
+     -6.230835587623281,
+     -6.232313861427188,
+     -6.2338778890503015,
+     -6.235494738505591,
+     -6.237137444587844,
+     -6.238784960734876,
+     -6.240421793379268,
+     -6.242037408156754,
+     -6.2436255201018325,
+     -6.245183356502147,
+     -6.246711053808873,
+     -6.248210963254013,
+     -6.249687123276813,
+     -6.251144732618611,
+     -6.252589758587233,
+     -6.2540284991198964,
+     -6.255467307294703,
+     -6.256912323287946,
+     -6.2583692511790225,
+     -6.2598432771408845,
+     -6.261338819391908,
+     -6.262859546986633,
+     -6.264408322589488
+    ],
+    "roll_deg": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "focal_length_mm": [
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0,
+     35.0
+    ]
+   },
+   "capture_times_s": [
+    0.008333333333
+   ]
+  }
+ ],
+ "landmarks": [
+  {
+   "name": "air_0_40_l",
+   "north_m": 40.0,
+   "east_m": 2.2685340896132176,
+   "alt_m": 10000.0
+  },
+  {
+   "name": "air_0_40_r",
+   "north_m": -40.0,
+   "east_m": 2.268534089613263,
+   "alt_m": 10000.0
+  },
+  {
+   "name": "air_0_40_u",
+   "north_m": 1.2409322978262088e-15,
+   "east_m": 2.26853408961324,
+   "alt_m": 10040.0
+  },
+  {
+   "name": "air_0_40_d",
+   "north_m": 1.2409322978262088e-15,
+   "east_m": 2.26853408961324,
+   "alt_m": 9960.0
+  },
+  {
+   "name": "air_0_400_l",
+   "north_m": 400.0,
+   "east_m": 2.2685340896130137,
+   "alt_m": 10000.0
+  },
+  {
+   "name": "air_0_400_r",
+   "north_m": -400.0,
+   "east_m": 2.2685340896134667,
+   "alt_m": 10000.0
+  },
+  {
+   "name": "air_0_400_u",
+   "north_m": 1.2409322978262088e-15,
+   "east_m": 2.26853408961324,
+   "alt_m": 10400.0
+  },
+  {
+   "name": "air_0_400_d",
+   "north_m": 1.2409322978262088e-15,
+   "east_m": 2.26853408961324,
+   "alt_m": 9600.0
+  },
+  {
+   "name": "ground_0",
+   "north_m": 1.2409322978262088e-15,
+   "east_m": 2.26853408961324,
+   "alt_m": 0.0
+  },
+  {
+   "name": "air_1_40_l",
+   "north_m": 40.00000000000015,
+   "east_m": 274.52579525171313,
+   "alt_m": 9999.884566
+  },
+  {
+   "name": "air_1_40_r",
+   "north_m": -39.99999999999985,
+   "east_m": 274.52579525171313,
+   "alt_m": 9999.884566
+  },
+  {
+   "name": "air_1_40_u",
+   "north_m": 1.4866045023805803e-13,
+   "east_m": 274.52579525171313,
+   "alt_m": 10039.884566
+  },
+  {
+   "name": "air_1_40_d",
+   "north_m": 1.4866045023805803e-13,
+   "east_m": 274.52579525171313,
+   "alt_m": 9959.884566
+  },
+  {
+   "name": "air_1_400_l",
+   "north_m": 400.00000000000017,
+   "east_m": 274.5257952517129,
+   "alt_m": 9999.884566
+  },
+  {
+   "name": "air_1_400_r",
+   "north_m": -399.99999999999983,
+   "east_m": 274.52579525171336,
+   "alt_m": 9999.884566
+  },
+  {
+   "name": "air_1_400_u",
+   "north_m": 1.4866045023805803e-13,
+   "east_m": 274.52579525171313,
+   "alt_m": 10399.884566
+  },
+  {
+   "name": "air_1_400_d",
+   "north_m": 1.4866045023805803e-13,
+   "east_m": 274.52579525171313,
+   "alt_m": 9599.884566
+  },
+  {
+   "name": "ground_1",
+   "north_m": 1.4866045023805803e-13,
+   "east_m": 274.52579525171313,
+   "alt_m": 0.0
+  },
+  {
+   "name": "air_2_40_l",
+   "north_m": 40.00000000000028,
+   "east_m": 519.6144771993859,
+   "alt_m": 9999.64198
+  },
+  {
+   "name": "air_2_40_r",
+   "north_m": -39.99999999999972,
+   "east_m": 519.6144771993859,
+   "alt_m": 9999.64198
+  },
+  {
+   "name": "air_2_40_u",
+   "north_m": 2.803655644697653e-13,
+   "east_m": 519.6144771993859,
+   "alt_m": 10039.64198
+  },
+  {
+   "name": "air_2_40_d",
+   "north_m": 2.803655644697653e-13,
+   "east_m": 519.6144771993859,
+   "alt_m": 9959.64198
+  },
+  {
+   "name": "air_2_400_l",
+   "north_m": 400.0000000000003,
+   "east_m": 519.6144771993856,
+   "alt_m": 9999.64198
+  },
+  {
+   "name": "air_2_400_r",
+   "north_m": -399.9999999999997,
+   "east_m": 519.6144771993861,
+   "alt_m": 9999.64198
+  },
+  {
+   "name": "air_2_400_u",
+   "north_m": 2.803655644697653e-13,
+   "east_m": 519.6144771993859,
+   "alt_m": 10399.64198
+  },
+  {
+   "name": "air_2_400_d",
+   "north_m": 2.803655644697653e-13,
+   "east_m": 519.6144771993859,
+   "alt_m": 9599.64198
+  },
+  {
+   "name": "ground_2",
+   "north_m": 2.803655644697653e-13,
+   "east_m": 519.6144771993859,
+   "alt_m": 0.0
+  },
+  {
+   "name": "air_3_40_l",
+   "north_m": 40.000000000000426,
+   "east_m": 792.0018188876566,
+   "alt_m": 9999.238431
+  },
+  {
+   "name": "air_3_40_r",
+   "north_m": -39.999999999999574,
+   "east_m": 792.0018188876566,
+   "alt_m": 9999.238431
+  },
+  {
+   "name": "air_3_40_u",
+   "north_m": 4.263503738972802e-13,
+   "east_m": 792.0018188876566,
+   "alt_m": 10039.238431
+  },
+  {
+   "name": "air_3_40_d",
+   "north_m": 4.263503738972802e-13,
+   "east_m": 792.0018188876566,
+   "alt_m": 9959.238431
+  },
+  {
+   "name": "air_3_400_l",
+   "north_m": 400.00000000000045,
+   "east_m": 792.0018188876563,
+   "alt_m": 9999.238431
+  },
+  {
+   "name": "air_3_400_r",
+   "north_m": -399.99999999999955,
+   "east_m": 792.0018188876568,
+   "alt_m": 9999.238431
+  },
+  {
+   "name": "air_3_400_u",
+   "north_m": 4.263503738972802e-13,
+   "east_m": 792.0018188876566,
+   "alt_m": 10399.238431
+  },
+  {
+   "name": "air_3_400_d",
+   "north_m": 4.263503738972802e-13,
+   "east_m": 792.0018188876566,
+   "alt_m": 9599.238431
+  },
+  {
+   "name": "ground_3",
+   "north_m": 4.263503738972802e-13,
+   "east_m": 792.0018188876566,
+   "alt_m": 0.0
+  }
+ ],
+ "log_profile": {
+  "reference_speed_mps": 4.115555555555556,
+  "from_deg": 270.0,
+  "reference_height_m": 300.0,
+  "z0_m": 0.0002,
+  "surface_layer_top_m": 300.0,
+  "carries_base": true
+ },
+ "objects": [
+  {
+   "id": "aircraft:B747:0",
+   "int_id": 1,
+   "class": "aircraft",
+   "class_id": 1,
+   "instance": 0,
+   "role": "primary",
+   "mesh_sha256": "b70a9f612eb9fb25b408da40ec0a24ca749aa14b03d52bbdc84bae8389a53bde",
+   "licence": "GPL-2.0",
+   "in_scene": true,
+   "labelled": true
+  },
+  {
+   "id": "terrain",
+   "int_id": 2,
+   "class": "terrain",
+   "class_id": 2,
+   "instance": 0,
+   "role": "scene",
+   "mesh_sha256": null,
+   "licence": null,
+   "in_scene": true,
+   "labelled": true
+  }
+ ],
+ "taxonomy": [
+  "aircraft",
+  "terrain",
+  "building",
+  "vegetation",
+  "water",
+  "cloud",
+  "payload",
+  "landing_gear"
+ ],
+ "georeference": {
+  "projected_crs": "EPSG:32631",
+  "origin": {
+   "lat_deg": 0.0,
+   "lon_deg": 0.0,
+   "x_m": 166021.44308054057,
+   "y_m": 0.0
+  },
+  "undulation_origin_m": null
+ },
+ "google_tiles": {
+  "geoid_undulation_m": 17.162999999999997,
+  "geoid_model": "EGM96"
+ }
+}
