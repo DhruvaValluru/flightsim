@@ -1,0 +1,11 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "03_a320_over_new_york_wide_lens_terrain_download": {
+   "post": "03_a320_over_new_york_wide_lens_terrain_download_post.jpg",
+   "source": "03_a320_over_new_york_wide_lens_terrain_download_frame_beauty_post.png"
+  }
+ }
+}
