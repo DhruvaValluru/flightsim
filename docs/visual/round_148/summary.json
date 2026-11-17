@@ -1,0 +1,114 @@
+[
+ {
+  "number": 1,
+  "name": "golden hour A-4, flying east",
+  "prompt": "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "e93fbb705a63",
+  "lighting": {},
+  "seconds": 126.1,
+  "spec_sha256": "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.282,
+   "offset_px": [
+    284,
+    -27
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 7,
+  "name": "tower view, heavy rain",
+  "prompt": "tower view of the a320 at 1000 m in heavy rain with a 250 mm lens for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "d2a55afd54e0",
+  "lighting": {},
+  "seconds": 146.3,
+  "spec_sha256": "cf3697a5b8c94e5a54c30f373f30fae193d9e68ed10878f721f27d32361af7a4",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.247,
+   "offset_px": [
+    -345,
+    -208
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 9,
+  "name": "747 through a thunderstorm",
+  "prompt": "chase view of the 747 flying west through a thunderstorm at 2000 m for 6 seconds",
+  "outcome": "failed",
+  "why": "[camera.render] the render commandlet produced no render.json for camera 'camera0' (pass 1 of 1); see render.log\nlast words:\n[2026.11.17-01.58.09:142][  0]LogFlightSimScenario: Display:   engine 3  throttle 0.482591  mixture 1.000000\n[2026.11.17-01.58.09:143][  0]LogFlightSimScenario: Display:   latched  elevator 0.000000  pitch trim -0.280699  aileron -0.000017  rudder 0.000023  gear 0.0\n[2026.11.17-01.58.09:144][  0]LogFlightSimScenario: Display: turbulence 'lee-rotor' configured once after trim (seed 151633); the seed is never re-written inside the step loop\n[2026.11.17-01.58.09:144][  0]LogFlightSimRender: Display: waiting for shader compilation\n[2026.11.17-01.58.09:178][  0]LogFlightSimRender: Display: beauty: blue noise ready (scalar /Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64, vec2 /Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64): the cloud march's start jitter is per pixel and per capture\n[2026.11.17-01.58.09:179][  0]LogFlightSimWeather: Display: cloud VolumetricCloudComponent (VolumetricCloud_0): /Temp/Untitled_1.Untitled:PersistentLevel.VolumetricCloud_0.VolumetricCloudComponent.MID_M_FlightSimCloudLayers_0, domain 3, used_with_volumetric_cloud yes, compiled\n[2026.11.17-01.58.09:180][  0]LogFlightSimWeather: Display: cloud VolumetricCloud (Actor_4): /Temp/Untitled_1.Untitled:PersistentLevel.Actor_4.VolumetricCloud.MID_M_StormCell_0, domain 3, used_with_volumetric_cloud yes, compiled\n[2026.11.17-01.58.09:181][  0]LogFlightSimRender: Display: warm-up: 20 captures (capture watchdog 300 s, gpu drain on)\n[2026.11.17-01.58.13:308][  0]LogD3D11RHI: Error: Result failed with error DXGI_ERROR_DEVICE_REMOVED DXGI_ERROR_DEVICE_HUNG\n[2026.11.17-01.58.15:297][  0]LogWindows: Error: appError called: Fatal error: [File:D:\\build\\++UE5\\Sync\\Engine\\Source\\Runtime\\Windows\\D3D11RHI\\Private\\D3D11Util.cpp] [Line: 166]\nUnreal Engine is exiting due to D3D device being lost. (Error: 0x887A0006 - 'HUNG')\n[2026.11.17-01.58.15:297][  0]LogWindows: Windows GetLastError: The operation completed successfully. (0)",
+  "run_id": "16aacddc80b1",
+  "lighting": {},
+  "seconds": 35.8,
+  "spec_sha256": "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
+  "render_json": false
+ },
+ {
+  "number": 13,
+  "name": "747 cruise over the ocean",
+  "prompt": "chase view of the 747 over the ocean at 10000 m at noon for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "9ce7b30016bd",
+  "lighting": {},
+  "seconds": 61.0,
+  "spec_sha256": "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.095,
+   "offset_px": [
+    -14,
+    314
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ },
+ {
+  "number": 15,
+  "name": "747 in hurricane-like weather (the refusal's suggestion)",
+  "prompt": "chase view of the 747 at 2000 m in strong wind, severe turbulence and heavy rain for 6 seconds",
+  "outcome": "done",
+  "why": "clip ready",
+  "run_id": "39790ab8ac3c",
+  "lighting": {},
+  "seconds": 121.1,
+  "spec_sha256": "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+  "render_json": true,
+  "look_keys_missing": [],
+  "new_look_ran": true,
+  "beauty_post": true,
+  "ghost": {
+   "score": 0.566,
+   "offset_px": [
+    -159,
+    -208
+   ],
+   "suspected": false,
+   "threshold": 0.6,
+   "basis": "best NCC of the aircraft's own patch outside its mask box; a report, not a gate"
+  }
+ }
+]

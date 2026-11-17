@@ -1,0 +1,158 @@
+{
+    "round":  148,
+    "commit":  "b3174986",
+    "full":  false,
+    "scenes":  [
+                   1,
+                   7,
+                   9,
+                   13,
+                   15
+               ],
+    "switches":  "",
+    "prep":  [
+                 "build",
+                 "materials"
+             ],
+    "seconds":  {
+                    "build":  49.9,
+                    "materials":  19.9,
+                    "scenes":  493.1
+                },
+    "outcomes":  [
+                     {
+                         "number":  1,
+                         "outcome":  "done",
+                         "seconds":  126.1,
+                         "spec_sha256":  "a35164a5f2128c0dafe58e14d6167437abd4452ce25a74464435ab07c12f6727",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  7,
+                         "outcome":  "done",
+                         "seconds":  146.3,
+                         "spec_sha256":  "cf3697a5b8c94e5a54c30f373f30fae193d9e68ed10878f721f27d32361af7a4",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  9,
+                         "outcome":  "failed",
+                         "seconds":  35.8,
+                         "spec_sha256":  "587b30f070de312b93c2953d0fb581d522278a87874fca020340ecf7ac43c094",
+                         "why":  "[camera.render] the render commandlet produced no render.json for camera \u0027camera0\u0027 (pass 1 of 1); see render.log\nlast words:\n[2026.11.17-01.58.09:142][  0]LogFlightSimScenario: Display:   engine 3  throttle 0.482591  mixture 1.000000\n[2026.11.17-01.58.09:143][  0]LogFlightSimScenario: Display:   latched  elevator 0.000000  pitch trim -0.280699  aileron -0.000017  rudder 0.000023  gear 0.0\n[2026.11.17-01.58.09:144][  0]LogFlightSimScenario: Display: turbulence \u0027lee-rotor\u0027 configured once after trim (seed 151633); the seed is never re-written inside the step loop\n[2026.11.17-01.58.09:144][  0]LogFlightSimRender: Display: waiting for shader compilation\n[2026.11.17-01.58.09:178][  0]LogFlightSimRender: Display: beauty: blue noise ready (scalar /Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64, vec2 /Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64): the cloud march\u0027s start jitter is per pixel and per capture\n[2026.11.17-01.58.09:179][  0]LogFlightSimWeather: Display: cloud VolumetricCloudComponent (VolumetricCloud_0): /Temp/Untitled_1.Untitled:PersistentLevel.VolumetricCloud_0.VolumetricCloudComponent.MID_M_FlightSimCloudLayers_0, domain 3, used_with_volumetric_cloud yes, compiled\n[2026.11.17-01.58.09:180][  0]LogFlightSimWeather: Display: cloud VolumetricCloud (Actor_4): /Temp/Untitled_1.Untitled:PersistentLevel.Actor_4.VolumetricCloud.MID_M_StormCell_0, domain 3, used_with_volumetric_cloud yes, compiled\n[2026.11.17-01.58.09:181][  0]LogFlightSimRender: Display: warm-up: 20 captures (capture watchdog 300 s, gpu drain on)\n[2026.11.17-01.58.13:308][  0]LogD3D11RHI: Error: Result failed with error DXGI_ERROR_DEVICE_REMOVED DXGI_ERROR_DEVICE_HUNG\n[2026.11.17-01.58.15:297][  0]LogWindows: Error: appError called: Fatal error: [File:D:\\build\\++UE5\\Sync\\Engine\\Source\\Runtime\\Windows\\D3D11RHI\\Private\\D3D11Util.cpp] [Line: 166]\nUnreal Engine is exiting due to D3D device being lost. (Error: 0x887A0006 - \u0027HUNG\u0027)\n[2026.11.17-01.58.15:297][  0]LogWindows: Windows GetLastError: The operation completed successfully. (0)"
+                     },
+                     {
+                         "number":  13,
+                         "outcome":  "done",
+                         "seconds":  61.0,
+                         "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+                         "why":  "clip ready"
+                     },
+                     {
+                         "number":  15,
+                         "outcome":  "done",
+                         "seconds":  121.1,
+                         "spec_sha256":  "ea3739ebdcaa48ad92871e04c54c93b118fe954705cd89e9e7000aa809c2ca2b",
+                         "why":  "clip ready"
+                     }
+                 ],
+    "compiler":  "llm",
+    "pixel_metrics":  {
+                          "calibration":  "uncalibrated: report only, no threshold has been judged against real rounds",
+                          "limits":  {
+                                         "blank_std_min":  0.002,
+                                         "blank_mean_min":  0.003,
+                                         "clipped_max":  0.02,
+                                         "crushed_max":  0.05,
+                                         "mean_luma_min":  0.02,
+                                         "mean_luma_max":  0.8,
+                                         "ssim_min":  0.35,
+                                         "flicker_max":  0.02
+                                     },
+                          "gate":  "report only; never fails the round",
+                          "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_147",
+                          "compare_with_found":  true,
+                          "scenes":  {
+                                         "1":  {
+                                                   "frame":  "01_golden_hour_a_4_flying_east.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.19492,
+                                                                  "std_luma":  0.16788,
+                                                                  "clipped":  1E-05,
+                                                                  "crushed":  0.0
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "01_golden_hour_a_4_flying_east.jpg",
+                                                                       "flicker":  0.02279,
+                                                                       "ssim":  0.8672,
+                                                                       "flags":  [
+                                                                                     "flicker"
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "7":  {
+                                                   "frame":  "07_tower_view_heavy_rain.jpg",
+                                                   "health":  {
+                                                                  "mean_luma":  0.16602,
+                                                                  "std_luma":  0.01128,
+                                                                  "clipped":  0.0,
+                                                                  "crushed":  0.0
+                                                              },
+                                                   "flags":  [
+
+                                                             ],
+                                                   "vs_previous":  {
+                                                                       "frame":  "07_tower_view_heavy_rain.jpg",
+                                                                       "flicker":  0.05407,
+                                                                       "ssim":  0.9569,
+                                                                       "flags":  [
+                                                                                     "flicker"
+                                                                                 ]
+                                                                   }
+                                               },
+                                         "13":  {
+                                                    "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.09988,
+                                                                   "std_luma":  0.10265,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  7E-05
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                                        "flicker":  0.00112,
+                                                                        "ssim":  0.9969,
+                                                                        "flags":  [
+
+                                                                                  ]
+                                                                    }
+                                                },
+                                         "15":  {
+                                                    "frame":  "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.13949,
+                                                                   "std_luma":  0.0891,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  1E-05
+                                                               },
+                                                    "flags":  [
+
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+                                                                        "flicker":  0.0812,
+                                                                        "ssim":  0.6766,
+                                                                        "flags":  [
+                                                                                      "flicker"
+                                                                                  ]
+                                                                    }
+                                                }
+                                     }
+                      }
+}
