@@ -489,11 +489,25 @@ world_beauty.overrides:
   hint: "Fix the overrides file so it names only the world look's own sections and fields, or render without it."
 world_beauty.clouds:
   sentence: "The beauty clouds were asked for in a mode the world look does not know."
-  hint: "Ask for the card's clouds, fair-weather clouds or the engine's clouds, or leave the choice out; -cloud-type= takes clear, cumulus, stratocumulus, altocumulus, cirrus, overcast or nimbostratus; -cloud-march= takes auto, constrained, discrete or probe; -sky-multi-scatter= takes auto, on or off; -cloud-deck-scatter= takes round95 or beauty."
+  hint: "Ask for the card's clouds, fair-weather clouds or the engine's clouds, or leave the choice out; -cloud-type= takes clear, cumulus, stratocumulus, altocumulus, cirrus, overcast or nimbostratus; -cloud-march= takes auto, constrained, discrete or probe; -sky-multi-scatter= takes auto, on or off; -cloud-deck-scatter= takes round95 or beauty; -cloud-material= takes auto, ours, epic or engine."
 # visual round 5, lane L3 (FlightSimClouds.cpp ApplyDistantClouds / ApplySkyHdri):
 world_beauty.distant_clouds:
   sentence: "The distant cloud sheet was asked for in a mode the world look does not know."
   hint: "Ask for -distant-clouds=on or off, or leave the choice out (on)."
+# r148 HDRI sky (core/scene/hdri_sky.py, FlightSimHdriSky.cpp):
+world_beauty.hdri_sky:
+  sentence: "The HDRI sky was asked for in a mode the world look does not know, or its sky files are missing."
+  hint: "Ask for -look-hdri=auto, light or off, or leave the choice out (off)."
+hdri_sky.switch:
+  sentence: "The HDRI sky switch names a mode the world look does not know."
+  hint: "Ask for -look-hdri=auto, light or off, or leave the choice out (off)."
+hdri_sky.preset:
+  sentence: "The HDRI sky was asked for under a weather preset it has no sky for."
+  hint: "Use one of the world look's weather presets, or render with -look-hdri=off."
+# contrail opacity shader (FlightSimAircraftFX.cpp):
+contrail_opacity.hlsl:
+  sentence: "The contrail opacity shader could not be read."
+  hint: "Restore the contrail shader file from the repository, or render without contrails."
 world_beauty.cirrus:
   sentence: "The beauty cirrus sheet was asked for in a mode the world look does not know."
   hint: "Ask for -look-cirrus=on or off, or leave the choice out (off)."

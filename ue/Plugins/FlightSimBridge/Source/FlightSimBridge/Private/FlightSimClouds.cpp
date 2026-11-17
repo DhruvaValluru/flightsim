@@ -2122,7 +2122,7 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		// Lane rain-grey: -cloud-deck-scatter=round95|beauty (CloudDeckScatterFor).
 		CloudDeckScatterSwitch = TEXT("beauty");
 		FParse::Value(*Switches, TEXT("cloud-deck-scatter="), CloudDeckScatterSwitch);
-		CloudMaterialSwitch = TEXT("ours");
+		CloudMaterialSwitch = TEXT("auto");   // r150
 		FParse::Value(*Switches, TEXT("cloud-material="), CloudMaterialSwitch);
 		// Impostor A/B (0deddc6d): -cloud-volumetric-scale=<0..1> (1 by default)
 		// thins every volumetric layer's drawn cover; 0 hides the layer
@@ -2233,9 +2233,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		                        *CloudDeckScatterSwitch);
 		return false;
 	}
-	if (CloudMaterialSwitch != TEXT("ours") && CloudMaterialSwitch != TEXT("epic") && CloudMaterialSwitch != TEXT("engine"))
+	if (CloudMaterialSwitch != TEXT("auto") && CloudMaterialSwitch != TEXT("ours") && CloudMaterialSwitch != TEXT("epic") &&
+	    CloudMaterialSwitch != TEXT("engine"))
 	{
-		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-material=%s is not ours, epic or engine"),
+		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-material=%s is not auto, ours, epic or engine"),
 		                        *CloudMaterialSwitch);
 		return false;
 	}
@@ -3811,9 +3812,16 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		// ours (the MID above stays as the bookkeeping's; it draws nothing). Not
 		// loadable (plugin off): ours stays and the record says so.
 		FString EpicMaterialDrawn = TEXT("not asked");
-		if (CloudMaterialSwitch == TEXT("epic") || CloudMaterialSwitch == TEXT("engine"))
+		// r150: auto = the engine's stock cloud on cumulus-family layers (the owner's
+		// call: UE's default clouds read better than ours from above); decks keep ours.
+		const bool bStockCumulus = State.Shape == CloudCumulus || State.Shape == CloudStratocumulus ||
+		                           State.Shape == CloudAltocumulus;
+		const FString MaterialWord = CloudMaterialSwitch == TEXT("auto")
+		                                 ? FString(bStockCumulus ? TEXT("engine") : TEXT("ours"))
+		                                 : CloudMaterialSwitch;
+		if (MaterialWord == TEXT("epic") || MaterialWord == TEXT("engine"))
 		{
-			const char* StockPath = CloudMaterialSwitch == TEXT("engine") ? CloudMaterialEnginePath() : CloudMaterialEpicPath();
+			const char* StockPath = MaterialWord == TEXT("engine") ? CloudMaterialEnginePath() : CloudMaterialEpicPath();
 			UMaterialInterface* Epic = LoadObject<UMaterialInterface>(nullptr, ANSI_TO_TCHAR(StockPath));
 			if (Epic != nullptr)
 			{

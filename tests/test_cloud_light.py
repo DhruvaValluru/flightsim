@@ -202,10 +202,10 @@ def test_the_bridge_reads_refuses_gates_sets_and_records():
     assert 'FParse::Value(*Switches, TEXT("look-cloud-light="), CloudLightSwitch);' in CPP
     assert 'FParse::Value(*Switches, TEXT("cloud-material="), CloudMaterialSwitch);' in CPP
     assert "-look-cloud-light=%s is not on or off" in CPP
-    assert "-cloud-material=%s is not ours, epic or engine" in CPP
+    assert "-cloud-material=%s is not auto, ours, epic or engine" in CPP
     assert 'FString CloudLightSwitch = TEXT("off");' in HDR   # off until the Windows A/B
     assert '		CloudLightSwitch = TEXT("off");' in CPP and wb.CLOUD_LIGHT_DEFAULT == "off"
-    assert 'FString CloudMaterialSwitch = TEXT("ours");' in HDR
+    assert 'FString CloudMaterialSwitch = TEXT("auto");' in HDR
     assert "CloudBillowApplies(CloudLightBillow(CloudBillowSwitch == TEXT(\"on\"), bLight), State.Shape)" in CPP
     assert "return bBillowOn && !bLightOn;" in PURE
     assert wb.cloud_light_billow(True, False) and not wb.cloud_light_billow(True, True)
@@ -216,7 +216,9 @@ def test_the_bridge_reads_refuses_gates_sets_and_records():
     assert 'LightOut->SetNumberField(TEXT("SkyBottomOcclusion"), BottomOcclusion);' in CPP
     assert 'Layer->SetObjectField(TEXT("cloud_light_row"), LightOut);' in CPP
     assert wb.CLOUD_MATERIAL_EPIC in CPP
-    assert wb.CLOUD_MATERIAL_WORDS == ("ours", "epic", "engine")
+    assert wb.CLOUD_MATERIAL_WORDS == ("auto", "ours", "epic", "engine")
+    assert wb.CLOUD_MATERIAL_DEFAULT == "auto"
+    assert 'CloudMaterialSwitch = TEXT("auto");' in CPP
     assert wb.CLOUD_LIGHT_SWITCH == "-look-cloud-light" and wb.CLOUD_MATERIAL_SWITCH == "-cloud-material"
 
 
