@@ -59,7 +59,7 @@ PREPARED_DIR = HDRI_DIR / "prepared"
 
 #: The switch.
 LOOK_HDRI_MODES = ("auto", "light", "off")
-LOOK_HDRI_DEFAULT = "auto"
+LOOK_HDRI_DEFAULT = "off"  # r148: auto turned #1 cold and TDRd #9; opt-in
 
 #: World presets, in FlightSimWorldPure's order (clear, hazy, overcast, rain, storm).
 PRESETS = ("clear", "hazy", "overcast", "rain", "storm")

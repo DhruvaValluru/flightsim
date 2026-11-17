@@ -3,7 +3,7 @@
 // BEAUTY ONLY. Owned by FFlightSimWorldBeauty (FlightSimClouds.h), which the
 // render commandlet builds only under -quality=beauty; a measure render never
 // constructs it. -look-hdri=auto|light|off (command line or
-// FLIGHTSIM_RENDER_SWITCHES; auto by default; another word refuses by name):
+// FLIGHTSIM_RENDER_SWITCHES; off by default (r148), auto opt-in; another word refuses by name):
 //
 // * light and auto: the sky light. The commandlet captures the scene's sky as
 //   it always has, then SwitchSkyLight reads the captured sky's upward

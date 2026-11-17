@@ -59,8 +59,8 @@ def _script_value(name):
 # -- the switch and the laws --------------------------------------------------------------
 
 def test_the_switch_defaults_to_auto_and_refuses_another_word():
-    assert hs.LOOK_HDRI_DEFAULT == "auto"
-    assert hs.mode_from(None) == "auto" and hs.mode_from("") == "auto"
+    assert hs.LOOK_HDRI_DEFAULT == "off"
+    assert hs.mode_from(None) == "off" and hs.mode_from("") == "off"
     for word in hs.LOOK_HDRI_MODES:
         assert hs.mode_from(word) == word
     with pytest.raises(ValueError, match="hdri_sky.switch"):

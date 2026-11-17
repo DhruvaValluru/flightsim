@@ -86,12 +86,13 @@ namespace FlightSimHdriPure
 		return Mode >= 0 && Mode < ModeCount ? Names[Mode] : "";
 	}
 
-	// -1 for a word that is not a mode; an empty word is the default (auto).
+	// -1 for a word that is not a mode; an empty word is the default (off: Windows r148
+	// at b3174986 turned #1 golden hour cold blue and TDRd #9; auto stays opt-in).
 	inline int ModeFrom(const char* Word)
 	{
 		if (Word == nullptr || Word[0] == '\0')
 		{
-			return ModeAuto;
+			return ModeOff;
 		}
 		for (int Mode = 0; Mode < ModeCount; ++Mode)
 		{
