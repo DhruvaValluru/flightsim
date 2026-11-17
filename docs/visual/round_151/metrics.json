@@ -11,53 +11,126 @@
   "flicker_max": 0.02
  },
  "gate": "report only; never fails the round",
- "compare_with": "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_1465",
+ "compare_with": "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_147",
  "compare_with_found": true,
  "scenes": {
-  "3": {
-   "frame": "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+  "1": {
+   "frame": "01_golden_hour_a_4_flying_east.jpg",
    "health": {
-    "mean_luma": 0.1433,
-    "std_luma": 0.13288,
+    "mean_luma": 0.17213,
+    "std_luma": 0.1606,
     "clipped": 0.0,
-    "crushed": 0.00057
+    "crushed": 8e-05
    },
    "flags": [],
    "vs_previous": {
-    "frame": "03_a320_over_new_york_wide_lens_terrain_download.jpg",
-    "flicker": 0.08273,
-    "ssim": 0.7303,
-    "flags": [
-     "flicker"
-    ]
+    "frame": "01_golden_hour_a_4_flying_east.jpg",
+    "flicker": 0.0,
+    "ssim": 1.0,
+    "flags": []
+   }
+  },
+  "3": {
+   "frame": "03_a320_over_new_york_wide_lens_terrain_download.jpg",
+   "health": {
+    "mean_luma": 0.22404,
+    "std_luma": 0.18726,
+    "clipped": 0.0,
+    "crushed": 0.00023
+   },
+   "flags": [],
+   "vs_previous": null
+  },
+  "6": {
+   "frame": "06_a320_over_sfo_heading_south_moderate_rain.jpg",
+   "health": {
+    "mean_luma": 0.12955,
+    "std_luma": 0.0719,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "06_a320_over_sfo_heading_south_moderate_rain.jpg",
+    "flicker": 0.0,
+    "ssim": 1.0,
+    "flags": []
+   }
+  },
+  "7": {
+   "frame": "07_tower_view_heavy_rain.jpg",
+   "health": {
+    "mean_luma": 0.22009,
+    "std_luma": 0.01508,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "07_tower_view_heavy_rain.jpg",
+    "flicker": 0.0,
+    "ssim": 1.0,
+    "flags": []
+   }
+  },
+  "10": {
+   "frame": "10_c172_near_a_tornado.jpg",
+   "health": {
+    "mean_luma": 0.05422,
+    "std_luma": 0.06202,
+    "clipped": 0.0,
+    "crushed": 0.00543
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "10_c172_near_a_tornado.jpg",
+    "flicker": 0.0,
+    "ssim": 1.0,
+    "flags": []
    }
   },
   "12": {
    "frame": "12_c172_cockpit_over_the_grand_canyon.jpg",
    "health": {
-    "mean_luma": 0.0935,
-    "std_luma": 0.08616,
+    "mean_luma": 0.19042,
+    "std_luma": 0.15828,
     "clipped": 0.0,
-    "crushed": 0.06467
+    "crushed": 0.0495
    },
-   "flags": [
-    "crushed"
-   ],
+   "flags": [],
    "vs_previous": null
   },
   "13": {
    "frame": "13_747_cruise_over_the_ocean.jpg",
    "health": {
-    "mean_luma": 0.09197,
-    "std_luma": 0.09679,
+    "mean_luma": 0.07406,
+    "std_luma": 0.07396,
     "clipped": 0.0,
     "crushed": 1e-05
    },
    "flags": [],
    "vs_previous": {
     "frame": "13_747_cruise_over_the_ocean.jpg",
-    "flicker": 0.01914,
-    "ssim": 0.874,
+    "flicker": 0.02694,
+    "ssim": 0.7691,
+    "flags": [
+     "flicker"
+    ]
+   }
+  },
+  "15": {
+   "frame": "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+   "health": {
+    "mean_luma": 0.05829,
+    "std_luma": 0.0506,
+    "clipped": 0.0,
+    "crushed": 0.0
+   },
+   "flags": [],
+   "vs_previous": {
+    "frame": "15_747_in_hurricane_like_weather_the_refusal_s_sugg.jpg",
+    "flicker": 0.0,
+    "ssim": 1.0,
     "flags": []
    }
   }
