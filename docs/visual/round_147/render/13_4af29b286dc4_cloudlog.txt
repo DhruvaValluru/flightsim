@@ -1,0 +1,20 @@
+LogPluginManager: Mounting Engine plugin GoogleCloudMessaging
+[2026.11.16-23.48.22:354][  0]LogConfig: Set CVar [[r.VolumetricFog:1]]
+[2026.11.16-23.48.22:354][  0]LogConfig: Set CVar [[r.VolumetricFog.GridPixelSize:8]]
+[2026.11.16-23.48.22:354][  0]LogConfig: Set CVar [[r.VolumetricFog.GridSizeZ:128]]
+[2026.11.16-23.48.22:354][  0]LogConfig: Set CVar [[r.VolumetricFog.HistoryMissSupersampleCount:4]]
+[2026.11.16-23.48.22:354][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.ProbeResolution:8]]
+[2026.11.16-23.48.22:354][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.NumProbesToTraceBudget:70]]
+[2026.11.16-23.48.25:313][  0]LogDerivedDataCache: Cloud: Disabled because Host is set to 'None'
+[2026.11.16-23.48.25:313][  0]LogDerivedDataCache: Unable to find inner node Cloud for hierarchy Hierarchy.
+[2026.11.16-23.48.31:350][  0]LogFlightSimRender: Display: physical sky 2026-03-20T12:07:00+00:00: sun 109.7/89.9 deg, moon 56.6/70.3 deg (3% lit), 0 stars, EV100 15.36, clouds on
+[2026.11.16-23.48.31:434][  0]LogFlightSimWorldBeauty: Display: world beauty: preset clear, 1 cloud layer(s) redrawn, 0 override(s), scatter off
+[2026.11.16-23.48.31:606][  0]LogConfig: Set CVar [[r.VolumetricFog.GridPixelSize:4]]
+[2026.11.16-23.48.31:606][  0]LogConfig: Set CVar [[r.VolumetricFog.HistoryMissSupersampleCount:16]]
+[2026.11.16-23.48.31:614][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.ProbeResolution:16]]
+[2026.11.16-23.48.31:614][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.NumProbesToTraceBudget:350]]
+[2026.11.16-23.48.58:649][  0]LogFlightSimRender: Display: beauty: blue noise ready (scalar /Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64, vec2 /Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64): the cloud march's start jitter is per pixel and per capture
+[2026.11.16-23.48.58:650][  0]LogFlightSimWeather: Display: cloud VolumetricCloudComponent (VolumetricCloud_0): /Temp/Untitled_1.Untitled:PersistentLevel.VolumetricCloud_0.VolumetricCloudComponent.MID_M_FlightSimCloudLayers_0, domain 3, used_with_volumetric_cloud yes, compiled
+[2026.11.16-23.49.09:981][  0]LogFlightSimRender: Display: sky capture switches: start-frame before, at aircraft, clouds shown, beauty-only actors shown
+[2026.11.16-23.49.09:984][  0]LogFlightSimRender: Display: sky capture cost (constrained gpu): weather actors hidden (0 components), cloud reflection march capped at 32 / 8 samples
+[2026.11.16-23.49.25:242][  2]LogFlightSimRender: Display: measured cover: 640x360 captures, 16 beauty-only actor(s) hidden (+ Cloud show flag), every 1 frame(s) of 1; -measure-cover=off skips it

@@ -1,0 +1,21 @@
+LogPluginManager: Mounting Engine plugin GoogleCloudMessaging
+[2026.11.16-23.34.42:664][  0]LogConfig: Set CVar [[r.VolumetricFog:1]]
+[2026.11.16-23.34.42:664][  0]LogConfig: Set CVar [[r.VolumetricFog.GridPixelSize:8]]
+[2026.11.16-23.34.42:664][  0]LogConfig: Set CVar [[r.VolumetricFog.GridSizeZ:128]]
+[2026.11.16-23.34.42:664][  0]LogConfig: Set CVar [[r.VolumetricFog.HistoryMissSupersampleCount:4]]
+[2026.11.16-23.34.42:665][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.ProbeResolution:8]]
+[2026.11.16-23.34.42:665][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.NumProbesToTraceBudget:70]]
+[2026.11.16-23.34.45:620][  0]LogDerivedDataCache: Cloud: Disabled because Host is set to 'None'
+[2026.11.16-23.34.45:620][  0]LogDerivedDataCache: Unable to find inner node Cloud for hierarchy Hierarchy.
+[2026.11.16-23.34.55:534][  0]LogFlightSimRender: Display: physical sky 2026-03-21T01:36:38+00:00: sun 265.7/6.0 deg, moon 262.6/31.7 deg (5% lit), 0 stars, EV100 11.60, clouds on
+[2026.11.16-23.34.56:541][  0]LogMaterial: Display: Missing cached shadermap for M_FlightSimDistantClouds in PCD3D_SM5, Default, SM5, Editor (DDC key hash: e24a696d2c6e201ad22631dcb49c162101973cb7), compiling. 
+[2026.11.16-23.34.56:620][  0]LogFlightSimWorldBeauty: Display: world beauty: preset clear, 1 cloud layer(s) redrawn, 0 override(s), scatter off
+[2026.11.16-23.34.57:046][  0]LogConfig: Set CVar [[r.VolumetricFog.GridPixelSize:4]]
+[2026.11.16-23.34.57:046][  0]LogConfig: Set CVar [[r.VolumetricFog.HistoryMissSupersampleCount:16]]
+[2026.11.16-23.34.57:059][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.ProbeResolution:16]]
+[2026.11.16-23.34.57:059][  0]LogConfig: Set CVar [[r.Lumen.TranslucencyVolume.RadianceCache.NumProbesToTraceBudget:350]]
+[2026.11.16-23.35.25:547][  0]LogFlightSimRender: Display: beauty: blue noise ready (scalar /Engine/EngineMaterials/FastBlueNoise_scalar_128x128x64.FastBlueNoise_scalar_128x128x64, vec2 /Engine/EngineMaterials/FastBlueNoise_vec2_128x128x64.FastBlueNoise_vec2_128x128x64): the cloud march's start jitter is per pixel and per capture
+[2026.11.16-23.35.25:549][  0]LogFlightSimWeather: Display: cloud VolumetricCloudComponent (VolumetricCloud_0): /Temp/Untitled_1.Untitled:PersistentLevel.VolumetricCloud_0.VolumetricCloudComponent.MID_M_FlightSimCloudLayers_0, domain 3, used_with_volumetric_cloud yes, compiled
+[2026.11.16-23.35.39:161][  0]LogFlightSimRender: Display: sky capture switches: start-frame before, at aircraft, clouds shown, beauty-only actors shown
+[2026.11.16-23.35.39:165][  0]LogFlightSimRender: Display: sky capture cost (constrained gpu): weather actors hidden (0 components), cloud reflection march capped at 32 / 8 samples
+[2026.11.16-23.35.59:150][  2]LogFlightSimRender: Display: measured cover: 640x360 captures, 12 beauty-only actor(s) hidden (+ Cloud show flag), every 1 frame(s) of 1; -measure-cover=off skips it
