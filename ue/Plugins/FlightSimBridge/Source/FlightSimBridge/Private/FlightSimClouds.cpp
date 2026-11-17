@@ -829,11 +829,18 @@ namespace FlightSimWorldPure
 	}
 	// -cloud-material=ours|epic (A/B; world_beauty.CLOUD_MATERIAL_*): epic puts Epic's
 	// Volumetrics plugin cloud material on the beauty layer instead of ours.
-	constexpr int CloudMaterialWordCount = 2;
+	constexpr int CloudMaterialWordCount = 3;
 	inline const char* CloudMaterialWord(int I)
 	{
-		static const char* const Words[CloudMaterialWordCount] = {"ours", "epic"};
+		static const char* const Words[CloudMaterialWordCount] = {"ours", "epic", "engine"};
 		return I >= 0 && I < CloudMaterialWordCount ? Words[I] : "";
+	}
+	// r150 (owner, 2026-11-16: "unreal engine's basic default clouds also look better"
+	// than #13's): -cloud-material=engine draws the engine's own stock volumetric cloud
+	// material, which always ships with UE (no plugin).
+	inline const char* CloudMaterialEnginePath()
+	{
+		return "/Engine/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.m_SimpleVolumetricCloud_Inst";
 	}
 	inline const char* CloudMaterialEpicPath()
 	{
@@ -2226,9 +2233,9 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		                        *CloudDeckScatterSwitch);
 		return false;
 	}
-	if (CloudMaterialSwitch != TEXT("ours") && CloudMaterialSwitch != TEXT("epic"))
+	if (CloudMaterialSwitch != TEXT("ours") && CloudMaterialSwitch != TEXT("epic") && CloudMaterialSwitch != TEXT("engine"))
 	{
-		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-material=%s is not ours or epic"),
+		Error = FString::Printf(TEXT("world_beauty.clouds: -cloud-material=%s is not ours, epic or engine"),
 		                        *CloudMaterialSwitch);
 		return false;
 	}
@@ -3804,9 +3811,10 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		// ours (the MID above stays as the bookkeeping's; it draws nothing). Not
 		// loadable (plugin off): ours stays and the record says so.
 		FString EpicMaterialDrawn = TEXT("not asked");
-		if (CloudMaterialSwitch == TEXT("epic"))
+		if (CloudMaterialSwitch == TEXT("epic") || CloudMaterialSwitch == TEXT("engine"))
 		{
-			UMaterialInterface* Epic = LoadObject<UMaterialInterface>(nullptr, ANSI_TO_TCHAR(CloudMaterialEpicPath()));
+			const char* StockPath = CloudMaterialSwitch == TEXT("engine") ? CloudMaterialEnginePath() : CloudMaterialEpicPath();
+			UMaterialInterface* Epic = LoadObject<UMaterialInterface>(nullptr, ANSI_TO_TCHAR(StockPath));
 			if (Epic != nullptr)
 			{
 				Cloud->SetMaterial(Epic);
@@ -3815,8 +3823,8 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 			else
 			{
 				EpicMaterialDrawn = TEXT("unloadable (Volumetrics plugin not enabled?): ours drawn");
-				UE_LOG(LogFlightSimWorldBeauty, Warning, TEXT("-cloud-material=epic: %s did not load; ours drawn"),
-				       ANSI_TO_TCHAR(CloudMaterialEpicPath()));
+				UE_LOG(LogFlightSimWorldBeauty, Warning, TEXT("-cloud-material=%s: %s did not load; ours drawn"),
+				       *CloudMaterialSwitch, ANSI_TO_TCHAR(StockPath));
 			}
 		}
 		Cloud->SetbUsePerSampleAtmosphericLightTransmittance(true);

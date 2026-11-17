@@ -1223,11 +1223,12 @@ def cloud_sky_ao(norm_alt: float, bottom_occlusion: float, row: Dict[str, float]
 #: wisp and light scalars do not exist on it; the layer's altitude, march tier and
 #: shadows stay ours.
 CLOUD_MATERIAL_SWITCH = "-cloud-material"
-CLOUD_MATERIAL_WORDS: Tuple[str, ...] = ("ours", "epic")
+CLOUD_MATERIAL_WORDS: Tuple[str, ...] = ("ours", "epic", "engine")
 #: ON draws a SEPARATE material (sky-clouds2 review: the light's parameters on the
 #: default graph raised its PS 161 -> 847 instructions and 0 -> 8 samplers with the
 #: switch off), so the default M_FlightSimCloudLayers stays at graph 8's cost.
 CLOUD_LIGHT_MATERIAL = "/Game/FlightSim/M_FlightSimCloudLayersLit.M_FlightSimCloudLayersLit"
+CLOUD_MATERIAL_ENGINE = "/Engine/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.m_SimpleVolumetricCloud_Inst"
 CLOUD_MATERIAL_EPIC = "/Volumetrics/Sky/Materials/M_VolumetricCloud_02_Profiles_Soft.M_VolumetricCloud_02_Profiles_Soft"
 
 
