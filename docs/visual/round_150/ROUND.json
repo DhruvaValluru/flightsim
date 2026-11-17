@@ -7,14 +7,19 @@
                ],
     "switches":  "-cloud-material=engine",
     "prep":  [
-                 "build"
+
              ],
     "seconds":  {
-                    "build":  35,
-                    "scenes":  233.8
+                    "scenes":  63.6
                 },
     "outcomes":  [
-
+                     {
+                         "number":  13,
+                         "outcome":  "done",
+                         "seconds":  61.8,
+                         "spec_sha256":  "546c12ef50d175a5e6143317c6d3fb9831b40e102e01c219808e62810a8ed472",
+                         "why":  "clip ready"
+                     }
                  ],
     "compiler":  "llm",
     "pixel_metrics":  {
@@ -33,7 +38,26 @@
                           "compare_with":  "C:\\Users\\kanth\\flightsim\\docs\\visual\\round_148",
                           "compare_with_found":  true,
                           "scenes":  {
+                                         "13":  {
+                                                    "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                    "health":  {
+                                                                   "mean_luma":  0.09197,
+                                                                   "std_luma":  0.09679,
+                                                                   "clipped":  0.0,
+                                                                   "crushed":  1E-05
+                                                               },
+                                                    "flags":  [
 
+                                                              ],
+                                                    "vs_previous":  {
+                                                                        "frame":  "13_747_cruise_over_the_ocean.jpg",
+                                                                        "flicker":  0.00791,
+                                                                        "ssim":  0.9049,
+                                                                        "flags":  [
+
+                                                                                  ]
+                                                                    }
+                                                }
                                      }
                       }
 }
