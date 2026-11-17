@@ -1,0 +1,41 @@
+[2026.11.17-03.40.32:824][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.40.36:171][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.34 s
+[2026.11.17-03.40.36:172][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.40.39:522][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.35 s
+[2026.11.17-03.40.39:523][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.40.42:878][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.35 s
+[2026.11.17-03.40.42:878][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.40.46:236][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.35 s
+[2026.11.17-03.40.46:236][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.40.49:580][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.34 s
+[2026.11.17-03.40.49:580][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.40.52:937][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.35 s
+[2026.11.17-03.40.52:937][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.40.56:304][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.36 s
+[2026.11.17-03.40.56:305][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.40.59:649][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.34 s
+[2026.11.17-03.40.59:650][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.41.03:007][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.35 s
+[2026.11.17-03.41.03:008][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.41.06:377][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.36 s
+[2026.11.17-03.41.06:378][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.41.09:722][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 3.34 s
+[2026.11.17-03.41.09:724][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.41.12:043][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 2.31 s
+[2026.11.17-03.41.12:043][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.41.14:371][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 2.31 s
+[2026.11.17-03.41.14:371][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.41.16:689][  0]LogFlightSimRender: Display: gpu drain: a subject meter re-warm capture finished on the GPU in 2.31 s
+[2026.11.17-03.41.16:691][  0]LogRenderer: Warning: The film grain texture is still using the default texture proxy.
+[2026.11.17-03.41.20:708][  0]LogD3D11RHI: Error: Result failed with error DXGI_ERROR_DEVICE_REMOVED DXGI_ERROR_DEVICE_HUNG
+ at D:\build\++UE5\Sync\Engine\Source\Runtime\Windows\D3D11RHI\Private\D3D11Query.cpp:396
+[2026.11.17-03.41.22:243][  0]LogWindows: FPlatformMisc::RequestExit(0, WindowsPlatformCrashContext.ReportGPUCrash)
+[2026.11.17-03.41.22:244][  0]LogWindows: FPlatformMisc::RequestExitWithStatus(0, 0, WindowsPlatformCrashContext.ReportGPUCrash)
+[2026.11.17-03.41.22:244][  0]LogCore: Engine exit requested (reason: Win RequestExit)
+[2026.11.17-03.41.22:244][  0]LogWindows: Error: appError called: Fatal error: [File:D:\build\++UE5\Sync\Engine\Source\Runtime\Windows\D3D11RHI\Private\D3D11Util.cpp] [Line: 166] 
+Unreal Engine is exiting due to D3D device being lost. (Error: 0x887A0006 - 'HUNG')
+
+
+
+[2026.11.17-03.41.22:245][  0]LogWindows: Windows GetLastError: The operation completed successfully. (0)
+[2026.11.17-03.41.22:253][  0]LogWindows: FPlatformMisc::RequestExit(0, WindowsPlatformCrashContext.ReportGPUCrash)
