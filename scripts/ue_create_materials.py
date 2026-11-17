@@ -3783,7 +3783,8 @@ WORLD_BEAUTY_MATERIALS = ("M_FlightSimCloudLayers", "M_FlightSimCloudLayersLit",
                           "M_FlightSimDistantClouds",   # visual round 5, L3: the distant sheet
                           "M_FlightSimCirrus",          # sky step 6 (2026-11-15): the high cirrus sheet
                           "M_FlightSimRainbow",         # high-sky fx (2026-11-15): the beauty rainbow
-                          "M_FlightSimOceanBeauty")     # lane B (2026-11-11): the beauty sea cap
+                          "M_FlightSimOceanBeauty",     # lane B (2026-11-11): the beauty sea cap
+                          "M_FlightSimHdriBackdrop")    # round 148 (2026-11-16): the low-camera HDRI backdrop
 WORLD_SHADER_DIR = "assets/shaders/world"
 #: The collection the tiles' material reads and the render sets
 #: (world_beauty.WORLD_MPC / WORLD_MPC_SCALARS: names and defaults pinned equal).
@@ -4101,7 +4102,7 @@ WORLD_SCATTER_OPACITY_CLIP = 0.5
 #: round 95's node (-cloud-deck-scatter=round95, the default).
 WORLD_GRAPH_GENERATIONS = {"M_FlightSimCloudLayers": "11", "M_FlightSimDistantClouds": "6", "M_FlightSimCirrus": "3",
                            "M_FlightSimCloudLayersLit": "2",
-                           "M_FlightSimRainbow": "1"}
+                           "M_FlightSimRainbow": "1", "M_FlightSimHdriBackdrop": "1"}
 
 
 def world_graph_stale(name):
@@ -4154,6 +4155,7 @@ WORLD_GENERATIONS = {"MPC_FlightSimWorld": "5", "M_FlightSimTilesBeauty": "13", 
                      "M_FlightSimDistantClouds": "6",   # distant 4: round-52 shared noise (ShapeLodBulge); 5: round-82 GrazingSoften; 6: round-147 tops relief + sea shadow
                      "M_FlightSimCirrus": "3",          # sky step 6: the high cirrus sheet; 2: sky-cirrus2 patches + hooked fibres; 3: look check denser/brighter defaults
                      "M_FlightSimRainbow": "1",         # high-sky fx: the beauty rainbow
+                     "M_FlightSimHdriBackdrop": "1",    # round 148: the low-camera HDRI backdrop (hdri_backdrop.hlsl)
                      "M_FlightSimOceanBeauty": "7"}     # lane B: the beauty sea (2: own reflection; 3: sphere up, swell, sheen; 4: depth pull; 5: storm sea, card wind; 6: hyperreal sea, HyperSea; 7: round-147 HorizonLift)
 WORLD_GENERATION_TAG = "FlightSimWorldGeneration"
 
@@ -4932,6 +4934,156 @@ def create_sky_hdri():
     print(f"SKY-HDRI-IMPORTED: {full} ({row['licence']}; sun at image longitude "
           f"{record.get('sun_longitude_deg', 0.0):.1f} deg, {record.get('clamped_pixels', 0)} sun pixels clamped)")
 
+#: Round 148 (core/scene/hdri_sky.py): the look's Poly Haven HDRIs, imported from the
+#: committed files as TextureCubes (T_HdriLight_<name> from the prepared 1K copy,
+#: T_HdriBackdrop_<name> from the 2K original), each stamped with its file's sha256
+#: and imported again only when that changes.
+HDRI_LOOK_SHA_TAG = "FlightSimHdriSha256"
+#: M_FlightSimHdriBackdrop's scalars and their defaults (the bridge sets every one;
+#: FlightSimHdriSky.cpp Build / SwitchSkyLight / Advance). Scale and Opacity 0: an
+#: instance nobody set draws nothing.
+WORLD_HDRI_BACKDROP_SCALARS = {
+    "YawDeg": 0.0,
+    "Scale": 0.0,
+    "ClampLum": 4.0,
+    "HorizonLowDeg": 1.0,
+    "HorizonHighDeg": 12.0,
+    "Opacity": 0.0,
+    "SunHoleDeg": 0.0,
+    "SunSpanDeg": 0.0,
+    "SkyDepthCm": 1.0e8,
+}
+#: The Custom node's inputs, in hdri_backdrop.hlsl's order.
+WORLD_HDRI_BACKDROP_INPUTS = ("Dir", "Sky", "SunDir", "SceneDepth") + tuple(WORLD_HDRI_BACKDROP_SCALARS)
+
+
+def _hdri_sky_module():
+    import sys
+    module = _repo_file("core/scene/hdri_sky.py")
+    if module is None:
+        raise RuntimeError("core/scene/hdri_sky.py is not in this checkout")
+    root = str(module.parents[2])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from core.scene import hdri_sky
+    return hdri_sky
+
+
+def _hdri_sha256(path):
+    import hashlib
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _import_hdri_cube(source, asset_name, want_sha=None):
+    """One committed .hdr as /Game/FlightSim/Sky/<asset_name> (a TextureCube: UE
+    imports an equirectangular long-lat .hdr as a cube), linear, TC_HDR."""
+    digest = _hdri_sha256(source)
+    if want_sha is not None and digest != want_sha:
+        raise RuntimeError(f"HDRI: {source} hashes {digest}, the pin says {want_sha}")
+    hdri_sky = _hdri_sky_module()
+    full = f"{hdri_sky.ASSET_DIR}/{asset_name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(full) and not rebuild_requested(asset_name):
+        stamped = unreal.EditorAssetLibrary.get_metadata_tag(unreal.EditorAssetLibrary.load_asset(full),
+                                                             HDRI_LOOK_SHA_TAG)
+        if str(stamped) == digest:
+            print(f"HDRI-EXISTS: {full}")
+            return unreal.load_asset(full)
+    task = unreal.AssetImportTask()
+    task.set_editor_property("filename", str(source))
+    task.set_editor_property("destination_path", hdri_sky.ASSET_DIR)
+    task.set_editor_property("destination_name", asset_name)
+    task.set_editor_property("automated", True)
+    task.set_editor_property("replace_existing", True)
+    task.set_editor_property("save", False)
+    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+    texture = unreal.load_asset(full)
+    if texture is None or not isinstance(texture, unreal.TextureCube):
+        raise RuntimeError(f"HDRI: {source} did not import as a TextureCube at {full}")
+    texture.set_editor_property("srgb", False)
+    texture.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_HDR)
+    unreal.EditorAssetLibrary.set_metadata_tag(texture, HDRI_LOOK_SHA_TAG, digest)
+    unreal.EditorAssetLibrary.save_asset(full)
+    print(f"HDRI-IMPORTED: {full} ({source.name}, CC0)")
+    return texture
+
+
+def create_look_hdris():
+    """T_HdriLight_<name> and T_HdriBackdrop_<name> for every pin in
+    core/scene/hdri_sky.py HDRIS (round 148, -look-hdri=; FlightSimHdriSky.cpp).
+    The files are committed (assets/hdri/, CC0, README.md), so this needs no
+    download and no numpy."""
+    import json
+    hdri_sky = _hdri_sky_module()
+    for name, row in hdri_sky.HDRIS.items():
+        source = _repo_file(f"assets/hdri/{name}_2k.hdr")
+        prepared = _repo_file(f"assets/hdri/prepared/{name}_skylight_1k.hdr")
+        sidecar = _repo_file(f"assets/hdri/prepared/{name}_skylight_1k.json")
+        if source is None or prepared is None or sidecar is None:
+            raise RuntimeError(f"HDRI: assets/hdri files for {name} are not in this checkout")
+        record = json.loads(sidecar.read_text(encoding="utf-8"))
+        _import_hdri_cube(prepared, f"{hdri_sky.LIGHT_ASSET_PREFIX}{name}", record["prepared_sha256"])
+        _import_hdri_cube(source, f"{hdri_sky.BACKDROP_ASSET_PREFIX}{name}", row["sha256"])
+
+
+def create_hdri_backdrop():
+    """M_FlightSimHdriBackdrop: the photographed sky over a low camera (round 148,
+    FlightSimHdriSky.cpp on one engine sphere centred on the camera, beauty only).
+    UNLIT, TRANSLUCENT, two-sided; Apply Fogging per pixel and cloud fogging (the
+    fog and the volumetric clouds draw over it); no custom depth, no velocity, so
+    no label or depth pass sees it. hdri_backdrop.hlsl returns float4(emissive,
+    opacity): the 2K cube turned by YawDeg, its sun clamped, scaled, faded in above
+    the horizon, opened around the scene's sun, and drawn over sky pixels only
+    (SceneDepth beyond SkyDepthCm). VISUAL ONLY; UNMEASURED until a
+    Windows render."""
+    hdri_sky = _hdri_sky_module()
+    default_name = hdri_sky.SLOT_HDRI["clear"]
+    default = unreal.load_asset(f"{hdri_sky.ASSET_DIR}/{hdri_sky.BACKDROP_ASSET_PREFIX}{default_name}")
+    if default is None:
+        raise RuntimeError("M_FlightSimHdriBackdrop: the backdrop cubes are not imported (create_look_hdris)")
+    material = _world_beauty_material("M_FlightSimHdriBackdrop")
+    if material is None:
+        return
+    lib = unreal.MaterialEditingLibrary
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    material.set_editor_property("two_sided", True)
+    material.set_editor_property("use_translucency_vertex_fog", True)   # Apply Fogging
+    material.set_editor_property("compute_fog_per_pixel", True)
+    material.set_editor_property("apply_cloud_fogging", True)
+    material.set_editor_property("allow_translucent_custom_depth_writes", False)
+    material.set_editor_property("output_translucent_velocity", False)
+    pins = {}
+    camera = lib.create_material_expression(material, unreal.MaterialExpressionCameraVectorWS, -1900, -500)
+    negate = lib.create_material_expression(material, unreal.MaterialExpressionMultiply, -1700, -500)
+    negate.set_editor_property("const_b", -1.0)
+    lib.connect_material_expressions(camera, "", negate, "A")
+    pins["Dir"] = (negate, "")
+    sky = lib.create_material_expression(material, unreal.MaterialExpressionTextureObjectParameter, -1800, -350)
+    sky.set_editor_property("parameter_name", "Sky")
+    sky.set_editor_property("texture", default)
+    pins["Sky"] = (sky, "")
+    sun_dir = lib.create_material_expression(material, unreal.MaterialExpressionSkyAtmosphereLightDirection,
+                                             -1800, -200)
+    sun_dir.set_editor_property("light_index", 0)
+    pins["SunDir"] = (sun_dir, "")
+    scene_depth = lib.create_material_expression(material, unreal.MaterialExpressionSceneDepth, -1900, -120)
+    pins["SceneDepth"] = (mask(material, lib, scene_depth, "r", -1700, -120), "")
+    for i, (name, default_value) in enumerate(WORLD_HDRI_BACKDROP_SCALARS.items()):
+        pins[name] = (scalar(material, lib, name, default_value, -1800, -50 + 90 * i), "")
+    ordered = {name: pins[name] for name in WORLD_HDRI_BACKDROP_INPUTS}
+    body = world_custom(material, lib, "hdri_backdrop", unreal.CustomMaterialOutputType.CMOT_FLOAT4,
+                        ordered, -900, 0)
+    lib.connect_material_property(mask(material, lib, body, "rgb", -600, -50), "",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    lib.connect_material_property(mask(material, lib, body, "a", -600, 150), "",
+                                  unreal.MaterialProperty.MP_OPACITY)
+    world_stamp(material, "M_FlightSimHdriBackdrop")
+    finish(material, "M_FlightSimHdriBackdrop")
+
 # == END WORLD LANE ===============================================================
 
 # ==== AIRCRAFT LANE (visual overhaul V7) -- begin ============================
@@ -5177,6 +5329,8 @@ create_world_distant_clouds()   # visual round 5, L3: the distant sheet
 create_world_cirrus()           # sky step 6: the high cirrus sheet (beauty only)
 create_world_rainbow()          # high-sky fx: the beauty rainbow (beauty only)
 create_sky_hdri()               # visual round 5, L3: the sky HDRI probe (FLIGHTSIM_SKY_HDRI only)
+create_look_hdris()             # round 148: the look's Poly Haven HDRIs (-look-hdri=)
+create_hdri_backdrop()          # round 148: the low-camera HDRI backdrop (beauty only)
 
 create_aircraft_masters()  # AIRCRAFT LANE (V7)
 create_cloud_impostor()    # 2026-11-14: the pre-rendered impostor clouds (-cloud-impostors=)

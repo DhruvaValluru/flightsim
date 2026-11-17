@@ -714,6 +714,16 @@ rp_check "sky-hdri: SkyLight SetRealTimeCapture" "Engine/Classes/Components/SkyL
 rp_check "sky-hdri: SkyLight SetCaptureIsDirty" "Engine/Classes/Components/SkyLightComponent.h" "ENGINE_API void SetCaptureIsDirty();"
 rp_check "sky-hdri: SkyLight IsRealTimeCaptureEnabled" "Engine/Classes/Components/SkyLightComponent.h" "IsRealTimeCaptureEnabled()"
 rp_check "sky-hdri: UTextureCube header" "Engine/Classes/Engine/TextureCube.h" "class UTextureCube"
+# Round 148 (FlightSimHdriSky.cpp, -look-hdri=): the captured sky's SH read back, the
+# HDRI's turn, the lower hemisphere, the backdrop sphere kept out of every capture.
+rp_check "hdri-sky: SkyLight GetIrradianceEnvironmentMap" "Engine/Classes/Components/SkyLightComponent.h" "FSHVectorRGB3 GetIrradianceEnvironmentMap()"
+rp_check "hdri-sky: SkyLight GetProcessedSkyTexture" "Engine/Classes/Components/SkyLightComponent.h" "const FTexture* GetProcessedSkyTexture() const"
+rp_check "hdri-sky: SkyLight SetLowerHemisphereColor" "Engine/Classes/Components/SkyLightComponent.h" "ENGINE_API void SetLowerHemisphereColor(const FLinearColor& InLowerHemisphereColor);"
+rp_check "hdri-sky: SH diffuse transfer" "Core/Public/Math/SHMath.h" "static TSHVector CalcDiffuseTransfer(const FVector& Normal)"
+rp_check "hdri-sky: the source turn is R(angle) x the world direction" "../../Shaders/Private/ReflectionEnvironmentShaders.usf" "CubeCoordinates.xy = float2(dot(CubeCoordinates.xy, float2(SinCosSourceCubemapRotation.y, -SinCosSourceCubemapRotation.x)), dot(CubeCoordinates.xy, SinCosSourceCubemapRotation));"
+rp_check "hdri-sky: the long-lat import's longitude" "../Developer/TextureCompressor/Private/TextureCompressorModule.cpp" "atan2(NormalizedDirection.X, -NormalizedDirection.Z)"
+rp_check "hdri-sky: texture compile wait" "Engine/Public/TextureCompiler.h" "class FTextureCompilingManager"
+rp_check "hdri-sky: primitive bVisibleInRealTimeSkyCaptures" "Engine/Classes/Components/PrimitiveComponent.h" "uint8 bVisibleInRealTimeSkyCaptures :1;"
 # Sky step 6 (the owner's X-Plane-12 brief, 2026-11-15): the high cirrus sheet
 # (FlightSimClouds.cpp ApplyCirrus / BuildCurvedDisc, M_FlightSimCirrus from
 # create_world_cirrus). No engine symbol beyond the distant sheet's above: the

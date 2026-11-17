@@ -1,0 +1,34 @@
+{
+  "authors": {
+    "Jarod Guest": "Sky Edits",
+    "Sergej Majboroda": "Original"
+  },
+  "basis": "sun clamped at clamp_factor x the upper hemisphere's median luminance, the upper hemisphere's mean luminance normalised to 1 (x normalise), 2x2 box mean to 1K; the backdrop multiplies the 2K original by normalise and clamps it at clamp_luminance in the material; UNCALIBRATED",
+  "clamp_factor": 32.0,
+  "clamp_luminance": 47.624351501464844,
+  "clamped_energy_share": 0.0,
+  "clamped_pixels": 0,
+  "format": "flightsim.hdri_sky",
+  "licence": "CC0-1.0",
+  "name": "overcast_soil_puresky",
+  "normalise": 0.6978695224998357,
+  "prepared_resolution": [
+    1024,
+    512
+  ],
+  "prepared_sha256": "0397743438523b8e73244143399e4d79970fc11a707f8917935825dfe85e9b6c",
+  "prepared_upper_mean_luminance": 0.9970009326934814,
+  "slot": "storm",
+  "source": "https://polyhaven.com/a/overcast_soil_puresky",
+  "source_resolution": [
+    2048,
+    1024
+  ],
+  "source_sha256": "5414e1ac0c35e451d28595b2a2cba05e2ca301fdeb755b0a469408443093dafc",
+  "sun_elevation_deg": 34.7168,
+  "sun_longitude_deg": -11.8652,
+  "title": "Overcast Soil (Pure Sky)",
+  "upper_mean_luminance_before": 1.4329326152801514,
+  "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/overcast_soil_puresky_2k.hdr",
+  "version": 1
+}

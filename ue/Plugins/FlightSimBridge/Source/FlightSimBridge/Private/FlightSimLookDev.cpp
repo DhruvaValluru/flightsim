@@ -42,6 +42,7 @@
 #include "Engine/SceneCapture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Components/SceneCaptureComponent2D.h"
+#include "Components/SkyLightComponent.h"
 #include "GameFramework/Actor.h"
 #include "GeoReferencingSystem.h"
 #include "ImageUtils.h"
@@ -793,6 +794,16 @@ namespace
 		Target->InitAutoFormat(Width, Height);
 		Target->UpdateResourceImmediate(true);
 		Capture->TextureTarget = Target;
+		// Round 148: the commandlet's sky light capture-once and HDRI switch
+		// (FlightSimHdriSky.h), so the look-dev still shows -look-hdri.
+		if (S.WorldBeauty->IsBuilt() && S.WorldBeauty->WantsHdriSwitch() && S.Visual->SkyLightComponent != nullptr)
+		{
+			S.Visual->SkyLightComponent->SetCaptureIsDirty();
+			S.World->SendAllEndOfFrameUpdates();
+			USkyLightComponent::UpdateSkyCaptureContents(S.World.Get());
+			FlushRenderingCommands();
+			S.WorldBeauty->SwitchSkyLightToHdri(S.World.Get(), *S.Visual);
+		}
 		// Warm-up captures (temporal history, exposure), as the commandlet's -warmup.
 		int32 Warmup = 8;
 		FParse::Value(*S.Params, TEXT("warmup="), Warmup);

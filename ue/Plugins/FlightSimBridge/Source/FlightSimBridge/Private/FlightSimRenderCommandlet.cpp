@@ -6250,6 +6250,17 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			World->SendAllEndOfFrameUpdates();
 			FlushRenderingCommands();
 		}
+		// Round 148 (FlightSimHdriSky.h, -look-hdri=auto|light|off): the captured
+		// sky's upward irradiance read back, then the matched Poly Haven sky as the
+		// sky light's specified cubemap at that irradiance (two texture-only
+		// captures: no scene is drawn), and the low-camera backdrop shown. Beauty
+		// only (the world lane is never built for measure); off does nothing.
+		if (bBeauty && WorldBeauty.IsBuilt() && WorldBeauty.WantsHdriSwitch())
+		{
+			BeatWatchdog(TEXT("the HDRI sky light switch"));
+			WorldBeauty.SwitchSkyLightToHdri(World, VisualScene);
+			DrainGpu(TEXT("the HDRI sky light switch"));
+		}
 		for (int32 i = 0; i < 2; ++i)
 		{
 			const FString PostSkyStage = FString::Printf(TEXT("post-sky capture %d/2"), i + 1);

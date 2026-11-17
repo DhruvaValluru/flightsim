@@ -1,0 +1,33 @@
+{
+  "authors": {
+    "Greg Zaal": "All"
+  },
+  "basis": "sun clamped at clamp_factor x the upper hemisphere's median luminance, the upper hemisphere's mean luminance normalised to 1 (x normalise), 2x2 box mean to 1K; the backdrop multiplies the 2K original by normalise and clamps it at clamp_luminance in the material; UNCALIBRATED",
+  "clamp_factor": 32.0,
+  "clamp_luminance": 33.60485076904297,
+  "clamped_energy_share": 0.0,
+  "clamped_pixels": 0,
+  "format": "flightsim.hdri_sky",
+  "licence": "CC0-1.0",
+  "name": "kloofendal_overcast_puresky",
+  "normalise": 0.8317091822545478,
+  "prepared_resolution": [
+    1024,
+    512
+  ],
+  "prepared_sha256": "5b7f8872fbb0d6bace515ffca0087efcbbda16da06da9093610b1a108fd210f5",
+  "prepared_upper_mean_luminance": 0.9965755343437195,
+  "slot": "overcast",
+  "source": "https://polyhaven.com/a/kloofendal_overcast_puresky",
+  "source_resolution": [
+    2048,
+    1024
+  ],
+  "source_sha256": "312b1b04b7f10057a4f1418abc59d1166c8933cc93fc72051502edaf8d6b2fcd",
+  "sun_elevation_deg": 23.1152,
+  "sun_longitude_deg": 29.4434,
+  "title": "Kloofendal Overcast (Pure Sky)",
+  "upper_mean_luminance_before": 1.2023433446884155,
+  "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/kloofendal_overcast_puresky_2k.hdr",
+  "version": 1
+}

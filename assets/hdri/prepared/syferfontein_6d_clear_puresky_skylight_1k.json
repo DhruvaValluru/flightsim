@@ -1,0 +1,34 @@
+{
+  "authors": {
+    "Greg Zaal": "Original",
+    "Jarod Guest": "Sky Edits"
+  },
+  "basis": "sun clamped at clamp_factor x the upper hemisphere's median luminance, the upper hemisphere's mean luminance normalised to 1 (x normalise), 2x2 box mean to 1K; the backdrop multiplies the 2K original by normalise and clamps it at clamp_luminance in the material; UNCALIBRATED",
+  "clamp_factor": 32.0,
+  "clamp_luminance": 7.015737533569336,
+  "clamped_energy_share": 0.6756018931075289,
+  "clamped_pixels": 6404,
+  "format": "flightsim.hdri_sky",
+  "licence": "CC0-1.0",
+  "name": "syferfontein_6d_clear_puresky",
+  "normalise": 2.460338748663215,
+  "prepared_resolution": [
+    1024,
+    512
+  ],
+  "prepared_sha256": "3b0c93d3cc360720d2b01c16ba1073dca086ff9a21b8b490f037075630cca4e7",
+  "prepared_upper_mean_luminance": 0.9958135485649109,
+  "slot": "golden",
+  "source": "https://polyhaven.com/a/syferfontein_6d_clear_puresky",
+  "source_resolution": [
+    2048,
+    1024
+  ],
+  "source_sha256": "3efca43f875db8d790001dad1677bd13c0968effc6d3193bdd2ee12e226e7eaa",
+  "sun_elevation_deg": 5.8887,
+  "sun_longitude_deg": 35.7715,
+  "title": "Syferfontein 6d Clear (Pure Sky)",
+  "upper_mean_luminance_before": 1.252929925918579,
+  "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/syferfontein_6d_clear_puresky_2k.hdr",
+  "version": 1
+}

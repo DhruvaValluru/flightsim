@@ -75,6 +75,7 @@
 #include "Dom/JsonValue.h"
 #include "FlightSimDustHaze.h"
 #include "FlightSimGroundDetail.h"
+#include "FlightSimHdriSky.h"
 #include "FlightSimSunShafts.h"
 
 class AActor;
@@ -140,6 +141,15 @@ public:
 	// for its own constrained-GPU safeguards (FlightSimRenderCommandlet.cpp
 	// "constrained gpu"). Beauty only: measure never asks.
 	static bool ConstrainedGpu();
+
+	// Round 148 (FlightSimHdriSky.h): -look-hdri=auto|light|off. The commandlet and
+	// the look-dev still call this right after the sky light's capture-once: the
+	// matched Poly Haven photograph becomes the sky light's specified cubemap at
+	// the captured sky's upward irradiance, the lightning pulse's base intensity
+	// follows the change, and the low-camera backdrop is shown. Nothing happens
+	// under off, at night, without the cube, or before Build.
+	void SwitchSkyLightToHdri(UWorld* World, FFlightSimVisualScene& Scene);
+	bool WantsHdriSwitch() const { return HdriSky.WantsSwitch(); }
 
 	// look_applied.world_beauty (the same object the scene's LookApplied holds).
 	TSharedPtr<FJsonObject> Record;
@@ -398,6 +408,8 @@ private:
 
 	// dust-humidity-haze: the overlay after ApplyAtmosphere (FlightSimDustHaze.h).
 	FFlightSimDustHaze DustHaze;
+	// Round 148: the HDRI sky light and the low-camera backdrop.
+	FFlightSimHdriSky HdriSky;
 	TArray<TSharedPtr<FJsonValue>> Frames;
 	// The occlusion summary CloudOcclusionRecord reports (Advance keeps it).
 	double MaxOccludedFraction = 0.0;

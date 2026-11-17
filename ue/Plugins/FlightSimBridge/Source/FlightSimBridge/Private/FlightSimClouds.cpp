@@ -2498,6 +2498,18 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 		const FVector Forward = Scene.Sun->GetActorForwardVector();
 		SunElevationDeg = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(-Forward.Z, -1.0, 1.0)));
 	}
+	// Round 148 (FlightSimHdriSky.h): -look-hdri=auto|light|off (auto by default).
+	// After the -sky-hdri= probe, which it leaves alone; the switch itself waits
+	// for the commandlet's sky light capture (SwitchSkyLightToHdri).
+	{
+		const FString HdriSwitches = FString(Params != nullptr ? Params : TEXT("")) + TEXT(" ")
+			+ FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_RENDER_SWITCHES"));
+		if (!HdriSky.Build(World, Scene, Preset, SunElevationDeg, HdriSwitches, Error))
+		{
+			return false;
+		}
+		Record->SetObjectField(TEXT("hdri_sky"), HdriSky.Record);
+	}
 	ApplyTiles(World, Tiles, CardWetness, SunElevationDeg);
 	// sun-shafts-sky-occlusion (FlightSimSunShafts.h): value-only, after the presets.
 	TSharedPtr<FJsonObject> SunShaftsOut;
@@ -4385,6 +4397,23 @@ void FFlightSimWorldBeauty::ApplyDistantClouds(UWorld* World, FFlightSimVisualSc
 	Record->SetObjectField(TEXT("distant_clouds"), Out);
 }
 
+// Round 148 (FlightSimHdriSky.h): right after the sky light's capture-once. The
+// lightning pulse sets the sky light's intensity from SkyLightBaseIntensity every
+// frame, so that base follows the switch's intensity change.
+void FFlightSimWorldBeauty::SwitchSkyLightToHdri(UWorld* World, FFlightSimVisualScene& Scene)
+{
+	if (!bBuilt)
+	{
+		return;
+	}
+	const double Factor = HdriSky.SwitchSkyLight(World, Scene);
+	SkyLightBaseIntensity = static_cast<float>(SkyLightBaseIntensity * Factor);
+	if (HdriSky.Record.IsValid())
+	{
+		HdriSky.Record->SetNumberField(TEXT("lightning_base_intensity"), SkyLightBaseIntensity);
+	}
+}
+
 // Round 147 (r146 #13, 2026-11-16): -look-high-ap=on|off (on by default). A camera
 // above HighApMinAltitudeM sees the far deck out to its horizon, but the aerial-
 // perspective LUT every translucent surface reads (the distant sheet among them) ends at
@@ -4960,6 +4989,8 @@ void FFlightSimWorldBeauty::Advance(double TimeSeconds, const FVector& CameraCm,
 		Frame->SetNumberField(TEXT("cirrus_altitude_m"), Sheet.AltitudeM);
 		Frame->SetNumberField(TEXT("cirrus_fade"), Sheet.Fade);
 	}
+	// Round 148: the HDRI backdrop follows the camera; its opacity is the camera's height law.
+	HdriSky.Advance(CameraCm, Frame);
 
 	// Sky step 4: the height fog's reference height follows the aircraft (the
 	// engine's 655 m observer clamp: FlightSimWorldPure::FogReferenceZM), re-based

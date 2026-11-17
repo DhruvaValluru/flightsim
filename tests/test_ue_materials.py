@@ -213,7 +213,9 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                # High-sky fx (2026-11-15): the beauty rainbow (FlightSimSkyFx.cpp, beauty only).
                "M_FlightSimRainbow",
                # Lane B (2026-11-11): the beauty sea cap (FlightSimGoogleTiles.cpp, beauty only).
-               "M_FlightSimOceanBeauty"}
+               "M_FlightSimOceanBeauty",
+               # Round 148: the low-camera HDRI backdrop (FlightSimHdriSky.cpp, beauty only).
+               "M_FlightSimHdriBackdrop"}
 COMMANDLET_CPP = BRIDGE / "Private" / "FlightSimRenderCommandlet.cpp"
 
 
