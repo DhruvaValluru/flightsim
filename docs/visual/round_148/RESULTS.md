@@ -29,7 +29,7 @@ Wall time 579 s. SSIM is against round 147; scene 9 had no round 147 frame to co
 - Unmeasured: whether `-look-hdri=off` on #9 renders clean at this commit. That one still would show whether the HDRI is the cause.
 
 ## Other notes
-- In #1, #7 and #13 the frame has no hdri_backdrop_opacity in its summary, so check `frames[].hdri_backdrop_opacity` in render.json for the backdrop law. All scenes use full_below_agl_m 600 and none_above_agl_m 1000.
+- The backdrop law is per frame (`frames[].hdri_backdrop_opacity` in render.json). All scenes use full_below_agl_m 600 and none_above_agl_m 1000.
 - Brightness in #1 went 0.172 to 0.195 against r147, and in #15 0.058 to 0.139 (SSIM 0.68, a big change). #7 went 0.220 to 0.166, back darker.
 
 ## hdri_sky sections
