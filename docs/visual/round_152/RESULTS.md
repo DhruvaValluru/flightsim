@@ -20,3 +20,17 @@ The frame is pixel-identical to r151 #13 on 2afd3525.
 - Layer 0's cloud_material_auto is still m_SimpleVolumetricCloud_Inst.
 
 Run id: a7cb5275ab59
+
+## Looking at the frame: what the #13 streaks look like
+This section is a hypothesis for p3-mac. It is unmeasured; no A/B has been rendered.
+- The streaks are BRIGHT bands. Each one starts at a cloud and runs to the bottom edge of the frame.
+- They fan out RADIALLY: streaks on the left lean down and left, streaks on the right lean down and right. They converge on a point above the top centre of the frame.
+- The sun is at 89.9 deg elevation, almost straight up and off-screen above the camera.
+- Radial bands from occluders, pointing away from the sun's screen position, are what UE's screen-space light shafts look like. render.json shows them on:
+  - `sun_shafts.sun.light_shaft_occlusion = true`, with occlusion_mask_darkness 0.4 and occlusion_depth_range_m 20000
+  - `light_shaft_bloom = true`, with bloom_scale 0.2 and threshold 8
+  - `hero_lighting.sun.light_shaft_bloom = true`
+  - `show_flags.light_shafts = true`
+  - `r.LightShaftQuality 1`
+- The same streaks are there, fainter, with OUR cloud material: see round_149/13 (b3174986, distant clouds off). So they come from neither the stock cloud nor the atmosphere cloud-shadow strength, which matches r152 being identical to r151.
+- I found no switch at a7d84e6a that turns the light shafts off; there is only `-sun-shafts-tier=still|interactive`. So the A/B to run is #13 with light-shaft occlusion and bloom off. That needs a switch from the Mac.
