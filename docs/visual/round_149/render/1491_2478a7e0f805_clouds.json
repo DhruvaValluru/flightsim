@@ -1,0 +1,123 @@
+{
+ "clouds.march": {
+  "path": "probe",
+  "path_basis": "CloudConstrainedGpu (GRHIDeviceIsIntegrated, or a feature level below SM6): the constrained row is ef361bd6's march",
+  "tier": "probe",
+  "switch": "probe",
+  "switch_given": "probe",
+  "plan_march_tier": "auto",
+  "word_source": "switch",
+  "tier_basis": "sky step 3: -cloud-march=auto|constrained|discrete|probe; auto is the GPU class (constrained: ef361bd6's row, rounds 5-95; discrete: the engine's caps, 768 view / 80 shadow samples over 50 km, set for a discrete GPU, never rendered); probe is the constrained class's opt-in raise (288 view / 20 shadow samples, DistanceToSampleMaxCount 8 km), one scene, one still, the Windows TDR 887a0006 the pass or fail. UNMEASURED: no tier but constrained has rendered",
+  "rhi_device_is_integrated": true,
+  "feature_level_sm6": false,
+  "adapter": "Intel(R) Graphics",
+  "view_sample_count_scale": 3,
+  "shadow_sample_count_scale": 2,
+  "tracing_max_distance_km": 80,
+  "view_samples_max": 288,
+  "shadow_samples": 20,
+  "banding_basis": "round 1 marched 192 view samples over up to 80 km (400 m steps through 0.05/m cloud) and 10 unjittered quadratic shadow samples over 15 km: contour banding and unlit cloud. The view march is blue-noise jittered by the engine (VolumetricCloud.usf) and averaged by the still's captures ONLY once the commandlet has loaded and built the blue-noise textures before the first capture (clouds round 6: render_settings.beauty_path.blue_noise; a commandlet otherwise gets BlueNoise.cpp's constant dummy, the altitude-slice strata of round 3); the shadow march spans the layer (CloudShadowTracingKm)",
+  "cloud_tiers": "on",
+  "cloud_tiers_basis": "round 52: the engine's shadow march is unjittered (ShadowJitterNorm 0.5) and each quadratic segment is opaque at cloud extinction, so the sun's light came in on/off iso-altitude tiers; M_FlightSimCloudLayers dithers and softens a shadow sample over its segment's footprint (ShadowFootprintKm = 2 sqrt(shadow km) / shadow samples, per layer), and the plane weather field's vertical walls lean and bulge with height (SideBulge); no sample added. -look-cloud-tiers=off sets both 0: round 51's clouds",
+  "calibration": "UNCALIBRATED: set by probe render on the render machine",
+  "r.VolumetricCloud.ApplyFogOnAllPixel": "0",
+  "cvars": {
+   "r.VolumetricCloud.ViewRaySampleMaxCount": [
+    "768",
+    "768"
+   ],
+   "r.VolumetricCloud.Shadow.ViewRaySampleMaxCount": [
+    "80",
+    "80"
+   ],
+   "r.VolumetricCloud.DistanceToSampleMaxCount": [
+    "15",
+    "8"
+   ],
+   "r.VolumetricCloud.SampleMinCount": [
+    "2",
+    "2"
+   ],
+   "r.VolumetricCloud.ShadowMap.RaySampleMaxCount": [
+    "128",
+    "128"
+   ],
+   "r.VolumetricCloud.ShadowMap.MaxResolution": [
+    "2048",
+    "2048"
+   ],
+   "r.VolumetricCloud.SkyAO.TraceSampleCount": [
+    "10",
+    "10"
+   ],
+   "r.SkyAtmosphere.AerialPerspectiveLUT.Depth": [
+    "96",
+    "96"
+   ],
+   "r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution": [
+    "16",
+    "32"
+   ],
+   "r.SkyAtmosphere.AerialPerspectiveLUT.Width": [
+    "32",
+    "32"
+   ],
+   "r.SkyAtmosphere.TransmittanceLUT.SampleCount": [
+    "10",
+    "30"
+   ],
+   "r.SkyAtmosphere.MultiScatteringLUT.SampleCount": [
+    "15",
+    "20"
+   ],
+   "r.SkyAtmosphere.DistanceToSampleCountMax": [
+    "150",
+    "150"
+   ]
+  },
+  "cvars_skipped": [],
+  "cvar_fields": {
+   "view_ray_sample_max": "r.VolumetricCloud.ViewRaySampleMaxCount",
+   "shadow_ray_sample_max": "r.VolumetricCloud.Shadow.ViewRaySampleMaxCount",
+   "distance_to_sample_max_km": "r.VolumetricCloud.DistanceToSampleMaxCount",
+   "sample_min_count": "r.VolumetricCloud.SampleMinCount",
+   "shadowmap_ray_sample_max": "r.VolumetricCloud.ShadowMap.RaySampleMaxCount",
+   "shadowmap_max_resolution": "r.VolumetricCloud.ShadowMap.MaxResolution",
+   "skyao_trace_samples": "r.VolumetricCloud.SkyAO.TraceSampleCount",
+   "ap_lut_depth_km": "r.SkyAtmosphere.AerialPerspectiveLUT.Depth",
+   "ap_lut_depth_resolution": "r.SkyAtmosphere.AerialPerspectiveLUT.DepthResolution",
+   "ap_lut_width": "r.SkyAtmosphere.AerialPerspectiveLUT.Width",
+   "transmittance_lut_samples": "r.SkyAtmosphere.TransmittanceLUT.SampleCount",
+   "multiscatter_lut_samples": "r.SkyAtmosphere.MultiScatteringLUT.SampleCount",
+   "sky_distance_to_sample_max_km": "r.SkyAtmosphere.DistanceToSampleCountMax"
+  },
+  "cvars_basis": "sky step 3: each value is [before, read back]; before is read when this lane runs, ahead of the render path's Cinematic scalability pass, which sets at scalability priority and cannot lower a code-priority value, so what is read back here is what the captures draw with. The constrained row repeats what the render laptop drew with before this step (the engine's registration default, or the Cinematic group's value for AP DepthResolution 32, TransmittanceLUT.SampleCount 30, MultiScatteringLUT.SampleCount 20): a recorded no-op. Every cvar is put back by RestoreCvars at teardown. r.VolumetricCloud.DistanceToSampleMaxCount also governs the sky-light capture's step count: the engine sets InvDistanceToSampleCountMax once, for every trace, and its reflection pass re-derives only the two sample caps, so the probe's 8 km lengthens that capture's march too (up to 15/8 x per short in-layer path) in the submission that hung r87 (887a0006); the Windows TDR is its pass or fail. UNCALIBRATED; the discrete and probe rows are UNMEASURED",
+  "render_path_owned": [
+   "r.SkyAtmosphere.FastSkyLUT",
+   "r.SkyAtmosphere.AerialPerspectiveLUT.FastApplyOnOpaque",
+   "r.SkyAtmosphere.MultiScatteringLUT.HighQuality",
+   "r.SkyAtmosphere.LUT32",
+   "r.SkyAtmosphere.SampleCountMax",
+   "r.SkyAtmosphere.AerialPerspectiveLUT.SampleCountMaxPerSlice",
+   "r.VolumetricCloud",
+   "r.VolumetricCloud.HighQualityAerialPerspective",
+   "r.VolumetricRenderTarget.Mode"
+  ],
+  "render_path_owned_basis": "one owner per cvar: these are the render commandlet's (render_settings.beauty_path.read_back holds their final values); this lane never sets them. The sky-light capture's SetReflectionViewSampleCountScale and r.VolumetricCloud.ReflectionRaySampleMaxCount / Shadow.ReflectionRaySampleMaxCount are the commandlet's caps on that capture's SampleCountMax / ShadowSampleCountMax; they do NOT isolate the capture from this table: r.VolumetricCloud.DistanceToSampleMaxCount sets InvDistanceToSampleCountMax for every trace, the capture's included, so the probe tier's 8 km raises the capture's per-ray step count (up to 15/8 x) under those caps"
+ },
+ "distant_clouds": {
+  "mode": "off",
+  "engine_content": "UE 5.7 still ships /Engine/EngineSky/BP_Sky_Sphere with M_Sky_Panning_Clouds, M_Sky_Panning_Clouds2(_Inst) and T_Sky_Clouds_M (read in the engine content on 2026-11-10); not used: a sky sphere covers the SkyAtmosphere",
+  "labels": "a translucent unlit disc: no depth write, no custom depth, no shadow; in BeautyOnlyActors, so every label capture hides it (mask, class, depth and boxes untouched); the measure quality never builds it",
+  "pixel_moving": false,
+  "calibration": "UNCALIBRATED: set by probe render on the render machine",
+  "drawn": "nothing (-distant-clouds=off)"
+ },
+ "hdri_sky": {
+  "switch": "off",
+  "calibration": "UNCALIBRATED: set by probe render on the render machine",
+  "measured": "UNMEASURED until a Windows render",
+  "labels": "the sky light lights the beauty only; the backdrop sphere is in BeautyOnlyActors (every label capture hides it), unlit translucent, no depth, custom depth or velocity, no shadow",
+  "sky": "the captured scene (-look-hdri=off: nothing built)"
+ }
+}
