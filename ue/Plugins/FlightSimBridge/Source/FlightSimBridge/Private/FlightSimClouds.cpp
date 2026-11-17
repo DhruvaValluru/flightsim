@@ -2488,6 +2488,10 @@ bool FFlightSimWorldBeauty::Build(UWorld* World, const TCHAR* Params, const TSha
 	KeepAircraftClearOfClouds(Card, Aircraft, Weather);
 	// Visual round 5, lane L3: the far deck and the horizon (after the clearance:
 	// the sheet follows the slab that is drawn), then the sky HDRI probe.
+	if (bStockCloudsFromAbove)
+	{
+		DistantMode = TEXT("off");   // r150: the stock cloud from above draws its own far deck
+	}
 	ApplyDistantClouds(World, Scene, Weather, DistantMode, Seed);
 	// Round 147 (r146 #13): the aerial-perspective LUT to the horizon for a high camera.
 	ApplyHighAltitudeAerialPerspective(Aircraft);
@@ -3812,13 +3816,11 @@ void FFlightSimWorldBeauty::ApplyClouds(UWorld* World, FFlightSimVisualScene& Sc
 		// ours (the MID above stays as the bookkeeping's; it draws nothing). Not
 		// loadable (plugin off): ours stays and the record says so.
 		FString EpicMaterialDrawn = TEXT("not asked");
-		// r150: auto = the engine's stock cloud on cumulus-family layers (the owner's
-		// call: UE's default clouds read better than ours from above); decks keep ours.
-		const bool bStockCumulus = State.Shape == CloudCumulus || State.Shape == CloudStratocumulus ||
-		                           State.Shape == CloudAltocumulus;
-		const FString MaterialWord = CloudMaterialSwitch == TEXT("auto")
-		                                 ? FString(bStockCumulus ? TEXT("engine") : TEXT("ours"))
-		                                 : CloudMaterialSwitch;
+		// r150: auto draws ours here; KeepAircraftClearOfClouds swaps in the engine's
+		// stock cloud on a cumulus-family layer the aircraft is ABOVE (Windows r1502:
+		// UE's stock cloud reads as real cumulus seen from above, ours as flat cut-outs;
+		// r1501: from below, #3's ours reads better than the stock one).
+		const FString MaterialWord = CloudMaterialSwitch == TEXT("auto") ? FString(TEXT("ours")) : CloudMaterialSwitch;
 		if (MaterialWord == TEXT("epic") || MaterialWord == TEXT("engine"))
 		{
 			const char* StockPath = MaterialWord == TEXT("engine") ? CloudMaterialEnginePath() : CloudMaterialEpicPath();
@@ -4080,6 +4082,7 @@ void FFlightSimWorldBeauty::KeepAircraftClearOfClouds(const TSharedPtr<FJsonObje
 		     "moves clear of it with its thickness kept (a rain or storm deck above, others to the nearer side); "
 		     "UNCALIBRATED"));
 	TArray<TSharedPtr<FJsonValue>> Rows;
+	bStockCloudsFromAbove = false;
 	for (FCloudLayerState& State : CloudLayers)
 	{
 		const FLayerClear Clear =
@@ -4100,6 +4103,26 @@ void FFlightSimWorldBeauty::KeepAircraftClearOfClouds(const TSharedPtr<FJsonObje
 		}
 		Row->SetNumberField(TEXT("base_m"), State.BaseM);
 		Row->SetNumberField(TEXT("top_m"), State.TopM);
+		// r150 -cloud-material=auto: a cumulus-family layer below the aircraft draws the
+		// engine's stock cloud (and the distant sheet is skipped: r1502 against r150).
+		const bool bCumulusFamily = State.Shape == CloudCumulus || State.Shape == CloudStratocumulus ||
+		                            State.Shape == CloudAltocumulus;
+		FString AutoDrawn = TEXT("ours");
+		if (CloudMaterialSwitch == TEXT("auto") && bCumulusFamily && AircraftUpM > State.TopM && State.Component != nullptr)
+		{
+			UMaterialInterface* Stock = LoadObject<UMaterialInterface>(nullptr, ANSI_TO_TCHAR(CloudMaterialEnginePath()));
+			if (Stock != nullptr)
+			{
+				State.Component->SetMaterial(Stock);
+				bStockCloudsFromAbove = true;
+				AutoDrawn = Stock->GetPathName();
+			}
+			else
+			{
+				AutoDrawn = TEXT("engine stock cloud unloadable: ours drawn");
+			}
+		}
+		Row->SetStringField(TEXT("cloud_material_auto"), AutoDrawn);
 		Rows.Add(MakeShared<FJsonValueObject>(Row));
 	}
 	Out->SetArrayField(TEXT("layers"), Rows);

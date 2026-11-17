@@ -315,7 +315,8 @@ private:
 	// flat-base albedo: FlightSimWorldPure::CloudLightRow; off is c9e13c53) and
 	// -cloud-material=ours|epic (the Volumetrics plugin's cloud material, an A/B).
 	FString CloudLightSwitch = TEXT("off");   // off by default until the Windows A/B (not seen in a Mac capture)
-	FString CloudMaterialSwitch = TEXT("auto");   // r150: engine stock cloud on cumulus
+	FString CloudMaterialSwitch = TEXT("auto");   // r150: engine stock cloud on cumulus below the aircraft
+	bool bStockCloudsFromAbove = false;   // r150: set by KeepAircraftClearOfClouds; skips the distant sheet
 	// Lane rain-grey: -cloud-deck-scatter=round95|beauty (a deck's scattering node:
 	// FlightSimWorldPure::CloudDeckScatterRow; beauty is sky step 1's on every shape).
 	FString CloudDeckScatterSwitch = TEXT("beauty");   // round 147: beauty by default
