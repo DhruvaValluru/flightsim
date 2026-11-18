@@ -1,0 +1,15 @@
+{
+ "steps_off": [
+  "upscale"
+ ],
+ "frames": {
+  "01_golden_hour_a_4_flying_east": {
+   "post": "01_golden_hour_a_4_flying_east_post.jpg",
+   "source": "01_golden_hour_a_4_flying_east_frame_beauty_post.png"
+  },
+  "13_747_cruise_over_the_ocean": {
+   "post": "13_747_cruise_over_the_ocean_post.jpg",
+   "source": "13_747_cruise_over_the_ocean_frame_beauty_post.png"
+  }
+ }
+}
