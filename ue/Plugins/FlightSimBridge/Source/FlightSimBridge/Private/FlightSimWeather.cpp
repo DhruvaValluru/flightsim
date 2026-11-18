@@ -1091,8 +1091,11 @@ FFlightSimFlashPower FFlightSimWeather::WindowPower(const FFlightSimLightCurve& 
 		const double Lit = C.LeaderWPerM * WeatherOverlap(A, B, Flash.LeaderStartS, Flash.LeaderEndS);
 		Main += Lit;
 		Branch += Lit;
-		Progress = FMath::Clamp((B - Flash.LeaderStartS) / (Flash.LeaderEndS - Flash.LeaderStartS),
-		                        0.0, 1.0);
+		// A zero-length leader (start == end) is complete at its start, not NaN.
+		const double LeaderSpanS = Flash.LeaderEndS - Flash.LeaderStartS;
+		Progress = LeaderSpanS > 0.0
+			? FMath::Clamp((B - Flash.LeaderStartS) / LeaderSpanS, 0.0, 1.0)
+			: (B >= Flash.LeaderStartS ? 1.0 : 0.0);
 	}
 	else
 	{
@@ -1671,6 +1674,14 @@ bool FFlightSimWeather::BuildRain(UWorld* World, const TSharedPtr<FJsonObject>& 
 	    !WeatherVector(Rain, TEXT("box_half_m"), 3, Box, TEXT("weather.rain"), Error) ||
 	    !WeatherVector(Rain, TEXT("wind_enu_mps"), 3, Wind, TEXT("weather.rain"), Error))
 	{
+		return false;
+	}
+	// The drop sampler divides by lambda and by the size span (SampleDiameterMm,
+	// D0Mm): refuse a card that would turn every drop into NaN.
+	if (!(RainLambda > 0.0) || !(RainDMaxMm > RainDMinMm))
+	{
+		Error = FString::Printf(TEXT("weather.rain: lambda %g must be > 0 and d_max_mm %g > d_render_min_mm %g"),
+		                        RainLambda, RainDMaxMm, RainDMinMm);
 		return false;
 	}
 	// The card masks the seed to 53 bits, so the JSON number carries it

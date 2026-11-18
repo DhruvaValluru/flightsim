@@ -2165,7 +2165,16 @@ void FFlightSimAircraftFX::Advance(TFunctionRef<double(const TCHAR*)> ReadProper
 			if (bFirstAdvance && !Trail.bVapour)
 			{
 				const double Preseed = Constant(TEXT("contrail"), TEXT("PreseedS"), 8.0);
-				const FVector Back = -Frame.GetUnitAxis(EAxis::X) * SpeedCmS;
+				// Along the air-relative velocity, not the nose: at a cruise
+				// angle of attack (1.5 deg in #13) the nose line put the 8 s
+				// trail ~50 m low at its far end. JSBSim body axes (z down)
+				// to the actor's (Z up); absent properties read 0 (the nose).
+				const double AlphaRad = FMath::DegreesToRadians(ReadProperty(TEXT("aero/alpha-deg")));
+				const double BetaRad = FMath::DegreesToRadians(ReadProperty(TEXT("aero/beta-deg")));
+				const FVector VelocityBody(FMath::Cos(AlphaRad) * FMath::Cos(BetaRad), FMath::Sin(BetaRad),
+				                           -FMath::Sin(AlphaRad) * FMath::Cos(BetaRad));
+				const FVector Back = -Frame.TransformVectorNoScale(VelocityBody).GetSafeNormal(
+					UE_SMALL_NUMBER, Frame.GetUnitAxis(EAxis::X)) * SpeedCmS;
 				for (double Ago = Preseed; Ago > 0.0; Ago -= 0.5)
 				{
 					FTrailSample Seed;

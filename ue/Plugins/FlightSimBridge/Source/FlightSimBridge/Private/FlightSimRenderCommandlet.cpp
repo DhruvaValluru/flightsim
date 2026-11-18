@@ -2299,6 +2299,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	FParse::Value(*Params, TEXT("fps="), FramesPerSecond);
 	FParse::Value(*Params, TEXT("width="), Width);
 	FParse::Value(*Params, TEXT("height="), Height);
+	// fps divides the physics steps per frame and the motion-blur shutter;
+	// width / height divide the projection and size the render targets.
+	if (!(FramesPerSecond > 0.0) || Width <= 0 || Height <= 0)
+	{
+		UE_LOG(LogFlightSimRender, Error,
+		       TEXT("render.args: -fps=%g, -width=%d, -height=%d: each must be > 0"),
+		       FramesPerSecond, Width, Height);
+		return 1;
+	}
 	// Discarded warm-up captures (see the loop before the first frame).
 	// Two is the measured minimum for a non-blank frame and is a floor:
 	// fewer would put black frames into the run. Beauty wants more, so
@@ -7387,7 +7396,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			const double Fraction = FMath::Clamp(Time / Duration, 0.0, 1.0);
 			const double Elev = FMath::Lerp(SunElevationDeg, SunElevationEndDeg, Fraction);
-			const double Azim = FMath::Lerp(SunAzimuthDeg, SunAzimuthEndDeg, Fraction);
+			// The short way round: 350 -> 10 sweeps 20 deg through north, not
+			// 340 deg back through south.
+			const double Azim = SunAzimuthDeg
+				+ FMath::FindDeltaAngleDegrees(SunAzimuthDeg, SunAzimuthEndDeg) * Fraction;
 			VisualScene.Sun->SetActorRotation(FRotator(-Elev, Azim + 180.0, 0.0));
 		}
 		// W5: the world look per tick at the FDM's own time -- the cloud

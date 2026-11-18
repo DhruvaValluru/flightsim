@@ -333,6 +333,11 @@ render.still_samples:
 render.pathtrace:
   sentence: "The path-traced render cannot run here: it needs the Windows render host with hardware ray tracing turned on for that render, and it renders stills, not clips (a clip would take hours)."
   hint: "Render the path-traced sheet on the Windows box as stills (pass -pathtrace-clip only to mean a path-traced clip), or ask for the beauty quality instead."
+# FlightSimRenderCommandlet.cpp: -fps, -width and -height must each be > 0
+# (they divide the physics steps per frame, the shutter and the projection).
+render.args:
+  sentence: "The render was given a frame rate or an image size of zero or less, so it cannot run."
+  hint: "Leave -fps, -width and -height out to use the defaults, or give each a positive number."
 # no-lumen-and-machine lane (FlightSimBeautyFallback.cpp): the beauty look
 # without Lumen is chosen by -beauty-fallback=auto|force|off.
 render.beauty_fallback_mode:
