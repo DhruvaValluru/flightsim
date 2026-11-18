@@ -1,0 +1,13 @@
+{
+ "steps_off": [
+  "camera",
+  "lut",
+  "upscale"
+ ],
+ "frames": {
+  "13_747_cruise_over_the_ocean": {
+   "post": "13_747_cruise_over_the_ocean_post.jpg",
+   "source": "13_747_cruise_over_the_ocean_frame_beauty_post.png"
+  }
+ }
+}
