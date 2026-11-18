@@ -921,7 +921,15 @@ CONTRAIL_DEFAULTS = {
     # + CameraFadeLengthM, so the stretch passing beside a chase camera no longer
     # runs to the frame edge at full strength. M_AircraftContrail's
     # CameraFadeOffset / CameraFadeLength defaults (cm). UNCALIBRATED.
-    "CameraFadeOffsetM": 30.0, "CameraFadeLengthM": 120.0,
+    # Round 155 (2026-11-18, #13's four ghost beams; -contrails=off in r1556
+    # removed them): with 30 / 120 the chase camera (~100 m behind a 747, in its
+    # wake) saw only the stretch 30-60 m from the lens, between this fade and the
+    # formation point (FormationDelayS, ~37 m behind the engines, ~68 m from the
+    # camera): four faint beams from mid-frame down. Now the trail is gone nearer
+    # than 80 m and full beyond 130 m: a camera sitting in the wake sees none of
+    # its own young trail, and a trail seen from 130 m or more is unchanged.
+    # The C++ pushes these onto each trail's instance (no material rebuild).
+    "CameraFadeOffsetM": 80.0, "CameraFadeLengthM": 50.0,
     # LOOK_GENERATION 13 (hyperreal contrails; #13's "four bright runway stripes":
     # solid, one width, one brightness, no spreading). Everything UNCALIBRATED.
     # Width: StartWidthM + JetSpreadM (1 - exp(-age / JetMixS)) + SpreadMPerS age.

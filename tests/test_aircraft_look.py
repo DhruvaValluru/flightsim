@@ -863,5 +863,10 @@ def test_the_contrail_fades_in_with_the_camera_distance():
     assert "MaterialExpressionCameraDepthFade" not in body   # absent from UE 5.7's Python (round 93)
     assert "MaterialExpressionPixelDepth" in body and "_saturate(material, ramp" in body
     assert 'connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)' in body
-    assert look.CONTRAIL_DEFAULTS["CameraFadeOffsetM"] == 30.0
-    assert look.CONTRAIL_DEFAULTS["CameraFadeLengthM"] == 120.0
+    # Round 155: past the formation point seen from a chase camera in the wake.
+    assert look.CONTRAIL_DEFAULTS["CameraFadeOffsetM"] == 80.0
+    assert look.CONTRAIL_DEFAULTS["CameraFadeLengthM"] == 50.0
+    cpp = (REPO / "ue" / "Plugins" / "FlightSimBridge" / "Source" / "FlightSimBridge" / "Private"
+           / "FlightSimAircraftFX.cpp").read_text(encoding="utf-8")
+    assert 'Constant(TEXT("contrail"), TEXT("CameraFadeOffsetM")' in cpp
+    assert 'Constant(TEXT("contrail"), TEXT("CameraFadeLengthM")' in cpp

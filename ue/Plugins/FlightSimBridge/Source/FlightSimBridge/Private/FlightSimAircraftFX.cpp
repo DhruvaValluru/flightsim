@@ -767,6 +767,17 @@ bool FFlightSimAircraftFX::Build(UWorld* World, const FFlightSimAircraftFXOption
 		// (contrail_facing.hlsl; RebuildTrail writes the half width on UV3).
 		Instance->SetScalarParameterValue(FName(AircraftFxParamFacing),
 			Options.bContrailFacing ? 1.0f : 0.0f);
+		// Round 155 (#13's ghost beams): the camera-distance fade from the look
+		// constants, not the material's baked default (aircraft_look
+		// CONTRAIL_DEFAULTS CameraFade*; the master's parameters, cm). A wingtip
+		// vapour trail keeps the master's baked fade.
+		if (!bVapour)
+		{
+			Instance->SetScalarParameterValue(FName(TEXT("CameraFadeOffset")), static_cast<float>(
+				AircraftFxCmPerMetre * Constant(TEXT("contrail"), TEXT("CameraFadeOffsetM"), 80.0)));
+			Instance->SetScalarParameterValue(FName(TEXT("CameraFadeLength")), static_cast<float>(
+				AircraftFxCmPerMetre * FMath::Max(Constant(TEXT("contrail"), TEXT("CameraFadeLengthM"), 50.0), 0.01)));
+		}
 		Trail.Mesh->SetMaterial(0, Instance);
 		Trail.Mesh->RegisterComponent();
 		BeautyOnlyActors.Add(Trail.Owner);
