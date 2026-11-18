@@ -59,6 +59,9 @@ param(
     # compile every scene afresh (and re-pin it); by default a round replays the
     # spec pinned in runs\visual\specs\<NN>.json on that scene's first compile
     [switch]$Recompile,
+    # copy each scene's render.json (runs\webapp\<run>\frames\*\render.json) into
+    # the round folder as render\NN_<run>_<camera>.json, so the Mac reads it from git
+    [switch]$KeepRender,
     # the compiler for a scene's FIRST compile (run_test_scenarios.py --compiler);
     # a pinned spec replays whichever compiled it. The stress ladder uses regex.
     [ValidateSet("llm", "regex")][string]$Compiler = "llm",
@@ -242,6 +245,18 @@ if ($Full) {
 
 $summary = @()
 if (Test-Path (Join-Path $out "summary.json")) { $summary = Get-Content (Join-Path $out "summary.json") -Raw | ConvertFrom-Json }
+if ($KeepRender) {
+    $renderOut = Join-Path $out "render"
+    New-Item -ItemType Directory -Force $renderOut | Out-Null
+    foreach ($row in @($summary)) {
+        if (-not $row.run_id) { continue }
+        $runDir = Join-Path $repo "runs\webapp\$($row.run_id)"
+        Get-ChildItem (Join-Path $runDir "frames") -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $rj = Join-Path $_.FullName "render.json"
+            if (Test-Path $rj) { Copy-Item $rj (Join-Path $renderOut ("{0:D2}_{1}_{2}.json" -f [int]$row.number, $row.run_id, $_.Name)) }
+        }
+    }
+}
 $record = [ordered]@{
     round = $Round; commit = $head; full = [bool]$Full; scenes = $sceneList; switches = $Switches
     prep = $steps; seconds = $timings
