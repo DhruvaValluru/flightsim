@@ -115,14 +115,15 @@ CAMERA = {"chroma_knee": 0.6, "chroma_limit": 1.0, "highlight_from": 0.85,
 
 @pytest.mark.parametrize("value, expect", [
     (None, None), ("", None), ("off", None), ("OFF", None), ("0", None),
-    # The upscale is opt-in: ``on`` alone leaves it off (it invents detail).
-    ("on", frozenset({"upscale"})), ("On", frozenset({"upscale"})),
-    ("on,-halation,-upscale", frozenset({"halation", "upscale"})),
-    ("on, no-grain ", frozenset({"grain", "upscale"})),
-    ("on,+upscale", frozenset()), ("ON, +Upscale", frozenset()),
-    ("on,+upscale,-halation", frozenset({"halation"})),
-    ("on,+upscale,-upscale", frozenset({"upscale"})),
-    ("on,-upscale,+upscale", frozenset()),
+    # The upscale, the film LUT and the camera response are opt-in: ``on`` alone leaves them off.
+    ("on", frozenset({"lut", "camera", "upscale"})), ("On", frozenset({"lut", "camera", "upscale"})),
+    ("on,-halation,-upscale", frozenset({"lut", "camera", "halation", "upscale"})),
+    ("on, no-grain ", frozenset({"lut", "camera", "grain", "upscale"})),
+    ("on,+upscale", frozenset({"lut", "camera"})), ("ON, +Upscale", frozenset({"lut", "camera"})),
+    ("on,+upscale,-halation", frozenset({"lut", "camera", "halation"})),
+    ("on,+upscale,-upscale", frozenset({"lut", "camera", "upscale"})),
+    ("on,-upscale,+upscale", frozenset({"lut", "camera"})),
+    ("on,+lut,+camera,+upscale", frozenset()),
 ])
 def test_the_switch_parses(value, expect):
     assert bp.parse_switch(value) == expect
@@ -141,15 +142,15 @@ def test_wanted_reads_the_environment(monkeypatch):
     monkeypatch.delenv("FLIGHTSIM_BEAUTY_POST", raising=False)
     assert bp.wanted() is None
     monkeypatch.setenv("FLIGHTSIM_BEAUTY_POST", "on,-upscale")
-    assert bp.wanted() == frozenset({"upscale"})
+    assert bp.wanted() == frozenset({"lut", "camera", "upscale"})
     monkeypatch.setenv("FLIGHTSIM_BEAUTY_POST", "on")
-    assert bp.wanted() == frozenset({"upscale"}), "on alone must not upscale"
-    monkeypatch.setenv("FLIGHTSIM_BEAUTY_POST", "on,+upscale")
+    assert bp.wanted() == frozenset({"lut", "camera", "upscale"}), "on alone must not upscale or grade"
+    monkeypatch.setenv("FLIGHTSIM_BEAUTY_POST", "on,+upscale,+lut,+camera")
     assert bp.wanted() == frozenset()
 
 
-def test_the_upscale_is_the_only_opt_in_step():
-    assert bp.OPT_IN_STEPS == ("upscale",)
+def test_the_opt_in_steps():
+    assert bp.OPT_IN_STEPS == ("lut", "camera", "upscale")
     assert set(bp.OPT_IN_STEPS) <= set(bp.STEPS)
 
 

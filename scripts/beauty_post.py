@@ -90,13 +90,18 @@ BEAUTY_POST_VERSION = 3
 #: isolated it, halation off and an 8-bit blend both clean).
 #: The environment switch (core/config_surface.py): ``on`` runs every step
 #: but the opt-in ones, ``on,-halation`` (or ``no-halation``) leaves steps
-#: out, ``on,+upscale`` adds an opt-in step, ``off`` or unset runs nothing.
+#: out, ``on,+upscale`` (or ``+lut``, ``+camera``) adds an opt-in step, ``off`` or unset runs nothing.
 ENV_SWITCH = "FLIGHTSIM_BEAUTY_POST"
 STEPS = ("denoise", "lut", "camera", "halation", "grain", "vignette", "upscale")
 #: Steps that run only when a ``+<step>`` word asks for them. The upscale
 #: invents detail (Real-ESRGAN hallucinates texture) and changes the pixel
 #: grid the labels are measured on, so ``on`` alone never runs it.
-OPT_IN_STEPS = ("upscale",)
+#: 2026-11-18: the film-stock LUT and the camera response are opt-in too. On
+#: round 151 they took every frame darker and greyer than the engine's own:
+#: #01's golden warmth (raw RGB 0.47/0.39/0.38 -> 0.37/0.31/0.31) and #13's
+#: sky (blue 0.48 -> 0.32, the "dark navy"); the Portra/Ektachrome cubes alone,
+#: applied to the raw frames on the Mac, account for about half of it.
+OPT_IN_STEPS = ("lut", "camera", "upscale")
 #: World presets (core/scene/world_beauty.py PRESETS, recorded in the beauty
 #: look as world_preset) whose frames are noisy enough to denoise: fog,
 #: rain, storm. A clear or overcast frame keeps its pixels.
@@ -185,8 +190,8 @@ class BeautyPostError(RuntimeError):
 def parse_switch(value: Optional[str]) -> Optional[FrozenSet[str]]:
     """``FLIGHTSIM_BEAUTY_POST`` -> the steps switched OFF (a frozenset) when
     the pipeline runs, None when it does not. ``on`` runs every step but the
-    opt-in ones (:data:`OPT_IN_STEPS`: the upscale), so ``on`` is
-    ``{"upscale"}``; ``on,-halation,no-grain`` leaves those out too;
+    opt-in ones (:data:`OPT_IN_STEPS`: the film LUT, the camera response
+    and the upscale), so ``on`` is ``{"lut", "camera", "upscale"}``; ``on,-halation,no-grain`` leaves those out too;
     ``on,+upscale`` runs the upscale as well; ``off`` or empty runs nothing.
     Words apply left to right. An unknown word, or ``+`` on a step that is
     not opt-in, is refused by name (beauty_post.switch)."""
