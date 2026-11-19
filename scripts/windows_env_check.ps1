@@ -74,11 +74,11 @@ else { $facts.tiles = "repo fallback"; Ok "tiles" "no variable; the engine's bui
 
 # 8. git: on the pipeline branch, nothing uncommitted, origin reachable
 $branch = (git rev-parse --abbrev-ref HEAD).Trim(); $facts.branch = $branch
-if ($branch -ne "phase-2-final") { Fail "git.branch" "on $branch, the pipeline runs on phase-2-final" } else { Ok "git" "branch $branch" }
+if ($branch -ne "claude/vibrant-gauss-olema4") { Fail "git.branch" "on $branch, the pipeline runs on claude/vibrant-gauss-olema4" } else { Ok "git" "branch $branch" }
 $dirty = git status --porcelain | Where-Object { $_ -notmatch "^\?\? " }
 if ($dirty) { Fail "git.dirty" "uncommitted changes: $(($dirty | Measure-Object).Count) files; commit or stash before proving" }
-Invoke-Quiet { git ls-remote --exit-code origin phase-2-final }
-if ($LASTEXITCODE -ne 0) { Fail "git.origin" "origin phase-2-final not reachable" }
+Invoke-Quiet { git ls-remote --exit-code origin claude/vibrant-gauss-olema4 }
+if ($LASTEXITCODE -ne 0) { Fail "git.origin" "origin claude/vibrant-gauss-olema4 not reachable" }
 
 # 9. the built game module the editor commandlets need
 if (-not (Test-Path "ue\Binaries\Win64\UnrealEditor-FlightSim.dll")) { Ok "ue_binaries" "absent; the runner builds once (stamp stale)" } else { $facts.ue_binaries = "present"; Ok "ue_binaries" "present" }

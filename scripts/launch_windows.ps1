@@ -131,8 +131,15 @@ function Start-FlightSimServer {
 }
 
 Invoke-Step 1 "install" {
-    $out = Invoke-Logged "powershell" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+    # The branch this folder is ON, not deploy_windows.ps1's default: a clone
+    # of another branch was switched to the default by this step and then
+    # built that branch's older code (2026-11-18, a fresh clone landed on
+    # phase-2-final). A detached checkout keeps the repository default.
+    $branch = "$(git -C $repo rev-parse --abbrev-ref HEAD 2>$null)".Trim()
+    $deployArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
         (Join-Path $PSScriptRoot "deploy_windows.ps1"), "-NoLaunch", "-InstallDir", $repo)
+    if ($branch -and $branch -ne "HEAD") { $deployArgs += @("-Branch", $branch) }
+    $out = Invoke-Logged "powershell" $deployArgs
     if ($script:lastExit -ne 0) { Stop-With "install" (Find-NamedReason $out "install.lock_failed") }
     if (-not (Test-Path $venvPython)) { Stop-With "install" "install.venv_failed: no $venvPython" }
     # The native JSBSim library is built here, not committed: a fresh download

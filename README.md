@@ -173,7 +173,7 @@ Per-OS setup notes:
   starts the server and opens the browser):
 
   ```powershell
-  irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/phase-2-final/scripts/deploy_windows.ps1 | iex
+  irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/claude/vibrant-gauss-olema4/scripts/deploy_windows.ps1 | iex
   ```
 
   Install Python 3.12: both setup scripts install the hashed

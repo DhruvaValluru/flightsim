@@ -2,7 +2,7 @@
 #
 # From any PowerShell window (no clone needed first):
 #
-#   irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/phase-2-final/scripts/deploy_windows.ps1 | iex
+#   irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/claude/vibrant-gauss-olema4/scripts/deploy_windows.ps1 | iex
 #
 # or, from an existing clone:  .\scripts\deploy_windows.ps1
 #
@@ -20,7 +20,7 @@
 # `& ([scriptblock]::Create((irm <url>))) -Branch x`):
 #   -InstallDir  where to clone (default ~\flightsim; an existing clone
 #                run from inside itself is reused in place)
-#   -Branch      branch to check out (default phase-2-final, the repository's default)
+#   -Branch      branch to check out (default claude/vibrant-gauss-olema4, the repository's default)
 #   -NoLaunch    set up only; do not start the server or browser
 #   -Reset       make the clone EXACTLY the remote branch (git reset
 #                --hard origin/<branch>): local edits and local commits
@@ -37,7 +37,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallDir = "",
-    [string]$Branch = "phase-2-final",
+    [string]$Branch = "claude/vibrant-gauss-olema4",
     [switch]$NoLaunch,
     [switch]$Reset
 )
