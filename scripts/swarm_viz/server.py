@@ -35,7 +35,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_BASE = "claude/vibrant-gauss-olema4"
+DEFAULT_BASE = "phase-3-completed"
 RUFLO_PKG = "ruflo@3.74.1"
 
 ACTIVE_WINDOW_S = 45.0  # an agent transcript touched within this many seconds is "active"

@@ -12,15 +12,15 @@
 #
 # WHICH CODE THE FOUR FRAMES RENDER (the precondition). visual_fix_round.ps1 step 1
 # checks out a branch and fast-forwards it FROM ORIGIN (by default
-# claude/vibrant-gauss-olema4), so the laptop renders origin's copy of that branch,
+# phase-3-completed), so the laptop renders origin's copy of that branch,
 # never the checkout you stand on. This script passes -Branch (default: the branch
 # of the current checkout) through, and refuses by name (compare.wrong_branch) when
 # origin/<branch> does not carry scripts/sky_contact_sheet.py and PLAN_CLOUD_SHAPES in
 # core/scene/world_beauty.py: a host before sky step 2 (such as fbcbaa5d) does not
 # parse -cloud-type=, ignores it silently, and would render four frames of the same
 # look. So, before this command measures anything, claude/xplane-sky must be pushed
-# (then run it from that checkout), or merged into claude/vibrant-gauss-olema4 and
-# pushed (then run it from that checkout, or pass -Branch claude/vibrant-gauss-olema4).
+# (then run it from that checkout), or merged into phase-3-completed and
+# pushed (then run it from that checkout, or pass -Branch phase-3-completed).
 # What it does:
 #
 #  0. The branch check above; a refusal (compare.round_exists) when any of the four
@@ -125,7 +125,7 @@ if (-not $Branch) { $Branch = (git rev-parse --abbrev-ref HEAD).Trim() }
 git fetch -q origin
 if ($LASTEXITCODE -ne 0) { Refuse "git.fetch" "git fetch failed" }
 git rev-parse -q --verify "origin/$Branch" 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) { Refuse "compare.wrong_branch" "origin has no branch $Branch; push it, or merge claude/xplane-sky into claude/vibrant-gauss-olema4, push, and pass -Branch claude/vibrant-gauss-olema4" }
+if ($LASTEXITCODE -ne 0) { Refuse "compare.wrong_branch" "origin has no branch $Branch; push it, or merge claude/xplane-sky into phase-3-completed, push, and pass -Branch phase-3-completed" }
 git cat-file -e "origin/${Branch}:scripts/sky_contact_sheet.py" 2>$null
 if ($LASTEXITCODE -ne 0) { Refuse "compare.wrong_branch" "origin/$Branch has no scripts/sky_contact_sheet.py: sky step 8 is not on it; merge claude/xplane-sky into it and push first" }
 $worldBeauty = @(git show "origin/${Branch}:core/scene/world_beauty.py" 2>$null)

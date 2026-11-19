@@ -30,7 +30,7 @@
 # ladder never reuses a visual round's number. Commit nothing; the Claude
 # session that ran it reports budget.json.
 #
-# Needs this script on claude/vibrant-gauss-olema4 (the round script checks
+# Needs this script on phase-3-completed (the round script checks
 # that branch out; refused as ladder.not_on_round_branch otherwise).
 # Exit: 0 tier 0 sustained, 1 it was not, 3 refused by name ("REFUSED <rule>: ...").
 # A run whose round script threw (not exited) is judged with exit code 98.
@@ -93,12 +93,12 @@ $counters = [ordered]@{
 if (-not (Test-Path $py)) { Refuse "python.venv" "no $py -- run .\scripts\setup.ps1 first" }
 if (-not (Test-Path $round)) { Refuse "ladder.no_round_script" "no $round" }
 if (-not (Get-Command typeperf -ErrorAction SilentlyContinue)) { Refuse "ladder.no_typeperf" "typeperf.exe is not on PATH" }
-# visual_fix_round.ps1 checks out and fast-forwards claude/vibrant-gauss-olema4
+# visual_fix_round.ps1 checks out and fast-forwards phase-3-completed
 # on every run, so the ladder (and the round script's -Compiler / -SpecDir)
 # must be on that branch, or the first run swaps them out from under it.
 git fetch -q origin
-git cat-file -e "origin/claude/vibrant-gauss-olema4:scripts/stress_ladder.py" 2>$null
-if ($LASTEXITCODE -ne 0) { Refuse "ladder.not_on_round_branch" "scripts\stress_ladder.py is not on origin/claude/vibrant-gauss-olema4 yet; merge it there first" }
+git cat-file -e "origin/phase-3-completed:scripts/stress_ladder.py" 2>$null
+if ($LASTEXITCODE -ne 0) { Refuse "ladder.not_on_round_branch" "scripts\stress_ladder.py is not on origin/phase-3-completed yet; merge it there first" }
 $busy = $false
 try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$Port/status" -TimeoutSec 3 | Out-Null; $busy = $true } catch { }
 if ($busy) { Refuse "ladder.port_busy" "something already answers on port $Port; it would render without the tier's switches. Stop it or pass -Port" }

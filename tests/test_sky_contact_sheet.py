@@ -392,7 +392,7 @@ def test_the_sheet_reads_the_keys_the_host_writes():
 def test_the_powershell_renders_four_rounds_of_one_scene_on_the_branch_it_stands_on():
     """sky_compare_round.ps1: FLIGHTSIM_SKY stated, the branch checked against origin
     before round 1 (visual_fix_round.ps1 checks out and fast-forwards -Branch FROM
-    ORIGIN, default claude/vibrant-gauss-olema4; a host before sky step 2 ignores
+    ORIGIN, default phase-3-completed; a host before sky step 2 ignores
     -cloud-type=), visual_fix_round.ps1 called once per word with -cloud-type=<word>,
     the same scene / old round / branch, then sky_contact_sheet.py into
     docs\\visual\\sky_compare\\round_<N> with the worktree as the fallback root;
@@ -419,8 +419,8 @@ def test_the_powershell_renders_four_rounds_of_one_scene_on_the_branch_it_stands
     assert PS1.index('Refuse "compare.wrong_branch"') < PS1.index("& $fixRound @fixArgs")
     assert PS1.index('Refuse "compare.round_exists"') < PS1.index("& $fixRound @fixArgs")
     # visual_fix_round.ps1 took -Branch with the old hard-coded value as its default
-    assert '[string]$Branch = "claude/vibrant-gauss-olema4",' in FIX_PS1
-    assert '$branch = "claude/vibrant-gauss-olema4"' not in FIX_PS1
+    assert '[string]$Branch = "phase-3-completed",' in FIX_PS1
+    assert '$branch = "phase-3-completed"' not in FIX_PS1
     assert "git checkout -q $branch" in FIX_PS1 and 'git merge -q --ff-only "origin/$branch"' in FIX_PS1
     # the old round's second home, the same as visual_fix_round.ps1 step 4b's
     assert '$wtVisual = Join-Path $wt "docs\\visual"' in PS1
@@ -468,7 +468,9 @@ def test_the_docs_name_the_script_the_location_the_precondition_and_the_unmeasur
         assert "docs/visual/sky_compare/round_" in text, name
         assert "UNMEASURED" in text, name
         # the precondition: visual_fix_round.ps1 renders origin's copy of a branch
-        assert "claude/vibrant-gauss-olema4" in text and "merged into" in text, name
+        # the branch was renamed claude/vibrant-gauss-olema4 -> phase-3-completed
+        # (2026-11-18); the dated docs keep the name they were written under
+        assert ("phase-3-completed" in text or "claude/vibrant-gauss-olema4" in text) and "merged into" in text, name
         assert "-Branch" in text, name
         assert "switch_not_seen" in text, name
     assert "### Sky step 8" in PLAN
