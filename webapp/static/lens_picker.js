@@ -70,6 +70,16 @@ const STYLE = `
 .lensPicker summary { cursor: default; list-style: none; }
 .lensPicker summary::-webkit-details-marker { display: none; }
 .lensPicker .lpBody { margin-top: .6rem; }
+.lensPicker .lpInsert { background: linear-gradient(135deg, #f0a030, #e0662a); color: #1a1208;
+  font-weight: 700; font-size: 1.05rem; letter-spacing: .03em; border: 0; border-radius: 999px;
+  padding: .6rem 1.6rem; margin: 0 .5rem; cursor: pointer;
+  box-shadow: 0 0 0 1px #ffb54d, 0 3px 14px rgba(240,140,40,.45);
+  transition: transform .12s ease, box-shadow .12s ease, background .2s ease; }
+.lensPicker .lpInsert:hover { transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 0 0 1px #ffc670, 0 5px 18px rgba(240,140,40,.6); }
+.lensPicker .lpInsert:active { transform: scale(.98); }
+.lensPicker .lpInsert.lpConfirmed { background: linear-gradient(135deg, #43c47a, #2f9d5c); color: #08180f;
+  box-shadow: 0 0 0 1px #6be09b, 0 3px 14px rgba(60,190,110,.5); }
 .lensPicker .lpViews { display: flex; flex-wrap: wrap; gap: .6rem;
   align-items: flex-start; }
 .lensPicker canvas { display: block; border-radius: 6px;
@@ -307,7 +317,7 @@ function mount(holder, textarea) {
     `aircraft (left and right go round it, up and down go higher or lower); ` +
     `scroll to come closer or pull back; or type the exact position. The ` +
     `zoom slider is the lens's focal length: bigger is more zoomed in. The ` +
-    `small view shows where the camera is. "Add to prompt" writes the ` +
+    `small view shows where the camera is. "Confirm camera angle" writes the ` +
     `position and the lens into the prompt, and the camera follows the ` +
     `aircraft from there.</div>` +
     `<div class="lpRow"><label>sample aircraft <select class="lpAircraft">${options}</select></label></div>` +
@@ -326,7 +336,7 @@ function mount(holder, textarea) {
     `<div class="lpGrid lpXyz"></div>` +
     `<div class="lpDim lpStats"></div>` +
     `<div class="lpRow">Say it in the prompt: <span class="lpPhrase"></span>` +
-    `<button type="button" class="opt lpInsert">Add to prompt</button>` +
+    `<button type="button" class="lpInsert">&#10003; Confirm camera angle</button>` +
     `<button type="button" class="opt lpCopy">Copy</button>` +
     `<span class="lpDim lpNote"></span></div>` +
     `</div>`;
@@ -603,7 +613,15 @@ function mount(holder, textarea) {
     if (!textarea) return;
     textarea.value = applyCameraToPrompt(textarea.value, toOffset(pose), mm);
     textarea.dispatchEvent(new Event("input", {bubbles: true}));
-    $(".lpNote").textContent = "added to the prompt";
+    $(".lpNote").textContent = "camera angle confirmed: it is in the prompt";
+    const button = $(".lpInsert");
+    button.classList.add("lpConfirmed");
+    button.innerHTML = "&#10003; Camera angle confirmed";
+    clearTimeout(button._lpTimer);
+    button._lpTimer = setTimeout(() => {
+      button.classList.remove("lpConfirmed");
+      button.innerHTML = "&#10003; Confirm camera angle";
+    }, 2200);
   });
   $(".lpCopy").addEventListener("click", async () => {
     try {
