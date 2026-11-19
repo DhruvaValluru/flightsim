@@ -10,7 +10,13 @@
   h1 { font-size: 1.1rem; letter-spacing: .12em; color: #9fb4c7; }
   small, .dim { color: #7d8a93; }
   .promptRow { display: flex; gap: 1rem; align-items: flex-start; }
-  .promptRow textarea { flex: 1 1 auto; min-width: 0; height: 9rem; }
+  .promptMain { flex: 1 1 auto; min-width: 0; }
+  .promptRow textarea { flex: 1 1 auto; min-width: 0; height: 9rem; box-sizing: border-box; }
+  .promptActions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; margin-top: .5rem; }
+  button.interpret { font-size: 1.15rem; font-weight: 700; letter-spacing: .04em;
+                     padding: .75rem 2.4rem; background: #2f7fc4;
+                     box-shadow: 0 0 0 1px #4a9ad8, 0 2px 10px rgba(47,127,196,.45); }
+  button.interpret:hover:not(:disabled) { background: #3a8fd6; }
   .promptRow aside { flex: 0 0 17rem; max-height: 18rem; overflow-y: auto;
                      border: 1px solid #2c3947; border-radius: 6px; padding: .5rem .6rem; }
   @media (max-width: 760px) { .promptRow { flex-direction: column; }
@@ -157,8 +163,36 @@ visual-only per host (measured).</p>
 </div>
 
 <div class="promptRow">
-  <textarea id="prompt"
-    placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
+  <div class="promptMain">
+    <textarea id="prompt"
+      placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
+    <div class="promptActions">
+      <button id="compile" class="interpret">Interpret</button>
+      <label class="dim" title="The clip is min(duration, 22 s); a shorter clip renders proportionally fewer frames. Overrides a duration stated in the prompt, shown as a user edit in the table.">
+        clip <select id="clipSeconds">
+          <option value="">prompt</option>
+          <option value="still">1 frame (preview)</option>
+          <option value="3">3 s</option>
+          <option value="6">6 s</option>
+          <option value="10">10 s</option>
+          <option value="15">15 s</option>
+          <option value="20">20 s</option>
+          <option value="22">22 s</option>
+        </select>
+      </label>
+      <label class="dim" title="Cinematic or beauty renders THIS run at beauty quality (Lumen, 1080p) with the colour grade chosen from the sun and the weather: storm under a storm or rain, golden hour with a low sun, desert noon otherwise. Cinematic adds the cinematic lens (depth of field, a light vignette). The prompt word &quot;cinematic&quot; or &quot;beauty&quot; does the same, except on a run that captures labels (cameras stated), which leaves measure only through this option; the run records which. Visual only.">
+        look <select id="lookSwitch">
+          <option value="">prompt</option>
+          <option value="cinematic">cinematic</option>
+          <option value="beauty">beauty</option>
+          <option value="off">measure (no look)</option>
+        </select>
+      </label>
+      <span id="llmState" class="badge">compiler: checking&hellip;</span>
+      <span id="buildState" class="badge" title="the git branch and commit this server process was started from (GET /status build)">serving: checking&hellip;</span>
+      <span id="compileState" class="dim"></span>
+    </div>
+  </div>
   <aside id="conditionsList"></aside>
 </div>
 <script src="/conditions_list.js"></script>
@@ -194,32 +228,7 @@ visual-only per host (measured).</p>
 </section>
 <script src="/settings.js"></script>
 <script>FlightSimSettings.mount(document.getElementById("settings-panel"));</script>
-<p>
-  <button id="compile">Interpret</button>
-  <label class="dim" title="The clip is min(duration, 22 s); a shorter clip renders proportionally fewer frames. Overrides a duration stated in the prompt, shown as a user edit in the table.">
-    clip <select id="clipSeconds">
-      <option value="">prompt</option>
-      <option value="still">1 frame (preview)</option>
-      <option value="3">3 s</option>
-      <option value="6">6 s</option>
-      <option value="10">10 s</option>
-      <option value="15">15 s</option>
-      <option value="20">20 s</option>
-      <option value="22">22 s</option>
-    </select>
-  </label>
-  <label class="dim" title="Cinematic or beauty renders THIS run at beauty quality (Lumen, 1080p) with the colour grade chosen from the sun and the weather: storm under a storm or rain, golden hour with a low sun, desert noon otherwise. Cinematic adds the cinematic lens (depth of field, a light vignette). The prompt word &quot;cinematic&quot; or &quot;beauty&quot; does the same, except on a run that captures labels (cameras stated), which leaves measure only through this option; the run records which. Visual only.">
-    look <select id="lookSwitch">
-      <option value="">prompt</option>
-      <option value="cinematic">cinematic</option>
-      <option value="beauty">beauty</option>
-      <option value="off">measure (no look)</option>
-    </select>
-  </label>
-  <span id="llmState" class="badge">compiler: checking&hellip;</span>
-  <span id="buildState" class="badge" title="the git branch and commit this server process was started from (GET /status build)">serving: checking&hellip;</span>
-  <span id="compileState" class="dim"></span>
-</p>
+
 
 <details id="altGuide" class="card" open>
   <summary><b>Altitude guide</b> &mdash; how high is &ldquo;at 3000 m&rdquo;?
