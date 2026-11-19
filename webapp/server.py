@@ -378,6 +378,16 @@ def _compile_problems(data: Dict[str, Any]) -> List[str]:
                     rows.append(_plain({"constraint": v.constraint, "message": v.message,
                                         "actual": v.actual, "limit": v.limit,
                                         "unit": v.unit}))
+            # An aircraft with no 3-D model passes validation but /run
+            # refuses it (aircraft.mesh): name it here so the rewrite
+            # swaps to an aircraft that renders.
+            if not rows:
+                mesh = refuse_placeholder_mesh(spec)
+                if mesh is not None:
+                    names = ", ".join(a["name"] for a in pickable_aircraft())
+                    rows.append({"message": (
+                        f"The aircraft {spec.aircraft.value} has no 3-D model, so it "
+                        f"cannot be rendered. Use one of these aircraft instead: {names}.")})
         except Exception:
             pass
     out = _rejection_problems(data)

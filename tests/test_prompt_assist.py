@@ -97,3 +97,13 @@ def test_no_model_leaves_the_verdict_alone(app, monkeypatch):
     monkeypatch.setattr(pa, "_client", lambda c=None, m=None: (None, None))
     data = app.post("/compile", json={"prompt": "a plane flying", "assist": True}).json()
     assert "spec" in data
+
+
+def test_an_aircraft_without_a_model_is_named_so_the_ai_swaps_it(app, monkeypatch):
+    prompt = "an A-4E Skyhawk over the ocean at 8,000 ft in the afternoon"
+    data = app.post("/compile", json={"prompt": prompt}).json()
+    assert server._compile_problems(data) == []
+    monkeypatch.setattr(server, "refuse_placeholder_mesh",
+                        lambda spec: {"sentence": "no licensed 3-D model"})
+    problems = server._compile_problems(data)
+    assert len(problems) == 1 and "no 3-D model" in problems[0]
