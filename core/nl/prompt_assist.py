@@ -43,7 +43,11 @@ _RULES = """Facts about this simulator:
 - Each aircraft has a stall speed and a top speed; jets cruise ~350-500 kt, small
   propeller planes ~100-180 kt. Leave out a speed rather than guess a wrong one.
 - Weather words it understands: clear, scattered/broken/overcast clouds, rain, snow,
-  thunderstorm, lightning, fog, wind in knots, light/moderate/severe turbulence.
+  thunderstorm (it brings its own lightning: write "thunderstorm", never the word
+  "lightning", which is refused), fog, wind in knots, light/moderate/severe turbulence.
+- "Above the clouds" is said with a cloud layer and a high altitude ("overcast clouds,
+  at 35,000 ft"), never as the ground; the ground is a place or a surface word
+  (ocean, city, desert, forest, mountains).
 - Time words: dawn, morning, noon, afternoon, golden hour, sunset, dusk, night.
 - The word "cinematic" asks for the highest-quality look.
 Reply with JSON only: {"prompt": <the new prompt>, "explanation": <one short plain

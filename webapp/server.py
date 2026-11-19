@@ -380,7 +380,7 @@ def _compile_problems(data: Dict[str, Any]) -> List[str]:
                                         "unit": v.unit}))
         except Exception:
             pass
-    out = []
+    out = _rejection_problems(data)
     for r in rows:
         words = " ".join(str(r.get(k) or "").strip() for k in ("sentence", "hint")).strip()
         if not words or words == "The request was refused.":
@@ -388,6 +388,17 @@ def _compile_problems(data: Dict[str, Any]) -> List[str]:
         if words:
             out.append(words)
     return out
+
+
+def _rejection_problems(data: Dict[str, Any]) -> List[str]:
+    """The AI interpreter's reading was refused (an out-of-vocabulary word)
+    and the offline parser stood in: a rewrite in known words may let the
+    AI read the whole request. A soft problem: the fallback still runs."""
+    note = str(data.get("llm_note") or "")
+    if str(data.get("compiler", "")).startswith("regex (llm unavailable)") and "rejected" in note:
+        return [f"The AI interpreter could not read part of the request ({note[:220]}); "
+                "say that part with words the simulator knows."]
+    return []
 
 
 @app.post("/compile")
@@ -444,6 +455,10 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         unresolved = problems
     if problems and not unresolved:
         unresolved = problems
+    # A refused AI reading is soft: the offline parse still runs, so it is
+    # not "can't run" when the rewrite did not take.
+    soft = set(_rejection_problems(data))
+    unresolved = [p for p in unresolved if p not in soft]
     if not steps and not unresolved:
         return response
     if isinstance(data, dict):
