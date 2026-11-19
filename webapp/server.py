@@ -146,6 +146,10 @@ class CompileRequest(BaseModel):
     #: (webapp.runs.apply_aircraft_choice). None = the prompt decides, as
     #: before. An unknown value is refused by name (400).
     aircraft: Optional[str] = None
+    #: Let the language model rewrite the prompt: expand a vague one, and
+    #: fix one that cannot run (core/nl/prompt_assist.py). The page sends
+    #: true; the API default is off so a script's prompt is never changed.
+    assist: bool = False
 
 
 class RunRequest(BaseModel):
@@ -350,8 +354,105 @@ def altitude_guide_endpoint(ground_m: float = 0.0) -> JSONResponse:
     return JSONResponse(guide(ground_m))
 
 
+#: Rounds of "fix the prompt, interpret again" before the page is told
+#: what still stops it.
+ASSIST_FIX_ROUNDS = 2
+
+
+def _compile_problems(data: Dict[str, Any]) -> List[str]:
+    """What stops a compiled prompt from running, in plain words: the
+    verdict's violations plus the terrain pre-flight /run refuses on."""
+    if not isinstance(data, dict) or data.get("error"):
+        return []
+    rows: List[Dict[str, Any]] = []
+    if data.get("refused"):
+        rows.append(data)
+    verdict = data.get("validation") or {}
+    rows.extend(verdict.get("violations") or [])
+    seen = {r.get("constraint") or r.get("refused") for r in rows}
+    if not rows and (data.get("spec") or {}).get("dict"):
+        try:
+            spec = ScenarioSpec.from_dict(data["spec"]["dict"])
+            for v in _full_violations(spec):
+                if v.constraint not in seen:
+                    rows.append(_plain({"constraint": v.constraint, "message": v.message,
+                                        "actual": v.actual, "limit": v.limit,
+                                        "unit": v.unit}))
+        except Exception:
+            pass
+    out = []
+    for r in rows:
+        words = " ".join(str(r.get(k) or "").strip() for k in ("sentence", "hint")).strip()
+        if not words or words == "The request was refused.":
+            words = str(r.get("message") or r.get("refused") or r.get("constraint") or "")
+        if words:
+            out.append(words)
+    return out
+
+
 @app.post("/compile")
 def compile_endpoint(request: CompileRequest) -> JSONResponse:
+    """Interpret a prompt. With ``assist`` (the page), the language model
+    first expands a vague prompt, and after interpreting rewrites a prompt
+    that cannot run until it does (ASSIST_FIX_ROUNDS), keeping a rewrite
+    only when it runs; the response's ``assist`` says what it changed and
+    why, so the page can show it under the Interpret button."""
+    use = (request.assist and request.compiler == "llm" and not request.answers
+           and bool(request.prompt.strip()) and llm_available())
+    if not use:
+        return _compile_core(request)
+    from core.nl.prompt_assist import expand_prompt, fix_prompt, is_vague
+
+    try:
+        names = [a["name"] for a in pickable_aircraft()]
+    except Exception:
+        names = []
+    original = request.prompt.strip()
+    steps: List[Dict[str, Any]] = []
+    if is_vague(original):
+        expanded = expand_prompt(original, names)
+        if expanded is not None:
+            request = request.model_copy(update={"prompt": expanded.prompt})
+            steps.append(expanded.to_dict())
+    response = _compile_core(request)
+    data = json.loads(response.body)
+    problems = _compile_problems(data)
+    history: List[str] = []
+    unresolved: List[str] = []
+    for _round in range(ASSIST_FIX_ROUNDS):
+        if not problems:
+            break
+        fixed = fix_prompt(request.prompt, problems, names, history)
+        if fixed is None:
+            unresolved = problems
+            break
+        trial = request.model_copy(update={"prompt": fixed.prompt})
+        trial_response = _compile_core(trial)
+        trial_data = json.loads(trial_response.body)
+        trial_problems = _compile_problems(trial_data)
+        if trial_data.get("error"):
+            unresolved = problems
+            break
+        if not trial_problems:
+            request, response, data = trial, trial_response, trial_data
+            steps.append(fixed.to_dict())
+            problems = []
+            break
+        history.append(f"{fixed.prompt!r} -> still: " + "; ".join(trial_problems))
+        unresolved = problems
+    else:
+        unresolved = problems
+    if problems and not unresolved:
+        unresolved = problems
+    if not steps and not unresolved:
+        return response
+    if isinstance(data, dict):
+        data["assist"] = {"original": original, "prompt": request.prompt,
+                          "steps": steps, "unresolved": unresolved}
+    return JSONResponse(data, status_code=response.status_code)
+
+
+def _compile_core(request: CompileRequest) -> JSONResponse:
     prompt = request.prompt.strip()
     if not prompt:
         return JSONResponse({"error": "empty prompt"}, status_code=400)

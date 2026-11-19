@@ -16,6 +16,11 @@
   button.interpret { font-size: 1.15rem; font-weight: 700; letter-spacing: .04em;
                      padding: .75rem 2.4rem; background: #2f7fc4;
                      box-shadow: 0 0 0 1px #4a9ad8, 0 2px 10px rgba(47,127,196,.45); }
+  .assistNote { margin-top: .55rem; padding: .55rem .75rem; border-radius: 6px;
+                border: 1px solid #2c5a80; background: #13202c; color: #d8e6f1; }
+  .assistNote.bad { border-color: #8c4a2b; background: #2a1a12; }
+  .assistNote .was { color: #7d8a93; font-size: .9em; margin-top: .25rem; }
+  .assistNote button { padding: .2rem .7rem; margin-left: .4rem; background: #1d2733; }
   button.interpret:hover:not(:disabled) { background: #3a8fd6; }
   .promptRow aside { flex: 0 0 17rem; max-height: 18rem; overflow-y: auto;
                      border: 1px solid #2c3947; border-radius: 6px; padding: .5rem .6rem; }
@@ -190,8 +195,10 @@ visual-only per host (measured).</p>
       </label>
       <span id="llmState" class="badge">compiler: checking&hellip;</span>
       <span id="buildState" class="badge" title="the git branch and commit this server process was started from (GET /status build)">serving: checking&hellip;</span>
+      <label class="dim" title="Let the AI expand a vague prompt and rewrite a prompt that cannot run (too low over the ground, too slow, ...) until it can. It says what it changed below, with an undo."><input type="checkbox" id="assistToggle" checked> AI auto-fix</label>
       <span id="compileState" class="dim"></span>
     </div>
+    <div id="assistNote" class="assistNote" hidden></div>
   </div>
   <aside id="conditionsList"></aside>
 </div>
@@ -1687,7 +1694,8 @@ function editedSpecDict() {
 }
 
 async function doCompile(body) {
-  $("compileState").textContent = "compiling...";
+  $("compileState").textContent = body.assist
+    ? "interpreting (the AI may improve or fix your prompt)..." : "compiling...";
   $("compile").disabled = true;
   $("answer").disabled = true;
   try {
@@ -1698,6 +1706,7 @@ async function doCompile(body) {
     const payload = await response.json();
     if (payload.error) { $("compileState").textContent = payload.error; return; }
     $("compileState").textContent = "";
+    renderAssist(payload.assist);
     pickedAfterCompile = null;
     if (payload.needs_clarification) {
       renderQuestions(payload);
@@ -1726,6 +1735,41 @@ async function doCompile(body) {
       `.venv/bin/uvicorn webapp.server:app --port 8008  and open ` +
       `http://127.0.0.1:8008/ -- not the raw index.html file.`;
   } finally { $("compile").disabled = false; $("answer").disabled = false; }
+}
+
+// The AI's rewrite of the prompt (POST /compile assist; core/nl/prompt_assist.py),
+// shown right under the Interpret button: what it changed and why, the
+// prompt box updated to the version that runs, and an undo.
+function renderAssist(a) {
+  const box = $("assistNote");
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+  if (!a) { box.hidden = true; box.innerHTML = ""; return; }
+  const parts = [];
+  for (const step of a.steps || []) {
+    if (step.kind === "expanded")
+      parts.push(`<div><b>AI expanded your prompt:</b> ${esc(step.explanation)}</div>`);
+    else
+      parts.push(`<div><b>AI fixed a problem:</b> ${esc((step.problems || []).join(" "))}` +
+                 `<br>&rarr; ${esc(step.explanation)}</div>`);
+  }
+  if ((a.unresolved || []).length)
+    parts.push(`<div><b>Still can't run:</b> ${esc(a.unresolved.join(" "))}` +
+               ` &mdash; change the prompt and press Interpret again.</div>`);
+  const changed = a.prompt && a.prompt !== a.original;
+  if (changed) {
+    $("prompt").value = a.prompt;
+    $("prompt").dispatchEvent(new Event("input"));
+    parts.push(`<div class="was">your words were: &ldquo;${esc(a.original)}&rdquo;` +
+               `<button id="assistUndo" type="button">undo</button></div>`);
+  }
+  box.className = "assistNote" + ((a.unresolved || []).length ? " bad" : "");
+  box.innerHTML = parts.join("");
+  box.hidden = parts.length === 0;
+  if (changed) $("assistUndo").addEventListener("click", () => {
+    $("prompt").value = a.original;
+    $("prompt").dispatchEvent(new Event("input"));
+    box.hidden = true;
+  });
 }
 
 // "" = no override: the prompt (or the documented default) decides.
@@ -1777,6 +1821,7 @@ $("compile").addEventListener("click", () =>
   doCompile({prompt: $("prompt").value, clip_seconds: clipSeconds(),
              environment: environmentPreset(),
              aircraft: aircraftPreset(),
+             assist: $("assistToggle").checked,
              still: stillPreview()}));
 
 // The selector used to be read only at Interpret: picking "3 s" AFTER
