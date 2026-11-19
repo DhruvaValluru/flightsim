@@ -116,6 +116,9 @@
             vertical-align: middle; border: 1px solid #2c3947; }
   .auto { color: #7d8a93; font-style: italic; }
   /* Altitude guide */
+  .altSlider { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; }
+  .altSlider input[type=range] { flex: 1 1 16rem; accent-color: #2f7fc4; }
+  .altValue { font-weight: 700; color: #e6ecf1; min-width: 11rem; font-variant-numeric: tabular-nums; }
   #altGuide summary { cursor: pointer; color: #9fb4c7; }
   #altGuide .agControls { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem;
                           align-items: center; margin: .6rem 0; }
@@ -237,7 +240,13 @@ visual-only per host (measured).</p>
 <script>FlightSimSettings.mount(document.getElementById("settings-panel"));</script>
 
 
-<details id="altGuide" class="card" open>
+<div id="altSlider" class="card altSlider">
+  <label for="altRange"><b>Altitude</b></label>
+  <input type="range" id="altRange" min="0" max="1000" step="1" value="480">
+  <span id="altValue" class="altValue">3,000 m &middot; 9,843 ft</span>
+  <span class="dim">above sea level &mdash; drag, then Interpret (or Run)</span>
+</div>
+<details id="altGuide" class="card" hidden>
   <summary><b>Altitude guide</b> &mdash; how high is &ldquo;at 3000 m&rdquo;?
   Planes at each checkpoint above the ground, and the number to ask for.</summary>
   <div class="agControls">
@@ -3162,7 +3171,7 @@ function agUse(row) {
   if (compiled && input) {
     input.value = metres;
     input.dispatchEvent(new Event("input", {bubbles: true}));
-    input.focus();
+    if (row.label !== "slider") input.focus();
     $("compileState").textContent =
       `altitude set to ${metres} m in the table (${row.label.toLowerCase()}); press Run`;
     return;
@@ -3215,6 +3224,40 @@ $("altGuide").addEventListener("toggle", () => {
   try { localStorage.setItem("agOpen", $("altGuide").open ? "1" : "0"); } catch (_) {}
 });
 agLoad();
+// The altitude slider (replaces the tall guide table, kept hidden for its
+// drawing code): a square-root scale so low heights get room, 0-13,000 m.
+const ALT_MAX_M = 13000;
+function altFromRange(v) {
+  const m = Math.pow(v / 1000, 2) * ALT_MAX_M;
+  return m < 1000 ? Math.round(m / 10) * 10 : Math.round(m / 50) * 50;
+}
+function rangeFromAlt(m) {
+  return Math.round(Math.sqrt(Math.max(0, Math.min(ALT_MAX_M, m)) / ALT_MAX_M) * 1000);
+}
+function altLabel(m) {
+  return `${m.toLocaleString()} m \u00b7 ${Math.round(m * M_TO_FT).toLocaleString()} ft`;
+}
+$("altRange").addEventListener("input", () => {
+  $("altValue").textContent = altLabel(altFromRange(+$("altRange").value));
+});
+$("altRange").addEventListener("change", () => {
+  const m = altFromRange(+$("altRange").value);
+  agUse({ask_m: m, label: "slider"});
+});
+function altSync(m) {
+  if (!(m >= 0)) return;
+  $("altRange").value = rangeFromAlt(m);
+  $("altValue").textContent = altLabel(Math.round(m));
+}
+$("prompt").addEventListener("input", () => {
+  const asked = agPromptAltitude($("prompt").value);
+  if (asked) altSync(asked.m);
+});
+$("specTable").addEventListener("input", event => {
+  if (event.target && event.target.dataset && event.target.dataset.name === "altitude")
+    altSync(Number(event.target.value));
+});
+altSync(3000);
 // E5: the extra-pass checkboxes (#passPicker, inside E3's
 // #settings-capture-passes slot) read and write the capture_passes
 // setting through E2's GET/PUT /settings. settings.js never touches
