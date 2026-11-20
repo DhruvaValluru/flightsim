@@ -290,7 +290,7 @@ def _scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
             iy, ix = np.unravel_index(int(np.argmax(masked)), masked.shape)
             top = {"altitude_m": _r(alt[iy, ix], 1), "pixel": [int(ix), int(iy)],
                    "range_m": _r(horiz[iy, ix], 1),
-                   "height_above_aircraft_ground_m": _r(alt[iy, ix] - ground_alt, 1)
+                   "height_above_flight_model_ground_m": _r(alt[iy, ix] - ground_alt, 1)
                    if ground_alt is not None else None}
         out["terrain"] = {
             "altitude_range_in_view_m": [_r(lo, 1), _r(hi, 1)],
@@ -332,15 +332,65 @@ def _scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
                                         "at_px": [int(xs[j]), int(ys[j])]})
             out["range_rings"] = {"radii_m": radii, "centre": "the ground point below the aircraft",
                                   "labels": ring_labels, "_alpha": a_r}
-    # Drop line and nadir.
-    if ground_alt is not None:
+    # Ground under the aircraft: the flight model's (its terrain bake, the
+    # ground the physics flies over) and the one MEASURED in this frame
+    # from the depth image -- directly below when that is in view, else
+    # the street level round the point below.
+    model_ground = ground_alt
+    measured, basis_g = None, "not measurable: no depth image beside this frame"
+    low_nearby = None
+    direct = False
+    if fields is not None:
+        north, east, alt, horiz = fields
         n0, e0 = float(ac.get("north_m", 0.0)), float(ac.get("east_m", 0.0))
-        top_c = _to_camera(record, (n0, e0, float(ac.get("alt_m", 0.0))))
-        foot_c = _to_camera(record, (n0, e0, ground_alt))
+        d_nadir = np.hypot(north - n0, east - e0)
+        below = np.isfinite(alt) & (d_nadir < 40.0)
+        around = np.isfinite(alt) & (d_nadir < 2000.0)
+        if below.sum() >= 20:
+            measured = float(np.nanmedian(alt[below]))
+            direct = True
+            basis_g = "measured directly below the aircraft (depth image, within 40 m)"
+        else:
+            basis_g = "not in view: the ground straight below the aircraft is outside this frame"
+        if around.sum() >= 200:
+            low_nearby = float(np.nanpercentile(alt[around], 5))
+    plane_alt = float(ac.get("alt_m", state.get("altitude_m", 0.0)))
+    diff = (model_ground - measured) if (model_ground is not None and measured is not None) else None
+    out["ground"] = {
+        "flight_model_m": _r(model_ground, 1),
+        "flight_model_basis": "aircraft altitude minus the flight model's AGL (its terrain bake)",
+        "measured_m": _r(measured, 1), "measured_basis": basis_g,
+        "difference_m": _r(diff, 1),
+        "agl_flight_model_m": _r(state.get("agl_m"), 1),
+        "agl_measured_m": _r(plane_alt - measured, 1) if measured is not None else None,
+        "measured_directly_below": bool(measured is not None and direct),
+        "lowest_visible_ground_within_2km_m": _r(low_nearby, 1),
+        "lowest_visible_ground_basis": ("5th percentile of the visible ground within 2 km of "
+                                        "the point below -- street / water level, not the "
+                                        "ground under the aircraft"),
+        "mismatch": bool(diff is not None and abs(diff) > 30.0),
+        "mismatch_threshold_m": 30.0,
+    }
+    # The drop line uses the measured ground only when it was measured
+    # straight below; an estimate from nearby ground is shown, not used.
+    ground_draw = measured if (measured is not None and direct) else model_ground
+    # Drop line and nadir.
+    if ground_draw is not None:
+        n0, e0 = float(ac.get("north_m", 0.0)), float(ac.get("east_m", 0.0))
+        top_c = _to_camera(record, (n0, e0, plane_alt))
+        foot_c = _to_camera(record, (n0, e0, ground_draw))
+        agl = plane_alt - ground_draw
+        label = f"AGL {agl:,.0f} m"
+        g_ = out["ground"]
+        if g_["mismatch"]:
+            label += f"  (model {float(state['agl_m']):,.0f})"
         out["drop_line"] = {"from_px": px(top_c), "to_px": px(foot_c),
-                            "ground_altitude_m": _r(ground_alt, 1),
-                            "height_above_ground_m": _r(state.get("agl_m"), 1),
-                            "label": f"AGL {float(state['agl_m']):,.0f} m"}
+                            "ground_altitude_m": _r(ground_draw, 1),
+                            "height_above_ground_m": _r(agl, 1),
+                            "basis": "measured ground" if (measured is not None and direct)
+                            else "flight-model ground",
+                            "label": label}
+    ground_alt = ground_draw
     # Flight path.
     pts, basis = _path_points(manifest, record)
     if len(pts) > 1:
@@ -392,13 +442,20 @@ def _scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
                            "track_x_px": (dir_px(trk, 0.0) or [None])[0] if trk is not None else None}
     # Environment.
     render = _render_json(source) or {}
-    sun = ((render.get("look_applied") or {}).get("sun") or {})
+    sky = ((render.get("scene") or {}).get("sky") or {})
+    hero = ((render.get("hero_lighting") or {}).get("sun") or {})
     fog = ((render.get("look_applied") or {}).get("fog") or {})
-    sun_az = None
-    if sun.get("engine_sun_yaw_deg") is not None:
-        # The commandlet takes the yaw TOWARD the sun, measured from east
-        # toward north (core/scenario/randomization.engine_sun_azimuth).
-        sun_az = (90.0 - float(sun["engine_sun_yaw_deg"])) % 360.0
+    sun_el, sun_az, sun_basis = None, None, "not recorded beside this frame"
+    if sky.get("sun_elevation_deg") is not None:
+        sun_el = float(sky["sun_elevation_deg"])
+        sun_az = (float(sky["sun_azimuth_deg"]) % 360.0
+                  if sky.get("sun_azimuth_deg") is not None else None)
+        sun_basis = "render.json scene.sky (the sun the frame was lit with)"
+    elif hero.get("sun_elevation_deg") is not None:
+        sun_el = float(hero["sun_elevation_deg"])
+        sun_basis = "render.json hero_lighting.sun"
+    # (render.json look_applied.sun is a stale record of the level's
+    # default light, not the frame's sun; it is not read.)
     wind_spd = float(state.get("wind_speed_mps") or 0.0) / 0.514444
     wn, we = float(state.get("wind_north_mps") or 0.0), float(state.get("wind_east_mps") or 0.0)
     wind_from = math.degrees(math.atan2(-we, -wn)) % 360.0 if wind_spd > 0.1 else None
@@ -408,20 +465,33 @@ def _scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
     out["environment"] = {
         "location": loc, "latitude_deg": state.get("lat_deg"), "longitude_deg": state.get("lon_deg"),
         "ground_elevation_below_m": _r(ground_alt, 1),
+        "ground_basis": out["ground"]["measured_basis"]
+        if out["ground"]["measured_directly_below"] else out["ground"]["flight_model_basis"],
         "scene_terrain_elevation_m": cond.get("terrain_elevation"),
         "surface": cond.get("surface"), "turbulence": cond.get("turbulence"),
         "weather_event": cond.get("weather_event"),
         "wind_from_deg": _r(wind_from, 1), "wind_speed_kt": _r(wind_spd, 1),
         "temperature_c": _r(float(state["temperature_k"]) - 273.15, 1)
         if state.get("temperature_k") is not None else None,
-        "sun_elevation_deg": sun.get("sun_elevation_deg"), "sun_azimuth_deg": _r(sun_az, 1),
-        "sun_basis": ("render.json look_applied.sun (azimuth from the engine yaw toward the sun)"
-                      if sun else "not recorded beside this frame"),
+        "sun_elevation_deg": _r(sun_el, 1), "sun_azimuth_deg": _r(sun_az, 1),
+        "sun_basis": sun_basis,
         "fog_density": fog.get("fog_density"),
         "geoid_undulation_m": _r((manifest.get("datum") or {}).get("undulation_m"), 2),
         "vertical_datum": (manifest.get("datum") or {}).get("vertical_datum_of_heights"),
     }
     return out
+
+
+def _ground_text(geo: Dict) -> str:
+    g = geo.get("ground") or {}
+    if g.get("measured_m") is None:
+        if g.get("flight_model_m") is None:
+            return "--"
+        return f"{g['flight_model_m']:,.0f} m model (not in view)"
+    text = f"{g['measured_m']:,.0f} m measured"
+    if g.get("mismatch"):
+        text += f" \u26a0 model {g['flight_model_m']:,.0f}"
+    return text
 
 
 def _env_rows(geo: Dict) -> List[Tuple[str, str]]:
@@ -431,7 +501,9 @@ def _env_rows(geo: Dict) -> List[Tuple[str, str]]:
     loc = env.get("location") or "--"
     rows = [("LOCATION", loc if len(loc) <= 30 else loc[:29] + "…"),
             ("LAT / LON", f"{f(env['latitude_deg'], '.4f')} / {f(env['longitude_deg'], '.4f')}"),
-            ("GROUND BELOW", f(env.get("ground_elevation_below_m"), ",.0f", " m")),
+            ("GROUND BELOW", _ground_text(geo)),
+            ("LOWEST NEARBY", f((geo.get("ground") or {}).get("lowest_visible_ground_within_2km_m"),
+                                ",.0f", " m")),
             ("TERRAIN IN VIEW", (f"{ter['altitude_range_in_view_m'][0]:,.0f} – "
                                  f"{ter['altitude_range_in_view_m'][1]:,.0f} m")
              if ter.get("altitude_range_in_view_m") else "--"),

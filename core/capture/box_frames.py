@@ -22,6 +22,7 @@ the run's ``frames/`` directory.
 from __future__ import annotations
 
 from pathlib import Path
+import os
 from typing import Dict, Iterable, List, Optional, Sequence
 
 #: Mask box (measured) and predicted box colours, legible on sky and ground.
@@ -145,55 +146,88 @@ def _drawer_mtime() -> float:
                if (here / n).is_file())
 
 
+#: The pictures :func:`draw_box_frames` can write per frame.
+PICTURE_KINDS = ("boxes", "plain", "detailed", "scene")
+
+
+def _picture_plan(manifest, run_dir, out_subdir):
+    from .box3d import draw_box3d_detailed_frame, draw_box3d_frame
+
+    def draw_3d(rec, src, dst):
+        return draw_box3d_frame(rec, src, dst, manifest=manifest)
+
+    def draw_3d_detailed(rec, src, dst):
+        return draw_box3d_detailed_frame(rec, src, dst, manifest=manifest)
+
+    def draw_3d_scene(rec, src, dst):
+        from .scene_overlay import draw_scene_frame
+
+        return draw_scene_frame(rec, src, dst, manifest=manifest)
+
+    code = _drawer_mtime()
+    return {"boxes": (out_subdir, boxed_name, draw_box_frame, 0.0),
+            "plain": (OUT_SUBDIR_3D, box3d_name, draw_3d, code),
+            "detailed": (OUT_SUBDIR_3D, box3d_detailed_name, draw_3d_detailed, code),
+            "scene": (OUT_SUBDIR_3D, box3d_scene_name, draw_3d_scene, code)}
+
+
+def frame_source(run_dir: Path, record: Dict) -> Optional[Path]:
+    """The image a frame's pictures are drawn on: the render, else the
+    engine-free preview of the same frame; None when neither exists."""
+    frame_file = Path(run_dir) / str(record.get("file", ""))
+    if frame_file.is_file():
+        return frame_file
+    preview = (Path(run_dir) / "previews" / str(record.get("camera_id"))
+               / f"preview_{int(record.get('index', 0)):04d}.png")
+    return preview if preview.is_file() else None
+
+
 def draw_box_frames(manifest: Dict, run_dir, cameras: Optional[Iterable[str]] = None,
-                    out_subdir: str = OUT_SUBDIR) -> List[Path]:
-    """One boxed copy per rendered frame (every frame, no cap); frames
-    the renderer did not write are skipped. A copy newer than both its
-    frame and the manifest is reused."""
+                    out_subdir: str = OUT_SUBDIR,
+                    kinds: Sequence[str] = ("boxes", "plain"),
+                    indices: Optional[Iterable[int]] = None,
+                    workers: Optional[int] = None) -> List[Path]:
+    """The boxed copies of the rendered frames: for every frame (or the
+    frame ``indices``) of the ``cameras``, each picture in ``kinds``
+    (``boxes`` 2-D boxes, ``plain`` / ``detailed`` / ``scene`` the 3-D
+    pictures). Frames the renderer did not write are drawn on their
+    preview, or skipped. A copy newer than its frame, the manifest and
+    the drawing code is reused. Many frames draw on a thread pool (numpy
+    and Pillow release the interpreter lock in the heavy work)."""
     run_dir = Path(run_dir)
     wanted = set(cameras) if cameras is not None else None
+    only = set(int(i) for i in indices) if indices is not None else None
     manifest_path = run_dir / "capture_manifest.json"
     manifest_mtime = manifest_path.stat().st_mtime if manifest_path.is_file() else 0.0
-    written: List[Path] = []
+    plan = _picture_plan(manifest, run_dir, out_subdir)
+    jobs = []
     for record in manifest.get("frames", []):
         camera = str(record.get("camera_id"))
         if wanted is not None and camera not in wanted:
             continue
-        frame_file = run_dir / str(record.get("file", ""))
-        source = frame_file
-        if not source.is_file():
-            # No engine render on this machine: draw on the engine-free
-            # shaded preview of the same frame (same pose, same intrinsics,
-            # full resolution), so the boxes still have a picture.
-            source = (run_dir / "previews" / camera
-                      / f"preview_{int(record.get('index', 0)):04d}.png")
-            if not source.is_file():
-                continue
-        from .box3d import draw_box3d_detailed_frame, draw_box3d_frame
-
-        def draw_3d(rec, src, dst):
-            return draw_box3d_frame(rec, src, dst, manifest=manifest)
-
-        def draw_3d_detailed(rec, src, dst):
-            return draw_box3d_detailed_frame(rec, src, dst, manifest=manifest)
-
-        def draw_3d_scene(rec, src, dst):
-            from .scene_overlay import draw_scene_frame
-
-            return draw_scene_frame(rec, src, dst, manifest=manifest)
-
-        for subdir, name, draw, code_mtime in (
-                (out_subdir, boxed_name(frame_file.name), draw_box_frame, 0.0),
-                (OUT_SUBDIR_3D, box3d_name(frame_file.name), draw_3d, _drawer_mtime()),
-                (OUT_SUBDIR_3D, box3d_detailed_name(frame_file.name), draw_3d_detailed,
-                 _drawer_mtime()),
-                (OUT_SUBDIR_3D, box3d_scene_name(frame_file.name), draw_3d_scene,
-                 _drawer_mtime())):
-            target = run_dir / subdir / camera / name
+        if only is not None and int(record.get("index", -1)) not in only:
+            continue
+        source = frame_source(run_dir, record)
+        if source is None:
+            continue
+        frame_name = Path(str(record.get("file", ""))).name
+        for kind in kinds:
+            subdir, namer, draw, code_mtime = plan[kind]
+            target = run_dir / subdir / camera / namer(frame_name)
             if (target.is_file() and target.stat().st_mtime >= source.stat().st_mtime
                     and target.stat().st_mtime >= manifest_mtime
                     and target.stat().st_mtime >= code_mtime):
-                written.append(target)
+                jobs.append((None, target))
                 continue
-            written.append(Path(draw(record, source, target)))
-    return written
+            jobs.append(((draw, record, source, target), target))
+    todo = [j for j, _ in jobs if j is not None]
+    n_workers = workers if workers is not None else min(4, max(1, (os.cpu_count() or 2) - 1))
+    if len(todo) > 2 and n_workers > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            list(pool.map(lambda j: j[0](j[1], j[2], j[3]), todo))
+    else:
+        for draw, record, source, target in todo:
+            draw(record, source, target)
+    return [target for _, target in jobs]

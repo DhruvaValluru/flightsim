@@ -620,7 +620,27 @@ def _compact_json(data) -> str:
         lambda m: "[" + ", ".join(v.strip() for v in m.group(1).split(",")) + "]", text)
 
 
-def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
+#: A clip's 3-D pictures are drawn for at most this many frames by default
+#: (evenly spaced, first and last included); every frame keeps its JSON.
+BOX3D_MAX_PICTURES = 24
+
+
+def box3d_picture_indices(records: List[Dict], every: int = 0) -> List[int]:
+    """The frame indices that get the three 3-D pictures: every ``every``-th
+    frame, or (``every`` 0) evenly spaced up to BOX3D_MAX_PICTURES, always
+    with the first and last frame."""
+    idx = [int(r.get("index", i)) for i, r in enumerate(records)]
+    if not idx:
+        return []
+    if every <= 0:
+        every = max(1, -(-len(idx) // BOX3D_MAX_PICTURES))
+    chosen = idx[::every]
+    if idx[-1] not in chosen:
+        chosen.append(idx[-1])
+    return chosen
+
+
+def box3d_archive(out: Path, camera_id: str, every: int = 0) -> Optional[Path]:
     """A zip of ONE view's 3-D boxes: per frame the 3-D box picture and a
     small JSON with just that frame's ``box_3d`` section (each plane's box
     in camera coordinates, which way it faces, the rebuild recipe and its
@@ -644,12 +664,15 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
                if str(r.get("camera_id")) == camera_id]
     if not records:
         return None
+    pictured = set(box3d_picture_indices(records, every))
     try:
-        draw_box_frames(manifest, out, cameras=[camera_id])
+        draw_box_frames(manifest, out, cameras=[camera_id],
+                        kinds=("plain", "detailed", "scene"), indices=pictured)
     except (OSError, ImportError):
         pass
     pictures = sorted((out / "boxed3d" / camera_id).glob("*_box3d*.png"))
-    archive = out / "downloads" / f"{camera_id}_box3d.zip"
+    suffix = "" if not every else f"_every{every}"
+    archive = out / "downloads" / f"{camera_id}_box3d{suffix}.zip"
     inputs = pictures + [manifest_path]
     if archive.is_file() and archive.stat().st_mtime >= max(
             p.stat().st_mtime for p in inputs):
@@ -708,6 +731,10 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"                  pitch ladder, heading tape, environment values\n"
         f"  camera, scene   the camera's pose and intrinsics; the scene\n"
         f"\n"
+        f"A clip: the three pictures are drawn for up to {BOX3D_MAX_PICTURES} evenly\n"
+        f"spaced frames (first and last included); every frame has its JSON.\n"
+        f"Ask the server for ?every=1 (every frame) or ?every=N for more.\n"
+        f"\n"
         f"Forces come from the JSBSim flight model's state at this frame.\n"
         f"The airflow is a potential-flow + lifting-line model driven by\n"
         f"this frame's lift and airspeed (fast and analytic, not CFD).\n"
@@ -721,7 +748,8 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
             stem = name[:-len(".png")] if name.endswith(".png") else name
             names = {"plain": box3d_name(name), "detailed": box3d_detailed_name(name),
                      "scene": box3d_scene_name(name)}
-            for picture_name in names.values():
+            has_pictures = int(record.get("index", -1)) in pictured
+            for picture_name in (names.values() if has_pictures else ()):
                 picture = out / "boxed3d" / camera_id / picture_name
                 if picture.is_file():
                     zf.write(picture, arcname=f"{camera_id}_3d/{picture.name}",
@@ -730,7 +758,8 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
             try:
                 from core.capture.flight_overlay import frame_sidecar
 
-                sidecar = frame_sidecar(manifest, record, box_3d, pictures={
+                sidecar = frame_sidecar(manifest, record, box_3d, airflow=has_pictures,
+                                        pictures={} if not has_pictures else {
                     "plain": f"{names['plain']}: the frame with each aircraft's 3-D box",
                     "detailed": (f"{names['detailed']}: the box plus airflow, forces "
                                  "(lift, weight, thrust, drag, net), velocity and the "
@@ -743,11 +772,20 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
                 if not frame_path.is_file():
                     frame_path = (out / "previews" / camera_id
                                   / f"preview_{int(record.get('index', 0)):04d}.png")
+                if not has_pictures:
+                    sidecar["pictures_note"] = (
+                        f"no pictures for this frame: a clip's pictures are drawn for "
+                        f"{len(pictured)} of its {len(records)} frames (download with "
+                        f"?every=1 for all); the physics and the box are here")
                 try:
+                    if not has_pictures:
+                        raise LookupError("scene numbers are written with the pictures")
                     from core.capture.scene_overlay import scene_geometry, scene_json
 
                     sidecar["scene_overlay"] = scene_json(
                         scene_geometry(manifest, record, frame_path))
+                except LookupError:
+                    pass
                 except Exception as exc:  # noqa: BLE001 -- the rest still ships
                     sidecar["scene_overlay"] = {"error": f"{type(exc).__name__}: {exc}"}
             except Exception:        # noqa: BLE001 -- the box alone still ships

@@ -723,10 +723,10 @@ def overlay_json(geometry: Dict, keep_every: int = 4) -> Dict:
 
 
 def frame_sidecar(manifest: Dict, record: Dict, box_3d: Dict,
-                  pictures: Optional[Dict] = None) -> Dict:
+                  pictures: Optional[Dict] = None, airflow: bool = True) -> Dict:
     """The full per-frame JSON: what is in both pictures, the flight
     physics, the box section (unchanged), the camera and the scene."""
-    geometry = overlay_geometry(manifest, record)
+    geometry = overlay_geometry(manifest, record, airflow=airflow)
     physics = next((a["physics_values"] for a in geometry["aircraft"]
                     if a.get("physics_values")), None)
     state_rows, force_rows = _panel_rows(physics) if physics else ([], [])

@@ -1587,10 +1587,12 @@ def run_dataset_archive(run_id: str, format: str = "coco",
 
 
 @app.get("/runs/{run_id}/cameras/{camera_id}/box3d.zip")
-def run_camera_box3d_archive(run_id: str, camera_id: str):
-    """ONE view's 3-D boxes as a download: per frame the 3-D box picture
-    and that frame's box_3d JSON. Declared before the generic image route
-    for the same reason the frames zip is."""
+def run_camera_box3d_archive(run_id: str, camera_id: str, every: int = 0):
+    """ONE view's 3-D boxes as a download: per frame the plain, detailed
+    and scene pictures and the frame's JSON. A clip's pictures are drawn
+    for up to BOX3D_MAX_PICTURES evenly spaced frames unless ``every`` asks
+    for every N-th (1 = all); every frame keeps its JSON. Declared before
+    the generic image route for the same reason the frames zip is."""
     from webapp.capture import box3d_archive
 
     if not _CAMERA_NAME.match(camera_id):
@@ -1598,12 +1600,47 @@ def run_camera_box3d_archive(run_id: str, camera_id: str):
     out = manager.out_root / run_id
     if not out.is_dir():
         return JSONResponse({"error": "no such run"}, status_code=404)
-    archive = box3d_archive(out, camera_id)
+    archive = box3d_archive(out, camera_id, every=max(0, min(int(every), 10000)))
     if archive is None:
         return JSONResponse({"error": f"camera {camera_id!r} has no frames in "
                                       f"this run"}, status_code=404)
     return FileResponse(archive, media_type="application/zip",
                         filename=f"{run_id}_{camera_id}_3d_boxes.zip")
+
+
+_BOX3D_KINDS = ("plain", "detailed", "scene")
+
+
+@app.get("/runs/{run_id}/cameras/{camera_id}/box3d/{index}/{kind}.png")
+def run_camera_box3d_picture(run_id: str, camera_id: str, index: int, kind: str):
+    """ONE frame's 3-D picture (plain, detailed or scene), drawn on first
+    request and kept in boxed3d/ -- so the page shows a clip's pictures
+    as they are looked at instead of drawing every frame up front."""
+    from core.capture.box_frames import (box3d_detailed_name, box3d_name, box3d_scene_name,
+                                         draw_box_frames)
+
+    if not _CAMERA_NAME.match(camera_id) or kind not in _BOX3D_KINDS:
+        return JSONResponse({"error": "no such picture"}, status_code=404)
+    out = manager.out_root / run_id
+    manifest_path = out / "capture_manifest.json"
+    if not manifest_path.is_file():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return JSONResponse({"error": "unreadable manifest"}, status_code=500)
+    record = next((r for r in manifest.get("frames", [])
+                   if str(r.get("camera_id")) == camera_id
+                   and int(r.get("index", -1)) == int(index)), None)
+    if record is None:
+        return JSONResponse({"error": "no such frame"}, status_code=404)
+    draw_box_frames(manifest, out, cameras=[camera_id], kinds=(kind,), indices=[index])
+    namer = {"plain": box3d_name, "detailed": box3d_detailed_name,
+             "scene": box3d_scene_name}[kind]
+    path = out / "boxed3d" / camera_id / namer(Path(str(record.get("file", ""))).name)
+    if not path.is_file():
+        return JSONResponse({"error": "the frame has no image to draw on"}, status_code=404)
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/runs/{run_id}/cameras/{camera_id}/frames.zip")
