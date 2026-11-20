@@ -9,28 +9,26 @@ Reproduce with `python scripts/flight_model_check.py` (JSBSim 1.2.4,
 | Aircraft | Quantity | Flight model | Published | Difference |
 |---|---|---|---|---|
 | Cessna 172P | stall, flaps up, power off, 2400 lb, sea level | **53.2 kt** (CLmax 1.44 at 16.1 deg) | **51 KCAS** (172P spec); 50-53 KCAS aft-forward CG (C172N POH) | +4 % (inside the CG band) |
-| Cessna 172P | top level speed, sea level | **130-135 kt** (trims at 130 kt, 84 % throttle; no trim from 135 kt; model at 1880 lb) | **123 kt** | about +6-9 % (lighter test weight) |
-| A-4 (A-4E) | top level speed, sea level | **~410 kt** (throttle 1.0 at 410 kt; no trim from 415 kt) | **585 kt** (673 mph) | **-30 %** |
+| Cessna 172P | top level speed, 1,500 ft | **130 kt** (model at 1,880 lb) | **123 kt** at sea level | about +6 % (lighter test weight) |
+| A-4 (A-4E) | top level speed, 1,500 ft, clean | **600 kt** (Mach 0.91, throttle 0.99) | **585 kt** (673 mph) at sea level | about +3 % |
+| A-4 (A-4E) | top level speed, 1,500 ft, default stores | **530 kt** (stores add CD 0.015) | -- (published figure is clean) | slower, as stores should make it |
 | A-4 (A-4E) | stall, clean, 8295 kg | 144 kt (CLmax 1.00 at 14.9 deg) | not found in a citable source | -- |
 
 ## What it means
 
-* **Cessna 172P: trustworthy.** Stall speed within 4 % and top speed
-  within ~6-9 % of the handbook. The forces drawn for the Cessna are
-  realistic.
-* **A-4: the drag is too high.** At its top speed the model's drag
-  coefficient is 0.059, about 2.5-3x what a clean A-4 should have, while
-  its thrust (~8,600 lbf at 410 kt) is reasonable for a J52-P-8A (about
-  9,300 lbf static). So at high speed the model needs far more thrust than
-  the real aircraft, and the DRAG and THRUST the picture shows at cruise
-  are both higher than a real A-4's would be. The model's own header says
-  its aerodynamics come from Aeromatic (estimated from public data), not
-  measured data. Lift, weight and load factor are not affected by this.
-* **Not changed here.** Correcting the A-4's drag would change how every
-  A-4 flight in the simulator behaves (speeds, climb, trimmed attitudes)
-  and the validated tests built on them, so it is left as a recommendation:
-  scale the A-4's zero-lift drag (CD0) so the model trims level at about
-  585 kt at sea level on full throttle, then re-run the A-4 test scenarios.
+* **Both models are trustworthy for what the pictures show.** The Cessna's
+  stall is within 4 % and its top speed within ~6 % of the handbook; the
+  clean A-4 reaches 600 kt against 585 kt published (+3 %), and carrying
+  its default stores it is slower (530 kt), as it should be.
+* **Correction to the first version of this page.** It read the A-4 at
+  ~410 kt (-30 %) and blamed its drag. That test flew at 100 ft, where
+  the simulator (correctly) keeps retractable gear DOWN (core/fdm/gear.py,
+  GEAR_UP_AGL_FT): the gear added CD 0.020 and the stores another 0.015.
+  Every real run flies above that height with the gear up. The check now
+  flies at 1,500 ft; nothing in the A-4 model needed changing.
+* **What the pictures show at cruise.** On the default loadout the A-4's
+  drag includes the stores (about 40 % of its zero-lift drag), so its
+  DRAG and THRUST read higher than a clean A-4's at the same speed.
 
 ## Sources
 
