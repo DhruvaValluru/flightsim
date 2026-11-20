@@ -571,7 +571,7 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
     x_te = xq1 - 0.75 * chord
     b_eff = math.pi * span / 4.0
     g_tip = lift / (rho * tas * b_eff) if lift > 0 else 0.0
-    core = 0.05 * span
+    core = 0.03 * span                  # tip-vortex core, ~3 % of span
     far = 40.0 * ref
     tips = [np.array([x_te, -b_eff / 2.0, z_w]), np.array([x_te, b_eff / 2.0, z_w])]
 
@@ -628,36 +628,46 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
     up = np.cross(side, flow_dir)
     up /= np.linalg.norm(up)
     up = up if up[2] < 0 else -up             # body -z is up
-    seeds, kinds = [], []
+    seeds, kinds, stop_x = [], [], []
     nose = np.array([geo["x_nose_m"], 0.0, z_ax])
+    short = geo["x_tail_m"] - 0.1 * ref
     # Fuselage: two rings just outside the skin, seeded a little ahead of
     # the nose, so the lines part round the nose and run along the body.
-    for ring, (rr, count) in enumerate(((1.12, 12), (1.45, 12))):
+    for ring, (rr, count) in enumerate(((1.15, 10), (1.6, 8))):
         for i in range(count):
             th = 2.0 * math.pi * (i + 0.5 * ring) / count
             off = side * math.cos(th) * rr * R + up * math.sin(th) * rr * R
             seeds.append(nose - flow_dir * (0.35 * R + 0.04 * length) + off)
             kinds.append("fuselage")
+            stop_x.append(short)
     # Wing: at stations across the span, lines close over and under the
     # surface (a few hundredths of a chord) and one further out, started
     # half a chord ahead of the swept leading edge.
-    for frac in (0.25, 0.42, 0.58, 0.74, 0.88):
+    for frac in (0.22, 0.36, 0.5, 0.63, 0.75, 0.86):
         for sgn in (-1.0, 1.0):
             y = sgn * frac * half
             le = np.array([float(x_qc_at(np.array([y]))[0]) + 0.25 * chord, y, z_w])
-            for h in (0.035, 0.11, -0.05, 0.3):
+            for h in (0.035, 0.12, -0.05):
                 seeds.append(le - flow_dir * (0.5 * chord) + up * h * chord)
                 kinds.append("wing")
+                stop_x.append(short)
+    # Tips: small rings round where each trailing vortex leaves the wing;
+    # these lines roll up round the vortex and run further aft.
     for sgn in (-1.0, 1.0):
-        y = sgn * 0.98 * half
-        le = np.array([float(x_qc_at(np.array([y]))[0]) + 0.25 * chord, y, z_w])
-        for h in (0.08, -0.06):
-            seeds.append(le - flow_dir * (0.5 * chord) + up * h * chord)
-            kinds.append("wingtip")
+        y_tip = sgn * b_eff / 2.0
+        le = np.array([float(x_qc_at(np.array([sgn * half]))[0]) + 0.25 * chord, y_tip, z_w])
+        for rr, count in ((0.035, 6), (0.07, 8)):
+            for i in range(count):
+                th = 2.0 * math.pi * i / count
+                off = side * math.cos(th) * rr * span + up * math.sin(th) * rr * span
+                seeds.append(le - flow_dir * (0.3 * chord) + off)
+                kinds.append("wingtip")
+                stop_x.append(geo["x_tail_m"] - 0.45 * ref)
     P = np.array(seeds, float)
+    stop_x = np.array(stop_x)
     ds = min(0.008 * ref, 0.02 * chord)
-    # From the seeds to a short way past the tail / trailing edge.
-    run = (geo["x_nose_m"] - geo["x_tail_m"]) + 0.04 * length + 0.35 * R + 0.15 * ref
+    # From the seeds to a short way past the tail (further for the tips).
+    run = (geo["x_nose_m"] - geo["x_tail_m"]) + 0.04 * length + 0.35 * R + 0.5 * ref
     steps = int(run / ds)
     paths = [P.copy()]
     speeds = [np.linalg.norm(field(P), axis=1) / tas]
@@ -670,7 +680,7 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
         alive &= sp2 > 0.03 * tas
         # Each line stops a short way behind the tail: a long wake runs at
         # a chase camera and fans over the picture.
-        alive &= P[:, 0] > geo["x_tail_m"] - 0.1 * ref
+        alive &= P[:, 0] > stop_x
         P = np.where(alive[:, None], P + v2 / (sp2[:, None] + 1e-9) * ds, P)
         paths.append(P.copy())
         speeds.append(np.linalg.norm(field(P), axis=1) / tas)

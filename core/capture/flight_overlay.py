@@ -523,16 +523,21 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
             for ln in flow["lines"]:
                 pts, cams, spd = ln["points_px"], ln["points_camera_m"], ln["speed_ratio"]
                 n = len(pts)
+                strong = ln.get("kind") in ("wing", "wingtip")
+                width = (1.35 if strong else 1.0) * k
+                peak = 215.0 if strong else 160.0
                 for i in range(n - 1):
                     a, b = cv.P(pts[i]), cv.P(pts[i + 1])
                     if a is None or b is None:
                         continue
-                    alpha = 175.0 * min(1.0, i / 14.0) * min(1.0, (n - 1 - i) / 14.0)
+                    alpha = peak * min(1.0, i / 14.0) * min(1.0, (n - 1 - i) / 14.0)
                     if depth is not None:
                         z_surface = depth(pts[i])
                         if z_surface is not None and cams[i][2] > z_surface + 0.1 + 0.004 * z_surface:
                             continue            # the aircraft (or terrain) is in front
-                    cv.line("flow", a, b, ramp(spd[i], window), 1.05 * k, alpha=alpha)
+                    # A faint dark underlay keeps the line legible on bright ground.
+                    cv.line("flow", a, b, ramp(spd[i], window), width, alpha=alpha,
+                            outline=True)
         _draw_box(cv, item, detailed=True)
         for d in item.get("dimension_labels", []):
             cv.tag(cv.P(d["at_px"]), d["text"], COLOURS["dim"], small, leader=False)
