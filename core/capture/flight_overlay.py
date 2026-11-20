@@ -547,9 +547,10 @@ def _panel(draw, origin, heading, rows, font, title, k, accent):
     w = max(lw + vw, hw) + 20 * k
     rh = 16 * k
     h = 26 * k + rh * len(rows) + 8 * k
-    draw.rectangle([x, y, x + w, y + h], fill=(6, 12, 20, 175), outline=accent + (140,),
+    draw.rectangle([x, y, x + w, y + h], fill=(6, 12, 20, 200), outline=accent + (140,),
                    width=max(1, int(k)))
-    draw.rectangle([x, y, x + w, y + 20 * k], fill=accent + (40,))
+    draw.rectangle([x, y, x + w, y + 20 * k], fill=(4, 9, 15, 240))
+    draw.line([x, y + 20 * k, x + w, y + 20 * k], fill=accent + (200,), width=max(1, int(k)))
     draw.text((x + 8 * k, y + 4 * k), heading, font=title, fill=accent + (255,))
     for i, (label, value) in enumerate(rows):
         ty = y + 26 * k + i * rh
@@ -571,9 +572,10 @@ def _force_panel(draw, right_top, physics, rows, font, title, small, k, flow):
     x1, y = right_top
     x = x1 - w
     accent = COLOURS["box"]
-    draw.rectangle([x, y, x1, y + h], fill=(6, 12, 20, 175), outline=accent + (140,),
+    draw.rectangle([x, y, x1, y + h], fill=(6, 12, 20, 200), outline=accent + (140,),
                    width=max(1, int(k)))
-    draw.rectangle([x, y, x1, y + 20 * k], fill=accent + (40,))
+    draw.rectangle([x, y, x1, y + 20 * k], fill=(4, 9, 15, 240))
+    draw.line([x, y + 20 * k, x1, y + 20 * k], fill=accent + (200,), width=max(1, int(k)))
     draw.text((x + 8 * k, y + 4 * k), "FORCES & AERODYNAMICS", font=title, fill=accent + (255,))
     bx0 = x + 78 * k
     bx1 = x1 - 96 * k
