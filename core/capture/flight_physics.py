@@ -511,6 +511,43 @@ def _joukowski_velocity(X, Z, alpha_eff, U, eps=0.085, delta=0.04):
     return w.real, -w.imag, gamma
 
 
+def vortex_lattice(span: float, chord: float, x_qc_root: float, x_qc_tip: float,
+                   n: int = 16) -> Dict:
+    """Spanwise lift distribution of the wing from a vortex-lattice solve:
+    ``n`` horseshoe vortices bound on the (swept) quarter-chord line,
+    trailing downstream, control points at three-quarter chord, flat-plate
+    boundary condition. Returns the panel edges / centres (m) and the
+    circulation SHAPE normalised so its integral over the span is 1 (the
+    frame's lift scales it: Gamma(y) = L / (rho V) x shape)."""
+    import numpy as np
+
+    half = span / 2.0
+    # Cosine spacing: finer panels toward the tips, where the load changes.
+    th = np.linspace(0.0, math.pi, n + 1)
+    edges = -half * np.cos(th)
+    centres = 0.5 * (edges[:-1] + edges[1:])
+
+    def xqc(y):
+        return x_qc_root + (x_qc_tip - x_qc_root) * np.abs(y) / half
+
+    far = 1e4 * span
+    A = np.zeros((n, n))
+    cps = np.stack([xqc(centres) - 0.5 * chord, centres, np.zeros(n)], axis=1)
+    for j in range(n):
+        a = np.array([xqc(edges[j]), edges[j], 0.0])
+        b = np.array([xqc(edges[j + 1]), edges[j + 1], 0.0])
+        fa = a + np.array([-far, 0.0, 0.0])
+        fb = b + np.array([-far, 0.0, 0.0])
+        v = (_segment_velocity(cps, fa, a, 1.0, 1e-6) + _segment_velocity(cps, a, b, 1.0, 1e-6)
+             + _segment_velocity(cps, b, fb, 1.0, 1e-6))
+        A[:, j] = v[:, 2]                      # the normal (body z) component
+    shape = np.linalg.solve(A, np.ones(n))
+    shape = np.abs(shape)
+    shape /= float(np.sum(shape * np.diff(edges))) or 1.0
+    return {"edges_m": edges, "centres_m": centres, "shape": shape, "panels": n,
+            "sweep_quarter_chord_deg": math.degrees(math.atan2(x_qc_root - x_qc_tip, half))}
+
+
 def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Sequence[float],
                         airframe: Optional[Dict] = None) -> Optional[Dict]:
     """Streamlines of the air round the airframe, in BODY metres about the CG.
@@ -554,9 +591,16 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
     half = span / 2.0
     lift = float(((physics.get("forces") or {}).get("lift") or {}).get("magnitude_n") or 0.0)
     rho = float((physics.get("air") or {}).get("density_kg_m3") or 1.2)
-    # Elliptic loading: root circulation G0 = 4 L / (rho V pi b); section
-    # circulation G0 sqrt(1 - (2y/b)^2).
-    g0 = 4.0 * lift / (rho * tas * math.pi * span) if lift > 0 else 0.0
+    # Spanwise loading from the vortex lattice on the swept planform:
+    # Gamma(y) = L / (rho V) x shape(y); g0 is its value at the root.
+    vlm = vortex_lattice(span, chord, geo["x_quarter_chord_m"], geo["x_quarter_chord_tip_m"])
+    gamma_total = lift / (rho * tas) if lift > 0 else 0.0
+    vlm_gamma = vlm["shape"] * gamma_total
+    centres, edges = vlm["centres_m"], vlm["edges_m"]
+    g0 = float(np.interp(0.0, centres, vlm_gamma)) if lift > 0 else 0.0
+
+    def gamma_at(y):
+        return np.interp(y, centres, vlm_gamma, left=0.0, right=0.0)
     scale = 4.0 / chord                         # metres -> aerofoil units
     mu_R = abs(1.0 - complex(-0.085, 0.04))
     beta = math.asin(0.04 / mu_R)
@@ -571,9 +615,15 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
     x_te = xq1 - 0.75 * chord
     b_eff = math.pi * span / 4.0
     g_tip = lift / (rho * tas * b_eff) if lift > 0 else 0.0
-    core = 0.03 * span                  # tip-vortex core, ~3 % of span
+    core = 0.03 * span                  # trailing-vortex core, ~3 % of span
     far = 40.0 * ref
     tips = [np.array([x_te, -b_eff / 2.0, z_w]), np.array([x_te, b_eff / 2.0, z_w])]
+    # The trailing vortex sheet: every panel edge sheds the jump in
+    # circulation, from its trailing edge downstream.
+    g_pad = np.concatenate([[0.0], vlm_gamma, [0.0]])
+    shed = g_pad[:-1] - g_pad[1:]
+    legs = [(np.array([float(x_qc_at(np.array([ye]))[0]) - 0.75 * chord, ye, z_w]), float(sh))
+            for ye, sh in zip(edges, shed) if abs(sh) > 1e-9]
 
     def section_alpha(g_m2s):
         # Incidence whose Kutta circulation is the section circulation
@@ -587,7 +637,7 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
         v += _rankine_velocity(P - np.array([0.0, 0.0, z_ax]), a, m, x_mid)
         if g0 > 0:
             y = P[:, 1]
-            load = np.sqrt(np.clip(1.0 - (y / half) ** 2, 0.0, 1.0))
+            load = gamma_at(y) / max(g0, 1e-9)
             # Section-plane coordinates of each point, rotated so the
             # aerofoil's free stream lies along the local flow angle.
             Xb = -(P[:, 0] - (x_qc_at(y) - 0.25 * chord)) * scale
@@ -599,7 +649,7 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
                 sel = (np.abs(y) / half >= lo) & (np.abs(y) / half < hi)
                 if not sel.any():
                     continue
-                lm = float(np.sqrt(max(0.0, 1.0 - ((lo + min(hi, 1.0)) / 2.0) ** 2)))
+                lm = float(gamma_at(np.array([half * (lo + min(hi, 1.0)) / 2.0]))[0]) / max(g0, 1e-9)
                 ae = section_alpha(g0 * lm)
                 rot = alpha_flow - ae          # aerofoil frame -> section plane
                 c, s_ = math.cos(rot), math.sin(rot)
@@ -620,8 +670,8 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
             out = np.stack([-out_u, np.zeros(len(P)), -out_w], axis=1)
             fade = np.clip(1.5 - np.abs(y) / half, 0.0, 1.0)[:, None]
             v += out * fade
-            v += _segment_velocity(P, tips[0] + flow_dir * far, tips[0], g_tip, core)
-            v += _segment_velocity(P, tips[1], tips[1] + flow_dir * far, g_tip, core)
+            for start, strength in legs:
+                v += _segment_velocity(P, start, start + flow_dir * far, strength, core)
         return v
 
     side = np.array([0.0, 1.0, 0.0])
@@ -698,9 +748,10 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
         "model": ("potential flow round the airframe: free stream (relative wind) + "
                   "Rankine body on the nose-tail axis + a Joukowski aerofoil section "
                   "of the model's mean chord at each span station, at the incidence "
-                  "whose Kutta circulation carries this frame's lift with elliptic "
-                  "spanwise loading + the trailing tip vortices. Analytic, driven by "
-                  "the frame's lift, density and airspeed; not a CFD solve"),
+                  "whose Kutta circulation carries that station's share of this "
+                  "frame's lift (spanwise loading from a vortex-lattice solve of the "
+                  "swept planform) + the trailing vortex sheet it sheds. Analytic, "
+                  "driven by the frame's lift, density and airspeed; not a CFD solve"),
         "geometry": {k: (_r(v, 4) if isinstance(v, float) else v) for k, v in geo.items()},
         "parameters": {"free_stream_mps": _r(tas, 3),
                        "relative_wind_direction_body": _r(flow_dir.tolist(), 6),
@@ -708,6 +759,15 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
                        "root_section_incidence_deg": _r(math.degrees(section_alpha(g0)), 3)
                        if g0 else None,
                        "tip_vortex_circulation_m2_s": _r(g_tip, 3),
+                       "spanwise_loading": {
+                           "method": ("vortex lattice: horseshoes on the swept quarter-chord "
+                                      "line, control points at 3/4 chord, flat plate; scaled "
+                                      "to this frame's lift"),
+                           "panels": vlm["panels"],
+                           "sweep_quarter_chord_deg": _r(vlm["sweep_quarter_chord_deg"], 2),
+                           "y_m": _r(list(map(float, centres)), 3),
+                           "circulation_m2_s": _r(list(map(float, vlm_gamma)), 3),
+                           "trailing_legs": len(legs)},
                        "tip_vortex_spacing_m": _r(b_eff, 3), "vortex_core_m": _r(core, 3),
                        "source_strength_m3_s": _r(m, 3), "seeds": len(seeds),
                        "step_m": _r(ds, 4), "steps": steps},

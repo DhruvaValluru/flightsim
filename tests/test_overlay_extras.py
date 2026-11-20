@@ -96,3 +96,17 @@ def test_surface_pressure_is_highest_where_the_surface_faces_the_flow():
     profile = [cp[40, 40 + i] for i in range(0, 33, 4)]
     assert all(a >= b for a, b in zip(profile, profile[1:]))
     assert profile[-1] < 0.0
+
+
+def test_the_vortex_lattice_loads_a_wing_like_theory():
+    from core.capture.flight_physics import vortex_lattice
+
+    flat = vortex_lattice(10.0, 1.0, 0.0, 0.0, 16)
+    shape, edges = flat["shape"], flat["edges_m"]
+    assert float(np.sum(shape * np.diff(edges))) == pytest.approx(1.0)
+    assert shape[7] > shape[0] and shape[8] > shape[-1]          # most load at the root
+    assert np.allclose(shape, shape[::-1], rtol=1e-6)             # symmetric
+    swept = vortex_lattice(10.0, 1.0, 0.0, -2.5, 16)
+    # Sweeping back moves load outboard (the classic swept-wing tip loading).
+    assert swept["shape"][8] < shape[8] and swept["shape"][1] > shape[1]
+    assert swept["sweep_quarter_chord_deg"] == pytest.approx(26.57, abs=0.05)
