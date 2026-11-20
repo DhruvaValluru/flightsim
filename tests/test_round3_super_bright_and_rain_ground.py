@@ -36,7 +36,7 @@ from core.scene import lighting
 from core.scene import world_beauty as wb
 from core.sky import plan as sky_plan
 
-from tests.test_presets_colour import YOSEMITE, edited, write_sky
+from tests.test_presets_colour import BRIGHT, YOSEMITE, edited, write_sky
 
 REPO = Path(__file__).resolve().parents[1]
 PRIVATE = REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private"
@@ -69,8 +69,8 @@ def _plan_scene(tmp_path: Path, name: str, **edits):
 
 def test_super_bright_opens_back_part_of_the_relit_meter(tmp_path):
     golden = _plan_scene(tmp_path, "01")
-    bright = _plan_scene(tmp_path, "02", preset="super_bright")
-    preset = lighting.PRESETS["super_bright"]
+    bright = _plan_scene(tmp_path, "02", **BRIGHT)
+    preset = BRIGHT
     ex = bright["beauty"]["exposure"]
     gain = bright["sky"]["exposure"]["ev100"] - golden["sky"]["exposure"]["ev100"]
     assert gain > 3.0                                           # 6 -> 72 deg: about 3.7 stops
@@ -119,7 +119,7 @@ def _ratio(rgb):
 
 def test_super_bright_lights_its_fill_as_a_fill_not_more_blue_sky(tmp_path):
     golden = _plan_scene(tmp_path, "01")
-    bright = _plan_scene(tmp_path, "02", preset="super_bright")
+    bright = _plan_scene(tmp_path, "02", **BRIGHT)
     assert "sky_light" not in golden["hero"]                         # #01 untouched
     fill = bright["hero"]["sky_light"]
     sky, colour, scale = fill["model_sky_rgb"], fill["color_linear_rgb"], fill["intensity_scale"]
@@ -169,10 +169,10 @@ def test_the_fill_luminance_rides_the_lighting_blocks_sky_light_scale(tmp_path):
 
     import webapp.runs as runs
 
-    bright = _plan_scene(tmp_path, "02", preset="super_bright")
+    bright = _plan_scene(tmp_path, "02", **BRIGHT)
     out = tmp_path / "02"
-    look = runs.relight_sky_plan(edited(YOSEMITE, preset="super_bright"),
-                                 write_sky(edited(YOSEMITE, preset="super_bright"), tmp_path), None)
+    look = runs.relight_sky_plan(edited(YOSEMITE, **BRIGHT),
+                                 write_sky(edited(YOSEMITE, **BRIGHT), tmp_path), None)
     folded = hl.with_stated_fill_scale(look, out / "beauty_look.json")
     scale = bright["hero"]["sky_light"]["intensity_scale"]
     assert folded["sky_light_scale"] == pytest.approx(look["sky_light_scale"] * scale, abs=1e-5)

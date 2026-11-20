@@ -25,7 +25,7 @@ import pytest
 from core.scene import hero_lighting as hl
 from core.scene import lighting
 
-from tests.test_presets_colour import DESERT, YOSEMITE, edited, write_sky
+from tests.test_presets_colour import BRIGHT, DESERT, YOSEMITE, edited, write_sky
 
 LUMA = (0.2126, 0.7152, 0.0722)
 
@@ -50,7 +50,7 @@ def _chroma(rgb):
 
 
 def test_super_bright_fill_is_near_neutral(tmp_path):
-    bright = _plan(tmp_path, "02", preset="super_bright")
+    bright = _plan(tmp_path, "02", **BRIGHT)
     fill = bright["hero"]["sky_light"]
     assert fill["neutral_share"] == hl.STATED_FILL_NEUTRAL_SHARE == 0.0   # round 76 (1.0, then 0.5)
     colour, sky, scale = fill["color_linear_rgb"], fill["model_sky_rgb"], fill["intensity_scale"]
@@ -69,7 +69,7 @@ def test_super_bright_fill_is_near_neutral(tmp_path):
 
 
 def test_the_neutral_fill_does_not_turn_the_ground_orange(tmp_path):
-    bright = _plan(tmp_path, "02", preset="super_bright")
+    bright = _plan(tmp_path, "02", **BRIGHT)
     ground, fill = bright["hero"]["ground"], bright["hero"]["sky_light"]
     drawn = [v * c * fill["intensity_scale"] for v, c in
              zip(ground["lower_hemisphere_luminance_rgb"], fill["color_linear_rgb"])]
@@ -90,7 +90,7 @@ def test_super_bright_sun_is_near_neutral():
 
     from core.xplane.atmosphere import Atmosphere, sun_irradiance
 
-    preset = lighting.PRESETS["super_bright"]
+    preset = BRIGHT
     atm = Atmosphere()
     sun = sun_irradiance(atm, 1200.0, preset["sun_elevation_deg"]) / np.asarray(atm.solar_irradiance)
     assert _chroma(list(sun)) <= 1.35                                # a high sun: barely reddened
@@ -112,7 +112,7 @@ def test_scenes_without_a_stated_fill_are_unchanged(tmp_path):
 
 
 def test_measure_never_gets_a_sidecar():
-    assert hl.write_sidecar_beside(edited(YOSEMITE, preset="super_bright"), None) is None
+    assert hl.write_sidecar_beside(edited(YOSEMITE, **BRIGHT), None) is None
     assert hl.with_stated_fill_scale({"sky_light_scale": 1.35}, None) == {"sky_light_scale": 1.35}
 
 

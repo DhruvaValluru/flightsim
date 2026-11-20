@@ -34,7 +34,7 @@ import pytest
 from core.render.flags import lighting_flags, render_flags
 from core.scene import hero_lighting as hl
 
-from tests.test_presets_colour import YOSEMITE, edited, write_sky
+from tests.test_presets_colour import BRIGHT, YOSEMITE, edited, write_sky
 
 REPO = Path(__file__).resolve().parents[1]
 PRIVATE = REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private"
@@ -76,7 +76,7 @@ def _plan(tmp_path: Path, name: str, **edits):
 
 def test_02_differs_from_01_only_in_the_sun_the_exposure_the_knobs_and_the_fill(tmp_path):
     golden = _plan(tmp_path, "01")
-    bright = _plan(tmp_path, "02", preset="super_bright")
+    bright = _plan(tmp_path, "02", **BRIGHT)
     # The command: the knob flags and the haze are the only new or changed tokens.
     added = sorted(set(bright["flags"]) - set(golden["flags"]))
     removed = sorted(set(golden["flags"]) - set(bright["flags"]))
@@ -189,7 +189,7 @@ def test_the_commandlet_witnesses_the_sky_light_capture():
 
 
 def test_measure_never_gets_a_probe_or_a_sidecar(tmp_path):
-    assert hl.write_sidecar_beside(edited(YOSEMITE, preset="super_bright"), None) is None
+    assert hl.write_sidecar_beside(edited(YOSEMITE, **BRIGHT), None) is None
     assert hl.flags_beside(None) == []
     # No probe switch is ever emitted by the web app: they are the operator's A/B, by hand.
     runs_py = (REPO / "webapp/runs.py").read_text(encoding="utf-8")

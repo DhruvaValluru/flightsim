@@ -5,9 +5,11 @@ spec say how the render is lit, on top of whatever placed the sun before
 it (the documented default look, a stated ``environment.time_of_day``,
 or the storm look):
 
-* a **preset** word -- ``natural`` (change nothing), ``sunny``,
-  ``super_bright``, ``soft``, ``hazy``, ``overcast``, ``golden_hour``,
-  ``dramatic`` -- that supplies every knob below it did not get stated;
+* a **preset** word -- ``natural`` (change nothing), ``soft``, ``hazy``,
+  ``overcast``, ``golden_hour``, ``dramatic`` -- that supplies every knob
+  below it did not get stated (``sunny`` and ``super_bright`` were removed
+  2026-11-19: over New York they rendered nearly the same as ``natural``,
+  so their words now read as ``natural``);
 * the **sun direction in exact degrees** -- ``sun_elevation_deg`` above
   the horizon and ``sun_azimuth_deg`` the compass bearing the light comes
   FROM (0 north, 90 east), each overriding the preset and the time of day;
@@ -44,12 +46,6 @@ KNOBS = ("sun_elevation_deg", "brightness_ev", "sun_intensity",
 #: leaves out keeps the look underneath. ``natural`` names nothing.
 PRESETS: Dict[str, Dict[str, float]] = {
     "natural": {},
-    "sunny": {"sun_elevation_deg": 55.0, "brightness_ev": 0.2, "sun_intensity": 1.15,
-              "color_temperature_k": 5900.0, "shadow_softness_deg": 0.53,
-              "sky_fill": 1.0, "haze": 0.0009},
-    "super_bright": {"sun_elevation_deg": 72.0, "brightness_ev": 0.6, "sun_intensity": 1.6,
-                     "color_temperature_k": 6000.0, "shadow_softness_deg": 0.45,
-                     "sky_fill": 1.35, "haze": 0.0005},
     "soft": {"sun_elevation_deg": 38.0, "brightness_ev": 0.3, "sun_intensity": 0.75,
              "color_temperature_k": 6100.0, "shadow_softness_deg": 6.0,
              "sky_fill": 1.4, "haze": 0.002},
@@ -72,9 +68,11 @@ PRESET_NAMES = tuple(PRESETS)
 #: Spoken spellings the block accepts for a preset (normalised first).
 ALIASES = {
     "default": "natural", "none": "natural", "normal": "natural",
-    "sun": "sunny", "clear": "sunny", "bright": "sunny",
-    "super bright": "super_bright", "very bright": "super_bright",
-    "extra bright": "super_bright", "superbright": "super_bright",
+    # sunny / super_bright were removed 2026-11-19 (owner: they looked the
+    # same as natural); their words still parse, as natural.
+    "sunny": "natural", "sun": "natural", "clear": "natural", "bright": "natural",
+    "super bright": "natural", "super_bright": "natural", "very bright": "natural",
+    "extra bright": "natural", "superbright": "natural",
     "cloudy": "overcast", "grey": "overcast", "gray": "overcast",
     "diffuse": "soft", "soft light": "soft",
     "golden": "golden_hour", "golden hour": "golden_hour", "sunset": "golden_hour",

@@ -81,6 +81,14 @@
   button.opt { background: #1d2733; color: #d8dde2; margin: .15rem .3rem
                .15rem 0; }
   button.opt.selected { background: #2b5d8c; color: #eaf2f9; }
+  /* Lighting presets: a thumbnail of the look beside each button. */
+  .lpresets { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0; }
+  button.opt.lpreset { display: flex; align-items: center; gap: .5rem;
+                       margin: 0; padding: .3rem .6rem .3rem .3rem;
+                       border: 2px solid transparent; }
+  button.opt.lpreset.selected { border-color: #8fc1ec; }
+  button.opt.lpreset img { width: 128px; height: 72px; object-fit: cover;
+                           border-radius: 3px; display: block; }
   input.free { background: #171d24; color: inherit; border: 1px solid
                #2c3947; border-radius: 4px; font: inherit;
                padding: .25rem .5rem; width: 16rem; }
@@ -827,7 +835,7 @@ const toLog = (v, lo, hi) => 1000 * Math.log(clamp(v, lo, hi) / lo) / Math.log(h
 const fromLog = (t, lo, hi) => lo * Math.pow(hi / lo, t / 1000);
 
 const LIGHTING_LABELS = {
-  natural: "Natural", sunny: "Sunny", super_bright: "Super bright",
+  natural: "Natural",
   soft: "Soft", hazy: "Hazy", overcast: "Overcast",
   golden_hour: "Golden hour", dramatic: "Dramatic"};
 //: What an unstated engine knob is, with no preset naming it: the
@@ -900,9 +908,16 @@ function renderLightingPanel() {
   const autoNote = (knob, unit = "") => knob.auto
     ? ` <span class="auto">auto${knob.fromPreset ? " (preset)" : ""}</span>` : "";
 
-  const presetButtons = Object.keys(lightingPresets.presets || LIGHTING_LABELS).map(name =>
-    `<button class="opt${name === preset ? " selected" : ""}" data-lpreset="${name}">` +
-    `${LIGHTING_LABELS[name] || name}</button>`).join("");
+  // Each preset shows a thumbnail of how it looks (one frame over Manhattan,
+  // /lighting_preview/<name>.jpg) so the pick is made by eye, not by name.
+  const presetNames = Object.keys(lightingPresets.presets || {}).length
+    ? Object.keys(lightingPresets.presets) : Object.keys(LIGHTING_LABELS);
+  const presetButtons = presetNames.map(name =>
+    `<button class="opt lpreset${name === preset ? " selected" : ""}" data-lpreset="${name}" ` +
+    `title="${LIGHTING_LABELS[name] || name}: sample frame over Manhattan">` +
+    `<img src="/lighting_preview/${name}.jpg" alt="" loading="lazy" ` +
+    `onerror="this.style.display='none'">` +
+    `<span>${LIGHTING_LABELS[name] || name}</span></button>`).join("");
 
   const compass = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"].map((label, i) =>
     `<button class="nudge" data-laz="${i * 45}">${label}</button>`).join("");
@@ -935,7 +950,7 @@ function renderLightingPanel() {
     `<b>C</b> is the camera and the arrow is where the aircraft flies, so you can ` +
     `put the light behind the camera, beside it or behind the aircraft. ` +
     `What you set here is written into the <b>lighting</b> rows of the table.</div>` +
-    `<div class="ctl">${presetButtons}</div>` +
+    `<div class="lpresets">${presetButtons}</div>` +
     `<div class="panelRow">` +
     `<div class="panelCol" style="flex:0 0 220px">${sunDialSvg()}</div>` +
     `<div class="panelCol">` +

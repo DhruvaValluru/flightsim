@@ -56,9 +56,9 @@ from pathlib import Path
 SCENARIOS = [
     ("golden hour A-4, flying east",
      "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds", {}),
-    ("same, super bright preset",
+    ("same, soft preset",
      "chase view of the a4 at 1500 m over yosemite at golden hour, flying east, for 6 seconds",
-     {"preset": "super_bright"}),
+     {"preset": "soft"}),
     ("a320 over new york, wide lens (terrain download)",
      "chase view of the a320 over new york city at 600 m in the morning with a 18 mm lens for 6 seconds", {}),
     ("desert A-4, sun behind the camera",

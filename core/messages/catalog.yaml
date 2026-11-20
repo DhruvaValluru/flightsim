@@ -1341,7 +1341,7 @@ buildings.ids:
   hint: "Take every identifier from the source, once each, and give each outline at least three corners."
 lighting.preset:
   sentence: "The lighting preset is not one this build knows."
-  hint: "Choose natural, sunny, super bright, soft, hazy, overcast, golden hour or dramatic."
+  hint: "Choose natural, soft, hazy, overcast, golden hour or dramatic."
 lighting.range:
   sentence: "A lighting value is outside what the render can show."
   hint: "Keep the sun 2 to 90 degrees up and its direction 0 to 360 degrees, brightness within 5 stops, colour 1700 to 12000 K, shadow softness 0 to 45 degrees, sun and sky fill 0 to 10 times, and haze 0 to 0.05."

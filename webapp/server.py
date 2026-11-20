@@ -1870,6 +1870,21 @@ def aircraft_picker_script() -> FileResponse:
                         media_type="application/javascript")
 
 
+@app.get("/lighting_preview/{name}.jpg")
+def lighting_preview(name: str):
+    """The thumbnail beside each lighting-preset button: one frame of that
+    preset over Manhattan (A-4E, 3,000 ft, chase view), rendered on the
+    Windows laptop 2026-11-19 (webapp/static/lighting/<preset>.jpg). Only a
+    preset in core/scene/lighting.py PRESETS is served."""
+    from core.scene.lighting import PRESETS
+
+    path = STATIC / "lighting" / f"{name}.jpg"
+    if name not in PRESETS or not path.is_file():
+        return Response(status_code=404)
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "max-age=86400"})
+
+
 @app.get("/generate.html", response_class=HTMLResponse)
 def generate_page() -> str:
     """The guided page: ask, clarify, preview, generate, review, download."""

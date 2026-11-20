@@ -88,8 +88,9 @@ def test_the_host_sets_it_in_the_beauty_look_only_and_records_it():
     assert TILES.count(f"{tl.CESIUM_SETTER}(") == 1
 
 
-def test_super_bright_keeps_a_daylight_key_a_touch_warm_not_cold():
-    preset = lighting.PRESETS["super_bright"]
+def test_soft_keeps_a_daylight_key_a_touch_warm_not_cold():
+    # was super_bright (removed 2026-11-19); soft is the remaining daylight key
+    preset = lighting.PRESETS["soft"]
     # Unreal's temperature: below 6500 K is warmer than white.
     assert 6000.0 <= preset["color_temperature_k"] < 6300.0
     assert lighting.PRESETS["golden_hour"]["color_temperature_k"] < preset["color_temperature_k"]

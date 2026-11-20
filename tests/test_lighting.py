@@ -90,7 +90,11 @@ def test_out_of_range_values_and_unknown_presets_refuse_by_name():
 
 
 def test_spoken_preset_words_are_accepted():
-    assert lighting.canonical_preset("Super bright") == "super_bright"
+    # sunny / super_bright were removed 2026-11-19; their words read as natural
+    assert lighting.canonical_preset("Super bright") == "natural"
+    assert lighting.canonical_preset("sunny") == "natural"
+    assert lighting.canonical_preset("super_bright") == "natural"
+    assert "sunny" not in lighting.PRESETS and "super_bright" not in lighting.PRESETS
     assert lighting.canonical_preset("golden hour") == "golden_hour"
     assert lighting.canonical_preset("cloudy") == "overcast"
     with pytest.raises(ValueError, match="not one of"):
@@ -109,9 +113,9 @@ def test_a_preset_fills_every_knob_it_names_and_the_engine_keys_follow():
     import webapp.runs as runs
 
     spec = plain_spec()
-    spec.set("lighting.preset", "super_bright")
+    spec.set("lighting.preset", "dramatic")
     look = runs.render_look_for(spec, None)
-    preset = lighting.PRESETS["super_bright"]
+    preset = lighting.PRESETS["dramatic"]
     assert look["sun_elev"] == preset["sun_elevation_deg"]
     assert look["sun_azim"] == DEFAULT_LOOK["sun_azim"]          # no preset names a direction
     noon_bias = runs.exposure_bias_for(preset["sun_elevation_deg"])[0]
@@ -276,9 +280,9 @@ def test_rain_dims_softens_and_hazes_the_light_and_a_stated_choice_still_wins():
     light = runs.render_look_for(compile_prompt(
         "chase view of the c172p over mount fuji at sunrise in light rain for 6 seconds"), None)
     assert look["sun_intensity_scale"] < light["sun_intensity_scale"] < 1.0      # heavier = dimmer
-    spec.set("lighting.preset", "sunny")
-    sunny = runs.render_look_for(spec, None)
-    assert sunny["sun_intensity_scale"] == lighting.PRESETS["sunny"]["sun_intensity"]
+    spec.set("lighting.preset", "dramatic")
+    stated = runs.render_look_for(spec, None)
+    assert stated["sun_intensity_scale"] == lighting.PRESETS["dramatic"]["sun_intensity"]
     spec.set("lighting.sky_fill", 0.5)
     assert runs.render_look_for(spec, None)["sky_light_scale"] == 0.5
 

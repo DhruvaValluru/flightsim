@@ -44,6 +44,15 @@ YOSEMITE = "chase view of the a4 at 1500 m over yosemite at golden hour, flying 
 DESERT = "chase view of the a4 at 2000 m over the desert at 17:30, flying southwest, for 6 seconds"
 
 
+
+#: The old "super_bright" preset's knobs (removed from core/scene/lighting.py
+#: 2026-11-19: it rendered nearly the same as natural). The hero-lighting
+#: tests below still need a bright scene with a stated fill, so they state
+#: these knobs directly; the planning code reads stated and preset values alike.
+BRIGHT = {"sun_elevation_deg": 72.0, "brightness_ev": 0.6, "sun_intensity": 1.6,
+          "color_temperature_k": 6000.0, "shadow_softness_deg": 0.45,
+          "sky_fill": 1.35, "haze": 0.0005}
+
 def edited(prompt: str, **lighting_edits) -> ScenarioSpec:
     """The compiled spec with run_test_scenarios.py's apply_lighting edits
     (the page's dict, lighting section included, as POST /run reads it)."""
@@ -70,12 +79,12 @@ def write_sky(spec: ScenarioSpec, out: Path) -> Path:
 def test_super_bright_moves_the_physical_skys_sun_and_sends_its_knobs(tmp_path):
     import webapp.runs as runs
 
-    spec = edited(YOSEMITE, preset="super_bright")
+    spec = edited(YOSEMITE, **BRIGHT)
     sky = write_sky(spec, tmp_path)
     before = json.loads(sky.read_text(encoding="ascii"))
     look = runs.relight_sky_plan(spec, sky, None)
     after = json.loads(sky.read_text(encoding="ascii"))
-    preset = lighting.PRESETS["super_bright"]
+    preset = BRIGHT
     assert after["sun"]["elevation_deg"] == preset["sun_elevation_deg"]
     assert after["sun"]["relit"]["from"]["elevation_deg"] == before["sun"]["elevation_deg"]
     assert after["exposure"]["ev100"] > before["exposure"]["ev100"]   # a higher sun meters brighter
@@ -120,7 +129,7 @@ def test_measure_on_the_physical_sky_still_drops_the_block(monkeypatch):
     import webapp.runs as runs
 
     monkeypatch.setenv("FLIGHTSIM_SKY", "physical")
-    spec = edited(YOSEMITE, preset="super_bright")
+    spec = edited(YOSEMITE, **BRIGHT)
     assert runs.render_look_for(spec, None) is None
     assert runs.render_look_for(spec, "storm") == runs.STORM_LOOK
     flow = RUNS_PY[RUNS_PY.index("        quality = run_render_quality(run.look)\n        # The look"):]
@@ -158,7 +167,7 @@ def test_super_bright_is_brighter_than_natural_in_the_beauty_exposure(tmp_path, 
 
     monkeypatch.delenv("FLIGHTSIM_SKY", raising=False)
     sidecars = {}
-    for name, edits in (("natural", {}), ("super_bright", {"preset": "super_bright"})):
+    for name, edits in (("natural", {}), ("super_bright", BRIGHT)):
         spec = edited(YOSEMITE, **edits)
         out = tmp_path / name
         out.mkdir()
@@ -166,7 +175,7 @@ def test_super_bright_is_brighter_than_natural_in_the_beauty_exposure(tmp_path, 
                                            quality="beauty")
         sidecars[name] = json.loads(path.read_text(encoding="utf-8"))
     bright = sidecars["super_bright"]["exposure"]
-    preset = lighting.PRESETS["super_bright"]
+    preset = BRIGHT
     # The preset's scales are applied and recorded, not metered away ...
     assert bright["scene_light_stops"] == 0.0
     assert bright["lighting_scales_unmetered"]["sun_intensity_scale"] == preset["sun_intensity"]
@@ -196,7 +205,7 @@ def test_the_rain_looks_scales_stay_metered(tmp_path):
 def test_measure_writes_no_sidecar(tmp_path):
     import webapp.runs as runs
 
-    spec = edited(YOSEMITE, preset="super_bright")
+    spec = edited(YOSEMITE, **BRIGHT)
     assert runs.write_beauty_look_plan(spec, tmp_path, runs.render_look_for(spec, None),
                                        quality="measure") is None
 
