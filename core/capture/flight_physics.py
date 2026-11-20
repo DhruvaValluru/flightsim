@@ -876,12 +876,13 @@ def surface_pressure(depth, mask, K, flow_dir_camera, mach: float = 0.0):
     # 3x3 mean over aircraft pixels only.
     pad = np.pad(z, 1, constant_values=np.nan)
     stack = np.stack([pad[i:i + h, j:j + w] for i in range(3) for j in range(3)])
-    with np.errstate(all="ignore"):
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)
-            zs = np.nanmean(stack, axis=0)
+    # A NaN-ignoring mean without numpy's empty-slice warning (the warning
+    # filter is not thread-safe, and the pictures draw on a thread pool).
+    valid = np.isfinite(stack)
+    count = valid.sum(axis=0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        zs = np.where(count > 0, np.where(valid, stack, 0.0).sum(axis=0) / np.maximum(count, 1),
+                      np.nan)
     u = np.arange(w) + 0.5
     v = np.arange(h) + 0.5
     uu, vv = np.meshgrid(u, v)

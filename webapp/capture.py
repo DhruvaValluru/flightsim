@@ -135,6 +135,31 @@ from core.capture.window import clip_columns  # noqa: E402,F401 -- the one copy,
 from core.render.flags import DEFAULT_FPS as RENDER_FPS  # noqa: E402 -- camera-motion-layer: the frame clock
 
 
+def flight_spec_for(spec):
+    """(spec to fly headlessly, validate_first, assert_closure).
+
+    A drawn route on a spec projected for the UE host: the projection
+    switched the autopilot off (HOST_OPEN_LOOP_FROM -- the host has none
+    and steers from the route pre-flight's control schedule), and the
+    validator's route.hold_state, answered for this run by /run, would
+    refuse the headless pre-run; with validation off the runner would still
+    refuse a route with no autopilot. So the pre-run flies the copy the
+    route pre-flight flies (webapp.route_map._route_copy: autopilot back
+    on), unvalidated and without the closure assertion, exactly as that
+    pre-flight does (its closure is the route's own check, already passed
+    at /run). Any other spec flies as it stands, fully checked."""
+    from webapp.runs import HOST_OPEN_LOOP_FROM
+
+    route = getattr(spec, "route", None)
+    if (route is not None and not route.is_default()
+            and not bool(spec.hold_state.value)
+            and str(spec.hold_state.frm) == HOST_OPEN_LOOP_FROM):
+        from webapp.route_map import _route_copy
+
+        return _route_copy(spec, restore_autopilot=True), False, False
+    return spec, True, True
+
+
 def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,
           tornado: Optional[Dict] = None,
           duration_s: Optional[float] = None):
@@ -153,7 +178,9 @@ def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,
     from core.scenario.runner import run_spec
 
     frame = SceneFrame.for_spec(spec, heightfield)
-    result = run_spec(spec, terrain_ground=terrain_ground)
+    flown, validate_first, assert_closure = flight_spec_for(spec)
+    result = run_spec(flown, validate_first=validate_first, assert_closure=assert_closure,
+                      terrain_ground=terrain_ground)
     columns = clip_columns(result.telemetry.columns, duration_s)
     datum = float(spec.terrain_elevation.value)
     tracks, schedules = _solve_cameras(

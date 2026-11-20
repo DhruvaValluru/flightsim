@@ -164,3 +164,25 @@ def test_the_overlay_video_is_encoded_at_the_clip_rate(tmp_path, monkeypatch):
     cmd = seen["command"]
     assert float(cmd[cmd.index("-framerate") + 1]) == pytest.approx(10.0, rel=1e-3)
     assert "libx264" in cmd
+
+
+def test_a_drawn_route_on_the_host_projection_flies_the_autopilot_copy():
+    """Windows r12: every drawn-route run with cameras failed in
+    capture.solve -- the projected spec (autopilot off for the host) was
+    validated and flown, so route.hold_state / RouteError refused it."""
+    from core.nl.compiler import compile_prompt
+    from webapp.capture import flight_spec_for
+    from webapp.runs import project_for_ue_host
+
+    spec = compile_prompt("A-4 over the grand canyon at 3000 m, chase camera, 6 seconds")
+    spec.set("hold_state", True, frm="test")
+    plain, v, c = flight_spec_for(spec)
+    assert plain is spec and v and c
+    spec.set("route.waypoints", [{"east_m": 0.0, "north_m": 300.0, "alt_m": 3000.0}], frm="test")
+    project_for_ue_host(spec)
+    assert not bool(spec.hold_state.value)
+    flown, v, c = flight_spec_for(spec)
+    assert flown is not spec and bool(flown.hold_state.value) and not v and not c
+    assert flown.route.waypoints.value == spec.route.waypoints.value
+    spec.set("hold_state", False, frm="the user switched it off")   # a user's choice keeps its refusal
+    assert flight_spec_for(spec)[0] is spec
