@@ -548,6 +548,27 @@ def vortex_lattice(span: float, chord: float, x_qc_root: float, x_qc_tip: float,
             "sweep_quarter_chord_deg": math.degrees(math.atan2(x_qc_root - x_qc_tip, half))}
 
 
+def _segments_velocity(P, A, B, gammas, core):
+    """Biot-Savart velocity (N,3) of L straight vortex segments A[l] -> B[l]
+    (circulation gammas[l], smoothed core) at once -- the batched
+    :func:`_segment_velocity`."""
+    import numpy as np
+
+    r0 = (B - A)[None, :, :]                       # (1, L, 3)
+    r1 = P[:, None, :] - A[None, :, :]             # (N, L, 3)
+    r2 = P[:, None, :] - B[None, :, :]
+    cx = r1[..., 1] * r2[..., 2] - r1[..., 2] * r2[..., 1]
+    cy = r1[..., 2] * r2[..., 0] - r1[..., 0] * r2[..., 2]
+    cz = r1[..., 0] * r2[..., 1] - r1[..., 1] * r2[..., 0]
+    r0r0 = (r0 * r0).sum(axis=-1)
+    c2 = cx * cx + cy * cy + cz * cz + (core * core) * r0r0
+    n1 = np.sqrt((r1 * r1).sum(axis=-1)) + 1e-9
+    n2 = np.sqrt((r2 * r2).sum(axis=-1)) + 1e-9
+    k = (gammas[None, :] / (4.0 * math.pi)
+         * ((r1 * r0).sum(axis=-1) / n1 - (r2 * r0).sum(axis=-1) / n2) / c2)
+    return np.stack([(cx * k).sum(axis=1), (cy * k).sum(axis=1), (cz * k).sum(axis=1)], axis=1)
+
+
 def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Sequence[float],
                         airframe: Optional[Dict] = None) -> Optional[Dict]:
     """Streamlines of the air round the airframe, in BODY metres about the CG.
@@ -624,6 +645,9 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
     shed = g_pad[:-1] - g_pad[1:]
     legs = [(np.array([float(x_qc_at(np.array([ye]))[0]) - 0.75 * chord, ye, z_w]), float(sh))
             for ye, sh in zip(edges, shed) if abs(sh) > 1e-9]
+    leg_a = np.array([a for a, _ in legs]) if legs else np.zeros((0, 3))
+    leg_b = leg_a + flow_dir * far
+    leg_g = np.array([g for _, g in legs])
 
     def section_alpha(g_m2s):
         # Incidence whose Kutta circulation is the section circulation
@@ -670,8 +694,8 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
             out = np.stack([-out_u, np.zeros(len(P)), -out_w], axis=1)
             fade = np.clip(1.5 - np.abs(y) / half, 0.0, 1.0)[:, None]
             v += out * fade
-            for start, strength in legs:
-                v += _segment_velocity(P, start, start + flow_dir * far, strength, core)
+            if len(legs):
+                v += _segments_velocity(P, leg_a, leg_b, leg_g, core)
         return v
 
     side = np.array([0.0, 1.0, 0.0])
