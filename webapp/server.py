@@ -150,6 +150,9 @@ class CompileRequest(BaseModel):
     #: fix one that cannot run (core/nl/prompt_assist.py). The page sends
     #: true; the API default is off so a script's prompt is never changed.
     assist: bool = False
+    #: The lighting look picked on the page BEFORE Interpret (a preset
+    #: word, core/scene/lighting.py); applied as a user edit.
+    lighting: Optional[str] = None
 
 
 class RunRequest(BaseModel):
@@ -609,6 +612,14 @@ def _compile_core(request: CompileRequest) -> JSONResponse:
             apply_environment_preset(spec, request.environment)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+    if request.lighting is not None:
+        from core.scene.lighting import canonical_preset
+
+        try:
+            look = canonical_preset(request.lighting)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        spec.lighting.set("preset", look, frm="lighting picked before Interpret (web UI)")
 
     # Planning happens BEFORE the table and verdict are built, so what the
     # user reviews is what will run: the weather event's documented

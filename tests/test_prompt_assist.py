@@ -107,3 +107,13 @@ def test_an_aircraft_without_a_model_is_named_so_the_ai_swaps_it(app, monkeypatc
                         lambda spec: {"sentence": "no licensed 3-D model"})
     problems = server._compile_problems(data)
     assert len(problems) == 1 and "no 3-D model" in problems[0]
+
+
+def test_a_lighting_look_picked_before_interpret_rides_on_the_compile(app):
+    data = app.post("/compile", json={"prompt": "an A-4E Skyhawk over the ocean at 8,000 ft",
+                                      "lighting": "golden hour"}).json()
+    assert data["spec"]["dict"]["lighting"]["preset"]["value"] == "golden_hour"
+    assert data["spec"]["dict"]["lighting"]["preset"]["source"] == "user"
+    bad = app.post("/compile", json={"prompt": "an A-4E Skyhawk over the ocean",
+                                     "lighting": "disco"})
+    assert bad.status_code == 400

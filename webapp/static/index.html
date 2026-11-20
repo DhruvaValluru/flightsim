@@ -16,6 +16,7 @@
   button.interpret { font-size: 1.15rem; font-weight: 700; letter-spacing: .04em;
                      padding: .75rem 2.4rem; background: #2f7fc4;
                      box-shadow: 0 0 0 1px #4a9ad8, 0 2px 10px rgba(47,127,196,.45); }
+  .preLook .preLookRow { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; margin: .2rem 0; }
   .assistNote { margin-top: .55rem; padding: .55rem .75rem; border-radius: 6px;
                 border: 1px solid #2c5a80; background: #13202c; color: #d8e6f1; }
   .assistNote.bad { border-color: #8c4a2b; background: #2a1a12; }
@@ -212,6 +213,14 @@ visual-only per host (measured).</p>
     <div id="assistNote" class="assistNote" hidden></div>
   </div>
   <aside id="conditionsList"></aside>
+</div>
+<div id="preLook" class="card preLook">
+  <div class="preLookRow"><b>Lighting</b>
+    <span class="dim">pick it now; Interpret applies it (fine-tune it later in the Lighting panel)</span></div>
+  <div id="preLighting" class="lpresets"></div>
+  <div class="preLookRow"><b>Flight path</b>
+    <button id="preRoute" type="button" class="opt">&#9998; Draw the flight path</button>
+    <span class="dim">interprets the prompt, then opens the map on that place's terrain</span></div>
 </div>
 <script src="/conditions_list.js"></script>
 <script>ConditionsList.mount(document.getElementById("conditionsList"), document.getElementById("prompt"));</script>
@@ -679,6 +688,7 @@ function renderSpec(payload) {
   });
   lightingPresets = spec.lighting_presets || lightingPresets;
   renderLightingPanel();
+  if (typeof renderPreLighting === "function") renderPreLighting();
   renderViewPanel();
   renderVerdict(payload.validation);
 }
@@ -998,7 +1008,9 @@ function renderLightingPanel() {
         setRow(`lighting.${name}`, null);
       }
       setRow("lighting.brightness_ev", 0);
+      preLighting = button.dataset.lpreset;
       renderLightingPanel();
+      if (typeof renderPreLighting === "function") renderPreLighting();
     }));
   holder.querySelectorAll("[data-laz]").forEach(button =>
     button.addEventListener("click", () => {
@@ -1841,12 +1853,53 @@ function stillPreview() {
   return $("clipSeconds").value === "still";
 }
 
-$("compile").addEventListener("click", () =>
-  doCompile({prompt: $("prompt").value, clip_seconds: clipSeconds(),
-             environment: environmentPreset(),
-             aircraft: aircraftPreset(),
-             assist: $("assistToggle").checked,
-             still: stillPreview()}));
+function compileFromPage() {
+  return doCompile({prompt: $("prompt").value, clip_seconds: clipSeconds(),
+                    environment: environmentPreset(),
+                    aircraft: aircraftPreset(),
+                    assist: $("assistToggle").checked,
+                    lighting: preLighting,
+                    still: stillPreview()});
+}
+$("compile").addEventListener("click", compileFromPage);
+
+// Lighting and the flight path BEFORE Interpret. The lighting strip holds
+// a pick that rides on the next Interpret (POST /compile lighting) and,
+// once a spec is on the page, also clicks the full Lighting panel's own
+// preset so the two never disagree. The flight-path button interprets
+// first when nothing is interpreted yet (the map needs the place's
+// terrain) and opens the route map.
+var preLighting = null;
+function renderPreLighting() {
+  const holder = $("preLighting");
+  const current = compiled && rowInput("lighting.preset")
+    ? String(rowValue("lighting.preset") || "natural") : (preLighting || "natural");
+  holder.innerHTML = Object.keys(LIGHTING_LABELS).map(name =>
+    `<button type="button" class="opt lpreset${name === current ? " selected" : ""}" ` +
+    `data-prelight="${name}" title="${LIGHTING_LABELS[name]}: sample frame over Manhattan">` +
+    `<img src="/lighting_preview/${name}.jpg" alt="" loading="lazy" ` +
+    `onerror="this.style.display='none'"><span>${LIGHTING_LABELS[name]}</span></button>`).join("");
+  holder.querySelectorAll("[data-prelight]").forEach(button =>
+    button.addEventListener("click", () => {
+      preLighting = button.dataset.prelight;
+      const inPanel = document.querySelector(`#lightingPanel [data-lpreset="${preLighting}"]`);
+      if (compiled && inPanel) inPanel.click();
+      renderPreLighting();
+    }));
+}
+renderPreLighting();
+$("preRoute").addEventListener("click", async () => {
+  if (!compiled) {
+    if (!$("prompt").value.trim()) {
+      $("compileState").textContent = "type a prompt first: the map opens on its place";
+      return;
+    }
+    await compileFromPage();
+  }
+  if (!compiled) return;
+  openRouteMap();
+  $("routeMap").scrollIntoView({behavior: "smooth", block: "start"});
+});
 
 // The selector used to be read only at Interpret: picking "3 s" AFTER
 // interpreting changed nothing, and Run flew the old duration. Now a pick
