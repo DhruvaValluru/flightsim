@@ -486,6 +486,13 @@ void main() {
       const scene = this.data.scene || {};
       root.innerHTML = `
 <style>
+  .c3dConfirm { background: linear-gradient(135deg, #f0a030, #e0662a) !important; color: #1a1208 !important;
+    font-weight: 700; font-size: 1.05rem; letter-spacing: .03em; border: 0; border-radius: 999px !important;
+    padding: .6rem 1.6rem !important; cursor: pointer;
+    box-shadow: 0 0 0 1px #ffb54d, 0 3px 14px rgba(240,140,40,.45);
+    transition: transform .12s ease, box-shadow .12s ease; }
+  .c3dConfirm:hover { transform: translateY(-1px) scale(1.03);
+    box-shadow: 0 0 0 1px #ffc670, 0 5px 18px rgba(240,140,40,.6); }
   .c3d-views { display: flex; gap: .8rem; flex-wrap: wrap; }
   .c3d-pane { flex: 1 1 420px; min-width: 300px; }
   .c3d-stack { position: relative; }
@@ -538,7 +545,7 @@ void main() {
 </div>
 <div class="c3d-read" id="c3dRead"></div>
 <div>
-  <button id="c3dPlace">${this.edit ? `Update camera[${this.edit.index}]` : "Add this camera"}</button>
+  <button id="c3dPlace" class="c3dConfirm">&#10003; ${this.edit ? `Confirm camera angle (camera ${this.edit.index})` : "Confirm camera angle"}</button>
   <button class="opt" id="c3dFromView" title="Put the camera where the scene view's eye is, looking the same way">Camera = scene view</button>
   <button class="opt" id="c3dClose">Close</button>
   <span id="c3dState" class="dim"></span>
