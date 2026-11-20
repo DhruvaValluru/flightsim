@@ -39,6 +39,7 @@ should not have their run reshaped.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -607,6 +608,18 @@ CAMERA_VIEW_KEYS = (
 )
 
 
+_NUMBER_LIST = re.compile(r"\[\s*(-?[\d.eE+-]+(?:\s*,\s*-?[\d.eE+-]+)*)\s*\]")
+
+
+def _compact_json(data) -> str:
+    """Indented JSON with every short list of numbers on one line (a
+    vector, a pixel, a matrix row), so a frame's file reads like the
+    picture: one point per line, not one number per line."""
+    text = json.dumps(data, indent=1, ensure_ascii=False)
+    return _NUMBER_LIST.sub(
+        lambda m: "[" + ", ".join(v.strip() for v in m.group(1).split(",")) + "]", text)
+
+
 def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
     """A zip of ONE view's 3-D boxes: per frame the 3-D box picture and a
     small JSON with just that frame's ``box_3d`` section (each plane's box
@@ -644,16 +657,42 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
     readme = (
         f"{camera_id}: the 3-D boxes of run {out.name}\n"
         f"\n"
-        f"frame_NNNN_box3d.png  the frame with each plane's 3-D box drawn\n"
-        f"                 (blue; red = nose face; yellow arrow = where the\n"
-        f"                 nose points), rebuilt from the JSON beside it\n"
-        f"frame_NNNN_box3d.json  that frame's box_3d: per plane centre_m,\n"
-        f"                 extents_m (length/width/height), body_axes_in_camera\n"
-        f"                 (forward/right/down), orientation (yaw/pitch/roll\n"
-        f"                 from the camera and a word), shape_box (measured\n"
-        f"                 from the mesh, when the machine had it), the recipe\n"
-        f"                 to rebuild the 8 corners from these numbers and the\n"
-        f"                 frame's intrinsic_matrix alone, and rebuild_check\n"
+        f"frame_NNNN_box3d.png   the frame as an aerodynamics readout:\n"
+        f"  - each plane's 3-D box (cyan, corner brackets; magenta = nose\n"
+        f"    face), its length / width / height, body axes x/y/z at the CG\n"
+        f"  - the forces from the CG, to scale: LIFT (green), WEIGHT\n"
+        f"    (orange), THRUST (blue), DRAG (red), NET (white, when not ~0),\n"
+        f"    and the velocity off the nose (yellow, dashed)\n"
+        f"  - the airflow: streamlines past the airframe coloured by local\n"
+        f"    speed / free stream (blue slow -> red fast)\n"
+        f"  - FLIGHT STATE panel (position, altitude, speeds, Mach, attitude,\n"
+        f"    alpha / beta / gamma, load factor, air data, wind) and FORCES &\n"
+        f"    AERODYNAMICS panel (force bars, L/D, T/W, CL / CD, Ps, mass)\n"
+        f"\n"
+        f"frame_NNNN_box3d.json  the same frame in numbers:\n"
+        f"  box_3d          per plane centre_m, extents_m, body axes,\n"
+        f"                  orientation, shape_box, rebuild recipe + check\n"
+        f"  flight_physics  every force (lift, drag, side force, thrust per\n"
+        f"                  engine, weight, aerodynamic total, net) as body /\n"
+        f"                  NED / camera vectors and magnitudes; force\n"
+        f"                  balance (acceleration, load factor from the forces\n"
+        f"                  vs the flight model's); velocity (ground, air,\n"
+        f"                  TAS / CAS / Mach, track, vertical speed); alpha,\n"
+        f"                  beta, flight path angle; attitude; air (density,\n"
+        f"                  pressure, temperature, speed of sound, dynamic\n"
+        f"                  pressure, wind, gusts); CL / CD / CY over the\n"
+        f"                  wing area; lifting-line circulation and downwash;\n"
+        f"                  energy and specific excess power; controls\n"
+        f"  panels          the two panels' rows exactly as printed\n"
+        f"  overlay         everything drawn: box corners (m and px), each\n"
+        f"                  arrow's ends (m and px) and scale, the airflow\n"
+        f"                  model, its parameters and every streamline's\n"
+        f"                  points (m and px) with the local speed ratio\n"
+        f"  camera, scene   the camera's pose and intrinsics; the scene\n"
+        f"\n"
+        f"Forces come from the JSBSim flight model's state at this frame.\n"
+        f"The airflow is a potential-flow + lifting-line model driven by\n"
+        f"this frame's lift and airspeed (fast and analytic, not CFD).\n"
         f"\n"
         f"Camera coordinates: x right, y down, z forward along the view,\n"
         f"metres. The full per-frame labels are in the frames zip.\n")
@@ -666,12 +705,16 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
             if picture.is_file():
                 zf.write(picture, arcname=f"{camera_id}_3d/{picture.name}",
                          compress_type=zipfile.ZIP_STORED)
+            box_3d = box3d_section(manifest, record)
+            try:
+                from core.capture.flight_overlay import frame_sidecar
+
+                sidecar = frame_sidecar(manifest, record, box_3d)
+            except Exception:        # noqa: BLE001 -- the box alone still ships
+                sidecar = {"camera_id": camera_id, "frame_index": record.get("index"),
+                           "t_s": record.get("t_s"), "box_3d": box_3d}
             zf.writestr(f"{camera_id}_3d/{stem}_box3d.json",
-                        json.dumps({"camera_id": camera_id,
-                                    "frame_index": record.get("index"),
-                                    "t_s": record.get("t_s"),
-                                    "box_3d": box3d_section(manifest, record)},
-                                   indent=1),
+                        _compact_json(sidecar),
                         compress_type=zipfile.ZIP_DEFLATED)
         zf.writestr(f"{camera_id}_3d/README.txt", readme,
                     compress_type=zipfile.ZIP_DEFLATED)

@@ -122,6 +122,15 @@ def draw_box_frame(record: Dict, source: Path, target: Path) -> Path:
     return target
 
 
+def _drawer_mtime() -> float:
+    """The newest of the 3-D picture's drawing modules, so a picture drawn
+    by older code is redrawn instead of reused."""
+    here = Path(__file__).resolve().parent
+    return max((here / n).stat().st_mtime for n in
+               ("box3d.py", "flight_overlay.py", "flight_physics.py")
+               if (here / n).is_file())
+
+
 def draw_box_frames(manifest: Dict, run_dir, cameras: Optional[Iterable[str]] = None,
                     out_subdir: str = OUT_SUBDIR) -> List[Path]:
     """One boxed copy per rendered frame (every frame, no cap); frames
@@ -148,12 +157,16 @@ def draw_box_frames(manifest: Dict, run_dir, cameras: Optional[Iterable[str]] = 
                 continue
         from .box3d import draw_box3d_frame
 
-        for subdir, name, draw in ((out_subdir, boxed_name(frame_file.name), draw_box_frame),
-                                   (OUT_SUBDIR_3D, box3d_name(frame_file.name),
-                                    draw_box3d_frame)):
+        def draw_3d(rec, src, dst):
+            return draw_box3d_frame(rec, src, dst, manifest=manifest)
+
+        for subdir, name, draw, code_mtime in (
+                (out_subdir, boxed_name(frame_file.name), draw_box_frame, 0.0),
+                (OUT_SUBDIR_3D, box3d_name(frame_file.name), draw_3d, _drawer_mtime())):
             target = run_dir / subdir / camera / name
             if (target.is_file() and target.stat().st_mtime >= source.stat().st_mtime
-                    and target.stat().st_mtime >= manifest_mtime):
+                    and target.stat().st_mtime >= manifest_mtime
+                    and target.stat().st_mtime >= code_mtime):
                 written.append(target)
                 continue
             written.append(Path(draw(record, source, target)))

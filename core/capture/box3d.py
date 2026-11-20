@@ -16,8 +16,9 @@ projected. This module:
 * states which way the plane faces from the camera's point of view
   (:func:`facing`): yaw / pitch / roll of the airframe relative to the
   camera and a plain word ("away from the camera", "to the left", ...);
-* draws a third version of each frame with the rebuilt box and a nose
-  arrow on it (:func:`draw_box3d_frame`).
+* draws a third version of each frame with the rebuilt box, the airflow,
+  the forces and the flight-state panels on it (:func:`draw_box3d_frame`,
+  core/capture/flight_overlay.py).
 
 Corner order (the producer's, airframe.box_corners_body_m): for forward
 in (aft, nose), for right in (left, right), for down in (top, bottom) --
@@ -242,10 +243,21 @@ NOSE_EDGE = (255, 90, 90)
 ARROW = (255, 235, 80)
 
 
-def draw_box3d_frame(record: Dict, source, target):
+def draw_box3d_frame(record: Dict, source, target, manifest: Optional[Dict] = None):
     """Write ``target``: ``source`` with each plane's 3-D box drawn from
-    the REBUILT corners (record alone) and an arrow out of its nose."""
+    the REBUILT corners (record alone) and, through
+    core/capture/flight_overlay.py, the airflow, the forces (lift, weight,
+    thrust, drag, net), the velocity and the flight-state panels. The plain
+    box-and-nose-arrow drawing below stays as the fallback when the
+    overlay cannot be drawn."""
     from pathlib import Path
+
+    try:
+        from .flight_overlay import draw_flight_frame
+
+        return draw_flight_frame(record, source, target, manifest=manifest)
+    except Exception:            # noqa: BLE001 -- never lose the box picture
+        pass
 
     from PIL import Image, ImageDraw
 
