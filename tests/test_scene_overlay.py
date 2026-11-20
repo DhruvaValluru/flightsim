@@ -98,7 +98,7 @@ def test_a_clip_draws_pictures_for_a_sample_of_frames_and_json_for_all():
 
     records = [{"index": i} for i in range(200)]
     chosen = box3d_picture_indices(records)
-    assert len(chosen) <= BOX3D_MAX_PICTURES + 1
+    assert BOX3D_MAX_PICTURES == 12 and len(chosen) <= BOX3D_MAX_PICTURES + 1
     assert chosen[0] == 0 and chosen[-1] == 199
     assert box3d_picture_indices(records, every=1) == list(range(200))
     assert box3d_picture_indices([{"index": 0}]) == [0]
@@ -120,3 +120,28 @@ def test_the_page_route_draws_one_picture_on_demand(tmp_path, monkeypatch):
     assert client.get("/runs/abc123/cameras/chase/box3d/99/plain.png").status_code == 404
     page = (Path(server.__file__).parent / "static" / "frames.html").read_text(encoding="utf-8")
     assert 'data-k="detailed"' in page or "detailed" in page and "box3d/" in page
+
+
+def test_the_page_builds_the_zip_in_the_background_and_reports_progress(tmp_path, monkeypatch):
+    import time
+
+    from fastapi.testclient import TestClient
+
+    import webapp.server as server
+
+    run = tmp_path / "bg123"
+    shutil.copytree(BUNDLE, run)
+    monkeypatch.setattr(server.manager, "out_root", tmp_path)
+    client = TestClient(server.app)
+    first = client.get("/runs/bg123/cameras/chase/box3d_build").json()
+    assert first["state"] in ("building", "ready") and "path" not in first
+    for _ in range(120):
+        st = client.get("/runs/bg123/cameras/chase/box3d_build").json()
+        if st["state"] != "building":
+            break
+        time.sleep(0.25)
+    assert st["state"] == "ready", st
+    reply = client.get("/runs/bg123/cameras/chase/box3d.zip")
+    assert reply.status_code == 200 and reply.content[:2] == b"PK"
+    page = (Path(server.__file__).parent / "static" / "frames.html").read_text(encoding="utf-8")
+    assert "box3d_build" in page and "drawing pictures" in page

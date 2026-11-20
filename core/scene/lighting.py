@@ -65,6 +65,17 @@ PRESETS: Dict[str, Dict[str, float]] = {
 
 PRESET_NAMES = tuple(PRESETS)
 
+#: Where the sun stands for a preset that moves it, when nothing states an
+#: azimuth: the compass bearing the sun really has at the preset's
+#: elevation on an equinox afternoon at 40 deg N (declination 0:
+#: cos A = -sin h sin lat / (cos h cos lat), the western root). Without
+#: it a low preset kept the level's default bearing -- due south, where
+#: a 7 deg sun is impossible at mid-northern latitudes (solar noon there
+#: is 25-73 deg up).
+PRESET_SUN_AZIMUTH_DEG: Dict[str, float] = {
+    "golden_hour": 264.0, "dramatic": 258.0, "soft": 229.0, "hazy": 234.0, "overcast": 213.0,
+}
+
 #: Spoken spellings the block accepts for a preset (normalised first).
 ALIASES = {
     "default": "natural", "none": "natural", "normal": "natural",
@@ -145,6 +156,16 @@ def effective_values(stated: Mapping[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _default_bearing(base: Mapping[str, Any]) -> bool:
+    """True when ``base`` still carries the harness's default sun bearing
+    (no time of day or randomisation moved it)."""
+    try:
+        from core.render.flags import DEFAULT_LOOK
+    except ImportError:
+        return False
+    return float(base.get("sun_azim", DEFAULT_LOOK["sun_azim"])) == float(DEFAULT_LOOK["sun_azim"])
+
+
 def apply(base: Mapping[str, Any], stated: Mapping[str, Any],
           exposure_for_elevation) -> Dict[str, Any]:
     """The look the commandlet is given: ``base`` (the four look numbers,
@@ -165,8 +186,14 @@ def apply(base: Mapping[str, Any], stated: Mapping[str, Any],
         look["sun_elev"] = round(values["sun_elevation_deg"], 2)
         look["exposure_bias"] = exposure_for_elevation(look["sun_elev"])
         moved.append("elevation")
-    if values["sun_azimuth_deg"] is not None:
-        look["sun_azim"] = round(compass_to_engine_azimuth(values["sun_azimuth_deg"]), 2)
+    azimuth = values["sun_azimuth_deg"]
+    if (azimuth is None and stated.get("sun_elevation_deg") is None
+            and values["preset"] in PRESET_SUN_AZIMUTH_DEG and _default_bearing(base)):
+        # The preset placed the sun and nothing else gave it a bearing (no
+        # stated azimuth, no time of day): the bearing that elevation has.
+        azimuth = PRESET_SUN_AZIMUTH_DEG[values["preset"]]
+    if azimuth is not None:
+        look["sun_azim"] = round(compass_to_engine_azimuth(azimuth), 2)
         moved.append("azimuth")
     if values["brightness_ev"] is not None:
         look["exposure_bias"] = round(float(look["exposure_bias"]) + values["brightness_ev"], 2)

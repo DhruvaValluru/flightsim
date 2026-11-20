@@ -20,6 +20,7 @@ import asyncio
 import json
 from dataclasses import replace
 import re
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -1609,6 +1610,55 @@ def run_camera_box3d_archive(run_id: str, camera_id: str, every: int = 0):
 
 
 _BOX3D_KINDS = ("plain", "detailed", "scene")
+#: Background 3-D zip builds: (run, camera, every) -> state. A clip's zip
+#: draws a few pictures per pictured frame (seconds each on the laptop),
+#: so the page starts the build and polls instead of holding a request.
+_BOX3D_BUILDS: Dict[tuple, Dict] = {}
+_BOX3D_LOCK = threading.Lock()
+
+
+@app.get("/runs/{run_id}/cameras/{camera_id}/box3d_build")
+def run_camera_box3d_build(run_id: str, camera_id: str, every: int = 0):
+    """Start (or report) the background build of the 3-D zip: ``state`` is
+    building (with ``done`` / ``total`` pictures), ready (then GET
+    box3d.zip serves it at once) or failed."""
+    from webapp.capture import box3d_archive
+
+    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    out = manager.out_root / run_id
+    if not (out / "capture_manifest.json").is_file():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    every = max(0, min(int(every), 10000))
+    key = (run_id, camera_id, every)
+    with _BOX3D_LOCK:
+        state = _BOX3D_BUILDS.get(key)
+        if state and state["state"] == "building":
+            return JSONResponse(_public(state))
+        if state and state["state"] == "ready" and Path(state["path"]).is_file():
+            return JSONResponse(_public(state))
+        state = {"state": "building", "done": 0, "total": None, "stage": "drawing pictures"}
+        _BOX3D_BUILDS[key] = state
+
+    def tick(done, total):
+        state.update(done=done, total=total)
+
+    def work():
+        try:
+            path = box3d_archive(out, camera_id, every=every, progress=tick)
+            if path is None:
+                state.update(state="failed", error="this camera has no frames")
+            else:
+                state.update(state="ready", path=str(path), stage="ready")
+        except Exception as exc:  # noqa: BLE001 -- reported to the page
+            state.update(state="failed", error=f"{type(exc).__name__}: {exc}")
+
+    threading.Thread(target=work, daemon=True).start()
+    return JSONResponse(_public(state))
+
+
+def _public(state: Dict) -> Dict:
+    return {k: v for k, v in state.items() if k != "path"}
 
 
 @app.get("/runs/{run_id}/cameras/{camera_id}/box3d/{index}/{kind}.png")

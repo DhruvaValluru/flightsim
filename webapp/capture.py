@@ -622,7 +622,7 @@ def _compact_json(data) -> str:
 
 #: A clip's 3-D pictures are drawn for at most this many frames by default
 #: (evenly spaced, first and last included); every frame keeps its JSON.
-BOX3D_MAX_PICTURES = 24
+BOX3D_MAX_PICTURES = 12
 
 
 def box3d_picture_indices(records: List[Dict], every: int = 0) -> List[int]:
@@ -640,7 +640,8 @@ def box3d_picture_indices(records: List[Dict], every: int = 0) -> List[int]:
     return chosen
 
 
-def box3d_archive(out: Path, camera_id: str, every: int = 0) -> Optional[Path]:
+def box3d_archive(out: Path, camera_id: str, every: int = 0,
+                  progress: Optional[Callable] = None) -> Optional[Path]:
     """A zip of ONE view's 3-D boxes: per frame the 3-D box picture and a
     small JSON with just that frame's ``box_3d`` section (each plane's box
     in camera coordinates, which way it faces, the rebuild recipe and its
@@ -667,7 +668,8 @@ def box3d_archive(out: Path, camera_id: str, every: int = 0) -> Optional[Path]:
     pictured = set(box3d_picture_indices(records, every))
     try:
         draw_box_frames(manifest, out, cameras=[camera_id],
-                        kinds=("plain", "detailed", "scene"), indices=pictured)
+                        kinds=("plain", "detailed", "scene"), indices=pictured,
+                        progress=progress)
     except (OSError, ImportError):
         pass
     pictures = sorted((out / "boxed3d" / camera_id).glob("*_box3d*.png"))

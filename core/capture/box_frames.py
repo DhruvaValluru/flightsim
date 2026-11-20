@@ -186,7 +186,7 @@ def draw_box_frames(manifest: Dict, run_dir, cameras: Optional[Iterable[str]] = 
                     out_subdir: str = OUT_SUBDIR,
                     kinds: Sequence[str] = ("boxes", "plain"),
                     indices: Optional[Iterable[int]] = None,
-                    workers: Optional[int] = None) -> List[Path]:
+                    workers: Optional[int] = None, progress=None) -> List[Path]:
     """The boxed copies of the rendered frames: for every frame (or the
     frame ``indices``) of the ``cameras``, each picture in ``kinds``
     (``boxes`` 2-D boxes, ``plain`` / ``detailed`` / ``scene`` the 3-D
@@ -222,12 +222,22 @@ def draw_box_frames(manifest: Dict, run_dir, cameras: Optional[Iterable[str]] = 
             jobs.append(((draw, record, source, target), target))
     todo = [j for j, _ in jobs if j is not None]
     n_workers = workers if workers is not None else min(4, max(1, (os.cpu_count() or 2) - 1))
+    done = 0
+    if progress:
+        progress(0, len(todo))
     if len(todo) > 2 and n_workers > 1:
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
-            list(pool.map(lambda j: j[0](j[1], j[2], j[3]), todo))
+            for future in as_completed([pool.submit(j[0], j[1], j[2], j[3]) for j in todo]):
+                future.result()
+                done += 1
+                if progress:
+                    progress(done, len(todo))
     else:
         for draw, record, source, target in todo:
             draw(record, source, target)
+            done += 1
+            if progress:
+                progress(done, len(todo))
     return [target for _, target in jobs]

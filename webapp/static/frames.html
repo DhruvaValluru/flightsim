@@ -121,6 +121,25 @@ function matrixTable(name, matrix) {
 // One click copies the exact recorded value (a matrix, a record); a
 // consumer should never retype a number off a screen.
 document.addEventListener("click", event => {
+  // The 3-D zip of a clip takes a while to draw: start it in the
+  // background, show its progress, then download it.
+  const zip = event.target.closest && event.target.closest("a.box3dzip");
+  if (zip) {
+    event.preventDefault();
+    const note = zip.parentElement.querySelector(".box3dstate");
+    const poll = async () => {
+      let st;
+      try { st = await (await fetch(zip.dataset.build)).json(); }
+      catch (error) { note.textContent = "could not reach the server"; return; }
+      if (st.state === "ready") { note.textContent = "ready"; location.href = zip.href; return; }
+      if (st.state === "failed") { note.textContent = "failed: " + (st.error || "?"); return; }
+      note.textContent = st.total ? `drawing pictures ${st.done}/${st.total}\u2026`
+                                  : "preparing\u2026";
+      setTimeout(poll, 1500);
+    };
+    poll();
+    return;
+  }
   const tab = event.target.closest && event.target.closest(".b3 .tabs button");
   if (tab) {
     const box = tab.closest(".b3");
@@ -488,8 +507,10 @@ async function load() {
   document.getElementById("links").innerHTML =
     `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/frames.zip">` +
     `<b>download every frame with its labels (zip)</b></a> &middot; ` +
-    `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/box3d.zip">` +
-    `<b>download the 3-D boxes (3D zip)</b></a> ` +
+    `<a class="box3dzip" href="${base}/cameras/${encodeURIComponent(cameraId)}/box3d.zip" ` +
+    `data-build="${base}/cameras/${encodeURIComponent(cameraId)}/box3d_build">` +
+    `<b>download the 3-D pictures (3D zip: plain, detailed, scene)</b></a> ` +
+    `<span class="dim box3dstate"></span> ` +
     `&middot; dataset: <a href="${base}/dataset.zip?format=coco">COCO</a> ` +
     `<a href="${base}/dataset.zip?format=kitti">KITTI</a> ` +
     `<a href="${base}/dataset.zip?format=webdataset">WebDataset</a> ` +

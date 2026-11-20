@@ -510,6 +510,20 @@ def _draw_box(cv: _Canvas, item: Dict, detailed: bool):
 INSET_BELOW = 0.2
 
 
+def _small_aircraft(geo) -> bool:
+    """True when the main aircraft spans under INSET_BELOW of the frame
+    (and is in it): the picture then gets the detail inset."""
+    W, H = geo.get("image_size_px") or (0, 0)
+    main = next((a for a in geo["aircraft"] if a.get("has_physics")), None) or \
+        (geo["aircraft"][0] if geo["aircraft"] else None)
+    pts = [p for p in (main or {}).get("corners_px", []) if p is not None]
+    if not pts or not W:
+        return False
+    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    return (x1 - x0) < INSET_BELOW * W and x1 > 0 and x0 < W and y1 > 0 and y0 < H
+
+
 def _detail_inset(record, source, geo, manifest, draw):
     """(inset image, top-left in the frame, label) or None: the area round
     the main aircraft re-drawn at a higher scale -- the record's
@@ -531,7 +545,7 @@ def _detail_inset(record, source, geo, manifest, draw):
     x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
     y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
     bw = max(x1 - x0, 1.0)
-    if bw >= INSET_BELOW * W or x1 < 0 or x0 > W or y1 < 0 or y0 > H:
+    if not _small_aircraft(geo):
         return None
     cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
     cw = max(bw * 1.9, (y1 - y0) * 1.9 * 1.6, 0.06 * W)
@@ -634,6 +648,9 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
     title = _font(int(11.5 * k))
     for item in geo["aircraft"]:
         cv.avoid(item.get("bbox_2d_px"))
+    # A small aircraft gets the detail inset; its labels are read there,
+    # so the main frame does not stack them round a few dozen pixels.
+    quiet = chrome and _small_aircraft(geo)
 
     main = None
     for item in geo["aircraft"]:
@@ -659,7 +676,7 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
                     cv.line("flow", a, b, ramp(spd[i], window), width, alpha=alpha,
                             outline=True)
         _draw_box(cv, item, detailed=True)
-        for d in item.get("dimension_labels", []):
+        for d in ([] if quiet else item.get("dimension_labels", [])):
             cv.tag(cv.P(d["at_px"]), d["text"], COLOURS["dim"], small, leader=False)
         for ax, colour in zip(item.get("body_axes", []), ("axis_x", "axis_y", "axis_z")):
             a, b = cv.P(ax["from_px"]), cv.P(ax["to_px"])
@@ -687,7 +704,8 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
                                         outline=colour + (240,), width=max(1, int(1.6 * k)))
             else:
                 cv.arrowhead("inst", a, b, colour, 13 * k, alpha=245)
-            cv.tag(b, arrow["label"], colour, font)
+            if not quiet:
+                cv.tag(b, arrow["label"], colour, font)
         cg = cv.P(item.get("cg_px"))
         if cg is not None and item.get("has_physics"):
             r = 4.5 * k
@@ -699,6 +717,11 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
                        fill=(235, 245, 235, 255))
         if item.get("physics_values"):
             main = item
+            if quiet:
+                vis = [cv.P(p) for p in item["corners_px"] if p is not None]
+                if vis:
+                    cv.tag((max(p[0] for p in vis), min(p[1] for p in vis)),
+                           "forces & airflow: see DETAIL", COLOURS["dim"], small)
 
     inset = None
     if chrome:

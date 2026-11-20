@@ -117,7 +117,11 @@ def test_a_preset_fills_every_knob_it_names_and_the_engine_keys_follow():
     look = runs.render_look_for(spec, None)
     preset = lighting.PRESETS["dramatic"]
     assert look["sun_elev"] == preset["sun_elevation_deg"]
-    assert look["sun_azim"] == DEFAULT_LOOK["sun_azim"]          # no preset names a direction
+    # A low preset sun gets the bearing it really has at that height
+    # (equinox afternoon, 40 deg N), not the level's due-south default.
+    assert look["lighting"]["sun_azimuth_deg"] == pytest.approx(
+        lighting.PRESET_SUN_AZIMUTH_DEG["dramatic"], abs=0.02)
+    assert look["sun_azim"] != DEFAULT_LOOK["sun_azim"]
     noon_bias = runs.exposure_bias_for(preset["sun_elevation_deg"])[0]
     assert look["exposure_bias"] == pytest.approx(noon_bias + preset["brightness_ev"])
     assert look["fog_density"] == preset["haze"]
@@ -305,3 +309,19 @@ def test_the_rain_look_is_interpolated_and_held():
     assert lighting.RAIN_ANCHORS[2][1]["sun_intensity"] < middle["sun_intensity"] \
         < lighting.RAIN_ANCHORS[1][1]["sun_intensity"]
     assert lighting.problems(lighting.rain_knobs(30.0)) == []
+
+
+def test_a_golden_hour_sun_is_low_in_the_west_not_due_south():
+    """Windows r9: golden_hour put a 7 deg sun at azimuth 180 -- solar noon,
+    impossible that low at mid-northern latitudes."""
+    import webapp.runs as runs
+
+    spec = plain_spec()
+    spec.set("lighting.preset", "golden_hour")
+    look = runs.render_look_for(spec, None)
+    az = look["lighting"]["sun_azimuth_deg"]
+    assert look["sun_elev"] == 7.0
+    assert 240.0 < az < 290.0                       # west, an evening sun
+    # A stated bearing still wins.
+    spec.set("lighting.sun_azimuth_deg", 95.0)
+    assert runs.render_look_for(spec, None)["lighting"]["sun_azimuth_deg"] == pytest.approx(95.0)
