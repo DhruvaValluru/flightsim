@@ -110,3 +110,57 @@ def test_the_vortex_lattice_loads_a_wing_like_theory():
     # Sweeping back moves load outboard (the classic swept-wing tip loading).
     assert swept["shape"][8] < shape[8] and swept["shape"][1] > shape[1]
     assert swept["sweep_quarter_chord_deg"] == pytest.approx(26.57, abs=0.05)
+
+
+def test_the_viewer_page_and_its_frame_json(tmp_path, monkeypatch):
+    import shutil
+
+    from fastapi.testclient import TestClient
+
+    import webapp.server as server
+
+    shutil.copytree(BUNDLE, tmp_path / "vw1")
+    monkeypatch.setattr(server.manager, "out_root", tmp_path)
+    c = TestClient(server.app)
+    page = c.get("/viewer.html")
+    assert page.status_code == 200 and "/box3d/${index}.json" in page.text
+    data = c.get("/runs/vw1/cameras/chase/box3d/0.json").json()
+    for key in ("panels", "flight_physics", "overlay", "scene_overlay"):
+        assert key in data
+    assert data["overlay"]["detailed"]["aircraft"][0]["arrows"]
+    again = c.get("/runs/vw1/cameras/chase/box3d/0.json")          # cached
+    assert again.status_code == 200
+    assert c.get("/runs/vw1/cameras/chase/box3d/9.json").status_code == 404
+
+
+def test_the_overlay_video_is_encoded_at_the_clip_rate(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+
+    import webapp.capture as capture
+
+    run = tmp_path / "vid"
+    shutil.copytree(BUNDLE, run)
+    manifest = json.loads((run / "capture_manifest.json").read_text(encoding="utf-8"))
+    first = manifest["frames"][0]
+    second = dict(first, index=1, t_s=float(first["t_s"]) + 0.1,
+                  file=first["file"].replace("frame_0000", "frame_0001"))
+    manifest["frames"].append(second)
+    (run / "capture_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    for suffix in (".png", "_mask.png", "_depth.f32"):
+        shutil.copyfile(run / first["file"].replace(".png", suffix),
+                        run / second["file"].replace(".png", suffix))
+    seen = {}
+
+    def fake_run(command, capture_output=True, text=True):
+        seen["command"] = command
+        Path(command[-1]).write_bytes(b"\x00\x00\x00\x18ftypmp42")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(capture.subprocess, "run", fake_run)
+    monkeypatch.setattr("core.util.platform.find_ffmpeg", lambda: Path("ffmpeg"))
+    video = capture.box3d_video(run, "chase", "detailed")
+    assert video is not None and video.is_file() and video.name == "chase_box3d_detailed.mp4"
+    cmd = seen["command"]
+    assert float(cmd[cmd.index("-framerate") + 1]) == pytest.approx(10.0, rel=1e-3)
+    assert "libx264" in cmd

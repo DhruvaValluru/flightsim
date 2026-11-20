@@ -126,7 +126,11 @@ document.addEventListener("click", event => {
   const zip = event.target.closest && event.target.closest("a.box3dzip");
   if (zip) {
     event.preventDefault();
-    const note = zip.parentElement.querySelector(".box3dstate");
+    let note = zip.nextElementSibling;
+    while (note && !(note.classList && note.classList.contains("box3dstate"))) {
+      note = note.nextElementSibling;
+    }
+    note = note || zip.parentElement.querySelector(".box3dstate");
     const poll = async () => {
       let st;
       try { st = await (await fetch(zip.dataset.build)).json(); }
@@ -510,7 +514,13 @@ async function load() {
     `<a class="box3dzip" href="${base}/cameras/${encodeURIComponent(cameraId)}/box3d.zip" ` +
     `data-build="${base}/cameras/${encodeURIComponent(cameraId)}/box3d_build">` +
     `<b>download the 3-D pictures (3D zip: plain, detailed, scene)</b></a> ` +
-    `<span class="dim box3dstate"></span> ` +
+    `<span class="dim box3dstate"></span> &middot; ` +
+    `<a href="/viewer.html?run=${encodeURIComponent(runId)}&camera=${encodeURIComponent(cameraId)}" ` +
+    `target="_blank"><b>open the interactive 3-D viewer</b></a> &middot; overlay video: ` +
+    ["detailed", "scene", "plain"].map(k =>
+      `<a class="box3dzip" href="${base}/cameras/${encodeURIComponent(cameraId)}/box3d_${k}.mp4" ` +
+      `data-build="${base}/cameras/${encodeURIComponent(cameraId)}/box3d_video_build?kind=${k}">${k}</a>`)
+      .join(" ") + ` <span class="dim box3dstate"></span> ` +
     `&middot; dataset: <a href="${base}/dataset.zip?format=coco">COCO</a> ` +
     `<a href="${base}/dataset.zip?format=kitti">KITTI</a> ` +
     `<a href="${base}/dataset.zip?format=webdataset">WebDataset</a> ` +

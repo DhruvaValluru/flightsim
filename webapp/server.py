@@ -1624,13 +1624,47 @@ def run_camera_box3d_build(run_id: str, camera_id: str, every: int = 0):
     box3d.zip serves it at once) or failed."""
     from webapp.capture import box3d_archive
 
+    every = max(0, min(int(every), 10000))
+    return _background_build(run_id, camera_id, ("zip", every),
+                             lambda out, tick: box3d_archive(out, camera_id, every=every,
+                                                             progress=tick))
+
+
+@app.get("/runs/{run_id}/cameras/{camera_id}/box3d_video_build")
+def run_camera_box3d_video_build(run_id: str, camera_id: str, kind: str = "detailed"):
+    """Start (or report) the background build of the overlay video of one
+    picture kind (detailed, scene, plain): every frame drawn, then encoded;
+    GET box3d_<kind>.mp4 serves it when ready."""
+    from webapp.capture import BOX3D_VIDEO_KINDS, box3d_video
+
+    if kind not in BOX3D_VIDEO_KINDS:
+        return JSONResponse({"error": "no such picture kind"}, status_code=404)
+    return _background_build(run_id, camera_id, ("video", kind),
+                             lambda out, tick: box3d_video(out, camera_id, kind, progress=tick))
+
+
+@app.get("/runs/{run_id}/cameras/{camera_id}/box3d_{kind}.mp4")
+def run_camera_box3d_video(run_id: str, camera_id: str, kind: str):
+    """The overlay video once built (box3d_video_build)."""
+    from webapp.capture import BOX3D_VIDEO_KINDS
+
+    if not _CAMERA_NAME.match(camera_id) or kind not in BOX3D_VIDEO_KINDS:
+        return JSONResponse({"error": "no such video"}, status_code=404)
+    path = manager.out_root / run_id / "downloads" / f"{camera_id}_box3d_{kind}.mp4"
+    if not path.is_file():
+        return JSONResponse({"error": "not built yet (box3d_video_build)"}, status_code=404)
+    return FileResponse(path, media_type="video/mp4",
+                        filename=f"{run_id}_{camera_id}_{kind}_overlay.mp4")
+
+
+def _background_build(run_id: str, camera_id: str, what: tuple, build):
+    """Start or report one background build (zip or video) of a view."""
     if not _CAMERA_NAME.match(camera_id):
         return JSONResponse({"error": "no such camera"}, status_code=404)
     out = manager.out_root / run_id
     if not (out / "capture_manifest.json").is_file():
         return JSONResponse({"error": "no such run"}, status_code=404)
-    every = max(0, min(int(every), 10000))
-    key = (run_id, camera_id, every)
+    key = (run_id, camera_id) + tuple(what)
     with _BOX3D_LOCK:
         state = _BOX3D_BUILDS.get(key)
         if state and state["state"] == "building":
@@ -1645,7 +1679,7 @@ def run_camera_box3d_build(run_id: str, camera_id: str, every: int = 0):
 
     def work():
         try:
-            path = box3d_archive(out, camera_id, every=every, progress=tick)
+            path = build(out, tick)
             if path is None:
                 state.update(state="failed", error="this camera has no frames")
             else:
@@ -1659,6 +1693,47 @@ def run_camera_box3d_build(run_id: str, camera_id: str, every: int = 0):
 
 def _public(state: Dict) -> Dict:
     return {k: v for k, v in state.items() if k != "path"}
+
+
+@app.get("/runs/{run_id}/cameras/{camera_id}/box3d/{index}.json")
+def run_camera_box3d_json(run_id: str, camera_id: str, index: int):
+    """ONE frame's full 3-D JSON (box, physics, panels, overlay, airflow,
+    scene numbers, surface pressure) -- the viewer's data. Computed on first
+    request and kept beside the pictures in boxed3d/."""
+    from webapp.capture import _compact_json, box3d_frame_json
+
+    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    out = manager.out_root / run_id
+    manifest_path = out / "capture_manifest.json"
+    if not manifest_path.is_file():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    record_list = json.loads(manifest_path.read_text(encoding="utf-8")).get("frames", [])
+    record = next((r for r in record_list if str(r.get("camera_id")) == camera_id
+                   and int(r.get("index", -1)) == int(index)), None)
+    if record is None:
+        return JSONResponse({"error": "no such frame"}, status_code=404)
+    cached = out / "boxed3d" / camera_id / f"frame_{int(index):04d}_box3d.json"
+    if cached.is_file() and cached.stat().st_mtime >= manifest_path.stat().st_mtime:
+        from core.capture.box_frames import _drawer_mtime
+
+        if cached.stat().st_mtime >= _drawer_mtime():
+            return FileResponse(cached, media_type="application/json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record = next(r for r in manifest["frames"] if str(r.get("camera_id")) == camera_id
+                  and int(r.get("index", -1)) == int(index))
+    data = box3d_frame_json(out, manifest, record, full=True)
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_text(_compact_json(data), encoding="utf-8")
+    return FileResponse(cached, media_type="application/json")
+
+
+@app.get("/viewer.html", response_class=HTMLResponse)
+def viewer_page() -> str:
+    """The interactive 3-D viewer of one camera (?run=&camera=): the frame
+    with toggleable layers drawn from each frame's JSON, hover readouts and
+    a time slider."""
+    return _page("viewer.html")
 
 
 @app.get("/runs/{run_id}/cameras/{camera_id}/box3d/{index}/{kind}.png")

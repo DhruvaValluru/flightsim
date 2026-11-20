@@ -640,6 +640,114 @@ def box3d_picture_indices(records: List[Dict], every: int = 0) -> List[int]:
     return chosen
 
 
+BOX3D_VIDEO_KINDS = ("detailed", "scene", "plain")
+
+
+def box3d_video(out: Path, camera_id: str, kind: str = "detailed",
+                progress: Optional[Callable] = None) -> Optional[Path]:
+    """One view's clip as an overlay video: the ``kind`` picture (detailed,
+    scene or plain) drawn for EVERY frame, encoded at the clip's own frame
+    rate (frames / their time span) with the clips' BT.709 encode. Built
+    under ``downloads/<camera>_box3d_<kind>.mp4`` and reused while newer
+    than its pictures; None when the view has under two frames."""
+    import shutil
+    import tempfile
+
+    from core.capture.box_frames import (box3d_detailed_name, box3d_name, box3d_scene_name,
+                                         draw_box_frames)
+    from core.capture.display import clip_encode_args
+    from core.util.platform import find_ffmpeg
+
+    if kind not in BOX3D_VIDEO_KINDS:
+        raise ValueError(f"no such picture kind {kind!r}")
+    manifest_path = out / "capture_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    records = sorted((r for r in manifest.get("frames", [])
+                      if str(r.get("camera_id")) == camera_id),
+                     key=lambda r: float(r.get("t_s") or 0.0))
+    if len(records) < 2:
+        return None
+    draw_box_frames(manifest, out, cameras=[camera_id], kinds=(kind,), progress=progress)
+    namer = {"plain": box3d_name, "detailed": box3d_detailed_name,
+             "scene": box3d_scene_name}[kind]
+    pictures = [out / "boxed3d" / camera_id / namer(Path(str(r.get("file", ""))).name)
+                for r in records]
+    pictures = [p for p in pictures if p.is_file()]
+    if len(pictures) < 2:
+        return None
+    video = out / "downloads" / f"{camera_id}_box3d_{kind}.mp4"
+    if video.is_file() and video.stat().st_mtime >= max(p.stat().st_mtime for p in pictures):
+        return video
+    span = float(records[-1].get("t_s") or 0.0) - float(records[0].get("t_s") or 0.0)
+    fps = (len(records) - 1) / span if span > 0 else 10.0
+    video.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        # Numbered copies (hard links where the disk allows) so ffmpeg reads
+        # one contiguous sequence whatever the frames' own numbering.
+        for i, p in enumerate(pictures):
+            dst = Path(tmp) / f"f_{i:05d}.png"
+            try:
+                dst.hardlink_to(p)
+            except (OSError, AttributeError, NotImplementedError):
+                shutil.copyfile(p, dst)
+        partial = video.with_suffix(".part.mp4")
+        command = [str(find_ffmpeg()), "-y", "-loglevel", "error", "-framerate", f"{fps:.6f}",
+                   "-i", str(Path(tmp) / "f_%05d.png"),
+                   *clip_encode_args(18, filter_chain="pad=ceil(iw/2)*2:ceil(ih/2)*2"),
+                   str(partial)]
+        done = subprocess.run(command, capture_output=True, text=True)
+        if done.returncode != 0 or not partial.is_file():
+            raise RuntimeError(f"ffmpeg failed: {done.stderr.strip()[-400:]}")
+        partial.replace(video)
+    return video
+
+
+def box3d_frame_json(out: Path, manifest: Dict, record: Dict, full: bool = True) -> Dict:
+    """One frame's 3-D JSON (the zip's frame_NNNN_box3d.json and the
+    viewer's data): box, physics, panels, overlay; with ``full`` also the
+    airflow lines, the scene numbers and the surface pressure."""
+    from core.capture.box3d import box3d_section
+    from core.capture.box_frames import box3d_detailed_name, box3d_name, box3d_scene_name
+
+    camera_id = str(record.get("camera_id"))
+    name = Path(str(record.get("file", ""))).name
+    names = {"plain": box3d_name(name), "detailed": box3d_detailed_name(name),
+             "scene": box3d_scene_name(name)}
+    box_3d = box3d_section(manifest, record)
+    try:
+        from core.capture.flight_overlay import frame_sidecar
+
+        sidecar = frame_sidecar(manifest, record, box_3d, airflow=full,
+                                pictures={} if not full else {
+            "plain": f"{names['plain']}: the frame with each aircraft's 3-D box",
+            "detailed": (f"{names['detailed']}: the box plus airflow, forces "
+                         "(lift, weight, thrust, drag, net), velocity, surface pressure "
+                         "and the flight-state / forces panels"),
+            "scene": (f"{names['scene']}: the world round the aircraft -- height "
+                      "contours and tint, ground grid, range rings, drop line, "
+                      "flight path, horizon, landmarks, weather, environment panel")})
+    except Exception:                # noqa: BLE001 -- the box alone still ships
+        return {"camera_id": camera_id, "frame_index": record.get("index"),
+                "t_s": record.get("t_s"), "box_3d": box_3d}
+    if not full:
+        return sidecar
+    frame_path = out / str(record.get("file", ""))
+    if not frame_path.is_file():
+        frame_path = (out / "previews" / camera_id
+                      / f"preview_{int(record.get('index', 0)):04d}.png")
+    try:
+        from core.capture.flight_overlay import overlay_geometry, surface_pressure_for
+        from core.capture.scene_overlay import scene_geometry, scene_json
+
+        sidecar["scene_overlay"] = scene_json(scene_geometry(manifest, record, frame_path))
+        _, cp_stats = surface_pressure_for(record, frame_path, overlay_geometry(manifest, record))
+        if cp_stats:
+            sidecar["surface_pressure"] = cp_stats
+    except Exception as exc:         # noqa: BLE001 -- the rest still ships
+        sidecar["scene_overlay"] = {"error": f"{type(exc).__name__}: {exc}"}
+    return sidecar
+
+
 def box3d_archive(out: Path, camera_id: str, every: int = 0,
                   progress: Optional[Callable] = None) -> Optional[Path]:
     """A zip of ONE view's 3-D boxes: per frame the 3-D box picture and a
@@ -763,49 +871,12 @@ def box3d_archive(out: Path, camera_id: str, every: int = 0,
                 if picture.is_file():
                     zf.write(picture, arcname=f"{camera_id}_3d/{picture.name}",
                              compress_type=zipfile.ZIP_STORED)
-            box_3d = box3d_section(manifest, record)
-            try:
-                from core.capture.flight_overlay import frame_sidecar
-
-                sidecar = frame_sidecar(manifest, record, box_3d, airflow=has_pictures,
-                                        pictures={} if not has_pictures else {
-                    "plain": f"{names['plain']}: the frame with each aircraft's 3-D box",
-                    "detailed": (f"{names['detailed']}: the box plus airflow, forces "
-                                 "(lift, weight, thrust, drag, net), velocity and the "
-                                 "flight-state / forces panels"),
-                    "scene": (f"{names['scene']}: the world round the aircraft -- height "
-                              "contours and tint, ground grid, range rings, drop line, "
-                              "flight path, horizon, pitch ladder, heading tape, "
-                              "environment panel")})
-                frame_path = out / str(record.get("file", ""))
-                if not frame_path.is_file():
-                    frame_path = (out / "previews" / camera_id
-                                  / f"preview_{int(record.get('index', 0)):04d}.png")
-                if not has_pictures:
-                    sidecar["pictures_note"] = (
-                        f"no pictures for this frame: a clip's pictures are drawn for "
-                        f"{len(pictured)} of its {len(records)} frames (download with "
-                        f"?every=1 for all); the physics and the box are here")
-                try:
-                    if not has_pictures:
-                        raise LookupError("scene numbers are written with the pictures")
-                    from core.capture.scene_overlay import scene_geometry, scene_json
-
-                    sidecar["scene_overlay"] = scene_json(
-                        scene_geometry(manifest, record, frame_path))
-                    from core.capture.flight_overlay import overlay_geometry, surface_pressure_for
-
-                    _, cp_stats = surface_pressure_for(
-                        record, frame_path, overlay_geometry(manifest, record))
-                    if cp_stats:
-                        sidecar["surface_pressure"] = cp_stats
-                except LookupError:
-                    pass
-                except Exception as exc:  # noqa: BLE001 -- the rest still ships
-                    sidecar["scene_overlay"] = {"error": f"{type(exc).__name__}: {exc}"}
-            except Exception:        # noqa: BLE001 -- the box alone still ships
-                sidecar = {"camera_id": camera_id, "frame_index": record.get("index"),
-                           "t_s": record.get("t_s"), "box_3d": box_3d}
+            sidecar = box3d_frame_json(out, manifest, record, has_pictures)
+            if not has_pictures:
+                sidecar["pictures_note"] = (
+                    f"no pictures for this frame: a clip's pictures are drawn for "
+                    f"{len(pictured)} of its {len(records)} frames (download with "
+                    f"?every=1 for all); the physics and the box are here")
             zf.writestr(f"{camera_id}_3d/{stem}_box3d.json",
                         _compact_json(sidecar),
                         compress_type=zipfile.ZIP_DEFLATED)
