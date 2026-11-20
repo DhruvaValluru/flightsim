@@ -68,7 +68,7 @@ def test_the_script_is_served_and_both_pages_mount_it():
     assert "window.LensPicker" in response.text
     for page in ("/", "/generate.html"):
         html = client.get(page).text
-        assert '<script src="/lens_picker.js"></script>' in html, page
+        assert re.search(r'<script src="/lens_picker\.js(\?v=\d+)?"></script>', html), page
         assert 'LensPicker.mount(document.getElementById("lensPicker"), ' \
                'document.getElementById("prompt"))' in html, page
 
