@@ -169,6 +169,94 @@ def _samples(alpha, level_idx, values, per_level=40, threshold=0.85):
     return out
 
 
+_WGS_A, _WGS_F = 6378137.0, 1.0 / 298.257223563
+
+
+def _ecef(lat, lon, h=0.0):
+    la, lo = math.radians(lat), math.radians(lon)
+    e2 = _WGS_F * (2 - _WGS_F)
+    n = _WGS_A / math.sqrt(1 - e2 * math.sin(la) ** 2)
+    return ((n + h) * math.cos(la) * math.cos(lo), (n + h) * math.cos(la) * math.sin(lo),
+            (n * (1 - e2) + h) * math.sin(la))
+
+
+def geodetic_to_scene(lat, lon, lat0, lon0):
+    """(north, east) metres of a WGS84 point in the scene's local tangent
+    frame at the datum origin (east-north-up through ECEF)."""
+    x, y, z = _ecef(lat, lon)
+    x0, y0, z0 = _ecef(lat0, lon0)
+    dx, dy, dz = x - x0, y - y0, z - z0
+    la, lo = math.radians(lat0), math.radians(lon0)
+    east = -math.sin(lo) * dx + math.cos(lo) * dy
+    north = (-math.sin(la) * math.cos(lo) * dx - math.sin(la) * math.sin(lo) * dy
+             + math.cos(la) * dz)
+    return north, east
+
+
+def _landmarks():
+    path = Path(__file__).resolve().parents[2] / "assets" / "landmarks" / "landmarks.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))["landmarks"]
+    except (OSError, ValueError, KeyError):
+        return []
+
+
+def landmarks_in_view(manifest, fields, plane_mask=None):
+    """The bundled landmarks this frame actually shows: a landmark is named
+    only where the depth image has ground / structure at its position
+    (within a radius growing with range), so a hidden or out-of-view place
+    is never labelled; the label sits on its highest visible point."""
+    import numpy as np
+
+    frame = manifest.get("frame") or {}
+    lat0, lon0 = frame.get("origin_lat_deg"), frame.get("origin_lon_deg")
+    if lat0 is None or lon0 is None or fields is None:
+        return []
+    to_scene = None
+    if frame.get("crs") and frame.get("origin_x_m") is not None:
+        # The scene frame IS the run's projected CRS about its origin
+        # (manifest 'frame'; poses.py: origin_x + east).
+        try:
+            from pyproj import Transformer
+
+            tr = Transformer.from_crs("EPSG:4326", frame["crs"], always_xy=True)
+            x0, y0 = float(frame["origin_x_m"]), float(frame["origin_y_m"])
+
+            def to_scene(lat, lon):
+                x, y = tr.transform(lon, lat)
+                return y - y0, x - x0
+        except Exception:            # noqa: BLE001 -- fall back to a tangent plane
+            to_scene = None
+    if to_scene is None:
+        def to_scene(lat, lon):
+            return geodetic_to_scene(lat, lon, lat0, lon0)
+    north, east, alt, horiz = fields
+    ok = np.isfinite(alt)
+    out = []
+    for lm in _landmarks():
+        n, e = to_scene(lm["lat"], lm["lon"])
+        d = np.hypot(north - n, east - e)
+        base = 150.0 if lm["kind"] in ("park", "water", "area", "airport") else 45.0
+        sel = ok & (d < np.maximum(base, 0.006 * horiz))
+        if sel.sum() < 4:
+            continue
+        ys, xs = np.nonzero(sel)
+        if lm["kind"] in ("park", "water", "area", "airport"):
+            j = len(ys) // 2
+            order = np.argsort(xs + ys * 1e-3)
+            iy, ix = int(ys[order[j]]), int(xs[order[j]])
+        else:
+            vals = alt[ys, xs]
+            j = int(np.argmax(vals))
+            iy, ix = int(ys[j]), int(xs[j])
+        out.append({"name": lm["name"], "kind": lm["kind"], "lat": lm["lat"], "lon": lm["lon"],
+                    "scene_north_m": round(n, 1), "scene_east_m": round(e, 1),
+                    "at_px": [ix, iy], "range_m": round(float(horiz[iy, ix]), 1),
+                    "visible_altitude_m": round(float(alt[iy, ix]), 1),
+                    "pixels_matched": int(sel.sum())})
+    return sorted(out, key=lambda x: x["range_m"])
+
+
 def _conditions(manifest):
     return {k: (v.get("value") if isinstance(v, dict) else v)
             for k, v in (manifest.get("conditions") or {}).items()}
@@ -332,6 +420,11 @@ def _scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
                                         "at_px": [int(xs[j]), int(ys[j])]})
             out["range_rings"] = {"radii_m": radii, "centre": "the ground point below the aircraft",
                                   "labels": ring_labels, "_alpha": a_r}
+    if fields is not None:
+        out["landmarks"] = {"named": landmarks_in_view(manifest, fields),
+                            "source": "assets/landmarks/landmarks.json (bundled, public "
+                                      "coordinates) projected into the run's frame CRS; named "
+                                      "only where the depth image shows the place"}
     # Ground under the aircraft: the flight model's (its terrain bake, the
     # ground the physics flies over) and the one MEASURED in this frame
     # from the depth image -- directly below when that is in view, else
@@ -459,6 +552,26 @@ def _scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
         sun_basis = "render.json hero_lighting.sun"
     # (render.json look_applied.sun is a stale record of the level's
     # default light, not the frame's sun; it is not read.)
+    look = render.get("look_applied") or {}
+    clouds = look.get("clouds") or {}
+    wl = look.get("weather_look") or {}
+    env_r = render.get("environment") or {}
+    layers = []
+    for layer in clouds.get("layers") or []:
+        if isinstance(layer, dict):
+            base = next((layer[k] for k in layer if "base" in k or "bottom" in k), None)
+            top = next((layer[k] for k in layer if "top" in k), None)
+            layers.append({"base": base, "top": top, "kind": layer.get("kind") or layer.get("type")})
+    gust = math.sqrt(sum(float(state.get(k) or 0.0) ** 2
+                         for k in ("gust_north_mps", "gust_east_mps", "gust_down_mps")))
+    weather = {"cloud_layers_requested": clouds.get("layers_requested"),
+               "cloud_layers": layers, "clouds_drawn": clouds.get("drawn"),
+               "rain_rate_mmh": wl.get("rain_rate_mmh"),
+               "storm": (wl.get("storm") or {}).get("storm"),
+               "turbulence_model": env_r.get("turbulence") or cond.get("turbulence"),
+               "gust_now_mps": _r(gust, 2),
+               "source": "render.json look_applied.clouds / weather_look, environment; the "
+                         "frame's flight-model gust"}
     wind_spd = float(state.get("wind_speed_mps") or 0.0) / 0.514444
     wn, we = float(state.get("wind_north_mps") or 0.0), float(state.get("wind_east_mps") or 0.0)
     wind_from = math.degrees(math.atan2(-we, -wn)) % 360.0 if wind_spd > 0.1 else None
@@ -479,10 +592,24 @@ def _scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
         "sun_elevation_deg": _r(sun_el, 1), "sun_azimuth_deg": _r(sun_az, 1),
         "sun_basis": sun_basis,
         "fog_density": fog.get("fog_density"),
+        "weather": weather,
         "geoid_undulation_m": _r((manifest.get("datum") or {}).get("undulation_m"), 2),
         "vertical_datum": (manifest.get("datum") or {}).get("vertical_datum_of_heights"),
     }
     return out
+
+
+def _cloud_text(w: Dict) -> str:
+    layers = w.get("cloud_layers") or []
+    if layers:
+        parts = []
+        for l in layers[:2]:
+            b, t = l.get("base"), l.get("top")
+            parts.append(f"{b:,.0f}-{t:,.0f} m" if isinstance(b, (int, float)) and
+                         isinstance(t, (int, float)) else str(l.get("kind") or "layer"))
+        return "; ".join(parts)
+    n = w.get("cloud_layers_requested")
+    return "none drawn" if not n else f"{n} layer(s)"
 
 
 def _ground_text(geo: Dict) -> str:
@@ -514,7 +641,13 @@ def _env_rows(geo: Dict) -> List[Tuple[str, str]]:
             ("VISIBLE RANGE", f((ter.get("visible_range_m") or 0) / 1000.0 if ter.get("visible_range_m") else None, ".1f", " km")),
             ("WIND", f"{env['wind_from_deg']:03.0f}° / {env['wind_speed_kt']:.0f} kt"
              if env.get("wind_from_deg") is not None else "calm"),
-            ("TURBULENCE", str(env.get("turbulence") or "--")),
+            ("TURBULENCE", f"{(env.get('weather') or {}).get('turbulence_model') or env.get('turbulence') or '--'}"
+                           f"  gust {((env.get('weather') or {}).get('gust_now_mps') or 0):.1f} m/s"),
+            ("CLOUDS", _cloud_text(env.get("weather") or {})),
+            ("RAIN", (f"{env['weather']['rain_rate_mmh']:g} mm/h"
+                      if (env.get("weather") or {}).get("rain_rate_mmh") else "none")
+             + (f"  storm {env['weather']['storm']}"
+                if (env.get("weather") or {}).get("storm") not in (None, "none") else "")),
             ("SURFACE", str(env.get("surface") or "--")),
             ("SUN", (f"elev {env['sun_elevation_deg']}°" +
                      (f"  az {env['sun_azimuth_deg']:03.0f}°" if env.get("sun_azimuth_deg") is not None else ""))
@@ -668,6 +801,17 @@ def draw_scene_frame(record: Dict, source, target, manifest: Optional[Dict] = No
             cv.tag(p, f"{int(lvl)} m", (150, 220, 165), small, leader=False)
             used.append(p)
 
+    # Landmarks named where the depth image shows them.
+    for lm in (geo.get("landmarks") or {}).get("named", [])[:8]:
+        if lm["at_px"][0] < 310 * cv.u and lm["at_px"][1] < 460 * cv.u:
+            continue                       # under the environment panel
+        p = cv.P(lm["at_px"])
+        r = 2.4 * k
+        cv.draw["inst"].ellipse([p[0] - r, p[1] - r, p[0] + r, p[1] + r],
+                                fill=(235, 245, 235, 235), outline=(0, 0, 0, 150))
+        cv.tag((p[0], p[1] - 10 * k), f"{lm['name']}  {lm['range_m'] / 1000:.1f} km",
+               (225, 240, 228), small)
+
     # Flight path and shadow.
     fp = geo.get("flight_path")
     if fp:
@@ -730,8 +874,10 @@ def draw_scene_frame(record: Dict, source, target, manifest: Optional[Dict] = No
         top_d.text((x - tw / 2, ty - bx[1]), txt, font=small, fill=colour + (255,))
 
     # Environment panel, header and footer.
-    _panel(top_d, (pad, 64 * k), "ENVIRONMENT  " + str((record.get("camera_id"))), _env_rows(geo),
+    rows = _env_rows(geo)
+    _panel(top_d, (pad, 64 * k), "ENVIRONMENT  " + str((record.get("camera_id"))), rows,
            font, title, k)
+    _wind_dial(top_d, (pad, 64 * k + (24 + 14.5 * len(rows) + 14) * k), geo, small, title, k)
     header = (f"FLIGHTSIM  SCENE   cam {record.get('camera_id')}   "
               f"frame {int(record.get('index', 0)):04d}   t {float(record.get('t_s') or 0):.3f} s")
     top_d.rectangle([0, 0, cv.W * SS_(), 20 * k], fill=COLOURS["header"] + (215,))
@@ -744,6 +890,51 @@ def draw_scene_frame(record: Dict, source, target, manifest: Optional[Dict] = No
                     fill=COLOURS["header"] + (215,))
     top_d.text((pad, cv.H * SS_() - 15 * k), foot, font=small, fill=COLOURS["dim"] + (255,))
     return cv.finish(target)
+
+
+def _wind_dial(draw, origin, geo, small, title, k):
+    """A small dial: the view's heading up, the wind arrow (blowing toward),
+    the sun's bearing, so the picture shows where the weather comes from."""
+    env, tape = geo["environment"], geo["heading_tape"]
+    x, y = origin
+    r = 34 * k
+    cx, cy = x + r + 10 * k, y + r + 22 * k
+    draw.rectangle([x, y, x + 2 * r + 120 * k, y + 2 * r + 30 * k], fill=COLOURS["panel"] + (195,),
+                   outline=COLOURS["box"] + (90,), width=max(1, int(0.8 * k)))
+    draw.text((x + 8 * k, y + 4 * k), "WIND / SUN  (view up)", font=small,
+              fill=COLOURS["bracket"] + (255,))
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=COLOURS["dim"] + (200,),
+                 width=max(1, int(k)))
+    view = float(tape.get("camera_azimuth_deg") or 0.0)
+
+    def at(bearing, rad):
+        a = math.radians(bearing - view)
+        return cx + math.sin(a) * rad, cy - math.cos(a) * rad
+
+    nx, ny = at(0.0, r + 7 * k)
+    draw.text((nx - 3 * k, ny - 6 * k), "N", font=small, fill=COLOURS["text"] + (230,))
+    if env.get("wind_from_deg") is not None and (env.get("wind_speed_kt") or 0) > 0.5:
+        frm = float(env["wind_from_deg"])
+        a, b = at(frm, r * 0.85), at(frm + 180.0, r * 0.85)
+        draw.line([a, b], fill=COLOURS["thrust"] + (240,), width=max(1, int(2 * k)))
+        ux, uy = b[0] - a[0], b[1] - a[1]
+        L = math.hypot(ux, uy) or 1
+        ux, uy = ux / L, uy / L
+        s = 7 * k
+        draw.polygon([b, (b[0] - ux * s - uy * s * 0.5, b[1] - uy * s + ux * s * 0.5),
+                      (b[0] - ux * s + uy * s * 0.5, b[1] - uy * s - ux * s * 0.5)],
+                     fill=COLOURS["thrust"] + (240,))
+        txt = f"wind {frm:03.0f}\u00b0 {env['wind_speed_kt']:.0f} kt"
+    else:
+        txt = "wind calm"
+    if env.get("sun_azimuth_deg") is not None:
+        sx, sy = at(float(env["sun_azimuth_deg"]), r)
+        rr = 4.5 * k
+        draw.ellipse([sx - rr, sy - rr, sx + rr, sy + rr], fill=COLOURS["weight"] + (240,))
+    draw.text((x + 2 * r + 28 * k, cy - 10 * k), txt, font=small, fill=COLOURS["text"] + (230,))
+    if env.get("sun_elevation_deg") is not None:
+        draw.text((x + 2 * r + 28 * k, cy + 4 * k), f"sun {env['sun_elevation_deg']:.0f}\u00b0 up",
+                  font=small, fill=COLOURS["weight"] + (230,))
 
 
 def SS_():

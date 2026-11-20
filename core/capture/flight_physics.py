@@ -712,3 +712,134 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
                        "source_strength_m3_s": _r(m, 3), "seeds": len(seeds),
                        "step_m": _r(ds, 4), "steps": steps},
     }
+
+
+# -- the clip over time --------------------------------------------------------
+
+#: The per-frame columns of a clip's physics series (and its CSV).
+SERIES_COLUMNS = (
+    ("t_s", "s"), ("frame", ""), ("altitude_msl_m", "m"), ("height_above_ground_m", "m"),
+    ("tas_kt", "kt"), ("cas_kt", "kt"), ("ground_speed_kt", "kt"), ("mach", ""),
+    ("vertical_speed_fpm", "ft/min"), ("heading_deg", "deg"), ("pitch_deg", "deg"),
+    ("roll_deg", "deg"), ("alpha_deg", "deg"), ("beta_deg", "deg"),
+    ("flight_path_angle_deg", "deg"), ("load_factor_g", "g"), ("lift_kn", "kN"),
+    ("drag_kn", "kN"), ("thrust_kn", "kN"), ("weight_kn", "kN"), ("net_force_kn", "kN"),
+    ("lift_to_drag", ""), ("cl", ""), ("cd", ""), ("dynamic_pressure_pa", "Pa"),
+    ("air_density_kg_m3", "kg/m3"), ("temperature_c", "C"), ("wind_speed_kt", "kt"),
+    ("specific_excess_power_mps", "m/s"), ("energy_height_m", "m"),
+)
+
+_SERIES_MEMO: List = []
+
+
+def clip_series(manifest: Dict, camera_id) -> List[Dict]:
+    """One row per frame of ``camera_id`` (time order) with the
+    :data:`SERIES_COLUMNS`, from each frame's own flight-model state."""
+    for m_, c_, out_ in _SERIES_MEMO:
+        if m_ is manifest and c_ == camera_id:
+            return out_
+    rows = []
+    frames = sorted((r for r in manifest.get("frames", [])
+                     if str(r.get("camera_id")) == str(camera_id)),
+                    key=lambda r: float(r.get("t_s") or 0.0))
+    for r in frames:
+        p = frame_physics(manifest, r)
+        if p is None:
+            continue
+        f, v, a, air = p["forces"], p["velocity"], p["aerodynamic_angles"], p["air"]
+        co, en, pos, att = (p.get("coefficients") or {}), p["energy"], p["position"], p["attitude"]
+        rows.append({
+            "t_s": r.get("t_s"), "frame": r.get("index"),
+            "altitude_msl_m": pos["altitude_msl_m"], "height_above_ground_m": pos["height_above_ground_m"],
+            "tas_kt": v["true_airspeed_kt"], "cas_kt": v["calibrated_airspeed_kt"],
+            "ground_speed_kt": v["ground_speed_kt"], "mach": v["mach"],
+            "vertical_speed_fpm": v["vertical_speed_fpm"], "heading_deg": att["heading_deg"],
+            "pitch_deg": att["pitch_deg"], "roll_deg": att["roll_deg"],
+            "alpha_deg": a["alpha_deg"], "beta_deg": a["beta_deg"],
+            "flight_path_angle_deg": a["flight_path_angle_deg"],
+            "load_factor_g": p["force_balance"]["load_factor_nz_flight_model"],
+            "lift_kn": f["lift"]["magnitude_kn"], "drag_kn": f["drag"]["magnitude_kn"],
+            "thrust_kn": f["thrust"]["magnitude_kn"], "weight_kn": f["weight"]["magnitude_kn"],
+            "net_force_kn": f["net"]["magnitude_kn"], "lift_to_drag": co.get("lift_to_drag"),
+            "cl": co.get("CL"), "cd": co.get("CD"), "dynamic_pressure_pa": air["dynamic_pressure_pa"],
+            "air_density_kg_m3": air["density_kg_m3"], "temperature_c": air["temperature_c"],
+            "wind_speed_kt": air["wind_speed_kt"],
+            "specific_excess_power_mps": en["specific_excess_power_mps"],
+            "energy_height_m": en["energy_height_m"],
+        })
+    _SERIES_MEMO.append((manifest, camera_id, rows))
+    del _SERIES_MEMO[:-4]
+    return rows
+
+
+def series_csv(rows: List[Dict]) -> str:
+    """The series as CSV text, a units row under the header."""
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\n")
+    w.writerow([c for c, _ in SERIES_COLUMNS])
+    w.writerow([u for _, u in SERIES_COLUMNS])
+    for r in rows:
+        w.writerow(["" if r.get(c) is None else r.get(c) for c, _ in SERIES_COLUMNS])
+    return buf.getvalue()
+
+
+# -- surface pressure (estimated) -----------------------------------------------
+
+def surface_pressure(depth, mask, K, flow_dir_camera, mach: float = 0.0):
+    """Estimated pressure coefficient on the aircraft's visible surface.
+
+    Normals from the depth image (camera points per pixel, smoothed, their
+    cross-gradient), the free-stream direction from the frame's velocity.
+    Windward (the surface facing the flow): potential flow round a blunt
+    body, Cp = Cp0 (1 - 9/4 sin^2 theta) with cos theta = n . (-flow), Cp0
+    = 1 + M^2/4 (compressible stagnation); leeward: -0.2, separated wake.
+    An ESTIMATE from the surface's orientation -- not CFD. Returns (Cp
+    array H x W, NaN off the aircraft) or None."""
+    import numpy as np
+
+    if depth is None or mask is None or K is None:
+        return None
+    h, w = depth.shape
+    m = mask.astype(bool)
+    if m.sum() < 30:
+        return None
+    # Erode by one pixel: silhouette pixels mix the aircraft and the sky.
+    inner = m.copy()
+    inner[1:, :] &= m[:-1, :]
+    inner[:-1, :] &= m[1:, :]
+    inner[:, 1:] &= m[:, :-1]
+    inner[:, :-1] &= m[:, 1:]
+    z = np.where(m, depth, np.nan)
+    # 3x3 mean over aircraft pixels only.
+    pad = np.pad(z, 1, constant_values=np.nan)
+    stack = np.stack([pad[i:i + h, j:j + w] for i in range(3) for j in range(3)])
+    with np.errstate(all="ignore"):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            zs = np.nanmean(stack, axis=0)
+    u = np.arange(w) + 0.5
+    v = np.arange(h) + 0.5
+    uu, vv = np.meshgrid(u, v)
+    X = (uu - K[0][2]) / K[0][0] * zs
+    Y = (vv - K[1][2]) / K[1][1] * zs
+    P = np.stack([X, Y, zs], axis=-1)
+    du = np.gradient(P, axis=1)
+    dv = np.gradient(P, axis=0)
+    n = np.cross(du, dv)
+    norm = np.linalg.norm(n, axis=-1)
+    n = n / np.where(norm > 0, norm, np.nan)[..., None]
+    # Face the camera (the visible side).
+    n = np.where((n[..., 2] > 0)[..., None], -n, n)
+    toward = -np.asarray(flow_dir_camera, float)          # the direction the aircraft moves
+    toward = toward / (np.linalg.norm(toward) or 1.0)
+    c = n @ toward                                        # cos theta, > 0 windward
+    cp0 = 1.0 + mach * mach / 4.0
+    cp = np.where(c > 0, cp0 * (1.0 - 2.25 * (1.0 - c * c)), -0.2)
+    cp = np.clip(cp, -1.3, cp0)
+    cp[~inner] = np.nan
+    return cp

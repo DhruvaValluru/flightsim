@@ -250,6 +250,16 @@ def _overlay_geometry(manifest: Optional[Dict], record: Dict, airflow: bool = Tr
                                                    "colours_rgb_slow_to_fast": [list(c) for c in RAMP]},
                                    "lines": lines}
             item["physics_values"] = physics
+            if manifest is not None:
+                from .flight_physics import clip_series
+
+                series = clip_series(manifest, record.get("camera_id"))
+                if len(series) >= 3:
+                    item["series"] = {"columns": ["t_s", "lift_kn", "load_factor_g", "tas_kt",
+                                                  "altitude_msl_m"],
+                                      "t_now_s": record.get("t_s"),
+                                      "rows": [[r["t_s"], r["lift_kn"], r["load_factor_g"],
+                                                r["tas_kt"], r["altitude_msl_m"]] for r in series]}
         out["aircraft"].append(item)
     return out
 
@@ -505,6 +515,70 @@ def _draw_box(cv: _Canvas, item: Dict, detailed: bool):
     return c
 
 
+#: Surface-pressure tint: Cp -> colour (suction blue, neutral green,
+#: stagnation red), and its strength over the aircraft.
+CP_RAMP = [(-1.3, (70, 140, 255)), (-0.4, (80, 200, 210)), (0.0, (90, 205, 120)),
+           (0.5, (235, 220, 90)), (1.0, (240, 85, 60))]
+CP_ALPHA = 0.5
+
+
+def _cp_colour(cp):
+    import numpy as np
+
+    xs = np.array([c for c, _ in CP_RAMP])
+    out = np.zeros(cp.shape + (3,))
+    for ch in range(3):
+        out[..., ch] = np.interp(np.nan_to_num(cp, nan=0.0), xs, [col[ch] for _, col in CP_RAMP])
+    return out
+
+
+def surface_pressure_for(record, source, geo):
+    """(Cp array or None, stats dict) for the main aircraft of the frame,
+    from its depth image, ID image and velocity (flight_physics
+    .surface_pressure)."""
+    import numpy as np
+    from PIL import Image
+
+    from .flight_physics import surface_pressure
+
+    W, H = geo.get("image_size_px") or (0, 0)
+    main = next((a for a in geo["aircraft"] if a.get("physics_values")), None)
+    src = Path(source)
+    dpath, mpath = src.with_name(src.stem + "_depth.f32"), src.with_name(src.stem + "_mask.png")
+    if main is None or not dpath.is_file() or not mpath.is_file() or not W:
+        return None, None
+    raw = np.fromfile(dpath, dtype="<f4")
+    if raw.size != W * H:
+        return None, None
+    ids = {int(e["int_id"]) for e in (record.get("labels") or {}).get("objects") or []
+           if isinstance(e, dict) and e.get("int_id") is not None
+           and not str(e.get("id")).startswith("terrain")}
+    mimg = Image.open(mpath).convert("L")
+    if mimg.size != (W, H):
+        mimg = mimg.resize((W, H), Image.NEAREST)
+    mask = np.isin(np.array(mimg), sorted(ids))
+    vel = main["physics_values"]["velocity"]
+    travel = vel.get("velocity_direction_camera")
+    if not travel:
+        return None, None
+    cp = surface_pressure(raw.reshape(H, W).astype("f8"), mask, _intrinsics(record),
+                          [-t for t in travel], float(vel.get("mach") or 0.0))
+    if cp is None or not np.isfinite(cp).any():
+        return None, None
+    ok = np.isfinite(cp)
+    iy, ix = np.unravel_index(int(np.nanargmax(cp)), cp.shape)
+    stats = {"method": ("estimated from the surface's orientation: depth-image normals vs the "
+                        "free stream; windward Cp = Cp0 (1 - 9/4 sin^2 theta), Cp0 = 1 + M^2/4; "
+                        "leeward -0.2 (separated). Not CFD."),
+             "pixels": int(ok.sum()), "cp_min": round(float(np.nanmin(cp)), 3),
+             "cp_max": round(float(np.nanmax(cp)), 3), "cp_mean": round(float(np.nanmean(cp)), 3),
+             "stagnation_px": [int(ix), int(iy)],
+             "dynamic_pressure_pa": main["physics_values"]["air"]["dynamic_pressure_pa"],
+             "colour_ramp_cp_rgb": [[c, list(col)] for c, col in CP_RAMP],
+             "tint_alpha": CP_ALPHA}
+    return cp, stats
+
+
 #: The aircraft is "small" below this fraction of the frame width: the
 #: picture then carries a magnified detail inset.
 INSET_BELOW = 0.2
@@ -524,7 +598,7 @@ def _small_aircraft(geo) -> bool:
     return (x1 - x0) < INSET_BELOW * W and x1 > 0 and x0 < W and y1 > 0 and y0 < H
 
 
-def _detail_inset(record, source, geo, manifest, draw):
+def _detail_inset(record, source, geo, manifest, draw, prefer_left: bool = False):
     """(inset image, top-left in the frame, label) or None: the area round
     the main aircraft re-drawn at a higher scale -- the record's
     intrinsics scaled and shifted to the crop, the frame / ID image /
@@ -599,8 +673,8 @@ def _detail_inset(record, source, geo, manifest, draw):
         img = Image.open(ztarget).convert("RGB").copy()
     u = max(H / 720.0, 0.45)
     x, y = W - out_w - int(12 * u), H - out_h - int(30 * u)
-    if x < x1 and x + out_w > x0 and y < y1 and y + out_h > y0:
-        x = int(12 * u)                      # the plane is there: the other corner
+    if prefer_left or (x < x1 and x + out_w > x0 and y < y1 and y + out_h > y0):
+        x = int(12 * u)                      # the plane / the clip graphs are there
     return img, (x, y), f"DETAIL x{scale:.1f}  {main['id']}"
 
 
@@ -646,6 +720,21 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
     font = _font(int(11 * k))
     small = _font(int(9.5 * k))
     title = _font(int(11.5 * k))
+    try:
+        cp, _ = surface_pressure_for(record, source, geo)
+    except Exception:                # noqa: BLE001 -- the tint is optional
+        cp = None
+    if cp is not None:
+        import numpy as np
+        from PIL import Image
+
+        # Near-neutral surface stays almost clear (the aircraft's own look);
+        # strong suction / stagnation shows (up to CP_ALPHA).
+        strength = np.clip(0.12 + (CP_ALPHA - 0.12) * np.abs(np.nan_to_num(cp)) / 0.8,
+                           0.0, CP_ALPHA)
+        a = np.where(np.isfinite(cp), strength * 255, 0).astype("uint8")
+        tint = Image.fromarray(np.dstack([_cp_colour(cp).astype("uint8"), a]), "RGBA")
+        cv.plate = Image.alpha_composite(cv.plate, tint.resize(cv.plate.size, Image.BILINEAR))
     for item in geo["aircraft"]:
         cv.avoid(item.get("bbox_2d_px"))
     # A small aircraft gets the detail inset; its labels are read there,
@@ -731,19 +820,23 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
             physics = main["physics_values"]
             state_rows, force_rows = _panel_rows(physics)
             _panel(top, (pad, 30 * k), "FLIGHT STATE  " + main["id"], state_rows, font, title, k)
-            _force_panel(top, (cv.W * SS - pad, 30 * k), physics, force_rows, font, title, small, k,
-                         main.get("airflow"))
+            bottom = _force_panel(top, (cv.W * SS - pad, 30 * k), physics, force_rows, font, title,
+                                  small, k, main.get("airflow"))
+            if main.get("series"):
+                _series_panel(top, (cv.W * SS - pad, bottom + 6 * k), main["series"], font, title,
+                              small, k)
         header = (f"FLIGHTSIM  AERODYNAMICS   cam {record.get('camera_id')}   "
                   f"frame {int(record.get('index', 0)):04d}   t {float(record.get('t_s') or 0):.3f} s")
         top.rectangle([0, 0, cv.W * SS, 20 * k], fill=COLOURS["header"] + (215,))
         top.line([0, 20 * k, cv.W * SS, 20 * k], fill=COLOURS["box"] + (120,), width=max(1, int(0.8 * k)))
         top.text((pad, 4 * k), header, font=title, fill=COLOURS["text"] + (255,))
         foot = ("forces & state: JSBSim flight model at this frame   airflow: potential flow "
-                "(fuselage + aerofoil sections carrying this lift + tip vortices), shaded by "
-                "local speed")
+                "(fuselage + aerofoil sections + tip vortices)   surface tint: estimated "
+                "pressure Cp (blue suction, green ~0, red stagnation)")
         top.rectangle([0, cv.H * SS - 18 * k, cv.W * SS, cv.H * SS], fill=COLOURS["header"] + (215,))
         top.text((pad, cv.H * SS - 15 * k), foot, font=small, fill=COLOURS["dim"] + (255,))
-        inset = _detail_inset(record, source, geo, manifest, draw_flight_frame)
+        inset = _detail_inset(record, source, geo, manifest, draw_flight_frame,
+                              prefer_left=bool(main and main.get("series")))
     return cv.finish(target, inset=inset)
 
 
@@ -765,6 +858,50 @@ def _panel(draw, origin, heading, rows, font, title, k):
         ty = y + 23 * k + i * rh
         draw.text((x + 9 * k, ty), label, font=font, fill=COLOURS["dim"] + (255,))
         draw.text((x + 9 * k + lw, ty), value, font=font, fill=COLOURS["text"] + (255,))
+
+
+def _series_panel(draw, right_top, series, font, title, small, k):
+    """Small graphs of the clip over time (lift, load factor, airspeed,
+    altitude) with this frame marked."""
+    rows = series["rows"]
+    t = [r[0] for r in rows]
+    t0, t1 = min(t), max(t)
+    span = (t1 - t0) or 1.0
+    charts = (("LIFT kN", 1, COLOURS["lift"]), ("LOAD g", 2, COLOURS["bracket"]),
+              ("TAS kt", 3, COLOURS["thrust"]), ("ALT m", 4, COLOURS["weight"]))
+    w = 270 * k
+    ch = 22 * k
+    h = 24 * k + len(charts) * (ch + 6 * k) + 4 * k
+    x1, y = right_top
+    x = x1 - w
+    draw.rectangle([x, y, x1, y + h], fill=COLOURS["panel"] + (195,),
+                   outline=COLOURS["box"] + (90,), width=max(1, int(0.8 * k)))
+    draw.rectangle([x, y, x1, y + 18 * k], fill=COLOURS["header"] + (235,))
+    draw.text((x + 8 * k, y + 3.5 * k), f"OVER THE CLIP  {span:.1f} s", font=title,
+              fill=COLOURS["bracket"] + (255,))
+    gx0, gx1 = x + 66 * k, x1 - 58 * k
+    now = float(series.get("t_now_s") or t0)
+    for i, (label, col, colour) in enumerate(charts):
+        vals = [r[col] for r in rows if r[col] is not None]
+        if len(vals) < 2:
+            continue
+        lo, hi = min(vals), max(vals)
+        pad_v = (hi - lo) * 0.1 or max(abs(hi) * 0.01, 0.01)
+        lo, hi = lo - pad_v, hi + pad_v
+        gy0 = y + 24 * k + i * (ch + 6 * k)
+        gy1 = gy0 + ch
+        draw.text((x + 9 * k, gy0 + 4 * k), label, font=small, fill=COLOURS["dim"] + (255,))
+        draw.rectangle([gx0, gy0, gx1, gy1], fill=(255, 255, 255, 10))
+        pts = [(gx0 + (gx1 - gx0) * (r[0] - t0) / span,
+                gy1 - (gy1 - gy0) * (r[col] - lo) / (hi - lo)) for r in rows if r[col] is not None]
+        draw.line(pts, fill=colour + (230,), width=max(1, int(1.2 * k)))
+        xn = gx0 + (gx1 - gx0) * (now - t0) / span
+        draw.line([xn, gy0, xn, gy1], fill=(235, 245, 235, 200), width=max(1, int(0.8 * k)))
+        cur = min(rows, key=lambda r: abs(r[0] - now))[col]
+        if cur is not None:
+            draw.text((gx1 + 5 * k, gy0 + 4 * k), f"{cur:,.1f}" if abs(cur) < 1000 else f"{cur:,.0f}",
+                      font=small, fill=COLOURS["text"] + (255,))
+    return y + h
 
 
 def _force_panel(draw, right_top, physics, rows, font, title, small, k, flow):
@@ -822,6 +959,7 @@ def _force_panel(draw, right_top, physics, rows, font, title, small, k, flow):
         draw.text((gx0, ty), f"slow {lo_w:.3f}", font=small, fill=COLOURS["dim"] + (255,))
         draw.text(((gx0 + gx1) / 2 - mw / 2, ty), mid, font=small, fill=COLOURS["dim"] + (255,))
         draw.text((gx1 - fw, ty), fast, font=small, fill=COLOURS["dim"] + (255,))
+    return y + h
 
 
 # -- the JSON twin -----------------------------------------------------------
@@ -832,7 +970,8 @@ def overlay_json(geometry: Dict, keep_every: int = 4) -> Dict:
     camera metres, rounded) so the file stays readable."""
     out = {"image_size_px": geometry.get("image_size_px"), "aircraft": []}
     for item in geometry["aircraft"]:
-        entry = {k: v for k, v in item.items() if k not in ("airflow", "physics_values")}
+        entry = {k: v for k, v in item.items()
+                 if k not in ("airflow", "physics_values", "series")}
         flow = item.get("airflow")
         if flow:
             lines = []

@@ -733,6 +733,13 @@ def box3d_archive(out: Path, camera_id: str, every: int = 0,
         f"                  pitch ladder, heading tape, environment values\n"
         f"  camera, scene   the camera's pose and intrinsics; the scene\n"
         f"\n"
+        f"physics.csv  one row per frame (time order): altitude, speeds, Mach,\n"
+        f"  attitude, alpha / beta / gamma, load factor, lift / drag / thrust /\n"
+        f"  weight / net (kN), L/D, CL, CD, dynamic pressure, density, wind,\n"
+        f"  specific excess power, energy height; a units row under the header.\n"
+        f"  On a clip the detailed picture also graphs lift, load, TAS and\n"
+        f"  altitude over the clip with the frame marked (OVER THE CLIP).\n"
+        f"\n"
         f"A clip: the three pictures are drawn for up to {BOX3D_MAX_PICTURES} evenly\n"
         f"spaced frames (first and last included); every frame has its JSON.\n"
         f"Ask the server for ?every=1 (every frame) or ?every=N for more.\n"
@@ -786,6 +793,12 @@ def box3d_archive(out: Path, camera_id: str, every: int = 0,
 
                     sidecar["scene_overlay"] = scene_json(
                         scene_geometry(manifest, record, frame_path))
+                    from core.capture.flight_overlay import overlay_geometry, surface_pressure_for
+
+                    _, cp_stats = surface_pressure_for(
+                        record, frame_path, overlay_geometry(manifest, record))
+                    if cp_stats:
+                        sidecar["surface_pressure"] = cp_stats
                 except LookupError:
                     pass
                 except Exception as exc:  # noqa: BLE001 -- the rest still ships
@@ -796,6 +809,15 @@ def box3d_archive(out: Path, camera_id: str, every: int = 0,
             zf.writestr(f"{camera_id}_3d/{stem}_box3d.json",
                         _compact_json(sidecar),
                         compress_type=zipfile.ZIP_DEFLATED)
+        try:
+            from core.capture.flight_physics import clip_series, series_csv
+
+            rows = clip_series(manifest, camera_id)
+            if rows:
+                zf.writestr(f"{camera_id}_3d/physics.csv", series_csv(rows),
+                            compress_type=zipfile.ZIP_DEFLATED)
+        except Exception:            # noqa: BLE001 -- the pictures still ship
+            pass
         zf.writestr(f"{camera_id}_3d/README.txt", readme,
                     compress_type=zipfile.ZIP_DEFLATED)
     partial.replace(archive)
