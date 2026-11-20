@@ -103,10 +103,14 @@ def test_airflow_hugs_the_wing_faster_over_it_and_turned_down_behind(manifest, r
     assert max(over) > 1.05                    # the fast flow over the top
     again = airflow_streamlines(p, box["extents_m"], (0.0, 0.0, 0.0), manifest["airframe"])
     assert again["lines"][5]["points_body_m"] == flow["lines"][5]["points_body_m"]
-    # Lines end a short way behind the tail, not far downstream.
+    # Lines end a short way behind the tail, not far downstream (the tip
+    # lines run a little further, to show the vortices rolling up).
     tail = geo["x_tail_m"]
     ref = max(box["extents_m"][0], box["extents_m"][1])
-    assert all(ln["points_body_m"][-1][0] > tail - 0.15 * ref for ln in flow["lines"])
+    for ln in flow["lines"]:
+        reach = 0.5 if ln["kind"] == "wingtip" else 0.15
+        assert ln["points_body_m"][-1][0] > tail - reach * ref
+    assert any(ln["kind"] == "wingtip" for ln in flow["lines"])
 
 
 def test_the_picture_is_drawn_at_the_frame_size(manifest, record, tmp_path):
