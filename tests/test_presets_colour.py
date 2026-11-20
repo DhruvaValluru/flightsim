@@ -281,3 +281,35 @@ def test_a_sky_blue_fill_stays_blue_on_the_model():
         assert r < g < b, elevation
         hue = math.degrees(math.atan2(math.sqrt(3) * (g - b), 2 * r - g - b)) % 360.0
         assert 195.0 <= hue <= 235.0, (elevation, hue)
+
+
+def test_golden_hour_over_the_physical_sky_moves_the_bearing_off_due_south(tmp_path):
+    """Windows r9: golden_hour over the physical sky kept the plan's noon
+    bearing (az 180) with a 7 deg sun -- impossible. The preset's bearing
+    rides with its elevation; a stated azimuth still wins."""
+    import webapp.runs as runs
+    from core.scene import lighting
+
+    noon = YOSEMITE.replace("at golden hour", "at noon")
+    spec = edited(noon, preset="golden_hour")
+    sky = write_sky(spec, tmp_path)
+    runs.relight_sky_plan(spec, sky, None)
+    sun = json.loads(sky.read_text(encoding="ascii"))["sun"]
+    assert sun["elevation_deg"] == 7.0
+    assert sun["azimuth_deg"] == lighting.PRESET_SUN_AZIMUTH_DEG["golden_hour"]
+    # A stated golden hour: the plan's sun is already low; its real bearing stays.
+    out = tmp_path / "golden"
+    out.mkdir()
+    spec = edited(YOSEMITE, preset="golden_hour")
+    sky = write_sky(spec, out)
+    planned = json.loads(sky.read_text(encoding="ascii"))["sun"]["azimuth_deg"]
+    runs.relight_sky_plan(spec, sky, None)
+    if abs(json.loads(sky.read_text(encoding="ascii"))["sun"]["relit"]["from"]["elevation_deg"]
+           - 7.0) <= 10.0:
+        assert json.loads(sky.read_text(encoding="ascii"))["sun"]["azimuth_deg"] == planned
+    out = tmp_path / "stated"
+    out.mkdir()
+    spec = edited(YOSEMITE, preset="golden_hour", sun_azimuth_deg=100.0)
+    sky = write_sky(spec, out)
+    runs.relight_sky_plan(spec, sky, None)
+    assert json.loads(sky.read_text(encoding="ascii"))["sun"]["azimuth_deg"] == 100.0

@@ -2918,6 +2918,15 @@ def relight_sky_plan(spec: ScenarioSpec, sky: Path, event_note) -> Optional[Dict
     values = lighting.effective_values(
         lighting.stated_values(block) if block is not None else {})
     elevation, azimuth = values["sun_elevation_deg"], values["sun_azimuth_deg"]
+    stated = lighting.stated_values(block) if block is not None else {}
+    if (azimuth is None and elevation is not None and stated.get("sun_elevation_deg") is None
+            and values["preset"] in lighting.PRESET_SUN_AZIMUTH_DEG
+            and abs(float(plan["sun"]["elevation_deg"]) - float(elevation)) > 10.0):
+        # A preset that moves the sun far from the plan's (e.g. golden_hour
+        # over a noon plan) moves its bearing with it: the plan's own bearing
+        # (due south at noon) is impossible at 7 deg up. A plan already near
+        # the preset's height (a stated golden hour) keeps its real bearing.
+        azimuth = lighting.PRESET_SUN_AZIMUTH_DEG[values["preset"]]
     if elevation is not None or azimuth is not None:
         plan = relight(plan, elevation_deg=elevation, azimuth_deg=azimuth,
                        basis=f"the lighting block ('{values['preset']}', webapp.runs."
