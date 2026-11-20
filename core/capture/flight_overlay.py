@@ -106,7 +106,22 @@ def _main_id(manifest: Optional[Dict], entries) -> Optional[str]:
     return want if want in ids else (ids[0] if ids else None)
 
 
+_MEMO: List = []
+
+
 def overlay_geometry(manifest: Optional[Dict], record: Dict, airflow: bool = True) -> Dict:
+    """Memoised :func:`_overlay_geometry` (one zip build draws two pictures
+    and writes the JSON from the same numbers; the airflow is the cost)."""
+    for m_, r_, a_, out_ in _MEMO:
+        if m_ is manifest and r_ is record and a_ == airflow:
+            return out_
+    out_ = _overlay_geometry(manifest, record, airflow)
+    _MEMO.append((manifest, record, airflow, out_))
+    del _MEMO[:-6]
+    return out_
+
+
+def _overlay_geometry(manifest: Optional[Dict], record: Dict, airflow: bool = True) -> Dict:
     """Everything the picture draws, in camera metres and pixels (see the
     module doc). Pure numbers; no image is read."""
     K = _intrinsics(record)

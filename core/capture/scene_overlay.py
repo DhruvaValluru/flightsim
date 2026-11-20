@@ -39,6 +39,7 @@ G0 = 9.80665
 #: Contour interval candidates (m): the one giving ~6-16 levels in view.
 CONTOUR_STEPS = (5, 10, 20, 25, 50, 100, 200, 250, 500, 1000)
 RING_KM = (1, 2, 5, 10, 20, 50)
+CONTOUR_RANGE_M = 4000.0
 PATH_SECONDS = 30
 PATH_TICK_S = 5
 
@@ -222,8 +223,24 @@ def _path_points(manifest, record):
                  "turning at g tan(bank) / ground speed (a coordinated turn)")
 
 
+_MEMO: List = []
+
+
 def scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
-    """Everything the scene picture draws, in numbers."""
+    """Everything the scene picture draws, in numbers (memoised for the
+    same manifest / record / frame, so the picture and the JSON of one
+    zip build compute it once)."""
+    key = str(source)
+    for m_, r_, k_, out_ in _MEMO:
+        if m_ is manifest and r_ is record and k_ == key:
+            return out_
+    out_ = _scene_geometry(manifest, record, source)
+    _MEMO.append((manifest, record, key, out_))
+    del _MEMO[:-4]
+    return out_
+
+
+def _scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
     import numpy as np
 
     K = _intrinsics(record)
@@ -278,12 +295,14 @@ def scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
         out["terrain"] = {
             "altitude_range_in_view_m": [_r(lo, 1), _r(hi, 1)],
             "altitude_range_basis": "1st-99.5th percentile of the visible ground inside 15 km",
-            "contour_and_tint_range_m": 15000,
+            "tint_range_m": 15000, "contour_range_m": 4000,
             "visible_range_m": _r(float(np.nanmax(horiz)), 1) if ok.any() else None,
             "sky_fraction": _r(float((~np.isfinite(depth) | (depth >= 1e6)).mean()), 4),
             "tallest_point": top,
         }
-        a_c, idx_c = _iso_alpha(alt_near, step=step)
+        # Contour lines only inside 4 km: farther, the ground is seen at a
+        # grazing angle and a 20 m iso-line breaks into per-pixel speckle.
+        a_c, idx_c = _iso_alpha(np.where(horiz < CONTOUR_RANGE_M, alt, np.nan), step=step)
         out["_alt"] = alt_near
         out["height_tint"] = {"from_m": _r(lo + 0.3 * span, 1), "full_m": _r(hi, 1),
                               "about": "ground and buildings above from_m tinted green, "
@@ -384,6 +403,8 @@ def scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
     wn, we = float(state.get("wind_north_mps") or 0.0), float(state.get("wind_east_mps") or 0.0)
     wind_from = math.degrees(math.atan2(-we, -wn)) % 360.0 if wind_spd > 0.1 else None
     loc = ((manifest.get("conditions") or {}).get("latitude") or {}).get("from")
+    if isinstance(loc, str) and loc == loc.lower():
+        loc = loc.title()                    # "new york" -> "New York" (as typed in the prompt)
     out["environment"] = {
         "location": loc, "latitude_deg": state.get("lat_deg"), "longitude_deg": state.get("lon_deg"),
         "ground_elevation_below_m": _r(ground_alt, 1),
@@ -460,7 +481,8 @@ def draw_scene_frame(record: Dict, source, target, manifest: Optional[Dict] = No
         A = rgba[..., 3]
         out_a = a + A * (1.0 - a)
         safe = np.maximum(out_a, 1e-9)[..., None]
-        col = np.broadcast_to(np.asarray(colour, "f8"), rgba[..., :3].shape)
+        col = np.nan_to_num(np.broadcast_to(np.asarray(colour, "f8"), rgba[..., :3].shape))
+        a = np.nan_to_num(a)
         rgba[..., :3] = (col * a[..., None] + rgba[..., :3] * (A * (1.0 - a))[..., None]) / safe
         rgba[..., 3] = out_a
 
@@ -625,9 +647,12 @@ def draw_scene_frame(record: Dict, source, target, manifest: Optional[Dict] = No
         top_d.polygon([(x, y0 + 22 * k), (x - 5 * k, y0 + 30 * k), (x + 5 * k, y0 + 30 * k)],
                       fill=colour + (240,))
         txt = f"{label} {val:03.0f}"
-        tw = top_d.textbbox((0, 0), txt, font=small)[2]
-        top_d.text((x - tw / 2, y0 + 31 * k + (0 if key == "heading_x_px" else 11 * k)), txt,
-                   font=small, fill=colour + (255,))
+        bx = top_d.textbbox((0, 0), txt, font=small)
+        tw, th = bx[2] - bx[0], bx[3] - bx[1]
+        ty = y0 + 32 * k + (0 if key == "heading_x_px" else 13 * k)
+        top_d.rectangle([x - tw / 2 - 3 * k, ty - 1.5 * k, x + tw / 2 + 3 * k, ty + th + 3 * k],
+                        fill=COLOURS["header"] + (215,))
+        top_d.text((x - tw / 2, ty - bx[1]), txt, font=small, fill=colour + (255,))
 
     # Environment panel, header and footer.
     _panel(top_d, (pad, 64 * k), "ENVIRONMENT  " + str((record.get("camera_id"))), _env_rows(geo),
