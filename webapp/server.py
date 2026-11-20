@@ -335,9 +335,30 @@ def _validation_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     }
 
 
+_SCRIPT_SRC = re.compile(r'src="/([\w.-]+\.js)"')
+
+
+def _page(name: str) -> str:
+    """A page with each of its scripts stamped by the file's modification
+    time (``/lens_picker.js?v=...``): a browser holding an old copy of a
+    script fetches the new one as soon as the file changes, without a
+    hard refresh (an owner saw a stale button after pulling)."""
+    html = (STATIC / name).read_text(encoding="utf-8")
+
+    def stamp(match: "re.Match[str]") -> str:
+        script = STATIC / match.group(1)
+        try:
+            version = int(script.stat().st_mtime)
+        except OSError:
+            return match.group(0)
+        return f'src="/{match.group(1)}?v={version}"'
+
+    return _SCRIPT_SRC.sub(stamp, html)
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    return (STATIC / "index.html").read_text(encoding="utf-8")
+    return _page("index.html")
 
 
 @app.get("/altitude-guide")
@@ -1608,7 +1629,7 @@ def run_camera_archive(run_id: str, camera_id: str):
 @app.get("/frames.html", response_class=HTMLResponse)
 def frames_page() -> str:
     """The per-camera frame browser: every image beside its own labels."""
-    return (STATIC / "frames.html").read_text(encoding="utf-8")
+    return _page("frames.html")
 
 
 @app.get("/runs/{run_id}/clips/{camera_id}.mp4")
@@ -1893,7 +1914,7 @@ def lighting_preview(name: str):
 @app.get("/generate.html", response_class=HTMLResponse)
 def generate_page() -> str:
     """The guided page: ask, clarify, preview, generate, review, download."""
-    return (STATIC / "generate.html").read_text(encoding="utf-8")
+    return _page("generate.html")
 
 
 @app.post("/generate/plan")
