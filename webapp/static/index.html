@@ -906,8 +906,21 @@ function lightingKnob(name) {
           fromPreset: table[name] !== undefined};
 }
 
+// A preset is the whole look: clear the knobs it names so it shows as
+// picked (the sun's direction is kept -- no preset names one).
+function applyLightingPreset(name) {
+  setRow("lighting.preset", name);
+  for (const knob of ["sun_elevation_deg", "sun_intensity", "color_temperature_k",
+                      "shadow_softness_deg", "sky_fill", "haze"]) {
+    setRow(`lighting.${knob}`, null);
+  }
+  setRow("lighting.brightness_ev", 0);
+  renderLightingPanel();
+}
+
 function renderLightingPanel() {
   const holder = $("lightingPanel");
+  const wasOpen = !!holder.querySelector("details.lightFine[open]");
   if (!rowInput("lighting.preset")) { holder.style.display = "none"; return; }
   holder.style.display = "";
   const preset = String(rowValue("lighting.preset") || "natural");
@@ -917,17 +930,6 @@ function renderLightingPanel() {
   const timeOfDay = String(rowValue("time_of_day") ?? "none");
   const autoNote = (knob, unit = "") => knob.auto
     ? ` <span class="auto">auto${knob.fromPreset ? " (preset)" : ""}</span>` : "";
-
-  // Each preset shows a thumbnail of how it looks (one frame over Manhattan,
-  // /lighting_preview/<name>.jpg) so the pick is made by eye, not by name.
-  const presetNames = Object.keys(lightingPresets.presets || {}).length
-    ? Object.keys(lightingPresets.presets) : Object.keys(LIGHTING_LABELS);
-  const presetButtons = presetNames.map(name =>
-    `<button class="opt lpreset${name === preset ? " selected" : ""}" data-lpreset="${name}" ` +
-    `title="${LIGHTING_LABELS[name] || name}: sample frame over Manhattan">` +
-    `<img src="/lighting_preview/${name}.jpg" alt="" loading="lazy" ` +
-    `onerror="this.style.display='none'">` +
-    `<span>${LIGHTING_LABELS[name] || name}</span></button>`).join("");
 
   const compass = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"].map((label, i) =>
     `<button class="nudge" data-laz="${i * 45}">${label}</button>`).join("");
@@ -954,13 +956,14 @@ function renderLightingPanel() {
   };
 
   holder.innerHTML =
-    `<h3>Lighting</h3>` +
-    `<div class="dim">Pick a look, then aim the sun: drag it on the sky dial ` +
+    `<details class="lightFine"><summary class="dim" style="cursor:pointer">` +
+    `fine-tune the lighting (look: <b>${LIGHTING_LABELS[preset] || preset}</b>, ` +
+    `picked above the Interpret button)</summary>` +
+    `<div class="dim">Aim the sun: drag it on the sky dial ` +
     `(centre = straight overhead, edge = the horizon) or type exact degrees. ` +
     `<b>C</b> is the camera and the arrow is where the aircraft flies, so you can ` +
     `put the light behind the camera, beside it or behind the aircraft. ` +
     `What you set here is written into the <b>lighting</b> rows of the table.</div>` +
-    `<div class="lpresets">${presetButtons}</div>` +
     `<div class="panelRow">` +
     `<div class="panelCol" style="flex:0 0 220px">${sunDialSvg()}</div>` +
     `<div class="panelCol">` +
@@ -996,22 +999,9 @@ function renderLightingPanel() {
     slider("haze", "haze", 0, 0.02, 0.0001, "", 4) +
     `<div class="dim">Preset numbers are a starting point chosen by eye, not ` +
     `calibrated against the measured looks; every value is recorded with the run.</div>` +
-    `</details>`;
+    `</details></details>`;
 
-  holder.querySelectorAll("[data-lpreset]").forEach(button =>
-    button.addEventListener("click", () => {
-      // A preset is the whole look: clear the knobs it names so it shows
-      // as picked (the sun's direction is kept -- no preset names one).
-      setRow("lighting.preset", button.dataset.lpreset);
-      for (const name of ["sun_elevation_deg", "sun_intensity", "color_temperature_k",
-                          "shadow_softness_deg", "sky_fill", "haze"]) {
-        setRow(`lighting.${name}`, null);
-      }
-      setRow("lighting.brightness_ev", 0);
-      preLighting = button.dataset.lpreset;
-      renderLightingPanel();
-      if (typeof renderPreLighting === "function") renderPreLighting();
-    }));
+  if (wasOpen) holder.querySelector("details.lightFine").open = true;
   holder.querySelectorAll("[data-laz]").forEach(button =>
     button.addEventListener("click", () => {
       setRow("lighting.sun_azimuth_deg", wrap360(+button.dataset.laz));
@@ -1500,17 +1490,11 @@ function renderCameraPicker() {
   // Or draw the flight path itself: the route map (webapp/static/
   // route_map.js) shows the ground the physics flies, checks the line as
   // it is drawn, and writes it into the spec as user-stated waypoints.
-  const routeBtn = document.createElement("button");
-  routeBtn.className = "opt";
-  routeBtn.id = "routeMapOpen";
-  routeBtn.textContent = "+ draw the flight path";
-  routeBtn.title = "draw the route on the scene's terrain; the autopilot flies it";
-  routeBtn.addEventListener("click", openRouteMap);
-  row.appendChild(routeBtn);
   holder.appendChild(row);
   // The owner's rule (2026-10-09, "have it always expanded"): the map opens
   // by itself after Interpret; the button re-opens it after Clear.
-  if (window.RouteMap) setTimeout(openRouteMap, 0);
+  // Since 2026-11-19 the map opens only from "Draw the flight path" above
+  // Interpret (the owner: no boxes popping up again after Interpret).
   // Or say where the camera should be, in words.
   const sentence = document.createElement("div");
   sentence.style.marginTop = ".5rem";
@@ -1882,8 +1866,7 @@ function renderPreLighting() {
   holder.querySelectorAll("[data-prelight]").forEach(button =>
     button.addEventListener("click", () => {
       preLighting = button.dataset.prelight;
-      const inPanel = document.querySelector(`#lightingPanel [data-lpreset="${preLighting}"]`);
-      if (compiled && inPanel) inPanel.click();
+      if (compiled && rowInput("lighting.preset")) applyLightingPreset(preLighting);
       renderPreLighting();
     }));
 }

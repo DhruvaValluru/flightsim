@@ -74,10 +74,13 @@ def _browser_ready():
 # -- the page and the module ----------------------------------------------
 
 def test_the_page_mounts_the_map_beside_the_camera_buttons():
-    assert '<script src="/route_map.js"></script>' in PAGE
+    assert re.search(r'<script src="/route_map\.js(\?v=\d+)?"></script>', PAGE) or \
+        '<script src="/route_map.js"></script>' in PAGE
     assert '<div id="routeMap"></div>' in PAGE
     assert '<div id="routeState" class="dim"></div>' in PAGE
-    assert 'routeBtn.textContent = "+ draw the flight path"' in PAGE
+    # Opened from "Draw the flight path" above Interpret (2026-11-19), not
+    # by itself after Interpret.
+    assert 'id="preRoute"' in PAGE and "Draw the flight path" in PAGE
     assert "function openRouteMap()" in PAGE
     assert 'container: $("routeMap")' in PAGE
     # The map hands back waypoints; the page writes them as user-stated
