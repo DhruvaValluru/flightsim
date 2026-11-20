@@ -296,8 +296,14 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
     k = SS * u
 
     # A slightly darker, cooler plate so the readout reads.
-    plate = ImageEnhance.Brightness(ImageEnhance.Color(base).enhance(0.85)).enhance(0.82)
+    plate = ImageEnhance.Brightness(ImageEnhance.Color(base).enhance(0.88)).enhance(0.86)
     big = plate.resize((W * SS, H * SS), Image.BICUBIC).convert("RGBA")
+    # Two layer pairs: the airflow (and the box floor) under the aircraft,
+    # everything else over it. The aircraft's own pixels go back on top of
+    # the airflow at full brightness, so the plane stays crisp.
+    fglow = Image.new("RGBA", big.size, (0, 0, 0, 0))
+    fsharp = Image.new("RGBA", big.size, (0, 0, 0, 0))
+    fgd, fsd = ImageDraw.Draw(fglow), ImageDraw.Draw(fsharp)
     glow = Image.new("RGBA", big.size, (0, 0, 0, 0))
     sharp = Image.new("RGBA", big.size, (0, 0, 0, 0))
     gd, sd = ImageDraw.Draw(glow), ImageDraw.Draw(sharp)
@@ -369,29 +375,41 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
         sd.text((x + pad + 2 * k - x0, y + pad - y0), text, font=fnt, fill=colour + (255,))
 
     main_physics = None
-    occluder = _aircraft_mask(record, source, geo)
+    aircraft_pixels = _aircraft_pixels(record, source, geo, big.size)
+    plane_rect = _main_rect(record, geo)
+    fallback_rect = None if aircraft_pixels is not None else plane_rect
+    if plane_rect is not None:
+        # Labels keep off the plane itself (they hang off leader lines).
+        placed.append((plane_rect[0] * sx * SS, plane_rect[1] * sy * SS,
+                       plane_rect[2] * sx * SS, plane_rect[3] * sy * SS))
     for item in geo["aircraft"]:
-        # Airflow first, under everything else.
         flow = item.get("airflow")
         if flow:
-            cgz = item["cg_camera_m"][2]
             window = flow["colour_ramp"]["speed_ratio_range"]
             for ln in flow["lines"]:
-                pts, cams, spd = ln["points_px"], ln["points_camera_m"], ln["speed_ratio"]
+                pts, spd = ln["points_px"], ln["speed_ratio"]
                 for i in range(len(pts) - 1):
                     a, b = P(pts[i]), P(pts[i + 1])
                     if a is None or b is None:
                         continue
-                    hidden = (occluder is not None and cams[i][2] > cgz
-                              and occluder(pts[i]))
-                    fade = min(1.0, i / 12.0) * min(1.0, (len(pts) - 1 - i) / 12.0)
-                    alpha = int((50 if hidden else 190) * fade)
-                    line(a, b, ramp(spd[i], window), 1.1 * k, alpha=alpha, glow_on=not hidden)
+                    over = (fallback_rect is not None and pts[i] is not None
+                            and fallback_rect[0] <= pts[i][0] <= fallback_rect[2]
+                            and fallback_rect[1] <= pts[i][1] <= fallback_rect[3])
+                    fade = min(1.0, i / 10.0) * min(1.0, (len(pts) - 1 - i) / 10.0)
+                    alpha = int((45 if over else 185) * fade)
+                    colour = ramp(spd[i], window)
+                    fsd.line([a, b], fill=colour + (alpha,), width=max(1, int(1.1 * k)))
+                    if not over:
+                        fgd.line([a, b], fill=colour + (int(alpha * 0.7),),
+                                 width=max(1, int(3.3 * k)))
         c = [P(p) for p in item["corners_px"]]
-        # Faint floor of the box, then edges, brackets and the nose face.
         floor = [c[i] for i in (1, 3, 7, 5)]
         if all(p is not None for p in floor):
-            sd.polygon(floor, fill=COLOURS["box"] + (28,))
+            fsd.polygon(floor, fill=COLOURS["box"] + (24,))
+
+    for item in geo["aircraft"]:
+        c = [P(p) for p in item["corners_px"]]
+        # Edges, corner brackets and the nose face.
         for a, b in EDGES:
             line(c[a], c[b], COLOURS["box"], 1.4 * k, alpha=170)
         for i in range(8):
@@ -465,8 +483,13 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
     sd.rectangle([0, H * SS - 20 * k, W * SS, H * SS], fill=COLOURS["panel"] + (200,))
     sd.text((pad, H * SS - 16 * k), foot, font=small, fill=COLOURS["dim"] + (255,))
 
+    out = Image.alpha_composite(big, fglow.filter(ImageFilter.GaussianBlur(4 * k)))
+    out = Image.alpha_composite(out, fsharp)
+    if aircraft_pixels is not None:
+        crisp = base.resize(big.size, Image.BICUBIC).convert("RGBA")
+        out.paste(crisp, (0, 0), aircraft_pixels)
     glow = glow.filter(ImageFilter.GaussianBlur(5 * k))
-    out = Image.alpha_composite(big, glow)
+    out = Image.alpha_composite(out, glow)
     out = Image.alpha_composite(out, sharp)
     out = out.convert("RGB").resize((W, H), Image.LANCZOS)
     target = Path(target)
@@ -475,11 +498,12 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
     return target
 
 
-def _aircraft_mask(record: Dict, source, geo: Dict):
-    """A pixel test for 'this pixel is the main aircraft', from the frame's
-    ID image when the run wrote one; None otherwise."""
+def _aircraft_pixels(record: Dict, source, geo: Dict, size):
+    """An L mask (at ``size``) of every aircraft's pixels, from the frame's
+    ID image when the run wrote one (``frame_NNNN_mask.png`` beside it);
+    None when there is none."""
     try:
-        from PIL import Image
+        from PIL import Image, ImageFilter
     except ImportError:
         return None
     src = Path(source)
@@ -487,25 +511,32 @@ def _aircraft_mask(record: Dict, source, geo: Dict):
     if not mask_path.is_file():
         return None
     entries = (record.get("labels") or {}).get("objects") or []
-    ids = {str(e.get("id")): e.get("int_id") for e in entries if isinstance(e, dict)}
-    main = next((a["id"] for a in geo["aircraft"] if a.get("has_physics")), None)
-    int_id = ids.get(main)
-    if int_id is None:
+    wanted = {str(a["id"]) for a in geo["aircraft"]}
+    ids = sorted({int(e["int_id"]) for e in entries if isinstance(e, dict)
+                  and str(e.get("id")) in wanted and e.get("int_id") is not None})
+    if not ids:
         return None
     try:
         mask = Image.open(mask_path).convert("L")
     except OSError:
         return None
-    mw, mh = mask.size
-    gw, gh = geo.get("image_size_px") or (mw, mh)
-    data = mask.load()
+    table = [255 if v in ids else 0 for v in range(256)]
+    picked = mask.point(table)
+    if picked.getbbox() is None:
+        return None
+    return picked.resize(size, Image.NEAREST).filter(ImageFilter.GaussianBlur(1.2))
 
-    def test(p):
-        if p is None:
-            return False
-        x, y = int(p[0] * mw / (gw or mw)), int(p[1] * mh / (gh or mh))
-        return 0 <= x < mw and 0 <= y < mh and data[x, y] == int_id
-    return test
+
+def _main_rect(record: Dict, geo: Dict):
+    """The main aircraft's 2-D box (pixels) when there is no ID image: the
+    airflow is drawn faint over it so the plane is not buried."""
+    main = next((a["id"] for a in geo["aircraft"] if a.get("has_physics")), None)
+    for e in (record.get("labels") or {}).get("objects") or []:
+        if isinstance(e, dict) and str(e.get("id")) == main:
+            box = e.get("bbox_2d_tight") or e.get("bbox_2d")
+            if isinstance(box, (list, tuple)) and len(box) == 4:
+                return [float(v) for v in box]
+    return None
 
 
 def _panel(draw, origin, heading, rows, font, title, k, accent):

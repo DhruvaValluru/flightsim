@@ -511,7 +511,9 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
                          + up * math.sin(th) * frac * half_h)
     P = np.array(seeds, float)
     ds = 0.02 * ref
-    steps = int((0.5 * length + 0.55 * ref + 1.05 * ref) / ds)
+    # Upstream run-in, past the airframe, and a short wake behind the tail
+    # (a long wake runs at a chase camera and fans over the picture).
+    steps = int((0.5 * length + 0.55 * ref + 0.5 * length + 0.3 * ref) / ds)
     paths = [P.copy()]
     speeds = [np.linalg.norm(field(P), axis=1) / tas]
     alive = np.ones(len(P), bool)
