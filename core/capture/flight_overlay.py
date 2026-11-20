@@ -131,6 +131,8 @@ def _overlay_geometry(manifest: Optional[Dict], record: Dict, airflow: bool = Tr
     entries = _entries(record, manifest)
     main = _main_id(manifest, entries)
     out = {"image_size_px": [width, height], "aircraft": []}
+    if record.get("_ui_scale"):
+        out["ui_scale"] = record["_ui_scale"]
 
     def px(p):
         if K is None or p[2] < near:
@@ -374,7 +376,7 @@ class _Canvas:
         self.W, self.H = base.size
         gw, gh = geo.get("image_size_px") or (self.W, self.H)
         self.sx, self.sy = self.W / float(gw or self.W), self.H / float(gh or self.H)
-        self.u = max(self.H / 720.0, 0.45)
+        self.u = float(geo.get("ui_scale") or max(self.H / 720.0, 0.45))
         self.k = SS * self.u
         size = (self.W * SS, self.H * SS)
         plate = ImageEnhance.Brightness(base).enhance(0.9)
@@ -448,7 +450,7 @@ class _Canvas:
         d.rectangle([x, y, x + 2 * k, y + bh], fill=colour + (230,))
         d.text((x + pad + 3 * k - x0, y + pad - y0), text, font=font, fill=colour + (255,))
 
-    def finish(self, target):
+    def finish(self, target, inset=None):
         from PIL import Image, ImageChops
 
         out = self.plate
@@ -460,6 +462,21 @@ class _Canvas:
                 layer = Image.merge("RGBA", (r, g, b, ImageChops.multiply(a, keep)))
             out = Image.alpha_composite(out, layer)
         out = out.convert("RGB").resize((self.W, self.H), Image.LANCZOS)
+        if inset is not None:
+            img, (x, y), label = inset
+            from PIL import ImageDraw
+
+            out.paste(img, (int(x), int(y)))
+            d = ImageDraw.Draw(out)
+            u = self.u
+            d.rectangle([x - 1, y - 1, x + img.width, y + img.height],
+                        outline=COLOURS["box"], width=max(1, int(1.2 * u)))
+            f = _font(int(10 * u))
+            tb = d.textbbox((0, 0), label, font=f)
+            d.rectangle([x - 1, y - (tb[3] - tb[1]) - 8 * u, x + tb[2] - tb[0] + 10 * u, y - 1],
+                        fill=COLOURS["header"])
+            d.text((x + 5 * u, y - (tb[3] - tb[1]) - 5 * u - tb[1]), label, font=f,
+                   fill=COLOURS["bracket"])
         target = Path(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         out.save(target)
@@ -488,8 +505,93 @@ def _draw_box(cv: _Canvas, item: Dict, detailed: bool):
     return c
 
 
+#: The aircraft is "small" below this fraction of the frame width: the
+#: picture then carries a magnified detail inset.
+INSET_BELOW = 0.2
+
+
+def _detail_inset(record, source, geo, manifest, draw):
+    """(inset image, top-left in the frame, label) or None: the area round
+    the main aircraft re-drawn at a higher scale -- the record's
+    intrinsics scaled and shifted to the crop, the frame / ID image /
+    depth cropped and resampled -- so its lines stay sharp."""
+    import tempfile
+
+    import numpy as np
+    from PIL import Image
+
+    W, H = geo.get("image_size_px") or (0, 0)
+    main = next((a for a in geo["aircraft"] if a.get("has_physics")), None) or \
+        (geo["aircraft"][0] if geo["aircraft"] else None)
+    if not main or not W or not H:
+        return None
+    pts = [p for p in main["corners_px"] if p is not None]
+    if not pts:
+        return None
+    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    bw = max(x1 - x0, 1.0)
+    if bw >= INSET_BELOW * W or x1 < 0 or x0 > W or y1 < 0 or y0 > H:
+        return None
+    cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    cw = max(bw * 1.9, (y1 - y0) * 1.9 * 1.6, 0.06 * W)
+    ch = cw / 1.6
+    out_w = int(0.36 * W)
+    out_h = int(out_w / 1.6)
+    scale = out_w / cw
+    left, top = cx - cw / 2.0, cy - ch / 2.0
+    K = _intrinsics(record)
+    zr = dict(record)
+    zr["fx_px"], zr["fy_px"] = K[0][0] * scale, K[1][1] * scale
+    zr["principal_point_px"] = [(K[0][2] - left) * scale, (K[1][2] - top) * scale]
+    zr["intrinsic_matrix"] = [[zr["fx_px"], 0.0, zr["principal_point_px"][0]],
+                              [0.0, zr["fy_px"], zr["principal_point_px"][1]], [0.0, 0.0, 1.0]]
+    zr["width_px"], zr["height_px"] = out_w, out_h
+    zr["_ui_scale"] = 0.8 * max(H / 720.0, 0.45)      # the inset's text at frame size
+    labels = dict(record.get("labels") or {})
+    objs = []
+    for e in labels.get("objects") or []:
+        e = dict(e)
+        for key in ("bbox_2d", "bbox_2d_tight"):
+            if isinstance(e.get(key), (list, tuple)) and len(e[key]) == 4:
+                b = e[key]
+                e[key] = [(b[0] - left) * scale, (b[1] - top) * scale,
+                          (b[2] - left) * scale, (b[3] - top) * scale]
+        objs.append(e)
+    if objs:
+        labels["objects"] = objs
+    zr["labels"] = labels
+    src = Path(source)
+    rows = np.clip((np.arange(out_h) / scale + top).astype(int), 0, H - 1)
+    cols = np.clip((np.arange(out_w) / scale + left).astype(int), 0, W - 1)
+    base = Image.open(src).convert("RGB")
+    crop = base.crop((int(left), int(top), int(left + cw), int(top + ch))).resize(
+        (out_w, out_h), Image.BICUBIC)
+    with tempfile.TemporaryDirectory() as tmp:
+        zsrc = Path(tmp) / "frame_inset.png"
+        crop.save(zsrc)
+        mask_path = src.with_name(src.stem + "_mask.png")
+        if mask_path.is_file():
+            m = np.array(Image.open(mask_path).convert("L").resize((W, H), Image.NEAREST))
+            Image.fromarray(m[rows][:, cols]).save(Path(tmp) / "frame_inset_mask.png")
+        depth_path = src.with_name(src.stem + "_depth.f32")
+        if depth_path.is_file():
+            d = np.fromfile(depth_path, dtype="<f4")
+            if d.size == W * H:
+                d.reshape(H, W)[rows][:, cols].astype("<f4").tofile(
+                    Path(tmp) / "frame_inset_depth.f32")
+        ztarget = Path(tmp) / "inset_out.png"
+        draw(zr, zsrc, ztarget, manifest=manifest, chrome=False)
+        img = Image.open(ztarget).convert("RGB").copy()
+    u = max(H / 720.0, 0.45)
+    x, y = W - out_w - int(12 * u), H - out_h - int(30 * u)
+    if x < x1 and x + out_w > x0 and y < y1 and y + out_h > y0:
+        x = int(12 * u)                      # the plane is there: the other corner
+    return img, (x, y), f"DETAIL x{scale:.1f}  {main['id']}"
+
+
 def draw_plain_frame(record: Dict, source, target, manifest: Optional[Dict] = None,
-                     geometry: Optional[Dict] = None) -> Path:
+                     geometry: Optional[Dict] = None, chrome: bool = True) -> Path:
     """Write ``target``: the frame with each aircraft's 3-D box only."""
     from PIL import Image
 
@@ -510,13 +612,16 @@ def draw_plain_frame(record: Dict, source, target, manifest: Optional[Dict] = No
             top = min(vis, key=lambda p: p[1])
             cv.tag((min(p[0] for p in vis), top[1] - 6 * cv.k), text, COLOURS["box"], small,
                    leader=False)
-    return cv.finish(target)
+    inset = _detail_inset(record, source, geo, manifest, draw_plain_frame) if chrome else None
+    return cv.finish(target, inset=inset)
 
 
 def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = None,
-                      geometry: Optional[Dict] = None) -> Path:
+                      geometry: Optional[Dict] = None, chrome: bool = True) -> Path:
     """Write ``target``: the detailed picture (box, airflow, forces,
-    velocity, panels) of :func:`overlay_geometry`."""
+    velocity, panels) of :func:`overlay_geometry`; with a magnified
+    detail inset when the aircraft is small in the frame. ``chrome``
+    False draws the overlay alone (no panels, header, inset)."""
     from PIL import Image
 
     base = Image.open(source).convert("RGB")
@@ -595,25 +700,28 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
         if item.get("physics_values"):
             main = item
 
-    pad = 10 * k
-    top = cv.draw["top"]
-    if main is not None:
-        physics = main["physics_values"]
-        state_rows, force_rows = _panel_rows(physics)
-        _panel(top, (pad, 30 * k), "FLIGHT STATE  " + main["id"], state_rows, font, title, k)
-        _force_panel(top, (cv.W * SS - pad, 30 * k), physics, force_rows, font, title, small, k,
-                     main.get("airflow"))
-    header = (f"FLIGHTSIM  AERODYNAMICS   cam {record.get('camera_id')}   "
-              f"frame {int(record.get('index', 0)):04d}   t {float(record.get('t_s') or 0):.3f} s")
-    top.rectangle([0, 0, cv.W * SS, 20 * k], fill=COLOURS["header"] + (215,))
-    top.line([0, 20 * k, cv.W * SS, 20 * k], fill=COLOURS["box"] + (120,), width=max(1, int(0.8 * k)))
-    top.text((pad, 4 * k), header, font=title, fill=COLOURS["text"] + (255,))
-    foot = ("forces & state: JSBSim flight model at this frame   airflow: potential flow "
-            "(fuselage + aerofoil sections carrying this lift + tip vortices), shaded by "
-            "local speed")
-    top.rectangle([0, cv.H * SS - 18 * k, cv.W * SS, cv.H * SS], fill=COLOURS["header"] + (215,))
-    top.text((pad, cv.H * SS - 15 * k), foot, font=small, fill=COLOURS["dim"] + (255,))
-    return cv.finish(target)
+    inset = None
+    if chrome:
+        pad = 10 * k
+        top = cv.draw["top"]
+        if main is not None:
+            physics = main["physics_values"]
+            state_rows, force_rows = _panel_rows(physics)
+            _panel(top, (pad, 30 * k), "FLIGHT STATE  " + main["id"], state_rows, font, title, k)
+            _force_panel(top, (cv.W * SS - pad, 30 * k), physics, force_rows, font, title, small, k,
+                         main.get("airflow"))
+        header = (f"FLIGHTSIM  AERODYNAMICS   cam {record.get('camera_id')}   "
+                  f"frame {int(record.get('index', 0)):04d}   t {float(record.get('t_s') or 0):.3f} s")
+        top.rectangle([0, 0, cv.W * SS, 20 * k], fill=COLOURS["header"] + (215,))
+        top.line([0, 20 * k, cv.W * SS, 20 * k], fill=COLOURS["box"] + (120,), width=max(1, int(0.8 * k)))
+        top.text((pad, 4 * k), header, font=title, fill=COLOURS["text"] + (255,))
+        foot = ("forces & state: JSBSim flight model at this frame   airflow: potential flow "
+                "(fuselage + aerofoil sections carrying this lift + tip vortices), shaded by "
+                "local speed")
+        top.rectangle([0, cv.H * SS - 18 * k, cv.W * SS, cv.H * SS], fill=COLOURS["header"] + (215,))
+        top.text((pad, cv.H * SS - 15 * k), foot, font=small, fill=COLOURS["dim"] + (255,))
+        inset = _detail_inset(record, source, geo, manifest, draw_flight_frame)
+    return cv.finish(target, inset=inset)
 
 
 def _panel(draw, origin, heading, rows, font, title, k):

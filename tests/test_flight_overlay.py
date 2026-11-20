@@ -156,3 +156,20 @@ def test_sidecar_without_state_still_carries_the_box(manifest, record):
     assert data["flight_physics"] is None
     assert data["box_3d"]["aircraft"]
     assert math.isfinite(data["overlay"]["detailed"]["aircraft"][0]["range_m"])
+
+
+def test_a_small_aircraft_gets_a_magnified_detail_inset(manifest, record):
+    from core.capture.flight_overlay import _detail_inset
+
+    source = BUNDLE / "frames" / "chase" / "frame_0000.png"
+    assert _detail_inset(record, source, overlay_geometry(manifest, record), manifest,
+                         draw_plain_frame) is None          # big in frame: no inset
+    small = dict(record)
+    small["fx_px"], small["fy_px"] = record["fx_px"] * 0.3, record["fy_px"] * 0.3
+    small["intrinsic_matrix"] = [[small["fx_px"], 0.0, 160.0], [0.0, small["fy_px"], 90.0],
+                                 [0.0, 0.0, 1.0]]
+    inset = _detail_inset(small, source, overlay_geometry(manifest, small), manifest,
+                          draw_plain_frame)
+    assert inset is not None
+    img, (x, y), label = inset
+    assert img.width > 0 and label.startswith("DETAIL x")

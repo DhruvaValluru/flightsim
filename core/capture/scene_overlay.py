@@ -395,15 +395,18 @@ def _scene_geometry(manifest: Dict, record: Dict, source) -> Dict:
     pts, basis = _path_points(manifest, record)
     if len(pts) > 1:
         path, shadow, ticks = [], [], []
+        span = pts[-1][0]
+        tick_s = PATH_TICK_S if span >= 2 * PATH_TICK_S else 1.0
         for t, n, e, a in pts:
             c = _to_camera(record, (n, e, a))
             path.append({"t_s": t, "north_m": _r(n, 2), "east_m": _r(e, 2), "alt_m": _r(a, 2),
                          "px": px(c)})
             if ground_alt is not None:
                 shadow.append(px(_to_camera(record, (n, e, ground_alt))))
-            if t > 0 and abs(t / PATH_TICK_S - round(t / PATH_TICK_S)) < 1e-6:
+            if t > 0 and abs(t / tick_s - round(t / tick_s)) < 0.02:
                 ticks.append({"t_s": t, "label": f"+{int(t)} s", "px": px(c)})
-        out["flight_path"] = {"basis": basis, "seconds": PATH_SECONDS, "points": path,
+        out["flight_path"] = {"basis": basis, "seconds": round(span, 3), "tick_s": tick_s,
+                              "points": path,
                               "ground_shadow_px": shadow, "ticks": ticks}
     # Horizon, pitch ladder, heading tape.
     hz = (record.get("labels") or {}).get("horizon") or {}
