@@ -1292,14 +1292,19 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     look = resolve_look_switch(request.look, spec.prompt,
                                capture=wants_capture(spec))
     switched = {"look": look} if look else {}
+    turn = provisioned.get("prompt_turn")
     outcome = manager.start(spec, provenance={
         "prompt": spec.prompt,
         **{k: v for k, v in request.provenance.items()
            if k in ("compiler", "model", "transcript")},
+        # The turn the prompt asked for, planned as a route (or why not):
+        # kept with the run so /runs/<id> shows it after the fact.
+        **({"prompt_turn": turn} if turn else {}),
     }, **switched)
     if "refused" in outcome:
         return JSONResponse(outcome, status_code=409)
-    return JSONResponse({**outcome, "digest": spec.digest(), **switched})
+    return JSONResponse({**outcome, "digest": spec.digest(), **switched,
+                         **({"prompt_turn": turn} if turn else {})})
 
 
 def build_info() -> Dict[str, str]:
