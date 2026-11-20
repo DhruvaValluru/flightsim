@@ -860,7 +860,7 @@ def provision_flight(spec: ScenarioSpec, *, per_case: bool = False) -> Dict[str,
     its seed as a user edit, which build_case would keep on every case.
     """
     provisioned = provision_place(spec)
-    out = {**provisioned, "weather_refusal": None, "violations": []}
+    out = {**provisioned, "weather_refusal": None, "violations": [], "prompt_turn": None}
     if provisioned["refusal"] is not None:
         return out
     # Severe-weather composition edits (thunderstorm -> severe turbulence
@@ -883,6 +883,17 @@ def provision_flight(spec: ScenarioSpec, *, per_case: bool = False) -> Dict[str,
     # this spec object into the render flow.
     from webapp.route_map import plan_route_flight
 
+    # A turn the prompt asks for ("steep left banking turn", "circle"),
+    # with no route drawn, is planned here as a route the autopilot flies
+    # (webapp/prompt_turn.py) -- before the route pre-flight, which then
+    # flies it like a drawn one. No closing arc: the run flies straight
+    # and says why.
+    try:
+        from webapp.prompt_turn import plan_prompt_turn
+
+        out["prompt_turn"] = plan_prompt_turn(spec, duration_cap_s=CLIP_SECONDS)
+    except Exception as exc:          # noqa: BLE001 -- never block a run on the turn plan
+        out["prompt_turn"] = {"refused": "route.turn_plan", "message": f"{type(exc).__name__}: {exc}"}
     route_refusal = plan_route_flight(spec)
     # The seed derives BEFORE the digest is answered. A run can be
     # stochastic even with turbulence word "none" -- lee-rotor over windy

@@ -1253,6 +1253,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     if provisioned["violations"]:
         verdict["ok"] = False
         verdict["violations"].extend(provisioned["violations"])
+    # The turn the prompt asked for: planned as a route, or why it flies
+    # straight (webapp/prompt_turn.py).
+    if provisioned.get("prompt_turn"):
+        verdict["prompt_turn"] = provisioned["prompt_turn"]
     if not verdict["ok"]:
         return JSONResponse({"refused": "validation", **verdict},
                             status_code=409)
