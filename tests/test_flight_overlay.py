@@ -139,7 +139,7 @@ def test_the_zip_json_is_the_picture_in_numbers(tmp_path):
     assert "chase_3d/frame_0000_box3d_detailed.png" in names
     for key in ("pictures", "panels", "flight_physics", "box_3d", "overlay", "camera"):
         assert key in data
-    assert set(data["pictures"]) == {"plain", "detailed"}
+    assert set(data["pictures"]) == {"plain", "detailed", "scene"}
     assert "arrows" not in data["overlay"]["plain"]["aircraft"][0]
     physics = data["flight_physics"]
     assert data["panels"]["forces"]["LIFT"] == (

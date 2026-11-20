@@ -630,7 +630,8 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
     import zipfile
 
     from core.capture.box3d import box3d_section
-    from core.capture.box_frames import box3d_detailed_name, box3d_name, draw_box_frames
+    from core.capture.box_frames import (box3d_detailed_name, box3d_name, box3d_scene_name,
+                                         draw_box_frames)
 
     manifest_path = out / "capture_manifest.json"
     if not manifest_path.is_file():
@@ -672,6 +673,14 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"    alpha / beta / gamma, load factor, air data, wind) and FORCES &\n"
         f"    AERODYNAMICS panel (force bars, L/D, T/W, CL / CD, Ps, mass)\n"
         f"\n"
+        f"frame_NNNN_box3d_scene.png     the world round the aircraft, measured:\n"
+        f"  height contours and a green tint on tall ground / buildings (from\n"
+        f"  the depth image), a 500 m ground grid, range rings round the point\n"
+        f"  below the plane and the drop line to it (AGL), the flight path\n"
+        f"  ahead (ticks every 5 s), the horizon, a pitch ladder, a heading\n"
+        f"  tape, and an ENVIRONMENT panel (location, ground, terrain in view,\n"
+        f"  tallest point, visible range, wind, turbulence, surface, sun, geoid)\n"
+        f"\n"
         f"frame_NNNN_box3d.json  the same frame in numbers:\n"
         f"  box_3d          per plane centre_m, extents_m, body axes,\n"
         f"                  orientation, shape_box, rebuild recipe + check\n"
@@ -693,6 +702,10 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"                  arrow's ends (m and px) and scale, the airflow\n"
         f"                  model, its parameters and every streamline's\n"
         f"                  points (m and px) with the local speed ratio\n"
+        f"  scene_overlay   everything the scene picture draws: terrain stats,\n"
+        f"                  contour / grid / ring sample points (px), drop\n"
+        f"                  line, flight path points (m and px), horizon,\n"
+        f"                  pitch ladder, heading tape, environment values\n"
         f"  camera, scene   the camera's pose and intrinsics; the scene\n"
         f"\n"
         f"Forces come from the JSBSim flight model's state at this frame.\n"
@@ -706,7 +719,8 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
         for record in records:
             name = Path(str(record.get("file"))).name
             stem = name[:-len(".png")] if name.endswith(".png") else name
-            names = {"plain": box3d_name(name), "detailed": box3d_detailed_name(name)}
+            names = {"plain": box3d_name(name), "detailed": box3d_detailed_name(name),
+                     "scene": box3d_scene_name(name)}
             for picture_name in names.values():
                 picture = out / "boxed3d" / camera_id / picture_name
                 if picture.is_file():
@@ -720,7 +734,22 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
                     "plain": f"{names['plain']}: the frame with each aircraft's 3-D box",
                     "detailed": (f"{names['detailed']}: the box plus airflow, forces "
                                  "(lift, weight, thrust, drag, net), velocity and the "
-                                 "flight-state / forces panels")})
+                                 "flight-state / forces panels"),
+                    "scene": (f"{names['scene']}: the world round the aircraft -- height "
+                              "contours and tint, ground grid, range rings, drop line, "
+                              "flight path, horizon, pitch ladder, heading tape, "
+                              "environment panel")})
+                frame_path = out / str(record.get("file", ""))
+                if not frame_path.is_file():
+                    frame_path = (out / "previews" / camera_id
+                                  / f"preview_{int(record.get('index', 0)):04d}.png")
+                try:
+                    from core.capture.scene_overlay import scene_geometry, scene_json
+
+                    sidecar["scene_overlay"] = scene_json(
+                        scene_geometry(manifest, record, frame_path))
+                except Exception as exc:  # noqa: BLE001 -- the rest still ships
+                    sidecar["scene_overlay"] = {"error": f"{type(exc).__name__}: {exc}"}
             except Exception:        # noqa: BLE001 -- the box alone still ships
                 sidecar = {"camera_id": camera_id, "frame_index": record.get("index"),
                            "t_s": record.get("t_s"), "box_3d": box_3d}
