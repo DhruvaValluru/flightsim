@@ -1797,7 +1797,8 @@ def lens_picker_script() -> FileResponse:
     """The lens picker both prompt pages mount: a sample frame and a
     focal-length slider that writes "with a <n> mm lens" into the prompt."""
     return FileResponse(STATIC / "lens_picker.js",
-                        media_type="application/javascript")
+                        media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/conditions_list.js")
@@ -1806,7 +1807,8 @@ def conditions_list_script() -> FileResponse:
     the weather and environment phrases the compiler turns into spec
     fields, clickable into the prompt (tests/test_conditions_list.py)."""
     return FileResponse(STATIC / "conditions_list.js",
-                        media_type="application/javascript")
+                        media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -1850,7 +1852,8 @@ def settings_script() -> FileResponse:
     (E3): the six ui_keys() fields over GET/PUT /settings (E2), the rest
     under its Advanced fold (tests/test_settings_page.py)."""
     return FileResponse(STATIC / "settings.js",
-                        media_type="application/javascript")
+                        media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/environment_picker.js")
@@ -1859,7 +1862,8 @@ def environment_picker_script() -> FileResponse:
     the desert/forest preset sent as the structured ``environment`` field
     of POST /compile (tests/test_webapp.py test_environment_preset_*)."""
     return FileResponse(STATIC / "environment_picker.js",
-                        media_type="application/javascript")
+                        media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/aircraft_picker.js")
@@ -1867,7 +1871,8 @@ def aircraft_picker_script() -> FileResponse:
     """The aircraft picker the prompt page mounts beside the environment
     picker, filled from GET /aircraft."""
     return FileResponse(STATIC / "aircraft_picker.js",
-                        media_type="application/javascript")
+                        media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/lighting_preview/{name}.jpg")
