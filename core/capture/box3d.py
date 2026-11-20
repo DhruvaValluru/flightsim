@@ -16,9 +16,10 @@ projected. This module:
 * states which way the plane faces from the camera's point of view
   (:func:`facing`): yaw / pitch / roll of the airframe relative to the
   camera and a plain word ("away from the camera", "to the left", ...);
-* draws a third version of each frame with the rebuilt box, the airflow,
-  the forces and the flight-state panels on it (:func:`draw_box3d_frame`,
-  core/capture/flight_overlay.py).
+* draws each frame twice more: with the rebuilt box only
+  (:func:`draw_box3d_frame`) and with the box, the airflow, the forces and
+  the flight-state panels (:func:`draw_box3d_detailed_frame`), both in
+  core/capture/flight_overlay.py's style.
 
 Corner order (the producer's, airframe.box_corners_body_m): for forward
 in (aft, nose), for right in (left, right), for down in (top, bottom) --
@@ -238,6 +239,15 @@ def box3d_section(manifest: Dict, record: Dict) -> Dict:
 
 # -- the third picture -----------------------------------------------------
 
+
+def draw_box3d_detailed_frame(record: Dict, source, target, manifest: Optional[Dict] = None):
+    """Write ``target``: the DETAILED picture -- the 3-D box plus the
+    airflow, the forces, the velocity and the flight-state panels
+    (core/capture/flight_overlay.py ``draw_flight_frame``)."""
+    from .flight_overlay import draw_flight_frame
+
+    return draw_flight_frame(record, source, target, manifest=manifest)
+
 BOX_EDGE = (90, 200, 255)
 NOSE_EDGE = (255, 90, 90)
 ARROW = (255, 235, 80)
@@ -245,17 +255,16 @@ ARROW = (255, 235, 80)
 
 def draw_box3d_frame(record: Dict, source, target, manifest: Optional[Dict] = None):
     """Write ``target``: ``source`` with each plane's 3-D box drawn from
-    the REBUILT corners (record alone) and, through
-    core/capture/flight_overlay.py, the airflow, the forces (lift, weight,
-    thrust, drag, net), the velocity and the flight-state panels. The plain
-    box-and-nose-arrow drawing below stays as the fallback when the
-    overlay cannot be drawn."""
+    the REBUILT corners (record alone) -- the PLAIN picture, in the
+    flight overlay's style (core/capture/flight_overlay.py). The detailed
+    picture (airflow, forces, panels) is :func:`draw_box3d_detailed_frame`.
+    The box-and-nose-arrow drawing below stays as the fallback."""
     from pathlib import Path
 
     try:
-        from .flight_overlay import draw_flight_frame
+        from .flight_overlay import draw_plain_frame
 
-        return draw_flight_frame(record, source, target, manifest=manifest)
+        return draw_plain_frame(record, source, target, manifest=manifest)
     except Exception:            # noqa: BLE001 -- never lose the box picture
         pass
 

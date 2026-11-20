@@ -1,5 +1,7 @@
-"""Every rendered frame three times: as rendered, with its 2-D boxes drawn
-on, and with its 3-D boxes drawn on (``boxed3d/``, core/capture/box3d.py).
+"""Every rendered frame four times: as rendered, with its 2-D boxes drawn
+on, with its 3-D boxes drawn on, and with its 3-D boxes plus the airflow,
+forces and flight-state panels (both in ``boxed3d/``, core/capture/
+box3d.py and flight_overlay.py).
 
 For each object the frame's ``labels.objects[]`` records (the main
 aircraft, every other aircraft, the scene aggregates when they have a
@@ -92,6 +94,12 @@ def box3d_name(frame_name: str) -> str:
     return f"{stem}_box3d.png"
 
 
+def box3d_detailed_name(frame_name: str) -> str:
+    """``frame_0042.png`` -> ``frame_0042_box3d_detailed.png``."""
+    stem = frame_name[:-len(".png")] if frame_name.endswith(".png") else frame_name
+    return f"{stem}_box3d_detailed.png"
+
+
 def draw_box_frame(record: Dict, source: Path, target: Path) -> Path:
     """Write ``target``: ``source`` with the record's 2-D boxes drawn."""
     from PIL import Image, ImageDraw
@@ -155,14 +163,19 @@ def draw_box_frames(manifest: Dict, run_dir, cameras: Optional[Iterable[str]] = 
                       / f"preview_{int(record.get('index', 0)):04d}.png")
             if not source.is_file():
                 continue
-        from .box3d import draw_box3d_frame
+        from .box3d import draw_box3d_detailed_frame, draw_box3d_frame
 
         def draw_3d(rec, src, dst):
             return draw_box3d_frame(rec, src, dst, manifest=manifest)
 
+        def draw_3d_detailed(rec, src, dst):
+            return draw_box3d_detailed_frame(rec, src, dst, manifest=manifest)
+
         for subdir, name, draw, code_mtime in (
                 (out_subdir, boxed_name(frame_file.name), draw_box_frame, 0.0),
-                (OUT_SUBDIR_3D, box3d_name(frame_file.name), draw_3d, _drawer_mtime())):
+                (OUT_SUBDIR_3D, box3d_name(frame_file.name), draw_3d, _drawer_mtime()),
+                (OUT_SUBDIR_3D, box3d_detailed_name(frame_file.name), draw_3d_detailed,
+                 _drawer_mtime())):
             target = run_dir / subdir / camera / name
             if (target.is_file() and target.stat().st_mtime >= source.stat().st_mtime
                     and target.stat().st_mtime >= manifest_mtime

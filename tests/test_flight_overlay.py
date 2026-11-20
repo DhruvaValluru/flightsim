@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 from core.capture.box3d import box3d_section, project
-from core.capture.flight_overlay import draw_flight_frame, frame_sidecar, overlay_geometry
+from core.capture.flight_overlay import (draw_flight_frame, draw_plain_frame, frame_sidecar,
+                                         overlay_geometry)
 from core.capture.flight_physics import G0, airflow_streamlines, frame_physics
 
 BUNDLE = Path(__file__).parent / "fixtures" / "engine_bundle_min"
@@ -79,32 +80,45 @@ def test_arrows_are_their_camera_points_projected(manifest, record):
     assert length["thrust"] < 0.5 * length["lift"]
 
 
-def test_airflow_turns_down_behind_a_lifting_wing(manifest, record):
+def test_airflow_hugs_the_wing_faster_over_it_and_turned_down_behind(manifest, record):
     box = _box(record)
     p = frame_physics(manifest, record, box)
-    flow = airflow_streamlines(p, box["extents_m"], (0.0, 0.0, 0.0))
-    assert flow is not None and flow["parameters"]["horseshoe_circulation_m2_s"] > 0
-    # Lines that start near the wing's mid-span drop (body z grows) as
-    # they pass the wing: the downwash the lift implies.
-    span = box["extents_m"][1]
-    drops = []
-    for line in flow["lines"]:
-        start, end = line["points_body_m"][0], line["points_body_m"][-1]
-        if abs(start[1]) < 0.3 * span and abs(start[2]) < 1.0:
-            drops.append(end[2] - start[2])
-    assert drops and sum(drops) / len(drops) > 0.0
-    again = airflow_streamlines(p, box["extents_m"], (0.0, 0.0, 0.0))
+    flow = airflow_streamlines(p, box["extents_m"], (0.0, 0.0, 0.0), manifest["airframe"])
+    assert flow is not None
+    geo = flow["geometry"]
+    assert geo["basis"]["wing"].startswith("wingtip keypoints")
+    # The section incidence carries the frame's lift: a positive, small angle.
+    assert 0.0 < flow["parameters"]["root_section_incidence_deg"] < 10.0
+    wing = [ln for ln in flow["lines"] if ln["kind"] == "wing"]
+    over = []
+    for ln in wing:
+        pts = ln["points_body_m"]
+        start, end = pts[0], pts[-1]
+        over.append(max(ln["speed_ratio"]))
+        # Inboard of the tip vortices every wing line leaves lower (body z
+        # larger) than it arrived: the downwash the lift implies. (Outboard
+        # of them the air rises -- the upwash round the tips.)
+        if abs(start[1]) < 0.6 * geo["span_m"] / 2:
+            assert end[2] > start[2]
+    assert max(over) > 1.05                    # the fast flow over the top
+    again = airflow_streamlines(p, box["extents_m"], (0.0, 0.0, 0.0), manifest["airframe"])
     assert again["lines"][5]["points_body_m"] == flow["lines"][5]["points_body_m"]
+    # Lines end a short way behind the tail, not far downstream.
+    tail = geo["x_tail_m"]
+    ref = max(box["extents_m"][0], box["extents_m"][1])
+    assert all(ln["points_body_m"][-1][0] > tail - 0.15 * ref for ln in flow["lines"])
 
 
 def test_the_picture_is_drawn_at_the_frame_size(manifest, record, tmp_path):
     from PIL import Image, ImageChops
 
     source = BUNDLE / "frames" / "chase" / "frame_0000.png"
-    target = draw_flight_frame(record, source, tmp_path / "x_box3d.png", manifest=manifest)
-    a, b = Image.open(source).convert("RGB"), Image.open(target).convert("RGB")
-    assert a.size == b.size
-    assert ImageChops.difference(a, b).getbbox() is not None
+    a = Image.open(source).convert("RGB")
+    for draw in (draw_flight_frame, draw_plain_frame):
+        target = draw(record, source, tmp_path / f"{draw.__name__}.png", manifest=manifest)
+        b = Image.open(target).convert("RGB")
+        assert a.size == b.size
+        assert ImageChops.difference(a, b).getbbox() is not None
 
 
 def test_the_zip_json_is_the_picture_in_numbers(tmp_path):
@@ -118,12 +132,15 @@ def test_the_zip_json_is_the_picture_in_numbers(tmp_path):
         data = json.loads(zf.read("chase_3d/frame_0000_box3d.json"))
         readme = zf.read("chase_3d/README.txt").decode()
     assert "chase_3d/frame_0000_box3d.png" in names
-    for key in ("panels", "flight_physics", "box_3d", "overlay", "camera"):
+    assert "chase_3d/frame_0000_box3d_detailed.png" in names
+    for key in ("pictures", "panels", "flight_physics", "box_3d", "overlay", "camera"):
         assert key in data
+    assert set(data["pictures"]) == {"plain", "detailed"}
+    assert "arrows" not in data["overlay"]["plain"]["aircraft"][0]
     physics = data["flight_physics"]
     assert data["panels"]["forces"]["LIFT"] == (
         f"{physics['forces']['lift']['magnitude_kn']:,.2f} kN")
-    main = data["overlay"]["aircraft"][0]
+    main = data["overlay"]["detailed"]["aircraft"][0]
     assert main["airflow"]["lines"] and main["arrows"]
     assert data["box_3d"]["aircraft"][0]["rebuild_check"]["ok"]
     assert "LIFT" in readme and "flight_physics" in readme
@@ -134,4 +151,4 @@ def test_sidecar_without_state_still_carries_the_box(manifest, record):
     data = frame_sidecar(manifest, bare, box3d_section(manifest, bare))
     assert data["flight_physics"] is None
     assert data["box_3d"]["aircraft"]
-    assert math.isfinite(data["overlay"]["aircraft"][0]["range_m"])
+    assert math.isfinite(data["overlay"]["detailed"]["aircraft"][0]["range_m"])

@@ -630,7 +630,7 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
     import zipfile
 
     from core.capture.box3d import box3d_section
-    from core.capture.box_frames import box3d_name, draw_box_frames
+    from core.capture.box_frames import box3d_detailed_name, box3d_name, draw_box_frames
 
     manifest_path = out / "capture_manifest.json"
     if not manifest_path.is_file():
@@ -647,7 +647,7 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
         draw_box_frames(manifest, out, cameras=[camera_id])
     except (OSError, ImportError):
         pass
-    pictures = sorted((out / "boxed3d" / camera_id).glob("*_box3d.png"))
+    pictures = sorted((out / "boxed3d" / camera_id).glob("*_box3d*.png"))
     archive = out / "downloads" / f"{camera_id}_box3d.zip"
     inputs = pictures + [manifest_path]
     if archive.is_file() and archive.stat().st_mtime >= max(
@@ -657,14 +657,17 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
     readme = (
         f"{camera_id}: the 3-D boxes of run {out.name}\n"
         f"\n"
-        f"frame_NNNN_box3d.png   the frame as an aerodynamics readout:\n"
-        f"  - each plane's 3-D box (cyan, corner brackets; magenta = nose\n"
-        f"    face), its length / width / height, body axes x/y/z at the CG\n"
-        f"  - the forces from the CG, to scale: LIFT (green), WEIGHT\n"
-        f"    (orange), THRUST (blue), DRAG (red), NET (white, when not ~0),\n"
-        f"    and the velocity off the nose (yellow, dashed)\n"
-        f"  - the airflow: streamlines past the airframe coloured by local\n"
-        f"    speed / free stream (blue slow -> red fast)\n"
+        f"frame_NNNN_box3d.png           the frame with each plane's 3-D box\n"
+        f"  (green edges and corner brackets, brighter nose face) and a tag:\n"
+        f"  id, length x span x height, range. Nothing else.\n"
+        f"\n"
+        f"frame_NNNN_box3d_detailed.png  the same box plus, for the flown\n"
+        f"  aircraft (the plane stays visible under all of it):\n"
+        f"  - the forces from the CG, to scale, in kN: LIFT, WEIGHT, THRUST,\n"
+        f"    DRAG, and NET when it is not ~0; the velocity off the nose\n"
+        f"  - the airflow round the airframe: lines that bend round the nose,\n"
+        f"    over and under the wing and off the tips, shaded by local\n"
+        f"    airspeed (dark = slower, pale = faster); hidden behind the plane\n"
         f"  - FLIGHT STATE panel (position, altitude, speeds, Mach, attitude,\n"
         f"    alpha / beta / gamma, load factor, air data, wind) and FORCES &\n"
         f"    AERODYNAMICS panel (force bars, L/D, T/W, CL / CD, Ps, mass)\n"
@@ -683,8 +686,10 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"                  pressure, wind, gusts); CL / CD / CY over the\n"
         f"                  wing area; lifting-line circulation and downwash;\n"
         f"                  energy and specific excess power; controls\n"
-        f"  panels          the two panels' rows exactly as printed\n"
-        f"  overlay         everything drawn: box corners (m and px), each\n"
+        f"  pictures        which png is which\n"
+        f"  panels          the detailed picture's panels exactly as printed\n"
+        f"  overlay         plain / detailed: everything each picture draws:\n"
+        f"                  box corners (m and px), each\n"
         f"                  arrow's ends (m and px) and scale, the airflow\n"
         f"                  model, its parameters and every streamline's\n"
         f"                  points (m and px) with the local speed ratio\n"
@@ -701,15 +706,21 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
         for record in records:
             name = Path(str(record.get("file"))).name
             stem = name[:-len(".png")] if name.endswith(".png") else name
-            picture = out / "boxed3d" / camera_id / box3d_name(name)
-            if picture.is_file():
-                zf.write(picture, arcname=f"{camera_id}_3d/{picture.name}",
-                         compress_type=zipfile.ZIP_STORED)
+            names = {"plain": box3d_name(name), "detailed": box3d_detailed_name(name)}
+            for picture_name in names.values():
+                picture = out / "boxed3d" / camera_id / picture_name
+                if picture.is_file():
+                    zf.write(picture, arcname=f"{camera_id}_3d/{picture.name}",
+                             compress_type=zipfile.ZIP_STORED)
             box_3d = box3d_section(manifest, record)
             try:
                 from core.capture.flight_overlay import frame_sidecar
 
-                sidecar = frame_sidecar(manifest, record, box_3d)
+                sidecar = frame_sidecar(manifest, record, box_3d, pictures={
+                    "plain": f"{names['plain']}: the frame with each aircraft's 3-D box",
+                    "detailed": (f"{names['detailed']}: the box plus airflow, forces "
+                                 "(lift, weight, thrust, drag, net), velocity and the "
+                                 "flight-state / forces panels")})
             except Exception:        # noqa: BLE001 -- the box alone still ships
                 sidecar = {"camera_id": camera_id, "frame_index": record.get("index"),
                            "t_s": record.get("t_s"), "box_3d": box_3d}

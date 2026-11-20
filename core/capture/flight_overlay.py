@@ -1,27 +1,31 @@
-"""The 3-D box picture as an engineering readout, and its JSON twin.
+"""The 3-D box pictures of a frame, and their JSON twin.
 
-On top of the frame this draws, per aircraft, the 3-D box (glowing edges,
-corner brackets, the nose face, the length / span / height along its
-edges, the body axes at the CG) and, for the aircraft the flight model
-flew:
+Two pictures per frame, one look (a restrained green instrument style,
+no neon, no glow), and the plane always readable underneath:
 
-* the airflow -- streamlines past the airframe from
-  :func:`core.capture.flight_physics.airflow_streamlines`, coloured by the
-  local airspeed against the free stream (blue slow -> red fast);
-* the forces from the CG -- lift, weight, thrust, drag (and the net force
-  when it is not negligible), each an arrow in 3-D, projected with the
-  frame's own intrinsics, with its value in kN; and the velocity vector
-  off the nose;
-* two panels: the flight state (position, altitude, speeds, Mach,
-  attitude, alpha / beta / gamma, load factor, air data, wind) and the
-  forces (bars to one scale, L/D, T/W, CL, CD, specific excess power),
-  plus the colour key.
+* PLAIN (``frame_NNNN_box3d.png``): the frame with each aircraft's 3-D
+  box -- thin edges, corner brackets, the nose face -- and a small tag
+  (id, length x span x height, range). Nothing else.
+* DETAILED (``frame_NNNN_box3d_detailed.png``): the same box plus, for
+  the aircraft the flight model flew,
+  - the airflow: streamlines round the airframe from
+    :func:`core.capture.flight_physics.airflow_streamlines` (fuselage
+    body + aerofoil sections carrying the frame's lift + tip vortices),
+    shaded by local airspeed; hidden where the rendered aircraft is in
+    front of them (the frame's depth image), faint where they cross it;
+  - the forces from the CG -- lift, weight, thrust, drag, and the net
+    force when it is not negligible -- to one scale, each labelled in kN,
+    and the velocity off the nose; the labels keep off the plane;
+  - the FLIGHT STATE and FORCES & AERODYNAMICS panels.
 
-:func:`overlay_geometry` computes everything the picture draws, in
-camera metres AND pixels, without drawing; :func:`draw_flight_frame`
-draws exactly that. The frame's JSON carries the same geometry, so the
-JSON is the picture in numbers: every arrow, line and panel value in it
-is what is on the image.
+Every number drawn is the flight model's state at that frame
+(:func:`core.capture.flight_physics.frame_physics`). Over the aircraft's
+own pixels (the frame's ID image) every overlay is drawn at reduced
+strength, so the plane is never buried.
+
+:func:`overlay_geometry` computes everything drawn, in camera metres AND
+pixels; the frame's JSON carries exactly that, so it is the pictures in
+numbers.
 """
 
 from __future__ import annotations
@@ -30,32 +34,39 @@ import math
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .box3d import EDGES, NOSE_FACE, _intrinsics, clip_segment, facing, project, rebuild_corners
-from .flight_physics import G0, KT, FT, airflow_streamlines, frame_physics
+from .box3d import EDGES, NOSE_FACE, _intrinsics, facing, project, rebuild_corners
+from .flight_physics import airflow_streamlines, frame_physics
 
 #: The arrow scale, stated in the JSON: a force F is drawn
 #: ARROW_K x reference length x sqrt(F / weight) long (sqrt so thrust and
 #: drag, a tenth of the weight, still read beside lift and weight).
-ARROW_K = 0.55
+ARROW_K = 0.5
 ARROW_MIN_FRACTION = 0.004          # forces under 0.4 % of weight are not drawn
 NET_MIN_FRACTION = 0.03             # the net force is drawn above 3 % of weight
 
+#: The palette: one green family for the instrument (box, text, panels)
+#: and muted, distinguishable tints for the four forces.
 COLOURS = {
-    "box": (0, 229, 255), "nose": (255, 60, 170), "lift": (70, 255, 120),
-    "weight": (255, 150, 40), "thrust": (60, 150, 255), "drag": (255, 64, 64),
-    "net": (245, 245, 245), "velocity": (255, 232, 60), "text": (215, 240, 255),
-    "dim": (120, 170, 190), "panel": (6, 12, 20), "axis_x": (255, 80, 80),
-    "axis_y": (80, 255, 110), "axis_z": (90, 150, 255),
+    "box": (110, 225, 150), "bracket": (150, 245, 180), "nose": (200, 255, 210),
+    "lift": (140, 240, 160), "weight": (225, 205, 120), "thrust": (120, 215, 205),
+    "drag": (235, 150, 130), "net": (235, 245, 235), "velocity": (200, 235, 140),
+    "text": (215, 240, 220), "dim": (130, 175, 145), "panel": (5, 16, 10),
+    "header": (3, 10, 6), "axis_x": (235, 150, 130), "axis_y": (140, 240, 160),
+    "axis_z": (120, 215, 205),
 }
-#: Streamline colour ramp over speed ratio (blue slow, cyan, green, yellow, red fast).
-RAMP = [(20, 70, 255), (0, 200, 255), (60, 255, 150), (255, 230, 40), (255, 60, 30)]
-#: The speed-ratio window the ramp spans (|u| / V; 1 = free stream).
+#: Airflow shading over speed ratio: deep sea-green (slow) -> green ->
+#: pale lime -> near white (fast).
+RAMP = [(40, 120, 110), (70, 175, 130), (120, 225, 150), (200, 245, 165), (245, 255, 235)]
+#: The default window the shading spans (|u| / V; 1 = free stream); each
+#: frame states the window it used.
 RAMP_RANGE = (0.94, 1.06)
+#: Overlay strength over the aircraft's own pixels (1 = full).
+OVER_PLANE = 0.45
 
 
 def ramp(ratio: float, window: Sequence[float] = RAMP_RANGE) -> Tuple[int, int, int]:
     lo, hi = window
-    t = min(1.0, max(0.0, (ratio - lo) / (hi - lo))) * (len(RAMP) - 1)
+    t = min(1.0, max(0.0, (ratio - lo) / ((hi - lo) or 1.0))) * (len(RAMP) - 1)
     i = min(int(t), len(RAMP) - 2)
     f = t - i
     return tuple(int(RAMP[i][k] + (RAMP[i + 1][k] - RAMP[i][k]) * f) for k in range(3))
@@ -95,7 +106,7 @@ def _main_id(manifest: Optional[Dict], entries) -> Optional[str]:
     return want if want in ids else (ids[0] if ids else None)
 
 
-def overlay_geometry(manifest: Optional[Dict], record: Dict) -> Dict:
+def overlay_geometry(manifest: Optional[Dict], record: Dict, airflow: bool = True) -> Dict:
     """Everything the picture draws, in camera metres and pixels (see the
     module doc). Pure numbers; no image is read."""
     K = _intrinsics(record)
@@ -130,7 +141,10 @@ def overlay_geometry(manifest: Optional[Dict], record: Dict) -> Dict:
             d = [c[k] - cg[k] for k in range(3)]
             return [sum(d[k] * axes[a][k] for k in range(3)) for a in range(3)]
 
+        tight = entry.get("bbox_2d_tight") or entry.get("bbox_2d")
         item = {"id": str(entry.get("id")),
+                "bbox_2d_px": ([round(float(v), 2) for v in tight]
+                               if isinstance(tight, (list, tuple)) and len(tight) == 4 else None),
                 "box_drawn": "shape_box (measured mesh)" if box is shape else "stated dimensions",
                 "corners_m": [_r(c, 4) for c in corners],
                 "corners_px": [px(c) for c in corners],
@@ -191,12 +205,15 @@ def overlay_geometry(manifest: Optional[Dict], record: Dict) -> Dict:
             item["arrow_scale"] = (f"length = {ARROW_K} x {ref:.2f} m x sqrt(F / weight), "
                                    f"capped at 1.1 x {ref:.2f} m; velocity arrow fixed "
                                    f"0.7 x {ref:.2f} m along the relative wind")
-            flow = airflow_streamlines(physics, extents, body_of(centre))
+            flow = (airflow_streamlines(physics, extents, body_of(centre),
+                                        (manifest or {}).get("airframe"))
+                    if airflow else None)
             if flow is not None:
                 lines = []
                 for line in flow["lines"]:
                     pts = [cam(p) for p in line["points_body_m"]]
-                    lines.append({"points_camera_m": pts, "points_px": [px(p) for p in pts],
+                    lines.append({"kind": line.get("kind"), "points_camera_m": pts,
+                                  "points_px": [px(p) for p in pts],
                                   "speed_ratio": line["speed_ratio"]})
                 every = sorted(x for ln in lines for x in ln["speed_ratio"])
                 lo = every[int(0.03 * (len(every) - 1))]
@@ -204,6 +221,11 @@ def overlay_geometry(manifest: Optional[Dict], record: Dict) -> Dict:
                 spread = max(hi - 1.0, 1.0 - lo, 0.01)
                 window = [round(1.0 - spread, 4), round(1.0 + spread, 4)]
                 item["airflow"] = {"model": flow["model"], "parameters": flow["parameters"],
+                                   "geometry": flow.get("geometry"),
+                                   "occlusion": ("segments behind the frame's depth image "
+                                                 "(the rendered aircraft or terrain in front) "
+                                                 "are not drawn; over the aircraft's own pixels "
+                                                 f"every overlay is drawn at {OVER_PLANE} strength"),
                                    "colour_ramp": {"speed_ratio_range": window,
                                                    "range_basis": "symmetric about 1.0, "
                                                    "covering the 3rd-97th percentile of this "
@@ -264,6 +286,9 @@ def _panel_rows(physics: Dict) -> Tuple[List[Tuple[str, str]], List[Tuple[str, s
 
 # -- drawing -------------------------------------------------------------------
 
+SS = 2                                  # supersampling factor
+
+
 def _font(size: int):
     from PIL import ImageFont
 
@@ -280,345 +305,377 @@ def _font(size: int):
         return ImageFont.load_default()
 
 
-def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = None,
-                      geometry: Optional[Dict] = None) -> Path:
-    """Write ``target``: ``source`` with the box, airflow, forces and panels
-    of :func:`overlay_geometry` drawn on (2x supersampled, with glow)."""
-    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+def _passes(record: Dict, source, geo: Dict):
+    """(aircraft mask L-image at the frame size or None, depth getter or
+    None) from the frame's ID image and depth pass beside it."""
+    from PIL import Image
 
-    base = Image.open(source).convert("RGB")
-    W, H = base.size
-    geo = geometry or overlay_geometry(manifest, record)
-    gw, gh = geo.get("image_size_px") or (W, H)
-    sx, sy = W / float(gw or W), H / float(gh or H)
-    SS = 2
-    u = max(H / 720.0, 0.45)                    # UI scale (1 at 720p)
-    k = SS * u
+    src = Path(source)
+    mask = None
+    mask_path = src.with_name(src.stem + "_mask.png")
+    if mask_path.is_file():
+        entries = (record.get("labels") or {}).get("objects") or []
+        wanted = {str(a["id"]) for a in geo["aircraft"]}
+        ids = sorted({int(e["int_id"]) for e in entries if isinstance(e, dict)
+                      and str(e.get("id")) in wanted and e.get("int_id") is not None})
+        if ids:
+            try:
+                picked = Image.open(mask_path).convert("L").point(
+                    [255 if v in ids else 0 for v in range(256)])
+                mask = picked if picked.getbbox() is not None else None
+            except OSError:
+                mask = None
+    depth = None
+    depth_path = src.with_name(src.stem + "_depth.f32")
+    gw, gh = geo.get("image_size_px") or (0, 0)
+    if depth_path.is_file() and gw and gh:
+        try:
+            import numpy as np
 
-    # A slightly darker, cooler plate so the readout reads.
-    plate = ImageEnhance.Brightness(ImageEnhance.Color(base).enhance(0.88)).enhance(0.86)
-    big = plate.resize((W * SS, H * SS), Image.BICUBIC).convert("RGBA")
-    # Two layer pairs: the airflow (and the box floor) under the aircraft,
-    # everything else over it. The aircraft's own pixels go back on top of
-    # the airflow at full brightness, so the plane stays crisp.
-    fglow = Image.new("RGBA", big.size, (0, 0, 0, 0))
-    fsharp = Image.new("RGBA", big.size, (0, 0, 0, 0))
-    fgd, fsd = ImageDraw.Draw(fglow), ImageDraw.Draw(fsharp)
-    glow = Image.new("RGBA", big.size, (0, 0, 0, 0))
-    sharp = Image.new("RGBA", big.size, (0, 0, 0, 0))
-    gd, sd = ImageDraw.Draw(glow), ImageDraw.Draw(sharp)
-    limit = 8.0 * max(W, H) * SS
+            raw = np.fromfile(depth_path, dtype="<f4")
+            if raw.size == gw * gh:
+                grid = raw.reshape(gh, gw)
 
-    def P(p):
+                def depth(p):
+                    x, y = int(p[0]), int(p[1])
+                    if 0 <= x < gw and 0 <= y < gh:
+                        z = float(grid[y, x])
+                        return z if math.isfinite(z) else None
+                    return None
+        except (OSError, ValueError, ImportError):
+            depth = None
+    return mask, depth
+
+
+class _Canvas:
+    """The supersampled drawing surface: the frame plate and three layers
+    (airflow, instrument, labels/panels), composited with the plane kept
+    readable."""
+
+    def __init__(self, base, geo, mask):
+        from PIL import Image, ImageDraw, ImageEnhance
+
+        self.base = base
+        self.W, self.H = base.size
+        gw, gh = geo.get("image_size_px") or (self.W, self.H)
+        self.sx, self.sy = self.W / float(gw or self.W), self.H / float(gh or self.H)
+        self.u = max(self.H / 720.0, 0.45)
+        self.k = SS * self.u
+        size = (self.W * SS, self.H * SS)
+        plate = ImageEnhance.Brightness(base).enhance(0.9)
+        if mask is not None:
+            plate.paste(base, (0, 0), mask.resize(base.size, Image.NEAREST))
+        self.plate = plate.resize(size, Image.BICUBIC).convert("RGBA")
+        self.mask = (mask.resize(size, Image.NEAREST) if mask is not None else None)
+        self.layers = {n: Image.new("RGBA", size, (0, 0, 0, 0)) for n in ("flow", "inst", "top")}
+        self.draw = {n: ImageDraw.Draw(img) for n, img in self.layers.items()}
+        self.limit = 8.0 * max(self.W, self.H) * SS
+        self.placed = []
+
+    def P(self, p):
         if p is None:
             return None
-        return (max(-limit, min(limit, p[0] * sx * SS)), max(-limit, min(limit, p[1] * sy * SS)))
+        lim = self.limit
+        return (max(-lim, min(lim, p[0] * self.sx * SS)), max(-lim, min(lim, p[1] * self.sy * SS)))
 
-    def line(a, b, colour, w, alpha=255, glow_on=True):
+    def avoid(self, rect_px):
+        if rect_px:
+            x0, y0, x1, y1 = rect_px
+            m = 4 * self.k
+            self.placed.append((x0 * self.sx * SS - m, y0 * self.sy * SS - m,
+                                x1 * self.sx * SS + m, y1 * self.sy * SS + m))
+
+    def line(self, layer, a, b, colour, w, alpha=255, outline=False):
         if a is None or b is None:
             return
-        sd.line([a, b], fill=colour + (alpha,), width=max(1, int(w)))
-        if glow_on:
-            gd.line([a, b], fill=colour + (min(255, alpha),), width=max(1, int(w * 3)))
+        d = self.draw[layer]
+        if outline:
+            d.line([a, b], fill=(0, 0, 0, int(alpha * 0.45)), width=max(1, int(w + 2 * self.k)))
+        d.line([a, b], fill=colour + (int(alpha),), width=max(1, int(w)))
 
-    def dashed(a, b, colour, w, dash):
-        if a is None or b is None:
-            return
-        L = math.dist(a, b)
-        n = max(1, int(L // dash))
-        for i in range(0, n, 2):
-            t0, t1 = i / n, min(1.0, (i + 1) / n)
-            line((a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0),
-                 (a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1), colour, w)
-
-    def arrowhead(a, b, colour, size):
+    def arrowhead(self, layer, a, b, colour, size, alpha=255):
         L = math.dist(a, b)
         if L < 1:
             return
         ux, uy = (b[0] - a[0]) / L, (b[1] - a[1]) / L
-        s = min(size, L * 0.45)
-        left = (b[0] - ux * s - uy * s * 0.5, b[1] - uy * s + ux * s * 0.5)
-        right = (b[0] - ux * s + uy * s * 0.5, b[1] - uy * s - ux * s * 0.5)
-        sd.polygon([b, left, right], fill=colour + (255,))
-        gd.polygon([b, left, right], fill=colour + (200,))
+        s = min(size, L * 0.4)
+        left = (b[0] - ux * s - uy * s * 0.36, b[1] - uy * s + ux * s * 0.36)
+        right = (b[0] - ux * s + uy * s * 0.36, b[1] - uy * s - ux * s * 0.36)
+        self.draw[layer].polygon([b, left, right], fill=colour + (int(alpha),),
+                                 outline=(0, 0, 0, int(alpha * 0.5)))
 
-    font = _font(int(12 * k))
-    small = _font(int(10 * k))
-    title = _font(int(13 * k))
-
-    placed = []
-
-    def tag(at, text, colour, fnt=None, anchor_left=True):
+    def tag(self, at, text, colour, font, leader=True):
         if at is None:
             return
-        fnt = fnt or font
-        x0, y0, x1, y1 = sd.textbbox((0, 0), text, font=fnt)
+        d, k = self.draw["top"], self.k
+        x0, y0, x1, y1 = d.textbbox((0, 0), text, font=font)
         tw, th = x1 - x0, y1 - y0
-        pad = 4 * k
-        x = at[0] + (6 * k if anchor_left else -tw - 2 * pad - 6 * k)
-        y = at[1] - th / 2 - pad
-        x = max(2 * k, min(x, W * SS - tw - 2 * pad - 2 * k))
-        y = max(2 * k, min(y, H * SS - th - 2 * pad - 2 * k))
-        bw, bh = tw + 2 * pad, th + 2 * pad
-        for step in range(40):
-            hit = next((q for q in placed if x < q[2] and x + bw > q[0]
-                        and y < q[3] + 2 * k and y + bh + 2 * k > q[1]), None)
+        pad = 3.5 * k
+        bw, bh = tw + 2 * pad + 3 * k, th + 2 * pad
+        Wd, Hd = self.W * SS, self.H * SS
+        x = max(2 * k, min(at[0] + 8 * k, Wd - bw - 2 * k))
+        y = max(26 * k, min(at[1] - bh / 2, Hd - bh - 24 * k))
+        for step in range(60):
+            hit = next((q for q in self.placed if x < q[2] and x + bw > q[0]
+                        and y < q[3] and y + bh > q[1]), None)
             if hit is None:
                 break
-            y = hit[3] + 3 * k if step % 2 == 0 or y + bh < H * SS - 30 * k else hit[1] - bh - 3 * k
-        placed.append((x, y, x + bw, y + bh))
-        if math.dist((x, y + bh / 2), at) > 14 * k:
-            sd.line([at, (x, y + bh / 2)], fill=colour + (160,), width=max(1, int(k)))
-        sd.rectangle([x, y, x + tw + 2 * pad, y + th + 2 * pad],
-                     fill=COLOURS["panel"] + (190,))
-        sd.rectangle([x, y, x + 2 * k, y + th + 2 * pad], fill=colour + (255,))
-        sd.text((x + pad + 2 * k - x0, y + pad - y0), text, font=fnt, fill=colour + (255,))
+            # Step past the obstacle: below it, or above when below is full.
+            if hit[3] + 3 * k + bh < Hd - 24 * k and step < 30:
+                y = hit[3] + 3 * k
+            else:
+                y = hit[1] - bh - 3 * k
+        self.placed.append((x, y, x + bw, y + bh))
+        if leader and math.dist((x, y + bh / 2), at) > 12 * k:
+            d.line([at, (x, y + bh / 2)], fill=colour + (150,), width=max(1, int(0.8 * k)))
+        d.rectangle([x, y, x + bw, y + bh], fill=COLOURS["panel"] + (205,),
+                    outline=colour + (90,), width=max(1, int(0.7 * k)))
+        d.rectangle([x, y, x + 2 * k, y + bh], fill=colour + (230,))
+        d.text((x + pad + 3 * k - x0, y + pad - y0), text, font=font, fill=colour + (255,))
 
-    main_physics = None
-    aircraft_pixels = _aircraft_pixels(record, source, geo, big.size)
-    plane_rect = _main_rect(record, geo)
-    fallback_rect = None if aircraft_pixels is not None else plane_rect
-    if plane_rect is not None:
-        # Labels keep off the plane itself (they hang off leader lines).
-        placed.append((plane_rect[0] * sx * SS, plane_rect[1] * sy * SS,
-                       plane_rect[2] * sx * SS, plane_rect[3] * sy * SS))
+    def finish(self, target):
+        from PIL import Image, ImageChops
+
+        out = self.plate
+        for name in ("flow", "inst", "top"):
+            layer = self.layers[name]
+            if self.mask is not None and name != "top":
+                keep = self.mask.point(lambda v: 255 - int(v * (1.0 - OVER_PLANE)))
+                r, g, b, a = layer.split()
+                layer = Image.merge("RGBA", (r, g, b, ImageChops.multiply(a, keep)))
+            out = Image.alpha_composite(out, layer)
+        out = out.convert("RGB").resize((self.W, self.H), Image.LANCZOS)
+        target = Path(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        out.save(target)
+        return target
+
+
+def _draw_box(cv: _Canvas, item: Dict, detailed: bool):
+    k = cv.k
+    c = [cv.P(p) for p in item["corners_px"]]
+    for a, b in EDGES:
+        cv.line("inst", c[a], c[b], COLOURS["box"], 1.1 * k, alpha=165)
+    for i in range(8):
+        if c[i] is None:
+            continue
+        for a, b in EDGES:
+            if i in (a, b):
+                j = b if i == a else a
+                if c[j] is None:
+                    continue
+                t = 0.18
+                cv.line("inst", c[i], (c[i][0] + (c[j][0] - c[i][0]) * t,
+                                       c[i][1] + (c[j][1] - c[i][1]) * t),
+                        COLOURS["bracket"], 2.4 * k, alpha=235)
+    for a, b in NOSE_FACE:
+        cv.line("inst", c[a], c[b], COLOURS["nose"], 1.6 * k, alpha=210)
+    return c
+
+
+def draw_plain_frame(record: Dict, source, target, manifest: Optional[Dict] = None,
+                     geometry: Optional[Dict] = None) -> Path:
+    """Write ``target``: the frame with each aircraft's 3-D box only."""
+    from PIL import Image
+
+    base = Image.open(source).convert("RGB")
+    geo = geometry or overlay_geometry(manifest, record, airflow=False)
+    mask, _ = _passes(record, source, geo)
+    cv = _Canvas(base, geo, mask)
+    small = _font(int(10.5 * cv.k))
+    for item in geo["aircraft"]:
+        cv.avoid(item.get("bbox_2d_px"))
+    for item in geo["aircraft"]:
+        c = _draw_box(cv, item, detailed=False)
+        vis = [p for p in c if p is not None]
+        if vis:
+            e = item["extents_m"]
+            text = (f"{item['id']}   {e['length']:.1f} x {e['width']:.1f} x "
+                    f"{e['height']:.1f} m   {item['range_m']:.0f} m")
+            top = min(vis, key=lambda p: p[1])
+            cv.tag((min(p[0] for p in vis), top[1] - 6 * cv.k), text, COLOURS["box"], small,
+                   leader=False)
+    return cv.finish(target)
+
+
+def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = None,
+                      geometry: Optional[Dict] = None) -> Path:
+    """Write ``target``: the detailed picture (box, airflow, forces,
+    velocity, panels) of :func:`overlay_geometry`."""
+    from PIL import Image
+
+    base = Image.open(source).convert("RGB")
+    geo = geometry or overlay_geometry(manifest, record)
+    mask, depth = _passes(record, source, geo)
+    cv = _Canvas(base, geo, mask)
+    k = cv.k
+    font = _font(int(11 * k))
+    small = _font(int(9.5 * k))
+    title = _font(int(11.5 * k))
+    for item in geo["aircraft"]:
+        cv.avoid(item.get("bbox_2d_px"))
+
+    main = None
     for item in geo["aircraft"]:
         flow = item.get("airflow")
         if flow:
             window = flow["colour_ramp"]["speed_ratio_range"]
             for ln in flow["lines"]:
-                pts, spd = ln["points_px"], ln["speed_ratio"]
-                for i in range(len(pts) - 1):
-                    a, b = P(pts[i]), P(pts[i + 1])
+                pts, cams, spd = ln["points_px"], ln["points_camera_m"], ln["speed_ratio"]
+                n = len(pts)
+                for i in range(n - 1):
+                    a, b = cv.P(pts[i]), cv.P(pts[i + 1])
                     if a is None or b is None:
                         continue
-                    over = (fallback_rect is not None and pts[i] is not None
-                            and fallback_rect[0] <= pts[i][0] <= fallback_rect[2]
-                            and fallback_rect[1] <= pts[i][1] <= fallback_rect[3])
-                    fade = min(1.0, i / 10.0) * min(1.0, (len(pts) - 1 - i) / 10.0)
-                    alpha = int((45 if over else 185) * fade)
-                    colour = ramp(spd[i], window)
-                    fsd.line([a, b], fill=colour + (alpha,), width=max(1, int(1.1 * k)))
-                    if not over:
-                        fgd.line([a, b], fill=colour + (int(alpha * 0.7),),
-                                 width=max(1, int(3.3 * k)))
-        c = [P(p) for p in item["corners_px"]]
-        floor = [c[i] for i in (1, 3, 7, 5)]
-        if all(p is not None for p in floor):
-            fsd.polygon(floor, fill=COLOURS["box"] + (24,))
-
-    for item in geo["aircraft"]:
-        c = [P(p) for p in item["corners_px"]]
-        # Edges, corner brackets and the nose face.
-        for a, b in EDGES:
-            line(c[a], c[b], COLOURS["box"], 1.4 * k, alpha=170)
-        for i in range(8):
-            if c[i] is None:
-                continue
-            for a, b in EDGES:
-                if i in (a, b):
-                    j = b if i == a else a
-                    if c[j] is None:
-                        continue
-                    t = 0.22
-                    line(c[i], (c[i][0] + (c[j][0] - c[i][0]) * t,
-                                c[i][1] + (c[j][1] - c[i][1]) * t), COLOURS["box"], 3.2 * k)
-        for a, b in NOSE_FACE:
-            line(c[a], c[b], COLOURS["nose"], 2.2 * k)
-        for d in item["dimension_labels"]:
-            tag(P(d["at_px"]), d["text"], COLOURS["box"], small)
-        for ax, colour in zip(item["body_axes"], ("axis_x", "axis_y", "axis_z")):
-            a, b = P(ax["from_px"]), P(ax["to_px"])
-            line(a, b, COLOURS[colour], 1.6 * k)
+                    alpha = 175.0 * min(1.0, i / 14.0) * min(1.0, (n - 1 - i) / 14.0)
+                    if depth is not None:
+                        z_surface = depth(pts[i])
+                        if z_surface is not None and cams[i][2] > z_surface + 0.1 + 0.004 * z_surface:
+                            continue            # the aircraft (or terrain) is in front
+                    cv.line("flow", a, b, ramp(spd[i], window), 1.05 * k, alpha=alpha)
+        _draw_box(cv, item, detailed=True)
+        for d in item.get("dimension_labels", []):
+            cv.tag(cv.P(d["at_px"]), d["text"], COLOURS["dim"], small, leader=False)
+        for ax, colour in zip(item.get("body_axes", []), ("axis_x", "axis_y", "axis_z")):
+            a, b = cv.P(ax["from_px"]), cv.P(ax["to_px"])
+            cv.line("inst", a, b, COLOURS[colour], 1.2 * k, alpha=200)
             if a and b:
-                arrowhead(a, b, COLOURS[colour], 7 * k)
+                cv.arrowhead("inst", a, b, COLOURS[colour], 6 * k, alpha=200)
         for arrow in item.get("arrows", []):
             colour = tuple(arrow["colour_rgb"])
-            a, b = P(arrow["from_px"]), P(arrow["to_px"])
+            a, b = cv.P(arrow["from_px"]), cv.P(arrow["to_px"])
             if a is None or b is None:
                 continue
             if arrow.get("dashed"):
-                dashed(a, b, colour, 2.2 * k, 9 * k)
+                L = math.dist(a, b)
+                steps = max(1, int(L // (7 * k)))
+                for i in range(0, steps, 2):
+                    t0, t1 = i / steps, min(1.0, (i + 1) / steps)
+                    cv.line("inst", (a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0),
+                            (a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1),
+                            colour, 1.6 * k, alpha=230, outline=True)
             else:
-                line(a, b, colour, 3.4 * k)
-            if math.dist(a, b) < 10 * k:          # pointing at / away from the camera
-                r = 7 * k
-                sd.ellipse([b[0] - r, b[1] - r, b[0] + r, b[1] + r], outline=colour + (255,),
-                           width=int(2 * k))
+                cv.line("inst", a, b, colour, 2.2 * k, alpha=240, outline=True)
+            if math.dist(a, b) < 10 * k:
+                r = 6 * k
+                cv.draw["inst"].ellipse([b[0] - r, b[1] - r, b[0] + r, b[1] + r],
+                                        outline=colour + (240,), width=max(1, int(1.6 * k)))
             else:
-                arrowhead(a, b, colour, 16 * k)
-            tag(b, arrow["label"], colour, font, anchor_left=b[0] >= a[0])
-        cg = P(item["cg_px"])
-        if cg is not None:
-            r = 6 * k
-            sd.ellipse([cg[0] - r, cg[1] - r, cg[0] + r, cg[1] + r], outline=(255, 255, 255, 255),
-                       width=int(1.6 * k))
-            sd.pieslice([cg[0] - r, cg[1] - r, cg[0] + r, cg[1] + r], 0, 90, fill=(255, 255, 255, 255))
-            sd.pieslice([cg[0] - r, cg[1] - r, cg[0] + r, cg[1] + r], 180, 270, fill=(255, 255, 255, 255))
-        if not item.get("has_physics"):
-            vis = [p for p in c if p is not None]
-            if vis:
-                tag((min(p[0] for p in vis), min(p[1] for p in vis) - 10 * k),
-                    f"{item['id']}  {item['range_m']:.0f} m", COLOURS["box"], small)
+                cv.arrowhead("inst", a, b, colour, 13 * k, alpha=245)
+            cv.tag(b, arrow["label"], colour, font)
+        cg = cv.P(item.get("cg_px"))
+        if cg is not None and item.get("has_physics"):
+            r = 4.5 * k
+            d = cv.draw["inst"]
+            d.ellipse([cg[0] - r, cg[1] - r, cg[0] + r, cg[1] + r],
+                      outline=(235, 245, 235, 255), width=max(1, int(1.2 * k)))
+            d.pieslice([cg[0] - r, cg[1] - r, cg[0] + r, cg[1] + r], 0, 90, fill=(235, 245, 235, 255))
+            d.pieslice([cg[0] - r, cg[1] - r, cg[0] + r, cg[1] + r], 180, 270,
+                       fill=(235, 245, 235, 255))
         if item.get("physics_values"):
-            main_physics = (item, item["physics_values"])
+            main = item
 
-    # Panels.
     pad = 10 * k
-    if main_physics:
-        item, physics = main_physics
+    top = cv.draw["top"]
+    if main is not None:
+        physics = main["physics_values"]
         state_rows, force_rows = _panel_rows(physics)
-        _panel(sd, (pad, pad + 26 * k), "FLIGHT STATE // " + item["id"].upper(), state_rows,
-               font, title, k, COLOURS["box"])
-        _force_panel(sd, (W * SS - pad, pad + 26 * k), physics, force_rows, font, title, small,
-                     k, item.get("airflow"))
-    # Header and footer bars.
-    header = (f"FLIGHTSIM // AERO-ANALYSIS   CAM {str(record.get('camera_id')).upper()}   "
-              f"FRAME {int(record.get('index', 0)):04d}   T+{float(record.get('t_s') or 0):.3f} s")
-    sd.rectangle([0, 0, W * SS, 22 * k], fill=COLOURS["panel"] + (200,))
-    sd.line([0, 22 * k, W * SS, 22 * k], fill=COLOURS["box"] + (160,), width=max(1, int(k)))
-    sd.text((pad, 4 * k), header, font=title, fill=COLOURS["box"] + (255,))
-    foot = ("box: 3-D extents (cyan) \u00b7 nose face (magenta) \u00b7 body axes x/y/z at CG"
-            "   forces: JSBSim state at this frame   airflow: potential-flow + lifting-line model")
-    sd.rectangle([0, H * SS - 20 * k, W * SS, H * SS], fill=COLOURS["panel"] + (200,))
-    sd.text((pad, H * SS - 16 * k), foot, font=small, fill=COLOURS["dim"] + (255,))
-
-    out = Image.alpha_composite(big, fglow.filter(ImageFilter.GaussianBlur(4 * k)))
-    out = Image.alpha_composite(out, fsharp)
-    if aircraft_pixels is not None:
-        crisp = base.resize(big.size, Image.BICUBIC).convert("RGBA")
-        out.paste(crisp, (0, 0), aircraft_pixels)
-    glow = glow.filter(ImageFilter.GaussianBlur(5 * k))
-    out = Image.alpha_composite(out, glow)
-    out = Image.alpha_composite(out, sharp)
-    out = out.convert("RGB").resize((W, H), Image.LANCZOS)
-    target = Path(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    out.save(target)
-    return target
+        _panel(top, (pad, 30 * k), "FLIGHT STATE  " + main["id"], state_rows, font, title, k)
+        _force_panel(top, (cv.W * SS - pad, 30 * k), physics, force_rows, font, title, small, k,
+                     main.get("airflow"))
+    header = (f"FLIGHTSIM  AERODYNAMICS   cam {record.get('camera_id')}   "
+              f"frame {int(record.get('index', 0)):04d}   t {float(record.get('t_s') or 0):.3f} s")
+    top.rectangle([0, 0, cv.W * SS, 20 * k], fill=COLOURS["header"] + (215,))
+    top.line([0, 20 * k, cv.W * SS, 20 * k], fill=COLOURS["box"] + (120,), width=max(1, int(0.8 * k)))
+    top.text((pad, 4 * k), header, font=title, fill=COLOURS["text"] + (255,))
+    foot = ("forces & state: JSBSim flight model at this frame   airflow: potential flow "
+            "(fuselage + aerofoil sections carrying this lift + tip vortices), shaded by "
+            "local speed")
+    top.rectangle([0, cv.H * SS - 18 * k, cv.W * SS, cv.H * SS], fill=COLOURS["header"] + (215,))
+    top.text((pad, cv.H * SS - 15 * k), foot, font=small, fill=COLOURS["dim"] + (255,))
+    return cv.finish(target)
 
 
-def _aircraft_pixels(record: Dict, source, geo: Dict, size):
-    """An L mask (at ``size``) of every aircraft's pixels, from the frame's
-    ID image when the run wrote one (``frame_NNNN_mask.png`` beside it);
-    None when there is none."""
-    try:
-        from PIL import Image, ImageFilter
-    except ImportError:
-        return None
-    src = Path(source)
-    mask_path = src.with_name(src.stem + "_mask.png")
-    if not mask_path.is_file():
-        return None
-    entries = (record.get("labels") or {}).get("objects") or []
-    wanted = {str(a["id"]) for a in geo["aircraft"]}
-    ids = sorted({int(e["int_id"]) for e in entries if isinstance(e, dict)
-                  and str(e.get("id")) in wanted and e.get("int_id") is not None})
-    if not ids:
-        return None
-    try:
-        mask = Image.open(mask_path).convert("L")
-    except OSError:
-        return None
-    table = [255 if v in ids else 0 for v in range(256)]
-    picked = mask.point(table)
-    if picked.getbbox() is None:
-        return None
-    return picked.resize(size, Image.NEAREST).filter(ImageFilter.GaussianBlur(1.2))
-
-
-def _main_rect(record: Dict, geo: Dict):
-    """The main aircraft's 2-D box (pixels) when there is no ID image: the
-    airflow is drawn faint over it so the plane is not buried."""
-    main = next((a["id"] for a in geo["aircraft"] if a.get("has_physics")), None)
-    for e in (record.get("labels") or {}).get("objects") or []:
-        if isinstance(e, dict) and str(e.get("id")) == main:
-            box = e.get("bbox_2d_tight") or e.get("bbox_2d")
-            if isinstance(box, (list, tuple)) and len(box) == 4:
-                return [float(v) for v in box]
-    return None
-
-
-def _panel(draw, origin, heading, rows, font, title, k, accent):
+def _panel(draw, origin, heading, rows, font, title, k):
     x, y = origin
     lw = max(draw.textbbox((0, 0), r[0], font=font)[2] for r in rows) + 12 * k
     vw = max(draw.textbbox((0, 0), r[1], font=font)[2] for r in rows)
     hw = draw.textbbox((0, 0), heading, font=title)[2]
     w = max(lw + vw, hw) + 20 * k
-    rh = 16 * k
-    h = 26 * k + rh * len(rows) + 8 * k
-    draw.rectangle([x, y, x + w, y + h], fill=(6, 12, 20, 200), outline=accent + (140,),
-                   width=max(1, int(k)))
-    draw.rectangle([x, y, x + w, y + 20 * k], fill=(4, 9, 15, 240))
-    draw.line([x, y + 20 * k, x + w, y + 20 * k], fill=accent + (200,), width=max(1, int(k)))
-    draw.text((x + 8 * k, y + 4 * k), heading, font=title, fill=accent + (255,))
+    rh = 14.5 * k
+    h = 24 * k + rh * len(rows) + 6 * k
+    draw.rectangle([x, y, x + w, y + h], fill=COLOURS["panel"] + (195,),
+                   outline=COLOURS["box"] + (90,), width=max(1, int(0.8 * k)))
+    draw.rectangle([x, y, x + w, y + 18 * k], fill=COLOURS["header"] + (235,))
+    draw.line([x, y + 18 * k, x + w, y + 18 * k], fill=COLOURS["box"] + (150,),
+              width=max(1, int(0.8 * k)))
+    draw.text((x + 8 * k, y + 3.5 * k), heading, font=title, fill=COLOURS["bracket"] + (255,))
     for i, (label, value) in enumerate(rows):
-        ty = y + 26 * k + i * rh
-        draw.text((x + 10 * k, ty), label, font=font, fill=(120, 170, 190, 255))
-        draw.text((x + 10 * k + lw, ty), value, font=font, fill=(225, 245, 255, 255))
-    return (x, y, x + w, y + h)
+        ty = y + 23 * k + i * rh
+        draw.text((x + 9 * k, ty), label, font=font, fill=COLOURS["dim"] + (255,))
+        draw.text((x + 9 * k + lw, ty), value, font=font, fill=COLOURS["text"] + (255,))
 
 
 def _force_panel(draw, right_top, physics, rows, font, title, small, k, flow):
-    """Force bars to one scale, the ratios, and the airflow colour key."""
+    """Force bars to one scale, the ratios, and the airflow shading key."""
     forces = physics["forces"]
     names = ("lift", "weight", "thrust", "drag")
-    top = max(float(forces[n]["magnitude_n"]) for n in names) or 1.0
-    w = 300 * k
-    rh = 16 * k
-    bars_h = len(names) * 20 * k
+    topv = max(float(forces[n]["magnitude_n"]) for n in names) or 1.0
+    w = 270 * k
+    rh = 14.5 * k
     extra = rows[len(names):]
-    h = 26 * k + bars_h + 8 * k + rh * len(extra) + (52 * k if flow else 0) + 8 * k
+    h = 24 * k + len(names) * 17 * k + 6 * k + rh * len(extra) + (44 * k if flow else 0) + 6 * k
     x1, y = right_top
     x = x1 - w
-    accent = COLOURS["box"]
-    draw.rectangle([x, y, x1, y + h], fill=(6, 12, 20, 200), outline=accent + (140,),
-                   width=max(1, int(k)))
-    draw.rectangle([x, y, x1, y + 20 * k], fill=(4, 9, 15, 240))
-    draw.line([x, y + 20 * k, x1, y + 20 * k], fill=accent + (200,), width=max(1, int(k)))
-    draw.text((x + 8 * k, y + 4 * k), "FORCES & AERODYNAMICS", font=title, fill=accent + (255,))
-    bx0 = x + 78 * k
-    bx1 = x1 - 96 * k
+    draw.rectangle([x, y, x1, y + h], fill=COLOURS["panel"] + (195,),
+                   outline=COLOURS["box"] + (90,), width=max(1, int(0.8 * k)))
+    draw.rectangle([x, y, x1, y + 18 * k], fill=COLOURS["header"] + (235,))
+    draw.line([x, y + 18 * k, x1, y + 18 * k], fill=COLOURS["box"] + (150,),
+              width=max(1, int(0.8 * k)))
+    draw.text((x + 8 * k, y + 3.5 * k), "FORCES & AERODYNAMICS", font=title,
+              fill=COLOURS["bracket"] + (255,))
+    bx0, bx1 = x + 70 * k, x1 - 86 * k
     for i, n in enumerate(names):
-        ty = y + 28 * k + i * 20 * k
+        ty = y + 25 * k + i * 17 * k
         mag = float(forces[n]["magnitude_n"])
         colour = COLOURS[n]
-        draw.text((x + 10 * k, ty), n.upper(), font=font, fill=colour + (255,))
-        draw.rectangle([bx0, ty + 2 * k, bx1, ty + 12 * k], fill=(255, 255, 255, 22))
-        draw.rectangle([bx0, ty + 2 * k, bx0 + (bx1 - bx0) * mag / top, ty + 12 * k],
-                       fill=colour + (220,))
-        draw.text((bx1 + 8 * k, ty), f"{mag / 1000.0:,.2f} kN", font=font, fill=(225, 245, 255, 255))
-    ty = y + 28 * k + bars_h + 4 * k
+        draw.text((x + 9 * k, ty), n.upper(), font=font, fill=colour + (255,))
+        draw.rectangle([bx0, ty + 3 * k, bx1, ty + 10 * k], fill=(255, 255, 255, 18))
+        draw.rectangle([bx0, ty + 3 * k, bx0 + (bx1 - bx0) * mag / topv, ty + 10 * k],
+                       fill=colour + (210,))
+        draw.text((bx1 + 7 * k, ty), f"{mag / 1000.0:,.2f} kN", font=font,
+                  fill=COLOURS["text"] + (255,))
+    ty = y + 25 * k + len(names) * 17 * k + 3 * k
     for label, value in extra:
-        draw.text((x + 10 * k, ty), label, font=font, fill=(120, 170, 190, 255))
-        draw.text((x + 110 * k, ty), value, font=font, fill=(225, 245, 255, 255))
+        draw.text((x + 9 * k, ty), label, font=font, fill=COLOURS["dim"] + (255,))
+        draw.text((x + 100 * k, ty), value, font=font, fill=COLOURS["text"] + (255,))
         ty += rh
     if flow:
         lo_w, hi_w = flow["colour_ramp"]["speed_ratio_range"]
-        ty += 6 * k
-        draw.text((x + 10 * k, ty), "AIRFLOW  local speed / free stream", font=small,
-                  fill=(120, 170, 190, 255))
-        ty += 16 * k
-        gx0, gx1 = x + 10 * k, x1 - 10 * k
+        ty += 5 * k
+        draw.text((x + 9 * k, ty), "AIRFLOW  local speed / free stream", font=small,
+                  fill=COLOURS["dim"] + (255,))
+        ty += 14 * k
+        gx0, gx1 = x + 9 * k, x1 - 9 * k
         steps = 60
         for i in range(steps):
             r = lo_w + (hi_w - lo_w) * i / (steps - 1)
             xa = gx0 + (gx1 - gx0) * i / steps
-            draw.rectangle([xa, ty, xa + (gx1 - gx0) / steps + 1, ty + 8 * k],
+            draw.rectangle([xa, ty, xa + (gx1 - gx0) / steps + 1, ty + 6 * k],
                            fill=ramp(r, (lo_w, hi_w)) + (255,))
-        ty += 11 * k
-        draw.text((gx0, ty), f"{lo_w:.3f} slow", font=small, fill=(150, 190, 210, 255))
+        ty += 9 * k
         mid = "1.00 = " + f"{physics['velocity']['true_airspeed_kt']:.0f} kt"
         mw = draw.textbbox((0, 0), mid, font=small)[2]
-        draw.text(((gx0 + gx1) / 2 - mw / 2, ty), mid, font=small, fill=(150, 190, 210, 255))
-        fast = f"fast {hi_w:.3f}"
+        fast = f"{hi_w:.3f} fast"
         fw = draw.textbbox((0, 0), fast, font=small)[2]
-        draw.text((gx1 - fw, ty), fast, font=small, fill=(150, 190, 210, 255))
+        draw.text((gx0, ty), f"slow {lo_w:.3f}", font=small, fill=COLOURS["dim"] + (255,))
+        draw.text(((gx0 + gx1) / 2 - mw / 2, ty), mid, font=small, fill=COLOURS["dim"] + (255,))
+        draw.text((gx1 - fw, ty), fast, font=small, fill=COLOURS["dim"] + (255,))
 
 
 # -- the JSON twin -----------------------------------------------------------
 
-def overlay_json(geometry: Dict, keep_every: int = 3) -> Dict:
+def overlay_json(geometry: Dict, keep_every: int = 4) -> Dict:
     """The geometry as it goes in the frame's JSON: everything drawn, with
     the streamlines thinned to every ``keep_every``-th point (pixels and
     camera metres, rounded) so the file stays readable."""
@@ -633,6 +690,7 @@ def overlay_json(geometry: Dict, keep_every: int = 3) -> Dict:
                 if idx[-1] != len(ln["points_px"]) - 1:
                     idx.append(len(ln["points_px"]) - 1)
                 lines.append({
+                    "kind": ln.get("kind"),
                     "points_px": [_r(ln["points_px"][i], 1) for i in idx],
                     "points_camera_m": [_r(ln["points_camera_m"][i], 3) for i in idx],
                     "speed_ratio": [_r(ln["speed_ratio"][i], 4) for i in idx],
@@ -644,29 +702,41 @@ def overlay_json(geometry: Dict, keep_every: int = 3) -> Dict:
     return out
 
 
-def frame_sidecar(manifest: Dict, record: Dict, box_3d: Dict) -> Dict:
-    """The full per-frame JSON: the frame, the camera, the box section
-    (unchanged), the flight physics and the overlay geometry."""
+def frame_sidecar(manifest: Dict, record: Dict, box_3d: Dict,
+                  pictures: Optional[Dict] = None) -> Dict:
+    """The full per-frame JSON: what is in both pictures, the flight
+    physics, the box section (unchanged), the camera and the scene."""
     geometry = overlay_geometry(manifest, record)
     physics = next((a["physics_values"] for a in geometry["aircraft"]
                     if a.get("physics_values")), None)
     state_rows, force_rows = _panel_rows(physics) if physics else ([], [])
     conditions = manifest.get("conditions") or {}
+    detailed = overlay_json(geometry)
+    plain = {"image_size_px": detailed["image_size_px"],
+             "aircraft": [{k: item[k] for k in ("id", "box_drawn", "corners_m", "corners_px",
+                                                 "edges", "nose_face_edges", "extents_m",
+                                                 "range_m", "orientation") if k in item}
+                          for item in detailed["aircraft"]]}
     return {
         "camera_id": record.get("camera_id"),
         "frame_index": record.get("index"),
         "t_s": record.get("t_s"),
-        "about": ("This file is the picture beside it in numbers: the 3-D box "
-                  "(box_3d), the flight physics of the frame (flight_physics: every "
-                  "force as a vector in body / NED / camera axes with its magnitude, "
-                  "velocity, air data, coefficients, energy) and every element drawn "
-                  "(overlay: the box corners, the force and velocity arrows, the "
-                  "airflow streamlines and the panel values, in camera metres and "
-                  "pixels)."),
+        "about": ("This file is the two pictures beside it in numbers. pictures: which "
+                  "file is which. panels: the detailed picture's two panels as printed. "
+                  "flight_physics: the flight model's state at this frame -- every force "
+                  "as a vector in body / NED / camera axes with its magnitude, the force "
+                  "balance, velocity, angles, air data, coefficients, energy, controls. "
+                  "box_3d: each aircraft's 3-D box, orientation and rebuild check. "
+                  "overlay.plain / overlay.detailed: every element each picture draws, "
+                  "in camera metres and pixels (box corners, force and velocity arrows "
+                  "with their scale, airflow streamlines with the local speed ratio)."),
+        "pictures": pictures or {},
+        "palette_rgb": {k: list(v) for k, v in COLOURS.items()
+                        if k in ("box", "lift", "weight", "thrust", "drag", "net", "velocity")},
         "panels": {"flight_state": dict(state_rows), "forces": dict(force_rows)},
         "flight_physics": physics,
         "box_3d": box_3d,
-        "overlay": overlay_json(geometry),
+        "overlay": {"plain": plain, "detailed": detailed},
         "camera": {
             "width_px": record.get("width_px"), "height_px": record.get("height_px"),
             "focal_length_mm": record.get("focal_length_mm"),

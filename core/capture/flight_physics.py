@@ -435,19 +435,103 @@ def _segment_velocity(P, A, B, gamma, core):
     return cross * k[:, None]
 
 
-def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Sequence[float],
-                        rings: Sequence[Tuple[float, int]] = ((0.28, 8), (0.55, 14),
-                                                              (0.82, 18), (1.05, 20)),
-                        ) -> Optional[Dict]:
-    """Streamlines of the air past the aircraft, in BODY metres about the CG.
+def _keypoint(airframe: Optional[Dict], name: str) -> Optional[List[float]]:
+    for kp in (airframe or {}).get("keypoints") or []:
+        if isinstance(kp, dict) and kp.get("name") == name and kp.get("body_m"):
+            return [float(v) for v in kp["body_m"]]
+    return None
 
-    Free stream: the relative wind (-V along wind-axes x). Fuselage: a
-    Rankine body (source at the nose, sink at the tail) sized to the box.
-    Wing: a horseshoe vortex of circulation L / (rho V b'), b' = pi b / 4,
-    bound at the CG and trailing downstream -- so the lines show the
-    upwash ahead of the wing, the downwash behind it and the tip vortices,
-    all in proportion to the frame's own lift. Returns the lines with the
-    local speed ratio |u| / V at every point, and the model's parameters.
+
+def airframe_geometry(physics: Dict, extents: Sequence[float], centre_body: Sequence[float],
+                      airframe: Optional[Dict] = None) -> Dict:
+    """The simple aerodynamic shape the airflow model flows round, from the
+    airframe's own keypoints (nose, tail, wingtips; FDM contact points)
+    and the flown model's wing (span, mean chord), falling back to the
+    box. Body metres about the CG."""
+    length, width, height = (float(v) for v in extents)
+    nose, tail = _keypoint(airframe, "nose"), _keypoint(airframe, "tail")
+    lt, rt = _keypoint(airframe, "left_wingtip"), _keypoint(airframe, "right_wingtip")
+    cx = float(centre_body[0])
+    if nose and tail and nose[0] > tail[0]:
+        x_nose, x_tail = nose[0], tail[0]
+        z_axis = 0.5 * (nose[2] + tail[2])
+        basis_fus = "nose / tail keypoints"
+    else:
+        x_nose, x_tail, z_axis = cx + length / 2, cx - length / 2, float(centre_body[2])
+        basis_fus = "box length"
+    co = physics.get("coefficients") or {}
+    span = float(co.get("span_m") or width)
+    chord = float(co.get("mean_chord_m") or (co.get("wing_area_m2") or 0) / span or 0.14 * span)
+    if lt and rt:
+        z_wing = 0.5 * (lt[2] + rt[2])
+        x_tip = 0.5 * (lt[0] + rt[0])
+        basis_wing = "wingtip keypoints + FDM span / mean chord"
+    else:
+        z_wing, x_tip = z_axis, 0.0
+        basis_wing = "FDM span / mean chord; wing at the CG height"
+    # The quarter-chord of the mean chord sits near the CG (where a stable
+    # aircraft balances); the wingtip keypoint's x says how far aft the
+    # tips sweep. The mean chord is placed between the two.
+    # Root quarter-chord at the CG (where a stable aircraft balances);
+    # the tips' keypoint x gives the sweep: the quarter-chord line runs
+    # from the root to the tip's x (minus a quarter chord, the keypoint
+    # being the tip's own reference point).
+    x_qc = 0.0
+    x_qc_tip = min(0.0, x_tip + 0.25 * chord) if (lt and rt) else 0.0
+    radius = max(0.05, min(0.18 * height, 0.075 * length))
+    return {"x_nose_m": x_nose, "x_tail_m": x_tail, "z_axis_m": z_axis,
+            "fuselage_radius_m": radius, "span_m": span, "chord_m": chord,
+            "x_quarter_chord_m": x_qc, "x_quarter_chord_tip_m": x_qc_tip,
+            "sweep_deg": math.degrees(math.atan2(x_qc - x_qc_tip, span / 2.0)),
+            "z_wing_m": z_wing,
+            "basis": {"fuselage": basis_fus, "wing": basis_wing}}
+
+
+def _joukowski_velocity(X, Z, alpha_eff, U, eps=0.085, delta=0.04):
+    """2-D flow past a Joukowski aerofoil (chord ~4 units along +X, the
+    downstream direction; Z up) at incidence ``alpha_eff`` to a free
+    stream U, circulation from the Kutta condition. Returns (u, w) and the
+    circulation in the same units. Vectorised over numpy arrays."""
+    import numpy as np
+
+    mu = complex(-eps, delta)
+    R = abs(1.0 - mu)
+    beta = math.asin(max(-1.0, min(1.0, delta / R)))
+    gamma = 4.0 * math.pi * U * R * math.sin(alpha_eff + beta)
+    z = X + 1j * Z
+    root = np.sqrt(z * z - 4.0 + 0j)
+    z1, z2 = (z + root) / 2.0, (z - root) / 2.0
+    zeta = np.where(np.abs(z1 - mu) >= np.abs(z2 - mu), z1, z2)
+    d = zeta - mu
+    dW = (U * (np.exp(-1j * alpha_eff) - R * R * np.exp(1j * alpha_eff) / (d * d))
+          + 1j * gamma / (2.0 * math.pi * d))
+    dz = 1.0 - 1.0 / (zeta * zeta)
+    dz = np.where(np.abs(dz) < 0.05, 0.05 * np.exp(1j * np.angle(dz)), dz)
+    w = dW / dz
+    return w.real, -w.imag, gamma
+
+
+def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Sequence[float],
+                        airframe: Optional[Dict] = None) -> Optional[Dict]:
+    """Streamlines of the air round the airframe, in BODY metres about the CG.
+
+    The flow is the sum of
+      * the free stream: the relative wind, -TAS along the wind axes;
+      * the fuselage: a Rankine body (nose source, tail sink) on the
+        nose-tail axis, sized to the fuselage radius;
+      * the wing: at every span station, the 2-D flow round an aerofoil
+        of the flown model's mean chord, at the incidence whose Kutta
+        circulation carries this frame's lift (elliptic spanwise loading,
+        so the section lift falls to zero at the tips) -- the stagnation
+        point under the leading edge, the fast flow over the top, the
+        turned flow off the trailing edge;
+      * the tip vortices: the trailing legs of the wing's vortex system,
+        circulation L / (rho V b'), from the trailing edge downstream.
+    Seeds hug the airframe: rings round the fuselage just outside its
+    radius, and lines just above and below the wing at stations across
+    the span, so the lines bend round the nose, over the wing and off the
+    tips. An analytic potential-flow model driven by the frame's own
+    lift, density and airspeed -- not a CFD solve; stated in the JSON.
     """
     import numpy as np
 
@@ -455,95 +539,166 @@ def airflow_streamlines(physics: Dict, extents: Sequence[float], centre_body: Se
     tas = float(vel.get("true_airspeed_mps") or 0.0)
     if tas < 5.0:
         return None
+    geo = airframe_geometry(physics, extents, centre_body, airframe)
     flow_dir = np.array(vel.get("relative_wind_direction_body") or (-1.0, 0.0, 0.0), float)
     flow_dir /= np.linalg.norm(flow_dir) or 1.0
     U = flow_dir * tas
-    length, width, height = (float(v) for v in extents)
-    ref = max(length, width)
-    radius = max(0.05, min(0.18 * height, 0.075 * length))
-    a = 0.42 * length
-    m = math.pi * tas * radius * radius * math.sqrt(a * a + radius * radius) / a
-    x0 = float(centre_body[0])
-    lift = (physics.get("forces") or {}).get("lift") or {}
-    lift_n = float(lift.get("magnitude_n") or 0.0)
+    length = geo["x_nose_m"] - geo["x_tail_m"]
+    ref = max(length, geo["span_m"])
+    R = geo["fuselage_radius_m"]
+    a = 0.45 * length
+    m = math.pi * tas * R * R * math.sqrt(a * a + R * R) / a
+    x_mid = 0.5 * (geo["x_nose_m"] + geo["x_tail_m"])
+    z_ax = geo["z_axis_m"]
+    span, chord = geo["span_m"], geo["chord_m"]
+    half = span / 2.0
+    lift = float(((physics.get("forces") or {}).get("lift") or {}).get("magnitude_n") or 0.0)
     rho = float((physics.get("air") or {}).get("density_kg_m3") or 1.2)
-    span = width
+    # Elliptic loading: root circulation G0 = 4 L / (rho V pi b); section
+    # circulation G0 sqrt(1 - (2y/b)^2).
+    g0 = 4.0 * lift / (rho * tas * math.pi * span) if lift > 0 else 0.0
+    scale = 4.0 / chord                         # metres -> aerofoil units
+    mu_R = abs(1.0 - complex(-0.085, 0.04))
+    beta = math.asin(0.04 / mu_R)
+    # Local flow angle in the section plane (X downstream = -x, Z up = -z).
+    alpha_flow = math.atan2(-flow_dir[2], -flow_dir[0])
+    xq0, xq1 = geo["x_quarter_chord_m"], geo["x_quarter_chord_tip_m"]
+
+    def x_qc_at(y):                                  # swept quarter-chord line
+        return xq0 + (xq1 - xq0) * np.clip(np.abs(y) / half, 0.0, 1.0)
+
+    z_w = geo["z_wing_m"]
+    x_te = xq1 - 0.75 * chord
     b_eff = math.pi * span / 4.0
-    gamma = lift_n / (rho * tas * b_eff) if lift_n > 0 else 0.0
-    core = 0.07 * span
+    g_tip = lift / (rho * tas * b_eff) if lift > 0 else 0.0
+    core = 0.05 * span
     far = 40.0 * ref
-    tip_l = np.array([0.0, -b_eff / 2.0, 0.0])
-    tip_r = np.array([0.0, b_eff / 2.0, 0.0])
-    far_l = tip_l + flow_dir * far
-    far_r = tip_r + flow_dir * far
-    # The horseshoe's sense: lift up (-z body) needs downwash (+z) behind
-    # the wing; the order far_l -> tip_l -> tip_r -> far_r with a positive
-    # gamma gives it when the air moves aft. Checked, and flipped if not.
-    def wing_v(P, g):
-        return (_segment_velocity(P, far_l, tip_l, g, core)
-                + _segment_velocity(P, tip_l, tip_r, g, core)
-                + _segment_velocity(P, tip_r, far_r, g, core))
-    behind = np.array([[0.0, 0.0, 0.0]]) + flow_dir * (0.6 * span)
-    if gamma and wing_v(behind, gamma)[0, 2] < 0:
-        gamma = -gamma
+    tips = [np.array([x_te, -b_eff / 2.0, z_w]), np.array([x_te, b_eff / 2.0, z_w])]
+
+    def section_alpha(g_m2s):
+        # Incidence whose Kutta circulation is the section circulation
+        # (aerofoil units: G = 4 pi U R sin(a + b), with U = 1).
+        g_units = g_m2s * scale / tas
+        s_ = max(-0.95, min(0.95, g_units / (4.0 * math.pi * mu_R)))
+        return math.asin(s_) - beta
 
     def field(P):
-        return U + _rankine_velocity(P, a, m, x0) + (wing_v(P, gamma) if gamma else 0.0)
+        v = np.tile(U, (len(P), 1))
+        v += _rankine_velocity(P - np.array([0.0, 0.0, z_ax]), a, m, x_mid)
+        if g0 > 0:
+            y = P[:, 1]
+            load = np.sqrt(np.clip(1.0 - (y / half) ** 2, 0.0, 1.0))
+            # Section-plane coordinates of each point, rotated so the
+            # aerofoil's free stream lies along the local flow angle.
+            Xb = -(P[:, 0] - (x_qc_at(y) - 0.25 * chord)) * scale
+            Zb = -(P[:, 2] - z_w) * scale
+            out_u = np.zeros(len(P))
+            out_w = np.zeros(len(P))
+            # Three load bands (root, mid, tip) keep this vectorised.
+            for lo, hi in ((0.0, 0.45), (0.45, 0.8), (0.8, 1.0001)):
+                sel = (np.abs(y) / half >= lo) & (np.abs(y) / half < hi)
+                if not sel.any():
+                    continue
+                lm = float(np.sqrt(max(0.0, 1.0 - ((lo + min(hi, 1.0)) / 2.0) ** 2)))
+                ae = section_alpha(g0 * lm)
+                rot = alpha_flow - ae          # aerofoil frame -> section plane
+                c, s_ = math.cos(rot), math.sin(rot)
+                Xa = c * Xb[sel] + s_ * Zb[sel]
+                Za = -s_ * Xb[sel] + c * Zb[sel]
+                ua, wa, _ = _joukowski_velocity(Xa, Za, ae, 1.0)
+                ux = c * ua - s_ * wa
+                wz = s_ * ua + c * wa
+                # Perturbation only (the free stream is already in v),
+                # faded with the elliptic load toward the tips.
+                fs_x, fs_z = math.cos(alpha_flow), math.sin(alpha_flow)
+                # Scaled from the band's circulation to this point's own.
+                k_ = load[sel] / max(lm, 1e-3)
+                out_u[sel] = (ux - fs_x) * tas * k_
+                out_w[sel] = (wz - fs_z) * tas * k_
+            # Far from the wing section the 2-D field still carries the
+            # bound circulation; fade it out beyond the tips.
+            out = np.stack([-out_u, np.zeros(len(P)), -out_w], axis=1)
+            fade = np.clip(1.5 - np.abs(y) / half, 0.0, 1.0)[:, None]
+            v += out * fade
+            v += _segment_velocity(P, tips[0] + flow_dir * far, tips[0], g_tip, core)
+            v += _segment_velocity(P, tips[1], tips[1] + flow_dir * far, g_tip, core)
+        return v
 
-    # Seeds: rings in the plane square to the flow, upstream of the nose.
-    side = np.cross(flow_dir, np.array([0.0, 0.0, 1.0]))
-    if np.linalg.norm(side) < 1e-6:
-        side = np.array([0.0, 1.0, 0.0])
-    side /= np.linalg.norm(side)
+    side = np.array([0.0, 1.0, 0.0])
     up = np.cross(side, flow_dir)
     up /= np.linalg.norm(up)
-    origin = np.array([x0, 0.0, 0.0]) - flow_dir * (0.5 * length + 0.55 * ref)
-    half_w = 0.6 * max(width, length * 0.6)
-    half_h = max(0.9 * height, 0.22 * width)
-    seeds = []
-    # Rings round the fuselage axis (an ellipse spanning the wing and the
-    # fin), so the flow reads as a tube from any camera; a fixed stagger
-    # between rings keeps the lines off a visible grid (same every run).
-    for ring, (frac, count) in enumerate(rings):
+    up = up if up[2] < 0 else -up             # body -z is up
+    seeds, kinds = [], []
+    nose = np.array([geo["x_nose_m"], 0.0, z_ax])
+    # Fuselage: two rings just outside the skin, seeded a little ahead of
+    # the nose, so the lines part round the nose and run along the body.
+    for ring, (rr, count) in enumerate(((1.12, 12), (1.45, 12))):
         for i in range(count):
-            th = 2.0 * math.pi * (i + 0.5 * (ring % 2)) / count
-            seeds.append(origin + side * math.cos(th) * frac * half_w
-                         + up * math.sin(th) * frac * half_h)
+            th = 2.0 * math.pi * (i + 0.5 * ring) / count
+            off = side * math.cos(th) * rr * R + up * math.sin(th) * rr * R
+            seeds.append(nose - flow_dir * (0.35 * R + 0.04 * length) + off)
+            kinds.append("fuselage")
+    # Wing: at stations across the span, lines close over and under the
+    # surface (a few hundredths of a chord) and one further out, started
+    # half a chord ahead of the swept leading edge.
+    for frac in (0.25, 0.42, 0.58, 0.74, 0.88):
+        for sgn in (-1.0, 1.0):
+            y = sgn * frac * half
+            le = np.array([float(x_qc_at(np.array([y]))[0]) + 0.25 * chord, y, z_w])
+            for h in (0.035, 0.11, -0.05, 0.3):
+                seeds.append(le - flow_dir * (0.5 * chord) + up * h * chord)
+                kinds.append("wing")
+    for sgn in (-1.0, 1.0):
+        y = sgn * 0.98 * half
+        le = np.array([float(x_qc_at(np.array([y]))[0]) + 0.25 * chord, y, z_w])
+        for h in (0.08, -0.06):
+            seeds.append(le - flow_dir * (0.5 * chord) + up * h * chord)
+            kinds.append("wingtip")
     P = np.array(seeds, float)
-    ds = 0.02 * ref
-    # Upstream run-in, past the airframe, and a short wake behind the tail
-    # (a long wake runs at a chase camera and fans over the picture).
-    steps = int((0.5 * length + 0.55 * ref + 0.5 * length + 0.3 * ref) / ds)
+    ds = min(0.008 * ref, 0.02 * chord)
+    # From the seeds to a short way past the tail / trailing edge.
+    run = (geo["x_nose_m"] - geo["x_tail_m"]) + 0.04 * length + 0.35 * R + 0.15 * ref
+    steps = int(run / ds)
     paths = [P.copy()]
     speeds = [np.linalg.norm(field(P), axis=1) / tas]
     alive = np.ones(len(P), bool)
     for _ in range(steps):
         v1 = field(P)
         d1 = v1 / (np.linalg.norm(v1, axis=1)[:, None] + 1e-9)
-        mid = P + d1 * (ds / 2.0)
-        v2 = field(mid)
+        v2 = field(P + d1 * (ds / 2.0))
         sp2 = np.linalg.norm(v2, axis=1)
-        d2 = v2 / (sp2[:, None] + 1e-9)
-        alive &= sp2 > 0.05 * tas
-        P = np.where(alive[:, None], P + d2 * ds, P)
+        alive &= sp2 > 0.03 * tas
+        # Each line stops a short way behind the tail: a long wake runs at
+        # a chase camera and fans over the picture.
+        alive &= P[:, 0] > geo["x_tail_m"] - 0.1 * ref
+        P = np.where(alive[:, None], P + v2 / (sp2[:, None] + 1e-9) * ds, P)
         paths.append(P.copy())
         speeds.append(np.linalg.norm(field(P), axis=1) / tas)
-    paths = np.stack(paths, axis=1)          # (N, steps+1, 3)
+    paths = np.stack(paths, axis=1)
     speeds = np.stack(speeds, axis=1)
-    lines = [{"points_body_m": paths[n].tolist(), "speed_ratio": speeds[n].tolist()}
-             for n in range(len(seeds))]
+    lines = []
+    for n in range(len(seeds)):
+        # Drop the repeated points after a line stopped.
+        moved = np.linalg.norm(np.diff(paths[n], axis=0), axis=1) > 1e-9
+        end = (int(np.nonzero(moved)[0][-1]) + 2) if moved.any() else 1
+        lines.append({"kind": kinds[n], "points_body_m": paths[n][:end].tolist(),
+                      "speed_ratio": speeds[n][:end].tolist()})
     return {
         "lines": lines,
-        "model": ("potential flow: free stream (relative wind) + Rankine body for "
-                  "the fuselage + lifting-line horseshoe vortex for the wing, "
-                  "circulation from this frame's lift. Analytic and fast; an "
-                  "illustration of the flow the forces imply, not a CFD solution"),
+        "model": ("potential flow round the airframe: free stream (relative wind) + "
+                  "Rankine body on the nose-tail axis + a Joukowski aerofoil section "
+                  "of the model's mean chord at each span station, at the incidence "
+                  "whose Kutta circulation carries this frame's lift with elliptic "
+                  "spanwise loading + the trailing tip vortices. Analytic, driven by "
+                  "the frame's lift, density and airspeed; not a CFD solve"),
+        "geometry": {k: (_r(v, 4) if isinstance(v, float) else v) for k, v in geo.items()},
         "parameters": {"free_stream_mps": _r(tas, 3),
                        "relative_wind_direction_body": _r(flow_dir.tolist(), 6),
-                       "fuselage_radius_m": _r(radius, 3),
-                       "source_sink_half_spacing_m": _r(a, 3),
-                       "source_strength_m3_s": _r(m, 3),
-                       "horseshoe_circulation_m2_s": _r(abs(gamma), 3),
-                       "vortex_span_m": _r(b_eff, 3), "vortex_core_m": _r(core, 3),
-                       "seeds": len(seeds), "step_m": _r(ds, 4), "steps": steps},
+                       "root_circulation_m2_s": _r(g0, 3),
+                       "root_section_incidence_deg": _r(math.degrees(section_alpha(g0)), 3)
+                       if g0 else None,
+                       "tip_vortex_circulation_m2_s": _r(g_tip, 3),
+                       "tip_vortex_spacing_m": _r(b_eff, 3), "vortex_core_m": _r(core, 3),
+                       "source_strength_m3_s": _r(m, 3), "seeds": len(seeds),
+                       "step_m": _r(ds, 4), "steps": steps},
     }
