@@ -1,4 +1,4 @@
-# flightsim
+# FlightSim
 
 **New here? Read [the guide](docs/GUIDE.md).** It covers the launcher,
 Settings, Capture and the dataset in plain words, with no commands.
