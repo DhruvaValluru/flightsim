@@ -48,8 +48,7 @@ DELIVERABLES
      Clone command:
      git clone --depth 1 -b phase-3-completed https://github.com/DhruvaValluru/flightsim.git
 
-     Note: the repository is private. Please reply with your GitHub usernames and I will add
-     you as collaborators so the link opens for you.
+     The repository is public, so no GitHub account or invitation is needed to view or clone it.
 
   2. Startup Guide (attached, PDF)
      A step-by-step guide for a Windows computer: the exact software versions to install, the
