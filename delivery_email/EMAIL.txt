@@ -42,7 +42,11 @@ INCLUDED
     run's frames, analysis pictures and JSON files
   • Preview renders and analysis frames (attached, and shown below), with one sample JSON file
 
-Thank you, Dr. Bhattacharya, for giving us the opportunity to work on this project. Thank you, Michael, for constantly keeping us in the loop and helping us through every phase.
+Dr. Bhattacharya, thank you for giving us the opportunity to work on this project. Being trusted with a project of this scope has been one of the most valuable experiences of my studies, and I am grateful for the confidence you placed in our team.
+
+Michael, thank you for constantly keeping us in the loop and for helping us through every phase. Your feedback, patience and quick answers whenever we were stuck kept the project moving and made a real difference to the final result.
+
+I have learned a great deal on this journey: flight dynamics and how to check a model against published data, real-time rendering in Unreal Engine, building and verifying a labelled dataset, and, above all, how to take a large technical project from an idea through several phases to a working system. I will carry these lessons into everything I do next.
 
 Please let me know if there are any new opportunities, projects or anything else I can help with.
 
