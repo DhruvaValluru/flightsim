@@ -1452,6 +1452,10 @@ route.closure:
   sentence: "Flown as drawn, the autopilot could not stay on the path: it strayed by {actual} where it must stay within {limit}, so the flight would produce no output."
   hint: "Widen the bends or spread the height changes, or let the map adjust the path."
 
+route.turn_plan:
+  sentence: "The prompt asks for a turn, but no turn the autopilot can follow fits this clip, so the aircraft flies straight."
+  hint: "Make the clip longer, slow the aircraft, ask for a gentler turn, or draw the turn on the route map."
+
 # -- the storm weather (core/scene/storm_weather.py, docs/WEATHER.md) --------
 weather.backend:
   sentence: "The rain backend asked for is not one the renderer has; it draws rain procedurally, with Niagara, or not at all."
