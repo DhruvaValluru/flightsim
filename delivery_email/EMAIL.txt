@@ -10,7 +10,7 @@ Attachments:
 
 ------------------------------------------------------------------------
 
-Dear Professor Backus and Dr. Bhattacharya,
+Dear Dr. Bhattacharya and Michael,
 
 I am pleased to submit the final deliverable for the FlightSim project. FlightSim is a research-grade flight simulation and synthetic-data system: a user describes a flight in plain English, and the system flies it with a physics model, renders it over real-world terrain, and delivers a labelled, verified dataset.
 
@@ -42,7 +42,9 @@ INCLUDED
     run's frames, analysis pictures and JSON files
   • Preview renders and analysis frames (attached, and shown below), with one sample JSON file
 
-Thank you both for your guidance and support throughout this project. I would be glad to give a live demonstration or answer any questions at your convenience.
+Thank you, Dr. Bhattacharya, for giving us the opportunity to work on this project. Thank you, Michael, for constantly keeping us in the loop and helping us through every phase.
+
+I would be glad to give a live demonstration or answer any questions at your convenience. Please also let me know if there are any new opportunities, projects or anything else I can help with.
 
 Best regards,
 
