@@ -12,25 +12,35 @@ Attachments:
 
 Dear Professor Backus and Dr. Bhattacharya,
 
-I am pleased to submit the final deliverable for the FlightSim project.
+I am pleased to submit the final deliverable for the FlightSim project. FlightSim is a research-grade flight simulation and synthetic-data system: a user describes a flight in plain English, and the system flies it with a physics model, renders it over real-world terrain, and delivers a labelled, verified dataset.
 
-PROJECT SUMMARY
+PROJECT DELIVERABLES
 
-FlightSim is a research-grade flight simulation and synthetic-data system. A user describes a flight in plain English. The system turns that description into a validated, reproducible scenario, flies it with the JSBSim flight-dynamics model, and renders it in Unreal Engine 5.7 over real-world terrain. Each run produces frames or a video clip together with an annotated dataset (COCO, KITTI, YOLO, VOC and WebDataset). For every frame it also produces 2-D and 3-D bounding boxes, analysis pictures and JSON data.
+1. Natural-language scenario generation
+A plain-English prompt becomes a validated, reproducible scenario specification. Named places are located on the map, a turn described in the prompt becomes a route the autopilot flies, and an AI auto-fix completes vague prompts and corrects ones that cannot run.
 
-DELIVERABLES
+2. Physics-based flight simulation
+Every flight is computed by the JSBSim flight-dynamics model. Scenarios can specify a non-standard atmosphere and humidity, payload, fuel and centre of gravity, failures, icing, wake turbulence, turbulence and layered wind. Checked against published data, the Cessna 172 stall speed is within 4 % and the A-4E Skyhawk top speed within 3 %.
 
-1. Source repository (public, branch phase-3-completed)
-https://github.com/DhruvaValluru/flightsim/tree/phase-3-completed
+3. Photorealistic rendering over real terrain
+Unreal Engine 5.7 renders each flight over real terrain and 3-D city tiles (Grand Canyon, Yosemite, the Alps, New York, San Francisco and more). Time of day sets the sun correctly for the place and date, and weather includes clouds, rain, thunderstorms and tornadoes. There are five aircraft (J-11A, A-4E Skyhawk, Airbus A320, Boeing 747, Cessna 172) and chase, cockpit and tower views.
 
-2. Startup Guide (attached)
-Covers installation, the first start, using the web app, and how to get each run's frames, analysis pictures and JSON files.
+4. Annotated dataset pipeline
+Every frame is labelled with 2-D and 3-D bounding boxes for the aircraft and any visible payload, plus keypoints, truncation, occlusion and the horizon line, alongside segmentation masks and depth. Datasets export to COCO, KITTI, YOLO, Pascal VOC and WebDataset with a dataset card. Each run is checked automatically before export: a clean run passes all 35 checks, and an unverified run is refused.
 
-3. Preview renders (attached)
-Six frames rendered by the system: a J-11A over the Matterhorn and over the desert, an A320 over New York, an A-4E over the Alps, a 747 in a thunderstorm and a Cessna 172 near a tornado.
+5. 3-D flight analysis
+For every frame the system draws three analysis pictures from the flight model's state: Plain (the 3-D bounding box), Detailed (lift, weight, thrust and drag vectors, airflow, and flight-state and aerodynamics panels) and Scene (terrain contours, ground grid, flight path and environment). Behind them are per-frame JSON data, a physics.csv for each clip, overlay videos and an interactive 3-D viewer.
 
-4. Analysis frames and JSON data (attached)
-For every frame, the system draws three analysis pictures from the flight model's state: Plain (the 3-D bounding box), Detailed (forces, airflow and flight-state panels) and Scene (terrain contours, flight path and environment). Each picture is backed by per-frame JSON data, and each clip has a physics.csv; one sample JSON is attached.
+6. One-command setup and web app
+A single launcher installs, checks and builds everything on a pinned toolchain, then opens a browser-based web app; normal use needs no command line. A fresh clone completed a hands-off run that passed all 35 checks. The codebase is covered by 3,752 automated tests.
+
+INCLUDED
+
+  • Source repository (public, branch phase-3-completed):
+    https://github.com/DhruvaValluru/flightsim/tree/phase-3-completed
+  • Startup Guide (attached): installation, first start, using the web app, and how to get each
+    run's frames, analysis pictures and JSON files
+  • Preview renders and analysis frames (attached, and shown below), with one sample JSON file
 
 Thank you both for your guidance and support throughout this project. I would be glad to give a live demonstration or answer any questions at your convenience.
 
