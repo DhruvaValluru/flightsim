@@ -5,7 +5,6 @@ Subject: FlightSim — Final Project Deliverable: Repository, Startup Guide and 
 Attachments:
   1. FlightSim_Startup_Guide.pdf
   2. FlightSim_Preview_Frames.jpg   (frames/00_preview_sheet.jpg — the six renders on one sheet)
-  3. FlightSim_Demo.mp4             (89-second walkthrough, 1.2 MB; optional)
   (Optionally the six individual frames from frames/01–06.)
 
 ------------------------------------------------------------------------
@@ -60,10 +59,6 @@ DELIVERABLES
        4. A-4E Skyhawk over the Alps
        5. Boeing 747 flying through a thunderstorm
        6. Cessna 172 near a tornado
-
-  4. Demonstration video (attached, optional)
-     An 89-second recording from launch to the finished dataset: the app reaches READY, a capture
-     runs, the dataset downloads and its card opens. The run passed all 35 of its verification checks.
 
 GETTING STARTED
 
