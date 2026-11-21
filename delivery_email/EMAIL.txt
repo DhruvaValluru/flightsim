@@ -1,19 +1,21 @@
 To:      mbackus@uncfsu.edu
 Cc:      sbhattac@uncfsu.edu
-Subject: FlightSim — Final Project Deliverable: Repository, Startup Guide and Preview Renders
+Subject: FlightSim — Final Project Deliverable: Repository, Startup Guide, Renders and Analysis Frames
 
 Attachments:
   1. FlightSim_Startup_Guide.pdf
   2. FlightSim_Preview_Frames.jpg   (frames/00_preview_sheet.jpg — the six renders on one sheet)
-  (Optionally the six individual frames from frames/01–06.)
+  3. FlightSim_Analysis_Frames.jpg  (frames/analysis/00_analysis_sheet.jpg — the 3-D analysis pictures on one sheet)
+  4. sample_frame_0000_box3d.json   (frames/analysis/ — one frame's full analysis data, ~360 KB)
+  (Optionally the individual frames from frames/01–06 and frames/analysis/.)
 
 ------------------------------------------------------------------------
 
 Dear Professor Backus and Dr. Bhattacharya,
 
 I am pleased to submit the final deliverable for the FlightSim project. This email contains the
-link to the source repository, the startup guide, and a set of preview frames rendered by the
-system.
+link to the source repository, the updated startup guide, a set of preview frames rendered by the
+system, and examples of the per-frame analysis pictures and JSON data it now produces.
 
 PROJECT SUMMARY
 
@@ -34,6 +36,9 @@ Key capabilities delivered:
     (chase, cockpit, tower)
   • A one-command Windows launcher and a browser-based web app — no command line needed in normal use
   • A labelled-dataset pipeline with automatic verification of every run
+  • Per-frame 2-D and 3-D bounding boxes, with analysis pictures (forces, airflow, flight state,
+    terrain and environment), JSON data for every frame, a physics.csv per clip, overlay videos and
+    an interactive 3-D viewer
 
 DELIVERABLES
 
@@ -49,7 +54,9 @@ DELIVERABLES
   2. Startup Guide (attached, PDF)
      A step-by-step guide for a Windows computer: the exact software versions to install, the
      one-command first start, pre-downloading terrain and scenes, getting updates, using the web
-     app, six ready-to-use cinematic prompts, and a troubleshooting table.
+     app, six ready-to-use cinematic prompts, and a troubleshooting table. A new Part 9 explains
+     where to find and download each run's frames, analysis pictures, JSON files and overlay
+     videos, and what each file contains.
 
   3. Preview frames (attached)
      Six frames rendered by the system on the Windows test machine:
@@ -59,6 +66,28 @@ DELIVERABLES
        4. A-4E Skyhawk over the Alps
        5. Boeing 747 flying through a thunderstorm
        6. Cessna 172 near a tornado
+
+  4. Analysis frames and JSON data (attached)
+     For every frame of a run, the system draws three 3-D analysis pictures from the flight model's
+     state at that instant:
+       • Plain: each aircraft's 3-D bounding box, with its ID, size and range
+       • Detailed: the box plus lift, weight, thrust, drag and net-force vectors, the airflow
+         around the airframe, and Flight State and Forces & Aerodynamics panels (on a clip, also
+         graphs of lift, load factor, airspeed and altitude over the clip)
+       • Scene: height contours, a ground grid, range rings, the drop line, the flight path, the
+         horizon, a pitch ladder, a heading tape and an Environment panel
+     The attached sheet shows all three for an A-4E Skyhawk over Manhattan, plus the Detailed
+     picture for a clip over the Hudson River and for a Cessna 172 over New York.
+
+     Each picture is backed by machine-readable files, all downloadable from the run's Frames page:
+       • frame_NNNN.json: the camera pose and lens, every flight-recorder channel at that moment,
+         and the ground-truth labels (2-D and 3-D boxes, truncation, keypoints, horizon)
+       • frame_NNNN_box3d.json: the 3-D box with a rebuild check, every force as a vector, the
+         force balance, velocity, angles, air data and aerodynamic coefficients, and every point
+         each picture draws, in metres and pixels (one sample is attached)
+       • physics.csv: one row per frame across the clip, with units
+       • manifest.json: the camera, all of its frames, landmarks and the object and class tables
+     The same pictures are also available as overlay videos and in the interactive 3-D viewer.
 
 GETTING STARTED
 

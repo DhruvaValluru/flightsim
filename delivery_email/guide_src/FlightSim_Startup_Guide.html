@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>FlightSim Startup Guide</title>
+<style>
+@page { size: letter; margin: 0.6in 0.65in; }
+body { font: 10.5pt/1.5 -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color: #1d232a; margin: 0; }
+h1 { font-size: 22pt; margin: 0 0 4px; color: #14202c; }
+.sub { color: #5d6b78; margin: 0 0 18px; }
+h2 { font-size: 13pt; color: #14202c; border-bottom: 2px solid #3a6ea5; padding-bottom: 3px; margin: 22px 0 10px; page-break-after: avoid; }
+h3 { font-size: 10.5pt; color: #2b5d91; margin: 14px 0 6px; page-break-after: avoid; }
+p { margin: 0 0 8px; }
+code { font: 9pt Menlo, Consolas, monospace; background: #eef1f4; padding: 1px 4px; border-radius: 3px; }
+pre { font: 9pt/1.5 Menlo, Consolas, monospace; background: #1b2530; color: #e7edf3; padding: 9px 12px; border-radius: 4px; white-space: pre-wrap; page-break-inside: avoid; margin: 6px 0 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 9pt; margin: 6px 0 10px; page-break-inside: auto; }
+th { background: #e6edf4; text-align: left; }
+th, td { border: 1px solid #cfd8e1; padding: 4px 6px; vertical-align: top; }
+tr { page-break-inside: avoid; }
+.note { background: #fff6e5; border-left: 4px solid #e7a33e; padding: 8px 12px; margin: 10px 0; }
+.ok { background: #eaf6ec; border-left: 4px solid #4caa5f; padding: 8px 12px; margin: 10px 0; }
+ol, ul { margin: 4px 0 10px; padding-left: 22px; }
+li { margin: 2px 0; }
+.new { display: inline-block; font-size: 7.5pt; font-weight: 700; color: #fff; background: #2f8a4c; border-radius: 3px; padding: 1px 5px; vertical-align: 2px; margin-left: 6px; }
+figure { margin: 8px 0 12px; page-break-inside: avoid; }
+figure img { width: 100%; border-radius: 3px; display: block; }
+figcaption { font-size: 8.5pt; color: #5d6b78; margin-top: 3px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.pb { page-break-before: always; }
+</style></head><body>
+
+<h1>FlightSim — Startup Guide</h1>
+<p class="sub">For a Windows computer starting from the GitHub repository. Branch: <code>phase-3-completed</code>. Follow the parts in order.</p>
+
+<h2>Part 1 — Download and install these first</h2>
+<p>The project checks every version exactly, so install these exact versions. If the launcher later stops with a <code>..._mismatch</code> line, the version installed is not the one listed here.</p>
+<table>
+<tr><th>What</th><th>Exact version</th><th>Where to get it</th></tr>
+<tr><td><b>Epic Games Launcher + Unreal Engine</b></td><td>5.7.4</td><td>epicgames.com → install the launcher → Unreal Engine tab → Library → add engine 5.7.4 (default folder <code>C:\Program Files\Epic Games\UE_5.7</code>)</td></tr>
+<tr><td><b>Cesium for Unreal</b> plugin</td><td>2.30.0</td><td>Fab (inside the Epic Games Launcher) → search "Cesium for Unreal" → <i>Install to Engine</i> → 5.7</td></tr>
+<tr><td><b>Visual Studio 2022</b> (Community is free)</td><td>MSVC 14.44.35207<br>Windows SDK 10.0.26100.0</td><td>visualstudio.microsoft.com → in the installer tick <b>Desktop development with C++</b>; under <i>Individual components</i> make sure <b>MSVC v143 (14.44)</b> and <b>Windows 11 SDK (10.0.26100.0)</b> are ticked</td></tr>
+<tr><td><b>Python</b></td><td>3.12.10</td><td>PowerShell: <code>winget install -e --id Python.Python.3.12 --version 3.12.10</code></td></tr>
+<tr><td><b>ffmpeg</b> (makes the video clips)</td><td>9.0.2</td><td>PowerShell: <code>winget install -e --id Gyan.FFmpeg --version 9.0.2</code></td></tr>
+<tr><td><b>Git</b></td><td>any recent</td><td>PowerShell: <code>winget install -e --id Git.Git</code></td></tr>
+<tr><td><b>GitHub access</b></td><td>—</td><td>The repository is private: the owner must add your GitHub account. Git asks you to sign in the first time.</td></tr>
+<tr><td>Cesium ion token (only if the map tiles fail)</td><td>—</td><td>Free account at cesium.com/ion → Access Tokens. Paste it later in the web app's <b>Settings</b>.</td></tr>
+</table>
+<div class="note"><b>After installing:</b> restart the computer once, so every new program is found. Git and Python are also installed automatically by the launcher if they are missing, but installing the exact Python version yourself avoids a version mismatch.</div>
+
+<h2>Part 2 — Which window to type in</h2>
+<p>Every command in this guide is for <b>PowerShell</b>. Open it from the Start menu (type <i>PowerShell</i>). A PowerShell line starts with <code>PS C:\Users\you&gt;</code>. If your window shows only <code>C:\Users\you&gt;</code> (no <code>PS</code>), it is Command Prompt: type <code>powershell</code> and press Enter first.</p>
+
+<h2>Part 3 — Download the project</h2>
+<pre>cd $HOME
+git clone --depth 1 -b phase-3-completed https://github.com/DhruvaValluru/flightsim.git
+cd flightsim</pre>
+
+<h2>Part 4 — First start (one command, then wait)</h2>
+<pre>cd $HOME\flightsim
+&amp; ".\Launch FlightSim.cmd"</pre>
+<p>The launcher runs seven steps and prints each one. The first time takes a long while (often 30–90 minutes); later starts take a minute or two.</p>
+<table>
+<tr><th>Step</th><th>What it does</th></tr>
+<tr><td>1 install</td><td>Sets up Python and its packages, builds the flight-physics library (JSBSim)</td></tr>
+<tr><td>2 preflight</td><td>Checks every tool and version from Part 1, and names anything missing</td></tr>
+<tr><td>3 build</td><td>Builds the Unreal plugin</td></tr>
+<tr><td>4 materials</td><td>Creates the project's materials</td></tr>
+<tr><td>5 aircraft</td><td>Downloads and imports the aircraft 3-D models</td></tr>
+<tr><td>6 bake</td><td>Downloads and prepares the Grand Canyon and Yosemite terrain</td></tr>
+<tr><td>7 server</td><td>Starts the web app and opens the browser</td></tr>
+</table>
+<p>When the last line says <b>READY</b>, the web app is at <b>http://127.0.0.1:8008/</b>. Leave that window open (closing it stops the app). If a line says <b>FAILED &lt;step&gt;: &lt;reason&gt;</b>, the reason names the fix; the full log is <code>logs\launch.log</code>.</p>
+
+<h2>Part 5 — Get every download and first-time build done now</h2>
+<p>The first time a scene uses something new (a storm, rain, a city's map tiles, a place's terrain) the computer has to download or build it, and that one run is slow — a first thunderstorm can take over an hour on a laptop without a gaming graphics card. These commands do all of that up front, so every run afterwards starts quickly. Run them in a <b>second</b> PowerShell window while the app from Part 4 is still running (READY).</p>
+<h3>5a. Download the terrain for every built-in place</h3>
+<pre>cd $HOME\flightsim
+.\.venv\Scripts\python.exe scripts\bake_terrain.py --all</pre>
+<h3>5b. Build every scene type once (storm, tornado, rain, city tiles, lighting looks, camera views)</h3>
+<pre>cd $HOME\flightsim
+$env:FLIGHTSIM_GOOGLE_TILES_TIMEOUT = "600"
+.\.venv\Scripts\python.exe scripts\run_test_scenarios.py --still</pre>
+<p>This renders one frame of each of the project's test scenes, one after another: golden hour over Yosemite, New York (downloads the city's map tiles), rain, a thunderstorm, a tornado, mountain turbulence, the cockpit and tower views and more. Expect <b>2–4 hours</b> the first time; leave it running. The results are collected in <code>runs\test_scenarios\index.html</code>.</p>
+<ul>
+<li>If it stops part-way (sleep, low memory), run the same command with <code>--resume</code> added to finish only what is left.</li>
+<li>To see the list of scenes first: add <code>--list</code>.</li>
+</ul>
+<div class="ok">After Part 5 everything is downloaded and built. Keep the computer plugged in and stop it from sleeping while it runs.</div>
+<h3>5c. Keep the longer map-tile wait for the web app too</h3>
+<p>Big cities can take more than the default 3 minutes to load their map tiles. Run this once; it is remembered:</p>
+<pre>[Environment]::SetEnvironmentVariable("FLIGHTSIM_GOOGLE_TILES_TIMEOUT", "600", "User")</pre>
+<p>Then close the app window and start it again (Part 6) so it picks this up.</p>
+
+<h2>Part 6 — Every time after that</h2>
+<pre>cd $HOME\flightsim
+&amp; ".\Launch FlightSim.cmd"</pre>
+<p>Wait for <b>READY</b>; the browser opens at http://127.0.0.1:8008/.</p>
+
+<h2>Part 7 — Getting updates</h2>
+<p>Close the app window first, then:</p>
+<pre>cd $HOME\flightsim
+git fetch --depth 1 origin
+git checkout -B phase-3-completed origin/phase-3-completed
+&amp; ".\Launch FlightSim.cmd"</pre>
+<p>The analysis pictures and 3-D box downloads in Part 9 arrived in an update on 21 Nov 2026. If you cloned before then, do this part once to get them.</p>
+
+<h2>Part 8 — Using the web app</h2>
+<ol>
+<li>Type what you want in the prompt box (e.g. <i>"A small plane flying over Manhattan, New York City at 2,000 feet at sunset, chase view"</i>).</li>
+<li>Optional, before Interpret: pick a <b>Lighting</b> look, drag the <b>Altitude</b> slider, set the camera and press <b>Confirm camera angle</b>, or press <b>Draw the flight path</b>.</li>
+<li>Press <b>Interpret</b>. With <b>AI auto-fix</b> ticked, a vague prompt is filled in and a prompt that cannot run (too low, an aircraft without a model, …) is fixed; the box under the button says what changed, with an undo.</li>
+<li>Set <b>clip</b> to <i>1 frame (preview)</i> for a quick look, or a length in seconds for a video. The word <b>cinematic</b> in the prompt (or <b>look → cinematic</b>) gives the best-looking picture.</li>
+<li>Press <b>Run</b>. When it says <b>done</b>, view the frames and download them — Part 9 shows every way to get them.</li>
+</ol>
+<h3>The most cinematic prompts to try</h3>
+<p>Each starts with <b>Cinematic:</b>, which turns on the best-looking render (colour grade, depth of field, low sun). Copy one into the prompt box as it is.</p>
+<ol>
+<li>Cinematic: an A-4E Skyhawk banking low over the Grand Canyon at 9,000 feet at golden hour, sun low in the west, chase view</li>
+<li>Cinematic: a J-11A sweeping over Yosemite Valley at 11,000 feet at sunrise with scattered clouds, chase view</li>
+<li>Cinematic: an A-4E Skyhawk flying low over the Hudson River past Manhattan, New York at 1,500 feet at golden hour</li>
+<li>Cinematic: a J-11A at 35,000 feet above an overcast cloud layer at sunset, leaving contrails</li>
+<li>Cinematic: an Airbus A320 climbing over San Francisco at 4,000 feet at dusk, chase view</li>
+<li>Cinematic: an A-4E Skyhawk over the ocean at 8,000 feet in a thunderstorm at dusk, chase view</li>
+</ol>
+<p>Tip: set clip to <i>1 frame (preview)</i> to see the shot quickly, then render a 6–10 s clip of the one you like. Prompt 6 is a storm: its first run is slow unless Part 5 was done.</p>
+<p>Altitudes are measured from <b>sea level</b>: the Grand Canyon rim is about 7,000 ft and Yosemite's peaks about 9,000–13,000 ft, so stay above the ground. Say <b>thunderstorm</b> (it brings its own lightning), not "lightning".</p>
+
+<h2 class="pb">Part 9 — Getting the frames, analysis pictures and JSON from a run <span class="new">NEW</span></h2>
+<p>Every finished run keeps three kinds of output for each camera:</p>
+<ul>
+<li>the <b>rendered frames</b>, plus a copy of each with its <b>2-D boxes</b> drawn on;</li>
+<li>three <b>3-D analysis pictures</b> of each frame (described in 9b);</li>
+<li>the <b>numbers behind them</b>: a JSON file for every frame and, for a clip, a <code>physics.csv</code> table.</li>
+</ul>
+
+<h3>9a. Open the run's frames</h3>
+<ol>
+<li>When the run says <b>done</b>, scroll below the clip to the camera line (for example <b>camera0</b>).</li>
+<li>Click <b>open all N frame(s) with their pose, matrices, labels and flight state →</b>. The <b>Frames</b> page opens in a new tab.</li>
+<li>Each frame is shown as rendered and with its 2-D boxes. Under it are three tabs, <b>Plain</b>, <b>Detailed</b> and <b>Scene</b>, which switch between the 3-D pictures. The server draws each picture the first time you open its tab, so the first view takes a few seconds.</li>
+</ol>
+
+<h3>9b. The three 3-D analysis pictures</h3>
+<div class="grid3">
+<figure><img src="img/plain.jpg" alt="Plain"><figcaption><b>Plain</b>: each aircraft's 3-D box (brighter nose face) with its ID, size and range.</figcaption></figure>
+<figure><img src="img/detailed.jpg" alt="Detailed"><figcaption><b>Detailed</b>: the box plus lift, weight, thrust, drag and net-force arrows, airflow lines and the Flight State and Forces &amp; Aerodynamics panels.</figcaption></figure>
+<figure><img src="img/scene.jpg" alt="Scene"><figcaption><b>Scene</b>: height contours, a 500 m ground grid, range rings, the drop line, the flight path, horizon, pitch ladder, heading tape and an Environment panel.</figcaption></figure>
+</div>
+<p>On a clip, the Detailed picture also graphs lift, load factor, true airspeed and altitude over the clip, with the current frame marked (<b>OVER THE CLIP</b>).</p>
+
+<h3>9c. Download them — the links at the top of the Frames page</h3>
+<table>
+<tr><th>Link</th><th>You get</th><th>Inside</th></tr>
+<tr><td><b>download every frame with its labels (zip)</b></td><td><code>&lt;run&gt;_&lt;camera&gt;_frames.zip</code></td><td><code>frame_NNNN.png</code> (as rendered), <code>frame_NNNN.json</code> (that frame's labels and flight state), <code>boxed/frame_NNNN_boxes.png</code> (2-D boxes), <code>boxed3d/frame_NNNN_box3d.png</code>, <code>manifest.json</code>, <code>README.txt</code></td></tr>
+<tr><td><b>download the 3-D pictures (3D zip: plain, detailed, scene)</b></td><td><code>&lt;run&gt;_&lt;camera&gt;_3d_boxes.zip</code></td><td><code>frame_NNNN_box3d.png</code>, <code>frame_NNNN_box3d_detailed.png</code>, <code>frame_NNNN_box3d_scene.png</code>, <code>frame_NNNN_box3d.json</code>, <code>physics.csv</code>, <code>README.txt</code></td></tr>
+<tr><td><b>overlay video: detailed · scene · plain</b></td><td><code>&lt;run&gt;_&lt;camera&gt;_&lt;kind&gt;_overlay.mp4</code></td><td>The whole clip with that picture drawn on every frame</td></tr>
+<tr><td><b>open the interactive 3-D viewer</b></td><td>a page in the browser</td><td>The frame with each overlay layer switched on or off (3-D box, forces &amp; velocity, airflow, labels, landmarks, flight path, horizon, scene). It has zoom and pan, and a play button and slider to step through the clip.</td></tr>
+<tr><td><b>dataset: COCO · KITTI · WebDataset · YOLO · Pascal VOC · all five</b></td><td><code>&lt;run&gt;_dataset_&lt;format&gt;.zip</code></td><td>The labelled dataset in that format, with its dataset card</td></tr>
+</table>
+<p>The 3-D zip and the overlay videos are built when you click them. On a clip this can take a minute or more: progress shows next to the link, and the download starts by itself when it says <b>ready</b>. For a clip, the three pictures are drawn for 12 evenly spaced frames (first and last included), and every frame gets its JSON. To get the pictures for every frame, add <code>?every=1</code> to the end of the 3D-zip link.</p>
+
+<h3>9d. What the JSON and CSV files hold</h3>
+<table>
+<tr><th>File</th><th>What is in it</th></tr>
+<tr><td><code>frame_NNNN.json</code></td><td>Where the camera was, which way it pointed, and its lens. <code>state</code> has every flight-recorder channel at that moment. <code>labels</code> has the 2-D box (clipped and unclipped), truncation, the 3-D box in camera coordinates, keypoints and the horizon line.</td></tr>
+<tr><td><code>frame_NNNN_box3d.json</code></td><td><code>box_3d</code>: each aircraft's centre, size, axes and orientation, with a rebuild check. <code>flight_physics</code>: every force as a vector and a magnitude, the force balance, velocity (TAS, CAS, Mach), alpha, beta and gamma, air data, CL, CD and CY, energy and controls. <code>panels</code>: the panels exactly as printed. <code>overlay</code> and <code>scene_overlay</code>: every point each picture draws, in metres and pixels.</td></tr>
+<tr><td><code>physics.csv</code></td><td>One row per frame, in time order: altitude, speeds, Mach, attitude, alpha, beta and gamma, load factor, lift, drag, thrust, weight and net force (kN), L/D, CL, CD, dynamic pressure, density, wind and specific excess power. Units are in the second row.</td></tr>
+<tr><td><code>manifest.json</code></td><td>This camera's block and all its frames, the scene's landmarks, the coordinate system, and the object and class tables.</td></tr>
+</table>
+<p>Each zip has a <code>README.txt</code> that explains every file in it.</p>
+
+<h3>9e. Putting the pictures in the dataset zip</h3>
+<p>In the <b>Dataset</b> section under the clip, tick <b>2-D box pictures</b> and/or <b>3-D box pictures</b> (and <b>flight table (CSV + NPZ)</b> for the numbers as a table), then press <b>Download dataset (zip)</b>.</p>
+
+<h3>9f. Where the files are on the computer</h3>
+<p>Everything a run made is in <code>runs\webapp\&lt;run id&gt;\</code> inside the project folder. Once built, the zips and overlay videos are kept in that run's <code>downloads\</code> folder, so the second download is instant.</p>
+<pre>explorer $HOME\flightsim\runs\webapp</pre>
+<p>The forces come from the JSBSim flight model's state at each frame. The airflow lines come from a fast analytic model (potential flow plus lifting line), not CFD. For how far to trust the numbers, see <code>docs/accuracy/FLIGHT_MODEL_CHECK.md</code> in the repository.</p>
+
+<h2>Part 10 — If something goes wrong</h2>
+<table>
+<tr><th>You see</th><th>Do this</th></tr>
+<tr><td><code>The filename, directory name, or volume label syntax is incorrect</code> or <code>&amp; was unexpected</code></td><td>You are in Command Prompt. Type <code>powershell</code>, press Enter, run the command again.</td></tr>
+<tr><td><code>FAILED preflight: toolchain.&lt;tool&gt;_mismatch: found X, pinned Y</code></td><td>Install exactly version Y of that tool (Part 1), then start again.</td></tr>
+<tr><td><code>terrain.google_tiles: the view was still NN % loaded after 180 s</code></td><td>Do Part 5c, restart the app, run again.</td></tr>
+<tr><td>The page looks old after an update</td><td>Close the browser tab and open http://127.0.0.1:8008/ again.</td></tr>
+<tr><td>"Unable to connect" in the browser</td><td>The app is not running: start it (Part 6) and wait for READY.</td></tr>
+<tr><td>A run is very slow the first time</td><td>Normal for a new scene type; Part 5 avoids it. It is fast the next time.</td></tr>
+<tr><td>A run fails</td><td>Open the run's log: <code>runs\webapp\&lt;run id&gt;\render.log</code> (the last lines name the reason).</td></tr>
+<tr><td>No Plain / Detailed / Scene tabs, or no 3D-zip link on the Frames page</td><td>The install is older than the 21 Nov update: do Part 7, then reload the page.</td></tr>
+<tr><td>The 3D zip or overlay video seems stuck</td><td>It is still drawing a long clip. Leave the tab open; the download starts by itself when it says <b>ready</b>.</td></tr>
+</table>
+</body></html>
