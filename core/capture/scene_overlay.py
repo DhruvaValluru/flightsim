@@ -720,11 +720,9 @@ def draw_scene_frame(record: Dict, source, target, manifest: Optional[Dict] = No
         add(geo["range_rings"]["_alpha"], (225, 245, 200), 0.85)
     if rgba[..., 3].max() > 0:
         rgba = np.nan_to_num(rgba, nan=0.0)
+        # H x W x 4 uint8: Pillow infers RGBA (its 'mode' argument goes in Pillow 13).
         img = Image.fromarray(np.clip(np.dstack([rgba[..., :3], rgba[..., 3:] * 255]), 0, 255)
-                              .astype("uint8"), "RGBA")
-        import os
-        if os.environ.get("FS_SCENE_DEBUG"):
-            img.save(os.environ["FS_SCENE_DEBUG"])
+                              .astype("uint8"))
         img = img.resize(cv.layers["flow"].size, Image.BILINEAR)
         cv.layers["flow"] = Image.alpha_composite(cv.layers["flow"], img)
         from PIL import ImageDraw

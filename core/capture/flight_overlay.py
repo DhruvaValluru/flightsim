@@ -733,7 +733,7 @@ def draw_flight_frame(record: Dict, source, target, manifest: Optional[Dict] = N
         strength = np.clip(0.12 + (CP_ALPHA - 0.12) * np.abs(np.nan_to_num(cp)) / 0.8,
                            0.0, CP_ALPHA)
         a = np.where(np.isfinite(cp), strength * 255, 0).astype("uint8")
-        tint = Image.fromarray(np.dstack([_cp_colour(cp).astype("uint8"), a]), "RGBA")
+        tint = Image.fromarray(np.dstack([_cp_colour(cp).astype("uint8"), a]))   # RGBA inferred
         cv.plate = Image.alpha_composite(cv.plate, tint.resize(cv.plate.size, Image.BILINEAR))
     for item in geo["aircraft"]:
         cv.avoid(item.get("bbox_2d_px"))
